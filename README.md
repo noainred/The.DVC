@@ -14,6 +14,11 @@
   모든 데이터 API는 토큰이 있어야 접근 가능(401 차단). 역할(admin/operator/viewer) 지원.
 - **vCenter 대시보드** — 등록된 **모든 vCenter를 카드 형태로 한눈에** 표시(상태·위치·버전,
   호스트/VM 수, CPU/메모리/스토리지 사용률, 알람). 카드 클릭 시 해당 vCenter로 드릴다운.
+- **통합 서머리** — 분산된 모든 vCenter 자원을 **하나로 SUM** 한 페이지. 전체 VM/호스트/
+  클러스터/데이터스토어/네트워크 개수, 물리 CPU·메모리·스토리지 용량과 사용량, VM 할당
+  합계(vCPU·RAM·프로비저닝 스토리지)와 **오버커밋 비율**, Guest OS 분포, vCenter별 기여도
+  합계 표(총합 행 포함). 리전/vCenter 스코프 적용 가능.
+- **시작 화면 설정** — 로그인 후 처음 보여줄 페이지를 사용자가 선택(브라우저에 저장).
 - **글로벌 개요 대시보드** — 전세계 KPI(vCenter/호스트/VM/CPU/메모리/스토리지/알람),
   세계지도 위 데이터센터 위치 및 상태 마커, 리전(Americas/EMEA/APAC)별 롤업, 차트.
 - **세계 지도** — 사이트별 마커 색상으로 정상/경고/위험 상태 표시, 호버 시 상세 요약,
@@ -116,6 +121,7 @@ cd server && node -e "import('./src/auth/auth.js').then(m=>console.log(m.hashPas
 | `GET /api/health` | 상태 · 데이터 소스 · 갱신시각 |
 | `GET /api/overview` | 글로벌 KPI + 리전별 + 사이트별 롤업 |
 | `GET /api/vcenters` | vCenter(사이트) 목록 + 사이트별 메트릭 |
+| `GET /api/summary` | 모든 vCenter 자원 통합 합계(개수·물리용량·할당·오버커밋·OS분포·사이트별 기여도). `?vcenterId=&region=` |
 | `GET /api/hosts` | ESXi 호스트 (`?vcenterId=&region=&state=&q=`) |
 | `GET /api/vms` | 가상머신. 사양 검색: `?vcpuMin=&vcpuMax=&ramMinGB=&ramMaxGB=&diskMinGB=&diskMaxGB=&cpuUsageMin=&memUsageMin=&os=&powerState=&sortBy=&order=&limit=` |
 | `GET /api/top` | 자원 최다 사용 Top N (VM/호스트/데이터스토어). `?vcenterId=&region=&limit=` |

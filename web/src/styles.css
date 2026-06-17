@@ -196,6 +196,11 @@ tbody tr:last-child td { border-bottom: none; }
 .login-hint { font-size: 12px; text-align: center; }
 .login-hint code { background: var(--panel-2); padding: 1px 6px; border-radius: 4px; color: var(--text); }
 
+/* Settings (landing page) box */
+.settings-box { display: flex; align-items: center; gap: 7px; font-size: 11px; }
+.settings-box .muted { white-space: nowrap; }
+.select-sm { padding: 6px 8px; font-size: 12px; min-width: 0; }
+
 /* User box */
 .user-box { display: flex; align-items: center; gap: 10px; }
 .user-avatar {
