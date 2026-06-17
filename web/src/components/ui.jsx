@@ -1,0 +1,113 @@
+import React, { useMemo, useState } from 'react';
+
+export function usageColor(pct) {
+  if (pct >= 90) return 'var(--red)';
+  if (pct >= 75) return 'var(--amber)';
+  return 'var(--green)';
+}
+
+export function Kpi({ label, value, unit, meta, pct, accent }) {
+  return (
+    <div className="card kpi">
+      <div className="label">{label}</div>
+      <div className="value" style={accent ? { color: accent } : undefined}>
+        {value}
+        {unit && <small> {unit}</small>}
+      </div>
+      {typeof pct === 'number' && (
+        <div className="usage-bar">
+          <span style={{ width: `${Math.min(pct, 100)}%`, background: usageColor(pct) }} />
+        </div>
+      )}
+      {meta && <div className="meta">{meta}</div>}
+    </div>
+  );
+}
+
+export function UsageCell({ pct }) {
+  return (
+    <span className="nowrap">
+      <span className="mini-bar">
+        <span style={{ width: `${Math.min(pct, 100)}%`, background: usageColor(pct) }} />
+      </span>{' '}
+      <span className="pct tabular">{pct}%</span>
+    </span>
+  );
+}
+
+export function StateBadge({ state }) {
+  const map = {
+    CONNECTED: ['green', '정상'],
+    POWERED_ON: ['green', 'On'],
+    MAINTENANCE: ['amber', '점검'],
+    POWERED_OFF: ['gray', 'Off'],
+    DISCONNECTED: ['red', '연결끊김'],
+    SUSPENDED: ['amber', '일시중지'],
+    connected: ['green', 'Connected'],
+    unreachable: ['red', 'Unreachable'],
+    RUNNING: ['green', 'Running'],
+    OUTDATED: ['amber', 'Outdated'],
+    NOT_RUNNING: ['gray', '미실행'],
+  };
+  const [cls, label] = map[state] || ['gray', state];
+  return <span className={`badge ${cls}`}>{label}</span>;
+}
+
+export function SeverityBadge({ severity }) {
+  const map = { critical: ['red', 'Critical'], warning: ['amber', 'Warning'], info: ['blue', 'Info'] };
+  const [cls, label] = map[severity] || ['gray', severity];
+  return <span className={`badge ${cls}`}>{label}</span>;
+}
+
+/** Sortable, client-side table. columns: [{key,label,render?,align?,sortValue?}] */
+export function DataTable({ columns, rows, initialSort, emptyText = '데이터가 없습니다.' }) {
+  const [sort, setSort] = useState(initialSort || { key: columns[0].key, dir: 'asc' });
+
+  const sorted = useMemo(() => {
+    const col = columns.find((c) => c.key === sort.key);
+    const val = (r) => (col?.sortValue ? col.sortValue(r) : r[sort.key]);
+    return [...rows].sort((a, b) => {
+      const x = val(a), y = val(b);
+      if (x == null) return 1;
+      if (y == null) return -1;
+      const cmp = typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y));
+      return sort.dir === 'asc' ? cmp : -cmp;
+    });
+  }, [rows, sort, columns]);
+
+  const toggle = (key) =>
+    setSort((s) => ({ key, dir: s.key === key && s.dir === 'asc' ? 'desc' : 'asc' }));
+
+  return (
+    <div className="table-wrap" style={{ maxHeight: '64vh' }}>
+      <table>
+        <thead>
+          <tr>
+            {columns.map((c) => (
+              <th key={c.key} onClick={() => toggle(c.key)} style={{ textAlign: c.align || 'left' }}>
+                {c.label}{sort.key === c.key ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : ''}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.length === 0 && (
+            <tr><td colSpan={columns.length} className="center muted" style={{ padding: 30 }}>{emptyText}</td></tr>
+          )}
+          {sorted.map((r, i) => (
+            <tr key={r.id || i}>
+              {columns.map((c) => (
+                <td key={c.key} style={{ textAlign: c.align || 'left' }}>
+                  {c.render ? c.render(r) : r[c.key]}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+export function Loading() { return <div className="loading">불러오는 중…</div>; }
+export function ErrorBox({ message }) { return <div className="error-box">오류: {message}</div>; }
