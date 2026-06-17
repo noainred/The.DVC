@@ -1,0 +1,29 @@
+import React from 'react';
+import { usePolling } from '../api.js';
+import { DataTable, UsageCell, StateBadge, Loading, ErrorBox } from '../components/ui.jsx';
+
+export default function Hosts({ filters }) {
+  const { data, error, loading } = usePolling('/hosts', filters, 15_000);
+  if (loading && !data) return <Loading />;
+  if (error) return <ErrorBox message={error} />;
+  const rows = data?.items || [];
+
+  const columns = [
+    { key: 'name', label: '호스트', render: (h) => <b>{h.name}</b> },
+    { key: 'vcenterId', label: 'vCenter', render: (h) => <span className="muted">{h.vcenterId}</span> },
+    { key: 'cluster', label: '클러스터' },
+    { key: 'connectionState', label: '상태', render: (h) => <StateBadge state={h.connectionState} /> },
+    { key: 'cpuCores', label: 'Cores', align: 'right', render: (h) => h.cpuCores },
+    { key: 'cpuUsagePct', label: 'CPU', render: (h) => <UsageCell pct={h.cpuUsagePct} /> },
+    { key: 'memUsagePct', label: '메모리', render: (h) => <UsageCell pct={h.memUsagePct} /> },
+    { key: 'memTotalMB', label: 'RAM', align: 'right', render: (h) => `${Math.round(h.memTotalMB / 1024)} GB` },
+    { key: 'vmCount', label: 'VM', align: 'right' },
+  ];
+
+  return (
+    <>
+      <div className="muted" style={{ marginBottom: 10 }}>총 {data.total.toLocaleString()}개 호스트</div>
+      <DataTable columns={columns} rows={rows} initialSort={{ key: 'cpuUsagePct', dir: 'desc' }} />
+    </>
+  );
+}

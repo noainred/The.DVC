@@ -1,0 +1,30 @@
+import React from 'react';
+import { usePolling } from '../api.js';
+import { DataTable, Loading, ErrorBox } from '../components/ui.jsx';
+
+export default function Networks({ filters }) {
+  const { data, error, loading } = usePolling('/networks', filters, 15_000);
+  if (loading && !data) return <Loading />;
+  if (error) return <ErrorBox message={error} />;
+  const rows = data?.items || [];
+
+  const label = (t) =>
+    t === 'DISTRIBUTED_PORTGROUP' ? ['purple', 'Distributed'] :
+    t === 'STANDARD_PORTGROUP' ? ['blue', 'Standard'] : ['gray', t];
+
+  const columns = [
+    { key: 'name', label: '네트워크', render: (n) => <b>{n.name}</b> },
+    { key: 'vcenterId', label: 'vCenter', render: (n) => <span className="muted">{n.vcenterId}</span> },
+    { key: 'type', label: '유형', render: (n) => { const [c, l] = label(n.type); return <span className={`badge ${c}`}>{l}</span>; } },
+    { key: 'vlanId', label: 'VLAN', align: 'right' },
+    { key: 'hostCount', label: '호스트', align: 'right' },
+    { key: 'vmCount', label: 'VM', align: 'right' },
+  ];
+
+  return (
+    <>
+      <div className="muted" style={{ marginBottom: 10 }}>총 {data.total.toLocaleString()}개 네트워크</div>
+      <DataTable columns={columns} rows={rows} initialSort={{ key: 'vmCount', dir: 'desc' }} />
+    </>
+  );
+}
