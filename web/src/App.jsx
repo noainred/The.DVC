@@ -8,10 +8,12 @@ import Networks from './views/Networks.jsx';
 import Alarms from './views/Alarms.jsx';
 import Explore from './views/Explore.jsx';
 import VCenters from './views/VCenters.jsx';
+import Summary from './views/Summary.jsx';
 import Login from './views/Login.jsx';
 
 const TABS = [
   { id: 'overview', label: '개요' },
+  { id: 'summary', label: '통합 서머리' },
   { id: 'vcenters', label: 'vCenter' },
   { id: 'explore', label: '탐색·랭킹' },
   { id: 'hosts', label: '호스트' },
@@ -22,6 +24,11 @@ const TABS = [
 ];
 
 const REGIONS = ['Americas', 'EMEA', 'APAC'];
+const LANDING_KEY = 'vmportal.landingTab';
+const getLandingTab = () => {
+  const saved = localStorage.getItem(LANDING_KEY);
+  return TABS.some((t) => t.id === saved) ? saved : 'overview';
+};
 
 export default function App() {
   // auth bootstrap: 'loading' | 'anon' | user object
@@ -48,10 +55,14 @@ export default function App() {
 }
 
 function Portal({ user, onLogout }) {
-  const [tab, setTab] = useState('overview');
+  // Initial view honours the user's saved landing-page preference.
+  const [tab, setTab] = useState(getLandingTab);
+  const [landingTab, setLandingTab] = useState(getLandingTab);
   const [vcenterId, setVcenterId] = useState('');
   const [region, setRegion] = useState('');
   const [q, setQ] = useState('');
+
+  const saveLanding = (id) => { setLandingTab(id); localStorage.setItem(LANDING_KEY, id); };
 
   const { data: health } = usePolling('/health', {}, 20_000);
   const { data: vcenters } = usePolling('/vcenters', {}, 60_000);
@@ -72,7 +83,8 @@ function Portal({ user, onLogout }) {
     return s;
   }, [vcenterId, region]);
 
-  const showFilters = tab !== 'overview' && tab !== 'vcenters';
+  const noFilterTabs = ['overview', 'vcenters', 'summary'];
+  const showFilters = !noFilterTabs.includes(tab);
   const showTextSearch = tab !== 'explore';
 
   const selectSite = (id) => { setVcenterId(id); setTab('hosts'); };
@@ -99,6 +111,12 @@ function Portal({ user, onLogout }) {
           <span className="dot live" />
           {health ? `${health.source.toUpperCase()} · ${health.vcenters} vCenter` : '연결 중…'}
           {health?.generatedAt && <span className="muted">· {new Date(health.generatedAt).toLocaleTimeString('ko-KR')}</span>}
+        </div>
+        <div className="settings-box" title="로그인 후 처음 보여줄 화면">
+          <span className="muted">시작 화면</span>
+          <select className="select select-sm" value={landingTab} onChange={(e) => saveLanding(e.target.value)}>
+            {TABS.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+          </select>
         </div>
         <div className="user-box">
           <div className="user-avatar" title={user.name}>{(user.name || 'U').slice(0, 1).toUpperCase()}</div>
@@ -131,6 +149,7 @@ function Portal({ user, onLogout }) {
         )}
 
         {tab === 'overview' && <Overview onSelectSite={selectSite} onGotoTab={setTab} />}
+        {tab === 'summary' && <Summary scope={scope} onGotoTab={setTab} />}
         {tab === 'vcenters' && <VCenters onSelectSite={selectSite} />}
         {tab === 'explore' && <Explore scope={scope} />}
         {tab === 'hosts' && <Hosts filters={filters} />}

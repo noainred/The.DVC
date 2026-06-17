@@ -43,6 +43,120 @@ api.get('/vcenters', (_req, res) => {
   res.json(store.get().rollups?.sites ?? []);
 });
 
+/** Map a guest OS string to a coarse family for distribution charts. */
+function osFamily(os = '') {
+  const s = os.toLowerCase();
+  if (s.includes('windows')) return 'Windows';
+  if (s.includes('red hat') || s.includes('rhel')) return 'RHEL';
+  if (s.includes('ubuntu')) return 'Ubuntu';
+  if (s.includes('centos')) return 'CentOS';
+  if (s.includes('suse')) return 'SUSE';
+  if (s.includes('debian')) return 'Debian';
+  return 'Other';
+}
+
+// Consolidated summary: SUM of every resource across all vCenters, with
+// allocation totals, overcommit ratios, OS distribution and per-vCenter
+// contribution. Optional ?vcenterId= / ?region= scoping.
+api.get('/summary', (req, res) => {
+  const snap = store.get();
+  const vcenters = applyFilters(snap.vcenters.map((v) => ({ ...v, vcenterId: v.id })), req.query, snap, ['name']);
+  const vcIds = new Set(vcenters.map((v) => v.id));
+  const hosts = snap.hosts.filter((h) => vcIds.has(h.vcenterId));
+  const vms = snap.vms.filter((v) => vcIds.has(v.vcenterId));
+  const datastores = snap.datastores.filter((d) => vcIds.has(d.vcenterId));
+  const networks = snap.networks.filter((n) => vcIds.has(n.vcenterId));
+  const alarms = snap.alarms.filter((a) => vcIds.has(a.vcenterId));
+  const sum = (arr, fn) => arr.reduce((a, x) => a + (fn(x) || 0), 0);
+
+  const clusters = new Set(hosts.map((h) => `${h.vcenterId}/${h.cluster}`)).size;
+  const cpuCores = sum(hosts, (h) => h.cpuCores);
+  const cpuTotalMhz = sum(hosts, (h) => h.cpuTotalMhz);
+  const cpuUsedMhz = sum(hosts, (h) => h.cpuUsageMhz);
+  const memTotalMB = sum(hosts, (h) => h.memTotalMB);
+  const memUsedMB = sum(hosts, (h) => h.memUsageMB);
+  const storCapGB = sum(datastores, (d) => d.capacityGB);
+  const storUsedGB = sum(datastores, (d) => d.usedGB);
+
+  // VM allocation totals (what is provisioned, regardless of host capacity)
+  const vmVcpu = sum(vms, (v) => v.cpuCount);
+  const vmRamMB = sum(vms, (v) => v.memMB);
+  const vmProvGB = sum(vms, (v) => v.storageGB);
+
+  const osDist = {};
+  for (const v of vms) { const f = osFamily(v.guestOS); osDist[f] = (osDist[f] || 0) + 1; }
+
+  const round = (v, d = 0) => Number((v || 0).toFixed(d));
+  const pct = (u, t) => (t > 0 ? Math.round((u / t) * 100) : 0);
+
+  // Per-vCenter contribution (the SUM each site adds to the whole)
+  const byVcenter = vcenters.map((vc) => {
+    const h = hosts.filter((x) => x.vcenterId === vc.id);
+    const v = vms.filter((x) => x.vcenterId === vc.id);
+    const d = datastores.filter((x) => x.vcenterId === vc.id);
+    return {
+      id: vc.id, name: vc.name, region: vc.location?.region, status: vc.status,
+      hosts: h.length,
+      vms: v.length,
+      vmsPoweredOn: v.filter((x) => x.powerState === 'POWERED_ON').length,
+      cpuCores: sum(h, (x) => x.cpuCores),
+      memTotalGB: round(sum(h, (x) => x.memTotalMB) / 1024),
+      storageTotalTB: round(sum(d, (x) => x.capacityGB) / 1024, 1),
+      vcpuAllocated: sum(v, (x) => x.cpuCount),
+      ramAllocatedGB: round(sum(v, (x) => x.memMB) / 1024),
+      provisionedTB: round(sum(v, (x) => x.storageGB) / 1024, 1),
+    };
+  }).sort((a, b) => b.vms - a.vms);
+
+  res.json({
+    generatedAt: snap.generatedAt,
+    source: snap.source,
+    counts: {
+      vcenters: vcenters.length,
+      vcentersConnected: vcenters.filter((v) => v.status === 'connected').length,
+      clusters,
+      hosts: hosts.length,
+      hostsConnected: hosts.filter((h) => h.connectionState === 'CONNECTED').length,
+      hostsMaintenance: hosts.filter((h) => h.connectionState === 'MAINTENANCE').length,
+      hostsDisconnected: hosts.filter((h) => h.connectionState === 'DISCONNECTED').length,
+      vms: vms.length,
+      vmsPoweredOn: vms.filter((v) => v.powerState === 'POWERED_ON').length,
+      vmsPoweredOff: vms.filter((v) => v.powerState !== 'POWERED_ON').length,
+      datastores: datastores.length,
+      networks: networks.length,
+      alarms: alarms.length,
+      alarmsCritical: alarms.filter((a) => a.severity === 'critical').length,
+      alarmsWarning: alarms.filter((a) => a.severity === 'warning').length,
+    },
+    compute: {
+      cpuCores,
+      cpuTotalGhz: round(cpuTotalMhz / 1000, 1),
+      cpuUsedGhz: round(cpuUsedMhz / 1000, 1),
+      cpuUsagePct: pct(cpuUsedMhz, cpuTotalMhz),
+      memTotalGB: round(memTotalMB / 1024),
+      memUsedGB: round(memUsedMB / 1024),
+      memUsagePct: pct(memUsedMB, memTotalMB),
+    },
+    storage: {
+      capacityTB: round(storCapGB / 1024, 1),
+      usedTB: round(storUsedGB / 1024, 1),
+      freeTB: round((storCapGB - storUsedGB) / 1024, 1),
+      usagePct: pct(storUsedGB, storCapGB),
+    },
+    allocation: {
+      vcpuAllocated: vmVcpu,
+      ramAllocatedGB: round(vmRamMB / 1024),
+      provisionedStorageTB: round(vmProvGB / 1024, 1),
+      // Overcommit: allocated vCPU / physical cores, allocated RAM / physical RAM
+      vcpuPerCore: cpuCores > 0 ? round(vmVcpu / cpuCores, 2) : 0,
+      ramOvercommitPct: memTotalMB > 0 ? Math.round((vmRamMB / memTotalMB) * 100) : 0,
+      avgVmPerHost: hosts.length > 0 ? round(vms.length / hosts.length, 1) : 0,
+    },
+    osDistribution: Object.entries(osDist).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value),
+    byVcenter,
+  });
+});
+
 api.get('/hosts', (req, res) => {
   const snap = store.get();
   let hosts = applyFilters(snap.hosts, req.query, snap, ['name', 'cluster']);
