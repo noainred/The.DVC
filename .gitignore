@@ -8,3 +8,4 @@ npm-debug.log*
 .DS_Store
 coverage/
 server/config/vcenters.json
+server/config/users.json

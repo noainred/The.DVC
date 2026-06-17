@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { usePolling } from './api.js';
+import React, { useEffect, useMemo, useState } from 'react';
+import { usePolling, getToken, setToken, setUnauthorizedHandler, fetchAuthConfig, fetchMe } from './api.js';
 import Overview from './views/Overview.jsx';
 import Hosts from './views/Hosts.jsx';
 import Vms from './views/Vms.jsx';
@@ -7,9 +7,12 @@ import Datastores from './views/Datastores.jsx';
 import Networks from './views/Networks.jsx';
 import Alarms from './views/Alarms.jsx';
 import Explore from './views/Explore.jsx';
+import VCenters from './views/VCenters.jsx';
+import Login from './views/Login.jsx';
 
 const TABS = [
   { id: 'overview', label: '개요' },
+  { id: 'vcenters', label: 'vCenter' },
   { id: 'explore', label: '탐색·랭킹' },
   { id: 'hosts', label: '호스트' },
   { id: 'vms', label: '가상머신' },
@@ -21,6 +24,30 @@ const TABS = [
 const REGIONS = ['Americas', 'EMEA', 'APAC'];
 
 export default function App() {
+  // auth bootstrap: 'loading' | 'anon' | user object
+  const [user, setUser] = useState('loading');
+
+  useEffect(() => {
+    setUnauthorizedHandler(() => setUser(null));
+    (async () => {
+      const cfg = await fetchAuthConfig();
+      if (!cfg.authEnabled) return setUser({ name: 'Anonymous', role: 'admin' });
+      if (!getToken()) return setUser(null);
+      const me = await fetchMe();
+      setUser(me || null);
+    })();
+  }, []);
+
+  const logout = () => { setToken(null); setUser(null); };
+
+  if (user === 'loading') {
+    return <div className="login-screen"><div className="loading">불러오는 중…</div></div>;
+  }
+  if (!user) return <Login onSuccess={setUser} />;
+  return <Portal user={user} onLogout={logout} />;
+}
+
+function Portal({ user, onLogout }) {
   const [tab, setTab] = useState('overview');
   const [vcenterId, setVcenterId] = useState('');
   const [region, setRegion] = useState('');
@@ -45,7 +72,7 @@ export default function App() {
     return s;
   }, [vcenterId, region]);
 
-  const showFilters = tab !== 'overview';
+  const showFilters = tab !== 'overview' && tab !== 'vcenters';
   const showTextSearch = tab !== 'explore';
 
   const selectSite = (id) => { setVcenterId(id); setTab('hosts'); };
@@ -69,9 +96,17 @@ export default function App() {
         </nav>
         <div className="spacer" />
         <div className="status-pill">
-          <span className={`dot live ${health?.status === 'ok' ? '' : ''}`} />
+          <span className="dot live" />
           {health ? `${health.source.toUpperCase()} · ${health.vcenters} vCenter` : '연결 중…'}
           {health?.generatedAt && <span className="muted">· {new Date(health.generatedAt).toLocaleTimeString('ko-KR')}</span>}
+        </div>
+        <div className="user-box">
+          <div className="user-avatar" title={user.name}>{(user.name || 'U').slice(0, 1).toUpperCase()}</div>
+          <div className="user-meta">
+            <div className="user-name">{user.name}</div>
+            <div className="user-role muted">{user.role}</div>
+          </div>
+          <button className="logout-btn" onClick={onLogout} title="로그아웃">로그아웃</button>
         </div>
       </header>
 
@@ -96,6 +131,7 @@ export default function App() {
         )}
 
         {tab === 'overview' && <Overview onSelectSite={selectSite} onGotoTab={setTab} />}
+        {tab === 'vcenters' && <VCenters onSelectSite={selectSite} />}
         {tab === 'explore' && <Explore scope={scope} />}
         {tab === 'hosts' && <Hosts filters={filters} />}
         {tab === 'vms' && <Vms filters={filters} />}

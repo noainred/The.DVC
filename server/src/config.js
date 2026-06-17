@@ -22,6 +22,16 @@ export const config = {
   rejectUnauthorized: process.env.VC_TLS_REJECT_UNAUTHORIZED === 'true',
   // Directory of the built web client to serve in production (optional).
   webDist: path.resolve(ROOT, '..', 'web', 'dist'),
+  auth: {
+    enabled: process.env.AUTH_ENABLED !== 'false',
+    // Signing secret for session tokens. Set AUTH_SECRET in production so
+    // tokens survive restarts; otherwise a random per-process secret is used.
+    secret: process.env.AUTH_SECRET || '',
+    // Token lifetime, e.g. "8h", "30m", "7d", or seconds.
+    tokenTtl: process.env.AUTH_TOKEN_TTL || '8h',
+    // Default seed admin password when no users.json exists (demo convenience).
+    defaultAdminPassword: process.env.DEFAULT_ADMIN_PASSWORD || 'admin123',
+  },
 };
 
 /**
