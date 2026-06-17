@@ -15,6 +15,9 @@
   클릭 시 해당 vCenter로 드릴다운.
 - **리소스 탐색** — 호스트 / 가상머신 / 스토리지 / 네트워크 / 알람을 정렬·검색·필터
   (리전, vCenter, 텍스트)로 탐색.
+- **탐색·랭킹(Find)** — 자원을 가장 많이 사용하는 VM·호스트·데이터스토어 **Top N 랭킹**
+  (CPU/메모리 사용률, vCPU/RAM/디스크 할당량, VM 수, 데이터스토어 사용률)과
+  **VM 사양별 검색**(최소 vCPU·RAM·디스크, CPU/메모리 사용률 임계값, Guest OS, 전원 상태).
 - **실시간 갱신** — 백엔드가 주기적으로 모든 vCenter를 폴링해 스냅샷을 집계하고,
   프론트엔드는 일정 주기로 자동 새로고침.
 - **장애 내성** — 한 vCenter가 응답하지 않아도 포탈 전체는 정상 동작(해당 사이트만
@@ -88,7 +91,8 @@ npm start          # API가 web/dist를 함께 서빙 → http://localhost:4000
 | `GET /api/overview` | 글로벌 KPI + 리전별 + 사이트별 롤업 |
 | `GET /api/vcenters` | vCenter(사이트) 목록 + 사이트별 메트릭 |
 | `GET /api/hosts` | ESXi 호스트 (`?vcenterId=&region=&state=&q=`) |
-| `GET /api/vms` | 가상머신 (`?powerState=&limit=` 등) |
+| `GET /api/vms` | 가상머신. 사양 검색: `?vcpuMin=&vcpuMax=&ramMinGB=&ramMaxGB=&diskMinGB=&diskMaxGB=&cpuUsageMin=&memUsageMin=&os=&powerState=&sortBy=&order=&limit=` |
+| `GET /api/top` | 자원 최다 사용 Top N (VM/호스트/데이터스토어). `?vcenterId=&region=&limit=` |
 | `GET /api/datastores` | 데이터스토어 |
 | `GET /api/networks` | 네트워크(포트그룹/분산스위치) |
 | `GET /api/alarms` | 알람 (`?severity=critical|warning|info`) |
