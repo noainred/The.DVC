@@ -9,6 +9,11 @@
 
 ## 주요 기능
 
+- **로그인 인증** — 사용자 로그인 후에만 포탈/대시보드 접근 가능. 외부 패키지 없이
+  Node 내장 `crypto`로 scrypt 비밀번호 해싱 + HS256 JWT 세션 토큰을 구현.
+  모든 데이터 API는 토큰이 있어야 접근 가능(401 차단). 역할(admin/operator/viewer) 지원.
+- **vCenter 대시보드** — 등록된 **모든 vCenter를 카드 형태로 한눈에** 표시(상태·위치·버전,
+  호스트/VM 수, CPU/메모리/스토리지 사용률, 알람). 카드 클릭 시 해당 vCenter로 드릴다운.
 - **글로벌 개요 대시보드** — 전세계 KPI(vCenter/호스트/VM/CPU/메모리/스토리지/알람),
   세계지도 위 데이터센터 위치 및 상태 마커, 리전(Americas/EMEA/APAC)별 롤업, 차트.
 - **세계 지도** — 사이트별 마커 색상으로 정상/경고/위험 상태 표시, 호버 시 상세 요약,
@@ -82,11 +87,32 @@ npm start          # API가 web/dist를 함께 서빙 → http://localhost:4000
 | `DATA_SOURCE` | `mock` | `mock` / `live` / `auto` |
 | `POLL_INTERVAL_MS` | `30000` | vCenter 폴링 주기(ms) |
 | `VC_TLS_REJECT_UNAUTHORIZED` | `false` | 사설 vCenter 자체서명 인증서 거부 여부 (`true`면 검증) |
+| `AUTH_ENABLED` | `true` | 로그인 인증 사용 여부 (`false`면 인증 없이 접근) |
+| `AUTH_SECRET` | (랜덤) | JWT 서명 시크릿. **운영 환경에서는 반드시 지정** (미지정 시 재시작마다 토큰 무효화) |
+| `AUTH_TOKEN_TTL` | `8h` | 세션 토큰 유효기간 (`30m`, `8h`, `7d`, 또는 초) |
+| `DEFAULT_ADMIN_PASSWORD` | `admin123` | `users.json` 미존재 시 시드되는 기본 admin 비밀번호 |
+
+### 로그인 / 사용자 관리
+
+기본 데모 계정은 **`admin` / `admin123`** 입니다(`users.json`이 없으면 자동 시드).
+운영 환경에서는 사용자 파일을 만들어 관리하세요:
+
+```bash
+cp server/config/users.example.json server/config/users.json
+# 비밀번호 해시 생성 (server/ 디렉터리에서 실행)
+cd server && node -e "import('./src/auth/auth.js').then(m=>console.log(m.hashPassword(process.argv[1])))" 'YourPassword'
+# 출력된 scrypt$... 값을 users.json의 passwordHash에 붙여넣기
+```
+
+> `users.json`은 `.gitignore` 처리되어 커밋되지 않습니다. 운영 시 `AUTH_SECRET`도 반드시 설정하세요.
 
 ## API 엔드포인트
 
 | 메서드 · 경로 | 설명 |
 |---------------|------|
+| `POST /api/auth/login` | 로그인 → JWT 토큰 발급 (`{username, password}`) |
+| `GET /api/auth/me` | 현재 사용자(토큰 필요) |
+| `GET /api/auth/config` | 인증 활성화 여부 (공개) |
 | `GET /api/health` | 상태 · 데이터 소스 · 갱신시각 |
 | `GET /api/overview` | 글로벌 KPI + 리전별 + 사이트별 롤업 |
 | `GET /api/vcenters` | vCenter(사이트) 목록 + 사이트별 메트릭 |
@@ -98,6 +124,9 @@ npm start          # API가 web/dist를 함께 서빙 → http://localhost:4000
 | `GET /api/alarms` | 알람 (`?severity=critical|warning|info`) |
 
 공통 필터: `vcenterId`, `region`, `q`(이름/IP/OS 등 텍스트 검색).
+
+> `/api/auth/*`를 제외한 모든 엔드포인트는 `Authorization: Bearer <token>` 헤더가 필요합니다
+> (`AUTH_ENABLED=false`인 경우 제외).
 
 ## 확장 아이디어
 
