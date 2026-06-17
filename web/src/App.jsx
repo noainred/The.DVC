@@ -6,9 +6,11 @@ import Vms from './views/Vms.jsx';
 import Datastores from './views/Datastores.jsx';
 import Networks from './views/Networks.jsx';
 import Alarms from './views/Alarms.jsx';
+import Explore from './views/Explore.jsx';
 
 const TABS = [
   { id: 'overview', label: '개요' },
+  { id: 'explore', label: '탐색·랭킹' },
   { id: 'hosts', label: '호스트' },
   { id: 'vms', label: '가상머신' },
   { id: 'datastores', label: '스토리지' },
@@ -35,7 +37,16 @@ export default function App() {
     return f;
   }, [vcenterId, region, q]);
 
+  // Scope (region/vCenter) without the free-text query, used by Explore.
+  const scope = useMemo(() => {
+    const s = {};
+    if (vcenterId) s.vcenterId = vcenterId;
+    else if (region) s.region = region;
+    return s;
+  }, [vcenterId, region]);
+
   const showFilters = tab !== 'overview';
+  const showTextSearch = tab !== 'explore';
 
   const selectSite = (id) => { setVcenterId(id); setTab('hosts'); };
 
@@ -75,7 +86,9 @@ export default function App() {
               <option value="">전체 vCenter</option>
               {(vcenters || []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
             </select>
-            <input className="input" placeholder="이름 / IP / OS 검색…" value={q} onChange={(e) => setQ(e.target.value)} />
+            {showTextSearch && (
+              <input className="input" placeholder="이름 / IP / OS 검색…" value={q} onChange={(e) => setQ(e.target.value)} />
+            )}
             {(region || vcenterId || q) && (
               <button className="tab" onClick={() => { setRegion(''); setVcenterId(''); setQ(''); }}>필터 초기화</button>
             )}
@@ -83,6 +96,7 @@ export default function App() {
         )}
 
         {tab === 'overview' && <Overview onSelectSite={selectSite} onGotoTab={setTab} />}
+        {tab === 'explore' && <Explore scope={scope} />}
         {tab === 'hosts' && <Hosts filters={filters} />}
         {tab === 'vms' && <Vms filters={filters} />}
         {tab === 'datastores' && <Datastores filters={filters} />}

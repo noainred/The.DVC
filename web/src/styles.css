@@ -163,3 +163,20 @@ tbody tr:last-child td { border-bottom: none; }
 .region-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; font-size: 12px; }
 .region-stats .rs { display: flex; justify-content: space-between; color: var(--text-dim); }
 .region-stats .rs b { color: var(--text); }
+
+/* Top-consumer leaderboards */
+.top-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid rgba(36,48,73,.4); }
+.top-row:last-child { border-bottom: none; }
+.top-rank { width: 22px; text-align: center; font-weight: 800; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.top-main { flex: 1; min-width: 0; }
+.top-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.top-sub { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.top-bar-wrap { display: flex; align-items: center; gap: 8px; width: 150px; flex-shrink: 0; }
+.top-bar { flex: 1; height: 7px; border-radius: 4px; background: var(--panel-2); overflow: hidden; }
+.top-bar > span { display: block; height: 100%; border-radius: 4px; }
+.top-val { font-size: 12px; font-weight: 600; min-width: 56px; text-align: right; }
+
+/* Spec search form */
+.spec-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.spec-grid label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-dim); font-weight: 600; }
+.spec-grid .input, .spec-grid .select { min-width: 0; width: 100%; }
