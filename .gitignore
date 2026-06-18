@@ -12,3 +12,4 @@ server/config/users.json
 server/.upgrade-cache/
 *.bak.[0-9]*
 *.new.[0-9]*
+dist-offline/

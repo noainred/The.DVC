@@ -71,6 +71,22 @@ npm run build      # 웹 빌드 → web/dist
 npm start          # API가 web/dist를 함께 서빙 → http://localhost:4000
 ```
 
+## 오프라인 설치 (Rocky Linux 9, air-gapped)
+
+인터넷이 없는 Rocky 9 서버에는 Node 런타임·서버 의존성·빌드된 웹 UI를 모두 포함한
+자체 완결형 패키지를 만들어 설치합니다(타깃에 인터넷·npm·컴파일러 불필요).
+
+```bash
+# 인터넷 되는 곳에서 패키지 빌드
+packaging/offline/build-package.sh           # → dist-offline/vmware-portal-offline-<버전>-el9-x64.tar.gz
+
+# 오프라인 Rocky 9 서버에서 설치 (systemd 서비스 등록)
+tar -xzf vmware-portal-offline-<버전>-el9-x64.tar.gz && cd vmware-portal-offline-*
+sudo ./install.sh --port 4000
+```
+
+자세한 내용은 `packaging/README.md` 및 `packaging/offline/OFFLINE-INSTALL.md` 참고.
+
 ## 실제 vCenter 연결
 
 기본은 목 데이터(`DATA_SOURCE=mock`)입니다. 실 환경 연결:
