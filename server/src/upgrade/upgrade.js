@@ -192,11 +192,15 @@ function applyIfNewer(members, installDir, currentVersion, { allowSame = false }
 
 /**
  * Re-exec the running process so the freshly installed code is loaded.
- * Node has no os.execv, so we spawn a detached copy with the same argv and
- * exit; works under nohup and supervisors (systemd will also restart on exit).
- * Does not return.
+ * Under systemd (INVOCATION_ID set) we simply exit and let the supervisor
+ * restart the unit (Restart=always); otherwise we spawn a detached copy with
+ * the same argv and exit (works under nohup). Does not return.
  */
 export function restartProcess() {
+  if (process.env.INVOCATION_ID || process.env.NOTIFY_SOCKET) {
+    setTimeout(() => process.exit(0), 100); // systemd will restart the unit
+    return;
+  }
   const child = spawn(process.execPath, process.argv.slice(1), {
     cwd: process.cwd(),
     detached: true,
