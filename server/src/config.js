@@ -32,7 +32,50 @@ export const config = {
     // Default seed admin password when no users.json exists (demo convenience).
     defaultAdminPassword: process.env.DEFAULT_ADMIN_PASSWORD || 'admin123',
   },
+  upgrade: {
+    // Opt-in: the whole feature is OFF unless explicitly enabled.
+    enabled: process.env.UPGRADE_ENABLED === 'true',
+    // Local folder watched for vmware-portal-<ver>.tar.gz/.zip bundles.
+    watchDir: process.env.UPGRADE_WATCH_DIR || '',
+    // Directory that gets replaced on upgrade (the running install). Required to apply.
+    installDir: process.env.UPGRADE_INSTALL_DIR || '',
+    // Top-level package directory name inside bundles.
+    packageName: process.env.UPGRADE_PACKAGE_NAME || 'vmware-portal',
+    // Remote source base (directory containing versions.json), optional.
+    remoteBase: process.env.UPGRADE_REMOTE_BASE || '',
+    // PAT for private remote sources, optional.
+    token: process.env.UPGRADE_TOKEN || '',
+    // Where downloaded bundles are stored before install.
+    downloadDir: process.env.UPGRADE_DOWNLOAD_DIR || path.resolve(ROOT, '.upgrade-cache'),
+    // Background check interval (ms). 0 disables the background watcher.
+    pollIntervalMs: Number(process.env.UPGRADE_POLL_INTERVAL_MS) || 0,
+    // When true, a newer version found by the watcher is applied + restarts automatically.
+    autoApply: process.env.UPGRADE_AUTO_APPLY === 'true',
+    // Edge agents this portal pushes new bundles to after self-upgrade.
+    // JSON array: [{"url":"https://edge1","token":"..."}]
+    edges: parseEdges(process.env.UPGRADE_EDGES),
+  },
 };
+
+function parseEdges(raw) {
+  if (!raw) return [];
+  try {
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr.filter((e) => e && e.url) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Current running version, read from the repo root package.json. */
+export function currentVersion() {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.resolve(ROOT, '..', 'package.json'), 'utf8'));
+    return pkg.version || '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
+}
 
 /**
  * Load the list of vCenters to monitor.

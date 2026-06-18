@@ -9,6 +9,7 @@ import Alarms from './views/Alarms.jsx';
 import Explore from './views/Explore.jsx';
 import VCenters from './views/VCenters.jsx';
 import Summary from './views/Summary.jsx';
+import Upgrade from './views/Upgrade.jsx';
 import Login from './views/Login.jsx';
 
 const TABS = [
@@ -21,6 +22,7 @@ const TABS = [
   { id: 'datastores', label: '스토리지' },
   { id: 'networks', label: '네트워크' },
   { id: 'alarms', label: '알람' },
+  { id: 'upgrade', label: '업그레이드', adminOnly: true },
 ];
 
 const REGIONS = ['Americas', 'EMEA', 'APAC'];
@@ -64,6 +66,9 @@ function Portal({ user, onLogout }) {
 
   const saveLanding = (id) => { setLandingTab(id); localStorage.setItem(LANDING_KEY, id); };
 
+  // Admin-only tabs (e.g. 자동 업그레이드) are hidden from other roles.
+  const visibleTabs = TABS.filter((t) => !t.adminOnly || user.role === 'admin');
+
   const { data: health } = usePolling('/health', {}, 20_000);
   const { data: vcenters } = usePolling('/vcenters', {}, 60_000);
 
@@ -83,7 +88,7 @@ function Portal({ user, onLogout }) {
     return s;
   }, [vcenterId, region]);
 
-  const noFilterTabs = ['overview', 'vcenters', 'summary'];
+  const noFilterTabs = ['overview', 'vcenters', 'summary', 'upgrade'];
   const showFilters = !noFilterTabs.includes(tab);
   const showTextSearch = tab !== 'explore';
 
@@ -100,7 +105,7 @@ function Portal({ user, onLogout }) {
           </div>
         </div>
         <nav className="tabs">
-          {TABS.map((t) => (
+          {visibleTabs.map((t) => (
             <button key={t.id} className={`tab ${tab === t.id ? 'active' : ''}`} onClick={() => setTab(t.id)}>
               {t.label}
             </button>
@@ -115,7 +120,7 @@ function Portal({ user, onLogout }) {
         <div className="settings-box" title="로그인 후 처음 보여줄 화면">
           <span className="muted">시작 화면</span>
           <select className="select select-sm" value={landingTab} onChange={(e) => saveLanding(e.target.value)}>
-            {TABS.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+            {visibleTabs.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
           </select>
         </div>
         <div className="user-box">
@@ -157,6 +162,7 @@ function Portal({ user, onLogout }) {
         {tab === 'datastores' && <Datastores filters={filters} />}
         {tab === 'networks' && <Networks filters={filters} />}
         {tab === 'alarms' && <Alarms filters={filters} />}
+        {tab === 'upgrade' && user.role === 'admin' && <Upgrade />}
       </main>
     </div>
   );

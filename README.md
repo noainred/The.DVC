@@ -19,6 +19,11 @@
   합계(vCPU·RAM·프로비저닝 스토리지)와 **오버커밋 비율**, Guest OS 분포, vCenter별 기여도
   합계 표(총합 행 포함). 리전/vCenter 스코프 적용 가능.
 - **시작 화면 설정** — 로그인 후 처음 보여줄 페이지를 사용자가 선택(브라우저에 저장).
+- **자동 업그레이드(옵트인)** — 감시 폴더의 새 버전 번들(`vmware-portal-<버전>.tar.gz/.zip`)
+  또는 원격 소스(`versions.json`, GitHub raw·사설 레포+토큰)를 확인해, 현재보다 새 버전만
+  검증 후 적용하고 프로세스를 재시작(re-exec). 기존 코드는 백업(롤백 가능), 경로 탈출·아카이브
+  폭탄 방지. 표준 라이브러리만 사용(내장 `zlib` + 자체 tar/zip 파서). 포탈은 자가 업그레이드 후
+  등록된 엣지에도 번들을 푸시. 관리자(admin) 전용 UI/API로 제어.
 - **글로벌 개요 대시보드** — 전세계 KPI(vCenter/호스트/VM/CPU/메모리/스토리지/알람),
   세계지도 위 데이터센터 위치 및 상태 마커, 리전(Americas/EMEA/APAC)별 롤업, 차트.
 - **세계 지도** — 사이트별 마커 색상으로 정상/경고/위험 상태 표시, 호버 시 상세 요약,
@@ -133,6 +138,30 @@ cd server && node -e "import('./src/auth/auth.js').then(m=>console.log(m.hashPas
 
 > `/api/auth/*`를 제외한 모든 엔드포인트는 `Authorization: Bearer <token>` 헤더가 필요합니다
 > (`AUTH_ENABLED=false`인 경우 제외).
+
+### 자동 업그레이드 (관리자 전용)
+
+옵트인 기능으로, 기본은 꺼져 있습니다. 환경변수로 활성화합니다:
+
+| 변수 | 설명 |
+|------|------|
+| `UPGRADE_ENABLED` | `true` 면 기능 활성화 |
+| `UPGRADE_WATCH_DIR` | 새 번들(`vmware-portal-<ver>.tar.gz/.zip`)을 감시할 로컬 폴더 |
+| `UPGRADE_INSTALL_DIR` | 교체 대상(실행 중 코드) 경로 — 적용하려면 필수 |
+| `UPGRADE_PACKAGE_NAME` | 번들 내 최상위 패키지 디렉터리명 (기본 `vmware-portal`) |
+| `UPGRADE_REMOTE_BASE` | 원격 소스 base(`versions.json` 포함 디렉터리) |
+| `UPGRADE_TOKEN` | 사설 원격 소스용 PAT |
+| `UPGRADE_POLL_INTERVAL_MS` | 백그라운드 확인 주기(ms), `0`이면 끔 |
+| `UPGRADE_AUTO_APPLY` | `true` 면 새 버전 발견 시 자동 적용+재시작 |
+| `UPGRADE_EDGES` | 자가 업그레이드 후 번들을 푸시할 엣지 목록 JSON `[{"url","token"}]` |
+
+관리자 API (모두 admin 역할 필요): `GET /api/upgrade/status`, `POST /api/upgrade/check`,
+`POST /api/upgrade/apply` (`{source,restart}`), `POST /api/upgrade/restart`,
+`POST /api/upgrade/bundle` (엣지가 받는 번들 푸시 엔드포인트). 포탈 상단의 **업그레이드** 탭에서
+GUI로도 확인·적용·재시작할 수 있습니다.
+
+> 안전장치: 더 새 버전만 적용, 아카이브 패키지·버전 검증, 경로 탈출 방지, zip/tar 폭탄 상한,
+> 기존 코드 백업(원자적 스왑·롤백). 재시작은 같은 인자로 프로세스를 re-exec 합니다.
 
 ## 확장 아이디어
 
