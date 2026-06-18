@@ -116,3 +116,14 @@ export function authMiddleware(req, res, next) {
   req.user = { username: payload.sub, role: payload.role, name: payload.name };
   next();
 }
+
+/** Require the authenticated user to hold one of the given roles. */
+export function requireRole(...roles) {
+  return (req, res, next) => {
+    if (!config.auth.enabled) return next();
+    if (!req.user || !roles.includes(req.user.role)) {
+      return res.status(403).json({ error: 'forbidden', requiredRole: roles });
+    }
+    next();
+  };
+}

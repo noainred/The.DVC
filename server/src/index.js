@@ -6,13 +6,16 @@ import { store } from './store.js';
 import { api } from './routes/api.js';
 import { authRouter } from './routes/auth.js';
 import { authMiddleware } from './auth/auth.js';
+import { upgradeRouter } from './routes/upgrade.js';
+import { upgradeManager } from './upgrade/manager.js';
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-app.use('/api/auth', authRouter);       // public: login / config / me
-app.use('/api', authMiddleware, api);   // protected resource endpoints
+app.use('/api/auth', authRouter);                      // public: login / config / me
+app.use('/api/upgrade', authMiddleware, upgradeRouter); // admin-gated auto-upgrade control
+app.use('/api', authMiddleware, api);                   // protected resource endpoints
 
 // Serve the built web client when it exists (production single-port mode).
 if (fs.existsSync(config.webDist)) {
@@ -24,6 +27,7 @@ if (fs.existsSync(config.webDist)) {
 }
 
 store.start();
+upgradeManager.start();
 
 app.listen(config.port, () => {
   console.log(`\n  VMware Global Monitoring Portal — API`);

@@ -29,6 +29,18 @@ export async function fetchJson(path, params = {}) {
   return res.json();
 }
 
+export async function postJson(path, body = {}) {
+  const res = await fetch(`${BASE}${path}`, {
+    method: 'POST',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(body),
+  });
+  if (res.status === 401) { setToken(null); onUnauthorized(); throw new Error('세션이 만료되었습니다.'); }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok && res.status !== 409) throw new Error(data.reason || data.error || `${path} -> ${res.status}`);
+  return data;
+}
+
 export async function login(username, password) {
   const res = await fetch(`${BASE}/auth/login`, {
     method: 'POST',
