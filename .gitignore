@@ -13,6 +13,8 @@ server/config/upgrade.json
 server/config/idrac.json
 server/config/idrac-power.db
 server/config/idrac-power.ndjson
+server/config/idrac-inventory.json
+server/config/collectors.json
 server/.upgrade-cache/
 *.bak.[0-9]*
 *.new.[0-9]*

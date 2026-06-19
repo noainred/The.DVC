@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { describeError } from '../util/errors.js';
-import { fetchPower } from './redfish.js';
+import { fetchPower, fetchInventory } from './redfish.js';
 import { testOme } from './ome.js';
 import { expandIpList } from './iprange.js';
 
@@ -221,7 +221,9 @@ export async function testServer(body) {
       return { ok: true, ms: r.ms, devices: r.devices, auth: r.auth, watts: r.sampleWatts, type: 'ome' };
     }
     const r = await fetchPower(normalized);
-    return { ok: true, ms: Date.now() - started, watts: r.watts, model: r.model, serviceTag: r.serviceTag, powerState: r.powerState };
+    let info = null;
+    try { info = await fetchInventory(normalized); } catch { /* power test still succeeds */ }
+    return { ok: true, ms: Date.now() - started, watts: r.watts, model: r.model, serviceTag: r.serviceTag, powerState: r.powerState, info };
   } catch (err) {
     const d = describeError(err);
     return { ok: false, reason: d.message, hint: d.hint, code: d.code, ms: Date.now() - started };

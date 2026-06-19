@@ -7,11 +7,15 @@
 
 import { config } from '../config.js';
 import { loadRegistry } from './registry.js';
-import { fetchPower } from './redfish.js';
+import { fetchPower, fetchInventory } from './redfish.js';
 import { fetchOmeDevices } from './ome.js';
 import { setOmeDevices, dbKey } from './omeCache.js';
+import { setInventory, inventoryStale } from './invCache.js';
 import { getDb } from './db.js';
 import { describeError } from '../util/errors.js';
+
+// Hardware inventory is largely static — refresh it at most every 30 minutes.
+const INVENTORY_MAX_AGE_MS = 30 * 60_000;
 
 let timer = null;
 let lastRun = null; // { at, ok, failed, results: [{id, watts?, devices?, error?}] }
@@ -36,6 +40,10 @@ async function pollOnce() {
       } else {
         const r = await fetchPower(s);
         db.insert(s.id, r.watts, ts);
+        // Refresh rich inventory on a slow cadence (best-effort, non-blocking).
+        if (inventoryStale(s.id, INVENTORY_MAX_AGE_MS)) {
+          try { setInventory(s.id, await fetchInventory(s)); } catch { /* keep last */ }
+        }
         results.push({ id: s.id, name: s.name, type: 'idrac', watts: r.watts });
       }
     } catch (err) {

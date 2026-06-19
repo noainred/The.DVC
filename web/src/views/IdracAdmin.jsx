@@ -55,10 +55,12 @@ export default function IdracAdmin() {
     setBusy(true); setMsg(null);
     try {
       const r = await postJson('/admin/idrac/test', form);
+      const inv = r.info?.system, fw = r.info?.idrac;
+      const extra = inv ? `${inv.hostName ? ` · 호스트 ${inv.hostName}` : ''}${inv.biosVersion ? ` · BIOS ${inv.biosVersion}` : ''}${fw?.firmwareVersion ? ` · iDRAC ${fw.firmwareVersion}` : ''}${fw?.ipmiVersion ? ` · IPMI ${fw.ipmiVersion}` : ''}` : '';
       setMsg(r.ok
         ? { ok: true, text: r.type === 'ome'
             ? `OME 연결 성공 (${r.ms}ms · ${r.auth}) · 장비 ${r.devices}대${r.watts != null ? ` · 샘플 ${r.watts} W` : ' · 전력값 없음(플러그인 확인)'}`
-            : `연결 성공 (${r.ms}ms) · 현재 ${r.watts != null ? `${r.watts} W` : '—'}${r.model ? ` · ${r.model}` : ''}${r.serviceTag ? ` · ${r.serviceTag}` : ''}` }
+            : `연결 성공 (${r.ms}ms) · 현재 ${r.watts != null ? `${r.watts} W` : '—'}${r.model ? ` · ${r.model}` : ''}${r.serviceTag ? ` · ${r.serviceTag}` : ''}${extra}` }
         : { ok: false, text: `연결 실패: ${r.reason}${r.hint ? ` (${r.hint})` : ''}` });
     } catch (e) { setMsg({ ok: false, text: e.message }); }
     finally { setBusy(false); }
