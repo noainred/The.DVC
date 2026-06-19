@@ -136,6 +136,36 @@ api.get('/vcenters', (_req, res) => {
   res.json(store.get().rollups?.sites ?? []);
 });
 
+// Special tool: find IPv4 addresses assigned to more than one VM, optionally
+// scoped to one vCenter (?vcenterId=). Helps catch duplicate/conflicting IPs.
+api.get('/tools/duplicate-ips', (req, res) => {
+  const snap = store.get();
+  let vms = snap.vms;
+  if (req.query.vcenterId) vms = vms.filter((v) => v.vcenterId === req.query.vcenterId);
+  const map = new Map();
+  for (const v of vms) {
+    const ips = v.ipAddresses?.length ? v.ipAddresses : (v.ipAddress ? [v.ipAddress] : []);
+    for (const ip of new Set(ips)) {
+      if (!map.has(ip)) map.set(ip, []);
+      map.get(ip).push({ id: v.id, name: v.name, vcenterId: v.vcenterId, host: v.host, cluster: v.cluster, powerState: v.powerState, guestOS: v.guestOS, ipAddresses: v.ipAddresses, ipAddress: v.ipAddress });
+    }
+  }
+  const items = [...map.entries()]
+    .filter(([, vs]) => vs.length > 1)
+    .map(([ip, vs]) => ({
+      ip, count: vs.length, vms: vs,
+      crossVcenter: new Set(vs.map((x) => x.vcenterId)).size > 1,
+    }))
+    .sort((a, b) => b.count - a.count || a.ip.localeCompare(b.ip, undefined, { numeric: true }));
+  res.json({
+    scope: req.query.vcenterId || 'all',
+    duplicateIps: items.length,
+    affectedVms: items.reduce((a, d) => a + d.count, 0),
+    scannedVms: vms.length,
+    items,
+  });
+});
+
 // Shared UI settings (e.g. dashboard map height) — same for all users.
 api.get('/ui-settings', (_req, res) => res.json(loadUiSettings()));
 api.put('/ui-settings', (req, res) => res.json(saveUiSettings(req.body || {})));

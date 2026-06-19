@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { usePolling } from '../api.js';
 import { Loading, ErrorBox, StateBadge, usageColor } from '../components/ui.jsx';
+import VCenterDetail from './VCenterDetail.jsx';
 
 function Bar({ label, pct, detail }) {
   return (
@@ -13,10 +14,13 @@ function Bar({ label, pct, detail }) {
 
 export default function VCenters({ onSelectSite }) {
   const { data, error, loading } = usePolling('/vcenters', {}, 15_000);
+  const [openId, setOpenId] = useState(null);
   if (loading && !data) return <Loading />;
   if (error) return <ErrorBox message={error} />;
 
   const sites = data || [];
+  const openSite = sites.find((s) => s.id === openId);
+  if (openSite) return <VCenterDetail site={openSite} onBack={() => setOpenId(null)} />;
   const connected = sites.filter((s) => s.status === 'connected').length;
   const totalHosts = sites.reduce((a, s) => a + (s.metrics?.hosts || 0), 0);
   const totalVms = sites.reduce((a, s) => a + (s.metrics?.vms || 0), 0);
@@ -36,7 +40,7 @@ export default function VCenters({ onSelectSite }) {
           const m = s.metrics || {};
           const down = s.status !== 'connected';
           return (
-            <div className="card vc-card" key={s.id} onClick={() => onSelectSite?.(s.id)}>
+            <div className="card vc-card" key={s.id} onClick={() => setOpenId(s.id)}>
               <div className="vc-head">
                 <div>
                   <div className="vc-name">{s.name}</div>

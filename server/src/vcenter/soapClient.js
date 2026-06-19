@@ -284,16 +284,17 @@ export async function collectFromVCenterSoap(vc) {
   try {
     const view = await c.createContainerView([
       'HostSystem', 'VirtualMachine', 'Datastore', 'ClusterComputeResource',
-      'Network', 'DistributedVirtualPortgroup',
+      'Network', 'DistributedVirtualPortgroup', 'Folder',
     ]);
     const objs = await c.retrieveProperties(view, [
+      { type: 'Folder', paths: ['name', 'parent'] },
       { type: 'ClusterComputeResource', paths: ['name'] },
       { type: 'HostSystem', paths: [
         'name', 'parent', 'runtime.connectionState', 'runtime.powerState', 'runtime.inMaintenanceMode',
         'summary.hardware.numCpuCores', 'summary.hardware.cpuMhz', 'summary.hardware.memorySize',
         'summary.quickStats.overallCpuUsage', 'summary.quickStats.overallMemoryUsage'] },
       { type: 'VirtualMachine', paths: [
-        'name', 'runtime.host', 'runtime.powerState', 'summary.config.numCpu', 'summary.config.memorySizeMB',
+        'name', 'runtime.host', 'parent', 'runtime.powerState', 'summary.config.numCpu', 'summary.config.memorySizeMB',
         'summary.config.guestFullName', 'summary.quickStats.overallCpuUsage', 'summary.quickStats.guestMemoryUsage',
         'summary.storage.committed', 'guest.ipAddress', 'guest.net', 'guest.toolsRunningStatus'] },
       { type: 'Datastore', paths: ['name', 'summary.type', 'summary.capacity', 'summary.freeSpace', 'summary.accessible'] },
@@ -303,6 +304,20 @@ export async function collectFromVCenterSoap(vc) {
 
     const clusterName = new Map();
     for (const o of objs) if (o.type === 'ClusterComputeResource') clusterName.set(o.ref, o.props.name);
+
+    // Folder hierarchy → resolve each VM's folder path (vSphere "VMs & Templates").
+    const folderByRef = new Map(); // ref -> { name, parent }
+    for (const o of objs) if (o.type === 'Folder') folderByRef.set(o.ref, { name: o.props.name, parent: o.props.parent });
+    const folderPath = (ref) => {
+      const parts = [];
+      let cur = ref; let guard = 0;
+      while (cur && folderByRef.has(cur) && guard++ < 32) {
+        const f = folderByRef.get(cur);
+        if (f.name && f.name !== 'vm' && f.name !== 'Datacenters') parts.unshift(f.name);
+        cur = f.parent;
+      }
+      return parts.length ? parts.join('/') : 'vm';
+    };
 
     const hostMeta = new Map(); // ref -> { name, cpuMhzPerCore }
     const hostByRef = new Map(); // ref -> host object
@@ -370,6 +385,7 @@ export async function collectFromVCenterSoap(vc) {
         vcenterId: vc.id,
         host: host?.name || '',
         cluster: host?.cluster || '',
+        folder: folderPath(p.parent),
         name: p.name,
         powerState: powered ? 'POWERED_ON' : 'POWERED_OFF',
         guestOS: p['summary.config.guestFullName'] || 'unknown',

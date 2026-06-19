@@ -26,6 +26,11 @@ const GUEST_OS = [
   'Windows Server 2019', 'CentOS Stream 9', 'SUSE Linux Enterprise 15', 'Debian 12',
 ];
 const APP_ROLES = ['web', 'app', 'db', 'cache', 'mq', 'lb', 'k8s-node', 'monitor', 'backup', 'dns'];
+// VM folder paths to mimic a vSphere "VMs and Templates" inventory.
+const VM_FOLDERS = [
+  'Production/Web', 'Production/DB', 'Production/App', 'Infrastructure/Network',
+  'Infrastructure/Storage', 'Test/QA', 'Dev', 'DMZ', 'Discovered virtual machine',
+];
 const DS_TYPES = ['VMFS', 'NFS', 'vSAN'];
 const NET_TYPES = ['STANDARD_PORTGROUP', 'DISTRIBUTED_PORTGROUP'];
 
@@ -218,6 +223,7 @@ export function generateSnapshot() {
         memUsagePct,
         ipAddress: powered ? mkIp(site, vm.idx) : null,
         ipAddresses: powered ? mkIps(site, vm.idx) : [],
+        folder: VM_FOLDERS[(vm.idx * 7 + site.id.length) % VM_FOLDERS.length],
         toolsStatus: powered ? (vm.idx % 17 === 0 ? 'OUTDATED' : 'RUNNING') : 'NOT_RUNNING',
       });
     }
