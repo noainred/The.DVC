@@ -27,6 +27,17 @@ const GUEST_OS = [
 ];
 const APP_ROLES = ['web', 'app', 'db', 'cache', 'mq', 'lb', 'k8s-node', 'monitor', 'backup', 'dns'];
 const ESXI_VERSIONS = ['8.0.3', '8.0.2', '8.0.1', '7.0.3', '7.0.2', '6.7.0'];
+// Host hardware vendor/model mix.
+const HW = [
+  { vendor: 'Dell Inc.', model: 'PowerEdge R760' },
+  { vendor: 'Dell Inc.', model: 'PowerEdge R750' },
+  { vendor: 'Dell Inc.', model: 'PowerEdge R740' },
+  { vendor: 'HPE', model: 'ProLiant DL380 Gen11' },
+  { vendor: 'HPE', model: 'ProLiant DL360 Gen10' },
+  { vendor: 'Lenovo', model: 'ThinkSystem SR650 V3' },
+  { vendor: 'Cisco Systems Inc', model: 'UCSC-C240-M6' },
+  { vendor: 'Supermicro', model: 'SYS-220U-TNR' },
+];
 const HBA_FC = [
   { model: 'Emulex LPe35002 32Gb FC', speeds: [32, 16] },
   { model: 'QLogic QLE2772 32Gb FC', speeds: [32, 32] },
@@ -258,6 +269,8 @@ export function generateSnapshot() {
         vmCount: vmsOnHost.length,
         cpuThreads: h.cpuCores * 2, // logical cores (hyper-threaded)
         version: ESXI_VERSIONS[(h.idx + site.id.length) % ESXI_VERSIONS.length],
+        vendor: HW[(h.idx + site.id.length) % HW.length].vendor,
+        model: HW[(h.idx + site.id.length) % HW.length].model,
         hbas: mkHbas(h.idx),
         gpus: mkGpus(h.idx, site),
         // approximate host power draw (W): idle baseline + per-core + load-dependent

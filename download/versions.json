@@ -1,17 +1,17 @@
 {
-  "latest": "1.12.0",
+  "latest": "1.13.0",
   "versions": [
     {
-      "version": "1.12.0",
-      "tar_gz": "vmware-portal-1.12.0.tar.gz",
-      "size_bytes": 1706811,
-      "sha256": "c04d94e845dcdbf12d02bf37cf83356a6d662d8761b37beaa1cdb1fc8d45b858",
-      "installer": "vmware-portal-offline-1.12.0-el9-x64.tar.gz",
-      "installer_size_bytes": 58905024,
-      "installer_sha256": "208625489640588db18a5763c9f2c64b677435893a9bebd75f277be6d9b96d79",
-      "windows": "vmware-portal-win-1.12.0-x64.zip",
-      "windows_size_bytes": 40002118,
-      "windows_sha256": "e0d8e6a8dbe273025d594bbc4a19063fe26196ac3907bea72e90c6df7147137e"
+      "version": "1.13.0",
+      "tar_gz": "vmware-portal-1.13.0.tar.gz",
+      "size_bytes": 1707853,
+      "sha256": "415e02849402dc07fbdaa879654c901be778ee0784831e9aa0237c2bf8f14cb9",
+      "installer": "vmware-portal-offline-1.13.0-el9-x64.tar.gz",
+      "installer_size_bytes": 58901914,
+      "installer_sha256": "3b9d1bb5e7c939b68789d724ecd994e49a2ebaf650a8f61ca2d2e1baca59a370",
+      "windows": "vmware-portal-win-1.13.0-x64.zip",
+      "windows_size_bytes": 40002995,
+      "windows_sha256": "d0639238bf4647987a17e1001af58c9a9205afd7fb572c0de11036ec140ae20f"
     }
   ]
 }

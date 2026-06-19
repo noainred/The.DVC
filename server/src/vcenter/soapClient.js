@@ -472,6 +472,7 @@ export async function collectFromVCenterSoap(vc) {
         'name', 'parent', 'runtime.connectionState', 'runtime.powerState', 'runtime.inMaintenanceMode',
         'summary.hardware.numCpuCores', 'summary.hardware.numCpuThreads', 'summary.hardware.cpuMhz', 'summary.hardware.memorySize',
         'summary.config.product.version', 'summary.config.product.build', 'config.graphicsInfo',
+        'summary.hardware.vendor', 'summary.hardware.model',
         'summary.quickStats.overallCpuUsage', 'summary.quickStats.overallMemoryUsage'] },
       { type: 'VirtualMachine', paths: [
         'name', 'runtime.host', 'parent', 'runtime.powerState', 'summary.config.numCpu', 'summary.config.memorySizeMB',
@@ -532,6 +533,8 @@ export async function collectFromVCenterSoap(vc) {
         version: p['summary.config.product.version'] || '',
         build: p['summary.config.product.build'] || '',
         gpus: parseGpus(p['config.graphicsInfo']),
+        vendor: p['summary.hardware.vendor'] || '',
+        model: p['summary.hardware.model'] || '',
         vmCount: 0,
       };
       hosts.push(host);
