@@ -284,7 +284,13 @@ export async function fetchRemoteVersions(base, { token, timeout = 10_000 } = {}
     if (!res.ok) return [null, `versions.json HTTP ${res.status}`];
     return [await res.json(), null];
   } catch (err) {
-    return [null, `failed to read versions: ${err.message}`];
+    const code = err?.cause?.code || err?.code || '';
+    const offline = /ENOTFOUND|EAI_AGAIN|ETIMEDOUT|ENETUNREACH|EHOSTUNREACH|ECONNREFUSED|UND_ERR/i
+      .test(`${err?.message} ${code} ${err?.cause?.message || ''}`);
+    const base = `원격 소스(versions.json) 접속 실패: ${err.message}`;
+    return [null, offline
+      ? `${base} — 폐쇄망(오프라인) 서버는 인터넷 업그레이드가 불가합니다. '감시 폴더'에 업그레이드 번들을 넣어 적용하세요.`
+      : base];
   }
 }
 
