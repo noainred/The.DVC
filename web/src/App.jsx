@@ -17,8 +17,8 @@ import ErrorBoundary from './components/ErrorBoundary.jsx';
 
 const TABS = [
   { id: 'overview', label: '개요' },
-  { id: 'summary', label: '통합 서머리' },
-  { id: 'vcenters', label: 'vCenter' },
+  { id: 'summary', label: 'Summary' },
+  { id: 'vcenters', label: '가상화 자원' },
   { id: 'explore', label: '탐색·랭킹' },
   { id: 'hosts', label: '호스트' },
   { id: 'vms', label: '가상머신' },
