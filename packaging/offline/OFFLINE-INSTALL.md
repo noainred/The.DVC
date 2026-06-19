@@ -18,9 +18,37 @@ vmware-portal-offline-<버전>-el9-x64/
 └── README.md               # (이 문서)
 ```
 
+## 패키지 만들기
+
+설치는 항상 오프라인입니다. 패키지(tarball)를 만드는 방법은 두 가지입니다.
+
+### A. 인터넷 되는 곳에서 빌드 (가장 간단)
+
+```bash
+packaging/offline/build-package.sh
+# → dist-offline/vmware-portal-offline-<버전>-el9-x64.tar.gz
+```
+
+### B. 인터넷이 전혀 없는 곳에서 빌드 (air-gapped 빌드 호스트)
+
+미리 두 가지만 준비하면 네트워크 없이도 패키지를 만들 수 있습니다:
+
+1. Node.js 런타임 압축본을 미리 받아 복사:
+   `https://nodejs.org/dist/v22.20.0/node-v22.20.0-linux-x64.tar.xz`
+2. 의존성이 포함된 저장소(온라인에서 `npm run install:all` 1회 실행 → `node_modules` 포함).
+
+그런 다음 네트워크 없이:
+
+```bash
+packaging/offline/build-package.sh --offline \
+  --node-tarball /경로/node-v22.20.0-linux-x64.tar.xz
+```
+
+> 인터넷이 어디에도 없다면 빌드 과정 없이 **미리 빌드된 tarball을 받아** 바로 설치하면 됩니다.
+
 ## 설치
 
-1. 인터넷 되는 곳에서 만든 tarball을 USB/내부망으로 Rocky 9 서버에 복사합니다.
+1. tarball을 USB/내부망으로 Rocky 9 서버에 복사합니다.
 2. 압축을 풀고 설치 스크립트를 실행합니다(root 필요):
 
 ```bash
