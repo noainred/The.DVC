@@ -120,6 +120,13 @@ sudo ./install.sh --port 4000
    DATA_SOURCE=auto  npm start     # 실패한 vCenter는 목 데이터로 대체(데모/혼합용)
    ```
 
+> **메트릭 수집 방식**: 호스트/VM의 CPU·메모리 **용량과 실시간 사용률**, 데이터스토어
+> 사용량은 vSphere **REST 목록 API로는 제공되지 않으므로**, 기본적으로 vim25 **SOAP API**
+> (`/sdk`, PropertyCollector)로 수집합니다. vCenter의 SOAP 포트(443)와 모니터링 계정의
+> 읽기 권한이 필요합니다. SOAP 연결 실패 시 자동으로 REST 목록 API로 폴백합니다
+> (이 경우 호스트 CPU/메모리 사용률은 표시되지 않을 수 있습니다). `VC_SOAP_METRICS=false`
+> 로 끌 수 있습니다.
+
 ### 환경변수
 
 | 변수 | 기본값 | 설명 |
@@ -128,6 +135,7 @@ sudo ./install.sh --port 4000
 | `DATA_SOURCE` | `mock` | `mock` / `live` / `auto` |
 | `POLL_INTERVAL_MS` | `30000` | vCenter 폴링 주기(ms) |
 | `VC_TLS_REJECT_UNAUTHORIZED` | `false` | 사설 vCenter 자체서명 인증서 거부 여부 (`true`면 검증) |
+| `VC_SOAP_METRICS` | `true` | 호스트/VM 실측 메트릭을 vim25 SOAP로 수집(끄면 REST만 사용 — CPU/메모리 사용률 미수집) |
 | `AUTH_ENABLED` | `true` | 로그인 인증 사용 여부 (`false`면 인증 없이 접근) |
 | `AUTH_SECRET` | (랜덤) | JWT 서명 시크릿. **운영 환경에서는 반드시 지정** (미지정 시 재시작마다 토큰 무효화) |
 | `AUTH_TOKEN_TTL` | `8h` | 세션 토큰 유효기간 (`30m`, `8h`, `7d`, 또는 초) |

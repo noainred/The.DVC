@@ -20,6 +20,8 @@ export const config = {
   pollIntervalMs: Number(process.env.POLL_INTERVAL_MS) || 30_000,
   // Allow self-signed vCenter certificates (common in private DCs).
   rejectUnauthorized: process.env.VC_TLS_REJECT_UNAUTHORIZED === 'true',
+  // Use the vim25 SOAP API for real host/VM metrics (default on; REST is a fallback).
+  vcSoapMetrics: process.env.VC_SOAP_METRICS !== 'false',
   // Directory of the built web client to serve in production (optional).
   webDist: path.resolve(ROOT, '..', 'web', 'dist'),
   auth: {
