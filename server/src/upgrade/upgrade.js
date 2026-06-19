@@ -138,6 +138,9 @@ export function applyPackage(members, installDir) {
 
   const hadOld = fs.existsSync(target);
   if (hadOld) fs.renameSync(target, backup);     // current -> backup (same fs, atomic)
+  // Carry user data/config over so an upgrade never wipes registered vCenters,
+  // users, or saved upgrade settings (these live inside the app dir).
+  if (hadOld) preserveUserConfig(backup, staging);
   try {
     fs.renameSync(staging, target);              // new -> place
   } catch (err) {
@@ -146,6 +149,26 @@ export function applyPackage(members, installDir) {
     throw err;
   }
   return hadOld ? backup : '';
+}
+
+// User-owned files that must survive an upgrade (kept out of the bundle).
+const PRESERVE_PATHS = [
+  'server/config/vcenters.json',
+  'server/config/users.json',
+  'server/config/upgrade.json',
+];
+
+/** Copy preserved config from the old install (backup) into the new one (staging). */
+function preserveUserConfig(fromDir, toDir) {
+  for (const rel of PRESERVE_PATHS) {
+    try {
+      const src = path.join(fromDir, rel);
+      if (!fs.existsSync(src)) continue;
+      const dst = path.join(toDir, rel);
+      fs.mkdirSync(path.dirname(dst), { recursive: true });
+      fs.copyFileSync(src, dst);
+    } catch { /* best effort — never block the upgrade on this */ }
+  }
 }
 
 /* ----------------------------- high-level apply --------------------------- */
