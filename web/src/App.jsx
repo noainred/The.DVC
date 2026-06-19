@@ -10,12 +10,8 @@ import Explore from './views/Explore.jsx';
 import VCenters from './views/VCenters.jsx';
 import Summary from './views/Summary.jsx';
 import Upgrade from './views/Upgrade.jsx';
-import VCenterAdmin from './views/VCenterAdmin.jsx';
-import IdracAdmin from './views/IdracAdmin.jsx';
-import Collectors from './views/Collectors.jsx';
-import AgentScans from './views/AgentScans.jsx';
+import Settings from './views/Settings.jsx';
 import SpecialTools from './views/SpecialTools.jsx';
-import Diagnostics from './views/Diagnostics.jsx';
 import Login from './views/Login.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 
@@ -30,11 +26,7 @@ const TABS = [
   { id: 'networks', label: '네트워크' },
   { id: 'alarms', label: '알람' },
   { id: 'tools', label: '특수 기능' },
-  { id: 'vcenter-admin', label: 'vCenter 관리', adminOnly: true, secret: true },
-  { id: 'idrac-admin', label: '전력 수집', adminOnly: true, secret: true },
-  { id: 'collectors', label: '수집 서버', adminOnly: true, secret: true },
-  { id: 'agent-scans', label: '에이전트 작업', adminOnly: true, secret: true },
-  { id: 'diagnostics', label: '진단·로그', adminOnly: true, secret: true },
+  { id: 'settings', label: '설정', adminOnly: true },
   { id: 'upgrade', label: '업그레이드', adminOnly: true, feature: 'upgradeTab' },
 ];
 
@@ -148,21 +140,11 @@ function Portal({ user, onLogout }) {
   const [egg, setEgg] = useState(false);
   const bumpEgg = () => setEggClicks((n) => { const m = n + 1; if (m >= 30) { setEgg(true); return 0; } return m; });
 
-  // Hidden admin tabs (vCenter 관리 / 진단·로그) revealed by clicking the version badge 33 times.
-  const [secretClicks, setSecretClicks] = useState(0);
-  const [secretRevealed, setSecretRevealed] = useState(false);
-  const bumpSecret = () => setSecretClicks((n) => {
-    const m = n + 1;
-    if (m >= 33) { setSecretRevealed(true); return 0; }
-    return m;
-  });
-
   // Hide admin-only tabs from other roles, and feature-gated tabs (e.g. 업그레이드)
   // unless the server enables them.
   const visibleTabs = TABS.filter((t) => {
     if (t.adminOnly && user.role !== 'admin') return false;
     if (t.feature && !health?.features?.[t.feature]) return false;
-    if (t.secret && !secretRevealed) return false;
     return true;
   });
 
@@ -185,7 +167,7 @@ function Portal({ user, onLogout }) {
   }, [vcenterId, region]);
 
 
-  const noFilterTabs = ['overview', 'vcenters', 'summary', 'upgrade', 'tools', 'vcenter-admin', 'idrac-admin', 'collectors', 'agent-scans', 'diagnostics'];
+  const noFilterTabs = ['overview', 'vcenters', 'summary', 'upgrade', 'tools', 'settings'];
   const showFilters = !noFilterTabs.includes(tab);
   const showTextSearch = tab !== 'explore';
 
@@ -198,7 +180,7 @@ function Portal({ user, onLogout }) {
           <div className="logo" onClick={bumpEgg} style={{ cursor: 'pointer' }}>V</div>
           <div>
             <h1 className="brand-title">The Davinci<br />Virtual Platform</h1>
-            {health?.version && <span className="ver-badge brand-ver" onClick={bumpSecret} style={{ cursor: 'pointer' }} title="">v{health.version}</span>}
+            {health?.version && <span className="ver-badge brand-ver">v{health.version}</span>}
           </div>
         </div>
         <nav className="tabs">
@@ -278,11 +260,7 @@ function Portal({ user, onLogout }) {
           {tab === 'networks' && <Networks filters={filters} />}
           {tab === 'alarms' && <Alarms filters={filters} />}
           {tab === 'tools' && <SpecialTools />}
-          {tab === 'vcenter-admin' && user.role === 'admin' && secretRevealed && <VCenterAdmin />}
-          {tab === 'idrac-admin' && user.role === 'admin' && secretRevealed && <IdracAdmin />}
-          {tab === 'collectors' && user.role === 'admin' && secretRevealed && <Collectors />}
-          {tab === 'agent-scans' && user.role === 'admin' && secretRevealed && <AgentScans />}
-          {tab === 'diagnostics' && user.role === 'admin' && secretRevealed && <Diagnostics />}
+          {tab === 'settings' && user.role === 'admin' && <Settings />}
           {tab === 'upgrade' && user.role === 'admin' && health?.features?.upgradeTab && <Upgrade />}
         </ErrorBoundary>
       </main>
