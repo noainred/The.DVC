@@ -2,8 +2,22 @@ import { Router } from 'express';
 import { store } from '../store.js';
 import { currentVersion, config } from '../config.js';
 import { loadUiSettings, saveUiSettings } from '../ui-settings.js';
+import { hostPower } from '../idrac/service.js';
 
 export const api = Router();
+
+// Real iDRAC power for one host (current + history). Used by the host detail
+// popup. ?name=<esxi host name>&hours=24
+api.get('/idrac/host-power', async (req, res) => {
+  const name = req.query.name;
+  if (!name) return res.status(400).json({ matched: false, reason: 'name이 필요합니다.' });
+  try {
+    const hours = Math.min(720, Math.max(1, Number(req.query.hours) || 24));
+    res.json(await hostPower(String(name), { hours }));
+  } catch (err) {
+    res.status(500).json({ matched: false, reason: err.message });
+  }
+});
 
 /** Apply common query filters (?vcenterId=, ?region=, ?q=) to a collection. */
 function applyFilters(items, query, snap, searchFields = ['name']) {

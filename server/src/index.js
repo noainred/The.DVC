@@ -12,6 +12,7 @@ import { authMiddleware } from './auth/auth.js';
 import { upgradeRouter } from './routes/upgrade.js';
 import { upgradeManager } from './upgrade/manager.js';
 import { adminRouter } from './routes/admin.js';
+import { startIdracPoller } from './idrac/poller.js';
 
 const app = express();
 app.use(cors());
@@ -56,6 +57,7 @@ if (fs.existsSync(config.webDist)) {
 
 store.start();
 upgradeManager.start();
+startIdracPoller();
 
 app.listen(config.port, () => {
   console.log(`\n  VMware Global Monitoring Portal — API`);

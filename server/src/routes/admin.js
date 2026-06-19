@@ -8,6 +8,11 @@ import {
   listRegistry, addVcenter, updateVcenter, removeVcenter, testConnection, importVcenters,
 } from '../vcenter/registry.js';
 import { geocode } from '../vcenter/geocode.js';
+import {
+  listRegistry as listServers, addServer, updateServer, removeServer,
+  testServer, importServers, parseCsv,
+} from '../idrac/registry.js';
+import { getPollerStatus, pollNow } from '../idrac/poller.js';
 
 export const adminRouter = Router();
 
@@ -102,6 +107,53 @@ adminRouter.post('/vcenters/import-file', adminOnly, (req, res) => {
   } catch (err) {
     res.status(400).json({ ok: false, reason: `파일 읽기 실패: ${err.message}` });
   }
+});
+
+// ---- iDRAC power collection (Dell Redfish) --------------------------------
+
+// List registered Dell servers (credentials redacted) + poller status.
+adminRouter.get('/idrac', adminOnly, (_req, res) => {
+  res.json({ servers: listServers(), poller: getPollerStatus() });
+});
+
+// Register a server, then poll immediately so power shows up right away.
+adminRouter.post('/idrac', adminOnly, async (req, res) => {
+  const result = addServer(req.body || {});
+  if (result.ok) pollNow().catch(() => {});
+  res.status(result.ok ? 201 : 400).json(result);
+});
+
+adminRouter.put('/idrac/:id', adminOnly, async (req, res) => {
+  const result = updateServer(req.params.id, req.body || {});
+  if (result.ok) pollNow().catch(() => {});
+  res.status(result.ok ? 200 : 400).json(result);
+});
+
+adminRouter.delete('/idrac/:id', adminOnly, async (req, res) => {
+  const result = removeServer(req.params.id);
+  res.status(result.ok ? 200 : 404).json(result);
+});
+
+// Test connectivity + read current power for a server (new or saved by id).
+adminRouter.post('/idrac/test', adminOnly, async (req, res) => {
+  res.json(await testServer(req.body || {}));
+});
+
+// Trigger an immediate poll of all servers.
+adminRouter.post('/idrac/poll', adminOnly, async (_req, res) => {
+  res.json({ ok: true, lastRun: await pollNow() });
+});
+
+// Import servers (JSON array / { servers:[...] } / CSV text). Body:
+//   { servers:[...], mode? } | { csv:"...", mode? } | bare array
+adminRouter.post('/idrac/import', adminOnly, (req, res) => {
+  const body = req.body || {};
+  let list;
+  if (typeof body.csv === 'string') list = parseCsv(body.csv);
+  else list = Array.isArray(body) ? body : body.servers;
+  const result = importServers(list, body.mode === 'replace' ? 'replace' : 'merge');
+  if (result.ok) pollNow().catch(() => {});
+  res.status(result.ok ? 200 : 400).json(result);
 });
 
 function existsFile(p) {

@@ -1,0 +1,215 @@
+import React, { useEffect, useRef, useState } from 'react';
+import { fetchJson, postJson, putJson, delJson } from '../api.js';
+import { Loading, ErrorBox } from '../components/ui.jsx';
+
+const EMPTY = { id: '', name: '', host: '', username: 'root', password: '', serviceTag: '', hostNames: '', enabled: true };
+
+export default function IdracAdmin() {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState(null);
+  const [form, setForm] = useState(null);
+  const [editing, setEditing] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [importMsg, setImportMsg] = useState(null);
+  const [replaceMode, setReplaceMode] = useState(false);
+  const fileRef = useRef(null);
+
+  const load = async () => {
+    try { setData(await fetchJson('/admin/idrac')); setError(null); }
+    catch (e) { setError(e.message); }
+  };
+  useEffect(() => {
+    load();
+    const t = setInterval(load, 30_000); // refresh current power/poller status
+    return () => clearInterval(t);
+  }, []);
+
+  if (error) return <ErrorBox message={error} />;
+  if (!data) return <Loading />;
+
+  const openAdd = () => { setEditing(false); setForm({ ...EMPTY }); setMsg(null); };
+  const openEdit = (s) => {
+    setEditing(true);
+    setForm({ ...EMPTY, ...s, password: '', hostNames: (s.hostNames || []).join(', ') });
+    setMsg(null);
+  };
+  const close = () => { setForm(null); setMsg(null); };
+  const setF = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const save = async () => {
+    setBusy(true); setMsg(null);
+    try {
+      const payload = { ...form, hostNames: form.hostNames };
+      const r = editing ? await putJson(`/admin/idrac/${encodeURIComponent(form.id)}`, payload) : await postJson('/admin/idrac', payload);
+      if (r.ok) { await load(); close(); }
+      else setMsg({ ok: false, text: r.reason });
+    } catch (e) { setMsg({ ok: false, text: e.message }); }
+    finally { setBusy(false); }
+  };
+
+  const test = async () => {
+    setBusy(true); setMsg(null);
+    try {
+      const r = await postJson('/admin/idrac/test', form);
+      setMsg(r.ok
+        ? { ok: true, text: `연결 성공 (${r.ms}ms) · 현재 ${r.watts != null ? `${r.watts} W` : '—'}${r.model ? ` · ${r.model}` : ''}${r.serviceTag ? ` · ${r.serviceTag}` : ''}` }
+        : { ok: false, text: `연결 실패: ${r.reason}${r.hint ? ` (${r.hint})` : ''}` });
+    } catch (e) { setMsg({ ok: false, text: e.message }); }
+    finally { setBusy(false); }
+  };
+
+  const remove = async (s) => {
+    if (!window.confirm(`'${s.name}' (${s.id}) 을(를) 삭제할까요?`)) return;
+    try { await delJson(`/admin/idrac/${encodeURIComponent(s.id)}`); await load(); }
+    catch (e) { setError(e.message); }
+  };
+
+  const pollNow = async () => {
+    setBusy(true);
+    try { await postJson('/admin/idrac/poll', {}); await load(); }
+    catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  };
+
+  const onImportFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setImportMsg(null);
+    try {
+      const text = await file.text();
+      let body;
+      if (file.name.endsWith('.csv')) body = { csv: text, mode: replaceMode ? 'replace' : 'merge' };
+      else {
+        const json = JSON.parse(text);
+        const servers = Array.isArray(json) ? json : json.servers;
+        if (!Array.isArray(servers)) throw new Error('servers 배열이 없습니다.');
+        body = { servers, mode: replaceMode ? 'replace' : 'merge' };
+      }
+      const r = await postJson('/admin/idrac/import', body);
+      setImportMsg(r.ok
+        ? { ok: true, text: `불러오기 완료 — 추가 ${r.added}, 갱신 ${r.updated}, 건너뜀 ${r.skipped.length} (총 ${r.total})`, skipped: r.skipped }
+        : { ok: false, text: r.reason });
+      await load();
+    } catch (err) { setImportMsg({ ok: false, text: `불러오기 실패: ${err.message}` }); }
+  };
+
+  const list = data.servers || [];
+  const poller = data.poller || {};
+  const lastResults = poller.lastRun?.results || [];
+  const wattsById = Object.fromEntries(lastResults.map((r) => [r.id, r]));
+  const fmtW = (w) => (w != null ? `${(w / 1000).toFixed(2)} kW (${w} W)` : '—');
+
+  return (
+    <>
+      <div className="flex between wrap gap" style={{ marginBottom: 6 }}>
+        <div className="section-title" style={{ margin: '6px 0' }}>전력 수집 — Dell iDRAC (관리자)</div>
+        <div className="flex gap" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+          <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12 }} title="체크 시 기존 목록을 모두 교체">
+            <input type="checkbox" checked={replaceMode} onChange={(e) => setReplaceMode(e.target.checked)} /> 전체 교체
+          </label>
+          <input ref={fileRef} type="file" accept=".json,.csv,application/json,text/csv" style={{ display: 'none' }} onChange={onImportFile} />
+          <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={() => fileRef.current?.click()}>파일 업로드(JSON/CSV)</button>
+          <button className="logout-btn" style={{ padding: '9px 14px' }} disabled={busy} onClick={pollNow}>지금 수집</button>
+          <button className="login-btn" style={{ flex: 'none', padding: '9px 16px' }} onClick={openAdd}>+ 서버 추가</button>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginBottom: 12, padding: '10px 14px' }}>
+        <div className="muted" style={{ fontSize: 12, lineHeight: 1.7 }}>
+          Dell 서버의 iDRAC(Redfish)에 접속해 <b>실시간 소비전력(W)</b>을 {Math.round((poller.intervalMs || 60000) / 1000)}초마다 수집해 DB에 저장합니다.
+          <b>호스트 이름</b>(ESXi 호스트명)을 입력하면 호스트 클릭 시 해당 서버 전력이 표시됩니다.
+          {poller.lastRun && <> · 최근 수집: {new Date(poller.lastRun.at).toLocaleString('ko-KR')} (성공 {poller.lastRun.ok}/{poller.lastRun.ok + poller.lastRun.failed})</>}
+        </div>
+      </div>
+
+      {importMsg && (
+        <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 8, fontSize: 13,
+          background: importMsg.ok ? 'rgba(34,197,94,.12)' : 'rgba(239,68,68,.12)',
+          color: importMsg.ok ? '#4ade80' : '#f87171' }}>
+          {importMsg.text}
+          {importMsg.skipped?.length > 0 && (
+            <ul style={{ margin: '6px 0 0', paddingLeft: 18, color: 'var(--amber)' }}>
+              {importMsg.skipped.slice(0, 8).map((s, i) => <li key={i}>{s.id}: {s.reason}</li>)}
+            </ul>
+          )}
+        </div>
+      )}
+
+      <div className="table-wrap">
+        <table>
+          <thead><tr>
+            <th>ID</th><th>이름</th><th>iDRAC 주소</th><th>계정</th><th>매핑 호스트</th><th>현재 전력</th><th>상태</th><th className="right">작업</th>
+          </tr></thead>
+          <tbody>
+            {list.length === 0 && <tr><td colSpan={8} className="center muted" style={{ padding: 28 }}>등록된 서버가 없습니다. “+ 서버 추가”로 등록하세요.</td></tr>}
+            {list.map((s) => {
+              const r = wattsById[s.id];
+              return (
+                <tr key={s.id}>
+                  <td><b>{s.id}</b></td>
+                  <td>{s.name}</td>
+                  <td className="muted">{s.host?.replace(/^https?:\/\//, '')}</td>
+                  <td className="muted">{s.username}</td>
+                  <td className="muted">{(s.hostNames || []).join(', ') || <span className="badge gray">미지정</span>}</td>
+                  <td className="tabular">{r?.watts != null ? fmtW(r.watts) : (r?.error ? <span className="badge red" title={r.error}>오류</span> : '—')}</td>
+                  <td>{s.enabled === false ? <span className="badge gray">중지</span> : <span className="badge green">수집</span>}</td>
+                  <td className="right nowrap">
+                    <button className="tab" onClick={() => openEdit(s)}>수정</button>
+                    <button className="tab" style={{ color: 'var(--red)' }} onClick={() => remove(s)}>삭제</button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {form && (
+        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) close(); }}>
+          <div className="modal card">
+            <div className="flex between" style={{ marginBottom: 12 }}>
+              <b style={{ fontSize: 15 }}>{editing ? `서버 수정 — ${form.id}` : '새 Dell 서버 등록'}</b>
+              <button className="logout-btn" onClick={close}>닫기</button>
+            </div>
+            <div className="spec-grid">
+              <label>ID *<input className="input" value={form.id} onChange={setF('id')} disabled={editing} placeholder="srv-seoul-01" /></label>
+              <label>서버 이름 *<input className="input" value={form.name} onChange={setF('name')} placeholder="ESXi-SEOUL-01" /></label>
+              <label style={{ gridColumn: '1 / -1' }}>iDRAC 주소 *<input className="input" value={form.host} onChange={setF('host')} placeholder="10.0.0.21  또는  https://idrac-seoul-01.corp.local" /></label>
+              <label>계정 *<input className="input" value={form.username} onChange={setF('username')} placeholder="root" /></label>
+              <label>비밀번호 {editing && <span className="muted">(비우면 유지)</span>}<input className="input" type="password" value={form.password} onChange={setF('password')} placeholder={editing ? '••••••' : ''} /></label>
+              <label>서비스 태그<input className="input" value={form.serviceTag} onChange={setF('serviceTag')} placeholder="(선택) 자동 조회됨" /></label>
+              <label>수집 여부
+                <select className="select" value={form.enabled ? '1' : '0'} onChange={(e) => setForm((f) => ({ ...f, enabled: e.target.value === '1' }))}>
+                  <option value="1">수집</option>
+                  <option value="0">중지</option>
+                </select>
+              </label>
+              <label style={{ gridColumn: '1 / -1' }}>매핑 ESXi 호스트 이름 (쉼표로 여러 개)
+                <input className="input" value={form.hostNames} onChange={setF('hostNames')} placeholder="esxi-seoul-01.corp.local, 10.0.0.21" />
+              </label>
+            </div>
+
+            {msg && (
+              <div style={{ marginTop: 12, padding: '9px 12px', borderRadius: 8, fontSize: 13,
+                background: msg.ok ? 'rgba(34,197,94,.12)' : 'rgba(239,68,68,.12)',
+                color: msg.ok ? '#4ade80' : '#f87171' }}>{msg.text}</div>
+            )}
+
+            <div className="flex gap" style={{ marginTop: 16 }}>
+              <button className="login-btn" style={{ flex: 'none', padding: '10px 18px' }} disabled={busy} onClick={save}>
+                {busy ? '저장 중…' : (editing ? '저장' : '등록')}
+              </button>
+              <button className="logout-btn" style={{ padding: '10px 18px' }} disabled={busy} onClick={test}>연결/전력 테스트</button>
+            </div>
+            <div className="muted" style={{ marginTop: 10, fontSize: 12 }}>
+              매핑 호스트 이름은 대시보드의 ESXi 호스트 이름과 일치해야 합니다(대소문자 무시). 자격증명은 서버
+              <code> $CONFIG_DIR/idrac.json</code>(0600)에만 저장됩니다.
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
