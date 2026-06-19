@@ -1,17 +1,17 @@
 {
-  "latest": "1.5.1",
+  "latest": "1.6.0",
   "versions": [
     {
-      "version": "1.5.1",
-      "tar_gz": "vmware-portal-1.5.1.tar.gz",
-      "size_bytes": 1346942,
-      "sha256": "f1a8f37febd7c33445dc2630f7b874f0856949ecff03b717058529120d9f9c87",
-      "installer": "vmware-portal-offline-1.5.1-el9-x64.tar.gz",
-      "installer_size_bytes": 58532830,
-      "installer_sha256": "ba608f101031b5ad6743f0830851963680cad605f1ee518da39a64ad0a7fb1af",
-      "windows": "vmware-portal-win-1.5.1-x64.zip",
-      "windows_size_bytes": 39380964,
-      "windows_sha256": "42f63858a92e39ba7f1b5855f512e7fcba8d42d118f78d9cd5e47cbb30f16c3e"
+      "version": "1.6.0",
+      "tar_gz": "vmware-portal-1.6.0.tar.gz",
+      "size_bytes": 1350703,
+      "sha256": "4ec40e26c519ea10269bb01d6f774299daaf63d219cf1c8c423395c487d8e0c3",
+      "installer": "vmware-portal-offline-1.6.0-el9-x64.tar.gz",
+      "installer_size_bytes": 58536051,
+      "installer_sha256": "f22c69c7be1ced2a001cc24e77276fd6e0fa1d3277b827169e511b913e5c947e",
+      "windows": "vmware-portal-win-1.6.0-x64.zip",
+      "windows_size_bytes": 39384877,
+      "windows_sha256": "be6bb7cd01e8b65b33805c14f2ed9d50c0d16c3596400102962aa179c5d9eac6"
     }
   ]
 }

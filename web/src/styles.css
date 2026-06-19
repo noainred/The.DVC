@@ -361,3 +361,19 @@ tbody tr:last-child td { border-bottom: none; }
 .vc-counts .vc-count b { font-size: 18px; font-weight: 800; }
 .vc-counts .vc-count span { color: var(--text-dim); display: block; }
 .vc-foot { display: flex; justify-content: space-between; align-items: center; font-size: 12px; border-top: 1px solid var(--border); padding-top: 10px; }
+
+/* vCenter detail (vSphere-like inventory) */
+.vcd-views { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.vcd-tree { padding: 10px 12px; }
+.vcd-node { display: flex; align-items: center; gap: 6px; padding: 5px 6px; border-radius: 6px; cursor: pointer; font-size: 13px; white-space: nowrap; }
+.vcd-node:hover { background: rgba(59,130,246,.08); }
+.vcd-root { font-size: 14px; }
+.vcd-leaf { cursor: pointer; }
+.vcd-caret { display: inline-block; width: 14px; color: var(--text-dim); text-align: center; flex: none; }
+.vcd-children { margin-left: 16px; border-left: 1px solid rgba(36,48,73,.6); padding-left: 6px; }
+.vcd-nlabel { font-weight: 600; }
+.vcd-sub { color: var(--text-faint); font-size: 11px; margin-left: 6px; }
+.vcd-link { color: #cfe0ff; cursor: pointer; }
+.vcd-link:hover { color: var(--accent-2); text-decoration: underline; }
+.vcd-row { cursor: pointer; }
+.vcd-row:hover td { background: rgba(59,130,246,.06); }
