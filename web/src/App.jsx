@@ -13,6 +13,7 @@ import Upgrade from './views/Upgrade.jsx';
 import VCenterAdmin from './views/VCenterAdmin.jsx';
 import Diagnostics from './views/Diagnostics.jsx';
 import Login from './views/Login.jsx';
+import ErrorBoundary from './components/ErrorBoundary.jsx';
 
 const TABS = [
   { id: 'overview', label: '개요' },
@@ -73,7 +74,16 @@ export default function App() {
     return <div className="login-screen"><div className="loading">불러오는 중…</div></div>;
   }
   if (!user) return <Login onSuccess={setUser} />;
-  return <Portal user={user} onLogout={logout} />;
+  return (
+    <ErrorBoundary fallback={
+      <div className="login-screen"><div className="error-box">
+        <div style={{ fontWeight: 700, marginBottom: 8 }}>화면을 표시하는 중 오류가 발생했습니다.</div>
+        <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} onClick={() => window.location.reload()}>새로고침</button>
+      </div></div>
+    }>
+      <Portal user={user} onLogout={logout} />
+    </ErrorBoundary>
+  );
 }
 
 function Portal({ user, onLogout }) {
@@ -248,18 +258,20 @@ function Portal({ user, onLogout }) {
           </div>
         )}
 
-        {tab === 'overview' && <Overview onSelectSite={selectSite} onGotoTab={setTab} />}
-        {tab === 'summary' && <Summary scope={scope} onGotoTab={setTab} />}
-        {tab === 'vcenters' && <VCenters onSelectSite={selectSite} />}
-        {tab === 'explore' && <Explore scope={scope} />}
-        {tab === 'hosts' && <Hosts filters={filters} />}
-        {tab === 'vms' && <Vms filters={filters} />}
-        {tab === 'datastores' && <Datastores filters={filters} />}
-        {tab === 'networks' && <Networks filters={filters} />}
-        {tab === 'alarms' && <Alarms filters={filters} />}
-        {tab === 'vcenter-admin' && user.role === 'admin' && secretRevealed && <VCenterAdmin />}
-        {tab === 'diagnostics' && user.role === 'admin' && secretRevealed && <Diagnostics />}
-        {tab === 'upgrade' && user.role === 'admin' && health?.features?.upgradeTab && <Upgrade />}
+        <ErrorBoundary key={tab}>
+          {tab === 'overview' && <Overview onSelectSite={selectSite} onGotoTab={setTab} />}
+          {tab === 'summary' && <Summary scope={scope} onGotoTab={setTab} />}
+          {tab === 'vcenters' && <VCenters onSelectSite={selectSite} />}
+          {tab === 'explore' && <Explore scope={scope} />}
+          {tab === 'hosts' && <Hosts filters={filters} />}
+          {tab === 'vms' && <Vms filters={filters} />}
+          {tab === 'datastores' && <Datastores filters={filters} />}
+          {tab === 'networks' && <Networks filters={filters} />}
+          {tab === 'alarms' && <Alarms filters={filters} />}
+          {tab === 'vcenter-admin' && user.role === 'admin' && secretRevealed && <VCenterAdmin />}
+          {tab === 'diagnostics' && user.role === 'admin' && secretRevealed && <Diagnostics />}
+          {tab === 'upgrade' && user.role === 'admin' && health?.features?.upgradeTab && <Upgrade />}
+        </ErrorBoundary>
       </main>
 
       <footer className="statusbar">
