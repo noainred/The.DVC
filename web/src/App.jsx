@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { usePolling, getToken, setToken, setUnauthorizedHandler, fetchAuthConfig, fetchMe } from './api.js';
 import Overview from './views/Overview.jsx';
 import Hosts from './views/Hosts.jsx';
@@ -109,6 +109,21 @@ function Portal({ user, onLogout }) {
 
   const { data: health } = usePolling('/health', {}, 20_000);
   const { data: vcenters } = usePolling('/vcenters', {}, 60_000);
+
+  // Notify when the running version changes (an upgrade was applied + restarted).
+  const lastVerRef = useRef(null);
+  const [upToast, setUpToast] = useState(null);
+  useEffect(() => {
+    const v = health?.version;
+    if (!v) return;
+    if (lastVerRef.current === null) { lastVerRef.current = v; return; }
+    if (lastVerRef.current !== v) { lastVerRef.current = v; setUpToast(v); }
+  }, [health?.version]);
+  useEffect(() => {
+    if (!upToast) return;
+    const t = setTimeout(() => setUpToast(null), 8000);
+    return () => clearTimeout(t);
+  }, [upToast]);
 
   // Hide admin-only tabs from other roles, and feature-gated tabs (e.g. 업그레이드)
   // unless the server enables them.
@@ -253,6 +268,18 @@ function Portal({ user, onLogout }) {
         <div className="sb-cell"><span className="sb-label">전체 VM</span><span className="sb-val">{(health?.vms || 0).toLocaleString()} <small className="muted">({(health?.vmsPoweredOn || 0).toLocaleString()} On)</small></span></div>
         <div className="sb-cell"><span className="sb-label">활성 알람</span><span className="sb-val" style={{ color: health?.alarmsCritical ? 'var(--red)' : undefined }}>{(health?.alarms || 0).toLocaleString()}</span></div>
       </footer>
+
+      {upToast && (
+        <div className="up-toast">
+          <span className="up-toast-icon">⬆️</span>
+          <div className="up-toast-body">
+            <div className="up-toast-title">업그레이드 완료</div>
+            <div className="up-toast-sub">버전 <b>v{upToast}</b> 으로 업데이트되었습니다.</div>
+          </div>
+          <button className="up-toast-reload" onClick={() => window.location.reload()}>새로고침</button>
+          <button className="up-toast-x" onClick={() => setUpToast(null)} aria-label="닫기">×</button>
+        </div>
+      )}
 
       {egg && (
         <div className="egg-overlay" onClick={() => setEgg(false)}>
