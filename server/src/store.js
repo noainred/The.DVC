@@ -4,6 +4,7 @@ import { collectFromVCenter } from './vcenter/restClient.js';
 import { describeError } from './util/errors.js';
 import { latestPowerByHostName } from './idrac/service.js';
 import { applyMutes } from './alarm-mutes.js';
+import { getDataSource } from './runtime-settings.js';
 
 /**
  * Overlay real iDRAC power (Watts) onto hosts by matching the ESXi host name to
@@ -42,7 +43,8 @@ class Store {
 
   async refresh() {
     try {
-      if (config.dataSource === 'mock') {
+      const dataSource = getDataSource();
+      if (dataSource === 'mock') {
         this.snapshot = withRollups(applyAlarmMutes(await overlayIdracPower(generateSnapshot())));
         return;
       }
@@ -51,8 +53,8 @@ class Store {
       const results = await Promise.allSettled(vcenters.map((vc) => collectFromVCenter(vc)));
 
       const merged = emptySnapshot();
-      merged.source = config.dataSource;
-      const mockFallback = config.dataSource === 'auto' ? generateSnapshot() : null;
+      merged.source = dataSource;
+      const mockFallback = dataSource === 'auto' ? generateSnapshot() : null;
 
       results.forEach((r, i) => {
         const vc = vcenters[i];
@@ -113,7 +115,7 @@ function pushSite(target, source, vcId) {
 function emptySnapshot() {
   return {
     generatedAt: new Date().toISOString(),
-    source: config.dataSource,
+    source: getDataSource(),
     vcenters: [], hosts: [], vms: [], datastores: [], networks: [], alarms: [],
     collectionErrors: [],
     rollups: null,

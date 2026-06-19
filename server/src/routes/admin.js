@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import { config } from '../config.js';
 import { requireRole } from '../auth/auth.js';
 import { store } from '../store.js';
+import { getDataSource, setDataSource, isDataSourceOverridden } from '../runtime-settings.js';
 import { getLogs } from '../logbuffer.js';
 import {
   listRegistry, addVcenter, updateVcenter, removeVcenter, testConnection, importVcenters,
@@ -46,9 +47,22 @@ adminRouter.get('/status', adminOnly, (_req, res) => {
   });
 });
 
+// Read the effective data source (UI override or env default).
+adminRouter.get('/data-source', adminOnly, (_req, res) => {
+  res.json({ dataSource: getDataSource(), envDefault: config.dataSource, overridden: isDataSourceOverridden() });
+});
+
+// Switch the data source at runtime (mock | live | auto) and re-poll.
+adminRouter.put('/data-source', adminOnly, async (req, res) => {
+  const result = setDataSource((req.body || {}).dataSource);
+  if (!result.ok) return res.status(400).json(result);
+  await store.refresh().catch(() => {});
+  res.json({ ...result, overridden: isDataSourceOverridden() });
+});
+
 // List registered vCenters (credentials redacted) + current data-source mode.
 adminRouter.get('/vcenters', adminOnly, (_req, res) => {
-  res.json({ dataSource: config.dataSource, vcenters: listRegistry() });
+  res.json({ dataSource: getDataSource(), vcenters: listRegistry() });
 });
 
 // Register a new vCenter, then trigger a re-poll.

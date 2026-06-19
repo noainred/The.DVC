@@ -116,6 +116,13 @@ export default function VCenterAdmin() {
 
   const list = data.vcenters || [];
 
+  const changeSource = async (e) => {
+    const ds = e.target.value;
+    if (!window.confirm(`데이터 소스를 '${ds.toUpperCase()}' 로 전환할까요? 즉시 다시 수집합니다.`)) return;
+    try { await putJson('/admin/data-source', { dataSource: ds }); await load(); }
+    catch (err) { setError(err.message); }
+  };
+
   return (
     <>
       <div className="flex between wrap gap" style={{ marginBottom: 6 }}>
@@ -127,6 +134,18 @@ export default function VCenterAdmin() {
           <input ref={fileRef} type="file" accept=".json,application/json" style={{ display: 'none' }} onChange={onImportFile} />
           <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={() => fileRef.current?.click()}>파일 업로드</button>
           <button className="login-btn" style={{ flex: 'none', padding: '9px 16px' }} onClick={openAdd}>+ vCenter 추가</button>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginBottom: 12, padding: '12px 14px' }}>
+        <div className="flex gap wrap" style={{ alignItems: 'center' }}>
+          <span className="muted" style={{ fontSize: 12, fontWeight: 600 }}>데이터 소스</span>
+          <select className="select" value={data.dataSource} onChange={changeSource} style={{ maxWidth: 160 }}>
+            <option value="mock">MOCK (데모)</option>
+            <option value="live">LIVE (실제 vCenter)</option>
+            <option value="auto">AUTO (live+실패 시 mock)</option>
+          </select>
+          <span className="muted" style={{ fontSize: 11 }}>전환 시 즉시 재수집합니다. (환경변수 없이 포탈에서 변경)</span>
         </div>
       </div>
 

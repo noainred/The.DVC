@@ -181,6 +181,14 @@ function Portal({ user, onLogout }) {
           <div>
             <h1 className="brand-title">The Davinci<br />Virtual Platform</h1>
             {health?.version && <span className="ver-badge brand-ver">v{health.version}</span>}
+            {health?.source && (
+              <span className="ver-badge brand-ver" style={{
+                marginLeft: 6,
+                color: health.source === 'live' ? '#4ade80' : health.source === 'mock' ? '#fbbf24' : '#22d3ee',
+                background: health.source === 'live' ? 'rgba(34,197,94,.12)' : health.source === 'mock' ? 'rgba(245,158,11,.14)' : 'rgba(34,211,238,.12)',
+                borderColor: 'transparent',
+              }} title="데이터 소스">{health.source.toUpperCase()}</span>
+            )}
           </div>
         </div>
         <nav className="tabs">

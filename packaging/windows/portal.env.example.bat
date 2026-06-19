@@ -1,39 +1,51 @@
 @echo off
-rem ===========================================================================
-rem  VMware Global Monitoring Portal / Collector - Windows 환경설정
-rem  start-portal.bat 가 이 파일을 불러옵니다. 값 수정 후 서비스를 재시작하세요.
-rem ===========================================================================
+rem ==========================================================================
+rem  VMware Global Monitoring Portal / Collector - Windows environment
+rem  start-portal.bat reads this file. Edit the values, then run
+rem  install-service.ps1 (admin PowerShell).
+rem
+rem  IMPORTANT (avoid broken lines / errors):
+rem   - Save this file as ANSI (not UTF-8) with Windows CRLF line endings.
+rem   - Use ASCII-only values (letters, digits, - _ . :). No Korean in values.
+rem ==========================================================================
 
-rem --- 포트 ---
+rem --- HTTP port ---
 set PORT=4000
 
-rem --- 사용자 설정 저장 위치(앱 폴더 밖 권장: 업그레이드해도 보존) ---
+rem --- Config/data dir (kept across upgrades) ---
 set CONFIG_DIR=C:\ProgramData\vmware-portal
 
-rem --- 데이터 소스: mock | live | auto ---
+rem --- Data source: mock | live | auto ---
 set DATA_SOURCE=mock
 
-rem --- Node 내장 SQLite (iDRAC 전력 이력) 활성화. 그대로 두세요. ---
+rem --- Node built-in SQLite (iDRAC power history). Keep as-is. ---
 set NODE_OPTIONS=--experimental-sqlite
 
-rem ===========================================================================
-rem  [수집 에이전트로 쓸 때] 아래 두 값을 채우면 이 서버가 수집 에이전트가 됩니다.
-rem  COLLECTOR_TOKEN: 중앙 포탈에서 이 에이전트를 당겨올 때 사용할 공유 토큰
-rem  COLLECTOR_DATACENTER: 이 에이전트가 있는 데이터센터 이름
-rem ===========================================================================
+rem ==========================================================================
+rem  [Power-collection agent] Set a token to make this server a collector that
+rem  the central portal pulls power from. ASCII-only token.
+rem ==========================================================================
 rem set COLLECTOR_TOKEN=change-me-strong-token
 rem set COLLECTOR_DATACENTER=Seoul-DC1
 
-rem [중앙 오케스트레이션 에이전트] 중앙에서 IP 할당받아 로컬 스캔하려면:
+rem [Central-orchestrated scan agent] Pull IP assignments from the central
+rem portal by this agent name and scan locally:
 rem set AGENT_NAME=Seoul-DC1
-rem set CENTRAL_URL=http://중앙포탈:4000
+rem set CENTRAL_URL=http://central-portal:4000
 rem set CENTRAL_TOKEN=change-me-strong-token
 rem set AGENT_SCAN_INTERVAL_MS=3600000
 
-rem --- iDRAC/OME 전력 수집 주기(ms) ---
+rem --- Active Directory (LDAP) login (optional) ---
+rem set AD_ENABLED=true
+rem set AD_URL=ldaps://dc.corp.local:636
+rem set AD_DOMAIN=corp.local
+rem set AD_BASE_DN=DC=corp,DC=local
+rem set AD_ADMIN_GROUP=VMware-Portal-Admins
+
+rem --- iDRAC/OME poll interval (ms) ---
 set IDRAC_POLL_INTERVAL_MS=60000
 
-rem --- 인증 (수집 전용 서버는 AUTH_ENABLED=true 유지 권장) ---
+rem --- Auth (set AUTH_ENABLED=false to disable login) ---
 set AUTH_ENABLED=true
 rem set AUTH_SECRET=
 set DEFAULT_ADMIN_PASSWORD=admin123
