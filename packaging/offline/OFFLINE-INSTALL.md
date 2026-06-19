@@ -95,13 +95,68 @@ systemctl restart vmware-portal      # 재시작
 
 ## 업그레이드 (오프라인)
 
-새 버전도 같은 방식으로 오프라인 설치할 수 있습니다. 새 tarball을 풀고 `sudo ./install.sh`
-를 다시 실행하면 기존 앱이 `app.bak.<timestamp>` 로 백업된 뒤 교체되고 서비스가 재시작됩니다.
+빌드 시 두 가지 산출물이 나옵니다:
 
-또는 포탈 내장 **자동 업그레이드**(관리자 → 업그레이드 탭)를 쓰려면 `portal.env` 에서
-`UPGRADE_ENABLED=true`, `UPGRADE_WATCH_DIR=/opt/vmware-portal/incoming`,
-`UPGRADE_INSTALL_DIR=/opt/vmware-portal/app` 를 설정하고 새 번들
-(`vmware-portal-<버전>.tar.gz`)을 감시 폴더에 넣으세요.
+| 파일 | 용도 |
+|------|------|
+| `vmware-portal-offline-<버전>-el9-x64.tar.gz` | **설치 패키지**(런타임 포함) — 최초 설치 / 수동 재설치 |
+| `vmware-portal-<버전>.tar.gz` | **업그레이드 번들**(앱만, ~1MB) — 자동/수동 업그레이드 |
+
+> 업그레이드는 새 버전(`package.json`의 version이 더 높을 때)만 적용되며, 기존 앱은
+> `app.bak.<timestamp>` 로 백업되어 롤백할 수 있습니다.
+
+### 방법 1) 설치 패키지 재실행 (가장 단순한 수동 업그레이드)
+
+새 **설치 패키지**를 받아서 풀고 다시 설치하면 됩니다:
+
+```bash
+tar -xzf vmware-portal-offline-<새버전>-el9-x64.tar.gz
+cd vmware-portal-offline-<새버전>-el9-x64
+sudo ./install.sh --port 4000
+```
+기존 앱이 백업된 뒤 교체되고 서비스가 자동 재시작됩니다. (설정 `portal.env` 는 유지)
+
+### 방법 2) 관리자 UI로 수동 업그레이드 (새 파일 받아서 적용)
+
+1. `portal.env` 에 한 번만 설정:
+   ```
+   UPGRADE_ENABLED=true
+   UPGRADE_WATCH_DIR=/opt/vmware-portal/incoming
+   UPGRADE_INSTALL_DIR=/opt/vmware-portal/app
+   ```
+   ```bash
+   sudo mkdir -p /opt/vmware-portal/incoming
+   sudo chown vmportal:vmportal /opt/vmware-portal/incoming
+   sudo systemctl restart vmware-portal
+   ```
+2. 새 **업그레이드 번들**(`vmware-portal-<새버전>.tar.gz`)을 감시 폴더에 복사:
+   ```bash
+   sudo cp vmware-portal-<새버전>.tar.gz /opt/vmware-portal/incoming/
+   sudo chown vmportal:vmportal /opt/vmware-portal/incoming/vmware-portal-*.tar.gz
+   ```
+3. 포탈 로그인(admin) → **업그레이드** 탭 → **새 버전 확인** → **업그레이드 적용** →
+   **프로세스 재시작**. (또는 `sudo systemctl restart vmware-portal`)
+
+### 방법 3) 완전 자동 업그레이드 (감시 폴더 폴링)
+
+방법 2의 설정에 더해 자동 적용을 켭니다:
+```
+UPGRADE_ENABLED=true
+UPGRADE_WATCH_DIR=/opt/vmware-portal/incoming
+UPGRADE_INSTALL_DIR=/opt/vmware-portal/app
+UPGRADE_POLL_INTERVAL_MS=300000     # 5분마다 확인
+UPGRADE_AUTO_APPLY=true             # 새 번들 발견 시 자동 적용 + 재시작
+```
+이후에는 새 번들을 감시 폴더에 **넣기만** 하면, 폴링 주기 내에 자동으로 적용되고
+서비스가 재시작됩니다. (더 높은 버전만 적용)
+
+> 원격 자동 업그레이드: 사내 미러/웹에 `versions.json` + 번들을 두고 `UPGRADE_REMOTE_BASE`
+> (+ 사설이면 `UPGRADE_TOKEN`)를 설정하면, 감시 폴더 없이 원격에서 받아 적용합니다.
+
+### 누적된 백업 정리 (선택)
+```bash
+sudo rm -rf /opt/vmware-portal/app.bak.*    # 정상 동작 확인 후
+```
 
 ## 제거
 
