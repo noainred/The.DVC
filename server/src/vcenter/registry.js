@@ -19,7 +19,7 @@ import { config } from '../config.js';
 // kept outside the app dir (e.g. /etc/vmware-portal) to survive upgrades.
 const FILE = path.join(config.configDir, 'vcenters.json');
 
-const REGIONS = ['Americas', 'EMEA', 'APAC'];
+const REGIONS = ['아시아', '중국', '유럽', '미국'];
 
 export function loadRegistry() {
   if (!fs.existsSync(FILE)) return [];

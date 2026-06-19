@@ -36,7 +36,7 @@ const TABS = [
   { id: 'upgrade', label: '업그레이드', adminOnly: true, feature: 'upgradeTab' },
 ];
 
-const REGIONS = ['Americas', 'EMEA', 'APAC'];
+const REGIONS = ['아시아', '중국', '유럽', '미국'];
 
 // Per-menu filter (added to the shared filter bar on the matching tab).
 const MENU_FILTERS = {
