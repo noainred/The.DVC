@@ -47,17 +47,17 @@ export default function Overview({ onSelectSite, onGotoTab }) {
     <>
       <div className="section-title">글로벌 현황</div>
       <div className="kpis">
-        <Kpi label="vCenter" value={`${g.vcentersConnected}/${g.vcenters}`} meta={`${g.vcenters - g.vcentersConnected}개 연결 불가`} accent="var(--accent-2)" />
-        <Kpi label="ESXi 호스트" value={fmt(g.hosts)} meta={`정상 ${g.hostsConnected} · 점검 ${g.hostsMaintenance} · 끊김 ${g.hostsDisconnected}`} />
-        <Kpi label="가상머신" value={fmt(g.vms)} meta={`구동중 ${fmt(g.vmsPoweredOn)} · 정지 ${fmt(g.vmsPoweredOff)}`} accent="var(--green)" />
+        <Kpi label="vCenter" value={`${g.vcentersConnected}/${g.vcenters}`} meta={`${g.vcenters - g.vcentersConnected}개 연결 불가`} accent="var(--accent-2)" onClick={() => onGotoTab?.('vcenters')} />
+        <Kpi label="ESXi 호스트" value={fmt(g.hosts)} meta={`정상 ${g.hostsConnected} · 점검 ${g.hostsMaintenance} · 끊김 ${g.hostsDisconnected}`} onClick={() => onGotoTab?.('hosts')} />
+        <Kpi label="가상머신" value={fmt(g.vms)} meta={`구동중 ${fmt(g.vmsPoweredOn)} · 정지 ${fmt(g.vmsPoweredOff)}`} accent="var(--green)" onClick={() => onGotoTab?.('vms')} />
         <Kpi label="CPU 사용률" value={`${g.cpuUsagePct}%`} pct={g.cpuUsagePct} meta={`${g.cpuUsedGhz} / ${g.cpuTotalGhz} GHz · ${fmt(g.cpuCores)} cores`} />
         <Kpi label="메모리 사용률" value={`${g.memUsagePct}%`} pct={g.memUsagePct} meta={`${fmt(g.memUsedGB)} / ${fmt(g.memTotalGB)} GB`} />
-        <Kpi label="스토리지 사용률" value={`${g.storageUsagePct}%`} pct={g.storageUsagePct} meta={`${g.storageUsedTB} / ${g.storageTotalTB} TB · ${g.datastores} DS`} />
+        <Kpi label="스토리지 사용률" value={`${g.storageUsagePct}%`} pct={g.storageUsagePct} meta={`${g.storageUsedTB} / ${g.storageTotalTB} TB · ${g.datastores} DS`} onClick={() => onGotoTab?.('datastores')} />
         {g.powerReporting > 0 && (
           <Kpi label="총 소비전력" value={`${fmt(g.powerKw)} kW`} accent="var(--amber)" meta={`${fmt(g.powerReporting)}개 호스트 측정 · 시간당 약 ${fmt(g.powerKw)} kWh`} />
         )}
-        <Kpi label="네트워크" value={fmt(g.networks)} meta="포트그룹 / 분산스위치" />
-        <Kpi label="알람" value={fmt(g.alarms)} accent={g.alarmsCritical ? 'var(--red)' : 'var(--amber)'} meta={`위험 ${g.alarmsCritical} · 경고 ${g.alarmsWarning}`} />
+        <Kpi label="네트워크" value={fmt(g.networks)} meta="포트그룹 / 분산스위치" onClick={() => onGotoTab?.('networks')} />
+        <Kpi label="알람" value={fmt(g.alarms)} accent={g.alarmsCritical ? 'var(--red)' : 'var(--amber)'} meta={`위험 ${g.alarmsCritical} · 경고 ${g.alarmsWarning}`} onClick={() => onGotoTab?.('alarms')} />
       </div>
 
       <div className="section-title">전세계 데이터센터 분포 <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>(+/- 로 크기 조절 · 드래그로 이동 · 모든 사용자 공유)</span></div>

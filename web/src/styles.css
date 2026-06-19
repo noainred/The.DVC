@@ -100,6 +100,9 @@ body {
 .kpi .value { font-size: 30px; font-weight: 800; margin-top: 6px; line-height: 1; }
 .kpi .meta { font-size: 12px; color: var(--text-faint); margin-top: 8px; }
 .kpi .value small { font-size: 14px; color: var(--text-dim); font-weight: 600; }
+.kpi-click { cursor: pointer; transition: border-color .15s, transform .1s, box-shadow .15s; }
+.kpi-click:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 6px 18px rgba(0,0,0,.35); }
+.kpi-click:active { transform: translateY(0); }
 
 .usage-bar { height: 7px; border-radius: 4px; background: var(--panel-2); overflow: hidden; margin-top: 10px; }
 .usage-bar > span { display: block; height: 100%; border-radius: 4px; transition: width .6s ease; }
