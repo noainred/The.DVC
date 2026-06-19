@@ -60,6 +60,7 @@ export class VimSoapClient {
       rootFolder: pick('rootFolder'),
       viewManager: pick('viewManager'),
       sessionManager: pick('sessionManager'),
+      perfManager: pick('perfManager'),
       version: pick('version'),
     };
     if (!this.sc.propertyCollector) throw new Error('RetrieveServiceContent failed');
@@ -105,6 +106,53 @@ export class VimSoapClient {
       `</objectSet></specSet></RetrieveProperties>`;
     const xml = await this.#call(body);
     return parseObjectContent(xml);
+  }
+
+  /** RetrieveProperties for a single managed object (no traversal). */
+  async retrieveObjectProps(type, ref, paths) {
+    const body =
+      `<RetrieveProperties xmlns="urn:vim25"><_this type="PropertyCollector">${this.sc.propertyCollector}</_this>` +
+      `<specSet><propSet><type>${type}</type>${paths.map((p) => `<pathSet>${p}</pathSet>`).join('')}</propSet>` +
+      `<objectSet><obj type="${type}">${ref}</obj></objectSet></specSet></RetrieveProperties>`;
+    return parseObjectContent(await this.#call(body));
+  }
+
+  /** Find the counterId for power.power.average from the perf counter catalog. */
+  async powerCounterId() {
+    if (!this.sc.perfManager) return null;
+    const objs = await this.retrieveObjectProps('PerformanceManager', this.sc.perfManager, ['perfCounter']);
+    const xml = objs[0]?.props?.perfCounter || '';
+    for (const blk of xml.split('<PerfCounterInfo').slice(1)) {
+      const key = /<key>(\d+)<\/key>/.exec(blk)?.[1];
+      const name = /<nameInfo>[\s\S]*?<key>(\w+)<\/key>/.exec(blk)?.[1];
+      const group = /<groupInfo>[\s\S]*?<key>(\w+)<\/key>/.exec(blk)?.[1];
+      const rollup = /<rollupType>(\w+)<\/rollupType>/.exec(blk)?.[1];
+      if (key && group === 'power' && name === 'power' && rollup === 'average') return key;
+    }
+    return null;
+  }
+
+  /** Query real-time host power (Watts) for the given host MoRefs -> Map<ref, watts>. */
+  async queryHostPower(counterId, hostRefs) {
+    const out = new Map();
+    if (!counterId || !hostRefs.length) return out;
+    const specs = hostRefs.map((ref) =>
+      `<querySpec><entity type="HostSystem">${ref}</entity><maxSample>1</maxSample>` +
+      `<metricId><counterId>${counterId}</counterId><instance></instance></metricId>` +
+      `<intervalId>20</intervalId></querySpec>`
+    ).join('');
+    const xml = await this.#call(
+      `<QueryPerf xmlns="urn:vim25"><_this type="PerformanceManager">${this.sc.perfManager}</_this>${specs}</QueryPerf>`
+    );
+    const re = /<returnval[^>]*>([\s\S]*?)<\/returnval>/g;
+    let m;
+    while ((m = re.exec(xml))) {
+      const blk = m[1];
+      const ent = /<entity type="HostSystem">([^<]+)<\/entity>/.exec(blk)?.[1];
+      const val = /<value>[\s\S]*?<value>(\d+)<\/value>/.exec(blk)?.[1];
+      if (ent && val != null) out.set(ent, Number(val));
+    }
+    return out;
   }
 }
 
@@ -195,6 +243,22 @@ export async function collectFromVCenterSoap(vc) {
       hosts.push(host);
       hostByRef.set(o.ref, host);
     }
+
+    // Real-time host power draw (Watts) via PerformanceManager. Best-effort:
+    // not all hardware/hosts report the power.power.average counter, and a
+    // failure here must never break the rest of the collection.
+    if (config.vcSoapMetrics && c.sc.perfManager && hostByRef.size) {
+      try {
+        const counterId = await c.powerCounterId();
+        if (counterId) {
+          const powerMap = await c.queryHostPower(counterId, [...hostByRef.keys()]);
+          for (const [ref, host] of hostByRef) host.powerWatts = powerMap.get(ref) || 0;
+        }
+      } catch (err) {
+        console.warn(`[collect] ${vc.id} 전력 수집 건너뜀: ${err.message}`);
+      }
+    }
+
     const vms = [];
     for (const o of objs.filter((x) => x.type === 'VirtualMachine')) {
       const p = o.props;

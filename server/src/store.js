@@ -132,6 +132,9 @@ function withRollups(snap) {
     alarms: snap.alarms.length,
     alarmsCritical: snap.alarms.filter((a) => a.severity === 'critical').length,
     alarmsWarning: snap.alarms.filter((a) => a.severity === 'warning').length,
+    powerWatts: sum(snap.hosts, (h) => h.powerWatts),
+    powerKw: round(sum(snap.hosts, (h) => h.powerWatts) / 1000, 1),
+    powerReporting: snap.hosts.filter((h) => h.powerWatts > 0).length,
   };
 
   const byKey = (key) => {
@@ -161,6 +164,7 @@ function withRollups(snap) {
         storageTotalTB: round(stC / 1024, 1),
         alarmsCritical: a.filter((x) => x.severity === 'critical').length,
         alarmsWarning: a.filter((x) => x.severity === 'warning').length,
+        powerKw: round(sum(h, (x) => x.powerWatts) / 1000, 1),
       };
     });
   };
