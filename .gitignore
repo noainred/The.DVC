@@ -9,6 +9,7 @@ npm-debug.log*
 coverage/
 server/config/vcenters.json
 server/config/users.json
+server/config/upgrade.json
 server/.upgrade-cache/
 *.bak.[0-9]*
 *.new.[0-9]*

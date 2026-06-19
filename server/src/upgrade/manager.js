@@ -3,11 +3,12 @@
  * check, runs the optional background watcher (local folder + remote source),
  * applies newer bundles, pushes them to edges, and re-execs the process.
  *
- * Everything here is a no-op unless config.upgrade.enabled is true (opt-in).
+ * Settings come from settings.js (env defaults + values edited in the admin UI)
+ * and can be reloaded at runtime. Everything is a no-op unless enabled.
  */
 
-import path from 'node:path';
-import { config, currentVersion } from '../config.js';
+import { currentVersion } from '../config.js';
+import { loadSettings, saveSettings, redactSettings } from './settings.js';
 import {
   findNewerArchive, upgradeFromArchive, checkRemote, upgradeFromRemote,
   restartProcess, pushBundleToEdge, vstr,
@@ -15,47 +16,47 @@ import {
 
 class UpgradeManager {
   constructor() {
-    this.cfg = config.upgrade;
-    this.lastCheck = null;     // { at, watch, remote }
-    this.lastResult = null;    // last apply result
+    this.settings = loadSettings();
+    this.lastCheck = null;
+    this.lastResult = null;
     this.timer = null;
   }
 
   get enabled() {
-    return this.cfg.enabled;
+    return this.settings.enabled;
   }
 
   status() {
+    const s = this.settings;
     return {
-      enabled: this.cfg.enabled,
+      ...redactSettings(s),
       version: currentVersion(),
-      watchDir: this.cfg.watchDir || null,
-      installDir: this.cfg.installDir || null,
-      packageName: this.cfg.packageName,
-      remoteConfigured: Boolean(this.cfg.remoteBase),
-      remoteBase: this.cfg.remoteBase || null,
-      remoteVersionsUrl: this.cfg.remoteBase ? `${this.cfg.remoteBase.replace(/\/+$/, '')}/versions.json` : null,
-      autoApply: this.cfg.autoApply,
-      pollIntervalMs: this.cfg.pollIntervalMs,
-      edges: this.cfg.edges.map((e) => e.url),
+      remoteConfigured: Boolean(s.remoteBase),
+      remoteVersionsUrl: s.remoteBase ? `${s.remoteBase.replace(/\/+$/, '')}/versions.json` : null,
       lastCheck: this.lastCheck,
       lastResult: this.lastResult,
     };
   }
 
+  /** Persist edited settings and restart the background poller. */
+  updateSettings(partial) {
+    this.settings = saveSettings(partial);
+    this.#restartTimer();
+    return this.status();
+  }
+
   /** Check both sources for an available newer version (no install). */
   async check() {
+    const s = this.settings;
     const cur = currentVersion();
     const result = { at: Date.now(), current: cur };
 
-    if (this.cfg.watchDir) {
-      const found = findNewerArchive(this.cfg.watchDir, cur);
-      result.watch = found
-        ? { available: true, version: vstr(found.version), path: found.path }
-        : { available: false };
+    if (s.watchDir) {
+      const found = findNewerArchive(s.watchDir, cur);
+      result.watch = found ? { available: true, version: vstr(found.version), path: found.path } : { available: false };
     }
-    if (this.cfg.remoteBase) {
-      result.remote = await checkRemote(this.cfg.remoteBase, cur, { token: this.cfg.token });
+    if (s.remoteBase) {
+      result.remote = await checkRemote(s.remoteBase, cur, { token: s.token });
     }
     this.lastCheck = result;
     return result;
@@ -63,62 +64,60 @@ class UpgradeManager {
 
   /** Install the newest available bundle. source: 'auto' | 'watch' | 'remote'. */
   async apply({ source = 'auto', restart = false } = {}) {
-    if (!this.cfg.installDir) {
-      return { ok: false, reason: 'UPGRADE_INSTALL_DIR is not set; refusing to apply' };
-    }
+    const s = this.settings;
+    if (!s.installDir) return { ok: false, reason: '설치 경로(installDir)가 설정되지 않아 적용할 수 없습니다.' };
     const cur = currentVersion();
-    const { installDir, packageName, watchDir, remoteBase, token, downloadDir } = this.cfg;
     let res = null;
 
-    if ((source === 'auto' || source === 'watch') && watchDir) {
-      const found = findNewerArchive(watchDir, cur);
-      if (found) res = upgradeFromArchive(found.path, installDir, cur, packageName);
+    if ((source === 'auto' || source === 'watch') && s.watchDir) {
+      const found = findNewerArchive(s.watchDir, cur);
+      if (found) res = upgradeFromArchive(found.path, s.installDir, cur, s.packageName);
     }
-    if (!res?.ok && (source === 'auto' || source === 'remote') && remoteBase) {
-      res = await upgradeFromRemote(remoteBase, installDir, cur, downloadDir, { token, pkgName: packageName });
+    if (!res?.ok && (source === 'auto' || source === 'remote') && s.remoteBase) {
+      res = await upgradeFromRemote(s.remoteBase, s.installDir, cur, s.downloadDir, { token: s.token, pkgName: s.packageName });
     }
-    if (!res) res = { ok: false, reason: 'no upgrade source produced a candidate' };
+    if (!res) res = { ok: false, reason: '적용할 업그레이드 소스가 없습니다 (감시 폴더/원격 미설정).' };
 
     this.lastResult = { at: Date.now(), source, ...res };
-
     if (res.ok) {
       await this.pushToEdges(res.appliedArchive).catch(() => {});
-      if (restart) {
-        setTimeout(() => restartProcess(), 250);
-        res.restarting = true;
-      }
+      if (restart) { setTimeout(() => restartProcess(), 250); res.restarting = true; }
     }
     return res;
   }
 
-  /** Push the most relevant bundle to all configured edges (best-effort). */
   async pushToEdges(archivePath) {
-    if (!this.cfg.edges.length) return [];
-    // Prefer an explicit archive; otherwise the newest local bundle.
+    const s = this.settings;
+    if (!s.edges?.length) return [];
     let bundle = archivePath;
-    if (!bundle && this.cfg.watchDir) {
-      const found = findNewerArchive(this.cfg.watchDir, '0.0.0');
-      bundle = found?.path;
-    }
+    if (!bundle && s.watchDir) bundle = findNewerArchive(s.watchDir, '0.0.0')?.path;
     if (!bundle) return [];
-    return Promise.all(this.cfg.edges.map((e) => pushBundleToEdge(e, bundle)));
+    return Promise.all(s.edges.map((e) => pushBundleToEdge(e, bundle)));
   }
 
-  start() {
-    if (!this.cfg.enabled) return;
-    console.log(`  ▸ auto-upgrade: enabled (watch=${this.cfg.watchDir || '-'}, remote=${this.cfg.remoteBase ? 'yes' : 'no'}, autoApply=${this.cfg.autoApply})`);
-    if (this.cfg.pollIntervalMs > 0) {
-      this.timer = setInterval(() => this.tick().catch((e) => console.error('[upgrade] tick error:', e.message)), this.cfg.pollIntervalMs);
+  #restartTimer() {
+    if (this.timer) { clearInterval(this.timer); this.timer = null; }
+    const s = this.settings;
+    if (s.enabled && s.pollIntervalMs > 0) {
+      this.timer = setInterval(() => this.tick().catch((e) => console.error('[upgrade] tick error:', e.message)), s.pollIntervalMs);
       this.timer.unref?.();
       this.tick().catch(() => {});
     }
   }
 
+  start() {
+    const s = this.settings;
+    if (s.enabled) {
+      console.log(`  ▸ auto-upgrade: enabled (watch=${s.watchDir || '-'}, remote=${s.remoteBase ? 'yes' : 'no'}, autoApply=${s.autoApply})`);
+    }
+    this.#restartTimer();
+  }
+
   async tick() {
     const check = await this.check();
     const newer = check.watch?.available || check.remote?.available;
-    if (newer && this.cfg.autoApply) {
-      console.log('[upgrade] newer version detected — applying and restarting');
+    if (newer && this.settings.autoApply) {
+      console.log('[upgrade] 새 버전 감지 — 적용 후 재시작합니다');
       await this.apply({ source: 'auto', restart: true });
     }
   }

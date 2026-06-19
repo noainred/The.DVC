@@ -199,10 +199,15 @@ cd server && node -e "import('./src/auth/auth.js').then(m=>console.log(m.hashPas
 | `UPGRADE_AUTO_APPLY` | `true` 면 새 버전 발견 시 자동 적용+재시작 |
 | `UPGRADE_EDGES` | 자가 업그레이드 후 번들을 푸시할 엣지 목록 JSON `[{"url","token"}]` |
 
-관리자 API (모두 admin 역할 필요): `GET /api/upgrade/status`, `POST /api/upgrade/check`,
+관리자 API (모두 admin 역할 필요): `GET/PUT /api/upgrade/settings`,
+`GET /api/upgrade/status`, `POST /api/upgrade/check`,
 `POST /api/upgrade/apply` (`{source,restart}`), `POST /api/upgrade/restart`,
-`POST /api/upgrade/bundle` (엣지가 받는 번들 푸시 엔드포인트). 포탈 상단의 **업그레이드** 탭에서
-GUI로도 확인·적용·재시작할 수 있습니다.
+`POST /api/upgrade/bundle` (엣지가 받는 번들 푸시 엔드포인트).
+
+**포탈에서 직접 설정**: 관리자 **업그레이드** 탭에서 인터넷 업그레이드(원격 소스 URL·토큰·
+확인 주기·자동 적용)와 수동 업그레이드(감시 폴더)를 GUI로 편집·저장하고, 확인·적용·재시작까지
+할 수 있습니다. 편집한 설정은 `config/upgrade.json`(gitignore)에 저장되어 재시작 후에도 유지되며,
+환경변수는 초기 기본값으로 사용됩니다. 실행 중 버전은 상단 바에 배지로 표시됩니다.
 
 > 안전장치: 더 새 버전만 적용, 아카이브 패키지·버전 검증, 경로 탈출 방지, zip/tar 폭탄 상한,
 > 기존 코드 백업(원자적 스왑·롤백). 재시작은 같은 인자로 프로세스를 re-exec 합니다.
