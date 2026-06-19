@@ -1,15 +1,16 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { usePolling } from '../api.js';
-import { DataTable, UsageCell, StateBadge, Loading, ErrorBox, ResultCount } from '../components/ui.jsx';
+import { DataTable, UsageCell, StateBadge, Loading, ErrorBox, ResultCount, EntityDetail } from '../components/ui.jsx';
 
 export default function Hosts({ filters }) {
   const { data, error, loading } = usePolling('/hosts', filters, 15_000);
+  const [detail, setDetail] = useState(null);
   if (loading && !data) return <Loading />;
   if (error) return <ErrorBox message={error} />;
   const rows = data?.items || [];
 
   const columns = [
-    { key: 'name', label: '호스트', render: (h) => <b>{h.name}</b> },
+    { key: 'name', label: '호스트', render: (h) => <button className="cell-link" onClick={() => setDetail(h)}>{h.name}</button> },
     { key: 'vcenterId', label: 'vCenter', render: (h) => <span className="muted">{h.vcenterId}</span> },
     { key: 'cluster', label: '클러스터' },
     { key: 'connectionState', label: '상태', render: (h) => <StateBadge state={h.connectionState} /> },
@@ -25,6 +26,7 @@ export default function Hosts({ filters }) {
     <>
       <ResultCount total={data.total} label="호스트" filtered={Object.keys(filters || {}).length > 0} />
       <DataTable columns={columns} rows={rows} initialSort={{ key: 'cpuUsagePct', dir: 'desc' }} />
+      {detail && <EntityDetail type="host" item={detail} onClose={() => setDetail(null)} />}
     </>
   );
 }

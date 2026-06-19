@@ -41,6 +41,21 @@ export const config = {
     // Show the admin "업그레이드" tab. Hidden by default; SHOW_UPGRADE_TAB=true to enable.
     showUpgradeTab: process.env.SHOW_UPGRADE_TAB === 'true',
   },
+  idrac: {
+    // Poll Dell iDRAC (Redfish) for real host power draw and store time-series
+    // in SQLite. The registry (server name, iDRAC host, credentials) lives in
+    // CONFIG_DIR/idrac.json. Enabled automatically when any entry is registered.
+    enabled: process.env.IDRAC_ENABLED !== 'false',
+    pollIntervalMs: Number(process.env.IDRAC_POLL_INTERVAL_MS) || 60_000,
+    // SQLite database file for power samples. Kept in CONFIG_DIR so upgrades
+    // preserve history. Override with IDRAC_DB_PATH.
+    dbPath: process.env.IDRAC_DB_PATH ||
+      path.join(process.env.CONFIG_DIR || path.resolve(ROOT, 'config'), 'idrac-power.db'),
+    // How many days of samples to retain (older rows pruned). 0 = keep all.
+    retentionDays: Number(process.env.IDRAC_RETENTION_DAYS) || 90,
+    // Per-request timeout to the iDRAC Redfish API.
+    timeoutMs: Number(process.env.IDRAC_TIMEOUT_MS) || 15_000,
+  },
   auth: {
     enabled: process.env.AUTH_ENABLED !== 'false',
     // Signing secret for session tokens. Set AUTH_SECRET in production so

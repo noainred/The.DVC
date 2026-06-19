@@ -11,6 +11,7 @@ import VCenters from './views/VCenters.jsx';
 import Summary from './views/Summary.jsx';
 import Upgrade from './views/Upgrade.jsx';
 import VCenterAdmin from './views/VCenterAdmin.jsx';
+import IdracAdmin from './views/IdracAdmin.jsx';
 import Diagnostics from './views/Diagnostics.jsx';
 import Login from './views/Login.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
@@ -26,6 +27,7 @@ const TABS = [
   { id: 'networks', label: '네트워크' },
   { id: 'alarms', label: '알람' },
   { id: 'vcenter-admin', label: 'vCenter 관리', adminOnly: true, secret: true },
+  { id: 'idrac-admin', label: '전력 수집', adminOnly: true, secret: true },
   { id: 'diagnostics', label: '진단·로그', adminOnly: true, secret: true },
   { id: 'upgrade', label: '업그레이드', adminOnly: true, feature: 'upgradeTab' },
 ];
@@ -177,7 +179,7 @@ function Portal({ user, onLogout }) {
   }, [vcenterId, region]);
 
 
-  const noFilterTabs = ['overview', 'vcenters', 'summary', 'upgrade', 'vcenter-admin', 'diagnostics'];
+  const noFilterTabs = ['overview', 'vcenters', 'summary', 'upgrade', 'vcenter-admin', 'idrac-admin', 'diagnostics'];
   const showFilters = !noFilterTabs.includes(tab);
   const showTextSearch = tab !== 'explore';
 
@@ -270,6 +272,7 @@ function Portal({ user, onLogout }) {
           {tab === 'networks' && <Networks filters={filters} />}
           {tab === 'alarms' && <Alarms filters={filters} />}
           {tab === 'vcenter-admin' && user.role === 'admin' && secretRevealed && <VCenterAdmin />}
+          {tab === 'idrac-admin' && user.role === 'admin' && secretRevealed && <IdracAdmin />}
           {tab === 'diagnostics' && user.role === 'admin' && secretRevealed && <Diagnostics />}
           {tab === 'upgrade' && user.role === 'admin' && health?.features?.upgradeTab && <Upgrade />}
         </ErrorBoundary>

@@ -2,6 +2,24 @@ import { config, loadVcenterConfig } from './config.js';
 import { generateSnapshot } from './mock/generator.js';
 import { collectFromVCenter } from './vcenter/restClient.js';
 import { describeError } from './util/errors.js';
+import { latestPowerByHostName } from './idrac/service.js';
+
+/**
+ * Overlay real iDRAC power (Watts) onto hosts by matching the ESXi host name to
+ * a registered Dell server. When matched, the measured value takes precedence
+ * over any mock/SOAP estimate and is flagged with powerSource='idrac'.
+ */
+async function overlayIdracPower(snap) {
+  try {
+    const byName = await latestPowerByHostName();
+    if (!byName.size) return snap;
+    for (const h of snap.hosts) {
+      const m = byName.get(String(h.name || '').trim().toLowerCase());
+      if (m) { h.powerWatts = m.watts; h.powerSource = 'idrac'; }
+    }
+  } catch { /* power overlay is best-effort */ }
+  return snap;
+}
 
 /**
  * In-memory aggregated store. Holds the most recent global snapshot and
@@ -18,7 +36,7 @@ class Store {
   async refresh() {
     try {
       if (config.dataSource === 'mock') {
-        this.snapshot = withRollups(generateSnapshot());
+        this.snapshot = withRollups(await overlayIdracPower(generateSnapshot()));
         return;
       }
 
@@ -56,7 +74,7 @@ class Store {
       });
 
       merged.generatedAt = new Date().toISOString();
-      this.snapshot = withRollups(merged);
+      this.snapshot = withRollups(await overlayIdracPower(merged));
       this.lastError = null;
     } catch (err) {
       this.lastError = err.message;
