@@ -37,6 +37,10 @@ export const config = {
   vcSoapMetrics: process.env.VC_SOAP_METRICS !== 'false',
   // Directory of the built web client to serve in production (optional).
   webDist: path.resolve(ROOT, '..', 'web', 'dist'),
+  ui: {
+    // Show the admin "업그레이드" tab. Hidden by default; SHOW_UPGRADE_TAB=true to enable.
+    showUpgradeTab: process.env.SHOW_UPGRADE_TAB === 'true',
+  },
   auth: {
     enabled: process.env.AUTH_ENABLED !== 'false',
     // Signing secret for session tokens. Set AUTH_SECRET in production so
