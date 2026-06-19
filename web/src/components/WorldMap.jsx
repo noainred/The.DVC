@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ComposableMap, Geographies, Geography, Marker, ZoomableGroup } from 'react-simple-maps';
 import geoData from 'world-atlas/countries-110m.json';
 
@@ -11,8 +11,26 @@ function markerStyle(site) {
   return { fill: '#22c55e', r: 5, ring: '#22c55e' };
 }
 
-export default function WorldMap({ sites = [], onSelect }) {
+export default function WorldMap({ sites = [], onSelect, height = 420, onResizeEnd }) {
   const [tip, setTip] = useState(null);
+  const [h, setH] = useState(height);
+  // follow the shared (server) height unless the user is actively dragging
+  useEffect(() => { setH(height); }, [height]);
+
+  const startResize = (e) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startH = h;
+    const clamp = (v) => Math.max(240, Math.min(1200, v));
+    const onMove = (ev) => setH(clamp(startH + (ev.clientY - startY)));
+    const onUp = (ev) => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      onResizeEnd?.(clamp(startH + (ev.clientY - startY)));
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
 
   return (
     <div className="card map-wrap" style={{ padding: 8 }}>
@@ -20,7 +38,7 @@ export default function WorldMap({ sites = [], onSelect }) {
         projection="geoEqualEarth"
         projectionConfig={{ scale: 175 }}
         style={{ width: '100%', height: 'auto' }}
-        height={420}
+        height={h}
       >
         {/* drag to pan, wheel to zoom; centered on Korea by default */}
         <ZoomableGroup center={[127, 20]} zoom={1} minZoom={1} maxZoom={8}>
@@ -88,6 +106,11 @@ export default function WorldMap({ sites = [], onSelect }) {
           )}
         </div>
       )}
+
+      {/* drag to resize the map height (saved server-side, shared by all users) */}
+      <div className="map-resize" onMouseDown={startResize} title="드래그하여 지도 높이 조절 (모든 사용자 공유)">
+        <span className="map-resize-grip" />
+      </div>
     </div>
   );
 }
