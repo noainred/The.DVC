@@ -56,6 +56,22 @@ export const config = {
     // Per-request timeout to the iDRAC Redfish API.
     timeoutMs: Number(process.env.IDRAC_TIMEOUT_MS) || 15_000,
   },
+  collector: {
+    // Distributed collection. Each datacenter runs this app as a "collector
+    // agent" that polls its local iDRAC/OME and exposes the result at
+    // GET /api/collector/export (guarded by COLLECTOR_TOKEN). The central
+    // portal registers those agents and pulls+merges their power data.
+    //
+    // Token this instance REQUIRES on its own export endpoint. Empty = export
+    // endpoint disabled (this instance is central-only, not an agent).
+    token: process.env.COLLECTOR_TOKEN || '',
+    // Friendly datacenter label advertised by this agent's export.
+    datacenter: process.env.COLLECTOR_DATACENTER || process.env.DATACENTER || '',
+    // Central portal: pull registered collectors on this interval. 0 disables.
+    pullIntervalMs: Number(process.env.COLLECTOR_PULL_INTERVAL_MS) || 60_000,
+    // Per-request timeout when pulling a remote collector.
+    timeoutMs: Number(process.env.COLLECTOR_TIMEOUT_MS) || 20_000,
+  },
   auth: {
     enabled: process.env.AUTH_ENABLED !== 'false',
     // Signing secret for session tokens. Set AUTH_SECRET in production so

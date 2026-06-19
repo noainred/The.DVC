@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, putJson, delJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 
-const EMPTY = { id: '', name: '', host: '', username: 'root', password: '', serviceTag: '', hostNames: '', enabled: true };
+const EMPTY = { id: '', name: '', host: '', username: 'root', password: '', serviceTag: '', hostNames: '', enabled: true, type: 'idrac' };
 
 export default function IdracAdmin() {
   const [data, setData] = useState(null);
@@ -56,7 +56,9 @@ export default function IdracAdmin() {
     try {
       const r = await postJson('/admin/idrac/test', form);
       setMsg(r.ok
-        ? { ok: true, text: `연결 성공 (${r.ms}ms) · 현재 ${r.watts != null ? `${r.watts} W` : '—'}${r.model ? ` · ${r.model}` : ''}${r.serviceTag ? ` · ${r.serviceTag}` : ''}` }
+        ? { ok: true, text: r.type === 'ome'
+            ? `OME 연결 성공 (${r.ms}ms · ${r.auth}) · 장비 ${r.devices}대${r.watts != null ? ` · 샘플 ${r.watts} W` : ' · 전력값 없음(플러그인 확인)'}`
+            : `연결 성공 (${r.ms}ms) · 현재 ${r.watts != null ? `${r.watts} W` : '—'}${r.model ? ` · ${r.model}` : ''}${r.serviceTag ? ` · ${r.serviceTag}` : ''}` }
         : { ok: false, text: `연결 실패: ${r.reason}${r.hint ? ` (${r.hint})` : ''}` });
     } catch (e) { setMsg({ ok: false, text: e.message }); }
     finally { setBusy(false); }
@@ -177,20 +179,22 @@ export default function IdracAdmin() {
       <div className="table-wrap">
         <table>
           <thead><tr>
-            <th>ID</th><th>이름</th><th>iDRAC 주소</th><th>계정</th><th>매핑 호스트</th><th>현재 전력</th><th>상태</th><th className="right">작업</th>
+            <th>ID</th><th>유형</th><th>이름</th><th>주소</th><th>계정</th><th>매핑/장비</th><th>현재 전력</th><th>상태</th><th className="right">작업</th>
           </tr></thead>
           <tbody>
-            {list.length === 0 && <tr><td colSpan={8} className="center muted" style={{ padding: 28 }}>등록된 서버가 없습니다. “+ 서버 추가”로 등록하세요.</td></tr>}
+            {list.length === 0 && <tr><td colSpan={9} className="center muted" style={{ padding: 28 }}>등록된 서버가 없습니다. “+ 서버 추가”로 등록하세요.</td></tr>}
             {list.map((s) => {
               const r = wattsById[s.id];
+              const isOme = s.type === 'ome';
               return (
                 <tr key={s.id}>
                   <td><b>{s.id}</b></td>
+                  <td>{isOme ? <span className="badge blue">OME</span> : <span className="badge gray">iDRAC</span>}</td>
                   <td>{s.name}</td>
                   <td className="muted">{s.host?.replace(/^https?:\/\//, '')}</td>
                   <td className="muted">{s.username}</td>
-                  <td className="muted">{(s.hostNames || []).join(', ') || <span className="badge gray">미지정</span>}</td>
-                  <td className="tabular">{r?.watts != null ? fmtW(r.watts) : (r?.error ? <span className="badge red" title={r.error}>오류</span> : '—')}</td>
+                  <td className="muted">{isOme ? (r?.devices != null ? `장비 ${r.devices}대${r.measured != null ? ` · 측정 ${r.measured}` : ''}` : <span className="badge gray">자동 발견</span>) : ((s.hostNames || []).join(', ') || <span className="badge gray">미지정</span>)}</td>
+                  <td className="tabular">{isOme ? (r?.error ? <span className="badge red" title={r.error}>오류</span> : (r?.metric ? <span className="muted">{r.metric === 'powermanager' ? 'Power Mgr' : '인벤토리'}</span> : '—')) : (r?.watts != null ? fmtW(r.watts) : (r?.error ? <span className="badge red" title={r.error}>오류</span> : '—'))}</td>
                   <td>{s.enabled === false ? <span className="badge gray">중지</span> : <span className="badge green">수집</span>}</td>
                   <td className="right nowrap">
                     <button className="tab" onClick={() => openEdit(s)}>수정</button>
@@ -211,21 +215,36 @@ export default function IdracAdmin() {
               <button className="logout-btn" onClick={close}>닫기</button>
             </div>
             <div className="spec-grid">
-              <label>ID *<input className="input" value={form.id} onChange={setF('id')} disabled={editing} placeholder="srv-seoul-01" /></label>
-              <label>서버 이름 *<input className="input" value={form.name} onChange={setF('name')} placeholder="ESXi-SEOUL-01" /></label>
-              <label style={{ gridColumn: '1 / -1' }}>iDRAC 주소 *<input className="input" value={form.host} onChange={setF('host')} placeholder="10.0.0.21  또는  https://idrac-seoul-01.corp.local" /></label>
-              <label>계정 *<input className="input" value={form.username} onChange={setF('username')} placeholder="root" /></label>
+              <label>소스 유형
+                <select className="select" value={form.type || 'idrac'} onChange={(e) => setForm((f) => ({ ...f, type: e.target.value }))} disabled={editing}>
+                  <option value="idrac">iDRAC 직접 (서버 1대)</option>
+                  <option value="ome">OME (전체 자동 발견)</option>
+                </select>
+              </label>
+              <label>ID *<input className="input" value={form.id} onChange={setF('id')} disabled={editing} placeholder={form.type === 'ome' ? 'ome-hq' : 'srv-seoul-01'} /></label>
+              <label>{form.type === 'ome' ? 'OME 이름 *' : '서버 이름 *'}<input className="input" value={form.name} onChange={setF('name')} placeholder={form.type === 'ome' ? 'OME-HQ' : 'ESXi-SEOUL-01'} /></label>
+              <label style={{ gridColumn: '1 / -1' }}>{form.type === 'ome' ? 'OME 주소 *' : 'iDRAC 주소 *'}<input className="input" value={form.host} onChange={setF('host')} placeholder={form.type === 'ome' ? 'https://ome.corp.local  또는  10.0.0.10' : '10.0.0.21  또는  https://idrac-seoul-01.corp.local'} /></label>
+              <label>계정 *<input className="input" value={form.username} onChange={setF('username')} placeholder={form.type === 'ome' ? 'admin' : 'root'} /></label>
               <label>비밀번호 {editing && <span className="muted">(비우면 유지)</span>}<input className="input" type="password" value={form.password} onChange={setF('password')} placeholder={editing ? '••••••' : ''} /></label>
-              <label>서비스 태그<input className="input" value={form.serviceTag} onChange={setF('serviceTag')} placeholder="(선택) 자동 조회됨" /></label>
               <label>수집 여부
                 <select className="select" value={form.enabled ? '1' : '0'} onChange={(e) => setForm((f) => ({ ...f, enabled: e.target.value === '1' }))}>
                   <option value="1">수집</option>
                   <option value="0">중지</option>
                 </select>
               </label>
-              <label style={{ gridColumn: '1 / -1' }}>매핑 ESXi 호스트 이름 (쉼표로 여러 개)
-                <input className="input" value={form.hostNames} onChange={setF('hostNames')} placeholder="esxi-seoul-01.corp.local, 10.0.0.21" />
-              </label>
+              {form.type !== 'ome' && (
+                <>
+                  <label>서비스 태그<input className="input" value={form.serviceTag} onChange={setF('serviceTag')} placeholder="(선택) 자동 조회됨" /></label>
+                  <label style={{ gridColumn: '1 / -1' }}>매핑 ESXi 호스트 이름 (쉼표로 여러 개)
+                    <input className="input" value={form.hostNames} onChange={setF('hostNames')} placeholder="esxi-seoul-01.corp.local, 10.0.0.21" />
+                  </label>
+                </>
+              )}
+              {form.type === 'ome' && (
+                <div className="muted" style={{ gridColumn: '1 / -1', fontSize: 12 }}>
+                  OME에 등록된 <b>모든 서버를 자동 발견</b>하여 전력을 수집합니다. ESXi 호스트는 서비스태그/장비명으로 자동 매칭됩니다.
+                </div>
+              )}
             </div>
 
             {msg && (

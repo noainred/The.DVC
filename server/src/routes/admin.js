@@ -14,6 +14,9 @@ import {
 } from '../idrac/registry.js';
 import { expandIpList } from '../idrac/iprange.js';
 import { getPollerStatus, pollNow } from '../idrac/poller.js';
+import { listCollectors, addCollector, updateCollector, removeCollector, loadCollectors } from '../collector/registry.js';
+import { allCollectorStatus, getCollectorStatus } from '../collector/state.js';
+import { pullNow } from '../collector/puller.js';
 
 export const adminRouter = Router();
 
@@ -169,6 +172,57 @@ adminRouter.post('/idrac/bulk-add', adminOnly, (req, res) => {
   const result = bulkAddByIps(req.body || {});
   if (result.ok) pollNow().catch(() => {});
   res.status(result.ok ? 200 : 400).json(result);
+});
+
+// ---- Distributed collection: remote collector agents ----------------------
+
+// List registered collectors (tokens redacted) + live pull status.
+adminRouter.get('/collectors', adminOnly, (_req, res) => {
+  res.json({ collectors: listCollectors(), status: allCollectorStatus() });
+});
+
+adminRouter.post('/collectors', adminOnly, (req, res) => {
+  const result = addCollector(req.body || {});
+  if (result.ok) pullNow().catch(() => {});
+  res.status(result.ok ? 201 : 400).json(result);
+});
+
+adminRouter.put('/collectors/:id', adminOnly, (req, res) => {
+  const result = updateCollector(req.params.id, req.body || {});
+  if (result.ok) pullNow().catch(() => {});
+  res.status(result.ok ? 200 : 400).json(result);
+});
+
+adminRouter.delete('/collectors/:id', adminOnly, (req, res) => {
+  const result = removeCollector(req.params.id);
+  res.status(result.ok ? 200 : 404).json(result);
+});
+
+// Trigger an immediate pull of all collectors.
+adminRouter.post('/collectors/pull', adminOnly, async (_req, res) => {
+  await pullNow();
+  res.json({ ok: true, status: allCollectorStatus() });
+});
+
+// Test connectivity to one collector (saved by id, or an ad-hoc {url, token}).
+adminRouter.post('/collectors/test', adminOnly, async (req, res) => {
+  const body = req.body || {};
+  let { url, token } = body;
+  if (body.id) { const saved = loadCollectors().find((c) => c.id === body.id); if (saved) { url = url || saved.url; token = token || saved.token; } }
+  if (!url) return res.status(400).json({ ok: false, reason: 'url이 필요합니다.' });
+  if (!/^https?:\/\//.test(url)) url = `http://${url}`;
+  const started = Date.now();
+  try {
+    const r = await fetch(`${url.replace(/\/+$/, '')}/api/collector/export`, {
+      headers: { Accept: 'application/json', ...(token ? { 'X-Collector-Token': token } : {}) },
+      signal: AbortSignal.timeout(config.collector.timeoutMs),
+    });
+    if (!r.ok) return res.json({ ok: false, reason: `HTTP ${r.status}`, ms: Date.now() - started });
+    const data = await r.json();
+    res.json({ ok: true, ms: Date.now() - started, hosts: data.hosts, version: data.version, datacenter: data.datacenter });
+  } catch (err) {
+    res.json({ ok: false, reason: err.message, ms: Date.now() - started });
+  }
 });
 
 function existsFile(p) {
