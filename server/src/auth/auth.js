@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { authenticateAD } from './ad.js';
 
 // users.json lives in CONFIG_DIR (default app/server/config; set to e.g.
 // /etc/vmware-portal to keep it outside the app dir across upgrades).
@@ -96,10 +97,23 @@ export function loadUsers() {
   return users;
 }
 
-export function authenticate(username, password) {
+export function authenticateLocal(username, password) {
   const user = loadUsers().find((u) => u.username === username);
   if (!user || !verifyPassword(password, user.passwordHash)) return null;
-  return { username: user.username, name: user.name || user.username, role: user.role || 'viewer' };
+  return { username: user.username, name: user.name || user.username, role: user.role || 'viewer', source: 'local' };
+}
+
+/**
+ * Authenticate a user. If Active Directory is enabled, AD is tried first and,
+ * on failure (unknown user / AD down), falls back to local users.json — so the
+ * built-in admin keeps working alongside AD logins.
+ */
+export async function authenticate(username, password) {
+  try {
+    const adUser = await authenticateAD(username, password);
+    if (adUser) return adUser;
+  } catch { /* fall back to local */ }
+  return authenticateLocal(username, password);
 }
 
 /* -------------------------------- middleware ------------------------------- */
