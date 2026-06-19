@@ -41,6 +41,20 @@ export async function postJson(path, body = {}) {
   return data;
 }
 
+export async function sendJson(path, method, body = {}) {
+  const res = await fetch(`${BASE}${path}`, {
+    method,
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: method === 'DELETE' && !Object.keys(body).length ? undefined : JSON.stringify(body),
+  });
+  if (res.status === 401) { setToken(null); onUnauthorized(); throw new Error('세션이 만료되었습니다.'); }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok && res.status !== 409 && res.status !== 400) throw new Error(data.reason || data.error || `${path} -> ${res.status}`);
+  return data;
+}
+export const putJson = (path, body) => sendJson(path, 'PUT', body);
+export const delJson = (path) => sendJson(path, 'DELETE');
+
 export async function login(username, password) {
   const res = await fetch(`${BASE}/auth/login`, {
     method: 'POST',

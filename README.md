@@ -87,6 +87,21 @@ sudo ./install.sh --port 4000
 
 자세한 내용은 `packaging/README.md` 및 `packaging/offline/OFFLINE-INSTALL.md` 참고.
 
+## vCenter 등록 · 관리
+
+포탈에서 직접(관리자 전용) vCenter를 등록/수정/삭제하고 연결을 테스트할 수 있습니다:
+
+- 웹 UI: 상단 **vCenter 관리** 탭(admin 역할) → “+ vCenter 추가” → 호스트/계정/위치 입력 →
+  **연결 테스트** 후 저장. 저장 시 즉시 재수집됩니다.
+- 저장 위치: `server/config/vcenters.json` (0600, gitignore). 비밀번호는 API 응답에서 마스킹됩니다.
+- API(admin): `GET/POST /api/admin/vcenters`, `PUT/DELETE /api/admin/vcenters/:id`,
+  `POST /api/admin/vcenters/test`.
+
+> 등록한 vCenter의 실제 수집은 서버가 `DATA_SOURCE=live`(또는 `auto`)일 때 반영됩니다.
+> `mock` 모드에서는 대시보드에 데모 데이터가 표시됩니다.
+
+직접 파일로 등록하려면(또는 대량 등록):
+
 ## 실제 vCenter 연결
 
 기본은 목 데이터(`DATA_SOURCE=mock`)입니다. 실 환경 연결:
