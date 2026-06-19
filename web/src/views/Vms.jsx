@@ -34,7 +34,18 @@ function VmDetail({ vm, onClose }) {
         <DetailRow label="vCPU">{vm.cpuCount} 코어</DetailRow>
         <DetailRow label="RAM">{Math.round(vm.memMB / 1024)} GB ({vm.memMB.toLocaleString()} MB)</DetailRow>
         <DetailRow label="디스크">{vm.storageGB} GB</DetailRow>
+        <DetailRow label="Tools 버전">{vm.toolsVersion || '—'}</DetailRow>
+        <DetailRow label="스냅샷">{vm.snapshotCount ? `${vm.snapshotCount}개 · ${vm.snapshotSizeGB || 0} GB` : '없음'}</DetailRow>
         <DetailRow label="vCenter ID">{vm.id}</DetailRow>
+      </div>
+      <div style={{ marginTop: 12 }}>
+        <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>태그</div>
+        <div style={{ marginBottom: 10 }}>
+          {(vm.tags?.length ? vm.tags : []).map((t) => <span key={t} className="badge blue" style={{ marginRight: 6 }}>{t}</span>)}
+          {!vm.tags?.length && <span className="muted">—</span>}
+        </div>
+        <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>메모(Notes)</div>
+        <div style={{ fontSize: 13, whiteSpace: 'pre-wrap', color: vm.notes ? 'var(--text)' : 'var(--text-faint)' }}>{vm.notes || '—'}</div>
       </div>
       <div style={{ marginTop: 14, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
         <div>

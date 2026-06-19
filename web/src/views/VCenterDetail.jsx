@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { usePolling } from '../api.js';
-import { Loading, ErrorBox, StateBadge, UsageCell, EntityDetail } from '../components/ui.jsx';
+import { Loading, ErrorBox, StateBadge, UsageCell, EntityDetail, DataTable } from '../components/ui.jsx';
 
 const VIEWS = [
   { k: 'hosts', label: '호스트 및 클러스터', icon: '🖥️' },
@@ -102,35 +102,25 @@ export default function VCenterDetail({ site, onBack }) {
         )}
 
         {view === 'storage' && (
-          <div className="table-wrap">
-            <table>
-              <thead><tr><th>데이터스토어</th><th>유형</th><th className="right">용량</th><th className="right">사용</th><th>사용률</th></tr></thead>
-              <tbody>
-                {datastores.map((d) => (
-                  <tr key={d.id} className="vcd-row" onClick={() => setSel({ type: 'datastore', item: d })}>
-                    <td><b>💾 {d.name}</b></td><td><span className="badge blue">{d.type}</span></td>
-                    <td className="right tabular">{tb(d.capacityGB)}</td><td className="right tabular">{tb(d.usedGB)}</td>
-                    <td><UsageCell pct={d.usagePct} /></td>
-                  </tr>
-                ))}
-                {datastores.length === 0 && <tr><td colSpan={5} className="center muted" style={{ padding: 20 }}>데이터스토어 없음</td></tr>}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            columns={[
+              { key: 'name', label: '데이터스토어', render: (d) => <button className="cell-link" onClick={() => setSel({ type: 'datastore', item: d })}>💾 {d.name}</button> },
+              { key: 'type', label: '유형', render: (d) => <span className="badge blue">{d.type}</span> },
+              { key: 'capacityGB', label: '용량', align: 'right', render: (d) => tb(d.capacityGB) },
+              { key: 'usedGB', label: '사용', align: 'right', render: (d) => tb(d.usedGB) },
+              { key: 'usagePct', label: '사용률', render: (d) => <UsageCell pct={d.usagePct} /> },
+            ]}
+            rows={datastores} initialSort={{ key: 'usagePct', dir: 'desc' }} emptyText="데이터스토어 없음" />
         )}
 
         {view === 'network' && (
-          <div className="table-wrap">
-            <table>
-              <thead><tr><th>네트워크</th><th>유형</th><th className="right">호스트</th></tr></thead>
-              <tbody>
-                {networks.map((n) => (
-                  <tr key={n.id}><td><b>🌐 {n.name}</b></td><td><span className="badge gray">{n.type}</span></td><td className="right tabular">{n.hostCount ?? '—'}</td></tr>
-                ))}
-                {networks.length === 0 && <tr><td colSpan={3} className="center muted" style={{ padding: 20 }}>네트워크 없음</td></tr>}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            columns={[
+              { key: 'name', label: '네트워크', render: (n) => <b>🌐 {n.name}</b> },
+              { key: 'type', label: '유형', render: (n) => <span className="badge gray">{n.type}</span> },
+              { key: 'hostCount', label: '호스트', align: 'right', render: (n) => n.hostCount ?? '—' },
+            ]}
+            rows={networks} initialSort={{ key: 'name', dir: 'asc' }} emptyText="네트워크 없음" />
         )}
       </div>
 

@@ -55,13 +55,22 @@ export class VimSoapClient {
       `<RetrieveServiceContent xmlns="urn:vim25"><_this type="ServiceInstance">ServiceInstance</_this></RetrieveServiceContent>`
     );
     const pick = (tag) => new RegExp(`<${tag}[^>]*>([^<]+)</${tag}>`).exec(xml)?.[1];
+    // Friendly vCenter version/build/name live in <about>.
+    const about = /<about>([\s\S]*?)<\/about>/.exec(xml)?.[1] || '';
+    const aboutPick = (tag) => new RegExp(`<${tag}[^>]*>([^<]+)</${tag}>`).exec(about)?.[1];
     this.sc = {
       propertyCollector: pick('propertyCollector'),
       rootFolder: pick('rootFolder'),
       viewManager: pick('viewManager'),
       sessionManager: pick('sessionManager'),
       perfManager: pick('perfManager'),
-      version: pick('version'),
+      extensionManager: pick('extensionManager'),
+      licenseManager: pick('licenseManager'),
+      version: aboutPick('version') || pick('version'),
+      build: aboutPick('build') || '',
+      fullName: aboutPick('fullName') || '',
+      apiVersion: aboutPick('apiVersion') || '',
+      instanceUuid: aboutPick('instanceUuid') || '',
     };
     if (!this.sc.propertyCollector) throw new Error('RetrieveServiceContent failed');
     return this.sc;
@@ -195,6 +204,60 @@ export class VimSoapClient {
     for (let i = 0; i < n; i++) out.push({ t: times[i], v: vals[i] });
     return out;
   }
+
+  /** Installed solutions / plug-ins registered with vCenter (ExtensionManager). */
+  async retrieveExtensions() {
+    if (!this.sc.extensionManager) return [];
+    const objs = await this.retrieveObjectProps('ExtensionManager', this.sc.extensionManager, ['extensionList']);
+    const xml = objs[0]?.props?.extensionList || '';
+    const out = [];
+    for (const blk of xml.split('<extensionList').slice(1)) {
+      const key = /<key>([^<]+)<\/key>/.exec(blk)?.[1];
+      const version = /<version>([^<]+)<\/version>/.exec(blk)?.[1];
+      const company = /<company>([^<]*)<\/company>/.exec(blk)?.[1];
+      const label = /<label>([^<]*)<\/label>/.exec(blk)?.[1];
+      if (key) out.push({ key, version: version || '', company: company || '', label: label || key });
+    }
+    return out;
+  }
+
+  /** Send a raw vim25 SOAP body (public wrapper around the internal caller). */
+  async callRaw(body) { return this.#call(body); }
+
+  /** Licenses assigned in this vCenter (LicenseManager.licenses). */
+  async retrieveLicenses() {
+    if (!this.sc.licenseManager) return [];
+    const objs = await this.retrieveObjectProps('LicenseManager', this.sc.licenseManager, ['licenses']);
+    const xml = objs[0]?.props?.licenses || '';
+    const out = [];
+    for (const blk of xml.split('<licenses>').slice(1)) {
+      const name = /<name>([^<]*)<\/name>/.exec(blk)?.[1] || '';
+      const total = Number(/<total>(-?\d+)<\/total>/.exec(blk)?.[1] || 0);
+      const used = Number(/<used>(-?\d+)<\/used>/.exec(blk)?.[1] || 0);
+      const key = /<licenseKey>([^<]*)<\/licenseKey>/.exec(blk)?.[1] || '';
+      const edition = /<editionKey>([^<]*)<\/editionKey>/.exec(blk)?.[1] || '';
+      const props = {};
+      for (const pm of blk.matchAll(/<properties>\s*<key>([^<]+)<\/key>\s*<value[^>]*>([^<]*)<\/value>/g)) props[pm[1]] = pm[2];
+      out.push({
+        name, total, used,
+        key: key ? `${key.slice(0, 5)}-…-${key.slice(-5)}` : '',
+        edition,
+        product: props.ProductName || '',
+        productVersion: props.ProductVersion || '',
+        expires: props.expirationDate || props.ExpirationDate || '',
+      });
+    }
+    return out;
+  }
+
+  /** One-time clone ticket to open a VM console (VMRC / WebMKS) without re-auth. */
+  async acquireCloneTicket() {
+    if (!this.sc?.sessionManager) await this.retrieveServiceContent();
+    const xml = await this.#call(
+      `<AcquireCloneTicket xmlns="urn:vim25"><_this type="SessionManager">${this.sc.sessionManager}</_this></AcquireCloneTicket>`
+    );
+    return /<returnval>([^<]+)<\/returnval>/.exec(xml)?.[1] || null;
+  }
 }
 
 // IPv4 helpers — collect every IPv4 a guest reports, excluding IPv6/loopback.
@@ -212,6 +275,23 @@ function extractIPv4s(netXml, primary) {
 function vmIps(netXml, primary) {
   const ips = extractIPv4s(netXml, primary);
   return { ipAddress: ips[0] || (isIPv4(primary) ? String(primary) : null), ipAddresses: ips };
+}
+
+// Snapshot count (from the snapshot tree) + approximate size from layoutEx files.
+function snapshotInfo(snapXml, layoutXml) {
+  let snapshotCount = 0;
+  if (snapXml) snapshotCount = (snapXml.match(/<snapshot type="VirtualMachineSnapshot">/g) || []).length
+    || (snapXml.match(/<VirtualMachineSnapshotTree>/g) || []).length;
+  let bytes = 0;
+  if (snapshotCount > 0 && layoutXml) {
+    // Sum sizes of snapshot data (.vmsn) files as a best-effort delta size.
+    for (const blk of layoutXml.split('<file>').slice(1)) {
+      const type = /<type>([^<]+)<\/type>/.exec(blk)?.[1];
+      const size = Number(/<size>(\d+)<\/size>/.exec(blk)?.[1] || 0);
+      if (type === 'snapshotData' || /-(\d{6})\.vmdk/.test(blk)) bytes += size;
+    }
+  }
+  return { snapshotCount, snapshotSizeGB: Math.round(bytes / 1024 ** 3 * 10) / 10 };
 }
 
 // vCenter PerformanceManager intervals and the counters we expose on demand.
@@ -248,6 +328,27 @@ export async function fetchVmMetric(vc, moref, type, interval, { start, end } = 
   } finally {
     await c.logout();
   }
+}
+
+/** Trigger VMware Tools upgrade on the given VM MoRefs. Returns per-VM result. */
+export async function upgradeVmTools(vc, morefs) {
+  const c = new VimSoapClient(vc);
+  await c.login();
+  const results = [];
+  try {
+    for (const ref of morefs) {
+      try {
+        // UpgradeTools_Task — installerOptions omitted (use defaults).
+        await c.callRaw(`<UpgradeTools_Task xmlns="urn:vim25"><_this type="VirtualMachine">${ref}</_this></UpgradeTools_Task>`);
+        results.push({ ref, ok: true });
+      } catch (err) {
+        results.push({ ref, ok: false, error: err.message });
+      }
+    }
+  } finally {
+    await c.logout();
+  }
+  return results;
 }
 
 /** Parse RetrieveProperties response into [{type, ref, props:{path:value}}]. */
@@ -297,7 +398,8 @@ export async function collectFromVCenterSoap(vc) {
       { type: 'VirtualMachine', paths: [
         'name', 'runtime.host', 'parent', 'runtime.powerState', 'summary.config.numCpu', 'summary.config.memorySizeMB',
         'summary.config.guestFullName', 'summary.quickStats.overallCpuUsage', 'summary.quickStats.guestMemoryUsage',
-        'summary.storage.committed', 'guest.ipAddress', 'guest.net', 'guest.toolsRunningStatus'] },
+        'summary.storage.committed', 'guest.ipAddress', 'guest.net', 'guest.toolsRunningStatus',
+        'guest.toolsVersion', 'guest.toolsVersionStatus2', 'config.annotation', 'snapshot', 'layoutEx.file'] },
       { type: 'Datastore', paths: ['name', 'summary.type', 'summary.capacity', 'summary.freeSpace', 'summary.accessible'] },
       { type: 'Network', paths: ['name'] },
       { type: 'DistributedVirtualPortgroup', paths: ['name'] },
@@ -401,6 +503,11 @@ export async function collectFromVCenterSoap(vc) {
         ...vmIps(p['guest.net'], p['guest.ipAddress']),
         toolsStatus: p['guest.toolsRunningStatus'] === 'guestToolsRunning' ? 'RUNNING'
           : powered ? 'NOT_RUNNING' : 'NOT_RUNNING',
+        toolsVersion: p['guest.toolsVersion'] || '',
+        toolsVersionStatus: p['guest.toolsVersionStatus2'] || '',
+        notes: (p['config.annotation'] || '').slice(0, 2000),
+        tags: [], // vSphere Tags require the tagging REST API; not collected via SOAP
+        ...snapshotInfo(p['snapshot'], p['layoutEx.file']),
       });
     }
 
@@ -447,10 +554,18 @@ export async function collectFromVCenterSoap(vc) {
       if (d.usagePct > 90) mkAlarm(d.name, 'datastore', d.usagePct > 95 ? 'critical' : 'warning', `Datastore usage at ${d.usagePct}%`);
     }
 
+    // Installed solutions / plug-ins + licenses (best-effort).
+    let solutions = [];
+    try { solutions = (await c.retrieveExtensions()).slice(0, 300); } catch { /* optional */ }
+    let licenses = [];
+    try { licenses = (await c.retrieveLicenses()).slice(0, 200); } catch { /* optional */ }
+
     return {
       vcenter: {
         id: vc.id, name: vc.name, location: vc.location,
         status: 'connected', version: c.sc.version || vc.version || 'unknown',
+        build: c.sc.build || '', fullName: c.sc.fullName || '', instanceUuid: c.sc.instanceUuid || '',
+        solutions, licenses,
       },
       hosts, vms, datastores, networks, alarms,
     };

@@ -182,6 +182,10 @@ export function EntityDetail({ type, item, onClose }) {
             <DRow label="디스크">{item.storageGB} GB</DRow>
             <DRow label="CPU 사용률"><UsageCell pct={item.cpuUsagePct} /></DRow>
             <DRow label="메모리 사용률"><UsageCell pct={item.memUsagePct} /></DRow>
+            <DRow label="Tools 버전">{item.toolsVersion || '—'}</DRow>
+            <DRow label="스냅샷">{item.snapshotCount ? `${item.snapshotCount}개 · ${item.snapshotSizeGB || 0} GB` : '없음'}</DRow>
+            <DRow label="태그">{item.tags?.length ? item.tags.map((t) => <span key={t} className="badge blue" style={{ marginLeft: 4 }}>{t}</span>) : '—'}</DRow>
+            <DRow label="메모">{item.notes || '—'}</DRow>
           </>
         )}
         {type === 'host' && (
