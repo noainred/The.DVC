@@ -3,6 +3,7 @@ import { generateSnapshot } from './mock/generator.js';
 import { collectFromVCenter } from './vcenter/restClient.js';
 import { describeError } from './util/errors.js';
 import { latestPowerByHostName } from './idrac/service.js';
+import { applyMutes } from './alarm-mutes.js';
 
 /**
  * Overlay real iDRAC power (Watts) onto hosts by matching the ESXi host name to
@@ -21,6 +22,12 @@ async function overlayIdracPower(snap) {
   return snap;
 }
 
+/** Drop alarms matching user-defined mute rules ("ignore this kind"). */
+function applyAlarmMutes(snap) {
+  try { snap.alarms = applyMutes(snap.alarms); } catch { /* best effort */ }
+  return snap;
+}
+
 /**
  * In-memory aggregated store. Holds the most recent global snapshot and
  * refreshes it on an interval. The API reads exclusively from here so HTTP
@@ -36,7 +43,7 @@ class Store {
   async refresh() {
     try {
       if (config.dataSource === 'mock') {
-        this.snapshot = withRollups(await overlayIdracPower(generateSnapshot()));
+        this.snapshot = withRollups(applyAlarmMutes(await overlayIdracPower(generateSnapshot())));
         return;
       }
 
@@ -74,7 +81,7 @@ class Store {
       });
 
       merged.generatedAt = new Date().toISOString();
-      this.snapshot = withRollups(await overlayIdracPower(merged));
+      this.snapshot = withRollups(applyAlarmMutes(await overlayIdracPower(merged)));
       this.lastError = null;
     } catch (err) {
       this.lastError = err.message;

@@ -21,3 +21,4 @@ server/.upgrade-cache/
 *.bak.[0-9]*
 *.new.[0-9]*
 dist-offline/
+server/config/alarm-mutes.json

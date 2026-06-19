@@ -4,6 +4,7 @@ import { currentVersion, config, loadVcenterConfig } from '../config.js';
 import { loadUiSettings, saveUiSettings } from '../ui-settings.js';
 import { hostPower } from '../idrac/service.js';
 import { fetchVmMetric, PERF_INTERVALS, upgradeVmTools, getVmConsole } from '../vcenter/soapClient.js';
+import { listMutes, addMute, removeMute } from '../alarm-mutes.js';
 
 export const api = Router();
 
@@ -247,6 +248,24 @@ api.get('/tools/snapshots', (req, res) => {
     count: items.length,
     totalSizeGB: Math.round(items.reduce((a, v) => a + (v.snapshotSizeGB || 0), 0) * 10) / 10,
     items,
+  });
+});
+
+// ESXi version distribution + host list (optionally per vCenter).
+api.get('/tools/esxi', (req, res) => {
+  const snap = store.get();
+  let hosts = snap.hosts;
+  if (req.query.vcenterId) hosts = hosts.filter((h) => h.vcenterId === req.query.vcenterId);
+  const map = new Map();
+  for (const h of hosts) {
+    const v = h.version || 'unknown';
+    if (!map.has(v)) map.set(v, { version: v, count: 0 });
+    map.get(v).count++;
+  }
+  res.json({
+    scanned: hosts.length,
+    versions: [...map.values()].sort((a, b) => b.count - a.count),
+    items: hosts.map((h) => ({ host: h.name, vcenterId: h.vcenterId, cluster: h.cluster, version: h.version || 'unknown', build: h.build || '', connectionState: h.connectionState })),
   });
 });
 
@@ -622,4 +641,17 @@ api.get('/alarms', (req, res) => {
   let alarms = applyFilters(snap.alarms, req.query, snap, ['message', 'entity']);
   if (req.query.severity) alarms = alarms.filter((a) => a.severity === req.query.severity);
   res.json({ total: alarms.length, items: alarms });
+});
+
+// Alarm mute rules — "이 알람 앞으로 무시". Muted alarms are filtered globally.
+api.get('/alarm-mutes', (_req, res) => res.json({ mutes: listMutes() }));
+api.post('/alarm-mutes', (req, res) => {
+  const result = addMute(req.body || {});
+  if (result.ok) store.refresh().catch(() => {}); // re-apply immediately
+  res.status(result.ok ? 200 : 400).json(result);
+});
+api.delete('/alarm-mutes/:id', (req, res) => {
+  const result = removeMute(decodeURIComponent(req.params.id));
+  if (result.ok) store.refresh().catch(() => {});
+  res.status(result.ok ? 200 : 404).json(result);
 });
