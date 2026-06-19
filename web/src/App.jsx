@@ -24,8 +24,8 @@ const TABS = [
   { id: 'datastores', label: '스토리지' },
   { id: 'networks', label: '네트워크' },
   { id: 'alarms', label: '알람' },
-  { id: 'vcenter-admin', label: 'vCenter 관리', adminOnly: true },
-  { id: 'diagnostics', label: '진단·로그', adminOnly: true },
+  { id: 'vcenter-admin', label: 'vCenter 관리', adminOnly: true, secret: true },
+  { id: 'diagnostics', label: '진단·로그', adminOnly: true, secret: true },
   { id: 'upgrade', label: '업그레이드', adminOnly: true, feature: 'upgradeTab' },
 ];
 
@@ -38,6 +38,13 @@ const MENU_FILTERS = {
   datastores: { key: 'type', options: [['', '전체 유형'], ['VMFS', 'VMFS'], ['NFS', 'NFS'], ['vSAN', 'vSAN']] },
   networks: { key: 'type', options: [['', '전체 유형'], ['STANDARD_PORTGROUP', 'Standard'], ['DISTRIBUTED_PORTGROUP', 'Distributed']] },
   alarms: { key: 'severity', options: [['', '전체 심각도'], ['critical', 'Critical'], ['warning', 'Warning'], ['info', 'Info']] },
+};
+const fmtUptime = (s) => {
+  if (s == null) return '—';
+  const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
+  if (d > 0) return `${d}일 ${h}시간`;
+  if (h > 0) return `${h}시간 ${m}분`;
+  return `${m}분`;
 };
 const LANDING_KEY = 'vmportal.landingTab';
 const getLandingTab = () => {
@@ -108,6 +115,7 @@ function Portal({ user, onLogout }) {
   const visibleTabs = TABS.filter((t) => {
     if (t.adminOnly && user.role !== 'admin') return false;
     if (t.feature && !health?.features?.[t.feature]) return false;
+    if (t.secret && !secretRevealed) return false;
     return true;
   });
 
@@ -134,6 +142,15 @@ function Portal({ user, onLogout }) {
   const [egg, setEgg] = useState(false);
   const bumpEgg = () => setEggClicks((n) => { const m = n + 1; if (m >= 30) { setEgg(true); return 0; } return m; });
 
+  // Hidden admin tabs (vCenter 관리 / 진단·로그) revealed by clicking the version badge 33 times.
+  const [secretClicks, setSecretClicks] = useState(0);
+  const [secretRevealed, setSecretRevealed] = useState(false);
+  const bumpSecret = () => setSecretClicks((n) => {
+    const m = n + 1;
+    if (m >= 33) { setSecretRevealed(true); return 0; }
+    return m;
+  });
+
   const noFilterTabs = ['overview', 'vcenters', 'summary', 'upgrade', 'vcenter-admin', 'diagnostics'];
   const showFilters = !noFilterTabs.includes(tab);
   const showTextSearch = tab !== 'explore';
@@ -147,7 +164,7 @@ function Portal({ user, onLogout }) {
           <div className="logo" onClick={bumpEgg} style={{ cursor: 'pointer' }}>V</div>
           <div>
             <h1 className="brand-title">The Davinci<br />Virtual Platform</h1>
-            {health?.version && <span className="ver-badge brand-ver">v{health.version}</span>}
+            {health?.version && <span className="ver-badge brand-ver" onClick={bumpSecret} style={{ cursor: 'pointer' }} title="">v{health.version}</span>}
           </div>
         </div>
         <nav className="tabs">
@@ -225,10 +242,17 @@ function Portal({ user, onLogout }) {
         {tab === 'datastores' && <Datastores filters={filters} />}
         {tab === 'networks' && <Networks filters={filters} />}
         {tab === 'alarms' && <Alarms filters={filters} />}
-        {tab === 'vcenter-admin' && user.role === 'admin' && <VCenterAdmin />}
-        {tab === 'diagnostics' && user.role === 'admin' && <Diagnostics />}
+        {tab === 'vcenter-admin' && user.role === 'admin' && secretRevealed && <VCenterAdmin />}
+        {tab === 'diagnostics' && user.role === 'admin' && secretRevealed && <Diagnostics />}
         {tab === 'upgrade' && user.role === 'admin' && health?.features?.upgradeTab && <Upgrade />}
       </main>
+
+      <footer className="statusbar">
+        <div className="sb-cell"><span className="sb-label">서버 Uptime</span><span className="sb-val">{fmtUptime(health?.uptimeSec)}</span></div>
+        <div className="sb-cell"><span className="sb-label">전체 호스트</span><span className="sb-val">{(health?.hosts || 0).toLocaleString()}</span></div>
+        <div className="sb-cell"><span className="sb-label">전체 VM</span><span className="sb-val">{(health?.vms || 0).toLocaleString()} <small className="muted">({(health?.vmsPoweredOn || 0).toLocaleString()} On)</small></span></div>
+        <div className="sb-cell"><span className="sb-label">활성 알람</span><span className="sb-val" style={{ color: health?.alarmsCritical ? 'var(--red)' : undefined }}>{(health?.alarms || 0).toLocaleString()}</span></div>
+      </footer>
 
       {egg && (
         <div className="egg-overlay" onClick={() => setEgg(false)}>
