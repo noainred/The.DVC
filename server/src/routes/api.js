@@ -128,8 +128,12 @@ api.get('/summary', (req, res) => {
       vcpuAllocated: sum(v, (x) => x.cpuCount),
       ramAllocatedGB: round(sum(v, (x) => x.memMB) / 1024),
       provisionedTB: round(sum(v, (x) => x.storageGB) / 1024, 1),
+      powerKw: round(sum(h, (x) => x.powerWatts) / 1000, 1),
     };
   }).sort((a, b) => b.vms - a.vms);
+
+  const powerWatts = sum(hosts, (h) => h.powerWatts);
+  const powerReporting = hosts.filter((h) => h.powerWatts > 0).length;
 
   res.json({
     generatedAt: snap.generatedAt,
@@ -165,6 +169,13 @@ api.get('/summary', (req, res) => {
       usedTB: round(storUsedGB / 1024, 1),
       freeTB: round((storCapGB - storUsedGB) / 1024, 1),
       usagePct: pct(storUsedGB, storCapGB),
+    },
+    power: {
+      watts: powerWatts,
+      kw: round(powerWatts / 1000, 1),
+      reporting: powerReporting,
+      // Rough annual energy & cost projection (24/7), informational only.
+      annualMwh: round((powerWatts * 24 * 365) / 1e9, 1),
     },
     allocation: {
       vcpuAllocated: vmVcpu,
@@ -252,6 +263,7 @@ api.get('/top', (req, res) => {
     hostsByCpu: top(hosts, 'cpuUsagePct'),
     hostsByMem: top(hosts, 'memUsagePct'),
     hostsByVmCount: top(hosts, 'vmCount'),
+    hostsByPower: top(hosts.filter((h) => h.powerWatts > 0), 'powerWatts'),
     datastoresByUsage: top(datastores, 'usagePct'),
   });
 });

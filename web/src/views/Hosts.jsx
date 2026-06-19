@@ -17,6 +17,7 @@ export default function Hosts({ filters }) {
     { key: 'cpuUsagePct', label: 'CPU', render: (h) => <UsageCell pct={h.cpuUsagePct} /> },
     { key: 'memUsagePct', label: '메모리', render: (h) => <UsageCell pct={h.memUsagePct} /> },
     { key: 'memTotalMB', label: 'RAM', align: 'right', render: (h) => `${Math.round(h.memTotalMB / 1024)} GB` },
+    { key: 'powerWatts', label: '전력', align: 'right', render: (h) => (h.powerWatts > 0 ? `${(h.powerWatts / 1000).toFixed(2)} kW` : '—') },
     { key: 'vmCount', label: 'VM', align: 'right' },
   ];
 

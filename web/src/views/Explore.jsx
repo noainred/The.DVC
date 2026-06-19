@@ -91,6 +91,13 @@ export default function Explore({ scope }) {
           label={(d) => `${d.usagePct}% · ${tb(d.capacityGB)}`} accent="var(--green)" type="datastore" onSelect={setDetail} />
       </div>
 
+      {top.hostsByPower?.length > 0 && (
+        <div className="grid cols-3" style={{ marginTop: 16 }}>
+          <TopList title="소비전력 최다 호스트" items={top.hostsByPower} valueOf={(h) => h.powerWatts}
+            label={(h) => `${(h.powerWatts / 1000).toFixed(2)} kW`} accent="var(--amber)" type="host" onSelect={setDetail} />
+        </div>
+      )}
+
       <div className="grid cols-3" style={{ marginTop: 16 }}>
         <TopList title="vCPU 할당 최다 VM" items={top.vmsByVcpu} valueOf={(v) => v.cpuCount}
           label={(v) => `${v.cpuCount} vCPU`} accent="var(--accent)" type="vm" onSelect={setDetail} />

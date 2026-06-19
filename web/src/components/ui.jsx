@@ -180,6 +180,7 @@ export function EntityDetail({ type, item, onClose }) {
             <DRow label="CPU 사용률"><UsageCell pct={item.cpuUsagePct} /></DRow>
             <DRow label="메모리">{gb(item.memTotalMB)}</DRow>
             <DRow label="메모리 사용률"><UsageCell pct={item.memUsagePct} /></DRow>
+            {item.powerWatts > 0 && <DRow label="소비전력">{(item.powerWatts / 1000).toFixed(2)} kW ({item.powerWatts} W)</DRow>}
             <DRow label="VM 수">{item.vmCount}</DRow>
           </>
         )}

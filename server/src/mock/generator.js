@@ -179,6 +179,8 @@ export function generateSnapshot() {
         memUsageMB,
         memUsagePct: Math.round((memUsageMB / h.memTotalMB) * 100),
         vmCount: vmsOnHost.length,
+        // approximate host power draw (W): idle baseline + per-core + load-dependent
+        powerWatts: disconnected ? 0 : Math.round(140 + h.cpuCores * 4.5 + cpuLoad * h.cpuCores * 5 + memLoad * 30),
       });
 
       if (connectionState === 'DISCONNECTED') {

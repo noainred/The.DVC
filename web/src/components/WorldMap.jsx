@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { ComposableMap, Geographies, Geography, Marker, ZoomableGroup } from 'react-simple-maps';
+import React, { useEffect, useRef, useState } from 'react';
+import { ComposableMap, Geographies, Geography, Marker } from 'react-simple-maps';
 import geoData from 'world-atlas/countries-110m.json';
 
 /** Marker color/size driven by the worst alarm state at a site. */
@@ -16,8 +16,33 @@ export default function WorldMap({ sites = [], onSelect, height = 420, onResizeE
   const [h, setH] = useState(height);
   useEffect(() => { setH(height); }, [height]);
 
+  // Horizontal drag rotates the projection's center longitude. Because the
+  // rotation is modular (360°), dragging keeps scrolling around the globe
+  // forever: 아시아 → 미국 → 유럽 → 다시 아시아. Start centered on Asia/Korea.
+  const [lambda, setLambda] = useState(-127);
+  const drag = useRef(null);
+  const moved = useRef(false);
+
   const clamp = (v) => Math.max(240, Math.min(1200, v));
   const changeHeight = (delta) => { const nh = clamp(h + delta); setH(nh); onResizeEnd?.(nh); };
+
+  const onPointerDown = (e) => {
+    // ignore drags that start on a marker (let the marker handle click/hover)
+    drag.current = { x: e.clientX, lambda };
+    moved.current = false;
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+  };
+  const onPointerMove = (e) => {
+    if (!drag.current) return;
+    const dx = e.clientX - drag.current.x;
+    if (Math.abs(dx) > 2) moved.current = true;
+    // ~0.32°/px; drag left → 동쪽(아시아→미국), drag right → 서쪽
+    setLambda(drag.current.lambda + dx * 0.32);
+  };
+  const endDrag = (e) => {
+    if (drag.current) e.currentTarget?.releasePointerCapture?.(e.pointerId);
+    drag.current = null;
+  };
 
   return (
     <div className="card map-wrap" style={{ padding: 8 }}>
@@ -29,13 +54,14 @@ export default function WorldMap({ sites = [], onSelect, height = 420, onResizeE
       </div>
       <ComposableMap
         projection="geoEqualEarth"
-        projectionConfig={{ scale: 175 }}
-        style={{ width: '100%', height: 'auto' }}
+        projectionConfig={{ scale: 175, rotate: [lambda, 0, 0] }}
+        style={{ width: '100%', height: 'auto', cursor: drag.current ? 'grabbing' : 'grab', touchAction: 'none' }}
         height={h}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={endDrag}
+        onPointerLeave={endDrag}
       >
-        {/* drag to pan; wheel zoom disabled (use +/- for size) */}
-        <ZoomableGroup center={[127, 20]} zoom={1} minZoom={1} maxZoom={8}
-          filterZoomEvent={(e) => e.type !== 'wheel' && e.type !== 'dblclick'}>
         <Geographies geography={geoData}>
           {({ geographies }) =>
             geographies.map((geo) => (
@@ -63,7 +89,7 @@ export default function WorldMap({ sites = [], onSelect, height = 420, onResizeE
               onMouseEnter={(e) => setTip({ x: e.clientX, y: e.clientY, site: s })}
               onMouseMove={(e) => setTip({ x: e.clientX, y: e.clientY, site: s })}
               onMouseLeave={() => setTip(null)}
-              onClick={() => onSelect?.(s.id)}
+              onClick={() => { if (!moved.current) onSelect?.(s.id); }}
             >
               {/* decorative pulse + marker — ignore pointer events so hover is stable */}
               <circle r={st.r + 5} fill={st.ring} opacity={0.18} style={{ pointerEvents: 'none' }}>
@@ -76,13 +102,13 @@ export default function WorldMap({ sites = [], onSelect, height = 420, onResizeE
             </Marker>
           );
         })}
-        </ZoomableGroup>
       </ComposableMap>
 
       <div className="map-legend">
         <span className="legend-item"><span className="dot" style={{ background: '#22c55e' }} /> 정상</span>
         <span className="legend-item"><span className="dot" style={{ background: '#f59e0b' }} /> 경고</span>
         <span className="legend-item"><span className="dot" style={{ background: '#ef4444' }} /> 위험/연결끊김</span>
+        <span className="legend-item muted" style={{ marginLeft: 'auto' }}>← 드래그하면 지구가 계속 돌아갑니다 →</span>
       </div>
 
       {tip && (

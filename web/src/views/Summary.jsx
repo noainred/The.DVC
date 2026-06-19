@@ -80,6 +80,9 @@ export default function Summary({ scope, onGotoTab }) {
         <Big label="전체 CPU 코어" value={fmt(comp.cpuCores)} sub={`${fmt(comp.cpuTotalGhz)} GHz 물리 용량`} />
         <Big label="전체 메모리" value={fmt(comp.memTotalGB)} unit="GB" sub={`≈ ${(comp.memTotalGB / 1024).toFixed(1)} TB`} />
         <Big label="전체 스토리지" value={fmt(st.capacityTB)} unit="TB" sub={`여유 ${st.freeTB} TB`} />
+        {s.power?.reporting > 0 && (
+          <Big label="총 소비전력" value={fmt(s.power.kw)} unit="kW" accent="var(--amber)" sub={`${fmt(s.power.reporting)}개 호스트 · 연 ≈ ${fmt(s.power.annualMwh)} MWh`} />
+        )}
         <Big label="활성 알람" value={fmt(c.alarms)} accent={c.alarmsCritical ? 'var(--red)' : 'var(--amber)'} sub={`위험 ${c.alarmsCritical} · 경고 ${c.alarmsWarning}`} />
       </div>
 
