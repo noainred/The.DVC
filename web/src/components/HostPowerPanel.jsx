@@ -80,6 +80,76 @@ export default function HostPowerPanel({ hostName }) {
           )}
         </>
       )}
+
+      {!loading && data?.matched && data.info && <ServerInfo info={data.info} />}
+    </div>
+  );
+}
+
+function IRow({ label, value }) {
+  if (value == null || value === '') return null;
+  return (
+    <div className="flex between" style={{ padding: '5px 0', borderBottom: '1px solid rgba(36,48,73,.35)', gap: 12 }}>
+      <span className="muted" style={{ fontSize: 12 }}>{label}</span>
+      <span style={{ fontSize: 12, textAlign: 'right', wordBreak: 'break-all' }}>{value}</span>
+    </div>
+  );
+}
+
+/** Rich iDRAC hardware/firmware inventory (hostname, BIOS/CMOS, IPMI, CPU…). */
+function ServerInfo({ info }) {
+  const [showBios, setShowBios] = useState(false);
+  const sys = info.system || {}, idrac = info.idrac || {}, cpu = info.cpu || {}, mem = info.memory || {};
+  const bios = info.bios || {};
+  const nics = info.network || [];
+  const biosAttrs = Object.entries(bios.attributes || {});
+
+  return (
+    <div style={{ marginTop: 16, borderTop: '1px solid rgba(36,48,73,.6)', paddingTop: 12 }}>
+      <div className="flex between" style={{ marginBottom: 8 }}>
+        <b style={{ fontSize: 13 }}>🖥️ 서버 상세 정보 (iDRAC)</b>
+        {info.collectedAt && <span className="muted" style={{ fontSize: 11 }}>{new Date(info.collectedAt).toLocaleString('ko-KR')}</span>}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 20px' }}>
+        <IRow label="호스트명" value={sys.hostName} />
+        <IRow label="전원 상태" value={sys.powerState} />
+        <IRow label="모델" value={[sys.manufacturer, sys.model].filter(Boolean).join(' ')} />
+        <IRow label="서비스 태그" value={sys.serviceTag} />
+        <IRow label="시리얼 번호" value={sys.serialNumber} />
+        <IRow label="자산 태그" value={sys.assetTag} />
+        <IRow label="BIOS 버전" value={sys.biosVersion} />
+        <IRow label="iDRAC 펌웨어" value={idrac.firmwareVersion} />
+        <IRow label="IPMI 버전" value={idrac.ipmiVersion} />
+        <IRow label="iDRAC 모델" value={idrac.model} />
+        <IRow label="CPU" value={cpu.model ? `${cpu.model}${cpu.count ? ` ×${cpu.count}` : ''}${cpu.cores ? ` · ${cpu.cores}코어` : ''}` : null} />
+        <IRow label="메모리" value={mem.totalGiB != null ? `${mem.totalGiB} GiB` : null} />
+        <IRow label="시스템 상태" value={sys.health} />
+        <IRow label="UUID" value={sys.uuid} />
+      </div>
+
+      {nics.length > 0 && (
+        <div style={{ marginTop: 10 }}>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>iDRAC 네트워크</div>
+          {nics.map((n, i) => (
+            <div key={i} className="muted" style={{ fontSize: 11 }}>
+              {n.name && <b style={{ color: 'var(--text)' }}>{n.name}</b>} {n.ipv4 || ''} {n.mac ? `· ${n.mac}` : ''} {n.fqdn ? `· ${n.fqdn}` : ''}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {biosAttrs.length > 0 && (
+        <div style={{ marginTop: 10 }}>
+          <button className="tab" onClick={() => setShowBios((v) => !v)}>
+            {showBios ? '▼' : '▶'} BIOS / CMOS 설정 {bios.attributeCount ? `(주요 ${biosAttrs.length} / 전체 ${bios.attributeCount})` : ''}
+          </button>
+          {showBios && (
+            <div style={{ marginTop: 6, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 20px' }}>
+              {biosAttrs.map(([k, v]) => <IRow key={k} label={k} value={String(v)} />)}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

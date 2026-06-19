@@ -7,6 +7,7 @@
 import { loadRegistry, matchKeys } from './registry.js';
 import { getDb } from './db.js';
 import { allOmeDevices, dbKey } from './omeCache.js';
+import { getInventory } from './invCache.js';
 import { remotePowerByHost } from '../collector/state.js';
 
 const norm = (s) => String(s || '').trim().toLowerCase();
@@ -94,6 +95,7 @@ export async function hostPower(hostName, { hours = 24, limit = 1000 } = {}) {
       server: { id: server.id, name: server.name, host: server.host, serviceTag: server.serviceTag, enabled: server.enabled },
       current: latest ? { watts: latest.watts, ts: latest.ts } : null,
       history: db.history(server.id, since, limit),
+      info: getInventory(server.id),
     };
   }
 
@@ -108,6 +110,8 @@ export async function hostPower(hostName, { hours = 24, limit = 1000 } = {}) {
       server: { id: key, name: ome.device.name, host: '(via OME)', serviceTag: ome.device.serviceTag, model: ome.device.model, enabled: true },
       current: latest ? { watts: latest.watts, ts: latest.ts } : null,
       history: db.history(key, since, limit),
+      // OME devices expose basic identity; full Redfish inventory is iDRAC-only.
+      info: { system: { model: ome.device.model, serviceTag: ome.device.serviceTag, powerState: ome.device.powerState } },
     };
   }
 
