@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { VCenterClient } from './restClient.js';
 import { describeError } from '../util/errors.js';
+import { geocode } from './geocode.js';
 import { config } from '../config.js';
 
 // User registry lives in CONFIG_DIR (default app/server/config) so it can be
@@ -54,25 +55,32 @@ function normalize(body, existing = null) {
   const host = String(body.host ?? e.host ?? '').trim();
   const username = String(body.username ?? e.username ?? '').trim();
 
-  if (!id || !/^[a-zA-Z0-9._-]+$/.test(id)) return [null, 'id는 영문/숫자/.-_ 만 허용됩니다.'];
+  // id may come from an imported vcenters.json and can contain '/', '.', etc.
+  // (it is URL-encoded on the client), so only reject empty/oversized/control chars.
+  if (!id) return [null, 'id는 필수입니다.'];
+  if (id.length > 128 || [...id].some((c) => c.charCodeAt(0) < 32)) return [null, 'id에 사용할 수 없는 문자가 있습니다.'];
   if (!name) return [null, 'name(표시 이름)은 필수입니다.'];
   if (!/^https?:\/\//.test(host)) return [null, 'host는 https://... 형식이어야 합니다.'];
   if (!username) return [null, 'username은 필수입니다.'];
 
   const loc = body.location || e.location || {};
   const region = REGIONS.includes(loc.region) ? loc.region : (loc.region || 'Unknown');
+  const city = String(loc.city || '').trim();
+  const country = String(loc.country || '').trim();
+  let lat = loc.lat != null && loc.lat !== '' ? Number(loc.lat) : undefined;
+  let lon = loc.lon != null && loc.lon !== '' ? Number(loc.lon) : undefined;
+  // Auto-plot on the map: if no coordinates were given, derive them from the
+  // city/country name via the offline geocoder.
+  if ((lat == null || Number.isNaN(lat)) && (lon == null || Number.isNaN(lon)) && (city || country)) {
+    const g = geocode(city, country);
+    if (g) { lat = g.lat; lon = g.lon; }
+  }
 
   const entry = {
     id, name, host, username,
     // keep existing password if not provided / blank
     password: body.password ? String(body.password) : e.password || '',
-    location: {
-      city: String(loc.city || '').trim(),
-      country: String(loc.country || '').trim(),
-      region,
-      lat: loc.lat != null && loc.lat !== '' ? Number(loc.lat) : undefined,
-      lon: loc.lon != null && loc.lon !== '' ? Number(loc.lon) : undefined,
-    },
+    location: { city, country, region, lat, lon },
   };
   return [entry, null];
 }
