@@ -55,6 +55,15 @@ export const config = {
     retentionDays: Number(process.env.IDRAC_RETENTION_DAYS) || 90,
     // Per-request timeout to the iDRAC Redfish API.
     timeoutMs: Number(process.env.IDRAC_TIMEOUT_MS) || 15_000,
+    // --- OME (OpenManage Enterprise) tuning ---
+    // Power Manager plugin id (constant across OME installs; override if needed).
+    omePluginId: process.env.OME_POWER_PLUGIN_ID || '2F6D05BE-EE4B-4B0E-B873-C8D2F64A4625',
+    // Power Manager metric types to try, in order, until one returns a value.
+    // Defaults cover instantaneous/average system power across OME versions.
+    omePowerMetricTypes: (process.env.OME_POWER_METRIC_TYPES || '3,4,1')
+      .split(',').map((s) => Number(s.trim())).filter((n) => Number.isFinite(n)),
+    // Duration window enum for the metric query (0=recent). Override per env.
+    omePowerDuration: Number(process.env.OME_POWER_DURATION) || 0,
   },
   collector: {
     // Distributed collection. Each datacenter runs this app as a "collector
