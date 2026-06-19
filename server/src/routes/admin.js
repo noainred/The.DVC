@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { config } from '../config.js';
 import { requireRole } from '../auth/auth.js';
 import { store } from '../store.js';
+import { getLogs } from '../logbuffer.js';
 import {
   listRegistry, addVcenter, updateVcenter, removeVcenter, testConnection,
 } from '../vcenter/registry.js';
@@ -9,6 +10,22 @@ import {
 export const adminRouter = Router();
 
 const adminOnly = requireRole('admin');
+
+// Server operational logs (ring buffer). ?since=<id>&level=info|warn|error
+adminRouter.get('/logs', adminOnly, (req, res) => {
+  res.json(getLogs({ since: req.query.since, level: req.query.level }));
+});
+
+// Data-source + per-vCenter collection errors (why a vCenter won't connect).
+adminRouter.get('/status', adminOnly, (_req, res) => {
+  const snap = store.get();
+  res.json({
+    dataSource: snap.source,
+    generatedAt: snap.generatedAt,
+    vcenters: snap.vcenters.length,
+    collectionErrors: snap.collectionErrors || [],
+  });
+});
 
 // List registered vCenters (credentials redacted) + current data-source mode.
 adminRouter.get('/vcenters', adminOnly, (_req, res) => {

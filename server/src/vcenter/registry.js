@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { VCenterClient } from './restClient.js';
+import { describeError } from '../util/errors.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FILE = path.resolve(__dirname, '..', '..', 'config', 'vcenters.json');
@@ -124,6 +125,7 @@ export async function testConnection(body) {
     await client.logout();
     return { ok: true, ms: Date.now() - started };
   } catch (err) {
-    return { ok: false, reason: err.message, ms: Date.now() - started };
+    const d = describeError(err);
+    return { ok: false, reason: d.message, hint: d.hint, code: d.code, ms: Date.now() - started };
   }
 }

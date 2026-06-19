@@ -46,7 +46,11 @@ export default function VCenters({ onSelectSite }) {
               </div>
 
               {down ? (
-                <div className="muted" style={{ padding: '16px 0' }}>이 vCenter에 연결할 수 없습니다.</div>
+                <div style={{ padding: '12px 0' }}>
+                  <div className="muted" style={{ marginBottom: 6 }}>이 vCenter에 연결할 수 없습니다.</div>
+                  {s.error && <div className="diag-err-msg" style={{ fontSize: 12 }}>{s.error}</div>}
+                  {s.hint && <div className="diag-err-hint" style={{ fontSize: 12 }}>💡 {s.hint}</div>}
+                </div>
               ) : (
                 <>
                   <div className="vc-counts">
