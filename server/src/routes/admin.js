@@ -10,8 +10,9 @@ import {
 import { geocode } from '../vcenter/geocode.js';
 import {
   listRegistry as listServers, addServer, updateServer, removeServer,
-  testServer, importServers, parseCsv,
+  testServer, importServers, parseCsv, bulkAddByIps,
 } from '../idrac/registry.js';
+import { expandIpList } from '../idrac/iprange.js';
 import { getPollerStatus, pollNow } from '../idrac/poller.js';
 
 export const adminRouter = Router();
@@ -152,6 +153,20 @@ adminRouter.post('/idrac/import', adminOnly, (req, res) => {
   if (typeof body.csv === 'string') list = parseCsv(body.csv);
   else list = Array.isArray(body) ? body : body.servers;
   const result = importServers(list, body.mode === 'replace' ? 'replace' : 'merge');
+  if (result.ok) pollNow().catch(() => {});
+  res.status(result.ok ? 200 : 400).json(result);
+});
+
+// Preview how an IP list expands (count + sample + parse errors) — no writes.
+adminRouter.post('/idrac/expand-ips', adminOnly, (req, res) => {
+  const { ips, errors, truncated } = expandIpList((req.body || {}).ips || '');
+  res.json({ ok: true, count: ips.length, truncated, sample: ips.slice(0, 12), errors });
+});
+
+// Bulk-register servers from an IP list with shared credentials, then poll.
+// Body: { ips, username, password, namePrefix?, mode? }
+adminRouter.post('/idrac/bulk-add', adminOnly, (req, res) => {
+  const result = bulkAddByIps(req.body || {});
   if (result.ok) pollNow().catch(() => {});
   res.status(result.ok ? 200 : 400).json(result);
 });

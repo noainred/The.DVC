@@ -17,7 +17,7 @@ import Login from './views/Login.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 
 const TABS = [
-  { id: 'overview', label: '개요' },
+  { id: 'overview', label: 'Overview' },
   { id: 'summary', label: 'Summary' },
   { id: 'vcenters', label: 'Platform' },
   { id: 'explore', label: '탐색·랭킹' },
