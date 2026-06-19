@@ -3,7 +3,7 @@ import { store } from '../store.js';
 import { currentVersion, config, loadVcenterConfig } from '../config.js';
 import { loadUiSettings, saveUiSettings } from '../ui-settings.js';
 import { hostPower } from '../idrac/service.js';
-import { fetchVmMetric, PERF_INTERVALS } from '../vcenter/soapClient.js';
+import { fetchVmMetric, PERF_INTERVALS, upgradeVmTools } from '../vcenter/soapClient.js';
 
 export const api = Router();
 
@@ -164,6 +164,170 @@ api.get('/tools/duplicate-ips', (req, res) => {
     scannedVms: vms.length,
     items,
   });
+});
+
+// Installed VMware solutions (vCenter extensions) per vCenter, NSX highlighted.
+api.get('/tools/solutions', (_req, res) => {
+  const snap = store.get();
+  const items = (snap.vcenters || []).map((vc) => {
+    const sols = vc.solutions || [];
+    return {
+      vcenterId: vc.id, name: vc.name, status: vc.status,
+      version: vc.version, build: vc.build, fullName: vc.fullName,
+      solutions: sols,
+      nsx: sols.filter((s) => /nsx/i.test(s.key) || /nsx/i.test(s.label)),
+    };
+  });
+  const nsxVer = {};
+  for (const it of items) for (const s of it.nsx) { const v = s.version || '?'; nsxVer[v] = (nsxVer[v] || 0) + 1; }
+  const vcVer = {};
+  for (const it of items) { const v = it.version || '?'; vcVer[v] = (vcVer[v] || 0) + 1; }
+  res.json({
+    items,
+    nsxVersions: Object.entries(nsxVer).map(([version, count]) => ({ version, count })).sort((a, b) => b.count - a.count),
+    vcenterVersions: Object.entries(vcVer).map(([version, count]) => ({ version, count })).sort((a, b) => b.count - a.count),
+  });
+});
+
+// VMware Tools version distribution (optionally per vCenter).
+api.get('/tools/vmtools', (req, res) => {
+  const snap = store.get();
+  let vms = snap.vms;
+  if (req.query.vcenterId) vms = vms.filter((v) => v.vcenterId === req.query.vcenterId);
+  const map = new Map();
+  for (const v of vms) {
+    const ver = v.toolsVersion || '없음';
+    if (!map.has(ver)) map.set(ver, { version: ver, count: 0, running: 0, outdated: 0, notRunning: 0, ids: [] });
+    const e = map.get(ver); e.count++;
+    if (e.ids.length < 2000) e.ids.push(v.id);
+    if (v.toolsStatus === 'RUNNING') e.running++;
+    else if (v.toolsStatus === 'OUTDATED') e.outdated++;
+    else e.notRunning++;
+  }
+  res.json({
+    scannedVms: vms.length,
+    versions: [...map.values()].sort((a, b) => b.count - a.count),
+  });
+});
+
+// VMs that have snapshots (optionally per vCenter).
+api.get('/tools/snapshots', (req, res) => {
+  const snap = store.get();
+  let vms = snap.vms.filter((v) => (v.snapshotCount || 0) > 0);
+  if (req.query.vcenterId) vms = vms.filter((v) => v.vcenterId === req.query.vcenterId);
+  const items = vms.map((v) => ({
+    id: v.id, name: v.name, vcenterId: v.vcenterId, host: v.host, cluster: v.cluster,
+    snapshotCount: v.snapshotCount, snapshotSizeGB: v.snapshotSizeGB || 0,
+    powerState: v.powerState, guestOS: v.guestOS,
+  }));
+  res.json({
+    count: items.length,
+    totalSizeGB: Math.round(items.reduce((a, v) => a + (v.snapshotSizeGB || 0), 0) * 10) / 10,
+    items,
+  });
+});
+
+// GPU inventory per host + aggregate counts by model and vCenter.
+api.get('/tools/gpu', (req, res) => {
+  const snap = store.get();
+  let hosts = snap.hosts;
+  if (req.query.vcenterId) hosts = hosts.filter((h) => h.vcenterId === req.query.vcenterId);
+  const hostsWithGpu = [];
+  const byModel = {};
+  const byVcenter = {};
+  let totalGpus = 0;
+  for (const h of hosts) {
+    const gpus = h.gpus || [];
+    if (!gpus.length) continue;
+    totalGpus += gpus.length;
+    hostsWithGpu.push({ host: h.name, vcenterId: h.vcenterId, cluster: h.cluster, count: gpus.length, model: gpus[0].model, memGB: gpus[0].memGB, vgpu: gpus[0].vgpuMode });
+    for (const g of gpus) {
+      byModel[g.model] = (byModel[g.model] || 0) + 1;
+      byVcenter[h.vcenterId] = (byVcenter[h.vcenterId] || 0) + 1;
+    }
+  }
+  res.json({
+    totalGpus,
+    hostsWithGpu: hostsWithGpu.length,
+    byModel: Object.entries(byModel).map(([model, count]) => ({ model, count })).sort((a, b) => b.count - a.count),
+    byVcenter: Object.entries(byVcenter).map(([vcenterId, count]) => ({ vcenterId, count })).sort((a, b) => b.count - a.count),
+    items: hostsWithGpu.sort((a, b) => b.count - a.count),
+  });
+});
+
+// Host HBA adapters and their link speeds (optionally per vCenter).
+api.get('/tools/hba', (req, res) => {
+  const snap = store.get();
+  let hosts = snap.hosts;
+  if (req.query.vcenterId) hosts = hosts.filter((h) => h.vcenterId === req.query.vcenterId);
+  const items = [];
+  const speedDist = {};
+  for (const h of hosts) {
+    for (const hba of h.hbas || []) {
+      items.push({ host: h.name, vcenterId: h.vcenterId, cluster: h.cluster, name: hba.name, type: hba.type, model: hba.model, speedGbps: hba.speedGbps || 0, wwn: hba.wwn || '', status: hba.status || '' });
+      const k = hba.speedGbps ? `${hba.speedGbps}Gb` : '미상';
+      speedDist[k] = (speedDist[k] || 0) + 1;
+    }
+  }
+  res.json({
+    hostsWithHba: hosts.filter((h) => (h.hbas || []).length).length,
+    adapters: items.length,
+    speedDistribution: Object.entries(speedDist).map(([speed, count]) => ({ speed, count })).sort((a, b) => parseFloat(b.speed) - parseFloat(a.speed)),
+    items,
+  });
+});
+
+// License overview across all vCenters (optionally one). Aggregates per product.
+api.get('/tools/licenses', (req, res) => {
+  const snap = store.get();
+  let vcs = snap.vcenters || [];
+  if (req.query.vcenterId) vcs = vcs.filter((v) => v.id === req.query.vcenterId);
+  const items = [];
+  for (const vc of vcs) for (const l of vc.licenses || []) items.push({ vcenterId: vc.id, vcenterName: vc.name, ...l });
+  // rollup by license name
+  const roll = new Map();
+  for (const l of items) {
+    const k = l.name || l.edition || 'unknown';
+    if (!roll.has(k)) roll.set(k, { name: k, total: 0, used: 0, product: l.product, productVersion: l.productVersion, count: 0 });
+    const e = roll.get(k); e.total += l.total || 0; e.used += l.used || 0; e.count++;
+  }
+  res.json({
+    items,
+    byLicense: [...roll.values()].sort((a, b) => b.used - a.used),
+    totalAssigned: items.reduce((a, l) => a + (l.used || 0), 0),
+  });
+});
+
+// Trigger VMware Tools upgrade on one or more VMs. Body: { ids:[vmId,...] }.
+api.post('/vms/upgrade-tools', async (req, res) => {
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+  if (!ids.length) return res.status(400).json({ ok: false, reason: '대상 VM이 없습니다.' });
+  const snap = store.get();
+  if (snap.source === 'mock') {
+    return res.json({ ok: true, mock: true, requested: ids.length, results: ids.map((id) => ({ id, ok: true })) });
+  }
+  // live: group by vCenter and call UpgradeTools_Task
+  const byVc = new Map();
+  for (const id of ids) {
+    const sep = id.indexOf(':');
+    const vcId = sep >= 0 ? id.slice(0, sep) : id;
+    const moref = sep >= 0 ? id.slice(sep + 1) : '';
+    if (!byVc.has(vcId)) byVc.set(vcId, []);
+    byVc.get(vcId).push({ id, moref });
+  }
+  const cfg = loadVcenterConfig().vcenters;
+  const results = [];
+  for (const [vcId, list] of byVc) {
+    const vc = cfg.find((v) => v.id === vcId);
+    if (!vc) { for (const x of list) results.push({ id: x.id, ok: false, error: 'vCenter 설정 없음' }); continue; }
+    try {
+      const r = await upgradeVmTools(vc, list.map((x) => x.moref));
+      r.forEach((rr, i) => results.push({ id: list[i].id, ok: rr.ok, error: rr.error }));
+    } catch (err) {
+      for (const x of list) results.push({ id: x.id, ok: false, error: err.message });
+    }
+  }
+  res.json({ ok: true, requested: ids.length, succeeded: results.filter((r) => r.ok).length, results });
 });
 
 // Shared UI settings (e.g. dashboard map height) — same for all users.

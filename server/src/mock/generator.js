@@ -27,6 +27,73 @@ const GUEST_OS = [
 ];
 const APP_ROLES = ['web', 'app', 'db', 'cache', 'mq', 'lb', 'k8s-node', 'monitor', 'backup', 'dns'];
 const ESXI_VERSIONS = ['8.0.3', '8.0.2', '8.0.1', '7.0.3', '7.0.2', '6.7.0'];
+const HBA_FC = [
+  { model: 'Emulex LPe35002 32Gb FC', speeds: [32, 16] },
+  { model: 'QLogic QLE2772 32Gb FC', speeds: [32, 32] },
+  { model: 'Emulex LPe31002 16Gb FC', speeds: [16, 16] },
+  { model: 'QLogic QLE2692 16Gb FC', speeds: [16, 8] },
+];
+const HBA_ISCSI = { model: 'Broadcom 57414 25GbE iSCSI', speeds: [25, 25] };
+function wwn(idx, p) { const h = (idx * 131 + p * 17).toString(16).padStart(2, '0'); return `20:00:00:24:ff:${h}:${(p).toString(16).padStart(2, '0')}:${(idx % 256).toString(16).padStart(2, '0')}`; }
+function mkHbas(idx) {
+  const fc = HBA_FC[idx % HBA_FC.length];
+  const hbas = fc.speeds.map((sp, p) => ({
+    name: `vmhba${p + 1}`, type: 'FibreChannel', model: fc.model,
+    speedGbps: idx % 23 === 0 && p === 1 ? Math.max(8, sp / 2) : sp, // a few links degraded
+    wwn: wwn(idx, p), status: 'online',
+  }));
+  if (idx % 4 === 0) hbas.push({ name: 'vmhba64', type: 'iSCSI', model: HBA_ISCSI.model, speedGbps: HBA_ISCSI.speeds[0], wwn: '', status: 'online' });
+  return hbas;
+}
+const VC_VERSIONS = ['8.0.3', '8.0.2', '7.0.3'];
+const TOOLS_VERSIONS = ['12352', '12325', '11365', '11296', '10346', '12389'];
+const VM_TAGS = [
+  ['Production', 'Tier-1'], ['Dev'], ['Backup:Daily'], [], ['Critical', 'PCI'],
+  ['Test'], ['Owner:InfraTeam'], ['DR-Protected'],
+];
+// Installed VMware solutions (vCenter extensions) per site, with NSX highlighted.
+const NSX_VERSIONS = ['4.1.2.3', '4.1.0.2', '3.2.3.1', '4.0.1.1'];
+const GPU_MODELS = [
+  { model: 'NVIDIA H100 80GB', memGB: 80, vendor: 'NVIDIA' },
+  { model: 'NVIDIA A100 80GB', memGB: 80, vendor: 'NVIDIA' },
+  { model: 'NVIDIA L40S', memGB: 48, vendor: 'NVIDIA' },
+  { model: 'NVIDIA A40', memGB: 48, vendor: 'NVIDIA' },
+  { model: 'NVIDIA T4', memGB: 16, vendor: 'NVIDIA' },
+];
+// ~1 in 4 hosts has GPUs (AI/VDI hosts). Returns [] otherwise.
+function mkGpus(idx, site) {
+  if (idx % 4 !== 0) return [];
+  const g = GPU_MODELS[idx % GPU_MODELS.length];
+  const count = [1, 2, 4, 8][idx % 4];
+  return Array.from({ length: count }, (_, i) => ({
+    model: g.model, vendor: g.vendor, memGB: g.memGB,
+    vgpuMode: idx % 3 === 0,
+    busId: `0000:${(0x3b + i).toString(16)}:00.0`,
+  }));
+}
+function mkLicenses(site) {
+  const n = site.hosts;
+  return [
+    { name: 'vSphere 8 Enterprise Plus', total: n + 8, used: n, key: 'XXXXX-…-AAAAA', edition: 'esxEnterprisePlus', product: 'VMware ESX Server', productVersion: '8.0', expires: '2026-12-31' },
+    { name: 'vCenter Server 8 Standard', total: 1, used: 1, key: 'YYYYY-…-BBBBB', edition: 'vcExpress', product: 'VMware VirtualCenter Server', productVersion: '8.0', expires: '2026-12-31' },
+    { name: 'NSX Data Center Advanced', total: n + 4, used: n, key: 'ZZZZZ-…-CCCCC', edition: 'nsx', product: 'NSX', productVersion: '4.1', expires: site.region === '중국' ? '2025-09-30' : '2027-06-30' },
+    { name: 'vSAN Enterprise', total: n, used: Math.round(n * 0.6), key: 'WWWWW-…-DDDDD', edition: 'vsanEnterprise', product: 'vSAN', productVersion: '8.0', expires: '2026-12-31' },
+  ];
+}
+function mkSolutions(site) {
+  const n = site.id.length;
+  const sols = [
+    { key: 'com.vmware.nsx.management.nsxt', label: 'VMware NSX-T', company: 'VMware', version: NSX_VERSIONS[n % NSX_VERSIONS.length], category: 'NSX' },
+    { key: 'com.vmware.vsan.health', label: 'vSAN', company: 'VMware', version: ['8.0u2', '8.0u1', '7.0u3'][n % 3], category: 'Storage' },
+    { key: 'com.vmware.vcHms', label: 'Site Recovery Manager', company: 'VMware', version: ['8.7.0', '8.6.0'][n % 2], category: 'DR' },
+    { key: 'com.vmware.vrops', label: 'Aria Operations', company: 'VMware', version: ['8.14.0', '8.12.1'][n % 2], category: 'Mgmt' },
+    { key: 'com.vmware.vlcm', label: 'Lifecycle Manager', company: 'VMware', version: site.region === '미국' ? '8.0.3' : '8.0.2', category: 'Mgmt' },
+  ];
+  // some sites also have HCX / Avi
+  if (n % 2 === 0) sols.push({ key: 'com.vmware.hcx', label: 'HCX', company: 'VMware', version: '4.8.0', category: 'Migration' });
+  if (n % 3 === 0) sols.push({ key: 'com.vmware.avi.lb', label: 'NSX Advanced LB (Avi)', company: 'VMware', version: '22.1.3', category: 'NSX' });
+  return sols;
+}
 // VM folder paths to mimic a vSphere "VMs and Templates" inventory.
 const VM_FOLDERS = [
   'Production/Web', 'Production/DB', 'Production/App', 'Infrastructure/Network',
@@ -136,8 +203,10 @@ export function generateSnapshot() {
       name: site.name,
       location: { city: site.city, country: site.country, region: site.region, lat: site.lat, lon: site.lon },
       status: vcReachable ? 'connected' : 'unreachable',
-      version: '8.0.2',
+      version: VC_VERSIONS[site.id.length % VC_VERSIONS.length],
       build: '22617221',
+      solutions: mkSolutions(site),
+      licenses: mkLicenses(site),
     });
 
     if (!vcReachable) {
@@ -189,6 +258,8 @@ export function generateSnapshot() {
         vmCount: vmsOnHost.length,
         cpuThreads: h.cpuCores * 2, // logical cores (hyper-threaded)
         version: ESXI_VERSIONS[(h.idx + site.id.length) % ESXI_VERSIONS.length],
+        hbas: mkHbas(h.idx),
+        gpus: mkGpus(h.idx, site),
         // approximate host power draw (W): idle baseline + per-core + load-dependent
         powerWatts: disconnected ? 0 : Math.round(140 + h.cpuCores * 4.5 + cpuLoad * h.cpuCores * 5 + memLoad * 30),
       });
@@ -228,6 +299,11 @@ export function generateSnapshot() {
         ipAddresses: powered ? mkIps(site, vm.idx) : [],
         folder: VM_FOLDERS[(vm.idx * 7 + site.id.length) % VM_FOLDERS.length],
         toolsStatus: powered ? (vm.idx % 17 === 0 ? 'OUTDATED' : 'RUNNING') : 'NOT_RUNNING',
+        toolsVersion: TOOLS_VERSIONS[vm.idx % TOOLS_VERSIONS.length],
+        notes: vm.idx % 4 === 0 ? `${pick(['운영', '백업대상', '마이그레이션 예정', 'PoC', '담당: 인프라팀'])} · ${site.id}` : '',
+        tags: VM_TAGS[vm.idx % VM_TAGS.length],
+        snapshotCount: vm.idx % 6 === 0 ? intBetween(1, 4) : 0,
+        snapshotSizeGB: vm.idx % 6 === 0 ? Math.round(vm.storageGB * (0.05 + (vm.idx % 5) * 0.06) * 10) / 10 : 0,
       });
     }
 
