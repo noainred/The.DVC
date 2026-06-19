@@ -17,11 +17,15 @@ api.get('/vms/:id/metrics', async (req, res) => {
   const id = req.params.id;
   const type = METRIC_TYPES.includes(req.query.type) ? req.query.type : 'cpu';
   const interval = PERF_INTERVALS[req.query.interval] ? req.query.interval : 'realtime';
+  // Optional explicit date range (ISO/datetime-local). Empty = rolling window.
+  const start = req.query.start && !Number.isNaN(Date.parse(req.query.start)) ? req.query.start : null;
+  const end = req.query.end && !Number.isNaN(Date.parse(req.query.end)) ? req.query.end : null;
+
   const snap = store.get();
   const vm = snap.vms.find((v) => v.id === id);
   if (!vm) return res.status(404).json({ ok: false, reason: 'VM을 찾을 수 없습니다.' });
 
-  if (snap.source === 'mock') return res.json(synthMetric(vm, type, interval));
+  if (snap.source === 'mock') return res.json(synthMetric(vm, type, interval, { start, end }));
 
   const sep = id.indexOf(':');
   const vcId = sep >= 0 ? id.slice(0, sep) : id;
@@ -29,37 +33,37 @@ api.get('/vms/:id/metrics', async (req, res) => {
   const vc = loadVcenterConfig().vcenters.find((v) => v.id === vcId);
   if (!vc) return res.status(404).json({ ok: false, reason: 'vCenter 설정을 찾을 수 없습니다.' });
   try {
-    res.json(await fetchVmMetric(vc, moref, type, interval));
+    res.json(await fetchVmMetric(vc, moref, type, interval, { start, end }));
   } catch (err) {
     res.status(502).json({ ok: false, reason: err.message });
   }
 });
 
 // Synthesize a realistic series for mock mode so the viewer works out of the box.
-function synthMetric(vm, type, interval) {
-  const spec = {
-    realtime: { n: 180, stepMs: 20_000 },
-    day: { n: 288, stepMs: 300_000 },
-    week: { n: 336, stepMs: 1_800_000 },
-    month: { n: 360, stepMs: 7_200_000 },
-    year: { n: 365, stepMs: 86_400_000 },
-  }[interval] || { n: 180, stepMs: 20_000 };
+// Honors an explicit { start, end } date range when provided.
+function synthMetric(vm, type, interval, range = {}) {
+  const stepMs = { realtime: 20_000, day: 300_000, week: 1_800_000, month: 7_200_000, year: 86_400_000 }[interval] || 20_000;
+  const defN = { realtime: 180, day: 288, week: 336, month: 360, year: 365 }[interval] || 180;
+  let endMs = range.end ? Date.parse(range.end) : Date.now();
+  let startMs = range.start ? Date.parse(range.start) : endMs - (defN - 1) * stepMs;
+  if (startMs > endMs) [startMs, endMs] = [endMs, startMs];
+  const n = Math.max(2, Math.min(2000, Math.round((endMs - startMs) / stepMs) + 1));
+  const spec = { n, stepMs, startMs };
   const base = type === 'cpu' ? (vm.cpuUsagePct || 10)
     : type === 'mem' ? (vm.memUsagePct || 20)
       : type === 'disk' ? 1800 : 900; // KBps baselines
   const amp = type === 'cpu' || type === 'mem' ? base * 0.5 + 8 : base * 0.8;
   const seed = [...vm.id].reduce((a, c) => a + c.charCodeAt(0), 0);
-  const now = Date.now();
   const points = [];
-  for (let i = spec.n - 1; i >= 0; i--) {
-    const t = new Date(now - i * spec.stepMs).toISOString();
+  for (let i = 0; i < spec.n; i++) {
+    const t = new Date(spec.startMs + i * spec.stepMs).toISOString();
     const wave = Math.sin((i + seed) / 9) * 0.6 + Math.sin((i + seed) / 23) * 0.4;
     let v = base + wave * amp + (((seed * (i + 1)) % 17) - 8) * (amp / 20);
     if (type === 'cpu' || type === 'mem') v = Math.max(0, Math.min(100, v));
     else v = Math.max(0, v);
     points.push({ t, v: Math.round(v * 10) / 10 });
   }
-  return { ok: true, type, interval, unit: METRIC_UNIT[type], points, mock: true };
+  return { ok: true, type, interval, unit: METRIC_UNIT[type], points, mock: true, start: range.start || null, end: range.end || null };
 }
 
 // Real iDRAC power for one host (current + history). Used by the host detail

@@ -19,6 +19,15 @@ const INTERVALS = [
 ];
 const tipStyle = { background: '#0c1322', border: '1px solid #243049', borderRadius: 8, color: '#e6edf6', fontSize: 12 };
 
+// Humanize a KBps value to KB/s · MB/s · GB/s so axis labels stay short.
+function fmtRate(kbps) {
+  if (kbps == null) return '—';
+  if (kbps >= 1024 * 1024) return `${(kbps / 1024 / 1024).toFixed(1)} GB/s`;
+  if (kbps >= 1024) return `${(kbps / 1024).toFixed(1)} MB/s`;
+  return `${Math.round(kbps)} KB/s`;
+}
+const fmtVal = (v, unit) => (unit === 'KBps' ? fmtRate(v) : `${v}${unit}`);
+
 function fmtTick(t, interval) {
   const d = new Date(t);
   if (interval === 'realtime' || interval === 'day') return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
@@ -40,21 +49,25 @@ export function VmMetricButton({ vmId, vmName }) {
 function VmMetricModal({ vmId, vmName, onClose }) {
   const [type, setType] = useState('cpu');
   const [interval, setIntv] = useState('realtime');
+  const [range, setRange] = useState({ start: '', end: '' }); // applied range
+  const [draft, setDraft] = useState({ start: '', end: '' });  // date-picker inputs
   const [state, setState] = useState({ loading: true });
 
   useEffect(() => {
     let active = true;
+    const params = { type, interval, ...(range.start ? { start: range.start } : {}), ...(range.end ? { end: range.end } : {}) };
     const fetchOnce = () => {
-      fetchJson(`/vms/${encodeURIComponent(vmId)}/metrics`, { type, interval })
+      fetchJson(`/vms/${encodeURIComponent(vmId)}/metrics`, params)
         .then((d) => { if (active) setState({ loading: false, data: d }); })
         .catch((e) => { if (active) setState({ loading: false, error: e.message }); });
     };
     setState({ loading: true });
     fetchOnce();
-    // 실시간일 때만 20초마다 자동 갱신
-    const timer = interval === 'realtime' ? setInterval(fetchOnce, 20_000) : null;
+    // 실시간 + 기간 미지정일 때만 20초마다 자동 갱신
+    const live = interval === 'realtime' && !range.start && !range.end;
+    const timer = live ? setInterval(fetchOnce, 20_000) : null;
     return () => { active = false; if (timer) clearInterval(timer); };
-  }, [vmId, type, interval]);
+  }, [vmId, type, interval, range.start, range.end]);
 
   const { loading, data, error } = state;
   const cfg = TYPES.find((t) => t.k === type);
@@ -85,11 +98,22 @@ function VmMetricModal({ vmId, vmName, onClose }) {
           </div>
         </div>
 
+        {/* 기간(날짜) 지정 — 비우면 최근 구간 자동 */}
+        <div className="flex gap wrap" style={{ marginBottom: 10, alignItems: 'center', fontSize: 12 }}>
+          <span className="muted">기간 지정</span>
+          <input className="input" type="datetime-local" style={{ padding: '5px 8px', width: 'auto' }} value={draft.start} onChange={(e) => setDraft((d) => ({ ...d, start: e.target.value }))} />
+          <span className="muted">~</span>
+          <input className="input" type="datetime-local" style={{ padding: '5px 8px', width: 'auto' }} value={draft.end} onChange={(e) => setDraft((d) => ({ ...d, end: e.target.value }))} />
+          <button className="tab" onClick={() => setRange({ start: draft.start, end: draft.end })}>적용</button>
+          {(range.start || range.end) && <button className="tab" onClick={() => { setDraft({ start: '', end: '' }); setRange({ start: '', end: '' }); }}>최근으로</button>}
+          {(range.start || range.end) ? <span className="badge blue">기간 조회</span> : <span className="muted">최근 구간</span>}
+        </div>
+
         {!loading && !error && pts.length > 0 && (
           <div className="flex gap" style={{ marginBottom: 8, gap: 24 }}>
-            <span className="muted" style={{ fontSize: 12 }}>현재 <b style={{ color: 'var(--text)' }}>{last}{unit}</b></span>
-            <span className="muted" style={{ fontSize: 12 }}>평균 <b style={{ color: 'var(--text)' }}>{avg}{unit}</b></span>
-            <span className="muted" style={{ fontSize: 12 }}>최대 <b style={{ color: 'var(--text)' }}>{peak}{unit}</b></span>
+            <span className="muted" style={{ fontSize: 12 }}>현재 <b style={{ color: 'var(--text)' }}>{fmtVal(last, unit)}</b></span>
+            <span className="muted" style={{ fontSize: 12 }}>평균 <b style={{ color: 'var(--text)' }}>{fmtVal(avg, unit)}</b></span>
+            <span className="muted" style={{ fontSize: 12 }}>최대 <b style={{ color: 'var(--text)' }}>{fmtVal(peak, unit)}</b></span>
             {data?.mock && <span className="badge gray" style={{ fontSize: 11 }}>데모 데이터</span>}
           </div>
         )}
@@ -109,9 +133,10 @@ function VmMetricModal({ vmId, vmName, onClose }) {
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#243049" />
                 <XAxis dataKey="t" stroke="#8b9bb4" fontSize={11} minTickGap={40} tickFormatter={(t) => fmtTick(t, interval)} />
-                <YAxis stroke="#8b9bb4" fontSize={11} width={48} unit={unit} domain={type === 'cpu' || type === 'mem' ? [0, 100] : [0, 'auto']} />
-                <Tooltip contentStyle={tipStyle} labelFormatter={(t) => new Date(t).toLocaleString('ko-KR')} formatter={(v) => [`${v}${unit}`, cfg.label]} />
-                <Area type="monotone" dataKey="v" stroke={cfg.color} strokeWidth={2} fill="url(#vmMetricFill)" isAnimationActive={false} />
+                <YAxis stroke="#8b9bb4" fontSize={11} width={unit === 'KBps' ? 72 : 48}
+                  tickFormatter={(v) => fmtVal(v, unit)} domain={type === 'cpu' || type === 'mem' ? [0, 100] : [0, 'auto']} />
+                <Tooltip contentStyle={tipStyle} labelFormatter={(t) => new Date(t).toLocaleString('ko-KR')} formatter={(v) => [fmtVal(v, unit), cfg.label]} />
+                <Area type="monotone" dataKey="v" stroke={cfg.color} strokeWidth={2} fill="url(#vmMetricFill)" isAnimationActive={false} connectNulls dot={false} />
               </AreaChart>
             </ResponsiveContainer>
           )}
