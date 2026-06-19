@@ -135,5 +135,69 @@ export function Modal({ title, onClose, children, width = 560 }) {
   );
 }
 
+function DRow({ label, children }) {
+  return (
+    <div className="flex between" style={{ padding: '8px 0', borderBottom: '1px solid rgba(36,48,73,.4)', gap: 16 }}>
+      <span className="muted">{label}</span>
+      <span style={{ textAlign: 'right', wordBreak: 'break-all' }}>{children}</span>
+    </div>
+  );
+}
+
+const gb = (mb) => `${Math.round((mb || 0) / 1024).toLocaleString()} GB`;
+const tb = (g) => (g >= 1024 ? `${(g / 1024).toFixed(1)} TB` : `${g} GB`);
+
+/** Detail popup for a host / VM / datastore. */
+export function EntityDetail({ type, item, onClose }) {
+  const titles = { vm: 'VM', host: '호스트', datastore: '데이터스토어' };
+  return (
+    <Modal title={`${titles[type] || ''} 상세 — ${item.name}`} onClose={onClose} width={640}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 24px' }}>
+        {type === 'vm' && (
+          <>
+            <DRow label="이름"><b>{item.name}</b></DRow>
+            <DRow label="전원"><StateBadge state={item.powerState} /></DRow>
+            <DRow label="vCenter">{item.vcenterId}</DRow>
+            <DRow label="호스트">{item.host || '—'}</DRow>
+            <DRow label="클러스터">{item.cluster || '—'}</DRow>
+            <DRow label="Guest OS">{item.guestOS}</DRow>
+            <DRow label="IP">{item.ipAddress || '—'}</DRow>
+            <DRow label="VMware Tools"><StateBadge state={item.toolsStatus} /></DRow>
+            <DRow label="vCPU">{item.cpuCount} 코어</DRow>
+            <DRow label="RAM">{gb(item.memMB)}</DRow>
+            <DRow label="디스크">{item.storageGB} GB</DRow>
+            <DRow label="CPU 사용률"><UsageCell pct={item.cpuUsagePct} /></DRow>
+            <DRow label="메모리 사용률"><UsageCell pct={item.memUsagePct} /></DRow>
+          </>
+        )}
+        {type === 'host' && (
+          <>
+            <DRow label="이름"><b>{item.name}</b></DRow>
+            <DRow label="상태"><StateBadge state={item.connectionState} /></DRow>
+            <DRow label="vCenter">{item.vcenterId}</DRow>
+            <DRow label="클러스터">{item.cluster || '—'}</DRow>
+            <DRow label="CPU 코어">{item.cpuCores}</DRow>
+            <DRow label="CPU 사용률"><UsageCell pct={item.cpuUsagePct} /></DRow>
+            <DRow label="메모리">{gb(item.memTotalMB)}</DRow>
+            <DRow label="메모리 사용률"><UsageCell pct={item.memUsagePct} /></DRow>
+            <DRow label="VM 수">{item.vmCount}</DRow>
+          </>
+        )}
+        {type === 'datastore' && (
+          <>
+            <DRow label="이름"><b>{item.name}</b></DRow>
+            <DRow label="유형"><span className="badge blue">{item.type}</span></DRow>
+            <DRow label="vCenter">{item.vcenterId}</DRow>
+            <DRow label="총 용량">{tb(item.capacityGB)}</DRow>
+            <DRow label="사용">{tb(item.usedGB)}</DRow>
+            <DRow label="여유">{tb(item.freeGB)}</DRow>
+            <DRow label="사용률"><UsageCell pct={item.usagePct} /></DRow>
+          </>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
 export function Loading() { return <div className="loading">불러오는 중…</div>; }
 export function ErrorBox({ message }) { return <div className="error-box">오류: {message}</div>; }

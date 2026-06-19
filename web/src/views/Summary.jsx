@@ -10,6 +10,8 @@ const OS_COLORS = {
   SUSE: '#22c55e', Debian: '#ec4899', Other: '#64748b',
 };
 const tipStyle = { background: '#0c1322', border: '1px solid #243049', borderRadius: 8, color: '#e6edf6', fontSize: 12 };
+const itemStyle = { color: '#e6edf6' };
+const labelStyle = { color: '#8b9bb4' };
 const fmt = (n) => (n ?? 0).toLocaleString('en-US');
 
 function Big({ label, value, unit, sub, accent }) {
@@ -108,7 +110,7 @@ export default function Summary({ scope, onGotoTab }) {
               <Pie data={osPie} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={60} outerRadius={95} paddingAngle={2}>
                 {osPie.map((d, i) => <Cell key={i} fill={d.fill} />)}
               </Pie>
-              <Tooltip contentStyle={tipStyle} formatter={(v, n) => [`${fmt(v)} VM`, n]} />
+              <Tooltip contentStyle={tipStyle} itemStyle={itemStyle} labelStyle={labelStyle} formatter={(v, n) => [`${fmt(v)} VM`, n]} />
               <Legend wrapperStyle={{ fontSize: 12 }} />
             </PieChart>
           </ResponsiveContainer>

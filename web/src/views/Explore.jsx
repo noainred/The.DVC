@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { usePolling } from '../api.js';
-import { DataTable, UsageCell, StateBadge, Loading, ErrorBox } from '../components/ui.jsx';
+import { DataTable, UsageCell, StateBadge, Loading, ErrorBox, EntityDetail } from '../components/ui.jsx';
 
-/** Compact leaderboard list for a "top consumers" category. */
-function TopList({ title, items, valueOf, label, accent }) {
+/** Compact leaderboard list for a "top consumers" category. Rows are clickable. */
+function TopList({ title, items, valueOf, label, accent, type, onSelect }) {
   const max = Math.max(1, ...items.map(valueOf));
   return (
     <div className="card">
@@ -15,7 +15,7 @@ function TopList({ title, items, valueOf, label, accent }) {
       {items.map((it, i) => {
         const v = valueOf(it);
         return (
-          <div key={it.id || i} className="top-row">
+          <div key={it.id || i} className="top-row top-row-click" onClick={() => onSelect?.({ type, item: it })} title="클릭하여 상세 보기">
             <span className="top-rank">{i + 1}</span>
             <div className="top-main">
               <div className="top-name">{it.name}</div>
@@ -34,6 +34,7 @@ function TopList({ title, items, valueOf, label, accent }) {
 
 export default function Explore({ scope }) {
   const [limit, setLimit] = useState(10);
+  const [detail, setDetail] = useState(null); // { type, item }
   const { data: top, error, loading } = usePolling('/top', { ...scope, limit }, 15_000);
 
   // Advanced spec search state
@@ -74,29 +75,29 @@ export default function Explore({ scope }) {
 
       <div className="grid cols-3">
         <TopList title="CPU 사용률 최다 VM" items={top.vmsByCpuUsage} valueOf={(v) => v.cpuUsagePct}
-          label={(v) => `${v.cpuUsagePct}%`} accent="var(--accent)" />
+          label={(v) => `${v.cpuUsagePct}%`} accent="var(--accent)" type="vm" onSelect={setDetail} />
         <TopList title="메모리 사용률 최다 VM" items={top.vmsByMemUsage} valueOf={(v) => v.memUsagePct}
-          label={(v) => `${v.memUsagePct}%`} accent="var(--purple)" />
+          label={(v) => `${v.memUsagePct}%`} accent="var(--purple)" type="vm" onSelect={setDetail} />
         <TopList title="디스크 할당 최다 VM" items={top.vmsByStorage} valueOf={(v) => v.storageGB}
-          label={(v) => tb(v.storageGB)} accent="var(--accent-2)" />
+          label={(v) => tb(v.storageGB)} accent="var(--accent-2)" type="vm" onSelect={setDetail} />
       </div>
 
       <div className="grid cols-3" style={{ marginTop: 16 }}>
         <TopList title="CPU 사용률 최다 호스트" items={top.hostsByCpu} valueOf={(h) => h.cpuUsagePct}
-          label={(h) => `${h.cpuUsagePct}%`} accent="var(--red)" />
+          label={(h) => `${h.cpuUsagePct}%`} accent="var(--red)" type="host" onSelect={setDetail} />
         <TopList title="메모리 사용률 최다 호스트" items={top.hostsByMem} valueOf={(h) => h.memUsagePct}
-          label={(h) => `${h.memUsagePct}%`} accent="var(--amber)" />
+          label={(h) => `${h.memUsagePct}%`} accent="var(--amber)" type="host" onSelect={setDetail} />
         <TopList title="사용률 최다 데이터스토어" items={top.datastoresByUsage} valueOf={(d) => d.usagePct}
-          label={(d) => `${d.usagePct}% · ${tb(d.capacityGB)}`} accent="var(--green)" />
+          label={(d) => `${d.usagePct}% · ${tb(d.capacityGB)}`} accent="var(--green)" type="datastore" onSelect={setDetail} />
       </div>
 
       <div className="grid cols-3" style={{ marginTop: 16 }}>
         <TopList title="vCPU 할당 최다 VM" items={top.vmsByVcpu} valueOf={(v) => v.cpuCount}
-          label={(v) => `${v.cpuCount} vCPU`} accent="var(--accent)" />
+          label={(v) => `${v.cpuCount} vCPU`} accent="var(--accent)" type="vm" onSelect={setDetail} />
         <TopList title="RAM 할당 최다 VM" items={top.vmsByRam} valueOf={(v) => v.memMB}
-          label={(v) => `${Math.round(v.memMB / 1024)} GB`} accent="var(--purple)" />
+          label={(v) => `${Math.round(v.memMB / 1024)} GB`} accent="var(--purple)" type="vm" onSelect={setDetail} />
         <TopList title="VM 수 최다 호스트" items={top.hostsByVmCount} valueOf={(h) => h.vmCount}
-          label={(h) => `${h.vmCount} VM`} accent="var(--accent-2)" />
+          label={(h) => `${h.vmCount} VM`} accent="var(--accent-2)" type="host" onSelect={setDetail} />
       </div>
 
       <div className="section-title">VM 사양별 검색</div>
@@ -128,6 +129,8 @@ export default function Explore({ scope }) {
         <DataTable columns={vmCols} rows={vmResult?.items || []} initialSort={{ key: 'cpuUsagePct', dir: 'desc' }}
           emptyText="조건에 맞는 VM이 없습니다." />
       </div>
+
+      {detail && <EntityDetail type={detail.type} item={detail.item} onClose={() => setDetail(null)} />}
     </>
   );
 }

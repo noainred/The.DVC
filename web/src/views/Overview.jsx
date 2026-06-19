@@ -70,7 +70,7 @@ export default function Overview({ onSelectSite, onGotoTab }) {
               <CartesianGrid strokeDasharray="3 3" stroke="#243049" />
               <XAxis dataKey="name" stroke="#8b9bb4" fontSize={10} interval={0} angle={-30} textAnchor="end" height={60} />
               <YAxis stroke="#8b9bb4" fontSize={12} />
-              <Tooltip contentStyle={tipStyle} cursor={{ fill: 'rgba(59,130,246,.08)' }} />
+              <Tooltip contentStyle={tipStyle} itemStyle={itemStyle} labelStyle={labelStyle} cursor={{ fill: 'rgba(59,130,246,.08)' }} />
               <Legend wrapperStyle={{ fontSize: 12 }} />
               <Bar dataKey="VM" fill="#334b7a" radius={[4, 4, 0, 0]} />
               <Bar dataKey="On" fill="#3b82f6" radius={[4, 4, 0, 0]} />
@@ -85,7 +85,7 @@ export default function Overview({ onSelectSite, onGotoTab }) {
               <CartesianGrid strokeDasharray="3 3" stroke="#243049" horizontal={false} />
               <XAxis type="number" domain={[0, 100]} stroke="#8b9bb4" fontSize={12} unit="%" />
               <YAxis type="category" dataKey="name" stroke="#8b9bb4" fontSize={12} width={70} />
-              <Tooltip contentStyle={tipStyle} cursor={{ fill: 'rgba(59,130,246,.08)' }} formatter={(v) => `${v}%`} />
+              <Tooltip contentStyle={tipStyle} itemStyle={itemStyle} labelStyle={labelStyle} cursor={{ fill: 'rgba(59,130,246,.08)' }} formatter={(v) => `${v}%`} />
               <Bar dataKey="used" radius={[0, 4, 4, 0]}>
                 {capacityData.map((d, i) => (
                   <Cell key={i} fill={d.used >= 90 ? '#ef4444' : d.used >= 75 ? '#f59e0b' : '#22c55e'} />
@@ -122,7 +122,7 @@ export default function Overview({ onSelectSite, onGotoTab }) {
               <Pie data={osPie} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={55} outerRadius={90} paddingAngle={3}>
                 {osPie.map((d, i) => <Cell key={i} fill={d.fill} />)}
               </Pie>
-              <Tooltip contentStyle={tipStyle} />
+              <Tooltip contentStyle={tipStyle} itemStyle={itemStyle} labelStyle={labelStyle} />
               <Legend wrapperStyle={{ fontSize: 12 }} />
             </PieChart>
           </ResponsiveContainer>
@@ -135,3 +135,5 @@ export default function Overview({ onSelectSite, onGotoTab }) {
 const tipStyle = {
   background: '#0c1322', border: '1px solid #243049', borderRadius: 8, color: '#e6edf6', fontSize: 12,
 };
+const itemStyle = { color: '#e6edf6' };
+const labelStyle = { color: '#8b9bb4' };

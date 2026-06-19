@@ -33,13 +33,21 @@ function sortBy(items, key, order = 'desc') {
 api.get('/health', (_req, res) => {
   const snap = store.get();
   const connected = snap.vcenters.filter((v) => v.status === 'connected').length;
+  const g = snap.rollups?.global || {};
   res.json({
     status: 'ok',
     version: currentVersion(),
     source: snap.source,
     generatedAt: snap.generatedAt,
+    uptimeSec: Math.floor(process.uptime()),
     vcenters: snap.vcenters.length,
     vcentersConnected: connected,
+    hosts: g.hosts || 0,
+    vms: g.vms || 0,
+    vmsPoweredOn: g.vmsPoweredOn || 0,
+    alarms: g.alarms || 0,
+    alarmsCritical: g.alarmsCritical || 0,
+    cpuUsagePct: g.cpuUsagePct || 0,
     features: { upgradeTab: config.ui.showUpgradeTab },
   });
 });
