@@ -135,6 +135,20 @@ function Portal({ user, onLogout }) {
     return () => clearTimeout(t);
   }, [upToast]);
 
+  // Easter egg: click the logo 30 times.
+  const [eggClicks, setEggClicks] = useState(0);
+  const [egg, setEgg] = useState(false);
+  const bumpEgg = () => setEggClicks((n) => { const m = n + 1; if (m >= 30) { setEgg(true); return 0; } return m; });
+
+  // Hidden admin tabs (vCenter 관리 / 진단·로그) revealed by clicking the version badge 33 times.
+  const [secretClicks, setSecretClicks] = useState(0);
+  const [secretRevealed, setSecretRevealed] = useState(false);
+  const bumpSecret = () => setSecretClicks((n) => {
+    const m = n + 1;
+    if (m >= 33) { setSecretRevealed(true); return 0; }
+    return m;
+  });
+
   // Hide admin-only tabs from other roles, and feature-gated tabs (e.g. 업그레이드)
   // unless the server enables them.
   const visibleTabs = TABS.filter((t) => {
@@ -162,19 +176,6 @@ function Portal({ user, onLogout }) {
     return s;
   }, [vcenterId, region]);
 
-  // Easter egg: click the logo 30 times.
-  const [eggClicks, setEggClicks] = useState(0);
-  const [egg, setEgg] = useState(false);
-  const bumpEgg = () => setEggClicks((n) => { const m = n + 1; if (m >= 30) { setEgg(true); return 0; } return m; });
-
-  // Hidden admin tabs (vCenter 관리 / 진단·로그) revealed by clicking the version badge 33 times.
-  const [secretClicks, setSecretClicks] = useState(0);
-  const [secretRevealed, setSecretRevealed] = useState(false);
-  const bumpSecret = () => setSecretClicks((n) => {
-    const m = n + 1;
-    if (m >= 33) { setSecretRevealed(true); return 0; }
-    return m;
-  });
 
   const noFilterTabs = ['overview', 'vcenters', 'summary', 'upgrade', 'vcenter-admin', 'diagnostics'];
   const showFilters = !noFilterTabs.includes(tab);
