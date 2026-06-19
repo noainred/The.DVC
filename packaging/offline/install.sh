@@ -61,18 +61,7 @@ fi
 echo "==> 앱 설치: $APP_DST"
 cp -a "$SCRIPT_DIR/app" "$APP_DST"
 
-# Preserve user config (registered vCenters / users / upgrade settings) so a
-# reinstall/upgrade never wipes them — these live inside the app dir.
-if [[ -n "$BAK" ]]; then
-  for rel in server/config/vcenters.json server/config/users.json server/config/upgrade.json; do
-    if [[ -f "$BAK/$rel" ]]; then
-      echo "==> 기존 설정 보존: $rel"
-      cp -a "$BAK/$rel" "$APP_DST/$rel"
-    fi
-  done
-fi
-
-# 4) Config ------------------------------------------------------------------
+# 4) Config — lives in $CONFIG_DIR (OUTSIDE the app), so upgrades never touch it
 mkdir -p "$CONFIG_DIR"
 if [[ ! -f "$CONFIG_DIR/portal.env" ]]; then
   echo "==> 환경설정 생성: $CONFIG_DIR/portal.env"
@@ -84,6 +73,23 @@ if [[ ! -f "$CONFIG_DIR/portal.env" ]]; then
 else
   echo "==> 기존 환경설정 유지: $CONFIG_DIR/portal.env"
 fi
+# ensure the app reads user config from $CONFIG_DIR
+grep -q '^CONFIG_DIR=' "$CONFIG_DIR/portal.env" || echo "CONFIG_DIR=$CONFIG_DIR" >> "$CONFIG_DIR/portal.env"
+sed -i "s#^CONFIG_DIR=.*#CONFIG_DIR=$CONFIG_DIR#" "$CONFIG_DIR/portal.env"
+
+# Migrate user config from an older in-app location (current or backed-up app)
+# into $CONFIG_DIR so existing registrations/users/settings are kept.
+for f in vcenters.json users.json upgrade.json; do
+  if [[ ! -f "$CONFIG_DIR/$f" ]]; then
+    for src in "$BAK/server/config/$f" "$APP_DST/server/config/$f"; do
+      if [[ -n "$src" && -f "$src" ]]; then
+        echo "==> 기존 설정 이전: $f -> $CONFIG_DIR/"
+        cp -a "$src" "$CONFIG_DIR/$f"
+        break
+      fi
+    done
+  fi
+done
 
 # 5) Permissions -------------------------------------------------------------
 chown -R "$SERVICE_USER:$SERVICE_USER" "$PREFIX"

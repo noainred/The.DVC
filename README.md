@@ -137,6 +137,7 @@ sudo ./install.sh --port 4000
 | 변수 | 기본값 | 설명 |
 |------|--------|------|
 | `PORT` | `4000` | API 포트 |
+| `CONFIG_DIR` | `server/config` | 사용자 설정(vcenters.json/users.json/upgrade.json) 저장 위치. 오프라인 설치 시 `/etc/vmware-portal` 로 설정되어 **업그레이드해도 보존**됨 |
 | `DATA_SOURCE` | `mock` | `mock` / `live` / `auto` |
 | `POLL_INTERVAL_MS` | `30000` | vCenter 폴링 주기(ms) |
 | `VC_TLS_REJECT_UNAUTHORIZED` | `false` | 사설 vCenter 자체서명 인증서 거부 여부 (`true`면 검증) |

@@ -22,6 +22,10 @@ const DEFAULT_REMOTE_BASE =
 export const config = {
   port: Number(process.env.PORT) || 4000,
   dataSource: (process.env.DATA_SOURCE || 'mock').toLowerCase(),
+  // Where user config (vcenters.json / users.json / upgrade.json) is read/written.
+  // Defaults to the app's server/config; set CONFIG_DIR (e.g. /etc/vmware-portal)
+  // to keep it OUTSIDE the app dir so upgrades never touch it.
+  configDir: process.env.CONFIG_DIR || path.resolve(ROOT, 'config'),
   // How often (ms) the collector refreshes the aggregated snapshot.
   pollIntervalMs: Number(process.env.POLL_INTERVAL_MS) || 30_000,
   // Allow self-signed vCenter certificates (common in private DCs).
@@ -92,8 +96,9 @@ export function currentVersion() {
  */
 export function loadVcenterConfig() {
   const candidates = [
-    path.resolve(ROOT, 'config', 'vcenters.json'),
-    path.resolve(ROOT, 'config', 'vcenters.example.json'),
+    path.join(process.env.CONFIG_DIR || path.resolve(ROOT, 'config'), 'vcenters.json'),
+    path.resolve(ROOT, 'config', 'vcenters.json'),           // legacy in-app location
+    path.resolve(ROOT, 'config', 'vcenters.example.json'),   // bundled template
   ];
   for (const file of candidates) {
     if (fs.existsSync(file)) {

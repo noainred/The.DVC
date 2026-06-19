@@ -7,11 +7,11 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { config } from '../config.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const FILE = path.resolve(__dirname, '..', '..', 'config', 'upgrade.json');
+// Persisted in CONFIG_DIR (default app/server/config; set to e.g.
+// /etc/vmware-portal to survive upgrades).
+const FILE = path.join(config.configDir, 'upgrade.json');
 
 // Fields editable from the portal (others, e.g. downloadDir, stay env-only).
 const FIELDS = ['enabled', 'watchDir', 'installDir', 'packageName', 'remoteBase', 'token', 'pollIntervalMs', 'autoApply'];
