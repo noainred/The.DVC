@@ -22,11 +22,13 @@
 - **진단·로그(관리자)** — vCenter **연결 실패 원인**(DNS/연결거부/타임아웃/인증서/인증 등
   원인별 한국어 힌트)과 **실시간 서버 로그 뷰어**를 포탈 안에서 확인. vCenter 대시보드 카드와
   vCenter 관리 화면에도 실패 이유가 표시됩니다.
-- **자동 업그레이드(옵트인)** — 감시 폴더의 새 버전 번들(`vmware-portal-<버전>.tar.gz/.zip`)
-  또는 원격 소스(`versions.json`, GitHub raw·사설 레포+토큰)를 확인해, 현재보다 새 버전만
-  검증 후 적용하고 프로세스를 재시작(re-exec). 기존 코드는 백업(롤백 가능), 경로 탈출·아카이브
-  폭탄 방지. 표준 라이브러리만 사용(내장 `zlib` + 자체 tar/zip 파서). 포탈은 자가 업그레이드 후
-  등록된 엣지에도 번들을 푸시. 관리자(admin) 전용 UI/API로 제어.
+- **자동 업그레이드(옵트인)** — **GitHub `download/versions.json` 을 주기적으로 모니터링**
+  하다가 새 버전이 올라오면 받아서 적용하고 프로세스를 재시작(re-exec). 로컬 감시 폴더의
+  번들(`vmware-portal-<버전>.tar.gz`)도 지원. 현재보다 새 버전만 검증 후 적용, 기존 코드는
+  백업(롤백 가능), 경로 탈출·아카이브 폭탄 방지. 표준 라이브러리만 사용(내장 `zlib` + 자체
+  tar/zip 파서). 자가 업그레이드 후 등록된 엣지에도 번들 푸시. 관리자 전용 UI/API로 제어.
+  - 감시 경로(기본값): `https://raw.githubusercontent.com/noainred/The.DVC/<branch>/download/versions.json`
+    (`UPGRADE_REMOTE_BASE` 로 변경, 사설 레포는 `UPGRADE_TOKEN`)
 - **글로벌 개요 대시보드** — 전세계 KPI(vCenter/호스트/VM/CPU/메모리/스토리지/알람),
   세계지도 위 데이터센터 위치 및 상태 마커, 리전(Americas/EMEA/APAC)별 롤업, 차트.
 - **세계 지도** — 사이트별 마커 색상으로 정상/경고/위험 상태 표시, 호버 시 상세 요약,

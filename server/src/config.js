@@ -5,6 +5,12 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 
+// Directory on GitHub (raw) that holds versions.json + the upgrade bundles.
+// The portal monitors this for new releases. After merging to main, switch the
+// ref to 'main'. Override with UPGRADE_REMOTE_BASE.
+const DEFAULT_REMOTE_BASE =
+  'https://raw.githubusercontent.com/noainred/The.DVC/claude/vmware-global-monitoring-portal-nrnpnt/download';
+
 /**
  * Central configuration for the portal backend.
  *
@@ -43,8 +49,9 @@ export const config = {
     installDir: process.env.UPGRADE_INSTALL_DIR || '',
     // Top-level package directory name inside bundles.
     packageName: process.env.UPGRADE_PACKAGE_NAME || 'vmware-portal',
-    // Remote source base (directory containing versions.json), optional.
-    remoteBase: process.env.UPGRADE_REMOTE_BASE || '',
+    // Remote source base = the directory that contains versions.json. Defaults
+    // to this repo's download/ on GitHub so the portal monitors it out of the box.
+    remoteBase: process.env.UPGRADE_REMOTE_BASE || DEFAULT_REMOTE_BASE,
     // PAT for private remote sources, optional.
     token: process.env.UPGRADE_TOKEN || '',
     // Where downloaded bundles are stored before install.
