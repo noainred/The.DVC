@@ -1,11 +1,11 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { config } from '../config.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CONFIG_DIR = path.resolve(__dirname, '..', '..', 'config');
+// users.json lives in CONFIG_DIR (default app/server/config; set to e.g.
+// /etc/vmware-portal to keep it outside the app dir across upgrades).
+const CONFIG_DIR = config.configDir;
 
 /* ----------------------------- password hashing ---------------------------- */
 // scrypt-based, no native dependencies. Format: scrypt$<saltHex>$<hashHex>

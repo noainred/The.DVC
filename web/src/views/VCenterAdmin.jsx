@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, putJson, delJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 
@@ -15,12 +15,52 @@ export default function VCenterAdmin() {
   const [editing, setEditing] = useState(false);
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [importMsg, setImportMsg] = useState(null);
+  const [replaceMode, setReplaceMode] = useState(false);
+  const [serverPath, setServerPath] = useState('');
+  const fileRef = useRef(null);
 
   const load = async () => {
     try { setData(await fetchJson('/admin/vcenters')); setError(null); }
     catch (e) { setError(e.message); }
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    fetchJson('/admin/vcenters/import-suggestions').then((s) => setServerPath((p) => p || s.default || '')).catch(() => {});
+  }, []);
+
+  const showImportResult = (r, extra = '') => setImportMsg(r.ok
+    ? { ok: true, text: `불러오기 완료${extra} — 추가 ${r.added}, 갱신 ${r.updated}, 건너뜀 ${r.skipped.length} (총 ${r.total})`, skipped: r.skipped }
+    : { ok: false, text: r.reason });
+
+  const importFromServer = async () => {
+    setImportMsg(null);
+    if (!serverPath.trim()) return setImportMsg({ ok: false, text: '서버 파일 경로를 입력하세요.' });
+    if (replaceMode && !window.confirm('기존 목록을 모두 비우고 서버 파일로 교체할까요?')) return;
+    try {
+      const r = await postJson('/admin/vcenters/import-file', { path: serverPath.trim(), mode: replaceMode ? 'replace' : 'merge' });
+      showImportResult(r, ` (${serverPath.trim()})`);
+      await load();
+    } catch (e) { setImportMsg({ ok: false, text: e.message }); }
+  };
+
+  const onImportFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setImportMsg(null);
+    try {
+      const json = JSON.parse(await file.text());
+      const vcenters = Array.isArray(json) ? json : json.vcenters;
+      if (!Array.isArray(vcenters)) throw new Error('vcenters 배열이 없습니다.');
+      if (replaceMode && !window.confirm(`기존 목록을 모두 비우고 ${vcenters.length}개로 교체할까요?`)) return;
+      const r = await postJson('/admin/vcenters/import', { vcenters, mode: replaceMode ? 'replace' : 'merge' });
+      showImportResult(r, ` (업로드: ${file.name})`);
+      await load();
+    } catch (err) {
+      setImportMsg({ ok: false, text: `불러오기 실패: ${err.message}` });
+    }
+  };
 
   if (error) return <ErrorBox message={error} />;
   if (!data) return <Loading />;
@@ -65,18 +105,50 @@ export default function VCenterAdmin() {
 
   return (
     <>
-      <div className="flex between wrap" style={{ marginBottom: 6 }}>
+      <div className="flex between wrap gap" style={{ marginBottom: 6 }}>
         <div className="section-title" style={{ margin: '6px 0' }}>vCenter 등록 · 관리 (관리자)</div>
-        <button className="login-btn" style={{ flex: 'none', padding: '9px 16px' }} onClick={openAdd}>+ vCenter 추가</button>
+        <div className="flex gap" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+          <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12 }} title="체크 시 기존 목록을 모두 교체">
+            <input type="checkbox" checked={replaceMode} onChange={(e) => setReplaceMode(e.target.checked)} /> 전체 교체
+          </label>
+          <input ref={fileRef} type="file" accept=".json,application/json" style={{ display: 'none' }} onChange={onImportFile} />
+          <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={() => fileRef.current?.click()}>파일 업로드</button>
+          <button className="login-btn" style={{ flex: 'none', padding: '9px 16px' }} onClick={openAdd}>+ vCenter 추가</button>
+        </div>
       </div>
+
+      <div className="card" style={{ marginBottom: 12, padding: '12px 14px' }}>
+        <div className="flex gap wrap" style={{ alignItems: 'center' }}>
+          <span className="muted" style={{ fontSize: 12, fontWeight: 600 }}>서버 파일에서 불러오기</span>
+          <input className="input" style={{ flex: 1, minWidth: 280 }} value={serverPath}
+            onChange={(e) => setServerPath(e.target.value)} placeholder="/etc/vmware-portal/vcenters.json" />
+          <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={importFromServer}>서버 파일 불러오기</button>
+        </div>
+        <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
+          서버에 이미 있는 vcenters.json 경로를 지정하거나, 위 “파일 업로드”로 PC의 파일을 올릴 수 있습니다. “전체 교체” 체크 시 기존 목록을 덮어씁니다.
+        </div>
+      </div>
+
+      {importMsg && (
+        <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 8, fontSize: 13,
+          background: importMsg.ok ? 'rgba(34,197,94,.12)' : 'rgba(239,68,68,.12)',
+          color: importMsg.ok ? '#4ade80' : '#f87171' }}>
+          {importMsg.text}
+          {importMsg.skipped?.length > 0 && (
+            <ul style={{ margin: '6px 0 0', paddingLeft: 18, color: 'var(--amber)' }}>
+              {importMsg.skipped.slice(0, 8).map((s, i) => <li key={i}>{s.id}: {s.reason}</li>)}
+            </ul>
+          )}
+        </div>
+      )}
 
       {data.dataSource === 'mock' && (
         <div className="card" style={{ marginBottom: 14, borderColor: 'var(--amber)' }}>
           <b style={{ color: 'var(--amber)' }}>ℹ 현재 데이터 소스: mock(데모)</b>
           <div className="muted" style={{ marginTop: 6, fontSize: 13 }}>
-            여기서 등록한 vCenter는 <code>config/vcenters.json</code> 에 저장되며, 실제 수집은
-            서버를 <code>DATA_SOURCE=live</code> (또는 <code>auto</code>) 로 실행할 때 반영됩니다.
-            대시보드의 현재 숫자는 데모 데이터입니다.
+            여기서 등록한 vCenter는 <code>$CONFIG_DIR/vcenters.json</code>(기본 <code>/etc/vmware-portal/</code>)
+            에 저장되어 업그레이드해도 보존됩니다. 실제 수집은 서버를 <code>DATA_SOURCE=live</code>
+            (또는 <code>auto</code>)로 실행할 때 반영됩니다. 대시보드의 현재 숫자는 데모 데이터입니다.
           </div>
         </div>
       )}

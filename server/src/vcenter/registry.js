@@ -10,12 +10,13 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { VCenterClient } from './restClient.js';
 import { describeError } from '../util/errors.js';
+import { config } from '../config.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const FILE = path.resolve(__dirname, '..', '..', 'config', 'vcenters.json');
+// User registry lives in CONFIG_DIR (default app/server/config) so it can be
+// kept outside the app dir (e.g. /etc/vmware-portal) to survive upgrades.
+const FILE = path.join(config.configDir, 'vcenters.json');
 
 const REGIONS = ['Americas', 'EMEA', 'APAC'];
 
@@ -103,6 +104,29 @@ export function removeVcenter(id) {
   if (next.length === list.length) return { ok: false, reason: `없는 vCenter: ${id}` };
   saveRegistry(next);
   return { ok: true };
+}
+
+/**
+ * Import an existing vcenters.json. `mode`:
+ *   - 'merge'   : add new entries, update existing ones by id (default)
+ *   - 'replace' : replace the whole registry with the imported list
+ * Returns a summary { ok, mode, added, updated, skipped[], total }.
+ */
+export function importVcenters(incoming, mode = 'merge') {
+  if (!Array.isArray(incoming)) return { ok: false, reason: 'vcenters 배열을 찾을 수 없습니다 ({ "vcenters": [...] } 형식 필요).' };
+  const existing = loadRegistry();
+  const result = mode === 'replace' ? [] : [...existing];
+  let added = 0, updated = 0;
+  const skipped = [];
+  for (const raw of incoming) {
+    const base = mode === 'replace' ? null : existing.find((v) => v.id === raw?.id);
+    const [entry, err] = normalize(raw || {}, base);
+    if (err) { skipped.push({ id: raw?.id || '(id 없음)', reason: err }); continue; }
+    const idx = result.findIndex((v) => v.id === entry.id);
+    if (idx >= 0) { result[idx] = entry; updated++; } else { result.push(entry); added++; }
+  }
+  saveRegistry(result);
+  return { ok: true, mode, added, updated, skipped, total: result.length };
 }
 
 /**
