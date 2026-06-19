@@ -46,11 +46,21 @@ export async function getVmConsole(vc, moref, vmName) {
     const serverGuid = c.sc.instanceUuid || '';
     const thumbprint = await getThumbprint(hostOnly, port);
     const vmrcUrl = `vmrc://clone:${ticket}@${hostNoScheme}/?moid=${encodeURIComponent(moref)}`;
+    // webconsole.html requires ALL of: vmId, vmName, host, serverGuid,
+    // sessionTicket, thumbprint, locale. A blank one triggers "Input is required".
     const webConsoleUrl = `https://${hostNoScheme}/ui/webconsole.html?vmId=${encodeURIComponent(moref)}` +
       `&vmName=${encodeURIComponent(vmName || moref)}&serverGuid=${encodeURIComponent(serverGuid)}` +
-      `&host=${encodeURIComponent(hostNoScheme)}&sessionTicket=${encodeURIComponent(ticket || '')}` +
+      `&locale=en_US&host=${encodeURIComponent(hostNoScheme)}&sessionTicket=${encodeURIComponent(ticket || '')}` +
       `&thumbprint=${encodeURIComponent(thumbprint)}`;
-    return { ok: true, vmrcUrl, webConsoleUrl, serverGuid, thumbprint, host: hostNoScheme };
+    const missing = [];
+    if (!ticket) missing.push('sessionTicket');
+    if (!serverGuid) missing.push('serverGuid');
+    if (!thumbprint) missing.push('thumbprint');
+    return {
+      ok: true, vmrcUrl, webConsoleUrl,
+      serverGuid, thumbprint, host: hostNoScheme,
+      ticketIssued: Boolean(ticket), missing,
+    };
   } finally {
     await c.logout();
   }
