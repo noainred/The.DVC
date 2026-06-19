@@ -16,6 +16,8 @@ export default function IdracAdmin() {
   const [csvText, setCsvText] = useState(null);   // null = closed
   const [bulk, setBulk] = useState(null);          // null = closed
   const [bulkPreview, setBulkPreview] = useState(null);
+  const [scanResult, setScanResult] = useState(null);
+  const [selected, setSelected] = useState(new Set());
   const fileRef = useRef(null);
 
   const load = async () => {
@@ -121,6 +123,32 @@ export default function IdracAdmin() {
     } catch (e) { setBulkPreview({ count: 0, errors: [e.message], sample: [] }); }
   };
 
+  const scanIdracs = async () => {
+    setBusy(true); setScanResult(null); setImportMsg(null);
+    try {
+      const r = await postJson('/admin/idrac/scan', { ips: bulk.ips, username: bulk.username, password: bulk.password });
+      if (r.ok) { setScanResult(r); setSelected(new Set(r.found.map((f) => f.ip))); }
+      else setImportMsg({ ok: false, text: r.reason });
+    } catch (e) { setImportMsg({ ok: false, text: e.message }); }
+    finally { setBusy(false); }
+  };
+
+  const toggleSel = (ip) => setSelected((s) => { const n = new Set(s); n.has(ip) ? n.delete(ip) : n.add(ip); return n; });
+
+  const registerScanned = async () => {
+    const found = (scanResult?.found || []).filter((f) => selected.has(f.ip));
+    if (!found.length) return;
+    setBusy(true); setImportMsg(null);
+    try {
+      const r = await postJson('/admin/idrac/register-scanned', { found, username: bulk.username, password: bulk.password, mode: replaceMode ? 'replace' : 'merge' });
+      setImportMsg(r.ok
+        ? { ok: true, text: `iDRAC ${found.length}대 등록 — 추가 ${r.added}, 갱신 ${r.updated} (총 ${r.total})`, skipped: r.skipped }
+        : { ok: false, text: r.reason });
+      if (r.ok) { await load(); setBulk(null); setBulkPreview(null); setScanResult(null); }
+    } catch (e) { setImportMsg({ ok: false, text: e.message }); }
+    finally { setBusy(false); }
+  };
+
   const submitBulk = async () => {
     setBusy(true); setImportMsg(null);
     try {
@@ -151,7 +179,7 @@ export default function IdracAdmin() {
           <input ref={fileRef} type="file" accept=".json,.csv,application/json,text/csv" style={{ display: 'none' }} onChange={onImportFile} />
           <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={() => fileRef.current?.click()}>파일 업로드(JSON/CSV)</button>
           <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={() => { setCsvText(''); }}>CSV 붙여넣기</button>
-          <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={() => { setBulk({ ips: '', username: 'root', password: '', namePrefix: '' }); setBulkPreview(null); }}>IP 일괄 등록</button>
+          <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={() => { setBulk({ ips: '', username: 'root', password: '', namePrefix: '' }); setBulkPreview(null); setScanResult(null); }}>IP 일괄 등록</button>
           <button className="logout-btn" style={{ padding: '9px 14px' }} disabled={busy} onClick={pollNow}>지금 수집</button>
           <button className="login-btn" style={{ flex: 'none', padding: '9px 16px' }} onClick={openAdd}>+ 서버 추가</button>
         </div>
@@ -317,10 +345,14 @@ export default function IdracAdmin() {
               <label>이름 접두어<input className="input" value={bulk.namePrefix} onChange={(e) => setBulk((b) => ({ ...b, namePrefix: e.target.value }))} placeholder="(선택) 예: SEOUL-" /></label>
             </div>
             <div className="flex gap" style={{ marginTop: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-              <button className="logout-btn" style={{ padding: '10px 16px' }} disabled={!bulk.ips.trim()} onClick={() => previewBulk(bulk.ips)}>미리보기</button>
               <button className="login-btn" style={{ flex: 'none', padding: '10px 18px' }}
-                disabled={busy || !bulk.ips.trim() || !bulk.username.trim() || !bulk.password} onClick={submitBulk}>
-                {busy ? '등록 중…' : '일괄 등록'}
+                disabled={busy || !bulk.ips.trim() || !bulk.username.trim() || !bulk.password} onClick={scanIdracs}>
+                {busy ? '스캔 중…' : '🔍 스캔하여 iDRAC만 찾기'}
+              </button>
+              <button className="logout-btn" style={{ padding: '10px 16px' }} disabled={!bulk.ips.trim()} onClick={() => previewBulk(bulk.ips)}>IP 미리보기</button>
+              <button className="logout-btn" style={{ padding: '10px 16px' }}
+                disabled={busy || !bulk.ips.trim() || !bulk.username.trim() || !bulk.password} onClick={submitBulk} title="스캔 없이 입력한 모든 IP를 그대로 등록">
+                스캔없이 전체 등록
               </button>
               <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12 }}>
                 <input type="checkbox" checked={replaceMode} onChange={(e) => setReplaceMode(e.target.checked)} /> 전체 교체
@@ -329,11 +361,57 @@ export default function IdracAdmin() {
                 <span className="muted" style={{ fontSize: 12 }}>
                   → <b style={{ color: 'var(--text)' }}>{bulkPreview.count}</b>개 IP
                   {bulkPreview.truncated && ' (상한 4096)'}
-                  {bulkPreview.sample?.length > 0 && ` · 예: ${bulkPreview.sample.slice(0, 4).join(', ')}…`}
                   {bulkPreview.errors?.length > 0 && <span style={{ color: 'var(--amber)' }}> · 무시 {bulkPreview.errors.length}</span>}
                 </span>
               )}
             </div>
+            <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
+              “스캔”은 각 IP의 Redfish에 접속해 <b>Dell iDRAC만</b> 골라냅니다(미응답/타 장비/인증실패 제외). 대역이 크면 다소 걸립니다.
+            </div>
+
+            {scanResult && (
+              <div style={{ marginTop: 12, borderTop: '1px solid rgba(36,48,73,.6)', paddingTop: 10 }}>
+                <div className="flex between wrap" style={{ marginBottom: 8 }}>
+                  <b style={{ fontSize: 13 }}>
+                    스캔 {scanResult.scanned}개 → iDRAC <span style={{ color: 'var(--green)' }}>{scanResult.foundCount}</span>대 발견
+                  </b>
+                  <span className="muted" style={{ fontSize: 12 }}>
+                    미응답 {scanResult.unreachable} · 타장비 {scanResult.notIdrac} · 인증실패 {scanResult.authFailed}{scanResult.truncated ? ' · 상한 적용' : ''}
+                  </span>
+                </div>
+                {scanResult.found.length === 0 ? (
+                  <div className="muted" style={{ fontSize: 12, padding: 8 }}>발견된 iDRAC가 없습니다. 계정/비번 또는 대역을 확인하세요.</div>
+                ) : (
+                  <>
+                    <div style={{ maxHeight: 240, overflowY: 'auto', border: '1px solid rgba(36,48,73,.5)', borderRadius: 8 }}>
+                      <table>
+                        <thead><tr>
+                          <th style={{ width: 32 }}><input type="checkbox" checked={selected.size === scanResult.found.length}
+                            onChange={(e) => setSelected(e.target.checked ? new Set(scanResult.found.map((f) => f.ip)) : new Set())} /></th>
+                          <th>IP</th><th>서비스태그</th><th>호스트명</th><th>모델</th>
+                        </tr></thead>
+                        <tbody>
+                          {scanResult.found.map((f) => (
+                            <tr key={f.ip} style={{ cursor: 'pointer' }} onClick={() => toggleSel(f.ip)}>
+                              <td><input type="checkbox" checked={selected.has(f.ip)} onChange={() => toggleSel(f.ip)} onClick={(e) => e.stopPropagation()} /></td>
+                              <td><b>{f.ip}</b></td>
+                              <td className="muted">{f.serviceTag || '—'}</td>
+                              <td className="muted">{f.hostName || '—'}</td>
+                              <td className="muted">{[f.manufacturer, f.model].filter(Boolean).join(' ') || '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="flex gap" style={{ marginTop: 10, alignItems: 'center' }}>
+                      <button className="login-btn" style={{ flex: 'none', padding: '10px 18px' }} disabled={busy || selected.size === 0} onClick={registerScanned}>
+                        {busy ? '등록 중…' : `선택한 iDRAC ${selected.size}대 등록`}
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}

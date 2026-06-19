@@ -174,6 +174,27 @@ export function bulkAddByIps(body) {
 }
 
 /**
+ * Register iDRACs discovered by a range scan. Each found item carries identity
+ * (ip, serviceTag, hostName, model); the shared username/password are applied
+ * to all. hostNames includes the discovered hostname + IP for auto-matching.
+ */
+export function registerScanned(found, username, password, mode = 'merge') {
+  if (!Array.isArray(found) || !found.length) return { ok: false, reason: '등록할 iDRAC가 없습니다.' };
+  if (!username || !password) return { ok: false, reason: 'username/password가 필요합니다.' };
+  const servers = found.map((f) => ({
+    id: f.ip,
+    name: f.hostName || f.serviceTag || f.ip,
+    host: f.ip,
+    username,
+    password,
+    serviceTag: f.serviceTag || '',
+    hostNames: [f.hostName, f.ip].filter(Boolean),
+    enabled: true,
+  }));
+  return importServers(servers, mode);
+}
+
+/**
  * Parse a CSV with header columns: name, host, username, password, serviceTag,
  * hostNames (hostNames may be ';'-separated). Returns an array of server objects.
  */
