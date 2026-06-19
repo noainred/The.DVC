@@ -8,11 +8,13 @@
 import { config } from '../config.js';
 import { loadRegistry } from './registry.js';
 import { fetchPower } from './redfish.js';
+import { fetchOmeDevices } from './ome.js';
+import { setOmeDevices, dbKey } from './omeCache.js';
 import { getDb } from './db.js';
 import { describeError } from '../util/errors.js';
 
 let timer = null;
-let lastRun = null; // { at, ok, failed, results: [{id, watts?, error?}] }
+let lastRun = null; // { at, ok, failed, results: [{id, watts?, devices?, error?}] }
 
 async function pollOnce() {
   const servers = loadRegistry().filter((s) => s.enabled !== false && s.host && s.username && s.password);
@@ -22,12 +24,23 @@ async function pollOnce() {
   const results = [];
   await Promise.all(servers.map(async (s) => {
     try {
-      const r = await fetchPower(s);
-      db.insert(s.id, r.watts, ts);
-      results.push({ id: s.id, name: s.name, watts: r.watts });
+      if (s.type === 'ome') {
+        // One OME -> many devices. Persist a sample per device + cache for lookups.
+        const { devices, usedMetricService, count } = await fetchOmeDevices(s);
+        let measured = 0;
+        for (const d of devices) {
+          if (d.watts != null) { db.insert(dbKey(s.id, d), d.watts, ts); measured++; }
+        }
+        setOmeDevices(s.id, devices, { usedMetricService });
+        results.push({ id: s.id, name: s.name, type: 'ome', devices: count, measured, metric: usedMetricService ? 'powermanager' : 'inventory' });
+      } else {
+        const r = await fetchPower(s);
+        db.insert(s.id, r.watts, ts);
+        results.push({ id: s.id, name: s.name, type: 'idrac', watts: r.watts });
+      }
     } catch (err) {
       const d = describeError(err);
-      results.push({ id: s.id, name: s.name, error: d.message });
+      results.push({ id: s.id, name: s.name, type: s.type || 'idrac', error: d.message });
     }
   }));
   // Retention pruning

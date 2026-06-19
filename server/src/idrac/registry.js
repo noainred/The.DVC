@@ -13,6 +13,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { describeError } from '../util/errors.js';
 import { fetchPower } from './redfish.js';
+import { testOme } from './ome.js';
 import { expandIpList } from './iprange.js';
 
 const FILE = path.join(config.configDir, 'idrac.json');
@@ -63,25 +64,27 @@ function normalize(body, existing = null) {
   const name = String(body.name ?? e.name ?? '').trim();
   let host = String(body.host ?? e.host ?? '').trim();
   const username = String(body.username ?? e.username ?? '').trim();
+  const type = (body.type ?? e.type ?? 'idrac') === 'ome' ? 'ome' : 'idrac';
 
   if (!id) return [null, 'id는 필수입니다.'];
   if (id.length > 128 || [...id].some((c) => c.charCodeAt(0) < 32)) return [null, 'id에 사용할 수 없는 문자가 있습니다.'];
   if (!name) return [null, 'name(서버 표시 이름)은 필수입니다.'];
-  if (!host) return [null, 'iDRAC 주소(host)는 필수입니다.'];
+  if (!host) return [null, type === 'ome' ? 'OME 주소(host)는 필수입니다.' : 'iDRAC 주소(host)는 필수입니다.'];
   if (!username) return [null, 'username은 필수입니다.'];
 
-  // Accept a bare IP/hostname and normalize to https://host (iDRAC Redfish).
+  // Accept a bare IP/hostname and normalize to https://host.
   if (!/^https?:\/\//.test(host)) host = `https://${host}`;
   host = host.replace(/\/+$/, '');
 
   // hostNames: ESXi host name(s) this iDRAC maps to. Accept array or
-  // comma/space/newline-separated string.
+  // comma/space/newline-separated string. (OME auto-discovers devices, so
+  // hostNames is optional/ignored there.)
   let hostNames = body.hostNames ?? e.hostNames ?? [];
   if (typeof hostNames === 'string') hostNames = hostNames.split(/[,\n\r]+/);
   hostNames = [...new Set((hostNames || []).map((h) => String(h).trim()).filter(Boolean))];
 
   const entry = {
-    id, name, host, username,
+    id, name, host, username, type,
     password: body.password ? String(body.password) : e.password || '',
     serviceTag: String(body.serviceTag ?? e.serviceTag ?? '').trim(),
     hostNames,
@@ -210,9 +213,14 @@ export async function testServer(body) {
   // normalize host the same way as save
   let host = String(entry.host).trim();
   if (!/^https?:\/\//.test(host)) host = `https://${host}`;
+  const normalized = { ...entry, host: host.replace(/\/+$/, '') };
   const started = Date.now();
   try {
-    const r = await fetchPower({ ...entry, host: host.replace(/\/+$/, '') });
+    if (entry.type === 'ome') {
+      const r = await testOme(normalized);
+      return { ok: true, ms: r.ms, devices: r.devices, auth: r.auth, watts: r.sampleWatts, type: 'ome' };
+    }
+    const r = await fetchPower(normalized);
     return { ok: true, ms: Date.now() - started, watts: r.watts, model: r.model, serviceTag: r.serviceTag, powerState: r.powerState };
   } catch (err) {
     const d = describeError(err);
