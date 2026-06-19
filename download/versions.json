@@ -1,0 +1,11 @@
+{
+  "latest": "1.0.0",
+  "versions": [
+    {
+      "version": "1.0.0",
+      "tar_gz": "vmware-portal-offline-1.0.0-el9-x64.tar.gz",
+      "size_bytes": 58454054,
+      "sha256": "d79e7c473862f01f5efae4a17d22067a841466842808ff1049606ee0f0a415a3"
+    }
+  ]
+}
