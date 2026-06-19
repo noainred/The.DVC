@@ -8,7 +8,7 @@ import { Kpi, Loading, ErrorBox, SeverityBadge } from '../components/ui.jsx';
 import WorldMap from '../components/WorldMap.jsx';
 import ErrorBoundary from '../components/ErrorBoundary.jsx';
 
-const REGION_COLORS = { '아시아': '#22d3ee', '중국': '#ef4444', '유럽': '#a855f7', '미국': '#3b82f6', Unknown: '#64748b' };
+const REGION_COLORS = { '아시아': '#22d3ee', '중국': '#ef4444', '유럽': '#a855f7', '북미': '#3b82f6', Unknown: '#64748b' };
 
 export default function Overview({ onSelectSite, onGotoTab }) {
   const { data: ov, error, loading } = usePolling('/overview', {}, 15_000);

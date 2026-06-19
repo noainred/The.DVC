@@ -8,9 +8,9 @@
  */
 
 const SITES = [
-  { id: 'vc-us-east', name: 'vcenter-us-east-01', city: 'Ashburn', country: 'USA', region: '미국', lat: 39.04, lon: -77.49, hosts: 24 },
-  { id: 'vc-us-west', name: 'vcenter-us-west-01', city: 'San Jose', country: 'USA', region: '미국', lat: 37.33, lon: -121.89, hosts: 18 },
-  { id: 'vc-br-sao', name: 'vcenter-br-sao-01', city: 'São Paulo', country: 'Brazil', region: '미국', lat: -23.55, lon: -46.63, hosts: 8 },
+  { id: 'vc-us-east', name: 'vcenter-us-east-01', city: 'Ashburn', country: 'USA', region: '북미', lat: 39.04, lon: -77.49, hosts: 24 },
+  { id: 'vc-us-west', name: 'vcenter-us-west-01', city: 'San Jose', country: 'USA', region: '북미', lat: 37.33, lon: -121.89, hosts: 18 },
+  { id: 'vc-br-sao', name: 'vcenter-br-sao-01', city: 'São Paulo', country: 'Brazil', region: '북미', lat: -23.55, lon: -46.63, hosts: 8 },
   { id: 'vc-eu-central', name: 'vcenter-eu-central-01', city: 'Frankfurt', country: 'Germany', region: '유럽', lat: 50.11, lon: 8.68, hosts: 30 },
   { id: 'vc-eu-west', name: 'vcenter-eu-west-01', city: 'Dublin', country: 'Ireland', region: '유럽', lat: 53.35, lon: -6.26, hosts: 16 },
   { id: 'vc-me-uae', name: 'vcenter-me-uae-01', city: 'Dubai', country: 'UAE', region: '유럽', lat: 25.20, lon: 55.27, hosts: 6 },
@@ -98,7 +98,7 @@ function mkSolutions(site) {
     { key: 'com.vmware.vsan.health', label: 'vSAN', company: 'VMware', version: ['8.0u2', '8.0u1', '7.0u3'][n % 3], category: 'Storage' },
     { key: 'com.vmware.vcHms', label: 'Site Recovery Manager', company: 'VMware', version: ['8.7.0', '8.6.0'][n % 2], category: 'DR' },
     { key: 'com.vmware.vrops', label: 'Aria Operations', company: 'VMware', version: ['8.14.0', '8.12.1'][n % 2], category: 'Mgmt' },
-    { key: 'com.vmware.vlcm', label: 'Lifecycle Manager', company: 'VMware', version: site.region === '미국' ? '8.0.3' : '8.0.2', category: 'Mgmt' },
+    { key: 'com.vmware.vlcm', label: 'Lifecycle Manager', company: 'VMware', version: site.region === '북미' ? '8.0.3' : '8.0.2', category: 'Mgmt' },
   ];
   // some sites also have HCX / Avi
   if (n % 2 === 0) sols.push({ key: 'com.vmware.hcx', label: 'HCX', company: 'VMware', version: '4.8.0', category: 'Migration' });
