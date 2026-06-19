@@ -27,7 +27,7 @@ export default function Login({ onSuccess }) {
         <div className="brand" style={{ justifyContent: 'center', marginBottom: 6 }}>
           <div className="logo">V</div>
           <div>
-            <h1 style={{ fontSize: 18 }}>[The Davinci] Virtual Platform</h1>
+            <h1 className="brand-title" style={{ fontSize: 20 }}>The Davinci<br />Virtual Platform</h1>
             <div className="sub">다빈치 프로젝트 분석 플랫폼</div>
           </div>
         </div>

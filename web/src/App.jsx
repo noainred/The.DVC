@@ -146,8 +146,8 @@ function Portal({ user, onLogout }) {
         <div className="brand">
           <div className="logo" onClick={bumpEgg} style={{ cursor: 'pointer' }}>V</div>
           <div>
-            <h1>[The Davinci] Virtual Platform{health?.version && <span className="ver-badge">v{health.version}</span>}</h1>
-            <div className="sub">다빈치 프로젝트 분석 플랫폼</div>
+            <h1 className="brand-title">The Davinci<br />Virtual Platform</h1>
+            {health?.version && <span className="ver-badge brand-ver">v{health.version}</span>}
           </div>
         </div>
         <nav className="tabs">
