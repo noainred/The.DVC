@@ -14,34 +14,28 @@ function markerStyle(site) {
 export default function WorldMap({ sites = [], onSelect, height = 420, onResizeEnd }) {
   const [tip, setTip] = useState(null);
   const [h, setH] = useState(height);
-  // follow the shared (server) height unless the user is actively dragging
   useEffect(() => { setH(height); }, [height]);
 
-  const startResize = (e) => {
-    e.preventDefault();
-    const startY = e.clientY;
-    const startH = h;
-    const clamp = (v) => Math.max(240, Math.min(1200, v));
-    const onMove = (ev) => setH(clamp(startH + (ev.clientY - startY)));
-    const onUp = (ev) => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-      onResizeEnd?.(clamp(startH + (ev.clientY - startY)));
-    };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-  };
+  const clamp = (v) => Math.max(240, Math.min(1200, v));
+  const changeHeight = (delta) => { const nh = clamp(h + delta); setH(nh); onResizeEnd?.(nh); };
 
   return (
     <div className="card map-wrap" style={{ padding: 8 }}>
+      {/* map height controls (saved server-side, shared by all users) */}
+      <div className="map-size-ctrl">
+        <button onClick={() => changeHeight(-60)} title="지도 축소" disabled={h <= 240}>−</button>
+        <span className="map-size-val">{Math.round(h)}px</span>
+        <button onClick={() => changeHeight(60)} title="지도 확대" disabled={h >= 1200}>+</button>
+      </div>
       <ComposableMap
         projection="geoEqualEarth"
         projectionConfig={{ scale: 175 }}
         style={{ width: '100%', height: 'auto' }}
         height={h}
       >
-        {/* drag to pan, wheel to zoom; centered on Korea by default */}
-        <ZoomableGroup center={[127, 20]} zoom={1} minZoom={1} maxZoom={8}>
+        {/* drag to pan; wheel zoom disabled (use +/- for size) */}
+        <ZoomableGroup center={[127, 20]} zoom={1} minZoom={1} maxZoom={8}
+          filterZoomEvent={(e) => e.type !== 'wheel' && e.type !== 'dblclick'}>
         <Geographies geography={geoData}>
           {({ geographies }) =>
             geographies.map((geo) => (
@@ -106,11 +100,6 @@ export default function WorldMap({ sites = [], onSelect, height = 420, onResizeE
           )}
         </div>
       )}
-
-      {/* drag to resize the map height (saved server-side, shared by all users) */}
-      <div className="map-resize" onMouseDown={startResize} title="드래그하여 지도 높이 조절 (모든 사용자 공유)">
-        <span className="map-resize-grip" />
-      </div>
     </div>
   );
 }

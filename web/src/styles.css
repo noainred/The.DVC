@@ -94,10 +94,18 @@ body {
 
 /* Map */
 .map-wrap { position: relative; }
-.map-resize { height: 14px; margin-top: 4px; display: grid; place-items: center; cursor: ns-resize; border-radius: 6px; }
-.map-resize:hover { background: rgba(59,130,246,.1); }
-.map-resize-grip { width: 46px; height: 4px; border-radius: 3px; background: var(--border); }
-.map-resize:hover .map-resize-grip { background: var(--accent); }
+.map-size-ctrl {
+  position: absolute; top: 14px; right: 14px; z-index: 10; display: flex; align-items: center; gap: 6px;
+  background: rgba(12,19,34,.85); border: 1px solid var(--border); border-radius: 10px; padding: 4px 6px;
+}
+.map-size-ctrl button {
+  width: 28px; height: 28px; border-radius: 7px; border: 1px solid var(--border); cursor: pointer;
+  background: var(--panel-2); color: var(--text); font-size: 18px; font-weight: 700; line-height: 1;
+  display: grid; place-items: center;
+}
+.map-size-ctrl button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-2); }
+.map-size-ctrl button:disabled { opacity: .4; cursor: not-allowed; }
+.map-size-val { font-size: 12px; color: var(--text-dim); min-width: 44px; text-align: center; font-variant-numeric: tabular-nums; }
 .map-legend { position: absolute; right: 14px; bottom: 12px; display: flex; gap: 14px; font-size: 11px; color: var(--text-dim); }
 .legend-item { display: flex; align-items: center; gap: 6px; }
 .tooltip {
