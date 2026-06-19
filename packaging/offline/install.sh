@@ -52,6 +52,7 @@ cp -a "$SCRIPT_DIR/runtime/node" "$PREFIX/runtime/node"
 
 # 3) App (atomic swap with backup; aligns with the in-app auto-upgrade) ------
 APP_DST="$PREFIX/app"
+BAK=""
 if [[ -d "$APP_DST" ]]; then
   BAK="$APP_DST.bak.$(date +%s)"
   echo "==> 기존 앱 백업: $BAK"
@@ -59,6 +60,17 @@ if [[ -d "$APP_DST" ]]; then
 fi
 echo "==> 앱 설치: $APP_DST"
 cp -a "$SCRIPT_DIR/app" "$APP_DST"
+
+# Preserve user config (registered vCenters / users / upgrade settings) so a
+# reinstall/upgrade never wipes them — these live inside the app dir.
+if [[ -n "$BAK" ]]; then
+  for rel in server/config/vcenters.json server/config/users.json server/config/upgrade.json; do
+    if [[ -f "$BAK/$rel" ]]; then
+      echo "==> 기존 설정 보존: $rel"
+      cp -a "$BAK/$rel" "$APP_DST/$rel"
+    fi
+  done
+fi
 
 # 4) Config ------------------------------------------------------------------
 mkdir -p "$CONFIG_DIR"
