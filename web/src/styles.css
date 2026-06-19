@@ -94,6 +94,10 @@ body {
 
 /* Map */
 .map-wrap { position: relative; }
+.map-resize { height: 14px; margin-top: 4px; display: grid; place-items: center; cursor: ns-resize; border-radius: 6px; }
+.map-resize:hover { background: rgba(59,130,246,.1); }
+.map-resize-grip { width: 46px; height: 4px; border-radius: 3px; background: var(--border); }
+.map-resize:hover .map-resize-grip { background: var(--accent); }
 .map-legend { position: absolute; right: 14px; bottom: 12px; display: flex; gap: 14px; font-size: 11px; color: var(--text-dim); }
 .legend-item { display: flex; align-items: center; gap: 6px; }
 .tooltip {
@@ -225,6 +229,47 @@ tbody tr:last-child td { border-bottom: none; }
 /* Upgrade settings groups */
 .settings-group { margin-top: 14px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: rgba(10,14,23,.4); }
 .settings-group-title { font-size: 12px; font-weight: 700; color: var(--text-dim); margin-bottom: 10px; }
+
+/* Easter egg */
+.egg-overlay {
+  position: fixed; inset: 0; z-index: 500; display: grid; place-items: center;
+  background: radial-gradient(900px 600px at 50% 40%, rgba(59,130,246,.25), rgba(4,8,16,.92));
+  backdrop-filter: blur(6px); animation: egg-fade .3s ease;
+}
+@keyframes egg-fade { from { opacity: 0; } to { opacity: 1; } }
+.egg-card {
+  position: relative; text-align: center; padding: 40px 56px; border-radius: 22px;
+  background: linear-gradient(160deg, #141b2d, #0a0e17);
+  border: 1px solid var(--border); box-shadow: 0 0 70px rgba(59,130,246,.5);
+  animation: egg-pop .55s cubic-bezier(.2,1.4,.4,1);
+}
+@keyframes egg-pop { 0% { transform: scale(.4) rotate(-8deg); opacity: 0; } 100% { transform: scale(1) rotate(0); opacity: 1; } }
+.egg-emoji { font-size: 56px; animation: egg-bounce 1.4s ease-in-out infinite; }
+@keyframes egg-bounce { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-14px); } }
+.egg-line { font-size: 20px; color: var(--text-dim); margin-top: 6px; font-weight: 600; }
+.egg-name {
+  font-size: 64px; font-weight: 900; letter-spacing: 2px; margin: 6px 0;
+  background: linear-gradient(90deg, #22d3ee, #3b82f6, #a855f7, #22d3ee);
+  background-size: 300% auto; -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent; animation: egg-shine 3s linear infinite;
+  filter: drop-shadow(0 0 18px rgba(59,130,246,.6));
+}
+@keyframes egg-shine { to { background-position: 300% center; } }
+.egg-btn {
+  margin-top: 22px; padding: 11px 26px; border-radius: 10px; border: none; cursor: pointer;
+  font-weight: 800; font-size: 15px; color: #04101f;
+  background: linear-gradient(135deg, var(--accent-2), var(--accent));
+}
+.egg-sparkles { position: fixed; inset: 0; pointer-events: none; }
+.egg-sparkles span {
+  position: absolute; left: calc(8% + (var(--i) * 11%)); top: -8%; font-size: 28px;
+  animation: egg-fall 2.6s linear infinite; animation-delay: calc(var(--i) * .18s);
+}
+@keyframes egg-fall {
+  0% { transform: translateY(-10vh) rotate(0); opacity: 0; }
+  10% { opacity: 1; }
+  100% { transform: translateY(110vh) rotate(360deg); opacity: 0; }
+}
 
 /* Modal */
 .modal-overlay {

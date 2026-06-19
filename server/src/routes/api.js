@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { store } from '../store.js';
 import { currentVersion, config } from '../config.js';
+import { loadUiSettings, saveUiSettings } from '../ui-settings.js';
 
 export const api = Router();
 
@@ -52,6 +53,10 @@ api.get('/overview', (_req, res) => {
 api.get('/vcenters', (_req, res) => {
   res.json(store.get().rollups?.sites ?? []);
 });
+
+// Shared UI settings (e.g. dashboard map height) — same for all users.
+api.get('/ui-settings', (_req, res) => res.json(loadUiSettings()));
+api.put('/ui-settings', (req, res) => res.json(saveUiSettings(req.body || {})));
 
 /** Map a guest OS string to a coarse family for distribution charts. */
 function osFamily(os = '') {

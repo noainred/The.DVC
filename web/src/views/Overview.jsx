@@ -1,9 +1,9 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid,
   PieChart, Pie, Cell, Legend,
 } from 'recharts';
-import { usePolling } from '../api.js';
+import { usePolling, fetchJson, putJson } from '../api.js';
 import { Kpi, Loading, ErrorBox, SeverityBadge } from '../components/ui.jsx';
 import WorldMap from '../components/WorldMap.jsx';
 
@@ -12,6 +12,11 @@ const REGION_COLORS = { Americas: '#3b82f6', EMEA: '#a855f7', APAC: '#22d3ee', U
 export default function Overview({ onSelectSite, onGotoTab }) {
   const { data: ov, error, loading } = usePolling('/overview', {}, 15_000);
   const { data: alarmData } = usePolling('/alarms', { severity: undefined }, 15_000);
+
+  // Shared (server-saved) map height so everyone sees the same size.
+  const [mapHeight, setMapHeight] = useState(420);
+  useEffect(() => { fetchJson('/ui-settings').then((s) => setMapHeight(s.mapHeight || 420)).catch(() => {}); }, []);
+  const saveMapHeight = (px) => { setMapHeight(px); putJson('/ui-settings', { mapHeight: px }).catch(() => {}); };
 
   if (loading && !ov) return <Loading />;
   if (error) return <ErrorBox message={error} />;
@@ -51,8 +56,8 @@ export default function Overview({ onSelectSite, onGotoTab }) {
         <Kpi label="알람" value={fmt(g.alarms)} accent={g.alarmsCritical ? 'var(--red)' : 'var(--amber)'} meta={`위험 ${g.alarmsCritical} · 경고 ${g.alarmsWarning}`} />
       </div>
 
-      <div className="section-title">전세계 데이터센터 분포</div>
-      <WorldMap sites={sites} onSelect={onSelectSite} />
+      <div className="section-title">전세계 데이터센터 분포 <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>(지도 하단을 드래그해 크기 조절 · 모든 사용자 공유)</span></div>
+      <WorldMap sites={sites} onSelect={onSelectSite} height={mapHeight} onResizeEnd={saveMapHeight} />
 
       <div className="grid cols-2" style={{ marginTop: 16 }}>
         <div className="card">

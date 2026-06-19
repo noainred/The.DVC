@@ -129,6 +129,11 @@ function Portal({ user, onLogout }) {
     return s;
   }, [vcenterId, region]);
 
+  // Easter egg: click the logo 30 times.
+  const [eggClicks, setEggClicks] = useState(0);
+  const [egg, setEgg] = useState(false);
+  const bumpEgg = () => setEggClicks((n) => { const m = n + 1; if (m >= 30) { setEgg(true); return 0; } return m; });
+
   const noFilterTabs = ['overview', 'vcenters', 'summary', 'upgrade', 'vcenter-admin', 'diagnostics'];
   const showFilters = !noFilterTabs.includes(tab);
   const showTextSearch = tab !== 'explore';
@@ -139,7 +144,7 @@ function Portal({ user, onLogout }) {
     <div className="app">
       <header className="topbar">
         <div className="brand">
-          <div className="logo">V</div>
+          <div className="logo" onClick={bumpEgg} style={{ cursor: 'pointer' }}>V</div>
           <div>
             <h1>[The Davinci] Virtual Platform{health?.version && <span className="ver-badge">v{health.version}</span>}</h1>
             <div className="sub">다빈치 프로젝트 분석 플랫폼</div>
@@ -224,6 +229,21 @@ function Portal({ user, onLogout }) {
         {tab === 'diagnostics' && user.role === 'admin' && <Diagnostics />}
         {tab === 'upgrade' && user.role === 'admin' && health?.features?.upgradeTab && <Upgrade />}
       </main>
+
+      {egg && (
+        <div className="egg-overlay" onClick={() => setEgg(false)}>
+          <div className="egg-sparkles">{'✨🎉💫⭐🎊✨🌟💥'.split('').map((s, i) => (
+            <span key={i} style={{ ['--i']: i }}>{s}</span>
+          ))}</div>
+          <div className="egg-card" onClick={(e) => e.stopPropagation()}>
+            <div className="egg-emoji">🚀</div>
+            <div className="egg-line">이 프로그램은</div>
+            <div className="egg-name">박준호</div>
+            <div className="egg-line">가 만들었습니다.</div>
+            <button className="egg-btn" onClick={() => setEgg(false)}>닫기</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
