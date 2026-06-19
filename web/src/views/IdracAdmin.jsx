@@ -13,6 +13,9 @@ export default function IdracAdmin() {
   const [busy, setBusy] = useState(false);
   const [importMsg, setImportMsg] = useState(null);
   const [replaceMode, setReplaceMode] = useState(false);
+  const [csvText, setCsvText] = useState(null);   // null = closed
+  const [bulk, setBulk] = useState(null);          // null = closed
+  const [bulkPreview, setBulkPreview] = useState(null);
   const fileRef = useRef(null);
 
   const load = async () => {
@@ -95,6 +98,38 @@ export default function IdracAdmin() {
     } catch (err) { setImportMsg({ ok: false, text: `불러오기 실패: ${err.message}` }); }
   };
 
+  const submitCsv = async () => {
+    setBusy(true); setImportMsg(null);
+    try {
+      const r = await postJson('/admin/idrac/import', { csv: csvText || '', mode: replaceMode ? 'replace' : 'merge' });
+      setImportMsg(r.ok
+        ? { ok: true, text: `불러오기 완료 — 추가 ${r.added}, 갱신 ${r.updated}, 건너뜀 ${r.skipped.length} (총 ${r.total})`, skipped: r.skipped }
+        : { ok: false, text: r.reason });
+      if (r.ok) { await load(); setCsvText(null); }
+    } catch (e) { setImportMsg({ ok: false, text: e.message }); }
+    finally { setBusy(false); }
+  };
+
+  const previewBulk = async (ipsText) => {
+    try {
+      const r = await postJson('/admin/idrac/expand-ips', { ips: ipsText });
+      setBulkPreview(r);
+    } catch (e) { setBulkPreview({ count: 0, errors: [e.message], sample: [] }); }
+  };
+
+  const submitBulk = async () => {
+    setBusy(true); setImportMsg(null);
+    try {
+      const r = await postJson('/admin/idrac/bulk-add', { ...bulk, mode: replaceMode ? 'replace' : 'merge' });
+      if (r.ok) {
+        setImportMsg({ ok: true, skipped: r.skipped,
+          text: `IP ${r.expanded}개 → 추가 ${r.added}, 갱신 ${r.updated} (총 ${r.total})${r.truncated ? ' · 상한 4096 적용됨' : ''}${r.ipErrors?.length ? ` · 무시된 항목 ${r.ipErrors.length}` : ''}` });
+        await load(); setBulk(null); setBulkPreview(null);
+      } else setImportMsg({ ok: false, text: r.reason + (r.ipErrors?.length ? ` (${r.ipErrors.slice(0, 3).join('; ')})` : '') });
+    } catch (e) { setImportMsg({ ok: false, text: e.message }); }
+    finally { setBusy(false); }
+  };
+
   const list = data.servers || [];
   const poller = data.poller || {};
   const lastResults = poller.lastRun?.results || [];
@@ -111,6 +146,8 @@ export default function IdracAdmin() {
           </label>
           <input ref={fileRef} type="file" accept=".json,.csv,application/json,text/csv" style={{ display: 'none' }} onChange={onImportFile} />
           <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={() => fileRef.current?.click()}>파일 업로드(JSON/CSV)</button>
+          <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={() => { setCsvText(''); }}>CSV 붙여넣기</button>
+          <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={() => { setBulk({ ips: '', username: 'root', password: '', namePrefix: '' }); setBulkPreview(null); }}>IP 일괄 등록</button>
           <button className="logout-btn" style={{ padding: '9px 14px' }} disabled={busy} onClick={pollNow}>지금 수집</button>
           <button className="login-btn" style={{ flex: 'none', padding: '9px 16px' }} onClick={openAdd}>+ 서버 추가</button>
         </div>
@@ -206,6 +243,75 @@ export default function IdracAdmin() {
             <div className="muted" style={{ marginTop: 10, fontSize: 12 }}>
               매핑 호스트 이름은 대시보드의 ESXi 호스트 이름과 일치해야 합니다(대소문자 무시). 자격증명은 서버
               <code> $CONFIG_DIR/idrac.json</code>(0600)에만 저장됩니다.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {csvText != null && (
+        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setCsvText(null); }}>
+          <div className="modal card" style={{ maxWidth: 720 }}>
+            <div className="flex between" style={{ marginBottom: 10 }}>
+              <b style={{ fontSize: 15 }}>CSV 붙여넣기로 서버 등록</b>
+              <button className="logout-btn" onClick={() => setCsvText(null)}>닫기</button>
+            </div>
+            <div className="muted" style={{ fontSize: 12, marginBottom: 8, lineHeight: 1.7 }}>
+              첫 줄은 헤더입니다. 컬럼: <code>name,host,username,password,serviceTag,hostNames</code>
+              (hostNames 는 <code>;</code> 로 여러 개). 쉼표(,)로 구분합니다.
+            </div>
+            <textarea className="input" style={{ width: '100%', minHeight: 220, fontFamily: 'monospace', fontSize: 12, resize: 'vertical' }}
+              value={csvText} onChange={(e) => setCsvText(e.target.value)}
+              placeholder={'name,host,username,password,serviceTag,hostNames\nESXi-SEOUL-01,10.0.0.21,root,P@ss,,esxi-seoul-01.corp.local\nESXi-SEOUL-02,10.0.0.22,root,P@ss,,esxi-seoul-02.corp.local'} />
+            <div className="flex gap" style={{ marginTop: 12, alignItems: 'center' }}>
+              <button className="login-btn" style={{ flex: 'none', padding: '10px 18px' }} disabled={busy || !csvText.trim()} onClick={submitCsv}>
+                {busy ? '등록 중…' : '등록'}
+              </button>
+              <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12 }}>
+                <input type="checkbox" checked={replaceMode} onChange={(e) => setReplaceMode(e.target.checked)} /> 전체 교체
+              </label>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {bulk != null && (
+        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) { setBulk(null); setBulkPreview(null); } }}>
+          <div className="modal card" style={{ maxWidth: 720 }}>
+            <div className="flex between" style={{ marginBottom: 10 }}>
+              <b style={{ fontSize: 15 }}>IP 일괄 등록 (동일 계정/비밀번호)</b>
+              <button className="logout-btn" onClick={() => { setBulk(null); setBulkPreview(null); }}>닫기</button>
+            </div>
+            <div className="muted" style={{ fontSize: 12, marginBottom: 8, lineHeight: 1.7 }}>
+              IP를 한 줄에 하나씩. 범위 <code>10.0.0.1 - 10.0.0.20</code>, CIDR <code>10.0.0.0/24</code>,
+              짧은 범위 <code>10.0.0.1-20</code> 모두 가능합니다. (<code>#</code> 뒤는 주석, 최대 4096개)
+            </div>
+            <textarea className="input" style={{ width: '100%', minHeight: 180, fontFamily: 'monospace', fontSize: 12, resize: 'vertical' }}
+              value={bulk.ips}
+              onChange={(e) => { const v = e.target.value; setBulk((b) => ({ ...b, ips: v })); }}
+              onBlur={() => bulk.ips.trim() && previewBulk(bulk.ips)}
+              placeholder={'10.0.0.21\n10.0.0.30 - 10.0.0.45\n10.0.1.0/24\n# 주석'} />
+            <div className="spec-grid" style={{ marginTop: 10 }}>
+              <label>iDRAC 계정 *<input className="input" value={bulk.username} onChange={(e) => setBulk((b) => ({ ...b, username: e.target.value }))} placeholder="root" /></label>
+              <label>iDRAC 비밀번호 *<input className="input" type="password" value={bulk.password} onChange={(e) => setBulk((b) => ({ ...b, password: e.target.value }))} /></label>
+              <label>이름 접두어<input className="input" value={bulk.namePrefix} onChange={(e) => setBulk((b) => ({ ...b, namePrefix: e.target.value }))} placeholder="(선택) 예: SEOUL-" /></label>
+            </div>
+            <div className="flex gap" style={{ marginTop: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+              <button className="logout-btn" style={{ padding: '10px 16px' }} disabled={!bulk.ips.trim()} onClick={() => previewBulk(bulk.ips)}>미리보기</button>
+              <button className="login-btn" style={{ flex: 'none', padding: '10px 18px' }}
+                disabled={busy || !bulk.ips.trim() || !bulk.username.trim() || !bulk.password} onClick={submitBulk}>
+                {busy ? '등록 중…' : '일괄 등록'}
+              </button>
+              <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12 }}>
+                <input type="checkbox" checked={replaceMode} onChange={(e) => setReplaceMode(e.target.checked)} /> 전체 교체
+              </label>
+              {bulkPreview && (
+                <span className="muted" style={{ fontSize: 12 }}>
+                  → <b style={{ color: 'var(--text)' }}>{bulkPreview.count}</b>개 IP
+                  {bulkPreview.truncated && ' (상한 4096)'}
+                  {bulkPreview.sample?.length > 0 && ` · 예: ${bulkPreview.sample.slice(0, 4).join(', ')}…`}
+                  {bulkPreview.errors?.length > 0 && <span style={{ color: 'var(--amber)' }}> · 무시 {bulkPreview.errors.length}</span>}
+                </span>
+              )}
             </div>
           </div>
         </div>

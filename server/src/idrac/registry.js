@@ -13,6 +13,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { describeError } from '../util/errors.js';
 import { fetchPower } from './redfish.js';
+import { expandIpList } from './iprange.js';
 
 const FILE = path.join(config.configDir, 'idrac.json');
 
@@ -137,6 +138,36 @@ export function importServers(incoming, mode = 'merge') {
   }
   saveRegistry(result);
   return { ok: true, mode, added, updated, skipped, total: result.length };
+}
+
+/**
+ * Bulk-register Dell servers from an IP list that all share the same iDRAC
+ * credentials. `ips` is free-form text (one per line; ranges and CIDR allowed).
+ * Each IP becomes a server whose id/name/host is the IP and whose hostNames
+ * includes the IP (so a host registered by IP auto-matches). Returns a summary
+ * including the import result and any IP-parse errors.
+ */
+export function bulkAddByIps(body) {
+  const username = String(body.username || '').trim();
+  const password = String(body.password || '');
+  if (!username) return { ok: false, reason: 'username은 필수입니다.' };
+  if (!password) return { ok: false, reason: 'password는 필수입니다.' };
+
+  const { ips, errors, truncated } = expandIpList(body.ips || '');
+  if (!ips.length) return { ok: false, reason: 'IP를 한 개 이상 입력하세요.', ipErrors: errors };
+
+  const prefix = String(body.namePrefix || '').trim();
+  const servers = ips.map((ip) => ({
+    id: ip,
+    name: prefix ? `${prefix}${ip}` : ip,
+    host: ip,
+    username,
+    password,
+    hostNames: [ip],
+    enabled: true,
+  }));
+  const result = importServers(servers, body.mode === 'replace' ? 'replace' : 'merge');
+  return { ...result, expanded: ips.length, ipErrors: errors, truncated };
 }
 
 /**
