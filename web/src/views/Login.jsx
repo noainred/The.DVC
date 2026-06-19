@@ -27,8 +27,8 @@ export default function Login({ onSuccess }) {
         <div className="brand" style={{ justifyContent: 'center', marginBottom: 6 }}>
           <div className="logo">V</div>
           <div>
-            <h1 style={{ fontSize: 18 }}>VMware Global Monitoring Portal</h1>
-            <div className="sub">전세계 vCenter 인프라 통합 모니터링</div>
+            <h1 style={{ fontSize: 18 }}>[The Davinci] Virtual Platform</h1>
+            <div className="sub">다빈치 프로젝트 분석 플랫폼</div>
           </div>
         </div>
         <div className="login-title">로그인</div>
