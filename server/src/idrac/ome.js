@@ -32,9 +32,6 @@ const dispatcher = new Agent({
 
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : (v != null && v !== '' && !Number.isNaN(Number(v)) ? Number(v) : null));
 
-// Power Manager plugin id (constant across OME installs).
-const POWER_PLUGIN_ID = '2F6D05BE-EE4B-4B0E-B873-C8D2F64A4625';
-
 export class OmeClient {
   constructor(entry) {
     this.base = entry.host.replace(/\/+$/, '');
@@ -114,31 +111,35 @@ export class OmeClient {
     return devices;
   }
 
-  /** Try Power Manager metrics for one device -> watts (or null). */
+  /**
+   * Power Manager metrics for one device -> watts (or null). Tries the
+   * configured metric types in order (instantaneous/avg/max system power) until
+   * one returns a recent numeric value. All knobs are env-configurable so the
+   * exact metric type can be tuned in the field without a code change.
+   */
   async powerViaMetricService(deviceId) {
-    // Best-effort: ask for the most recent System Power Consumption metric.
-    const body = {
-      PluginId: POWER_PLUGIN_ID,
-      EntityType: 0,           // device
-      EntityId: Number(deviceId),
-      MetricTypes: [3],        // 3 = system power consumption (instantaneous/avg)
-      Duration: 0,             // latest
-      SortOrder: 1,
-    };
-    try {
-      const r = await this.#req('/api/MetricService/Metrics', { method: 'POST', body });
-      const vals = r?.value || r?.Value || [];
-      // pick the most recent numeric value
-      let best = null;
-      for (const v of vals) {
-        const w = num(v.Value ?? v.value);
-        const t = Date.parse(v.Timestamp ?? v.timestamp ?? '') || 0;
-        if (w != null && (!best || t >= best.t)) best = { w, t };
-      }
-      return best ? Math.round(best.w) : null;
-    } catch {
-      return null;
+    for (const metricType of config.idrac.omePowerMetricTypes) {
+      const body = {
+        PluginId: config.idrac.omePluginId,
+        EntityType: 0,           // device
+        EntityId: Number(deviceId),
+        MetricTypes: [metricType],
+        Duration: config.idrac.omePowerDuration,
+        SortOrder: 1,            // most recent first
+      };
+      try {
+        const r = await this.#req('/api/MetricService/Metrics', { method: 'POST', body });
+        const vals = r?.value || r?.Value || r?.Metrics || [];
+        let best = null;
+        for (const v of vals) {
+          const w = num(v.Value ?? v.value ?? v.MetricValue);
+          const t = Date.parse(v.Timestamp ?? v.timestamp ?? '') || 0;
+          if (w != null && (!best || t >= best.t)) best = { w, t };
+        }
+        if (best) return Math.round(best.w);
+      } catch { /* try next metric type */ }
     }
+    return null;
   }
 
   /** Fallback: instantaneous power from the device's power-usage sub-resource. */
