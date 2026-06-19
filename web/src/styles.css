@@ -216,6 +216,10 @@ tbody tr:last-child td { border-bottom: none; }
 .log-level { flex-shrink: 0; font-weight: 700; white-space: pre; }
 .log-msg { color: #cbd5e1; }
 
+/* Clickable table cell (e.g. VM name -> detail) */
+.cell-link { background: none; border: none; padding: 0; color: #fff; font-weight: 700; cursor: pointer; font-size: 13px; font-family: inherit; text-align: left; }
+.cell-link:hover { color: var(--accent-2); text-decoration: underline; }
+
 /* Upgrade settings groups */
 .settings-group { margin-top: 14px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: rgba(10,14,23,.4); }
 .settings-group-title { font-size: 12px; font-weight: 700; color: var(--text-dim); margin-bottom: 10px; }

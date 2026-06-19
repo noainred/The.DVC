@@ -1,6 +1,6 @@
 import React from 'react';
 import { usePolling } from '../api.js';
-import { DataTable, UsageCell, Loading, ErrorBox } from '../components/ui.jsx';
+import { DataTable, UsageCell, Loading, ErrorBox, ResultCount } from '../components/ui.jsx';
 
 export default function Datastores({ filters }) {
   const { data, error, loading } = usePolling('/datastores', filters, 15_000);
@@ -23,7 +23,7 @@ export default function Datastores({ filters }) {
 
   return (
     <>
-      <div className="muted" style={{ marginBottom: 10 }}>총 {data.total.toLocaleString()}개 데이터스토어</div>
+      <ResultCount total={data.total} label="데이터스토어" filtered={Object.keys(filters || {}).length > 0} />
       <DataTable columns={columns} rows={rows} initialSort={{ key: 'usagePct', dir: 'desc' }} />
     </>
   );

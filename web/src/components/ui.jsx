@@ -109,5 +109,31 @@ export function DataTable({ columns, rows, initialSort, emptyText = '데이터�
   );
 }
 
+/** Standard "총 N개 …" result count, with an indicator when a filter is active. */
+export function ResultCount({ total = 0, shown, label, filtered }) {
+  return (
+    <div className="muted result-count" style={{ marginBottom: 10 }}>
+      총 <b style={{ color: 'var(--text)' }}>{total.toLocaleString()}</b>개 {label}
+      {shown != null && shown < total && <span> (상위 {shown.toLocaleString()}개 표시)</span>}
+      {filtered && <span className="badge blue" style={{ marginLeft: 8 }}>필터 적용 중</span>}
+    </div>
+  );
+}
+
+/** Simple centered modal. Click the backdrop or 닫기 to close. */
+export function Modal({ title, onClose, children, width = 560 }) {
+  return (
+    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="modal card" style={{ maxWidth: width }}>
+        <div className="flex between" style={{ marginBottom: 12 }}>
+          <b style={{ fontSize: 15 }}>{title}</b>
+          <button className="logout-btn" onClick={onClose}>닫기</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
 export function Loading() { return <div className="loading">불러오는 중…</div>; }
 export function ErrorBox({ message }) { return <div className="error-box">오류: {message}</div>; }

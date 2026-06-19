@@ -30,6 +30,15 @@ const TABS = [
 ];
 
 const REGIONS = ['Americas', 'EMEA', 'APAC'];
+
+// Per-menu filter (added to the shared filter bar on the matching tab).
+const MENU_FILTERS = {
+  hosts: { key: 'state', options: [['', '전체 상태'], ['CONNECTED', '정상'], ['MAINTENANCE', '점검'], ['DISCONNECTED', '연결끊김']] },
+  vms: { key: 'powerState', options: [['', '전체 전원'], ['POWERED_ON', 'On'], ['POWERED_OFF', 'Off']] },
+  datastores: { key: 'type', options: [['', '전체 유형'], ['VMFS', 'VMFS'], ['NFS', 'NFS'], ['vSAN', 'vSAN']] },
+  networks: { key: 'type', options: [['', '전체 유형'], ['STANDARD_PORTGROUP', 'Standard'], ['DISTRIBUTED_PORTGROUP', 'Distributed']] },
+  alarms: { key: 'severity', options: [['', '전체 심각도'], ['critical', 'Critical'], ['warning', 'Warning'], ['info', 'Info']] },
+};
 const LANDING_KEY = 'vmportal.landingTab';
 const getLandingTab = () => {
   const saved = localStorage.getItem(LANDING_KEY);
@@ -61,12 +70,33 @@ export default function App() {
 }
 
 function Portal({ user, onLogout }) {
-  // Initial view honours the user's saved landing-page preference.
-  const [tab, setTab] = useState(getLandingTab);
+  const isAllowed = (id) => {
+    const t = TABS.find((x) => x.id === id);
+    return Boolean(t && (!t.adminOnly || user.role === 'admin'));
+  };
+  const tabFromHash = () => {
+    const h = window.location.hash.replace(/^#\/?/, '');
+    return isAllowed(h) ? h : null;
+  };
+
+  // Initial view: the tab in the URL hash (so a refresh stays put), else the
+  // user's saved landing-page preference.
+  const [tab, setTabState] = useState(() => tabFromHash() || getLandingTab());
   const [landingTab, setLandingTab] = useState(getLandingTab);
   const [vcenterId, setVcenterId] = useState('');
   const [region, setRegion] = useState('');
   const [q, setQ] = useState('');
+  const [menuFilter, setMenuFilter] = useState({}); // { [tabId]: value }
+
+  // Keep the URL hash in sync with the active tab, and follow back/forward.
+  const setTab = (id) => { setTabState(id); window.location.hash = `#/${id}`; };
+  useEffect(() => {
+    if (!tabFromHash()) window.history.replaceState(null, '', `#/${tab}`);
+    const onHash = () => { const t = tabFromHash(); if (t) setTabState(t); };
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const saveLanding = (id) => { setLandingTab(id); localStorage.setItem(LANDING_KEY, id); };
 
@@ -81,8 +111,10 @@ function Portal({ user, onLogout }) {
     if (vcenterId) f.vcenterId = vcenterId;
     else if (region) f.region = region;
     if (q) f.q = q;
+    const mf = MENU_FILTERS[tab];
+    if (mf && menuFilter[tab]) f[mf.key] = menuFilter[tab];
     return f;
-  }, [vcenterId, region, q]);
+  }, [vcenterId, region, q, tab, menuFilter]);
 
   // Scope (region/vCenter) without the free-text query, used by Explore.
   const scope = useMemo(() => {
@@ -148,11 +180,17 @@ function Portal({ user, onLogout }) {
               <option value="">전체 vCenter</option>
               {(vcenters || []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
             </select>
+            {MENU_FILTERS[tab] && (
+              <select className="select" value={menuFilter[tab] || ''}
+                onChange={(e) => setMenuFilter((m) => ({ ...m, [tab]: e.target.value }))}>
+                {MENU_FILTERS[tab].options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+            )}
             {showTextSearch && (
               <input className="input" placeholder="이름 / IP / OS 검색…" value={q} onChange={(e) => setQ(e.target.value)} />
             )}
-            {(region || vcenterId || q) && (
-              <button className="tab" onClick={() => { setRegion(''); setVcenterId(''); setQ(''); }}>필터 초기화</button>
+            {(region || vcenterId || q || menuFilter[tab]) && (
+              <button className="tab" onClick={() => { setRegion(''); setVcenterId(''); setQ(''); setMenuFilter((m) => ({ ...m, [tab]: '' })); }}>필터 초기화</button>
             )}
           </div>
         )}
