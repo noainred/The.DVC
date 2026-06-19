@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import HostPowerPanel from './HostPowerPanel.jsx';
+import { VmMetricButton } from './VmMetrics.jsx';
 
 export function usageColor(pct) {
   if (pct >= 90) return 'var(--red)';
@@ -169,7 +170,10 @@ export function EntityDetail({ type, item, onClose }) {
             <DRow label="호스트">{item.host || '—'}</DRow>
             <DRow label="클러스터">{item.cluster || '—'}</DRow>
             <DRow label="Guest OS">{item.guestOS}</DRow>
-            <DRow label="IP">{item.ipAddress || '—'}</DRow>
+            <DRow label={`IP${item.ipAddresses?.length > 1 ? ` (${item.ipAddresses.length})` : ''}`}>
+              {(item.ipAddresses?.length ? item.ipAddresses : (item.ipAddress ? [item.ipAddress] : [])).map((ip, i) => <div key={i}>{ip}</div>)}
+              {!(item.ipAddresses?.length || item.ipAddress) && '—'}
+            </DRow>
             <DRow label="VMware Tools"><StateBadge state={item.toolsStatus} /></DRow>
             <DRow label="vCPU">{item.cpuCount} 코어</DRow>
             <DRow label="RAM">{gb(item.memMB)}</DRow>
@@ -205,6 +209,11 @@ export function EntityDetail({ type, item, onClose }) {
         )}
       </div>
       {type === 'host' && <HostPowerPanel hostName={item.name} />}
+      {type === 'vm' && (
+        <div className="flex" style={{ marginTop: 14, justifyContent: 'flex-end' }}>
+          <VmMetricButton vmId={item.id} vmName={item.name} />
+        </div>
+      )}
     </Modal>
   );
 }

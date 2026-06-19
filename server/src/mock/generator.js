@@ -217,6 +217,7 @@ export function generateSnapshot() {
         cpuUsagePct,
         memUsagePct,
         ipAddress: powered ? mkIp(site, vm.idx) : null,
+        ipAddresses: powered ? mkIps(site, vm.idx) : [],
         toolsStatus: powered ? (vm.idx % 17 === 0 ? 'OUTDATED' : 'RUNNING') : 'NOT_RUNNING',
       });
     }
@@ -276,6 +277,13 @@ function clamp(v, lo, hi) {
 function mkIp(site, idx) {
   const oct = Math.abs(Math.round(site.lat)) % 250;
   return `10.${oct}.${Math.floor(idx / 254) % 254}.${(idx % 253) + 1}`;
+}
+// Some VMs are multi-homed (mgmt + service + storage NIC). Returns 1-3 IPv4s.
+function mkIps(site, idx) {
+  const ips = [mkIp(site, idx)];
+  if (idx % 3 === 0) ips.push(`172.16.${idx % 254}.${(idx * 7 % 253) + 1}`);
+  if (idx % 5 === 0) ips.push(`192.168.${idx % 254}.${(idx * 3 % 253) + 1}`);
+  return ips;
 }
 function severityRank(s) {
   return { critical: 3, warning: 2, info: 1 }[s] || 0;
