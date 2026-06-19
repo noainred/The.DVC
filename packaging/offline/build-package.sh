@@ -123,13 +123,25 @@ cp "$SCRIPT_DIR/OFFLINE-INSTALL.md" "$STAGE/README.md"
 chmod +x "$STAGE/install.sh" "$STAGE/uninstall.sh"
 echo "${VERSION}" > "$STAGE/VERSION"
 
-# 5) Pack --------------------------------------------------------------------
+# 5) Pack the full installer package -----------------------------------------
 TARBALL="$OUT_DIR/${PKG_NAME}-offline-${VERSION}-${STAMP}.tar.gz"
-echo "==> Packing ${TARBALL}"
+echo "==> Packing installer package ${TARBALL}"
 tar -czf "$TARBALL" -C "$BUILD_DIR" "$(basename "$STAGE")"
 ( cd "$OUT_DIR" && sha256sum "$(basename "$TARBALL")" > "$(basename "$TARBALL").sha256" )
 
+# 6) Pack the auto-upgrade bundle ---------------------------------------------
+# Members live under "vmware-portal/" so the in-app upgrader (watch folder /
+# admin UI) can swap the app dir. The Node runtime is NOT included — only the
+# app (server + node_modules + web/dist + package.json) is replaced on upgrade.
+BUNDLE="$OUT_DIR/${PKG_NAME}-${VERSION}.tar.gz"
+echo "==> Packing upgrade bundle ${BUNDLE}"
+cp -a "$APP" "$BUILD_DIR/${PKG_NAME}"
+tar -czf "$BUNDLE" -C "$BUILD_DIR" "${PKG_NAME}"
+( cd "$OUT_DIR" && sha256sum "$(basename "$BUNDLE")" > "$(basename "$BUNDLE").sha256" )
+
 echo ""
-echo "✅ Offline package ready:"
-echo "    $TARBALL"
-echo "    $(du -h "$TARBALL" | cut -f1) — copy to the Rocky 9 host, extract, run ./install.sh"
+echo "✅ Build complete:"
+echo "    설치 패키지 : $TARBALL  ($(du -h "$TARBALL" | cut -f1))"
+echo "                  → 최초 설치/수동 재설치: 풀고 sudo ./install.sh"
+echo "    업그레이드 번들: $BUNDLE  ($(du -h "$BUNDLE" | cut -f1))"
+echo "                  → 자동/수동 업그레이드: 감시 폴더에 넣거나 관리자 UI로 적용"
