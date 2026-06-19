@@ -22,3 +22,4 @@ server/.upgrade-cache/
 *.new.[0-9]*
 dist-offline/
 server/config/alarm-mutes.json
+server/config/auth.json
