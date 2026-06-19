@@ -13,6 +13,7 @@ import Upgrade from './views/Upgrade.jsx';
 import VCenterAdmin from './views/VCenterAdmin.jsx';
 import IdracAdmin from './views/IdracAdmin.jsx';
 import Collectors from './views/Collectors.jsx';
+import AgentScans from './views/AgentScans.jsx';
 import Diagnostics from './views/Diagnostics.jsx';
 import Login from './views/Login.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
@@ -30,6 +31,7 @@ const TABS = [
   { id: 'vcenter-admin', label: 'vCenter 관리', adminOnly: true, secret: true },
   { id: 'idrac-admin', label: '전력 수집', adminOnly: true, secret: true },
   { id: 'collectors', label: '수집 서버', adminOnly: true, secret: true },
+  { id: 'agent-scans', label: '에이전트 작업', adminOnly: true, secret: true },
   { id: 'diagnostics', label: '진단·로그', adminOnly: true, secret: true },
   { id: 'upgrade', label: '업그레이드', adminOnly: true, feature: 'upgradeTab' },
 ];
@@ -181,7 +183,7 @@ function Portal({ user, onLogout }) {
   }, [vcenterId, region]);
 
 
-  const noFilterTabs = ['overview', 'vcenters', 'summary', 'upgrade', 'vcenter-admin', 'idrac-admin', 'collectors', 'diagnostics'];
+  const noFilterTabs = ['overview', 'vcenters', 'summary', 'upgrade', 'vcenter-admin', 'idrac-admin', 'collectors', 'agent-scans', 'diagnostics'];
   const showFilters = !noFilterTabs.includes(tab);
   const showTextSearch = tab !== 'explore';
 
@@ -276,6 +278,7 @@ function Portal({ user, onLogout }) {
           {tab === 'vcenter-admin' && user.role === 'admin' && secretRevealed && <VCenterAdmin />}
           {tab === 'idrac-admin' && user.role === 'admin' && secretRevealed && <IdracAdmin />}
           {tab === 'collectors' && user.role === 'admin' && secretRevealed && <Collectors />}
+          {tab === 'agent-scans' && user.role === 'admin' && secretRevealed && <AgentScans />}
           {tab === 'diagnostics' && user.role === 'admin' && secretRevealed && <Diagnostics />}
           {tab === 'upgrade' && user.role === 'admin' && health?.features?.upgradeTab && <Upgrade />}
         </ErrorBoundary>

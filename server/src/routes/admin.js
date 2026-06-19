@@ -21,6 +21,9 @@ import { pullNow } from '../collector/puller.js';
 import { pushUpgradeToCollectors } from '../collector/upgradePush.js';
 import { resolveBundleBytes } from '../upgrade/bundleSource.js';
 import { upgradeManager } from '../upgrade/manager.js';
+import {
+  listAssignments, addAssignment, updateAssignment, removeAssignment, getResults,
+} from '../central/assignments.js';
 
 export const adminRouter = Router();
 
@@ -263,6 +266,29 @@ adminRouter.post('/collectors/test', adminOnly, async (req, res) => {
   } catch (err) {
     res.json({ ok: false, reason: err.message, ms: Date.now() - started });
   }
+});
+
+// ---- Agent scan assignments (central orchestration) -----------------------
+
+// List per-agent IP assignments (credentials redacted) + each agent's last
+// reported scan result.
+adminRouter.get('/assignments', adminOnly, (_req, res) => {
+  res.json({ assignments: listAssignments(), results: getResults(), centralEnabled: Boolean(config.central.token) });
+});
+
+adminRouter.post('/assignments', adminOnly, (req, res) => {
+  const result = addAssignment(req.body || {});
+  res.status(result.ok ? 201 : 400).json(result);
+});
+
+adminRouter.put('/assignments/:agent', adminOnly, (req, res) => {
+  const result = updateAssignment(req.params.agent, req.body || {});
+  res.status(result.ok ? 200 : 400).json(result);
+});
+
+adminRouter.delete('/assignments/:agent', adminOnly, (req, res) => {
+  const result = removeAssignment(req.params.agent);
+  res.status(result.ok ? 200 : 404).json(result);
 });
 
 function existsFile(p) {
