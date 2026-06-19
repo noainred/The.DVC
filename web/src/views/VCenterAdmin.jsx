@@ -3,7 +3,7 @@ import { fetchJson, postJson, putJson, delJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import EscClose from '../components/EscClose.jsx';
 
-const REGIONS = ['아시아', '중국', '유럽', '미국'];
+const REGIONS = ['아시아', '중국', '유럽', '북미'];
 const EMPTY = {
   id: '', name: '', host: 'https://', username: '', password: '',
   location: { city: '', country: '', region: '아시아', lat: '', lon: '' },
