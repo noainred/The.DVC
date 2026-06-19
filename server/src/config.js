@@ -37,6 +37,9 @@ export const config = {
   vcSoapMetrics: process.env.VC_SOAP_METRICS !== 'false',
   // Directory of the built web client to serve in production (optional).
   webDist: path.resolve(ROOT, '..', 'web', 'dist'),
+  // The app root (contains server/ + web/ + package.json). Used as the default
+  // install dir when applying a centrally-pushed upgrade on a collector agent.
+  appRoot: path.resolve(ROOT, '..'),
   ui: {
     // Show the admin "업그레이드" tab. Hidden by default; SHOW_UPGRADE_TAB=true to enable.
     showUpgradeTab: process.env.SHOW_UPGRADE_TAB === 'true',
