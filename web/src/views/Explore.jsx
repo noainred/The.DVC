@@ -50,7 +50,7 @@ export default function Explore({ scope }) {
   const tb = (gb) => (gb >= 1024 ? `${(gb / 1024).toFixed(1)} TB` : `${gb} GB`);
 
   const vmCols = [
-    { key: 'name', label: 'VM', render: (v) => <b>{v.name}</b> },
+    { key: 'name', label: 'VM', render: (v) => <button className="cell-link" onClick={() => setDetail({ type: 'vm', item: v })}>{v.name}</button> },
     { key: 'vcenterId', label: 'vCenter', render: (v) => <span className="muted">{v.vcenterId}</span> },
     { key: 'powerState', label: '전원', render: (v) => <StateBadge state={v.powerState} /> },
     { key: 'cpuCount', label: 'vCPU', align: 'right' },
