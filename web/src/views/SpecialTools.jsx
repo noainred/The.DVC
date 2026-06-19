@@ -11,6 +11,7 @@ const TOOLS = [
   { k: 'esxi', icon: '🖳', label: 'ESXi 버전별', desc: '호스트 ESXi 버전 분포/목록' },
   { k: 'vcversion', icon: '🏛️', label: 'vCenter 버전별', desc: 'vCenter 버전 분포' },
   { k: 'nsx', icon: '🛡️', label: 'NSX 관리', desc: 'NSX 배포 현황 / 버전' },
+  { k: 'hardware', icon: '🏷️', label: '벤더/모델 서머리', desc: '법인별 호스트 벤더·모델 수량' },
   { k: 'hba', icon: '🔌', label: 'HBA 카드 속도', desc: '호스트 FC/iSCSI 어댑터 속도' },
   { k: 'gpu', icon: '🎮', label: 'GPU 인벤토리', desc: '호스트/모델별 GPU 종합' },
   { k: 'shutdown', icon: '🛑', label: '긴급 ShutDown', desc: '비상 정지 (관리자 전용)', danger: true, disabled: true },
@@ -50,7 +51,7 @@ function ToolPanel({ tool, onBack }) {
   const meta = TOOLS.find((t) => t.k === tool);
   const [scope, setScope] = useState('');
   const { data: vcList } = usePolling('/vcenters', {}, 60_000);
-  const scoped = ['dupip', 'vmtools', 'snapshots', 'hba', 'gpu', 'licenses', 'esxi'].includes(tool);
+  const scoped = ['dupip', 'vmtools', 'snapshots', 'hba', 'gpu', 'licenses', 'esxi', 'hardware'].includes(tool);
 
   return (
     <>
@@ -76,10 +77,37 @@ function ToolPanel({ tool, onBack }) {
       {tool === 'licenses' && <Licenses scope={scope} />}
       {tool === 'hba' && <Hba scope={scope} />}
       {tool === 'gpu' && <Gpu scope={scope} />}
+      {tool === 'hardware' && <Hardware scope={scope} />}
       {tool === 'esxi' && <Esxi scope={scope} />}
       {tool === 'vcversion' && <VcVersion />}
       {tool === 'nsx' && <Nsx />}
       {tool === 'shutdown' && <Shutdown />}
+    </>
+  );
+}
+
+function Hardware({ scope }) {
+  const { loading, data, error } = useTool('/tools/hardware', scope ? { vcenterId: scope } : {});
+  if (loading) return <Loading />;
+  if (error) return <ErrorBox message={error} />;
+  const cols = [
+    { key: 'vcenterName', label: '법인(vCenter)', render: (r) => <b>{r.vcenterName}</b> },
+    { key: 'vendor', label: '벤더', render: (r) => <span className="badge blue">{r.vendor}</span> },
+    { key: 'model', label: '모델' },
+    { key: 'count', label: '수량', align: 'right', render: (r) => <b>{r.count}</b> },
+  ];
+  return (
+    <>
+      <div className="kpis" style={{ marginBottom: 14 }}>
+        <Card label="호스트" value={data.hosts} meta={`벤더 ${data.byVendor.length} · 모델 ${data.byModel.length}`} />
+        {data.byVendor.slice(0, 4).map((v) => <Card key={v.vendor} label={v.vendor} value={v.count} />)}
+      </div>
+      <div className="section-title" style={{ marginTop: 0 }}>모델별 합계</div>
+      <div className="flex gap wrap" style={{ marginBottom: 14 }}>
+        {data.byModel.slice(0, 12).map((m) => <span key={m.model} className="badge gray" style={{ fontSize: 12, padding: '4px 10px' }}>{m.model} · {m.count}</span>)}
+      </div>
+      <div className="section-title">법인 × 벤더 × 모델</div>
+      <DataTable columns={cols} rows={data.items} initialSort={{ key: 'count', dir: 'desc' }} />
     </>
   );
 }

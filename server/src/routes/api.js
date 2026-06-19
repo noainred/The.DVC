@@ -251,6 +251,37 @@ api.get('/tools/snapshots', (req, res) => {
   });
 });
 
+// Host hardware (vendor/model) summary — per vendor, per model, and the
+// vCenter × vendor × model breakdown ("어떤 법인에 어떤 모델 몇 대").
+api.get('/tools/hardware', (req, res) => {
+  const snap = store.get();
+  let hosts = snap.hosts;
+  if (req.query.vcenterId) hosts = hosts.filter((h) => h.vcenterId === req.query.vcenterId);
+  const vcName = {};
+  for (const vc of snap.vcenters || []) vcName[vc.id] = vc.name;
+  const byVendor = {};
+  const byModel = {};
+  const combo = new Map(); // vcenter|vendor|model -> count
+  for (const h of hosts) {
+    const vendor = h.vendor || '미상';
+    const model = h.model || '미상';
+    byVendor[vendor] = (byVendor[vendor] || 0) + 1;
+    byModel[`${vendor} ${model}`] = (byModel[`${vendor} ${model}`] || 0) + 1;
+    const key = `${h.vcenterId}|${vendor}|${model}`;
+    combo.set(key, (combo.get(key) || 0) + 1);
+  }
+  const items = [...combo.entries()].map(([k, count]) => {
+    const [vcenterId, vendor, model] = k.split('|');
+    return { vcenterId, vcenterName: vcName[vcenterId] || vcenterId, vendor, model, count };
+  }).sort((a, b) => b.count - a.count);
+  res.json({
+    hosts: hosts.length,
+    byVendor: Object.entries(byVendor).map(([vendor, count]) => ({ vendor, count })).sort((a, b) => b.count - a.count),
+    byModel: Object.entries(byModel).map(([model, count]) => ({ model, count })).sort((a, b) => b.count - a.count),
+    items,
+  });
+});
+
 // ESXi version distribution + host list (optionally per vCenter).
 api.get('/tools/esxi', (req, res) => {
   const snap = store.get();
