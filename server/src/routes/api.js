@@ -1,10 +1,66 @@
 import { Router } from 'express';
 import { store } from '../store.js';
-import { currentVersion, config } from '../config.js';
+import { currentVersion, config, loadVcenterConfig } from '../config.js';
 import { loadUiSettings, saveUiSettings } from '../ui-settings.js';
 import { hostPower } from '../idrac/service.js';
+import { fetchVmMetric, PERF_INTERVALS } from '../vcenter/soapClient.js';
 
 export const api = Router();
+
+const METRIC_TYPES = ['cpu', 'mem', 'disk', 'net'];
+const METRIC_UNIT = { cpu: '%', mem: '%', disk: 'KBps', net: 'KBps' };
+
+// On-demand VM performance time-series — NOT collected by the regular poll.
+// Queried live from vCenter only when the user opens the metric viewer.
+//   /vms/:id/metrics?type=cpu|mem|disk|net&interval=realtime|day|week|month|year
+api.get('/vms/:id/metrics', async (req, res) => {
+  const id = req.params.id;
+  const type = METRIC_TYPES.includes(req.query.type) ? req.query.type : 'cpu';
+  const interval = PERF_INTERVALS[req.query.interval] ? req.query.interval : 'realtime';
+  const snap = store.get();
+  const vm = snap.vms.find((v) => v.id === id);
+  if (!vm) return res.status(404).json({ ok: false, reason: 'VM을 찾을 수 없습니다.' });
+
+  if (snap.source === 'mock') return res.json(synthMetric(vm, type, interval));
+
+  const sep = id.indexOf(':');
+  const vcId = sep >= 0 ? id.slice(0, sep) : id;
+  const moref = sep >= 0 ? id.slice(sep + 1) : '';
+  const vc = loadVcenterConfig().vcenters.find((v) => v.id === vcId);
+  if (!vc) return res.status(404).json({ ok: false, reason: 'vCenter 설정을 찾을 수 없습니다.' });
+  try {
+    res.json(await fetchVmMetric(vc, moref, type, interval));
+  } catch (err) {
+    res.status(502).json({ ok: false, reason: err.message });
+  }
+});
+
+// Synthesize a realistic series for mock mode so the viewer works out of the box.
+function synthMetric(vm, type, interval) {
+  const spec = {
+    realtime: { n: 180, stepMs: 20_000 },
+    day: { n: 288, stepMs: 300_000 },
+    week: { n: 336, stepMs: 1_800_000 },
+    month: { n: 360, stepMs: 7_200_000 },
+    year: { n: 365, stepMs: 86_400_000 },
+  }[interval] || { n: 180, stepMs: 20_000 };
+  const base = type === 'cpu' ? (vm.cpuUsagePct || 10)
+    : type === 'mem' ? (vm.memUsagePct || 20)
+      : type === 'disk' ? 1800 : 900; // KBps baselines
+  const amp = type === 'cpu' || type === 'mem' ? base * 0.5 + 8 : base * 0.8;
+  const seed = [...vm.id].reduce((a, c) => a + c.charCodeAt(0), 0);
+  const now = Date.now();
+  const points = [];
+  for (let i = spec.n - 1; i >= 0; i--) {
+    const t = new Date(now - i * spec.stepMs).toISOString();
+    const wave = Math.sin((i + seed) / 9) * 0.6 + Math.sin((i + seed) / 23) * 0.4;
+    let v = base + wave * amp + (((seed * (i + 1)) % 17) - 8) * (amp / 20);
+    if (type === 'cpu' || type === 'mem') v = Math.max(0, Math.min(100, v));
+    else v = Math.max(0, v);
+    points.push({ t, v: Math.round(v * 10) / 10 });
+  }
+  return { ok: true, type, interval, unit: METRIC_UNIT[type], points, mock: true };
+}
 
 // Real iDRAC power for one host (current + history). Used by the host detail
 // popup. ?name=<esxi host name>&hours=24

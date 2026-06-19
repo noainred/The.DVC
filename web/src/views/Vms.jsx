@@ -1,6 +1,14 @@
 import React, { useState } from 'react';
 import { usePolling } from '../api.js';
 import { DataTable, UsageCell, StateBadge, Loading, ErrorBox, ResultCount, Modal } from '../components/ui.jsx';
+import { VmMetricButton } from '../components/VmMetrics.jsx';
+
+/** Render every IPv4 a VM has (multi-homed), one per line; IPv6 is excluded upstream. */
+function ipList(vm) {
+  const ips = vm.ipAddresses?.length ? vm.ipAddresses : (vm.ipAddress ? [vm.ipAddress] : []);
+  if (!ips.length) return <span className="muted">—</span>;
+  return ips.map((ip, i) => <div key={i}>{ip}</div>);
+}
 
 function DetailRow({ label, children }) {
   return (
@@ -21,7 +29,7 @@ function VmDetail({ vm, onClose }) {
         <DetailRow label="호스트">{vm.host || '—'}</DetailRow>
         <DetailRow label="클러스터">{vm.cluster || '—'}</DetailRow>
         <DetailRow label="Guest OS">{vm.guestOS}</DetailRow>
-        <DetailRow label="IP 주소">{vm.ipAddress || '—'}</DetailRow>
+        <DetailRow label={`IP 주소${vm.ipAddresses?.length > 1 ? ` (${vm.ipAddresses.length})` : ''}`}>{ipList(vm)}</DetailRow>
         <DetailRow label="VMware Tools"><StateBadge state={vm.toolsStatus} /></DetailRow>
         <DetailRow label="vCPU">{vm.cpuCount} 코어</DetailRow>
         <DetailRow label="RAM">{Math.round(vm.memMB / 1024)} GB ({vm.memMB.toLocaleString()} MB)</DetailRow>
@@ -37,6 +45,9 @@ function VmDetail({ vm, onClose }) {
           <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>메모리 사용률</div>
           <UsageCell pct={vm.memUsagePct} />
         </div>
+      </div>
+      <div className="flex" style={{ marginTop: 16, justifyContent: 'flex-end' }}>
+        <VmMetricButton vmId={vm.id} vmName={vm.name} />
       </div>
     </Modal>
   );
@@ -54,7 +65,7 @@ export default function Vms({ filters }) {
     { key: 'vcenterId', label: 'vCenter', render: (v) => <span className="muted">{v.vcenterId}</span> },
     { key: 'powerState', label: '전원', render: (v) => <StateBadge state={v.powerState} /> },
     { key: 'guestOS', label: 'Guest OS' },
-    { key: 'ipAddress', label: 'IP', render: (v) => v.ipAddress || <span className="muted">—</span> },
+    { key: 'ipAddress', label: 'IP', render: (v) => ipList(v) },
     { key: 'cpuCount', label: 'vCPU', align: 'right' },
     { key: 'memMB', label: 'RAM', align: 'right', render: (v) => `${Math.round(v.memMB / 1024)} GB` },
     { key: 'cpuUsagePct', label: 'CPU', render: (v) => <UsageCell pct={v.cpuUsagePct} /> },

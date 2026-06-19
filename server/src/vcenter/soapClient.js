@@ -154,6 +154,95 @@ export class VimSoapClient {
     }
     return out;
   }
+
+  /** Map 'group.name.rollup' -> counterId from the PerformanceManager catalog. */
+  async perfCounterMap() {
+    if (!this.sc.perfManager) return new Map();
+    const objs = await this.retrieveObjectProps('PerformanceManager', this.sc.perfManager, ['perfCounter']);
+    const xml = objs[0]?.props?.perfCounter || '';
+    const map = new Map();
+    for (const blk of xml.split('<PerfCounterInfo').slice(1)) {
+      const key = /<key>(\d+)<\/key>/.exec(blk)?.[1];
+      const name = /<nameInfo>[\s\S]*?<key>(\w+)<\/key>/.exec(blk)?.[1];
+      const group = /<groupInfo>[\s\S]*?<key>(\w+)<\/key>/.exec(blk)?.[1];
+      const rollup = /<rollupType>(\w+)<\/rollupType>/.exec(blk)?.[1];
+      if (key && name && group && rollup) map.set(`${group}.${name}.${rollup}`, key);
+    }
+    return map;
+  }
+
+  /**
+   * Query a perf counter time-series for one entity over the given interval.
+   * intervalId: 20 (real-time), 300 (day), 1800 (week), 7200 (month), 86400 (year).
+   * Returns [{ t: ISO timestamp, v: number }].
+   */
+  async queryEntityPerf(entityType, ref, counterId, intervalId, maxSample = 0) {
+    const spec =
+      `<querySpec><entity type="${entityType}">${ref}</entity>` +
+      (maxSample ? `<maxSample>${maxSample}</maxSample>` : '') +
+      `<metricId><counterId>${counterId}</counterId><instance></instance></metricId>` +
+      `<intervalId>${intervalId}</intervalId></querySpec>`;
+    const xml = await this.#call(
+      `<QueryPerf xmlns="urn:vim25"><_this type="PerformanceManager">${this.sc.perfManager}</_this>${spec}</QueryPerf>`
+    );
+    const rv = /<returnval[^>]*>([\s\S]*?)<\/returnval>/.exec(xml)?.[1] || '';
+    const times = [...rv.matchAll(/<timestamp>([^<]+)<\/timestamp>/g)].map((m) => m[1]);
+    const vals = [...rv.matchAll(/<value>(-?\d+)<\/value>/g)].map((m) => Number(m[1]));
+    const n = Math.min(times.length, vals.length);
+    const out = [];
+    for (let i = 0; i < n; i++) out.push({ t: times[i], v: vals[i] });
+    return out;
+  }
+}
+
+// IPv4 helpers — collect every IPv4 a guest reports, excluding IPv6/loopback.
+const isIPv4 = (s) => /^(?:\d{1,3}\.){3}\d{1,3}$/.test(String(s)) && String(s).split('.').every((o) => Number(o) <= 255);
+function extractIPv4s(netXml, primary) {
+  const out = [];
+  const add = (ip) => {
+    ip = String(ip || '').trim();
+    if (isIPv4(ip) && !ip.startsWith('127.') && !ip.startsWith('169.254.') && ip !== '0.0.0.0' && !out.includes(ip)) out.push(ip);
+  };
+  if (netXml) { for (const m of netXml.matchAll(/<ipAddress>([^<]+)<\/ipAddress>/g)) add(m[1]); }
+  add(primary);
+  return out;
+}
+function vmIps(netXml, primary) {
+  const ips = extractIPv4s(netXml, primary);
+  return { ipAddress: ips[0] || (isIPv4(primary) ? String(primary) : null), ipAddresses: ips };
+}
+
+// vCenter PerformanceManager intervals and the counters we expose on demand.
+export const PERF_INTERVALS = { realtime: 20, day: 300, week: 1800, month: 7200, year: 86400 };
+const PERF_COUNTERS = {
+  cpu: { key: 'cpu.usage.average', unit: '%', div: 100 },
+  mem: { key: 'mem.usage.average', unit: '%', div: 100 },
+  disk: { key: 'disk.usage.average', unit: 'KBps', div: 1 },
+  net: { key: 'net.usage.average', unit: 'KBps', div: 1 },
+};
+
+/**
+ * On-demand performance query for one VM (not part of the regular poll).
+ * type: cpu|mem|disk|net, interval: realtime|day|week|month|year.
+ * Returns { type, interval, unit, points:[{t,v}] }. Throws on failure.
+ */
+export async function fetchVmMetric(vc, moref, type, interval) {
+  const cfg = PERF_COUNTERS[type];
+  if (!cfg) throw new Error(`지원하지 않는 지표: ${type}`);
+  const intervalId = PERF_INTERVALS[interval] || 20;
+  const c = new VimSoapClient(vc);
+  await c.login();
+  try {
+    const map = await c.perfCounterMap();
+    const counterId = map.get(cfg.key);
+    if (!counterId) throw new Error(`vCenter에 카운터가 없습니다: ${cfg.key}`);
+    const maxSample = interval === 'realtime' ? 180 : 0;
+    const raw = await c.queryEntityPerf('VirtualMachine', moref, counterId, intervalId, maxSample);
+    const points = raw.map((p) => ({ t: p.t, v: cfg.div > 1 ? Math.round((Math.max(0, p.v) / cfg.div) * 10) / 10 : Math.max(0, p.v) }));
+    return { ok: true, type, interval, unit: cfg.unit, points };
+  } finally {
+    await c.logout();
+  }
 }
 
 /** Parse RetrieveProperties response into [{type, ref, props:{path:value}}]. */
@@ -201,7 +290,7 @@ export async function collectFromVCenterSoap(vc) {
       { type: 'VirtualMachine', paths: [
         'name', 'runtime.host', 'runtime.powerState', 'summary.config.numCpu', 'summary.config.memorySizeMB',
         'summary.config.guestFullName', 'summary.quickStats.overallCpuUsage', 'summary.quickStats.guestMemoryUsage',
-        'summary.storage.committed', 'guest.ipAddress', 'guest.toolsRunningStatus'] },
+        'summary.storage.committed', 'guest.ipAddress', 'guest.net', 'guest.toolsRunningStatus'] },
       { type: 'Datastore', paths: ['name', 'summary.type', 'summary.capacity', 'summary.freeSpace', 'summary.accessible'] },
       { type: 'Network', paths: ['name'] },
       { type: 'DistributedVirtualPortgroup', paths: ['name'] },
@@ -284,7 +373,7 @@ export async function collectFromVCenterSoap(vc) {
         storageGB: Math.round(num(p['summary.storage.committed']) / 1024 ** 3),
         cpuUsagePct: powered ? pct(cpuUsageMhz, vmCpuCapacity) : 0,
         memUsagePct: powered ? pct(guestMemMB, memMB) : 0,
-        ipAddress: p['guest.ipAddress'] || null,
+        ...vmIps(p['guest.net'], p['guest.ipAddress']),
         toolsStatus: p['guest.toolsRunningStatus'] === 'guestToolsRunning' ? 'RUNNING'
           : powered ? 'NOT_RUNNING' : 'NOT_RUNNING',
       });
