@@ -22,24 +22,37 @@ export default function WorldMap({ sites = [], onSelect, height = 420, onResizeE
   // rotation is modular (360°), dragging keeps scrolling around the globe
   // forever: 아시아 → 미국 → 유럽 → 다시 아시아. Start centered on Asia/Korea.
   const [lambda, setLambda] = useState(-127);
+  const [offsetY, setOffsetY] = useState(0); // vertical pan, in SVG units
   const drag = useRef(null);
   const moved = useRef(false);
+  const wrapRef = useRef(null);
 
   const clamp = (v) => Math.max(240, Math.min(1200, v));
   const changeHeight = (delta) => { const nh = clamp(h + delta); setH(nh); onResizeEnd?.(nh); };
 
+  // ComposableMap renders an 800-wide viewBox scaled to 100% width; convert a
+  // screen-pixel delta into SVG units so vertical panning tracks the cursor.
+  const svgFactor = () => {
+    const w = wrapRef.current?.getBoundingClientRect().width || 800;
+    return 800 / w;
+  };
+
   const onPointerDown = (e) => {
-    // ignore drags that start on a marker (let the marker handle click/hover)
-    drag.current = { x: e.clientX, lambda };
+    drag.current = { x: e.clientX, y: e.clientY, lambda, offsetY };
     moved.current = false;
     e.currentTarget.setPointerCapture?.(e.pointerId);
   };
   const onPointerMove = (e) => {
     if (!drag.current) return;
     const dx = e.clientX - drag.current.x;
-    if (Math.abs(dx) > 2) moved.current = true;
+    const dy = e.clientY - drag.current.y;
+    if (Math.abs(dx) > 2 || Math.abs(dy) > 2) moved.current = true;
     // ~0.32°/px; drag left → 동쪽(아시아→미국), drag right → 서쪽
     setLambda(drag.current.lambda + dx * 0.32);
+    // vertical pan, clamped so the map can't be dragged completely out of view
+    const lim = h * 0.55;
+    const ny = drag.current.offsetY + dy * svgFactor();
+    setOffsetY(Math.max(-lim, Math.min(lim, ny)));
   };
   const endDrag = (e) => {
     if (drag.current) e.currentTarget?.releasePointerCapture?.(e.pointerId);
@@ -54,6 +67,7 @@ export default function WorldMap({ sites = [], onSelect, height = 420, onResizeE
         <span className="map-size-val">{Math.round(h)}px</span>
         <button onClick={() => changeHeight(60)} title="지도 확대" disabled={h >= 1200}>+</button>
       </div>
+      <div ref={wrapRef} style={{ overflow: 'hidden', borderRadius: 8 }}>
       <ComposableMap
         projection="geoEqualEarth"
         projectionConfig={{ scale: 175, rotate: [lambda, 0, 0] }}
@@ -64,6 +78,7 @@ export default function WorldMap({ sites = [], onSelect, height = 420, onResizeE
         onPointerUp={endDrag}
         onPointerLeave={endDrag}
       >
+        <g transform={`translate(0, ${offsetY})`}>
         <Geographies geography={geoData}>
           {({ geographies }) =>
             geographies.map((geo) => (
@@ -104,13 +119,15 @@ export default function WorldMap({ sites = [], onSelect, height = 420, onResizeE
             </Marker>
           );
         })}
+        </g>
       </ComposableMap>
+      </div>
 
       <div className="map-legend">
         <span className="legend-item"><span className="dot" style={{ background: '#22c55e' }} /> 정상</span>
         <span className="legend-item"><span className="dot" style={{ background: '#f59e0b' }} /> 경고</span>
         <span className="legend-item"><span className="dot" style={{ background: '#ef4444' }} /> 위험/연결끊김</span>
-        <span className="legend-item muted" style={{ marginLeft: 'auto' }}>← 드래그하면 지구가 계속 돌아갑니다 →</span>
+        <span className="legend-item muted" style={{ marginLeft: 'auto' }}>드래그: ←→ 지구 무한 회전 · ↑↓ 상하 이동</span>
       </div>
 
       {tip && (
