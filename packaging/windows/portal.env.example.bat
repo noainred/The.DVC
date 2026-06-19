@@ -24,6 +24,12 @@ rem ===========================================================================
 rem set COLLECTOR_TOKEN=change-me-strong-token
 rem set COLLECTOR_DATACENTER=Seoul-DC1
 
+rem [중앙 오케스트레이션 에이전트] 중앙에서 IP 할당받아 로컬 스캔하려면:
+rem set AGENT_NAME=Seoul-DC1
+rem set CENTRAL_URL=http://중앙포탈:4000
+rem set CENTRAL_TOKEN=change-me-strong-token
+rem set AGENT_SCAN_INTERVAL_MS=3600000
+
 rem --- iDRAC/OME 전력 수집 주기(ms) ---
 set IDRAC_POLL_INTERVAL_MS=60000
 

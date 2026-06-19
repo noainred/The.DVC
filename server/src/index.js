@@ -13,8 +13,10 @@ import { upgradeRouter } from './routes/upgrade.js';
 import { upgradeManager } from './upgrade/manager.js';
 import { adminRouter } from './routes/admin.js';
 import { collectorRouter } from './routes/collector.js';
+import { centralRouter } from './routes/central.js';
 import { startIdracPoller } from './idrac/poller.js';
 import { startCollectorPuller } from './collector/puller.js';
+import { startAgentScanner } from './agent/scanner.js';
 
 const app = express();
 app.use(cors());
@@ -33,6 +35,7 @@ app.use((req, res, next) => {
 });
 
 app.use('/api/collector', collectorRouter);            // token-gated agent export (no user auth)
+app.use('/api/central', centralRouter);                // token-gated agent<->central (no user auth)
 app.use('/api/auth', authRouter);                      // public: login / config / me
 app.use('/api/upgrade', authMiddleware, upgradeRouter); // admin-gated auto-upgrade control
 app.use('/api/admin', authMiddleware, adminRouter);     // admin-gated vCenter management
@@ -62,6 +65,7 @@ store.start();
 upgradeManager.start();
 startIdracPoller();
 startCollectorPuller();
+startAgentScanner();
 
 app.listen(config.port, () => {
   console.log(`\n  VMware Global Monitoring Portal — API`);

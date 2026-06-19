@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -83,6 +84,28 @@ export const config = {
     pullIntervalMs: Number(process.env.COLLECTOR_PULL_INTERVAL_MS) || 60_000,
     // Per-request timeout when pulling a remote collector.
     timeoutMs: Number(process.env.COLLECTOR_TIMEOUT_MS) || 20_000,
+  },
+  // Central orchestration of agent-side scans. The central portal hands out
+  // per-agent IP assignments; each agent pulls its assignment by name, scans
+  // locally, and posts the results back.
+  central: {
+    // Token the central REQUIRES on its /api/central endpoints (agent->central).
+    // Empty = those endpoints are disabled (this instance is not a central).
+    token: process.env.CENTRAL_TOKEN || '',
+  },
+  agent: {
+    // This agent's name — matched against central IP assignments.
+    name: process.env.AGENT_NAME || process.env.COLLECTOR_DATACENTER || os.hostname(),
+    // Central portal base URL this agent pulls assignments from / posts to.
+    // Empty = agent scanning disabled.
+    centralUrl: (process.env.CENTRAL_URL || '').replace(/\/+$/, ''),
+    // Token presented to the central (must match the central's CENTRAL_TOKEN).
+    centralToken: process.env.CENTRAL_TOKEN || '',
+    // How often the agent pulls its assignment and scans (ms).
+    scanIntervalMs: Number(process.env.AGENT_SCAN_INTERVAL_MS) || 3_600_000,
+    // Auto-register discovered iDRACs into this agent's local registry so it
+    // begins collecting their power immediately.
+    autoRegister: process.env.AGENT_AUTO_REGISTER !== 'false',
   },
   auth: {
     enabled: process.env.AUTH_ENABLED !== 'false',
