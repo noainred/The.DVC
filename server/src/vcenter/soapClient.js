@@ -176,10 +176,12 @@ export class VimSoapClient {
    * intervalId: 20 (real-time), 300 (day), 1800 (week), 7200 (month), 86400 (year).
    * Returns [{ t: ISO timestamp, v: number }].
    */
-  async queryEntityPerf(entityType, ref, counterId, intervalId, maxSample = 0) {
+  async queryEntityPerf(entityType, ref, counterId, intervalId, maxSample = 0, { startTime, endTime } = {}) {
     const spec =
       `<querySpec><entity type="${entityType}">${ref}</entity>` +
-      (maxSample ? `<maxSample>${maxSample}</maxSample>` : '') +
+      (startTime ? `<startTime>${startTime}</startTime>` : '') +
+      (endTime ? `<endTime>${endTime}</endTime>` : '') +
+      (!startTime && maxSample ? `<maxSample>${maxSample}</maxSample>` : '') +
       `<metricId><counterId>${counterId}</counterId><instance></instance></metricId>` +
       `<intervalId>${intervalId}</intervalId></querySpec>`;
     const xml = await this.#call(
@@ -226,7 +228,7 @@ const PERF_COUNTERS = {
  * type: cpu|mem|disk|net, interval: realtime|day|week|month|year.
  * Returns { type, interval, unit, points:[{t,v}] }. Throws on failure.
  */
-export async function fetchVmMetric(vc, moref, type, interval) {
+export async function fetchVmMetric(vc, moref, type, interval, { start, end } = {}) {
   const cfg = PERF_COUNTERS[type];
   if (!cfg) throw new Error(`지원하지 않는 지표: ${type}`);
   const intervalId = PERF_INTERVALS[interval] || 20;
@@ -236,10 +238,13 @@ export async function fetchVmMetric(vc, moref, type, interval) {
     const map = await c.perfCounterMap();
     const counterId = map.get(cfg.key);
     if (!counterId) throw new Error(`vCenter에 카운터가 없습니다: ${cfg.key}`);
-    const maxSample = interval === 'realtime' ? 180 : 0;
-    const raw = await c.queryEntityPerf('VirtualMachine', moref, counterId, intervalId, maxSample);
+    // A specified date range uses startTime/endTime; otherwise the rolling window.
+    const startTime = start ? new Date(start).toISOString() : null;
+    const endTime = end ? new Date(end).toISOString() : null;
+    const maxSample = (!startTime && interval === 'realtime') ? 180 : 0;
+    const raw = await c.queryEntityPerf('VirtualMachine', moref, counterId, intervalId, maxSample, { startTime, endTime });
     const points = raw.map((p) => ({ t: p.t, v: cfg.div > 1 ? Math.round((Math.max(0, p.v) / cfg.div) * 10) / 10 : Math.max(0, p.v) }));
-    return { ok: true, type, interval, unit: cfg.unit, points };
+    return { ok: true, type, interval, unit: cfg.unit, points, start: startTime, end: endTime };
   } finally {
     await c.logout();
   }
