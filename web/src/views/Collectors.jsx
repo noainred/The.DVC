@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, putJson, delJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
+import EscClose from '../components/EscClose.jsx';
 
 const EMPTY = { id: '', name: '', datacenter: '', url: 'http://', token: '', enabled: true };
 
@@ -150,6 +151,7 @@ export default function Collectors() {
 
       {form && (
         <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) close(); }}>
+          <EscClose onClose={close} />
           <div className="modal card">
             <div className="flex between" style={{ marginBottom: 12 }}>
               <b style={{ fontSize: 15 }}>{editing ? `수집 서버 수정 — ${form.id}` : '새 수집 서버 등록'}</b>

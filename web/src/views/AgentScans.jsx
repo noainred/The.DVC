@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, putJson, delJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
+import EscClose from '../components/EscClose.jsx';
 
 const EMPTY = { agent: '', ips: '', username: 'root', password: '', enabled: true };
 
@@ -158,6 +159,7 @@ export default function AgentScans() {
 
       {form && (
         <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) close(); }}>
+          <EscClose onClose={close} />
           <div className="modal card" style={{ maxWidth: 640 }}>
             <div className="flex between" style={{ marginBottom: 12 }}>
               <b style={{ fontSize: 15 }}>{editing ? `작업 수정 — ${form.agent}` : '새 에이전트 작업 할당'}</b>
@@ -196,6 +198,7 @@ export default function AgentScans() {
 
       {csvOpen && (
         <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setCsvOpen(false); }}>
+          <EscClose onClose={() => setCsvOpen(false)} />
           <div className="modal card" style={{ maxWidth: 760 }}>
             <div className="flex between" style={{ marginBottom: 10 }}>
               <b style={{ fontSize: 15 }}>CSV로 에이전트 작업 가져오기</b>

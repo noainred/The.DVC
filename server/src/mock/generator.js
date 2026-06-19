@@ -26,6 +26,7 @@ const GUEST_OS = [
   'Windows Server 2019', 'CentOS Stream 9', 'SUSE Linux Enterprise 15', 'Debian 12',
 ];
 const APP_ROLES = ['web', 'app', 'db', 'cache', 'mq', 'lb', 'k8s-node', 'monitor', 'backup', 'dns'];
+const ESXI_VERSIONS = ['8.0.3', '8.0.2', '8.0.1', '7.0.3', '7.0.2', '6.7.0'];
 // VM folder paths to mimic a vSphere "VMs and Templates" inventory.
 const VM_FOLDERS = [
   'Production/Web', 'Production/DB', 'Production/App', 'Infrastructure/Network',
@@ -186,6 +187,8 @@ export function generateSnapshot() {
         memUsageMB,
         memUsagePct: Math.round((memUsageMB / h.memTotalMB) * 100),
         vmCount: vmsOnHost.length,
+        cpuThreads: h.cpuCores * 2, // logical cores (hyper-threaded)
+        version: ESXI_VERSIONS[(h.idx + site.id.length) % ESXI_VERSIONS.length],
         // approximate host power draw (W): idle baseline + per-core + load-dependent
         powerWatts: disconnected ? 0 : Math.round(140 + h.cpuCores * 4.5 + cpuLoad * h.cpuCores * 5 + memLoad * 30),
       });

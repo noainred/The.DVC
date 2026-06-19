@@ -2,6 +2,16 @@ import React, { useState } from 'react';
 import { usePolling } from '../api.js';
 import { DataTable, UsageCell, StateBadge, Loading, ErrorBox, EntityDetail } from '../components/ui.jsx';
 
+function SumCard({ label, value, meta, accent }) {
+  return (
+    <div className="card kpi">
+      <div className="label">{label}</div>
+      <div className="value" style={{ fontSize: 24, ...(accent ? { color: accent } : {}) }}>{value}</div>
+      {meta && <div className="meta">{meta}</div>}
+    </div>
+  );
+}
+
 /** Compact leaderboard list for a "top consumers" category. Rows are clickable. */
 function TopList({ title, items, valueOf, label, accent, type, onSelect }) {
   const max = Math.max(1, ...items.map(valueOf));
@@ -133,6 +143,16 @@ export default function Explore({ scope }) {
           조건 일치 VM: <b style={{ color: 'var(--text)' }}>{vmResult?.total?.toLocaleString() ?? '…'}</b>개
           {vmResult && vmResult.total > vmResult.items.length && ` (상위 ${vmResult.items.length}개 표시)`}
         </div>
+        {vmResult?.totals && (
+          <div className="kpis" style={{ marginBottom: 12 }}>
+            <SumCard label="검색된 VM" value={vmResult.totals.count.toLocaleString()} meta={`구동중 ${vmResult.totals.poweredOn.toLocaleString()}`} />
+            <SumCard label="vCPU 합계" value={vmResult.totals.vcpu.toLocaleString()} meta="할당 vCPU" accent="var(--accent)" />
+            <SumCard label="RAM 합계" value={`${vmResult.totals.ramGB.toLocaleString()} GB`} meta={`≈ ${(vmResult.totals.ramGB / 1024).toFixed(1)} TB`} accent="var(--purple)" />
+            <SumCard label="디스크 합계" value={`${vmResult.totals.diskTB.toLocaleString()} TB`} meta={`${vmResult.totals.diskGB.toLocaleString()} GB`} accent="var(--accent-2)" />
+            <SumCard label="평균 CPU 사용률" value={`${vmResult.totals.avgCpuUsagePct}%`} meta="구동중 VM 기준" />
+            <SumCard label="평균 메모리 사용률" value={`${vmResult.totals.avgMemUsagePct}%`} meta="구동중 VM 기준" />
+          </div>
+        )}
         <DataTable columns={vmCols} rows={vmResult?.items || []} initialSort={{ key: 'cpuUsagePct', dir: 'desc' }}
           emptyText="조건에 맞는 VM이 없습니다." />
       </div>
