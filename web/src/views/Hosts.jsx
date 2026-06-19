@@ -22,8 +22,33 @@ export default function Hosts({ filters }) {
     { key: 'vmCount', label: 'VM', align: 'right' },
   ];
 
+  const s = data.summary;
+  const fmt = (n) => (n ?? 0).toLocaleString('en-US');
+
   return (
     <>
+      {s && (
+        <>
+          <div className="section-title" style={{ marginTop: 0 }}>글로벌 호스트 요약</div>
+          <div className="kpis" style={{ marginBottom: 12 }}>
+            <div className="card kpi"><div className="label">전체 호스트(ESXi)</div><div className="value">{fmt(s.total)}</div><div className="meta">전원 On {fmt(s.poweredOn)} · Off {fmt(s.poweredOff)}</div></div>
+            <div className="card kpi"><div className="label">상태</div><div className="value" style={{ fontSize: 20 }}>정상 {fmt(s.connected)}</div><div className="meta">점검 {fmt(s.maintenance)} · 끊김 {fmt(s.disconnected)}</div></div>
+            <div className="card kpi"><div className="label">물리 코어</div><div className="value">{fmt(s.physicalCores)}</div><div className="meta">논리 코어 {fmt(s.logicalCores)}</div></div>
+            <div className="card kpi"><div className="label">할당 vCore</div><div className="value" style={{ color: 'var(--accent)' }}>{fmt(s.vcoreAllocated)}</div><div className="meta">vCore:물리 {s.vcorePerCore} : 1</div></div>
+            <div className="card kpi"><div className="label">전체 메모리</div><div className="value">{fmt(s.memTotalGB)}<small> GB</small></div><div className="meta">≈ {(s.memTotalGB / 1024).toFixed(1)} TB{s.powerKw > 0 ? ` · ${s.powerKw} kW` : ''}</div></div>
+            <div className="card kpi">
+              <div className="label">ESXi 버전</div>
+              <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {s.esxiVersions.slice(0, 6).map((v) => (
+                  <span key={v.version} className="badge blue" title={`${v.count} 호스트`}>{v.version} · {v.count}</span>
+                ))}
+                {s.esxiVersions.length === 0 && <span className="muted">정보 없음</span>}
+              </div>
+            </div>
+          </div>
+          <div className="section-title">호스트 상세</div>
+        </>
+      )}
       <ResultCount total={data.total} label="호스트" filtered={Object.keys(filters || {}).length > 0} />
       <DataTable columns={columns} rows={rows} initialSort={{ key: 'cpuUsagePct', dir: 'desc' }} />
       {detail && <EntityDetail type="host" item={detail} onClose={() => setDetail(null)} />}

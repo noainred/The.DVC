@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import HostPowerPanel from './HostPowerPanel.jsx';
 import { VmMetricButton } from './VmMetrics.jsx';
+import EscClose from './EscClose.jsx';
 
 export function usageColor(pct) {
   if (pct >= 90) return 'var(--red)';
@@ -129,10 +130,11 @@ export function ResultCount({ total = 0, shown, label, filtered }) {
   );
 }
 
-/** Simple centered modal. Click the backdrop or 닫기 to close. */
+/** Simple centered modal. Click the backdrop, press ESC, or 닫기 to close. */
 export function Modal({ title, onClose, children, width = 560 }) {
   return (
     <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <EscClose onClose={onClose} />
       <div className="modal card" style={{ maxWidth: width }}>
         <div className="flex between" style={{ marginBottom: 12 }}>
           <b style={{ fontSize: 15 }}>{title}</b>

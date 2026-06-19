@@ -316,7 +316,31 @@ api.get('/hosts', (req, res) => {
   const snap = store.get();
   let hosts = applyFilters(snap.hosts, req.query, snap, ['name', 'cluster']);
   if (req.query.state) hosts = hosts.filter((h) => h.connectionState === req.query.state);
-  res.json({ total: hosts.length, items: hosts });
+
+  // Global host summary for the top of the 호스트 screen.
+  const sm = (fn) => hosts.reduce((a, h) => a + (fn(h) || 0), 0);
+  const hostNames = new Set(hosts.map((h) => h.name));
+  // vCore = vCPU allocated to VMs running on the in-scope hosts.
+  const vcoreAllocated = snap.vms.filter((v) => hostNames.has(v.host)).reduce((a, v) => a + (v.cpuCount || 0), 0);
+  const verMap = {};
+  for (const h of hosts) { const v = h.version || 'unknown'; verMap[v] = (verMap[v] || 0) + 1; }
+  const physicalCores = sm((h) => h.cpuCores);
+  const summary = {
+    total: hosts.length,
+    connected: hosts.filter((h) => h.connectionState === 'CONNECTED').length,
+    maintenance: hosts.filter((h) => h.connectionState === 'MAINTENANCE').length,
+    disconnected: hosts.filter((h) => h.connectionState === 'DISCONNECTED').length,
+    poweredOn: hosts.filter((h) => h.powerState === 'POWERED_ON').length,
+    poweredOff: hosts.filter((h) => h.powerState && h.powerState !== 'POWERED_ON').length,
+    physicalCores,
+    logicalCores: sm((h) => h.cpuThreads || h.cpuCores),
+    vcoreAllocated,
+    vcorePerCore: physicalCores > 0 ? Math.round((vcoreAllocated / physicalCores) * 100) / 100 : 0,
+    memTotalGB: Math.round(sm((h) => h.memTotalMB) / 1024),
+    powerKw: Math.round(sm((h) => h.powerWatts) / 100) / 10,
+    esxiVersions: Object.entries(verMap).map(([version, count]) => ({ version, count })).sort((a, b) => b.count - a.count),
+  };
+  res.json({ total: hosts.length, items: hosts, summary });
 });
 
 api.get('/vms', (req, res) => {
@@ -343,7 +367,24 @@ api.get('/vms', (req, res) => {
 
   if (q.sortBy) vms = sortBy(vms, q.sortBy, q.order);
   const limit = Math.min(Number(q.limit) || 500, 5000);
-  res.json({ total: vms.length, items: vms.slice(0, limit) });
+
+  // Aggregate over ALL matched VMs (not just the page) so the UI can show the
+  // sum of the searched resources: vCPU/RAM/disk allocation + avg usage.
+  const sm = (fn) => vms.reduce((a, v) => a + (fn(v) || 0), 0);
+  const on = vms.filter((v) => v.powerState === 'POWERED_ON');
+  const avg = (arr, fn) => (arr.length ? Math.round((arr.reduce((a, v) => a + (fn(v) || 0), 0) / arr.length) * 10) / 10 : 0);
+  const totals = {
+    count: vms.length,
+    poweredOn: on.length,
+    poweredOff: vms.length - on.length,
+    vcpu: sm((v) => v.cpuCount),
+    ramGB: Math.round(sm((v) => v.memMB) / 1024),
+    diskGB: sm((v) => v.storageGB),
+    diskTB: Math.round(sm((v) => v.storageGB) / 1024 * 10) / 10,
+    avgCpuUsagePct: avg(on, (v) => v.cpuUsagePct),
+    avgMemUsagePct: avg(on, (v) => v.memUsagePct),
+  };
+  res.json({ total: vms.length, items: vms.slice(0, limit), totals });
 });
 
 api.get('/datastores', (req, res) => {

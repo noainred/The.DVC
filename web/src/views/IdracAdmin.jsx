@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, putJson, delJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
+import EscClose from '../components/EscClose.jsx';
 
 const EMPTY = { id: '', name: '', host: '', username: 'root', password: '', serviceTag: '', hostNames: '', enabled: true, type: 'idrac' };
 
@@ -239,6 +240,7 @@ export default function IdracAdmin() {
 
       {form && (
         <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) close(); }}>
+          <EscClose onClose={close} />
           <div className="modal card">
             <div className="flex between" style={{ marginBottom: 12 }}>
               <b style={{ fontSize: 15 }}>{editing ? `서버 수정 — ${form.id}` : '새 Dell 서버 등록'}</b>
@@ -299,6 +301,7 @@ export default function IdracAdmin() {
 
       {csvText != null && (
         <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setCsvText(null); }}>
+          <EscClose onClose={() => setCsvText(null)} />
           <div className="modal card" style={{ maxWidth: 720 }}>
             <div className="flex between" style={{ marginBottom: 10 }}>
               <b style={{ fontSize: 15 }}>CSV 붙여넣기로 서버 등록</b>
@@ -325,6 +328,7 @@ export default function IdracAdmin() {
 
       {bulk != null && (
         <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) { setBulk(null); setBulkPreview(null); } }}>
+          <EscClose onClose={() => { setBulk(null); setBulkPreview(null); }} />
           <div className="modal card" style={{ maxWidth: 720 }}>
             <div className="flex between" style={{ marginBottom: 10 }}>
               <b style={{ fontSize: 15 }}>IP 일괄 등록 (동일 계정/비밀번호)</b>

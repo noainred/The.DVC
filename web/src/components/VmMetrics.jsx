@@ -3,6 +3,7 @@ import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
 } from 'recharts';
 import { fetchJson } from '../api.js';
+import EscClose from './EscClose.jsx';
 
 const TYPES = [
   { k: 'cpu', label: 'CPU 사용률', color: '#3b82f6' },
@@ -79,6 +80,7 @@ function VmMetricModal({ vmId, vmName, onClose }) {
 
   return (
     <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <EscClose onClose={onClose} />
       <div className="modal card" style={{ maxWidth: 900, width: '92%' }}>
         <div className="flex between" style={{ marginBottom: 12 }}>
           <b style={{ fontSize: 15 }}>📈 성능 — {vmName}</b>
