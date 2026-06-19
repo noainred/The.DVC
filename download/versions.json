@@ -1,14 +1,14 @@
 {
-  "latest": "1.1.11",
+  "latest": "1.1.12",
   "versions": [
     {
-      "version": "1.1.11",
-      "tar_gz": "vmware-portal-1.1.11.tar.gz",
-      "size_bytes": 1295694,
-      "sha256": "45815129a21aa07ba57a602c8d9f16af55cf0613f23bfe8c214337fdba0aea8d",
-      "installer": "vmware-portal-offline-1.1.11-el9-x64.tar.gz",
-      "installer_size_bytes": 58481981,
-      "installer_sha256": "3d8c9e36604d68763a25516bc24bd9a730f53d425f99dbfe96c8c48230785fd2"
+      "version": "1.1.12",
+      "tar_gz": "vmware-portal-1.1.12.tar.gz",
+      "size_bytes": 1295420,
+      "sha256": "283dd1fc6eb96edf756241e0e2a0a4afae2817b5d30efd4507e04ea8e386999a",
+      "installer": "vmware-portal-offline-1.1.12-el9-x64.tar.gz",
+      "installer_size_bytes": 58481050,
+      "installer_sha256": "bf9f9a432c9b617512c17b9f8e51220106482460dc83492bd1f7ee86559dcf2a"
     }
   ]
 }

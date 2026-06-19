@@ -24,8 +24,11 @@ export default function Overview({ onSelectSite, onGotoTab }) {
 
   const fmt = (n) => n?.toLocaleString('en-US');
 
-  const regionVmData = regions.map((r) => ({
-    name: r.key, VM: r.vms, On: r.vmsPoweredOn,
+  // VM 분포 by 법인(vCenter)
+  const corpVmData = sites.map((s) => ({
+    name: s.id || s.name,
+    VM: s.metrics?.vms || 0,
+    On: s.metrics?.vmsPoweredOn || 0,
   }));
   const capacityData = [
     { name: 'CPU', used: g.cpuUsagePct },
@@ -54,13 +57,13 @@ export default function Overview({ onSelectSite, onGotoTab }) {
       <div className="grid cols-2" style={{ marginTop: 16 }}>
         <div className="card">
           <div className="flex between" style={{ marginBottom: 12 }}>
-            <b>리전별 VM 분포</b>
+            <b>법인별 VM 분포</b>
             <span className="muted" style={{ fontSize: 12 }}>전원 On / 전체</span>
           </div>
           <ResponsiveContainer width="100%" height={240}>
-            <BarChart data={regionVmData} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
+            <BarChart data={corpVmData} margin={{ top: 5, right: 10, left: -10, bottom: 30 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#243049" />
-              <XAxis dataKey="name" stroke="#8b9bb4" fontSize={12} />
+              <XAxis dataKey="name" stroke="#8b9bb4" fontSize={10} interval={0} angle={-30} textAnchor="end" height={60} />
               <YAxis stroke="#8b9bb4" fontSize={12} />
               <Tooltip contentStyle={tipStyle} cursor={{ fill: 'rgba(59,130,246,.08)' }} />
               <Legend wrapperStyle={{ fontSize: 12 }} />
@@ -86,34 +89,6 @@ export default function Overview({ onSelectSite, onGotoTab }) {
             </BarChart>
           </ResponsiveContainer>
         </div>
-      </div>
-
-      <div className="section-title">리전 요약 <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>(카드에 마우스를 올리면 vCenter 목록)</span></div>
-      <div className="region-grid">
-        {regions.map((r) => {
-          const rsites = sites.filter((s) => (s.location?.region || 'Unknown') === r.key);
-          const tip = [
-            `${r.key} 리전 · ${r.vcenters} vCenter`,
-            ...rsites.map((s) => `• ${s.name} [${s.status === 'connected' ? '정상' : '불가'}] 호스트 ${s.metrics?.hosts ?? 0} · VM ${s.metrics?.vms ?? 0}`),
-            `합계: 호스트 ${r.hosts} · VM ${r.vms} · CPU ${r.cpuUsagePct}% · 메모리 ${r.memUsagePct}% · 스토리지 ${r.storageUsagePct}%`,
-          ].join('\n');
-          return (
-          <div className="card region-card" key={r.key} title={tip}>
-            <div className="rc-head">
-              <span className="rc-name" style={{ color: REGION_COLORS[r.key] }}>{r.key}</span>
-              <span className="muted" style={{ fontSize: 12 }}>{r.vcenters} vCenter</span>
-            </div>
-            <div className="region-stats">
-              <div className="rs"><span>호스트</span><b>{r.hosts}</b></div>
-              <div className="rs"><span>VM</span><b>{r.vms}</b></div>
-              <div className="rs"><span>CPU</span><b>{r.cpuUsagePct}%</b></div>
-              <div className="rs"><span>메모리</span><b>{r.memUsagePct}%</b></div>
-              <div className="rs"><span>스토리지</span><b>{r.storageUsagePct}%</b></div>
-              <div className="rs"><span>알람</span><b style={{ color: r.alarmsCritical ? 'var(--red)' : undefined }}>{r.alarmsCritical + r.alarmsWarning}</b></div>
-            </div>
-          </div>
-          );
-        })}
       </div>
 
       <div className="grid cols-2" style={{ marginTop: 16 }}>

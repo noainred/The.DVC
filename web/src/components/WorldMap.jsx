@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ComposableMap, Geographies, Geography, Marker } from 'react-simple-maps';
+import { ComposableMap, Geographies, Geography, Marker, ZoomableGroup } from 'react-simple-maps';
 import geoData from 'world-atlas/countries-110m.json';
 
 /** Marker color/size driven by the worst alarm state at a site. */
@@ -18,11 +18,12 @@ export default function WorldMap({ sites = [], onSelect }) {
     <div className="card map-wrap" style={{ padding: 8 }}>
       <ComposableMap
         projection="geoEqualEarth"
-        // Rotate the projection so Korea (~127°E, 37°N) sits at screen center.
-        projectionConfig={{ scale: 175, center: [0, 12], rotate: [-127, 0, 0] }}
+        projectionConfig={{ scale: 175 }}
         style={{ width: '100%', height: 'auto' }}
         height={420}
       >
+        {/* drag to pan, wheel to zoom; centered on Korea by default */}
+        <ZoomableGroup center={[127, 20]} zoom={1} minZoom={1} maxZoom={8}>
         <Geographies geography={geoData}>
           {({ geographies }) =>
             geographies.map((geo) => (
@@ -48,19 +49,22 @@ export default function WorldMap({ sites = [], onSelect }) {
               key={s.id}
               coordinates={[loc.lon, loc.lat]}
               onMouseEnter={(e) => setTip({ x: e.clientX, y: e.clientY, site: s })}
-              onMouseMove={(e) => setTip((t) => (t ? { ...t, x: e.clientX, y: e.clientY } : t))}
+              onMouseMove={(e) => setTip({ x: e.clientX, y: e.clientY, site: s })}
               onMouseLeave={() => setTip(null)}
               onClick={() => onSelect?.(s.id)}
-              style={{ default: { cursor: 'pointer' } }}
             >
-              <circle r={st.r + 5} fill={st.ring} opacity={0.18}>
+              {/* decorative pulse + marker — ignore pointer events so hover is stable */}
+              <circle r={st.r + 5} fill={st.ring} opacity={0.18} style={{ pointerEvents: 'none' }}>
                 <animate attributeName="r" from={st.r + 3} to={st.r + 11} dur="2.2s" repeatCount="indefinite" />
                 <animate attributeName="opacity" from="0.35" to="0" dur="2.2s" repeatCount="indefinite" />
               </circle>
-              <circle r={st.r} fill={st.fill} stroke="#0a0e17" strokeWidth={1.2} />
+              <circle r={st.r} fill={st.fill} stroke="#0a0e17" strokeWidth={1.2} style={{ pointerEvents: 'none' }} />
+              {/* larger transparent hit area so hovering (not clicking) reliably shows info */}
+              <circle r={15} fill="transparent" style={{ cursor: 'pointer' }} />
             </Marker>
           );
         })}
+        </ZoomableGroup>
       </ComposableMap>
 
       <div className="map-legend">
