@@ -8,9 +8,12 @@ const TOOLS = [
   { k: 'snapshots', icon: '📸', label: '스냅샷 있는 VM', desc: 'vCenter/용량/개수별 정렬' },
   { k: 'solutions', icon: '🧱', label: 'VMware 솔루션 / NSX', desc: 'vCenter별 설치 버전' },
   { k: 'licenses', icon: '🔑', label: '라이선스 한눈에', desc: '제품별 할당/사용/만료' },
+  { k: 'esxi', icon: '🖳', label: 'ESXi 버전별', desc: '호스트 ESXi 버전 분포/목록' },
+  { k: 'vcversion', icon: '🏛️', label: 'vCenter 버전별', desc: 'vCenter 버전 분포' },
+  { k: 'nsx', icon: '🛡️', label: 'NSX 관리', desc: 'NSX 배포 현황 / 버전' },
   { k: 'hba', icon: '🔌', label: 'HBA 카드 속도', desc: '호스트 FC/iSCSI 어댑터 속도' },
   { k: 'gpu', icon: '🎮', label: 'GPU 인벤토리', desc: '호스트/모델별 GPU 종합' },
-  { k: 'shutdown', icon: '🛑', label: '긴급 ShutDown', desc: '비상 정지 (관리자 전용)', danger: true },
+  { k: 'shutdown', icon: '🛑', label: '긴급 ShutDown', desc: '비상 정지 (관리자 전용)', danger: true, disabled: true },
 ];
 
 const tb = (gb) => (gb >= 1024 ? `${(gb / 1024).toFixed(1)} TB` : `${gb} GB`);
@@ -24,11 +27,18 @@ export default function SpecialTools() {
       <div className="muted" style={{ fontSize: 13, marginBottom: 14 }}>아래 기능을 클릭하면 해당 진단을 실행해 보여줍니다.</div>
       <div className="vc-grid">
         {TOOLS.map((t) => (
-          <div key={t.k} className="card vc-card" style={{ cursor: 'pointer', ...(t.danger ? { borderColor: 'var(--red)' } : {}) }} onClick={() => setTool(t.k)}>
-            <div style={{ fontSize: 30 }}>{t.icon}</div>
-            <div className="vc-name" style={{ marginTop: 8, ...(t.danger ? { color: 'var(--red)' } : {}) }}>{t.label}</div>
+          <div key={t.k} className="card vc-card"
+            style={{
+              cursor: t.disabled ? 'not-allowed' : 'pointer',
+              opacity: t.disabled ? 0.5 : 1,
+              ...(t.danger && !t.disabled ? { borderColor: 'var(--red)' } : {}),
+            }}
+            onClick={t.disabled ? undefined : () => setTool(t.k)}
+            title={t.disabled ? '비활성화됨 (관리자 전용)' : undefined}>
+            <div style={{ fontSize: 30, filter: t.disabled ? 'grayscale(1)' : 'none' }}>{t.icon}</div>
+            <div className="vc-name" style={{ marginTop: 8, ...(t.danger && !t.disabled ? { color: 'var(--red)' } : {}) }}>{t.label}</div>
             <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>{t.desc}</div>
-            <div className="vc-foot"><span className="muted">클릭하여 실행</span><span className="muted">→</span></div>
+            <div className="vc-foot"><span className="muted">{t.disabled ? '비활성화됨' : '클릭하여 실행'}</span><span className="muted">{t.disabled ? '' : '→'}</span></div>
           </div>
         ))}
       </div>
@@ -40,7 +50,7 @@ function ToolPanel({ tool, onBack }) {
   const meta = TOOLS.find((t) => t.k === tool);
   const [scope, setScope] = useState('');
   const { data: vcList } = usePolling('/vcenters', {}, 60_000);
-  const scoped = ['dupip', 'vmtools', 'snapshots', 'hba', 'gpu', 'licenses'].includes(tool);
+  const scoped = ['dupip', 'vmtools', 'snapshots', 'hba', 'gpu', 'licenses', 'esxi'].includes(tool);
 
   return (
     <>
@@ -66,7 +76,86 @@ function ToolPanel({ tool, onBack }) {
       {tool === 'licenses' && <Licenses scope={scope} />}
       {tool === 'hba' && <Hba scope={scope} />}
       {tool === 'gpu' && <Gpu scope={scope} />}
+      {tool === 'esxi' && <Esxi scope={scope} />}
+      {tool === 'vcversion' && <VcVersion />}
+      {tool === 'nsx' && <Nsx />}
       {tool === 'shutdown' && <Shutdown />}
+    </>
+  );
+}
+
+function Esxi({ scope }) {
+  const { loading, data, error } = useTool('/tools/esxi', scope ? { vcenterId: scope } : {});
+  if (loading) return <Loading />;
+  if (error) return <ErrorBox message={error} />;
+  const cols = [
+    { key: 'host', label: '호스트', render: (h) => <b>{h.host}</b> },
+    { key: 'vcenterId', label: 'vCenter', render: (h) => <span className="muted">{h.vcenterId}</span> },
+    { key: 'cluster', label: '클러스터' },
+    { key: 'version', label: 'ESXi 버전', render: (h) => <span className="badge blue">{h.version}</span> },
+    { key: 'build', label: '빌드', render: (h) => <span className="muted">{h.build || '—'}</span> },
+    { key: 'connectionState', label: '상태', render: (h) => <StateBadge state={h.connectionState} /> },
+  ];
+  return (
+    <>
+      <div className="flex gap wrap" style={{ marginBottom: 14 }}>
+        <Card label="호스트" value={data.scanned} meta={`버전 ${data.versions.length}종`} />
+        {data.versions.map((v) => <span key={v.version} className="badge blue" style={{ alignSelf: 'center', fontSize: 13, padding: '4px 10px' }}>{v.version} · {v.count}</span>)}
+      </div>
+      <DataTable columns={cols} rows={data.items} initialSort={{ key: 'version', dir: 'desc' }} />
+    </>
+  );
+}
+
+function VcVersion() {
+  const { loading, data, error } = useTool('/tools/solutions', {});
+  if (loading) return <Loading />;
+  if (error) return <ErrorBox message={error} />;
+  const cols = [
+    { key: 'name', label: 'vCenter', render: (v) => <b>{v.name}</b> },
+    { key: 'version', label: '버전', render: (v) => <span className="badge blue">{v.version || '—'}</span> },
+    { key: 'build', label: '빌드', render: (v) => <span className="muted">{v.build || '—'}</span> },
+    { key: 'status', label: '상태', render: (v) => <StateBadge state={v.status} /> },
+    { key: 'fullName', label: '제품', render: (v) => <span className="muted" style={{ fontSize: 12 }}>{v.fullName || '—'}</span> },
+  ];
+  return (
+    <>
+      <div className="flex gap wrap" style={{ marginBottom: 14 }}>
+        <Card label="vCenter" value={data.items.length} meta={`버전 ${data.vcenterVersions.length}종`} />
+        {data.vcenterVersions.map((v) => <span key={v.version} className="badge blue" style={{ alignSelf: 'center', fontSize: 13, padding: '4px 10px' }}>v{v.version} · {v.count}</span>)}
+      </div>
+      <DataTable columns={cols} rows={data.items} initialSort={{ key: 'version', dir: 'desc' }} />
+    </>
+  );
+}
+
+function Nsx() {
+  const { loading, data, error } = useTool('/tools/solutions', {});
+  if (loading) return <Loading />;
+  if (error) return <ErrorBox message={error} />;
+  const withNsx = data.items.filter((it) => it.nsx.length > 0);
+  const cols = [
+    { key: 'name', label: 'vCenter', render: (it) => <b>{it.name}</b> },
+    { key: 'nsxVersion', label: 'NSX 버전', sortValue: (it) => it.nsx[0]?.version || '', render: (it) => it.nsx.map((s) => <span key={s.key} className="badge green" style={{ marginRight: 4 }}>{s.label} {s.version}</span>) },
+    { key: 'status', label: 'vCenter 상태', render: (it) => <StateBadge state={it.status} /> },
+  ];
+  return (
+    <>
+      <div className="flex gap wrap" style={{ marginBottom: 14 }}>
+        <Card label="NSX 적용 vCenter" value={withNsx.length} meta={`전체 ${data.items.length}`} accent="var(--green)" />
+        {data.nsxVersions.map((n) => <span key={n.version} className="badge green" style={{ alignSelf: 'center', fontSize: 13, padding: '4px 10px' }}>NSX {n.version} · {n.count}</span>)}
+        {data.nsxVersions.length === 0 && <span className="muted" style={{ alignSelf: 'center' }}>NSX 정보 없음</span>}
+      </div>
+      {withNsx.length > 0
+        ? <DataTable columns={cols} rows={withNsx} initialSort={{ key: 'name', dir: 'asc' }} />
+        : <div className="card"><span className="muted">NSX가 설치된 vCenter가 없습니다.</span></div>}
+      <div className="card" style={{ marginTop: 14, borderColor: 'var(--border)' }}>
+        <b>NSX 정책 관리</b>
+        <div className="muted" style={{ fontSize: 13, marginTop: 6, lineHeight: 1.7 }}>
+          세그먼트/방화벽 등 NSX 정책 관리는 NSX Manager API 연동이 필요합니다. 현재는 vCenter 등록 정보 기준
+          <b> 배포 현황·버전</b>을 보여줍니다. NSX Manager 연동(주소·계정)을 추가하면 정책 조회/관리를 확장할 수 있습니다.
+        </div>
+      </div>
     </>
   );
 }

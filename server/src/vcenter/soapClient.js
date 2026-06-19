@@ -266,7 +266,8 @@ export class VimSoapClient {
     const objs = await this.retrieveObjectProps('ExtensionManager', this.sc.extensionManager, ['extensionList']);
     const xml = objs[0]?.props?.extensionList || '';
     const out = [];
-    for (const blk of xml.split('<extensionList').slice(1)) {
+    // Array elements are named by TYPE (<Extension>), not the property name.
+    for (const blk of xml.split(/<Extension(?=[ >])/).slice(1)) {
       const key = /<key>([^<]+)<\/key>/.exec(blk)?.[1];
       const version = /<version>([^<]+)<\/version>/.exec(blk)?.[1];
       const company = /<company>([^<]*)<\/company>/.exec(blk)?.[1];
@@ -285,7 +286,8 @@ export class VimSoapClient {
     const objs = await this.retrieveObjectProps('LicenseManager', this.sc.licenseManager, ['licenses']);
     const xml = objs[0]?.props?.licenses || '';
     const out = [];
-    for (const blk of xml.split('<licenses>').slice(1)) {
+    // Array elements are typed <LicenseManagerLicenseInfo>, not the property name.
+    for (const blk of xml.split(/<LicenseManagerLicenseInfo(?=[ >])/).slice(1)) {
       const name = /<name>([^<]*)<\/name>/.exec(blk)?.[1] || '';
       const total = Number(/<total>(-?\d+)<\/total>/.exec(blk)?.[1] || 0);
       const used = Number(/<used>(-?\d+)<\/used>/.exec(blk)?.[1] || 0);
@@ -330,6 +332,27 @@ function extractIPv4s(netXml, primary) {
 function vmIps(netXml, primary) {
   const ips = extractIPv4s(netXml, primary);
   return { ipAddress: ips[0] || (isIPv4(primary) ? String(primary) : null), ipAddresses: ips };
+}
+
+// Parse host config.graphicsInfo (<HostGraphicsInfo> elements) into GPU list.
+function parseGpus(xml) {
+  if (!xml) return [];
+  const out = [];
+  for (const blk of xml.split(/<HostGraphicsInfo(?=[ >])/).slice(1)) {
+    const deviceName = /<deviceName>([^<]*)<\/deviceName>/.exec(blk)?.[1] || '';
+    const vendorName = /<vendorName>([^<]*)<\/vendorName>/.exec(blk)?.[1] || '';
+    const gtype = /<graphicsType>([^<]*)<\/graphicsType>/.exec(blk)?.[1] || '';
+    const memKB = Number(/<memorySizeInKB>(\d+)<\/memorySizeInKB>/.exec(blk)?.[1] || 0);
+    if (deviceName || vendorName) {
+      out.push({
+        model: deviceName || vendorName,
+        vendor: vendorName,
+        memGB: memKB ? Math.round(memKB / 1024 / 1024) : 0,
+        vgpuMode: /shared/i.test(gtype),
+      });
+    }
+  }
+  return out;
 }
 
 // Snapshot count (from the snapshot tree) + approximate size from layoutEx files.
@@ -448,7 +471,7 @@ export async function collectFromVCenterSoap(vc) {
       { type: 'HostSystem', paths: [
         'name', 'parent', 'runtime.connectionState', 'runtime.powerState', 'runtime.inMaintenanceMode',
         'summary.hardware.numCpuCores', 'summary.hardware.numCpuThreads', 'summary.hardware.cpuMhz', 'summary.hardware.memorySize',
-        'summary.config.product.version', 'summary.config.product.build',
+        'summary.config.product.version', 'summary.config.product.build', 'config.graphicsInfo',
         'summary.quickStats.overallCpuUsage', 'summary.quickStats.overallMemoryUsage'] },
       { type: 'VirtualMachine', paths: [
         'name', 'runtime.host', 'parent', 'runtime.powerState', 'summary.config.numCpu', 'summary.config.memorySizeMB',
@@ -508,6 +531,7 @@ export async function collectFromVCenterSoap(vc) {
         cpuThreads: num(p['summary.hardware.numCpuThreads']) || cores,
         version: p['summary.config.product.version'] || '',
         build: p['summary.config.product.build'] || '',
+        gpus: parseGpus(p['config.graphicsInfo']),
         vmCount: 0,
       };
       hosts.push(host);
