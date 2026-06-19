@@ -87,6 +87,55 @@ export function removeAssignment(agent) {
   return { ok: true };
 }
 
+/**
+ * Parse an assignments CSV. Columns: agent, ips, username, password, enabled.
+ * The ips cell may hold several ranges separated by ';' or '|' (commas are the
+ * CSV delimiter). A header row is optional. Lines starting with '#' are skipped.
+ */
+export function parseCsv(text) {
+  const lines = String(text || '').split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+  if (!lines.length) return [];
+  const headerCells = lines[0].split(',').map((h) => h.trim().toLowerCase());
+  const hasHeader = headerCells.includes('agent') && headerCells.includes('ips');
+  const cols = hasHeader ? headerCells : ['agent', 'ips', 'username', 'password', 'enabled'];
+  const out = [];
+  for (const line of lines.slice(hasHeader ? 1 : 0)) {
+    const cells = line.split(',');
+    const row = {};
+    cols.forEach((c, i) => { row[c] = (cells[i] || '').trim(); });
+    if (!row.agent) continue;
+    out.push({
+      agent: row.agent,
+      ips: (row.ips || '').split(/[;|]/).map((s) => s.trim()).filter(Boolean).join('\n'),
+      username: row.username || 'root',
+      password: row.password || '',
+      enabled: !/^(0|false|no|off|중지|disabled)$/i.test(row.enabled || 'true'),
+    });
+  }
+  return out;
+}
+
+/**
+ * Import assignments. mode 'merge' (default) upserts by agent name; 'replace'
+ * swaps the whole list. Returns { ok, mode, added, updated, skipped[], total }.
+ */
+export function importAssignments(incoming, mode = 'merge') {
+  if (!Array.isArray(incoming)) return { ok: false, reason: 'assignments 배열을 찾을 수 없습니다.' };
+  const existing = loadAssignments();
+  const result = mode === 'replace' ? [] : [...existing];
+  let added = 0, updated = 0;
+  const skipped = [];
+  for (const raw of incoming) {
+    const base = mode === 'replace' ? null : existing.find((a) => a.agent.toLowerCase() === String(raw?.agent || '').toLowerCase());
+    const [entry, err] = normalize(raw || {}, base);
+    if (err) { skipped.push({ agent: raw?.agent || '(이름없음)', reason: err }); continue; }
+    const idx = result.findIndex((a) => a.agent.toLowerCase() === entry.agent.toLowerCase());
+    if (idx >= 0) { result[idx] = entry; updated++; } else { result.push(entry); added++; }
+  }
+  save(result);
+  return { ok: true, mode, added, updated, skipped, total: result.length };
+}
+
 // ---- results --------------------------------------------------------------
 
 let results = {};
