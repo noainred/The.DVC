@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { usePolling } from '../api.js';
 import { DataTable, UsageCell, StateBadge, Loading, ErrorBox, ResultCount, Modal } from '../components/ui.jsx';
 import { VmMetricButton } from '../components/VmMetrics.jsx';
+import { VmConsoleButton } from '../components/VmConsole.jsx';
 
 /** Render every IPv4 a VM has (multi-homed), one per line; IPv6 is excluded upstream. */
 function ipList(vm) {
@@ -57,7 +58,8 @@ function VmDetail({ vm, onClose }) {
           <UsageCell pct={vm.memUsagePct} />
         </div>
       </div>
-      <div className="flex" style={{ marginTop: 16, justifyContent: 'flex-end' }}>
+      <div className="flex gap" style={{ marginTop: 16, justifyContent: 'flex-end' }}>
+        <VmConsoleButton vmId={vm.id} vmName={vm.name} />
         <VmMetricButton vmId={vm.id} vmName={vm.name} />
       </div>
     </Modal>

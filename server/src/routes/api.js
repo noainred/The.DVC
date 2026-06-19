@@ -3,7 +3,7 @@ import { store } from '../store.js';
 import { currentVersion, config, loadVcenterConfig } from '../config.js';
 import { loadUiSettings, saveUiSettings } from '../ui-settings.js';
 import { hostPower } from '../idrac/service.js';
-import { fetchVmMetric, PERF_INTERVALS, upgradeVmTools } from '../vcenter/soapClient.js';
+import { fetchVmMetric, PERF_INTERVALS, upgradeVmTools, getVmConsole } from '../vcenter/soapClient.js';
 
 export const api = Router();
 
@@ -34,6 +34,29 @@ api.get('/vms/:id/metrics', async (req, res) => {
   if (!vc) return res.status(404).json({ ok: false, reason: 'vCenter 설정을 찾을 수 없습니다.' });
   try {
     res.json(await fetchVmMetric(vc, moref, type, interval, { start, end }));
+  } catch (err) {
+    res.status(502).json({ ok: false, reason: err.message });
+  }
+});
+
+// VM remote console (원격 콘솔). Returns VMRC + HTML5 web-console launch URLs
+// using a one-time vCenter clone ticket. Live only.
+api.get('/vms/:id/console', async (req, res) => {
+  const id = req.params.id;
+  const snap = store.get();
+  const vm = snap.vms.find((v) => v.id === id);
+  if (!vm) return res.status(404).json({ ok: false, reason: 'VM을 찾을 수 없습니다.' });
+  if (snap.source === 'mock') {
+    return res.json({ ok: true, mock: true, vmName: vm.name, reason: '데모 모드입니다. 실제 vCenter(live) 연결 시 VMRC/웹 콘솔 링크가 생성됩니다.' });
+  }
+  const sep = id.indexOf(':');
+  const vcId = sep >= 0 ? id.slice(0, sep) : id;
+  const moref = sep >= 0 ? id.slice(sep + 1) : '';
+  const vc = loadVcenterConfig().vcenters.find((v) => v.id === vcId);
+  if (!vc) return res.status(404).json({ ok: false, reason: 'vCenter 설정을 찾을 수 없습니다.' });
+  try {
+    const c = await getVmConsole(vc, moref, vm.name);
+    res.json({ ...c, vmName: vm.name });
   } catch (err) {
     res.status(502).json({ ok: false, reason: err.message });
   }

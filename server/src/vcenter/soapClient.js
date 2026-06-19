@@ -9,7 +9,52 @@
  * follows the global dispatcher configured in restClient.js (self-signed OK).
  */
 
+import tls from 'node:tls';
 import { config } from '../config.js';
+
+/** SHA-1 thumbprint of a host's TLS cert (needed by the HTML5 web console). */
+function getThumbprint(host, port = 443) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (v) => { if (!done) { done = true; resolve(v); } };
+    try {
+      const socket = tls.connect({ host, port, rejectUnauthorized: false, servername: host, timeout: 8000 }, () => {
+        const cert = socket.getPeerCertificate();
+        socket.end();
+        finish(cert?.fingerprint || '');
+      });
+      socket.on('error', () => finish(''));
+      socket.on('timeout', () => { socket.destroy(); finish(''); });
+    } catch { finish(''); }
+  });
+}
+
+/**
+ * Build VM remote-console launch URLs the way the vSphere Client does:
+ *   - VMRC (desktop app):  vmrc://clone:<ticket>@<host>/?moid=<moref>
+ *   - HTML5 web console:   https://<host>/ui/webconsole.html?... (clone ticket + thumbprint)
+ * Uses a one-time clone ticket so no re-login is needed.
+ */
+export async function getVmConsole(vc, moref, vmName) {
+  const hostNoScheme = vc.host.replace(/^https?:\/\//, '').replace(/\/+$/, '');
+  const hostOnly = hostNoScheme.split(':')[0];
+  const port = Number(hostNoScheme.split(':')[1]) || 443;
+  const c = new VimSoapClient(vc);
+  await c.login();
+  try {
+    const ticket = await c.acquireCloneTicket();
+    const serverGuid = c.sc.instanceUuid || '';
+    const thumbprint = await getThumbprint(hostOnly, port);
+    const vmrcUrl = `vmrc://clone:${ticket}@${hostNoScheme}/?moid=${encodeURIComponent(moref)}`;
+    const webConsoleUrl = `https://${hostNoScheme}/ui/webconsole.html?vmId=${encodeURIComponent(moref)}` +
+      `&vmName=${encodeURIComponent(vmName || moref)}&serverGuid=${encodeURIComponent(serverGuid)}` +
+      `&host=${encodeURIComponent(hostNoScheme)}&sessionTicket=${encodeURIComponent(ticket || '')}` +
+      `&thumbprint=${encodeURIComponent(thumbprint)}`;
+    return { ok: true, vmrcUrl, webConsoleUrl, serverGuid, thumbprint, host: hostNoScheme };
+  } finally {
+    await c.logout();
+  }
+}
 
 const esc = (s) =>
   String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
