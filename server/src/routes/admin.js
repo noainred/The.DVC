@@ -10,9 +10,10 @@ import {
 import { geocode } from '../vcenter/geocode.js';
 import {
   listRegistry as listServers, addServer, updateServer, removeServer,
-  testServer, importServers, parseCsv, bulkAddByIps,
+  testServer, importServers, parseCsv, bulkAddByIps, registerScanned,
 } from '../idrac/registry.js';
 import { expandIpList } from '../idrac/iprange.js';
+import { scanForIdracs } from '../idrac/scan.js';
 import { getPollerStatus, pollNow } from '../idrac/poller.js';
 import { listCollectors, addCollector, updateCollector, removeCollector, loadCollectors } from '../collector/registry.js';
 import { allCollectorStatus, getCollectorStatus } from '../collector/state.js';
@@ -173,6 +174,29 @@ adminRouter.post('/idrac/expand-ips', adminOnly, (req, res) => {
 // Body: { ips, username, password, namePrefix?, mode? }
 adminRouter.post('/idrac/bulk-add', adminOnly, (req, res) => {
   const result = bulkAddByIps(req.body || {});
+  if (result.ok) pollNow().catch(() => {});
+  res.status(result.ok ? 200 : 400).json(result);
+});
+
+// Scan an IP range and return only the IPs that are real Dell iDRACs (with
+// identity). No writes. Body: { ips, username, password }
+adminRouter.post('/idrac/scan', adminOnly, async (req, res) => {
+  const { ips, username, password } = req.body || {};
+  if (!ips) return res.status(400).json({ ok: false, reason: 'IP 대역을 입력하세요.' });
+  if (!username || !password) return res.status(400).json({ ok: false, reason: 'iDRAC 계정/비밀번호가 필요합니다.' });
+  try {
+    const result = await scanForIdracs({ ips, username, password });
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    res.status(500).json({ ok: false, reason: err.message });
+  }
+});
+
+// Register iDRACs found by a scan, applying the shared credentials, then poll.
+// Body: { found:[{ip,serviceTag,hostName,model}], username, password, mode? }
+adminRouter.post('/idrac/register-scanned', adminOnly, (req, res) => {
+  const { found, username, password, mode } = req.body || {};
+  const result = registerScanned(found, username, password, mode === 'replace' ? 'replace' : 'merge');
   if (result.ok) pollNow().catch(() => {});
   res.status(result.ok ? 200 : 400).json(result);
 });

@@ -94,6 +94,56 @@ const BIOS_KEYS = [
 const firstMember = (root) => (root?.Members || [])[0]?.['@odata.id'];
 
 /**
+ * Probe one IP to decide whether it is a Dell iDRAC: checks the Redfish service
+ * root (reachability + Dell signature) and, with credentials, reads the system
+ * identity (service tag / model / hostname). Short-timeout and quiet — used for
+ * scanning an IP range. Returns:
+ *   { ok:false, reason }                         // not reachable / not Redfish
+ *   { ok:true, isIdrac, dell, authFailed,        // reachable Redfish
+ *     model, manufacturer, serviceTag, hostName }
+ */
+export async function probeIdrac(host, username, password, timeoutMs = 3000) {
+  let base = String(host).replace(/\/+$/, '');
+  if (!/^https?:\/\//.test(base)) base = `https://${base}`;
+  const auth = 'Basic ' + Buffer.from(`${username}:${password}`).toString('base64');
+  const opt = (extra) => ({ headers: { Accept: 'application/json', ...extra }, signal: AbortSignal.timeout(timeoutMs), dispatcher });
+
+  // 1) Redfish service root (no auth). Identifies Redfish + Dell signature.
+  let root;
+  try {
+    const res = await fetch(`${base}/redfish/v1`, opt());
+    if (!res.ok && res.status !== 401) return { ok: false, reason: `HTTP ${res.status}` };
+    root = await res.json().catch(() => ({}));
+  } catch (err) {
+    return { ok: false, reason: err.name === 'TimeoutError' ? 'timeout' : err.message };
+  }
+  const sig = JSON.stringify(root || {}).toLowerCase();
+  let dell = root?.Vendor === 'Dell' || Boolean(root?.Oem?.Dell) || sig.includes('idrac') || sig.includes('dell');
+
+  // 2) System identity (with auth). Confirms credentials + enriches result.
+  let model = '', manufacturer = '', serviceTag = '', hostName = '';
+  try {
+    const sres = await fetch(`${base}/redfish/v1/Systems`, opt({ Authorization: auth }));
+    if (sres.status === 401) return { ok: true, isIdrac: dell, dell, authFailed: true };
+    if (sres.ok) {
+      const sroot = await sres.json();
+      const first = firstMember(sroot);
+      if (first) {
+        const s2 = await fetch(`${base}${first}`, opt({ Authorization: auth }));
+        if (s2.ok) {
+          const s = await s2.json();
+          model = s.Model || ''; manufacturer = s.Manufacturer || '';
+          serviceTag = s.SKU || s.SerialNumber || ''; hostName = s.HostName || '';
+        }
+      }
+    }
+  } catch { /* identity optional; service root already classified it */ }
+
+  if ((manufacturer + model).toLowerCase().includes('dell')) dell = true;
+  return { ok: true, isIdrac: dell, dell, authFailed: false, model, manufacturer, serviceTag, hostName };
+}
+
+/**
  * Collect a rich hardware/firmware inventory from one iDRAC via Redfish:
  * hostname, service tag, BIOS version + key CMOS settings, iDRAC firmware,
  * IPMI version, CPU/memory summary, health, and iDRAC network identity.
