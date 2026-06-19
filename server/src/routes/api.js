@@ -31,7 +31,15 @@ function sortBy(items, key, order = 'desc') {
 
 api.get('/health', (_req, res) => {
   const snap = store.get();
-  res.json({ status: 'ok', version: currentVersion(), source: snap.source, generatedAt: snap.generatedAt, vcenters: snap.vcenters.length });
+  const connected = snap.vcenters.filter((v) => v.status === 'connected').length;
+  res.json({
+    status: 'ok',
+    version: currentVersion(),
+    source: snap.source,
+    generatedAt: snap.generatedAt,
+    vcenters: snap.vcenters.length,
+    vcentersConnected: connected,
+  });
 });
 
 // High-level KPIs + regional / per-site rollups for the dashboard landing view.

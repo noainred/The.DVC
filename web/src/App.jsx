@@ -149,9 +149,20 @@ function Portal({ user, onLogout }) {
         </nav>
         <div className="spacer" />
         <div className="status-pill">
-          <span className="dot live" />
-          {health ? `${health.source.toUpperCase()} · ${health.vcenters} vCenter` : '연결 중…'}
-          {health?.generatedAt && <span className="muted">· {new Date(health.generatedAt).toLocaleTimeString('ko-KR')}</span>}
+          {(() => {
+            const total = health?.vcenters ?? 0;
+            const conn = health?.vcentersConnected ?? 0;
+            const allOk = total === 0 || conn === total;
+            const color = allOk ? 'var(--green)' : conn === 0 ? 'var(--red)' : 'var(--amber)';
+            return (
+              <>
+                <span className="dot live" style={{ background: color, boxShadow: `0 0 8px ${color}` }} />
+                {health ? `${health.source.toUpperCase()} · ${conn}/${total} vCenter` : '연결 중…'}
+                {!allOk && <span className="muted">({total - conn} 불가)</span>}
+                {health?.generatedAt && <span className="muted">· {new Date(health.generatedAt).toLocaleTimeString('ko-KR')}</span>}
+              </>
+            );
+          })()}
         </div>
         <div className="settings-box" title="로그인 후 처음 보여줄 화면">
           <span className="muted">시작 화면</span>
