@@ -18,7 +18,8 @@ export default function WorldMap({ sites = [], onSelect }) {
     <div className="card map-wrap" style={{ padding: 8 }}>
       <ComposableMap
         projection="geoEqualEarth"
-        projectionConfig={{ scale: 165 }}
+        // Rotate the projection so Korea (~127°E, 37°N) sits at screen center.
+        projectionConfig={{ scale: 175, center: [0, 12], rotate: [-127, 0, 0] }}
         style={{ width: '100%', height: 'auto' }}
         height={420}
       >
