@@ -19,3 +19,10 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
   - 머지된 경우 main 기준 ZIP:
     `https://github.com/noainred/The.DVC/archive/refs/heads/main.zip`
   - 해당 PR 링크도 함께 제공한다.
+- **작업 완료 시 업데이트 버전을 GitHub에 게시**: 기능 작업이 끝나면
+  `package.json` 버전을 올리고(semver), `packaging/offline/build-package.sh`로
+  설치 패키지와 업그레이드 번들을 빌드해 `download/` 에 갱신 커밋한다
+  (`versions.json` 의 `latest` 도 갱신). 그래야 원격/오프라인 업그레이드가 가능하다.
+  - 설치 패키지: `download/vmware-portal-offline-<버전>-el9-x64.tar.gz`
+  - 업그레이드 번들: `download/vmware-portal-<버전>.tar.gz`
+  - 다운로드(raw): `https://github.com/noainred/The.DVC/raw/<branch>/download/<파일>`

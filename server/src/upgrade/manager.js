@@ -33,6 +33,8 @@ class UpgradeManager {
       installDir: this.cfg.installDir || null,
       packageName: this.cfg.packageName,
       remoteConfigured: Boolean(this.cfg.remoteBase),
+      remoteBase: this.cfg.remoteBase || null,
+      remoteVersionsUrl: this.cfg.remoteBase ? `${this.cfg.remoteBase.replace(/\/+$/, '')}/versions.json` : null,
       autoApply: this.cfg.autoApply,
       pollIntervalMs: this.cfg.pollIntervalMs,
       edges: this.cfg.edges.map((e) => e.url),

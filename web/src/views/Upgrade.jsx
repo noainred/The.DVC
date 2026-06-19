@@ -60,7 +60,11 @@ export default function Upgrade() {
             <Row label="현재 버전"><b className="tabular">v{status.version}</b></Row>
             <Row label="감시 폴더">{status.watchDir || <span className="muted">미설정</span>}</Row>
             <Row label="설치 경로">{status.installDir || <span className="muted">미설정</span>}</Row>
-            <Row label="원격 소스">{status.remoteConfigured ? '설정됨' : <span className="muted">미설정</span>}</Row>
+            <Row label="감시 대상(versions.json)">
+              {status.remoteVersionsUrl
+                ? <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 11, wordBreak: 'break-all' }}>{status.remoteVersionsUrl}</span>
+                : <span className="muted">미설정</span>}
+            </Row>
             <Row label="자동 적용">{status.autoApply ? '예' : '아니오'}{status.pollIntervalMs ? ` · ${status.pollIntervalMs / 1000}s 주기` : ''}</Row>
             <Row label="엣지 푸시 대상">{status.edges?.length ? `${status.edges.length}곳` : <span className="muted">없음</span>}</Row>
           </div>
