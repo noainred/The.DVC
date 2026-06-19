@@ -121,7 +121,16 @@ api.get('/summary', (req, res) => {
   const vmProvGB = sum(vms, (v) => v.storageGB);
 
   const osDist = {};
-  for (const v of vms) { const f = osFamily(v.guestOS); osDist[f] = (osDist[f] || 0) + 1; }
+  const osAlloc = {}; // OS family -> { vms, vcpu, ramMB, diskGB }
+  for (const v of vms) {
+    const f = osFamily(v.guestOS);
+    osDist[f] = (osDist[f] || 0) + 1;
+    const a = osAlloc[f] || (osAlloc[f] = { name: f, vms: 0, vcpu: 0, ramMB: 0, diskGB: 0 });
+    a.vms += 1;
+    a.vcpu += v.cpuCount || 0;
+    a.ramMB += v.memMB || 0;
+    a.diskGB += v.storageGB || 0;
+  }
 
   const round = (v, d = 0) => Number((v || 0).toFixed(d));
   const pct = (u, t) => (t > 0 ? Math.round((u / t) * 100) : 0);
@@ -201,6 +210,14 @@ api.get('/summary', (req, res) => {
       avgVmPerHost: hosts.length > 0 ? round(vms.length / hosts.length, 1) : 0,
     },
     osDistribution: Object.entries(osDist).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value),
+    osAllocation: Object.values(osAlloc).map((a) => ({
+      name: a.name,
+      vms: a.vms,
+      vcpu: a.vcpu,
+      ramGB: round(a.ramMB / 1024),
+      diskGB: a.diskGB,
+      diskTB: round(a.diskGB / 1024, 1),
+    })).sort((a, b) => b.vcpu - a.vcpu),
     byVcenter,
   });
 });

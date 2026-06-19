@@ -8,15 +8,17 @@
  */
 
 const SITES = [
-  { id: 'vc-us-east', name: 'vcenter-us-east-01', city: 'Ashburn', country: 'USA', region: 'Americas', lat: 39.04, lon: -77.49, hosts: 24 },
-  { id: 'vc-us-west', name: 'vcenter-us-west-01', city: 'San Jose', country: 'USA', region: 'Americas', lat: 37.33, lon: -121.89, hosts: 18 },
-  { id: 'vc-br-sao', name: 'vcenter-br-sao-01', city: 'São Paulo', country: 'Brazil', region: 'Americas', lat: -23.55, lon: -46.63, hosts: 8 },
-  { id: 'vc-eu-central', name: 'vcenter-eu-central-01', city: 'Frankfurt', country: 'Germany', region: 'EMEA', lat: 50.11, lon: 8.68, hosts: 30 },
-  { id: 'vc-eu-west', name: 'vcenter-eu-west-01', city: 'Dublin', country: 'Ireland', region: 'EMEA', lat: 53.35, lon: -6.26, hosts: 16 },
-  { id: 'vc-me-uae', name: 'vcenter-me-uae-01', city: 'Dubai', country: 'UAE', region: 'EMEA', lat: 25.20, lon: 55.27, hosts: 6 },
-  { id: 'vc-ap-northeast', name: 'vcenter-ap-northeast-01', city: 'Seoul', country: 'South Korea', region: 'APAC', lat: 37.57, lon: 126.98, hosts: 22 },
-  { id: 'vc-ap-southeast', name: 'vcenter-ap-southeast-01', city: 'Singapore', country: 'Singapore', region: 'APAC', lat: 1.35, lon: 103.82, hosts: 14 },
-  { id: 'vc-ap-south', name: 'vcenter-ap-south-01', city: 'Mumbai', country: 'India', region: 'APAC', lat: 19.08, lon: 72.88, hosts: 12 },
+  { id: 'vc-us-east', name: 'vcenter-us-east-01', city: 'Ashburn', country: 'USA', region: '미국', lat: 39.04, lon: -77.49, hosts: 24 },
+  { id: 'vc-us-west', name: 'vcenter-us-west-01', city: 'San Jose', country: 'USA', region: '미국', lat: 37.33, lon: -121.89, hosts: 18 },
+  { id: 'vc-br-sao', name: 'vcenter-br-sao-01', city: 'São Paulo', country: 'Brazil', region: '미국', lat: -23.55, lon: -46.63, hosts: 8 },
+  { id: 'vc-eu-central', name: 'vcenter-eu-central-01', city: 'Frankfurt', country: 'Germany', region: '유럽', lat: 50.11, lon: 8.68, hosts: 30 },
+  { id: 'vc-eu-west', name: 'vcenter-eu-west-01', city: 'Dublin', country: 'Ireland', region: '유럽', lat: 53.35, lon: -6.26, hosts: 16 },
+  { id: 'vc-me-uae', name: 'vcenter-me-uae-01', city: 'Dubai', country: 'UAE', region: '유럽', lat: 25.20, lon: 55.27, hosts: 6 },
+  { id: 'vc-ap-northeast', name: 'vcenter-ap-northeast-01', city: 'Seoul', country: 'South Korea', region: '아시아', lat: 37.57, lon: 126.98, hosts: 22 },
+  { id: 'vc-ap-southeast', name: 'vcenter-ap-southeast-01', city: 'Singapore', country: 'Singapore', region: '아시아', lat: 1.35, lon: 103.82, hosts: 14 },
+  { id: 'vc-ap-south', name: 'vcenter-ap-south-01', city: 'Mumbai', country: 'India', region: '아시아', lat: 19.08, lon: 72.88, hosts: 12 },
+  { id: 'vc-cn-east', name: 'vcenter-cn-east-01', city: 'Shanghai', country: 'China', region: '중국', lat: 31.23, lon: 121.47, hosts: 20 },
+  { id: 'vc-cn-north', name: 'vcenter-cn-north-01', city: 'Beijing', country: 'China', region: '중국', lat: 39.90, lon: 116.41, hosts: 16 },
 ];
 
 const GUEST_OS = [

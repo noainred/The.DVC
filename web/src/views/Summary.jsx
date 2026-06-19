@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid,
 } from 'recharts';
 import { usePolling } from '../api.js';
 import { Loading, ErrorBox, usageColor } from '../components/ui.jsx';
@@ -41,7 +42,10 @@ function CapacityBar({ label, usedLabel, totalLabel, pct }) {
 }
 
 export default function Summary({ scope, onGotoTab }) {
-  const { data: s, error, loading } = usePolling('/summary', scope, 15_000);
+  const [corp, setCorp] = useState(''); // '' = all 법인(vCenter)
+  const params = { ...scope, ...(corp ? { vcenterId: corp } : {}) };
+  const { data: s, error, loading } = usePolling('/summary', params, 15_000);
+  const { data: vcList } = usePolling('/vcenters', {}, 60_000); // 법인 목록(필터)
   if (loading && !s) return <Loading />;
   if (error) return <ErrorBox message={error} />;
   if (!s) return null;
@@ -69,9 +73,24 @@ export default function Summary({ scope, onGotoTab }) {
     return a;
   }, {});
 
+  const osAlloc = s.osAllocation || [];
+  const osAllocTotals = osAlloc.reduce((a, r) => {
+    a.vms += r.vms; a.vcpu += r.vcpu; a.ramGB += r.ramGB; a.diskGB += r.diskGB; return a;
+  }, { vms: 0, vcpu: 0, ramGB: 0, diskGB: 0 });
+  const corpName = corp ? (vcList || []).find((v) => v.id === corp)?.name || corp : '전체 법인';
+
   return (
     <>
-      <div className="section-title">전체 통합 합계 (모든 vCenter 자원 SUM)</div>
+      <div className="flex between wrap" style={{ marginBottom: 4, alignItems: 'center' }}>
+        <div className="section-title" style={{ margin: '6px 0' }}>전체 통합 합계 {corp ? `— ${corpName}` : '(모든 vCenter 자원 SUM)'}</div>
+        <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }}>
+          <span className="muted">법인 필터</span>
+          <select className="select" value={corp} onChange={(e) => setCorp(e.target.value)}>
+            <option value="">전체 법인</option>
+            {(vcList || []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+          </select>
+        </label>
+      </div>
       <div className="kpis">
         <Big label="vCenter" value={fmt(c.vcenters)} sub={`연결 ${c.vcentersConnected} · 클러스터 ${c.clusters}`} accent="var(--accent-2)" />
         <Big label="전체 호스트(ESXi)" value={fmt(c.hosts)} sub={`정상 ${c.hostsConnected} · 점검 ${c.hostsMaintenance} · 끊김 ${c.hostsDisconnected}`} />
@@ -100,6 +119,59 @@ export default function Summary({ scope, onGotoTab }) {
         <Big label="할당된 RAM 합계" value={fmt(al.ramAllocatedGB)} unit="GB" sub={`물리 RAM의 ${al.ramOvercommitPct}%`} accent="var(--purple)" />
         <Big label="프로비저닝 스토리지" value={fmt(al.provisionedStorageTB)} unit="TB" sub="VM 디스크 할당 총량" accent="var(--accent-2)" />
         <Big label="호스트당 평균 VM" value={al.avgVmPerHost} sub={`전체 ${fmt(c.vms)} VM / ${fmt(c.hosts)} 호스트`} />
+      </div>
+
+      <div className="section-title">OS별 할당 자원 합계 {corp ? `— ${corpName}` : ''}</div>
+      <div className="grid cols-2">
+        <div className="card">
+          <div className="flex between" style={{ marginBottom: 8 }}>
+            <b>OS별 vCPU · 메모리 · 디스크 합계</b>
+            <span className="muted" style={{ fontSize: 12 }}>{osAlloc.length} OS · {fmt(osAllocTotals.vms)} VM</span>
+          </div>
+          <div className="table-wrap">
+            <table>
+              <thead><tr>
+                <th>Guest OS</th><th className="right">VM</th><th className="right">vCPU</th><th className="right">메모리(GB)</th><th className="right">디스크(GB)</th>
+              </tr></thead>
+              <tbody>
+                {osAlloc.map((o) => (
+                  <tr key={o.name}>
+                    <td><span className="dot" style={{ display: 'inline-block', width: 9, height: 9, borderRadius: 9, marginRight: 6, background: OS_COLORS[o.name] || '#64748b' }} />{o.name}</td>
+                    <td className="right tabular">{fmt(o.vms)}</td>
+                    <td className="right tabular">{fmt(o.vcpu)}</td>
+                    <td className="right tabular">{fmt(o.ramGB)}</td>
+                    <td className="right tabular">{fmt(o.diskGB)}</td>
+                  </tr>
+                ))}
+                {osAlloc.length === 0 && <tr><td colSpan={5} className="center muted" style={{ padding: 20 }}>데이터 없음</td></tr>}
+                <tr style={{ borderTop: '2px solid var(--accent)', fontWeight: 700 }}>
+                  <td><b>합계</b></td>
+                  <td className="right tabular">{fmt(osAllocTotals.vms)}</td>
+                  <td className="right tabular">{fmt(osAllocTotals.vcpu)}</td>
+                  <td className="right tabular">{fmt(osAllocTotals.ramGB)}</td>
+                  <td className="right tabular">{fmt(osAllocTotals.diskGB)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="card">
+          <b>OS별 할당 자원 (정규화 비교)</b>
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart data={osAlloc} margin={{ top: 14, right: 16, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#243049" />
+              <XAxis dataKey="name" stroke="#8b9bb4" fontSize={11} interval={0} angle={-20} textAnchor="end" height={50} />
+              <YAxis stroke="#8b9bb4" fontSize={11} />
+              <Tooltip contentStyle={tipStyle} itemStyle={itemStyle} labelStyle={labelStyle} cursor={{ fill: 'rgba(59,130,246,.08)' }}
+                formatter={(v, n) => [fmt(v), n === 'vcpu' ? 'vCPU' : n === 'ramGB' ? 'RAM(GB)' : '디스크(GB)']} />
+              <Legend wrapperStyle={{ fontSize: 12 }} formatter={(n) => (n === 'vcpu' ? 'vCPU' : n === 'ramGB' ? 'RAM(GB)' : '디스크(GB)')} />
+              <Bar dataKey="vcpu" fill="#3b82f6" radius={[3, 3, 0, 0]} />
+              <Bar dataKey="ramGB" fill="#a855f7" radius={[3, 3, 0, 0]} />
+              <Bar dataKey="diskGB" fill="#22d3ee" radius={[3, 3, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
       </div>
 
       <div className="grid cols-2" style={{ marginTop: 16 }}>
