@@ -8,6 +8,7 @@ import { authRouter } from './routes/auth.js';
 import { authMiddleware } from './auth/auth.js';
 import { upgradeRouter } from './routes/upgrade.js';
 import { upgradeManager } from './upgrade/manager.js';
+import { adminRouter } from './routes/admin.js';
 
 const app = express();
 app.use(cors());
@@ -15,6 +16,7 @@ app.use(express.json());
 
 app.use('/api/auth', authRouter);                      // public: login / config / me
 app.use('/api/upgrade', authMiddleware, upgradeRouter); // admin-gated auto-upgrade control
+app.use('/api/admin', authMiddleware, adminRouter);     // admin-gated vCenter management
 app.use('/api', authMiddleware, api);                   // protected resource endpoints
 
 // Serve the built web client when it exists (production single-port mode).

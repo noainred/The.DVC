@@ -196,6 +196,13 @@ tbody tr:last-child td { border-bottom: none; }
 .login-hint { font-size: 12px; text-align: center; }
 .login-hint code { background: var(--panel-2); padding: 1px 6px; border-radius: 4px; color: var(--text); }
 
+/* Modal */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(4, 8, 16, 0.7); backdrop-filter: blur(3px);
+  display: grid; place-items: center; z-index: 200; padding: 20px;
+}
+.modal { width: 100%; max-width: 640px; max-height: 88vh; overflow: auto; }
+
 /* Settings (landing page) box */
 .settings-box { display: flex; align-items: center; gap: 7px; font-size: 11px; }
 .settings-box .muted { white-space: nowrap; }
