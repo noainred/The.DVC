@@ -6,9 +6,16 @@ export function usageColor(pct) {
   return 'var(--green)';
 }
 
-export function Kpi({ label, value, unit, meta, pct, accent }) {
+export function Kpi({ label, value, unit, meta, pct, accent, onClick }) {
   return (
-    <div className="card kpi">
+    <div
+      className={`card kpi${onClick ? ' kpi-click' : ''}`}
+      onClick={onClick}
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={onClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } } : undefined}
+      title={onClick ? '클릭하여 보기' : undefined}
+    >
       <div className="label">{label}</div>
       <div className="value" style={accent ? { color: accent } : undefined}>
         {value}
