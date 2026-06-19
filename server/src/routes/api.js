@@ -194,13 +194,15 @@ api.get('/vms', (req, res) => {
 
 api.get('/datastores', (req, res) => {
   const snap = store.get();
-  const ds = applyFilters(snap.datastores, req.query, snap, ['name', 'type']);
+  let ds = applyFilters(snap.datastores, req.query, snap, ['name', 'type']);
+  if (req.query.type) ds = ds.filter((d) => String(d.type || '').toLowerCase().includes(String(req.query.type).toLowerCase()));
   res.json({ total: ds.length, items: ds });
 });
 
 api.get('/networks', (req, res) => {
   const snap = store.get();
-  const nets = applyFilters(snap.networks, req.query, snap, ['name', 'type']);
+  let nets = applyFilters(snap.networks, req.query, snap, ['name', 'type']);
+  if (req.query.type) nets = nets.filter((n) => n.type === req.query.type);
   res.json({ total: nets.length, items: nets });
 });
 

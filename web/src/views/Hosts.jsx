@@ -1,6 +1,6 @@
 import React from 'react';
 import { usePolling } from '../api.js';
-import { DataTable, UsageCell, StateBadge, Loading, ErrorBox } from '../components/ui.jsx';
+import { DataTable, UsageCell, StateBadge, Loading, ErrorBox, ResultCount } from '../components/ui.jsx';
 
 export default function Hosts({ filters }) {
   const { data, error, loading } = usePolling('/hosts', filters, 15_000);
@@ -22,7 +22,7 @@ export default function Hosts({ filters }) {
 
   return (
     <>
-      <div className="muted" style={{ marginBottom: 10 }}>총 {data.total.toLocaleString()}개 호스트</div>
+      <ResultCount total={data.total} label="호스트" filtered={Object.keys(filters || {}).length > 0} />
       <DataTable columns={columns} rows={rows} initialSort={{ key: 'cpuUsagePct', dir: 'desc' }} />
     </>
   );

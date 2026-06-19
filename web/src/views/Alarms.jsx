@@ -21,7 +21,8 @@ export default function Alarms({ filters }) {
   return (
     <>
       <div className="muted" style={{ marginBottom: 10 }}>
-        총 {data.total.toLocaleString()}개 알람 · 위험 {rows.filter((a) => a.severity === 'critical').length} · 경고 {rows.filter((a) => a.severity === 'warning').length}
+        총 <b style={{ color: 'var(--text)' }}>{data.total.toLocaleString()}</b>개 알람 · 위험 {rows.filter((a) => a.severity === 'critical').length} · 경고 {rows.filter((a) => a.severity === 'warning').length}
+        {Object.keys(filters || {}).length > 0 && <span className="badge blue" style={{ marginLeft: 8 }}>필터 적용 중</span>}
       </div>
       <DataTable columns={columns} rows={rows} initialSort={{ key: 'severity', dir: 'desc' }} emptyText="활성 알람이 없습니다." />
     </>

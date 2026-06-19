@@ -1,6 +1,6 @@
 import React from 'react';
 import { usePolling } from '../api.js';
-import { DataTable, Loading, ErrorBox } from '../components/ui.jsx';
+import { DataTable, Loading, ErrorBox, ResultCount } from '../components/ui.jsx';
 
 export default function Networks({ filters }) {
   const { data, error, loading } = usePolling('/networks', filters, 15_000);
@@ -23,7 +23,7 @@ export default function Networks({ filters }) {
 
   return (
     <>
-      <div className="muted" style={{ marginBottom: 10 }}>총 {data.total.toLocaleString()}개 네트워크</div>
+      <ResultCount total={data.total} label="네트워크" filtered={Object.keys(filters || {}).length > 0} />
       <DataTable columns={columns} rows={rows} initialSort={{ key: 'vmCount', dir: 'desc' }} />
     </>
   );
