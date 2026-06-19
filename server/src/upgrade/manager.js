@@ -13,6 +13,9 @@ import {
   findNewerArchive, upgradeFromArchive, checkRemote, upgradeFromRemote,
   restartProcess, pushBundleToEdge, vstr,
 } from './upgrade.js';
+import { resolveBundleBytes } from './bundleSource.js';
+import { pushUpgradeToCollectors } from '../collector/upgradePush.js';
+import { loadCollectors } from '../collector/registry.js';
 
 class UpgradeManager {
   constructor() {
@@ -81,9 +84,24 @@ class UpgradeManager {
     this.lastResult = { at: Date.now(), source, ...res };
     if (res.ok) {
       await this.pushToEdges(res.appliedArchive).catch(() => {});
+      await this.pushToCollectors().catch(() => {});
       if (restart) { setTimeout(() => restartProcess(), 250); res.restarting = true; }
     }
     return res;
+  }
+
+  /**
+   * After a successful self-upgrade, push the same bundle to every registered
+   * collector agent so all datacenters stay on the same version automatically.
+   */
+  async pushToCollectors() {
+    if (!loadCollectors().some((c) => c.enabled !== false)) return [];
+    const bundle = await resolveBundleBytes(this.settings);
+    if (!bundle) return [];
+    const results = await pushUpgradeToCollectors(bundle.bytes);
+    const ok = results.filter((r) => r.ok).length;
+    if (results.length) console.log(`[upgrade] 수집 에이전트 업그레이드 푸시: ${ok}/${results.length} 성공`);
+    return results;
   }
 
   async pushToEdges(archivePath) {

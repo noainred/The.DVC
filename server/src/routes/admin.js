@@ -17,6 +17,9 @@ import { getPollerStatus, pollNow } from '../idrac/poller.js';
 import { listCollectors, addCollector, updateCollector, removeCollector, loadCollectors } from '../collector/registry.js';
 import { allCollectorStatus, getCollectorStatus } from '../collector/state.js';
 import { pullNow } from '../collector/puller.js';
+import { pushUpgradeToCollectors } from '../collector/upgradePush.js';
+import { resolveBundleBytes } from '../upgrade/bundleSource.js';
+import { upgradeManager } from '../upgrade/manager.js';
 
 export const adminRouter = Router();
 
@@ -202,6 +205,19 @@ adminRouter.delete('/collectors/:id', adminOnly, (req, res) => {
 adminRouter.post('/collectors/pull', adminOnly, async (_req, res) => {
   await pullNow();
   res.json({ ok: true, status: allCollectorStatus() });
+});
+
+// Push an upgrade bundle to collector agents. Body: { id?, force? }.
+// Brings one (id) or all registered agents up to the central portal's version.
+adminRouter.post('/collectors/upgrade', adminOnly, async (req, res) => {
+  const { id, force } = req.body || {};
+  const bundle = await resolveBundleBytes(upgradeManager.settings);
+  if (!bundle) {
+    return res.status(409).json({ ok: false, reason: '업그레이드 번들을 찾을 수 없습니다 (감시 폴더/원격 소스 확인).' });
+  }
+  const results = await pushUpgradeToCollectors(bundle.bytes, { ids: id ? [id] : null, force: Boolean(force) });
+  const ok = results.filter((r) => r.ok).length;
+  res.json({ ok: true, version: bundle.version, source: bundle.source, pushed: results.length, succeeded: ok, results });
 });
 
 // Test connectivity to one collector (saved by id, or an ad-hoc {url, token}).
