@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ComposableMap, Geographies, Geography, Marker } from 'react-simple-maps';
 import geoData from 'world-atlas/countries-110m.json';
+import { Modal } from './ui.jsx';
 
 /** Marker color/size driven by the worst alarm state at a site. */
 function markerStyle(site) {
@@ -13,6 +14,7 @@ function markerStyle(site) {
 
 export default function WorldMap({ sites = [], onSelect, height = 420, onResizeEnd }) {
   const [tip, setTip] = useState(null);
+  const [picked, setPicked] = useState(null); // vCenter clicked on the map
   const [h, setH] = useState(height);
   useEffect(() => { setH(height); }, [height]);
 
@@ -89,7 +91,7 @@ export default function WorldMap({ sites = [], onSelect, height = 420, onResizeE
               onMouseEnter={(e) => setTip({ x: e.clientX, y: e.clientY, site: s })}
               onMouseMove={(e) => setTip({ x: e.clientX, y: e.clientY, site: s })}
               onMouseLeave={() => setTip(null)}
-              onClick={() => { if (!moved.current) onSelect?.(s.id); }}
+              onClick={() => { if (!moved.current) { setTip(null); setPicked(s); } }}
             >
               {/* decorative pulse + marker — ignore pointer events so hover is stable */}
               <circle r={st.r + 5} fill={st.ring} opacity={0.18} style={{ pointerEvents: 'none' }}>
@@ -126,6 +128,39 @@ export default function WorldMap({ sites = [], onSelect, height = 420, onResizeE
           )}
         </div>
       )}
+
+      {picked && (() => {
+        const m = picked.metrics || {};
+        const row = (label, value) => (
+          <div className="flex between" style={{ padding: '8px 0', borderBottom: '1px solid rgba(36,48,73,.4)', gap: 16 }}>
+            <span className="muted">{label}</span>
+            <span style={{ textAlign: 'right' }}>{value}</span>
+          </div>
+        );
+        return (
+          <Modal title={`vCenter — ${picked.name}`} onClose={() => setPicked(null)} width={520}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 24px' }}>
+              {row('ID', picked.id)}
+              {row('상태', <b style={{ color: picked.status === 'connected' ? 'var(--green)' : 'var(--red)' }}>{picked.status}</b>)}
+              {row('위치', `${picked.location?.city || '-'}, ${picked.location?.country || '-'}`)}
+              {row('리전', picked.location?.region || '-')}
+              {row('버전', picked.version || '-')}
+              {row('호스트', m.hosts ?? '-')}
+              {row('VM', `${m.vms ?? '-'} (${m.vmsPoweredOn ?? 0} on)`)}
+              {row('CPU 사용률', `${m.cpuUsagePct ?? '-'}%`)}
+              {row('메모리 사용률', `${m.memUsagePct ?? '-'}%`)}
+              {row('스토리지 사용률', `${m.storageUsagePct ?? '-'}%`)}
+              {m.powerKw > 0 && row('소비전력', `${m.powerKw} kW`)}
+              {row('알람', `위험 ${m.alarmsCritical || 0} · 경고 ${m.alarmsWarning || 0}`)}
+            </div>
+            <div className="flex" style={{ justifyContent: 'flex-end', marginTop: 14 }}>
+              <button className="login-btn" style={{ flex: 'none', padding: '9px 16px' }} onClick={() => { onSelect?.(picked.id); setPicked(null); }}>
+                이 vCenter 자원 보기 →
+              </button>
+            </div>
+          </Modal>
+        );
+      })()}
     </div>
   );
 }
