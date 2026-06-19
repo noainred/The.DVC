@@ -23,6 +23,7 @@ import { resolveBundleBytes } from '../upgrade/bundleSource.js';
 import { upgradeManager } from '../upgrade/manager.js';
 import {
   listAssignments, addAssignment, updateAssignment, removeAssignment, getResults,
+  parseCsv as parseAssignmentsCsv, importAssignments,
 } from '../central/assignments.js';
 
 export const adminRouter = Router();
@@ -289,6 +290,17 @@ adminRouter.put('/assignments/:agent', adminOnly, (req, res) => {
 adminRouter.delete('/assignments/:agent', adminOnly, (req, res) => {
   const result = removeAssignment(req.params.agent);
   res.status(result.ok ? 200 : 404).json(result);
+});
+
+// Import assignments from CSV text or a JSON array. Body:
+//   { csv:"...", mode? } | { assignments:[...], mode? } | bare array
+adminRouter.post('/assignments/import', adminOnly, (req, res) => {
+  const b = req.body || {};
+  let list;
+  if (typeof b.csv === 'string') list = parseAssignmentsCsv(b.csv);
+  else list = Array.isArray(b) ? b : b.assignments;
+  const result = importAssignments(list, b.mode === 'replace' ? 'replace' : 'merge');
+  res.status(result.ok ? 200 : 400).json(result);
 });
 
 function existsFile(p) {
