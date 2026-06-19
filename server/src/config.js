@@ -30,6 +30,9 @@ export const config = {
   pollIntervalMs: Number(process.env.POLL_INTERVAL_MS) || 30_000,
   // Allow self-signed vCenter certificates (common in private DCs).
   rejectUnauthorized: process.env.VC_TLS_REJECT_UNAUTHORIZED === 'true',
+  // TLS compatibility for older vCenter appliances (used when cert verify is off).
+  vcTlsMinVersion: process.env.VC_TLS_MIN_VERSION || 'TLSv1',
+  vcTlsCiphers: process.env.VC_TLS_CIPHERS || 'DEFAULT@SECLEVEL=0',
   // Use the vim25 SOAP API for real host/VM metrics (default on; REST is a fallback).
   vcSoapMetrics: process.env.VC_SOAP_METRICS !== 'false',
   // Directory of the built web client to serve in production (optional).
