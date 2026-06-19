@@ -6,6 +6,7 @@ import {
 import { usePolling, fetchJson, putJson } from '../api.js';
 import { Kpi, Loading, ErrorBox, SeverityBadge } from '../components/ui.jsx';
 import WorldMap from '../components/WorldMap.jsx';
+import ErrorBoundary from '../components/ErrorBoundary.jsx';
 
 const REGION_COLORS = { Americas: '#3b82f6', EMEA: '#a855f7', APAC: '#22d3ee', Unknown: '#64748b' };
 
@@ -56,8 +57,10 @@ export default function Overview({ onSelectSite, onGotoTab }) {
         <Kpi label="알람" value={fmt(g.alarms)} accent={g.alarmsCritical ? 'var(--red)' : 'var(--amber)'} meta={`위험 ${g.alarmsCritical} · 경고 ${g.alarmsWarning}`} />
       </div>
 
-      <div className="section-title">전세계 데이터센터 분포 <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>(지도 하단을 드래그해 크기 조절 · 모든 사용자 공유)</span></div>
-      <WorldMap sites={sites} onSelect={onSelectSite} height={mapHeight} onResizeEnd={saveMapHeight} />
+      <div className="section-title">전세계 데이터센터 분포 <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>(+/- 로 크기 조절 · 드래그로 이동 · 모든 사용자 공유)</span></div>
+      <ErrorBoundary fallback={<div className="card error-box">지도를 불러올 수 없습니다.</div>}>
+        <WorldMap sites={sites} onSelect={onSelectSite} height={mapHeight} onResizeEnd={saveMapHeight} />
+      </ErrorBoundary>
 
       <div className="grid cols-2" style={{ marginTop: 16 }}>
         <div className="card">

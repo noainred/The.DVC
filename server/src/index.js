@@ -3,6 +3,7 @@ import { pushLog } from './logbuffer.js';
 import express from 'express';
 import cors from 'cors';
 import fs from 'node:fs';
+import path from 'node:path';
 import { config } from './config.js';
 import { store } from './store.js';
 import { api } from './routes/api.js';
@@ -35,10 +36,21 @@ app.use('/api', authMiddleware, api);                   // protected resource en
 
 // Serve the built web client when it exists (production single-port mode).
 if (fs.existsSync(config.webDist)) {
-  app.use(express.static(config.webDist));
+  // Hashed assets can cache forever; index.html must never be cached so the
+  // browser always picks up new asset hashes after an upgrade.
+  app.use(express.static(config.webDist, {
+    setHeaders: (res, filePath) => {
+      if (filePath.endsWith('index.html')) res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+      else if (filePath.includes(`${path.sep}assets${path.sep}`)) res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    },
+  }));
   app.get('*', (req, res, next) => {
     if (req.path.startsWith('/api')) return next();
-    res.sendFile(`${config.webDist}/index.html`);
+    // A missing file with an extension (e.g. a stale asset hash) must 404 — never
+    // return index.html for it, or the browser executes HTML as JS and shows a blank page.
+    if (path.extname(req.path)) return res.status(404).end();
+    res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+    res.sendFile(path.join(config.webDist, 'index.html'));
   });
 }
 
