@@ -1,4 +1,5 @@
 import { Agent, setGlobalDispatcher } from 'undici';
+import { constants as cryptoConstants } from 'node:crypto';
 import { config } from '../config.js';
 
 /**
@@ -16,11 +17,22 @@ import { config } from '../config.js';
  * configurable via VC_TLS_REJECT_UNAUTHORIZED (default: off).
  */
 
-// Configure a global dispatcher that honours the TLS verification setting.
+// Configure a global dispatcher tuned for older vCenter TLS stacks. Many
+// appliances negotiate legacy TLS versions/ciphers (or legacy renegotiation)
+// that OpenSSL 3 rejects by default, which surfaces as "Client network socket
+// disconnected before secure TLS connection was established". We therefore
+// allow older TLS and lower the security level when cert verification is off.
 if (!config.rejectUnauthorized) {
-  setGlobalDispatcher(
-    new Agent({ connect: { rejectUnauthorized: false } })
-  );
+  const connect = {
+    rejectUnauthorized: false,
+    minVersion: config.vcTlsMinVersion,           // default TLSv1
+    ciphers: config.vcTlsCiphers,                 // default DEFAULT@SECLEVEL=0
+    secureOptions:
+      cryptoConstants.SSL_OP_LEGACY_SERVER_CONNECT |
+      cryptoConstants.SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION,
+    timeout: 15_000,
+  };
+  setGlobalDispatcher(new Agent({ connect, connectTimeout: 15_000 }));
 }
 
 export class VCenterClient {

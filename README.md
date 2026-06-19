@@ -142,6 +142,8 @@ sudo ./install.sh --port 4000
 | `POLL_INTERVAL_MS` | `30000` | vCenter 폴링 주기(ms) |
 | `VC_TLS_REJECT_UNAUTHORIZED` | `false` | 사설 vCenter 자체서명 인증서 거부 여부 (`true`면 검증) |
 | `VC_SOAP_METRICS` | `true` | 호스트/VM 실측 메트릭을 vim25 SOAP로 수집(끄면 REST만 사용 — CPU/메모리 사용률 미수집) |
+| `VC_TLS_MIN_VERSION` | `TLSv1` | 구형 vCenter 호환 최소 TLS 버전 (`TLSv1`/`TLSv1.1`/`TLSv1.2`) |
+| `VC_TLS_CIPHERS` | `DEFAULT@SECLEVEL=0` | 구형 암호/키 허용(레거시 어플라이언스 TLS 핸드셰이크 호환) |
 | `AUTH_ENABLED` | `true` | 로그인 인증 사용 여부 (`false`면 인증 없이 접근) |
 | `AUTH_SECRET` | (랜덤) | JWT 서명 시크릿. **운영 환경에서는 반드시 지정** (미지정 시 재시작마다 토큰 무효화) |
 | `AUTH_TOKEN_TTL` | `8h` | 세션 토큰 유효기간 (`30m`, `8h`, `7d`, 또는 초) |
