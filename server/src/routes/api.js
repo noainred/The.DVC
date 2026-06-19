@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { store } from '../store.js';
-import { currentVersion } from '../config.js';
+import { currentVersion, config } from '../config.js';
 
 export const api = Router();
 
@@ -39,6 +39,7 @@ api.get('/health', (_req, res) => {
     generatedAt: snap.generatedAt,
     vcenters: snap.vcenters.length,
     vcentersConnected: connected,
+    features: { upgradeTab: config.ui.showUpgradeTab },
   });
 });
 

@@ -26,7 +26,7 @@ const TABS = [
   { id: 'alarms', label: '알람' },
   { id: 'vcenter-admin', label: 'vCenter 관리', adminOnly: true },
   { id: 'diagnostics', label: '진단·로그', adminOnly: true },
-  { id: 'upgrade', label: '업그레이드', adminOnly: true },
+  { id: 'upgrade', label: '업그레이드', adminOnly: true, feature: 'upgradeTab' },
 ];
 
 const REGIONS = ['Americas', 'EMEA', 'APAC'];
@@ -100,11 +100,16 @@ function Portal({ user, onLogout }) {
 
   const saveLanding = (id) => { setLandingTab(id); localStorage.setItem(LANDING_KEY, id); };
 
-  // Admin-only tabs (e.g. 자동 업그레이드) are hidden from other roles.
-  const visibleTabs = TABS.filter((t) => !t.adminOnly || user.role === 'admin');
-
   const { data: health } = usePolling('/health', {}, 20_000);
   const { data: vcenters } = usePolling('/vcenters', {}, 60_000);
+
+  // Hide admin-only tabs from other roles, and feature-gated tabs (e.g. 업그레이드)
+  // unless the server enables them.
+  const visibleTabs = TABS.filter((t) => {
+    if (t.adminOnly && user.role !== 'admin') return false;
+    if (t.feature && !health?.features?.[t.feature]) return false;
+    return true;
+  });
 
   const filters = useMemo(() => {
     const f = {};
@@ -217,7 +222,7 @@ function Portal({ user, onLogout }) {
         {tab === 'alarms' && <Alarms filters={filters} />}
         {tab === 'vcenter-admin' && user.role === 'admin' && <VCenterAdmin />}
         {tab === 'diagnostics' && user.role === 'admin' && <Diagnostics />}
-        {tab === 'upgrade' && user.role === 'admin' && <Upgrade />}
+        {tab === 'upgrade' && user.role === 'admin' && health?.features?.upgradeTab && <Upgrade />}
       </main>
     </div>
   );
