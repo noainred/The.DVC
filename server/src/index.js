@@ -1,3 +1,5 @@
+import './logbuffer.js'; // first: capture console output into the ring buffer
+import { pushLog } from './logbuffer.js';
 import express from 'express';
 import cors from 'cors';
 import fs from 'node:fs';
@@ -13,6 +15,18 @@ import { adminRouter } from './routes/admin.js';
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// Lightweight request logging for the log viewer (skip the log endpoint itself).
+app.use((req, res, next) => {
+  const url = req.originalUrl.split('?')[0];
+  if (url === '/api/admin/logs') return next();
+  const start = Date.now();
+  res.on('finish', () => {
+    const level = res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info';
+    pushLog(level, `${req.method} ${url} ${res.statusCode} ${Date.now() - start}ms`);
+  });
+  next();
+});
 
 app.use('/api/auth', authRouter);                      // public: login / config / me
 app.use('/api/upgrade', authMiddleware, upgradeRouter); // admin-gated auto-upgrade control

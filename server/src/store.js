@@ -1,6 +1,7 @@
 import { config, loadVcenterConfig } from './config.js';
 import { generateSnapshot } from './mock/generator.js';
 import { collectFromVCenter } from './vcenter/restClient.js';
+import { describeError } from './util/errors.js';
 
 /**
  * In-memory aggregated store. Holds the most recent global snapshot and
@@ -38,14 +39,19 @@ class Store {
           merged.datastores.push(...s.datastores);
           merged.networks.push(...s.networks);
           merged.alarms.push(...s.alarms);
-        } else if (mockFallback) {
-          // auto mode: substitute mock data for this site so the portal stays whole
-          pushSite(merged, mockFallback, vc.id);
         } else {
-          merged.vcenters.push({
-            id: vc.id, name: vc.name, location: vc.location,
-            status: 'unreachable', error: String(r.reason?.message || r.reason),
-          });
+          const d = describeError(r.reason);
+          console.error(`[collect] ${vc.id} (${vc.name}) 연결 실패: ${d.message}${d.hint ? ` — ${d.hint}` : ''}`);
+          merged.collectionErrors.push({ vcenterId: vc.id, name: vc.name, ...d, at: Date.now(), fallback: Boolean(mockFallback) });
+          if (mockFallback) {
+            // auto mode: substitute mock data for this site so the portal stays whole
+            pushSite(merged, mockFallback, vc.id);
+          } else {
+            merged.vcenters.push({
+              id: vc.id, name: vc.name, location: vc.location,
+              status: 'unreachable', error: d.message, hint: d.hint, code: d.code,
+            });
+          }
         }
       });
 
@@ -84,12 +90,14 @@ function emptySnapshot() {
     generatedAt: new Date().toISOString(),
     source: config.dataSource,
     vcenters: [], hosts: [], vms: [], datastores: [], networks: [], alarms: [],
+    collectionErrors: [],
     rollups: null,
   };
 }
 
 /** Compute global / regional / per-vCenter rollups used by the dashboard. */
 function withRollups(snap) {
+  if (!snap.collectionErrors) snap.collectionErrors = [];
   const sum = (arr, fn) => arr.reduce((a, x) => a + (fn(x) || 0), 0);
 
   const cpuTotalMhz = sum(snap.hosts, (h) => h.cpuTotalMhz);

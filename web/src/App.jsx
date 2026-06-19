@@ -11,6 +11,7 @@ import VCenters from './views/VCenters.jsx';
 import Summary from './views/Summary.jsx';
 import Upgrade from './views/Upgrade.jsx';
 import VCenterAdmin from './views/VCenterAdmin.jsx';
+import Diagnostics from './views/Diagnostics.jsx';
 import Login from './views/Login.jsx';
 
 const TABS = [
@@ -24,6 +25,7 @@ const TABS = [
   { id: 'networks', label: '네트워크' },
   { id: 'alarms', label: '알람' },
   { id: 'vcenter-admin', label: 'vCenter 관리', adminOnly: true },
+  { id: 'diagnostics', label: '진단·로그', adminOnly: true },
   { id: 'upgrade', label: '업그레이드', adminOnly: true },
 ];
 
@@ -90,7 +92,7 @@ function Portal({ user, onLogout }) {
     return s;
   }, [vcenterId, region]);
 
-  const noFilterTabs = ['overview', 'vcenters', 'summary', 'upgrade', 'vcenter-admin'];
+  const noFilterTabs = ['overview', 'vcenters', 'summary', 'upgrade', 'vcenter-admin', 'diagnostics'];
   const showFilters = !noFilterTabs.includes(tab);
   const showTextSearch = tab !== 'explore';
 
@@ -165,6 +167,7 @@ function Portal({ user, onLogout }) {
         {tab === 'networks' && <Networks filters={filters} />}
         {tab === 'alarms' && <Alarms filters={filters} />}
         {tab === 'vcenter-admin' && user.role === 'admin' && <VCenterAdmin />}
+        {tab === 'diagnostics' && user.role === 'admin' && <Diagnostics />}
         {tab === 'upgrade' && user.role === 'admin' && <Upgrade />}
       </main>
     </div>

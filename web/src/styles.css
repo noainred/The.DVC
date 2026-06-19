@@ -196,6 +196,25 @@ tbody tr:last-child td { border-bottom: none; }
 .login-hint { font-size: 12px; text-align: center; }
 .login-hint code { background: var(--panel-2); padding: 1px 6px; border-radius: 4px; color: var(--text); }
 
+/* Diagnostics — vCenter connection errors */
+.diag-err { padding: 10px 0; border-bottom: 1px solid rgba(36,48,73,.5); }
+.diag-err:last-child { border-bottom: none; }
+.diag-err-head { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; flex-wrap: wrap; }
+.diag-err-msg { font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; font-size: 12.5px; color: #f9a8a8; word-break: break-all; }
+.diag-err-hint { font-size: 12.5px; color: var(--amber); margin-top: 4px; }
+
+/* Server log console */
+.log-console {
+  background: #070b13; border: 1px solid var(--border); border-radius: 8px;
+  height: 52vh; overflow: auto; padding: 8px 10px;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: 12px; line-height: 1.55;
+}
+.log-line { display: flex; gap: 10px; white-space: pre-wrap; word-break: break-word; padding: 1px 0; }
+.log-line:hover { background: rgba(59,130,246,.06); }
+.log-time { color: var(--text-faint); flex-shrink: 0; }
+.log-level { flex-shrink: 0; font-weight: 700; white-space: pre; }
+.log-msg { color: #cbd5e1; }
+
 /* Modal */
 .modal-overlay {
   position: fixed; inset: 0; background: rgba(4, 8, 16, 0.7); backdrop-filter: blur(3px);
