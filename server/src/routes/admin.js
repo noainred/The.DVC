@@ -7,6 +7,7 @@ import { getLogs } from '../logbuffer.js';
 import {
   listRegistry, addVcenter, updateVcenter, removeVcenter, testConnection, importVcenters,
 } from '../vcenter/registry.js';
+import { geocode } from '../vcenter/geocode.js';
 
 export const adminRouter = Router();
 
@@ -57,6 +58,12 @@ adminRouter.delete('/vcenters/:id', adminOnly, async (req, res) => {
 // Test connectivity to a vCenter (new entry or a saved one by id).
 adminRouter.post('/vcenters/test', adminOnly, async (req, res) => {
   res.json(await testConnection(req.body || {}));
+});
+
+// Offline geocode: city/country -> { lat, lon, match } for map plotting.
+adminRouter.get('/geocode', adminOnly, (req, res) => {
+  const g = geocode(req.query.city, req.query.country);
+  res.json(g ? { ok: true, ...g } : { ok: false, reason: '좌표를 찾을 수 없습니다 (도시/국가명 확인).' });
 });
 
 // Import an uploaded vcenters.json. Body: { vcenters:[...], mode?:'merge'|'replace' }

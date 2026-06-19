@@ -88,10 +88,17 @@ export default function Overview({ onSelectSite, onGotoTab }) {
         </div>
       </div>
 
-      <div className="section-title">리전 요약</div>
+      <div className="section-title">리전 요약 <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>(카드에 마우스를 올리면 vCenter 목록)</span></div>
       <div className="region-grid">
-        {regions.map((r) => (
-          <div className="card region-card" key={r.key}>
+        {regions.map((r) => {
+          const rsites = sites.filter((s) => (s.location?.region || 'Unknown') === r.key);
+          const tip = [
+            `${r.key} 리전 · ${r.vcenters} vCenter`,
+            ...rsites.map((s) => `• ${s.name} [${s.status === 'connected' ? '정상' : '불가'}] 호스트 ${s.metrics?.hosts ?? 0} · VM ${s.metrics?.vms ?? 0}`),
+            `합계: 호스트 ${r.hosts} · VM ${r.vms} · CPU ${r.cpuUsagePct}% · 메모리 ${r.memUsagePct}% · 스토리지 ${r.storageUsagePct}%`,
+          ].join('\n');
+          return (
+          <div className="card region-card" key={r.key} title={tip}>
             <div className="rc-head">
               <span className="rc-name" style={{ color: REGION_COLORS[r.key] }}>{r.key}</span>
               <span className="muted" style={{ fontSize: 12 }}>{r.vcenters} vCenter</span>
@@ -105,7 +112,8 @@ export default function Overview({ onSelectSite, onGotoTab }) {
               <div className="rs"><span>알람</span><b style={{ color: r.alarmsCritical ? 'var(--red)' : undefined }}>{r.alarmsCritical + r.alarmsWarning}</b></div>
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
 
       <div className="grid cols-2" style={{ marginTop: 16 }}>

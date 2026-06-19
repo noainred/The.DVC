@@ -79,7 +79,7 @@ export default function VCenterAdmin() {
   const save = async () => {
     setBusy(true); setMsg(null);
     try {
-      const r = editing ? await putJson(`/admin/vcenters/${form.id}`, form) : await postJson('/admin/vcenters', form);
+      const r = editing ? await putJson(`/admin/vcenters/${encodeURIComponent(form.id)}`, form) : await postJson('/admin/vcenters', form);
       if (r.ok) { await load(); close(); }
       else setMsg({ ok: false, text: r.reason });
     } catch (e) { setMsg({ ok: false, text: e.message }); }
@@ -97,8 +97,20 @@ export default function VCenterAdmin() {
 
   const remove = async (vc) => {
     if (!window.confirm(`'${vc.name}' (${vc.id}) 을(를) 삭제할까요?`)) return;
-    try { await delJson(`/admin/vcenters/${vc.id}`); await load(); }
+    try { await delJson(`/admin/vcenters/${encodeURIComponent(vc.id)}`); await load(); }
     catch (e) { setError(e.message); }
+  };
+
+  // Auto-fill map coordinates from the city/country name (offline geocoder).
+  const autoGeocode = async () => {
+    if (!form) return;
+    const { city, country, lat, lon } = form.location;
+    if (!city && !country) return;
+    if ((lat !== '' && lat != null) || (lon !== '' && lon != null)) return; // keep manual coords
+    try {
+      const g = await fetchJson('/admin/geocode', { city, country });
+      if (g.ok) setForm((f) => ({ ...f, location: { ...f.location, lat: g.lat, lon: g.lon } }));
+    } catch { /* ignore */ }
   };
 
   const list = data.vcenters || [];
@@ -197,8 +209,8 @@ export default function VCenterAdmin() {
                   {REGIONS.map((r) => <option key={r} value={r}>{r}</option>)}
                 </select>
               </label>
-              <label>도시<input className="input" value={form.location.city} onChange={setLoc('city')} placeholder="Seoul" /></label>
-              <label>국가<input className="input" value={form.location.country} onChange={setLoc('country')} placeholder="South Korea" /></label>
+              <label>도시<input className="input" value={form.location.city} onChange={setLoc('city')} onBlur={autoGeocode} placeholder="Seoul" /></label>
+              <label>국가<input className="input" value={form.location.country} onChange={setLoc('country')} onBlur={autoGeocode} placeholder="South Korea" /></label>
               <label>위도(lat)<input className="input" value={form.location.lat} onChange={setLoc('lat')} placeholder="37.57" /></label>
               <label>경도(lon)<input className="input" value={form.location.lon} onChange={setLoc('lon')} placeholder="126.98" /></label>
             </div>
