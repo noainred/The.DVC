@@ -104,7 +104,7 @@ function Portal({ user, onLogout }) {
         <div className="brand">
           <div className="logo">V</div>
           <div>
-            <h1>VMware Global Monitoring Portal</h1>
+            <h1>VMware Global Monitoring Portal{health?.version && <span className="ver-badge">v{health.version}</span>}</h1>
             <div className="sub">전세계 vCenter 인프라 통합 모니터링</div>
           </div>
         </div>

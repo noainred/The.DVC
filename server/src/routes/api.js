@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { store } from '../store.js';
+import { currentVersion } from '../config.js';
 
 export const api = Router();
 
@@ -30,7 +31,7 @@ function sortBy(items, key, order = 'desc') {
 
 api.get('/health', (_req, res) => {
   const snap = store.get();
-  res.json({ status: 'ok', source: snap.source, generatedAt: snap.generatedAt, vcenters: snap.vcenters.length });
+  res.json({ status: 'ok', version: currentVersion(), source: snap.source, generatedAt: snap.generatedAt, vcenters: snap.vcenters.length });
 });
 
 // High-level KPIs + regional / per-site rollups for the dashboard landing view.
