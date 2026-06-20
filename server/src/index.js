@@ -23,6 +23,7 @@ import { startIdracPoller } from './idrac/poller.js';
 import { startNsxPoller } from './nsx/store.js';
 import { startAlertEngine } from './alerts.js';
 import { startMetricsSampler } from './metrics/sampler.js';
+import { startGpuGuestPoller } from './gpu/poller.js';
 import { startCollectorPuller } from './collector/puller.js';
 import { startAgentScanner } from './agent/scanner.js';
 
@@ -76,6 +77,7 @@ startIdracPoller();
 startNsxPoller();
 startAlertEngine();
 startMetricsSampler();
+startGpuGuestPoller();
 startCollectorPuller();
 startAgentScanner();
 

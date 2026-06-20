@@ -121,6 +121,7 @@ export class VimSoapClient {
       perfManager: pick('perfManager'),
       extensionManager: pick('extensionManager'),
       licenseManager: pick('licenseManager'),
+      guestOperationsManager: pick('guestOperationsManager'),
       version: aboutPick('version') || pick('version'),
       build: aboutPick('build') || '',
       fullName: aboutPick('fullName') || '',
@@ -344,13 +345,46 @@ function parseGpus(xml) {
     const gtype = /<graphicsType>([^<]*)<\/graphicsType>/.exec(blk)?.[1] || '';
     const memKB = Number(/<memorySizeInKB>(\d+)<\/memorySizeInKB>/.exec(blk)?.[1] || 0);
     if (deviceName || vendorName) {
+      // graphicsType: sharedDirect=vGPU(GRID), shared=vSGA. 순수 패스쓰루(DirectPath
+      // I/O) GPU는 graphicsInfo가 아니라 PCI passthrough에 나타나므로 별도 수집한다.
+      const mode = /shareddirect/i.test(gtype) ? 'vgpu' : /shared/i.test(gtype) ? 'vsga' : 'vgpu';
       out.push({
         model: deviceName || vendorName,
         vendor: vendorName,
         memGB: memKB ? Math.round(memKB / 1024 / 1024) : 0,
-        vgpuMode: /shared/i.test(gtype),
+        mode,
+        vgpuMode: mode === 'vgpu',
       });
     }
+  }
+  return out;
+}
+
+/**
+ * Parse config.pciPassthruInfo + hardware.pciDevice for GPUs assigned in raw
+ * PCI passthrough (DirectPath I/O). These do NOT appear in graphicsInfo. A GPU
+ * is a PCI device with class id 0x03xx (VGA / 3D / display controller).
+ * Returns [{ model, vendor, memGB:0, mode:'passthrough' }].
+ */
+function parsePassthruGpus(passthruXml, pciDeviceXml) {
+  if (!passthruXml || !pciDeviceXml) return [];
+  // Device ids that are passthrough-enabled (and active).
+  const enabled = new Set();
+  for (const blk of passthruXml.split(/<HostPciPassthruInfo(?=[ >])/).slice(1)) {
+    const id = /<id>([^<]+)<\/id>/.exec(blk)?.[1];
+    if (id && /<passthruEnabled>\s*true\s*<\/passthruEnabled>/i.test(blk)) enabled.add(id);
+  }
+  if (!enabled.size) return [];
+  const out = [];
+  for (const blk of pciDeviceXml.split(/<HostPciDevice(?=[ >])/).slice(1)) {
+    const id = /<id>([^<]+)<\/id>/.exec(blk)?.[1];
+    if (!id || !enabled.has(id)) continue;
+    const classId = Number(/<classId>(-?\d+)<\/classId>/.exec(blk)?.[1] || 0);
+    // PCI base class 0x03 = display controller (VGA 0x0300 / 3D 0x0302).
+    if ((classId >> 8) !== 0x03) continue;
+    const deviceName = /<deviceName>([^<]*)<\/deviceName>/.exec(blk)?.[1] || '';
+    const vendorName = /<vendorName>([^<]*)<\/vendorName>/.exec(blk)?.[1] || '';
+    out.push({ model: deviceName || vendorName || 'Passthrough GPU', vendor: vendorName, memGB: 0, mode: 'passthrough', vgpuMode: false });
   }
   return out;
 }
@@ -553,6 +587,7 @@ export async function collectFromVCenterSoap(vc) {
         'name', 'parent', 'runtime.connectionState', 'runtime.powerState', 'runtime.inMaintenanceMode',
         'summary.hardware.numCpuCores', 'summary.hardware.numCpuThreads', 'summary.hardware.cpuMhz', 'summary.hardware.memorySize',
         'summary.config.product.version', 'summary.config.product.build', 'config.graphicsInfo',
+        'config.pciPassthruInfo', 'hardware.pciDevice',
         'summary.hardware.vendor', 'summary.hardware.model', 'config.storageDevice.hostBusAdapter',
         'runtime.healthSystemRuntime.systemHealthInfo.numericSensorInfo',
         'summary.quickStats.overallCpuUsage', 'summary.quickStats.overallMemoryUsage'] },
@@ -617,7 +652,7 @@ export async function collectFromVCenterSoap(vc) {
         cpuThreads: num(p['summary.hardware.numCpuThreads']) || cores,
         version: p['summary.config.product.version'] || '',
         build: p['summary.config.product.build'] || '',
-        gpus: parseGpus(p['config.graphicsInfo']),
+        gpus: [...parseGpus(p['config.graphicsInfo']), ...parsePassthruGpus(p['config.pciPassthruInfo'], p['hardware.pciDevice'])],
         hbas: parseHbas(p['config.storageDevice.hostBusAdapter']),
         ...parseTemps(p['runtime.healthSystemRuntime.systemHealthInfo.numericSensorInfo']),
         vendor: p['summary.hardware.vendor'] || '',

@@ -9,6 +9,7 @@ import { config } from '../config.js';
 import { store } from './../store.js';
 import { getMetricsDb } from './db.js';
 import { loadMetricsSettings } from './settings.js';
+import { getGuestGpuHost } from '../gpu/store.js';
 
 let timer = null;
 let lastRun = null;
@@ -37,15 +38,17 @@ async function sampleOnce() {
   // Datastore used GB (for capacity forecast).
   for (const d of snap.datastores || []) if (d.usedGB != null) rows.push({ metric: 'ds_usedgb', k: d.id, v: d.usedGB });
 
-  // GPU utilization (only hosts reporting it) — per host + per-cluster/per-vCenter averages.
-  const gpuHosts = (snap.hosts || []).filter((h) => h.gpuUtilPct != null);
+  // GPU utilization — ESXi 보고값 우선, 없으면 게스트 OS 수집 오버레이(패스쓰루).
+  // per host + per-cluster/per-vCenter averages.
   const gpuByCluster = new Map();
   const gpuByVc = new Map();
-  for (const h of gpuHosts) {
-    rows.push({ metric: 'gpu_util', k: h.id, v: h.gpuUtilPct });
+  for (const h of snap.hosts || []) {
+    const util = h.gpuUtilPct ?? (getGuestGpuHost(h.id)?.utilPct ?? null);
+    if (util == null) continue;
+    rows.push({ metric: 'gpu_util', k: h.id, v: util });
     const ck = `${h.vcenterId}|${h.cluster || 'standalone'}`;
-    (gpuByCluster.get(ck) || gpuByCluster.set(ck, []).get(ck)).push(h.gpuUtilPct);
-    (gpuByVc.get(h.vcenterId) || gpuByVc.set(h.vcenterId, []).get(h.vcenterId)).push(h.gpuUtilPct);
+    (gpuByCluster.get(ck) || gpuByCluster.set(ck, []).get(ck)).push(util);
+    (gpuByVc.get(h.vcenterId) || gpuByVc.set(h.vcenterId, []).get(h.vcenterId)).push(util);
   }
   for (const [k, arr] of gpuByCluster) rows.push({ metric: 'gpu_cluster', k, v: round1(avg(arr)) });
   for (const [k, arr] of gpuByVc) rows.push({ metric: 'gpu_vc', k, v: round1(avg(arr)) });

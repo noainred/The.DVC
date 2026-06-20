@@ -1148,6 +1148,19 @@ function Hba({ scope }) {
   );
 }
 
+const GPU_MODE = { vgpu: ['vGPU', 'green'], passthrough: ['패스쓰루', 'amber'], vsga: ['vSGA', 'blue'] };
+function GpuModeBadge({ mode, modes }) {
+  const [label, cls] = GPU_MODE[mode] || ['—', 'gray'];
+  // 한 호스트에 모드가 섞여 있으면 보조 표기.
+  const extra = modes ? Object.entries(modes).filter(([k]) => k !== mode) : [];
+  return (
+    <span>
+      <span className={`badge ${cls}`}>{label}</span>
+      {extra.map(([k, n]) => <span key={k} className={`badge ${GPU_MODE[k]?.[1] || 'gray'}`} style={{ marginLeft: 4, opacity: 0.8 }}>{GPU_MODE[k]?.[0] || k} {n}</span>)}
+    </span>
+  );
+}
+
 function Gpu({ scope }) {
   const { loading, data, error } = useTool('/tools/gpu', scope ? { vcenterId: scope } : {});
   const [view, setView] = useState('host'); // host | cluster | vc
@@ -1158,14 +1171,17 @@ function Gpu({ scope }) {
     const r = await fetchJson(`/tools/gpu/history?level=${level}&key=${encodeURIComponent(key)}&days=${days}`).catch(() => null);
     setHist(r ? { ...r } : { error: true });
   };
+  const [mode, setMode] = useState(''); // '' | vgpu | passthrough | vsga
   useEffect(() => { if (hist && hist.key) openHist(hist.level, hist.key); /* eslint-disable-next-line */ }, [days]);
   if (loading) return <Loading />;
   if (error) return <ErrorBox message={error} />;
 
+  const items = mode ? data.items.filter((h) => h.mode === mode) : data.items;
+
   // Aggregate current utilization by cluster / vCenter from per-host items.
   const aggregate = (keyFn, labelFn) => {
     const m = new Map();
-    for (const h of data.items) {
+    for (const h of items) {
       if (h.utilPct == null) continue;
       const k = keyFn(h);
       const g = m.get(k) || { key: k, name: labelFn(h), hosts: 0, sum: 0, max: 0, gpus: 0 };
@@ -1174,9 +1190,9 @@ function Gpu({ scope }) {
     return [...m.values()].map((g) => ({ key: g.key, name: g.name, sub: `${g.hosts} 호스트 · GPU ${g.gpus}`, avg: Math.round(g.sum / g.hosts), max: g.max, level: view }));
   };
 
-  const hostRows = data.items.map((h) => ({
+  const hostRows = items.map((h) => ({
     key: h.id, name: h.host, vcenterId: h.vcenterId, sub: `${h.vcenterId} / ${h.cluster || '-'} · ${h.model}`,
-    model: h.model, count: h.count, memGB: h.memGB, vgpu: h.vgpu, avg: h.utilPct, max: h.utilPct, util: h.utilPct, level: 'host',
+    model: h.model, count: h.count, memGB: h.memGB, mode: h.mode, modes: h.modes, utilSource: h.utilSource, avg: h.utilPct, max: h.utilPct, util: h.utilPct, level: 'host',
   }));
   const rows = view === 'host' ? hostRows
     : view === 'cluster' ? aggregate((h) => `${h.vcenterId}|${h.cluster || 'standalone'}`, (h) => `${h.vcenterId} / ${h.cluster || 'standalone'}`)
@@ -1188,8 +1204,9 @@ function Gpu({ scope }) {
     { key: 'model', label: 'GPU 모델' },
     { key: 'count', label: '개수', align: 'right' },
     { key: 'memGB', label: 'VRAM', align: 'right', render: (r) => `${r.memGB} GB` },
-    { key: 'util', label: '사용률', render: (r) => (r.util == null ? <span className="muted">—</span> : <UsageCell pct={r.util} />) },
-    { key: 'vgpu', label: 'vGPU', sortValue: (r) => (r.vgpu ? 1 : 0), render: (r) => (r.vgpu ? <span className="badge green">vGPU</span> : <span className="badge gray">Passthrough</span>) },
+    { key: 'mode', label: '사용 방식', sortValue: (r) => r.mode, render: (r) => <GpuModeBadge mode={r.mode} modes={r.modes} /> },
+    { key: 'util', label: '사용률', render: (r) => (r.util == null ? <span className="muted">—</span>
+      : <span className="flex gap" style={{ alignItems: 'center' }}><UsageCell pct={r.util} />{r.utilSource === 'guest' && <span className="badge gray" style={{ fontSize: 10 }} title="게스트 OS에서 수집(패스쓰루)">게스트</span>}</span>) },
     { key: 'hist', label: '추이', render: (r) => <button className="tab" onClick={() => openHist('host', r.key)}>5년 추이</button> },
   ];
   const aggCols = [
@@ -1205,14 +1222,22 @@ function Gpu({ scope }) {
       <div className="kpis" style={{ marginBottom: 14 }}>
         <Card label="총 GPU" value={data.totalGpus} accent="var(--accent)" meta={`GPU 호스트 ${data.hostsWithGpu}`} />
         <Card label="평균 GPU 사용률" value={data.avgUtilPct == null ? '—' : `${data.avgUtilPct}%`} meta={data.utilReporting ? `${data.utilReporting} 호스트 보고` : '사용률 미보고'} />
-        {data.byModel.slice(0, 2).map((m) => <Card key={m.model} label={m.model} value={m.count} />)}
+        <Card label="vGPU" value={data.byMode?.vgpu ?? 0} accent="var(--green)" meta="공유 다이렉트(GRID)" />
+        <Card label="패스쓰루" value={data.byMode?.passthrough ?? 0} accent="var(--amber)" meta="DirectPath I/O" />
+        {(data.byMode?.vsga ?? 0) > 0 && <Card label="vSGA" value={data.byMode.vsga} meta="공유(소프트)" />}
       </div>
-      <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>※ GPU 사용률은 NVIDIA vGPU/GRID 드라이버가 설치돼 vSphere 성능 카운터를 보고하는 호스트만 표시됩니다. 이름을 클릭하면 최근 5년 추이를 볼 수 있습니다.</div>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>※ vGPU/vSGA는 ESXi가 사용률을 보고하지만, <b>패스쓰루(DirectPath I/O)</b>는 게스트 OS가 GPU를 직접 소유해 ESXi에서 사용률을 볼 수 없습니다(설정 › GPU 게스트 수집에서 게스트 OS 수집을 켜면 표시). 이름을 클릭하면 최근 5년 추이를 봅니다.</div>
       {data.items.length === 0 ? <div className="card"><span className="muted">GPU가 설치된 호스트가 없습니다.</span></div> : (
         <>
-          <div className="flex gap" style={{ marginBottom: 8 }}>
+          <div className="flex gap wrap" style={{ marginBottom: 8 }}>
             {[['host', '호스트별'], ['cluster', '클러스터별'], ['vc', '법인별']].map(([k, l]) => (
               <button key={k} className={view === k ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setView(k)}>{l}</button>
+            ))}
+            <span style={{ width: 12 }} />
+            {[['', '전체'], ['vgpu', 'vGPU'], ['passthrough', '패스쓰루'], ['vsga', 'vSGA']].map(([k, l]) => (
+              <button key={k || 'all'} className={mode === k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 12px' }} onClick={() => setMode(k)}>
+                {l} <b style={{ opacity: 0.7 }}>{k ? (data.byMode?.[k] ?? 0) : data.totalGpus}</b>
+              </button>
             ))}
           </div>
           <DataTable columns={view === 'host' ? hostCols : aggCols} rows={rows} initialSort={{ key: view === 'host' ? 'count' : 'avg', dir: 'desc' }} />
