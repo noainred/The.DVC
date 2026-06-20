@@ -15,6 +15,7 @@ import { getDataSource } from '../runtime-settings.js';
 import { loadVcenterConfig } from '../config.js';
 import { expandSpec } from './spec.js';
 import { cleanPlacement } from './placement.js';
+import { addSaved } from './saved.js';
 import { createProvisioner } from './vsphere.js';
 import { describeError } from '../util/errors.js';
 
@@ -98,6 +99,9 @@ export function createJob(spec, { user } = {}) {
   };
   jobs.unshift(job);
   while (jobs.length > MAX_JOBS) jobs.pop();
+
+  // Persist the spec so it can be reloaded/reused later (memo/tags editable).
+  try { addSaved({ spec, source, user, memo: spec.memo, tags: spec.tags }); } catch { /* best effort */ }
 
   // Run in the background; never await here so the HTTP response returns at once.
   runJob(job, source).catch((err) => {

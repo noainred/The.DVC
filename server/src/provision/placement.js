@@ -9,10 +9,12 @@
 
 import { store } from '../store.js';
 import { getDataSource } from '../runtime-settings.js';
+import { loadVcenterConfig } from '../config.js';
+import { collectFoldersAndPools } from '../vcenter/soapClient.js';
 
 const uniq = (arr) => [...new Set(arr.filter(Boolean))];
 
-export function getPlacement(vcenterId) {
+export async function getPlacement(vcenterId) {
   const snap = store.get();
   const hosts = snap.hosts.filter((h) => !vcenterId || h.vcenterId === vcenterId);
   const datastores = snap.datastores.filter((d) => !vcenterId || d.vcenterId === vcenterId);
@@ -29,14 +31,28 @@ export function getPlacement(vcenterId) {
     .sort((a, b) => (b.freeGB || 0) - (a.freeGB || 0));
 
   const mock = getDataSource() === 'mock';
-  // Editable suggestions (datalist) — not authoritative for live.
-  const folders = mock ? ['vm', 'Production', 'Development', 'Infra', 'Templates'] : ['vm'];
-  const resourcePools = mock ? ['Resources (기본)', 'Prod', 'Dev', 'Batch'] : ['Resources'];
+  // Folders + resource pools: read live from the chosen vCenter when possible.
+  let folders = null;
+  let resourcePools = null;
+  let foldersSource = mock ? 'demo' : 'default';
+  if (!mock && vcenterId) {
+    const vc = loadVcenterConfig().vcenters.find((v) => v.id === vcenterId);
+    if (vc) {
+      try {
+        const r = await collectFoldersAndPools(vc);
+        folders = r.folders; resourcePools = r.resourcePools; foldersSource = 'vcenter';
+      } catch (err) {
+        foldersSource = `error: ${err.message}`;
+      }
+    }
+  }
+  if (!folders) folders = mock ? ['vm', 'Production', 'Development', 'Infra', 'Templates'] : ['vm'];
+  if (!resourcePools) resourcePools = mock ? ['Resources (기본)', 'Prod', 'Dev', 'Batch'] : ['Resources'];
   const profiles = mock
     ? ['Datastore Default', 'vSAN Default Storage Policy', 'Thin Provision', 'Thick Provision (Eager)']
     : ['Datastore Default'];
 
-  return { clusters, hosts: hostsOut, datastores: datastoresOut, folders, resourcePools, profiles, editable: { folders: true, resourcePools: true, profiles: true } };
+  return { clusters, hosts: hostsOut, datastores: datastoresOut, folders, resourcePools, profiles, foldersSource, editable: { folders: true, resourcePools: true, profiles: true } };
 }
 
 /** Normalize an incoming placement payload (all optional, trimmed strings). */
