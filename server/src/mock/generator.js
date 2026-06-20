@@ -85,6 +85,19 @@ function mkGpus(idx, site) {
     busId: `0000:${(0x3b + i).toString(16)}:00.0`,
   }));
 }
+// VM의 GPU 할당 정보(vGPU/패스쓰루). GPU 호스트 위 VM의 일부에만 부여.
+function mkVmGpu(hostState, idx) {
+  const hg = hostState?.gpus || [];
+  if (!hg.length) return null;
+  const mode = hg[0].mode; // 'vgpu' | 'passthrough' | 'vsga'
+  if (mode === 'vsga') return null;            // vSGA는 할당형 GPU 아님
+  if (idx % 3 !== 0) return null;              // GPU 호스트 VM의 ~1/3만 GPU 보유
+  if (mode === 'vgpu') {
+    const prof = hg[0].model.includes('A100') ? 'grid_a100-10c' : hg[0].model.includes('H100') ? 'grid_h100-20c' : 'grid_t4-4q';
+    return { type: 'vgpu', count: 1, profile: prof, model: hg[0].model };
+  }
+  return { type: 'passthrough', count: idx % 6 === 0 ? 2 : 1, profile: '', model: hg[0].model };
+}
 function mkLicenses(site) {
   const n = site.hosts;
   return [
@@ -346,6 +359,7 @@ export function generateSnapshot() {
         tags: VM_TAGS[vm.idx % VM_TAGS.length],
         snapshotCount: vm.idx % 6 === 0 ? intBetween(1, 4) : 0,
         snapshotSizeGB: vm.idx % 6 === 0 ? Math.round(vm.storageGB * (0.05 + (vm.idx % 5) * 0.06) * 10) / 10 : 0,
+        gpu: mkVmGpu(hostState, vm.idx),
       });
     }
 

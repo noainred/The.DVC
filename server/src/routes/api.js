@@ -1068,6 +1068,17 @@ api.get('/vms', (req, res) => {
   if (q.os) vms = vms.filter((v) => String(v.guestOS).toLowerCase().includes(String(q.os).toLowerCase()));
   if (q.toolsStatus) vms = vms.filter((v) => v.toolsStatus === q.toolsStatus);
 
+  // GPU 할당 VM 집계(현재 필터 범위) + GPU 전용/종류 필터.
+  const gpuType = (v) => v.gpu?.type || null;
+  const gpuCounts = {
+    total: vms.filter((v) => v.gpu).length,
+    vgpu: vms.filter((v) => gpuType(v) === 'vgpu').length,
+    passthrough: vms.filter((v) => gpuType(v) === 'passthrough').length,
+    mixed: vms.filter((v) => gpuType(v) === 'mixed').length,
+  };
+  if (q.gpu === '1' || q.gpu === 'true') vms = vms.filter((v) => v.gpu);
+  if (q.gpuType) vms = vms.filter((v) => gpuType(v) === q.gpuType);
+
   if (q.sortBy) vms = sortBy(vms, q.sortBy, q.order);
   const limit = Math.min(Number(q.limit) || 500, 5000);
 
@@ -1086,6 +1097,7 @@ api.get('/vms', (req, res) => {
     diskTB: Math.round(sm((v) => v.storageGB) / 1024 * 10) / 10,
     avgCpuUsagePct: avg(on, (v) => v.cpuUsagePct),
     avgMemUsagePct: avg(on, (v) => v.memUsagePct),
+    gpu: gpuCounts,
   };
   res.json({ total: vms.length, items: vms.slice(0, limit), totals });
 });
