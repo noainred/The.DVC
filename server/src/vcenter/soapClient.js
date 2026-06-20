@@ -387,6 +387,30 @@ function parseHbas(xml) {
   return out;
 }
 
+/**
+ * Parse runtime.healthSystemRuntime.systemHealthInfo.numericSensorInfo for
+ * temperature sensors (sensorType=temperature). value = currentReading × 10^unitModifier.
+ * Returns { tempC, tempMaxC, temps:[{name,c}] }. Prefers an ambient/inlet sensor
+ * for tempC, else the max.
+ */
+function parseTemps(xml) {
+  if (!xml) return { tempC: null, tempMaxC: null, temps: [] };
+  const temps = [];
+  for (const blk of xml.split(/<HostNumericSensorInfo(?=[ >])/).slice(1)) {
+    if (!/<sensorType>\s*temperature\s*<\/sensorType>/i.test(blk)) continue;
+    const name = /<name>([^<]*)<\/name>/.exec(blk)?.[1] || '';
+    const reading = Number(/<currentReading>(-?\d+)<\/currentReading>/.exec(blk)?.[1]);
+    const mod = Number(/<unitModifier>(-?\d+)<\/unitModifier>/.exec(blk)?.[1] || 0);
+    if (!Number.isFinite(reading)) continue;
+    const c = Math.round(reading * (10 ** mod) * 10) / 10;
+    if (c > -50 && c < 200) temps.push({ name: name.trim(), c });
+  }
+  if (!temps.length) return { tempC: null, tempMaxC: null, temps: [] };
+  const ambient = temps.find((t) => /ambient|inlet|intake|front/i.test(t.name));
+  const max = temps.reduce((m, t) => (t.c > m.c ? t : m), temps[0]);
+  return { tempC: (ambient || max).c, tempMaxC: max.c, temps: temps.slice(0, 12) };
+}
+
 // Snapshot count (from the snapshot tree) + approximate size from layoutEx files.
 function snapshotInfo(snapXml, layoutXml) {
   let snapshotCount = 0;
@@ -505,6 +529,7 @@ export async function collectFromVCenterSoap(vc) {
         'summary.hardware.numCpuCores', 'summary.hardware.numCpuThreads', 'summary.hardware.cpuMhz', 'summary.hardware.memorySize',
         'summary.config.product.version', 'summary.config.product.build', 'config.graphicsInfo',
         'summary.hardware.vendor', 'summary.hardware.model', 'config.storageDevice.hostBusAdapter',
+        'runtime.healthSystemRuntime.systemHealthInfo.numericSensorInfo',
         'summary.quickStats.overallCpuUsage', 'summary.quickStats.overallMemoryUsage'] },
       { type: 'ResourcePool', paths: ['name'] },
       { type: 'VirtualMachine', paths: [
@@ -569,6 +594,7 @@ export async function collectFromVCenterSoap(vc) {
         build: p['summary.config.product.build'] || '',
         gpus: parseGpus(p['config.graphicsInfo']),
         hbas: parseHbas(p['config.storageDevice.hostBusAdapter']),
+        ...parseTemps(p['runtime.healthSystemRuntime.systemHealthInfo.numericSensorInfo']),
         vendor: p['summary.hardware.vendor'] || '',
         model: p['summary.hardware.model'] || '',
         vmCount: 0,

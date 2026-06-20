@@ -1,12 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson, postJson, putJson, usePolling, getToken } from '../api.js';
 import { DataTable, Loading, ErrorBox, StateBadge, UsageCell, EntityDetail, Modal, ResultCount, SearchBox } from '../components/ui.jsx';
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 
 const TOOLS = [
   { k: 'aisearch', icon: '🔎', label: 'AI 검색 (자연어)', desc: '자연어로 VM/호스트/IP 검색 · 로컬 LLM' },
   { k: 'vmfinder', icon: '🧭', label: 'VM 정밀 검색 / 유휴 VM', desc: '다수 vCenter·폴더·클러스터·풀 + 조건 · 1일/1주 평균 CPU로 미사용 VM' },
   { k: 'capacity', icon: '📈', label: '용량 리포트', desc: '클러스터별 여유·오버커밋·수용여력 · 전체/법인별' },
   { k: 'waste', icon: '♻️', label: '낭비 리소스', desc: '정지 VM·스냅샷·thin 회수가능·Tools 미설치' },
+  { k: 'esxitemp', icon: '🌡️', label: 'ESXi 온도', desc: '호스트/클러스터/법인별 현재 온도 + 최근 5년 추이' },
+  { k: 'forecast', icon: '🔮', label: '용량 추세/예측', desc: '데이터스토어 증가율·가득 찰 예상일' },
   { k: 'guestos', icon: '🐧', label: 'Guest OS 종류/버전', desc: 'OS·버전별 VM 수 · 전체/법인별 · 검색' },
   { k: 'thinvms', icon: '💧', label: 'Thin VM 찾기', desc: 'Thin 프로비저닝 VM · 회수 가능 용량(추정)' },
   { k: 'ipam', icon: '📒', label: '센터별 IP 관리대장', desc: 'vCenter 수집 IP 전체 · 클릭 시 상세 · DB/CSV' },
@@ -58,7 +61,7 @@ function ToolPanel({ tool, onBack }) {
   const meta = TOOLS.find((t) => t.k === tool);
   const [scope, setScope] = useState('');
   const { data: vcList } = usePolling('/vcenters', {}, 60_000);
-  const scoped = ['ipam', 'dupip', 'vmtools', 'snapshots', 'hba', 'gpu', 'licenses', 'esxi', 'hardware', 'guestos', 'thinvms', 'capacity', 'waste'].includes(tool);
+  const scoped = ['ipam', 'dupip', 'vmtools', 'snapshots', 'hba', 'gpu', 'licenses', 'esxi', 'hardware', 'guestos', 'thinvms', 'capacity', 'waste', 'esxitemp', 'forecast'].includes(tool);
 
   return (
     <>
@@ -79,6 +82,8 @@ function ToolPanel({ tool, onBack }) {
       {tool === 'vmfinder' && <VmFinder />}
       {tool === 'capacity' && <Capacity scope={scope} />}
       {tool === 'waste' && <Waste scope={scope} />}
+      {tool === 'esxitemp' && <EsxiTemp scope={scope} />}
+      {tool === 'forecast' && <Forecast scope={scope} />}
       {tool === 'guestos' && <GuestOs scope={scope} />}
       {tool === 'thinvms' && <ThinVms scope={scope} />}
       {tool === 'ipam' && <Ipam scope={scope} onScope={setScope} />}
@@ -646,6 +651,101 @@ function useTool(path, params) {
   return state;
 }
 
+function tempColor(c) { return c == null ? 'var(--text-faint)' : c >= 40 ? 'var(--red)' : c >= 32 ? 'var(--amber)' : 'var(--green)'; }
+
+function EsxiTemp({ scope }) {
+  const { loading, data, error } = useTool('/tools/esxi-temp', scope ? { vcenterId: scope } : {});
+  const [view, setView] = useState('host'); // host | cluster | vc
+  const [hist, setHist] = useState(null); // { level, key, days, points, synthesized }
+  const [days, setDays] = useState(7);
+  const openHist = async (level, key) => {
+    setHist({ level, key, loading: true });
+    const r = await fetchJson(`/tools/esxi-temp/history?level=${level}&key=${encodeURIComponent(key)}&days=${days}`).catch(() => null);
+    setHist(r ? { ...r } : { error: true });
+  };
+  useEffect(() => { if (hist && hist.key) openHist(hist.level, hist.key); /* eslint-disable-next-line */ }, [days]);
+  if (loading) return <Loading />;
+  if (error) return <ErrorBox message={error} />;
+
+  const rows = view === 'host'
+    ? data.hosts.map((h) => ({ key: h.id, name: h.name, sub: `${h.vcenterId} / ${h.cluster || '-'}`, avgC: h.tempC, maxC: h.tempMaxC, level: 'host' }))
+    : (view === 'cluster' ? data.clusters : data.vcenters).map((g) => ({ key: g.key, name: g.key.replace('|', ' / '), sub: `${g.hosts} 호스트`, avgC: g.avgC, maxC: g.maxC, level: view === 'cluster' ? 'cluster' : 'vc' }));
+
+  return (
+    <>
+      <div className="kpis" style={{ marginBottom: 14 }}>
+        <Card label="온도 보고 호스트" value={`${data.reportingHosts}/${data.totalHosts}`} meta="센서 보고 호스트" />
+        <Card label="평균 온도" value={data.hosts.length ? `${(data.hosts.reduce((a, h) => a + h.tempC, 0) / data.hosts.length).toFixed(1)}℃` : '—'} />
+        <Card label="최고 온도" value={data.hosts.length ? `${Math.max(...data.hosts.map((h) => h.tempMaxC))}℃` : '—'} accent="var(--red)" />
+      </div>
+      {data.reportingHosts === 0 && <div className="card" style={{ marginBottom: 12, borderColor: 'var(--amber)' }}><span className="muted">온도 센서를 보고하는 호스트가 없습니다(하드웨어/CIM 미지원이거나 nested ESXi). 라이브 수집 시 표시됩니다.</span></div>}
+      <div className="flex gap" style={{ marginBottom: 8 }}>
+        {[['host', '호스트별'], ['cluster', '클러스터별'], ['vc', '법인별']].map(([k, l]) => (
+          <button key={k} className={view === k ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setView(k)}>{l}</button>
+        ))}
+      </div>
+      <DataTable rows={rows} initialSort={{ key: 'avgC', dir: 'desc' }} columns={[
+        { key: 'name', label: view === 'host' ? '호스트' : (view === 'cluster' ? '클러스터' : '법인'), render: (r) => <button className="cell-link" onClick={() => openHist(r.level, r.key)}>{r.name}</button> },
+        { key: 'sub', label: '구분', render: (r) => <span className="muted" style={{ fontSize: 12 }}>{r.sub}</span> },
+        { key: 'avgC', label: '평균 ℃', align: 'right', render: (r) => <b style={{ color: tempColor(r.avgC) }}>{r.avgC ?? '—'}</b> },
+        { key: 'maxC', label: '최고 ℃', align: 'right', render: (r) => <span style={{ color: tempColor(r.maxC) }}>{r.maxC ?? '—'}</span> },
+        { key: 'hist', label: '추이', render: (r) => <button className="tab" onClick={() => openHist(r.level, r.key)}>5년 추이</button> },
+      ]} />
+
+      {hist && (
+        <Modal title={`온도 추이 — ${hist.key || ''}`} onClose={() => setHist(null)} width={760}>
+          <div className="flex gap" style={{ marginBottom: 10 }}>
+            {[[1, '1일'], [7, '1주'], [30, '1달'], [365, '1년'], [1830, '5년']].map(([d, l]) => (
+              <button key={d} className={days === d ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '6px 12px', fontSize: 12 }} onClick={() => setDays(d)}>{l}</button>
+            ))}
+            {hist.synthesized && <span className="badge amber" style={{ alignSelf: 'center' }}>데모 합성</span>}
+          </div>
+          {hist.loading ? <Loading /> : hist.error ? <ErrorBox message="이력을 불러오지 못했습니다." /> : (hist.points || []).length === 0
+            ? <div className="muted">해당 기간 데이터가 없습니다(수집 누적 후 표시).</div>
+            : (
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart data={(hist.points || []).map((p) => ({ t: new Date(p.ts).toLocaleDateString(), avg: p.avg, max: p.max }))}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.08)" />
+                  <XAxis dataKey="t" tick={{ fontSize: 11 }} minTickGap={40} />
+                  <YAxis tick={{ fontSize: 11 }} unit="℃" domain={['auto', 'auto']} />
+                  <Tooltip contentStyle={{ background: '#0b1220', border: '1px solid #243049', fontSize: 12 }} />
+                  <Line type="monotone" dataKey="avg" stroke="#22d3ee" dot={false} name="평균" />
+                  <Line type="monotone" dataKey="max" stroke="#f87171" dot={false} name="최고" />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
+        </Modal>
+      )}
+    </>
+  );
+}
+
+function Forecast({ scope }) {
+  const { loading, data, error } = useTool('/tools/capacity-forecast', scope ? { vcenterId: scope } : {});
+  if (loading) return <Loading />;
+  if (error) return <ErrorBox message={error} />;
+  const tb2 = (g) => (g >= 1024 ? `${(g / 1024).toFixed(1)} TB` : `${g} GB`);
+  const dlabel = (d) => d == null ? '—' : d > 3650 ? '>10년' : d > 365 ? `${(d / 365).toFixed(1)}년` : `${d}일`;
+  const soon = data.items.filter((x) => x.daysToFull != null && x.daysToFull <= 180).length;
+  return (
+    <>
+      <div className="kpis" style={{ marginBottom: 14 }}>
+        <Card label="데이터스토어" value={data.items.length} />
+        <Card label="180일 내 포화 예상" value={soon} accent={soon ? 'var(--red)' : 'var(--green)'} />
+      </div>
+      {data.mock && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>※ 데모: 증가율/예상일은 합성값입니다. 라이브는 수집 이력(ds_usedgb)이 쌓이면 선형회귀로 산출됩니다.</div>}
+      <DataTable rows={data.items} initialSort={{ key: 'daysToFull', dir: 'asc' }} columns={[
+        { key: 'name', label: '데이터스토어', render: (d) => <b>{d.name}</b> },
+        { key: 'vcenterId', label: 'vCenter', render: (d) => <span className="muted">{d.vcenterId}</span> },
+        { key: 'usagePct', label: '현재 사용', render: (d) => <UsageCell pct={d.usagePct} /> },
+        { key: 'freeGB', label: '여유', align: 'right', render: (d) => tb2(d.freeGB) },
+        { key: 'growthGBperDay', label: '증가율/일', align: 'right', render: (d) => d.growthGBperDay == null ? '—' : `${d.growthGBperDay} GB` },
+        { key: 'daysToFull', label: '가득 찰 예상', align: 'right', render: (d) => <b style={{ color: d.daysToFull != null && d.daysToFull <= 180 ? 'var(--red)' : undefined }}>{dlabel(d.daysToFull)}</b> },
+      ]} />
+    </>
+  );
+}
+
 function Capacity({ scope }) {
   const { loading, data, error } = useTool('/tools/capacity', scope ? { vcenterId: scope } : {});
   if (loading) return <Loading />;
@@ -1058,14 +1158,17 @@ function Gpu({ scope }) {
     { key: 'model', label: 'GPU 모델' },
     { key: 'count', label: '개수', align: 'right' },
     { key: 'memGB', label: 'VRAM', align: 'right', render: (h) => `${h.memGB} GB` },
+    { key: 'utilPct', label: '사용률', render: (h) => (h.utilPct == null ? <span className="muted">—</span> : <UsageCell pct={h.utilPct} />) },
     { key: 'vgpu', label: 'vGPU', sortValue: (h) => (h.vgpu ? 1 : 0), render: (h) => (h.vgpu ? <span className="badge green">vGPU</span> : <span className="badge gray">Passthrough</span>) },
   ];
   return (
     <>
       <div className="kpis" style={{ marginBottom: 14 }}>
         <Card label="총 GPU" value={data.totalGpus} accent="var(--accent)" meta={`GPU 호스트 ${data.hostsWithGpu}`} />
-        {data.byModel.slice(0, 4).map((m) => <Card key={m.model} label={m.model} value={m.count} />)}
+        <Card label="평균 GPU 사용률" value={data.avgUtilPct == null ? '—' : `${data.avgUtilPct}%`} meta={data.utilReporting ? `${data.utilReporting} 호스트 보고` : '사용률 미보고'} />
+        {data.byModel.slice(0, 3).map((m) => <Card key={m.model} label={m.model} value={m.count} />)}
       </div>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>※ GPU 사용률은 NVIDIA vGPU/GRID 드라이버가 설치돼 vSphere 성능 카운터를 보고하는 호스트만 표시됩니다.</div>
       {data.items.length === 0 ? <div className="card"><span className="muted">GPU가 설치된 호스트가 없습니다.</span></div>
         : <DataTable columns={cols} rows={data.items} initialSort={{ key: 'count', dir: 'desc' }} />}
     </>

@@ -276,6 +276,10 @@ export function generateSnapshot() {
         gpus: mkGpus(h.idx, site),
         // approximate host power draw (W): idle baseline + per-core + load-dependent
         powerWatts: disconnected ? 0 : Math.round(140 + h.cpuCores * 4.5 + cpuLoad * h.cpuCores * 5 + memLoad * 30),
+        // 흡기 온도(섭씨): 부하/전원에 따라 22~38℃ 근방.
+        tempC: disconnected ? null : Math.round((22 + cpuLoad * 12 + (h.idx % 5)) * 10) / 10,
+        tempMaxC: disconnected ? null : Math.round((40 + cpuLoad * 25 + (h.idx % 7)) * 10) / 10,
+        gpuUtilPct: mkGpus(h.idx, site).length ? Math.round(cpuLoad * 80 + (h.idx % 17)) % 100 : null,
       });
 
       if (connectionState === 'DISCONNECTED') {

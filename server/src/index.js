@@ -22,6 +22,7 @@ import { centralRouter } from './routes/central.js';
 import { startIdracPoller } from './idrac/poller.js';
 import { startNsxPoller } from './nsx/store.js';
 import { startAlertEngine } from './alerts.js';
+import { startMetricsSampler } from './metrics/sampler.js';
 import { startCollectorPuller } from './collector/puller.js';
 import { startAgentScanner } from './agent/scanner.js';
 
@@ -74,6 +75,7 @@ upgradeManager.start();
 startIdracPoller();
 startNsxPoller();
 startAlertEngine();
+startMetricsSampler();
 startCollectorPuller();
 startAgentScanner();
 
