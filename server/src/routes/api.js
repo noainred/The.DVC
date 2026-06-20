@@ -12,6 +12,7 @@ import { listNotes } from '../release-notes.js';
 import { nlSearch } from '../llm/nlSearch.js';
 import { sortByOrder } from '../vcenter/order.js';
 import { getMetricsDb } from '../metrics/db.js';
+import { getGuestGpuHost, getGuestGpuVms } from '../gpu/store.js';
 import { nsxStore } from '../nsx/store.js';
 import { expandSpec } from '../provision/spec.js';
 import { listSources, listJobs, getJob } from '../provision/jobs.js';
@@ -461,12 +462,24 @@ api.get('/tools/gpu', (req, res) => {
   const hostsWithGpu = [];
   const byModel = {};
   const byVcenter = {};
+  const byMode = { vgpu: 0, passthrough: 0, vsga: 0 };
   let totalGpus = 0;
   for (const h of hosts) {
     const gpus = h.gpus || [];
     if (!gpus.length) continue;
     totalGpus += gpus.length;
-    hostsWithGpu.push({ id: h.id, host: h.name, vcenterId: h.vcenterId, cluster: h.cluster, count: gpus.length, model: gpus[0].model, memGB: gpus[0].memGB, vgpu: gpus[0].vgpuMode, utilPct: h.gpuUtilPct ?? null });
+    // 한 호스트에 모드가 섞일 수 있으므로 대표 모드(가장 많은 것) + 개수 분포를 함께 제공.
+    const modes = {};
+    for (const g of gpus) { const md = g.mode || (g.vgpuMode ? 'vgpu' : 'passthrough'); modes[md] = (modes[md] || 0) + 1; byMode[md] = (byMode[md] || 0) + 1; }
+    const primaryMode = Object.entries(modes).sort((a, b) => b[1] - a[1])[0][0];
+    // ESXi가 사용률을 못 보는 패스쓰루 호스트는 게스트 OS 수집 오버레이로 보완.
+    const guest = h.gpuUtilPct == null ? getGuestGpuHost(h.id) : null;
+    const utilPct = h.gpuUtilPct ?? (guest ? guest.utilPct : null);
+    hostsWithGpu.push({
+      id: h.id, host: h.name, vcenterId: h.vcenterId, cluster: h.cluster, count: gpus.length,
+      model: gpus[0].model, memGB: gpus[0].memGB, mode: primaryMode, modes,
+      vgpu: primaryMode === 'vgpu', utilPct, utilSource: h.gpuUtilPct != null ? 'esxi' : (guest ? 'guest' : null),
+    });
     for (const g of gpus) {
       byModel[g.model] = (byModel[g.model] || 0) + 1;
       byVcenter[h.vcenterId] = (byVcenter[h.vcenterId] || 0) + 1;
@@ -478,6 +491,7 @@ api.get('/tools/gpu', (req, res) => {
     hostsWithGpu: hostsWithGpu.length,
     utilReporting: utils.length,
     avgUtilPct: utils.length ? Math.round(utils.reduce((a, b) => a + b, 0) / utils.length) : null,
+    byMode,
     byModel: Object.entries(byModel).map(([model, count]) => ({ model, count })).sort((a, b) => b.count - a.count),
     byVcenter: Object.entries(byVcenter).map(([vcenterId, count]) => ({ vcenterId, count })).sort((a, b) => b.count - a.count),
     items: hostsWithGpu.sort((a, b) => b.count - a.count),

@@ -24,6 +24,8 @@ import { listAudit } from '../audit.js';
 import { alertStatus, saveAlertConfig, testAlert } from '../alerts.js';
 import { loadMetricsSettings, saveMetricsSettings, METRICS_LIMITS } from '../metrics/settings.js';
 import { metricsSamplerStatus, rescheduleMetricsSampler } from '../metrics/sampler.js';
+import { loadGpuGuestSettings, saveGpuGuestSettings, redactGpuGuestSettings } from '../gpu/settings.js';
+import { gpuGuestStatus, rescheduleGpuGuestPoller } from '../gpu/poller.js';
 import {
   listRegistry as listNsx, addManager as addNsx, updateManager as updateNsx,
   removeManager as removeNsx, testConnection as testNsx,
@@ -208,6 +210,16 @@ adminRouter.put('/metrics/settings', adminOnly, (req, res) => {
   const settings = saveMetricsSettings(req.body || {});
   rescheduleMetricsSampler(); // apply the new interval immediately
   res.json({ ok: true, settings, status: metricsSamplerStatus() });
+});
+
+// GPU 게스트 수집: 어떤 법인을 게스트 OS 계정으로 GPU 모니터링할지 + 자격증명.
+adminRouter.get('/gpu-guest/settings', adminOnly, (_req, res) => {
+  res.json({ settings: redactGpuGuestSettings(loadGpuGuestSettings()), status: gpuGuestStatus() });
+});
+adminRouter.put('/gpu-guest/settings', adminOnly, (req, res) => {
+  const settings = saveGpuGuestSettings(req.body || {});
+  rescheduleGpuGuestPoller();
+  res.json({ ok: true, settings: redactGpuGuestSettings(settings), status: gpuGuestStatus() });
 });
 
 // Read the effective data source (UI override or env default).

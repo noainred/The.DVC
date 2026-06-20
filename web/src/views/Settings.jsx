@@ -14,6 +14,7 @@ import Diagnostics from './Diagnostics.jsx';
 import Alerts2 from './Alerts2.jsx';
 import Audit from './Audit.jsx';
 import MetricsSettings from './MetricsSettings.jsx';
+import GpuGuestSettings from './GpuGuestSettings.jsx';
 import About from './About.jsx';
 
 const SUB = [
@@ -21,6 +22,7 @@ const SUB = [
   { k: 'nsx-admin', label: 'NSX 관리', C: NsxAdmin },
   { k: 'idrac-admin', label: '전력 수집', C: IdracAdmin },
   { k: 'metrics', label: '지표 수집', C: MetricsSettings },
+  { k: 'gpu-guest', label: 'GPU 게스트 수집', C: GpuGuestSettings },
   { k: 'collectors', label: '수집 서버', C: Collectors },
   { k: 'agent-scans', label: '에이전트 작업', C: AgentScans },
   { k: 'agent-deploy', label: '에이전트 배포', C: AgentDeploy },

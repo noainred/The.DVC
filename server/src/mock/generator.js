@@ -76,9 +76,12 @@ function mkGpus(idx, site) {
   if (idx % 4 !== 0) return [];
   const g = GPU_MODELS[idx % GPU_MODELS.length];
   const count = [1, 2, 4, 8][idx % 4];
+  // 사용 방식: vGPU(공유 다이렉트) / 패스쓰루(DirectPath I/O) / vSGA(공유) 혼합.
+  const mode = ['vgpu', 'passthrough', 'vsga'][idx % 3 === 0 ? 0 : idx % 5 === 0 ? 2 : 1];
   return Array.from({ length: count }, (_, i) => ({
     model: g.model, vendor: g.vendor, memGB: g.memGB,
-    vgpuMode: idx % 3 === 0,
+    mode,                       // 'vgpu' | 'passthrough' | 'vsga'
+    vgpuMode: mode === 'vgpu',  // 하위호환
     busId: `0000:${(0x3b + i).toString(16)}:00.0`,
   }));
 }
@@ -289,7 +292,13 @@ export function generateSnapshot() {
         // 흡기 온도(섭씨): 부하/전원에 따라 22~38℃ 근방.
         tempC: disconnected ? null : Math.round((22 + cpuLoad * 12 + (h.idx % 5)) * 10) / 10,
         tempMaxC: disconnected ? null : Math.round((40 + cpuLoad * 25 + (h.idx % 7)) * 10) / 10,
-        gpuUtilPct: mkGpus(h.idx, site).length ? Math.round(cpuLoad * 80 + (h.idx % 17)) % 100 : null,
+        // ESXi가 보고하는 GPU 사용률은 vGPU/vSGA만. 순수 패스쓰루 호스트는 null
+        // (게스트 OS 수집이 채움) — 실 환경 동작과 동일하게 시뮬레이션.
+        gpuUtilPct: (() => {
+          const gs = mkGpus(h.idx, site);
+          if (!gs.length || gs.every((g) => g.mode === 'passthrough')) return null;
+          return Math.round(cpuLoad * 80 + (h.idx % 17)) % 100;
+        })(),
       });
 
       if (connectionState === 'DISCONNECTED') {
