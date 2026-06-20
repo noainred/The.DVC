@@ -12,6 +12,8 @@ import { authMiddleware } from './auth/auth.js';
 import { upgradeRouter } from './routes/upgrade.js';
 import { upgradeManager } from './upgrade/manager.js';
 import { adminRouter } from './routes/admin.js';
+import { remoteRouter } from './routes/remote.js';
+import { attachSshGateway } from './proxy/sshGateway.js';
 import { collectorRouter } from './routes/collector.js';
 import { centralRouter } from './routes/central.js';
 import { startIdracPoller } from './idrac/poller.js';
@@ -39,6 +41,7 @@ app.use('/api/central', centralRouter);                // token-gated agent<->ce
 app.use('/api/auth', authRouter);                      // public: login / config / me
 app.use('/api/upgrade', authMiddleware, upgradeRouter); // admin-gated auto-upgrade control
 app.use('/api/admin', authMiddleware, adminRouter);     // admin-gated vCenter management
+app.use('/api/remote', authMiddleware, remoteRouter);   // remote access (HAProxy/SSH/RDP)
 app.use('/api', authMiddleware, api);                   // protected resource endpoints
 
 // Serve the built web client when it exists (production single-port mode).
@@ -67,10 +70,13 @@ startIdracPoller();
 startCollectorPuller();
 startAgentScanner();
 
-app.listen(config.port, () => {
+const server = app.listen(config.port, () => {
   console.log(`\n  VMware Global Monitoring Portal — API`);
   console.log(`  ▸ listening on http://localhost:${config.port}`);
   console.log(`  ▸ data source: ${config.dataSource}`);
   console.log(`  ▸ poll interval: ${config.pollIntervalMs / 1000}s`);
   console.log(`  ▸ auth: ${config.auth.enabled ? 'enabled' : 'disabled'}\n`);
 });
+
+// Browser SSH console (WebSocket upgrade on /api/remote/ssh).
+attachSshGateway(server);

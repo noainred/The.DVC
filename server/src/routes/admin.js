@@ -5,6 +5,7 @@ import { requireRole, listUsers, createUser, updateUser, deleteUser, beginTotpEn
 import { store } from '../store.js';
 import { getDataSource, setDataSource, isDataSourceOverridden } from '../runtime-settings.js';
 import { ledgerInfo } from '../ipam/db.js';
+import { saveNote, deleteNote } from '../release-notes.js';
 import { getLogs } from '../logbuffer.js';
 import {
   listRegistry, addVcenter, updateVcenter, removeVcenter, testConnection, importVcenters,
@@ -79,6 +80,16 @@ adminRouter.post('/users/:username/totp/confirm', adminOnly, (req, res) => {
 });
 adminRouter.post('/users/:username/totp/disable', adminOnly, (req, res) => {
   const r = disableTotp(req.params.username, req.body || {});
+  res.status(r.ok ? 200 : 400).json(r);
+});
+
+// Record / delete a release note (admin).
+adminRouter.post('/release-notes', adminOnly, (req, res) => {
+  const r = saveNote(req.body || {});
+  res.status(r.ok ? 200 : 400).json(r);
+});
+adminRouter.delete('/release-notes/:version', adminOnly, (req, res) => {
+  const r = deleteNote(req.params.version);
   res.status(r.ok ? 200 : 400).json(r);
 });
 

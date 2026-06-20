@@ -6,6 +6,7 @@ import { hostPower } from '../idrac/service.js';
 import { fetchVmMetric, PERF_INTERVALS, upgradeVmTools, getVmConsole } from '../vcenter/soapClient.js';
 import { listMutes, addMute, removeMute } from '../alarm-mutes.js';
 import { buildIpamRows } from '../ipam/ledger.js';
+import { listNotes } from '../release-notes.js';
 
 export const api = Router();
 
@@ -250,6 +251,11 @@ api.get('/tools/snapshots', (req, res) => {
     totalSizeGB: Math.round(items.reduce((a, v) => a + (v.snapshotSizeGB || 0), 0) * 10) / 10,
     items,
   });
+});
+
+// Release notes (built-in changelog + admin-recorded), newest first.
+api.get('/release-notes', (_req, res) => {
+  res.json({ current: currentVersion(), notes: listNotes() });
 });
 
 // Per-center IP ledger (IP 관리대장): every IPv4 collected from vCenter (VM

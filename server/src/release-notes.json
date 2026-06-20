@@ -1,0 +1,122 @@
+{
+  "notes": [
+    {
+      "version": "1.17.0",
+      "date": "2026-06-20",
+      "title": "원격 접속(SSH/RDP) + 릴리즈 노트",
+      "notes": [
+        "특수기능 '원격 접속': HAProxy Data Plane API로 대상별 공개포트 매핑 생성/삭제",
+        "브라우저 내장 SSH 터미널(xterm.js + WebSocket), 프록시 경유로 대상 SSH 접속",
+        "RDP는 .rdp 다운로드(프록시주소:공개포트), guacd 구성 시 웹 콘솔 확장 예정",
+        "대상 SSH/RDP 포트 직접 입력(비표준 포트 지원), 다중 IP VM은 IP 선택",
+        "프록시 SSH 자동배포: haproxy.cfg 관리 블록 갱신+검증(haproxy -c)+reload, 원본 자동 백업",
+        "릴리즈 노트 화면 — 버전 배지 클릭, 관리자 기록 가능"
+      ]
+    },
+    {
+      "version": "1.16.0",
+      "date": "2026-06-20",
+      "title": "Google OTP 로그인 + 사용자 관리",
+      "notes": [
+        "Google Authenticator(TOTP) 로그인, 등록 시 로컬계정은 OTP 전용",
+        "설정 → 사용자 관리: 계정 CRUD, 역할 변경, OTP 등록(QR)/해제"
+      ]
+    },
+    {
+      "version": "1.15.0",
+      "date": "2026-06-20",
+      "title": "센터별 IP 관리대장",
+      "notes": [
+        "vCenter 수집 IP 전체를 센터별 집계, IP 클릭 시 소유 VM/호스트 상세",
+        "타 프로그램 공유용 SQLite DB(ipam.db) + CSV 내보내기"
+      ]
+    },
+    {
+      "version": "1.14.0",
+      "date": "2026-06-20",
+      "title": "데이터소스 전환 + Windows 실행 수정",
+      "notes": [
+        "포탈에서 live/mock/auto 전환, 버전 옆 LIVE/MOCK 배지",
+        "Windows portal.env.bat ASCII+CRLF로 수정(실행 오류 해결)"
+      ]
+    },
+    {
+      "version": "1.13.1",
+      "date": "2026-06-19",
+      "title": "리전 라벨 변경",
+      "notes": ["리전 '미국' → '북미'로 변경"]
+    },
+    {
+      "version": "1.13.0",
+      "date": "2026-06-19",
+      "title": "벤더/모델 서머리",
+      "notes": ["특수기능 법인×벤더×모델 호스트 수량 집계 도구"]
+    },
+    {
+      "version": "1.12.0",
+      "date": "2026-06-19",
+      "title": "Active Directory 로그인",
+      "notes": ["AD(LDAP) UPN 바인드 + 그룹→역할 매핑, 로컬 폴백, 연결 테스트"]
+    },
+    {
+      "version": "1.11.0",
+      "date": "2026-06-18",
+      "title": "설정 메뉴 신설",
+      "notes": ["설정(Settings) 메뉴로 관리 하위메뉴 통합, 버전클릭 비밀메뉴 제거"]
+    },
+    {
+      "version": "1.10.0",
+      "date": "2026-06-18",
+      "title": "알람 무시 규칙 + 버전 도구",
+      "notes": ["알람 무시(뮤트) 규칙", "ESXi/vCenter 버전·NSX 도구", "live 파서 수정(GPU/라이선스/솔루션)"]
+    },
+    {
+      "version": "1.9.0",
+      "date": "2026-06-17",
+      "title": "VM 원격 콘솔",
+      "notes": ["VM 원격 콘솔(VMRC + 웹 콘솔) 접속", "1.9.1: 웹 콘솔 진단/locale 보강"]
+    },
+    {
+      "version": "1.8.0",
+      "date": "2026-06-17",
+      "title": "특수기능 대폭 확장",
+      "notes": ["솔루션/NSX·VMtools·스냅샷·HBA·라이선스·GPU·긴급정지", "VM Notes/Tags + 정렬"]
+    },
+    {
+      "version": "1.7.0",
+      "date": "2026-06-16",
+      "title": "UX 개선",
+      "notes": ["모달 ESC 닫기, 검색결과 합계, 호스트/VM 글로벌 요약"]
+    },
+    {
+      "version": "1.6.0",
+      "date": "2026-06-16",
+      "title": "vCenter 인벤토리 화면",
+      "notes": ["vSphere 유사 인벤토리 화면", "특수기능 중복 IP 찾기"]
+    },
+    {
+      "version": "1.5.0",
+      "date": "2026-06-15",
+      "title": "VM 성능/다중 IP",
+      "notes": ["VM 다중 IPv4 표시", "온디맨드 성능 조회(실시간/일/주/월/년)", "1.5.1: 기간 지정·단위 보정"]
+    },
+    {
+      "version": "1.4.0",
+      "date": "2026-06-14",
+      "title": "분산 IP 스캔/Summary",
+      "notes": ["중앙 IP 할당 → 에이전트 이름별 원격 스캔/보고", "Summary OS별 할당자원 합계·리전 분류", "에이전트 작업 CSV 가져오기"]
+    },
+    {
+      "version": "1.3.0",
+      "date": "2026-06-13",
+      "title": "전력 수집/분산 에이전트",
+      "notes": ["OME 연동 + 분산 수집(에이전트/중앙 병합) + Windows 패키지", "iDRAC 상세 인벤토리, IP 대역 스캔 자동탐지", "수집 에이전트 자동 업그레이드(중앙→13개 DC)"]
+    },
+    {
+      "version": "1.2.0",
+      "date": "2026-06-12",
+      "title": "iDRAC 전력 수집",
+      "notes": ["Dell iDRAC 전력 수집 모듈 + 호스트 전력 상세", "iDRAC CSV/IP 일괄 등록(범위/CIDR)"]
+    }
+  ]
+}

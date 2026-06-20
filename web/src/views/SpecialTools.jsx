@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson, postJson, usePolling, getToken } from '../api.js';
 import { DataTable, Loading, ErrorBox, StateBadge, UsageCell, EntityDetail, Modal, ResultCount } from '../components/ui.jsx';
+import RemoteAccess from './RemoteAccess.jsx';
 
 const TOOLS = [
+  { k: 'remote', icon: '🖥️', label: '원격 접속 (SSH/RDP)', desc: '프록시(HAProxy) 경유 브라우저 SSH·RDP' },
   { k: 'ipam', icon: '📒', label: '센터별 IP 관리대장', desc: 'vCenter 수집 IP 전체 · 클릭 시 상세 · DB/CSV' },
   { k: 'dupip', icon: '🔁', label: '중복 IP 찾기', desc: '둘 이상 VM이 같은 IPv4를 쓰는 경우' },
   { k: 'vmtools', icon: '🧩', label: 'VMware Tools 버전', desc: '버전별 집계 + 업그레이드' },
@@ -71,6 +73,7 @@ function ToolPanel({ tool, onBack }) {
           </label>
         )}
       </div>
+      {tool === 'remote' && <RemoteAccess />}
       {tool === 'ipam' && <Ipam scope={scope} />}
       {tool === 'dupip' && <DupIp scope={scope} />}
       {tool === 'vmtools' && <VmTools scope={scope} />}
