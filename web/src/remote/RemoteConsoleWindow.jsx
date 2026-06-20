@@ -19,6 +19,12 @@ export function RemoteConsoleWindow() {
     return () => { window.removeEventListener('click', close); window.removeEventListener('blur', close); };
   }, [menu]);
 
+  const openMenu = (x, y, id) => setMenu({
+    x: Math.min(x, (typeof window !== 'undefined' ? window.innerWidth : 1200) - 230),
+    y: Math.min(y, (typeof window !== 'undefined' ? window.innerHeight : 800) - 110),
+    id,
+  });
+
   if (sessions.length === 0) return null;
 
   // Minimized → a dock chip at the bottom.
@@ -67,20 +73,23 @@ export function RemoteConsoleWindow() {
       </div>
 
       {/* tab bar */}
-      <div style={{ display: 'flex', gap: 2, padding: '6px 8px 0', overflowX: 'auto', background: 'rgba(255,255,255,.02)' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, padding: '6px 8px 0', overflowX: 'auto', background: 'rgba(255,255,255,.02)' }}>
         {sessions.map((s) => (
           <div key={s.id} onClick={() => activateSession(s.id)}
-            onContextMenu={(e) => { e.preventDefault(); activateSession(s.id); setMenu({ x: e.clientX, y: e.clientY, id: s.id }); }}
-            title="우클릭: 새 세션(New) / 복제(Dup)"
-            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderRadius: '8px 8px 0 0', cursor: 'pointer', whiteSpace: 'nowrap', fontSize: 12,
+            onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); activateSession(s.id); openMenu(e.clientX, e.clientY, s.id); }}
+            title="우클릭 또는 ▾ : 새 세션(New) / 복제(Dup)"
+            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px 6px 10px', borderRadius: '8px 8px 0 0', cursor: 'pointer', whiteSpace: 'nowrap', fontSize: 12,
               background: s.id === activeId ? 'var(--card-bg, #0f172a)' : 'transparent',
               color: s.id === activeId ? 'var(--text)' : 'var(--text-faint, #94a3b8)',
               borderTop: s.id === activeId ? '2px solid var(--accent, #2563eb)' : '2px solid transparent' }}>
             <span className="badge blue" style={{ fontSize: 10, padding: '1px 5px' }}>{s.kind.toUpperCase()}</span>
             {s.mapping.name}
-            <span onClick={(e) => { e.stopPropagation(); closeRemoteSession(s.id); }} title="탭 닫기" style={{ marginLeft: 4, opacity: 0.6 }}>✕</span>
+            <span onClick={(e) => { e.stopPropagation(); openMenu(e.clientX, e.clientY, s.id); }} title="세션 메뉴 (New/Dup)" style={{ marginLeft: 2, padding: '0 4px', opacity: 0.75, fontWeight: 700 }}>▾</span>
+            <span onClick={(e) => { e.stopPropagation(); closeRemoteSession(s.id); }} title="탭 닫기" style={{ opacity: 0.6 }}>✕</span>
           </div>
         ))}
+        <button className="logout-btn" title="활성 세션과 같은 대상으로 새 세션" onClick={() => activeId && newSessionLike(activeId)}
+          style={{ padding: '4px 10px', margin: '0 0 2px 4px', flex: 'none' }}>＋</button>
       </div>
 
       {/* bodies (all mounted; only active is shown so sessions stay connected) */}
