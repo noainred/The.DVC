@@ -24,11 +24,12 @@ export async function buildWorkbook(sheets) {
       { header: 'Hostname', key: 'hostname', width: 40 },
       { header: '메모(Notes)', key: 'notes', width: 28 },
       { header: '전원', key: 'power', width: 7 },
+      { header: '분류', key: 'scope', width: 8 },
       { header: '상태', key: 'status', width: 10 },
     ];
     // Title row
     ws.spliceRows(1, 0, [`VLAN — ${s.subnet}`, `사용 ${s.used}/255`]);
-    ws.mergeCells('A1:F1');
+    ws.mergeCells('A1:G1');
     const title = ws.getCell('A1');
     title.font = { bold: true, size: 12 };
     title.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFC000' } };
@@ -37,7 +38,7 @@ export async function buildWorkbook(sheets) {
 
     const label = { used: '사용', multihomed: '멀티홈', duplicate: '중복', network: 'Network ID', empty: '' };
     for (const r of s.rows) {
-      const row = ws.addRow({ ip: r.ip, purpose: r.purpose, hostname: r.hostname, notes: r.notes, power: r.power, status: label[r.status] });
+      const row = ws.addRow({ ip: r.ip, purpose: r.purpose, hostname: r.hostname, notes: r.notes, power: r.power, scope: r.scope, status: label[r.status] });
       const argb = FILL[r.status];
       if (argb) row.eachCell((c) => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb } }; });
     }

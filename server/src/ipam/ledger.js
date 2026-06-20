@@ -3,7 +3,7 @@
  * Shared by the /tools/ipam API and the SQLite exporter so both stay in sync.
  */
 
-import { getIgnoreMatcher } from './settings.js';
+import { getIgnoreMatcher, getClassifier } from './settings.js';
 
 export function ipToNum(s) {
   const p = String(s || '').split('.').map(Number);
@@ -23,6 +23,7 @@ export function buildIpamRows(snap, vcenterId) {
   for (const vc of snap.vcenters || []) vcName[vc.id] = vc.name;
 
   const ignored = getIgnoreMatcher();
+  const classify = getClassifier();
   const rows = [];
   const count = new Map();
   for (const vm of vms) {
@@ -33,7 +34,7 @@ export function buildIpamRows(snap, vcenterId) {
       rows.push({
         ip, ipNum: ipToNum(ip), vcenterId: vm.vcenterId, vcenterName: vcName[vm.vcenterId] || vm.vcenterId,
         ownerType: 'vm', ownerName: vm.name, powerState: vm.powerState, guestOS: vm.guestOS,
-        hostName: vm.host || '', cluster: vm.cluster || '', multiHomed: ips.length > 1, owner: vm,
+        hostName: vm.host || '', cluster: vm.cluster || '', multiHomed: ips.length > 1, scope: classify(ip), owner: vm,
       });
     }
   }
@@ -44,7 +45,7 @@ export function buildIpamRows(snap, vcenterId) {
     rows.push({
       ip: h.name, ipNum: ipToNum(h.name), vcenterId: h.vcenterId, vcenterName: vcName[h.vcenterId] || h.vcenterId,
       ownerType: 'host', ownerName: h.name, powerState: h.powerState, guestOS: `ESXi ${h.version || ''}`.trim(),
-      hostName: h.name, cluster: h.cluster || '', multiHomed: false, owner: h,
+      hostName: h.name, cluster: h.cluster || '', multiHomed: false, scope: classify(h.name), owner: h,
     });
   }
   for (const r of rows) r.duplicate = count.get(r.ip) > 1;
@@ -56,6 +57,8 @@ export function buildIpamRows(snap, vcenterId) {
     total: rows.length,
     multiHomed: rows.filter((r) => r.multiHomed).length,
     duplicateIps: [...count.values()].filter((c) => c > 1).length,
+    publicIps: rows.filter((r) => r.scope === 'public').length,
+    privateIps: rows.filter((r) => r.scope === 'private').length,
     byVcenter: Object.entries(byVc).map(([id, c]) => ({ vcenterId: id, vcenterName: vcName[id] || id, count: c })).sort((a, b) => b.count - a.count),
     rows,
   };
@@ -87,7 +90,7 @@ export function buildSubnetSheets(snap, { vcenterId, onlyBase } = {}) {
     for (let i = 0; i < 256; i++) {
       const ip = `${base}.${i}`;
       const recs = byIp.get(ip) || [];
-      let status = 'empty', purpose = '', hostname = '', notes = '', power = '';
+      let status = 'empty', purpose = '', hostname = '', notes = '', power = '', scope = '';
       if (i === 0) { status = 'network'; purpose = 'Network ID'; }
       else if (recs.length) {
         used++;
@@ -97,8 +100,9 @@ export function buildSubnetSheets(snap, { vcenterId, onlyBase } = {}) {
         purpose = `${r.ownerType === 'vm' ? 'VM' : '호스트'} · ${r.vcenterName}${o.cluster ? ` / ${o.cluster}` : ''}`;
         notes = (o.notes || '').split(/\r?\n/)[0] || '';
         power = o.powerState === 'POWERED_ON' ? 'On' : (o.powerState ? 'Off' : '');
+        scope = r.scope === 'public' ? '공인' : '사설';
       }
-      sheetRows.push({ ip, last: i, purpose, hostname, notes, power, status });
+      sheetRows.push({ ip, last: i, purpose, hostname, notes, power, status, scope });
     }
     return { subnet: `${base}.0/24`, base, used, rows: sheetRows };
   });

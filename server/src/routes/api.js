@@ -297,10 +297,10 @@ api.get('/tools/ipam.xlsx', async (req, res) => {
 // CSV export of the IP ledger for sharing with other tools/spreadsheets.
 api.get('/tools/ipam.csv', (req, res) => {
   const { rows } = buildIpamRows(store.get(), req.query.vcenterId);
-  const head = ['ip', 'vcenter_id', 'vcenter_name', 'owner_type', 'owner_name', 'power_state', 'guest_os', 'host_name', 'cluster', 'multi_homed', 'duplicate'];
+  const head = ['ip', 'vcenter_id', 'vcenter_name', 'owner_type', 'owner_name', 'power_state', 'guest_os', 'host_name', 'cluster', 'scope', 'multi_homed', 'duplicate'];
   const esc = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   const lines = [head.join(',')];
-  for (const r of rows) lines.push([r.ip, r.vcenterId, r.vcenterName, r.ownerType, r.ownerName, r.powerState, r.guestOS, r.hostName, r.cluster, r.multiHomed ? 1 : 0, r.duplicate ? 1 : 0].map(esc).join(','));
+  for (const r of rows) lines.push([r.ip, r.vcenterId, r.vcenterName, r.ownerType, r.ownerName, r.powerState, r.guestOS, r.hostName, r.cluster, r.scope, r.multiHomed ? 1 : 0, r.duplicate ? 1 : 0].map(esc).join(','));
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="ipam-${new Date().toISOString().slice(0, 10)}.csv"`);
   res.send('﻿' + lines.join('\r\n')); // BOM for Excel

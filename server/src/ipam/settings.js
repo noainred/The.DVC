@@ -14,10 +14,12 @@ const FILE = path.join(config.configDir, 'ipam-settings.json');
 let cache = null;       // raw settings
 let matcherCache = null; // compiled matcher
 
+let classifierCache = null;
+
 function load() {
   if (cache) return cache;
-  cache = { global: [], vcenters: {} };
-  try { if (fs.existsSync(FILE)) { const s = JSON.parse(fs.readFileSync(FILE, 'utf8')); cache = { global: s.global || [], vcenters: s.vcenters || {} }; } } catch { /* defaults */ }
+  cache = { global: [], vcenters: {}, publicRanges: [], privateRanges: [] };
+  try { if (fs.existsSync(FILE)) { const s = JSON.parse(fs.readFileSync(FILE, 'utf8')); cache = { global: s.global || [], vcenters: s.vcenters || {}, publicRanges: s.publicRanges || [], privateRanges: s.privateRanges || [] }; } } catch { /* defaults */ }
   return cache;
 }
 
@@ -27,11 +29,33 @@ export function saveSettings(body = {}) {
   const next = {
     global: cleanList(body.global),
     vcenters: Object.fromEntries(Object.entries(body.vcenters || {}).map(([k, v]) => [k, cleanList(v)]).filter(([, v]) => v.length)),
+    publicRanges: cleanList(body.publicRanges),
+    privateRanges: cleanList(body.privateRanges),
   };
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
   fs.writeFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
-  cache = next; matcherCache = null;
+  cache = next; matcherCache = null; classifierCache = null;
   return next;
+}
+
+// RFC1918 private space (default when no explicit rule matches).
+const RFC1918 = ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'].map(parseRange);
+const inAny = (n, ranges) => ranges.some((r) => n >= r.lo && n <= r.hi);
+
+/** Returns ip → 'public' | 'private'. Explicit rules win; else RFC1918 = private. */
+export function getClassifier() {
+  if (classifierCache) return classifierCache;
+  const s = load();
+  const pub = (s.publicRanges || []).map(parseRange).filter(Boolean);
+  const priv = (s.privateRanges || []).map(parseRange).filter(Boolean);
+  classifierCache = (ip) => {
+    const n = ipToNum(ip);
+    if (n == null) return 'private';
+    if (inAny(n, priv)) return 'private';
+    if (inAny(n, pub)) return 'public';
+    return inAny(n, RFC1918) ? 'private' : 'public';
+  };
+  return classifierCache;
 }
 
 const cleanList = (v) => (Array.isArray(v) ? v : String(v || '').split(/\r?\n/)).map((s) => String(s).trim()).filter(Boolean);

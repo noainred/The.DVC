@@ -256,6 +256,9 @@ function Ipam({ scope, onScope }) {
         {r.multiHomed && <span className="badge amber" style={{ marginLeft: 4 }}>멀티홈</span>}
       </button>
     ) },
+    { key: 'scope', label: '분류', sortValue: (r) => r.scope || '', render: (r) => (
+      <span className={`badge ${r.scope === 'public' ? 'amber' : 'green'}`}>{r.scope === 'public' ? '공인' : '사설'}</span>
+    ) },
     { key: 'vcenterName', label: '센터(vCenter)' },
     { key: 'ownerName', label: '소유 자원', render: (r) => <><span className="badge blue">{r.ownerType === 'vm' ? 'VM' : '호스트'}</span> {r.ownerName}</> },
     { key: 'powerState', label: '전원', render: (r) => <StateBadge state={r.powerState} /> },
@@ -268,6 +271,7 @@ function Ipam({ scope, onScope }) {
       <div className="kpis" style={{ marginBottom: 14 }}>
         <Card label="총 IP" value={data.total.toLocaleString()} meta={`센터 ${data.byVcenter.length} · 서브넷 ${subnets.length}`} />
         <Card label="서브넷(/24) 대역" value={subnets.length} meta={`10.x ${c10} · 172.x ${c172} · 192.x ${c192}`} />
+        <Card label="공인 / 사설 IP" value={`${(data.publicIps ?? 0).toLocaleString()} / ${(data.privateIps ?? 0).toLocaleString()}`} meta="공인=인터넷 라우팅 대역" />
         <Card label="중복 IP" value={data.duplicateIps} accent={data.duplicateIps ? 'var(--red)' : undefined} />
         <Card label="멀티홈 IP" value={data.multiHomed} />
         {db && <Card label="공유 DB 레코드" value={db.count.toLocaleString()} meta={db.kind.toUpperCase()} />}
@@ -311,7 +315,7 @@ function Ipam({ scope, onScope }) {
           {sheet && (
             <div className="table-wrap" style={{ maxHeight: '62vh' }}>
               <table>
-                <thead><tr><th>{base}.X</th><th>Purpose</th><th>Hostname</th><th>메모(Notes)</th><th>전원</th><th>상태</th></tr></thead>
+                <thead><tr><th>{base}.X</th><th>Purpose</th><th>Hostname</th><th>메모(Notes)</th><th>전원</th><th>분류</th><th>상태</th></tr></thead>
                 <tbody>
                   {sheet.rows.map((r) => (
                     <tr key={r.ip} style={{ background: ROWBG[r.status] }}>
@@ -320,6 +324,7 @@ function Ipam({ scope, onScope }) {
                       <td>{r.hostname}</td>
                       <td className="muted" style={{ fontSize: 12 }}>{r.notes}</td>
                       <td>{r.power}</td>
+                      <td className="muted" style={{ fontSize: 12 }}>{r.scope}</td>
                       <td className="muted" style={{ fontSize: 12 }}>{STLAB[r.status]}</td>
                     </tr>
                   ))}
@@ -359,8 +364,12 @@ function IpmsSettings({ onClose }) {
 
   const globalText = (s.global || []).join('\n');
   const vcText = (s.vcenters?.[vc] || []).join('\n');
+  const publicText = (s.publicRanges || []).join('\n');
+  const privateText = (s.privateRanges || []).join('\n');
   const setGlobal = (t) => setS({ ...s, global: t.split('\n') });
   const setVcText = (t) => setS({ ...s, vcenters: { ...(s.vcenters || {}), [vc]: t.split('\n') } });
+  const setPublic = (t) => setS({ ...s, publicRanges: t.split('\n') });
+  const setPrivate = (t) => setS({ ...s, privateRanges: t.split('\n') });
   const save = async () => {
     const r = await putJson('/admin/ipam/settings', s).catch((e) => ({ error: e.message }));
     if (r.ok) onClose(); else setMsg(r.error || '저장 실패');
@@ -382,6 +391,18 @@ function IpmsSettings({ onClose }) {
         </div>
         <textarea className="input" rows={5} value={vcText} onChange={(e) => setVcText(e.target.value)} placeholder={'172.16.0.0/12'} style={{ resize: 'vertical', fontFamily: 'monospace', fontSize: 12 }} />
         <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>선택한 <b>{vcs.find((v) => v.id === vc)?.name || vc}</b> 에서만 위 대역을 숨깁니다.</div>
+      </div>
+      <div style={{ borderTop: '1px solid rgba(255,255,255,.08)', paddingTop: 10, marginTop: 12 }}>
+        <b style={{ fontSize: 13 }}>공인 / 사설 IP 분류</b>
+        <div className="muted" style={{ fontSize: 11, margin: '4px 0 10px' }}>관리대장의 <b>분류</b> 열에 사용됩니다. 명시한 대역이 우선이고, 둘 다 해당 없으면 RFC1918(10/8·172.16/12·192.168/16)은 <b>사설</b>, 그 외는 <b>공인</b>으로 자동 분류됩니다. 사설이 우선합니다.</div>
+        <div className="flex gap wrap">
+          <label style={{ flex: 1, minWidth: 220 }}>공인(Public) 대역
+            <textarea className="input" rows={4} value={publicText} onChange={(e) => setPublic(e.target.value)} placeholder={'203.0.113.0/24\n8.8.8.8'} style={{ resize: 'vertical', fontFamily: 'monospace', fontSize: 12 }} />
+          </label>
+          <label style={{ flex: 1, minWidth: 220 }}>사설(Private) 대역
+            <textarea className="input" rows={4} value={privateText} onChange={(e) => setPrivate(e.target.value)} placeholder={'100.64.0.0/10\n10.0.0.0/8'} style={{ resize: 'vertical', fontFamily: 'monospace', fontSize: 12 }} />
+          </label>
+        </div>
       </div>
       <div className="flex gap" style={{ marginTop: 14 }}>
         <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} onClick={save}>저장</button>
