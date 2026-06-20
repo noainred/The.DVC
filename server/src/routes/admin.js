@@ -19,6 +19,7 @@ import {
   listRegistry, addVcenter, updateVcenter, removeVcenter, testConnection, importVcenters,
 } from '../vcenter/registry.js';
 import { geocode } from '../vcenter/geocode.js';
+import { getOrder, saveOrder } from '../vcenter/order.js';
 import {
   listRegistry as listNsx, addManager as addNsx, updateManager as updateNsx,
   removeManager as removeNsx, testConnection as testNsx,
@@ -236,6 +237,19 @@ adminRouter.delete('/vcenters/:id', adminOnly, async (req, res) => {
 // Test connectivity to a vCenter (new entry or a saved one by id).
 adminRouter.post('/vcenters/test', adminOnly, async (req, res) => {
   res.json(await testConnection(req.body || {}));
+});
+
+// vCenter display order (applies to every "vCenter 선택" list in the web).
+adminRouter.get('/vcenter-order', adminOnly, (_req, res) => {
+  const order = getOrder();
+  const rank = new Map(order.map((id, i) => [id, i]));
+  // Return all registered vCenters in saved order; unsaved ones appended.
+  const list = listRegistry().map((v) => ({ id: v.id, name: v.name, region: v.location?.region || '' }));
+  list.sort((a, b) => (rank.has(a.id) ? rank.get(a.id) : 1e9) - (rank.has(b.id) ? rank.get(b.id) : 1e9));
+  res.json({ order, vcenters: list });
+});
+adminRouter.put('/vcenter-order', adminOnly, (req, res) => {
+  res.json({ ok: true, order: saveOrder((req.body || {}).order) });
 });
 
 // --- VM 프로비저닝: 대량 생성 작업 시작 (관리자) ---
