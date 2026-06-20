@@ -38,21 +38,76 @@ export function generateNsxForManager(mgr) {
       vlanIds: vlan ? [String(100 + i)] : [],
       subnets: [`10.${n(10, 250)}.${i}.0/24`],
       type: vlan ? 'VLAN' : 'OVERLAY',
+      transportZone: vlan ? 'TZ-VLAN' : 'TZ-Overlay',
+      vmCount: n(0, 36),
+      ports: Array.from({ length: Math.min(8, n(0, 8)) }, (_, k) => `vm-${['web', 'app', 'db'][k % 3]}-${mgr.id}-${i}-${k + 1}`),
     });
   }
   const transportNodes = [];
-  for (let i = 0; i < hostNodes; i++) transportNodes.push({ id: `${mgr.id}:tn-h-${i}`, managerId: mgr.id, name: `esxi-${mgr.id}-${i + 1}`, type: 'host' });
-  for (let i = 0; i < edgeNodes; i++) transportNodes.push({ id: `${mgr.id}:tn-e-${i}`, managerId: mgr.id, name: `edge-${mgr.id}-${i + 1}`, type: 'edge' });
+  for (let i = 0; i < hostNodes; i++) transportNodes.push({ id: `${mgr.id}:tn-h-${i}`, managerId: mgr.id, name: `esxi-${mgr.id}-${i + 1}`, type: 'host', status: rnd() < 0.95 ? 'UP' : 'DOWN' });
+  for (let i = 0; i < edgeNodes; i++) transportNodes.push({ id: `${mgr.id}:tn-e-${i}`, managerId: mgr.id, name: `edge-${mgr.id}-${i + 1}`, type: 'edge', status: rnd() < 0.97 ? 'UP' : 'DOWN' });
 
+  // Interfaces / NAT / LB on the gateways (for the detail view).
+  for (const g of gateways) {
+    g.interfaces = g.tier === 'T0' ? n(2, 6) : n(1, 4);
+    g.nat = n(0, g.tier === 'T0' ? 24 : 12);
+    g.lb = g.tier === 'T1' ? n(0, 4) : 0;
+  }
+
+  // Security groups with members (VM names + effective IPs) and a match criteria.
+  const groupCount = n(8, 24);
+  const groupNames = [];
+  const securityGroups = [];
+  for (let g = 0; g < groupCount; g++) {
+    const gname = `sg-${['web', 'app', 'db', 'dmz', 'mgmt', 'svc', 'prod', 'dev'][g % 8]}-${g}`;
+    groupNames.push(gname);
+    const memberCount = n(1, 14);
+    securityGroups.push({
+      id: `${mgr.id}:grp-${g}`, managerId: mgr.id, name: gname,
+      memberType: rnd() < 0.6 ? 'VM' : 'IP', memberCount,
+      members: Array.from({ length: Math.min(memberCount, 40) }, (_, k) => `vm-${gname}-${k + 1}`),
+      memberIps: Array.from({ length: Math.min(memberCount, 40) }, () => `10.${n(10, 250)}.${n(0, 255)}.${n(1, 254)}`),
+      criteria: `Tag.scope = ${['env', 'app', 'tier'][g % 3]} AND Tag = ${['prod', 'web', 'db', 'dmz'][g % 4]}`,
+    });
+  }
+
+  // Distributed firewall: policies, each with concrete rules referencing groups.
+  const SERVICES = ['HTTPS', 'HTTP', 'SSH', 'MySQL', 'PostgreSQL', 'DNS', 'ICMP-ALL', 'Any'];
+  const ACTIONS = ['ALLOW', 'DROP', 'REJECT'];
+  const CATS = ['Emergency', 'Infrastructure', 'Environment', 'Application'];
   const policies = n(4, 14);
+  const pickG = () => (groupNames.length ? groupNames[n(0, groupNames.length - 1)] : 'Any');
+  const dfw = [];
+  let ruleTotal = 0;
+  for (let p = 0; p < policies; p++) {
+    const cat = CATS[p % CATS.length];
+    const ruleN = n(2, 8);
+    const rules = [];
+    for (let r = 0; r < ruleN; r++) {
+      rules.push({
+        id: `${mgr.id}:rule-${p}-${r}`, managerId: mgr.id, policy: `${cat}-Policy-${p}`,
+        name: `${cat.slice(0, 3)}-rule-${p}-${r}`,
+        sources: rnd() < 0.3 ? ['Any'] : [pickG()],
+        destinations: rnd() < 0.3 ? ['Any'] : [pickG()],
+        services: [SERVICES[n(0, SERVICES.length - 1)]],
+        action: rnd() < 0.72 ? 'ALLOW' : ACTIONS[n(1, 2)],
+        direction: 'IN_OUT', appliedTo: rnd() < 0.5 ? 'DFW' : pickG(),
+        enabled: rnd() > 0.05,
+      });
+    }
+    ruleTotal += ruleN;
+    dfw.push({ id: `${mgr.id}:pol-${p}`, managerId: mgr.id, name: `${cat}-Policy-${p}`, category: cat, ruleCount: ruleN, rules });
+  }
+
   return {
     manager: {
       id: mgr.id, name: mgr.name, host: mgr.host, region: mgr.location?.region || '', vcenterId: mgr.vcenterId || '',
       status: degraded ? 'degraded' : 'connected', version: ['4.1.2.3', '4.1.1.0', '3.2.3.1'][n(0, 2)], nodeCount: 3,
     },
     gateways, segments, transportNodes,
-    firewall: { policies, rules: policies * n(3, 9) },
-    groups: n(8, 40),
+    firewall: { policies, rules: ruleTotal },
+    groups: groupCount,
+    dfw, securityGroups,
   };
 }
 

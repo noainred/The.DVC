@@ -183,6 +183,8 @@ api.get('/nsx', (req, res) => {
     gateways: scoped ? snap.gateways.filter((g) => mIds.has(g.managerId)) : snap.gateways,
     segments: scoped ? snap.segments.filter((s) => mIds.has(s.managerId)) : snap.segments,
     transportNodes: scoped ? snap.transportNodes.filter((t) => mIds.has(t.managerId)) : snap.transportNodes,
+    dfw: scoped ? (snap.dfw || []).filter((p) => mIds.has(p.managerId)) : (snap.dfw || []),
+    securityGroups: scoped ? (snap.securityGroups || []).filter((g) => mIds.has(g.managerId)) : (snap.securityGroups || []),
     collectionErrors: snap.collectionErrors,
   });
 });
