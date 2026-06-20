@@ -1,6 +1,16 @@
 {
   "notes": [
     {
+      "version": "1.21.0",
+      "date": "2026-06-20",
+      "title": "Ollama 서버 자동설치 (SSH)",
+      "notes": [
+        "설정 → AI 검색: 별도 서버에 SSH로 Ollama 자동 설치(온라인/오프라인 tgz)",
+        "서비스를 0.0.0.0:11434로 노출, (선택)모델 pull, 설치 후 포탈 LLM 주소 자동 연결",
+        "API: /admin/ollama-deploy{,/test}"
+      ]
+    },
+    {
       "version": "1.20.0",
       "date": "2026-06-20",
       "title": "AI 자연어 검색 (로컬 LLM)",
