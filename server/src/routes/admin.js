@@ -10,6 +10,7 @@ import { loadLlmConfig, saveLlmConfig } from '../llm/config.js';
 import { ollamaTest } from '../llm/ollama.js';
 import { installOllama } from '../llm/ollamaDeploy.js';
 import { deployAgent, testTarget, installerInfo } from '../agent/deploy.js';
+import { fetchRemoteVersions, listLocalPackages, downloadPackage } from '../upgrade/fetchPackage.js';
 import { listTargets, getTargetRaw, saveTarget, removeTarget, recordResult } from '../agent/deployRegistry.js';
 import { getLogs } from '../logbuffer.js';
 import {
@@ -86,6 +87,18 @@ adminRouter.post('/users/:username/totp/confirm', adminOnly, (req, res) => {
 adminRouter.post('/users/:username/totp/disable', adminOnly, (req, res) => {
   const r = disableTotp(req.params.username, req.body || {});
   res.status(r.ok ? 200 : 400).json(r);
+});
+
+// --- Package auto-download (upgrade/install packages → packages dir) ---
+adminRouter.get('/packages', adminOnly, async (req, res) => {
+  let remote = null;
+  try { remote = await fetchRemoteVersions(req.query.baseUrl || config.packages.baseUrl); }
+  catch (e) { remote = { error: e.message }; }
+  res.json({ dir: config.packages.dir, baseUrl: config.packages.baseUrl, local: listLocalPackages(), remote });
+});
+adminRouter.post('/packages/download', adminOnly, async (req, res) => {
+  try { const r = await downloadPackage(req.body || {}); res.status(r.ok ? 200 : 400).json(r); }
+  catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
 });
 
 // --- iDRAC-scan agent auto-deploy (SSH push install) ---

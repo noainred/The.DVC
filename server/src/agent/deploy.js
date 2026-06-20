@@ -10,21 +10,26 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { config } from '../config.js';
 import { withSsh } from '../proxy/sshExec.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 
-/** Find the newest offline installer tarball shipped in download/ (or a given path). */
+/** Find the newest offline installer tarball in download/ or the packages dir (or a given path). */
 export function resolveInstaller(explicit) {
   if (explicit) return fs.existsSync(explicit) ? explicit : null;
-  const dir = path.join(ROOT, 'download');
-  try {
-    const files = fs.readdirSync(dir)
-      .filter((f) => /^vmware-portal-offline-.*-el9-x64\.tar\.gz$/.test(f))
-      .map((f) => ({ f, m: fs.statSync(path.join(dir, f)).mtimeMs }))
-      .sort((a, b) => b.m - a.m);
-    return files.length ? path.join(dir, files[0].f) : null;
-  } catch { return null; }
+  const dirs = [path.join(ROOT, 'download'), config.packages?.dir].filter(Boolean);
+  let best = null;
+  for (const dir of dirs) {
+    try {
+      for (const f of fs.readdirSync(dir)) {
+        if (!/^vmware-portal-offline-.*-el9-x64\.tar\.gz$/.test(f)) continue;
+        const m = fs.statSync(path.join(dir, f)).mtimeMs;
+        if (!best || m > best.m) best = { p: path.join(dir, f), m };
+      }
+    } catch { /* dir may not exist */ }
+  }
+  return best ? best.p : null;
 }
 
 export function installerInfo(explicit) {
