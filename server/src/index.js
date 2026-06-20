@@ -9,6 +9,7 @@ import { store } from './store.js';
 import { api } from './routes/api.js';
 import { authRouter } from './routes/auth.js';
 import { authMiddleware } from './auth/auth.js';
+import { auditMiddleware } from './audit.js';
 import { upgradeRouter } from './routes/upgrade.js';
 import { upgradeManager } from './upgrade/manager.js';
 import { adminRouter } from './routes/admin.js';
@@ -43,8 +44,8 @@ app.use('/api/collector', collectorRouter);            // token-gated agent expo
 app.use('/api/central', centralRouter);                // token-gated agent<->central (no user auth)
 app.use('/api/auth', authRouter);                      // public: login / config / me
 app.use('/api/upgrade', authMiddleware, upgradeRouter); // admin-gated auto-upgrade control
-app.use('/api/admin', authMiddleware, adminRouter);     // admin-gated vCenter management
-app.use('/api/remote', authMiddleware, remoteRouter);   // remote access (HAProxy/SSH/RDP)
+app.use('/api/admin', authMiddleware, auditMiddleware, adminRouter);     // admin-gated vCenter management
+app.use('/api/remote', authMiddleware, auditMiddleware, remoteRouter);   // remote access (HAProxy/SSH/RDP)
 app.use('/api', authMiddleware, api);                   // protected resource endpoints
 
 // Serve the built web client when it exists (production single-port mode).

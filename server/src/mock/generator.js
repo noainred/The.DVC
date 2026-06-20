@@ -307,6 +307,9 @@ export function generateSnapshot() {
         cpuCount: vm.cpuCount,
         memMB: vm.memMB,
         storageGB: vm.storageGB,
+        // ~60% thin: committed(사용) < provisioned, 나머지 thick.
+        thin: vm.idx % 5 !== 0 && vm.idx % 3 !== 0,
+        uncommittedGB: (vm.idx % 5 !== 0 && vm.idx % 3 !== 0) ? Math.round(vm.storageGB * (0.3 + (vm.idx % 4) * 0.15)) : 0,
         cpuUsagePct,
         memUsagePct,
         ipAddress: powered ? mkIp(site, vm.idx) : null,

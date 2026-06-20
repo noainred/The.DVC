@@ -20,6 +20,7 @@ import {
 } from '../vcenter/registry.js';
 import { geocode } from '../vcenter/geocode.js';
 import { getOrder, saveOrder } from '../vcenter/order.js';
+import { listAudit } from '../audit.js';
 import {
   listRegistry as listNsx, addManager as addNsx, updateManager as updateNsx,
   removeManager as removeNsx, testConnection as testNsx,
@@ -251,6 +252,11 @@ adminRouter.get('/vcenter-order', adminOnly, (_req, res) => {
 });
 adminRouter.put('/vcenter-order', adminOnly, (req, res) => {
   res.json({ ok: true, order: saveOrder((req.body || {}).order) });
+});
+
+// Audit log viewer (누가 언제 무엇을 했는지).
+adminRouter.get('/audit', adminOnly, (req, res) => {
+  res.json(listAudit({ limit: req.query.limit, offset: req.query.offset, user: req.query.user, q: req.query.q }));
 });
 
 // --- VM 프로비저닝: 대량 생성 작업 시작 (관리자) ---

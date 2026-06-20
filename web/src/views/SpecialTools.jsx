@@ -5,6 +5,7 @@ import { DataTable, Loading, ErrorBox, StateBadge, UsageCell, EntityDetail, Moda
 const TOOLS = [
   { k: 'aisearch', icon: '🔎', label: 'AI 검색 (자연어)', desc: '자연어로 VM/호스트/IP 검색 · 로컬 LLM' },
   { k: 'guestos', icon: '🐧', label: 'Guest OS 종류/버전', desc: 'OS·버전별 VM 수 · 전체/법인별 · 검색' },
+  { k: 'thinvms', icon: '💧', label: 'Thin VM 찾기', desc: 'Thin 프로비저닝 VM · 회수 가능 용량(추정)' },
   { k: 'ipam', icon: '📒', label: '센터별 IP 관리대장', desc: 'vCenter 수집 IP 전체 · 클릭 시 상세 · DB/CSV' },
   { k: 'dupip', icon: '🔁', label: '중복 IP 찾기', desc: '둘 이상 VM이 같은 IPv4를 쓰는 경우' },
   { k: 'vmtools', icon: '🧩', label: 'VMware Tools 버전', desc: '버전별 집계 + 업그레이드' },
@@ -54,7 +55,7 @@ function ToolPanel({ tool, onBack }) {
   const meta = TOOLS.find((t) => t.k === tool);
   const [scope, setScope] = useState('');
   const { data: vcList } = usePolling('/vcenters', {}, 60_000);
-  const scoped = ['ipam', 'dupip', 'vmtools', 'snapshots', 'hba', 'gpu', 'licenses', 'esxi', 'hardware', 'guestos'].includes(tool);
+  const scoped = ['ipam', 'dupip', 'vmtools', 'snapshots', 'hba', 'gpu', 'licenses', 'esxi', 'hardware', 'guestos', 'thinvms'].includes(tool);
 
   return (
     <>
@@ -73,6 +74,7 @@ function ToolPanel({ tool, onBack }) {
       </div>
       {tool === 'aisearch' && <AiSearch />}
       {tool === 'guestos' && <GuestOs scope={scope} />}
+      {tool === 'thinvms' && <ThinVms scope={scope} />}
       {tool === 'ipam' && <Ipam scope={scope} onScope={setScope} />}
       {tool === 'dupip' && <DupIp scope={scope} />}
       {tool === 'vmtools' && <VmTools scope={scope} />}
@@ -636,6 +638,41 @@ function useTool(path, params) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path, key]);
   return state;
+}
+
+function ThinVms({ scope }) {
+  const { loading, data, error } = useTool('/tools/thin-vms', scope ? { vcenterId: scope } : {});
+  const [q, setQ] = useState('');
+  if (loading) return <Loading />;
+  if (error) return <ErrorBox message={error} />;
+  const term = q.trim().toLowerCase();
+  const rows = data.items.filter((r) => !term || r.name.toLowerCase().includes(term) || (r.guestOS || '').toLowerCase().includes(term) || (r.host || '').toLowerCase().includes(term));
+  const cols = [
+    { key: 'name', label: 'VM', render: (r) => <b>{r.name}</b> },
+    { key: 'vcenterId', label: 'vCenter', render: (r) => <span className="muted">{r.vcenterId}</span> },
+    { key: 'powerState', label: '전원', render: (r) => <StateBadge state={r.powerState} /> },
+    { key: 'guestOS', label: 'Guest OS' },
+    { key: 'committedGB', label: '사용(committed)', align: 'right', render: (r) => tb(r.committedGB) },
+    { key: 'provisionedGB', label: '할당(provisioned)', align: 'right', render: (r) => tb(r.provisionedGB) },
+    { key: 'uncommittedGB', label: '회수가능(추정)', align: 'right', render: (r) => <b style={{ color: 'var(--amber)' }}>{tb(r.uncommittedGB)}</b> },
+    { key: 'host', label: 'ESXi 호스트', render: (r) => <span className="muted">{r.host}</span> },
+  ];
+  return (
+    <>
+      <div className="kpis" style={{ marginBottom: 14 }}>
+        <Card label="Thin VM" value={data.thinVms.toLocaleString()} meta={`전체 ${data.totalVms.toLocaleString()} 중 ${data.thinPct}%`} />
+        <Card label="사용 합계" value={`${data.committedTB} TB`} meta="committed" />
+        <Card label="할당 합계" value={`${data.provisionedTB} TB`} meta="provisioned" />
+        <Card label="회수 가능(추정)" value={`${data.reclaimableTB} TB`} accent="var(--amber)" meta="uncommitted 합" />
+      </div>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>※ Thin 판정은 vCenter의 uncommitted(여유) 기준 <b>추정</b>입니다. 회수 가능 용량은 정확한 값이 아니라 참고치입니다.</div>
+      <div className="flex gap" style={{ marginBottom: 8 }}>
+        <SearchBox className="input" style={{ maxWidth: 260 }} placeholder="VM / OS / 호스트 검색" value={q} onChange={setQ} />
+      </div>
+      <ResultCount total={data.items.length} shown={rows.length} label="Thin VM" filtered={!!term} />
+      <DataTable columns={cols} rows={rows} initialSort={{ key: 'uncommittedGB', dir: 'desc' }} />
+    </>
+  );
 }
 
 function GuestOs({ scope }) {
