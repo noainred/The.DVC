@@ -49,6 +49,7 @@ export class NsxClient {
   tier1s() { return this.#get('/policy/api/v1/infra/tier-1s'); }
   segments() { return this.#get('/policy/api/v1/infra/segments'); }
   securityPolicies() { return this.#get('/policy/api/v1/infra/domains/default/security-policies'); }
+  policyRules(policyId) { return this.#get(`/policy/api/v1/infra/domains/default/security-policies/${encodeURIComponent(policyId)}/rules`); }
   groups() { return this.#get('/policy/api/v1/infra/domains/default/groups'); }
 
   /** Login check — cheapest authenticated call. */
@@ -87,19 +88,52 @@ export async function collectFromNsx(mgr) {
     managerId: mgr.id,
     name: n.display_name || n.id,
     type: /edge/i.test(n.resource_type || n.node_deployment_info?.resource_type || '') ? 'edge' : 'host',
+    status: n.status || '',
   }));
   const mkGw = (arr, tier) => (arr.results || []).map((g) => ({
     id: `${mgr.id}:${g.id}`, managerId: mgr.id, name: g.display_name || g.id, tier,
     haMode: g.ha_mode || '', failoverMode: g.failover_mode || '',
   }));
+  // Overlay vs VLAN is decided purely by the presence of vlan_ids (segment.type
+  // in NSX is DISCONNECTED/ROUTED/EXTENDED, not Overlay/VLAN).
   const segments = (segs.results || []).map((s) => ({
     id: `${mgr.id}:${s.id}`, managerId: mgr.id, name: s.display_name || s.id,
     connectivity: (s.connectivity_path || '').split('/').pop() || '',
     vlanIds: s.vlan_ids || [],
     subnets: (s.subnets || []).map((x) => x.network || x.gateway_address).filter(Boolean),
-    type: s.type || (s.vlan_ids?.length ? 'VLAN' : 'OVERLAY'),
+    type: (s.vlan_ids?.length ? 'VLAN' : 'OVERLAY'),
+    transportZone: (s.transport_zone_path || '').split('/').pop() || '',
   }));
-  const dfwRules = (pols.results || []).reduce((a, p) => a + (p.rule_count ?? (p.rules?.length || 0)), 0);
+
+  // Pull the actual DFW rules for each policy (bounded) so the UI can browse them.
+  const policies = (pols.results || []).slice(0, 60);
+  const ruleSets = await Promise.all(policies.map((p) =>
+    client.policyRules(p.id).then((r) => r.results || []).catch(() => null)));
+  const dfw = policies.map((p, i) => {
+    const rawRules = ruleSets[i] != null ? ruleSets[i] : [];
+    const rules = rawRules.map((r) => ({
+      id: `${mgr.id}:${r.id}`, managerId: mgr.id, policy: p.display_name || p.id,
+      name: r.display_name || r.id,
+      sources: (r.source_groups || []).map(shortGroup),
+      destinations: (r.destination_groups || []).map(shortGroup),
+      services: (r.services || []).map(shortGroup),
+      action: r.action || '', direction: r.direction || 'IN_OUT',
+      appliedTo: (r.scope || []).map(shortGroup).join(', ') || 'DFW',
+      enabled: !r.disabled,
+    }));
+    return {
+      id: `${mgr.id}:${p.id}`, managerId: mgr.id, name: p.display_name || p.id,
+      category: p.category || '', ruleCount: p.rule_count ?? rules.length, rules,
+    };
+  });
+  const dfwRules = dfw.reduce((a, p) => a + (p.ruleCount || 0), 0);
+
+  const securityGroups = (grps.results || []).map((g) => ({
+    id: `${mgr.id}:${g.id}`, managerId: mgr.id, name: g.display_name || g.id,
+    memberType: (g.expression || []).map((e) => e.member_type || e.resource_type).filter(Boolean)[0] || 'Mixed',
+    memberCount: null, members: [], memberIps: [],
+    criteria: (g.expression || []).map(exprText).filter(Boolean).join(' ') || '—',
+  }));
 
   return {
     manager: {
@@ -110,7 +144,19 @@ export async function collectFromNsx(mgr) {
     gateways: [...mkGw(t0, 'T0'), ...mkGw(t1, 'T1')],
     segments,
     transportNodes: tn,
-    firewall: { policies: (pols.results || []).length, rules: dfwRules },
+    firewall: { policies: dfw.length, rules: dfwRules },
     groups: (grps.results || []).length,
+    dfw, securityGroups,
   };
+}
+
+// NSX policy paths look like /infra/domains/default/groups/web → show the leaf.
+const shortGroup = (s) => String(s || '').split('/').pop() || String(s || '');
+function exprText(e) {
+  if (!e) return '';
+  if (e.resource_type === 'Condition') return `${e.key || ''} ${e.operator || ''} ${e.value || ''}`.trim();
+  if (e.resource_type === 'IPAddressExpression') return `IP(${(e.ip_addresses || []).slice(0, 3).join(',')}…)`;
+  if (e.resource_type === 'PathExpression') return `Members(${(e.paths || []).length})`;
+  if (e.conjunction_operator) return e.conjunction_operator;
+  return e.resource_type || '';
 }
