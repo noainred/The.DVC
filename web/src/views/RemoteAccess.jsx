@@ -232,7 +232,7 @@ export default function RemoteAccess() {
   );
 }
 
-function RdpConsole({ mapping, onClose }) {
+export function RdpConsole({ mapping, onClose }) {
   const elRef = useRef(null);
   const clientRef = useRef(null);
   const [creds, setCreds] = useState({ username: '', password: '', domain: '' });
@@ -290,7 +290,7 @@ function RdpConsole({ mapping, onClose }) {
   );
 }
 
-function SshTerminal({ mapping, onClose }) {
+export function SshTerminal({ mapping, onClose }) {
   const elRef = useRef(null);
   const termRef = useRef(null);
   const wsRef = useRef(null);

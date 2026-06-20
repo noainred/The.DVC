@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import HostPowerPanel from './HostPowerPanel.jsx';
 import { VmMetricButton } from './VmMetrics.jsx';
 import { VmConsoleButton } from './VmConsole.jsx';
+import { VmRemoteButton } from './VmRemote.jsx';
 import EscClose from './EscClose.jsx';
 
 export function usageColor(pct) {
@@ -219,6 +220,7 @@ export function EntityDetail({ type, item, onClose }) {
       {type === 'vm' && (
         <div className="flex gap" style={{ marginTop: 14, justifyContent: 'flex-end' }}>
           <VmConsoleButton vmId={item.id} vmName={item.name} />
+          <VmRemoteButton item={item} />
           <VmMetricButton vmId={item.id} vmName={item.name} />
         </div>
       )}

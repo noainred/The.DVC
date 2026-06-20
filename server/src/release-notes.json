@@ -1,6 +1,17 @@
 {
   "notes": [
     {
+      "version": "1.22.0",
+      "date": "2026-06-20",
+      "title": "VM 상세에서 바로 원격 접속",
+      "notes": [
+        "VM 상세 모달 '원격 콘솔' 옆에 'HAProxy 원격 접속' 버튼 추가",
+        "프로토콜(SSH/RDP)·IP(다중 IP 선택)·포트 지정 → 매핑 자동 생성/재사용 후 접속",
+        "SSH는 브라우저 터미널, RDP는 guacd 웹콘솔(없으면 .rdp 다운로드)",
+        "API: POST /remote/quick-connect (동일 대상+포트+프로토콜 매핑 재사용)"
+      ]
+    },
+    {
       "version": "1.21.0",
       "date": "2026-06-20",
       "title": "Ollama 서버 자동설치 (SSH)",
