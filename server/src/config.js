@@ -74,7 +74,7 @@ export const config = {
     // so it survives upgrades. 5-year retention by default; sampled on an interval.
     dbPath: process.env.TEMP_DB_PATH ||
       path.join(process.env.CONFIG_DIR || path.resolve(ROOT, 'config'), 'host-temp.db'),
-    sampleIntervalMs: Number(process.env.TEMP_SAMPLE_INTERVAL_MS) || 600_000, // 10분
+    sampleIntervalMs: Number(process.env.TEMP_SAMPLE_INTERVAL_MS) || 60_000,  // 1분 (설정에서 변경 가능)
     retentionDays: Number(process.env.TEMP_RETENTION_DAYS) || 1830,           // ~5년
   },
   ipam: {

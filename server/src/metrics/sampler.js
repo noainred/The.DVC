@@ -8,6 +8,7 @@
 import { config } from '../config.js';
 import { store } from './../store.js';
 import { getMetricsDb } from './db.js';
+import { loadMetricsSettings } from './settings.js';
 
 let timer = null;
 let lastRun = null;
@@ -41,18 +42,33 @@ async function sampleOnce() {
 
   if (rows.length) { try { db.insertMany(rows, ts); } catch (e) { console.warn('[metrics] insert 실패:', e.message); } }
 
-  // Retention prune.
-  if (config.temp.retentionDays > 0) { try { db.prune(ts - config.temp.retentionDays * 86_400_000); } catch { /* */ } }
+  // Retention prune (runtime-configurable).
+  const { retentionDays } = loadMetricsSettings();
+  if (retentionDays > 0) { try { db.prune(ts - retentionDays * 86_400_000); } catch { /* */ } }
   lastRun = { at: ts, rows: rows.length, hostsWithTemp: hostsWithTemp.length };
 }
 
 const round1 = (x) => (x == null ? null : Number(x.toFixed(1)));
 
-export function metricsSamplerStatus() { return { intervalMs: config.temp.sampleIntervalMs, retentionDays: config.temp.retentionDays, lastRun }; }
+export function metricsSamplerStatus() {
+  const s = loadMetricsSettings();
+  return { intervalMs: s.sampleIntervalMs, retentionDays: s.retentionDays, lastRun };
+}
+
+/** (Re)arm the periodic timer from the current effective settings. */
+export function rescheduleMetricsSampler() {
+  if (timer) clearInterval(timer);
+  const { sampleIntervalMs } = loadMetricsSettings();
+  timer = setInterval(() => sampleOnce().catch(() => {}), sampleIntervalMs);
+  timer.unref?.();
+  console.log(`[metrics] sampler rescheduled — every ${Math.round(sampleIntervalMs / 1000)}s`);
+  return sampleIntervalMs;
+}
 
 export function startMetricsSampler() {
+  const { sampleIntervalMs, retentionDays } = loadMetricsSettings();
   setTimeout(() => sampleOnce().catch((e) => console.error('[metrics] sample 실패:', e.message)), 12_000).unref?.();
-  timer = setInterval(() => sampleOnce().catch(() => {}), config.temp.sampleIntervalMs);
+  timer = setInterval(() => sampleOnce().catch(() => {}), sampleIntervalMs);
   timer.unref?.();
-  console.log(`[metrics] sampler started (every ${Math.round(config.temp.sampleIntervalMs / 1000)}s, retention ${config.temp.retentionDays}d)`);
+  console.log(`[metrics] sampler started (every ${Math.round(sampleIntervalMs / 1000)}s, retention ${retentionDays}d)`);
 }

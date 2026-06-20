@@ -22,6 +22,8 @@ import { geocode } from '../vcenter/geocode.js';
 import { getOrder, saveOrder } from '../vcenter/order.js';
 import { listAudit } from '../audit.js';
 import { alertStatus, saveAlertConfig, testAlert } from '../alerts.js';
+import { loadMetricsSettings, saveMetricsSettings, METRICS_LIMITS } from '../metrics/settings.js';
+import { metricsSamplerStatus, rescheduleMetricsSampler } from '../metrics/sampler.js';
 import {
   listRegistry as listNsx, addManager as addNsx, updateManager as updateNsx,
   removeManager as removeNsx, testConnection as testNsx,
@@ -197,6 +199,16 @@ adminRouter.get('/ipam/db-info', adminOnly, async (_req, res) => {
 // IPMS settings: ignore IP ranges (global + per-vCenter) hidden from the ledger.
 adminRouter.get('/ipam/settings', adminOnly, (_req, res) => res.json({ settings: loadIpamSettings() }));
 adminRouter.put('/ipam/settings', adminOnly, (req, res) => res.json({ ok: true, settings: saveIpamSettings(req.body || {}) }));
+
+// Metrics sampler settings: 온도/용량/GPU 수집 주기 + 보존기간 (런타임 변경).
+adminRouter.get('/metrics/settings', adminOnly, (_req, res) => {
+  res.json({ settings: loadMetricsSettings(), limits: METRICS_LIMITS, status: metricsSamplerStatus() });
+});
+adminRouter.put('/metrics/settings', adminOnly, (req, res) => {
+  const settings = saveMetricsSettings(req.body || {});
+  rescheduleMetricsSampler(); // apply the new interval immediately
+  res.json({ ok: true, settings, status: metricsSamplerStatus() });
+});
 
 // Read the effective data source (UI override or env default).
 adminRouter.get('/data-source', adminOnly, (_req, res) => {

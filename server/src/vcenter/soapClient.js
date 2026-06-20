@@ -411,6 +411,31 @@ function parseTemps(xml) {
   return { tempC: (ambient || max).c, tempMaxC: max.c, temps: temps.slice(0, 12) };
 }
 
+/**
+ * Classify a datastore's backing storage from its DatastoreInfo XML + summary.type.
+ * Returns { storageType, remoteHost, ssd }.
+ *   storageType: local | san | nas | vsan | vvol | other
+ * VMFS volumes carry a HostVmfsVolume.local boolean that distinguishes a host's
+ * internal disk (로컬) from a shared block LUN (SAN: FC/iSCSI/FCoE). NFS/CIFS are
+ * NAS, and vSAN/vVol are their own categories.
+ */
+function parseDatastoreStorage(infoXml, summaryType) {
+  const t = (summaryType || '').toUpperCase();
+  if (t.startsWith('NFS') || t === 'CIFS') {
+    const remoteHost = infoXml ? (/<remoteHost>([^<]*)<\/remoteHost>/.exec(infoXml)?.[1] || '') : '';
+    return { storageType: 'nas', remoteHost, ssd: false };
+  }
+  if (t === 'VSAN') return { storageType: 'vsan', remoteHost: '', ssd: true };
+  if (t === 'VVOL') return { storageType: 'vvol', remoteHost: '', ssd: false };
+  if (t === 'PMEM') return { storageType: 'local', remoteHost: '', ssd: true };
+  if (t === 'VMFS') {
+    const local = infoXml ? /<local>\s*true\s*<\/local>/i.test(infoXml) : false;
+    const ssd = infoXml ? /<ssd>\s*true\s*<\/ssd>/i.test(infoXml) : false;
+    return { storageType: local ? 'local' : 'san', remoteHost: '', ssd };
+  }
+  return { storageType: 'other', remoteHost: '', ssd: false };
+}
+
 // Snapshot count (from the snapshot tree) + approximate size from layoutEx files.
 function snapshotInfo(snapXml, layoutXml) {
   let snapshotCount = 0;
@@ -537,7 +562,7 @@ export async function collectFromVCenterSoap(vc) {
         'summary.config.guestFullName', 'summary.config.template', 'summary.quickStats.overallCpuUsage', 'summary.quickStats.guestMemoryUsage',
         'summary.storage.committed', 'summary.storage.uncommitted', 'guest.ipAddress', 'guest.net', 'guest.toolsRunningStatus',
         'guest.toolsVersion', 'guest.toolsVersionStatus2', 'config.annotation', 'snapshot', 'layoutEx.file'] },
-      { type: 'Datastore', paths: ['name', 'summary.type', 'summary.capacity', 'summary.freeSpace', 'summary.accessible'] },
+      { type: 'Datastore', paths: ['name', 'summary.type', 'summary.capacity', 'summary.freeSpace', 'summary.accessible', 'info'] },
       { type: 'Network', paths: ['name'] },
       { type: 'DistributedVirtualPortgroup', paths: ['name'] },
     ]);
@@ -675,6 +700,7 @@ export async function collectFromVCenterSoap(vc) {
         usedGB,
         usagePct: pct(usedGB, capacityGB),
         accessible: p['summary.accessible'] !== 'false',
+        ...parseDatastoreStorage(p['info'], p['summary.type']),
       };
     });
 
