@@ -110,6 +110,7 @@ const VM_FOLDERS = [
   'Production/Web', 'Production/DB', 'Production/App', 'Infrastructure/Network',
   'Infrastructure/Storage', 'Test/QA', 'Dev', 'DMZ', 'Discovered virtual machine',
 ];
+const RES_POOLS = ['Resources', 'Prod', 'Dev', 'Batch', 'HighPriority'];
 const DS_TYPES = ['VMFS', 'NFS', 'vSAN'];
 const NET_TYPES = ['STANDARD_PORTGROUP', 'DISTRIBUTED_PORTGROUP'];
 
@@ -315,6 +316,7 @@ export function generateSnapshot() {
         ipAddress: powered ? mkIp(site, vm.idx) : null,
         ipAddresses: powered ? mkIps(site, vm.idx) : [],
         folder: VM_FOLDERS[(vm.idx * 7 + site.id.length) % VM_FOLDERS.length],
+        resourcePool: RES_POOLS[(vm.idx * 3) % RES_POOLS.length],
         toolsStatus: powered ? (vm.idx % 17 === 0 ? 'OUTDATED' : 'RUNNING') : 'NOT_RUNNING',
         toolsVersion: TOOLS_VERSIONS[vm.idx % TOOLS_VERSIONS.length],
         notes: vm.idx % 4 === 0 ? `${pick(['운영', '백업대상', '마이그레이션 예정', 'PoC', '담당: 인프라팀'])} · ${site.id}` : '',

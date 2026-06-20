@@ -115,6 +115,14 @@ api.get('/idrac/host-power', async (req, res) => {
 });
 
 /** Apply common query filters (?vcenterId=, ?region=, ?q=) to a collection. */
+// Run `fn` over items with at most `limit` concurrent (for bounded on-demand vCenter queries).
+async function eachLimited(items, limit, fn) {
+  let i = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (i < items.length) { const idx = i++; await fn(items[idx], idx); }
+  }));
+}
+
 function applyFilters(items, query, snap, searchFields = ['name']) {
   let out = items;
   if (query.vcenterId) out = out.filter((x) => x.vcenterId === query.vcenterId);
@@ -485,6 +493,77 @@ api.get('/tools/thin-vms', (req, res) => {
     reclaimableTB: round(items.reduce((a, x) => a + x.uncommittedGB, 0) / 1024, 1),
     items,
   });
+});
+
+// Advanced VM finder: scope by 다수 vCenter + folder/cluster/resourcePool +
+// conditions. Optional withAvg → 1일/1주 평균 CPU(유휴 판정). 평균은 live는
+// vCenter 성능 API 온디맨드(상한 있음), mock은 현재값 기반 합성.
+api.post('/tools/vm-finder', async (req, res) => {
+  const b = req.body || {};
+  const snap = store.get();
+  const inList = (v, arr) => !arr || !arr.length || arr.includes(v);
+  // Facets reflect the chosen vCenter scope (so 폴더/클러스터/풀 목록이 좁혀짐).
+  const scopeVms = snap.vms.filter((v) => inList(v.vcenterId, b.vcenterIds));
+  const facets = {
+    vcenters: [...new Set(snap.vms.map((v) => v.vcenterId))].sort(),
+    folders: [...new Set(scopeVms.map((v) => v.folder).filter(Boolean))].sort(),
+    clusters: [...new Set(scopeVms.map((v) => v.cluster).filter(Boolean))].sort(),
+    resourcePools: [...new Set(scopeVms.map((v) => v.resourcePool).filter(Boolean))].sort(),
+  };
+  const term = String(b.q || '').trim().toLowerCase();
+  let vms = scopeVms.filter((v) =>
+    inList(v.folder, b.folders) && inList(v.cluster, b.clusters) && inList(v.resourcePool, b.resourcePools)
+    && (!b.powerState || v.powerState === b.powerState)
+    && (!b.os || String(v.guestOS || '').toLowerCase().includes(String(b.os).toLowerCase()))
+    && (!term || v.name.toLowerCase().includes(term) || String(v.ipAddress || '').includes(term))
+    && (b.includeTemplates || !v.template));
+
+  const round1 = (x) => Number((x || 0).toFixed(1));
+  const items = vms.map((v) => ({
+    id: v.id, name: v.name, vcenterId: v.vcenterId, folder: v.folder, cluster: v.cluster, resourcePool: v.resourcePool,
+    host: v.host, powerState: v.powerState, guestOS: v.guestOS, cpuCount: v.cpuCount, memMB: v.memMB,
+    cpuUsagePct: v.cpuUsagePct, memUsagePct: v.memUsagePct, storageGB: v.storageGB,
+    avgDayCpu: null, avgWeekCpu: null, idle: null,
+  }));
+
+  const result = { facets, total: items.length, items, avgComputed: false };
+
+  if (b.withAvg && items.length) {
+    const threshold = Number(b.idleThreshold) || 5;
+    const CAP = 40;
+    const targets = items.slice(0, CAP);
+    result.avgCap = CAP; result.avgComputed = true; result.avgTruncated = items.length > CAP;
+    if (snap.source === 'mock') {
+      for (const it of targets) {
+        // 합성: 현재값 주변으로 일/주 평균(전원 꺼짐=0).
+        const base = it.powerState === 'POWERED_ON' ? it.cpuUsagePct : 0;
+        it.avgDayCpu = round1(Math.max(0, base * 0.85));
+        it.avgWeekCpu = round1(Math.max(0, base * 0.7));
+      }
+    } else {
+      const cfgs = loadVcenterConfig().vcenters;
+      await eachLimited(targets, 6, async (it) => {
+        const vc = cfgs.find((x) => x.id === it.vcenterId);
+        if (!vc) return;
+        const moref = it.id.split(':').slice(1).join(':');
+        try {
+          const [day, week] = await Promise.all([
+            fetchVmMetric(vc, moref, 'cpu', 'day').catch(() => null),
+            fetchVmMetric(vc, moref, 'cpu', 'week').catch(() => null),
+          ]);
+          const avg = (m) => { const pts = (m?.points || []).map((p) => p.v).filter((x) => x != null); return pts.length ? round1(pts.reduce((a, x) => a + x, 0) / pts.length) : null; };
+          it.avgDayCpu = avg(day); it.avgWeekCpu = avg(week);
+        } catch { /* per-VM best effort */ }
+      });
+    }
+    for (const it of targets) {
+      const a = it.avgWeekCpu ?? it.avgDayCpu;
+      it.idle = it.powerState === 'POWERED_ON' && a != null && a <= threshold;
+    }
+    result.idleCount = targets.filter((x) => x.idle).length;
+    result.idleThreshold = threshold;
+  }
+  res.json(result);
 });
 
 // Guest OS distribution — VM counts grouped by Guest OS (종류·버전), optionally

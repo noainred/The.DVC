@@ -495,7 +495,7 @@ export async function collectFromVCenterSoap(vc) {
   try {
     const view = await c.createContainerView([
       'HostSystem', 'VirtualMachine', 'Datastore', 'ClusterComputeResource',
-      'Network', 'DistributedVirtualPortgroup', 'Folder',
+      'Network', 'DistributedVirtualPortgroup', 'Folder', 'ResourcePool',
     ]);
     const objs = await c.retrieveProperties(view, [
       { type: 'Folder', paths: ['name', 'parent'] },
@@ -506,8 +506,9 @@ export async function collectFromVCenterSoap(vc) {
         'summary.config.product.version', 'summary.config.product.build', 'config.graphicsInfo',
         'summary.hardware.vendor', 'summary.hardware.model', 'config.storageDevice.hostBusAdapter',
         'summary.quickStats.overallCpuUsage', 'summary.quickStats.overallMemoryUsage'] },
+      { type: 'ResourcePool', paths: ['name'] },
       { type: 'VirtualMachine', paths: [
-        'name', 'runtime.host', 'parent', 'runtime.powerState', 'summary.config.numCpu', 'summary.config.memorySizeMB',
+        'name', 'runtime.host', 'parent', 'resourcePool', 'runtime.powerState', 'summary.config.numCpu', 'summary.config.memorySizeMB',
         'summary.config.guestFullName', 'summary.config.template', 'summary.quickStats.overallCpuUsage', 'summary.quickStats.guestMemoryUsage',
         'summary.storage.committed', 'summary.storage.uncommitted', 'guest.ipAddress', 'guest.net', 'guest.toolsRunningStatus',
         'guest.toolsVersion', 'guest.toolsVersionStatus2', 'config.annotation', 'snapshot', 'layoutEx.file'] },
@@ -518,6 +519,8 @@ export async function collectFromVCenterSoap(vc) {
 
     const clusterName = new Map();
     for (const o of objs) if (o.type === 'ClusterComputeResource') clusterName.set(o.ref, o.props.name);
+    const poolName = new Map();
+    for (const o of objs) if (o.type === 'ResourcePool') poolName.set(o.ref, o.props.name);
 
     // Folder hierarchy → resolve each VM's folder path (vSphere "VMs & Templates").
     const folderByRef = new Map(); // ref -> { name, parent }
@@ -607,6 +610,7 @@ export async function collectFromVCenterSoap(vc) {
         host: host?.name || '',
         cluster: host?.cluster || '',
         folder: folderPath(p.parent),
+        resourcePool: poolName.get(p.resourcePool) || '',
         name: p.name,
         powerState: powered ? 'POWERED_ON' : 'POWERED_OFF',
         template: p['summary.config.template'] === 'true',
