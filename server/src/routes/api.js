@@ -11,6 +11,7 @@ import { buildWorkbook } from '../ipam/excel.js';
 import { listNotes } from '../release-notes.js';
 import { nlSearch } from '../llm/nlSearch.js';
 import { sortByOrder } from '../vcenter/order.js';
+import { getMetricsDb } from '../metrics/db.js';
 import { nsxStore } from '../nsx/store.js';
 import { expandSpec } from '../provision/spec.js';
 import { listSources, listJobs, getJob } from '../provision/jobs.js';
@@ -115,6 +116,17 @@ api.get('/idrac/host-power', async (req, res) => {
 });
 
 /** Apply common query filters (?vcenterId=, ?region=, ?q=) to a collection. */
+// Small deterministic hash for synthesized demo series (stable per key).
+function hash(s) { let h = 2166136261; const str = String(s); for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0); }
+// Least-squares slope of y over x.
+function linregSlope(xs, ys) {
+  const n = xs.length; if (n < 2) return null;
+  const mx = xs.reduce((a, b) => a + b, 0) / n; const my = ys.reduce((a, b) => a + b, 0) / n;
+  let num = 0; let den = 0;
+  for (let i = 0; i < n; i++) { num += (xs[i] - mx) * (ys[i] - my); den += (xs[i] - mx) ** 2; }
+  return den === 0 ? null : num / den;
+}
+
 // Run `fn` over items with at most `limit` concurrent (for bounded on-demand vCenter queries).
 async function eachLimited(items, limit, fn) {
   let i = 0;
@@ -454,15 +466,18 @@ api.get('/tools/gpu', (req, res) => {
     const gpus = h.gpus || [];
     if (!gpus.length) continue;
     totalGpus += gpus.length;
-    hostsWithGpu.push({ host: h.name, vcenterId: h.vcenterId, cluster: h.cluster, count: gpus.length, model: gpus[0].model, memGB: gpus[0].memGB, vgpu: gpus[0].vgpuMode });
+    hostsWithGpu.push({ host: h.name, vcenterId: h.vcenterId, cluster: h.cluster, count: gpus.length, model: gpus[0].model, memGB: gpus[0].memGB, vgpu: gpus[0].vgpuMode, utilPct: h.gpuUtilPct ?? null });
     for (const g of gpus) {
       byModel[g.model] = (byModel[g.model] || 0) + 1;
       byVcenter[h.vcenterId] = (byVcenter[h.vcenterId] || 0) + 1;
     }
   }
+  const utils = hostsWithGpu.map((x) => x.utilPct).filter((x) => x != null);
   res.json({
     totalGpus,
     hostsWithGpu: hostsWithGpu.length,
+    utilReporting: utils.length,
+    avgUtilPct: utils.length ? Math.round(utils.reduce((a, b) => a + b, 0) / utils.length) : null,
     byModel: Object.entries(byModel).map(([model, count]) => ({ model, count })).sort((a, b) => b.count - a.count),
     byVcenter: Object.entries(byVcenter).map(([vcenterId, count]) => ({ vcenterId, count })).sort((a, b) => b.count - a.count),
     items: hostsWithGpu.sort((a, b) => b.count - a.count),
@@ -633,6 +648,76 @@ api.post('/tools/vm-finder', async (req, res) => {
     result.idleThreshold = threshold;
   }
   res.json(result);
+});
+
+// ESXi 온도 — 현재 값(호스트/클러스터/법인별 그룹) + 5년 히스토리 시계열.
+api.get('/tools/esxi-temp', (req, res) => {
+  const snap = store.get();
+  const vcId = req.query.vcenterId;
+  const hosts = (snap.hosts || []).filter((h) => (!vcId || h.vcenterId === vcId) && h.tempC != null);
+  const r1 = (x) => (x == null ? null : Number(x.toFixed(1)));
+  const grp = (keyFn) => {
+    const m = new Map();
+    for (const h of hosts) { const k = keyFn(h); const g = m.get(k) || { key: k, count: 0, sum: 0, max: -Infinity }; g.count++; g.sum += h.tempC; g.max = Math.max(g.max, h.tempMaxC ?? h.tempC); m.set(k, g); }
+    return [...m.values()].map((g) => ({ key: g.key, hosts: g.count, avgC: r1(g.sum / g.count), maxC: r1(g.max) })).sort((a, b) => b.avgC - a.avgC);
+  };
+  res.json({
+    scope: vcId || 'all',
+    reportingHosts: hosts.length,
+    totalHosts: (snap.hosts || []).filter((h) => !vcId || h.vcenterId === vcId).length,
+    hosts: hosts.map((h) => ({ id: h.id, name: h.name, vcenterId: h.vcenterId, cluster: h.cluster, tempC: h.tempC, tempMaxC: h.tempMaxC ?? h.tempC, temps: h.temps || [] })).sort((a, b) => b.tempC - a.tempC),
+    clusters: grp((h) => `${h.vcenterId}|${h.cluster || 'standalone'}`),
+    vcenters: grp((h) => h.vcenterId),
+  });
+});
+
+// Temperature history (5년까지). level=host|cluster|vc, key=대상키, days=기간.
+api.get('/tools/esxi-temp/history', async (req, res) => {
+  const level = ['host', 'cluster', 'vc'].includes(req.query.level) ? req.query.level : 'host';
+  const metric = { host: 'temp_host', cluster: 'temp_cluster', vc: 'temp_vc' }[level];
+  const key = String(req.query.key || '');
+  const days = Math.max(1, Math.min(1830, Number(req.query.days) || 7));
+  const since = Date.now() - days * 86_400_000;
+  const bucketMs = days <= 2 ? 3_600_000 : days <= 14 ? 6 * 3_600_000 : days <= 120 ? 86_400_000 : days <= 800 ? 7 * 86_400_000 : 30 * 86_400_000;
+  let points = [];
+  try { const db = await getMetricsDb(); points = db.history(metric, key, since, bucketMs, 1000); } catch { points = []; }
+  let synthesized = false;
+  if (points.length < 2 && store.get().source === 'mock') {
+    // 데모: 일별/주별 합성 시계열(계절·일교차 반영).
+    synthesized = true; points = [];
+    const base = 26 + (hash(key) % 8);
+    for (let t = since; t <= Date.now(); t += bucketMs) {
+      const day = t / 86_400_000;
+      const v = base + 6 * Math.sin(day / 58) + 3 * Math.sin(day) + (hash(key + t) % 3);
+      points.push({ ts: Math.floor(t), avg: Number(v.toFixed(1)), min: Number((v - 2).toFixed(1)), max: Number((v + 4).toFixed(1)) });
+    }
+  }
+  res.json({ level, key, days, bucketMs, synthesized, points });
+});
+
+// 데이터스토어 용량 추세/예측 — ds_usedgb 히스토리로 선형회귀 → 가득 찰 예상일.
+api.get('/tools/capacity-forecast', async (req, res) => {
+  const snap = store.get();
+  const vcId = req.query.vcenterId;
+  const dss = (snap.datastores || []).filter((d) => !vcId || d.vcenterId === vcId);
+  let db = null; try { db = await getMetricsDb(); } catch { /* */ }
+  const mock = snap.source === 'mock';
+  const items = [];
+  for (const d of dss) {
+    let pts = [];
+    if (db) { try { pts = db.history('ds_usedgb', d.id, Date.now() - 120 * 86_400_000, 86_400_000, 200); } catch { /* */ } }
+    let slope = null; let synthesized = false; // GB/day
+    if (pts.length >= 3) {
+      slope = linregSlope(pts.map((p) => p.ts / 86_400_000), pts.map((p) => p.avg));
+    } else if (mock) {
+      synthesized = true; slope = Math.max(0, (d.capacityGB * 0.0008) + (hash(d.id) % 5) * 0.2); // 합성 증가율
+    }
+    const freeGB = d.freeGB ?? Math.max(0, (d.capacityGB || 0) - (d.usedGB || 0));
+    const daysToFull = slope && slope > 0.01 ? Math.round(freeGB / slope) : null;
+    items.push({ id: d.id, name: d.name, vcenterId: d.vcenterId, type: d.type, capacityGB: d.capacityGB, usedGB: d.usedGB, freeGB, usagePct: d.usagePct, growthGBperDay: slope == null ? null : Number(slope.toFixed(2)), daysToFull, synthesized });
+  }
+  items.sort((a, b) => (a.daysToFull ?? Infinity) - (b.daysToFull ?? Infinity));
+  res.json({ scope: vcId || 'all', mock, items });
 });
 
 // Guest OS distribution — VM counts grouped by Guest OS (종류·버전), optionally
