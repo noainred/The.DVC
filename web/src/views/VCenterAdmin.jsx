@@ -6,6 +6,7 @@ import EscClose from '../components/EscClose.jsx';
 const REGIONS = ['아시아', '중국', '유럽', '북미'];
 const EMPTY = {
   id: '', name: '', host: 'https://', username: '', password: '',
+  enabled: true, pollIntervalSec: '', timeoutMs: '',
   location: { city: '', country: '', region: '아시아', lat: '', lon: '' },
 };
 
@@ -234,6 +235,14 @@ export default function VCenterAdmin() {
               <label>국가<input className="input" value={form.location.country} onChange={setLoc('country')} onBlur={autoGeocode} placeholder="South Korea" /></label>
               <label>위도(lat)<input className="input" value={form.location.lat} onChange={setLoc('lat')} placeholder="37.57" /></label>
               <label>경도(lon)<input className="input" value={form.location.lon} onChange={setLoc('lon')} placeholder="126.98" /></label>
+              <label>수집 주기(초, 0/빈칸=기본)<input className="input" type="number" value={form.pollIntervalSec} onChange={setF('pollIntervalSec')} placeholder="예: 300 (고RTT)" /></label>
+              <label>수집 타임아웃(ms, 0/빈칸=30000)<input className="input" type="number" value={form.timeoutMs} onChange={setF('timeoutMs')} placeholder="예: 60000 (고RTT)" /></label>
+              <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }}>
+                <input type="checkbox" checked={form.enabled !== false} onChange={(e) => setForm((f) => ({ ...f, enabled: e.target.checked }))} /> 수집 사용
+              </label>
+            </div>
+            <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+              고지연(RTT 높은) vCenter는 <b>수집 주기를 길게</b>(예 300초) + <b>타임아웃을 크게</b>(예 60000ms) 설정하면, 느린 1곳이 전체 폴링을 막지 않습니다.
             </div>
 
             {msg && (

@@ -392,48 +392,85 @@ export function RdpConsole({ mapping, onClose }) {
   );
 }
 
+const SPIN = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+
 export function SshTerminal({ mapping, onClose }) {
   const elRef = useRef(null);
   const termRef = useRef(null);
   const wsRef = useRef(null);
+  const timerRef = useRef(null);
+  const phaseRef = useRef('form');
   const [creds, setCreds] = useState({ username: '', password: '' });
-  const [connected, setConnected] = useState(false);
+  const [phase, setPhaseState] = useState('form'); // form | connecting | live | error
+  const [status, setStatus] = useState('');
+  const [ticks, setTicks] = useState(0); // 200ms ticks (spinner + elapsed)
 
-  useEffect(() => () => { try { wsRef.current?.close(); } catch { /* */ } try { termRef.current?.dispose(); } catch { /* */ } }, []);
+  const setPhase = (p) => { phaseRef.current = p; setPhaseState(p); };
+  const stopTimer = () => { try { clearInterval(timerRef.current); } catch { /* */ } timerRef.current = null; };
+  useEffect(() => () => { stopTimer(); try { wsRef.current?.close(); } catch { /* */ } try { termRef.current?.dispose(); } catch { /* */ } }, []);
 
   const connect = () => {
-    setConnected(true);
-    const term = new Terminal({ fontSize: 13, cursorBlink: true, theme: { background: '#0b1020' } });
-    const fit = new FitAddon(); term.loadAddon(fit);
-    term.open(elRef.current); fit.fit(); term.focus(); termRef.current = term;
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const ws = new WebSocket(`${proto}://${location.host}/api/remote/ssh?token=${encodeURIComponent(getToken() || '')}`);
-    wsRef.current = ws;
-    ws.onopen = () => ws.send(JSON.stringify({ type: 'auth', mappingId: mapping.id, username: creds.username, password: creds.password, cols: term.cols, rows: term.rows }));
-    ws.onmessage = (e) => {
-      const s = typeof e.data === 'string' ? e.data : '';
-      try { const j = JSON.parse(s); if (j && j.type === 'status') { term.write(`\r\n\x1b[33m${j.text}\x1b[0m\r\n`); return; } } catch { /* raw */ }
-      term.write(s);
-    };
-    ws.onclose = () => term.write('\r\n\x1b[31m[연결 종료]\x1b[0m\r\n');
-    term.onData((d) => { if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'data', data: d })); });
-    const onResize = () => { try { fit.fit(); if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows })); } catch { /* */ } };
-    window.addEventListener('resize', onResize);
+    setPhase('connecting'); setStatus('프록시에 WebSocket 연결 중…'); setTicks(0);
+    stopTimer(); const t0 = Date.now();
+    timerRef.current = setInterval(() => setTicks(Math.floor((Date.now() - t0) / 200)), 200);
+
+    setTimeout(() => {
+      const term = new Terminal({ fontSize: 13, cursorBlink: true, theme: { background: '#0b1020' } });
+      const fit = new FitAddon(); term.loadAddon(fit);
+      term.open(elRef.current); fit.fit(); term.focus(); termRef.current = term;
+      term.write('\x1b[90m연결을 준비하는 중입니다…\x1b[0m\r\n');
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      const ws = new WebSocket(`${proto}://${location.host}/api/remote/ssh?token=${encodeURIComponent(getToken() || '')}`);
+      wsRef.current = ws;
+      ws.onopen = () => { setStatus('인증 중… (자격증명 전송)'); ws.send(JSON.stringify({ type: 'auth', mappingId: mapping.id, username: creds.username, password: creds.password, cols: term.cols, rows: term.rows })); };
+      ws.onmessage = (e) => {
+        const s = typeof e.data === 'string' ? e.data : '';
+        try { const j = JSON.parse(s); if (j && j.type === 'status') { setStatus(j.text); term.write(`\r\n\x1b[33m${j.text}\x1b[0m\r\n`); return; } } catch { /* raw */ }
+        if (phaseRef.current !== 'live') { setPhase('live'); stopTimer(); }
+        term.write(s);
+      };
+      ws.onerror = () => { if (phaseRef.current !== 'live') { setPhase('error'); setStatus('WebSocket 연결 실패 — 포탈/프록시 경로 또는 인증을 확인하세요.'); } stopTimer(); };
+      ws.onclose = () => { term.write('\r\n\x1b[31m[연결 종료]\x1b[0m\r\n'); if (phaseRef.current !== 'live') { setPhase('error'); setStatus((x) => x && !x.includes('실패') ? `${x} — 연결이 종료되었습니다.` : (x || '연결이 종료되었습니다.')); } stopTimer(); };
+      term.onData((d) => { if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'data', data: d })); });
+      window.addEventListener('resize', () => { try { fit.fit(); if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows })); } catch { /* */ } });
+    }, 0);
   };
+
+  const elapsed = Math.floor(ticks * 0.2);
+  const slow = phase === 'connecting' && elapsed >= 20;
 
   return (
     <Modal title={`SSH — ${mapping.name} (${mapping.targetHost}:${mapping.targetPort})`} onClose={onClose} width={820}>
-      {!connected ? (
+      {phase === 'form' ? (
         <div className="spec-grid">
           <label>사용자명<input className="input" autoFocus value={creds.username} onChange={(e) => setCreds({ ...creds, username: e.target.value })} placeholder="root" /></label>
           <label>비밀번호<input className="input" type="password" value={creds.password} onChange={(e) => setCreds({ ...creds, password: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && creds.username && connect()} /></label>
           <div style={{ gridColumn: '1 / -1' }}>
             <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} disabled={!creds.username} onClick={connect}>접속</button>
-            <span className="muted" style={{ fontSize: 12, marginLeft: 10 }}>프록시 경유로 대상 SSH에 연결합니다.</span>
+            <span className="muted" style={{ fontSize: 12, marginLeft: 10 }}>{mapping.proxyName ? `프록시 '${mapping.proxyName}' 경유로 ` : '프록시 경유로 '}대상 SSH에 연결합니다.</span>
           </div>
         </div>
       ) : (
-        <div ref={elRef} style={{ height: 420, background: '#0b1020', borderRadius: 8, padding: 6 }} />
+        <>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, padding: '8px 12px', borderRadius: 8, fontSize: 13,
+            background: phase === 'live' ? 'rgba(34,197,94,.12)' : phase === 'error' ? 'rgba(239,68,68,.12)' : 'rgba(59,130,246,.12)',
+            color: phase === 'live' ? '#4ade80' : phase === 'error' ? '#f87171' : '#93c5fd' }}>
+            {phase === 'connecting' && <>
+              <span style={{ fontFamily: 'monospace' }}>{SPIN[ticks % SPIN.length]}</span>
+              <span>{status}</span>
+              <span className="muted" style={{ marginLeft: 'auto' }}>{elapsed}s 경과</span>
+            </>}
+            {phase === 'live' && <span>● 연결됨 — 터미널이 활성화되었습니다.</span>}
+            {phase === 'error' && <>
+              <span>⚠ {status}</span>
+              <button className="logout-btn" style={{ padding: '4px 12px', marginLeft: 'auto' }} onClick={connect}>재시도</button>
+            </>}
+          </div>
+          {slow && <div className="muted" style={{ fontSize: 12, marginBottom: 8, color: 'var(--amber)' }}>
+            응답이 지연되고 있습니다({elapsed}s). 프록시 매핑(공개포트) 적용 상태, 대상 SSH 포트/방화벽, 프록시→대상 경로를 확인하세요. 살아있으며 계속 시도 중입니다.
+          </div>}
+          <div ref={elRef} style={{ height: 400, background: '#0b1020', borderRadius: 8, padding: 6 }} />
+        </>
       )}
     </Modal>
   );

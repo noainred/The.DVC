@@ -93,7 +93,7 @@ export class VimSoapClient {
         ...(this.cookie ? { Cookie: this.cookie } : {}),
       },
       body: ENVELOPE(body),
-      signal: AbortSignal.timeout(30_000),
+      signal: AbortSignal.timeout(this.vc?.timeoutMs > 0 ? this.vc.timeoutMs : 30_000),
     });
     const setCookie = res.headers.get('set-cookie');
     if (setCookie) this.cookie = setCookie.split(';')[0];
