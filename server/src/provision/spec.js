@@ -44,15 +44,29 @@ export function expandSpec(spec = {}) {
     return { vms, errors };
   }
 
-  const count = Math.max(0, Math.min(500, Math.round(Number(spec.count) || 0)));
+  // Explicit IP list (one per VM) — for assigning non-contiguous / scattered IPs.
+  // Accepts an array or a newline/space/comma separated string.
+  const ipListRaw = Array.isArray(guest.ipList) ? guest.ipList : String(guest.ipList || '').split(/[\s,]+/);
+  const ipList = ipListRaw.map((s) => String(s).trim()).filter(Boolean);
+  const useList = !dhcp && ipList.length > 0;
+
+  // When an explicit IP list is given and no count is set, default the count to
+  // the number of IPs so users can just paste a column of addresses.
+  let count = Math.max(0, Math.min(500, Math.round(Number(spec.count) || 0)));
+  if (useList && count < 1) count = Math.min(500, ipList.length);
   const start = Math.round(Number(spec.startIndex) || 1);
   const pad = Math.max(0, Math.round(Number(spec.pad) || 0));
   if (!spec.namePattern) errors.push('이름 패턴이 필요합니다 (예: web-{n}).');
   if (count < 1) errors.push('생성 개수는 1 이상이어야 합니다.');
   if (count > 500) errors.push('한 번에 최대 500대까지 생성할 수 있습니다.');
 
+  if (useList) {
+    for (const ip of ipList) if (ipToNum(ip) == null) errors.push(`잘못된 IP: ${ip}`);
+    if (ipList.length < count) errors.push(`IP가 부족합니다 — VM ${count}대에 IP ${ipList.length}개. (한 줄에 하나씩 입력)`);
+  }
+
   let ipBase = null;
-  if (!dhcp && guest.ipStart) {
+  if (!dhcp && !useList && guest.ipStart) {
     ipBase = ipToNum(guest.ipStart);
     if (ipBase == null) errors.push(`잘못된 시작 IP: ${guest.ipStart}`);
   }
@@ -62,7 +76,7 @@ export function expandSpec(spec = {}) {
     const n = start + i;
     const name = applyPattern(spec.namePattern, n, pad);
     const hostname = guest.hostnamePattern ? applyPattern(guest.hostnamePattern, n, pad) : name;
-    const ip = dhcp ? '' : (ipBase != null ? numToIp(ipBase + i) : '');
+    const ip = dhcp ? '' : (useList ? (ipList[i] || '') : (ipBase != null ? numToIp(ipBase + i) : ''));
     vms.push({ name, hostname, ip });
   }
   const names = vms.map((v) => v.name);
