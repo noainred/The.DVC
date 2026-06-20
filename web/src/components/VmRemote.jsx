@@ -14,6 +14,7 @@ export function VmRemoteButton({ item }) {
   const [protocol, setProtocol] = useState('ssh');
   const [ip, setIp] = useState(ips[0] || '');
   const [port, setPort] = useState('');
+  const [creds, setCreds] = useState({ username: '', password: '', domain: '' });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [probe, setProbe] = useState({ loading: true });
@@ -52,7 +53,10 @@ export function VmRemoteButton({ item }) {
         const blob = await res.blob(); const url = URL.createObjectURL(blob);
         const a = document.createElement('a'); a.href = url; a.download = `${item.name}.rdp`; a.click(); URL.revokeObjectURL(url);
       } else {
-        openRemoteSession({ kind: protocol, mapping: { ...r.mapping, proxyName: r.proxyName } });
+        const initialCreds = creds.username
+          ? (protocol === 'rdp' ? { username: creds.username, password: creds.password, domain: creds.domain } : { username: creds.username, password: creds.password })
+          : null;
+        openRemoteSession({ kind: protocol, mapping: { ...r.mapping, proxyName: r.proxyName }, initialCreds });
       }
       setOpen(false);
     } catch (e) { setError(e.message); }
@@ -86,13 +90,27 @@ export function VmRemoteButton({ item }) {
               <label>포트(비우면 기본 {protocol === 'rdp' ? '3389' : '22'})
                 <input className="input" type="number" value={port} onChange={(e) => setPort(e.target.value)} placeholder={protocol === 'rdp' ? '3389' : '22'} />
               </label>
+              <label>사용자명
+                <input className="input" value={creds.username} onChange={(e) => setCreds({ ...creds, username: e.target.value })}
+                  placeholder={protocol === 'rdp' ? 'Administrator' : 'root'}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && ip && creds.username) connect(); }} />
+              </label>
+              <label>비밀번호
+                <input className="input" type="password" value={creds.password} onChange={(e) => setCreds({ ...creds, password: e.target.value })}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && ip && creds.username) connect(); }} />
+              </label>
+              {protocol === 'rdp' && (
+                <label>도메인(선택)
+                  <input className="input" value={creds.domain} onChange={(e) => setCreds({ ...creds, domain: e.target.value })} />
+                </label>
+              )}
               <div style={{ gridColumn: '1 / -1' }}>
                 {error && <div className="login-error" style={{ marginBottom: 8 }}>{error}</div>}
                 <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} disabled={busy || !ip} onClick={connect}>
                   {busy ? '연결 준비 중…' : '접속'}
                 </button>
                 <span className="muted" style={{ fontSize: 12, marginLeft: 10 }}>
-                  HAProxy 매핑을 만들고 {protocol === 'ssh' ? '브라우저 터미널' : 'RDP 웹콘솔/.rdp'}로 연결합니다.
+                  계정을 입력하면 바로 연결됩니다(비우면 콘솔에서 입력). {protocol === 'ssh' ? '브라우저 터미널' : 'RDP 웹콘솔/.rdp'}.
                 </span>
               </div>
             </div>
