@@ -19,6 +19,7 @@ import { startMappingExpiry } from './proxy/expiry.js';
 import { collectorRouter } from './routes/collector.js';
 import { centralRouter } from './routes/central.js';
 import { startIdracPoller } from './idrac/poller.js';
+import { startNsxPoller } from './nsx/store.js';
 import { startCollectorPuller } from './collector/puller.js';
 import { startAgentScanner } from './agent/scanner.js';
 
@@ -69,6 +70,7 @@ if (fs.existsSync(config.webDist)) {
 store.start();
 upgradeManager.start();
 startIdracPoller();
+startNsxPoller();
 startCollectorPuller();
 startAgentScanner();
 

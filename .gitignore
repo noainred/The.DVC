@@ -8,6 +8,7 @@ npm-debug.log*
 .DS_Store
 coverage/
 server/config/vcenters.json
+server/config/nsx.json
 server/config/users.json
 server/config/upgrade.json
 server/config/idrac.json

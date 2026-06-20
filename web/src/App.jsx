@@ -5,6 +5,7 @@ import Hosts from './views/Hosts.jsx';
 import Vms from './views/Vms.jsx';
 import Datastores from './views/Datastores.jsx';
 import Networks from './views/Networks.jsx';
+import Nsx from './views/Nsx.jsx';
 import Alarms from './views/Alarms.jsx';
 import Explore from './views/Explore.jsx';
 import VCenters from './views/VCenters.jsx';
@@ -12,6 +13,7 @@ import Summary from './views/Summary.jsx';
 import Upgrade from './views/Upgrade.jsx';
 import Settings from './views/Settings.jsx';
 import SpecialTools from './views/SpecialTools.jsx';
+import VmProvision from './views/VmProvision.jsx';
 import ReleaseNotes from './views/ReleaseNotes.jsx';
 import { RemoteConsoleWindow } from './remote/RemoteConsoleWindow.jsx';
 import Login from './views/Login.jsx';
@@ -26,8 +28,10 @@ const TABS = [
   { id: 'vms', label: '가상머신' },
   { id: 'datastores', label: '스토리지' },
   { id: 'networks', label: '네트워크' },
+  { id: 'nsx', label: 'NSX' },
   { id: 'alarms', label: '알람' },
   { id: 'tools', label: '특수 기능' },
+  { id: 'provision', label: 'VM 생성', adminOnly: true },
   { id: 'settings', label: '설정', adminOnly: true },
   { id: 'upgrade', label: '업그레이드', adminOnly: true, feature: 'upgradeTab' },
 ];
@@ -170,7 +174,7 @@ function Portal({ user, onLogout }) {
   }, [vcenterId, region]);
 
 
-  const noFilterTabs = ['overview', 'vcenters', 'summary', 'upgrade', 'tools', 'settings'];
+  const noFilterTabs = ['overview', 'vcenters', 'summary', 'upgrade', 'tools', 'settings', 'nsx', 'provision'];
   const showFilters = !noFilterTabs.includes(tab);
   const showTextSearch = tab !== 'explore';
 
@@ -267,8 +271,10 @@ function Portal({ user, onLogout }) {
           {tab === 'vms' && <Vms filters={filters} />}
           {tab === 'datastores' && <Datastores filters={filters} />}
           {tab === 'networks' && <Networks filters={filters} />}
+          {tab === 'nsx' && <Nsx />}
           {tab === 'alarms' && <Alarms filters={filters} />}
           {tab === 'tools' && <SpecialTools />}
+          {tab === 'provision' && user.role === 'admin' && <VmProvision />}
           {tab === 'settings' && user.role === 'admin' && <Settings />}
           {tab === 'upgrade' && user.role === 'admin' && health?.features?.upgradeTab && <Upgrade />}
         </ErrorBoundary>

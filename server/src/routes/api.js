@@ -9,6 +9,9 @@ import { buildIpamRows, buildSubnetSheets, listSubnets } from '../ipam/ledger.js
 import { buildWorkbook } from '../ipam/excel.js';
 import { listNotes } from '../release-notes.js';
 import { nlSearch } from '../llm/nlSearch.js';
+import { nsxStore } from '../nsx/store.js';
+import { expandSpec } from '../provision/spec.js';
+import { listSources, listJobs, getJob } from '../provision/jobs.js';
 
 export const api = Router();
 
@@ -158,6 +161,47 @@ api.get('/health', (_req, res) => {
 api.get('/overview', (_req, res) => {
   const snap = store.get();
   res.json({ generatedAt: snap.generatedAt, source: snap.source, ...snap.rollups });
+});
+
+// NSX overview — aggregated snapshot from the NSX Manager poller (separate from
+// vCenter). Optional ?managerId= / ?region= scoping for the detail tables.
+api.get('/nsx', (req, res) => {
+  const snap = nsxStore.get();
+  const { managerId, region } = req.query;
+  const mIds = new Set(
+    snap.managers
+      .filter((m) => (!managerId || m.id === managerId) && (!region || m.region === region))
+      .map((m) => m.id),
+  );
+  const scoped = managerId || region;
+  res.json({
+    generatedAt: snap.generatedAt,
+    source: snap.source,
+    rollup: snap.rollup,
+    managers: snap.managers.filter((m) => mIds.has(m.id)),
+    gateways: scoped ? snap.gateways.filter((g) => mIds.has(g.managerId)) : snap.gateways,
+    segments: scoped ? snap.segments.filter((s) => mIds.has(s.managerId)) : snap.segments,
+    transportNodes: scoped ? snap.transportNodes.filter((t) => mIds.has(t.managerId)) : snap.transportNodes,
+    collectionErrors: snap.collectionErrors,
+  });
+});
+
+// --- VM 프로비저닝 (생성/대량 생성) ---
+// Clonable source VMs/templates from the current snapshot (optionally scoped).
+api.get('/provision/sources', (req, res) => {
+  res.json({ sources: listSources(req.query.vcenterId) });
+});
+// Dry-run: expand a bulk spec into the concrete per-VM list (name/hostname/ip).
+api.post('/provision/preview', (req, res) => {
+  const { vms, errors } = expandSpec(req.body || {});
+  res.json({ ok: errors.length === 0, count: vms.length, vms: vms.slice(0, 500), errors });
+});
+// Provisioning jobs (only the caller's own; admins see all).
+api.get('/provision/jobs', (req, res) => res.json({ jobs: listJobs(req.user) }));
+api.get('/provision/jobs/:id', (req, res) => {
+  const job = getJob(req.params.id, req.user);
+  if (!job) return res.status(404).json({ ok: false, reason: '작업을 찾을 수 없습니다.' });
+  res.json(job);
 });
 
 api.get('/vcenters', (_req, res) => {
