@@ -14,6 +14,7 @@ import { upgradeManager } from './upgrade/manager.js';
 import { adminRouter } from './routes/admin.js';
 import { remoteRouter } from './routes/remote.js';
 import { attachSshGateway } from './proxy/sshGateway.js';
+import { attachRdpGateway } from './proxy/guacdTunnel.js';
 import { collectorRouter } from './routes/collector.js';
 import { centralRouter } from './routes/central.js';
 import { startIdracPoller } from './idrac/poller.js';
@@ -78,5 +79,6 @@ const server = app.listen(config.port, () => {
   console.log(`  ▸ auth: ${config.auth.enabled ? 'enabled' : 'disabled'}\n`);
 });
 
-// Browser SSH console (WebSocket upgrade on /api/remote/ssh).
+// Browser SSH/RDP consoles (WebSocket upgrades on /api/remote/ssh and /rdp).
 attachSshGateway(server);
+attachRdpGateway(server);
