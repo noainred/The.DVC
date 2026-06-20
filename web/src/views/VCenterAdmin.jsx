@@ -186,6 +186,8 @@ export default function VCenterAdmin() {
         </div>
       )}
 
+      <VcenterOrderCard />
+
       <div className="table-wrap">
         <table>
           <thead><tr>
@@ -264,5 +266,69 @@ export default function VCenterAdmin() {
         </div>
       )}
     </>
+  );
+}
+
+/** 웹에 표시되는 모든 'vCenter 선택' 목록의 순서를 지정한다(↑/↓로 정렬 후 저장). */
+function VcenterOrderCard() {
+  const [list, setList] = useState(null);
+  const [msg, setMsg] = useState(null);
+  const [open, setOpen] = useState(false);
+  const load = () => fetchJson('/admin/vcenter-order').then((r) => setList(r.vcenters)).catch(() => setList([]));
+  useEffect(() => { load(); }, []);
+  if (!list) return null;
+
+  const move = (i, d) => {
+    const j = i + d;
+    if (j < 0 || j >= list.length) return;
+    const next = [...list];
+    [next[i], next[j]] = [next[j], next[i]];
+    setList(next);
+  };
+  const save = async () => {
+    const r = await putJson('/admin/vcenter-order', { order: list.map((v) => v.id) }).catch((e) => ({ ok: false, reason: e.message }));
+    setMsg(r.ok ? { ok: true, text: '순서를 저장했습니다. 모든 vCenter 선택 목록에 적용됩니다.' } : { ok: false, text: r.reason || '저장 실패' });
+    if (r.ok) setTimeout(() => setMsg(null), 4000);
+  };
+  const sortName = () => setList([...list].sort((a, b) => a.name.localeCompare(b.name)));
+
+  return (
+    <div className="card" style={{ marginBottom: 12, padding: '12px 14px' }}>
+      <div className="flex between wrap" style={{ alignItems: 'center' }}>
+        <b style={{ fontSize: 14 }}>vCenter 표시 순서 ({list.length})</b>
+        <button className="logout-btn" style={{ padding: '7px 12px' }} onClick={() => setOpen((o) => !o)}>{open ? '접기' : '순서 지정'}</button>
+      </div>
+      <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>여기서 정한 순서가 웹의 모든 “vCenter 선택” 콤보박스·목록에 동일하게 적용됩니다.</div>
+      {open && (
+        <>
+          {msg && <div style={{ margin: '8px 0', padding: '8px 12px', borderRadius: 8, fontSize: 13, background: msg.ok ? 'rgba(34,197,94,.12)' : 'rgba(239,68,68,.12)', color: msg.ok ? '#4ade80' : '#f87171' }}>{msg.text}</div>}
+          <div className="table-wrap" style={{ marginTop: 8, maxHeight: '44vh' }}>
+            <table>
+              <thead><tr><th style={{ width: 50 }}>순서</th><th>이름</th><th>ID</th><th>리전</th><th className="right">이동</th></tr></thead>
+              <tbody>
+                {list.length === 0 && <tr><td colSpan={5} className="center muted" style={{ padding: 18 }}>등록된 vCenter가 없습니다.</td></tr>}
+                {list.map((v, i) => (
+                  <tr key={v.id}>
+                    <td className="muted">{i + 1}</td>
+                    <td><b>{v.name}</b></td>
+                    <td className="muted">{v.id}</td>
+                    <td><span className="badge blue">{v.region || '-'}</span></td>
+                    <td className="right nowrap">
+                      <button className="tab" disabled={i === 0} onClick={() => move(i, -1)}>↑</button>
+                      <button className="tab" disabled={i === list.length - 1} onClick={() => move(i, 1)}>↓</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex gap" style={{ marginTop: 10 }}>
+            <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={save}>순서 저장</button>
+            <button className="logout-btn" style={{ padding: '8px 14px' }} onClick={sortName}>이름순 정렬</button>
+            <button className="logout-btn" style={{ padding: '8px 14px' }} onClick={load}>되돌리기</button>
+          </div>
+        </>
+      )}
+    </div>
   );
 }

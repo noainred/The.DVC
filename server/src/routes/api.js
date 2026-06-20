@@ -10,6 +10,7 @@ import { getAnnotation, setAnnotation } from '../ipam/annotations.js';
 import { buildWorkbook } from '../ipam/excel.js';
 import { listNotes } from '../release-notes.js';
 import { nlSearch } from '../llm/nlSearch.js';
+import { sortByOrder } from '../vcenter/order.js';
 import { nsxStore } from '../nsx/store.js';
 import { expandSpec } from '../provision/spec.js';
 import { listSources, listJobs, getJob } from '../provision/jobs.js';
@@ -216,7 +217,7 @@ api.get('/provision/jobs/:id', (req, res) => {
 });
 
 api.get('/vcenters', (_req, res) => {
-  res.json(store.get().rollups?.sites ?? []);
+  res.json(sortByOrder(store.get().rollups?.sites ?? [], (s) => s.id));
 });
 
 // Special tool: find IPv4 addresses assigned to more than one VM, optionally
