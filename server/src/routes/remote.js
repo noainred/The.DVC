@@ -14,6 +14,7 @@ import {
 } from '../proxy/registry.js';
 import { testDataplane, applyMapping, removeMapping as haproxyRemove } from '../proxy/dataplane.js';
 import { deployToProxy, previewConfig, testDeploy } from '../proxy/deploy.js';
+import { withSsh } from '../proxy/sshExec.js';
 
 export const remoteRouter = Router();
 const adminOnly = requireRole('admin');
@@ -29,6 +30,31 @@ remoteRouter.get('/mappings', (_req, res) => {
       return { ...m, proxyName: p.name, proxyHost: p.proxyHost, guacdConfigured: !!p.guacd?.host };
     }),
   });
+});
+
+// Reachability probe: from the assigned proxy, ping the target and check the
+// TCP port. Used to colour the VM "원격 접속" button (blue=open, red=closed).
+const SAFE_HOST = /^[A-Za-z0-9._:-]+$/;
+remoteRouter.post('/probe', async (req, res) => {
+  const { vcenterId, targetHost } = req.body || {};
+  const targetPort = Math.min(65535, Math.max(1, Number((req.body || {}).targetPort) || 22));
+  if (!targetHost || !SAFE_HOST.test(targetHost)) return res.status(400).json({ ok: false, reason: '대상 호스트가 올바르지 않습니다.' });
+  const proxy = resolveProxy(vcenterId);
+  if (!proxy.deploy?.host || !proxy.deploy?.username) {
+    return res.json({ ok: false, method: 'none', proxyName: proxy.name, reason: `프록시 '${proxy.name}'에 SSH(자동배포) 설정이 없어 사전 점검을 할 수 없습니다.` });
+  }
+  const creds = { host: proxy.deploy.host, port: proxy.deploy.port, username: proxy.deploy.username, password: proxy.deploy.password, privateKey: proxy.deploy.privateKey || undefined };
+  try {
+    const out = await withSsh(creds, async ({ exec }) => {
+      const ping = await exec(`ping -c1 -W1 ${targetHost} 2>/dev/null | sed -n 's/.*time=\\([0-9.]*\\).*/\\1/p' | head -1`);
+      const pingMs = parseFloat(ping.stdout.trim());
+      const port = await exec(`timeout 2 bash -c '</dev/tcp/${targetHost}/${targetPort}' 2>/dev/null && echo OPEN || echo CLOSED`);
+      return { pingOk: Number.isFinite(pingMs), pingMs: Number.isFinite(pingMs) ? pingMs : null, portOpen: port.stdout.includes('OPEN') };
+    });
+    res.json({ ok: true, method: 'ssh', proxyName: proxy.name, targetHost, targetPort, ...out });
+  } catch (err) {
+    res.json({ ok: false, method: 'ssh', proxyName: proxy.name, reason: err.message });
+  }
 });
 
 // vCenter → proxy assignments (any authenticated user; secrets redacted for admin view).

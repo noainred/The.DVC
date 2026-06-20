@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { postJson, getToken } from '../api.js';
 import { Modal } from './ui.jsx';
 import { openRemoteSession } from '../remote/sessions.js';
@@ -16,8 +16,29 @@ export function VmRemoteButton({ item }) {
   const [port, setPort] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const [probe, setProbe] = useState({ loading: true });
 
   const noIp = ips.length === 0;
+  const guessPort = /windows/i.test(item.guestOS || '') ? 3389 : 22;
+
+  // Pre-flight reachability check via the assigned proxy (ping + TCP port).
+  useEffect(() => {
+    let alive = true;
+    if (noIp) { setProbe({ loading: false, ok: false, reason: '수집된 IP가 없습니다.' }); return; }
+    setProbe({ loading: true });
+    postJson('/remote/probe', { vcenterId: item.vcenterId, targetHost: ips[0], targetPort: guessPort })
+      .then((r) => { if (alive) setProbe({ loading: false, ...r }); })
+      .catch((e) => { if (alive) setProbe({ loading: false, ok: false, reason: e.message }); });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [item.id]);
+
+  const probeColor = probe.loading ? null : probe.ok ? (probe.portOpen ? '#60a5fa' : '#f87171') : '#f59e0b';
+  const probeTip = probe.loading ? '프록시 경유 접속 점검 중…'
+    : probe.ok
+      ? `프록시 '${probe.proxyName}'에서 ${ips[0]}:${guessPort} ${probe.portOpen ? '통신 OK ✓' : '통신 실패 ✗'}`
+        + (probe.pingOk ? ` · ping ${probe.pingMs}ms` : ' · ping 무응답')
+      : `사전 점검 불가: ${probe.reason || ''}`;
   const connect = async () => {
     setBusy(true); setError(null);
     try {
@@ -40,8 +61,9 @@ export function VmRemoteButton({ item }) {
 
   return (
     <>
-      <button className="logout-btn" style={{ padding: '8px 14px' }} onClick={() => { setError(null); setOpen(true); }} title="HAProxy 경유 SSH/RDP">
-        🔗 원격 접속
+      <button className="logout-btn" style={{ padding: '8px 14px', color: probeColor || undefined, borderColor: probeColor || undefined }}
+        onClick={() => { setError(null); setOpen(true); }} title={probeTip}>
+        🔗 원격 접속{probe.loading ? ' …' : probe.ok ? (probe.portOpen ? ' ●' : ' ●') : ''}
       </button>
 
       {open && (
