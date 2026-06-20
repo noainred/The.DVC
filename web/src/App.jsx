@@ -212,10 +212,10 @@ function Portal({ user, onLogout }) {
               <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.3 }}>
                 <span>
                   <span className="dot live" style={{ background: color, boxShadow: `0 0 8px ${color}` }} />
-                  {health ? `${health.source.toUpperCase()} · ${conn}/${total} vCenter` : '연결 중…'}
+                  {health ? `${conn}/${total} vCenter${allOk ? ' OK' : ''}` : '연결 중…'}
                   {!allOk && <span className="muted"> ({total - conn} 불가)</span>}
                 </span>
-                {health?.generatedAt && <span className="muted" style={{ fontSize: 11 }}>{new Date(health.generatedAt).toLocaleTimeString('ko-KR')}</span>}
+                {health?.generatedAt && <span className="muted" style={{ fontSize: 11, textAlign: 'center' }}>{new Date(health.generatedAt).toLocaleTimeString('ko-KR')}</span>}
               </div>
             );
           })()}
