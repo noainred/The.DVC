@@ -14,6 +14,7 @@ import { store } from '../store.js';
 import { getDataSource } from '../runtime-settings.js';
 import { loadVcenterConfig } from '../config.js';
 import { expandSpec } from './spec.js';
+import { cleanPlacement } from './placement.js';
 import { createProvisioner } from './vsphere.js';
 import { describeError } from '../util/errors.js';
 
@@ -22,11 +23,15 @@ const MAX_JOBS = 50; // keep the most recent N jobs in memory
 
 const jobs = []; // newest first
 
-/** Source VMs/templates that can be cloned, from the current snapshot. */
-export function listSources(vcenterId) {
+/** Source VMs/templates that can be cloned, from the current snapshot.
+ *  `q` does a case-insensitive prefix match on the name (A → all starting "A"). */
+export function listSources(vcenterId, q = '') {
   const snap = store.get();
-  return snap.vms
+  const prefix = String(q || '').trim().toLowerCase();
+  const all = snap.vms
     .filter((v) => !vcenterId || v.vcenterId === vcenterId)
+    .filter((v) => !prefix || String(v.name || '').toLowerCase().startsWith(prefix));
+  const sources = all
     .map((v) => ({
       id: v.id, name: v.name, vcenterId: v.vcenterId,
       template: Boolean(v.template), guestOS: v.guestOS || '',
@@ -34,6 +39,8 @@ export function listSources(vcenterId) {
     }))
     // Templates first, then powered-off (golden images), then the rest.
     .sort((a, b) => (Number(b.template) - Number(a.template)) || a.name.localeCompare(b.name));
+  // Cap the payload; the name search narrows it for the user.
+  return { total: sources.length, sources: sources.slice(0, 300) };
 }
 
 export function listJobs(user) {
@@ -52,6 +59,7 @@ export function getJob(id, user) {
 const redact = (j) => ({
   id: j.id, createdAt: j.createdAt, createdBy: j.createdBy, vcenterId: j.vcenterId,
   sourceId: j.sourceId, sourceName: j.sourceName, powerOn: j.powerOn, live: j.live,
+  placement: j.placement,
   status: j.status, total: j.vms.length,
   done: j.vms.filter((v) => v.status === 'done').length,
   failed: j.vms.filter((v) => v.status === 'error').length,
@@ -73,6 +81,7 @@ export function createJob(spec, { user } = {}) {
 
   const live = getDataSource() !== 'mock';
   const guest = spec.guest || {};
+  const placement = cleanPlacement(spec.placement);
   const job = {
     id: randomUUID(),
     createdAt: new Date().toISOString(),
@@ -82,9 +91,10 @@ export function createJob(spec, { user } = {}) {
     sourceName: source.name,
     sourceGuestOS: source.guestOS || '',
     powerOn: Boolean(spec.powerOn),
+    placement,
     live,
     status: 'running',
-    vms: vms.map((v) => ({ ...v, guest, status: 'queued', error: null, task: null })),
+    vms: vms.map((v) => ({ ...v, guest, placement, status: 'queued', error: null, task: null })),
   };
   jobs.unshift(job);
   while (jobs.length > MAX_JOBS) jobs.pop();
@@ -108,7 +118,7 @@ async function runJob(job, source) {
     await eachLimited(job.vms, CONCURRENCY, async (v) => {
       v.status = 'running';
       try {
-        const r = await prov.cloneOne(source, v, { powerOn: job.powerOn });
+        const r = await prov.cloneOne(source, v, { powerOn: job.powerOn, placement: job.placement });
         v.task = r.task; v.status = 'done';
       } catch (err) {
         const d = describeError(err);

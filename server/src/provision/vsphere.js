@@ -11,6 +11,19 @@
  */
 
 import { VimSoapClient } from '../vcenter/soapClient.js';
+import { store } from '../store.js';
+
+// Resolve a host/datastore display name to its MoRef using the live snapshot
+// (snapshot ids are `${vcId}:${moref}`), scoped to one vCenter.
+const morefOf = (id) => String(id || '').split(':').slice(1).join(':');
+function findHostRef(vcenterId, name) {
+  const h = store.get().hosts.find((x) => x.vcenterId === vcenterId && x.name === name);
+  return h ? morefOf(h.id) : null;
+}
+function findDatastoreRef(vcenterId, name) {
+  const d = store.get().datastores.find((x) => x.vcenterId === vcenterId && x.name === name);
+  return d ? morefOf(d.id) : null;
+}
 
 const esc = (s) => String(s ?? '')
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -69,15 +82,25 @@ export function createProvisioner(vc) {
   };
 
   return {
-    async cloneOne(source, vm, { powerOn = false } = {}) {
+    async cloneOne(source, vm, { powerOn = false, placement = {} } = {}) {
       await ensureLogin();
-      const srcRef = String(source.id).split(':').slice(1).join(':') || source.id;
+      const srcRef = morefOf(source.id) || source.id;
+      // Target folder: the operator's choice would need a name→MoRef lookup; for
+      // now we place into the source's parent folder (same as source).
       const folder = await parentFolder(srcRef);
       if (!folder) throw new Error('원본 VM의 폴더를 찾을 수 없습니다 (parent Folder 조회 실패).');
+
+      // RelocateSpec: pin host / datastore when chosen (resolved from snapshot).
+      const hostRef = placement.host ? findHostRef(source.vcenterId, placement.host) : null;
+      const dsRef = placement.datastore ? findDatastoreRef(source.vcenterId, placement.datastore) : null;
+      const reloc =
+        (hostRef ? `<host type="HostSystem">${hostRef}</host>` : '') +
+        (dsRef ? `<datastore type="Datastore">${dsRef}</datastore>` : '') +
+        (placement.storageProfile ? `<profile><profile xsi:type="VirtualMachineDefinedProfileSpec"><profileName>${esc(placement.storageProfile)}</profileName></profile></profile>` : '');
       const windows = isWindows(source.guestOS);
       const spec =
         `<spec>` +
-        `<location/>` +
+        `<location>${reloc}</location>` +
         `<template>false</template>` +
         customizationXml(vm, vm.guest || {}, windows) +
         `<powerOn>${powerOn ? 'true' : 'false'}</powerOn>` +

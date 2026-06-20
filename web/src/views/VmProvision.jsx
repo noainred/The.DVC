@@ -2,6 +2,9 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { fetchJson, postJson, usePolling } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 
+const chipStyle = { cursor: 'pointer', padding: '5px 12px', fontSize: 12, userSelect: 'none' };
+const chipActive = { border: '1px solid var(--accent,#6366f1)', color: '#c7d2fe', background: 'rgba(99,102,241,.15)' };
+
 const JOB_BADGE = { running: 'amber', completed: 'green', completed_with_errors: 'amber', error: 'red' };
 const JOB_LABEL = { running: '진행 중', completed: '완료', completed_with_errors: '일부 실패', error: '실패' };
 const VM_BADGE = { queued: 'gray', running: 'amber', done: 'green', error: 'red' };
@@ -10,7 +13,8 @@ const VM_LABEL = { queued: '대기', running: '생성 중', done: '완료', erro
 const EMPTY = {
   vcenterId: '', sourceId: '',
   namePattern: 'vm-{n}', count: 3, startIndex: 1, pad: 2, powerOn: true,
-  guest: { hostnamePattern: 'vm-{n}', ipMode: 'static', ipStart: '', subnetMask: '255.255.255.0', gateway: '', dnsServers: '', domain: '' },
+  placement: { cluster: '', host: '', datastore: '', folder: '', resourcePool: '', storageProfile: '' },
+  guest: { hostnamePattern: 'vm-{n}', ipMode: 'static', ipStart: '', ipAssign: 'sequential', ipList: '', subnetMask: '255.255.255.0', gateway: '', dnsServers: '', domain: '' },
 };
 
 /** VM 생성 — 비슷한 VM을 한 번에 대량 생성 + 게스트 OS hostname/IP 설정. (관리자) */
@@ -18,25 +22,52 @@ export default function VmProvision() {
   const { data: vcenters } = usePolling('/vcenters', {}, 60_000);
   const [form, setForm] = useState(structuredClone(EMPTY));
   const [sources, setSources] = useState([]);
+  const [srcTotal, setSrcTotal] = useState(0);
+  const [srcQuery, setSrcQuery] = useState('');
+  const [srcLoading, setSrcLoading] = useState(false);
+  const [placement, setPlacement] = useState(null);
   const [preview, setPreview] = useState(null);
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
   const [jobId, setJobId] = useState(null);
 
-  // Load clonable sources whenever the vCenter scope changes.
+  // Placement options (cluster/host/datastore/folder/pool/profile) for the 법인.
   useEffect(() => {
     const q = form.vcenterId ? `?vcenterId=${encodeURIComponent(form.vcenterId)}` : '';
-    fetchJson(`/provision/sources${q}`).then((r) => setSources(r.sources || [])).catch(() => setSources([]));
+    fetchJson(`/provision/placement${q}`).then(setPlacement).catch(() => setPlacement(null));
   }, [form.vcenterId]);
+
+  // Load clonable templates/VMs for the selected 법인(vCenter), prefix-filtered by
+  // the name box (A → all starting with A). Debounced so typing stays smooth.
+  useEffect(() => {
+    setSrcLoading(true);
+    const params = new URLSearchParams();
+    if (form.vcenterId) params.set('vcenterId', form.vcenterId);
+    if (srcQuery.trim()) params.set('q', srcQuery.trim());
+    const t = setTimeout(() => {
+      fetchJson(`/provision/sources?${params.toString()}`)
+        .then((r) => { setSources(r.sources || []); setSrcTotal(r.total ?? (r.sources || []).length); })
+        .catch(() => { setSources([]); setSrcTotal(0); })
+        .finally(() => setSrcLoading(false));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [form.vcenterId, srcQuery]);
 
   const setF = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
   const setG = (k) => (e) => setForm((f) => ({ ...f, guest: { ...f.guest, [k]: e.target.value } }));
+  const setP = (k) => (e) => setForm((f) => ({ ...f, placement: { ...f.placement, [k]: e.target.value } }));
 
   const specBody = useMemo(() => ({
     sourceId: form.sourceId,
     namePattern: form.namePattern, count: Number(form.count) || 0, startIndex: Number(form.startIndex) || 1, pad: Number(form.pad) || 0,
     powerOn: form.powerOn,
-    guest: { ...form.guest, dnsServers: String(form.guest.dnsServers || '').split(/[\s,]+/).filter(Boolean) },
+    placement: form.placement,
+    guest: {
+      ...form.guest,
+      dnsServers: String(form.guest.dnsServers || '').split(/[\s,]+/).filter(Boolean),
+      // 'list' mode → send the explicit IPs; otherwise let the server auto-increment.
+      ipList: form.guest.ipAssign === 'list' ? String(form.guest.ipList || '').split(/[\s,\n]+/).filter(Boolean) : [],
+    },
   }), [form]);
 
   const doPreview = async () => {
@@ -45,7 +76,7 @@ export default function VmProvision() {
     catch (e) { setMsg({ ok: false, text: e.message }); }
   };
   // Auto-refresh the preview as the user types the pattern/count/IP.
-  useEffect(() => { const t = setTimeout(doPreview, 350); return () => clearTimeout(t); /* eslint-disable-next-line */ }, [form.namePattern, form.count, form.startIndex, form.pad, form.guest.ipMode, form.guest.ipStart, form.guest.hostnamePattern]);
+  useEffect(() => { const t = setTimeout(doPreview, 350); return () => clearTimeout(t); /* eslint-disable-next-line */ }, [form.namePattern, form.count, form.startIndex, form.pad, form.guest.ipMode, form.guest.ipStart, form.guest.ipAssign, form.guest.ipList, form.guest.hostnamePattern]);
 
   const submit = async () => {
     if (!form.sourceId) return setMsg({ ok: false, text: '원본 VM/템플릿을 선택하세요.' });
@@ -65,26 +96,89 @@ export default function VmProvision() {
       <div className="section-title" style={{ marginTop: 0 }}>🖥️ VM 생성 · 대량 생성</div>
 
       <div className="card" style={{ marginBottom: 14 }}>
-        <b style={{ fontSize: 14 }}>1. 원본 선택 (클론)</b>
-        <div className="spec-grid" style={{ marginTop: 8 }}>
-          <label>vCenter
-            <select className="select" value={form.vcenterId} onChange={(e) => setForm((f) => ({ ...f, vcenterId: e.target.value, sourceId: '' }))}>
-              <option value="">— 전체 —</option>
-              {(vcenters || []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
-            </select>
-          </label>
-          <label style={{ gridColumn: '1 / -1' }}>원본 VM / 템플릿 ({sources.length})
-            <select className="select" value={form.sourceId} onChange={setF('sourceId')}>
-              <option value="">— 선택 —</option>
-              {sources.map((s) => <option key={s.id} value={s.id}>{s.template ? '📦 ' : ''}{s.name} · {s.guestOS || 'OS?'} · {s.template ? '템플릿' : (s.powerState === 'POWERED_ON' ? 'On' : 'Off')}</option>)}
-            </select>
-          </label>
+        <b style={{ fontSize: 14 }}>1. 원본 선택 (클론) — 법인(vCenter)을 선택하고 이름으로 검색하세요</b>
+
+        {/* 법인(vCenter) 칩 — 클릭 시 해당 법인의 템플릿/VM 목록 */}
+        <div className="flex gap wrap" style={{ margin: '10px 0' }}>
+          <span className="badge gray" style={{ ...chipStyle, ...(form.vcenterId === '' ? chipActive : {}) }}
+            onClick={() => setForm((f) => ({ ...f, vcenterId: '', sourceId: '' }))}>전체</span>
+          {(vcenters || []).map((v) => (
+            <span key={v.id} className="badge gray" style={{ ...chipStyle, ...(form.vcenterId === v.id ? chipActive : {}) }}
+              onClick={() => setForm((f) => ({ ...f, vcenterId: v.id, sourceId: '' }))}>{v.name}</span>
+          ))}
         </div>
-        {sel && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>게스트 OS: <b>{sel.guestOS || '알 수 없음'}</b>{/win/i.test(sel.guestOS) ? ' (Windows — Sysprep 사용자 지정)' : ' (Linux — LinuxPrep 사용자 지정)'} · vCPU {sel.cpuCount ?? '—'} · RAM {sel.memMB ? `${Math.round(sel.memMB / 1024)}GB` : '—'}</div>}
+
+        {/* 이름 접두 검색: A 입력 → A로 시작하는 모든 VM/템플릿 */}
+        <input className="input" value={srcQuery} onChange={(e) => setSrcQuery(e.target.value)}
+          placeholder="이름으로 검색 (예: A → A로 시작하는 모든 VM/템플릿)" style={{ marginBottom: 8 }} />
+        <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
+          {form.vcenterId ? `${vcenters?.find((v) => v.id === form.vcenterId)?.name || form.vcenterId} · ` : '전체 법인 · '}
+          {srcLoading ? '검색 중…' : `${srcTotal.toLocaleString()}개 일치${srcTotal > sources.length ? ` (상위 ${sources.length}개 표시 — 이름을 더 입력해 좁히세요)` : ''}`}
+        </div>
+
+        <div className="table-wrap" style={{ maxHeight: '34vh' }}>
+          <table>
+            <thead><tr><th>유형</th><th>이름</th><th>Guest OS</th><th>전원/상태</th><th className="right">vCPU / RAM</th></tr></thead>
+            <tbody>
+              {sources.length === 0 && <tr><td colSpan={5} className="center muted" style={{ padding: 22 }}>{srcLoading ? '검색 중…' : '일치하는 템플릿/VM이 없습니다.'}</td></tr>}
+              {sources.map((s) => (
+                <tr key={s.id} style={{ cursor: 'pointer', background: form.sourceId === s.id ? 'rgba(99,102,241,.14)' : undefined }}
+                  onClick={() => setForm((f) => ({ ...f, sourceId: s.id }))}>
+                  <td>{s.template ? <span className="badge purple">📦 템플릿</span> : <span className="badge blue">VM</span>}</td>
+                  <td><b>{s.name}</b>{form.sourceId === s.id && <span style={{ color: '#818cf8', marginLeft: 6 }}>✓</span>}</td>
+                  <td className="muted">{s.guestOS || '—'}</td>
+                  <td>{s.template ? <span className="muted">템플릿</span> : <span className="muted">{s.powerState === 'POWERED_ON' ? 'On' : 'Off'}</span>}</td>
+                  <td className="right muted">{s.cpuCount ?? '—'} / {s.memMB ? `${Math.round(s.memMB / 1024)}GB` : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {sel
+          ? <div style={{ marginTop: 8, fontSize: 13 }}>선택된 원본: <b>{sel.name}</b> · 게스트 OS <b>{sel.guestOS || '알 수 없음'}</b>{/win/i.test(sel.guestOS) ? ' (Windows — Sysprep)' : ' (Linux — LinuxPrep)'} · vCPU {sel.cpuCount ?? '—'} · RAM {sel.memMB ? `${Math.round(sel.memMB / 1024)}GB` : '—'}</div>
+          : <div className="muted" style={{ marginTop: 8, fontSize: 12 }}>위 목록에서 복제할 템플릿/VM을 클릭하세요.</div>}
       </div>
 
       <div className="card" style={{ marginBottom: 14 }}>
-        <b style={{ fontSize: 14 }}>2. 이름 · 개수</b>
+        <b style={{ fontSize: 14 }}>2. 배치 (클러스터 · 호스트 · 스토리지 · 폴더 · 리소스풀 · 프로파일)</b>
+        <div className="spec-grid" style={{ marginTop: 8 }}>
+          <label>클러스터
+            <select className="select" value={form.placement.cluster} onChange={(e) => setForm((f) => ({ ...f, placement: { ...f.placement, cluster: e.target.value, host: '' } }))}>
+              <option value="">— 자동/원본과 동일 —</option>
+              {(placement?.clusters || []).map((c) => <option key={c.name} value={c.name}>{c.name} (호스트 {c.hosts})</option>)}
+            </select>
+          </label>
+          <label>호스트(ESXi)
+            <select className="select" value={form.placement.host} onChange={setP('host')}>
+              <option value="">— 자동(DRS) —</option>
+              {(placement?.hosts || []).filter((h) => !form.placement.cluster || h.cluster === form.placement.cluster).map((h) => <option key={h.id} value={h.name}>{h.name}</option>)}
+            </select>
+          </label>
+          <label>데이터스토어
+            <select className="select" value={form.placement.datastore} onChange={setP('datastore')}>
+              <option value="">— 자동/원본과 동일 —</option>
+              {(placement?.datastores || []).map((d) => <option key={d.id} value={d.name}>{d.name}{d.freeGB != null ? ` · 여유 ${d.freeGB >= 1024 ? `${(d.freeGB / 1024).toFixed(1)}TB` : `${d.freeGB}GB`}` : ''}</option>)}
+            </select>
+          </label>
+          <label>폴더(VM Folder)
+            <input className="input" list="prov-folders" value={form.placement.folder} onChange={setP('folder')} placeholder="예: Production" />
+            <datalist id="prov-folders">{(placement?.folders || []).map((x) => <option key={x} value={x} />)}</datalist>
+          </label>
+          <label>리소스 풀(Resource Pool)
+            <input className="input" list="prov-pools" value={form.placement.resourcePool} onChange={setP('resourcePool')} placeholder="예: Prod" />
+            <datalist id="prov-pools">{(placement?.resourcePools || []).map((x) => <option key={x} value={x} />)}</datalist>
+          </label>
+          <label>스토리지 프로파일(정책)
+            <input className="input" list="prov-profiles" value={form.placement.storageProfile} onChange={setP('storageProfile')} placeholder="예: vSAN Default Storage Policy" />
+            <datalist id="prov-profiles">{(placement?.profiles || []).map((x) => <option key={x} value={x} />)}</datalist>
+          </label>
+        </div>
+        <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>비워두면 원본 VM과 동일한 위치(클러스터/호스트/데이터스토어)에 배치됩니다. 폴더·리소스풀·프로파일은 vCenter의 정확한 이름을 입력하세요(목록은 추천값).</div>
+      </div>
+
+      <div className="card" style={{ marginBottom: 14 }}>
+        <b style={{ fontSize: 14 }}>3. 이름 · 개수</b>
         <div className="spec-grid" style={{ marginTop: 8 }}>
           <label>이름 패턴 (<code>{'{n}'}</code> = 일련번호)<input className="input" value={form.namePattern} onChange={setF('namePattern')} placeholder="web-{n}" /></label>
           <label>개수<input className="input" type="number" min="1" max="500" value={form.count} onChange={setF('count')} /></label>
@@ -97,24 +191,44 @@ export default function VmProvision() {
       </div>
 
       <div className="card" style={{ marginBottom: 14 }}>
-        <b style={{ fontSize: 14 }}>3. 게스트 OS 설정 (hostname · IP)</b>
+        <b style={{ fontSize: 14 }}>4. 게스트 OS 설정 (hostname · IP)</b>
         <div className="spec-grid" style={{ marginTop: 8 }}>
           <label>Hostname 패턴<input className="input" value={form.guest.hostnamePattern} onChange={setG('hostnamePattern')} placeholder="web-{n}" /></label>
           <label>IP 방식
             <select className="select" value={form.guest.ipMode} onChange={setG('ipMode')}>
-              <option value="static">고정 IP (자동 증가)</option>
+              <option value="static">고정 IP</option>
               <option value="dhcp">DHCP</option>
             </select>
           </label>
-          {form.guest.ipMode === 'static' && <>
+          {form.guest.ipMode === 'static' && (
+            <label>IP 할당
+              <select className="select" value={form.guest.ipAssign} onChange={setG('ipAssign')}>
+                <option value="sequential">순차 증가 (시작 IP +1)</option>
+                <option value="list">직접 입력 (떨어진 IP)</option>
+              </select>
+            </label>
+          )}
+          {form.guest.ipMode === 'static' && form.guest.ipAssign === 'sequential' && (
             <label>시작 IP<input className="input" value={form.guest.ipStart} onChange={setG('ipStart')} placeholder="10.0.10.50" /></label>
+          )}
+          {form.guest.ipMode === 'static' && <>
             <label>서브넷 마스크<input className="input" value={form.guest.subnetMask} onChange={setG('subnetMask')} placeholder="255.255.255.0" /></label>
             <label>게이트웨이<input className="input" value={form.guest.gateway} onChange={setG('gateway')} placeholder="10.0.10.1" /></label>
           </>}
           <label>DNS 서버(공백/쉼표 구분)<input className="input" value={form.guest.dnsServers} onChange={setG('dnsServers')} placeholder="8.8.8.8 1.1.1.1" /></label>
           <label>도메인<input className="input" value={form.guest.domain} onChange={setG('domain')} placeholder="corp.local" /></label>
         </div>
-        <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>고정 IP는 시작 IP에서 1씩 증가합니다 (예: 10.0.10.50, .51, .52 …).</div>
+        {form.guest.ipMode === 'static' && form.guest.ipAssign === 'list' && (
+          <label style={{ display: 'block', marginTop: 10 }}>IP 목록 (한 줄에 하나 · VM 순서대로 매핑 — 떨어진/임의 IP 가능)
+            <textarea className="input" rows={5} value={form.guest.ipList} onChange={setG('ipList')}
+              placeholder={'10.0.10.50\n10.0.20.17\n10.0.99.200'} style={{ resize: 'vertical', fontFamily: 'monospace', fontSize: 12 }} />
+          </label>
+        )}
+        <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+          {form.guest.ipMode === 'dhcp' ? 'DHCP로 자동 할당됩니다.'
+            : form.guest.ipAssign === 'list' ? '입력한 IP가 VM 순서대로 1:1 매핑됩니다. (대수보다 IP가 많으면 IP 수만큼 생성)'
+            : '시작 IP에서 1씩 증가합니다 (예: 10.0.10.50, .51, .52 …).'}
+        </div>
       </div>
 
       {msg && (
@@ -166,6 +280,13 @@ function JobProgress({ jobId }) {
         <div style={{ width: `${pct}%`, height: '100%', background: job.failed ? 'var(--amber)' : 'var(--green)', transition: 'width .3s' }} />
       </div>
       <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>완료 {job.done} · 실패 {job.failed} · 전체 {job.total} {job.live ? '· LIVE (실제 vCenter)' : '· MOCK (데모)'}</div>
+      {job.placement && (job.placement.cluster || job.placement.host || job.placement.datastore || job.placement.folder || job.placement.resourcePool || job.placement.storageProfile) && (
+        <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>배치 — {[
+          job.placement.cluster && `클러스터 ${job.placement.cluster}`, job.placement.host && `호스트 ${job.placement.host}`,
+          job.placement.datastore && `DS ${job.placement.datastore}`, job.placement.folder && `폴더 ${job.placement.folder}`,
+          job.placement.resourcePool && `풀 ${job.placement.resourcePool}`, job.placement.storageProfile && `프로파일 ${job.placement.storageProfile}`,
+        ].filter(Boolean).join(' · ')}</div>
+      )}
       <div className="table-wrap" style={{ maxHeight: '34vh' }}>
         <table>
           <thead><tr><th>VM</th><th>Hostname</th><th>IP</th><th>상태</th><th>비고</th></tr></thead>

@@ -12,6 +12,7 @@ import { nlSearch } from '../llm/nlSearch.js';
 import { nsxStore } from '../nsx/store.js';
 import { expandSpec } from '../provision/spec.js';
 import { listSources, listJobs, getJob } from '../provision/jobs.js';
+import { getPlacement } from '../provision/placement.js';
 
 export const api = Router();
 
@@ -187,9 +188,14 @@ api.get('/nsx', (req, res) => {
 });
 
 // --- VM 프로비저닝 (생성/대량 생성) ---
-// Clonable source VMs/templates from the current snapshot (optionally scoped).
+// Clonable source VMs/templates from the current snapshot. ?vcenterId= scopes to
+// one 법인; ?q= prefix-matches the name (A → all VMs/templates starting with A).
 api.get('/provision/sources', (req, res) => {
-  res.json({ sources: listSources(req.query.vcenterId) });
+  res.json(listSources(req.query.vcenterId, req.query.q));
+});
+// Placement options for one 법인(vCenter): cluster/host/datastore/folder/pool/profile.
+api.get('/provision/placement', (req, res) => {
+  res.json(getPlacement(req.query.vcenterId));
 });
 // Dry-run: expand a bulk spec into the concrete per-VM list (name/hostname/ip).
 api.post('/provision/preview', (req, res) => {
