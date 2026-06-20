@@ -54,6 +54,12 @@ export function setSessionCreds(id, creds) {
   if (s) s.creds = creds;
 }
 
+/** Label the tab by the actually-connected hostname (overrides the mapping name). */
+export function setSessionLabel(id, label) {
+  const s = state.sessions.find((x) => x.id === id);
+  if (s && label && s.label !== label) { s.label = label; emit(); }
+}
+
 export function closeRemoteSession(id) {
   const i = state.sessions.findIndex((s) => s.id === id);
   state.sessions = state.sessions.filter((s) => s.id !== id);
