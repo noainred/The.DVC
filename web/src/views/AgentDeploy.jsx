@@ -15,12 +15,21 @@ export default function AgentDeploy() {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
   const [targets, setTargets] = useState([]);
+  const [pkg, setPkg] = useState(null);
+  const [dl, setDl] = useState({ kind: 'installer', version: '', busy: false });
 
+  const loadInstaller = () => fetchJson('/admin/agent-deploy/installer').then(setInstaller).catch(() => setInstaller({ available: false }));
+  const loadPkg = () => fetchJson('/admin/packages').then(setPkg).catch(() => setPkg(null));
   const loadTargets = () => fetchJson('/admin/agent-deploy/targets').then((d) => setTargets(d.targets)).catch(() => {});
-  useEffect(() => {
-    fetchJson('/admin/agent-deploy/installer').then(setInstaller).catch(() => setInstaller({ available: false }));
-    loadTargets();
-  }, []);
+  useEffect(() => { loadInstaller(); loadTargets(); loadPkg(); }, []);
+
+  const downloadPkg = async () => {
+    setDl((d) => ({ ...d, busy: true })); setResult(null);
+    const r = await postJson('/admin/packages/download', { kind: dl.kind, version: dl.version || undefined }).catch((e) => ({ ok: false, reason: e.message }));
+    setResult({ kind: 'pkg', ...r });
+    await loadPkg(); await loadInstaller();
+    setDl((d) => ({ ...d, busy: false }));
+  };
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
 
   const saveTarget = async () => {
@@ -60,6 +69,35 @@ export default function AgentDeploy() {
   return (
     <>
       <div className="section-title" style={{ margin: '6px 0 10px' }}>에이전트 자동배포 (SSH 설치)</div>
+
+      <div className="card" style={{ marginBottom: 12 }}>
+        <b style={{ fontSize: 14 }}>설치 패키지 자동 다운로드</b>
+        <div className="muted" style={{ fontSize: 12, margin: '4px 0 8px' }}>
+          저장소에서 패키지를 받아 <code>{pkg?.dir || '패키지 폴더'}</code> 에 저장합니다(SHA-256 검증). 폐쇄망은 사내 미러 URL로 변경하세요(PACKAGE_BASE_URL).
+        </div>
+        <div className="flex gap wrap" style={{ alignItems: 'flex-end' }}>
+          <label style={{ fontSize: 12 }}>종류
+            <select className="select" value={dl.kind} onChange={(e) => setDl({ ...dl, kind: e.target.value })}>
+              <option value="installer">설치 패키지(Rocky9 offline)</option>
+              <option value="bundle">업그레이드 번들(app)</option>
+              <option value="windows">Windows zip</option>
+            </select>
+          </label>
+          <label style={{ fontSize: 12 }}>버전(비우면 latest{pkg?.remote?.latest ? ` ${pkg.remote.latest}` : ''})
+            <input className="input" value={dl.version} onChange={(e) => setDl({ ...dl, version: e.target.value })} placeholder={pkg?.remote?.latest || '1.x.y'} />
+          </label>
+          <button className="login-btn" style={{ flex: 'none', padding: '9px 16px' }} disabled={dl.busy} onClick={downloadPkg}>{dl.busy ? '다운로드 중…' : '다운로드'}</button>
+        </div>
+        <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+          저장소: <code>{pkg?.baseUrl}</code>{pkg?.remote?.error ? ` · ⚠ 원격 조회 실패: ${pkg.remote.error}` : (pkg?.remote?.latest ? ` · 원격 latest ${pkg.remote.latest}` : '')}
+        </div>
+        {pkg?.local?.length > 0 && (
+          <div style={{ marginTop: 8 }}>
+            <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>보유 패키지</div>
+            {pkg.local.map((p) => <div key={p.name} style={{ fontSize: 12 }}><code>{p.name}</code> <span className="muted">({(p.sizeBytes / 1048576).toFixed(1)} MB)</span></div>)}
+          </div>
+        )}
+      </div>
 
       <div className="card" style={{ marginBottom: 12, borderColor: installer.available ? undefined : 'var(--red)' }}>
         {installer.available
@@ -131,12 +169,13 @@ export default function AgentDeploy() {
       {result && (
         <div className="card" style={{ borderColor: result.ok ? 'var(--green)' : 'var(--red)' }}>
           <b style={{ color: result.ok ? 'var(--green)' : 'var(--red)' }}>
-            {result.ok ? '성공' : '실패'} — {{ test: 'SSH 테스트', save: '대상 저장', 'deploy-all': '전체 배포' }[result.kind] || '배포'}
+            {result.ok ? '성공' : '실패'} — {{ test: 'SSH 테스트', save: '대상 저장', 'deploy-all': '전체 배포', pkg: '패키지 다운로드' }[result.kind] || '배포'}
           </b>
           <div style={{ fontSize: 13, marginTop: 6, lineHeight: 1.7 }}>
             {result.reason && <div style={{ color: result.ok ? 'var(--green)' : 'var(--red)' }}>{result.reason}</div>}
             {result.os && <div>OS: {result.os} · root: {result.isRoot ? '예' : '아니오'} · systemd: {result.systemd ? '예' : '아니오'}</div>}
             {result.active && <div>서비스 상태: <b>{result.active}</b> · 설치 패키지: {result.installer}</div>}
+            {result.kind === 'pkg' && result.ok && <div>저장: <code>{result.file}</code> ({(result.sizeBytes / 1048576).toFixed(1)} MB) · v{result.version}{result.verified ? ' · SHA-256 검증됨' : ''}</div>}
             {result.kind === 'deploy-all' && <div>{result.deployed}/{result.total} 성공
               <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
                 {(result.results || []).map((x) => <li key={x.id} style={{ color: x.ok ? 'var(--green)' : 'var(--red)' }}>{x.host} · {x.agentName || ''} — {x.ok ? (x.active || 'ok') : x.reason}</li>)}

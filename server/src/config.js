@@ -76,6 +76,15 @@ export const config = {
     dbPath: process.env.IPAM_DB_PATH ||
       path.join(process.env.CONFIG_DIR || path.resolve(ROOT, 'config'), 'ipam.db'),
   },
+  packages: {
+    // Where to fetch upgrade/install packages from (GitHub raw by default; set a
+    // LAN mirror for air-gapped sites), and where to store the downloaded files
+    // (also searched by the agent-deploy installer resolver).
+    baseUrl: process.env.PACKAGE_BASE_URL ||
+      'https://github.com/noainred/The.DVC/raw/claude/vmware-global-monitoring-portal-nrnpnt/download',
+    dir: process.env.PACKAGE_DIR ||
+      path.join(process.env.CONFIG_DIR || path.resolve(ROOT, 'config'), 'packages'),
+  },
   collector: {
     // Distributed collection. Each datacenter runs this app as a "collector
     // agent" that polls its local iDRAC/OME and exposes the result at
