@@ -134,15 +134,19 @@ export function ResultCount({ total = 0, shown, label, filtered }) {
 
 /** Simple centered modal. Click the backdrop, press ESC, or 닫기 to close. */
 export function Modal({ title, onClose, children, width = 560 }) {
+  // Header stays pinned while the body scrolls, so long detail content (many
+  // rows + action buttons) is always fully reachable by scrolling.
   return (
     <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <EscClose onClose={onClose} />
-      <div className="modal card" style={{ maxWidth: width }}>
-        <div className="flex between" style={{ marginBottom: 12 }}>
+      <div className="modal card" style={{ maxWidth: width, maxHeight: '88vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div className="flex between" style={{ marginBottom: 12, flex: '0 0 auto' }}>
           <b style={{ fontSize: 15 }}>{title}</b>
           <button className="logout-btn" onClick={onClose}>닫기</button>
         </div>
-        {children}
+        <div style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', overflowX: 'hidden', paddingRight: 4, marginRight: -4 }}>
+          {children}
+        </div>
       </div>
     </div>
   );
