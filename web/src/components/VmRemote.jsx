@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { postJson, getToken } from '../api.js';
 import { Modal } from './ui.jsx';
-import { SshTerminal, RdpConsole } from '../views/RemoteAccess.jsx';
+import { openRemoteSession } from '../remote/sessions.js';
 
 /**
  * VM 상세에서 HAProxy 경유 원격 접속을 시작하는 버튼.
@@ -16,7 +16,6 @@ export function VmRemoteButton({ item }) {
   const [port, setPort] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
-  const [session, setSession] = useState(null); // { kind:'ssh'|'rdp', mapping }
 
   const noIp = ips.length === 0;
   const connect = async () => {
@@ -31,11 +30,10 @@ export function VmRemoteButton({ item }) {
         const res = await fetch(`/api/remote/rdp/${r.mapping.id}`, { headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {} });
         const blob = await res.blob(); const url = URL.createObjectURL(blob);
         const a = document.createElement('a'); a.href = url; a.download = `${item.name}.rdp`; a.click(); URL.revokeObjectURL(url);
-        setOpen(false);
       } else {
-        setSession({ kind: protocol, mapping: r.mapping });
-        setOpen(false);
+        openRemoteSession({ kind: protocol, mapping: { ...r.mapping, proxyName: r.proxyName } });
       }
+      setOpen(false);
     } catch (e) { setError(e.message); }
     setBusy(false);
   };
@@ -79,9 +77,6 @@ export function VmRemoteButton({ item }) {
           )}
         </Modal>
       )}
-
-      {session?.kind === 'ssh' && <SshTerminal mapping={session.mapping} onClose={() => setSession(null)} />}
-      {session?.kind === 'rdp' && <RdpConsole mapping={session.mapping} onClose={() => setSession(null)} />}
     </>
   );
 }
