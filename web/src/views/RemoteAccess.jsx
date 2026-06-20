@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { openRemoteSession } from '../remote/sessions.js';
-import { fetchJson, postJson, delJson, getToken } from '../api.js';
+import { fetchJson, postJson, delJson, getToken, usePolling } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 
 const PROTOCOLS = [['ssh', 'SSH'], ['rdp', 'RDP']];
@@ -16,6 +16,7 @@ export default function RemoteAccess() {
   const [vmQuery, setVmQuery] = useState('');
   const [vmList, setVmList] = useState([]);
   const [vmSel, setVmSel] = useState(null);
+  const { data: vcList } = usePolling('/vcenters', {}, 60_000);
 
   const load = async () => {
     try { setData(await fetchJson('/remote/mappings')); setError(null); }
@@ -110,7 +111,12 @@ export default function RemoteAccess() {
             </label>
             <label>대상 호스트(IP)<input className="input" value={form.targetHost} onChange={(e) => setForm({ ...form, targetHost: e.target.value })} placeholder="VM 선택 또는 직접 입력" /></label>
             <label>대상 포트(보안상 22/3389 아닐 수 있음)<input className="input" type="number" value={form.targetPort} onChange={(e) => setForm({ ...form, targetPort: e.target.value })} placeholder={form.protocol === 'rdp' ? '3389' : '22'} /></label>
-            <label>법인(vCenter ID, 선택)<input className="input" value={form.vcenterId} onChange={(e) => setForm({ ...form, vcenterId: e.target.value })} placeholder="vc-ap-southeast" /></label>
+            <label>법인(vCenter, 선택)
+              <select className="select" value={form.vcenterId} onChange={(e) => setForm({ ...form, vcenterId: e.target.value })}>
+                <option value="">— 선택 —</option>
+                {(vcList || []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+              </select>
+            </label>
             <label>공개 포트(비우면 자동)<input className="input" type="number" value={form.publicPort} onChange={(e) => setForm({ ...form, publicPort: e.target.value })} placeholder="자동" /></label>
           </div>
           <button className="login-btn" style={{ flex: 'none', padding: '8px 16px', marginTop: 10 }} disabled={!form.targetHost} onClick={addMapping}>추가 + HAProxy 적용</button>
