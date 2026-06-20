@@ -6,6 +6,7 @@ import Collectors from './Collectors.jsx';
 import AgentScans from './AgentScans.jsx';
 import AgentDeploy from './AgentDeploy.jsx';
 import ProxySettings from './ProxySettings.jsx';
+import RemoteAccess from './RemoteAccess.jsx';
 import AdSettings from './AdSettings.jsx';
 import LlmSettings from './LlmSettings.jsx';
 import UserAdmin from './UserAdmin.jsx';
@@ -19,6 +20,7 @@ const SUB = [
   { k: 'agent-scans', label: '에이전트 작업', C: AgentScans },
   { k: 'agent-deploy', label: '에이전트 배포', C: AgentDeploy },
   { k: 'proxy', label: '중계 서버', C: ProxySettings },
+  { k: 'remote', label: '원격접속 설정', C: RemoteAccess },
   { k: 'users', label: '사용자 관리', C: UserAdmin },
   { k: 'auth-ad', label: '인증(AD)', C: AdSettings },
   { k: 'ai-search', label: 'AI 검색', C: LlmSettings },
