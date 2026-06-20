@@ -14,7 +14,7 @@
 import net from 'node:net';
 import { WebSocketServer } from 'ws';
 import { verifyToken } from '../auth/auth.js';
-import { getMapping, getConfig } from './registry.js';
+import { getMapping, getProxyById } from './registry.js';
 import { config } from '../config.js';
 
 // Encode a Guacamole instruction: each element is "<charLen>.<value>", comma
@@ -55,13 +55,13 @@ export function attachRdpGateway(server) {
 }
 
 function handle(ws, params) {
-  const cfg = getConfig();
   const m = getMapping(params.get('mappingId'));
-  if (!cfg.guacd?.host) { ws.close(1011, 'guacd not configured'); return; }
   if (!m || m.protocol !== 'rdp') { ws.close(1011, 'rdp mapping not found'); return; }
+  const proxy = getProxyById(m.proxyId);
+  if (!proxy.guacd?.host) { ws.close(1011, 'guacd not configured'); return; }
 
-  const host = cfg.proxyHost || m.targetHost;
-  const port = cfg.proxyHost ? m.publicPort : m.targetPort;
+  const host = proxy.proxyHost || m.targetHost;
+  const port = proxy.proxyHost ? m.publicPort : m.targetPort;
   const settings = {
     hostname: host, port: String(port),
     username: params.get('username') || '', password: params.get('password') || '', domain: params.get('domain') || '',
@@ -69,7 +69,7 @@ function handle(ws, params) {
     security: params.get('security') || 'any', 'ignore-cert': 'true', 'resize-method': 'display-update',
   };
 
-  const guacd = net.connect(cfg.guacd.port || 4822, cfg.guacd.host);
+  const guacd = net.connect(proxy.guacd.port || 4822, proxy.guacd.host);
   let ready = false;
   let buf = '';
 

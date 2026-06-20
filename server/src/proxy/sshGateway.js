@@ -14,7 +14,7 @@
 import { WebSocketServer } from 'ws';
 import { Client as SSHClient } from 'ssh2';
 import { verifyToken } from '../auth/auth.js';
-import { getMapping, getConfig } from './registry.js';
+import { getMapping, getProxyById } from './registry.js';
 import { config } from '../config.js';
 
 export function attachSshGateway(server) {
@@ -43,9 +43,9 @@ function handleConnection(ws) {
     if (msg.type === 'auth') {
       const m = getMapping(msg.mappingId);
       if (!m || m.protocol !== 'ssh') return send({ type: 'status', text: 'SSH 매핑을 찾을 수 없습니다.' }) || ws.close();
-      const cfg = getConfig();
-      const host = cfg.proxyHost || m.targetHost;     // dial through the proxy frontend
-      const port = cfg.proxyHost ? m.publicPort : m.targetPort;
+      const proxyHost = getProxyById(m.proxyId).proxyHost;
+      const host = proxyHost || m.targetHost;     // dial through the assigned proxy frontend
+      const port = proxyHost ? m.publicPort : m.targetPort;
       send({ type: 'status', text: `연결 중 ${host}:${port} (대상 ${m.targetHost}:${m.targetPort})…` });
 
       ssh = new SSHClient();

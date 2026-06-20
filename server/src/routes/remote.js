@@ -10,6 +10,7 @@ import { requireRole } from '../auth/auth.js';
 import {
   getConfig, getConfigSafe, saveConfig,
   listMappings, getMapping, addMapping, removeMapping, setMappingStatus,
+  listProxies, listProxiesSafe, getProxyById, resolveProxy, saveProxy, removeProxy,
 } from '../proxy/registry.js';
 import { testDataplane, applyMapping, removeMapping as haproxyRemove } from '../proxy/dataplane.js';
 import { deployToProxy, previewConfig, testDeploy } from '../proxy/deploy.js';
@@ -17,14 +18,22 @@ import { deployToProxy, previewConfig, testDeploy } from '../proxy/deploy.js';
 export const remoteRouter = Router();
 const adminOnly = requireRole('admin');
 
+// Connection info for a mapping resolves through the mapping's assigned proxy.
+const mappingProxy = (m) => getProxyById(m.proxyId);
+
 // Public-ish (any authenticated user): list mappings + how to connect.
 remoteRouter.get('/mappings', (_req, res) => {
-  const c = getConfig();
   res.json({
-    proxyHost: c.proxyHost,
-    guacdConfigured: !!c.guacd?.host,
-    mappings: listMappings().map(({ error, ...m }) => m),
+    mappings: listMappings().map(({ error, ...m }) => {
+      const p = mappingProxy(m);
+      return { ...m, proxyName: p.name, proxyHost: p.proxyHost, guacdConfigured: !!p.guacd?.host };
+    }),
   });
+});
+
+// vCenter → proxy assignments (any authenticated user; secrets redacted for admin view).
+remoteRouter.get('/proxies', (_req, res) => {
+  res.json({ proxies: listProxies().map((p) => ({ id: p.id, name: p.name, proxyHost: p.proxyHost, vcenterIds: p.vcenterIds, guacdConfigured: !!p.guacd?.host })) });
 });
 
 // Candidate targets from vCenter: VMs that have at least one IP, with all IPs
@@ -48,50 +57,62 @@ remoteRouter.get('/config', adminOnly, (_req, res) => res.json({ config: getConf
 
 remoteRouter.put('/config', adminOnly, (req, res) => res.json({ ok: true, config: saveConfig(req.body || {}) }));
 
+// --- per-vCenter proxy CRUD (admin) ---
+remoteRouter.get('/proxies/full', adminOnly, (_req, res) => res.json({ proxies: listProxiesSafe() }));
+remoteRouter.post('/proxies', adminOnly, (req, res) => {
+  const r = saveProxy(req.body || {});
+  res.status(r.ok ? 200 : 400).json(r);
+});
+remoteRouter.delete('/proxies/:id', adminOnly, (req, res) => {
+  const r = removeProxy(req.params.id);
+  res.status(r.ok ? 200 : 400).json(r);
+});
+
+// Test a proxy's Data Plane API (by proxyId, or the default).
 remoteRouter.post('/test', adminOnly, async (req, res) => {
-  const dp = { ...getConfig().dataplane, ...((req.body || {}).dataplane || {}) };
-  if (dp.password === '********') dp.password = getConfig().dataplane.password;
+  const proxy = getProxyById((req.body || {}).proxyId);
+  const dp = { ...proxy.dataplane, ...((req.body || {}).dataplane || {}) };
+  if (dp.password === '********') dp.password = proxy.dataplane.password;
   res.json(await testDataplane(dp));
 });
 
 // --- SSH-based proxy auto-deploy (alternative to Data Plane API) ---
 remoteRouter.post('/deploy/test', adminOnly, async (req, res) => {
-  const dep = mergeDeploy((req.body || {}).deploy);
+  const proxy = getProxyById((req.body || {}).proxyId);
+  const dep = { ...proxy.deploy, ...((req.body || {}).deploy || {}) };
+  if (dep.password === '********') dep.password = proxy.deploy.password;
+  if (dep.privateKey === '********') dep.privateKey = proxy.deploy.privateKey;
   res.json(await testDeploy(dep));
 });
 
-remoteRouter.get('/deploy/preview', adminOnly, (_req, res) => {
-  res.type('text/plain').send(previewConfig(listMappings(), getConfig()));
+// Push the generated HAProxy config for each proxy's mappings and reload.
+remoteRouter.post('/deploy', adminOnly, async (req, res) => {
+  const onlyId = (req.body || {}).proxyId;
+  const results = [];
+  for (const proxy of listProxies()) {
+    if (onlyId && proxy.id !== onlyId) continue;
+    if (!proxy.deploy?.enabled) continue;
+    const ms = listMappings().filter((m) => (m.proxyId || 'default') === proxy.id);
+    const r = await deployToProxy(proxy.deploy, ms, { bindAddress: proxy.dataplane?.bindAddress || '*' });
+    if (r.ok) for (const m of ms) setMappingStatus(m.id, 'active', null);
+    results.push({ proxy: proxy.name, ...r });
+  }
+  res.json({ ok: results.every((r) => r.ok), results });
 });
 
-// Push the generated HAProxy config for ALL mappings to the proxy and reload.
-remoteRouter.post('/deploy', adminOnly, async (_req, res) => {
-  const c = getConfig();
-  const r = await deployToProxy(c.deploy, listMappings(), { bindAddress: c.dataplane?.bindAddress || '*' });
-  if (r.ok) for (const m of listMappings()) setMappingStatus(m.id, 'active', null);
-  res.status(r.ok ? 200 : 400).json(r);
-});
-
-function mergeDeploy(input = {}) {
-  const cur = getConfig().deploy;
-  const dep = { ...cur, ...input };
-  if (dep.password === '********') dep.password = cur.password;
-  if (dep.privateKey === '********') dep.privateKey = cur.privateKey;
-  return dep;
-}
-
-// Provision a freshly-added mapping on the proxy (Data Plane or SSH deploy).
+// Provision a freshly-added mapping on ITS proxy (Data Plane or SSH deploy).
 async function provision(mapping) {
-  const c = getConfig();
-  if (c.dataplane?.enabled) {
-    try { await applyMapping(c.dataplane, mapping); setMappingStatus(mapping.id, 'active', null); }
+  const proxy = mappingProxy(mapping);
+  if (proxy.dataplane?.enabled) {
+    try { await applyMapping(proxy.dataplane, mapping); setMappingStatus(mapping.id, 'active', null); }
     catch (err) { setMappingStatus(mapping.id, 'error', err.message); }
-  } else if (c.deploy?.enabled) {
-    const d = await deployToProxy(c.deploy, listMappings(), { bindAddress: c.dataplane?.bindAddress || '*' });
-    if (d.ok) for (const m of listMappings()) setMappingStatus(m.id, 'active', null);
+  } else if (proxy.deploy?.enabled) {
+    const ms = listMappings().filter((m) => (m.proxyId || 'default') === proxy.id);
+    const d = await deployToProxy(proxy.deploy, ms, { bindAddress: proxy.dataplane?.bindAddress || '*' });
+    if (d.ok) for (const m of ms) setMappingStatus(m.id, 'active', null);
     else setMappingStatus(mapping.id, 'error', d.reason);
   } else {
-    setMappingStatus(mapping.id, 'manual', 'Data Plane/SSH 배포 미사용 — HAProxy 수동 설정 필요');
+    setMappingStatus(mapping.id, 'manual', `프록시 '${proxy.name}' Data Plane/SSH 배포 미사용 — 수동 설정 필요`);
   }
 }
 
@@ -118,27 +139,28 @@ remoteRouter.post('/quick-connect', async (req, res) => {
     await provision(r.mapping);
     m = getMapping(r.mapping.id);
   }
-  const c = getConfig();
-  res.json({ ok: true, mapping: m, proxyHost: c.proxyHost, guacdConfigured: !!c.guacd?.host });
+  const p = mappingProxy(m);
+  res.json({ ok: true, mapping: m, proxyName: p.name, proxyHost: p.proxyHost, guacdConfigured: !!p.guacd?.host });
 });
 
 // Re-apply (e.g. after fixing Data Plane settings).
 remoteRouter.post('/mappings/:id/apply', adminOnly, async (req, res) => {
   const m = getMapping(req.params.id);
   if (!m) return res.status(404).json({ ok: false, reason: '매핑을 찾을 수 없습니다.' });
-  try { await applyMapping(getConfig().dataplane, m); setMappingStatus(m.id, 'active', null); res.json({ ok: true, mapping: getMapping(m.id) }); }
+  try { await applyMapping(mappingProxy(m).dataplane, m); setMappingStatus(m.id, 'active', null); res.json({ ok: true, mapping: getMapping(m.id) }); }
   catch (err) { setMappingStatus(m.id, 'error', err.message); res.status(400).json({ ok: false, reason: err.message }); }
 });
 
 remoteRouter.delete('/mappings/:id', adminOnly, async (req, res) => {
   const m = getMapping(req.params.id);
   if (!m) return res.status(404).json({ ok: false, reason: '매핑을 찾을 수 없습니다.' });
-  const c = getConfig();
-  if (c.dataplane?.enabled) { try { await haproxyRemove(c.dataplane, m); } catch { /* remove locally anyway */ } }
+  const proxy = mappingProxy(m);
+  if (proxy.dataplane?.enabled) { try { await haproxyRemove(proxy.dataplane, m); } catch { /* remove locally anyway */ } }
   const result = removeMapping(req.params.id);
-  // SSH-deploy mode: re-push the config without the removed mapping.
-  if (result.ok && !c.dataplane?.enabled && c.deploy?.enabled) {
-    await deployToProxy(c.deploy, listMappings(), { bindAddress: c.dataplane?.bindAddress || '*' }).catch(() => {});
+  // SSH-deploy mode: re-push that proxy's config without the removed mapping.
+  if (result.ok && !proxy.dataplane?.enabled && proxy.deploy?.enabled) {
+    const ms = listMappings().filter((x) => (x.proxyId || 'default') === proxy.id);
+    await deployToProxy(proxy.deploy, ms, { bindAddress: proxy.dataplane?.bindAddress || '*' }).catch(() => {});
   }
   res.json(result);
 });
@@ -147,9 +169,9 @@ remoteRouter.delete('/mappings/:id', adminOnly, async (req, res) => {
 remoteRouter.get('/rdp/:id', (req, res) => {
   const m = getMapping(req.params.id);
   if (!m || m.protocol !== 'rdp') return res.status(404).end();
-  const c = getConfig();
-  const host = c.proxyHost || m.targetHost;
-  const port = c.proxyHost ? m.publicPort : m.targetPort;
+  const proxyHost = mappingProxy(m).proxyHost;
+  const host = proxyHost || m.targetHost;
+  const port = proxyHost ? m.publicPort : m.targetPort;
   const rdp = [
     `full address:s:${host}:${port}`,
     'prompt for credentials:i:1',
