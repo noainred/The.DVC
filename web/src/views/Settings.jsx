@@ -3,6 +3,7 @@ import VCenterAdmin from './VCenterAdmin.jsx';
 import IdracAdmin from './IdracAdmin.jsx';
 import Collectors from './Collectors.jsx';
 import AgentScans from './AgentScans.jsx';
+import AgentDeploy from './AgentDeploy.jsx';
 import AdSettings from './AdSettings.jsx';
 import UserAdmin from './UserAdmin.jsx';
 import Diagnostics from './Diagnostics.jsx';
@@ -12,6 +13,7 @@ const SUB = [
   { k: 'idrac-admin', label: '전력 수집', C: IdracAdmin },
   { k: 'collectors', label: '수집 서버', C: Collectors },
   { k: 'agent-scans', label: '에이전트 작업', C: AgentScans },
+  { k: 'agent-deploy', label: '에이전트 배포', C: AgentDeploy },
   { k: 'users', label: '사용자 관리', C: UserAdmin },
   { k: 'auth-ad', label: '인증(AD)', C: AdSettings },
   { k: 'diagnostics', label: '진단·로그', C: Diagnostics },

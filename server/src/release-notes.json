@@ -1,6 +1,17 @@
 {
   "notes": [
     {
+      "version": "1.18.0",
+      "date": "2026-06-20",
+      "title": "에이전트 자동배포 (SSH 설치)",
+      "notes": [
+        "설정 → 에이전트 배포: 신규 Rocky9 호스트에 SSH로 수집/iDRAC스캔 에이전트 자동 설치",
+        "중앙 설치 패키지 SFTP 전송 → install.sh → portal.env에 에이전트 설정 주입 → 서비스 시작",
+        "SSH 테스트(OS/root/systemd 점검), 실행 로그 표시",
+        "공용 SSH 유틸(명령/파일 업로드) — 프록시 자동배포와 공유"
+      ]
+    },
+    {
       "version": "1.17.0",
       "date": "2026-06-20",
       "title": "원격 접속(SSH/RDP) + 릴리즈 노트",
