@@ -3,7 +3,8 @@ import { postJson, getToken } from '../api.js';
 import { Modal } from './ui.jsx';
 import { openRemoteSession } from '../remote/sessions.js';
 
-const FLD = { display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 };
+const FLD = { display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, minWidth: 0 };
+const INP = { width: '100%', minWidth: 0, boxSizing: 'border-box' };
 
 /**
  * VM 상세에서 HAProxy 경유 원격 접속을 시작하는 버튼.
@@ -79,20 +80,20 @@ export function VmRemoteButton({ item }) {
             <div className="muted">이 VM에 수집된 IP가 없어 접속할 수 없습니다.</div>
           ) : (
             <div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1fr)', gap: 10 }}>
                 <label style={FLD}>프로토콜
-                  <select className="select" value={protocol} onChange={(e) => { setProtocol(e.target.value); setPort(''); }}>
+                  <select className="select" style={INP} value={protocol} onChange={(e) => { setProtocol(e.target.value); setPort(''); }}>
                     <option value="ssh">SSH</option>
                     <option value="rdp">RDP</option>
                   </select>
                 </label>
                 <label style={FLD}>대상 IP{ips.length > 1 ? ` (${ips.length})` : ''}
-                  <select className="select" value={ip} onChange={(e) => setIp(e.target.value)}>
+                  <select className="select" style={INP} value={ip} onChange={(e) => setIp(e.target.value)}>
                     {ips.map((x) => <option key={x} value={x}>{x}</option>)}
                   </select>
                 </label>
                 <label style={FLD}>포트(기본 {protocol === 'rdp' ? '3389' : '22'})
-                  <input className="input" type="number" value={port} onChange={(e) => setPort(e.target.value)} placeholder={protocol === 'rdp' ? '3389' : '22'} />
+                  <input className="input" style={INP} type="number" value={port} onChange={(e) => setPort(e.target.value)} placeholder={protocol === 'rdp' ? '3389' : '22'} />
                 </label>
               </div>
 
@@ -103,19 +104,19 @@ export function VmRemoteButton({ item }) {
                 </div>
               )}
 
-              <div style={{ display: 'grid', gridTemplateColumns: protocol === 'rdp' ? '1fr 1fr 1fr' : '1fr 1fr', gap: 10, marginTop: 12 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: protocol === 'rdp' ? 'minmax(0,1fr) minmax(0,1fr) minmax(0,1fr)' : 'minmax(0,1fr) minmax(0,1fr)', gap: 10, marginTop: 12 }}>
                 <label style={FLD}>사용자명
-                  <input className="input" value={creds.username} onChange={(e) => setCreds({ ...creds, username: e.target.value })}
+                  <input className="input" style={INP} value={creds.username} onChange={(e) => setCreds({ ...creds, username: e.target.value })}
                     placeholder={protocol === 'rdp' ? 'Administrator' : 'root'}
                     onKeyDown={(e) => { if (e.key === 'Enter' && ip && creds.username) connect(); }} />
                 </label>
                 <label style={FLD}>비밀번호
-                  <input className="input" type="password" value={creds.password} onChange={(e) => setCreds({ ...creds, password: e.target.value })}
+                  <input className="input" style={INP} type="password" value={creds.password} onChange={(e) => setCreds({ ...creds, password: e.target.value })}
                     onKeyDown={(e) => { if (e.key === 'Enter' && ip && creds.username) connect(); }} />
                 </label>
                 {protocol === 'rdp' && (
                   <label style={FLD}>도메인(선택)
-                    <input className="input" value={creds.domain} onChange={(e) => setCreds({ ...creds, domain: e.target.value })} />
+                    <input className="input" style={INP} value={creds.domain} onChange={(e) => setCreds({ ...creds, domain: e.target.value })} />
                   </label>
                 )}
               </div>
