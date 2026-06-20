@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { openRemoteSession } from '../remote/sessions.js';
 import { fetchJson, postJson, delJson, getToken, usePolling } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
-import { ProxyEditor } from './ProxySettings.jsx';
+import { ProxyEditor, HealthDot } from './ProxySettings.jsx';
 
 const PROTOCOLS = [['ssh', 'SSH'], ['rdp', 'RDP']];
 const STATUS_BADGE = { active: 'green', manual: 'amber', pending: 'gray', error: 'red' };
@@ -19,13 +19,20 @@ export default function RemoteAccess() {
   const [vmSel, setVmSel] = useState(null);
   const [proxies, setProxies] = useState([]);
   const [editProxy, setEditProxy] = useState(null);
+  const [health, setHealth] = useState({});
   const { data: vcList } = usePolling('/vcenters', {}, 60_000);
+
+  const testOne = async (id) => {
+    setHealth((h) => ({ ...h, [id]: { state: 'testing' } }));
+    const r = await postJson(`/remote/proxies/${id}/health`, {}).catch((e) => ({ ok: false, reason: e.message, method: 'error' }));
+    setHealth((h) => ({ ...h, [id]: { state: r.method === 'manual' ? 'manual' : (r.ok ? 'ok' : 'fail'), reason: r.reason, ms: r.ms, method: r.method } }));
+  };
 
   const load = async () => {
     try { setData(await fetchJson('/remote/mappings')); setError(null); }
     catch (e) { setError(e.message); }
     fetchJson('/remote/config').then(() => setIsAdmin(true)).catch(() => setIsAdmin(false)); // 403 for non-admin
-    fetchJson('/remote/proxies/full').then((p) => setProxies(p.proxies || [])).catch(() => setProxies([]));
+    fetchJson('/remote/proxies/full').then((p) => { setProxies(p.proxies || []); (p.proxies || []).forEach((x) => testOne(x.id)); }).catch(() => setProxies([]));
   };
   useEffect(() => { load(); }, []);
 
@@ -146,17 +153,19 @@ export default function RemoteAccess() {
           <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>현재 설정된 중계 서버(HAProxy)입니다. 자세한 구성은 설정 → 중계 서버에서도 가능합니다.</div>
           <div className="table-wrap">
             <table>
-              <thead><tr><th>이름</th><th>프록시 주소</th><th>공개포트 시작</th><th>할당 vCenter</th><th>프로비저닝</th><th style={{ textAlign: 'right' }}>관리</th></tr></thead>
+              <thead><tr><th>상태</th><th>이름</th><th>프록시 주소</th><th>공개포트 시작</th><th>할당 vCenter</th><th>프로비저닝</th><th style={{ textAlign: 'right' }}>관리</th></tr></thead>
               <tbody>
-                {proxies.length === 0 && <tr><td colSpan={6} className="center muted" style={{ padding: 18 }}>추가 중계 서버가 없습니다. (모두 기본 프록시 사용)</td></tr>}
+                {proxies.length === 0 && <tr><td colSpan={7} className="center muted" style={{ padding: 18 }}>추가 중계 서버가 없습니다. (모두 기본 프록시 사용)</td></tr>}
                 {proxies.map((p) => (
                   <tr key={p.id}>
+                    <td><HealthDot h={health[p.id]} /></td>
                     <td><b>{p.name}</b></td>
                     <td>{p.proxyHost || '—'}</td>
                     <td>{p.publicPortBase}</td>
                     <td className="muted" style={{ fontSize: 12 }}>{(p.vcenterIds || []).join(', ') || '—'}</td>
                     <td>{p.dataplane?.enabled ? <span className="badge green">Data Plane</span> : p.deploy?.enabled ? <span className="badge green">SSH</span> : <span className="badge gray">수동</span>}{p.guacd?.host ? <span className="badge blue" style={{ marginLeft: 4 }}>guacd</span> : null}</td>
                     <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      <button className="logout-btn" style={{ padding: '6px 10px' }} onClick={() => testOne(p.id)}>테스트</button>{' '}
                       <button className="logout-btn" style={{ padding: '6px 10px' }} onClick={() => setEditProxy(p)}>편집</button>{' '}
                       <button className="logout-btn" style={{ padding: '6px 10px' }} onClick={() => removeProxy(p)}>삭제</button>
                     </td>

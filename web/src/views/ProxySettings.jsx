@@ -9,11 +9,19 @@ export default function ProxySettings() {
   const [error, setError] = useState(null);
   const [msg, setMsg] = useState(null);
   const [editProxy, setEditProxy] = useState(null);
+  const [health, setHealth] = useState({}); // { [proxyId]: { state, reason, ms, method } }
+
+  const testOne = async (id) => {
+    setHealth((h) => ({ ...h, [id]: { state: 'testing' } }));
+    const r = await postJson(`/remote/proxies/${id}/health`, {}).catch((e) => ({ ok: false, reason: e.message, method: 'error' }));
+    setHealth((h) => ({ ...h, [id]: { state: r.method === 'manual' ? 'manual' : (r.ok ? 'ok' : 'fail'), reason: r.reason, ms: r.ms, method: r.method } }));
+  };
+  const testAll = (list) => (list || proxies).forEach((p) => testOne(p.id));
 
   const load = async () => {
     try {
       const r = await fetchJson('/remote/config'); setCfg(r.config); setError(null);
-      fetchJson('/remote/proxies/full').then((p) => setProxies(p.proxies)).catch(() => setProxies([]));
+      fetchJson('/remote/proxies/full').then((p) => { setProxies(p.proxies); testAll(p.proxies); }).catch(() => setProxies([]));
     } catch (e) { setError(e.message); }
   };
   useEffect(() => { load(); }, []);
@@ -105,22 +113,27 @@ export default function ProxySettings() {
       <div className="card" style={{ marginBottom: 14 }}>
         <div className="flex between wrap" style={{ alignItems: 'center', marginBottom: 8 }}>
           <b style={{ fontSize: 14 }}>vCenter별 프록시 할당</b>
-          <button className="login-btn" style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setEditProxy({ name: '', proxyHost: '', publicPortBase: 20000, vcenterIds: [], dataplane: { enabled: false, url: '', basePath: '/v3', username: '', password: '' }, deploy: { enabled: false, host: '', port: 22, username: '', password: '', haproxyConfigPath: '/etc/haproxy/haproxy.cfg', reloadCmd: 'systemctl reload haproxy', validateCmd: 'haproxy -c -f {file}' }, guacd: { host: '', port: 4822 } })}>+ 프록시 추가</button>
+          <div className="flex gap">
+            <button className="logout-btn" style={{ padding: '7px 14px' }} onClick={() => testAll()}>전체 상태 테스트</button>
+            <button className="login-btn" style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setEditProxy({ name: '', proxyHost: '', publicPortBase: 20000, vcenterIds: [], dataplane: { enabled: false, url: '', basePath: '/v3', username: '', password: '' }, deploy: { enabled: false, host: '', port: 22, username: '', password: '', haproxyConfigPath: '/etc/haproxy/haproxy.cfg', reloadCmd: 'systemctl reload haproxy', validateCmd: 'haproxy -c -f {file}' }, guacd: { host: '', port: 4822 } })}>+ 프록시 추가</button>
+          </div>
         </div>
-        <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>법인(vCenter)별로 다른 프록시 서버를 지정합니다. VM 접속 시 해당 vCenter에 할당된 프록시를 자동 사용하며, 미할당 vCenter는 위 <b>기본 프록시</b>를 씁니다.</div>
+        <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>법인(vCenter)별로 다른 프록시 서버를 지정합니다. VM 접속 시 해당 vCenter에 할당된 프록시를 자동 사용하며, 미할당 vCenter는 위 <b>기본 프록시</b>를 씁니다. <b>상태</b> 점등: 🟢 동작 · 🔴 실패 · ⚪ 수동/대기.</div>
         <div className="table-wrap">
           <table>
-            <thead><tr><th>이름</th><th>프록시 주소</th><th>공개포트 시작</th><th>할당 vCenter</th><th>프로비저닝</th><th style={{ textAlign: 'right' }}>관리</th></tr></thead>
+            <thead><tr><th>상태</th><th>이름</th><th>프록시 주소</th><th>공개포트 시작</th><th>할당 vCenter</th><th>프로비저닝</th><th style={{ textAlign: 'right' }}>관리</th></tr></thead>
             <tbody>
-              {proxies.length === 0 && <tr><td colSpan={6} className="center muted" style={{ padding: 20 }}>추가 프록시가 없습니다. (모두 기본 프록시 사용)</td></tr>}
+              {proxies.length === 0 && <tr><td colSpan={7} className="center muted" style={{ padding: 20 }}>추가 프록시가 없습니다. (모두 기본 프록시 사용)</td></tr>}
               {proxies.map((p) => (
                 <tr key={p.id}>
+                  <td><HealthDot h={health[p.id]} /></td>
                   <td><b>{p.name}</b></td>
                   <td>{p.proxyHost || '—'}</td>
                   <td>{p.publicPortBase}</td>
                   <td className="muted" style={{ fontSize: 12 }}>{(p.vcenterIds || []).join(', ') || '—'}</td>
                   <td>{p.dataplane?.enabled ? <span className="badge green">Data Plane</span> : p.deploy?.enabled ? <span className="badge green">SSH</span> : <span className="badge gray">수동</span>}{p.guacd?.host ? <span className="badge blue" style={{ marginLeft: 4 }}>guacd</span> : null}</td>
                   <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                    <button className="logout-btn" style={{ padding: '6px 10px' }} onClick={() => testOne(p.id)}>테스트</button>{' '}
                     <button className="logout-btn" style={{ padding: '6px 10px' }} onClick={() => setEditProxy(p)}>편집</button>{' '}
                     <button className="logout-btn" style={{ padding: '6px 10px' }} onClick={() => removeProxyForm(p)}>삭제</button>
                   </td>
@@ -137,6 +150,23 @@ export default function ProxySettings() {
 
       {editProxy && <ProxyEditor initial={editProxy} onSave={saveProxyForm} onClose={() => setEditProxy(null)} />}
     </>
+  );
+}
+
+/** Live proxy health indicator: 🟢 동작 · 🔴 실패 · 🟡 확인중 · ⚪ 수동/대기. */
+export function HealthDot({ h }) {
+  const map = {
+    testing: ['#fbbf24', '확인중…'],
+    ok: ['#22c55e', `동작 중${h?.ms ? ` · ${h.ms}ms` : ''}${h?.method ? ` (${h.method})` : ''}`],
+    fail: ['#ef4444', `동작 안 함: ${h?.reason || '실패'}`],
+    manual: ['#64748b', '수동 구성 (자동 프로비저닝 없음)'],
+  };
+  const [color, label] = map[h?.state] || ['#64748b', '대기 — 테스트를 눌러 확인'];
+  return (
+    <span title={label} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+      <span style={{ width: 11, height: 11, borderRadius: '50%', background: color, boxShadow: `0 0 7px ${color}`, display: 'inline-block' }} />
+      <span className="muted">{(h?.state === 'ok') ? '동작' : h?.state === 'fail' ? '실패' : h?.state === 'testing' ? '확인중' : h?.state === 'manual' ? '수동' : '대기'}</span>
+    </span>
   );
 }
 

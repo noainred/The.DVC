@@ -95,6 +95,26 @@ remoteRouter.delete('/proxies/:id', adminOnly, (req, res) => {
   res.status(r.ok ? 200 : 400).json(r);
 });
 
+// Health check for one proxy — auto-selects Data Plane API or SSH deploy based
+// on what the proxy has enabled. Returns { ok, ms, reason, method }.
+remoteRouter.post('/proxies/:id/health', adminOnly, async (req, res) => {
+  const proxy = getProxyById(req.params.id);
+  if (!proxy) return res.status(404).json({ ok: false, reason: '프록시를 찾을 수 없습니다.', method: 'none' });
+  try {
+    if (proxy.dataplane?.enabled && proxy.dataplane?.url) {
+      const r = await testDataplane(proxy.dataplane);
+      return res.json({ ...r, method: 'dataplane' });
+    }
+    if (proxy.deploy?.enabled && proxy.deploy?.host) {
+      const r = await testDeploy(proxy.deploy);
+      return res.json({ ...r, method: 'ssh' });
+    }
+    return res.json({ ok: false, reason: '자동 프로비저닝(Data Plane/SSH) 미설정 — 수동 구성 프록시', method: 'manual' });
+  } catch (err) {
+    res.json({ ok: false, reason: err.message, method: 'error' });
+  }
+});
+
 // Test a proxy's Data Plane API (by proxyId, or the default).
 remoteRouter.post('/test', adminOnly, async (req, res) => {
   const proxy = getProxyById((req.body || {}).proxyId);
