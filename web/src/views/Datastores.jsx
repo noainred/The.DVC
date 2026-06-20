@@ -1,6 +1,6 @@
 import React from 'react';
 import { usePolling } from '../api.js';
-import { DataTable, UsageCell, Loading, ErrorBox, ResultCount } from '../components/ui.jsx';
+import { DataTable, UsageCell, Kpi, Loading, ErrorBox, ResultCount } from '../components/ui.jsx';
 
 export default function Datastores({ filters }) {
   const { data, error, loading } = usePolling('/datastores', filters, 15_000);
@@ -10,6 +10,12 @@ export default function Datastores({ filters }) {
 
   const tb = (gb) => (gb >= 1024 ? `${(gb / 1024).toFixed(1)} TB` : `${gb} GB`);
   const typeBadge = { vSAN: 'purple', NFS: 'blue', VMFS: 'green' };
+
+  // Sum capacity/used/free across the currently shown (filtered) datastores.
+  const sum = (k) => rows.reduce((a, d) => a + (d[k] || 0), 0);
+  const capGB = sum('capacityGB'), usedGB = sum('usedGB'), freeGB = sum('freeGB');
+  const usagePct = capGB > 0 ? Math.round((usedGB / capGB) * 100) : 0;
+  const filtered = Object.keys(filters || {}).length > 0;
 
   const columns = [
     { key: 'name', label: '데이터스토어', render: (d) => <b>{d.name}</b> },
@@ -23,7 +29,14 @@ export default function Datastores({ filters }) {
 
   return (
     <>
-      <ResultCount total={data.total} label="데이터스토어" filtered={Object.keys(filters || {}).length > 0} />
+      <div className="kpis" style={{ marginBottom: 12 }}>
+        <Kpi label={filtered ? '데이터스토어 (필터)' : '데이터스토어'} value={rows.length.toLocaleString()} meta={filtered ? '필터 적용 합계' : '전체 합계'} />
+        <Kpi label="총 용량 합계" value={tb(capGB)} meta={`${rows.length}개 데이터스토어`} />
+        <Kpi label="사용 합계" value={tb(usedGB)} meta={`${usagePct}% 사용`} accent={usagePct >= 85 ? 'var(--red)' : usagePct >= 70 ? 'var(--amber)' : undefined} />
+        <Kpi label="여유 합계" value={tb(freeGB)} />
+        <Kpi label="평균 사용률" value={usagePct} unit="%" pct={usagePct} />
+      </div>
+      <ResultCount total={data.total} label="데이터스토어" filtered={filtered} />
       <DataTable columns={columns} rows={rows} initialSort={{ key: 'usagePct', dir: 'desc' }} />
     </>
   );
