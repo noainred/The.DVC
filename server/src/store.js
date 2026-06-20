@@ -5,6 +5,8 @@ import { describeError } from './util/errors.js';
 import { latestPowerByHostName } from './idrac/service.js';
 import { applyMutes } from './alarm-mutes.js';
 import { getDataSource } from './runtime-settings.js';
+import { buildIpamRows } from './ipam/ledger.js';
+import { syncLedger } from './ipam/db.js';
 
 /**
  * Overlay real iDRAC power (Watts) onto hosts by matching the ESXi host name to
@@ -46,6 +48,7 @@ class Store {
       const dataSource = getDataSource();
       if (dataSource === 'mock') {
         this.snapshot = withRollups(applyAlarmMutes(await overlayIdracPower(generateSnapshot())));
+        this.syncLedger();
         return;
       }
 
@@ -84,11 +87,18 @@ class Store {
 
       merged.generatedAt = new Date().toISOString();
       this.snapshot = withRollups(applyAlarmMutes(await overlayIdracPower(merged)));
+      this.syncLedger();
       this.lastError = null;
     } catch (err) {
       this.lastError = err.message;
       console.error('[store] refresh failed:', err.message);
     }
+  }
+
+  // Export the current IP inventory to the shareable SQLite ledger (best-effort,
+  // non-blocking) so other programs can read CONFIG_DIR/ipam.db.
+  syncLedger() {
+    try { syncLedger(buildIpamRows(this.snapshot).rows); } catch { /* best effort */ }
   }
 
   start() {

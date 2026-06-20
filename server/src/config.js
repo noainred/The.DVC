@@ -69,6 +69,13 @@ export const config = {
     // Duration window enum for the metric query (0=recent). Override per env.
     omePowerDuration: Number(process.env.OME_POWER_DURATION) || 0,
   },
+  ipam: {
+    // Shareable IP ledger DB (SQLite). Replaced on every refresh so external
+    // programs can read the current per-center IP inventory. In CONFIG_DIR so
+    // upgrades preserve it. Override with IPAM_DB_PATH.
+    dbPath: process.env.IPAM_DB_PATH ||
+      path.join(process.env.CONFIG_DIR || path.resolve(ROOT, 'config'), 'ipam.db'),
+  },
   collector: {
     // Distributed collection. Each datacenter runs this app as a "collector
     // agent" that polls its local iDRAC/OME and exposes the result at
