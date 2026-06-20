@@ -14,7 +14,7 @@
 import net from 'node:net';
 import { WebSocketServer } from 'ws';
 import { verifyToken } from '../auth/auth.js';
-import { getMapping, getProxyById } from './registry.js';
+import { getMapping, getProxyById, touchMapping } from './registry.js';
 import { config } from '../config.js';
 
 // Encode a Guacamole instruction: each element is "<charLen>.<value>", comma
@@ -57,6 +57,7 @@ export function attachRdpGateway(server) {
 function handle(ws, params) {
   const m = getMapping(params.get('mappingId'));
   if (!m || m.protocol !== 'rdp') { ws.close(1011, 'rdp mapping not found'); return; }
+  touchMapping(m.id); // reset the 1-day ephemeral expiry clock on use
   const proxy = getProxyById(m.proxyId);
   if (!proxy.guacd?.host) { ws.close(1011, 'guacd not configured'); return; }
 

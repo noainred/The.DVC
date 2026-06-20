@@ -14,7 +14,7 @@
 import { WebSocketServer } from 'ws';
 import { Client as SSHClient } from 'ssh2';
 import { verifyToken } from '../auth/auth.js';
-import { getMapping, getProxyById } from './registry.js';
+import { getMapping, getProxyById, touchMapping } from './registry.js';
 import { config } from '../config.js';
 
 export function attachSshGateway(server) {
@@ -43,6 +43,7 @@ function handleConnection(ws) {
     if (msg.type === 'auth') {
       const m = getMapping(msg.mappingId);
       if (!m || m.protocol !== 'ssh') return send({ type: 'status', text: 'SSH 매핑을 찾을 수 없습니다.' }) || ws.close();
+      touchMapping(m.id); // reset the 1-day ephemeral expiry clock on use
       const proxyHost = getProxyById(m.proxyId).proxyHost;
       const host = proxyHost || m.targetHost;     // dial through the assigned proxy frontend
       const port = proxyHost ? m.publicPort : m.targetPort;

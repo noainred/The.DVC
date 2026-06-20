@@ -9,11 +9,12 @@ import { store } from '../store.js';
 import { requireRole } from '../auth/auth.js';
 import {
   getConfig, getConfigSafe, saveConfig,
-  listMappings, getMapping, addMapping, removeMapping, setMappingStatus,
+  listMappings, listMappingsForUser, getMapping, addMapping, removeMapping, setMappingStatus, touchMapping,
   listProxies, listProxiesSafe, getProxyById, resolveProxy, saveProxy, removeProxy,
 } from '../proxy/registry.js';
-import { testDataplane, applyMapping, removeMapping as haproxyRemove } from '../proxy/dataplane.js';
-import { deployToProxy, previewConfig, testDeploy } from '../proxy/deploy.js';
+import { testDataplane, applyMapping } from '../proxy/dataplane.js';
+import { previewConfig, testDeploy, deployToProxy } from '../proxy/deploy.js';
+import { provision, deprovision } from '../proxy/provision.js';
 import { withSsh } from '../proxy/sshExec.js';
 
 export const remoteRouter = Router();
@@ -23,9 +24,9 @@ const adminOnly = requireRole('admin');
 const mappingProxy = (m) => getProxyById(m.proxyId);
 
 // Public-ish (any authenticated user): list mappings + how to connect.
-remoteRouter.get('/mappings', (_req, res) => {
+remoteRouter.get('/mappings', (req, res) => {
   res.json({
-    mappings: listMappings().map(({ error, ...m }) => {
+    mappings: listMappingsForUser(req.user).map(({ error, ...m }) => {
       const p = mappingProxy(m);
       return { ...m, proxyName: p.name, proxyHost: p.proxyHost, guacdConfigured: !!p.guacd?.host };
     }),
@@ -126,25 +127,10 @@ remoteRouter.post('/deploy', adminOnly, async (req, res) => {
   res.json({ ok: results.every((r) => r.ok), results });
 });
 
-// Provision a freshly-added mapping on ITS proxy (Data Plane or SSH deploy).
-async function provision(mapping) {
-  const proxy = mappingProxy(mapping);
-  if (proxy.dataplane?.enabled) {
-    try { await applyMapping(proxy.dataplane, mapping); setMappingStatus(mapping.id, 'active', null); }
-    catch (err) { setMappingStatus(mapping.id, 'error', err.message); }
-  } else if (proxy.deploy?.enabled) {
-    const ms = listMappings().filter((m) => (m.proxyId || 'default') === proxy.id);
-    const d = await deployToProxy(proxy.deploy, ms, { bindAddress: proxy.dataplane?.bindAddress || '*' });
-    if (d.ok) for (const m of ms) setMappingStatus(m.id, 'active', null);
-    else setMappingStatus(mapping.id, 'error', d.reason);
-  } else {
-    setMappingStatus(mapping.id, 'manual', `프록시 '${proxy.name}' Data Plane/SSH 배포 미사용 — 수동 설정 필요`);
-  }
-}
 
-// Create a mapping, then provision it on HAProxy.
+// Create a mapping, then provision it on HAProxy. (admin-created = persistent)
 remoteRouter.post('/mappings', adminOnly, async (req, res) => {
-  const r = addMapping(req.body || {});
+  const r = addMapping({ ...(req.body || {}), owner: req.user.username, ephemeral: false });
   if (!r.ok) return res.status(400).json(r);
   await provision(r.mapping);
   res.json({ ok: true, mapping: getMapping(r.mapping.id) });
@@ -158,12 +144,16 @@ remoteRouter.post('/quick-connect', async (req, res) => {
   const targetPort = Number((req.body || {}).targetPort) || (proto === 'rdp' ? 3389 : 22);
   if (!targetHost) return res.status(400).json({ ok: false, reason: '대상 IP가 필요합니다.' });
 
-  let m = listMappings().find((x) => x.targetHost === targetHost && Number(x.targetPort) === targetPort && x.protocol === proto);
+  // Reuse this user's existing mapping for the same target, else create an
+  // ephemeral one owned by them (auto-removed 1 day after last use).
+  let m = listMappings().find((x) => x.targetHost === targetHost && Number(x.targetPort) === targetPort && x.protocol === proto && (!x.owner || x.owner === req.user.username));
   if (!m) {
-    const r = addMapping({ name: name || `${proto.toUpperCase()} ${targetHost}`, vcenterId, protocol: proto, targetHost, targetPort });
+    const r = addMapping({ name: name || `${proto.toUpperCase()} ${targetHost}`, vcenterId, protocol: proto, targetHost, targetPort, owner: req.user.username, ephemeral: true });
     if (!r.ok) return res.status(400).json(r);
     await provision(r.mapping);
     m = getMapping(r.mapping.id);
+  } else {
+    touchMapping(m.id); m = getMapping(m.id);
   }
   const p = mappingProxy(m);
   res.json({ ok: true, mapping: m, proxyName: p.name, proxyHost: p.proxyHost, guacdConfigured: !!p.guacd?.host });
@@ -177,18 +167,15 @@ remoteRouter.post('/mappings/:id/apply', adminOnly, async (req, res) => {
   catch (err) { setMappingStatus(m.id, 'error', err.message); res.status(400).json({ ok: false, reason: err.message }); }
 });
 
-remoteRouter.delete('/mappings/:id', adminOnly, async (req, res) => {
+remoteRouter.delete('/mappings/:id', async (req, res) => {
   const m = getMapping(req.params.id);
   if (!m) return res.status(404).json({ ok: false, reason: '매핑을 찾을 수 없습니다.' });
-  const proxy = mappingProxy(m);
-  if (proxy.dataplane?.enabled) { try { await haproxyRemove(proxy.dataplane, m); } catch { /* remove locally anyway */ } }
-  const result = removeMapping(req.params.id);
-  // SSH-deploy mode: re-push that proxy's config without the removed mapping.
-  if (result.ok && !proxy.dataplane?.enabled && proxy.deploy?.enabled) {
-    const ms = listMappings().filter((x) => (x.proxyId || 'default') === proxy.id);
-    await deployToProxy(proxy.deploy, ms, { bindAddress: proxy.dataplane?.bindAddress || '*' }).catch(() => {});
+  // Owners can delete their own mapping; admins can delete any.
+  if (req.user.role !== 'admin' && m.owner && m.owner !== req.user.username) {
+    return res.status(403).json({ ok: false, reason: '본인 접속 기록만 삭제할 수 있습니다.' });
   }
-  res.json(result);
+  await deprovision(m);
+  res.json(removeMapping(req.params.id));
 });
 
 // Download an .rdp file pointing at proxyHost:publicPort (client-side RDP).

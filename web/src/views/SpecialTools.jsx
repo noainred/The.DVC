@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { fetchJson, postJson, usePolling, getToken } from '../api.js';
+import { fetchJson, postJson, putJson, usePolling, getToken } from '../api.js';
 import { DataTable, Loading, ErrorBox, StateBadge, UsageCell, EntityDetail, Modal, ResultCount } from '../components/ui.jsx';
 import RemoteAccess from './RemoteAccess.jsx';
 
@@ -74,7 +74,7 @@ function ToolPanel({ tool, onBack }) {
       </div>
       {tool === 'aisearch' && <AiSearch />}
       {tool === 'remote' && <RemoteAccess />}
-      {tool === 'ipam' && <Ipam scope={scope} />}
+      {tool === 'ipam' && <Ipam scope={scope} onScope={setScope} />}
       {tool === 'dupip' && <DupIp scope={scope} />}
       {tool === 'vmtools' && <VmTools scope={scope} />}
       {tool === 'snapshots' && <Snapshots scope={scope} />}
@@ -185,7 +185,7 @@ function AiSearch() {
   );
 }
 
-function Ipam({ scope }) {
+function Ipam({ scope, onScope }) {
   const { loading, data, error } = useTool('/tools/ipam', scope ? { vcenterId: scope } : {});
   const [q, setQ] = useState('');
   const [sel, setSel] = useState(null);
@@ -197,11 +197,12 @@ function Ipam({ scope }) {
   useEffect(() => { fetchJson('/admin/ipam/db-info').then(setDb).catch(() => setDb(null)); }, []);
 
   const sp = scope ? `?vcenterId=${encodeURIComponent(scope)}` : '';
-  const pickBase = async (b) => { setBase(b); setSheet(await fetchJson(`/tools/ipam/sheet?base=${b}${scope ? `&vcenterId=${encodeURIComponent(scope)}` : ''}`).catch(() => null)); };
-  const openSheets = async () => {
+  const pickBase = async (b, vc = scope) => { setBase(b); setSheet(await fetchJson(`/tools/ipam/sheet?base=${b}${vc ? `&vcenterId=${encodeURIComponent(vc)}` : ''}`).catch(() => null)); };
+  const openSheets = async (vc = scope) => {
     setView('sheet');
-    const r = await fetchJson(`/tools/ipam/subnets${sp}`).catch(() => ({ subnets: [] }));
-    setSubnets(r.subnets); if (r.subnets[0]) pickBase(r.subnets[0].base);
+    const q = vc ? `?vcenterId=${encodeURIComponent(vc)}` : '';
+    const r = await fetchJson(`/tools/ipam/subnets${q}`).catch(() => ({ subnets: [] }));
+    setSubnets(r.subnets); if (r.subnets[0]) pickBase(r.subnets[0].base, vc);
   };
   const blobDownload = async (path, name) => {
     const res = await fetch(`/api${path}`, { headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {} });
@@ -210,8 +211,20 @@ function Ipam({ scope }) {
   };
   const downloadXlsx = () => blobDownload(`/tools/ipam.xlsx${sp}`, `ip-ledger-${new Date().toISOString().slice(0, 10)}.xlsx`);
 
-  // Reload the subnet list (and first sheet) when the vCenter scope changes.
-  useEffect(() => { if (view === 'sheet') openSheets(); /* eslint-disable-next-line */ }, [scope]);
+  const [canIpms, setCanIpms] = useState(false);
+  const [ipms, setIpms] = useState(false); // IPMS settings modal open
+  useEffect(() => { fetchJson('/admin/ipam/settings').then(() => setCanIpms(true)).catch(() => setCanIpms(false)); }, []);
+
+  // Always keep the subnet list in sync with the vCenter scope (for counts/chips).
+  useEffect(() => {
+    const q = scope ? `?vcenterId=${encodeURIComponent(scope)}` : '';
+    fetchJson(`/tools/ipam/subnets${q}`).then((r) => { setSubnets(r.subnets); if (view === 'sheet' && r.subnets[0]) pickBase(r.subnets[0].base, scope); }).catch(() => setSubnets([]));
+    // eslint-disable-next-line
+  }, [scope]);
+
+  const c10 = subnets.filter((s) => s.base.startsWith('10.')).length;
+  const c192 = subnets.filter((s) => s.base.startsWith('192.')).length;
+  const c172 = subnets.filter((s) => s.base.startsWith('172.')).length;
 
   if (loading) return <Loading />;
   if (error) return <ErrorBox message={error} />;
@@ -253,13 +266,18 @@ function Ipam({ scope }) {
   return (
     <>
       <div className="kpis" style={{ marginBottom: 14 }}>
-        <Card label="총 IP" value={data.total.toLocaleString()} meta={`센터 ${data.byVcenter.length}`} />
+        <Card label="총 IP" value={data.total.toLocaleString()} meta={`센터 ${data.byVcenter.length} · 서브넷 ${subnets.length}`} />
+        <Card label="서브넷(/24) 대역" value={subnets.length} meta={`10.x ${c10} · 172.x ${c172} · 192.x ${c192}`} />
         <Card label="중복 IP" value={data.duplicateIps} accent={data.duplicateIps ? 'var(--red)' : undefined} />
         <Card label="멀티홈 IP" value={data.multiHomed} />
         {db && <Card label="공유 DB 레코드" value={db.count.toLocaleString()} meta={db.kind.toUpperCase()} />}
       </div>
       <div className="flex gap wrap" style={{ marginBottom: 10 }}>
-        {data.byVcenter.map((v) => <span key={v.vcenterId} className="badge gray" style={{ fontSize: 12, padding: '4px 10px' }}>{v.vcenterName} · {v.count}</span>)}
+        {data.byVcenter.map((v) => (
+          <span key={v.vcenterId} className="badge gray" title="이 vCenter의 서브넷 대장 보기"
+            style={{ fontSize: 12, padding: '4px 10px', cursor: 'pointer', border: scope === v.vcenterId ? '1px solid var(--accent,#2563eb)' : undefined }}
+            onClick={() => { onScope?.(v.vcenterId); openSheets(v.vcenterId); }}>{v.vcenterName} · {v.count}</span>
+        ))}
       </div>
       <div className="flex between wrap gap" style={{ marginBottom: 8, alignItems: 'center' }}>
         <div className="flex gap" style={{ alignItems: 'center' }}>
@@ -268,6 +286,7 @@ function Ipam({ scope }) {
           {view === 'list' && <input className="input" style={{ maxWidth: 260 }} placeholder="IP / VM / 호스트 검색" value={q} onChange={(e) => setQ(e.target.value)} />}
         </div>
         <div className="flex gap">
+          {canIpms && <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={() => setIpms(true)}>⚙ IPMS 설정</button>}
           <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={downloadCsv}>CSV</button>
           <button className="login-btn" style={{ flex: 'none', padding: '9px 14px' }} onClick={downloadXlsx}>엑셀 대장(.xlsx)</button>
         </div>
@@ -275,6 +294,13 @@ function Ipam({ scope }) {
 
       {view === 'sheet' ? (
         <>
+          <div className="flex gap wrap" style={{ marginBottom: 8, alignItems: 'center' }}>
+            {subnets.map((s) => (
+              <span key={s.base} className="badge gray" title="이 서브넷 보기"
+                style={{ fontSize: 12, padding: '4px 10px', cursor: 'pointer', border: base === s.base ? '1px solid var(--accent,#2563eb)' : undefined }}
+                onClick={() => pickBase(s.base)}>{s.subnet} · {s.used}</span>
+            ))}
+          </div>
           <div className="flex gap wrap" style={{ marginBottom: 8, alignItems: 'center' }}>
             <span className="muted" style={{ fontSize: 12 }}>서브넷</span>
             <select className="select" style={{ maxWidth: 280 }} value={base} onChange={(e) => pickBase(e.target.value)}>
@@ -315,7 +341,53 @@ function Ipam({ scope }) {
         </div>
       )}
       {sel && <EntityDetail type={sel.ownerType} item={sel.owner} onClose={() => setSel(null)} />}
+      {ipms && <IpmsSettings onClose={() => setIpms(false)} />}
     </>
+  );
+}
+
+function IpmsSettings({ onClose }) {
+  const [s, setS] = useState(null);
+  const [vcs, setVcs] = useState([]);
+  const [vc, setVc] = useState('');
+  const [msg, setMsg] = useState(null);
+  useEffect(() => {
+    fetchJson('/admin/ipam/settings').then((r) => setS(r.settings)).catch((e) => setMsg(e.message));
+    fetchJson('/vcenters').then((list) => { setVcs(list); if (list[0]) setVc(list[0].id); }).catch(() => {});
+  }, []);
+  if (!s) return <Modal title="IPMS 설정" onClose={onClose}>{msg ? <ErrorBox message={msg} /> : <Loading />}</Modal>;
+
+  const globalText = (s.global || []).join('\n');
+  const vcText = (s.vcenters?.[vc] || []).join('\n');
+  const setGlobal = (t) => setS({ ...s, global: t.split('\n') });
+  const setVcText = (t) => setS({ ...s, vcenters: { ...(s.vcenters || {}), [vc]: t.split('\n') } });
+  const save = async () => {
+    const r = await putJson('/admin/ipam/settings', s).catch((e) => ({ error: e.message }));
+    if (r.ok) onClose(); else setMsg(r.error || '저장 실패');
+  };
+
+  return (
+    <Modal title="IPMS 설정 — 무시할 IP 대역" onClose={onClose} width={560}>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>여기 입력한 대역의 IP는 IP 관리대장/검색/공유DB에서 제외됩니다. 형식: CIDR(10.0.0.0/8), 범위(10.0.0.1-10.0.0.50), 단일 IP. 한 줄에 하나.</div>
+      {msg && <div className="login-error" style={{ marginBottom: 8 }}>{msg}</div>}
+      <label style={{ display: 'block', marginBottom: 12 }}>전체 무시 대역 (모든 vCenter)
+        <textarea className="input" rows={5} value={globalText} onChange={(e) => setGlobal(e.target.value)} placeholder={'10.255.0.0/16\n8.8.8.8'} style={{ resize: 'vertical', fontFamily: 'monospace', fontSize: 12 }} />
+      </label>
+      <div style={{ borderTop: '1px solid rgba(255,255,255,.08)', paddingTop: 10 }}>
+        <div className="flex gap" style={{ alignItems: 'center', marginBottom: 6 }}>
+          <b style={{ fontSize: 13 }}>vCenter별 무시 대역</b>
+          <select className="select" value={vc} onChange={(e) => setVc(e.target.value)} style={{ maxWidth: 240 }}>
+            {vcs.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+          </select>
+        </div>
+        <textarea className="input" rows={5} value={vcText} onChange={(e) => setVcText(e.target.value)} placeholder={'172.16.0.0/12'} style={{ resize: 'vertical', fontFamily: 'monospace', fontSize: 12 }} />
+        <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>선택한 <b>{vcs.find((v) => v.id === vc)?.name || vc}</b> 에서만 위 대역을 숨깁니다.</div>
+      </div>
+      <div className="flex gap" style={{ marginTop: 14 }}>
+        <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} onClick={save}>저장</button>
+        <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={onClose}>취소</button>
+      </div>
+    </Modal>
   );
 }
 

@@ -3,6 +3,8 @@
  * Shared by the /tools/ipam API and the SQLite exporter so both stay in sync.
  */
 
+import { getIgnoreMatcher } from './settings.js';
+
 export function ipToNum(s) {
   const p = String(s || '').split('.').map(Number);
   return p.length === 4 && p.every((n) => Number.isInteger(n) && n >= 0 && n <= 255)
@@ -20,11 +22,13 @@ export function buildIpamRows(snap, vcenterId) {
   const vcName = {};
   for (const vc of snap.vcenters || []) vcName[vc.id] = vc.name;
 
+  const ignored = getIgnoreMatcher();
   const rows = [];
   const count = new Map();
   for (const vm of vms) {
     const ips = vm.ipAddresses?.length ? vm.ipAddresses : (vm.ipAddress ? [vm.ipAddress] : []);
     for (const ip of ips) {
+      if (ignored(ip, vm.vcenterId)) continue;
       count.set(ip, (count.get(ip) || 0) + 1);
       rows.push({
         ip, ipNum: ipToNum(ip), vcenterId: vm.vcenterId, vcenterName: vcName[vm.vcenterId] || vm.vcenterId,
@@ -35,6 +39,7 @@ export function buildIpamRows(snap, vcenterId) {
   }
   for (const h of hosts) {
     if (ipToNum(h.name) == null) continue; // host registered by FQDN → no mgmt IP
+    if (ignored(h.name, h.vcenterId)) continue;
     count.set(h.name, (count.get(h.name) || 0) + 1);
     rows.push({
       ip: h.name, ipNum: ipToNum(h.name), vcenterId: h.vcenterId, vcenterName: vcName[h.vcenterId] || h.vcenterId,
