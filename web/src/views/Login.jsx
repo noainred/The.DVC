@@ -39,9 +39,9 @@ export default function Login({ onSuccess }) {
             onChange={(e) => setUsername(e.target.value)} placeholder="admin" />
         </label>
         <label className="login-field">
-          <span>비밀번호</span>
-          <input className="input" type="password" autoComplete="current-password" value={password}
-            onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" />
+          <span>비밀번호 또는 OTP 코드</span>
+          <input className="input" type="password" autoComplete="one-time-code" value={password}
+            onChange={(e) => setPassword(e.target.value)} placeholder="비밀번호 또는 6자리 OTP" />
         </label>
 
         {error && <div className="login-error">{error}</div>}
@@ -51,7 +51,8 @@ export default function Login({ onSuccess }) {
         </button>
 
         <div className="login-hint muted">
-          기본 데모 계정: <code>admin</code> / <code>admin123</code>
+          OTP를 등록한 계정은 <b>Google OTP 6자리 코드</b>로 로그인합니다.<br />
+          기본 데모 계정: <code>admin</code> / <code>admin123</code> (OTP 등록 전)
         </div>
       </form>
     </div>
