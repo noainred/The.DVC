@@ -5,7 +5,8 @@ import { loadUiSettings, saveUiSettings } from '../ui-settings.js';
 import { hostPower } from '../idrac/service.js';
 import { fetchVmMetric, PERF_INTERVALS, upgradeVmTools, getVmConsole } from '../vcenter/soapClient.js';
 import { listMutes, addMute, removeMute } from '../alarm-mutes.js';
-import { buildIpamRows } from '../ipam/ledger.js';
+import { buildIpamRows, buildSubnetSheets, listSubnets } from '../ipam/ledger.js';
+import { buildWorkbook } from '../ipam/excel.js';
 import { listNotes } from '../release-notes.js';
 import { nlSearch } from '../llm/nlSearch.js';
 
@@ -272,6 +273,25 @@ api.get('/release-notes', (_req, res) => {
 // by center, with the owning entity embedded so the UI can show details on click.
 api.get('/tools/ipam', (req, res) => {
   res.json(buildIpamRows(store.get(), req.query.vcenterId));
+});
+
+// Per-/24 subnet ledger (Excel-style): subnet list, one subnet's rows, or full .xlsx.
+api.get('/tools/ipam/subnets', (req, res) => {
+  res.json({ subnets: listSubnets(store.get(), req.query.vcenterId) });
+});
+api.get('/tools/ipam/sheet', (req, res) => {
+  const sheets = buildSubnetSheets(store.get(), { vcenterId: req.query.vcenterId, onlyBase: req.query.base });
+  res.json(sheets[0] || { subnet: '', rows: [] });
+});
+api.get('/tools/ipam.xlsx', async (req, res) => {
+  try {
+    const sheets = buildSubnetSheets(store.get(), { vcenterId: req.query.vcenterId });
+    const wb = await buildWorkbook(sheets);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="ip-ledger-${new Date().toISOString().slice(0, 10)}.xlsx"`);
+    await wb.xlsx.write(res);
+    res.end();
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // CSV export of the IP ledger for sharing with other tools/spreadsheets.

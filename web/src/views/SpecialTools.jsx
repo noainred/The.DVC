@@ -192,9 +192,31 @@ function Ipam({ scope }) {
   const [q, setQ] = useState('');
   const [sel, setSel] = useState(null);
   const [db, setDb] = useState(null);
+  const [view, setView] = useState('list'); // list | sheet
+  const [subnets, setSubnets] = useState([]);
+  const [base, setBase] = useState('');
+  const [sheet, setSheet] = useState(null);
   useEffect(() => { fetchJson('/admin/ipam/db-info').then(setDb).catch(() => setDb(null)); }, []);
+
+  const sp = scope ? `?vcenterId=${encodeURIComponent(scope)}` : '';
+  const pickBase = async (b) => { setBase(b); setSheet(await fetchJson(`/tools/ipam/sheet?base=${b}${scope ? `&vcenterId=${encodeURIComponent(scope)}` : ''}`).catch(() => null)); };
+  const openSheets = async () => {
+    setView('sheet');
+    const r = await fetchJson(`/tools/ipam/subnets${sp}`).catch(() => ({ subnets: [] }));
+    setSubnets(r.subnets); if (r.subnets[0]) pickBase(r.subnets[0].base);
+  };
+  const blobDownload = async (path, name) => {
+    const res = await fetch(`/api${path}`, { headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {} });
+    const blob = await res.blob(); const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = name; a.click(); URL.revokeObjectURL(url);
+  };
+  const downloadXlsx = () => blobDownload(`/tools/ipam.xlsx${sp}`, `ip-ledger-${new Date().toISOString().slice(0, 10)}.xlsx`);
+
   if (loading) return <Loading />;
   if (error) return <ErrorBox message={error} />;
+
+  const ROWBG = { used: 'rgba(34,197,94,.12)', multihomed: 'rgba(59,130,246,.14)', duplicate: 'rgba(239,68,68,.14)', network: 'rgba(148,163,184,.14)', empty: 'transparent' };
+  const STLAB = { used: '사용', multihomed: '멀티홈', duplicate: '중복', network: 'Network ID', empty: '' };
 
   const term = q.trim().toLowerCase();
   const rows = term
@@ -239,11 +261,52 @@ function Ipam({ scope }) {
         {data.byVcenter.map((v) => <span key={v.vcenterId} className="badge gray" style={{ fontSize: 12, padding: '4px 10px' }}>{v.vcenterName} · {v.count}</span>)}
       </div>
       <div className="flex between wrap gap" style={{ marginBottom: 8, alignItems: 'center' }}>
-        <input className="input" style={{ maxWidth: 280 }} placeholder="IP / VM / 호스트 검색" value={q} onChange={(e) => setQ(e.target.value)} />
-        <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={downloadCsv}>CSV 내보내기</button>
+        <div className="flex gap" style={{ alignItems: 'center' }}>
+          <button className={view === 'list' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setView('list')}>목록</button>
+          <button className={view === 'sheet' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={openSheets}>서브넷 대장(엑셀형)</button>
+          {view === 'list' && <input className="input" style={{ maxWidth: 260 }} placeholder="IP / VM / 호스트 검색" value={q} onChange={(e) => setQ(e.target.value)} />}
+        </div>
+        <div className="flex gap">
+          <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={downloadCsv}>CSV</button>
+          <button className="login-btn" style={{ flex: 'none', padding: '9px 14px' }} onClick={downloadXlsx}>엑셀 대장(.xlsx)</button>
+        </div>
       </div>
-      <ResultCount total={data.rows.length} shown={rows.length} label="IP" filtered={!!term} />
-      <DataTable columns={cols} rows={rows} initialSort={{ key: 'ip', dir: 'asc' }} />
+
+      {view === 'sheet' ? (
+        <>
+          <div className="flex gap wrap" style={{ marginBottom: 8, alignItems: 'center' }}>
+            <span className="muted" style={{ fontSize: 12 }}>서브넷</span>
+            <select className="select" style={{ maxWidth: 280 }} value={base} onChange={(e) => pickBase(e.target.value)}>
+              {subnets.map((s) => <option key={s.base} value={s.base}>{s.subnet} · 사용 {s.used}</option>)}
+            </select>
+            <span className="muted" style={{ fontSize: 12 }}>🟩 사용 · 🟦 멀티홈 · 🟥 중복 · ⬜ 미사용</span>
+          </div>
+          {sheet && (
+            <div className="table-wrap" style={{ maxHeight: '62vh' }}>
+              <table>
+                <thead><tr><th>{base}.X</th><th>Purpose</th><th>Hostname</th><th>메모(Notes)</th><th>전원</th><th>상태</th></tr></thead>
+                <tbody>
+                  {sheet.rows.map((r) => (
+                    <tr key={r.ip} style={{ background: ROWBG[r.status] }}>
+                      <td><b>{r.ip}</b></td>
+                      <td>{r.purpose}</td>
+                      <td>{r.hostname}</td>
+                      <td className="muted" style={{ fontSize: 12 }}>{r.notes}</td>
+                      <td>{r.power}</td>
+                      <td className="muted" style={{ fontSize: 12 }}>{STLAB[r.status]}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          <ResultCount total={data.rows.length} shown={rows.length} label="IP" filtered={!!term} />
+          <DataTable columns={cols} rows={rows} initialSort={{ key: 'ip', dir: 'asc' }} />
+        </>
+      )}
       {db && (
         <div className="muted" style={{ fontSize: 12, marginTop: 10, lineHeight: 1.7 }}>
           타 프로그램 공유용 DB: <code>{db.path}</code> ({db.kind === 'sqlite' ? 'SQLite · 테이블 ip_records' : 'NDJSON'})

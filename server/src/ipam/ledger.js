@@ -55,3 +55,51 @@ export function buildIpamRows(snap, vcenterId) {
     rows,
   };
 }
+
+/**
+ * Build the per-/24-subnet ledger (Excel-style): each subnet is a sheet with all
+ * .0–.255 rows; collected IPs are filled with Purpose(VM/호스트 · 법인 / 클러스터)
+ * + Hostname + Notes + power + status. `onlyBase` returns a single subnet.
+ */
+export function buildSubnetSheets(snap, { vcenterId, onlyBase } = {}) {
+  const { rows } = buildIpamRows(snap, vcenterId);
+  const byIp = new Map();
+  const bases = new Set();
+  for (const r of rows) {
+    if (r.ipNum == null) continue;
+    const p = r.ip.split('.');
+    const base = `${p[0]}.${p[1]}.${p[2]}`;
+    bases.add(base);
+    if (!byIp.has(r.ip)) byIp.set(r.ip, []);
+    byIp.get(r.ip).push(r);
+  }
+  const baseNum = (b) => { const p = b.split('.').map(Number); return ((p[0] << 24) >>> 0) + (p[1] << 16) + (p[2] << 8); };
+  const sortedBases = [...bases].sort((a, b) => baseNum(a) - baseNum(b)).filter((b) => !onlyBase || b === onlyBase);
+
+  const sheets = sortedBases.map((base) => {
+    const sheetRows = [];
+    let used = 0;
+    for (let i = 0; i < 256; i++) {
+      const ip = `${base}.${i}`;
+      const recs = byIp.get(ip) || [];
+      let status = 'empty', purpose = '', hostname = '', notes = '', power = '';
+      if (i === 0) { status = 'network'; purpose = 'Network ID'; }
+      else if (recs.length) {
+        used++;
+        const r = recs[0]; const o = r.owner || {};
+        status = recs.length > 1 ? 'duplicate' : (r.multiHomed ? 'multihomed' : 'used');
+        hostname = [...new Set(recs.map((x) => x.ownerName))].join(' / ');
+        purpose = `${r.ownerType === 'vm' ? 'VM' : '호스트'} · ${r.vcenterName}${o.cluster ? ` / ${o.cluster}` : ''}`;
+        notes = (o.notes || '').split(/\r?\n/)[0] || '';
+        power = o.powerState === 'POWERED_ON' ? 'On' : (o.powerState ? 'Off' : '');
+      }
+      sheetRows.push({ ip, last: i, purpose, hostname, notes, power, status });
+    }
+    return { subnet: `${base}.0/24`, base, used, rows: sheetRows };
+  });
+  return sheets;
+}
+
+export function listSubnets(snap, vcenterId) {
+  return buildSubnetSheets(snap, { vcenterId }).map((s) => ({ subnet: s.subnet, base: s.base, used: s.used }));
+}
