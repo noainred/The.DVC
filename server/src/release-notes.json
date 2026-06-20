@@ -1,6 +1,17 @@
 {
   "notes": [
     {
+      "version": "1.30.0",
+      "date": "2026-06-20",
+      "title": "IP 관리대장 — 엑셀 형식(/24 서브넷)",
+      "notes": [
+        "서브넷(/24)별 대장 보기: .0~.255 전체 + Purpose(VM/호스트·법인/클러스터)·Hostname·메모·전원·상태",
+        "색상 구분(사용/멀티홈/중복/미사용/Network ID)",
+        "엑셀(.xlsx) 다운로드 — 서브넷=시트, 셀 색상 포함(exceljs)",
+        "API: /tools/ipam/subnets, /tools/ipam/sheet, /tools/ipam.xlsx"
+      ]
+    },
+    {
       "version": "1.29.1",
       "date": "2026-06-20",
       "title": "중계 서버(프록시) 설정 → 설정 메뉴",
