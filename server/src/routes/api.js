@@ -122,7 +122,9 @@ function applyFilters(items, query, snap, searchFields = ['name']) {
   }
   if (query.q) {
     const q = String(query.q).toLowerCase();
-    out = out.filter((x) => searchFields.some((f) => String(x[f] ?? '').toLowerCase().includes(q)));
+    // Optional: include the user/vCenter notes in the search (?notes=1).
+    const fields = (query.notes === '1' || query.notes === 'true') ? [...searchFields, 'notes'] : searchFields;
+    out = out.filter((x) => fields.some((f) => String(x[f] ?? '').toLowerCase().includes(q)));
   }
   return out;
 }

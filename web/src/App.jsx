@@ -116,10 +116,12 @@ function Portal({ user, onLogout }) {
   const region = cur.region || '';
   const vcenterId = cur.vcenterId || '';
   const q = cur.q || '';
+  const qNotes = !!cur.qNotes; // 메모 포함 검색 (기본 꺼짐)
   const patchFilter = (patch, t = tab) => setTabFilters((m) => ({ ...m, [t]: { ...(m[t] || {}), ...patch } }));
   const setRegion = (v) => patchFilter({ region: v, vcenterId: '' });
   const setVcenterId = (v) => patchFilter({ vcenterId: v });
   const setQ = (v) => patchFilter({ q: v });
+  const setQNotes = (v) => patchFilter({ qNotes: v });
 
   // Keep the URL hash in sync with the active tab, and follow back/forward.
   const setTab = (id) => { setTabState(id); window.location.hash = `#/${id}`; };
@@ -168,11 +170,11 @@ function Portal({ user, onLogout }) {
     const f = {};
     if (vcenterId) f.vcenterId = vcenterId;
     else if (region) f.region = region;
-    if (q) f.q = q;
+    if (q) { f.q = q; if (qNotes) f.notes = '1'; }
     const mf = MENU_FILTERS[tab];
     if (mf && menuFilter[tab]) f[mf.key] = menuFilter[tab];
     return f;
-  }, [vcenterId, region, q, tab, menuFilter]);
+  }, [vcenterId, region, q, qNotes, tab, menuFilter]);
 
   // Scope (region/vCenter) without the free-text query, used by Explore.
   const scope = useMemo(() => {
@@ -267,8 +269,14 @@ function Portal({ user, onLogout }) {
             {showTextSearch && (
               <input className="input" placeholder="이름 / IP / OS 검색…" value={q} onChange={(e) => setQ(e.target.value)} />
             )}
+            {showTextSearch && (
+              <label className="flex gap" style={{ alignItems: 'center', fontSize: 12, whiteSpace: 'nowrap', cursor: 'pointer' }}
+                title="체크하면 검색에 메모(Notes) 내용도 포함합니다. (기본: 미포함)">
+                <input type="checkbox" checked={qNotes} onChange={(e) => setQNotes(e.target.checked)} /> 메모 포함
+              </label>
+            )}
             {(region || vcenterId || q || menuFilter[tab]) && (
-              <button className="tab" onClick={() => { patchFilter({ region: '', vcenterId: '', q: '' }); setMenuFilter((m) => ({ ...m, [tab]: '' })); }}>필터 초기화</button>
+              <button className="tab" onClick={() => { patchFilter({ region: '', vcenterId: '', q: '', qNotes: false }); setMenuFilter((m) => ({ ...m, [tab]: '' })); }}>필터 초기화</button>
             )}
           </div>
         )}
