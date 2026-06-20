@@ -36,3 +36,6 @@ server/config/packages.json
 server/config/ipam-settings.json
 server/config/ipam-annotations.json
 server/config/audit.ndjson
+server/config/alerts.json
+server/config/host-temp.db
+server/config/host-temp.ndjson

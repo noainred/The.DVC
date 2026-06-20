@@ -69,6 +69,14 @@ export const config = {
     // Duration window enum for the metric query (0=recent). Override per env.
     omePowerDuration: Number(process.env.OME_POWER_DURATION) || 0,
   },
+  temp: {
+    // ESXi host temperature time-series (SQLite, like iDRAC power). In CONFIG_DIR
+    // so it survives upgrades. 5-year retention by default; sampled on an interval.
+    dbPath: process.env.TEMP_DB_PATH ||
+      path.join(process.env.CONFIG_DIR || path.resolve(ROOT, 'config'), 'host-temp.db'),
+    sampleIntervalMs: Number(process.env.TEMP_SAMPLE_INTERVAL_MS) || 600_000, // 10분
+    retentionDays: Number(process.env.TEMP_RETENTION_DAYS) || 1830,           // ~5년
+  },
   ipam: {
     // Shareable IP ledger DB (SQLite). Replaced on every refresh so external
     // programs can read the current per-center IP inventory. In CONFIG_DIR so
