@@ -6,6 +6,7 @@ import { store } from '../store.js';
 import { getDataSource, setDataSource, isDataSourceOverridden } from '../runtime-settings.js';
 import { ledgerInfo } from '../ipam/db.js';
 import { saveNote, deleteNote } from '../release-notes.js';
+import { deployAgent, testTarget, installerInfo } from '../agent/deploy.js';
 import { getLogs } from '../logbuffer.js';
 import {
   listRegistry, addVcenter, updateVcenter, removeVcenter, testConnection, importVcenters,
@@ -80,6 +81,19 @@ adminRouter.post('/users/:username/totp/confirm', adminOnly, (req, res) => {
 });
 adminRouter.post('/users/:username/totp/disable', adminOnly, (req, res) => {
   const r = disableTotp(req.params.username, req.body || {});
+  res.status(r.ok ? 200 : 400).json(r);
+});
+
+// --- iDRAC-scan agent auto-deploy (SSH push install) ---
+adminRouter.get('/agent-deploy/installer', adminOnly, (req, res) => res.json(installerInfo(req.query.path)));
+
+adminRouter.post('/agent-deploy/test', adminOnly, async (req, res) => {
+  res.json(await testTarget(req.body || {}));
+});
+
+adminRouter.post('/agent-deploy', adminOnly, async (req, res) => {
+  const { installerPath, port, ...target } = req.body || {};
+  const r = await deployAgent(target, { installerPath, port });
   res.status(r.ok ? 200 : 400).json(r);
 });
 

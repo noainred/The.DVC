@@ -38,6 +38,15 @@ function sftpReadFile(conn, path) {
   });
 }
 
+function sftpPutFile(conn, localPath, remotePath) {
+  return new Promise((resolve, reject) => {
+    conn.sftp((err, sftp) => {
+      if (err) return reject(err);
+      sftp.fastPut(localPath, remotePath, (e) => (e ? reject(e) : resolve()));
+    });
+  });
+}
+
 function sftpWriteFile(conn, path, content, mode = 0o644) {
   return new Promise((resolve, reject) => {
     conn.sftp((err, sftp) => {
@@ -61,6 +70,7 @@ export async function withSsh(creds, fn) {
     exec: async (cmd) => { const r = await exec(conn, cmd); log.push(r); return r; },
     readFile: (p) => sftpReadFile(conn, p),
     writeFile: (p, c, m) => sftpWriteFile(conn, p, c, m),
+    putFile: (local, remote) => sftpPutFile(conn, local, remote),
     log,
   };
   try {
