@@ -1,5 +1,5 @@
-import React, { useRef } from 'react';
-import { useRemoteWindow, closeRemoteSession, activateSession, setWin, closeAllSessions } from './sessions.js';
+import React, { useRef, useState, useEffect } from 'react';
+import { useRemoteWindow, closeRemoteSession, activateSession, setWin, closeAllSessions, newSessionLike, duplicateSession, setSessionCreds } from './sessions.js';
 import { SshConsole, RdpConsole } from './RemoteConsole.jsx';
 
 /**
@@ -10,6 +10,14 @@ import { SshConsole, RdpConsole } from './RemoteConsole.jsx';
 export function RemoteConsoleWindow() {
   const { sessions, activeId, win } = useRemoteWindow();
   const dragRef = useRef(null);
+  const [menu, setMenu] = useState(null); // { x, y, id }
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    window.addEventListener('click', close);
+    window.addEventListener('blur', close);
+    return () => { window.removeEventListener('click', close); window.removeEventListener('blur', close); };
+  }, [menu]);
 
   if (sessions.length === 0) return null;
 
@@ -62,6 +70,8 @@ export function RemoteConsoleWindow() {
       <div style={{ display: 'flex', gap: 2, padding: '6px 8px 0', overflowX: 'auto', background: 'rgba(255,255,255,.02)' }}>
         {sessions.map((s) => (
           <div key={s.id} onClick={() => activateSession(s.id)}
+            onContextMenu={(e) => { e.preventDefault(); activateSession(s.id); setMenu({ x: e.clientX, y: e.clientY, id: s.id }); }}
+            title="우클릭: 새 세션(New) / 복제(Dup)"
             style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderRadius: '8px 8px 0 0', cursor: 'pointer', whiteSpace: 'nowrap', fontSize: 12,
               background: s.id === activeId ? 'var(--card-bg, #0f172a)' : 'transparent',
               color: s.id === activeId ? 'var(--text)' : 'var(--text-faint, #94a3b8)',
@@ -78,11 +88,22 @@ export function RemoteConsoleWindow() {
         {sessions.map((s) => (
           <div key={s.id} style={{ position: 'absolute', inset: 0, display: s.id === activeId ? 'block' : 'none' }}>
             {s.kind === 'ssh'
-              ? <SshConsole mapping={s.mapping} active={s.id === activeId} />
-              : <RdpConsole mapping={s.mapping} active={s.id === activeId} />}
+              ? <SshConsole mapping={s.mapping} active={s.id === activeId} initialCreds={s.initialCreds} onCreds={(c) => setSessionCreds(s.id, c)} />
+              : <RdpConsole mapping={s.mapping} active={s.id === activeId} initialCreds={s.initialCreds} onCreds={(c) => setSessionCreds(s.id, c)} />}
           </div>
         ))}
       </div>
+
+      {menu && (
+        <div style={{ position: 'fixed', left: menu.x, top: menu.y, zIndex: 400, minWidth: 200,
+          background: 'var(--card-bg, #0f172a)', border: '1px solid rgba(255,255,255,.12)', borderRadius: 8, boxShadow: '0 8px 30px rgba(0,0,0,.5)', overflow: 'hidden' }}
+          onClick={(e) => e.stopPropagation()}>
+          <button className="logout-btn" style={{ display: 'block', width: '100%', textAlign: 'left', border: 'none', borderRadius: 0, padding: '10px 14px' }}
+            onClick={() => { newSessionLike(menu.id); setMenu(null); }}>➕ New — 같은 대상 새 세션</button>
+          <button className="logout-btn" style={{ display: 'block', width: '100%', textAlign: 'left', border: 'none', borderRadius: 0, padding: '10px 14px' }}
+            onClick={() => { duplicateSession(menu.id); setMenu(null); }}>⧉ Dup — 동일 세션 복제(자격증명 포함)</button>
+        </div>
+      )}
 
       {/* resize handle */}
       {!win.maximized && (

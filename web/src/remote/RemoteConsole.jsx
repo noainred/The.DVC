@@ -8,7 +8,7 @@ import { getToken } from '../api.js';
 const SPIN = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
 /** Browser SSH console body (fills its container). Connects on credential submit. */
-export function SshConsole({ mapping }) {
+export function SshConsole({ mapping, initialCreds, onCreds }) {
   const elRef = useRef(null);
   const termRef = useRef(null);
   const wsRef = useRef(null);
@@ -16,7 +16,7 @@ export function SshConsole({ mapping }) {
   const fitRef = useRef(null);
   const roRef = useRef(null);
   const phaseRef = useRef('form');
-  const [creds, setCreds] = useState({ username: '', password: '' });
+  const [creds, setCreds] = useState(initialCreds && initialCreds.username ? initialCreds : { username: '', password: '' });
   const [phase, setPhaseState] = useState('form'); // form | connecting | live | error
   const [status, setStatus] = useState('');
   const [ticks, setTicks] = useState(0);
@@ -24,6 +24,8 @@ export function SshConsole({ mapping }) {
   const setPhase = (p) => { phaseRef.current = p; setPhaseState(p); };
   const stopTimer = () => { try { clearInterval(timerRef.current); } catch { /* */ } timerRef.current = null; };
   useEffect(() => () => { stopTimer(); try { roRef.current?.disconnect(); } catch { /* */ } try { wsRef.current?.close(); } catch { /* */ } try { termRef.current?.dispose(); } catch { /* */ } }, []);
+  // Auto-connect when duplicated (credentials carried over).
+  useEffect(() => { if (initialCreds && initialCreds.username) connect(); /* eslint-disable-next-line */ }, []);
 
   const refit = () => {
     try {
@@ -34,6 +36,7 @@ export function SshConsole({ mapping }) {
   };
 
   const connect = () => {
+    onCreds?.(creds);
     setPhase('connecting'); setStatus('프록시에 WebSocket 연결 중…'); setTicks(0);
     stopTimer(); const t0 = Date.now();
     timerRef.current = setInterval(() => setTicks(Math.floor((Date.now() - t0) / 200)), 200);
@@ -92,17 +95,19 @@ export function SshConsole({ mapping }) {
 }
 
 /** Browser RDP console body via guacd. `active` gates keyboard so background tabs don't capture keys. */
-export function RdpConsole({ mapping, active }) {
+export function RdpConsole({ mapping, active, initialCreds, onCreds }) {
   const elRef = useRef(null);
   const clientRef = useRef(null);
   const activeRef = useRef(active);
-  const [creds, setCreds] = useState({ username: '', password: '', domain: '' });
+  const [creds, setCreds] = useState(initialCreds && initialCreds.username ? initialCreds : { username: '', password: '', domain: '' });
   const [connected, setConnected] = useState(false);
   const [status, setStatus] = useState('');
   useEffect(() => { activeRef.current = active; }, [active]);
   useEffect(() => () => { try { clientRef.current?.disconnect(); } catch { /* */ } }, []);
+  useEffect(() => { if (initialCreds && initialCreds.username) connect(); /* eslint-disable-next-line */ }, []);
 
   const connect = () => {
+    onCreds?.(creds);
     setConnected(true);
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     const tunnel = new Guacamole.WebSocketTunnel(`${proto}://${location.host}/api/remote/rdp`);
