@@ -55,13 +55,21 @@ function customizationXml(vm, guest, windows) {
         `<hwClockUTC>true</hwClockUTC>` +
       `</identity>`;
 
-  const ipSpec = guest.ipMode === 'dhcp' || !vm.ip
-    ? `<ip xsi:type="CustomizationDhcpIpGenerator"/>`
-    : `<ip xsi:type="CustomizationFixedIp"><ipAddress>${esc(vm.ip)}</ipAddress></ip>` +
-      (guest.subnetMask ? `<subnetMask>${esc(guest.subnetMask)}</subnetMask>` : '') +
-      (guest.gateway ? `<gateway>${esc(guest.gateway)}</gateway>` : '');
-
-  const nicMap = `<nicSettingMap><adapter>${ipSpec}</adapter></nicSettingMap>`;
+  // One <nicSettingMap> per virtual NIC, applied in order; optional <macAddress>
+  // binds a specific NIC (otherwise positional). Falls back to a single NIC for
+  // older saved specs that only carry vm.ip.
+  const nics = (Array.isArray(vm.nics) && vm.nics.length)
+    ? vm.nics
+    : [{ dhcp: guest.ipMode === 'dhcp' || !vm.ip, ip: vm.ip, subnetMask: guest.subnetMask, gateway: guest.gateway, mac: '' }];
+  const nicXml = (nic) => {
+    const ipSpec = nic.dhcp || !nic.ip
+      ? `<ip xsi:type="CustomizationDhcpIpGenerator"/>`
+      : `<ip xsi:type="CustomizationFixedIp"><ipAddress>${esc(nic.ip)}</ipAddress></ip>` +
+        (nic.subnetMask ? `<subnetMask>${esc(nic.subnetMask)}</subnetMask>` : '') +
+        (nic.gateway ? `<gateway>${esc(nic.gateway)}</gateway>` : '');
+    return `<nicSettingMap>${nic.mac ? `<macAddress>${esc(nic.mac)}</macAddress>` : ''}<adapter>${ipSpec}</adapter></nicSettingMap>`;
+  };
+  const nicMap = nics.map(nicXml).join('');
   return `<customization>${identity}${globalIp}${nicMap}</customization>`;
 }
 

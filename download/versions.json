@@ -1,20 +1,20 @@
 {
-  "latest": "1.41.0",
+  "latest": "1.42.0",
   "versions": [
     {
-      "version": "1.41.0",
-      "tar_gz": "vmware-portal-1.41.0.tar.gz",
-      "size_bytes": 9396144,
-      "sha256": "c1504369ccd74751d4d7eb9ae1e3848ac2e50e4705ab53a5ee4893001f9d9559",
-      "installer": "vmware-portal-offline-1.41.0-el9-x64.tar.gz",
-      "installer_size_bytes": 66629574,
-      "installer_sha256": "cf0c20d7c9c26049baf913df9c3f2a05956c3fb7be05d746a820b96b4b70fec3",
-      "installer_cent9": "vmware-portal-offline-1.41.0-cent9-x64.tar.gz",
-      "installer_cent9_size_bytes": 66636218,
-      "installer_cent9_sha256": "7172e16cb633c1471f4b268d3f5fbec41c5766c95af1de32f29fae3b1b3a989d",
-      "windows": "vmware-portal-win-1.41.0-x64.zip",
-      "windows_size_bytes": 49162287,
-      "windows_sha256": "0704cf61594aef379874a064fb18cc35cb2f5ba8c02b84c44152349270a62aef"
+      "version": "1.42.0",
+      "tar_gz": "vmware-portal-1.42.0.tar.gz",
+      "size_bytes": 9399261,
+      "sha256": "ccf824d990109afa92dd99c7bf2452df210d892b435588578307c45b9bef26e2",
+      "installer": "vmware-portal-offline-1.42.0-el9-x64.tar.gz",
+      "installer_size_bytes": 66631297,
+      "installer_sha256": "e58ec14d7d9276229983ac5077ed57f06e3d42d76a11af0a94b95d03bd44b416",
+      "installer_cent9": "vmware-portal-offline-1.42.0-cent9-x64.tar.gz",
+      "installer_cent9_size_bytes": 66638196,
+      "installer_cent9_sha256": "40a002996d4c8684b0151c2835f0f4a3ed9a680c4b13f7d4b7787406cd53bb42",
+      "windows": "vmware-portal-win-1.42.0-x64.zip",
+      "windows_size_bytes": 49165413,
+      "windows_sha256": "ce3131f6a6577894ca8da127200e4902bfda225ec9fcea9d05c13ee55145f8c3"
     }
   ]
 }

@@ -4,6 +4,7 @@ import { DataTable, Loading, ErrorBox, StateBadge, UsageCell, EntityDetail, Moda
 
 const TOOLS = [
   { k: 'aisearch', icon: '🔎', label: 'AI 검색 (자연어)', desc: '자연어로 VM/호스트/IP 검색 · 로컬 LLM' },
+  { k: 'guestos', icon: '🐧', label: 'Guest OS 종류/버전', desc: 'OS·버전별 VM 수 · 전체/법인별 · 검색' },
   { k: 'ipam', icon: '📒', label: '센터별 IP 관리대장', desc: 'vCenter 수집 IP 전체 · 클릭 시 상세 · DB/CSV' },
   { k: 'dupip', icon: '🔁', label: '중복 IP 찾기', desc: '둘 이상 VM이 같은 IPv4를 쓰는 경우' },
   { k: 'vmtools', icon: '🧩', label: 'VMware Tools 버전', desc: '버전별 집계 + 업그레이드' },
@@ -53,7 +54,7 @@ function ToolPanel({ tool, onBack }) {
   const meta = TOOLS.find((t) => t.k === tool);
   const [scope, setScope] = useState('');
   const { data: vcList } = usePolling('/vcenters', {}, 60_000);
-  const scoped = ['ipam', 'dupip', 'vmtools', 'snapshots', 'hba', 'gpu', 'licenses', 'esxi', 'hardware'].includes(tool);
+  const scoped = ['ipam', 'dupip', 'vmtools', 'snapshots', 'hba', 'gpu', 'licenses', 'esxi', 'hardware', 'guestos'].includes(tool);
 
   return (
     <>
@@ -71,6 +72,7 @@ function ToolPanel({ tool, onBack }) {
         )}
       </div>
       {tool === 'aisearch' && <AiSearch />}
+      {tool === 'guestos' && <GuestOs scope={scope} />}
       {tool === 'ipam' && <Ipam scope={scope} onScope={setScope} />}
       {tool === 'dupip' && <DupIp scope={scope} />}
       {tool === 'vmtools' && <VmTools scope={scope} />}
@@ -634,6 +636,43 @@ function useTool(path, params) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path, key]);
   return state;
+}
+
+function GuestOs({ scope }) {
+  const { loading, data, error } = useTool('/tools/guest-os', scope ? { vcenterId: scope } : {});
+  const [q, setQ] = useState('');
+  const [view, setView] = useState('os'); // os | family
+  if (loading) return <Loading />;
+  if (error) return <ErrorBox message={error} />;
+  const term = q.trim().toLowerCase();
+  const rows = (view === 'os' ? data.items : data.families).filter((r) => !term || (r.os || r.family).toLowerCase().includes(term));
+  const osCols = [
+    { key: 'os', label: 'Guest OS (종류·버전)', render: (r) => <b>{r.os}</b> },
+    { key: 'family', label: '계열', render: (r) => <span className="badge gray">{r.family}</span> },
+    { key: 'total', label: 'VM 수', align: 'right' },
+    { key: 'on', label: 'On', align: 'right', render: (r) => <span className="badge green">{r.on}</span> },
+    { key: 'off', label: 'Off', align: 'right', render: (r) => <span className="badge gray">{r.off}</span> },
+  ];
+  const famCols = [
+    { key: 'family', label: 'OS 계열', render: (r) => <b>{r.family}</b> },
+    { key: 'total', label: 'VM 수', align: 'right' },
+    { key: 'on', label: 'On', align: 'right', render: (r) => <span className="badge green">{r.on}</span> },
+  ];
+  return (
+    <>
+      <div className="kpis" style={{ marginBottom: 14 }}>
+        <Card label="총 VM" value={data.total.toLocaleString()} meta={scope ? '선택 법인' : '전체 법인'} />
+        <Card label="OS 종류(버전 포함)" value={data.distinctOs} />
+        <Card label="OS 계열" value={data.families.length} meta={data.families.slice(0, 3).map((f) => f.family).join(' · ')} />
+      </div>
+      <div className="flex gap wrap" style={{ marginBottom: 8, alignItems: 'center' }}>
+        <button className={view === 'os' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setView('os')}>OS·버전별 ({data.items.length})</button>
+        <button className={view === 'family' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setView('family')}>계열별 ({data.families.length})</button>
+        <SearchBox className="input" style={{ maxWidth: 260 }} placeholder="OS 이름 검색 (예: Windows, Ubuntu 22)" value={q} onChange={setQ} />
+      </div>
+      <DataTable columns={view === 'os' ? osCols : famCols} rows={rows} initialSort={{ key: 'total', dir: 'desc' }} />
+    </>
+  );
 }
 
 function Card({ label, value, meta, accent, onClick, active }) {
