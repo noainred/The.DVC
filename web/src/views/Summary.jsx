@@ -43,7 +43,13 @@ function CapacityBar({ label, usedLabel, totalLabel, pct }) {
 
 export default function Summary({ scope, onGotoTab }) {
   const [corp, setCorp] = useState(''); // '' = all 법인(vCenter)
-  const params = { ...scope, ...(corp ? { vcenterId: corp } : {}) };
+  const [osPower, setOsPower] = useState('all'); // all | on | off
+  const [osKind, setOsKind] = useState('all');   // all | vm | template
+  const params = {
+    ...scope, ...(corp ? { vcenterId: corp } : {}),
+    ...(osPower !== 'all' ? { power: osPower } : {}),
+    ...(osKind !== 'all' ? { kind: osKind } : {}),
+  };
   const { data: s, error, loading } = usePolling('/summary', params, 15_000);
   const { data: vcList } = usePolling('/vcenters', {}, 60_000); // 법인 목록(필터)
   if (loading && !s) return <Loading />;
@@ -124,9 +130,21 @@ export default function Summary({ scope, onGotoTab }) {
       <div className="section-title">OS별 할당 자원 합계 {corp ? `— ${corpName}` : ''}</div>
       <div className="grid cols-2">
         <div className="card">
-          <div className="flex between" style={{ marginBottom: 8 }}>
+          <div className="flex between wrap" style={{ marginBottom: 8, gap: 8, alignItems: 'center' }}>
             <b>OS별 vCPU · 메모리 · 디스크 합계</b>
-            <span className="muted" style={{ fontSize: 12 }}>{osAlloc.length} OS · {fmt(osAllocTotals.vms)} VM</span>
+            <div className="flex gap wrap" style={{ alignItems: 'center' }}>
+              <select className="select" value={osPower} onChange={(e) => setOsPower(e.target.value)} style={{ fontSize: 12, padding: '4px 8px' }}>
+                <option value="all">전원 전체</option>
+                <option value="on">On만</option>
+                <option value="off">Off만</option>
+              </select>
+              <select className="select" value={osKind} onChange={(e) => setOsKind(e.target.value)} style={{ fontSize: 12, padding: '4px 8px' }}>
+                <option value="all">VM+템플릿</option>
+                <option value="vm">VM만</option>
+                <option value="template">템플릿만</option>
+              </select>
+              <span className="muted" style={{ fontSize: 12 }}>{osAlloc.length} OS · {fmt(osAllocTotals.vms)} VM</span>
+            </div>
           </div>
           <div className="table-wrap">
             <table>

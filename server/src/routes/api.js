@@ -482,9 +482,17 @@ api.get('/summary', (req, res) => {
   const vmRamMB = sum(vms, (v) => v.memMB);
   const vmProvGB = sum(vms, (v) => v.storageGB);
 
+  // OS allocation table can be filtered by power state and VM/template.
+  const osVms = vms.filter((v) => {
+    if (req.query.power === 'on' && v.powerState !== 'POWERED_ON') return false;
+    if (req.query.power === 'off' && v.powerState !== 'POWERED_OFF') return false;
+    if (req.query.kind === 'template' && !v.template) return false;
+    if (req.query.kind === 'vm' && v.template) return false;
+    return true;
+  });
   const osDist = {};
   const osAlloc = {}; // OS family -> { vms, vcpu, ramMB, diskGB }
-  for (const v of vms) {
+  for (const v of osVms) {
     const f = osFamily(v.guestOS);
     osDist[f] = (osDist[f] || 0) + 1;
     const a = osAlloc[f] || (osAlloc[f] = { name: f, vms: 0, vcpu: 0, ramMB: 0, diskGB: 0 });
