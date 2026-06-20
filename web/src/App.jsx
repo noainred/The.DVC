@@ -218,19 +218,13 @@ function Portal({ user, onLogout }) {
             );
           })()}
         </div>
-        <div className="settings-box" title="로그인 후 처음 보여줄 화면">
-          <span className="muted">시작 화면</span>
-          <select className="select select-sm" value={landingTab} onChange={(e) => saveLanding(e.target.value)}>
-            {visibleTabs.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
-          </select>
-        </div>
         <div className="user-box">
           <div className="user-avatar" title={user.name}>{(user.name || 'U').slice(0, 1).toUpperCase()}</div>
           <div className="user-meta">
             <div className="user-name">{user.name}</div>
             <div className="user-role muted">{user.role}</div>
           </div>
-          <button className="logout-btn" onClick={onLogout} title="로그아웃">로그아웃</button>
+          <button className="logout-btn" onClick={onLogout} title="로그아웃">Out</button>
         </div>
       </header>
 
