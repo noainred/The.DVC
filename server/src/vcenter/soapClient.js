@@ -182,6 +182,21 @@ export class VimSoapClient {
     return parseObjectContent(await this.#call(body));
   }
 
+  /** RetrieveProperties for an explicit list of objects of one type (chunked). */
+  async retrieveManyObjectProps(type, refs, paths, chunk = 250) {
+    const out = [];
+    for (let i = 0; i < refs.length; i += chunk) {
+      const slice = refs.slice(i, i + chunk);
+      const objectSets = slice.map((r) => `<objectSet><obj type="${type}">${r}</obj></objectSet>`).join('');
+      const body =
+        `<RetrieveProperties xmlns="urn:vim25"><_this type="PropertyCollector">${this.sc.propertyCollector}</_this>` +
+        `<specSet><propSet><type>${type}</type>${paths.map((p) => `<pathSet>${p}</pathSet>`).join('')}</propSet>` +
+        `${objectSets}</specSet></RetrieveProperties>`;
+      out.push(...parseObjectContent(await this.#call(body)));
+    }
+    return out;
+  }
+
   /** Find the counterId for power.power.average from the perf counter catalog. */
   async powerCounterId() {
     if (!this.sc.perfManager) return null;
@@ -470,6 +485,25 @@ function parseDatastoreStorage(infoXml, summaryType) {
   return { storageType: 'other', remoteHost: '', ssd: false };
 }
 
+/**
+ * Parse a VM's config.hardware.device for assigned GPUs (VirtualPCIPassthrough).
+ *   - VmiopBackingInfo  → vGPU (mediated, has a <vgpu> profile)
+ *   - Device/Dynamic/Plugin backing → raw PCI passthrough (DirectPath I/O)
+ * Returns { type:'vgpu'|'passthrough'|'mixed', count, vgpu, passthrough, profile } or null.
+ */
+function parseVmGpu(deviceXml) {
+  if (!deviceXml || !/VirtualPCIPassthrough/.test(deviceXml)) return null;
+  let vgpu = 0; let passthrough = 0; let profile = '';
+  for (const part of deviceXml.split('<device')) {
+    if (!/xsi:type="VirtualPCIPassthrough"/.test(part)) continue;
+    if (/Vmiop/i.test(part)) { vgpu++; if (!profile) profile = /<vgpu>([^<]+)<\/vgpu>/.exec(part)?.[1] || ''; }
+    else passthrough++;
+  }
+  if (!vgpu && !passthrough) return null;
+  const type = vgpu && passthrough ? 'mixed' : (vgpu ? 'vgpu' : 'passthrough');
+  return { type, count: vgpu + passthrough, vgpu, passthrough, profile };
+}
+
 // Snapshot count (from the snapshot tree) + approximate size from layoutEx files.
 function snapshotInfo(snapXml, layoutXml) {
   let snapshotCount = 0;
@@ -716,8 +750,32 @@ export async function collectFromVCenterSoap(vc) {
         toolsVersionStatus: p['guest.toolsVersionStatus2'] || '',
         notes: (p['config.annotation'] || '').slice(0, 2000),
         tags: [], // vSphere Tags require the tagging REST API; not collected via SOAP
+        gpu: null, // 아래에서 GPU 호스트 위 VM만 대상으로 채움
         ...snapshotInfo(p['snapshot'], p['layoutEx.file']),
       });
+    }
+
+    // VM GPU 할당(vGPU/패스쓰루) — 비용을 줄이려 GPU가 있는 호스트 위 VM만 대상으로
+    // config.hardware.device를 추가 조회한다(O(전체 VM) 아님). 실패는 격리.
+    try {
+      const gpuHostRefs = new Set([...hostByRef].filter(([, h]) => (h.gpus || []).length).map(([ref]) => ref));
+      if (gpuHostRefs.size) {
+        const vmByRef = new Map();
+        for (const o of objs.filter((x) => x.type === 'VirtualMachine')) {
+          if (gpuHostRefs.has(o.props['runtime.host'])) vmByRef.set(o.ref, o);
+        }
+        if (vmByRef.size) {
+          const devObjs = await c.retrieveManyObjectProps('VirtualMachine', [...vmByRef.keys()], ['config.hardware.device']);
+          const gpuByVmId = new Map();
+          for (const d of devObjs) {
+            const g = parseVmGpu(d.props['config.hardware.device']);
+            if (g) gpuByVmId.set(`${vc.id}:${d.ref}`, g);
+          }
+          for (const vm of vms) { const g = gpuByVmId.get(vm.id); if (g) vm.gpu = g; }
+        }
+      }
+    } catch (err) {
+      console.warn(`[collect] ${vc.id} VM GPU 조회 건너뜀: ${err.message}`);
     }
 
     const datastores = objs.filter((x) => x.type === 'Datastore').map((o) => {
