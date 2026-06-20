@@ -13,6 +13,7 @@ import Upgrade from './views/Upgrade.jsx';
 import Settings from './views/Settings.jsx';
 import SpecialTools from './views/SpecialTools.jsx';
 import ReleaseNotes from './views/ReleaseNotes.jsx';
+import { RemoteConsoleWindow } from './remote/RemoteConsoleWindow.jsx';
 import Login from './views/Login.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 
@@ -310,6 +311,7 @@ function Portal({ user, onLogout }) {
       )}
 
       {showNotes && <ReleaseNotes isAdmin={user.role === 'admin'} onClose={() => setShowNotes(false)} />}
+      <RemoteConsoleWindow />
     </div>
   );
 }

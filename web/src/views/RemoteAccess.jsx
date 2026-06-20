@@ -1,8 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Terminal } from '@xterm/xterm';
-import { FitAddon } from '@xterm/addon-fit';
-import Guacamole from 'guacamole-common-js';
-import '@xterm/xterm/css/xterm.css';
+import React, { useEffect, useState } from 'react';
+import { openRemoteSession } from '../remote/sessions.js';
 import { fetchJson, postJson, putJson, delJson, getToken } from '../api.js';
 import { Loading, ErrorBox, Modal } from '../components/ui.jsx';
 
@@ -15,8 +12,6 @@ export default function RemoteAccess() {
   const [cfg, setCfg] = useState(null);   // admin only (null if not admin)
   const [error, setError] = useState(null);
   const [msg, setMsg] = useState(null);
-  const [ssh, setSsh] = useState(null);   // mapping for SSH terminal modal
-  const [rdp, setRdp] = useState(null);   // mapping for RDP web console modal
   const [form, setForm] = useState({ name: '', vcenterId: '', protocol: 'ssh', targetHost: '', targetPort: '', publicPort: '' });
   const [vmQuery, setVmQuery] = useState('');
   const [vmList, setVmList] = useState([]);
@@ -251,9 +246,9 @@ export default function RemoteAccess() {
                 <td><span className={`badge ${STATUS_BADGE[m.status] || 'gray'}`}>{m.status}</span></td>
                 <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                   {m.protocol === 'ssh'
-                    ? <button className="login-btn" style={{ flex: 'none', padding: '6px 12px' }} onClick={() => setSsh(m)}>SSH 터미널</button>
+                    ? <button className="login-btn" style={{ flex: 'none', padding: '6px 12px' }} onClick={() => openRemoteSession({ kind: 'ssh', mapping: m })}>SSH 터미널</button>
                     : (m.guacdConfigured
-                        ? <><button className="login-btn" style={{ flex: 'none', padding: '6px 12px' }} onClick={() => setRdp(m)}>웹 RDP</button>{' '}<button className="logout-btn" style={{ padding: '6px 10px' }} onClick={() => downloadRdp(m)}>.rdp</button></>
+                        ? <><button className="login-btn" style={{ flex: 'none', padding: '6px 12px' }} onClick={() => openRemoteSession({ kind: 'rdp', mapping: m })}>웹 RDP</button>{' '}<button className="logout-btn" style={{ padding: '6px 10px' }} onClick={() => downloadRdp(m)}>.rdp</button></>
                         : <button className="login-btn" style={{ flex: 'none', padding: '6px 12px' }} onClick={() => downloadRdp(m)}>.rdp 다운로드</button>)}
                   {isAdmin && <> {' '}
                     {m.status === 'error' && <button className="logout-btn" style={{ padding: '6px 10px' }} onClick={() => reapply(m)}>재적용</button>}
@@ -271,8 +266,6 @@ export default function RemoteAccess() {
         SSH는 브라우저 내장 터미널, RDP는 .rdp 파일(또는 guacd 구성 시 웹 콘솔)로 연결됩니다.
       </div>
 
-      {ssh && <SshTerminal mapping={ssh} onClose={() => setSsh(null)} />}
-      {rdp && <RdpConsole mapping={rdp} onClose={() => setRdp(null)} />}
       {editProxy && <ProxyEditor initial={editProxy} onSave={saveProxyForm} onClose={() => setEditProxy(null)} />}
     </>
   );
@@ -330,148 +323,6 @@ function ProxyEditor({ initial, onSave, onClose }) {
         <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} disabled={!p.name} onClick={submit}>저장</button>
         <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={onClose}>취소</button>
       </div>
-    </Modal>
-  );
-}
-
-export function RdpConsole({ mapping, onClose }) {
-  const elRef = useRef(null);
-  const clientRef = useRef(null);
-  const [creds, setCreds] = useState({ username: '', password: '', domain: '' });
-  const [connected, setConnected] = useState(false);
-  const [status, setStatus] = useState('');
-
-  useEffect(() => () => { try { clientRef.current?.disconnect(); } catch { /* */ } }, []);
-
-  const connect = () => {
-    setConnected(true);
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const tunnel = new Guacamole.WebSocketTunnel(`${proto}://${location.host}/api/remote/rdp`);
-    const client = new Guacamole.Client(tunnel);
-    clientRef.current = client;
-    elRef.current.appendChild(client.getDisplay().getElement());
-    client.onstatechange = (s) => setStatus(['초기화', '연결 중', '대기', '연결됨', '연결 종료', '오류'][s] || String(s));
-    client.onerror = (e) => setStatus(`오류: ${e.message || e}`);
-
-    const w = Math.max(800, elRef.current.clientWidth || 1024);
-    const h = Math.max(600, elRef.current.clientHeight || 768);
-    const q = new URLSearchParams({
-      token: getToken() || '', mappingId: mapping.id,
-      username: creds.username, password: creds.password, domain: creds.domain,
-      width: String(w), height: String(h),
-    }).toString();
-    client.connect(q);
-
-    const display = client.getDisplay().getElement();
-    const mouse = new Guacamole.Mouse(display);
-    mouse.onmousedown = mouse.onmouseup = mouse.onmousemove = (state) => client.sendMouseState(state);
-    const kbd = new Guacamole.Keyboard(document);
-    kbd.onkeydown = (k) => client.sendKeyEvent(1, k);
-    kbd.onkeyup = (k) => client.sendKeyEvent(0, k);
-  };
-
-  return (
-    <Modal title={`RDP — ${mapping.name} (${mapping.targetHost}:${mapping.targetPort})`} onClose={onClose} width={900}>
-      {!connected ? (
-        <div className="spec-grid">
-          <label>사용자명<input className="input" autoFocus value={creds.username} onChange={(e) => setCreds({ ...creds, username: e.target.value })} placeholder="Administrator" /></label>
-          <label>비밀번호<input className="input" type="password" value={creds.password} onChange={(e) => setCreds({ ...creds, password: e.target.value })} /></label>
-          <label>도메인(선택)<input className="input" value={creds.domain} onChange={(e) => setCreds({ ...creds, domain: e.target.value })} /></label>
-          <div style={{ gridColumn: '1 / -1' }}>
-            <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} onClick={connect}>접속</button>
-            <span className="muted" style={{ fontSize: 12, marginLeft: 10 }}>guacd 게이트웨이 경유로 RDP에 연결합니다. (guacd 구성 필요)</span>
-          </div>
-        </div>
-      ) : (
-        <>
-          <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>상태: {status}</div>
-          <div ref={elRef} style={{ height: 540, background: '#000', borderRadius: 8, overflow: 'hidden' }} tabIndex={0} />
-        </>
-      )}
-    </Modal>
-  );
-}
-
-const SPIN = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-
-export function SshTerminal({ mapping, onClose }) {
-  const elRef = useRef(null);
-  const termRef = useRef(null);
-  const wsRef = useRef(null);
-  const timerRef = useRef(null);
-  const phaseRef = useRef('form');
-  const [creds, setCreds] = useState({ username: '', password: '' });
-  const [phase, setPhaseState] = useState('form'); // form | connecting | live | error
-  const [status, setStatus] = useState('');
-  const [ticks, setTicks] = useState(0); // 200ms ticks (spinner + elapsed)
-
-  const setPhase = (p) => { phaseRef.current = p; setPhaseState(p); };
-  const stopTimer = () => { try { clearInterval(timerRef.current); } catch { /* */ } timerRef.current = null; };
-  useEffect(() => () => { stopTimer(); try { wsRef.current?.close(); } catch { /* */ } try { termRef.current?.dispose(); } catch { /* */ } }, []);
-
-  const connect = () => {
-    setPhase('connecting'); setStatus('프록시에 WebSocket 연결 중…'); setTicks(0);
-    stopTimer(); const t0 = Date.now();
-    timerRef.current = setInterval(() => setTicks(Math.floor((Date.now() - t0) / 200)), 200);
-
-    setTimeout(() => {
-      const term = new Terminal({ fontSize: 13, cursorBlink: true, theme: { background: '#0b1020' } });
-      const fit = new FitAddon(); term.loadAddon(fit);
-      term.open(elRef.current); fit.fit(); term.focus(); termRef.current = term;
-      term.write('\x1b[90m연결을 준비하는 중입니다…\x1b[0m\r\n');
-      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-      const ws = new WebSocket(`${proto}://${location.host}/api/remote/ssh?token=${encodeURIComponent(getToken() || '')}`);
-      wsRef.current = ws;
-      ws.onopen = () => { setStatus('인증 중… (자격증명 전송)'); ws.send(JSON.stringify({ type: 'auth', mappingId: mapping.id, username: creds.username, password: creds.password, cols: term.cols, rows: term.rows })); };
-      ws.onmessage = (e) => {
-        const s = typeof e.data === 'string' ? e.data : '';
-        try { const j = JSON.parse(s); if (j && j.type === 'status') { setStatus(j.text); term.write(`\r\n\x1b[33m${j.text}\x1b[0m\r\n`); return; } } catch { /* raw */ }
-        if (phaseRef.current !== 'live') { setPhase('live'); stopTimer(); }
-        term.write(s);
-      };
-      ws.onerror = () => { if (phaseRef.current !== 'live') { setPhase('error'); setStatus('WebSocket 연결 실패 — 포탈/프록시 경로 또는 인증을 확인하세요.'); } stopTimer(); };
-      ws.onclose = () => { term.write('\r\n\x1b[31m[연결 종료]\x1b[0m\r\n'); if (phaseRef.current !== 'live') { setPhase('error'); setStatus((x) => x && !x.includes('실패') ? `${x} — 연결이 종료되었습니다.` : (x || '연결이 종료되었습니다.')); } stopTimer(); };
-      term.onData((d) => { if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'data', data: d })); });
-      window.addEventListener('resize', () => { try { fit.fit(); if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows })); } catch { /* */ } });
-    }, 0);
-  };
-
-  const elapsed = Math.floor(ticks * 0.2);
-  const slow = phase === 'connecting' && elapsed >= 20;
-
-  return (
-    <Modal title={`SSH — ${mapping.name} (${mapping.targetHost}:${mapping.targetPort})`} onClose={onClose} width={820}>
-      {phase === 'form' ? (
-        <div className="spec-grid">
-          <label>사용자명<input className="input" autoFocus value={creds.username} onChange={(e) => setCreds({ ...creds, username: e.target.value })} placeholder="root" /></label>
-          <label>비밀번호<input className="input" type="password" value={creds.password} onChange={(e) => setCreds({ ...creds, password: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && creds.username && connect()} /></label>
-          <div style={{ gridColumn: '1 / -1' }}>
-            <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} disabled={!creds.username} onClick={connect}>접속</button>
-            <span className="muted" style={{ fontSize: 12, marginLeft: 10 }}>{mapping.proxyName ? `프록시 '${mapping.proxyName}' 경유로 ` : '프록시 경유로 '}대상 SSH에 연결합니다.</span>
-          </div>
-        </div>
-      ) : (
-        <>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, padding: '8px 12px', borderRadius: 8, fontSize: 13,
-            background: phase === 'live' ? 'rgba(34,197,94,.12)' : phase === 'error' ? 'rgba(239,68,68,.12)' : 'rgba(59,130,246,.12)',
-            color: phase === 'live' ? '#4ade80' : phase === 'error' ? '#f87171' : '#93c5fd' }}>
-            {phase === 'connecting' && <>
-              <span style={{ fontFamily: 'monospace' }}>{SPIN[ticks % SPIN.length]}</span>
-              <span>{status}</span>
-              <span className="muted" style={{ marginLeft: 'auto' }}>{elapsed}s 경과</span>
-            </>}
-            {phase === 'live' && <span>● 연결됨 — 터미널이 활성화되었습니다.</span>}
-            {phase === 'error' && <>
-              <span>⚠ {status}</span>
-              <button className="logout-btn" style={{ padding: '4px 12px', marginLeft: 'auto' }} onClick={connect}>재시도</button>
-            </>}
-          </div>
-          {slow && <div className="muted" style={{ fontSize: 12, marginBottom: 8, color: 'var(--amber)' }}>
-            응답이 지연되고 있습니다({elapsed}s). 프록시 매핑(공개포트) 적용 상태, 대상 SSH 포트/방화벽, 프록시→대상 경로를 확인하세요. 살아있으며 계속 시도 중입니다.
-          </div>}
-          <div ref={elRef} style={{ height: 400, background: '#0b1020', borderRadius: 8, padding: 6 }} />
-        </>
-      )}
     </Modal>
   );
 }
