@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { fetchJson, postJson } from '../api.js';
+import { fetchJson, postJson, delJson } from '../api.js';
 import { Loading } from '../components/ui.jsx';
 
 const EMPTY = {
@@ -14,9 +14,34 @@ export default function AgentDeploy() {
   const [installer, setInstaller] = useState(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
+  const [targets, setTargets] = useState([]);
 
-  useEffect(() => { fetchJson('/admin/agent-deploy/installer').then(setInstaller).catch(() => setInstaller({ available: false })); }, []);
+  const loadTargets = () => fetchJson('/admin/agent-deploy/targets').then((d) => setTargets(d.targets)).catch(() => {});
+  useEffect(() => {
+    fetchJson('/admin/agent-deploy/installer').then(setInstaller).catch(() => setInstaller({ available: false }));
+    loadTargets();
+  }, []);
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
+
+  const saveTarget = async () => {
+    const r = await postJson('/admin/agent-deploy/targets', { id: f.id, ...f }).catch((e) => ({ ok: false, reason: e.message }));
+    if (r.ok) { await loadTargets(); setResult({ kind: 'save', ok: true, reason: '대상을 저장했습니다.' }); }
+    else setResult({ kind: 'save', ok: false, reason: r.reason });
+  };
+  const editTarget = (t) => setF({ ...EMPTY, ...t, password: '', privateKey: '' });
+  const removeTarget = async (t) => { if (window.confirm(`'${t.host}' 대상을 삭제할까요?`)) { await delJson(`/admin/agent-deploy/targets/${t.id}`).catch(() => {}); await loadTargets(); } };
+  const deployTarget = async (t) => {
+    if (!window.confirm(`${t.host} 에 배포할까요?`)) return;
+    setBusy(true); setResult(null);
+    const r = await postJson(`/admin/agent-deploy/targets/${t.id}/deploy`, {}).catch((e) => ({ ok: false, reason: e.message }));
+    setResult({ kind: 'deploy', ...r }); await loadTargets(); setBusy(false);
+  };
+  const deployAll = async () => {
+    if (!window.confirm(`저장된 활성 대상 전체에 배포할까요? (순차 진행)`)) return;
+    setBusy(true); setResult(null);
+    const r = await postJson('/admin/agent-deploy/deploy-all', {}).catch((e) => ({ ok: false, reason: e.message }));
+    setResult({ kind: 'deploy-all', ...r }); await loadTargets(); setBusy(false);
+  };
 
   const test = async () => {
     setBusy(true); setResult(null);
@@ -67,20 +92,56 @@ export default function AgentDeploy() {
         </div>
       </div>
 
-      <div className="flex gap" style={{ marginBottom: 14 }}>
+      <div className="flex gap wrap" style={{ marginBottom: 14 }}>
         <button className="logout-btn" style={{ padding: '9px 16px' }} disabled={busy || !f.host} onClick={test}>SSH 테스트</button>
+        <button className="logout-btn" style={{ padding: '9px 16px' }} disabled={busy || !f.host} onClick={saveTarget}>{f.id ? '대상 수정' : '대상 저장'}</button>
+        {f.id && <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={() => setF(EMPTY)}>새 대상</button>}
         <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} disabled={busy || !f.host || !installer.available} onClick={deploy}>{busy ? '진행 중…' : '배포 + 설치'}</button>
       </div>
+
+      {targets.length > 0 && (
+        <div className="card" style={{ marginBottom: 14 }}>
+          <div className="flex between wrap" style={{ alignItems: 'center', marginBottom: 8 }}>
+            <b style={{ fontSize: 14 }}>저장된 대상 ({targets.length})</b>
+            <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={busy || !installer.available} onClick={deployAll}>전체 배포</button>
+          </div>
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>호스트</th><th>에이전트</th><th>중앙</th><th>마지막 결과</th><th style={{ textAlign: 'right' }}>작업</th></tr></thead>
+              <tbody>
+                {targets.map((t) => (
+                  <tr key={t.id}>
+                    <td><b>{t.host}</b>:{t.port || 22} <span className="muted" style={{ fontSize: 11 }}>{t.username}</span></td>
+                    <td>{t.agentName || '—'}</td>
+                    <td className="muted" style={{ fontSize: 12 }}>{t.centralUrl || '—'}</td>
+                    <td>{t.lastResult ? <span className={`badge ${t.lastResult.ok ? 'green' : 'red'}`}>{t.lastResult.ok ? t.lastResult.active || 'ok' : '실패'}</span> : <span className="muted">—</span>}</td>
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      <button className="login-btn" style={{ flex: 'none', padding: '6px 12px' }} disabled={busy || !installer.available} onClick={() => deployTarget(t)}>배포</button>{' '}
+                      <button className="logout-btn" style={{ padding: '6px 10px' }} onClick={() => editTarget(t)}>편집</button>{' '}
+                      <button className="logout-btn" style={{ padding: '6px 10px' }} onClick={() => removeTarget(t)}>삭제</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {result && (
         <div className="card" style={{ borderColor: result.ok ? 'var(--green)' : 'var(--red)' }}>
           <b style={{ color: result.ok ? 'var(--green)' : 'var(--red)' }}>
-            {result.ok ? '성공' : '실패'} — {result.kind === 'test' ? 'SSH 테스트' : '배포'}
+            {result.ok ? '성공' : '실패'} — {{ test: 'SSH 테스트', save: '대상 저장', 'deploy-all': '전체 배포' }[result.kind] || '배포'}
           </b>
           <div style={{ fontSize: 13, marginTop: 6, lineHeight: 1.7 }}>
-            {result.reason && <div style={{ color: 'var(--red)' }}>{result.reason}</div>}
+            {result.reason && <div style={{ color: result.ok ? 'var(--green)' : 'var(--red)' }}>{result.reason}</div>}
             {result.os && <div>OS: {result.os} · root: {result.isRoot ? '예' : '아니오'} · systemd: {result.systemd ? '예' : '아니오'}</div>}
             {result.active && <div>서비스 상태: <b>{result.active}</b> · 설치 패키지: {result.installer}</div>}
+            {result.kind === 'deploy-all' && <div>{result.deployed}/{result.total} 성공
+              <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                {(result.results || []).map((x) => <li key={x.id} style={{ color: x.ok ? 'var(--green)' : 'var(--red)' }}>{x.host} · {x.agentName || ''} — {x.ok ? (x.active || 'ok') : x.reason}</li>)}
+              </ul>
+            </div>}
           </div>
           {Array.isArray(result.log) && result.log.length > 0 && (
             <details style={{ marginTop: 8 }}>

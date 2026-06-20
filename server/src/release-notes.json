@@ -1,6 +1,16 @@
 {
   "notes": [
     {
+      "version": "1.19.0",
+      "date": "2026-06-20",
+      "title": "에이전트 일괄배포 + RDP 웹 콘솔",
+      "notes": [
+        "에이전트 배포: 대상 저장(SSH/에이전트 설정) + 개별/전체 일괄 배포(순차), 마지막 결과 표시",
+        "원격 접속 RDP: guacd 기반 브라우저 웹 콘솔(guacamole-common-js) — guacd 구성 시 사용",
+        "guacd WebSocket 터널(select→args→connect→ready 핸드셰이크 후 중계)"
+      ]
+    },
+    {
       "version": "1.18.0",
       "date": "2026-06-20",
       "title": "에이전트 자동배포 (SSH 설치)",

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import Guacamole from 'guacamole-common-js';
 import '@xterm/xterm/css/xterm.css';
 import { fetchJson, postJson, putJson, delJson, getToken } from '../api.js';
 import { Loading, ErrorBox, Modal } from '../components/ui.jsx';
@@ -15,6 +16,7 @@ export default function RemoteAccess() {
   const [error, setError] = useState(null);
   const [msg, setMsg] = useState(null);
   const [ssh, setSsh] = useState(null);   // mapping for SSH terminal modal
+  const [rdp, setRdp] = useState(null);   // mapping for RDP web console modal
   const [form, setForm] = useState({ name: '', vcenterId: '', protocol: 'ssh', targetHost: '', targetPort: '', publicPort: '' });
   const [vmQuery, setVmQuery] = useState('');
   const [vmList, setVmList] = useState([]);
@@ -206,7 +208,7 @@ export default function RemoteAccess() {
                   {m.protocol === 'ssh'
                     ? <button className="login-btn" style={{ flex: 'none', padding: '6px 12px' }} onClick={() => setSsh(m)}>SSH 터미널</button>
                     : (data.guacdConfigured
-                        ? <button className="login-btn" style={{ flex: 'none', padding: '6px 12px' }} onClick={() => flash(false, 'guacd 웹 RDP 콘솔은 다음 단계에서 제공됩니다. 현재는 .rdp 다운로드를 이용하세요.')}>웹 RDP</button>
+                        ? <><button className="login-btn" style={{ flex: 'none', padding: '6px 12px' }} onClick={() => setRdp(m)}>웹 RDP</button>{' '}<button className="logout-btn" style={{ padding: '6px 10px' }} onClick={() => downloadRdp(m)}>.rdp</button></>
                         : <button className="login-btn" style={{ flex: 'none', padding: '6px 12px' }} onClick={() => downloadRdp(m)}>.rdp 다운로드</button>)}
                   {isAdmin && <> {' '}
                     {m.status === 'error' && <button className="logout-btn" style={{ padding: '6px 10px' }} onClick={() => reapply(m)}>재적용</button>}
@@ -225,7 +227,66 @@ export default function RemoteAccess() {
       </div>
 
       {ssh && <SshTerminal mapping={ssh} onClose={() => setSsh(null)} />}
+      {rdp && <RdpConsole mapping={rdp} onClose={() => setRdp(null)} />}
     </>
+  );
+}
+
+function RdpConsole({ mapping, onClose }) {
+  const elRef = useRef(null);
+  const clientRef = useRef(null);
+  const [creds, setCreds] = useState({ username: '', password: '', domain: '' });
+  const [connected, setConnected] = useState(false);
+  const [status, setStatus] = useState('');
+
+  useEffect(() => () => { try { clientRef.current?.disconnect(); } catch { /* */ } }, []);
+
+  const connect = () => {
+    setConnected(true);
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    const tunnel = new Guacamole.WebSocketTunnel(`${proto}://${location.host}/api/remote/rdp`);
+    const client = new Guacamole.Client(tunnel);
+    clientRef.current = client;
+    elRef.current.appendChild(client.getDisplay().getElement());
+    client.onstatechange = (s) => setStatus(['초기화', '연결 중', '대기', '연결됨', '연결 종료', '오류'][s] || String(s));
+    client.onerror = (e) => setStatus(`오류: ${e.message || e}`);
+
+    const w = Math.max(800, elRef.current.clientWidth || 1024);
+    const h = Math.max(600, elRef.current.clientHeight || 768);
+    const q = new URLSearchParams({
+      token: getToken() || '', mappingId: mapping.id,
+      username: creds.username, password: creds.password, domain: creds.domain,
+      width: String(w), height: String(h),
+    }).toString();
+    client.connect(q);
+
+    const display = client.getDisplay().getElement();
+    const mouse = new Guacamole.Mouse(display);
+    mouse.onmousedown = mouse.onmouseup = mouse.onmousemove = (state) => client.sendMouseState(state);
+    const kbd = new Guacamole.Keyboard(document);
+    kbd.onkeydown = (k) => client.sendKeyEvent(1, k);
+    kbd.onkeyup = (k) => client.sendKeyEvent(0, k);
+  };
+
+  return (
+    <Modal title={`RDP — ${mapping.name} (${mapping.targetHost}:${mapping.targetPort})`} onClose={onClose} width={900}>
+      {!connected ? (
+        <div className="spec-grid">
+          <label>사용자명<input className="input" autoFocus value={creds.username} onChange={(e) => setCreds({ ...creds, username: e.target.value })} placeholder="Administrator" /></label>
+          <label>비밀번호<input className="input" type="password" value={creds.password} onChange={(e) => setCreds({ ...creds, password: e.target.value })} /></label>
+          <label>도메인(선택)<input className="input" value={creds.domain} onChange={(e) => setCreds({ ...creds, domain: e.target.value })} /></label>
+          <div style={{ gridColumn: '1 / -1' }}>
+            <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} onClick={connect}>접속</button>
+            <span className="muted" style={{ fontSize: 12, marginLeft: 10 }}>guacd 게이트웨이 경유로 RDP에 연결합니다. (guacd 구성 필요)</span>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>상태: {status}</div>
+          <div ref={elRef} style={{ height: 540, background: '#000', borderRadius: 8, overflow: 'hidden' }} tabIndex={0} />
+        </>
+      )}
+    </Modal>
   );
 }
 

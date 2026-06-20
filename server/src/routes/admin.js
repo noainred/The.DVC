@@ -7,6 +7,7 @@ import { getDataSource, setDataSource, isDataSourceOverridden } from '../runtime
 import { ledgerInfo } from '../ipam/db.js';
 import { saveNote, deleteNote } from '../release-notes.js';
 import { deployAgent, testTarget, installerInfo } from '../agent/deploy.js';
+import { listTargets, getTargetRaw, saveTarget, removeTarget, recordResult } from '../agent/deployRegistry.js';
 import { getLogs } from '../logbuffer.js';
 import {
   listRegistry, addVcenter, updateVcenter, removeVcenter, testConnection, importVcenters,
@@ -92,9 +93,42 @@ adminRouter.post('/agent-deploy/test', adminOnly, async (req, res) => {
 });
 
 adminRouter.post('/agent-deploy', adminOnly, async (req, res) => {
-  const { installerPath, port, ...target } = req.body || {};
-  const r = await deployAgent(target, { installerPath, port });
+  const { installerPath, port, portalPort, ...target } = req.body || {};
+  const r = await deployAgent(target, { installerPath, port: port || portalPort });
   res.status(r.ok ? 200 : 400).json(r);
+});
+
+// Saved targets + bulk deploy.
+adminRouter.get('/agent-deploy/targets', adminOnly, (_req, res) => res.json({ targets: listTargets() }));
+
+adminRouter.post('/agent-deploy/targets', adminOnly, (req, res) => {
+  const r = saveTarget(req.body || {});
+  res.status(r.ok ? 200 : 400).json(r);
+});
+
+adminRouter.delete('/agent-deploy/targets/:id', adminOnly, (req, res) => {
+  const r = removeTarget(req.params.id);
+  res.status(r.ok ? 200 : 400).json(r);
+});
+
+adminRouter.post('/agent-deploy/targets/:id/deploy', adminOnly, async (req, res) => {
+  const t = getTargetRaw(req.params.id);
+  if (!t) return res.status(404).json({ ok: false, reason: '대상을 찾을 수 없습니다.' });
+  const r = await deployAgent(t, { installerPath: t.installerPath, port: t.portalPort });
+  recordResult(t.id, r);
+  res.status(r.ok ? 200 : 400).json(r);
+});
+
+// Deploy to all enabled saved targets, sequentially (heavy SFTP transfers).
+adminRouter.post('/agent-deploy/deploy-all', adminOnly, async (_req, res) => {
+  const results = [];
+  for (const t of listTargets().filter((x) => x.enabled !== false)) {
+    const raw = getTargetRaw(t.id);
+    const r = await deployAgent(raw, { installerPath: raw.installerPath, port: raw.portalPort });
+    recordResult(t.id, r);
+    results.push({ id: t.id, host: t.host, agentName: t.agentName, ok: r.ok, active: r.active, reason: r.reason });
+  }
+  res.json({ ok: true, deployed: results.filter((r) => r.ok).length, total: results.length, results });
 });
 
 // Record / delete a release note (admin).
