@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { fetchJson, postJson, usePolling } from '../api.js';
-import { DataTable, Loading, ErrorBox, StateBadge, UsageCell, EntityDetail, Modal } from '../components/ui.jsx';
+import { fetchJson, postJson, usePolling, getToken } from '../api.js';
+import { DataTable, Loading, ErrorBox, StateBadge, UsageCell, EntityDetail, Modal, ResultCount } from '../components/ui.jsx';
 
 const TOOLS = [
+  { k: 'ipam', icon: '📒', label: '센터별 IP 관리대장', desc: 'vCenter 수집 IP 전체 · 클릭 시 상세 · DB/CSV' },
   { k: 'dupip', icon: '🔁', label: '중복 IP 찾기', desc: '둘 이상 VM이 같은 IPv4를 쓰는 경우' },
   { k: 'vmtools', icon: '🧩', label: 'VMware Tools 버전', desc: '버전별 집계 + 업그레이드' },
   { k: 'snapshots', icon: '📸', label: '스냅샷 있는 VM', desc: 'vCenter/용량/개수별 정렬' },
@@ -51,7 +52,7 @@ function ToolPanel({ tool, onBack }) {
   const meta = TOOLS.find((t) => t.k === tool);
   const [scope, setScope] = useState('');
   const { data: vcList } = usePolling('/vcenters', {}, 60_000);
-  const scoped = ['dupip', 'vmtools', 'snapshots', 'hba', 'gpu', 'licenses', 'esxi', 'hardware'].includes(tool);
+  const scoped = ['ipam', 'dupip', 'vmtools', 'snapshots', 'hba', 'gpu', 'licenses', 'esxi', 'hardware'].includes(tool);
 
   return (
     <>
@@ -70,6 +71,7 @@ function ToolPanel({ tool, onBack }) {
           </label>
         )}
       </div>
+      {tool === 'ipam' && <Ipam scope={scope} />}
       {tool === 'dupip' && <DupIp scope={scope} />}
       {tool === 'vmtools' && <VmTools scope={scope} />}
       {tool === 'snapshots' && <Snapshots scope={scope} />}
@@ -82,6 +84,74 @@ function ToolPanel({ tool, onBack }) {
       {tool === 'vcversion' && <VcVersion />}
       {tool === 'nsx' && <Nsx />}
       {tool === 'shutdown' && <Shutdown />}
+    </>
+  );
+}
+
+function Ipam({ scope }) {
+  const { loading, data, error } = useTool('/tools/ipam', scope ? { vcenterId: scope } : {});
+  const [q, setQ] = useState('');
+  const [sel, setSel] = useState(null);
+  const [db, setDb] = useState(null);
+  useEffect(() => { fetchJson('/admin/ipam/db-info').then(setDb).catch(() => setDb(null)); }, []);
+  if (loading) return <Loading />;
+  if (error) return <ErrorBox message={error} />;
+
+  const term = q.trim().toLowerCase();
+  const rows = term
+    ? data.rows.filter((r) => r.ip.includes(term) || (r.ownerName || '').toLowerCase().includes(term) || (r.hostName || '').toLowerCase().includes(term))
+    : data.rows;
+
+  const downloadCsv = async () => {
+    const res = await fetch(`/api/tools/ipam.csv${scope ? `?vcenterId=${encodeURIComponent(scope)}` : ''}`,
+      { headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {} });
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `ipam-${new Date().toISOString().slice(0, 10)}.csv`; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const link = { background: 'none', border: 'none', color: '#3b82f6', cursor: 'pointer', padding: 0, font: 'inherit' };
+  const cols = [
+    { key: 'ip', label: 'IP 주소', sortValue: (r) => r.ipNum ?? Infinity, render: (r) => (
+      <button style={link} onClick={() => setSel(r)}>
+        <b>{r.ip}</b>
+        {r.duplicate && <span className="badge red" style={{ marginLeft: 6 }}>중복</span>}
+        {r.multiHomed && <span className="badge amber" style={{ marginLeft: 4 }}>멀티홈</span>}
+      </button>
+    ) },
+    { key: 'vcenterName', label: '센터(vCenter)' },
+    { key: 'ownerName', label: '소유 자원', render: (r) => <><span className="badge blue">{r.ownerType === 'vm' ? 'VM' : '호스트'}</span> {r.ownerName}</> },
+    { key: 'powerState', label: '전원', render: (r) => <StateBadge state={r.powerState} /> },
+    { key: 'guestOS', label: 'OS / 게스트' },
+    { key: 'hostName', label: 'ESXi 호스트' },
+  ];
+
+  return (
+    <>
+      <div className="kpis" style={{ marginBottom: 14 }}>
+        <Card label="총 IP" value={data.total.toLocaleString()} meta={`센터 ${data.byVcenter.length}`} />
+        <Card label="중복 IP" value={data.duplicateIps} accent={data.duplicateIps ? 'var(--red)' : undefined} />
+        <Card label="멀티홈 IP" value={data.multiHomed} />
+        {db && <Card label="공유 DB 레코드" value={db.count.toLocaleString()} meta={db.kind.toUpperCase()} />}
+      </div>
+      <div className="flex gap wrap" style={{ marginBottom: 10 }}>
+        {data.byVcenter.map((v) => <span key={v.vcenterId} className="badge gray" style={{ fontSize: 12, padding: '4px 10px' }}>{v.vcenterName} · {v.count}</span>)}
+      </div>
+      <div className="flex between wrap gap" style={{ marginBottom: 8, alignItems: 'center' }}>
+        <input className="input" style={{ maxWidth: 280 }} placeholder="IP / VM / 호스트 검색" value={q} onChange={(e) => setQ(e.target.value)} />
+        <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={downloadCsv}>CSV 내보내기</button>
+      </div>
+      <ResultCount total={data.rows.length} shown={rows.length} label="IP" filtered={!!term} />
+      <DataTable columns={cols} rows={rows} initialSort={{ key: 'ip', dir: 'asc' }} />
+      {db && (
+        <div className="muted" style={{ fontSize: 12, marginTop: 10, lineHeight: 1.7 }}>
+          타 프로그램 공유용 DB: <code>{db.path}</code> ({db.kind === 'sqlite' ? 'SQLite · 테이블 ip_records' : 'NDJSON'})
+          {' · '}갱신 {db.updatedAt ? new Date(db.updatedAt).toLocaleString() : '—'} · 수집 주기마다 자동 갱신됩니다.
+        </div>
+      )}
+      {sel && <EntityDetail type={sel.ownerType} item={sel.owner} onClose={() => setSel(null)} />}
     </>
   );
 }

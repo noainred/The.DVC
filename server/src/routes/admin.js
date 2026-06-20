@@ -4,6 +4,7 @@ import { config } from '../config.js';
 import { requireRole } from '../auth/auth.js';
 import { store } from '../store.js';
 import { getDataSource, setDataSource, isDataSourceOverridden } from '../runtime-settings.js';
+import { ledgerInfo } from '../ipam/db.js';
 import { getLogs } from '../logbuffer.js';
 import {
   listRegistry, addVcenter, updateVcenter, removeVcenter, testConnection, importVcenters,
@@ -45,6 +46,11 @@ adminRouter.get('/status', adminOnly, (_req, res) => {
     vcenters: snap.vcenters.length,
     collectionErrors: snap.collectionErrors || [],
   });
+});
+
+// Shareable IP ledger DB location + record count (for other-program integration).
+adminRouter.get('/ipam/db-info', adminOnly, async (_req, res) => {
+  res.json(await ledgerInfo());
 });
 
 // Read the effective data source (UI override or env default).

@@ -5,6 +5,7 @@ import { loadUiSettings, saveUiSettings } from '../ui-settings.js';
 import { hostPower } from '../idrac/service.js';
 import { fetchVmMetric, PERF_INTERVALS, upgradeVmTools, getVmConsole } from '../vcenter/soapClient.js';
 import { listMutes, addMute, removeMute } from '../alarm-mutes.js';
+import { buildIpamRows } from '../ipam/ledger.js';
 
 export const api = Router();
 
@@ -249,6 +250,25 @@ api.get('/tools/snapshots', (req, res) => {
     totalSizeGB: Math.round(items.reduce((a, v) => a + (v.snapshotSizeGB || 0), 0) * 10) / 10,
     items,
   });
+});
+
+// Per-center IP ledger (IP 관리대장): every IPv4 collected from vCenter (VM
+// guest IPs, multi-homed NICs, and hosts registered by management IP), grouped
+// by center, with the owning entity embedded so the UI can show details on click.
+api.get('/tools/ipam', (req, res) => {
+  res.json(buildIpamRows(store.get(), req.query.vcenterId));
+});
+
+// CSV export of the IP ledger for sharing with other tools/spreadsheets.
+api.get('/tools/ipam.csv', (req, res) => {
+  const { rows } = buildIpamRows(store.get(), req.query.vcenterId);
+  const head = ['ip', 'vcenter_id', 'vcenter_name', 'owner_type', 'owner_name', 'power_state', 'guest_os', 'host_name', 'cluster', 'multi_homed', 'duplicate'];
+  const esc = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const lines = [head.join(',')];
+  for (const r of rows) lines.push([r.ip, r.vcenterId, r.vcenterName, r.ownerType, r.ownerName, r.powerState, r.guestOS, r.hostName, r.cluster, r.multiHomed ? 1 : 0, r.duplicate ? 1 : 0].map(esc).join(','));
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="ipam-${new Date().toISOString().slice(0, 10)}.csv"`);
+  res.send('﻿' + lines.join('\r\n')); // BOM for Excel
 });
 
 // Host hardware (vendor/model) summary — per vendor, per model, and the

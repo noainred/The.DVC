@@ -24,3 +24,5 @@ dist-offline/
 server/config/alarm-mutes.json
 server/config/auth.json
 server/config/runtime.json
+server/config/ipam.db
+server/config/ipam.ndjson
