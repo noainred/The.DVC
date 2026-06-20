@@ -3,6 +3,7 @@ import { usePolling } from '../api.js';
 import { DataTable, UsageCell, StateBadge, Loading, ErrorBox, ResultCount, Modal } from '../components/ui.jsx';
 import { VmMetricButton } from '../components/VmMetrics.jsx';
 import { VmConsoleButton } from '../components/VmConsole.jsx';
+import { VmRemoteButton } from '../components/VmRemote.jsx';
 
 /** Render every IPv4 a VM has (multi-homed), one per line; IPv6 is excluded upstream. */
 function ipList(vm) {
@@ -60,6 +61,7 @@ function VmDetail({ vm, onClose }) {
       </div>
       <div className="flex gap" style={{ marginTop: 16, justifyContent: 'flex-end' }}>
         <VmConsoleButton vmId={vm.id} vmName={vm.name} />
+        <VmRemoteButton item={vm} />
         <VmMetricButton vmId={vm.id} vmName={vm.name} />
       </div>
     </Modal>

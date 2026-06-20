@@ -56,9 +56,18 @@ function initSqlite() {
     const countStmt = db.prepare('SELECT COUNT(*) AS n, MAX(updated_at) AS at FROM ip_records');
     return {
       kind: 'sqlite',
+      // One transaction → a single commit/fsync for the whole snapshot, instead
+      // of thousands of auto-committed inserts that would block the event loop.
       sync: (rows, updatedAt) => {
-        del.run();
-        for (const r of rows) ins.run(...toRecord(r, updatedAt));
+        db.exec('BEGIN IMMEDIATE');
+        try {
+          del.run();
+          for (const r of rows) ins.run(...toRecord(r, updatedAt));
+          db.exec('COMMIT');
+        } catch (err) {
+          try { db.exec('ROLLBACK'); } catch { /* ignore */ }
+          throw err;
+        }
       },
       info: () => { const r = countStmt.get(); return { count: r?.n || 0, updatedAt: r?.at || null }; },
     };

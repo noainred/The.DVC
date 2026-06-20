@@ -9,6 +9,15 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
 - 빌드 검증: `npm run build` (웹), 서버는 `node server/src/index.js`
 - 오프라인 패키지: `packaging/offline/build-package.sh` (Rocky Linux 9)
 
+## 운영 환경 (성능 설계 시 반드시 고려)
+
+- vCenter: **현재 13개 DC/13개 vCenter, 향후 30개까지 확장 예정**. 글로벌 분산.
+- 사용자(포탈)는 **한국**에 위치. 일부 vCenter(예: **폴란드, 미국 동부**)는 **RTT 800ms 초과**.
+- 고지연·다수 vCenter 환경이므로:
+  - **매 폴링 주기마다 이벤트 루프를 블로킹하는 동기 작업 금지**(예: 대량 SQLite write는 반드시 트랜잭션으로 묶기). 과거 IPAM 동기화가 무트랜잭션으로 6천 행 25초 블로킹 → 전체 UI 지연 발생, 트랜잭션으로 해결.
+  - vCenter 수집은 **병렬 + per-vCenter 타임아웃**. 느린 1개가 전체 폴링을 막지 않게 한다.
+  - 30개 vCenter·고RTT 확장을 가정해 수집/직렬화/DB write를 O(N)·논블로킹으로 유지.
+
 ## 사용자 선호 (반드시 준수)
 
 - **항상 한글로 응답**: 모든 답변/설명 메시지는 한국어로 작성한다.
