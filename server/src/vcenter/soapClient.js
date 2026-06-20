@@ -509,7 +509,7 @@ export async function collectFromVCenterSoap(vc) {
       { type: 'VirtualMachine', paths: [
         'name', 'runtime.host', 'parent', 'runtime.powerState', 'summary.config.numCpu', 'summary.config.memorySizeMB',
         'summary.config.guestFullName', 'summary.config.template', 'summary.quickStats.overallCpuUsage', 'summary.quickStats.guestMemoryUsage',
-        'summary.storage.committed', 'guest.ipAddress', 'guest.net', 'guest.toolsRunningStatus',
+        'summary.storage.committed', 'summary.storage.uncommitted', 'guest.ipAddress', 'guest.net', 'guest.toolsRunningStatus',
         'guest.toolsVersion', 'guest.toolsVersionStatus2', 'config.annotation', 'snapshot', 'layoutEx.file'] },
       { type: 'Datastore', paths: ['name', 'summary.type', 'summary.capacity', 'summary.freeSpace', 'summary.accessible'] },
       { type: 'Network', paths: ['name'] },
@@ -614,6 +614,9 @@ export async function collectFromVCenterSoap(vc) {
         cpuCount: numCpu,
         memMB,
         storageGB: Math.round(num(p['summary.storage.committed']) / 1024 ** 3),
+        // Thin 추정: uncommitted(여유 가능 공간)이 의미있게 크면 thin 디스크 존재.
+        uncommittedGB: Math.round(num(p['summary.storage.uncommitted']) / 1024 ** 3),
+        thin: num(p['summary.storage.uncommitted']) > 1024 ** 3,
         cpuUsagePct: powered ? pct(cpuUsageMhz, vmCpuCapacity) : 0,
         memUsagePct: powered ? pct(guestMemMB, memMB) : 0,
         ...vmIps(p['guest.net'], p['guest.ipAddress']),

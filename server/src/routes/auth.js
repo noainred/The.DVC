@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { config } from '../config.js';
 import { authenticate, signToken, authMiddleware, requireRole, getUser, beginTotpEnroll, confirmTotpEnroll } from '../auth/auth.js';
 import { loadAdConfig, saveAdConfig, testAd } from '../auth/ad.js';
+import { logAudit } from '../audit.js';
 
 export const authRouter = Router();
 
@@ -16,10 +17,15 @@ authRouter.post('/login', async (req, res) => {
   if (!username || !password) {
     return res.status(400).json({ error: 'username and password are required' });
   }
+  const ip = (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').toString().split(',')[0];
   const user = await authenticate(username, password);
-  if (!user) return res.status(401).json({ error: 'invalid credentials' });
+  if (!user) {
+    logAudit({ user: username, action: '로그인 실패', ip });
+    return res.status(401).json({ error: 'invalid credentials' });
+  }
 
   const token = signToken({ sub: user.username, role: user.role, name: user.name });
+  logAudit({ user: user.username, action: '로그인', detail: user.role, ip });
   res.json({ token, user });
 });
 

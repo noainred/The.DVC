@@ -461,6 +461,32 @@ api.get('/tools/gpu', (req, res) => {
   });
 });
 
+// Thin-provisioned VM finder. thin = uncommitted(여유)이 큰 VM(추정). committed=실사용,
+// provisioned=committed+uncommitted. 회수 가능 추정 = uncommitted 합계.
+api.get('/tools/thin-vms', (req, res) => {
+  const snap = store.get();
+  let vms = snap.vms;
+  if (req.query.vcenterId) vms = vms.filter((v) => v.vcenterId === req.query.vcenterId);
+  const round = (v, d = 1) => Number((v || 0).toFixed(d));
+  const items = vms.filter((v) => v.thin).map((v) => ({
+    id: v.id, name: v.name, vcenterId: v.vcenterId, host: v.host, cluster: v.cluster,
+    powerState: v.powerState, guestOS: v.guestOS,
+    committedGB: v.storageGB || 0,
+    uncommittedGB: v.uncommittedGB || 0,
+    provisionedGB: (v.storageGB || 0) + (v.uncommittedGB || 0),
+  })).sort((a, b) => b.uncommittedGB - a.uncommittedGB);
+  res.json({
+    scope: req.query.vcenterId || 'all',
+    totalVms: vms.length,
+    thinVms: items.length,
+    thinPct: vms.length ? Math.round((items.length / vms.length) * 100) : 0,
+    committedTB: round(items.reduce((a, x) => a + x.committedGB, 0) / 1024, 1),
+    provisionedTB: round(items.reduce((a, x) => a + x.provisionedGB, 0) / 1024, 1),
+    reclaimableTB: round(items.reduce((a, x) => a + x.uncommittedGB, 0) / 1024, 1),
+    items,
+  });
+});
+
 // Guest OS distribution — VM counts grouped by Guest OS (종류·버전), optionally
 // per vCenter. Family rollup + full-name detail; power(on/off) split.
 api.get('/tools/guest-os', (req, res) => {
