@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { fetchJson, postJson, delJson } from '../api.js';
+import { fetchJson, postJson, putJson, delJson } from '../api.js';
 import { Loading } from '../components/ui.jsx';
 
 const EMPTY = {
@@ -17,9 +17,15 @@ export default function AgentDeploy() {
   const [targets, setTargets] = useState([]);
   const [pkg, setPkg] = useState(null);
   const [dl, setDl] = useState({ kind: 'installer', version: '', busy: false });
+  const [pkgCfg, setPkgCfg] = useState(null); // { baseUrl, dir } editable
 
   const loadInstaller = () => fetchJson('/admin/agent-deploy/installer').then(setInstaller).catch(() => setInstaller({ available: false }));
-  const loadPkg = () => fetchJson('/admin/packages').then(setPkg).catch(() => setPkg(null));
+  const loadPkg = () => fetchJson('/admin/packages').then((p) => { setPkg(p); setPkgCfg({ baseUrl: p.baseUrl || '', dir: p.dir || '' }); }).catch(() => setPkg(null));
+  const savePkgCfg = async () => {
+    const r = await putJson('/admin/packages/settings', pkgCfg).catch((e) => ({ ok: false, reason: e.message }));
+    setResult({ kind: 'pkgcfg', ok: !!r.ok, reason: r.reason });
+    await loadPkg();
+  };
   const loadTargets = () => fetchJson('/admin/agent-deploy/targets').then((d) => setTargets(d.targets)).catch(() => {});
   useEffect(() => { loadInstaller(); loadTargets(); loadPkg(); }, []);
 
@@ -73,12 +79,30 @@ export default function AgentDeploy() {
       <div className="card" style={{ marginBottom: 12 }}>
         <b style={{ fontSize: 14 }}>설치 패키지 자동 다운로드</b>
         <div className="muted" style={{ fontSize: 12, margin: '4px 0 8px' }}>
-          저장소에서 패키지를 받아 <code>{pkg?.dir || '패키지 폴더'}</code> 에 저장합니다(SHA-256 검증). 폐쇄망은 사내 미러 URL로 변경하세요(PACKAGE_BASE_URL).
+          저장소에서 패키지를 받아 저장 경로에 보관합니다(SHA-256 검증). 폐쇄망은 아래 <b>저장소 URL</b>을 사내 미러로 바꾸세요(웹에서 바로 수정 가능).
         </div>
+        {pkgCfg && (
+          <div className="card" style={{ margin: '0 0 10px', padding: '10px 12px', background: 'rgba(255,255,255,.02)' }}>
+            <div className="flex gap wrap" style={{ alignItems: 'flex-end' }}>
+              <label style={{ flex: 2, minWidth: 320, fontSize: 12 }}>저장소 URL (versions.json 위치)
+                <input className="input" value={pkgCfg.baseUrl} onChange={(e) => setPkgCfg({ ...pkgCfg, baseUrl: e.target.value })} placeholder="https://mirror.corp/vmware-portal/download" />
+              </label>
+              <label style={{ flex: 1, minWidth: 220, fontSize: 12 }}>저장 경로
+                <input className="input" value={pkgCfg.dir} onChange={(e) => setPkgCfg({ ...pkgCfg, dir: e.target.value })} placeholder="/etc/vmware-portal/packages" />
+              </label>
+              <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={savePkgCfg}>저장</button>
+              <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={loadPkg}>새로고침</button>
+            </div>
+            <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
+              비워두면 환경변수 기본값을 사용합니다(기본 URL: <code>{pkg?.settings?.defaults?.baseUrl}</code>). {pkg?.settings?.overridden?.baseUrl ? '· 현재 웹에서 지정한 URL 사용 중' : ''}
+            </div>
+          </div>
+        )}
         <div className="flex gap wrap" style={{ alignItems: 'flex-end' }}>
           <label style={{ fontSize: 12 }}>종류
             <select className="select" value={dl.kind} onChange={(e) => setDl({ ...dl, kind: e.target.value })}>
-              <option value="installer">설치 패키지(Rocky9 offline)</option>
+              <option value="installer">설치 패키지(Rocky 9 offline)</option>
+              <option value="installer_cent9">설치 패키지(CentOS Stream 9 offline)</option>
               <option value="bundle">업그레이드 번들(app)</option>
               <option value="windows">Windows zip</option>
             </select>

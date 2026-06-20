@@ -43,7 +43,9 @@ done
 
 VERSION="$(node -p "require('$REPO_ROOT/package.json').version" 2>/dev/null || echo 0.0.0)"
 PKG_NAME="vmware-portal"
-STAMP="el9-${ARCH}"
+# Distro stamp in the artifact name; el9 packages are RHEL9-compatible (Rocky /
+# CentOS Stream / Alma / RHEL 9). Override with STAMP env, e.g. STAMP=cent9-x64.
+STAMP="${STAMP:-el9-${ARCH}}"
 BUILD_DIR="$(mktemp -d)"
 STAGE="$BUILD_DIR/${PKG_NAME}-offline-${VERSION}-${STAMP}"
 OUT_DIR="${OUT_DIR:-$REPO_ROOT/dist-offline}"

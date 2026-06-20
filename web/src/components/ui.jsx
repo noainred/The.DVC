@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import HostPowerPanel from './HostPowerPanel.jsx';
 import { VmMetricButton } from './VmMetrics.jsx';
 import { VmConsoleButton } from './VmConsole.jsx';
@@ -200,12 +200,16 @@ export function EntityDetail({ type, item, onClose }) {
             <DRow label="상태"><StateBadge state={item.connectionState} /></DRow>
             <DRow label="vCenter">{item.vcenterId}</DRow>
             <DRow label="클러스터">{item.cluster || '—'}</DRow>
-            <DRow label="CPU 코어">{item.cpuCores}</DRow>
+            <DRow label="전원">{item.powerState === 'POWERED_ON' ? 'On' : (item.powerState ? 'Off' : '—')}</DRow>
+            <DRow label="제조사 / 모델">{[item.vendor, item.model].filter(Boolean).join(' / ') || '—'}</DRow>
+            <DRow label="ESXi 버전">{item.version ? `${item.version}${item.build ? ` (build ${item.build})` : ''}` : '—'}</DRow>
+            <DRow label="CPU">{item.cpuCores}코어{item.cpuThreads ? ` / ${item.cpuThreads}스레드` : ''}{item.cpuTotalMhz ? ` · ${(item.cpuTotalMhz / 1000).toFixed(1)}GHz` : ''}</DRow>
             <DRow label="CPU 사용률"><UsageCell pct={item.cpuUsagePct} /></DRow>
-            <DRow label="메모리">{gb(item.memTotalMB)}</DRow>
+            <DRow label="메모리">{gb(item.memTotalMB)}{item.memUsageMB ? ` · 사용 ${gb(item.memUsageMB)}` : ''}</DRow>
             <DRow label="메모리 사용률"><UsageCell pct={item.memUsagePct} /></DRow>
             {item.powerWatts > 0 && <DRow label="소비전력">{(item.powerWatts / 1000).toFixed(2)} kW ({item.powerWatts} W){item.powerSource === 'idrac' ? ' · iDRAC' : ''}</DRow>}
             <DRow label="VM 수">{item.vmCount}</DRow>
+            <DRow label="HBA / GPU">{(item.hbas?.length || 0)}개 / {(item.gpus?.length || 0)}개</DRow>
           </>
         )}
         {type === 'datastore' && (
@@ -220,6 +224,35 @@ export function EntityDetail({ type, item, onClose }) {
           </>
         )}
       </div>
+      {type === 'host' && item.hbas?.length > 0 && (
+        <div style={{ marginTop: 14 }}>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>스토리지 어댑터 (HBA) — {item.hbas.length}</div>
+          <div className="table-wrap" style={{ maxHeight: '28vh' }}>
+            <table>
+              <thead><tr><th>어댑터</th><th>유형</th><th>모델</th><th style={{ textAlign: 'right' }}>속도</th><th>WWN</th></tr></thead>
+              <tbody>
+                {item.hbas.map((h, i) => (
+                  <tr key={i}>
+                    <td><b>{h.name || '—'}</b></td>
+                    <td><span className="badge blue">{h.type}</span></td>
+                    <td className="muted" style={{ fontSize: 12 }}>{h.model || '—'}</td>
+                    <td style={{ textAlign: 'right' }}>{h.speedGbps ? `${h.speedGbps} Gb` : '—'}</td>
+                    <td className="muted" style={{ fontSize: 11 }}>{h.wwn || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+      {type === 'host' && item.gpus?.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>GPU — {item.gpus.length}</div>
+          <div className="flex gap wrap">
+            {item.gpus.map((g, i) => <span key={i} className="badge gray" style={{ fontSize: 12 }}>{g.model}{g.memGB ? ` · ${g.memGB}GB` : ''}{g.vgpuMode ? ' · vGPU' : ''}</span>)}
+          </div>
+        </div>
+      )}
       {type === 'host' && <HostPowerPanel hostName={item.name} />}
       {type === 'vm' && (
         <div className="flex gap" style={{ marginTop: 14, justifyContent: 'flex-end' }}>
@@ -229,6 +262,30 @@ export function EntityDetail({ type, item, onClose }) {
         </div>
       )}
     </Modal>
+  );
+}
+
+/**
+ * IME(한글) 안전 검색 입력. Controlled 입력이 매 키 입력마다 부모를 리렌더하면
+ * 한글 조합이 끊기므로, 로컬 상태로 표시하고 조합 중에는 부모로 onChange를 보내지
+ * 않는다(조합 종료/비조합 입력 시에만 전파). 외부 값 변경(탭 전환·초기화)은 조합 중이
+ * 아닐 때만 로컬에 반영한다.
+ */
+export function SearchBox({ value = '', onChange, placeholder, className = 'input', style, onKeyDown }) {
+  const [local, setLocal] = useState(value);
+  const composing = useRef(false);
+  useEffect(() => { if (!composing.current) setLocal(value); }, [value]);
+  return (
+    <input
+      className={className}
+      style={style}
+      placeholder={placeholder}
+      value={local}
+      onChange={(e) => { setLocal(e.target.value); if (!composing.current) onChange(e.target.value); }}
+      onCompositionStart={() => { composing.current = true; }}
+      onCompositionEnd={(e) => { composing.current = false; onChange(e.target.value); }}
+      onKeyDown={onKeyDown}
+    />
   );
 }
 

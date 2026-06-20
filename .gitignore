@@ -32,5 +32,6 @@ server/config/release-notes.json
 server/config/agent-deploy-targets.json
 server/config/llm.json
 server/config/packages/
+server/config/packages.json
 server/config/ipam-settings.json
 server/config/ipam-annotations.json

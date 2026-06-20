@@ -1,6 +1,18 @@
 {
   "notes": [
     {
+      "version": "1.39.0",
+      "date": "2026-06-20",
+      "title": "한글 입력 수정·HBA 라이브·호스트 상세 + 패키지 저장소 웹수정·CentOS9 설치본",
+      "notes": [
+        "검색창 한글 입력이 끊기던 문제 수정 — 조합(IME) 이벤트 처리하는 SearchBox 적용(전역 필터·IP대장·NSX 검색)",
+        "HBA 카드 속도: 라이브(실제 vCenter)에서도 수집 — SOAP config.storageDevice.hostBusAdapter 파싱(유형/모델/속도/WWN)",
+        "호스트 상세: vCenter 수준 정보로 강화 — 제조사·모델·ESXi 버전(빌드)·CPU(코어/스레드/GHz)·메모리 사용·HBA 어댑터 표·GPU 목록",
+        "패키지 자동 다운로드: 저장소 URL·저장 경로를 웹에서 직접 수정/저장(packages.json), 환경변수 없이 폐쇄망 미러 지정",
+        "설치 패키지 CentOS Stream 9 버전 추가(vmware-portal-offline-<버전>-cent9-x64.tar.gz) — el9 공통(Rocky/CentOS/Alma/RHEL 9)"
+      ]
+    },
+    {
       "version": "1.38.0",
       "date": "2026-06-20",
       "title": "중계서버 동작 상태 표시 + 메모 포함 검색 옵션",

@@ -12,6 +12,7 @@ import { ollamaTest } from '../llm/ollama.js';
 import { installOllama } from '../llm/ollamaDeploy.js';
 import { deployAgent, testTarget, installerInfo } from '../agent/deploy.js';
 import { fetchRemoteVersions, listLocalPackages, downloadPackage } from '../upgrade/fetchPackage.js';
+import { getPackageSettings, savePackageSettings } from '../upgrade/packageSettings.js';
 import { listTargets, getTargetRaw, saveTarget, removeTarget, recordResult } from '../agent/deployRegistry.js';
 import { getLogs } from '../logbuffer.js';
 import {
@@ -98,10 +99,15 @@ adminRouter.post('/users/:username/totp/disable', adminOnly, (req, res) => {
 
 // --- Package auto-download (upgrade/install packages → packages dir) ---
 adminRouter.get('/packages', adminOnly, async (req, res) => {
+  const s = getPackageSettings();
   let remote = null;
-  try { remote = await fetchRemoteVersions(req.query.baseUrl || config.packages.baseUrl); }
+  try { remote = await fetchRemoteVersions(req.query.baseUrl || s.baseUrl); }
   catch (e) { remote = { error: e.message }; }
-  res.json({ dir: config.packages.dir, baseUrl: config.packages.baseUrl, local: listLocalPackages(), remote });
+  res.json({ dir: s.dir, baseUrl: s.baseUrl, settings: s, local: listLocalPackages(), remote });
+});
+// Web-editable package source (repository URL / download dir / token).
+adminRouter.put('/packages/settings', adminOnly, (req, res) => {
+  res.json({ ok: true, settings: savePackageSettings(req.body || {}) });
 });
 adminRouter.post('/packages/download', adminOnly, async (req, res) => {
   try { const r = await downloadPackage(req.body || {}); res.status(r.ok ? 200 : 400).json(r); }

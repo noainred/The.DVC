@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { usePolling, fetchJson } from '../api.js';
-import { Kpi, DataTable, Modal, Loading, ErrorBox } from '../components/ui.jsx';
+import { Kpi, DataTable, Modal, Loading, ErrorBox, SearchBox } from '../components/ui.jsx';
 
 const MGR_BADGE = { connected: 'green', degraded: 'amber', unreachable: 'red', pending: 'gray', disabled: 'gray' };
 const MGR_LABEL = { connected: '정상', degraded: '저하', unreachable: '연결끊김', pending: '대기', disabled: '비활성' };
@@ -84,7 +84,7 @@ export default function Nsx() {
           const cnt = k === 'gateways' ? data.gateways.length : k === 'segments' ? data.segments.length : k === 'nodes' ? data.transportNodes.length : k === 'dfw' ? rules.length : (data.securityGroups || []).length;
           return <button key={k} className={view === k ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => { setView(k); }}>{l} ({cnt})</button>;
         })}
-        <input className="input" style={{ maxWidth: 280 }} placeholder="이름 / IP / 서비스 / 그룹 검색…" value={q} onChange={(e) => setQ(e.target.value)} />
+        <SearchBox className="input" style={{ maxWidth: 280 }} placeholder="이름 / IP / 서비스 / 그룹 검색…" value={q} onChange={setQ} />
         {mgr && <span className="muted" style={{ fontSize: 12 }}>· {mgr} 필터됨 <button className="tab" style={{ padding: '2px 8px' }} onClick={() => setMgr('')}>해제</button></span>}
       </div>
 

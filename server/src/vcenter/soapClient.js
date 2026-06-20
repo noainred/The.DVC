@@ -355,6 +355,38 @@ function parseGpus(xml) {
   return out;
 }
 
+/**
+ * Parse config.storageDevice.hostBusAdapter (array) into [{ name,type,model,speedGbps,wwn,status }].
+ * Array items are <HostHostBusAdapter xsi:type="HostFibreChannelHba|HostInternetScsiHba|...">.
+ * FC link speed is reported in bits/sec; portWorldWideName is a decimal we render as hex.
+ */
+function parseHbas(xml) {
+  if (!xml) return [];
+  const out = [];
+  const TYPE = {
+    HostFibreChannelHba: 'FibreChannel', HostFibreChannelOverEthernetHba: 'FCoE',
+    HostInternetScsiHba: 'iSCSI', HostBlockHba: 'Block',
+    HostParallelScsiHba: 'SCSI', HostSerialAttachedHba: 'SAS', HostPcieHba: 'NVMe', HostRdmaDevice: 'RDMA',
+  };
+  // Split on each array element; tolerate both <HostHostBusAdapter and type-named tags.
+  const blocks = xml.split(/<(?:HostHostBusAdapter|hostBusAdapter)(?=[ >])/).slice(1);
+  for (const blk of blocks) {
+    const xsi = /xsi:type="([^"]+)"/.exec(blk)?.[1] || '';
+    const name = /<device>([^<]+)<\/device>/.exec(blk)?.[1] || /<key>[^<]*key-vim\.host\.[^.]*\.([^<]+)<\/key>/.exec(blk)?.[1] || '';
+    const model = /<model>([^<]*)<\/model>/.exec(blk)?.[1] || '';
+    const status = /<status>([^<]*)<\/status>/.exec(blk)?.[1] || '';
+    const wwnDec = /<portWorldWideName>(\d+)<\/portWorldWideName>/.exec(blk)?.[1];
+    const speedRaw = Number(/<speed>(\d+)<\/speed>/.exec(blk)?.[1] || 0); // FC: bits/sec
+    let speedGbps = 0;
+    if (speedRaw > 0) speedGbps = speedRaw >= 1e9 ? Math.round(speedRaw / 1e9) : (speedRaw <= 128 ? speedRaw : Math.round(speedRaw / 1000));
+    let wwn = '';
+    if (wwnDec) { try { wwn = BigInt(wwnDec).toString(16).padStart(16, '0').replace(/(..)(?=.)/g, '$1:'); } catch { /* ignore */ } }
+    if (!name && !model) continue;
+    out.push({ name, type: TYPE[xsi] || (xsi.replace(/^Host/, '').replace(/Hba$/, '') || 'HBA'), model, speedGbps, wwn, status });
+  }
+  return out;
+}
+
 // Snapshot count (from the snapshot tree) + approximate size from layoutEx files.
 function snapshotInfo(snapXml, layoutXml) {
   let snapshotCount = 0;
@@ -472,7 +504,7 @@ export async function collectFromVCenterSoap(vc) {
         'name', 'parent', 'runtime.connectionState', 'runtime.powerState', 'runtime.inMaintenanceMode',
         'summary.hardware.numCpuCores', 'summary.hardware.numCpuThreads', 'summary.hardware.cpuMhz', 'summary.hardware.memorySize',
         'summary.config.product.version', 'summary.config.product.build', 'config.graphicsInfo',
-        'summary.hardware.vendor', 'summary.hardware.model',
+        'summary.hardware.vendor', 'summary.hardware.model', 'config.storageDevice.hostBusAdapter',
         'summary.quickStats.overallCpuUsage', 'summary.quickStats.overallMemoryUsage'] },
       { type: 'VirtualMachine', paths: [
         'name', 'runtime.host', 'parent', 'runtime.powerState', 'summary.config.numCpu', 'summary.config.memorySizeMB',
@@ -533,6 +565,7 @@ export async function collectFromVCenterSoap(vc) {
         version: p['summary.config.product.version'] || '',
         build: p['summary.config.product.build'] || '',
         gpus: parseGpus(p['config.graphicsInfo']),
+        hbas: parseHbas(p['config.storageDevice.hostBusAdapter']),
         vendor: p['summary.hardware.vendor'] || '',
         model: p['summary.hardware.model'] || '',
         vmCount: 0,

@@ -9,16 +9,18 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
+import { getPackageBaseUrl, getPackageDir } from './packageSettings.js';
 
 const trim = (u) => String(u || '').replace(/\/+$/, '');
 
-export async function fetchRemoteVersions(baseUrl = config.packages.baseUrl) {
-  const res = await fetch(`${trim(baseUrl)}/versions.json`, { signal: AbortSignal.timeout(20000) });
+export async function fetchRemoteVersions(baseUrl) {
+  const base = baseUrl || getPackageBaseUrl();
+  const res = await fetch(`${trim(base)}/versions.json`, { signal: AbortSignal.timeout(20000) });
   if (!res.ok) throw new Error(`versions.json HTTP ${res.status}`);
   return res.json();
 }
 
-export function listLocalPackages(dir = config.packages.dir) {
+export function listLocalPackages(dir = getPackageDir()) {
   try {
     return fs.readdirSync(dir)
       .filter((f) => /\.(tar\.gz|zip)$/.test(f))
@@ -28,13 +30,16 @@ export function listLocalPackages(dir = config.packages.dir) {
 }
 
 const KIND = {
-  installer: { file: 'installer', sha: 'installer_sha256' }, // Rocky9 offline installer
-  bundle: { file: 'tar_gz', sha: 'sha256' },                 // app upgrade bundle
-  windows: { file: 'windows', sha: 'windows_sha256' },       // Windows zip
+  installer: { file: 'installer', sha: 'installer_sha256' },               // el9 offline installer (Rocky 9)
+  installer_cent9: { file: 'installer_cent9', sha: 'installer_cent9_sha256' }, // CentOS Stream 9 offline installer
+  bundle: { file: 'tar_gz', sha: 'sha256' },                               // app upgrade bundle
+  windows: { file: 'windows', sha: 'windows_sha256' },                     // Windows zip
 };
 
 /** Download one package kind (default: latest installer). Verifies SHA-256. */
-export async function downloadPackage({ kind = 'installer', version, baseUrl = config.packages.baseUrl, dir = config.packages.dir } = {}) {
+export async function downloadPackage({ kind = 'installer', version, baseUrl, dir } = {}) {
+  baseUrl = baseUrl || getPackageBaseUrl();
+  dir = dir || getPackageDir();
   const k = KIND[kind];
   if (!k) return { ok: false, reason: `알 수 없는 종류: ${kind}` };
   const versions = await fetchRemoteVersions(baseUrl);
