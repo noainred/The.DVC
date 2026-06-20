@@ -3,6 +3,8 @@ import { postJson, getToken } from '../api.js';
 import { Modal } from './ui.jsx';
 import { openRemoteSession } from '../remote/sessions.js';
 
+const FLD = { display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 };
+
 /**
  * VM 상세에서 HAProxy 경유 원격 접속을 시작하는 버튼.
  * 프로토콜(SSH/RDP)·IP(다중 IP 선택)·포트를 고른 뒤 매핑을 만들고(또는 재사용)
@@ -21,6 +23,7 @@ export function VmRemoteButton({ item }) {
 
   const noIp = ips.length === 0;
   const guessPort = /windows/i.test(item.guestOS || '') ? 3389 : 22;
+  const noteTail = (item.notes || '').split(/\r?\n/).map((l) => l.trimEnd()).filter(Boolean).slice(-3).join('\n');
 
   // Pre-flight reachability check via the assigned proxy (ping + TCP port).
   useEffect(() => {
@@ -75,42 +78,55 @@ export function VmRemoteButton({ item }) {
           {noIp ? (
             <div className="muted">이 VM에 수집된 IP가 없어 접속할 수 없습니다.</div>
           ) : (
-            <div className="spec-grid">
-              <label>프로토콜
-                <select className="select" value={protocol} onChange={(e) => { setProtocol(e.target.value); setPort(''); }}>
-                  <option value="ssh">SSH</option>
-                  <option value="rdp">RDP</option>
-                </select>
-              </label>
-              <label>대상 IP{ips.length > 1 ? ` (${ips.length})` : ''}
-                <select className="select" value={ip} onChange={(e) => setIp(e.target.value)}>
-                  {ips.map((x) => <option key={x} value={x}>{x}</option>)}
-                </select>
-              </label>
-              <label style={{ gridColumn: '1 / -1' }}>포트(비우면 기본 {protocol === 'rdp' ? '3389' : '22'})
-                <input className="input" type="number" value={port} onChange={(e) => setPort(e.target.value)} placeholder={protocol === 'rdp' ? '3389' : '22'} />
-              </label>
-              <label>사용자명
-                <input className="input" value={creds.username} onChange={(e) => setCreds({ ...creds, username: e.target.value })}
-                  placeholder={protocol === 'rdp' ? 'Administrator' : 'root'}
-                  onKeyDown={(e) => { if (e.key === 'Enter' && ip && creds.username) connect(); }} />
-              </label>
-              <label>비밀번호
-                <input className="input" type="password" value={creds.password} onChange={(e) => setCreds({ ...creds, password: e.target.value })}
-                  onKeyDown={(e) => { if (e.key === 'Enter' && ip && creds.username) connect(); }} />
-              </label>
-              {protocol === 'rdp' && (
-                <label>도메인(선택)
-                  <input className="input" value={creds.domain} onChange={(e) => setCreds({ ...creds, domain: e.target.value })} />
+            <div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+                <label style={FLD}>프로토콜
+                  <select className="select" value={protocol} onChange={(e) => { setProtocol(e.target.value); setPort(''); }}>
+                    <option value="ssh">SSH</option>
+                    <option value="rdp">RDP</option>
+                  </select>
                 </label>
+                <label style={FLD}>대상 IP{ips.length > 1 ? ` (${ips.length})` : ''}
+                  <select className="select" value={ip} onChange={(e) => setIp(e.target.value)}>
+                    {ips.map((x) => <option key={x} value={x}>{x}</option>)}
+                  </select>
+                </label>
+                <label style={FLD}>포트(기본 {protocol === 'rdp' ? '3389' : '22'})
+                  <input className="input" type="number" value={port} onChange={(e) => setPort(e.target.value)} placeholder={protocol === 'rdp' ? '3389' : '22'} />
+                </label>
+              </div>
+
+              {noteTail && (
+                <div style={{ marginTop: 12 }}>
+                  <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>메모(Notes)</div>
+                  <div style={{ whiteSpace: 'pre-wrap', fontSize: 13, background: 'rgba(255,255,255,.03)', borderRadius: 8, padding: '8px 10px', maxHeight: 72, overflow: 'auto' }}>{noteTail}</div>
+                </div>
               )}
-              <div style={{ gridColumn: '1 / -1' }}>
+
+              <div style={{ display: 'grid', gridTemplateColumns: protocol === 'rdp' ? '1fr 1fr 1fr' : '1fr 1fr', gap: 10, marginTop: 12 }}>
+                <label style={FLD}>사용자명
+                  <input className="input" value={creds.username} onChange={(e) => setCreds({ ...creds, username: e.target.value })}
+                    placeholder={protocol === 'rdp' ? 'Administrator' : 'root'}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && ip && creds.username) connect(); }} />
+                </label>
+                <label style={FLD}>비밀번호
+                  <input className="input" type="password" value={creds.password} onChange={(e) => setCreds({ ...creds, password: e.target.value })}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && ip && creds.username) connect(); }} />
+                </label>
+                {protocol === 'rdp' && (
+                  <label style={FLD}>도메인(선택)
+                    <input className="input" value={creds.domain} onChange={(e) => setCreds({ ...creds, domain: e.target.value })} />
+                  </label>
+                )}
+              </div>
+
+              <div style={{ marginTop: 12 }}>
                 {error && <div className="login-error" style={{ marginBottom: 8 }}>{error}</div>}
                 <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} disabled={busy || !ip} onClick={connect}>
                   {busy ? '연결 준비 중…' : '접속'}
                 </button>
                 <span className="muted" style={{ fontSize: 12, marginLeft: 10 }}>
-                  계정을 입력하면 바로 연결됩니다(비우면 콘솔에서 입력). {protocol === 'ssh' ? '브라우저 터미널' : 'RDP 웹콘솔/.rdp'}.
+                  계정을 입력하면 바로 연결됩니다(비우면 콘솔에서 입력).
                 </span>
               </div>
             </div>
