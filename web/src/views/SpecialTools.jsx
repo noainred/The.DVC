@@ -59,11 +59,9 @@ function ToolPanel({ tool, onBack }) {
 
   return (
     <>
-      <div className="flex between wrap" style={{ marginBottom: 12, alignItems: 'center' }}>
-        <div className="flex gap" style={{ alignItems: 'center' }}>
-          <button className="tab" onClick={onBack}>← 특수 기능</button>
-          <div className="section-title" style={{ margin: 0 }}>{meta.icon} {meta.label}</div>
-        </div>
+      <div className="flex wrap" style={{ marginBottom: 12, alignItems: 'center', gap: 12 }}>
+        <button className="tab" onClick={onBack}>← 특수 기능</button>
+        <div className="section-title" style={{ margin: 0 }}>{meta.icon} {meta.label}</div>
         {scoped && (
           <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }}>
             <span className="muted">범위</span>
@@ -211,6 +209,9 @@ function Ipam({ scope }) {
     const a = document.createElement('a'); a.href = url; a.download = name; a.click(); URL.revokeObjectURL(url);
   };
   const downloadXlsx = () => blobDownload(`/tools/ipam.xlsx${sp}`, `ip-ledger-${new Date().toISOString().slice(0, 10)}.xlsx`);
+
+  // Reload the subnet list (and first sheet) when the vCenter scope changes.
+  useEffect(() => { if (view === 'sheet') openSheets(); /* eslint-disable-next-line */ }, [scope]);
 
   if (loading) return <Loading />;
   if (error) return <ErrorBox message={error} />;
