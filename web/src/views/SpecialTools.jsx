@@ -5,6 +5,8 @@ import { DataTable, Loading, ErrorBox, StateBadge, UsageCell, EntityDetail, Moda
 const TOOLS = [
   { k: 'aisearch', icon: '🔎', label: 'AI 검색 (자연어)', desc: '자연어로 VM/호스트/IP 검색 · 로컬 LLM' },
   { k: 'vmfinder', icon: '🧭', label: 'VM 정밀 검색 / 유휴 VM', desc: '다수 vCenter·폴더·클러스터·풀 + 조건 · 1일/1주 평균 CPU로 미사용 VM' },
+  { k: 'capacity', icon: '📈', label: '용량 리포트', desc: '클러스터별 여유·오버커밋·수용여력 · 전체/법인별' },
+  { k: 'waste', icon: '♻️', label: '낭비 리소스', desc: '정지 VM·스냅샷·thin 회수가능·Tools 미설치' },
   { k: 'guestos', icon: '🐧', label: 'Guest OS 종류/버전', desc: 'OS·버전별 VM 수 · 전체/법인별 · 검색' },
   { k: 'thinvms', icon: '💧', label: 'Thin VM 찾기', desc: 'Thin 프로비저닝 VM · 회수 가능 용량(추정)' },
   { k: 'ipam', icon: '📒', label: '센터별 IP 관리대장', desc: 'vCenter 수집 IP 전체 · 클릭 시 상세 · DB/CSV' },
@@ -56,7 +58,7 @@ function ToolPanel({ tool, onBack }) {
   const meta = TOOLS.find((t) => t.k === tool);
   const [scope, setScope] = useState('');
   const { data: vcList } = usePolling('/vcenters', {}, 60_000);
-  const scoped = ['ipam', 'dupip', 'vmtools', 'snapshots', 'hba', 'gpu', 'licenses', 'esxi', 'hardware', 'guestos', 'thinvms'].includes(tool);
+  const scoped = ['ipam', 'dupip', 'vmtools', 'snapshots', 'hba', 'gpu', 'licenses', 'esxi', 'hardware', 'guestos', 'thinvms', 'capacity', 'waste'].includes(tool);
 
   return (
     <>
@@ -75,6 +77,8 @@ function ToolPanel({ tool, onBack }) {
       </div>
       {tool === 'aisearch' && <AiSearch />}
       {tool === 'vmfinder' && <VmFinder />}
+      {tool === 'capacity' && <Capacity scope={scope} />}
+      {tool === 'waste' && <Waste scope={scope} />}
       {tool === 'guestos' && <GuestOs scope={scope} />}
       {tool === 'thinvms' && <ThinVms scope={scope} />}
       {tool === 'ipam' && <Ipam scope={scope} onScope={setScope} />}
@@ -640,6 +644,71 @@ function useTool(path, params) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path, key]);
   return state;
+}
+
+function Capacity({ scope }) {
+  const { loading, data, error } = useTool('/tools/capacity', scope ? { vcenterId: scope } : {});
+  if (loading) return <Loading />;
+  if (error) return <ErrorBox message={error} />;
+  const t = data.totals;
+  const cols = [
+    { key: 'cluster', label: '클러스터', render: (c) => <b>{c.cluster}</b> },
+    { key: 'vcenterId', label: 'vCenter', render: (c) => <span className="muted">{c.vcenterId}</span> },
+    { key: 'hosts', label: '호스트', align: 'right' },
+    { key: 'vmsOn', label: 'VM(On)', align: 'right', render: (c) => `${c.vmsOn}/${c.vms}` },
+    { key: 'cores', label: '물리코어', align: 'right' },
+    { key: 'vcpuAllocated', label: '할당 vCPU', align: 'right' },
+    { key: 'vcpuPerCore', label: 'vCPU:코어', align: 'right', render: (c) => <span className={`badge ${c.vcpuPerCore >= 4 ? 'red' : c.vcpuPerCore >= 3 ? 'amber' : 'green'}`}>{c.vcpuPerCore}:1</span> },
+    { key: 'ramOvercommitPct', label: 'RAM 오버커밋', align: 'right', render: (c) => <span className={`badge ${c.ramOvercommitPct >= 100 ? 'red' : c.ramOvercommitPct >= 85 ? 'amber' : 'green'}`}>{c.ramOvercommitPct}%</span> },
+    { key: 'cpuUsedPct', label: 'CPU 사용', render: (c) => <UsageCell pct={c.cpuUsedPct} /> },
+    { key: 'memUsedPct', label: '메모리 사용', render: (c) => <UsageCell pct={c.memUsedPct} /> },
+    { key: 'ramHeadroomGB', label: 'RAM 여유', align: 'right', render: (c) => tb(c.ramHeadroomGB) },
+  ];
+  return (
+    <>
+      <div className="kpis" style={{ marginBottom: 14 }}>
+        <Card label="클러스터" value={t.clusters} meta={`호스트 ${t.hosts}`} />
+        <Card label="물리코어 / 할당 vCPU" value={`${t.cores} / ${t.vcpuAllocated}`} meta={`${t.vcpuPerCore}:1 평균`} accent={t.vcpuPerCore >= 4 ? 'var(--red)' : undefined} />
+        <Card label="메모리 / 할당" value={`${tb(t.memTotalGB)} / ${tb(t.ramAllocatedGB)}`} />
+        <Card label="RAM 여유(헤드룸)" value={tb(t.ramHeadroomGB)} accent={t.ramHeadroomGB <= 0 ? 'var(--red)' : 'var(--green)'} />
+      </div>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>오버커밋: vCPU:코어 ≥4 또는 RAM ≥100%면 과밀(빨강). RAM 여유 = 물리RAM − 할당(전원 On).</div>
+      <DataTable columns={cols} rows={data.clusters} initialSort={{ key: 'ramOvercommitPct', dir: 'desc' }} />
+    </>
+  );
+}
+
+function Waste({ scope }) {
+  const { loading, data, error } = useTool('/tools/waste', scope ? { vcenterId: scope } : {});
+  const [tab, setTab] = useState('off');
+  if (loading) return <Loading />;
+  if (error) return <ErrorBox message={error} />;
+  const tb2 = (g) => (g >= 1024 ? `${(g / 1024).toFixed(1)} TB` : `${g} GB`);
+  return (
+    <>
+      <div className="kpis" style={{ marginBottom: 14 }}>
+        <Card label="전원 꺼진 VM" value={data.poweredOff.count} meta={`스토리지 ${tb2(data.poweredOff.storageGB)} 점유`} accent={data.poweredOff.count ? 'var(--amber)' : undefined} />
+        <Card label="스냅샷 보유 VM" value={data.snapshots.count} meta={`${tb2(data.snapshots.sizeGB)} 사용`} accent={data.snapshots.count ? 'var(--amber)' : undefined} />
+        <Card label="Thin 회수가능(추정)" value={tb2(data.thinReclaim.reclaimableGB)} meta={`${data.thinReclaim.count} VM`} />
+        <Card label="Tools 미실행(On)" value={data.noTools.count} accent={data.noTools.count ? 'var(--amber)' : undefined} />
+      </div>
+      <div className="flex gap" style={{ marginBottom: 8 }}>
+        {[['off', `전원 꺼짐 (${data.poweredOff.count})`], ['snap', `스냅샷 (${data.snapshots.count})`], ['tools', `Tools 미실행 (${data.noTools.count})`]].map(([k, l]) => (
+          <button key={k} className={tab === k ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setTab(k)}>{l}</button>
+        ))}
+      </div>
+      {tab === 'off' && <DataTable rows={data.poweredOff.vms} initialSort={{ key: 'storageGB', dir: 'desc' }} columns={[
+        { key: 'name', label: 'VM', render: (v) => <b>{v.name}</b> }, { key: 'vcenterId', label: 'vCenter', render: (v) => <span className="muted">{v.vcenterId}</span> },
+        { key: 'guestOS', label: 'OS' }, { key: 'storageGB', label: '스토리지', align: 'right', render: (v) => tb2(v.storageGB) }]} />}
+      {tab === 'snap' && <DataTable rows={data.snapshots.vms} initialSort={{ key: 'snapshotSizeGB', dir: 'desc' }} columns={[
+        { key: 'name', label: 'VM', render: (v) => <b>{v.name}</b> }, { key: 'vcenterId', label: 'vCenter', render: (v) => <span className="muted">{v.vcenterId}</span> },
+        { key: 'snapshotCount', label: '개수', align: 'right' }, { key: 'snapshotSizeGB', label: '크기', align: 'right', render: (v) => tb2(v.snapshotSizeGB) }]} />}
+      {tab === 'tools' && <DataTable rows={data.noTools.vms} columns={[
+        { key: 'name', label: 'VM', render: (v) => <b>{v.name}</b> }, { key: 'vcenterId', label: 'vCenter', render: (v) => <span className="muted">{v.vcenterId}</span> },
+        { key: 'toolsStatus', label: 'Tools 상태', render: (v) => <span className="badge amber">{v.toolsStatus}</span> }]} />}
+      <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>※ 고아 디스크(orphaned VMDK)는 데이터스토어 파일 스캔이 필요해 현재 미포함입니다.</div>
+    </>
+  );
 }
 
 function VmFinder() {
