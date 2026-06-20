@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { usePolling } from '../api.js';
+import React, { useEffect, useMemo, useState } from 'react';
+import { usePolling, fetchJson } from '../api.js';
 import { Kpi, DataTable, Modal, Loading, ErrorBox } from '../components/ui.jsx';
 
 const MGR_BADGE = { connected: 'green', degraded: 'amber', unreachable: 'red', pending: 'gray', disabled: 'gray' };
@@ -181,10 +181,11 @@ function DetailModal({ detail, onClose }) {
         <Row label="연결 VM 수">{item.vmCount ?? '—'}</Row>
         {item.ports?.length > 0 && (
           <div style={{ marginTop: 10 }}>
-            <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>연결된 VM (포트)</div>
+            <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>연결된 VM (NSX 포트)</div>
             <div className="flex gap wrap">{item.ports.map((p) => <span key={p} className="badge gray" style={{ fontSize: 12 }}>{p}</span>)}</div>
           </div>
         )}
+        <SegmentVms subnets={item.subnets || []} />
       </>}
       {type === 'rule' && <>
         <Row label="정책">{item.policy}</Row>
@@ -214,5 +215,44 @@ function DetailModal({ detail, onClose }) {
         )}
       </>}
     </Modal>
+  );
+}
+
+/** Segment → VMs/IP ledger: resolve the segment's subnet against the IP 관리대장
+ *  (vCenter 수집 IP)로 이 세그먼트를 실제로 사용하는 VM/IP를 보여준다. */
+function SegmentVms({ subnets }) {
+  const cidr = (subnets || []).find((s) => /\d+\.\d+\.\d+\.\d+\/\d+/.test(s));
+  const base = cidr ? cidr.split('/')[0].split('.').slice(0, 3).join('.') : null;
+  const [rows, setRows] = useState(null);
+  useEffect(() => {
+    if (!base) return;
+    fetchJson(`/tools/ipam/sheet?base=${base}`)
+      .then((r) => setRows((r.rows || []).filter((x) => x.status !== 'empty' && x.status !== 'network')))
+      .catch(() => setRows([]));
+  }, [base]);
+  if (!cidr) return <div className="muted" style={{ marginTop: 12, fontSize: 12 }}>이 세그먼트에는 서브넷이 없어 IP 대장을 연결할 수 없습니다 (VLAN 업링크 등).</div>;
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>이 세그먼트({cidr})를 사용하는 VM · IP 대장 {rows ? `(${rows.length})` : ''}</div>
+      {rows == null ? <div className="muted" style={{ fontSize: 12 }}>불러오는 중…</div>
+        : rows.length === 0 ? <div className="muted" style={{ fontSize: 12 }}>이 서브넷에서 수집된 IP가 없습니다.</div>
+        : (
+          <div className="table-wrap" style={{ maxHeight: '34vh' }}>
+            <table>
+              <thead><tr><th>IP</th><th>VM / 용도</th><th>Hostname</th><th>분류</th></tr></thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.ip}>
+                    <td><b>{r.ip}</b></td>
+                    <td>{r.purpose || '—'}</td>
+                    <td className="muted">{r.hostname || '—'}</td>
+                    <td className="muted">{r.scope || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+    </div>
   );
 }

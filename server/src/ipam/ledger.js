@@ -4,6 +4,7 @@
  */
 
 import { getIgnoreMatcher, getClassifier } from './settings.js';
+import { getAnnotations } from './annotations.js';
 
 export function ipToNum(s) {
   const p = String(s || '').split('.').map(Number);
@@ -84,6 +85,7 @@ export function buildSubnetSheets(snap, { vcenterId, onlyBase } = {}) {
   const baseNum = (b) => { const p = b.split('.').map(Number); return ((p[0] << 24) >>> 0) + (p[1] << 16) + (p[2] << 8); };
   const sortedBases = [...bases].sort((a, b) => baseNum(a) - baseNum(b)).filter((b) => !onlyBase || b === onlyBase);
 
+  const annotations = getAnnotations();
   const sheets = sortedBases.map((base) => {
     const sheetRows = [];
     let used = 0;
@@ -102,7 +104,8 @@ export function buildSubnetSheets(snap, { vcenterId, onlyBase } = {}) {
         power = o.powerState === 'POWERED_ON' ? 'On' : (o.powerState ? 'Off' : '');
         scope = r.scope === 'public' ? '공인' : '사설';
       }
-      sheetRows.push({ ip, last: i, purpose, hostname, notes, power, status, scope });
+      const ann = annotations[ip];
+      sheetRows.push({ ip, last: i, purpose, hostname, notes, power, status, scope, memo: ann?.memo || '', tags: ann?.tags || [] });
     }
     return { subnet: `${base}.0/24`, base, used, rows: sheetRows };
   });

@@ -187,10 +187,13 @@ function Ipam({ scope, onScope }) {
   const [q, setQ] = useState('');
   const [sel, setSel] = useState(null);
   const [db, setDb] = useState(null);
+  const [rowFilter, setRowFilter] = useState(''); // '' | duplicate | multihomed | public | private
+  const [editMemo, setEditMemo] = useState(null); // { ip, memo, tags } for the editor
   const [view, setView] = useState('list'); // list | sheet
   const [subnets, setSubnets] = useState([]);
   const [base, setBase] = useState('');
   const [sheet, setSheet] = useState(null);
+  const [stFilter, setStFilter] = useState(''); // '' = 전체 | used | multihomed | duplicate | empty
   useEffect(() => { fetchJson('/admin/ipam/db-info').then(setDb).catch(() => setDb(null)); }, []);
 
   const sp = scope ? `?vcenterId=${encodeURIComponent(scope)}` : '';
@@ -230,9 +233,15 @@ function Ipam({ scope, onScope }) {
   const STLAB = { used: '사용', multihomed: '멀티홈', duplicate: '중복', network: 'Network ID', empty: '' };
 
   const term = q.trim().toLowerCase();
-  const rows = term
-    ? data.rows.filter((r) => r.ip.includes(term) || (r.ownerName || '').toLowerCase().includes(term) || (r.hostName || '').toLowerCase().includes(term))
-    : data.rows;
+  const rows = data.rows.filter((r) => {
+    if (rowFilter === 'duplicate' && !r.duplicate) return false;
+    if (rowFilter === 'multihomed' && !r.multiHomed) return false;
+    if (rowFilter === 'public' && r.scope !== 'public') return false;
+    if (rowFilter === 'private' && r.scope !== 'private') return false;
+    if (term && !(r.ip.includes(term) || (r.ownerName || '').toLowerCase().includes(term) || (r.hostName || '').toLowerCase().includes(term))) return false;
+    return true;
+  });
+  const toggleRowFilter = (k) => { setRowFilter((cur) => (cur === k ? '' : k)); setView('list'); };
 
   const downloadCsv = async () => {
     const res = await fetch(`/api/tools/ipam.csv${scope ? `?vcenterId=${encodeURIComponent(scope)}` : ''}`,
@@ -268,11 +277,24 @@ function Ipam({ scope, onScope }) {
       <div className="kpis" style={{ marginBottom: 14 }}>
         <Card label="총 IP" value={data.total.toLocaleString()} meta={`센터 ${data.byVcenter.length} · 서브넷 ${subnets.length}`} />
         <Card label="서브넷(/24) 대역" value={subnets.length} meta={`10.x ${c10} · 172.x ${c172} · 192.x ${c192}`} />
-        <Card label="공인 / 사설 IP" value={`${(data.publicIps ?? 0).toLocaleString()} / ${(data.privateIps ?? 0).toLocaleString()}`} meta="공인=인터넷 라우팅 대역" />
-        <Card label="중복 IP" value={data.duplicateIps} accent={data.duplicateIps ? 'var(--red)' : undefined} />
-        <Card label="멀티홈 IP" value={data.multiHomed} />
+        <Card label="공인 / 사설 IP" value={`${(data.publicIps ?? 0).toLocaleString()} / ${(data.privateIps ?? 0).toLocaleString()}`}
+          meta={rowFilter === 'public' ? '공인만 보기 ✓' : rowFilter === 'private' ? '사설만 보기 ✓' : '클릭: 공인/사설 필터'}
+          active={rowFilter === 'public' || rowFilter === 'private'}
+          onClick={() => toggleRowFilter(rowFilter === 'public' ? 'private' : rowFilter === 'private' ? '' : 'public')} />
+        <Card label="중복 IP" value={data.duplicateIps} accent={data.duplicateIps ? 'var(--red)' : undefined}
+          meta={rowFilter === 'duplicate' ? '중복만 보기 ✓' : '클릭하여 중복만'} active={rowFilter === 'duplicate'} onClick={() => toggleRowFilter('duplicate')} />
+        <Card label="멀티홈 IP" value={data.multiHomed}
+          meta={rowFilter === 'multihomed' ? '멀티홈만 보기 ✓' : '클릭하여 멀티홈만'} active={rowFilter === 'multihomed'} onClick={() => toggleRowFilter('multihomed')} />
         {db && <Card label="공유 DB 레코드" value={db.count.toLocaleString()} meta={db.kind.toUpperCase()} />}
       </div>
+      {rowFilter && view === 'list' && (
+        <div className="flex gap" style={{ marginBottom: 8, alignItems: 'center' }}>
+          <span className="badge blue" style={{ fontSize: 12 }}>
+            {rowFilter === 'duplicate' ? '중복 IP만' : rowFilter === 'multihomed' ? '멀티홈 IP만' : rowFilter === 'public' ? '공인 IP만' : '사설 IP만'} 표시 중
+          </span>
+          <button className="tab" style={{ padding: '4px 10px' }} onClick={() => setRowFilter('')}>필터 해제</button>
+        </div>
+      )}
       <div className="flex gap wrap" style={{ marginBottom: 10 }}>
         {data.byVcenter.map((v) => (
           <span key={v.vcenterId} className="badge gray" title="이 vCenter의 서브넷 대장 보기"
@@ -307,28 +329,60 @@ function Ipam({ scope, onScope }) {
             <select className="select" style={{ maxWidth: 280 }} value={base} onChange={(e) => pickBase(e.target.value)}>
               {subnets.map((s) => <option key={s.base} value={s.base}>{s.subnet} · 사용 {s.used}</option>)}
             </select>
-            <span className="muted" style={{ fontSize: 12 }}>🟩 사용 · 🟦 멀티홈 · 🟥 중복 · ⬜ 미사용</span>
           </div>
-          {sheet && (
-            <div className="table-wrap" style={{ maxHeight: '62vh' }}>
-              <table>
-                <thead><tr><th>{base}.X</th><th>Purpose</th><th>Hostname</th><th>메모(Notes)</th><th>전원</th><th>분류</th><th>상태</th></tr></thead>
-                <tbody>
-                  {sheet.rows.map((r) => (
-                    <tr key={r.ip} style={{ background: ROWBG[r.status] }}>
-                      <td><b>{r.ip}</b></td>
-                      <td>{r.purpose}</td>
-                      <td>{r.hostname}</td>
-                      <td className="muted" style={{ fontSize: 12 }}>{r.notes}</td>
-                      <td>{r.power}</td>
-                      <td className="muted" style={{ fontSize: 12 }}>{r.scope}</td>
-                      <td className="muted" style={{ fontSize: 12 }}>{STLAB[r.status]}</td>
-                    </tr>
+          {sheet && (() => {
+            const cnt = (st) => sheet.rows.filter((r) => (st === 'used' ? (r.status === 'used' || r.status === 'multihomed' || r.status === 'duplicate') : r.status === st)).length;
+            const FILTERS = [
+              ['', `전체 (${sheet.rows.length})`, 'gray'],
+              ['used', `사용중 (${cnt('used')})`, 'green'],
+              ['multihomed', `멀티홈 (${cnt('multihomed')})`, 'blue'],
+              ['duplicate', `중복 (${cnt('duplicate')})`, 'red'],
+              ['empty', `미사용 (${cnt('empty')})`, 'gray'],
+            ];
+            // '사용중' = 실제 점유(사용/멀티홈/중복) 전부, 나머지는 정확히 해당 상태.
+            const shown = sheet.rows.filter((r) => {
+              if (!stFilter) return true;
+              if (stFilter === 'used') return r.status === 'used' || r.status === 'multihomed' || r.status === 'duplicate';
+              return r.status === stFilter;
+            });
+            return (
+              <>
+                <div className="flex gap wrap" style={{ marginBottom: 8, alignItems: 'center' }}>
+                  {FILTERS.map(([k, label]) => (
+                    <button key={k} className={stFilter === k ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '6px 12px', fontSize: 12 }} onClick={() => setStFilter(k)}>{label}</button>
                   ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+                  <span className="muted" style={{ fontSize: 12, marginLeft: 4 }}>🟩 사용 · 🟦 멀티홈 · 🟥 중복 · ⬜ 미사용</span>
+                </div>
+                <div className="table-wrap" style={{ maxHeight: '62vh' }}>
+                  <table>
+                    <thead><tr><th>{base}.X</th><th>Purpose</th><th>Hostname</th><th>메모(Notes)</th><th>전원</th><th>분류</th><th>상태</th><th>메모 · 태그</th></tr></thead>
+                    <tbody>
+                      {shown.length === 0 && <tr><td colSpan={8} className="center muted" style={{ padding: 22 }}>해당 상태의 IP가 없습니다.</td></tr>}
+                      {shown.map((r) => (
+                        <tr key={r.ip} style={{ background: ROWBG[r.status] }}>
+                          <td><b>{r.ip}</b></td>
+                          <td>{r.purpose}</td>
+                          <td>{r.hostname}</td>
+                          <td className="muted" style={{ fontSize: 12 }}>{r.notes}</td>
+                          <td>{r.power}</td>
+                          <td className="muted" style={{ fontSize: 12 }}>{r.scope}</td>
+                          <td className="muted" style={{ fontSize: 12 }}>{STLAB[r.status]}</td>
+                          <td style={{ fontSize: 12 }}>
+                            {r.memo && <div style={{ marginBottom: 3 }}>{r.memo}</div>}
+                            {(r.tags || []).map((t) => <span key={t} className="badge blue" style={{ marginRight: 4, fontSize: 10 }}>{t}</span>)}
+                            <button className="tab" style={{ padding: '2px 8px', fontSize: 11, marginLeft: (r.tags || []).length ? 4 : 0 }}
+                              onClick={() => setEditMemo({ ip: r.ip, memo: r.memo || '', tags: (r.tags || []).join(', ') })}>
+                              {r.memo || (r.tags || []).length ? '✎ 편집' : '+ 추가'}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            );
+          })()}
         </>
       ) : (
         <>
@@ -344,7 +398,39 @@ function Ipam({ scope, onScope }) {
       )}
       {sel && <EntityDetail type={sel.ownerType} item={sel.owner} onClose={() => setSel(null)} />}
       {ipms && <IpmsSettings onClose={() => setIpms(false)} />}
+      {editMemo && <MemoEditor init={editMemo} onClose={() => setEditMemo(null)} onSaved={() => { setEditMemo(null); pickBase(base); }} />}
     </>
+  );
+}
+
+/** Per-IP user memo + tags editor (separate from vCenter notes). */
+function MemoEditor({ init, onClose, onSaved }) {
+  const [memo, setMemo] = useState(init.memo || '');
+  const [tags, setTags] = useState(init.tags || '');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const save = async () => {
+    setBusy(true); setErr(null);
+    const body = { ip: init.ip, memo, tags: String(tags).split(/[,\n]/).map((s) => s.trim()).filter(Boolean) };
+    const r = await putJson('/tools/ipam/annotation', body).catch((e) => ({ ok: false, reason: e.message }));
+    setBusy(false);
+    if (r.ok) onSaved(); else setErr(r.reason || '저장 실패');
+  };
+  return (
+    <Modal title={`메모 · 태그 — ${init.ip}`} onClose={onClose} width={480}>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>vCenter 메모와 별개로, 이 IP에 직접 남기는 메모/태그입니다. (수집 갱신에도 유지)</div>
+      {err && <div className="login-error" style={{ marginBottom: 8 }}>{err}</div>}
+      <label style={{ display: 'block', marginBottom: 12 }}>메모
+        <textarea className="input" rows={4} value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="예: 보안취약점 점검 대상, 담당 홍길동" style={{ resize: 'vertical' }} />
+      </label>
+      <label style={{ display: 'block', marginBottom: 4 }}>태그 (쉼표로 구분)
+        <input className="input" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="예: 점검, IAM, 운영" />
+      </label>
+      <div className="flex gap" style={{ marginTop: 16 }}>
+        <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} disabled={busy} onClick={save}>{busy ? '저장 중…' : '저장'}</button>
+        <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={onClose}>취소</button>
+      </div>
+    </Modal>
   );
 }
 
@@ -550,8 +636,16 @@ function useTool(path, params) {
   return state;
 }
 
-function Card({ label, value, meta, accent }) {
-  return <div className="card kpi"><div className="label">{label}</div><div className="value" style={{ fontSize: 24, ...(accent ? { color: accent } : {}) }}>{value}</div>{meta && <div className="meta">{meta}</div>}</div>;
+function Card({ label, value, meta, accent, onClick, active }) {
+  return (
+    <div className="card kpi" onClick={onClick}
+      style={{ ...(onClick ? { cursor: 'pointer' } : {}), ...(active ? { border: '1px solid var(--accent,#2563eb)', boxShadow: '0 0 0 1px var(--accent,#2563eb)' } : {}) }}
+      title={onClick ? '클릭하여 필터' : undefined}>
+      <div className="label">{label}</div>
+      <div className="value" style={{ fontSize: 24, ...(accent ? { color: accent } : {}) }}>{value}</div>
+      {meta && <div className="meta">{meta}</div>}
+    </div>
+  );
 }
 
 function DupIp({ scope }) {

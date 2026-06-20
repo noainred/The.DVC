@@ -140,7 +140,7 @@ export default function ProxySettings() {
   );
 }
 
-function ProxyEditor({ initial, onSave, onClose }) {
+export function ProxyEditor({ initial, onSave, onClose }) {
   const [p, setP] = useState({ ...initial, vcenterIdsText: (initial.vcenterIds || []).join(', ') });
   const set = (k) => (e) => setP((s) => ({ ...s, [k]: e.target.value }));
   const setSub = (grp, k) => (e) => setP((s) => ({ ...s, [grp]: { ...s[grp], [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value } }));

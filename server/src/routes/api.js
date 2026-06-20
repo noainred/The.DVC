@@ -6,6 +6,7 @@ import { hostPower } from '../idrac/service.js';
 import { fetchVmMetric, PERF_INTERVALS, upgradeVmTools, getVmConsole } from '../vcenter/soapClient.js';
 import { listMutes, addMute, removeMute } from '../alarm-mutes.js';
 import { buildIpamRows, buildSubnetSheets, listSubnets } from '../ipam/ledger.js';
+import { getAnnotation, setAnnotation } from '../ipam/annotations.js';
 import { buildWorkbook } from '../ipam/excel.js';
 import { listNotes } from '../release-notes.js';
 import { nlSearch } from '../llm/nlSearch.js';
@@ -334,6 +335,16 @@ api.get('/tools/ipam/subnets', (req, res) => {
 api.get('/tools/ipam/sheet', (req, res) => {
   const sheets = buildSubnetSheets(store.get(), { vcenterId: req.query.vcenterId, onlyBase: req.query.base });
   res.json(sheets[0] || { subnet: '', rows: [] });
+});
+
+// Per-IP user annotation (custom memo + tags), separate from vCenter notes.
+api.get('/tools/ipam/annotation', (req, res) => {
+  res.json({ ip: req.query.ip, annotation: getAnnotation(req.query.ip) });
+});
+api.put('/tools/ipam/annotation', (req, res) => {
+  const { ip, memo, tags } = req.body || {};
+  const r = setAnnotation(ip, { memo, tags }, req.user);
+  res.status(r.ok ? 200 : 400).json(r);
 });
 api.get('/tools/ipam.xlsx', async (req, res) => {
   try {
