@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { usePolling, getToken, setToken, setUnauthorizedHandler, fetchAuthConfig, fetchMe } from './api.js';
+import { SearchBox } from './components/ui.jsx';
 import Overview from './views/Overview.jsx';
 import Hosts from './views/Hosts.jsx';
 import Vms from './views/Vms.jsx';
@@ -267,7 +268,7 @@ function Portal({ user, onLogout }) {
               </select>
             )}
             {showTextSearch && (
-              <input className="input" placeholder="이름 / IP / OS 검색…" value={q} onChange={(e) => setQ(e.target.value)} />
+              <SearchBox placeholder="이름 / IP / OS 검색…" value={q} onChange={setQ} />
             )}
             {showTextSearch && (
               <label className="flex gap" style={{ alignItems: 'center', fontSize: 12, whiteSpace: 'nowrap', cursor: 'pointer' }}
