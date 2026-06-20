@@ -15,12 +15,13 @@ export default function Nsx() {
   const [view, setView] = useState('gateways');
   const [q, setQ] = useState('');
   const [detail, setDetail] = useState(null); // { type, item }
+  // NOTE: all hooks must run before any early return (React error #310).
+  const rules = useMemo(() => (data?.dfw || []).flatMap((p) => p.rules || []), [data]);
   if (loading && !data) return <Loading />;
   if (error) return <ErrorBox message={error} />;
   const r = data.rollup || {};
   const managers = data.managers || [];
 
-  const rules = useMemo(() => (data.dfw || []).flatMap((p) => p.rules || []), [data.dfw]);
   const match = (s) => !q || String(s).toLowerCase().includes(q.toLowerCase());
   const list = (() => {
     if (view === 'gateways') return data.gateways.filter((g) => match(`${g.name} ${g.tier} ${g.managerId} ${g.haMode}`));

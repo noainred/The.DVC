@@ -1,6 +1,14 @@
 {
   "notes": [
     {
+      "version": "1.36.1",
+      "date": "2026-06-20",
+      "title": "NSX 화면 오류(React #310) 수정",
+      "notes": [
+        "NSX 탭에서 'React error #310'으로 화면이 깨지던 문제 수정 — useMemo 훅이 조건부 return 뒤에 호출되던 순서 오류 해결"
+      ]
+    },
+    {
       "version": "1.36.0",
       "date": "2026-06-20",
       "title": "NSX 상세 기능 — DFW 규칙 · 보안그룹 · 검색 · 상세보기",
