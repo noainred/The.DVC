@@ -6,6 +6,8 @@ import { store } from '../store.js';
 import { getDataSource, setDataSource, isDataSourceOverridden } from '../runtime-settings.js';
 import { ledgerInfo } from '../ipam/db.js';
 import { saveNote, deleteNote } from '../release-notes.js';
+import { loadLlmConfig, saveLlmConfig } from '../llm/config.js';
+import { ollamaTest } from '../llm/ollama.js';
 import { deployAgent, testTarget, installerInfo } from '../agent/deploy.js';
 import { listTargets, getTargetRaw, saveTarget, removeTarget, recordResult } from '../agent/deployRegistry.js';
 import { getLogs } from '../logbuffer.js';
@@ -129,6 +131,13 @@ adminRouter.post('/agent-deploy/deploy-all', adminOnly, async (_req, res) => {
     results.push({ id: t.id, host: t.host, agentName: t.agentName, ok: r.ok, active: r.active, reason: r.reason });
   }
   res.json({ ok: true, deployed: results.filter((r) => r.ok).length, total: results.length, results });
+});
+
+// --- Local LLM (Ollama) config for natural-language search ---
+adminRouter.get('/llm-config', adminOnly, (_req, res) => res.json({ config: loadLlmConfig() }));
+adminRouter.put('/llm-config', adminOnly, (req, res) => res.json({ ok: true, config: saveLlmConfig(req.body || {}) }));
+adminRouter.post('/llm-test', adminOnly, async (req, res) => {
+  res.json(await ollamaTest({ ...loadLlmConfig(), ...(req.body || {}) }));
 });
 
 // Record / delete a release note (admin).

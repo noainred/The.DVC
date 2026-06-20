@@ -7,6 +7,7 @@ import { fetchVmMetric, PERF_INTERVALS, upgradeVmTools, getVmConsole } from '../
 import { listMutes, addMute, removeMute } from '../alarm-mutes.js';
 import { buildIpamRows } from '../ipam/ledger.js';
 import { listNotes } from '../release-notes.js';
+import { nlSearch } from '../llm/nlSearch.js';
 
 export const api = Router();
 
@@ -251,6 +252,14 @@ api.get('/tools/snapshots', (req, res) => {
     totalSizeGB: Math.round(items.reduce((a, v) => a + (v.snapshotSizeGB || 0), 0) * 10) / 10,
     items,
   });
+});
+
+// Natural-language search (local LLM interprets → query runs on local data).
+api.post('/search/nl', async (req, res) => {
+  const query = String((req.body || {}).query || '').trim();
+  if (!query) return res.status(400).json({ error: 'query is required' });
+  try { res.json(await nlSearch(query)); }
+  catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // Release notes (built-in changelog + admin-recorded), newest first.

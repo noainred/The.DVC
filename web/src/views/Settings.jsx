@@ -5,6 +5,7 @@ import Collectors from './Collectors.jsx';
 import AgentScans from './AgentScans.jsx';
 import AgentDeploy from './AgentDeploy.jsx';
 import AdSettings from './AdSettings.jsx';
+import LlmSettings from './LlmSettings.jsx';
 import UserAdmin from './UserAdmin.jsx';
 import Diagnostics from './Diagnostics.jsx';
 
@@ -16,6 +17,7 @@ const SUB = [
   { k: 'agent-deploy', label: '에이전트 배포', C: AgentDeploy },
   { k: 'users', label: '사용자 관리', C: UserAdmin },
   { k: 'auth-ad', label: '인증(AD)', C: AdSettings },
+  { k: 'ai-search', label: 'AI 검색', C: LlmSettings },
   { k: 'diagnostics', label: '진단·로그', C: Diagnostics },
 ];
 
