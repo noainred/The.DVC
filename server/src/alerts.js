@@ -1,0 +1,201 @@
+/**
+ * Alerting — evaluates threshold/condition rules against the current snapshot on
+ * an interval and pushes notifications to Slack(incoming webhook) and/or a
+ * generic Webhook(JSON POST). Dependency-free (HTTP via fetch). Email은 SMTP
+ * 라이브러리가 필요하므로 현재는 webhook 경유를 권장(추후 옵션).
+ *
+ * Config: CONFIG_DIR/alerts.json. Fires on a condition becoming active (new),
+ * re-notifies after cooldown while still active, and notes resolution.
+ */
+
+import fs from 'node:fs';
+import path from 'node:path';
+import { config } from './config.js';
+import { store } from './store.js';
+import { logAudit } from './audit.js';
+
+const FILE = path.join(config.configDir, 'alerts.json');
+
+const DEFAULTS = {
+  channels: {
+    slack: { enabled: false, url: '' },
+    webhook: { enabled: false, url: '' },
+  },
+  rules: {
+    criticalAlarms: { enabled: true },
+    vcenterDown: { enabled: true },
+    hostDisconnected: { enabled: true },
+    datastorePct: { enabled: true, threshold: 90 },
+    ramOvercommitPct: { enabled: false, threshold: 120 },
+    vcpuPerCore: { enabled: false, threshold: 5 },
+  },
+  cooldownMin: 60,
+  intervalSec: 60,
+};
+
+let cache = null;
+export function loadAlertConfig() {
+  if (cache) return cache;
+  cache = structuredClone(DEFAULTS);
+  try {
+    if (fs.existsSync(FILE)) {
+      const s = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+      cache = {
+        channels: { slack: { ...DEFAULTS.channels.slack, ...s.channels?.slack }, webhook: { ...DEFAULTS.channels.webhook, ...s.channels?.webhook } },
+        rules: { ...DEFAULTS.rules, ...(s.rules || {}) },
+        cooldownMin: s.cooldownMin ?? DEFAULTS.cooldownMin,
+        intervalSec: s.intervalSec ?? DEFAULTS.intervalSec,
+      };
+    }
+  } catch { /* defaults */ }
+  return cache;
+}
+export function saveAlertConfig(body = {}) {
+  const cur = loadAlertConfig();
+  const next = {
+    channels: {
+      slack: { enabled: !!body.channels?.slack?.enabled, url: body.channels?.slack?.url ?? cur.channels.slack.url },
+      webhook: { enabled: !!body.channels?.webhook?.enabled, url: body.channels?.webhook?.url ?? cur.channels.webhook.url },
+    },
+    rules: { ...cur.rules, ...(body.rules || {}) },
+    cooldownMin: Math.max(1, Number(body.cooldownMin) || cur.cooldownMin),
+    intervalSec: Math.max(15, Number(body.intervalSec) || cur.intervalSec),
+  };
+  fs.mkdirSync(path.dirname(FILE), { recursive: true });
+  fs.writeFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
+  cache = next;
+  return next;
+}
+
+/** Evaluate rules against a snapshot → array of { key, severity, title, detail }. */
+export function evaluate(snap, cfg = loadAlertConfig()) {
+  const out = [];
+  const R = cfg.rules;
+  if (R.criticalAlarms?.enabled) {
+    for (const a of (snap.alarms || []).filter((x) => x.severity === 'critical').slice(0, 100)) {
+      out.push({ key: `alarm:${a.id || a.name}`, severity: 'critical', title: `위험 알람: ${a.name || a.entity || ''}`, detail: `${a.vcenterId || ''} ${a.entity || ''} ${a.status || ''}`.trim() });
+    }
+  }
+  if (R.vcenterDown?.enabled) {
+    for (const v of (snap.vcenters || []).filter((x) => x.status === 'unreachable')) {
+      out.push({ key: `vc:${v.id}`, severity: 'critical', title: `vCenter 수집 실패: ${v.name || v.id}`, detail: v.error || '연결 불가' });
+    }
+  }
+  if (R.hostDisconnected?.enabled) {
+    for (const h of (snap.hosts || []).filter((x) => x.connectionState === 'DISCONNECTED').slice(0, 100)) {
+      out.push({ key: `host:${h.id}`, severity: 'warning', title: `호스트 연결 끊김: ${h.name}`, detail: `${h.vcenterId} / ${h.cluster || ''}` });
+    }
+  }
+  if (R.datastorePct?.enabled) {
+    const th = Number(R.datastorePct.threshold) || 90;
+    for (const d of (snap.datastores || []).filter((x) => (x.usagePct || 0) >= th).slice(0, 200)) {
+      out.push({ key: `ds:${d.id}`, severity: d.usagePct >= 95 ? 'critical' : 'warning', title: `데이터스토어 용량 ${d.usagePct}%: ${d.name}`, detail: `${d.vcenterId} · 여유 ${d.freeGB}GB` });
+    }
+  }
+  if (R.ramOvercommitPct?.enabled || R.vcpuPerCore?.enabled) {
+    const byC = new Map();
+    for (const h of snap.hosts || []) {
+      const k = `${h.vcenterId} ${h.cluster || 'standalone'}`;
+      const c = byC.get(k) || { name: h.cluster || 'standalone', vc: h.vcenterId, cores: 0, memGB: 0, vcpu: 0, ramGB: 0 };
+      c.cores += h.cpuCores || 0; c.memGB += (h.memTotalMB || 0) / 1024; byC.set(k, c);
+    }
+    for (const v of snap.vms || []) {
+      if (v.powerState !== 'POWERED_ON' || v.template) continue;
+      const k = `${v.vcenterId} ${v.cluster || 'standalone'}`;
+      const c = byC.get(k); if (c) { c.vcpu += v.cpuCount || 0; c.ramGB += (v.memMB || 0) / 1024; }
+    }
+    for (const c of byC.values()) {
+      if (R.ramOvercommitPct?.enabled && c.memGB > 0) {
+        const pct = Math.round((c.ramGB / c.memGB) * 100);
+        if (pct >= (Number(R.ramOvercommitPct.threshold) || 120)) out.push({ key: `ramoc:${c.vc}:${c.name}`, severity: 'warning', title: `RAM 오버커밋 ${pct}%: ${c.name}`, detail: `${c.vc} · 할당 ${Math.round(c.ramGB)}/${Math.round(c.memGB)}GB` });
+      }
+      if (R.vcpuPerCore?.enabled && c.cores > 0) {
+        const ratio = Number((c.vcpu / c.cores).toFixed(1));
+        if (ratio >= (Number(R.vcpuPerCore.threshold) || 5)) out.push({ key: `vcpuoc:${c.vc}:${c.name}`, severity: 'warning', title: `vCPU:코어 ${ratio}:1: ${c.name}`, detail: `${c.vc} · vCPU ${c.vcpu}/코어 ${c.cores}` });
+      }
+    }
+  }
+  return out;
+}
+
+async function post(url, payload) {
+  return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: AbortSignal.timeout(10000) });
+}
+export async function notify(alert, cfg = loadAlertConfig()) {
+  const text = `[${alert.severity === 'critical' ? '🔴 위험' : '🟠 경고'}] ${alert.title}${alert.detail ? `\n${alert.detail}` : ''}`;
+  const results = [];
+  if (cfg.channels.slack?.enabled && cfg.channels.slack.url) {
+    try { const r = await post(cfg.channels.slack.url, { text }); results.push(`slack:${r.status}`); } catch (e) { results.push(`slack:err ${e.message}`); }
+  }
+  if (cfg.channels.webhook?.enabled && cfg.channels.webhook.url) {
+    try { const r = await post(cfg.channels.webhook.url, { source: 'vmware-portal', ...alert, text, at: new Date().toISOString() }); results.push(`webhook:${r.status}`); } catch (e) { results.push(`webhook:err ${e.message}`); }
+  }
+  return results;
+}
+
+// --- Engine state ---
+const firing = new Map();   // key -> { alert, since, lastNotified }
+const recent = [];          // recent notifications (in-memory, newest first)
+let timer = null;
+
+function pushRecent(entry) { recent.unshift(entry); if (recent.length > 200) recent.pop(); }
+
+async function tick() {
+  const cfg = loadAlertConfig();
+  if (!cfg.channels.slack?.enabled && !cfg.channels.webhook?.enabled) { // still track state for UI
+    refreshState(cfg, false);
+    return;
+  }
+  await refreshState(cfg, true);
+}
+
+async function refreshState(cfg, sendEnabled) {
+  let active = [];
+  try { active = evaluate(store.get(), cfg); } catch { active = []; }
+  const now = Date.now();
+  const cooldownMs = (cfg.cooldownMin || 60) * 60_000;
+  const seen = new Set();
+  for (const a of active) {
+    seen.add(a.key);
+    const prev = firing.get(a.key);
+    if (!prev) {
+      firing.set(a.key, { alert: a, since: now, lastNotified: 0 });
+    }
+    const st = firing.get(a.key);
+    st.alert = a;
+    if (sendEnabled && now - (st.lastNotified || 0) >= cooldownMs) {
+      st.lastNotified = now;
+      notify(a, cfg).then((res) => { pushRecent({ at: new Date().toISOString(), ...a, channels: res }); }).catch(() => {});
+    }
+  }
+  // resolve
+  for (const [key, st] of [...firing.entries()]) {
+    if (!seen.has(key)) { firing.delete(key); pushRecent({ at: new Date().toISOString(), key, title: `해소: ${st.alert.title}`, severity: 'resolved' }); }
+  }
+}
+
+export function alertStatus() {
+  const cfg = loadAlertConfig();
+  return {
+    config: cfg,
+    firing: [...firing.values()].map((s) => ({ ...s.alert, since: new Date(s.since).toISOString() })),
+    recent: recent.slice(0, 100),
+    engineOn: !!timer,
+  };
+}
+
+export function startAlertEngine() {
+  const cfg = loadAlertConfig();
+  const iv = Math.max(15, cfg.intervalSec || 60) * 1000;
+  setTimeout(() => tick().catch(() => {}), 8000).unref?.();
+  timer = setInterval(() => tick().catch(() => {}), iv);
+  timer.unref?.();
+  console.log(`[alerts] engine started (every ${Math.round(iv / 1000)}s)`);
+}
+
+/** Send a test notification to verify channel config. */
+export async function testAlert(user) {
+  const res = await notify({ key: 'test', severity: 'warning', title: '테스트 알림', detail: `${user || ''} · ${new Date().toLocaleString()}` });
+  logAudit({ user: user || 'unknown', action: '알림 테스트 발송', detail: res.join(', ') });
+  return { ok: res.some((r) => /:(2\d\d)/.test(r)) || res.length === 0, results: res };
+}

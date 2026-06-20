@@ -11,6 +11,7 @@ import AdSettings from './AdSettings.jsx';
 import LlmSettings from './LlmSettings.jsx';
 import UserAdmin from './UserAdmin.jsx';
 import Diagnostics from './Diagnostics.jsx';
+import Alerts2 from './Alerts2.jsx';
 import Audit from './Audit.jsx';
 import About from './About.jsx';
 
@@ -26,6 +27,7 @@ const SUB = [
   { k: 'users', label: '사용자 관리', C: UserAdmin },
   { k: 'auth-ad', label: '인증(AD)', C: AdSettings },
   { k: 'ai-search', label: 'AI 검색', C: LlmSettings },
+  { k: 'alerts', label: '알림', C: Alerts2 },
   { k: 'diagnostics', label: '진단·로그', C: Diagnostics },
   { k: 'audit', label: '감사 로그', C: Audit },
   { k: 'about', label: 'About', C: About },

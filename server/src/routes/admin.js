@@ -21,6 +21,7 @@ import {
 import { geocode } from '../vcenter/geocode.js';
 import { getOrder, saveOrder } from '../vcenter/order.js';
 import { listAudit } from '../audit.js';
+import { alertStatus, saveAlertConfig, testAlert } from '../alerts.js';
 import {
   listRegistry as listNsx, addManager as addNsx, updateManager as updateNsx,
   removeManager as removeNsx, testConnection as testNsx,
@@ -258,6 +259,11 @@ adminRouter.put('/vcenter-order', adminOnly, (req, res) => {
 adminRouter.get('/audit', adminOnly, (req, res) => {
   res.json(listAudit({ limit: req.query.limit, offset: req.query.offset, user: req.query.user, q: req.query.q }));
 });
+
+// Alerting: config + current firing/recent, save config, send a test notification.
+adminRouter.get('/alerts', adminOnly, (_req, res) => res.json(alertStatus()));
+adminRouter.put('/alerts', adminOnly, (req, res) => res.json({ ok: true, config: saveAlertConfig(req.body || {}) }));
+adminRouter.post('/alerts/test', adminOnly, async (req, res) => res.json(await testAlert(req.user?.username)));
 
 // --- VM 프로비저닝: 대량 생성 작업 시작 (관리자) ---
 adminRouter.post('/provision/jobs', adminOnly, (req, res) => {
