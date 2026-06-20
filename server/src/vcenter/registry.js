@@ -76,11 +76,19 @@ function normalize(body, existing = null) {
     if (g) { lat = g.lat; lon = g.lon; }
   }
 
+  // Per-vCenter collection tuning (for high-RTT / many-site environments).
+  const intRaw = body.pollIntervalSec ?? e.pollIntervalSec;
+  const toRaw = body.timeoutMs ?? e.timeoutMs;
+  const pollIntervalSec = intRaw != null && intRaw !== '' ? Math.max(0, Math.round(Number(intRaw) || 0)) : 0; // 0 = global default
+  const timeoutMs = toRaw != null && toRaw !== '' ? Math.max(0, Math.round(Number(toRaw) || 0)) : 0;          // 0 = 30s default
+  const enabled = body.enabled !== undefined ? body.enabled !== false : (e.enabled !== false);
+
   const entry = {
     id, name, host, username,
     // keep existing password if not provided / blank
     password: body.password ? String(body.password) : e.password || '',
     location: { city, country, region, lat, lon },
+    enabled, pollIntervalSec, timeoutMs,
   };
   return [entry, null];
 }

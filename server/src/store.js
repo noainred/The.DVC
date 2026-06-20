@@ -41,6 +41,8 @@ class Store {
     this.snapshot = emptySnapshot();
     this.lastError = null;
     this.timer = null;
+    this.vcCache = new Map(); // vcId -> { ok, data } | { ok:false, vc, err, at }
+    this.vcLast = new Map();  // vcId -> last collection attempt (ms)
   }
 
   async refresh() {
@@ -53,37 +55,61 @@ class Store {
       }
 
       const { vcenters } = loadVcenterConfig();
-      const results = await Promise.allSettled(vcenters.map((vc) => collectFromVCenter(vc)));
+      const now = Date.now();
+      const globalMs = config.pollIntervalMs;
 
+      // Collect only the vCenters whose own interval has elapsed (or never
+      // collected). High-RTT sites can use a longer pollIntervalSec so they
+      // don't get re-polled every base tick; disabled ones are skipped.
+      const due = vcenters.filter((vc) => {
+        if (vc.enabled === false) return false;
+        const last = this.vcLast.get(vc.id) || 0;
+        const intervalMs = vc.pollIntervalSec > 0 ? vc.pollIntervalSec * 1000 : globalMs;
+        return now - last >= intervalMs - 500;
+      });
+      const results = await Promise.allSettled(due.map((vc) => collectFromVCenter(vc)));
+      results.forEach((r, i) => {
+        const vc = due[i];
+        this.vcLast.set(vc.id, Date.now());
+        if (r.status === 'fulfilled') {
+          this.vcCache.set(vc.id, { ok: true, data: r.value });
+        } else {
+          const d = describeError(r.reason);
+          console.error(`[collect] ${vc.id} (${vc.name}) 연결 실패: ${d.message}${d.hint ? ` — ${d.hint}` : ''}`);
+          this.vcCache.set(vc.id, { ok: false, vc, err: d, at: Date.now() });
+        }
+      });
+      // Drop cache entries for vCenters that were removed from the registry.
+      const ids = new Set(vcenters.map((v) => v.id));
+      for (const id of [...this.vcCache.keys()]) if (!ids.has(id)) this.vcCache.delete(id);
+
+      // Rebuild the merged snapshot from cache every tick (cheap), so non-due
+      // vCenters keep serving their last-known data instead of disappearing.
       const merged = emptySnapshot();
       merged.source = dataSource;
       const mockFallback = dataSource === 'auto' ? generateSnapshot() : null;
-
-      results.forEach((r, i) => {
-        const vc = vcenters[i];
-        if (r.status === 'fulfilled') {
-          const s = r.value;
+      for (const vc of vcenters) {
+        if (vc.enabled === false) {
+          merged.vcenters.push({ id: vc.id, name: vc.name, location: vc.location, status: 'disabled' });
+          continue;
+        }
+        const c = this.vcCache.get(vc.id);
+        if (c?.ok) {
+          const s = c.data;
           merged.vcenters.push(s.vcenter);
           merged.hosts.push(...s.hosts);
           merged.vms.push(...s.vms);
           merged.datastores.push(...s.datastores);
           merged.networks.push(...s.networks);
           merged.alarms.push(...s.alarms);
+        } else if (c && !c.ok) {
+          merged.collectionErrors.push({ vcenterId: vc.id, name: vc.name, ...c.err, at: c.at, fallback: Boolean(mockFallback) });
+          if (mockFallback) pushSite(merged, mockFallback, vc.id);
+          else merged.vcenters.push({ id: vc.id, name: vc.name, location: vc.location, status: 'unreachable', error: c.err.message, hint: c.err.hint, code: c.err.code });
         } else {
-          const d = describeError(r.reason);
-          console.error(`[collect] ${vc.id} (${vc.name}) 연결 실패: ${d.message}${d.hint ? ` — ${d.hint}` : ''}`);
-          merged.collectionErrors.push({ vcenterId: vc.id, name: vc.name, ...d, at: Date.now(), fallback: Boolean(mockFallback) });
-          if (mockFallback) {
-            // auto mode: substitute mock data for this site so the portal stays whole
-            pushSite(merged, mockFallback, vc.id);
-          } else {
-            merged.vcenters.push({
-              id: vc.id, name: vc.name, location: vc.location,
-              status: 'unreachable', error: d.message, hint: d.hint, code: d.code,
-            });
-          }
+          merged.vcenters.push({ id: vc.id, name: vc.name, location: vc.location, status: 'pending' });
         }
-      });
+      }
 
       merged.generatedAt = new Date().toISOString();
       this.snapshot = withRollups(applyAlarmMutes(await overlayIdracPower(merged)));
