@@ -21,13 +21,26 @@ export default function RemoteAccess() {
   const [vmQuery, setVmQuery] = useState('');
   const [vmList, setVmList] = useState([]);
   const [vmSel, setVmSel] = useState(null); // selected VM (with its IPs)
+  const [proxies, setProxies] = useState([]);
+  const [editProxy, setEditProxy] = useState(null); // proxy object or {} for new
 
   const load = async () => {
     try { setData(await fetchJson('/remote/mappings')); setError(null); }
     catch (e) { setError(e.message); }
     fetchJson('/remote/config').then((r) => setCfg(r.config)).catch(() => setCfg(null)); // 403 for non-admin
+    fetchJson('/remote/proxies/full').then((r) => setProxies(r.proxies)).catch(() => setProxies([]));
   };
   useEffect(() => { load(); }, []);
+
+  const saveProxyForm = async (p) => {
+    const r = await postJson('/remote/proxies', p).catch((e) => ({ ok: false, reason: e.message }));
+    if (r.ok) { setEditProxy(null); await load(); flash(true, '프록시를 저장했습니다.'); } else flash(false, r.reason);
+  };
+  const removeProxyForm = async (p) => {
+    if (!window.confirm(`프록시 '${p.name}'을(를) 삭제할까요?`)) return;
+    await delJson(`/remote/proxies/${p.id}`).catch(() => {});
+    await load();
+  };
 
   if (error) return <ErrorBox message={error} />;
   if (!data) return <Loading />;
@@ -148,6 +161,37 @@ export default function RemoteAccess() {
 
       {isAdmin && (
         <div className="card" style={{ marginBottom: 14 }}>
+          <div className="flex between wrap" style={{ alignItems: 'center', marginBottom: 8 }}>
+            <b style={{ fontSize: 14 }}>vCenter별 프록시 할당</b>
+            <button className="login-btn" style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setEditProxy({ name: '', proxyHost: '', publicPortBase: 20000, vcenterIds: [], dataplane: { enabled: false, url: '', basePath: '/v3', username: '', password: '' }, deploy: { enabled: false, host: '', port: 22, username: '', password: '', haproxyConfigPath: '/etc/haproxy/haproxy.cfg', reloadCmd: 'systemctl reload haproxy', validateCmd: 'haproxy -c -f {file}' }, guacd: { host: '', port: 4822 } })}>+ 프록시 추가</button>
+          </div>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>법인(vCenter)별로 다른 프록시 서버를 지정합니다. VM 접속 시 해당 vCenter에 할당된 프록시를 자동 사용하며, 미할당 vCenter는 위 <b>기본 프록시</b>(Data Plane/SSH 배포 설정)를 씁니다.</div>
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>이름</th><th>프록시 주소</th><th>공개포트 시작</th><th>할당 vCenter</th><th>프로비저닝</th><th style={{ textAlign: 'right' }}>관리</th></tr></thead>
+              <tbody>
+                {proxies.length === 0 && <tr><td colSpan={6} className="center muted" style={{ padding: 20 }}>추가 프록시가 없습니다. (모두 기본 프록시 사용)</td></tr>}
+                {proxies.map((p) => (
+                  <tr key={p.id}>
+                    <td><b>{p.name}</b></td>
+                    <td>{p.proxyHost || '—'}</td>
+                    <td>{p.publicPortBase}</td>
+                    <td className="muted" style={{ fontSize: 12 }}>{(p.vcenterIds || []).join(', ') || '—'}</td>
+                    <td>{p.dataplane?.enabled ? <span className="badge green">Data Plane</span> : p.deploy?.enabled ? <span className="badge green">SSH</span> : <span className="badge gray">수동</span>}{p.guacd?.host ? <span className="badge blue" style={{ marginLeft: 4 }}>guacd</span> : null}</td>
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      <button className="logout-btn" style={{ padding: '6px 10px' }} onClick={() => setEditProxy(p)}>편집</button>{' '}
+                      <button className="logout-btn" style={{ padding: '6px 10px' }} onClick={() => removeProxyForm(p)}>삭제</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {isAdmin && (
+        <div className="card" style={{ marginBottom: 14 }}>
           <b style={{ fontSize: 14 }}>대상 추가 (SSH/RDP)</b>
           <div className="card" style={{ margin: '8px 0', padding: '10px 12px', background: 'rgba(255,255,255,.02)' }}>
             <div className="flex gap wrap" style={{ alignItems: 'flex-end' }}>
@@ -191,23 +235,24 @@ export default function RemoteAccess() {
         </div>
       )}
 
-      <div className="section-title" style={{ marginTop: 0 }}>접속 대상 {data.proxyHost && <span className="muted" style={{ fontSize: 12 }}>· 프록시 {data.proxyHost}</span>}</div>
+      <div className="section-title" style={{ marginTop: 0 }}>접속 대상</div>
       <div className="table-wrap">
         <table>
-          <thead><tr><th>이름</th><th>프로토콜</th><th>대상</th><th>공개 포트</th><th>상태</th><th style={{ textAlign: 'right' }}>접속</th></tr></thead>
+          <thead><tr><th>이름</th><th>프로토콜</th><th>대상</th><th>프록시</th><th>공개 포트</th><th>상태</th><th style={{ textAlign: 'right' }}>접속</th></tr></thead>
           <tbody>
-            {data.mappings.length === 0 && <tr><td colSpan={6} className="center muted" style={{ padding: 26 }}>등록된 대상이 없습니다.</td></tr>}
+            {data.mappings.length === 0 && <tr><td colSpan={7} className="center muted" style={{ padding: 26 }}>등록된 대상이 없습니다.</td></tr>}
             {data.mappings.map((m) => (
               <tr key={m.id}>
                 <td><b>{m.name}</b>{m.vcenterId && <span className="muted" style={{ fontSize: 11 }}> · {m.vcenterId}</span>}</td>
                 <td><span className="badge blue">{m.protocol.toUpperCase()}</span></td>
                 <td>{m.targetHost}:{m.targetPort}</td>
-                <td>{data.proxyHost ? `${data.proxyHost}:${m.publicPort}` : m.publicPort}</td>
+                <td className="muted" style={{ fontSize: 12 }}>{m.proxyName || '기본'}</td>
+                <td>{m.proxyHost ? `${m.proxyHost}:${m.publicPort}` : m.publicPort}</td>
                 <td><span className={`badge ${STATUS_BADGE[m.status] || 'gray'}`}>{m.status}</span></td>
                 <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                   {m.protocol === 'ssh'
                     ? <button className="login-btn" style={{ flex: 'none', padding: '6px 12px' }} onClick={() => setSsh(m)}>SSH 터미널</button>
-                    : (data.guacdConfigured
+                    : (m.guacdConfigured
                         ? <><button className="login-btn" style={{ flex: 'none', padding: '6px 12px' }} onClick={() => setRdp(m)}>웹 RDP</button>{' '}<button className="logout-btn" style={{ padding: '6px 10px' }} onClick={() => downloadRdp(m)}>.rdp</button></>
                         : <button className="login-btn" style={{ flex: 'none', padding: '6px 12px' }} onClick={() => downloadRdp(m)}>.rdp 다운로드</button>)}
                   {isAdmin && <> {' '}
@@ -228,7 +273,64 @@ export default function RemoteAccess() {
 
       {ssh && <SshTerminal mapping={ssh} onClose={() => setSsh(null)} />}
       {rdp && <RdpConsole mapping={rdp} onClose={() => setRdp(null)} />}
+      {editProxy && <ProxyEditor initial={editProxy} onSave={saveProxyForm} onClose={() => setEditProxy(null)} />}
     </>
+  );
+}
+
+function ProxyEditor({ initial, onSave, onClose }) {
+  const [p, setP] = useState({ ...initial, vcenterIdsText: (initial.vcenterIds || []).join(', ') });
+  const set = (k) => (e) => setP((s) => ({ ...s, [k]: e.target.value }));
+  const setSub = (grp, k) => (e) => setP((s) => ({ ...s, [grp]: { ...s[grp], [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value } }));
+  const submit = () => onSave({ ...p, publicPortBase: Number(p.publicPortBase) || 20000, vcenterIds: p.vcenterIdsText.split(',').map((x) => x.trim()).filter(Boolean) });
+
+  return (
+    <Modal title={initial.id ? `프록시 편집 — ${initial.name}` : '프록시 추가'} onClose={onClose} width={620}>
+      <div className="spec-grid">
+        <label>이름<input className="input" value={p.name} onChange={set('name')} placeholder="OC2-Proxy" /></label>
+        <label>프록시 공개주소<input className="input" value={p.proxyHost} onChange={set('proxyHost')} placeholder="proxy-oc2.dvc" /></label>
+        <label>공개포트 시작<input className="input" type="number" value={p.publicPortBase} onChange={set('publicPortBase')} /></label>
+        <label style={{ gridColumn: '1 / -1' }}>할당 vCenter ID (쉼표 구분)<input className="input" value={p.vcenterIdsText} onChange={set('vcenterIdsText')} placeholder="OC2, OC3" /></label>
+      </div>
+
+      <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,.08)' }}>
+        <label className="flex gap" style={{ alignItems: 'center', fontSize: 13, marginBottom: 6 }}>
+          <input type="checkbox" checked={!!p.dataplane?.enabled} onChange={setSub('dataplane', 'enabled')} /> <b>Data Plane API</b> 사용
+        </label>
+        <div className="spec-grid">
+          <label>URL<input className="input" value={p.dataplane?.url || ''} onChange={setSub('dataplane', 'url')} placeholder="http://proxy-oc2:5555" /></label>
+          <label>basePath<input className="input" value={p.dataplane?.basePath || '/v3'} onChange={setSub('dataplane', 'basePath')} /></label>
+          <label>사용자<input className="input" value={p.dataplane?.username || ''} onChange={setSub('dataplane', 'username')} /></label>
+          <label>비밀번호<input className="input" type="password" value={p.dataplane?.password || ''} onChange={setSub('dataplane', 'password')} placeholder="********" /></label>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,.08)' }}>
+        <label className="flex gap" style={{ alignItems: 'center', fontSize: 13, marginBottom: 6 }}>
+          <input type="checkbox" checked={!!p.deploy?.enabled} onChange={setSub('deploy', 'enabled')} /> <b>SSH 자동배포</b> 사용
+        </label>
+        <div className="spec-grid">
+          <label>SSH 호스트<input className="input" value={p.deploy?.host || ''} onChange={setSub('deploy', 'host')} /></label>
+          <label>포트<input className="input" type="number" value={p.deploy?.port || 22} onChange={setSub('deploy', 'port')} /></label>
+          <label>사용자<input className="input" value={p.deploy?.username || ''} onChange={setSub('deploy', 'username')} /></label>
+          <label>비밀번호<input className="input" type="password" value={p.deploy?.password || ''} onChange={setSub('deploy', 'password')} placeholder="********" /></label>
+          <label style={{ gridColumn: '1 / -1' }}>haproxy.cfg 경로<input className="input" value={p.deploy?.haproxyConfigPath || ''} onChange={setSub('deploy', 'haproxyConfigPath')} /></label>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,.08)' }}>
+        <b style={{ fontSize: 13 }}>guacd (RDP 웹콘솔, 선택)</b>
+        <div className="spec-grid" style={{ marginTop: 6 }}>
+          <label>guacd 호스트<input className="input" value={p.guacd?.host || ''} onChange={setSub('guacd', 'host')} /></label>
+          <label>포트<input className="input" type="number" value={p.guacd?.port || 4822} onChange={setSub('guacd', 'port')} /></label>
+        </div>
+      </div>
+
+      <div className="flex gap" style={{ marginTop: 14 }}>
+        <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} disabled={!p.name} onClick={submit}>저장</button>
+        <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={onClose}>취소</button>
+      </div>
+    </Modal>
   );
 }
 
