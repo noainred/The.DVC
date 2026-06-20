@@ -23,7 +23,7 @@ const TOOLS = [
   { k: 'nsx', icon: '🛡️', label: 'NSX 관리', desc: 'NSX 배포 현황 / 버전' },
   { k: 'hardware', icon: '🏷️', label: '벤더/모델 서머리', desc: '법인별 호스트 벤더·모델 수량' },
   { k: 'hba', icon: '🔌', label: 'HBA 카드 속도', desc: '호스트 FC/iSCSI 어댑터 속도' },
-  { k: 'gpu', icon: '🎮', label: 'GPU 인벤토리', desc: '호스트/모델별 GPU 종합' },
+  { k: 'gpu', icon: '🎮', label: 'GPU 인벤토리', desc: '호스트/모델별 GPU + 사용률 최근 5년 추이' },
   { k: 'shutdown', icon: '🛑', label: '긴급 ShutDown', desc: '비상 정지 (관리자 전용)', danger: true, disabled: true },
 ];
 
@@ -1150,27 +1150,99 @@ function Hba({ scope }) {
 
 function Gpu({ scope }) {
   const { loading, data, error } = useTool('/tools/gpu', scope ? { vcenterId: scope } : {});
+  const [view, setView] = useState('host'); // host | cluster | vc
+  const [hist, setHist] = useState(null);   // { level, key, days, points, synthesized }
+  const [days, setDays] = useState(7);
+  const openHist = async (level, key) => {
+    setHist({ level, key, loading: true });
+    const r = await fetchJson(`/tools/gpu/history?level=${level}&key=${encodeURIComponent(key)}&days=${days}`).catch(() => null);
+    setHist(r ? { ...r } : { error: true });
+  };
+  useEffect(() => { if (hist && hist.key) openHist(hist.level, hist.key); /* eslint-disable-next-line */ }, [days]);
   if (loading) return <Loading />;
   if (error) return <ErrorBox message={error} />;
-  const cols = [
-    { key: 'host', label: '호스트', render: (h) => <b>{h.host}</b> },
-    { key: 'vcenterId', label: 'vCenter', render: (h) => <span className="muted">{h.vcenterId}</span> },
+
+  // Aggregate current utilization by cluster / vCenter from per-host items.
+  const aggregate = (keyFn, labelFn) => {
+    const m = new Map();
+    for (const h of data.items) {
+      if (h.utilPct == null) continue;
+      const k = keyFn(h);
+      const g = m.get(k) || { key: k, name: labelFn(h), hosts: 0, sum: 0, max: 0, gpus: 0 };
+      g.hosts++; g.sum += h.utilPct; g.max = Math.max(g.max, h.utilPct); g.gpus += h.count; m.set(k, g);
+    }
+    return [...m.values()].map((g) => ({ key: g.key, name: g.name, sub: `${g.hosts} 호스트 · GPU ${g.gpus}`, avg: Math.round(g.sum / g.hosts), max: g.max, level: view }));
+  };
+
+  const hostRows = data.items.map((h) => ({
+    key: h.id, name: h.host, vcenterId: h.vcenterId, sub: `${h.vcenterId} / ${h.cluster || '-'} · ${h.model}`,
+    model: h.model, count: h.count, memGB: h.memGB, vgpu: h.vgpu, avg: h.utilPct, max: h.utilPct, util: h.utilPct, level: 'host',
+  }));
+  const rows = view === 'host' ? hostRows
+    : view === 'cluster' ? aggregate((h) => `${h.vcenterId}|${h.cluster || 'standalone'}`, (h) => `${h.vcenterId} / ${h.cluster || 'standalone'}`)
+      : aggregate((h) => h.vcenterId, (h) => h.vcenterId);
+
+  const hostCols = [
+    { key: 'name', label: '호스트', render: (r) => <button className="cell-link" onClick={() => openHist('host', r.key)}>{r.name}</button> },
+    { key: 'vcenterId', label: 'vCenter', render: (r) => <span className="muted">{r.vcenterId}</span> },
     { key: 'model', label: 'GPU 모델' },
     { key: 'count', label: '개수', align: 'right' },
-    { key: 'memGB', label: 'VRAM', align: 'right', render: (h) => `${h.memGB} GB` },
-    { key: 'utilPct', label: '사용률', render: (h) => (h.utilPct == null ? <span className="muted">—</span> : <UsageCell pct={h.utilPct} />) },
-    { key: 'vgpu', label: 'vGPU', sortValue: (h) => (h.vgpu ? 1 : 0), render: (h) => (h.vgpu ? <span className="badge green">vGPU</span> : <span className="badge gray">Passthrough</span>) },
+    { key: 'memGB', label: 'VRAM', align: 'right', render: (r) => `${r.memGB} GB` },
+    { key: 'util', label: '사용률', render: (r) => (r.util == null ? <span className="muted">—</span> : <UsageCell pct={r.util} />) },
+    { key: 'vgpu', label: 'vGPU', sortValue: (r) => (r.vgpu ? 1 : 0), render: (r) => (r.vgpu ? <span className="badge green">vGPU</span> : <span className="badge gray">Passthrough</span>) },
+    { key: 'hist', label: '추이', render: (r) => <button className="tab" onClick={() => openHist('host', r.key)}>5년 추이</button> },
   ];
+  const aggCols = [
+    { key: 'name', label: view === 'cluster' ? '클러스터' : '법인', render: (r) => <button className="cell-link" onClick={() => openHist(r.level, r.key)}>{r.name}</button> },
+    { key: 'sub', label: '구분', render: (r) => <span className="muted" style={{ fontSize: 12 }}>{r.sub}</span> },
+    { key: 'avg', label: '평균 사용률', render: (r) => <UsageCell pct={r.avg} /> },
+    { key: 'max', label: '최고 %', align: 'right', render: (r) => <b>{r.max}%</b> },
+    { key: 'hist', label: '추이', render: (r) => <button className="tab" onClick={() => openHist(r.level, r.key)}>5년 추이</button> },
+  ];
+
   return (
     <>
       <div className="kpis" style={{ marginBottom: 14 }}>
         <Card label="총 GPU" value={data.totalGpus} accent="var(--accent)" meta={`GPU 호스트 ${data.hostsWithGpu}`} />
         <Card label="평균 GPU 사용률" value={data.avgUtilPct == null ? '—' : `${data.avgUtilPct}%`} meta={data.utilReporting ? `${data.utilReporting} 호스트 보고` : '사용률 미보고'} />
-        {data.byModel.slice(0, 3).map((m) => <Card key={m.model} label={m.model} value={m.count} />)}
+        {data.byModel.slice(0, 2).map((m) => <Card key={m.model} label={m.model} value={m.count} />)}
       </div>
-      <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>※ GPU 사용률은 NVIDIA vGPU/GRID 드라이버가 설치돼 vSphere 성능 카운터를 보고하는 호스트만 표시됩니다.</div>
-      {data.items.length === 0 ? <div className="card"><span className="muted">GPU가 설치된 호스트가 없습니다.</span></div>
-        : <DataTable columns={cols} rows={data.items} initialSort={{ key: 'count', dir: 'desc' }} />}
+      <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>※ GPU 사용률은 NVIDIA vGPU/GRID 드라이버가 설치돼 vSphere 성능 카운터를 보고하는 호스트만 표시됩니다. 이름을 클릭하면 최근 5년 추이를 볼 수 있습니다.</div>
+      {data.items.length === 0 ? <div className="card"><span className="muted">GPU가 설치된 호스트가 없습니다.</span></div> : (
+        <>
+          <div className="flex gap" style={{ marginBottom: 8 }}>
+            {[['host', '호스트별'], ['cluster', '클러스터별'], ['vc', '법인별']].map(([k, l]) => (
+              <button key={k} className={view === k ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setView(k)}>{l}</button>
+            ))}
+          </div>
+          <DataTable columns={view === 'host' ? hostCols : aggCols} rows={rows} initialSort={{ key: view === 'host' ? 'count' : 'avg', dir: 'desc' }} />
+        </>
+      )}
+
+      {hist && (
+        <Modal title={`GPU 사용률 추이 — ${hist.key || ''}`} onClose={() => setHist(null)} width={760}>
+          <div className="flex gap" style={{ marginBottom: 10 }}>
+            {[[1, '1일'], [7, '1주'], [30, '1달'], [365, '1년'], [1830, '5년']].map(([d, l]) => (
+              <button key={d} className={days === d ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '6px 12px', fontSize: 12 }} onClick={() => setDays(d)}>{l}</button>
+            ))}
+            {hist.synthesized && <span className="badge amber" style={{ alignSelf: 'center' }}>데모 합성</span>}
+          </div>
+          {hist.loading ? <Loading /> : hist.error ? <ErrorBox message="이력을 불러오지 못했습니다." /> : (hist.points || []).length === 0
+            ? <div className="muted">해당 기간 데이터가 없습니다(수집 누적 후 표시).</div>
+            : (
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart data={(hist.points || []).map((p) => ({ t: new Date(p.ts).toLocaleDateString(), avg: p.avg, max: p.max }))}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.08)" />
+                  <XAxis dataKey="t" tick={{ fontSize: 11 }} minTickGap={40} />
+                  <YAxis tick={{ fontSize: 11 }} unit="%" domain={[0, 100]} />
+                  <Tooltip contentStyle={{ background: '#0b1220', border: '1px solid #243049', fontSize: 12 }} />
+                  <Line type="monotone" dataKey="avg" stroke="#a78bfa" dot={false} name="평균" />
+                  <Line type="monotone" dataKey="max" stroke="#f59e0b" dot={false} name="최고" />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
+        </Modal>
+      )}
     </>
   );
 }

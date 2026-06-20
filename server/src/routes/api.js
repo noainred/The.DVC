@@ -466,7 +466,7 @@ api.get('/tools/gpu', (req, res) => {
     const gpus = h.gpus || [];
     if (!gpus.length) continue;
     totalGpus += gpus.length;
-    hostsWithGpu.push({ host: h.name, vcenterId: h.vcenterId, cluster: h.cluster, count: gpus.length, model: gpus[0].model, memGB: gpus[0].memGB, vgpu: gpus[0].vgpuMode, utilPct: h.gpuUtilPct ?? null });
+    hostsWithGpu.push({ id: h.id, host: h.name, vcenterId: h.vcenterId, cluster: h.cluster, count: gpus.length, model: gpus[0].model, memGB: gpus[0].memGB, vgpu: gpus[0].vgpuMode, utilPct: h.gpuUtilPct ?? null });
     for (const g of gpus) {
       byModel[g.model] = (byModel[g.model] || 0) + 1;
       byVcenter[h.vcenterId] = (byVcenter[h.vcenterId] || 0) + 1;
@@ -482,6 +482,31 @@ api.get('/tools/gpu', (req, res) => {
     byVcenter: Object.entries(byVcenter).map(([vcenterId, count]) => ({ vcenterId, count })).sort((a, b) => b.count - a.count),
     items: hostsWithGpu.sort((a, b) => b.count - a.count),
   });
+});
+
+// GPU 사용률 히스토리(5년까지). level=host|cluster|vc, key=대상키, days=기간.
+api.get('/tools/gpu/history', async (req, res) => {
+  const level = ['host', 'cluster', 'vc'].includes(req.query.level) ? req.query.level : 'host';
+  const metric = { host: 'gpu_util', cluster: 'gpu_cluster', vc: 'gpu_vc' }[level];
+  const key = String(req.query.key || '');
+  const days = Math.max(1, Math.min(1830, Number(req.query.days) || 7));
+  const since = Date.now() - days * 86_400_000;
+  const bucketMs = days <= 2 ? 3_600_000 : days <= 14 ? 6 * 3_600_000 : days <= 120 ? 86_400_000 : days <= 800 ? 7 * 86_400_000 : 30 * 86_400_000;
+  let points = [];
+  try { const db = await getMetricsDb(); points = db.history(metric, key, since, bucketMs, 1000); } catch { points = []; }
+  let synthesized = false;
+  if (points.length < 2 && store.get().source === 'mock') {
+    // 데모: 일과 시간대·요일 부하를 반영한 0~100% 합성 시계열.
+    synthesized = true; points = [];
+    const base = 25 + (hash(key) % 30);
+    for (let t = since; t <= Date.now(); t += bucketMs) {
+      const day = t / 86_400_000;
+      let v = base + 22 * Math.abs(Math.sin(day / 9)) + 14 * Math.sin(day) + (hash(key + t) % 8);
+      v = Math.max(0, Math.min(100, v));
+      points.push({ ts: Math.floor(t), avg: Number(v.toFixed(1)), min: Number(Math.max(0, v - 12).toFixed(1)), max: Number(Math.min(100, v + 10).toFixed(1)) });
+    }
+  }
+  res.json({ level, key, days, bucketMs, unit: '%', synthesized, points });
 });
 
 // Capacity report — per-cluster compute capacity, allocation, overcommit, headroom.

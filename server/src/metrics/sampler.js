@@ -1,7 +1,7 @@
 /**
- * Metrics sampler — on an interval, snapshots host temperature (per host +
- * per-cluster/per-vCenter averages), datastore used GB, and GPU utilization
- * into the time-series DB. Enables 5-year history (온도) and capacity forecast.
+ * Metrics sampler — on an interval, snapshots host temperature and GPU
+ * utilization (per host + per-cluster/per-vCenter averages) and datastore used
+ * GB into the time-series DB. Enables 5-year history (온도/GPU) and capacity forecast.
  * Failures are isolated; sampling never blocks the event loop meaningfully.
  */
 
@@ -37,8 +37,18 @@ async function sampleOnce() {
   // Datastore used GB (for capacity forecast).
   for (const d of snap.datastores || []) if (d.usedGB != null) rows.push({ metric: 'ds_usedgb', k: d.id, v: d.usedGB });
 
-  // GPU utilization (only hosts reporting it).
-  for (const h of snap.hosts || []) if (h.gpuUtilPct != null) rows.push({ metric: 'gpu_util', k: h.id, v: h.gpuUtilPct });
+  // GPU utilization (only hosts reporting it) — per host + per-cluster/per-vCenter averages.
+  const gpuHosts = (snap.hosts || []).filter((h) => h.gpuUtilPct != null);
+  const gpuByCluster = new Map();
+  const gpuByVc = new Map();
+  for (const h of gpuHosts) {
+    rows.push({ metric: 'gpu_util', k: h.id, v: h.gpuUtilPct });
+    const ck = `${h.vcenterId}|${h.cluster || 'standalone'}`;
+    (gpuByCluster.get(ck) || gpuByCluster.set(ck, []).get(ck)).push(h.gpuUtilPct);
+    (gpuByVc.get(h.vcenterId) || gpuByVc.set(h.vcenterId, []).get(h.vcenterId)).push(h.gpuUtilPct);
+  }
+  for (const [k, arr] of gpuByCluster) rows.push({ metric: 'gpu_cluster', k, v: round1(avg(arr)) });
+  for (const [k, arr] of gpuByVc) rows.push({ metric: 'gpu_vc', k, v: round1(avg(arr)) });
 
   if (rows.length) { try { db.insertMany(rows, ts); } catch (e) { console.warn('[metrics] insert 실패:', e.message); } }
 
