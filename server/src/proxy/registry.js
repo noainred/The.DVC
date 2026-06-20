@@ -187,7 +187,7 @@ function nextPublicPort(proxyId, base) {
   return p;
 }
 
-export function addMapping({ name, vcenterId, protocol, targetHost, targetPort, publicPort, proxyId } = {}) {
+export function addMapping({ name, vcenterId, protocol, targetHost, targetPort, publicPort, proxyId, owner, ephemeral } = {}) {
   const c = load();
   protocol = protocol === 'rdp' ? 'rdp' : 'ssh';
   targetPort = Number(targetPort) || (protocol === 'rdp' ? 3389 : 22);
@@ -198,15 +198,30 @@ export function addMapping({ name, vcenterId, protocol, targetHost, targetPort, 
   if (c.mappings.some((m) => (m.proxyId || 'default') === pid && m.publicPort === publicPort)) {
     return { ok: false, reason: `프록시 '${proxy.name}'에서 공개 포트 ${publicPort} 가 이미 사용 중입니다.` };
   }
+  const now = new Date().toISOString();
   const m = {
     id: crypto.randomBytes(5).toString('hex'),
     name: name || `${protocol.toUpperCase()} ${targetHost}:${targetPort}`,
     vcenterId: vcenterId || '', proxyId: pid, protocol, targetHost, targetPort, publicPort,
-    createdAt: new Date().toISOString(), status: 'pending',
+    owner: owner || '', ephemeral: Boolean(ephemeral),
+    createdAt: now, lastUsedAt: now, status: 'pending',
   };
   c.mappings.push(m);
   persist();
   return { ok: true, mapping: m };
+}
+
+/** Bump a mapping's last-used time (resets the ephemeral expiry clock). */
+export function touchMapping(id) {
+  const m = getMapping(id);
+  if (m) { m.lastUsedAt = new Date().toISOString(); persist(); }
+}
+
+/** Mappings visible to a user: admins see all; others only their own. */
+export function listMappingsForUser(user) {
+  const all = load().mappings;
+  if (!user || user.role === 'admin') return all;
+  return all.filter((m) => !m.owner || m.owner === user.username);
 }
 
 export function removeMapping(id) {

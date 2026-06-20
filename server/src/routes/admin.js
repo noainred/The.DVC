@@ -5,6 +5,7 @@ import { requireRole, listUsers, createUser, updateUser, deleteUser, beginTotpEn
 import { store } from '../store.js';
 import { getDataSource, setDataSource, isDataSourceOverridden } from '../runtime-settings.js';
 import { ledgerInfo } from '../ipam/db.js';
+import { loadSettings as loadIpamSettings, saveSettings as saveIpamSettings } from '../ipam/settings.js';
 import { saveNote, deleteNote } from '../release-notes.js';
 import { loadLlmConfig, saveLlmConfig } from '../llm/config.js';
 import { ollamaTest } from '../llm/ollama.js';
@@ -176,6 +177,10 @@ adminRouter.delete('/release-notes/:version', adminOnly, (req, res) => {
 adminRouter.get('/ipam/db-info', adminOnly, async (_req, res) => {
   res.json(await ledgerInfo());
 });
+
+// IPMS settings: ignore IP ranges (global + per-vCenter) hidden from the ledger.
+adminRouter.get('/ipam/settings', adminOnly, (_req, res) => res.json({ settings: loadIpamSettings() }));
+adminRouter.put('/ipam/settings', adminOnly, (req, res) => res.json({ ok: true, settings: saveIpamSettings(req.body || {}) }));
 
 // Read the effective data source (UI override or env default).
 adminRouter.get('/data-source', adminOnly, (_req, res) => {

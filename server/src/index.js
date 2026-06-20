@@ -15,6 +15,7 @@ import { adminRouter } from './routes/admin.js';
 import { remoteRouter } from './routes/remote.js';
 import { attachSshGateway } from './proxy/sshGateway.js';
 import { attachRdpGateway } from './proxy/guacdTunnel.js';
+import { startMappingExpiry } from './proxy/expiry.js';
 import { collectorRouter } from './routes/collector.js';
 import { centralRouter } from './routes/central.js';
 import { startIdracPoller } from './idrac/poller.js';
@@ -82,3 +83,4 @@ const server = app.listen(config.port, () => {
 // Browser SSH/RDP consoles (WebSocket upgrades on /api/remote/ssh and /rdp).
 attachSshGateway(server);
 attachRdpGateway(server);
+startMappingExpiry(); // remove ephemeral quick-connect mappings 1 day after last use

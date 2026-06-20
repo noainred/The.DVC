@@ -131,7 +131,10 @@ export default function RemoteAccess() {
             {data.mappings.length === 0 && <tr><td colSpan={7} className="center muted" style={{ padding: 26 }}>등록된 대상이 없습니다.</td></tr>}
             {data.mappings.map((m) => (
               <tr key={m.id}>
-                <td><b>{m.name}</b>{m.vcenterId && <span className="muted" style={{ fontSize: 11 }}> · {m.vcenterId}</span>}</td>
+                <td><b>{m.name}</b>{m.vcenterId && <span className="muted" style={{ fontSize: 11 }}> · {m.vcenterId}</span>}
+                  {m.ephemeral && <span className="badge amber" style={{ marginLeft: 6, fontSize: 10 }} title="마지막 사용 후 1일 뒤 자동 삭제">임시</span>}
+                  {m.owner && <span className="muted" style={{ fontSize: 10, marginLeft: 4 }}>{m.owner}</span>}
+                </td>
                 <td><span className="badge blue">{m.protocol.toUpperCase()}</span></td>
                 <td>{m.targetHost}:{m.targetPort}</td>
                 <td className="muted" style={{ fontSize: 12 }}>{m.proxyName || '기본'}</td>
@@ -143,10 +146,8 @@ export default function RemoteAccess() {
                     : (m.guacdConfigured
                         ? <><button className="login-btn" style={{ flex: 'none', padding: '6px 12px' }} onClick={() => openRemoteSession({ kind: 'rdp', mapping: m })}>웹 RDP</button>{' '}<button className="logout-btn" style={{ padding: '6px 10px' }} onClick={() => downloadRdp(m)}>.rdp</button></>
                         : <button className="login-btn" style={{ flex: 'none', padding: '6px 12px' }} onClick={() => downloadRdp(m)}>.rdp 다운로드</button>)}
-                  {isAdmin && <> {' '}
-                    {m.status === 'error' && <button className="logout-btn" style={{ padding: '6px 10px' }} onClick={() => reapply(m)}>재적용</button>}
-                    {' '}<button className="logout-btn" style={{ padding: '6px 10px' }} onClick={() => remove(m)}>삭제</button>
-                  </>}
+                  {isAdmin && m.status === 'error' && <> {' '}<button className="logout-btn" style={{ padding: '6px 10px' }} onClick={() => reapply(m)}>재적용</button></>}
+                  {' '}<button className="logout-btn" style={{ padding: '6px 10px' }} onClick={() => remove(m)}>삭제</button>
                 </td>
               </tr>
             ))}
