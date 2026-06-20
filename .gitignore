@@ -26,3 +26,5 @@ server/config/auth.json
 server/config/runtime.json
 server/config/ipam.db
 server/config/ipam.ndjson
+server/config/remote-access.json
+server/config/release-notes.json

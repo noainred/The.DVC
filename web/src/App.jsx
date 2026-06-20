@@ -12,6 +12,7 @@ import Summary from './views/Summary.jsx';
 import Upgrade from './views/Upgrade.jsx';
 import Settings from './views/Settings.jsx';
 import SpecialTools from './views/SpecialTools.jsx';
+import ReleaseNotes from './views/ReleaseNotes.jsx';
 import Login from './views/Login.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 
@@ -104,6 +105,7 @@ function Portal({ user, onLogout }) {
   const [region, setRegion] = useState('');
   const [q, setQ] = useState('');
   const [menuFilter, setMenuFilter] = useState({}); // { [tabId]: value }
+  const [showNotes, setShowNotes] = useState(false);
 
   // Keep the URL hash in sync with the active tab, and follow back/forward.
   const setTab = (id) => { setTabState(id); window.location.hash = `#/${id}`; };
@@ -180,7 +182,7 @@ function Portal({ user, onLogout }) {
           <div className="logo" onClick={bumpEgg} style={{ cursor: 'pointer' }}>V</div>
           <div>
             <h1 className="brand-title">The Davinci<br />Virtual Platform</h1>
-            {health?.version && <span className="ver-badge brand-ver">v{health.version}</span>}
+            {health?.version && <span className="ver-badge brand-ver" style={{ cursor: 'pointer' }} title="릴리즈 노트 보기" onClick={() => setShowNotes(true)}>v{health.version}</span>}
             {health?.source && (
               <span className="ver-badge brand-ver" style={{
                 marginLeft: 6,
@@ -306,6 +308,8 @@ function Portal({ user, onLogout }) {
           </div>
         </div>
       )}
+
+      {showNotes && <ReleaseNotes isAdmin={user.role === 'admin'} onClose={() => setShowNotes(false)} />}
     </div>
   );
 }
