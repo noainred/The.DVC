@@ -29,3 +29,4 @@ server/config/ipam.ndjson
 server/config/remote-access.json
 server/config/release-notes.json
 server/config/agent-deploy-targets.json
+server/config/llm.json
