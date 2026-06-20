@@ -12,7 +12,7 @@ export function VmConsoleButton({ vmId, vmName }) {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <button className="tab" style={{ flex: 'none', padding: '8px 14px' }} onClick={() => setOpen(true)}>🖥️ 원격 콘솔</button>
+      <button className="logout-btn" style={{ padding: '8px 14px' }} onClick={() => setOpen(true)}>🖥️ 원격 콘솔</button>
       {open && <VmConsoleModal vmId={vmId} vmName={vmName} onClose={() => setOpen(false)} />}
     </>
   );
