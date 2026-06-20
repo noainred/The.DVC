@@ -87,7 +87,7 @@ export function VmRemoteButton({ item }) {
                   {ips.map((x) => <option key={x} value={x}>{x}</option>)}
                 </select>
               </label>
-              <label>포트(비우면 기본 {protocol === 'rdp' ? '3389' : '22'})
+              <label style={{ gridColumn: '1 / -1' }}>포트(비우면 기본 {protocol === 'rdp' ? '3389' : '22'})
                 <input className="input" type="number" value={port} onChange={(e) => setPort(e.target.value)} placeholder={protocol === 'rdp' ? '3389' : '22'} />
               </label>
               <label>사용자명
