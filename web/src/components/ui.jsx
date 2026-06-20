@@ -164,6 +164,13 @@ function DRow({ label, children }) {
 const gb = (mb) => `${Math.round((mb || 0) / 1024).toLocaleString()} GB`;
 const tb = (g) => (g >= 1024 ? `${(g / 1024).toFixed(1)} TB` : `${g} GB`);
 
+// Backing-storage category badge for a datastore (로컬/SAN/NAS/vSAN/vVol).
+const DS_KIND = { local: ['로컬 디스크', 'green'], san: ['SAN', 'blue'], nas: ['NAS', 'amber'], vsan: ['vSAN', 'purple'], vvol: ['vVol', 'amber'], other: ['기타', 'gray'] };
+function dsStorageLabel(item) {
+  const [label, cls] = DS_KIND[item.storageType] || DS_KIND.other;
+  return <span className={`badge ${cls}`}>{label}{item.ssd ? ' · SSD' : ''}</span>;
+}
+
 /** Detail popup for a host / VM / datastore. */
 export function EntityDetail({ type, item, onClose }) {
   const titles = { vm: 'VM', host: '호스트', datastore: '데이터스토어' };
@@ -215,7 +222,9 @@ export function EntityDetail({ type, item, onClose }) {
         {type === 'datastore' && (
           <>
             <DRow label="이름"><b>{item.name}</b></DRow>
+            <DRow label="스토리지">{dsStorageLabel(item)}</DRow>
             <DRow label="유형"><span className="badge blue">{item.type}</span></DRow>
+            {item.remoteHost && <DRow label="원격 호스트">{item.remoteHost}</DRow>}
             <DRow label="vCenter">{item.vcenterId}</DRow>
             <DRow label="총 용량">{tb(item.capacityGB)}</DRow>
             <DRow label="사용">{tb(item.usedGB)}</DRow>

@@ -150,11 +150,21 @@ function buildBaseline() {
     const nDs = Math.max(2, Math.round(site.hosts / 5));
     for (let d = 0; d < nDs; d++) {
       const type = pick(DS_TYPES);
-      const capacityGB = pick([2048, 4096, 8192, 16384, 32768, 65536]);
+      // Map the datastore type to a backing-storage category. A VMFS volume can be
+      // either an internal disk (로컬) or a shared block LUN (SAN); ~1 in 3 is local.
+      let storageType, remoteHost = '';
+      if (type === 'NFS') { storageType = 'nas'; remoteHost = `nas-${site.id.split('-').slice(1).join('')}.local`; }
+      else if (type === 'vSAN') storageType = 'vsan';
+      else storageType = (d % 3 === 0) ? 'local' : 'san';
+      const label = storageType === 'local' ? 'local' : storageType === 'san' ? 'san' : type.toLowerCase();
+      const capacityGB = storageType === 'local' ? pick([1024, 2048, 4096]) : pick([4096, 8192, 16384, 32768, 65536]);
       datastores.push({
         idx: d,
-        name: `${site.city.replace(/\s+/g, '').toLowerCase()}-ds-${type.toLowerCase()}-${d + 1}`,
+        name: `${site.city.replace(/\s+/g, '').toLowerCase()}-ds-${label}-${d + 1}`,
         type,
+        storageType,
+        remoteHost,
+        ssd: storageType === 'vsan' || (storageType === 'local' && d % 2 === 0),
         capacityGB,
       });
     }
@@ -341,6 +351,9 @@ export function generateSnapshot() {
         vcenterId: site.id,
         name: ds.name,
         type: ds.type,
+        storageType: ds.storageType,
+        remoteHost: ds.remoteHost,
+        ssd: ds.ssd,
         capacityGB: ds.capacityGB,
         freeGB,
         usedGB: ds.capacityGB - freeGB,
