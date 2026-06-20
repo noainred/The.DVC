@@ -302,6 +302,7 @@ export function generateSnapshot() {
         cluster: vm.host.cluster,
         name: vm.name,
         powerState: powered ? 'POWERED_ON' : 'POWERED_OFF',
+        template: vm.idx % 17 === 0, // ~6% are templates (always powered off)
         guestOS: vm.guestOS,
         cpuCount: vm.cpuCount,
         memMB: vm.memMB,

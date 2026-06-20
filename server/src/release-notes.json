@@ -1,6 +1,15 @@
 {
   "notes": [
     {
+      "version": "1.25.0",
+      "date": "2026-06-20",
+      "title": "OS별 합계 — 전원/VM·템플릿 필터",
+      "notes": [
+        "Summary의 OS별 자원 합계를 전원(전체/On/Off)·종류(VM+템플릿/VM/템플릿)로 필터",
+        "VM 템플릿 구분 수집(summary.config.template) + mock 반영"
+      ]
+    },
+    {
       "version": "1.24.0",
       "date": "2026-06-20",
       "title": "vCenter별 수집 주기·타임아웃 + SSH 접속 진행표시",

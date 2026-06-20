@@ -476,7 +476,7 @@ export async function collectFromVCenterSoap(vc) {
         'summary.quickStats.overallCpuUsage', 'summary.quickStats.overallMemoryUsage'] },
       { type: 'VirtualMachine', paths: [
         'name', 'runtime.host', 'parent', 'runtime.powerState', 'summary.config.numCpu', 'summary.config.memorySizeMB',
-        'summary.config.guestFullName', 'summary.quickStats.overallCpuUsage', 'summary.quickStats.guestMemoryUsage',
+        'summary.config.guestFullName', 'summary.config.template', 'summary.quickStats.overallCpuUsage', 'summary.quickStats.guestMemoryUsage',
         'summary.storage.committed', 'guest.ipAddress', 'guest.net', 'guest.toolsRunningStatus',
         'guest.toolsVersion', 'guest.toolsVersionStatus2', 'config.annotation', 'snapshot', 'layoutEx.file'] },
       { type: 'Datastore', paths: ['name', 'summary.type', 'summary.capacity', 'summary.freeSpace', 'summary.accessible'] },
@@ -576,6 +576,7 @@ export async function collectFromVCenterSoap(vc) {
         folder: folderPath(p.parent),
         name: p.name,
         powerState: powered ? 'POWERED_ON' : 'POWERED_OFF',
+        template: p['summary.config.template'] === 'true',
         guestOS: p['summary.config.guestFullName'] || 'unknown',
         cpuCount: numCpu,
         memMB,
