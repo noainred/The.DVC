@@ -80,22 +80,46 @@ function mergeDeploy(input = {}) {
   return dep;
 }
 
-// Create a mapping, then provision it on HAProxy via the Data Plane API.
-remoteRouter.post('/mappings', adminOnly, async (req, res) => {
-  const r = addMapping(req.body || {});
-  if (!r.ok) return res.status(400).json(r);
+// Provision a freshly-added mapping on the proxy (Data Plane or SSH deploy).
+async function provision(mapping) {
   const c = getConfig();
   if (c.dataplane?.enabled) {
-    try { await applyMapping(c.dataplane, r.mapping); setMappingStatus(r.mapping.id, 'active', null); }
-    catch (err) { setMappingStatus(r.mapping.id, 'error', err.message); }
+    try { await applyMapping(c.dataplane, mapping); setMappingStatus(mapping.id, 'active', null); }
+    catch (err) { setMappingStatus(mapping.id, 'error', err.message); }
   } else if (c.deploy?.enabled) {
     const d = await deployToProxy(c.deploy, listMappings(), { bindAddress: c.dataplane?.bindAddress || '*' });
     if (d.ok) for (const m of listMappings()) setMappingStatus(m.id, 'active', null);
-    else setMappingStatus(r.mapping.id, 'error', d.reason);
+    else setMappingStatus(mapping.id, 'error', d.reason);
   } else {
-    setMappingStatus(r.mapping.id, 'manual', 'Data Plane/SSH 배포 미사용 — HAProxy 수동 설정 필요');
+    setMappingStatus(mapping.id, 'manual', 'Data Plane/SSH 배포 미사용 — HAProxy 수동 설정 필요');
   }
+}
+
+// Create a mapping, then provision it on HAProxy.
+remoteRouter.post('/mappings', adminOnly, async (req, res) => {
+  const r = addMapping(req.body || {});
+  if (!r.ok) return res.status(400).json(r);
+  await provision(r.mapping);
   res.json({ ok: true, mapping: getMapping(r.mapping.id) });
+});
+
+// One-click connect from a VM detail: reuse an existing mapping for the same
+// target+port+protocol, else create+provision one. Any authenticated user.
+remoteRouter.post('/quick-connect', async (req, res) => {
+  const { protocol = 'ssh', targetHost, vcenterId, name } = req.body || {};
+  const proto = protocol === 'rdp' ? 'rdp' : 'ssh';
+  const targetPort = Number((req.body || {}).targetPort) || (proto === 'rdp' ? 3389 : 22);
+  if (!targetHost) return res.status(400).json({ ok: false, reason: '대상 IP가 필요합니다.' });
+
+  let m = listMappings().find((x) => x.targetHost === targetHost && Number(x.targetPort) === targetPort && x.protocol === proto);
+  if (!m) {
+    const r = addMapping({ name: name || `${proto.toUpperCase()} ${targetHost}`, vcenterId, protocol: proto, targetHost, targetPort });
+    if (!r.ok) return res.status(400).json(r);
+    await provision(r.mapping);
+    m = getMapping(r.mapping.id);
+  }
+  const c = getConfig();
+  res.json({ ok: true, mapping: m, proxyHost: c.proxyHost, guacdConfigured: !!c.guacd?.host });
 });
 
 // Re-apply (e.g. after fixing Data Plane settings).
