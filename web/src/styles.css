@@ -214,8 +214,8 @@ tbody tr:last-child td { border-bottom: none; }
 .top-val { font-size: 12px; font-weight: 600; min-width: 56px; text-align: right; }
 
 /* Spec search form */
-.spec-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
-.spec-grid label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-dim); font-weight: 600; }
+.spec-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; align-items: end; }
+.spec-grid label { display: flex; flex-direction: column; justify-content: flex-end; gap: 6px; font-size: 12px; color: var(--text-dim); font-weight: 600; }
 .spec-grid .input, .spec-grid .select { min-width: 0; width: 100%; }
 
 /* Login */

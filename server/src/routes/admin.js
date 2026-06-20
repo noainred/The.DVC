@@ -26,6 +26,7 @@ import {
 } from '../nsx/registry.js';
 import { nsxStore } from '../nsx/store.js';
 import { createJob as createProvisionJob } from '../provision/jobs.js';
+import { updateSaved, removeSaved } from '../provision/saved.js';
 import {
   listRegistry as listServers, addServer, updateServer, removeServer,
   testServer, importServers, parseCsv, bulkAddByIps, registerScanned,
@@ -256,6 +257,15 @@ adminRouter.put('/vcenter-order', adminOnly, (req, res) => {
 adminRouter.post('/provision/jobs', adminOnly, (req, res) => {
   const result = createProvisionJob(req.body || {}, { user: req.user });
   res.status(result.ok ? 201 : 400).json(result);
+});
+// 저장된 작업 메모/태그 수정·삭제 (관리자)
+adminRouter.put('/provision/saved/:id', adminOnly, (req, res) => {
+  const r = updateSaved(req.params.id, req.body || {});
+  res.status(r.ok ? 200 : 404).json(r);
+});
+adminRouter.delete('/provision/saved/:id', adminOnly, (req, res) => {
+  const r = removeSaved(req.params.id);
+  res.status(r.ok ? 200 : 404).json(r);
 });
 
 // --- NSX Manager registry (separate from vCenter; managed by NSX Manager) ---

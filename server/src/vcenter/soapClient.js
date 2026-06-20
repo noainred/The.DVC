@@ -689,3 +689,43 @@ export async function collectFromVCenterSoap(vc) {
     await c.logout();
   }
 }
+
+/**
+ * On-demand: read the real VM Folders and Resource Pools from one vCenter, for
+ * the VM provisioning placement pickers. Best-effort; throws on login failure.
+ * Returns { folders:[path...], resourcePools:[name...] }.
+ */
+export async function collectFoldersAndPools(vc) {
+  const c = new VimSoapClient(vc);
+  await c.login();
+  try {
+    const view = await c.createContainerView(['Folder', 'ResourcePool']);
+    const objs = await c.retrieveProperties(view, [
+      { type: 'Folder', paths: ['name', 'parent', 'childType'] },
+      { type: 'ResourcePool', paths: ['name', 'parent'] },
+    ]);
+    const folderByRef = new Map();
+    for (const o of objs) if (o.type === 'Folder') folderByRef.set(o.ref, { name: o.props.name, parent: o.props.parent, childType: o.props.childType || '' });
+    const path = (ref) => {
+      const parts = []; let cur = ref, guard = 0;
+      while (cur && folderByRef.has(cur) && guard++ < 32) {
+        const f = folderByRef.get(cur);
+        if (f.name && f.name !== 'vm' && f.name !== 'Datacenters') parts.unshift(f.name);
+        cur = f.parent;
+      }
+      return parts.length ? parts.join('/') : 'vm';
+    };
+    // Only folders that can hold VMs (childType includes VirtualMachine).
+    const folders = [...new Set(
+      [...folderByRef.entries()]
+        .filter(([, f]) => /VirtualMachine/.test(f.childType))
+        .map(([ref]) => path(ref)),
+    )].filter(Boolean).sort();
+    const resourcePools = [...new Set(
+      objs.filter((o) => o.type === 'ResourcePool').map((o) => o.props.name).filter(Boolean),
+    )].sort();
+    return { folders: folders.length ? folders : ['vm'], resourcePools: resourcePools.length ? resourcePools : ['Resources'] };
+  } finally {
+    await c.logout();
+  }
+}

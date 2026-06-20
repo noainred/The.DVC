@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { fetchJson, postJson, usePolling } from '../api.js';
-import { Loading, ErrorBox } from '../components/ui.jsx';
+import { fetchJson, postJson, putJson, delJson, usePolling } from '../api.js';
+import { Loading, ErrorBox, SearchBox } from '../components/ui.jsx';
 
 const chipStyle = { cursor: 'pointer', padding: '5px 12px', fontSize: 12, userSelect: 'none' };
 const chipActive = { border: '1px solid var(--accent,#6366f1)', color: '#c7d2fe', background: 'rgba(99,102,241,.15)' };
@@ -87,6 +87,32 @@ export default function VmProvision() {
       if (r.ok) { setJobId(r.job.id); setMsg({ ok: true, text: `작업 시작됨 — ${r.job.total}대 생성 중` }); }
       else setMsg({ ok: false, text: r.reason });
     } catch (e) { setMsg({ ok: false, text: e.message }); } finally { setBusy(false); }
+  };
+
+  // Reload a saved job's spec back into the form for reuse.
+  const loadSaved = (entry) => {
+    const sp = entry.spec || {};
+    const g = sp.guest || {};
+    const ipList = Array.isArray(g.ipList) ? g.ipList : [];
+    setForm({
+      ...structuredClone(EMPTY),
+      vcenterId: entry.vcenterId || '',
+      sourceId: sp.sourceId || entry.sourceId || '',
+      namePattern: sp.namePattern || 'vm-{n}',
+      count: sp.count || 0,
+      startIndex: sp.startIndex || 1,
+      pad: sp.pad || 0,
+      powerOn: sp.powerOn !== false,
+      placement: { ...EMPTY.placement, ...(sp.placement || {}) },
+      guest: {
+        ...EMPTY.guest, ...g,
+        ipAssign: ipList.length ? 'list' : 'sequential',
+        ipList: ipList.join('\n'),
+        dnsServers: Array.isArray(g.dnsServers) ? g.dnsServers.join(' ') : (g.dnsServers || ''),
+      },
+    });
+    setMsg({ ok: true, text: `저장된 작업 '${entry.name}'을(를) 불러왔습니다. 원본/대상을 확인 후 생성하세요.` });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const sel = sources.find((s) => s.id === form.sourceId);
@@ -180,10 +206,10 @@ export default function VmProvision() {
       <div className="card" style={{ marginBottom: 14 }}>
         <b style={{ fontSize: 14 }}>3. 이름 · 개수</b>
         <div className="spec-grid" style={{ marginTop: 8 }}>
-          <label>이름 패턴 (<code>{'{n}'}</code> = 일련번호)<input className="input" value={form.namePattern} onChange={setF('namePattern')} placeholder="web-{n}" /></label>
+          <label>이름 패턴 ({'{n}'}=번호)<input className="input" value={form.namePattern} onChange={setF('namePattern')} placeholder="web-{n}" /></label>
           <label>개수<input className="input" type="number" min="1" max="500" value={form.count} onChange={setF('count')} /></label>
           <label>시작 번호<input className="input" type="number" value={form.startIndex} onChange={setF('startIndex')} /></label>
-          <label>자릿수 채움(0=없음)<input className="input" type="number" min="0" value={form.pad} onChange={setF('pad')} placeholder="2 → 01,02" /></label>
+          <label>자릿수(0=없음)<input className="input" type="number" min="0" value={form.pad} onChange={setF('pad')} placeholder="2 → 01,02" /></label>
           <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }}>
             <input type="checkbox" checked={form.powerOn} onChange={(e) => setForm((f) => ({ ...f, powerOn: e.target.checked }))} /> 생성 후 전원 켜기
           </label>
@@ -262,6 +288,7 @@ export default function VmProvision() {
 
       <JobProgress jobId={jobId} />
       <RecentJobs onOpen={setJobId} activeId={jobId} />
+      <SavedJobs onLoad={loadSaved} vcenters={vcenters} reloadKey={jobId} />
     </>
   );
 }
@@ -328,6 +355,86 @@ function RecentJobs({ onOpen, activeId }) {
           </tbody>
         </table>
       </div>
+    </>
+  );
+}
+
+/** 저장된 작업: 모든 VM 생성 작업을 저장하고 vCenter별/전체·검색·10개+More·메모/TAG 편집·불러오기. */
+function SavedJobs({ onLoad, vcenters, reloadKey }) {
+  const [vc, setVc] = useState('');     // '' = 전체
+  const [limit, setLimit] = useState(10);
+  const [data, setData] = useState(null);
+  const [q, setQ] = useState('');
+  const [edit, setEdit] = useState(null); // { id, memo, tags }
+  const load = () => fetchJson(`/provision/saved?limit=${limit}${vc ? `&vcenterId=${encodeURIComponent(vc)}` : ''}`).then(setData).catch(() => setData({ total: 0, items: [], vcenters: [] }));
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [vc, limit, reloadKey]);
+  if (!data) return null;
+
+  const term = q.trim().toLowerCase();
+  const items = (data.items || []).filter((e) => !term || `${e.name} ${e.sourceName} ${e.memo} ${(e.tags || []).join(' ')}`.toLowerCase().includes(term));
+  const vcName = (id) => (vcenters || []).find((v) => v.id === id)?.name || id;
+
+  const saveEdit = async () => {
+    const r = await putJson(`/admin/provision/saved/${edit.id}`, { memo: edit.memo, tags: String(edit.tags).split(/[,\n]/).map((s) => s.trim()).filter(Boolean) }).catch(() => ({ ok: false }));
+    if (r.ok) { setEdit(null); load(); }
+  };
+  const del = async (e) => { if (!window.confirm(`저장된 작업 '${e.name}'을 삭제할까요?`)) return; await delJson(`/admin/provision/saved/${e.id}`).catch(() => {}); load(); };
+
+  return (
+    <>
+      <div className="section-title">저장된 작업 (재사용)</div>
+      <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 8 }}>
+        <span className={vc === '' ? 'login-btn' : 'logout-btn'} style={{ cursor: 'pointer', padding: '5px 12px', fontSize: 12, borderRadius: 6 }} onClick={() => { setVc(''); setLimit(10); }}>전체 ({data.vcenters ? '' : ''}{vc === '' ? data.total : ''})</span>
+        {(data.vcenters || []).map((id) => (
+          <span key={id} className={vc === id ? 'login-btn' : 'logout-btn'} style={{ cursor: 'pointer', padding: '5px 12px', fontSize: 12, borderRadius: 6 }} onClick={() => { setVc(id); setLimit(10); }}>{vcName(id)}</span>
+        ))}
+        <SearchBox className="input" style={{ maxWidth: 240 }} placeholder="이름/원본/메모/태그 검색" value={q} onChange={setQ} />
+        <span className="muted" style={{ fontSize: 12 }}>{vc ? `${vcName(vc)} · ` : '전체 · '}{data.total}건</span>
+      </div>
+      <div className="table-wrap" style={{ maxHeight: '44vh' }}>
+        <table>
+          <thead><tr><th>시작</th><th>이름 패턴</th><th>원본</th><th>vCenter</th><th>대수</th><th>메모 · 태그</th><th className="right">작업</th></tr></thead>
+          <tbody>
+            {items.length === 0 && <tr><td colSpan={7} className="center muted" style={{ padding: 20 }}>저장된 작업이 없습니다. VM을 생성하면 자동 저장됩니다.</td></tr>}
+            {items.map((e) => (
+              <tr key={e.id}>
+                <td className="muted" style={{ fontSize: 12 }}>{new Date(e.createdAt).toLocaleString()}</td>
+                <td><b>{e.name}</b></td>
+                <td className="muted">{e.sourceName || '—'}</td>
+                <td className="muted">{vcName(e.vcenterId)}</td>
+                <td>{e.count || (e.spec?.guest?.ipList?.length) || '—'}</td>
+                <td style={{ fontSize: 12 }}>
+                  {e.memo && <div style={{ marginBottom: 3 }}>{e.memo}</div>}
+                  {(e.tags || []).map((t) => <span key={t} className="badge blue" style={{ marginRight: 4, fontSize: 10 }}>{t}</span>)}
+                  <button className="tab" style={{ padding: '2px 8px', fontSize: 11, marginLeft: (e.tags || []).length ? 4 : 0 }} onClick={() => setEdit({ id: e.id, memo: e.memo || '', tags: (e.tags || []).join(', ') })}>{e.memo || (e.tags || []).length ? '✎' : '+ 메모'}</button>
+                </td>
+                <td className="right nowrap">
+                  <button className="login-btn" style={{ flex: 'none', padding: '5px 12px' }} onClick={() => onLoad(e)}>불러오기</button>{' '}
+                  <button className="tab" style={{ color: 'var(--red)' }} onClick={() => del(e)}>삭제</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {!q && data.total > (data.items || []).length && (
+        <div style={{ marginTop: 8, textAlign: 'center' }}>
+          <button className="logout-btn" style={{ padding: '8px 18px' }} onClick={() => setLimit((l) => l + 20)}>More — 지난 작업 더 보기 ({(data.items || []).length}/{data.total})</button>
+        </div>
+      )}
+      {edit && (
+        <div className="modal-overlay" onClick={(ev) => { if (ev.target === ev.currentTarget) setEdit(null); }}>
+          <div className="modal card" style={{ maxWidth: 460 }}>
+            <div className="flex between" style={{ marginBottom: 12 }}><b>메모 · 태그</b><button className="logout-btn" onClick={() => setEdit(null)}>닫기</button></div>
+            <label style={{ display: 'block', marginBottom: 10 }}>메모<textarea className="input" rows={3} value={edit.memo} onChange={(e) => setEdit({ ...edit, memo: e.target.value })} style={{ resize: 'vertical' }} /></label>
+            <label style={{ display: 'block' }}>태그(쉼표 구분)<input className="input" value={edit.tags} onChange={(e) => setEdit({ ...edit, tags: e.target.value })} placeholder="예: 운영, 정기" /></label>
+            <div className="flex gap" style={{ marginTop: 14 }}>
+              <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} onClick={saveEdit}>저장</button>
+              <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={() => setEdit(null)}>취소</button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
