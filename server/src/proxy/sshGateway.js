@@ -51,6 +51,15 @@ function handleConnection(ws) {
       ssh = new SSHClient();
       ssh.on('ready', () => {
         send({ type: 'status', text: '인증 성공. 셸을 엽니다…' });
+        // Fetch the remote hostname so the tab can be labelled by the actual server.
+        try {
+          ssh.exec('hostname', (e, hs) => {
+            if (e || !hs) return;
+            let out = '';
+            hs.on('data', (d) => { out += d.toString(); });
+            hs.on('close', () => { const h = out.trim().split(/\s+/)[0]; if (h) send({ type: 'hostname', name: h }); });
+          });
+        } catch { /* optional */ }
         ssh.shell({ term: 'xterm-256color', cols: msg.cols || 80, rows: msg.rows || 24 }, (err, s) => {
           if (err) { send({ type: 'status', text: `셸 오류: ${err.message}` }); return ws.close(); }
           stream = s;

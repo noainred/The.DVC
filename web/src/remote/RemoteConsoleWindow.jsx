@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { useRemoteWindow, closeRemoteSession, activateSession, setWin, closeAllSessions, newSessionLike, duplicateSession, setSessionCreds } from './sessions.js';
+import { useRemoteWindow, closeRemoteSession, activateSession, setWin, closeAllSessions, newSessionLike, duplicateSession, setSessionCreds, setSessionLabel } from './sessions.js';
 import { SshConsole, RdpConsole } from './RemoteConsole.jsx';
 
 /**
@@ -34,7 +34,7 @@ export function RemoteConsoleWindow() {
       <button onClick={() => setWin({ minimized: false })}
         style={{ position: 'fixed', left: 16, bottom: 16, zIndex: 300, padding: '10px 16px', borderRadius: 10,
           background: 'var(--accent, #2563eb)', color: '#fff', border: 'none', cursor: 'pointer', boxShadow: '0 6px 24px rgba(0,0,0,.4)', fontSize: 13 }}>
-        🖥️ 원격 콘솔 {sessions.length}개 — {active.mapping.name} (열기)
+        🖥️ 원격 콘솔 {sessions.length}개 — {active.label || active.mapping.name} (열기)
       </button>
     );
   }
@@ -83,7 +83,7 @@ export function RemoteConsoleWindow() {
               color: s.id === activeId ? 'var(--text)' : 'var(--text-faint, #94a3b8)',
               borderTop: s.id === activeId ? '2px solid var(--accent, #2563eb)' : '2px solid transparent' }}>
             <span className="badge blue" style={{ fontSize: 10, padding: '1px 5px' }}>{s.kind.toUpperCase()}</span>
-            {s.mapping.name}
+            {s.label || s.mapping.name}
             <span onClick={(e) => { e.stopPropagation(); openMenu(e.clientX, e.clientY, s.id); }} title="세션 메뉴 (New/Dup)" style={{ marginLeft: 2, padding: '0 4px', opacity: 0.75, fontWeight: 700 }}>▾</span>
             <span onClick={(e) => { e.stopPropagation(); closeRemoteSession(s.id); }} title="탭 닫기" style={{ opacity: 0.6 }}>✕</span>
           </div>
@@ -97,7 +97,7 @@ export function RemoteConsoleWindow() {
         {sessions.map((s) => (
           <div key={s.id} style={{ position: 'absolute', inset: 0, display: s.id === activeId ? 'block' : 'none' }}>
             {s.kind === 'ssh'
-              ? <SshConsole mapping={s.mapping} active={s.id === activeId} initialCreds={s.initialCreds} onCreds={(c) => setSessionCreds(s.id, c)} />
+              ? <SshConsole mapping={s.mapping} active={s.id === activeId} initialCreds={s.initialCreds} onCreds={(c) => setSessionCreds(s.id, c)} onHostname={(h) => setSessionLabel(s.id, h)} />
               : <RdpConsole mapping={s.mapping} active={s.id === activeId} initialCreds={s.initialCreds} onCreds={(c) => setSessionCreds(s.id, c)} />}
           </div>
         ))}

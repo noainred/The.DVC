@@ -8,7 +8,7 @@ import { getToken } from '../api.js';
 const SPIN = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
 /** Browser SSH console body (fills its container). Connects on credential submit. */
-export function SshConsole({ mapping, initialCreds, onCreds }) {
+export function SshConsole({ mapping, initialCreds, onCreds, onHostname }) {
   const elRef = useRef(null);
   const termRef = useRef(null);
   const wsRef = useRef(null);
@@ -52,7 +52,7 @@ export function SshConsole({ mapping, initialCreds, onCreds }) {
       ws.onopen = () => { setStatus('인증 중… (자격증명 전송)'); ws.send(JSON.stringify({ type: 'auth', mappingId: mapping.id, username: creds.username, password: creds.password, cols: term.cols, rows: term.rows })); };
       ws.onmessage = (e) => {
         const s = typeof e.data === 'string' ? e.data : '';
-        try { const j = JSON.parse(s); if (j && j.type === 'status') { setStatus(j.text); term.write(`\r\n\x1b[33m${j.text}\x1b[0m\r\n`); return; } } catch { /* raw */ }
+        try { const j = JSON.parse(s); if (j && j.type === 'hostname') { onHostname?.(j.name); return; } if (j && j.type === 'status') { setStatus(j.text); term.write(`\r\n\x1b[33m${j.text}\x1b[0m\r\n`); return; } } catch { /* raw */ }
         if (phaseRef.current !== 'live') { setPhase('live'); stopTimer(); }
         term.write(s);
       };
