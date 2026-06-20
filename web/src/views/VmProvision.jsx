@@ -14,7 +14,7 @@ const EMPTY = {
   vcenterId: '', sourceId: '',
   namePattern: 'vm-{n}', count: 3, startIndex: 1, pad: 2, powerOn: true,
   placement: { cluster: '', host: '', datastore: '', folder: '', resourcePool: '', storageProfile: '' },
-  guest: { hostnamePattern: 'vm-{n}', ipMode: 'static', ipStart: '', ipAssign: 'sequential', ipList: '', subnetMask: '255.255.255.0', gateway: '', dnsServers: '', domain: '' },
+  guest: { hostnamePattern: 'vm-{n}', ipMode: 'static', ipStart: '', ipAssign: 'sequential', ipList: '', subnetMask: '255.255.255.0', gateway: '', dnsServers: '', domain: '', extraNics: [] },
 };
 
 /** VM 생성 — 비슷한 VM을 한 번에 대량 생성 + 게스트 OS hostname/IP 설정. (관리자) */
@@ -67,8 +67,15 @@ export default function VmProvision() {
       dnsServers: String(form.guest.dnsServers || '').split(/[\s,]+/).filter(Boolean),
       // 'list' mode → send the explicit IPs; otherwise let the server auto-increment.
       ipList: form.guest.ipAssign === 'list' ? String(form.guest.ipList || '').split(/[\s,\n]+/).filter(Boolean) : [],
+      extraNics: (form.guest.extraNics || []).filter((e) => e.ipMode === 'dhcp' || e.ipStart),
     },
   }), [form]);
+
+  // Additional NIC helpers.
+  const addNic = () => setForm((f) => ({ ...f, guest: { ...f.guest, extraNics: [...(f.guest.extraNics || []), { ipMode: 'static', ipStart: '', subnetMask: '255.255.255.0', gateway: '', mac: '' }] } }));
+  const setNic = (idx, k, v) => setForm((f) => ({ ...f, guest: { ...f.guest, extraNics: f.guest.extraNics.map((e, i) => (i === idx ? { ...e, [k]: v } : e)) } }));
+  const delNic = (idx) => setForm((f) => ({ ...f, guest: { ...f.guest, extraNics: f.guest.extraNics.filter((_, i) => i !== idx) } }));
+  const [ipGuide, setIpGuide] = useState(false);
 
   const doPreview = async () => {
     setMsg(null);
@@ -217,7 +224,10 @@ export default function VmProvision() {
       </div>
 
       <div className="card" style={{ marginBottom: 14 }}>
-        <b style={{ fontSize: 14 }}>4. 게스트 OS 설정 (hostname · IP)</b>
+        <div className="flex between wrap" style={{ alignItems: 'center' }}>
+          <b style={{ fontSize: 14 }}>4. 게스트 OS 설정 (hostname · IP) — NIC1(기본)</b>
+          <button className="logout-btn" style={{ padding: '6px 12px', fontSize: 12 }} onClick={() => setIpGuide(true)}>ⓘ IP 입력 가이드</button>
+        </div>
         <div className="spec-grid" style={{ marginTop: 8 }}>
           <label>Hostname 패턴<input className="input" value={form.guest.hostnamePattern} onChange={setG('hostnamePattern')} placeholder="web-{n}" /></label>
           <label>IP 방식
@@ -255,7 +265,39 @@ export default function VmProvision() {
             : form.guest.ipAssign === 'list' ? '입력한 IP가 VM 순서대로 1:1 매핑됩니다. (대수보다 IP가 많으면 IP 수만큼 생성)'
             : '시작 IP에서 1씩 증가합니다 (예: 10.0.10.50, .51, .52 …).'}
         </div>
+
+        {/* 추가 NIC (NIC2+) — 순서 기준, 선택적 MAC */}
+        <div style={{ borderTop: '1px solid rgba(255,255,255,.08)', marginTop: 12, paddingTop: 10 }}>
+          <div className="flex between wrap" style={{ alignItems: 'center', marginBottom: 6 }}>
+            <b style={{ fontSize: 13 }}>추가 NIC ({(form.guest.extraNics || []).length})</b>
+            <button className="logout-btn" style={{ padding: '6px 12px', fontSize: 12 }} onClick={addNic}>+ NIC 추가</button>
+          </div>
+          <div className="muted" style={{ fontSize: 11, marginBottom: 8 }}>
+            NIC는 <b>가상 NIC 순서</b>대로 적용됩니다(NIC1=기본, 아래가 NIC2, NIC3 …). MAC을 입력하면 그 MAC의 NIC에 바인딩됩니다(보통 1대 생성 시에만 유효). 게스트 인터페이스 이름(ens192 등) 기준 지정은 vSphere가 지원하지 않습니다.
+          </div>
+          {(form.guest.extraNics || []).map((e, i) => (
+            <div key={i} className="card" style={{ padding: '8px 10px', marginBottom: 6, background: 'rgba(255,255,255,.02)' }}>
+              <div className="flex gap wrap" style={{ alignItems: 'flex-end' }}>
+                <span className="badge blue" style={{ alignSelf: 'center' }}>NIC{i + 2}</span>
+                <label style={{ fontSize: 12 }}>IP 방식
+                  <select className="select" value={e.ipMode} onChange={(ev) => setNic(i, 'ipMode', ev.target.value)}>
+                    <option value="static">고정 IP</option><option value="dhcp">DHCP</option>
+                  </select>
+                </label>
+                {e.ipMode === 'static' && <>
+                  <label style={{ fontSize: 12 }}>시작 IP<input className="input" value={e.ipStart} onChange={(ev) => setNic(i, 'ipStart', ev.target.value)} placeholder="10.20.0.50" /></label>
+                  <label style={{ fontSize: 12 }}>서브넷<input className="input" value={e.subnetMask} onChange={(ev) => setNic(i, 'subnetMask', ev.target.value)} placeholder="255.255.255.0" /></label>
+                  <label style={{ fontSize: 12 }}>게이트웨이<input className="input" value={e.gateway} onChange={(ev) => setNic(i, 'gateway', ev.target.value)} placeholder="(선택)" /></label>
+                </>}
+                <label style={{ fontSize: 12 }}>MAC(선택)<input className="input" value={e.mac} onChange={(ev) => setNic(i, 'mac', ev.target.value)} placeholder="00:50:56:.." /></label>
+                <button className="tab" style={{ color: 'var(--red)', padding: '7px 10px' }} onClick={() => delNic(i)}>삭제</button>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
+
+      {ipGuide && <IpGuideModal onClose={() => setIpGuide(false)} />}
 
       {msg && (
         <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 8, fontSize: 13,
@@ -436,5 +478,36 @@ function SavedJobs({ onLoad, vcenters, reloadKey }) {
         </div>
       )}
     </>
+  );
+}
+
+/** IP 입력 상세 가이드 — 순차/직접입력/다중 NIC 규칙 + vSphere 한계 정직 안내. */
+function IpGuideModal({ onClose }) {
+  const H = ({ children }) => <div style={{ fontWeight: 800, fontSize: 13, margin: '12px 0 4px', color: '#c7d2fe' }}>{children}</div>;
+  const code = { fontFamily: 'monospace', background: 'rgba(255,255,255,.06)', padding: '1px 5px', borderRadius: 4 };
+  return (
+    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="modal card" style={{ maxWidth: 640, maxHeight: '88vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div className="flex between" style={{ marginBottom: 8, flex: '0 0 auto' }}>
+          <b style={{ fontSize: 15 }}>ⓘ IP 입력 가이드</b>
+          <button className="logout-btn" onClick={onClose}>닫기</button>
+        </div>
+        <div style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', fontSize: 13, lineHeight: 1.7 }}>
+          <H>1) 고정 IP — 순차 증가</H>
+          <div className="muted">시작 IP에서 VM마다 +1씩 자동 증가합니다. 예) 시작 <span style={code}>10.0.10.50</span> · 3대 → <span style={code}>.50 / .51 / .52</span>. 서브넷 마스크·게이트웨이·DNS·도메인은 모든 VM 공통.</div>
+          <H>2) 고정 IP — 직접 입력(떨어진 IP)</H>
+          <div className="muted">연속되지 않은 IP가 필요할 때, <b>한 줄에 하나</b>씩 입력하면 VM 순서대로 1:1 매핑됩니다. 입력한 IP 개수만큼 생성됩니다(개수 자동).<br /><span style={code}>10.0.10.50</span> · <span style={code}>10.0.20.17</span> · <span style={code}>172.16.8.200</span></div>
+          <H>3) DHCP</H>
+          <div className="muted">IP를 비우고 DHCP를 선택하면 게스트가 부팅 후 DHCP로 주소를 받습니다. (마스크/게이트웨이 입력 불필요)</div>
+          <H>4) 다중 NIC (NIC2, NIC3 …)</H>
+          <div className="muted">‘추가 NIC’로 NIC를 더하면 각 NIC에 별도 IP 대역을 줄 수 있습니다. 적용 기준은 <b>가상 NIC의 순서</b>입니다 — 위에서부터 NIC1, NIC2 … 순으로 매핑됩니다. 각 NIC도 순차 증가 또는 DHCP를 선택할 수 있습니다.</div>
+          <H>5) MAC 바인딩(선택) · 인터페이스 이름에 대한 사실</H>
+          <div className="muted">MAC을 입력하면 그 MAC을 가진 NIC에 설정을 바인딩합니다. 다만 클론으로 <b>여러 대</b>를 만들면 각 VM의 MAC이 새로 생성되므로 MAC 바인딩은 보통 <b>1대 생성</b> 시에만 의미가 있습니다.<br />
+            <b style={{ color: 'var(--amber)' }}>중요:</b> vSphere 게스트 커스터마이징은 <b>게스트 인터페이스 이름(ens192 / eth0 / Ethernet0)으로 IP를 지정하는 기능이 없습니다.</b> ‘순서(또는 MAC)’ 기준만 지원하며, 인터페이스 이름은 게스트 OS가 부팅하면서 정합니다.</div>
+          <H>6) 적용 조건(실동작)</H>
+          <div className="muted">고정 IP 적용에는 원본 템플릿에 <b>VMware Tools</b>와 게스트 커스터마이징 지원(Linux: perl/cloud-init, Windows: Sysprep)이 필요합니다. 누락 시 IP가 적용되지 않을 수 있습니다. 라이브 적용은 운영 vCenter에서 먼저 1대로 검증을 권장합니다.</div>
+        </div>
+      </div>
+    </div>
   );
 }

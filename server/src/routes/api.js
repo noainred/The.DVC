@@ -461,6 +461,33 @@ api.get('/tools/gpu', (req, res) => {
   });
 });
 
+// Guest OS distribution — VM counts grouped by Guest OS (종류·버전), optionally
+// per vCenter. Family rollup + full-name detail; power(on/off) split.
+api.get('/tools/guest-os', (req, res) => {
+  const snap = store.get();
+  let vms = snap.vms;
+  if (req.query.vcenterId) vms = vms.filter((v) => v.vcenterId === req.query.vcenterId);
+  const byName = new Map();
+  const byFamily = new Map();
+  for (const v of vms) {
+    const name = (v.guestOS || '미상').trim() || '미상';
+    const on = v.powerState === 'POWERED_ON';
+    const n = byName.get(name) || { os: name, family: osFamily(v.guestOS), total: 0, on: 0, off: 0 };
+    n.total++; if (on) n.on++; else n.off++;
+    byName.set(name, n);
+    const fam = osFamily(v.guestOS);
+    const f = byFamily.get(fam) || { family: fam, total: 0, on: 0 };
+    f.total++; if (on) f.on++;
+    byFamily.set(fam, f);
+  }
+  res.json({
+    total: vms.length,
+    distinctOs: byName.size,
+    families: [...byFamily.values()].sort((a, b) => b.total - a.total),
+    items: [...byName.values()].sort((a, b) => b.total - a.total),
+  });
+});
+
 // Host HBA adapters and their link speeds (optionally per vCenter).
 api.get('/tools/hba', (req, res) => {
   const snap = store.get();

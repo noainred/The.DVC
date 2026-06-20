@@ -71,13 +71,30 @@ export function expandSpec(spec = {}) {
     if (ipBase == null) errors.push(`잘못된 시작 IP: ${guest.ipStart}`);
   }
 
+  // Additional NICs (NIC2, NIC3 …) applied IN ORDER (vSphere maps nicSettingMap
+  // to the VM's virtual NICs positionally; optional MAC binds a specific NIC).
+  const extraNics = (Array.isArray(guest.extraNics) ? guest.extraNics : []).map((e, idx) => {
+    const edhcp = e.ipMode === 'dhcp';
+    let base = null;
+    if (!edhcp && e.ipStart) { base = ipToNum(e.ipStart); if (base == null) errors.push(`NIC${idx + 2} 잘못된 시작 IP: ${e.ipStart}`); }
+    return { edhcp, base, subnetMask: e.subnetMask || '', gateway: e.gateway || '', mac: String(e.mac || '').trim() };
+  });
+
   const vms = [];
   for (let i = 0; i < count; i++) {
     const n = start + i;
     const name = applyPattern(spec.namePattern, n, pad);
     const hostname = guest.hostnamePattern ? applyPattern(guest.hostnamePattern, n, pad) : name;
     const ip = dhcp ? '' : (useList ? (ipList[i] || '') : (ipBase != null ? numToIp(ipBase + i) : ''));
-    vms.push({ name, hostname, ip });
+    const nics = [{ dhcp, ip, subnetMask: guest.subnetMask || '', gateway: guest.gateway || '', mac: '' }];
+    for (const e of extraNics) {
+      nics.push({
+        dhcp: e.edhcp,
+        ip: e.edhcp ? '' : (e.base != null ? numToIp(e.base + i) : ''),
+        subnetMask: e.subnetMask, gateway: e.gateway, mac: e.mac,
+      });
+    }
+    vms.push({ name, hostname, ip, nics });
   }
   const names = vms.map((v) => v.name);
   if (new Set(names).size !== names.length) errors.push('이름 패턴이 중복을 만듭니다. {n} 을(를) 포함했는지 확인하세요.');
