@@ -53,6 +53,7 @@ export async function sendJson(path, method, body = {}) {
   return data;
 }
 export const putJson = (path, body) => sendJson(path, 'PUT', body);
+export const patchJson = (path, body) => sendJson(path, 'PATCH', body);
 export const delJson = (path) => sendJson(path, 'DELETE');
 
 export async function login(username, password) {

@@ -123,6 +123,8 @@ export const config = {
     tokenTtl: process.env.AUTH_TOKEN_TTL || '8h',
     // Default seed admin password when no users.json exists (demo convenience).
     defaultAdminPassword: process.env.DEFAULT_ADMIN_PASSWORD || 'admin123',
+    // Issuer label shown in Google Authenticator when enrolling TOTP.
+    totpIssuer: process.env.TOTP_ISSUER || 'VMware Portal',
   },
   upgrade: {
     // Opt-in: the whole feature is OFF unless explicitly enabled.

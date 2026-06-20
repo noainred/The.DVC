@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import fs from 'node:fs';
 import { config } from '../config.js';
-import { requireRole } from '../auth/auth.js';
+import { requireRole, listUsers, createUser, updateUser, deleteUser, beginTotpEnroll, confirmTotpEnroll, disableTotp } from '../auth/auth.js';
 import { store } from '../store.js';
 import { getDataSource, setDataSource, isDataSourceOverridden } from '../runtime-settings.js';
 import { ledgerInfo } from '../ipam/db.js';
@@ -46,6 +46,40 @@ adminRouter.get('/status', adminOnly, (_req, res) => {
     vcenters: snap.vcenters.length,
     collectionErrors: snap.collectionErrors || [],
   });
+});
+
+// --- User management (admin) ---
+adminRouter.get('/users', adminOnly, (_req, res) => res.json({ users: listUsers() }));
+
+adminRouter.post('/users', adminOnly, (req, res) => {
+  const r = createUser(req.body || {});
+  res.status(r.ok ? 200 : 400).json(r);
+});
+
+adminRouter.patch('/users/:username', adminOnly, (req, res) => {
+  const r = updateUser(req.params.username, req.body || {});
+  res.status(r.ok ? 200 : 400).json(r);
+});
+
+adminRouter.delete('/users/:username', adminOnly, (req, res) => {
+  if (req.params.username === req.user.username) return res.status(400).json({ ok: false, reason: '자기 자신은 삭제할 수 없습니다.' });
+  const r = deleteUser(req.params.username);
+  res.status(r.ok ? 200 : 400).json(r);
+});
+
+// TOTP (Google Authenticator) management for a user — admin enrolls and hands
+// the QR to the user (since OTP-only users have no password to self-enroll).
+adminRouter.post('/users/:username/totp/begin', adminOnly, (req, res) => {
+  const r = beginTotpEnroll(req.params.username);
+  res.status(r.ok ? 200 : 400).json(r);
+});
+adminRouter.post('/users/:username/totp/confirm', adminOnly, (req, res) => {
+  const r = confirmTotpEnroll(req.params.username, (req.body || {}).code);
+  res.status(r.ok ? 200 : 400).json(r);
+});
+adminRouter.post('/users/:username/totp/disable', adminOnly, (req, res) => {
+  const r = disableTotp(req.params.username, req.body || {});
+  res.status(r.ok ? 200 : 400).json(r);
 });
 
 // Shareable IP ledger DB location + record count (for other-program integration).
