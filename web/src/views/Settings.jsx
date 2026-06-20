@@ -11,6 +11,7 @@ import AdSettings from './AdSettings.jsx';
 import LlmSettings from './LlmSettings.jsx';
 import UserAdmin from './UserAdmin.jsx';
 import Diagnostics from './Diagnostics.jsx';
+import About from './About.jsx';
 
 const SUB = [
   { k: 'vcenter-admin', label: 'vCenter 관리', C: VCenterAdmin },
@@ -25,6 +26,7 @@ const SUB = [
   { k: 'auth-ad', label: '인증(AD)', C: AdSettings },
   { k: 'ai-search', label: 'AI 검색', C: LlmSettings },
   { k: 'diagnostics', label: '진단·로그', C: Diagnostics },
+  { k: 'about', label: 'About', C: About },
 ];
 
 /** 설정 — 관리자용 하위 메뉴(vCenter 관리/전력 수집/수집 서버/에이전트 작업/진단). */
