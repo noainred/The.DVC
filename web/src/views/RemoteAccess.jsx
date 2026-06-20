@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { openRemoteSession } from '../remote/sessions.js';
 import { fetchJson, postJson, delJson, getToken, usePolling } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
+import { ProxyEditor } from './ProxySettings.jsx';
 
 const PROTOCOLS = [['ssh', 'SSH'], ['rdp', 'RDP']];
 const STATUS_BADGE = { active: 'green', manual: 'amber', pending: 'gray', error: 'red' };
@@ -16,14 +17,26 @@ export default function RemoteAccess() {
   const [vmQuery, setVmQuery] = useState('');
   const [vmList, setVmList] = useState([]);
   const [vmSel, setVmSel] = useState(null);
+  const [proxies, setProxies] = useState([]);
+  const [editProxy, setEditProxy] = useState(null);
   const { data: vcList } = usePolling('/vcenters', {}, 60_000);
 
   const load = async () => {
     try { setData(await fetchJson('/remote/mappings')); setError(null); }
     catch (e) { setError(e.message); }
     fetchJson('/remote/config').then(() => setIsAdmin(true)).catch(() => setIsAdmin(false)); // 403 for non-admin
+    fetchJson('/remote/proxies/full').then((p) => setProxies(p.proxies || [])).catch(() => setProxies([]));
   };
   useEffect(() => { load(); }, []);
+
+  const saveProxy = async (p) => {
+    const r = await postJson('/remote/proxies', p).catch((e) => ({ ok: false, reason: e.message }));
+    if (r.ok) { setEditProxy(null); await load(); flash(true, '중계 서버를 저장했습니다.'); } else flash(false, r.reason);
+  };
+  const removeProxy = async (p) => {
+    if (!window.confirm(`중계 서버 '${p.name}'을(를) 삭제할까요?`)) return;
+    await delJson(`/remote/proxies/${p.id}`).catch(() => {}); await load();
+  };
 
   if (error) return <ErrorBox message={error} />;
   if (!data) return <Loading />;
@@ -123,6 +136,38 @@ export default function RemoteAccess() {
         </div>
       )}
 
+      {isAdmin && (
+        <div className="card" style={{ marginBottom: 14 }}>
+          <div className="flex between wrap" style={{ alignItems: 'center', marginBottom: 6 }}>
+            <b style={{ fontSize: 14 }}>중계 서버(프록시) 목록</b>
+            <button className="login-btn" style={{ flex: 'none', padding: '7px 14px' }}
+              onClick={() => setEditProxy({ name: '', proxyHost: '', publicPortBase: 20000, vcenterIds: [], dataplane: { enabled: false, url: '', basePath: '/v3', username: '', password: '' }, deploy: { enabled: false, host: '', port: 22, username: '', password: '', haproxyConfigPath: '/etc/haproxy/haproxy.cfg', reloadCmd: 'systemctl reload haproxy', validateCmd: 'haproxy -c -f {file}' }, guacd: { host: '', port: 4822 } })}>+ 중계 서버 추가</button>
+          </div>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>현재 설정된 중계 서버(HAProxy)입니다. 자세한 구성은 설정 → 중계 서버에서도 가능합니다.</div>
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>이름</th><th>프록시 주소</th><th>공개포트 시작</th><th>할당 vCenter</th><th>프로비저닝</th><th style={{ textAlign: 'right' }}>관리</th></tr></thead>
+              <tbody>
+                {proxies.length === 0 && <tr><td colSpan={6} className="center muted" style={{ padding: 18 }}>추가 중계 서버가 없습니다. (모두 기본 프록시 사용)</td></tr>}
+                {proxies.map((p) => (
+                  <tr key={p.id}>
+                    <td><b>{p.name}</b></td>
+                    <td>{p.proxyHost || '—'}</td>
+                    <td>{p.publicPortBase}</td>
+                    <td className="muted" style={{ fontSize: 12 }}>{(p.vcenterIds || []).join(', ') || '—'}</td>
+                    <td>{p.dataplane?.enabled ? <span className="badge green">Data Plane</span> : p.deploy?.enabled ? <span className="badge green">SSH</span> : <span className="badge gray">수동</span>}{p.guacd?.host ? <span className="badge blue" style={{ marginLeft: 4 }}>guacd</span> : null}</td>
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      <button className="logout-btn" style={{ padding: '6px 10px' }} onClick={() => setEditProxy(p)}>편집</button>{' '}
+                      <button className="logout-btn" style={{ padding: '6px 10px' }} onClick={() => removeProxy(p)}>삭제</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       <div className="section-title" style={{ marginTop: 0 }}>접속 대상</div>
       <div className="table-wrap">
         <table>
@@ -159,6 +204,8 @@ export default function RemoteAccess() {
         포탈이 프록시(HAProxy)에 <b>공개 포트 → 대상:포트</b> TCP 매핑을 만들고, 사용자는 <b>프록시주소:공개포트</b>로 접속합니다.
         SSH는 브라우저 내장 터미널, RDP는 .rdp 파일(또는 guacd 구성 시 웹 콘솔)로 연결됩니다.
       </div>
+
+      {editProxy && <ProxyEditor initial={editProxy} onSave={saveProxy} onClose={() => setEditProxy(null)} />}
     </>
   );
 }
