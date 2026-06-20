@@ -469,6 +469,75 @@ api.get('/tools/gpu', (req, res) => {
   });
 });
 
+// Capacity report — per-cluster compute capacity, allocation, overcommit, headroom.
+api.get('/tools/capacity', (req, res) => {
+  const snap = store.get();
+  const vcId = req.query.vcenterId;
+  const hosts = snap.hosts.filter((h) => !vcId || h.vcenterId === vcId);
+  const vms = snap.vms.filter((v) => (!vcId || v.vcenterId === vcId) && !v.template);
+  const r1 = (x) => Number((x || 0).toFixed(1));
+  const byCluster = new Map();
+  const key = (h) => `${h.vcenterId} ${h.cluster || 'standalone'}`;
+  for (const h of hosts) {
+    const k = key(h);
+    const c = byCluster.get(k) || { vcenterId: h.vcenterId, cluster: h.cluster || 'standalone', hosts: 0, cores: 0, cpuTotalMhz: 0, cpuUsedMhz: 0, memTotalGB: 0, memUsedGB: 0, vcpuOn: 0, vcpuAll: 0, ramOnGB: 0, vmsOn: 0, vms: 0 };
+    c.hosts++; c.cores += h.cpuCores || 0; c.cpuTotalMhz += h.cpuTotalMhz || 0; c.cpuUsedMhz += h.cpuUsageMhz || 0;
+    c.memTotalGB += (h.memTotalMB || 0) / 1024; c.memUsedGB += (h.memUsageMB || 0) / 1024;
+    byCluster.set(k, c);
+  }
+  for (const v of vms) {
+    const k = `${v.vcenterId} ${v.cluster || 'standalone'}`;
+    const c = byCluster.get(k); if (!c) continue;
+    c.vms++; const on = v.powerState === 'POWERED_ON';
+    c.vcpuAll += v.cpuCount || 0;
+    if (on) { c.vcpuOn += v.cpuCount || 0; c.ramOnGB += (v.memMB || 0) / 1024; c.vmsOn++; }
+  }
+  const clusters = [...byCluster.values()].map((c) => ({
+    vcenterId: c.vcenterId, cluster: c.cluster, hosts: c.hosts, vms: c.vms, vmsOn: c.vmsOn,
+    cores: c.cores, memTotalGB: Math.round(c.memTotalGB),
+    vcpuAllocated: c.vcpuOn, vcpuTotal: c.vcpuAll, ramAllocatedGB: Math.round(c.ramOnGB),
+    vcpuPerCore: c.cores ? r1(c.vcpuOn / c.cores) : 0,
+    ramOvercommitPct: c.memTotalGB ? Math.round((c.ramOnGB / c.memTotalGB) * 100) : 0,
+    cpuUsedPct: c.cpuTotalMhz ? Math.round((c.cpuUsedMhz / c.cpuTotalMhz) * 100) : 0,
+    memUsedPct: c.memTotalGB ? Math.round((c.memUsedGB / c.memTotalGB) * 100) : 0,
+    ramHeadroomGB: Math.round(c.memTotalGB - c.ramOnGB),
+  })).sort((a, b) => b.ramOvercommitPct - a.ramOvercommitPct);
+  const sum = (f) => clusters.reduce((a, x) => a + f(x), 0);
+  res.json({
+    scope: vcId || 'all',
+    clusters,
+    totals: {
+      clusters: clusters.length, hosts: sum((c) => c.hosts), cores: sum((c) => c.cores),
+      memTotalGB: sum((c) => c.memTotalGB), vcpuAllocated: sum((c) => c.vcpuAllocated), ramAllocatedGB: sum((c) => c.ramAllocatedGB),
+      vcpuPerCore: sum((c) => c.cores) ? r1(sum((c) => c.vcpuAllocated) / sum((c) => c.cores)) : 0,
+      ramHeadroomGB: sum((c) => c.ramHeadroomGB),
+    },
+  });
+});
+
+// Waste report — 자원 낭비 후보 모음(스냅샷 기반): 전원 꺼진 VM, 스냅샷 보유 VM,
+// thin 회수가능, Tools 미설치. (고아 VMDK는 데이터스토어 파일 스캔이 필요해 미포함)
+api.get('/tools/waste', (req, res) => {
+  const snap = store.get();
+  const vcId = req.query.vcenterId;
+  const vms = snap.vms.filter((v) => (!vcId || v.vcenterId === vcId) && !v.template);
+  const r1 = (x) => Number((x || 0).toFixed(1));
+  const off = vms.filter((v) => v.powerState !== 'POWERED_ON');
+  const snaps = vms.filter((v) => (v.snapshotCount || 0) > 0);
+  const thin = vms.filter((v) => v.thin);
+  const noTools = vms.filter((v) => v.powerState === 'POWERED_ON' && v.toolsStatus && v.toolsStatus !== 'RUNNING');
+  const top = (arr, fn, n = 50) => [...arr].sort((a, b) => fn(b) - fn(a)).slice(0, n);
+  res.json({
+    scope: vcId || 'all',
+    poweredOff: { count: off.length, storageGB: off.reduce((a, v) => a + (v.storageGB || 0), 0),
+      vms: top(off, (v) => v.storageGB || 0).map((v) => ({ id: v.id, name: v.name, vcenterId: v.vcenterId, storageGB: v.storageGB, guestOS: v.guestOS })) },
+    snapshots: { count: snaps.length, sizeGB: r1(snaps.reduce((a, v) => a + (v.snapshotSizeGB || 0), 0)),
+      vms: top(snaps, (v) => v.snapshotSizeGB || 0).map((v) => ({ id: v.id, name: v.name, vcenterId: v.vcenterId, snapshotCount: v.snapshotCount, snapshotSizeGB: v.snapshotSizeGB })) },
+    thinReclaim: { count: thin.length, reclaimableGB: thin.reduce((a, v) => a + (v.uncommittedGB || 0), 0) },
+    noTools: { count: noTools.length, vms: noTools.slice(0, 50).map((v) => ({ id: v.id, name: v.name, vcenterId: v.vcenterId, toolsStatus: v.toolsStatus })) },
+  });
+});
+
 // Thin-provisioned VM finder. thin = uncommitted(여유)이 큰 VM(추정). committed=실사용,
 // provisioned=committed+uncommitted. 회수 가능 추정 = uncommitted 합계.
 api.get('/tools/thin-vms', (req, res) => {
