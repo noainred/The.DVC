@@ -1,6 +1,17 @@
 {
   "notes": [
     {
+      "version": "1.33.0",
+      "date": "2026-06-20",
+      "title": "NSX 통합 모니터링 + VM 대량 생성(게스트 IP/Hostname 지정)",
+      "notes": [
+        "NSX: NSX Manager(vCenter와 별개) 등록 후 T0/T1 게이트웨이·세그먼트·전송노드·분산방화벽(DFW) 통합 모니터링 — 'NSX' 탭 + 설정 → NSX 관리, per-Manager 병렬+타임아웃(고RTT 대응), mock 데모 지원",
+        "VM 생성: 원본 VM/템플릿을 클론해 비슷한 VM을 한 번에 대량 생성 — 이름 패턴(web-{n})·개수·시작번호·자릿수",
+        "VM 생성 시 게스트 OS 사용자 지정: hostname 패턴, 고정 IP 자동 증가(또는 DHCP)·서브넷·게이트웨이·DNS·도메인 (Linux LinuxPrep / Windows Sysprep)",
+        "대량 생성은 동시성 제한 작업으로 비동기 실행 + 진행률/대별 상태 표시(이벤트 루프 비차단)"
+      ]
+    },
+    {
       "version": "1.32.0",
       "date": "2026-06-20",
       "title": "IP 관리대장 — 공인/사설(Public/Private) 분류",

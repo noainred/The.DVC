@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import VCenterAdmin from './VCenterAdmin.jsx';
+import NsxAdmin from './NsxAdmin.jsx';
 import IdracAdmin from './IdracAdmin.jsx';
 import Collectors from './Collectors.jsx';
 import AgentScans from './AgentScans.jsx';
@@ -12,6 +13,7 @@ import Diagnostics from './Diagnostics.jsx';
 
 const SUB = [
   { k: 'vcenter-admin', label: 'vCenter 관리', C: VCenterAdmin },
+  { k: 'nsx-admin', label: 'NSX 관리', C: NsxAdmin },
   { k: 'idrac-admin', label: '전력 수집', C: IdracAdmin },
   { k: 'collectors', label: '수집 서버', C: Collectors },
   { k: 'agent-scans', label: '에이전트 작업', C: AgentScans },

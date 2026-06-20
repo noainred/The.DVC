@@ -93,6 +93,8 @@ export function usePolling(path, params = {}, intervalMs = 15_000) {
   savedParams.current = params;
 
   useEffect(() => {
+    // A falsy path disables polling (e.g. conditional/late-bound endpoints).
+    if (!path) { setLoading(false); return undefined; }
     let active = true;
     let timer;
     const tick = async () => {

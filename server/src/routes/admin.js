@@ -19,6 +19,12 @@ import {
 } from '../vcenter/registry.js';
 import { geocode } from '../vcenter/geocode.js';
 import {
+  listRegistry as listNsx, addManager as addNsx, updateManager as updateNsx,
+  removeManager as removeNsx, testConnection as testNsx,
+} from '../nsx/registry.js';
+import { nsxStore } from '../nsx/store.js';
+import { createJob as createProvisionJob } from '../provision/jobs.js';
+import {
   listRegistry as listServers, addServer, updateServer, removeServer,
   testServer, importServers, parseCsv, bulkAddByIps, registerScanned,
 } from '../idrac/registry.js';
@@ -224,6 +230,35 @@ adminRouter.delete('/vcenters/:id', adminOnly, async (req, res) => {
 // Test connectivity to a vCenter (new entry or a saved one by id).
 adminRouter.post('/vcenters/test', adminOnly, async (req, res) => {
   res.json(await testConnection(req.body || {}));
+});
+
+// --- VM 프로비저닝: 대량 생성 작업 시작 (관리자) ---
+adminRouter.post('/provision/jobs', adminOnly, (req, res) => {
+  const result = createProvisionJob(req.body || {}, { user: req.user });
+  res.status(result.ok ? 201 : 400).json(result);
+});
+
+// --- NSX Manager registry (separate from vCenter; managed by NSX Manager) ---
+adminRouter.get('/nsx/managers', adminOnly, (_req, res) => {
+  res.json({ dataSource: getDataSource(), managers: listNsx() });
+});
+adminRouter.post('/nsx/managers', adminOnly, (req, res) => {
+  const result = addNsx(req.body || {});
+  if (result.ok) nsxStore.refresh().catch(() => {});
+  res.status(result.ok ? 201 : 400).json(result);
+});
+adminRouter.put('/nsx/managers/:id', adminOnly, (req, res) => {
+  const result = updateNsx(req.params.id, req.body || {});
+  if (result.ok) nsxStore.refresh().catch(() => {});
+  res.status(result.ok ? 200 : 400).json(result);
+});
+adminRouter.delete('/nsx/managers/:id', adminOnly, (req, res) => {
+  const result = removeNsx(req.params.id);
+  if (result.ok) nsxStore.refresh().catch(() => {});
+  res.status(result.ok ? 200 : 404).json(result);
+});
+adminRouter.post('/nsx/managers/test', adminOnly, async (req, res) => {
+  res.json(await testNsx(req.body || {}));
 });
 
 // Offline geocode: city/country -> { lat, lon, match } for map plotting.
