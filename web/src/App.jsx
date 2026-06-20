@@ -106,11 +106,20 @@ function Portal({ user, onLogout }) {
   // user's saved landing-page preference.
   const [tab, setTabState] = useState(() => tabFromHash() || getLandingTab());
   const [landingTab, setLandingTab] = useState(getLandingTab);
-  const [vcenterId, setVcenterId] = useState('');
-  const [region, setRegion] = useState('');
-  const [q, setQ] = useState('');
+  // Filters are kept PER TAB so a filter set on one menu never carries over to
+  // (or shows on) another menu. Each tab has its own { region, vcenterId, q }.
+  const [tabFilters, setTabFilters] = useState({}); // { [tabId]: { region, vcenterId, q } }
   const [menuFilter, setMenuFilter] = useState({}); // { [tabId]: value }
   const [showNotes, setShowNotes] = useState(false);
+
+  const cur = tabFilters[tab] || {};
+  const region = cur.region || '';
+  const vcenterId = cur.vcenterId || '';
+  const q = cur.q || '';
+  const patchFilter = (patch, t = tab) => setTabFilters((m) => ({ ...m, [t]: { ...(m[t] || {}), ...patch } }));
+  const setRegion = (v) => patchFilter({ region: v, vcenterId: '' });
+  const setVcenterId = (v) => patchFilter({ vcenterId: v });
+  const setQ = (v) => patchFilter({ q: v });
 
   // Keep the URL hash in sync with the active tab, and follow back/forward.
   const setTab = (id) => { setTabState(id); window.location.hash = `#/${id}`; };
@@ -171,6 +180,7 @@ function Portal({ user, onLogout }) {
     if (vcenterId) s.vcenterId = vcenterId;
     else if (region) s.region = region;
     return s;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vcenterId, region]);
 
 
@@ -178,7 +188,8 @@ function Portal({ user, onLogout }) {
   const showFilters = !noFilterTabs.includes(tab);
   const showTextSearch = tab !== 'explore';
 
-  const selectSite = (id) => { setVcenterId(id); setTab('hosts'); };
+  // Drill into a site → set the HOSTS tab's own vCenter filter, then go there.
+  const selectSite = (id) => { patchFilter({ vcenterId: id, region: '' }, 'hosts'); setTab('hosts'); };
 
   return (
     <div className="app">
@@ -257,7 +268,7 @@ function Portal({ user, onLogout }) {
               <input className="input" placeholder="이름 / IP / OS 검색…" value={q} onChange={(e) => setQ(e.target.value)} />
             )}
             {(region || vcenterId || q || menuFilter[tab]) && (
-              <button className="tab" onClick={() => { setRegion(''); setVcenterId(''); setQ(''); setMenuFilter((m) => ({ ...m, [tab]: '' })); }}>필터 초기화</button>
+              <button className="tab" onClick={() => { patchFilter({ region: '', vcenterId: '', q: '' }); setMenuFilter((m) => ({ ...m, [tab]: '' })); }}>필터 초기화</button>
             )}
           </div>
         )}
