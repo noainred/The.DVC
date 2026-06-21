@@ -128,6 +128,16 @@ adminRouter.post('/packages/download', adminOnly, async (req, res) => {
 
 // --- iDRAC-scan agent auto-deploy (SSH push install) ---
 adminRouter.get('/agent-deploy/installer', adminOnly, (req, res) => res.json(installerInfo(req.query.path)));
+// 배포 폼 자동 채우기용 기본값: 중앙 URL(접속한 호스트 기준 추정) + 포탈 포트 + 토큰 상태.
+adminRouter.get('/agent-deploy/defaults', adminOnly, (req, res) => {
+  const host = (req.get('host') || `localhost:${config.port}`).replace(/\/+$/, '');
+  const proto = (req.get('x-forwarded-proto') || req.protocol || 'http').split(',')[0];
+  res.json({
+    centralUrl: `${proto}://${host}`,
+    portalPort: config.port,
+    central: centralTokenInfo(),
+  });
+});
 
 adminRouter.post('/agent-deploy/test', adminOnly, async (req, res) => {
   res.json(await testTarget(req.body || {}));
