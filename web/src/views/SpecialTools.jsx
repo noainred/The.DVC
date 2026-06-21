@@ -542,11 +542,11 @@ function IpScanSettings({ onClose }) {
   const [info, setInfo] = useState(null);
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
-  const load = async () => {
-    try { const r = await fetchJson('/admin/ipam/scan/settings'); setS(r.settings); setStatus(r.status); setInfo(r.info); }
+  const load = async (first = false) => {
+    try { const r = await fetchJson('/admin/ipam/scan/settings'); if (first) setS(r.settings); setStatus(r.status); setInfo(r.info); }
     catch (e) { setMsg(e.message); }
   };
-  useEffect(() => { load(); const t = setInterval(load, 5000); return () => clearInterval(t); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { load(true); const t = setInterval(() => load(false), 5000); return () => clearInterval(t); /* eslint-disable-next-line */ }, []);
   if (!s) return <Modal title="IP 스캔" onClose={onClose}>{msg ? <ErrorBox message={msg} /> : <Loading />}</Modal>;
 
   const save = async () => {
