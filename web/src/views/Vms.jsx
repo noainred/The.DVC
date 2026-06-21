@@ -119,9 +119,7 @@ export default function Vms({ filters }) {
           <div className="section-title" style={{ marginTop: 0 }}>글로벌 가상머신 요약</div>
           <div className="kpis" style={{ marginBottom: 12 }}>
             <div className="card kpi"><div className="label">전체 VM</div><div className="value">{fmt(t.count)}</div><div className="meta">구동중 {fmt(t.poweredOn)} · 정지 {fmt(t.poweredOff)}</div></div>
-            <div className="card kpi"><div className="label">할당 vCPU 합계</div><div className="value" style={{ color: 'var(--accent)' }}>{fmt(t.vcpu)}</div></div>
-            <div className="card kpi"><div className="label">할당 RAM 합계</div><div className="value" style={{ color: 'var(--purple)' }}>{fmt(t.ramGB)}<small> GB</small></div><div className="meta">≈ {(t.ramGB / 1024).toFixed(1)} TB</div></div>
-            <div className="card kpi"><div className="label">할당 디스크 합계</div><div className="value" style={{ color: 'var(--accent-2)' }}>{fmt(t.diskTB)}<small> TB</small></div><div className="meta">{fmt(t.diskGB)} GB</div></div>
+            <div className="card kpi"><div className="label">할당 vCPU/vCore 합계</div><div className="value" style={{ color: 'var(--accent)' }}>{fmt(t.vcpu)}</div></div>
             <div className="card kpi"><div className="label">평균 CPU 사용률</div><div className="value">{t.avgCpuUsagePct}%</div><div className="meta">구동중 VM 기준</div></div>
             <div className="card kpi"><div className="label">평균 메모리 사용률</div><div className="value">{t.avgMemUsagePct}%</div><div className="meta">구동중 VM 기준</div></div>
             <div className="card kpi" role="button" tabIndex={0}
@@ -133,6 +131,8 @@ export default function Vms({ filters }) {
               <div className="value" style={{ color: 'var(--green)' }}>{fmt(g.total)}</div>
               <div className="meta">vGPU {fmt(g.vgpu)} · 패스쓰루 {fmt(g.passthrough)}{g.mixed ? ` · 혼합 ${fmt(g.mixed)}` : ''}</div>
             </div>
+            <div className="card kpi"><div className="label">할당 RAM 합계</div><div className="value" style={{ color: 'var(--purple)' }}>{fmt(t.ramGB)}<small> GB</small></div><div className="meta">≈ {(t.ramGB / 1024).toFixed(1)} TB</div></div>
+            <div className="card kpi"><div className="label">할당 디스크 합계</div><div className="value" style={{ color: 'var(--accent-2)' }}>{fmt(t.diskTB)}<small> TB</small></div><div className="meta">{fmt(t.diskGB)} GB</div></div>
           </div>
           <div className="section-title">가상머신 상세</div>
         </>
