@@ -42,12 +42,23 @@ export function VmMetricButton({ vmId, vmName }) {
   return (
     <>
       <button className="login-btn" style={{ flex: 'none', padding: '8px 14px' }} onClick={() => setOpen(true)}>📈 성능 그래프 보기</button>
-      {open && <VmMetricModal vmId={vmId} vmName={vmName} onClose={() => setOpen(false)} />}
+      {open && <MetricModal metricsPath={`/vms/${encodeURIComponent(vmId)}/metrics`} name={vmName} onClose={() => setOpen(false)} />}
     </>
   );
 }
 
-function VmMetricModal({ vmId, vmName, onClose }) {
+/** Button that opens the on-demand ESXi host performance viewer. */
+export function HostMetricButton({ hostId, hostName }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button className="login-btn" style={{ flex: 'none', padding: '8px 14px' }} onClick={() => setOpen(true)}>📈 성능 그래프 보기</button>
+      {open && <MetricModal metricsPath={`/hosts/${encodeURIComponent(hostId)}/metrics`} name={hostName} onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
+function MetricModal({ metricsPath, name, onClose }) {
   const [type, setType] = useState('cpu');
   const [interval, setIntv] = useState('realtime');
   const [range, setRange] = useState({ start: '', end: '' }); // applied range
@@ -58,7 +69,7 @@ function VmMetricModal({ vmId, vmName, onClose }) {
     let active = true;
     const params = { type, interval, ...(range.start ? { start: range.start } : {}), ...(range.end ? { end: range.end } : {}) };
     const fetchOnce = () => {
-      fetchJson(`/vms/${encodeURIComponent(vmId)}/metrics`, params)
+      fetchJson(metricsPath, params)
         .then((d) => { if (active) setState({ loading: false, data: d }); })
         .catch((e) => { if (active) setState({ loading: false, error: e.message }); });
     };
@@ -68,7 +79,7 @@ function VmMetricModal({ vmId, vmName, onClose }) {
     const live = interval === 'realtime' && !range.start && !range.end;
     const timer = live ? setInterval(fetchOnce, 20_000) : null;
     return () => { active = false; if (timer) clearInterval(timer); };
-  }, [vmId, type, interval, range.start, range.end]);
+  }, [metricsPath, type, interval, range.start, range.end]);
 
   const { loading, data, error } = state;
   const cfg = TYPES.find((t) => t.k === type);
@@ -83,7 +94,7 @@ function VmMetricModal({ vmId, vmName, onClose }) {
       <EscClose onClose={onClose} />
       <div className="modal card" style={{ maxWidth: 900, width: '92%' }}>
         <div className="flex between" style={{ marginBottom: 12 }}>
-          <b style={{ fontSize: 15 }}>📈 성능 — {vmName}</b>
+          <b style={{ fontSize: 15 }}>📈 성능 — {name}</b>
           <button className="logout-btn" onClick={onClose}>닫기</button>
         </div>
 

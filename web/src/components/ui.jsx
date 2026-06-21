@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import HostPowerPanel from './HostPowerPanel.jsx';
-import { VmMetricButton } from './VmMetrics.jsx';
+import { VmMetricButton, HostMetricButton } from './VmMetrics.jsx';
 import { VmConsoleButton } from './VmConsole.jsx';
 import { VmRemoteButton } from './VmRemote.jsx';
 import EscClose from './EscClose.jsx';
@@ -264,6 +264,11 @@ export function EntityDetail({ type, item, onClose }) {
         </div>
       )}
       {type === 'host' && <HostPowerPanel hostName={item.name} />}
+      {type === 'host' && (
+        <div className="flex gap" style={{ marginTop: 14, justifyContent: 'flex-end' }}>
+          <HostMetricButton hostId={item.id} hostName={item.name} />
+        </div>
+      )}
       {type === 'vm' && (
         <div className="flex gap" style={{ marginTop: 14, justifyContent: 'flex-end' }}>
           <VmConsoleButton vmId={item.id} vmName={item.name} />
