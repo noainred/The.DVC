@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson, postJson, putJson, usePolling, getToken } from '../api.js';
-import { DataTable, Loading, ErrorBox, StateBadge, UsageCell, EntityDetail, Modal, ResultCount, SearchBox } from '../components/ui.jsx';
+import { DataTable, Loading, ErrorBox, StateBadge, UsageCell, EntityDetail, Modal, ResultCount, SearchBox, VmLink } from '../components/ui.jsx';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 
 const TOOLS = [
@@ -281,7 +281,7 @@ function Ipam({ scope, onScope }) {
       <span className={`badge ${r.scope === 'public' ? 'amber' : 'green'}`}>{r.scope === 'public' ? '공인' : '사설'}</span>
     ) },
     { key: 'vcenterName', label: '센터(vCenter)' },
-    { key: 'ownerName', label: '소유 자원', render: (r) => <><span className="badge blue">{r.ownerType === 'vm' ? 'VM' : '호스트'}</span> {r.ownerName}</> },
+    { key: 'ownerName', label: '소유 자원', render: (r) => <><span className="badge blue">{r.ownerType === 'vm' ? 'VM' : '호스트'}</span> <button className="cell-link" onClick={() => setSel({ ownerType: r.ownerType, owner: r.owner })}>{r.ownerName}</button></> },
     { key: 'powerState', label: '전원', render: (r) => <StateBadge state={r.powerState} /> },
     { key: 'guestOS', label: 'OS / 게스트' },
     { key: 'hostName', label: 'ESXi 호스트' },
@@ -377,7 +377,7 @@ function Ipam({ scope, onScope }) {
                         <tr key={r.ip} style={{ background: ROWBG[r.status] }}>
                           <td><b>{r.ip}</b></td>
                           <td>{r.purpose}</td>
-                          <td>{r.hostname}</td>
+                          <td>{r.hostname ? <VmLink ip={r.ip} vcenterId={scope} label={r.hostname} /> : ''}</td>
                           <td className="muted" style={{ fontSize: 12 }}>{r.notes}</td>
                           <td>{r.power}</td>
                           <td className="muted" style={{ fontSize: 12 }}>{r.scope}</td>
