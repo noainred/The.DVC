@@ -26,8 +26,9 @@ import { loadMetricsSettings, saveMetricsSettings, METRICS_LIMITS } from '../met
 import { metricsSamplerStatus, rescheduleMetricsSampler } from '../metrics/sampler.js';
 import { loadGpuGuestSettings, saveGpuGuestSettings, redactGpuGuestSettings } from '../gpu/settings.js';
 import { gpuGuestStatus, rescheduleGpuGuestPoller } from '../gpu/poller.js';
-import { loadScanSettings, saveScanSettings, scanResultList, scanInfo } from '../ipam/scanStore.js';
+import { loadScanSettings, saveScanSettings, scanResultList, scanInfo, listScanAgents, LOCAL } from '../ipam/scanStore.js';
 import { runScanOnce, scanStatus, rescheduleScanPoller } from '../ipam/scanPoller.js';
+import { listAssignments as listIdracAssignments } from '../central/assignments.js';
 import {
   listRegistry as listNsx, addManager as addNsx, updateManager as updateNsx,
   removeManager as removeNsx, testConnection as testNsx,
@@ -204,17 +205,24 @@ adminRouter.get('/ipam/db-info', adminOnly, async (_req, res) => {
 adminRouter.get('/ipam/settings', adminOnly, (_req, res) => res.json({ settings: loadIpamSettings() }));
 adminRouter.put('/ipam/settings', adminOnly, (req, res) => res.json({ ok: true, settings: saveIpamSettings(req.body || {}) }));
 
-// IP 능동 스캔(TCP 커넥트) 설정/상태/수동실행/결과.
-adminRouter.get('/ipam/scan/settings', adminOnly, (_req, res) => {
-  res.json({ settings: loadScanSettings(), status: scanStatus(), info: scanInfo() });
+// IP 능동 스캔(TCP 커넥트) — 에이전트별 설정/상태/수동실행/결과.
+// agent 미지정 = 이 포탈(중앙) 직접 스캔(__local__). 그 외 이름 = 분산 에이전트 할당.
+adminRouter.get('/ipam/scan/settings', adminOnly, (req, res) => {
+  const agent = req.query.agent || LOCAL;
+  // 선택 가능한 에이전트 목록: 로컬 + iDRAC 할당 에이전트 + 이미 IP스캔 설정된 에이전트.
+  const names = new Set([LOCAL]);
+  for (const a of listScanAgents()) names.add(a.name);
+  for (const a of listIdracAssignments()) names.add(a.agent);
+  res.json({ agent, settings: loadScanSettings(agent), agents: [...names], status: scanStatus(), info: scanInfo() });
 });
 adminRouter.put('/ipam/scan/settings', adminOnly, (req, res) => {
-  const settings = saveScanSettings(req.body || {});
-  rescheduleScanPoller();
-  res.json({ ok: true, settings, status: scanStatus() });
+  const agent = (req.body && req.body.agent) || LOCAL;
+  const settings = saveScanSettings(agent, req.body || {});
+  if (agent === LOCAL) rescheduleScanPoller(); // 로컬 설정만 이 포탈 폴러에 적용
+  res.json({ ok: true, agent, settings, status: scanStatus() });
 });
 adminRouter.post('/ipam/scan/run', adminOnly, async (_req, res) => {
-  const r = await runScanOnce({ manual: true });
+  const r = await runScanOnce({ manual: true }); // 이 포탈(로컬) 즉시 스캔
   res.json({ ...r, status: scanStatus(), info: scanInfo() });
 });
 adminRouter.get('/ipam/scan/results', adminOnly, (_req, res) => {

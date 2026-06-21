@@ -25,6 +25,7 @@ import { startAlertEngine } from './alerts.js';
 import { startMetricsSampler } from './metrics/sampler.js';
 import { startGpuGuestPoller } from './gpu/poller.js';
 import { startIpScanPoller } from './ipam/scanPoller.js';
+import { startIpScanAgent } from './agent/ipScanWorker.js';
 import { startCollectorPuller } from './collector/puller.js';
 import { startAgentScanner } from './agent/scanner.js';
 
@@ -80,6 +81,7 @@ startAlertEngine();
 startMetricsSampler();
 startGpuGuestPoller();
 startIpScanPoller();
+startIpScanAgent();
 startCollectorPuller();
 startAgentScanner();
 
