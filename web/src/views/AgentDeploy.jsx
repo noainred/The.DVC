@@ -27,12 +27,18 @@ export default function AgentDeploy() {
     await loadPkg();
   };
   const loadTargets = () => fetchJson('/admin/agent-deploy/targets').then((d) => setTargets(d.targets)).catch(() => {});
-  // 실행 중 서버의 중앙 토큰을 읽어 폼에 자동 입력(있을 때만).
+  // 실행 중 서버의 중앙 토큰/기본값을 읽어 폼에 자동 입력.
   const [tokenInfo, setTokenInfo] = useState({ hasToken: false });
+  const [defaults, setDefaults] = useState(null);
   const [genBusy, setGenBusy] = useState(false);
+  const [fillBusy, setFillBusy] = useState(false);
   const loadToken = async () => {
     const r = await fetchJson('/admin/central-token').catch(() => null);
     if (r) { setTokenInfo(r); if (r.token) setF((s) => (s.centralToken ? s : { ...s, centralToken: r.token })); }
+  };
+  const loadDefaults = async () => {
+    const d = await fetchJson('/admin/agent-deploy/defaults').catch(() => null);
+    if (d) { setDefaults(d); setF((s) => ({ ...s, centralUrl: s.centralUrl || d.centralUrl || '', portalPort: s.portalPort || d.portalPort || 4000 })); }
   };
   const genToken = async () => {
     setGenBusy(true);
@@ -41,7 +47,36 @@ export default function AgentDeploy() {
     if (r.ok && r.token) { setF((s) => ({ ...s, centralToken: r.token })); setTokenInfo({ hasToken: true, token: r.token }); setResult({ kind: 'token', ok: true, created: r.created }); }
     else setResult({ kind: 'token', ok: false, reason: r.reason });
   };
-  useEffect(() => { loadInstaller(); loadTargets(); loadPkg(); loadToken(); }, []);
+  // 24바이트 랜덤 hex(클라이언트 생성) — 전력수집 토큰 등 임의 비밀용.
+  const randHex = () => Array.from(crypto.getRandomValues(new Uint8Array(24))).map((b) => b.toString(16).padStart(2, '0')).join('');
+  const suggestName = (s, d) => {
+    if (s.agentName) return s.agentName;
+    if (s.host) return `${String(s.host).replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '')}-agent`;
+    return `agent-${Math.floor(Math.random() * 9000 + 1000)}`;
+  };
+  // 배포에 필요한 모든 값을 자동으로 채움(빈 칸만, 토큰은 없으면 생성).
+  const autofill = async () => {
+    setFillBusy(true); setResult(null);
+    const d = defaults || await fetchJson('/admin/agent-deploy/defaults').catch(() => null);
+    let token = tokenInfo.token;
+    if (!token) { const r = await postJson('/admin/central-token/generate', {}).catch(() => null); if (r?.token) { token = r.token; setTokenInfo({ hasToken: true, token }); } }
+    setF((s) => {
+      const name = suggestName(s, d);
+      return {
+        ...s,
+        agentName: s.agentName || name,
+        centralUrl: s.centralUrl || d?.centralUrl || '',
+        centralToken: token || s.centralToken,
+        collectorToken: s.collectorToken || randHex(),
+        collectorDatacenter: s.collectorDatacenter || name,
+        portalPort: s.portalPort || d?.portalPort || 4000,
+        installerPath: s.installerPath, // 비워두면 자동 선택
+      };
+    });
+    setFillBusy(false);
+    setResult({ kind: 'autofill', ok: true });
+  };
+  useEffect(() => { loadInstaller(); loadTargets(); loadPkg(); loadToken(); loadDefaults(); }, []);
 
   const downloadPkg = async () => {
     setDl((d) => ({ ...d, busy: true })); setResult(null);
@@ -155,12 +190,21 @@ export default function AgentDeploy() {
       </div>
 
       <div className="card" style={{ marginBottom: 12 }}>
-        <b style={{ fontSize: 14 }}>에이전트 설정 (포탈 env에 주입)</b>
-        <div className="muted" style={{ fontSize: 12, margin: '4px 0 8px' }}>iDRAC 스캔 에이전트는 <b>에이전트 이름 + 중앙 URL + 토큰</b>을, 전력수집 에이전트는 <b>수집 토큰</b>을 채우세요.</div>
+        <div className="flex between" style={{ alignItems: 'center' }}>
+          <b style={{ fontSize: 14 }}>에이전트 설정 (포탈 env에 주입)</b>
+          <button className="login-btn" type="button" style={{ flex: 'none', padding: '7px 14px' }} disabled={fillBusy} onClick={autofill}
+            title="모든 값을 자동으로 채웁니다: 에이전트 이름(SSH 호스트 기반 추정), 중앙 URL(이 포탈 주소), 중앙 토큰(없으면 생성·portal.env 저장), 전력수집 토큰(랜덤), 수집 DC명, 포탈 포트. 이미 입력한 칸은 보존됩니다.">
+            {fillBusy ? '채우는 중…' : '🪄 모두 자동 채우기'}
+          </button>
+        </div>
+        <div className="muted" style={{ fontSize: 12, margin: '4px 0 8px' }}>iDRAC/IP 스캔 에이전트는 <b>에이전트 이름 + 중앙 URL + 중앙 토큰</b>이 필수, 전력수집까지 하려면 <b>수집 토큰 + 수집 DC명</b>을 채우세요. 위 <b>자동 채우기</b>로 한 번에 채울 수 있습니다.</div>
         <div className="spec-grid">
-          <label>에이전트 이름(AGENT_NAME)<input className="input" value={f.agentName} onChange={set('agentName')} placeholder="Seoul-DC1" /></label>
-          <label>중앙 URL(CENTRAL_URL)<input className="input" value={f.centralUrl} onChange={set('centralUrl')} placeholder="http://central:4000" /></label>
-          <label>중앙 토큰(CENTRAL_TOKEN)
+          <label title="이 에이전트의 고유 식별 이름. IP 스캔 '할당 에이전트' 드롭다운과 중앙 할당 매칭(AGENT_NAME)에 사용됩니다. 사이트/DC가 드러나게 지으세요. 예: OC2-Agent, Seoul-DC1. 자동 채우기는 SSH 호스트 기반으로 제안합니다.">
+            에이전트 이름(AGENT_NAME)<input className="input" value={f.agentName} onChange={set('agentName')} placeholder="예: OC2-Agent / Seoul-DC1" /></label>
+          <label title="에이전트가 접속할 '중앙 포탈' 주소. 에이전트 서버에서 도달 가능한 IP/호스트:포트여야 합니다(끝에 / 없이). 예: http://192.168.20.143:4000. 자동 채우기는 지금 접속한 포탈 주소로 채웁니다 — 에이전트 망에서 안 닿으면 외부 접근용 주소로 바꾸세요.">
+            중앙 URL(CENTRAL_URL)<input className="input" value={f.centralUrl} onChange={set('centralUrl')} placeholder="http://<포탈주소>:4000" /></label>
+          <label title="중앙↔에이전트 공유 비밀. 중앙 포탈의 CENTRAL_TOKEN과 반드시 동일해야 하며 다르면 403. '생성'을 누르면 안전한 랜덤 토큰을 만들어 이 포탈(중앙) 환경(portal.env)에 저장하고 칸을 채웁니다(리붓해도 유지). 이미 있으면 자동 입력됩니다.">
+            중앙 토큰(CENTRAL_TOKEN)
             <div className="flex gap" style={{ alignItems: 'center' }}>
               <input className="input" value={f.centralToken} onChange={set('centralToken')} placeholder={tokenInfo.hasToken ? '' : '미설정 — 생성 클릭'} />
               <button className="logout-btn" type="button" style={{ flex: 'none', padding: '7px 12px', whiteSpace: 'nowrap' }} disabled={genBusy} onClick={genToken}
@@ -168,10 +212,14 @@ export default function AgentDeploy() {
             </div>
             <span className="muted" style={{ fontSize: 11 }}>{tokenInfo.hasToken ? '✅ 중앙 토큰이 이 포탈에 설정됨(자동 입력됨)' : '⚠ 중앙 미설정 — 생성 시 portal.env에 저장(리붓 유지)'}</span>
           </label>
-          <label>전력수집 토큰(COLLECTOR_TOKEN, 선택)<input className="input" value={f.collectorToken} onChange={set('collectorToken')} /></label>
-          <label>수집 DC명(COLLECTOR_DATACENTER, 선택)<input className="input" value={f.collectorDatacenter} onChange={set('collectorDatacenter')} /></label>
-          <label>포탈 포트<input className="input" type="number" value={f.portalPort} onChange={set('portalPort')} /></label>
-          <label style={{ gridColumn: '1 / -1' }}>설치 패키지 경로(비우면 자동)<input className="input" value={f.installerPath} onChange={set('installerPath')} placeholder="(중앙 서버의 tarball 경로)" /></label>
+          <label title="(선택) 이 에이전트를 '전력/데이터 pull 대상'으로도 쓸 때만. 중앙이 이 에이전트의 /api/collector/export 를 당겨갈 때 쓰는 임의 비밀입니다. iDRAC/IP 스캔만 할 거면 비워두세요. 자동 채우기는 랜덤값을 넣습니다. 중앙 '설정 › 수집 서버' 등록 시 같은 값을 사용하세요.">
+            전력수집 토큰(COLLECTOR_TOKEN, 선택)<input className="input" value={f.collectorToken} onChange={set('collectorToken')} placeholder="(전력수집 시에만)" /></label>
+          <label title="(선택) 전력수집 에이전트가 보고할 데이터센터 라벨. 수집 토큰을 쓸 때만 의미 있습니다. 예: OC2. 안 쓰면 비움.">
+            수집 DC명(COLLECTOR_DATACENTER, 선택)<input className="input" value={f.collectorDatacenter} onChange={set('collectorDatacenter')} placeholder="예: OC2" /></label>
+          <label title="에이전트 인스턴스가 자기 서버에서 열 HTTP 포트(기본 4000). 그 호스트에서 포트 충돌이 없으면 그대로 두세요.">
+            포탈 포트<input className="input" type="number" value={f.portalPort} onChange={set('portalPort')} /></label>
+          <label style={{ gridColumn: '1 / -1' }} title="보통 비워두세요 — 중앙이 download/의 el9 오프라인 패키지를 자동 선택해 SSH로 전송·설치합니다. 특정 tarball을 강제하려면 '중앙 서버' 상의 절대경로를 입력하세요.">
+            설치 패키지 경로(비우면 자동)<input className="input" value={f.installerPath} onChange={set('installerPath')} placeholder="(비우면 자동 선택)" /></label>
         </div>
       </div>
 
@@ -214,7 +262,7 @@ export default function AgentDeploy() {
       {result && (
         <div className="card" style={{ borderColor: result.ok ? 'var(--green)' : 'var(--red)' }}>
           <b style={{ color: result.ok ? 'var(--green)' : 'var(--red)' }}>
-            {result.ok ? '성공' : '실패'} — {{ test: 'SSH 테스트', save: '대상 저장', 'deploy-all': '전체 배포', pkg: '패키지 다운로드' }[result.kind] || '배포'}
+            {result.ok ? '성공' : '실패'} — {{ test: 'SSH 테스트', save: '대상 저장', 'deploy-all': '전체 배포', pkg: '패키지 다운로드', token: '중앙 토큰', autofill: '자동 채우기', pkgcfg: '패키지 설정' }[result.kind] || '배포'}
           </b>
           <div style={{ fontSize: 13, marginTop: 6, lineHeight: 1.7 }}>
             {result.reason && <div style={{ color: result.ok ? 'var(--green)' : 'var(--red)' }}>{result.reason}</div>}
