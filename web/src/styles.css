@@ -96,6 +96,7 @@ body {
   padding: 16px 18px; box-shadow: var(--shadow);
 }
 .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; }
+.kpi { text-align: center; } /* 모든 메뉴의 KPI 박스: 라벨·숫자(용량 등) 중앙정렬 */
 .kpi .label { color: var(--text-dim); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; }
 .kpi .value { font-size: 30px; font-weight: 800; margin-top: 6px; line-height: 1; }
 .kpi .meta { font-size: 12px; color: var(--text-faint); margin-top: 8px; }

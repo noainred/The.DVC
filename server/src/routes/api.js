@@ -1112,6 +1112,10 @@ api.get('/vms', (req, res) => {
     diskTB: Math.round(sm((v) => v.storageGB) / 1024 * 10) / 10,
     avgCpuUsagePct: avg(on, (v) => v.cpuUsagePct),
     avgMemUsagePct: avg(on, (v) => v.memUsagePct),
+    // 평균 디스크 사용율 = 프로비저닝(committed+uncommitted) 대비 실제 사용(committed).
+    // thick 디스크는 uncommitted=0 → 100%. 게스트 파일시스템 사용율과는 다름.
+    avgDiskUsagePct: avg(vms.filter((v) => (v.storageGB || 0) + (v.uncommittedGB || 0) > 0),
+      (v) => ((v.storageGB || 0) / ((v.storageGB || 0) + (v.uncommittedGB || 0))) * 100),
     gpu: gpuCounts,
   };
   res.json({ total: vms.length, items: vms.slice(0, limit), totals });
