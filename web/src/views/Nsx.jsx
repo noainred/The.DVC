@@ -5,6 +5,7 @@ import { Kpi, DataTable, Modal, Loading, ErrorBox, SearchBox } from '../componen
 const MGR_BADGE = { connected: 'green', degraded: 'amber', unreachable: 'red', pending: 'gray', disabled: 'gray' };
 const MGR_LABEL = { connected: '정상', degraded: '저하', unreachable: '연결끊김', pending: '대기', disabled: '비활성' };
 const ACT_BADGE = { ALLOW: 'green', DROP: 'red', REJECT: 'amber' };
+const ACT_LABEL = { ALLOW: '허용(ALLOW)', DROP: '차단(DROP)', REJECT: '거부(REJECT)' };
 
 const VIEWS = [['gateways', '게이트웨이'], ['segments', '세그먼트'], ['nodes', '전송 노드'], ['dfw', '분산방화벽(DFW)'], ['groups', '보안그룹']];
 
@@ -117,7 +118,7 @@ function SegmentTable({ rows, onOpen }) {
     { key: 'connectivity', label: '연결(T1/T0)', render: (s) => <span className="muted">{s.connectivity || '—'}</span> },
     { key: 'vlanIds', label: 'VLAN', render: (s) => (s.vlanIds || []).join(', ') || '—' },
     { key: 'subnets', label: '서브넷', render: (s) => (s.subnets || []).join(', ') || '—' },
-    { key: 'vmCount', label: 'VM', align: 'right', render: (s) => s.vmCount ?? '—' },
+    { key: 'vmCount', label: 'VM(포트)', align: 'right', render: (s) => (s.vmCount == null ? <span className="muted" title="포트 미조회(권한/미지원)">—</span> : <b style={{ color: s.vmCount ? 'var(--text)' : 'var(--text-dim)' }}>{s.vmCount}</b>) },
   ];
   return <DataTable columns={cols} rows={rows} initialSort={{ key: 'name', dir: 'asc' }} />;
 }
@@ -137,7 +138,8 @@ function DfwTable({ rows, onOpen }) {
     { key: 'sources', label: '소스', render: (x) => (x.sources || []).join(', ') || 'Any' },
     { key: 'destinations', label: '목적지', render: (x) => (x.destinations || []).join(', ') || 'Any' },
     { key: 'services', label: '서비스', render: (x) => (x.services || []).join(', ') || 'Any' },
-    { key: 'action', label: '동작', render: (x) => <span className={`badge ${ACT_BADGE[x.action] || 'gray'}`}>{x.action || '—'}</span> },
+    { key: 'action', label: '동작', render: (x) => <span className={`badge ${ACT_BADGE[x.action] || 'gray'}`}>{ACT_LABEL[x.action] || x.action || '—'}</span> },
+    { key: 'logged', label: '로깅', render: (x) => (x.logged == null ? <span className="muted">—</span> : x.logged ? <span className="badge blue">로깅 on</span> : <span className="badge gray">off</span>) },
     { key: 'enabled', label: '사용', render: (x) => (x.enabled === false ? <span className="badge gray">off</span> : <span className="badge green">on</span>) },
   ];
   return <DataTable columns={cols} rows={rows} initialSort={{ key: 'policy', dir: 'asc' }} emptyText="DFW 규칙이 없습니다. (라이브: 권한/도메인 확인)" />;
@@ -188,14 +190,18 @@ function DetailModal({ detail, onClose }) {
         <SegmentVms subnets={item.subnets || []} />
       </>}
       {type === 'rule' && <>
-        <Row label="정책">{item.policy}</Row>
+        <Row label="정책">{item.policy}{item.category ? ` (${item.category})` : ''}</Row>
         <Row label="소스">{(item.sources || []).join(', ') || 'Any'}</Row>
         <Row label="목적지">{(item.destinations || []).join(', ') || 'Any'}</Row>
         <Row label="서비스">{(item.services || []).join(', ') || 'Any'}</Row>
-        <Row label="동작"><span className={`badge ${ACT_BADGE[item.action] || 'gray'}`}>{item.action || '—'}</span></Row>
+        <Row label="동작(허용/차단)"><span className={`badge ${ACT_BADGE[item.action] || 'gray'}`}>{ACT_LABEL[item.action] || item.action || '—'}</span></Row>
+        <Row label="로깅">{item.logged == null ? '—' : (item.logged ? <span className="badge blue">로깅 켜짐</span> : <span className="badge gray">꺼짐</span>)}</Row>
         <Row label="방향">{item.direction || '—'}</Row>
+        <Row label="IP 프로토콜">{item.ipProtocol || '—'}</Row>
         <Row label="적용 대상(Applied To)">{item.appliedTo || 'DFW'}</Row>
+        <Row label="순번(Sequence)">{item.sequence ?? '—'}</Row>
         <Row label="사용">{item.enabled === false ? '비활성' : '활성'}</Row>
+        {item.notes ? <Row label="메모">{item.notes}</Row> : null}
       </>}
       {type === 'group' && <>
         <Row label="멤버 유형">{item.memberType || '—'}</Row>
