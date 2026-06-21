@@ -830,6 +830,12 @@ function VmFinder() {
   const toggle = (key, val) => setF((s) => ({ ...s, [key]: s[key].includes(val) ? s[key].filter((x) => x !== val) : [...s[key], val] }));
   const facets = data?.facets || { vcenters: [], folders: [], clusters: [], resourcePools: [] };
   const vcName = (id) => (vcenters || []).find((v) => v.id === id)?.name || id;
+  // vCenter 칩을 설정에서 지정한 순서(/vcenters 응답 순서)대로 정렬.
+  const vcOrder = (vcenters || []).map((v) => v.id);
+  const orderedVcenters = [...(facets.vcenters || [])].sort((a, b) => {
+    const ia = vcOrder.indexOf(a); const ib = vcOrder.indexOf(b);
+    return (ia < 0 ? 1e9 : ia) - (ib < 0 ? 1e9 : ib);
+  });
 
   const Chips = ({ label, list, sel, onToggle, nameOf }) => (
     <div style={{ marginBottom: 8 }}>
@@ -864,7 +870,7 @@ function VmFinder() {
   return (
     <>
       <div className="card" style={{ marginBottom: 12 }}>
-        <Chips label="vCenter (미선택=전체)" list={facets.vcenters} sel={f.vcenterIds} onToggle={(x) => toggle('vcenterIds', x)} nameOf={vcName} />
+        <Chips label="vCenter (미선택=전체)" list={orderedVcenters} sel={f.vcenterIds} onToggle={(x) => toggle('vcenterIds', x)} nameOf={vcName} />
         <div className="flex gap wrap">
           <div style={{ flex: 1, minWidth: 220 }}><Chips label="폴더" list={facets.folders} sel={f.folders} onToggle={(x) => toggle('folders', x)} /></div>
           <div style={{ flex: 1, minWidth: 220 }}><Chips label="클러스터" list={facets.clusters} sel={f.clusters} onToggle={(x) => toggle('clusters', x)} /></div>
