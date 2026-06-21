@@ -653,17 +653,26 @@ function useTool(path, params) {
 
 function tempColor(c) { return c == null ? 'var(--text-faint)' : c >= 40 ? 'var(--red)' : c >= 32 ? 'var(--amber)' : 'var(--green)'; }
 
+// 집계 단위(bucketMs)에 맞춰 X축 라벨: 분/시간이면 시각, 일 이상이면 날짜.
+function fmtTempTick(ts, bucketMs) {
+  const d = new Date(ts);
+  if (bucketMs && bucketMs <= 3_600_000) return d.toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleDateString('ko-KR', { year: '2-digit', month: '2-digit', day: '2-digit' });
+}
+
 function EsxiTemp({ scope }) {
   const { loading, data, error } = useTool('/tools/esxi-temp', scope ? { vcenterId: scope } : {});
   const [view, setView] = useState('host'); // host | cluster | vc
   const [hist, setHist] = useState(null); // { level, key, days, points, synthesized }
   const [days, setDays] = useState(7);
+  const [bucket, setBucket] = useState('auto'); // auto | minute | hour | day
   const openHist = async (level, key) => {
     setHist({ level, key, loading: true });
-    const r = await fetchJson(`/tools/esxi-temp/history?level=${level}&key=${encodeURIComponent(key)}&days=${days}`).catch(() => null);
+    const bq = bucket && bucket !== 'auto' ? `&bucket=${bucket}` : '';
+    const r = await fetchJson(`/tools/esxi-temp/history?level=${level}&key=${encodeURIComponent(key)}&days=${days}${bq}`).catch(() => null);
     setHist(r ? { ...r } : { error: true });
   };
-  useEffect(() => { if (hist && hist.key) openHist(hist.level, hist.key); /* eslint-disable-next-line */ }, [days]);
+  useEffect(() => { if (hist && hist.key) openHist(hist.level, hist.key); /* eslint-disable-next-line */ }, [days, bucket]);
   if (loading) return <Loading />;
   if (error) return <ErrorBox message={error} />;
 
@@ -695,17 +704,24 @@ function EsxiTemp({ scope }) {
 
       {hist && (
         <Modal title={`온도 추이 — ${hist.key || ''}`} onClose={() => setHist(null)} width={760}>
-          <div className="flex gap" style={{ marginBottom: 10 }}>
+          <div className="flex gap wrap" style={{ marginBottom: 8 }}>
             {[[1, '1일'], [7, '1주'], [30, '1달'], [365, '1년'], [1830, '5년']].map(([d, l]) => (
               <button key={d} className={days === d ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '6px 12px', fontSize: 12 }} onClick={() => setDays(d)}>{l}</button>
             ))}
             {hist.synthesized && <span className="badge amber" style={{ alignSelf: 'center' }}>데모 합성</span>}
           </div>
+          <div className="flex gap wrap" style={{ marginBottom: 10, alignItems: 'center' }}>
+            <span className="muted" style={{ fontSize: 12 }}>집계 단위(기준)</span>
+            {[['auto', '자동'], ['minute', '분'], ['hour', '시간'], ['day', '일']].map(([b, l]) => (
+              <button key={b} className={bucket === b ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '5px 11px', fontSize: 12 }} onClick={() => setBucket(b)}>{l}</button>
+            ))}
+            {hist.points?.length ? <span className="muted" style={{ fontSize: 11 }}>{hist.points.length}개 구간</span> : null}
+          </div>
           {hist.loading ? <Loading /> : hist.error ? <ErrorBox message="이력을 불러오지 못했습니다." /> : (hist.points || []).length === 0
             ? <div className="muted">해당 기간 데이터가 없습니다(수집 누적 후 표시).</div>
             : (
               <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={(hist.points || []).map((p) => ({ t: new Date(p.ts).toLocaleDateString(), avg: p.avg, max: p.max }))}>
+                <LineChart data={(hist.points || []).map((p) => ({ t: fmtTempTick(p.ts, hist.bucketMs), avg: p.avg, max: p.max }))}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.08)" />
                   <XAxis dataKey="t" tick={{ fontSize: 11 }} minTickGap={40} />
                   <YAxis tick={{ fontSize: 11 }} unit="℃" domain={['auto', 'auto']} />
