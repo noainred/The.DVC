@@ -1,9 +1,10 @@
 /**
- * IP 스캔 설정 + 결과 저장소.
- * - 설정: config/ipam-scan.json (대역/포트/주기/동시성/타임아웃/사용여부)
- * - 결과: config/ipam-scan-results.json (ip → 열린포트/서비스/호스트명/최근확인)
+ * IP 스캔 설정(에이전트별) + 결과 저장소.
+ * - 설정: config/ipam-scan.json → { agents: { [name]: cfg } }
+ *     "__local__" = 이 포탈(중앙)에서 직접 스캔하는 설정.
+ *     그 외 이름 = 해당 분산 에이전트가 중앙에서 읽어가 자기 사이트에서 스캔할 설정.
+ * - 결과: config/ipam-scan-results.json (ip → 열린포트/서비스/호스트명/최근확인/agent)
  *   → IP 대장(ledger)이 이 결과를 병합해 물리/기타 서버 IP를 채운다.
- * 분산 에이전트는 각 사이트에서 자기 대역을 스캔하도록 이 인스턴스에서 enable한다.
  */
 
 import fs from 'node:fs';
@@ -13,25 +14,17 @@ import { DEFAULT_PORTS } from './scan.js';
 
 const CFG = path.join(config.configDir, 'ipam-scan.json');
 const RES = path.join(config.configDir, 'ipam-scan-results.json');
+export const LOCAL = '__local__';
 
 const DEFAULTS = {
-  enabled: false,
-  ranges: [],            // ["10.0.0.0/24", "192.168.1.1-50"]
-  ports: DEFAULT_PORTS,
-  intervalMs: 3_600_000, // 1시간
-  concurrency: 128,
-  timeoutMs: 700,
-  reverseDns: true,
-  retentionDays: 30,     // 이 기간 미확인 결과는 정리
+  enabled: false, ranges: [], ports: DEFAULT_PORTS,
+  intervalMs: 3_600_000, concurrency: 128, timeoutMs: 700, reverseDns: true, retentionDays: 30,
 };
 
-function readJson(file, dflt) {
-  if (!fs.existsSync(file)) return dflt;
-  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return dflt; }
-}
+const clamp = (v, lo, hi, d) => { const n = Number(v); return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : d; };
+function readJson(file, dflt) { if (!fs.existsSync(file)) return dflt; try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return dflt; } }
 
-export function loadScanSettings() {
-  const p = readJson(CFG, {}) || {};
+function normalizeCfg(p = {}) {
   return {
     enabled: !!p.enabled,
     ranges: Array.isArray(p.ranges) ? p.ranges.filter(Boolean) : [],
@@ -44,10 +37,28 @@ export function loadScanSettings() {
   };
 }
 
-const clamp = (v, lo, hi, d) => { const n = Number(v); return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : d; };
+function loadAll() {
+  const p = readJson(CFG, {}) || {};
+  // 구버전(단일 설정) 마이그레이션: 최상위에 ranges가 있으면 __local__로 이전.
+  if (!p.agents && (p.ranges || p.enabled !== undefined)) return { agents: { [LOCAL]: normalizeCfg(p) } };
+  return { agents: p.agents && typeof p.agents === 'object' ? p.agents : {} };
+}
 
-export function saveScanSettings(partial) {
-  const cur = loadScanSettings();
+function saveAll(all) {
+  fs.mkdirSync(path.dirname(CFG), { recursive: true });
+  fs.writeFileSync(CFG, JSON.stringify(all, null, 2), { mode: 0o600 });
+}
+
+/** 한 에이전트(기본=로컬)의 설정. */
+export function loadScanSettings(agent = LOCAL) {
+  const all = loadAll();
+  return normalizeCfg(all.agents[agent] || {});
+}
+
+/** 에이전트별 설정 저장(부분 업데이트). */
+export function saveScanSettings(agent, partial = {}) {
+  const all = loadAll();
+  const cur = normalizeCfg(all.agents[agent] || {});
   const next = { ...cur };
   if (partial.enabled !== undefined) next.enabled = !!partial.enabled;
   if (partial.ranges !== undefined) next.ranges = (Array.isArray(partial.ranges) ? partial.ranges : String(partial.ranges).split(/[\n,]/)).map((s) => String(s).trim()).filter(Boolean);
@@ -57,19 +68,24 @@ export function saveScanSettings(partial) {
   if (partial.timeoutMs !== undefined) next.timeoutMs = clamp(partial.timeoutMs, 100, 10_000, DEFAULTS.timeoutMs);
   if (partial.reverseDns !== undefined) next.reverseDns = !!partial.reverseDns;
   if (partial.retentionDays !== undefined) next.retentionDays = clamp(partial.retentionDays, 0, 3650, DEFAULTS.retentionDays);
-  fs.mkdirSync(path.dirname(CFG), { recursive: true });
-  fs.writeFileSync(CFG, JSON.stringify(next, null, 2), { mode: 0o600 });
+  all.agents[agent] = next;
+  saveAll(all);
   return next;
 }
 
-// 결과: { [ip]: { ip, openPorts, services, hostname, lastSeen } }
+export function listScanAgents() {
+  const all = loadAll();
+  return Object.keys(all.agents).map((name) => ({ name, ...normalizeCfg(all.agents[name]) }));
+}
+
+// ---- 결과 ----------------------------------------------------------------
 let results = readJson(RES, {}) || {};
 
 export function getScanResults() { return results; }
 export function scanResultList() { return Object.values(results).sort((a, b) => (a.ip < b.ip ? -1 : 1)); }
 
-export function mergeScanResults(alive, ts = Date.now()) {
-  for (const h of alive) results[h.ip] = { ip: h.ip, openPorts: h.openPorts, services: h.services, hostname: h.hostname || '', lastSeen: ts };
+export function mergeScanResults(alive, ts = Date.now(), agent = LOCAL) {
+  for (const h of alive) results[h.ip] = { ip: h.ip, openPorts: h.openPorts, services: h.services, hostname: h.hostname || '', lastSeen: ts, agent };
   persist();
 }
 
@@ -87,5 +103,7 @@ function persist() {
 
 export function scanInfo() {
   const list = scanResultList();
-  return { count: list.length, lastSeen: list.reduce((m, r) => Math.max(m, r.lastSeen || 0), 0) || null };
+  const byAgent = {};
+  for (const r of list) byAgent[r.agent || LOCAL] = (byAgent[r.agent || LOCAL] || 0) + 1;
+  return { count: list.length, lastSeen: list.reduce((m, r) => Math.max(m, r.lastSeen || 0), 0) || null, byAgent };
 }

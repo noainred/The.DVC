@@ -536,22 +536,33 @@ function IpmsSettings({ onClose }) {
 }
 
 /** IP 능동 스캔(TCP 커넥트) 설정 + 수동 실행 + 결과. 물리/기타 서버 IP를 대장에 채운다. */
+const LOCAL_AGENT = '__local__';
 function IpScanSettings({ onClose }) {
   const [s, setS] = useState(null);
+  const [agent, setAgent] = useState(LOCAL_AGENT);
+  const [agents, setAgents] = useState([LOCAL_AGENT]);
+  const [newAgent, setNewAgent] = useState('');
   const [status, setStatus] = useState(null);
   const [info, setInfo] = useState(null);
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
-  const load = async (first = false) => {
-    try { const r = await fetchJson('/admin/ipam/scan/settings'); if (first) setS(r.settings); setStatus(r.status); setInfo(r.info); }
-    catch (e) { setMsg(e.message); }
+  const load = async (ag, first = false) => {
+    try {
+      const r = await fetchJson('/admin/ipam/scan/settings', { agent: ag });
+      if (first) setS(r.settings);
+      if (r.agents) setAgents(r.agents);
+      setStatus(r.status); setInfo(r.info);
+    } catch (e) { setMsg(e.message); }
   };
-  useEffect(() => { load(true); const t = setInterval(() => load(false), 5000); return () => clearInterval(t); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { load(agent, true); const t = setInterval(() => load(agent, false), 5000); return () => clearInterval(t); /* eslint-disable-next-line */ }, [agent]);
   if (!s) return <Modal title="IP 스캔" onClose={onClose}>{msg ? <ErrorBox message={msg} /> : <Loading />}</Modal>;
 
+  const isLocal = agent === LOCAL_AGENT;
+  const agentLabel = (a) => (a === LOCAL_AGENT ? '이 포탈에서 직접' : a);
+  const switchAgent = (a) => { setS(null); setMsg(null); setAgent(a); };
   const save = async () => {
     setBusy(true); setMsg(null);
-    try { const r = await putJson('/admin/ipam/scan/settings', s); setS(r.settings); setStatus(r.status); setMsg('저장되었습니다.'); }
+    try { const r = await putJson('/admin/ipam/scan/settings', { ...s, agent }); setS(r.settings); setStatus(r.status); setMsg(isLocal ? '저장되었습니다(이 포탈에 즉시 적용).' : `저장되었습니다. '${agent}' 에이전트가 다음 주기에 읽어가 스캔합니다.`); }
     catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(false); }
   };
   const runNow = async () => {
@@ -565,12 +576,20 @@ function IpScanSettings({ onClose }) {
     <Modal title="🛰️ IP 능동 스캔 (TCP 커넥트)" onClose={onClose} width={680} resizable minWidth={460} minHeight={420}>
       <div className="muted" style={{ fontSize: 12, marginBottom: 12 }}>
         vCenter가 모르는 <b>물리서버·타 가상화·네트워크 장비</b> IP를 TCP 커넥트 스캔으로 찾아 IP 관리대장에 채웁니다.
-        분산 환경에선 각 사이트(에이전트)에서 켜고 그 사이트 대역을 등록하세요.
+        <b> 할당 에이전트</b>를 고르면 해당 에이전트가 이 설정을 읽어가 자기 사이트에서 스캔하고 결과를 포탈에 보고합니다.
         <span className="badge amber" style={{ marginLeft: 6 }}>승인된 대역만</span>
       </div>
       {msg && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>{msg}</div>}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'max-content 1fr', columnGap: 16, rowGap: 14, alignItems: 'start' }}>
+        <label style={{ fontWeight: 600, paddingTop: 9 }}>할당 에이전트</label>
+        <div className="flex gap wrap" style={{ alignItems: 'center' }}>
+          <select className="select" value={agent} onChange={(e) => switchAgent(e.target.value)} style={{ maxWidth: 260 }}>
+            {agents.map((a) => <option key={a} value={a}>{agentLabel(a)}</option>)}
+          </select>
+          <input className="input" style={{ width: 160 }} placeholder="새 에이전트 이름" value={newAgent} onChange={(e) => setNewAgent(e.target.value)} />
+          <button className="tab" style={{ flex: 'none', padding: '6px 12px' }} disabled={!newAgent.trim()} onClick={() => { const a = newAgent.trim(); setNewAgent(''); if (a) switchAgent(a); }}>추가/선택</button>
+        </div>
         <label style={{ fontWeight: 600, paddingTop: 9 }}>사용</label>
         <label className="flex gap" style={{ alignItems: 'center', paddingTop: 9 }}>
           <input type="checkbox" checked={s.enabled} onChange={(e) => setS({ ...s, enabled: e.target.checked })} /> 주기적으로 스캔
@@ -594,16 +613,19 @@ function IpScanSettings({ onClose }) {
         </div>
       </div>
 
+      {!isLocal && <div className="muted" style={{ fontSize: 12, marginTop: 12 }}>※ 이 설정은 <b>{agent}</b> 에이전트(<code>AGENT_NAME={agent}</code>, <code>CENTRAL_URL</code> 설정 필요)가 다음 주기에 읽어가 자기 사이트에서 스캔하고 결과를 포탈로 보고합니다. '지금 스캔'은 이 포탈에서 직접 스캔할 때만 동작합니다.</div>}
+
       <div className="card" style={{ padding: 12, marginTop: 14, fontSize: 13 }}>
-        <span className="muted">상태 <b style={{ color: status?.running ? 'var(--amber)' : 'var(--text)' }}>{status?.running ? '스캔 중' : (status?.enabled ? '활성' : '비활성')}</b></span>{' · '}
+        <span className="muted">이 포탈 상태 <b style={{ color: status?.running ? 'var(--amber)' : 'var(--text)' }}>{status?.running ? '스캔 중' : (status?.enabled ? '활성' : '비활성')}</b></span>{' · '}
         <span className="muted">저장된 결과 <b style={{ color: 'var(--text)' }}>{info?.count ?? 0}</b>개</span>
-        {last && !last.skipped && !last.error && <span className="muted"> · 최근: {last.scanned}개 중 {last.alive}개 응답</span>}
+        {info?.byAgent && Object.keys(info.byAgent).length > 0 && <span className="muted"> ({Object.entries(info.byAgent).map(([a, n]) => `${a === LOCAL_AGENT ? '포탈' : a}:${n}`).join(', ')})</span>}
+        {last && !last.skipped && !last.error && <span className="muted"> · 최근(포탈): {last.scanned}개 중 {last.alive}개 응답</span>}
         {last?.error && <span style={{ color: 'var(--red)' }}> · 오류: {last.error}</span>}
       </div>
 
       <div className="flex gap" style={{ marginTop: 14 }}>
         <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} disabled={busy} onClick={save}>저장</button>
-        <button className="logout-btn" style={{ padding: '9px 14px' }} disabled={busy || status?.running} onClick={runNow}>지금 스캔</button>
+        <button className="logout-btn" style={{ padding: '9px 14px' }} disabled={busy || status?.running || !isLocal} title={isLocal ? '' : '원격 에이전트는 자체 주기로 스캔합니다'} onClick={runNow}>지금 스캔(포탈)</button>
         <button className="logout-btn" style={{ padding: '9px 14px', marginLeft: 'auto' }} onClick={onClose}>닫기</button>
       </div>
     </Modal>
