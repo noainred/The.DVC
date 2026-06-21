@@ -535,11 +535,11 @@ const PERF_COUNTERS = {
 };
 
 /**
- * On-demand performance query for one VM (not part of the regular poll).
- * type: cpu|mem|disk|net, interval: realtime|day|week|month|year.
+ * On-demand performance query for a single entity (VM or Host) — not part of
+ * the regular poll. type: cpu|mem|disk|net, interval: realtime|day|week|month|year.
  * Returns { type, interval, unit, points:[{t,v}] }. Throws on failure.
  */
-export async function fetchVmMetric(vc, moref, type, interval, { start, end } = {}) {
+export async function fetchEntityMetric(vc, entityType, moref, type, interval, { start, end } = {}) {
   const cfg = PERF_COUNTERS[type];
   if (!cfg) throw new Error(`지원하지 않는 지표: ${type}`);
   const intervalId = PERF_INTERVALS[interval] || 20;
@@ -553,13 +553,16 @@ export async function fetchVmMetric(vc, moref, type, interval, { start, end } = 
     const startTime = start ? new Date(start).toISOString() : null;
     const endTime = end ? new Date(end).toISOString() : null;
     const maxSample = (!startTime && interval === 'realtime') ? 180 : 0;
-    const raw = await c.queryEntityPerf('VirtualMachine', moref, counterId, intervalId, maxSample, { startTime, endTime });
+    const raw = await c.queryEntityPerf(entityType, moref, counterId, intervalId, maxSample, { startTime, endTime });
     const points = raw.map((p) => ({ t: p.t, v: cfg.div > 1 ? Math.round((Math.max(0, p.v) / cfg.div) * 10) / 10 : Math.max(0, p.v) }));
     return { ok: true, type, interval, unit: cfg.unit, points, start: startTime, end: endTime };
   } finally {
     await c.logout();
   }
 }
+
+export const fetchVmMetric = (vc, moref, type, interval, opts) => fetchEntityMetric(vc, 'VirtualMachine', moref, type, interval, opts);
+export const fetchHostMetric = (vc, moref, type, interval, opts) => fetchEntityMetric(vc, 'HostSystem', moref, type, interval, opts);
 
 /** Trigger VMware Tools upgrade on the given VM MoRefs. Returns per-VM result. */
 export async function upgradeVmTools(vc, morefs) {

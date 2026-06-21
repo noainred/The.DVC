@@ -3,7 +3,7 @@ import { store } from '../store.js';
 import { currentVersion, config, loadVcenterConfig } from '../config.js';
 import { loadUiSettings, saveUiSettings } from '../ui-settings.js';
 import { hostPower } from '../idrac/service.js';
-import { fetchVmMetric, PERF_INTERVALS, upgradeVmTools, getVmConsole } from '../vcenter/soapClient.js';
+import { fetchVmMetric, fetchHostMetric, PERF_INTERVALS, upgradeVmTools, getVmConsole } from '../vcenter/soapClient.js';
 import { listMutes, addMute, removeMute } from '../alarm-mutes.js';
 import { buildIpamRows, buildSubnetSheets, listSubnets } from '../ipam/ledger.js';
 import { getAnnotation, setAnnotation } from '../ipam/annotations.js';
@@ -50,6 +50,33 @@ api.get('/vms/:id/metrics', async (req, res) => {
   if (!vc) return res.status(404).json({ ok: false, reason: 'vCenter 설정을 찾을 수 없습니다.' });
   try {
     res.json(await fetchVmMetric(vc, moref, type, interval, { start, end }));
+  } catch (err) {
+    res.status(502).json({ ok: false, reason: err.message });
+  }
+});
+
+// ESXi 호스트 성능 — CPU/메모리/디스크/네트워크 실시간 + 기간 조회(VM과 동일 방식).
+//   /hosts/:id/metrics?type=cpu|mem|disk|net&interval=realtime|day|week|month|year
+api.get('/hosts/:id/metrics', async (req, res) => {
+  const id = req.params.id;
+  const type = METRIC_TYPES.includes(req.query.type) ? req.query.type : 'cpu';
+  const interval = PERF_INTERVALS[req.query.interval] ? req.query.interval : 'realtime';
+  const start = req.query.start && !Number.isNaN(Date.parse(req.query.start)) ? req.query.start : null;
+  const end = req.query.end && !Number.isNaN(Date.parse(req.query.end)) ? req.query.end : null;
+
+  const snap = store.get();
+  const host = (snap.hosts || []).find((h) => h.id === id);
+  if (!host) return res.status(404).json({ ok: false, reason: '호스트를 찾을 수 없습니다.' });
+
+  if (snap.source === 'mock') return res.json(synthMetric(host, type, interval, { start, end }));
+
+  const sep = id.indexOf(':');
+  const vcId = sep >= 0 ? id.slice(0, sep) : id;
+  const moref = sep >= 0 ? id.slice(sep + 1) : '';
+  const vc = loadVcenterConfig().vcenters.find((v) => v.id === vcId);
+  if (!vc) return res.status(404).json({ ok: false, reason: 'vCenter 설정을 찾을 수 없습니다.' });
+  try {
+    res.json(await fetchHostMetric(vc, moref, type, interval, { start, end }));
   } catch (err) {
     res.status(502).json({ ok: false, reason: err.message });
   }
