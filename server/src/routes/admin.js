@@ -28,7 +28,7 @@ import { loadGpuGuestSettings, saveGpuGuestSettings, redactGpuGuestSettings } fr
 import { gpuGuestStatus, rescheduleGpuGuestPoller } from '../gpu/poller.js';
 import { loadScanSettings, saveScanSettings, scanResultList, scanInfo, listScanAgents, LOCAL } from '../ipam/scanStore.js';
 import { runScanOnce, scanStatus, rescheduleScanPoller } from '../ipam/scanPoller.js';
-import { listAssignments as listIdracAssignments } from '../central/assignments.js';
+import { listAssignments as listIdracAssignments, getResults as getAgentResults } from '../central/assignments.js';
 import {
   listRegistry as listNsx, addManager as addNsx, updateManager as updateNsx,
   removeManager as removeNsx, testConnection as testNsx,
@@ -209,10 +209,14 @@ adminRouter.put('/ipam/settings', adminOnly, (req, res) => res.json({ ok: true, 
 // agent 미지정 = 이 포탈(중앙) 직접 스캔(__local__). 그 외 이름 = 분산 에이전트 할당.
 adminRouter.get('/ipam/scan/settings', adminOnly, (req, res) => {
   const agent = req.query.agent || LOCAL;
-  // 선택 가능한 에이전트 목록: 로컬 + iDRAC 할당 에이전트 + 이미 IP스캔 설정된 에이전트.
+  // 선택 가능한 에이전트: 로컬 + IP스캔 설정된 에이전트 + iDRAC 할당 + 중앙에 보고한
+  // 에이전트(getResults) + 배포된 에이전트(agentName) + 수집 서버(datacenter).
   const names = new Set([LOCAL]);
   for (const a of listScanAgents()) names.add(a.name);
-  for (const a of listIdracAssignments()) names.add(a.agent);
+  for (const a of listIdracAssignments()) if (a.agent) names.add(a.agent);
+  for (const k of Object.keys(getAgentResults() || {})) names.add(k);
+  for (const t of listTargets()) if (t.agentName) names.add(t.agentName);
+  for (const c of listCollectors()) if (c.datacenter) names.add(c.datacenter);
   res.json({ agent, settings: loadScanSettings(agent), agents: [...names], status: scanStatus(), info: scanInfo() });
 });
 adminRouter.put('/ipam/scan/settings', adminOnly, (req, res) => {
