@@ -7,7 +7,7 @@
 import { Router } from 'express';
 import { config } from '../config.js';
 import { getAssignment, setResult } from '../central/assignments.js';
-import { loadScanSettings, mergeScanResults } from '../ipam/scanStore.js';
+import { loadScanSettings, mergeScanResults, recordAgentReport } from '../ipam/scanStore.js';
 
 export const centralRouter = Router();
 
@@ -60,5 +60,6 @@ centralRouter.post('/ip-scan-result', (req, res) => {
   const b = req.body || {};
   if (!b.agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
   if (Array.isArray(b.alive)) mergeScanResults(b.alive.slice(0, 8000), Date.now(), String(b.agent));
+  recordAgentReport(String(b.agent), { scanned: b.scanned || 0, alive: Array.isArray(b.alive) ? b.alive.length : 0 });
   res.json({ ok: true, merged: Array.isArray(b.alive) ? b.alive.length : 0 });
 });
