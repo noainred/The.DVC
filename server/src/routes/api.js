@@ -690,23 +690,38 @@ api.post('/tools/vm-finder', async (req, res) => {
 });
 
 // ESXi 온도 — 현재 값(호스트/클러스터/법인별 그룹) + 5년 히스토리 시계열.
-api.get('/tools/esxi-temp', (req, res) => {
+api.get('/tools/esxi-temp', async (req, res) => {
   const snap = store.get();
   const vcId = req.query.vcenterId;
   const hosts = (snap.hosts || []).filter((h) => (!vcId || h.vcenterId === vcId) && h.tempC != null);
   const r1 = (x) => (x == null ? null : Number(x.toFixed(1)));
-  const grp = (keyFn) => {
+  // 최근 5분 평균/최대(시계열). 표시 컬럼: 현재온도 / 5분 평균 / 최대 온도.
+  let avg5Host = new Map(); let avg5Cluster = new Map(); let avg5Vc = new Map();
+  try {
+    const db = await getMetricsDb();
+    const since = Date.now() - 5 * 60_000;
+    avg5Host = db.recentAvg('temp_host', since);
+    avg5Cluster = db.recentAvg('temp_cluster', since);
+    avg5Vc = db.recentAvg('temp_vc', since);
+  } catch { /* 시계열 없으면 5분 평균은 null */ }
+  const grp = (keyFn, avg5Map) => {
     const m = new Map();
     for (const h of hosts) { const k = keyFn(h); const g = m.get(k) || { key: k, count: 0, sum: 0, max: -Infinity }; g.count++; g.sum += h.tempC; g.max = Math.max(g.max, h.tempMaxC ?? h.tempC); m.set(k, g); }
-    return [...m.values()].map((g) => ({ key: g.key, hosts: g.count, avgC: r1(g.sum / g.count), maxC: r1(g.max) })).sort((a, b) => b.avgC - a.avgC);
+    return [...m.values()].map((g) => {
+      const a5 = avg5Map.get(g.key);
+      return { key: g.key, hosts: g.count, curC: r1(g.sum / g.count), avg5C: a5 ? a5.avg : null, maxC: r1(Math.max(g.max, a5?.max ?? -Infinity)) };
+    }).sort((a, b) => b.curC - a.curC);
   };
   res.json({
     scope: vcId || 'all',
     reportingHosts: hosts.length,
     totalHosts: (snap.hosts || []).filter((h) => !vcId || h.vcenterId === vcId).length,
-    hosts: hosts.map((h) => ({ id: h.id, name: h.name, vcenterId: h.vcenterId, cluster: h.cluster, tempC: h.tempC, tempMaxC: h.tempMaxC ?? h.tempC, temps: h.temps || [] })).sort((a, b) => b.tempC - a.tempC),
-    clusters: grp((h) => `${h.vcenterId}|${h.cluster || 'standalone'}`),
-    vcenters: grp((h) => h.vcenterId),
+    hosts: hosts.map((h) => {
+      const a5 = avg5Host.get(h.id);
+      return { id: h.id, name: h.name, vcenterId: h.vcenterId, cluster: h.cluster, curC: h.tempC, avg5C: a5 ? a5.avg : null, tempMaxC: r1(Math.max(h.tempMaxC ?? h.tempC, a5?.max ?? -Infinity)), temps: h.temps || [] };
+    }).sort((a, b) => b.curC - a.curC),
+    clusters: grp((h) => `${h.vcenterId}|${h.cluster || 'standalone'}`, avg5Cluster),
+    vcenters: grp((h) => h.vcenterId, avg5Vc),
   });
 });
 
