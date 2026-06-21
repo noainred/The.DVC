@@ -450,17 +450,19 @@ function MemoEditor({ init, onClose, onSaved }) {
     if (r.ok) onSaved(); else setErr(r.reason || '저장 실패');
   };
   return (
-    <Modal title={`메모 · 태그 — ${init.ip}`} onClose={onClose} width={680} resizable minWidth={420} minHeight={360}>
+    <Modal title={`메모 · 태그 — ${init.ip}`} onClose={onClose} width={720} resizable minWidth={460} minHeight={380}>
       <div className="muted" style={{ fontSize: 12, marginBottom: 14 }}>vCenter 메모와 별개로, 이 IP에 직접 남기는 메모/태그입니다. (수집 갱신에도 유지)</div>
       {err && <div className="login-error" style={{ marginBottom: 8 }}>{err}</div>}
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        <label style={{ display: 'block', fontWeight: 600, marginBottom: 6 }}>메모</label>
+      {/* 2열 폼: 라벨(왼쪽 기준선) · 입력 박스(오른쪽 기준선)로 정렬 */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'max-content 1fr', columnGap: 16, rowGap: 16, alignItems: 'start' }}>
+        <label style={{ fontWeight: 600, paddingTop: 9, whiteSpace: 'nowrap' }}>메모</label>
         <textarea className="input" value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="예: 보안취약점 점검 대상, 담당 홍길동"
-          style={{ resize: 'vertical', minHeight: 120, flex: '1 1 auto', width: '100%', boxSizing: 'border-box', display: 'block', marginBottom: 16 }} />
-        <label style={{ display: 'block', fontWeight: 600, marginBottom: 6 }}>태그 (쉼표로 구분)</label>
+          style={{ resize: 'vertical', minHeight: 140, width: '100%', boxSizing: 'border-box', display: 'block' }} />
+        <label style={{ fontWeight: 600, paddingTop: 9, whiteSpace: 'nowrap' }}>태그<span className="muted" style={{ fontWeight: 400, fontSize: 11 }}> (쉼표로 구분)</span></label>
         <input className="input" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="예: 점검, IAM, 운영"
           style={{ width: '100%', boxSizing: 'border-box', display: 'block' }} />
-        <div className="flex gap" style={{ marginTop: 18 }}>
+        <div />
+        <div className="flex gap" style={{ marginTop: 4 }}>
           <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} disabled={busy} onClick={save}>{busy ? '저장 중…' : '저장'}</button>
           <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={onClose}>취소</button>
         </div>
