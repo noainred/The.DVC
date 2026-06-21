@@ -17,12 +17,12 @@ const DB_PATH = config.ipam.dbPath;
 let impl = null;
 let ready = null;
 
-const COLUMNS = ['ip', 'ip_num', 'vcenter_id', 'vcenter_name', 'owner_type', 'owner_name',
-  'power_state', 'guest_os', 'host_name', 'cluster', 'scope', 'multi_homed', 'duplicate', 'updated_at'];
+const COLUMNS = ['ip', 'ip_num', 'vcenter_id', 'vcenter_name', 'owner_type', 'server_type', 'owner_name',
+  'power_state', 'guest_os', 'os_name', 'os_version', 'host_name', 'cluster', 'scope', 'multi_homed', 'duplicate', 'updated_at'];
 
 function toRecord(r, updatedAt) {
-  return [r.ip, r.ipNum ?? null, r.vcenterId, r.vcenterName, r.ownerType, r.ownerName,
-    r.powerState || '', r.guestOS || '', r.hostName || '', r.cluster || '', r.scope || '',
+  return [r.ip, r.ipNum ?? null, r.vcenterId, r.vcenterName, r.ownerType, r.serverType || (r.ownerType === 'host' ? 'BareMetal' : 'VM'), r.ownerName,
+    r.powerState || '', r.guestOS || '', r.osName || '', r.osVersion || '', r.hostName || '', r.cluster || '', r.scope || '',
     r.multiHomed ? 1 : 0, r.duplicate ? 1 : 0, updatedAt];
 }
 
@@ -38,9 +38,12 @@ function initSqlite() {
         vcenter_id TEXT NOT NULL,
         vcenter_name TEXT,
         owner_type TEXT NOT NULL,
+        server_type TEXT,
         owner_name TEXT NOT NULL,
         power_state TEXT,
         guest_os TEXT,
+        os_name TEXT,
+        os_version TEXT,
         host_name TEXT,
         cluster TEXT,
         scope TEXT,
@@ -51,8 +54,11 @@ function initSqlite() {
       CREATE INDEX IF NOT EXISTS idx_ip_records_ip ON ip_records (ip);
       CREATE INDEX IF NOT EXISTS idx_ip_records_vc ON ip_records (vcenter_id);
     `);
-    // Migrate older DBs that predate the public/private classification column.
+    // Migrate older DBs that predate newer columns (best-effort; ignore if present).
     try { db.exec('ALTER TABLE ip_records ADD COLUMN scope TEXT'); } catch { /* already present */ }
+    try { db.exec('ALTER TABLE ip_records ADD COLUMN server_type TEXT'); } catch { /* already present */ }
+    try { db.exec('ALTER TABLE ip_records ADD COLUMN os_name TEXT'); } catch { /* already present */ }
+    try { db.exec('ALTER TABLE ip_records ADD COLUMN os_version TEXT'); } catch { /* already present */ }
     try { fs.chmodSync(DB_PATH, 0o600); } catch { /* best effort */ }
     const del = db.prepare('DELETE FROM ip_records');
     const ins = db.prepare(`INSERT INTO ip_records (${COLUMNS.join(', ')}) VALUES (${COLUMNS.map(() => '?').join(', ')})`);

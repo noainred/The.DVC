@@ -29,9 +29,23 @@ const TOOLS = [
 
 const tb = (gb) => (gb >= 1024 ? `${(gb / 1024).toFixed(1)} TB` : `${gb} GB`);
 
+// URL 해시(#/tools/<기능키>)에서 현재 도구 키를 읽는다(바로가기/북마크 지원).
+const toolFromHash = () => {
+  const parts = window.location.hash.replace(/^#\/?/, '').split('/');
+  const k = parts[0] === 'tools' ? parts[1] : '';
+  return TOOLS.some((t) => t.k === k) ? k : null;
+};
+
 export default function SpecialTools() {
-  const [tool, setTool] = useState(null);
-  if (tool) return <ToolPanel tool={tool} onBack={() => setTool(null)} />;
+  const [tool, setTool] = useState(() => toolFromHash());
+  const openTool = (k) => { setTool(k); window.location.hash = k ? `#/tools/${k}` : '#/tools'; };
+  // 뒤로/앞으로 가기 및 외부에서 바로가기로 진입할 때 동기화.
+  useEffect(() => {
+    const onHash = () => setTool(toolFromHash());
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+  if (tool) return <ToolPanel tool={tool} onBack={() => openTool(null)} />;
   return (
     <>
       <div className="section-title" style={{ marginTop: 0 }}>🛠️ 특수 기능</div>
@@ -44,8 +58,8 @@ export default function SpecialTools() {
               opacity: t.disabled ? 0.5 : 1,
               ...(t.danger && !t.disabled ? { borderColor: 'var(--red)' } : {}),
             }}
-            onClick={t.disabled ? undefined : () => setTool(t.k)}
-            title={t.disabled ? '비활성화됨 (관리자 전용)' : undefined}>
+            onClick={t.disabled ? undefined : () => openTool(t.k)}
+            title={t.disabled ? '비활성화됨 (관리자 전용)' : `바로가기: #/tools/${t.k}`}>
             <div style={{ fontSize: 30, filter: t.disabled ? 'grayscale(1)' : 'none' }}>{t.icon}</div>
             <div className="vc-name" style={{ marginTop: 8, ...(t.danger && !t.disabled ? { color: 'var(--red)' } : {}) }}>{t.label}</div>
             <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>{t.desc}</div>
@@ -281,9 +295,11 @@ function Ipam({ scope, onScope }) {
       <span className={`badge ${r.scope === 'public' ? 'amber' : 'green'}`}>{r.scope === 'public' ? '공인' : '사설'}</span>
     ) },
     { key: 'vcenterName', label: '센터(vCenter)' },
-    { key: 'ownerName', label: '소유 자원', render: (r) => <><span className="badge blue">{r.ownerType === 'vm' ? 'VM' : '호스트'}</span> <button className="cell-link" onClick={() => setSel({ ownerType: r.ownerType, owner: r.owner })}>{r.ownerName}</button></> },
+    { key: 'serverType', label: '서버종류', sortValue: (r) => r.serverType || '', render: (r) => <span className={`badge ${r.serverType === 'BareMetal' ? 'amber' : 'blue'}`}>{r.serverType === 'BareMetal' ? '베어메탈' : 'VM'}</span> },
+    { key: 'ownerName', label: '소유 자원', render: (r) => <button className="cell-link" onClick={() => setSel({ ownerType: r.ownerType, owner: r.owner })}>{r.ownerName}</button> },
     { key: 'powerState', label: '전원', render: (r) => <StateBadge state={r.powerState} /> },
-    { key: 'guestOS', label: 'OS / 게스트' },
+    { key: 'osName', label: 'OS 종류', sortValue: (r) => r.osName || '', render: (r) => r.osName || <span className="muted">—</span> },
+    { key: 'osVersion', label: 'OS 버전', sortValue: (r) => r.osVersion || '', render: (r) => r.osVersion || <span className="muted">—</span> },
     { key: 'hostName', label: 'ESXi 호스트' },
   ];
 
@@ -370,14 +386,16 @@ function Ipam({ scope, onScope }) {
                 </div>
                 <div className="table-wrap" style={{ maxHeight: '62vh' }}>
                   <table>
-                    <thead><tr><th>{base}.X</th><th>Purpose</th><th>Hostname</th><th>메모(Notes)</th><th>전원</th><th>분류</th><th>상태</th><th>메모 · 태그</th></tr></thead>
+                    <thead><tr><th>{base}.X</th><th>Purpose</th><th>Hostname</th><th>서버종류</th><th>OS</th><th>메모(Notes)</th><th>전원</th><th>분류</th><th>상태</th><th>메모 · 태그</th></tr></thead>
                     <tbody>
-                      {shown.length === 0 && <tr><td colSpan={8} className="center muted" style={{ padding: 22 }}>해당 상태의 IP가 없습니다.</td></tr>}
+                      {shown.length === 0 && <tr><td colSpan={10} className="center muted" style={{ padding: 22 }}>해당 상태의 IP가 없습니다.</td></tr>}
                       {shown.map((r) => (
                         <tr key={r.ip} style={{ background: ROWBG[r.status] }}>
                           <td><b>{r.ip}</b></td>
                           <td>{r.purpose}</td>
                           <td>{r.hostname ? <VmLink ip={r.ip} vcenterId={scope} label={r.hostname} /> : ''}</td>
+                          <td className="muted" style={{ fontSize: 12 }}>{r.serverType || ''}</td>
+                          <td className="muted" style={{ fontSize: 12 }}>{r.os || ''}</td>
                           <td className="muted" style={{ fontSize: 12 }}>{r.notes}</td>
                           <td>{r.power}</td>
                           <td className="muted" style={{ fontSize: 12 }}>{r.scope}</td>
@@ -432,18 +450,20 @@ function MemoEditor({ init, onClose, onSaved }) {
     if (r.ok) onSaved(); else setErr(r.reason || '저장 실패');
   };
   return (
-    <Modal title={`메모 · 태그 — ${init.ip}`} onClose={onClose} width={480}>
-      <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>vCenter 메모와 별개로, 이 IP에 직접 남기는 메모/태그입니다. (수집 갱신에도 유지)</div>
+    <Modal title={`메모 · 태그 — ${init.ip}`} onClose={onClose} width={680} resizable minWidth={420} minHeight={360}>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 14 }}>vCenter 메모와 별개로, 이 IP에 직접 남기는 메모/태그입니다. (수집 갱신에도 유지)</div>
       {err && <div className="login-error" style={{ marginBottom: 8 }}>{err}</div>}
-      <label style={{ display: 'block', marginBottom: 12 }}>메모
-        <textarea className="input" rows={4} value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="예: 보안취약점 점검 대상, 담당 홍길동" style={{ resize: 'vertical' }} />
-      </label>
-      <label style={{ display: 'block', marginBottom: 4 }}>태그 (쉼표로 구분)
-        <input className="input" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="예: 점검, IAM, 운영" />
-      </label>
-      <div className="flex gap" style={{ marginTop: 16 }}>
-        <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} disabled={busy} onClick={save}>{busy ? '저장 중…' : '저장'}</button>
-        <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={onClose}>취소</button>
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        <label style={{ display: 'block', fontWeight: 600, marginBottom: 6 }}>메모</label>
+        <textarea className="input" value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="예: 보안취약점 점검 대상, 담당 홍길동"
+          style={{ resize: 'vertical', minHeight: 120, flex: '1 1 auto', width: '100%', boxSizing: 'border-box', display: 'block', marginBottom: 16 }} />
+        <label style={{ display: 'block', fontWeight: 600, marginBottom: 6 }}>태그 (쉼표로 구분)</label>
+        <input className="input" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="예: 점검, IAM, 운영"
+          style={{ width: '100%', boxSizing: 'border-box', display: 'block' }} />
+        <div className="flex gap" style={{ marginTop: 18 }}>
+          <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} disabled={busy} onClick={save}>{busy ? '저장 중…' : '저장'}</button>
+          <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={onClose}>취소</button>
+        </div>
       </div>
     </Modal>
   );

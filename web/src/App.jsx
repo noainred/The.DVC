@@ -99,7 +99,8 @@ function Portal({ user, onLogout }) {
     return Boolean(t && (!t.adminOnly || user.role === 'admin'));
   };
   const tabFromHash = () => {
-    const h = window.location.hash.replace(/^#\/?/, '');
+    // 첫 세그먼트만 탭으로 사용(예: #/tools/esxitemp → tools). 나머지는 각 뷰가 처리.
+    const h = window.location.hash.replace(/^#\/?/, '').split('/')[0];
     return isAllowed(h) ? h : null;
   };
 

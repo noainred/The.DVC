@@ -12,6 +12,15 @@ export function ipToNum(s) {
     ? (((p[0] << 24) >>> 0) + (p[1] << 16) + (p[2] << 8) + p[3]) : null;
 }
 
+/** "CentOS 7 (64-bit)" → { osName:'CentOS', osVersion:'7' } 식으로 분리. */
+export function parseOs(guestOS) {
+  const s = String(guestOS || '').replace(/\s*\(\d+-bit\)\s*$/i, '').trim();
+  if (!s) return { osName: '', osVersion: '' };
+  const m = s.match(/^(.*?)[\s-]*((?:\d+\.)+\d+|\d{4}|\d+(?:\s*R\d)?)\s*$/);
+  if (m && m[2]) return { osName: (m[1] || '').trim() || s, osVersion: m[2].trim() };
+  return { osName: s, osVersion: '' };
+}
+
 /** Build IP rows + summary from a snapshot, optionally scoped to one vCenter. */
 export function buildIpamRows(snap, vcenterId) {
   let vms = snap.vms || [];
@@ -34,7 +43,8 @@ export function buildIpamRows(snap, vcenterId) {
       count.set(ip, (count.get(ip) || 0) + 1);
       rows.push({
         ip, ipNum: ipToNum(ip), vcenterId: vm.vcenterId, vcenterName: vcName[vm.vcenterId] || vm.vcenterId,
-        ownerType: 'vm', ownerName: vm.name, powerState: vm.powerState, guestOS: vm.guestOS,
+        ownerType: 'vm', serverType: 'VM', ownerName: vm.name, powerState: vm.powerState, guestOS: vm.guestOS,
+        ...parseOs(vm.guestOS),
         hostName: vm.host || '', cluster: vm.cluster || '', multiHomed: ips.length > 1, scope: classify(ip), owner: vm,
       });
     }
@@ -45,7 +55,8 @@ export function buildIpamRows(snap, vcenterId) {
     count.set(h.name, (count.get(h.name) || 0) + 1);
     rows.push({
       ip: h.name, ipNum: ipToNum(h.name), vcenterId: h.vcenterId, vcenterName: vcName[h.vcenterId] || h.vcenterId,
-      ownerType: 'host', ownerName: h.name, powerState: h.powerState, guestOS: `ESXi ${h.version || ''}`.trim(),
+      ownerType: 'host', serverType: 'BareMetal', ownerName: h.name, powerState: h.powerState, guestOS: `ESXi ${h.version || ''}`.trim(),
+      osName: 'ESXi', osVersion: h.version || '',
       hostName: h.name, cluster: h.cluster || '', multiHomed: false, scope: classify(h.name), owner: h,
     });
   }
@@ -92,20 +103,22 @@ export function buildSubnetSheets(snap, { vcenterId, onlyBase } = {}) {
     for (let i = 0; i < 256; i++) {
       const ip = `${base}.${i}`;
       const recs = byIp.get(ip) || [];
-      let status = 'empty', purpose = '', hostname = '', notes = '', power = '', scope = '';
+      let status = 'empty', purpose = '', hostname = '', notes = '', power = '', scope = '', serverType = '', os = '';
       if (i === 0) { status = 'network'; purpose = 'Network ID'; }
       else if (recs.length) {
         used++;
         const r = recs[0]; const o = r.owner || {};
         status = recs.length > 1 ? 'duplicate' : (r.multiHomed ? 'multihomed' : 'used');
         hostname = [...new Set(recs.map((x) => x.ownerName))].join(' / ');
-        purpose = `${r.ownerType === 'vm' ? 'VM' : '호스트'} · ${r.vcenterName}${o.cluster ? ` / ${o.cluster}` : ''}`;
+        serverType = r.serverType === 'BareMetal' ? '베어메탈' : 'VM';
+        os = [r.osName, r.osVersion].filter(Boolean).join(' ');
+        purpose = `${serverType} · ${r.vcenterName}${o.cluster ? ` / ${o.cluster}` : ''}`;
         notes = (o.notes || '').split(/\r?\n/)[0] || '';
         power = o.powerState === 'POWERED_ON' ? 'On' : (o.powerState ? 'Off' : '');
         scope = r.scope === 'public' ? '공인' : '사설';
       }
       const ann = annotations[ip];
-      sheetRows.push({ ip, last: i, purpose, hostname, notes, power, status, scope, memo: ann?.memo || '', tags: ann?.tags || [] });
+      sheetRows.push({ ip, last: i, purpose, hostname, serverType, os, notes, power, status, scope, memo: ann?.memo || '', tags: ann?.tags || [] });
     }
     return { subnet: `${base}.0/24`, base, used, rows: sheetRows };
   });
