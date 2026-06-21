@@ -124,7 +124,15 @@ export default function Vms({ filters }) {
             <div className="card kpi"><div className="label">할당 디스크 합계</div><div className="value" style={{ color: 'var(--accent-2)' }}>{fmt(t.diskTB)}<small> TB</small></div><div className="meta">{fmt(t.diskGB)} GB</div></div>
             <div className="card kpi"><div className="label">평균 CPU 사용률</div><div className="value">{t.avgCpuUsagePct}%</div><div className="meta">구동중 VM 기준</div></div>
             <div className="card kpi"><div className="label">평균 메모리 사용률</div><div className="value">{t.avgMemUsagePct}%</div><div className="meta">구동중 VM 기준</div></div>
-            <div className="card kpi"><div className="label">GPU 할당 VM</div><div className="value" style={{ color: 'var(--green)' }}>{fmt(g.total)}</div><div className="meta">vGPU {fmt(g.vgpu)} · 패스쓰루 {fmt(g.passthrough)}{g.mixed ? ` · 혼합 ${fmt(g.mixed)}` : ''}</div></div>
+            <div className="card kpi" role="button" tabIndex={0}
+              style={{ cursor: 'pointer', outline: (gpuOnly || gpuType) ? '1px solid var(--green)' : 'none' }}
+              title="클릭하면 GPU 할당 VM만 표시"
+              onClick={() => { const n = !(gpuOnly || gpuType); setGpuOnly(n); if (!n) setGpuType(''); }}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); const n = !(gpuOnly || gpuType); setGpuOnly(n); if (!n) setGpuType(''); } }}>
+              <div className="label">GPU 할당 VM {(gpuOnly || gpuType) ? '✓' : '▸'}</div>
+              <div className="value" style={{ color: 'var(--green)' }}>{fmt(g.total)}</div>
+              <div className="meta">vGPU {fmt(g.vgpu)} · 패스쓰루 {fmt(g.passthrough)}{g.mixed ? ` · 혼합 ${fmt(g.mixed)}` : ''}</div>
+            </div>
           </div>
           <div className="section-title">가상머신 상세</div>
         </>
