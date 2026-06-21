@@ -5,6 +5,7 @@
 
 import { getIgnoreMatcher, getClassifier } from './settings.js';
 import { getAnnotations } from './annotations.js';
+import { scanResultList } from './scanStore.js';
 
 export function ipToNum(s) {
   const p = String(s || '').split('.').map(Number);
@@ -60,6 +61,24 @@ export function buildIpamRows(snap, vcenterId) {
       hostName: h.name, cluster: h.cluster || '', multiHomed: false, scope: classify(h.name), owner: h,
     });
   }
+  // 능동 스캔으로 발견된 IP(물리/기타 서버 등) 병합 — vCenter가 모르는 IP만 추가.
+  // 스캔 결과는 특정 vCenter에 속하지 않으므로 vCenter 스코프와 무관하게 표시한다.
+  if (!vcenterId) {
+    const known = new Set(rows.map((r) => r.ip));
+    for (const sc of scanResultList()) {
+      if (ignored(sc.ip, '') || known.has(sc.ip) || ipToNum(sc.ip) == null) continue;
+      known.add(sc.ip);
+      count.set(sc.ip, (count.get(sc.ip) || 0) + 1);
+      rows.push({
+        ip: sc.ip, ipNum: ipToNum(sc.ip), vcenterId: '', vcenterName: '(네트워크 스캔)',
+        ownerType: 'scanned', serverType: 'Scanned', ownerName: sc.hostname || sc.ip,
+        powerState: 'POWERED_ON', guestOS: '', osName: '', osVersion: '',
+        hostName: sc.hostname || '', cluster: '', multiHomed: false, scope: classify(sc.ip),
+        openPorts: sc.openPorts || [], services: sc.services || [], lastSeen: sc.lastSeen || null,
+        source: 'scan', owner: null,
+      });
+    }
+  }
   for (const r of rows) r.duplicate = count.get(r.ip) > 1;
   rows.sort((a, b) => (a.ipNum ?? Infinity) - (b.ipNum ?? Infinity));
 
@@ -110,9 +129,11 @@ export function buildSubnetSheets(snap, { vcenterId, onlyBase } = {}) {
         const r = recs[0]; const o = r.owner || {};
         status = recs.length > 1 ? 'duplicate' : (r.multiHomed ? 'multihomed' : 'used');
         hostname = [...new Set(recs.map((x) => x.ownerName))].join(' / ');
-        serverType = r.serverType === 'BareMetal' ? '베어메탈' : 'VM';
-        os = [r.osName, r.osVersion].filter(Boolean).join(' ');
-        purpose = `${serverType} · ${r.vcenterName}${o.cluster ? ` / ${o.cluster}` : ''}`;
+        serverType = r.serverType === 'BareMetal' ? '베어메탈' : (r.serverType === 'Scanned' ? '스캔' : 'VM');
+        os = r.serverType === 'Scanned' ? (r.services || []).join(', ') : [r.osName, r.osVersion].filter(Boolean).join(' ');
+        purpose = r.serverType === 'Scanned'
+          ? `네트워크 스캔 · 포트 ${(r.openPorts || []).join(',')}`
+          : `${serverType} · ${r.vcenterName}${o.cluster ? ` / ${o.cluster}` : ''}`;
         notes = (o.notes || '').split(/\r?\n/)[0] || '';
         power = o.powerState === 'POWERED_ON' ? 'On' : (o.powerState ? 'Off' : '');
         scope = r.scope === 'public' ? '공인' : '사설';

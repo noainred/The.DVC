@@ -26,6 +26,8 @@ import { loadMetricsSettings, saveMetricsSettings, METRICS_LIMITS } from '../met
 import { metricsSamplerStatus, rescheduleMetricsSampler } from '../metrics/sampler.js';
 import { loadGpuGuestSettings, saveGpuGuestSettings, redactGpuGuestSettings } from '../gpu/settings.js';
 import { gpuGuestStatus, rescheduleGpuGuestPoller } from '../gpu/poller.js';
+import { loadScanSettings, saveScanSettings, scanResultList, scanInfo } from '../ipam/scanStore.js';
+import { runScanOnce, scanStatus, rescheduleScanPoller } from '../ipam/scanPoller.js';
 import {
   listRegistry as listNsx, addManager as addNsx, updateManager as updateNsx,
   removeManager as removeNsx, testConnection as testNsx,
@@ -201,6 +203,23 @@ adminRouter.get('/ipam/db-info', adminOnly, async (_req, res) => {
 // IPMS settings: ignore IP ranges (global + per-vCenter) hidden from the ledger.
 adminRouter.get('/ipam/settings', adminOnly, (_req, res) => res.json({ settings: loadIpamSettings() }));
 adminRouter.put('/ipam/settings', adminOnly, (req, res) => res.json({ ok: true, settings: saveIpamSettings(req.body || {}) }));
+
+// IP 능동 스캔(TCP 커넥트) 설정/상태/수동실행/결과.
+adminRouter.get('/ipam/scan/settings', adminOnly, (_req, res) => {
+  res.json({ settings: loadScanSettings(), status: scanStatus(), info: scanInfo() });
+});
+adminRouter.put('/ipam/scan/settings', adminOnly, (req, res) => {
+  const settings = saveScanSettings(req.body || {});
+  rescheduleScanPoller();
+  res.json({ ok: true, settings, status: scanStatus() });
+});
+adminRouter.post('/ipam/scan/run', adminOnly, async (_req, res) => {
+  const r = await runScanOnce({ manual: true });
+  res.json({ ...r, status: scanStatus(), info: scanInfo() });
+});
+adminRouter.get('/ipam/scan/results', adminOnly, (_req, res) => {
+  res.json({ results: scanResultList().slice(0, 5000), info: scanInfo() });
+});
 
 // Metrics sampler settings: 온도/용량/GPU 수집 주기 + 보존기간 (런타임 변경).
 adminRouter.get('/metrics/settings', adminOnly, (_req, res) => {

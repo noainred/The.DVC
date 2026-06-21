@@ -242,6 +242,7 @@ function Ipam({ scope, onScope }) {
 
   const [canIpms, setCanIpms] = useState(false);
   const [ipms, setIpms] = useState(false); // IPMS settings modal open
+  const [scanOpen, setScanOpen] = useState(false); // IP 스캔 설정 모달
   useEffect(() => { fetchJson('/admin/ipam/settings').then(() => setCanIpms(true)).catch(() => setCanIpms(false)); }, []);
 
   // Always keep the subnet list in sync with the vCenter scope (for counts/chips).
@@ -295,8 +296,8 @@ function Ipam({ scope, onScope }) {
       <span className={`badge ${r.scope === 'public' ? 'amber' : 'green'}`}>{r.scope === 'public' ? '공인' : '사설'}</span>
     ) },
     { key: 'vcenterName', label: '센터(vCenter)' },
-    { key: 'serverType', label: '서버종류', sortValue: (r) => r.serverType || '', render: (r) => <span className={`badge ${r.serverType === 'BareMetal' ? 'amber' : 'blue'}`}>{r.serverType === 'BareMetal' ? '베어메탈' : 'VM'}</span> },
-    { key: 'ownerName', label: '소유 자원', render: (r) => <button className="cell-link" onClick={() => setSel({ ownerType: r.ownerType, owner: r.owner })}>{r.ownerName}</button> },
+    { key: 'serverType', label: '서버종류', sortValue: (r) => r.serverType || '', render: (r) => <span className={`badge ${r.serverType === 'BareMetal' ? 'amber' : r.serverType === 'Scanned' ? 'purple' : 'blue'}`}>{r.serverType === 'BareMetal' ? '베어메탈' : r.serverType === 'Scanned' ? '스캔' : 'VM'}</span> },
+    { key: 'ownerName', label: '소유 자원', render: (r) => (r.owner ? <button className="cell-link" onClick={() => setSel({ ownerType: r.ownerType, owner: r.owner })}>{r.ownerName}</button> : <span>{r.ownerName}{(r.services || []).length ? <span className="muted" style={{ fontSize: 11 }}> · {(r.services || []).join(',')}</span> : ''}</span>) },
     { key: 'powerState', label: '전원', render: (r) => <StateBadge state={r.powerState} /> },
     { key: 'osName', label: 'OS 종류', sortValue: (r) => r.osName || '', render: (r) => r.osName || <span className="muted">—</span> },
     { key: 'osVersion', label: 'OS 버전', sortValue: (r) => r.osVersion || '', render: (r) => r.osVersion || <span className="muted">—</span> },
@@ -341,6 +342,7 @@ function Ipam({ scope, onScope }) {
         </div>
         <div className="flex gap">
           {canIpms && <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={() => setIpms(true)}>⚙ IPMS 설정</button>}
+          {canIpms && <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={() => setScanOpen(true)}>🛰️ IP 스캔</button>}
           <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={downloadCsv}>CSV</button>
           <button className="login-btn" style={{ flex: 'none', padding: '9px 14px' }} onClick={downloadXlsx}>엑셀 대장(.xlsx)</button>
         </div>
@@ -431,6 +433,7 @@ function Ipam({ scope, onScope }) {
       )}
       {sel && <EntityDetail type={sel.ownerType} item={sel.owner} onClose={() => setSel(null)} />}
       {ipms && <IpmsSettings onClose={() => setIpms(false)} />}
+      {scanOpen && <IpScanSettings onClose={() => setScanOpen(false)} />}
       {editMemo && <MemoEditor init={editMemo} onClose={() => setEditMemo(null)} onSaved={() => { setEditMemo(null); pickBase(base); }} />}
     </>
   );
@@ -527,6 +530,81 @@ function IpmsSettings({ onClose }) {
       <div className="flex gap" style={{ marginTop: 14 }}>
         <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} onClick={save}>저장</button>
         <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={onClose}>취소</button>
+      </div>
+    </Modal>
+  );
+}
+
+/** IP 능동 스캔(TCP 커넥트) 설정 + 수동 실행 + 결과. 물리/기타 서버 IP를 대장에 채운다. */
+function IpScanSettings({ onClose }) {
+  const [s, setS] = useState(null);
+  const [status, setStatus] = useState(null);
+  const [info, setInfo] = useState(null);
+  const [msg, setMsg] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const load = async () => {
+    try { const r = await fetchJson('/admin/ipam/scan/settings'); setS(r.settings); setStatus(r.status); setInfo(r.info); }
+    catch (e) { setMsg(e.message); }
+  };
+  useEffect(() => { load(); const t = setInterval(load, 5000); return () => clearInterval(t); /* eslint-disable-next-line */ }, []);
+  if (!s) return <Modal title="IP 스캔" onClose={onClose}>{msg ? <ErrorBox message={msg} /> : <Loading />}</Modal>;
+
+  const save = async () => {
+    setBusy(true); setMsg(null);
+    try { const r = await putJson('/admin/ipam/scan/settings', s); setS(r.settings); setStatus(r.status); setMsg('저장되었습니다.'); }
+    catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(false); }
+  };
+  const runNow = async () => {
+    setBusy(true); setMsg('스캔 실행 중…');
+    try { const r = await postJson('/admin/ipam/scan/run', {}); setStatus(r.status); setInfo(r.info); setMsg(r.ok ? `완료: ${r.scanned}개 중 ${r.alive}개 응답 (${Math.round((r.durationMs || 0) / 1000)}초)` : `실패: ${r.reason}`); }
+    catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(false); }
+  };
+  const last = status?.lastRun;
+
+  return (
+    <Modal title="🛰️ IP 능동 스캔 (TCP 커넥트)" onClose={onClose} width={680} resizable minWidth={460} minHeight={420}>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 12 }}>
+        vCenter가 모르는 <b>물리서버·타 가상화·네트워크 장비</b> IP를 TCP 커넥트 스캔으로 찾아 IP 관리대장에 채웁니다.
+        분산 환경에선 각 사이트(에이전트)에서 켜고 그 사이트 대역을 등록하세요.
+        <span className="badge amber" style={{ marginLeft: 6 }}>승인된 대역만</span>
+      </div>
+      {msg && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>{msg}</div>}
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'max-content 1fr', columnGap: 16, rowGap: 14, alignItems: 'start' }}>
+        <label style={{ fontWeight: 600, paddingTop: 9 }}>사용</label>
+        <label className="flex gap" style={{ alignItems: 'center', paddingTop: 9 }}>
+          <input type="checkbox" checked={s.enabled} onChange={(e) => setS({ ...s, enabled: e.target.checked })} /> 주기적으로 스캔
+        </label>
+        <label style={{ fontWeight: 600, paddingTop: 9 }}>스캔 대역</label>
+        <textarea className="input" value={(s.ranges || []).join('\n')} onChange={(e) => setS({ ...s, ranges: e.target.value.split(/\n/) })}
+          placeholder={'10.0.0.0/24\n192.168.1.1-192.168.1.50\n172.16.5.10'} style={{ resize: 'vertical', minHeight: 96, fontFamily: 'monospace', fontSize: 12, width: '100%', boxSizing: 'border-box' }} />
+        <label style={{ fontWeight: 600, paddingTop: 9 }}>포트</label>
+        <input className="input" value={(s.ports || []).join(', ')} onChange={(e) => setS({ ...s, ports: e.target.value.split(/[\s,]+/).map(Number).filter(Boolean) })}
+          style={{ width: '100%', boxSizing: 'border-box' }} />
+        <label style={{ fontWeight: 600, paddingTop: 9 }}>주기 / 동시성 / 타임아웃</label>
+        <div className="flex gap wrap" style={{ alignItems: 'center' }}>
+          <input className="input" type="number" min={1} style={{ width: 90 }} value={Math.round(s.intervalMs / 60000)} onChange={(e) => setS({ ...s, intervalMs: Math.max(1, Number(e.target.value) || 60) * 60000 })} /><span className="muted">분</span>
+          <input className="input" type="number" min={1} max={1024} style={{ width: 80 }} value={s.concurrency} onChange={(e) => setS({ ...s, concurrency: Number(e.target.value) || 128 })} /><span className="muted">동시</span>
+          <input className="input" type="number" min={100} max={10000} style={{ width: 90 }} value={s.timeoutMs} onChange={(e) => setS({ ...s, timeoutMs: Number(e.target.value) || 700 })} /><span className="muted">ms</span>
+        </div>
+        <label style={{ fontWeight: 600, paddingTop: 9 }}>역DNS / 보존</label>
+        <div className="flex gap wrap" style={{ alignItems: 'center' }}>
+          <label className="flex gap" style={{ alignItems: 'center' }}><input type="checkbox" checked={s.reverseDns} onChange={(e) => setS({ ...s, reverseDns: e.target.checked })} /> 역DNS 호스트명</label>
+          <input className="input" type="number" min={0} style={{ width: 80 }} value={s.retentionDays} onChange={(e) => setS({ ...s, retentionDays: Number(e.target.value) || 0 })} /><span className="muted">일 보존</span>
+        </div>
+      </div>
+
+      <div className="card" style={{ padding: 12, marginTop: 14, fontSize: 13 }}>
+        <span className="muted">상태 <b style={{ color: status?.running ? 'var(--amber)' : 'var(--text)' }}>{status?.running ? '스캔 중' : (status?.enabled ? '활성' : '비활성')}</b></span>{' · '}
+        <span className="muted">저장된 결과 <b style={{ color: 'var(--text)' }}>{info?.count ?? 0}</b>개</span>
+        {last && !last.skipped && !last.error && <span className="muted"> · 최근: {last.scanned}개 중 {last.alive}개 응답</span>}
+        {last?.error && <span style={{ color: 'var(--red)' }}> · 오류: {last.error}</span>}
+      </div>
+
+      <div className="flex gap" style={{ marginTop: 14 }}>
+        <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} disabled={busy} onClick={save}>저장</button>
+        <button className="logout-btn" style={{ padding: '9px 14px' }} disabled={busy || status?.running} onClick={runNow}>지금 스캔</button>
+        <button className="logout-btn" style={{ padding: '9px 14px', marginLeft: 'auto' }} onClick={onClose}>닫기</button>
       </div>
     </Modal>
   );
