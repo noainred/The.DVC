@@ -134,13 +134,17 @@ export function ResultCount({ total = 0, shown, label, filtered }) {
 }
 
 /** Simple centered modal. Click the backdrop, press ESC, or 닫기 to close. */
-export function Modal({ title, onClose, children, width = 560 }) {
+export function Modal({ title, onClose, children, width = 560, resizable = false, minWidth = 360, minHeight = 240 }) {
   // Header stays pinned while the body scrolls, so long detail content (many
   // rows + action buttons) is always fully reachable by scrolling.
+  // resizable=true: 사용자가 모서리를 드래그해 창 크기를 조절할 수 있다.
+  const resizeStyle = resizable
+    ? { width, maxWidth: '95vw', height: 'min(70vh, 560px)', maxHeight: '95vh', minWidth, minHeight, resize: 'both' }
+    : { maxWidth: width, maxHeight: '88vh' };
   return (
     <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <EscClose onClose={onClose} />
-      <div className="modal card" style={{ maxWidth: width, maxHeight: '88vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div className="modal card" style={{ ...resizeStyle, display: 'flex', flexDirection: 'column', overflow: resizable ? 'auto' : 'hidden' }}>
         <div className="flex between" style={{ marginBottom: 12, flex: '0 0 auto' }}>
           <b style={{ fontSize: 15 }}>{title}</b>
           <button className="logout-btn" onClick={onClose}>닫기</button>
