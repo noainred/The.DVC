@@ -784,21 +784,30 @@ api.get('/tools/esxi-temp/history', async (req, res) => {
   const key = String(req.query.key || '');
   const days = Math.max(1, Math.min(1830, Number(req.query.days) || 7));
   const since = Date.now() - days * 86_400_000;
-  const bucketMs = days <= 2 ? 3_600_000 : days <= 14 ? 6 * 3_600_000 : days <= 120 ? 86_400_000 : days <= 800 ? 7 * 86_400_000 : 30 * 86_400_000;
+  // 집계 단위(기준): 분/시간/일 명시 선택, 미지정 시 기간에 따라 자동.
+  const BUCKET = { minute: 60_000, hour: 3_600_000, day: 86_400_000 };
+  const bucket = BUCKET[req.query.bucket] ? req.query.bucket : 'auto';
+  const bucketMs = BUCKET[req.query.bucket]
+    || (days <= 2 ? 3_600_000 : days <= 14 ? 6 * 3_600_000 : days <= 120 ? 86_400_000 : days <= 800 ? 7 * 86_400_000 : 30 * 86_400_000);
+  // 분 단위 등 미세 집계는 점이 많아질 수 있어 상한을 넉넉히.
+  const limit = bucketMs <= 60_000 ? 5000 : bucketMs <= 3_600_000 ? 3000 : 1500;
   let points = [];
-  try { const db = await getMetricsDb(); points = db.history(metric, key, since, bucketMs, 1000); } catch { points = []; }
+  try { const db = await getMetricsDb(); points = db.history(metric, key, since, bucketMs, limit); } catch { points = []; }
   let synthesized = false;
   if (points.length < 2 && store.get().source === 'mock') {
-    // 데모: 일별/주별 합성 시계열(계절·일교차 반영).
+    // 데모: 합성 시계열(계절·일교차·분 변동 반영). 분 단위는 점이 많아 최근 구간만.
     synthesized = true; points = [];
+    const cap = limit;
+    let startT = since;
+    if ((Date.now() - since) / bucketMs > cap) startT = Date.now() - cap * bucketMs;
     const base = 26 + (hash(key) % 8);
-    for (let t = since; t <= Date.now(); t += bucketMs) {
-      const day = t / 86_400_000;
-      const v = base + 6 * Math.sin(day / 58) + 3 * Math.sin(day) + (hash(key + t) % 3);
+    for (let t = startT; t <= Date.now(); t += bucketMs) {
+      const day = t / 86_400_000; const minute = t / 60_000;
+      const v = base + 6 * Math.sin(day / 58) + 3 * Math.sin(day) + 1.2 * Math.sin(minute / 7) + (hash(key + t) % 3);
       points.push({ ts: Math.floor(t), avg: Number(v.toFixed(1)), min: Number((v - 2).toFixed(1)), max: Number((v + 4).toFixed(1)) });
     }
   }
-  res.json({ level, key, days, bucketMs, synthesized, points });
+  res.json({ level, key, days, bucket, bucketMs, synthesized, points });
 });
 
 // 데이터스토어 용량 추세/예측 — ds_usedgb 히스토리로 선형회귀 → 가득 찰 예상일.
