@@ -93,6 +93,9 @@ export function generateNsxForManager(mgr) {
         action: rnd() < 0.72 ? 'ALLOW' : ACTIONS[n(1, 2)],
         direction: 'IN_OUT', appliedTo: rnd() < 0.5 ? 'DFW' : pickG(),
         enabled: rnd() > 0.05,
+        logged: rnd() < 0.5,
+        ipProtocol: 'IPV4_IPV6', category: cat, sequence: (r + 1) * 10,
+        notes: rnd() < 0.2 ? '운영팀 승인 규칙' : '',
       });
     }
     ruleTotal += ruleN;

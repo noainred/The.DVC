@@ -48,6 +48,7 @@ export class NsxClient {
   tier0s() { return this.#get('/policy/api/v1/infra/tier-0s'); }
   tier1s() { return this.#get('/policy/api/v1/infra/tier-1s'); }
   segments() { return this.#get('/policy/api/v1/infra/segments'); }
+  segmentPorts(segmentId) { return this.#get(`/policy/api/v1/infra/segments/${encodeURIComponent(segmentId)}/ports`); }
   securityPolicies() { return this.#get('/policy/api/v1/infra/domains/default/security-policies'); }
   policyRules(policyId) { return this.#get(`/policy/api/v1/infra/domains/default/security-policies/${encodeURIComponent(policyId)}/rules`); }
   groups() { return this.#get('/policy/api/v1/infra/domains/default/groups'); }
@@ -70,6 +71,15 @@ function clusterHealth(status) {
  * best-effort: a missing/forbidden endpoint degrades that section instead of
  * failing the whole manager. The identity call (node) must succeed.
  */
+// 동시성 제한 실행기(인덱스 전달). 고RTT·다수 매니저에서 NSX API 과부하 방지.
+async function eachLimited(items, limit, fn) {
+  let i = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length || 1) }, async () => {
+    while (i < items.length) { const idx = i++; try { await fn(items[idx], idx); } catch { /* isolated */ } }
+  });
+  await Promise.all(workers);
+}
+
 export async function collectFromNsx(mgr) {
   const client = new NsxClient(mgr);
   const node = await client.node(); // throws if auth/host is wrong → manager unreachable
@@ -103,7 +113,19 @@ export async function collectFromNsx(mgr) {
     subnets: (s.subnets || []).map((x) => x.network || x.gateway_address).filter(Boolean),
     type: (s.vlan_ids?.length ? 'VLAN' : 'OVERLAY'),
     transportZone: (s.transport_zone_path || '').split('/').pop() || '',
+    vmCount: null, ports: [], // 아래에서 세그먼트 포트(연결 vNIC)를 조회해 채움
   }));
+
+  // 세그먼트별 연결 포트(=VM vNIC) 조회 → VM 수/포트 목록. NSX는 세그먼트에 VM 수를
+  // 직접 주지 않으므로 포트를 세어야 한다. 매니저 부하를 위해 동시성 8로 제한.
+  await eachLimited((segs.results || []), 8, async (s, idx) => {
+    try {
+      const r = await client.segmentPorts(s.id);
+      const ports = (r.results || []).filter((p) => p.attachment && p.attachment.id);
+      segments[idx].ports = ports.map((p) => (p.display_name || p.id).replace(/\.vmx.*$/, '')).slice(0, 50);
+      segments[idx].vmCount = ports.length;
+    } catch { /* 권한/미지원 시 null 유지(=미조회) */ }
+  });
 
   // Pull the actual DFW rules for each policy (bounded) so the UI can browse them.
   const policies = (pols.results || []).slice(0, 60);
@@ -120,6 +142,11 @@ export async function collectFromNsx(mgr) {
       action: r.action || '', direction: r.direction || 'IN_OUT',
       appliedTo: (r.scope || []).map(shortGroup).join(', ') || 'DFW',
       enabled: !r.disabled,
+      logged: r.logged === true,                              // 로깅 on/off
+      ipProtocol: r.ip_protocol || 'IPV4_IPV6',
+      category: p.category || '',
+      sequence: r.sequence_number ?? null,
+      notes: r.notes || '',
     }));
     return {
       id: `${mgr.id}:${p.id}`, managerId: mgr.id, name: p.display_name || p.id,
