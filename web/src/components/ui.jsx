@@ -4,6 +4,7 @@ import { VmMetricButton } from './VmMetrics.jsx';
 import { VmConsoleButton } from './VmConsole.jsx';
 import { VmRemoteButton } from './VmRemote.jsx';
 import EscClose from './EscClose.jsx';
+import { fetchJson } from '../api.js';
 
 export function usageColor(pct) {
   if (pct >= 90) return 'var(--red)';
@@ -271,6 +272,36 @@ export function EntityDetail({ type, item, onClose }) {
         </div>
       )}
     </Modal>
+  );
+}
+
+/**
+ * 어디서나 VM 이름/IP/호스트명을 클릭하면 VM 상세(EntityDetail) 팝업을 띄우는 공용 링크.
+ * 스냅샷에서 단건 조회(/vms/lookup) 후 모달을 연다. 못 찾으면 안내 모달.
+ */
+export function VmLink({ name, ip, vcenterId, label, className = 'cell-link', style }) {
+  const [vm, setVm] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const open = async (e) => {
+    e?.stopPropagation?.();
+    setBusy(true); setMsg(null);
+    try {
+      const params = {};
+      if (name) params.name = name;
+      if (ip) params.ip = ip;
+      if (vcenterId) params.vcenterId = vcenterId;
+      const r = await fetchJson('/vms/lookup', params);
+      if (r.vm) setVm(r.vm); else setMsg(`해당 VM을 찾을 수 없습니다 (${label || name || ip}).`);
+    } catch (err) { setMsg(err.message); }
+    finally { setBusy(false); }
+  };
+  return (
+    <>
+      <button className={className} style={style} disabled={busy} onClick={open} title="클릭하면 VM 상세 보기">{label ?? name ?? ip}</button>
+      {vm && <EntityDetail type="vm" item={vm} onClose={() => setVm(null)} />}
+      {msg && <Modal title="VM 조회" onClose={() => setMsg(null)} width={380}><div className="muted" style={{ padding: 4 }}>{msg}</div></Modal>}
+    </>
   );
 }
 

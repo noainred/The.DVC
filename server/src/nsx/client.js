@@ -52,6 +52,9 @@ export class NsxClient {
   securityPolicies() { return this.#get('/policy/api/v1/infra/domains/default/security-policies'); }
   policyRules(policyId) { return this.#get(`/policy/api/v1/infra/domains/default/security-policies/${encodeURIComponent(policyId)}/rules`); }
   groups() { return this.#get('/policy/api/v1/infra/domains/default/groups'); }
+  // 그룹의 실제(effective) 멤버 — 온디맨드 라이브 조회.
+  groupVmMembers(groupId) { return this.#get(`/policy/api/v1/infra/domains/default/groups/${encodeURIComponent(groupId)}/members/virtual-machines`); }
+  groupIpMembers(groupId) { return this.#get(`/policy/api/v1/infra/domains/default/groups/${encodeURIComponent(groupId)}/members/ip-addresses`); }
 
   /** Login check — cheapest authenticated call. */
   async ping() { await this.node(); }
@@ -179,6 +182,28 @@ export async function collectFromNsx(mgr) {
 
 // NSX policy paths look like /infra/domains/default/groups/web → show the leaf.
 const shortGroup = (s) => String(s || '').split('/').pop() || String(s || '');
+
+/**
+ * On-demand: 한 NSX 그룹의 실제(effective) 멤버를 라이브 조회한다.
+ * VM 멤버 + IP 멤버를 모두 가져와 정규화. 둘 다 실패하면 throw.
+ */
+export async function fetchGroupMembers(mgr, groupId) {
+  const client = new NsxClient(mgr);
+  const [vmRes, ipRes] = await Promise.all([
+    client.groupVmMembers(groupId).catch((e) => ({ __err: e.message })),
+    client.groupIpMembers(groupId).catch((e) => ({ __err: e.message })),
+  ]);
+  const vms = (vmRes && Array.isArray(vmRes.results) ? vmRes.results : []).map((v) => ({
+    name: v.display_name || v.name || v.external_id || '(이름없음)',
+    os: v.guest_info?.os_name || v.os_name || '',
+    powerState: v.power_state || '',
+    ips: (v.guest_info?.ip_addresses) || [],
+  }));
+  const ips = (ipRes && Array.isArray(ipRes.results)) ? ipRes.results : [];
+  if (vmRes?.__err && ipRes?.__err) throw new Error(vmRes.__err);
+  return { vmCount: vms.length, vms: vms.slice(0, 500), ipCount: ips.length, ips: ips.slice(0, 1000) };
+}
+
 function exprText(e) {
   if (!e) return '';
   if (e.resource_type === 'Condition') return `${e.key || ''} ${e.operator || ''} ${e.value || ''}`.trim();

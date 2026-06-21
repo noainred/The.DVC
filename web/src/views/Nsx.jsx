@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { usePolling, fetchJson } from '../api.js';
-import { Kpi, DataTable, Modal, Loading, ErrorBox, SearchBox } from '../components/ui.jsx';
+import { Kpi, DataTable, Modal, Loading, ErrorBox, SearchBox, VmLink } from '../components/ui.jsx';
 
 const MGR_BADGE = { connected: 'green', degraded: 'amber', unreachable: 'red', pending: 'gray', disabled: 'gray' };
 const MGR_LABEL = { connected: '정상', degraded: '저하', unreachable: '연결끊김', pending: '대기', disabled: '비활성' };
@@ -205,22 +205,60 @@ function DetailModal({ detail, onClose }) {
       </>}
       {type === 'group' && <>
         <Row label="멤버 유형">{item.memberType || '—'}</Row>
-        <Row label="멤버 수">{item.memberCount ?? '(라이브는 별도 조회)'}</Row>
         <Row label="기준(조건)">{item.criteria || '—'}</Row>
-        {item.members?.length > 0 && (
-          <div style={{ marginTop: 10 }}>
-            <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>멤버 VM ({item.members.length})</div>
-            <div className="flex gap wrap">{item.members.map((m) => <span key={m} className="badge gray" style={{ fontSize: 12 }}>{m}</span>)}</div>
-          </div>
-        )}
-        {item.memberIps?.length > 0 && (
-          <div style={{ marginTop: 10 }}>
-            <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>멤버 IP ({item.memberIps.length})</div>
-            <div className="flex gap wrap">{item.memberIps.map((ip) => <span key={ip} className="badge blue" style={{ fontSize: 12 }}>{ip}</span>)}</div>
-          </div>
-        )}
+        <GroupMembers group={item} />
       </>}
     </Modal>
+  );
+}
+
+/** 보안그룹의 실제(effective) 멤버를 NSX Manager에서 온디맨드로 라이브 조회. */
+function GroupMembers({ group }) {
+  const [state, setState] = useState({ status: 'idle' }); // idle|loading|done|error
+  const load = async () => {
+    setState({ status: 'loading' });
+    try {
+      const r = await fetchJson('/nsx/group-members', { managerId: group.managerId, groupId: group.id });
+      setState({ status: 'done', data: r });
+    } catch (e) { setState({ status: 'error', error: e.message }); }
+  };
+  const d = state.data;
+  return (
+    <div style={{ marginTop: 12 }}>
+      <div className="flex between" style={{ alignItems: 'center' }}>
+        <span className="muted" style={{ fontSize: 12 }}>멤버 (실제/effective)</span>
+        <button className="login-btn" style={{ flex: 'none', padding: '6px 14px', fontSize: 12 }} disabled={state.status === 'loading'} onClick={load}>
+          {state.status === 'loading' ? '조회 중…' : state.status === 'done' ? '새로고침' : '라이브 조회'}
+        </button>
+      </div>
+      {state.status === 'error' && <div className="error-box" style={{ marginTop: 8, padding: 10, fontSize: 12 }}>조회 실패: {state.error}</div>}
+      {state.status === 'done' && d && (
+        <div style={{ marginTop: 8 }}>
+          {d.mock && <span className="badge amber" style={{ fontSize: 11, marginBottom: 6, display: 'inline-block' }}>데모 합성</span>}
+          <div className="flex gap" style={{ fontSize: 13, marginBottom: 8 }}>
+            <span className="muted">멤버 VM <b style={{ color: 'var(--text)' }}>{d.vmCount ?? 0}</b></span>
+            <span className="muted">멤버 IP <b style={{ color: 'var(--text)' }}>{d.ipCount ?? 0}</b></span>
+          </div>
+          {d.vms?.length > 0 && (
+            <div style={{ marginBottom: 8 }}>
+              <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>VM</div>
+              <div style={{ maxHeight: 180, overflow: 'auto' }} className="flex gap wrap">
+                {d.vms.map((v, i) => <span key={i} className="badge gray" style={{ fontSize: 12 }} title={`${v.os || ''} ${(v.ips || []).join(', ')}`}><VmLink name={v.name} ip={(v.ips || [])[0]} label={v.name} className="cell-link" />{v.powerState ? ` · ${v.powerState === 'POWERED_ON' ? 'On' : 'Off'}` : ''}</span>)}
+              </div>
+            </div>
+          )}
+          {d.ips?.length > 0 && (
+            <div>
+              <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>IP</div>
+              <div style={{ maxHeight: 140, overflow: 'auto' }} className="flex gap wrap">
+                {d.ips.map((ip, i) => <span key={i} className="badge blue" style={{ fontSize: 12 }}>{ip}</span>)}
+              </div>
+            </div>
+          )}
+          {!d.vms?.length && !d.ips?.length && <div className="muted" style={{ fontSize: 12 }}>멤버가 없습니다.</div>}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -249,7 +287,7 @@ function SegmentVms({ subnets }) {
               <tbody>
                 {rows.map((r) => (
                   <tr key={r.ip}>
-                    <td><b>{r.ip}</b></td>
+                    <td><b><VmLink ip={r.ip} label={r.ip} /></b></td>
                     <td>{r.purpose || '—'}</td>
                     <td className="muted">{r.hostname || '—'}</td>
                     <td className="muted">{r.scope || '—'}</td>

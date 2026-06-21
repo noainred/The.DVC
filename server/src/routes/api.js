@@ -14,6 +14,8 @@ import { sortByOrder } from '../vcenter/order.js';
 import { getMetricsDb } from '../metrics/db.js';
 import { getGuestGpuHost, getGuestGpuVms } from '../gpu/store.js';
 import { nsxStore } from '../nsx/store.js';
+import { loadRegistry as loadNsxRegistry } from '../nsx/registry.js';
+import { fetchGroupMembers } from '../nsx/client.js';
 import { expandSpec } from '../provision/spec.js';
 import { listSources, listJobs, getJob } from '../provision/jobs.js';
 import { getPlacement } from '../provision/placement.js';
@@ -213,6 +215,29 @@ api.get('/nsx', (req, res) => {
     securityGroups: scoped ? (snap.securityGroups || []).filter((g) => mIds.has(g.managerId)) : (snap.securityGroups || []),
     collectionErrors: snap.collectionErrors,
   });
+});
+
+// NSX 보안그룹 라이브 멤버 조회(온디맨드). groupId는 스냅샷의 "managerId:rawId" 형식.
+api.get('/nsx/group-members', async (req, res) => {
+  const full = String(req.query.groupId || '');
+  const sep = full.indexOf(':');
+  const managerId = req.query.managerId || (sep > 0 ? full.slice(0, sep) : '');
+  const rawId = sep > 0 ? full.slice(sep + 1) : full;
+  if (!managerId || !rawId) return res.status(400).json({ error: 'managerId/groupId가 필요합니다.' });
+  if (nsxStore.get().source === 'mock') {
+    // 데모: 합성 멤버.
+    const n = 3 + (hash(rawId) % 12);
+    const vms = Array.from({ length: n }, (_, i) => ({ name: `${rawId.slice(0, 8)}-vm-${i + 1}`, os: 'Linux', powerState: 'POWERED_ON', ips: [`10.94.${hash(rawId) % 200}.${i + 10}`] }));
+    return res.json({ mock: true, vmCount: vms.length, vms, ipCount: vms.length, ips: vms.map((v) => v.ips[0]) });
+  }
+  const mgr = loadNsxRegistry().find((m) => m.id === managerId);
+  if (!mgr) return res.status(404).json({ error: `NSX Manager를 찾을 수 없습니다: ${managerId}` });
+  try {
+    const data = await fetchGroupMembers(mgr, rawId);
+    res.json({ mock: false, ...data });
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
 });
 
 // --- VM 프로비저닝 (생성/대량 생성) ---
@@ -1119,6 +1144,19 @@ api.get('/vms', (req, res) => {
     gpu: gpuCounts,
   };
   res.json({ total: vms.length, items: vms.slice(0, limit), totals });
+});
+
+// VM 단건 조회 — 이름/IP/호스트명으로 스냅샷에서 찾아 상세 팝업에 쓴다(모든 화면 공용).
+api.get('/vms/lookup', (req, res) => {
+  const { name, ip, vcenterId } = req.query;
+  const vms = (store.get().vms || []).filter((v) => !vcenterId || v.vcenterId === vcenterId);
+  let vm = null;
+  if (ip) vm = vms.find((v) => (v.ipAddresses || []).includes(ip) || v.ipAddress === ip);
+  if (!vm && name) {
+    const n = String(name).toLowerCase();
+    vm = vms.find((v) => (v.name || '').toLowerCase() === n) || vms.find((v) => (v.name || '').toLowerCase().includes(n));
+  }
+  res.json({ vm: vm || null });
 });
 
 api.get('/datastores', (req, res) => {
