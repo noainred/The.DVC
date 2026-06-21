@@ -35,12 +35,14 @@ function initSqlite() {
       JOIN (SELECT k, MAX(ts) mts FROM samples WHERE metric=? GROUP BY k) m ON s.k=m.k AND s.ts=m.mts WHERE s.metric=?`);
     const bucket = db.prepare(`SELECT (ts/?)*? AS b, AVG(v) avg, MIN(v) min, MAX(v) max FROM samples
       WHERE metric=? AND k=? AND ts>=? GROUP BY b ORDER BY b LIMIT ?`);
+    const recentAvgAll = db.prepare(`SELECT k, AVG(v) avg, MAX(v) max FROM samples WHERE metric=? AND ts>=? GROUP BY k`);
     const prune = db.prepare('DELETE FROM samples WHERE ts < ?');
     return {
       kind: 'sqlite',
       insertMany: (rows, ts) => { db.exec('BEGIN'); try { for (const r of rows) ins.run(r.metric, r.k, r.v, ts); db.exec('COMMIT'); } catch (e) { try { db.exec('ROLLBACK'); } catch { /* */ } throw e; } },
       latestAll: (metric) => { const map = new Map(); for (const r of latestAll.all(metric, metric)) map.set(r.k, { v: r.v, ts: r.ts }); return map; },
       history: (metric, k, sinceTs, bucketMs, limit) => bucket.all(bucketMs, bucketMs, metric, k, sinceTs, limit).map((r) => ({ ts: r.b, avg: round1(r.avg), min: round1(r.min), max: round1(r.max) })),
+      recentAvg: (metric, sinceTs) => { const map = new Map(); for (const r of recentAvgAll.all(metric, sinceTs)) map.set(r.k, { avg: round1(r.avg), max: round1(r.max) }); return map; },
       prune: (beforeTs) => prune.run(beforeTs),
     };
   });
@@ -62,6 +64,11 @@ function initJson() {
         g.sum += r.v; g.n++; g.min = Math.min(g.min, r.v); g.max = Math.max(g.max, r.v); buckets.set(b, g);
       }
       return [...buckets.entries()].sort((a, b) => a[0] - b[0]).slice(-limit).map(([b, g]) => ({ ts: b, avg: round1(g.sum / g.n), min: round1(g.min), max: round1(g.max) }));
+    },
+    recentAvg: (metric, sinceTs) => {
+      const agg = new Map();
+      for (const r of rows) if (r.m === metric && r.t >= sinceTs) { const g = agg.get(r.k) || { sum: 0, n: 0, max: -Infinity }; g.sum += r.v; g.n++; g.max = Math.max(g.max, r.v); agg.set(r.k, g); }
+      const map = new Map(); for (const [k, g] of agg) map.set(k, { avg: round1(g.sum / g.n), max: round1(g.max) }); return map;
     },
     prune: (beforeTs) => { const n = rows.filter((r) => r.t >= beforeTs); if (n.length !== rows.length) { rows = n; try { fs.writeFileSync(file, rows.map((r) => JSON.stringify(r)).join('\n') + '\n', { mode: 0o600 }); } catch { /* */ } } },
   };

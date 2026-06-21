@@ -490,18 +490,22 @@ function parseDatastoreStorage(infoXml, summaryType) {
  *   - VmiopBackingInfo  → vGPU (mediated, has a <vgpu> profile)
  *   - Device/Dynamic/Plugin backing → raw PCI passthrough (DirectPath I/O)
  * Returns { type:'vgpu'|'passthrough'|'mixed', count, vgpu, passthrough, profile } or null.
+ *
+ * Count directly (don't split on '<device') because backing fields like
+ * <deviceId> contain the substring "<device" and would break naive splitting,
+ * which previously caused vGPU devices to be miscounted as raw passthrough.
+ * `xsi:type="VirtualPCIPassthrough"` (with the closing quote) marks each device
+ * and does NOT match the backing type `...VirtualPCIPassthroughVmiopBackingInfo`.
  */
 function parseVmGpu(deviceXml) {
-  if (!deviceXml || !/VirtualPCIPassthrough/.test(deviceXml)) return null;
-  let vgpu = 0; let passthrough = 0; let profile = '';
-  for (const part of deviceXml.split('<device')) {
-    if (!/xsi:type="VirtualPCIPassthrough"/.test(part)) continue;
-    if (/Vmiop/i.test(part)) { vgpu++; if (!profile) profile = /<vgpu>([^<]+)<\/vgpu>/.exec(part)?.[1] || ''; }
-    else passthrough++;
-  }
-  if (!vgpu && !passthrough) return null;
+  if (!deviceXml) return null;
+  const total = (deviceXml.match(/xsi:type="VirtualPCIPassthrough"/g) || []).length;
+  if (!total) return null;
+  const vgpu = (deviceXml.match(/VmiopBackingInfo/g) || []).length;
+  const passthrough = Math.max(0, total - vgpu);
   const type = vgpu && passthrough ? 'mixed' : (vgpu ? 'vgpu' : 'passthrough');
-  return { type, count: vgpu + passthrough, vgpu, passthrough, profile };
+  const profile = /<vgpu>([^<]+)<\/vgpu>/.exec(deviceXml)?.[1] || '';
+  return { type, count: total, vgpu, passthrough, profile };
 }
 
 // Snapshot count (from the snapshot tree) + approximate size from layoutEx files.
