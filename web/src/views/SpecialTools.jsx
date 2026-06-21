@@ -799,13 +799,13 @@ function Waste({ scope }) {
         ))}
       </div>
       {tab === 'off' && <DataTable rows={data.poweredOff.vms} initialSort={{ key: 'storageGB', dir: 'desc' }} columns={[
-        { key: 'name', label: 'VM', render: (v) => <b>{v.name}</b> }, { key: 'vcenterId', label: 'vCenter', render: (v) => <span className="muted">{v.vcenterId}</span> },
+        { key: 'name', label: 'VM', render: (v) => <VmLink name={v.name} vcenterId={v.vcenterId} label={v.name} /> }, { key: 'vcenterId', label: 'vCenter', render: (v) => <span className="muted">{v.vcenterId}</span> },
         { key: 'guestOS', label: 'OS' }, { key: 'storageGB', label: '스토리지', align: 'right', render: (v) => tb2(v.storageGB) }]} />}
       {tab === 'snap' && <DataTable rows={data.snapshots.vms} initialSort={{ key: 'snapshotSizeGB', dir: 'desc' }} columns={[
-        { key: 'name', label: 'VM', render: (v) => <b>{v.name}</b> }, { key: 'vcenterId', label: 'vCenter', render: (v) => <span className="muted">{v.vcenterId}</span> },
+        { key: 'name', label: 'VM', render: (v) => <VmLink name={v.name} vcenterId={v.vcenterId} label={v.name} /> }, { key: 'vcenterId', label: 'vCenter', render: (v) => <span className="muted">{v.vcenterId}</span> },
         { key: 'snapshotCount', label: '개수', align: 'right' }, { key: 'snapshotSizeGB', label: '크기', align: 'right', render: (v) => tb2(v.snapshotSizeGB) }]} />}
       {tab === 'tools' && <DataTable rows={data.noTools.vms} columns={[
-        { key: 'name', label: 'VM', render: (v) => <b>{v.name}</b> }, { key: 'vcenterId', label: 'vCenter', render: (v) => <span className="muted">{v.vcenterId}</span> },
+        { key: 'name', label: 'VM', render: (v) => <VmLink name={v.name} vcenterId={v.vcenterId} label={v.name} /> }, { key: 'vcenterId', label: 'vCenter', render: (v) => <span className="muted">{v.vcenterId}</span> },
         { key: 'toolsStatus', label: 'Tools 상태', render: (v) => <span className="badge amber">{v.toolsStatus}</span> }]} />}
       <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>※ 고아 디스크(orphaned VMDK)는 데이터스토어 파일 스캔이 필요해 현재 미포함입니다.</div>
     </>
@@ -853,7 +853,7 @@ function VmFinder() {
   const items = data?.items || [];
   const withAvg = data?.avgComputed;
   const cols = [
-    { key: 'name', label: 'VM', render: (r) => <b>{r.name}</b> },
+    { key: 'name', label: 'VM', render: (r) => <VmLink name={r.name} vcenterId={r.vcenterId} label={r.name} /> },
     { key: 'vcenterId', label: 'vCenter', render: (r) => <span className="muted">{vcName(r.vcenterId)}</span> },
     { key: 'folder', label: '폴더', render: (r) => <span className="muted" style={{ fontSize: 12 }}>{r.folder || '—'}</span> },
     { key: 'cluster', label: '클러스터', render: (r) => <span className="muted" style={{ fontSize: 12 }}>{r.cluster || '—'}</span> },
@@ -911,7 +911,7 @@ function ThinVms({ scope }) {
   const term = q.trim().toLowerCase();
   const rows = data.items.filter((r) => !term || r.name.toLowerCase().includes(term) || (r.guestOS || '').toLowerCase().includes(term) || (r.host || '').toLowerCase().includes(term));
   const cols = [
-    { key: 'name', label: 'VM', render: (r) => <b>{r.name}</b> },
+    { key: 'name', label: 'VM', render: (r) => <VmLink name={r.name} vcenterId={r.vcenterId} label={r.name} /> },
     { key: 'vcenterId', label: 'vCenter', render: (r) => <span className="muted">{r.vcenterId}</span> },
     { key: 'powerState', label: '전원', render: (r) => <StateBadge state={r.powerState} /> },
     { key: 'guestOS', label: 'Guest OS' },
