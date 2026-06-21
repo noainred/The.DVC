@@ -27,7 +27,21 @@ export default function AgentDeploy() {
     await loadPkg();
   };
   const loadTargets = () => fetchJson('/admin/agent-deploy/targets').then((d) => setTargets(d.targets)).catch(() => {});
-  useEffect(() => { loadInstaller(); loadTargets(); loadPkg(); }, []);
+  // 실행 중 서버의 중앙 토큰을 읽어 폼에 자동 입력(있을 때만).
+  const [tokenInfo, setTokenInfo] = useState({ hasToken: false });
+  const [genBusy, setGenBusy] = useState(false);
+  const loadToken = async () => {
+    const r = await fetchJson('/admin/central-token').catch(() => null);
+    if (r) { setTokenInfo(r); if (r.token) setF((s) => (s.centralToken ? s : { ...s, centralToken: r.token })); }
+  };
+  const genToken = async () => {
+    setGenBusy(true);
+    const r = await postJson('/admin/central-token/generate', { force: false }).catch((e) => ({ ok: false, reason: e.message }));
+    setGenBusy(false);
+    if (r.ok && r.token) { setF((s) => ({ ...s, centralToken: r.token })); setTokenInfo({ hasToken: true, token: r.token }); setResult({ kind: 'token', ok: true, created: r.created }); }
+    else setResult({ kind: 'token', ok: false, reason: r.reason });
+  };
+  useEffect(() => { loadInstaller(); loadTargets(); loadPkg(); loadToken(); }, []);
 
   const downloadPkg = async () => {
     setDl((d) => ({ ...d, busy: true })); setResult(null);
@@ -146,7 +160,14 @@ export default function AgentDeploy() {
         <div className="spec-grid">
           <label>에이전트 이름(AGENT_NAME)<input className="input" value={f.agentName} onChange={set('agentName')} placeholder="Seoul-DC1" /></label>
           <label>중앙 URL(CENTRAL_URL)<input className="input" value={f.centralUrl} onChange={set('centralUrl')} placeholder="http://central:4000" /></label>
-          <label>중앙 토큰(CENTRAL_TOKEN)<input className="input" value={f.centralToken} onChange={set('centralToken')} /></label>
+          <label>중앙 토큰(CENTRAL_TOKEN)
+            <div className="flex gap" style={{ alignItems: 'center' }}>
+              <input className="input" value={f.centralToken} onChange={set('centralToken')} placeholder={tokenInfo.hasToken ? '' : '미설정 — 생성 클릭'} />
+              <button className="logout-btn" type="button" style={{ flex: 'none', padding: '7px 12px', whiteSpace: 'nowrap' }} disabled={genBusy} onClick={genToken}
+                title="없으면 안전한 랜덤 토큰을 생성해 이 포탈(중앙) 환경에 저장하고 채웁니다">{genBusy ? '생성 중…' : (tokenInfo.hasToken ? '현재값' : '생성')}</button>
+            </div>
+            <span className="muted" style={{ fontSize: 11 }}>{tokenInfo.hasToken ? '✅ 중앙 토큰이 이 포탈에 설정됨(자동 입력됨)' : '⚠ 중앙 미설정 — 생성 시 portal.env에 저장(리붓 유지)'}</span>
+          </label>
           <label>전력수집 토큰(COLLECTOR_TOKEN, 선택)<input className="input" value={f.collectorToken} onChange={set('collectorToken')} /></label>
           <label>수집 DC명(COLLECTOR_DATACENTER, 선택)<input className="input" value={f.collectorDatacenter} onChange={set('collectorDatacenter')} /></label>
           <label>포탈 포트<input className="input" type="number" value={f.portalPort} onChange={set('portalPort')} /></label>

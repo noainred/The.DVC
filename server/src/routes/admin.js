@@ -29,6 +29,7 @@ import { gpuGuestStatus, rescheduleGpuGuestPoller } from '../gpu/poller.js';
 import { loadScanSettings, saveScanSettings, scanResultList, scanInfo, listScanAgents, getAgentReports, LOCAL } from '../ipam/scanStore.js';
 import { runScanOnce, scanStatus, rescheduleScanPoller } from '../ipam/scanPoller.js';
 import { listAssignments as listIdracAssignments, getResults as getAgentResults } from '../central/assignments.js';
+import { centralTokenInfo, generateCentralToken, setCentralToken } from '../central/token.js';
 import {
   listRegistry as listNsx, addManager as addNsx, updateManager as updateNsx,
   removeManager as removeNsx, testConnection as testNsx,
@@ -204,6 +205,17 @@ adminRouter.get('/ipam/db-info', adminOnly, async (_req, res) => {
 // IPMS settings: ignore IP ranges (global + per-vCenter) hidden from the ledger.
 adminRouter.get('/ipam/settings', adminOnly, (_req, res) => res.json({ settings: loadIpamSettings() }));
 adminRouter.put('/ipam/settings', adminOnly, (req, res) => res.json({ ok: true, settings: saveIpamSettings(req.body || {}) }));
+
+// 중앙 토큰(CENTRAL_TOKEN) — 조회/생성/저장(실행중 서버 + portal.env 영속).
+adminRouter.get('/central-token', adminOnly, (_req, res) => res.json(centralTokenInfo()));
+adminRouter.post('/central-token/generate', adminOnly, (req, res) => {
+  const r = generateCentralToken({ force: !!(req.body && req.body.force) });
+  res.json({ ok: true, ...r });
+});
+adminRouter.put('/central-token', adminOnly, (req, res) => {
+  try { res.json({ ok: true, token: setCentralToken(req.body && req.body.token) }); }
+  catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
+});
 
 // IP 능동 스캔(TCP 커넥트) — 에이전트별 설정/상태/수동실행/결과.
 // agent 미지정 = 이 포탈(중앙) 직접 스캔(__local__). 그 외 이름 = 분산 에이전트 할당.
