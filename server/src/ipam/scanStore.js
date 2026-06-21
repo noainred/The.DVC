@@ -14,6 +14,7 @@ import { DEFAULT_PORTS } from './scan.js';
 
 const CFG = path.join(config.configDir, 'ipam-scan.json');
 const RES = path.join(config.configDir, 'ipam-scan-results.json');
+const REP = path.join(config.configDir, 'ipam-scan-agents.json');
 export const LOCAL = '__local__';
 
 const DEFAULTS = {
@@ -107,3 +108,13 @@ export function scanInfo() {
   for (const r of list) byAgent[r.agent || LOCAL] = (byAgent[r.agent || LOCAL] || 0) + 1;
   return { count: list.length, lastSeen: list.reduce((m, r) => Math.max(m, r.lastSeen || 0), 0) || null, byAgent };
 }
+
+// ---- 에이전트별 보고 기록(마지막 보고 시각·스캔/응답 수) ----------------------
+let reports = readJson(REP, {}) || {};
+
+export function recordAgentReport(agent, { scanned = 0, alive = 0 } = {}) {
+  reports[agent || LOCAL] = { at: Date.now(), scanned, alive };
+  try { fs.mkdirSync(path.dirname(REP), { recursive: true }); fs.writeFileSync(REP, JSON.stringify(reports, null, 2), { mode: 0o600 }); } catch { /* */ }
+}
+
+export function getAgentReports() { return reports; }

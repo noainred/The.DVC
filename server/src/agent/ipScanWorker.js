@@ -28,7 +28,7 @@ export async function runIpScanAgentOnce() {
       ports: a.ports, concurrency: a.concurrency, timeoutMs: a.timeoutMs, reverseDns: a.reverseDns,
     });
     await fetch(`${config.agent.centralUrl}/api/central/ip-scan-result`, {
-      method: 'POST', headers: headers(), body: JSON.stringify({ agent: config.agent.name, alive }), signal: AbortSignal.timeout(30_000),
+      method: 'POST', headers: headers(), body: JSON.stringify({ agent: config.agent.name, alive, scanned }), signal: AbortSignal.timeout(30_000),
     });
     last = { at: Date.now(), assigned: true, scanned, alive: alive.length };
     return last;

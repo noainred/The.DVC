@@ -26,7 +26,7 @@ import { loadMetricsSettings, saveMetricsSettings, METRICS_LIMITS } from '../met
 import { metricsSamplerStatus, rescheduleMetricsSampler } from '../metrics/sampler.js';
 import { loadGpuGuestSettings, saveGpuGuestSettings, redactGpuGuestSettings } from '../gpu/settings.js';
 import { gpuGuestStatus, rescheduleGpuGuestPoller } from '../gpu/poller.js';
-import { loadScanSettings, saveScanSettings, scanResultList, scanInfo, listScanAgents, LOCAL } from '../ipam/scanStore.js';
+import { loadScanSettings, saveScanSettings, scanResultList, scanInfo, listScanAgents, getAgentReports, LOCAL } from '../ipam/scanStore.js';
 import { runScanOnce, scanStatus, rescheduleScanPoller } from '../ipam/scanPoller.js';
 import { listAssignments as listIdracAssignments, getResults as getAgentResults } from '../central/assignments.js';
 import {
@@ -217,7 +217,13 @@ adminRouter.get('/ipam/scan/settings', adminOnly, (req, res) => {
   for (const k of Object.keys(getAgentResults() || {})) names.add(k);
   for (const t of listTargets()) if (t.agentName) names.add(t.agentName);
   for (const c of listCollectors()) if (c.datacenter) names.add(c.datacenter);
-  res.json({ agent, settings: loadScanSettings(agent), agents: [...names], status: scanStatus(), info: scanInfo() });
+  for (const k of Object.keys(getAgentReports() || {})) if (k && k !== LOCAL) names.add(k);
+  res.json({
+    agent, settings: loadScanSettings(agent), agents: [...names],
+    status: scanStatus(), info: scanInfo(),
+    centralEnabled: !!config.central.token,   // 에이전트 보고 가능 여부(중앙 토큰 설정)
+    reports: getAgentReports(),               // 에이전트별 마지막 보고
+  });
 });
 adminRouter.put('/ipam/scan/settings', adminOnly, (req, res) => {
   const agent = (req.body && req.body.agent) || LOCAL;

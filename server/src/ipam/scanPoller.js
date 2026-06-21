@@ -5,7 +5,7 @@
  */
 
 import { scanRanges } from './scan.js';
-import { loadScanSettings, mergeScanResults, pruneScanResults, LOCAL } from './scanStore.js';
+import { loadScanSettings, mergeScanResults, pruneScanResults, recordAgentReport, LOCAL } from './scanStore.js';
 
 let timer = null;
 let running = false;
@@ -23,6 +23,7 @@ export async function runScanOnce({ manual = false } = {}) {
       ports: s.ports, concurrency: s.concurrency, timeoutMs: s.timeoutMs, reverseDns: s.reverseDns,
     });
     mergeScanResults(alive, Date.now(), LOCAL);
+    recordAgentReport(LOCAL, { scanned, alive: alive.length });
     pruneScanResults(s.retentionDays);
     lastRun = { at: Date.now(), durationMs: Date.now() - started, scanned, alive: alive.length, manual };
     return { ok: true, ...lastRun };

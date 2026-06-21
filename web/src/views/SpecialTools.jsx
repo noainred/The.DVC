@@ -544,6 +544,8 @@ function IpScanSettings({ onClose }) {
   const [newAgent, setNewAgent] = useState('');
   const [status, setStatus] = useState(null);
   const [info, setInfo] = useState(null);
+  const [reports, setReports] = useState({});
+  const [centralEnabled, setCentralEnabled] = useState(true);
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
   const load = async (ag, first = false) => {
@@ -551,7 +553,7 @@ function IpScanSettings({ onClose }) {
       const r = await fetchJson('/admin/ipam/scan/settings', { agent: ag });
       if (first) setS(r.settings);
       if (r.agents) setAgents(r.agents);
-      setStatus(r.status); setInfo(r.info);
+      setStatus(r.status); setInfo(r.info); setReports(r.reports || {}); setCentralEnabled(r.centralEnabled !== false);
     } catch (e) { setMsg(e.message); }
   };
   useEffect(() => { load(agent, true); const t = setInterval(() => load(agent, false), 5000); return () => clearInterval(t); /* eslint-disable-next-line */ }, [agent]);
@@ -614,6 +616,46 @@ function IpScanSettings({ onClose }) {
       </div>
 
       {!isLocal && <div className="muted" style={{ fontSize: 12, marginTop: 12 }}>※ 이 설정은 <b>{agent}</b> 에이전트(<code>AGENT_NAME={agent}</code>, <code>CENTRAL_URL</code> 설정 필요)가 다음 주기에 읽어가 자기 사이트에서 스캔하고 결과를 포탈로 보고합니다. '지금 스캔'은 이 포탈에서 직접 스캔할 때만 동작합니다.</div>}
+
+      {/* 등록된 에이전트 없음 안내 */}
+      {agents.filter((a) => a !== LOCAL_AGENT).length === 0 && (
+        <div className="card" style={{ padding: 12, marginTop: 14, borderColor: 'var(--amber)', fontSize: 12.5, lineHeight: 1.7 }}>
+          <b style={{ color: 'var(--amber)' }}>⚠ 등록된 에이전트가 없습니다.</b> 현재는 <b>이 포탈에서 직접</b>만 스캔할 수 있습니다.
+          <div className="muted" style={{ marginTop: 6 }}>
+            분산 에이전트가 목록에 뜨려면:
+            <div>① <b>설정 › 에이전트 배포</b>로 에이전트를 배포하거나 <b>수집 서버</b>를 등록</div>
+            <div>② 에이전트 측에 <code>AGENT_NAME</code>, <code>CENTRAL_URL</code>(이 포탈 주소), <code>CENTRAL_TOKEN</code> 설정</div>
+            <div>③ <b>이 포탈에 <code>CENTRAL_TOKEN</code> 환경변수가 설정되어 있어야</b> 에이전트 보고가 허용됩니다 {centralEnabled ? <span className="badge green">설정됨</span> : <span className="badge red">미설정</span>}</div>
+            <div style={{ marginTop: 4 }}>· 우측 <b>"새 에이전트 이름"</b>에 에이전트의 <code>AGENT_NAME</code>을 직접 입력해 미리 할당을 만들어 둘 수도 있습니다.</div>
+          </div>
+        </div>
+      )}
+
+      {/* 에이전트별 마지막 보고 현황 */}
+      {Object.keys(reports).length > 0 && (
+        <div style={{ marginTop: 14 }}>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>에이전트별 보고 현황</div>
+          <div className="table-wrap" style={{ maxHeight: '24vh' }}>
+            <table>
+              <thead><tr><th>에이전트</th><th>마지막 보고</th><th style={{ textAlign: 'right' }}>스캔 / 응답</th><th>상태</th></tr></thead>
+              <tbody>
+                {Object.entries(reports).sort((a, b) => (b[1].at || 0) - (a[1].at || 0)).map(([name, r]) => {
+                  const ageMin = (Date.now() - (r.at || 0)) / 60000;
+                  const fresh = ageMin < 90; // 90분 내 보고면 정상
+                  return (
+                    <tr key={name}>
+                      <td><b>{name === LOCAL_AGENT ? '이 포탈' : name}</b></td>
+                      <td className="muted" style={{ fontSize: 12 }}>{r.at ? new Date(r.at).toLocaleString('ko-KR') : '—'}</td>
+                      <td style={{ textAlign: 'right' }}>{(r.scanned ?? 0).toLocaleString()} / <b>{(r.alive ?? 0).toLocaleString()}</b></td>
+                      <td><span className={`badge ${fresh ? 'green' : 'gray'}`}>{fresh ? '정상' : '오래됨'}</span></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       <div className="card" style={{ padding: 12, marginTop: 14, fontSize: 13 }}>
         <span className="muted">이 포탈 상태 <b style={{ color: status?.running ? 'var(--amber)' : 'var(--text)' }}>{status?.running ? '스캔 중' : (status?.enabled ? '활성' : '비활성')}</b></span>{' · '}
