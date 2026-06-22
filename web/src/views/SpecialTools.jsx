@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { fetchJson, postJson, putJson, usePolling, getToken } from '../api.js';
 import { DataTable, Loading, ErrorBox, StateBadge, UsageCell, EntityDetail, Modal, ResultCount, SearchBox, VmLink } from '../components/ui.jsx';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
+import { VmRemoteButton } from '../components/VmRemote.jsx';
 
 const TOOLS = [
   { k: 'aisearch', icon: '🔎', label: 'AI 검색 (자연어)', desc: '자연어로 VM/호스트/IP 검색 · 로컬 LLM' },
@@ -400,7 +401,7 @@ function Ipam({ scope, onScope }) {
                       {shown.length === 0 && <tr><td colSpan={11} className="center muted" style={{ padding: 22 }}>해당 상태의 IP가 없습니다.</td></tr>}
                       {shown.map((r) => (
                         <tr key={r.ip} style={{ background: ROWBG[r.status] }}>
-                          <td><button className="cell-link" title="클릭: 확인 시점·호스트명·사용/미사용 기간 보기" onClick={() => setHistIp({ ip: r.ip, hostname: r.hostname })}><b>{r.ip}</b></button></td>
+                          <td><button className="cell-link" title="클릭: 확인 시점·호스트명·사용/미사용 기간 + VM 정보/원격 접속" onClick={() => setHistIp(r)}><b>{r.ip}</b></button></td>
                           <td>{r.purpose}</td>
                           <td>{r.hostname ? <VmLink ip={r.ip} vcenterId={scope} label={r.hostname} /> : ''}</td>
                           <td className="muted" style={{ fontSize: 12 }}>{r.serverType || ''}</td>
@@ -412,7 +413,7 @@ function Ipam({ scope, onScope }) {
                           <td style={{ fontSize: 11 }}>
                             {r.usageStatus
                               ? <button className="tab" style={{ padding: '2px 8px', fontSize: 11 }} title={`최초 발견: ${r.firstSeen ? new Date(r.firstSeen).toLocaleString() : '—'}\n마지막 확인: ${r.lastSeen ? new Date(r.lastSeen).toLocaleString() : '—'}\n현재: ${r.usageStatus === 'up' ? '사용 중' : '해제됨'}`}
-                                  onClick={() => setHistIp({ ip: r.ip, hostname: r.hostname })}>🕒 이력</button>
+                                  onClick={() => setHistIp(r)}>🕒 이력</button>
                               : <span className="muted">—</span>}
                           </td>
                           <td style={{ fontSize: 12 }}>
@@ -448,15 +449,20 @@ function Ipam({ scope, onScope }) {
       {ipms && <IpmsSettings onClose={() => setIpms(false)} />}
       {scanOpen && <IpScanSettings onClose={() => setScanOpen(false)} />}
       {editMemo && <MemoEditor init={editMemo} onClose={() => setEditMemo(null)} onSaved={() => { setEditMemo(null); pickBase(base); }} />}
-      {histIp && <IpHistoryModal ip={histIp.ip} hostname={histIp.hostname} onClose={() => setHistIp(null)} />}
+      {histIp && <IpHistoryModal row={histIp} scope={scope} onClose={() => setHistIp(null)} />}
       {scanStatusOpen && <ScanStatusModal onClose={() => setScanStatusOpen(false)} />}
     </>
   );
 }
 
 /** IP 사용 이력 — 스캔으로 관측된 사용 시작(up)/해제(down) 전이 + 사용/미사용 구간. */
-function IpHistoryModal({ ip, hostname, onClose }) {
+function IpHistoryModal({ row, scope, onClose }) {
+  const ip = row.ip;
+  const hostname = row.hostname;
   const [h, setH] = useState(undefined);
+  const [showDetail, setShowDetail] = useState(false);
+  // VM/호스트 소유 IP면 그 자원으로, 스캔 IP면 IP만으로 원격 접속 대상 구성.
+  const remoteItem = row.owner || { name: hostname || ip, ipAddresses: [ip], vcenterId: row.vcenterId || scope || '' };
   useEffect(() => { fetchJson(`/tools/ipam/history?ip=${encodeURIComponent(ip)}`).then((r) => setH(r.history || null)).catch(() => setH(null)); }, [ip]);
   const fmt = (t) => (t ? new Date(t).toLocaleString() : '—');
   const dur = (ms) => { if (ms < 0) ms = 0; const d = Math.floor(ms / 86400000), hh = Math.floor((ms % 86400000) / 3600000), mm = Math.floor((ms % 3600000) / 60000); return d ? `${d}일 ${hh}시간` : (hh ? `${hh}시간 ${mm}분` : `${mm}분`); };
@@ -528,6 +534,13 @@ function IpHistoryModal({ ip, hostname, onClose }) {
           <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>※ 일정 시간(스캔 주기의 3배 또는 최소 3시간) 동안 응답이 없으면 '해제'로 기록됩니다.</div>
         </>
       )}
+      {/* 하단: VM 정보 보기(소유 자원이 있을 때) + 원격 접속(SSH/RDP) — 기존 기능 재사용 */}
+      <div className="flex gap" style={{ marginTop: 14, borderTop: '1px solid rgba(255,255,255,.08)', paddingTop: 12, alignItems: 'center' }}>
+        {row.owner && <button className="logout-btn" style={{ padding: '8px 14px' }} onClick={() => setShowDetail(true)}>🖥 VM 정보 보기</button>}
+        <VmRemoteButton item={remoteItem} />
+        {!row.owner && <span className="muted" style={{ fontSize: 12 }}>스캔으로 확인된 IP — 원격 접속은 IP로 직접 연결합니다.</span>}
+      </div>
+      {showDetail && row.owner && <EntityDetail type={row.ownerType} item={row.owner} onClose={() => setShowDetail(false)} />}
     </Modal>
   );
 }
@@ -657,8 +670,29 @@ function IpScanSettings({ onClose }) {
   const switchAgent = (a) => { setS(null); setMsg(null); setAgent(a); };
   const save = async () => {
     setBusy(true); setMsg(null);
-    try { const r = await putJson('/admin/ipam/scan/settings', { ...s, agent }); setS(r.settings); setStatus(r.status); setMsg(isLocal ? '저장되었습니다(이 포탈에 즉시 적용).' : `저장되었습니다. '${agent}' 에이전트가 다음 주기에 읽어가 스캔합니다.`); }
-    catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(false); }
+    try {
+      const r = await putJson('/admin/ipam/scan/settings', { ...s, agent });
+      setS(r.settings); setStatus(r.status);
+      const cfg = r.settings || s;
+      const mins = Math.max(1, Math.round((cfg.intervalMs || 3_600_000) / 60000));
+      const nextAt = new Date(Date.now() + (cfg.intervalMs || 3_600_000)).toLocaleString('ko-KR');
+      const hasRanges = (cfg.ranges || []).filter(Boolean).length > 0;
+      if (isLocal) {
+        // 저장 후 '지금 스캔?' 확인 — 아니오면 설정된 주기/다음 스캔 시각 안내.
+        if (hasRanges && window.confirm('설정을 저장했습니다.\n지금 바로 스캔할까요?\n\n[취소]를 누르면 설정된 주기에 따라 자동 스캔됩니다.')) {
+          await runNow();
+        } else if (cfg.enabled && hasRanges) {
+          setMsg(`저장됨 · 자동 스캔 켜짐(주기 ${mins}분). 다음 자동 스캔 예정: 약 ${nextAt}. 지금 바로 하려면 '지금 스캔(포탈)'을 누르세요.`);
+        } else {
+          setMsg(`저장됨 · 자동 스캔이 꺼져 있습니다('주기적으로 스캔' 체크 후 저장하거나 '지금 스캔(포탈)'을 누르세요).`);
+        }
+      } else {
+        // 원격 에이전트는 중앙에서 즉시 실행 불가 — 다음 주기에 스스로 읽어가 스캔.
+        setMsg(cfg.enabled
+          ? `저장됨 · '${agent}' 에이전트가 주기 ${mins}분마다 이 설정을 읽어가 스캔합니다. 다음 스캔: 최대 ${mins}분 이내(에이전트 다음 주기). 중앙에서 즉시 실행은 불가합니다.`
+          : `저장됨 · '${agent}' 자동 스캔이 꺼져 있습니다('주기적으로 스캔' 체크 후 저장하세요).`);
+      }
+    } catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(false); }
   };
   const runNow = async () => {
     const nRanges = (s.ranges || []).map((x) => String(x).trim()).filter(Boolean).length;
