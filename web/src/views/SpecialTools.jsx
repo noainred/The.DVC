@@ -367,7 +367,9 @@ function Ipam({ scope, onScope }) {
             </select>
           </div>
           {sheet && (() => {
-            const cnt = (st) => sheet.rows.filter((r) => (st === 'used' ? (r.status === 'used' || r.status === 'multihomed' || r.status === 'duplicate') : r.status === st)).length;
+            // '사용중'에는 스캔으로 확인된 IP(scanned)도 포함(실제 사용 중인 IP이므로).
+            const USED = ['used', 'multihomed', 'duplicate', 'scanned'];
+            const cnt = (st) => sheet.rows.filter((r) => (st === 'used' ? USED.includes(r.status) : r.status === st)).length;
             const FILTERS = [
               ['', `전체 (${sheet.rows.length})`, 'gray'],
               ['used', `사용중 (${cnt('used')})`, 'green'],
@@ -377,10 +379,10 @@ function Ipam({ scope, onScope }) {
               ['released', `해제(이력) (${cnt('released')})`, 'amber'],
               ['empty', `미사용 (${cnt('empty')})`, 'gray'],
             ];
-            // '사용중' = 실제 점유(사용/멀티홈/중복) 전부, 나머지는 정확히 해당 상태.
+            // '사용중' = 실제 점유(사용/멀티홈/중복/스캔확인) 전부, 나머지는 정확히 해당 상태.
             const shown = sheet.rows.filter((r) => {
               if (!stFilter) return true;
-              if (stFilter === 'used') return r.status === 'used' || r.status === 'multihomed' || r.status === 'duplicate';
+              if (stFilter === 'used') return USED.includes(r.status);
               return r.status === stFilter;
             });
             return (
@@ -398,7 +400,7 @@ function Ipam({ scope, onScope }) {
                       {shown.length === 0 && <tr><td colSpan={11} className="center muted" style={{ padding: 22 }}>해당 상태의 IP가 없습니다.</td></tr>}
                       {shown.map((r) => (
                         <tr key={r.ip} style={{ background: ROWBG[r.status] }}>
-                          <td><b>{r.ip}</b></td>
+                          <td><button className="cell-link" title="클릭: 확인 시점·호스트명·사용/미사용 기간 보기" onClick={() => setHistIp({ ip: r.ip, hostname: r.hostname })}><b>{r.ip}</b></button></td>
                           <td>{r.purpose}</td>
                           <td>{r.hostname ? <VmLink ip={r.ip} vcenterId={scope} label={r.hostname} /> : ''}</td>
                           <td className="muted" style={{ fontSize: 12 }}>{r.serverType || ''}</td>
@@ -410,7 +412,7 @@ function Ipam({ scope, onScope }) {
                           <td style={{ fontSize: 11 }}>
                             {r.usageStatus
                               ? <button className="tab" style={{ padding: '2px 8px', fontSize: 11 }} title={`최초 발견: ${r.firstSeen ? new Date(r.firstSeen).toLocaleString() : '—'}\n마지막 확인: ${r.lastSeen ? new Date(r.lastSeen).toLocaleString() : '—'}\n현재: ${r.usageStatus === 'up' ? '사용 중' : '해제됨'}`}
-                                  onClick={() => setHistIp(r.ip)}>🕒 이력</button>
+                                  onClick={() => setHistIp({ ip: r.ip, hostname: r.hostname })}>🕒 이력</button>
                               : <span className="muted">—</span>}
                           </td>
                           <td style={{ fontSize: 12 }}>
@@ -446,31 +448,68 @@ function Ipam({ scope, onScope }) {
       {ipms && <IpmsSettings onClose={() => setIpms(false)} />}
       {scanOpen && <IpScanSettings onClose={() => setScanOpen(false)} />}
       {editMemo && <MemoEditor init={editMemo} onClose={() => setEditMemo(null)} onSaved={() => { setEditMemo(null); pickBase(base); }} />}
-      {histIp && <IpHistoryModal ip={histIp} onClose={() => setHistIp(null)} />}
+      {histIp && <IpHistoryModal ip={histIp.ip} hostname={histIp.hostname} onClose={() => setHistIp(null)} />}
       {scanStatusOpen && <ScanStatusModal onClose={() => setScanStatusOpen(false)} />}
     </>
   );
 }
 
-/** IP 사용 이력 — 스캔으로 관측된 사용 시작(up)/해제(down) 전이 타임라인. */
-function IpHistoryModal({ ip, onClose }) {
+/** IP 사용 이력 — 스캔으로 관측된 사용 시작(up)/해제(down) 전이 + 사용/미사용 구간. */
+function IpHistoryModal({ ip, hostname, onClose }) {
   const [h, setH] = useState(undefined);
   useEffect(() => { fetchJson(`/tools/ipam/history?ip=${encodeURIComponent(ip)}`).then((r) => setH(r.history || null)).catch(() => setH(null)); }, [ip]);
   const fmt = (t) => (t ? new Date(t).toLocaleString() : '—');
   const dur = (ms) => { if (ms < 0) ms = 0; const d = Math.floor(ms / 86400000), hh = Math.floor((ms % 86400000) / 3600000), mm = Math.floor((ms % 3600000) / 60000); return d ? `${d}일 ${hh}시간` : (hh ? `${hh}시간 ${mm}분` : `${mm}분`); };
+  // 이벤트(오래된→최신)로 사용(up)/미사용(down) 구간을 만든다. 마지막 구간은 현재까지.
+  const evs = (h?.events) || [];
+  const now = Date.now();
+  const segs = evs.map((e, i) => ({ type: e.type, start: e.ts, end: i + 1 < evs.length ? evs[i + 1].ts : now, hostname: e.hostname }))
+    .map((s) => ({ ...s, ms: Math.max(0, s.end - s.start) }));
+  const usedMs = segs.filter((s) => s.type === 'up').reduce((a, s) => a + s.ms, 0);
+  const idleMs = segs.filter((s) => s.type === 'down').reduce((a, s) => a + s.ms, 0);
+  // 확인된 호스트명: 가장 최근 'up' 이벤트의 호스트명(없으면 전달받은 값).
+  const lastUpHost = [...evs].reverse().find((e) => e.type === 'up' && e.hostname)?.hostname;
+  const confirmedHost = lastUpHost || hostname || '—';
   return (
-    <Modal title={`IP 사용 이력 — ${ip}`} onClose={onClose} width={620} resizable minWidth={420} minHeight={360}>
+    <Modal title={`IP 사용 이력 — ${ip}`} onClose={onClose} width={640} resizable minWidth={440} minHeight={380}>
       {h === undefined ? <Loading /> : !h ? (
-        <div className="muted" style={{ fontSize: 13, padding: 16 }}>이 IP의 스캔 이력이 없습니다. IP 능동 스캔이 이 대역을 한 번 이상 관측해야 이력이 쌓입니다.</div>
+        <div style={{ padding: 8 }}>
+          <div className="flex gap wrap" style={{ marginBottom: 10 }}>
+            <div style={{ minWidth: 160 }}><div className="muted" style={{ fontSize: 12 }}>확인된 호스트명</div><div style={{ fontSize: 13, marginTop: 2 }}>{hostname || '—'}</div></div>
+          </div>
+          <div className="muted" style={{ fontSize: 13 }}>이 IP의 스캔 이력이 아직 없습니다. IP 능동 스캔이 이 대역을 한 번 이상 관측하면, 확인 시점·호스트명·사용/미사용 기간이 여기에 쌓입니다.</div>
+        </div>
       ) : (
         <>
           <div className="flex gap wrap" style={{ marginBottom: 12 }}>
-            {[['현재 상태', h.status === 'up' ? <span className="badge green">사용 중</span> : <span className="badge amber">해제됨</span>],
-              ['최초 발견', fmt(h.firstSeen)], ['마지막 확인', fmt(h.lastSeen)], ['관측 기간', dur((h.lastSeen || 0) - (h.firstSeen || 0))]].map(([k, v], i) => (
-              <div key={i} style={{ minWidth: 130 }}><div className="muted" style={{ fontSize: 12 }}>{k}</div><div style={{ fontSize: 13, marginTop: 2 }}>{v}</div></div>
+            {[['현재 상태', h.status === 'up' ? <span className="badge green">사용 중</span> : <span className="badge amber">미사용(해제)</span>],
+              ['확인된 호스트명', confirmedHost],
+              ['최초 확인', fmt(h.firstSeen)], ['마지막 확인', fmt(h.lastSeen)],
+              ['총 사용 기간', dur(usedMs)], ['총 미사용 기간', dur(idleMs)]].map(([k, v], i) => (
+              <div key={i} style={{ minWidth: 150 }}><div className="muted" style={{ fontSize: 12 }}>{k}</div><div style={{ fontSize: 13, marginTop: 2 }}>{v}</div></div>
             ))}
           </div>
-          <div className="table-wrap" style={{ maxHeight: '52vh' }}>
+
+          <div className="muted" style={{ fontSize: 12, margin: '4px 0 6px' }}>사용 / 미사용 구간</div>
+          <div className="table-wrap" style={{ marginBottom: 14 }}>
+            <table>
+              <thead><tr><th>구간</th><th>시작</th><th>종료</th><th style={{ textAlign: 'right' }}>기간</th></tr></thead>
+              <tbody>
+                {[...segs].reverse().map((s, i) => (
+                  <tr key={i}>
+                    <td>{s.type === 'up' ? <span className="badge green">사용</span> : <span className="badge amber">미사용</span>}</td>
+                    <td style={{ whiteSpace: 'nowrap' }}>{fmt(s.start)}</td>
+                    <td style={{ whiteSpace: 'nowrap' }}>{s.end >= now - 1000 ? '현재' : fmt(s.end)}</td>
+                    <td style={{ textAlign: 'right' }} className="muted">{dur(s.ms)}</td>
+                  </tr>
+                ))}
+                {!segs.length && <tr><td colSpan={4} className="center muted" style={{ padding: 16 }}>구간 정보가 없습니다.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="muted" style={{ fontSize: 12, margin: '4px 0 6px' }}>전이 기록(확인 시점별)</div>
+          <div className="table-wrap">
             <table>
               <thead><tr><th>시각</th><th>전이</th><th>호스트명</th><th>포트</th></tr></thead>
               <tbody>
