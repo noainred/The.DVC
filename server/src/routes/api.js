@@ -522,6 +522,14 @@ api.get('/tools/gpu', (req, res) => {
   const byVcenter = {};
   const byMode = { vgpu: 0, passthrough: 0, vsga: 0 };
   let totalGpus = 0;
+  // GPU가 할당된 VM을 호스트(이름)별로 집계 — 각 GPU 호스트에 몇 개 VM이 GPU를 쓰는지.
+  const gpuVmByHost = {};
+  for (const v of (snap.vms || [])) {
+    if (!v.gpu || !v.host) continue;
+    const e = gpuVmByHost[v.host] || { vms: 0, vgpu: 0, passthrough: 0 };
+    e.vms++; e.vgpu += v.gpu.vgpu || 0; e.passthrough += v.gpu.passthrough || 0;
+    gpuVmByHost[v.host] = e;
+  }
   for (const h of hosts) {
     const gpus = h.gpus || [];
     if (!gpus.length) continue;
@@ -533,10 +541,12 @@ api.get('/tools/gpu', (req, res) => {
     // ESXi가 사용률을 못 보는 패스쓰루 호스트는 게스트 OS 수집 오버레이로 보완.
     const guest = h.gpuUtilPct == null ? getGuestGpuHost(h.id) : null;
     const utilPct = h.gpuUtilPct ?? (guest ? guest.utilPct : null);
+    const vmAlloc = gpuVmByHost[h.name] || { vms: 0, vgpu: 0, passthrough: 0 };
     hostsWithGpu.push({
       id: h.id, host: h.name, vcenterId: h.vcenterId, cluster: h.cluster, count: gpus.length,
       model: gpus[0].model, memGB: gpus[0].memGB, mode: primaryMode, modes,
       vgpu: primaryMode === 'vgpu', utilPct, utilSource: h.gpuUtilPct != null ? 'esxi' : (guest ? 'guest' : null),
+      assignedVms: vmAlloc.vms,
     });
     for (const g of gpus) {
       byModel[g.model] = (byModel[g.model] || 0) + 1;
@@ -553,6 +563,27 @@ api.get('/tools/gpu', (req, res) => {
     byModel: Object.entries(byModel).map(([model, count]) => ({ model, count })).sort((a, b) => b.count - a.count),
     byVcenter: Object.entries(byVcenter).map(([vcenterId, count]) => ({ vcenterId, count })).sort((a, b) => b.count - a.count),
     items: hostsWithGpu.sort((a, b) => b.count - a.count),
+  });
+});
+
+// GPU가 할당된 VM 목록 — 어떤 VM이 어떤 방식(vGPU/패스쓰루)·프로파일로 GPU를 쓰는지.
+// 선택 필터: vcenterId, host, mode(vgpu|passthrough|mixed), model(호스트 GPU 모델).
+api.get('/tools/gpu/vms', (req, res) => {
+  const snap = store.get();
+  // 호스트명 → GPU 모델 매핑(모델 필터용)
+  const hostModel = {};
+  for (const h of snap.hosts) if ((h.gpus || []).length) hostModel[h.name] = h.gpus[0].model;
+  let vms = (snap.vms || []).filter((v) => v.gpu);
+  if (req.query.vcenterId) vms = vms.filter((v) => v.vcenterId === req.query.vcenterId);
+  if (req.query.host) vms = vms.filter((v) => v.host === req.query.host);
+  if (req.query.model) vms = vms.filter((v) => hostModel[v.host] === req.query.model);
+  if (req.query.mode) vms = vms.filter((v) => v.gpu.type === req.query.mode || (req.query.mode === 'vgpu' && v.gpu.vgpu) || (req.query.mode === 'passthrough' && v.gpu.passthrough));
+  res.json({
+    total: vms.length,
+    vms: vms.map((v) => ({
+      id: v.id, name: v.name, vcenterId: v.vcenterId, host: v.host, cluster: v.cluster,
+      powerState: v.powerState, model: hostModel[v.host] || '', gpu: v.gpu,
+    })).sort((a, b) => (a.vcenterId === b.vcenterId ? a.name.localeCompare(b.name) : a.vcenterId.localeCompare(b.vcenterId))).slice(0, 5000),
   });
 });
 
