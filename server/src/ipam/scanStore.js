@@ -86,6 +86,8 @@ export function listScanAgents() {
 // ---- 결과 ----------------------------------------------------------------
 let results = readJson(RES, {}) || {};
 
+let scanRevN = 0; // 스캔 결과/이력 변경 리비전(대장 캐시 무효화 키)
+export function scanRev() { return scanRevN; }
 export function getScanResults() { return results; }
 export function scanResultList() { return Object.values(results).sort((a, b) => (a.ip < b.ip ? -1 : 1)); }
 
@@ -96,6 +98,7 @@ export function mergeScanResults(alive, ts = Date.now(), agent = LOCAL) {
   }
   persist();
   persistHist();
+  scanRevN++;
 }
 
 // ---- IP 사용 이력 ----------------------------------------------------------
@@ -141,7 +144,7 @@ export function sweepReleases(idleMs, now = Date.now()) {
     // 아주 오래 안 보인 IP의 이력은 정리(무한 증식 방지)
     if ((e.lastSeen || 0) < now - HISTORY_RETENTION_MS) { delete history[e.ip]; changed++; }
   }
-  if (changed) { histDirty = true; persistHist(); }
+  if (changed) { histDirty = true; persistHist(); scanRevN++; }
   return changed;
 }
 
@@ -166,7 +169,7 @@ export function pruneScanResults(retentionDays) {
   const cut = Date.now() - retentionDays * 86_400_000;
   let changed = false;
   for (const [ip, r] of Object.entries(results)) if ((r.lastSeen || 0) < cut) { delete results[ip]; changed = true; }
-  if (changed) persist();
+  if (changed) { persist(); scanRevN++; }
 }
 
 function persist() {

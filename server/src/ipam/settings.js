@@ -15,6 +15,8 @@ let cache = null;       // raw settings
 let matcherCache = null; // compiled matcher
 
 let classifierCache = null;
+let rev = 0; // 설정 변경 리비전(대장 캐시 무효화 키)
+export function settingsRev() { return rev; }
 
 function load() {
   if (cache) return cache;
@@ -34,7 +36,7 @@ export function saveSettings(body = {}) {
   };
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
   fs.writeFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
-  cache = next; matcherCache = null; classifierCache = null;
+  cache = next; matcherCache = null; classifierCache = null; rev++;
   return next;
 }
 
