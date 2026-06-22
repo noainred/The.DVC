@@ -52,6 +52,20 @@ function envBlock({ agentName, centralUrl, centralToken, collectorToken, collect
 
 const creds = (t) => ({ host: t.host, port: t.port || 22, username: t.username, password: t.password, privateKey: t.privateKey || undefined });
 
+// 번들 Node 22는 glibc >= 2.28(EL8/EL9, Rocky/Alma/RHEL 9 등) 필요. 대상 glibc 점검.
+const MIN_GLIBC = [2, 28];
+async function probeGlibc(exec) {
+  // getconf 우선, 실패 시 ldd --version 파싱.
+  let out = (await exec('getconf GNU_LIBC_VERSION 2>/dev/null').catch(() => ({ stdout: '' }))).stdout.trim();
+  let m = /(\d+)\.(\d+)/.exec(out);
+  if (!m) { out = (await exec('ldd --version 2>&1 | head -1').catch(() => ({ stdout: '' }))).stdout.trim(); m = /(\d+)\.(\d+)\s*$/.exec(out) || /(\d+)\.(\d+)/.exec(out); }
+  if (!m) return { version: '', ok: null };
+  const ver = [Number(m[1]), Number(m[2])];
+  const ok = ver[0] > MIN_GLIBC[0] || (ver[0] === MIN_GLIBC[0] && ver[1] >= MIN_GLIBC[1]);
+  return { version: `${ver[0]}.${ver[1]}`, ok };
+}
+const glibcHint = (g) => `대상 호스트의 glibc ${g.version}이(가) 너무 낮습니다. 번들된 Node 22는 glibc ${MIN_GLIBC.join('.')} 이상(Rocky/Alma/RHEL 8·9)이 필요합니다. EL7(CentOS/RHEL 7, glibc 2.17)에서는 동작하지 않습니다 — 에이전트 호스트를 EL8/EL9로 올리거나 EL8/9 호스트를 사용하세요.`;
+
 /** SSH connectivity + prerequisite probe. */
 export async function testTarget(target) {
   if (!target?.host || !target?.username) return { ok: false, reason: 'host/username을 입력하세요.' };
@@ -60,7 +74,12 @@ export async function testTarget(target) {
       const os = await exec('cat /etc/os-release 2>/dev/null | grep -E "^PRETTY_NAME" | cut -d= -f2 | tr -d \'"\'');
       const root = await exec('id -u');
       const sysd = await exec('command -v systemctl >/dev/null && echo yes || echo no');
-      return { ok: true, os: os.stdout.trim(), isRoot: root.stdout.trim() === '0', systemd: sysd.stdout.includes('yes') };
+      const glibc = await probeGlibc(exec);
+      return {
+        ok: true, os: os.stdout.trim(), isRoot: root.stdout.trim() === '0', systemd: sysd.stdout.includes('yes'),
+        glibc: glibc.version, glibcOk: glibc.ok,
+        warn: glibc.ok === false ? glibcHint(glibc) : undefined,
+      };
     });
   } catch (err) {
     return { ok: false, reason: err.message };
@@ -80,6 +99,10 @@ export async function deployAgent(target, { installerPath, port = 4000 } = {}) {
       const idu = await exec('id -u');
       if (idu.stdout.trim() !== '0') return { ok: false, reason: 'install.sh 는 root 권한이 필요합니다. root 계정으로 접속하세요.' };
 
+      // 사전 점검: glibc가 낮으면 설치를 시도하지 않고 명확히 안내(혼란스러운 GLIBC 덤프 방지).
+      const glibc = await probeGlibc(exec);
+      if (glibc.ok === false) return { ok: false, reason: glibcHint(glibc), glibc: glibc.version };
+
       await exec(`rm -rf ${workDir} ${remotePkg} && mkdir -p ${workDir}`);
       await putFile(installer, remotePkg);                       // SFTP upload (fastPut)
       const untar = await exec(`tar xzf ${remotePkg} -C ${workDir}`);
@@ -91,14 +114,27 @@ export async function deployAgent(target, { installerPath, port = 4000 } = {}) {
       // Inject agent settings into the env file, then restart.
       const block = envBlock(target).replace(/'/g, "'\\''");
       await exec(`printf '%s' '${block}' >> /etc/vmware-portal/portal.env`);
-      await exec('systemctl restart vmware-portal');
+      await exec('systemctl restart vmware-portal 2>&1 || true');
+      // 재시작 직후 잠깐 대기 후 상태 확인(크래시 루프 감지).
+      await exec('sleep 2');
       const active = await exec('systemctl is-active vmware-portal');
+      const isActive = active.stdout.trim() === 'active';
+      let log = '';
+      if (!isActive) {
+        // 실패 시 서비스 로그를 자동 수집해 포탈에 그대로 보여준다(SSH 재접속 불필요).
+        const st = await exec('systemctl status vmware-portal --no-pager -l 2>&1 | head -20').catch(() => ({ stdout: '' }));
+        const jc = await exec('journalctl -u vmware-portal --no-pager -n 60 2>&1').catch(() => ({ stdout: '' }));
+        const port4000 = await exec(`ss -ltnp 2>/dev/null | grep ":${port} " || true`).catch(() => ({ stdout: '' }));
+        log = [st.stdout, '--- journalctl ---', jc.stdout, port4000.stdout ? `--- 포트 ${port} 사용 중 ---\n${port4000.stdout}` : ''].filter(Boolean).join('\n').slice(-4000);
+      }
       await exec(`rm -rf ${workDir} ${remotePkg}`);
       return {
-        ok: active.stdout.trim() === 'active',
+        ok: isActive,
         active: active.stdout.trim(),
         installer: path.basename(installer),
-        reason: active.stdout.trim() === 'active' ? undefined : '서비스가 active 상태가 아닙니다. 로그를 확인하세요.',
+        glibc: glibc.version,
+        log,
+        reason: isActive ? undefined : '서비스가 active 상태가 아닙니다. 아래 로그를 확인하세요.',
       };
     });
   } catch (err) {
