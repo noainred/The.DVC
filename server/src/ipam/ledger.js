@@ -35,6 +35,9 @@ export function buildIpamRows(snap, vcenterId) {
 
   const ignored = getIgnoreMatcher();
   const classify = getClassifier();
+  // 확인 출처(discovery): 'vcenter'(vCenter 인식) · 'scan'(Ping/TCP 스캔) · 'both'(둘 다).
+  // vCenter가 아는 IP가 스캔에도 잡히면 'both'로 표시.
+  const scanIpSet = new Set(scanResultList().map((s) => s.ip));
   const rows = [];
   const count = new Map();
   for (const vm of vms) {
@@ -47,6 +50,7 @@ export function buildIpamRows(snap, vcenterId) {
         ownerType: 'vm', serverType: 'VM', ownerName: vm.name, powerState: vm.powerState, guestOS: vm.guestOS,
         ...parseOs(vm.guestOS),
         hostName: vm.host || '', cluster: vm.cluster || '', multiHomed: ips.length > 1, scope: classify(ip), owner: vm,
+        discovery: scanIpSet.has(ip) ? 'both' : 'vcenter',
       });
     }
   }
@@ -59,6 +63,7 @@ export function buildIpamRows(snap, vcenterId) {
       ownerType: 'host', serverType: 'BareMetal', ownerName: h.name, powerState: h.powerState, guestOS: `ESXi ${h.version || ''}`.trim(),
       osName: 'ESXi', osVersion: h.version || '',
       hostName: h.name, cluster: h.cluster || '', multiHomed: false, scope: classify(h.name), owner: h,
+      discovery: scanIpSet.has(h.name) ? 'both' : 'vcenter',
     });
   }
   // 능동 스캔으로 발견된 IP(물리/기타 서버 등) 병합 — vCenter가 모르는 IP만 추가.
@@ -87,7 +92,7 @@ export function buildIpamRows(snap, vcenterId) {
         hostName: sc.hostname || '', cluster: '', multiHomed: false, scope: classify(sc.ip),
         openPorts: sc.openPorts || [], services: sc.services || [], lastSeen: sc.lastSeen || null,
         firstSeen: hist?.firstSeen || null, usageStatus: hist?.status || null, released,
-        source: 'scan', owner: null,
+        source: 'scan', discovery: 'scan', owner: null,
       });
     }
   }
@@ -141,12 +146,16 @@ export function buildSubnetSheets(snap, { vcenterId, onlyBase } = {}) {
       const recs = byIp.get(ip) || [];
       let status = 'empty', purpose = '', hostname = '', notes = '', power = '', scope = '', serverType = '', os = '';
       let firstSeen = null, lastSeen = null, usageStatus = null;
-      let owner = null, ownerType = '', vcenterId = ''; // 상세/원격접속용
+      let owner = null, ownerType = '', vcenterId = '', discovery = ''; // 상세/원격접속/확인출처
       if (i === 0) { status = 'network'; purpose = 'Network ID'; }
       else if (recs.length) {
         used++;
         const r = recs[0]; const o = r.owner || {};
         owner = r.owner || null; ownerType = r.ownerType || ''; vcenterId = r.vcenterId || '';
+        // 한 IP가 vCenter+스캔 양쪽 rec를 가지면 'both'
+        discovery = recs.some((x) => x.discovery === 'both') ? 'both'
+          : (recs.some((x) => x.discovery === 'vcenter') && recs.some((x) => x.discovery === 'scan')) ? 'both'
+            : (r.discovery || '');
         firstSeen = r.firstSeen || null; lastSeen = r.lastSeen || null; usageStatus = r.usageStatus || null;
         // vCenter가 모르고 능동 스캔으로만 확인된 IP는 'scanned'(스캔 확인)로 구분 표시.
         status = r.released ? 'released'
@@ -163,7 +172,7 @@ export function buildSubnetSheets(snap, { vcenterId, onlyBase } = {}) {
         scope = r.scope === 'public' ? '공인' : '사설';
       }
       const ann = annotations[ip];
-      sheetRows.push({ ip, last: i, purpose, hostname, serverType, os, notes, power, status, scope, firstSeen, lastSeen, usageStatus, owner, ownerType, vcenterId, memo: ann?.memo || '', tags: ann?.tags || [] });
+      sheetRows.push({ ip, last: i, purpose, hostname, serverType, os, notes, power, status, scope, firstSeen, lastSeen, usageStatus, discovery, owner, ownerType, vcenterId, memo: ann?.memo || '', tags: ann?.tags || [] });
     }
     return { subnet: `${base}.0/24`, base, used, rows: sheetRows };
   });

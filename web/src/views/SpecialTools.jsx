@@ -4,6 +4,14 @@ import { DataTable, Loading, ErrorBox, StateBadge, UsageCell, EntityDetail, Moda
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import { VmRemoteButton } from '../components/VmRemote.jsx';
 
+// IP 확인 출처 배지: vCenter 인식 / Ping(TCP)스캔 / 둘 다
+const DISCOVERY = { vcenter: ['vCenter', 'blue'], scan: ['Ping스캔', 'teal'], both: ['vCenter+스캔', 'green'] };
+function DiscoveryBadge({ d }) {
+  const m = DISCOVERY[d];
+  if (!m) return <span className="muted">—</span>;
+  return <span className={`badge ${m[1]}`} title={d === 'both' ? 'vCenter 인벤토리 + 능동 스캔 양쪽에서 확인' : d === 'scan' ? '능동 스캔(Ping/TCP)으로만 확인' : 'vCenter 인벤토리에서 확인'}>{m[0]}</span>;
+}
+
 const TOOLS = [
   { k: 'aisearch', icon: '🔎', label: 'AI 검색 (자연어)', desc: '자연어로 VM/호스트/IP 검색 · 로컬 LLM' },
   { k: 'vmfinder', icon: '🧭', label: 'VM 정밀 검색 / 유휴 VM', desc: '다수 vCenter·폴더·클러스터·풀 + 조건 · 1일/1주 평균 CPU로 미사용 VM' },
@@ -300,6 +308,7 @@ function Ipam({ scope, onScope }) {
     ) },
     { key: 'vcenterName', label: '센터(vCenter)' },
     { key: 'serverType', label: '서버종류', sortValue: (r) => r.serverType || '', render: (r) => <span className={`badge ${r.serverType === 'BareMetal' ? 'amber' : r.serverType === 'Scanned' ? 'teal' : 'blue'}`} title={r.serverType === 'Scanned' ? 'vCenter가 모르는 IP를 능동 스캔으로 확인' : undefined}>{r.serverType === 'BareMetal' ? '베어메탈' : r.serverType === 'Scanned' ? '🛰 스캔 확인' : 'VM'}</span> },
+    { key: 'discovery', label: '확인 방식', sortValue: (r) => r.discovery || '', render: (r) => <DiscoveryBadge d={r.discovery} /> },
     { key: 'ownerName', label: '소유 자원', render: (r) => (r.owner ? <button className="cell-link" onClick={() => setSel({ ownerType: r.ownerType, owner: r.owner })}>{r.ownerName}</button> : <span>{r.ownerName}{(r.services || []).length ? <span className="muted" style={{ fontSize: 11 }}> · {(r.services || []).join(',')}</span> : ''}</span>) },
     { key: 'powerState', label: '전원', render: (r) => <StateBadge state={r.powerState} /> },
     { key: 'osName', label: 'OS 종류', sortValue: (r) => r.osName || '', render: (r) => r.osName || <span className="muted">—</span> },
@@ -397,15 +406,16 @@ function Ipam({ scope, onScope }) {
                 </div>
                 <div className="table-wrap" style={{ maxHeight: '62vh' }}>
                   <table>
-                    <thead><tr><th>{base}.X</th><th>Purpose</th><th>Hostname</th><th>서버종류</th><th>OS</th><th>메모(Notes)</th><th>전원</th><th>분류</th><th>상태</th><th>사용이력</th><th>메모 · 태그</th></tr></thead>
+                    <thead><tr><th>{base}.X</th><th>Purpose</th><th>Hostname</th><th>서버종류</th><th>확인 방식</th><th>OS</th><th>메모(Notes)</th><th>전원</th><th>분류</th><th>상태</th><th>사용이력</th><th>메모 · 태그</th></tr></thead>
                     <tbody>
-                      {shown.length === 0 && <tr><td colSpan={11} className="center muted" style={{ padding: 22 }}>해당 상태의 IP가 없습니다.</td></tr>}
+                      {shown.length === 0 && <tr><td colSpan={12} className="center muted" style={{ padding: 22 }}>해당 상태의 IP가 없습니다.</td></tr>}
                       {shown.map((r) => (
                         <tr key={r.ip} style={{ background: ROWBG[r.status] }}>
                           <td><button className="cell-link" title="클릭: 확인 시점·호스트명·사용/미사용 기간 + VM 정보/원격 접속" onClick={() => setHistIp(r)}><b>{r.ip}</b></button></td>
                           <td>{r.purpose}</td>
                           <td>{r.hostname ? <VmLink ip={r.ip} vcenterId={scope} label={r.hostname} /> : ''}</td>
                           <td className="muted" style={{ fontSize: 12 }}>{r.serverType || ''}</td>
+                          <td style={{ fontSize: 12 }}><DiscoveryBadge d={r.discovery} /></td>
                           <td className="muted" style={{ fontSize: 12 }}>{r.os || ''}</td>
                           <td className="muted" style={{ fontSize: 12 }}>{r.notes}</td>
                           <td>{r.power}</td>
@@ -490,6 +500,7 @@ function IpHistoryModal({ row, scope, onClose }) {
         <>
           <div className="flex gap wrap" style={{ marginBottom: 12 }}>
             {[['현재 상태', h.status === 'up' ? <span className="badge green">사용 중</span> : <span className="badge amber">미사용(해제)</span>],
+              ['확인 방식', <DiscoveryBadge d={row.discovery} />],
               ['확인된 호스트명', confirmedHost],
               ['최초 확인', fmt(h.firstSeen)], ['마지막 확인', fmt(h.lastSeen)],
               ['총 사용 기간', dur(usedMs)], ['총 미사용 기간', dur(idleMs)]].map(([k, v], i) => (
