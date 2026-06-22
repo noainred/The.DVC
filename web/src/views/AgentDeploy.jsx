@@ -266,8 +266,16 @@ export default function AgentDeploy() {
           </b>
           <div style={{ fontSize: 13, marginTop: 6, lineHeight: 1.7 }}>
             {result.reason && <div style={{ color: result.ok ? 'var(--green)' : 'var(--red)' }}>{result.reason}</div>}
-            {result.os && <div>OS: {result.os} · root: {result.isRoot ? '예' : '아니오'} · systemd: {result.systemd ? '예' : '아니오'}</div>}
+            {result.os && <div>OS: {result.os} · root: {result.isRoot ? '예' : '아니오'} · systemd: {result.systemd ? '예' : '아니오'}{result.glibc ? ` · glibc: ${result.glibc} ${result.glibcOk === false ? '❌' : result.glibcOk ? '✅' : ''}` : ''}</div>}
+            {result.warn && <div style={{ color: 'var(--amber)', marginTop: 4 }}>⚠ {result.warn}</div>}
+            {result.glibc && result.kind !== 'test' && result.ok === false && <div style={{ color: 'var(--amber)', marginTop: 4 }}>glibc: {result.glibc}</div>}
             {result.active && <div>서비스 상태: <b>{result.active}</b> · 설치 패키지: {result.installer}</div>}
+            {result.log && (
+              <div style={{ marginTop: 8 }}>
+                <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>대상 호스트 서비스 로그(journalctl/status)</div>
+                <pre style={{ background: '#0b1220', border: '1px solid #243049', borderRadius: 8, padding: 10, fontSize: 11, lineHeight: 1.5, maxHeight: '36vh', overflow: 'auto', whiteSpace: 'pre-wrap' }}>{result.log}</pre>
+              </div>
+            )}
             {result.kind === 'pkg' && result.ok && <div>저장: <code>{result.file}</code> ({(result.sizeBytes / 1048576).toFixed(1)} MB) · v{result.version}{result.verified ? ' · SHA-256 검증됨' : ''}</div>}
             {result.kind === 'deploy-all' && <div>{result.deployed}/{result.total} 성공
               <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
