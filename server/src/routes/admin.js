@@ -144,8 +144,10 @@ adminRouter.post('/agent-deploy/test', adminOnly, async (req, res) => {
 });
 
 adminRouter.post('/agent-deploy', adminOnly, async (req, res) => {
-  const { installerPath, port, portalPort, ...target } = req.body || {};
-  const r = await deployAgent(target, { installerPath, port: port || portalPort });
+  // SSH 포트(target.port)와 포탈 포트(portalPort)를 혼동하지 않도록 분리.
+  // portalPort만 install.sh --port 로 전달(예전 버그: SSH 22가 포탈 포트로 들어가 EACCES).
+  const { installerPath, portalPort, ...target } = req.body || {};
+  const r = await deployAgent(target, { installerPath, port: Number(portalPort) || 4000 });
   res.status(r.ok ? 200 : 400).json(r);
 });
 
