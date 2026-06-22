@@ -1,6 +1,16 @@
 {
   "notes": [
     {
+      "version": "1.75.0",
+      "date": "2026-06-22",
+      "title": "Guest OS 화면 — 전원(켜짐/꺼짐)·VM/템플릿 필터 추가",
+      "notes": [
+        "특수기능 'Guest OS 종류/버전'에 전원(전체/켜짐/꺼짐) + 종류(전체/VM/템플릿) 필터 추가",
+        "법인은 기존 '범위' 드롭다운으로 선택 — 필터 조합으로 원하는 집합만 집계",
+        "GET /tools/guest-os 에 power=on|off, kind=vm|template 파라미터 지원"
+      ]
+    },
+    {
       "version": "1.74.0",
       "date": "2026-06-22",
       "title": "위협 탐지(방어) — 텔레메트리 기반 + NSX 분산 IDS 연동",

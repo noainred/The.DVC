@@ -1506,9 +1506,12 @@ function ThinVms({ scope }) {
 }
 
 function GuestOs({ scope }) {
-  const { loading, data, error } = useTool('/tools/guest-os', scope ? { vcenterId: scope } : {});
   const [q, setQ] = useState('');
   const [view, setView] = useState('os'); // os | family
+  const [power, setPower] = useState('all'); // all | on | off
+  const [kind, setKind] = useState('all');   // all | vm | template
+  const params = { ...(scope ? { vcenterId: scope } : {}), ...(power !== 'all' ? { power } : {}), ...(kind !== 'all' ? { kind } : {}) };
+  const { loading, data, error } = useTool('/tools/guest-os', params);
   if (loading) return <Loading />;
   if (error) return <ErrorBox message={error} />;
   const term = q.trim().toLowerCase();
@@ -1536,6 +1539,15 @@ function GuestOs({ scope }) {
         <button className={view === 'os' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setView('os')}>OS·버전별 ({data.items.length})</button>
         <button className={view === 'family' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setView('family')}>계열별 ({data.families.length})</button>
         <SearchBox className="input" style={{ maxWidth: 260 }} placeholder="OS 이름 검색 (예: Windows, Ubuntu 22)" value={q} onChange={setQ} />
+        <span style={{ width: 8 }} />
+        <span className="muted" style={{ fontSize: 12 }}>전원</span>
+        {[['all', '전체'], ['on', '켜짐'], ['off', '꺼짐']].map(([k, l]) => (
+          <button key={k} className={power === k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 11px', fontSize: 12 }} onClick={() => setPower(k)}>{l}</button>
+        ))}
+        <span className="muted" style={{ fontSize: 12, marginLeft: 6 }}>종류</span>
+        {[['all', '전체'], ['vm', 'VM'], ['template', '템플릿']].map(([k, l]) => (
+          <button key={k} className={kind === k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 11px', fontSize: 12 }} onClick={() => setKind(k)}>{l}</button>
+        ))}
       </div>
       <DataTable columns={view === 'os' ? osCols : famCols} rows={rows} initialSort={{ key: 'total', dir: 'desc' }} />
     </>
