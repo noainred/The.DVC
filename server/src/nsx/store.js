@@ -83,7 +83,7 @@ const pendingManager = (m) => ({ id: m.id, name: m.name, host: m.host, region: m
 const unreachableManager = (m, err) => ({ id: m.id, name: m.name, host: m.host, region: m.location?.region || '', vcenterId: m.vcenterId || '', status: 'unreachable', version: '', nodeCount: 0, error: err.message, hint: err.hint, code: err.code });
 
 function empty() {
-  return { generatedAt: new Date().toISOString(), source: getDataSource(), managers: [], gateways: [], segments: [], transportNodes: [], dfw: [], securityGroups: [], collectionErrors: [], rollup: null };
+  return { generatedAt: new Date().toISOString(), source: getDataSource(), managers: [], gateways: [], segments: [], transportNodes: [], dfw: [], securityGroups: [], idsEvents: [], collectionErrors: [], rollup: null };
 }
 
 function merge(parts, errors, source) {
@@ -97,6 +97,7 @@ function merge(parts, errors, source) {
     snap.transportNodes.push(...p.transportNodes);
     snap.dfw.push(...(p.dfw || []));
     snap.securityGroups.push(...(p.securityGroups || []));
+    snap.idsEvents.push(...(p.ids?.events || []));
   }
   snap.generatedAt = new Date().toISOString();
   return snap;

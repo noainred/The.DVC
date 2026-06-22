@@ -7,7 +7,8 @@ import { fetchVmMetric, fetchHostMetric, PERF_INTERVALS, upgradeVmTools, getVmCo
 import { listMutes, addMute, removeMute } from '../alarm-mutes.js';
 import { buildIpamRows, buildSubnetSheets, listSubnets } from '../ipam/ledger.js';
 import { getAnnotation, setAnnotation } from '../ipam/annotations.js';
-import { getIpHistory } from '../ipam/scanStore.js';
+import { getIpHistory, scanResultList, getIpHistoryMap } from '../ipam/scanStore.js';
+import { getClassifier } from '../ipam/settings.js';
 import { buildWorkbook } from '../ipam/excel.js';
 import { listNotes } from '../release-notes.js';
 import { nlSearch } from '../llm/nlSearch.js';
@@ -658,6 +659,66 @@ api.get('/tools/insights', (req, res) => {
   };
 
   res.json({ generatedAt: snap.generatedAt, rightsizing, clusters, alarmHotspot, gpuWaste });
+});
+
+// 위협 탐지 — (A) 텔레메트리 기반 + (B) NSX 분산 IDS 이벤트. 자사 인프라 방어 목적.
+const RISKY_PORTS = { 21: 'FTP', 23: 'Telnet', 135: 'RPC', 139: 'NetBIOS', 445: 'SMB', 1433: 'MSSQL', 3306: 'MySQL', 3389: 'RDP', 5432: 'PostgreSQL', 5900: 'VNC', 6379: 'Redis', 9200: 'Elasticsearch', 27017: 'MongoDB', 11211: 'Memcached' };
+const EOL_OS = [
+  [/windows.*(\bxp\b|2000|2003|2008|vista|\b7\b|\bnt\b)/i, 'Windows (EOL)'],
+  [/cent\s?os.*(\b5\b|\b6\b|\b7\b)/i, 'CentOS (EOL)'],
+  [/red\s?hat.*(\b5\b|\b6\b|\b7\b)/i, 'RHEL (EOL)'],
+  [/ubuntu.*(1[0-6]\.(04|10)|8\.04|9\.|0[0-9]\.)/i, 'Ubuntu (EOL)'],
+  [/debian.*(\b[1-9]\b)\b/i, 'Debian old'],
+];
+api.get('/tools/threats', (req, res) => {
+  const snap = store.get();
+  const vc = req.query.vcenterId;
+  const vms = vc ? snap.vms.filter((v) => v.vcenterId === vc) : snap.vms;
+  const on = vms.filter((v) => v.powerState === 'POWERED_ON');
+  const classify = getClassifier();
+  const slim = (v) => ({ name: v.name, vcenterId: v.vcenterId, host: v.host || '', cpuPct: v.cpuUsagePct ?? null, memPct: v.memUsagePct ?? null });
+
+  // A1) 크립토마이닝 의심 — 고CPU 지속(현재 스냅샷 기준; 사용률 미보고는 제외)
+  const mining = on.filter((v) => (v.cpuUsagePct ?? -1) >= 90).map(slim).sort((a, b) => (b.cpuPct || 0) - (a.cpuPct || 0));
+
+  // A2) EOL/취약 OS
+  const eol = vms.map((v) => { const m = EOL_OS.find(([re]) => re.test(v.guestOS || '')); return m ? { ...slim(v), os: v.guestOS, reason: m[1] } : null; }).filter(Boolean);
+
+  // A3) 위험 포트 노출(스캔 결과) — 공인 노출이면 high
+  const scan = scanResultList();
+  const risky = scan.map((s) => {
+    const hits = (s.openPorts || []).filter((p) => RISKY_PORTS[p]);
+    if (!hits.length) return null;
+    const pub = classify(s.ip) === 'public';
+    return { ip: s.ip, hostname: s.hostname || '', ports: hits.map((p) => `${p}/${RISKY_PORTS[p]}`), public: pub, severity: pub ? 'high' : 'medium' };
+  }).filter(Boolean).sort((a, b) => (b.public - a.public) || (b.ports.length - a.ports.length));
+
+  // A4) 신규 rogue IP — vCenter가 모르고, 최근 7일 내 처음 스캔된 IP
+  const known = new Set();
+  for (const v of (snap.vms || [])) { const ips = v.ipAddresses?.length ? v.ipAddresses : (v.ipAddress ? [v.ipAddress] : []); for (const ip of ips) known.add(ip); }
+  for (const h of (snap.hosts || [])) known.add(h.name);
+  const hist = getIpHistoryMap();
+  const cut = Date.now() - 7 * 86_400_000;
+  const rogue = scan.filter((s) => !known.has(s.ip) && (hist[s.ip]?.firstSeen || 0) > cut)
+    .map((s) => ({ ip: s.ip, hostname: s.hostname || '', firstSeen: hist[s.ip]?.firstSeen || null, ports: (s.openPorts || []), services: s.services || [] }))
+    .sort((a, b) => (b.firstSeen || 0) - (a.firstSeen || 0));
+
+  // B) NSX 분산 IDS 이벤트(있으면)
+  const nsx = nsxStore.get();
+  let idsEvents = nsx.idsEvents || [];
+  const idsManagers = (nsx.managers || []).map((m) => ({ name: m.name, enabled: m.idsEnabled ?? null, profiles: m.idsProfiles || 0, events: m.idsEventCount || 0 }));
+  const sev = (e) => e.severity;
+  idsEvents = idsEvents.slice(0, 500);
+
+  res.json({
+    generatedAt: snap.generatedAt,
+    summary: {
+      mining: mining.length, eol: eol.length, riskyPublic: risky.filter((r) => r.public).length, riskyTotal: risky.length,
+      rogue: rogue.length, idsEvents: idsEvents.length, idsCritical: idsEvents.filter((e) => /crit|high/.test(sev(e))).length,
+    },
+    mining: mining.slice(0, 200), eol: eol.slice(0, 300), risky: risky.slice(0, 300), rogue: rogue.slice(0, 300),
+    ids: { managers: idsManagers, events: idsEvents },
+  });
 });
 
 // GPU 사용률 히스토리(5년까지). level=host|cluster|vc, key=대상키, days=기간.
