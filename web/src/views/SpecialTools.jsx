@@ -332,9 +332,10 @@ function Ipam({ scope, onScope }) {
       )}
       <div className="flex gap wrap" style={{ marginBottom: 10 }}>
         {data.byVcenter.map((v) => (
-          <span key={v.vcenterId} className="badge gray" title="이 vCenter의 서브넷 대장 보기"
+          <span key={v.vcenterId || '__scan__'} className={`badge ${v.scanned ? 'teal' : 'gray'}`}
+            title={v.scanned ? '어떤 vCenter에도 속하지 않고 IP 능동 스캔으로만 확인된 IP입니다. 서브넷 대장의 “스캔 확인” 필터로 볼 수 있습니다.' : '이 vCenter의 서브넷 대장 보기'}
             style={{ fontSize: 12, padding: '4px 10px', cursor: 'pointer', border: scope === v.vcenterId ? '1px solid var(--accent,#2563eb)' : undefined }}
-            onClick={() => { onScope?.(v.vcenterId); openSheets(v.vcenterId); }}>{v.vcenterName} · {v.count}</span>
+            onClick={() => { onScope?.(v.vcenterId); openSheets(v.vcenterId); }}>{v.scanned ? '🛰 네트워크 스캔' : v.vcenterName} · {v.count}</span>
         ))}
       </div>
       <div className="flex between wrap gap" style={{ marginBottom: 8, alignItems: 'center' }}>
