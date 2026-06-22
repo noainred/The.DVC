@@ -661,11 +661,15 @@ function IpScanSettings({ onClose }) {
     catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(false); }
   };
   const runNow = async () => {
-    setBusy(true); setMsg('스캔을 시작하는 중…');
+    const nRanges = (s.ranges || []).map((x) => String(x).trim()).filter(Boolean).length;
+    setBusy(true); setMsg(`입력한 대역(${nRanges}개)을 저장하고 스캔을 시작하는 중…`);
     try {
+      // 입력한 대역을 먼저 저장한 뒤 스캔(미저장 입력이 무시되어 첫 대역만 스캔되던 문제 방지).
+      const sv = await putJson('/admin/ipam/scan/settings', { ...s, agent });
+      if (sv?.settings) setS(sv.settings);
       const r = await postJson('/admin/ipam/scan/run', {});
       if (r.status) setStatus(r.status); if (r.info) setInfo(r.info);
-      setMsg(r.ok ? '스캔을 백그라운드에서 시작했습니다. 창을 닫아도 계속 실행됩니다(진행률은 아래 막대 또는 대장 상단 “스캔 상태”에서 확인).' : `시작 실패: ${r.reason}`);
+      setMsg(r.ok ? `대역 ${nRanges}개 스캔을 백그라운드에서 시작했습니다(전체 IP는 진행 막대에 표시). 창을 닫아도 계속 실행됩니다.` : `시작 실패: ${r.reason}`);
     } catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(false); load(agent, false); }
   };
   const last = status?.lastRun;
@@ -692,9 +696,12 @@ function IpScanSettings({ onClose }) {
         <label className="flex gap" style={{ alignItems: 'center', paddingTop: 9 }}>
           <input type="checkbox" checked={s.enabled} onChange={(e) => setS({ ...s, enabled: e.target.checked })} /> 주기적으로 스캔
         </label>
-        <label style={{ fontWeight: 600, paddingTop: 9 }}>스캔 대역</label>
-        <textarea className="input" value={(s.ranges || []).join('\n')} onChange={(e) => setS({ ...s, ranges: e.target.value.split(/\n/) })}
-          placeholder={'10.0.0.0/24\n192.168.1.1-192.168.1.50\n172.16.5.10'} style={{ resize: 'vertical', minHeight: 96, fontFamily: 'monospace', fontSize: 12, width: '100%', boxSizing: 'border-box' }} />
+        <label style={{ fontWeight: 600, paddingTop: 9 }}>스캔 대역 <span className="muted" style={{ fontWeight: 400, fontSize: 11 }}>(한 줄에 하나)</span></label>
+        <div>
+          <textarea className="input" value={(s.ranges || []).join('\n')} onChange={(e) => setS({ ...s, ranges: e.target.value.split(/\n/) })}
+            placeholder={'10.0.0.0/24\n192.168.1.1-192.168.1.50\n172.16.5.10'} style={{ resize: 'vertical', minHeight: 96, fontFamily: 'monospace', fontSize: 12, width: '100%', boxSizing: 'border-box', display: 'block' }} />
+          <div className="muted" style={{ fontSize: 11, marginTop: 3 }}>등록 대역 <b>{(s.ranges || []).map((x) => String(x).trim()).filter(Boolean).length}</b>개 — 모든 줄을 스캔합니다. <b>지금 스캔</b>은 입력값을 자동 저장 후 실행합니다.</div>
+        </div>
         <label style={{ fontWeight: 600, paddingTop: 9 }}>포트</label>
         <input className="input" value={(s.ports || []).join(', ')} onChange={(e) => setS({ ...s, ports: e.target.value.split(/[\s,]+/).map(Number).filter(Boolean) })}
           style={{ width: '100%', boxSizing: 'border-box' }} />
