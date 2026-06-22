@@ -7,6 +7,10 @@ import { applyMutes } from './alarm-mutes.js';
 import { getDataSource } from './runtime-settings.js';
 import { buildIpamRows } from './ipam/ledger.js';
 import { syncLedger } from './ipam/db.js';
+import { getInventory, pruneInventory } from './central/inventory.js';
+
+// 사이트 위임 vCenter가 이 시간 이상 push가 없으면 'stale'로 표시(데이터는 계속 서빙).
+const SITE_STALE_MS = Number(process.env.SITE_INVENTORY_STALE_MS) || 300_000;
 
 /**
  * Overlay real iDRAC power (Watts) onto hosts by matching the ESXi host name to
@@ -63,6 +67,7 @@ class Store {
       // don't get re-polled every base tick; disabled ones are skipped.
       const due = vcenters.filter((vc) => {
         if (vc.enabled === false) return false;
+        if (vc.collectMode === 'site') return false; // 사이트 위임: 중앙은 직접 폴링하지 않음
         const last = this.vcLast.get(vc.id) || 0;
         const intervalMs = vc.pollIntervalSec > 0 ? vc.pollIntervalSec * 1000 : globalMs;
         return now - last >= intervalMs - 500;
@@ -82,6 +87,7 @@ class Store {
       // Drop cache entries for vCenters that were removed from the registry.
       const ids = new Set(vcenters.map((v) => v.id));
       for (const id of [...this.vcCache.keys()]) if (!ids.has(id)) this.vcCache.delete(id);
+      pruneInventory(ids); // 위임 인벤토리 캐시도 동기화
 
       // Rebuild the merged snapshot from cache every tick (cheap), so non-due
       // vCenters keep serving their last-known data instead of disappearing.
@@ -91,6 +97,23 @@ class Store {
       for (const vc of vcenters) {
         if (vc.enabled === false) {
           merged.vcenters.push({ id: vc.id, name: vc.name, location: vc.location, status: 'disabled' });
+          continue;
+        }
+        // 사이트 위임 vCenter: 현장 서버가 push한 인벤토리를 병합(중앙 폴링 없음).
+        if (vc.collectMode === 'site') {
+          const inv = getInventory(vc.id);
+          if (inv?.data?.vcenter) {
+            const s = inv.data;
+            const stale = Date.now() - inv.at > SITE_STALE_MS;
+            merged.vcenters.push({ ...s.vcenter, collectSource: 'site', collectedBy: inv.agent, receivedAt: inv.at, stale });
+            merged.hosts.push(...(s.hosts || []));
+            merged.vms.push(...(s.vms || []));
+            merged.datastores.push(...(s.datastores || []));
+            merged.networks.push(...(s.networks || []));
+            merged.alarms.push(...(s.alarms || []));
+          } else {
+            merged.vcenters.push({ id: vc.id, name: vc.name, location: vc.location, status: 'pending', collectSource: 'site', note: '사이트 에이전트 수집 대기' });
+          }
           continue;
         }
         const c = this.vcCache.get(vc.id);

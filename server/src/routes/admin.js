@@ -30,6 +30,7 @@ import { loadScanSettings, saveScanSettings, scanResultList, scanInfo, listScanA
 import { startScan, scanStatus, rescheduleScanPoller } from '../ipam/scanPoller.js';
 import { listAssignments as listIdracAssignments, getResults as getAgentResults } from '../central/assignments.js';
 import { centralTokenInfo, generateCentralToken, setCentralToken } from '../central/token.js';
+import { listInventory } from '../central/inventory.js';
 import {
   listRegistry as listNsx, addManager as addNsx, updateManager as updateNsx,
   removeManager as removeNsx, testConnection as testNsx,
@@ -229,6 +230,8 @@ adminRouter.put('/ipam/settings', adminOnly, (req, res) => res.json({ ok: true, 
 
 // 중앙 토큰(CENTRAL_TOKEN) — 조회/생성/저장(실행중 서버 + portal.env 영속).
 adminRouter.get('/central-token', adminOnly, (_req, res) => res.json(centralTokenInfo()));
+// 사이트 위임 수집 현황(어떤 vCenter를 어떤 에이전트가 언제 push했는지).
+adminRouter.get('/central/inventory', adminOnly, (_req, res) => res.json({ inventory: listInventory() }));
 adminRouter.post('/central-token/generate', adminOnly, (req, res) => {
   const r = generateCentralToken({ force: !!(req.body && req.body.force) });
   res.json({ ok: true, ...r });

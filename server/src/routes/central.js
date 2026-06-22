@@ -7,6 +7,7 @@
 import { Router } from 'express';
 import { config } from '../config.js';
 import { getAssignment, setResult } from '../central/assignments.js';
+import { setInventory } from '../central/inventory.js';
 import { loadScanSettings, mergeScanResults, recordAgentReport } from '../ipam/scanStore.js';
 
 export const centralRouter = Router();
@@ -42,6 +43,26 @@ centralRouter.post('/result', (req, res) => {
     durationMs: b.durationMs || null,
   });
   res.json({ ok: true });
+});
+
+// 사이트 위임 수집: 현장 서버가 로컬 vCenter 인벤토리 조각을 push.
+// Body: { agent, vcenterId, vcenter, hosts[], vms[], datastores[], networks[], alarms[], generatedAt }
+centralRouter.post('/inventory', (req, res) => {
+  if (!config.central.token) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: '토큰 불일치' });
+  const b = req.body || {};
+  if (!b.vcenterId || !b.vcenter) return res.status(400).json({ ok: false, reason: 'vcenterId/vcenter가 필요합니다.' });
+  const arr = (x, n) => (Array.isArray(x) ? x.slice(0, n) : []);
+  const slice = {
+    vcenter: b.vcenter,
+    hosts: arr(b.hosts, 50_000),
+    vms: arr(b.vms, 500_000),
+    datastores: arr(b.datastores, 50_000),
+    networks: arr(b.networks, 50_000),
+    alarms: arr(b.alarms, 50_000),
+  };
+  setInventory(String(b.vcenterId), slice, String(b.agent || ''), b.generatedAt || null);
+  res.json({ ok: true, vcenterId: b.vcenterId, hosts: slice.hosts.length, vms: slice.vms.length });
 });
 
 // Agent pulls its IP-scan assignment (TCP connect scan config) by name.
