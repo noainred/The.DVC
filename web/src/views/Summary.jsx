@@ -4,7 +4,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
 } from 'recharts';
 import { usePolling } from '../api.js';
-import { Loading, ErrorBox, usageColor } from '../components/ui.jsx';
+import { Loading, ErrorBox, usageColor, Modal } from '../components/ui.jsx';
 
 const OS_COLORS = {
   Windows: '#3b82f6', RHEL: '#ef4444', Ubuntu: '#f59e0b', CentOS: '#a855f7',
@@ -15,13 +15,45 @@ const itemStyle = { color: '#e6edf6' };
 const labelStyle = { color: '#8b9bb4' };
 const fmt = (n) => (n ?? 0).toLocaleString('en-US');
 
-function Big({ label, value, unit, sub, accent }) {
+function Big({ label, value, unit, sub, accent, onClick }) {
   return (
-    <div className="card kpi">
-      <div className="label">{label}</div>
+    <div className="card kpi" onClick={onClick} style={onClick ? { cursor: 'pointer' } : undefined} title={onClick ? '클릭 시 vCenter별 상세 보기' : undefined}>
+      <div className="label">{label}{onClick && <span style={{ marginLeft: 4, opacity: .6 }}>›</span>}</div>
       <div className="value" style={accent ? { color: accent } : undefined}>{value}{unit && <small> {unit}</small>}</div>
       {sub && <div className="meta">{sub}</div>}
     </div>
+  );
+}
+
+/** vCenter(법인)별 가상화율(vCPU : 물리코어) 상세 모달. byVcenter 데이터로 클라이언트 계산. */
+function VcpuRatioModal({ rows, onClose }) {
+  const r2 = (v) => Number((v || 0).toFixed(2));
+  const list = (rows || []).map((vc) => ({
+    ...vc, ratio: vc.cpuCores > 0 ? r2(vc.vcpuAllocated / vc.cpuCores) : 0,
+  })).sort((a, b) => b.ratio - a.ratio);
+  const ratioColor = (r) => (r > 4 ? 'var(--amber)' : r > 0 ? 'var(--green)' : 'var(--text-dim)');
+  return (
+    <Modal title="vCenter별 가상화율 (vCPU : 물리코어)" onClose={onClose} width={720} resizable minWidth={480} minHeight={360}>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>할당된 vCPU ÷ 물리 코어 수. <b style={{ color: 'var(--amber)' }}>4:1 초과</b>는 높은 오버커밋입니다.</div>
+      <div className="table-wrap" style={{ maxHeight: '60vh' }}>
+        <table>
+          <thead><tr><th>vCenter(법인)</th><th style={{ textAlign: 'right' }}>VM</th><th style={{ textAlign: 'right' }}>할당 vCPU</th><th style={{ textAlign: 'right' }}>물리 코어</th><th style={{ textAlign: 'right' }}>가상화율</th><th>오버커밋</th></tr></thead>
+          <tbody>
+            {list.length === 0 && <tr><td colSpan={6} className="center muted" style={{ padding: 20 }}>데이터가 없습니다.</td></tr>}
+            {list.map((vc) => (
+              <tr key={vc.id}>
+                <td><b>{vc.name}</b></td>
+                <td style={{ textAlign: 'right' }} className="tabular">{(vc.vms || 0).toLocaleString()}</td>
+                <td style={{ textAlign: 'right' }} className="tabular">{(vc.vcpuAllocated || 0).toLocaleString()}</td>
+                <td style={{ textAlign: 'right' }} className="tabular">{(vc.cpuCores || 0).toLocaleString()}</td>
+                <td style={{ textAlign: 'right', fontWeight: 700, color: ratioColor(vc.ratio) }} className="tabular">{vc.ratio} : 1</td>
+                <td><span className={`badge ${vc.ratio > 4 ? 'amber' : 'green'}`}>{vc.ratio > 4 ? '높음' : '정상'}</span></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Modal>
   );
 }
 
@@ -45,6 +77,7 @@ export default function Summary({ scope, onGotoTab }) {
   const [corp, setCorp] = useState(''); // '' = all 법인(vCenter)
   const [osPower, setOsPower] = useState('all'); // all | on | off
   const [osKind, setOsKind] = useState('all');   // all | vm | template
+  const [showRatio, setShowRatio] = useState(false); // vCenter별 가상화율 모달
   const params = {
     ...scope, ...(corp ? { vcenterId: corp } : {}),
     ...(osPower !== 'all' ? { power: osPower } : {}),
@@ -121,7 +154,7 @@ export default function Summary({ scope, onGotoTab }) {
       <div className="section-title">VM 할당 합계 &amp; 오버커밋</div>
       <div className="kpis">
         <Big label="할당된 vCPU 합계" value={fmt(al.vcpuAllocated)} sub={`물리 코어 ${fmt(comp.cpuCores)}개`} accent="var(--accent)" />
-        <Big label="vCPU : 물리코어 비율" value={`${al.vcpuPerCore} : 1`} sub={al.vcpuPerCore > 4 ? '높은 오버커밋' : '정상 범위'} accent={al.vcpuPerCore > 4 ? 'var(--amber)' : 'var(--green)'} />
+        <Big label="vCPU : 물리코어 비율" value={`${al.vcpuPerCore} : 1`} sub={al.vcpuPerCore > 4 ? '높은 오버커밋' : '정상 범위'} accent={al.vcpuPerCore > 4 ? 'var(--amber)' : 'var(--green)'} onClick={() => setShowRatio(true)} />
         <Big label="할당된 RAM 합계" value={fmt(al.ramAllocatedGB)} unit="GB" sub={`물리 RAM의 ${al.ramOvercommitPct}%`} accent="var(--purple)" />
         <Big label="프로비저닝 스토리지" value={fmt(al.provisionedStorageTB)} unit="TB" sub="VM 디스크 할당 총량" accent="var(--accent-2)" />
         <Big label="호스트당 평균 VM" value={al.avgVmPerHost} sub={`전체 ${fmt(c.vms)} VM / ${fmt(c.hosts)} 호스트`} />
@@ -255,6 +288,7 @@ export default function Summary({ scope, onGotoTab }) {
           </tbody>
         </table>
       </div>
+      {showRatio && <VcpuRatioModal rows={s.byVcenter} onClose={() => setShowRatio(false)} />}
     </>
   );
 }

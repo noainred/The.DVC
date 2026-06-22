@@ -5,9 +5,13 @@
  */
 
 import { scanRanges } from './scan.js';
-import { loadScanSettings, mergeScanResults, pruneScanResults, recordAgentReport, LOCAL } from './scanStore.js';
+import { loadScanSettings, mergeScanResults, pruneScanResults, recordAgentReport, sweepReleases, LOCAL } from './scanStore.js';
+
+// 일정 시간 응답이 없으면 'IP 해제'로 간주(이력에 down 기록). 스캔 주기의 3배 또는 최소 3시간.
+function releaseIdleMs() { return Math.max(loadScanSettings().intervalMs * 3, 3 * 3_600_000); }
 
 let timer = null;
+let releaseTimer = null;
 let running = false;
 let lastRun = null;
 
@@ -24,6 +28,7 @@ export async function runScanOnce({ manual = false } = {}) {
     });
     mergeScanResults(alive, Date.now(), LOCAL);
     recordAgentReport(LOCAL, { scanned, alive: alive.length });
+    sweepReleases(releaseIdleMs()); // 미응답 IP를 '해제'로 마킹(사용 이력)
     pruneScanResults(s.retentionDays);
     lastRun = { at: Date.now(), durationMs: Date.now() - started, scanned, alive: alive.length, manual };
     return { ok: true, ...lastRun };
@@ -52,5 +57,9 @@ export function startIpScanPoller() {
   setTimeout(() => runScanOnce().catch((e) => console.error('[ipscan] 실패:', e.message)), 30_000).unref?.();
   timer = setInterval(() => runScanOnce().catch(() => {}), s.intervalMs);
   timer.unref?.();
+  // 분산 에이전트가 중앙으로 보고하는 경우 로컬 스캔이 꺼져 있어도 '해제' 전이는 기록해야 하므로
+  // 별도 주기(10분)로 미응답 IP를 마킹한다(중앙/로컬 공통).
+  releaseTimer = setInterval(() => { try { sweepReleases(releaseIdleMs()); } catch { /* */ } }, 10 * 60_000);
+  releaseTimer.unref?.();
   console.log(`[ipscan] poller started (enabled=${s.enabled}, ranges=${s.ranges.length}, every ${Math.round(s.intervalMs / 1000)}s)`);
 }

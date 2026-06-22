@@ -216,6 +216,13 @@ tbody tr:last-child td { border-bottom: none; }
 /* Spec search form */
 .spec-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; align-items: end; }
 .spec-grid label { display: flex; flex-direction: column; justify-content: flex-end; gap: 6px; font-size: 12px; color: var(--text-dim); font-weight: 600; }
+/* 라벨 높이가 1~2줄로 달라도 입력칸이 같은 기준선에 정렬되도록: 위 정렬 + 캡션 고정 높이 */
+.agent-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px 14px; align-items: start; }
+.agent-grid > label { display: flex; flex-direction: column; gap: 6px; }
+.agent-grid .cap { min-height: 30px; line-height: 1.3; font-size: 12px; font-weight: 600; color: var(--text-dim); display: flex; align-items: flex-end; }
+.agent-grid .input, .agent-grid .select { min-width: 0; width: 100%; }
+.agent-grid > label.agent-check { flex-direction: row; align-items: center; gap: 8px; font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+.agent-grid > label.agent-check input[type="checkbox"] { width: auto; flex: none; }
 .spec-grid .input, .spec-grid .select { min-width: 0; width: 100%; }
 
 /* Login */

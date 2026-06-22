@@ -30,6 +30,7 @@ import { attachRdpGateway } from './proxy/guacdTunnel.js';
 import { startMappingExpiry } from './proxy/expiry.js';
 import { collectorRouter } from './routes/collector.js';
 import { centralRouter } from './routes/central.js';
+import { dlSourceRouter } from './routes/dlsource.js';
 import { startIdracPoller } from './idrac/poller.js';
 import { startNsxPoller } from './nsx/store.js';
 import { startAlertEngine } from './alerts.js';
@@ -58,6 +59,7 @@ app.use((req, res, next) => {
 
 app.use('/api/collector', collectorRouter);            // token-gated agent export (no user auth)
 app.use('/api/central', centralRouter);                // token-gated agent<->central (no user auth)
+app.use('/dl', dlSourceRouter);                        // 중앙 업그레이드 소스(versions.json + 번들, 공개)
 app.use('/api/auth', authRouter);                      // public: login / config / me
 app.use('/api/upgrade', authMiddleware, upgradeRouter); // admin-gated auto-upgrade control
 app.use('/api/admin', authMiddleware, auditMiddleware, adminRouter);     // admin-gated vCenter management

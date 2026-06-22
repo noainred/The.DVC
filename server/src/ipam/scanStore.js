@@ -15,7 +15,11 @@ import { DEFAULT_PORTS } from './scan.js';
 const CFG = path.join(config.configDir, 'ipam-scan.json');
 const RES = path.join(config.configDir, 'ipam-scan-results.json');
 const REP = path.join(config.configDir, 'ipam-scan-agents.json');
+const HIST = path.join(config.configDir, 'ipam-scan-history.json');
 export const LOCAL = '__local__';
+
+const MAX_EVENTS = 200;             // IP당 보관 이벤트 수(가장 오래된 것부터 삭제)
+const HISTORY_RETENTION_MS = 365 * 86_400_000; // 1년 넘게 안 보인 IP는 이력에서 제거(무한 증식 방지)
 
 const DEFAULTS = {
   enabled: false, ranges: [], ports: DEFAULT_PORTS,
@@ -86,8 +90,75 @@ export function getScanResults() { return results; }
 export function scanResultList() { return Object.values(results).sort((a, b) => (a.ip < b.ip ? -1 : 1)); }
 
 export function mergeScanResults(alive, ts = Date.now(), agent = LOCAL) {
-  for (const h of alive) results[h.ip] = { ip: h.ip, openPorts: h.openPorts, services: h.services, hostname: h.hostname || '', lastSeen: ts, agent };
+  for (const h of alive) {
+    results[h.ip] = { ip: h.ip, openPorts: h.openPorts, services: h.services, hostname: h.hostname || '', lastSeen: ts, agent };
+    recordSeen(h, ts, agent); // IP 사용 이력(온라인 전환) 갱신
+  }
   persist();
+  persistHist();
+}
+
+// ---- IP 사용 이력 ----------------------------------------------------------
+// 어떤 IP가 "사용 시작(up) → 미사용(down)"으로 바뀌는 전이를 기록해 대장에서 추이를 본다.
+// up 전이: 스캔에서 새로 보이거나, down 이후 다시 보일 때 기록.
+// down 전이: sweepReleases()가 일정 시간 미응답 IP를 '해제'로 마킹할 때 기록.
+let history = readJson(HIST, {}) || {};
+let histDirty = false;
+
+function pushEvent(entry, ev) {
+  entry.events.push(ev);
+  if (entry.events.length > MAX_EVENTS) entry.events.splice(0, entry.events.length - MAX_EVENTS);
+}
+
+function recordSeen(h, ts, agent) {
+  const ip = h.ip;
+  let e = history[ip];
+  if (!e) {
+    e = history[ip] = { ip, firstSeen: ts, lastSeen: ts, status: 'up', agent, events: [] };
+    pushEvent(e, { ts, type: 'up', hostname: h.hostname || '', ports: h.openPorts || [], agent });
+    histDirty = true;
+    return;
+  }
+  e.lastSeen = ts;
+  e.agent = agent;
+  if (e.status !== 'up') {
+    e.status = 'up';
+    pushEvent(e, { ts, type: 'up', hostname: h.hostname || '', ports: h.openPorts || [], agent });
+    histDirty = true;
+  }
+}
+
+/** 일정 시간(idleMs) 이상 응답이 없던 'up' IP를 '해제(down)'로 마킹한다. */
+export function sweepReleases(idleMs, now = Date.now()) {
+  if (!idleMs || idleMs <= 0) return 0;
+  let changed = 0;
+  for (const e of Object.values(history)) {
+    if (e.status === 'up' && (e.lastSeen || 0) < now - idleMs) {
+      e.status = 'down';
+      pushEvent(e, { ts: now, type: 'down' });
+      changed++;
+    }
+    // 아주 오래 안 보인 IP의 이력은 정리(무한 증식 방지)
+    if ((e.lastSeen || 0) < now - HISTORY_RETENTION_MS) { delete history[e.ip]; changed++; }
+  }
+  if (changed) { histDirty = true; persistHist(); }
+  return changed;
+}
+
+function persistHist() {
+  if (!histDirty) return;
+  histDirty = false;
+  try { fs.mkdirSync(path.dirname(HIST), { recursive: true }); fs.writeFileSync(HIST, JSON.stringify(history, null, 2), { mode: 0o600 }); } catch { /* best effort */ }
+}
+
+/** 한 IP의 사용 이력(없으면 null). */
+export function getIpHistory(ip) { return history[ip] || null; }
+
+/** ip → { firstSeen, lastSeen, status } 요약 맵(대장 주석용). */
+export function getIpHistoryMap() {
+  const m = {};
+  for (const e of Object.values(history)) m[e.ip] = { firstSeen: e.firstSeen, lastSeen: e.lastSeen, status: e.status };
+  return m;
 }
 
 export function pruneScanResults(retentionDays) {
