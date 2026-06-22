@@ -587,6 +587,79 @@ api.get('/tools/gpu/vms', (req, res) => {
   });
 });
 
+// 운영 인사이트 — 기존 스냅샷만으로 계산하는 모니터링 분석 묶음:
+//  ② VM 라이트사이징(유휴/과대/과소)  ④ 클러스터 N+1(호스트 1대 장애 여력)
+//  ⑧ 알람 핫스팟(심각도/엔티티/센터)   ⑩ GPU 유휴/낭비
+api.get('/tools/insights', (req, res) => {
+  const snap = store.get();
+  const vc = req.query.vcenterId;
+  const hosts = vc ? snap.hosts.filter((h) => h.vcenterId === vc) : snap.hosts;
+  const vms = vc ? snap.vms.filter((v) => v.vcenterId === vc) : snap.vms;
+  const alarms = vc ? (snap.alarms || []).filter((a) => a.vcenterId === vc) : (snap.alarms || []);
+  const on = vms.filter((v) => v.powerState === 'POWERED_ON');
+  const r0 = (n, d = 0) => Number((n || 0).toFixed(d));
+  const gb = (mb) => Math.round((mb || 0) / 1024);
+
+  // ② 라이트사이징
+  const slim = (v) => ({ name: v.name, vcenterId: v.vcenterId, host: v.host || '', cpuPct: v.cpuUsagePct ?? null, memPct: v.memUsagePct ?? null, vcpu: v.cpuCount || 0, ramGB: gb(v.memMB) });
+  const idle = on.filter((v) => (v.cpuUsagePct ?? 100) < 5 && (v.memUsagePct ?? 100) < 20).map(slim);
+  const oversized = on.filter((v) => (v.cpuCount || 0) >= 4 && (v.cpuUsagePct ?? 100) < 10 && !((v.cpuUsagePct ?? 100) < 5 && (v.memUsagePct ?? 100) < 20)).map(slim);
+  const undersized = on.filter((v) => (v.cpuUsagePct ?? 0) > 85 || (v.memUsagePct ?? 0) > 90).map(slim);
+  const rightsizing = {
+    idleCount: idle.length, oversizedCount: oversized.length, undersizedCount: undersized.length,
+    reclaimableVcpu: [...idle, ...oversized].reduce((a, v) => a + (v.vcpu || 0), 0),
+    reclaimableRamGB: [...idle, ...oversized].reduce((a, v) => a + (v.ramGB || 0), 0),
+    idle: idle.slice(0, 200), oversized: oversized.slice(0, 200), undersized: undersized.slice(0, 200),
+  };
+
+  // ④ 클러스터 N+1 (가장 큰 호스트 1대 장애 시 잔여 용량으로 현재 사용량 수용 가능?)
+  const cmap = new Map();
+  for (const h of hosts) {
+    const k = `${h.vcenterId}|${h.cluster || 'standalone'}`;
+    const g = cmap.get(k) || { vcenterId: h.vcenterId, cluster: h.cluster || 'standalone', hosts: 0, cpuMhz: 0, cpuUsed: 0, memMB: 0, memUsed: 0, maxCpu: 0, maxMem: 0 };
+    g.hosts++; g.cpuMhz += h.cpuTotalMhz || 0; g.cpuUsed += h.cpuUsageMhz || 0; g.memMB += h.memTotalMB || 0; g.memUsed += h.memUsageMB || 0;
+    g.maxCpu = Math.max(g.maxCpu, h.cpuTotalMhz || 0); g.maxMem = Math.max(g.maxMem, h.memTotalMB || 0);
+    cmap.set(k, g);
+  }
+  const clusters = [...cmap.values()].map((g) => {
+    const remCpu = g.cpuMhz - g.maxCpu, remMem = g.memMB - g.maxMem;
+    const cpuOkPct = remCpu > 0 ? r0((g.cpuUsed / remCpu) * 100) : 999;
+    const memOkPct = remMem > 0 ? r0((g.memUsed / remMem) * 100) : 999;
+    const n1Ok = g.hosts >= 2 && cpuOkPct <= 90 && memOkPct <= 90;
+    return { vcenterId: g.vcenterId, cluster: g.cluster, hosts: g.hosts, n1Ok, cpuAfterFailPct: cpuOkPct, memAfterFailPct: memOkPct,
+      cpuUsagePct: g.cpuMhz ? r0((g.cpuUsed / g.cpuMhz) * 100) : 0, memUsagePct: g.memMB ? r0((g.memUsed / g.memMB) * 100) : 0 };
+  }).sort((a, b) => (a.n1Ok === b.n1Ok ? b.cpuAfterFailPct - a.cpuAfterFailPct : a.n1Ok ? 1 : -1));
+
+  // ⑧ 알람 핫스팟
+  const bySev = { critical: 0, warning: 0, info: 0 };
+  const byEntity = new Map(); const byVc = new Map();
+  for (const a of alarms) {
+    const sev = (a.severity || 'info').toLowerCase(); bySev[sev] = (bySev[sev] || 0) + 1;
+    const ent = a.entity || '(미상)'; byEntity.set(ent, (byEntity.get(ent) || 0) + 1);
+    byVc.set(a.vcenterId || '', (byVc.get(a.vcenterId || '') + 1 || 1));
+  }
+  const alarmHotspot = {
+    total: alarms.length, bySeverity: bySev,
+    topEntities: [...byEntity.entries()].map(([entity, count]) => ({ entity, count })).sort((a, b) => b.count - a.count).slice(0, 20),
+    byVcenter: [...byVc.entries()].map(([vcenterId, count]) => ({ vcenterId, count })).sort((a, b) => b.count - a.count),
+  };
+
+  // ⑩ GPU 유휴/낭비 (ESXi 보고 사용률 기준)
+  const gpuHosts = hosts.filter((h) => (h.gpus || []).length);
+  const gpuVmByHost = {};
+  for (const v of vms) if (v.gpu && v.host) gpuVmByHost[v.host] = (gpuVmByHost[v.host] || 0) + 1;
+  const idleGpu = gpuHosts.filter((h) => h.gpuUtilPct != null && h.gpuUtilPct < 10)
+    .map((h) => ({ host: h.name, vcenterId: h.vcenterId, model: h.gpus[0].model, count: h.gpus.length, util: h.gpuUtilPct, assignedVms: gpuVmByHost[h.name] || 0 }))
+    .sort((a, b) => a.util - b.util);
+  const gpuWaste = {
+    totalGpuHosts: gpuHosts.length, totalGpus: gpuHosts.reduce((a, h) => a + h.gpus.length, 0),
+    idleHostCount: idleGpu.length, idleGpus: idleGpu.reduce((a, x) => a + x.count, 0),
+    unreporting: gpuHosts.filter((h) => h.gpuUtilPct == null).length, list: idleGpu.slice(0, 100),
+  };
+
+  res.json({ generatedAt: snap.generatedAt, rightsizing, clusters, alarmHotspot, gpuWaste });
+});
+
 // GPU 사용률 히스토리(5년까지). level=host|cluster|vc, key=대상키, days=기간.
 api.get('/tools/gpu/history', async (req, res) => {
   const level = ['host', 'cluster', 'vc'].includes(req.query.level) ? req.query.level : 'host';

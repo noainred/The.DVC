@@ -14,6 +14,7 @@ function DiscoveryBadge({ d }) {
 
 const TOOLS = [
   { k: 'aisearch', icon: '🔎', label: 'AI 검색 (자연어)', desc: '자연어로 VM/호스트/IP 검색 · 로컬 LLM' },
+  { k: 'insights', icon: '🧠', label: '운영 인사이트', desc: 'VM 라이트사이징 · 클러스터 N+1 여력 · 알람 핫스팟 · GPU 유휴' },
   { k: 'vmfinder', icon: '🧭', label: 'VM 정밀 검색 / 유휴 VM', desc: '다수 vCenter·폴더·클러스터·풀 + 조건 · 1일/1주 평균 CPU로 미사용 VM' },
   { k: 'capacity', icon: '📈', label: '용량 리포트', desc: '클러스터별 여유·오버커밋·수용여력 · 전체/법인별' },
   { k: 'waste', icon: '♻️', label: '낭비 리소스', desc: '정지 VM·스냅샷·thin 회수가능·Tools 미설치' },
@@ -102,6 +103,7 @@ function ToolPanel({ tool, onBack }) {
         )}
       </div>
       {tool === 'aisearch' && <AiSearch />}
+      {tool === 'insights' && <Insights scope={scope} />}
       {tool === 'vmfinder' && <VmFinder />}
       {tool === 'capacity' && <Capacity scope={scope} />}
       {tool === 'waste' && <Waste scope={scope} />}
@@ -885,6 +887,101 @@ function ScanStatusModal({ onClose }) {
         </>
       )}
     </Modal>
+  );
+}
+
+/** 운영 인사이트 — 라이트사이징 · 클러스터 N+1 · 알람 핫스팟 · GPU 유휴 (기존 스냅샷 기반). */
+function Insights({ scope }) {
+  const { loading, data, error } = useTool('/tools/insights', scope ? { vcenterId: scope } : {});
+  const [sec, setSec] = useState('rightsizing');
+  if (loading) return <Loading />;
+  if (error) return <ErrorBox message={error} />;
+  const rs = data.rightsizing, cl = data.clusters || [], ah = data.alarmHotspot, gw = data.gpuWaste;
+  const n1Bad = cl.filter((c) => !c.n1Ok).length;
+  const SECS = [
+    ['rightsizing', `♻ VM 라이트사이징`],
+    ['n1', `🛡 클러스터 N+1 (위험 ${n1Bad})`],
+    ['alarms', `🚨 알람 핫스팟 (${ah.total})`],
+    ['gpu', `🎮 GPU 유휴 (${gw.idleGpus})`],
+  ];
+  const vmRows = (arr) => (
+    <div className="table-wrap" style={{ maxHeight: '52vh' }}>
+      <table><thead><tr><th>VM</th><th>법인</th><th>호스트</th><th style={{ textAlign: 'right' }}>vCPU</th><th style={{ textAlign: 'right' }}>RAM</th><th>CPU%</th><th>MEM%</th></tr></thead>
+        <tbody>
+          {arr.length === 0 && <tr><td colSpan={7} className="center muted" style={{ padding: 18 }}>해당 VM이 없습니다.</td></tr>}
+          {arr.map((v) => (
+            <tr key={`${v.vcenterId}:${v.name}`}>
+              <td><b>{v.name}</b></td><td className="muted">{v.vcenterId}</td><td className="muted" style={{ fontSize: 12 }}>{v.host}</td>
+              <td style={{ textAlign: 'right' }}>{v.vcpu}</td><td style={{ textAlign: 'right' }}>{v.ramGB} GB</td>
+              <td>{v.cpuPct == null ? '—' : <UsageCell pct={v.cpuPct} />}</td><td>{v.memPct == null ? '—' : <UsageCell pct={v.memPct} />}</td>
+            </tr>
+          ))}
+        </tbody></table>
+    </div>
+  );
+  return (
+    <>
+      <div className="kpis" style={{ marginBottom: 14 }}>
+        <Card label="유휴 VM" value={rs.idleCount} accent="var(--amber)" meta="전원 ON·CPU<5%·MEM<20%" />
+        <Card label="회수 가능(추정)" value={`${rs.reclaimableVcpu} vCPU`} meta={`${rs.reclaimableRamGB} GB RAM`} />
+        <Card label="N+1 위험 클러스터" value={n1Bad} accent={n1Bad ? 'var(--red)' : 'var(--green)'} meta={`전체 ${cl.length} 클러스터`} />
+        <Card label="유휴 GPU" value={gw.idleGpus} accent="var(--amber)" meta={`GPU 호스트 ${gw.totalGpuHosts} · 미보고 ${gw.unreporting}`} />
+        <Card label="알람" value={ah.total} accent={ah.bySeverity.critical ? 'var(--red)' : 'var(--text)'} meta={`위험 ${ah.bySeverity.critical || 0} · 경고 ${ah.bySeverity.warning || 0}`} />
+      </div>
+      <div className="flex gap wrap" style={{ marginBottom: 10 }}>
+        {SECS.map(([k, l]) => <button key={k} className={sec === k ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setSec(k)}>{l}</button>)}
+      </div>
+
+      {sec === 'rightsizing' && (
+        <>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>실사용률 기준. <b>유휴</b>(회수 후보) · <b>과대</b>(vCPU≥4·CPU&lt;10%) · <b>과소</b>(CPU&gt;85% 또는 MEM&gt;90%, 증설 필요).</div>
+          <div className="section-title" style={{ fontSize: 14 }}>유휴 VM ({rs.idleCount})</div>{vmRows(rs.idle)}
+          <div className="section-title" style={{ fontSize: 14, marginTop: 14 }}>과대 할당 VM ({rs.oversizedCount})</div>{vmRows(rs.oversized)}
+          <div className="section-title" style={{ fontSize: 14, marginTop: 14 }}>과소(증설 필요) VM ({rs.undersizedCount})</div>{vmRows(rs.undersized)}
+        </>
+      )}
+      {sec === 'n1' && (
+        <div className="table-wrap" style={{ maxHeight: '64vh' }}>
+          <div className="muted" style={{ fontSize: 12, margin: '0 0 8px' }}>호스트 1대(가장 큰 호스트) 장애 시 잔여 용량으로 현재 사용량을 수용할 수 있는지. 90% 초과·단일 호스트면 위험.</div>
+          <table><thead><tr><th>법인</th><th>클러스터</th><th style={{ textAlign: 'right' }}>호스트</th><th>현재 CPU</th><th>현재 MEM</th><th>1대 장애 후 CPU</th><th>1대 장애 후 MEM</th><th>N+1</th></tr></thead>
+            <tbody>
+              {cl.map((c) => (
+                <tr key={`${c.vcenterId}:${c.cluster}`} style={{ background: c.n1Ok ? undefined : 'rgba(239,68,68,.10)' }}>
+                  <td className="muted">{c.vcenterId}</td><td><b>{c.cluster}</b></td><td style={{ textAlign: 'right' }}>{c.hosts}</td>
+                  <td><UsageCell pct={c.cpuUsagePct} /></td><td><UsageCell pct={c.memUsagePct} /></td>
+                  <td>{c.cpuAfterFailPct > 200 ? '—' : <UsageCell pct={Math.min(c.cpuAfterFailPct, 100)} />}</td>
+                  <td>{c.memAfterFailPct > 200 ? '—' : <UsageCell pct={Math.min(c.memAfterFailPct, 100)} />}</td>
+                  <td>{c.n1Ok ? <span className="badge green">여유</span> : <span className="badge red">위험</span>}</td>
+                </tr>
+              ))}
+            </tbody></table>
+        </div>
+      )}
+      {sec === 'alarms' && (
+        <div className="grid2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+          <div><div className="section-title" style={{ fontSize: 14 }}>알람 많은 엔티티</div>
+            <div className="table-wrap" style={{ maxHeight: '52vh' }}><table><thead><tr><th>엔티티</th><th style={{ textAlign: 'right' }}>알람 수</th></tr></thead>
+              <tbody>{ah.topEntities.length === 0 && <tr><td colSpan={2} className="center muted" style={{ padding: 18 }}>알람 없음</td></tr>}
+                {ah.topEntities.map((e) => <tr key={e.entity}><td>{e.entity}</td><td style={{ textAlign: 'right' }}><b>{e.count}</b></td></tr>)}</tbody></table></div></div>
+          <div><div className="section-title" style={{ fontSize: 14 }}>센터별 알람</div>
+            <div className="table-wrap" style={{ maxHeight: '52vh' }}><table><thead><tr><th>vCenter</th><th style={{ textAlign: 'right' }}>알람 수</th></tr></thead>
+              <tbody>{ah.byVcenter.map((e) => <tr key={e.vcenterId || '_'}><td>{e.vcenterId || '—'}</td><td style={{ textAlign: 'right' }}><b>{e.count}</b></td></tr>)}</tbody></table></div></div>
+        </div>
+      )}
+      {sec === 'gpu' && (
+        <div className="table-wrap" style={{ maxHeight: '64vh' }}>
+          <div className="muted" style={{ fontSize: 12, margin: '0 0 8px' }}>ESXi 보고 사용률 &lt;10% GPU 호스트(유휴/낭비 후보). 미보고({gw.unreporting})는 패스쓰루로 사용률 미관측.</div>
+          <table><thead><tr><th>호스트</th><th>법인</th><th>GPU 모델</th><th style={{ textAlign: 'right' }}>개수</th><th>사용률</th><th style={{ textAlign: 'right' }}>할당 VM</th></tr></thead>
+            <tbody>
+              {gw.list.length === 0 && <tr><td colSpan={6} className="center muted" style={{ padding: 18 }}>유휴 GPU 호스트가 없습니다.</td></tr>}
+              {gw.list.map((g) => (
+                <tr key={g.host}><td><b>{g.host}</b></td><td className="muted">{g.vcenterId}</td><td>{g.model}</td>
+                  <td style={{ textAlign: 'right' }}>{g.count}</td><td><UsageCell pct={g.util} /></td><td style={{ textAlign: 'right' }}>{g.assignedVms}</td></tr>
+              ))}
+            </tbody></table>
+        </div>
+      )}
+    </>
   );
 }
 
