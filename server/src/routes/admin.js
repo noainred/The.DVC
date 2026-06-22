@@ -10,7 +10,7 @@ import { saveNote, deleteNote } from '../release-notes.js';
 import { loadLlmConfig, saveLlmConfig } from '../llm/config.js';
 import { ollamaTest } from '../llm/ollama.js';
 import { installOllama } from '../llm/ollamaDeploy.js';
-import { deployAgent, testTarget, installerInfo } from '../agent/deploy.js';
+import { deployAgent, testTarget, installerInfo, checkAgentStatus } from '../agent/deploy.js';
 import { fetchRemoteVersions, listLocalPackages, downloadPackage } from '../upgrade/fetchPackage.js';
 import { getPackageSettings, savePackageSettings } from '../upgrade/packageSettings.js';
 import { listTargets, getTargetRaw, saveTarget, removeTarget, recordResult } from '../agent/deployRegistry.js';
@@ -168,6 +168,15 @@ adminRouter.post('/agent-deploy/targets/:id/deploy', adminOnly, async (req, res)
   const r = await deployAgent(t, { installerPath: t.installerPath, port: t.portalPort });
   recordResult(t.id, r);
   res.status(r.ok ? 200 : 400).json(r);
+});
+
+// 저장된 대상의 서비스 상태를 재확인(재배포 없이). 결과를 '마지막 결과'에 반영.
+adminRouter.post('/agent-deploy/targets/:id/status', adminOnly, async (req, res) => {
+  const t = getTargetRaw(req.params.id);
+  if (!t) return res.status(404).json({ ok: false, reason: '대상을 찾을 수 없습니다.' });
+  const r = await checkAgentStatus(t);
+  recordResult(t.id, r);
+  res.json(r);
 });
 
 // Deploy to all enabled saved targets, sequentially (heavy SFTP transfers).

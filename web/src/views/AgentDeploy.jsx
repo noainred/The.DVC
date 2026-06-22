@@ -100,6 +100,11 @@ export default function AgentDeploy() {
     const r = await postJson(`/admin/agent-deploy/targets/${t.id}/deploy`, {}).catch((e) => ({ ok: false, reason: e.message }));
     setResult({ kind: 'deploy', ...r }); await loadTargets(); setBusy(false);
   };
+  const checkStatus = async (t) => {
+    setBusy(true); setResult(null);
+    const r = await postJson(`/admin/agent-deploy/targets/${t.id}/status`, {}).catch((e) => ({ ok: false, reason: e.message }));
+    setResult({ kind: 'status', ...r }); await loadTargets(); setBusy(false);
+  };
   const deployAll = async () => {
     if (!window.confirm(`저장된 활성 대상 전체에 배포할까요? (순차 진행)`)) return;
     setBusy(true); setResult(null);
@@ -248,6 +253,7 @@ export default function AgentDeploy() {
                     <td>{t.lastResult ? <span className={`badge ${t.lastResult.ok ? 'green' : 'red'}`}>{t.lastResult.ok ? t.lastResult.active || 'ok' : '실패'}</span> : <span className="muted">—</span>}</td>
                     <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                       <button className="login-btn" style={{ flex: 'none', padding: '6px 12px' }} disabled={busy || !installer.available} onClick={() => deployTarget(t)}>배포</button>{' '}
+                      <button className="logout-btn" style={{ padding: '6px 10px' }} disabled={busy} onClick={() => checkStatus(t)} title="재배포 없이 대상 서비스 상태를 SSH로 확인">상태 확인</button>{' '}
                       <button className="logout-btn" style={{ padding: '6px 10px' }} onClick={() => editTarget(t)}>편집</button>{' '}
                       <button className="logout-btn" style={{ padding: '6px 10px' }} onClick={() => removeTarget(t)}>삭제</button>
                     </td>
@@ -262,14 +268,14 @@ export default function AgentDeploy() {
       {result && (
         <div className="card" style={{ borderColor: result.ok ? 'var(--green)' : 'var(--red)' }}>
           <b style={{ color: result.ok ? 'var(--green)' : 'var(--red)' }}>
-            {result.ok ? '성공' : '실패'} — {{ test: 'SSH 테스트', save: '대상 저장', 'deploy-all': '전체 배포', pkg: '패키지 다운로드', token: '중앙 토큰', autofill: '자동 채우기', pkgcfg: '패키지 설정' }[result.kind] || '배포'}
+            {result.ok ? '성공' : '실패'} — {{ test: 'SSH 테스트', save: '대상 저장', 'deploy-all': '전체 배포', pkg: '패키지 다운로드', token: '중앙 토큰', autofill: '자동 채우기', pkgcfg: '패키지 설정', status: '서버 상태 확인' }[result.kind] || '배포'}
           </b>
           <div style={{ fontSize: 13, marginTop: 6, lineHeight: 1.7 }}>
             {result.reason && <div style={{ color: result.ok ? 'var(--green)' : 'var(--red)' }}>{result.reason}</div>}
             {result.os && <div>OS: {result.os} · root: {result.isRoot ? '예' : '아니오'} · systemd: {result.systemd ? '예' : '아니오'}{result.glibc ? ` · glibc: ${result.glibc} ${result.glibcOk === false ? '❌' : result.glibcOk ? '✅' : ''}` : ''}</div>}
             {result.warn && <div style={{ color: 'var(--amber)', marginTop: 4 }}>⚠ {result.warn}</div>}
             {result.glibc && result.kind !== 'test' && result.ok === false && <div style={{ color: 'var(--amber)', marginTop: 4 }}>glibc: {result.glibc}</div>}
-            {result.active && <div>서비스 상태: <b>{result.active}</b> · 설치 패키지: {result.installer}</div>}
+            {result.active && <div>서비스 상태: <b style={{ color: result.ok ? 'var(--green)' : 'var(--red)' }}>{result.active}</b>{result.version ? ` · 버전 ${result.version}` : ''}{result.installer ? ` · 설치 패키지 ${result.installer}` : ''}{result.detail ? ` · ${result.detail}` : ''}</div>}
             {result.log && (
               <div style={{ marginTop: 8 }}>
                 <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>대상 호스트 서비스 로그(journalctl/status)</div>

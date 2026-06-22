@@ -115,10 +115,9 @@ export async function deployAgent(target, { installerPath, port = 4000 } = {}) {
       const block = envBlock(target).replace(/'/g, "'\\''");
       await exec(`printf '%s' '${block}' >> /etc/vmware-portal/portal.env`);
       await exec('systemctl restart vmware-portal 2>&1 || true');
-      // 재시작 직후 잠깐 대기 후 상태 확인(크래시 루프 감지).
-      await exec('sleep 2');
-      const active = await exec('systemctl is-active vmware-portal');
-      const isActive = active.stdout.trim() === 'active';
+      // 첫 기동(Node22 + node:sqlite)이 수 초 걸릴 수 있어 active 될 때까지 폴링(최대 ~30초).
+      const activeState = await waitActive(exec, 15, 2);
+      const isActive = activeState === 'active';
       let log = '';
       if (!isActive) {
         // 실패 시 서비스 로그를 자동 수집해 포탈에 그대로 보여준다(SSH 재접속 불필요).
@@ -130,12 +129,46 @@ export async function deployAgent(target, { installerPath, port = 4000 } = {}) {
       await exec(`rm -rf ${workDir} ${remotePkg}`);
       return {
         ok: isActive,
-        active: active.stdout.trim(),
+        active: activeState,
         installer: path.basename(installer),
         glibc: glibc.version,
         log,
         reason: isActive ? undefined : '서비스가 active 상태가 아닙니다. 아래 로그를 확인하세요.',
       };
+    });
+  } catch (err) {
+    return { ok: false, reason: err.message };
+  }
+}
+
+// systemd 서비스가 active 될 때까지 폴링. active면 즉시 반환, 아니면 마지막 상태 반환.
+async function waitActive(exec, tries = 15, delaySec = 2) {
+  let state = '';
+  for (let i = 0; i < tries; i++) {
+    state = (await exec('systemctl is-active vmware-portal').catch(() => ({ stdout: '' }))).stdout.trim();
+    if (state === 'active') return 'active';
+    if (state === 'failed' && i >= 2) return 'failed'; // 명백 실패면 빨리 종료
+    await exec(`sleep ${delaySec}`);
+  }
+  return state || 'unknown';
+}
+
+/** 배포 후 에이전트(대상 호스트)의 vmware-portal 서비스 상태를 SSH로 재확인. */
+export async function checkAgentStatus(target) {
+  if (!target?.host || !target?.username) return { ok: false, reason: 'host/username이 필요합니다.' };
+  try {
+    return await withSsh(creds(target), async ({ exec }) => {
+      const active = (await exec('systemctl is-active vmware-portal 2>&1').catch(() => ({ stdout: '' }))).stdout.trim();
+      const isActive = active === 'active';
+      const sub = (await exec('systemctl show vmware-portal -p SubState,ActiveEnterTimestamp,MainPID 2>/dev/null').catch(() => ({ stdout: '' }))).stdout.trim().replace(/\n/g, ' · ');
+      const ver = (await exec('cat /etc/vmware-portal/VERSION 2>/dev/null || cat /opt/vmware-portal/app/VERSION 2>/dev/null || true').catch(() => ({ stdout: '' }))).stdout.trim();
+      let log = '';
+      if (!isActive) {
+        const jc = (await exec('journalctl -u vmware-portal --no-pager -n 60 2>&1').catch(() => ({ stdout: '' }))).stdout;
+        const st = (await exec('systemctl status vmware-portal --no-pager -l 2>&1 | head -20').catch(() => ({ stdout: '' }))).stdout;
+        log = [st, '--- journalctl ---', jc].filter(Boolean).join('\n').slice(-4000);
+      }
+      return { ok: isActive, active, version: ver || undefined, detail: sub, log, reason: isActive ? undefined : `서비스 상태: ${active}` };
     });
   } catch (err) {
     return { ok: false, reason: err.message };
