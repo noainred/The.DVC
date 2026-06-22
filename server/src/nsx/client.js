@@ -19,12 +19,19 @@
  * (self-signed certs are common on private NSX appliances).
  */
 
+import { ensureNsxDial } from './proxy.js';
+
 const norm = (s) => String(s || '').replace(/\/+$/, '');
 
 export class NsxClient {
-  constructor(mgr) {
+  // dial(선택): { proxyHost, publicPort } — 주어지면 등록된 HAProxy frontend로 다이얼한다
+  // (TCP 패스스루 → TLS는 NSX와 직접). 직접 연결이면 mgr.host 그대로 사용.
+  constructor(mgr, dial = null) {
     this.mgr = mgr;
-    this.baseUrl = norm(mgr.host);
+    this.baseUrl = dial?.proxyHost && dial?.publicPort
+      ? `https://${dial.proxyHost}:${dial.publicPort}`
+      : norm(mgr.host);
+    this.viaProxy = !!(dial?.proxyHost && dial?.publicPort);
     this.auth = 'Basic ' + Buffer.from(`${mgr.username}:${mgr.password}`).toString('base64');
     this.timeoutMs = mgr.timeoutMs > 0 ? mgr.timeoutMs : 20_000;
   }
@@ -84,7 +91,8 @@ async function eachLimited(items, limit, fn) {
 }
 
 export async function collectFromNsx(mgr) {
-  const client = new NsxClient(mgr);
+  const dial = await ensureNsxDial(mgr); // proxyId가 있으면 HAProxy 경유 다이얼 주소
+  const client = new NsxClient(mgr, dial);
   const node = await client.node(); // throws if auth/host is wrong → manager unreachable
   const [cluster, tnodes, t0, t1, segs, pols, grps] = await Promise.all([
     client.clusterStatus().catch(() => null),
@@ -188,7 +196,8 @@ const shortGroup = (s) => String(s || '').split('/').pop() || String(s || '');
  * VM 멤버 + IP 멤버를 모두 가져와 정규화. 둘 다 실패하면 throw.
  */
 export async function fetchGroupMembers(mgr, groupId) {
-  const client = new NsxClient(mgr);
+  const dial = await ensureNsxDial(mgr);
+  const client = new NsxClient(mgr, dial);
   const [vmRes, ipRes] = await Promise.all([
     client.groupVmMembers(groupId).catch((e) => ({ __err: e.message })),
     client.groupIpMembers(groupId).catch((e) => ({ __err: e.message })),

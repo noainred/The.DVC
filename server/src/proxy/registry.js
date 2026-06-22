@@ -187,10 +187,12 @@ function nextPublicPort(proxyId, base) {
   return p;
 }
 
+const PROTO_PORT = { ssh: 22, rdp: 3389, nsx: 443 }; // nsx = HTTPS API(TCP 패스스루) 경유용
+
 export function addMapping({ name, vcenterId, protocol, targetHost, targetPort, publicPort, proxyId, owner, ephemeral } = {}) {
   const c = load();
-  protocol = protocol === 'rdp' ? 'rdp' : 'ssh';
-  targetPort = Number(targetPort) || (protocol === 'rdp' ? 3389 : 22);
+  protocol = PROTO_PORT[protocol] ? protocol : 'ssh';
+  targetPort = Number(targetPort) || PROTO_PORT[protocol];
   if (!targetHost) return { ok: false, reason: '대상 호스트(IP)를 입력하세요.' };
   const proxy = proxyId ? getProxyById(proxyId) : resolveProxy(vcenterId);
   const pid = proxy.id;

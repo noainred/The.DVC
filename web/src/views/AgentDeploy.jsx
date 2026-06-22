@@ -54,7 +54,8 @@ export default function AgentDeploy() {
     if (s.host) return `${String(s.host).replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '')}-agent`;
     return `agent-${Math.floor(Math.random() * 9000 + 1000)}`;
   };
-  // 배포에 필요한 모든 값을 자동으로 채움(빈 칸만, 토큰은 없으면 생성).
+  // 올인원 자동 채우기: 이 1대가 해당 DC의 모든 작업(인벤토리 위임 수집·전력·IP스캔·자동
+  // 업그레이드)을 수행하도록 필요한 값/토큰을 모두 채우고 모든 역할 옵션을 켠다.
   const autofill = async () => {
     setFillBusy(true); setResult(null);
     const d = defaults || await fetchJson('/admin/agent-deploy/defaults').catch(() => null);
@@ -71,6 +72,8 @@ export default function AgentDeploy() {
         collectorDatacenter: s.collectorDatacenter || name,
         portalPort: s.portalPort || d?.portalPort || 4000,
         installerPath: s.installerPath, // 비워두면 자동 선택
+        autoUpgrade: true,    // ⑦ 자동 업그레이드(소스=중앙)
+        pushInventory: true,  // ① vCenter 인벤토리 위임 수집 → 중앙 push
       };
     });
     setFillBusy(false);
@@ -196,13 +199,25 @@ export default function AgentDeploy() {
 
       <div className="card" style={{ marginBottom: 12 }}>
         <div className="flex between" style={{ alignItems: 'center' }}>
-          <b style={{ fontSize: 14 }}>에이전트 설정 (포탈 env에 주입)</b>
+          <b style={{ fontSize: 14 }}>에이전트 설정 (포탈 env에 주입) — 올인원 현장 서버</b>
           <button className="login-btn" type="button" style={{ flex: 'none', padding: '7px 14px' }} disabled={fillBusy} onClick={autofill}
-            title="모든 값을 자동으로 채웁니다: 에이전트 이름(SSH 호스트 기반 추정), 중앙 URL(이 포탈 주소), 중앙 토큰(없으면 생성·portal.env 저장), 전력수집 토큰(랜덤), 수집 DC명, 포탈 포트. 이미 입력한 칸은 보존됩니다.">
-            {fillBusy ? '채우는 중…' : '🪄 모두 자동 채우기'}
+            title="이 1대가 해당 DC의 모든 작업을 수행하도록 모든 값을 채우고 모든 역할을 켭니다: 에이전트 이름, 중앙 URL(이 포탈), 중앙 토큰(없으면 생성·저장), 전력수집 토큰(랜덤)+수집 DC명, 자동 업그레이드, 사이트 위임 수집(vCenter 인벤토리 push). 이미 입력한 칸은 보존됩니다.">
+            {fillBusy ? '채우는 중…' : '🌐 올인원 자동 채우기'}
           </button>
         </div>
-        <div className="muted" style={{ fontSize: 12, margin: '4px 0 8px' }}>iDRAC/IP 스캔 에이전트는 <b>에이전트 이름 + 중앙 URL + 중앙 토큰</b>이 필수, 전력수집까지 하려면 <b>수집 토큰 + 수집 DC명</b>을 채우세요. 위 <b>자동 채우기</b>로 한 번에 채울 수 있습니다.</div>
+        <div className="muted" style={{ fontSize: 12, margin: '4px 0 8px' }}>
+          <b>이 1대(현장 서버)가 해당 데이터센터 대상으로 수행하는 작업:</b>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '2px 12px', marginTop: 4 }}>
+            <span>① vCenter 인벤토리 수집 → 중앙 push <span className="muted">(사이트 위임)</span></span>
+            <span>② 전력 수집(iDRAC/OME)</span>
+            <span>③ 수집 서버(원격) export</span>
+            <span>④ IP 스캔(로컬 대역)</span>
+            <span>⑤ 지표·온도·GPU 게스트 수집 <span className="muted">(로컬 vCenter 등록 시 자동)</span></span>
+            <span>⑥ 원격접속 중계 SSH/RDP <span className="muted">(포탈 내장)</span></span>
+            <span>⑦ 자동 업그레이드 <span className="muted">(소스=중앙)</span></span>
+          </div>
+          <div style={{ marginTop: 6 }}>※ <b>🌐 올인원 자동 채우기</b>로 ①②③④⑦을 한 번에 켭니다. ⑤⑥은 자동입니다. <b>①을 쓰려면</b> 배포 후 이 현장 서버의 <code>vcenters.json</code>에 로컬 vCenter를 등록하고, 중앙 'vCenter 관리'에서 해당 vCenter를 <b>'사이트 위임'</b>으로 설정하세요.</div>
+        </div>
         <div className="agent-grid">
           <label title="이 에이전트의 고유 식별 이름. IP 스캔 '할당 에이전트' 드롭다운과 중앙 할당 매칭(AGENT_NAME)에 사용됩니다. 사이트/DC가 드러나게 지으세요. 예: OC2-Agent, Seoul-DC1. 자동 채우기는 SSH 호스트 기반으로 제안합니다.">
             <span className="cap">에이전트 이름(AGENT_NAME)</span><input className="input" value={f.agentName} onChange={set('agentName')} placeholder="예: OC2-Agent / Seoul-DC1" /></label>

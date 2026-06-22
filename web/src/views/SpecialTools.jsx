@@ -261,8 +261,8 @@ function Ipam({ scope, onScope }) {
   if (loading) return <Loading />;
   if (error) return <ErrorBox message={error} />;
 
-  const ROWBG = { used: 'rgba(34,197,94,.12)', multihomed: 'rgba(59,130,246,.14)', duplicate: 'rgba(239,68,68,.14)', network: 'rgba(148,163,184,.14)', released: 'rgba(245,158,11,.13)', empty: 'transparent' };
-  const STLAB = { used: '사용', multihomed: '멀티홈', duplicate: '중복', network: 'Network ID', released: '해제(이력)', empty: '' };
+  const ROWBG = { used: 'rgba(34,197,94,.12)', multihomed: 'rgba(59,130,246,.14)', duplicate: 'rgba(239,68,68,.14)', network: 'rgba(148,163,184,.14)', released: 'rgba(245,158,11,.13)', scanned: 'rgba(20,184,166,.14)', empty: 'transparent' };
+  const STLAB = { used: '사용', multihomed: '멀티홈', duplicate: '중복', network: 'Network ID', released: '해제(이력)', scanned: '스캔 확인', empty: '' };
 
   const term = q.trim().toLowerCase();
   const rows = data.rows.filter((r) => {
@@ -298,7 +298,7 @@ function Ipam({ scope, onScope }) {
       <span className={`badge ${r.scope === 'public' ? 'amber' : 'green'}`}>{r.scope === 'public' ? '공인' : '사설'}</span>
     ) },
     { key: 'vcenterName', label: '센터(vCenter)' },
-    { key: 'serverType', label: '서버종류', sortValue: (r) => r.serverType || '', render: (r) => <span className={`badge ${r.serverType === 'BareMetal' ? 'amber' : r.serverType === 'Scanned' ? 'purple' : 'blue'}`}>{r.serverType === 'BareMetal' ? '베어메탈' : r.serverType === 'Scanned' ? '스캔' : 'VM'}</span> },
+    { key: 'serverType', label: '서버종류', sortValue: (r) => r.serverType || '', render: (r) => <span className={`badge ${r.serverType === 'BareMetal' ? 'amber' : r.serverType === 'Scanned' ? 'teal' : 'blue'}`} title={r.serverType === 'Scanned' ? 'vCenter가 모르는 IP를 능동 스캔으로 확인' : undefined}>{r.serverType === 'BareMetal' ? '베어메탈' : r.serverType === 'Scanned' ? '🛰 스캔 확인' : 'VM'}</span> },
     { key: 'ownerName', label: '소유 자원', render: (r) => (r.owner ? <button className="cell-link" onClick={() => setSel({ ownerType: r.ownerType, owner: r.owner })}>{r.ownerName}</button> : <span>{r.ownerName}{(r.services || []).length ? <span className="muted" style={{ fontSize: 11 }}> · {(r.services || []).join(',')}</span> : ''}</span>) },
     { key: 'powerState', label: '전원', render: (r) => <StateBadge state={r.powerState} /> },
     { key: 'osName', label: 'OS 종류', sortValue: (r) => r.osName || '', render: (r) => r.osName || <span className="muted">—</span> },
@@ -373,6 +373,7 @@ function Ipam({ scope, onScope }) {
               ['used', `사용중 (${cnt('used')})`, 'green'],
               ['multihomed', `멀티홈 (${cnt('multihomed')})`, 'blue'],
               ['duplicate', `중복 (${cnt('duplicate')})`, 'red'],
+              ['scanned', `스캔 확인 (${cnt('scanned')})`, 'teal'],
               ['released', `해제(이력) (${cnt('released')})`, 'amber'],
               ['empty', `미사용 (${cnt('empty')})`, 'gray'],
             ];
@@ -388,7 +389,7 @@ function Ipam({ scope, onScope }) {
                   {FILTERS.map(([k, label]) => (
                     <button key={k} className={stFilter === k ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '6px 12px', fontSize: 12 }} onClick={() => setStFilter(k)}>{label}</button>
                   ))}
-                  <span className="muted" style={{ fontSize: 12, marginLeft: 4 }}>🟩 사용 · 🟦 멀티홈 · 🟥 중복 · 🟧 해제(이력) · ⬜ 미사용</span>
+                  <span className="muted" style={{ fontSize: 12, marginLeft: 4 }}>🟩 사용 · 🟦 멀티홈 · 🟥 중복 · 🟦 스캔 확인 · 🟧 해제(이력) · ⬜ 미사용</span>
                 </div>
                 <div className="table-wrap" style={{ maxHeight: '62vh' }}>
                   <table>
@@ -405,7 +406,7 @@ function Ipam({ scope, onScope }) {
                           <td className="muted" style={{ fontSize: 12 }}>{r.notes}</td>
                           <td>{r.power}</td>
                           <td className="muted" style={{ fontSize: 12 }}>{r.scope}</td>
-                          <td className="muted" style={{ fontSize: 12 }}>{r.status === 'released' ? <span className="badge amber">해제</span> : STLAB[r.status]}</td>
+                          <td className="muted" style={{ fontSize: 12 }}>{r.status === 'released' ? <span className="badge amber">해제</span> : r.status === 'scanned' ? <span className="badge teal" title="vCenter가 모르는 IP를 능동 스캔으로 확인">🛰 스캔 확인</span> : STLAB[r.status]}</td>
                           <td style={{ fontSize: 11 }}>
                             {r.usageStatus
                               ? <button className="tab" style={{ padding: '2px 8px', fontSize: 11 }} title={`최초 발견: ${r.firstSeen ? new Date(r.firstSeen).toLocaleString() : '—'}\n마지막 확인: ${r.lastSeen ? new Date(r.lastSeen).toLocaleString() : '—'}\n현재: ${r.usageStatus === 'up' ? '사용 중' : '해제됨'}`}

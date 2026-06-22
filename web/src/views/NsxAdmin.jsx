@@ -4,7 +4,7 @@ import { Loading, ErrorBox } from '../components/ui.jsx';
 import EscClose from '../components/EscClose.jsx';
 
 const REGIONS = ['아시아', '중국', '유럽', '북미'];
-const EMPTY = { id: '', name: '', host: 'https://', username: '', password: '', vcenterId: '', enabled: true, pollIntervalSec: '', timeoutMs: '', location: { region: '아시아' } };
+const EMPTY = { id: '', name: '', host: 'https://', username: '', password: '', vcenterId: '', proxyId: '', enabled: true, pollIntervalSec: '', timeoutMs: '', location: { region: '아시아' } };
 
 /** 설정 → NSX 관리: NSX Manager 등록/수정/연결테스트/삭제. (vCenter와 별개 수집기) */
 export default function NsxAdmin() {
@@ -15,6 +15,8 @@ export default function NsxAdmin() {
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
   const { data: vcenters } = usePolling('/vcenters', {}, 60_000);
+  const [proxies, setProxies] = useState([]);
+  useEffect(() => { fetchJson('/remote/proxies').then((r) => setProxies(r.proxies || [])).catch(() => setProxies([])); }, []);
 
   const load = async () => {
     try { setData(await fetchJson('/admin/nsx/managers')); setError(null); }
@@ -75,7 +77,7 @@ export default function NsxAdmin() {
               <tr key={m.id}>
                 <td><b>{m.id}</b></td>
                 <td>{m.name}</td>
-                <td className="muted">{m.host}</td>
+                <td className="muted">{m.host}{m.proxyId && <span className="badge amber" style={{ marginLeft: 6, fontSize: 10 }} title={`중계 서버(HAProxy) 경유: ${proxies.find((p) => p.id === m.proxyId)?.name || m.proxyId}`}>프록시 경유</span>}</td>
                 <td className="muted">{m.username}</td>
                 <td><span className="badge blue">{m.location?.region || '-'}</span></td>
                 <td className="muted">{m.vcenterId || '—'}</td>
@@ -112,6 +114,12 @@ export default function NsxAdmin() {
                 <select className="select" value={form.vcenterId} onChange={setF('vcenterId')}>
                   <option value="">— 선택 —</option>
                   {(vcenters || []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+                </select>
+              </label>
+              <label title="다른 법인/사이트에 있어 직접 닿지 않는 NSX는 이미 등록된 중계 서버(HAProxy)를 골라 경유 연결합니다. 선택 시 그 프록시에 NSX:443 TCP 패스스루 매핑을 자동 생성·적용하고, 수집/테스트가 프록시를 통해 이뤄집니다. '직접 연결'은 중앙에서 NSX로 바로 접속합니다. ※ 선택한 프록시에 frontend 주소(proxyHost)가 설정돼 있어야 합니다.">프록시 경유(선택)
+                <select className="select" value={form.proxyId || ''} onChange={setF('proxyId')}>
+                  <option value="">직접 연결(프록시 미사용)</option>
+                  {proxies.filter((p) => p.proxyHost).map((p) => <option key={p.id} value={p.id}>{p.name} ({p.proxyHost})</option>)}
                 </select>
               </label>
               <label>수집 주기(초, 0/빈칸=기본)<input className="input" type="number" value={form.pollIntervalSec} onChange={setF('pollIntervalSec')} placeholder="예: 300 (고RTT)" /></label>
