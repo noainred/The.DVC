@@ -107,7 +107,7 @@ export function buildIpamRows(snap, vcenterId) {
     duplicateIps: [...count.values()].filter((c) => c > 1).length,
     publicIps: rows.filter((r) => r.scope === 'public').length,
     privateIps: rows.filter((r) => r.scope === 'private').length,
-    byVcenter: Object.entries(byVc).map(([id, c]) => ({ vcenterId: id, vcenterName: vcName[id] || id, count: c })).sort((a, b) => b.count - a.count),
+    byVcenter: Object.entries(byVc).map(([id, c]) => ({ vcenterId: id, vcenterName: vcName[id] || (id || '네트워크 스캔'), scanned: !id, count: c })).sort((a, b) => b.count - a.count),
     rows,
   };
 }
