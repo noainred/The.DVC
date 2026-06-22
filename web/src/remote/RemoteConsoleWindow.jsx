@@ -1,6 +1,8 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, lazy, Suspense } from 'react';
 import { useRemoteWindow, closeRemoteSession, activateSession, setWin, closeAllSessions, newSessionLike, duplicateSession, setSessionCreds, setSessionLabel } from './sessions.js';
-import { SshConsole, RdpConsole } from './RemoteConsole.jsx';
+// xterm/guacamole 등 무거운 콘솔 의존성은 실제 원격 세션을 열 때만 로드(코드 스플릿).
+const SshConsole = lazy(() => import('./RemoteConsole.jsx').then((m) => ({ default: m.SshConsole })));
+const RdpConsole = lazy(() => import('./RemoteConsole.jsx').then((m) => ({ default: m.RdpConsole })));
 
 /**
  * A single floating console window that hosts every open SSH/RDP session as a
@@ -96,9 +98,11 @@ export function RemoteConsoleWindow() {
       <div style={{ flex: 1, position: 'relative', minHeight: 0 }}>
         {sessions.map((s) => (
           <div key={s.id} style={{ position: 'absolute', inset: 0, display: s.id === activeId ? 'block' : 'none' }}>
-            {s.kind === 'ssh'
-              ? <SshConsole mapping={s.mapping} active={s.id === activeId} initialCreds={s.initialCreds} onCreds={(c) => setSessionCreds(s.id, c)} onHostname={(h) => setSessionLabel(s.id, h)} />
-              : <RdpConsole mapping={s.mapping} active={s.id === activeId} initialCreds={s.initialCreds} onCreds={(c) => setSessionCreds(s.id, c)} />}
+            <Suspense fallback={<div className="muted" style={{ padding: 24 }}>콘솔 로딩 중…</div>}>
+              {s.kind === 'ssh'
+                ? <SshConsole mapping={s.mapping} active={s.id === activeId} initialCreds={s.initialCreds} onCreds={(c) => setSessionCreds(s.id, c)} onHostname={(h) => setSessionLabel(s.id, h)} />
+                : <RdpConsole mapping={s.mapping} active={s.id === activeId} initialCreds={s.initialCreds} onCreds={(c) => setSessionCreds(s.id, c)} />}
+            </Suspense>
           </div>
         ))}
       </div>

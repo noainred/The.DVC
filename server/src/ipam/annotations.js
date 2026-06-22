@@ -12,6 +12,8 @@ import { config } from '../config.js';
 const FILE = path.join(config.configDir, 'ipam-annotations.json');
 
 let cache = null;
+let rev = 0; // 메모/태그 변경 리비전(대장 캐시 무효화 키)
+export function annotationsRev() { return rev; }
 
 function load() {
   if (cache) return cache;
@@ -43,6 +45,6 @@ export function setAnnotation(ip, { memo = '', tags = [] } = {}, user) {
   }
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
   fs.writeFileSync(FILE, JSON.stringify(data, null, 2), { mode: 0o600 });
-  cache = data;
+  cache = data; rev++;
   return { ok: true, annotation: data[key] || null };
 }

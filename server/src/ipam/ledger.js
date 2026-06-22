@@ -3,9 +3,14 @@
  * Shared by the /tools/ipam API and the SQLite exporter so both stay in sync.
  */
 
-import { getIgnoreMatcher, getClassifier } from './settings.js';
-import { getAnnotations } from './annotations.js';
-import { scanResultList, getIpHistoryMap } from './scanStore.js';
+import { getIgnoreMatcher, getClassifier, settingsRev } from './settings.js';
+import { getAnnotations, annotationsRev } from './annotations.js';
+import { scanResultList, getIpHistoryMap, scanRev } from './scanStore.js';
+
+// buildIpamRows 결과 메모이즈 — 같은 스냅샷·스코프·설정/주석/스캔 리비전이면 재계산하지 않는다.
+// (API·서브넷대장·xlsx·CSV·syncLedger가 같은 입력으로 여러 번 호출 → 중복 계산 제거)
+const _ipamCache = new Map(); // key -> rows결과
+const _ipamKey = (snap, vcenterId) => `${snap?.generatedAt || ''}|${vcenterId || ''}|s${settingsRev()}|a${annotationsRev()}|n${scanRev()}`;
 
 export function ipToNum(s) {
   const p = String(s || '').split('.').map(Number);
@@ -24,6 +29,9 @@ export function parseOs(guestOS) {
 
 /** Build IP rows + summary from a snapshot, optionally scoped to one vCenter. */
 export function buildIpamRows(snap, vcenterId) {
+  const _ck = _ipamKey(snap, vcenterId);
+  const _hit = _ipamCache.get(_ck);
+  if (_hit) return _hit;
   let vms = snap.vms || [];
   let hosts = snap.hosts || [];
   if (vcenterId) {
@@ -107,7 +115,7 @@ export function buildIpamRows(snap, vcenterId) {
 
   const byVc = {};
   for (const r of rows) byVc[r.vcenterId] = (byVc[r.vcenterId] || 0) + 1;
-  return {
+  const out = {
     total: rows.length,
     multiHomed: rows.filter((r) => r.multiHomed).length,
     duplicateIps: [...count.values()].filter((c) => c > 1).length,
@@ -116,6 +124,10 @@ export function buildIpamRows(snap, vcenterId) {
     byVcenter: Object.entries(byVc).map(([id, c]) => ({ vcenterId: id, vcenterName: vcName[id] || (id || '네트워크 스캔'), scanned: !id, count: c })).sort((a, b) => b.count - a.count),
     rows,
   };
+  // 최근 키만 소량 보관(스냅샷이 바뀌면 키가 달라져 자연 만료). 메모리 상한.
+  _ipamCache.set(_ck, out);
+  if (_ipamCache.size > 8) _ipamCache.delete(_ipamCache.keys().next().value);
+  return out;
 }
 
 /**
