@@ -44,8 +44,11 @@ import { startInventoryPush } from './agent/inventoryPush.js';
 
 const app = express();
 app.use(cors());
-// 사이트 위임 수집의 인벤토리 push는 수MB가 될 수 있어 기본 100kb 한도를 상향.
-app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '64mb' }));
+// 사이트 위임 수집의 인벤토리 push(/api/central/inventory)만 수MB가 될 수 있어 큰 한도를 적용.
+// 그 외 모든 라우트는 기본 1mb로 제한해 메모리/요청 남용 면적을 줄인다.
+const BIG_JSON = express.json({ limit: process.env.JSON_BODY_LIMIT || '64mb' });
+app.use('/api/central/inventory', BIG_JSON);
+app.use(express.json({ limit: '1mb' }));
 
 // Lightweight request logging for the log viewer (skip the log endpoint itself).
 app.use((req, res, next) => {
@@ -88,18 +91,15 @@ if (fs.existsSync(config.webDist)) {
   });
 }
 
+// 메인 수집(vCenter)만 즉시 기동하고, 보조 폴러들은 초기 기동을 스태거(분산)해
+// 부팅 직후 동시 폴링으로 인한 CPU 스파이크를 평탄화한다(이후 각자 주기 반복).
 store.start();
 upgradeManager.start();
-startIdracPoller();
-startNsxPoller();
-startAlertEngine();
-startMetricsSampler();
-startGpuGuestPoller();
-startIpScanPoller();
-startIpScanAgent();
-startCollectorPuller();
-startAgentScanner();
-startInventoryPush();
+const stagger = [
+  startIdracPoller, startNsxPoller, startAlertEngine, startMetricsSampler, startGpuGuestPoller,
+  startIpScanPoller, startIpScanAgent, startCollectorPuller, startAgentScanner, startInventoryPush,
+];
+stagger.forEach((start, i) => setTimeout(() => { try { start(); } catch (e) { console.error('[start] 폴러 기동 실패:', e?.message); } }, i * 1500).unref?.());
 
 const server = app.listen(config.port, () => {
   console.log(`\n  VMware Global Monitoring Portal — API`);

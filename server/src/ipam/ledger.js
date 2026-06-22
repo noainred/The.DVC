@@ -36,8 +36,9 @@ export function buildIpamRows(snap, vcenterId) {
   const ignored = getIgnoreMatcher();
   const classify = getClassifier();
   // 확인 출처(discovery): 'vcenter'(vCenter 인식) · 'scan'(Ping/TCP 스캔) · 'both'(둘 다).
-  // vCenter가 아는 IP가 스캔에도 잡히면 'both'로 표시.
-  const scanIpSet = new Set(scanResultList().map((s) => s.ip));
+  // vCenter가 아는 IP가 스캔에도 잡히면 'both'로 표시. (스캔 결과는 1회만 조회해 재사용)
+  const scanList = scanResultList();
+  const scanIpSet = new Set(scanList.map((s) => s.ip));
   const rows = [];
   const count = new Map();
   for (const vm of vms) {
@@ -79,7 +80,7 @@ export function buildIpamRows(snap, vcenterId) {
     }
     for (const h of (snap.hosts || [])) if (ipToNum(h.name) != null) known.add(h.name);
     const seen = new Set(rows.map((r) => r.ip));
-    for (const sc of scanResultList()) {
+    for (const sc of scanList) {
       if (ignored(sc.ip, '') || known.has(sc.ip) || seen.has(sc.ip) || ipToNum(sc.ip) == null) continue;
       seen.add(sc.ip);
       const hist = histMap[sc.ip];
