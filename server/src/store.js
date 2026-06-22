@@ -93,7 +93,10 @@ class Store {
       // vCenters keep serving their last-known data instead of disappearing.
       const merged = emptySnapshot();
       merged.source = dataSource;
-      const mockFallback = dataSource === 'auto' ? generateSnapshot() : null;
+      // auto 모드 폴백: 도달 불가 vCenter가 실제로 생겼을 때만 목 데이터를 1회 생성(지연).
+      const isAuto = dataSource === 'auto';
+      let mockSnap = null;
+      const getMock = () => (mockSnap ||= generateSnapshot());
       for (const vc of vcenters) {
         if (vc.enabled === false) {
           merged.vcenters.push({ id: vc.id, name: vc.name, location: vc.location, status: 'disabled' });
@@ -126,8 +129,8 @@ class Store {
           merged.networks.push(...s.networks);
           merged.alarms.push(...s.alarms);
         } else if (c && !c.ok) {
-          merged.collectionErrors.push({ vcenterId: vc.id, name: vc.name, ...c.err, at: c.at, fallback: Boolean(mockFallback) });
-          if (mockFallback) pushSite(merged, mockFallback, vc.id);
+          merged.collectionErrors.push({ vcenterId: vc.id, name: vc.name, ...c.err, at: c.at, fallback: isAuto });
+          if (isAuto) pushSite(merged, getMock(), vc.id);
           else merged.vcenters.push({ id: vc.id, name: vc.name, location: vc.location, status: 'unreachable', error: c.err.message, hint: c.err.hint, code: c.err.code });
         } else {
           merged.vcenters.push({ id: vc.id, name: vc.name, location: vc.location, status: 'pending' });
@@ -255,10 +258,11 @@ function withRollups(snap) {
     });
   };
 
-  const sites = snap.vcenters.map((vc) => {
-    const r = byKey('vcenter').find((x) => x.key === vc.id);
-    return { ...vc, metrics: r };
-  });
+  // byKey('vcenter')는 호스트/VM/DS 전체를 재순회하므로 vCenter 수만큼 호출하면 O(N²).
+  // 한 번만 계산해 Map으로 조회한다.
+  const vcRollup = byKey('vcenter');
+  const vcMetrics = new Map(vcRollup.map((x) => [x.key, x]));
+  const sites = snap.vcenters.map((vc) => ({ ...vc, metrics: vcMetrics.get(vc.id) }));
 
   snap.rollups = { global, byRegion: byKey('region'), sites };
   return snap;

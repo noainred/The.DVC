@@ -1,24 +1,26 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react';
 import { usePolling, getToken, setToken, setUnauthorizedHandler, fetchAuthConfig, fetchMe } from './api.js';
 import { SearchBox } from './components/ui.jsx';
-import Overview from './views/Overview.jsx';
-import Hosts from './views/Hosts.jsx';
-import Vms from './views/Vms.jsx';
-import Datastores from './views/Datastores.jsx';
-import Networks from './views/Networks.jsx';
-import Nsx from './views/Nsx.jsx';
-import Alarms from './views/Alarms.jsx';
-import Explore from './views/Explore.jsx';
-import VCenters from './views/VCenters.jsx';
-import Summary from './views/Summary.jsx';
-import Upgrade from './views/Upgrade.jsx';
-import Settings from './views/Settings.jsx';
-import SpecialTools from './views/SpecialTools.jsx';
-import VmProvision from './views/VmProvision.jsx';
-import ReleaseNotes from './views/ReleaseNotes.jsx';
 import { RemoteConsoleWindow } from './remote/RemoteConsoleWindow.jsx';
 import Login from './views/Login.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
+
+// 탭 화면은 지연 로드(코드 스플릿)해 초기 번들/첫 로딩을 줄인다(recharts 등 무거운 의존성 분리).
+const Overview = lazy(() => import('./views/Overview.jsx'));
+const Hosts = lazy(() => import('./views/Hosts.jsx'));
+const Vms = lazy(() => import('./views/Vms.jsx'));
+const Datastores = lazy(() => import('./views/Datastores.jsx'));
+const Networks = lazy(() => import('./views/Networks.jsx'));
+const Nsx = lazy(() => import('./views/Nsx.jsx'));
+const Alarms = lazy(() => import('./views/Alarms.jsx'));
+const Explore = lazy(() => import('./views/Explore.jsx'));
+const VCenters = lazy(() => import('./views/VCenters.jsx'));
+const Summary = lazy(() => import('./views/Summary.jsx'));
+const Upgrade = lazy(() => import('./views/Upgrade.jsx'));
+const Settings = lazy(() => import('./views/Settings.jsx'));
+const SpecialTools = lazy(() => import('./views/SpecialTools.jsx'));
+const VmProvision = lazy(() => import('./views/VmProvision.jsx'));
+const ReleaseNotes = lazy(() => import('./views/ReleaseNotes.jsx'));
 
 const TABS = [
   { id: 'overview', label: 'Overview' },
@@ -284,6 +286,7 @@ function Portal({ user, onLogout }) {
         )}
 
         <ErrorBoundary key={tab}>
+         <Suspense fallback={<div className="muted" style={{ padding: 24 }}>로딩 중…</div>}>
           {tab === 'overview' && <Overview onSelectSite={selectSite} onGotoTab={setTab} />}
           {tab === 'summary' && <Summary scope={scope} onGotoTab={setTab} />}
           {tab === 'vcenters' && <VCenters onSelectSite={selectSite} />}
@@ -298,6 +301,7 @@ function Portal({ user, onLogout }) {
           {tab === 'provision' && user.role === 'admin' && <VmProvision />}
           {tab === 'settings' && user.role === 'admin' && <Settings />}
           {tab === 'upgrade' && user.role === 'admin' && health?.features?.upgradeTab && <Upgrade />}
+         </Suspense>
         </ErrorBoundary>
       </main>
 
@@ -335,7 +339,7 @@ function Portal({ user, onLogout }) {
         </div>
       )}
 
-      {showNotes && <ReleaseNotes isAdmin={user.role === 'admin'} onClose={() => setShowNotes(false)} />}
+      {showNotes && <Suspense fallback={null}><ReleaseNotes isAdmin={user.role === 'admin'} onClose={() => setShowNotes(false)} /></Suspense>}
       <RemoteConsoleWindow />
     </div>
   );
