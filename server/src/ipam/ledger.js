@@ -141,10 +141,12 @@ export function buildSubnetSheets(snap, { vcenterId, onlyBase } = {}) {
       const recs = byIp.get(ip) || [];
       let status = 'empty', purpose = '', hostname = '', notes = '', power = '', scope = '', serverType = '', os = '';
       let firstSeen = null, lastSeen = null, usageStatus = null;
+      let owner = null, ownerType = '', vcenterId = ''; // 상세/원격접속용
       if (i === 0) { status = 'network'; purpose = 'Network ID'; }
       else if (recs.length) {
         used++;
         const r = recs[0]; const o = r.owner || {};
+        owner = r.owner || null; ownerType = r.ownerType || ''; vcenterId = r.vcenterId || '';
         firstSeen = r.firstSeen || null; lastSeen = r.lastSeen || null; usageStatus = r.usageStatus || null;
         // vCenter가 모르고 능동 스캔으로만 확인된 IP는 'scanned'(스캔 확인)로 구분 표시.
         status = r.released ? 'released'
@@ -161,7 +163,7 @@ export function buildSubnetSheets(snap, { vcenterId, onlyBase } = {}) {
         scope = r.scope === 'public' ? '공인' : '사설';
       }
       const ann = annotations[ip];
-      sheetRows.push({ ip, last: i, purpose, hostname, serverType, os, notes, power, status, scope, firstSeen, lastSeen, usageStatus, memo: ann?.memo || '', tags: ann?.tags || [] });
+      sheetRows.push({ ip, last: i, purpose, hostname, serverType, os, notes, power, status, scope, firstSeen, lastSeen, usageStatus, owner, ownerType, vcenterId, memo: ann?.memo || '', tags: ann?.tags || [] });
     }
     return { subnet: `${base}.0/24`, base, used, rows: sheetRows };
   });
