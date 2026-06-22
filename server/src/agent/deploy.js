@@ -40,7 +40,7 @@ export function installerInfo(explicit) {
 }
 
 // 주입할 env 키/값 쌍(빈 값은 제외). 재배포 시 이 키들을 portal.env에서 교체(upsert)한다.
-function envPairs({ agentName, centralUrl, centralToken, collectorToken, collectorDatacenter, scanIntervalMs, autoUpgrade, upgradeIntervalMs }, port) {
+function envPairs({ agentName, centralUrl, centralToken, collectorToken, collectorDatacenter, scanIntervalMs, autoUpgrade, upgradeIntervalMs, pushInventory, inventoryIntervalMs }, port) {
   const p = [];
   if (port) p.push(['PORT', String(port)]); // 기존 portal.env의 PORT(예: 잘못된 22)도 교체
   if (agentName) p.push(['AGENT_NAME', agentName]);
@@ -49,6 +49,11 @@ function envPairs({ agentName, centralUrl, centralToken, collectorToken, collect
   if (scanIntervalMs) p.push(['AGENT_SCAN_INTERVAL_MS', String(scanIntervalMs)]);
   if (collectorToken) p.push(['COLLECTOR_TOKEN', collectorToken]);
   if (collectorDatacenter) p.push(['COLLECTOR_DATACENTER', collectorDatacenter]);
+  // 사이트 위임 수집: 이 현장 서버가 로컬 vCenter 인벤토리를 중앙으로 push.
+  if (pushInventory && centralUrl) {
+    p.push(['AGENT_PUSH_INVENTORY', 'true']);
+    if (inventoryIntervalMs) p.push(['AGENT_INVENTORY_INTERVAL_MS', String(inventoryIntervalMs)]);
+  }
   // 자동 업그레이드(소스 = 현재 포탈의 /dl). 토큰 없이 공개 소스에서 pull.
   if (autoUpgrade && centralUrl) {
     const base = `${String(centralUrl).replace(/\/+$/, '')}/dl`;

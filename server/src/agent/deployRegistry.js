@@ -12,7 +12,7 @@ import { config } from '../config.js';
 const FILE = path.join(config.configDir, 'agent-deploy-targets.json');
 const SECRET_KEYS = ['password', 'privateKey'];
 const FIELDS = ['host', 'port', 'username', 'password', 'privateKey', 'agentName',
-  'centralUrl', 'centralToken', 'collectorToken', 'collectorDatacenter', 'installerPath', 'portalPort', 'autoUpgrade', 'enabled'];
+  'centralUrl', 'centralToken', 'collectorToken', 'collectorDatacenter', 'installerPath', 'portalPort', 'autoUpgrade', 'pushInventory', 'enabled'];
 
 let cache = null;
 

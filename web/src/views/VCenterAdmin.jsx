@@ -6,7 +6,7 @@ import EscClose from '../components/EscClose.jsx';
 const REGIONS = ['아시아', '중국', '유럽', '북미'];
 const EMPTY = {
   id: '', name: '', host: 'https://', username: '', password: '',
-  enabled: true, pollIntervalSec: '', timeoutMs: '',
+  enabled: true, pollIntervalSec: '', timeoutMs: '', collectMode: 'direct',
   location: { city: '', country: '', region: '아시아', lat: '', lon: '' },
 };
 
@@ -198,7 +198,7 @@ export default function VCenterAdmin() {
             {list.map((vc) => (
               <tr key={vc.id}>
                 <td><b>{vc.id}</b></td>
-                <td>{vc.name}</td>
+                <td>{vc.name}{vc.collectMode === 'site' && <span className="badge amber" style={{ marginLeft: 6, fontSize: 10 }} title="사이트 위임 수집 — 현장 서버가 수집해 중앙으로 push">사이트 위임</span>}</td>
                 <td className="muted">{vc.host}</td>
                 <td className="muted">{vc.username}</td>
                 <td><span className="badge blue">{vc.location?.region || '-'}</span></td>
@@ -239,6 +239,12 @@ export default function VCenterAdmin() {
               <label>경도(lon)<input className="input" value={form.location.lon} onChange={setLoc('lon')} placeholder="126.98" /></label>
               <label>수집 주기(초, 0/빈칸=기본)<input className="input" type="number" value={form.pollIntervalSec} onChange={setF('pollIntervalSec')} placeholder="예: 300 (고RTT)" /></label>
               <label>수집 타임아웃(ms, 0/빈칸=30000)<input className="input" type="number" value={form.timeoutMs} onChange={setF('timeoutMs')} placeholder="예: 60000 (고RTT)" /></label>
+              <label style={{ gridColumn: '1 / -1' }} title="중앙 직접: 이 포탈(중앙)이 vCenter에 직접 접속해 수집. 사이트 위임: 그 사이트의 현장 서버(에이전트, AGENT_PUSH_INVENTORY=true)가 로컬에서 수집해 중앙으로 push — 고RTT 원격 사이트(폴란드/미국동부 등)에 권장. 위임 선택 시 중앙은 이 vCenter를 직접 폴링하지 않습니다.">수집 방식
+                <select className="select" value={form.collectMode || 'direct'} onChange={setF('collectMode')}>
+                  <option value="direct">중앙 직접 수집(기본)</option>
+                  <option value="site">사이트 위임(현장 서버가 수집→중앙 push, 고RTT 권장)</option>
+                </select>
+              </label>
               <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }}>
                 <input type="checkbox" checked={form.enabled !== false} onChange={(e) => setForm((f) => ({ ...f, enabled: e.target.checked }))} /> 수집 사용
               </label>

@@ -82,13 +82,15 @@ function normalize(body, existing = null) {
   const pollIntervalSec = intRaw != null && intRaw !== '' ? Math.max(0, Math.round(Number(intRaw) || 0)) : 0; // 0 = global default
   const timeoutMs = toRaw != null && toRaw !== '' ? Math.max(0, Math.round(Number(toRaw) || 0)) : 0;          // 0 = 30s default
   const enabled = body.enabled !== undefined ? body.enabled !== false : (e.enabled !== false);
+  // 수집 방식: 'direct'(중앙이 직접 폴링) | 'site'(현장 서버가 수집해 중앙으로 push)
+  const collectMode = (body.collectMode ?? e.collectMode) === 'site' ? 'site' : 'direct';
 
   const entry = {
     id, name, host, username,
     // keep existing password if not provided / blank
     password: body.password ? String(body.password) : e.password || '',
     location: { city, country, region, lat, lon },
-    enabled, pollIntervalSec, timeoutMs,
+    enabled, pollIntervalSec, timeoutMs, collectMode,
   };
   return [entry, null];
 }

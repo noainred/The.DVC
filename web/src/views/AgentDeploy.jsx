@@ -5,7 +5,7 @@ import { Loading } from '../components/ui.jsx';
 const EMPTY = {
   host: '', port: 22, username: 'root', password: '', privateKey: '',
   agentName: '', centralUrl: '', centralToken: '', collectorToken: '', collectorDatacenter: '',
-  installerPath: '', portalPort: 4000, autoUpgrade: true,
+  installerPath: '', portalPort: 4000, autoUpgrade: true, pushInventory: false,
 };
 
 /** 설정 → 에이전트 배포: 새 Rocky9 호스트에 SSH로 수집 에이전트 자동 설치. */
@@ -228,6 +228,9 @@ export default function AgentDeploy() {
           <label className="agent-check" style={{ gridColumn: '1 / -1' }} title="켜면 이 에이전트가 '현재 포탈'을 업그레이드 소스로 사용합니다(UPGRADE_REMOTE_BASE = 중앙 URL + /dl). 중앙 포탈이 새 버전 번들을 download/에 올리면 에이전트가 주기적으로(기본 1시간) 확인해 자동 업그레이드합니다. 중앙 URL이 비어 있으면 무시됩니다.">
             <input type="checkbox" checked={!!f.autoUpgrade} onChange={(e) => setF((s) => ({ ...s, autoUpgrade: e.target.checked }))} />
             <span>자동 업그레이드 활성화 — 업그레이드 소스 = 현재 포탈(<code>중앙 URL/dl</code>)</span></label>
+          <label className="agent-check" style={{ gridColumn: '1 / -1' }} title="켜면 이 현장 서버가 자기 로컬 vCenter 인벤토리(VM/호스트/데이터스토어/NSX/알람)를 수집해 중앙(OC2)으로 push 합니다(AGENT_PUSH_INVENTORY=true). 중앙은 그 vCenter를 직접 폴링하지 않아 고RTT 원격 사이트의 수집 지연이 사라집니다. ※ 중앙의 'vCenter 관리'에서 해당 vCenter의 수집 방식을 '사이트 위임'으로 설정해야 적용됩니다. 그리고 이 현장 서버의 vcenters.json에 로컬 vCenter를 등록해야 합니다.">
+            <input type="checkbox" checked={!!f.pushInventory} onChange={(e) => setF((s) => ({ ...s, pushInventory: e.target.checked }))} />
+            <span>사이트 위임 수집 — 이 현장 서버가 로컬 vCenter 수집 후 중앙으로 push(고RTT 사이트 권장)</span></label>
         </div>
       </div>
 

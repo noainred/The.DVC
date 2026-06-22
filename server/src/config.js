@@ -130,6 +130,10 @@ export const config = {
     // Auto-register discovered iDRACs into this agent's local registry so it
     // begins collecting their power immediately.
     autoRegister: process.env.AGENT_AUTO_REGISTER !== 'false',
+    // 사이트 위임 수집: 이 서버가 자기 로컬 vCenter 인벤토리를 수집해 중앙으로 push.
+    // 고RTT 원격 사이트의 vCenter 수집을 현장 서버가 전담하게 해 중앙↔vCenter RTT를 제거.
+    pushInventory: process.env.AGENT_PUSH_INVENTORY === 'true',
+    inventoryIntervalMs: Number(process.env.AGENT_INVENTORY_INTERVAL_MS) || 60_000,
   },
   auth: {
     enabled: process.env.AUTH_ENABLED !== 'false',

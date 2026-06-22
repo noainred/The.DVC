@@ -144,7 +144,7 @@ export function Modal({ title, onClose, children, width = 560, resizable = false
   return (
     <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <EscClose onClose={onClose} />
-      <div className="modal card" style={{ ...resizeStyle, display: 'flex', flexDirection: 'column', overflow: resizable ? 'auto' : 'hidden' }}>
+      <div className="modal card" style={{ ...resizeStyle, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <div className="flex between" style={{ marginBottom: 12, flex: '0 0 auto' }}>
           <b style={{ fontSize: 15 }}>{title}</b>
           <button className="logout-btn" onClick={onClose}>닫기</button>

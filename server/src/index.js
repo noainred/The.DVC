@@ -40,10 +40,12 @@ import { startIpScanPoller } from './ipam/scanPoller.js';
 import { startIpScanAgent } from './agent/ipScanWorker.js';
 import { startCollectorPuller } from './collector/puller.js';
 import { startAgentScanner } from './agent/scanner.js';
+import { startInventoryPush } from './agent/inventoryPush.js';
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+// 사이트 위임 수집의 인벤토리 push는 수MB가 될 수 있어 기본 100kb 한도를 상향.
+app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '64mb' }));
 
 // Lightweight request logging for the log viewer (skip the log endpoint itself).
 app.use((req, res, next) => {
@@ -97,6 +99,7 @@ startIpScanPoller();
 startIpScanAgent();
 startCollectorPuller();
 startAgentScanner();
+startInventoryPush();
 
 const server = app.listen(config.port, () => {
   console.log(`\n  VMware Global Monitoring Portal — API`);
