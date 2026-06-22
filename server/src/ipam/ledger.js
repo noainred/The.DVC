@@ -181,7 +181,8 @@ export function buildSubnetSheets(snap, { vcenterId, onlyBase } = {}) {
           ? `네트워크 스캔 · 포트 ${(r.openPorts || []).join(',')}`
           : `${serverType} · ${r.vcenterName}${o.cluster ? ` / ${o.cluster}` : ''}`;
         notes = (o.notes || '').split(/\r?\n/)[0] || '';
-        power = o.powerState === 'POWERED_ON' ? 'On' : (o.powerState ? 'Off' : '');
+        // 전원: 행의 powerState 기준(스캔 IP는 owner가 없지만 ping/TCP 응답=살아있음=On).
+        power = r.powerState === 'POWERED_ON' ? 'On' : (r.powerState ? 'Off' : '');
         scope = r.scope === 'public' ? '공인' : '사설';
       }
       const ann = annotations[ip];
