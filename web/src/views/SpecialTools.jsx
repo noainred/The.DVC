@@ -1469,10 +1469,58 @@ function GpuModeBadge({ mode, modes }) {
   );
 }
 
+/** VM의 GPU 사용 방식 배지(혼합이면 vGPU/패스쓰루 장수 분리 표기). */
+function VmGpuModeBadge({ gpu }) {
+  if (!gpu) return <span className="muted">—</span>;
+  if (gpu.type === 'mixed') return <span><span className="badge green">vGPU {gpu.vgpu}</span> <span className="badge amber" style={{ marginLeft: 4 }}>패스쓰루 {gpu.passthrough}</span></span>;
+  const [l, c] = GPU_MODE[gpu.type] || ['—', 'gray'];
+  return <span className={`badge ${c}`}>{l}</span>;
+}
+
+/** GPU가 할당된 VM 목록 모달 — 어떤 VM이 어떤 방식·프로파일로 GPU를 쓰는지. */
+function GpuVmsModal({ title, params, onClose }) {
+  const [d, setD] = useState(null);
+  const [err, setErr] = useState(null);
+  useEffect(() => {
+    const qs = new URLSearchParams(Object.entries(params || {}).filter(([, v]) => v)).toString();
+    fetchJson(`/tools/gpu/vms${qs ? `?${qs}` : ''}`).then(setD).catch((e) => setErr(e.message));
+  }, []);
+  return (
+    <Modal title={title} onClose={onClose} width={820} resizable minWidth={520} minHeight={380}>
+      {err ? <ErrorBox message={err} /> : !d ? <Loading /> : (
+        <>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>GPU 할당 VM <b>{d.total}</b>개 · 어떤 VM이 어떤 방식/프로파일로 GPU를 사용하는지 보여줍니다.</div>
+          <div className="table-wrap" style={{ maxHeight: '60vh' }}>
+            <table>
+              <thead><tr><th>VM</th><th>법인</th><th>호스트</th><th>GPU 모델</th><th>사용 방식</th><th>프로파일</th><th style={{ textAlign: 'right' }}>장수</th><th>전원</th></tr></thead>
+              <tbody>
+                {d.vms.length === 0 && <tr><td colSpan={8} className="center muted" style={{ padding: 20 }}>GPU 할당 VM이 없습니다.</td></tr>}
+                {d.vms.map((v) => (
+                  <tr key={v.id}>
+                    <td><b>{v.name}</b></td>
+                    <td className="muted">{v.vcenterId}</td>
+                    <td className="muted" style={{ fontSize: 12 }}>{v.host || '—'}</td>
+                    <td style={{ fontSize: 12 }}>{v.model || '—'}</td>
+                    <td><VmGpuModeBadge gpu={v.gpu} /></td>
+                    <td className="muted" style={{ fontSize: 12 }}>{v.gpu?.profile || '—'}</td>
+                    <td style={{ textAlign: 'right' }}>{v.gpu?.count ?? '—'}</td>
+                    <td>{v.powerState === 'POWERED_ON' ? <span className="badge green">On</span> : <span className="badge gray">Off</span>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </Modal>
+  );
+}
+
 function Gpu({ scope }) {
   const { loading, data, error } = useTool('/tools/gpu', scope ? { vcenterId: scope } : {});
-  const [view, setView] = useState('host'); // host | cluster | vc
+  const [view, setView] = useState('host'); // host | cluster | vc | model
   const [hist, setHist] = useState(null);   // { level, key, days, points, synthesized }
+  const [vmList, setVmList] = useState(null); // { title, params } for GpuVmsModal
   const [days, setDays] = useState(7);
   const openHist = async (level, key) => {
     setHist({ level, key, loading: true });
@@ -1486,25 +1534,43 @@ function Gpu({ scope }) {
 
   const items = mode ? data.items.filter((h) => h.mode === mode) : data.items;
 
-  // Aggregate current utilization by cluster / vCenter from per-host items.
+  // Aggregate by cluster / vCenter from per-host items. 사용률 미보고(패스쓰루) 호스트도
+  // GPU 장수·할당 VM·방식 집계에는 포함하고, 평균/최고 사용률만 보고 호스트로 계산한다.
   const aggregate = (keyFn, labelFn) => {
     const m = new Map();
     for (const h of items) {
-      if (h.utilPct == null) continue;
       const k = keyFn(h);
-      const g = m.get(k) || { key: k, name: labelFn(h), hosts: 0, sum: 0, max: 0, gpus: 0 };
-      g.hosts++; g.sum += h.utilPct; g.max = Math.max(g.max, h.utilPct); g.gpus += h.count; m.set(k, g);
+      const g = m.get(k) || { key: k, name: labelFn(h), hosts: 0, sum: 0, util: 0, max: 0, gpus: 0, assignedVms: 0, modes: {} };
+      g.hosts++; g.gpus += h.count; g.assignedVms += h.assignedVms || 0;
+      for (const [md, n] of Object.entries(h.modes || {})) g.modes[md] = (g.modes[md] || 0) + n;
+      if (h.utilPct != null) { g.util++; g.sum += h.utilPct; g.max = Math.max(g.max, h.utilPct); }
+      m.set(k, g);
     }
-    return [...m.values()].map((g) => ({ key: g.key, name: g.name, sub: `${g.hosts} 호스트 · GPU ${g.gpus}`, avg: Math.round(g.sum / g.hosts), max: g.max, level: view }));
+    return [...m.values()].map((g) => ({
+      key: g.key, name: g.name, hosts: g.hosts, gpus: g.gpus, assignedVms: g.assignedVms, modes: g.modes,
+      sub: `${g.hosts} 호스트 · GPU ${g.gpus}`, avg: g.util ? Math.round(g.sum / g.util) : null, max: g.max, level: view,
+    }));
   };
 
   const hostRows = items.map((h) => ({
     key: h.id, name: h.host, vcenterId: h.vcenterId, sub: `${h.vcenterId} / ${h.cluster || '-'} · ${h.model}`,
-    model: h.model, count: h.count, memGB: h.memGB, mode: h.mode, modes: h.modes, utilSource: h.utilSource, avg: h.utilPct, max: h.utilPct, util: h.utilPct, level: 'host',
+    model: h.model, count: h.count, memGB: h.memGB, mode: h.mode, modes: h.modes, utilSource: h.utilSource, avg: h.utilPct, max: h.utilPct, util: h.utilPct, assignedVms: h.assignedVms || 0, level: 'host',
   }));
+  // 법인 × GPU 모델별 수량 집계: 어떤 법인에 어떤 GPU 카드가 몇 장 설치됐는지.
+  const modelAgg = () => {
+    const m = new Map();
+    for (const h of items) {
+      const k = `${h.vcenterId}|${h.model}`;
+      const g = m.get(k) || { key: k, vcenterId: h.vcenterId, model: h.model, gpus: 0, hosts: 0, assignedVms: 0, memGB: h.memGB || 0, modeSet: new Set() };
+      g.gpus += h.count; g.hosts++; g.assignedVms += h.assignedVms || 0; if (h.mode) g.modeSet.add(h.mode); g.memGB = Math.max(g.memGB, h.memGB || 0); m.set(k, g);
+    }
+    return [...m.values()].map((g) => ({ ...g, modes: [...g.modeSet] }));
+  };
+
   const rows = view === 'host' ? hostRows
     : view === 'cluster' ? aggregate((h) => `${h.vcenterId}|${h.cluster || 'standalone'}`, (h) => `${h.vcenterId} / ${h.cluster || 'standalone'}`)
-      : aggregate((h) => h.vcenterId, (h) => h.vcenterId);
+      : view === 'model' ? modelAgg()
+        : aggregate((h) => h.vcenterId, (h) => h.vcenterId);
 
   const hostCols = [
     { key: 'name', label: '호스트', render: (r) => <button className="cell-link" onClick={() => openHist('host', r.key)}>{r.name}</button> },
@@ -1515,14 +1581,34 @@ function Gpu({ scope }) {
     { key: 'mode', label: '사용 방식', sortValue: (r) => r.mode, render: (r) => <GpuModeBadge mode={r.mode} modes={r.modes} /> },
     { key: 'util', label: '사용률', render: (r) => (r.util == null ? <span className="muted">—</span>
       : <span className="flex gap" style={{ alignItems: 'center' }}><UsageCell pct={r.util} />{r.utilSource === 'guest' && <span className="badge gray" style={{ fontSize: 10 }} title="게스트 OS에서 수집(패스쓰루)">게스트</span>}</span>) },
+    { key: 'assignedVms', label: '할당 VM', align: 'right', render: (r) => (r.assignedVms ? <button className="cell-link" onClick={() => setVmList({ title: `GPU 할당 VM — ${r.name}`, params: { host: r.name } })}>{r.assignedVms}</button> : <span className="muted">0</span>) },
     { key: 'hist', label: '추이', render: (r) => <button className="tab" onClick={() => openHist('host', r.key)}>5년 추이</button> },
   ];
   const aggCols = [
-    { key: 'name', label: view === 'cluster' ? '클러스터' : '법인', render: (r) => <button className="cell-link" onClick={() => openHist(r.level, r.key)}>{r.name}</button> },
+    { key: 'name', label: '클러스터', render: (r) => <button className="cell-link" onClick={() => openHist(r.level, r.key)}>{r.name}</button> },
     { key: 'sub', label: '구분', render: (r) => <span className="muted" style={{ fontSize: 12 }}>{r.sub}</span> },
-    { key: 'avg', label: '평균 사용률', render: (r) => <UsageCell pct={r.avg} /> },
+    { key: 'avg', label: '평균 사용률', render: (r) => (r.avg == null ? <span className="muted">—</span> : <UsageCell pct={r.avg} />) },
     { key: 'max', label: '최고 %', align: 'right', render: (r) => <b>{r.max}%</b> },
     { key: 'hist', label: '추이', render: (r) => <button className="tab" onClick={() => openHist(r.level, r.key)}>5년 추이</button> },
+  ];
+  // 법인별: 법인에 GPU가 몇 장·어떤 방식·할당 VM 몇 개.
+  const vcCols = [
+    { key: 'name', label: '법인(vCenter)', render: (r) => <button className="cell-link" onClick={() => openHist(r.level, r.key)}>{r.name}</button> },
+    { key: 'gpus', label: 'GPU 장수', align: 'right', render: (r) => <b style={{ color: 'var(--accent)' }}>{r.gpus}</b> },
+    { key: 'hosts', label: '호스트', align: 'right' },
+    { key: 'modes', label: '사용 방식', sortValue: (r) => Object.keys(r.modes || {}).join(','), render: (r) => Object.entries(r.modes || {}).map(([m, n]) => <span key={m} className={`badge ${GPU_MODE[m]?.[1] || 'gray'}`} style={{ marginRight: 4 }}>{GPU_MODE[m]?.[0] || m} {n}</span>) },
+    { key: 'assignedVms', label: '할당 VM', align: 'right', render: (r) => (r.assignedVms ? <button className="cell-link" onClick={() => setVmList({ title: `GPU 할당 VM — ${r.name}`, params: { vcenterId: r.key } })}>{r.assignedVms}</button> : <span className="muted">0</span>) },
+    { key: 'avg', label: '평균 사용률', render: (r) => (r.avg == null ? <span className="muted">—</span> : <UsageCell pct={r.avg} />) },
+  ];
+  // 법인·모델별: 어떤 법인에 어떤 GPU 카드가 몇 장·할당 VM 몇 개.
+  const modelCols = [
+    { key: 'vcenterId', label: '법인(vCenter)', render: (r) => <b>{r.vcenterId}</b> },
+    { key: 'model', label: 'GPU 모델' },
+    { key: 'gpus', label: 'GPU 장수', align: 'right', render: (r) => <b style={{ color: 'var(--accent)' }}>{r.gpus}</b> },
+    { key: 'hosts', label: '호스트 수', align: 'right' },
+    { key: 'memGB', label: 'VRAM', align: 'right', render: (r) => `${r.memGB} GB` },
+    { key: 'modes', label: '사용 방식', sortValue: (r) => (r.modes || []).join(','), render: (r) => (r.modes || []).map((m) => <GpuModeBadge key={m} mode={m} />) },
+    { key: 'assignedVms', label: '할당 VM', align: 'right', render: (r) => (r.assignedVms ? <button className="cell-link" onClick={() => setVmList({ title: `GPU 할당 VM — ${r.vcenterId} · ${r.model}`, params: { vcenterId: r.vcenterId, model: r.model } })}>{r.assignedVms}</button> : <span className="muted">0</span>) },
   ];
 
   return (
@@ -1538,7 +1624,7 @@ function Gpu({ scope }) {
       {data.items.length === 0 ? <div className="card"><span className="muted">GPU가 설치된 호스트가 없습니다.</span></div> : (
         <>
           <div className="flex gap wrap" style={{ marginBottom: 8 }}>
-            {[['host', '호스트별'], ['cluster', '클러스터별'], ['vc', '법인별']].map(([k, l]) => (
+            {[['host', '호스트별'], ['cluster', '클러스터별'], ['vc', '법인별'], ['model', '법인·모델별']].map(([k, l]) => (
               <button key={k} className={view === k ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setView(k)}>{l}</button>
             ))}
             <span style={{ width: 12 }} />
@@ -1547,8 +1633,15 @@ function Gpu({ scope }) {
                 {l} <b style={{ opacity: 0.7 }}>{k ? (data.byMode?.[k] ?? 0) : data.totalGpus}</b>
               </button>
             ))}
+            <button className="logout-btn" style={{ flex: 'none', padding: '7px 12px', marginLeft: 'auto' }}
+              onClick={() => setVmList({ title: 'GPU 할당 VM 전체', params: { ...(scope ? { vcenterId: scope } : {}), ...(mode ? { mode } : {}) } })}>🎮 GPU 할당 VM 보기</button>
           </div>
-          <DataTable columns={view === 'host' ? hostCols : aggCols} rows={rows} initialSort={{ key: view === 'host' ? 'count' : 'avg', dir: 'desc' }} />
+          {view === 'model' && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>법인별로 설치된 GPU 카드 모델·장수·할당 VM 수입니다(같은 법인·같은 모델은 합산). <b>할당 VM</b> 숫자를 클릭하면 해당 VM 목록과 사용 방식을 봅니다.</div>}
+          {view === 'vc' && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>법인별 GPU 장수·사용 방식·할당 VM 수입니다. <b>할당 VM</b> 숫자를 클릭하면 VM별 사용 방식을 봅니다.</div>}
+          <DataTable
+            columns={view === 'host' ? hostCols : view === 'model' ? modelCols : view === 'vc' ? vcCols : aggCols}
+            rows={rows}
+            initialSort={{ key: (view === 'host' || view === 'model' || view === 'vc') ? (view === 'host' ? 'count' : 'gpus') : 'avg', dir: 'desc' }} />
         </>
       )}
 
@@ -1576,6 +1669,7 @@ function Gpu({ scope }) {
             )}
         </Modal>
       )}
+      {vmList && <GpuVmsModal title={vmList.title} params={vmList.params} onClose={() => setVmList(null)} />}
     </>
   );
 }
