@@ -156,6 +156,7 @@ tbody tr:last-child td { border-bottom: none; }
 .badge.gray { background: rgba(139,155,180,.15); color: var(--text-dim); }
 .badge.blue { background: rgba(59,130,246,.15); color: #60a5fa; }
 .badge.purple { background: rgba(168,85,247,.15); color: #c084fc; }
+.badge.teal { background: rgba(20,184,166,.16); color: #2dd4bf; }
 
 .mini-bar { width: 90px; height: 6px; border-radius: 3px; background: var(--panel-2); display: inline-block; vertical-align: middle; overflow: hidden; }
 .mini-bar > span { display: block; height: 100%; }

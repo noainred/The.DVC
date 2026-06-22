@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { NsxClient } from './client.js';
+import { ensureNsxDial } from './proxy.js';
 import { describeError } from '../util/errors.js';
 
 const FILE = path.join(config.configDir, 'nsx.json');
@@ -65,6 +66,8 @@ function normalize(body, existing = null) {
     id, name, host, username,
     password: body.password ? String(body.password) : e.password || '',
     vcenterId: String(body.vcenterId ?? e.vcenterId ?? '').trim(),
+    // 다른 법인의 NSX를 등록된 HAProxy(중계 서버) 경유로 연결. 빈 값 = 직접 연결.
+    proxyId: String(body.proxyId ?? e.proxyId ?? '').trim(),
     location: { region },
     enabled, pollIntervalSec, timeoutMs,
   };
@@ -110,11 +113,12 @@ export async function testConnection(body) {
   if (!entry.host || !entry.username || !entry.password) {
     return { ok: false, reason: 'host/username/password가 필요합니다.' };
   }
-  const client = new NsxClient(entry);
   const started = Date.now();
   try {
+    const dial = await ensureNsxDial(entry); // proxyId가 있으면 HAProxy 경유로 테스트
+    const client = new NsxClient(entry, dial);
     await client.ping();
-    return { ok: true, ms: Date.now() - started };
+    return { ok: true, ms: Date.now() - started, viaProxy: !!dial };
   } catch (err) {
     const d = describeError(err);
     return { ok: false, reason: d.message, hint: d.hint, code: d.code, ms: Date.now() - started };

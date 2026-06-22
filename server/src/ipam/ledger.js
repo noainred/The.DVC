@@ -138,7 +138,10 @@ export function buildSubnetSheets(snap, { vcenterId, onlyBase } = {}) {
         used++;
         const r = recs[0]; const o = r.owner || {};
         firstSeen = r.firstSeen || null; lastSeen = r.lastSeen || null; usageStatus = r.usageStatus || null;
-        status = r.released ? 'released' : (recs.length > 1 ? 'duplicate' : (r.multiHomed ? 'multihomed' : 'used'));
+        // vCenter가 모르고 능동 스캔으로만 확인된 IP는 'scanned'(스캔 확인)로 구분 표시.
+        status = r.released ? 'released'
+          : r.serverType === 'Scanned' ? 'scanned'
+            : (recs.length > 1 ? 'duplicate' : (r.multiHomed ? 'multihomed' : 'used'));
         hostname = [...new Set(recs.map((x) => x.ownerName))].join(' / ');
         serverType = r.serverType === 'BareMetal' ? '베어메탈' : (r.serverType === 'Scanned' ? '스캔' : 'VM');
         os = r.serverType === 'Scanned' ? (r.services || []).join(', ') : [r.osName, r.osVersion].filter(Boolean).join(' ');
