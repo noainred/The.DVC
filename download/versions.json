@@ -1,6 +1,21 @@
 {
-  "latest": "1.71.1",
+  "latest": "1.72.0",
   "versions": [
+    {
+      "version": "1.72.0",
+      "tar_gz": "vmware-portal-1.72.0.tar.gz",
+      "size_bytes": 9504266,
+      "sha256": "0512aea28065b8124e7356cf182c75bb5346ed5751d6a32b5c371534735ee9de",
+      "installer": "vmware-portal-offline-1.72.0-el9-x64.tar.gz",
+      "installer_size_bytes": 66737530,
+      "installer_sha256": "fe4f1faf24082a508e3e8b880217f27bb164bb6d6ebaab78e7b3c41066dc94f9",
+      "installer_cent9": "vmware-portal-offline-1.72.0-cent9-x64.tar.gz",
+      "installer_cent9_size_bytes": 66743640,
+      "installer_cent9_sha256": "473839dd8c3a553ed93906c9d30b64bf68cd289a4d7b9dd2066a3ebfcf63efae",
+      "windows": "vmware-portal-win-1.72.0-x64.zip",
+      "windows_size_bytes": 49266867,
+      "windows_sha256": "af96d331995e20589ac7e54be069cf49073dde70b18c8f5c364bdf30be49290b"
+    },
     {
       "version": "1.71.1",
       "tar_gz": "vmware-portal-1.71.1.tar.gz",
@@ -15,21 +30,6 @@
       "windows": "vmware-portal-win-1.71.1-x64.zip",
       "windows_size_bytes": 49266152,
       "windows_sha256": "10da02c9b181c74599b88df2d39548df0cf80d15bf3fbb87b71b453cb37acde7"
-    },
-    {
-      "version": "1.71.0",
-      "tar_gz": "vmware-portal-1.71.0.tar.gz",
-      "size_bytes": 9503358,
-      "sha256": "4b6ba45bf3139796637295a6189d2adec3c95c746200eef97ba3d7344f4ef81c",
-      "installer": "vmware-portal-offline-1.71.0-el9-x64.tar.gz",
-      "installer_size_bytes": 66735274,
-      "installer_sha256": "99d0e5ce7a5ad2b4559c878a1d75b787e131d7b7d0703ec384acbc3c3308ab25",
-      "installer_cent9": "vmware-portal-offline-1.71.0-cent9-x64.tar.gz",
-      "installer_cent9_size_bytes": 66743007,
-      "installer_cent9_sha256": "a0f8ad103f5744a24030c495a312d67d136588fed5b7c707cf361ef907114458",
-      "windows": "vmware-portal-win-1.71.0-x64.zip",
-      "windows_size_bytes": 49265909,
-      "windows_sha256": "9c8c0aa0c1ea3f398957af2d53961fe8e773ed4b04a0c6a995bd1e79ea757d11"
     }
   ]
 }
