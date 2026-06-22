@@ -14,10 +14,12 @@ export default function Overview({ onSelectSite, onGotoTab }) {
   const { data: ov, error, loading } = usePolling('/overview', {}, 15_000);
   const { data: alarmData } = usePolling('/alarms', { severity: undefined }, 15_000);
 
-  // Shared (server-saved) map height so everyone sees the same size.
+  // Shared (server-saved) map height + drag view(가로 회전 lambda·세로 이동)so everyone sees the same.
   const [mapHeight, setMapHeight] = useState(420);
-  useEffect(() => { fetchJson('/ui-settings').then((s) => setMapHeight(s.mapHeight || 420)).catch(() => {}); }, []);
+  const [mapView, setMapView] = useState({ lambda: -127, offsetY: 0 });
+  useEffect(() => { fetchJson('/ui-settings').then((s) => { setMapHeight(s.mapHeight || 420); setMapView({ lambda: s.mapLambda ?? -127, offsetY: s.mapOffsetY ?? 0 }); }).catch(() => {}); }, []);
   const saveMapHeight = (px) => { setMapHeight(px); putJson('/ui-settings', { mapHeight: px }).catch(() => {}); };
+  const saveMapView = ({ lambda, offsetY }) => { setMapView({ lambda, offsetY }); putJson('/ui-settings', { mapLambda: lambda, mapOffsetY: offsetY }).catch(() => {}); };
 
   if (loading && !ov) return <Loading />;
   if (error) return <ErrorBox message={error} />;
@@ -62,7 +64,7 @@ export default function Overview({ onSelectSite, onGotoTab }) {
 
       <div className="section-title">전세계 데이터센터 분포 <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>(+/- 로 크기 조절 · 드래그로 이동 · 모든 사용자 공유)</span></div>
       <ErrorBoundary fallback={<div className="card error-box">지도를 불러올 수 없습니다.</div>}>
-        <WorldMap sites={sites} onSelect={onSelectSite} height={mapHeight} onResizeEnd={saveMapHeight} />
+        <WorldMap sites={sites} onSelect={onSelectSite} height={mapHeight} onResizeEnd={saveMapHeight} lambda={mapView.lambda} offsetY={mapView.offsetY} onViewEnd={saveMapView} />
       </ErrorBoundary>
 
       <div className="grid cols-2" style={{ marginTop: 16 }}>

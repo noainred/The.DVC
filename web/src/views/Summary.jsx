@@ -25,19 +25,34 @@ function Big({ label, value, unit, sub, accent, onClick }) {
   );
 }
 
-/** vCenter(법인)별 가상화율(vCPU : 물리코어) 상세 모달. byVcenter 데이터로 클라이언트 계산. */
+/** vCenter(법인)별 가상화율(vCPU : 물리코어) 상세 모달. byVcenter 데이터로 클라이언트 계산. 제목 클릭 정렬. */
 function VcpuRatioModal({ rows, onClose }) {
   const r2 = (v) => Number((v || 0).toFixed(2));
-  const list = (rows || []).map((vc) => ({
-    ...vc, ratio: vc.cpuCores > 0 ? r2(vc.vcpuAllocated / vc.cpuCores) : 0,
-  })).sort((a, b) => b.ratio - a.ratio);
+  const [sort, setSort] = useState({ key: 'ratio', dir: 'desc' });
+  const base = (rows || []).map((vc) => ({ ...vc, ratio: vc.cpuCores > 0 ? r2(vc.vcpuAllocated / vc.cpuCores) : 0 }));
+  const list = [...base].sort((a, b) => {
+    const va = a[sort.key], vb = b[sort.key];
+    const cmp = typeof va === 'string' ? String(va).localeCompare(String(vb)) : (va || 0) - (vb || 0);
+    return sort.dir === 'asc' ? cmp : -cmp;
+  });
   const ratioColor = (r) => (r > 4 ? 'var(--amber)' : r > 0 ? 'var(--green)' : 'var(--text-dim)');
+  const toggle = (key) => setSort((s) => ({ key, dir: s.key === key ? (s.dir === 'asc' ? 'desc' : 'asc') : (key === 'name' ? 'asc' : 'desc') }));
+  const arrow = (key) => (sort.key === key ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : '');
+  const COLS = [
+    ['name', 'vCenter(법인)', 'left'], ['vms', 'VM', 'right'], ['vcpuAllocated', '할당 vCPU', 'right'],
+    ['cpuCores', '물리 코어', 'right'], ['ratio', '가상화율', 'right'],
+  ];
   return (
     <Modal title="vCenter별 가상화율 (vCPU : 물리코어)" onClose={onClose} width={720} resizable minWidth={480} minHeight={360}>
-      <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>할당된 vCPU ÷ 물리 코어 수. <b style={{ color: 'var(--amber)' }}>4:1 초과</b>는 높은 오버커밋입니다.</div>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>할당된 vCPU ÷ 물리 코어 수. <b style={{ color: 'var(--amber)' }}>4:1 초과</b>는 높은 오버커밋입니다. <span style={{ opacity: .8 }}>제목을 클릭하면 정렬됩니다.</span></div>
       <div className="table-wrap" style={{ maxHeight: '60vh' }}>
         <table>
-          <thead><tr><th>vCenter(법인)</th><th style={{ textAlign: 'right' }}>VM</th><th style={{ textAlign: 'right' }}>할당 vCPU</th><th style={{ textAlign: 'right' }}>물리 코어</th><th style={{ textAlign: 'right' }}>가상화율</th><th>오버커밋</th></tr></thead>
+          <thead><tr>
+            {COLS.map(([key, label, align]) => (
+              <th key={key} style={{ textAlign: align, cursor: 'pointer', userSelect: 'none' }} onClick={() => toggle(key)} title="클릭하여 정렬">{label}{arrow(key)}</th>
+            ))}
+            <th>오버커밋</th>
+          </tr></thead>
           <tbody>
             {list.length === 0 && <tr><td colSpan={6} className="center muted" style={{ padding: 20 }}>데이터가 없습니다.</td></tr>}
             {list.map((vc) => (

@@ -14,6 +14,7 @@ let timer = null;
 let releaseTimer = null;
 let running = false;
 let lastRun = null;
+let progress = null; // 실행 중 진행률: { total, done, alive, startedAt }
 
 export async function runScanOnce({ manual = false } = {}) {
   if (running) return { ok: false, reason: '이미 스캔 중입니다.' };
@@ -22,12 +23,14 @@ export async function runScanOnce({ manual = false } = {}) {
   if (!s.ranges.length) { lastRun = { at: Date.now(), skipped: '대역 없음' }; return { ok: false, reason: '스캔 대역이 없습니다.' }; }
   running = true;
   const started = Date.now();
+  progress = { total: 0, done: 0, alive: 0, startedAt: started };
   try {
     const { scanned, alive } = await scanRanges(s.ranges, {
       ports: s.ports, concurrency: s.concurrency, timeoutMs: s.timeoutMs, reverseDns: s.reverseDns,
+      onProgress: (done, total, aliveCount) => { progress = { total, done, alive: aliveCount, startedAt: started }; },
     });
     mergeScanResults(alive, Date.now(), LOCAL);
-    recordAgentReport(LOCAL, { scanned, alive: alive.length });
+    recordAgentReport(LOCAL, { scanned, alive: alive.length, durationMs: Date.now() - started });
     sweepReleases(releaseIdleMs()); // 미응답 IP를 '해제'로 마킹(사용 이력)
     pruneScanResults(s.retentionDays);
     lastRun = { at: Date.now(), durationMs: Date.now() - started, scanned, alive: alive.length, manual };
@@ -35,12 +38,22 @@ export async function runScanOnce({ manual = false } = {}) {
   } catch (e) {
     lastRun = { at: Date.now(), error: e.message, manual };
     return { ok: false, reason: e.message };
-  } finally { running = false; }
+  } finally { running = false; progress = null; }
+}
+
+/** 비동기로 스캔 시작(요청은 즉시 반환, 창을 닫아도 백그라운드에서 계속 실행). */
+export function startScan({ manual = true } = {}) {
+  if (running) return { ok: false, reason: '이미 스캔 중입니다.', running: true };
+  const s = loadScanSettings();
+  if (!s.ranges.length) return { ok: false, reason: '스캔 대역이 없습니다.' };
+  runScanOnce({ manual }).catch((e) => console.error('[ipscan] 백그라운드 스캔 실패:', e.message));
+  return { ok: true, started: true };
 }
 
 export function scanStatus() {
   const s = loadScanSettings();
-  return { enabled: s.enabled, ranges: s.ranges.length, intervalMs: s.intervalMs, running, lastRun };
+  const pct = progress && progress.total ? Math.round((progress.done / progress.total) * 100) : null;
+  return { enabled: s.enabled, ranges: s.ranges.length, intervalMs: s.intervalMs, running, lastRun, progress: progress ? { ...progress, pct } : null };
 }
 
 export function rescheduleScanPoller() {

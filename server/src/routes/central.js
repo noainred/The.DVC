@@ -60,6 +60,6 @@ centralRouter.post('/ip-scan-result', (req, res) => {
   const b = req.body || {};
   if (!b.agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
   if (Array.isArray(b.alive)) mergeScanResults(b.alive.slice(0, 8000), Date.now(), String(b.agent));
-  recordAgentReport(String(b.agent), { scanned: b.scanned || 0, alive: Array.isArray(b.alive) ? b.alive.length : 0 });
+  recordAgentReport(String(b.agent), { scanned: b.scanned || 0, alive: Array.isArray(b.alive) ? b.alive.length : 0, durationMs: b.durationMs || null });
   res.json({ ok: true, merged: Array.isArray(b.alive) ? b.alive.length : 0 });
 });

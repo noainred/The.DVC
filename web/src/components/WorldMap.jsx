@@ -12,7 +12,7 @@ function markerStyle(site) {
   return { fill: '#22c55e', r: 5, ring: '#22c55e' };
 }
 
-export default function WorldMap({ sites = [], onSelect, height = 420, onResizeEnd }) {
+export default function WorldMap({ sites = [], onSelect, height = 420, onResizeEnd, lambda: lambda0 = -127, offsetY: offsetY0 = 0, onViewEnd }) {
   const [tip, setTip] = useState(null);
   const [picked, setPicked] = useState(null); // vCenter clicked on the map
   const [h, setH] = useState(height);
@@ -21,11 +21,14 @@ export default function WorldMap({ sites = [], onSelect, height = 420, onResizeE
   // Horizontal drag rotates the projection's center longitude. Because the
   // rotation is modular (360°), dragging keeps scrolling around the globe
   // forever: 아시아 → 미국 → 유럽 → 다시 아시아. Start centered on Asia/Korea.
-  const [lambda, setLambda] = useState(-127);
-  const [offsetY, setOffsetY] = useState(0); // vertical pan, in SVG units
+  const [lambda, setLambda] = useState(lambda0);
+  const [offsetY, setOffsetY] = useState(offsetY0); // vertical pan, in SVG units
   const drag = useRef(null);
   const moved = useRef(false);
   const wrapRef = useRef(null);
+  // 서버에서 저장된 뷰가 (마운트 이후) 도착하면 드래그 중이 아닐 때 한 번 반영.
+  useEffect(() => { if (!drag.current) setLambda(lambda0); }, [lambda0]);
+  useEffect(() => { if (!drag.current) setOffsetY(offsetY0); }, [offsetY0]);
 
   const clamp = (v) => Math.max(240, Math.min(1200, v));
   const changeHeight = (delta) => { const nh = clamp(h + delta); setH(nh); onResizeEnd?.(nh); };
@@ -55,7 +58,10 @@ export default function WorldMap({ sites = [], onSelect, height = 420, onResizeE
     setOffsetY(Math.max(-lim, Math.min(lim, ny)));
   };
   const endDrag = (e) => {
-    if (drag.current) e.currentTarget?.releasePointerCapture?.(e.pointerId);
+    if (drag.current) {
+      e.currentTarget?.releasePointerCapture?.(e.pointerId);
+      if (moved.current) onViewEnd?.({ lambda, offsetY }); // 드래그 종료 시 위치 저장(공유)
+    }
     drag.current = null;
   };
 

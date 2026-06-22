@@ -183,9 +183,24 @@ export function scanInfo() {
 // ---- 에이전트별 보고 기록(마지막 보고 시각·스캔/응답 수) ----------------------
 let reports = readJson(REP, {}) || {};
 
-export function recordAgentReport(agent, { scanned = 0, alive = 0 } = {}) {
-  reports[agent || LOCAL] = { at: Date.now(), scanned, alive };
+export function recordAgentReport(agent, { scanned = 0, alive = 0, durationMs = null } = {}) {
+  const name = agent || LOCAL;
+  reports[name] = { at: Date.now(), scanned, alive };
   try { fs.mkdirSync(path.dirname(REP), { recursive: true }); fs.writeFileSync(REP, JSON.stringify(reports, null, 2), { mode: 0o600 }); } catch { /* */ }
+  recordRun({ agent: name, scanned, alive, durationMs }); // 완료된 스캔 이력에 추가
 }
 
 export function getAgentReports() { return reports; }
+
+// ---- 스캔 실행 이력(완료된 스캔 로그, 최근 N건) ------------------------------
+const RUNLOG = path.join(config.configDir, 'ipam-scan-runs.json');
+const MAX_RUNS = 200;
+let runs = (() => { const r = readJson(RUNLOG, {}); return Array.isArray(r?.runs) ? r.runs : []; })();
+
+export function recordRun({ agent = LOCAL, scanned = 0, alive = 0, durationMs = null } = {}) {
+  runs.unshift({ at: Date.now(), agent, scanned, alive, durationMs });
+  if (runs.length > MAX_RUNS) runs = runs.slice(0, MAX_RUNS);
+  try { fs.mkdirSync(path.dirname(RUNLOG), { recursive: true }); fs.writeFileSync(RUNLOG, JSON.stringify({ runs }, null, 2), { mode: 0o600 }); } catch { /* */ }
+}
+
+export function getScanRuns(limit = 50) { return runs.slice(0, limit); }
