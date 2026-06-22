@@ -71,18 +71,23 @@ async function scanOneHost(ip, ports, timeoutMs, reverseDns) {
   return { ip, openPorts: open, services: open.map(portService), hostname };
 }
 
-/** 대역(여러 spec) 스캔. 진행 콜백 onAlive(host) 가능. 생존 호스트 배열 반환. */
-export async function scanRanges(specs, { ports = DEFAULT_PORTS, concurrency = 128, timeoutMs = 700, reverseDns = true, onAlive } = {}) {
+/** 대역(여러 spec) 스캔. 진행 콜백 onAlive(host)/onProgress(done,total,alive) 가능. 생존 호스트 배열 반환. */
+export async function scanRanges(specs, { ports = DEFAULT_PORTS, concurrency = 128, timeoutMs = 700, reverseDns = true, onAlive, onProgress } = {}) {
   const seen = new Set();
   const ips = [];
   for (const spec of (Array.isArray(specs) ? specs : [specs])) for (const ip of expandRange(spec)) if (!seen.has(ip)) { seen.add(ip); ips.push(ip); }
   const alive = [];
+  const total = ips.length;
   let idx = 0;
+  let done = 0;
+  onProgress?.(0, total, 0);
   const worker = async () => {
     while (idx < ips.length) {
       const ip = ips[idx++];
       const r = await scanOneHost(ip, ports, timeoutMs, reverseDns).catch(() => null);
+      done++;
       if (r) { alive.push(r); onAlive?.(r); }
+      onProgress?.(done, total, alive.length);
     }
   };
   await Promise.all(Array.from({ length: Math.min(concurrency, ips.length || 1) }, worker));

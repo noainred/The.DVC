@@ -219,6 +219,7 @@ function Ipam({ scope, onScope }) {
   const [rowFilter, setRowFilter] = useState(''); // '' | duplicate | multihomed | public | private
   const [editMemo, setEditMemo] = useState(null); // { ip, memo, tags } for the editor
   const [histIp, setHistIp] = useState(null); // IP 사용 이력 모달 대상
+  const [scanStatusOpen, setScanStatusOpen] = useState(false); // 스캔 상태(진행/이력) 모달
   const [view, setView] = useState('list'); // list | sheet
   const [subnets, setSubnets] = useState([]);
   const [base, setBase] = useState('');
@@ -342,6 +343,7 @@ function Ipam({ scope, onScope }) {
           {view === 'list' && <SearchBox className="input" style={{ maxWidth: 260 }} placeholder="IP / VM / 호스트 검색" value={q} onChange={setQ} />}
         </div>
         <div className="flex gap">
+          {canIpms && <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={() => setScanStatusOpen(true)} title="진행 중인 IP 스캔 + 완료된 스캔 이력 보기">📊 스캔 상태</button>}
           {canIpms && <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={() => setIpms(true)}>⚙ IPMS 설정</button>}
           {canIpms && <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={() => setScanOpen(true)}>🛰️ IP 스캔</button>}
           <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={downloadCsv}>CSV</button>
@@ -444,6 +446,7 @@ function Ipam({ scope, onScope }) {
       {scanOpen && <IpScanSettings onClose={() => setScanOpen(false)} />}
       {editMemo && <MemoEditor init={editMemo} onClose={() => setEditMemo(null)} onSaved={() => { setEditMemo(null); pickBase(base); }} />}
       {histIp && <IpHistoryModal ip={histIp} onClose={() => setHistIp(null)} />}
+      {scanStatusOpen && <ScanStatusModal onClose={() => setScanStatusOpen(false)} />}
     </>
   );
 }
@@ -606,7 +609,7 @@ function IpScanSettings({ onClose }) {
       setStatus(r.status); setInfo(r.info); setReports(r.reports || {}); setCentralEnabled(r.centralEnabled !== false);
     } catch (e) { setMsg(e.message); }
   };
-  useEffect(() => { load(agent, true); const t = setInterval(() => load(agent, false), 5000); return () => clearInterval(t); /* eslint-disable-next-line */ }, [agent]);
+  useEffect(() => { load(agent, true); const t = setInterval(() => load(agent, false), 2000); return () => clearInterval(t); /* eslint-disable-next-line */ }, [agent]);
   if (!s) return <Modal title="IP 스캔" onClose={onClose}>{msg ? <ErrorBox message={msg} /> : <Loading />}</Modal>;
 
   const isLocal = agent === LOCAL_AGENT;
@@ -618,9 +621,12 @@ function IpScanSettings({ onClose }) {
     catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(false); }
   };
   const runNow = async () => {
-    setBusy(true); setMsg('스캔 실행 중…');
-    try { const r = await postJson('/admin/ipam/scan/run', {}); setStatus(r.status); setInfo(r.info); setMsg(r.ok ? `완료: ${r.scanned}개 중 ${r.alive}개 응답 (${Math.round((r.durationMs || 0) / 1000)}초)` : `실패: ${r.reason}`); }
-    catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(false); }
+    setBusy(true); setMsg('스캔을 시작하는 중…');
+    try {
+      const r = await postJson('/admin/ipam/scan/run', {});
+      if (r.status) setStatus(r.status); if (r.info) setInfo(r.info);
+      setMsg(r.ok ? '스캔을 백그라운드에서 시작했습니다. 창을 닫아도 계속 실행됩니다(진행률은 아래 막대 또는 대장 상단 “스캔 상태”에서 확인).' : `시작 실패: ${r.reason}`);
+    } catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(false); load(agent, false); }
   };
   const last = status?.lastRun;
 
@@ -713,6 +719,7 @@ function IpScanSettings({ onClose }) {
         {info?.byAgent && Object.keys(info.byAgent).length > 0 && <span className="muted"> ({Object.entries(info.byAgent).map(([a, n]) => `${a === LOCAL_AGENT ? '포탈' : a}:${n}`).join(', ')})</span>}
         {last && !last.skipped && !last.error && <span className="muted"> · 최근(포탈): {last.scanned}개 중 {last.alive}개 응답</span>}
         {last?.error && <span style={{ color: 'var(--red)' }}> · 오류: {last.error}</span>}
+        <ScanProgressBar progress={status?.progress} />
       </div>
 
       <div className="flex gap" style={{ marginTop: 14 }}>
@@ -720,6 +727,70 @@ function IpScanSettings({ onClose }) {
         <button className="logout-btn" style={{ padding: '9px 14px' }} disabled={busy || status?.running || !isLocal} title={isLocal ? '' : '원격 에이전트는 자체 주기로 스캔합니다'} onClick={runNow}>지금 스캔(포탈)</button>
         <button className="logout-btn" style={{ padding: '9px 14px', marginLeft: 'auto' }} onClick={onClose}>닫기</button>
       </div>
+    </Modal>
+  );
+}
+
+/** 진행 중 스캔 진행률 막대(스캔한 IP 수 / 전체 + %). progress 없으면 렌더 안 함. */
+function ScanProgressBar({ progress }) {
+  if (!progress || !progress.total) return null;
+  const pct = progress.pct ?? Math.round((progress.done / progress.total) * 100);
+  const elapsed = progress.startedAt ? Math.round((Date.now() - progress.startedAt) / 1000) : 0;
+  return (
+    <div style={{ marginTop: 10 }}>
+      <div className="flex between" style={{ fontSize: 12, marginBottom: 4 }}>
+        <span className="muted">진행 {progress.done.toLocaleString()} / {progress.total.toLocaleString()} · 응답 <b style={{ color: 'var(--green)' }}>{progress.alive}</b> · {elapsed}초 경과</span>
+        <b className="tabular" style={{ color: 'var(--amber)' }}>{pct}%</b>
+      </div>
+      <div className="usage-bar" style={{ height: 10 }}><span style={{ width: `${Math.min(pct, 100)}%`, background: 'var(--amber)' }} /></div>
+    </div>
+  );
+}
+
+/** 대장 상단 '스캔 상태' 버튼이 여는 모달: 진행 중 스캔 + 완료된 스캔 이력. */
+function ScanStatusModal({ onClose }) {
+  const [d, setD] = useState(null);
+  const [err, setErr] = useState(null);
+  const load = () => fetchJson('/admin/ipam/scan/status').then(setD).catch((e) => setErr(e.message));
+  useEffect(() => { load(); const t = setInterval(load, 2000); return () => clearInterval(t); }, []);
+  const fmt = (t) => (t ? new Date(t).toLocaleString('ko-KR') : '—');
+  const dur = (ms) => (ms == null ? '—' : ms < 1000 ? `${ms}ms` : `${Math.round(ms / 1000)}초`);
+  const st = d?.status; const runs = d?.runs || [];
+  return (
+    <Modal title="🛰️ IP 스캔 상태 — 진행 중 · 이력" onClose={onClose} width={720} resizable minWidth={480} minHeight={400}>
+      {err && <ErrorBox message={err} />}
+      {!d ? <Loading /> : (
+        <>
+          <div className="card" style={{ padding: 12, marginBottom: 14 }}>
+            <div className="flex between" style={{ alignItems: 'center' }}>
+              <b style={{ fontSize: 14 }}>{st?.running ? '🔄 스캔 진행 중' : '대기 중(진행 중인 스캔 없음)'}</b>
+              <span className="muted" style={{ fontSize: 12 }}>저장된 결과 {d.info?.count ?? 0}개</span>
+            </div>
+            {st?.running && <ScanProgressBar progress={st.progress} />}
+            {!st?.running && st?.lastRun && !st.lastRun.error && !st.lastRun.skipped && (
+              <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>최근(포탈): {st.lastRun.scanned}개 중 {st.lastRun.alive}개 응답 · {dur(st.lastRun.durationMs)} · {fmt(st.lastRun.at)}</div>
+            )}
+          </div>
+
+          <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>완료된 스캔 이력 (최근 {runs.length}건 · 포탈/에이전트 통합)</div>
+          <div className="table-wrap" style={{ maxHeight: '46vh' }}>
+            <table>
+              <thead><tr><th>완료 시각</th><th>에이전트</th><th style={{ textAlign: 'right' }}>스캔 / 응답</th><th style={{ textAlign: 'right' }}>소요</th></tr></thead>
+              <tbody>
+                {runs.length === 0 && <tr><td colSpan={4} className="center muted" style={{ padding: 20 }}>완료된 스캔 이력이 없습니다.</td></tr>}
+                {runs.map((r, i) => (
+                  <tr key={i}>
+                    <td style={{ whiteSpace: 'nowrap' }}>{fmt(r.at)}</td>
+                    <td><b>{r.agent === LOCAL_AGENT ? '이 포탈' : r.agent}</b></td>
+                    <td style={{ textAlign: 'right' }} className="tabular">{(r.scanned ?? 0).toLocaleString()} / <b style={{ color: 'var(--green)' }}>{(r.alive ?? 0).toLocaleString()}</b></td>
+                    <td style={{ textAlign: 'right' }} className="muted">{dur(r.durationMs)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
     </Modal>
   );
 }

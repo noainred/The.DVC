@@ -26,8 +26,8 @@ import { loadMetricsSettings, saveMetricsSettings, METRICS_LIMITS } from '../met
 import { metricsSamplerStatus, rescheduleMetricsSampler } from '../metrics/sampler.js';
 import { loadGpuGuestSettings, saveGpuGuestSettings, redactGpuGuestSettings } from '../gpu/settings.js';
 import { gpuGuestStatus, rescheduleGpuGuestPoller } from '../gpu/poller.js';
-import { loadScanSettings, saveScanSettings, scanResultList, scanInfo, listScanAgents, getAgentReports, LOCAL } from '../ipam/scanStore.js';
-import { runScanOnce, scanStatus, rescheduleScanPoller } from '../ipam/scanPoller.js';
+import { loadScanSettings, saveScanSettings, scanResultList, scanInfo, listScanAgents, getAgentReports, getScanRuns, LOCAL } from '../ipam/scanStore.js';
+import { startScan, scanStatus, rescheduleScanPoller } from '../ipam/scanPoller.js';
 import { listAssignments as listIdracAssignments, getResults as getAgentResults } from '../central/assignments.js';
 import { centralTokenInfo, generateCentralToken, setCentralToken } from '../central/token.js';
 import {
@@ -264,9 +264,13 @@ adminRouter.put('/ipam/scan/settings', adminOnly, (req, res) => {
   if (agent === LOCAL) rescheduleScanPoller(); // 로컬 설정만 이 포탈 폴러에 적용
   res.json({ ok: true, agent, settings, status: scanStatus() });
 });
-adminRouter.post('/ipam/scan/run', adminOnly, async (_req, res) => {
-  const r = await runScanOnce({ manual: true }); // 이 포탈(로컬) 즉시 스캔
+adminRouter.post('/ipam/scan/run', adminOnly, (_req, res) => {
+  const r = startScan({ manual: true }); // 비동기 시작 — 즉시 반환(백그라운드 실행, 창 닫아도 지속)
   res.json({ ...r, status: scanStatus(), info: scanInfo() });
+});
+// 진행 중 스캔 상태 + 완료된 스캔 이력(가벼운 폴링용).
+adminRouter.get('/ipam/scan/status', adminOnly, (_req, res) => {
+  res.json({ status: scanStatus(), info: scanInfo(), runs: getScanRuns(50), reports: getAgentReports() });
 });
 adminRouter.get('/ipam/scan/results', adminOnly, (_req, res) => {
   res.json({ results: scanResultList().slice(0, 5000), info: scanInfo() });
