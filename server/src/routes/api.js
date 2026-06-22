@@ -1012,6 +1012,11 @@ api.get('/tools/guest-os', (req, res) => {
   const snap = store.get();
   let vms = snap.vms;
   if (req.query.vcenterId) vms = vms.filter((v) => v.vcenterId === req.query.vcenterId);
+  // 전원(on/off) · 종류(vm/template) 필터
+  if (req.query.power === 'on') vms = vms.filter((v) => v.powerState === 'POWERED_ON');
+  else if (req.query.power === 'off') vms = vms.filter((v) => v.powerState !== 'POWERED_ON');
+  if (req.query.kind === 'vm') vms = vms.filter((v) => !v.template);
+  else if (req.query.kind === 'template') vms = vms.filter((v) => v.template);
   const byName = new Map();
   const byFamily = new Map();
   for (const v of vms) {
