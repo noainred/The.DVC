@@ -15,6 +15,7 @@ function DiscoveryBadge({ d }) {
 const TOOLS = [
   { k: 'aisearch', icon: '🔎', label: 'AI 검색 (자연어)', desc: '자연어로 VM/호스트/IP 검색 · 로컬 LLM' },
   { k: 'insights', icon: '🧠', label: '운영 인사이트', desc: 'VM 라이트사이징 · 클러스터 N+1 여력 · 알람 핫스팟 · GPU 유휴' },
+  { k: 'threats', icon: '🛡️', label: '위협 탐지', desc: '마이닝 의심 · 위험 포트 노출 · EOL OS · 신규 rogue IP · NSX IDS' },
   { k: 'vmfinder', icon: '🧭', label: 'VM 정밀 검색 / 유휴 VM', desc: '다수 vCenter·폴더·클러스터·풀 + 조건 · 1일/1주 평균 CPU로 미사용 VM' },
   { k: 'capacity', icon: '📈', label: '용량 리포트', desc: '클러스터별 여유·오버커밋·수용여력 · 전체/법인별' },
   { k: 'waste', icon: '♻️', label: '낭비 리소스', desc: '정지 VM·스냅샷·thin 회수가능·Tools 미설치' },
@@ -104,6 +105,7 @@ function ToolPanel({ tool, onBack }) {
       </div>
       {tool === 'aisearch' && <AiSearch />}
       {tool === 'insights' && <Insights scope={scope} />}
+      {tool === 'threats' && <Threats scope={scope} />}
       {tool === 'vmfinder' && <VmFinder />}
       {tool === 'capacity' && <Capacity scope={scope} />}
       {tool === 'waste' && <Waste scope={scope} />}
@@ -980,6 +982,80 @@ function Insights({ scope }) {
               ))}
             </tbody></table>
         </div>
+      )}
+    </>
+  );
+}
+
+/** 위협 탐지 — 텔레메트리 기반(마이닝/위험포트/EOL/rogue) + NSX 분산 IDS 이벤트. 방어 목적. */
+function Threats({ scope }) {
+  const { loading, data, error } = useTool('/tools/threats', scope ? { vcenterId: scope } : {});
+  const [sec, setSec] = useState('mining');
+  if (loading) return <Loading />;
+  if (error) return <ErrorBox message={error} />;
+  const s = data.summary;
+  const fmt = (t) => (t ? new Date(t).toLocaleString('ko-KR') : '—');
+  const SECS = [
+    ['mining', `⛏ 마이닝 의심 (${s.mining})`],
+    ['risky', `🚪 위험 포트 (${s.riskyTotal})`],
+    ['eol', `🧟 EOL OS (${s.eol})`],
+    ['rogue', `👻 신규 rogue IP (${s.rogue})`],
+    ['ids', `🛡 NSX IDS (${s.idsEvents})`],
+  ];
+  return (
+    <>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>자사 인프라 <b>방어적 위협 탐지</b>입니다. 텔레메트리·스캔·NSX IDS 신호 기반이며, 확정 판정이 아닌 <b>점검 후보</b>를 제시합니다.</div>
+      <div className="kpis" style={{ marginBottom: 14 }}>
+        <Card label="마이닝 의심(고CPU)" value={s.mining} accent={s.mining ? 'var(--amber)' : 'var(--green)'} meta="전원ON·CPU≥90%" />
+        <Card label="위험 포트 노출" value={s.riskyTotal} accent={s.riskyPublic ? 'var(--red)' : 'var(--amber)'} meta={`공인 노출 ${s.riskyPublic}`} />
+        <Card label="EOL/취약 OS" value={s.eol} accent={s.eol ? 'var(--amber)' : 'var(--green)'} meta="지원종료 추정" />
+        <Card label="신규 rogue IP" value={s.rogue} accent={s.rogue ? 'var(--amber)' : 'var(--green)'} meta="7일 내 첫 관측" />
+        <Card label="NSX IDS 이벤트" value={s.idsEvents} accent={s.idsCritical ? 'var(--red)' : 'var(--text)'} meta={`위험 ${s.idsCritical}`} />
+      </div>
+      <div className="flex gap wrap" style={{ marginBottom: 10 }}>
+        {SECS.map(([k, l]) => <button key={k} className={sec === k ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setSec(k)}>{l}</button>)}
+      </div>
+
+      {sec === 'mining' && (
+        <div className="table-wrap" style={{ maxHeight: '64vh' }}>
+          <div className="muted" style={{ fontSize: 12, margin: '0 0 8px' }}>전원 ON·CPU ≥ 90%. 지속 고부하는 크립토마이닝/폭주 프로세스 신호일 수 있습니다(확정 아님).</div>
+          <table><thead><tr><th>VM</th><th>법인</th><th>호스트</th><th>CPU%</th><th>MEM%</th></tr></thead>
+            <tbody>{data.mining.length === 0 && <tr><td colSpan={5} className="center muted" style={{ padding: 18 }}>해당 없음</td></tr>}
+              {data.mining.map((v) => <tr key={`${v.vcenterId}:${v.name}`}><td><b>{v.name}</b></td><td className="muted">{v.vcenterId}</td><td className="muted" style={{ fontSize: 12 }}>{v.host}</td><td><UsageCell pct={v.cpuPct} /></td><td>{v.memPct == null ? '—' : <UsageCell pct={v.memPct} />}</td></tr>)}</tbody></table>
+        </div>
+      )}
+      {sec === 'risky' && (
+        <div className="table-wrap" style={{ maxHeight: '64vh' }}>
+          <div className="muted" style={{ fontSize: 12, margin: '0 0 8px' }}>스캔에서 확인된 위험 서비스 포트(Telnet/SMB/RDP/DB 등). <b>공인 IP 노출</b>은 즉시 점검 권장.</div>
+          <table><thead><tr><th>IP</th><th>호스트명</th><th>위험 포트</th><th>분류</th><th>위험도</th></tr></thead>
+            <tbody>{data.risky.length === 0 && <tr><td colSpan={5} className="center muted" style={{ padding: 18 }}>해당 없음</td></tr>}
+              {data.risky.map((r) => <tr key={r.ip} style={{ background: r.public ? 'rgba(239,68,68,.10)' : undefined }}><td><b>{r.ip}</b></td><td className="muted">{r.hostname || '—'}</td><td>{r.ports.map((p) => <span key={p} className="badge amber" style={{ marginRight: 4 }}>{p}</span>)}</td><td>{r.public ? <span className="badge red">공인</span> : <span className="badge gray">사설</span>}</td><td>{r.severity === 'high' ? <span className="badge red">높음</span> : <span className="badge amber">보통</span>}</td></tr>)}</tbody></table>
+        </div>
+      )}
+      {sec === 'eol' && (
+        <div className="table-wrap" style={{ maxHeight: '64vh' }}>
+          <table><thead><tr><th>VM</th><th>법인</th><th>OS</th><th>사유</th></tr></thead>
+            <tbody>{data.eol.length === 0 && <tr><td colSpan={4} className="center muted" style={{ padding: 18 }}>해당 없음</td></tr>}
+              {data.eol.map((v) => <tr key={`${v.vcenterId}:${v.name}`}><td><b>{v.name}</b></td><td className="muted">{v.vcenterId}</td><td>{v.os}</td><td><span className="badge amber">{v.reason}</span></td></tr>)}</tbody></table>
+        </div>
+      )}
+      {sec === 'rogue' && (
+        <div className="table-wrap" style={{ maxHeight: '64vh' }}>
+          <div className="muted" style={{ fontSize: 12, margin: '0 0 8px' }}>vCenter가 모르는데 최근 7일 내 처음 스캔된 IP — 미등록 장비/침입 가능성 점검.</div>
+          <table><thead><tr><th>IP</th><th>호스트명</th><th>최초 관측</th><th>포트</th></tr></thead>
+            <tbody>{data.rogue.length === 0 && <tr><td colSpan={4} className="center muted" style={{ padding: 18 }}>해당 없음</td></tr>}
+              {data.rogue.map((r) => <tr key={r.ip}><td><b>{r.ip}</b></td><td className="muted">{r.hostname || '—'}</td><td className="muted" style={{ fontSize: 12 }}>{fmt(r.firstSeen)}</td><td className="muted" style={{ fontSize: 12 }}>{(r.ports || []).join(', ')}</td></tr>)}</tbody></table>
+        </div>
+      )}
+      {sec === 'ids' && (
+        <>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>NSX 분산 IDS/IPS. {data.ids.managers.map((m) => `${m.name}: ${m.enabled === true ? '활성' : m.enabled === false ? '비활성' : '미상'}(프로파일 ${m.profiles})`).join(' · ') || 'NSX 매니저 없음'}</div>
+          <div className="table-wrap" style={{ maxHeight: '60vh' }}>
+            <table><thead><tr><th>시각</th><th>시그니처</th><th>심각도</th><th>출발지</th><th>목적지</th><th>조치</th><th style={{ textAlign: 'right' }}>횟수</th></tr></thead>
+              <tbody>{data.ids.events.length === 0 && <tr><td colSpan={7} className="center muted" style={{ padding: 18 }}>IDS 이벤트가 없습니다(미활성 또는 NSX 버전/NAPP 미지원일 수 있음).</td></tr>}
+                {data.ids.events.map((e) => <tr key={e.id}><td className="muted" style={{ fontSize: 12 }}>{fmt(e.at)}</td><td>{e.signature}</td><td>{/crit|high/.test(e.severity) ? <span className="badge red">{e.severity}</span> : <span className="badge amber">{e.severity}</span>}</td><td className="muted">{e.src || '—'}</td><td className="muted">{e.dst || '—'}</td><td>{e.action || '—'}</td><td style={{ textAlign: 'right' }}>{e.count}</td></tr>)}</tbody></table>
+          </div>
+        </>
       )}
     </>
   );

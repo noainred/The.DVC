@@ -62,6 +62,10 @@ export class NsxClient {
   // 그룹의 실제(effective) 멤버 — 온디맨드 라이브 조회.
   groupVmMembers(groupId) { return this.#get(`/policy/api/v1/infra/domains/default/groups/${encodeURIComponent(groupId)}/members/virtual-machines`); }
   groupIpMembers(groupId) { return this.#get(`/policy/api/v1/infra/domains/default/groups/${encodeURIComponent(groupId)}/members/ip-addresses`); }
+  // 분산 IDS/IPS — 활성 설정 + 최근 침입 이벤트(베스트에포트; 버전/NAPP에 따라 미지원일 수 있음).
+  idsConfig() { return this.#get('/policy/api/v1/infra/settings/firewall/security/intrusion-services'); }
+  idsProfiles() { return this.#get('/policy/api/v1/infra/intrusion-service-profiles'); }
+  idsEvents() { return this.#get('/api/v1/intrusion-detection-system-events?page_size=200'); }
 
   /** Login check — cheapest authenticated call. */
   async ping() { await this.node(); }
@@ -173,18 +177,39 @@ export async function collectFromNsx(mgr) {
     criteria: (g.expression || []).map(exprText).filter(Boolean).join(' ') || '—',
   }));
 
+  // 분산 IDS/IPS(베스트에포트) — 활성 여부 + 프로파일 수 + 최근 침입 이벤트.
+  const [idsCfg, idsProf, idsEv] = await Promise.all([
+    client.idsConfig().catch(() => null),
+    client.idsProfiles().catch(() => ({ results: [] })),
+    client.idsEvents().catch(() => ({ results: [] })),
+  ]);
+  const ids = {
+    enabled: idsCfg ? (idsCfg.ids_enabled ?? idsCfg.enabled ?? null) : null,
+    profiles: (idsProf?.results || []).length,
+    events: (idsEv?.results || []).slice(0, 200).map((e) => ({
+      id: `${mgr.id}:${e.id || e.event_id || Math.random().toString(36).slice(2)}`,
+      managerId: mgr.id, managerName: mgr.name,
+      signature: e.signature_name || e.signature_id || e.title || '(시그니처 미상)',
+      severity: String(e.severity || e.impact || '').toLowerCase() || 'unknown',
+      src: e.source_ip || e.src_ip || '', dst: e.destination_ip || e.dst_ip || '',
+      action: e.ids_action || e.action || '', at: e.last_event_time || e.event_time || e.create_time || null,
+      count: e.event_count || 1,
+    })),
+  };
+
   return {
     manager: {
       id: mgr.id, name: mgr.name, host: mgr.host, region: mgr.location?.region || '', vcenterId: mgr.vcenterId || '',
       status: clusterHealth(cluster), version: node?.node_version || node?.product_version || 'unknown',
       nodeCount: (cluster?.mgmt_cluster_status?.online_nodes?.length) || (cluster?.detailed_cluster_status?.groups?.length) || 1,
+      idsEnabled: ids.enabled, idsProfiles: ids.profiles, idsEventCount: ids.events.length,
     },
     gateways: [...mkGw(t0, 'T0'), ...mkGw(t1, 'T1')],
     segments,
     transportNodes: tn,
     firewall: { policies: dfw.length, rules: dfwRules },
     groups: (grps.results || []).length,
-    dfw, securityGroups,
+    dfw, securityGroups, ids,
   };
 }
 
