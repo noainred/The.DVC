@@ -297,7 +297,7 @@ export default function AgentDeploy() {
             {result.warn && <div style={{ color: 'var(--amber)', marginTop: 4 }}>⚠ {result.warn}</div>}
             {result.glibc && result.kind !== 'test' && result.ok === false && <div style={{ color: 'var(--amber)', marginTop: 4 }}>glibc: {result.glibc}</div>}
             {result.active && <div>서비스 상태: <b style={{ color: result.ok ? 'var(--green)' : 'var(--red)' }}>{result.active}</b>{result.version ? ` · 버전 ${result.version}` : ''}{result.installer ? ` · 설치 패키지 ${result.installer}` : ''}{result.detail ? ` · ${result.detail}` : ''}</div>}
-            {result.log && (
+            {typeof result.log === 'string' && result.log.trim() && (
               <div style={{ marginTop: 8 }}>
                 <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>대상 호스트 서비스 로그(journalctl/status)</div>
                 <pre style={{ background: '#0b1220', border: '1px solid #243049', borderRadius: 8, padding: 10, fontSize: 11, lineHeight: 1.5, maxHeight: '36vh', overflow: 'auto', whiteSpace: 'pre-wrap' }}>{result.log}</pre>
