@@ -39,15 +39,24 @@ export function installerInfo(explicit) {
   return { available: true, path: p, name: path.basename(p), sizeBytes: st.size };
 }
 
-function envBlock({ agentName, centralUrl, centralToken, collectorToken, collectorDatacenter, scanIntervalMs }) {
-  const lines = ['', '# --- portal agent (auto-deployed) ---'];
-  if (agentName) lines.push(`AGENT_NAME=${agentName}`);
-  if (centralUrl) lines.push(`CENTRAL_URL=${centralUrl}`);
-  if (centralToken) lines.push(`CENTRAL_TOKEN=${centralToken}`);
-  if (scanIntervalMs) lines.push(`AGENT_SCAN_INTERVAL_MS=${scanIntervalMs}`);
-  if (collectorToken) lines.push(`COLLECTOR_TOKEN=${collectorToken}`);
-  if (collectorDatacenter) lines.push(`COLLECTOR_DATACENTER=${collectorDatacenter}`);
-  return lines.join('\n') + '\n';
+// 주입할 env 키/값 쌍(빈 값은 제외). 재배포 시 이 키들을 portal.env에서 교체(upsert)한다.
+function envPairs({ agentName, centralUrl, centralToken, collectorToken, collectorDatacenter, scanIntervalMs, autoUpgrade, upgradeIntervalMs }, port) {
+  const p = [];
+  if (port) p.push(['PORT', String(port)]); // 기존 portal.env의 PORT(예: 잘못된 22)도 교체
+  if (agentName) p.push(['AGENT_NAME', agentName]);
+  if (centralUrl) p.push(['CENTRAL_URL', centralUrl]);
+  if (centralToken) p.push(['CENTRAL_TOKEN', centralToken]);
+  if (scanIntervalMs) p.push(['AGENT_SCAN_INTERVAL_MS', String(scanIntervalMs)]);
+  if (collectorToken) p.push(['COLLECTOR_TOKEN', collectorToken]);
+  if (collectorDatacenter) p.push(['COLLECTOR_DATACENTER', collectorDatacenter]);
+  // 자동 업그레이드(소스 = 현재 포탈의 /dl). 토큰 없이 공개 소스에서 pull.
+  if (autoUpgrade && centralUrl) {
+    const base = `${String(centralUrl).replace(/\/+$/, '')}/dl`;
+    p.push(['UPGRADE_ENABLED', 'true'], ['UPGRADE_AUTO_APPLY', 'true'], ['UPGRADE_REMOTE_BASE', base],
+      ['UPGRADE_INSTALL_DIR', '/opt/vmware-portal/app'], ['UPGRADE_PACKAGE_NAME', 'vmware-portal'],
+      ['UPGRADE_POLL_INTERVAL_MS', String(upgradeIntervalMs || 3_600_000)]);
+  }
+  return p;
 }
 
 const creds = (t) => ({ host: t.host, port: t.port || 22, username: t.username, password: t.password, privateKey: t.privateKey || undefined });
@@ -111,8 +120,11 @@ export async function deployAgent(target, { installerPath, port = 4000 } = {}) {
       const inst = await exec(`cd ${workDir}/vmware-portal-offline-* && ./install.sh --port ${port}`);
       if (inst.code !== 0) return { ok: false, reason: `install.sh 실패: ${(inst.stderr || inst.stdout).slice(-500)}` };
 
-      // Inject agent settings into the env file, then restart.
-      const block = envBlock(target).replace(/'/g, "'\\''");
+      // Inject agent settings into portal.env — upsert(키 교체)로 재배포 시 중복/이전 값 정리.
+      const pairs = envPairs(target, port);
+      const delScript = pairs.map(([k]) => `/^${k}=/d`).join(';');
+      if (delScript) await exec(`sed -i '${delScript}' /etc/vmware-portal/portal.env 2>/dev/null || true`);
+      const block = ('\n# --- portal agent (auto-deployed) ---\n' + pairs.map(([k, v]) => `${k}=${v}`).join('\n') + '\n').replace(/'/g, "'\\''");
       await exec(`printf '%s' '${block}' >> /etc/vmware-portal/portal.env`);
       await exec('systemctl restart vmware-portal 2>&1 || true');
       // 첫 기동(Node22 + node:sqlite)이 수 초 걸릴 수 있어 active 될 때까지 폴링(최대 ~30초).

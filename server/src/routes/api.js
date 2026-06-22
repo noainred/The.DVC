@@ -7,6 +7,7 @@ import { fetchVmMetric, fetchHostMetric, PERF_INTERVALS, upgradeVmTools, getVmCo
 import { listMutes, addMute, removeMute } from '../alarm-mutes.js';
 import { buildIpamRows, buildSubnetSheets, listSubnets } from '../ipam/ledger.js';
 import { getAnnotation, setAnnotation } from '../ipam/annotations.js';
+import { getIpHistory } from '../ipam/scanStore.js';
 import { buildWorkbook } from '../ipam/excel.js';
 import { listNotes } from '../release-notes.js';
 import { nlSearch } from '../llm/nlSearch.js';
@@ -423,6 +424,11 @@ api.get('/tools/ipam/subnets', (req, res) => {
 api.get('/tools/ipam/sheet', (req, res) => {
   const sheets = buildSubnetSheets(store.get(), { vcenterId: req.query.vcenterId, onlyBase: req.query.base });
   res.json(sheets[0] || { subnet: '', rows: [] });
+});
+
+// Per-IP usage history (scan-derived online/offline transitions over time).
+api.get('/tools/ipam/history', (req, res) => {
+  res.json({ ip: req.query.ip, history: getIpHistory(String(req.query.ip || '')) });
 });
 
 // Per-IP user annotation (custom memo + tags), separate from vCenter notes.

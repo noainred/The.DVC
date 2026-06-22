@@ -13,8 +13,11 @@ const INP = { width: '100%', minWidth: 0, boxSizing: 'border-box' };
  */
 export function VmRemoteButton({ item }) {
   const ips = item.ipAddresses?.length ? item.ipAddresses : (item.ipAddress ? [item.ipAddress] : []);
+  // Guest OS로 Windows/Linux를 인식해 기본 프로토콜·포트를 자동 선택(Windows→RDP/3389, 그 외→SSH/22).
+  const isWindows = /windows|win32|win64|microsoft/i.test(item.guestOS || '');
   const [open, setOpen] = useState(false);
-  const [protocol, setProtocol] = useState('ssh');
+  const [protocol, setProtocol] = useState(isWindows ? 'rdp' : 'ssh');
+  const [autoProto, setAutoProto] = useState(true); // 사용자가 직접 바꾸기 전까지는 자동 선택 유지
   const [ip, setIp] = useState(ips[0] || '');
   const [port, setPort] = useState('');
   const [creds, setCreds] = useState({ username: '', password: '', domain: '' });
@@ -23,7 +26,7 @@ export function VmRemoteButton({ item }) {
   const [probe, setProbe] = useState({ loading: true });
 
   const noIp = ips.length === 0;
-  const guessPort = /windows/i.test(item.guestOS || '') ? 3389 : 22;
+  const guessPort = isWindows ? 3389 : 22;
   const noteTail = (item.notes || '').split(/\r?\n/).map((l) => l.trimEnd()).filter(Boolean).slice(-3).join('\n');
 
   // Pre-flight reachability check via the assigned proxy (ping + TCP port).
@@ -81,8 +84,8 @@ export function VmRemoteButton({ item }) {
           ) : (
             <div>
               <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1fr)', gap: 10 }}>
-                <label style={FLD}>프로토콜
-                  <select className="select" style={INP} value={protocol} onChange={(e) => { setProtocol(e.target.value); setPort(''); }}>
+                <label style={FLD}>프로토콜{autoProto ? <span className="muted" style={{ fontWeight: 400 }}> · {isWindows ? 'Windows' : 'Linux'} 자동</span> : ''}
+                  <select className="select" style={INP} value={protocol} onChange={(e) => { setProtocol(e.target.value); setPort(''); setAutoProto(false); }}>
                     <option value="ssh">SSH</option>
                     <option value="rdp">RDP</option>
                   </select>

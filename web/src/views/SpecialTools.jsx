@@ -218,6 +218,7 @@ function Ipam({ scope, onScope }) {
   const [db, setDb] = useState(null);
   const [rowFilter, setRowFilter] = useState(''); // '' | duplicate | multihomed | public | private
   const [editMemo, setEditMemo] = useState(null); // { ip, memo, tags } for the editor
+  const [histIp, setHistIp] = useState(null); // IP 사용 이력 모달 대상
   const [view, setView] = useState('list'); // list | sheet
   const [subnets, setSubnets] = useState([]);
   const [base, setBase] = useState('');
@@ -259,8 +260,8 @@ function Ipam({ scope, onScope }) {
   if (loading) return <Loading />;
   if (error) return <ErrorBox message={error} />;
 
-  const ROWBG = { used: 'rgba(34,197,94,.12)', multihomed: 'rgba(59,130,246,.14)', duplicate: 'rgba(239,68,68,.14)', network: 'rgba(148,163,184,.14)', empty: 'transparent' };
-  const STLAB = { used: '사용', multihomed: '멀티홈', duplicate: '중복', network: 'Network ID', empty: '' };
+  const ROWBG = { used: 'rgba(34,197,94,.12)', multihomed: 'rgba(59,130,246,.14)', duplicate: 'rgba(239,68,68,.14)', network: 'rgba(148,163,184,.14)', released: 'rgba(245,158,11,.13)', empty: 'transparent' };
+  const STLAB = { used: '사용', multihomed: '멀티홈', duplicate: '중복', network: 'Network ID', released: '해제(이력)', empty: '' };
 
   const term = q.trim().toLowerCase();
   const rows = data.rows.filter((r) => {
@@ -370,6 +371,7 @@ function Ipam({ scope, onScope }) {
               ['used', `사용중 (${cnt('used')})`, 'green'],
               ['multihomed', `멀티홈 (${cnt('multihomed')})`, 'blue'],
               ['duplicate', `중복 (${cnt('duplicate')})`, 'red'],
+              ['released', `해제(이력) (${cnt('released')})`, 'amber'],
               ['empty', `미사용 (${cnt('empty')})`, 'gray'],
             ];
             // '사용중' = 실제 점유(사용/멀티홈/중복) 전부, 나머지는 정확히 해당 상태.
@@ -384,13 +386,13 @@ function Ipam({ scope, onScope }) {
                   {FILTERS.map(([k, label]) => (
                     <button key={k} className={stFilter === k ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '6px 12px', fontSize: 12 }} onClick={() => setStFilter(k)}>{label}</button>
                   ))}
-                  <span className="muted" style={{ fontSize: 12, marginLeft: 4 }}>🟩 사용 · 🟦 멀티홈 · 🟥 중복 · ⬜ 미사용</span>
+                  <span className="muted" style={{ fontSize: 12, marginLeft: 4 }}>🟩 사용 · 🟦 멀티홈 · 🟥 중복 · 🟧 해제(이력) · ⬜ 미사용</span>
                 </div>
                 <div className="table-wrap" style={{ maxHeight: '62vh' }}>
                   <table>
-                    <thead><tr><th>{base}.X</th><th>Purpose</th><th>Hostname</th><th>서버종류</th><th>OS</th><th>메모(Notes)</th><th>전원</th><th>분류</th><th>상태</th><th>메모 · 태그</th></tr></thead>
+                    <thead><tr><th>{base}.X</th><th>Purpose</th><th>Hostname</th><th>서버종류</th><th>OS</th><th>메모(Notes)</th><th>전원</th><th>분류</th><th>상태</th><th>사용이력</th><th>메모 · 태그</th></tr></thead>
                     <tbody>
-                      {shown.length === 0 && <tr><td colSpan={10} className="center muted" style={{ padding: 22 }}>해당 상태의 IP가 없습니다.</td></tr>}
+                      {shown.length === 0 && <tr><td colSpan={11} className="center muted" style={{ padding: 22 }}>해당 상태의 IP가 없습니다.</td></tr>}
                       {shown.map((r) => (
                         <tr key={r.ip} style={{ background: ROWBG[r.status] }}>
                           <td><b>{r.ip}</b></td>
@@ -401,7 +403,13 @@ function Ipam({ scope, onScope }) {
                           <td className="muted" style={{ fontSize: 12 }}>{r.notes}</td>
                           <td>{r.power}</td>
                           <td className="muted" style={{ fontSize: 12 }}>{r.scope}</td>
-                          <td className="muted" style={{ fontSize: 12 }}>{STLAB[r.status]}</td>
+                          <td className="muted" style={{ fontSize: 12 }}>{r.status === 'released' ? <span className="badge amber">해제</span> : STLAB[r.status]}</td>
+                          <td style={{ fontSize: 11 }}>
+                            {r.usageStatus
+                              ? <button className="tab" style={{ padding: '2px 8px', fontSize: 11 }} title={`최초 발견: ${r.firstSeen ? new Date(r.firstSeen).toLocaleString() : '—'}\n마지막 확인: ${r.lastSeen ? new Date(r.lastSeen).toLocaleString() : '—'}\n현재: ${r.usageStatus === 'up' ? '사용 중' : '해제됨'}`}
+                                  onClick={() => setHistIp(r.ip)}>🕒 이력</button>
+                              : <span className="muted">—</span>}
+                          </td>
                           <td style={{ fontSize: 12 }}>
                             {r.memo && <div style={{ marginBottom: 3 }}>{r.memo}</div>}
                             {(r.tags || []).map((t) => <span key={t} className="badge blue" style={{ marginRight: 4, fontSize: 10 }}>{t}</span>)}
@@ -435,7 +443,49 @@ function Ipam({ scope, onScope }) {
       {ipms && <IpmsSettings onClose={() => setIpms(false)} />}
       {scanOpen && <IpScanSettings onClose={() => setScanOpen(false)} />}
       {editMemo && <MemoEditor init={editMemo} onClose={() => setEditMemo(null)} onSaved={() => { setEditMemo(null); pickBase(base); }} />}
+      {histIp && <IpHistoryModal ip={histIp} onClose={() => setHistIp(null)} />}
     </>
+  );
+}
+
+/** IP 사용 이력 — 스캔으로 관측된 사용 시작(up)/해제(down) 전이 타임라인. */
+function IpHistoryModal({ ip, onClose }) {
+  const [h, setH] = useState(undefined);
+  useEffect(() => { fetchJson(`/tools/ipam/history?ip=${encodeURIComponent(ip)}`).then((r) => setH(r.history || null)).catch(() => setH(null)); }, [ip]);
+  const fmt = (t) => (t ? new Date(t).toLocaleString() : '—');
+  const dur = (ms) => { if (ms < 0) ms = 0; const d = Math.floor(ms / 86400000), hh = Math.floor((ms % 86400000) / 3600000), mm = Math.floor((ms % 3600000) / 60000); return d ? `${d}일 ${hh}시간` : (hh ? `${hh}시간 ${mm}분` : `${mm}분`); };
+  return (
+    <Modal title={`IP 사용 이력 — ${ip}`} onClose={onClose} width={620} resizable minWidth={420} minHeight={360}>
+      {h === undefined ? <Loading /> : !h ? (
+        <div className="muted" style={{ fontSize: 13, padding: 16 }}>이 IP의 스캔 이력이 없습니다. IP 능동 스캔이 이 대역을 한 번 이상 관측해야 이력이 쌓입니다.</div>
+      ) : (
+        <>
+          <div className="flex gap wrap" style={{ marginBottom: 12 }}>
+            {[['현재 상태', h.status === 'up' ? <span className="badge green">사용 중</span> : <span className="badge amber">해제됨</span>],
+              ['최초 발견', fmt(h.firstSeen)], ['마지막 확인', fmt(h.lastSeen)], ['관측 기간', dur((h.lastSeen || 0) - (h.firstSeen || 0))]].map(([k, v], i) => (
+              <div key={i} style={{ minWidth: 130 }}><div className="muted" style={{ fontSize: 12 }}>{k}</div><div style={{ fontSize: 13, marginTop: 2 }}>{v}</div></div>
+            ))}
+          </div>
+          <div className="table-wrap" style={{ maxHeight: '52vh' }}>
+            <table>
+              <thead><tr><th>시각</th><th>전이</th><th>호스트명</th><th>포트</th></tr></thead>
+              <tbody>
+                {[...(h.events || [])].reverse().map((e, i) => (
+                  <tr key={i}>
+                    <td style={{ whiteSpace: 'nowrap' }}>{fmt(e.ts)}</td>
+                    <td>{e.type === 'up' ? <span className="badge green">사용 시작</span> : <span className="badge amber">해제</span>}</td>
+                    <td className="muted" style={{ fontSize: 12 }}>{e.hostname || '—'}</td>
+                    <td className="muted" style={{ fontSize: 12 }}>{(e.ports || []).join(', ') || '—'}</td>
+                  </tr>
+                ))}
+                {!(h.events || []).length && <tr><td colSpan={4} className="center muted" style={{ padding: 18 }}>기록된 전이가 없습니다.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+          <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>※ 일정 시간(스캔 주기의 3배 또는 최소 3시간) 동안 응답이 없으면 '해제'로 기록됩니다.</div>
+        </>
+      )}
+    </Modal>
   );
 }
 

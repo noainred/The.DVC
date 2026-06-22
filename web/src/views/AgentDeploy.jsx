@@ -5,7 +5,7 @@ import { Loading } from '../components/ui.jsx';
 const EMPTY = {
   host: '', port: 22, username: 'root', password: '', privateKey: '',
   agentName: '', centralUrl: '', centralToken: '', collectorToken: '', collectorDatacenter: '',
-  installerPath: '', portalPort: 4000,
+  installerPath: '', portalPort: 4000, autoUpgrade: true,
 };
 
 /** 설정 → 에이전트 배포: 새 Rocky9 호스트에 SSH로 수집 에이전트 자동 설치. */
@@ -203,13 +203,13 @@ export default function AgentDeploy() {
           </button>
         </div>
         <div className="muted" style={{ fontSize: 12, margin: '4px 0 8px' }}>iDRAC/IP 스캔 에이전트는 <b>에이전트 이름 + 중앙 URL + 중앙 토큰</b>이 필수, 전력수집까지 하려면 <b>수집 토큰 + 수집 DC명</b>을 채우세요. 위 <b>자동 채우기</b>로 한 번에 채울 수 있습니다.</div>
-        <div className="spec-grid">
+        <div className="agent-grid">
           <label title="이 에이전트의 고유 식별 이름. IP 스캔 '할당 에이전트' 드롭다운과 중앙 할당 매칭(AGENT_NAME)에 사용됩니다. 사이트/DC가 드러나게 지으세요. 예: OC2-Agent, Seoul-DC1. 자동 채우기는 SSH 호스트 기반으로 제안합니다.">
-            에이전트 이름(AGENT_NAME)<input className="input" value={f.agentName} onChange={set('agentName')} placeholder="예: OC2-Agent / Seoul-DC1" /></label>
+            <span className="cap">에이전트 이름(AGENT_NAME)</span><input className="input" value={f.agentName} onChange={set('agentName')} placeholder="예: OC2-Agent / Seoul-DC1" /></label>
           <label title="에이전트가 접속할 '중앙 포탈' 주소. 에이전트 서버에서 도달 가능한 IP/호스트:포트여야 합니다(끝에 / 없이). 예: http://192.168.20.143:4000. 자동 채우기는 지금 접속한 포탈 주소로 채웁니다 — 에이전트 망에서 안 닿으면 외부 접근용 주소로 바꾸세요.">
-            중앙 URL(CENTRAL_URL)<input className="input" value={f.centralUrl} onChange={set('centralUrl')} placeholder="http://<포탈주소>:4000" /></label>
+            <span className="cap">중앙 URL(CENTRAL_URL)</span><input className="input" value={f.centralUrl} onChange={set('centralUrl')} placeholder="http://<포탈주소>:4000" /></label>
           <label title="중앙↔에이전트 공유 비밀. 중앙 포탈의 CENTRAL_TOKEN과 반드시 동일해야 하며 다르면 403. '생성'을 누르면 안전한 랜덤 토큰을 만들어 이 포탈(중앙) 환경(portal.env)에 저장하고 칸을 채웁니다(리붓해도 유지). 이미 있으면 자동 입력됩니다.">
-            중앙 토큰(CENTRAL_TOKEN)
+            <span className="cap">중앙 토큰(CENTRAL_TOKEN)</span>
             <div className="flex gap" style={{ alignItems: 'center' }}>
               <input className="input" value={f.centralToken} onChange={set('centralToken')} placeholder={tokenInfo.hasToken ? '' : '미설정 — 생성 클릭'} />
               <button className="logout-btn" type="button" style={{ flex: 'none', padding: '7px 12px', whiteSpace: 'nowrap' }} disabled={genBusy} onClick={genToken}
@@ -218,13 +218,16 @@ export default function AgentDeploy() {
             <span className="muted" style={{ fontSize: 11 }}>{tokenInfo.hasToken ? '✅ 중앙 토큰이 이 포탈에 설정됨(자동 입력됨)' : '⚠ 중앙 미설정 — 생성 시 portal.env에 저장(리붓 유지)'}</span>
           </label>
           <label title="(선택) 이 에이전트를 '전력/데이터 pull 대상'으로도 쓸 때만. 중앙이 이 에이전트의 /api/collector/export 를 당겨갈 때 쓰는 임의 비밀입니다. iDRAC/IP 스캔만 할 거면 비워두세요. 자동 채우기는 랜덤값을 넣습니다. 중앙 '설정 › 수집 서버' 등록 시 같은 값을 사용하세요.">
-            전력수집 토큰(COLLECTOR_TOKEN, 선택)<input className="input" value={f.collectorToken} onChange={set('collectorToken')} placeholder="(전력수집 시에만)" /></label>
-          <label title="(선택) 전력수집 에이전트가 보고할 데이터센터 라벨. 수집 토큰을 쓸 때만 의미 있습니다. 예: OC2. 안 쓰면 비움.">
-            수집 DC명(COLLECTOR_DATACENTER, 선택)<input className="input" value={f.collectorDatacenter} onChange={set('collectorDatacenter')} placeholder="예: OC2" /></label>
+            <span className="cap">전력수집 토큰(COLLECTOR_TOKEN, 선택)</span><input className="input" value={f.collectorToken} onChange={set('collectorToken')} placeholder="(전력수집 시에만)" /></label>
+          <label title="(선택) 전력수집 에이전트가 보고할 데이터센터 라벨. 수집 토큰을 쓸 때만 의미 있습니다. 예: OC2. 안 쓰면 비움. ※ 이 값만 채운다고 중앙에 자동 등록되지 않습니다 — 배포 후 중앙 '설정 › 수집 서버'에 같은 토큰으로 등록해야 데이터가 올라옵니다.">
+            <span className="cap">수집 DC명(COLLECTOR_DATACENTER, 선택)</span><input className="input" value={f.collectorDatacenter} onChange={set('collectorDatacenter')} placeholder="예: OC2" /></label>
           <label title="에이전트 인스턴스가 자기 서버에서 열 HTTP 포트(기본 4000). 그 호스트에서 포트 충돌이 없으면 그대로 두세요.">
-            포탈 포트<input className="input" type="number" value={f.portalPort} onChange={set('portalPort')} /></label>
+            <span className="cap">포탈 포트</span><input className="input" type="number" value={f.portalPort} onChange={set('portalPort')} /></label>
           <label style={{ gridColumn: '1 / -1' }} title="보통 비워두세요 — 중앙이 download/의 el9 오프라인 패키지를 자동 선택해 SSH로 전송·설치합니다. 특정 tarball을 강제하려면 '중앙 서버' 상의 절대경로를 입력하세요.">
-            설치 패키지 경로(비우면 자동)<input className="input" value={f.installerPath} onChange={set('installerPath')} placeholder="(비우면 자동 선택)" /></label>
+            <span className="cap">설치 패키지 경로(비우면 자동)</span><input className="input" value={f.installerPath} onChange={set('installerPath')} placeholder="(비우면 자동 선택)" /></label>
+          <label className="agent-check" style={{ gridColumn: '1 / -1' }} title="켜면 이 에이전트가 '현재 포탈'을 업그레이드 소스로 사용합니다(UPGRADE_REMOTE_BASE = 중앙 URL + /dl). 중앙 포탈이 새 버전 번들을 download/에 올리면 에이전트가 주기적으로(기본 1시간) 확인해 자동 업그레이드합니다. 중앙 URL이 비어 있으면 무시됩니다.">
+            <input type="checkbox" checked={!!f.autoUpgrade} onChange={(e) => setF((s) => ({ ...s, autoUpgrade: e.target.checked }))} />
+            <span>자동 업그레이드 활성화 — 업그레이드 소스 = 현재 포탈(<code>중앙 URL/dl</code>)</span></label>
         </div>
       </div>
 
