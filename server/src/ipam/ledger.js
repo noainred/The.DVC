@@ -62,13 +62,21 @@ export function buildIpamRows(snap, vcenterId) {
     });
   }
   // 능동 스캔으로 발견된 IP(물리/기타 서버 등) 병합 — vCenter가 모르는 IP만 추가.
-  // 스캔 결과는 특정 vCenter에 속하지 않으므로 vCenter 스코프와 무관하게 표시한다.
+  // 스캔 결과는 특정 vCenter에 속하지 않으므로 vCenter 스코프와 무관하게 '항상' 표시한다.
+  // '이미 vCenter가 아는 IP' 판정은 스코프된 rows가 아니라 '전체' vCenter IP 기준으로 한다
+  // (스코프를 걸면 다른 vCenter의 IP가 known에서 빠져 스캔으로 오인되는 문제 방지).
   const histMap = getIpHistoryMap();
-  if (!vcenterId) {
-    const known = new Set(rows.map((r) => r.ip));
+  {
+    const known = new Set();
+    for (const vm of (snap.vms || [])) {
+      const ips = vm.ipAddresses?.length ? vm.ipAddresses : (vm.ipAddress ? [vm.ipAddress] : []);
+      for (const ip of ips) known.add(ip);
+    }
+    for (const h of (snap.hosts || [])) if (ipToNum(h.name) != null) known.add(h.name);
+    const seen = new Set(rows.map((r) => r.ip));
     for (const sc of scanResultList()) {
-      if (ignored(sc.ip, '') || known.has(sc.ip) || ipToNum(sc.ip) == null) continue;
-      known.add(sc.ip);
+      if (ignored(sc.ip, '') || known.has(sc.ip) || seen.has(sc.ip) || ipToNum(sc.ip) == null) continue;
+      seen.add(sc.ip);
       const hist = histMap[sc.ip];
       const released = hist?.status === 'down';
       count.set(sc.ip, (count.get(sc.ip) || 0) + 1);
