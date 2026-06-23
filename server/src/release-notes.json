@@ -1,6 +1,17 @@
 {
   "notes": [
     {
+      "version": "1.92.0",
+      "date": "2026-06-23",
+      "title": "3D 구성도 VM 단위 포커스 + 글로벌 현황 GPU 카드/GPU VM KPI",
+      "notes": [
+        "구성도(3D): vCenter/호스트 선택 드롭다운 추가 — 선택 시 그 범위의 VM만 깔끔하게 표시(VM 단위 보기). 전체 VM(1500 상한)의 헤어볼 대신 포커스해서 탐색.",
+        "GET /api/insights/graph 에 vcenterId·host 필터 추가. 포커스 시 VM 자동 표시.",
+        "글로벌 현황(Overview)에 'GPU 카드'(설치된 GPU 장수)와 'GPU 사용 VM'(GPU 할당 VM 수) KPI 추가.",
+        "GET /api/overview 응답에 gpuCards·gpuVms 추가."
+      ]
+    },
+    {
       "version": "1.91.0",
       "date": "2026-06-23",
       "title": "포탈 백업 — 중앙+엣지 설정 통합 백업 · 정기(분/시간/일) · 변경 자동 백업",

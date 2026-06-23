@@ -48,7 +48,11 @@ insightsRouter.get('/security', (_req, res) => res.json(computeSecurityPosture(s
 insightsRouter.get('/topology', (req, res) => res.json(buildTopology(store.get(), { vcenterId: req.query.vcenterId || null, host: req.query.host || null })));
 
 // --- 구성도 그래프(3D 네트워크용) — 설정된 구성 + 라이브 스냅샷 ---
-insightsRouter.get('/graph', (req, res) => res.json(buildGraph(store.get(), { vms: req.query.vms === '1' || req.query.vms === 'true' })));
+insightsRouter.get('/graph', (req, res) => res.json(buildGraph(store.get(), {
+  vms: req.query.vms === '1' || req.query.vms === 'true',
+  vcenterId: req.query.vcenterId || null,
+  host: req.query.host || null,
+})));
 
 // --- 인시던트 타임라인 ---
 insightsRouter.get('/incidents', (req, res) => res.json(getIncidents({ limit: Number(req.query.limit) || 200 })));
