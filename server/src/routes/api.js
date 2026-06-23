@@ -20,6 +20,7 @@ import { pingMany } from '../util/ping.js';
 import { getServiceCheck } from '../health/services.js';
 import { getNetworkCheck } from '../health/network.js';
 import { buildVmwareConfigExport } from '../backup/vmwareExport.js';
+import { getLogsDb } from '../logs/db.js';
 import zlib from 'node:zlib';
 import { nsxStore } from '../nsx/store.js';
 import { loadRegistry as loadNsxRegistry } from '../nsx/registry.js';
@@ -224,11 +225,21 @@ api.get('/health', (_req, res) => {
 // High-level KPIs + regional / per-site rollups for the dashboard landing view.
 api.get('/overview', (_req, res) => {
   const snap = store.get();
-  // GPU 집계: 설치된 GPU 카드 총 장수 + GPU를 할당받은 VM 수(글로벌 현황 KPI용).
+  // GPU 집계: 설치된 GPU 카드 총 장수 + GPU 평균 사용률(글로벌 현황 KPI용).
+  // 사용률은 GPU 보유 호스트의 util(ESXi 보고 + 게스트 오버레이)을 평균.
   let gpuCards = 0, gpuVms = 0;
-  for (const h of snap.hosts) gpuCards += (h.gpus || []).length;
+  let utilSum = 0, utilN = 0;
+  for (const h of snap.hosts) {
+    const gn = (h.gpus || []).length;
+    gpuCards += gn;
+    if (gn) {
+      const u = h.gpuUtilPct ?? getGuestGpuHost(h.id)?.utilPct;
+      if (u != null && Number.isFinite(u)) { utilSum += u; utilN++; }
+    }
+  }
   for (const v of snap.vms) if (v.gpu) gpuVms++;
-  res.json({ generatedAt: snap.generatedAt, source: snap.source, ...snap.rollups, gpuCards, gpuVms });
+  const gpuUtilPct = utilN ? Math.round(utilSum / utilN) : 0;
+  res.json({ generatedAt: snap.generatedAt, source: snap.source, ...snap.rollups, gpuCards, gpuVms, gpuUtilPct, gpuUtilHosts: utilN });
 });
 
 // NSX overview — aggregated snapshot from the NSX Manager poller (separate from
@@ -742,6 +753,32 @@ api.get('/tools/vmware-config', (req, res) => {
       return res.end(gz);
     }
     res.json(data);
+  } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+});
+
+// vCenter 장기 보관 로그 조회 — 필터: vcenterId·severity·q·since·until + 페이징.
+api.get('/tools/vclogs', async (req, res) => {
+  try {
+    const db = await getLogsDb();
+    const f = { vcenterId: req.query.vcenterId || '', severity: req.query.severity || '', q: req.query.q || '',
+      since: req.query.since ? Number(req.query.since) : 0, until: req.query.until ? Number(req.query.until) : 0 };
+    const limit = Math.min(1000, Number(req.query.limit) || 200);
+    const offset = Math.max(0, Number(req.query.offset) || 0);
+    res.json({ total: db.count(f), rows: db.query(f, limit, offset), meta: db.meta(), dbKind: db.kind });
+  } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+});
+api.get('/tools/vclogs/export.csv', async (req, res) => {
+  try {
+    const db = await getLogsDb();
+    const f = { vcenterId: req.query.vcenterId || '', severity: req.query.severity || '', q: req.query.q || '',
+      since: req.query.since ? Number(req.query.since) : 0, until: req.query.until ? Number(req.query.until) : 0 };
+    const rows = db.query(f, 100_000, 0);
+    const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const csv = ['time,vcenter,severity,type,user,entity,message',
+      ...rows.map((r) => [new Date(r.ts).toISOString(), r.vcenterId, r.severity, r.type, r.user, r.entity, r.message].map(esc).join(','))].join('\n');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="vcenter-logs-${new Date().toISOString().slice(0, 10)}.csv"`);
+    res.send('﻿' + csv); // BOM(엑셀 한글)
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 

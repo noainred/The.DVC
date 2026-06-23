@@ -129,6 +129,7 @@ export class VimSoapClient {
       extensionManager: pick('extensionManager'),
       licenseManager: pick('licenseManager'),
       guestOperationsManager: pick('guestOperationsManager'),
+      eventManager: pick('eventManager'),
       version: aboutPick('version') || pick('version'),
       build: aboutPick('build') || '',
       fullName: aboutPick('fullName') || '',
@@ -665,6 +666,78 @@ export async function upgradeVmTools(vc, morefs) {
     await c.logout();
   }
   return results;
+}
+
+/**
+ * vCenter 이벤트 로그를 수집한다(장기 보관용). vim25 EventManager의 EventHistoryCollector를
+ * 생성해 beginTime(sinceTs) 이후 이벤트를 페이지 단위로 읽는다. max 상한까지.
+ * 반환: [{ key, ts, type, severity, user, entity, message }] (오래된 → 최신).
+ */
+export async function collectVCenterEvents(vc, { sinceTs = Date.now() - 86_400_000, max = 5000, pageSize = 200 } = {}) {
+  const c = new VimSoapClient(vc);
+  await c.login();
+  let collector = null;
+  const out = [];
+  try {
+    if (!c.sc.eventManager) return out;
+    const beginIso = new Date(sinceTs).toISOString();
+    const createXml = await c.callRaw(
+      `<CreateCollectorForEvents xmlns="urn:vim25"><_this type="EventManager">${c.sc.eventManager}</_this>` +
+      `<filter><time><beginTime>${beginIso}</beginTime></time></filter></CreateCollectorForEvents>`);
+    collector = /<returnval[^>]*>([^<]+)<\/returnval>/.exec(createXml)?.[1];
+    if (!collector) return out;
+    const cRef = escXml(collector);
+    // ReadNextEvents 로 forward 읽기(오래된→최신). 빈 페이지 또는 max 도달 시 종료.
+    for (let guard = 0; guard < 200 && out.length < max; guard++) {
+      const xml = await c.callRaw(
+        `<ReadNextEvents xmlns="urn:vim25"><_this type="EventHistoryCollector">${cRef}</_this><maxCount>${Math.min(pageSize, max - out.length)}</maxCount></ReadNextEvents>`);
+      const events = parseEventsXml(xml);
+      if (!events.length) break;
+      out.push(...events);
+    }
+  } finally {
+    if (collector) await c.callRaw(`<DestroyCollector xmlns="urn:vim25"><_this type="EventHistoryCollector">${escXml(collector)}</_this></DestroyCollector>`).catch(() => {});
+    await c.logout().catch(() => {});
+  }
+  return out;
+}
+
+// XML 특수문자 이스케이프(collector moref가 &<> 포함 가능).
+function escXml(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+/** ReadNextEvents 응답의 <returnval> 블록들을 파싱. */
+export function parseEventsXml(xml) {
+  const out = [];
+  const re = /<returnval\b([^>]*)>([\s\S]*?)<\/returnval>/g;
+  let m;
+  while ((m = re.exec(xml))) {
+    const attrs = m[1] || '', body = m[2] || '';
+    const type = /xsi:type="([^"]+)"/.exec(attrs)?.[1] || /(?:^|\s)type="([^"]+)"/.exec(attrs)?.[1] || 'Event';
+    const pick = (tag) => new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)</${tag}>`).exec(body)?.[1];
+    const key = pick('key');
+    const createdTime = pick('createdTime');
+    const userName = (pick('userName') || '').trim();
+    const message = (pick('fullFormattedMessage') || '').replace(/\s+/g, ' ').trim();
+    // 엔티티명: vm/host/computeResource/datacenter 중 첫 <name>.
+    let entity = '';
+    for (const tag of ['vm', 'host', 'computeResource', 'dvs', 'datastore', 'network', 'datacenter']) {
+      const blk = pick(tag);
+      if (blk) { const n = /<name\b[^>]*>([^<]*)<\/name>/.exec(blk)?.[1]; if (n) { entity = n; break; } }
+    }
+    // 심각도: 명시 <severity> 우선, 없으면 타입명으로 추정.
+    const sev = (pick('severity') || '').trim().toLowerCase();
+    const severity = sev || (/error|fail|fault|cannot|lost|down/i.test(type) ? 'error' : /warn/i.test(type) ? 'warning' : 'info');
+    out.push({
+      key: key || null,
+      ts: createdTime ? Date.parse(createdTime) : Date.now(),
+      type: type.replace(/^.*:/, ''),
+      severity: ['error', 'warning', 'info'].includes(severity) ? severity : (severity === 'red' ? 'error' : severity === 'yellow' ? 'warning' : 'info'),
+      user: userName,
+      entity,
+      message: message.slice(0, 1000),
+    });
+  }
+  return out;
 }
 
 /** Parse RetrieveProperties response into [{type, ref, props:{path:value}}]. */

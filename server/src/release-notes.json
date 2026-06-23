@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "1.94.0",
+      "date": "2026-06-23",
+      "title": "vCenter 로그 장기 보관(엣지 로컬 저장·경로/용량/기간 설정) + 글로벌 GPU 사용율 KPI",
+      "notes": [
+        "설정 › 'vCenter 로그 보관' 추가 — vCenter가 단기간만 보관하는 이벤트를 포탈이 주기 수집해 장기 보관. vim25 EventManager(EventHistoryCollector)로 신규 이벤트만 증분 수집.",
+        "분산 저장: 데이터를 중앙 집중 저장하지 않고 각 포탈(해당 지역 엣지)이 자기 vCenter 로그만 로컬 보관(중앙 push 없음).",
+        "설정값: 수집 주기 · 보관 기간(일, 0=무제한) · 용량 제한(MB, 초과 시 오래된 것부터 삭제+VACUUM) · 최소 심각도 · 저장 경로(서버 디렉터리 지정).",
+        "로그 뷰어: vCenter/심각도/검색 필터 + 페이징 + CSV 내보내기(엑셀 BOM). SQLite(없으면 NDJSON) 보관, (vcenterId,key) 중복 제거.",
+        "글로벌 현황 KPI: 'GPU 사용 VM' → 'GPU 사용율'(GPU 호스트 평균 사용률)로 변경, 'GPU 카드 수량' 유지.",
+        "신규 API: /api/admin/vclogs/*(status·settings·collect), /api/tools/vclogs(조회·export.csv), /api/overview에 gpuUtilPct 추가."
+      ]
+    },
+    {
       "version": "1.93.0",
       "date": "2026-06-23",
       "title": "특수 기능 3종 — 다빈치 서비스 점검 · 글로벌 네트워크 점검 · VMware 구성 백업",

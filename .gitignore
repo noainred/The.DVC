@@ -48,3 +48,8 @@ server/config/host-temp.ndjson
 server/config/backups/
 server/config/backup.json
 server/config/central-agent-config.json
+
+# vCenter 로그 보관(런타임)
+server/config/vcenter-logs.db
+server/config/vcenter-logs.ndjson
+server/config/vcenter-logs.json
