@@ -1784,7 +1784,7 @@ function GpuVmsModal({ title, params, onClose }) {
                 {d.vms.length === 0 && <tr><td colSpan={8} className="center muted" style={{ padding: 20 }}>GPU 할당 VM이 없습니다.</td></tr>}
                 {d.vms.map((v) => (
                   <tr key={v.id}>
-                    <td><b>{v.name}</b></td>
+                    <td><VmLink name={v.name} vcenterId={v.vcenterId} label={v.name} /></td>
                     <td className="muted">{v.vcenterId}</td>
                     <td className="muted" style={{ fontSize: 12 }}>{v.host || '—'}</td>
                     <td style={{ fontSize: 12 }}>{v.model || '—'}</td>
