@@ -31,6 +31,7 @@ export async function pushGpuGuestNow() {
     });
     if (!res.ok) throw new Error(`gpu-guest -> ${res.status}`);
     last = { at: Date.now(), hosts: hosts.length, vms: vms.length };
+    console.log(`[gpu-guest-push] sent → ${config.agent.centralUrl} hosts=${hosts.length} vms=${vms.length}`);
     return { ok: true, hosts: hosts.length, vms: vms.length };
   } catch (e) {
     last = { at: Date.now(), hosts: 0, vms: 0, error: e.message };

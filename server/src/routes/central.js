@@ -77,6 +77,7 @@ centralRouter.post('/gpu-guest-data', (req, res) => {
   const hosts = Array.isArray(b.hosts) ? b.hosts.slice(0, 50_000) : [];
   const vms = Array.isArray(b.vms) ? b.vms.slice(0, 500_000) : [];
   setGuestGpu({ hosts, vms }); // 로컬 폴러와 동일한 게스트 오버레이에 기록 → /tools/gpu·샘플러가 그대로 사용
+  console.log(`[central] gpu-guest-data 수신: agent=${b.agent} hosts=${hosts.length} vms=${vms.length}`);
   res.json({ ok: true, agent: b.agent, hosts: hosts.length, vms: vms.length });
 });
 

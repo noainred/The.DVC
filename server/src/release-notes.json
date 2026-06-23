@@ -1,6 +1,16 @@
 {
   "notes": [
     {
+      "version": "1.86.2",
+      "date": "2026-06-23",
+      "title": "게스트 GPU push 진단 로그 — agent 전송/중앙 수신을 journalctl로 확인 가능",
+      "notes": [
+        "agent: 게스트 GPU push 성공 시 '[gpu-guest-push] sent → <중앙> hosts=N vms=M' 로그",
+        "중앙: 수신 시 '[central] gpu-guest-data 수신: agent=… hosts=N vms=M' 로그",
+        "→ agent/중앙 양쪽에서 journalctl로 push 동작 여부를 즉시 확인 가능"
+      ]
+    },
+    {
       "version": "1.86.1",
       "date": "2026-06-23",
       "title": "설치 패키지 자동 다운로드 — 종류 다중 선택 + 버전 드롭다운 선택",
