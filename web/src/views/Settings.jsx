@@ -15,6 +15,7 @@ import Alerts2 from './Alerts2.jsx';
 import Audit from './Audit.jsx';
 import MetricsSettings from './MetricsSettings.jsx';
 import GpuGuestSettings from './GpuGuestSettings.jsx';
+import GpuGuestDiag from './GpuGuestDiag.jsx';
 import GpuSettings from './GpuSettings.jsx';
 import About from './About.jsx';
 
@@ -27,6 +28,7 @@ const SUB = [
   { k: 'metrics', label: '지표 수집', C: MetricsSettings, group: 'collect' },
   { k: 'gpu-collect', label: 'GPU 수집', C: GpuSettings, group: 'collect' },
   { k: 'gpu-guest', label: 'GPU 게스트 수집', C: GpuGuestSettings, group: 'collect' },
+  { k: 'gpu-guest-diag', label: 'GPU 수집 진단', C: GpuGuestDiag, group: 'collect' },
   { k: 'collectors', label: '수집 서버(원격)', C: Collectors, group: 'collect' },
   { k: 'agent-scans', label: '에이전트 작업', C: AgentScans, group: 'collect' },
   { k: 'agent-deploy', label: '에이전트 배포', C: AgentDeploy, group: 'collect' },

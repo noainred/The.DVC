@@ -12,6 +12,7 @@
 
 import { config } from '../config.js';
 import { getGuestGpuVms, getGuestGpuAllHosts } from '../gpu/store.js';
+import { getGpuGuestDiag } from '../gpu/poller.js';
 
 let timer = null;
 let last = null; // { at, hosts, vms, error }
@@ -24,10 +25,11 @@ export async function pushGpuGuestNow() {
   if (!config.agent.centralUrl || !config.agent.centralToken) return { ok: false, reason: 'push 비활성화(CENTRAL_URL/TOKEN 미설정)' };
   const hosts = [...getGuestGpuAllHosts().entries()].map(([hostId, v]) => ({ hostId, utilPct: v.utilPct }));
   const vms = getGuestGpuVms().map((v) => ({ vmId: v.vmId, utilPct: v.utilPct, memUsedPct: v.memUsedPct ?? null, host: v.host, vcenterId: v.vcenterId }));
-  if (!hosts.length && !vms.length) { last = { at: Date.now(), hosts: 0, vms: 0 }; return { ok: true, hosts: 0, vms: 0 }; }
+  const diag = getGpuGuestDiag(); // 선별 깔때기 + VM별 성공/실패(웹 '수집 진단'에서 표시)
+  // 진단은 데이터가 없어도(=어디서 막혔는지가 핵심) 항상 보낸다.
   try {
     const res = await fetch(`${config.agent.centralUrl}/api/central/gpu-guest-data`, {
-      method: 'POST', headers: headers(), body: JSON.stringify({ agent: config.agent.name, hosts, vms }), signal: AbortSignal.timeout(30_000),
+      method: 'POST', headers: headers(), body: JSON.stringify({ agent: config.agent.name, hosts, vms, diag }), signal: AbortSignal.timeout(30_000),
     });
     if (!res.ok) throw new Error(`gpu-guest -> ${res.status}`);
     last = { at: Date.now(), hosts: hosts.length, vms: vms.length };

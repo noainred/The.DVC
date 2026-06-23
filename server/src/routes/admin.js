@@ -26,9 +26,10 @@ import { loadMetricsSettings, saveMetricsSettings, METRICS_LIMITS } from '../met
 import { forceGpuUtilCollect, clearGpuUtilForce } from '../vcenter/soapClient.js';
 import { metricsSamplerStatus, rescheduleMetricsSampler } from '../metrics/sampler.js';
 import { loadGpuGuestSettings, saveGpuGuestSettings, redactGpuGuestSettings, resolveVmCreds } from '../gpu/settings.js';
-import { gpuGuestStatus, rescheduleGpuGuestPoller, passthruHostIds, vmUsesPassthroughGpu } from '../gpu/poller.js';
+import { gpuGuestStatus, rescheduleGpuGuestPoller, passthruHostIds, vmUsesPassthroughGpu, getGpuGuestDiag } from '../gpu/poller.js';
 import { testVmGuest, VimSoapClient } from '../gpu/guestops.js';
 import { getGuestGpuVms } from '../gpu/store.js';
+import { getAllGpuGuestDiag } from '../central/gpuGuestDiag.js';
 import { loadVcenterConfig } from '../config.js';
 import { loadScanSettings, saveScanSettings, scanResultList, scanInfo, listScanAgents, getAgentReports, getScanRuns, LOCAL } from '../ipam/scanStore.js';
 import { startScan, scanStatus, rescheduleScanPoller } from '../ipam/scanPoller.js';
@@ -328,6 +329,12 @@ adminRouter.put('/gpu-guest/settings', adminOnly, (req, res) => {
   const settings = saveGpuGuestSettings(req.body || {});
   rescheduleGpuGuestPoller();
   res.json({ ok: true, settings: redactGpuGuestSettings(settings), status: gpuGuestStatus() });
+});
+
+// GPU 게스트 수집 진단 — 어느 단계에서 막혔는지(선별 깔때기 + VM별 성공/실패·에러).
+// 중앙 본인이 직접 수집하면 local, agent들이 push한 건 agents 로 함께 반환.
+adminRouter.get('/gpu-guest/diag', adminOnly, (_req, res) => {
+  res.json({ local: getGpuGuestDiag(), agents: getAllGpuGuestDiag() });
 });
 
 // 선택한 법인(vCenter)에서 GPU를 패스쓰루로 쓰는 VM 목록 — VM별 자격증명 설정용.

@@ -82,29 +82,38 @@ function authXml(creds) {
 // 깨지지 않게 정규식으로 스킴 다음 호스트만 바꾼다('*' 호스트도 포함).
 const swapHost = (u, host) => u.replace(/^(https?:\/\/)[^/]+/, `$1${host}`);
 
-async function readGuestFile(c, fileManager, vmRef, auth, guestPath, timeoutMs, preferHosts = []) {
+async function readGuestFile(c, fileManager, vmRef, auth, guestPath, timeoutMs, preferHosts = [], tag = '') {
   let ftXml;
   try {
     ftXml = await c.callRaw(
       `<InitiateFileTransferFromGuest xmlns="urn:vim25"><_this type="GuestFileManager">${fileManager}</_this>${vmRef}${auth}` +
       `<guestFilePath>${esc(guestPath)}</guestFilePath></InitiateFileTransferFromGuest>`);
-  } catch (e) { return { text: '', error: cleanGuestError(e.message) }; }
+  } catch (e) {
+    console.warn(`[gpu-guest]     [${tag}] InitiateFileTransferFromGuest 실패: ${e.message}`);
+    return { text: '', error: `파일전송요청 실패: ${cleanGuestError(e.message)}` };
+  }
   const url = /<url>([^<]+)<\/url>/.exec(ftXml)?.[1];
   if (!url) return { text: '', error: '파일 전송 URL을 반환하지 않음' };
-  // 파일 전송 URL의 호스트가 '*'(=연결한 서버)/FQDN으로 오는데, 프록시 경유 등록이면
-  // 그 FQDN이 포탈에서 도달 안 되거나(또는 vCenter가 직접 서빙 안 해) 404가 난다.
-  // 그래서 호출자가 준 후보(vCenter 실제 IP → ESXi IP → ESXi FQDN)로 먼저 시도하고,
-  // 마지막에 등록된 vc.host(프록시)로 폴백. path/query(토큰)는 보존하고 호스트만 교체.
+  // path/query(토큰)는 보존하고 호스트만 교체. 후보(vCenter 실제 IP → ESXi IP → ESXi FQDN) → vc.host.
   const vcHost = (c.vc.host || '').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  const origHost = (() => { try { return new URL(url).host; } catch { return '?'; } })();
   const hosts = [...new Set([...preferHosts.filter(Boolean), vcHost])];
-  const tries = []; // 진단: 시도한 모든 호스트의 결과를 한 번에 보여준다.
+  console.log(`[gpu-guest]     [${tag}] 파일전송 URL host=${origHost} → 시도순서 [${hosts.join(', ')}]`);
+  const tries = [];
   for (const host of hosts) {
     const cand = swapHost(url, host);
     try {
       const res = await fetch(cand, { signal: AbortSignal.timeout(timeoutMs) });
-      if (res.ok) return { text: await res.text(), error: null };
+      if (res.ok) {
+        console.log(`[gpu-guest]     [${tag}] 다운로드 ${host} → HTTP ${res.status} ✓`);
+        return { text: await res.text(), error: null };
+      }
+      console.warn(`[gpu-guest]     [${tag}] 다운로드 ${host} → HTTP ${res.status}`);
       tries.push(`${host}=HTTP${res.status}`);
-    } catch (e) { tries.push(`${host}=${String(e.message || 'err').slice(0, 40)}`); }
+    } catch (e) {
+      console.warn(`[gpu-guest]     [${tag}] 다운로드 ${host} → ${e.message}`);
+      tries.push(`${host}=${String(e.message || 'err').slice(0, 60)}`);
+    }
   }
   return { text: '', error: `파일 다운로드 실패: ${tries.join(' | ')}` };
 }
@@ -132,28 +141,36 @@ export async function collectVmGpu(c, vmMoref, creds, { isWindows, timeoutMs = 2
     ? { path: 'C:\\Windows\\System32\\cmd.exe', args: `/c nvidia-smi ${NVSMI_QUERY} 1>"${outFile}" 2>"${errFile}"` }
     : { path: '/bin/sh', args: `-c "export PATH=$PATH:/usr/bin:/usr/local/bin:/usr/local/sbin:/usr/local/nvidia/bin; nvidia-smi ${NVSMI_QUERY} 1>${outFile} 2>${errFile}"` };
 
-  // 3) StartProgramInGuest
+  // 3) StartProgramInGuest — 게스트에서 nvidia-smi 실행
   const startXml =
     `<StartProgramInGuest xmlns="urn:vim25"><_this type="GuestProcessManager">${processManager}</_this>${vmRef}${auth}` +
     `<spec xsi:type="GuestProgramSpec"><programPath>${esc(prog.path)}</programPath><arguments>${esc(prog.args)}</arguments></spec></StartProgramInGuest>`;
-  const startRes = await c.callRaw(startXml);
+  let startRes;
+  try { startRes = await c.callRaw(startXml); }
+  catch (e) { throw new Error(`StartProgramInGuest SOAP 실패: ${cleanGuestError(e.message)} | raw: ${String(e.message).slice(0, 200)}`); }
   const pid = /<returnval>(\d+)<\/returnval>/.exec(startRes)?.[1];
-  if (!pid) throw new Error('StartProgramInGuest 실패(게스트 작업 권한/Tools 확인)');
+  if (!pid) {
+    const fault = /<faultstring>([^<]*)<\/faultstring>/.exec(startRes)?.[1] || startRes.slice(0, 200);
+    throw new Error(`StartProgramInGuest 실패(pid 없음): ${fault}`);
+  }
+  console.log(`[gpu-guest]     [${vmMoref}] StartProgram pid=${pid} → ${outFile}`);
 
   // 4) 종료 대기(ListProcessesInGuest)
   const deadline = Date.now() + timeoutMs;
+  let ended = false;
   while (Date.now() < deadline) {
     await sleep(1200);
     const listXml = await c.callRaw(
       `<ListProcessesInGuest xmlns="urn:vim25"><_this type="GuestProcessManager">${processManager}</_this>${vmRef}${auth}<pids>${pid}</pids></ListProcessesInGuest>`
-    );
-    if (/<endTime>/.test(listXml)) break; // 종료됨
+    ).catch((e) => { console.warn(`[gpu-guest]     [${vmMoref}] ListProcesses 오류: ${e.message}`); return ''; });
+    if (/<endTime>/.test(listXml)) { ended = true; break; } // 종료됨
   }
+  if (!ended) console.warn(`[gpu-guest]     [${vmMoref}] 프로세스 종료 대기 타임아웃(${Math.round(timeoutMs / 1000)}s) — 그래도 파일 회수 시도`);
 
   // 5) stdout 회수 → 파싱 (다운로드는 vCenter 실제 IP/ESXi IP 후보 우선).
   // 다운로드는 짧은 타임아웃으로 빠른 실패(도달 안 되는 후보가 전체를 오래 막지 않게).
   const dlTimeout = Math.min(timeoutMs, 4000);
-  const outRes = await readGuestFile(c, fileManager, vmRef, auth, outFile, dlTimeout, dlHosts);
+  const outRes = await readGuestFile(c, fileManager, vmRef, auth, outFile, dlTimeout, dlHosts, vmMoref);
   const parsed = parseNvidiaSmiCsv(outRes.text);
   if (parsed) {
     deleteGuestFile(c, fileManager, vmRef, auth, outFile);
