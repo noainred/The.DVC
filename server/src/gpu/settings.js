@@ -54,16 +54,29 @@ export function saveGpuGuestSettings(partial) {
   if (partial.pollIntervalMs !== undefined) next.pollIntervalMs = clamp(partial.pollIntervalMs, 10_000, 86_400_000, DEFAULTS.pollIntervalMs);
   if (partial.concurrency !== undefined) next.concurrency = clamp(partial.concurrency, 1, 32, DEFAULTS.concurrency);
   if (partial.timeoutMs !== undefined) next.timeoutMs = clamp(partial.timeoutMs, 3_000, 120_000, DEFAULTS.timeoutMs);
+  if (partial.maxVmsPerVcenter !== undefined) next.maxVmsPerVcenter = clamp(partial.maxVmsPerVcenter, 1, 100_000, DEFAULTS.maxVmsPerVcenter);
   next.vcenters = { ...(cur.vcenters || {}) };
   if (partial.vcenters && typeof partial.vcenters === 'object') {
     for (const [id, v] of Object.entries(partial.vcenters)) {
       const prev = next.vcenters[id] || {};
-      next.vcenters[id] = {
+      const merged = {
         enabled: v.enabled !== undefined ? Boolean(v.enabled) : (prev.enabled ?? false),
         username: v.username !== undefined ? String(v.username || '') : (prev.username || ''),
         // 빈 비밀번호 = 기존 유지
         password: (v.password !== undefined && v.password !== '') ? String(v.password) : (prev.password || ''),
+        vms: { ...(prev.vms || {}) }, // VM별 자격증명 override
       };
+      if (v.vms && typeof v.vms === 'object') {
+        for (const [vmId, cred] of Object.entries(v.vms)) {
+          if (cred === null) { delete merged.vms[vmId]; continue; } // 공용으로 전환 = override 제거
+          const pv = merged.vms[vmId] || {};
+          merged.vms[vmId] = {
+            username: cred.username !== undefined ? String(cred.username || '') : (pv.username || ''),
+            password: (cred.password !== undefined && cred.password !== '') ? String(cred.password) : (pv.password || ''),
+          };
+        }
+      }
+      next.vcenters[id] = merged;
     }
   }
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
@@ -72,13 +85,15 @@ export function saveGpuGuestSettings(partial) {
   return loadGpuGuestSettings();
 }
 
-/** 비밀번호를 가려 클라이언트로 안전하게 내보낸다. */
+/** 비밀번호를 가려 클라이언트로 안전하게 내보낸다(VM별 자격증명 포함). */
 export function redactGpuGuestSettings(s) {
   const vcenters = {};
   for (const [id, v] of Object.entries(s.vcenters || {})) {
-    vcenters[id] = { enabled: !!v.enabled, username: v.username || '', hasPassword: !!v.password };
+    const vms = {};
+    for (const [vmId, c] of Object.entries(v.vms || {})) vms[vmId] = { username: c.username || '', hasPassword: !!c.password };
+    vcenters[id] = { enabled: !!v.enabled, username: v.username || '', hasPassword: !!v.password, vms };
   }
-  return { enabled: s.enabled, pollIntervalMs: s.pollIntervalMs, concurrency: s.concurrency, timeoutMs: s.timeoutMs, vcenters };
+  return { enabled: s.enabled, pollIntervalMs: s.pollIntervalMs, concurrency: s.concurrency, timeoutMs: s.timeoutMs, maxVmsPerVcenter: s.maxVmsPerVcenter, vcenters };
 }
 
 export function isVcenterGpuMonitored(vcId) {
@@ -90,4 +105,18 @@ export function getGuestCreds(vcId) {
   const s = loadGpuGuestSettings();
   const v = s.vcenters[vcId];
   return v && v.username ? { username: v.username, password: v.password || '' } : null;
+}
+
+/**
+ * VM 단위 게스트 자격증명 해석: VM별 override(자체 계정)가 있으면 그것을, 없으면
+ * 법인(vCenter) 공용 계정으로 fallback. 둘 다 없으면 null(수집 대상 아님).
+ * 반환 source: 'vm'(VM별) | 'vc'(법인 공용).
+ */
+export function resolveVmCreds(s, vcId, vmId) {
+  const vc = (s.vcenters || {})[vcId];
+  if (!vc) return null;
+  const per = (vc.vms || {})[vmId];
+  if (per && per.username) return { username: per.username, password: per.password || '', source: 'vm' };
+  if (vc.username) return { username: vc.username, password: vc.password || '', source: 'vc' };
+  return null;
 }

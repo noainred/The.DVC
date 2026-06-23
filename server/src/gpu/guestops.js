@@ -23,10 +23,50 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 async function guestManagers(c) {
-  const objs = await c.retrieveObjectProps('GuestOperationsManager', c.sc.guestOperationsManager, ['processManager', 'fileManager']);
+  const objs = await c.retrieveObjectProps('GuestOperationsManager', c.sc.guestOperationsManager, ['processManager', 'fileManager', 'authManager']);
   const p = objs[0]?.props || {};
   if (!p.processManager || !p.fileManager) throw new Error('GuestOperationsManager 사용 불가');
-  return { processManager: p.processManager, fileManager: p.fileManager };
+  return { processManager: p.processManager, fileManager: p.fileManager, authManager: p.authManager };
+}
+
+// vCenter 게스트 작업 fault 메시지를 사람이 읽기 쉬운 한국어로 요약.
+function cleanGuestError(msg) {
+  const m = String(msg || '');
+  if (/InvalidGuestLogin|authentication|Failed to authenticate/i.test(m)) return '게스트 로그인 실패 — 계정/비밀번호 확인';
+  if (/GuestComponentsOutOfDate|GuestOperationsUnavailable|not (?:installed|running)|tools/i.test(m)) return 'VMware Tools 미실행/구버전 — 게스트 작업 불가';
+  if (/timeout|timed out|AbortError/i.test(m)) return '게스트 작업 타임아웃';
+  if (/powered ?off|not powered on|InvalidPowerState/i.test(m)) return 'VM 전원 꺼짐';
+  return m.slice(0, 160);
+}
+
+/**
+ * 자격증명 검증(로그인 테스트) + nvidia-smi 데이터 읽기 테스트를 한 번에.
+ * 반환 { login, read, error, sample }.
+ *   - login: ValidateCredentialsInGuest 성공 여부(게스트에 명령 실행 X, 인증만 확인)
+ *   - read : nvidia-smi로 GPU 사용률을 실제로 읽었는지
+ */
+export async function testVmGuest(c, vmMoref, creds, { isWindows = false, timeoutMs = 15_000 } = {}) {
+  const out = { login: false, read: false, error: null, sample: null };
+  const vmRef = `<vm type="VirtualMachine">${vmMoref}</vm>`;
+  const auth = authXml(creds);
+  let authManager;
+  try {
+    ({ authManager } = await guestManagers(c));
+  } catch (e) { out.error = cleanGuestError(e.message); return out; }
+  // 1) 로그인(자격증명) 검증 — 게스트에 아무것도 실행하지 않고 인증만 확인.
+  try {
+    if (authManager) {
+      await c.callRaw(`<ValidateCredentialsInGuest xmlns="urn:vim25"><_this type="GuestAuthManager">${authManager}</_this>${vmRef}${auth}</ValidateCredentialsInGuest>`);
+    }
+    out.login = true;
+  } catch (e) { out.error = cleanGuestError(e.message); return out; }
+  // 2) 데이터 읽기 — nvidia-smi 실행 후 파싱.
+  try {
+    const r = await collectVmGpu(c, vmMoref, creds, { isWindows, timeoutMs });
+    if (r && r.utilPct != null) { out.read = true; out.sample = { gpus: r.count, utilPct: r.utilPct, memUsedPct: r.memUsedPct }; }
+    else out.error = 'nvidia-smi 출력 없음 — 게스트에 NVIDIA 드라이버/nvidia-smi 확인';
+  } catch (e) { out.error = cleanGuestError(e.message); }
+  return out;
 }
 
 function authXml(creds) {
