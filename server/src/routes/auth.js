@@ -3,6 +3,7 @@ import { config } from '../config.js';
 import { authenticate, signToken, authMiddleware, requireRole, getUser, beginTotpEnroll, confirmTotpEnroll } from '../auth/auth.js';
 import { loadAdConfig, saveAdConfig, testAd } from '../auth/ad.js';
 import { logAudit } from '../audit.js';
+import { recordPortalLoginFail } from '../security/loginStore.js';
 
 export const authRouter = Router();
 
@@ -21,6 +22,7 @@ authRouter.post('/login', async (req, res) => {
   const user = await authenticate(username, password);
   if (!user) {
     logAudit({ user: username, action: '로그인 실패', ip });
+    try { recordPortalLoginFail({ username, ip, reason: 'invalid credentials' }); } catch { /* */ }
     return res.status(401).json({ error: 'invalid credentials' });
   }
 

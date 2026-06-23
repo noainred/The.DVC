@@ -50,6 +50,10 @@ import { recordCapture, listCaptures, getCapture, deleteCapture } from '../net/c
 import { listMonitors, saveMonitor, removeMonitor, runMonitorNow } from '../net/monitor.js';
 import { addUsersToVms } from '../guest/accountService.js';
 import { snapshotFilter, slimVm, guestProbe } from '../search/deepSearch.js';
+import { analyzeLoginFails } from '../security/loginFails.js';
+import { loadLoginMonitor, saveLoginMonitor, loginMonitorStatus, runLoginAnalysisNow } from '../security/loginMonitor.js';
+import { listGuestScans, saveGuestScan, removeGuestScan, runGuestScanNow } from '../security/guestScanScheduler.js';
+import { analyzeNetIssues } from '../security/netIssueStore.js';
 import path from 'node:path';
 import {
   listRegistry as listNsx, addManager as addNsx, updateManager as updateNsx,
@@ -903,6 +907,24 @@ adminRouter.post('/deep-search/probe', adminOnly, async (req, res) => {
     res.json({ candidates: candidates.length, ...r });
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
+
+// ───────────────────────── 로그인 실패 분석 ─────────────────────────
+adminRouter.get('/security/login-fails', adminOnly, async (req, res) => {
+  try { res.json(await analyzeLoginFails({ vcenterId: req.query.vcenterId || '', days: Number(req.query.days) || loadLoginMonitor().days, threshold: Number(req.query.threshold) || loadLoginMonitor().threshold, windowMin: Number(req.query.windowMin) || loadLoginMonitor().windowMin })); }
+  catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+});
+adminRouter.get('/security/login-fails/status', adminOnly, (_req, res) => res.json(loginMonitorStatus()));
+adminRouter.put('/security/login-fails/settings', adminOnly, (req, res) => res.json(saveLoginMonitor(req.body || {})));
+adminRouter.post('/security/login-fails/run', adminOnly, async (_req, res) => { try { await runLoginAnalysisNow(); res.json({ ok: true, ...loginMonitorStatus() }); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); } });
+
+// 게스트 네트워크 이슈(패킷드랍/에러) 분석.
+adminRouter.get('/security/net-issues', adminOnly, (req, res) => { try { res.json(analyzeNetIssues({ vcenterId: req.query.vcenterId || '', days: Number(req.query.days) || 7 })); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); } });
+
+// 게스트 조사 스케줄(로그인 실패 / 네트워크 이슈) — vCenter별·OS별·주기.
+adminRouter.get('/security/guest-scans', adminOnly, (_req, res) => res.json({ jobs: listGuestScans() }));
+adminRouter.put('/security/guest-scans', adminOnly, (req, res) => res.json(saveGuestScan(req.body || {})));
+adminRouter.delete('/security/guest-scans/:id', adminOnly, (req, res) => res.json({ ok: removeGuestScan(req.params.id) }));
+adminRouter.post('/security/guest-scans/:id/run', adminOnly, async (req, res) => { try { res.json(await runGuestScanNow(req.params.id)); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); } });
 
 function existsFile(p) {
   try { return fs.statSync(p).isFile(); } catch { return false; }
