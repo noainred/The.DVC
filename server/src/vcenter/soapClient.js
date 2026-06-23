@@ -276,7 +276,8 @@ export class VimSoapClient {
       const ent = /<entity type="HostSystem">([^<]+)<\/entity>/.exec(blk)?.[1];
       if (!ent) continue;
       const vals = [...blk.matchAll(/<value>(\d+)<\/value>/g)].map((x) => Number(x[1]));
-      if (vals.length) out.set(ent, Math.round(vals.reduce((a, b) => a + b, 0) / vals.length));
+      // vSphere percent 카운터는 1/100 퍼센트 단위(예: 3800 = 38%). ÷100 후 0~100 클램프.
+      if (vals.length) out.set(ent, Math.max(0, Math.min(100, Math.round(vals.reduce((a, b) => a + b, 0) / vals.length / 100))));
     }
     return out;
   }
