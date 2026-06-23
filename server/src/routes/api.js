@@ -555,9 +555,12 @@ function buildGpuInventory(snap, vcenterId) {
     }
   }
   const utils = hostsWithGpu.map((x) => x.utilPct).filter((x) => x != null);
+  // GPU를 사용하는 VM 수(스코프 내, 템플릿 제외) — 상단 요약용.
+  const gpuVmCount = (snap.vms || []).filter((v) => v.gpu && !v.template && (!vcenterId || v.vcenterId === vcenterId)).length;
   return {
     totalGpus,
     hostsWithGpu: hostsWithGpu.length,
+    gpuVmCount,
     utilReporting: utils.length,
     avgUtilPct: utils.length ? Math.round(utils.reduce((a, b) => a + b, 0) / utils.length) : null,
     byMode,

@@ -1919,6 +1919,14 @@ function Gpu({ scope }) {
 
   return (
     <>
+      {/* 상단 요약 — 선택 범위에서 몇 개 호스트의 몇 개 VM이 GPU를 사용하는지 한눈에 */}
+      <div className="card" style={{ padding: '12px 16px', marginBottom: 14, borderLeft: '3px solid var(--accent,#2563eb)' }}>
+        <span style={{ fontSize: 15 }}>
+          <b style={{ color: 'var(--accent)' }}>{scope || '전체'}</b> 범위 —
+          GPU 호스트 <b>{data.hostsWithGpu}</b>대에서 VM <b>{data.gpuVmCount ?? 0}</b>대가 GPU 사용 중
+          <span className="muted" style={{ fontSize: 13 }}>{' '}(총 GPU {data.totalGpus}장 · vGPU {data.byMode?.vgpu ?? 0} · 패스쓰루 {data.byMode?.passthrough ?? 0})</span>
+        </span>
+      </div>
       <div className="kpis" style={{ marginBottom: 14 }}>
         <Card label="총 GPU" value={data.totalGpus} accent="var(--accent)" meta={`GPU 호스트 ${data.hostsWithGpu}`} />
         <Card label="평균 GPU 사용률" value={data.avgUtilPct == null ? '—' : `${data.avgUtilPct}%`} meta={data.utilReporting ? `${data.utilReporting} 호스트 보고` : '사용률 미보고'} />
