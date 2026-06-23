@@ -5,6 +5,7 @@ import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianG
 import { VmRemoteButton } from '../components/VmRemote.jsx';
 import Topology3D from './Topology3D.jsx';
 import { ServiceCheck, NetworkCheck, VmwareConfigBackup } from './DavinciChecks.jsx';
+import NetTrafficAnalysis from './NetTrafficAnalysis.jsx';
 
 // IP 확인 출처 배지: vCenter 인식 / Ping(TCP)스캔 / 둘 다
 const DISCOVERY = { vcenter: ['vCenter', 'blue'], scan: ['Ping스캔', 'teal'], both: ['vCenter+스캔', 'green'] };
@@ -40,6 +41,7 @@ const TOOLS = [
   { k: 'topo3d', icon: '🌐', label: '구성도 (3D)', desc: '설정된 구성을 3D 네트워크로 — 줌인/아웃·회전·VM 펼치기' },
   { k: 'davinci-svc', icon: '🩺', label: '다빈치 서비스 점검', desc: '포탈 내부 서비스/수집기(vCenter·NSX·전력·지표·GPU·알림·백업·에이전트) 상태 한눈에' },
   { k: 'net-check', icon: '📡', label: '글로벌 네트워크 점검', desc: '전세계 vCenter·NSX 제어플레인 도달성·RTT + 네트워크 객체 요약' },
+  { k: 'net-traffic', icon: '🔬', label: '네트워크 트래픽 분석', desc: '두 서버 간 tcpdump 캡처·분석(핸드셰이크·재전송·RST) + 로그 자체 장애 탐지' },
   { k: 'vmware-backup', icon: '🗃️', label: 'VMware 구성 백업', desc: '사이트의 수집 구성(호스트·VM·DS·네트워크·NSX) 스냅샷 내보내기' },
   { k: 'backup', icon: '💾', label: '백업', desc: '설정 백업/복원 (준비 중)', disabled: true, comingSoon: true },
   { k: 'massdeploy', icon: '🚀', label: '대용량 배포', desc: '대량 배포 (준비 중)', disabled: true, comingSoon: true },
@@ -145,6 +147,7 @@ function ToolPanel({ tool, onBack }) {
       {tool === 'topo3d' && <Topology3D />}
       {tool === 'davinci-svc' && <ServiceCheck />}
       {tool === 'net-check' && <NetworkCheck />}
+      {tool === 'net-traffic' && <NetTrafficAnalysis />}
       {tool === 'vmware-backup' && <VmwareConfigBackup />}
       {tool === 'shutdown' && <Shutdown />}
     </>

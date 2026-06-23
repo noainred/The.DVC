@@ -42,6 +42,8 @@ import { loadBackupSettings, saveBackupSettings, backupStatus } from '../backup/
 import { saveLogSettings } from '../logs/settings.js';
 import { logStatus, rescheduleLogPoller, pollLogsOnce } from '../logs/poller.js';
 import { resetLogsDb } from '../logs/db.js';
+import { runTrafficCapture } from '../net/tcpdump.js';
+import { analyzeLogsForIssues } from '../net/logIssues.js';
 import path from 'node:path';
 import {
   listRegistry as listNsx, addManager as addNsx, updateManager as updateNsx,
@@ -807,6 +809,27 @@ adminRouter.put('/vclogs/settings', adminOnly, (req, res) => {
 });
 adminRouter.post('/vclogs/collect', adminOnly, async (_req, res) => {
   try { res.json({ ok: true, ...(await pollLogsOnce()) }); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+});
+
+// ───────────────────────── 네트워크 트래픽 분석 ─────────────────────────
+// 두 서버 간 tcpdump 캡처 후 분석(관리자 전용, SSH+root 필요).
+// Body: { hostA:{host,port,username,password,privateKey}, peer, iface, seconds, maxPackets, useSudo }
+adminRouter.post('/net/capture', adminOnly, async (req, res) => {
+  const b = req.body || {};
+  if (!b.hostA?.host || !b.hostA?.username) return res.status(400).json({ ok: false, reason: 'A 서버 SSH 접속정보(host/username)가 필요합니다.' });
+  if (!b.peer) return res.status(400).json({ ok: false, reason: '대상 서버(B) IP가 필요합니다.' });
+  try {
+    const r = await runTrafficCapture({
+      hostA: { host: b.hostA.host, port: b.hostA.port || 22, username: b.hostA.username, password: b.hostA.password, privateKey: b.hostA.privateKey || undefined },
+      peer: String(b.peer).trim(), iface: b.iface || 'any', seconds: b.seconds, maxPackets: b.maxPackets, useSudo: b.useSudo !== false,
+    });
+    res.json(r);
+  } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+});
+// 로그 자체 분석(장애/이슈 탐지).
+adminRouter.get('/net/log-issues', adminOnly, async (req, res) => {
+  try { res.json(await analyzeLogsForIssues({ vcenterId: req.query.vcenterId || '', days: Number(req.query.days) || 7 })); }
+  catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 
 function existsFile(p) {
