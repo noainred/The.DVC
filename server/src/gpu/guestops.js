@@ -244,4 +244,102 @@ export function parseNvidiaSmiCsv(text) {
   return { count: gpus.length, utilPct: avg(gpus.map((g) => g.utilPct)), memUsedPct: memTotal ? Math.round((memUsed / memTotal) * 100) : null, migEnabled: migCount, gpus };
 }
 
+// ───────────────────── 게스트 계정 추가(권한 작업) ─────────────────────
+// vim25 게스트 작업으로 게스트 OS에 sudo 사용자 계정을 추가한다. 비밀번호는 셸 인자/스크립트에
+// 넣지 않고 별도 파일로 업로드해 `chpasswd < file`로 적용 → 노출/인용 문제 회피. root 게스트 권한 필요.
+
+const URL_DECODE = (s) => String(s)
+  .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+  .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+  .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(Number(d))).replace(/&amp;/g, '&');
+
+function candidateUrls(c, url, preferHosts = []) {
+  const vcHost = (c.vc.host || '').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  const swapped = [...new Set([...preferHosts.filter(Boolean), vcHost])].map((h) => swapHost(url, h));
+  return [...new Set([url, ...swapped])];
+}
+
+/** 게스트로 파일 업로드(InitiateFileTransferToGuest → HTTP PUT). posixPerm=8진수(linux). */
+async function writeGuestFile(c, fileManager, vmRef, auth, guestPath, content, { posixPerm = 0o600, isWindows = false, preferHosts = [], timeoutMs = 8000 } = {}) {
+  const bytes = Buffer.byteLength(content, 'utf8');
+  const attrs = isWindows
+    ? '<fileAttributes xsi:type="GuestWindowsFileAttributes"></fileAttributes>'
+    : `<fileAttributes xsi:type="GuestPosixFileAttributes"><permissions>${posixPerm}</permissions></fileAttributes>`;
+  let xml;
+  try {
+    xml = await c.callRaw(`<InitiateFileTransferToGuest xmlns="urn:vim25"><_this type="GuestFileManager">${fileManager}</_this>${vmRef}${auth}` +
+      `<guestFilePath>${esc(guestPath)}</guestFilePath>${attrs}<fileSize>${bytes}</fileSize><overwrite>true</overwrite></InitiateFileTransferToGuest>`);
+  } catch (e) { return { ok: false, error: `업로드요청 실패: ${cleanGuestError(e.message)}` }; }
+  const url = URL_DECODE(/<returnval[^>]*>([^<]+)<\/returnval>/.exec(xml)?.[1] || '');
+  if (!url) return { ok: false, error: '업로드 URL을 반환하지 않음' };
+  const tries = [];
+  for (const cand of candidateUrls(c, url, preferHosts)) {
+    try {
+      const res = await fetch(cand, { method: 'PUT', body: content, headers: { 'Content-Type': 'application/octet-stream', 'Content-Length': String(bytes) }, signal: AbortSignal.timeout(timeoutMs) });
+      if (res.ok) return { ok: true };
+      tries.push(`HTTP${res.status}`);
+    } catch (e) { tries.push(String(e.message).slice(0, 50)); }
+  }
+  return { ok: false, error: `업로드 실패: ${tries.join(' | ')}` };
+}
+
+/** 게스트에 스크립트(+부가 파일)를 올려 실행하고 stdout/stderr/exitCode를 회수. */
+export async function runGuestScript(c, vmMoref, creds, scriptText, { isWindows = false, dlHosts = [], timeoutMs = 30_000, files = [] } = {}) {
+  const { processManager, fileManager } = await guestManagers(c);
+  const auth = authXml(creds);
+  const vmRef = `<vm type="VirtualMachine">${vmMoref}</vm>`;
+  const ts = Date.now();
+  const scriptPath = isWindows ? `C:\\Windows\\Temp\\portal-acct-${ts}.bat` : `/tmp/portal-acct-${ts}.sh`;
+  const outFile = isWindows ? `C:\\Windows\\Temp\\portal-acct-${ts}.out` : `/tmp/portal-acct-${ts}.out`;
+  const errFile = isWindows ? `C:\\Windows\\Temp\\portal-acct-${ts}.err` : `/tmp/portal-acct-${ts}.err`;
+  for (const f of files) { const w = await writeGuestFile(c, fileManager, vmRef, auth, f.path, f.content, { posixPerm: f.perm ?? 0o600, isWindows, preferHosts: dlHosts }); if (!w.ok) throw new Error(`파일 업로드 실패(${f.path}): ${w.error}`); }
+  const ws = await writeGuestFile(c, fileManager, vmRef, auth, scriptPath, scriptText, { posixPerm: 0o600, isWindows, preferHosts: dlHosts });
+  if (!ws.ok) throw new Error(`스크립트 업로드 실패: ${ws.error}`);
+  const prog = isWindows
+    ? { path: 'C:\\Windows\\System32\\cmd.exe', args: `/c "${scriptPath}" 1>"${outFile}" 2>"${errFile}"` }
+    : { path: '/bin/sh', args: `-c "sh ${scriptPath} 1>${outFile} 2>${errFile}"` };
+  const startXml = await c.callRaw(`<StartProgramInGuest xmlns="urn:vim25"><_this type="GuestProcessManager">${processManager}</_this>${vmRef}${auth}` +
+    `<spec xsi:type="GuestProgramSpec"><programPath>${esc(prog.path)}</programPath><arguments>${esc(prog.args)}</arguments></spec></StartProgramInGuest>`);
+  const pid = /<returnval>(\d+)<\/returnval>/.exec(startXml)?.[1];
+  if (!pid) { const fault = /<faultstring>([^<]*)<\/faultstring>/.exec(startXml)?.[1] || startXml.slice(0, 160); throw new Error(`StartProgramInGuest 실패: ${cleanGuestError(fault)}`); }
+  const deadline = Date.now() + timeoutMs; let exitCode = null, ended = false;
+  while (Date.now() < deadline) {
+    await sleep(1000);
+    const listXml = await c.callRaw(`<ListProcessesInGuest xmlns="urn:vim25"><_this type="GuestProcessManager">${processManager}</_this>${vmRef}${auth}<pids>${pid}</pids></ListProcessesInGuest>`).catch(() => '');
+    if (/<endTime>/.test(listXml)) { ended = true; const ec = /<exitCode>(-?\d+)<\/exitCode>/.exec(listXml); exitCode = ec ? Number(ec[1]) : null; break; }
+  }
+  const dl = Math.min(timeoutMs, 8000);
+  const out = await readGuestFile(c, fileManager, vmRef, auth, outFile, dl, dlHosts, vmMoref);
+  const err = await readGuestFile(c, fileManager, vmRef, auth, errFile, dl, dlHosts, `${vmMoref}.err`);
+  for (const p of [scriptPath, outFile, errFile, ...files.map((f) => f.path)]) deleteGuestFile(c, fileManager, vmRef, auth, p);
+  return { ok: exitCode === 0 || (exitCode == null && ended), exitCode, ended, stdout: (out.text || '').trim().slice(0, 2000), stderr: (err.text || '').trim().slice(0, 2000) };
+}
+
+const USERRE = /^[a-z_][a-z0-9_-]{0,31}$/; // 안전한 사용자명만(셸 주입 방지)
+
+/** 게스트 OS에 사용자 계정 추가(+sudo). root 게스트 자격증명 필요. */
+export async function addGuestUser(c, vmMoref, creds, { username, password, sudo = true, nopasswd = false, isWindows = false, dlHosts = [], timeoutMs = 30_000 } = {}) {
+  const u = String(username || '');
+  if (!isWindows && !USERRE.test(u)) throw new Error('사용자명 형식 오류(영소문자/숫자/_/-, 첫 글자 영문 또는 _, 32자 이내).');
+  if (isWindows && !/^[A-Za-z0-9._-]{1,20}$/.test(u)) throw new Error('Windows 사용자명 형식 오류.');
+  if (!password) throw new Error('비밀번호가 필요합니다.');
+  const ts = Date.now();
+  if (isWindows) {
+    const p = String(password).replace(/"/g, '');
+    const script = `@echo off\r\nnet user "${u}" "${p}" /add\r\nnet localgroup Administrators "${u}" /add\r\nnet user "${u}"\r\n`;
+    return runGuestScript(c, vmMoref, creds, script, { isWindows: true, dlHosts, timeoutMs });
+  }
+  const pwPath = `/tmp/portal-pw-${ts}`;
+  const lines = [
+    '#!/bin/sh', 'set -e',
+    `if id "${u}" >/dev/null 2>&1; then echo "user-exists"; else useradd -m -s /bin/bash "${u}"; echo "user-created"; fi`,
+    `chpasswd < "${pwPath}"; rm -f "${pwPath}"; echo "password-set"`,
+  ];
+  if (sudo) lines.push(`if getent group wheel >/dev/null 2>&1; then usermod -aG wheel "${u}"; else usermod -aG sudo "${u}"; fi; echo "sudo-group-added"`);
+  if (sudo && nopasswd) lines.push(`printf '%s ALL=(ALL) NOPASSWD:ALL\\n' "${u}" > /etc/sudoers.d/${u}; chmod 440 /etc/sudoers.d/${u}; (visudo -cf /etc/sudoers.d/${u} || rm -f /etc/sudoers.d/${u}); echo "nopasswd-set"`);
+  lines.push(`id "${u}"`);
+  // 비밀번호는 스크립트가 아니라 별도 파일(0600)로만 전달 → 셸/프로세스 인자 노출 없음.
+  return runGuestScript(c, vmMoref, creds, lines.join('\n') + '\n', { isWindows: false, dlHosts, timeoutMs, files: [{ path: pwPath, content: `${u}:${password}\n`, perm: 0o600 }] });
+}
+
 export { VimSoapClient };
