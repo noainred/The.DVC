@@ -12,6 +12,7 @@ import { setGuestGpu } from '../gpu/store.js';
 import { setGpuGuestDiag } from '../central/gpuGuestDiag.js';
 import { takePingJobs, setPingResults } from '../central/pingJobs.js';
 import { setAgentConfig } from '../central/agentConfig.js';
+import { takeLogQueries, setLogQueryResult } from '../central/logQueries.js';
 import { loadScanSettings, mergeScanResults, recordAgentReport } from '../ipam/scanStore.js';
 
 export const centralRouter = Router();
@@ -120,6 +121,23 @@ centralRouter.post('/agent-config', (req, res) => {
   res.json({ ok: true, agent: b.agent, files: Object.keys(files).length });
 });
 function require_basename(p) { return String(p).split(/[\\/]/).pop().slice(0, 200); }
+
+// 엣지 로그 연합 조회: 에이전트가 자기 vCenter들의 대기 조회를 인출 → 로컬 로그 DB 조회 → 결과 보고.
+centralRouter.get('/log-queries', (req, res) => {
+  if (!config.central.token) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: '토큰 불일치' });
+  const vcs = String(req.query.vcenters || '').split(',').map((s) => s.trim()).filter(Boolean);
+  res.json({ ok: true, queries: takeLogQueries(vcs) });
+});
+// Body: { reqId, vcenterId, total, rows, dbKind }
+centralRouter.post('/log-query-result', (req, res) => {
+  if (!config.central.token) return res.status(404).json({ ok: false });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: '토큰 불일치' });
+  const b = req.body || {};
+  if (!b.reqId) return res.status(400).json({ ok: false, reason: 'reqId가 필요합니다.' });
+  setLogQueryResult(String(b.reqId), b);
+  res.json({ ok: true });
+});
 
 // Agent pulls its IP-scan assignment (TCP connect scan config) by name.
 centralRouter.get('/ip-scan-assignment', (req, res) => {

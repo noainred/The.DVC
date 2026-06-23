@@ -1,6 +1,17 @@
 {
   "notes": [
     {
+      "version": "1.95.0",
+      "date": "2026-06-23",
+      "title": "엣지 로그 연합 조회 — 중앙에서 조회만 중계, 데이터는 엣지에 보관",
+      "notes": [
+        "설정 › vCenter 로그 보관 뷰어에서 엣지 보관 vCenter를 선택하면 연합 조회 — 데이터는 엣지 포탈에 그대로 남고 조회 결과(페이지)만 중앙으로 중계.",
+        "흐름: UI POST /api/tools/vclogs/federate(요청) → 에이전트 GET /api/central/log-queries(인출) → 로컬 로그 DB 조회 → POST /api/central/log-query-result(보고) → UI GET 폴링.",
+        "로그 출처 표시(/api/tools/vclogs/sources): 로컬 보관 vs 엣지 보관 구분. 엣지 조회 시 담당 에이전트 배지 표시.",
+        "에이전트 로그조회 워커(4초 폴링) 자동 기동(CENTRAL_URL 설정 시)."
+      ]
+    },
+    {
       "version": "1.94.0",
       "date": "2026-06-23",
       "title": "vCenter 로그 장기 보관(엣지 로컬 저장·경로/용량/기간 설정) + 글로벌 GPU 사용율 KPI",
