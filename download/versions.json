@@ -1,6 +1,21 @@
 {
-  "latest": "1.89.1",
+  "latest": "1.90.0",
   "versions": [
+    {
+      "version": "1.90.0",
+      "tar_gz": "vmware-portal-1.90.0.tar.gz",
+      "size_bytes": 10197417,
+      "sha256": "2375e904c700bb40afcbf31572ff8d288a53ec8d05b9632b1d3c9c790abe40ff",
+      "installer": "vmware-portal-offline-1.90.0-el9-x64.tar.gz",
+      "installer_size_bytes": 67431361,
+      "installer_sha256": "46655704ff02c4d68e3ebb440c253ee62efe78fb0f0db16ee49d8972d42c724f",
+      "installer_cent9": "vmware-portal-offline-1.90.0-cent9-x64.tar.gz",
+      "installer_cent9_size_bytes": 67438120,
+      "installer_cent9_sha256": "b561991825d218a03856a7d77a395ef203753c571a34398d5c899382e368ffe9",
+      "windows": "vmware-portal-win-1.90.0-x64.zip",
+      "windows_size_bytes": 50110269,
+      "windows_sha256": "ca5cf941df4183f72191e9699f19f2c68de679b0fddaf5f563e82b1451fbe27c"
+    },
     {
       "version": "1.89.1",
       "tar_gz": "vmware-portal-1.89.1.tar.gz",
