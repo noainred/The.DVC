@@ -1,6 +1,14 @@
 {
   "notes": [
     {
+      "version": "1.86.4",
+      "date": "2026-06-23",
+      "title": "vGPU 사용률 수집 진단 로그 — 카운터 존재/수집 호스트 수 표시",
+      "notes": [
+        "vGPU 사용률(gpu.utilization) 수집 시 '[collect] <vc> vGPU 사용률 수집: 대상 N · 값 M (카운터 OK)' 또는 '카운터 없음' 로그를 남겨, 사용률이 '—'로 안 뜰 때 원인(카운터 부재/폴링 미수행/캐시)을 구분 가능"
+      ]
+    },
+    {
       "version": "1.86.3",
       "date": "2026-06-23",
       "title": "버그수정 — vCenter host에 스킴(https://) 없으면 'fetch failed: unknown scheme'로 수집 실패",

@@ -806,6 +806,9 @@ export async function collectFromVCenterSoap(vc) {
               const map = await c.queryHostGpuUtil(cid, stale);
               // 카운터가 존재(=수집 가능)하면 GPU 호스트는 값이 없어도(유휴) 0으로 기록 → '—' 대신 '0' 표시.
               for (const ref of stale) _gpuUtilCache.set(`${vc.id}:${ref}`, { pct: map.get(ref) ?? 0, at: now });
+              console.log(`[collect] ${vc.id} vGPU 사용률 수집: 대상 ${stale.length} · 값 ${map.size} (gpu.utilization 카운터 OK)`);
+            } else {
+              console.warn(`[collect] ${vc.id} gpu.utilization 카운터 없음 — vGPU 사용률 미수집(NVIDIA vGPU Manager VIB/드라이버 또는 vCenter 카운터 확인)`);
             }
           }
           // 캐시된 사용률을 GPU 보유 호스트에 적용(throttle 주기 사이에도 마지막 값 유지).
