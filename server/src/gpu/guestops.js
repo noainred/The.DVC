@@ -97,16 +97,16 @@ async function readGuestFile(c, fileManager, vmRef, auth, guestPath, timeoutMs, 
   // 마지막에 등록된 vc.host(프록시)로 폴백. path/query(토큰)는 보존하고 호스트만 교체.
   const vcHost = (c.vc.host || '').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
   const hosts = [...new Set([...preferHosts.filter(Boolean), vcHost])];
-  let lastErr = '';
+  const tries = []; // 진단: 시도한 모든 호스트의 결과를 한 번에 보여준다.
   for (const host of hosts) {
     const cand = swapHost(url, host);
     try {
       const res = await fetch(cand, { signal: AbortSignal.timeout(timeoutMs) });
       if (res.ok) return { text: await res.text(), error: null };
-      lastErr = `HTTP ${res.status} (${host})`;
-    } catch (e) { lastErr = `${e.message} (${host})`; }
+      tries.push(`${host}=HTTP${res.status}`);
+    } catch (e) { tries.push(`${host}=${String(e.message || 'err').slice(0, 40)}`); }
   }
-  return { text: '', error: `파일 다운로드 실패: ${lastErr}` };
+  return { text: '', error: `파일 다운로드 실패: ${tries.join(' | ')}` };
 }
 
 function deleteGuestFile(c, fileManager, vmRef, auth, guestPath) {
