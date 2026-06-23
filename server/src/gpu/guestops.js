@@ -47,7 +47,7 @@ function cleanGuestError(msg) {
  *   - login: ValidateCredentialsInGuest 성공 여부(게스트에 명령 실행 X, 인증만 확인)
  *   - read : nvidia-smi로 GPU 사용률을 실제로 읽었는지
  */
-export async function testVmGuest(c, vmMoref, creds, { isWindows = false, timeoutMs = 15_000 } = {}) {
+export async function testVmGuest(c, vmMoref, creds, { isWindows = false, timeoutMs = 15_000, dlHosts = [] } = {}) {
   const out = { login: false, read: false, error: null, sample: null };
   const vmRef = `<vm type="VirtualMachine">${vmMoref}</vm>`;
   const auth = authXml(creds);
@@ -64,7 +64,7 @@ export async function testVmGuest(c, vmMoref, creds, { isWindows = false, timeou
   } catch (e) { out.error = cleanGuestError(e.message); return out; }
   // 2) 데이터 읽기 — nvidia-smi 실행 후 파싱. 실패 시 구체 사유(stderr/다운로드)를 그대로 표시.
   try {
-    const r = await collectVmGpu(c, vmMoref, creds, { isWindows, timeoutMs });
+    const r = await collectVmGpu(c, vmMoref, creds, { isWindows, timeoutMs, dlHosts });
     if (r && r.utilPct != null) { out.read = true; out.sample = { gpus: r.count, utilPct: r.utilPct, memUsedPct: r.memUsedPct }; }
     else out.error = 'nvidia-smi 출력 없음 — 게스트에 NVIDIA 드라이버/nvidia-smi 확인';
   } catch (e) { out.error = e.guestDiag ? e.message : cleanGuestError(e.message); }
@@ -78,7 +78,11 @@ function authXml(creds) {
 
 // 게스트 파일 1개를 InitiateFileTransferFromGuest → HTTP GET 으로 회수.
 // 반환 { text, error } — error 가 있으면 다운로드 단계(포탈→ESXi 도달/인증서/HTTP) 실패.
-async function readGuestFile(c, fileManager, vmRef, auth, guestPath, timeoutMs) {
+// path/query(토큰)는 건드리지 않고 호스트(+포트)만 교체 — new URL()의 재인코딩으로 토큰이
+// 깨지지 않게 정규식으로 스킴 다음 호스트만 바꾼다('*' 호스트도 포함).
+const swapHost = (u, host) => u.replace(/^(https?:\/\/)[^/]+/, `$1${host}`);
+
+async function readGuestFile(c, fileManager, vmRef, auth, guestPath, timeoutMs, preferHosts = []) {
   let ftXml;
   try {
     ftXml = await c.callRaw(
@@ -87,18 +91,15 @@ async function readGuestFile(c, fileManager, vmRef, auth, guestPath, timeoutMs) 
   } catch (e) { return { text: '', error: cleanGuestError(e.message) }; }
   const url = /<url>([^<]+)<\/url>/.exec(ftXml)?.[1];
   if (!url) return { text: '', error: '파일 전송 URL을 반환하지 않음' };
-  // 파일 전송 URL의 호스트 처리:
-  //  - '*' 와일드카드 = '연결한 서버(vCenter)'를 의미 → vCenter 호스트로 치환.
-  //  - 실제 호스트(ESXi/vCenter FQDN)가 박힌 경우 그대로 시도(같은 망이면 도달).
-  // 토큰은 그 URL을 발급한 호스트에서만 유효하므로, 호스트를 함부로 vCenter로 강제하면
-  // 404가 난다(1.83.1 회귀). 그래서 (1) 원본 호스트로 먼저, (2) 실패 시 vCenter로 폴백.
+  // 파일 전송 URL의 호스트가 '*'(=연결한 서버)/FQDN으로 오는데, 프록시 경유 등록이면
+  // 그 FQDN이 포탈에서 도달 안 되거나(또는 vCenter가 직접 서빙 안 해) 404가 난다.
+  // 그래서 호출자가 준 후보(vCenter 실제 IP → ESXi IP → ESXi FQDN)로 먼저 시도하고,
+  // 마지막에 등록된 vc.host(프록시)로 폴백. path/query(토큰)는 보존하고 호스트만 교체.
   const vcHost = (c.vc.host || '').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
-  const primary = url.replace('://*', `://${vcHost}`);
-  const candidates = [primary];
-  try { const u = new URL(primary); if (u.host !== vcHost) { u.host = vcHost; candidates.push(u.toString()); } } catch { /* keep primary */ }
+  const hosts = [...new Set([...preferHosts.filter(Boolean), vcHost])];
   let lastErr = '';
-  for (const cand of candidates) {
-    const host = (() => { try { return new URL(cand).host; } catch { return '?'; } })();
+  for (const host of hosts) {
+    const cand = swapHost(url, host);
     try {
       const res = await fetch(cand, { signal: AbortSignal.timeout(timeoutMs) });
       if (res.ok) return { text: await res.text(), error: null };
@@ -118,7 +119,7 @@ function deleteGuestFile(c, fileManager, vmRef, auth, guestPath) {
  * stdout은 outFile, stderr는 errFile로 분리 캡처해, 결과가 비면 stderr/다운로드
  * 사유를 담아 Error를 던진다(테스트에서 정확한 원인 표시). 폴러는 .catch(()=>null).
  */
-export async function collectVmGpu(c, vmMoref, creds, { isWindows, timeoutMs = 20_000 } = {}) {
+export async function collectVmGpu(c, vmMoref, creds, { isWindows, timeoutMs = 20_000, dlHosts = [] } = {}) {
   const { processManager, fileManager } = await guestManagers(c);
   const auth = authXml(creds);
   const vmRef = `<vm type="VirtualMachine">${vmMoref}</vm>`;
@@ -149,8 +150,8 @@ export async function collectVmGpu(c, vmMoref, creds, { isWindows, timeoutMs = 2
     if (/<endTime>/.test(listXml)) break; // 종료됨
   }
 
-  // 5) stdout 회수 → 파싱
-  const outRes = await readGuestFile(c, fileManager, vmRef, auth, outFile, timeoutMs);
+  // 5) stdout 회수 → 파싱 (다운로드는 vCenter 실제 IP/ESXi IP 후보 우선)
+  const outRes = await readGuestFile(c, fileManager, vmRef, auth, outFile, timeoutMs, dlHosts);
   const parsed = parseNvidiaSmiCsv(outRes.text);
   if (parsed) {
     deleteGuestFile(c, fileManager, vmRef, auth, outFile);
@@ -159,7 +160,7 @@ export async function collectVmGpu(c, vmMoref, creds, { isWindows, timeoutMs = 2
   }
 
   // 6) 비었으면 stderr 회수해 진단 후 정리 + 구체 사유로 throw
-  const errRes = await readGuestFile(c, fileManager, vmRef, auth, errFile, timeoutMs);
+  const errRes = await readGuestFile(c, fileManager, vmRef, auth, errFile, timeoutMs, dlHosts);
   deleteGuestFile(c, fileManager, vmRef, auth, outFile);
   deleteGuestFile(c, fileManager, vmRef, auth, errFile);
   const stderrLine = (errRes.text || '').trim().split(/\r?\n/)[0];

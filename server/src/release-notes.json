@@ -1,6 +1,16 @@
 {
   "notes": [
     {
+      "version": "1.83.3",
+      "date": "2026-06-23",
+      "title": "게스트 파일 회수를 vCenter 실제 IP/ESXi IP로 시도 — 프록시 경유 등록 환경 대응",
+      "notes": [
+        "vCenter를 프록시(FQDN) 경유로 등록한 환경에서 파일 전송 URL의 FQDN이 404나던 문제 대응 — 호스트가 보고하는 vCenter 실제 IP(summary.managementServerIp)와 ESXi 관리 IP(config.network.vnic)를 수집",
+        "다운로드를 'vCenter 실제 IP → ESXi IP → ESXi FQDN → 등록된 vc.host(프록시)' 순으로 시도(토큰 보존, 호스트만 교체). 첫 성공을 사용",
+        "실패 시 어느 호스트/상태(예: HTTP 404 (10.x.x.x))인지 표시. ※ vCenter 실제 IP는 업그레이드 후 다음 폴링에서 채워짐"
+      ]
+    },
+    {
       "version": "1.83.2",
       "date": "2026-06-23",
       "title": "게스트 GPU 파일 회수 404 수정 — 원본 호스트 우선 + vCenter 폴백 + 실패 호스트 표시",

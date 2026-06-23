@@ -349,6 +349,9 @@ adminRouter.post('/gpu-guest/test', adminOnly, async (req, res) => {
   if (!vcenterId || !Array.isArray(items) || !items.length) return res.status(400).json({ error: 'vcenterId + items 필요' });
   const snap = store.get();
   const vmById = new Map((snap.vms || []).filter((v) => v.vcenterId === vcenterId).map((v) => [v.id, v]));
+  // 호스트명 → 다운로드 후보 호스트(vCenter 실제 IP → ESXi IP → ESXi FQDN).
+  const dlByHost = new Map();
+  for (const h of snap.hosts || []) if (h.vcenterId === vcenterId) dlByHost.set(h.name, [h.mgmtServerIp, h.mgmtIp, h.name].filter(Boolean));
   const s = loadGpuGuestSettings();
 
   // 데모(mock) 환경: 실제 게스트가 없으므로 합성 결과.
@@ -384,7 +387,7 @@ adminRouter.post('/gpu-guest/test', adminOnly, async (req, res) => {
         else creds = resolveVmCreds(s, vcenterId, it.vmId);
         if (!creds || !creds.username) { results[i] = { vmId: it.vmId, login: false, read: false, error: '계정 없음' }; continue; }
         const isWindows = /windows/i.test(v.guestOS || '');
-        const r = await testVmGuest(c, String(v.id).split(':').slice(1).join(':'), creds, { isWindows, timeoutMs: s.timeoutMs }).catch((e) => ({ login: false, read: false, error: e.message }));
+        const r = await testVmGuest(c, String(v.id).split(':').slice(1).join(':'), creds, { isWindows, timeoutMs: s.timeoutMs, dlHosts: dlByHost.get(v.host) || [] }).catch((e) => ({ login: false, read: false, error: e.message }));
         results[i] = { vmId: it.vmId, ...r };
       }
     });

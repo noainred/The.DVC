@@ -73,6 +73,9 @@ async function pollLive(snap, vc, s) {
     && vmUsesPassthroughGpu(v) && v.powerState === 'POWERED_ON' && v.toolsStatus === 'RUNNING' && resolveVmCreds(s, vc.id, v.id))
     .slice(0, s.maxVmsPerVcenter || 1000);
   if (!cands.length) return { hosts: [], vms: [] };
+  // 호스트명 → 다운로드 후보 호스트(vCenter 실제 IP → ESXi IP → ESXi FQDN).
+  const dlByHost = new Map();
+  for (const h of snap.hosts || []) if (h.vcenterId === vc.id) dlByHost.set(h.name, [h.mgmtServerIp, h.mgmtIp, h.name].filter(Boolean));
   const c = new VimSoapClient(vc);
   await c.login();
   const vms = [];
@@ -83,7 +86,7 @@ async function pollLive(snap, vc, s) {
       if (!creds) return;
       const moref = String(v.id).split(':').slice(1).join(':');
       const isWindows = /windows/i.test(v.guestOS || '');
-      const r = await collectVmGpu(c, moref, creds, { isWindows, timeoutMs: s.timeoutMs }).catch(() => null);
+      const r = await collectVmGpu(c, moref, creds, { isWindows, timeoutMs: s.timeoutMs, dlHosts: dlByHost.get(v.host) || [] }).catch(() => null);
       if (r && r.utilPct != null) {
         vms.push({ vmId: v.id, host: v.host, vcenterId: vc.id, utilPct: r.utilPct, memUsedPct: r.memUsedPct });
         const arr = byHost.get(v.host) || []; arr.push(r.utilPct); byHost.set(v.host, arr);
