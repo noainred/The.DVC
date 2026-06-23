@@ -407,10 +407,12 @@ function parseGpus(xml) {
     const gtype = /<graphicsType>([^<]*)<\/graphicsType>/.exec(blk)?.[1] || '';
     const memKB = Number(/<memorySizeInKB>(\d+)<\/memorySizeInKB>/.exec(blk)?.[1] || 0);
     const pciId = /<pciId>([^<]*)<\/pciId>/.exec(blk)?.[1] || '';
-    if (deviceName || vendorName) {
-      // graphicsType: sharedDirect=vGPU(GRID), shared=vSGA. 순수 패스쓰루(DirectPath
-      // I/O) GPU는 graphicsInfo가 아니라 PCI passthrough에 나타나므로 별도 수집한다.
-      const mode = /shareddirect/i.test(gtype) ? 'vgpu' : /shared/i.test(gtype) ? 'vsga' : 'vgpu';
+    // graphicsType: sharedDirect=vGPU(GRID), shared=vSGA 만 graphics로 '관리되는' GPU.
+    // 그 외(basic/공란)는 vGPU로 단정하지 말 것 — 패스쓰루 GPU도 graphicsInfo에 빈
+    // graphicsType으로 올라올 수 있어, 여기서 vGPU로 잡으면 패스쓰루가 0이 된다.
+    // 비(非)shared GPU는 pciPassthruInfo(passthruEnabled) 검출에 맡긴다.
+    const mode = /shareddirect/i.test(gtype) ? 'vgpu' : /shared/i.test(gtype) ? 'vsga' : null;
+    if (mode && (deviceName || vendorName)) {
       out.push({
         model: deviceName || vendorName,
         vendor: vendorName,

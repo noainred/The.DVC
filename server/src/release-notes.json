@@ -1,6 +1,15 @@
 {
   "notes": [
     {
+      "version": "1.80.1",
+      "date": "2026-06-23",
+      "title": "버그수정 — 패스쓰루 GPU 호스트가 0으로 사라지던 문제(1.80.0 회귀)",
+      "notes": [
+        "graphicsInfo의 graphicsType이 sharedDirect/shared가 아닌(빈값/basic) GPU까지 무조건 vGPU로 분류해, 패스쓰루 GPU가 vGPU로 잘못 잡히고 중복제거로 패스쓰루 검출이 0이 되던 문제 수정",
+        "이제 sharedDirect=vGPU, shared=vSGA만 graphics 관리 GPU로 보고, 그 외는 pciPassthruInfo(passthruEnabled)의 패스쓰루 검출에 맡겨 패스쓰루 호스트가 정상 표시됨"
+      ]
+    },
+    {
       "version": "1.80.0",
       "date": "2026-06-23",
       "title": "버그수정 — vGPU 호스트가 '패스쓰루'로 이중 집계되던 문제 + GPU 사용량 CSV/JSON export",

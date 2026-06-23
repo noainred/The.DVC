@@ -16,7 +16,11 @@ const DEFAULTS = {
   pollIntervalMs: 60_000, // 1분
   concurrency: 4,         // 동시에 게스트 작업할 VM 수(고RTT 보호)
   timeoutMs: 20_000,      // VM당 게스트 작업 타임아웃
-  vcenters: {},           // { [vcenterId]: { enabled, username, password } }
+  maxVmsPerVcenter: 1000, // 법인당 한 주기 최대 처리 VM(폭주 방지 안전상한)
+  // { [vcenterId]: { enabled, username, password, vms: { [vmId]: { username, password } } } }
+  //  - username/password : 법인 공용(기본) 계정 — 같은 계정 쓰는 VM에 적용(선택)
+  //  - vms[vmId]         : VM별 계정 override(VM마다 계정이 다를 때). 있으면 공용보다 우선.
+  vcenters: {},
 };
 
 function readFile() {
@@ -31,6 +35,7 @@ export function loadGpuGuestSettings() {
     pollIntervalMs: clamp(p.pollIntervalMs, 10_000, 86_400_000, DEFAULTS.pollIntervalMs),
     concurrency: clamp(p.concurrency, 1, 32, DEFAULTS.concurrency),
     timeoutMs: clamp(p.timeoutMs, 3_000, 120_000, DEFAULTS.timeoutMs),
+    maxVmsPerVcenter: clamp(p.maxVmsPerVcenter, 1, 100_000, DEFAULTS.maxVmsPerVcenter),
     vcenters: p.vcenters && typeof p.vcenters === 'object' ? p.vcenters : {},
   };
 }
