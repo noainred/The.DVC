@@ -39,6 +39,9 @@ import { listInventory } from '../central/inventory.js';
 import { listAgentConfigs } from '../central/agentConfig.js';
 import { createBackup, listBackups, backupPath, deleteBackup, readBackup, restoreCentral } from '../backup/service.js';
 import { loadBackupSettings, saveBackupSettings, backupStatus } from '../backup/settings.js';
+import { saveLogSettings } from '../logs/settings.js';
+import { logStatus, rescheduleLogPoller, pollLogsOnce } from '../logs/poller.js';
+import { resetLogsDb } from '../logs/db.js';
 import path from 'node:path';
 import {
   listRegistry as listNsx, addManager as addNsx, updateManager as updateNsx,
@@ -789,6 +792,21 @@ adminRouter.post('/backup/restore/:name', adminOnly, (req, res) => {
     const r = restoreCentral(a);
     res.json({ ok: true, ...r, note: '중앙 설정 복원 완료 — 적용하려면 포탈 재시작. 복원 전 현재 설정은 자동 백업(pre-restore)됨.' });
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+});
+
+// ───────────────────────── vCenter 로그 보관 ─────────────────────────
+adminRouter.get('/vclogs/status', adminOnly, async (_req, res) => {
+  try { res.json(await logStatus()); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+});
+adminRouter.put('/vclogs/settings', adminOnly, (req, res) => {
+  const s = saveLogSettings(req.body || {});
+  if (s._pathChanged) resetLogsDb(); // 저장 경로 변경 → 다음 접근 시 새 경로로 재오픈
+  rescheduleLogPoller();
+  delete s._pathChanged;
+  res.json(s);
+});
+adminRouter.post('/vclogs/collect', adminOnly, async (_req, res) => {
+  try { res.json({ ok: true, ...(await pollLogsOnce()) }); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 
 function existsFile(p) {
