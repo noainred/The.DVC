@@ -21,60 +21,130 @@ export default function NetTrafficAnalysis() {
   );
 }
 
+function StatGrid({ st }) {
+  if (!st) return null;
+  const cells = [['패킷', st.packets], ['SYN/SYN-ACK', `${st.syn}/${st.synAck}`], ['RST', st.rst, st.rst ? '#ef4444' : ''], ['재전송', `${st.retransPct}%`, st.retransPct >= 5 ? '#f59e0b' : ''], ['RTT', st.rttMs != null ? `${st.rttMs} ms` : '—'], ['송신', `${st.toPeer.packets}p`], ['수신', `${st.fromPeer.packets}p`], ['기간', `${st.durSec}s`]];
+  return (
+    <div className="flex gap wrap" style={{ marginBottom: 8 }}>
+      {cells.map(([l, v, c]) => <div key={l} className="card" style={{ padding: '6px 10px', minWidth: 76 }}><div className="muted" style={{ fontSize: 10 }}>{l}</div><div style={{ fontSize: 15, fontWeight: 700, color: c || 'inherit' }}>{v}</div></div>)}
+    </div>
+  );
+}
+const SingleResult = ({ res }) => {
+  const st = res?.analysis?.stat; if (!st) return res?.reason ? <ErrorBox message={res.reason} /> : null;
+  return (
+    <div>
+      {res.warn && <div className="badge red" style={{ whiteSpace: 'normal', marginBottom: 8 }}>경고: {res.warn}</div>}
+      <StatGrid st={st} />
+      {res.analysis.issues.map((it, i) => <Issue key={i} it={it} />)}
+      {(st.topPorts || []).length > 0 && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>주요 포트: {st.topPorts.map((p) => `${p.port}(${p.packets})`).join(', ')}</div>}
+      {(res.sample || []).length > 0 && (
+        <details style={{ marginTop: 8 }}><summary className="muted" style={{ fontSize: 12, cursor: 'pointer' }}>원본 패킷 샘플 ({res.sample.length})</summary>
+          <pre style={{ fontSize: 11, maxHeight: '26vh', overflow: 'auto', background: 'rgba(148,163,184,.08)', padding: 8, borderRadius: 6, marginTop: 6 }}>{res.sample.join('\n')}</pre></details>
+      )}
+    </div>
+  );
+};
+const DualResult = ({ res }) => (
+  <div>
+    <div className="section-title" style={{ fontSize: 14 }}>🔀 양방향 경로 비교</div>
+    {(res.comparison?.issues || []).map((it, i) => <Issue key={i} it={it} />)}
+    <div className="flex gap wrap" style={{ marginTop: 10 }}>
+      <div style={{ flex: '1 1 340px' }}>
+        <div className="muted" style={{ fontSize: 13, marginBottom: 6, fontWeight: 600 }}>A 관점 ({res.hostA}) {res.a?.captured != null && `· ${res.a.captured}패킷`}</div>
+        <SingleResult res={res.a} />
+      </div>
+      <div style={{ flex: '1 1 340px' }}>
+        <div className="muted" style={{ fontSize: 13, marginBottom: 6, fontWeight: 600 }}>B 관점 ({res.hostB}) {res.b?.captured != null && `· ${res.b.captured}패킷`}</div>
+        <SingleResult res={res.b} />
+      </div>
+    </div>
+  </div>
+);
+
 function Capture() {
-  const [f, setF] = useState({ host: '', port: 22, username: 'root', password: '', peer: '', iface: 'any', seconds: 10, maxPackets: 2000, useSudo: true });
+  const [f, setF] = useState({ host: '', port: 22, username: 'root', password: '', peer: '', bHost: '', bPort: 22, bUser: 'root', bPass: '', iface: 'any', seconds: 10, maxPackets: 2000, useSudo: true });
+  const [mode, setMode] = useState('single'); // 'single' | 'dual'
+  const [via, setVia] = useState('central');  // 'central' | 'agent'
+  const [agent, setAgent] = useState('');
+  const [agents, setAgents] = useState([]);
   const [res, setRes] = useState(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
+  useEffect(() => { fetchJson('/admin/net/agents').then((d) => setAgents(d.agents || [])).catch(() => {}); }, []);
+
   const run = async () => {
     setBusy(true); setErr(null); setRes(null);
+    const body = {
+      via, agent, dual: mode === 'dual',
+      hostA: { host: f.host, port: Number(f.port) || 22, username: f.username, password: f.password },
+      iface: f.iface, seconds: Number(f.seconds), maxPackets: Number(f.maxPackets), useSudo: f.useSudo,
+    };
+    if (mode === 'dual') body.hostB = { host: f.bHost, port: Number(f.bPort) || 22, username: f.bUser, password: f.bPass };
+    else body.peer = f.peer;
     try {
-      const r = await postJson('/admin/net/capture', {
-        hostA: { host: f.host, port: Number(f.port) || 22, username: f.username, password: f.password },
-        peer: f.peer, iface: f.iface, seconds: Number(f.seconds), maxPackets: Number(f.maxPackets), useSudo: f.useSudo,
-      });
+      const r = await postJson('/admin/net/capture', body);
+      if (r.delegated && r.reqId) {
+        // 에이전트 위임 → 결과 폴링.
+        const maxTries = Math.ceil((Number(f.seconds) + 30) / 2);
+        for (let i = 0; i < maxTries; i++) {
+          await new Promise((x) => setTimeout(x, 2000));
+          const p = await fetchJson(`/admin/net/capture?reqId=${encodeURIComponent(r.reqId)}`);
+          if (p.state === 'done') { setRes(p.result); setBusy(false); return; }
+        }
+        setErr('에이전트 응답 시간 초과(엣지 캡처 워커 상태 확인).'); return;
+      }
       setRes(r);
     } catch (e) { setErr(e.message); } finally { setBusy(false); }
   };
-  const st = res?.analysis?.stat;
+  const canRun = f.host && (mode === 'dual' ? f.bHost : f.peer) && (via === 'central' || agent);
+
   return (
     <div className="card" style={{ padding: 16, marginBottom: 16 }}>
-      <div className="section-title" style={{ marginTop: 0, fontSize: 15 }}>🔎 tcpdump 캡처 & 분석</div>
-      <div className="flex gap wrap" style={{ alignItems: 'center', gap: 10 }}>
-        <input className="input" placeholder="A 서버 호스트/IP (SSH 접속)" style={{ width: 200 }} value={f.host} onChange={(e) => setF({ ...f, host: e.target.value })} />
-        <input className="input" placeholder="포트" style={{ width: 70 }} value={f.port} onChange={(e) => setF({ ...f, port: e.target.value })} />
-        <input className="input" placeholder="SSH 사용자" style={{ width: 110 }} value={f.username} onChange={(e) => setF({ ...f, username: e.target.value })} />
-        <input className="input" type="password" placeholder="비밀번호" style={{ width: 130 }} value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} />
-      </div>
-      <div className="flex gap wrap" style={{ alignItems: 'center', gap: 10, marginTop: 10 }}>
-        <input className="input" placeholder="대상 B 서버 IP (필터)" style={{ width: 200 }} value={f.peer} onChange={(e) => setF({ ...f, peer: e.target.value })} />
-        <input className="input" placeholder="인터페이스" style={{ width: 90 }} value={f.iface} onChange={(e) => setF({ ...f, iface: e.target.value })} title="any 또는 eth0 등" />
-        <span className="muted">시간</span><input className="input" type="number" style={{ width: 70 }} value={f.seconds} onChange={(e) => setF({ ...f, seconds: e.target.value })} /><span className="muted">초</span>
-        <span className="muted">최대</span><input className="input" type="number" style={{ width: 90 }} value={f.maxPackets} onChange={(e) => setF({ ...f, maxPackets: e.target.value })} /><span className="muted">패킷</span>
-        <label className="flex gap" style={{ alignItems: 'center', fontSize: 12, cursor: 'pointer' }}><input type="checkbox" checked={f.useSudo} onChange={(e) => setF({ ...f, useSudo: e.target.checked })} /> sudo(비root)</label>
-        <button className="login-btn" style={{ padding: '8px 16px' }} disabled={busy || !f.host || !f.peer} onClick={run}>{busy ? '캡처 중…' : '캡처 & 분석'}</button>
-      </div>
-      <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>※ A 서버에서 <code>tcpdump host {f.peer || 'B'}</code>를 {f.seconds}초/{f.maxPackets}패킷 한도로 실행합니다. tcpdump는 root 권한 필요(비root는 무비밀번호 sudo).</div>
-      {err && <div style={{ marginTop: 10 }}><ErrorBox message={err} /></div>}
-      {res && (
-        <div style={{ marginTop: 14 }}>
-          {res.warn && <div className="badge red" style={{ whiteSpace: 'normal', marginBottom: 8 }}>경고: {res.warn}</div>}
-          <div className="flex gap wrap" style={{ marginBottom: 10 }}>
-            {[['패킷', st.packets], ['SYN/SYN-ACK', `${st.syn}/${st.synAck}`], ['RST', st.rst, st.rst ? '#ef4444' : ''], ['재전송', `${st.retransPct}%`, st.retransPct >= 5 ? '#f59e0b' : ''], ['RTT', st.rttMs != null ? `${st.rttMs} ms` : '—'], ['→B', `${st.toPeer.packets}p`], ['B→', `${st.fromPeer.packets}p`], ['기간', `${st.durSec}s`]].map(([l, v, c]) => (
-              <div key={l} className="card" style={{ padding: '8px 12px', minWidth: 88 }}><div className="muted" style={{ fontSize: 11 }}>{l}</div><div style={{ fontSize: 17, fontWeight: 700, color: c || 'inherit' }}>{v}</div></div>
-            ))}
+      <div className="flex between wrap" style={{ alignItems: 'center' }}>
+        <div className="section-title" style={{ marginTop: 0, fontSize: 15 }}>🔎 tcpdump 캡처 & 분석</div>
+        <div className="flex gap" style={{ alignItems: 'center' }}>
+          <div className="flex gap" style={{ alignItems: 'center' }}>
+            {[['single', '단일'], ['dual', '동시(양방향)']].map(([k, l]) => <button key={k} className={mode === k ? 'login-btn' : 'tab'} style={{ padding: '5px 11px' }} onClick={() => setMode(k)}>{l}</button>)}
           </div>
-          <div className="section-title" style={{ fontSize: 14 }}>진단</div>
-          {res.analysis.issues.map((it, i) => <Issue key={i} it={it} />)}
-          {(st.topPorts || []).length > 0 && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>주요 포트: {st.topPorts.map((p) => `${p.port}(${p.packets})`).join(', ')}</div>}
-          {(res.sample || []).length > 0 && (
-            <details style={{ marginTop: 8 }}>
-              <summary className="muted" style={{ fontSize: 12, cursor: 'pointer' }}>원본 패킷 샘플 ({res.sample.length})</summary>
-              <pre style={{ fontSize: 11, maxHeight: '30vh', overflow: 'auto', background: 'rgba(148,163,184,.08)', padding: 8, borderRadius: 6, marginTop: 6 }}>{res.sample.join('\n')}</pre>
-            </details>
-          )}
+          <select className="select" value={via} onChange={(e) => setVia(e.target.value)} title="실행 위치">
+            <option value="central">중앙 직접 실행</option>
+            <option value="agent">엣지 에이전트 위임</option>
+          </select>
+          {via === 'agent' && <select className="select" value={agent} onChange={(e) => setAgent(e.target.value)}><option value="">에이전트 선택</option>{agents.map((a) => <option key={a} value={a}>{a}</option>)}</select>}
         </div>
+      </div>
+      {/* A 서버 */}
+      <div className="muted" style={{ fontSize: 12, margin: '8px 0 4px' }}>A 서버 (SSH 접속해 캡처)</div>
+      <div className="flex gap wrap" style={{ alignItems: 'center', gap: 10 }}>
+        <input className="input" placeholder="A 호스트/IP" style={{ width: 190 }} value={f.host} onChange={(e) => setF({ ...f, host: e.target.value })} />
+        <input className="input" placeholder="포트" style={{ width: 64 }} value={f.port} onChange={(e) => setF({ ...f, port: e.target.value })} />
+        <input className="input" placeholder="사용자" style={{ width: 100 }} value={f.username} onChange={(e) => setF({ ...f, username: e.target.value })} />
+        <input className="input" type="password" placeholder="비밀번호" style={{ width: 120 }} value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} />
+      </div>
+      {/* B 서버 */}
+      <div className="muted" style={{ fontSize: 12, margin: '10px 0 4px' }}>{mode === 'dual' ? 'B 서버 (동시 캡처)' : 'B 대상 (필터 IP)'}</div>
+      {mode === 'dual' ? (
+        <div className="flex gap wrap" style={{ alignItems: 'center', gap: 10 }}>
+          <input className="input" placeholder="B 호스트/IP" style={{ width: 190 }} value={f.bHost} onChange={(e) => setF({ ...f, bHost: e.target.value })} />
+          <input className="input" placeholder="포트" style={{ width: 64 }} value={f.bPort} onChange={(e) => setF({ ...f, bPort: e.target.value })} />
+          <input className="input" placeholder="사용자" style={{ width: 100 }} value={f.bUser} onChange={(e) => setF({ ...f, bUser: e.target.value })} />
+          <input className="input" type="password" placeholder="비밀번호" style={{ width: 120 }} value={f.bPass} onChange={(e) => setF({ ...f, bPass: e.target.value })} />
+        </div>
+      ) : (
+        <input className="input" placeholder="대상 B 서버 IP" style={{ width: 200 }} value={f.peer} onChange={(e) => setF({ ...f, peer: e.target.value })} />
       )}
+      {/* 공통 옵션 */}
+      <div className="flex gap wrap" style={{ alignItems: 'center', gap: 10, marginTop: 10 }}>
+        <span className="muted">인터페이스</span><input className="input" style={{ width: 84 }} value={f.iface} onChange={(e) => setF({ ...f, iface: e.target.value })} />
+        <span className="muted">시간</span><input className="input" type="number" style={{ width: 64 }} value={f.seconds} onChange={(e) => setF({ ...f, seconds: e.target.value })} /><span className="muted">초</span>
+        <span className="muted">최대</span><input className="input" type="number" style={{ width: 84 }} value={f.maxPackets} onChange={(e) => setF({ ...f, maxPackets: e.target.value })} /><span className="muted">패킷</span>
+        <label className="flex gap" style={{ alignItems: 'center', fontSize: 12, cursor: 'pointer' }}><input type="checkbox" checked={f.useSudo} onChange={(e) => setF({ ...f, useSudo: e.target.checked })} /> sudo(비root)</label>
+        <button className="login-btn" style={{ padding: '8px 16px' }} disabled={busy || !canRun} onClick={run}>{busy ? (via === 'agent' ? '에이전트 캡처 중…' : '캡처 중…') : (mode === 'dual' ? '동시 캡처 & 비교' : '캡처 & 분석')}</button>
+      </div>
+      <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>※ tcpdump는 root 권한 필요(비root는 무비밀번호 sudo). {mode === 'dual' ? 'A·B에서 동시에 캡처해 양쪽 관점을 비교합니다.' : `A에서 host ${f.peer || 'B'} 필터로 캡처합니다.`}{via === 'agent' && ' 엣지 에이전트가 대신 실행(사설망).'}</div>
+      {err && <div style={{ marginTop: 10 }}><ErrorBox message={err} /></div>}
+      {res && <div style={{ marginTop: 14 }}>{res.dual ? <DualResult res={res} /> : <SingleResult res={res} />}</div>}
     </div>
   );
 }

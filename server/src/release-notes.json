@@ -1,6 +1,17 @@
 {
   "notes": [
     {
+      "version": "1.97.0",
+      "date": "2026-06-23",
+      "title": "네트워크 트래픽 분석 확장 — 에이전트 위임 캡처 + 동시(양방향) 캡처 비교",
+      "notes": [
+        "에이전트 위임 캡처: 중앙이 직접 못 가는 사설망 서버는 그 망의 엣지 에이전트가 tcpdump를 대행. 실행 위치(중앙 직접/엣지 에이전트) 선택. 작업큐(central/captureJobs) + 에이전트 캡처 워커(4초 폴링) + 결과 폴링.",
+        "동시(양방향) 캡처: A와 B에서 같은 시간 동안 동시에 캡처해 양쪽 관점을 한 화면에서 비교.",
+        "경로별 진단: A 송신 vs B 수신 / B 송신 vs A 수신을 대조해 'A→B 패킷 미수신', 'B→A 응답 미수신', 경로별 손실율(비대칭 라우팅·방화벽) 자동 탐지.",
+        "신규 API: /api/admin/net/agents(위임 대상), /api/admin/net/capture(via·dual 지원, GET ?reqId 폴링), /api/central/capture-jobs·capture-result."
+      ]
+    },
+    {
       "version": "1.96.0",
       "date": "2026-06-23",
       "title": "네트워크 트래픽 분석 — 두 서버 간 tcpdump 캡처·진단 + 로그 자체 장애 탐지",

@@ -13,6 +13,7 @@ import { setGpuGuestDiag } from '../central/gpuGuestDiag.js';
 import { takePingJobs, setPingResults } from '../central/pingJobs.js';
 import { setAgentConfig } from '../central/agentConfig.js';
 import { takeLogQueries, setLogQueryResult } from '../central/logQueries.js';
+import { takeCaptureJobs, setCaptureResult } from '../central/captureJobs.js';
 import { loadScanSettings, mergeScanResults, recordAgentReport } from '../ipam/scanStore.js';
 
 export const centralRouter = Router();
@@ -136,6 +137,22 @@ centralRouter.post('/log-query-result', (req, res) => {
   const b = req.body || {};
   if (!b.reqId) return res.status(400).json({ ok: false, reason: 'reqId가 필요합니다.' });
   setLogQueryResult(String(b.reqId), b);
+  res.json({ ok: true });
+});
+
+// 위임 tcpdump 캡처: 에이전트가 자기 이름의 대기 캡처 작업을 인출 → 로컬 SSH 캡처 → 결과 보고.
+centralRouter.get('/capture-jobs', (req, res) => {
+  if (!config.central.token) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: '토큰 불일치' });
+  res.json({ ok: true, jobs: takeCaptureJobs(String(req.query.agent || '')) });
+});
+// Body: { reqId, result }
+centralRouter.post('/capture-result', (req, res) => {
+  if (!config.central.token) return res.status(404).json({ ok: false });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: '토큰 불일치' });
+  const b = req.body || {};
+  if (!b.reqId) return res.status(400).json({ ok: false, reason: 'reqId가 필요합니다.' });
+  setCaptureResult(String(b.reqId), b.result || { ok: false, reason: '빈 결과' });
   res.json({ ok: true });
 });
 

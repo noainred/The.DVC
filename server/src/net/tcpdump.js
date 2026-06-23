@@ -8,7 +8,7 @@
 
 import { withSsh } from '../proxy/sshExec.js';
 
-const IPRE = /^[0-9a-fA-F:.]+$/;        // IPv4/IPv6
+const PEERRE = /^[a-zA-Z0-9._:-]+$/;    // IP 또는 호스트명(셸 메타문자 차단)
 const IFRE = /^[a-zA-Z0-9._-]+$/;       // 인터페이스명
 
 /** tcpdump 한 줄(`-n -tt`) 파싱 → { ts, src, sport, dst, dport, flags, len } 또는 null. */
@@ -73,7 +73,7 @@ export function analyzeCapture(pkts, peer) {
  * 반환 { ok, command, lines, parsed, analysis, raw, error }.
  */
 export async function runTrafficCapture({ hostA, peer, iface = 'any', seconds = 10, maxPackets = 2000, useSudo = true } = {}) {
-  if (!peer || !IPRE.test(peer)) throw new Error('대상 서버(B) IP 형식이 올바르지 않습니다.');
+  if (!peer || !PEERRE.test(peer)) throw new Error('대상 서버(B) IP/호스트 형식이 올바르지 않습니다.');
   if (!IFRE.test(iface)) throw new Error('인터페이스명이 올바르지 않습니다.');
   const sec = Math.min(120, Math.max(1, Number(seconds) || 10));
   const max = Math.min(20000, Math.max(10, Number(maxPackets) || 2000));
@@ -96,4 +96,41 @@ export async function runTrafficCapture({ hostA, peer, iface = 'any', seconds = 
       warn: pkts.length === 0 && errLine ? errLine.trim().slice(0, 200) : null,
     };
   });
+}
+
+/**
+ * 양쪽 관점 비교 — A의 캡처(peer=B)와 B의 캡처(peer=A)를 대조해 경로별(A→B / B→A) 유실을 진단.
+ * A가 보낸 패킷을 B가 못 받았으면 A→B 경로 문제, 그 반대면 복귀 경로 문제.
+ */
+export function compareDual(a, b) {
+  const aS = a?.analysis?.stat, bS = b?.analysis?.stat;
+  if (!aS || !bS) return { ok: false, issues: [{ sev: 'error', title: '한쪽 캡처 실패', detail: '양쪽 모두 캡처 성공해야 비교 가능합니다(SSH/권한 확인).' }], aStat: aS || null, bStat: bS || null };
+  const aOut = aS.toPeer.packets, bIn = bS.fromPeer.packets;   // A가 B로 보냄 / B가 A로부터 받음
+  const bOut = bS.toPeer.packets, aIn = aS.fromPeer.packets;   // B가 A로 보냄 / A가 B로부터 받음
+  const lossAB = aOut > 0 ? Math.max(0, Math.round((1 - Math.min(bIn, aOut) / aOut) * 100)) : 0;
+  const lossBA = bOut > 0 ? Math.max(0, Math.round((1 - Math.min(aIn, bOut) / bOut) * 100)) : 0;
+  const issues = [];
+  if (aOut > 5 && bIn === 0) issues.push({ sev: 'error', title: 'A→B 패킷 미수신', detail: `A는 ${aOut}패킷 전송했으나 B는 수신 0 — A→B 경로 차단/유실(방화벽·라우팅·NAT 의심).` });
+  else if (lossAB >= 20) issues.push({ sev: 'warning', title: `A→B 경로 손실 ~${lossAB}%`, detail: `A 송신 ${aOut} vs B 수신 ${bIn} — 경로 패킷 손실.` });
+  if (bOut > 5 && aIn === 0) issues.push({ sev: 'error', title: 'B→A 응답 미수신', detail: `B는 ${bOut}패킷 응답했으나 A는 수신 0 — 복귀 경로 차단/유실(비대칭 라우팅·방화벽 의심).` });
+  else if (lossBA >= 20) issues.push({ sev: 'warning', title: `B→A 경로 손실 ~${lossBA}%`, detail: `B 송신 ${bOut} vs A 수신 ${aIn} — 복귀 경로 손실.` });
+  if (!issues.length) issues.push({ sev: 'ok', title: '양방향 경로 정상', detail: `양측 패킷 수가 일치합니다(손실 A→B ${lossAB}% · B→A ${lossBA}%).` });
+  return { ok: true, lossAB, lossBA, aStat: aS, bStat: bS, issues };
+}
+
+/**
+ * 동시(양방향) 캡처 — A와 B에서 같은 시간 동안 tcpdump를 동시에 실행해 양쪽 관점을 얻고 비교.
+ * opts: { hostA(creds+host), hostB(creds+host), iface, seconds, maxPackets, useSudo }.
+ */
+export async function runDualCapture({ hostA, hostB, iface = 'any', seconds = 10, maxPackets = 2000, useSudo = true } = {}) {
+  const peerForA = String(hostB?.host || '').trim(); // A에서 B를 필터
+  const peerForB = String(hostA?.host || '').trim(); // B에서 A를 필터
+  if (!peerForA || !peerForB) throw new Error('A·B 서버 호스트가 모두 필요합니다.');
+  const [ra, rb] = await Promise.allSettled([
+    runTrafficCapture({ hostA, peer: peerForA, iface, seconds, maxPackets, useSudo }),
+    runTrafficCapture({ hostA: hostB, peer: peerForB, iface, seconds, maxPackets, useSudo }),
+  ]);
+  const a = ra.status === 'fulfilled' ? ra.value : { ok: false, reason: ra.reason?.message || '캡처 실패', captured: 0 };
+  const b = rb.status === 'fulfilled' ? rb.value : { ok: false, reason: rb.reason?.message || '캡처 실패', captured: 0 };
+  return { ok: true, dual: true, hostA: peerForB, hostB: peerForA, a, b, comparison: compareDual(a, b) };
 }
