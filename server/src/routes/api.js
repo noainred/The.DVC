@@ -21,6 +21,9 @@ import { getServiceCheck } from '../health/services.js';
 import { getNetworkCheck } from '../health/network.js';
 import { buildVmwareConfigExport } from '../backup/vmwareExport.js';
 import { getLogsDb } from '../logs/db.js';
+import { enqueueLogQuery, getLogQueryResult } from '../central/logQueries.js';
+import { listInventory } from '../central/inventory.js';
+import { getAllGpuGuestDiag } from '../central/gpuGuestDiag.js';
 import zlib from 'node:zlib';
 import { nsxStore } from '../nsx/store.js';
 import { loadRegistry as loadNsxRegistry } from '../nsx/registry.js';
@@ -754,6 +757,31 @@ api.get('/tools/vmware-config', (req, res) => {
     }
     res.json(data);
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+});
+
+// 로그 출처 — 이 포탈 로컬 보관(local) vs 엣지 보관(remote, 연합 조회 필요).
+api.get('/tools/vclogs/sources', (_req, res) => {
+  const localIds = new Set((loadVcenterConfig().vcenters || []).map((v) => v.id));
+  const vcAgent = new Map();
+  for (const inv of listInventory()) if (inv.agent) vcAgent.set(inv.vcenterId, inv.agent);
+  for (const a of getAllGpuGuestDiag()) { if (!a.agent) continue; for (const vc of a.vcenters || []) if (vc.vcId) vcAgent.set(vc.vcId, a.agent); }
+  const remote = [];
+  for (const [vcenterId, agent] of vcAgent) if (!localIds.has(vcenterId)) remote.push({ vcenterId, agent });
+  res.json({ local: [...localIds], remote });
+});
+
+// 엣지 로그 연합 조회 — 요청 큐잉(POST) / 결과 폴링(GET ?reqId=).
+api.post('/tools/vclogs/federate', (req, res) => {
+  const b = req.body || {};
+  const vcenterId = String(b.vcenterId || '').trim();
+  if (!vcenterId) return res.status(400).json({ ok: false, reason: 'vcenterId가 필요합니다.' });
+  const filter = { vcenterId, severity: b.severity || '', q: b.q || '', since: Number(b.since) || 0, until: Number(b.until) || 0, limit: Math.min(500, Number(b.limit) || 200) };
+  res.json({ ok: true, reqId: enqueueLogQuery(vcenterId, filter) });
+});
+api.get('/tools/vclogs/federate', (req, res) => {
+  const reqId = String(req.query.reqId || '');
+  if (!reqId) return res.status(400).json({ ok: false, reason: 'reqId가 필요합니다.' });
+  res.json({ ok: true, ...getLogQueryResult(reqId) });
 });
 
 // vCenter 장기 보관 로그 조회 — 필터: vcenterId·severity·q·since·until + 페이징.

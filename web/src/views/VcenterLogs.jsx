@@ -81,10 +81,30 @@ function LogViewer() {
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [sources, setSources] = useState({ local: [], remote: [] });
+  const [mode, setMode] = useState('local'); // 'local' | 'edge'
   const LIMIT = 200;
+  const remoteAgent = (id) => sources.remote.find((r) => r.vcenterId === id)?.agent;
+
+  useEffect(() => { fetchJson('/tools/vclogs/sources').then(setSources).catch(() => {}); }, []);
+
+  // 엣지 보관 vCenter면 연합 조회(요청 큐잉 → 폴링). 데이터는 엣지에 남고 결과만 중계.
+  const federate = async () => {
+    setMode('edge'); setLoading(true); setRows([]);
+    try {
+      const { reqId } = await postJson('/tools/vclogs/federate', { vcenterId: f.vcenterId, severity: f.severity, q: f.q, limit: LIMIT });
+      for (let i = 0; i < 9; i++) {
+        await new Promise((r) => setTimeout(r, 1500));
+        const d = await fetchJson(`/tools/vclogs/federate?reqId=${encodeURIComponent(reqId)}`);
+        if (d.state === 'done') { setRows(d.rows || []); setTotal(d.total || 0); setLoading(false); return; }
+      }
+      setLoading(false); // 타임아웃(엣지 미응답)
+    } catch { setLoading(false); }
+  };
 
   const load = (reset = true) => {
-    setLoading(true);
+    if (f.vcenterId && remoteAgent(f.vcenterId)) return federate(); // 엣지 보관 → 연합 조회
+    setMode('local'); setLoading(true);
     const off = reset ? 0 : offset;
     const qs = new URLSearchParams({ limit: String(LIMIT), offset: String(off) });
     if (f.vcenterId) qs.set('vcenterId', f.vcenterId);
@@ -94,7 +114,7 @@ function LogViewer() {
       setTotal(d.total); setRows((prev) => (reset ? d.rows : [...prev, ...d.rows])); setOffset(off + d.rows.length);
     }).catch(() => {}).finally(() => setLoading(false));
   };
-  useEffect(() => { load(true); /* eslint-disable-next-line */ }, [f.vcenterId, f.severity]);
+  useEffect(() => { load(true); /* eslint-disable-next-line */ }, [f.vcenterId, f.severity, sources]);
 
   const exportCsv = async () => {
     const qs = new URLSearchParams();
@@ -120,8 +140,9 @@ function LogViewer() {
           <button className="tab" style={{ padding: '6px 12px' }} onClick={() => load(true)}>검색</button>
         </div>
         <div className="flex gap" style={{ alignItems: 'center' }}>
+          {mode === 'edge' && <span className="badge amber" title="데이터는 엣지에 보관, 조회만 중계">엣지 조회: {remoteAgent(f.vcenterId) || '?'}</span>}
           <span className="muted" style={{ fontSize: 12 }}>{fmtNum(total)}건</span>
-          <button className="logout-btn" style={{ padding: '6px 12px' }} onClick={exportCsv}>⬇ CSV</button>
+          <button className="logout-btn" style={{ padding: '6px 12px' }} onClick={exportCsv} disabled={mode === 'edge'} title={mode === 'edge' ? '엣지 조회는 CSV 미지원(엣지 포탈에서 받으세요)' : ''}>⬇ CSV</button>
         </div>
       </div>
       <div className="table-wrap" style={{ maxHeight: '52vh' }}>
@@ -144,7 +165,8 @@ function LogViewer() {
             })}
           </tbody></table>
       </div>
-      {rows.length < total && <button className="tab" style={{ marginTop: 10, padding: '7px 16px' }} disabled={loading} onClick={() => load(false)}>{loading ? '불러오는 중…' : `더 보기 (${rows.length}/${fmtNum(total)})`}</button>}
+      {mode === 'local' && rows.length < total && <button className="tab" style={{ marginTop: 10, padding: '7px 16px' }} disabled={loading} onClick={() => load(false)}>{loading ? '불러오는 중…' : `더 보기 (${rows.length}/${fmtNum(total)})`}</button>}
+      {mode === 'edge' && loading && <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>엣지 포탈에 조회 중… (응답 대기)</div>}
     </div>
   );
 }
