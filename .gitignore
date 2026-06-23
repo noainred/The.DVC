@@ -53,3 +53,7 @@ server/config/central-agent-config.json
 server/config/vcenter-logs.db
 server/config/vcenter-logs.ndjson
 server/config/vcenter-logs.json
+
+# 네트워크 캡처(런타임)
+server/config/capture-history.json
+server/config/capture-monitors.json

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { fetchJson, postJson, usePolling } from '../api.js';
-import { ErrorBox } from '../components/ui.jsx';
+import { fetchJson, postJson, putJson, delJson, usePolling } from '../api.js';
+import { ErrorBox, Modal } from '../components/ui.jsx';
 
 const DOT = { ok: '#22c55e', warning: '#f59e0b', error: '#ef4444' };
 const SevDot = ({ s }) => <span style={{ display: 'inline-block', width: 9, height: 9, borderRadius: '50%', background: DOT[s] || '#64748b', marginRight: 7 }} />;
@@ -11,12 +11,113 @@ const Issue = ({ it }) => (
   </div>
 );
 
+const fmtTime = (ts) => (ts ? new Date(ts).toLocaleString('ko-KR') : '—');
+const worstBadge = (w) => <span className={`badge ${w === 'error' ? 'red' : w === 'warning' ? 'amber' : 'green'}`}>{w === 'error' ? '이슈' : w === 'warning' ? '주의' : '정상'}</span>;
+
+function History() {
+  const [d, setD] = useState(null); const [sel, setSel] = useState(null);
+  const load = () => fetchJson('/admin/net/history').then((r) => setD(r.captures || [])).catch(() => setD([]));
+  useEffect(() => { load(); }, []);
+  const view = async (id) => { try { setSel(await fetchJson(`/admin/net/history/${id}`)); } catch { /* */ } };
+  return (
+    <div className="card" style={{ padding: 14 }}>
+      <div className="flex between" style={{ alignItems: 'center', marginBottom: 8 }}>
+        <div className="section-title" style={{ marginTop: 0, fontSize: 15 }}>캡처 이력</div>
+        <button className="logout-btn" style={{ padding: '6px 12px' }} onClick={load}>⟳</button>
+      </div>
+      {!d ? <div className="muted">불러오는 중…</div> : d.length === 0 ? <div className="muted" style={{ fontSize: 12 }}>저장된 캡처가 없습니다.</div> : (
+        <div className="table-wrap" style={{ maxHeight: '54vh' }}>
+          <table><thead><tr><th>시각</th><th>구분</th><th>모드</th><th>A ↔ B</th><th>결과</th><th>진단</th></tr></thead>
+            <tbody>{d.map((c) => (
+              <tr key={c.id} style={{ cursor: 'pointer' }} onClick={() => view(c.id)}>
+                <td className="muted" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{fmtTime(c.at)}</td>
+                <td style={{ fontSize: 12 }}>{c.source === 'monitor' ? `모니터${c.monitorName ? `(${c.monitorName})` : ''}` : '수동'}{c.via === 'agent' ? '·위임' : ''}</td>
+                <td style={{ fontSize: 12 }}>{c.mode === 'dual' ? '동시' : '단일'}</td>
+                <td style={{ fontSize: 12 }}>{c.hostA} ↔ {c.hostB}</td>
+                <td>{worstBadge(c.worst)}</td>
+                <td className="muted" style={{ fontSize: 12 }}>{(c.issues || [])[0]?.title || '—'}</td>
+              </tr>
+            ))}</tbody></table>
+        </div>
+      )}
+      {sel && (
+        <Modal title={`캡처 상세 — ${fmtTime(sel.at)}`} onClose={() => setSel(null)} width={680}>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>{sel.hostA} ↔ {sel.hostB} · {sel.mode === 'dual' ? '동시' : '단일'} · {sel.source === 'monitor' ? '모니터' : '수동'}</div>
+          {(sel.issues || []).map((it, i) => <Issue key={i} it={it} />)}
+          {sel.detail?.stat && <StatGrid st={sel.detail.stat} />}
+          {sel.detail?.a && <><div className="muted" style={{ fontSize: 12, fontWeight: 600 }}>A</div><StatGrid st={sel.detail.a} /><div className="muted" style={{ fontSize: 12, fontWeight: 600 }}>B</div><StatGrid st={sel.detail.b} /></>}
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function Monitors() {
+  const [d, setD] = useState(null);
+  const [form, setForm] = useState(null);
+  const load = () => fetchJson('/admin/net/monitors').then((r) => setD(r.monitors || [])).catch(() => setD([]));
+  useEffect(() => { load(); const t = setInterval(load, 30_000); return () => clearInterval(t); }, []);
+  const blank = { name: '', mode: 'dual', intervalMin: 10, seconds: 10, maxPackets: 1000, iface: 'any', useSudo: true, enabled: true, hostA: { host: '', port: 22, username: 'root', password: '' }, hostB: { host: '', port: 22, username: 'root', password: '' }, peer: '' };
+  const save = async () => { try { await putJson('/admin/net/monitors', form); } catch (e) { /* */ } setForm(null); load(); };
+  const run = async (id) => { try { await postJson(`/admin/net/monitors/${id}/run`, {}); } catch { /* */ } load(); };
+  const del = async (id) => { try { await delJson(`/admin/net/monitors/${id}`); } catch { /* */ } load(); };
+  const toggle = async (m) => { try { await putJson('/admin/net/monitors', { id: m.id, name: m.name, mode: m.mode, intervalMin: m.intervalMin, seconds: m.seconds, maxPackets: m.maxPackets, iface: m.iface, hostA: { host: m.hostA }, peer: m.hostB, enabled: !m.enabled }); } catch { /* */ } load(); };
+  return (
+    <div className="card" style={{ padding: 14 }}>
+      <div className="flex between" style={{ alignItems: 'center', marginBottom: 8 }}>
+        <div className="section-title" style={{ marginTop: 0, fontSize: 15 }}>연속 모니터링 (주기 캡처 + 이슈 알림)</div>
+        <button className="login-btn" style={{ padding: '6px 12px' }} onClick={() => setForm(blank)}>+ 모니터 추가</button>
+      </div>
+      <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>두 서버 간 캡처를 주기적으로 자동 실행해 이력에 기록하고, 경로 손실/미수신 등 이슈가 감지되면 알림(설정 › 알림 채널)을 보냅니다.</p>
+      {!d ? <div className="muted">불러오는 중…</div> : d.length === 0 ? <div className="muted" style={{ fontSize: 12 }}>등록된 모니터가 없습니다.</div> : (
+        <div className="table-wrap"><table><thead><tr><th>이름</th><th>모드</th><th>A ↔ B</th><th>주기</th><th>최근</th><th>상태</th><th>작업</th></tr></thead>
+          <tbody>{d.map((m) => (
+            <tr key={m.id}>
+              <td><b>{m.name}</b></td><td style={{ fontSize: 12 }}>{m.mode === 'dual' ? '동시' : '단일'}</td>
+              <td style={{ fontSize: 12 }}>{m.hostA} ↔ {m.hostB}</td><td style={{ fontSize: 12 }}>{m.intervalMin}분</td>
+              <td className="muted" style={{ fontSize: 11 }}>{m.lastRun ? `${fmtTime(m.lastRun)} · ${m.lastDetail}` : '—'}</td>
+              <td>{m.enabled ? worstBadge(m.lastWorst || 'ok') : <span className="badge gray">중지</span>}</td>
+              <td><div className="flex gap">
+                <button className="tab" style={{ padding: '3px 8px', fontSize: 11 }} onClick={() => run(m.id)}>지금</button>
+                <button className="tab" style={{ padding: '3px 8px', fontSize: 11 }} onClick={() => toggle(m)}>{m.enabled ? '중지' : '시작'}</button>
+                <button className="tab" style={{ padding: '3px 8px', fontSize: 11, color: 'var(--red)' }} onClick={() => del(m.id)}>삭제</button>
+              </div></td>
+            </tr>
+          ))}</tbody></table></div>
+      )}
+      {form && (
+        <Modal title="모니터 추가" onClose={() => setForm(null)} width={560}>
+          <div className="flex gap wrap" style={{ flexDirection: 'column', gap: 10 }}>
+            <input className="input" placeholder="이름" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+            <div className="flex gap" style={{ alignItems: 'center' }}>
+              <select className="select" value={form.mode} onChange={(e) => setForm({ ...form, mode: e.target.value })}><option value="dual">동시(양방향)</option><option value="single">단일</option></select>
+              <span className="muted">주기</span><input className="input" type="number" style={{ width: 70 }} value={form.intervalMin} onChange={(e) => setForm({ ...form, intervalMin: e.target.value })} /><span className="muted">분</span>
+              <span className="muted">시간</span><input className="input" type="number" style={{ width: 60 }} value={form.seconds} onChange={(e) => setForm({ ...form, seconds: e.target.value })} /><span className="muted">초</span>
+            </div>
+            <div className="muted" style={{ fontSize: 12 }}>A 서버</div>
+            <div className="flex gap"><input className="input" placeholder="A 호스트" value={form.hostA.host} onChange={(e) => setForm({ ...form, hostA: { ...form.hostA, host: e.target.value } })} /><input className="input" style={{ width: 100 }} placeholder="사용자" value={form.hostA.username} onChange={(e) => setForm({ ...form, hostA: { ...form.hostA, username: e.target.value } })} /><input className="input" type="password" style={{ width: 120 }} placeholder="비번" value={form.hostA.password} onChange={(e) => setForm({ ...form, hostA: { ...form.hostA, password: e.target.value } })} /></div>
+            <div className="muted" style={{ fontSize: 12 }}>{form.mode === 'dual' ? 'B 서버' : 'B 대상 IP'}</div>
+            {form.mode === 'dual'
+              ? <div className="flex gap"><input className="input" placeholder="B 호스트" value={form.hostB.host} onChange={(e) => setForm({ ...form, hostB: { ...form.hostB, host: e.target.value } })} /><input className="input" style={{ width: 100 }} placeholder="사용자" value={form.hostB.username} onChange={(e) => setForm({ ...form, hostB: { ...form.hostB, username: e.target.value } })} /><input className="input" type="password" style={{ width: 120 }} placeholder="비번" value={form.hostB.password} onChange={(e) => setForm({ ...form, hostB: { ...form.hostB, password: e.target.value } })} /></div>
+              : <input className="input" placeholder="B 대상 IP" value={form.peer} onChange={(e) => setForm({ ...form, peer: e.target.value })} />}
+            <button className="login-btn" style={{ padding: '8px 16px' }} onClick={save}>저장</button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
 export default function NetTrafficAnalysis() {
+  const [tab, setTab] = useState('capture');
+  const TABS = [['capture', '캡처 분석'], ['history', '이력'], ['monitor', '연속 모니터링']];
   return (
     <div>
       <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>통신하는 두 서버 사이의 패킷을 tcpdump로 캡처해 핸드셰이크·재전송·RST 등으로 장애/이슈를 진단하고, 보관된 로그를 자체 분석해 문제 패턴을 찾습니다.</p>
-      <Capture />
-      <LogIssues />
+      <div className="vcd-views" style={{ marginBottom: 12 }}>{TABS.map(([k, l]) => <button key={k} className={tab === k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setTab(k)}>{l}</button>)}</div>
+      {tab === 'capture' && <><Capture /><LogIssues /></>}
+      {tab === 'history' && <History />}
+      {tab === 'monitor' && <Monitors />}
     </div>
   );
 }
@@ -97,6 +198,18 @@ function Capture() {
       setRes(r);
     } catch (e) { setErr(e.message); } finally { setBusy(false); }
   };
+  const [pcapBusy, setPcapBusy] = useState(false);
+  const [pcapInfo, setPcapInfo] = useState(null);
+  const runPcap = async () => {
+    setPcapBusy(true); setErr(null); setPcapInfo(null);
+    try {
+      const r = await postJson('/admin/net/pcap', { hostA: { host: f.host, port: Number(f.port) || 22, username: f.username, password: f.password }, peer: f.peer, iface: f.iface, seconds: Number(f.seconds), maxPackets: Number(f.maxPackets), useSudo: f.useSudo });
+      if (!r.ok) { setErr(r.reason || 'pcap 실패'); return; }
+      const bin = atob(r.pcapBase64); const arr = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([arr], { type: 'application/vnd.tcpdump.pcap' })); a.download = r.fileName; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      setPcapInfo({ captured: r.captured, size: r.size, summary: r.summary });
+    } catch (e) { setErr(e.message); } finally { setPcapBusy(false); }
+  };
   const canRun = f.host && (mode === 'dual' ? f.bHost : f.peer) && (via === 'central' || agent);
 
   return (
@@ -141,7 +254,9 @@ function Capture() {
         <span className="muted">최대</span><input className="input" type="number" style={{ width: 84 }} value={f.maxPackets} onChange={(e) => setF({ ...f, maxPackets: e.target.value })} /><span className="muted">패킷</span>
         <label className="flex gap" style={{ alignItems: 'center', fontSize: 12, cursor: 'pointer' }}><input type="checkbox" checked={f.useSudo} onChange={(e) => setF({ ...f, useSudo: e.target.checked })} /> sudo(비root)</label>
         <button className="login-btn" style={{ padding: '8px 16px' }} disabled={busy || !canRun} onClick={run}>{busy ? (via === 'agent' ? '에이전트 캡처 중…' : '캡처 중…') : (mode === 'dual' ? '동시 캡처 & 비교' : '캡처 & 분석')}</button>
+        {mode === 'single' && via === 'central' && <button className="logout-btn" style={{ padding: '8px 14px' }} disabled={pcapBusy || !f.host || !f.peer} onClick={runPcap} title="pcap 파일로 저장해 다운로드(tshark/Wireshark 심층 분석)">{pcapBusy ? 'pcap 중…' : '⬇ pcap 저장'}</button>}
       </div>
+      {pcapInfo && <div className="card" style={{ padding: 10, marginTop: 8 }}><div className="muted" style={{ fontSize: 12 }}>pcap 다운로드 완료 — {pcapInfo.captured ?? '?'}패킷 · {Math.round((pcapInfo.size || 0) / 1024)}KB</div>{pcapInfo.summary && <pre style={{ fontSize: 11, maxHeight: '24vh', overflow: 'auto', marginTop: 6, background: 'rgba(148,163,184,.08)', padding: 8, borderRadius: 6 }}>{pcapInfo.summary}</pre>}</div>}
       <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>※ tcpdump는 root 권한 필요(비root는 무비밀번호 sudo). {mode === 'dual' ? 'A·B에서 동시에 캡처해 양쪽 관점을 비교합니다.' : `A에서 host ${f.peer || 'B'} 필터로 캡처합니다.`}{via === 'agent' && ' 엣지 에이전트가 대신 실행(사설망).'}</div>
       {err && <div style={{ marginTop: 10 }}><ErrorBox message={err} /></div>}
       {res && <div style={{ marginTop: 14 }}>{res.dual ? <DualResult res={res} /> : <SingleResult res={res} />}</div>}

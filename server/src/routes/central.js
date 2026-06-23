@@ -14,6 +14,7 @@ import { takePingJobs, setPingResults } from '../central/pingJobs.js';
 import { setAgentConfig } from '../central/agentConfig.js';
 import { takeLogQueries, setLogQueryResult } from '../central/logQueries.js';
 import { takeCaptureJobs, setCaptureResult } from '../central/captureJobs.js';
+import { recordCapture } from '../net/captureHistory.js';
 import { loadScanSettings, mergeScanResults, recordAgentReport } from '../ipam/scanStore.js';
 
 export const centralRouter = Router();
@@ -153,6 +154,7 @@ centralRouter.post('/capture-result', (req, res) => {
   const b = req.body || {};
   if (!b.reqId) return res.status(400).json({ ok: false, reason: 'reqId가 필요합니다.' });
   setCaptureResult(String(b.reqId), b.result || { ok: false, reason: '빈 결과' });
+  try { if (b.result?.ok) recordCapture(b.result, { source: 'manual', via: 'agent' }); } catch { /* */ }
   res.json({ ok: true });
 });
 
