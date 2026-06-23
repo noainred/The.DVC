@@ -8,6 +8,7 @@ import { Router } from 'express';
 import { config } from '../config.js';
 import { getAssignment, setResult } from '../central/assignments.js';
 import { setInventory } from '../central/inventory.js';
+import { setGuestGpu } from '../gpu/store.js';
 import { loadScanSettings, mergeScanResults, recordAgentReport } from '../ipam/scanStore.js';
 
 export const centralRouter = Router();
@@ -63,6 +64,20 @@ centralRouter.post('/inventory', (req, res) => {
   };
   setInventory(String(b.vcenterId), slice, String(b.agent || ''), b.generatedAt || null);
   res.json({ ok: true, vcenterId: b.vcenterId, hosts: slice.hosts.length, vms: slice.vms.length });
+});
+
+// 게스트 GPU 수집 위임: ESXi 망에 닿는 현장 agent가 게스트 OS(nvidia-smi)에서 수집한
+// GPU 사용률을 push. 중앙은 포탈이 ESXi에 직접 못 가는 환경에서 이 값을 오버레이로 사용.
+// Body: { agent, hosts:[{hostId,utilPct}], vms:[{vmId,utilPct,memUsedPct,host,vcenterId}] }
+centralRouter.post('/gpu-guest-data', (req, res) => {
+  if (!config.central.token) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: '토큰 불일치' });
+  const b = req.body || {};
+  if (!b.agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
+  const hosts = Array.isArray(b.hosts) ? b.hosts.slice(0, 50_000) : [];
+  const vms = Array.isArray(b.vms) ? b.vms.slice(0, 500_000) : [];
+  setGuestGpu({ hosts, vms }); // 로컬 폴러와 동일한 게스트 오버레이에 기록 → /tools/gpu·샘플러가 그대로 사용
+  res.json({ ok: true, agent: b.agent, hosts: hosts.length, vms: vms.length });
 });
 
 // Agent pulls its IP-scan assignment (TCP connect scan config) by name.

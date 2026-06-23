@@ -1,6 +1,17 @@
 {
   "notes": [
     {
+      "version": "1.84.0",
+      "date": "2026-06-23",
+      "title": "게스트 GPU 수집 위임 — 현장 agent가 수집→중앙 push (포탈이 ESXi에 직접 못 가는 환경)",
+      "notes": [
+        "포탈(중앙)이 ESXi 망에 직접 못 가 게스트 파일을 회수할 수 없는 환경 대응 — ESXi 망에 닿는 현장 agent가 게스트 OS(nvidia-smi)에서 GPU 사용률을 수집해 중앙으로 push(원격접속과 동일한 위임 구조)",
+        "중앙 수신 endpoint 추가: POST /api/central/gpu-guest-data (X-Central-Token 인증). 받은 값을 로컬 폴러와 동일한 게스트 오버레이에 기록 → GPU 인벤토리/사용률·'수집' 표시가 그대로 동작",
+        "agent push 폴러 추가(CENTRAL_URL+CENTRAL_TOKEN 설정 시 기동). 인벤토리 push와 동일 패턴, 사이트→중앙 단방향 아웃바운드",
+        "배포: ESXi(예: 192.168.10.x)에 닿는 서버에 agent(동일 포탈 바이너리)를 두고 거기서 '설정 › GPU 게스트 수집'을 구성. 중앙은 GPU 게스트 수집을 끄고 push만 수신"
+      ]
+    },
+    {
       "version": "1.83.5",
       "date": "2026-06-23",
       "title": "게스트 테스트가 안 끝나던 문제 — 다운로드 빠른 실패(4초) + 불필요 재시도 제거",
