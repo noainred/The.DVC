@@ -1,6 +1,17 @@
 {
   "notes": [
     {
+      "version": "1.88.3",
+      "date": "2026-06-23",
+      "title": "🎯 GPU 게스트 수집 근본 해결 — guestFile URL의 XML 엔티티(&amp;) 디코딩",
+      "notes": [
+        "근본 원인 수정: InitiateFileTransferFromGuest가 돌려주는 <url>은 SOAP XML이라 '&'가 '&amp;'로 인코딩되어 온다. 디코딩하지 않아 실제 GET URL이 'id=N&amp;token=T'가 되고, token 파라미터명이 'amp;token'으로 깨져 ESXi가 티켓을 못 받아 모든 다운로드가 HTTP404였다.",
+        "이제 추출한 URL에 XML 엔티티 디코딩(&amp;→& 등)을 적용 → 'id=N&token=T'로 올바르게 전달되어 게스트 파일(nvidia-smi 결과) 정상 회수.",
+        "진단으로 확정: nvidia-smi는 정상 작동(.out size>0), 계정·망·드라이버 모두 정상이었고 URL 디코딩 누락이 유일한 원인이었음.",
+        "패스쓰루 GPU 사용률 게스트 수집 end-to-end 동작(에이전트→중앙 push 포함)."
+      ]
+    },
+    {
       "version": "1.88.2",
       "date": "2026-06-23",
       "title": "GPU 게스트 회수 진단 강화 — 게스트 파일 크기(size) + ESXi 404 응답 본문 표시",

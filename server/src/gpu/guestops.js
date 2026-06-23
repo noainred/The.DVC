@@ -94,7 +94,15 @@ async function readGuestFile(c, fileManager, vmRef, auth, guestPath, timeoutMs, 
     console.warn(`[gpu-guest]     [${tag}] InitiateFileTransferFromGuest 실패: ${e.message}`);
     return { text: '', error: `파일전송요청 실패: ${cleanGuestError(e.message)}` };
   }
-  const url = /<url>([^<]+)<\/url>/.exec(ftXml)?.[1];
+  // ⭐ 근본 원인 수정: SOAP 응답의 <url>은 XML이라 '&'가 '&amp;'로 인코딩되어 온다.
+  // 디코딩하지 않으면 URL이 'id=N&amp;token=T'가 되어 token 파라미터가 깨지고 → ESXi가
+  // 티켓을 못 받아 HTTP404. 엔티티를 디코딩해야 'id=N&token=T'로 올바르게 전달된다.
+  const xmlDecode = (s) => String(s)
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(Number(d)))
+    .replace(/&amp;/g, '&'); // &amp; 는 항상 마지막에(이중 인코딩 방지)
+  const url = xmlDecode(/<url>([^<]+)<\/url>/.exec(ftXml)?.[1] || '');
   if (!url) return { text: '', error: '파일 전송 URL을 반환하지 않음' };
   // InitiateFileTransferFromGuest 응답의 <size> = 게스트 파일 크기. 0이면 nvidia-smi가
   // stdout을 안 낸 것(드라이버/PATH 문제) → ESXi가 빈 파일 전송에 404를 줄 수 있다.
