@@ -19,15 +19,16 @@ import {
   listRegistry, addVcenter, updateVcenter, removeVcenter, testConnection, importVcenters,
 } from '../vcenter/registry.js';
 import { geocode } from '../vcenter/geocode.js';
-import { getOrder, saveOrder } from '../vcenter/order.js';
+import { getOrder, saveOrder, sortByOrder } from '../vcenter/order.js';
 import { listAudit } from '../audit.js';
 import { alertStatus, saveAlertConfig, testAlert } from '../alerts.js';
 import { loadMetricsSettings, saveMetricsSettings, METRICS_LIMITS } from '../metrics/settings.js';
 import { forceGpuUtilCollect, clearGpuUtilForce } from '../vcenter/soapClient.js';
 import { metricsSamplerStatus, rescheduleMetricsSampler } from '../metrics/sampler.js';
 import { loadGpuGuestSettings, saveGpuGuestSettings, redactGpuGuestSettings, resolveVmCreds } from '../gpu/settings.js';
-import { gpuGuestStatus, rescheduleGpuGuestPoller, passthruHostIds } from '../gpu/poller.js';
+import { gpuGuestStatus, rescheduleGpuGuestPoller, passthruHostIds, vmUsesPassthroughGpu } from '../gpu/poller.js';
 import { testVmGuest, VimSoapClient } from '../gpu/guestops.js';
+import { getGuestGpuVms } from '../gpu/store.js';
 import { loadVcenterConfig } from '../config.js';
 import { loadScanSettings, saveScanSettings, scanResultList, scanInfo, listScanAgents, getAgentReports, getScanRuns, LOCAL } from '../ipam/scanStore.js';
 import { startScan, scanStatus, rescheduleScanPoller } from '../ipam/scanPoller.js';
@@ -321,14 +322,21 @@ adminRouter.get('/gpu-guest/vms', adminOnly, (req, res) => {
   const hostNames = passthruHostIds(snap, vcId);
   const s = loadGpuGuestSettings();
   const saved = (s.vcenters[vcId]?.vms) || {};
+  // 실제 수집 상태(게스트에서 읽어온 마지막 값) — vmId 기준.
+  const collectedBy = new Map(getGuestGpuVms().map((x) => [x.vmId, x]));
   const vms = (snap.vms || [])
-    .filter((v) => v.vcenterId === vcId && hostNames.has(v.host))
-    .map((v) => ({
-      id: v.id, name: v.name, host: v.host, cluster: v.cluster || '',
-      powerState: v.powerState, toolsStatus: v.toolsStatus || '', guestOS: v.guestOS || '',
-      gpu: v.gpu || null,
-      hasOwnCred: !!saved[v.id]?.username, ownUsername: saved[v.id]?.username || '',
-    }))
+    // 해당 vCenter에서 'GPU를 패스쓰루로 할당받은' VM만(호스트 위 모든 VM/템플릿 제외).
+    .filter((v) => v.vcenterId === vcId && !v.template && hostNames.has(v.host) && vmUsesPassthroughGpu(v))
+    .map((v) => {
+      const c = collectedBy.get(v.id);
+      return {
+        id: v.id, name: v.name, host: v.host, cluster: v.cluster || '',
+        powerState: v.powerState, toolsStatus: v.toolsStatus || '', guestOS: v.guestOS || '',
+        gpu: v.gpu || null,
+        hasOwnCred: !!saved[v.id]?.username, ownUsername: saved[v.id]?.username || '',
+        collected: c ? { utilPct: c.utilPct, memUsedPct: c.memUsedPct ?? null, at: c.at } : null,
+      };
+    })
     .sort((a, b) => a.name.localeCompare(b.name));
   res.json({ vcenterId: vcId, vcShared: { username: s.vcenters[vcId]?.username || '', hasPassword: !!s.vcenters[vcId]?.password }, vms });
 });
@@ -402,7 +410,7 @@ adminRouter.put('/data-source', adminOnly, async (req, res) => {
 
 // List registered vCenters (credentials redacted) + current data-source mode.
 adminRouter.get('/vcenters', adminOnly, (_req, res) => {
-  res.json({ dataSource: getDataSource(), vcenters: listRegistry() });
+  res.json({ dataSource: getDataSource(), vcenters: sortByOrder(listRegistry()) }); // 저장된 표시 순서 적용
 });
 
 // Register a new vCenter, then trigger a re-poll.

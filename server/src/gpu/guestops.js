@@ -20,7 +20,9 @@ import { VimSoapClient } from '../vcenter/soapClient.js';
 const NVSMI_QUERY = '--query-gpu=utilization.gpu,utilization.memory,memory.used,memory.total --format=csv,noheader,nounits';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+// XML 이스케이프(5개 사전정의 엔티티). 비밀번호는 <password> 요소 내용으로만 들어가고
+// 셸 명령에는 절대 넣지 않으므로, &<>"' 만 이스케이프하면 특수문자 비밀번호도 안전하다.
+const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 
 async function guestManagers(c) {
   const objs = await c.retrieveObjectProps('GuestOperationsManager', c.sc.guestOperationsManager, ['processManager', 'fileManager', 'authManager']);
