@@ -31,6 +31,8 @@ import { startMappingExpiry } from './proxy/expiry.js';
 import { collectorRouter } from './routes/collector.js';
 import { centralRouter } from './routes/central.js';
 import { dlSourceRouter } from './routes/dlsource.js';
+import { insightsRouter } from './routes/insights.js';
+import { metricsExportRouter } from './routes/metricsExport.js';
 import { startIdracPoller } from './idrac/poller.js';
 import { startNsxPoller } from './nsx/store.js';
 import { startAlertEngine } from './alerts.js';
@@ -66,10 +68,12 @@ app.use((req, res, next) => {
 app.use('/api/collector', collectorRouter);            // token-gated agent export (no user auth)
 app.use('/api/central', centralRouter);                // token-gated agent<->central (no user auth)
 app.use('/dl', dlSourceRouter);                        // 중앙 업그레이드 소스(versions.json + 번들, 공개)
+app.use('/metrics', metricsExportRouter);              // Prometheus/OTel 익스포터(선택 토큰)
 app.use('/api/auth', authRouter);                      // public: login / config / me
 app.use('/api/upgrade', authMiddleware, upgradeRouter); // admin-gated auto-upgrade control
 app.use('/api/admin', authMiddleware, auditMiddleware, adminRouter);     // admin-gated vCenter management
 app.use('/api/remote', authMiddleware, auditMiddleware, remoteRouter);   // remote access (HAProxy/SSH/RDP)
+app.use('/api/insights', authMiddleware, insightsRouter); // FinOps·이상탐지·예측·보안·토폴로지·인시던트·ChatOps
 app.use('/api', authMiddleware, api);                   // protected resource endpoints
 
 // Serve the built web client when it exists (production single-port mode).
