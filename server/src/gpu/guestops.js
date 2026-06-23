@@ -87,9 +87,14 @@ async function readGuestFile(c, fileManager, vmRef, auth, guestPath, timeoutMs) 
   } catch (e) { return { text: '', error: cleanGuestError(e.message) }; }
   const url = /<url>([^<]+)<\/url>/.exec(ftXml)?.[1];
   if (!url) return { text: '', error: 'ESXi가 파일 전송 URL을 반환하지 않음' };
-  // ESXi가 반환하는 URL의 와일드카드 호스트(*)는 vCenter 호스트로 치환.
+  // 파일 전송 URL은 보통 'VM이 떠 있는 ESXi 호스트'를 가리키는데, 포탈은 ESXi에 직접
+  // 못 간다(vCenter만 도달). vCenter는 게스트 파일 전송을 ESXi로 '프록시'하므로,
+  // URL의 호스트를 항상 vCenter(연결 호스트)로 바꿔 vCenter 경유로 받는다.
+  //  - '*' 와일드카드(=연결 호스트 의미)도, 실제 ESXi FQDN이 박힌 경우도 모두 vCenter로.
   const vcHost = (c.vc.host || '').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
-  const dl = url.replace('://*', `://${vcHost}`);
+  let dl;
+  try { const u = new URL(url.replace('://*', `://${vcHost}`)); u.host = vcHost; dl = u.toString(); }
+  catch { dl = url.replace('://*', `://${vcHost}`); }
   try {
     const res = await fetch(dl, { signal: AbortSignal.timeout(timeoutMs) });
     if (!res.ok) return { text: '', error: `파일 다운로드 HTTP ${res.status}` };
