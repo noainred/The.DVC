@@ -134,3 +134,33 @@ export async function runDualCapture({ hostA, hostB, iface = 'any', seconds = 10
   const b = rb.status === 'fulfilled' ? rb.value : { ok: false, reason: rb.reason?.message || '캡처 실패', captured: 0 };
   return { ok: true, dual: true, hostA: peerForB, hostB: peerForA, a, b, comparison: compareDual(a, b) };
 }
+
+/**
+ * pcap 파일 캡처 — A에서 tcpdump -w로 pcap 파일을 만들고, base64로 회수해 다운로드용으로 반환한다.
+ * capinfos/tshark가 있으면 요약도 함께. 원본 파일은 회수 후 삭제. maxPackets로 크기 제한.
+ */
+export async function runPcapCapture({ hostA, peer, iface = 'any', seconds = 10, maxPackets = 2000, useSudo = true } = {}) {
+  if (!peer || !PEERRE.test(peer)) throw new Error('대상 서버(B) IP/호스트 형식이 올바르지 않습니다.');
+  if (!IFRE.test(iface)) throw new Error('인터페이스명이 올바르지 않습니다.');
+  const sec = Math.min(120, Math.max(1, Number(seconds) || 10));
+  const max = Math.min(20000, Math.max(10, Number(maxPackets) || 2000));
+  const isRoot = (hostA.username || '').trim() === 'root';
+  const sudo = isRoot ? '' : (useSudo ? 'sudo -n ' : '');
+  const ts = Date.now();
+  const file = `/tmp/portal-cap-${ts}.pcap`;
+  return withSsh(hostA, async ({ exec }) => {
+    const cap = await exec(`${sudo}timeout ${sec} tcpdump -i ${iface} -n -w ${file} -c ${max} host ${peer} 2>&1; echo RC=$?`);
+    const capOut = (cap.stdout || '') + (cap.stderr || '');
+    const pktM = /(\d+) packets captured/.exec(capOut);
+    const sumR = await exec(`(command -v capinfos >/dev/null && ${sudo}capinfos ${file} 2>/dev/null) || (command -v tshark >/dev/null && ${sudo}tshark -r ${file} -q -z io,phs 2>/dev/null | head -60) || echo "(capinfos/tshark 미설치 — pcap만 제공)"`);
+    const b64 = await exec(`${sudo}base64 ${file} 2>/dev/null`);
+    await exec(`${sudo}rm -f ${file}`).catch(() => {});
+    const pcapBase64 = (b64.stdout || '').replace(/\s+/g, '');
+    const errLine = (/permission denied|sudo:|command not found|tcpdump: /i.test(capOut) && !/listening on/i.test(capOut)) ? (capOut.split('\n').find((l) => /permission|sudo:|not found|tcpdump:/i.test(l)) || '') : '';
+    return {
+      ok: true, fileName: `capture-${peer}-${ts}.pcap`, captured: pktM ? Number(pktM[1]) : null,
+      size: Math.floor((pcapBase64.length * 3) / 4), pcapBase64, summary: (sumR.stdout || '').slice(0, 4000),
+      warn: !pcapBase64 && errLine ? errLine.trim().slice(0, 200) : null,
+    };
+  });
+}

@@ -42,10 +42,12 @@ import { loadBackupSettings, saveBackupSettings, backupStatus } from '../backup/
 import { saveLogSettings } from '../logs/settings.js';
 import { logStatus, rescheduleLogPoller, pollLogsOnce } from '../logs/poller.js';
 import { resetLogsDb } from '../logs/db.js';
-import { runTrafficCapture, runDualCapture } from '../net/tcpdump.js';
+import { runTrafficCapture, runDualCapture, runPcapCapture } from '../net/tcpdump.js';
 import { analyzeLogsForIssues } from '../net/logIssues.js';
 import { enqueueCapture, getCaptureResult } from '../central/captureJobs.js';
 import { getAllAgentConfigs } from '../central/agentConfig.js';
+import { recordCapture, listCaptures, getCapture, deleteCapture } from '../net/captureHistory.js';
+import { listMonitors, saveMonitor, removeMonitor, runMonitorNow } from '../net/monitor.js';
 import path from 'node:path';
 import {
   listRegistry as listNsx, addManager as addNsx, updateManager as updateNsx,
@@ -841,6 +843,7 @@ adminRouter.post('/net/capture', adminOnly, async (req, res) => {
     const r = dual
       ? await runDualCapture({ hostA: b.hostA, hostB: b.hostB, ...opts })
       : await runTrafficCapture({ hostA: b.hostA, peer: String(b.peer).trim(), ...opts });
+    try { recordCapture(r, { source: 'manual', via: 'central', hostA: b.hostA.host, peer: b.peer }); } catch { /* 이력 실패 무시 */ }
     res.json(r);
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
@@ -850,6 +853,28 @@ adminRouter.get('/net/capture', adminOnly, (req, res) => {
   if (!req.query.reqId) return res.status(400).json({ ok: false, reason: 'reqId가 필요합니다.' });
   res.json(getCaptureResult(String(req.query.reqId)));
 });
+
+// pcap 파일 캡처 + 다운로드(중앙 직접). tshark 심층 분석용.
+adminRouter.post('/net/pcap', adminOnly, async (req, res) => {
+  const b = req.body || {};
+  if (!b.hostA?.host || !b.hostA?.username || !b.peer) return res.status(400).json({ ok: false, reason: 'A 접속정보·대상 B IP가 필요합니다.' });
+  try {
+    const r = await runPcapCapture({ hostA: b.hostA, peer: String(b.peer).trim(), iface: b.iface || 'any', seconds: b.seconds, maxPackets: b.maxPackets, useSudo: b.useSudo !== false });
+    if (!r.pcapBase64) return res.json({ ok: false, reason: r.warn || 'pcap을 회수하지 못했습니다(권한/tcpdump 확인).' });
+    res.json({ ok: true, fileName: r.fileName, captured: r.captured, size: r.size, summary: r.summary, pcapBase64: r.pcapBase64 });
+  } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+});
+
+// 캡처 이력
+adminRouter.get('/net/history', adminOnly, (req, res) => res.json({ captures: listCaptures({ limit: Number(req.query.limit) || 100 }) }));
+adminRouter.get('/net/history/:id', adminOnly, (req, res) => { const c = getCapture(req.params.id); return c ? res.json(c) : res.status(404).json({ ok: false }); });
+adminRouter.delete('/net/history/:id', adminOnly, (req, res) => res.json({ ok: deleteCapture(req.params.id) }));
+
+// 연속 모니터링
+adminRouter.get('/net/monitors', adminOnly, (_req, res) => res.json({ monitors: listMonitors() }));
+adminRouter.put('/net/monitors', adminOnly, (req, res) => res.json(saveMonitor(req.body || {})));
+adminRouter.delete('/net/monitors/:id', adminOnly, (req, res) => res.json({ ok: removeMonitor(req.params.id) }));
+adminRouter.post('/net/monitors/:id/run', adminOnly, async (req, res) => { try { res.json(await runMonitorNow(req.params.id)); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); } });
 // 로그 자체 분석(장애/이슈 탐지).
 adminRouter.get('/net/log-issues', adminOnly, async (req, res) => {
   try { res.json(await analyzeLogsForIssues({ vcenterId: req.query.vcenterId || '', days: Number(req.query.days) || 7 })); }
