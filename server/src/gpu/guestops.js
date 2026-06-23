@@ -150,22 +150,30 @@ export async function collectVmGpu(c, vmMoref, creds, { isWindows, timeoutMs = 2
     if (/<endTime>/.test(listXml)) break; // 종료됨
   }
 
-  // 5) stdout 회수 → 파싱 (다운로드는 vCenter 실제 IP/ESXi IP 후보 우선)
-  const outRes = await readGuestFile(c, fileManager, vmRef, auth, outFile, timeoutMs, dlHosts);
+  // 5) stdout 회수 → 파싱 (다운로드는 vCenter 실제 IP/ESXi IP 후보 우선).
+  // 다운로드는 짧은 타임아웃으로 빠른 실패(도달 안 되는 후보가 전체를 오래 막지 않게).
+  const dlTimeout = Math.min(timeoutMs, 4000);
+  const outRes = await readGuestFile(c, fileManager, vmRef, auth, outFile, dlTimeout, dlHosts);
   const parsed = parseNvidiaSmiCsv(outRes.text);
   if (parsed) {
     deleteGuestFile(c, fileManager, vmRef, auth, outFile);
     deleteGuestFile(c, fileManager, vmRef, auth, errFile);
     return parsed;
   }
+  // 다운로드 자체가 실패(어느 후보도 못 받음)면 stderr도 같은 실패 → 재시도 없이 그 사유로 throw.
+  if (outRes.error) {
+    deleteGuestFile(c, fileManager, vmRef, auth, outFile);
+    deleteGuestFile(c, fileManager, vmRef, auth, errFile);
+    const e = new Error(outRes.error); e.guestDiag = true; throw e;
+  }
 
-  // 6) 비었으면 stderr 회수해 진단 후 정리 + 구체 사유로 throw
-  const errRes = await readGuestFile(c, fileManager, vmRef, auth, errFile, timeoutMs, dlHosts);
+  // 6) 다운로드는 됐는데 stdout이 비었으면 stderr만 확인.
+  const errRes = await readGuestFile(c, fileManager, vmRef, auth, errFile, dlTimeout, dlHosts);
   deleteGuestFile(c, fileManager, vmRef, auth, outFile);
   deleteGuestFile(c, fileManager, vmRef, auth, errFile);
   const stderrLine = (errRes.text || '').trim().split(/\r?\n/)[0];
   const reason = stderrLine ? `게스트 오류: ${stderrLine.slice(0, 180)}`
-    : (outRes.error || errRes.error || 'nvidia-smi 출력이 비어 있음(명령은 실행됐으나 stdout 없음)');
+    : 'nvidia-smi 출력이 비어 있음(명령은 실행됐으나 stdout 없음)';
   const e = new Error(reason); e.guestDiag = true; throw e;
 }
 
