@@ -17,6 +17,7 @@ import { getMetricsDb } from '../metrics/db.js';
 import { getGuestGpuHost, getGuestGpuVms } from '../gpu/store.js';
 import { enqueuePing, getPingResults, setPingResults } from '../central/pingJobs.js';
 import { pingMany } from '../util/ping.js';
+import { snapshotFilter, slimVm } from '../search/deepSearch.js';
 import { getServiceCheck } from '../health/services.js';
 import { getNetworkCheck } from '../health/network.js';
 import { buildVmwareConfigExport } from '../backup/vmwareExport.js';
@@ -731,6 +732,13 @@ api.get('/tools/gpu/vms', (req, res) => {
       };
     }).sort((a, b) => (a.vcenterId === b.vcenterId ? a.name.localeCompare(b.name) : a.vcenterId.localeCompare(b.vcenterId))).slice(0, 5000),
   });
+});
+
+// 심층 검색(스냅샷 1차) — 다조건 + 범위(전체/특정/복수 vCenter). Body: { vcenterIds[], filters{} }.
+api.post('/tools/deep-search', (req, res) => {
+  const b = req.body || {};
+  const vms = snapshotFilter(store.get(), { vcenterIds: b.vcenterIds || [], f: b.filters || {} });
+  res.json({ total: vms.length, items: vms.slice(0, 2000).map(slimVm) });
 });
 
 // 다빈치 서비스 점검 — 포탈 내부 서비스/수집기 상태 통합.

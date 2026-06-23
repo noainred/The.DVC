@@ -1,6 +1,6 @@
 {
   "name": "vmware-portal-server",
-  "version": "1.99.0",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
   "description": "Aggregation API for the VMware global monitoring portal",
