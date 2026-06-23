@@ -1,6 +1,16 @@
 {
   "notes": [
     {
+      "version": "1.80.0",
+      "date": "2026-06-23",
+      "title": "버그수정 — vGPU 호스트가 '패스쓰루'로 이중 집계되던 문제 + GPU 사용량 CSV/JSON export",
+      "notes": [
+        "vGPU(Shared Direct) 호스트가 모두 'vGPU 패스쓰루 N'으로 잘못 표시되던 버그 수정 — 같은 물리 GPU가 graphicsInfo(vGPU)와 pciPassthruInfo(passthruEnabled) 양쪽에 나타나 이중 집계되던 것을 pciId로 중복 제거",
+        "GPU 인벤토리 화면에 '⬇ CSV / ⬇ JSON' 내려받기 추가 — 호스트별 GPU 모델·장수·모드·사용률·할당 VM을 파일로 export(현재 vCenter 스코프 반영, Excel 호환 BOM)",
+        "수집 가능한(gpu.utilization 카운터 존재) vCenter의 GPU 호스트는 유휴 시 '—' 대신 '0%'로 표시"
+      ]
+    },
+    {
       "version": "1.79.0",
       "date": "2026-06-23",
       "title": "특수기능 메뉴 빠른 찾기 + 설정에 'GPU 수집' 메뉴(수집 주기)",

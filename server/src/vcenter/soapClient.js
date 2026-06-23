@@ -406,6 +406,7 @@ function parseGpus(xml) {
     const vendorName = /<vendorName>([^<]*)<\/vendorName>/.exec(blk)?.[1] || '';
     const gtype = /<graphicsType>([^<]*)<\/graphicsType>/.exec(blk)?.[1] || '';
     const memKB = Number(/<memorySizeInKB>(\d+)<\/memorySizeInKB>/.exec(blk)?.[1] || 0);
+    const pciId = /<pciId>([^<]*)<\/pciId>/.exec(blk)?.[1] || '';
     if (deviceName || vendorName) {
       // graphicsType: sharedDirect=vGPU(GRID), shared=vSGA. 순수 패스쓰루(DirectPath
       // I/O) GPU는 graphicsInfo가 아니라 PCI passthrough에 나타나므로 별도 수집한다.
@@ -416,6 +417,7 @@ function parseGpus(xml) {
         memGB: memKB ? Math.round(memKB / 1024 / 1024) : 0,
         mode,
         vgpuMode: mode === 'vgpu',
+        pciId,
       });
     }
   }
@@ -427,9 +429,15 @@ function parseGpus(xml) {
  * PCI passthrough (DirectPath I/O). These do NOT appear in graphicsInfo. A GPU
  * is a PCI device with class id 0x03xx (VGA / 3D / display controller).
  * Returns [{ model, vendor, memGB:0, mode:'passthrough' }].
+ *
+ * `skipIds` excludes GPUs already presented via graphicsInfo (vGPU/vSGA). On
+ * NVIDIA vGPU 호스트는 Shared Direct GPU가 graphicsInfo에도 나오고 동시에
+ * pciPassthruInfo에 passthruEnabled=true로도 나오기 때문에, 같은 물리 GPU(동일
+ * pciId)가 vGPU+패스쓰루로 이중 집계되는 문제를 막는다.
  */
-function parsePassthruGpus(passthruXml, pciDeviceXml) {
+function parsePassthruGpus(passthruXml, pciDeviceXml, skipIds) {
   if (!passthruXml || !pciDeviceXml) return [];
+  const skip = skipIds || new Set();
   // Device ids that are passthrough-enabled (and active).
   const enabled = new Set();
   for (const blk of passthruXml.split(/<HostPciPassthruInfo(?=[ >])/).slice(1)) {
@@ -440,7 +448,7 @@ function parsePassthruGpus(passthruXml, pciDeviceXml) {
   const out = [];
   for (const blk of pciDeviceXml.split(/<HostPciDevice(?=[ >])/).slice(1)) {
     const id = /<id>([^<]+)<\/id>/.exec(blk)?.[1];
-    if (!id || !enabled.has(id)) continue;
+    if (!id || !enabled.has(id) || skip.has(id)) continue; // graphicsInfo(vGPU/vSGA)와 중복 제거
     const classId = Number(/<classId>(-?\d+)<\/classId>/.exec(blk)?.[1] || 0);
     // PCI base class 0x03 = display controller (VGA 0x0300 / 3D 0x0302).
     if ((classId >> 8) !== 0x03) continue;
@@ -740,7 +748,12 @@ export async function collectFromVCenterSoap(vc) {
         cpuThreads: num(p['summary.hardware.numCpuThreads']) || cores,
         version: p['summary.config.product.version'] || '',
         build: p['summary.config.product.build'] || '',
-        gpus: [...parseGpus(p['config.graphicsInfo']), ...parsePassthruGpus(p['config.pciPassthruInfo'], p['hardware.pciDevice'])],
+        gpus: (() => {
+          const gfx = parseGpus(p['config.graphicsInfo']);
+          // vGPU/vSGA로 이미 잡힌 물리 GPU(pciId)는 패스쓰루에서 제외해 이중 집계 방지.
+          const gfxIds = new Set(gfx.map((g) => g.pciId).filter(Boolean));
+          return [...gfx, ...parsePassthruGpus(p['config.pciPassthruInfo'], p['hardware.pciDevice'], gfxIds)];
+        })(),
         hbas: parseHbas(p['config.storageDevice.hostBusAdapter']),
         ...parseTemps(p['runtime.healthSystemRuntime.systemHealthInfo.numericSensorInfo']),
         vendor: p['summary.hardware.vendor'] || '',
@@ -780,7 +793,8 @@ export async function collectFromVCenterSoap(vc) {
             const cid = await c.gpuUtilCounterId();
             if (cid) {
               const map = await c.queryHostGpuUtil(cid, stale);
-              for (const ref of stale) { const pct = map.get(ref); if (pct != null) _gpuUtilCache.set(`${vc.id}:${ref}`, { pct, at: now }); }
+              // 카운터가 존재(=수집 가능)하면 GPU 호스트는 값이 없어도(유휴) 0으로 기록 → '—' 대신 '0' 표시.
+              for (const ref of stale) _gpuUtilCache.set(`${vc.id}:${ref}`, { pct: map.get(ref) ?? 0, at: now });
             }
           }
           // 캐시된 사용률을 GPU 보유 호스트에 적용(throttle 주기 사이에도 마지막 값 유지).

@@ -1812,6 +1812,13 @@ function Gpu({ scope }) {
     try { await postJson('/admin/gpu/collect-util', {}); } catch { /* best effort */ }
     setCollecting(false); setBust((b) => b + 1);
   };
+  // GPU 사용량/인벤토리 CSV·JSON 내려받기(현재 vCenter 스코프 반영).
+  const exportGpu = async (fmt) => {
+    const q = scope ? `?vcenterId=${encodeURIComponent(scope)}` : '';
+    const res = await fetch(`/api/tools/gpu.${fmt}${q}`, { headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {} });
+    const blob = await res.blob(); const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = `gpu-${new Date().toISOString().slice(0, 10)}.${fmt}`; a.click(); URL.revokeObjectURL(url);
+  };
   const [view, setView] = useState('host'); // host | cluster | vc | model
   const [hist, setHist] = useState(null);   // { level, key, days, points, synthesized }
   const [vmList, setVmList] = useState(null); // { title, params } for GpuVmsModal
@@ -1954,6 +1961,8 @@ function Gpu({ scope }) {
               onClick={collectNow} title="vCenter 성능 카운터(gpu.utilization)로 지금 사용률을 즉시 수집합니다(설정 주기 무시).">{collecting ? '수집 중…' : '⟳ 지금 수집'}</button>
             <button className="logout-btn" style={{ flex: 'none', padding: '7px 12px' }}
               onClick={() => setVmList({ title: `GPU 할당 VM${modelFilter ? ` — ${modelFilter}` : ' 전체'}`, params: { ...(scope ? { vcenterId: scope } : {}), ...(mode ? { mode } : {}), ...(modelFilter ? { model: modelFilter } : {}) } })}>🎮 GPU 할당 VM 보기</button>
+            <button className="logout-btn" style={{ flex: 'none', padding: '7px 12px' }} onClick={() => exportGpu('csv')} title="호스트별 GPU 사용량·인벤토리를 CSV로 내려받기(Excel 호환).">⬇ CSV</button>
+            <button className="logout-btn" style={{ flex: 'none', padding: '7px 12px' }} onClick={() => exportGpu('json')} title="GPU 사용량·인벤토리 집계를 JSON으로 내려받기.">⬇ JSON</button>
           </div>
           {view === 'model' && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>법인별로 설치된 GPU 카드 모델·장수·할당 VM 수입니다(같은 법인·같은 모델은 합산). <b>할당 VM</b> 숫자를 클릭하면 해당 VM 목록과 사용 방식을 봅니다.</div>}
           {view === 'vc' && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>법인별 GPU 장수·사용 방식·할당 VM 수입니다. <b>할당 VM</b> 숫자를 클릭하면 VM별 사용 방식을 봅니다.</div>}
