@@ -17,7 +17,7 @@ export default function AgentDeploy() {
   const [result, setResult] = useState(null);
   const [targets, setTargets] = useState([]);
   const [pkg, setPkg] = useState(null);
-  const [dl, setDl] = useState({ kind: 'installer', version: '', busy: false });
+  const [dl, setDl] = useState({ kinds: ['installer_cent9'], version: '', busy: false });
   const [pkgCfg, setPkgCfg] = useState(null); // { baseUrl, dir } editable
 
   const loadInstaller = () => fetchJson('/admin/agent-deploy/installer').then(setInstaller).catch(() => setInstaller({ available: false }));
@@ -90,9 +90,17 @@ export default function AgentDeploy() {
   };
 
   const downloadPkg = async () => {
+    const kinds = dl.kinds || [];
+    if (!kinds.length) { setResult({ kind: 'pkg-multi', ok: false, reason: '종류를 1개 이상 선택하세요.' }); return; }
     setDl((d) => ({ ...d, busy: true })); setResult(null);
-    const r = await postJson('/admin/packages/download', { kind: dl.kind, version: dl.version || undefined }).catch((e) => ({ ok: false, reason: e.message }));
-    setResult({ kind: 'pkg', ...r });
+    const results = [];
+    for (const k of kinds) {
+      // eslint-disable-next-line no-await-in-loop
+      const r = await postJson('/admin/packages/download', { kind: k, version: dl.version || undefined }).catch((e) => ({ ok: false, reason: e.message }));
+      results.push({ ...r, kind: k });
+    }
+    const okCount = results.filter((r) => r.ok).length;
+    setResult({ kind: 'pkg-multi', ok: okCount === kinds.length, okCount, total: kinds.length, results });
     await loadPkg(); await loadInstaller();
     setDl((d) => ({ ...d, busy: false }));
   };
@@ -163,19 +171,29 @@ export default function AgentDeploy() {
             </div>
           </div>
         )}
-        <div className="flex gap wrap" style={{ alignItems: 'flex-end' }}>
-          <label style={{ fontSize: 12 }}>종류
-            <select className="select" value={dl.kind} onChange={(e) => setDl({ ...dl, kind: e.target.value })}>
-              <option value="installer">설치 패키지(Rocky 9 offline)</option>
-              <option value="installer_cent9">설치 패키지(CentOS Stream 9 offline)</option>
-              <option value="bundle">업그레이드 번들(app)</option>
-              <option value="windows">Windows zip</option>
-            </select>
-          </label>
-          <label style={{ fontSize: 12 }}>버전(비우면 latest{pkg?.remote?.latest ? ` ${pkg.remote.latest}` : ''})
-            <input className="input" value={dl.version} onChange={(e) => setDl({ ...dl, version: e.target.value })} placeholder={pkg?.remote?.latest || '1.x.y'} />
-          </label>
-          <button className="login-btn" style={{ flex: 'none', padding: '9px 16px' }} disabled={dl.busy} onClick={downloadPkg}>{dl.busy ? '다운로드 중…' : '다운로드'}</button>
+        <div style={{ marginTop: 4 }}>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>종류(여러 개 선택 가능)</div>
+          <div className="flex gap wrap" style={{ marginBottom: 8 }}>
+            {[['installer', 'Rocky 9 offline'], ['installer_cent9', 'CentOS Stream 9 offline'], ['bundle', '업그레이드 번들(app)'], ['windows', 'Windows zip']].map(([k, label]) => {
+              const on = (dl.kinds || []).includes(k);
+              return (
+                <label key={k} className="agent-check" style={{ margin: 0, padding: '5px 10px', border: '1px solid #243049', borderRadius: 8, cursor: 'pointer', background: on ? 'rgba(37,99,235,.12)' : 'transparent' }}>
+                  <input type="checkbox" checked={on} onChange={(e) => setDl((d) => ({ ...d, kinds: e.target.checked ? [...(d.kinds || []), k] : (d.kinds || []).filter((x) => x !== k) }))} />
+                  <span style={{ fontSize: 12 }}>{label}</span>
+                </label>
+              );
+            })}
+          </div>
+          <div className="flex gap wrap" style={{ alignItems: 'flex-end' }}>
+            <label style={{ fontSize: 12 }}>버전
+              <select className="select" value={dl.version} onChange={(e) => setDl({ ...dl, version: e.target.value })}>
+                <option value="">latest{pkg?.remote?.latest ? ` (${pkg.remote.latest})` : ''}</option>
+                {(pkg?.remote?.versions || []).map((v) => <option key={v.version} value={v.version}>{v.version}</option>)}
+              </select>
+            </label>
+            <span className="muted" style={{ fontSize: 12, alignSelf: 'center' }}>선택 {(dl.kinds || []).length}종</span>
+            <button className="login-btn" style={{ flex: 'none', padding: '9px 16px' }} disabled={dl.busy || !(dl.kinds || []).length} onClick={downloadPkg}>{dl.busy ? '다운로드 중…' : '다운로드'}</button>
+          </div>
         </div>
         <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
           저장소: <code>{pkg?.baseUrl}</code>{pkg?.remote?.error ? ` · ⚠ 원격 조회 실패: ${pkg.remote.error}` : (pkg?.remote?.latest ? ` · 원격 latest ${pkg.remote.latest}` : '')}
@@ -325,7 +343,7 @@ export default function AgentDeploy() {
       {result && (
         <div className="card" style={{ borderColor: result.ok ? 'var(--green)' : 'var(--red)' }}>
           <b style={{ color: result.ok ? 'var(--green)' : 'var(--red)' }}>
-            {result.ok ? '성공' : '실패'} — {{ test: 'SSH 테스트', save: '대상 저장', 'deploy-all': '전체 배포', pkg: '패키지 다운로드', token: '중앙 토큰', autofill: '자동 채우기', pkgcfg: '패키지 설정', status: '서버 상태 확인' }[result.kind] || '배포'}
+            {result.ok ? '성공' : '실패'} — {{ test: 'SSH 테스트', save: '대상 저장', 'deploy-all': '전체 배포', pkg: '패키지 다운로드', 'pkg-multi': '패키지 다운로드', token: '중앙 토큰', autofill: '자동 채우기', pkgcfg: '패키지 설정', status: '서버 상태 확인' }[result.kind] || '배포'}
           </b>
           <div style={{ fontSize: 13, marginTop: 6, lineHeight: 1.7 }}>
             {result.reason && <div style={{ color: result.ok ? 'var(--green)' : 'var(--red)' }}>{result.reason}</div>}
@@ -346,6 +364,13 @@ export default function AgentDeploy() {
               </div>
             )}
             {result.kind === 'pkg' && result.ok && <div>저장: <code>{result.file}</code> ({(result.sizeBytes / 1048576).toFixed(1)} MB) · v{result.version}{result.verified ? ' · SHA-256 검증됨' : ''}</div>}
+            {result.kind === 'pkg-multi' && (
+              <div>{result.total != null ? `${result.okCount}/${result.total}종 다운로드` : ''}
+                <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                  {(result.results || []).map((x, i) => <li key={i} style={{ color: x.ok ? 'var(--green)' : 'var(--red)' }}>{x.kind} — {x.ok ? <span><code>{x.file}</code> ({(x.sizeBytes / 1048576).toFixed(1)} MB) v{x.version}{x.verified ? ' · SHA-256 ✓' : ''}</span> : (x.reason || '실패')}</li>)}
+                </ul>
+              </div>
+            )}
             {result.kind === 'deploy-all' && <div>{result.deployed}/{result.total} 성공
               <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
                 {(result.results || []).map((x) => <li key={x.id} style={{ color: x.ok ? 'var(--green)' : 'var(--red)' }}>{x.host} · {x.agentName || ''} — {x.ok ? (x.active || 'ok') : x.reason}</li>)}
