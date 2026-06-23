@@ -427,6 +427,29 @@ function parseGpus(xml) {
 }
 
 /**
+ * 모델명에서 GPU VRAM(GB) 추론 — 패스쓰루 GPU는 PCI 정보에 메모리가 없어 표시가 0이 되므로
+ * 모델 문자열의 명시값(예: "A100 PCIe 80GB")을 우선, 없으면 알려진 모델로 보정.
+ */
+function inferGpuMemGB(model) {
+  const s = String(model || '');
+  const explicit = /(\d{2,3})\s*GB/i.exec(s); // "80GB", "48 GB" 등 명시값 우선
+  if (explicit) return Number(explicit[1]);
+  const m = s.toUpperCase();
+  if (/H200/.test(m)) return 141;
+  if (/H100/.test(m)) return 80;
+  if (/A100/.test(m)) return 80;          // 40/80 혼재 가능 — 명시 없으면 80 가정
+  if (/A40|GA102/.test(m)) return 48;
+  if (/L40S?/.test(m)) return 48;
+  if (/A30/.test(m)) return 24;
+  if (/A10(?!0)/.test(m)) return 24;
+  if (/\bL4\b|AD104/.test(m)) return 24;
+  if (/A16/.test(m)) return 16;
+  if (/\bT4\b|TU104/.test(m)) return 16;
+  if (/V100/.test(m)) return 32;
+  return 0;
+}
+
+/**
  * Parse config.pciPassthruInfo + hardware.pciDevice for GPUs assigned in raw
  * PCI passthrough (DirectPath I/O). These do NOT appear in graphicsInfo. A GPU
  * is a PCI device with class id 0x03xx (VGA / 3D / display controller).
@@ -456,7 +479,9 @@ function parsePassthruGpus(passthruXml, pciDeviceXml, skipIds) {
     if ((classId >> 8) !== 0x03) continue;
     const deviceName = /<deviceName>([^<]*)<\/deviceName>/.exec(blk)?.[1] || '';
     const vendorName = /<vendorName>([^<]*)<\/vendorName>/.exec(blk)?.[1] || '';
-    out.push({ model: deviceName || vendorName || 'Passthrough GPU', vendor: vendorName, memGB: 0, mode: 'passthrough', vgpuMode: false });
+    const model = deviceName || vendorName || 'Passthrough GPU';
+    // 패스쓰루 GPU는 PCI 정보에 VRAM이 없으므로 모델명에서 추론(없으면 0).
+    out.push({ model, vendor: vendorName, memGB: inferGpuMemGB(model), mode: 'passthrough', vgpuMode: false });
   }
   return out;
 }
