@@ -1,6 +1,15 @@
 {
   "notes": [
     {
+      "version": "1.86.3",
+      "date": "2026-06-23",
+      "title": "버그수정 — vCenter host에 스킴(https://) 없으면 'fetch failed: unknown scheme'로 수집 실패",
+      "notes": [
+        "vcenters.json의 host가 'https://' 없이 IP/FQDN만(예: 192.168.21.200) 들어가면 vCenter 연결이 'unknown scheme'로 실패하던 문제 수정 — 설정 로딩 시 스킴이 없으면 자동으로 https:// 보강",
+        "에이전트 배포의 GPU 게스트 자동 구성도 host에 스킴을 붙여 기록. 업그레이드만 해도 기존 vcenters.json이 자동 보정됨"
+      ]
+    },
+    {
       "version": "1.86.2",
       "date": "2026-06-23",
       "title": "게스트 GPU push 진단 로그 — agent 전송/중앙 수신을 journalctl로 확인 가능",

@@ -82,7 +82,8 @@ async function writeGpuGuestConfig({ exec, readFile, writeFile }, g) {
   // 1) vcenters.json — agent가 수집할 vCenter(중앙과 동일한 id로). 같은 id면 갱신.
   const vcs = await readJson('vcenters.json');
   if (!Array.isArray(vcs.vcenters)) vcs.vcenters = [];
-  const entry = { id: g.vcenterId, name: g.vcenterName || g.vcenterId, host: g.vcenterHost, username: g.vcenterUser || '', password: g.vcenterPass || '', enabled: true };
+  const host = /^https?:\/\//i.test(g.vcenterHost) ? g.vcenterHost : `https://${String(g.vcenterHost).trim()}`; // 스킴 보강
+  const entry = { id: g.vcenterId, name: g.vcenterName || g.vcenterId, host, username: g.vcenterUser || '', password: g.vcenterPass || '', enabled: true };
   const i = vcs.vcenters.findIndex((v) => v && v.id === g.vcenterId);
   if (i >= 0) vcs.vcenters[i] = { ...vcs.vcenters[i], ...entry }; else vcs.vcenters.push(entry);
   await writeFile(`${dir}/vcenters.json`, JSON.stringify(vcs, null, 2), 0o600);
