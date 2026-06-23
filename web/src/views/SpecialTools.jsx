@@ -49,6 +49,7 @@ const toolFromHash = () => {
 
 export default function SpecialTools() {
   const [tool, setTool] = useState(() => toolFromHash());
+  const [menuQ, setMenuQ] = useState(''); // 메뉴 빠른 찾기
   const openTool = (k) => { setTool(k); window.location.hash = k ? `#/tools/${k}` : '#/tools'; };
   // 뒤로/앞으로 가기 및 외부에서 바로가기로 진입할 때 동기화.
   useEffect(() => {
@@ -57,12 +58,20 @@ export default function SpecialTools() {
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
   if (tool) return <ToolPanel tool={tool} onBack={() => openTool(null)} />;
+  const ql = menuQ.trim().toLowerCase();
+  const shown = ql
+    ? TOOLS.filter((t) => t.label.toLowerCase().startsWith(ql) || t.label.toLowerCase().includes(ql) || (t.desc || '').toLowerCase().includes(ql))
+    : TOOLS;
   return (
     <>
       <div className="section-title" style={{ marginTop: 0 }}>🛠️ 특수 기능</div>
-      <div className="muted" style={{ fontSize: 13, marginBottom: 14 }}>아래 기능을 클릭하면 해당 진단을 실행해 보여줍니다.</div>
+      <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 14 }}>
+        <div className="muted" style={{ fontSize: 13 }}>아래 기능을 클릭하면 해당 진단을 실행해 보여줍니다.</div>
+        <SearchBox className="input" style={{ maxWidth: 280 }} placeholder="메뉴 빠른 찾기 (예: G, GPU, IP)" value={menuQ} onChange={setMenuQ} />
+      </div>
       <div className="vc-grid">
-        {TOOLS.map((t) => (
+        {shown.length === 0 && <div className="muted" style={{ gridColumn: '1 / -1', padding: 24 }}>“{menuQ}”에 해당하는 메뉴가 없습니다.</div>}
+        {shown.map((t) => (
           <div key={t.k} className="card vc-card"
             style={{
               cursor: t.disabled ? 'not-allowed' : 'pointer',
