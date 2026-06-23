@@ -595,6 +595,63 @@ api.get('/tools/gpu.csv', (req, res) => {
   res.send('﻿' + lines.join('\r\n')); // BOM for Excel
 });
 
+// GPU 사용률 시계열 수집 메타 — '언제부터 데이터가 쌓였는지'(수집 시작/마지막/샘플 수).
+// export 모달에서 사용자가 수집 시작 일시를 보고 전체/기간을 고르도록.
+api.get('/tools/gpu/series-meta', async (req, res) => {
+  try {
+    const db = await getMetricsDb();
+    const m = db.meta('gpu_util');
+    res.json({ collectedSince: m.firstTs, latestAt: m.lastTs, sampleCount: m.count });
+  } catch { res.json({ collectedSince: null, latestAt: null, sampleCount: 0 }); }
+});
+
+// GPU 사용률 '수집된 전체 데이터' export — 시계열(샘플마다 한 행). range=all(수집 시작~현재)
+// 또는 range=days(최근 N일). vcenterId로 법인 스코프. format은 .csv/.json.
+async function gpuSeriesExport(req, res, fmt) {
+  const range = req.query.range === 'days' ? 'days' : 'all';
+  const days = Math.max(1, Math.min(1830, Number(req.query.days) || 30));
+  const vcId = req.query.vcenterId || null;
+  const snap = store.get();
+  const hostMap = new Map(); // host.id -> {name,vcenterId,cluster}
+  for (const h of snap.hosts || []) hostMap.set(h.id, h);
+  const db = await getMetricsDb();
+  const meta = db.meta('gpu_util');
+  const until = Date.now();
+  const since = range === 'days' ? until - days * 86_400_000 : (meta.firstTs ?? 0);
+  const raw = db.dump('gpu_util', since, until, 1_000_000);
+  // 법인 스코프면 해당 법인 호스트만. 이름/클러스터는 현재 스냅샷 기준으로 매핑.
+  const out = [];
+  for (const r of raw) {
+    const h = hostMap.get(r.k);
+    if (vcId && (!h || h.vcenterId !== vcId)) continue;
+    out.push({ ts: r.ts, host: h?.name || r.k, vcenterId: h?.vcenterId || '', cluster: h?.cluster || '', utilPct: r.v });
+  }
+  const stamp = new Date().toISOString().slice(0, 10);
+  const sinceIso = meta.firstTs ? new Date(meta.firstTs).toISOString() : '없음';
+  if (fmt === 'json') {
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="gpu-history-${range}-${stamp}.json"`);
+    res.send(JSON.stringify({
+      generatedAt: new Date().toISOString(), collectedSince: meta.firstTs ? new Date(meta.firstTs).toISOString() : null,
+      range, days: range === 'days' ? days : null, vcenterId: vcId, sampleCount: out.length,
+      points: out.map((p) => ({ ...p, tsIso: new Date(p.ts).toISOString() })),
+    }, null, 2));
+    return;
+  }
+  const esc = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const head = ['timestamp_iso', 'epoch_ms', 'host', 'vcenter_id', 'cluster', 'gpu_util_pct'];
+  const lines = [
+    `# GPU 사용률 수집 데이터 — 수집 시작: ${sinceIso} (그날부터 누적) | 범위: ${range === 'all' ? '전체' : `최근 ${days}일`} | 생성: ${new Date().toISOString()} | 샘플 ${out.length}`,
+    head.join(','),
+  ];
+  for (const p of out) lines.push([new Date(p.ts).toISOString(), p.ts, p.host, p.vcenterId, p.cluster, p.utilPct].map(esc).join(','));
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="gpu-history-${range}-${stamp}.csv"`);
+  res.send('﻿' + lines.join('\r\n')); // BOM for Excel
+}
+api.get('/tools/gpu/export.csv', (req, res) => gpuSeriesExport(req, res, 'csv'));
+api.get('/tools/gpu/export.json', (req, res) => gpuSeriesExport(req, res, 'json'));
+
 // GPU가 할당된 VM 목록 — 어떤 VM이 어떤 방식(vGPU/패스쓰루)·프로파일로 GPU를 쓰는지.
 // 선택 필터: vcenterId, host, mode(vgpu|passthrough|mixed), model(호스트 GPU 모델).
 api.get('/tools/gpu/vms', (req, res) => {
