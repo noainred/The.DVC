@@ -81,9 +81,13 @@ async function pollLive(snap, vc, s) {
         : counts.onTools === 0 ? 'On+Tools VM 없음' : '수집 대상 계정 없음';
     return { hosts: [], vms: [], diag };
   }
-  // 호스트명 → 다운로드 후보 호스트(vCenter 실제 IP → ESXi IP → ESXi FQDN).
+  // 호스트명 → 게스트파일 다운로드 후보. guestFile은 오직 "그 VM이 떠 있는 ESXi 호스트"만
+  // 서빙한다(vCenter는 항상 HTTP404). 따라서 ESXi 자신의 주소만 후보로 둔다:
+  //   h.mgmtIp = ESXi 관리 vmk IP(예: 192.168.10.x), h.name = ESXi FQDN.
+  // ⚠️ h.mgmtServerIp 는 'ESXi를 관리하는 vCenter IP'라 404만 유발 → 후보에서 제외.
+  // (readGuestFile이 마지막 폴백으로 vCenter host를 한 번 더 시도하므로 누락 위험 없음)
   const dlByHost = new Map();
-  for (const h of snap.hosts || []) if (h.vcenterId === vc.id) dlByHost.set(h.name, [h.mgmtServerIp, h.mgmtIp, h.name].filter(Boolean));
+  for (const h of snap.hosts || []) if (h.vcenterId === vc.id) dlByHost.set(h.name, [h.mgmtIp, h.name].filter(Boolean));
   const c = new VimSoapClient(vc);
   try { await c.login(); }
   catch (e) { diag.stage = 'vCenter 로그인 실패'; diag.error = e.message; console.warn(`[gpu-guest] ${vc.id} vCenter 로그인 실패: ${e.message}`); return { hosts: [], vms: [], diag }; }
