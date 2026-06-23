@@ -86,22 +86,26 @@ async function readGuestFile(c, fileManager, vmRef, auth, guestPath, timeoutMs) 
       `<guestFilePath>${esc(guestPath)}</guestFilePath></InitiateFileTransferFromGuest>`);
   } catch (e) { return { text: '', error: cleanGuestError(e.message) }; }
   const url = /<url>([^<]+)<\/url>/.exec(ftXml)?.[1];
-  if (!url) return { text: '', error: 'ESXi가 파일 전송 URL을 반환하지 않음' };
-  // 파일 전송 URL은 보통 'VM이 떠 있는 ESXi 호스트'를 가리키는데, 포탈은 ESXi에 직접
-  // 못 간다(vCenter만 도달). vCenter는 게스트 파일 전송을 ESXi로 '프록시'하므로,
-  // URL의 호스트를 항상 vCenter(연결 호스트)로 바꿔 vCenter 경유로 받는다.
-  //  - '*' 와일드카드(=연결 호스트 의미)도, 실제 ESXi FQDN이 박힌 경우도 모두 vCenter로.
+  if (!url) return { text: '', error: '파일 전송 URL을 반환하지 않음' };
+  // 파일 전송 URL의 호스트 처리:
+  //  - '*' 와일드카드 = '연결한 서버(vCenter)'를 의미 → vCenter 호스트로 치환.
+  //  - 실제 호스트(ESXi/vCenter FQDN)가 박힌 경우 그대로 시도(같은 망이면 도달).
+  // 토큰은 그 URL을 발급한 호스트에서만 유효하므로, 호스트를 함부로 vCenter로 강제하면
+  // 404가 난다(1.83.1 회귀). 그래서 (1) 원본 호스트로 먼저, (2) 실패 시 vCenter로 폴백.
   const vcHost = (c.vc.host || '').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
-  let dl;
-  try { const u = new URL(url.replace('://*', `://${vcHost}`)); u.host = vcHost; dl = u.toString(); }
-  catch { dl = url.replace('://*', `://${vcHost}`); }
-  try {
-    const res = await fetch(dl, { signal: AbortSignal.timeout(timeoutMs) });
-    if (!res.ok) return { text: '', error: `파일 다운로드 HTTP ${res.status}` };
-    return { text: await res.text(), error: null };
-  } catch (e) {
-    return { text: '', error: `파일 다운로드 실패(포탈→ESXi 도달/네트워크/인증서): ${e.message}` };
+  const primary = url.replace('://*', `://${vcHost}`);
+  const candidates = [primary];
+  try { const u = new URL(primary); if (u.host !== vcHost) { u.host = vcHost; candidates.push(u.toString()); } } catch { /* keep primary */ }
+  let lastErr = '';
+  for (const cand of candidates) {
+    const host = (() => { try { return new URL(cand).host; } catch { return '?'; } })();
+    try {
+      const res = await fetch(cand, { signal: AbortSignal.timeout(timeoutMs) });
+      if (res.ok) return { text: await res.text(), error: null };
+      lastErr = `HTTP ${res.status} (${host})`;
+    } catch (e) { lastErr = `${e.message} (${host})`; }
   }
+  return { text: '', error: `파일 다운로드 실패: ${lastErr}` };
 }
 
 function deleteGuestFile(c, fileManager, vmRef, auth, guestPath) {
