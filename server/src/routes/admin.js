@@ -42,8 +42,10 @@ import { loadBackupSettings, saveBackupSettings, backupStatus } from '../backup/
 import { saveLogSettings } from '../logs/settings.js';
 import { logStatus, rescheduleLogPoller, pollLogsOnce } from '../logs/poller.js';
 import { resetLogsDb } from '../logs/db.js';
-import { runTrafficCapture } from '../net/tcpdump.js';
+import { runTrafficCapture, runDualCapture } from '../net/tcpdump.js';
 import { analyzeLogsForIssues } from '../net/logIssues.js';
+import { enqueueCapture, getCaptureResult } from '../central/captureJobs.js';
+import { getAllAgentConfigs } from '../central/agentConfig.js';
 import path from 'node:path';
 import {
   listRegistry as listNsx, addManager as addNsx, updateManager as updateNsx,
@@ -812,19 +814,41 @@ adminRouter.post('/vclogs/collect', adminOnly, async (_req, res) => {
 });
 
 // ───────────────────────── 네트워크 트래픽 분석 ─────────────────────────
-// 두 서버 간 tcpdump 캡처 후 분석(관리자 전용, SSH+root 필요).
-// Body: { hostA:{host,port,username,password,privateKey}, peer, iface, seconds, maxPackets, useSudo }
+// 위임 캡처용 에이전트 목록(엣지가 사설망 서버를 대신 캡처).
+adminRouter.get('/net/agents', adminOnly, (_req, res) => {
+  const agents = new Set([...Object.keys(getAllAgentConfigs() || {}), ...listInventory().map((x) => x.agent).filter(Boolean), ...getAllGpuGuestDiag().map((x) => x.agent).filter(Boolean)]);
+  res.json({ agents: [...agents] });
+});
+
+// 두 서버 간 tcpdump 캡처/분석(관리자 전용, SSH+root). 단일/동시(dual) + 중앙직접/에이전트위임.
+// Body: { via:'central'|'agent', agent?, dual?, hostA:{...}, hostB?:{...}, peer?, iface, seconds, maxPackets, useSudo }
 adminRouter.post('/net/capture', adminOnly, async (req, res) => {
   const b = req.body || {};
+  const dual = !!b.dual;
   if (!b.hostA?.host || !b.hostA?.username) return res.status(400).json({ ok: false, reason: 'A 서버 SSH 접속정보(host/username)가 필요합니다.' });
-  if (!b.peer) return res.status(400).json({ ok: false, reason: '대상 서버(B) IP가 필요합니다.' });
+  if (dual ? (!b.hostB?.host || !b.hostB?.username) : !b.peer) return res.status(400).json({ ok: false, reason: dual ? 'B 서버 SSH 접속정보가 필요합니다.' : '대상 서버(B) IP가 필요합니다.' });
+  const opts = { iface: b.iface || 'any', seconds: b.seconds, maxPackets: b.maxPackets, useSudo: b.useSudo !== false };
+
+  // 에이전트 위임: 큐잉만 하고 reqId 반환(클라이언트가 폴링).
+  if (b.via === 'agent') {
+    if (!b.agent) return res.status(400).json({ ok: false, reason: '위임할 엣지 에이전트를 선택하세요.' });
+    const spec = dual ? { dual: true, hostA: b.hostA, hostB: b.hostB, ...opts } : { host: b.hostA.host, port: b.hostA.port, username: b.hostA.username, password: b.hostA.password, privateKey: b.hostA.privateKey, peer: String(b.peer).trim(), ...opts };
+    return res.json({ ok: true, delegated: true, reqId: enqueueCapture(String(b.agent), spec) });
+  }
+
+  // 중앙 직접 실행.
   try {
-    const r = await runTrafficCapture({
-      hostA: { host: b.hostA.host, port: b.hostA.port || 22, username: b.hostA.username, password: b.hostA.password, privateKey: b.hostA.privateKey || undefined },
-      peer: String(b.peer).trim(), iface: b.iface || 'any', seconds: b.seconds, maxPackets: b.maxPackets, useSudo: b.useSudo !== false,
-    });
+    const r = dual
+      ? await runDualCapture({ hostA: b.hostA, hostB: b.hostB, ...opts })
+      : await runTrafficCapture({ hostA: b.hostA, peer: String(b.peer).trim(), ...opts });
     res.json(r);
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+});
+
+// 위임 캡처 결과 폴링.
+adminRouter.get('/net/capture', adminOnly, (req, res) => {
+  if (!req.query.reqId) return res.status(400).json({ ok: false, reason: 'reqId가 필요합니다.' });
+  res.json(getCaptureResult(String(req.query.reqId)));
 });
 // 로그 자체 분석(장애/이슈 탐지).
 adminRouter.get('/net/log-issues', adminOnly, async (req, res) => {
