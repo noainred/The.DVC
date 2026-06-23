@@ -1,6 +1,16 @@
 {
   "notes": [
     {
+      "version": "1.88.2",
+      "date": "2026-06-23",
+      "title": "GPU 게스트 회수 진단 강화 — 게스트 파일 크기(size) + ESXi 404 응답 본문 표시",
+      "notes": [
+        "진단: 모든 후보가 HTTP404일 때 원인을 (A)빈 파일 vs (B)티켓 거부로 구분하기 위해 InitiateFileTransferFromGuest 응답의 <size>(게스트 파일 크기)를 로그·웹 에러에 표시. size=0이면 nvidia-smi가 stdout을 안 낸 것(드라이버/PATH 문제).",
+        "진단: 다운로드 실패 시 ESXi가 돌려준 404 응답 본문 일부를 캡처해 표시(파일없음/티켓무효 등 실제 사유).",
+        "에러 메시지에 size 포함 — 웹 'GPU 수집 진단'에서 바로 식별 가능."
+      ]
+    },
+    {
       "version": "1.88.1",
       "date": "2026-06-23",
       "title": "GPU 게스트 수집 회수단계 수정 — guestFile 원본 URL 우선 시도 + stderr 원인규명 + 토큰 가린 전체 URL 로그",

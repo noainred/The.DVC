@@ -96,6 +96,9 @@ async function readGuestFile(c, fileManager, vmRef, auth, guestPath, timeoutMs, 
   }
   const url = /<url>([^<]+)<\/url>/.exec(ftXml)?.[1];
   if (!url) return { text: '', error: '파일 전송 URL을 반환하지 않음' };
+  // InitiateFileTransferFromGuest 응답의 <size> = 게스트 파일 크기. 0이면 nvidia-smi가
+  // stdout을 안 낸 것(드라이버/PATH 문제) → ESXi가 빈 파일 전송에 404를 줄 수 있다.
+  const size = /<size>(\d+)<\/size>/.exec(ftXml)?.[1];
   // 토큰을 가린 URL(로그용). guestFile 티켓이 노출되지 않게 token/id/value를 마스킹.
   const redact = (u) => String(u).replace(/(([?&])(?:token|id|value)=)[^&]+/gi, '$1***');
   const vcHost = (c.vc.host || '').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
@@ -104,7 +107,7 @@ async function readGuestFile(c, fileManager, vmRef, auth, guestPath, timeoutMs, 
   // 그 ESXi가 티켓을 모르는 경로로 404가 날 수 있다. 원본 → ESXi 후보(IP/FQDN) → vCenter 폴백.
   const swapped = [...new Set([...preferHosts.filter(Boolean), vcHost])].map((h) => swapHost(url, h));
   const candidates = [...new Set([url, ...swapped])];
-  console.log(`[gpu-guest]     [${tag}] 파일전송 URL(원본 host=${origHost})=${redact(url)} → 후보 ${candidates.length}개`);
+  console.log(`[gpu-guest]     [${tag}] 파일전송 URL(원본 host=${origHost}, size=${size ?? '?'}B)=${redact(url)} → 후보 ${candidates.length}개`);
   const tries = [];
   for (const cand of candidates) {
     const candHost = (() => { try { return new URL(cand).host; } catch { return '?'; } })();
@@ -115,14 +118,17 @@ async function readGuestFile(c, fileManager, vmRef, auth, guestPath, timeoutMs, 
         console.log(`[gpu-guest]     [${tag}] 다운로드 ${candHost}${isOrig ? '(원본)' : ''} → HTTP ${res.status} ✓`);
         return { text: await res.text(), error: null };
       }
-      console.warn(`[gpu-guest]     [${tag}] 다운로드 ${candHost}${isOrig ? '(원본)' : ''} → HTTP ${res.status}`);
-      tries.push(`${candHost}${isOrig ? '(원본)' : ''}=HTTP${res.status}`);
+      // 404 등 본문에 ESXi가 사유를 담아주므로(예: 파일없음/티켓무효) 일부를 캡처.
+      let body = '';
+      try { body = (await res.text()).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 100); } catch { /* */ }
+      console.warn(`[gpu-guest]     [${tag}] 다운로드 ${candHost}${isOrig ? '(원본)' : ''} → HTTP ${res.status}${body ? ` body="${body}"` : ''}`);
+      tries.push(`${candHost}${isOrig ? '(원본)' : ''}=HTTP${res.status}${body ? `(${body})` : ''}`);
     } catch (e) {
       console.warn(`[gpu-guest]     [${tag}] 다운로드 ${candHost}${isOrig ? '(원본)' : ''} → ${e.message}`);
       tries.push(`${candHost}${isOrig ? '(원본)' : ''}=${String(e.message || 'err').slice(0, 60)}`);
     }
   }
-  return { text: '', error: `파일 다운로드 실패: ${tries.join(' | ')}` };
+  return { text: '', error: `파일 다운로드 실패(size=${size ?? '?'}B): ${tries.join(' | ')}` };
 }
 
 function deleteGuestFile(c, fileManager, vmRef, auth, guestPath) {
