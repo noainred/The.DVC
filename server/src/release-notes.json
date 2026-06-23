@@ -1,6 +1,15 @@
 {
   "notes": [
     {
+      "version": "1.83.1",
+      "date": "2026-06-23",
+      "title": "게스트 GPU 파일 회수를 vCenter 경유로 강제 — 포탈이 ESXi에 직접 못 가는 환경 대응",
+      "notes": [
+        "nvidia-smi 결과 파일 다운로드 URL이 'VM이 떠 있는 ESXi 호스트'를 가리켜 포탈이 직접 못 받던 문제 수정 — URL 호스트를 항상 vCenter(연결 호스트)로 바꿔 vCenter가 ESXi로 프록시하도록(ESXi 직접연결/별도 agent 불필요)",
+        "'*' 와일드카드뿐 아니라 실제 ESXi FQDN이 박힌 경우도 vCenter로 라우팅"
+      ]
+    },
+    {
       "version": "1.83.0",
       "date": "2026-06-23",
       "title": "GPU 인벤토리 상단에 'GPU 호스트 N대 · GPU 사용 VM M대' 요약(선택 범위 반영)",
