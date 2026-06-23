@@ -1795,7 +1795,14 @@ function GpuVmsModal({ title, params, onClose }) {
 }
 
 function Gpu({ scope }) {
-  const { loading, data, error } = useTool('/tools/gpu', scope ? { vcenterId: scope } : {});
+  const [bust, setBust] = useState(0);       // '지금 수집' 후 재조회 트리거
+  const [collecting, setCollecting] = useState(false);
+  const { loading, data, error } = useTool('/tools/gpu', { ...(scope ? { vcenterId: scope } : {}), _b: bust });
+  const collectNow = async () => {
+    setCollecting(true);
+    try { await postJson('/admin/gpu/collect-util', {}); } catch { /* best effort */ }
+    setCollecting(false); setBust((b) => b + 1);
+  };
   const [view, setView] = useState('host'); // host | cluster | vc | model
   const [hist, setHist] = useState(null);   // { level, key, days, points, synthesized }
   const [vmList, setVmList] = useState(null); // { title, params } for GpuVmsModal
@@ -1934,7 +1941,9 @@ function Gpu({ scope }) {
               <option value="">GPU 종류: 전체</option>
               {(data.byModel || []).map((m) => <option key={m.model} value={m.model}>{m.model} (×{m.count})</option>)}
             </select>
-            <button className="logout-btn" style={{ flex: 'none', padding: '7px 12px', marginLeft: 'auto' }}
+            <button className="logout-btn" style={{ flex: 'none', padding: '7px 12px', marginLeft: 'auto' }} disabled={collecting}
+              onClick={collectNow} title="vCenter 성능 카운터(gpu.utilization)로 지금 사용률을 즉시 수집합니다(설정 주기 무시).">{collecting ? '수집 중…' : '⟳ 지금 수집'}</button>
+            <button className="logout-btn" style={{ flex: 'none', padding: '7px 12px' }}
               onClick={() => setVmList({ title: `GPU 할당 VM${modelFilter ? ` — ${modelFilter}` : ' 전체'}`, params: { ...(scope ? { vcenterId: scope } : {}), ...(mode ? { mode } : {}), ...(modelFilter ? { model: modelFilter } : {}) } })}>🎮 GPU 할당 VM 보기</button>
           </div>
           {view === 'model' && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>법인별로 설치된 GPU 카드 모델·장수·할당 VM 수입니다(같은 법인·같은 모델은 합산). <b>할당 VM</b> 숫자를 클릭하면 해당 VM 목록과 사용 방식을 봅니다.</div>}

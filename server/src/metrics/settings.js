@@ -12,11 +12,12 @@ import { config } from '../config.js';
 const FILE = path.join(config.configDir, 'metrics.json');
 
 // Fields editable from the portal.
-const FIELDS = ['sampleIntervalMs', 'retentionDays'];
+const FIELDS = ['sampleIntervalMs', 'retentionDays', 'gpuUtilEnabled', 'gpuUtilIntervalSec'];
 
 // Guardrails: don't let the UI set an interval so small it hammers vCenter.
 const MIN_INTERVAL_MS = 10_000;   // 10초
 const MAX_INTERVAL_MS = 86_400_000; // 24시간
+const MIN_GPU_SEC = 20, MAX_GPU_SEC = 86_400;
 
 function readFile() {
   if (!fs.existsSync(FILE)) return {};
@@ -25,7 +26,7 @@ function readFile() {
 
 /** Effective settings = env defaults overlaid with persisted overrides. */
 export function loadMetricsSettings() {
-  const eff = { sampleIntervalMs: config.temp.sampleIntervalMs, retentionDays: config.temp.retentionDays };
+  const eff = { sampleIntervalMs: config.temp.sampleIntervalMs, retentionDays: config.temp.retentionDays, gpuUtilEnabled: true, gpuUtilIntervalSec: 60 };
   const persisted = readFile();
   for (const f of FIELDS) if (persisted[f] !== undefined) eff[f] = persisted[f];
   return eff;
@@ -34,6 +35,8 @@ export function loadMetricsSettings() {
 function coerce(field, v) {
   if (field === 'sampleIntervalMs') return Math.max(MIN_INTERVAL_MS, Math.min(MAX_INTERVAL_MS, Number(v) || MIN_INTERVAL_MS));
   if (field === 'retentionDays') return Math.max(0, Math.floor(Number(v) || 0));
+  if (field === 'gpuUtilEnabled') return v !== false;
+  if (field === 'gpuUtilIntervalSec') return Math.max(MIN_GPU_SEC, Math.min(MAX_GPU_SEC, Math.floor(Number(v) || 60)));
   return v;
 }
 
@@ -46,4 +49,4 @@ export function saveMetricsSettings(partial) {
   return loadMetricsSettings();
 }
 
-export const METRICS_LIMITS = { minIntervalMs: MIN_INTERVAL_MS, maxIntervalMs: MAX_INTERVAL_MS };
+export const METRICS_LIMITS = { minIntervalMs: MIN_INTERVAL_MS, maxIntervalMs: MAX_INTERVAL_MS, minGpuSec: MIN_GPU_SEC, maxGpuSec: MAX_GPU_SEC };

@@ -26,6 +26,8 @@ export default function MetricsSettings() {
   const [error, setError] = useState(null);
   const [intervalSec, setIntervalSec] = useState(60);
   const [retentionDays, setRetentionDays] = useState(1830);
+  const [gpuEnabled, setGpuEnabled] = useState(true);
+  const [gpuSec, setGpuSec] = useState(60);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
 
@@ -35,6 +37,8 @@ export default function MetricsSettings() {
       setData(d);
       setIntervalSec(Math.round((d.settings.sampleIntervalMs || 60000) / 1000));
       setRetentionDays(d.settings.retentionDays ?? 1830);
+      setGpuEnabled(d.settings.gpuUtilEnabled !== false);
+      setGpuSec(d.settings.gpuUtilIntervalSec ?? 60);
       setError(null);
     } catch (e) { setError(e.message); }
   };
@@ -55,7 +59,7 @@ export default function MetricsSettings() {
     setBusy(true); setMsg(null);
     try {
       const ms = Math.max(limits.minIntervalMs, Math.min(limits.maxIntervalMs, intervalSec * 1000));
-      const r = await putJson('/admin/metrics/settings', { sampleIntervalMs: ms, retentionDays: Number(retentionDays) || 0 });
+      const r = await putJson('/admin/metrics/settings', { sampleIntervalMs: ms, retentionDays: Number(retentionDays) || 0, gpuUtilEnabled: gpuEnabled, gpuUtilIntervalSec: Number(gpuSec) || 60 });
       setData(r);
       setIntervalSec(Math.round(r.settings.sampleIntervalMs / 1000));
       setMsg('저장되었습니다. 새 주기가 즉시 적용됩니다.');
@@ -93,6 +97,19 @@ export default function MetricsSettings() {
           <input className="input" type="number" min={0} value={retentionDays}
             onChange={(e) => setRetentionDays(Number(e.target.value))} style={{ width: 120 }} />
           <span className="muted">일 (기본 1830일 ≈ 5년)</span>
+        </div>
+
+        <div style={{ borderTop: '1px solid rgba(255,255,255,.08)', marginTop: 16, paddingTop: 14 }}>
+          <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }}>
+            <input type="checkbox" checked={gpuEnabled} onChange={(e) => setGpuEnabled(e.target.checked)} /> GPU 호스트 사용률 수집(vCenter 성능 카운터 <code>gpu.utilization</code>)
+          </label>
+          <div className="flex gap" style={{ alignItems: 'center', marginTop: 8 }}>
+            <span className="muted" style={{ fontSize: 12 }}>GPU 사용률 수집 주기</span>
+            <input className="input" type="number" min={20} max={86400} value={gpuSec} disabled={!gpuEnabled}
+              onChange={(e) => setGpuSec(Number(e.target.value))} style={{ width: 110 }} />
+            <span className="muted">초 (20초~24시간)</span>
+          </div>
+          <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>GPU 호스트만 대상이며, vGPU/vSGA는 ESXi가 사용률을 보고합니다. 패스쓰루는 게스트 수집(설정 › GPU 게스트 수집)으로 보완됩니다. GPU 인벤토리 화면의 <b>‘지금 수집’</b>으로 즉시 1회 수집도 가능합니다.</div>
         </div>
 
         <div className="flex gap" style={{ alignItems: 'center', marginTop: 18 }}>
