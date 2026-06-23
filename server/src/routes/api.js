@@ -15,6 +15,8 @@ import { nlSearch } from '../llm/nlSearch.js';
 import { sortByOrder } from '../vcenter/order.js';
 import { getMetricsDb } from '../metrics/db.js';
 import { getGuestGpuHost, getGuestGpuVms } from '../gpu/store.js';
+import { enqueuePing, getPingResults, setPingResults } from '../central/pingJobs.js';
+import { pingMany } from '../util/ping.js';
 import { nsxStore } from '../nsx/store.js';
 import { loadRegistry as loadNsxRegistry } from '../nsx/registry.js';
 import { fetchGroupMembers } from '../nsx/client.js';
@@ -654,6 +656,33 @@ async function gpuSeriesExport(req, res, fmt) {
 }
 api.get('/tools/gpu/export.csv', (req, res) => gpuSeriesExport(req, res, 'csv'));
 api.get('/tools/gpu/export.json', (req, res) => gpuSeriesExport(req, res, 'json'));
+
+// 중앙에서 직접 ping 시도 후 결과 저장(에이전트 없이도 같은 망이면 즉시 결과). 실패 격리.
+async function pingLocallyAndStore(vcenterId, ips) {
+  const rows = await pingMany(ips, { timeoutMs: 1500 });
+  // 도달한 것만 저장 — 중앙이 못 가는 IP는 alive=false로 덮어쓰지 않고 에이전트 보고를 기다림.
+  const reachable = rows.filter((r) => r.alive);
+  if (reachable.length) setPingResults(vcenterId, reachable);
+}
+
+// VM IP Ping(위임) — 중앙은 VM 사설 IP에 직접 못 가므로, 그 vCenter 담당 에이전트가
+// ping을 대행한다. POST로 요청 큐잉 → 에이전트가 인출/실행/보고 → GET으로 녹/적 조회.
+// 중앙이 직접 수집하는 vCenter(에이전트 없음)는 중앙이 직접 ping해 즉시 결과를 채운다.
+api.post('/tools/ip-ping', async (req, res) => {
+  const vcenterId = String(req.body?.vcenterId || '').trim();
+  const ips = Array.isArray(req.body?.ips) ? req.body.ips.map((s) => String(s).trim()).filter(Boolean).slice(0, 16) : [];
+  if (!vcenterId || !ips.length) return res.status(400).json({ ok: false, reason: 'vcenterId·ips가 필요합니다.' });
+  enqueuePing(vcenterId, ips);
+  // 에이전트가 없는(중앙 직접 수집) vCenter는 중앙에서 직접 ping 시도(같은 망일 때 즉시 결과).
+  if (config.dataSource !== 'mock') pingLocallyAndStore(vcenterId, ips).catch(() => {});
+  res.json({ ok: true, queued: ips.length });
+});
+api.get('/tools/ip-ping', (req, res) => {
+  const vcenterId = String(req.query.vcenterId || '').trim();
+  const ips = String(req.query.ips || '').split(',').map((s) => s.trim()).filter(Boolean);
+  if (!vcenterId || !ips.length) return res.status(400).json({ ok: false, reason: 'vcenterId·ips가 필요합니다.' });
+  res.json({ ok: true, results: getPingResults(vcenterId, ips) });
+});
 
 // GPU가 할당된 VM 목록 — 어떤 VM이 어떤 방식(vGPU/패스쓰루)·프로파일로 GPU를 쓰는지.
 // 선택 필터: vcenterId, host, mode(vgpu|passthrough|mixed), model(호스트 GPU 모델).

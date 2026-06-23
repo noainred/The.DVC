@@ -1,6 +1,17 @@
 {
   "notes": [
     {
+      "version": "1.89.0",
+      "date": "2026-06-23",
+      "title": "VM IP 에이전트 Ping(녹/적 표시) + GPU 모델 박스 클릭 필터",
+      "notes": [
+        "VM 상세 창의 각 IP 옆에 도달성 표시(🟢도달/🔴무응답/⚪확인중) 추가. 중앙 포탈은 VM 사설 IP에 직접 못 가므로, 그 vCenter를 담당하는 현장 에이전트가 ICMP ping을 대행하고 결과를 중앙에 보고한다(에이전트 없는 직접 수집 vCenter는 중앙이 직접 ping). 'ping 재시도' 버튼 제공.",
+        "신규: 위임 Ping 작업큐(POST /api/tools/ip-ping 요청 → 에이전트 GET /api/central/ping-jobs 인출 → ping → POST /api/central/ping-result 보고 → GET /api/tools/ip-ping 조회). ping CLI가 없는 환경은 TCP 연결 폴백.",
+        "특수 기능 › GPU › 'GPU 모델별 합계' 박스를 클릭하면 해당 GPU가 설치된 호스트만 표시(다시 클릭하면 해제).",
+        "에이전트 ping 워커는 CENTRAL_URL 설정 시 자동 기동(기본 4초 폴링, 대기 작업 없으면 ping 미실행)."
+      ]
+    },
+    {
       "version": "1.88.4",
       "date": "2026-06-23",
       "title": "GPU 할당 VM 목록에 게스트 수집 사용률·메모리 컬럼 추가",
