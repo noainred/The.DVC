@@ -667,12 +667,18 @@ api.get('/tools/gpu/vms', (req, res) => {
   if (req.query.host) vms = vms.filter((v) => v.host === req.query.host);
   if (req.query.model) vms = vms.filter((v) => hostModel[v.host] === req.query.model);
   if (req.query.mode) vms = vms.filter((v) => v.gpu.type === req.query.mode || (req.query.mode === 'vgpu' && v.gpu.vgpu) || (req.query.mode === 'passthrough' && v.gpu.passthrough));
+  // 게스트 OS(nvidia-smi)에서 수집한 VM별 GPU 사용률/메모리 오버레이(패스쓰루 GPU는 ESXi가 못 봄).
+  const guestByVm = new Map(getGuestGpuVms().map((g) => [g.vmId, g]));
   res.json({
     total: vms.length,
-    vms: vms.map((v) => ({
-      id: v.id, name: v.name, vcenterId: v.vcenterId, host: v.host, cluster: v.cluster,
-      powerState: v.powerState, model: hostModel[v.host] || '', gpu: v.gpu,
-    })).sort((a, b) => (a.vcenterId === b.vcenterId ? a.name.localeCompare(b.name) : a.vcenterId.localeCompare(b.vcenterId))).slice(0, 5000),
+    vms: vms.map((v) => {
+      const g = guestByVm.get(v.id);
+      return {
+        id: v.id, name: v.name, vcenterId: v.vcenterId, host: v.host, cluster: v.cluster,
+        powerState: v.powerState, model: hostModel[v.host] || '', gpu: v.gpu,
+        guestUtilPct: g ? g.utilPct : null, guestMemPct: g ? (g.memUsedPct ?? null) : null, guestAt: g ? g.at : null,
+      };
+    }).sort((a, b) => (a.vcenterId === b.vcenterId ? a.name.localeCompare(b.name) : a.vcenterId.localeCompare(b.vcenterId))).slice(0, 5000),
   });
 });
 

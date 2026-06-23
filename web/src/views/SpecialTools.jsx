@@ -1790,12 +1790,12 @@ function GpuVmsModal({ title, params, onClose }) {
     <Modal title={title} onClose={onClose} width={820} resizable minWidth={520} minHeight={380}>
       {err ? <ErrorBox message={err} /> : !d ? <Loading /> : (
         <>
-          <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>GPU 할당 VM <b>{d.total}</b>개 · 어떤 VM이 어떤 방식/프로파일로 GPU를 사용하는지 보여줍니다.</div>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>GPU 할당 VM <b>{d.total}</b>개 · 어떤 VM이 어떤 방식/프로파일로 GPU를 사용하는지 보여줍니다. <span style={{ opacity: 0.8 }}>사용률은 게스트 OS(nvidia-smi) 수집값.</span></div>
           <div className="table-wrap">
             <table>
-              <thead><tr><th>VM</th><th>법인</th><th>호스트</th><th>GPU 모델</th><th>사용 방식</th><th>프로파일</th><th style={{ textAlign: 'right' }}>장수</th><th>전원</th></tr></thead>
+              <thead><tr><th>VM</th><th>법인</th><th>호스트</th><th>GPU 모델</th><th>사용 방식</th><th>프로파일</th><th style={{ textAlign: 'right' }}>장수</th><th style={{ textAlign: 'right' }}>사용률</th><th style={{ textAlign: 'right' }}>메모리</th><th>전원</th></tr></thead>
               <tbody>
-                {d.vms.length === 0 && <tr><td colSpan={8} className="center muted" style={{ padding: 20 }}>GPU 할당 VM이 없습니다.</td></tr>}
+                {d.vms.length === 0 && <tr><td colSpan={10} className="center muted" style={{ padding: 20 }}>GPU 할당 VM이 없습니다.</td></tr>}
                 {d.vms.map((v) => (
                   <tr key={v.id}>
                     <td><VmLink name={v.name} vcenterId={v.vcenterId} label={v.name} /></td>
@@ -1805,6 +1805,8 @@ function GpuVmsModal({ title, params, onClose }) {
                     <td><VmGpuModeBadge gpu={v.gpu} /></td>
                     <td className="muted" style={{ fontSize: 12 }}>{v.gpu?.profile || '—'}</td>
                     <td style={{ textAlign: 'right' }}>{v.gpu?.count ?? '—'}</td>
+                    <td style={{ textAlign: 'right' }}>{v.guestUtilPct == null ? <span className="muted">—</span> : <UsageCell pct={v.guestUtilPct} />}</td>
+                    <td style={{ textAlign: 'right' }}>{v.guestMemPct == null ? <span className="muted">—</span> : <UsageCell pct={v.guestMemPct} />}</td>
                     <td>{v.powerState === 'POWERED_ON' ? <span className="badge green">On</span> : <span className="badge gray">Off</span>}</td>
                   </tr>
                 ))}
