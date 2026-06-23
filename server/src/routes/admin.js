@@ -148,11 +148,27 @@ adminRouter.post('/agent-deploy/test', adminOnly, async (req, res) => {
   res.json(await testTarget(req.body || {}));
 });
 
+// 배포 성공 후, 그 호스트를 중앙에 '수집 서버'로 자동 등록(설치+등록 원클릭).
+// collectorToken이 있고 registerCollector!==false 일 때만. 같은 id면 갱신.
+function autoRegisterCollector(target, portalPort) {
+  if (!target?.collectorToken || target.registerCollector === false) return null;
+  const port = Number(portalPort) || 4000;
+  const id = (String(target.collectorDatacenter || target.agentName || target.host || '').trim().toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '')) || `col-${target.host}`;
+  const url = `http://${target.host}:${port}`;
+  const body = { id, name: target.agentName || target.collectorDatacenter || target.host, datacenter: target.collectorDatacenter || '', url, token: target.collectorToken, enabled: true };
+  const exists = loadCollectors().find((c) => c.id === id);
+  const r = exists ? updateCollector(id, body) : addCollector(body);
+  if (r.ok) pullNow().catch(() => {});
+  return r.ok ? { registered: true, id, url, updated: !!exists } : { registered: false, reason: r.reason };
+}
+
 adminRouter.post('/agent-deploy', adminOnly, async (req, res) => {
   // SSH 포트(target.port)와 포탈 포트(portalPort)를 혼동하지 않도록 분리.
   // portalPort만 install.sh --port 로 전달(예전 버그: SSH 22가 포탈 포트로 들어가 EACCES).
   const { installerPath, portalPort, ...target } = req.body || {};
   const r = await deployAgent(target, { installerPath, port: Number(portalPort) || 4000 });
+  if (r.ok) r.collector = autoRegisterCollector(target, portalPort); // 설치 성공 시 중앙에 수집 서버로 자동 등록
   res.status(r.ok ? 200 : 400).json(r);
 });
 
@@ -173,6 +189,7 @@ adminRouter.post('/agent-deploy/targets/:id/deploy', adminOnly, async (req, res)
   const t = getTargetRaw(req.params.id);
   if (!t) return res.status(404).json({ ok: false, reason: '대상을 찾을 수 없습니다.' });
   const r = await deployAgent(t, { installerPath: t.installerPath, port: t.portalPort });
+  if (r.ok) r.collector = autoRegisterCollector(t, t.portalPort); // 설치 성공 시 중앙에 수집 서버로 자동 등록
   recordResult(t.id, r);
   res.status(r.ok ? 200 : 400).json(r);
 });

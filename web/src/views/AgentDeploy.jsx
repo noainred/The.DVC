@@ -5,7 +5,7 @@ import { Loading } from '../components/ui.jsx';
 const EMPTY = {
   host: '', port: 22, username: 'root', password: '', privateKey: '',
   agentName: '', centralUrl: '', centralToken: '', collectorToken: '', collectorDatacenter: '',
-  installerPath: '', portalPort: 4000, autoUpgrade: true, pushInventory: false,
+  installerPath: '', portalPort: 4000, autoUpgrade: true, pushInventory: false, registerCollector: true,
 };
 
 /** 설정 → 에이전트 배포: 새 Rocky9 호스트에 SSH로 수집 에이전트 자동 설치. */
@@ -234,7 +234,7 @@ export default function AgentDeploy() {
           </label>
           <label title="(선택) 이 에이전트를 '전력/데이터 pull 대상'으로도 쓸 때만. 중앙이 이 에이전트의 /api/collector/export 를 당겨갈 때 쓰는 임의 비밀입니다. iDRAC/IP 스캔만 할 거면 비워두세요. 자동 채우기는 랜덤값을 넣습니다. 중앙 '설정 › 수집 서버' 등록 시 같은 값을 사용하세요.">
             <span className="cap">전력수집 토큰(COLLECTOR_TOKEN, 선택)</span><input className="input" value={f.collectorToken} onChange={set('collectorToken')} placeholder="(전력수집 시에만)" /></label>
-          <label title="(선택) 전력수집 에이전트가 보고할 데이터센터 라벨. 수집 토큰을 쓸 때만 의미 있습니다. 예: OC2. 안 쓰면 비움. ※ 이 값만 채운다고 중앙에 자동 등록되지 않습니다 — 배포 후 중앙 '설정 › 수집 서버'에 같은 토큰으로 등록해야 데이터가 올라옵니다.">
+          <label title="(선택) 전력수집 에이전트가 보고할 데이터센터 라벨. 수집 토큰을 쓸 때만 의미 있습니다. 예: OC2. 안 쓰면 비움. ※ 아래 '수집 서버 자동 등록'을 켜면 배포 후 중앙에 자동 등록됩니다.">
             <span className="cap">수집 DC명(COLLECTOR_DATACENTER, 선택)</span><input className="input" value={f.collectorDatacenter} onChange={set('collectorDatacenter')} placeholder="예: OC2" /></label>
           <label title="에이전트 인스턴스가 자기 서버에서 열 HTTP 포트(기본 4000). 그 호스트에서 포트 충돌이 없으면 그대로 두세요.">
             <span className="cap">포탈 포트</span><input className="input" type="number" value={f.portalPort} onChange={set('portalPort')} /></label>
@@ -246,6 +246,9 @@ export default function AgentDeploy() {
           <label className="agent-check" style={{ gridColumn: '1 / -1' }} title="켜면 이 현장 서버가 자기 로컬 vCenter 인벤토리(VM/호스트/데이터스토어/NSX/알람)를 수집해 중앙(OC2)으로 push 합니다(AGENT_PUSH_INVENTORY=true). 중앙은 그 vCenter를 직접 폴링하지 않아 고RTT 원격 사이트의 수집 지연이 사라집니다. ※ 중앙의 'vCenter 관리'에서 해당 vCenter의 수집 방식을 '사이트 위임'으로 설정해야 적용됩니다. 그리고 이 현장 서버의 vcenters.json에 로컬 vCenter를 등록해야 합니다.">
             <input type="checkbox" checked={!!f.pushInventory} onChange={(e) => setF((s) => ({ ...s, pushInventory: e.target.checked }))} />
             <span>사이트 위임 수집 — 이 현장 서버가 로컬 vCenter 수집 후 중앙으로 push(고RTT 사이트 권장)</span></label>
+          <label className="agent-check" style={{ gridColumn: '1 / -1' }} title="켜면 배포·설치 성공 직후, 이 호스트(http://host:포탈포트)를 중앙 '설정 › 수집 서버'에 자동 등록합니다(전력수집 토큰 사용). 따로 수집 서버 화면에서 URL/토큰을 입력할 필요가 없습니다. 전력수집 토큰이 비어 있으면 무시됩니다.">
+            <input type="checkbox" checked={!!f.registerCollector} onChange={(e) => setF((s) => ({ ...s, registerCollector: e.target.checked }))} />
+            <span>수집 서버 자동 등록 — 설치 성공 시 중앙 '수집 서버'에 자동 등록(전력수집 토큰 필요)</span></label>
         </div>
       </div>
 
@@ -297,6 +300,9 @@ export default function AgentDeploy() {
             {result.warn && <div style={{ color: 'var(--amber)', marginTop: 4 }}>⚠ {result.warn}</div>}
             {result.glibc && result.kind !== 'test' && result.ok === false && <div style={{ color: 'var(--amber)', marginTop: 4 }}>glibc: {result.glibc}</div>}
             {result.active && <div>서비스 상태: <b style={{ color: result.ok ? 'var(--green)' : 'var(--red)' }}>{result.active}</b>{result.version ? ` · 버전 ${result.version}` : ''}{result.installer ? ` · 설치 패키지 ${result.installer}` : ''}{result.detail ? ` · ${result.detail}` : ''}</div>}
+            {result.collector && (result.collector.registered
+              ? <div style={{ color: 'var(--green)', marginTop: 4 }}>✅ 중앙 '수집 서버'에 {result.collector.updated ? '갱신' : '자동 등록'}됨 — id <code>{result.collector.id}</code> · <code>{result.collector.url}</code></div>
+              : <div style={{ color: 'var(--amber)', marginTop: 4 }}>⚠ 수집 서버 자동 등록 건너뜀{result.collector.reason ? ` — ${result.collector.reason}` : ''}</div>)}
             {typeof result.log === 'string' && result.log.trim() && (
               <div style={{ marginTop: 8 }}>
                 <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>대상 호스트 서비스 로그(journalctl/status)</div>
