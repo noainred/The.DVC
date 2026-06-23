@@ -1,6 +1,15 @@
 {
   "notes": [
     {
+      "version": "1.83.0",
+      "date": "2026-06-23",
+      "title": "GPU 인벤토리 상단에 'GPU 호스트 N대 · GPU 사용 VM M대' 요약(선택 범위 반영)",
+      "notes": [
+        "GPU 인벤토리 화면 맨 위에 요약 배너 추가 — 선택한 vCenter(범위)에서 GPU 호스트 몇 대에서 VM 몇 대가 GPU를 사용 중인지 한눈에 표시(총 GPU·vGPU·패스쓰루 수 포함)",
+        "/tools/gpu 응답에 gpuVmCount(스코프 내 GPU 사용 VM 수, 템플릿 제외) 추가"
+      ]
+    },
+    {
       "version": "1.82.2",
       "date": "2026-06-23",
       "title": "게스트 GPU 읽기 진단 강화 — stderr 회수 + 구체 실패 사유 + PATH 보강",
