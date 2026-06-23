@@ -789,7 +789,12 @@ export async function collectFromVCenterSoap(vc) {
         if (ms.gpuUtilEnabled !== false) {
           const intervalMs = Math.max(20, ms.gpuUtilIntervalSec || 60) * 1000;
           const now = Date.now();
-          const gpuRefs = [...hostByRef].filter(([, h]) => (h.gpus || []).length).map(([ref]) => ref); // GPU 호스트만
+          // ESXi가 사용률을 보고하는 vGPU/vSGA 호스트만 대상. 순수 패스쓰루 호스트는
+          // ESXi가 사용률을 못 보므로 여기서 0을 찍지 말고(가짜 0% 방지) 게스트 수집
+          // overlay에 맡긴다(없으면 '—'). 그래야 패스쓰루 수집 동작 여부가 구분된다.
+          const gpuRefs = [...hostByRef]
+            .filter(([, h]) => (h.gpus || []).some((g) => g.mode === 'vgpu' || g.mode === 'vsga' || g.vgpuMode))
+            .map(([ref]) => ref);
           const stale = _gpuForce ? gpuRefs : gpuRefs.filter((ref) => now - (_gpuUtilCache.get(`${vc.id}:${ref}`)?.at || 0) >= intervalMs);
           if (stale.length) {
             const cid = await c.gpuUtilCounterId();
