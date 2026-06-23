@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson, postJson, putJson, usePolling, getToken } from '../api.js';
 import { DataTable, Loading, ErrorBox, StateBadge, UsageCell, EntityDetail, Modal, ResultCount, SearchBox, VmLink } from '../components/ui.jsx';
-import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Brush } from 'recharts';
 import { VmRemoteButton } from '../components/VmRemote.jsx';
 
 // IP 확인 출처 배지: vCenter 인식 / Ping(TCP)스캔 / 둘 다
@@ -1220,6 +1220,16 @@ function fmtTempTick(ts, bucketMs) {
   return d.toLocaleDateString('ko-KR', { year: '2-digit', month: '2-digit', day: '2-digit' });
 }
 
+// 추이 차트 x축: 선택 범위(일수)에 맞춰 단위 라벨 — 1일=시간, 1주=요일, 1달=일, 1년=달, 5년=년/월.
+function fmtTrendTick(ts, days) {
+  const d = new Date(ts);
+  if (days <= 1) return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });          // 시간
+  if (days <= 7) return d.toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric', weekday: 'short' }); // 요일
+  if (days <= 31) return d.toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' });             // 일
+  if (days <= 366) return d.toLocaleDateString('ko-KR', { year: '2-digit', month: 'short' });             // 달
+  return d.toLocaleDateString('ko-KR', { year: '2-digit', month: '2-digit' });                             // 년/월
+}
+
 function EsxiTemp({ scope }) {
   const { loading, data, error } = useTool('/tools/esxi-temp', scope ? { vcenterId: scope } : {});
   const [view, setView] = useState('host'); // host | cluster | vc
@@ -1280,16 +1290,20 @@ function EsxiTemp({ scope }) {
           {hist.loading ? <Loading /> : hist.error ? <ErrorBox message="이력을 불러오지 못했습니다." /> : (hist.points || []).length === 0
             ? <div className="muted">해당 기간 데이터가 없습니다(수집 누적 후 표시).</div>
             : (
-              <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={(hist.points || []).map((p) => ({ t: fmtTempTick(p.ts, hist.bucketMs), avg: p.avg, max: p.max }))}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.08)" />
-                  <XAxis dataKey="t" tick={{ fontSize: 11 }} minTickGap={40} />
-                  <YAxis tick={{ fontSize: 11 }} unit="℃" domain={['auto', 'auto']} />
-                  <Tooltip contentStyle={{ background: '#0b1220', border: '1px solid #243049', fontSize: 12 }} />
-                  <Line type="monotone" dataKey="avg" stroke="#22d3ee" dot={false} name="평균" />
-                  <Line type="monotone" dataKey="max" stroke="#f87171" dot={false} name="최고" />
-                </LineChart>
-              </ResponsiveContainer>
+              <>
+                <ResponsiveContainer width="100%" height={320}>
+                  <LineChart data={(hist.points || []).map((p) => ({ t: fmtTrendTick(p.ts, days), avg: p.avg, max: p.max }))}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.08)" />
+                    <XAxis dataKey="t" tick={{ fontSize: 11 }} minTickGap={40} />
+                    <YAxis tick={{ fontSize: 11 }} unit="℃" domain={['auto', 'auto']} />
+                    <Tooltip contentStyle={{ background: '#0b1220', border: '1px solid #243049', fontSize: 12 }} />
+                    <Line type="monotone" dataKey="avg" stroke="#22d3ee" dot={false} name="평균" isAnimationActive={false} />
+                    <Line type="monotone" dataKey="max" stroke="#f87171" dot={false} name="최고" isAnimationActive={false} />
+                    <Brush dataKey="t" height={22} stroke="#6366f1" travellerWidth={8} tickFormatter={() => ''} />
+                  </LineChart>
+                </ResponsiveContainer>
+                <div className="muted" style={{ fontSize: 11, marginTop: 4, textAlign: 'center' }}>아래 막대를 드래그하면 구간을 좁혀 스크롤·확대해 볼 수 있습니다.</div>
+              </>
             )}
         </Modal>
       )}
@@ -1992,16 +2006,20 @@ function Gpu({ scope }) {
           {hist.loading ? <Loading /> : hist.error ? <ErrorBox message="이력을 불러오지 못했습니다." /> : (hist.points || []).length === 0
             ? <div className="muted">해당 기간 데이터가 없습니다(수집 누적 후 표시).</div>
             : (
-              <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={(hist.points || []).map((p) => ({ t: new Date(p.ts).toLocaleDateString(), avg: p.avg, max: p.max }))}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.08)" />
-                  <XAxis dataKey="t" tick={{ fontSize: 11 }} minTickGap={40} />
-                  <YAxis tick={{ fontSize: 11 }} unit="%" domain={[0, 100]} />
-                  <Tooltip contentStyle={{ background: '#0b1220', border: '1px solid #243049', fontSize: 12 }} />
-                  <Line type="monotone" dataKey="avg" stroke="#a78bfa" dot={false} name="평균" />
-                  <Line type="monotone" dataKey="max" stroke="#f59e0b" dot={false} name="최고" />
-                </LineChart>
-              </ResponsiveContainer>
+              <>
+                <ResponsiveContainer width="100%" height={320}>
+                  <LineChart data={(hist.points || []).map((p) => ({ t: fmtTrendTick(p.ts, days), avg: p.avg, max: p.max }))}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.08)" />
+                    <XAxis dataKey="t" tick={{ fontSize: 11 }} minTickGap={40} />
+                    <YAxis tick={{ fontSize: 11 }} unit="%" domain={[0, 100]} allowDataOverflow />
+                    <Tooltip contentStyle={{ background: '#0b1220', border: '1px solid #243049', fontSize: 12 }} />
+                    <Line type="monotone" dataKey="avg" stroke="#a78bfa" dot={false} name="평균" isAnimationActive={false} />
+                    <Line type="monotone" dataKey="max" stroke="#f59e0b" dot={false} name="최고" isAnimationActive={false} />
+                    <Brush dataKey="t" height={22} stroke="#6366f1" travellerWidth={8} tickFormatter={() => ''} />
+                  </LineChart>
+                </ResponsiveContainer>
+                <div className="muted" style={{ fontSize: 11, marginTop: 4, textAlign: 'center' }}>아래 막대를 드래그하면 구간을 좁혀 스크롤·확대해 볼 수 있습니다.</div>
+              </>
             )}
         </Modal>
       )}
