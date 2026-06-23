@@ -1,6 +1,16 @@
 {
   "notes": [
     {
+      "version": "1.88.4",
+      "date": "2026-06-23",
+      "title": "GPU 할당 VM 목록에 게스트 수집 사용률·메모리 컬럼 추가",
+      "notes": [
+        "특수 기능 › GPU › 'GPU 할당 VM 전체' 모달에 VM별 GPU 사용률·메모리 컬럼 추가 — 게스트 OS(nvidia-smi)에서 수집한 패스쓰루 GPU 실사용률을 그 자리에서 바로 확인.",
+        "API: GET /tools/gpu/vms 응답에 guestUtilPct·guestMemPct·guestAt 추가(게스트 오버레이 매칭).",
+        "수집값 없는 VM(미수집/로그인실패)은 '—'로 표시."
+      ]
+    },
+    {
       "version": "1.88.3",
       "date": "2026-06-23",
       "title": "🎯 GPU 게스트 수집 근본 해결 — guestFile URL의 XML 엔티티(&amp;) 디코딩",
