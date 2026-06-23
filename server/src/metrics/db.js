@@ -36,6 +36,8 @@ function initSqlite() {
     const bucket = db.prepare(`SELECT (ts/?)*? AS b, AVG(v) avg, MIN(v) min, MAX(v) max FROM samples
       WHERE metric=? AND k=? AND ts>=? GROUP BY b ORDER BY b LIMIT ?`);
     const recentAvgAll = db.prepare(`SELECT k, AVG(v) avg, MAX(v) max FROM samples WHERE metric=? AND ts>=? GROUP BY k`);
+    const metaStmt = db.prepare('SELECT MIN(ts) AS mn, MAX(ts) AS mx, COUNT(*) AS n FROM samples WHERE metric=?');
+    const dumpStmt = db.prepare('SELECT k, v, ts FROM samples WHERE metric=? AND ts>=? AND ts<=? ORDER BY ts, k LIMIT ?');
     const prune = db.prepare('DELETE FROM samples WHERE ts < ?');
     return {
       kind: 'sqlite',
@@ -43,6 +45,8 @@ function initSqlite() {
       latestAll: (metric) => { const map = new Map(); for (const r of latestAll.all(metric, metric)) map.set(r.k, { v: r.v, ts: r.ts }); return map; },
       history: (metric, k, sinceTs, bucketMs, limit) => bucket.all(bucketMs, bucketMs, metric, k, sinceTs, limit).map((r) => ({ ts: r.b, avg: round1(r.avg), min: round1(r.min), max: round1(r.max) })),
       recentAvg: (metric, sinceTs) => { const map = new Map(); for (const r of recentAvgAll.all(metric, sinceTs)) map.set(r.k, { avg: round1(r.avg), max: round1(r.max) }); return map; },
+      meta: (metric) => { const r = metaStmt.get(metric); return { firstTs: r?.mn ?? null, lastTs: r?.mx ?? null, count: Number(r?.n || 0) }; },
+      dump: (metric, sinceTs, untilTs, limit) => dumpStmt.all(metric, sinceTs, untilTs, limit).map((r) => ({ k: r.k, v: r.v, ts: r.ts })),
       prune: (beforeTs) => prune.run(beforeTs),
     };
   });
@@ -70,6 +74,8 @@ function initJson() {
       for (const r of rows) if (r.m === metric && r.t >= sinceTs) { const g = agg.get(r.k) || { sum: 0, n: 0, max: -Infinity }; g.sum += r.v; g.n++; g.max = Math.max(g.max, r.v); agg.set(r.k, g); }
       const map = new Map(); for (const [k, g] of agg) map.set(k, { avg: round1(g.sum / g.n), max: round1(g.max) }); return map;
     },
+    meta: (metric) => { let mn = null, mx = null, n = 0; for (const r of rows) if (r.m === metric) { n++; if (mn == null || r.t < mn) mn = r.t; if (mx == null || r.t > mx) mx = r.t; } return { firstTs: mn, lastTs: mx, count: n }; },
+    dump: (metric, sinceTs, untilTs, limit) => rows.filter((r) => r.m === metric && r.t >= sinceTs && r.t <= untilTs).sort((a, b) => a.t - b.t).slice(0, limit).map((r) => ({ k: r.k, v: r.v, ts: r.t })),
     prune: (beforeTs) => { const n = rows.filter((r) => r.t >= beforeTs); if (n.length !== rows.length) { rows = n; try { fs.writeFileSync(file, rows.map((r) => JSON.stringify(r)).join('\n') + '\n', { mode: 0o600 }); } catch { /* */ } } },
   };
 }

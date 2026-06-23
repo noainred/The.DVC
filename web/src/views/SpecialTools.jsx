@@ -1812,7 +1812,8 @@ function Gpu({ scope }) {
     try { await postJson('/admin/gpu/collect-util', {}); } catch { /* best effort */ }
     setCollecting(false); setBust((b) => b + 1);
   };
-  // GPU 사용량/인벤토리 CSV·JSON 내려받기(현재 vCenter 스코프 반영).
+  const [exportOpen, setExportOpen] = useState(false);
+  // 현재 상태(스냅샷) CSV·JSON 내려받기(현재 vCenter 스코프 반영).
   const exportGpu = async (fmt) => {
     const q = scope ? `?vcenterId=${encodeURIComponent(scope)}` : '';
     const res = await fetch(`/api/tools/gpu.${fmt}${q}`, { headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {} });
@@ -1961,8 +1962,7 @@ function Gpu({ scope }) {
               onClick={collectNow} title="vCenter 성능 카운터(gpu.utilization)로 지금 사용률을 즉시 수집합니다(설정 주기 무시).">{collecting ? '수집 중…' : '⟳ 지금 수집'}</button>
             <button className="logout-btn" style={{ flex: 'none', padding: '7px 12px' }}
               onClick={() => setVmList({ title: `GPU 할당 VM${modelFilter ? ` — ${modelFilter}` : ' 전체'}`, params: { ...(scope ? { vcenterId: scope } : {}), ...(mode ? { mode } : {}), ...(modelFilter ? { model: modelFilter } : {}) } })}>🎮 GPU 할당 VM 보기</button>
-            <button className="logout-btn" style={{ flex: 'none', padding: '7px 12px' }} onClick={() => exportGpu('csv')} title="호스트별 GPU 사용량·인벤토리를 CSV로 내려받기(Excel 호환).">⬇ CSV</button>
-            <button className="logout-btn" style={{ flex: 'none', padding: '7px 12px' }} onClick={() => exportGpu('json')} title="GPU 사용량·인벤토리 집계를 JSON으로 내려받기.">⬇ JSON</button>
+            <button className="logout-btn" style={{ flex: 'none', padding: '7px 12px' }} onClick={() => setExportOpen(true)} title="수집된 GPU 사용률 데이터(전체/기간)를 CSV·JSON으로 내려받기.">⬇ 내보내기</button>
           </div>
           {view === 'model' && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>법인별로 설치된 GPU 카드 모델·장수·할당 VM 수입니다(같은 법인·같은 모델은 합산). <b>할당 VM</b> 숫자를 클릭하면 해당 VM 목록과 사용 방식을 봅니다.</div>}
           {view === 'vc' && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>법인별 GPU 장수·사용 방식·할당 VM 수입니다. <b>할당 VM</b> 숫자를 클릭하면 VM별 사용 방식을 봅니다.</div>}
@@ -1998,6 +1998,67 @@ function Gpu({ scope }) {
         </Modal>
       )}
       {vmList && <GpuVmsModal title={vmList.title} params={vmList.params} onClose={() => setVmList(null)} />}
+      {exportOpen && <GpuExportModal scope={scope} onClose={() => setExportOpen(false)} onSnapshot={exportGpu} />}
     </>
+  );
+}
+
+/** GPU 데이터 내보내기 — 수집 시작 일시 안내 + 전체/기간 선택 + CSV/JSON. */
+function GpuExportModal({ scope, onClose, onSnapshot }) {
+  const [meta, setMeta] = useState(null);   // { collectedSince, latestAt, sampleCount }
+  const [range, setRange] = useState('all'); // all | days
+  const [days, setDays] = useState(30);
+  useEffect(() => {
+    const q = scope ? `?vcenterId=${encodeURIComponent(scope)}` : '';
+    fetchJson(`/tools/gpu/series-meta${q}`).then(setMeta).catch(() => setMeta({ collectedSince: null, sampleCount: 0 }));
+  }, [scope]);
+  const fmtTs = (ts) => (ts ? new Date(ts).toLocaleString('ko-KR') : null);
+  const sinceTxt = meta && meta.collectedSince
+    ? `${fmtTs(meta.collectedSince)} 부터 데이터가 쌓여 있습니다`
+    : (meta ? '아직 수집된 GPU 사용률 이력이 없습니다(샘플러가 한 주기 이상 돌면 생성됩니다)' : '확인 중…');
+  const daysSince = meta && meta.collectedSince ? Math.max(1, Math.round((Date.now() - meta.collectedSince) / 86_400_000)) : null;
+  const download = async (fmt) => {
+    const params = new URLSearchParams();
+    if (scope) params.set('vcenterId', scope);
+    params.set('range', range);
+    if (range === 'days') params.set('days', String(days));
+    const res = await fetch(`/api/tools/gpu/export.${fmt}?${params.toString()}`, { headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {} });
+    const blob = await res.blob(); const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = `gpu-history-${range}-${new Date().toISOString().slice(0, 10)}.${fmt}`; a.click(); URL.revokeObjectURL(url);
+  };
+  return (
+    <Modal title="GPU 데이터 내보내기" onClose={onClose} width={560}>
+      <div className="card" style={{ padding: 12, marginBottom: 14, borderLeft: '3px solid var(--accent,#2563eb)' }}>
+        <div style={{ fontSize: 13 }}>📅 <b>수집 시작</b>: {sinceTxt}</div>
+        {meta && meta.collectedSince && (
+          <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+            총 {daysSince}일 누적 · 샘플 {meta.sampleCount?.toLocaleString?.() ?? meta.sampleCount}개{meta.latestAt ? ` · 마지막 ${fmtTs(meta.latestAt)}` : ''}
+          </div>
+        )}
+      </div>
+
+      <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>내보낼 범위</div>
+      <label className="flex gap" style={{ alignItems: 'center', marginBottom: 6, cursor: 'pointer' }}>
+        <input type="radio" name="gpuexp" checked={range === 'all'} onChange={() => setRange('all')} />
+        <span><b>전체 수집 데이터</b> — 수집 시작일부터 현재까지 모두</span>
+      </label>
+      <label className="flex gap" style={{ alignItems: 'center', marginBottom: 6, cursor: 'pointer' }}>
+        <input type="radio" name="gpuexp" checked={range === 'days'} onChange={() => setRange('days')} />
+        <span>기간 지정 — 최근
+          <input className="input" type="number" min={1} max={1830} value={days} disabled={range !== 'days'}
+            onChange={(e) => setDays(Math.max(1, Number(e.target.value) || 30))} style={{ width: 80, margin: '0 6px' }} /> 일
+        </span>
+      </label>
+
+      <div className="flex gap" style={{ marginTop: 16, alignItems: 'center' }}>
+        <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={() => download('csv')}>⬇ CSV 내보내기</button>
+        <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={() => download('json')}>⬇ JSON 내보내기</button>
+      </div>
+      <div className="muted" style={{ fontSize: 12, marginTop: 12, borderTop: '1px solid rgba(255,255,255,.08)', paddingTop: 10 }}>
+        시계열(샘플마다 한 행)로 내보냅니다. 현재 상태(호스트별 1행 스냅샷)만 필요하면&nbsp;
+        <button className="cell-link" onClick={() => onSnapshot('csv')}>스냅샷 CSV</button> ·&nbsp;
+        <button className="cell-link" onClick={() => onSnapshot('json')}>스냅샷 JSON</button>
+      </div>
+    </Modal>
   );
 }
