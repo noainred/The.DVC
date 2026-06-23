@@ -2,7 +2,9 @@
 
 전 세계 데이터센터에 분산 운영 중인 다수의 **VMware vCenter / NSX** 인프라를 하나의 포탈에서
 통합 모니터링·운영하는 대시보드입니다. VM · ESXi 호스트 · 스토리지 · 네트워크 · 알람뿐 아니라
-**전력(iDRAC/OME) · 온도 · GPU · IP 관리대장 · 용량 예측 · 원격접속 · VM 생성**까지 한 화면에서 다룹니다.
+**전력(iDRAC/OME) · 온도 · GPU · IP 관리대장 · 용량 예측 · 원격접속 · VM 생성**, 그리고
+**인사이트(FinOps·AI 이상탐지·보안·토폴로지) · 포탈/구성 백업 · vCenter 로그 장기보관 ·
+네트워크 트래픽 분석(tcpdump) · 게스트 계정 관리 · 심층 검색**까지 한 화면에서 다룹니다.
 
 > 실제 vCenter 자격증명이 없어도 **현실적인 목(mock) 데이터로 즉시 실행**됩니다.
 > 실 환경에서는 포탈 UI(또는 `server/config/vcenters.json`)에 vCenter만 등록하면 됩니다.
@@ -46,6 +48,21 @@
 - **VM 생성(프로비저닝)** — 단건/대량 클론 + 게스트 커스터마이징(이름/IP 규칙), 동시성 제한 작업 큐, 작업 이력·메모/태그.
 - **원격 접속** — 브라우저 SSH(xterm.js/WebSocket)·RDP(Guacamole), HAProxy Data Plane API로 임시 포트 매핑(TTL 1일), `.rdp` 다운로드, VM에서 빠른 접속.
 - **AI 자연어 검색** — 로컬 LLM(Ollama)로 "북미 메모리 90% 넘는 호스트" 같은 질의 → 구조화 검색(불가 시 규칙 기반 폴백).
+
+### 인사이트 / 분석 (v1.88+)
+- **인사이트 패널** — 💰 FinOps(전력→kWh·요금·CO₂, PUE/단가 설정) · 🤖 AI 이상탐지(중앙값·MAD Z-score) · 📈 용량/수명 예측(선형회귀 ETA) · 🛡 보안(ESXi/vCenter 빌드 ↔ 내장 VMSA·EOL) · 🌐 토폴로지 · 🚨 인시던트 타임라인 · 💬 LLM ChatOps.
+- **구성도(3D)** — 설정된 라이브 구성을 3D 네트워크 그래프로(중앙→엣지→vCenter→NSX/호스트→VM, 줌·회전, vCenter/호스트 포커스로 VM 단위 탐색).
+- **Prometheus/OTel 익스포터** — `/metrics`로 호스트 CPU·MEM·전력·GPU, 데이터스토어, VM 카운트 노출(선택 토큰).
+- **다빈치 서비스 점검 / 글로벌 네트워크 점검** — 내부 서비스·수집기 상태 + 제어플레인(vCenter/NSX) 도달성·RTT.
+- **심층 검색** — 게이트웨이·서브넷(CIDR)·OS·GPU·범위 등 다조건 + 게스트 탐침(GPU 드라이버/특정 프로세스). 전체/특정/복수 vCenter.
+
+### 백업 / 로그 / 네트워크 진단 (v1.88+)
+- **포탈 백업** — 중앙+엣지 설정을 gzip로 통합 백업(정기/변경 자동, 보관·복원). **VMware 구성 백업**(사이트 수집 구성 스냅샷).
+- **vCenter 로그 장기보관** — vim25 EventManager로 이벤트 증분 수집해 SQLite/NDJSON 장기보관(보관기간·용량·저장경로 설정). **분산 저장**(각 엣지 로컬) + 중앙 **연합 조회**.
+- **네트워크 트래픽 분석** — 두 서버 간 `tcpdump` 캡처·진단(핸드셰이크·재전송·RST), **동시(양방향) 비교**, **에이전트 위임 캡처**, **pcap 다운로드**, **캡처 이력**, **연속 모니터링**(주기 캡처 + 이슈 알림) + 로그 자체 장애 탐지.
+- **게스트 계정 추가** — VMware Tools(게스트 작업)로 게스트 OS에 sudo 계정 생성(비밀번호 파일 전달로 셸 노출 회피, 다중 VM, 감사 로그).
+- **VM IP Ping** — 중앙이 못 가는 사설 IP를 엣지 에이전트가 대행 ping(VM 상세에서 녹/적).
+- **PWA** — 설치 가능 + 위험 인시던트 브라우저 알림.
 
 ### 관리 / 운영 편의
 - **인증/RBAC** — scrypt 해시 + HS256 JWT, 역할(admin/operator/viewer), **TOTP 2FA**, **Active Directory(LDAP)** 연동.
@@ -143,6 +160,8 @@ npm run build && npm start   # API가 web/dist 서빙 → http://localhost:4000
 | `COLLECTOR_PULL_INTERVAL_MS` | `60000` | 중앙이 에이전트 pull 주기 |
 | `CENTRAL_TOKEN` | — | 중앙↔에이전트 API 토큰(중앙·에이전트 동일값) |
 | `AGENT_NAME` / `CENTRAL_URL` / `AGENT_SCAN_INTERVAL_MS` | hostname / — / `3600000` | 에이전트 이름·중앙 주소·스캔 주기 |
+| `AGENT_PING_POLL_MS` / `AGENT_LOGQ_POLL_MS` / `AGENT_CAPTURE_POLL_MS` | `4000` | 위임 ping·로그조회·캡처 워커 폴링 주기 |
+| `AGENT_CONFIG_PUSH_MS` | `1800000` | 엣지 설정 → 중앙 push 주기(백업 통합) |
 
 ### 원격접속 · LLM · 기타
 | 변수 | 기본값 | 설명 |
@@ -151,6 +170,7 @@ npm run build && npm start   # API가 web/dist 서빙 → http://localhost:4000
 | `REMOTE_MAPPING_TTL_MS` | `86400000` | 원격 매핑 TTL(1일) |
 | `LLM_ENABLED` / `OLLAMA_URL` / `OLLAMA_MODEL` | `false` / `http://localhost:11434` / `llama3.1` | AI 자연어 검색 |
 | `PROVISION_CONCURRENCY` | `4` | 동시 VM 클론 수 |
+| `METRICS_EXPORT_TOKEN` | — | `/metrics`(Prometheus) 접근 토큰(미설정 시 공개) |
 | `UPGRADE_*` | — | 자동 업그레이드(아래 참조) |
 
 ---
@@ -178,10 +198,13 @@ npm run build && npm start   # API가 web/dist 서빙 → http://localhost:4000
 | `GET/POST/DELETE /alarm-mutes` `GET/PUT /ui-settings` `POST /search/nl` | 음소거 · UI설정 · 자연어검색 |
 
 ### 특수기능 `/api/tools/*`
-`gpu`(+`/history`), `esxi-temp`(+`/history`), `capacity`, `capacity-forecast`, `waste`, `thin-vms`, `guest-os`, `hba`, `licenses`, `esxi`, `solutions`, `hardware`, `vmtools`, `snapshots`, `duplicate-ips`, `vm-finder`(POST), `ipam`(+`/subnets`,`/sheet`,`/annotation`,`.xlsx`,`.csv`)
+`gpu`(+`/history`,`/vms`), `esxi-temp`(+`/history`), `capacity`, `capacity-forecast`, `waste`, `thin-vms`, `guest-os`, `hba`, `licenses`, `esxi`, `solutions`, `hardware`, `vmtools`, `snapshots`, `duplicate-ips`, `vm-finder`(POST), `ipam`(+`/subnets`,`/sheet`,`/annotation`,`.xlsx`,`.csv`), `deep-search`(POST), `ip-ping`, `service-check`, `network-check`, `vmware-config`, `vclogs`(+`/export.csv`,`/federate`,`/sources`)
+
+### 인사이트 `/api/insights/*`
+`finops`(+`/config`), `anomalies`, `forecast`, `security`, `topology`, `graph`, `incidents`, `chatops`(POST) · 익스포터 `GET /metrics`(Prometheus)
 
 ### 관리자 `/api/admin/*` (발췌)
-`users`, `vcenters`(+`/test`,`/import`,`/order`), `nsx/managers`, `idrac`(+`/scan`,`/bulk-add`), `collectors`, `assignments`, `agent-deploy`, `metrics/settings`, `gpu-guest/settings`, `ipam/settings`, `ipam/scan/{settings,run,results}`, `alerts`(+`/test`), `audit`, `data-source`, `llm-config`, `packages`, `geocode`, `logs`
+`users`, `vcenters`(+`/test`,`/import`,`/order`), `nsx/managers`, `idrac`(+`/scan`,`/bulk-add`), `collectors`, `assignments`, `agent-deploy`, `metrics/settings`, `gpu-guest/{settings,vms,test,diag}`, `ipam/settings`, `ipam/scan/{settings,run,results}`, `alerts`(+`/test`), `audit`, `data-source`, `llm-config`, `packages`, `geocode`, `logs`, `backup/*`, `vclogs/*`, `net/{capture,pcap,history,monitors,agents,log-issues}`, `guest/add-user`, `deep-search/probe`
 
 ### 원격접속 `/api/remote/*`
 `mappings`, `quick-connect`, `proxies`, `config`, `deploy`, `probe`, `targets`, `rdp/:id`
@@ -189,8 +212,8 @@ npm run build && npm start   # API가 web/dist 서빙 → http://localhost:4000
 ### 업그레이드 `/api/upgrade/*`
 `status`, `check`, `apply`, `restart`, `settings`, `bundle`
 
-### 토큰 라우터
-`/api/collector/{export,ping,upgrade}` · `/api/central/{assignment,result,ip-scan-assignment,ip-scan-result}`
+### 토큰 라우터(에이전트↔중앙, `X-Central-Token`)
+`/api/collector/{export,ping,upgrade}` · `/api/central/{assignment,result,inventory,ip-scan-assignment,ip-scan-result,gpu-guest-data,agent-config,ping-jobs,ping-result,log-queries,log-query-result,capture-jobs,capture-result}`
 
 ---
 
@@ -209,6 +232,12 @@ npm run build && npm start   # API가 web/dist 서빙 → http://localhost:4000
 | `guestos` | Guest OS 종류/버전 | `esxi` / `vcversion` | ESXi/vCenter 버전 분포 |
 | `esxitemp` | ESXi 온도(5년 추이) | `hardware` / `hba` | 벤더·모델 / HBA 속도 |
 | `gpu` | GPU 인벤토리(vGPU/패스쓰루·5년) | `nsx` | NSX 관리 |
+| `deepsearch` | 심층 검색(게이트웨이·GPU·프로세스·다중 vCenter) | `topo3d` | 구성도(3D 네트워크) |
+| `davinci-svc` | 다빈치 서비스 점검 | `net-check` | 글로벌 네트워크 점검 |
+| `net-traffic` | 네트워크 트래픽 분석(tcpdump) | `vmware-backup` | VMware 구성 백업 |
+
+> 상단 **인사이트** 탭(FinOps·이상탐지·예측·보안·토폴로지·인시던트·ChatOps)과
+> **설정**의 포탈 백업 · vCenter 로그 보관 · 게스트 계정 추가 · GPU 게스트 수집/진단도 참고.
 
 ---
 
