@@ -35,6 +35,8 @@ const TOOLS = [
   { k: 'hardware', icon: '🏷️', label: '벤더/모델 서머리', desc: '법인별 호스트 벤더·모델 수량' },
   { k: 'hba', icon: '🔌', label: 'HBA 카드 속도', desc: '호스트 FC/iSCSI 어댑터 속도' },
   { k: 'gpu', icon: '🎮', label: 'GPU 인벤토리', desc: '호스트/모델별 GPU + 사용률 최근 5년 추이' },
+  { k: 'backup', icon: '💾', label: '백업', desc: '설정 백업/복원 (준비 중)', disabled: true, comingSoon: true },
+  { k: 'massdeploy', icon: '🚀', label: '대용량 배포', desc: '대량 배포 (준비 중)', disabled: true, comingSoon: true },
   { k: 'shutdown', icon: '🛑', label: '긴급 ShutDown', desc: '비상 정지 (관리자 전용)', danger: true, disabled: true },
 ];
 
@@ -79,11 +81,11 @@ export default function SpecialTools() {
               ...(t.danger && !t.disabled ? { borderColor: 'var(--red)' } : {}),
             }}
             onClick={t.disabled ? undefined : () => openTool(t.k)}
-            title={t.disabled ? '비활성화됨 (관리자 전용)' : `바로가기: #/tools/${t.k}`}>
+            title={t.disabled ? (t.comingSoon ? '준비 중 (곧 제공)' : '비활성화됨 (관리자 전용)') : `바로가기: #/tools/${t.k}`}>
             <div style={{ fontSize: 30, filter: t.disabled ? 'grayscale(1)' : 'none' }}>{t.icon}</div>
             <div className="vc-name" style={{ marginTop: 8, ...(t.danger && !t.disabled ? { color: 'var(--red)' } : {}) }}>{t.label}</div>
             <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>{t.desc}</div>
-            <div className="vc-foot"><span className="muted">{t.disabled ? '비활성화됨' : '클릭하여 실행'}</span><span className="muted">{t.disabled ? '' : '→'}</span></div>
+            <div className="vc-foot"><span className="muted">{t.disabled ? (t.comingSoon ? '준비 중' : '비활성화됨') : '클릭하여 실행'}</span><span className="muted">{t.disabled ? '' : '→'}</span></div>
           </div>
         ))}
       </div>
