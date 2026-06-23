@@ -25,8 +25,10 @@ import { alertStatus, saveAlertConfig, testAlert } from '../alerts.js';
 import { loadMetricsSettings, saveMetricsSettings, METRICS_LIMITS } from '../metrics/settings.js';
 import { forceGpuUtilCollect, clearGpuUtilForce } from '../vcenter/soapClient.js';
 import { metricsSamplerStatus, rescheduleMetricsSampler } from '../metrics/sampler.js';
-import { loadGpuGuestSettings, saveGpuGuestSettings, redactGpuGuestSettings } from '../gpu/settings.js';
-import { gpuGuestStatus, rescheduleGpuGuestPoller } from '../gpu/poller.js';
+import { loadGpuGuestSettings, saveGpuGuestSettings, redactGpuGuestSettings, resolveVmCreds } from '../gpu/settings.js';
+import { gpuGuestStatus, rescheduleGpuGuestPoller, passthruHostIds } from '../gpu/poller.js';
+import { testVmGuest, VimSoapClient } from '../gpu/guestops.js';
+import { loadVcenterConfig } from '../config.js';
 import { loadScanSettings, saveScanSettings, scanResultList, scanInfo, listScanAgents, getAgentReports, getScanRuns, LOCAL } from '../ipam/scanStore.js';
 import { startScan, scanStatus, rescheduleScanPoller } from '../ipam/scanPoller.js';
 import { listAssignments as listIdracAssignments, getResults as getAgentResults } from '../central/assignments.js';
@@ -308,6 +310,81 @@ adminRouter.put('/gpu-guest/settings', adminOnly, (req, res) => {
   const settings = saveGpuGuestSettings(req.body || {});
   rescheduleGpuGuestPoller();
   res.json({ ok: true, settings: redactGpuGuestSettings(settings), status: gpuGuestStatus() });
+});
+
+// 선택한 법인(vCenter)에서 GPU를 패스쓰루로 쓰는 VM 목록 — VM별 자격증명 설정용.
+// 패스쓰루 호스트 위의 VM(전원/Tools 무관)을 모두 보여주고, 현재 저장된 VM별 계정 여부도 함께.
+adminRouter.get('/gpu-guest/vms', adminOnly, (req, res) => {
+  const vcId = req.query.vcenterId;
+  if (!vcId) return res.status(400).json({ error: 'vcenterId 필요' });
+  const snap = store.get();
+  const hostNames = passthruHostIds(snap, vcId);
+  const s = loadGpuGuestSettings();
+  const saved = (s.vcenters[vcId]?.vms) || {};
+  const vms = (snap.vms || [])
+    .filter((v) => v.vcenterId === vcId && hostNames.has(v.host))
+    .map((v) => ({
+      id: v.id, name: v.name, host: v.host, cluster: v.cluster || '',
+      powerState: v.powerState, toolsStatus: v.toolsStatus || '', guestOS: v.guestOS || '',
+      gpu: v.gpu || null,
+      hasOwnCred: !!saved[v.id]?.username, ownUsername: saved[v.id]?.username || '',
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  res.json({ vcenterId: vcId, vcShared: { username: s.vcenters[vcId]?.username || '', hasPassword: !!s.vcenters[vcId]?.password }, vms });
+});
+
+// 게스트 로그인/데이터 읽기 테스트 — 개별 또는 일괄. body:
+//   { vcenterId, items: [{ vmId, username, password, useShared }] }
+// useShared=true 면 법인 공용 계정으로, 아니면 입력한(없으면 저장된 VM별) 계정으로 테스트.
+adminRouter.post('/gpu-guest/test', adminOnly, async (req, res) => {
+  const { vcenterId, items } = req.body || {};
+  if (!vcenterId || !Array.isArray(items) || !items.length) return res.status(400).json({ error: 'vcenterId + items 필요' });
+  const snap = store.get();
+  const vmById = new Map((snap.vms || []).filter((v) => v.vcenterId === vcenterId).map((v) => [v.id, v]));
+  const s = loadGpuGuestSettings();
+
+  // 데모(mock) 환경: 실제 게스트가 없으므로 합성 결과.
+  if (snap.source === 'mock') {
+    return res.json({ mock: true, results: items.map((it) => {
+      const v = vmById.get(it.vmId);
+      const ok = !!v && v.powerState === 'POWERED_ON' && v.toolsStatus === 'RUNNING';
+      return { vmId: it.vmId, login: ok, read: ok, error: ok ? null : 'VM 전원/Tools 미동작(mock)', sample: ok ? { gpus: 1, utilPct: 42 } : null };
+    }) });
+  }
+
+  const vc = (loadVcenterConfig().vcenters || []).find((x) => x.id === vcenterId);
+  if (!vc) return res.status(404).json({ error: '등록된 vCenter 아님' });
+  const limit = Math.min(Math.max(1, s.concurrency || 4), 8);
+  const results = new Array(items.length);
+  let c;
+  try {
+    c = new VimSoapClient(vc);
+    await c.login();
+    const q = items.map((it, i) => ({ it, i }));
+    const workers = Array.from({ length: Math.min(limit, q.length) }, async () => {
+      while (q.length) {
+        const { it, i } = q.shift();
+        const v = vmById.get(it.vmId);
+        if (!v) { results[i] = { vmId: it.vmId, login: false, read: false, error: 'VM을 찾을 수 없음' }; continue; }
+        if (v.toolsStatus !== 'RUNNING') { results[i] = { vmId: it.vmId, login: false, read: false, error: 'VMware Tools 미실행' }; continue; }
+        if (v.powerState !== 'POWERED_ON') { results[i] = { vmId: it.vmId, login: false, read: false, error: 'VM 전원 꺼짐' }; continue; }
+        // 자격증명 결정: useShared면 법인 공용, 아니면 입력값(빈 비번은 저장값) → 없으면 해석값.
+        const vcShared = s.vcenters[vcenterId] || {};
+        let creds;
+        if (it.useShared) creds = vcShared.username ? { username: vcShared.username, password: vcShared.password || '' } : null;
+        else if (it.username) creds = { username: it.username, password: it.password || (vcShared.vms?.[it.vmId]?.password || '') };
+        else creds = resolveVmCreds(s, vcenterId, it.vmId);
+        if (!creds || !creds.username) { results[i] = { vmId: it.vmId, login: false, read: false, error: '계정 없음' }; continue; }
+        const isWindows = /windows/i.test(v.guestOS || '');
+        const r = await testVmGuest(c, String(v.id).split(':').slice(1).join(':'), creds, { isWindows, timeoutMs: s.timeoutMs }).catch((e) => ({ login: false, read: false, error: e.message }));
+        results[i] = { vmId: it.vmId, ...r };
+      }
+    });
+    await Promise.all(workers);
+  } catch (e) {
+    return res.status(500).json({ error: `vCenter 로그인 실패: ${e.message}` });
+  } finally { try { await c?.logout(); } catch { /* */ } }
+  res.json({ results });
 });
 
 // Read the effective data source (UI override or env default).

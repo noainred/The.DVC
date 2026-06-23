@@ -9,7 +9,7 @@
 
 import { config, loadVcenterConfig } from '../config.js';
 import { store } from '../store.js';
-import { loadGpuGuestSettings } from './settings.js';
+import { loadGpuGuestSettings, resolveVmCreds } from './settings.js';
 import { setGuestGpu, pruneGuestGpu, guestGpuCounts } from './store.js';
 import { collectVmGpu, VimSoapClient } from './guestops.js';
 
@@ -26,7 +26,7 @@ async function eachLimited(items, limit, fn) {
   await Promise.all(workers);
 }
 
-function passthruHostIds(snap, vcId) {
+export function passthruHostIds(snap, vcId) {
   const ids = new Set();
   for (const h of snap.hosts || []) {
     if (h.vcenterId !== vcId) continue;
@@ -60,17 +60,20 @@ const hashStr = (s) => { let h = 0; for (let i = 0; i < String(s).length; i++) h
 async function pollLive(snap, vc, s) {
   const hostNames = passthruHostIds(snap, vc.id);
   if (!hostNames.size) return { hosts: [], vms: [] };
-  // 대상 VM: 패스쓰루 호스트 위 + 전원 On + Tools 동작. nvidia-smi가 없으면 자동 제외.
+  // 대상 VM: 패스쓰루 호스트 위 + 전원 On + Tools 동작 + 자격증명(VM별/법인 공용)이
+  // 해석되는 VM만. 상한은 maxVmsPerVcenter(기본 1000)로 폭주만 방지(과거 32 상한 제거).
   const cands = (snap.vms || []).filter((v) => v.vcenterId === vc.id && hostNames.has(v.host)
-    && v.powerState === 'POWERED_ON' && v.toolsStatus === 'RUNNING').slice(0, s.concurrency * 8);
+    && v.powerState === 'POWERED_ON' && v.toolsStatus === 'RUNNING' && resolveVmCreds(s, vc.id, v.id))
+    .slice(0, s.maxVmsPerVcenter || 1000);
   if (!cands.length) return { hosts: [], vms: [] };
-  const creds = s.vcenters[vc.id];
   const c = new VimSoapClient(vc);
   await c.login();
   const vms = [];
   const byHost = new Map();
   try {
     await eachLimited(cands, s.concurrency, async (v) => {
+      const creds = resolveVmCreds(s, vc.id, v.id);
+      if (!creds) return;
       const moref = String(v.id).split(':').slice(1).join(':');
       const isWindows = /windows/i.test(v.guestOS || '');
       const r = await collectVmGpu(c, moref, creds, { isWindows, timeoutMs: s.timeoutMs }).catch(() => null);
@@ -110,8 +113,7 @@ async function pollOnce() {
         if (mock) result = pollMock(snap, vcId);
         else {
           const vc = reg.find((x) => x.id === vcId);
-          const creds = s.vcenters[vcId];
-          if (!vc || !creds?.username) return;
+          if (!vc) return; // 자격증명은 VM별/법인 공용을 pollLive에서 VM 단위로 해석
           result = await pollLive(snap, vc, s);
         }
         setGuestGpu(result);
