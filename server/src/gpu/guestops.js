@@ -62,12 +62,12 @@ export async function testVmGuest(c, vmMoref, creds, { isWindows = false, timeou
     }
     out.login = true;
   } catch (e) { out.error = cleanGuestError(e.message); return out; }
-  // 2) 데이터 읽기 — nvidia-smi 실행 후 파싱.
+  // 2) 데이터 읽기 — nvidia-smi 실행 후 파싱. 실패 시 구체 사유(stderr/다운로드)를 그대로 표시.
   try {
     const r = await collectVmGpu(c, vmMoref, creds, { isWindows, timeoutMs });
     if (r && r.utilPct != null) { out.read = true; out.sample = { gpus: r.count, utilPct: r.utilPct, memUsedPct: r.memUsedPct }; }
     else out.error = 'nvidia-smi 출력 없음 — 게스트에 NVIDIA 드라이버/nvidia-smi 확인';
-  } catch (e) { out.error = cleanGuestError(e.message); }
+  } catch (e) { out.error = e.guestDiag ? e.message : cleanGuestError(e.message); }
   return out;
 }
 
@@ -76,16 +76,51 @@ function authXml(creds) {
     `<username>${esc(creds.username)}</username><password>${esc(creds.password)}</password></auth>`;
 }
 
-/** Run nvidia-smi in one guest and return parsed GPU rows, or null on any failure. */
+// 게스트 파일 1개를 InitiateFileTransferFromGuest → HTTP GET 으로 회수.
+// 반환 { text, error } — error 가 있으면 다운로드 단계(포탈→ESXi 도달/인증서/HTTP) 실패.
+async function readGuestFile(c, fileManager, vmRef, auth, guestPath, timeoutMs) {
+  let ftXml;
+  try {
+    ftXml = await c.callRaw(
+      `<InitiateFileTransferFromGuest xmlns="urn:vim25"><_this type="GuestFileManager">${fileManager}</_this>${vmRef}${auth}` +
+      `<guestFilePath>${esc(guestPath)}</guestFilePath></InitiateFileTransferFromGuest>`);
+  } catch (e) { return { text: '', error: cleanGuestError(e.message) }; }
+  const url = /<url>([^<]+)<\/url>/.exec(ftXml)?.[1];
+  if (!url) return { text: '', error: 'ESXi가 파일 전송 URL을 반환하지 않음' };
+  // ESXi가 반환하는 URL의 와일드카드 호스트(*)는 vCenter 호스트로 치환.
+  const vcHost = (c.vc.host || '').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  const dl = url.replace('://*', `://${vcHost}`);
+  try {
+    const res = await fetch(dl, { signal: AbortSignal.timeout(timeoutMs) });
+    if (!res.ok) return { text: '', error: `파일 다운로드 HTTP ${res.status}` };
+    return { text: await res.text(), error: null };
+  } catch (e) {
+    return { text: '', error: `파일 다운로드 실패(포탈→ESXi 도달/네트워크/인증서): ${e.message}` };
+  }
+}
+
+function deleteGuestFile(c, fileManager, vmRef, auth, guestPath) {
+  c.callRaw(`<DeleteFileInGuest xmlns="urn:vim25"><_this type="GuestFileManager">${fileManager}</_this>${vmRef}${auth}` +
+    `<filePath>${esc(guestPath)}</filePath></DeleteFileInGuest>`).catch(() => {});
+}
+
+/**
+ * Run nvidia-smi in one guest and return parsed GPU rows.
+ * stdout은 outFile, stderr는 errFile로 분리 캡처해, 결과가 비면 stderr/다운로드
+ * 사유를 담아 Error를 던진다(테스트에서 정확한 원인 표시). 폴러는 .catch(()=>null).
+ */
 export async function collectVmGpu(c, vmMoref, creds, { isWindows, timeoutMs = 20_000 } = {}) {
   const { processManager, fileManager } = await guestManagers(c);
   const auth = authXml(creds);
   const vmRef = `<vm type="VirtualMachine">${vmMoref}</vm>`;
-  // 임시 출력 파일 + 쉘 경유 리다이렉트(출력 캡처에 필요).
-  const outFile = isWindows ? `C\\:\\\\Windows\\\\Temp\\\\nvsmi_${Date.now()}.txt` : `/tmp/nvsmi_${Date.now()}.txt`;
+  // stdout/stderr 분리 캡처(쉘 리다이렉트). stderr를 버리지 않아야 원인 진단 가능.
+  const ts = Date.now();
+  const outFile = isWindows ? `C:\\Windows\\Temp\\nvsmi_${ts}.out` : `/tmp/nvsmi_${ts}.out`;
+  const errFile = isWindows ? `C:\\Windows\\Temp\\nvsmi_${ts}.err` : `/tmp/nvsmi_${ts}.err`;
+  // 비대화형 게스트 작업 셸은 PATH가 비어있을 수 있어 /usr/bin 등을 보강(절대경로 지정 X, 이름 그대로 실행).
   const prog = isWindows
-    ? { path: 'C:\\Windows\\System32\\cmd.exe', args: `/c nvidia-smi ${NVSMI_QUERY} > ${outFile.replace(/\\\\/g, '\\')}` }
-    : { path: '/bin/sh', args: `-c "nvidia-smi ${NVSMI_QUERY} > ${outFile} 2>/dev/null"` };
+    ? { path: 'C:\\Windows\\System32\\cmd.exe', args: `/c nvidia-smi ${NVSMI_QUERY} 1>"${outFile}" 2>"${errFile}"` }
+    : { path: '/bin/sh', args: `-c "export PATH=$PATH:/usr/bin:/usr/local/bin:/usr/local/sbin:/usr/local/nvidia/bin; nvidia-smi ${NVSMI_QUERY} 1>${outFile} 2>${errFile}"` };
 
   // 3) StartProgramInGuest
   const startXml =
@@ -93,40 +128,35 @@ export async function collectVmGpu(c, vmMoref, creds, { isWindows, timeoutMs = 2
     `<spec xsi:type="GuestProgramSpec"><programPath>${esc(prog.path)}</programPath><arguments>${esc(prog.args)}</arguments></spec></StartProgramInGuest>`;
   const startRes = await c.callRaw(startXml);
   const pid = /<returnval>(\d+)<\/returnval>/.exec(startRes)?.[1];
-  if (!pid) throw new Error('StartProgramInGuest 실패');
+  if (!pid) throw new Error('StartProgramInGuest 실패(게스트 작업 권한/Tools 확인)');
 
   // 4) 종료 대기(ListProcessesInGuest)
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    await sleep(1500);
+    await sleep(1200);
     const listXml = await c.callRaw(
       `<ListProcessesInGuest xmlns="urn:vim25"><_this type="GuestProcessManager">${processManager}</_this>${vmRef}${auth}<pids>${pid}</pids></ListProcessesInGuest>`
     );
     if (/<endTime>/.test(listXml)) break; // 종료됨
   }
 
-  // 5) 결과 파일 다운로드
-  const ftXml = await c.callRaw(
-    `<InitiateFileTransferFromGuest xmlns="urn:vim25"><_this type="GuestFileManager">${fileManager}</_this>${vmRef}${auth}` +
-    `<guestFilePath>${esc(isWindows ? outFile.replace(/\\\\/g, '\\') : outFile)}</guestFilePath></InitiateFileTransferFromGuest>`
-  );
-  const url = /<url>([^<]+)<\/url>/.exec(ftXml)?.[1];
-  let text = '';
-  if (url) {
-    // ESXi가 반환하는 URL의 와일드카드 호스트(*)는 vCenter 호스트로 치환.
-    const vcHost = (c.vc.host || '').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
-    const dl = url.replace('://*', `://${vcHost}`);
-    const res = await fetch(dl, { signal: AbortSignal.timeout(timeoutMs) });
-    if (res.ok) text = await res.text();
+  // 5) stdout 회수 → 파싱
+  const outRes = await readGuestFile(c, fileManager, vmRef, auth, outFile, timeoutMs);
+  const parsed = parseNvidiaSmiCsv(outRes.text);
+  if (parsed) {
+    deleteGuestFile(c, fileManager, vmRef, auth, outFile);
+    deleteGuestFile(c, fileManager, vmRef, auth, errFile);
+    return parsed;
   }
 
-  // 6) 정리(best-effort)
-  c.callRaw(
-    `<DeleteFileInGuest xmlns="urn:vim25"><_this type="GuestFileManager">${fileManager}</_this>${vmRef}${auth}` +
-    `<filePath>${esc(isWindows ? outFile.replace(/\\\\/g, '\\') : outFile)}</filePath></DeleteFileInGuest>`
-  ).catch(() => {});
-
-  return parseNvidiaSmiCsv(text);
+  // 6) 비었으면 stderr 회수해 진단 후 정리 + 구체 사유로 throw
+  const errRes = await readGuestFile(c, fileManager, vmRef, auth, errFile, timeoutMs);
+  deleteGuestFile(c, fileManager, vmRef, auth, outFile);
+  deleteGuestFile(c, fileManager, vmRef, auth, errFile);
+  const stderrLine = (errRes.text || '').trim().split(/\r?\n/)[0];
+  const reason = stderrLine ? `게스트 오류: ${stderrLine.slice(0, 180)}`
+    : (outRes.error || errRes.error || 'nvidia-smi 출력이 비어 있음(명령은 실행됐으나 stdout 없음)');
+  const e = new Error(reason); e.guestDiag = true; throw e;
 }
 
 /** "12, 8, 2048, 81920" 형식(여러 줄=여러 GPU)을 파싱해 집계. */

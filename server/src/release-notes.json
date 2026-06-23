@@ -1,6 +1,16 @@
 {
   "notes": [
     {
+      "version": "1.82.2",
+      "date": "2026-06-23",
+      "title": "게스트 GPU 읽기 진단 강화 — stderr 회수 + 구체 실패 사유 + PATH 보강",
+      "notes": [
+        "nvidia-smi 출력이 비면 stderr를 별도 파일로 회수해 '게스트 오류: <메시지>' 또는 '파일 다운로드 실패(포탈→ESXi 도달/네트워크/인증서)' 등 구체 사유를 테스트 결과에 표시(기존엔 2>/dev/null로 원인이 가려짐)",
+        "비대화형 게스트 작업 셸의 빈 PATH 대비 — 절대경로 지정 없이 기존 PATH에 /usr/bin·/usr/local/bin·/usr/local/nvidia/bin 보강 후 nvidia-smi 실행",
+        "stdout/stderr 분리 캡처 + 임시파일 정리"
+      ]
+    },
+    {
       "version": "1.82.1",
       "date": "2026-06-23",
       "title": "GPU 게스트 'VM별 계정' 개선 — 패스쓰루 VM만 표시 + 실제 수집 여부 + 순서/레이아웃",
