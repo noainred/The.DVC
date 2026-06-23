@@ -208,7 +208,10 @@ export function loadVcenterConfig() {
       try {
         const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
         if (Array.isArray(parsed?.vcenters)) {
-          return { file, vcenters: parsed.vcenters };
+          // host에 스킴(http/https)이 없으면 https:// 보강 — fetch 'unknown scheme' 방지.
+          const vcenters = parsed.vcenters.map((v) => (v && v.host && !/^https?:\/\//i.test(String(v.host))
+            ? { ...v, host: `https://${String(v.host).trim()}` } : v));
+          return { file, vcenters };
         }
       } catch (err) {
         console.error(`[config] Failed to parse ${file}: ${err.message}`);
