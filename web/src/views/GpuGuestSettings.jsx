@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson, putJson, postJson } from '../api.js';
-import { Loading, ErrorBox } from '../components/ui.jsx';
+import { Loading, ErrorBox, VmLink } from '../components/ui.jsx';
 
 const fmtAgo = (ts) => {
   if (!ts) return '없음';
@@ -58,7 +58,7 @@ export default function GpuGuestSettings() {
   const monitoredCount = Object.values(form.vcenters).filter((v) => v.enabled).length;
 
   return (
-    <div style={{ maxWidth: 980 }}>
+    <div style={{ maxWidth: 1280 }}>
       <div className="section-title" style={{ marginTop: 0 }}>🎮 GPU 게스트 수집</div>
       <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
         패스쓰루(DirectPath I/O) GPU는 ESXi가 사용률을 보지 못합니다. 선택한 <b>법인의 VM</b>에
@@ -229,12 +229,13 @@ function VmCredManager({ vcs, vcenters }) {
           <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
             공용 계정: <b>{vcShared.username || '(미설정)'}</b>{vcShared.hasPassword ? ' · 비번 저장됨' : ''} · VM {rows.length}개 · 별도 계정 {ownCount}개
           </div>
-          <div style={{ overflowX: 'auto' }}>
+          <div style={{ overflowX: 'auto', maxWidth: '100%' }}>
             <table className="data-table" style={{ width: '100%', fontSize: 13 }}>
               <thead><tr>
                 <th style={{ textAlign: 'left' }}>VM</th>
                 <th style={{ textAlign: 'left' }}>호스트</th>
                 <th style={{ textAlign: 'left' }}>상태</th>
+                <th style={{ textAlign: 'left' }}>수집(읽기)</th>
                 <th style={{ textAlign: 'left' }}>계정 방식</th>
                 <th style={{ textAlign: 'left' }}>계정 / 비밀번호</th>
                 <th style={{ textAlign: 'left' }}>테스트</th>
@@ -244,14 +245,19 @@ function VmCredManager({ vcs, vcenters }) {
                   const ready = r.powerState === 'POWERED_ON' && r.toolsStatus === 'RUNNING';
                   return (
                     <tr key={r.id}>
-                      <td><b>{r.name}</b><div className="muted" style={{ fontSize: 11 }}>{r.guestOS || ''}</div></td>
-                      <td className="muted" style={{ fontSize: 12 }}>{r.host}</td>
-                      <td style={{ fontSize: 11 }}>
+                      <td><VmLink name={r.name} vcenterId={selVc} label={r.name} /><div className="muted" style={{ fontSize: 11 }}>{r.guestOS || ''}</div></td>
+                      <td className="muted" style={{ fontSize: 12, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.host}>{r.host}</td>
+                      <td style={{ fontSize: 11, whiteSpace: 'nowrap' }}>
                         <span className={`badge ${r.powerState === 'POWERED_ON' ? 'green' : 'gray'}`}>{r.powerState === 'POWERED_ON' ? 'On' : 'Off'}</span>{' '}
                         <span className={`badge ${r.toolsStatus === 'RUNNING' ? 'green' : 'amber'}`}>Tools {r.toolsStatus === 'RUNNING' ? 'OK' : (r.toolsStatus || '—')}</span>
                       </td>
+                      <td style={{ fontSize: 11, whiteSpace: 'nowrap' }}>
+                        {r.collected
+                          ? <span className="badge green" title={`마지막 수집 ${fmtAgo(r.collected.at)}`}>● {r.collected.utilPct}% <span style={{ opacity: 0.7 }}>{fmtAgo(r.collected.at)}</span></span>
+                          : <span className="badge gray" title="아직 게스트에서 사용률을 읽어오지 못함">미수집</span>}
+                      </td>
                       <td>
-                        <select className="select" value={r.mode} onChange={(e) => setRow(r.id, { mode: e.target.value })} style={{ width: 96 }}>
+                        <select className="select" value={r.mode} onChange={(e) => setRow(r.id, { mode: e.target.value })} style={{ width: 84 }}>
                           <option value="shared">공용</option>
                           <option value="own">별도</option>
                         </select>
@@ -259,10 +265,10 @@ function VmCredManager({ vcs, vcenters }) {
                       <td>
                         {r.mode === 'own' ? (
                           <div className="flex gap" style={{ gap: 4 }}>
-                            <input className="input" style={{ width: 120 }} placeholder="계정(root 등)" value={r.username} onChange={(e) => setRow(r.id, { username: e.target.value })} />
-                            <input className="input" type="password" style={{ width: 120 }} placeholder={r.hadOwn ? '●●●●● (변경시)' : '비밀번호'} value={r.password} onChange={(e) => setRow(r.id, { password: e.target.value })} />
+                            <input className="input" style={{ width: 104 }} placeholder="계정(root 등)" value={r.username} onChange={(e) => setRow(r.id, { username: e.target.value })} />
+                            <input className="input" type="password" style={{ width: 104 }} placeholder={r.hadOwn ? '●●●●●' : '비밀번호'} value={r.password} onChange={(e) => setRow(r.id, { password: e.target.value })} />
                           </div>
-                        ) : <span className="muted" style={{ fontSize: 12 }}>법인 공용 계정 사용</span>}
+                        ) : <span className="muted" style={{ fontSize: 12 }}>공용 계정</span>}
                       </td>
                       <td>
                         <div className="flex gap" style={{ alignItems: 'center', gap: 6 }}>

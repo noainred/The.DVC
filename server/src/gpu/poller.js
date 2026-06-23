@@ -35,6 +35,13 @@ export function passthruHostIds(snap, vcId) {
   return ids;
 }
 
+/** 이 VM이 GPU를 '패스쓰루(DirectPath I/O)'로 할당받았는지 — 게스트 수집 대상 판별. */
+export function vmUsesPassthroughGpu(v) {
+  const g = v && v.gpu;
+  if (!g) return false;
+  return (g.passthrough || 0) > 0 || g.type === 'passthrough' || g.type === 'mixed';
+}
+
 // 데모(mock): 선택 법인의 패스쓰루 호스트/VM에 합성 사용률을 채운다.
 function pollMock(snap, vcId) {
   const hostNames = passthruHostIds(snap, vcId);
@@ -63,7 +70,7 @@ async function pollLive(snap, vc, s) {
   // 대상 VM: 패스쓰루 호스트 위 + 전원 On + Tools 동작 + 자격증명(VM별/법인 공용)이
   // 해석되는 VM만. 상한은 maxVmsPerVcenter(기본 1000)로 폭주만 방지(과거 32 상한 제거).
   const cands = (snap.vms || []).filter((v) => v.vcenterId === vc.id && hostNames.has(v.host)
-    && v.powerState === 'POWERED_ON' && v.toolsStatus === 'RUNNING' && resolveVmCreds(s, vc.id, v.id))
+    && vmUsesPassthroughGpu(v) && v.powerState === 'POWERED_ON' && v.toolsStatus === 'RUNNING' && resolveVmCreds(s, vc.id, v.id))
     .slice(0, s.maxVmsPerVcenter || 1000);
   if (!cands.length) return { hosts: [], vms: [] };
   const c = new VimSoapClient(vc);
