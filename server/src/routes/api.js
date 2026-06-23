@@ -514,10 +514,10 @@ api.get('/tools/esxi', (req, res) => {
 });
 
 // GPU inventory per host + aggregate counts by model and vCenter.
-api.get('/tools/gpu', (req, res) => {
-  const snap = store.get();
+// GPU 인벤토리 집계(호스트별 GPU 장수·모드·사용률·할당 VM) — /tools/gpu 와 CSV/JSON export 공용.
+function buildGpuInventory(snap, vcenterId) {
   let hosts = snap.hosts;
-  if (req.query.vcenterId) hosts = hosts.filter((h) => h.vcenterId === req.query.vcenterId);
+  if (vcenterId) hosts = hosts.filter((h) => h.vcenterId === vcenterId);
   const hostsWithGpu = [];
   const byModel = {};
   const byVcenter = {};
@@ -555,7 +555,7 @@ api.get('/tools/gpu', (req, res) => {
     }
   }
   const utils = hostsWithGpu.map((x) => x.utilPct).filter((x) => x != null);
-  res.json({
+  return {
     totalGpus,
     hostsWithGpu: hostsWithGpu.length,
     utilReporting: utils.length,
@@ -564,7 +564,35 @@ api.get('/tools/gpu', (req, res) => {
     byModel: Object.entries(byModel).map(([model, count]) => ({ model, count })).sort((a, b) => b.count - a.count),
     byVcenter: Object.entries(byVcenter).map(([vcenterId, count]) => ({ vcenterId, count })).sort((a, b) => b.count - a.count),
     items: hostsWithGpu.sort((a, b) => b.count - a.count),
-  });
+  };
+}
+
+api.get('/tools/gpu', (req, res) => {
+  res.json(buildGpuInventory(store.get(), req.query.vcenterId));
+});
+
+// GPU 사용량/인벤토리 JSON export — 집계 결과 그대로 파일로 내려받기.
+api.get('/tools/gpu.json', (req, res) => {
+  const data = buildGpuInventory(store.get(), req.query.vcenterId);
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="gpu-${new Date().toISOString().slice(0, 10)}.json"`);
+  res.send(JSON.stringify({ generatedAt: new Date().toISOString(), vcenterId: req.query.vcenterId || null, ...data }, null, 2));
+});
+
+// GPU 사용량/인벤토리 CSV export — 호스트별 한 행(모델·장수·모드·사용률·할당 VM).
+api.get('/tools/gpu.csv', (req, res) => {
+  const data = buildGpuInventory(store.get(), req.query.vcenterId);
+  const head = ['host', 'vcenter_id', 'cluster', 'gpu_model', 'gpu_count', 'mem_gb', 'mode', 'mode_breakdown', 'util_pct', 'util_source', 'assigned_vms'];
+  const esc = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const lines = [head.join(',')];
+  for (const r of data.items) {
+    const breakdown = Object.entries(r.modes || {}).map(([m, n]) => `${m}:${n}`).join(' ');
+    lines.push([r.host, r.vcenterId, r.cluster, r.model, r.count, r.memGB, r.mode, breakdown,
+      r.utilPct == null ? '' : r.utilPct, r.utilSource || '', r.assignedVms].map(esc).join(','));
+  }
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="gpu-${new Date().toISOString().slice(0, 10)}.csv"`);
+  res.send('﻿' + lines.join('\r\n')); // BOM for Excel
 });
 
 // GPU가 할당된 VM 목록 — 어떤 VM이 어떤 방식(vGPU/패스쓰루)·프로파일로 GPU를 쓰는지.
