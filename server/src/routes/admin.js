@@ -48,6 +48,7 @@ import { enqueueCapture, getCaptureResult } from '../central/captureJobs.js';
 import { getAllAgentConfigs } from '../central/agentConfig.js';
 import { recordCapture, listCaptures, getCapture, deleteCapture } from '../net/captureHistory.js';
 import { listMonitors, saveMonitor, removeMonitor, runMonitorNow } from '../net/monitor.js';
+import { addUsersToVms } from '../guest/accountService.js';
 import path from 'node:path';
 import {
   listRegistry as listNsx, addManager as addNsx, updateManager as updateNsx,
@@ -879,6 +880,15 @@ adminRouter.post('/net/monitors/:id/run', adminOnly, async (req, res) => { try {
 adminRouter.get('/net/log-issues', adminOnly, async (req, res) => {
   try { res.json(await analyzeLogsForIssues({ vcenterId: req.query.vcenterId || '', days: Number(req.query.days) || 7 })); }
   catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+});
+
+// ───────────────────────── 게스트 계정 추가 ─────────────────────────
+// VMware Tools(게스트 작업)로 게스트 OS에 sudo 계정 추가. 관리자 전용 + 감사 로그.
+// Body: { vcenterId, vmIds[], username, password, sudo, nopasswd, guestUser, guestPass }
+adminRouter.post('/guest/add-user', adminOnly, async (req, res) => {
+  const b = req.body || {};
+  try { res.json(await addUsersToVms(b)); }
+  catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
 });
 
 function existsFile(p) {

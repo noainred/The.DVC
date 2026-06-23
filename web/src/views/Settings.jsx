@@ -19,6 +19,7 @@ import GpuGuestDiag from './GpuGuestDiag.jsx';
 import GpuSettings from './GpuSettings.jsx';
 import PortalBackup from './PortalBackup.jsx';
 import VcenterLogs from './VcenterLogs.jsx';
+import GuestAccount from './GuestAccount.jsx';
 import About from './About.jsx';
 
 // 모든 하위 화면 정의(키→라벨→컴포넌트). 그룹에 속한 항목은 group 키로 묶는다.
@@ -31,6 +32,7 @@ const SUB = [
   { k: 'gpu-collect', label: 'GPU 수집', C: GpuSettings, group: 'collect' },
   { k: 'gpu-guest', label: 'GPU 게스트 수집', C: GpuGuestSettings, group: 'collect' },
   { k: 'gpu-guest-diag', label: 'GPU 수집 진단', C: GpuGuestDiag, group: 'collect' },
+  { k: 'guest-account', label: '게스트 계정 추가', C: GuestAccount, group: 'collect' },
   { k: 'collectors', label: '수집 서버(원격)', C: Collectors, group: 'collect' },
   { k: 'agent-scans', label: '에이전트 작업', C: AgentScans, group: 'collect' },
   { k: 'agent-deploy', label: '에이전트 배포', C: AgentDeploy, group: 'collect' },
