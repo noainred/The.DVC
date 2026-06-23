@@ -20,6 +20,8 @@ import GpuSettings from './GpuSettings.jsx';
 import PortalBackup from './PortalBackup.jsx';
 import VcenterLogs from './VcenterLogs.jsx';
 import GuestAccount from './GuestAccount.jsx';
+import LoginFails from './LoginFails.jsx';
+import NetIssues from './NetIssues.jsx';
 import About from './About.jsx';
 
 // 모든 하위 화면 정의(키→라벨→컴포넌트). 그룹에 속한 항목은 group 키로 묶는다.
@@ -47,6 +49,8 @@ const SUB = [
   { k: 'vclogs', label: 'vCenter 로그 보관', C: VcenterLogs },
   { k: 'diagnostics', label: '진단·로그', C: Diagnostics },
   { k: 'audit', label: '감사 로그', C: Audit },
+  { k: 'login-fails', label: '로그인 실패 분석', C: LoginFails },
+  { k: 'net-issues', label: '네트워크 이슈 분석', C: NetIssues },
   { k: 'about', label: 'About', C: About },
 ];
 

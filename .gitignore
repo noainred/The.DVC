@@ -57,3 +57,12 @@ server/config/vcenter-logs.json
 # 네트워크 캡처(런타임)
 server/config/capture-history.json
 server/config/capture-monitors.json
+
+# 로그인 실패 분석(런타임)
+server/config/login-fails.ndjson
+server/config/login-monitor.json
+
+# 게스트 조사 스케줄러 · 네트워크 이슈(런타임)
+server/config/guest-scans.json
+server/config/net-issues.ndjson
+server/config/net-issues-state.json
