@@ -9,6 +9,7 @@ import { config } from '../config.js';
 import { getAssignment, setResult } from '../central/assignments.js';
 import { setInventory } from '../central/inventory.js';
 import { setGuestGpu } from '../gpu/store.js';
+import { setGpuGuestDiag } from '../central/gpuGuestDiag.js';
 import { loadScanSettings, mergeScanResults, recordAgentReport } from '../ipam/scanStore.js';
 
 export const centralRouter = Router();
@@ -77,6 +78,7 @@ centralRouter.post('/gpu-guest-data', (req, res) => {
   const hosts = Array.isArray(b.hosts) ? b.hosts.slice(0, 50_000) : [];
   const vms = Array.isArray(b.vms) ? b.vms.slice(0, 500_000) : [];
   setGuestGpu({ hosts, vms }); // 로컬 폴러와 동일한 게스트 오버레이에 기록 → /tools/gpu·샘플러가 그대로 사용
+  if (b.diag) setGpuGuestDiag(b.agent, b.diag, { hosts: hosts.length, vms: vms.length }); // 수집 진단 보관
   console.log(`[central] gpu-guest-data 수신: agent=${b.agent} hosts=${hosts.length} vms=${vms.length}`);
   res.json({ ok: true, agent: b.agent, hosts: hosts.length, vms: vms.length });
 });
