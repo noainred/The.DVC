@@ -17,7 +17,9 @@
 
 import { VimSoapClient } from '../vcenter/soapClient.js';
 
-const NVSMI_QUERY = '--query-gpu=utilization.gpu,utilization.memory,memory.used,memory.total --format=csv,noheader,nounits';
+// mig.mode.current(Enabled/Disabled/N/A)를 마지막 컬럼으로 추가 수집 → MIG(분할 GPU) 가시화.
+// 문자열 컬럼이므로 파서에서 원본 문자열로 별도 처리(숫자 변환 금지).
+const NVSMI_QUERY = '--query-gpu=utilization.gpu,utilization.memory,memory.used,memory.total,mig.mode.current --format=csv,noheader,nounits';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // XML 이스케이프(5개 사전정의 엔티티). 비밀번호는 <password> 요소 내용으로만 들어가고
@@ -65,7 +67,7 @@ export async function testVmGuest(c, vmMoref, creds, { isWindows = false, timeou
   // 2) 데이터 읽기 — nvidia-smi 실행 후 파싱. 실패 시 구체 사유(stderr/다운로드)를 그대로 표시.
   try {
     const r = await collectVmGpu(c, vmMoref, creds, { isWindows, timeoutMs, dlHosts });
-    if (r && r.utilPct != null) { out.read = true; out.sample = { gpus: r.count, utilPct: r.utilPct, memUsedPct: r.memUsedPct }; }
+    if (r && r.utilPct != null) { out.read = true; out.sample = { gpus: r.count, utilPct: r.utilPct, memUsedPct: r.memUsedPct, migEnabled: r.migEnabled || 0 }; }
     else out.error = 'nvidia-smi 출력 없음 — 게스트에 NVIDIA 드라이버/nvidia-smi 확인';
   } catch (e) { out.error = e.guestDiag ? e.message : cleanGuestError(e.message); }
   return out;
@@ -194,20 +196,26 @@ export async function collectVmGpu(c, vmMoref, creds, { isWindows, timeoutMs = 2
   const e = new Error(reason); e.guestDiag = true; throw e;
 }
 
-/** "12, 8, 2048, 81920" 형식(여러 줄=여러 GPU)을 파싱해 집계. */
+/** "12, 8, 2048, 81920, Enabled" 형식(여러 줄=여러 GPU)을 파싱해 집계. 마지막 컬럼은 MIG 모드(문자열). */
 export function parseNvidiaSmiCsv(text) {
   if (!text || !text.trim()) return null;
   const gpus = [];
   for (const line of text.trim().split(/\r?\n/)) {
-    const cols = line.split(',').map((x) => Number(String(x).trim()));
-    if (cols.length < 1 || !Number.isFinite(cols[0])) continue;
-    gpus.push({ utilPct: cols[0], memUtilPct: Number.isFinite(cols[1]) ? cols[1] : null, memUsedMB: cols[2] ?? null, memTotalMB: cols[3] ?? null });
+    const raw = line.split(',').map((x) => String(x).trim());
+    const n0 = Number(raw[0]);
+    if (raw.length < 1 || !Number.isFinite(n0)) continue;
+    const num = (i) => { const v = Number(raw[i]); return Number.isFinite(v) ? v : null; };
+    // MIG 모드: 'Enabled'/'Disabled'/'N/A'(미지원 GPU). 숫자가 아닌 마지막 컬럼.
+    const migRaw = raw.length >= 5 ? raw[4] : '';
+    const mig = /enabled/i.test(migRaw) ? 'enabled' : /disabled/i.test(migRaw) ? 'disabled' : null;
+    gpus.push({ utilPct: n0, memUtilPct: num(1), memUsedMB: num(2), memTotalMB: num(3), mig });
   }
   if (!gpus.length) return null;
   const avg = (arr) => Math.round(arr.reduce((a, b) => a + b, 0) / arr.length);
   const memUsed = gpus.reduce((a, g) => a + (g.memUsedMB || 0), 0);
   const memTotal = gpus.reduce((a, g) => a + (g.memTotalMB || 0), 0);
-  return { count: gpus.length, utilPct: avg(gpus.map((g) => g.utilPct)), memUsedPct: memTotal ? Math.round((memUsed / memTotal) * 100) : null, gpus };
+  const migCount = gpus.filter((g) => g.mig === 'enabled').length;
+  return { count: gpus.length, utilPct: avg(gpus.map((g) => g.utilPct)), memUsedPct: memTotal ? Math.round((memUsed / memTotal) * 100) : null, migEnabled: migCount, gpus };
 }
 
 export { VimSoapClient };

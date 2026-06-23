@@ -19,6 +19,7 @@ const Summary = lazy(() => import('./views/Summary.jsx'));
 const Upgrade = lazy(() => import('./views/Upgrade.jsx'));
 const Settings = lazy(() => import('./views/Settings.jsx'));
 const SpecialTools = lazy(() => import('./views/SpecialTools.jsx'));
+const Insights = lazy(() => import('./views/Insights.jsx'));
 const VmProvision = lazy(() => import('./views/VmProvision.jsx'));
 const ReleaseNotes = lazy(() => import('./views/ReleaseNotes.jsx'));
 
@@ -34,6 +35,7 @@ const TABS = [
   { id: 'nsx', label: 'NSX' },
   { id: 'alarms', label: '알람' },
   { id: 'tools', label: '특수 기능' },
+  { id: 'insights', label: '인사이트' },
   { id: 'provision', label: 'VM 생성', adminOnly: true },
   { id: 'settings', label: '설정', adminOnly: true },
   { id: 'upgrade', label: '업그레이드', adminOnly: true, feature: 'upgradeTab' },
@@ -190,7 +192,7 @@ function Portal({ user, onLogout }) {
   }, [vcenterId, region]);
 
 
-  const noFilterTabs = ['overview', 'vcenters', 'summary', 'upgrade', 'tools', 'settings', 'nsx', 'provision'];
+  const noFilterTabs = ['overview', 'vcenters', 'summary', 'upgrade', 'tools', 'insights', 'settings', 'nsx', 'provision'];
   const showFilters = !noFilterTabs.includes(tab);
   const showTextSearch = tab !== 'explore';
 
@@ -298,6 +300,7 @@ function Portal({ user, onLogout }) {
           {tab === 'nsx' && <Nsx />}
           {tab === 'alarms' && <Alarms filters={filters} />}
           {tab === 'tools' && <SpecialTools />}
+          {tab === 'insights' && <Insights onGotoTab={setTab} />}
           {tab === 'provision' && user.role === 'admin' && <VmProvision />}
           {tab === 'settings' && user.role === 'admin' && <Settings />}
           {tab === 'upgrade' && user.role === 'admin' && health?.features?.upgradeTab && <Upgrade />}

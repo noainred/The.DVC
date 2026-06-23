@@ -1,0 +1,15 @@
+{
+  "name": "VMware Global Monitoring Portal",
+  "short_name": "VM Portal",
+  "description": "전세계 분산 vCenter 인프라 통합 모니터링 포탈",
+  "lang": "ko",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
