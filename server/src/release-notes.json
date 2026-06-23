@@ -1,6 +1,17 @@
 {
   "notes": [
     {
+      "version": "2.0.0",
+      "date": "2026-06-23",
+      "title": "심층 검색 — 다조건 VM 검색 + 게스트 탐침(GPU드라이버·프로세스) + 게이트웨이 수집",
+      "notes": [
+        "특수 기능 > 심층 검색: 게이트웨이·IP·서브넷(CIDR)·OS·전원·Tools·GPU모드·클러스터·호스트·vCPU/RAM/디스크·CPU사용률·스냅샷·메모 등 다조건 검색. 범위는 전체/특정/복수 vCenter.",
+        "게이트웨이 수집 신규: guest.ipStack의 기본 경로에서 VM 게이트웨이 수집(vm.gateways) → 특정 게이트웨이 사용 VM 검색 가능.",
+        "게스트 탐침(관리자): 1차 필터된 VM에 게스트 명령을 실행해 GPU 드라이버 설치 VM, 특정 프로세스 실행 VM을 식별(Linux/Windows). 게스트 계정 입력 또는 GPU 게스트 설정 폴백, 동시성 제한·대수 상한.",
+        "신규 API: POST /api/tools/deep-search(스냅샷), POST /api/admin/deep-search/probe(게스트)."
+      ]
+    },
+    {
       "version": "1.99.0",
       "date": "2026-06-23",
       "title": "게스트 계정 추가 — VMware Tools로 게스트 OS에 sudo 계정 생성",

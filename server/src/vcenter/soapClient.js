@@ -398,6 +398,25 @@ function vmIps(netXml, primary) {
   return { ipAddress: ips[0] || (isIPv4(primary) ? String(primary) : null), ipAddresses: ips };
 }
 
+// guest.ipStack(GuestStackInfo[])에서 기본 게이트웨이(default route: network 0.0.0.0/prefix 0)를 추출.
+function vmGateways(ipStackXml) {
+  if (!ipStackXml) return [];
+  const out = new Set();
+  // 각 <ipRoute> 블록에서 network=0.0.0.0 & prefixLength=0 이면 <gateway><ipAddress>를 채택.
+  const routeRe = /<ipRoute>([\s\S]*?)<\/ipRoute>/g;
+  let m;
+  while ((m = routeRe.exec(ipStackXml))) {
+    const blk = m[1];
+    const net = /<network>([^<]*)<\/network>/.exec(blk)?.[1] || '';
+    const prefix = /<prefixLength>(\d+)<\/prefixLength>/.exec(blk)?.[1] || '';
+    if ((net === '0.0.0.0' || net === '::') && (prefix === '0' || prefix === '')) {
+      const gw = /<gateway>[\s\S]*?<ipAddress>([^<]+)<\/ipAddress>/.exec(blk)?.[1];
+      if (gw && isIPv4(gw)) out.add(gw);
+    }
+  }
+  return [...out];
+}
+
 // Parse host config.graphicsInfo (<HostGraphicsInfo> elements) into GPU list.
 function parseGpus(xml) {
   if (!xml) return [];
@@ -792,7 +811,7 @@ export async function collectFromVCenterSoap(vc) {
       { type: 'VirtualMachine', paths: [
         'name', 'runtime.host', 'parent', 'resourcePool', 'runtime.powerState', 'summary.config.numCpu', 'summary.config.memorySizeMB',
         'summary.config.guestFullName', 'summary.config.template', 'summary.quickStats.overallCpuUsage', 'summary.quickStats.guestMemoryUsage',
-        'summary.storage.committed', 'summary.storage.uncommitted', 'guest.ipAddress', 'guest.net', 'guest.toolsRunningStatus',
+        'summary.storage.committed', 'summary.storage.uncommitted', 'guest.ipAddress', 'guest.net', 'guest.ipStack', 'guest.toolsRunningStatus',
         'guest.toolsVersion', 'guest.toolsVersionStatus2', 'config.annotation', 'snapshot', 'layoutEx.file'] },
       { type: 'Datastore', paths: ['name', 'summary.type', 'summary.capacity', 'summary.freeSpace', 'summary.accessible', 'info'] },
       { type: 'Network', paths: ['name'] },
@@ -952,6 +971,7 @@ export async function collectFromVCenterSoap(vc) {
         cpuUsagePct: powered ? pct(cpuUsageMhz, vmCpuCapacity) : 0,
         memUsagePct: powered ? pct(guestMemMB, memMB) : 0,
         ...vmIps(p['guest.net'], p['guest.ipAddress']),
+        gateways: vmGateways(p['guest.ipStack']),
         toolsStatus: p['guest.toolsRunningStatus'] === 'guestToolsRunning' ? 'RUNNING'
           : powered ? 'NOT_RUNNING' : 'NOT_RUNNING',
         toolsVersion: p['guest.toolsVersion'] || '',

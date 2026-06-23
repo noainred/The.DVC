@@ -49,6 +49,7 @@ import { getAllAgentConfigs } from '../central/agentConfig.js';
 import { recordCapture, listCaptures, getCapture, deleteCapture } from '../net/captureHistory.js';
 import { listMonitors, saveMonitor, removeMonitor, runMonitorNow } from '../net/monitor.js';
 import { addUsersToVms } from '../guest/accountService.js';
+import { snapshotFilter, slimVm, guestProbe } from '../search/deepSearch.js';
 import path from 'node:path';
 import {
   listRegistry as listNsx, addManager as addNsx, updateManager as updateNsx,
@@ -889,6 +890,18 @@ adminRouter.post('/guest/add-user', adminOnly, async (req, res) => {
   const b = req.body || {};
   try { res.json(await addUsersToVms(b)); }
   catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
+});
+
+// 심층 검색(게스트 탐침) — GPU 드라이버/프로세스 등 게스트 OS 조건. 관리자 전용(게스트 명령 실행).
+// Body: { vcenterIds[], filters{}, probe:{type,pattern}, guestUser, guestPass, maxVms }
+adminRouter.post('/deep-search/probe', adminOnly, async (req, res) => {
+  const b = req.body || {};
+  if (!b.probe?.type) return res.status(400).json({ ok: false, reason: 'probe.type이 필요합니다.' });
+  try {
+    const candidates = snapshotFilter(store.get(), { vcenterIds: b.vcenterIds || [], f: b.filters || {} }).map(slimVm);
+    const r = await guestProbe(candidates, b.probe, { guestUser: b.guestUser || '', guestPass: b.guestPass || '', maxVms: Math.min(500, Number(b.maxVms) || 100) });
+    res.json({ candidates: candidates.length, ...r });
+  } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 
 function existsFile(p) {
