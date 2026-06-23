@@ -11,6 +11,7 @@ import { setInventory } from '../central/inventory.js';
 import { setGuestGpu } from '../gpu/store.js';
 import { setGpuGuestDiag } from '../central/gpuGuestDiag.js';
 import { takePingJobs, setPingResults } from '../central/pingJobs.js';
+import { setAgentConfig } from '../central/agentConfig.js';
 import { loadScanSettings, mergeScanResults, recordAgentReport } from '../ipam/scanStore.js';
 
 export const centralRouter = Router();
@@ -102,6 +103,23 @@ centralRouter.post('/ping-result', (req, res) => {
   setPingResults(String(b.vcenterId), Array.isArray(b.results) ? b.results.slice(0, 200) : []);
   res.json({ ok: true, count: Array.isArray(b.results) ? b.results.length : 0 });
 });
+
+// 엣지 설정 push: 에이전트가 자기 CONFIG_DIR 설정을 보내 중앙 통합 백업에 합쳐지게 한다.
+// Body: { agent, files:{ name: content } }
+centralRouter.post('/agent-config', (req, res) => {
+  if (!config.central.token) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: '토큰 불일치' });
+  const b = req.body || {};
+  if (!b.agent || !b.files || typeof b.files !== 'object') return res.status(400).json({ ok: false, reason: 'agent·files가 필요합니다.' });
+  // 파일 수/크기 상한(남용 방지).
+  const files = {};
+  let n = 0;
+  for (const [k, v] of Object.entries(b.files)) { if (n++ >= 200) break; if (typeof v === 'string' && v.length <= 8_000_000) files[require_basename(k)] = v; }
+  setAgentConfig(String(b.agent).slice(0, 120), files);
+  console.log(`[central] agent-config 수신: agent=${b.agent} (${Object.keys(files).length}개)`);
+  res.json({ ok: true, agent: b.agent, files: Object.keys(files).length });
+});
+function require_basename(p) { return String(p).split(/[\\/]/).pop().slice(0, 200); }
 
 // Agent pulls its IP-scan assignment (TCP connect scan config) by name.
 centralRouter.get('/ip-scan-assignment', (req, res) => {

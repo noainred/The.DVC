@@ -36,6 +36,10 @@ import { startScan, scanStatus, rescheduleScanPoller } from '../ipam/scanPoller.
 import { listAssignments as listIdracAssignments, getResults as getAgentResults } from '../central/assignments.js';
 import { centralTokenInfo, generateCentralToken, setCentralToken } from '../central/token.js';
 import { listInventory } from '../central/inventory.js';
+import { listAgentConfigs } from '../central/agentConfig.js';
+import { createBackup, listBackups, backupPath, deleteBackup, readBackup, restoreCentral } from '../backup/service.js';
+import { loadBackupSettings, saveBackupSettings, backupStatus } from '../backup/settings.js';
+import path from 'node:path';
 import {
   listRegistry as listNsx, addManager as addNsx, updateManager as updateNsx,
   removeManager as removeNsx, testConnection as testNsx,
@@ -751,6 +755,40 @@ adminRouter.post('/assignments/import', adminOnly, (req, res) => {
   else list = Array.isArray(b) ? b : b.assignments;
   const result = importAssignments(list, b.mode === 'replace' ? 'replace' : 'merge');
   res.status(result.ok ? 200 : 400).json(result);
+});
+
+// ───────────────────────── 포탈 백업 ─────────────────────────
+// 중앙 + 엣지(에이전트 push) 설정 통합 백업. 정기/변경자동/수동 + 다운로드 + 복원.
+adminRouter.get('/backup/status', adminOnly, (_req, res) => {
+  res.json({ ...backupStatus(), backups: listBackups(), edges: listAgentConfigs() });
+});
+adminRouter.put('/backup/settings', adminOnly, (req, res) => res.json(saveBackupSettings(req.body || {})));
+adminRouter.post('/backup/now', adminOnly, (_req, res) => {
+  try { res.json({ ok: true, ...createBackup('manual', { retention: loadBackupSettings().retention }) }); }
+  catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+});
+adminRouter.get('/backup/download/:name', adminOnly, (req, res) => {
+  const p = backupPath(req.params.name);
+  if (!p) return res.status(404).json({ ok: false, reason: '백업을 찾을 수 없습니다.' });
+  res.download(p, path.basename(p));
+});
+adminRouter.get('/backup/view/:name', adminOnly, (req, res) => {
+  const a = readBackup(req.params.name);
+  if (!a) return res.status(404).json({ ok: false, reason: '백업을 찾을 수 없습니다.' });
+  res.json({ // 자격증명 내용은 빼고 요약만.
+    createdAt: a.createdAt, reason: a.reason, centralVersion: a.central?.version,
+    centralFiles: Object.keys(a.central?.files || {}),
+    edges: Object.entries(a.edges || {}).map(([agent, e]) => ({ agent, at: e.at, files: Object.keys(e.files || {}) })),
+  });
+});
+adminRouter.delete('/backup/:name', adminOnly, (req, res) => res.json({ ok: deleteBackup(req.params.name) }));
+adminRouter.post('/backup/restore/:name', adminOnly, (req, res) => {
+  try {
+    const a = readBackup(req.params.name);
+    if (!a) return res.status(404).json({ ok: false, reason: '백업을 찾을 수 없습니다.' });
+    const r = restoreCentral(a);
+    res.json({ ok: true, ...r, note: '중앙 설정 복원 완료 — 적용하려면 포탈 재시작. 복원 전 현재 설정은 자동 백업(pre-restore)됨.' });
+  } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 
 function existsFile(p) {

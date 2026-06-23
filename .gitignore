@@ -43,3 +43,8 @@ server/config/audit.ndjson
 server/config/alerts.json
 server/config/host-temp.db
 server/config/host-temp.ndjson
+
+# 포탈 백업(런타임)
+server/config/backups/
+server/config/backup.json
+server/config/central-agent-config.json
