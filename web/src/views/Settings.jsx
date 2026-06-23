@@ -15,6 +15,7 @@ import Alerts2 from './Alerts2.jsx';
 import Audit from './Audit.jsx';
 import MetricsSettings from './MetricsSettings.jsx';
 import GpuGuestSettings from './GpuGuestSettings.jsx';
+import GpuSettings from './GpuSettings.jsx';
 import About from './About.jsx';
 
 // 모든 하위 화면 정의(키→라벨→컴포넌트). 그룹에 속한 항목은 group 키로 묶는다.
@@ -24,6 +25,7 @@ const SUB = [
   // --- 수집 서버 그룹 ---
   { k: 'idrac-admin', label: '전력 수집', C: IdracAdmin, group: 'collect' },
   { k: 'metrics', label: '지표 수집', C: MetricsSettings, group: 'collect' },
+  { k: 'gpu-collect', label: 'GPU 수집', C: GpuSettings, group: 'collect' },
   { k: 'gpu-guest', label: 'GPU 게스트 수집', C: GpuGuestSettings, group: 'collect' },
   { k: 'collectors', label: '수집 서버(원격)', C: Collectors, group: 'collect' },
   { k: 'agent-scans', label: '에이전트 작업', C: AgentScans, group: 'collect' },
