@@ -1,6 +1,16 @@
 {
   "notes": [
     {
+      "version": "1.93.0",
+      "date": "2026-06-23",
+      "title": "특수 기능 3종 — 다빈치 서비스 점검 · 글로벌 네트워크 점검 · VMware 구성 백업",
+      "notes": [
+        "🩺 다빈치 서비스 점검: 포탈 내부 서비스/수집기(중앙 API·vCenter·NSX·전력·지표·GPU 게스트·IP스캔·알림·업그레이드·백업·엣지 에이전트·원격 수집기·LLM) 상태를 녹/주의/실패/비활성으로 한눈에. GET /api/tools/service-check.",
+        "📡 글로벌 네트워크 점검: 전세계 vCenter·NSX 제어플레인의 중앙 도달성·RTT(TCP 443) 측정 + 네트워크 객체(포트그룹/분산스위치/NSX 세그먼트) 요약. 사설망 vCenter는 '에이전트 경유'로 구분 표기. GET /api/tools/network-check.",
+        "🗃️ VMware 구성 백업: 사이트(또는 전체)의 수집 VMware 구성(vCenter·ESXi 호스트·VM·데이터스토어·네트워크·NSX·알람)을 구조화해 gzip(.json.gz)으로 내보내기 — 문서화/DR 참고/감사용 구성 스냅샷. GET /api/tools/vmware-config(?vcenterId=&download=1)."
+      ]
+    },
+    {
       "version": "1.92.0",
       "date": "2026-06-23",
       "title": "3D 구성도 VM 단위 포커스 + 글로벌 현황 GPU 카드/GPU VM KPI",

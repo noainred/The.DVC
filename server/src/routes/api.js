@@ -17,6 +17,10 @@ import { getMetricsDb } from '../metrics/db.js';
 import { getGuestGpuHost, getGuestGpuVms } from '../gpu/store.js';
 import { enqueuePing, getPingResults, setPingResults } from '../central/pingJobs.js';
 import { pingMany } from '../util/ping.js';
+import { getServiceCheck } from '../health/services.js';
+import { getNetworkCheck } from '../health/network.js';
+import { buildVmwareConfigExport } from '../backup/vmwareExport.js';
+import zlib from 'node:zlib';
 import { nsxStore } from '../nsx/store.js';
 import { loadRegistry as loadNsxRegistry } from '../nsx/registry.js';
 import { fetchGroupMembers } from '../nsx/client.js';
@@ -713,6 +717,32 @@ api.get('/tools/gpu/vms', (req, res) => {
       };
     }).sort((a, b) => (a.vcenterId === b.vcenterId ? a.name.localeCompare(b.name) : a.vcenterId.localeCompare(b.vcenterId))).slice(0, 5000),
   });
+});
+
+// 다빈치 서비스 점검 — 포탈 내부 서비스/수집기 상태 통합.
+api.get('/tools/service-check', (_req, res) => {
+  try { res.json(getServiceCheck()); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+});
+
+// 글로벌 네트워크 점검 — 제어플레인(vCenter/NSX) 도달성·RTT + 네트워크 객체 요약.
+api.get('/tools/network-check', async (_req, res) => {
+  try { res.json(await getNetworkCheck()); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+});
+
+// 사이트 VMware 솔루션 구성 백업 — 수집 구성 스냅샷. ?vcenterId=로 사이트 한정, ?download=1로 gzip 파일.
+api.get('/tools/vmware-config', (req, res) => {
+  try {
+    const data = buildVmwareConfigExport({ vcenterId: req.query.vcenterId || null });
+    if (req.query.download === '1') {
+      const gz = zlib.gzipSync(Buffer.from(JSON.stringify(data, null, 2)));
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const fn = `vmware-config-${data.meta.scope}-${stamp}.json.gz`;
+      res.setHeader('Content-Type', 'application/gzip');
+      res.setHeader('Content-Disposition', `attachment; filename="${fn}"`);
+      return res.end(gz);
+    }
+    res.json(data);
+  } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 
 // 운영 인사이트 — 기존 스냅샷만으로 계산하는 모니터링 분석 묶음:

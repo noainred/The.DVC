@@ -55,7 +55,33 @@ export function pingOne(ip, { timeoutMs = 1500 } = {}) {
   });
 }
 
-/** 여러 IP를 동시(제한) ping → [{ ip, alive, rttMs }]. */
+/** 단일 호스트:포트 TCP 연결 프로브 → { alive, rttMs }. 제어플레인(443 등) 도달성/지연 측정용. */
+export function tcpConnect(host, port = 443, timeoutMs = 2500) {
+  return new Promise((resolve) => {
+    const h = String(host || '').trim();
+    if (!h || !SAFE.test(h)) return resolve({ alive: false, rttMs: null });
+    const start = Date.now();
+    let done = false;
+    const fin = (alive) => { if (!done) { done = true; resolve({ alive, rttMs: alive ? Date.now() - start : null }); } };
+    const sock = net.connect({ host: h, port });
+    sock.setTimeout(timeoutMs);
+    sock.once('connect', () => { sock.destroy(); fin(true); });
+    sock.once('timeout', () => { sock.destroy(); fin(false); });
+    sock.once('error', () => { sock.destroy(); fin(false); });
+  });
+}
+
+/** 여러 {host,port,...meta} 동시(제한) TCP 프로브. 반환은 입력 + {alive,rttMs}. */
+export async function tcpProbeMany(targets = [], { timeoutMs = 2500, concurrency = 10 } = {}) {
+  const out = [];
+  let i = 0;
+  async function worker() {
+    while (i < targets.length) { const t = targets[i++]; const r = await tcpConnect(t.host, t.port || 443, timeoutMs); out.push({ ...t, ...r }); }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, targets.length) }, worker));
+  return out;
+}
+
 export async function pingMany(ips = [], { timeoutMs = 1500, concurrency = 8 } = {}) {
   const list = [...new Set(ips.map((s) => String(s).trim()).filter(Boolean))];
   const out = [];
