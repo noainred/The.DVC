@@ -1950,17 +1950,25 @@ function Gpu({ scope }) {
         <Card label="패스쓰루" value={data.byMode?.passthrough ?? 0} accent="var(--amber)" meta="DirectPath I/O" />
         {(data.byMode?.vsga ?? 0) > 0 && <Card label="vSGA" value={data.byMode.vsga} meta="공유(소프트)" />}
       </div>
-      {/* GPU 모델(종류)별 총 장수 합계 — 어떤 종류 GPU가 총 몇 장인지 한눈에 */}
+      {/* GPU 모델(종류)별 총 장수 합계 — 클릭하면 그 GPU가 설치된 호스트만 표시 */}
       {(data.byModel || []).length > 0 && (
         <div style={{ marginBottom: 14 }}>
-          <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>GPU 모델별 합계 (총 {data.totalGpus}장 · {data.byModel.length}종)</div>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>GPU 모델별 합계 (총 {data.totalGpus}장 · {data.byModel.length}종) <span style={{ opacity: 0.8 }}>— 박스를 클릭하면 해당 GPU 설치 호스트만 봅니다</span></div>
           <div className="flex gap wrap">
-            {data.byModel.map((m) => (
-              <div key={m.model} className="card" style={{ padding: '8px 14px', minWidth: 120, flex: 'none' }}>
-                <div className="muted" style={{ fontSize: 11, marginBottom: 2 }}>{m.model}</div>
-                <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--accent)' }}>{m.count}<small style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-dim)' }}> 장</small></div>
-              </div>
-            ))}
+            {data.byModel.map((m) => {
+              const active = view === 'host' && modelFilter === m.model;
+              const pick = () => { if (active) { setModelFilter(''); } else { setView('host'); setModelFilter(m.model); } };
+              return (
+                <div key={m.model} role="button" tabIndex={0} onClick={pick}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } }}
+                  className="card" title={active ? '필터 해제' : `${m.model} 설치 호스트만 보기`}
+                  style={{ padding: '8px 14px', minWidth: 120, flex: 'none', cursor: 'pointer',
+                    outline: active ? '2px solid var(--accent)' : 'none', outlineOffset: -1 }}>
+                  <div className="muted" style={{ fontSize: 11, marginBottom: 2 }}>{m.model}{active && ' ✕'}</div>
+                  <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--accent)' }}>{m.count}<small style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-dim)' }}> 장</small></div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

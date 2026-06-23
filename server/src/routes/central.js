@@ -10,6 +10,7 @@ import { getAssignment, setResult } from '../central/assignments.js';
 import { setInventory } from '../central/inventory.js';
 import { setGuestGpu } from '../gpu/store.js';
 import { setGpuGuestDiag } from '../central/gpuGuestDiag.js';
+import { takePingJobs, setPingResults } from '../central/pingJobs.js';
 import { loadScanSettings, mergeScanResults, recordAgentReport } from '../ipam/scanStore.js';
 
 export const centralRouter = Router();
@@ -81,6 +82,25 @@ centralRouter.post('/gpu-guest-data', (req, res) => {
   if (b.diag) setGpuGuestDiag(b.agent, b.diag, { hosts: hosts.length, vms: vms.length }); // 수집 진단 보관
   console.log(`[central] gpu-guest-data 수신: agent=${b.agent} hosts=${hosts.length} vms=${vms.length}`);
   res.json({ ok: true, agent: b.agent, hosts: hosts.length, vms: vms.length });
+});
+
+// 위임 Ping: 현장 에이전트가 자기 담당 vCenter들의 대기 IP를 인출 → ping → 결과 보고.
+// 중앙이 VM 사설 IP에 직접 못 가는 환경에서, 그 망에 닿는 에이전트가 ping을 대행.
+centralRouter.get('/ping-jobs', (req, res) => {
+  if (!config.central.token) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: '토큰 불일치' });
+  const vcs = String(req.query.vcenters || '').split(',').map((s) => s.trim()).filter(Boolean);
+  res.json({ ok: true, jobs: takePingJobs(vcs) });
+});
+
+// Body: { vcenterId, results:[{ ip, alive, rttMs }] }
+centralRouter.post('/ping-result', (req, res) => {
+  if (!config.central.token) return res.status(404).json({ ok: false });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: '토큰 불일치' });
+  const b = req.body || {};
+  if (!b.vcenterId) return res.status(400).json({ ok: false, reason: 'vcenterId가 필요합니다.' });
+  setPingResults(String(b.vcenterId), Array.isArray(b.results) ? b.results.slice(0, 200) : []);
+  res.json({ ok: true, count: Array.isArray(b.results) ? b.results.length : 0 });
 });
 
 // Agent pulls its IP-scan assignment (TCP connect scan config) by name.

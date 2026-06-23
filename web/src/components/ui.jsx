@@ -4,7 +4,7 @@ import { VmMetricButton, HostMetricButton } from './VmMetrics.jsx';
 import { VmConsoleButton } from './VmConsole.jsx';
 import { VmRemoteButton } from './VmRemote.jsx';
 import EscClose from './EscClose.jsx';
-import { fetchJson } from '../api.js';
+import { fetchJson, postJson } from '../api.js';
 
 export function usageColor(pct) {
   if (pct >= 90) return 'var(--red)';
@@ -177,6 +177,47 @@ function dsStorageLabel(item) {
 }
 
 /** Detail popup for a host / VM / datastore. */
+/**
+ * VM IP별 도달성(녹/적) — 중앙은 사설 IP에 직접 못 가므로 해당 vCenter 담당 에이전트가
+ * ping을 대행한다. 마운트 시 ping 요청을 큐잉하고 결과를 주기적으로 폴링한다.
+ */
+function VmIpPing({ vcenterId, ips }) {
+  const [res, setRes] = useState({}); // ip -> { state, rttMs }
+  const [run, setRun] = useState(0);
+  useEffect(() => {
+    if (!vcenterId || !ips.length) return;
+    let alive = true;
+    const qs = `vcenterId=${encodeURIComponent(vcenterId)}&ips=${encodeURIComponent(ips.join(','))}`;
+    postJson('/tools/ip-ping', { vcenterId, ips }).catch(() => {});
+    const poll = () => fetchJson(`/tools/ip-ping?${qs}`).then((d) => { if (alive) setRes(d.results || {}); }).catch(() => {});
+    poll();
+    const t = setInterval(poll, 3000);
+    const stop = setTimeout(() => clearInterval(t), 33000); // ~30초 후 폴링 종료
+    return () => { alive = false; clearInterval(t); clearTimeout(stop); };
+  }, [vcenterId, ips.join(','), run]);
+  const dot = (state) => {
+    const c = state === 'up' ? 'var(--green,#22c55e)' : state === 'down' ? 'var(--red,#ef4444)' : '#9ca3af';
+    return <span title={state} style={{ display: 'inline-block', width: 9, height: 9, borderRadius: '50%', background: c,
+      boxShadow: state === 'up' ? '0 0 6px var(--green,#22c55e)' : 'none', marginRight: 6,
+      animation: state === 'pending' || state === 'unknown' ? 'pulse 1.2s infinite' : 'none' }} />;
+  };
+  return (
+    <>
+      {ips.map((ip, i) => {
+        const r = res[ip] || { state: 'pending' };
+        return (
+          <div key={i} style={{ display: 'flex', alignItems: 'center' }}>
+            {dot(r.state)}<span>{ip}</span>
+            {r.state === 'up' && r.rttMs != null && <span className="muted" style={{ fontSize: 11, marginLeft: 6 }}>{r.rttMs}ms</span>}
+            {r.state === 'down' && <span className="muted" style={{ fontSize: 11, marginLeft: 6 }}>무응답</span>}
+          </div>
+        );
+      })}
+      <button className="tab" style={{ marginTop: 4, padding: '2px 8px', fontSize: 11 }} onClick={() => setRun((n) => n + 1)}>↻ ping 재시도</button>
+    </>
+  );
+}
+
 export function EntityDetail({ type, item, onClose }) {
   const titles = { vm: 'VM', host: '호스트', datastore: '데이터스토어' };
   return (
@@ -191,8 +232,11 @@ export function EntityDetail({ type, item, onClose }) {
             <DRow label="클러스터">{item.cluster || '—'}</DRow>
             <DRow label="Guest OS">{item.guestOS}</DRow>
             <DRow label={`IP${item.ipAddresses?.length > 1 ? ` (${item.ipAddresses.length})` : ''}`}>
-              {(item.ipAddresses?.length ? item.ipAddresses : (item.ipAddress ? [item.ipAddress] : [])).map((ip, i) => <div key={i}>{ip}</div>)}
-              {!(item.ipAddresses?.length || item.ipAddress) && '—'}
+              {(() => {
+                const ips = item.ipAddresses?.length ? item.ipAddresses : (item.ipAddress ? [item.ipAddress] : []);
+                if (!ips.length) return '—';
+                return <VmIpPing vcenterId={item.vcenterId} ips={ips} />;
+              })()}
             </DRow>
             <DRow label="VMware Tools"><StateBadge state={item.toolsStatus} /></DRow>
             <DRow label="vCPU">{item.cpuCount} 코어</DRow>
