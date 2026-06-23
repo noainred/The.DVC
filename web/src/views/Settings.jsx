@@ -17,6 +17,7 @@ import MetricsSettings from './MetricsSettings.jsx';
 import GpuGuestSettings from './GpuGuestSettings.jsx';
 import GpuGuestDiag from './GpuGuestDiag.jsx';
 import GpuSettings from './GpuSettings.jsx';
+import PortalBackup from './PortalBackup.jsx';
 import About from './About.jsx';
 
 // 모든 하위 화면 정의(키→라벨→컴포넌트). 그룹에 속한 항목은 group 키로 묶는다.
@@ -39,6 +40,7 @@ const SUB = [
   { k: 'auth-ad', label: '인증(AD)', C: AdSettings },
   { k: 'ai-search', label: 'AI 검색', C: LlmSettings },
   { k: 'alerts', label: '알림', C: Alerts2 },
+  { k: 'backup', label: '포탈 백업', C: PortalBackup },
   { k: 'diagnostics', label: '진단·로그', C: Diagnostics },
   { k: 'audit', label: '감사 로그', C: Audit },
   { k: 'about', label: 'About', C: About },

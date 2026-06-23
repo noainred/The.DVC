@@ -45,6 +45,8 @@ import { startAgentScanner } from './agent/scanner.js';
 import { startInventoryPush } from './agent/inventoryPush.js';
 import { startGpuGuestPush } from './agent/gpuGuestPush.js';
 import { startPingWorker } from './agent/pingWorker.js';
+import { startConfigPush } from './agent/configPush.js';
+import { startBackupScheduler } from './backup/settings.js';
 
 const app = express();
 app.use(cors());
@@ -52,6 +54,7 @@ app.use(cors());
 // 그 외 모든 라우트는 기본 1mb로 제한해 메모리/요청 남용 면적을 줄인다.
 const BIG_JSON = express.json({ limit: process.env.JSON_BODY_LIMIT || '64mb' });
 app.use('/api/central/inventory', BIG_JSON);
+app.use('/api/central/agent-config', BIG_JSON); // 엣지 설정 통합 push(다수 파일)
 app.use(express.json({ limit: '1mb' }));
 
 // Lightweight request logging for the log viewer (skip the log endpoint itself).
@@ -104,7 +107,7 @@ upgradeManager.start();
 const stagger = [
   startIdracPoller, startNsxPoller, startAlertEngine, startMetricsSampler, startGpuGuestPoller,
   startIpScanPoller, startIpScanAgent, startCollectorPuller, startAgentScanner, startInventoryPush,
-  startGpuGuestPush, startPingWorker,
+  startGpuGuestPush, startPingWorker, startConfigPush, startBackupScheduler,
 ];
 stagger.forEach((start, i) => setTimeout(() => { try { start(); } catch (e) { console.error('[start] 폴러 기동 실패:', e?.message); } }, i * 1500).unref?.());
 
