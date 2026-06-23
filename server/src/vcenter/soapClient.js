@@ -688,6 +688,7 @@ export async function collectFromVCenterSoap(vc) {
         'config.pciPassthruInfo', 'hardware.pciDevice',
         'summary.hardware.vendor', 'summary.hardware.model', 'config.storageDevice.hostBusAdapter',
         'runtime.healthSystemRuntime.systemHealthInfo.numericSensorInfo',
+        'summary.managementServerIp', 'config.network.vnic',
         'summary.quickStats.overallCpuUsage', 'summary.quickStats.overallMemoryUsage'] },
       { type: 'ResourcePool', paths: ['name'] },
       { type: 'VirtualMachine', paths: [
@@ -750,6 +751,9 @@ export async function collectFromVCenterSoap(vc) {
         cpuThreads: num(p['summary.hardware.numCpuThreads']) || cores,
         version: p['summary.config.product.version'] || '',
         build: p['summary.config.product.build'] || '',
+        // 게스트 파일 회수용: vCenter 실제 IP(호스트가 보고) + ESXi 관리 IP(vmk).
+        mgmtServerIp: p['summary.managementServerIp'] || '',
+        mgmtIp: (/<ipAddress>([^<]+)<\/ipAddress>/.exec(p['config.network.vnic'] || '')?.[1]) || '',
         gpus: (() => {
           const gfx = parseGpus(p['config.graphicsInfo']);
           // vGPU/vSGA로 이미 잡힌 물리 GPU(pciId)는 패스쓰루에서 제외해 이중 집계 방지.
