@@ -40,9 +40,11 @@ export function installerInfo(explicit) {
 }
 
 // 주입할 env 키/값 쌍(빈 값은 제외). 재배포 시 이 키들을 portal.env에서 교체(upsert)한다.
-function envPairs({ agentName, centralUrl, centralToken, collectorToken, collectorDatacenter, scanIntervalMs, autoUpgrade, upgradeIntervalMs, pushInventory, inventoryIntervalMs }, port) {
+function envPairs({ agentName, centralUrl, centralToken, collectorToken, collectorDatacenter, scanIntervalMs, autoUpgrade, upgradeIntervalMs, pushInventory, inventoryIntervalMs, gpuGuest }, port) {
   const p = [];
   if (port) p.push(['PORT', String(port)]); // 기존 portal.env의 PORT(예: 잘못된 22)도 교체
+  // GPU 게스트 수집(또는 사이트 위임)을 하려면 실데이터 수집 모드여야 한다(mock 금지).
+  if ((gpuGuest && gpuGuest.enabled) || pushInventory) p.push(['DATA_SOURCE', 'live']);
   if (agentName) p.push(['AGENT_NAME', agentName]);
   if (centralUrl) p.push(['CENTRAL_URL', centralUrl]);
   if (centralToken) p.push(['CENTRAL_TOKEN', centralToken]);
@@ -65,6 +67,42 @@ function envPairs({ agentName, centralUrl, centralToken, collectorToken, collect
 }
 
 const creds = (t) => ({ host: t.host, port: t.port || 22, username: t.username, password: t.password, privateKey: t.privateKey || undefined });
+
+/**
+ * 배포 대상(agent)에 GPU 게스트 수집 설정을 직접 주입한다 — agent 포탈에 따로 로그인해
+ * 구성할 필요 없이, vcenters.json(수집할 vCenter)과 gpu-guest.json(게스트 계정/사용)을
+ * /etc/vmware-portal 에 써넣는다. 기존 파일이 있으면 같은 vCenter id를 병합한다.
+ *   g: { vcenterId, vcenterName, vcenterHost, vcenterUser, vcenterPass, guestUser, guestPass, pollIntervalMs }
+ */
+async function writeGpuGuestConfig({ exec, readFile, writeFile }, g) {
+  if (!g.vcenterId || !g.vcenterHost) return { ok: false, reason: 'vCenter id/host가 필요합니다.' };
+  const dir = '/etc/vmware-portal';
+  const readJson = async (f) => { try { const t = await readFile(`${dir}/${f}`); return t ? JSON.parse(t) : {}; } catch { return {}; } };
+
+  // 1) vcenters.json — agent가 수집할 vCenter(중앙과 동일한 id로). 같은 id면 갱신.
+  const vcs = await readJson('vcenters.json');
+  if (!Array.isArray(vcs.vcenters)) vcs.vcenters = [];
+  const entry = { id: g.vcenterId, name: g.vcenterName || g.vcenterId, host: g.vcenterHost, username: g.vcenterUser || '', password: g.vcenterPass || '', enabled: true };
+  const i = vcs.vcenters.findIndex((v) => v && v.id === g.vcenterId);
+  if (i >= 0) vcs.vcenters[i] = { ...vcs.vcenters[i], ...entry }; else vcs.vcenters.push(entry);
+  await writeFile(`${dir}/vcenters.json`, JSON.stringify(vcs, null, 2), 0o600);
+
+  // 2) gpu-guest.json — 게스트 수집 on + 그 법인 공용 계정.
+  const gg = await readJson('gpu-guest.json');
+  gg.enabled = true;
+  gg.pollIntervalMs = gg.pollIntervalMs || Number(g.pollIntervalMs) || 60_000;
+  gg.concurrency = gg.concurrency || 4;
+  gg.timeoutMs = gg.timeoutMs || 20_000;
+  gg.maxVmsPerVcenter = gg.maxVmsPerVcenter || 1000;
+  gg.vcenters = gg.vcenters || {};
+  const prevVms = (gg.vcenters[g.vcenterId] && gg.vcenters[g.vcenterId].vms) || {};
+  gg.vcenters[g.vcenterId] = { enabled: true, username: g.guestUser || '', password: g.guestPass || '', vms: prevVms };
+  await writeFile(`${dir}/gpu-guest.json`, JSON.stringify(gg, null, 2), 0o600);
+
+  // 서비스 계정 소유/권한(설치 시 dir은 vmportal 소유) — 새 파일도 vmportal:vmportal 0600.
+  await exec(`chown vmportal:vmportal ${dir}/vcenters.json ${dir}/gpu-guest.json 2>/dev/null; chmod 600 ${dir}/vcenters.json ${dir}/gpu-guest.json 2>/dev/null || true`);
+  return { ok: true, vcenterId: g.vcenterId, vcenterHost: g.vcenterHost, guestUser: g.guestUser || '' };
+}
 
 // 번들 Node 22는 glibc >= 2.28(EL8/EL9, Rocky/Alma/RHEL 9 등) 필요. 대상 glibc 점검.
 const MIN_GLIBC = [2, 28];
@@ -109,7 +147,7 @@ export async function deployAgent(target, { installerPath, port = 4000 } = {}) {
   const remotePkg = '/tmp/vmportal-agent-pkg.tar.gz';
   const workDir = '/tmp/vmportal-agent-deploy';
   try {
-    return await withSsh(creds(target), async ({ exec, putFile }) => {
+    return await withSsh(creds(target), async ({ exec, putFile, readFile, writeFile }) => {
       const idu = await exec('id -u');
       if (idu.stdout.trim() !== '0') return { ok: false, reason: 'install.sh 는 root 권한이 필요합니다. root 계정으로 접속하세요.' };
 
@@ -131,6 +169,14 @@ export async function deployAgent(target, { installerPath, port = 4000 } = {}) {
       if (delScript) await exec(`sed -i '${delScript}' /etc/vmware-portal/portal.env 2>/dev/null || true`);
       const block = ('\n# --- portal agent (auto-deployed) ---\n' + pairs.map(([k, v]) => `${k}=${v}`).join('\n') + '\n').replace(/'/g, "'\\''");
       await exec(`printf '%s' '${block}' >> /etc/vmware-portal/portal.env`);
+
+      // GPU 게스트 수집 자동 구성: agent의 vcenters.json + gpu-guest.json 주입(원격 포탈 로그인 불필요).
+      let gpuGuestApplied = null;
+      if (target.gpuGuest && target.gpuGuest.enabled) {
+        try { gpuGuestApplied = await writeGpuGuestConfig({ exec, readFile, writeFile }, target.gpuGuest); }
+        catch (e) { gpuGuestApplied = { ok: false, reason: e.message }; }
+      }
+
       await exec('systemctl restart vmware-portal 2>&1 || true');
       // 첫 기동(Node22 + node:sqlite)이 수 초 걸릴 수 있어 active 될 때까지 폴링(최대 ~30초).
       const activeState = await waitActive(exec, 15, 2);
@@ -149,6 +195,7 @@ export async function deployAgent(target, { installerPath, port = 4000 } = {}) {
         active: activeState,
         installer: path.basename(installer),
         glibc: glibc.version,
+        gpuGuest: gpuGuestApplied,
         log,
         reason: isActive ? undefined : '서비스가 active 상태가 아닙니다. 아래 로그를 확인하세요.',
       };

@@ -6,6 +6,7 @@ const EMPTY = {
   host: '', port: 22, username: 'root', password: '', privateKey: '',
   agentName: '', centralUrl: '', centralToken: '', collectorToken: '', collectorDatacenter: '',
   installerPath: '', portalPort: 4000, autoUpgrade: true, pushInventory: false, registerCollector: true,
+  gpuGuest: { enabled: false, vcenterId: '', vcenterName: '', vcenterHost: '', vcenterUser: '', vcenterPass: '', guestUser: 'root', guestPass: '' },
 };
 
 /** 설정 → 에이전트 배포: 새 Rocky9 호스트에 SSH로 수집 에이전트 자동 설치. */
@@ -79,7 +80,14 @@ export default function AgentDeploy() {
     setFillBusy(false);
     setResult({ kind: 'autofill', ok: true });
   };
-  useEffect(() => { loadInstaller(); loadTargets(); loadPkg(); loadToken(); loadDefaults(); }, []);
+  const [vcs, setVcs] = useState([]); // 중앙에 등록된 vCenter(드롭다운으로 id/host 자동 채움)
+  useEffect(() => { loadInstaller(); loadTargets(); loadPkg(); loadToken(); loadDefaults(); fetchJson('/admin/vcenters').then((d) => setVcs(d.vcenters || [])).catch(() => {}); }, []);
+  // GPU 게스트 수집 폼(중첩) 세터.
+  const setG = (k) => (e) => setF((s) => ({ ...s, gpuGuest: { ...s.gpuGuest, [k]: e.target.value } }));
+  const pickGpuVc = (id) => {
+    const vc = vcs.find((v) => v.id === id);
+    setF((s) => ({ ...s, gpuGuest: { ...s.gpuGuest, vcenterId: id, vcenterName: vc?.name || id, vcenterHost: s.gpuGuest.vcenterHost || (vc?.host || '').replace(/^https?:\/\//, '') } }));
+  };
 
   const downloadPkg = async () => {
     setDl((d) => ({ ...d, busy: true })); setResult(null);
@@ -249,7 +257,32 @@ export default function AgentDeploy() {
           <label className="agent-check" style={{ gridColumn: '1 / -1' }} title="켜면 배포·설치 성공 직후, 이 호스트(http://host:포탈포트)를 중앙 '설정 › 수집 서버'에 자동 등록합니다(전력수집 토큰 사용). 따로 수집 서버 화면에서 URL/토큰을 입력할 필요가 없습니다. 전력수집 토큰이 비어 있으면 무시됩니다.">
             <input type="checkbox" checked={!!f.registerCollector} onChange={(e) => setF((s) => ({ ...s, registerCollector: e.target.checked }))} />
             <span>수집 서버 자동 등록 — 설치 성공 시 중앙 '수집 서버'에 자동 등록(전력수집 토큰 필요)</span></label>
+          <label className="agent-check" style={{ gridColumn: '1 / -1' }} title="켜면 배포 시 이 agent에 GPU 게스트(패스쓰루) 수집을 자동 구성합니다 — agent의 vcenters.json(수집 vCenter)과 gpu-guest.json(게스트 계정)을 써넣어 agent 포탈에 따로 로그인할 필요가 없습니다. agent가 ESXi 망에 닿아 수집 후 중앙으로 push 합니다.">
+            <input type="checkbox" checked={!!f.gpuGuest.enabled} onChange={(e) => setF((s) => ({ ...s, gpuGuest: { ...s.gpuGuest, enabled: e.target.checked } }))} />
+            <span><b>GPU 게스트(패스쓰루) 수집 자동 구성</b> — 배포 시 agent에 vCenter+게스트 계정 주입(원격 포탈 로그인 불필요)</span></label>
         </div>
+
+        {f.gpuGuest.enabled && (
+          <div className="agent-grid" style={{ marginTop: 10, padding: 12, border: '1px solid var(--accent,#2563eb)', borderRadius: 10 }}>
+            <div style={{ gridColumn: '1 / -1', fontSize: 13 }} className="muted">⚠️ vCenter <b>id는 중앙과 동일</b>해야 호스트/VM이 매칭됩니다. 아래 드롭다운에서 중앙 vCenter를 고르면 id가 맞춰집니다. <b>host</b>는 이 agent가 vCenter에 접속할 주소(IP/FQDN)로, 필요하면 수정하세요.</div>
+            <label title="중앙에 등록된 vCenter를 선택하면 id가 자동으로 맞춰집니다(오버레이 매칭에 필수).">
+              <span className="cap">대상 vCenter(중앙과 동일 id)</span>
+              <select className="input" value={f.gpuGuest.vcenterId} onChange={(e) => pickGpuVc(e.target.value)}>
+                <option value="">vCenter 선택…</option>
+                {vcs.map((v) => <option key={v.id} value={v.id}>{v.name || v.id} ({v.id})</option>)}
+              </select></label>
+            <label title="이 agent가 vCenter에 접속할 주소. 중앙 등록 host를 기본값으로 채우지만, agent가 다른 경로(예: 내부 IP)로 접속하면 수정하세요.">
+              <span className="cap">vCenter 접속 host(IP/FQDN)</span><input className="input" value={f.gpuGuest.vcenterHost} onChange={setG('vcenterHost')} placeholder="예: 192.168.21.200" /></label>
+            <label title="vCenter SOAP 로그인 계정(게스트 작업 권한 필요).">
+              <span className="cap">vCenter 계정</span><input className="input" value={f.gpuGuest.vcenterUser} onChange={setG('vcenterUser')} placeholder="administrator@vsphere.local" /></label>
+            <label title="vCenter 비밀번호.">
+              <span className="cap">vCenter 비밀번호</span><input className="input" type="password" value={f.gpuGuest.vcenterPass} onChange={setG('vcenterPass')} /></label>
+            <label title="게스트 OS 공용 계정(예: root). VM마다 다르면 배포 후 agent에서 VM별로 조정할 수 있습니다.">
+              <span className="cap">게스트 공용 계정</span><input className="input" value={f.gpuGuest.guestUser} onChange={setG('guestUser')} placeholder="root" /></label>
+            <label title="게스트 OS 계정 비밀번호.">
+              <span className="cap">게스트 비밀번호</span><input className="input" type="password" value={f.gpuGuest.guestPass} onChange={setG('guestPass')} /></label>
+          </div>
+        )}
       </div>
 
       <div className="flex gap wrap" style={{ marginBottom: 14 }}>
@@ -303,6 +336,9 @@ export default function AgentDeploy() {
             {result.collector && (result.collector.registered
               ? <div style={{ color: 'var(--green)', marginTop: 4 }}>✅ 중앙 '수집 서버'에 {result.collector.updated ? '갱신' : '자동 등록'}됨 — id <code>{result.collector.id}</code> · <code>{result.collector.url}</code></div>
               : <div style={{ color: 'var(--amber)', marginTop: 4 }}>⚠ 수집 서버 자동 등록 건너뜀{result.collector.reason ? ` — ${result.collector.reason}` : ''}</div>)}
+            {result.gpuGuest && (result.gpuGuest.ok
+              ? <div style={{ color: 'var(--green)', marginTop: 4 }}>✅ GPU 게스트 수집 자동 구성됨 — vCenter <code>{result.gpuGuest.vcenterId}</code> @ <code>{result.gpuGuest.vcenterHost}</code> · 게스트 계정 <code>{result.gpuGuest.guestUser || '(미입력)'}</code></div>
+              : <div style={{ color: 'var(--amber)', marginTop: 4 }}>⚠ GPU 게스트 수집 구성 실패{result.gpuGuest.reason ? ` — ${result.gpuGuest.reason}` : ''}</div>)}
             {typeof result.log === 'string' && result.log.trim() && (
               <div style={{ marginTop: 8 }}>
                 <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>대상 호스트 서비스 로그(journalctl/status)</div>

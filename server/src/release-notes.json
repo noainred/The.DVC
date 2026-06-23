@@ -1,6 +1,16 @@
 {
   "notes": [
     {
+      "version": "1.86.0",
+      "date": "2026-06-23",
+      "title": "에이전트 배포에서 GPU 게스트 수집까지 자동 구성 — agent 포탈 로그인 불필요",
+      "notes": [
+        "에이전트 배포 폼에 'GPU 게스트(패스쓰루) 수집 자동 구성' 추가 — 켜고 대상 vCenter(중앙과 동일 id 드롭다운)+vCenter 계정+게스트 공용 계정을 입력하면, 배포 시 agent의 vcenters.json·gpu-guest.json을 SSH로 주입(원격 agent 포탈에 따로 로그인할 필요 없음)",
+        "DATA_SOURCE=live 자동 설정(게스트 수집/사이트 위임 시 실데이터 모드). 기존 파일이 있으면 같은 vCenter id로 병합, 파일 권한 vmportal:vmportal 0600",
+        "배포 결과에 'GPU 게스트 수집 자동 구성됨 — vCenter/host/게스트 계정' 표시. agent가 ESXi 망에서 수집 → 중앙으로 push(1.84.0)"
+      ]
+    },
+    {
       "version": "1.85.0",
       "date": "2026-06-23",
       "title": "수집 서버 자동 설치 — 배포 성공 시 중앙에 '수집 서버' 자동 등록(원클릭)",
