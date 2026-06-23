@@ -96,25 +96,30 @@ async function readGuestFile(c, fileManager, vmRef, auth, guestPath, timeoutMs, 
   }
   const url = /<url>([^<]+)<\/url>/.exec(ftXml)?.[1];
   if (!url) return { text: '', error: '파일 전송 URL을 반환하지 않음' };
-  // path/query(토큰)는 보존하고 호스트만 교체. 후보(vCenter 실제 IP → ESXi IP → ESXi FQDN) → vc.host.
+  // 토큰을 가린 URL(로그용). guestFile 티켓이 노출되지 않게 token/id/value를 마스킹.
+  const redact = (u) => String(u).replace(/(([?&])(?:token|id|value)=)[^&]+/gi, '$1***');
   const vcHost = (c.vc.host || '').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
   const origHost = (() => { try { return new URL(url).host; } catch { return '?'; } })();
-  const hosts = [...new Set([...preferHosts.filter(Boolean), vcHost])];
-  console.log(`[gpu-guest]     [${tag}] 파일전송 URL host=${origHost} → 시도순서 [${hosts.join(', ')}]`);
+  // ⭐ 핵심: vSphere가 돌려준 "원본 URL을 그대로" 먼저 시도한다. 호스트만 바꿔치기하면
+  // 그 ESXi가 티켓을 모르는 경로로 404가 날 수 있다. 원본 → ESXi 후보(IP/FQDN) → vCenter 폴백.
+  const swapped = [...new Set([...preferHosts.filter(Boolean), vcHost])].map((h) => swapHost(url, h));
+  const candidates = [...new Set([url, ...swapped])];
+  console.log(`[gpu-guest]     [${tag}] 파일전송 URL(원본 host=${origHost})=${redact(url)} → 후보 ${candidates.length}개`);
   const tries = [];
-  for (const host of hosts) {
-    const cand = swapHost(url, host);
+  for (const cand of candidates) {
+    const candHost = (() => { try { return new URL(cand).host; } catch { return '?'; } })();
+    const isOrig = cand === url;
     try {
       const res = await fetch(cand, { signal: AbortSignal.timeout(timeoutMs) });
       if (res.ok) {
-        console.log(`[gpu-guest]     [${tag}] 다운로드 ${host} → HTTP ${res.status} ✓`);
+        console.log(`[gpu-guest]     [${tag}] 다운로드 ${candHost}${isOrig ? '(원본)' : ''} → HTTP ${res.status} ✓`);
         return { text: await res.text(), error: null };
       }
-      console.warn(`[gpu-guest]     [${tag}] 다운로드 ${host} → HTTP ${res.status}`);
-      tries.push(`${host}=HTTP${res.status}`);
+      console.warn(`[gpu-guest]     [${tag}] 다운로드 ${candHost}${isOrig ? '(원본)' : ''} → HTTP ${res.status}`);
+      tries.push(`${candHost}${isOrig ? '(원본)' : ''}=HTTP${res.status}`);
     } catch (e) {
-      console.warn(`[gpu-guest]     [${tag}] 다운로드 ${host} → ${e.message}`);
-      tries.push(`${host}=${String(e.message || 'err').slice(0, 60)}`);
+      console.warn(`[gpu-guest]     [${tag}] 다운로드 ${candHost}${isOrig ? '(원본)' : ''} → ${e.message}`);
+      tries.push(`${candHost}${isOrig ? '(원본)' : ''}=${String(e.message || 'err').slice(0, 60)}`);
     }
   }
   return { text: '', error: `파일 다운로드 실패: ${tries.join(' | ')}` };
@@ -171,7 +176,9 @@ export async function collectVmGpu(c, vmMoref, creds, { isWindows, timeoutMs = 2
 
   // 5) stdout 회수 → 파싱 (다운로드는 vCenter 실제 IP/ESXi IP 후보 우선).
   // 다운로드는 짧은 타임아웃으로 빠른 실패(도달 안 되는 후보가 전체를 오래 막지 않게).
-  const dlTimeout = Math.min(timeoutMs, 4000);
+  // 고RTT 사이트(폴란드·미국 동부 800ms+)는 TLS 핸드셰이크만 ~3RTT라 4초는 과도하게 짧다.
+  // 도달 가능한 ESXi가 오탐 타임아웃되지 않게 8초로 완화(작은 파일이라 전송 자체는 즉시).
+  const dlTimeout = Math.min(timeoutMs, 8000);
   const outRes = await readGuestFile(c, fileManager, vmRef, auth, outFile, dlTimeout, dlHosts, vmMoref);
   const parsed = parseNvidiaSmiCsv(outRes.text);
   if (parsed) {
@@ -179,20 +186,25 @@ export async function collectVmGpu(c, vmMoref, creds, { isWindows, timeoutMs = 2
     deleteGuestFile(c, fileManager, vmRef, auth, errFile);
     return parsed;
   }
-  // 다운로드 자체가 실패(어느 후보도 못 받음)면 stderr도 같은 실패 → 재시도 없이 그 사유로 throw.
-  if (outRes.error) {
+  // 다운로드가 "도달 불가(timeout 등, HTTP 응답 없음)"면 stderr도 같은 실패 → 빠른 실패.
+  // 단, "도달은 됨(HTTP 4xx/5xx 응답)"이면 stderr를 읽어 진짜 원인(드라이버/PATH/빈 출력)을 규명.
+  const reachable = outRes.error && /HTTP\d/.test(outRes.error);
+  if (outRes.error && !reachable) {
     deleteGuestFile(c, fileManager, vmRef, auth, outFile);
     deleteGuestFile(c, fileManager, vmRef, auth, errFile);
     const e = new Error(outRes.error); e.guestDiag = true; throw e;
   }
 
-  // 6) 다운로드는 됐는데 stdout이 비었으면 stderr만 확인.
-  const errRes = await readGuestFile(c, fileManager, vmRef, auth, errFile, dlTimeout, dlHosts);
+  // 6) stdout이 비었거나(다운로드 OK인데 내용 없음) 또는 도달은 되는데 .out이 404 →
+  //    stderr를 읽어 원인 규명(빈 .out이 ESXi에서 404날 수 있음).
+  const errRes = await readGuestFile(c, fileManager, vmRef, auth, errFile, dlTimeout, dlHosts, `${vmMoref}.err`);
   deleteGuestFile(c, fileManager, vmRef, auth, outFile);
   deleteGuestFile(c, fileManager, vmRef, auth, errFile);
   const stderrLine = (errRes.text || '').trim().split(/\r?\n/)[0];
+  // stderr를 읽었으면 그게 진짜 원인. 못 읽었고(.err도 404) .out도 404였으면 회수단계 문제를 명시.
   const reason = stderrLine ? `게스트 오류: ${stderrLine.slice(0, 180)}`
-    : 'nvidia-smi 출력이 비어 있음(명령은 실행됐으나 stdout 없음)';
+    : reachable ? `회수 실패(.out/.err 모두 HTTP404 — 파일 비었거나 ESXi가 티켓 거부) · stdout: ${outRes.error}`
+      : 'nvidia-smi 출력이 비어 있음(명령은 실행됐으나 stdout 없음)';
   const e = new Error(reason); e.guestDiag = true; throw e;
 }
 

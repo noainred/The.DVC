@@ -1,6 +1,18 @@
 {
   "notes": [
     {
+      "version": "1.88.1",
+      "date": "2026-06-23",
+      "title": "GPU 게스트 수집 회수단계 수정 — guestFile 원본 URL 우선 시도 + stderr 원인규명 + 토큰 가린 전체 URL 로그",
+      "notes": [
+        "회수 버그 수정: 그동안 vSphere가 돌려준 guestFile '원본 URL 호스트'를 한 번도 그대로 시도하지 않고 항상 다른 주소로 바꿔치기해 ESXi가 티켓을 모르는 경로로 HTTP404를 유발. 이제 원본 URL을 가장 먼저 시도 후 ESXi 후보(IP/FQDN)→vCenter 폴백.",
+        "다운로드 후보 정리: h.mgmtServerIp 는 ESXi가 아니라 '그 호스트를 관리하는 vCenter IP'(항상 404)라 후보에서 제외 — ESXi 자신의 IP(mgmtIp)/FQDN만 사용.",
+        "원인 규명 강화: .out 회수가 HTTP 응답(도달은 됨)으로 실패하면 .err(stderr)까지 읽어 드라이버/PATH/빈 출력 등 진짜 원인을 진단에 표시.",
+        "디버깅: 토큰/id를 가린 guestFile 전체 URL을 로그에 기록(journalctl grep gpu-guest).",
+        "고RTT 대응: 게스트파일 다운로드 타임아웃 4초→8초(폴란드·미국 동부 800ms+ 사이트 오탐 타임아웃 방지)."
+      ]
+    },
+    {
       "version": "1.88.0",
       "date": "2026-06-23",
       "title": "인사이트 — 최신 트렌드 기능 10종 통합(FinOps·AI 이상탐지·용량예측·보안·토폴로지·인시던트·ChatOps·Prometheus·GPU MIG·PWA)",
