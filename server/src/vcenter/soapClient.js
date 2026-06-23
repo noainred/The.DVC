@@ -11,6 +11,13 @@
 
 import tls from 'node:tls';
 import { config } from '../config.js';
+import { loadMetricsSettings } from '../metrics/settings.js';
+
+// 호스트 GPU 사용률 캐시(주기 throttle용). key=`${vcId}:${ref}` → { pct, at }.
+const _gpuUtilCache = new Map();
+let _gpuForce = false; // 수동 '지금 수집' 시 다음 수집을 강제(주기 무시)
+export function forceGpuUtilCollect() { _gpuForce = true; }
+export function clearGpuUtilForce() { _gpuForce = false; }
 
 /** SHA-1 thumbprint of a host's TLS cert (needed by the HTML5 web console). */
 function getThumbprint(host, port = 443) {
@@ -231,6 +238,45 @@ export class VimSoapClient {
       const ent = /<entity type="HostSystem">([^<]+)<\/entity>/.exec(blk)?.[1];
       const val = /<value>[\s\S]*?<value>(\d+)<\/value>/.exec(blk)?.[1];
       if (ent && val != null) out.set(ent, Number(val));
+    }
+    return out;
+  }
+
+  /** counterId for gpu.utilization.average (호스트 GPU 사용률 %). */
+  async gpuUtilCounterId() {
+    if (!this.sc.perfManager) return null;
+    const objs = await this.retrieveObjectProps('PerformanceManager', this.sc.perfManager, ['perfCounter']);
+    const xml = objs[0]?.props?.perfCounter || '';
+    for (const blk of xml.split('<PerfCounterInfo').slice(1)) {
+      const key = /<key>(\d+)<\/key>/.exec(blk)?.[1];
+      const name = /<nameInfo>[\s\S]*?<key>(\w+)<\/key>/.exec(blk)?.[1];
+      const group = /<groupInfo>[\s\S]*?<key>(\w+)<\/key>/.exec(blk)?.[1];
+      const rollup = /<rollupType>(\w+)<\/rollupType>/.exec(blk)?.[1];
+      if (key && group === 'gpu' && name === 'utilization' && rollup === 'average') return key;
+    }
+    return null;
+  }
+
+  /** 호스트별 GPU 사용률(%) — instance="*"(GPU별)을 호스트 단위 평균으로. Map<ref, pct>. */
+  async queryHostGpuUtil(counterId, hostRefs) {
+    const out = new Map();
+    if (!counterId || !hostRefs.length) return out;
+    const specs = hostRefs.map((ref) =>
+      `<querySpec><entity type="HostSystem">${ref}</entity><maxSample>1</maxSample>` +
+      `<metricId><counterId>${counterId}</counterId><instance>*</instance></metricId>` +
+      `<intervalId>20</intervalId></querySpec>`
+    ).join('');
+    const xml = await this.#call(
+      `<QueryPerf xmlns="urn:vim25"><_this type="PerformanceManager">${this.sc.perfManager}</_this>${specs}</QueryPerf>`
+    );
+    const re = /<returnval[^>]*>([\s\S]*?)<\/returnval>/g;
+    let m;
+    while ((m = re.exec(xml))) {
+      const blk = m[1];
+      const ent = /<entity type="HostSystem">([^<]+)<\/entity>/.exec(blk)?.[1];
+      if (!ent) continue;
+      const vals = [...blk.matchAll(/<value>(\d+)<\/value>/g)].map((x) => Number(x[1]));
+      if (vals.length) out.set(ent, Math.round(vals.reduce((a, b) => a + b, 0) / vals.length));
     }
     return out;
   }
@@ -716,6 +762,34 @@ export async function collectFromVCenterSoap(vc) {
         }
       } catch (err) {
         console.warn(`[collect] ${vc.id} 전력 수집 건너뜀: ${err.message}`);
+      }
+    }
+
+    // 호스트 GPU 사용률(gpu.utilization.average) — GPU 호스트만, 설정 주기로 throttle.
+    // 패스쓰루는 ESXi가 못 보므로 게스트 수집이 보완(store overlay). 실패해도 수집 전체는 안 막음.
+    if (config.vcSoapMetrics && c.sc.perfManager && hostByRef.size) {
+      try {
+        const ms = loadMetricsSettings();
+        if (ms.gpuUtilEnabled !== false) {
+          const intervalMs = Math.max(20, ms.gpuUtilIntervalSec || 60) * 1000;
+          const now = Date.now();
+          const gpuRefs = [...hostByRef].filter(([, h]) => (h.gpus || []).length).map(([ref]) => ref); // GPU 호스트만
+          const stale = _gpuForce ? gpuRefs : gpuRefs.filter((ref) => now - (_gpuUtilCache.get(`${vc.id}:${ref}`)?.at || 0) >= intervalMs);
+          if (stale.length) {
+            const cid = await c.gpuUtilCounterId();
+            if (cid) {
+              const map = await c.queryHostGpuUtil(cid, stale);
+              for (const ref of stale) { const pct = map.get(ref); if (pct != null) _gpuUtilCache.set(`${vc.id}:${ref}`, { pct, at: now }); }
+            }
+          }
+          // 캐시된 사용률을 GPU 보유 호스트에 적용(throttle 주기 사이에도 마지막 값 유지).
+          for (const [ref, host] of hostByRef) {
+            const e = _gpuUtilCache.get(`${vc.id}:${ref}`);
+            if (e && (host.gpus || []).length) host.gpuUtilPct = e.pct;
+          }
+        }
+      } catch (err) {
+        console.warn(`[collect] ${vc.id} GPU 사용률 수집 건너뜀: ${err.message}`);
       }
     }
 
