@@ -220,7 +220,11 @@ api.get('/health', (_req, res) => {
 // High-level KPIs + regional / per-site rollups for the dashboard landing view.
 api.get('/overview', (_req, res) => {
   const snap = store.get();
-  res.json({ generatedAt: snap.generatedAt, source: snap.source, ...snap.rollups });
+  // GPU 집계: 설치된 GPU 카드 총 장수 + GPU를 할당받은 VM 수(글로벌 현황 KPI용).
+  let gpuCards = 0, gpuVms = 0;
+  for (const h of snap.hosts) gpuCards += (h.gpus || []).length;
+  for (const v of snap.vms) if (v.gpu) gpuVms++;
+  res.json({ generatedAt: snap.generatedAt, source: snap.source, ...snap.rollups, gpuCards, gpuVms });
 });
 
 // NSX overview — aggregated snapshot from the NSX Manager poller (separate from

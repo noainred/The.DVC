@@ -59,6 +59,12 @@ export default function Overview({ onSelectSite, onGotoTab }) {
           <Kpi label="총 소비전력" value={`${fmt(g.powerKw)} kW`} accent="var(--amber)" meta={`${fmt(g.powerReporting)}개 호스트 측정 · 시간당 약 ${fmt(g.powerKw)} kWh`} />
         )}
         <Kpi label="네트워크" value={fmt(g.networks)} meta="포트그룹 / 분산스위치" onClick={() => onGotoTab?.('networks')} />
+        {g.gpuCards > 0 && (
+          <Kpi label="GPU 카드" value={fmt(g.gpuCards)} accent="var(--accent-2)" meta={`설치된 GPU 장수 · GPU VM ${fmt(g.gpuVms)}`} onClick={() => onGotoTab?.('tools')} />
+        )}
+        {g.gpuCards > 0 && (
+          <Kpi label="GPU 사용 VM" value={fmt(g.gpuVms)} accent="var(--green)" meta="GPU 할당 VM 수" onClick={() => onGotoTab?.('tools')} />
+        )}
         <Kpi label="알람" value={fmt(g.alarms)} accent={g.alarmsCritical ? 'var(--red)' : 'var(--amber)'} meta={`위험 ${g.alarmsCritical} · 경고 ${g.alarmsWarning}`} onClick={() => onGotoTab?.('alarms')} />
       </div>
 
