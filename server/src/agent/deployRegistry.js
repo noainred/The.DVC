@@ -31,6 +31,15 @@ function persist() {
 const redact = (t) => {
   const out = { ...t };
   for (const k of SECRET_KEYS) { out[`has${k[0].toUpperCase()}${k.slice(1)}`] = !!t[k]; delete out[k]; }
+  // gpuGuest는 enabled/대상/계정은 보여주되 비밀번호는 가린다(has* 플래그로 저장 여부만 표시).
+  if (t.gpuGuest && typeof t.gpuGuest === 'object') {
+    const g = t.gpuGuest;
+    out.gpuGuest = {
+      ...g,
+      vcenterPass: '', guestPass: '',
+      hasVcenterPass: !!g.vcenterPass, hasGuestPass: !!g.guestPass,
+    };
+  }
   return out;
 };
 
@@ -47,6 +56,23 @@ export function saveTarget(body = {}) {
     // keep stored secret when UI sends an empty/redacted value
     if (SECRET_KEYS.includes(k) && (body[k] === '' || body[k] === '********')) continue;
     target[k] = body[k];
+  }
+  // gpuGuest(중첩 객체) 병합 — 'GPU 게스트 수집 자동 구성' 체크/계정을 보존한다.
+  // 비밀번호(vcenterPass/guestPass)는 비거나 redacted(********)면 기존 저장값을 유지(편집 시 안 지워짐).
+  if (body.gpuGuest && typeof body.gpuGuest === 'object') {
+    const prev = target.gpuGuest || {};
+    const g = body.gpuGuest;
+    const keepSecret = (nv, ov) => (nv && nv !== '' && nv !== '********') ? nv : (ov || '');
+    target.gpuGuest = {
+      enabled: !!g.enabled,
+      vcenterId: g.vcenterId !== undefined ? g.vcenterId : (prev.vcenterId || ''),
+      vcenterName: g.vcenterName !== undefined ? g.vcenterName : (prev.vcenterName || ''),
+      vcenterHost: g.vcenterHost !== undefined ? g.vcenterHost : (prev.vcenterHost || ''),
+      vcenterUser: g.vcenterUser !== undefined ? g.vcenterUser : (prev.vcenterUser || ''),
+      vcenterPass: keepSecret(g.vcenterPass, prev.vcenterPass),
+      guestUser: g.guestUser !== undefined ? g.guestUser : (prev.guestUser || ''),
+      guestPass: keepSecret(g.guestPass, prev.guestPass),
+    };
   }
   if (!existing) list.push(target);
   cache = list; persist();

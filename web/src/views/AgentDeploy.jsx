@@ -111,7 +111,8 @@ export default function AgentDeploy() {
     if (r.ok) { await loadTargets(); setResult({ kind: 'save', ok: true, reason: '대상을 저장했습니다.' }); }
     else setResult({ kind: 'save', ok: false, reason: r.reason });
   };
-  const editTarget = (t) => setF({ ...EMPTY, ...t, password: '', privateKey: '' });
+  // gpuGuest는 EMPTY 기본값과 깊게 병합(저장 안 된 옛 대상도 안전) + 비밀번호는 비우고 has* 플래그 보존.
+  const editTarget = (t) => setF({ ...EMPTY, ...t, gpuGuest: { ...EMPTY.gpuGuest, ...(t.gpuGuest || {}) }, password: '', privateKey: '' });
   const removeTarget = async (t) => { if (window.confirm(`'${t.host}' 대상을 삭제할까요?`)) { await delJson(`/admin/agent-deploy/targets/${t.id}`).catch(() => {}); await loadTargets(); } };
   const deployTarget = async (t) => {
     if (!window.confirm(`${t.host} 에 배포할까요?`)) return;
@@ -294,11 +295,11 @@ export default function AgentDeploy() {
             <label title="vCenter SOAP 로그인 계정(게스트 작업 권한 필요).">
               <span className="cap">vCenter 계정</span><input className="input" value={f.gpuGuest.vcenterUser} onChange={setG('vcenterUser')} placeholder="administrator@vsphere.local" /></label>
             <label title="vCenter 비밀번호.">
-              <span className="cap">vCenter 비밀번호</span><input className="input" type="password" value={f.gpuGuest.vcenterPass} onChange={setG('vcenterPass')} /></label>
+              <span className="cap">vCenter 비밀번호</span><input className="input" type="password" value={f.gpuGuest.vcenterPass} onChange={setG('vcenterPass')} placeholder={f.gpuGuest.hasVcenterPass ? '●●●●● (저장됨 · 변경시 입력)' : ''} /></label>
             <label title="게스트 OS 공용 계정(예: root). VM마다 다르면 배포 후 agent에서 VM별로 조정할 수 있습니다.">
               <span className="cap">게스트 공용 계정</span><input className="input" value={f.gpuGuest.guestUser} onChange={setG('guestUser')} placeholder="root" /></label>
             <label title="게스트 OS 계정 비밀번호.">
-              <span className="cap">게스트 비밀번호</span><input className="input" type="password" value={f.gpuGuest.guestPass} onChange={setG('guestPass')} /></label>
+              <span className="cap">게스트 비밀번호</span><input className="input" type="password" value={f.gpuGuest.guestPass} onChange={setG('guestPass')} placeholder={f.gpuGuest.hasGuestPass ? '●●●●● (저장됨 · 변경시 입력)' : ''} /></label>
           </div>
         )}
       </div>
