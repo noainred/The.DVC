@@ -66,3 +66,6 @@ server/config/login-monitor.json
 server/config/guest-scans.json
 server/config/net-issues.ndjson
 server/config/net-issues-state.json
+
+# 세션 보안(유휴 로그아웃) 설정(런타임)
+server/config/security-session.json

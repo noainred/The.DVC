@@ -23,6 +23,7 @@ import GuestAccount from './GuestAccount.jsx';
 import LoginFails from './LoginFails.jsx';
 import NetIssues from './NetIssues.jsx';
 import AnomalyDetection from './AnomalyDetection.jsx';
+import SessionSecurity from './SessionSecurity.jsx';
 import About from './About.jsx';
 
 // 모든 하위 화면 정의(키→라벨→컴포넌트). 그룹에 속한 항목은 group 키로 묶는다.
@@ -43,6 +44,7 @@ const SUB = [
   { k: 'proxy', label: '중계 서버', C: ProxySettings, group: 'remote-srv' },
   { k: 'remote', label: '원격접속 설정', C: RemoteAccess, group: 'remote-srv' },
   { k: 'users', label: '사용자 관리', C: UserAdmin },
+  { k: 'session-security', label: '세션 보안', C: SessionSecurity },
   { k: 'auth-ad', label: '인증(AD)', C: AdSettings },
   { k: 'ai-search', label: 'AI 검색', C: LlmSettings },
   { k: 'alerts', label: '알림', C: Alerts2 },

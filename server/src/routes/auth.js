@@ -4,13 +4,16 @@ import { authenticate, signToken, authMiddleware, requireRole, getUser, beginTot
 import { loadAdConfig, saveAdConfig, testAd } from '../auth/ad.js';
 import { logAudit } from '../audit.js';
 import { recordPortalLoginFail } from '../security/loginStore.js';
+import { loadSessionSecurity } from '../security/securitySettings.js';
 
 export const authRouter = Router();
 
 // Whether auth is required at all, and whether AD login is enabled (UI hint).
+// 유휴 자동 로그아웃 설정도 함께 내려 클라이언트가 그 시간으로 타이머를 건다(비밀 아님).
 authRouter.get('/config', (_req, res) => {
   const ad = loadAdConfig();
-  res.json({ authEnabled: config.auth.enabled, adEnabled: Boolean(ad.enabled && ad.url) });
+  const sec = loadSessionSecurity();
+  res.json({ authEnabled: config.auth.enabled, adEnabled: Boolean(ad.enabled && ad.url), idleLogoutEnabled: sec.idleLogoutEnabled, idleLogoutMin: sec.idleLogoutMin });
 });
 
 authRouter.post('/login', async (req, res) => {

@@ -195,6 +195,15 @@ export function beginTotpEnroll(username, host = '') {
   };
 }
 
+/** 민감 작업 재인증용 — 사용자의 현재 OTP 코드를 검증. OTP 미등록이면 needEnroll. */
+export function verifyUserOtp(username, code) {
+  const u = getUser(username);
+  if (!u) return { ok: false, reason: '사용자를 찾을 수 없습니다.' };
+  if (!u.totpEnabled || !u.totpSecret) return { ok: false, reason: 'OTP가 등록되지 않은 계정입니다. 먼저 OTP를 등록하세요.', needEnroll: true };
+  if (!totp.verifyToken(String(code || '').trim(), u.totpSecret)) return { ok: false, reason: 'OTP 코드가 일치하지 않습니다.' };
+  return { ok: true };
+}
+
 /** Confirm enrollment by verifying a code from the authenticator app. */
 export function confirmTotpEnroll(username, code) {
   const u = getUser(username);
