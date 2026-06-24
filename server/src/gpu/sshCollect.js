@@ -68,6 +68,30 @@ export async function collectVmGpuSsh(vm, creds, { timeoutMs = 20_000, port = 22
   throw e;
 }
 
+/**
+ * 물리 서버 자동 감지 — SSH 접속해 GPU 모델명·호스트명·OS를 한 번에 읽어 자동 등록에 사용.
+ * 반환 { reachable, hostname, os, gpuModels:[name…], error }.
+ */
+export async function detectPhysicalGpu(host, creds, { timeoutMs = 20_000, port = 22 } = {}) {
+  const out = { reachable: false, hostname: '', os: '', gpuModels: [], error: null };
+  try {
+    const r = await withSsh(
+      { host, port, username: creds.username, password: creds.password || '', privateKey: creds.privateKey || undefined, readyTimeout: Math.max(5_000, timeoutMs) },
+      async (sh) => {
+        const names = await sh.exec("sh -lc 'export PATH=$PATH:/usr/bin:/usr/local/bin:/usr/local/sbin:/usr/local/nvidia/bin; nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null'");
+        const hn = await sh.exec('hostname 2>/dev/null');
+        const osr = await sh.exec("sh -lc 'cat /etc/os-release 2>/dev/null | sed -n \"s/^PRETTY_NAME=//p\" | tr -d \\\"; uname -s 2>/dev/null'");
+        return { names: names.stdout, hostname: hn.stdout, os: osr.stdout };
+      },
+    );
+    out.reachable = true;
+    out.gpuModels = String(r.names || '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+    out.hostname = String(r.hostname || '').trim().split(/\s+/)[0] || '';
+    out.os = String(r.os || '').trim().split(/\r?\n/).filter(Boolean)[0] || '';
+  } catch (e) { out.error = cleanSshErr(e.message); }
+  return out;
+}
+
 /** SSH 로그인+읽기 테스트 — testVmGuest와 동일한 { login, read, error, sample, trace } 형태. */
 export async function testVmGuestSsh(vm, creds, { timeoutMs = 20_000, port = 22, trace = null } = {}) {
   const out = { login: false, read: false, error: null, sample: null, trace: trace || [], via: 'ssh' };

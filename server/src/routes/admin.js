@@ -32,8 +32,8 @@ import { metricsSamplerStatus, rescheduleMetricsSampler } from '../metrics/sampl
 import { loadGpuGuestSettings, saveGpuGuestSettings, redactGpuGuestSettings, resolveVmCreds } from '../gpu/settings.js';
 import { gpuGuestStatus, rescheduleGpuGuestPoller, gpuHostIds, vmUsesGpu, getGpuGuestDiag } from '../gpu/poller.js';
 import { testVmGuest, VimSoapClient } from '../gpu/guestops.js';
-import { testVmGuestSsh } from '../gpu/sshCollect.js';
-import { listPhysical, addPhysical, updatePhysical, removePhysical, getPhysicalRaw } from '../gpu/physicalRegistry.js';
+import { testVmGuestSsh, detectPhysicalGpu } from '../gpu/sshCollect.js';
+import { listPhysical, addPhysical, updatePhysical, removePhysical, getPhysicalRaw, findPhysicalByHost } from '../gpu/physicalRegistry.js';
 import { getAllPhysicalGpu } from '../gpu/physicalStore.js';
 import { physicalPollerStatus, pollPhysicalOnce } from '../gpu/physicalPoller.js';
 import { getGuestGpuVms } from '../gpu/store.js';
@@ -453,6 +453,27 @@ adminRouter.delete('/gpu-physical/:id', adminOnly, (req, res) => {
 adminRouter.post('/gpu-physical/poll', adminOnly, async (_req, res) => {
   res.json({ ok: true, lastRun: await pollPhysicalOnce() });
 });
+// IP+ID+PW+소속 vCenter만 받아 SSH 로그인→GPU/OS/호스트명 자동 감지→자동 등록.
+// 같은 host가 이미 있으면 갱신. Body { host, username, password, port?, vcenterId? }
+adminRouter.post('/gpu-physical/auto-register', adminOnly, async (req, res) => {
+  const b = req.body || {};
+  const host = String(b.host || '').trim();
+  const username = String(b.username || '').trim();
+  if (!host || !username) return res.status(400).json({ ok: false, reason: 'IP/호스트와 계정이 필요합니다.' });
+  const st = loadGpuGuestSettings();
+  const det = await detectPhysicalGpu(host, { username, password: b.password || '' }, { timeoutMs: st.timeoutMs, port: Number(b.port) || 22 });
+  if (!det.reachable) return res.status(400).json({ ok: false, reason: `SSH 접속 실패 — ${det.error || '계정/네트워크 확인'}`, detected: det });
+  if (!det.gpuModels.length) return res.status(400).json({ ok: false, reason: 'GPU를 찾지 못했습니다(nvidia-smi 미설치/드라이버 없음). 접속은 성공했습니다.', detected: det });
+  const os = /microsoft|windows/i.test(det.os) ? 'windows' : 'linux';
+  const fields = { name: det.hostname || host, host, port: Number(b.port) || 22, username, password: b.password || '', os, vcenterId: String(b.vcenterId || '').trim(), gpuModels: det.gpuModels, enabled: true };
+  const exist = findPhysicalByHost(host);
+  let id;
+  if (exist) { updatePhysical(exist.id, fields); id = exist.id; }
+  else { const r = addPhysical(fields); if (!r.ok) return res.status(400).json({ ok: false, reason: r.reason, detected: det }); id = r.id; }
+  pollPhysicalOnce().catch(() => {});
+  res.json({ ok: true, id, updated: !!exist, detected: det });
+});
+
 // 단건 SSH 테스트(저장 전 검증 가능) — body { host, username, password?, port?, revealCreds? } 또는 { id }
 adminRouter.post('/gpu-physical/test', adminOnly, async (req, res) => {
   const b = req.body || {};
@@ -934,6 +955,26 @@ adminRouter.get('/idrac/gpu-inventory', adminOnly, (req, res) => {
       byModel.set(model, e);
     }
   }
+  // 추천: 물리(베어메탈) GPU 서버도 같은 모델 집계에 합친다(source='physical').
+  const vcFilter = String(req.query.vcenterId || '').trim();
+  let physServers = listPhysical();
+  if (vcFilter) physServers = physServers.filter((s) => (vcFilter === '__unmapped__' ? !s.vcenterId : s.vcenterId === vcFilter));
+  let physCount = 0;
+  for (const s of physServers) {
+    const gms = s.gpuModels || [];
+    if (!gms.length) continue;
+    physCount++;
+    serverList.push({ id: s.id, name: s.name, serviceTag: '', vcenterId: s.vcenterId || '', host: s.host, gpuCount: gms.length, source: 'physical', gpus: gms.map((m) => ({ model: m })) });
+    for (const gm of gms) {
+      const model = (gm || '미상').trim() || '미상';
+      const e = byModel.get(model) || { model, count: 0, servers: new Map() };
+      e.count++;
+      const key = `phys:${s.id}`;
+      const sv = e.servers.get(key) || { id: s.id, name: s.name, serviceTag: '', vcenterId: s.vcenterId || '', source: 'physical', count: 0 };
+      sv.count++; e.servers.set(key, sv);
+      byModel.set(model, e);
+    }
+  }
   const models = [...byModel.values()]
     .map((e) => ({ model: e.model, count: e.count, serverCount: e.servers.size, servers: [...e.servers.values()].sort((a, b) => b.count - a.count) }))
     .sort((a, b) => b.count - a.count);
@@ -942,6 +983,7 @@ adminRouter.get('/idrac/gpu-inventory', adminOnly, (req, res) => {
     models,
     servers: serverList.sort((a, b) => b.gpuCount - a.gpuCount),
     collectedServers: collected, totalServers: servers.length,
+    physicalServers: physCount,
     missing,
   });
 });

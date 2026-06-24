@@ -33,10 +33,12 @@ export function listPhysical() {
   return loadPhysical().map((s) => ({
     id: s.id, name: s.name, host: s.host, port: s.port || 22, username: s.username || '',
     os: s.os || 'linux', vcenterId: s.vcenterId || '', enabled: s.enabled !== false, hasPassword: !!s.password,
+    gpuModels: s.gpuModels || [],
   }));
 }
 
 export function getPhysicalRaw(id) { return loadPhysical().find((s) => s.id === id) || null; }
+export function findPhysicalByHost(host) { const h = String(host || '').trim().toLowerCase(); return loadPhysical().find((s) => (s.host || '').toLowerCase() === h) || null; }
 
 export function addPhysical(body = {}) {
   const host = String(body.host || '').trim();
@@ -50,6 +52,7 @@ export function addPhysical(body = {}) {
     username: String(body.username).trim(), password: String(body.password || ''),
     os: ['linux', 'windows'].includes(body.os) ? body.os : 'linux',
     vcenterId: String(body.vcenterId || '').trim(), enabled: body.enabled !== false,
+    gpuModels: Array.isArray(body.gpuModels) ? body.gpuModels.slice(0, 32) : [],
   });
   cache = list; persist();
   return { ok: true, id };
@@ -67,6 +70,7 @@ export function updatePhysical(id, body = {}) {
   if (body.os !== undefined && ['linux', 'windows'].includes(body.os)) s.os = body.os;
   if (body.vcenterId !== undefined) s.vcenterId = String(body.vcenterId || '').trim();
   if (body.enabled !== undefined) s.enabled = !!body.enabled;
+  if (Array.isArray(body.gpuModels)) s.gpuModels = body.gpuModels.slice(0, 32);
   persist();
   return { ok: true };
 }

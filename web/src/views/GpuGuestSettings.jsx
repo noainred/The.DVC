@@ -566,6 +566,21 @@ function PhysicalGpuManager({ vcs }) {
   const [msg, setMsg] = useState(null);
   const [testing, setTesting] = useState(null); // id 또는 'form'
   const [testRes, setTestRes] = useState(null);
+  const [auto, setAuto] = useState({ host: '', username: 'root', password: '', port: 22, vcenterId: '' });
+  const [autoBusy, setAutoBusy] = useState(false);
+  const [autoMsg, setAutoMsg] = useState(null);
+  const setA = (k) => (e) => setAuto((a) => ({ ...a, [k]: e.target.value }));
+  const autoRegister = async () => {
+    if (!auto.host.trim() || !auto.username.trim()) { setAutoMsg({ ok: false, text: 'IP와 계정을 입력하세요.' }); return; }
+    setAutoBusy(true); setAutoMsg(null);
+    const r = await postJson('/admin/gpu-physical/auto-register', auto).catch((e) => ({ ok: false, reason: e.message }));
+    setAutoBusy(false);
+    if (r.ok) {
+      setAutoMsg({ ok: true, text: `✅ ${r.updated ? '갱신' : '등록'}됨 — ${r.detected?.hostname || auto.host} · GPU ${r.detected?.gpuModels?.length || 0}장 (${[...new Set(r.detected?.gpuModels || [])].join(', ')}) · ${/win/i.test(r.detected?.os || '') ? 'Windows' : 'Linux'}` });
+      setAuto((a) => ({ ...a, host: '', password: '' }));
+      await load();
+    } else setAutoMsg({ ok: false, text: r.reason || '자동 등록 실패' });
+  };
   const load = () => fetchJson('/admin/gpu-physical').then(setD).catch(() => {});
   useEffect(() => { load(); const t = setInterval(load, 15_000); return () => clearInterval(t); }, []);
   const results = new Map((d?.results || []).map((r) => [r.id, r]));
@@ -598,6 +613,20 @@ function PhysicalGpuManager({ vcs }) {
       </div>
       <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
         ESXi/VM이 아닌 <b>물리 서버</b>에 직접 SSH로 접속해 <code>nvidia-smi</code>로 GPU 사용률을 수집합니다(주기는 위 '수집 주기' 공유). 서버 OS에 NVIDIA 드라이버 + SSH가 있어야 합니다.
+      </div>
+
+      {/* ⚡ 자동 등록 — IP+ID+PW+소속 vCenter만 넣으면 로그인해 GPU/OS/호스트명을 감지해 등록 */}
+      <div className="card" style={{ padding: 12, marginBottom: 12, border: '1px solid var(--accent)' }}>
+        <b style={{ fontSize: 13 }}>⚡ 자동 등록 <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>— IP·계정·소속만 넣으면 로그인해 GPU·OS·호스트명을 자동 감지해 등록</span></b>
+        <div className="flex gap wrap" style={{ marginTop: 8, alignItems: 'flex-end' }}>
+          <Field label="IP/호스트 *"><input className="input" style={{ width: 160 }} value={auto.host} onChange={setA('host')} placeholder="10.94.46.94" onKeyDown={(e) => e.key === 'Enter' && autoRegister()} /></Field>
+          <Field label="계정 *"><input className="input" style={{ width: 120 }} value={auto.username} onChange={setA('username')} placeholder="root" /></Field>
+          <Field label="비밀번호"><input className="input" type="password" style={{ width: 130 }} value={auto.password} onChange={setA('password')} onKeyDown={(e) => e.key === 'Enter' && autoRegister()} /></Field>
+          <Field label="포트"><input className="input" type="number" style={{ width: 70 }} value={auto.port} onChange={setA('port')} /></Field>
+          <Field label="소속 vCenter"><select className="select" value={auto.vcenterId} onChange={setA('vcenterId')} style={{ minWidth: 140 }}><option value="">(없음)</option>{vcs.map((v) => <option key={v.id} value={v.id}>{v.name || v.id}</option>)}</select></Field>
+          <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} disabled={autoBusy} onClick={autoRegister}>{autoBusy ? '로그인·감지 중…' : '🔍 로그인 후 자동 등록'}</button>
+        </div>
+        {autoMsg && <div style={{ marginTop: 8, fontSize: 13, color: autoMsg.ok ? 'var(--green)' : 'var(--red)' }}>{autoMsg.text}</div>}
       </div>
 
       <div style={{ overflowX: 'auto' }}>

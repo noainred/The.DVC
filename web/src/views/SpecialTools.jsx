@@ -1489,7 +1489,7 @@ function ServerGpuFinder({ vc, onServer }) {
     <div>
       <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 12 }}>
         <div className="muted" style={{ fontSize: 13 }}>
-          iDRAC가 수집한 GPU <b style={{ color: 'var(--accent)' }}>{d.totalGpus}</b>장 · <b>{d.models.length}</b>종 · 서버 {d.collectedServers}/{d.totalServers} 수집됨
+GPU <b style={{ color: 'var(--accent)' }}>{d.totalGpus}</b>장 · <b>{d.models.length}</b>종 · iDRAC {d.collectedServers}/{d.totalServers}{d.physicalServers ? ` · 물리 ${d.physicalServers}대` : ''}
           {d.missing?.length > 0 && <span className="badge amber" style={{ marginLeft: 8 }} title={d.missing.map((x) => x.name).join(', ')}>미수집 {d.missing.length}대</span>}
         </div>
         <div className="flex gap" style={{ alignItems: 'center' }}>
@@ -1523,7 +1523,7 @@ function ServerGpuFinder({ vc, onServer }) {
                 <table className="data-table" style={{ width: '100%', fontSize: 13 }}>
                   <thead><tr><th style={{ textAlign: 'left' }}>서버</th><th style={{ textAlign: 'left' }}>서비스태그</th><th style={{ textAlign: 'left' }}>소속 vCenter</th><th style={{ textAlign: 'right' }}>장수</th></tr></thead>
                   <tbody>{m.servers.map((s) => (
-                    <tr key={s.id}><td><button className="cell-link" onClick={() => onServer(s)}>{s.name}</button> <span className="muted" style={{ fontSize: 11 }}>({s.host || s.id})</span></td>
+                    <tr key={s.id + (s.source || '')}><td>{s.source === 'physical' ? <span>{s.name} <span className="badge gray" style={{ fontSize: 10 }}>물리</span></span> : <button className="cell-link" onClick={() => onServer(s)}>{s.name}</button>} <span className="muted" style={{ fontSize: 11 }}>({s.host || s.id})</span></td>
                       <td className="tabular">{s.serviceTag || '—'}</td>
                       <td className="muted">{s.vcenterId || '—'}</td>
                       <td style={{ textAlign: 'right' }}><b>{s.count}</b></td></tr>
