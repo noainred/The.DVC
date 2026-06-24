@@ -68,11 +68,13 @@ export default function App() {
   // auth bootstrap: 'loading' | 'anon' | user object
   const [user, setUser] = useState('loading');
   const [loginNotice, setLoginNotice] = useState('');
+  const [authCfg, setAuthCfg] = useState(null);
 
   useEffect(() => {
     setUnauthorizedHandler(() => setUser(null));
     (async () => {
       const cfg = await fetchAuthConfig();
+      setAuthCfg(cfg);
       if (!cfg.authEnabled) return setUser({ name: 'Anonymous', role: 'admin' });
       if (!getToken()) return setUser(null);
       const me = await fetchMe();
@@ -80,18 +82,20 @@ export default function App() {
     })();
   }, []);
 
-  // 유휴 자동 로그아웃 — 로그인(실세션) 상태에서 30분 동안 입력이 없으면 강제 로그아웃.
+  // 유휴 자동 로그아웃 — 로그인(실세션) 상태에서 설정된 시간(기본 30분) 동안 입력이 없으면 강제 로그아웃.
   useEffect(() => {
     if (!user || user === 'loading' || !getToken()) return undefined;
-    const IDLE_MS = 30 * 60 * 1000;
+    if (authCfg && authCfg.idleLogoutEnabled === false) return undefined;
+    const mins = Math.max(1, Number(authCfg?.idleLogoutMin) || 30);
+    const IDLE_MS = mins * 60 * 1000;
     let t;
-    const doLogout = () => { setToken(null); setLoginNotice('30분 동안 활동이 없어 자동 로그아웃되었습니다. 다시 로그인하세요.'); setUser(null); };
+    const doLogout = () => { setToken(null); setLoginNotice(`${mins}분 동안 활동이 없어 자동 로그아웃되었습니다. 다시 로그인하세요.`); setUser(null); };
     const reset = () => { clearTimeout(t); t = setTimeout(doLogout, IDLE_MS); };
     const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'click', 'visibilitychange'];
     events.forEach((e) => window.addEventListener(e, reset, { passive: true }));
     reset();
     return () => { clearTimeout(t); events.forEach((e) => window.removeEventListener(e, reset)); };
-  }, [user]);
+  }, [user, authCfg]);
 
   const logout = () => { setToken(null); setUser(null); };
 

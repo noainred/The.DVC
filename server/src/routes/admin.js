@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import fs from 'node:fs';
 import { config } from '../config.js';
-import { requireRole, listUsers, createUser, updateUser, deleteUser, beginTotpEnroll, confirmTotpEnroll, disableTotp } from '../auth/auth.js';
+import { requireRole, listUsers, createUser, updateUser, deleteUser, beginTotpEnroll, confirmTotpEnroll, disableTotp, verifyUserOtp } from '../auth/auth.js';
+import { loadSessionSecurity, saveSessionSecurity } from '../security/securitySettings.js';
 import { store } from '../store.js';
 import { getDataSource, setDataSource, isDataSourceOverridden } from '../runtime-settings.js';
 import { ledgerInfo } from '../ipam/db.js';
@@ -20,7 +21,7 @@ import {
 } from '../vcenter/registry.js';
 import { geocode } from '../vcenter/geocode.js';
 import { getOrder, saveOrder, sortByOrder } from '../vcenter/order.js';
-import { listAudit } from '../audit.js';
+import { listAudit, logAudit } from '../audit.js';
 import { alertStatus, saveAlertConfig, testAlert, getAnomalySettings, saveAnomalySettings } from '../alerts.js';
 import { loadMetricsSettings, saveMetricsSettings, METRICS_LIMITS } from '../metrics/settings.js';
 import { forceGpuUtilCollect, clearGpuUtilForce } from '../vcenter/soapClient.js';
@@ -514,6 +515,22 @@ adminRouter.post('/alerts/test', adminOnly, async (req, res) => res.json(await t
 // 이상동작 탐지(동시 다운) — vCenter별 임계 설정.
 adminRouter.get('/anomaly', adminOnly, (_req, res) => res.json(getAnomalySettings()));
 adminRouter.put('/anomaly', adminOnly, (req, res) => res.json({ ok: true, settings: saveAnomalySettings(req.body || {}) }));
+
+// 세션 보안(유휴 자동 로그아웃) — 조회는 자유, 변경은 OTP 재인증 + 감사 기록.
+adminRouter.get('/security/session', adminOnly, (_req, res) => res.json(loadSessionSecurity()));
+adminRouter.put('/security/session', adminOnly, (req, res) => {
+  const username = req.user?.username || 'unknown';
+  // 인증이 켜져 있으면 변경 시 본인 OTP 재인증을 강제(누가 바꿨는지 신원 확정 + 무단변경 방지).
+  if (config.auth.enabled) {
+    const v = verifyUserOtp(username, req.body?.otp);
+    if (!v.ok) return res.status(401).json({ ok: false, reason: v.reason, needEnroll: !!v.needEnroll });
+  }
+  const before = loadSessionSecurity();
+  const after = saveSessionSecurity({ idleLogoutEnabled: req.body?.idleLogoutEnabled, idleLogoutMin: req.body?.idleLogoutMin });
+  const fmt = (s) => (s.idleLogoutEnabled ? `${s.idleLogoutMin}분` : '비활성');
+  logAudit({ user: username, action: '세션 보안(유휴 자동 로그아웃) 변경', target: 'security/session', detail: `유휴 로그아웃 ${fmt(before)} → ${fmt(after)}`, ip: req.ip || '' });
+  res.json({ ok: true, settings: after });
+});
 
 // --- VM 프로비저닝: 대량 생성 작업 시작 (관리자) ---
 adminRouter.post('/provision/jobs', adminOnly, (req, res) => {
