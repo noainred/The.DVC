@@ -68,6 +68,8 @@ body {
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); }
 .dot.live { animation: pulse 2s infinite; }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
+@keyframes blink-red { 0%,100% { opacity: 1; } 50% { opacity: .2; } }
+.blink-red { color: var(--red,#ef4444); font-weight: 700; animation: blink-red 1s infinite; }
 
 /* Layout */
 .content { padding: 22px 24px 72px; max-width: 1680px; width: 100%; margin: 0 auto; }

@@ -61,7 +61,7 @@ export default function GpuGuestSettings() {
     <div style={{ maxWidth: 1280 }}>
       <div className="section-title" style={{ marginTop: 0 }}>🎮 GPU 게스트 수집</div>
       <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
-        패스쓰루(DirectPath I/O) GPU는 ESXi가 사용률을 보지 못합니다. 선택한 <b>법인의 VM</b>에
+패스쓰루(DirectPath I/O) GPU는 ESXi가 사용률을 보지 못하고, vGPU도 VM별 사용률은 게스트에서 읽는 게 정확합니다. 선택한 <b>법인의 VM</b>에
         VMware Tools 게스트 작업으로 <code>nvidia-smi</code>를 실행해 사용률을 수집합니다.
         VM마다 계정이 다르면 <b>VM별 계정</b>을 등록하세요.
         <span className="badge amber" style={{ marginLeft: 6 }}>실환경 BETA</span>
@@ -221,8 +221,8 @@ function VmCredManager({ vcs, vcenters }) {
         </div>
       </div>
 
-      {!selVc && <div className="muted" style={{ fontSize: 13 }}>법인을 선택하면 그 법인에서 GPU를 <b>패스쓰루</b>로 쓰는 VM 목록을 불러옵니다.</div>}
-      {selVc && rows && rows.length === 0 && !loading && <div className="muted" style={{ fontSize: 13 }}>이 법인에 패스쓰루 GPU VM이 없습니다.</div>}
+      {!selVc && <div className="muted" style={{ fontSize: 13 }}>법인을 선택하면 그 법인에서 <b>GPU(패스쓰루·vGPU)</b>를 쓰는 VM 목록을 불러옵니다.</div>}
+      {selVc && rows && rows.length === 0 && !loading && <div className="muted" style={{ fontSize: 13 }}>이 법인에 GPU 할당 VM이 없습니다.</div>}
 
       {selVc && rows && rows.length > 0 && (
         <>

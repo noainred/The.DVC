@@ -14,7 +14,7 @@ const fmtAgo = (ts) => {
 function Funnel({ c }) {
   if (!c) return null;
   const steps = [
-    ['패스쓰루 호스트', c.passthruHosts], ['호스트 위 VM', c.vmsOnHost], ['패스쓰루 GPU 할당', c.passthroughGpuVms],
+    ['GPU 호스트', c.gpuHosts ?? c.passthruHosts], ['호스트 위 VM', c.vmsOnHost], ['GPU 할당 VM', c.gpuVms ?? c.passthroughGpuVms],
     ['On+Tools', c.onTools], ['수집 대상(계정O)', c.candidates],
   ];
   let stopped = false;
