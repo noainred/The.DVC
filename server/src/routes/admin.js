@@ -33,6 +33,9 @@ import { loadGpuGuestSettings, saveGpuGuestSettings, redactGpuGuestSettings, res
 import { gpuGuestStatus, rescheduleGpuGuestPoller, gpuHostIds, vmUsesGpu, getGpuGuestDiag } from '../gpu/poller.js';
 import { testVmGuest, VimSoapClient } from '../gpu/guestops.js';
 import { testVmGuestSsh } from '../gpu/sshCollect.js';
+import { listPhysical, addPhysical, updatePhysical, removePhysical, getPhysicalRaw } from '../gpu/physicalRegistry.js';
+import { getAllPhysicalGpu } from '../gpu/physicalStore.js';
+import { physicalPollerStatus, pollPhysicalOnce } from '../gpu/physicalPoller.js';
 import { getGuestGpuVms } from '../gpu/store.js';
 import { getAllGpuGuestDiag } from '../central/gpuGuestDiag.js';
 import { loadVcenterConfig } from '../config.js';
@@ -429,7 +432,42 @@ adminRouter.get('/gpu-guest/vms', adminOnly, (req, res) => {
   res.json({ vcenterId: vcId, vcShared: { username: s.vcenters[vcId]?.username || '', hasPassword: !!s.vcenters[vcId]?.password }, vms });
 });
 
-// 게스트 로그인/데이터 읽기 테스트 — 개별 또는 일괄. body:
+// ── 물리(베어메탈) 서버 GPU 수집 — IP+계정으로 SSH nvidia-smi(가상화 안 한 서버) ──────
+adminRouter.get('/gpu-physical', adminOnly, (_req, res) => {
+  res.json({ servers: listPhysical(), results: getAllPhysicalGpu(), status: physicalPollerStatus() });
+});
+adminRouter.post('/gpu-physical', adminOnly, (req, res) => {
+  const r = addPhysical(req.body || {});
+  if (r.ok) pollPhysicalOnce().catch(() => {});
+  res.status(r.ok ? 201 : 400).json(r);
+});
+adminRouter.put('/gpu-physical/:id', adminOnly, (req, res) => {
+  const r = updatePhysical(req.params.id, req.body || {});
+  if (r.ok) pollPhysicalOnce().catch(() => {});
+  res.status(r.ok ? 200 : 400).json(r);
+});
+adminRouter.delete('/gpu-physical/:id', adminOnly, (req, res) => {
+  const r = removePhysical(req.params.id);
+  res.status(r.ok ? 200 : 400).json(r);
+});
+adminRouter.post('/gpu-physical/poll', adminOnly, async (_req, res) => {
+  res.json({ ok: true, lastRun: await pollPhysicalOnce() });
+});
+// 단건 SSH 테스트(저장 전 검증 가능) — body { host, username, password?, port?, revealCreds? } 또는 { id }
+adminRouter.post('/gpu-physical/test', adminOnly, async (req, res) => {
+  const b = req.body || {};
+  let host = String(b.host || '').trim(); let username = String(b.username || '').trim(); let password = String(b.password || ''); let port = Number(b.port) || 22;
+  if (b.id) { const s = getPhysicalRaw(b.id); if (s) { host = s.host; username = s.username; password = b.password || s.password; port = s.port || 22; } }
+  if (!host || !username) return res.status(400).json({ ok: false, reason: 'host, username이 필요합니다.' });
+  const st = loadGpuGuestSettings();
+  const seed = b.revealCreds ? [{ t: Date.now(), msg: `🔓 자격증명(평문): id=${username} · pw=${password || '(빈 비번)'} · 포트=${port}` }] : [];
+  try {
+    const r = await testVmGuestSsh({ ipAddresses: [host] }, { username, password }, { timeoutMs: st.timeoutMs, port, trace: seed });
+    res.json({ ok: true, host, port, ...r });
+  } catch (e) { res.json({ ok: false, host, port, login: false, read: false, error: e.message, trace: seed }); }
+});
+
+
 //   { vcenterId, items: [{ vmId, username, password, useShared }] }
 // useShared=true 면 법인 공용 계정으로, 아니면 입력한(없으면 저장된 VM별) 계정으로 테스트.
 adminRouter.post('/gpu-guest/test', adminOnly, async (req, res) => {

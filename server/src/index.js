@@ -38,6 +38,7 @@ import { startNsxPoller } from './nsx/store.js';
 import { startAlertEngine } from './alerts.js';
 import { startMetricsSampler } from './metrics/sampler.js';
 import { startGpuGuestPoller } from './gpu/poller.js';
+import { startPhysicalGpuPoller } from './gpu/physicalPoller.js';
 import { startIpScanPoller } from './ipam/scanPoller.js';
 import { startIpScanAgent } from './agent/ipScanWorker.js';
 import { startCollectorPuller } from './collector/puller.js';
@@ -113,7 +114,7 @@ if (fs.existsSync(config.webDist)) {
 store.start();
 upgradeManager.start();
 const stagger = [
-  startIdracPoller, startNsxPoller, startAlertEngine, startMetricsSampler, startGpuGuestPoller,
+  startIdracPoller, startNsxPoller, startAlertEngine, startMetricsSampler, startGpuGuestPoller, startPhysicalGpuPoller,
   startIpScanPoller, startIpScanAgent, startCollectorPuller, startAgentScanner, startIdracScanWorker, startInventoryPush,
   startGpuGuestPush, startPingWorker, startConfigPush, startBackupScheduler, startLogPoller, startLogQueryWorker, startCaptureWorker, startCaptureMonitor, startLoginMonitor, startGuestScanScheduler, startOsScanner,
 ];

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { fetchJson, putJson, postJson } from '../api.js';
+import { fetchJson, putJson, postJson, delJson } from '../api.js';
 import { Loading, ErrorBox, VmLink } from '../components/ui.jsx';
 
 const fmtAgo = (ts) => {
@@ -154,6 +154,9 @@ export default function GpuGuestSettings() {
 
       {/* VM별 계정 관리 + 테스트 */}
       <VmCredManager vcs={vcs} vcenters={form.vcenters} collectMethod={form.collectMethod} onSavedShared={load} />
+
+      {/* 물리(베어메탈) 서버 GPU 수집 — 가상화 안 한 서버 SSH nvidia-smi */}
+      <PhysicalGpuManager vcs={vcs} />
 
       <div className="card" style={{ padding: 16, marginTop: 14 }}>
         <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>현재 상태</div>
@@ -549,6 +552,107 @@ function TestResult({ t }) {
       {t.sample && <span className="muted">{t.sample.utilNA ? 'N/A(MIG)' : `${t.sample.utilPct}%`} · {t.sample.gpus}GPU</span>}
       {!t.read && t.error && <span className="muted" title={t.error}>({t.error})</span>}
     </span>
+  );
+}
+
+const PEMPTY = { id: '', name: '', host: '', port: 22, username: 'root', password: '', os: 'linux', vcenterId: '', enabled: true };
+
+/** 물리(베어메탈) 서버 GPU 수집 — 가상화 안 한 서버를 IP+계정으로 등록해 SSH nvidia-smi로 수집. */
+function PhysicalGpuManager({ vcs }) {
+  const [d, setD] = useState(null);
+  const [form, setForm] = useState(null);   // 추가/수정 폼
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const [testing, setTesting] = useState(null); // id 또는 'form'
+  const [testRes, setTestRes] = useState(null);
+  const load = () => fetchJson('/admin/gpu-physical').then(setD).catch(() => {});
+  useEffect(() => { load(); const t = setInterval(load, 15_000); return () => clearInterval(t); }, []);
+  const results = new Map((d?.results || []).map((r) => [r.id, r]));
+  const setF = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const openAdd = () => { setEditing(false); setForm({ ...PEMPTY }); setMsg(null); setTestRes(null); };
+  const openEdit = (s) => { setEditing(true); setForm({ ...PEMPTY, ...s, password: '' }); setMsg(null); setTestRes(null); };
+  const save = async () => {
+    setBusy(true); setMsg(null);
+    try {
+      const r = editing ? await putJson(`/admin/gpu-physical/${encodeURIComponent(form.id)}`, form) : await postJson('/admin/gpu-physical', form);
+      if (r.ok) { setForm(null); await load(); } else setMsg(r.reason || '저장 실패');
+    } catch (e) { setMsg(e.message); } finally { setBusy(false); }
+  };
+  const del = async (s) => { if (window.confirm(`'${s.name}' 삭제?`)) { await delJson(`/admin/gpu-physical/${encodeURIComponent(s.id)}`).catch(() => {}); await load(); } };
+  const test = async (payload, who) => {
+    setTesting(who); setTestRes(null);
+    const r = await postJson('/admin/gpu-physical/test', payload).catch((e) => ({ ok: false, error: e.message }));
+    setTesting(null); setTestRes({ who, ...r });
+  };
+  const pollNow = async () => { setBusy(true); await postJson('/admin/gpu-physical/poll', {}).catch(() => {}); await load(); setBusy(false); };
+
+  return (
+    <div className="card" style={{ padding: 16, marginTop: 14 }}>
+      <div className="flex between wrap" style={{ alignItems: 'center', marginBottom: 8, gap: 8 }}>
+        <b>🖥 물리 서버 GPU 수집 <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>(가상화 안 한 베어메탈 — SSH nvidia-smi)</span></b>
+        <div className="flex gap">
+          <button className="logout-btn" style={{ padding: '7px 12px' }} disabled={busy} onClick={pollNow}>↻ 지금 수집</button>
+          <button className="login-btn" style={{ flex: 'none', padding: '7px 14px' }} onClick={openAdd}>+ 서버 추가</button>
+        </div>
+      </div>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
+        ESXi/VM이 아닌 <b>물리 서버</b>에 직접 SSH로 접속해 <code>nvidia-smi</code>로 GPU 사용률을 수집합니다(주기는 위 '수집 주기' 공유). 서버 OS에 NVIDIA 드라이버 + SSH가 있어야 합니다.
+      </div>
+
+      <div style={{ overflowX: 'auto' }}>
+        <table className="data-table" style={{ width: '100%', fontSize: 13 }}>
+          <thead><tr><th style={{ textAlign: 'left' }}>이름</th><th style={{ textAlign: 'left' }}>IP/계정</th><th style={{ textAlign: 'left' }}>소속</th><th style={{ textAlign: 'left' }}>GPU/사용률</th><th style={{ textAlign: 'left' }}>상태</th><th style={{ textAlign: 'right' }}>작업</th></tr></thead>
+          <tbody>
+            {(d?.servers || []).length === 0 && <tr><td colSpan={6} className="center muted" style={{ padding: 18 }}>등록된 물리 GPU 서버가 없습니다.</td></tr>}
+            {(d?.servers || []).map((s) => {
+              const r = results.get(s.id);
+              return (
+                <tr key={s.id}>
+                  <td><b>{s.name}</b></td>
+                  <td className="muted">{s.host}:{s.port} · {s.username} · {s.os}</td>
+                  <td className="muted">{s.vcenterId || '—'}</td>
+                  <td className="tabular">{r && r.error ? <span className="badge red" title={r.error}>오류</span> : r && r.count != null ? <span>{r.utilNA ? 'N/A(MIG)' : `${r.utilPct}%`} · {r.count}GPU{r.memUsedPct != null ? ` · mem ${r.memUsedPct}%` : ''}</span> : <span className="muted">—</span>}</td>
+                  <td>{s.enabled ? <span className="badge green">수집</span> : <span className="badge gray">중지</span>}</td>
+                  <td className="right nowrap">
+                    <button className="tab" disabled={testing === s.id} onClick={() => test({ id: s.id }, s.id)}>{testing === s.id ? '테스트…' : '테스트'}</button>
+                    <button className="tab" onClick={() => openEdit(s)}>수정</button>
+                    <button className="tab" style={{ color: 'var(--red)' }} onClick={() => del(s)}>삭제</button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {testRes && testRes.who !== 'form' && (
+        <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+          {testRes.read ? `✅ ${testRes.host}: 수집 OK — ${testRes.sample?.gpus}GPU · ${testRes.sample?.utilNA ? 'N/A(MIG)' : testRes.sample?.utilPct + '%'}` : `❌ ${testRes.host}: ${testRes.error || (testRes.login ? '읽기 실패' : '로그인 실패')}`}
+        </div>
+      )}
+
+      {form && (
+        <div className="card" style={{ padding: 14, marginTop: 12, border: '1px solid var(--accent)' }}>
+          <b style={{ fontSize: 14 }}>{editing ? `서버 수정 — ${form.id}` : '새 물리 GPU 서버'}</b>
+          <div className="flex gap wrap" style={{ marginTop: 10 }}>
+            <Field label="이름"><input className="input" style={{ width: 150 }} value={form.name} onChange={setF('name')} placeholder="GPU-NODE-01" /></Field>
+            <Field label="IP/호스트 *"><input className="input" style={{ width: 170 }} value={form.host} onChange={setF('host')} placeholder="10.94.46.94" /></Field>
+            <Field label="SSH 포트"><input className="input" type="number" style={{ width: 80 }} value={form.port} onChange={setF('port')} /></Field>
+            <Field label="계정 *"><input className="input" style={{ width: 130 }} value={form.username} onChange={setF('username')} placeholder="root" /></Field>
+            <Field label={`비밀번호${editing ? ' (비우면 유지)' : ''}`}><input className="input" type="password" style={{ width: 140 }} value={form.password} onChange={setF('password')} /></Field>
+            <Field label="OS"><select className="select" value={form.os} onChange={setF('os')}><option value="linux">Linux</option><option value="windows">Windows</option></select></Field>
+            <Field label="소속 vCenter(선택)"><select className="select" value={form.vcenterId} onChange={setF('vcenterId')} style={{ minWidth: 150 }}><option value="">(없음)</option>{vcs.map((v) => <option key={v.id} value={v.id}>{v.name || v.id}</option>)}</select></Field>
+          </div>
+          <div className="flex gap" style={{ marginTop: 12, alignItems: 'center' }}>
+            <button className="logout-btn" style={{ padding: '8px 14px' }} disabled={testing === 'form' || !form.host || !form.username} onClick={() => test({ host: form.host, username: form.username, password: form.password, port: form.port }, 'form')}>{testing === 'form' ? '테스트 중…' : 'SSH 테스트'}</button>
+            <button className="login-btn" style={{ flex: 'none', padding: '8px 18px' }} disabled={busy} onClick={save}>{busy ? '저장 중…' : (editing ? '수정' : '추가')}</button>
+            <button className="tab" style={{ padding: '8px 12px' }} onClick={() => setForm(null)}>취소</button>
+            {testRes && testRes.who === 'form' && <span className="muted" style={{ fontSize: 12 }}>{testRes.read ? `✅ 수집 OK — ${testRes.sample?.gpus}GPU · ${testRes.sample?.utilNA ? 'N/A(MIG)' : testRes.sample?.utilPct + '%'}` : `❌ ${testRes.error || (testRes.login ? '읽기 실패' : '로그인 실패')}`}</span>}
+            {msg && <span className="badge red" style={{ fontSize: 12 }}>{msg}</span>}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

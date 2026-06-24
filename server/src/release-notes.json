@@ -1,6 +1,16 @@
 {
   "notes": [
     {
+      "version": "2.29.0",
+      "date": "2026-06-25",
+      "title": "물리(베어메탈) 서버 GPU 수집 — 가상화 안 한 서버도 SSH로 nvidia-smi",
+      "notes": [
+        "설정 › GPU 게스트 수집에 '🖥 물리 서버 GPU 수집' 패널을 추가했습니다. ESXi/VM이 아닌 물리 서버를 IP+계정으로 등록하면, 주기마다 직접 SSH로 nvidia-smi를 돌려 GPU 사용률·메모리·장수를 수집합니다(VM 게스트 수집과 동일한 SSH 로직 재사용).",
+        "서버별 SSH 테스트, 즉시 수집, OS(Linux/Windows)·SSH 포트·소속 vCenter(선택) 지정 지원. 결과는 표에 사용률/GPU수/상태로 실시간 표시됩니다.",
+        "수집 주기·동시성·타임아웃은 기존 GPU 게스트 설정을 공유하고, 긴급중단(2인 OTP) 시 함께 정지됩니다. 등록 정보는 CONFIG_DIR/gpu-physical.json(0600)에 저장(비밀번호는 화면에서 가림)."
+      ]
+    },
+    {
       "version": "2.28.0",
       "date": "2026-06-25",
       "title": "Platform vCenter 상세 — '비교하기'로 2개 vCenter 나란히 비교",
