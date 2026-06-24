@@ -40,7 +40,7 @@ export async function runIdracScanWorkerOnce() {
         const scan = await scanForIdracs({ ips: job.ips, username: job.username, password: job.password });
         let registered = 0;
         if (config.agent.autoRegister && scan.found.length) {
-          const rr = registerScanned(scan.found, job.username, job.password, 'merge');
+          const rr = registerScanned(scan.found, job.username, job.password, 'merge', job.vcenterId || '');
           if (rr.ok) { registered = (rr.added || 0) + (rr.updated || 0); pollNow().catch(() => {}); }
         }
         await postResult({ reqId: job.reqId, agent: config.agent.name, ...scan, registered, durationMs: Date.now() - started });

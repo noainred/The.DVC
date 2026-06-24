@@ -9,8 +9,8 @@
  */
 
 import { loadFinopsConfig } from './finops.js';
+import { buildHostIndex, resolveServerVcenter } from '../idrac/attribution.js';
 
-const norm = (s) => String(s || '').trim().toLowerCase();
 const round = (x, d = 1) => (x == null || !Number.isFinite(x) ? 0 : Number(x.toFixed(d)));
 
 /**
@@ -23,30 +23,13 @@ export function computePowerBreakdown(snap, measuredList, opts = {}) {
   const vcFilter = opts.vcenterId ? String(opts.vcenterId) : '';
 
   const regionByVc = new Map();
-  for (const v of snap.vcenters || []) regionByVc.set(v.id, v.location?.region || v.region || '기타');
+  const validVcIds = new Set();
+  for (const v of snap.vcenters || []) { regionByVc.set(v.id, v.location?.region || v.region || '기타'); validVcIds.add(v.id); }
 
-  // ESXi 호스트 인덱스: 이름·서비스태그 → { vcenterId, model }
-  const byName = new Map();
-  const byTag = new Map();
-  for (const h of snap.hosts || []) {
-    const info = { vcenterId: h.vcenterId, model: h.model || '' };
-    const n = norm(h.name);
-    if (n) byName.set(n, info);
-    const t = norm(h.serviceTag);
-    if (t) byTag.set(t, info);
-  }
-
+  // ESXi 호스트 인덱스(이름·서비스태그) + 공유 귀속 규칙(명시 vcenterId 우선).
+  const idx = buildHostIndex(snap.hosts || []);
   const list = Array.isArray(measuredList) ? measuredList : [];
-
-  const resolveHost = (m) => {
-    for (const k of (m.hostNames && m.hostNames.length ? m.hostNames : [m.host])) {
-      const hit = byName.get(norm(k));
-      if (hit) return hit;
-    }
-    const tag = norm(m.serviceTag);
-    if (tag && byTag.has(tag)) return byTag.get(tag);
-    return null;
-  };
+  const resolveHost = (m) => resolveServerVcenter(m, idx, validVcIds);
 
   const byVc = new Map();     // vcId -> { vcId, region, watts, servers }
   const byModel = new Map();  // model -> { model, watts, servers }

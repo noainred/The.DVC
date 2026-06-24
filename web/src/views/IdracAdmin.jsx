@@ -3,7 +3,7 @@ import { fetchJson, postJson, putJson, delJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import EscClose from '../components/EscClose.jsx';
 
-const EMPTY = { id: '', name: '', host: '', username: 'root', password: '', serviceTag: '', hostNames: '', enabled: true, type: 'idrac' };
+const EMPTY = { id: '', name: '', host: '', username: 'root', password: '', serviceTag: '', vcenterId: '', hostNames: '', enabled: true, type: 'idrac' };
 
 export default function IdracAdmin() {
   const [data, setData] = useState(null);
@@ -22,6 +22,8 @@ export default function IdracAdmin() {
   const [scanAgent, setScanAgent] = useState('__local__'); // 스캔 수행 주체(로컬 또는 에이전트 이름)
   const [agents, setAgents] = useState({ agents: [], centralEnabled: false });
   const [scanProgress, setScanProgress] = useState(null); // 위임 스캔 진행 안내문
+  const [vcenters, setVcenters] = useState([]);           // vCenter 목록(소속 지정용)
+  const [assignVc, setAssignVc] = useState('');           // 일괄 지정 대상 vCenter
   const fileRef = useRef(null);
 
   const load = async () => {
@@ -31,9 +33,20 @@ export default function IdracAdmin() {
   useEffect(() => {
     load();
     fetchJson('/admin/idrac/scan-agents').then(setAgents).catch(() => {});
+    fetchJson('/admin/vcenters').then((d) => setVcenters(d.vcenters || d || [])).catch(() => fetchJson('/vcenters').then((d) => setVcenters(d || [])).catch(() => {}));
     const t = setInterval(load, 30_000); // refresh current power/poller status
     return () => clearInterval(t);
   }, []);
+
+  const assignAllVcenter = async () => {
+    setBusy(true); setImportMsg(null);
+    try {
+      const r = await postJson('/admin/idrac/assign-vcenter', { all: true, vcenterId: assignVc });
+      setImportMsg(r.ok ? { ok: true, text: `${r.updated}대의 소속 vCenter를 ${assignVc ? `'${assignVc}'(으)로 지정` : '해제'}했습니다. (총 ${r.total})` } : { ok: false, text: r.reason });
+      if (r.ok) await load();
+    } catch (e) { setImportMsg({ ok: false, text: e.message }); }
+    finally { setBusy(false); }
+  };
 
   if (error) return <ErrorBox message={error} />;
   if (!data) return <Loading />;
@@ -131,7 +144,7 @@ export default function IdracAdmin() {
   const scanIdracs = async () => {
     setBusy(true); setScanResult(null); setImportMsg(null); setScanProgress(null);
     try {
-      const r = await postJson('/admin/idrac/scan', { ips: bulk.ips, username: bulk.username, password: bulk.password, agent: scanAgent });
+      const r = await postJson('/admin/idrac/scan', { ips: bulk.ips, username: bulk.username, password: bulk.password, agent: scanAgent, vcenterId: bulk.vcenterId || '' });
       if (!r.ok) { setImportMsg({ ok: false, text: r.reason }); return; }
       if (!r.delegated) {
         setScanResult({ ...r, delegated: false });
@@ -174,7 +187,7 @@ export default function IdracAdmin() {
     if (!found.length) return;
     setBusy(true); setImportMsg(null);
     try {
-      const r = await postJson('/admin/idrac/register-scanned', { found, username: bulk.username, password: bulk.password, mode: replaceMode ? 'replace' : 'merge' });
+      const r = await postJson('/admin/idrac/register-scanned', { found, username: bulk.username, password: bulk.password, mode: replaceMode ? 'replace' : 'merge', vcenterId: bulk.vcenterId || '' });
       setImportMsg(r.ok
         ? { ok: true, text: `iDRAC ${found.length}대 등록 — 추가 ${r.added}, 갱신 ${r.updated} (총 ${r.total})`, skipped: r.skipped }
         : { ok: false, text: r.reason });
@@ -210,6 +223,12 @@ export default function IdracAdmin() {
           <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12 }} title="체크 시 기존 목록을 모두 교체">
             <input type="checkbox" checked={replaceMode} onChange={(e) => setReplaceMode(e.target.checked)} /> 전체 교체
           </label>
+          <span className="muted" style={{ fontSize: 12, borderLeft: '1px solid rgba(148,163,184,.25)', paddingLeft: 10 }} title="목록의 모든 iDRAC 서버 소속 vCenter를 한 번에 지정합니다(ESXi 호스트가 아니어도 전력이 그 vCenter로 귀속).">전체 소속 vCenter:</span>
+          <select className="input" style={{ padding: '7px 10px', maxWidth: 200 }} value={assignVc} onChange={(e) => setAssignVc(e.target.value)}>
+            <option value="">(지정 해제)</option>
+            {vcenters.map((v) => <option key={v.id} value={v.id}>{v.name || v.id}</option>)}
+          </select>
+          <button className="logout-btn" style={{ padding: '9px 14px' }} disabled={busy} onClick={assignAllVcenter} title="목록 전체에 적용">전체 적용</button>
           <input ref={fileRef} type="file" accept=".json,.csv,application/json,text/csv" style={{ display: 'none' }} onChange={onImportFile} />
           <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={() => fileRef.current?.click()}>파일 업로드(JSON/CSV)</button>
           <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={() => { setCsvText(''); }}>CSV 붙여넣기</button>
@@ -257,7 +276,10 @@ export default function IdracAdmin() {
                   <td>{s.name}</td>
                   <td className="muted">{s.host?.replace(/^https?:\/\//, '')}</td>
                   <td className="muted">{s.username}</td>
-                  <td className="muted">{isOme ? (r?.devices != null ? `장비 ${r.devices}대${r.measured != null ? ` · 측정 ${r.measured}` : ''}` : <span className="badge gray">자동 발견</span>) : ((s.hostNames || []).join(', ') || <span className="badge gray">미지정</span>)}</td>
+                  <td className="muted">
+                    {s.vcenterId && <div><span className="badge teal" title="소속 vCenter로 명시 지정됨">vC: {s.vcenterId}</span></div>}
+                    {isOme ? (r?.devices != null ? `장비 ${r.devices}대${r.measured != null ? ` · 측정 ${r.measured}` : ''}` : <span className="badge gray">자동 발견</span>) : ((s.hostNames || []).join(', ') || (!s.vcenterId && <span className="badge gray">미지정</span>))}
+                  </td>
                   <td className="tabular">{isOme ? (r?.error ? <span className="badge red" title={r.error}>오류</span> : (r?.metric ? <span className="muted">{r.metric === 'powermanager' ? 'Power Mgr' : '인벤토리'}</span> : '—')) : (r?.watts != null ? fmtW(r.watts) : (r?.error ? <span className="badge red" title={r.error}>오류</span> : '—'))}</td>
                   <td>{s.enabled === false ? <span className="badge gray">중지</span> : <span className="badge green">수집</span>}</td>
                   <td className="right nowrap">
@@ -300,6 +322,13 @@ export default function IdracAdmin() {
               {form.type !== 'ome' && (
                 <>
                   <label>서비스 태그<input className="input" value={form.serviceTag} onChange={setF('serviceTag')} placeholder="(선택) 자동 조회됨" /></label>
+                  <label>소속 vCenter
+                    <select className="input" value={form.vcenterId || ''} onChange={setF('vcenterId')}
+                      title="지정 시 이 서버 전력을 해당 vCenter로 귀속(이름·태그 매칭보다 우선). ESXi 호스트가 아니어도 됩니다.">
+                      <option value="">(자동: 이름·태그 매칭)</option>
+                      {vcenters.map((v) => <option key={v.id} value={v.id}>{v.name || v.id}</option>)}
+                    </select>
+                  </label>
                   <label style={{ gridColumn: '1 / -1' }}>매핑 ESXi 호스트 이름 (쉼표로 여러 개)
                     <input className="input" value={form.hostNames} onChange={setF('hostNames')} placeholder="esxi-seoul-01.corp.local, 10.0.0.21" />
                   </label>
@@ -385,6 +414,13 @@ export default function IdracAdmin() {
                   title="원격 사이트 iDRAC는 중앙에서 직접 못 닿으므로, 그 사이트의 현장 에이전트가 스캔을 대행합니다.">
                   <option value="__local__">이 포탈에서 직접</option>
                   {(agents.agents || []).map((a) => <option key={a} value={a}>에이전트: {a}</option>)}
+                </select>
+              </label>
+              <label>소속 vCenter
+                <select className="input" value={bulk.vcenterId || ''} onChange={(e) => setBulk((b) => ({ ...b, vcenterId: e.target.value }))}
+                  title="이 배치의 서버 전력을 지정한 vCenter로 귀속합니다(ESXi 호스트가 아니어도 됨). 비우면 호스트명·서비스태그 매칭을 따릅니다.">
+                  <option value="">(자동: 이름·태그 매칭)</option>
+                  {vcenters.map((v) => <option key={v.id} value={v.id}>{v.name || v.id}</option>)}
                 </select>
               </label>
             </div>

@@ -2,7 +2,8 @@ import { config, loadVcenterConfig } from './config.js';
 import { generateSnapshot } from './mock/generator.js';
 import { collectFromVCenter } from './vcenter/restClient.js';
 import { describeError } from './util/errors.js';
-import { latestPowerByHostName, latestPowerByServiceTag } from './idrac/service.js';
+import { latestPowerByHostName, latestPowerByServiceTag, allMeasuredPower } from './idrac/service.js';
+import { buildHostIndex, resolveServerVcenter } from './idrac/attribution.js';
 import { applyMutes } from './alarm-mutes.js';
 import { getDataSource } from './runtime-settings.js';
 import { buildIpamRows } from './ipam/ledger.js';
@@ -21,13 +22,29 @@ async function overlayIdracPower(snap) {
   try {
     const byName = await latestPowerByHostName();
     const byTag = await latestPowerByServiceTag();
-    if (!byName.size && !byTag.size) return snap;
     for (const h of snap.hosts) {
       // 1) 호스트명 일치, 2) 서비스태그 일치(이름이 달라도 Dell 서버 전력 귀속).
       const m = byName.get(String(h.name || '').trim().toLowerCase())
         || byTag.get(String(h.serviceTag || '').trim().toLowerCase());
       if (m) { h.powerWatts = m.watts; h.powerSource = 'idrac'; }
     }
+
+    // 전체 측정 전력(iDRAC/OME/원격, 매핑 무관)을 vCenter별로 귀속 — Overview 총합·per-vCenter 롤업의 근거.
+    // 우선순위: 서버에 명시 지정된 vcenterId → 호스트명 → 서비스태그 → (미매핑).
+    const measured = await allMeasuredPower();
+    const idx = buildHostIndex(snap.hosts);
+    const validVcIds = new Set(snap.vcenters.map((v) => v.id));
+    const byVc = new Map();
+    let totalW = 0, count = 0;
+    for (const mm of measured) {
+      const w = Number(mm.watts);
+      if (!Number.isFinite(w)) continue;
+      count++; totalW += w;
+      const hit = resolveServerVcenter(mm, idx, validVcIds);
+      const vcId = hit ? hit.vcenterId : '(미매핑)';
+      byVc.set(vcId, (byVc.get(vcId) || 0) + w);
+    }
+    snap.measuredPower = { totalWatts: Math.round(totalW), servers: count, byVc: Object.fromEntries(byVc) };
   } catch { /* power overlay is best-effort */ }
   return snap;
 }
@@ -224,9 +241,11 @@ function withRollups(snap) {
     alarms: snap.alarms.length,
     alarmsCritical: snap.alarms.filter((a) => a.severity === 'critical').length,
     alarmsWarning: snap.alarms.filter((a) => a.severity === 'warning').length,
-    powerWatts: sum(snap.hosts, (h) => h.powerWatts),
-    powerKw: round(sum(snap.hosts, (h) => h.powerWatts) / 1000, 1),
-    powerReporting: snap.hosts.filter((h) => h.powerWatts > 0).length,
+    // 총 소비전력: 측정된 '모든' 서버(iDRAC/OME/원격) 합계 — ESXi 호스트로 매핑 안 된 서버도 포함.
+    powerWatts: snap.measuredPower ? snap.measuredPower.totalWatts : sum(snap.hosts, (h) => h.powerWatts),
+    powerKw: round((snap.measuredPower ? snap.measuredPower.totalWatts : sum(snap.hosts, (h) => h.powerWatts)) / 1000, 1),
+    powerReporting: snap.measuredPower ? snap.measuredPower.servers : snap.hosts.filter((h) => h.powerWatts > 0).length,
+    powerUnmappedKw: round((snap.measuredPower?.byVc?.['(미매핑)'] || 0) / 1000, 1),
   };
 
   const byKey = (key) => {
@@ -256,7 +275,8 @@ function withRollups(snap) {
         storageTotalTB: round(stC / 1024, 1),
         alarmsCritical: a.filter((x) => x.severity === 'critical').length,
         alarmsWarning: a.filter((x) => x.severity === 'warning').length,
-        powerKw: round(sum(h, (x) => x.powerWatts) / 1000, 1),
+        // 측정 전력을 vCenter 귀속 기준으로 합산(명시 지정·이름·태그). 호스트 미매핑 서버도 그 vCenter에 포함.
+        powerKw: round(ids.reduce((acc, id) => acc + (snap.measuredPower?.byVc?.[id] || 0), 0) / 1000, 1),
       };
     });
   };

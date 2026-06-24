@@ -67,7 +67,7 @@ import { createJob as createProvisionJob } from '../provision/jobs.js';
 import { updateSaved, removeSaved } from '../provision/saved.js';
 import {
   listRegistry as listServers, addServer, updateServer, removeServer,
-  testServer, importServers, parseCsv, bulkAddByIps, registerScanned,
+  testServer, importServers, parseCsv, bulkAddByIps, registerScanned, assignVcenter,
 } from '../idrac/registry.js';
 import { expandIpList } from '../idrac/iprange.js';
 import { scanForIdracs } from '../idrac/scan.js';
@@ -715,7 +715,7 @@ adminRouter.post('/idrac/scan', adminOnly, async (req, res) => {
   // 에이전트 위임 스캔(원격 사이트 iDRAC에 중앙이 직접 못 닿는 경우).
   if (agent && agent !== '__local__') {
     if (!config.central.token) return res.status(400).json({ ok: false, reason: '중앙(CENTRAL_TOKEN) 미설정 — 에이전트 위임 스캔을 사용할 수 없습니다.' });
-    const reqId = enqueueIdracScan(agent, { ips, username, password });
+    const reqId = enqueueIdracScan(agent, { ips, username, password, vcenterId: String(req.body?.vcenterId || '').trim() });
     if (!reqId) return res.status(429).json({ ok: false, reason: '대기 중인 스캔 잡이 너무 많습니다. 잠시 후 다시 시도하세요.' });
     return res.json({ ok: true, delegated: true, agent, reqId });
   }
@@ -745,12 +745,23 @@ adminRouter.get('/idrac/scan-agents', adminOnly, (_req, res) => {
 });
 
 // Register iDRACs found by a scan, applying the shared credentials, then poll.
-// Body: { found:[{ip,serviceTag,hostName,model}], username, password, mode? }
+// Body: { found:[{ip,serviceTag,hostName,model}], username, password, mode?, vcenterId? }
 adminRouter.post('/idrac/register-scanned', adminOnly, (req, res) => {
-  const { found, username, password, mode } = req.body || {};
-  const result = registerScanned(found, username, password, mode === 'replace' ? 'replace' : 'merge');
+  const { found, username, password, mode, vcenterId } = req.body || {};
+  const result = registerScanned(found, username, password, mode === 'replace' ? 'replace' : 'merge', vcenterId || '');
   if (result.ok) pollNow().catch(() => {});
   res.status(result.ok ? 200 : 400).json(result);
+});
+
+// 다수 iDRAC 서버의 소속 vCenter 일괄 지정/해제. Body: { ids?:[], vcenterId, all? }
+// ids 미지정 + all=true → 전체 적용. 빈 vcenterId = 지정 해제(이름/태그 매칭으로 복귀).
+adminRouter.post('/idrac/assign-vcenter', adminOnly, (req, res) => {
+  const b = req.body || {};
+  const ids = b.all ? null : (Array.isArray(b.ids) ? b.ids : []);
+  if (!b.all && (!ids || !ids.length)) return res.status(400).json({ ok: false, reason: '대상(ids) 또는 all=true가 필요합니다.' });
+  const result = assignVcenter({ ids, vcenterId: b.vcenterId || '' });
+  if (result.ok) pollNow().catch(() => {});
+  res.json(result);
 });
 
 // ---- Distributed collection: remote collector agents ----------------------

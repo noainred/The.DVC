@@ -105,7 +105,7 @@ export async function allMeasuredPower() {
     const sample = latest.get(s.id);
     if (!sample || sample.watts == null || !Number.isFinite(sample.watts)) continue;
     const { model, serviceTag } = serverIdentity(s.id, s);
-    out.push({ serverId: s.id, serverName: s.name, watts: sample.watts, ts: sample.ts, host: norm(s.host || matchKeys(s)[0] || s.name), hostNames: matchKeys(s), model, serviceTag, source: 'idrac' });
+    out.push({ serverId: s.id, serverName: s.name, watts: sample.watts, ts: sample.ts, host: norm(s.host || matchKeys(s)[0] || s.name), hostNames: matchKeys(s), model, serviceTag, vcenterId: s.vcenterId || '', source: 'idrac' });
     seen.add(s.id);
   }
   for (const { entryId, at, device } of allOmeDevices()) {

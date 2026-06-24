@@ -49,6 +49,22 @@ test('전력분석: 모델별 집계(ESXi 매핑 없이도 모델 그룹)', () =
   assert.ok(r.byModel.find((x) => x.model === '(모델 미상)').watts === 100);
 });
 
+test('전력분석: 명시 지정 vcenterId가 이름/태그 매칭보다 우선', () => {
+  const measured = [
+    // 이름은 esxi-a(vc1)와 일치하지만, 명시 지정 vc2가 우선되어야 함
+    { serverName: 'esxi-a', host: 'esxi-a', hostNames: ['esxi-a'], vcenterId: 'vc2', watts: 200, model: 'R640' },
+    // ESXi 호스트가 아니지만 명시 지정으로 vc1에 귀속
+    { serverName: 'MINWINPC', host: 'minwinpc', hostNames: ['minwinpc'], vcenterId: 'vc1', watts: 300 },
+    // 존재하지 않는 vCenter 지정 → 무시하고 매칭 폴백(여기선 미매핑)
+    { serverName: 'ghost', host: 'ghost', vcenterId: 'vcX', watts: 50 },
+  ];
+  const r = computePowerBreakdown(snap, measured);
+  assert.equal(r.byVcenter.find((x) => x.vcId === 'vc2').watts, 200);
+  assert.equal(r.byVcenter.find((x) => x.vcId === 'vc1').watts, 300);
+  assert.ok(r.byVcenter.find((x) => x.vcId === '(미매핑)').watts === 50);
+  assert.equal(r.mappedServers, 2);
+});
+
 test('전력분석: vcenterId 범위 지정 시 해당 법인만', () => {
   const measured = [
     { serverName: 'esxi-a', host: 'esxi-a', hostNames: ['esxi-a'], watts: 400 },
