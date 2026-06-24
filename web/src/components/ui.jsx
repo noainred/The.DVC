@@ -210,23 +210,34 @@ export function VmIpPing({ vcenterId, ips }) {
       boxShadow: state === 'up' ? '0 0 6px var(--green,#22c55e)' : 'none', marginRight: 6, flex: '0 0 auto',
       animation: state === 'pending' || state === 'unknown' ? 'pulse 1.2s infinite' : 'none' }} />;
   };
+  // 정렬: 도달(up) → 확인중(pending/unknown) → 실패(error/down) 순, 같은 상태면 RTT 오름차순.
+  const ORDER = { up: 0, pending: 1, unknown: 1, error: 2, down: 3 };
+  const sorted = [...ips].sort((a, b) => {
+    const ra = res[a] || { state: 'pending' }, rb = res[b] || { state: 'pending' };
+    const d = (ORDER[ra.state] ?? 1) - (ORDER[rb.state] ?? 1);
+    if (d) return d;
+    return (ra.rttMs ?? 1e9) - (rb.rttMs ?? 1e9);
+  });
   return (
     <>
-      {ips.map((ip, i) => {
-        const r = res[ip] || { state: 'pending' };
-        const color = PING_COLOR[r.state] || '';
-        const strong = r.state === 'up' || r.state === 'down';
-        return (
-          <div key={i} style={{ display: 'flex', alignItems: 'center', cursor: 'help' }} title={pingTip(ip, r)}>
-            {dot(r.state)}
-            <span style={{ color: color || 'inherit', fontWeight: strong ? 600 : 400 }}>{ip}</span>
-            {r.state === 'up' && r.rttMs != null && <span className="muted" style={{ fontSize: 11, marginLeft: 6 }}>{r.rttMs}ms</span>}
-            {r.state === 'down' && <span style={{ color: 'var(--red,#ef4444)', fontSize: 11, marginLeft: 6 }}>무응답</span>}
-            {r.state === 'pending' && <span className="muted" style={{ fontSize: 11, marginLeft: 6 }}>확인 중…</span>}
-          </div>
-        );
-      })}
-      <button className="tab" style={{ marginTop: 4, padding: '2px 8px', fontSize: 11 }} title="엣지 에이전트로 다시 ping" onClick={() => setRun((n) => n + 1)}>↻ ping 재시도</button>
+      <div style={{ display: 'inline-grid', gridTemplateColumns: 'auto auto auto', columnGap: 8, rowGap: 3, alignItems: 'center' }}>
+        {sorted.map((ip, i) => {
+          const r = res[ip] || { state: 'pending' };
+          const color = PING_COLOR[r.state] || '';
+          const strong = r.state === 'up' || r.state === 'down';
+          return (
+            <React.Fragment key={i}>
+              <span title={pingTip(ip, r)} style={{ display: 'inline-flex', cursor: 'help' }}>{dot(r.state)}</span>
+              <span title={pingTip(ip, r)} style={{ fontFamily: 'ui-monospace, monospace', color: color || 'inherit', fontWeight: strong ? 600 : 400, cursor: 'help' }}>{ip}</span>
+              <span style={{ fontSize: 11, textAlign: 'right', fontFamily: 'ui-monospace, monospace',
+                color: r.state === 'down' ? 'var(--red,#ef4444)' : 'var(--text-dim,#9ca3af)' }}>
+                {r.state === 'up' ? (r.rttMs != null ? `${r.rttMs}ms` : '응답') : r.state === 'down' ? '무응답' : r.state === 'error' ? '오류' : '확인 중…'}
+              </span>
+            </React.Fragment>
+          );
+        })}
+      </div>
+      <div><button className="tab" style={{ marginTop: 4, padding: '2px 8px', fontSize: 11 }} title="엣지 에이전트로 다시 ping" onClick={() => setRun((n) => n + 1)}>↻ ping 재시도</button></div>
     </>
   );
 }
