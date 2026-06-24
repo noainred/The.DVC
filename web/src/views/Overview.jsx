@@ -77,7 +77,7 @@ export default function Overview({ onSelectSite, onGotoTab }) {
         <Kpi label="스토리지 사용률" value={`${g.storageUsagePct}%`} pct={g.storageUsagePct} meta={`${g.storageUsedTB} / ${g.storageTotalTB} TB · ${g.datastores} DS`} onClick={() => onGotoTab?.('datastores')} />
         {g.powerReporting > 0 && (
           <Kpi label="총 소비전력" value={`${fmt(g.powerKw)} kW`} accent="var(--amber)"
-            meta={`측정 서버 ${fmt(g.powerReporting)}대 · 시간당 약 ${fmt(g.powerKw)} kWh${g.powerUnmappedKw > 0 ? ` · 미매핑 ${fmt(g.powerUnmappedKw)} kW` : ''}`}
+            meta={`등록 서버 ${fmt(g.powerReporting)}대 전체 합계(매핑+미매핑)${g.powerUnmappedKw > 0 ? ` · 매핑 ${fmt(Math.max(0, Math.round((g.powerKw - g.powerUnmappedKw) * 10) / 10))} + 미매핑 ${fmt(g.powerUnmappedKw)} kW` : ''} · 시간당 약 ${fmt(g.powerKw)} kWh`}
             onClick={() => onGotoTab?.('insights')} />
         )}
         <Kpi label="GPU 카드 수량" value={fmt(ov.gpuCards)} accent="var(--accent-2)" meta="설치된 GPU 장수" onClick={() => onGotoTab?.('tools')} />

@@ -475,8 +475,9 @@ function classifyFw(name) {
   const n = String(name).toLowerCase();
   if (n.includes('bios')) return 'BIOS';
   if (n.includes('idrac') || n.includes('lifecycle') || n.includes('ism')) return 'iDRAC';
-  if (n.includes('nic') || n.includes('network') || n.includes('ethernet') || n.includes('mellanox') || n.includes('broadcom') || n.includes('intel(r) ethernet') || n.includes('qlogic')) return 'NIC';
-  if (n.includes('raid') || n.includes('perc') || n.includes('hba') || n.includes('storage') || n.includes('bp') || n.includes('backplane')) return 'Storage';
+  if (n.includes('hba') || n.includes('fibre') || /\bfc\b/.test(n) || n.includes('host bus')) return 'HBA';
+  if (n.includes('nic') || n.includes('network') || n.includes('ethernet') || n.includes('mellanox') || n.includes('broadcom') || n.includes('intel(r) ethernet') || n.includes('qlogic') || n.includes('connectx')) return 'NIC';
+  if (n.includes('raid') || n.includes('perc') || n.includes('storage') || n.includes('bp') || n.includes('backplane')) return 'Storage';
   if (n.includes('power') || n.includes('psu') || n.includes('supply')) return 'PSU';
   if (n.includes('cpld') || n.includes('complex')) return 'CPLD';
   if (n.includes('disk') || n.includes('ssd') || n.includes('drive') || n.includes('nvme')) return 'Disk';

@@ -748,6 +748,155 @@ adminRouter.post('/idrac/poll', adminOnly, async (_req, res) => {
   res.json({ ok: true, lastRun: await pollNow() });
 });
 
+// 서버 분석 — 전체 iDRAC의 PSU(전원공급장치)를 평탄화(용량/출력/상태 정렬용) + 용량별 집계.
+adminRouter.get('/idrac/psu-inventory', adminOnly, (_req, res) => {
+  const servers = loadIdracRegistry().filter((s) => s.type !== 'ome');
+  const rows = [];
+  let collected = 0; let missing = 0;
+  for (const s of servers) {
+    const inv = getIdracInventory(s.id);
+    if (!inv) { missing++; continue; }
+    collected++;
+    for (const p of (inv.psus || [])) {
+      rows.push({
+        server: s.name, serverId: s.id, vcenterId: s.vcenterId || '',
+        name: p.name, model: p.model || '',
+        capacityWatts: p.capacityWatts ?? null, outputWatts: p.outputWatts ?? null, inputWatts: p.inputWatts ?? null,
+        voltage: p.lineInputVoltage ?? null, health: p.health || p.state || '',
+      });
+    }
+  }
+  const byCap = new Map();
+  for (const r of rows) { const k = r.capacityWatts ?? 0; const e = byCap.get(k) || { capacityWatts: r.capacityWatts ?? null, count: 0 }; e.count++; byCap.set(k, e); }
+  rows.sort((a, b) => (b.outputWatts || 0) - (a.outputWatts || 0));
+  res.json({
+    rows,
+    byCapacity: [...byCap.values()].sort((a, b) => (b.capacityWatts || 0) - (a.capacityWatts || 0)),
+    totalPsus: rows.length, totalOutputW: rows.reduce((a, b) => a + (b.outputWatts || 0), 0),
+    collectedServers: collected, totalServers: servers.length, missing,
+  });
+});
+
+// 서버 분석 — 전체 iDRAC에서 'OK가 아닌'(문제) 구성요소만 모아 보여준다.
+adminRouter.get('/idrac/health-issues', adminOnly, (_req, res) => {
+  const notOk = (h) => h && !/^ok$/i.test(String(h));
+  const servers = loadIdracRegistry().filter((s) => s.type !== 'ome');
+  const issues = [];
+  let collected = 0; const okSet = new Set(); const badSet = new Set();
+  for (const s of servers) {
+    const inv = getIdracInventory(s.id);
+    if (!inv) continue;
+    collected++;
+    const ctx = { server: s.name, serverId: s.id, vcenterId: s.vcenterId || '' };
+    const push = (category, item, status, detail) => { issues.push({ ...ctx, category, item, status: String(status || ''), detail: detail || '' }); badSet.add(s.id); };
+    const H = inv.health || {};
+    for (const [k, label] of [['overall', '전체'], ['processor', 'CPU'], ['memory', '메모리'], ['storage', '스토리지'], ['psu', 'PSU'], ['gpu', 'GPU']]) {
+      if (notOk(H[k])) push('헬스', label, H[k]);
+    }
+    for (const d of (inv.disks || [])) {
+      if (d.predictiveFailure) push('디스크', d.name || d.model, 'SMART 예측 실패', d.model);
+      else if (notOk(d.health)) push('디스크', d.name || d.model, d.health, d.model);
+    }
+    for (const p of (inv.psus || [])) if (notOk(p.health)) push('PSU', p.name, p.health, p.model);
+    for (const m of (inv.memoryDimms || [])) if (notOk(m.health)) push('메모리', m.locator, m.health);
+    for (const g of (inv.gpus || [])) if (notOk(g.health)) push('GPU', g.name, g.health, g.model);
+    for (const n of (inv.nics || [])) for (const port of (n.ports || [])) {
+      if (port.link && !/up|enabled|linkup/i.test(port.link)) push('NIC', `${n.model || n.name} · ${port.id}`, `링크 ${port.link}`);
+    }
+    if (!badSet.has(s.id)) okSet.add(s.id);
+  }
+  res.json({ issues, totalServers: servers.length, collectedServers: collected, okServers: okSet.size, issueServers: badSet.size });
+});
+
+// 서버 분석 — 전체 iDRAC 서버의 최신 온도센서(CPU/GPU/Inlet/Exhaust 등) 평탄화(정렬용).
+adminRouter.get('/idrac/temps', adminOnly, (_req, res) => {
+  const servers = loadIdracRegistry().filter((s) => s.type !== 'ome');
+  const rows = [];
+  const serverList = [];
+  let missing = 0;
+  for (const s of servers) {
+    const latest = getSensorSeries(s.id).latest;
+    const temps = latest?.temps || {};
+    if (!Object.keys(temps).length) { missing++; continue; }
+    const list = Object.entries(temps).map(([name, celsius]) => ({ name, celsius }));
+    serverList.push({ id: s.id, name: s.name, vcenterId: s.vcenterId || '', at: latest.t, maxC: Math.max(...list.map((x) => x.celsius)), temps: list });
+    for (const { name, celsius } of list) {
+      rows.push({ server: s.name, serverId: s.id, vcenterId: s.vcenterId || '', sensor: name, celsius, at: latest.t });
+    }
+  }
+  rows.sort((a, b) => b.celsius - a.celsius);
+  res.json({ rows, servers: serverList, sampledServers: serverList.length, totalServers: servers.length, missing, maxCelsius: rows.length ? rows[0].celsius : null });
+});
+
+// 서버 분석 — 서버 모델(R760/R770 등)별로 펌웨어/드라이버 버전 분포(버전별 설치 서버 수).
+adminRouter.get('/idrac/firmware-inventory', adminOnly, (_req, res) => {
+  const CAT_ORDER = ['iDRAC', 'BIOS', 'NIC', 'HBA', 'Storage', 'GPU', 'PSU', 'CPLD', 'Disk', 'Driver', '기타'];
+  const servers = loadIdracRegistry().filter((s) => s.type !== 'ome');
+  const models = new Map(); // model -> { servers:Set, cats: Map<cat, Map<version, Set<serverName>>> }
+  const missing = [];
+  for (const s of servers) {
+    const inv = getIdracInventory(s.id);
+    if (!inv) { missing.push({ id: s.id, name: s.name }); continue; }
+    const model = (inv.system?.model || '미상').trim() || '미상';
+    let m = models.get(model);
+    if (!m) { m = { model, servers: new Set(), cats: new Map() }; models.set(model, m); }
+    const sname = s.name || s.id;
+    m.servers.add(sname);
+    const add = (cat, version) => {
+      if (!version) return;
+      let c = m.cats.get(cat); if (!c) { c = new Map(); m.cats.set(cat, c); }
+      let v = c.get(version); if (!v) { v = new Set(); c.set(version, v); }
+      v.add(sname);
+    };
+    add('iDRAC', inv.idrac?.firmwareVersion);
+    add('BIOS', inv.bios?.version || inv.system?.biosVersion);
+    for (const f of (inv.firmware || [])) add(f.type || '기타', f.version);
+  }
+  const out = [...models.values()].map((m) => ({
+    model: m.model,
+    serverCount: m.servers.size,
+    categories: [...m.cats.entries()].map(([category, vmap]) => ({
+      category,
+      versions: [...vmap.entries()].map(([version, set]) => ({ version, count: set.size, servers: [...set].sort() })).sort((a, b) => b.count - a.count),
+    })).sort((a, b) => (CAT_ORDER.indexOf(a.category) + 1 || 99) - (CAT_ORDER.indexOf(b.category) + 1 || 99)),
+  })).sort((a, b) => b.serverCount - a.serverCount);
+  res.json({ models: out, missing, totalServers: servers.length, collectedServers: servers.length - missing.length });
+});
+
+// 서버 분석 — 모든 iDRAC가 수집한 GPU를 모델별로 집계(어떤 모델 몇 장, 어느 서버).
+adminRouter.get('/idrac/gpu-inventory', adminOnly, (_req, res) => {
+  const servers = loadIdracRegistry().filter((s) => s.type !== 'ome');
+  const byModel = new Map();
+  const serverList = [];
+  const missing = [];
+  let collected = 0;
+  for (const s of servers) {
+    const inv = getIdracInventory(s.id);
+    if (!inv) { missing.push({ id: s.id, name: s.name }); continue; }
+    collected++;
+    const gpus = inv.gpus || [];
+    serverList.push({ id: s.id, name: s.name, vcenterId: s.vcenterId || '', host: (s.host || '').replace(/^https?:\/\//, ''), gpuCount: gpus.length, gpus });
+    for (const g of gpus) {
+      const model = (g.model || '미상').trim() || '미상';
+      const e = byModel.get(model) || { model, count: 0, servers: new Map() };
+      e.count++;
+      const sv = e.servers.get(s.id) || { id: s.id, name: s.name, vcenterId: s.vcenterId || '', count: 0 };
+      sv.count++; e.servers.set(s.id, sv);
+      byModel.set(model, e);
+    }
+  }
+  const models = [...byModel.values()]
+    .map((e) => ({ model: e.model, count: e.count, serverCount: e.servers.size, servers: [...e.servers.values()].sort((a, b) => b.count - a.count) }))
+    .sort((a, b) => b.count - a.count);
+  res.json({
+    totalGpus: models.reduce((a, b) => a + b.count, 0),
+    models,
+    servers: serverList.sort((a, b) => b.gpuCount - a.gpuCount),
+    collectedServers: collected, totalServers: servers.length,
+    missing,
+  });
+});
+
 // 서버 상세 인벤토리(iDRAC/BIOS/드라이버 버전 등). 캐시 우선, ?refresh=1이면 즉시 재수집.
 adminRouter.get('/idrac/:id/inventory', adminOnly, async (req, res) => {
   const s = loadIdracRegistry().find((x) => x.id === req.params.id);
