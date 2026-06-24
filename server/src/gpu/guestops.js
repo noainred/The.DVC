@@ -227,6 +227,7 @@ export function parseNvidiaSmiCsv(text) {
   if (!text || !text.trim()) return null;
   const gpus = [];
   for (const line of text.trim().split(/\r?\n/)) {
+    if (!line.trim()) continue; // 빈 줄은 건너뜀(Number('')===0 으로 유령 0% GPU 생성 방지)
     const raw = line.split(',').map((x) => String(x).trim());
     const n0 = Number(raw[0]);
     if (raw.length < 1 || !Number.isFinite(n0)) continue;
