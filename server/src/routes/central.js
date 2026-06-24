@@ -11,6 +11,7 @@ import { setInventory } from '../central/inventory.js';
 import { setGuestGpu } from '../gpu/store.js';
 import { setGpuGuestDiag } from '../central/gpuGuestDiag.js';
 import { takePingJobs, setPingResults } from '../central/pingJobs.js';
+import { takeIdracScanJobs, setIdracScanResult } from '../central/idracScanJobs.js';
 import { setAgentConfig } from '../central/agentConfig.js';
 import { takeLogQueries, setLogQueryResult } from '../central/logQueries.js';
 import { takeCaptureJobs, setCaptureResult } from '../central/captureJobs.js';
@@ -70,6 +71,24 @@ centralRouter.post('/inventory', (req, res) => {
   };
   setInventory(String(b.vcenterId), slice, String(b.agent || ''), b.generatedAt || null);
   res.json({ ok: true, vcenterId: b.vcenterId, hosts: slice.hosts.length, vms: slice.vms.length });
+});
+
+// 위임 iDRAC 스캔: 에이전트가 자기 이름의 온디맨드 스캔 잡을 인출.
+centralRouter.get('/idrac-scan-jobs', (req, res) => {
+  if (!config.central.token) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: '토큰 불일치' });
+  res.json({ ok: true, jobs: takeIdracScanJobs(req.query.agent) });
+});
+
+// 위임 iDRAC 스캔: 에이전트가 발견 목록·요약을 reqId와 함께 회신.
+// Body: { agent, reqId, scanned, found:[...], unreachable, notIdrac, authFailed, registered, error? }
+centralRouter.post('/idrac-scan-result', (req, res) => {
+  if (!config.central.token) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: '토큰 불일치' });
+  const b = req.body || {};
+  if (!b.reqId) return res.status(400).json({ ok: false, reason: 'reqId가 필요합니다.' });
+  setIdracScanResult(String(b.reqId), b);
+  res.json({ ok: true });
 });
 
 // 게스트 GPU 수집 위임: ESXi 망에 닿는 현장 agent가 게스트 OS(nvidia-smi)에서 수집한

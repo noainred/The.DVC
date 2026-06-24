@@ -71,6 +71,7 @@ import {
 } from '../idrac/registry.js';
 import { expandIpList } from '../idrac/iprange.js';
 import { scanForIdracs } from '../idrac/scan.js';
+import { enqueueIdracScan, getIdracScanResult } from '../central/idracScanJobs.js';
 import { getPollerStatus, pollNow } from '../idrac/poller.js';
 import { listCollectors, addCollector, updateCollector, removeCollector, loadCollectors } from '../collector/registry.js';
 import { allCollectorStatus, getCollectorStatus } from '../collector/state.js';
@@ -703,17 +704,44 @@ adminRouter.post('/idrac/bulk-add', adminOnly, (req, res) => {
 });
 
 // Scan an IP range and return only the IPs that are real Dell iDRACs (with
-// identity). No writes. Body: { ips, username, password }
+// identity). No writes. Body: { ips, username, password, agent? }
+// agent 미지정/'__local__' = 이 포탈에서 직접 스캔(동기). 그 외 = 해당 에이전트에 위임.
 adminRouter.post('/idrac/scan', adminOnly, async (req, res) => {
   const { ips, username, password } = req.body || {};
+  const agent = String(req.body?.agent || '').trim();
   if (!ips) return res.status(400).json({ ok: false, reason: 'IP 대역을 입력하세요.' });
   if (!username || !password) return res.status(400).json({ ok: false, reason: 'iDRAC 계정/비밀번호가 필요합니다.' });
+
+  // 에이전트 위임 스캔(원격 사이트 iDRAC에 중앙이 직접 못 닿는 경우).
+  if (agent && agent !== '__local__') {
+    if (!config.central.token) return res.status(400).json({ ok: false, reason: '중앙(CENTRAL_TOKEN) 미설정 — 에이전트 위임 스캔을 사용할 수 없습니다.' });
+    const reqId = enqueueIdracScan(agent, { ips, username, password });
+    if (!reqId) return res.status(429).json({ ok: false, reason: '대기 중인 스캔 잡이 너무 많습니다. 잠시 후 다시 시도하세요.' });
+    return res.json({ ok: true, delegated: true, agent, reqId });
+  }
+
   try {
     const result = await scanForIdracs({ ips, username, password });
-    res.json({ ok: true, ...result });
+    res.json({ ok: true, delegated: false, ...result });
   } catch (err) {
     res.status(500).json({ ok: false, reason: err.message });
   }
+});
+
+// 위임 스캔 결과 폴링. Query: reqId
+adminRouter.get('/idrac/scan-result', adminOnly, (req, res) => {
+  res.json(getIdracScanResult(String(req.query.reqId || '')));
+});
+
+// 위임 스캔에 사용할 수 있는 에이전트 이름 목록(중앙에 보고/등록된 에이전트들).
+adminRouter.get('/idrac/scan-agents', adminOnly, (_req, res) => {
+  const names = new Set();
+  for (const k of Object.keys(getAllAgentConfigs() || {})) if (k) names.add(k);
+  for (const x of listInventory()) if (x.agent) names.add(x.agent);
+  for (const x of getAllGpuGuestDiag()) if (x.agent) names.add(x.agent);
+  for (const a of listAssignments()) if (a.agent) names.add(a.agent);
+  for (const k of Object.keys(getResults() || {})) if (k) names.add(k);
+  res.json({ agents: [...names].sort(), centralEnabled: Boolean(config.central.token) });
 });
 
 // Register iDRACs found by a scan, applying the shared credentials, then poll.

@@ -42,6 +42,7 @@ import { startIpScanPoller } from './ipam/scanPoller.js';
 import { startIpScanAgent } from './agent/ipScanWorker.js';
 import { startCollectorPuller } from './collector/puller.js';
 import { startAgentScanner } from './agent/scanner.js';
+import { startIdracScanWorker } from './agent/idracScanWorker.js';
 import { startInventoryPush } from './agent/inventoryPush.js';
 import { startGpuGuestPush } from './agent/gpuGuestPush.js';
 import { startPingWorker } from './agent/pingWorker.js';
@@ -113,7 +114,7 @@ store.start();
 upgradeManager.start();
 const stagger = [
   startIdracPoller, startNsxPoller, startAlertEngine, startMetricsSampler, startGpuGuestPoller,
-  startIpScanPoller, startIpScanAgent, startCollectorPuller, startAgentScanner, startInventoryPush,
+  startIpScanPoller, startIpScanAgent, startCollectorPuller, startAgentScanner, startIdracScanWorker, startInventoryPush,
   startGpuGuestPush, startPingWorker, startConfigPush, startBackupScheduler, startLogPoller, startLogQueryWorker, startCaptureWorker, startCaptureMonitor, startLoginMonitor, startGuestScanScheduler, startOsScanner,
 ];
 stagger.forEach((start, i) => setTimeout(() => { try { start(); } catch (e) { console.error('[start] 폴러 기동 실패:', e?.message); } }, i * 1500).unref?.());
