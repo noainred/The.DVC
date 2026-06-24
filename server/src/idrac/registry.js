@@ -87,6 +87,7 @@ function normalize(body, existing = null) {
     id, name, host, username, type,
     password: body.password ? String(body.password) : e.password || '',
     serviceTag: String(body.serviceTag ?? e.serviceTag ?? '').trim(),
+    vcenterId: String(body.vcenterId ?? e.vcenterId ?? '').trim(), // 명시 지정 시 전력이 이 vCenter로 귀속(이름·태그 매칭보다 우선)
     hostNames,
     enabled: body.enabled != null ? Boolean(body.enabled) : (e.enabled != null ? e.enabled : true),
   };
@@ -160,6 +161,7 @@ export function bulkAddByIps(body) {
   if (!ips.length) return { ok: false, reason: 'IP를 한 개 이상 입력하세요.', ipErrors: errors };
 
   const prefix = String(body.namePrefix || '').trim();
+  const vcenterId = String(body.vcenterId || '').trim();
   const servers = ips.map((ip) => ({
     id: ip,
     name: prefix ? `${prefix}${ip}` : ip,
@@ -167,6 +169,7 @@ export function bulkAddByIps(body) {
     username,
     password,
     hostNames: [ip],
+    vcenterId,
     enabled: true,
   }));
   const result = importServers(servers, body.mode === 'replace' ? 'replace' : 'merge');
@@ -178,9 +181,10 @@ export function bulkAddByIps(body) {
  * (ip, serviceTag, hostName, model); the shared username/password are applied
  * to all. hostNames includes the discovered hostname + IP for auto-matching.
  */
-export function registerScanned(found, username, password, mode = 'merge') {
+export function registerScanned(found, username, password, mode = 'merge', vcenterId = '') {
   if (!Array.isArray(found) || !found.length) return { ok: false, reason: '등록할 iDRAC가 없습니다.' };
   if (!username || !password) return { ok: false, reason: 'username/password가 필요합니다.' };
+  const vc = String(vcenterId || '').trim();
   const servers = found.map((f) => ({
     id: f.ip,
     name: f.hostName || f.serviceTag || f.ip,
@@ -189,9 +193,27 @@ export function registerScanned(found, username, password, mode = 'merge') {
     password,
     serviceTag: f.serviceTag || '',
     hostNames: [f.hostName, f.ip].filter(Boolean),
+    vcenterId: vc,
     enabled: true,
   }));
   return importServers(servers, mode);
+}
+
+/**
+ * 다수 서버의 소속 vCenter를 일괄 지정/해제. ids 미지정 시 전체 적용.
+ * Returns { ok, updated }.
+ */
+export function assignVcenter({ ids = null, vcenterId = '' } = {}) {
+  const vc = String(vcenterId || '').trim();
+  const list = loadRegistry();
+  const want = Array.isArray(ids) && ids.length ? new Set(ids.map(String)) : null;
+  let updated = 0;
+  for (const s of list) {
+    if (want && !want.has(String(s.id))) continue;
+    if (s.vcenterId !== vc) { s.vcenterId = vc; updated++; }
+  }
+  if (updated) saveRegistry(list);
+  return { ok: true, updated, total: list.length };
 }
 
 /**
@@ -215,6 +237,7 @@ export function parseCsv(text) {
       username: row.username,
       password: row.password,
       serviceTag: row.servicetag || row.service_tag || '',
+      vcenterId: row.vcenterid || row.vcenter || row.vcenter_id || '',
       hostNames: (row.hostnames || row.host_names || row.esxi || '').split(/[;|]/).map((s) => s.trim()).filter(Boolean),
     });
   }

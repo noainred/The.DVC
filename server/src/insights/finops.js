@@ -9,6 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { buildHostIndex, resolveServerVcenter } from '../idrac/attribution.js';
 
 const FILE = path.join(config.configDir, 'finops.json');
 
@@ -53,26 +54,11 @@ const round = (x, d = 1) => (x == null || !Number.isFinite(x) ? 0 : Number(x.toF
  */
 export function computeFinOps(snap, measuredList, cfg = loadFinopsConfig()) {
   const regionByVc = new Map();
-  for (const v of snap.vcenters || []) regionByVc.set(v.id, v.location?.region || v.region || '기타');
-  // 인벤토리 호스트명/서비스태그(정규화) → vCenter/모델. 매핑된 서버를 어느 vCenter로 귀속할지 판단.
-  const hostInfo = new Map();   // 호스트명 → info
-  const tagInfo = new Map();    // 서비스태그 → info
-  for (const h of snap.hosts || []) {
-    const info = { vcenterId: h.vcenterId, model: h.model || '' };
-    const n = String(h.name || '').toLowerCase();
-    if (n) hostInfo.set(n, info);
-    const t = String(h.serviceTag || '').trim().toLowerCase();
-    if (t) tagInfo.set(t, info);
-  }
-  // 서버 → ESXi 호스트 매핑: hostNames/host 중 이름 일치, 없으면 서비스태그 일치.
-  const resolve = (m) => {
-    for (const k of (m.hostNames && m.hostNames.length ? m.hostNames : [m.host])) {
-      const hit = hostInfo.get(String(k || '').toLowerCase());
-      if (hit) return hit;
-    }
-    const tag = String(m.serviceTag || '').trim().toLowerCase();
-    return (tag && tagInfo.get(tag)) || null;
-  };
+  const validVcIds = new Set();
+  for (const v of snap.vcenters || []) { regionByVc.set(v.id, v.location?.region || v.region || '기타'); validVcIds.add(v.id); }
+  // 서버 → vCenter 귀속(명시 vcenterId 우선 → 호스트명 → 서비스태그). 공유 규칙 사용.
+  const idx = buildHostIndex(snap.hosts || []);
+  const resolve = (m) => resolveServerVcenter(m, idx, validVcIds);
 
   // 하위호환: Map(host→{watts})가 들어오면 배열로 변환.
   const list = Array.isArray(measuredList)

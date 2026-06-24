@@ -34,14 +34,14 @@ function newReqId() {
 }
 
 /** UI가 위임 스캔 요청 → reqId 반환. */
-export function enqueueIdracScan(agent, { ips, username, password }) {
+export function enqueueIdracScan(agent, { ips, username, password, vcenterId = '' }) {
   gc();
   const key = String(agent || '').trim().toLowerCase();
   if (!key) return null;
   const pend = byAgent.get(key) || new Set();
   if (pend.size >= MAX_PENDING) return null;
   const reqId = newReqId();
-  jobs.set(reqId, { reqId, agent, ips, username, password, state: 'pending', createdAt: Date.now() });
+  jobs.set(reqId, { reqId, agent, ips, username, password, vcenterId, state: 'pending', createdAt: Date.now() });
   pend.add(reqId); byAgent.set(key, pend);
   return reqId;
 }
@@ -57,7 +57,7 @@ export function takeIdracScanJobs(agentName) {
     const j = jobs.get(reqId);
     if (!j) continue;
     j.state = 'running'; j.takenAt = Date.now();
-    out.push({ reqId, ips: j.ips, username: j.username, password: j.password });
+    out.push({ reqId, ips: j.ips, username: j.username, password: j.password, vcenterId: j.vcenterId || '' });
   }
   byAgent.delete(key);
   return out;
