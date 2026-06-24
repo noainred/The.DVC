@@ -1,7 +1,17 @@
 import React, { useState } from 'react';
-import { login } from '../api.js';
+import { login, getToken } from '../api.js';
+
+// 브라우저에 남아있는 SSO 토큰(JWT)의 payload를 디코드해 표시 이름을 추출(서명검증 아님 — 인사말 표시용).
+function nameFromToken() {
+  try {
+    const t = getToken(); if (!t) return '';
+    const p = JSON.parse(decodeURIComponent(escape(atob(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')))));
+    return p?.name || p?.username || p?.sub || '';
+  } catch { return ''; }
+}
 
 export default function Login({ onSuccess, notice }) {
+  const [welcome] = useState(nameFromToken);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState(null);
@@ -59,6 +69,7 @@ export default function Login({ onSuccess, notice }) {
         </div>
         <div className="login-title">로그인</div>
 
+        {welcome && !notice && <div style={{ textAlign: 'center', marginBottom: 8, fontSize: 14, color: 'var(--accent-2,#22d3ee)' }}><b>{welcome}</b>님 환영합니다 👋</div>}
         {notice && <div className="login-hint" style={{ color: 'var(--amber,#f59e0b)', textAlign: 'center', marginBottom: 8 }}>{notice}</div>}
 
         <label className="login-field">
