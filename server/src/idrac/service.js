@@ -80,6 +80,44 @@ export async function latestPowerByHostName() {
   return out;
 }
 
+/**
+ * 등록된 '모든' 서버의 최신 측정 전력(서버 단위, serverId로 중복 제거).
+ * iDRAC-직접 + OME 장비 + 원격 수집서버를 포함한다. ESXi 호스트 인벤토리와 매핑되지 않은
+ * 서버도 그대로 포함하므로(예: 호스트명이 인벤토리와 다른 경우), 측정된 실제 소비전력 합계가
+ * 매핑 여부와 무관하게 집계된다. 각 항목의 host는 매핑 기준 이름(인벤토리 매칭 시도용).
+ * 반환 [{ serverId, serverName, watts, ts, host, source }].
+ */
+export async function allMeasuredPower() {
+  const db = await getDb();
+  const latest = db.latestAll(); // Map<serverId,{watts,ts}>
+  const out = [];
+  const seen = new Set();
+  for (const s of loadRegistry()) {
+    if (s.type === 'ome') continue;
+    const sample = latest.get(s.id);
+    if (!sample || sample.watts == null || !Number.isFinite(sample.watts)) continue;
+    out.push({ serverId: s.id, serverName: s.name, watts: sample.watts, ts: sample.ts, host: norm(s.host || matchKeys(s)[0] || s.name), source: 'idrac' });
+    seen.add(s.id);
+  }
+  for (const { entryId, at, device } of allOmeDevices()) {
+    if (device.watts == null) continue;
+    const key = dbKey(entryId, device);
+    if (seen.has(key)) continue;
+    const sample = latest.get(key) || { watts: device.watts, ts: at };
+    if (sample.watts == null || !Number.isFinite(sample.watts)) continue;
+    out.push({ serverId: key, serverName: device.name, watts: sample.watts, ts: sample.ts, host: norm(device.serviceTag || device.name), source: 'ome' });
+    seen.add(key);
+  }
+  for (const [host, r] of remotePowerByHost()) {
+    if (r.watts == null || !Number.isFinite(r.watts)) continue;
+    const id = `remote:${r.collectorId}:${host}`;
+    if (seen.has(id)) continue;
+    out.push({ serverId: id, serverName: r.serverName || host, watts: r.watts, ts: r.ts, host: norm(host), source: 'remote' });
+    seen.add(id);
+  }
+  return out;
+}
+
 /** Detailed power for one host: current reading + history series + server info. */
 export async function hostPower(hostName, { hours = 24, limit = 1000 } = {}) {
   const db = await getDb();

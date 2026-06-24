@@ -32,8 +32,12 @@ export async function forecastCapacity(snap, opts = {}) {
   const minR2 = opts.minR2 != null ? Number(opts.minR2) : 0.3;
   const now = Date.now();
 
+  const vcFilter = opts.vcenterId ? String(opts.vcenterId) : '';
   const dsCap = new Map(); // dsId -> capacityGB
-  for (const d of snap.datastores || []) dsCap.set(d.id, { cap: d.capacityGB, name: d.name, vc: d.vcenterId, used: d.usedGB, pct: d.usagePct });
+  for (const d of snap.datastores || []) {
+    if (vcFilter && d.vcenterId !== vcFilter) continue; // vCenter 범위 지정 시 그 법인만(대규모 환경 hang 방지)
+    dsCap.set(d.id, { cap: d.capacityGB, name: d.name, vc: d.vcenterId, used: d.usedGB, pct: d.usagePct });
+  }
 
   const fit = (metric, k, cap) => {
     const hist = db.history(metric, k, since, bucketMs, 5000);
@@ -64,6 +68,7 @@ export async function forecastCapacity(snap, opts = {}) {
   const gpu = [];
   const gpuLatest = db.latestAll('gpu_vc');
   for (const [k] of gpuLatest) {
+    if (vcFilter && k !== vcFilter) continue;
     const f = fit('gpu_vc', k, 100);
     if (!f) continue;
     gpu.push({ vcenterId: k, metric: 'gpu_vc', limit: 100, ...f });
@@ -71,7 +76,8 @@ export async function forecastCapacity(snap, opts = {}) {
   gpu.sort((a, b) => (a.daysToLimit ?? 1e9) - (b.daysToLimit ?? 1e9));
 
   return {
-    config: { days, bucketMin: bucketMs / 60_000, minR2 },
+    config: { days, bucketMin: bucketMs / 60_000, minR2, vcenterId: vcFilter || '' },
+    scannedDatastores: dsCap.size,
     datastores: datastores.slice(0, 100),
     gpu: gpu.slice(0, 100),
     soon: datastores.filter((d) => d.daysToLimit != null && d.daysToLimit <= 30).slice(0, 30),

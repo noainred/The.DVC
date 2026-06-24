@@ -46,32 +46,44 @@ const round = (x, d = 1) => (x == null || !Number.isFinite(x) ? 0 : Number(x.toF
 
 /**
  * 현재 전력 기준 에너지/비용/탄소 집계.
- * @param snap     store 스냅샷(hosts, vcenters)
- * @param powerMap latestPowerByHostName() 결과 Map<hostLower,{watts,ts,...}>
+ * @param snap        store 스냅샷(hosts, vcenters)
+ * @param measuredList allMeasuredPower() 결과 — 등록된 '모든' 서버의 측정 전력(서버 단위).
+ *                     ESXi 인벤토리에 매핑 안 된 서버도 포함하므로 측정 전력이 누락되지 않는다.
+ *                     (하위호환: Map<hostLower,{watts}> 형태가 오면 항목으로 변환)
  */
-export function computeFinOps(snap, powerMap, cfg = loadFinopsConfig()) {
+export function computeFinOps(snap, measuredList, cfg = loadFinopsConfig()) {
   const regionByVc = new Map();
   for (const v of snap.vcenters || []) regionByVc.set(v.id, v.location?.region || v.region || '기타');
+  // 인벤토리 호스트명(정규화) → vCenter/모델. 매핑된 서버를 어느 vCenter로 귀속할지 판단.
+  const hostInfo = new Map();
+  for (const h of snap.hosts || []) hostInfo.set(String(h.name || '').toLowerCase(), { vcenterId: h.vcenterId, model: h.model || '' });
+
+  // 하위호환: Map(host→{watts})가 들어오면 배열로 변환.
+  const list = Array.isArray(measuredList)
+    ? measuredList
+    : [...(measuredList?.entries?.() || [])].map(([host, p]) => ({ serverName: host, host, watts: p?.watts, ts: p?.ts }));
 
   const byVc = new Map();      // vcId -> { vcId, region, watts, hosts }
   const byRegion = new Map();  // region -> { region, watts, hosts, vcenters:Set }
   const perHost = [];          // [{ host, vcenterId, region, watts }]
-  let totalW = 0, measured = 0;
+  let totalW = 0, measured = 0, unmapped = 0, unmappedW = 0;
 
-  for (const h of snap.hosts || []) {
-    const p = powerMap.get(String(h.name || '').toLowerCase());
-    const w = p?.watts;
+  for (const m of list) {
+    const w = m.watts;
     if (w == null || !Number.isFinite(w)) continue;
     measured++;
     totalW += w;
-    const region = regionByVc.get(h.vcenterId) || '기타';
-    perHost.push({ host: h.name, vcenterId: h.vcenterId, region, watts: w, model: h.model || '' });
+    const hi = hostInfo.get(String(m.host || '').toLowerCase());
+    const vcId = hi ? hi.vcenterId : '(미매핑)';
+    const region = hi ? (regionByVc.get(hi.vcenterId) || '기타') : '(미매핑)';
+    if (!hi) { unmapped++; unmappedW += w; }
+    perHost.push({ host: m.serverName || m.host, vcenterId: vcId, region, watts: w, model: hi?.model || '', mapped: !!hi });
 
-    const cv = byVc.get(h.vcenterId) || { vcId: h.vcenterId, region, watts: 0, hosts: 0 };
-    cv.watts += w; cv.hosts++; byVc.set(h.vcenterId, cv);
+    const cv = byVc.get(vcId) || { vcId, region, watts: 0, hosts: 0 };
+    cv.watts += w; cv.hosts++; byVc.set(vcId, cv);
 
     const cr = byRegion.get(region) || { region, watts: 0, hosts: 0, vcenters: new Set() };
-    cr.watts += w; cr.hosts++; cr.vcenters.add(h.vcenterId); byRegion.set(region, cr);
+    cr.watts += w; cr.hosts++; cr.vcenters.add(vcId); byRegion.set(region, cr);
   }
 
   // 현재 전력(facility = 서버전력 × PUE)으로 기간 에너지·비용·탄소 산출.
@@ -92,8 +104,10 @@ export function computeFinOps(snap, powerMap, cfg = loadFinopsConfig()) {
 
   return {
     config: cfg,
-    measuredHosts: measured,
+    measuredHosts: measured,         // 측정된 등록 서버 수(매핑 여부 무관)
     totalHosts: (snap.hosts || []).length,
+    unmappedServers: unmapped,       // 인벤토리 ESXi 호스트와 매핑 안 된 측정 서버 수
+    unmappedWatts: Math.round(unmappedW),
     totals: pack(totalW),
     byVcenter: [...byVc.values()].map((c) => ({ vcId: c.vcId, region: c.region, hosts: c.hosts, ...pack(c.watts) })).sort((a, b) => b.watts - a.watts),
     byRegion: [...byRegion.values()].map((c) => ({ region: c.region, hosts: c.hosts, vcenters: c.vcenters.size, ...pack(c.watts) })).sort((a, b) => b.watts - a.watts),
