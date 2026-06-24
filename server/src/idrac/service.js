@@ -10,6 +10,14 @@ import { allOmeDevices, dbKey } from './omeCache.js';
 import { getInventory } from './invCache.js';
 import { remotePowerByHost } from '../collector/state.js';
 
+// 서버의 모델/서비스태그를 인벤토리(Redfish)·레지스트리에서 최선의 값으로 해석.
+function serverIdentity(serverId, entry) {
+  const inv = getInventory(serverId);
+  const model = (inv?.system?.model || '').trim();
+  const serviceTag = (inv?.system?.serviceTag || entry?.serviceTag || '').trim();
+  return { model, serviceTag };
+}
+
 const norm = (s) => String(s || '').trim().toLowerCase();
 
 /** Find an OME-discovered device matching an ESXi host name (serviceTag/name). */
@@ -96,7 +104,8 @@ export async function allMeasuredPower() {
     if (s.type === 'ome') continue;
     const sample = latest.get(s.id);
     if (!sample || sample.watts == null || !Number.isFinite(sample.watts)) continue;
-    out.push({ serverId: s.id, serverName: s.name, watts: sample.watts, ts: sample.ts, host: norm(s.host || matchKeys(s)[0] || s.name), source: 'idrac' });
+    const { model, serviceTag } = serverIdentity(s.id, s);
+    out.push({ serverId: s.id, serverName: s.name, watts: sample.watts, ts: sample.ts, host: norm(s.host || matchKeys(s)[0] || s.name), hostNames: matchKeys(s), model, serviceTag, source: 'idrac' });
     seen.add(s.id);
   }
   for (const { entryId, at, device } of allOmeDevices()) {
@@ -105,15 +114,32 @@ export async function allMeasuredPower() {
     if (seen.has(key)) continue;
     const sample = latest.get(key) || { watts: device.watts, ts: at };
     if (sample.watts == null || !Number.isFinite(sample.watts)) continue;
-    out.push({ serverId: key, serverName: device.name, watts: sample.watts, ts: sample.ts, host: norm(device.serviceTag || device.name), source: 'ome' });
+    const st = norm(device.serviceTag);
+    out.push({ serverId: key, serverName: device.name, watts: sample.watts, ts: sample.ts, host: st || norm(device.name), hostNames: [st, norm(device.name)].filter(Boolean), model: (device.model || '').trim(), serviceTag: device.serviceTag || '', source: 'ome' });
     seen.add(key);
   }
   for (const [host, r] of remotePowerByHost()) {
     if (r.watts == null || !Number.isFinite(r.watts)) continue;
     const id = `remote:${r.collectorId}:${host}`;
     if (seen.has(id)) continue;
-    out.push({ serverId: id, serverName: r.serverName || host, watts: r.watts, ts: r.ts, host: norm(host), source: 'remote' });
+    out.push({ serverId: id, serverName: r.serverName || host, watts: r.watts, ts: r.ts, host: norm(host), hostNames: [norm(host)], model: (r.model || '').trim(), serviceTag: r.serviceTag || '', source: 'remote' });
     seen.add(id);
+  }
+  return out;
+}
+
+/**
+ * 서비스태그(정규화) → 최신 전력 샘플. ESXi 호스트의 서비스태그와 대조해, 호스트명이 달라도
+ * Dell 서버 전력을 호스트에 귀속할 수 있게 한다(이름 매칭 실패 보완).
+ * Map<serviceTagLower, { watts, ts, serverName }>.
+ */
+export async function latestPowerByServiceTag() {
+  const out = new Map();
+  for (const m of await allMeasuredPower()) {
+    const t = norm(m.serviceTag);
+    if (!t) continue;
+    const cur = out.get(t);
+    if (!cur || (m.ts || 0) > (cur.ts || 0)) out.set(t, { watts: m.watts, ts: m.ts, serverName: m.serverName });
   }
   return out;
 }

@@ -39,6 +39,7 @@ const TOOLS = [
   { k: 'vcversion', icon: '🏛️', label: 'vCenter 버전별', desc: 'vCenter 버전 분포' },
   { k: 'nsx', icon: '🛡️', label: 'NSX 관리', desc: 'NSX 배포 현황 / 버전' },
   { k: 'hardware', icon: '🏷️', label: '벤더/모델 서머리', desc: '법인별 호스트 벤더·모델 수량' },
+  { k: 'powermap', icon: '⚡', label: '전력 분석 (법인/모델별)', desc: '측정된 모든 서버 소비전력을 법인(vCenter)·모델·지역별로 분해 · 미매핑 포함 · CSV' },
   { k: 'hba', icon: '🔌', label: 'HBA 카드 속도', desc: '호스트 FC/iSCSI 어댑터 속도' },
   { k: 'gpu', icon: '🎮', label: 'GPU 인벤토리', desc: '호스트/모델별 GPU + 사용률 최근 5년 추이' },
   { k: 'topo3d', icon: '🌐', label: '구성도 (3D)', desc: '설정된 구성을 3D 네트워크로 — 줌인/아웃·회전·VM 펼치기' },
@@ -109,7 +110,7 @@ function ToolPanel({ tool, onBack }) {
   const meta = TOOLS.find((t) => t.k === tool);
   const [scope, setScope] = useState('');
   const { data: vcList } = usePolling('/vcenters', {}, 60_000);
-  const scoped = ['ipam', 'dupip', 'vmtools', 'snapshots', 'hba', 'gpu', 'licenses', 'esxi', 'hardware', 'guestos', 'real-os', 'thinvms', 'capacity', 'waste', 'esxitemp', 'forecast'].includes(tool);
+  const scoped = ['ipam', 'dupip', 'vmtools', 'snapshots', 'hba', 'gpu', 'licenses', 'esxi', 'hardware', 'powermap', 'guestos', 'real-os', 'thinvms', 'capacity', 'waste', 'esxitemp', 'forecast'].includes(tool);
 
   return (
     <>
@@ -146,6 +147,7 @@ function ToolPanel({ tool, onBack }) {
       {tool === 'hba' && <Hba scope={scope} />}
       {tool === 'gpu' && <Gpu scope={scope} />}
       {tool === 'hardware' && <Hardware scope={scope} />}
+      {tool === 'powermap' && <PowerMap scope={scope} />}
       {tool === 'esxi' && <Esxi scope={scope} />}
       {tool === 'vcversion' && <VcVersion />}
       {tool === 'nsx' && <Nsx />}
@@ -1729,6 +1731,180 @@ function Card({ label, value, meta, accent, onClick, active }) {
       <div className="value" style={{ fontSize: 24, ...(accent ? { color: accent } : {}) }}>{value}</div>
       {meta && <div className="meta">{meta}</div>}
     </div>
+  );
+}
+
+// 전력 단위: 1,000 넘으면 상위 단위(kW→MW→GW).
+const pdec1 = (n) => Number(n).toLocaleString(undefined, { maximumFractionDigits: 1 });
+function fmtWatts(w) {
+  if (w == null || !Number.isFinite(Number(w))) return '—';
+  const a = Math.abs(w);
+  if (a >= 1e9) return `${pdec1(w / 1e9)} GW`;
+  if (a >= 1e6) return `${pdec1(w / 1e6)} MW`;
+  if (a >= 1e3) return `${pdec1(w / 1e3)} kW`;
+  return `${Math.round(w).toLocaleString()} W`;
+}
+function fmtKwh(kwh) {
+  if (kwh == null || !Number.isFinite(Number(kwh))) return '—';
+  const a = Math.abs(kwh);
+  if (a >= 1e6) return `${pdec1(kwh / 1e6)} GWh`;
+  if (a >= 1e3) return `${pdec1(kwh / 1e3)} MWh`;
+  return `${pdec1(kwh)} kWh`;
+}
+
+/** 가로 막대(비중 표시) — recharts 없이 CSS만으로. */
+function Bar({ frac, color = 'var(--accent-2,#22d3ee)' }) {
+  return (
+    <div style={{ background: 'rgba(148,163,184,.14)', borderRadius: 4, height: 8, overflow: 'hidden', minWidth: 60 }}>
+      <div style={{ width: `${Math.max(2, Math.round((frac || 0) * 100))}%`, height: '100%', background: color, borderRadius: 4 }} />
+    </div>
+  );
+}
+
+function PowerMap({ scope }) {
+  const { loading, data, error } = useTool('/insights/power-breakdown', scope ? { vcenterId: scope } : {});
+  const [view, setView] = useState('vcenter'); // vcenter | model | region | server
+  const [q, setQ] = useState('');
+  if (loading) return <Loading />;
+  if (error) return <ErrorBox message={error} />;
+  if (!data) return null;
+  const cur = data.config?.currency || '₩';
+  const won = (v) => `${cur}${Number(v || 0).toLocaleString()}`;
+  const maxW = Math.max(1, ...(data.byVcenter || []).map((r) => r.watts), ...(data.byModel || []).map((r) => r.watts));
+
+  const csv = () => {
+    const head = ['서버', '모델', '서비스태그', 'vCenter', '지역', '수집원', 'W', '매핑'];
+    const rows = (data.servers || []).map((s) => [s.name, s.model, s.serviceTag, s.vcenterId, s.region, s.source, s.watts, s.mapped ? 'O' : 'X']);
+    const body = [head, ...rows].map((r) => r.map((c) => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\r\n');
+    const blob = new Blob(['﻿' + body], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `power-breakdown-${new Date().toISOString().slice(0, 10)}.csv`; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const term = q.trim().toLowerCase();
+  const servers = (data.servers || []).filter((s) => !term
+    || s.name.toLowerCase().includes(term) || (s.model || '').toLowerCase().includes(term)
+    || (s.serviceTag || '').toLowerCase().includes(term) || (s.vcenterId || '').toLowerCase().includes(term));
+
+  const TABS = [['vcenter', `법인별 (${(data.byVcenter || []).length})`], ['model', `모델별 (${(data.byModel || []).length})`], ['region', `지역별 (${(data.byRegion || []).length})`], ['server', `서버 (${data.totalServers})`]];
+
+  return (
+    <>
+      <div className="kpis" style={{ marginBottom: 14 }}>
+        <Card label="총 측정 전력" value={fmtWatts(data.totals.watts)} accent="var(--amber)" meta={`서버 ${data.totalServers}대 측정`} />
+        <Card label="월 에너지 / 요금" value={fmtKwh(data.totals.kwhMonth)} meta={`월 ${won(data.totals.costMonth)} · PUE ${data.config.pue}`} />
+        <Card label="연 전기요금(추정)" value={won(data.totals.costYear)} accent="#fbbf24" meta={`연 CO₂ ${Number(data.totals.co2YearKg || 0).toLocaleString()} kg`} />
+        <Card label="법인 매핑" value={`${data.mappedServers} / ${data.totalServers}`} accent={data.unmappedServers ? 'var(--red)' : 'var(--green)'}
+          meta={data.unmappedServers ? `미매핑 ${data.unmappedServers}대(${fmtWatts(data.unmappedWatts)})` : '전부 vCenter 매핑됨'} />
+      </div>
+      {data.unmappedServers > 0 && (
+        <div className="card" style={{ padding: '10px 14px', marginBottom: 12, borderLeft: '3px solid var(--amber)' }}>
+          <div style={{ fontSize: 13 }}>⚠ {data.unmappedServers}대({fmtWatts(data.unmappedWatts)})는 ESXi 호스트와 매핑되지 않아 <b>'(미매핑)'</b>으로 집계됩니다. 측정 전력 합계에는 포함됩니다.</div>
+          <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>자동 매핑은 ① iDRAC 호스트명 = ESXi 호스트명, ② Dell 서비스태그 일치로 시도합니다. 설정 → 수집(iDRAC)에서 서버의 <b>hostNames</b>에 해당 ESXi 호스트명을 넣으면 그 법인으로 귀속됩니다.</div>
+        </div>
+      )}
+      <div className="flex between wrap gap" style={{ marginBottom: 10, alignItems: 'center' }}>
+        <div className="flex gap" style={{ flexWrap: 'wrap' }}>
+          {TABS.map(([k, label]) => (
+            <button key={k} className={view === k ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setView(k)}>{label}</button>
+          ))}
+        </div>
+        <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={csv}>CSV</button>
+      </div>
+
+      {view === 'vcenter' && (
+        <div className="table-wrap" style={{ maxHeight: '60vh' }}>
+          <table>
+            <thead><tr><th>법인(vCenter)</th><th>지역</th><th style={{ textAlign: 'right' }}>서버</th><th style={{ textAlign: 'right' }}>현재 전력</th><th style={{ width: 160 }}>비중</th><th style={{ textAlign: 'right' }}>월 요금</th><th style={{ textAlign: 'right' }}>연 요금</th></tr></thead>
+            <tbody>
+              {data.byVcenter.map((r) => (
+                <tr key={r.vcId}>
+                  <td><b>{r.vcId}</b></td><td className="muted">{r.region}</td>
+                  <td style={{ textAlign: 'right' }}>{r.servers}</td>
+                  <td style={{ textAlign: 'right' }}><b>{fmtWatts(r.watts)}</b></td>
+                  <td><Bar frac={r.watts / maxW} color={r.vcId === '(미매핑)' ? 'var(--red)' : undefined} /></td>
+                  <td style={{ textAlign: 'right' }}>{won(r.costMonth)}</td>
+                  <td style={{ textAlign: 'right' }} className="muted">{won(r.costYear)}</td>
+                </tr>
+              ))}
+              {!data.byVcenter.length && <tr><td colSpan={7} className="center muted" style={{ padding: 20 }}>측정된 전력이 없습니다.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {view === 'model' && (
+        <div className="table-wrap" style={{ maxHeight: '60vh' }}>
+          <table>
+            <thead><tr><th>모델</th><th style={{ textAlign: 'right' }}>서버</th><th style={{ textAlign: 'right' }}>현재 전력</th><th style={{ width: 160 }}>비중</th><th style={{ textAlign: 'right' }}>대당 평균</th><th style={{ textAlign: 'right' }}>연 요금</th></tr></thead>
+            <tbody>
+              {data.byModel.map((r) => (
+                <tr key={r.model}>
+                  <td><b>{r.model}</b></td>
+                  <td style={{ textAlign: 'right' }}>{r.servers}</td>
+                  <td style={{ textAlign: 'right' }}><b>{fmtWatts(r.watts)}</b></td>
+                  <td><Bar frac={r.watts / maxW} color="var(--green)" /></td>
+                  <td style={{ textAlign: 'right' }} className="muted">{fmtWatts(r.watts / r.servers)}</td>
+                  <td style={{ textAlign: 'right' }} className="muted">{won(r.costYear)}</td>
+                </tr>
+              ))}
+              {!data.byModel.length && <tr><td colSpan={6} className="center muted" style={{ padding: 20 }}>모델 정보가 없습니다.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {view === 'region' && (
+        <div className="table-wrap" style={{ maxHeight: '60vh' }}>
+          <table>
+            <thead><tr><th>지역</th><th style={{ textAlign: 'right' }}>vCenter</th><th style={{ textAlign: 'right' }}>서버</th><th style={{ textAlign: 'right' }}>현재 전력</th><th style={{ textAlign: 'right' }}>연 요금</th></tr></thead>
+            <tbody>
+              {data.byRegion.map((r) => (
+                <tr key={r.region}>
+                  <td><b>{r.region}</b></td><td style={{ textAlign: 'right' }}>{r.vcenters}</td>
+                  <td style={{ textAlign: 'right' }}>{r.servers}</td>
+                  <td style={{ textAlign: 'right' }}><b>{fmtWatts(r.watts)}</b></td>
+                  <td style={{ textAlign: 'right' }} className="muted">{won(r.costYear)}</td>
+                </tr>
+              ))}
+              {!data.byRegion.length && <tr><td colSpan={5} className="center muted" style={{ padding: 20 }}>—</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {view === 'server' && (
+        <>
+          <div className="flex" style={{ marginBottom: 8 }}>
+            <SearchBox className="input" style={{ maxWidth: 320 }} placeholder="서버/모델/서비스태그/vCenter 검색" value={q} onChange={setQ} />
+          </div>
+          <ResultCount total={(data.servers || []).length} shown={servers.length} label="서버" filtered={!!term} />
+          <div className="table-wrap" style={{ maxHeight: '60vh' }}>
+            <table>
+              <thead><tr><th>서버</th><th>모델</th><th>서비스태그</th><th>법인(vCenter)</th><th>수집</th><th style={{ textAlign: 'right' }}>현재 전력</th></tr></thead>
+              <tbody>
+                {servers.map((s, i) => (
+                  <tr key={`${s.name}-${i}`}>
+                    <td><b>{s.name}</b></td>
+                    <td className="muted" style={{ fontSize: 12 }}>{s.model}</td>
+                    <td className="muted" style={{ fontSize: 12 }}>{s.serviceTag || '—'}</td>
+                    <td>{s.mapped ? s.vcenterId : <span className="badge red">미매핑</span>}</td>
+                    <td className="muted" style={{ fontSize: 12 }}>{s.source}</td>
+                    <td style={{ textAlign: 'right' }}>{fmtWatts(s.watts)}</td>
+                  </tr>
+                ))}
+                {!servers.length && <tr><td colSpan={6} className="center muted" style={{ padding: 20 }}>표시할 서버가 없습니다.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+      <div className="muted" style={{ fontSize: 12, marginTop: 10, lineHeight: 1.7 }}>
+        측정된 모든 전력원(iDRAC 직접 · OME · 원격 수집서버)을 서버 단위로 집계합니다. 모델·서비스태그는 iDRAC Redfish 인벤토리에서 읽으므로 ESXi 매핑이 없어도 모델별 분석이 가능합니다.
+      </div>
+    </>
   );
 }
 

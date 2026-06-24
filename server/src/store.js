@@ -2,7 +2,7 @@ import { config, loadVcenterConfig } from './config.js';
 import { generateSnapshot } from './mock/generator.js';
 import { collectFromVCenter } from './vcenter/restClient.js';
 import { describeError } from './util/errors.js';
-import { latestPowerByHostName } from './idrac/service.js';
+import { latestPowerByHostName, latestPowerByServiceTag } from './idrac/service.js';
 import { applyMutes } from './alarm-mutes.js';
 import { getDataSource } from './runtime-settings.js';
 import { buildIpamRows } from './ipam/ledger.js';
@@ -20,9 +20,12 @@ const SITE_STALE_MS = Number(process.env.SITE_INVENTORY_STALE_MS) || 300_000;
 async function overlayIdracPower(snap) {
   try {
     const byName = await latestPowerByHostName();
-    if (!byName.size) return snap;
+    const byTag = await latestPowerByServiceTag();
+    if (!byName.size && !byTag.size) return snap;
     for (const h of snap.hosts) {
-      const m = byName.get(String(h.name || '').trim().toLowerCase());
+      // 1) 호스트명 일치, 2) 서비스태그 일치(이름이 달라도 Dell 서버 전력 귀속).
+      const m = byName.get(String(h.name || '').trim().toLowerCase())
+        || byTag.get(String(h.serviceTag || '').trim().toLowerCase());
       if (m) { h.powerWatts = m.watts; h.powerSource = 'idrac'; }
     }
   } catch { /* power overlay is best-effort */ }

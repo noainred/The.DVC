@@ -8,6 +8,7 @@ import { requireRole } from '../auth/auth.js';
 import { store } from '../store.js';
 import { latestPowerByHostName, allMeasuredPower } from '../idrac/service.js';
 import { computeFinOps, loadFinopsConfig, saveFinopsConfig } from '../insights/finops.js';
+import { computePowerBreakdown } from '../insights/powerBreakdown.js';
 import { detectAnomalies } from '../insights/anomaly.js';
 import { forecastCapacity } from '../insights/forecast.js';
 import { computeSecurityPosture } from '../insights/cve.js';
@@ -27,6 +28,14 @@ insightsRouter.get('/finops', async (_req, res) => {
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 insightsRouter.get('/finops/config', (_req, res) => res.json(loadFinopsConfig()));
+
+// --- 전력 분석: 법인(vCenter)·모델·지역별 소비전력 분해 ---
+insightsRouter.get('/power-breakdown', async (req, res) => {
+  try {
+    const measured = await allMeasuredPower();
+    res.json(computePowerBreakdown(store.get(), measured, { vcenterId: req.query.vcenterId || '' }));
+  } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+});
 insightsRouter.put('/finops/config', adminOnly, (req, res) => res.json(saveFinopsConfig(req.body || {})));
 
 // --- AI 이상탐지 ---

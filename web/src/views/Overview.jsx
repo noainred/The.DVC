@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid,
   PieChart, Pie, Cell, Legend,
@@ -20,6 +20,26 @@ export default function Overview({ onSelectSite, onGotoTab }) {
   useEffect(() => { fetchJson('/ui-settings').then((s) => { setMapHeight(s.mapHeight || 420); setMapView({ lambda: s.mapLambda ?? -127, offsetY: s.mapOffsetY ?? 0 }); }).catch(() => {}); }, []);
   const saveMapHeight = (px) => { setMapHeight(px); putJson('/ui-settings', { mapHeight: px }).catch(() => {}); };
   const saveMapView = ({ lambda, offsetY }) => { setMapView({ lambda, offsetY }); putJson('/ui-settings', { mapLambda: lambda, mapOffsetY: offsetY }).catch(() => {}); };
+
+  // 글로벌 현황 KPI를 '1줄'로 유지 — 한 줄에 안 들어가 둘째 줄로 넘어간 박스는 통째로 숨긴다(부분 잘림 없음).
+  const kpisRef = useRef(null);
+  useLayoutEffect(() => {
+    const el = kpisRef.current;
+    if (!el) return undefined;
+    let lastW = -1;
+    const recompute = () => {
+      const kids = Array.from(el.children);
+      if (!kids.length) return;
+      kids.forEach((k) => { k.style.display = ''; });
+      const top0 = kids[0].offsetTop;
+      kids.forEach((k) => { if (k.offsetTop > top0) k.style.display = 'none'; });
+    };
+    recompute();
+    lastW = el.clientWidth;
+    const ro = new ResizeObserver(() => { const w = el.clientWidth; if (w === lastW) return; lastW = w; recompute(); });
+    ro.observe(el);
+    return () => ro.disconnect();
+  });
 
   if (loading && !ov) return <Loading />;
   if (error) return <ErrorBox message={error} />;
@@ -48,7 +68,7 @@ export default function Overview({ onSelectSite, onGotoTab }) {
   return (
     <>
       <div className="section-title">글로벌 현황</div>
-      <div className="kpis">
+      <div className="kpis" ref={kpisRef} title="한 줄에 안 들어가는 KPI는 자동으로 숨겨집니다(창을 넓히면 더 보입니다).">
         <Kpi label="vCenter" value={`${g.vcentersConnected}/${g.vcenters}`} meta={`${g.vcenters - g.vcentersConnected}개 연결 불가`} accent="var(--accent-2)" onClick={() => onGotoTab?.('vcenters')} />
         <Kpi label="ESXi 호스트" value={fmt(g.hosts)} meta={`정상 ${g.hostsConnected} · 점검 ${g.hostsMaintenance} · 끊김 ${g.hostsDisconnected}`} onClick={() => onGotoTab?.('hosts')} />
         <Kpi label="가상머신" value={fmt(g.vms)} meta={`구동중 ${fmt(g.vmsPoweredOn)} · 정지 ${fmt(g.vmsPoweredOff)}`} accent="var(--green)" onClick={() => onGotoTab?.('vms')} />
