@@ -159,6 +159,7 @@ function VmCredManager({ vcs, vcenters }) {
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
+  const [testProg, setTestProg] = useState(null); // { done, total } 테스트 진행률(부분 갱신)
 
   const loadVms = async (vcId) => {
     if (!vcId) { setRows(null); return; }
@@ -183,15 +184,28 @@ function VmCredManager({ vcs, vcenters }) {
   const runTest = async (subset) => {
     const targets = subset || rows;
     if (!targets || !targets.length) return;
-    setRows((rs) => rs.map((r) => (targets.find((t) => t.id === r.id) ? { ...r, test: { pending: true } } : r)));
-    try {
-      const items = targets.map((r) => ({ vmId: r.id, useShared: r.mode === 'shared', username: r.mode === 'own' ? r.username : '', password: r.mode === 'own' ? r.password : '' }));
-      const res = await postJson('/admin/gpu-guest/test', { vcenterId: selVc, items });
-      const byId = new Map((res.results || []).map((x) => [x.vmId, x]));
-      setRows((rs) => rs.map((r) => (byId.has(r.id) ? { ...r, test: byId.get(r.id), _mock: res.mock } : r)));
-    } catch (e) {
-      setRows((rs) => rs.map((r) => (targets.find((t) => t.id === r.id) ? { ...r, test: { error: e.message } } : r)));
+    // 도달 불가/느린 VM이 전체를 막지 않도록 작은 청크로 나눠 순차 처리하고, 끝나는 대로 행을 즉시 갱신한다.
+    // 청크당 1 요청이라 길이가 짧아 프록시 유휴 끊김도 방지되고, 진행률로 멈춘 듯 보이지 않게 한다.
+    const CHUNK = 4; // 서버 동시성(기본 4)에 맞춤 — 청크당 대략 1 웨이브
+    const ids = new Set(targets.map((t) => t.id));
+    setRows((rs) => rs.map((r) => (ids.has(r.id) ? { ...r, test: { pending: true } } : r)));
+    setTestProg({ done: 0, total: targets.length });
+    let done = 0;
+    for (let off = 0; off < targets.length; off += CHUNK) {
+      const chunk = targets.slice(off, off + CHUNK);
+      const items = chunk.map((r) => ({ vmId: r.id, useShared: r.mode === 'shared', username: r.mode === 'own' ? r.username : '', password: r.mode === 'own' ? r.password : '' }));
+      try {
+        const res = await postJson('/admin/gpu-guest/test', { vcenterId: selVc, items });
+        const byId = new Map((res.results || []).map((x) => [x.vmId, x]));
+        setRows((rs) => rs.map((r) => (byId.has(r.id) ? { ...r, test: byId.get(r.id), _mock: res.mock } : r)));
+      } catch (e) {
+        const cids = new Set(chunk.map((r) => r.id));
+        setRows((rs) => rs.map((r) => (cids.has(r.id) ? { ...r, test: { error: e.message } } : r)));
+      }
+      done += chunk.length;
+      setTestProg({ done, total: targets.length });
     }
+    setTestProg(null);
   };
 
   const saveCreds = async () => {
@@ -300,9 +314,17 @@ function VmCredManager({ vcs, vcenters }) {
           </div>
 
           <div className="flex gap wrap" style={{ alignItems: 'center', marginTop: 12 }}>
-            <button className="logout-btn" style={{ padding: '8px 14px' }} onClick={() => runTest(shown)}>⚡ {osFilter === 'all' ? '모두' : osFilter} 테스트</button>
+            <button className="logout-btn" style={{ padding: '8px 14px' }} disabled={!!testProg} onClick={() => runTest(shown)}>⚡ {osFilter === 'all' ? '모두' : osFilter} 테스트</button>
             <button className="login-btn" style={{ flex: 'none', padding: '8px 18px' }} disabled={busy} onClick={saveCreds}>{busy ? '저장 중…' : 'VM별 계정 저장'}</button>
+            {testProg && (
+              <span className="badge teal" style={{ fontSize: 12 }}>
+                테스트 중 {testProg.done}/{testProg.total} ({Math.round((testProg.done / testProg.total) * 100)}%) — 끝나는 대로 표시됩니다
+              </span>
+            )}
             {msg && <span className="muted" style={{ fontSize: 13 }}>{msg}</span>}
+          </div>
+          <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
+            도달 불가/느린 VM은 한 대당 수십 초가 걸릴 수 있어, 작은 묶음으로 나눠 끝나는 대로 행을 갱신합니다(전체가 멈추지 않음). 한 대만 빠르게 보려면 행의 “테스트”를 누르세요.
           </div>
           <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>
             ※ <b>로그인</b>=게스트 계정 인증(명령 실행 안 함) · <b>읽기</b>=nvidia-smi로 GPU 사용률 실제 수집. 둘 다 ✅면 수집 준비 완료입니다.
