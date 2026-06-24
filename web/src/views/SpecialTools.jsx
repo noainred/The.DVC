@@ -1552,22 +1552,24 @@ function GuestOs({ scope }) {
   const [view, setView] = useState('os'); // os | family
   const [power, setPower] = useState('all'); // all | on | off
   const [kind, setKind] = useState('all');   // all | vm | template
+  const [vmList, setVmList] = useState(null); // { label, q:{os|family} }
   const params = { ...(scope ? { vcenterId: scope } : {}), ...(power !== 'all' ? { power } : {}), ...(kind !== 'all' ? { kind } : {}) };
   const { loading, data, error } = useTool('/tools/guest-os', params);
   if (loading) return <Loading />;
   if (error) return <ErrorBox message={error} />;
   const term = q.trim().toLowerCase();
   const rows = (view === 'os' ? data.items : data.families).filter((r) => !term || (r.os || r.family).toLowerCase().includes(term));
+  const countCell = (r, label, qq) => <button className="cell-link" title="대상 VM 보기 / CSV" onClick={() => setVmList({ label, q: qq })}>{r.total}</button>;
   const osCols = [
     { key: 'os', label: 'Guest OS (종류·버전)', render: (r) => <b>{r.os}</b> },
     { key: 'family', label: '계열', render: (r) => <span className="badge gray">{r.family}</span> },
-    { key: 'total', label: 'VM 수', align: 'right' },
+    { key: 'total', label: 'VM 수', align: 'right', render: (r) => countCell(r, r.os, { os: r.os }) },
     { key: 'on', label: 'On', align: 'right', render: (r) => <span className="badge green">{r.on}</span> },
     { key: 'off', label: 'Off', align: 'right', render: (r) => <span className="badge gray">{r.off}</span> },
   ];
   const famCols = [
     { key: 'family', label: 'OS 계열', render: (r) => <b>{r.family}</b> },
-    { key: 'total', label: 'VM 수', align: 'right' },
+    { key: 'total', label: 'VM 수', align: 'right', render: (r) => countCell(r, r.family, { family: r.family }) },
     { key: 'on', label: 'On', align: 'right', render: (r) => <span className="badge green">{r.on}</span> },
   ];
   return (
@@ -1592,7 +1594,50 @@ function GuestOs({ scope }) {
         ))}
       </div>
       <DataTable columns={view === 'os' ? osCols : famCols} rows={rows} initialSort={{ key: 'total', dir: 'desc' }} />
+      {vmList && <GuestOsVmsModal label={vmList.label} params={{ ...params, ...vmList.q }} onClose={() => setVmList(null)} />}
     </>
+  );
+}
+
+function GuestOsVmsModal({ label, params, onClose }) {
+  const [d, setD] = useState(null);
+  const [err, setErr] = useState(null);
+  useEffect(() => {
+    const qs = new URLSearchParams(Object.entries(params || {}).filter(([, v]) => v)).toString();
+    fetchJson(`/tools/guest-os/vms${qs ? `?${qs}` : ''}`).then(setD).catch((e) => setErr(e.message));
+  }, []);
+  const exportCsv = () => {
+    const esc = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+    const head = ['vm', 'vcenter', 'cluster', 'host', 'cpu', 'memory_gb', 'disk_gb', 'ip', 'power'];
+    const lines = [head.join(',')];
+    for (const r of (d?.items || [])) lines.push([r.name, r.vcenterId, r.cluster, r.host, r.cpu, r.memGB, r.diskGB, r.ip, r.powerState === 'POWERED_ON' ? 'On' : 'Off'].map(esc).join(','));
+    const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = `guestos-${String(label).replace(/[^a-zA-Z0-9._-]+/g, '_')}-${new Date().toISOString().slice(0, 10)}.csv`; a.click(); URL.revokeObjectURL(url);
+  };
+  const cols = [
+    { key: 'name', label: 'VM', render: (r) => <VmLink name={r.name} vcenterId={r.vcenterId} label={r.name} /> },
+    { key: 'vcenterId', label: 'vCenter', render: (r) => <span className="muted">{r.vcenterId}</span> },
+    { key: 'cluster', label: '클러스터', render: (r) => <span style={{ fontSize: 12 }}>{r.cluster || '—'}</span> },
+    { key: 'host', label: '호스트', render: (r) => <span className="muted" style={{ fontSize: 12 }}>{r.host || '—'}</span> },
+    { key: 'cpu', label: 'CPU', align: 'right', render: (r) => `${r.cpu}` },
+    { key: 'memGB', label: 'MEM(GB)', align: 'right' },
+    { key: 'diskGB', label: 'DISK(GB)', align: 'right' },
+    { key: 'ip', label: 'IP', render: (r) => <span style={{ fontSize: 12 }}>{r.ip || '—'}</span> },
+    { key: 'powerState', label: '전원', render: (r) => (r.powerState === 'POWERED_ON' ? <span className="badge green">On</span> : <span className="badge gray">Off</span>) },
+  ];
+  return (
+    <Modal title={`대상 VM — ${label}`} onClose={onClose} width={1040} resizable minWidth={620} minHeight={380}>
+      {err ? <ErrorBox message={err} /> : !d ? <Loading /> : (
+        <>
+          <div className="flex between" style={{ alignItems: 'center', marginBottom: 10 }}>
+            <span className="muted" style={{ fontSize: 13 }}>대상 VM <b>{d.total.toLocaleString()}</b>개{d.total > (d.items?.length || 0) ? ` (상위 ${d.items.length} 표시)` : ''}</span>
+            <button className="logout-btn" style={{ flex: 'none', padding: '7px 14px' }} disabled={!d.items?.length} onClick={exportCsv}>⬇ CSV 내보내기</button>
+          </div>
+          <DataTable columns={cols} rows={d.items || []} initialSort={{ key: 'name', dir: 'asc' }} />
+        </>
+      )}
+    </Modal>
   );
 }
 

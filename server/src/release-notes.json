@@ -1,6 +1,16 @@
 {
   "notes": [
     {
+      "version": "2.10.0",
+      "date": "2026-06-24",
+      "title": "Guest OS 종류/버전 — VM 수 클릭 시 대상 VM 목록 + CSV 내보내기",
+      "notes": [
+        "특수 기능 > Guest OS 종류/버전: OS·버전별/계열별 표의 'VM 수'를 클릭하면 해당 대상 VM 목록 모달이 열립니다(현재 범위·전원·종류 필터 반영).",
+        "목록·CSV 항목: VM명·vCenter·클러스터·호스트·CPU·메모리(GB)·디스크(GB)·IP·전원. 'CSV 내보내기' 버튼으로 다운로드.",
+        "신규 API: GET /api/tools/guest-os/vms (os/family + vcenterId/power/kind 필터)."
+      ]
+    },
+    {
       "version": "2.9.1",
       "date": "2026-06-24",
       "title": "특수기능에 '디스크 추가 자동화' 타일(준비 중·비활성) + 로그인 환영 인사",

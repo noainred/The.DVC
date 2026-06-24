@@ -1277,6 +1277,27 @@ api.get('/tools/guest-os', (req, res) => {
   });
 });
 
+// 특정 Guest OS(종류·버전) 또는 계열에 해당하는 VM 목록 — VM 수 클릭 시 대상 VM/CSV용.
+// 쿼리: vcenterId·power(on/off)·kind(vm/template) + os(정확 일치) 또는 family(계열).
+api.get('/tools/guest-os/vms', (req, res) => {
+  const snap = store.get();
+  let vms = snap.vms;
+  if (req.query.vcenterId) vms = vms.filter((v) => v.vcenterId === req.query.vcenterId);
+  if (req.query.power === 'on') vms = vms.filter((v) => v.powerState === 'POWERED_ON');
+  else if (req.query.power === 'off') vms = vms.filter((v) => v.powerState !== 'POWERED_ON');
+  if (req.query.kind === 'vm') vms = vms.filter((v) => !v.template);
+  else if (req.query.kind === 'template') vms = vms.filter((v) => v.template);
+  if (req.query.os) { const os = String(req.query.os); vms = vms.filter((v) => ((v.guestOS || '미상').trim() || '미상') === os); }
+  if (req.query.family) { const fam = String(req.query.family); vms = vms.filter((v) => osFamily(v.guestOS) === fam); }
+  const items = vms.map((v) => ({
+    name: v.name, vcenterId: v.vcenterId, cluster: v.cluster || '', host: v.host || '',
+    guestOS: v.guestOS || '', powerState: v.powerState,
+    cpu: v.cpuCount || 0, memGB: Math.round((v.memMB || 0) / 1024), diskGB: v.storageGB || 0,
+    ip: (v.ipAddresses?.length ? v.ipAddresses : (v.ipAddress ? [v.ipAddress] : [])).join(' '),
+  })).sort((a, b) => (a.vcenterId === b.vcenterId ? a.name.localeCompare(b.name) : a.vcenterId.localeCompare(b.vcenterId)));
+  res.json({ total: items.length, items: items.slice(0, 10000) });
+});
+
 // Host HBA adapters and their link speeds (optionally per vCenter).
 api.get('/tools/hba', (req, res) => {
   const snap = store.get();
