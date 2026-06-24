@@ -7,6 +7,7 @@ import Topology3D from './Topology3D.jsx';
 import { ServiceCheck, NetworkCheck, VmwareConfigBackup } from './DavinciChecks.jsx';
 import NetTrafficAnalysis from './NetTrafficAnalysis.jsx';
 import DeepSearch from './DeepSearch.jsx';
+import { IdracDetailModal } from './IdracAdmin.jsx';
 
 // IP 확인 출처 배지: vCenter 인식 / Ping(TCP)스캔 / 둘 다
 const DISCOVERY = { vcenter: ['vCenter', 'blue'], scan: ['Ping스캔', 'teal'], both: ['vCenter+스캔', 'green'] };
@@ -1197,43 +1198,62 @@ function Nsx() {
   );
 }
 
-/** 서버 분석 — iDRAC가 수집한 하드웨어 정보 분석. 현재: GPU 찾기(모델별 장수·서버). */
+/** 서버 분석 — iDRAC가 수집한 하드웨어 정보 분석. vCenter(법인)별 필터 + 서버 클릭 상세 공용. */
 function ServerAnalysis() {
   const [sub, setSub] = useState('gpu'); // 향후 분석 추가 여지
+  const [vc, setVc] = useState(''); // '' 전체 | vCenterId | __unmapped__
+  const [vcs, setVcs] = useState([]);
+  const [detail, setDetail] = useState(null); // { id, name } → iDRAC 상세 모달
+  useEffect(() => { fetchJson('/vcenters').then((d) => setVcs(d || [])).catch(() => fetchJson('/admin/vcenters').then((d) => setVcs(d.vcenters || [])).catch(() => {})); }, []);
+  const onServer = (s) => setDetail({ id: s.id || s.serverId, name: s.name || s.server });
+  const sp = { vc, onServer };
   return (
     <div>
-      <div className="flex gap" style={{ marginBottom: 12 }}>
-        <button className={sub === 'gpu' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('gpu')}>🎮 GPU 찾기</button>
-        <button className={sub === 'fw' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('fw')}>🏷 펌웨어 보기</button>
-        <button className={sub === 'temp' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('temp')}>🌡 온도 보기</button>
-        <button className={sub === 'psu' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('psu')}>🔌 전력(PSU)</button>
-        <button className={sub === 'issues' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px', ...(sub === 'issues' ? {} : { borderColor: 'var(--red)', color: 'var(--red)' }) }} onClick={() => setSub('issues')}>⚠ 이상만</button>
+      <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 12 }}>
+        <div className="flex gap wrap">
+          <button className={sub === 'gpu' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('gpu')}>🎮 GPU 찾기</button>
+          <button className={sub === 'fw' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('fw')}>🏷 펌웨어 보기</button>
+          <button className={sub === 'temp' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('temp')}>🌡 온도 보기</button>
+          <button className={sub === 'psu' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('psu')}>🔌 전력(PSU)</button>
+          <button className={sub === 'issues' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px', ...(sub === 'issues' ? {} : { borderColor: 'var(--red)', color: 'var(--red)' }) }} onClick={() => setSub('issues')}>⚠ 이상만</button>
+        </div>
+        <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }} title="iDRAC 서버에 지정된 소속 vCenter(법인) 기준. '미지정'은 소속이 지정 안 된 서버.">
+          <span className="muted">법인/vCenter</span>
+          <select className="select" value={vc} onChange={(e) => setVc(e.target.value)} style={{ minWidth: 180 }}>
+            <option value="">전체</option>
+            {vcs.map((v) => <option key={v.id} value={v.id}>{v.name || v.id}</option>)}
+            <option value="__unmapped__">⚠ 미지정(소속 없음)</option>
+          </select>
+        </label>
       </div>
-      {sub === 'gpu' && <ServerGpuFinder />}
-      {sub === 'fw' && <ServerFirmwareFinder />}
-      {sub === 'temp' && <ServerTempFinder />}
-      {sub === 'psu' && <ServerPsuFinder />}
-      {sub === 'issues' && <ServerHealthIssues />}
+      {sub === 'gpu' && <ServerGpuFinder {...sp} />}
+      {sub === 'fw' && <ServerFirmwareFinder {...sp} />}
+      {sub === 'temp' && <ServerTempFinder {...sp} />}
+      {sub === 'psu' && <ServerPsuFinder {...sp} />}
+      {sub === 'issues' && <ServerHealthIssues {...sp} />}
+      {detail && <IdracDetailModal server={detail} onClose={() => setDetail(null)} />}
     </div>
   );
 }
 
+const vcQS = (vc) => (vc ? `?vcenterId=${encodeURIComponent(vc)}` : '');
+
 /** 전력(PSU) — 전체 서버의 설치된 PSU를 용량/출력/입력전압/상태로 정렬해 본다. */
-function ServerPsuFinder() {
+function ServerPsuFinder({ vc, onServer }) {
   const [d, setD] = useState(null);
   const [err, setErr] = useState(null);
   const [q, setQ] = useState('');
   const [cap, setCap] = useState(''); // 용량 필터(W)
   const [badOnly, setBadOnly] = useState(false);
-  const load = () => fetchJson('/admin/idrac/psu-inventory').then((r) => { setD(r); setErr(null); }).catch((e) => setErr(e.message));
-  useEffect(() => { load(); const t = setInterval(load, 30_000); return () => clearInterval(t); }, []);
+  const load = () => fetchJson(`/admin/idrac/psu-inventory${vcQS(vc)}`).then((r) => { setD(r); setErr(null); }).catch((e) => setErr(e.message));
+  useEffect(() => { setD(null); load(); const t = setInterval(load, 30_000); return () => clearInterval(t); /* eslint-disable-next-line */ }, [vc]);
   if (err) return <ErrorBox message={err} />;
   if (!d) return <Loading />;
   const ql = q.trim().toLowerCase();
   const rows = (d.rows || []).filter((r) =>
     (!cap || String(r.capacityWatts) === cap)
     && (!badOnly || (r.health && !/^ok$/i.test(r.health)))
-    && (!ql || [r.server, r.model, r.name, r.vcenterId].some((x) => String(x || '').toLowerCase().includes(ql))),
+    && (!ql || [r.server, r.model, r.name, r.vcenterId, r.serviceTag].some((x) => String(x || '').toLowerCase().includes(ql))),
   );
   return (
     <div>
@@ -1248,7 +1268,7 @@ function ServerPsuFinder() {
             {(d.byCapacity || []).map((c) => <option key={c.capacityWatts} value={String(c.capacityWatts)}>{c.capacityWatts ? `${c.capacityWatts}W` : '미상'} ({c.count})</option>)}
           </select>
           <label className="flex gap muted" style={{ alignItems: 'center', fontSize: 12 }}><input type="checkbox" checked={badOnly} onChange={(e) => setBadOnly(e.target.checked)} /> OK 아닌것만</label>
-          <SearchBox className="input" style={{ maxWidth: 200 }} placeholder="서버/모델 검색" value={q} onChange={setQ} />
+          <SearchBox className="input" style={{ maxWidth: 220 }} placeholder="서버/모델/서비스태그 검색" value={q} onChange={setQ} />
           <button className="logout-btn" style={{ padding: '7px 12px' }} onClick={load}>↻</button>
         </div>
       </div>
@@ -1268,7 +1288,7 @@ function ServerPsuFinder() {
           rows={rows}
           initialSort={{ key: 'capacityWatts', dir: 'desc' }}
           columns={[
-            { key: 'server', label: '서버', render: (r) => <b>{r.server}</b> },
+            { key: 'server', label: '서버', render: (r) => <span><button className="cell-link" onClick={() => onServer(r)}>{r.server}</button>{r.serviceTag && <div className="muted" style={{ fontSize: 11 }}>{r.serviceTag}</div>}</span> },
             { key: 'name', label: 'PSU', render: (r) => <span>{r.name}<div className="muted" style={{ fontSize: 11 }}>{r.model}</div></span> },
             { key: 'capacityWatts', label: '용량', align: 'right', render: (r) => r.capacityWatts != null ? <b>{r.capacityWatts}W</b> : '—' },
             { key: 'outputWatts', label: '출력', align: 'right', render: (r) => r.outputWatts != null ? `${r.outputWatts}W` : '—' },
@@ -1281,16 +1301,16 @@ function ServerPsuFinder() {
 }
 
 /** 이상만 — 전체 iDRAC에서 'OK가 아닌' 구성요소(헬스·디스크·PSU·메모리·GPU·NIC)만 모아 보여준다. */
-function ServerHealthIssues() {
+function ServerHealthIssues({ vc, onServer }) {
   const [d, setD] = useState(null);
   const [err, setErr] = useState(null);
   const [q, setQ] = useState('');
-  const load = () => fetchJson('/admin/idrac/health-issues').then((r) => { setD(r); setErr(null); }).catch((e) => setErr(e.message));
-  useEffect(() => { load(); const t = setInterval(load, 30_000); return () => clearInterval(t); }, []);
+  const load = () => fetchJson(`/admin/idrac/health-issues${vcQS(vc)}`).then((r) => { setD(r); setErr(null); }).catch((e) => setErr(e.message));
+  useEffect(() => { setD(null); load(); const t = setInterval(load, 30_000); return () => clearInterval(t); /* eslint-disable-next-line */ }, [vc]);
   if (err) return <ErrorBox message={err} />;
   if (!d) return <Loading />;
   const ql = q.trim().toLowerCase();
-  const rows = (d.issues || []).filter((r) => !ql || [r.server, r.category, r.item, r.status, r.vcenterId].some((x) => String(x || '').toLowerCase().includes(ql)));
+  const rows = (d.issues || []).filter((r) => !ql || [r.server, r.category, r.item, r.status, r.vcenterId, r.serviceTag].some((x) => String(x || '').toLowerCase().includes(ql)));
   return (
     <div>
       <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 12 }}>
@@ -1298,7 +1318,7 @@ function ServerHealthIssues() {
           서버 {d.collectedServers}/{d.totalServers} 수집 · <b style={{ color: d.issueServers ? 'var(--red)' : 'var(--green)' }}>이상 {d.issueServers}대</b> · 정상 {d.okServers}대 · 문제 항목 <b style={{ color: 'var(--red)' }}>{d.issues.length}</b>건
         </div>
         <div className="flex gap" style={{ alignItems: 'center' }}>
-          <SearchBox className="input" style={{ maxWidth: 240 }} placeholder="서버/구분/항목 검색" value={q} onChange={setQ} />
+          <SearchBox className="input" style={{ maxWidth: 240 }} placeholder="서버/서비스태그/항목 검색" value={q} onChange={setQ} />
           <button className="logout-btn" style={{ padding: '7px 12px' }} onClick={load}>↻ 새로고침</button>
         </div>
       </div>
@@ -1313,7 +1333,7 @@ function ServerHealthIssues() {
           rows={rows}
           initialSort={{ key: 'category', dir: 'asc' }}
           columns={[
-            { key: 'server', label: '서버', render: (r) => <b>{r.server}</b> },
+            { key: 'server', label: '서버', render: (r) => <span><button className="cell-link" onClick={() => onServer(r)}>{r.server}</button>{r.serviceTag && <div className="muted" style={{ fontSize: 11 }}>{r.serviceTag}</div>}</span> },
             { key: 'vcenterId', label: 'vCenter', render: (r) => <span className="muted">{r.vcenterId || '—'}</span> },
             { key: 'category', label: '구분', render: (r) => <span className="badge gray">{r.category}</span> },
             { key: 'item', label: '항목', render: (r) => <span>{r.item}{r.detail && <span className="muted" style={{ fontSize: 11 }}> · {r.detail}</span>}</span> },
@@ -1336,19 +1356,19 @@ const tempKindMatch = (kind, name) => {
 };
 
 /** 온도 보기 — 전체 서버의 최신 온도센서(CPU/GPU/Inlet/Exhaust 등)를 한 표에 모아 정렬. */
-function ServerTempFinder() {
+function ServerTempFinder({ vc, onServer }) {
   const [d, setD] = useState(null);
   const [err, setErr] = useState(null);
   const [q, setQ] = useState('');
   const [kind, setKind] = useState('');
-  const load = () => fetchJson('/admin/idrac/temps').then((r) => { setD(r); setErr(null); }).catch((e) => setErr(e.message));
-  useEffect(() => { load(); const t = setInterval(load, 30_000); return () => clearInterval(t); }, []);
+  const load = () => fetchJson(`/admin/idrac/temps${vcQS(vc)}`).then((r) => { setD(r); setErr(null); }).catch((e) => setErr(e.message));
+  useEffect(() => { setD(null); load(); const t = setInterval(load, 30_000); return () => clearInterval(t); /* eslint-disable-next-line */ }, [vc]);
   if (err) return <ErrorBox message={err} />;
   if (!d) return <Loading />;
   const ql = q.trim().toLowerCase();
   const rows = (d.rows || []).filter((r) =>
     tempKindMatch(kind, r.sensor)
-    && (!ql || r.sensor.toLowerCase().includes(ql) || r.server.toLowerCase().includes(ql) || (r.vcenterId || '').toLowerCase().includes(ql)),
+    && (!ql || [r.sensor, r.server, r.vcenterId, r.serviceTag].some((x) => String(x || '').toLowerCase().includes(ql))),
   );
   const avg = rows.length ? Math.round(rows.reduce((a, b) => a + b.celsius, 0) / rows.length) : null;
   return (
@@ -1364,7 +1384,7 @@ function ServerTempFinder() {
           <select className="select select-sm" value={kind} onChange={(e) => setKind(e.target.value)} style={{ minWidth: 130 }}>
             {TEMP_KINDS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
           </select>
-          <SearchBox className="input" style={{ maxWidth: 220 }} placeholder="서버/센서 검색 (예: CPU1, GPU, exhaust)" value={q} onChange={setQ} />
+          <SearchBox className="input" style={{ maxWidth: 240 }} placeholder="서버/센서/서비스태그 검색" value={q} onChange={setQ} />
           <button className="logout-btn" style={{ padding: '7px 12px' }} onClick={load}>↻</button>
         </div>
       </div>
@@ -1375,7 +1395,7 @@ function ServerTempFinder() {
           rows={rows}
           initialSort={{ key: 'celsius', dir: 'desc' }}
           columns={[
-            { key: 'server', label: '서버', render: (r) => <b>{r.server}</b> },
+            { key: 'server', label: '서버', render: (r) => <span><button className="cell-link" onClick={() => onServer(r)}>{r.server}</button>{r.serviceTag && <div className="muted" style={{ fontSize: 11 }}>{r.serviceTag}</div>}</span> },
             { key: 'vcenterId', label: 'vCenter', render: (r) => <span className="muted">{r.vcenterId || '—'}</span> },
             { key: 'sensor', label: '센서' },
             { key: 'celsius', label: '온도', align: 'right', render: (r) => <b style={{ color: tempColor(r.celsius) }}>{r.celsius}℃</b> },
@@ -1389,12 +1409,12 @@ function ServerTempFinder() {
 const FW_CAT_COLOR = { iDRAC: 'blue', BIOS: 'teal', NIC: 'green', HBA: 'amber', Storage: 'amber', GPU: 'green', PSU: 'gray', CPLD: 'gray', Disk: 'gray', Driver: 'gray', 기타: 'gray' };
 
 /** 펌웨어 보기 — 서버 모델(R760/R770…) 클릭 → iDRAC·BIOS·NIC·HBA 등 버전별 설치 서버 수. */
-function ServerFirmwareFinder() {
+function ServerFirmwareFinder({ vc }) {
   const [d, setD] = useState(null);
   const [err, setErr] = useState(null);
   const [model, setModel] = useState(null);
-  const load = () => fetchJson('/admin/idrac/firmware-inventory').then((r) => { setD(r); setErr(null); }).catch((e) => setErr(e.message));
-  useEffect(() => { load(); }, []);
+  const load = () => fetchJson(`/admin/idrac/firmware-inventory${vcQS(vc)}`).then((r) => { setD(r); setErr(null); }).catch((e) => setErr(e.message));
+  useEffect(() => { setD(null); load(); /* eslint-disable-next-line */ }, [vc]);
   if (err) return <ErrorBox message={err} />;
   if (!d) return <Loading />;
   const sel = model && d.models.find((m) => m.model === model);
@@ -1453,17 +1473,18 @@ function ServerFirmwareFinder() {
 }
 
 /** GPU 찾기 — iDRAC 수집 GPU를 모델별로 집계(어떤 모델 몇 장, 어느 서버). */
-function ServerGpuFinder() {
+function ServerGpuFinder({ vc, onServer }) {
   const [d, setD] = useState(null);
   const [err, setErr] = useState(null);
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(null); // 펼친 모델
-  const load = () => fetchJson('/admin/idrac/gpu-inventory').then((r) => { setD(r); setErr(null); }).catch((e) => setErr(e.message));
-  useEffect(() => { load(); }, []);
+  const load = () => fetchJson(`/admin/idrac/gpu-inventory${vcQS(vc)}`).then((r) => { setD(r); setErr(null); }).catch((e) => setErr(e.message));
+  useEffect(() => { setD(null); load(); /* eslint-disable-next-line */ }, [vc]);
   if (err) return <ErrorBox message={err} />;
   if (!d) return <Loading />;
   const ql = q.trim().toLowerCase();
-  const models = ql ? d.models.filter((m) => m.model.toLowerCase().includes(ql)) : d.models;
+  const models = ql ? d.models.filter((m) => m.model.toLowerCase().includes(ql)
+    || (m.servers || []).some((s) => (s.serviceTag || '').toLowerCase().includes(ql) || (s.name || '').toLowerCase().includes(ql))) : d.models;
   return (
     <div>
       <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 12 }}>
@@ -1472,7 +1493,7 @@ function ServerGpuFinder() {
           {d.missing?.length > 0 && <span className="badge amber" style={{ marginLeft: 8 }} title={d.missing.map((x) => x.name).join(', ')}>미수집 {d.missing.length}대</span>}
         </div>
         <div className="flex gap" style={{ alignItems: 'center' }}>
-          <SearchBox className="input" style={{ maxWidth: 240 }} placeholder="GPU 모델 검색 (예: RTXPRO, H100)" value={q} onChange={setQ} />
+          <SearchBox className="input" style={{ maxWidth: 260 }} placeholder="GPU 모델 / 서비스태그 검색" value={q} onChange={setQ} />
           <button className="logout-btn" style={{ padding: '7px 12px' }} onClick={load}>↻ 새로고침</button>
         </div>
       </div>
@@ -1500,9 +1521,10 @@ function ServerGpuFinder() {
               <div className="card" style={{ padding: 14, marginBottom: 14 }}>
                 <div style={{ fontWeight: 700, marginBottom: 8 }}>🎮 {m.model} — {m.count}장 / {m.serverCount}대 서버</div>
                 <table className="data-table" style={{ width: '100%', fontSize: 13 }}>
-                  <thead><tr><th style={{ textAlign: 'left' }}>서버</th><th style={{ textAlign: 'left' }}>소속 vCenter</th><th style={{ textAlign: 'right' }}>장수</th></tr></thead>
+                  <thead><tr><th style={{ textAlign: 'left' }}>서버</th><th style={{ textAlign: 'left' }}>서비스태그</th><th style={{ textAlign: 'left' }}>소속 vCenter</th><th style={{ textAlign: 'right' }}>장수</th></tr></thead>
                   <tbody>{m.servers.map((s) => (
-                    <tr key={s.id}><td><b>{s.name}</b> <span className="muted" style={{ fontSize: 11 }}>({s.id})</span></td>
+                    <tr key={s.id}><td><button className="cell-link" onClick={() => onServer(s)}>{s.name}</button> <span className="muted" style={{ fontSize: 11 }}>({s.host || s.id})</span></td>
+                      <td className="tabular">{s.serviceTag || '—'}</td>
                       <td className="muted">{s.vcenterId || '—'}</td>
                       <td style={{ textAlign: 'right' }}><b>{s.count}</b></td></tr>
                   ))}</tbody>

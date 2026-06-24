@@ -547,7 +547,7 @@ const LINE_COLORS = ['#60a5fa', '#f87171', '#34d399', '#fbbf24', '#a78bfa', '#f4
 const FW_TYPE_ORDER = ['iDRAC', 'BIOS', 'NIC', 'Storage', 'GPU', 'PSU', 'Disk', 'CPLD', 'Driver', '기타'];
 
 /** iDRAC 서버 상세 — 버전(iDRAC/BIOS/드라이버) + 온도센서·CPU 사용량 1분 시계열 차트. */
-function IdracDetailModal({ server, onClose }) {
+export function IdracDetailModal({ server, onClose }) {
   const [inv, setInv] = useState(null);
   const [invErr, setInvErr] = useState(null);
   const [sensors, setSensors] = useState(null);

@@ -94,6 +94,14 @@ export const adminRouter = Router();
 
 const adminOnly = requireRole('admin');
 
+// 서버 분석 공용 — iDRAC 서버 목록(OME 제외) + vCenter 필터(?vcenterId=, __unmapped__=미지정).
+function idracServersForAnalysis(req) {
+  const vc = String(req?.query?.vcenterId || '').trim();
+  let servers = loadIdracRegistry().filter((s) => s.type !== 'ome');
+  if (vc) servers = servers.filter((s) => (vc === '__unmapped__' ? !s.vcenterId : s.vcenterId === vc));
+  return servers;
+}
+
 // ── 긴급중단(Emergency Stop) — 관리자 2명 OTP(2인 승인)로만 켜고/끈다 ──────────
 adminRouter.get('/emergency-stop', adminOnly, (_req, res) => res.json(getEmergencyStatus()));
 
@@ -749,17 +757,18 @@ adminRouter.post('/idrac/poll', adminOnly, async (_req, res) => {
 });
 
 // 서버 분석 — 전체 iDRAC의 PSU(전원공급장치)를 평탄화(용량/출력/상태 정렬용) + 용량별 집계.
-adminRouter.get('/idrac/psu-inventory', adminOnly, (_req, res) => {
-  const servers = loadIdracRegistry().filter((s) => s.type !== 'ome');
+adminRouter.get('/idrac/psu-inventory', adminOnly, (req, res) => {
+  const servers = idracServersForAnalysis(req);
   const rows = [];
   let collected = 0; let missing = 0;
   for (const s of servers) {
     const inv = getIdracInventory(s.id);
     if (!inv) { missing++; continue; }
     collected++;
+    const serviceTag = s.serviceTag || inv.system?.serviceTag || '';
     for (const p of (inv.psus || [])) {
       rows.push({
-        server: s.name, serverId: s.id, vcenterId: s.vcenterId || '',
+        server: s.name, serverId: s.id, serviceTag, vcenterId: s.vcenterId || '',
         name: p.name, model: p.model || '',
         capacityWatts: p.capacityWatts ?? null, outputWatts: p.outputWatts ?? null, inputWatts: p.inputWatts ?? null,
         voltage: p.lineInputVoltage ?? null, health: p.health || p.state || '',
@@ -778,16 +787,16 @@ adminRouter.get('/idrac/psu-inventory', adminOnly, (_req, res) => {
 });
 
 // 서버 분석 — 전체 iDRAC에서 'OK가 아닌'(문제) 구성요소만 모아 보여준다.
-adminRouter.get('/idrac/health-issues', adminOnly, (_req, res) => {
+adminRouter.get('/idrac/health-issues', adminOnly, (req, res) => {
   const notOk = (h) => h && !/^ok$/i.test(String(h));
-  const servers = loadIdracRegistry().filter((s) => s.type !== 'ome');
+  const servers = idracServersForAnalysis(req);
   const issues = [];
   let collected = 0; const okSet = new Set(); const badSet = new Set();
   for (const s of servers) {
     const inv = getIdracInventory(s.id);
     if (!inv) continue;
     collected++;
-    const ctx = { server: s.name, serverId: s.id, vcenterId: s.vcenterId || '' };
+    const ctx = { server: s.name, serverId: s.id, serviceTag: s.serviceTag || inv.system?.serviceTag || '', vcenterId: s.vcenterId || '' };
     const push = (category, item, status, detail) => { issues.push({ ...ctx, category, item, status: String(status || ''), detail: detail || '' }); badSet.add(s.id); };
     const H = inv.health || {};
     for (const [k, label] of [['overall', '전체'], ['processor', 'CPU'], ['memory', '메모리'], ['storage', '스토리지'], ['psu', 'PSU'], ['gpu', 'GPU']]) {
@@ -809,8 +818,8 @@ adminRouter.get('/idrac/health-issues', adminOnly, (_req, res) => {
 });
 
 // 서버 분석 — 전체 iDRAC 서버의 최신 온도센서(CPU/GPU/Inlet/Exhaust 등) 평탄화(정렬용).
-adminRouter.get('/idrac/temps', adminOnly, (_req, res) => {
-  const servers = loadIdracRegistry().filter((s) => s.type !== 'ome');
+adminRouter.get('/idrac/temps', adminOnly, (req, res) => {
+  const servers = idracServersForAnalysis(req);
   const rows = [];
   const serverList = [];
   let missing = 0;
@@ -819,9 +828,10 @@ adminRouter.get('/idrac/temps', adminOnly, (_req, res) => {
     const temps = latest?.temps || {};
     if (!Object.keys(temps).length) { missing++; continue; }
     const list = Object.entries(temps).map(([name, celsius]) => ({ name, celsius }));
-    serverList.push({ id: s.id, name: s.name, vcenterId: s.vcenterId || '', at: latest.t, maxC: Math.max(...list.map((x) => x.celsius)), temps: list });
+    const serviceTag = s.serviceTag || getIdracInventory(s.id)?.system?.serviceTag || '';
+    serverList.push({ id: s.id, name: s.name, serviceTag, vcenterId: s.vcenterId || '', at: latest.t, maxC: Math.max(...list.map((x) => x.celsius)), temps: list });
     for (const { name, celsius } of list) {
-      rows.push({ server: s.name, serverId: s.id, vcenterId: s.vcenterId || '', sensor: name, celsius, at: latest.t });
+      rows.push({ server: s.name, serverId: s.id, serviceTag, vcenterId: s.vcenterId || '', sensor: name, celsius, at: latest.t });
     }
   }
   rows.sort((a, b) => b.celsius - a.celsius);
@@ -829,9 +839,9 @@ adminRouter.get('/idrac/temps', adminOnly, (_req, res) => {
 });
 
 // 서버 분석 — 서버 모델(R760/R770 등)별로 펌웨어/드라이버 버전 분포(버전별 설치 서버 수).
-adminRouter.get('/idrac/firmware-inventory', adminOnly, (_req, res) => {
+adminRouter.get('/idrac/firmware-inventory', adminOnly, (req, res) => {
   const CAT_ORDER = ['iDRAC', 'BIOS', 'NIC', 'HBA', 'Storage', 'GPU', 'PSU', 'CPLD', 'Disk', 'Driver', '기타'];
-  const servers = loadIdracRegistry().filter((s) => s.type !== 'ome');
+  const servers = idracServersForAnalysis(req);
   const models = new Map(); // model -> { servers:Set, cats: Map<cat, Map<version, Set<serverName>>> }
   const missing = [];
   for (const s of servers) {
@@ -864,8 +874,8 @@ adminRouter.get('/idrac/firmware-inventory', adminOnly, (_req, res) => {
 });
 
 // 서버 분석 — 모든 iDRAC가 수집한 GPU를 모델별로 집계(어떤 모델 몇 장, 어느 서버).
-adminRouter.get('/idrac/gpu-inventory', adminOnly, (_req, res) => {
-  const servers = loadIdracRegistry().filter((s) => s.type !== 'ome');
+adminRouter.get('/idrac/gpu-inventory', adminOnly, (req, res) => {
+  const servers = idracServersForAnalysis(req);
   const byModel = new Map();
   const serverList = [];
   const missing = [];
@@ -875,12 +885,13 @@ adminRouter.get('/idrac/gpu-inventory', adminOnly, (_req, res) => {
     if (!inv) { missing.push({ id: s.id, name: s.name }); continue; }
     collected++;
     const gpus = inv.gpus || [];
-    serverList.push({ id: s.id, name: s.name, vcenterId: s.vcenterId || '', host: (s.host || '').replace(/^https?:\/\//, ''), gpuCount: gpus.length, gpus });
+    const serviceTag = s.serviceTag || inv.system?.serviceTag || '';
+    serverList.push({ id: s.id, name: s.name, serviceTag, vcenterId: s.vcenterId || '', host: (s.host || '').replace(/^https?:\/\//, ''), gpuCount: gpus.length, gpus });
     for (const g of gpus) {
       const model = (g.model || '미상').trim() || '미상';
       const e = byModel.get(model) || { model, count: 0, servers: new Map() };
       e.count++;
-      const sv = e.servers.get(s.id) || { id: s.id, name: s.name, vcenterId: s.vcenterId || '', count: 0 };
+      const sv = e.servers.get(s.id) || { id: s.id, name: s.name, serviceTag, vcenterId: s.vcenterId || '', count: 0 };
       sv.count++; e.servers.set(s.id, sv);
       byModel.set(model, e);
     }
