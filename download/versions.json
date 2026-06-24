@@ -1,6 +1,21 @@
 {
-  "latest": "2.11.0",
+  "latest": "2.12.0",
   "versions": [
+    {
+      "version": "2.12.0",
+      "tar_gz": "vmware-portal-2.12.0.tar.gz",
+      "size_bytes": 10293610,
+      "sha256": "2bf683ca37fd47b55dd0e2e13596c205d48102ba73619a3b8edc1eef19f3aa08",
+      "installer": "vmware-portal-offline-2.12.0-el9-x64.tar.gz",
+      "installer_size_bytes": 67690362,
+      "installer_sha256": "ec274a2a2c2f9a7e0fc34da9d47c8bc5f60c78fd6b69780350a689fb69be9fdf",
+      "installer_cent9": "vmware-portal-offline-2.12.0-cent9-x64.tar.gz",
+      "installer_cent9_size_bytes": 67698717,
+      "installer_cent9_sha256": "72cb5b7fbe381a8d986fc802ce46c7ce1679f4910b4d0acb0aa740e16f10a3ef",
+      "windows": "vmware-portal-win-2.12.0-x64.zip",
+      "windows_size_bytes": 50228071,
+      "windows_sha256": "6a638fb0f99f778bdf435779d2bd0a5b1d2c38dc1885064cc12ba805b25ee817"
+    },
     {
       "version": "2.11.0",
       "tar_gz": "vmware-portal-2.11.0.tar.gz",
@@ -15,21 +30,6 @@
       "windows": "vmware-portal-win-2.11.0-x64.zip",
       "windows_size_bytes": 50226969,
       "windows_sha256": "3e15a687f6746cbf5384c0f4a0f91d47c9fad258933e523ebf8a2421a0485711"
-    },
-    {
-      "version": "2.10.0",
-      "tar_gz": "vmware-portal-2.10.0.tar.gz",
-      "size_bytes": 10285923,
-      "sha256": "c76854928bb62809f0f4b1f29acea54721da817c4efd3350bd6e98a29a023473",
-      "installer": "vmware-portal-offline-2.10.0-el9-x64.tar.gz",
-      "installer_size_bytes": 67679342,
-      "installer_sha256": "58f6bb1d8db78c5de7bd31b88664c3e01ac331ba9fd290e1fbb7253e97e00c40",
-      "installer_cent9": "vmware-portal-offline-2.10.0-cent9-x64.tar.gz",
-      "installer_cent9_size_bytes": 67686687,
-      "installer_cent9_sha256": "c6244c5bece545ae4b305b28fb92dbc2cefa2f29f3751c28816eaa9309b6880b",
-      "windows": "vmware-portal-win-2.10.0-x64.zip",
-      "windows_size_bytes": 50217568,
-      "windows_sha256": "93d5d931517d339b2c0026f401e539eb85ae995ad305f2415a92d731d45bf8c2"
     },
     {
       "version": "1.98.0",
