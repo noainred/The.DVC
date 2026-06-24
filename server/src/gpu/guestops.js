@@ -66,7 +66,7 @@ export async function testVmGuest(c, vmMoref, creds, { isWindows = false, timeou
   } catch (e) { tlog(tr, `✗ 관리자 조회 실패: ${cleanGuestError(e.message)}`); out.error = cleanGuestError(e.message); return out; }
   // 1) 로그인(자격증명) 검증 — 게스트에 아무것도 실행하지 않고 인증만 확인.
   try {
-    tlog(tr, `SOAP ValidateCredentialsInGuest (계정=${creds.username}) — 인증만 확인(명령 실행 X)`);
+    tlog(tr, `SOAP ValidateCredentialsInGuest (계정=${creds.username}${creds.password ? '' : ' · 비번없음(passwordless)'}) — 인증만 확인(명령 실행 X)`);
     if (authManager) {
       await c.callRaw(`<ValidateCredentialsInGuest xmlns="urn:vim25"><_this type="GuestAuthManager">${authManager}</_this>${vmRef}${auth}</ValidateCredentialsInGuest>`);
     }

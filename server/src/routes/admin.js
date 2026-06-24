@@ -380,7 +380,7 @@ adminRouter.get('/gpu-guest/vms', adminOnly, (req, res) => {
         id: v.id, name: v.name, host: v.host, cluster: v.cluster || '',
         powerState: v.powerState, toolsStatus: v.toolsStatus || '', guestOS: v.guestOS || '',
         gpu: v.gpu || null,
-        hasOwnCred: !!saved[v.id]?.username, ownUsername: saved[v.id]?.username || '',
+        hasOwnCred: !!saved[v.id]?.username, ownUsername: saved[v.id]?.username || '', ownPwless: !!saved[v.id]?.passwordless,
         collected: c ? { utilPct: c.utilPct, memUsedPct: c.memUsedPct ?? null, at: c.at } : null,
       };
     })
@@ -434,7 +434,8 @@ adminRouter.post('/gpu-guest/test', adminOnly, async (req, res) => {
           : (vcShared.username ? { username: vcShared.username, password: vcShared.password || '' } : null);
         let creds;
         if (it.useShared) creds = sharedForOs;
-        else if (it.username) creds = { username: it.username, password: it.password || (vcShared.vms?.[it.vmId]?.password || '') };
+        // passwordless = 비번 없는 계정 → 빈 비번으로 인증(저장값으로 폴백하지 않음).
+        else if (it.username) creds = { username: it.username, password: it.passwordless ? '' : (it.password || (vcShared.vms?.[it.vmId]?.password || '')), passwordless: !!it.passwordless };
         else creds = resolveVmCreds(s, vcenterId, it.vmId, isWindows);
         if (!creds || !creds.username) { results[i] = { vmId: it.vmId, login: false, read: false, error: '계정 없음', trace: [{ t: Date.now(), msg: '✗ 건너뜀 — 사용할 계정 없음(공용/별도 계정 미설정)' }] }; continue; }
         const r = await testVmGuest(c, String(v.id).split(':').slice(1).join(':'), creds, { isWindows, timeoutMs: s.timeoutMs, dlHosts: dlByHost.get(v.host) || [], trace: [] }).catch((e) => ({ login: false, read: false, error: e.message, trace: [{ t: Date.now(), msg: `✗ 예외: ${e.message}` }] }));

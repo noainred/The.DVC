@@ -74,10 +74,13 @@ export function saveGpuGuestSettings(partial) {
         for (const [vmId, cred] of Object.entries(v.vms)) {
           if (cred === null) { delete merged.vms[vmId]; continue; } // 공용으로 전환 = override 제거
           const pv = merged.vms[vmId] || {};
-          merged.vms[vmId] = {
-            username: cred.username !== undefined ? String(cred.username || '') : (pv.username || ''),
-            password: (cred.password !== undefined && cred.password !== '') ? String(cred.password) : (pv.password || ''),
-          };
+          merged.vms[vmId] = cred.passwordless
+            // passwordless = 비번 없는 계정(빈 비번으로 인증). 저장값으로 폴백하지 않는다.
+            ? { username: String(cred.username ?? pv.username ?? ''), password: '', passwordless: true }
+            : {
+              username: cred.username !== undefined ? String(cred.username || '') : (pv.username || ''),
+              password: (cred.password !== undefined && cred.password !== '') ? String(cred.password) : (pv.password || ''),
+            };
         }
       }
       next.vcenters[id] = merged;
@@ -94,7 +97,7 @@ export function redactGpuGuestSettings(s) {
   const vcenters = {};
   for (const [id, v] of Object.entries(s.vcenters || {})) {
     const vms = {};
-    for (const [vmId, c] of Object.entries(v.vms || {})) vms[vmId] = { username: c.username || '', hasPassword: !!c.password };
+    for (const [vmId, c] of Object.entries(v.vms || {})) vms[vmId] = { username: c.username || '', hasPassword: !!c.password, passwordless: !!c.passwordless };
     vcenters[id] = { enabled: !!v.enabled, username: v.username || '', hasPassword: !!v.password, winUsername: v.winUsername || '', hasWinPassword: !!v.winPassword, vms };
   }
   return { enabled: s.enabled, pollIntervalMs: s.pollIntervalMs, concurrency: s.concurrency, timeoutMs: s.timeoutMs, maxVmsPerVcenter: s.maxVmsPerVcenter, vcenters };

@@ -180,10 +180,20 @@ function VmCredManager({ vcs, vcenters }) {
         username: v.ownUsername || '',
         password: '',
         hadOwn: !!v.hasOwnCred,
+        pwless: v.ownPwless ? true : undefined,  // true/false=명시 · undefined=자동(별도+id만+비번빈칸+저장없음)
         test: null,                              // {login,read,error,sample} | {pending}
       })));
     } catch (e) { setMsg(`오류: ${e.message}`); setRows([]); }
     finally { setLoading(false); }
+  };
+
+  // passwordless = 비번 없는 계정(빈 비번 인증). 별도 + 계정명 입력 + 비번 빈칸일 때:
+  //   명시 토글(pwless=true) 또는 저장된 비번이 없으면(신규) 자동 인식.
+  const isPwless = (r) => {
+    if (r.mode !== 'own' || !(r.username || '').trim() || r.password) return false;
+    if (r.pwless === true) return true;
+    if (r.pwless === false) return false;
+    return !r.hadOwn; // 자동: 저장된 비번 없는 신규 별도 계정
   };
 
   const pickVc = (vcId) => { setSelVc(vcId); setRows(null); loadVms(vcId); };
@@ -207,7 +217,7 @@ function VmCredManager({ vcs, vcenters }) {
       const chunk = targets.slice(off, off + CHUNK);
       const ci = Math.floor(off / CHUNK) + 1;
       appendLog([{ t: Date.now(), line: `━━━ 묶음 ${ci}/${nChunks} 시작 — ${chunk.map((r) => r.name).join(', ')}` }]);
-      const items = chunk.map((r) => ({ vmId: r.id, useShared: r.mode === 'shared', username: r.mode === 'own' ? r.username : '', password: r.mode === 'own' ? r.password : '' }));
+      const items = chunk.map((r) => ({ vmId: r.id, useShared: r.mode === 'shared', username: r.mode === 'own' ? r.username : '', password: r.mode === 'own' ? r.password : '', passwordless: isPwless(r) }));
       try {
         const res = await postJson('/admin/gpu-guest/test', { vcenterId: selVc, items });
         const byId = new Map((res.results || []).map((x) => [x.vmId, x]));
@@ -240,7 +250,11 @@ function VmCredManager({ vcs, vcenters }) {
       const vms = {};
       for (const r of rows) {
         if (r.mode === 'own') {
-          if (r.username) vms[r.id] = { username: r.username, ...(r.password ? { password: r.password } : {}) };
+          if (r.username) {
+            vms[r.id] = isPwless(r)
+              ? { username: r.username, passwordless: true }   // 비번없음 계정으로 저장
+              : { username: r.username, ...(r.password ? { password: r.password } : {}) };
+          }
         } else if (r.hadOwn) {
           vms[r.id] = null; // 공용으로 전환 → override 제거
         }
@@ -319,12 +333,17 @@ function VmCredManager({ vcs, vcenters }) {
                       </td>
                       <td>
                         {r.mode === 'own' ? (
-                          <div className="flex gap" style={{ gap: 4 }}>
+                          <div className="flex gap" style={{ gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
                             <input className="input" style={{ width: 104 }} placeholder="계정(root 등)" value={r.username} onChange={(e) => setRow(r.id, { username: e.target.value })} />
-                            <input className="input" type="password" style={{ width: 120 }}
-                              placeholder={r.hadOwn ? '저장됨 · 변경시 입력' : '비밀번호'}
-                              title={r.hadOwn ? '저장된 비밀번호가 있습니다. 새 비밀번호로 테스트/저장하려면 여기에 입력하세요(비워두면 저장된 값 사용).' : '이 VM 계정의 비밀번호'}
-                              value={r.password} onChange={(e) => setRow(r.id, { password: e.target.value })} />
+                            <input className="input" type="password" style={{ width: 120 }} disabled={isPwless(r)}
+                              placeholder={isPwless(r) ? '비번없음' : (r.hadOwn ? '저장됨 · 변경시 입력' : '비밀번호 (비우면 비번없음)')}
+                              title={r.hadOwn ? '저장된 비밀번호가 있습니다. 새 비밀번호로 테스트/저장하려면 여기에 입력하세요(비워두면 저장된 값 사용).' : '이 VM 계정의 비밀번호(비우면 passwordless로 인증)'}
+                              value={isPwless(r) ? '' : r.password} onChange={(e) => setRow(r.id, { password: e.target.value })} />
+                            <label className="flex gap" style={{ alignItems: 'center', fontSize: 11, whiteSpace: 'nowrap' }}
+                              title="비번 없는 계정(빈 비밀번호로 인증). 저장된 비번으로 폴백하지 않습니다.">
+                              <input type="checkbox" checked={isPwless(r)} onChange={(e) => setRow(r.id, { pwless: e.target.checked, ...(e.target.checked ? { password: '' } : {}) })} />
+                              <span style={{ color: isPwless(r) ? 'var(--accent-2,#22d3ee)' : 'var(--muted,#8b9bb4)' }}>🔓 비번없음</span>
+                            </label>
                           </div>
                         ) : <span className="muted" style={{ fontSize: 12 }}>공용 계정</span>}
                       </td>
