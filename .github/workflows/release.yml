@@ -1,0 +1,82 @@
+name: release
+
+# 태그(v*) push 또는 수동 실행 시: 오프라인 설치 패키지(el9/cent9) + Windows 수집기 +
+# 업그레이드 번들을 빌드해 '롤링' 릴리스(downloads)에 자산으로 업로드한다.
+# 바이너리를 git 히스토리에 커밋하지 않으므로 .git 비대화가 사라지고, 빌드는 CI에서 수행된다.
+#
+# 포탈 자동 업그레이드는 PACKAGE_BASE_URL 을
+#   https://github.com/<owner>/<repo>/releases/download/downloads
+# 로 두면 ${base}/versions.json, ${base}/<파일> 이 이 릴리스 자산을 그대로 가리킨다.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+env:
+  NODE_VERSION: '22.20.0'
+  RELEASE_TAG: downloads
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install dependencies (root + server + web)
+        run: npm run install:all
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Resolve version
+        id: ver
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Build el9 installer + upgrade bundle
+        run: bash packaging/offline/build-package.sh --node-version "$NODE_VERSION" --out dist-offline
+
+      - name: Build cent9 installer
+        run: STAMP=cent9-x64 bash packaging/offline/build-package.sh --node-version "$NODE_VERSION" --out dist-offline
+
+      - name: Fetch Windows Node runtime
+        run: curl -fSL -o node-win.zip "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-win-x64.zip"
+
+      - name: Build Windows collector package
+        run: bash packaging/windows/build-collector-win.sh --node-zip node-win.zip --out dist-offline
+
+      - name: Generate sha256 sidecars
+        run: |
+          cd dist-offline
+          for f in *.tar.gz *.zip; do sha256sum "$f" > "$f.sha256"; done
+          ls -la
+
+      - name: Fetch previous versions.json (if any)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p prev
+          gh release download "$RELEASE_TAG" -p versions.json -D prev 2>/dev/null || true
+          [ -f prev/versions.json ] || echo '{"latest":"","versions":[]}' > prev/versions.json
+
+      - name: Build versions.json
+        run: node packaging/release/update-versions.mjs "${{ steps.ver.outputs.version }}" dist-offline prev/versions.json dist-offline/versions.json
+
+      - name: Publish assets to rolling '${{ env.RELEASE_TAG }}' release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$RELEASE_TAG" >/dev/null 2>&1 \
+            || gh release create "$RELEASE_TAG" --title "Downloads (rolling)" \
+                 --notes "포탈 설치/업그레이드 자산. release 워크플로가 자동 갱신합니다." --latest=false
+          gh release upload "$RELEASE_TAG" dist-offline/* --clobber
+          echo "업로드 완료: $(ls dist-offline | tr '\n' ' ')"
