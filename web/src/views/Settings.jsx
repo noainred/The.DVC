@@ -22,6 +22,7 @@ import VcenterLogs from './VcenterLogs.jsx';
 import GuestAccount from './GuestAccount.jsx';
 import LoginFails from './LoginFails.jsx';
 import NetIssues from './NetIssues.jsx';
+import AnomalyDetection from './AnomalyDetection.jsx';
 import About from './About.jsx';
 
 // 모든 하위 화면 정의(키→라벨→컴포넌트). 그룹에 속한 항목은 group 키로 묶는다.
@@ -45,6 +46,7 @@ const SUB = [
   { k: 'auth-ad', label: '인증(AD)', C: AdSettings },
   { k: 'ai-search', label: 'AI 검색', C: LlmSettings },
   { k: 'alerts', label: '알림', C: Alerts2 },
+  { k: 'anomaly', label: '이상동작 탐지', C: AnomalyDetection },
   { k: 'backup', label: '포탈 백업', C: PortalBackup },
   { k: 'vclogs', label: 'vCenter 로그 보관', C: VcenterLogs },
   { k: 'diagnostics', label: '진단·로그', C: Diagnostics },

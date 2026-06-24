@@ -45,6 +45,19 @@ test('detectMassPowerOff: vCenter별로 분리 집계', () => {
   assert.equal(detectMassPowerOff(p, snap, 10).length, 0);
 });
 
+test('detectMassPowerOff: vCenter별 임계(perVcenter)가 전역보다 우선', () => {
+  // 전역 임계 10이지만 vc1 임계 5 → 6대 OFF여도 알림 발생
+  const out = detectMassPowerOff(prev, snapWith(6, 'vc1'), { threshold: 10, perVcenter: { vc1: 5 } });
+  assert.equal(out.length, 1);
+  assert.match(out[0].detail, /임계 5대/);
+});
+
+test('detectMassPowerOff: perVcenter 미지정 vCenter는 전역 임계 사용', () => {
+  // vcX 임계 3만 지정, 대상은 vc1(6대) → vc1은 전역 10 적용 → 알림 없음
+  const out = detectMassPowerOff(prev, snapWith(6, 'vc1'), { threshold: 10, perVcenter: { vcX: 3 } });
+  assert.equal(out.length, 0);
+});
+
 test('detectMassPowerOff: 템플릿은 제외', () => {
   const p = new Map(); for (let i = 1; i <= 12; i++) p.set(`t-${i}`, 'POWERED_ON');
   const snap = { vms: Array.from({ length: 12 }, (_, i) => ({

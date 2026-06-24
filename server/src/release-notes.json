@@ -1,6 +1,17 @@
 {
   "notes": [
     {
+      "version": "2.3.0",
+      "date": "2026-06-24",
+      "title": "이상동작 탐지 메뉴 — vCenter별 'VM 동시 다운' 임계 설정",
+      "notes": [
+        "설정 > 이상동작 탐지 메뉴 신설: 어떤 vCenter에서 몇 대가 동시에 죽으면 알람을 띄울지 vCenter별로 지정. 전역 기본 임계 + vCenter별 임계(미지정 시 전역값 사용).",
+        "동시 다운 감지가 vCenter별 임계를 적용하도록 확장(detectMassPowerOff): 사이트마다 규모가 달라 임계를 다르게 두는 운영 환경 대응.",
+        "통지는 기존 설정 > 알림의 Slack/Webhook 채널로 전송. 알림 화면의 중복 규칙 항목은 제거하고 전용 메뉴로 일원화.",
+        "신규 API: GET/PUT /api/admin/anomaly. 단위 테스트 2건 추가(perVcenter 우선/전역 폴백), 총 32 통과."
+      ]
+    },
+    {
       "version": "2.2.0",
       "date": "2026-06-24",
       "title": "VM 동시 다운 알림 — 짧은 시간 다수 VM 전원 OFF 감지",

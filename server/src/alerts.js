@@ -25,7 +25,7 @@ const DEFAULTS = {
     criticalAlarms: { enabled: true },
     vcenterDown: { enabled: true },
     hostDisconnected: { enabled: true },
-    massVmPowerOff: { enabled: true, threshold: 10 },
+    massVmPowerOff: { enabled: true, threshold: 10, perVcenter: {} },
     datastorePct: { enabled: true, threshold: 90 },
     ramOvercommitPct: { enabled: false, threshold: 120 },
     vcpuPerCore: { enabled: false, threshold: 5 },
@@ -126,10 +126,14 @@ export function evaluate(snap, cfg = loadAlertConfig()) {
  * 주의: '현재 스냅샷에 존재하며 OFF로 바뀐' VM만 센다 → vCenter 수집 실패(VM 누락)로 인한
  * 오탐을 방지(누락 VM은 전이로 보지 않음).
  */
-export function detectMassPowerOff(prevPower, snap, threshold = 10) {
+export function detectMassPowerOff(prevPower, snap, ruleOrThreshold = 10) {
   const out = [];
   if (!prevPower || !prevPower.size) return out;
-  const th = Math.max(2, Number(threshold) || 10);
+  // 3번째 인자: 숫자(전역 임계, 하위호환) 또는 규칙객체 { threshold, perVcenter:{vcId:임계} }.
+  const rule = (ruleOrThreshold && typeof ruleOrThreshold === 'object') ? ruleOrThreshold : { threshold: ruleOrThreshold };
+  const defTh = Math.max(2, Number(rule.threshold) || 10);
+  const per = rule.perVcenter || {};
+  const thFor = (vc) => { const t = Number(per[vc]); return Number.isFinite(t) && t >= 1 ? Math.round(t) : defTh; };
   const byVc = new Map();
   for (const v of snap.vms || []) {
     if (v.template) continue;
@@ -138,6 +142,7 @@ export function detectMassPowerOff(prevPower, snap, threshold = 10) {
     }
   }
   for (const [vc, list] of byVc) {
+    const th = thFor(vc);
     if (list.length < th) continue;
     const byHost = {};
     for (const v of list) { const h = v.host || '?'; byHost[h] = (byHost[h] || 0) + 1; }
@@ -150,6 +155,26 @@ export function detectMassPowerOff(prevPower, snap, threshold = 10) {
     });
   }
   return out;
+}
+
+/** 이상동작 탐지(동시 다운) 설정 조회 — 전역 임계 + vCenter별 임계. */
+export function getAnomalySettings() {
+  const cfg = loadAlertConfig();
+  const r = cfg.rules.massVmPowerOff || { enabled: true, threshold: 10, perVcenter: {} };
+  return { enabled: r.enabled !== false, threshold: r.threshold ?? 10, perVcenter: r.perVcenter || {}, intervalSec: cfg.intervalSec };
+}
+
+/** 이상동작 탐지 설정 저장 — 채널/쿨다운 등 기존 알림 설정은 보존하고 동시다운 규칙만 갱신. */
+export function saveAnomalySettings(body = {}) {
+  const cur = loadAlertConfig();
+  const perVcenter = {};
+  for (const [k, v] of Object.entries(body.perVcenter || {})) {
+    const n = Number(v);
+    if (Number.isFinite(n) && n >= 1) perVcenter[k] = Math.min(100000, Math.round(n));
+  }
+  const rule = { enabled: body.enabled !== false, threshold: Math.max(2, Number(body.threshold) || 10), perVcenter };
+  saveAlertConfig({ channels: cur.channels, cooldownMin: cur.cooldownMin, intervalSec: cur.intervalSec, rules: { ...cur.rules, massVmPowerOff: rule } });
+  return getAnomalySettings();
 }
 
 /** 현재 스냅샷의 VM 전원상태로 직전상태 맵을 갱신(존재하는 VM만 → 수집 실패 시 직전값 유지). */
@@ -198,7 +223,7 @@ async function refreshState(cfg, sendEnabled) {
   // 직전상태 맵은 항상 갱신해 다음 주기 비교를 유지한다.
   try {
     if (vmPowerPrev && cfg.rules?.massVmPowerOff?.enabled) {
-      active = active.concat(detectMassPowerOff(vmPowerPrev, snap, cfg.rules.massVmPowerOff.threshold));
+      active = active.concat(detectMassPowerOff(vmPowerPrev, snap, cfg.rules.massVmPowerOff));
     }
     vmPowerPrev = updatePrevPower(vmPowerPrev || new Map(), snap);
   } catch { /* */ }

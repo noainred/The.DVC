@@ -21,7 +21,7 @@ import {
 import { geocode } from '../vcenter/geocode.js';
 import { getOrder, saveOrder, sortByOrder } from '../vcenter/order.js';
 import { listAudit } from '../audit.js';
-import { alertStatus, saveAlertConfig, testAlert } from '../alerts.js';
+import { alertStatus, saveAlertConfig, testAlert, getAnomalySettings, saveAnomalySettings } from '../alerts.js';
 import { loadMetricsSettings, saveMetricsSettings, METRICS_LIMITS } from '../metrics/settings.js';
 import { forceGpuUtilCollect, clearGpuUtilForce } from '../vcenter/soapClient.js';
 import { metricsSamplerStatus, rescheduleMetricsSampler } from '../metrics/sampler.js';
@@ -507,6 +507,10 @@ adminRouter.get('/audit', adminOnly, (req, res) => {
 adminRouter.get('/alerts', adminOnly, (_req, res) => res.json(alertStatus()));
 adminRouter.put('/alerts', adminOnly, (req, res) => res.json({ ok: true, config: saveAlertConfig(req.body || {}) }));
 adminRouter.post('/alerts/test', adminOnly, async (req, res) => res.json(await testAlert(req.user?.username)));
+
+// 이상동작 탐지(동시 다운) — vCenter별 임계 설정.
+adminRouter.get('/anomaly', adminOnly, (_req, res) => res.json(getAnomalySettings()));
+adminRouter.put('/anomaly', adminOnly, (req, res) => res.json({ ok: true, settings: saveAnomalySettings(req.body || {}) }));
 
 // --- VM 프로비저닝: 대량 생성 작업 시작 (관리자) ---
 adminRouter.post('/provision/jobs', adminOnly, (req, res) => {
