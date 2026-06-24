@@ -4,6 +4,24 @@ import { Loading, ErrorBox } from '../components/ui.jsx';
 
 const LEVEL_COLOR = { error: '#f87171', warn: '#fbbf24', info: '#93c5fd' };
 
+// 검색어와 일치하는 부분을 강조(대소문자 무시). q가 비면 원문 그대로.
+function highlight(msg, q) {
+  const text = String(msg ?? '');
+  if (!q) return text;
+  const lower = text.toLowerCase();
+  const out = [];
+  let i = 0;
+  let n = 0;
+  while (i < text.length) {
+    const idx = lower.indexOf(q, i);
+    if (idx === -1) { out.push(text.slice(i)); break; }
+    if (idx > i) out.push(text.slice(i, idx));
+    out.push(<mark key={n++} className="log-hl">{text.slice(idx, idx + q.length)}</mark>);
+    i = idx + q.length;
+  }
+  return out;
+}
+
 export default function Diagnostics() {
   const [status, setStatus] = useState(null);
   const [error, setError] = useState(null);
@@ -11,6 +29,7 @@ export default function Diagnostics() {
   // log viewer state
   const [logs, setLogs] = useState([]);
   const [level, setLevel] = useState('all');
+  const [query, setQuery] = useState('');
   const [paused, setPaused] = useState(false);
   const [autoscroll, setAutoscroll] = useState(true);
   const sinceRef = useRef(0);
@@ -60,7 +79,11 @@ export default function Diagnostics() {
   if (!status) return <Loading />;
 
   const errs = status.collectionErrors || [];
-  const shown = level === 'all' ? logs : logs.filter((l) => l.level === level);
+  const q = query.trim().toLowerCase();
+  const shown = logs.filter((l) =>
+    (level === 'all' || l.level === level) &&
+    (!q || String(l.msg || '').toLowerCase().includes(q)),
+  );
 
   return (
     <>
@@ -106,6 +129,16 @@ export default function Diagnostics() {
               <option value="warn">warn</option>
               <option value="error">error</option>
             </select>
+            <input
+              className="select select-sm"
+              style={{ minWidth: 180 }}
+              placeholder="🔍 검색어 포함 줄만…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+            {query && (
+              <button className="logout-btn" onClick={() => setQuery('')} title="검색어 지우기">✕</button>
+            )}
             <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12 }}>
               <input type="checkbox" checked={autoscroll} onChange={(e) => setAutoscroll(e.target.checked)} /> 자동 스크롤
             </label>
@@ -117,17 +150,23 @@ export default function Diagnostics() {
         </div>
 
         <div className="log-console" ref={consoleRef}>
-          {shown.length === 0 && <div className="muted" style={{ padding: 16 }}>로그가 없습니다.</div>}
+          {shown.length === 0 && (
+            <div className="muted" style={{ padding: 16 }}>
+              {logs.length === 0 ? '로그가 없습니다.' : '검색/필터 조건에 맞는 로그가 없습니다.'}
+            </div>
+          )}
           {shown.map((l) => (
             <div key={l.id} className="log-line">
               <span className="log-time">{new Date(l.time).toLocaleTimeString('ko-KR', { hour12: false })}</span>
               <span className="log-level" style={{ color: LEVEL_COLOR[l.level] || '#93c5fd' }}>{l.level.toUpperCase().padEnd(5)}</span>
-              <span className="log-msg">{l.msg}</span>
+              <span className="log-msg">{highlight(l.msg, q)}</span>
             </div>
           ))}
         </div>
         <div className="muted" style={{ marginTop: 8, fontSize: 12 }}>
-          최근 {logs.length}줄 (서버 메모리 버퍼, 3초마다 갱신) · 전체 로그는 호스트에서
+          {q || level !== 'all'
+            ? <>표시 {shown.length}줄 / 최근 {logs.length}줄 (필터 적용)</>
+            : <>최근 {logs.length}줄</>} (서버 메모리 버퍼, 3초마다 갱신) · 전체 로그는 호스트에서
           <code> journalctl -u vmware-portal -f</code> 로도 볼 수 있습니다.
         </div>
       </div>

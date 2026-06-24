@@ -261,6 +261,7 @@ tbody tr:last-child td { border-bottom: none; }
 .log-time { color: var(--text-faint); flex-shrink: 0; }
 .log-level { flex-shrink: 0; font-weight: 700; white-space: pre; }
 .log-msg { color: #cbd5e1; }
+.log-hl { background: #fde047; color: #111827; border-radius: 2px; padding: 0 1px; }
 
 /* Clickable table cell (e.g. VM name -> detail) */
 .cell-link { background: none; border: none; padding: 0; color: #fff; font-weight: 700; cursor: pointer; font-size: 13px; font-family: inherit; text-align: left; }
