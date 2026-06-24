@@ -2166,6 +2166,7 @@ function Gpu({ scope }) {
   };
   const [mode, setMode] = useState(''); // '' | vgpu | passthrough | vsga
   const [modelFilter, setModelFilter] = useState(''); // '' = 전체 모델, 아니면 특정 GPU 모델
+  const [power, setPower] = useState(''); // '' | on(켜진 VM 있는 호스트) | off(꺼진 VM 있는 호스트)
   useEffect(() => { if (hist && hist.key) openHist(hist.level, hist.key); /* eslint-disable-next-line */ }, [days]);
   // 선택한 사용 방식(mode) 필터에 해당하는 GPU가 0개면 '전체'로 자동 복구(빈 표 혼란 방지).
   useEffect(() => { if (data && mode && (data.byMode?.[mode] ?? 0) === 0) setMode(''); }, [data, mode]);
@@ -2174,6 +2175,9 @@ function Gpu({ scope }) {
 
   let items = mode ? data.items.filter((h) => h.mode === mode) : data.items;
   if (modelFilter) items = items.filter((h) => h.model === modelFilter);
+  // 전원 필터: 켜진/꺼진 GPU 할당 VM이 있는 호스트만.
+  if (power === 'on') items = items.filter((h) => (h.assignedVmsOn || 0) > 0);
+  else if (power === 'off') items = items.filter((h) => (h.assignedVmsOff || 0) > 0);
 
   // Aggregate by cluster / vCenter from per-host items. 사용률 미보고(패스쓰루) 호스트도
   // GPU 장수·할당 VM·방식 집계에는 포함하고, 평균/최고 사용률만 보고 호스트로 계산한다.
@@ -2196,7 +2200,7 @@ function Gpu({ scope }) {
 
   const hostRows = items.map((h) => ({
     key: h.id, name: h.host, vcenterId: h.vcenterId, sub: `${h.vcenterId} / ${h.cluster || '-'} · ${h.model}`,
-    model: h.model, count: h.count, memGB: h.memGB, mode: h.mode, modes: h.modes, utilSource: h.utilSource, avg: h.utilPct, max: h.utilPct, util: h.utilPct, assignedVms: h.assignedVms || 0, assignedVmNames: h.assignedVmNames || [], level: 'host',
+    model: h.model, count: h.count, memGB: h.memGB, mode: h.mode, modes: h.modes, utilSource: h.utilSource, avg: h.utilPct, max: h.utilPct, util: h.utilPct, assignedVms: h.assignedVms || 0, assignedVmsOn: h.assignedVmsOn || 0, assignedVmsOff: h.assignedVmsOff || 0, assignedVmNames: h.assignedVmNames || [], level: 'host',
   }));
   // 법인 × GPU 모델별 수량 집계: 어떤 법인에 어떤 GPU 카드가 몇 장 설치됐는지.
   const modelAgg = () => {
@@ -2226,6 +2230,7 @@ function Gpu({ scope }) {
     { key: 'assignedVms', label: '할당 VM', sortValue: (r) => r.assignedVms, render: (r) => (r.assignedVms ? (
       <div style={{ minWidth: 160 }}>
         <button className="cell-link" onClick={() => setVmList({ title: `GPU 할당 VM — ${r.name}`, params: { host: r.name } })}>{r.assignedVms}대</button>
+        <span className="muted" style={{ fontSize: 11, marginLeft: 6 }} title="GPU 할당 VM의 전원 상태">🟢{r.assignedVmsOn || 0} ⚫{r.assignedVmsOff || 0}</span>
         {(r.assignedVmNames || []).length > 0 && (
           <div className="muted" style={{ fontSize: 11, marginTop: 2, lineHeight: 1.4, whiteSpace: 'normal', wordBreak: 'break-all' }} title={(r.assignedVmNames || []).join(', ')}>
             {(r.assignedVmNames || []).slice(0, 6).map((n, i) => (
@@ -2331,6 +2336,11 @@ function Gpu({ scope }) {
               <option value="">GPU 종류: 전체</option>
               {(data.byModel || []).map((m) => <option key={m.model} value={m.model}>{m.model} (×{m.count})</option>)}
             </select>
+            <select className="select" style={{ flex: 'none', maxWidth: 220 }} value={power} onChange={(e) => setPower(e.target.value)} title="GPU 할당 VM의 전원 상태로 호스트 필터">
+              <option value="">전원: 전체</option>
+              <option value="on">🟢 켜진 VM 있는 호스트</option>
+              <option value="off">⚫ 꺼진 VM 있는 호스트</option>
+            </select>
             <button className="logout-btn" style={{ flex: 'none', padding: '7px 12px', marginLeft: 'auto' }} disabled={collecting}
               onClick={collectNow} title="vCenter 성능 카운터(gpu.utilization)로 지금 사용률을 즉시 수집합니다(설정 주기 무시).">{collecting ? '수집 중…' : '⟳ 지금 수집'}</button>
             <button className="logout-btn" style={{ flex: 'none', padding: '7px 12px' }}
@@ -2342,7 +2352,7 @@ function Gpu({ scope }) {
           {rows.length === 0 && data.items.length > 0 ? (
             <div className="card" style={{ padding: 16 }}>
               <span className="muted">현재 필터에 해당하는 GPU 호스트가 없습니다{mode ? ` (사용 방식: ${{ vgpu: 'vGPU', passthrough: '패스쓰루', vsga: 'vSGA' }[mode] || mode})` : ''}{modelFilter ? ` (모델: ${modelFilter})` : ''}. GPU는 총 {data.totalGpus}장 있습니다.</span>
-              <button className="tab" style={{ marginLeft: 10, padding: '4px 10px' }} onClick={() => { setMode(''); setModelFilter(''); }}>필터 초기화</button>
+              <button className="tab" style={{ marginLeft: 10, padding: '4px 10px' }} onClick={() => { setMode(''); setModelFilter(''); setPower(''); }}>필터 초기화</button>
             </div>
           ) : (
             <DataTable

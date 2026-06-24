@@ -552,8 +552,9 @@ function buildGpuInventory(snap, vcenterId) {
   const gpuVmByHost = {};
   for (const v of (snap.vms || [])) {
     if (!v.gpu || !v.host) continue;
-    const e = gpuVmByHost[v.host] || { vms: 0, vgpu: 0, passthrough: 0, names: [] };
+    const e = gpuVmByHost[v.host] || { vms: 0, on: 0, off: 0, vgpu: 0, passthrough: 0, names: [] };
     e.vms++; e.vgpu += v.gpu.vgpu || 0; e.passthrough += v.gpu.passthrough || 0;
+    if (v.powerState === 'POWERED_ON') e.on++; else e.off++;
     if (v.name) e.names.push(v.name);
     gpuVmByHost[v.host] = e;
   }
@@ -576,12 +577,12 @@ function buildGpuInventory(snap, vcenterId) {
     const gu = guestUtilByHost.get(h.name);
     const guestUtil = gu && gu.length ? Math.round(gu.reduce((a, b) => a + b, 0) / gu.length) : null;
     const utilPct = h.gpuUtilPct ?? guestUtil;
-    const vmAlloc = gpuVmByHost[h.name] || { vms: 0, vgpu: 0, passthrough: 0, names: [] };
+    const vmAlloc = gpuVmByHost[h.name] || { vms: 0, on: 0, off: 0, vgpu: 0, passthrough: 0, names: [] };
     hostsWithGpu.push({
       id: h.id, host: h.name, vcenterId: h.vcenterId, cluster: h.cluster, count: gpus.length,
       model: gpus[0].model, memGB: gpus[0].memGB, mode: primaryMode, modes,
       vgpu: primaryMode === 'vgpu', utilPct, utilSource: h.gpuUtilPct != null ? 'esxi' : (guestUtil != null ? 'guest' : null),
-      assignedVms: vmAlloc.vms, assignedVmNames: vmAlloc.names || [],
+      assignedVms: vmAlloc.vms, assignedVmsOn: vmAlloc.on || 0, assignedVmsOff: vmAlloc.off || 0, assignedVmNames: vmAlloc.names || [],
     });
     for (const g of gpus) {
       byModel[g.model] = (byModel[g.model] || 0) + 1;
