@@ -27,6 +27,7 @@ const TOOLS = [
   { k: 'esxitemp', icon: '🌡️', label: 'ESXi 온도', desc: '호스트/클러스터/법인별 현재 온도 + 최근 5년 추이' },
   { k: 'forecast', icon: '🔮', label: '용량 추세/예측', desc: '데이터스토어 증가율·가득 찰 예상일' },
   { k: 'guestos', icon: '🐧', label: 'Guest OS 종류/버전', desc: 'OS·버전별 VM 수 · 전체/법인별 · 검색' },
+  { k: 'real-os', icon: '🔎', label: '실제 OS 확인(게스트)', desc: '게스트 OS에서 실제 설치 OS(/etc/os-release 등) 읽기 · ESXi 보고와 불일치 탐지 · 주기 스캔 · CSV' },
   { k: 'thinvms', icon: '💧', label: 'Thin VM 찾기', desc: 'Thin 프로비저닝 VM · 회수 가능 용량(추정)' },
   { k: 'ipam', icon: '📒', label: '센터별 IP 관리대장', desc: 'vCenter 수집 IP 전체 · 클릭 시 상세 · DB/CSV' },
   { k: 'dupip', icon: '🔁', label: '중복 IP 찾기', desc: '둘 이상 VM이 같은 IPv4를 쓰는 경우' },
@@ -108,7 +109,7 @@ function ToolPanel({ tool, onBack }) {
   const meta = TOOLS.find((t) => t.k === tool);
   const [scope, setScope] = useState('');
   const { data: vcList } = usePolling('/vcenters', {}, 60_000);
-  const scoped = ['ipam', 'dupip', 'vmtools', 'snapshots', 'hba', 'gpu', 'licenses', 'esxi', 'hardware', 'guestos', 'thinvms', 'capacity', 'waste', 'esxitemp', 'forecast'].includes(tool);
+  const scoped = ['ipam', 'dupip', 'vmtools', 'snapshots', 'hba', 'gpu', 'licenses', 'esxi', 'hardware', 'guestos', 'real-os', 'thinvms', 'capacity', 'waste', 'esxitemp', 'forecast'].includes(tool);
 
   return (
     <>
@@ -134,6 +135,7 @@ function ToolPanel({ tool, onBack }) {
       {tool === 'esxitemp' && <EsxiTemp scope={scope} />}
       {tool === 'forecast' && <Forecast scope={scope} />}
       {tool === 'guestos' && <GuestOs scope={scope} />}
+      {tool === 'real-os' && <RealOs scope={scope} />}
       {tool === 'thinvms' && <ThinVms scope={scope} />}
       {tool === 'ipam' && <Ipam scope={scope} onScope={setScope} />}
       {tool === 'dupip' && <DupIp scope={scope} />}
@@ -1638,6 +1640,83 @@ function GuestOsVmsModal({ label, params, onClose }) {
         </>
       )}
     </Modal>
+  );
+}
+
+function RealOs({ scope }) {
+  const [st, setSt] = useState(null);     // /admin/os-scan status+settings
+  const [rows, setRows] = useState(null);
+  const [mm, setMm] = useState(false);    // 불일치만
+  const [err, setErr] = useState(null);
+  const [busy, setBusy] = useState('');
+  const [msg, setMsg] = useState(null);
+
+  const loadStatus = () => fetchJson('/admin/os-scan').then((r) => { setSt((cur) => ({ ...(cur || {}), ...r, settings: cur?.dirty ? cur.settings : r.settings })); setErr(null); }).catch((e) => setErr(e.message));
+  const loadResults = () => fetchJson(`/admin/os-scan/results?${new URLSearchParams({ ...(scope ? { vcenterId: scope } : {}), ...(mm ? { mismatch: '1' } : {}) })}`).then((r) => setRows(r.items || [])).catch(() => setRows([]));
+  useEffect(() => { loadStatus(); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { loadResults(); /* eslint-disable-next-line */ }, [scope, mm]);
+
+  if (err) return <ErrorBox message={err} />;
+  if (!st) return <Loading />;
+  const s = st.settings || {};
+  const setS = (patch) => setSt((cur) => ({ ...cur, dirty: true, settings: { ...cur.settings, ...patch } }));
+
+  const saveSettings = async () => { setBusy('save'); setMsg(null); try { const r = await putJson('/admin/os-scan/settings', s); setSt((c) => ({ ...c, ...r, dirty: false })); setMsg('저장됨'); } catch (e) { setMsg(e.message); } finally { setBusy(''); } };
+  const runNow = async () => { setBusy('run'); setMsg(null); try { const r = await postJson('/admin/os-scan/run', scope ? { vcenterId: scope } : {}); setMsg(r.ok ? `스캔 완료 — 탐지 ${r.found ?? 0}건` : `오류: ${r.reason || '실패'}`); await loadStatus(); await loadResults(); } catch (e) { setMsg(e.message); } finally { setBusy(''); } };
+  const exportCsv = async () => {
+    const qs = new URLSearchParams({ ...(scope ? { vcenterId: scope } : {}), ...(mm ? { mismatch: '1' } : {}) }).toString();
+    const res = await fetch(`/api/admin/os-scan/results.csv${qs ? `?${qs}` : ''}`, { headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {} });
+    const blob = await res.blob(); const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = `real-os-${new Date().toISOString().slice(0, 10)}.csv`; a.click(); URL.revokeObjectURL(url);
+  };
+
+  const sum = st.summary || {};
+  const cols = [
+    { key: 'vmName', label: 'VM', render: (r) => <VmLink name={r.vmName} vcenterId={r.vcenterId} label={r.vmName} /> },
+    { key: 'vcenterId', label: 'vCenter', render: (r) => <span className="muted">{r.vcenterId}</span> },
+    { key: 'host', label: '호스트', render: (r) => <span className="muted" style={{ fontSize: 12, maxWidth: 160, display: 'inline-block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', verticalAlign: 'bottom' }} title={r.host}>{r.host || '—'}</span> },
+    { key: 'esxiGuestOS', label: 'ESXi 보고', render: (r) => <span style={{ fontSize: 12 }}>{r.esxiGuestOS || '—'}</span> },
+    { key: 'os', label: '실제 OS', render: (r) => (r.os ? <b>{r.os}</b> : <span className="badge red" title={r.error}>실패</span>) },
+    { key: 'osVersion', label: '버전', render: (r) => r.osVersion || '—' },
+    { key: 'family', label: '계열', render: (r) => r.family ? <span className="badge gray">{r.family}</span> : '—' },
+    { key: 'mismatch', label: '불일치', sortValue: (r) => (r.mismatch ? 1 : 0), render: (r) => (r.mismatch ? <span className="badge amber">불일치</span> : (r.os ? <span className="badge green">일치</span> : '—')) },
+    { key: 'at', label: '스캔', render: (r) => <span className="muted" style={{ fontSize: 11 }}>{r.at ? new Date(r.at).toLocaleString('ko-KR') : '—'}</span> },
+  ];
+
+  return (
+    <>
+      <div className="kpis" style={{ marginBottom: 14 }}>
+        <Card label="스캔된 VM" value={(sum.scanned ?? 0).toLocaleString()} meta={st.lastRun ? `마지막 ${new Date(st.lastRun).toLocaleString('ko-KR')}` : '아직 실행 안 함'} />
+        <Card label="불일치(ESXi≠실제)" value={sum.mismatches ?? 0} accent={sum.mismatches ? 'var(--amber)' : ''} meta="ESXi 보고와 실제 설치 OS 차이" />
+        <Card label="탐지 실패" value={sum.errors ?? 0} accent={sum.errors ? 'var(--red)' : ''} meta="계정/Tools/권한 등" />
+        <Card label="계열 분포" value={(sum.byFamily || []).length} meta={(sum.byFamily || []).slice(0, 3).map((f) => `${f.family} ${f.count}`).join(' · ')} />
+      </div>
+
+      <div className="card" style={{ padding: 14, marginBottom: 12 }}>
+        <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>게스트 OS에서 <code>/etc/os-release</code>·<code>/etc/redhat-release</code>(Linux)·<code>Win32_OperatingSystem</code>(Windows)를 직접 읽어 <b>실제 설치 OS</b>를 확인합니다(ESXi 보고값과 별개). 계정은 <b>설정 › GPU 게스트 수집</b>의 OS별 계정을 사용합니다. 상단 <b>vCenter 선택</b>이 스캔 범위입니다.</p>
+        <div className="flex gap wrap" style={{ alignItems: 'center', gap: 14 }}>
+          <label className="flex gap" style={{ alignItems: 'center', cursor: 'pointer' }}><input type="checkbox" checked={!!s.enabled} onChange={(e) => setS({ enabled: e.target.checked })} /> <b>주기 스캔</b></label>
+          <span className="muted">주기</span><input className="input" type="number" min={5} style={{ width: 90 }} value={s.intervalMin} onChange={(e) => setS({ intervalMin: e.target.value })} /><span className="muted">분</span>
+          <span className="muted">최대</span><input className="input" type="number" min={1} style={{ width: 80 }} value={s.maxVms} onChange={(e) => setS({ maxVms: e.target.value })} /><span className="muted">대/회</span>
+          <span className="muted">재스캔</span><input className="input" type="number" min={0} style={{ width: 70 }} value={s.rescanDays} onChange={(e) => setS({ rescanDays: e.target.value })} /><span className="muted">일(0=안함)</span>
+          <span className="muted">동시</span><input className="input" type="number" min={1} max={16} style={{ width: 56 }} value={s.concurrency} onChange={(e) => setS({ concurrency: e.target.value })} />
+        </div>
+        <div className="flex gap" style={{ marginTop: 12, alignItems: 'center' }}>
+          <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={busy === 'save'} onClick={saveSettings}>설정 저장</button>
+          <button className="logout-btn" style={{ padding: '8px 16px' }} disabled={busy === 'run'} onClick={runNow}>{busy === 'run' ? '스캔 중…' : `지금 스캔 (${scope || '전체 vCenter'})`}</button>
+          {st.lastErr ? <span className="muted" style={{ fontSize: 12, color: 'var(--amber)' }}>최근 오류: {st.lastErr.slice(0, 60)}</span> : null}
+          {msg && <span className="muted" style={{ fontSize: 13 }}>{msg}</span>}
+        </div>
+      </div>
+
+      <div className="flex gap wrap" style={{ marginBottom: 8, alignItems: 'center' }}>
+        <button className={mm ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setMm((v) => !v)}>{mm ? '불일치만 ✓' : '불일치만 보기'}</button>
+        <span className="muted" style={{ fontSize: 12 }}>{rows ? `${rows.length}건` : ''}</span>
+        <button className="logout-btn" style={{ flex: 'none', padding: '7px 14px', marginLeft: 'auto' }} disabled={!rows?.length} onClick={exportCsv}>⬇ CSV 내보내기</button>
+      </div>
+      {!rows ? <Loading /> : rows.length === 0 ? <div className="card"><span className="muted">{mm ? '불일치 VM이 없습니다.' : '스캔 결과가 없습니다. ‘지금 스캔’을 실행하세요(계정은 GPU 게스트 수집 설정 사용).'}</span></div>
+        : <DataTable columns={cols} rows={rows} initialSort={{ key: 'mismatch', dir: 'desc' }} />}
+    </>
   );
 }
 

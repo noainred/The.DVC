@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import { config } from '../config.js';
 import { requireRole, listUsers, createUser, updateUser, deleteUser, beginTotpEnroll, confirmTotpEnroll, disableTotp, verifyUserOtp } from '../auth/auth.js';
 import { loadSessionSecurity, saveSessionSecurity } from '../security/securitySettings.js';
+import { saveOsScanSettings, runOsScanNow, osScanStatus } from '../inventory/osScanner.js';
+import { getOsResults } from '../inventory/osStore.js';
 import { store } from '../store.js';
 import { getDataSource, setDataSource, isDataSourceOverridden } from '../runtime-settings.js';
 import { ledgerInfo } from '../ipam/db.js';
@@ -536,6 +538,25 @@ adminRouter.put('/security/session', adminOnly, (req, res) => {
   if (before.settingsOwners.join(',') !== after.settingsOwners.join(',')) parts.push(`설정 소유 계정 [${before.settingsOwners.join(', ')}] → [${after.settingsOwners.join(', ')}]`);
   logAudit({ user: username, action: '세션 보안/설정 접근 변경', target: 'security/session', detail: parts.join(' · ') || '변경 없음', ip: req.ip || '' });
   res.json({ ok: true, settings: after });
+});
+
+// 실제 OS 인벤토리(게스트에서 읽은 실제 설치 OS) — 조회·설정·즉시 실행·결과·CSV.
+adminRouter.get('/os-scan', adminOnly, (_req, res) => res.json(osScanStatus()));
+adminRouter.put('/os-scan/settings', adminOnly, (req, res) => res.json({ ok: true, ...osScanStatus(), settings: saveOsScanSettings(req.body || {}) }));
+adminRouter.post('/os-scan/run', adminOnly, async (req, res) => res.json(await runOsScanNow(req.body?.vcenterId || '')));
+adminRouter.get('/os-scan/results', adminOnly, (req, res) => {
+  const rows = getOsResults({ vcenterId: req.query.vcenterId || '', mismatch: req.query.mismatch === '1' });
+  res.json({ total: rows.length, items: rows.slice(0, 10000) });
+});
+adminRouter.get('/os-scan/results.csv', adminOnly, (req, res) => {
+  const rows = getOsResults({ vcenterId: req.query.vcenterId || '', mismatch: req.query.mismatch === '1' });
+  const esc = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const head = ['vm', 'vcenter', 'cluster', 'host', 'esxi_guest_os', 'real_os', 'real_version', 'family', 'kernel', 'mismatch', 'scanned_at', 'error'];
+  const lines = [head.join(',')];
+  for (const r of rows) lines.push([r.vmName, r.vcenterId, r.cluster, r.host, r.esxiGuestOS, r.os, r.osVersion, r.family, r.kernel, r.mismatch ? 'Y' : 'N', new Date(r.at).toISOString(), r.error].map(esc).join(','));
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="real-os-${new Date().toISOString().slice(0, 10)}.csv"`);
+  res.send('﻿' + lines.join('\r\n'));
 });
 
 // --- VM 프로비저닝: 대량 생성 작업 시작 (관리자) ---

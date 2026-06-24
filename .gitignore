@@ -69,3 +69,7 @@ server/config/net-issues-state.json
 
 # 세션 보안(유휴 로그아웃) 설정(런타임)
 server/config/security-session.json
+
+# 실제 OS 인벤토리(런타임)
+server/config/os-inventory.json
+server/config/os-scan.json

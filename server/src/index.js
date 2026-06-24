@@ -53,6 +53,7 @@ import { startCaptureWorker } from './agent/captureWorker.js';
 import { startCaptureMonitor } from './net/monitor.js';
 import { startLoginMonitor } from './security/loginMonitor.js';
 import { startGuestScanScheduler } from './security/guestScanScheduler.js';
+import { startOsScanner } from './inventory/osScanner.js';
 
 const app = express();
 app.use(cors());
@@ -113,7 +114,7 @@ upgradeManager.start();
 const stagger = [
   startIdracPoller, startNsxPoller, startAlertEngine, startMetricsSampler, startGpuGuestPoller,
   startIpScanPoller, startIpScanAgent, startCollectorPuller, startAgentScanner, startInventoryPush,
-  startGpuGuestPush, startPingWorker, startConfigPush, startBackupScheduler, startLogPoller, startLogQueryWorker, startCaptureWorker, startCaptureMonitor, startLoginMonitor, startGuestScanScheduler,
+  startGpuGuestPush, startPingWorker, startConfigPush, startBackupScheduler, startLogPoller, startLogQueryWorker, startCaptureWorker, startCaptureMonitor, startLoginMonitor, startGuestScanScheduler, startOsScanner,
 ];
 stagger.forEach((start, i) => setTimeout(() => { try { start(); } catch (e) { console.error('[start] 폴러 기동 실패:', e?.message); } }, i * 1500).unref?.());
 
