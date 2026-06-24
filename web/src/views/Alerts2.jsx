@@ -6,7 +6,6 @@ const RULE_LABEL = {
   criticalAlarms: '위험(critical) 알람 발생',
   vcenterDown: 'vCenter 수집 실패(연결 불가)',
   hostDisconnected: '호스트 연결 끊김',
-  massVmPowerOff: 'VM 동시 다운 ≥ (대) — 직전 수집 이후 동시 전원 OFF',
   datastorePct: '데이터스토어 사용률 ≥ (%)',
   ramOvercommitPct: '클러스터 RAM 오버커밋 ≥ (%)',
   vcpuPerCore: '클러스터 vCPU:코어 ≥',
