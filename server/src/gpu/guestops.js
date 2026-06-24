@@ -76,7 +76,7 @@ export async function testVmGuest(c, vmMoref, creds, { isWindows = false, timeou
   // 2) 데이터 읽기 — nvidia-smi 실행 후 파싱. 실패 시 구체 사유(stderr/다운로드)를 그대로 표시.
   try {
     const r = await collectVmGpu(c, vmMoref, creds, { isWindows, timeoutMs, dlHosts, trace: tr });
-    if (r && r.utilPct != null) { out.read = true; out.sample = { gpus: r.count, utilPct: r.utilPct, memUsedPct: r.memUsedPct, migEnabled: r.migEnabled || 0 }; tlog(tr, `✓ 읽기 성공 — GPU ${r.count}개, 사용률 ${r.utilPct}%`); }
+    if (r && r.utilPct != null) { out.read = true; out.sample = { gpus: r.count, utilPct: r.utilPct, utilNA: !!r.utilNA, memUsedPct: r.memUsedPct, migEnabled: r.migEnabled || 0 }; tlog(tr, `✓ 읽기 성공 — GPU ${r.count}개, 사용률 ${r.utilNA ? 'N/A(MIG 모드)' : r.utilPct + '%'}`); }
     else { out.error = 'nvidia-smi 출력 없음 — 게스트에 NVIDIA 드라이버/nvidia-smi 확인'; tlog(tr, `✗ ${out.error}`); }
   } catch (e) { out.error = e.guestDiag ? e.message : cleanGuestError(e.message); tlog(tr, `✗ 읽기 실패: ${out.error}`); }
   return out;
@@ -254,23 +254,40 @@ export async function collectVmGpu(c, vmMoref, creds, { isWindows, timeoutMs = 2
 export function parseNvidiaSmiCsv(text) {
   if (!text || !text.trim()) return null;
   const gpus = [];
+  // '[N/A]' / 'N/A' / 빈값 → null. nounits라도 MIG 모드면 사용률이 '[N/A]'로 온다.
+  const num = (s) => { const v = Number(String(s).replace(/[[\]]/g, '').trim()); return Number.isFinite(v) ? v : null; };
   for (const line of text.trim().split(/\r?\n/)) {
-    if (!line.trim()) continue; // 빈 줄은 건너뜀(Number('')===0 으로 유령 0% GPU 생성 방지)
+    if (!line.trim()) continue; // 빈 줄 건너뜀
     const raw = line.split(',').map((x) => String(x).trim());
-    const n0 = Number(raw[0]);
-    if (raw.length < 1 || !Number.isFinite(n0)) continue;
-    const num = (i) => { const v = Number(raw[i]); return Number.isFinite(v) ? v : null; };
+    if (raw.length < 4) continue; // 데이터 행 아님(헤더/잡음)
+    const utilPct = num(raw[0]);     // MIG Enabled면 [N/A] → null(아래서 유휴 0% 처리)
+    const memUsedMB = num(raw[2]);
+    const memTotalMB = num(raw[3]);
+    // 실제 GPU 한 장 판별: 총 메모리가 보고되면 GPU다(MIG로 사용률이 N/A여도 메모리는 나옴).
+    // 둘 다 없으면(헤더/잡음) 건너뛴다. → MIG GPU가 통째로 누락되던 버그 수정.
+    if (memTotalMB == null && utilPct == null) continue;
     // MIG 모드: 'Enabled'/'Disabled'/'N/A'(미지원 GPU). 숫자가 아닌 마지막 컬럼.
     const migRaw = raw.length >= 5 ? raw[4] : '';
     const mig = /enabled/i.test(migRaw) ? 'enabled' : /disabled/i.test(migRaw) ? 'disabled' : null;
-    gpus.push({ utilPct: n0, memUtilPct: num(1), memUsedMB: num(2), memTotalMB: num(3), mig });
+    gpus.push({ utilPct, memUtilPct: num(raw[1]), memUsedMB, memTotalMB, mig });
   }
   if (!gpus.length) return null;
   const avg = (arr) => Math.round(arr.reduce((a, b) => a + b, 0) / arr.length);
+  const known = gpus.map((g) => g.utilPct).filter((v) => v != null);
   const memUsed = gpus.reduce((a, g) => a + (g.memUsedMB || 0), 0);
   const memTotal = gpus.reduce((a, g) => a + (g.memTotalMB || 0), 0);
   const migCount = gpus.filter((g) => g.mig === 'enabled').length;
-  return { count: gpus.length, utilPct: avg(gpus.map((g) => g.utilPct)), memUsedPct: memTotal ? Math.round((memUsed / memTotal) * 100) : null, migEnabled: migCount, gpus };
+  // 사용률을 아는 GPU가 하나도 없음 = MIG로 GPU 단위 사용률 미제공(인스턴스 미생성=유휴).
+  // 이 경우 0%(유휴)로 보고하되 utilNA 플래그로 'N/A(MIG)'임을 구분 가능하게 한다.
+  const utilNA = known.length === 0;
+  return {
+    count: gpus.length,
+    utilPct: known.length ? avg(known) : 0,
+    utilNA,
+    memUsedPct: memTotal ? Math.round((memUsed / memTotal) * 100) : null,
+    migEnabled: migCount,
+    gpus,
+  };
 }
 
 // ───────────────────── 게스트 계정 추가(권한 작업) ─────────────────────

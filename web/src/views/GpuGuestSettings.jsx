@@ -535,7 +535,7 @@ function TestResult({ t }) {
     <span className="flex gap" style={{ alignItems: 'center', gap: 4, fontSize: 11 }}>
       <span className={`badge ${t.login ? 'green' : 'red'}`}>로그인 {t.login ? '✓' : '✗'}</span>
       <span className={`badge ${t.read ? 'green' : (t.login ? 'amber' : 'gray')}`}>읽기 {t.read ? '✓' : '✗'}</span>
-      {t.sample && <span className="muted">{t.sample.utilPct}% · {t.sample.gpus}GPU</span>}
+      {t.sample && <span className="muted">{t.sample.utilNA ? 'N/A(MIG)' : `${t.sample.utilPct}%`} · {t.sample.gpus}GPU</span>}
       {!t.read && t.error && <span className="muted" title={t.error}>({t.error})</span>}
     </span>
   );

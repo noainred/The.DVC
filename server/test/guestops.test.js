@@ -30,3 +30,20 @@ test('parseNvidiaSmiCsv: 빈 입력 → null', () => {
   assert.equal(parseNvidiaSmiCsv('   '), null);
   assert.equal(parseNvidiaSmiCsv('not,a,number'), null);
 });
+
+test('parseNvidiaSmiCsv: MIG Enabled로 사용률 N/A여도 GPU 수집(유휴 0%)', () => {
+  // MIG 모드면 nvidia-smi가 GPU 단위 사용률을 [N/A]로 보고 → GPU가 통째로 누락되던 버그.
+  const r = parseNvidiaSmiCsv('[N/A], [N/A], 0, 81920, Enabled\n[N/A], [N/A], 0, 81920, Enabled');
+  assert.equal(r.count, 2);        // 두 장 모두 인식(예전엔 0 → null 반환)
+  assert.equal(r.utilPct, 0);      // 전부 N/A → 유휴 0%
+  assert.equal(r.utilNA, true);    // N/A(MIG) 구분 플래그
+  assert.equal(r.memUsedPct, 0);
+  assert.equal(r.migEnabled, 2);
+});
+
+test('parseNvidiaSmiCsv: 일부만 N/A면 아는 값으로 평균', () => {
+  const r = parseNvidiaSmiCsv('[N/A], [N/A], 0, 81920, Enabled\n50, 20, 4096, 81920, Disabled');
+  assert.equal(r.count, 2);
+  assert.equal(r.utilPct, 50);     // 아는 GPU(50)만 평균
+  assert.equal(r.utilNA, false);
+});

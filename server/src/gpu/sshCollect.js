@@ -52,7 +52,7 @@ export async function collectVmGpuSsh(vm, creds, { timeoutMs = 20_000, port = 22
       const out = (r.stdout || '').trim();
       if (out) {
         const parsed = parseNvidiaSmiCsv(out);
-        if (parsed && parsed.utilPct != null) { tlog(trace, `✓ SSH 수집 성공(${ip}) — GPU ${parsed.count}, 사용률 ${parsed.utilPct}%`); return parsed; }
+        if (parsed && parsed.utilPct != null) { tlog(trace, `✓ SSH 수집 성공(${ip}) — GPU ${parsed.count}, 사용률 ${parsed.utilNA ? 'N/A(MIG 모드)' : parsed.utilPct + '%'}`); return parsed; }
         lastErr = `nvidia-smi 출력 파싱 실패: ${out.slice(0, 80)}`;
       } else {
         lastErr = ((r.stderr || '').trim().split('\n')[0]) || 'nvidia-smi 출력 없음(드라이버/PATH 확인)';
@@ -75,7 +75,7 @@ export async function testVmGuestSsh(vm, creds, { timeoutMs = 20_000, port = 22,
   try {
     const r = await collectVmGpuSsh(vm, creds, { timeoutMs, port, trace: tr });
     out.login = true; // 접속+명령 실행 성공 = 로그인 성공
-    if (r && r.utilPct != null) { out.read = true; out.sample = { gpus: r.count, utilPct: r.utilPct, memUsedPct: r.memUsedPct, migEnabled: r.migEnabled || 0 }; }
+    if (r && r.utilPct != null) { out.read = true; out.sample = { gpus: r.count, utilPct: r.utilPct, utilNA: !!r.utilNA, memUsedPct: r.memUsedPct, migEnabled: r.migEnabled || 0 }; }
     else out.error = 'nvidia-smi 출력 없음';
   } catch (e) {
     out.error = e.message;
