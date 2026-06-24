@@ -37,25 +37,37 @@ function Funnel({ c }) {
   );
 }
 
-function VcDiag({ d }) {
+function VcDiag({ d, failOnly }) {
   const stageOk = d.stage === '완료';
+  const all = d.results || [];
+  const results = failOnly ? all.filter((r) => !r.ok) : all;
+  const failN = all.filter((r) => !r.ok).length;
+  const hasOsAcct = all.some((r) => r.os || r.account); // 구버전 agent는 OS/계정이 없을 수 있음
   return (
     <div className="card" style={{ padding: 12, marginTop: 8, borderLeft: `3px solid ${stageOk ? 'var(--green)' : 'var(--amber,#f59e0b)'}` }}>
       <div className="flex between wrap" style={{ alignItems: 'center', gap: 8 }}>
         <div><b>{d.vcId}</b> <span className={`badge ${stageOk ? 'green' : 'amber'}`} style={{ marginLeft: 6 }}>{d.stage || '?'}</span>
-          {d.collected != null && <span className="muted" style={{ marginLeft: 6, fontSize: 12 }}>수집 {d.collected}개</span>}</div>
+          {d.collected != null && <span className="muted" style={{ marginLeft: 6, fontSize: 12 }}>수집 {d.collected}개</span>}
+          {failN > 0 && <span className="badge red" style={{ marginLeft: 6 }}>실패 {failN}</span>}</div>
         <span className="muted" style={{ fontSize: 11 }}>{fmtAgo(d.at)}</span>
       </div>
       <Funnel c={d.counts} />
       {d.error && <div className="badge red" style={{ marginTop: 4, whiteSpace: 'normal' }}>오류: {d.error}</div>}
-      {(d.results || []).length > 0 && (
+      {all.length > 0 && (
         <div className="table-wrap" style={{ maxHeight: '40vh', marginTop: 6 }}>
-          <table><thead><tr><th>VM</th><th>호스트</th><th>결과</th></tr></thead>
+          <table><thead><tr><th>VM</th><th>호스트</th>{hasOsAcct && <th>OS / 계정</th>}<th>결과</th></tr></thead>
             <tbody>
-              {d.results.map((r, i) => (
+              {results.length === 0 && <tr><td colSpan={hasOsAcct ? 4 : 3} className="center muted" style={{ padding: 14 }}>{failOnly ? '실패한 VM 없음' : '결과 없음'}</td></tr>}
+              {results.map((r, i) => (
                 <tr key={i}>
                   <td><b>{r.vm}</b></td>
                   <td className="muted" style={{ fontSize: 12 }}>{r.host}</td>
+                  {hasOsAcct && (
+                    <td style={{ fontSize: 12 }}>
+                      {r.os && <span className={`badge ${r.os === 'Windows' ? 'blue' : 'gray'}`} style={{ marginRight: 4 }}>{r.os}</span>}
+                      <span className="muted">{r.account || '—'}</span>
+                    </td>
+                  )}
                   <td style={{ fontSize: 12 }}>
                     {r.ok
                       ? <span className="badge green">✓ util {r.util}% · mem {r.mem ?? '-'}% · {r.gpus}GPU</span>
@@ -85,14 +97,23 @@ export default function GpuGuestDiag() {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [guide, setGuide] = useState(true);
+  const [vcFilter, setVcFilter] = useState('');   // '' = 전체 vCenter
+  const [failOnly, setFailOnly] = useState(false); // 실패한 VM만 보기
   const load = () => fetchJson('/admin/gpu-guest/diag').then((d) => { setData(d); setError(null); }).catch((e) => setError(e.message));
   useEffect(() => { load(); const t = setInterval(load, 15_000); return () => clearInterval(t); }, []);
   if (error) return <ErrorBox message={error} />;
   if (!data) return <Loading />;
 
-  const blocks = [];
-  if (data.local && (data.local.vcenters || []).length) blocks.push({ key: '_local', agent: '이 포탈(로컬 수집)', at: data.local.at, vcenters: data.local.vcenters });
-  for (const a of (data.agents || [])) blocks.push({ key: a.agent, agent: `Agent: ${a.agent}`, at: a.receivedAt || a.at, vcenters: a.vcenters || [], counts: a.counts });
+  const rawBlocks = [];
+  if (data.local && (data.local.vcenters || []).length) rawBlocks.push({ key: '_local', agent: '이 포탈(로컬 수집)', at: data.local.at, vcenters: data.local.vcenters });
+  for (const a of (data.agents || [])) rawBlocks.push({ key: a.agent, agent: `Agent: ${a.agent}`, at: a.receivedAt || a.at, vcenters: a.vcenters || [], counts: a.counts });
+
+  // vCenter(법인) 목록 — 필터 드롭다운용.
+  const vcIds = [...new Set(rawBlocks.flatMap((b) => (b.vcenters || []).map((d) => d.vcId)).filter(Boolean))].sort();
+  // 선택한 vCenter만 남기고, 매칭 vCenter가 없는 블록(agent)은 숨긴다.
+  const blocks = vcFilter
+    ? rawBlocks.map((b) => ({ ...b, vcenters: (b.vcenters || []).filter((d) => d.vcId === vcFilter) })).filter((b) => b.vcenters.length)
+    : rawBlocks;
 
   return (
     <div style={{ maxWidth: 1100 }}>
@@ -101,6 +122,20 @@ export default function GpuGuestDiag() {
         패스쓰루 GPU 사용률 수집이 <b>어느 단계에서 막혔는지</b> 보여줍니다. 깔때기에서 <span className="badge red">빨간 0</span>으로
         떨어지는 지점이 원인입니다. 수집은 보통 ESXi 망에 닿는 <b>agent</b>가 수행해 중앙으로 push합니다(15초마다 자동 새로고침).
       </p>
+
+      <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 10 }}>
+        <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }}>
+          <span className="muted">vCenter(법인)</span>
+          <select className="select" value={vcFilter} onChange={(e) => setVcFilter(e.target.value)}>
+            <option value="">전체 ({vcIds.length})</option>
+            {vcIds.map((id) => <option key={id} value={id}>{id}</option>)}
+          </select>
+        </label>
+        <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }} title="인증/실행에 실패한 VM만 표시">
+          <input type="checkbox" checked={failOnly} onChange={(e) => setFailOnly(e.target.checked)} /> 실패한 VM만
+        </label>
+        {vcFilter && <button className="tab" style={{ padding: '4px 10px' }} onClick={() => setVcFilter('')}>필터 해제</button>}
+      </div>
 
       {blocks.length === 0
         ? <div className="card" style={{ padding: 16 }}><span className="muted">아직 진단 데이터가 없습니다. agent에서 GPU 게스트 수집이 한 주기 돌고 push되면 표시됩니다(설정 › GPU 게스트 수집 사용 + agent의 CENTRAL_URL/TOKEN 확인).</span></div>
@@ -112,7 +147,7 @@ export default function GpuGuestDiag() {
             </div>
             {(b.vcenters || []).length === 0
               ? <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>수집 대상 vCenter 없음(설정 확인).</div>
-              : b.vcenters.map((d, i) => <VcDiag key={i} d={d} />)}
+              : b.vcenters.map((d, i) => <VcDiag key={i} d={d} failOnly={failOnly} />)}
           </div>
         ))}
 

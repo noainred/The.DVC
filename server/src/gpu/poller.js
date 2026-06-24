@@ -117,13 +117,16 @@ async function pollLive(snap, vc, s) {
       let err = null;
       const r = await collectVmGpu(c, moref, creds, { isWindows, timeoutMs: s.timeoutMs, dlHosts })
         .catch((e) => { err = e.message; console.warn(`[gpu-guest]   ✗ ${v.name}: ${e.message}`); return null; });
+      // 진단에 시도한 OS/계정도 남긴다(인증 실패 시 어떤 계정이 거부됐는지 즉시 식별 — 비번 제외).
+      const osLabel = isWindows ? 'Windows' : 'Linux';
+      const acct = `${creds.username}(${creds.source})`;
       if (r && r.utilPct != null) {
         console.log(`[gpu-guest]   ✓ ${v.name}: util=${r.utilPct}% mem=${r.memUsedPct ?? '-'}% gpus=${r.count}`);
         vms.push({ vmId: v.id, host: v.host, vcenterId: vc.id, utilPct: r.utilPct, memUsedPct: r.memUsedPct });
         const arr = byHost.get(v.host) || []; arr.push(r.utilPct); byHost.set(v.host, arr);
-        if (diag.results.length < 200) diag.results.push({ vm: v.name, host: v.host, ok: true, util: r.utilPct, mem: r.memUsedPct ?? null, gpus: r.count });
+        if (diag.results.length < 200) diag.results.push({ vm: v.name, host: v.host, vcenterId: vc.id, os: osLabel, account: acct, ok: true, util: r.utilPct, mem: r.memUsedPct ?? null, gpus: r.count });
       } else if (diag.results.length < 200) {
-        diag.results.push({ vm: v.name, host: v.host, ok: false, error: err || 'nvidia-smi 결과 없음(stdout 비어있음)' });
+        diag.results.push({ vm: v.name, host: v.host, vcenterId: vc.id, os: osLabel, account: acct, ok: false, error: err || 'nvidia-smi 결과 없음(stdout 비어있음)' });
       }
     });
   } finally { await c.logout().catch(() => {}); }
