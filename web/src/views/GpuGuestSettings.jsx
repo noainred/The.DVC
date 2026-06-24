@@ -148,7 +148,7 @@ export default function GpuGuestSettings() {
       <QuickSshTest />
 
       {/* VM별 계정 관리 + 테스트 */}
-      <VmCredManager vcs={vcs} vcenters={form.vcenters} onSavedShared={load} />
+      <VmCredManager vcs={vcs} vcenters={form.vcenters} collectMethod={form.collectMethod} onSavedShared={load} />
 
       <div className="card" style={{ padding: 16, marginTop: 14 }}>
         <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>현재 상태</div>
@@ -223,7 +223,7 @@ function QuickSshTest() {
 }
 
 /** VM별 계정 관리 — 법인 선택 → 패스쓰루 GPU VM 조회 → 공용/별도 선택 + 로그인/읽기 테스트(개별·일괄). */
-function VmCredManager({ vcs, vcenters }) {
+function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared }) {
   const [selVc, setSelVc] = useState('');
   const [rows, setRows] = useState(null);   // null=미조회, []=없음
   const [osFilter, setOsFilter] = useState('all'); // all | linux | windows
@@ -333,8 +333,19 @@ function VmCredManager({ vcs, vcenters }) {
           vms[r.id] = null; // 공용으로 전환 → override 제거
         }
       }
-      await putJson('/admin/gpu-guest/settings', { vcenters: { [selVc]: { vms } } });
-      setMsg('VM별 계정을 저장했습니다.');
+      // SSH/auto로 테스트해 성공했는데 실제 수집 방식이 'VMware Tools만(guestops)'이면, 폴러는
+      // SSH를 절대 시도하지 않아 "테스트는 되는데 수집은 안 됨"이 된다. 이때 수집 방식을 'auto'로
+      // 올려 SSH 폴백을 켠다(게스트작업이 잘 되는 VM은 그대로, 막힌 VM만 SSH). 'ssh'로 강제하면
+      // 게스트작업으로 잘 수집되던 VM이 끊길 수 있어 안전한 'auto'를 쓴다.
+      const bumpToAuto = (testMethod === 'ssh' || testMethod === 'auto') && collectMethod === 'guestops';
+      await putJson('/admin/gpu-guest/settings', {
+        vcenters: { [selVc]: { vms } },
+        ...(bumpToAuto ? { collectMethod: 'auto' } : {}),
+      });
+      setMsg(bumpToAuto
+        ? "VM별 계정 저장 완료 — 수집 방식이 'VMware Tools만'이라 SSH 수집이 안 되던 걸 'auto(자동 폴백)'로 바꿔 켰습니다. 다음 주기부터 SSH로 수집됩니다."
+        : 'VM별 계정을 저장했습니다. (수집 방식이 SSH/auto인지 위 설정에서 확인하세요)');
+      if (bumpToAuto) onSavedShared?.();
       await loadVms(selVc);
     } catch (e) { setMsg(`오류: ${e.message}`); }
     finally { setBusy(false); }
