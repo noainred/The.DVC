@@ -245,7 +245,7 @@ function VmCredManager({ vcs, vcenters }) {
                   const ready = r.powerState === 'POWERED_ON' && r.toolsStatus === 'RUNNING';
                   return (
                     <tr key={r.id}>
-                      <td><VmLink name={r.name} vcenterId={selVc} label={r.name} /><div className="muted" style={{ fontSize: 11 }}>{r.guestOS || ''}</div></td>
+                      <td><VmLink name={r.name} vcenterId={selVc} label={r.name} item={r} /><div className="muted" style={{ fontSize: 11 }}>{r.guestOS || ''}</div></td>
                       <td className="muted" style={{ fontSize: 12, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.host}>{r.host}</td>
                       <td style={{ fontSize: 11, whiteSpace: 'nowrap' }}>
                         <span className={`badge ${r.powerState === 'POWERED_ON' ? 'green' : 'gray'}`}>{r.powerState === 'POWERED_ON' ? 'On' : 'Off'}</span>{' '}

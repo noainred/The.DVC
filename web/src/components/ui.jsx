@@ -239,9 +239,9 @@ export function EntityDetail({ type, item, onClose }) {
               })()}
             </DRow>
             <DRow label="VMware Tools"><StateBadge state={item.toolsStatus} /></DRow>
-            <DRow label="vCPU">{item.cpuCount} 코어</DRow>
-            <DRow label="RAM">{gb(item.memMB)}</DRow>
-            <DRow label="디스크">{item.storageGB} GB</DRow>
+            <DRow label="vCPU">{item.cpuCount != null ? `${item.cpuCount} 코어` : '—'}</DRow>
+            <DRow label="RAM">{item.memMB != null ? gb(item.memMB) : '—'}</DRow>
+            <DRow label="디스크">{item.storageGB != null ? `${item.storageGB} GB` : '—'}</DRow>
             <DRow label="CPU 사용률"><UsageCell pct={item.cpuUsagePct} /></DRow>
             <DRow label="메모리 사용률"><UsageCell pct={item.memUsagePct} /></DRow>
             <DRow label="Tools 버전">{item.toolsVersion || '—'}</DRow>
@@ -332,21 +332,25 @@ export function EntityDetail({ type, item, onClose }) {
  * 어디서나 VM 이름/IP/호스트명을 클릭하면 VM 상세(EntityDetail) 팝업을 띄우는 공용 링크.
  * 스냅샷에서 단건 조회(/vms/lookup) 후 모달을 연다. 못 찾으면 안내 모달.
  */
-export function VmLink({ name, ip, vcenterId, label, className = 'cell-link', style }) {
+export function VmLink({ name, ip, vcenterId, label, item, className = 'cell-link', style }) {
   const [vm, setVm] = useState(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
   const open = async (e) => {
     e?.stopPropagation?.();
     setBusy(true); setMsg(null);
+    // 가진 정보(item)가 있으면 즉시 상세를 띄워(무반응 방지), 이후 lookup으로 전체 정보 보강.
+    const seed = item || (name || ip ? { name: name || ip, vcenterId, ipAddress: ip } : null);
+    if (seed) setVm(seed);
     try {
       const params = {};
       if (name) params.name = name;
       if (ip) params.ip = ip;
       if (vcenterId) params.vcenterId = vcenterId;
       const r = await fetchJson('/vms/lookup', params);
-      if (r.vm) setVm(r.vm); else setMsg(`해당 VM을 찾을 수 없습니다 (${label || name || ip}).`);
-    } catch (err) { setMsg(err.message); }
+      if (r.vm) setVm((cur) => ({ ...(cur || {}), ...r.vm }));        // 전체 스냅샷으로 보강
+      else if (!seed) setMsg(`해당 VM을 찾을 수 없습니다 (${label || name || ip}).`);
+    } catch (err) { if (!seed) setMsg(err.message); }
     finally { setBusy(false); }
   };
   return (
