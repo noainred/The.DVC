@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { usePolling } from '../api.js';
-import { DataTable, UsageCell, StateBadge, Loading, ErrorBox, ResultCount, Modal } from '../components/ui.jsx';
+import { DataTable, UsageCell, StateBadge, Loading, ErrorBox, ResultCount, Modal, VmIpPing } from '../components/ui.jsx';
 import { VmMetricButton } from '../components/VmMetrics.jsx';
 import { VmConsoleButton } from '../components/VmConsole.jsx';
 import { VmRemoteButton } from '../components/VmRemote.jsx';
@@ -42,7 +42,10 @@ function VmDetail({ vm, onClose }) {
         <DetailRow label="호스트">{vm.host || '—'}</DetailRow>
         <DetailRow label="클러스터">{vm.cluster || '—'}</DetailRow>
         <DetailRow label="Guest OS">{vm.guestOS}</DetailRow>
-        <DetailRow label={`IP 주소${vm.ipAddresses?.length > 1 ? ` (${vm.ipAddresses.length})` : ''}`}>{ipList(vm)}</DetailRow>
+        <DetailRow label={`IP 주소${vm.ipAddresses?.length > 1 ? ` (${vm.ipAddresses.length})` : ''}`}>{(() => {
+          const ips = vm.ipAddresses?.length ? vm.ipAddresses : (vm.ipAddress ? [vm.ipAddress] : []);
+          return ips.length ? <VmIpPing vcenterId={vm.vcenterId} ips={ips} /> : <span className="muted">—</span>;
+        })()}</DetailRow>
         <DetailRow label="VMware Tools"><StateBadge state={vm.toolsStatus} /></DetailRow>
         <DetailRow label="vCPU">{vm.cpuCount} 코어</DetailRow>
         <DetailRow label="RAM">{Math.round(vm.memMB / 1024)} GB ({vm.memMB.toLocaleString()} MB)</DetailRow>

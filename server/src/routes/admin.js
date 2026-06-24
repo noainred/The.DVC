@@ -26,7 +26,7 @@ import { loadMetricsSettings, saveMetricsSettings, METRICS_LIMITS } from '../met
 import { forceGpuUtilCollect, clearGpuUtilForce } from '../vcenter/soapClient.js';
 import { metricsSamplerStatus, rescheduleMetricsSampler } from '../metrics/sampler.js';
 import { loadGpuGuestSettings, saveGpuGuestSettings, redactGpuGuestSettings, resolveVmCreds } from '../gpu/settings.js';
-import { gpuGuestStatus, rescheduleGpuGuestPoller, passthruHostIds, vmUsesPassthroughGpu, getGpuGuestDiag } from '../gpu/poller.js';
+import { gpuGuestStatus, rescheduleGpuGuestPoller, gpuHostIds, vmUsesGpu, getGpuGuestDiag } from '../gpu/poller.js';
 import { testVmGuest, VimSoapClient } from '../gpu/guestops.js';
 import { getGuestGpuVms } from '../gpu/store.js';
 import { getAllGpuGuestDiag } from '../central/gpuGuestDiag.js';
@@ -362,14 +362,14 @@ adminRouter.get('/gpu-guest/vms', adminOnly, (req, res) => {
   const vcId = req.query.vcenterId;
   if (!vcId) return res.status(400).json({ error: 'vcenterId 필요' });
   const snap = store.get();
-  const hostNames = passthruHostIds(snap, vcId);
+  const hostNames = gpuHostIds(snap, vcId);
   const s = loadGpuGuestSettings();
   const saved = (s.vcenters[vcId]?.vms) || {};
   // 실제 수집 상태(게스트에서 읽어온 마지막 값) — vmId 기준.
   const collectedBy = new Map(getGuestGpuVms().map((x) => [x.vmId, x]));
   const vms = (snap.vms || [])
-    // 해당 vCenter에서 'GPU를 패스쓰루로 할당받은' VM만(호스트 위 모든 VM/템플릿 제외).
-    .filter((v) => v.vcenterId === vcId && !v.template && hostNames.has(v.host) && vmUsesPassthroughGpu(v))
+    // 해당 vCenter에서 GPU(패스쓰루·vGPU)를 할당받은 VM(템플릿 제외).
+    .filter((v) => v.vcenterId === vcId && !v.template && hostNames.has(v.host) && vmUsesGpu(v))
     .map((v) => {
       const c = collectedBy.get(v.id);
       return {

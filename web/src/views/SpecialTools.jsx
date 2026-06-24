@@ -1805,10 +1805,10 @@ function GpuVmsModal({ title, params, onClose }) {
     fetchJson(`/tools/gpu/vms${qs ? `?${qs}` : ''}`).then(setD).catch((e) => setErr(e.message));
   }, []);
   return (
-    <Modal title={title} onClose={onClose} width={820} resizable minWidth={520} minHeight={380}>
+    <Modal title={title} onClose={onClose} width={1000} resizable minWidth={560} minHeight={380}>
       {err ? <ErrorBox message={err} /> : !d ? <Loading /> : (
         <>
-          <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>GPU 할당 VM <b>{d.total}</b>개 · 어떤 VM이 어떤 방식/프로파일로 GPU를 사용하는지 보여줍니다. <span style={{ opacity: 0.8 }}>사용률은 게스트 OS(nvidia-smi) 수집값.</span></div>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>GPU 할당 VM <b>{d.total}</b>개 · 어떤 VM이 어떤 방식/프로파일로 GPU를 사용하는지 보여줍니다. <span style={{ opacity: 0.8 }}>사용률·메모리는 게스트 OS(nvidia-smi) 수집값 — 전원 ON·VMware Tools·GPU 게스트 수집 계정이 있어야 표시됩니다(패스쓰루·vGPU 공통).</span></div>
           <div className="table-wrap">
             <table>
               <thead><tr><th>VM</th><th>법인</th><th>호스트</th><th>GPU 모델</th><th>사용 방식</th><th>프로파일</th><th style={{ textAlign: 'right' }}>장수</th><th style={{ textAlign: 'right' }}>사용률</th><th style={{ textAlign: 'right' }}>메모리</th><th>전원</th></tr></thead>
@@ -1818,13 +1818,13 @@ function GpuVmsModal({ title, params, onClose }) {
                   <tr key={v.id}>
                     <td><VmLink name={v.name} vcenterId={v.vcenterId} label={v.name} /></td>
                     <td className="muted">{v.vcenterId}</td>
-                    <td className="muted" style={{ fontSize: 12 }}>{v.host || '—'}</td>
+                    <td className="muted" style={{ fontSize: 12, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={v.host || ''}>{v.host || '—'}</td>
                     <td style={{ fontSize: 12 }}>{v.model || '—'}</td>
                     <td><VmGpuModeBadge gpu={v.gpu} /></td>
                     <td className="muted" style={{ fontSize: 12 }}>{v.gpu?.profile || '—'}</td>
                     <td style={{ textAlign: 'right' }}>{v.gpu?.count ?? '—'}</td>
-                    <td style={{ textAlign: 'right' }}>{v.guestUtilPct == null ? <span className="muted">—</span> : <UsageCell pct={v.guestUtilPct} />}</td>
-                    <td style={{ textAlign: 'right' }}>{v.guestMemPct == null ? <span className="muted">—</span> : <UsageCell pct={v.guestMemPct} />}</td>
+                    <td style={{ textAlign: 'right' }}>{v.guestUtilPct == null ? <span className="muted" title={v.powerState === 'POWERED_ON' ? 'GPU 게스트 수집 미설정/미수집 — 설정 › GPU 게스트 수집에서 해당 VM 계정 등록 후 수집됩니다' : '전원 OFF — 게스트에서 사용률 수집 불가'}>—</span> : <UsageCell pct={v.guestUtilPct} />}</td>
+                    <td style={{ textAlign: 'right' }}>{v.guestMemPct == null ? <span className="muted" title={v.powerState === 'POWERED_ON' ? 'GPU 게스트 수집 미설정/미수집 — 설정 › GPU 게스트 수집에서 계정 등록 후 수집됩니다' : '전원 OFF — 수집 불가'}>—</span> : <UsageCell pct={v.guestMemPct} />}</td>
                     <td>{v.powerState === 'POWERED_ON' ? <span className="badge green">On</span> : <span className="badge gray">Off</span>}</td>
                   </tr>
                 ))}
@@ -1866,6 +1866,8 @@ function Gpu({ scope }) {
   const [mode, setMode] = useState(''); // '' | vgpu | passthrough | vsga
   const [modelFilter, setModelFilter] = useState(''); // '' = 전체 모델, 아니면 특정 GPU 모델
   useEffect(() => { if (hist && hist.key) openHist(hist.level, hist.key); /* eslint-disable-next-line */ }, [days]);
+  // 선택한 사용 방식(mode) 필터에 해당하는 GPU가 0개면 '전체'로 자동 복구(빈 표 혼란 방지).
+  useEffect(() => { if (data && mode && (data.byMode?.[mode] ?? 0) === 0) setMode(''); }, [data, mode]);
   if (loading) return <Loading />;
   if (error) return <ErrorBox message={error} />;
 
@@ -1962,7 +1964,9 @@ function Gpu({ scope }) {
         </span>
       </div>
       <div className="kpis" style={{ marginBottom: 14 }}>
-        <Card label="총 GPU" value={data.totalGpus} accent="var(--accent)" meta={`GPU 호스트 ${data.hostsWithGpu}`} />
+        <Card label={`${scope || '전체'} 범위 · 총 GPU`} value={data.totalGpus} accent="var(--accent)" meta={`설치된 GPU 장수`} />
+        <Card label="GPU 호스트" value={data.hostsWithGpu} accent="var(--accent-2)" meta="GPU 설치 ESXi 호스트" />
+        <Card label="GPU 사용 VM" value={data.gpuVmCount ?? 0} accent="var(--green)" meta="GPU 할당된 VM 수" />
         <Card label="평균 GPU 사용률" value={data.avgUtilPct == null ? '—' : `${data.avgUtilPct}%`} meta={data.utilReporting ? `${data.utilReporting} 호스트 보고` : '사용률 미보고'} />
         <Card label="vGPU" value={data.byMode?.vgpu ?? 0} accent="var(--green)" meta="공유 다이렉트(GRID)" />
         <Card label="패스쓰루" value={data.byMode?.passthrough ?? 0} accent="var(--amber)" meta="DirectPath I/O" />
@@ -1998,11 +2002,17 @@ function Gpu({ scope }) {
               <button key={k} className={view === k ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setView(k)}>{l}</button>
             ))}
             <span style={{ width: 12 }} />
-            {[['', '전체'], ['vgpu', 'vGPU'], ['passthrough', '패스쓰루'], ['vsga', 'vSGA']].map(([k, l]) => (
-              <button key={k || 'all'} className={mode === k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 12px' }} onClick={() => setMode(k)}>
-                {l} <b style={{ opacity: 0.7 }}>{k ? (data.byMode?.[k] ?? 0) : data.totalGpus}</b>
-              </button>
-            ))}
+            {[['', '전체'], ['vgpu', 'vGPU'], ['passthrough', '패스쓰루'], ['vsga', 'vSGA']].map(([k, l]) => {
+              const cnt = k ? (data.byMode?.[k] ?? 0) : data.totalGpus;
+              const off = !!k && cnt === 0;
+              return (
+                <button key={k || 'all'} className={mode === k ? 'login-btn' : 'tab'} disabled={off}
+                  style={{ flex: 'none', padding: '7px 12px', opacity: off ? 0.45 : 1, cursor: off ? 'not-allowed' : 'pointer' }}
+                  title={off ? `${l} GPU가 없습니다` : ''} onClick={() => { if (!off) setMode(k); }}>
+                  {l} <b style={{ opacity: 0.7 }}>{cnt}</b>
+                </button>
+              );
+            })}
             <span style={{ width: 8 }} />
             <select className="select" style={{ flex: 'none', maxWidth: 240 }} value={modelFilter} onChange={(e) => setModelFilter(e.target.value)} title="GPU 종류(모델)별로 보기">
               <option value="">GPU 종류: 전체</option>
@@ -2016,10 +2026,17 @@ function Gpu({ scope }) {
           </div>
           {view === 'model' && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>법인별로 설치된 GPU 카드 모델·장수·할당 VM 수입니다(같은 법인·같은 모델은 합산). <b>할당 VM</b> 숫자를 클릭하면 해당 VM 목록과 사용 방식을 봅니다.</div>}
           {view === 'vc' && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>법인별 GPU 장수·사용 방식·할당 VM 수입니다. <b>할당 VM</b> 숫자를 클릭하면 VM별 사용 방식을 봅니다.</div>}
-          <DataTable
-            columns={view === 'host' ? hostCols : view === 'model' ? modelCols : view === 'vc' ? vcCols : aggCols}
-            rows={rows}
-            initialSort={{ key: (view === 'host' || view === 'model' || view === 'vc') ? (view === 'host' ? 'count' : 'gpus') : 'avg', dir: 'desc' }} />
+          {rows.length === 0 && data.items.length > 0 ? (
+            <div className="card" style={{ padding: 16 }}>
+              <span className="muted">현재 필터에 해당하는 GPU 호스트가 없습니다{mode ? ` (사용 방식: ${{ vgpu: 'vGPU', passthrough: '패스쓰루', vsga: 'vSGA' }[mode] || mode})` : ''}{modelFilter ? ` (모델: ${modelFilter})` : ''}. GPU는 총 {data.totalGpus}장 있습니다.</span>
+              <button className="tab" style={{ marginLeft: 10, padding: '4px 10px' }} onClick={() => { setMode(''); setModelFilter(''); }}>필터 초기화</button>
+            </div>
+          ) : (
+            <DataTable
+              columns={view === 'host' ? hostCols : view === 'model' ? modelCols : view === 'vc' ? vcCols : aggCols}
+              rows={rows}
+              initialSort={{ key: (view === 'host' || view === 'model' || view === 'vc') ? (view === 'host' ? 'count' : 'gpus') : 'avg', dir: 'desc' }} />
+          )}
         </>
       )}
 

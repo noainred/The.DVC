@@ -27,6 +27,8 @@ export function VmRemoteButton({ item }) {
 
   const noIp = ips.length === 0;
   const guessPort = isWindows ? 3389 : 22;
+  // 브라우저 비밀번호 관리자가 'VM 이름'으로 저장/자동입력하도록 비번 필드 id/name을 VM 이름 기반으로.
+  const pwFieldName = `vmpw_${String(item.name || 'vm').replace(/[^a-zA-Z0-9_-]/g, '_')}`;
   const noteTail = (item.notes || '').split(/\r?\n/).map((l) => l.trimEnd()).filter(Boolean).slice(-3).join('\n');
 
   // Pre-flight reachability check via the assigned proxy (ping + TCP port).
@@ -82,7 +84,10 @@ export function VmRemoteButton({ item }) {
           {noIp ? (
             <div className="muted">이 VM에 수집된 IP가 없어 접속할 수 없습니다.</div>
           ) : (
-            <div>
+            <form autoComplete="on" onSubmit={(e) => { e.preventDefault(); if (ip) connect(); }}>
+              {/* 브라우저가 비밀번호를 'VM 이름' 기준으로 저장/자동입력하도록 숨은 username 필드(포탈에 저장하는 게 아님) */}
+              <input type="text" name="vmname" autoComplete="username" value={item.name} readOnly aria-hidden="true" tabIndex={-1}
+                style={{ position: 'absolute', width: 1, height: 1, padding: 0, border: 0, opacity: 0, pointerEvents: 'none' }} />
               <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1fr)', gap: 10 }}>
                 <label style={FLD}>프로토콜{autoProto ? <span className="muted" style={{ fontWeight: 400 }}> · {isWindows ? 'Windows' : 'Linux'} 자동</span> : ''}
                   <select className="select" style={INP} value={protocol} onChange={(e) => { setProtocol(e.target.value); setPort(''); setAutoProto(false); }}>
@@ -110,12 +115,11 @@ export function VmRemoteButton({ item }) {
               <div style={{ display: 'grid', gridTemplateColumns: protocol === 'rdp' ? 'minmax(0,1fr) minmax(0,1fr) minmax(0,1fr)' : 'minmax(0,1fr) minmax(0,1fr)', gap: 10, marginTop: 12 }}>
                 <label style={FLD}>사용자명
                   <input className="input" style={INP} value={creds.username} onChange={(e) => setCreds({ ...creds, username: e.target.value })}
-                    placeholder={protocol === 'rdp' ? 'Administrator' : 'root'}
-                    onKeyDown={(e) => { if (e.key === 'Enter' && ip && creds.username) connect(); }} />
+                    autoComplete="off" placeholder={protocol === 'rdp' ? 'Administrator' : 'root'} />
                 </label>
                 <label style={FLD}>비밀번호
-                  <input className="input" style={INP} type="password" value={creds.password} onChange={(e) => setCreds({ ...creds, password: e.target.value })}
-                    onKeyDown={(e) => { if (e.key === 'Enter' && ip && creds.username) connect(); }} />
+                  <input className="input" style={INP} type="password" name={pwFieldName} id={pwFieldName} autoComplete="current-password"
+                    value={creds.password} onChange={(e) => setCreds({ ...creds, password: e.target.value })} />
                 </label>
                 {protocol === 'rdp' && (
                   <label style={FLD}>도메인(선택)
@@ -126,14 +130,14 @@ export function VmRemoteButton({ item }) {
 
               <div style={{ marginTop: 12 }}>
                 {error && <div className="login-error" style={{ marginBottom: 8 }}>{error}</div>}
-                <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} disabled={busy || !ip} onClick={connect}>
+                <button type="submit" className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} disabled={busy || !ip}>
                   {busy ? '연결 준비 중…' : '접속'}
                 </button>
                 <span className="muted" style={{ fontSize: 12, marginLeft: 10 }}>
-                  계정을 입력하면 바로 연결됩니다(비우면 콘솔에서 입력).
+                  계정을 입력하면 바로 연결됩니다(비우면 콘솔에서 입력). 비밀번호는 브라우저에 'VM 이름'으로 저장돼 다음 접속 시 자동입력됩니다.
                 </span>
               </div>
-            </div>
+            </form>
           )}
         </Modal>
       )}

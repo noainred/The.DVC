@@ -43,9 +43,19 @@ export function vmUsesPassthroughGpu(v) {
   return (g.passthrough || 0) > 0 || g.type === 'passthrough' || g.type === 'mixed';
 }
 
+/** GPU가 달린 호스트(패스쓰루+vGPU 모두). 게스트 수집 호스트 후보. */
+export function gpuHostIds(snap, vcId) {
+  const ids = new Set();
+  for (const h of snap.hosts || []) { if (h.vcenterId === vcId && (h.gpus || []).length) ids.add(h.name); }
+  return ids;
+}
+
+/** GPU가 할당된 VM이면 게스트 수집 대상(패스쓰루·vGPU 공통). nvidia-smi는 vGPU 게스트에서도 동작. */
+export function vmUsesGpu(v) { return !!(v && v.gpu); }
+
 // 데모(mock): 선택 법인의 패스쓰루 호스트/VM에 합성 사용률을 채운다.
 function pollMock(snap, vcId) {
-  const hostNames = passthruHostIds(snap, vcId);
+  const hostNames = gpuHostIds(snap, vcId);
   const hosts = [];
   const vms = [];
   const t = Date.now() / 60000;
@@ -55,7 +65,7 @@ function pollMock(snap, vcId) {
     hosts.push({ hostId: h.id, utilPct: Math.min(100, util) });
   }
   for (const v of snap.vms || []) {
-    if (v.vcenterId !== vcId || !hostNames.has(v.host) || v.powerState !== 'POWERED_ON') continue;
+    if (v.vcenterId !== vcId || !hostNames.has(v.host) || v.powerState !== 'POWERED_ON' || !vmUsesGpu(v) || v.template) continue;
     const util = Math.round(30 + 60 * Math.abs(Math.sin((hashStr(v.id) % 80) + t / 5)));
     vms.push({ vmId: v.id, host: v.host, vcenterId: vcId, utilPct: Math.min(100, util), memUsedPct: Math.min(100, util + 10) });
   }
@@ -66,18 +76,19 @@ const hashStr = (s) => { let h = 0; for (let i = 0; i < String(s).length; i++) h
 
 // 라이브(beta): VMware Tools 게스트 작업으로 nvidia-smi 실행. {hosts, vms, diag} 반환.
 async function pollLive(snap, vc, s) {
-  const hostNames = passthruHostIds(snap, vc.id);
+  const hostNames = gpuHostIds(snap, vc.id);
   // 선별 깔때기 — 어느 조건에서 VM이 빠지는지 단계별로 로깅 + 진단 데이터.
+  // 대상: GPU(패스쓰루+vGPU) 할당 VM. nvidia-smi는 vGPU 게스트에서도 사용률을 보고한다.
   const onHost = (snap.vms || []).filter((v) => v.vcenterId === vc.id && hostNames.has(v.host));
-  const passGpu = onHost.filter((v) => vmUsesPassthroughGpu(v));
-  const onTools = passGpu.filter((v) => v.powerState === 'POWERED_ON' && v.toolsStatus === 'RUNNING');
+  const gpuVms = onHost.filter((v) => vmUsesGpu(v) && !v.template);
+  const onTools = gpuVms.filter((v) => v.powerState === 'POWERED_ON' && v.toolsStatus === 'RUNNING');
   const cands = onTools.filter((v) => resolveVmCreds(s, vc.id, v.id)).slice(0, s.maxVmsPerVcenter || 1000);
-  const counts = { passthruHosts: hostNames.size, vmsOnHost: onHost.length, passthroughGpuVms: passGpu.length, onTools: onTools.length, candidates: cands.length };
-  console.log(`[gpu-guest] ${vc.id} 선별: 패스쓰루호스트=${counts.passthruHosts} · 호스트위VM=${counts.vmsOnHost} · 패스쓰루GPU할당=${counts.passthroughGpuVms} · On+Tools=${counts.onTools} · 계정있음(수집대상)=${counts.candidates}`);
+  const counts = { gpuHosts: hostNames.size, vmsOnHost: onHost.length, gpuVms: gpuVms.length, onTools: onTools.length, candidates: cands.length };
+  console.log(`[gpu-guest] ${vc.id} 선별: GPU호스트=${counts.gpuHosts} · 호스트위VM=${counts.vmsOnHost} · GPU할당VM=${counts.gpuVms} · On+Tools=${counts.onTools} · 계정있음(수집대상)=${counts.candidates}`);
   const diag = { vcId: vc.id, at: Date.now(), stage: '선별', counts, results: [], error: null };
   if (!cands.length) {
-    diag.stage = counts.passthruHosts === 0 ? '패스쓰루 호스트 없음'
-      : counts.passthroughGpuVms === 0 ? '패스쓰루 GPU 할당 VM 없음'
+    diag.stage = counts.gpuHosts === 0 ? 'GPU 호스트 없음'
+      : counts.gpuVms === 0 ? 'GPU 할당 VM 없음'
         : counts.onTools === 0 ? 'On+Tools VM 없음' : '수집 대상 계정 없음';
     return { hosts: [], vms: [], diag };
   }

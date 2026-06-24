@@ -181,7 +181,16 @@ function dsStorageLabel(item) {
  * VM IP별 도달성(녹/적) — 중앙은 사설 IP에 직접 못 가므로 해당 vCenter 담당 에이전트가
  * ping을 대행한다. 마운트 시 ping 요청을 큐잉하고 결과를 주기적으로 폴링한다.
  */
-function VmIpPing({ vcenterId, ips }) {
+// 색/설명 매핑: 엣지 에이전트가 사설 IP까지 ping을 대행하므로 그 결과로 도달성을 표시.
+const PING_COLOR = { up: 'var(--green,#22c55e)', down: 'var(--red,#ef4444)', pending: '', unknown: '', error: 'var(--red,#ef4444)' };
+const pingTip = (ip, r) => {
+  if (r.state === 'up') return `${ip} — 엣지 에이전트에서 ping 응답함${r.rttMs != null ? ` (${r.rttMs}ms)` : ''} · 도달 가능`;
+  if (r.state === 'down') return `${ip} — 엣지 에이전트에서 ping 무응답 · 도달 불가(VM 다운·방화벽·라우팅 의심)`;
+  if (r.state === 'error') return `${ip} — ping 확인 실패(${r.error || '에이전트 오류'})`;
+  return `${ip} — ping 확인 중…(해당 vCenter 담당 엣지 에이전트가 대행)`;
+};
+
+export function VmIpPing({ vcenterId, ips }) {
   const [res, setRes] = useState({}); // ip -> { state, rttMs }
   const [run, setRun] = useState(0);
   useEffect(() => {
@@ -196,24 +205,28 @@ function VmIpPing({ vcenterId, ips }) {
     return () => { alive = false; clearInterval(t); clearTimeout(stop); };
   }, [vcenterId, ips.join(','), run]);
   const dot = (state) => {
-    const c = state === 'up' ? 'var(--green,#22c55e)' : state === 'down' ? 'var(--red,#ef4444)' : '#9ca3af';
-    return <span title={state} style={{ display: 'inline-block', width: 9, height: 9, borderRadius: '50%', background: c,
-      boxShadow: state === 'up' ? '0 0 6px var(--green,#22c55e)' : 'none', marginRight: 6,
+    const c = state === 'up' ? 'var(--green,#22c55e)' : (state === 'down' || state === 'error') ? 'var(--red,#ef4444)' : '#9ca3af';
+    return <span style={{ display: 'inline-block', width: 9, height: 9, borderRadius: '50%', background: c,
+      boxShadow: state === 'up' ? '0 0 6px var(--green,#22c55e)' : 'none', marginRight: 6, flex: '0 0 auto',
       animation: state === 'pending' || state === 'unknown' ? 'pulse 1.2s infinite' : 'none' }} />;
   };
   return (
     <>
       {ips.map((ip, i) => {
         const r = res[ip] || { state: 'pending' };
+        const color = PING_COLOR[r.state] || '';
+        const strong = r.state === 'up' || r.state === 'down';
         return (
-          <div key={i} style={{ display: 'flex', alignItems: 'center' }}>
-            {dot(r.state)}<span>{ip}</span>
+          <div key={i} style={{ display: 'flex', alignItems: 'center', cursor: 'help' }} title={pingTip(ip, r)}>
+            {dot(r.state)}
+            <span style={{ color: color || 'inherit', fontWeight: strong ? 600 : 400 }}>{ip}</span>
             {r.state === 'up' && r.rttMs != null && <span className="muted" style={{ fontSize: 11, marginLeft: 6 }}>{r.rttMs}ms</span>}
-            {r.state === 'down' && <span className="muted" style={{ fontSize: 11, marginLeft: 6 }}>무응답</span>}
+            {r.state === 'down' && <span style={{ color: 'var(--red,#ef4444)', fontSize: 11, marginLeft: 6 }}>무응답</span>}
+            {r.state === 'pending' && <span className="muted" style={{ fontSize: 11, marginLeft: 6 }}>확인 중…</span>}
           </div>
         );
       })}
-      <button className="tab" style={{ marginTop: 4, padding: '2px 8px', fontSize: 11 }} onClick={() => setRun((n) => n + 1)}>↻ ping 재시도</button>
+      <button className="tab" style={{ marginTop: 4, padding: '2px 8px', fontSize: 11 }} title="엣지 에이전트로 다시 ping" onClick={() => setRun((n) => n + 1)}>↻ ping 재시도</button>
     </>
   );
 }
