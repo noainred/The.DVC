@@ -1,6 +1,14 @@
 {
   "notes": [
     {
+      "version": "2.18.2",
+      "date": "2026-06-24",
+      "title": "업그레이드 테스트용 버전",
+      "notes": [
+        "자동 업그레이드 동작 확인용 버전(기능 변경 없음). CI가 GitHub Releases('downloads' 태그)에 자산을 빌드·업로드하고 versions.json latest=2.18.2 로 갱신합니다."
+      ]
+    },
+    {
       "version": "2.18.1",
       "date": "2026-06-24",
       "title": "업그레이드 경로 검증 — GitHub Releases 자동 빌드/배포",
