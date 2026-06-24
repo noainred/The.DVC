@@ -144,6 +144,9 @@ export default function GpuGuestSettings() {
         </div>
       </div>
 
+      {/* VM 목록 조회 없이 IP+계정만으로 1대 즉시 테스트 */}
+      <QuickSshTest />
+
       {/* VM별 계정 관리 + 테스트 */}
       <VmCredManager vcs={vcs} vcenters={form.vcenters} onSavedShared={load} />
 
@@ -158,6 +161,63 @@ export default function GpuGuestSettings() {
             : <span className="muted">[{last.mode}] 호스트 <b style={{ color: 'var(--text)' }}>{last.hosts}</b> · VM <b style={{ color: 'var(--text)' }}>{last.vms}</b>{last.errors ? ` · 오류 ${last.errors}` : ''}</span>)}
         </div>
       </div>
+    </div>
+  );
+}
+
+/** 빠른 단일 테스트 — VM 목록/ vCenter 조회 없이 IP+계정만으로 nvidia-smi 1대 즉시 SSH 테스트. */
+function QuickSshTest() {
+  const [ip, setIp] = useState('');
+  const [username, setUsername] = useState('root');
+  const [password, setPassword] = useState('');
+  const [port, setPort] = useState(22);
+  const [reveal, setReveal] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [res, setRes] = useState(null);
+  const run = async () => {
+    if (!ip.trim() || !username.trim()) return;
+    setBusy(true); setRes(null);
+    try { setRes(await postJson('/admin/gpu-guest/test-ssh', { ip: ip.trim(), username: username.trim(), password, port: Number(port) || 22, revealCreds: reveal })); }
+    catch (e) { setRes({ error: e.message }); }
+    setBusy(false);
+  };
+  const fmtT = (t) => { const d = new Date(t); return d.toLocaleTimeString('ko-KR', { hour12: false }); };
+  return (
+    <div className="card" style={{ padding: 16, marginTop: 14 }}>
+      <div className="section-title" style={{ fontSize: 14, marginTop: 0 }}>⚡ 빠른 단일 테스트 (SSH)</div>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>VM 목록 조회 없이 <b>IP + 계정</b>만으로 게스트에 직접 SSH해 nvidia-smi 1대를 즉시 테스트합니다(VMware Tools 게스트작업 인증이 막힐 때 확인용). 비번을 비우면 passwordless/키 인증.</div>
+      <div className="flex gap wrap" style={{ alignItems: 'center' }}>
+        <input className="input" style={{ width: 160 }} placeholder="게스트 IP (예: 10.0.0.5)" value={ip} onChange={(e) => setIp(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && run()} />
+        <input className="input" style={{ width: 120 }} placeholder="계정(root 등)" value={username} onChange={(e) => setUsername(e.target.value)} />
+        <input className="input" type="password" style={{ width: 130 }} placeholder="비밀번호(빈칸 가능)" value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && run()} />
+        <input className="input" type="number" style={{ width: 80 }} min={1} max={65535} value={port} onChange={(e) => setPort(e.target.value)} title="SSH 포트" />
+        <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} disabled={busy || !ip.trim() || !username.trim()} onClick={run}>{busy ? '테스트 중…' : '테스트'}</button>
+        <label className="flex gap" style={{ alignItems: 'center', fontSize: 12 }} title="실행 로그에 실제 id/pw 평문 표시(디버그)">
+          <input type="checkbox" checked={reveal} onChange={(e) => setReveal(e.target.checked)} /> 🔓 평문
+        </label>
+      </div>
+      {res && (
+        <div style={{ marginTop: 12 }}>
+          <div className="flex gap" style={{ alignItems: 'center', marginBottom: 6 }}>
+            {res.error && !res.trace ? <span className="badge red">오류: {res.error}</span> : (
+              <>
+                <span className={`badge ${res.login ? 'green' : 'red'}`}>로그인 {res.login ? 'OK' : '실패'}</span>
+                <span className={`badge ${res.read ? 'green' : 'gray'}`}>읽기 {res.read ? 'OK' : '실패'}</span>
+                {res.sample && <span className="badge teal">GPU {res.sample.gpus} · 사용률 {res.sample.utilPct}% · mem {res.sample.memUsedPct ?? '-'}%</span>}
+                {!res.read && res.error && <span className="muted" style={{ fontSize: 12 }}>{res.error}</span>}
+              </>
+            )}
+          </div>
+          {(res.trace || []).length > 0 && (
+            <pre style={{ margin: 0, padding: '8px 10px', maxHeight: 200, overflow: 'auto', fontFamily: 'ui-monospace, Menlo, Consolas, monospace', fontSize: 12, background: '#0a0f1a', color: '#cbd5e1', whiteSpace: 'pre-wrap', wordBreak: 'break-all', borderRadius: 6 }}>
+              {res.trace.map((l, i) => {
+                const ok = /✓|성공|OK/.test(l.msg); const bad = /✗|실패|오류|타임아웃|거부/.test(l.msg);
+                return <div key={i} style={{ color: ok ? '#86efac' : bad ? '#fca5a5' : (l.msg.includes('🔓') ? '#fcd34d' : '#cbd5e1') }}>{fmtT(l.t)} {l.msg}</div>;
+              })}
+            </pre>
+          )}
+        </div>
+      )}
     </div>
   );
 }

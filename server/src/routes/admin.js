@@ -467,6 +467,25 @@ adminRouter.post('/gpu-guest/test', adminOnly, async (req, res) => {
   res.json({ results });
 });
 
+// 빠른 단일 테스트(SSH) — VM 목록 로딩/ vCenter 없이 IP+계정만으로 nvidia-smi 1대 테스트.
+// Body: { ip, username, password?, port?, revealCreds? }
+adminRouter.post('/gpu-guest/test-ssh', adminOnly, async (req, res) => {
+  const b = req.body || {};
+  const ip = String(b.ip || '').trim();
+  const username = String(b.username || '').trim();
+  if (!ip || !username) return res.status(400).json({ error: 'ip, username(계정)이 필요합니다.' });
+  const s = loadGpuGuestSettings();
+  const port = Number(b.port) || s.sshPort || 22;
+  const creds = { username, password: String(b.password || ''), privateKey: b.privateKey || undefined };
+  const seed = b.revealCreds ? [{ t: Date.now(), msg: `🔓 자격증명(평문): id=${username} · pw=${b.password ? b.password : '(빈 비번/passwordless)'} · 포트=${port}` }] : [];
+  try {
+    const r = await testVmGuestSsh({ ipAddresses: [ip] }, creds, { timeoutMs: s.timeoutMs, port, trace: seed });
+    res.json({ ip, port, ...r });
+  } catch (e) {
+    res.json({ ip, port, login: false, read: false, error: e.message, trace: seed.concat({ t: Date.now(), msg: `✗ 예외: ${e.message}` }) });
+  }
+});
+
 // Read the effective data source (UI override or env default).
 adminRouter.get('/data-source', adminOnly, (_req, res) => {
   res.json({ dataSource: getDataSource(), envDefault: config.dataSource, overridden: isDataSourceOverridden() });
