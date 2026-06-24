@@ -240,5 +240,212 @@ export async function fetchInventory(entry) {
     }
   } catch { /* bios optional */ }
 
+  // --- 헬스 롤업(전체 + 하위 시스템) ---
+  inv.health = {
+    overall: inv.system.health || '',
+    processor: inv.cpu.health || '',
+    memory: inv.memory.health || '',
+    storage: '', psu: '', fan: '', battery: '',
+  };
+
+  // --- 전원공급장치(PSU): 모델·출력 W·입력 전압·이중화·상태 (Chassis/Power) ---
+  inv.psus = [];
+  try {
+    const chassisRoot = await G('/redfish/v1/Chassis');
+    for (const m of (chassisRoot.Members || []).map((x) => x['@odata.id']).filter(Boolean)) {
+      let power; try { power = await G(`${m}/Power`); } catch { continue; }
+      for (const p of (power.PowerSupplies || []).slice(0, 8)) {
+        inv.psus.push({
+          name: p.Name || p.MemberId || 'PSU',
+          model: p.Model || '',
+          capacityWatts: num(p.PowerCapacityWatts),
+          inputWatts: num(p.PowerInputWatts),
+          outputWatts: num(p.PowerOutputWatts ?? p.LastPowerOutputWatts),
+          lineInputVoltage: num(p.LineInputVoltage),
+          health: p.Status?.Health || '',
+          state: p.Status?.State || '',
+          firmware: p.FirmwareVersion || '',
+        });
+      }
+      // 전력 한도(Power Cap)도 함께
+      const pc = (power.PowerControl || [])[0];
+      if (pc?.PowerLimit && inv.powerCap == null) {
+        inv.powerCap = { limitWatts: num(pc.PowerLimit.LimitInWatts), allocatedWatts: num(pc.PowerAllocatedWatts), metricWatts: num(pc.PowerConsumedWatts) };
+      }
+    }
+    if (inv.psus.length) inv.health.psu = inv.psus.some((p) => p.health && p.health !== 'OK') ? 'Warning' : 'OK';
+  } catch { /* psu optional */ }
+
+  // --- 물리 디스크 상태(스토리지): 모델·용량·미디어·SMART 예측 실패·상태 ---
+  inv.disks = [];
+  try {
+    if (sysId) {
+      const stRoot = await G(`${sysId}/Storage`);
+      for (const c of (stRoot.Members || []).slice(0, 8)) {
+        let ctrl; try { ctrl = await G(c['@odata.id']); } catch { continue; }
+        for (const d of (ctrl.Drives || []).slice(0, 32)) {
+          try {
+            const drive = await G(d['@odata.id']);
+            inv.disks.push({
+              name: drive.Name || drive.Id || '',
+              model: drive.Model || '',
+              serial: drive.SerialNumber || '',
+              capacityGB: drive.CapacityBytes ? Math.round(drive.CapacityBytes / 1e9) : null,
+              media: drive.MediaType || '',
+              protocol: drive.Protocol || '',
+              health: drive.Status?.Health || '',
+              state: drive.Status?.State || '',
+              predictiveFailure: !!(drive.FailurePredicted),
+              rpm: num(drive.RotationSpeedRPM),
+            });
+          } catch { /* skip drive */ }
+        }
+      }
+      if (inv.disks.length) inv.health.storage = inv.disks.some((d) => d.predictiveFailure || (d.health && d.health !== 'OK')) ? 'Warning' : 'OK';
+    }
+  } catch { /* storage optional */ }
+
+  // --- 메모리 DIMM: 슬롯·용량·속도·상태 (정정가능 오류/불량 조기 발견) ---
+  inv.memoryDimms = [];
+  try {
+    if (sysId) {
+      const memRoot = await G(`${sysId}/Memory`);
+      for (const mm of (memRoot.Members || []).slice(0, 64)) {
+        try {
+          const d = await G(mm['@odata.id']);
+          if (!(d.CapacityMiB || d.Status)) continue;
+          inv.memoryDimms.push({
+            locator: d.DeviceLocator || d.Name || d.Id || '',
+            sizeGB: d.CapacityMiB ? Math.round(d.CapacityMiB / 1024) : null,
+            speedMHz: num(d.OperatingSpeedMhz),
+            type: d.MemoryDeviceType || '',
+            manufacturer: d.Manufacturer || '',
+            health: d.Status?.Health || '',
+            state: d.Status?.State || '',
+          });
+        } catch { /* skip dimm */ }
+      }
+    }
+  } catch { /* memory optional */ }
+
+  // --- 최근 하드웨어 이벤트(Critical/Warning) — SEL 또는 Dell LC 로그 ---
+  inv.events = [];
+  try {
+    if (mgrId) {
+      let log = null;
+      for (const p of [`${mgrId}/LogServices/Sel/Entries`, `${mgrId}/LogServices/Lclog/Entries`]) {
+        try { log = await G(p); if (log?.Members?.length) break; } catch { /* try next */ }
+      }
+      for (const e of (log?.Members || []).slice(-40).reverse()) {
+        const sev = e.Severity || '';
+        if (sev && /critical|warning/i.test(sev)) {
+          inv.events.push({ severity: sev, created: e.Created || '', message: (e.Message || e.MessageId || '').slice(0, 200) });
+          if (inv.events.length >= 15) break;
+        }
+      }
+    }
+  } catch { /* events optional */ }
+
+  // --- Firmware/driver inventory (각종 카드: NIC·RAID·PSU·BIOS·iDRAC 등 + 버전) ---
+  try { inv.firmware = await fetchFirmwareInventory(entry); } catch { inv.firmware = []; }
+
   return inv;
+}
+
+/**
+ * 설치된 펌웨어/드라이버 버전 목록(Redfish UpdateService/FirmwareInventory).
+ * 'Installed-*' 항목만(이전/가용 버전 제외). [{ name, version, updateable, type }]
+ */
+export async function fetchFirmwareInventory(entry) {
+  const base = entry.host.replace(/\/+$/, '');
+  const auth = 'Basic ' + Buffer.from(`${entry.username}:${entry.password}`).toString('base64');
+  const G = (p) => get(base, p, auth);
+  const root = await G('/redfish/v1/UpdateService/FirmwareInventory');
+  const members = (root.Members || []).map((m) => m['@odata.id']).filter(Boolean)
+    .filter((id) => /\/Installed-/i.test(id)) // 현재 설치된 버전만
+    .slice(0, 120);
+  const out = [];
+  for (const id of members) {
+    try {
+      const f = await G(id);
+      if (!f.Version) continue;
+      out.push({
+        name: f.Name || f.Id || '',
+        version: f.Version || '',
+        updateable: !!f.Updateable,
+        type: classifyFw(f.Name || f.Id || ''),
+      });
+    } catch { /* skip one component */ }
+  }
+  // 종류 → 이름순 정렬(같은 종류끼리 묶임)
+  out.sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name) : a.type.localeCompare(b.type)));
+  return out;
+}
+
+function classifyFw(name) {
+  const n = String(name).toLowerCase();
+  if (n.includes('bios')) return 'BIOS';
+  if (n.includes('idrac') || n.includes('lifecycle') || n.includes('ism')) return 'iDRAC';
+  if (n.includes('nic') || n.includes('network') || n.includes('ethernet') || n.includes('mellanox') || n.includes('broadcom') || n.includes('intel(r) ethernet') || n.includes('qlogic')) return 'NIC';
+  if (n.includes('raid') || n.includes('perc') || n.includes('hba') || n.includes('storage') || n.includes('bp') || n.includes('backplane')) return 'Storage';
+  if (n.includes('power') || n.includes('psu') || n.includes('supply')) return 'PSU';
+  if (n.includes('cpld') || n.includes('complex')) return 'CPLD';
+  if (n.includes('disk') || n.includes('ssd') || n.includes('drive') || n.includes('nvme')) return 'Disk';
+  if (n.includes('gpu') || n.includes('nvidia')) return 'GPU';
+  if (n.includes('driver') || n.includes('os ')) return 'Driver';
+  return '기타';
+}
+
+/**
+ * 현재 온도센서 전체 + CPU 사용량(%)을 읽는다(1분 시계열용, 가벼움).
+ * 반환 { temps: [{name, celsius}], inletCelsius, maxCelsius, cpuUsagePct }.
+ * cpuUsagePct는 Dell 텔레메트리(SystemUsage) 가용 시에만(미지원이면 null).
+ */
+export async function fetchSensors(entry) {
+  const base = entry.host.replace(/\/+$/, '');
+  const auth = 'Basic ' + Buffer.from(`${entry.username}:${entry.password}`).toString('base64');
+  const G = (p) => get(base, p, auth);
+
+  const temps = [];
+  const fans = [];
+  // 1) 모든 Chassis의 Thermal → Temperatures[] + Fans[]
+  try {
+    const chassisRoot = await G('/redfish/v1/Chassis');
+    for (const m of (chassisRoot.Members || []).map((x) => x['@odata.id']).filter(Boolean)) {
+      let thermal;
+      try { thermal = await G(`${m}/Thermal`); } catch { continue; }
+      for (const t of thermal.Temperatures || []) {
+        const c = num(t.ReadingCelsius);
+        if (c == null) continue;
+        const name = t.Name || t.MemberId || `Sensor ${t.SensorNumber ?? ''}`.trim();
+        temps.push({ name, celsius: c });
+      }
+      for (const f of thermal.Fans || []) {
+        const rpm = num(f.Reading ?? f.ReadingRPM);
+        if (rpm == null) continue;
+        fans.push({ name: f.Name || f.FanName || f.MemberId || 'Fan', rpm });
+      }
+    }
+  } catch { /* thermal optional */ }
+
+  let inletCelsius = null, maxCelsius = null;
+  for (const t of temps) {
+    if (/inlet|intake|ambient/i.test(t.name)) inletCelsius = t.celsius;
+    if (maxCelsius == null || t.celsius > maxCelsius) maxCelsius = t.celsius;
+  }
+
+  // 2) CPU 사용량 — Dell 텔레메트리 SystemUsage 메트릭 리포트(있으면).
+  let cpuUsagePct = null;
+  try {
+    const rep = await G('/redfish/v1/TelemetryService/MetricReports/SystemUsage');
+    for (const v of rep.MetricValues || []) {
+      const id = String(v.MetricId || '');
+      if (/^(SystemBoardCPUUsage|CPUUsage)$/i.test(id)) {
+        const n = Number(String(v.MetricValue).replace(/[^\d.]/g, ''));
+        if (Number.isFinite(n)) { cpuUsagePct = Math.round(n); break; }
+      }
+    }
+  } catch { /* telemetry optional/unlicensed */ }
+
+  return { temps, fans, inletCelsius, maxCelsius, cpuUsagePct };
 }

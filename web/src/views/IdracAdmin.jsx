@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, putJson, delJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import EscClose from '../components/EscClose.jsx';
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
 
 const EMPTY = { id: '', name: '', host: '', username: 'root', password: '', serviceTag: '', vcenterId: '', hostNames: '', enabled: true, type: 'idrac' };
 
@@ -10,6 +11,7 @@ export default function IdracAdmin() {
   const [error, setError] = useState(null);
   const [form, setForm] = useState(null);
   const [editing, setEditing] = useState(false);
+  const [detail, setDetail] = useState(null); // { id, name } → 상세/센서 모달
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
   const [importMsg, setImportMsg] = useState(null);
@@ -285,6 +287,7 @@ export default function IdracAdmin() {
                   <td className="tabular">{isOme ? (r?.error ? <span className="badge red" title={r.error}>오류</span> : (r?.metric ? <span className="muted">{r.metric === 'powermanager' ? 'Power Mgr' : '인벤토리'}</span> : '—')) : (r?.watts != null ? fmtW(r.watts) : (r?.error ? <span className="badge red" title={r.error}>오류</span> : '—'))}</td>
                   <td>{s.enabled === false ? <span className="badge gray">중지</span> : <span className="badge green">수집</span>}</td>
                   <td className="right nowrap">
+                    {!isOme && <button className="tab" onClick={() => setDetail({ id: s.id, name: s.name })} title="iDRAC/BIOS/드라이버 버전 · 온도센서·CPU 사용량 차트">상세</button>}
                     <button className="tab" onClick={() => openEdit(s)}>수정</button>
                     <button className="tab" style={{ color: 'var(--red)' }} onClick={() => remove(s)}>삭제</button>
                   </td>
@@ -294,6 +297,8 @@ export default function IdracAdmin() {
           </tbody>
         </table>
       </div>
+
+      {detail && <IdracDetailModal server={detail} onClose={() => setDetail(null)} />}
 
       {form && (
         <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) close(); }}>
@@ -535,5 +540,193 @@ export default function IdracAdmin() {
         </div>
       )}
     </>
+  );
+}
+
+const LINE_COLORS = ['#60a5fa', '#f87171', '#34d399', '#fbbf24', '#a78bfa', '#f472b6', '#22d3ee', '#fb923c', '#4ade80', '#e879f9', '#94a3b8', '#fca5a5'];
+const FW_TYPE_ORDER = ['iDRAC', 'BIOS', 'NIC', 'Storage', 'GPU', 'PSU', 'Disk', 'CPLD', 'Driver', '기타'];
+
+/** iDRAC 서버 상세 — 버전(iDRAC/BIOS/드라이버) + 온도센서·CPU 사용량 1분 시계열 차트. */
+function IdracDetailModal({ server, onClose }) {
+  const [inv, setInv] = useState(null);
+  const [invErr, setInvErr] = useState(null);
+  const [sensors, setSensors] = useState(null);
+  const [tab, setTab] = useState('charts'); // charts | versions
+  const loadInv = (refresh) => fetchJson(`/admin/idrac/${encodeURIComponent(server.id)}/inventory${refresh ? '?refresh=1' : ''}`)
+    .then((r) => { setInv(r.inventory); setInvErr(null); }).catch((e) => setInvErr(e.message));
+  const loadSensors = () => fetchJson(`/admin/idrac/${encodeURIComponent(server.id)}/sensors?minutes=180`).then(setSensors).catch(() => {});
+  useEffect(() => { loadInv(false); loadSensors(); const t = setInterval(loadSensors, 30_000); return () => clearInterval(t); /* eslint-disable-next-line */ }, [server.id]);
+
+  const sensorNames = (sensors?.sensors || []).slice(0, 12);
+  const fanNames = (sensors?.fanNames || []).slice(0, 12);
+  const chartData = (sensors?.samples || []).map((s) => {
+    const row = { t: new Date(s.t).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false }), cpu: s.cpu };
+    for (const n of sensorNames) row[n] = s.temps?.[n] ?? null;
+    for (const n of fanNames) row[`fan:${n}`] = s.fans?.[n] ?? null;
+    return row;
+  });
+  const latest = sensors?.latest;
+  const fwByType = {};
+  for (const f of (inv?.firmware || [])) (fwByType[f.type] = fwByType[f.type] || []).push(f);
+  const orderedTypes = Object.keys(fwByType).sort((a, b) => (FW_TYPE_ORDER.indexOf(a) + 1 || 99) - (FW_TYPE_ORDER.indexOf(b) + 1 || 99));
+
+  return (
+    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <EscClose onClose={onClose} />
+      <div className="modal card" style={{ maxWidth: 980, width: '94vw' }}>
+        <div className="flex between" style={{ marginBottom: 10 }}>
+          <b style={{ fontSize: 15 }}>🖥 {server.name} — iDRAC 상세 / 센서</b>
+          <button className="logout-btn" onClick={onClose}>닫기</button>
+        </div>
+        <div className="flex gap" style={{ marginBottom: 12 }}>
+          <button className={tab === 'charts' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 14px' }} onClick={() => setTab('charts')}>📈 센서 차트(온도·CPU)</button>
+          <button className={tab === 'versions' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 14px' }} onClick={() => setTab('versions')}>🏷 하드웨어 / 버전</button>
+          {tab === 'versions' && <button className="tab" style={{ flex: 'none', padding: '6px 12px' }} onClick={() => { setInv(null); loadInv(true); }}>↻ 즉시 재수집</button>}
+        </div>
+
+        {tab === 'charts' && (
+          <div>
+            <div className="flex gap wrap" style={{ marginBottom: 10 }}>
+              <span className="badge blue">CPU 사용량 {latest?.cpu != null ? `${latest.cpu}%` : '— (텔레메트리 미지원)'}</span>
+              <span className="badge amber">최고 온도 {latest ? `${Math.max(...Object.values(latest.temps || { _: 0 }))}℃` : '—'}</span>
+              <span className="muted" style={{ fontSize: 12, alignSelf: 'center' }}>1분 간격 · 최근 {sensors?.count || 0}샘플 · 30초마다 갱신</span>
+            </div>
+            <div style={{ fontSize: 13, fontWeight: 700, margin: '6px 0' }}>CPU 사용량 (%)</div>
+            <div style={{ width: '100%', height: 180 }}>
+              <ResponsiveContainer>
+                <LineChart data={chartData} margin={{ top: 4, right: 12, left: -10, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,.15)" />
+                  <XAxis dataKey="t" tick={{ fontSize: 10, fill: '#94a3b8' }} minTickGap={40} />
+                  <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: '#94a3b8' }} width={36} />
+                  <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #334155', fontSize: 12 }} />
+                  <Line type="monotone" dataKey="cpu" name="CPU %" stroke="#60a5fa" dot={false} strokeWidth={2} isAnimationActive={false} connectNulls />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+            <div style={{ fontSize: 13, fontWeight: 700, margin: '12px 0 6px' }}>온도 센서 (℃) — {sensorNames.length}개</div>
+            <div style={{ width: '100%', height: 240 }}>
+              <ResponsiveContainer>
+                <LineChart data={chartData} margin={{ top: 4, right: 12, left: -10, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,.15)" />
+                  <XAxis dataKey="t" tick={{ fontSize: 10, fill: '#94a3b8' }} minTickGap={40} />
+                  <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} width={36} unit="℃" />
+                  <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #334155', fontSize: 12 }} />
+                  <Legend wrapperStyle={{ fontSize: 11 }} />
+                  {sensorNames.map((n, i) => (
+                    <Line key={n} type="monotone" dataKey={n} stroke={LINE_COLORS[i % LINE_COLORS.length]} dot={false} strokeWidth={1.6} isAnimationActive={false} connectNulls />
+                  ))}
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+            {fanNames.length > 0 && (
+              <>
+                <div style={{ fontSize: 13, fontWeight: 700, margin: '12px 0 6px' }}>팬 속도 (RPM) — {fanNames.length}개</div>
+                <div style={{ width: '100%', height: 200 }}>
+                  <ResponsiveContainer>
+                    <LineChart data={chartData} margin={{ top: 4, right: 12, left: -4, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,.15)" />
+                      <XAxis dataKey="t" tick={{ fontSize: 10, fill: '#94a3b8' }} minTickGap={40} />
+                      <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} width={46} />
+                      <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #334155', fontSize: 12 }} />
+                      <Legend wrapperStyle={{ fontSize: 11 }} />
+                      {fanNames.map((n, i) => (
+                        <Line key={n} type="monotone" dataKey={`fan:${n}`} name={n} stroke={LINE_COLORS[i % LINE_COLORS.length]} dot={false} strokeWidth={1.4} isAnimationActive={false} connectNulls />
+                      ))}
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </>
+            )}
+            {(!sensors || !sensors.samples?.length) && <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>아직 수집된 센서 샘플이 없습니다. 첫 수집(1분 주기) 후 표시됩니다.</div>}
+          </div>
+        )}
+
+        {tab === 'versions' && (
+          invErr ? <ErrorBox message={invErr} /> : !inv ? <Loading /> : (
+            <div>
+              <div className="flex gap wrap" style={{ marginBottom: 12 }}>
+                {Object.entries({ 전체: inv.health?.overall, CPU: inv.health?.processor, 메모리: inv.health?.memory, 스토리지: inv.health?.storage, PSU: inv.health?.psu }).map(([k, v]) => v ? (
+                  <span key={k} className={`badge ${/ok/i.test(v) ? 'green' : /warn/i.test(v) ? 'amber' : 'red'}`}>{k}: {v}</span>
+                ) : null)}
+              </div>
+              <div className="spec-grid" style={{ marginBottom: 14 }}>
+                <div><span className="muted">iDRAC 펌웨어</span><div><b>{inv.idrac?.firmwareVersion || '—'}</b> {inv.idrac?.model && <span className="muted">({inv.idrac.model})</span>}</div></div>
+                <div><span className="muted">BIOS 버전</span><div><b>{inv.bios?.version || inv.system?.biosVersion || '—'}</b></div></div>
+                <div><span className="muted">모델</span><div>{[inv.system?.manufacturer, inv.system?.model].filter(Boolean).join(' ') || '—'}</div></div>
+                <div><span className="muted">서비스태그</span><div>{inv.system?.serviceTag || '—'}</div></div>
+                <div><span className="muted">CPU</span><div>{inv.cpu?.model || '—'} {inv.cpu?.count ? <span className="muted">×{inv.cpu.count} · {inv.cpu.cores}C/{inv.cpu.threads}T</span> : ''}</div></div>
+                <div><span className="muted">메모리</span><div>{inv.memory?.totalGiB ? `${inv.memory.totalGiB} GiB` : '—'}{inv.memoryDimms?.length ? <span className="muted"> · DIMM {inv.memoryDimms.length}</span> : ''}</div></div>
+                {inv.powerCap?.limitWatts != null && <div><span className="muted">전력 한도</span><div>{inv.powerCap.limitWatts} W</div></div>}
+              </div>
+
+              {(inv.psus || []).length > 0 && (
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, margin: '6px 0' }}>전원공급장치(PSU) {inv.psus.length}</div>
+                  <table className="data-table" style={{ width: '100%', fontSize: 13 }}>
+                    <thead><tr><th style={{ textAlign: 'left' }}>이름</th><th style={{ textAlign: 'left' }}>모델</th><th style={{ textAlign: 'left' }}>용량/출력</th><th style={{ textAlign: 'left' }}>입력</th><th style={{ textAlign: 'left' }}>상태</th></tr></thead>
+                    <tbody>{inv.psus.map((p, i) => (
+                      <tr key={i}><td>{p.name}</td><td className="muted">{p.model || '—'}</td>
+                        <td className="tabular">{p.capacityWatts ? `${p.capacityWatts}W` : '—'}{p.outputWatts != null ? ` / ${p.outputWatts}W` : ''}</td>
+                        <td className="tabular">{p.lineInputVoltage != null ? `${p.lineInputVoltage}V` : '—'}{p.inputWatts != null ? ` · ${p.inputWatts}W` : ''}</td>
+                        <td><span className={`badge ${/ok/i.test(p.health) ? 'green' : p.health ? 'amber' : 'gray'}`}>{p.health || p.state || '—'}</span></td></tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+              )}
+
+              {(inv.disks || []).length > 0 && (
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, margin: '6px 0' }}>물리 디스크 {inv.disks.length} {inv.disks.some((d) => d.predictiveFailure) && <span className="badge red" style={{ marginLeft: 6 }}>⚠ SMART 예측 실패</span>}</div>
+                  <div style={{ maxHeight: 200, overflow: 'auto' }}>
+                    <table className="data-table" style={{ width: '100%', fontSize: 13 }}>
+                      <thead><tr><th style={{ textAlign: 'left' }}>디스크</th><th style={{ textAlign: 'left' }}>용량</th><th style={{ textAlign: 'left' }}>미디어</th><th style={{ textAlign: 'left' }}>상태</th></tr></thead>
+                      <tbody>{inv.disks.map((d, i) => (
+                        <tr key={i}><td>{d.name}<div className="muted" style={{ fontSize: 11 }}>{d.model}</div></td>
+                          <td className="tabular">{d.capacityGB != null ? `${d.capacityGB} GB` : '—'}</td>
+                          <td className="muted">{d.media || '—'}{d.protocol ? ` · ${d.protocol}` : ''}</td>
+                          <td>{d.predictiveFailure ? <span className="badge red">예측 실패</span> : <span className={`badge ${/ok/i.test(d.health) ? 'green' : d.health ? 'amber' : 'gray'}`}>{d.health || d.state || '—'}</span>}</td></tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {(inv.events || []).length > 0 && (
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, margin: '6px 0' }}>최근 하드웨어 이벤트(Critical/Warning) {inv.events.length}</div>
+                  <div style={{ maxHeight: 160, overflow: 'auto' }}>
+                    {inv.events.map((e, i) => (
+                      <div key={i} style={{ fontSize: 12, padding: '4px 0', borderBottom: '1px solid rgba(148,163,184,.12)' }}>
+                        <span className={`badge ${/crit/i.test(e.severity) ? 'red' : 'amber'}`} style={{ marginRight: 6 }}>{e.severity}</span>
+                        <span className="muted">{e.created ? new Date(e.created).toLocaleString('ko-KR') : ''}</span>
+                        <div style={{ marginTop: 2 }}>{e.message}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div style={{ fontSize: 13, fontWeight: 700, margin: '6px 0' }}>펌웨어 / 드라이버 버전 ({(inv.firmware || []).length})</div>
+              {(inv.firmware || []).length === 0 ? <div className="muted" style={{ fontSize: 13 }}>펌웨어 인벤토리를 읽지 못했습니다(모델/권한 확인). “↻ 즉시 재수집”을 눌러보세요.</div> : (
+                <div style={{ maxHeight: 340, overflow: 'auto' }}>
+                  <table className="data-table" style={{ width: '100%', fontSize: 13 }}>
+                    <thead><tr><th style={{ textAlign: 'left' }}>종류</th><th style={{ textAlign: 'left' }}>구성요소</th><th style={{ textAlign: 'left' }}>버전</th></tr></thead>
+                    <tbody>
+                      {orderedTypes.map((ty) => fwByType[ty].map((f, i) => (
+                        <tr key={ty + i}>
+                          <td>{i === 0 ? <span className="badge gray">{ty}</span> : ''}</td>
+                          <td>{f.name}</td>
+                          <td className="tabular"><b>{f.version}</b></td>
+                        </tr>
+                      )))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>인벤토리는 30분마다 자동 갱신됩니다. 방금 값을 보려면 “↻ 즉시 재수집”.</div>
+            </div>
+          )
+        )}
+      </div>
+    </div>
   );
 }

@@ -70,11 +70,15 @@ import { updateSaved, removeSaved } from '../provision/saved.js';
 import {
   listRegistry as listServers, addServer, updateServer, removeServer,
   testServer, importServers, parseCsv, bulkAddByIps, registerScanned, assignVcenter,
+  loadRegistry as loadIdracRegistry,
 } from '../idrac/registry.js';
 import { expandIpList } from '../idrac/iprange.js';
 import { scanForIdracs } from '../idrac/scan.js';
 import { enqueueIdracScan, getIdracScanResult } from '../central/idracScanJobs.js';
 import { getPollerStatus, pollNow } from '../idrac/poller.js';
+import { getInventory as getIdracInventory } from '../idrac/invCache.js';
+import { getSensorSeries } from '../idrac/sensorStore.js';
+import { fetchInventory as fetchIdracInventory, fetchSensors as fetchIdracSensors } from '../idrac/redfish.js';
 import { listCollectors, addCollector, updateCollector, removeCollector, loadCollectors } from '../collector/registry.js';
 import { allCollectorStatus, getCollectorStatus } from '../collector/state.js';
 import { pullNow } from '../collector/puller.js';
@@ -742,6 +746,32 @@ adminRouter.post('/idrac/test', adminOnly, async (req, res) => {
 // Trigger an immediate poll of all servers.
 adminRouter.post('/idrac/poll', adminOnly, async (_req, res) => {
   res.json({ ok: true, lastRun: await pollNow() });
+});
+
+// 서버 상세 인벤토리(iDRAC/BIOS/드라이버 버전 등). 캐시 우선, ?refresh=1이면 즉시 재수집.
+adminRouter.get('/idrac/:id/inventory', adminOnly, async (req, res) => {
+  const s = loadIdracRegistry().find((x) => x.id === req.params.id);
+  if (!s) return res.status(404).json({ ok: false, reason: '서버를 찾을 수 없습니다.' });
+  if (s.type === 'ome') return res.status(400).json({ ok: false, reason: 'OME 소스는 상세 인벤토리를 지원하지 않습니다(iDRAC 직접만).' });
+  if (req.query.refresh === '1') {
+    try { return res.json({ ok: true, fresh: true, inventory: await fetchIdracInventory(s) }); }
+    catch (e) { return res.status(502).json({ ok: false, reason: e.message }); }
+  }
+  const inv = getIdracInventory(s.id);
+  res.json({ ok: true, fresh: false, inventory: inv?.data || inv || null });
+});
+
+// 온도센서 + CPU 사용량 시계열(차트용). ?minutes=N 으로 최근 구간만. ?live=1 즉시 1샘플 수집.
+adminRouter.get('/idrac/:id/sensors', adminOnly, async (req, res) => {
+  const s = loadIdracRegistry().find((x) => x.id === req.params.id);
+  if (!s) return res.status(404).json({ ok: false, reason: '서버를 찾을 수 없습니다.' });
+  if (s.type === 'ome') return res.status(400).json({ ok: false, reason: 'OME 소스는 센서 시계열을 지원하지 않습니다.' });
+  let live = null;
+  if (req.query.live === '1') {
+    try { live = await fetchIdracSensors(s); } catch (e) { live = { error: e.message }; }
+  }
+  const minutes = Math.max(0, Math.min(1440, Number(req.query.minutes) || 0));
+  res.json({ ok: true, ...getSensorSeries(s.id, { minutes }), live, intervalMs: getPollerStatus().intervalMs });
 });
 
 // Import servers (JSON array / { servers:[...] } / CSV text). Body:

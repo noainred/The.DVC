@@ -7,7 +7,8 @@
 
 import { config } from '../config.js';
 import { loadRegistry } from './registry.js';
-import { fetchPower, fetchInventory } from './redfish.js';
+import { fetchPower, fetchInventory, fetchSensors } from './redfish.js';
+import { pushSensorSample } from './sensorStore.js';
 import { fetchOmeDevices } from './ome.js';
 import { setOmeDevices, dbKey } from './omeCache.js';
 import { setInventory, inventoryStale } from './invCache.js';
@@ -42,6 +43,8 @@ async function pollOnce() {
       } else {
         const r = await fetchPower(s);
         db.insert(s.id, r.watts, ts);
+        // 온도센서 + CPU 사용량을 매 주기(1분) 수집해 시계열에 적재(차트용, 격리).
+        try { const sn = await fetchSensors(s); pushSensorSample(s.id, { t: ts, cpuUsagePct: sn.cpuUsagePct, temps: sn.temps, fans: sn.fans }); } catch { /* 센서 실패는 전력 수집과 무관 */ }
         // Refresh rich inventory on a slow cadence (best-effort, non-blocking).
         if (inventoryStale(s.id, INVENTORY_MAX_AGE_MS)) {
           try { setInventory(s.id, await fetchInventory(s)); } catch { /* keep last */ }
