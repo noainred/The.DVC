@@ -37,9 +37,13 @@ const TABS = [
   { id: 'tools', label: '특수 기능' },
   { id: 'insights', label: '인사이트' },
   { id: 'provision', label: 'VM 생성', adminOnly: true },
-  { id: 'settings', label: '설정', adminOnly: true },
+  { id: 'settings', label: '설정', adminOnly: true, ownerOnly: true },
   { id: 'upgrade', label: '업그레이드', adminOnly: true, feature: 'upgradeTab' },
 ];
+
+// '설정'은 지정한 소유 계정(noainred)으로 로그인했을 때만 노출/접근. 인증 비활성(Anonymous) 환경은 허용.
+const SETTINGS_OWNER = 'noainred';
+const isSettingsOwner = (u) => !!u && (u.username === SETTINGS_OWNER || u.name === SETTINGS_OWNER || u.name === 'Anonymous');
 
 const REGIONS = ['아시아', '중국', '유럽', '북미'];
 
@@ -118,7 +122,7 @@ export default function App() {
 function Portal({ user, onLogout }) {
   const isAllowed = (id) => {
     const t = TABS.find((x) => x.id === id);
-    return Boolean(t && (!t.adminOnly || user.role === 'admin'));
+    return Boolean(t && (!t.adminOnly || user.role === 'admin') && (!t.ownerOnly || isSettingsOwner(user)));
   };
   const tabFromHash = () => {
     // 첫 세그먼트만 탭으로 사용(예: #/tools/esxitemp → tools). 나머지는 각 뷰가 처리.
@@ -186,6 +190,7 @@ function Portal({ user, onLogout }) {
   // unless the server enables them.
   const visibleTabs = TABS.filter((t) => {
     if (t.adminOnly && user.role !== 'admin') return false;
+    if (t.ownerOnly && !isSettingsOwner(user)) return false; // '설정'은 소유 계정(noainred)만
     if (t.feature && !health?.features?.[t.feature]) return false;
     return true;
   });
@@ -320,7 +325,7 @@ function Portal({ user, onLogout }) {
           {tab === 'tools' && <SpecialTools />}
           {tab === 'insights' && <Insights onGotoTab={setTab} />}
           {tab === 'provision' && user.role === 'admin' && <VmProvision />}
-          {tab === 'settings' && user.role === 'admin' && <Settings />}
+          {tab === 'settings' && user.role === 'admin' && isSettingsOwner(user) && <Settings />}
           {tab === 'upgrade' && user.role === 'admin' && health?.features?.upgradeTab && <Upgrade />}
          </Suspense>
         </ErrorBoundary>
