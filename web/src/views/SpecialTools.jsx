@@ -2196,7 +2196,7 @@ function Gpu({ scope }) {
 
   const hostRows = items.map((h) => ({
     key: h.id, name: h.host, vcenterId: h.vcenterId, sub: `${h.vcenterId} / ${h.cluster || '-'} · ${h.model}`,
-    model: h.model, count: h.count, memGB: h.memGB, mode: h.mode, modes: h.modes, utilSource: h.utilSource, avg: h.utilPct, max: h.utilPct, util: h.utilPct, assignedVms: h.assignedVms || 0, level: 'host',
+    model: h.model, count: h.count, memGB: h.memGB, mode: h.mode, modes: h.modes, utilSource: h.utilSource, avg: h.utilPct, max: h.utilPct, util: h.utilPct, assignedVms: h.assignedVms || 0, assignedVmNames: h.assignedVmNames || [], level: 'host',
   }));
   // 법인 × GPU 모델별 수량 집계: 어떤 법인에 어떤 GPU 카드가 몇 장 설치됐는지.
   const modelAgg = () => {
@@ -2223,7 +2223,19 @@ function Gpu({ scope }) {
     { key: 'mode', label: '사용 방식', sortValue: (r) => r.mode, render: (r) => <GpuModeBadge mode={r.mode} modes={r.modes} /> },
     { key: 'util', label: '사용률', render: (r) => (r.util == null ? <span className="muted">—</span>
       : <span className="flex gap" style={{ alignItems: 'center' }}><UsageCell pct={r.util} />{r.utilSource === 'guest' && <span className="badge gray" style={{ fontSize: 10 }} title="게스트 OS에서 수집(패스쓰루)">게스트</span>}</span>) },
-    { key: 'assignedVms', label: '할당 VM', align: 'right', render: (r) => (r.assignedVms ? <button className="cell-link" onClick={() => setVmList({ title: `GPU 할당 VM — ${r.name}`, params: { host: r.name } })}>{r.assignedVms}</button> : <span className="muted">0</span>) },
+    { key: 'assignedVms', label: '할당 VM', sortValue: (r) => r.assignedVms, render: (r) => (r.assignedVms ? (
+      <div style={{ minWidth: 160 }}>
+        <button className="cell-link" onClick={() => setVmList({ title: `GPU 할당 VM — ${r.name}`, params: { host: r.name } })}>{r.assignedVms}대</button>
+        {(r.assignedVmNames || []).length > 0 && (
+          <div className="muted" style={{ fontSize: 11, marginTop: 2, lineHeight: 1.4, whiteSpace: 'normal', wordBreak: 'break-all' }} title={(r.assignedVmNames || []).join(', ')}>
+            {(r.assignedVmNames || []).slice(0, 6).map((n, i) => (
+              <span key={n + i}>{i > 0 && ', '}<VmLink name={n} vcenterId={r.vcenterId} label={n} /></span>
+            ))}
+            {(r.assignedVmNames || []).length > 6 && <span> 외 {(r.assignedVmNames || []).length - 6}대</span>}
+          </div>
+        )}
+      </div>
+    ) : <span className="muted">0</span>) },
     { key: 'hist', label: '추이', render: (r) => <button className="tab" onClick={() => openHist('host', r.key)}>5년 추이</button> },
   ];
   const aggCols = [
