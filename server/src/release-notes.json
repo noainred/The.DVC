@@ -1,6 +1,14 @@
 {
   "notes": [
     {
+      "version": "2.18.1",
+      "date": "2026-06-24",
+      "title": "업그레이드 경로 검증 — GitHub Releases 자동 빌드/배포",
+      "notes": [
+        "다운로드를 GitHub Releases(롤링 'downloads' 태그)로 이전한 뒤 첫 검증용 릴리스. 설치/업그레이드 자산은 CI(GitHub Actions)가 빌드해 Releases에 업로드하며, 포탈 자동 업데이트는 ${base}/versions.json·${base}/<파일>(base=releases/download/downloads)에서 받습니다. 기능 변경 없음 — 자동 업그레이드 동작 확인용 버전."
+      ]
+    },
+    {
       "version": "2.18.0",
       "date": "2026-06-24",
       "title": "GPU 게스트 수집 진단 — vCenter(법인)별 보기 + 실패만 보기 + 시도 계정/OS 표시",
