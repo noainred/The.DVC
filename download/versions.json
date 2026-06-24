@@ -1,6 +1,21 @@
 {
-  "latest": "2.5.1",
+  "latest": "2.6.0",
   "versions": [
+    {
+      "version": "2.6.0",
+      "tar_gz": "vmware-portal-2.6.0.tar.gz",
+      "size_bytes": 10277180,
+      "sha256": "b73b88e67de2b67b1a6c695fde254501653213324100f56686fa14a1b0868854",
+      "installer": "vmware-portal-offline-2.6.0-el9-x64.tar.gz",
+      "installer_size_bytes": 67671107,
+      "installer_sha256": "4c731256f048dccf9817c43dd1308ceefae69fcc9cc279919e0df49de8e7a08b",
+      "installer_cent9": "vmware-portal-offline-2.6.0-cent9-x64.tar.gz",
+      "installer_cent9_size_bytes": 67673638,
+      "installer_cent9_sha256": "2e5a60678f981e1693b6ea09494573b09cbe4e75af42ff7cf37bd1cf14471269",
+      "windows": "vmware-portal-win-2.6.0-x64.zip",
+      "windows_size_bytes": 50195905,
+      "windows_sha256": "4532527fb9ca874f4d3e5f7dc16c3557d2789f09007be8443631ce2779a7dfe3"
+    },
     {
       "version": "2.5.1",
       "tar_gz": "vmware-portal-2.5.1.tar.gz",
@@ -15,21 +30,6 @@
       "windows": "vmware-portal-win-2.5.1-x64.zip",
       "windows_size_bytes": 50194865,
       "windows_sha256": "91d2daa6b78eab5052a2b566ce0d58ccfd5254f58340bb86458c9a165b1f501d"
-    },
-    {
-      "version": "2.5.0",
-      "tar_gz": "vmware-portal-2.5.0.tar.gz",
-      "size_bytes": 10274336,
-      "sha256": "1a8992ae17d4a5c96345661811f53096410824c7f2ea698541ed5dd8277c6ea1",
-      "installer": "vmware-portal-offline-2.5.0-el9-x64.tar.gz",
-      "installer_size_bytes": 67664661,
-      "installer_sha256": "3c462a11214ff9c170bab360a515573a2f9425c7e7ec5714c52f1688f826a291",
-      "installer_cent9": "vmware-portal-offline-2.5.0-cent9-x64.tar.gz",
-      "installer_cent9_size_bytes": 67674880,
-      "installer_cent9_sha256": "7e4d8dee1437454ca60e9b7b3a9e075dcdd3fc9b6df326c7079b33130a16b0c0",
-      "windows": "vmware-portal-win-2.5.0-x64.zip",
-      "windows_size_bytes": 50194479,
-      "windows_sha256": "c4228d9e050beaf0cbe729e3e161babb4c924dbc72b342be16d0c9a27f3a0450"
     },
     {
       "version": "1.98.0",

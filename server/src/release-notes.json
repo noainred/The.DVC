@@ -1,6 +1,17 @@
 {
   "notes": [
     {
+      "version": "2.6.0",
+      "date": "2026-06-24",
+      "title": "GPU 게스트 공용 계정 Windows/Linux 분리 입력 + VM 목록 OS별 보기",
+      "notes": [
+        "설정 > GPU 게스트 수집: 법인별 공용 계정을 🐧Linux(root 등)와 🪟Windows(Administrator 등)로 따로 입력. Windows VM은 Windows 계정으로, 그 외는 Linux 계정으로 수집(Windows 칸 비우면 Linux 계정으로 폴백).",
+        "자격증명 해석(resolveVmCreds)이 게스트 OS를 인식해 OS별 공용 계정을 선택 — 수집 폴러·게스트 계정 추가·심층 검색·게스트 조사 스케줄러·테스트 모두 반영.",
+        "VM별 계정 목록에 'OS별 보기' 필터(전체/Linux/Windows) 추가 — 선택 OS만 표시·테스트.",
+        "신규 설정 필드: vCenter별 winUsername/winPassword(0600 저장, 클라이언트로는 비번 마스킹)."
+      ]
+    },
+    {
       "version": "2.5.1",
       "date": "2026-06-24",
       "title": "GPU 사용률 집계에서 전원 OFF VM 제외",

@@ -90,7 +90,7 @@ export default function GpuGuestSettings() {
           <span className="muted" style={{ fontSize: 12 }}>선택됨 {monitoredCount} / {vcs.length}</span>
         </div>
         <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
-          여기 계정은 그 법인 VM에 <b>공용(기본)</b>으로 쓰입니다. VM마다 계정이 다르면 아래 <b>VM별 계정</b>에서 개별 지정하세요(개별이 공용보다 우선).
+          여기 계정은 그 법인 VM에 <b>공용(기본)</b>으로 쓰입니다. <b>Linux/Windows를 구분</b>해 입력하면 게스트 OS에 맞는 계정으로 수집합니다(Windows 칸 비우면 Linux 계정으로 폴백). VM마다 계정이 다르면 아래 <b>VM별 계정</b>에서 개별 지정하세요(개별이 공용보다 우선).
         </div>
         {vcs.length === 0 ? <span className="muted">등록된 vCenter가 없습니다. 먼저 vCenter를 등록하세요.</span> : (
           <div style={{ overflowX: 'auto' }}>
@@ -98,21 +98,28 @@ export default function GpuGuestSettings() {
               <thead><tr>
                 <th style={{ textAlign: 'left' }}>모니터링</th>
                 <th style={{ textAlign: 'left' }}>법인 / vCenter</th>
-                <th style={{ textAlign: 'left' }}>공용 계정</th>
-                <th style={{ textAlign: 'left' }}>비밀번호</th>
+                <th style={{ textAlign: 'left' }}>🐧 Linux 계정</th>
+                <th style={{ textAlign: 'left' }}>Linux 비번</th>
+                <th style={{ textAlign: 'left' }}>🪟 Windows 계정</th>
+                <th style={{ textAlign: 'left' }}>Windows 비번</th>
               </tr></thead>
               <tbody>
                 {vcs.map((vc) => {
-                  const v = form.vcenters[vc.id] || { enabled: false, username: '', password: '', hasPassword: false };
+                  const v = form.vcenters[vc.id] || { enabled: false, username: '', password: '', hasPassword: false, winUsername: '', winPassword: '', hasWinPassword: false };
                   return (
                     <tr key={vc.id}>
                       <td><input type="checkbox" checked={!!v.enabled} onChange={(e) => setVc(vc.id, { enabled: e.target.checked })} /></td>
                       <td><b>{vc.name || vc.id}</b><div className="muted" style={{ fontSize: 11 }}>{vc.location?.region || vc.location?.country || vc.id}</div></td>
-                      <td><input className="input" style={{ width: 160 }} placeholder="administrator / root" value={v.username}
+                      <td><input className="input" style={{ width: 140 }} placeholder="root" value={v.username}
                         onChange={(e) => setVc(vc.id, { username: e.target.value })} /></td>
-                      <td><input className="input" type="password" style={{ width: 160 }}
-                        placeholder={v.hasPassword ? '●●●●● (변경시 입력)' : '비밀번호'} value={v.password || ''}
+                      <td><input className="input" type="password" style={{ width: 140 }}
+                        placeholder={v.hasPassword ? '●●●●● (변경시 입력)' : 'Linux 비번'} value={v.password || ''}
                         onChange={(e) => setVc(vc.id, { password: e.target.value })} /></td>
+                      <td><input className="input" style={{ width: 140 }} placeholder="Administrator" value={v.winUsername || ''}
+                        onChange={(e) => setVc(vc.id, { winUsername: e.target.value })} /></td>
+                      <td><input className="input" type="password" style={{ width: 140 }}
+                        placeholder={v.hasWinPassword ? '●●●●● (변경시 입력)' : 'Windows 비번'} value={v.winPassword || ''}
+                        onChange={(e) => setVc(vc.id, { winPassword: e.target.value })} /></td>
                     </tr>
                   );
                 })}
@@ -148,6 +155,7 @@ export default function GpuGuestSettings() {
 function VmCredManager({ vcs, vcenters }) {
   const [selVc, setSelVc] = useState('');
   const [rows, setRows] = useState(null);   // null=미조회, []=없음
+  const [osFilter, setOsFilter] = useState('all'); // all | linux | windows
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
@@ -206,13 +214,20 @@ function VmCredManager({ vcs, vcenters }) {
   };
 
   const vcShared = vcenters[selVc] || {};
-  const ownCount = rows ? rows.filter((r) => r.mode === 'own').length : 0;
+  const isWin = (r) => /windows/i.test(r.guestOS || '');
+  const shown = rows ? rows.filter((r) => (osFilter === 'all' ? true : osFilter === 'windows' ? isWin(r) : !isWin(r))) : rows;
+  const ownCount = shown ? shown.filter((r) => r.mode === 'own').length : 0;
 
   return (
     <div className="card" style={{ padding: 16, marginTop: 14 }}>
       <div className="flex between wrap" style={{ alignItems: 'center', marginBottom: 8, gap: 8 }}>
         <b>VM별 계정 (계정이 VM마다 다를 때)</b>
         <div className="flex gap" style={{ alignItems: 'center' }}>
+          <select className="select" value={osFilter} onChange={(e) => setOsFilter(e.target.value)} style={{ minWidth: 110 }} title="OS별로 구분해 보기">
+            <option value="all">전체 OS</option>
+            <option value="linux">🐧 Linux</option>
+            <option value="windows">🪟 Windows</option>
+          </select>
           <select className="select" value={selVc} onChange={(e) => pickVc(e.target.value)} style={{ minWidth: 200 }}>
             <option value="">법인(vCenter) 선택…</option>
             {vcs.map((vc) => <option key={vc.id} value={vc.id}>{vc.name || vc.id}</option>)}
@@ -227,7 +242,7 @@ function VmCredManager({ vcs, vcenters }) {
       {selVc && rows && rows.length > 0 && (
         <>
           <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
-            공용 계정: <b>{vcShared.username || '(미설정)'}</b>{vcShared.hasPassword ? ' · 비번 저장됨' : ''} · VM {rows.length}개 · 별도 계정 {ownCount}개
+            공용 계정 — 🐧Linux <b>{vcShared.username || '(미설정)'}</b>{vcShared.hasPassword ? '·비번O' : ''} · 🪟Windows <b>{vcShared.winUsername || '(Linux로 폴백)'}</b>{vcShared.hasWinPassword ? '·비번O' : ''} · {osFilter === 'all' ? `VM ${rows.length}개` : `${osFilter} ${shown.length}/${rows.length}개`} · 별도 계정 {ownCount}개
           </div>
           <div style={{ overflowX: 'auto', maxWidth: '100%' }}>
             <table className="data-table" style={{ width: '100%', fontSize: 13 }}>
@@ -241,7 +256,8 @@ function VmCredManager({ vcs, vcenters }) {
                 <th style={{ textAlign: 'left' }}>테스트</th>
               </tr></thead>
               <tbody>
-                {rows.map((r) => {
+                {shown.length === 0 && <tr><td colSpan={7} className="muted" style={{ padding: 14, textAlign: 'center' }}>해당 OS({osFilter})의 VM이 없습니다.</td></tr>}
+                {shown.map((r) => {
                   const ready = r.powerState === 'POWERED_ON' && r.toolsStatus === 'RUNNING';
                   return (
                     <tr key={r.id}>
@@ -284,7 +300,7 @@ function VmCredManager({ vcs, vcenters }) {
           </div>
 
           <div className="flex gap wrap" style={{ alignItems: 'center', marginTop: 12 }}>
-            <button className="logout-btn" style={{ padding: '8px 14px' }} onClick={() => runTest(null)}>⚡ 모두 테스트</button>
+            <button className="logout-btn" style={{ padding: '8px 14px' }} onClick={() => runTest(shown)}>⚡ {osFilter === 'all' ? '모두' : osFilter} 테스트</button>
             <button className="login-btn" style={{ flex: 'none', padding: '8px 18px' }} disabled={busy} onClick={saveCreds}>{busy ? '저장 중…' : 'VM별 계정 저장'}</button>
             {msg && <span className="muted" style={{ fontSize: 13 }}>{msg}</span>}
           </div>
@@ -318,13 +334,9 @@ function Field({ label, children }) {
 
 function toForm(settings, vcs, prev) {
   const vcenters = {};
-  for (const vc of vcs) {
-    const s = settings.vcenters?.[vc.id] || {};
-    vcenters[vc.id] = { enabled: !!s.enabled, username: s.username || '', hasPassword: !!s.hasPassword, password: '' };
-  }
-  for (const [id, s] of Object.entries(settings.vcenters || {})) {
-    if (!vcenters[id]) vcenters[id] = { enabled: !!s.enabled, username: s.username || '', hasPassword: !!s.hasPassword, password: '' };
-  }
+  const mk = (s) => ({ enabled: !!s.enabled, username: s.username || '', hasPassword: !!s.hasPassword, password: '', winUsername: s.winUsername || '', hasWinPassword: !!s.hasWinPassword, winPassword: '' });
+  for (const vc of vcs) vcenters[vc.id] = mk(settings.vcenters?.[vc.id] || {});
+  for (const [id, s] of Object.entries(settings.vcenters || {})) { if (!vcenters[id]) vcenters[id] = mk(s); }
   return {
     enabled: !!settings.enabled, pollIntervalMs: settings.pollIntervalMs || 60000, concurrency: settings.concurrency || 4,
     timeoutMs: settings.timeoutMs || 20000, maxVmsPerVcenter: settings.maxVmsPerVcenter || 1000, vcenters,

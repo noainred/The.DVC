@@ -422,14 +422,17 @@ adminRouter.post('/gpu-guest/test', adminOnly, async (req, res) => {
         if (!v) { results[i] = { vmId: it.vmId, login: false, read: false, error: 'VM을 찾을 수 없음' }; continue; }
         if (v.toolsStatus !== 'RUNNING') { results[i] = { vmId: it.vmId, login: false, read: false, error: 'VMware Tools 미실행' }; continue; }
         if (v.powerState !== 'POWERED_ON') { results[i] = { vmId: it.vmId, login: false, read: false, error: 'VM 전원 꺼짐' }; continue; }
-        // 자격증명 결정: useShared면 법인 공용, 아니면 입력값(빈 비번은 저장값) → 없으면 해석값.
-        const vcShared = s.vcenters[vcenterId] || {};
-        let creds;
-        if (it.useShared) creds = vcShared.username ? { username: vcShared.username, password: vcShared.password || '' } : null;
-        else if (it.username) creds = { username: it.username, password: it.password || (vcShared.vms?.[it.vmId]?.password || '') };
-        else creds = resolveVmCreds(s, vcenterId, it.vmId);
-        if (!creds || !creds.username) { results[i] = { vmId: it.vmId, login: false, read: false, error: '계정 없음' }; continue; }
         const isWindows = /windows/i.test(v.guestOS || '');
+        // 자격증명 결정: useShared면 법인 공용(OS별), 아니면 입력값(빈 비번은 저장값) → 없으면 해석값.
+        const vcShared = s.vcenters[vcenterId] || {};
+        const sharedForOs = (isWindows && vcShared.winUsername)
+          ? { username: vcShared.winUsername, password: vcShared.winPassword || '' }
+          : (vcShared.username ? { username: vcShared.username, password: vcShared.password || '' } : null);
+        let creds;
+        if (it.useShared) creds = sharedForOs;
+        else if (it.username) creds = { username: it.username, password: it.password || (vcShared.vms?.[it.vmId]?.password || '') };
+        else creds = resolveVmCreds(s, vcenterId, it.vmId, isWindows);
+        if (!creds || !creds.username) { results[i] = { vmId: it.vmId, login: false, read: false, error: '계정 없음' }; continue; }
         const r = await testVmGuest(c, String(v.id).split(':').slice(1).join(':'), creds, { isWindows, timeoutMs: s.timeoutMs, dlHosts: dlByHost.get(v.host) || [] }).catch((e) => ({ login: false, read: false, error: e.message }));
         results[i] = { vmId: it.vmId, ...r };
       }

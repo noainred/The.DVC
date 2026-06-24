@@ -82,7 +82,7 @@ async function pollLive(snap, vc, s) {
   const onHost = (snap.vms || []).filter((v) => v.vcenterId === vc.id && hostNames.has(v.host));
   const gpuVms = onHost.filter((v) => vmUsesGpu(v) && !v.template);
   const onTools = gpuVms.filter((v) => v.powerState === 'POWERED_ON' && v.toolsStatus === 'RUNNING');
-  const cands = onTools.filter((v) => resolveVmCreds(s, vc.id, v.id)).slice(0, s.maxVmsPerVcenter || 1000);
+  const cands = onTools.filter((v) => resolveVmCreds(s, vc.id, v.id, /windows/i.test(v.guestOS || ''))).slice(0, s.maxVmsPerVcenter || 1000);
   const counts = { gpuHosts: hostNames.size, vmsOnHost: onHost.length, gpuVms: gpuVms.length, onTools: onTools.length, candidates: cands.length };
   console.log(`[gpu-guest] ${vc.id} 선별: GPU호스트=${counts.gpuHosts} · 호스트위VM=${counts.vmsOnHost} · GPU할당VM=${counts.gpuVms} · On+Tools=${counts.onTools} · 계정있음(수집대상)=${counts.candidates}`);
   const diag = { vcId: vc.id, at: Date.now(), stage: '선별', counts, results: [], error: null };
@@ -108,10 +108,10 @@ async function pollLive(snap, vc, s) {
   const byHost = new Map();
   try {
     await eachLimited(cands, s.concurrency, async (v) => {
-      const creds = resolveVmCreds(s, vc.id, v.id);
+      const isWindows = /windows/i.test(v.guestOS || '');
+      const creds = resolveVmCreds(s, vc.id, v.id, isWindows);
       if (!creds) return;
       const moref = String(v.id).split(':').slice(1).join(':');
-      const isWindows = /windows/i.test(v.guestOS || '');
       const dlHosts = dlByHost.get(v.host) || [];
       console.log(`[gpu-guest]   → ${v.name} (${moref}) host=${v.host} 계정=${creds.username}(${creds.source}) dl후보=[${dlHosts.join(', ')}]`);
       let err = null;
