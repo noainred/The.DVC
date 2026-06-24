@@ -15,6 +15,29 @@ const fmtAgo = (ts) => {
 };
 const num = (n) => (n == null ? '—' : Number(n).toLocaleString());
 const fmtDate = (ts) => (ts ? new Date(ts).toLocaleDateString('ko-KR') : '—');
+const dec1 = (n) => Number(n).toLocaleString(undefined, { maximumFractionDigits: 1 });
+// 전력(W): 1,000 넘으면 상위 단위(kW→MW→GW). 예: 131,133 W → 131.1 kW.
+const fmtW = (w) => {
+  if (w == null || !Number.isFinite(Number(w))) return '—';
+  const a = Math.abs(w);
+  if (a >= 1e9) return `${dec1(w / 1e9)} GW`;
+  if (a >= 1e6) return `${dec1(w / 1e6)} MW`;
+  if (a >= 1e3) return `${dec1(w / 1e3)} kW`;
+  return `${Math.round(w).toLocaleString()} W`;
+};
+// 에너지(입력 kWh): 1,000 넘으면 MWh→GWh. 예: 141,623.6 kWh → 141.6 MWh.
+const fmtWh = (kwh) => {
+  if (kwh == null || !Number.isFinite(Number(kwh))) return '—';
+  const a = Math.abs(kwh);
+  if (a >= 1e6) return `${dec1(kwh / 1e6)} GWh`;
+  if (a >= 1e3) return `${dec1(kwh / 1e3)} MWh`;
+  return `${dec1(kwh)} kWh`;
+};
+// CO2(입력 kg): 1,000 넘으면 t(톤).
+const fmtKg = (kg) => {
+  if (kg == null || !Number.isFinite(Number(kg))) return '—';
+  return Math.abs(kg) >= 1e3 ? `${dec1(kg / 1e3)} t` : `${Math.round(kg).toLocaleString()} kg`;
+};
 
 function Kpi({ label, value, sub, color }) {
   return (
@@ -48,13 +71,13 @@ function FinOps() {
   };
   return (
     <div>
-      <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>전력 수집(iDRAC/OME/원격) 기반 에너지·비용·탄소 추정. 현재 소비전력 × PUE {d.config.pue} 기준. 측정 서버 {d.measuredHosts}대(인벤토리 {d.totalHosts}호스트).{d.unmappedServers > 0 ? ` · ⚠ 미매핑 ${d.unmappedServers}대(${(d.unmappedWatts / 1000).toFixed(1)}kW)는 '(미매핑)'으로 집계 — ESXi 호스트명과 매핑하면 vCenter별로 귀속됩니다.` : ''}</p>
+      <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>전력 수집(iDRAC/OME/원격) 기반 에너지·비용·탄소 추정. 현재 소비전력 × PUE {d.config.pue} 기준. 측정 서버 {d.measuredHosts}대(인벤토리 {d.totalHosts}호스트).{d.unmappedServers > 0 ? ` · ⚠ 미매핑 ${d.unmappedServers}대(${fmtW(d.unmappedWatts)})는 '(미매핑)'으로 집계 — ESXi 호스트명과 매핑하면 vCenter별로 귀속됩니다.` : ''}</p>
       <div className="flex gap wrap" style={{ marginBottom: 12 }}>
-        <Kpi label="현재 소비전력" value={`${num(d.totals.watts)} W`} sub={`설비 포함 ${num(d.totals.facilityWatts)} W`} />
-        <Kpi label="월 에너지" value={`${num(d.totals.kwhMonth)} kWh`} sub={`연 ${num(d.totals.kwhYear)} kWh`} />
+        <Kpi label="현재 소비전력" value={fmtW(d.totals.watts)} sub={`설비 포함 ${fmtW(d.totals.facilityWatts)}`} />
+        <Kpi label="월 에너지" value={fmtWh(d.totals.kwhMonth)} sub={`연 ${fmtWh(d.totals.kwhYear)}`} />
         <Kpi label="월 전기요금" value={c(d.totals.costMonth)} sub={`일 ${c(d.totals.costDay)}`} color="#fbbf24" />
         <Kpi label="연 전기요금" value={c(d.totals.costYear)} color="#fbbf24" />
-        <Kpi label="월 탄소배출" value={`${num(d.totals.co2MonthKg)} kg`} sub={`연 ${num(d.totals.co2YearKg)} kg CO₂`} color="#34d399" />
+        <Kpi label="월 탄소배출" value={fmtKg(d.totals.co2MonthKg)} sub={`연 ${fmtKg(d.totals.co2YearKg)} CO₂`} color="#34d399" />
       </div>
       {d.byVcenter.length > 0 && (
         <div className="card" style={{ padding: 14, marginBottom: 12 }}>
@@ -76,7 +99,7 @@ function FinOps() {
           <div className="table-wrap" style={{ maxHeight: '46vh' }}>
             <table><thead><tr><th>호스트</th><th>vCenter</th><th>모델</th><th style={{ textAlign: 'right' }}>W</th></tr></thead>
               <tbody>{d.topHosts.map((h) => (
-                <tr key={h.host}><td><b>{h.host}</b></td><td className="muted">{h.vcenterId}</td><td className="muted" style={{ fontSize: 12 }}>{h.model || '—'}</td><td style={{ textAlign: 'right' }}>{num(h.watts)}</td></tr>
+                <tr key={h.host}><td><b>{h.host}</b></td><td className="muted">{h.vcenterId}</td><td className="muted" style={{ fontSize: 12 }}>{h.model || '—'}</td><td style={{ textAlign: 'right' }}>{fmtW(h.watts)}</td></tr>
               ))}</tbody></table>
           </div>
         </div>
@@ -266,7 +289,7 @@ function TreeNode({ node, depth }) {
         <span className="muted" style={{ fontSize: 11 }}>
           {node.type === 'vcenter' && `· ${node.region || ''} v${node.version || '?'} · 호스트 ${node.hosts} · VM ${node.vmCount}`}
           {node.type === 'cluster' && `· 호스트 ${node.hosts} · VM ${node.vmCount}`}
-          {node.type === 'host' && `· CPU ${node.cpuPct}% MEM ${node.memPct}% · VM ${node.vmOn}/${node.vmCount}${node.gpus ? ` · GPU ${node.gpus}` : ''}${node.watts ? ` · ${node.watts}W` : ''}`}
+          {node.type === 'host' && `· CPU ${node.cpuPct}% MEM ${node.memPct}% · VM ${node.vmOn}/${node.vmCount}${node.gpus ? ` · GPU ${node.gpus}` : ''}${node.watts ? ` · ${fmtW(node.watts)}` : ''}`}
           {node.type === 'vm' && `· ${node.guestOS || ''} ${node.cpuPct}%/${node.memPct}%${node.gpu ? ` · ${node.gpu}` : ''}`}
         </span>
       </div>

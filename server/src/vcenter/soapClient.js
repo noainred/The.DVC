@@ -511,6 +511,27 @@ function parsePassthruGpus(passthruXml, pciDeviceXml, skipIds) {
  * Array items are <HostHostBusAdapter xsi:type="HostFibreChannelHba|HostInternetScsiHba|...">.
  * FC link speed is reported in bits/sec; portWorldWideName is a decimal we render as hex.
  */
+/**
+ * summary.hardware.otherIdentifyingInfo에서 Dell 서비스태그를 추출한다.
+ * 각 항목은 identifierValue + identifierType.key(예: ServiceTag/AssetTag)로 구성.
+ * iDRAC의 SKU/SerialNumber와 동일하므로 전력(iDRAC)↔ESXi 호스트 자동 매핑 키가 된다.
+ */
+function parseServiceTag(xml) {
+  if (!xml) return '';
+  // 항목별로 분리(요소명은 환경에 따라 otherIdentifyingInfo/HostSystemIdentificationInfo).
+  const blocks = xml.split(/<(?:otherIdentifyingInfo|HostSystemIdentificationInfo)(?=[ >])/).slice(1);
+  const items = blocks.length ? blocks : [xml];
+  let assetTag = '';
+  for (const blk of items) {
+    const val = /<identifierValue>([^<]*)<\/identifierValue>/.exec(blk)?.[1]?.trim() || '';
+    if (!val) continue;
+    const key = (/<key>([^<]*)<\/key>/.exec(blk)?.[1] || '').toLowerCase();
+    if (key.includes('servicetag') || key.includes('serialnumbertag')) return val;
+    if (key.includes('assettag') && !assetTag) assetTag = val;
+  }
+  return assetTag; // 서비스태그가 없으면 자산태그라도 매핑 보조키로 사용.
+}
+
 function parseHbas(xml) {
   if (!xml) return [];
   const out = [];
@@ -803,7 +824,7 @@ export async function collectFromVCenterSoap(vc) {
         'summary.hardware.numCpuCores', 'summary.hardware.numCpuThreads', 'summary.hardware.cpuMhz', 'summary.hardware.memorySize',
         'summary.config.product.version', 'summary.config.product.build', 'config.graphicsInfo',
         'config.pciPassthruInfo', 'hardware.pciDevice',
-        'summary.hardware.vendor', 'summary.hardware.model', 'config.storageDevice.hostBusAdapter',
+        'summary.hardware.vendor', 'summary.hardware.model', 'summary.hardware.otherIdentifyingInfo', 'config.storageDevice.hostBusAdapter',
         'runtime.healthSystemRuntime.systemHealthInfo.numericSensorInfo',
         'summary.managementServerIp', 'config.network.vnic',
         'summary.quickStats.overallCpuUsage', 'summary.quickStats.overallMemoryUsage'] },
@@ -881,6 +902,7 @@ export async function collectFromVCenterSoap(vc) {
         ...parseTemps(p['runtime.healthSystemRuntime.systemHealthInfo.numericSensorInfo']),
         vendor: p['summary.hardware.vendor'] || '',
         model: p['summary.hardware.model'] || '',
+        serviceTag: parseServiceTag(p['summary.hardware.otherIdentifyingInfo']),
         vmCount: 0,
       };
       hosts.push(host);
