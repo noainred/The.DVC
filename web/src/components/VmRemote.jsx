@@ -23,32 +23,43 @@ export function VmRemoteButton({ item }) {
   const [creds, setCreds] = useState({ username: '', password: '', domain: '' });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
-  const [probe, setProbe] = useState({ loading: true });
+  const [probes, setProbes] = useState({}); // ip -> { loading, ok, portOpen, pingOk, pingMs, proxyName, reason }
 
   const noIp = ips.length === 0;
   const guessPort = isWindows ? 3389 : 22;
+  const probePort = protocol === 'rdp' ? 3389 : 22; // 선택 프로토콜의 기본 포트로 도달성 확인
   // 브라우저 비밀번호 관리자가 'VM 이름'으로 저장/자동입력하도록 비번 필드 id/name을 VM 이름 기반으로.
   const pwFieldName = `vmpw_${String(item.name || 'vm').replace(/[^a-zA-Z0-9_-]/g, '_')}`;
   const noteTail = (item.notes || '').split(/\r?\n/).map((l) => l.trimEnd()).filter(Boolean).slice(-3).join('\n');
 
-  // Pre-flight reachability check via the assigned proxy (ping + TCP port).
+  // 사전 도달성 확인 — 다수 IP를 '모두' 프록시 경유로 ping+TCP 포트 점검(어느 IP로 붙을지 판단).
   useEffect(() => {
     let alive = true;
-    if (noIp) { setProbe({ loading: false, ok: false, reason: '수집된 IP가 없습니다.' }); return; }
-    setProbe({ loading: true });
-    postJson('/remote/probe', { vcenterId: item.vcenterId, targetHost: ips[0], targetPort: guessPort })
-      .then((r) => { if (alive) setProbe({ loading: false, ...r }); })
-      .catch((e) => { if (alive) setProbe({ loading: false, ok: false, reason: e.message }); });
+    if (noIp) return;
+    setProbes(Object.fromEntries(ips.map((ip) => [ip, { loading: true }])));
+    ips.forEach((ip) => {
+      postJson('/remote/probe', { vcenterId: item.vcenterId, targetHost: ip, targetPort: probePort })
+        .then((r) => { if (alive) setProbes((p) => ({ ...p, [ip]: { loading: false, ...r } })); })
+        .catch((e) => { if (alive) setProbes((p) => ({ ...p, [ip]: { loading: false, ok: false, reason: e.message } })); });
+    });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [item.id]);
+  }, [item.id, protocol]);
 
-  const probeColor = probe.loading ? null : probe.ok ? (probe.portOpen ? '#60a5fa' : '#f87171') : '#f59e0b';
-  const probeTip = probe.loading ? '프록시 경유 접속 점검 중…'
-    : probe.ok
-      ? `프록시 '${probe.proxyName}'에서 ${ips[0]}:${guessPort} ${probe.portOpen ? '통신 OK ✓' : '통신 실패 ✗'}`
-        + (probe.pingOk ? ` · ping ${probe.pingMs}ms` : ' · ping 무응답')
-      : `사전 점검 불가: ${probe.reason || ''}`;
+  // 포트가 열린(접속 가능) IP가 있으면 그 IP를 자동 선택(현재 선택이 도달 불가일 때).
+  const openIps = ips.filter((x) => probes[x]?.portOpen);
+  useEffect(() => {
+    if (openIps.length && !probes[ip]?.portOpen) setIp(openIps[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(openIps)]);
+
+  const anyLoading = ips.some((x) => probes[x]?.loading);
+  const anyOpen = openIps.length > 0;
+  const probeColor = noIp ? '#f59e0b' : anyLoading ? null : anyOpen ? '#22c55e' : '#f87171';
+  const probeTip = noIp ? '수집된 IP가 없습니다.'
+    : anyLoading ? '프록시 경유 접속 점검 중…'
+      : anyOpen ? `접속 가능 IP: ${openIps.join(', ')} (:${probePort})`
+        : `모든 IP 접속 불가(:${probePort}) — 방화벽/포트/프록시 경로 확인`;
   const connect = async () => {
     setBusy(true); setError(null);
     try {
@@ -76,7 +87,7 @@ export function VmRemoteButton({ item }) {
     <>
       <button className="logout-btn" style={{ padding: '8px 14px', color: probeColor || undefined, borderColor: probeColor || undefined }}
         onClick={() => { setError(null); setOpen(true); }} title={probeTip}>
-        🔗 원격 접속{probe.loading ? ' …' : probe.ok ? (probe.portOpen ? ' ●' : ' ●') : ''}
+        🔗 원격 접속{anyLoading ? ' …' : ' ●'}
       </button>
 
       {open && (
@@ -103,6 +114,31 @@ export function VmRemoteButton({ item }) {
                 <label style={FLD}>포트(기본 {protocol === 'rdp' ? '3389' : '22'})
                   <input className="input" style={INP} type="number" value={port} onChange={(e) => setPort(e.target.value)} placeholder={protocol === 'rdp' ? '3389' : '22'} />
                 </label>
+              </div>
+
+              {/* 어떤 IP로 접속할지 확인 — 모든 IP를 프록시 경유로 도달성 점검(포트 열림=녹색). 선택한 IP로 접속. */}
+              <div style={{ marginTop: 10 }}>
+                <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>접속할 IP 확인 — {protocol.toUpperCase()} :{probePort} 도달성{ips.length > 1 ? ' (라디오로 선택)' : ''}</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {ips.map((x) => {
+                    const p = probes[x] || { loading: true };
+                    const st = p.loading ? 'pending' : p.portOpen ? 'up' : (p.pingOk ? 'warn' : 'down');
+                    const c = st === 'up' ? '#22c55e' : st === 'down' ? '#ef4444' : st === 'warn' ? '#f59e0b' : '#9ca3af';
+                    const label = p.loading ? '확인 중…' : p.portOpen ? `접속 가능 · 포트 열림${p.pingOk ? ` · ping ${p.pingMs}ms` : ''}` : p.pingOk ? '포트 닫힘(ping만 응답)' : '도달 불가';
+                    return (
+                      <label key={x} title={label} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: '4px 8px', borderRadius: 6,
+                        border: ip === x ? '1px solid var(--accent,#2563eb)' : '1px solid transparent', background: ip === x ? 'rgba(37,99,235,.08)' : 'transparent' }}>
+                        <input type="radio" name="remoteip" checked={ip === x} onChange={() => setIp(x)} />
+                        <span style={{ display: 'inline-block', width: 9, height: 9, borderRadius: '50%', background: c, boxShadow: st === 'up' ? '0 0 6px #22c55e' : 'none', flex: '0 0 auto', animation: st === 'pending' ? 'pulse 1.2s infinite' : 'none' }} />
+                        <span style={{ fontFamily: 'ui-monospace, monospace', color: c, fontWeight: 600 }}>{x}</span>
+                        <span className="muted" style={{ fontSize: 11, marginLeft: 'auto' }}>{label}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+                <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                  {anyLoading ? '도달성 확인 중…' : anyOpen ? `✅ 접속 가능 IP: ${openIps.join(', ')} — 선택한 IP로 접속합니다.` : '⚠ 열린 포트가 없습니다. 그래도 선택한 IP로 접속을 시도할 수 있습니다.'}
+                </div>
               </div>
 
               {noteTail && (

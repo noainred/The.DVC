@@ -20,6 +20,7 @@ export function SshConsole({ mapping, initialCreds, onCreds, onHostname }) {
   const [phase, setPhaseState] = useState('form'); // form | connecting | live | error
   const [status, setStatus] = useState('');
   const [ticks, setTicks] = useState(0);
+  const [formErr, setFormErr] = useState(''); // 폼 상단 안내(인증 실패 사유 등)
 
   const setPhase = (p) => { phaseRef.current = p; setPhaseState(p); };
   const stopTimer = () => { try { clearInterval(timerRef.current); } catch { /* */ } timerRef.current = null; };
@@ -37,6 +38,7 @@ export function SshConsole({ mapping, initialCreds, onCreds, onHostname }) {
 
   const connect = () => {
     onCreds?.(creds);
+    setFormErr('');
     setPhase('connecting'); setStatus('프록시에 WebSocket 연결 중…'); setTicks(0);
     stopTimer(); const t0 = Date.now();
     timerRef.current = setInterval(() => setTicks(Math.floor((Date.now() - t0) / 200)), 200);
@@ -52,7 +54,21 @@ export function SshConsole({ mapping, initialCreds, onCreds, onHostname }) {
       ws.onopen = () => { setStatus('인증 중… (자격증명 전송)'); ws.send(JSON.stringify({ type: 'auth', mappingId: mapping.id, username: creds.username, password: creds.password, cols: term.cols, rows: term.rows })); };
       ws.onmessage = (e) => {
         const s = typeof e.data === 'string' ? e.data : '';
-        try { const j = JSON.parse(s); if (j && j.type === 'hostname') { onHostname?.(j.name); return; } if (j && j.type === 'status') { setStatus(j.text); term.write(`\r\n\x1b[33m${j.text}\x1b[0m\r\n`); return; } } catch { /* raw */ }
+        try {
+          const j = JSON.parse(s);
+          if (j && j.type === 'hostname') { onHostname?.(j.name); return; }
+          if (j && j.type === 'status') {
+            setStatus(j.text); term.write(`\r\n\x1b[33m${j.text}\x1b[0m\r\n`);
+            // 인증 실패면 자격증명 폼으로 되돌려 비밀번호를 다시 입력하게 한다(빈/오타 비번 재입력).
+            if (/authentication|인증|permission denied|auth/i.test(j.text) && phaseRef.current !== 'live') {
+              setFormErr(`인증 실패: 사용자명/비밀번호를 확인하세요. (${j.text})`);
+              setCreds((c) => ({ ...c, password: '' }));
+              setPhase('form'); stopTimer();
+              try { wsRef.current?.close(); } catch { /* */ }
+            }
+            return;
+          }
+        } catch { /* raw */ }
         if (phaseRef.current !== 'live') { setPhase('live'); stopTimer(); }
         term.write(s);
       };
@@ -68,6 +84,7 @@ export function SshConsole({ mapping, initialCreds, onCreds, onHostname }) {
   if (phase === 'form') {
     return (
       <div style={{ padding: 14 }}>
+        {formErr && <div className="login-error" style={{ marginBottom: 10 }}>{formErr}</div>}
         <div className="spec-grid">
           <label>사용자명<input className="input" autoFocus value={creds.username} onChange={(e) => setCreds({ ...creds, username: e.target.value })} placeholder="root" /></label>
           <label>비밀번호<input className="input" type="password" value={creds.password} onChange={(e) => setCreds({ ...creds, password: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && creds.username && connect()} /></label>
@@ -86,7 +103,9 @@ export function SshConsole({ mapping, initialCreds, onCreds, onHostname }) {
         color: phase === 'live' ? '#4ade80' : phase === 'error' ? '#f87171' : '#93c5fd' }}>
         {phase === 'connecting' && <><span style={{ fontFamily: 'monospace' }}>{SPIN[ticks % SPIN.length]}</span><span>{status}</span><span className="muted" style={{ marginLeft: 'auto' }}>{elapsed}s</span></>}
         {phase === 'live' && <span>● 연결됨</span>}
-        {phase === 'error' && <><span>⚠ {status}</span><button className="logout-btn" style={{ padding: '4px 12px', marginLeft: 'auto' }} onClick={connect}>재시도</button></>}
+        {phase === 'error' && <><span>⚠ {status}</span>
+          <button className="logout-btn" style={{ padding: '4px 12px', marginLeft: 'auto' }} onClick={() => { setCreds((c) => ({ ...c, password: '' })); setFormErr(status || ''); setPhase('form'); }}>🔑 자격증명 입력</button>
+          <button className="logout-btn" style={{ padding: '4px 12px' }} onClick={connect}>재시도</button></>}
       </div>
       {slow && <div className="muted" style={{ fontSize: 12, marginBottom: 8, color: 'var(--amber)' }}>응답 지연({elapsed}s) — 프록시 매핑/대상 SSH 포트·방화벽·경로 확인. 계속 시도 중입니다.</div>}
       <div ref={elRef} style={{ flex: 1, minHeight: 120, background: '#0b1020', borderRadius: 8, padding: 6 }} />
