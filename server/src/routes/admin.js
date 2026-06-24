@@ -423,9 +423,9 @@ adminRouter.post('/gpu-guest/test', adminOnly, async (req, res) => {
       while (q.length) {
         const { it, i } = q.shift();
         const v = vmById.get(it.vmId);
-        if (!v) { results[i] = { vmId: it.vmId, login: false, read: false, error: 'VM을 찾을 수 없음' }; continue; }
-        if (v.toolsStatus !== 'RUNNING') { results[i] = { vmId: it.vmId, login: false, read: false, error: 'VMware Tools 미실행' }; continue; }
-        if (v.powerState !== 'POWERED_ON') { results[i] = { vmId: it.vmId, login: false, read: false, error: 'VM 전원 꺼짐' }; continue; }
+        if (!v) { results[i] = { vmId: it.vmId, login: false, read: false, error: 'VM을 찾을 수 없음', trace: [{ t: Date.now(), msg: '✗ 건너뜀 — VM을 스냅샷에서 찾을 수 없음' }] }; continue; }
+        if (v.toolsStatus !== 'RUNNING') { results[i] = { vmId: it.vmId, login: false, read: false, error: 'VMware Tools 미실행', trace: [{ t: Date.now(), msg: `✗ 건너뜀 — VMware Tools 미실행(status=${v.toolsStatus || '?'}) · 게스트 작업 불가` }] }; continue; }
+        if (v.powerState !== 'POWERED_ON') { results[i] = { vmId: it.vmId, login: false, read: false, error: 'VM 전원 꺼짐', trace: [{ t: Date.now(), msg: '✗ 건너뜀 — VM 전원 꺼짐' }] }; continue; }
         const isWindows = /windows/i.test(v.guestOS || '');
         // 자격증명 결정: useShared면 법인 공용(OS별), 아니면 입력값(빈 비번은 저장값) → 없으면 해석값.
         const vcShared = s.vcenters[vcenterId] || {};
@@ -436,8 +436,8 @@ adminRouter.post('/gpu-guest/test', adminOnly, async (req, res) => {
         if (it.useShared) creds = sharedForOs;
         else if (it.username) creds = { username: it.username, password: it.password || (vcShared.vms?.[it.vmId]?.password || '') };
         else creds = resolveVmCreds(s, vcenterId, it.vmId, isWindows);
-        if (!creds || !creds.username) { results[i] = { vmId: it.vmId, login: false, read: false, error: '계정 없음' }; continue; }
-        const r = await testVmGuest(c, String(v.id).split(':').slice(1).join(':'), creds, { isWindows, timeoutMs: s.timeoutMs, dlHosts: dlByHost.get(v.host) || [] }).catch((e) => ({ login: false, read: false, error: e.message }));
+        if (!creds || !creds.username) { results[i] = { vmId: it.vmId, login: false, read: false, error: '계정 없음', trace: [{ t: Date.now(), msg: '✗ 건너뜀 — 사용할 계정 없음(공용/별도 계정 미설정)' }] }; continue; }
+        const r = await testVmGuest(c, String(v.id).split(':').slice(1).join(':'), creds, { isWindows, timeoutMs: s.timeoutMs, dlHosts: dlByHost.get(v.host) || [], trace: [] }).catch((e) => ({ login: false, read: false, error: e.message, trace: [{ t: Date.now(), msg: `✗ 예외: ${e.message}` }] }));
         results[i] = { vmId: it.vmId, ...r };
       }
     });
