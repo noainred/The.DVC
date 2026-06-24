@@ -160,6 +160,7 @@ function VmCredManager({ vcs, vcenters }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
   const [testProg, setTestProg] = useState(null); // { done, total } 테스트 진행률(부분 갱신)
+  const [selected, setSelected] = useState(() => new Set()); // 선택 테스트 대상 VM id
   const [logLines, setLogLines] = useState([]);   // 실행 로그 콘솔(명령/단계별)
   const [showLog, setShowLog] = useState(true);
   const logRef = useRef(null);
@@ -300,6 +301,11 @@ function VmCredManager({ vcs, vcenters }) {
           <div style={{ overflowX: 'auto', maxWidth: '100%' }}>
             <table className="data-table" style={{ width: '100%', fontSize: 13 }}>
               <thead><tr>
+                <th style={{ textAlign: 'center', width: 28 }}>
+                  <input type="checkbox" title="표시된 VM 전체 선택/해제"
+                    checked={shown.length > 0 && shown.every((r) => selected.has(r.id))}
+                    onChange={(e) => setSelected(() => (e.target.checked ? new Set(shown.map((r) => r.id)) : new Set()))} />
+                </th>
                 <th style={{ textAlign: 'left' }}>VM</th>
                 <th style={{ textAlign: 'left' }}>호스트</th>
                 <th style={{ textAlign: 'left' }}>상태</th>
@@ -309,11 +315,15 @@ function VmCredManager({ vcs, vcenters }) {
                 <th style={{ textAlign: 'left' }}>테스트</th>
               </tr></thead>
               <tbody>
-                {shown.length === 0 && <tr><td colSpan={7} className="muted" style={{ padding: 14, textAlign: 'center' }}>해당 OS({osFilter})의 VM이 없습니다.</td></tr>}
+                {shown.length === 0 && <tr><td colSpan={8} className="muted" style={{ padding: 14, textAlign: 'center' }}>해당 OS({osFilter})의 VM이 없습니다.</td></tr>}
                 {shown.map((r) => {
                   const ready = r.powerState === 'POWERED_ON' && r.toolsStatus === 'RUNNING';
                   return (
-                    <tr key={r.id}>
+                    <tr key={r.id} style={selected.has(r.id) ? { background: 'rgba(34,211,238,.06)' } : undefined}>
+                      <td style={{ textAlign: 'center' }}>
+                        <input type="checkbox" checked={selected.has(r.id)}
+                          onChange={(e) => setSelected((s) => { const n = new Set(s); if (e.target.checked) n.add(r.id); else n.delete(r.id); return n; })} />
+                      </td>
                       <td><VmLink name={r.name} vcenterId={selVc} label={r.name} item={r} /><div className="muted" style={{ fontSize: 11 }}>{r.guestOS || ''}</div></td>
                       <td className="muted" style={{ fontSize: 12, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.host}>{r.host}</td>
                       <td style={{ fontSize: 11, whiteSpace: 'nowrap' }}>
@@ -361,7 +371,11 @@ function VmCredManager({ vcs, vcenters }) {
           </div>
 
           <div className="flex gap wrap" style={{ alignItems: 'center', marginTop: 12 }}>
+            <button className="login-btn" style={{ flex: 'none', padding: '8px 14px' }} disabled={!!testProg || selected.size === 0}
+              title={selected.size === 0 ? '체크박스로 VM을 선택하세요' : `선택한 ${selected.size}대만 테스트`}
+              onClick={() => runTest(rows.filter((r) => selected.has(r.id)))}>✅ 선택 테스트 ({selected.size})</button>
             <button className="logout-btn" style={{ padding: '8px 14px' }} disabled={!!testProg} onClick={() => runTest(shown)}>⚡ {osFilter === 'all' ? '모두' : osFilter} 테스트</button>
+            {selected.size > 0 && <button className="tab" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => setSelected(new Set())}>선택 해제</button>}
             <button className="login-btn" style={{ flex: 'none', padding: '8px 18px' }} disabled={busy} onClick={saveCreds}>{busy ? '저장 중…' : 'VM별 계정 저장'}</button>
             {testProg && (
               <span className="badge teal" style={{ fontSize: 12 }}>
