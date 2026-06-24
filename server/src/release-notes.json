@@ -1,6 +1,18 @@
 {
   "notes": [
     {
+      "version": "2.11.0",
+      "date": "2026-06-24",
+      "title": "실제 OS 확인(게스트) — 설치된 OS 직접 탐지 + ESXi 불일치 + 주기 스캔 + CSV",
+      "notes": [
+        "특수 기능 > 실제 OS 확인: VMware Tools 게스트 작업으로 게스트 OS 안의 /etc/os-release·/etc/redhat-release(Linux)·Win32_OperatingSystem(Windows)를 직접 읽어 '실제 설치된 OS'를 확인(ESXi 보고 guestOS와 별개).",
+        "범위 선택: 상단 vCenter 선택으로 전체 vCenter 또는 1개만 스캔.",
+        "결과는 별도 인벤토리 DB(os-inventory)에 VM별 저장. ESXi 지정과 실제 OS가 다른(계열·메이저버전) VM을 '불일치'로 표시.",
+        "주기 스캔: DB에 없는(또는 재스캔 기간 초과) VM을 주기적으로 찾아 탐지. 주기·대수·재스캔일수·동시성 옵션 제공.",
+        "결과 CSV 내보내기(VM·vCenter·클러스터·호스트·ESXi보고·실제OS·버전·계열·커널·불일치·시각). 신규 API /api/admin/os-scan/*. 계정은 GPU 게스트 수집(OS별) 재사용."
+      ]
+    },
+    {
       "version": "2.10.0",
       "date": "2026-06-24",
       "title": "Guest OS 종류/버전 — VM 수 클릭 시 대상 VM 목록 + CSV 내보내기",
