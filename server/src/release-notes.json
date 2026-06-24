@@ -1,6 +1,17 @@
 {
   "notes": [
     {
+      "version": "2.2.0",
+      "date": "2026-06-24",
+      "title": "VM 동시 다운 알림 — 짧은 시간 다수 VM 전원 OFF 감지",
+      "notes": [
+        "설정 > 알림에 'VM 동시 다운 ≥ (대)' 규칙 추가(기본 임계 10대): 직전 수집 이후 POWERED_ON→POWERED_OFF로 바뀐 VM을 vCenter별로 집계해 임계 이상이면 위험 알림(Slack/Webhook). 호스트별 분포와 대상 VM을 함께 알림.",
+        "호스트/스토리지/클러스터 장애로 다수 VM이 동시에 죽는 상황을 조기 감지. 임계값은 알림 설정에서 조정.",
+        "오탐 방지: '현재 스냅샷에 존재하며 OFF로 전이한' VM만 집계 → vCenter 수집 실패(VM 누락)나 첫 기동을 동시 다운으로 잘못 알리지 않음.",
+        "단위 테스트 6건 추가(detectMassPowerOff): 임계/전이/vCenter분리/템플릿제외/첫기동 오탐."
+      ]
+    },
+    {
       "version": "2.1.3",
       "date": "2026-06-24",
       "title": "단위 테스트 도입 + npm 빌드 검증(npm run verify) + nvidia-smi 빈줄 파싱 수정",
