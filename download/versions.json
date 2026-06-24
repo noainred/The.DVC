@@ -1,6 +1,22 @@
 {
-  "latest": "2.16.1",
+  "latest": "2.17.0",
   "versions": [
+    {
+      "version": "2.17.0",
+      "tar_gz": "vmware-portal-2.17.0.tar.gz",
+      "size_bytes": 10310050,
+      "sha256": "8ca480c573cc65f238792d35594c562dfb4992e376896ad5cb43554d48b5205d",
+      "installer": "vmware-portal-offline-2.17.0-el9-x64.tar.gz",
+      "installer_size_bytes": 67542996,
+      "installer_sha256": "f67fb66c1ebf3b79d2e70a0e7250b3a21294a8363ed6ac4e0536cbb4ebef623a",
+      "installer_cent9": "vmware-portal-offline-2.17.0-el9-x64.tar.gz",
+      "installer_cent9_size_bytes": 67542996,
+      "installer_cent9_sha256": "f67fb66c1ebf3b79d2e70a0e7250b3a21294a8363ed6ac4e0536cbb4ebef623a",
+      "windows": "vmware-portal-win-2.16.1-x64.zip",
+      "windows_size_bytes": 50246689,
+      "windows_sha256": "69d884faaab1494a64a09c09419efa1c0933455434636ea9487d46678eec58b5",
+      "note": "디스크 제약으로 el9 설치 패키지 + 업그레이드 번들만 신규 빌드. cent9는 el9 패키지로 대체(RHEL9 호환: Rocky/CentOS Stream/Alma/RHEL9). Windows 수집기는 2.16.1 그대로(이번 UI 변경은 Windows 수집기에 영향 없음)."
+    },
     {
       "version": "2.16.1",
       "tar_gz": "vmware-portal-2.16.1.tar.gz",

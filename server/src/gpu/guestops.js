@@ -43,33 +43,42 @@ function cleanGuestError(msg) {
   return m.slice(0, 160);
 }
 
+// 단계별 trace 기록기 — 게스트 작업의 명령/로그를 UI로 노출하기 위해 결과에 함께 담는다.
+// tr이 null이면 무시(폴러 등 trace 불필요 경로). 비밀번호/티켓은 절대 담지 않는다.
+const tlog = (tr, msg) => { if (tr) tr.push({ t: Date.now(), msg: String(msg) }); };
+
+
 /**
  * 자격증명 검증(로그인 테스트) + nvidia-smi 데이터 읽기 테스트를 한 번에.
  * 반환 { login, read, error, sample }.
  *   - login: ValidateCredentialsInGuest 성공 여부(게스트에 명령 실행 X, 인증만 확인)
  *   - read : nvidia-smi로 GPU 사용률을 실제로 읽었는지
  */
-export async function testVmGuest(c, vmMoref, creds, { isWindows = false, timeoutMs = 15_000, dlHosts = [] } = {}) {
-  const out = { login: false, read: false, error: null, sample: null };
+export async function testVmGuest(c, vmMoref, creds, { isWindows = false, timeoutMs = 15_000, dlHosts = [], trace = null } = {}) {
+  const out = { login: false, read: false, error: null, sample: null, trace: trace || [] };
+  const tr = out.trace;
   const vmRef = `<vm type="VirtualMachine">${vmMoref}</vm>`;
   const auth = authXml(creds);
   let authManager;
+  tlog(tr, `게스트 관리자 조회(GuestOperationsManager)`);
   try {
     ({ authManager } = await guestManagers(c));
-  } catch (e) { out.error = cleanGuestError(e.message); return out; }
+  } catch (e) { tlog(tr, `✗ 관리자 조회 실패: ${cleanGuestError(e.message)}`); out.error = cleanGuestError(e.message); return out; }
   // 1) 로그인(자격증명) 검증 — 게스트에 아무것도 실행하지 않고 인증만 확인.
   try {
+    tlog(tr, `SOAP ValidateCredentialsInGuest (계정=${creds.username}) — 인증만 확인(명령 실행 X)`);
     if (authManager) {
       await c.callRaw(`<ValidateCredentialsInGuest xmlns="urn:vim25"><_this type="GuestAuthManager">${authManager}</_this>${vmRef}${auth}</ValidateCredentialsInGuest>`);
     }
     out.login = true;
-  } catch (e) { out.error = cleanGuestError(e.message); return out; }
+    tlog(tr, `✓ 로그인 성공`);
+  } catch (e) { tlog(tr, `✗ 로그인 실패: ${cleanGuestError(e.message)}`); out.error = cleanGuestError(e.message); return out; }
   // 2) 데이터 읽기 — nvidia-smi 실행 후 파싱. 실패 시 구체 사유(stderr/다운로드)를 그대로 표시.
   try {
-    const r = await collectVmGpu(c, vmMoref, creds, { isWindows, timeoutMs, dlHosts });
-    if (r && r.utilPct != null) { out.read = true; out.sample = { gpus: r.count, utilPct: r.utilPct, memUsedPct: r.memUsedPct, migEnabled: r.migEnabled || 0 }; }
-    else out.error = 'nvidia-smi 출력 없음 — 게스트에 NVIDIA 드라이버/nvidia-smi 확인';
-  } catch (e) { out.error = e.guestDiag ? e.message : cleanGuestError(e.message); }
+    const r = await collectVmGpu(c, vmMoref, creds, { isWindows, timeoutMs, dlHosts, trace: tr });
+    if (r && r.utilPct != null) { out.read = true; out.sample = { gpus: r.count, utilPct: r.utilPct, memUsedPct: r.memUsedPct, migEnabled: r.migEnabled || 0 }; tlog(tr, `✓ 읽기 성공 — GPU ${r.count}개, 사용률 ${r.utilPct}%`); }
+    else { out.error = 'nvidia-smi 출력 없음 — 게스트에 NVIDIA 드라이버/nvidia-smi 확인'; tlog(tr, `✗ ${out.error}`); }
+  } catch (e) { out.error = e.guestDiag ? e.message : cleanGuestError(e.message); tlog(tr, `✗ 읽기 실패: ${out.error}`); }
   return out;
 }
 
@@ -84,14 +93,16 @@ function authXml(creds) {
 // 깨지지 않게 정규식으로 스킴 다음 호스트만 바꾼다('*' 호스트도 포함).
 const swapHost = (u, host) => u.replace(/^(https?:\/\/)[^/]+/, `$1${host}`);
 
-async function readGuestFile(c, fileManager, vmRef, auth, guestPath, timeoutMs, preferHosts = [], tag = '') {
+async function readGuestFile(c, fileManager, vmRef, auth, guestPath, timeoutMs, preferHosts = [], tag = '', tr = null) {
   let ftXml;
   try {
+    tlog(tr, `  SOAP InitiateFileTransferFromGuest (${guestPath})`);
     ftXml = await c.callRaw(
       `<InitiateFileTransferFromGuest xmlns="urn:vim25"><_this type="GuestFileManager">${fileManager}</_this>${vmRef}${auth}` +
       `<guestFilePath>${esc(guestPath)}</guestFilePath></InitiateFileTransferFromGuest>`);
   } catch (e) {
     console.warn(`[gpu-guest]     [${tag}] InitiateFileTransferFromGuest 실패: ${e.message}`);
+    tlog(tr, `  ✗ 파일전송요청 실패: ${cleanGuestError(e.message)}`);
     return { text: '', error: `파일전송요청 실패: ${cleanGuestError(e.message)}` };
   }
   // ⭐ 근본 원인 수정: SOAP 응답의 <url>은 XML이라 '&'가 '&amp;'로 인코딩되어 온다.
@@ -116,23 +127,28 @@ async function readGuestFile(c, fileManager, vmRef, auth, guestPath, timeoutMs, 
   const swapped = [...new Set([...preferHosts.filter(Boolean), vcHost])].map((h) => swapHost(url, h));
   const candidates = [...new Set([url, ...swapped])];
   console.log(`[gpu-guest]     [${tag}] 파일전송 URL(원본 host=${origHost}, size=${size ?? '?'}B)=${redact(url)} → 후보 ${candidates.length}개`);
+  tlog(tr, `  파일 다운로드 시도(size=${size ?? '?'}B, 후보 ${candidates.length}개): ${candidates.map((u) => { try { return new URL(u).host; } catch { return '?'; } }).join(', ')}`);
   const tries = [];
   for (const cand of candidates) {
     const candHost = (() => { try { return new URL(cand).host; } catch { return '?'; } })();
     const isOrig = cand === url;
+    const t0 = Date.now();
     try {
       const res = await fetch(cand, { signal: AbortSignal.timeout(timeoutMs) });
       if (res.ok) {
         console.log(`[gpu-guest]     [${tag}] 다운로드 ${candHost}${isOrig ? '(원본)' : ''} → HTTP ${res.status} ✓`);
+        tlog(tr, `  ✓ GET ${candHost}${isOrig ? '(원본)' : ''} → HTTP ${res.status} (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
         return { text: await res.text(), error: null };
       }
       // 404 등 본문에 ESXi가 사유를 담아주므로(예: 파일없음/티켓무효) 일부를 캡처.
       let body = '';
       try { body = (await res.text()).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 100); } catch { /* */ }
       console.warn(`[gpu-guest]     [${tag}] 다운로드 ${candHost}${isOrig ? '(원본)' : ''} → HTTP ${res.status}${body ? ` body="${body}"` : ''}`);
+      tlog(tr, `  ✗ GET ${candHost}${isOrig ? '(원본)' : ''} → HTTP ${res.status} (${((Date.now() - t0) / 1000).toFixed(1)}s)${body ? ` "${body.slice(0, 60)}"` : ''}`);
       tries.push(`${candHost}${isOrig ? '(원본)' : ''}=HTTP${res.status}${body ? `(${body})` : ''}`);
     } catch (e) {
       console.warn(`[gpu-guest]     [${tag}] 다운로드 ${candHost}${isOrig ? '(원본)' : ''} → ${e.message}`);
+      tlog(tr, `  ✗ GET ${candHost}${isOrig ? '(원본)' : ''} → ${cleanGuestError(e.message)} (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
       tries.push(`${candHost}${isOrig ? '(원본)' : ''}=${String(e.message || 'err').slice(0, 60)}`);
     }
   }
@@ -149,7 +165,8 @@ function deleteGuestFile(c, fileManager, vmRef, auth, guestPath) {
  * stdout은 outFile, stderr는 errFile로 분리 캡처해, 결과가 비면 stderr/다운로드
  * 사유를 담아 Error를 던진다(테스트에서 정확한 원인 표시). 폴러는 .catch(()=>null).
  */
-export async function collectVmGpu(c, vmMoref, creds, { isWindows, timeoutMs = 20_000, dlHosts = [] } = {}) {
+export async function collectVmGpu(c, vmMoref, creds, { isWindows, timeoutMs = 20_000, dlHosts = [], trace = null } = {}) {
+  const tr = trace;
   const { processManager, fileManager } = await guestManagers(c);
   const auth = authXml(creds);
   const vmRef = `<vm type="VirtualMachine">${vmMoref}</vm>`;
@@ -163,37 +180,47 @@ export async function collectVmGpu(c, vmMoref, creds, { isWindows, timeoutMs = 2
     : { path: '/bin/sh', args: `-c "export PATH=$PATH:/usr/bin:/usr/local/bin:/usr/local/sbin:/usr/local/nvidia/bin; nvidia-smi ${NVSMI_QUERY} 1>${outFile} 2>${errFile}"` };
 
   // 3) StartProgramInGuest — 게스트에서 nvidia-smi 실행
+  tlog(tr, `명령: ${prog.path} ${prog.args}`);
+  tlog(tr, `SOAP StartProgramInGuest`);
   const startXml =
     `<StartProgramInGuest xmlns="urn:vim25"><_this type="GuestProcessManager">${processManager}</_this>${vmRef}${auth}` +
     `<spec xsi:type="GuestProgramSpec"><programPath>${esc(prog.path)}</programPath><arguments>${esc(prog.args)}</arguments></spec></StartProgramInGuest>`;
   let startRes;
   try { startRes = await c.callRaw(startXml); }
-  catch (e) { throw new Error(`StartProgramInGuest SOAP 실패: ${cleanGuestError(e.message)} | raw: ${String(e.message).slice(0, 200)}`); }
+  catch (e) { tlog(tr, `✗ StartProgramInGuest SOAP 실패: ${cleanGuestError(e.message)}`); throw new Error(`StartProgramInGuest SOAP 실패: ${cleanGuestError(e.message)} | raw: ${String(e.message).slice(0, 200)}`); }
   const pid = /<returnval>(\d+)<\/returnval>/.exec(startRes)?.[1];
   if (!pid) {
     const fault = /<faultstring>([^<]*)<\/faultstring>/.exec(startRes)?.[1] || startRes.slice(0, 200);
+    tlog(tr, `✗ pid 없음: ${fault}`);
     throw new Error(`StartProgramInGuest 실패(pid 없음): ${fault}`);
   }
   console.log(`[gpu-guest]     [${vmMoref}] StartProgram pid=${pid} → ${outFile}`);
+  tlog(tr, `→ pid=${pid}, 출력파일=${outFile}`);
 
   // 4) 종료 대기(ListProcessesInGuest)
-  const deadline = Date.now() + timeoutMs;
-  let ended = false;
+  tlog(tr, `프로세스 종료 대기(ListProcessesInGuest, 최대 ${Math.round(timeoutMs / 1000)}s)`);
+  const waitStart = Date.now();
+  const deadline = waitStart + timeoutMs;
+  let ended = false, polls = 0;
   while (Date.now() < deadline) {
     await sleep(1200);
+    polls++;
     const listXml = await c.callRaw(
       `<ListProcessesInGuest xmlns="urn:vim25"><_this type="GuestProcessManager">${processManager}</_this>${vmRef}${auth}<pids>${pid}</pids></ListProcessesInGuest>`
-    ).catch((e) => { console.warn(`[gpu-guest]     [${vmMoref}] ListProcesses 오류: ${e.message}`); return ''; });
+    ).catch((e) => { console.warn(`[gpu-guest]     [${vmMoref}] ListProcesses 오류: ${e.message}`); tlog(tr, `  ! ListProcesses 오류: ${cleanGuestError(e.message)}`); return ''; });
     if (/<endTime>/.test(listXml)) { ended = true; break; } // 종료됨
   }
-  if (!ended) console.warn(`[gpu-guest]     [${vmMoref}] 프로세스 종료 대기 타임아웃(${Math.round(timeoutMs / 1000)}s) — 그래도 파일 회수 시도`);
+  const waitS = ((Date.now() - waitStart) / 1000).toFixed(1);
+  if (!ended) { console.warn(`[gpu-guest]     [${vmMoref}] 프로세스 종료 대기 타임아웃(${Math.round(timeoutMs / 1000)}s) — 그래도 파일 회수 시도`); tlog(tr, `! 종료 대기 타임아웃(${waitS}s, ${polls}회 폴링) — 그래도 회수 시도`); }
+  else tlog(tr, `→ 프로세스 종료 확인(${waitS}s, ${polls}회 폴링)`);
 
   // 5) stdout 회수 → 파싱 (다운로드는 vCenter 실제 IP/ESXi IP 후보 우선).
   // 다운로드는 짧은 타임아웃으로 빠른 실패(도달 안 되는 후보가 전체를 오래 막지 않게).
   // 고RTT 사이트(폴란드·미국 동부 800ms+)는 TLS 핸드셰이크만 ~3RTT라 4초는 과도하게 짧다.
   // 도달 가능한 ESXi가 오탐 타임아웃되지 않게 8초로 완화(작은 파일이라 전송 자체는 즉시).
   const dlTimeout = Math.min(timeoutMs, 8000);
-  const outRes = await readGuestFile(c, fileManager, vmRef, auth, outFile, dlTimeout, dlHosts, vmMoref);
+  tlog(tr, `결과(stdout) 회수: ${outFile}`);
+  const outRes = await readGuestFile(c, fileManager, vmRef, auth, outFile, dlTimeout, dlHosts, vmMoref, tr);
   const parsed = parseNvidiaSmiCsv(outRes.text);
   if (parsed) {
     deleteGuestFile(c, fileManager, vmRef, auth, outFile);
@@ -211,7 +238,8 @@ export async function collectVmGpu(c, vmMoref, creds, { isWindows, timeoutMs = 2
 
   // 6) stdout이 비었거나(다운로드 OK인데 내용 없음) 또는 도달은 되는데 .out이 404 →
   //    stderr를 읽어 원인 규명(빈 .out이 ESXi에서 404날 수 있음).
-  const errRes = await readGuestFile(c, fileManager, vmRef, auth, errFile, dlTimeout, dlHosts, `${vmMoref}.err`);
+  tlog(tr, `stdout 비어있음/실패 → stderr 회수로 원인 규명: ${errFile}`);
+  const errRes = await readGuestFile(c, fileManager, vmRef, auth, errFile, dlTimeout, dlHosts, `${vmMoref}.err`, tr);
   deleteGuestFile(c, fileManager, vmRef, auth, outFile);
   deleteGuestFile(c, fileManager, vmRef, auth, errFile);
   const stderrLine = (errRes.text || '').trim().split(/\r?\n/)[0];

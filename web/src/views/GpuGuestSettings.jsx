@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, putJson, postJson } from '../api.js';
 import { Loading, ErrorBox, VmLink } from '../components/ui.jsx';
 
@@ -160,6 +160,14 @@ function VmCredManager({ vcs, vcenters }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
   const [testProg, setTestProg] = useState(null); // { done, total } 테스트 진행률(부분 갱신)
+  const [logLines, setLogLines] = useState([]);   // 실행 로그 콘솔(명령/단계별)
+  const [showLog, setShowLog] = useState(true);
+  const logRef = useRef(null);
+  const appendLog = (lines) => setLogLines((prev) => {
+    const next = [...prev, ...lines];
+    return next.length > 4000 ? next.slice(-4000) : next; // 상한(메모리 보호)
+  });
+  useEffect(() => { const el = logRef.current; if (el) el.scrollTop = el.scrollHeight; }, [logLines]);
 
   const loadVms = async (vcId) => {
     if (!vcId) { setRows(null); return; }
@@ -187,24 +195,41 @@ function VmCredManager({ vcs, vcenters }) {
     // 도달 불가/느린 VM이 전체를 막지 않도록 작은 청크로 나눠 순차 처리하고, 끝나는 대로 행을 즉시 갱신한다.
     // 청크당 1 요청이라 길이가 짧아 프록시 유휴 끊김도 방지되고, 진행률로 멈춘 듯 보이지 않게 한다.
     const CHUNK = 4; // 서버 동시성(기본 4)에 맞춤 — 청크당 대략 1 웨이브
+    const nameOf = (id) => (rows.find((r) => r.id === id)?.name) || id;
+    const fmtT = (t) => { const d = new Date(t); return d.toLocaleTimeString('ko-KR', { hour12: false }) + '.' + String(d.getMilliseconds()).padStart(3, '0'); };
     const ids = new Set(targets.map((t) => t.id));
     setRows((rs) => rs.map((r) => (ids.has(r.id) ? { ...r, test: { pending: true } } : r)));
+    setLogLines([]); setShowLog(true);
     setTestProg({ done: 0, total: targets.length });
+    const nChunks = Math.ceil(targets.length / CHUNK);
     let done = 0;
     for (let off = 0; off < targets.length; off += CHUNK) {
       const chunk = targets.slice(off, off + CHUNK);
+      const ci = Math.floor(off / CHUNK) + 1;
+      appendLog([{ t: Date.now(), line: `━━━ 묶음 ${ci}/${nChunks} 시작 — ${chunk.map((r) => r.name).join(', ')}` }]);
       const items = chunk.map((r) => ({ vmId: r.id, useShared: r.mode === 'shared', username: r.mode === 'own' ? r.username : '', password: r.mode === 'own' ? r.password : '' }));
       try {
         const res = await postJson('/admin/gpu-guest/test', { vcenterId: selVc, items });
         const byId = new Map((res.results || []).map((x) => [x.vmId, x]));
         setRows((rs) => rs.map((r) => (byId.has(r.id) ? { ...r, test: byId.get(r.id), _mock: res.mock } : r)));
+        // 단계별 trace를 실행 로그에 누적(명령·다운로드·결과 등).
+        const newLines = [];
+        for (const x of res.results || []) {
+          const nm = nameOf(x.vmId);
+          for (const e of x.trace || []) newLines.push({ t: e.t, line: `${fmtT(e.t)} [${nm}] ${e.msg}` });
+          const verdict = x.login && x.read ? '✅ 수집 준비 완료' : x.login ? `⚠ 로그인 OK / 읽기 실패 — ${x.error || ''}` : `❌ ${x.error || '실패'}`;
+          newLines.push({ t: x.trace?.[x.trace.length - 1]?.t || Date.now(), line: `${fmtT(Date.now())} [${nm}] = ${verdict}` });
+        }
+        appendLog(newLines);
       } catch (e) {
         const cids = new Set(chunk.map((r) => r.id));
         setRows((rs) => rs.map((r) => (cids.has(r.id) ? { ...r, test: { error: e.message } } : r)));
+        appendLog([{ t: Date.now(), line: `${fmtT(Date.now())} ✗ 묶음 ${ci} 요청 실패: ${e.message}` }]);
       }
       done += chunk.length;
       setTestProg({ done, total: targets.length });
     }
+    appendLog([{ t: Date.now(), line: `━━━ 전체 완료 (${targets.length}대)` }]);
     setTestProg(null);
   };
 
@@ -326,6 +351,35 @@ function VmCredManager({ vcs, vcenters }) {
           <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
             도달 불가/느린 VM은 한 대당 수십 초가 걸릴 수 있어, 작은 묶음으로 나눠 끝나는 대로 행을 갱신합니다(전체가 멈추지 않음). 한 대만 빠르게 보려면 행의 “테스트”를 누르세요.
           </div>
+
+          {logLines.length > 0 && (
+            <div className="card" style={{ marginTop: 12, padding: 0, overflow: 'hidden' }}>
+              <div className="flex between" style={{ alignItems: 'center', padding: '8px 12px', borderBottom: '1px solid rgba(36,48,73,.6)' }}>
+                <b style={{ fontSize: 13 }}>🖥 실행 로그 <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>({logLines.length}줄 · 게스트 작업 명령/단계)</span></b>
+                <div className="flex gap" style={{ alignItems: 'center' }}>
+                  <button className="tab" style={{ padding: '4px 10px', fontSize: 12 }}
+                    onClick={() => navigator.clipboard?.writeText(logLines.map((l) => l.line).join('\n')).catch(() => {})}>복사</button>
+                  <button className="tab" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => setLogLines([])}>지우기</button>
+                  <button className="tab" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => setShowLog((v) => !v)}>{showLog ? '접기' : '펼치기'}</button>
+                </div>
+              </div>
+              {showLog && (
+                <pre ref={logRef} style={{
+                  margin: 0, padding: '10px 12px', maxHeight: 320, overflow: 'auto',
+                  fontFamily: 'ui-monospace, Menlo, Consolas, monospace', fontSize: 12, lineHeight: 1.55,
+                  background: '#0a0f1a', color: '#cbd5e1', whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+                }}>
+                  {logLines.map((l, i) => {
+                    const ok = /✓|✅|성공|준비 완료/.test(l.line);
+                    const bad = /✗|❌|실패|타임아웃|오류|건너뜀/.test(l.line);
+                    const hdr = l.line.startsWith('━━━');
+                    const color = hdr ? '#7dd3fc' : ok ? '#86efac' : bad ? '#fca5a5' : l.line.includes('명령:') ? '#fcd34d' : '#cbd5e1';
+                    return <div key={i} style={{ color, fontWeight: hdr || l.line.includes('명령:') ? 600 : 400 }}>{l.line}</div>;
+                  })}
+                </pre>
+              )}
+            </div>
+          )}
           <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>
             ※ <b>로그인</b>=게스트 계정 인증(명령 실행 안 함) · <b>읽기</b>=nvidia-smi로 GPU 사용률 실제 수집. 둘 다 ✅면 수집 준비 완료입니다.
             전원 Off/Tools 미동작 VM은 테스트 불가(수집 대상에서도 자동 제외).
