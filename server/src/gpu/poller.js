@@ -12,6 +12,7 @@ import { store } from '../store.js';
 import { loadGpuGuestSettings, resolveVmCreds } from './settings.js';
 import { setGuestGpu, pruneGuestGpu, guestGpuCounts } from './store.js';
 import { collectVmGpu, VimSoapClient } from './guestops.js';
+import { collectVmGpuSsh } from './sshCollect.js';
 
 let timer = null;
 let lastRun = null;
@@ -113,13 +114,25 @@ async function pollLive(snap, vc, s) {
       if (!creds) return;
       const moref = String(v.id).split(':').slice(1).join(':');
       const dlHosts = dlByHost.get(v.host) || [];
-      console.log(`[gpu-guest]   → ${v.name} (${moref}) host=${v.host} 계정=${creds.username}(${creds.source}) dl후보=[${dlHosts.join(', ')}]`);
+      const method = s.collectMethod || 'guestops';
+      console.log(`[gpu-guest]   → ${v.name} (${moref}) host=${v.host} 계정=${creds.username}(${creds.source}) 방식=${method} dl후보=[${dlHosts.join(', ')}]`);
       let err = null;
-      const r = await collectVmGpu(c, moref, creds, { isWindows, timeoutMs: s.timeoutMs, dlHosts })
-        .catch((e) => { err = e.message; console.warn(`[gpu-guest]   ✗ ${v.name}: ${e.message}`); return null; });
+      // 'ssh'=직접 SSH+nvidia-smi · 'auto'=SSH 우선 실패 시 게스트작업 · 'guestops'=VMware Tools(기본).
+      const viaSsh = () => collectVmGpuSsh(v, creds, { timeoutMs: s.timeoutMs, port: s.sshPort });
+      const viaGuestops = () => collectVmGpu(c, moref, creds, { isWindows, timeoutMs: s.timeoutMs, dlHosts });
+      let r = null;
+      if (method === 'ssh') {
+        r = await viaSsh().catch((e) => { err = e.message; return null; });
+      } else if (method === 'auto') {
+        r = await viaSsh().catch((e) => { err = e.message; return null; });
+        if (!(r && r.utilPct != null)) r = await viaGuestops().catch((e) => { err = e.message; return null; });
+      } else {
+        r = await viaGuestops().catch((e) => { err = e.message; return null; });
+      }
+      if (!(r && r.utilPct != null) && err) console.warn(`[gpu-guest]   ✗ ${v.name}: ${err}`);
       // 진단에 시도한 OS/계정도 남긴다(인증 실패 시 어떤 계정이 거부됐는지 즉시 식별 — 비번 제외).
       const osLabel = isWindows ? 'Windows' : 'Linux';
-      const acct = `${creds.username}(${creds.source})`;
+      const acct = `${creds.username}(${creds.source})·${method}`;
       if (r && r.utilPct != null) {
         console.log(`[gpu-guest]   ✓ ${v.name}: util=${r.utilPct}% mem=${r.memUsedPct ?? '-'}% gpus=${r.count}`);
         vms.push({ vmId: v.id, host: v.host, vcenterId: vc.id, utilPct: r.utilPct, memUsedPct: r.memUsedPct });

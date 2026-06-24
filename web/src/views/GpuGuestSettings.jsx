@@ -81,6 +81,17 @@ export default function GpuGuestSettings() {
             value={Math.round(form.timeoutMs / 1000)} onChange={(e) => setForm((f) => ({ ...f, timeoutMs: Math.max(3, Number(e.target.value) || 20) * 1000 }))} /></Field>
           <Field label="법인당 최대 VM"><input className="input" type="number" min={1} max={100000} style={{ width: 100 }}
             value={form.maxVmsPerVcenter} onChange={(e) => setForm((f) => ({ ...f, maxVmsPerVcenter: Math.max(1, Number(e.target.value) || 1000) }))} /></Field>
+          <Field label="수집 방식"><select className="select" style={{ width: 170 }} value={form.collectMethod}
+            title="VMware Tools=게스트작업(VGAuth). SSH 직접=게스트 IP로 SSH해 nvidia-smi(게스트작업 인증이 막힐 때). auto=SSH 우선 실패 시 게스트작업."
+            onChange={(e) => setForm((f) => ({ ...f, collectMethod: e.target.value }))}>
+            <option value="guestops">VMware Tools(기본)</option>
+            <option value="ssh">SSH 직접</option>
+            <option value="auto">auto(SSH→Tools)</option>
+          </select></Field>
+          {form.collectMethod !== 'guestops' && (
+            <Field label="SSH 포트"><input className="input" type="number" min={1} max={65535} style={{ width: 80 }}
+              value={form.sshPort} onChange={(e) => setForm((f) => ({ ...f, sshPort: Math.max(1, Number(e.target.value) || 22) }))} /></Field>
+          )}
         </div>
       </div>
 
@@ -161,6 +172,8 @@ function VmCredManager({ vcs, vcenters }) {
   const [msg, setMsg] = useState(null);
   const [testProg, setTestProg] = useState(null); // { done, total } 테스트 진행률(부분 갱신)
   const [selected, setSelected] = useState(() => new Set()); // 선택 테스트 대상 VM id
+  const [testMethod, setTestMethod] = useState(''); // '' = 저장된 설정 방식 | guestops | ssh | auto
+  const [revealCreds, setRevealCreds] = useState(false); // 디버그: 실행 로그에 실제 id/pw 평문
   const [logLines, setLogLines] = useState([]);   // 실행 로그 콘솔(명령/단계별)
   const [showLog, setShowLog] = useState(true);
   const logRef = useRef(null);
@@ -220,7 +233,7 @@ function VmCredManager({ vcs, vcenters }) {
       appendLog([{ t: Date.now(), line: `━━━ 묶음 ${ci}/${nChunks} 시작 — ${chunk.map((r) => r.name).join(', ')}` }]);
       const items = chunk.map((r) => ({ vmId: r.id, useShared: r.mode === 'shared', username: r.mode === 'own' ? r.username : '', password: r.mode === 'own' ? r.password : '', passwordless: isPwless(r) }));
       try {
-        const res = await postJson('/admin/gpu-guest/test', { vcenterId: selVc, items });
+        const res = await postJson('/admin/gpu-guest/test', { vcenterId: selVc, items, ...(testMethod ? { method: testMethod } : {}), revealCreds });
         const byId = new Map((res.results || []).map((x) => [x.vmId, x]));
         setRows((rs) => rs.map((r) => (byId.has(r.id) ? { ...r, test: byId.get(r.id), _mock: res.mock } : r)));
         // 단계별 trace를 실행 로그에 누적(명령·다운로드·결과 등).
@@ -376,6 +389,18 @@ function VmCredManager({ vcs, vcenters }) {
               onClick={() => runTest(rows.filter((r) => selected.has(r.id)))}>✅ 선택 테스트 ({selected.size})</button>
             <button className="logout-btn" style={{ padding: '8px 14px' }} disabled={!!testProg} onClick={() => runTest(shown)}>⚡ {osFilter === 'all' ? '모두' : osFilter} 테스트</button>
             {selected.size > 0 && <button className="tab" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => setSelected(new Set())}>선택 해제</button>}
+            <label className="flex gap" style={{ alignItems: 'center', fontSize: 12 }} title="테스트 수집 방식. SSH=게스트 IP로 직접 접속해 nvidia-smi(VMware Tools 게스트작업 인증이 막힐 때). auto=SSH 우선 실패 시 게스트작업.">
+              <span className="muted">방식</span>
+              <select className="select" style={{ width: 120 }} value={testMethod} onChange={(e) => setTestMethod(e.target.value)}>
+                <option value="">설정값</option>
+                <option value="guestops">VMware Tools</option>
+                <option value="ssh">SSH 직접</option>
+                <option value="auto">auto(SSH→Tools)</option>
+              </select>
+            </label>
+            <label className="flex gap" style={{ alignItems: 'center', fontSize: 12 }} title="실행 로그에 실제 전송되는 ID/비밀번호를 평문으로 표시(디버그). 이 응답에만 보이고 디스크/중앙에는 기록되지 않습니다.">
+              <input type="checkbox" checked={revealCreds} onChange={(e) => setRevealCreds(e.target.checked)} /> 🔓 자격증명 평문(디버그)
+            </label>
             <button className="login-btn" style={{ flex: 'none', padding: '8px 18px' }} disabled={busy} onClick={saveCreds}>{busy ? '저장 중…' : 'VM별 계정 저장'}</button>
             {testProg && (
               <span className="badge teal" style={{ fontSize: 12 }}>
@@ -451,6 +476,7 @@ function toForm(settings, vcs, prev) {
   for (const [id, s] of Object.entries(settings.vcenters || {})) { if (!vcenters[id]) vcenters[id] = mk(s); }
   return {
     enabled: !!settings.enabled, pollIntervalMs: settings.pollIntervalMs || 60000, concurrency: settings.concurrency || 4,
-    timeoutMs: settings.timeoutMs || 20000, maxVmsPerVcenter: settings.maxVmsPerVcenter || 1000, vcenters,
+    timeoutMs: settings.timeoutMs || 20000, maxVmsPerVcenter: settings.maxVmsPerVcenter || 1000,
+    collectMethod: settings.collectMethod || 'guestops', sshPort: settings.sshPort || 22, vcenters,
   };
 }

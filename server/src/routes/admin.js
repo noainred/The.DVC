@@ -31,6 +31,7 @@ import { metricsSamplerStatus, rescheduleMetricsSampler } from '../metrics/sampl
 import { loadGpuGuestSettings, saveGpuGuestSettings, redactGpuGuestSettings, resolveVmCreds } from '../gpu/settings.js';
 import { gpuGuestStatus, rescheduleGpuGuestPoller, gpuHostIds, vmUsesGpu, getGpuGuestDiag } from '../gpu/poller.js';
 import { testVmGuest, VimSoapClient } from '../gpu/guestops.js';
+import { testVmGuestSsh } from '../gpu/sshCollect.js';
 import { getGuestGpuVms } from '../gpu/store.js';
 import { getAllGpuGuestDiag } from '../central/gpuGuestDiag.js';
 import { loadVcenterConfig } from '../config.js';
@@ -393,6 +394,7 @@ adminRouter.get('/gpu-guest/vms', adminOnly, (req, res) => {
 // useShared=true 면 법인 공용 계정으로, 아니면 입력한(없으면 저장된 VM별) 계정으로 테스트.
 adminRouter.post('/gpu-guest/test', adminOnly, async (req, res) => {
   const { vcenterId, items } = req.body || {};
+  const revealCreds = !!req.body?.revealCreds; // 관리자 디버그: 실행 로그에 실제 id/pw 평문 표시(응답에만, 디스크/중앙 미기록)
   if (!vcenterId || !Array.isArray(items) || !items.length) return res.status(400).json({ error: 'vcenterId + items 필요' });
   const snap = store.get();
   const vmById = new Map((snap.vms || []).filter((v) => v.vcenterId === vcenterId).map((v) => [v.id, v]));
@@ -438,7 +440,23 @@ adminRouter.post('/gpu-guest/test', adminOnly, async (req, res) => {
         else if (it.username) creds = { username: it.username, password: it.passwordless ? '' : (it.password || (vcShared.vms?.[it.vmId]?.password || '')), passwordless: !!it.passwordless };
         else creds = resolveVmCreds(s, vcenterId, it.vmId, isWindows);
         if (!creds || !creds.username) { results[i] = { vmId: it.vmId, login: false, read: false, error: '계정 없음', trace: [{ t: Date.now(), msg: '✗ 건너뜀 — 사용할 계정 없음(공용/별도 계정 미설정)' }] }; continue; }
-        const r = await testVmGuest(c, String(v.id).split(':').slice(1).join(':'), creds, { isWindows, timeoutMs: s.timeoutMs, dlHosts: dlByHost.get(v.host) || [], trace: [] }).catch((e) => ({ login: false, read: false, error: e.message, trace: [{ t: Date.now(), msg: `✗ 예외: ${e.message}` }] }));
+        const moref = String(v.id).split(':').slice(1).join(':');
+        const dlHosts = dlByHost.get(v.host) || [];
+        const method = ['guestops', 'ssh', 'auto'].includes(req.body?.method) ? req.body.method : (s.collectMethod || 'guestops');
+        // 디버그(revealCreds): 실제 전송되는 id/pw를 평문으로 trace에 기록(이 응답에만, 디스크/중앙 미기록).
+        const seed = revealCreds ? [{ t: Date.now(), msg: `🔓 자격증명(평문): id=${creds.username} · pw=${creds.password === '' ? '(빈 비번/passwordless)' : creds.password} · 방식=${method} · 출처=${it.useShared ? '공용' : (it.passwordless ? '별도(비번없음)' : '별도입력')}` }] : [];
+        let r;
+        if (method === 'ssh') {
+          r = await testVmGuestSsh(v, creds, { timeoutMs: s.timeoutMs, port: s.sshPort, trace: seed }).catch((e) => ({ login: false, read: false, error: e.message, trace: seed.concat({ t: Date.now(), msg: `✗ 예외: ${e.message}` }) }));
+        } else if (method === 'auto') {
+          r = await testVmGuestSsh(v, creds, { timeoutMs: s.timeoutMs, port: s.sshPort, trace: seed }).catch(() => null);
+          if (!r || !r.read) {
+            const seed2 = (r?.trace || seed).concat({ t: Date.now(), msg: 'SSH 미수집 → VMware Tools 게스트작업으로 폴백' });
+            r = await testVmGuest(c, moref, creds, { isWindows, timeoutMs: s.timeoutMs, dlHosts, trace: seed2 }).catch((e) => ({ login: false, read: false, error: e.message, trace: seed2 }));
+          }
+        } else {
+          r = await testVmGuest(c, moref, creds, { isWindows, timeoutMs: s.timeoutMs, dlHosts, trace: seed }).catch((e) => ({ login: false, read: false, error: e.message, trace: seed.concat({ t: Date.now(), msg: `✗ 예외: ${e.message}` }) }));
+        }
         results[i] = { vmId: it.vmId, ...r };
       }
     });

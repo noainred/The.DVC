@@ -17,6 +17,10 @@ const DEFAULTS = {
   concurrency: 4,         // 동시에 게스트 작업할 VM 수(고RTT 보호)
   timeoutMs: 20_000,      // VM당 게스트 작업 타임아웃
   maxVmsPerVcenter: 1000, // 법인당 한 주기 최대 처리 VM(폭주 방지 안전상한)
+  // 수집 방식: 'guestops'=VMware Tools 게스트작업(기본) · 'ssh'=게스트 IP로 직접 SSH+nvidia-smi
+  //          · 'auto'=SSH 우선, 실패 시 게스트작업 폴백. SSH는 게스트작업(VGAuth) 인증만 막힐 때 유용.
+  collectMethod: 'guestops',
+  sshPort: 22,
   // { [vcenterId]: { enabled, username, password, vms: { [vmId]: { username, password } } } }
   //  - username/password : 법인 공용(기본) 계정 — 같은 계정 쓰는 VM에 적용(선택)
   //  - vms[vmId]         : VM별 계정 override(VM마다 계정이 다를 때). 있으면 공용보다 우선.
@@ -36,6 +40,8 @@ export function loadGpuGuestSettings() {
     concurrency: clamp(p.concurrency, 1, 32, DEFAULTS.concurrency),
     timeoutMs: clamp(p.timeoutMs, 3_000, 120_000, DEFAULTS.timeoutMs),
     maxVmsPerVcenter: clamp(p.maxVmsPerVcenter, 1, 100_000, DEFAULTS.maxVmsPerVcenter),
+    collectMethod: ['guestops', 'ssh', 'auto'].includes(p.collectMethod) ? p.collectMethod : DEFAULTS.collectMethod,
+    sshPort: clamp(p.sshPort, 1, 65_535, DEFAULTS.sshPort),
     vcenters: p.vcenters && typeof p.vcenters === 'object' ? p.vcenters : {},
   };
 }
@@ -55,6 +61,8 @@ export function saveGpuGuestSettings(partial) {
   if (partial.concurrency !== undefined) next.concurrency = clamp(partial.concurrency, 1, 32, DEFAULTS.concurrency);
   if (partial.timeoutMs !== undefined) next.timeoutMs = clamp(partial.timeoutMs, 3_000, 120_000, DEFAULTS.timeoutMs);
   if (partial.maxVmsPerVcenter !== undefined) next.maxVmsPerVcenter = clamp(partial.maxVmsPerVcenter, 1, 100_000, DEFAULTS.maxVmsPerVcenter);
+  if (partial.collectMethod !== undefined) next.collectMethod = ['guestops', 'ssh', 'auto'].includes(partial.collectMethod) ? partial.collectMethod : DEFAULTS.collectMethod;
+  if (partial.sshPort !== undefined) next.sshPort = clamp(partial.sshPort, 1, 65_535, DEFAULTS.sshPort);
   next.vcenters = { ...(cur.vcenters || {}) };
   if (partial.vcenters && typeof partial.vcenters === 'object') {
     for (const [id, v] of Object.entries(partial.vcenters)) {
@@ -100,7 +108,7 @@ export function redactGpuGuestSettings(s) {
     for (const [vmId, c] of Object.entries(v.vms || {})) vms[vmId] = { username: c.username || '', hasPassword: !!c.password, passwordless: !!c.passwordless };
     vcenters[id] = { enabled: !!v.enabled, username: v.username || '', hasPassword: !!v.password, winUsername: v.winUsername || '', hasWinPassword: !!v.winPassword, vms };
   }
-  return { enabled: s.enabled, pollIntervalMs: s.pollIntervalMs, concurrency: s.concurrency, timeoutMs: s.timeoutMs, maxVmsPerVcenter: s.maxVmsPerVcenter, vcenters };
+  return { enabled: s.enabled, pollIntervalMs: s.pollIntervalMs, concurrency: s.concurrency, timeoutMs: s.timeoutMs, maxVmsPerVcenter: s.maxVmsPerVcenter, collectMethod: s.collectMethod, sshPort: s.sshPort, vcenters };
 }
 
 export function isVcenterGpuMonitored(vcId) {

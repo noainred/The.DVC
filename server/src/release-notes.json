@@ -1,6 +1,17 @@
 {
   "notes": [
     {
+      "version": "2.21.0",
+      "date": "2026-06-24",
+      "title": "GPU 게스트 수집 — SSH 직접 방식 추가(게스트작업 인증 우회) + 디버그",
+      "notes": [
+        "수집 방식 선택 추가: VMware Tools(게스트작업·기본) / SSH 직접 / auto(SSH 우선→실패 시 게스트작업). SSH는 게스트 IP로 직접 접속해 nvidia-smi를 실행하므로, SSH는 되는데 VMware Tools 게스트작업(VGAuthService) 인증만 실패하는 환경(open-vm-tools에 vgauth 없음·VGAuthService 미동작·비대화형 로그온 PAM 차단·도메인/SSSD 계정 등)에서 수집이 됩니다. ESXi 파일전송을 안 써서 회수 404/미도달 문제도 없습니다.",
+        "설정 › GPU 게스트 수집에 '수집 방식'·'SSH 포트' 추가(poller 적용). VM별 계정 테스트에 방식 선택(설정값/Tools/SSH/auto) 즉석 오버라이드 + 실행 로그에 SSH 단계 표시.",
+        "디버그 옵션: VM별 계정 테스트에 '🔓 자격증명 평문' 토글 — 실제 전송되는 ID/비밀번호를 실행 로그에 마스킹 없이 평문 표시(테스트 응답에만, 디스크/중앙 미기록). 입력값 vs 저장값 폴백 vs passwordless를 즉시 구분.",
+        "다중 IP 지원: 게스트가 여러 IP를 보고하면 하나라도 SSH 접속되면 성공. 키(PEM) 인증도 지원."
+      ]
+    },
+    {
       "version": "2.20.2",
       "date": "2026-06-24",
       "title": "GPU 수집 진단 — vCenter 드롭다운을 '등록 전체'로(숫자 일치)",
