@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'idscan-'));
-const { enqueueIdracScan, takeIdracScanJobs, setIdracScanResult, getIdracScanResult } = await import('../src/central/idracScanJobs.js');
+const { enqueueIdracScan, takeIdracScanJobs, setIdracScanResult, setIdracScanProgress, getIdracScanResult } = await import('../src/central/idracScanJobs.js');
 
 test('위임 스캔: enqueue → take(에이전트 이름) → result → 폴링 라이프사이클', () => {
   const reqId = enqueueIdracScan('SEOUL', { ips: '10.0.0.1-10', username: 'root', password: 'pw' });
@@ -42,6 +42,21 @@ test('위임 스캔: 오류 보고는 error 상태', () => {
   const r = getIdracScanResult(reqId);
   assert.equal(r.state, 'error');
   assert.equal(r.error, '인증 실패');
+});
+
+test('위임 스캔: enqueue 시 총 IP 수 + 진행률 보고', () => {
+  const reqId = enqueueIdracScan('OSAKA', { ips: '10.2.0.1-10.2.0.20', username: 'root', password: 'pw' });
+  // enqueue 시점에 총 IP 수가 분모로 잡힘(20개)
+  assert.equal(getIdracScanResult(reqId).progress.total, 20);
+  assert.equal(getIdracScanResult(reqId).progress.scanned, 0);
+
+  takeIdracScanJobs('OSAKA');
+  // 중간 진행률 보고 → scanned 갱신, running 유지
+  setIdracScanProgress(reqId, { scanned: 12, total: 20 });
+  const r = getIdracScanResult(reqId);
+  assert.equal(r.state, 'running');
+  assert.equal(r.progress.scanned, 12);
+  assert.equal(r.progress.total, 20);
 });
 
 test('위임 스캔: 알 수 없는 reqId는 unknown', () => {

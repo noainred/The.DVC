@@ -11,7 +11,7 @@ import { setInventory } from '../central/inventory.js';
 import { setGuestGpu } from '../gpu/store.js';
 import { setGpuGuestDiag } from '../central/gpuGuestDiag.js';
 import { takePingJobs, setPingResults } from '../central/pingJobs.js';
-import { takeIdracScanJobs, setIdracScanResult } from '../central/idracScanJobs.js';
+import { takeIdracScanJobs, setIdracScanResult, setIdracScanProgress } from '../central/idracScanJobs.js';
 import { setAgentConfig } from '../central/agentConfig.js';
 import { takeLogQueries, setLogQueryResult } from '../central/logQueries.js';
 import { takeCaptureJobs, setCaptureResult } from '../central/captureJobs.js';
@@ -78,6 +78,16 @@ centralRouter.get('/idrac-scan-jobs', (req, res) => {
   if (!config.central.token) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
   if (!authed(req)) return res.status(403).json({ ok: false, reason: '토큰 불일치' });
   res.json({ ok: true, jobs: takeIdracScanJobs(req.query.agent) });
+});
+
+// 위임 iDRAC 스캔: 에이전트가 스캔 진행률(중간)을 보고. Body: { reqId, scanned, total }
+centralRouter.post('/idrac-scan-progress', (req, res) => {
+  if (!config.central.token) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: '토큰 불일치' });
+  const b = req.body || {};
+  if (!b.reqId) return res.status(400).json({ ok: false, reason: 'reqId가 필요합니다.' });
+  setIdracScanProgress(String(b.reqId), b);
+  res.json({ ok: true });
 });
 
 // 위임 iDRAC 스캔: 에이전트가 발견 목록·요약을 reqId와 함께 회신.

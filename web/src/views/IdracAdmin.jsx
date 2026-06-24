@@ -22,6 +22,7 @@ export default function IdracAdmin() {
   const [scanAgent, setScanAgent] = useState('__local__'); // 스캔 수행 주체(로컬 또는 에이전트 이름)
   const [agents, setAgents] = useState({ agents: [], centralEnabled: false });
   const [scanProgress, setScanProgress] = useState(null); // 위임 스캔 진행 안내문
+  const [scanPct, setScanPct] = useState(null); // { scanned, total } 진행률 바
   const [vcenters, setVcenters] = useState([]);           // vCenter 목록(소속 지정용)
   const [assignVc, setAssignVc] = useState('');           // 일괄 지정 대상 vCenter
   const fileRef = useRef(null);
@@ -142,7 +143,7 @@ export default function IdracAdmin() {
   };
 
   const scanIdracs = async () => {
-    setBusy(true); setScanResult(null); setImportMsg(null); setScanProgress(null);
+    setBusy(true); setScanResult(null); setImportMsg(null); setScanProgress(null); setScanPct(null);
     try {
       const r = await postJson('/admin/idrac/scan', { ips: bulk.ips, username: bulk.username, password: bulk.password, agent: scanAgent, vcenterId: bulk.vcenterId || '' });
       if (!r.ok) { setImportMsg({ ok: false, text: r.reason }); return; }
@@ -162,7 +163,7 @@ export default function IdracAdmin() {
         const s = await fetchJson(`/admin/idrac/scan-result?reqId=${encodeURIComponent(reqId)}`).catch(() => null);
         if (!s) continue;
         if (s.state === 'done' || s.state === 'error') {
-          setScanProgress(null);
+          setScanProgress(null); setScanPct(null);
           if (s.state === 'error') { setImportMsg({ ok: false, text: `에이전트 스캔 오류: ${s.error || '알 수 없음'}` }); return; }
           setScanResult({ ...s, delegated: true });
           setSelected(new Set()); // 위임 스캔은 현지 자동등록되므로 중앙 재등록 불필요
@@ -170,13 +171,14 @@ export default function IdracAdmin() {
           return;
         }
         if (s.state === 'unknown') { setImportMsg({ ok: false, text: '스캔 잡을 찾을 수 없습니다(만료되었거나 에이전트 미응답).' }); return; }
+        if (s.progress && s.progress.total > 0) setScanPct({ scanned: s.progress.scanned || 0, total: s.progress.total });
         setScanProgress(s.state === 'running'
           ? `에이전트 '${r.agent}'가 스캔 중입니다…`
           : `에이전트 '${r.agent}'가 잡을 인출하기를 기다리는 중… (에이전트가 실행/연결되어 있는지 확인)`);
       }
       setScanProgress(null);
       setImportMsg({ ok: false, text: '에이전트 스캔이 3분 내 완료되지 않았습니다. 에이전트 상태를 확인하세요(대역이 크면 더 걸릴 수 있음).' });
-    } catch (e) { setScanProgress(null); setImportMsg({ ok: false, text: e.message }); }
+    } catch (e) { setScanProgress(null); setScanPct(null); setImportMsg({ ok: false, text: e.message }); }
     finally { setBusy(false); }
   };
 
@@ -463,6 +465,17 @@ export default function IdracAdmin() {
             {scanProgress && (
               <div className="card" style={{ marginTop: 12, padding: '10px 14px', borderLeft: '3px solid var(--accent-2)', fontSize: 13 }}>
                 ⏳ {scanProgress}
+                {scanPct && scanPct.total > 0 && (
+                  <div style={{ marginTop: 8 }}>
+                    <div className="flex between" style={{ fontSize: 12, marginBottom: 4 }}>
+                      <span className="muted">{scanPct.scanned.toLocaleString()} / {scanPct.total.toLocaleString()} IP</span>
+                      <b>{Math.min(100, Math.round((scanPct.scanned / scanPct.total) * 100))}%</b>
+                    </div>
+                    <div style={{ height: 8, borderRadius: 6, background: 'rgba(36,48,73,.8)', overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${Math.min(100, Math.round((scanPct.scanned / scanPct.total) * 100))}%`, background: 'var(--accent)', transition: 'width .4s ease', borderRadius: 6 }} />
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 

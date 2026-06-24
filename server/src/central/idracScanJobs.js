@@ -12,7 +12,9 @@
  *   UI    ← GET  /api/admin/idrac/scan-result?reqId=...        → getIdracScanResult
  */
 
-const jobs = new Map();    // reqId -> { reqId, agent, ips, username, password, state, createdAt, takenAt, result, doneAt }
+import { expandIpList } from '../idrac/iprange.js';
+
+const jobs = new Map();    // reqId -> { reqId, agent, ips, username, password, state, createdAt, takenAt, result, doneAt, progress }
 const byAgent = new Map(); // agentLower -> Set<reqId> (대기 중)
 
 const TTL = 10 * 60_000;   // 완료/오류 잡 보존 10분
@@ -41,7 +43,10 @@ export function enqueueIdracScan(agent, { ips, username, password, vcenterId = '
   const pend = byAgent.get(key) || new Set();
   if (pend.size >= MAX_PENDING) return null;
   const reqId = newReqId();
-  jobs.set(reqId, { reqId, agent, ips, username, password, vcenterId, state: 'pending', createdAt: Date.now() });
+  // 총 IP 수를 미리 계산해 UI가 진행률 분모를 바로 표시할 수 있게 한다(스캔 max=2048 반영).
+  let total = 0;
+  try { total = Math.min(expandIpList(ips).ips.length, 2048); } catch { total = 0; }
+  jobs.set(reqId, { reqId, agent, ips, username, password, vcenterId, state: 'pending', createdAt: Date.now(), progress: { scanned: 0, total, at: Date.now() } });
   pend.add(reqId); byAgent.set(key, pend);
   return reqId;
 }
@@ -61,6 +66,19 @@ export function takeIdracScanJobs(agentName) {
   }
   byAgent.delete(key);
   return out;
+}
+
+/** 에이전트가 스캔 진행률 보고(중간) — { scanned, total }. */
+export function setIdracScanProgress(reqId, { scanned, total } = {}) {
+  const j = jobs.get(reqId);
+  if (!j) return false;
+  j.progress = {
+    scanned: Number(scanned) || 0,
+    total: Number(total) || j.progress?.total || 0,
+    at: Date.now(),
+  };
+  if (j.state === 'running' || j.state === 'pending') j.state = 'running';
+  return true;
 }
 
 /** 에이전트가 스캔 결과 보고. */
@@ -90,5 +108,5 @@ export function getIdracScanResult(reqId) {
   gc();
   const j = jobs.get(reqId);
   if (!j) return { state: 'unknown' };
-  return { state: j.state, agent: j.agent, takenAt: j.takenAt || null, ...(j.result || {}) };
+  return { state: j.state, agent: j.agent, takenAt: j.takenAt || null, progress: j.progress || null, ...(j.result || {}) };
 }

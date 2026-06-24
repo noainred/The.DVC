@@ -26,6 +26,12 @@ async function postResult(payload) {
   }).catch(() => {});
 }
 
+async function postProgress(reqId, scanned, total) {
+  await fetch(`${config.agent.centralUrl}/api/central/idrac-scan-progress`, {
+    method: 'POST', headers: headers(), body: JSON.stringify({ reqId, scanned, total }), signal: AbortSignal.timeout(10_000),
+  }).catch(() => {});
+}
+
 export async function runIdracScanWorkerOnce() {
   if (!config.agent.centralUrl) return null;
   try {
@@ -37,7 +43,15 @@ export async function runIdracScanWorkerOnce() {
     for (const job of jobs) {
       const started = Date.now();
       try {
-        const scan = await scanForIdracs({ ips: job.ips, username: job.username, password: job.password });
+        // 진행률을 중앙에 보고(최소 1.5s 간격으로 스로틀) → UI 프로세스 바.
+        let lastSent = 0;
+        const onProgress = (scanned, total) => {
+          const now = Date.now();
+          if (now - lastSent < 1500 && scanned < total) return;
+          lastSent = now;
+          postProgress(job.reqId, scanned, total);
+        };
+        const scan = await scanForIdracs({ ips: job.ips, username: job.username, password: job.password, onProgress });
         let registered = 0;
         if (config.agent.autoRegister && scan.found.length) {
           const rr = registerScanned(scan.found, job.username, job.password, 'merge', job.vcenterId || '');
