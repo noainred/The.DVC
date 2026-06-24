@@ -9,6 +9,7 @@ import { getDataSource } from './runtime-settings.js';
 import { buildIpamRows } from './ipam/ledger.js';
 import { syncLedger } from './ipam/db.js';
 import { getInventory, pruneInventory } from './central/inventory.js';
+import { isStopped } from './security/emergencyStop.js';
 
 // 사이트 위임 vCenter가 이 시간 이상 push가 없으면 'stale'로 표시(데이터는 계속 서빙).
 const SITE_STALE_MS = Number(process.env.SITE_INVENTORY_STALE_MS) || 300_000;
@@ -71,6 +72,8 @@ class Store {
 
   async refresh() {
     try {
+      // 긴급중단(2인 승인) 활성 시 모든 수집 정지 — 마지막 스냅샷은 그대로 유지.
+      if (isStopped()) return;
       const dataSource = getDataSource();
       if (dataSource === 'mock') {
         this.snapshot = withRollups(applyAlarmMutes(await overlayIdracPower(generateSnapshot())));

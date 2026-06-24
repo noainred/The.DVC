@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import fs from 'node:fs';
 import { config } from '../config.js';
-import { requireRole, listUsers, createUser, updateUser, deleteUser, beginTotpEnroll, confirmTotpEnroll, disableTotp, verifyUserOtp } from '../auth/auth.js';
+import { requireRole, listUsers, createUser, updateUser, deleteUser, beginTotpEnroll, confirmTotpEnroll, disableTotp, verifyUserOtp, getUser } from '../auth/auth.js';
+import { getEmergencyStatus, setEmergencyStop } from '../security/emergencyStop.js';
 import { loadSessionSecurity, saveSessionSecurity } from '../security/securitySettings.js';
 import { saveOsScanSettings, runOsScanNow, osScanStatus } from '../inventory/osScanner.js';
 import { getOsResults } from '../inventory/osStore.js';
@@ -88,6 +89,33 @@ import {
 export const adminRouter = Router();
 
 const adminOnly = requireRole('admin');
+
+// ── 긴급중단(Emergency Stop) — 관리자 2명 OTP(2인 승인)로만 켜고/끈다 ──────────
+adminRouter.get('/emergency-stop', adminOnly, (_req, res) => res.json(getEmergencyStatus()));
+
+// Body: { action:'stop'|'resume', approvals:[{username,code},{username,code}] }
+// 검증: 정확히 2명 · 서로 다른 계정 · 둘 다 admin · 둘 다 현재 OTP 일치.
+adminRouter.post('/emergency-stop', adminOnly, (req, res) => {
+  const b = req.body || {};
+  const action = b.action === 'resume' ? 'resume' : 'stop';
+  const approvals = Array.isArray(b.approvals) ? b.approvals : [];
+  if (!config.auth.enabled) return res.status(400).json({ ok: false, reason: '인증이 비활성화되어 2인 OTP 승인을 사용할 수 없습니다(AUTH_ENABLED).' });
+  if (approvals.length !== 2) return res.status(400).json({ ok: false, reason: '관리자 2명의 OTP 인증이 필요합니다.' });
+  const names = approvals.map((a) => String(a?.username || '').trim());
+  if (!names[0] || !names[1]) return res.status(400).json({ ok: false, reason: '두 계정의 ID를 모두 입력하세요.' });
+  if (names[0].toLowerCase() === names[1].toLowerCase()) return res.status(400).json({ ok: false, reason: '서로 다른 관리자 2명이어야 합니다.' });
+  for (const a of approvals) {
+    const name = String(a?.username || '').trim();
+    const u = getUser(name);
+    if (!u) return res.status(400).json({ ok: false, reason: `사용자 '${name}'를 찾을 수 없습니다.` });
+    if ((u.role || '') !== 'admin') return res.status(403).json({ ok: false, reason: `'${name}'는 관리자(admin)가 아닙니다.` });
+    const v = verifyUserOtp(name, a?.code);
+    if (!v.ok) return res.status(403).json({ ok: false, reason: `'${name}' OTP 인증 실패 — ${v.reason}`, needEnroll: v.needEnroll });
+  }
+  const status = setEmergencyStop(action === 'stop', names);
+  logAudit({ user: `${names[0]} + ${names[1]}`, action: action === 'stop' ? '긴급중단 실행(2인 승인)' : '긴급중단 해제(2인 승인)', target: 'emergency-stop', detail: `승인자 ${names.join(', ')}`, ip: req.ip || '' });
+  res.json({ ok: true, ...status });
+});
 
 // Server operational logs (ring buffer). ?since=<id>&level=info|warn|error
 adminRouter.get('/logs', adminOnly, (req, res) => {

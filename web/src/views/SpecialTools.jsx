@@ -50,7 +50,7 @@ const TOOLS = [
   { k: 'diskadd', icon: '🧩', label: '디스크 추가 자동화', desc: 'VM 디스크 추가 할당 자동화 (준비 중)', disabled: true, comingSoon: true },
   { k: 'backup', icon: '💾', label: '백업', desc: '설정 백업/복원 (준비 중)', disabled: true, comingSoon: true },
   { k: 'massdeploy', icon: '🚀', label: '대용량 배포', desc: '대량 배포 (준비 중)', disabled: true, comingSoon: true },
-  { k: 'shutdown', icon: '🛑', label: '긴급 ShutDown', desc: '비상 정지 (관리자 전용)', danger: true, disabled: true },
+  { k: 'shutdown', icon: '🛑', label: '긴급중단', desc: '모든 수집 즉시 정지 — 관리자 2명 OTP(2인 승인) 필요', danger: true },
 ];
 
 const tb = (gb) => (gb >= 1024 ? `${(gb / 1024).toFixed(1)} TB` : `${gb} GB`);
@@ -1195,29 +1195,88 @@ function Nsx() {
   );
 }
 
+/** 긴급중단 — 모든 수집을 즉시 정지. 관리자 2명이 각자 OTP로 인증해야(2인 승인) 실행/해제된다. */
 function Shutdown() {
-  const [open, setOpen] = useState(false);
+  const [status, setStatus] = useState(null);
+  const [open, setOpen] = useState(null); // 'stop' | 'resume' | null
+  const load = () => fetchJson('/admin/emergency-stop').then(setStatus).catch(() => {});
+  useEffect(() => { load(); const t = setInterval(load, 10_000); return () => clearInterval(t); }, []);
+  const active = !!status?.active;
   return (
     <>
-      <div className="card" style={{ borderColor: 'var(--red)', textAlign: 'center', padding: 32 }}>
-        <div style={{ fontSize: 44 }}>🛑</div>
-        <div style={{ fontSize: 18, fontWeight: 800, margin: '12px 0', color: 'var(--red)' }}>긴급 ShutDown</div>
-        <div className="muted" style={{ marginBottom: 20 }}>비상 시 인프라를 정지하는 기능입니다. 신중히 사용하세요.</div>
-        <button className="login-btn" style={{ flex: 'none', padding: '12px 28px', background: 'var(--red)', borderColor: 'var(--red)' }} onClick={() => setOpen(true)}>
-          🛑 긴급 ShutDown 실행
-        </button>
-      </div>
-      {open && (
-        <Modal title="긴급 ShutDown" onClose={() => setOpen(false)} width={460}>
-          <div style={{ textAlign: 'center', padding: '12px 8px' }}>
-            <div style={{ fontSize: 40 }}>⚠️</div>
-            <div style={{ fontSize: 16, fontWeight: 700, margin: '14px 0 6px' }}>세부 내용은 관리자에게 문의하세요</div>
-            <div className="muted" style={{ fontSize: 13 }}>This action requires administrator authorization.</div>
-            <button className="login-btn" style={{ flex: 'none', padding: '10px 22px', marginTop: 18 }} onClick={() => setOpen(false)}>확인</button>
+      <div className="card" style={{ borderColor: active ? 'var(--red)' : 'var(--accent)', padding: 28 }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 44 }}>{active ? '🛑' : '🟢'}</div>
+          <div style={{ fontSize: 18, fontWeight: 800, margin: '10px 0', color: active ? 'var(--red)' : 'var(--green)' }}>
+            {active ? '긴급중단 상태 — 모든 수집 정지됨' : '정상 — 수집 동작 중'}
           </div>
-        </Modal>
-      )}
+          {active && status?.by?.length === 2 && (
+            <div className="muted" style={{ fontSize: 13 }}>승인: <b>{status.by[0]}</b> + <b>{status.by[1]}</b>{status.at ? ` · ${new Date(status.at).toLocaleString('ko-KR')}` : ''}</div>
+          )}
+          <div className="muted" style={{ fontSize: 13, margin: '14px auto 18px', maxWidth: 560, lineHeight: 1.6 }}>
+            긴급중단을 켜면 <b>vCenter 폴링·GPU 게스트 수집·iDRAC 전력 수집</b> 등 모든 백그라운드 수집이 다음 주기부터 즉시 멈춥니다(이미 수집된 화면 데이터는 그대로 유지). <b>관리자 2명이 각각 OTP로 인증</b>해야 실행/해제됩니다(2인 승인).
+          </div>
+          {!active ? (
+            <button className="login-btn" style={{ flex: 'none', padding: '12px 28px', background: 'var(--red)', borderColor: 'var(--red)' }} onClick={() => setOpen('stop')}>
+              🛑 긴급중단 실행 (관리자 2명 OTP)
+            </button>
+          ) : (
+            <button className="login-btn" style={{ flex: 'none', padding: '12px 28px' }} onClick={() => setOpen('resume')}>
+              ▶ 긴급중단 해제 (관리자 2명 OTP)
+            </button>
+          )}
+        </div>
+      </div>
+      {open && <DualOtpModal action={open} onClose={() => setOpen(null)} onDone={(s) => { setStatus(s); setOpen(null); }} />}
     </>
+  );
+}
+
+/** 2인 승인 모달 — 관리자 2명의 로그인 창을 동시에 띄워 각자 ID+OTP로 인증. */
+function DualOtpModal({ action, onClose, onDone }) {
+  const [a, setA] = useState({ username: '', code: '' });
+  const [b, setB] = useState({ username: '', code: '' });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const stop = action === 'stop';
+  const ready = a.username.trim() && b.username.trim() && /^\d{6}$/.test(a.code.trim()) && /^\d{6}$/.test(b.code.trim())
+    && a.username.trim().toLowerCase() !== b.username.trim().toLowerCase();
+  const submit = async () => {
+    setBusy(true); setErr(null);
+    const r = await postJson('/admin/emergency-stop', {
+      action,
+      approvals: [{ username: a.username.trim(), code: a.code.trim() }, { username: b.username.trim(), code: b.code.trim() }],
+    }).catch((e) => ({ ok: false, reason: e.message }));
+    setBusy(false);
+    if (r.ok) onDone(r); else setErr(r.reason || '인증 실패');
+  };
+  const panel = (label, v, setV) => (
+    <div className="card" style={{ padding: 16, flex: 1, minWidth: 220, borderColor: 'var(--accent)' }}>
+      <div style={{ fontWeight: 700, marginBottom: 10 }}>🔐 {label}</div>
+      <label className="muted" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>관리자 ID</label>
+      <input className="input" autoComplete="off" value={v.username} placeholder="admin 계정" onChange={(e) => setV({ ...v, username: e.target.value })} />
+      <label className="muted" style={{ fontSize: 12, display: 'block', margin: '10px 0 4px' }}>OTP 코드(6자리)</label>
+      <input className="input" inputMode="numeric" maxLength={6} autoComplete="off" value={v.code}
+        placeholder="000000" style={{ letterSpacing: 4, fontFamily: 'monospace', fontSize: 18 }}
+        onChange={(e) => setV({ ...v, code: e.target.value.replace(/\D/g, '').slice(0, 6) })} />
+    </div>
+  );
+  return (
+    <Modal title={stop ? '🛑 긴급중단 — 2인 승인' : '▶ 긴급중단 해제 — 2인 승인'} onClose={onClose} width={640}>
+      <div className="muted" style={{ fontSize: 13, marginBottom: 14 }}>
+        서로 다른 <b>관리자 2명</b>이 각자 ID와 <b>OTP 코드</b>를 입력해야 {stop ? '긴급중단이 실행' : '긴급중단이 해제'}됩니다. (둘 다 admin 권한 · OTP 등록 필수)
+      </div>
+      <div className="flex gap wrap" style={{ alignItems: 'stretch' }}>
+        {panel('관리자 ①', a, setA)}
+        {panel('관리자 ②', b, setB)}
+      </div>
+      {err && <div className="badge red" style={{ display: 'block', marginTop: 14, padding: '8px 12px', fontSize: 13 }}>⚠ {err}</div>}
+      <div className="flex gap" style={{ marginTop: 18, justifyContent: 'flex-end' }}>
+        <button className="logout-btn" style={{ padding: '9px 16px' }} onClick={onClose}>취소</button>
+        <button className="login-btn" style={{ flex: 'none', padding: '9px 22px', ...(stop ? { background: 'var(--red)', borderColor: 'var(--red)' } : {}) }}
+          disabled={!ready || busy} onClick={submit}>{busy ? '인증 중…' : (stop ? '🛑 긴급중단 실행' : '▶ 해제')}</button>
+      </div>
+    </Modal>
   );
 }
 

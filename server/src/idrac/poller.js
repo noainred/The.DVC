@@ -13,6 +13,7 @@ import { setOmeDevices, dbKey } from './omeCache.js';
 import { setInventory, inventoryStale } from './invCache.js';
 import { getDb } from './db.js';
 import { describeError } from '../util/errors.js';
+import { isStopped } from '../security/emergencyStop.js';
 
 // Hardware inventory is largely static — refresh it at most every 30 minutes.
 const INVENTORY_MAX_AGE_MS = 30 * 60_000;
@@ -21,6 +22,7 @@ let timer = null;
 let lastRun = null; // { at, ok, failed, results: [{id, watts?, devices?, error?}] }
 
 async function pollOnce() {
+  if (isStopped()) { lastRun = { at: Date.now(), ok: 0, failed: 0, skipped: '긴급중단', results: [] }; return; }
   const servers = loadRegistry().filter((s) => s.enabled !== false && s.host && s.username && s.password);
   if (!servers.length) { lastRun = { at: Date.now(), ok: 0, failed: 0, results: [] }; return; }
   const db = await getDb();

@@ -13,6 +13,7 @@ import { loadGpuGuestSettings, resolveVmCreds } from './settings.js';
 import { setGuestGpu, pruneGuestGpu, guestGpuCounts } from './store.js';
 import { collectVmGpu, VimSoapClient } from './guestops.js';
 import { collectVmGpuSsh, guestIps } from './sshCollect.js';
+import { isStopped } from '../security/emergencyStop.js';
 
 let timer = null;
 let lastRun = null;
@@ -167,6 +168,7 @@ async function pollOnce() {
   if (running) return;
   running = true;
   try {
+    if (isStopped()) { lastRun = { at: Date.now(), skipped: '긴급중단' }; return; }
     const s = loadGpuGuestSettings();
     if (!s.enabled) { lastRun = { at: Date.now(), skipped: '비활성' }; return; }
     const snap = store.get();
