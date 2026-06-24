@@ -19,6 +19,9 @@ export default function IdracAdmin() {
   const [bulkPreview, setBulkPreview] = useState(null);
   const [scanResult, setScanResult] = useState(null);
   const [selected, setSelected] = useState(new Set());
+  const [scanAgent, setScanAgent] = useState('__local__'); // 스캔 수행 주체(로컬 또는 에이전트 이름)
+  const [agents, setAgents] = useState({ agents: [], centralEnabled: false });
+  const [scanProgress, setScanProgress] = useState(null); // 위임 스캔 진행 안내문
   const fileRef = useRef(null);
 
   const load = async () => {
@@ -27,6 +30,7 @@ export default function IdracAdmin() {
   };
   useEffect(() => {
     load();
+    fetchJson('/admin/idrac/scan-agents').then(setAgents).catch(() => {});
     const t = setInterval(load, 30_000); // refresh current power/poller status
     return () => clearInterval(t);
   }, []);
@@ -125,12 +129,41 @@ export default function IdracAdmin() {
   };
 
   const scanIdracs = async () => {
-    setBusy(true); setScanResult(null); setImportMsg(null);
+    setBusy(true); setScanResult(null); setImportMsg(null); setScanProgress(null);
     try {
-      const r = await postJson('/admin/idrac/scan', { ips: bulk.ips, username: bulk.username, password: bulk.password });
-      if (r.ok) { setScanResult(r); setSelected(new Set(r.found.map((f) => f.ip))); }
-      else setImportMsg({ ok: false, text: r.reason });
-    } catch (e) { setImportMsg({ ok: false, text: e.message }); }
+      const r = await postJson('/admin/idrac/scan', { ips: bulk.ips, username: bulk.username, password: bulk.password, agent: scanAgent });
+      if (!r.ok) { setImportMsg({ ok: false, text: r.reason }); return; }
+      if (!r.delegated) {
+        setScanResult({ ...r, delegated: false });
+        setSelected(new Set(r.found.map((f) => f.ip)));
+        return;
+      }
+      // 위임 스캔: reqId로 결과를 폴링(에이전트가 현지 스캔→현지 등록 후 회신).
+      setScanProgress(`에이전트 '${r.agent}'에 스캔 요청을 전달했습니다. 현지 스캔 결과를 기다리는 중…`);
+      const reqId = r.reqId;
+      const deadline = Date.now() + 180_000; // 최대 3분 대기
+      // eslint-disable-next-line no-await-in-loop
+      while (Date.now() < deadline) {
+        await new Promise((res) => setTimeout(res, 2500));
+        // eslint-disable-next-line no-await-in-loop
+        const s = await fetchJson(`/admin/idrac/scan-result?reqId=${encodeURIComponent(reqId)}`).catch(() => null);
+        if (!s) continue;
+        if (s.state === 'done' || s.state === 'error') {
+          setScanProgress(null);
+          if (s.state === 'error') { setImportMsg({ ok: false, text: `에이전트 스캔 오류: ${s.error || '알 수 없음'}` }); return; }
+          setScanResult({ ...s, delegated: true });
+          setSelected(new Set()); // 위임 스캔은 현지 자동등록되므로 중앙 재등록 불필요
+          await load();
+          return;
+        }
+        if (s.state === 'unknown') { setImportMsg({ ok: false, text: '스캔 잡을 찾을 수 없습니다(만료되었거나 에이전트 미응답).' }); return; }
+        setScanProgress(s.state === 'running'
+          ? `에이전트 '${r.agent}'가 스캔 중입니다…`
+          : `에이전트 '${r.agent}'가 잡을 인출하기를 기다리는 중… (에이전트가 실행/연결되어 있는지 확인)`);
+      }
+      setScanProgress(null);
+      setImportMsg({ ok: false, text: '에이전트 스캔이 3분 내 완료되지 않았습니다. 에이전트 상태를 확인하세요(대역이 크면 더 걸릴 수 있음).' });
+    } catch (e) { setScanProgress(null); setImportMsg({ ok: false, text: e.message }); }
     finally { setBusy(false); }
   };
 
@@ -347,7 +380,25 @@ export default function IdracAdmin() {
               <label>iDRAC 계정 *<input className="input" value={bulk.username} onChange={(e) => setBulk((b) => ({ ...b, username: e.target.value }))} placeholder="root" /></label>
               <label>iDRAC 비밀번호 *<input className="input" type="password" value={bulk.password} onChange={(e) => setBulk((b) => ({ ...b, password: e.target.value }))} /></label>
               <label>이름 접두어<input className="input" value={bulk.namePrefix} onChange={(e) => setBulk((b) => ({ ...b, namePrefix: e.target.value }))} placeholder="(선택) 예: SEOUL-" /></label>
+              <label>스캔 수행 Agent
+                <select className="input" value={scanAgent} onChange={(e) => setScanAgent(e.target.value)}
+                  title="원격 사이트 iDRAC는 중앙에서 직접 못 닿으므로, 그 사이트의 현장 에이전트가 스캔을 대행합니다.">
+                  <option value="__local__">이 포탈에서 직접</option>
+                  {(agents.agents || []).map((a) => <option key={a} value={a}>에이전트: {a}</option>)}
+                </select>
+              </label>
             </div>
+            {scanAgent !== '__local__' && (
+              <div className="muted" style={{ fontSize: 11, marginTop: 6, lineHeight: 1.6 }}>
+                위임 스캔: 에이전트 <b>{scanAgent}</b>가 현지에서 Redfish 스캔 후 <b>현지에 자동 등록</b>해 전력 수집을 시작합니다.
+                발견 목록은 아래에 표시되며, 전력은 중앙이 수집서버(collector)에서 취합합니다(중앙 재등록 불필요).
+              </div>
+            )}
+            {!agents.centralEnabled && (
+              <div className="muted" style={{ fontSize: 11, marginTop: 4, color: 'var(--amber)' }}>
+                ※ 이 포탈은 중앙(CENTRAL_TOKEN)이 설정되지 않아 에이전트 위임 스캔을 받을 수 없습니다. 로컬 스캔만 가능합니다.
+              </div>
+            )}
             <div className="flex gap" style={{ marginTop: 12, alignItems: 'center', flexWrap: 'wrap' }}>
               <button className="login-btn" style={{ flex: 'none', padding: '10px 18px' }}
                 disabled={busy || !bulk.ips.trim() || !bulk.username.trim() || !bulk.password} onClick={scanIdracs}>
@@ -373,11 +424,19 @@ export default function IdracAdmin() {
               “스캔”은 각 IP의 Redfish에 접속해 <b>Dell iDRAC만</b> 골라냅니다(미응답/타 장비/인증실패 제외). 대역이 크면 다소 걸립니다.
             </div>
 
+            {scanProgress && (
+              <div className="card" style={{ marginTop: 12, padding: '10px 14px', borderLeft: '3px solid var(--accent-2)', fontSize: 13 }}>
+                ⏳ {scanProgress}
+              </div>
+            )}
+
             {scanResult && (
               <div style={{ marginTop: 12, borderTop: '1px solid rgba(36,48,73,.6)', paddingTop: 10 }}>
                 <div className="flex between wrap" style={{ marginBottom: 8 }}>
                   <b style={{ fontSize: 13 }}>
+                    {scanResult.delegated && <span className="badge teal" style={{ marginRight: 6 }}>에이전트 {scanResult.agent}</span>}
                     스캔 {scanResult.scanned}개 → iDRAC <span style={{ color: 'var(--green)' }}>{scanResult.foundCount}</span>대 발견
+                    {scanResult.delegated && scanResult.registered != null && <span className="muted" style={{ fontWeight: 400 }}> · 현지 등록 {scanResult.registered}대</span>}
                   </b>
                   <span className="muted" style={{ fontSize: 12 }}>
                     미응답 {scanResult.unreachable} · 타장비 {scanResult.notIdrac} · 인증실패 {scanResult.authFailed}{scanResult.truncated ? ' · 상한 적용' : ''}
@@ -390,14 +449,14 @@ export default function IdracAdmin() {
                     <div style={{ maxHeight: 240, overflowY: 'auto', border: '1px solid rgba(36,48,73,.5)', borderRadius: 8 }}>
                       <table>
                         <thead><tr>
-                          <th style={{ width: 32 }}><input type="checkbox" checked={selected.size === scanResult.found.length}
-                            onChange={(e) => setSelected(e.target.checked ? new Set(scanResult.found.map((f) => f.ip)) : new Set())} /></th>
+                          {!scanResult.delegated && <th style={{ width: 32 }}><input type="checkbox" checked={selected.size === scanResult.found.length}
+                            onChange={(e) => setSelected(e.target.checked ? new Set(scanResult.found.map((f) => f.ip)) : new Set())} /></th>}
                           <th>IP</th><th>서비스태그</th><th>호스트명</th><th>모델</th>
                         </tr></thead>
                         <tbody>
                           {scanResult.found.map((f) => (
-                            <tr key={f.ip} style={{ cursor: 'pointer' }} onClick={() => toggleSel(f.ip)}>
-                              <td><input type="checkbox" checked={selected.has(f.ip)} onChange={() => toggleSel(f.ip)} onClick={(e) => e.stopPropagation()} /></td>
+                            <tr key={f.ip} style={{ cursor: scanResult.delegated ? 'default' : 'pointer' }} onClick={() => !scanResult.delegated && toggleSel(f.ip)}>
+                              {!scanResult.delegated && <td><input type="checkbox" checked={selected.has(f.ip)} onChange={() => toggleSel(f.ip)} onClick={(e) => e.stopPropagation()} /></td>}
                               <td><b>{f.ip}</b></td>
                               <td className="muted">{f.serviceTag || '—'}</td>
                               <td className="muted">{f.hostName || '—'}</td>
@@ -407,11 +466,18 @@ export default function IdracAdmin() {
                         </tbody>
                       </table>
                     </div>
-                    <div className="flex gap" style={{ marginTop: 10, alignItems: 'center' }}>
-                      <button className="login-btn" style={{ flex: 'none', padding: '10px 18px' }} disabled={busy || selected.size === 0} onClick={registerScanned}>
-                        {busy ? '등록 중…' : `선택한 iDRAC ${selected.size}대 등록`}
-                      </button>
-                    </div>
+                    {scanResult.delegated ? (
+                      <div className="muted" style={{ fontSize: 12, marginTop: 10, lineHeight: 1.6 }}>
+                        ✅ 위 iDRAC는 에이전트 <b>{scanResult.agent}</b>의 현지 레지스트리에 등록되어 전력 수집이 시작되었습니다.
+                        중앙에서는 별도 등록 없이 수집서버(collector) 취합으로 전력이 반영됩니다.
+                      </div>
+                    ) : (
+                      <div className="flex gap" style={{ marginTop: 10, alignItems: 'center' }}>
+                        <button className="login-btn" style={{ flex: 'none', padding: '10px 18px' }} disabled={busy || selected.size === 0} onClick={registerScanned}>
+                          {busy ? '등록 중…' : `선택한 iDRAC ${selected.size}대 등록`}
+                        </button>
+                      </div>
+                    )}
                   </>
                 )}
               </div>

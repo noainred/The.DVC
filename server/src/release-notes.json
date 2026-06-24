@@ -1,6 +1,16 @@
 {
   "notes": [
     {
+      "version": "2.15.0",
+      "date": "2026-06-24",
+      "title": "iDRAC IP 일괄 등록 — 스캔 수행 에이전트 선택(원격 사이트 위임 스캔)",
+      "notes": [
+        "전력 수집 → iDRAC IP 일괄 등록 모달에 '스캔 수행 Agent' 선택 추가: 원격 사이트의 iDRAC는 중앙 포탈에서 직접 닿지 않으므로, 그 사이트의 현장 에이전트를 골라 스캔을 위임할 수 있습니다. '이 포탈에서 직접'을 고르면 기존처럼 중앙이 동기 스캔합니다.",
+        "위임 스캔 흐름: 중앙이 온디맨드 잡 큐(reqId)에 스캔 요청을 적재 → 에이전트가 자기 이름으로 잡을 인출해 현지 Redfish 스캔 → 발견된 Dell iDRAC를 현지 레지스트리에 자동 등록(전력 수집 시작) → 발견 목록·요약을 중앙으로 회신. 중앙 UI는 진행 상태를 폴링해 결과를 보여줍니다(최대 3분 대기). 전력은 중앙이 수집서버(collector)에서 취합하므로 중앙 재등록이 필요 없습니다.",
+        "신규 백엔드: 중앙 큐(server/src/central/idracScanJobs.js), 에이전트 워커(idracScanWorker, 5초 폴링), 중앙 라우트 /api/central/idrac-scan-jobs·/idrac-scan-result, 관리 라우트 /admin/idrac/scan(agent)·/scan-result·/scan-agents. 단위테스트 3건 추가(총 53건 통과)."
+      ]
+    },
+    {
       "version": "2.14.0",
       "date": "2026-06-24",
       "title": "전력 분석 메뉴(법인/모델별) + 전력 자동 매핑 개선(서비스태그) + 전기 단위 자동 표기",
