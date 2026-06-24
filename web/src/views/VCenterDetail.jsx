@@ -30,6 +30,7 @@ export default function VCenterDetail({ site, onBack }) {
   const [open, setOpen] = useState({});      // expanded tree nodes
   const [q, setQ] = useState('');            // VM name search (hosts/vms views)
   const [dsKind, setDsKind] = useState('');  // datastore storage filter
+  const [comparing, setComparing] = useState(false); // vCenter 2개 비교 모드
   const toggle = (k) => setOpen((o) => ({ ...o, [k]: !o[k] }));
 
   const { data: hostsD } = usePolling('/hosts', { vcenterId }, 20_000);
@@ -90,13 +91,16 @@ export default function VCenterDetail({ site, onBack }) {
           </div>
           <StateBadge state={site.status} />
         </div>
-        <div className="flex gap" style={{ fontSize: 12 }}>
+        <div className="flex gap" style={{ fontSize: 12, alignItems: 'center' }}>
           <span className="muted">호스트 <b style={{ color: 'var(--text)' }}>{m.hosts ?? hosts.length}</b></span>
           <span className="muted">VM <b style={{ color: 'var(--text)' }}>{m.vms ?? vms.length}</b></span>
           <span className="muted">CPU <b style={{ color: 'var(--text)' }}>{m.cpuUsagePct ?? 0}%</b></span>
           <span className="muted">메모리 <b style={{ color: 'var(--text)' }}>{m.memUsagePct ?? 0}%</b></span>
+          <button className="login-btn" style={{ flex: 'none', padding: '6px 14px', marginLeft: 6 }} onClick={() => setComparing(true)}>⇄ 비교하기</button>
         </div>
       </div>
+
+      {comparing && <VCenterCompare site={site} onClose={() => setComparing(false)} />}
 
       <div className="vcd-views">
         {VIEWS.map((v) => (
@@ -283,3 +287,82 @@ function buildFolderTree(vms) {
 }
 
 const tb = (gb) => (gb >= 1024 ? `${(gb / 1024).toFixed(1)} TB` : `${gb} GB`);
+
+/* ---- vCenter 2개 비교 ---- */
+// 비교 지표 정의. higher: 'bad'=높을수록 나쁨(사용률), 'neutral'=단순 규모, 'good'=높을수록 좋음.
+const CMP_METRICS = [
+  { key: 'hosts', label: '호스트', higher: 'neutral' },
+  { key: 'vms', label: 'VM', higher: 'neutral' },
+  { key: 'vmsPoweredOn', label: 'VM(On)', higher: 'neutral' },
+  { key: 'cpuUsagePct', label: 'CPU 사용률', unit: '%', higher: 'bad' },
+  { key: 'memUsagePct', label: '메모리 사용률', unit: '%', higher: 'bad' },
+  { key: 'storageUsagePct', label: '스토리지 사용률', unit: '%', higher: 'bad' },
+  { key: 'storageTotalTB', label: '스토리지 총량', unit: ' TB', higher: 'neutral' },
+  { key: 'alarmsCritical', label: '심각 알람', higher: 'bad' },
+  { key: 'alarmsWarning', label: '경고 알람', higher: 'bad' },
+  { key: 'powerKw', label: '소비전력', unit: ' kW', higher: 'neutral' },
+];
+
+function VCenterCompare({ site, onClose }) {
+  const { data } = usePolling('/vcenters', {}, 30_000);
+  const sites = (data || []).filter((s) => s.id !== site.id);
+  const [otherId, setOtherId] = useState('');
+  const other = sites.find((s) => s.id === otherId);
+  const A = site.metrics || {};
+  const B = other?.metrics || {};
+  const num = (v) => (typeof v === 'number' ? v : 0);
+  const fmt = (v, u) => (v == null ? '—' : `${typeof v === 'number' ? v.toLocaleString() : v}${u || ''}`);
+  // 더 나은 쪽 색: bad 지표는 낮은 값이 초록, neutral은 강조만.
+  const colorFor = (metric, a, b, side) => {
+    if (metric.higher === 'neutral' || a === b) return undefined;
+    const aWins = metric.higher === 'bad' ? a < b : a > b;
+    const isWinner = side === 'A' ? aWins : !aWins;
+    return isWinner ? 'var(--green)' : 'var(--amber)';
+  };
+  return (
+    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="modal card" style={{ maxWidth: 720, width: '94vw' }}>
+        <div className="flex between" style={{ marginBottom: 12, alignItems: 'center' }}>
+          <b style={{ fontSize: 15 }}>⇄ vCenter 비교</b>
+          <button className="logout-btn" onClick={onClose}>닫기</button>
+        </div>
+        <div className="flex gap" style={{ alignItems: 'center', marginBottom: 14 }}>
+          <div className="card" style={{ padding: '8px 14px', flex: 1, borderColor: 'var(--accent)' }}>
+            <div style={{ fontWeight: 700 }}>{site.name}</div>
+            <div className="muted" style={{ fontSize: 12 }}>{site.location?.country || ''} · v{site.version || '—'}</div>
+          </div>
+          <span style={{ fontSize: 20 }} className="muted">⇄</span>
+          <div className="card" style={{ padding: '8px 14px', flex: 1 }}>
+            <select className="select" value={otherId} onChange={(e) => setOtherId(e.target.value)} style={{ width: '100%' }}>
+              <option value="">비교할 vCenter 선택…</option>
+              {sites.map((s) => <option key={s.id} value={s.id}>{s.name} ({s.id})</option>)}
+            </select>
+            {other && <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>{other.location?.country || ''} · v{other.version || '—'} · <StateBadge state={other.status} /></div>}
+          </div>
+        </div>
+        {!other ? (
+          <div className="muted" style={{ fontSize: 13, padding: 12 }}>오른쪽에서 비교할 vCenter를 선택하세요.</div>
+        ) : (
+          <table className="data-table" style={{ width: '100%', fontSize: 13 }}>
+            <thead><tr><th style={{ textAlign: 'left' }}>지표</th><th style={{ textAlign: 'right' }}>{site.name}</th><th style={{ textAlign: 'right' }}>{other.name}</th><th style={{ textAlign: 'right' }}>차이</th></tr></thead>
+            <tbody>
+              {CMP_METRICS.map((mt) => {
+                const a = num(A[mt.key]); const b = num(B[mt.key]);
+                const diff = Math.round((a - b) * 10) / 10;
+                return (
+                  <tr key={mt.key}>
+                    <td>{mt.label}</td>
+                    <td style={{ textAlign: 'right', color: colorFor(mt, a, b, 'A'), fontWeight: 600 }}>{fmt(A[mt.key] ?? 0, mt.unit)}</td>
+                    <td style={{ textAlign: 'right', color: colorFor(mt, a, b, 'B'), fontWeight: 600 }}>{fmt(B[mt.key] ?? 0, mt.unit)}</td>
+                    <td style={{ textAlign: 'right' }} className="muted">{diff === 0 ? '=' : `${diff > 0 ? '+' : ''}${diff}${mt.unit || ''}`}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+        <div className="muted" style={{ fontSize: 11, marginTop: 10 }}>초록=더 양호(사용률·알람이 낮은 쪽), 주황=상대적으로 높음. 규모 지표(호스트/VM/용량)는 색 없이 차이만 표시.</div>
+      </div>
+    </div>
+  );
+}
