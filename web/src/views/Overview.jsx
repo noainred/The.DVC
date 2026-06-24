@@ -58,8 +58,8 @@ export default function Overview({ onSelectSite, onGotoTab }) {
         {g.powerReporting > 0 && (
           <Kpi label="총 소비전력" value={`${fmt(g.powerKw)} kW`} accent="var(--amber)" meta={`${fmt(g.powerReporting)}개 호스트 측정 · 시간당 약 ${fmt(g.powerKw)} kWh`} />
         )}
-        <Kpi label="GPU 카드 수량" value={fmt(g.gpuCards)} accent="var(--accent-2)" meta={`설치된 GPU 장수 · GPU VM ${fmt(g.gpuVms)}`} onClick={() => onGotoTab?.('tools')} />
-        <Kpi label="GPU 사용율" value={`${g.gpuUtilPct ?? 0}%`} pct={g.gpuUtilPct ?? 0} accent="var(--green)" meta={`GPU 호스트 ${fmt(g.gpuUtilHosts)}대 평균`} onClick={() => onGotoTab?.('tools')} />
+        <Kpi label="GPU 카드 수량" value={fmt(ov.gpuCards)} accent="var(--accent-2)" meta="설치된 GPU 장수" onClick={() => onGotoTab?.('tools')} />
+        <Kpi label="GPU 사용 VM 수량" value={fmt(ov.gpuVms)} accent="var(--green)" meta="GPU 할당된 VM 수" onClick={() => onGotoTab?.('tools')} />
       </div>
 
       <div className="section-title">전세계 데이터센터 분포 <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>(+/- 로 크기 조절 · 드래그로 이동 · 모든 사용자 공유)</span></div>
