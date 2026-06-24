@@ -93,6 +93,11 @@ export default function GpuGuestSettings() {
               value={form.sshPort} onChange={(e) => setForm((f) => ({ ...f, sshPort: Math.max(1, Number(e.target.value) || 22) }))} /></Field>
           )}
         </div>
+        <div className="flex gap" style={{ alignItems: 'center', marginTop: 12 }}>
+          <button className="login-btn" style={{ flex: 'none', padding: '8px 18px' }} disabled={busy} onClick={save}>{busy ? '저장 중…' : '설정 저장'}</button>
+          <span className="muted" style={{ fontSize: 12 }}>수집 방식·주기·동시성 등 전역 설정을 저장합니다(아래 공용 계정도 함께).</span>
+          {msg && <span className="muted" style={{ fontSize: 13 }}>{msg}</span>}
+        </div>
       </div>
 
       <div className="card" style={{ padding: 16, marginTop: 14 }}>
