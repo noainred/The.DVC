@@ -1,6 +1,22 @@
 {
-  "latest": "2.17.0",
+  "latest": "2.18.0",
   "versions": [
+    {
+      "version": "2.18.0",
+      "tar_gz": "vmware-portal-2.18.0.tar.gz",
+      "size_bytes": 10309453,
+      "sha256": "6248b5a8a8110ef977882fc7c3c1d43b66916a76efc796d0829f21a45f639cff",
+      "installer": "vmware-portal-offline-2.17.0-el9-x64.tar.gz",
+      "installer_size_bytes": 67542996,
+      "installer_sha256": "f67fb66c1ebf3b79d2e70a0e7250b3a21294a8363ed6ac4e0536cbb4ebef623a",
+      "installer_cent9": "vmware-portal-offline-2.17.0-el9-x64.tar.gz",
+      "installer_cent9_size_bytes": 67542996,
+      "installer_cent9_sha256": "f67fb66c1ebf3b79d2e70a0e7250b3a21294a8363ed6ac4e0536cbb4ebef623a",
+      "windows": "vmware-portal-win-2.16.1-x64.zip",
+      "windows_size_bytes": 50246689,
+      "windows_sha256": "69d884faaab1494a64a09c09419efa1c0933455434636ea9487d46678eec58b5",
+      "note": "디스크 제약으로 2.18.0은 업그레이드 번들만 신규 빌드. 신규 설치는 2.17.0 설치 패키지(el9, RHEL9 호환)로 설치 후 업그레이드 번들로 2.18.0 적용. Windows 수집기는 2.16.1(이 변경 영향 없음)."
+    },
     {
       "version": "2.17.0",
       "tar_gz": "vmware-portal-2.17.0.tar.gz",
