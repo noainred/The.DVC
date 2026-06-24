@@ -551,7 +551,9 @@ function IdracDetailModal({ server, onClose }) {
   const [inv, setInv] = useState(null);
   const [invErr, setInvErr] = useState(null);
   const [sensors, setSensors] = useState(null);
-  const [tab, setTab] = useState('charts'); // charts | versions
+  const [tab, setTab] = useState('charts'); // charts | versions | gpu
+  const [gpuProbe, setGpuProbe] = useState(null); // null | 'loading' | result
+  const runGpuProbe = () => { setGpuProbe('loading'); fetchJson(`/admin/idrac/${encodeURIComponent(server.id)}/gpu-probe`).then(setGpuProbe).catch((e) => setGpuProbe({ ok: false, reason: e.message })); };
   const loadInv = (refresh) => fetchJson(`/admin/idrac/${encodeURIComponent(server.id)}/inventory${refresh ? '?refresh=1' : ''}`)
     .then((r) => { setInv(r.inventory); setInvErr(null); }).catch((e) => setInvErr(e.message));
   const loadSensors = () => fetchJson(`/admin/idrac/${encodeURIComponent(server.id)}/sensors?minutes=180`).then(setSensors).catch(() => {});
@@ -581,6 +583,7 @@ function IdracDetailModal({ server, onClose }) {
         <div className="flex gap" style={{ marginBottom: 12 }}>
           <button className={tab === 'charts' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 14px' }} onClick={() => setTab('charts')}>📈 센서 차트(온도·CPU)</button>
           <button className={tab === 'versions' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 14px' }} onClick={() => setTab('versions')}>🏷 하드웨어 / 버전</button>
+          <button className={tab === 'gpu' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 14px' }} onClick={() => { setTab('gpu'); if (!gpuProbe) runGpuProbe(); }}>🎮 GPU 수집 확인</button>
           {tab === 'versions' && <button className="tab" style={{ flex: 'none', padding: '6px 12px' }} onClick={() => { setInv(null); loadInv(true); }}>↻ 즉시 재수집</button>}
         </div>
 
@@ -691,6 +694,63 @@ function IdracDetailModal({ server, onClose }) {
                 </div>
               )}
 
+              {(inv.gpus || []).length > 0 && (
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, margin: '6px 0' }}>GPU(iDRAC 인식) {inv.gpus.length}</div>
+                  <table className="data-table" style={{ width: '100%', fontSize: 13 }}>
+                    <thead><tr><th style={{ textAlign: 'left' }}>이름</th><th style={{ textAlign: 'left' }}>모델</th><th style={{ textAlign: 'left' }}>상태</th></tr></thead>
+                    <tbody>{inv.gpus.map((g, i) => (
+                      <tr key={i}><td>{g.name}</td><td className="muted">{[g.manufacturer, g.model].filter(Boolean).join(' ') || '—'}</td>
+                        <td><span className={`badge ${/ok/i.test(g.health) ? 'green' : g.health ? 'amber' : 'gray'}`}>{g.health || g.state || '—'}</span></td></tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+              )}
+
+              {(inv.nics || []).length > 0 && (
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, margin: '6px 0' }}>NIC 어댑터/포트 {inv.nics.length}</div>
+                  <div style={{ maxHeight: 200, overflow: 'auto' }}>
+                    {inv.nics.map((n, i) => (
+                      <div key={i} style={{ marginBottom: 6 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600 }}>{n.model || n.name}</div>
+                        <div className="flex gap wrap" style={{ marginTop: 2 }}>
+                          {(n.ports || []).length === 0 ? <span className="muted" style={{ fontSize: 11 }}>포트 정보 없음</span> : n.ports.map((p, j) => (
+                            <span key={j} className={`badge ${/up|enabled|linkup/i.test(p.link) ? 'green' : 'gray'}`} style={{ fontSize: 11 }}>
+                              {p.id} {/up|enabled|linkup/i.test(p.link) ? '🔗' : '⛔'} {p.speedMbps ? `${p.speedMbps >= 1000 ? `${(p.speedMbps / 1000).toFixed(0)}G` : `${p.speedMbps}M`}` : ''}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {(inv.licenses || []).length > 0 && (
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, margin: '6px 0' }}>iDRAC 라이선스</div>
+                  <div className="flex gap wrap">
+                    {inv.licenses.map((l, i) => <span key={i} className="badge blue" title={l.entitlement}>{l.type || l.name}{l.expiry ? ` · ~${String(l.expiry).slice(0, 10)}` : ''}</span>)}
+                  </div>
+                </div>
+              )}
+
+              {(inv.idracUsers || []).length > 0 && (
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, margin: '6px 0' }}>iDRAC 계정 {inv.idracUsers.length}</div>
+                  <div className="flex gap wrap">
+                    {inv.idracUsers.map((u, i) => <span key={i} className={`badge ${u.enabled ? 'gray' : 'red'}`}>{u.userName} · {u.role || '—'}{u.enabled ? '' : '(비활성)'}</span>)}
+                  </div>
+                </div>
+              )}
+
+              {inv.boot && (inv.boot.overrideTarget || inv.boot.bootOrderCount != null) && (
+                <div className="muted" style={{ fontSize: 12, marginBottom: 12 }}>
+                  부팅: {inv.boot.bootOrderCount != null ? `순서 ${inv.boot.bootOrderCount}개` : ''}{inv.boot.overrideTarget && inv.boot.overrideTarget !== 'None' ? ` · 다음부팅 ${inv.boot.overrideTarget}(${inv.boot.overrideEnabled})` : ''}{inv.boot.mode ? ` · ${inv.boot.mode}` : ''}
+                </div>
+              )}
+
               {(inv.events || []).length > 0 && (
                 <div style={{ marginBottom: 14 }}>
                   <div style={{ fontSize: 13, fontWeight: 700, margin: '6px 0' }}>최근 하드웨어 이벤트(Critical/Warning) {inv.events.length}</div>
@@ -725,6 +785,54 @@ function IdracDetailModal({ server, onClose }) {
               <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>인벤토리는 30분마다 자동 갱신됩니다. 방금 값을 보려면 “↻ 즉시 재수집”.</div>
             </div>
           )
+        )}
+
+        {tab === 'gpu' && (
+          <div>
+            <div className="flex gap" style={{ alignItems: 'center', marginBottom: 12 }}>
+              <button className="logout-btn" style={{ padding: '7px 14px' }} disabled={gpuProbe === 'loading'} onClick={runGpuProbe}>{gpuProbe === 'loading' ? '확인 중…' : '↻ 다시 확인'}</button>
+              <span className="muted" style={{ fontSize: 12 }}>iDRAC(Redfish)에서 이 서버의 GPU 사용률을 OOB로 수집할 수 있는지 실측합니다.</span>
+            </div>
+            {gpuProbe === 'loading' ? <Loading /> : !gpuProbe ? null : gpuProbe.ok === false ? <ErrorBox message={gpuProbe.reason} /> : (
+              <div>
+                <div className="card" style={{ padding: 14, marginBottom: 14, borderColor: gpuProbe.utilizationAvailable ? 'var(--green)' : 'var(--amber)' }}>
+                  <div style={{ fontSize: 16, fontWeight: 800, color: gpuProbe.utilizationAvailable ? 'var(--green)' : 'var(--amber)' }}>
+                    {gpuProbe.utilizationAvailable ? '✅ GPU 사용률 OOB 수집 가능' : '⚠ GPU 사용률 OOB 수집 불가/미확인'}
+                  </div>
+                  <div className="muted" style={{ fontSize: 13, marginTop: 6, lineHeight: 1.6 }}>
+                    {gpuProbe.utilizationAvailable
+                      ? 'iDRAC 텔레메트리/ProcessorMetrics에서 GPU 사용률 메트릭이 확인되었습니다. (게스트 nvidia-smi 없이도 수집 가능)'
+                      : 'iDRAC에서 GPU 사용률 메트릭을 찾지 못했습니다. 보통 iDRAC9 + DataCenter 라이선스 + SMBPBI 지원 데이터센터 GPU + 텔레메트리 활성에서만 노출됩니다. 그 전까지는 게스트 OS의 nvidia-smi(설정 › GPU 게스트 수집)로 수집하세요.'}
+                  </div>
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 700, margin: '6px 0' }}>iDRAC 인식 GPU {gpuProbe.gpus.length}</div>
+                {gpuProbe.gpus.length === 0 ? <div className="muted" style={{ fontSize: 13 }}>iDRAC가 인식한 GPU가 없습니다(패스쓰루로 게스트에 직접 할당된 경우 안 보일 수 있음).</div> : (
+                  <table className="data-table" style={{ width: '100%', fontSize: 13 }}>
+                    <thead><tr><th style={{ textAlign: 'left' }}>GPU</th><th style={{ textAlign: 'left' }}>사용률</th><th style={{ textAlign: 'left' }}>온도</th><th style={{ textAlign: 'left' }}>전력</th><th style={{ textAlign: 'left' }}>상태</th></tr></thead>
+                    <tbody>{gpuProbe.gpus.map((g, i) => (
+                      <tr key={i}>
+                        <td>{g.name}<div className="muted" style={{ fontSize: 11 }}>{[g.manufacturer, g.model].filter(Boolean).join(' ')}</div></td>
+                        <td className="tabular">{g.utilPct != null ? `${g.utilPct}%` : g.bandwidthPct != null ? `${g.bandwidthPct}% (대역폭)` : '—'}</td>
+                        <td className="tabular">{g.tempC != null ? `${g.tempC}℃` : '—'}</td>
+                        <td className="tabular">{g.powerW != null ? `${g.powerW}W` : '—'}</td>
+                        <td><span className={`badge ${/ok/i.test(g.health) ? 'green' : g.health ? 'amber' : 'gray'}`}>{g.health || g.state || '—'}</span></td>
+                      </tr>
+                    ))}</tbody>
+                  </table>
+                )}
+                <div style={{ fontSize: 13, fontWeight: 700, margin: '12px 0 6px' }}>텔레메트리</div>
+                <div className="muted" style={{ fontSize: 13 }}>
+                  TelemetryService: <b style={{ color: gpuProbe.telemetry.available ? 'var(--green)' : 'var(--text-faint)' }}>{gpuProbe.telemetry.available ? '있음' : '없음/비활성'}</b>
+                  {gpuProbe.telemetry.gpuReports.length > 0 && <> · GPU 리포트 {gpuProbe.telemetry.gpuReports.map((r) => `${r.id}(${r.metrics}개${r.hasUtilization ? ', 사용률O' : ''})`).join(', ')}</>}
+                </div>
+                {(gpuProbe.notes || []).length > 0 && (
+                  <ul className="muted" style={{ fontSize: 12, marginTop: 10, paddingLeft: 18 }}>
+                    {gpuProbe.notes.map((n, i) => <li key={i}>{n}</li>)}
+                  </ul>
+                )}
+              </div>
+            )}
+          </div>
         )}
       </div>
     </div>

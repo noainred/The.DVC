@@ -1,6 +1,16 @@
 {
   "notes": [
     {
+      "version": "2.25.0",
+      "date": "2026-06-25",
+      "title": "iDRAC GPU 수집 가능 확인(프로브) + NIC·GPU·라이선스·계정 등 추가 수집",
+      "notes": [
+        "iDRAC에서 GPU 사용률을 OOB로 수집할 수 있는지 실측하는 'GPU 수집 확인' 탭을 추가했습니다. Systems/Processors의 GPU/Accelerator와 TelemetryService의 GPU 메트릭 리포트를 조회해, 사용률 메트릭 유무·GPU 목록(사용률/온도/전력)·텔레메트리 상태를 보여주고 가능/불가를 판정합니다.",
+        "결론: GPU 사용률 OOB 수집은 iDRAC9 + DataCenter 라이선스 + SMBPBI 지원 데이터센터 GPU + 텔레메트리 활성에서만 노출됩니다. 미지원이거나 패스쓰루로 게스트에 직접 할당된 경우는 기존 게스트 nvidia-smi 수집(설정 › GPU 게스트 수집)을 사용하세요 — 프로브가 서버별로 정확히 알려줍니다.",
+        "추가 수집(추천): GPU 목록(모델·상태), NIC 어댑터/포트(링크·속도), iDRAC 라이선스(Enterprise/DataCenter), iDRAC 계정(권한·활성), 부팅 설정. 모두 상세 모달에 표시됩니다."
+      ]
+    },
+    {
       "version": "2.24.0",
       "date": "2026-06-25",
       "title": "iDRAC 상세 — 버전·드라이버·온도/CPU/팬 차트 + Dell 핵심 정보 수집",

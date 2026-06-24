@@ -78,7 +78,7 @@ import { enqueueIdracScan, getIdracScanResult } from '../central/idracScanJobs.j
 import { getPollerStatus, pollNow } from '../idrac/poller.js';
 import { getInventory as getIdracInventory } from '../idrac/invCache.js';
 import { getSensorSeries } from '../idrac/sensorStore.js';
-import { fetchInventory as fetchIdracInventory, fetchSensors as fetchIdracSensors } from '../idrac/redfish.js';
+import { fetchInventory as fetchIdracInventory, fetchSensors as fetchIdracSensors, probeGpuTelemetry } from '../idrac/redfish.js';
 import { listCollectors, addCollector, updateCollector, removeCollector, loadCollectors } from '../collector/registry.js';
 import { allCollectorStatus, getCollectorStatus } from '../collector/state.js';
 import { pullNow } from '../collector/puller.js';
@@ -772,6 +772,15 @@ adminRouter.get('/idrac/:id/sensors', adminOnly, async (req, res) => {
   }
   const minutes = Math.max(0, Math.min(1440, Number(req.query.minutes) || 0));
   res.json({ ok: true, ...getSensorSeries(s.id, { minutes }), live, intervalMs: getPollerStatus().intervalMs });
+});
+
+// iDRAC에서 GPU 사용률 수집 가능 여부 실측 확인(GPU 목록 + 텔레메트리 리포트).
+adminRouter.get('/idrac/:id/gpu-probe', adminOnly, async (req, res) => {
+  const s = loadIdracRegistry().find((x) => x.id === req.params.id);
+  if (!s) return res.status(404).json({ ok: false, reason: '서버를 찾을 수 없습니다.' });
+  if (s.type === 'ome') return res.status(400).json({ ok: false, reason: 'OME 소스는 GPU 프로브를 지원하지 않습니다(iDRAC 직접만).' });
+  try { res.json({ ok: true, ...(await probeGpuTelemetry(s)) }); }
+  catch (e) { res.status(502).json({ ok: false, reason: e.message }); }
 });
 
 // Import servers (JSON array / { servers:[...] } / CSV text). Body:

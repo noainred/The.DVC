@@ -187,6 +187,14 @@ export async function fetchInventory(entry) {
         totalGiB: s.MemorySummary?.TotalSystemMemoryGiB ?? null,
         health: s.MemorySummary?.Status?.Health || '',
       };
+      inv.boot = {
+        mode: s.Boot?.BootSourceOverrideMode || s.BiosVersion ? (s.Boot?.BootSourceOverrideMode || '') : '',
+        overrideTarget: s.Boot?.BootSourceOverrideTarget || '',
+        overrideEnabled: s.Boot?.BootSourceOverrideEnabled || '',
+        secureBoot: s.SecureBoot?.['@odata.id'] ? 'present' : '',
+        bootOrderCount: Array.isArray(s.Boot?.BootOrder) ? s.Boot.BootOrder.length : null,
+      };
+      inv.powerState = s.PowerState || '';
     }
   } catch { /* identity optional */ }
 
@@ -346,6 +354,87 @@ export async function fetchInventory(entry) {
     }
   } catch { /* events optional */ }
 
+  // --- GPU(Accelerator) 목록: 모델·상태 (iDRAC가 OOB로 인식한 GPU) ---
+  inv.gpus = [];
+  try {
+    if (sysId) {
+      const procRoot = await G(`${sysId}/Processors`);
+      for (const m of (procRoot.Members || []).slice(0, 24)) {
+        let p; try { p = await G(m['@odata.id']); } catch { continue; }
+        const isGpu = /gpu|accelerator/i.test(p.ProcessorType || '') || /gpu|nvidia|tesla|a100|h100|h200|l40|l4\b/i.test(`${p.Model || ''} ${p.Name || ''}`);
+        if (!isGpu) continue;
+        inv.gpus.push({ name: p.Name || p.Id || '', model: (p.Model || '').trim(), manufacturer: p.Manufacturer || '', health: p.Status?.Health || '', state: p.Status?.State || '' });
+      }
+      if (inv.gpus.length) inv.health.gpu = inv.gpus.some((g) => g.health && g.health !== 'OK') ? 'Warning' : 'OK';
+    }
+  } catch { /* gpu optional */ }
+
+  // --- NIC 어댑터/포트: 모델·링크 상태·속도 ---
+  inv.nics = [];
+  try {
+    const chassisRoot = await G('/redfish/v1/Chassis');
+    for (const cm of (chassisRoot.Members || []).map((x) => x['@odata.id']).filter(Boolean).slice(0, 4)) {
+      let na; try { na = await G(`${cm}/NetworkAdapters`); } catch { continue; }
+      for (const am of (na.Members || []).slice(0, 8)) {
+        let a; try { a = await G(am['@odata.id']); } catch { continue; }
+        const ports = [];
+        const portsLink = a.NetworkPorts?.['@odata.id'] || a.Ports?.['@odata.id'];
+        if (portsLink) {
+          try {
+            const pr = await G(portsLink);
+            for (const pm of (pr.Members || []).slice(0, 8)) {
+              try {
+                const p = await G(pm['@odata.id']);
+                ports.push({
+                  id: p.Id || p.Name || '',
+                  link: p.LinkStatus || p.Status?.State || '',
+                  speedMbps: num(p.CurrentLinkSpeedMbps) ?? (p.SupportedLinkCapabilities?.[0]?.LinkSpeedMbps ?? null),
+                });
+              } catch { /* skip port */ }
+            }
+          } catch { /* ports optional */ }
+        }
+        inv.nics.push({ name: a.Id || a.Model || '', model: a.Model || a.Manufacturer || '', ports });
+      }
+    }
+  } catch { /* nics optional */ }
+
+  // --- iDRAC 라이선스(Enterprise/DataCenter — GPU 텔레메트리 가용성과 직결) ---
+  inv.licenses = [];
+  try {
+    let lic = null;
+    for (const p of ['/redfish/v1/LicenseService/Licenses', `${mgrId || '/redfish/v1/Managers/iDRAC.Embedded.1'}/Oem/Dell/DellLicenses`]) {
+      try { lic = await G(p); if (lic?.Members?.length) break; } catch { /* try next */ }
+    }
+    for (const m of (lic?.Members || []).slice(0, 12)) {
+      try {
+        const l = await G(m['@odata.id']);
+        inv.licenses.push({
+          name: l.Name || l.LicenseDescription || l.Id || '',
+          type: l.LicenseType || l.LicensePrimaryStatus || '',
+          entitlement: l.EntitlementId || l.EntitlementID || '',
+          expiry: l.ExpirationDate || '',
+        });
+      } catch { /* skip */ }
+    }
+  } catch { /* license optional */ }
+
+  // --- iDRAC 사용자 계정(감사용 — 활성 계정·권한, 비밀번호 제외) ---
+  inv.idracUsers = [];
+  try {
+    let acc = null;
+    for (const p of ['/redfish/v1/AccountService/Accounts', `${mgrId || '/redfish/v1/Managers/iDRAC.Embedded.1'}/Accounts`]) {
+      try { acc = await G(p); if (acc?.Members?.length) break; } catch { /* try next */ }
+    }
+    for (const m of (acc?.Members || []).slice(0, 32)) {
+      try {
+        const u = await G(m['@odata.id']);
+        if (!u.UserName) continue; // 빈 슬롯 제외
+        inv.idracUsers.push({ id: u.Id || '', userName: u.UserName, role: u.RoleId || u.Role || '', enabled: u.Enabled !== false });
+      } catch { /* skip */ }
+    }
+  } catch { /* users optional */ }
+
   // --- Firmware/driver inventory (각종 카드: NIC·RAID·PSU·BIOS·iDRAC 등 + 버전) ---
   try { inv.firmware = await fetchFirmwareInventory(entry); } catch { inv.firmware = []; }
 
@@ -394,6 +483,73 @@ function classifyFw(name) {
   if (n.includes('gpu') || n.includes('nvidia')) return 'GPU';
   if (n.includes('driver') || n.includes('os ')) return 'Driver';
   return '기타';
+}
+
+/**
+ * iDRAC(Redfish)에서 GPU 사용률 수집이 가능한지 실측으로 확인한다.
+ * 1) Systems/Processors 중 GPU/Accelerator → 모델·상태·ProcessorMetrics(대역폭/사용률/온도/전력)
+ * 2) TelemetryService MetricReports 중 GPU 관련 → 사용률 메트릭 포함 여부
+ * 반환 { gpus:[...], telemetry:{available, gpuReports}, utilizationAvailable, notes }.
+ * (대부분 모델은 온도/전력은 OOB로 보이나, GPU '사용률(%)'은 iDRAC9+DataCenter 라이선스 +
+ *  SMBPBI 지원 데이터센터 GPU에서만 텔레메트리로 노출됨. 미지원이면 게스트 nvidia-smi 권장.)
+ */
+export async function probeGpuTelemetry(entry) {
+  const base = entry.host.replace(/\/+$/, '');
+  const auth = 'Basic ' + Buffer.from(`${entry.username}:${entry.password}`).toString('base64');
+  const G = (p) => get(base, p, auth);
+  const out = { gpus: [], telemetry: { available: false, gpuReports: [] }, utilizationAvailable: false, notes: [] };
+
+  // 1) Processors → GPU/Accelerator
+  try {
+    const sysRoot = await G('/redfish/v1/Systems');
+    const sysId = firstMember(sysRoot);
+    if (sysId) {
+      const procRoot = await G(`${sysId}/Processors`);
+      for (const m of (procRoot.Members || []).slice(0, 24)) {
+        let p; try { p = await G(m['@odata.id']); } catch { continue; }
+        const isGpu = /gpu|accelerator/i.test(p.ProcessorType || '') || /gpu|nvidia|tesla|a100|h100|h200|l40|l4\b/i.test(`${p.Model || ''} ${p.Name || ''}`);
+        if (!isGpu) continue;
+        const g = { name: p.Name || p.Id || '', model: (p.Model || '').trim(), manufacturer: p.Manufacturer || '', health: p.Status?.Health || '', state: p.Status?.State || '' };
+        // ProcessorMetrics(있으면 대역폭/사용률/온도/전력 — Dell Oem 포함)
+        try {
+          const pm = await G(`${m['@odata.id']}/ProcessorMetrics`);
+          if (num(pm.BandwidthPercent) != null) g.bandwidthPct = num(pm.BandwidthPercent);
+          if (num(pm.OperatingSpeedMHz) != null) g.clockMHz = num(pm.OperatingSpeedMHz);
+          const dell = pm.Oem?.Dell || {};
+          for (const [k, v] of Object.entries(dell)) {
+            if (typeof v !== 'number') continue;
+            if (/util/i.test(k)) g.utilPct = v;
+            else if (/temp/i.test(k)) g.tempC = v;
+            else if (/power/i.test(k)) g.powerW = v;
+          }
+        } catch { /* metrics optional */ }
+        out.gpus.push(g);
+        if (g.utilPct != null || g.bandwidthPct != null) out.utilizationAvailable = true;
+      }
+    }
+  } catch { out.notes.push('Processors(시스템) 조회 실패 — 권한/모델 확인'); }
+
+  // 2) TelemetryService MetricReports — GPU 관련 리포트 + 사용률 메트릭 유무
+  try {
+    await G('/redfish/v1/TelemetryService');
+    out.telemetry.available = true;
+    const reps = await G('/redfish/v1/TelemetryService/MetricReports').catch(() => ({}));
+    for (const m of (reps.Members || [])) {
+      const id = m['@odata.id'] || '';
+      if (!/gpu|accelerator/i.test(id)) continue;
+      try {
+        const rep = await G(id);
+        const vals = rep.MetricValues || [];
+        const hasUtil = vals.some((v) => /util|usage|activity/i.test(String(v.MetricId || '')));
+        out.telemetry.gpuReports.push({ id: rep.Id || id.split('/').pop(), metrics: vals.length, hasUtilization: hasUtil });
+        if (hasUtil) out.utilizationAvailable = true;
+      } catch { /* skip report */ }
+    }
+    if (!out.telemetry.gpuReports.length) out.notes.push('텔레메트리에 GPU 사용률 리포트가 없음(GPU 미지원/리포트 비활성).');
+  } catch { out.notes.push('TelemetryService 없음/비활성 — GPU 사용률 OOB 수집 불가(iDRAC9+DataCenter 라이선스 필요).'); }
+
+  if (!out.gpus.length) out.notes.push('iDRAC가 인식한 GPU(Processor/Accelerator)가 없음 — 패스쓰루로 게스트에 직접 할당된 경우 iDRAC에 안 보일 수 있습니다.');
+  return out;
 }
 
 /**
