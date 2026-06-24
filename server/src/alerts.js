@@ -25,6 +25,7 @@ const DEFAULTS = {
     criticalAlarms: { enabled: true },
     vcenterDown: { enabled: true },
     hostDisconnected: { enabled: true },
+    massVmPowerOff: { enabled: true, threshold: 10 },
     datastorePct: { enabled: true, threshold: 90 },
     ramOvercommitPct: { enabled: false, threshold: 120 },
     vcpuPerCore: { enabled: false, threshold: 5 },
@@ -118,6 +119,45 @@ export function evaluate(snap, cfg = loadAlertConfig()) {
   return out;
 }
 
+/**
+ * 동시 다운 감지(상태 전이) — 직전 스냅샷에서 POWERED_ON이던 VM이 현재 POWERED_OFF로
+ * 바뀐 수를 vCenter별로 집계해 임계 이상이면 위험 알림. 호스트/스토리지/클러스터 장애 징후.
+ * 순수 함수: prevPower(Map: vmId→powerState)와 현재 snap을 받아 알림 배열 반환.
+ * 주의: '현재 스냅샷에 존재하며 OFF로 바뀐' VM만 센다 → vCenter 수집 실패(VM 누락)로 인한
+ * 오탐을 방지(누락 VM은 전이로 보지 않음).
+ */
+export function detectMassPowerOff(prevPower, snap, threshold = 10) {
+  const out = [];
+  if (!prevPower || !prevPower.size) return out;
+  const th = Math.max(2, Number(threshold) || 10);
+  const byVc = new Map();
+  for (const v of snap.vms || []) {
+    if (v.template) continue;
+    if (prevPower.get(v.id) === 'POWERED_ON' && v.powerState === 'POWERED_OFF') {
+      const g = byVc.get(v.vcenterId) || []; g.push(v); byVc.set(v.vcenterId, g);
+    }
+  }
+  for (const [vc, list] of byVc) {
+    if (list.length < th) continue;
+    const byHost = {};
+    for (const v of list) { const h = v.host || '?'; byHost[h] = (byHost[h] || 0) + 1; }
+    const hostStr = Object.entries(byHost).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([h, n]) => `${h}:${n}대`).join(', ');
+    const names = list.slice(0, 8).map((v) => v.name).join(', ');
+    out.push({
+      key: `massoff:${vc}`, severity: 'critical',
+      title: `VM 동시 다운 ${list.length}대: ${vc}`,
+      detail: `직전 수집 이후 ${list.length}대가 동시에 전원 OFF(임계 ${th}대). 호스트별 ${hostStr}. 대상 ${names}${list.length > 8 ? ` 외 ${list.length - 8}대` : ''}. 호스트/스토리지/클러스터 장애 의심.`,
+    });
+  }
+  return out;
+}
+
+/** 현재 스냅샷의 VM 전원상태로 직전상태 맵을 갱신(존재하는 VM만 → 수집 실패 시 직전값 유지). */
+function updatePrevPower(prev, snap) {
+  for (const v of snap.vms || []) { if (!v.template) prev.set(v.id, v.powerState); }
+  return prev;
+}
+
 async function post(url, payload) {
   return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: AbortSignal.timeout(10000) });
 }
@@ -137,6 +177,7 @@ export async function notify(alert, cfg = loadAlertConfig()) {
 const firing = new Map();   // key -> { alert, since, lastNotified }
 const recent = [];          // recent notifications (in-memory, newest first)
 let timer = null;
+let vmPowerPrev = null;      // vmId -> powerState (직전 스냅샷, 동시 다운 감지용)
 
 function pushRecent(entry) { recent.unshift(entry); if (recent.length > 200) recent.pop(); }
 
@@ -151,7 +192,16 @@ async function tick() {
 
 async function refreshState(cfg, sendEnabled) {
   let active = [];
-  try { active = evaluate(store.get(), cfg); } catch { active = []; }
+  const snap = store.get();
+  try { active = evaluate(snap, cfg); } catch { active = []; }
+  // 동시 다운 감지: 직전 스냅샷과 비교(전이). 규칙 켜져 있을 때만 알림에 포함하되,
+  // 직전상태 맵은 항상 갱신해 다음 주기 비교를 유지한다.
+  try {
+    if (vmPowerPrev && cfg.rules?.massVmPowerOff?.enabled) {
+      active = active.concat(detectMassPowerOff(vmPowerPrev, snap, cfg.rules.massVmPowerOff.threshold));
+    }
+    vmPowerPrev = updatePrevPower(vmPowerPrev || new Map(), snap);
+  } catch { /* */ }
   const now = Date.now();
   const cooldownMs = (cfg.cooldownMin || 60) * 60_000;
   const seen = new Set();
