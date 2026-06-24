@@ -556,6 +556,13 @@ function buildGpuInventory(snap, vcenterId) {
     e.vms++; e.vgpu += v.gpu.vgpu || 0; e.passthrough += v.gpu.passthrough || 0;
     gpuVmByHost[v.host] = e;
   }
+  // 게스트 수집 사용률은 '전원 ON GPU VM'만 집계(전원 OFF VM의 stale 값 제외) → 호스트(이름)별 평균.
+  const onGpuVmIds = new Set((snap.vms || []).filter((v) => v.gpu && v.powerState === 'POWERED_ON').map((v) => v.id));
+  const guestUtilByHost = new Map(); // hostName -> [utilPct...]
+  for (const g of getGuestGpuVms()) {
+    if (!onGpuVmIds.has(g.vmId) || g.utilPct == null) continue;
+    const arr = guestUtilByHost.get(g.host) || []; arr.push(g.utilPct); guestUtilByHost.set(g.host, arr);
+  }
   for (const h of hosts) {
     const gpus = h.gpus || [];
     if (!gpus.length) continue;
@@ -564,14 +571,15 @@ function buildGpuInventory(snap, vcenterId) {
     const modes = {};
     for (const g of gpus) { const md = g.mode || (g.vgpuMode ? 'vgpu' : 'passthrough'); modes[md] = (modes[md] || 0) + 1; byMode[md] = (byMode[md] || 0) + 1; }
     const primaryMode = Object.entries(modes).sort((a, b) => b[1] - a[1])[0][0];
-    // ESXi가 사용률을 못 보는 패스쓰루 호스트는 게스트 OS 수집 오버레이로 보완.
-    const guest = h.gpuUtilPct == null ? getGuestGpuHost(h.id) : null;
-    const utilPct = h.gpuUtilPct ?? (guest ? guest.utilPct : null);
+    // ESXi가 사용률을 못 보는 패스쓰루 호스트는 게스트 OS 수집 오버레이로 보완(전원 ON VM만).
+    const gu = guestUtilByHost.get(h.name);
+    const guestUtil = gu && gu.length ? Math.round(gu.reduce((a, b) => a + b, 0) / gu.length) : null;
+    const utilPct = h.gpuUtilPct ?? guestUtil;
     const vmAlloc = gpuVmByHost[h.name] || { vms: 0, vgpu: 0, passthrough: 0 };
     hostsWithGpu.push({
       id: h.id, host: h.name, vcenterId: h.vcenterId, cluster: h.cluster, count: gpus.length,
       model: gpus[0].model, memGB: gpus[0].memGB, mode: primaryMode, modes,
-      vgpu: primaryMode === 'vgpu', utilPct, utilSource: h.gpuUtilPct != null ? 'esxi' : (guest ? 'guest' : null),
+      vgpu: primaryMode === 'vgpu', utilPct, utilSource: h.gpuUtilPct != null ? 'esxi' : (guestUtil != null ? 'guest' : null),
       assignedVms: vmAlloc.vms,
     });
     for (const g of gpus) {
@@ -724,7 +732,8 @@ api.get('/tools/gpu/vms', (req, res) => {
   res.json({
     total: vms.length,
     vms: vms.map((v) => {
-      const g = guestByVm.get(v.id);
+      // 전원 OFF VM은 사용률 계산/표시에서 제외(이전에 수집된 stale 값 무시).
+      const g = v.powerState === 'POWERED_ON' ? guestByVm.get(v.id) : null;
       return {
         id: v.id, name: v.name, vcenterId: v.vcenterId, host: v.host, cluster: v.cluster,
         powerState: v.powerState, model: hostModel[v.host] || '', gpu: v.gpu,
