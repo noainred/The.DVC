@@ -46,6 +46,8 @@ STAGE="$BUILD_DIR/$PKG"
 OUT_DIR="${OUT_DIR:-$REPO_ROOT/dist-offline}"
 trap 'rm -rf "$BUILD_DIR"' EXIT
 mkdir -p "$STAGE/runtime" "$OUT_DIR"
+# zip은 BUILD_DIR 안에서( cd ) 실행되므로 OUT_DIR을 절대경로로 정규화한다(상대 --out 대응).
+OUT_DIR="$(cd "$OUT_DIR" && pwd)"
 
 echo "==> Windows 패키지 빌드: $PKG"
 
