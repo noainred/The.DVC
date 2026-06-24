@@ -177,17 +177,21 @@ export function deleteUser(username) {
   return { ok: true };
 }
 
-/** Start TOTP enrollment: generate a secret (pending until confirmed). */
-export function beginTotpEnroll(username) {
+/** Start TOTP enrollment: generate a secret (pending until confirmed).
+ *  host(접속한 포탈 IP:포트)를 주면 발급 라벨 issuer에 포함해 여러 포탈을 구분한다:
+ *  'VMware Portal' → 'VMware(<host>) Portal'. */
+export function beginTotpEnroll(username, host = '') {
   const u = getUser(username);
   if (!u) return { ok: false, reason: '사용자를 찾을 수 없습니다.' };
   const secret = totp.generateSecret();
   u.totpSecret = secret;
   u.totpEnabled = false; // not active until a code is confirmed
   persistUsers();
+  const base = config.auth.totpIssuer || 'VMware Portal';
+  const issuer = host ? (base.includes('VMware') ? base.replace('VMware', `VMware(${host})`) : `${base}(${host})`) : base;
   return {
     ok: true, secret,
-    otpauthURL: totp.otpauthURL({ secret, account: username, issuer: config.auth.totpIssuer }),
+    otpauthURL: totp.otpauthURL({ secret, account: username, issuer }),
   };
 }
 

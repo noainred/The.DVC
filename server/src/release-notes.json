@@ -1,6 +1,16 @@
 {
   "notes": [
     {
+      "version": "2.7.0",
+      "date": "2026-06-24",
+      "title": "30분 유휴 자동 로그아웃 + OTP 라벨에 포탈 IP 표시 + 로그인 데모 계정 안내 제거",
+      "notes": [
+        "보안: 로그인 후 30분 동안 입력(마우스·키보드·클릭·스크롤)이 없으면 자동 로그아웃하고 안내 표시. 활동 시 타이머 리셋.",
+        "OTP 등록 라벨에 접속한 포탈 IP를 포함 — 'VMware Portal:ID' → 'VMware(IP:포트) Portal:ID'. Authenticator 앱에서 여러 포탈을 구분하기 쉬움.",
+        "로그인 화면에서 기본 데모 계정(admin/admin123) 안내 문구 제거."
+      ]
+    },
+    {
       "version": "2.6.0",
       "date": "2026-06-24",
       "title": "GPU 게스트 공용 계정 Windows/Linux 분리 입력 + VM 목록 OS별 보기",
