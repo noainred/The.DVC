@@ -13,7 +13,7 @@ export const authRouter = Router();
 authRouter.get('/config', (_req, res) => {
   const ad = loadAdConfig();
   const sec = loadSessionSecurity();
-  res.json({ authEnabled: config.auth.enabled, adEnabled: Boolean(ad.enabled && ad.url), idleLogoutEnabled: sec.idleLogoutEnabled, idleLogoutMin: sec.idleLogoutMin });
+  res.json({ authEnabled: config.auth.enabled, adEnabled: Boolean(ad.enabled && ad.url), idleLogoutEnabled: sec.idleLogoutEnabled, idleLogoutMin: sec.idleLogoutMin, settingsOwners: sec.settingsOwners });
 });
 
 authRouter.post('/login', async (req, res) => {

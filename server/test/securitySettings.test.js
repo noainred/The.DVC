@@ -25,6 +25,20 @@ test('범위 클램프(1~1440) + 반올림', () => {
   assert.equal(saveSessionSecurity({ idleLogoutMin: 20.7 }).idleLogoutMin, 21);
 });
 
+test('설정 소유 계정 기본값 noainred', () => {
+  assert.deepEqual(loadSessionSecurity().settingsOwners, ['noainred']);
+});
+
+test('설정 소유 계정 변경 + 정규화(중복/형식 제거)', () => {
+  const s = saveSessionSecurity({ settingsOwners: ['noainred', 'admin', 'noainred', '!bad name'] });
+  assert.deepEqual(s.settingsOwners, ['noainred', 'admin']);
+});
+
+test('설정 소유 계정 빈 목록은 거부', () => {
+  assert.throws(() => saveSessionSecurity({ settingsOwners: [] }), /최소 1개/);
+  assert.throws(() => saveSessionSecurity({ settingsOwners: ['  '] }), /최소 1개/);
+});
+
 test('비활성 토글 유지', () => {
   const s = saveSessionSecurity({ idleLogoutEnabled: false });
   assert.equal(s.idleLogoutEnabled, false);

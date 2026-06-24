@@ -526,9 +526,15 @@ adminRouter.put('/security/session', adminOnly, (req, res) => {
     if (!v.ok) return res.status(401).json({ ok: false, reason: v.reason, needEnroll: !!v.needEnroll });
   }
   const before = loadSessionSecurity();
-  const after = saveSessionSecurity({ idleLogoutEnabled: req.body?.idleLogoutEnabled, idleLogoutMin: req.body?.idleLogoutMin });
+  let after;
+  try {
+    after = saveSessionSecurity({ idleLogoutEnabled: req.body?.idleLogoutEnabled, idleLogoutMin: req.body?.idleLogoutMin, settingsOwners: req.body?.settingsOwners });
+  } catch (e) { return res.status(400).json({ ok: false, reason: e.message }); }
   const fmt = (s) => (s.idleLogoutEnabled ? `${s.idleLogoutMin}분` : '비활성');
-  logAudit({ user: username, action: '세션 보안(유휴 자동 로그아웃) 변경', target: 'security/session', detail: `유휴 로그아웃 ${fmt(before)} → ${fmt(after)}`, ip: req.ip || '' });
+  const parts = [];
+  if (fmt(before) !== fmt(after)) parts.push(`유휴 로그아웃 ${fmt(before)} → ${fmt(after)}`);
+  if (before.settingsOwners.join(',') !== after.settingsOwners.join(',')) parts.push(`설정 소유 계정 [${before.settingsOwners.join(', ')}] → [${after.settingsOwners.join(', ')}]`);
+  logAudit({ user: username, action: '세션 보안/설정 접근 변경', target: 'security/session', detail: parts.join(' · ') || '변경 없음', ip: req.ip || '' });
   res.json({ ok: true, settings: after });
 });
 
