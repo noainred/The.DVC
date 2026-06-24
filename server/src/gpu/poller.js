@@ -12,7 +12,7 @@ import { store } from '../store.js';
 import { loadGpuGuestSettings, resolveVmCreds } from './settings.js';
 import { setGuestGpu, pruneGuestGpu, guestGpuCounts } from './store.js';
 import { collectVmGpu, VimSoapClient } from './guestops.js';
-import { collectVmGpuSsh } from './sshCollect.js';
+import { collectVmGpuSsh, guestIps } from './sshCollect.js';
 
 let timer = null;
 let lastRun = null;
@@ -83,7 +83,10 @@ async function pollLive(snap, vc, s) {
   // 대상: GPU(패스쓰루+vGPU) 할당 VM. nvidia-smi는 vGPU 게스트에서도 사용률을 보고한다.
   const onHost = (snap.vms || []).filter((v) => v.vcenterId === vc.id && hostNames.has(v.host));
   const gpuVms = onHost.filter((v) => vmUsesGpu(v) && !v.template);
-  const onTools = gpuVms.filter((v) => v.powerState === 'POWERED_ON' && v.toolsStatus === 'RUNNING');
+  // 수집 가능 상태: guestops는 Tools RUNNING 필요. ssh/auto는 Tools 미동작이어도 게스트 IP가 있으면 SSH로 수집 가능.
+  const method = s.collectMethod || 'auto';
+  const onTools = gpuVms.filter((v) => v.powerState === 'POWERED_ON'
+    && (v.toolsStatus === 'RUNNING' || (method !== 'guestops' && guestIps(v).length > 0)));
   const cands = onTools.filter((v) => resolveVmCreds(s, vc.id, v.id, /windows/i.test(v.guestOS || ''))).slice(0, s.maxVmsPerVcenter || 1000);
   const counts = { gpuHosts: hostNames.size, vmsOnHost: onHost.length, gpuVms: gpuVms.length, onTools: onTools.length, candidates: cands.length };
   console.log(`[gpu-guest] ${vc.id} 선별: GPU호스트=${counts.gpuHosts} · 호스트위VM=${counts.vmsOnHost} · GPU할당VM=${counts.gpuVms} · On+Tools=${counts.onTools} · 계정있음(수집대상)=${counts.candidates}`);

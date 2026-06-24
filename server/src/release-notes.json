@@ -1,6 +1,15 @@
 {
   "notes": [
     {
+      "version": "2.22.1",
+      "date": "2026-06-24",
+      "title": "GPU 수집 — SSH/auto는 Tools 미동작 VM도 대상(IP만 있으면)",
+      "notes": [
+        "수집 대상 선별이 항상 'VMware Tools RUNNING'을 요구해, SSH로는 수집 가능한데 Tools가 안 떠서 후보에서 빠지던 문제 수정. 수집 방식이 ssh/auto이면 Tools 미동작이어도 게스트 IP가 있으면 수집 대상에 포함(SSH로 nvidia-smi). guestops 전용일 때만 Tools RUNNING을 요구합니다.",
+        "주의: 실제 수집은 화면에 타이핑한 값이 아니라 'VM별 계정'에 저장된 계정/비번을 사용합니다. 빠른 단일 테스트로 성공한 계정은 VM별 계정(별도/공용)에 저장해야 수집에 반영됩니다."
+      ]
+    },
+    {
       "version": "2.22.0",
       "date": "2026-06-24",
       "title": "GPU 수집 — auto 폴백을 기본화(추가 설정 없이 SSH 자동 수집)",
