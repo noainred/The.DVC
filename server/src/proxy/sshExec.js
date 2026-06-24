@@ -11,8 +11,14 @@ function connect({ host, port = 22, username, password, privateKey, readyTimeout
     const conn = new SSHClient();
     conn.on('ready', () => resolve(conn));
     conn.on('error', reject);
+    // password 대신 keyboard-interactive 만 허용하는 서버 지원(ssh2는 명시적으로 켜야 시도).
+    // 같은 비밀번호로 모든 프롬프트에 응답한다.
+    conn.on('keyboard-interactive', (name, instr, lang, prompts, finish) => {
+      finish(prompts.map(() => password || ''));
+    });
     const auth = { host, port, username, readyTimeout, keepaliveInterval: 15000 };
-    if (privateKey) auth.privateKey = privateKey; else auth.password = password;
+    if (privateKey) auth.privateKey = privateKey;
+    else { auth.password = password; auth.tryKeyboard = true; }
     conn.connect(auth);
   });
 }

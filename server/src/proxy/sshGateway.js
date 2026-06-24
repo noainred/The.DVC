@@ -69,10 +69,24 @@ function handleConnection(ws) {
           s.stderr?.on('data', (d) => { if (ws.readyState === ws.OPEN) ws.send(d.toString('utf8')); });
         });
       });
-      ssh.on('error', (err) => { send({ type: 'status', text: `연결 실패: ${err.message}` }); ws.close(); });
+      // 일부 서버(하드닝된 Linux/네트워크 장비/Windows OpenSSH 등)는 password 대신
+      // keyboard-interactive 만 허용한다. ssh2는 명시적으로 켜지 않으면 이 방식을
+      // 시도하지 않아 'All configured authentication methods failed' 로 끝난다.
+      // 같은 비밀번호로 모든 프롬프트에 응답해 password/keyboard-interactive 양쪽을 지원.
+      ssh.on('keyboard-interactive', (name, instr, lang, prompts, finish) => {
+        finish(prompts.map(() => msg.password || ''));
+      });
+      ssh.on('error', (err) => {
+        const hint = /All configured authentication methods failed|authentication/i.test(err.message)
+          ? ' — 아이디/비밀번호를 확인하세요. (계정이 맞다면 대상 서버가 비밀번호 로그인을 막아둔 경우일 수 있습니다)'
+          : '';
+        send({ type: 'status', text: `연결 실패: ${err.message}${hint}` });
+        ws.close();
+      });
       ssh.on('close', () => ws.close());
       ssh.connect({
         host, port, username: msg.username, password: msg.password,
+        tryKeyboard: true,
         readyTimeout: 20000, keepaliveInterval: 15000,
       });
     } else if (msg.type === 'data' && stream) {

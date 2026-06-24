@@ -1,6 +1,16 @@
 {
   "notes": [
     {
+      "version": "2.22.3",
+      "date": "2026-06-24",
+      "title": "원격 SSH 콘솔 — keyboard-interactive 인증 지원(인증 실패 수정)",
+      "notes": [
+        "원격 콘솔 SSH 접속이 'All configured authentication methods failed' 로 실패하던 문제 수정. 일부 서버(하드닝된 Linux·네트워크 장비·Windows OpenSSH 등)는 password 대신 keyboard-interactive 만 허용하는데, ssh2가 이를 기본으로 시도하지 않아 발생했습니다. 이제 keyboard-interactive 프롬프트에 같은 비밀번호로 응답해 password/keyboard-interactive 양쪽을 지원합니다.",
+        "GPU SSH 수집(withSsh)에도 동일 적용 — SSH 로그인은 되는데 게스트작업/수집만 막히던 일부 서버가 추가로 수집됩니다.",
+        "인증 실패 시 안내 문구 보강(아이디/비번 확인 또는 대상 서버의 비밀번호 로그인 차단 가능성)."
+      ]
+    },
+    {
       "version": "2.22.2",
       "date": "2026-06-24",
       "title": "서버 로그 — 검색어로 줄 필터링",
