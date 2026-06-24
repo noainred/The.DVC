@@ -14,6 +14,7 @@ export default function Collectors() {
   const [busy, setBusy] = useState(false);
   const [banner, setBanner] = useState(null);
   const [central, setCentral] = useState(null);
+  const [sort, setSort] = useState({ key: 'id', dir: 'asc' });
 
   const load = async () => {
     try { setData(await fetchJson('/admin/collectors')); setError(null); }
@@ -74,6 +75,18 @@ export default function Collectors() {
     catch (e) { setError(e.message); }
   };
 
+  // 상태가 '오류'(status.ok === false)인 수집 서버를 일괄 삭제.
+  const removeErrored = async () => {
+    const st = data.status || {}; const cols = data.collectors || [];
+    const ids = cols.filter((c) => st[c.id] && st[c.id].ok === false).map((c) => c.id);
+    if (!ids.length) { setBanner({ ok: false, text: '오류 상태인 수집 서버가 없습니다.' }); return; }
+    if (!window.confirm(`오류 상태 수집 서버 ${ids.length}대를 일괄 삭제할까요?\n${ids.join(', ')}`)) return;
+    setBusy(true);
+    try { let n = 0; for (const id of ids) { try { await delJson(`/admin/collectors/${encodeURIComponent(id)}`); n++; } catch { /* */ } } await load(); setBanner({ ok: true, text: `오류 수집 서버 ${n}대 삭제 완료` }); }
+    catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  };
+
   const pullNow = async () => {
     setBusy(true);
     try { await postJson('/admin/collectors/pull', {}); await load(); }
@@ -84,6 +97,33 @@ export default function Collectors() {
   const list = data.collectors || [];
   const status = data.status || {};
   const totalHosts = Object.values(status).reduce((a, s) => a + (s.ok ? (s.hosts || 0) : 0), 0);
+  const erroredCount = list.filter((c) => status[c.id] && status[c.id].ok === false).length;
+
+  // 정렬 — 헤더 클릭으로 키/방향 토글. status 파생 컬럼(상태·호스트·버전·동기화)도 지원.
+  const sortVal = (c) => {
+    const s = status[c.id] || {};
+    switch (sort.key) {
+      case 'name': return c.name || '';
+      case 'datacenter': return c.datacenter || '';
+      case 'url': return c.url || '';
+      case 'state': return s.ok === true ? 2 : (s.ok === false ? 0 : 1); // 오류<대기<정상
+      case 'hosts': return s.ok ? (s.hosts || 0) : -1;
+      case 'version': return s.version || '';
+      case 'sync': return s.at || 0;
+      case 'enabled': return c.enabled === false ? 0 : 1;
+      default: return c.id || '';
+    }
+  };
+  const sortedList = [...list].sort((a, b) => {
+    const va = sortVal(a), vb = sortVal(b);
+    const r = (typeof va === 'number' && typeof vb === 'number') ? va - vb : String(va).localeCompare(String(vb));
+    return sort.dir === 'asc' ? r : -r;
+  });
+  const arrow = (k) => (sort.key === k ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : '');
+  const th = (k, label, extra = {}) => (
+    <th {...extra} style={{ cursor: 'pointer', userSelect: 'none', ...(extra.style || {}) }}
+      onClick={() => setSort((s) => ({ key: k, dir: s.key === k && s.dir === 'asc' ? 'desc' : 'asc' }))}>{label}{arrow(k)}</th>
+  );
 
   return (
     <>
@@ -93,6 +133,7 @@ export default function Collectors() {
           {central && <span className="muted" style={{ fontSize: 12 }}>중앙 버전 <b style={{ color: 'var(--text)' }}>v{central}</b></span>}
           <button className="logout-btn" style={{ padding: '9px 14px' }} disabled={busy} onClick={pullNow}>지금 동기화</button>
           <button className="logout-btn" style={{ padding: '9px 14px' }} disabled={busy} onClick={() => upgrade(null)}>모두 업그레이드</button>
+          <button className="logout-btn" style={{ padding: '9px 14px', color: 'var(--red)', borderColor: erroredCount ? 'var(--red)' : undefined }} disabled={busy || !erroredCount} title="상태가 '오류'인 수집 서버를 일괄 삭제" onClick={removeErrored}>오류 서버 일괄 삭제{erroredCount ? ` (${erroredCount})` : ''}</button>
           <button className="login-btn" style={{ flex: 'none', padding: '9px 16px' }} onClick={openAdd}>+ 수집 서버 추가</button>
         </div>
       </div>
@@ -117,11 +158,11 @@ export default function Collectors() {
       <div className="table-wrap">
         <table>
           <thead><tr>
-            <th>ID</th><th>이름</th><th>데이터센터</th><th>URL</th><th>상태</th><th>호스트</th><th>버전</th><th>최근 동기화</th><th>수집</th><th className="right">작업</th>
+            {th('id', 'ID')}{th('name', '이름')}{th('datacenter', '데이터센터')}{th('url', 'URL')}{th('state', '상태')}{th('hosts', '호스트')}{th('version', '버전')}{th('sync', '최근 동기화')}{th('enabled', '수집')}<th className="right">작업</th>
           </tr></thead>
           <tbody>
-            {list.length === 0 && <tr><td colSpan={10} className="center muted" style={{ padding: 28 }}>등록된 수집 서버가 없습니다. “+ 수집 서버 추가”로 등록하세요.</td></tr>}
-            {list.map((c) => {
+            {sortedList.length === 0 && <tr><td colSpan={10} className="center muted" style={{ padding: 28 }}>등록된 수집 서버가 없습니다. “+ 수집 서버 추가”로 등록하세요.</td></tr>}
+            {sortedList.map((c) => {
               const s = status[c.id];
               return (
                 <tr key={c.id}>
