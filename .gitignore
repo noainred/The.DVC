@@ -22,6 +22,11 @@ server/.upgrade-cache/
 *.bak.[0-9]*
 *.new.[0-9]*
 dist-offline/
+# 릴리스 바이너리는 GitHub Releases(롤링 'downloads' 태그)로 발행 — git에 커밋하지 않는다.
+# (.git 비대화 방지). versions.json/README 는 추적 유지.
+download/*.tar.gz
+download/*.zip
+download/*.sha256
 server/config/alarm-mutes.json
 server/config/auth.json
 server/config/runtime.json
