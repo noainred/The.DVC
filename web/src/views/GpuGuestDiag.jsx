@@ -99,8 +99,13 @@ export default function GpuGuestDiag() {
   const [guide, setGuide] = useState(true);
   const [vcFilter, setVcFilter] = useState('');   // '' = 전체 vCenter
   const [failOnly, setFailOnly] = useState(false); // 실패한 VM만 보기
+  const [vcs, setVcs] = useState([]);              // 등록된 전체 vCenter(표시 순서)
   const load = () => fetchJson('/admin/gpu-guest/diag').then((d) => { setData(d); setError(null); }).catch((e) => setError(e.message));
-  useEffect(() => { load(); const t = setInterval(load, 15_000); return () => clearInterval(t); }, []);
+  useEffect(() => {
+    load();
+    fetchJson('/vcenters').then((d) => setVcs(Array.isArray(d) ? d : (d?.vcenters || []))).catch(() => {});
+    const t = setInterval(load, 15_000); return () => clearInterval(t);
+  }, []);
   if (error) return <ErrorBox message={error} />;
   if (!data) return <Loading />;
 
@@ -108,8 +113,13 @@ export default function GpuGuestDiag() {
   if (data.local && (data.local.vcenters || []).length) rawBlocks.push({ key: '_local', agent: '이 포탈(로컬 수집)', at: data.local.at, vcenters: data.local.vcenters });
   for (const a of (data.agents || [])) rawBlocks.push({ key: a.agent, agent: `Agent: ${a.agent}`, at: a.receivedAt || a.at, vcenters: a.vcenters || [], counts: a.counts });
 
-  // vCenter(법인) 목록 — 필터 드롭다운용.
-  const vcIds = [...new Set(rawBlocks.flatMap((b) => (b.vcenters || []).map((d) => d.vcId)).filter(Boolean))].sort();
+  // 진단 데이터가 있는 vCenter(법인) id.
+  const diagVcIds = new Set(rawBlocks.flatMap((b) => (b.vcenters || []).map((d) => d.vcId)).filter(Boolean));
+  // 드롭다운: 등록된 '전체' vCenter(표시 순서) + 진단에만 있는 id를 뒤에 보강. 숫자가 vCenter 관리와 일치.
+  const vcOptions = [];
+  const seen = new Set();
+  for (const v of vcs) { const id = v.id || v; if (id && !seen.has(id)) { seen.add(id); vcOptions.push({ id, name: v.name || id, hasData: diagVcIds.has(id) }); } }
+  for (const id of diagVcIds) if (!seen.has(id)) { seen.add(id); vcOptions.push({ id, name: id, hasData: true }); }
   // 선택한 vCenter만 남기고, 매칭 vCenter가 없는 블록(agent)은 숨긴다.
   const blocks = vcFilter
     ? rawBlocks.map((b) => ({ ...b, vcenters: (b.vcenters || []).filter((d) => d.vcId === vcFilter) })).filter((b) => b.vcenters.length)
@@ -127,8 +137,8 @@ export default function GpuGuestDiag() {
         <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }}>
           <span className="muted">vCenter(법인)</span>
           <select className="select" value={vcFilter} onChange={(e) => setVcFilter(e.target.value)}>
-            <option value="">전체 ({vcIds.length})</option>
-            {vcIds.map((id) => <option key={id} value={id}>{id}</option>)}
+            <option value="">전체 ({vcOptions.length}){diagVcIds.size !== vcOptions.length ? ` · 수집됨 ${diagVcIds.size}` : ''}</option>
+            {vcOptions.map((o) => <option key={o.id} value={o.id}>{o.name}{o.hasData ? '' : ' · 데이터 없음'}</option>)}
           </select>
         </label>
         <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }} title="인증/실행에 실패한 VM만 표시">
@@ -138,7 +148,9 @@ export default function GpuGuestDiag() {
       </div>
 
       {blocks.length === 0
-        ? <div className="card" style={{ padding: 16 }}><span className="muted">아직 진단 데이터가 없습니다. agent에서 GPU 게스트 수집이 한 주기 돌고 push되면 표시됩니다(설정 › GPU 게스트 수집 사용 + agent의 CENTRAL_URL/TOKEN 확인).</span></div>
+        ? <div className="card" style={{ padding: 16 }}><span className="muted">{vcFilter
+          ? `'${vcFilter}'의 GPU 게스트 수집 진단 데이터가 아직 없습니다 — 이 vCenter를 담당하는 agent가 GPU 게스트 수집을 한 주기 돌려 push해야 표시됩니다(설정 › GPU 게스트 수집에서 이 법인 사용 + agent CENTRAL_URL/TOKEN 확인).`
+          : '아직 진단 데이터가 없습니다. agent에서 GPU 게스트 수집이 한 주기 돌고 push되면 표시됩니다(설정 › GPU 게스트 수집 사용 + agent의 CENTRAL_URL/TOKEN 확인).'}</span></div>
         : blocks.map((b) => (
           <div key={b.key} className="card" style={{ padding: 14, marginBottom: 12 }}>
             <div className="flex between" style={{ alignItems: 'center' }}>
