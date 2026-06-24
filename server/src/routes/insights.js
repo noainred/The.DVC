@@ -6,7 +6,7 @@
 import { Router } from 'express';
 import { requireRole } from '../auth/auth.js';
 import { store } from '../store.js';
-import { latestPowerByHostName } from '../idrac/service.js';
+import { latestPowerByHostName, allMeasuredPower } from '../idrac/service.js';
 import { computeFinOps, loadFinopsConfig, saveFinopsConfig } from '../insights/finops.js';
 import { detectAnomalies } from '../insights/anomaly.js';
 import { forecastCapacity } from '../insights/forecast.js';
@@ -22,8 +22,8 @@ const adminOnly = requireRole('admin');
 // --- FinOps: 전력 → kWh·비용·CO2 ---
 insightsRouter.get('/finops', async (_req, res) => {
   try {
-    const powerMap = await latestPowerByHostName();
-    res.json(computeFinOps(store.get(), powerMap));
+    const measured = await allMeasuredPower();
+    res.json(computeFinOps(store.get(), measured));
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 insightsRouter.get('/finops/config', (_req, res) => res.json(loadFinopsConfig()));

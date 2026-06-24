@@ -48,7 +48,7 @@ function FinOps() {
   };
   return (
     <div>
-      <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>전력 수집(iDRAC/OME/원격) 기반 에너지·비용·탄소 추정. 현재 소비전력 × PUE {d.config.pue} 기준. 측정 호스트 {d.measuredHosts}/{d.totalHosts}.</p>
+      <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>전력 수집(iDRAC/OME/원격) 기반 에너지·비용·탄소 추정. 현재 소비전력 × PUE {d.config.pue} 기준. 측정 서버 {d.measuredHosts}대(인벤토리 {d.totalHosts}호스트).{d.unmappedServers > 0 ? ` · ⚠ 미매핑 ${d.unmappedServers}대(${(d.unmappedWatts / 1000).toFixed(1)}kW)는 '(미매핑)'으로 집계 — ESXi 호스트명과 매핑하면 vCenter별로 귀속됩니다.` : ''}</p>
       <div className="flex gap wrap" style={{ marginBottom: 12 }}>
         <Kpi label="현재 소비전력" value={`${num(d.totals.watts)} W`} sub={`설비 포함 ${num(d.totals.facilityWatts)} W`} />
         <Kpi label="월 에너지" value={`${num(d.totals.kwhMonth)} kWh`} sub={`연 ${num(d.totals.kwhYear)} kWh`} />
@@ -140,9 +140,18 @@ function Anomaly() {
 
 /* ───────────────────────── 용량 예측 ───────────────────────── */
 function Forecast() {
-  const { data: d, error, loading } = usePolling('/insights/forecast', { days: 14 }, 60_000);
-  if (error) return <ErrorBox message={error} />;
-  if (loading && !d) return <Loading />;
+  const { data: vcs } = usePolling('/vcenters', {}, 60_000);
+  const [vc, setVc] = useState('');
+  const [days, setDays] = useState(14);
+  const [d, setD] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const run = async () => {
+    setLoading(true); setError(null);
+    try { setD(await fetchJson('/insights/forecast', { days: Number(days) || 14, ...(vc ? { vcenterId: vc } : {}) })); }
+    catch (e) { setError(e.message); }
+    finally { setLoading(false); }
+  };
   const dsRow = (x) => (
     <tr key={x.id}>
       <td><b>{x.name}</b></td><td className="muted">{x.vcenterId}</td>
@@ -154,7 +163,23 @@ function Forecast() {
   );
   return (
     <div>
-      <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>최근 14일 추세를 선형회귀해 <b>한계 도달 시점(ETA)</b>을 추정합니다. 신뢰도(R²) 0.3 이상만 표시.</p>
+      <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>최근 추세를 선형회귀해 <b>한계 도달 시점(ETA)</b>을 추정합니다. 신뢰도(R²) 0.3 이상만 표시.</p>
+      <div className="card" style={{ padding: 12, marginBottom: 12, borderLeft: '3px solid var(--amber,#f59e0b)' }}>
+        <div className="muted" style={{ fontSize: 13 }}>⚠ 용량예측은 전체 데이터스토어의 시계열을 회귀 분석하므로, <b>전체 vCenter 조회는 대규모 환경에서 수십 초~수 분</b>이 걸릴 수 있습니다(그동안 화면이 멈춘 듯 보일 수 있음). <b>vCenter를 선택</b>하면 훨씬 빠릅니다.</div>
+        <div className="flex gap wrap" style={{ marginTop: 10, alignItems: 'center' }}>
+          <select className="select" value={vc} onChange={(e) => setVc(e.target.value)} style={{ minWidth: 200 }}>
+            <option value="">전체 vCenter (느림)</option>
+            {(vcs || []).map((v) => <option key={v.id} value={v.id}>{v.name || v.id}</option>)}
+          </select>
+          <span className="muted">기간</span><input className="input" type="number" min={3} max={365} style={{ width: 72 }} value={days} onChange={(e) => setDays(e.target.value)} /><span className="muted">일</span>
+          <button className="login-btn" style={{ flex: 'none', padding: '8px 18px' }} disabled={loading} onClick={run}>{loading ? '분석 중…(잠시만요)' : '조회'}</button>
+          {d && !loading && <span className="muted" style={{ fontSize: 12 }}>분석 DS {num(d.scannedDatastores ?? 0)}개 · 범위 {d.config?.vcenterId || '전체'}</span>}
+        </div>
+      </div>
+      {error && <ErrorBox message={error} />}
+      {loading && <Loading />}
+      {!d && !loading && !error && <div className="card"><span className="muted">vCenter를 선택(또는 전체)하고 <b>조회</b>를 눌러 용량예측을 실행하세요.</span></div>}
+      {d && !loading && (<>
       <div className="flex gap wrap" style={{ marginBottom: 12 }}>
         <Kpi label="30일 내 포화 예상 DS" value={num((d?.soon || []).length)} color={(d?.soon || []).length ? '#f87171' : '#34d399'} />
         <Kpi label="예측 가능 DS" value={num((d?.datastores || []).length)} />
@@ -179,6 +204,7 @@ function Forecast() {
             ))}</tbody></table></div>
         </div>
       )}
+      </>)}
     </div>
   );
 }
