@@ -18,6 +18,7 @@ let timer = null;
 let lastRun = null;
 let lastDiag = null; // { at, mode, vcenters:[{vcId, stage, counts, results, error}] }
 let running = false;
+const learnedMethod = new Map(); // vmId -> 'ssh'|'guestops' : auto 모드에서 직전에 성공한 수집 방식(다음 주기 우선)
 
 // 간단한 동시성 제한 실행기.
 async function eachLimited(items, limit, fn) {
@@ -114,25 +115,29 @@ async function pollLive(snap, vc, s) {
       if (!creds) return;
       const moref = String(v.id).split(':').slice(1).join(':');
       const dlHosts = dlByHost.get(v.host) || [];
-      const method = s.collectMethod || 'guestops';
+      const method = s.collectMethod || 'auto';
       console.log(`[gpu-guest]   → ${v.name} (${moref}) host=${v.host} 계정=${creds.username}(${creds.source}) 방식=${method} dl후보=[${dlHosts.join(', ')}]`);
       let err = null;
-      // 'ssh'=직접 SSH+nvidia-smi · 'auto'=SSH 우선 실패 시 게스트작업 · 'guestops'=VMware Tools(기본).
+      // 'ssh'=직접 SSH+nvidia-smi · 'auto'=게스트작업 먼저→실패 시 SSH(+VM별 성공 방식 학습) · 'guestops'=VMware Tools.
       const viaSsh = () => collectVmGpuSsh(v, creds, { timeoutMs: s.timeoutMs, port: s.sshPort });
       const viaGuestops = () => collectVmGpu(c, moref, creds, { isWindows, timeoutMs: s.timeoutMs, dlHosts });
-      let r = null;
+      let r = null, usedMethod = method;
       if (method === 'ssh') {
         r = await viaSsh().catch((e) => { err = e.message; return null; });
       } else if (method === 'auto') {
-        r = await viaSsh().catch((e) => { err = e.message; return null; });
-        if (!(r && r.utilPct != null)) r = await viaGuestops().catch((e) => { err = e.message; return null; });
+        // 직전 성공 방식을 먼저(학습). 처음엔 게스트작업 → 실패하면 SSH 폴백. 추가 설정 없이 자동 수집.
+        const order = learnedMethod.get(v.id) === 'ssh' ? ['ssh', 'guestops'] : ['guestops', 'ssh'];
+        for (const m of order) {
+          r = await (m === 'ssh' ? viaSsh() : viaGuestops()).catch((e) => { err = e.message; return null; });
+          if (r && r.utilPct != null) { usedMethod = m; learnedMethod.set(v.id, m); break; }
+        }
       } else {
         r = await viaGuestops().catch((e) => { err = e.message; return null; });
       }
       if (!(r && r.utilPct != null) && err) console.warn(`[gpu-guest]   ✗ ${v.name}: ${err}`);
-      // 진단에 시도한 OS/계정도 남긴다(인증 실패 시 어떤 계정이 거부됐는지 즉시 식별 — 비번 제외).
+      // 진단에 시도한 OS/계정·실제 사용 방식도 남긴다(인증 실패 시 식별 — 비번 제외).
       const osLabel = isWindows ? 'Windows' : 'Linux';
-      const acct = `${creds.username}(${creds.source})·${method}`;
+      const acct = `${creds.username}(${creds.source})·${usedMethod}`;
       if (r && r.utilPct != null) {
         console.log(`[gpu-guest]   ✓ ${v.name}: util=${r.utilPct}% mem=${r.memUsedPct ?? '-'}% gpus=${r.count}`);
         vms.push({ vmId: v.id, host: v.host, vcenterId: vc.id, utilPct: r.utilPct, memUsedPct: r.memUsedPct });

@@ -449,10 +449,11 @@ adminRouter.post('/gpu-guest/test', adminOnly, async (req, res) => {
         if (method === 'ssh') {
           r = await testVmGuestSsh(v, creds, { timeoutMs: s.timeoutMs, port: s.sshPort, trace: seed }).catch((e) => ({ login: false, read: false, error: e.message, trace: seed.concat({ t: Date.now(), msg: `✗ 예외: ${e.message}` }) }));
         } else if (method === 'auto') {
-          r = await testVmGuestSsh(v, creds, { timeoutMs: s.timeoutMs, port: s.sshPort, trace: seed }).catch(() => null);
+          // 수집과 동일: VMware Tools 게스트작업 먼저 → 실패 시 SSH 폴백.
+          r = await testVmGuest(c, moref, creds, { isWindows, timeoutMs: s.timeoutMs, dlHosts, trace: seed }).catch(() => null);
           if (!r || !r.read) {
-            const seed2 = (r?.trace || seed).concat({ t: Date.now(), msg: 'SSH 미수집 → VMware Tools 게스트작업으로 폴백' });
-            r = await testVmGuest(c, moref, creds, { isWindows, timeoutMs: s.timeoutMs, dlHosts, trace: seed2 }).catch((e) => ({ login: false, read: false, error: e.message, trace: seed2 }));
+            const seed2 = (r?.trace || seed).concat({ t: Date.now(), msg: '게스트작업 미수집 → SSH로 폴백' });
+            r = await testVmGuestSsh(v, creds, { timeoutMs: s.timeoutMs, port: s.sshPort, trace: seed2 }).catch((e) => ({ login: false, read: false, error: e.message, trace: seed2 }));
           }
         } else {
           r = await testVmGuest(c, moref, creds, { isWindows, timeoutMs: s.timeoutMs, dlHosts, trace: seed }).catch((e) => ({ login: false, read: false, error: e.message, trace: seed.concat({ t: Date.now(), msg: `✗ 예외: ${e.message}` }) }));

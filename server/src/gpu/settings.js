@@ -17,9 +17,10 @@ const DEFAULTS = {
   concurrency: 4,         // 동시에 게스트 작업할 VM 수(고RTT 보호)
   timeoutMs: 20_000,      // VM당 게스트 작업 타임아웃
   maxVmsPerVcenter: 1000, // 법인당 한 주기 최대 처리 VM(폭주 방지 안전상한)
-  // 수집 방식: 'guestops'=VMware Tools 게스트작업(기본) · 'ssh'=게스트 IP로 직접 SSH+nvidia-smi
-  //          · 'auto'=SSH 우선, 실패 시 게스트작업 폴백. SSH는 게스트작업(VGAuth) 인증만 막힐 때 유용.
-  collectMethod: 'guestops',
+  // 수집 방식: 'guestops'=VMware Tools 게스트작업 · 'ssh'=게스트 IP로 직접 SSH+nvidia-smi
+  //          · 'auto'(기본)=게스트작업 먼저, 실패하면 SSH 폴백(+VM별 성공 방식 학습). 추가 설정 없이
+  //            게스트작업(VGAuth) 인증이 막히는 VM만 자동으로 SSH로 수집된다.
+  collectMethod: 'auto',
   sshPort: 22,
   // { [vcenterId]: { enabled, username, password, vms: { [vmId]: { username, password } } } }
   //  - username/password : 법인 공용(기본) 계정 — 같은 계정 쓰는 VM에 적용(선택)

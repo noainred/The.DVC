@@ -81,12 +81,12 @@ export default function GpuGuestSettings() {
             value={Math.round(form.timeoutMs / 1000)} onChange={(e) => setForm((f) => ({ ...f, timeoutMs: Math.max(3, Number(e.target.value) || 20) * 1000 }))} /></Field>
           <Field label="법인당 최대 VM"><input className="input" type="number" min={1} max={100000} style={{ width: 100 }}
             value={form.maxVmsPerVcenter} onChange={(e) => setForm((f) => ({ ...f, maxVmsPerVcenter: Math.max(1, Number(e.target.value) || 1000) }))} /></Field>
-          <Field label="수집 방식"><select className="select" style={{ width: 170 }} value={form.collectMethod}
-            title="VMware Tools=게스트작업(VGAuth). SSH 직접=게스트 IP로 SSH해 nvidia-smi(게스트작업 인증이 막힐 때). auto=SSH 우선 실패 시 게스트작업."
+          <Field label="수집 방식"><select className="select" style={{ width: 210 }} value={form.collectMethod}
+            title="auto(권장)=게스트작업 먼저→실패 시 SSH 자동 폴백(VM별 성공 방식 학습). VMware Tools=게스트작업만. SSH 직접=게스트 IP로 SSH해 nvidia-smi만."
             onChange={(e) => setForm((f) => ({ ...f, collectMethod: e.target.value }))}>
-            <option value="guestops">VMware Tools(기본)</option>
-            <option value="ssh">SSH 직접</option>
-            <option value="auto">auto(SSH→Tools)</option>
+            <option value="auto">auto · 자동 폴백(권장)</option>
+            <option value="guestops">VMware Tools만</option>
+            <option value="ssh">SSH 직접만</option>
           </select></Field>
           {form.collectMethod !== 'guestops' && (
             <Field label="SSH 포트"><input className="input" type="number" min={1} max={65535} style={{ width: 80 }}
@@ -453,9 +453,9 @@ function VmCredManager({ vcs, vcenters }) {
               <span className="muted">방식</span>
               <select className="select" style={{ width: 120 }} value={testMethod} onChange={(e) => setTestMethod(e.target.value)}>
                 <option value="">설정값</option>
+                <option value="auto">auto(자동 폴백)</option>
                 <option value="guestops">VMware Tools</option>
                 <option value="ssh">SSH 직접</option>
-                <option value="auto">auto(SSH→Tools)</option>
               </select>
             </label>
             <label className="flex gap" style={{ alignItems: 'center', fontSize: 12 }} title="실행 로그에 실제 전송되는 ID/비밀번호를 평문으로 표시(디버그). 이 응답에만 보이고 디스크/중앙에는 기록되지 않습니다.">
@@ -537,6 +537,6 @@ function toForm(settings, vcs, prev) {
   return {
     enabled: !!settings.enabled, pollIntervalMs: settings.pollIntervalMs || 60000, concurrency: settings.concurrency || 4,
     timeoutMs: settings.timeoutMs || 20000, maxVmsPerVcenter: settings.maxVmsPerVcenter || 1000,
-    collectMethod: settings.collectMethod || 'guestops', sshPort: settings.sshPort || 22, vcenters,
+    collectMethod: settings.collectMethod || 'auto', sshPort: settings.sshPort || 22, vcenters,
   };
 }
