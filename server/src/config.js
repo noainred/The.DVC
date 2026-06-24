@@ -6,11 +6,11 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 
-// Directory on GitHub (raw) that holds versions.json + the upgrade bundles.
-// The portal monitors this for new releases. After merging to main, switch the
-// ref to 'main'. Override with UPGRADE_REMOTE_BASE.
+// GitHub Releases '롤링' 자산(versions.json + 설치/업그레이드 번들)이 있는 base.
+// release 워크플로가 'downloads' 태그에 자산을 업로드하므로 ${base}/versions.json,
+// ${base}/<파일> 이 그대로 자산을 가리킨다. 사내 미러는 UPGRADE_REMOTE_BASE로 override.
 const DEFAULT_REMOTE_BASE =
-  'https://raw.githubusercontent.com/noainred/The.DVC/claude/vmware-global-monitoring-portal-nrnpnt/download';
+  'https://github.com/noainred/The.DVC/releases/download/downloads';
 
 /**
  * Central configuration for the portal backend.
@@ -85,11 +85,11 @@ export const config = {
       path.join(process.env.CONFIG_DIR || path.resolve(ROOT, 'config'), 'ipam.db'),
   },
   packages: {
-    // Where to fetch upgrade/install packages from (GitHub raw by default; set a
-    // LAN mirror for air-gapped sites), and where to store the downloaded files
-    // (also searched by the agent-deploy installer resolver).
+    // Where to fetch upgrade/install packages from (GitHub Releases 롤링 'downloads'
+    // 태그 기본; 폐쇄망은 PACKAGE_BASE_URL로 LAN 미러 지정), and where to store the
+    // downloaded files (also searched by the agent-deploy installer resolver).
     baseUrl: process.env.PACKAGE_BASE_URL ||
-      'https://github.com/noainred/The.DVC/raw/claude/vmware-global-monitoring-portal-nrnpnt/download',
+      'https://github.com/noainred/The.DVC/releases/download/downloads',
     dir: process.env.PACKAGE_DIR ||
       path.join(process.env.CONFIG_DIR || path.resolve(ROOT, 'config'), 'packages'),
   },
