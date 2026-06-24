@@ -232,6 +232,7 @@ function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared }) {
   const [selVc, setSelVc] = useState('');
   const [rows, setRows] = useState(null);   // null=미조회, []=없음
   const [osFilter, setOsFilter] = useState('all'); // all | linux | windows
+  const [powerFilter, setPowerFilter] = useState('all'); // all | on | off
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
@@ -358,8 +359,13 @@ function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared }) {
 
   const vcShared = vcenters[selVc] || {};
   const isWin = (r) => /windows/i.test(r.guestOS || '');
-  const shown = rows ? rows.filter((r) => (osFilter === 'all' ? true : osFilter === 'windows' ? isWin(r) : !isWin(r))) : rows;
+  const isOn = (r) => r.powerState === 'POWERED_ON';
+  const shown = rows ? rows.filter((r) =>
+    (osFilter === 'all' ? true : osFilter === 'windows' ? isWin(r) : !isWin(r))
+    && (powerFilter === 'all' ? true : powerFilter === 'on' ? isOn(r) : !isOn(r)),
+  ) : rows;
   const ownCount = shown ? shown.filter((r) => r.mode === 'own').length : 0;
+  const onCount = rows ? rows.filter(isOn).length : 0;
 
   return (
     <div className="card" style={{ padding: 16, marginTop: 14 }}>
@@ -370,6 +376,11 @@ function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared }) {
             <option value="all">전체 OS</option>
             <option value="linux">🐧 Linux</option>
             <option value="windows">🪟 Windows</option>
+          </select>
+          <select className="select" value={powerFilter} onChange={(e) => setPowerFilter(e.target.value)} style={{ minWidth: 120 }} title="전원 상태로 구분해 보기 — 꺼진 VM은 수집 대상이 아닙니다.">
+            <option value="all">전체 전원</option>
+            <option value="on">🟢 켜짐</option>
+            <option value="off">⚫ 꺼짐</option>
           </select>
           <select className="select" value={selVc} onChange={(e) => pickVc(e.target.value)} style={{ minWidth: 200 }}>
             <option value="">법인(vCenter) 선택…</option>
@@ -385,7 +396,7 @@ function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared }) {
       {selVc && rows && rows.length > 0 && (
         <>
           <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
-            공용 계정 — 🐧Linux <b>{vcShared.username || '(미설정)'}</b>{vcShared.hasPassword ? '·비번O' : ''} · 🪟Windows <b>{vcShared.winUsername || '(Linux로 폴백)'}</b>{vcShared.hasWinPassword ? '·비번O' : ''} · {osFilter === 'all' ? `VM ${rows.length}개` : `${osFilter} ${shown.length}/${rows.length}개`} · 별도 계정 {ownCount}개
+            공용 계정 — 🐧Linux <b>{vcShared.username || '(미설정)'}</b>{vcShared.hasPassword ? '·비번O' : ''} · 🪟Windows <b>{vcShared.winUsername || '(Linux로 폴백)'}</b>{vcShared.hasWinPassword ? '·비번O' : ''} · {(osFilter === 'all' && powerFilter === 'all') ? `VM ${rows.length}개` : `표시 ${shown.length}/${rows.length}개`} · 🟢켜짐 {onCount} · ⚫꺼짐 {rows.length - onCount} · 별도 계정 {ownCount}개
           </div>
           <div style={{ overflowX: 'auto', maxWidth: '100%' }}>
             <table className="data-table" style={{ width: '100%', fontSize: 13 }}>
