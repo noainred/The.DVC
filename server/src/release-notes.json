@@ -1,6 +1,16 @@
 {
   "notes": [
     {
+      "version": "2.1.2",
+      "date": "2026-06-24",
+      "title": "Overview GPU 카드 표시 수정 + 'GPU 사용 VM 수량' 카드",
+      "notes": [
+        "Overview GPU 카드의 'GPU VM undefined'·'GPU 호스트 undefined대' 표시 수정: GPU 집계값(gpuCards·gpuVms 등)을 /overview 최상위(ov)에서 읽도록 정정(기존 ov.global 참조 오류).",
+        "'GPU 사용율' 카드를 'GPU 사용 VM 수량'(GPU가 할당된 VM 수) 카드로 변경.",
+        "'GPU 카드 수량' 카드 보조설명을 '설치된 GPU 장수'로 정리."
+      ]
+    },
+    {
       "version": "2.1.1",
       "date": "2026-06-24",
       "title": "VM 이름 클릭 상세 팝업 안정화 — GPU 게스트 수집 등 어디서나 동일 동작",
