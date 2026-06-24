@@ -95,10 +95,10 @@ export async function guestProbe(candidates, probe, { guestUser = '', guestPass 
     try {
       await c.login();
       await eachLimited(vms, concurrency, async (v) => {
-        const creds = (guestUser && guestPass) ? { username: guestUser, password: guestPass } : resolveVmCreds(gset, vcId, v.id);
+        const isWindows = /windows/i.test(v.guestOS || '');
+        const creds = (guestUser && guestPass) ? { username: guestUser, password: guestPass } : resolveVmCreds(gset, vcId, v.id, isWindows);
         if (!creds || !creds.username) { errors.push({ vm: v.name, error: '게스트 계정 없음' }); return; }
         const moref = String(v.id).split(':').slice(1).join(':') || String(v.id);
-        const isWindows = /windows/i.test(v.guestOS || '');
         try {
           checked++;
           const r = await runGuestScript(c, moref, creds, probeScript(probe, isWindows), { isWindows, timeoutMs: 20_000 });

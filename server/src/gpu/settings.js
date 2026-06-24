@@ -61,9 +61,13 @@ export function saveGpuGuestSettings(partial) {
       const prev = next.vcenters[id] || {};
       const merged = {
         enabled: v.enabled !== undefined ? Boolean(v.enabled) : (prev.enabled ?? false),
+        // username/password = Linux(기본) 공용 계정
         username: v.username !== undefined ? String(v.username || '') : (prev.username || ''),
         // 빈 비밀번호 = 기존 유지
         password: (v.password !== undefined && v.password !== '') ? String(v.password) : (prev.password || ''),
+        // winUsername/winPassword = Windows 공용 계정(별도). 비우면 Linux 계정으로 폴백.
+        winUsername: v.winUsername !== undefined ? String(v.winUsername || '') : (prev.winUsername || ''),
+        winPassword: (v.winPassword !== undefined && v.winPassword !== '') ? String(v.winPassword) : (prev.winPassword || ''),
         vms: { ...(prev.vms || {}) }, // VM별 자격증명 override
       };
       if (v.vms && typeof v.vms === 'object') {
@@ -91,7 +95,7 @@ export function redactGpuGuestSettings(s) {
   for (const [id, v] of Object.entries(s.vcenters || {})) {
     const vms = {};
     for (const [vmId, c] of Object.entries(v.vms || {})) vms[vmId] = { username: c.username || '', hasPassword: !!c.password };
-    vcenters[id] = { enabled: !!v.enabled, username: v.username || '', hasPassword: !!v.password, vms };
+    vcenters[id] = { enabled: !!v.enabled, username: v.username || '', hasPassword: !!v.password, winUsername: v.winUsername || '', hasWinPassword: !!v.winPassword, vms };
   }
   return { enabled: s.enabled, pollIntervalMs: s.pollIntervalMs, concurrency: s.concurrency, timeoutMs: s.timeoutMs, maxVmsPerVcenter: s.maxVmsPerVcenter, vcenters };
 }
@@ -112,11 +116,13 @@ export function getGuestCreds(vcId) {
  * 법인(vCenter) 공용 계정으로 fallback. 둘 다 없으면 null(수집 대상 아님).
  * 반환 source: 'vm'(VM별) | 'vc'(법인 공용).
  */
-export function resolveVmCreds(s, vcId, vmId) {
+export function resolveVmCreds(s, vcId, vmId, isWindows = false) {
   const vc = (s.vcenters || {})[vcId];
   if (!vc) return null;
   const per = (vc.vms || {})[vmId];
   if (per && per.username) return { username: per.username, password: per.password || '', source: 'vm' };
+  // OS별 공용 계정: Windows VM이고 Windows 공용 계정이 있으면 그것, 아니면 Linux(기본) 공용 계정으로 폴백.
+  if (isWindows && vc.winUsername) return { username: vc.winUsername, password: vc.winPassword || '', source: 'vc-win' };
   if (vc.username) return { username: vc.username, password: vc.password || '', source: 'vc' };
   return null;
 }

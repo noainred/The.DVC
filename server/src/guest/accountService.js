@@ -34,10 +34,10 @@ export async function addUsersToVms({ vcenterId, vmIds = [], username, password,
       const name = v?.name || moref;
       try {
         if (!v) { results.push({ vmId, name, ok: false, error: '스냅샷에서 VM을 찾을 수 없음' }); continue; }
-        // 게스트 인증 계정: 요청값 우선, 없으면 GPU 게스트 설정의 vCenter/VM 계정.
-        let creds = (guestUser && guestPass) ? { username: guestUser, password: guestPass } : resolveVmCreds(gset, vcenterId, vmId);
-        if (!creds || !creds.username) { results.push({ vmId, name, ok: false, error: '게스트 인증 계정 없음(root 계정 입력 또는 GPU 게스트 설정)' }); continue; }
         const isWindows = /windows/i.test(v.guestOS || '');
+        // 게스트 인증 계정: 요청값 우선, 없으면 GPU 게스트 설정의 vCenter(OS별)/VM 계정.
+        let creds = (guestUser && guestPass) ? { username: guestUser, password: guestPass } : resolveVmCreds(gset, vcenterId, vmId, isWindows);
+        if (!creds || !creds.username) { results.push({ vmId, name, ok: false, error: '게스트 인증 계정 없음(root 계정 입력 또는 GPU 게스트 설정)' }); continue; }
         const h = hostByName.get(v.host);
         const dlHosts = h ? [h.mgmtIp, h.name].filter(Boolean) : [];
         const r = await addGuestUser(c, moref, creds, { username, password, sudo, nopasswd, isWindows, dlHosts });

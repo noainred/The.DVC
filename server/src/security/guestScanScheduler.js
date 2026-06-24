@@ -69,10 +69,10 @@ async function runJob(j) {
   try {
     await c.login();
     await eachLimited(vms, 4, async (v) => {
-      const creds = (j.guestUser && j.guestPass) ? { username: j.guestUser, password: j.guestPass } : resolveVmCreds(gset, j.vcenterId, v.id);
+      const isWindows = /windows/i.test(v.guestOS || '');
+      const creds = (j.guestUser && j.guestPass) ? { username: j.guestUser, password: j.guestPass } : resolveVmCreds(gset, j.vcenterId, v.id, isWindows);
       if (!creds || !creds.username) { errs.push(`${v.name}:계정없음`); return; }
       const moref = String(v.id).split(':').slice(1).join(':') || String(v.id);
-      const isWindows = /windows/i.test(v.guestOS || '');
       const os = isWindows ? 'windows' : 'linux';
       const h = hostByName.get(v.host); const dlHosts = h ? [h.mgmtIp, h.name].filter(Boolean) : [];
       try {
