@@ -13,7 +13,7 @@ export default function SessionSecurity() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
 
-  const load = () => fetchJson('/admin/security/session').then((r) => { setS(r); setErr(null); }).catch((e) => setErr(e.message));
+  const load = () => fetchJson('/admin/security/session').then((r) => { setS({ ...r, settingsOwners: (r.settingsOwners || []).join(', ') }); setErr(null); }).catch((e) => setErr(e.message));
   useEffect(() => { load(); }, []);
   if (err) return <ErrorBox message={err} />;
   if (!s) return <Loading />;
@@ -21,9 +21,10 @@ export default function SessionSecurity() {
   const save = async () => {
     setBusy(true); setMsg(null);
     try {
-      const r = await putJson('/admin/security/session', { idleLogoutEnabled: s.idleLogoutEnabled, idleLogoutMin: Number(s.idleLogoutMin) || 30, otp: otp.trim() });
+      const owners = String(s.settingsOwners || '').split(/[\s,]+/).map((x) => x.trim()).filter(Boolean);
+      const r = await putJson('/admin/security/session', { idleLogoutEnabled: s.idleLogoutEnabled, idleLogoutMin: Number(s.idleLogoutMin) || 30, settingsOwners: owners, otp: otp.trim() });
       if (r && r.ok === false) { setMsg(`오류: ${r.reason || '저장 실패'}`); }
-      else { setS(r.settings || s); setOtp(''); setMsg('저장되었습니다. 변경 내역은 감사 로그에 기록됩니다. (다음 로그인부터/재접속 시 적용)'); }
+      else { const ns = r.settings || s; setS({ ...ns, settingsOwners: (ns.settingsOwners || []).join(', ') }); setOtp(''); setMsg('저장되었습니다. 변경 내역은 감사 로그에 기록됩니다.'); }
     } catch (e) { setMsg(`오류: ${e.message}`); }
     finally { setBusy(false); }
   };
@@ -45,6 +46,13 @@ export default function SessionSecurity() {
           <input className="input" type="number" min={1} max={1440} style={{ width: 100 }} disabled={!s.idleLogoutEnabled}
             value={s.idleLogoutMin} onChange={(e) => setS({ ...s, idleLogoutMin: e.target.value })} />
           <span className="muted">분 (1~1440)</span>
+        </div>
+
+        <div style={{ borderTop: '1px solid rgba(255,255,255,.08)', marginTop: 16, paddingTop: 14 }}>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}><b>설정 메뉴 접근 계정</b> — 이 계정으로 로그인했을 때만 '설정'이 보입니다(쉼표/공백 구분, 최소 1개).</div>
+          <input className="input" style={{ width: '100%', maxWidth: 480 }} placeholder="noainred, admin" value={s.settingsOwners || ''}
+            onChange={(e) => setS({ ...s, settingsOwners: e.target.value })} />
+          <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>⚠ 본인 계정을 빼면 다음부터 설정에 못 들어올 수 있으니 주의하세요.</div>
         </div>
 
         <div style={{ borderTop: '1px solid rgba(255,255,255,.08)', marginTop: 16, paddingTop: 14 }}>

@@ -6,6 +6,8 @@ export default function Login({ onSuccess, notice }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [fails, setFails] = useState(0);
+  const [warn, setWarn] = useState(false); // 3회 실패 경고창
 
   const submit = async (e) => {
     e.preventDefault();
@@ -13,9 +15,15 @@ export default function Login({ onSuccess, notice }) {
     setError(null);
     try {
       const user = await login(username.trim(), password);
+      setFails(0);
       onSuccess(user);
     } catch (err) {
       setError(err.message);
+      setFails((n) => {
+        const c = n + 1;
+        if (c >= 3) setWarn(true); // 3회 연속 실패 → 법적 경고
+        return c;
+      });
     } finally {
       setBusy(false);
     }
@@ -23,6 +31,24 @@ export default function Login({ onSuccess, notice }) {
 
   return (
     <div className="login-screen">
+      {warn && (
+        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setWarn(false); }}>
+          <div className="modal card" style={{ maxWidth: 460, border: '1px solid var(--red,#ef4444)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+              <span style={{ fontSize: 22 }}>⚠️</span>
+              <b style={{ fontSize: 16, color: 'var(--red,#ef4444)' }}>접근 경고</b>
+            </div>
+            <div style={{ fontSize: 14, lineHeight: 1.7 }}>
+              로그인이 <b>{fails}회</b> 실패했습니다.<br />
+              <b>인가되지 않은 접근은 법적인 책임이 있습니다.</b><br />
+              접속하신 <b>IP</b> 와 <b>SSO 계정</b>은 기록됩니다.
+            </div>
+            <div className="flex" style={{ justifyContent: 'flex-end', marginTop: 16 }}>
+              <button className="login-btn" style={{ flex: 'none', padding: '8px 18px' }} onClick={() => setWarn(false)}>확인</button>
+            </div>
+          </div>
+        </div>
+      )}
       <form className="login-card card" onSubmit={submit}>
         <div className="brand" style={{ justifyContent: 'center', marginBottom: 6 }}>
           <div className="logo">V</div>
