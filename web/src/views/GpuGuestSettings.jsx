@@ -321,7 +321,10 @@ function VmCredManager({ vcs, vcenters }) {
                         {r.mode === 'own' ? (
                           <div className="flex gap" style={{ gap: 4 }}>
                             <input className="input" style={{ width: 104 }} placeholder="계정(root 등)" value={r.username} onChange={(e) => setRow(r.id, { username: e.target.value })} />
-                            <input className="input" type="password" style={{ width: 104 }} placeholder={r.hadOwn ? '●●●●●' : '비밀번호'} value={r.password} onChange={(e) => setRow(r.id, { password: e.target.value })} />
+                            <input className="input" type="password" style={{ width: 120 }}
+                              placeholder={r.hadOwn ? '저장됨 · 변경시 입력' : '비밀번호'}
+                              title={r.hadOwn ? '저장된 비밀번호가 있습니다. 새 비밀번호로 테스트/저장하려면 여기에 입력하세요(비워두면 저장된 값 사용).' : '이 VM 계정의 비밀번호'}
+                              value={r.password} onChange={(e) => setRow(r.id, { password: e.target.value })} />
                           </div>
                         ) : <span className="muted" style={{ fontSize: 12 }}>공용 계정</span>}
                       </td>
