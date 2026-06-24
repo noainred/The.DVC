@@ -122,7 +122,7 @@ adminRouter.delete('/users/:username', adminOnly, (req, res) => {
 // TOTP (Google Authenticator) management for a user — admin enrolls and hands
 // the QR to the user (since OTP-only users have no password to self-enroll).
 adminRouter.post('/users/:username/totp/begin', adminOnly, (req, res) => {
-  const r = beginTotpEnroll(req.params.username);
+  const r = beginTotpEnroll(req.params.username, req.get('host') || '');
   res.status(r.ok ? 200 : 400).json(r);
 });
 adminRouter.post('/users/:username/totp/confirm', adminOnly, (req, res) => {

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { login } from '../api.js';
 
-export default function Login({ onSuccess }) {
+export default function Login({ onSuccess, notice }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState(null);
@@ -33,6 +33,8 @@ export default function Login({ onSuccess }) {
         </div>
         <div className="login-title">로그인</div>
 
+        {notice && <div className="login-hint" style={{ color: 'var(--amber,#f59e0b)', textAlign: 'center', marginBottom: 8 }}>{notice}</div>}
+
         <label className="login-field">
           <span>아이디</span>
           <input className="input" autoFocus autoComplete="username" value={username}
@@ -51,8 +53,7 @@ export default function Login({ onSuccess }) {
         </button>
 
         <div className="login-hint muted">
-          OTP를 등록한 계정은 <b>Google OTP 6자리 코드</b>로 로그인합니다.<br />
-          기본 데모 계정: <code>admin</code> / <code>admin123</code> (OTP 등록 전)
+          OTP를 등록한 계정은 <b>Google OTP 6자리 코드</b>로 로그인합니다.
         </div>
       </form>
     </div>

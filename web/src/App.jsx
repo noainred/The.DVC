@@ -67,6 +67,7 @@ const getLandingTab = () => {
 export default function App() {
   // auth bootstrap: 'loading' | 'anon' | user object
   const [user, setUser] = useState('loading');
+  const [loginNotice, setLoginNotice] = useState('');
 
   useEffect(() => {
     setUnauthorizedHandler(() => setUser(null));
@@ -79,12 +80,25 @@ export default function App() {
     })();
   }, []);
 
+  // 유휴 자동 로그아웃 — 로그인(실세션) 상태에서 30분 동안 입력이 없으면 강제 로그아웃.
+  useEffect(() => {
+    if (!user || user === 'loading' || !getToken()) return undefined;
+    const IDLE_MS = 30 * 60 * 1000;
+    let t;
+    const doLogout = () => { setToken(null); setLoginNotice('30분 동안 활동이 없어 자동 로그아웃되었습니다. 다시 로그인하세요.'); setUser(null); };
+    const reset = () => { clearTimeout(t); t = setTimeout(doLogout, IDLE_MS); };
+    const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'click', 'visibilitychange'];
+    events.forEach((e) => window.addEventListener(e, reset, { passive: true }));
+    reset();
+    return () => { clearTimeout(t); events.forEach((e) => window.removeEventListener(e, reset)); };
+  }, [user]);
+
   const logout = () => { setToken(null); setUser(null); };
 
   if (user === 'loading') {
     return <div className="login-screen"><div className="loading">불러오는 중…</div></div>;
   }
-  if (!user) return <Login onSuccess={setUser} />;
+  if (!user) return <Login onSuccess={(u) => { setLoginNotice(''); setUser(u); }} notice={loginNotice} />;
   return (
     <ErrorBoundary fallback={
       <div className="login-screen"><div className="error-box">

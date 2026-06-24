@@ -40,7 +40,7 @@ authRouter.get('/me', authMiddleware, (req, res) => {
 // Self-service TOTP (Google Authenticator) enrollment for the current local user.
 authRouter.post('/totp/begin', authMiddleware, (req, res) => {
   if (!getUser(req.user.username)) return res.status(400).json({ ok: false, reason: '로컬 계정만 OTP를 등록할 수 있습니다. (AD 계정 제외)' });
-  res.json(beginTotpEnroll(req.user.username));
+  res.json(beginTotpEnroll(req.user.username, req.get('host') || ''));
 });
 authRouter.post('/totp/confirm', authMiddleware, (req, res) => {
   const r = confirmTotpEnroll(req.user.username, (req.body || {}).code);
