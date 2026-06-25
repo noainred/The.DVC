@@ -42,8 +42,17 @@ export function logAudit({ user = 'unknown', action, target = '', detail = '', i
     const line = JSON.stringify({ at: new Date().toISOString(), user, action, target, detail, ip }) + '\n';
     fs.mkdirSync(path.dirname(FILE), { recursive: true });
     fs.appendFileSync(FILE, line, { mode: 0o600 });
+    ensurePerms();
     maybeTrim();
   } catch { /* best effort */ }
+}
+
+// mode 옵션은 신규 생성 시에만 적용되므로, 프로세스당 1회 0600을 보장한다(append 핫패스 보호).
+let permsEnsured = false;
+function ensurePerms() {
+  if (permsEnsured) return;
+  permsEnsured = true;
+  try { fs.chmodSync(FILE, 0o600); } catch { /* */ }
 }
 
 let appendsSinceTrim = 0;
@@ -52,7 +61,7 @@ function maybeTrim() {
   appendsSinceTrim = 0;
   try {
     const lines = fs.readFileSync(FILE, 'utf8').split('\n').filter(Boolean);
-    if (lines.length > MAX) fs.writeFileSync(FILE, lines.slice(lines.length - MAX).join('\n') + '\n', { mode: 0o600 });
+    if (lines.length > MAX) { fs.writeFileSync(FILE, lines.slice(lines.length - MAX).join('\n') + '\n', { mode: 0o600 }); try { fs.chmodSync(FILE, 0o600); } catch { /* */ } }
   } catch { /* ignore */ }
 }
 

@@ -99,6 +99,10 @@ export const adminRouter = Router();
 
 const adminOnly = requireRole('admin');
 
+// 자격증명 디버그 표시용 마스킹 — 평문 비밀번호는 절대 응답에 넣지 않고 길이만 노출한다.
+// (계정명/passwordless 여부는 디버그에 유용하므로 유지)
+const maskPw = (p) => (p === '' || p == null) ? '(빈 비번/passwordless)' : `•••• (${String(p).length}자)`;
+
 // 서버 분석 공용 — iDRAC 서버 목록(OME 제외) + vCenter 필터(?vcenterId=, __unmapped__=미지정).
 function idracServersForAnalysis(req) {
   const vc = String(req?.query?.vcenterId || '').trim();
@@ -535,7 +539,7 @@ adminRouter.post('/gpu-physical/test', adminOnly, async (req, res) => {
   if (b.id) { const s = getPhysicalRaw(b.id); if (s) { host = s.host; username = s.username; password = b.password || s.password; port = s.port || 22; } }
   if (!host || !username) return res.status(400).json({ ok: false, reason: 'host, username이 필요합니다.' });
   const st = loadGpuGuestSettings();
-  const seed = b.revealCreds ? [{ t: Date.now(), msg: `🔓 자격증명(평문): id=${username} · pw=${password || '(빈 비번)'} · 포트=${port}` }] : [];
+  const seed = b.revealCreds ? [{ t: Date.now(), msg: `🔓 자격증명: id=${username} · pw=${maskPw(password)} · 포트=${port}` }] : [];
   try {
     const r = await testVmGuestSsh({ ipAddresses: [host] }, { username, password }, { timeoutMs: st.timeoutMs, port, trace: seed });
     res.json({ ok: true, host, port, ...r });
@@ -597,7 +601,7 @@ adminRouter.post('/gpu-guest/test', adminOnly, async (req, res) => {
         const dlHosts = dlByHost.get(v.host) || [];
         const method = ['guestops', 'ssh', 'auto'].includes(req.body?.method) ? req.body.method : (s.collectMethod || 'guestops');
         // 디버그(revealCreds): 실제 전송되는 id/pw를 평문으로 trace에 기록(이 응답에만, 디스크/중앙 미기록).
-        const seed = revealCreds ? [{ t: Date.now(), msg: `🔓 자격증명(평문): id=${creds.username} · pw=${creds.password === '' ? '(빈 비번/passwordless)' : creds.password} · 방식=${method} · 출처=${it.useShared ? '공용' : (it.passwordless ? '별도(비번없음)' : '별도입력')}` }] : [];
+        const seed = revealCreds ? [{ t: Date.now(), msg: `🔓 자격증명: id=${creds.username} · pw=${maskPw(creds.password)} · 방식=${method} · 출처=${it.useShared ? '공용' : (it.passwordless ? '별도(비번없음)' : '별도입력')}` }] : [];
         let r;
         if (method === 'ssh') {
           r = await testVmGuestSsh(v, creds, { timeoutMs: s.timeoutMs, port: s.sshPort, trace: seed }).catch((e) => ({ login: false, read: false, error: e.message, trace: seed.concat({ t: Date.now(), msg: `✗ 예외: ${e.message}` }) }));
@@ -631,7 +635,7 @@ adminRouter.post('/gpu-guest/test-ssh', adminOnly, async (req, res) => {
   const s = loadGpuGuestSettings();
   const port = Number(b.port) || s.sshPort || 22;
   const creds = { username, password: String(b.password || ''), privateKey: b.privateKey || undefined };
-  const seed = b.revealCreds ? [{ t: Date.now(), msg: `🔓 자격증명(평문): id=${username} · pw=${b.password ? b.password : '(빈 비번/passwordless)'} · 포트=${port}` }] : [];
+  const seed = b.revealCreds ? [{ t: Date.now(), msg: `🔓 자격증명: id=${username} · pw=${maskPw(b.password)} · 포트=${port}` }] : [];
   try {
     const r = await testVmGuestSsh({ ipAddresses: [ip] }, creds, { timeoutMs: s.timeoutMs, port, trace: seed });
     res.json({ ip, port, ...r });

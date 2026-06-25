@@ -9,23 +9,23 @@ import express from 'express';
 import { config, currentVersion } from '../config.js';
 import { buildExport } from '../collector/agent.js';
 import { upgradeManager } from '../upgrade/manager.js';
+import { tokenMatches } from '../util/secureCompare.js';
 import { upgradeFromBundleBytes, restartProcess } from '../upgrade/upgrade.js';
 
 export const collectorRouter = Router();
 
-// Verify the shared collector token on a request.
+// Verify the shared collector token on a request (상수시간 비교).
 function checkToken(req) {
   if (!config.collector.token) return false;
   const token = req.get('X-Collector-Token') || (req.get('Authorization') || '').replace(/^Bearer\s+/i, '');
-  return token === config.collector.token;
+  return tokenMatches(token, config.collector.token);
 }
 
 collectorRouter.get('/export', async (req, res) => {
   if (!config.collector.token) {
     return res.status(404).json({ error: 'collector export 비활성화 (COLLECTOR_TOKEN 미설정)' });
   }
-  const token = req.get('X-Collector-Token') || (req.get('Authorization') || '').replace(/^Bearer\s+/i, '');
-  if (token !== config.collector.token) {
+  if (!checkToken(req)) {
     return res.status(403).json({ error: '토큰 불일치' });
   }
   try {

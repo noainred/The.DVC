@@ -8,6 +8,7 @@ import { Router } from 'express';
 import { store } from '../store.js';
 import { latestPowerByHostName } from '../idrac/service.js';
 import { getGuestGpuAllHosts } from '../gpu/store.js';
+import { tokenMatches } from '../util/secureCompare.js';
 
 export const metricsExportRouter = Router();
 
@@ -23,7 +24,7 @@ function line(name, labels, value) {
 metricsExportRouter.get('/', async (req, res) => {
   if (TOKEN) {
     const t = req.query.token || (req.get('Authorization') || '').replace(/^Bearer\s+/i, '');
-    if (t !== TOKEN) return res.status(403).type('text/plain').send('# 403 토큰 불일치 (METRICS_EXPORT_TOKEN)\n');
+    if (!tokenMatches(t, TOKEN)) return res.status(403).type('text/plain').send('# 403 토큰 불일치 (METRICS_EXPORT_TOKEN)\n');
   }
   const snap = store.get();
   let powerMap = new Map();

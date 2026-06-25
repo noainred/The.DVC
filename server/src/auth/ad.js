@@ -44,6 +44,7 @@ export function saveAdConfig(partial) {
   for (const k of allowed) if (partial[k] !== undefined) next[k] = partial[k];
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
   fs.writeFileSync(FILE, JSON.stringify({ ad: next }, null, 2), { mode: 0o600 });
+  try { fs.chmodSync(FILE, 0o600); } catch { /* mode는 신규생성 시에만 적용 — 덮어쓰기에도 0600 보장 */ }
   return next;
 }
 

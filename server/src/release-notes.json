@@ -1,6 +1,20 @@
 {
   "notes": [
     {
+      "version": "2.38.0",
+      "date": "2026-06-26",
+      "title": "보안 강화 1차 — 로그인 잠금·평문비번 제거·토큰 상수시간 비교·권한 보존 + 전체 보안 감사",
+      "notes": [
+        "전체 소스를 6개 영역(인증/권한·명령주입·SSRF/TLS·시크릿/로깅·입력검증·프론트엔드)으로 정적 분석한 보안 감사 보고서(SECURITY-AUDIT.md)를 추가했습니다. Critical 6·High 11·Medium 10 항목을 파일:줄 + 수정안과 함께 정리했습니다.",
+        "로그인 무차별 대입 방어: IP+계정별 실패 8회 시 15분 잠금(429, Retry-After). 성공 시 즉시 해제. LOGIN_MAX_FAILS/LOGIN_LOCKOUT_MS 등으로 조정, LOGIN_RATELIMIT_DISABLED로 해제 가능.",
+        "기본 관리자 비밀번호(admin123)를 로그에 출력하지 않도록 제거하고, 그대로 사용 중이면 보안 경고를 띄웁니다(로그버퍼는 /admin/logs로 노출되므로 평문 비번 유출 방지).",
+        "GPU 수집 디버그(자격증명 표시)에서 평문 비밀번호를 제거하고 길이만 마스킹 표시(계정명·passwordless 여부는 유지). 디버그 응답으로 저장된 비번이 평문 유출되던 문제 차단.",
+        "에이전트/중앙/메트릭 공유 토큰 비교를 상수시간(timingSafeEqual)으로 변경해 타이밍 사이드채널로 토큰을 복구당하는 위험 제거.",
+        "시크릿 파일(users.json·remote-access.json·agent-deploy-targets.json·auth.json·llm.json·세션보안·감사로그) 저장 시 chmod 0600 폴백을 추가해, 덮어쓰기에서도 권한이 느슨해지지 않도록 보장.",
+        "추가 권장(접근에 영향이 있어 별도 적용 예정): /api 역할가드, 원격 quick-connect admin 제한, 전역 TLS 스코프화+번들 서명, relay-test SSRF 차단, 보안 헤더(helmet/CSP)·CORS 제한, AD LDAPS 검증 기본 on."
+      ]
+    },
+    {
       "version": "2.37.1",
       "date": "2026-06-26",
       "title": "vCenter 연결 테스트 — 실패 시 경로 단계(TCP·TLS·HTTP) 자동 진단 + 공통 원인 요약",

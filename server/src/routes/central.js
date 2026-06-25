@@ -7,6 +7,7 @@
 import { Router } from 'express';
 import { config } from '../config.js';
 import { getAssignment, setResult } from '../central/assignments.js';
+import { tokenMatches } from '../util/secureCompare.js';
 import { setInventory } from '../central/inventory.js';
 import { setGuestGpu } from '../gpu/store.js';
 import { setGpuGuestDiag } from '../central/gpuGuestDiag.js';
@@ -23,7 +24,7 @@ export const centralRouter = Router();
 function authed(req) {
   if (!config.central.token) return false;
   const t = req.get('X-Central-Token') || (req.get('Authorization') || '').replace(/^Bearer\s+/i, '');
-  return t === config.central.token;
+  return tokenMatches(t, config.central.token);
 }
 
 // Agent pulls the IP assignment for its name (incl. iDRAC credentials).

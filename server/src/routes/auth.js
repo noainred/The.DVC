@@ -5,6 +5,7 @@ import { loadAdConfig, saveAdConfig, testAd } from '../auth/ad.js';
 import { logAudit } from '../audit.js';
 import { recordPortalLoginFail } from '../security/loginStore.js';
 import { loadSessionSecurity } from '../security/securitySettings.js';
+import { checkLoginAllowed, recordLoginFailure, recordLoginSuccess } from '../security/loginRateLimit.js';
 
 export const authRouter = Router();
 
@@ -22,13 +23,28 @@ authRouter.post('/login', async (req, res) => {
     return res.status(400).json({ error: 'username and password are required' });
   }
   const ip = (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').toString().split(',')[0];
+
+  // 무차별 대입 방어: IP+계정 잠금 상태면 인증 시도 자체를 막는다.
+  const gate = checkLoginAllowed(ip, username);
+  if (gate.blocked) {
+    logAudit({ user: username, action: '로그인 차단(잠금)', detail: `${gate.retryAfterSec}s`, ip });
+    return res.status(429).set('Retry-After', String(gate.retryAfterSec))
+      .json({ error: `로그인 시도가 일시적으로 잠겼습니다. ${gate.retryAfterSec}초 후 다시 시도하세요.` });
+  }
+
   const user = await authenticate(username, password);
   if (!user) {
-    logAudit({ user: username, action: '로그인 실패', ip });
+    const lk = recordLoginFailure(ip, username);
+    logAudit({ user: username, action: lk.locked ? '로그인 실패(잠금 발동)' : '로그인 실패', ip });
     try { recordPortalLoginFail({ username, ip, reason: 'invalid credentials' }); } catch { /* */ }
+    if (lk.locked) {
+      return res.status(429).set('Retry-After', String(lk.retryAfterSec))
+        .json({ error: `로그인 실패가 많아 일시적으로 잠겼습니다. ${lk.retryAfterSec}초 후 다시 시도하세요.` });
+    }
     return res.status(401).json({ error: 'invalid credentials' });
   }
 
+  recordLoginSuccess(ip, username);
   const token = signToken({ sub: user.username, role: user.role, name: user.name });
   logAudit({ user: user.username, action: '로그인', detail: user.role, ip });
   res.json({ token, user });
