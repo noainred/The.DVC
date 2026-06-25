@@ -57,6 +57,16 @@ const TOOLS = [
 
 const tb = (gb) => (gb >= 1024 ? `${(gb / 1024).toFixed(1)} TB` : `${gb} GB`);
 
+// 응답을 파일로 저장. 서버가 Content-Disposition으로 준 파일명을 우선 사용(>1MB면 .zip).
+async function saveResponseAsFile(res, fallbackName) {
+  const cd = res.headers.get('content-disposition') || '';
+  const m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(cd);
+  const name = m ? decodeURIComponent(m[1]) : fallbackName;
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = name; a.click(); URL.revokeObjectURL(url);
+}
+
 // URL 해시(#/tools/<기능키>)에서 현재 도구 키를 읽는다(바로가기/북마크 지원).
 const toolFromHash = () => {
   const parts = window.location.hash.replace(/^#\/?/, '').split('/');
@@ -2559,12 +2569,12 @@ function Gpu({ scope }) {
     setCollecting(false); setBust((b) => b + 1);
   };
   const [exportOpen, setExportOpen] = useState(false);
-  // 현재 상태(스냅샷) CSV·JSON 내려받기(현재 vCenter 스코프 반영).
-  const exportGpu = async (fmt) => {
-    const q = scope ? `?vcenterId=${encodeURIComponent(scope)}` : '';
+  // 현재 상태(스냅샷) CSV·JSON 내려받기(vCenter 스코프 반영, zip 인식).
+  const exportGpu = async (fmt, vcId) => {
+    const vc = vcId ?? scope;
+    const q = vc ? `?vcenterId=${encodeURIComponent(vc)}` : '';
     const res = await fetch(`/api/tools/gpu.${fmt}${q}`, { headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {} });
-    const blob = await res.blob(); const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = `gpu-${new Date().toISOString().slice(0, 10)}.${fmt}`; a.click(); URL.revokeObjectURL(url);
+    await saveResponseAsFile(res, `gpu-${new Date().toISOString().slice(0, 10)}.${fmt}`);
   };
   const [view, setView] = useState('host'); // host | cluster | vc | model
   const [hist, setHist] = useState(null);   // { level, key, days, points, synthesized }
@@ -2816,10 +2826,13 @@ function GpuExportModal({ scope, onClose, onSnapshot }) {
   const [meta, setMeta] = useState(null);   // { collectedSince, latestAt, sampleCount }
   const [range, setRange] = useState('all'); // all | days
   const [days, setDays] = useState(30);
+  const [vc, setVc] = useState(scope || ''); // 내보낼 vCenter(빈값=전체)
+  const [vcs, setVcs] = useState([]);
+  useEffect(() => { fetchJson('/vcenters').then((d) => setVcs(d || [])).catch(() => {}); }, []);
   useEffect(() => {
-    const q = scope ? `?vcenterId=${encodeURIComponent(scope)}` : '';
+    const q = vc ? `?vcenterId=${encodeURIComponent(vc)}` : '';
     fetchJson(`/tools/gpu/series-meta${q}`).then(setMeta).catch(() => setMeta({ collectedSince: null, sampleCount: 0 }));
-  }, [scope]);
+  }, [vc]);
   const fmtTs = (ts) => (ts ? new Date(ts).toLocaleString('ko-KR') : null);
   const sinceTxt = meta && meta.collectedSince
     ? `${fmtTs(meta.collectedSince)} 부터 데이터가 쌓여 있습니다`
@@ -2827,12 +2840,11 @@ function GpuExportModal({ scope, onClose, onSnapshot }) {
   const daysSince = meta && meta.collectedSince ? Math.max(1, Math.round((Date.now() - meta.collectedSince) / 86_400_000)) : null;
   const download = async (fmt) => {
     const params = new URLSearchParams();
-    if (scope) params.set('vcenterId', scope);
+    if (vc) params.set('vcenterId', vc);
     params.set('range', range);
     if (range === 'days') params.set('days', String(days));
     const res = await fetch(`/api/tools/gpu/export.${fmt}?${params.toString()}`, { headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {} });
-    const blob = await res.blob(); const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = `gpu-history-${range}-${new Date().toISOString().slice(0, 10)}.${fmt}`; a.click(); URL.revokeObjectURL(url);
+    await saveResponseAsFile(res, `gpu-history-${range}-${new Date().toISOString().slice(0, 10)}.${fmt}`);
   };
   return (
     <Modal title="GPU 데이터 내보내기" onClose={onClose} width={560}>
@@ -2844,6 +2856,12 @@ function GpuExportModal({ scope, onClose, onSnapshot }) {
           </div>
         )}
       </div>
+
+      <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>법인(vCenter) 선택</div>
+      <select className="select" value={vc} onChange={(e) => setVc(e.target.value)} style={{ minWidth: 220, marginBottom: 12 }}>
+        <option value="">전체 vCenter</option>
+        {vcs.map((v) => <option key={v.id} value={v.id}>{v.name || v.id}</option>)}
+      </select>
 
       <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>내보낼 범위</div>
       <label className="flex gap" style={{ alignItems: 'center', marginBottom: 6, cursor: 'pointer' }}>
@@ -2864,8 +2882,9 @@ function GpuExportModal({ scope, onClose, onSnapshot }) {
       </div>
       <div className="muted" style={{ fontSize: 12, marginTop: 12, borderTop: '1px solid rgba(255,255,255,.08)', paddingTop: 10 }}>
         시계열(샘플마다 한 행)로 내보냅니다. 현재 상태(호스트별 1행 스냅샷)만 필요하면&nbsp;
-        <button className="cell-link" onClick={() => onSnapshot('csv')}>스냅샷 CSV</button> ·&nbsp;
-        <button className="cell-link" onClick={() => onSnapshot('json')}>스냅샷 JSON</button>
+        <button className="cell-link" onClick={() => onSnapshot('csv', vc)}>스냅샷 CSV</button> ·&nbsp;
+        <button className="cell-link" onClick={() => onSnapshot('json', vc)}>스냅샷 JSON</button>
+        <div style={{ marginTop: 6 }}>💡 파일 용량이 1MB를 넘으면 자동으로 <b>zip</b>으로 압축해 내려받습니다. · <b>gpu_util_pct</b>=GPU 사용률(0~100%) · <b>epoch_ms</b>=Unix 밀리초(엑셀은 지수표기로 보일 수 있음).</div>
       </div>
     </Modal>
   );

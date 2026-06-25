@@ -14,6 +14,7 @@ import { listNotes } from '../release-notes.js';
 import { nlSearch } from '../llm/nlSearch.js';
 import { sortByOrder } from '../vcenter/order.js';
 import { getMetricsDb } from '../metrics/db.js';
+import { sendMaybeZip } from '../util/zip.js';
 import { getGuestGpuHost, getGuestGpuVms } from '../gpu/store.js';
 import { enqueuePing, getPingResults, setPingResults } from '../central/pingJobs.js';
 import { pingMany } from '../util/ping.js';
@@ -612,9 +613,8 @@ api.get('/tools/gpu', (req, res) => {
 // GPU 사용량/인벤토리 JSON export — 집계 결과 그대로 파일로 내려받기.
 api.get('/tools/gpu.json', (req, res) => {
   const data = buildGpuInventory(store.get(), req.query.vcenterId);
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.setHeader('Content-Disposition', `attachment; filename="gpu-${new Date().toISOString().slice(0, 10)}.json"`);
-  res.send(JSON.stringify({ generatedAt: new Date().toISOString(), vcenterId: req.query.vcenterId || null, ...data }, null, 2));
+  const body = JSON.stringify({ generatedAt: new Date().toISOString(), vcenterId: req.query.vcenterId || null, ...data }, null, 2);
+  sendMaybeZip(res, `gpu-${new Date().toISOString().slice(0, 10)}.json`, body, 'application/json; charset=utf-8');
 });
 
 // GPU 사용량/인벤토리 CSV export — 호스트별 한 행(모델·장수·모드·사용률·할당 VM).
@@ -628,9 +628,7 @@ api.get('/tools/gpu.csv', (req, res) => {
     lines.push([r.host, r.vcenterId, r.cluster, r.model, r.count, r.memGB, r.mode, breakdown,
       r.utilPct == null ? '' : r.utilPct, r.utilSource || '', r.assignedVms].map(esc).join(','));
   }
-  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', `attachment; filename="gpu-${new Date().toISOString().slice(0, 10)}.csv"`);
-  res.send('﻿' + lines.join('\r\n')); // BOM for Excel
+  sendMaybeZip(res, `gpu-${new Date().toISOString().slice(0, 10)}.csv`, '﻿' + lines.join('\r\n'), 'text/csv; charset=utf-8'); // BOM for Excel
 });
 
 // GPU 사용률 시계열 수집 메타 — '언제부터 데이터가 쌓였는지'(수집 시작/마지막/샘플 수).
@@ -659,33 +657,34 @@ async function gpuSeriesExport(req, res, fmt) {
   const raw = db.dump('gpu_util', since, until, 1_000_000);
   // 법인 스코프면 해당 법인 호스트만. 이름/클러스터는 현재 스냅샷 기준으로 매핑.
   const out = [];
+  // gpu_util은 %(0~100). 과거 일부 샘플이 vSphere 1/100% 단위로 ×100 저장된 경우가 있어
+  // 100 초과면 ÷100로 정규화하고 0~100으로 클램프(util 최대 100이라 안전).
+  const normPct = (v) => { const n = Number(v); if (!Number.isFinite(n)) return 0; const p = n > 100 ? n / 100 : n; return Math.max(0, Math.min(100, Math.round(p))); };
   for (const r of raw) {
     const h = hostMap.get(r.k);
     if (vcId && (!h || h.vcenterId !== vcId)) continue;
-    out.push({ ts: r.ts, host: h?.name || r.k, vcenterId: h?.vcenterId || '', cluster: h?.cluster || '', utilPct: r.v });
+    out.push({ ts: r.ts, host: h?.name || r.k, vcenterId: h?.vcenterId || '', cluster: h?.cluster || '', utilPct: normPct(r.v) });
   }
   const stamp = new Date().toISOString().slice(0, 10);
   const sinceIso = meta.firstTs ? new Date(meta.firstTs).toISOString() : '없음';
   if (fmt === 'json') {
-    res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="gpu-history-${range}-${stamp}.json"`);
-    res.send(JSON.stringify({
+    const body = JSON.stringify({
       generatedAt: new Date().toISOString(), collectedSince: meta.firstTs ? new Date(meta.firstTs).toISOString() : null,
       range, days: range === 'days' ? days : null, vcenterId: vcId, sampleCount: out.length,
       points: out.map((p) => ({ ...p, tsIso: new Date(p.ts).toISOString() })),
-    }, null, 2));
+    }, null, 2);
+    sendMaybeZip(res, `gpu-history-${range}-${stamp}.json`, body, 'application/json; charset=utf-8');
     return;
   }
   const esc = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   const head = ['timestamp_iso', 'epoch_ms', 'host', 'vcenter_id', 'cluster', 'gpu_util_pct'];
   const lines = [
     `# GPU 사용률 수집 데이터 — 수집 시작: ${sinceIso} (그날부터 누적) | 범위: ${range === 'all' ? '전체' : `최근 ${days}일`} | 생성: ${new Date().toISOString()} | 샘플 ${out.length}`,
+    '# 단위: gpu_util_pct = GPU 사용률 %(0~100) · epoch_ms = Unix epoch 밀리초(엑셀은 지수표기로 보일 수 있음) · timestamp_iso = ISO8601 시각',
     head.join(','),
   ];
   for (const p of out) lines.push([new Date(p.ts).toISOString(), p.ts, p.host, p.vcenterId, p.cluster, p.utilPct].map(esc).join(','));
-  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', `attachment; filename="gpu-history-${range}-${stamp}.csv"`);
-  res.send('﻿' + lines.join('\r\n')); // BOM for Excel
+  sendMaybeZip(res, `gpu-history-${range}-${stamp}.csv`, '﻿' + lines.join('\r\n'), 'text/csv; charset=utf-8'); // BOM for Excel
 }
 api.get('/tools/gpu/export.csv', (req, res) => gpuSeriesExport(req, res, 'csv'));
 api.get('/tools/gpu/export.json', (req, res) => gpuSeriesExport(req, res, 'json'));
