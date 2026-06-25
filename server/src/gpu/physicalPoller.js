@@ -14,6 +14,18 @@ let timer = null;
 let lastRun = null;
 let running = false;
 
+// 수집 실패 원인 분류 — UI에서 로그인/드라이버/접속/오류로 구분 표시.
+function classifyErr(e) {
+  const m = String(e?.message || '');
+  if (e?.sshConnected) {
+    if (/nvidia-smi|드라이버|파싱|출력 없음/i.test(m)) return { errorCode: 'nodriver', errorLabel: '드라이버 없음' };
+    return { errorCode: 'error', errorLabel: '오류' };
+  }
+  if (/인증|auth|permission|비밀번호|publickey/i.test(m)) return { errorCode: 'login', errorLabel: '로그인 안됨' };
+  if (/거부|refused|타임아웃|timeout|미도달|경로|unreach|ETIMEDOUT|ECONNREFUSED/i.test(m)) return { errorCode: 'unreachable', errorLabel: '접속 불가' };
+  return { errorCode: 'error', errorLabel: '오류' };
+}
+
 async function eachLimited(items, limit, fn) {
   const q = [...items];
   const workers = Array.from({ length: Math.min(limit, q.length || 1) }, async () => {
@@ -45,7 +57,7 @@ export async function pollPhysicalOnce() {
         }
         ok++;
       } catch (e) {
-        setPhysicalGpu(sv.id, { id: sv.id, name: sv.name, host: sv.host, vcenterId: sv.vcenterId || '', error: e.message });
+        setPhysicalGpu(sv.id, { id: sv.id, name: sv.name, host: sv.host, vcenterId: sv.vcenterId || '', error: e.message, ...classifyErr(e) });
         failed++;
       }
     });

@@ -556,6 +556,8 @@ function TestResult({ t }) {
 }
 
 const PEMPTY = { id: '', name: '', host: '', port: 22, username: 'root', password: '', os: 'linux', vcenterId: '', enabled: true };
+// 오류 분류별 배지 색: 로그인 안됨=red · 드라이버 없음=amber · 접속 불가=gray · 기타=red
+const PGPU_ERR_COLOR = { login: 'red', nodriver: 'amber', unreachable: 'gray', error: 'red' };
 
 /** 물리(베어메탈) 서버 GPU 수집 — 가상화 안 한 서버를 IP+계정으로 등록해 SSH nvidia-smi로 수집. */
 function PhysicalGpuManager({ vcs }) {
@@ -684,6 +686,21 @@ function PhysicalGpuManager({ vcs }) {
         )}
       </div>
 
+      {(d?.servers || []).length > 0 && (() => {
+        const rs = d.servers.map((s) => results.get(s.id)).filter(Boolean);
+        const c = { ok: rs.filter((r) => r.count != null).length, login: 0, nodriver: 0, unreachable: 0, error: 0 };
+        for (const r of rs) if (r.error) c[r.errorCode || 'error'] = (c[r.errorCode || 'error'] || 0) + 1;
+        return (
+          <div className="flex gap wrap" style={{ fontSize: 12, marginBottom: 8 }}>
+            <span className="badge green">수집 {c.ok}</span>
+            {c.login > 0 && <span className="badge red">로그인 안됨 {c.login}</span>}
+            {c.nodriver > 0 && <span className="badge amber">드라이버 없음 {c.nodriver}</span>}
+            {c.unreachable > 0 && <span className="badge gray">접속 불가 {c.unreachable}</span>}
+            {c.error > 0 && <span className="badge red">오류 {c.error}</span>}
+          </div>
+        );
+      })()}
+
       <div style={{ overflowX: 'auto' }}>
         <table className="data-table" style={{ width: '100%', fontSize: 13 }}>
           <thead><tr><th style={{ textAlign: 'left' }}>이름</th><th style={{ textAlign: 'left' }}>IP/계정</th><th style={{ textAlign: 'left' }}>소속</th><th style={{ textAlign: 'left' }}>GPU/사용률</th><th style={{ textAlign: 'left' }}>상태</th><th style={{ textAlign: 'right' }}>작업</th></tr></thead>
@@ -696,8 +713,11 @@ function PhysicalGpuManager({ vcs }) {
                   <td><b>{s.name}</b></td>
                   <td className="muted">{s.host}:{s.port} · {s.username} · {s.os}</td>
                   <td className="muted">{s.vcenterId || '—'}</td>
-                  <td className="tabular">{r && r.error ? <span className="badge red" title={r.error}>오류</span> : r && r.count != null ? <span>{r.utilNA ? 'N/A(MIG)' : `${r.utilPct}%`} · {r.count}GPU{r.memUsedPct != null ? ` · mem ${r.memUsedPct}%` : ''}</span> : <span className="muted">—</span>}</td>
-                  <td>{s.enabled ? <span className="badge green">수집</span> : <span className="badge gray">중지</span>}</td>
+                  <td className="tabular">{r && r.count != null ? <span>{r.utilNA ? 'N/A(MIG)' : `${r.utilPct}%`} · {r.count}GPU{r.memUsedPct != null ? ` · mem ${r.memUsedPct}%` : ''}</span> : <span className="muted">—</span>}</td>
+                  <td>{!s.enabled ? <span className="badge gray">중지</span>
+                    : r && r.error ? <span className={`badge ${PGPU_ERR_COLOR[r.errorCode] || 'red'}`} title={r.error}>{r.errorLabel || '오류'}</span>
+                      : r && r.count != null ? <span className="badge green">수집</span>
+                        : <span className="badge gray">대기</span>}</td>
                   <td className="right nowrap">
                     <button className="tab" disabled={testing === s.id} onClick={() => test({ id: s.id }, s.id)}>{testing === s.id ? '테스트…' : '테스트'}</button>
                     <button className="tab" onClick={() => openEdit(s)}>수정</button>
