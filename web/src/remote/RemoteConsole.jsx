@@ -59,9 +59,13 @@ export function SshConsole({ mapping, initialCreds, onCreds, onHostname }) {
           if (j && j.type === 'hostname') { onHostname?.(j.name); return; }
           if (j && j.type === 'status') {
             setStatus(j.text); term.write(`\r\n\x1b[33m${j.text}\x1b[0m\r\n`);
-            // 인증 실패면 자격증명 폼으로 되돌려 비밀번호를 다시 입력하게 한다(빈/오타 비번 재입력).
-            if (/authentication|인증|permission denied|auth/i.test(j.text) && phaseRef.current !== 'live') {
-              setFormErr(`인증 실패: 사용자명/비밀번호를 확인하세요. (${j.text})`);
+            const t = j.text || '';
+            // 인증 '성공'/셸 열림 = 진행 중 → 라이브로 전환(터미널 사용 가능). 절대 오류 처리 금지.
+            if (/성공|셸을 엽|shell/i.test(t)) { if (phaseRef.current !== 'live') { setPhase('live'); stopTimer(); } return; }
+            // 진짜 인증 '실패'일 때만 자격증명 폼으로 되돌린다('성공'은 위에서 이미 제외).
+            const isAuthFail = /(인증\s*실패|로그인\s*실패|authentication\s+(failed|methods failed)|permission denied|auth.*fail|invalid (password|credential)|incorrect password)/i.test(t);
+            if (isAuthFail && phaseRef.current !== 'live') {
+              setFormErr(`인증 실패: 사용자명/비밀번호를 확인하세요. (${t})`);
               setCreds((c) => ({ ...c, password: '' }));
               setPhase('form'); stopTimer();
               try { wsRef.current?.close(); } catch { /* */ }
