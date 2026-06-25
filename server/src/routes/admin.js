@@ -463,7 +463,10 @@ adminRouter.post('/gpu-physical/auto-register', adminOnly, async (req, res) => {
   const st = loadGpuGuestSettings();
   const det = await detectPhysicalGpu(host, { username, password: b.password || '' }, { timeoutMs: st.timeoutMs, port: Number(b.port) || 22 });
   if (!det.reachable) return res.status(400).json({ ok: false, reason: `SSH 접속 실패 — ${det.error || '계정/네트워크 확인'}`, detected: det });
-  if (!det.gpuModels.length) return res.status(400).json({ ok: false, reason: 'GPU를 찾지 못했습니다(nvidia-smi 미설치/드라이버 없음). 접속은 성공했습니다.', detected: det });
+  // 로그인은 됐지만 GPU/드라이버 미발견: force가 아니면 등록하지 않고 확인을 유도(프론트가 재확인).
+  if (!det.gpuModels.length && !b.force) {
+    return res.json({ ok: false, reachable: true, noGpu: true, reason: '로그인은 되었지만 GPU/드라이버를 찾지 못했습니다(nvidia-smi 미설치).', detected: det });
+  }
   const os = /microsoft|windows/i.test(det.os) ? 'windows' : 'linux';
   const fields = { name: det.hostname || host, host, port: Number(b.port) || 22, username, password: b.password || '', os, vcenterId: String(b.vcenterId || '').trim(), gpuModels: det.gpuModels, enabled: true };
   const exist = findPhysicalByHost(host);
@@ -471,7 +474,7 @@ adminRouter.post('/gpu-physical/auto-register', adminOnly, async (req, res) => {
   if (exist) { updatePhysical(exist.id, fields); id = exist.id; }
   else { const r = addPhysical(fields); if (!r.ok) return res.status(400).json({ ok: false, reason: r.reason, detected: det }); id = r.id; }
   pollPhysicalOnce().catch(() => {});
-  res.json({ ok: true, id, updated: !!exist, detected: det });
+  res.json({ ok: true, id, updated: !!exist, noGpu: !det.gpuModels.length, detected: det });
 });
 
 // 단건 SSH 테스트(저장 전 검증 가능) — body { host, username, password?, port?, revealCreds? } 또는 { id }

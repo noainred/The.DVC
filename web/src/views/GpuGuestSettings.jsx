@@ -570,16 +570,28 @@ function PhysicalGpuManager({ vcs }) {
   const [autoBusy, setAutoBusy] = useState(false);
   const [autoMsg, setAutoMsg] = useState(null);
   const setA = (k) => (e) => setAuto((a) => ({ ...a, [k]: e.target.value }));
-  const autoRegister = async () => {
+  const autoRegister = async (force = false) => {
     if (!auto.host.trim() || !auto.username.trim()) { setAutoMsg({ ok: false, text: 'IP와 계정을 입력하세요.' }); return; }
     setAutoBusy(true); setAutoMsg(null);
-    const r = await postJson('/admin/gpu-physical/auto-register', auto).catch((e) => ({ ok: false, reason: e.message }));
+    const r = await postJson('/admin/gpu-physical/auto-register', { ...auto, force }).catch((e) => ({ ok: false, reason: e.message }));
     setAutoBusy(false);
     if (r.ok) {
-      setAutoMsg({ ok: true, text: `✅ ${r.updated ? '갱신' : '등록'}됨 — ${r.detected?.hostname || auto.host} · GPU ${r.detected?.gpuModels?.length || 0}장 (${[...new Set(r.detected?.gpuModels || [])].join(', ')}) · ${/win/i.test(r.detected?.os || '') ? 'Windows' : 'Linux'}` });
+      const models = [...new Set(r.detected?.gpuModels || [])];
+      setAutoMsg({ ok: true, text: r.noGpu
+        ? `✅ ${r.updated ? '갱신' : '등록'}됨(드라이버 미설치) — ${r.detected?.hostname || auto.host}. 드라이버 설치 후 자동 수집됩니다.`
+        : `✅ ${r.updated ? '갱신' : '등록'}됨 — ${r.detected?.hostname || auto.host} · GPU ${r.detected?.gpuModels?.length || 0}장 (${models.join(', ')}) · ${/win/i.test(r.detected?.os || '') ? 'Windows' : 'Linux'}` });
       setAuto((a) => ({ ...a, host: '', password: '' }));
       await load();
-    } else setAutoMsg({ ok: false, text: r.reason || '자동 등록 실패' });
+      return;
+    }
+    // 로그인은 됐는데 GPU/드라이버 미발견 → 그래도 등록할지 확인 후 force 재시도.
+    if (r.noGpu) {
+      if (window.confirm('로그인은 되었지만 드라이버가 설치되어 있지 않은 것 같습니다(nvidia-smi 미발견).\n수집 서버에 일단 등록하시겠습니까? (드라이버 설치 후 자동으로 수집됩니다)')) {
+        await autoRegister(true);
+      } else { setAutoMsg({ ok: false, text: '등록을 취소했습니다(드라이버 미발견).' }); }
+      return;
+    }
+    setAutoMsg({ ok: false, text: r.reason || '자동 등록 실패' });
   };
   const load = () => fetchJson('/admin/gpu-physical').then(setD).catch(() => {});
   useEffect(() => { load(); const t = setInterval(load, 15_000); return () => clearInterval(t); }, []);
@@ -624,7 +636,7 @@ function PhysicalGpuManager({ vcs }) {
           <Field label="비밀번호"><input className="input" type="password" style={{ width: 130 }} value={auto.password} onChange={setA('password')} onKeyDown={(e) => e.key === 'Enter' && autoRegister()} /></Field>
           <Field label="포트"><input className="input" type="number" style={{ width: 70 }} value={auto.port} onChange={setA('port')} /></Field>
           <Field label="소속 vCenter"><select className="select" value={auto.vcenterId} onChange={setA('vcenterId')} style={{ minWidth: 140 }}><option value="">(없음)</option>{vcs.map((v) => <option key={v.id} value={v.id}>{v.name || v.id}</option>)}</select></Field>
-          <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} disabled={autoBusy} onClick={autoRegister}>{autoBusy ? '로그인·감지 중…' : '🔍 로그인 후 자동 등록'}</button>
+          <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} disabled={autoBusy} onClick={() => autoRegister()}>{autoBusy ? '로그인·감지 중…' : '🔍 로그인 후 자동 등록'}</button>
         </div>
         {autoMsg && <div style={{ marginTop: 8, fontSize: 13, color: autoMsg.ok ? 'var(--green)' : 'var(--red)' }}>{autoMsg.text}</div>}
       </div>

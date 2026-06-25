@@ -14,6 +14,27 @@ import { parseNvidiaSmiCsv } from './guestops.js';
 const NVSMI = '--query-gpu=utilization.gpu,utilization.memory,memory.used,memory.total,mig.mode.current --format=csv,noheader,nounits';
 const tlog = (tr, msg) => { if (tr) tr.push({ t: Date.now(), msg: String(msg) }); };
 
+// nvidia-smi 실행 후보(OS·PATH 무관). 순서: 직접(Win/Linux PATH) → Linux 비대화형 PATH 보강
+// → Windows 절대경로. 하나라도 출력이 있으면 성공.
+function nvsmiCmds(argStr) {
+  return [
+    `nvidia-smi ${argStr}`,
+    `sh -lc 'export PATH=$PATH:/usr/bin:/usr/local/bin:/usr/local/sbin:/usr/local/nvidia/bin; nvidia-smi ${argStr}'`,
+    `"C:\\Program Files\\NVIDIA Corporation\\NVSMI\\nvidia-smi.exe" ${argStr}`,
+    `"C:\\Windows\\System32\\nvidia-smi.exe" ${argStr}`,
+  ];
+}
+async function runNvsmi(sh, argStr) {
+  let stderr = '';
+  for (const cmd of nvsmiCmds(argStr)) {
+    let res; try { res = await sh.exec(cmd); } catch { continue; }
+    const out = (res.stdout || '').trim();
+    if (out) return { out, cmd };
+    if (res.stderr) stderr = res.stderr.trim() || stderr;
+  }
+  return { out: '', cmd: null, stderr };
+}
+
 const usableIp = (ip) => typeof ip === 'string' && /^\d{1,3}(\.\d{1,3}){3}$/.test(ip)
   && !ip.startsWith('127.') && !ip.startsWith('169.254.') && ip !== '0.0.0.0';
 
@@ -38,7 +59,6 @@ function cleanSshErr(m) {
 export async function collectVmGpuSsh(vm, creds, { timeoutMs = 20_000, port = 22, trace = null } = {}) {
   const ips = guestIps(vm);
   if (!ips.length) { const e = new Error('게스트 IP 없음(VMware Tools가 IP 미보고) — SSH 수집 불가'); e.guestDiag = true; throw e; }
-  const cmd = `sh -lc 'export PATH=$PATH:/usr/bin:/usr/local/bin:/usr/local/sbin:/usr/local/nvidia/bin; nvidia-smi ${NVSMI}'`;
   let lastErr = '모든 IP 접속 실패';
   let connected = false;
   for (const ip of ips) {
@@ -46,16 +66,16 @@ export async function collectVmGpuSsh(vm, creds, { timeoutMs = 20_000, port = 22
     try {
       const r = await withSsh(
         { host: ip, port, username: creds.username, password: creds.password || '', privateKey: creds.privateKey || undefined, readyTimeout: Math.max(5_000, timeoutMs) },
-        async (sh) => sh.exec(cmd),
+        async (sh) => runNvsmi(sh, NVSMI),
       );
       connected = true;
-      const out = (r.stdout || '').trim();
+      const out = (r.out || '').trim();
       if (out) {
         const parsed = parseNvidiaSmiCsv(out);
         if (parsed && parsed.utilPct != null) { tlog(trace, `✓ SSH 수집 성공(${ip}) — GPU ${parsed.count}, 사용률 ${parsed.utilNA ? 'N/A(MIG 모드)' : parsed.utilPct + '%'}`); return parsed; }
         lastErr = `nvidia-smi 출력 파싱 실패: ${out.slice(0, 80)}`;
       } else {
-        lastErr = ((r.stderr || '').trim().split('\n')[0]) || 'nvidia-smi 출력 없음(드라이버/PATH 확인)';
+        lastErr = (r.stderr || '').split('\n')[0] || 'nvidia-smi 출력 없음(드라이버 미설치 또는 nvidia-smi 경로 없음 — Windows는 nvidia-smi.exe 설치/PATH 확인)';
       }
       tlog(trace, `✗ ${ip}: ${lastErr}`);
     } catch (e) {
@@ -78,14 +98,18 @@ export async function detectPhysicalGpu(host, creds, { timeoutMs = 20_000, port 
     const r = await withSsh(
       { host, port, username: creds.username, password: creds.password || '', privateKey: creds.privateKey || undefined, readyTimeout: Math.max(5_000, timeoutMs) },
       async (sh) => {
-        const names = await sh.exec("sh -lc 'export PATH=$PATH:/usr/bin:/usr/local/bin:/usr/local/sbin:/usr/local/nvidia/bin; nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null'");
-        const hn = await sh.exec('hostname 2>/dev/null');
-        const osr = await sh.exec("sh -lc 'cat /etc/os-release 2>/dev/null | sed -n \"s/^PRETTY_NAME=//p\" | tr -d \\\"; uname -s 2>/dev/null'");
-        return { names: names.stdout, hostname: hn.stdout, os: osr.stdout };
+        const names = await runNvsmi(sh, '--query-gpu=name --format=csv,noheader');
+        const hn = await sh.exec('hostname').catch(() => ({ stdout: '' }));
+        // OS: Linux는 uname, Windows는 'ver'(cmd) — 되는 쪽 사용.
+        const uname = await sh.exec('uname -s').catch(() => ({ stdout: '' }));
+        const ver = (uname.stdout || '').trim() ? { stdout: '' } : await sh.exec('cmd /c ver').catch(() => ({ stdout: '' }));
+        return { names: names.out, nvCmd: names.cmd, hostname: hn.stdout, os: (uname.stdout || ver.stdout || '') };
       },
     );
     out.reachable = true;
     out.gpuModels = String(r.names || '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+    // Windows 절대경로 명령으로 GPU를 찾았으면 OS를 windows로 보정.
+    if (/nvidia-smi\.exe|ver/i.test(`${r.nvCmd || ''} ${r.os || ''}`)) out.os = out.os || 'Windows';
     out.hostname = String(r.hostname || '').trim().split(/\s+/)[0] || '';
     out.os = String(r.os || '').trim().split(/\r?\n/).filter(Boolean)[0] || '';
   } catch (e) { out.error = cleanSshErr(e.message); }
