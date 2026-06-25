@@ -477,6 +477,39 @@ adminRouter.post('/gpu-physical/auto-register', adminOnly, async (req, res) => {
   res.json({ ok: true, id, updated: !!exist, noGpu: !det.gpuModels.length, detected: det });
 });
 
+// 여러 IP 일괄 자동 등록 — 대역/CIDR을 펼쳐 각 IP에 SSH 로그인→감지→등록(동시성 제한).
+// Body { ips, username, password?, port?, vcenterId?, force? }
+adminRouter.post('/gpu-physical/bulk-auto-register', adminOnly, async (req, res) => {
+  const b = req.body || {};
+  const username = String(b.username || '').trim();
+  if (!b.ips || !username) return res.status(400).json({ ok: false, reason: 'IP 목록과 계정이 필요합니다.' });
+  const { ips: list, errors, truncated } = expandIpList(b.ips);
+  const MAX = 512;
+  const targets = list.slice(0, MAX);
+  if (!targets.length) return res.status(400).json({ ok: false, reason: '유효한 IP가 없습니다.', ipErrors: errors });
+  const st = loadGpuGuestSettings();
+  const port = Number(b.port) || 22; const password = b.password || ''; const vcenterId = String(b.vcenterId || '').trim(); const force = !!b.force;
+  const results = new Array(targets.length);
+  let idx = 0;
+  const worker = async () => {
+    while (idx < targets.length) {
+      const i = idx++; const ip = targets[i];
+      const det = await detectPhysicalGpu(ip, { username, password }, { timeoutMs: st.timeoutMs, port }).catch((e) => ({ reachable: false, error: e.message, gpuModels: [] }));
+      if (!det.reachable) { results[i] = { ip, ok: false, reachable: false, error: det.error || '접속 실패' }; continue; }
+      if (!det.gpuModels.length && !force) { results[i] = { ip, ok: false, reachable: true, noGpu: true, host: det.hostname || '' }; continue; }
+      const os = /microsoft|windows/i.test(det.os) ? 'windows' : 'linux';
+      const fields = { name: det.hostname || ip, host: ip, port, username, password, os, vcenterId, gpuModels: det.gpuModels, enabled: true };
+      const exist = findPhysicalByHost(ip);
+      if (exist) updatePhysical(exist.id, fields); else addPhysical(fields);
+      results[i] = { ip, ok: true, updated: !!exist, noGpu: !det.gpuModels.length, gpuCount: det.gpuModels.length, host: det.hostname || ip };
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(8, targets.length) }, worker));
+  pollPhysicalOnce().catch(() => {});
+  const registered = results.filter((r) => r && r.ok).length;
+  res.json({ ok: true, total: targets.length, registered, results, ipErrors: errors, truncated: truncated || list.length > MAX });
+});
+
 // 단건 SSH 테스트(저장 전 검증 가능) — body { host, username, password?, port?, revealCreds? } 또는 { id }
 adminRouter.post('/gpu-physical/test', adminOnly, async (req, res) => {
   const b = req.body || {};

@@ -569,6 +569,11 @@ function PhysicalGpuManager({ vcs }) {
   const [auto, setAuto] = useState({ host: '', username: 'root', password: '', port: 22, vcenterId: '' });
   const [autoBusy, setAutoBusy] = useState(false);
   const [autoMsg, setAutoMsg] = useState(null);
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkIps, setBulkIps] = useState('');
+  const [bulkForce, setBulkForce] = useState(true);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkRes, setBulkRes] = useState(null);
   const setA = (k) => (e) => setAuto((a) => ({ ...a, [k]: e.target.value }));
   const autoRegister = async (force = false) => {
     if (!auto.host.trim() || !auto.username.trim()) { setAutoMsg({ ok: false, text: 'IP와 계정을 입력하세요.' }); return; }
@@ -592,6 +597,14 @@ function PhysicalGpuManager({ vcs }) {
       return;
     }
     setAutoMsg({ ok: false, text: r.reason || '자동 등록 실패' });
+  };
+  const bulkRegister = async () => {
+    if (!bulkIps.trim() || !auto.username.trim()) { setBulkRes({ error: 'IP 목록과 계정(위 자동 등록의 계정 칸)을 입력하세요.' }); return; }
+    setBulkBusy(true); setBulkRes(null);
+    const r = await postJson('/admin/gpu-physical/bulk-auto-register', { ips: bulkIps, username: auto.username, password: auto.password, port: auto.port, vcenterId: auto.vcenterId, force: bulkForce }).catch((e) => ({ ok: false, reason: e.message }));
+    setBulkBusy(false);
+    setBulkRes(r.ok ? r : { error: r.reason || '일괄 등록 실패' });
+    if (r.ok) await load();
   };
   const load = () => fetchJson('/admin/gpu-physical').then(setD).catch(() => {});
   useEffect(() => { load(); const t = setInterval(load, 15_000); return () => clearInterval(t); }, []);
@@ -637,8 +650,38 @@ function PhysicalGpuManager({ vcs }) {
           <Field label="포트"><input className="input" type="number" style={{ width: 70 }} value={auto.port} onChange={setA('port')} /></Field>
           <Field label="소속 vCenter"><select className="select" value={auto.vcenterId} onChange={setA('vcenterId')} style={{ minWidth: 140 }}><option value="">(없음)</option>{vcs.map((v) => <option key={v.id} value={v.id}>{v.name || v.id}</option>)}</select></Field>
           <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} disabled={autoBusy} onClick={() => autoRegister()}>{autoBusy ? '로그인·감지 중…' : '🔍 로그인 후 자동 등록'}</button>
+          <button className="logout-btn" style={{ flex: 'none', padding: '9px 14px' }} onClick={() => setBulkOpen((v) => !v)}>📋 여러 IP 일괄 등록</button>
         </div>
         {autoMsg && <div style={{ marginTop: 8, fontSize: 13, color: autoMsg.ok ? 'var(--green)' : 'var(--red)' }}>{autoMsg.text}</div>}
+
+        {bulkOpen && (
+          <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid rgba(148,163,184,.2)' }}>
+            <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>
+              IP를 한 줄에 하나씩(또는 범위 <code>10.0.0.1-20</code> · CIDR <code>10.0.0.0/24</code>). <b>계정·비밀번호·포트·소속 vCenter는 위 칸 값을 공통 사용</b>합니다. 각 IP에 SSH 로그인해 GPU를 감지·등록합니다(최대 512개).
+            </div>
+            <textarea className="input" style={{ width: '100%', minHeight: 90, fontFamily: 'monospace', fontSize: 12 }} value={bulkIps} onChange={(e) => setBulkIps(e.target.value)} placeholder={'10.94.46.94\n10.94.46.95\n10.94.46.0/24'} />
+            <div className="flex gap" style={{ alignItems: 'center', marginTop: 8 }}>
+              <label className="flex gap muted" style={{ alignItems: 'center', fontSize: 12 }}><input type="checkbox" checked={bulkForce} onChange={(e) => setBulkForce(e.target.checked)} /> 드라이버 없어도 등록(로그인만 되면)</label>
+              <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={bulkBusy} onClick={bulkRegister}>{bulkBusy ? '일괄 처리 중… (시간이 걸립니다)' : '일괄 등록 실행'}</button>
+            </div>
+            {bulkRes && (bulkRes.error ? <div style={{ marginTop: 8, fontSize: 13, color: 'var(--red)' }}>{bulkRes.error}</div> : (
+              <div style={{ marginTop: 10 }}>
+                <div style={{ fontSize: 13, marginBottom: 6 }}>완료 — 대상 <b>{bulkRes.total}</b> · 등록/갱신 <b style={{ color: 'var(--green)' }}>{bulkRes.registered}</b> · 실패 {bulkRes.total - bulkRes.registered}{bulkRes.truncated ? ' · ⚠ 512개 초과분 생략' : ''}</div>
+                <div style={{ maxHeight: 220, overflow: 'auto' }}>
+                  <table className="data-table" style={{ width: '100%', fontSize: 12 }}>
+                    <thead><tr><th style={{ textAlign: 'left' }}>IP</th><th style={{ textAlign: 'left' }}>결과</th></tr></thead>
+                    <tbody>{(bulkRes.results || []).map((x) => (
+                      <tr key={x.ip}><td className="tabular">{x.ip}</td>
+                        <td>{x.ok ? <span style={{ color: 'var(--green)' }}>✅ {x.updated ? '갱신' : '등록'}{x.host ? ` · ${x.host}` : ''}{x.noGpu ? ' (드라이버 미설치)' : ` · GPU ${x.gpuCount}`}</span>
+                          : x.noGpu ? <span className="muted">로그인 OK · GPU 없음(미등록)</span>
+                            : <span style={{ color: 'var(--red)' }}>❌ {x.error || '접속 실패'}</span>}</td></tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div style={{ overflowX: 'auto' }}>
