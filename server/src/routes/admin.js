@@ -684,6 +684,19 @@ adminRouter.post('/vcenters/test', adminOnly, async (req, res) => {
   res.json(await testConnection(req.body || {}));
 });
 
+// 등록된 모든 vCenter 연결을 병렬로 한 번에 테스트(느린 1곳이 전체를 막지 않게 per-vCenter 독립).
+// ?only=enabled 면 '수집 사용'인 것만. 반환: { results:[{id,name,host,enabled,ok,ms,reason,hint,code}] }
+adminRouter.post('/vcenters/test-all', adminOnly, async (req, res) => {
+  const onlyEnabled = String(req.query.only || (req.body || {}).only || '') === 'enabled';
+  let list = sortByOrder(listRegistry());
+  if (onlyEnabled) list = list.filter((v) => v.enabled !== false);
+  const results = await Promise.all(list.map(async (vc) => {
+    const r = await testConnection({ id: vc.id }).catch((e) => ({ ok: false, reason: e.message }));
+    return { id: vc.id, name: vc.name, host: vc.host, enabled: vc.enabled !== false, collectMode: vc.collectMode || 'direct', ...r };
+  }));
+  res.json({ ok: true, testedAt: Date.now(), total: results.length, okCount: results.filter((r) => r.ok).length, results });
+});
+
 // vCenter display order (applies to every "vCenter 선택" list in the web).
 adminRouter.get('/vcenter-order', adminOnly, (_req, res) => {
   const order = getOrder();
