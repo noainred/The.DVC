@@ -555,7 +555,7 @@ function buildGpuInventory(snap, vcenterId) {
     const e = gpuVmByHost[v.host] || { vms: 0, on: 0, off: 0, vgpu: 0, passthrough: 0, names: [] };
     e.vms++; e.vgpu += v.gpu.vgpu || 0; e.passthrough += v.gpu.passthrough || 0;
     if (v.powerState === 'POWERED_ON') e.on++; else e.off++;
-    if (v.name) e.names.push(v.name);
+    if (v.name) e.names.push({ name: v.name, on: v.powerState === 'POWERED_ON' });
     gpuVmByHost[v.host] = e;
   }
   // 게스트 수집 사용률은 '전원 ON GPU VM'만 집계(전원 OFF VM의 stale 값 제외) → 호스트(이름)별 평균.

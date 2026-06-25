@@ -2643,10 +2643,13 @@ function Gpu({ scope }) {
         <button className="cell-link" onClick={() => setVmList({ title: `GPU 할당 VM — ${r.name}`, params: { host: r.name } })}>{r.assignedVms}대</button>
         <span className="muted" style={{ fontSize: 11, marginLeft: 6 }} title="GPU 할당 VM의 전원 상태">🟢{r.assignedVmsOn || 0} ⚫{r.assignedVmsOff || 0}</span>
         {(r.assignedVmNames || []).length > 0 && (
-          <div className="muted" style={{ fontSize: 11, marginTop: 2, lineHeight: 1.4, whiteSpace: 'normal', wordBreak: 'break-all' }} title={(r.assignedVmNames || []).join(', ')}>
-            {(r.assignedVmNames || []).slice(0, 6).map((n, i) => (
-              <span key={n + i}>{i > 0 && ', '}<VmLink name={n} vcenterId={r.vcenterId} label={n} /></span>
-            ))}
+          <div className="muted" style={{ fontSize: 11, marginTop: 2, lineHeight: 1.5, whiteSpace: 'normal', wordBreak: 'break-all' }} title={(r.assignedVmNames || []).map((x) => `${x.name || x} ${(x.on ?? true) ? '(On)' : '(Off)'}`).join(', ')}>
+            {(r.assignedVmNames || []).slice(0, 6).map((x, i) => {
+              const nm = x.name || x; const on = x.on ?? true;
+              return (
+                <span key={i}>{i > 0 && ', '}<span title={on ? 'On' : 'Off'} style={{ color: on ? 'var(--green)' : 'var(--text-faint)' }}>{on ? '🟢' : '⚫'}</span> <VmLink name={nm} vcenterId={r.vcenterId} label={nm} /></span>
+              );
+            })}
             {(r.assignedVmNames || []).length > 6 && <span> 외 {(r.assignedVmNames || []).length - 6}대</span>}
           </div>
         )}
