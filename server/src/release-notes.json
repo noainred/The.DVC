@@ -1,6 +1,16 @@
 {
   "notes": [
     {
+      "version": "2.34.2",
+      "date": "2026-06-25",
+      "title": "vCenter 수집 — '잘 되다 안 됨'(HAProxy 중계 keep-alive 끊김) 자동 복구",
+      "notes": [
+        "vCenter를 HAProxy로 중계하는 환경에서, HAProxy reload나 방화벽 idle로 keep-alive 연결이 끊긴 뒤 포탈이 죽은 소켓을 재사용해 'The operation was aborted due to timeout'으로 막히던 문제를 수정했습니다(telnet은 새 연결이라 되지만 포탈은 재사용 소켓이라 멈춤).",
+        "전역 HTTPS 커넥션 풀의 유휴 소켓 회수 시간을 짧게(keepAliveTimeout 4초, VC_KEEPALIVE_MS) 설정해, 매 폴링마다 새 연결로 재접속하도록 했습니다. HAProxy가 reload돼도 다음 주기에 자동 복구됩니다(2.34.1의 reload 직렬화와 함께 효과).",
+        "타임아웃 에러 안내 문구도 'telnet은 되는데 막히면 중계 reload/방화벽 idle로 keep-alive가 끊긴 경우'임을 알려주도록 보강."
+      ]
+    },
+    {
       "version": "2.34.1",
       "date": "2026-06-25",
       "title": "원격접속 안정화 — 동시 접속 시 HAProxy 죽음/서버 리붓 방지",

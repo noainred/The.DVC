@@ -32,7 +32,16 @@ if (!config.rejectUnauthorized) {
       cryptoConstants.SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION,
     timeout: 15_000,
   };
-  setGlobalDispatcher(new Agent({ connect, connectTimeout: 15_000 }));
+  // vCenter를 HAProxy로 중계하는 환경에서는 reload/방화벽 idle로 keep-alive 연결이 끊겨
+  // 죽은 소켓을 재사용하면 응답을 기다리다 타임아웃('operation was aborted due to timeout')한다.
+  // 유휴 소켓을 짧게 회수해 매 폴링마다 새 연결로 재접속하도록 한다(폴링 간격 << keepAlive면 영향 없음).
+  setGlobalDispatcher(new Agent({
+    connect,
+    connectTimeout: 15_000,
+    keepAliveTimeout: Number(process.env.VC_KEEPALIVE_MS) || 4_000,
+    keepAliveMaxTimeout: 10_000,
+    pipelining: 1,
+  }));
 }
 
 export class VCenterClient {

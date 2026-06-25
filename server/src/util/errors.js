@@ -19,7 +19,7 @@ export function describeError(err) {
   } else if (code === 'ECONNREFUSED' || /ECONNREFUSED/i.test(test)) {
     hint = '연결 거부 — 포트(443)·vCenter 서비스·방화벽을 확인하세요.';
   } else if (/TIMEOUT|ETIMEDOUT|timed out|UND_ERR_CONNECT_TIMEOUT|aborted/i.test(test)) {
-    hint = '연결 시간 초과 — 네트워크 경로·방화벽을 확인하세요.';
+    hint = '연결 시간 초과 — telnet(TCP)은 되는데 여기서 막히면 중계(HAProxy) reload·방화벽 idle로 keep-alive 연결이 끊긴 경우가 많습니다(다음 주기에 새 연결로 자동 복구). 지속되면 네트워크 경로·중계 서버 상태를 확인하세요.';
   } else if (/CERT|SELF_SIGNED|self-signed|DEPTH_ZERO|UNABLE_TO_VERIFY|HOSTNAME/i.test(test)) {
     hint = '인증서 오류 — 자체서명 인증서면 VC_TLS_REJECT_UNAUTHORIZED=false 로 두세요.';
   } else if (/ECONNRESET/i.test(test)) {
