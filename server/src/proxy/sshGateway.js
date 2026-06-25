@@ -32,17 +32,32 @@ export function attachSshGateway(server) {
   });
 }
 
+// 동시 원격 SSH 세션 상한 + 유휴 타임아웃 — 무제한 세션이 포탈 서버 메모리/FD를 고갈시켜
+// 리붓되는 것을 막는다. 환경변수로 조정.
+const MAX_SESSIONS = Number(process.env.REMOTE_MAX_SESSIONS) || 80;
+const IDLE_MS = Number(process.env.REMOTE_IDLE_TIMEOUT_MS) || 30 * 60_000;
+let activeSessions = 0;
+
 function handleConnection(ws) {
   let ssh = null;
   let stream = null;
+  let counted = false;
+  let idleTimer = null;
   const send = (obj) => { try { ws.send(JSON.stringify(obj)); } catch { /* closed */ } };
+  const bumpIdle = () => { if (!IDLE_MS) return; clearTimeout(idleTimer); idleTimer = setTimeout(() => { send({ type: 'status', text: `\r\n[유휴 ${Math.round(IDLE_MS / 60000)}분 — 세션을 닫습니다]` }); try { ws.close(); } catch { /* */ } }, IDLE_MS); };
 
   ws.on('message', (raw) => {
+    bumpIdle();
     let msg; try { msg = JSON.parse(raw.toString()); } catch { return; }
 
     if (msg.type === 'auth') {
       const m = getMapping(msg.mappingId);
       if (!m || m.protocol !== 'ssh') return send({ type: 'status', text: 'SSH 매핑을 찾을 수 없습니다.' }) || ws.close();
+      if (!counted && activeSessions >= MAX_SESSIONS) {
+        send({ type: 'status', text: `동시 원격 세션 한도(${MAX_SESSIONS})를 초과했습니다. 사용하지 않는 세션을 닫고 잠시 후 다시 시도하세요.` });
+        return ws.close();
+      }
+      if (!counted) { activeSessions++; counted = true; }
       touchMapping(m.id); // reset the 1-day ephemeral expiry clock on use
       const proxyHost = getProxyById(m.proxyId).proxyHost;
       const host = proxyHost || m.targetHost;     // dial through the assigned proxy frontend
@@ -114,5 +129,12 @@ function handleConnection(ws) {
     }
   });
 
-  ws.on('close', () => { try { stream?.end(); } catch { /* */ } try { ssh?.end(); } catch { /* */ } });
+  ws.on('close', () => {
+    clearTimeout(idleTimer);
+    if (counted) { activeSessions = Math.max(0, activeSessions - 1); counted = false; }
+    try { stream?.end(); } catch { /* */ } try { ssh?.end(); } catch { /* */ }
+  });
 }
+
+/** 현재 동시 SSH 세션 수(상태/진단용). */
+export function activeSshSessionCount() { return activeSessions; }
