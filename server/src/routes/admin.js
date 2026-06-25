@@ -39,6 +39,7 @@ import { physicalPollerStatus, pollPhysicalOnce } from '../gpu/physicalPoller.js
 import { getGuestGpuVms } from '../gpu/store.js';
 import { getAllGpuGuestDiag } from '../central/gpuGuestDiag.js';
 import { loadVcenterConfig } from '../config.js';
+import { probeRelayPath } from '../vcenter/relayProbe.js';
 import { loadScanSettings, saveScanSettings, scanResultList, scanInfo, listScanAgents, getAgentReports, getScanRuns, LOCAL } from '../ipam/scanStore.js';
 import { startScan, scanStatus, rescheduleScanPoller } from '../ipam/scanPoller.js';
 import { listAssignments as listIdracAssignments, getResults as getAgentResults } from '../central/assignments.js';
@@ -138,6 +139,19 @@ adminRouter.get('/logs', adminOnly, (req, res) => {
 });
 
 // Data-source + per-vCenter collection errors (why a vCenter won't connect).
+// vCenter 중계 경로 단계별 진단 — TCP→TLS→HTTP 어디서 막혔는지. ?vcenterId= 또는 ?host=
+adminRouter.get('/vcenter/relay-test', adminOnly, async (req, res) => {
+  let host = String(req.query.host || '').trim();
+  if (!host && req.query.vcenterId) {
+    const vc = (loadVcenterConfig().vcenters || []).find((x) => x.id === req.query.vcenterId);
+    if (!vc) return res.status(404).json({ ok: false, reason: '등록된 vCenter가 아닙니다.' });
+    host = vc.host;
+  }
+  if (!host) return res.status(400).json({ ok: false, reason: 'vcenterId 또는 host가 필요합니다.' });
+  try { res.json({ ok: true, ...(await probeRelayPath(host, { timeoutMs: 6000 })) }); }
+  catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+});
+
 adminRouter.get('/status', adminOnly, (_req, res) => {
   const snap = store.get();
   res.json({

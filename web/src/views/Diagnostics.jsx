@@ -115,6 +115,7 @@ export default function Diagnostics() {
             </div>
             <div className="diag-err-msg">{e.message}</div>
             {e.hint && <div className="diag-err-hint">💡 {e.hint}</div>}
+            <RelayTest vcenterId={e.vcenterId} />
           </div>
         ))}
       </div>
@@ -171,5 +172,41 @@ export default function Diagnostics() {
         </div>
       </div>
     </>
+  );
+}
+
+/** vCenter 중계 경로 단계별 진단 — TCP → TLS → HTTP 어디서 막혔는지 보여준다. */
+function RelayTest({ vcenterId }) {
+  const [busy, setBusy] = useState(false);
+  const [r, setR] = useState(null);
+  const run = async () => {
+    setBusy(true); setR(null);
+    try { setR(await fetchJson(`/admin/vcenter/relay-test?vcenterId=${encodeURIComponent(vcenterId)}`)); }
+    catch (e) { setR({ ok: false, reason: e.message }); }
+    setBusy(false);
+  };
+  const Step = ({ label, s }) => {
+    if (!s) return <span className="badge gray" style={{ marginRight: 6 }}>{label} —</span>;
+    return <span className={`badge ${s.ok ? 'green' : 'red'}`} style={{ marginRight: 6 }} title={s.error || ''}>{label} {s.ok ? '✓' : '✗'}{s.ms != null ? ` ${s.ms}ms` : ''}</span>;
+  };
+  return (
+    <div style={{ marginTop: 8 }}>
+      <button className="logout-btn" style={{ padding: '5px 12px', fontSize: 12 }} disabled={busy} onClick={run}>{busy ? '진단 중…' : '🔎 중계 경로 테스트 (TCP·TLS·HTTP)'}</button>
+      {r && (r.ok === false ? (
+        <div className="diag-err-msg" style={{ marginTop: 6 }}>{r.reason}</div>
+      ) : (
+        <div style={{ marginTop: 8, fontSize: 13 }}>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>대상 {r.host}:{r.port}</div>
+          <div style={{ marginBottom: 6 }}>
+            <Step label="TCP 연결" s={r.steps.tcp} />
+            <Step label="TLS 핸드셰이크" s={r.steps.tls} />
+            <Step label="HTTP 응답" s={r.steps.http} />
+          </div>
+          <div className={`diag-err-hint`} style={{ color: r.verdict.state === 'ok' ? 'var(--green)' : 'var(--amber)' }}>
+            {r.verdict.state === 'ok' ? '✅' : '⚠️'} {r.verdict.text}
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }

@@ -1,6 +1,15 @@
 {
   "notes": [
     {
+      "version": "2.35.0",
+      "date": "2026-06-25",
+      "title": "vCenter 연결 진단 — 중계 경로 단계별 테스트(TCP·TLS·HTTP)",
+      "notes": [
+        "vCenter 연결 진단의 각 실패 항목에 '🔎 중계 경로 테스트' 버튼을 추가했습니다. 누르면 대상(또는 중계 HAProxy)으로 TCP 연결 → TLS 핸드셰이크 → HTTP 응답을 각각 짧은 타임아웃으로 분리 테스트해 어느 단계에서 막혔는지 ✓/✗와 소요시간으로 보여줍니다.",
+        "예: 'TCP ✓ / TLS ✗(무응답) / HTTP —' 이면 중계 HAProxy frontend는 TCP만 받고 backend(vCenter)로 전달이 끊긴 상태로 판정하고, HAProxy backend 확인·재시작을 안내합니다. 'telnet은 되는데 포탈은 멈춤' 같은 상황을 SSH 없이 포탈에서 바로 짚을 수 있습니다."
+      ]
+    },
+    {
       "version": "2.34.2",
       "date": "2026-06-25",
       "title": "vCenter 수집 — '잘 되다 안 됨'(HAProxy 중계 keep-alive 끊김) 자동 복구",
