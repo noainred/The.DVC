@@ -685,14 +685,19 @@ adminRouter.post('/vcenters/test', adminOnly, async (req, res) => {
 });
 
 // 등록된 모든 vCenter 연결을 병렬로 한 번에 테스트(느린 1곳이 전체를 막지 않게 per-vCenter 독립).
-// ?only=enabled 면 '수집 사용'인 것만. 반환: { results:[{id,name,host,enabled,ok,ms,reason,hint,code}] }
+// ?only=enabled 면 '수집 사용'인 것만. 실패 시 중계 경로(TCP·TLS·HTTP) 단계 진단을 자동 첨부해
+// 'TCP부터 안 됨(경로/방화벽)' vs 'TCP는 되는데 TLS만 막힘(HAProxy backend 끊김)'을 바로 구분.
 adminRouter.post('/vcenters/test-all', adminOnly, async (req, res) => {
   const onlyEnabled = String(req.query.only || (req.body || {}).only || '') === 'enabled';
+  const withRelay = String(req.query.relay || (req.body || {}).relay || 'true') !== 'false';
   let list = sortByOrder(listRegistry());
   if (onlyEnabled) list = list.filter((v) => v.enabled !== false);
   const results = await Promise.all(list.map(async (vc) => {
     const r = await testConnection({ id: vc.id }).catch((e) => ({ ok: false, reason: e.message }));
-    return { id: vc.id, name: vc.name, host: vc.host, enabled: vc.enabled !== false, collectMode: vc.collectMode || 'direct', ...r };
+    const base = { id: vc.id, name: vc.name, host: vc.host, enabled: vc.enabled !== false, collectMode: vc.collectMode || 'direct', ...r };
+    // 실패 시에만 경로 진단(짧은 6s 단계 타임아웃, 병렬) — 어디서 막혔는지 즉시 노출.
+    if (!r.ok && withRelay) base.relay = await probeRelayPath(vc.host, { timeoutMs: 6000 }).catch(() => null);
+    return base;
   }));
   res.json({ ok: true, testedAt: Date.now(), total: results.length, okCount: results.filter((r) => r.ok).length, results });
 });

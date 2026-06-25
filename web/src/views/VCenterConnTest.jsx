@@ -55,6 +55,18 @@ export default function VCenterConnTest() {
   const done = shown.filter((v) => results[v.id] && !results[v.id].testing);
   const okN = done.filter((v) => results[v.id].ok).length;
   const failN = done.length - okN;
+  // 실패 행의 중계 경로 진단 판정을 집계 — 전체가 같은 단계에서 막히면 공통 원인을 바로 안내.
+  const verdicts = done.reduce((acc, v) => {
+    const st = results[v.id]?.relay?.verdict?.state;
+    if (st && st !== 'ok') acc[st] = (acc[st] || 0) + 1;
+    return acc;
+  }, {});
+  const VERDICT_LABEL = {
+    tcp: 'TCP 연결 실패(경로/방화벽/호스트 다운)',
+    tls: 'TLS 무응답(HAProxy frontend만 살고 backend 끊김 의심)',
+    http: 'HTTP 무응답(TLS는 되나 vCenter vpxd 지연/중단)',
+  };
+  const topVerdict = Object.entries(verdicts).sort((a, b) => b[1] - a[1])[0];
 
   return (
     <>
@@ -78,6 +90,13 @@ export default function VCenterConnTest() {
           {testedAt && <span className="muted" style={{ fontSize: 12 }}>· 마지막 전체 테스트 {new Date(testedAt).toLocaleTimeString('ko-KR')}</span>}
           <span className="muted" style={{ fontSize: 12 }}>· 각 vCenter에 로그인→로그아웃을 시도해 연결/자격증명을 검증합니다.</span>
         </div>
+        {topVerdict && failN >= 2 && (
+          <div style={{ marginTop: 8, padding: '8px 12px', borderRadius: 8, fontSize: 13, background: 'rgba(245,158,11,.12)', color: 'var(--amber)' }}>
+            ⚠️ 실패 {failN}건 중 <b>{topVerdict[1]}건</b>이 같은 단계에서 막혔습니다: <b>{VERDICT_LABEL[topVerdict[0]] || topVerdict[0]}</b>.
+            {topVerdict[0] === 'tcp' && ' 여러 vCenter가 동시에 TCP부터 막히면 포탈 서버→해당 대역 라우팅/방화벽 또는 중계 서버 다운을 먼저 확인하세요(telnet도 안 될 가능성).'}
+            {topVerdict[0] === 'tls' && ' TCP는 되는데 TLS가 무응답이면 중계(HAProxy) backend(vCenter) 연결이 끊긴 상태가 유력 — 중계 서버에서 HAProxy backend UP 확인 후 systemctl restart haproxy.'}
+          </div>
+        )}
       </div>
 
       <div className="table-wrap">
@@ -104,12 +123,14 @@ export default function VCenterConnTest() {
                         <span className="badge red">✗ 실패</span>
                         <span style={{ marginLeft: 6, color: '#f87171', fontSize: 13 }}>{r.reason}</span>
                         {r.hint && <div className="muted" style={{ fontSize: 12, marginTop: 3 }}>💡 {r.hint}</div>}
+                        {/* 전체 테스트가 자동 첨부한 경로 진단(있으면 클릭 없이 즉시 표시) */}
+                        {r.relay && <RelaySteps r={r.relay} />}
                       </div>
                     )}
                   </td>
                   <td className="right nowrap">
                     <button className="tab" disabled={r?.testing} onClick={() => testOne(vc)}>{r?.testing ? '…' : '테스트'}</button>
-                    {r && !r.testing && !r.ok && <RelayTest vcenterId={vc.id} />}
+                    {r && !r.testing && !r.ok && !r.relay && <RelayTest vcenterId={vc.id} />}
                   </td>
                 </tr>
               );
@@ -125,7 +146,30 @@ export default function VCenterConnTest() {
   );
 }
 
-/** 중계 경로 단계별 진단(TCP·TLS·HTTP) — 실패 행에서 펼쳐 본다. */
+/** 중계 경로 진단 결과(TCP·TLS·HTTP)를 단계 배지 + 판정으로 표시(공용 표현 컴포넌트). */
+function RelaySteps({ r }) {
+  if (!r) return null;
+  if (r.ok === false) return <div style={{ marginTop: 6, color: '#f87171', fontSize: 12 }}>{r.reason}</div>;
+  const Step = ({ label, s }) => {
+    if (!s) return <span className="badge gray" style={{ marginRight: 4 }}>{label} —</span>;
+    return <span className={`badge ${s.ok ? 'green' : 'red'}`} style={{ marginRight: 4 }} title={s.error || ''}>{label} {s.ok ? '✓' : '✗'}{s.ms != null ? ` ${s.ms}ms` : ''}</span>;
+  };
+  return (
+    <div style={{ marginTop: 6, fontSize: 12 }}>
+      <div className="muted" style={{ marginBottom: 4 }}>중계 경로 · 대상 {r.host}:{r.port}</div>
+      <div style={{ marginBottom: 4 }}>
+        <Step label="TCP" s={r.steps.tcp} />
+        <Step label="TLS" s={r.steps.tls} />
+        <Step label="HTTP" s={r.steps.http} />
+      </div>
+      <div style={{ color: r.verdict.state === 'ok' ? 'var(--green)' : 'var(--amber)' }}>
+        {r.verdict.state === 'ok' ? '✅' : '⚠️'} {r.verdict.text}
+      </div>
+    </div>
+  );
+}
+
+/** 중계 경로 단계별 진단(TCP·TLS·HTTP)을 개별 행에서 수동 실행(전체 테스트로 자동 첨부가 없을 때). */
 function RelayTest({ vcenterId }) {
   const [busy, setBusy] = useState(false);
   const [r, setR] = useState(null);
@@ -135,28 +179,10 @@ function RelayTest({ vcenterId }) {
     catch (e) { setR({ ok: false, reason: e.message }); }
     setBusy(false);
   };
-  const Step = ({ label, s }) => {
-    if (!s) return <span className="badge gray" style={{ marginRight: 4 }}>{label} —</span>;
-    return <span className={`badge ${s.ok ? 'green' : 'red'}`} style={{ marginRight: 4 }} title={s.error || ''}>{label} {s.ok ? '✓' : '✗'}{s.ms != null ? ` ${s.ms}ms` : ''}</span>;
-  };
   return (
     <div style={{ marginTop: 6, textAlign: 'left' }}>
       <button className="tab" disabled={busy} onClick={run}>{busy ? '진단 중…' : '🔎 중계 경로'}</button>
-      {r && (r.ok === false ? (
-        <div style={{ marginTop: 6, color: '#f87171', fontSize: 12 }}>{r.reason}</div>
-      ) : (
-        <div style={{ marginTop: 6, fontSize: 12 }}>
-          <div className="muted" style={{ marginBottom: 4 }}>대상 {r.host}:{r.port}</div>
-          <div style={{ marginBottom: 4 }}>
-            <Step label="TCP" s={r.steps.tcp} />
-            <Step label="TLS" s={r.steps.tls} />
-            <Step label="HTTP" s={r.steps.http} />
-          </div>
-          <div style={{ color: r.verdict.state === 'ok' ? 'var(--green)' : 'var(--amber)' }}>
-            {r.verdict.state === 'ok' ? '✅' : '⚠️'} {r.verdict.text}
-          </div>
-        </div>
-      ))}
+      {r && <RelaySteps r={r} />}
     </div>
   );
 }
