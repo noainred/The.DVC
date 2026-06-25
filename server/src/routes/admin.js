@@ -40,6 +40,7 @@ import { getGuestGpuVms } from '../gpu/store.js';
 import { getAllGpuGuestDiag } from '../central/gpuGuestDiag.js';
 import { loadVcenterConfig } from '../config.js';
 import { probeRelayPath } from '../vcenter/relayProbe.js';
+import { portalDbReport } from '../insights/portalDb.js';
 import { loadScanSettings, saveScanSettings, scanResultList, scanInfo, listScanAgents, getAgentReports, getScanRuns, LOCAL } from '../ipam/scanStore.js';
 import { startScan, scanStatus, rescheduleScanPoller } from '../ipam/scanPoller.js';
 import { listAssignments as listIdracAssignments, getResults as getAgentResults } from '../central/assignments.js';
@@ -151,6 +152,9 @@ adminRouter.get('/vcenter/relay-test', adminOnly, async (req, res) => {
   try { res.json({ ok: true, ...(await probeRelayPath(host, { timeoutMs: 6000 })) }); }
   catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
+
+// 포탈 DB 인벤토리 — 사용 중 모든 데이터 파일의 경로·파일명·용도·크기·증가 추이.
+adminRouter.get('/portal-db', adminOnly, (_req, res) => res.json(portalDbReport()));
 
 adminRouter.get('/status', adminOnly, (_req, res) => {
   const snap = store.get();
