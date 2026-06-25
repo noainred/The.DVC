@@ -119,6 +119,20 @@ export default function ProxySettings() {
           </div>
         </div>
         <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>법인(vCenter)별로 다른 프록시 서버를 지정합니다. VM 접속 시 해당 vCenter에 할당된 프록시를 자동 사용하며, 미할당 vCenter는 위 <b>기본 프록시</b>를 씁니다. <b>상태</b> 점등: 🟢 동작 · 🔴 실패 · ⚪ 수동/대기.</div>
+        {(() => {
+          const ok = proxies.filter((p) => health[p.id]?.state === 'ok').length;
+          const fail = proxies.filter((p) => health[p.id]?.state === 'fail').length;
+          const other = proxies.length - ok - fail;
+          return (
+            <div className="flex gap wrap" style={{ fontSize: 13, marginBottom: 10 }}>
+              <span className="badge gray">총 {proxies.length}개</span>
+              <span className="badge green">🟢 정상 {ok}</span>
+              <span className="badge red">🔴 불량 {fail}</span>
+              <span className="badge gray">⚪ 대기/수동 {other}</span>
+              {proxies.length > 0 && other > 0 && <span className="muted" style={{ alignSelf: 'center', fontSize: 12 }}>· '전체 상태 테스트'를 누르면 정상/불량이 갱신됩니다.</span>}
+            </div>
+          );
+        })()}
         <div className="table-wrap">
           <table>
             <thead><tr><th>상태</th><th>이름</th><th>프록시 주소</th><th>공개포트 시작</th><th>할당 vCenter</th><th>프로비저닝</th><th style={{ textAlign: 'right' }}>관리</th></tr></thead>
