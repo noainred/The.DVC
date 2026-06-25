@@ -185,7 +185,7 @@ function dsStorageLabel(item) {
 const PING_COLOR = { up: 'var(--green,#22c55e)', down: 'var(--red,#ef4444)', pending: '', unknown: '', error: 'var(--red,#ef4444)' };
 const pingTip = (ip, r) => {
   if (r.state === 'up') return `${ip} — 엣지 에이전트에서 ping 응답함${r.rttMs != null ? ` (${r.rttMs}ms)` : ''} · 도달 가능`;
-  if (r.state === 'down') return `${ip} — 엣지 에이전트에서 ping 무응답 · 도달 불가(VM 다운·방화벽·라우팅 의심)`;
+  if (r.state === 'down') return `${ip} — 이 vCenter 담당(중앙/엣지)에서 ping 무응답 · 도달 불가. 이 IP가 다른 망이면 그 망 엣지 포탈에서는 닿을 수 있습니다(한 곳이라도 응답하면 녹색 유지).`;
   if (r.state === 'error') return `${ip} — ping 확인 실패(${r.error || '에이전트 오류'})`;
   return `${ip} — ping 확인 중…(해당 vCenter 담당 엣지 에이전트가 대행)`;
 };

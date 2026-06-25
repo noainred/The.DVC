@@ -14,6 +14,7 @@ const pending = new Map();  // vcenterId -> Map<ip, atMs>   (요청됐으나 아
 const results = new Map();  // vcenterId -> Map<ip, { alive, rttMs, at }>
 
 const RESULT_TTL = 5 * 60_000; // 결과 보존 5분
+const UP_STICKY_MS = 2 * 60_000; // 최근 'up'은 이 시간 동안 down 보고로 덮어쓰지 않음(멀티홈/멀티에이전트 깜빡임 방지)
 const MAX_IPS = 64;            // 한 vCenter당 동시 대기 IP 상한(남용 방지)
 
 /** UI가 ping을 요청 — 대기열에 추가(중복 IP는 갱신). */
@@ -46,7 +47,12 @@ export function setPingResults(vcenterId, rows = []) {
   const now = Date.now();
   for (const r of rows) {
     if (!r || !r.ip) continue;
-    m.set(String(r.ip), { alive: !!r.alive, rttMs: r.rttMs ?? null, at: now });
+    const key = String(r.ip);
+    const prev = m.get(key);
+    // 도달성은 'OR' — 한 vantage point(중앙/다른 망 에이전트)라도 최근에 응답했으면 up 유지.
+    // 다른 곳에서 못 닿아 down을 보고해도 신선한 up을 덮어쓰지 않는다(녹↔적 깜빡임 방지).
+    if (!r.alive && prev && prev.alive && (now - prev.at) < UP_STICKY_MS) continue;
+    m.set(key, { alive: !!r.alive, rttMs: r.rttMs ?? null, at: now });
   }
   // TTL 만료 정리
   for (const [ip, v] of m) if (now - v.at > RESULT_TTL) m.delete(ip);

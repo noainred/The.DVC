@@ -47,9 +47,27 @@ function handleConnection(ws) {
       const proxyHost = getProxyById(m.proxyId).proxyHost;
       const host = proxyHost || m.targetHost;     // dial through the assigned proxy frontend
       const port = proxyHost ? m.publicPort : m.targetPort;
-      send({ type: 'status', text: `연결 중 ${host}:${port} (대상 ${m.targetHost}:${m.targetPort})…` });
+      // 보안상 프록시 주소는 노출하지 않고 '대상'만 표시한다.
+      send({ type: 'status', text: `연결 중 ${m.targetHost}:${m.targetPort}…` });
+
+      // ssh -v 스타일 진행 로그(단계별 1회씩) — 접속이 지루하지 않게 과정을 보여준다.
+      // 프록시 주소·IP 등 내부 정보는 노출하지 않도록 문구를 가공한다.
+      const vshown = new Set();
+      const vsend = (key, text) => { if (vshown.has(key)) return; vshown.add(key); send({ type: 'status', text: `🔹 ${text}` }); };
+      const onDebug = (line) => {
+        const s = String(line || '');
+        if (/Trying|Connecting to|socket/i.test(s)) vsend('tcp', '대상에 TCP 연결 중…');
+        else if (/Remote ident|remote software|server.*version/i.test(s)) { const v = (s.match(/SSH-[\w.\-@ ]+/) || [])[0]; vsend('ident', `서버 식별 수신${v ? `: ${v.trim()}` : ''}`); }
+        else if (/KEXINIT|key exchange|\bKEX\b/i.test(s)) vsend('kex', '키 교환(KEX) 협상 중…');
+        else if (/NEWKEYS|encrypt|cipher/i.test(s)) vsend('enc', '암호화 채널 수립…');
+        else if (/keyboard-interactive/i.test(s)) vsend('kbd', '인증 시도: keyboard-interactive…');
+        else if (/userauth.*password|password auth|Trying password/i.test(s)) vsend('pw', '인증 시도: password…');
+        else if (/userauth|authenticat/i.test(s)) vsend('auth', '인증 협상 중…');
+      };
 
       ssh = new SSHClient();
+      ssh.on('banner', (b) => vsend('banner', `서버 배너: ${String(b).replace(/\s+/g, ' ').trim().slice(0, 120)}`));
+      ssh.on('handshake', (n) => vsend('hs', `핸드셰이크 완료 · 암호화 ${(n && (n.kex || n.serverHostKey)) || 'OK'}`));
       ssh.on('ready', () => {
         send({ type: 'status', text: '인증 성공. 셸을 엽니다…' });
         // Fetch the remote hostname so the tab can be labelled by the actual server.
@@ -86,7 +104,7 @@ function handleConnection(ws) {
       ssh.on('close', () => ws.close());
       ssh.connect({
         host, port, username: msg.username, password: msg.password,
-        tryKeyboard: true,
+        tryKeyboard: true, debug: onDebug,
         readyTimeout: 20000, keepaliveInterval: 15000,
       });
     } else if (msg.type === 'data' && stream) {
