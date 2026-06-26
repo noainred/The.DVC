@@ -164,6 +164,15 @@ export function getIpHistoryMap() {
   return m;
 }
 
+/** ip → { firstSeen, lastSeen, status, agent, events[] } 전체 맵(시간축 시각화용 — up/down 전이 시계열 포함). */
+export function getAllHistoryEvents() {
+  const m = {};
+  for (const e of Object.values(history)) {
+    m[e.ip] = { firstSeen: e.firstSeen, lastSeen: e.lastSeen, status: e.status, agent: e.agent || '', events: e.events || [] };
+  }
+  return m;
+}
+
 export function pruneScanResults(retentionDays) {
   if (!retentionDays) return;
   const cut = Date.now() - retentionDays * 86_400_000;

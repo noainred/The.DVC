@@ -7,6 +7,9 @@ import { fetchVmMetric, fetchHostMetric, PERF_INTERVALS, upgradeVmTools, getVmCo
 import { listMutes, addMute, removeMute } from '../alarm-mutes.js';
 import { buildIpamRows, buildSubnetSheets, listSubnets } from '../ipam/ledger.js';
 import { buildIpamInsights } from '../ipam/insights.js';
+import { buildNetmap } from '../ipam/netmap.js';
+import { listVcRanges } from '../ipam/rangeStore.js';
+import { expandRange } from '../ipam/scan.js';
 import { getAnnotation, setAnnotation } from '../ipam/annotations.js';
 import { getIpHistory, scanResultList, getIpHistoryMap } from '../ipam/scanStore.js';
 import { getClassifier } from '../ipam/settings.js';
@@ -462,6 +465,45 @@ api.get('/tools/ipam/sheet', (req, res) => {
 // Per-IP usage history (scan-derived online/offline transitions over time).
 api.get('/tools/ipam/history', (req, res) => {
   res.json({ ip: req.query.ip, history: getIpHistory(String(req.query.ip || '')) });
+});
+
+// vCenter별 등록 스캔 대역 목록(+vCenter 이름·IP 수 추정).
+api.get('/tools/ipam/vc-ranges', (req, res) => {
+  const snap = store.get();
+  const vcName = {};
+  for (const vc of snap.vcenters || []) vcName[vc.id] = vc.name;
+  const list = listVcRanges().map((e) => ({
+    ...e, vcenterName: vcName[e.vcenterId] || e.vcenterId,
+    ipCount: e.ranges.reduce((a, s) => a + expandRange(s).length, 0),
+  }));
+  // 등록 안 된 vCenter도 선택할 수 있게 전체 vCenter 목록을 함께 내려준다.
+  res.json({ ranges: list, vcenters: (snap.vcenters || []).map((v) => ({ id: v.id, name: v.name })) });
+});
+
+// 네트워크 맵 — 대역(/24) 선택 시 OS별·시간대별 사용/미사용 격자.
+api.get('/tools/ipam/netmap', (req, res) => {
+  res.json(buildNetmap(store.get(), {
+    vcenterId: req.query.vcenterId || '', base: req.query.base || '',
+    days: req.query.days, buckets: req.query.buckets,
+  }));
+});
+
+// 스캔 결과를 '첨부파일'처럼 내려받기(CSV). 현재 결과 + 이력(상태/최초관측) 조인.
+api.get('/tools/ipam/scan-report.csv', (req, res) => {
+  const histMap = getIpHistoryMap();
+  const rows = scanResultList();
+  const esc = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const iso = (t) => (t ? new Date(t).toISOString() : '');
+  const head = 'ip,hostname,status,open_ports,services,first_seen,last_seen,agent';
+  const lines = rows.map((r) => {
+    const h = histMap[r.ip] || {};
+    return [r.ip, r.hostname || '', h.status || '', (r.openPorts || []).join(' '), (r.services || []).join(' '),
+      iso(h.firstSeen), iso(r.lastSeen || h.lastSeen), r.agent || ''].map(esc).join(',');
+  });
+  const csv = `${head}\n${lines.join('\n')}\n`;
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="ip-scan-report-${new Date().toISOString().slice(0, 10)}.csv"`);
+  res.send(csv);
 });
 
 // Per-IP user annotation (custom memo + tags), separate from vCenter notes.

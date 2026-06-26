@@ -6,6 +6,12 @@
 
 import { scanRanges } from './scan.js';
 import { loadScanSettings, mergeScanResults, pruneScanResults, recordAgentReport, sweepReleases, LOCAL } from './scanStore.js';
+import { enabledVcRanges } from './rangeStore.js';
+
+// 로컬 폴러가 실제로 스캔할 대역 = __local__ 설정 대역 ∪ enabled인 모든 vCenter 대역(유니크).
+function effectiveRanges(s) {
+  return [...new Set([...(s.ranges || []), ...enabledVcRanges()])];
+}
 
 // 일정 시간 응답이 없으면 'IP 해제'로 간주(이력에 down 기록). 스캔 주기의 3배 또는 최소 3시간.
 function releaseIdleMs() { return Math.max(loadScanSettings().intervalMs * 3, 3 * 3_600_000); }
@@ -19,13 +25,15 @@ let progress = null; // 실행 중 진행률: { total, done, alive, startedAt }
 export async function runScanOnce({ manual = false } = {}) {
   if (running) return { ok: false, reason: '이미 스캔 중입니다.' };
   const s = loadScanSettings();
-  if (!manual && !s.enabled) { lastRun = { at: Date.now(), skipped: '비활성' }; return { ok: false, reason: '비활성' }; }
-  if (!s.ranges.length) { lastRun = { at: Date.now(), skipped: '대역 없음' }; return { ok: false, reason: '스캔 대역이 없습니다.' }; }
+  const ranges = effectiveRanges(s);
+  // 주기 스캔은 __local__ enabled이거나, enabled인 vCenter 대역이 하나라도 있으면 돈다.
+  if (!manual && !s.enabled && !enabledVcRanges().length) { lastRun = { at: Date.now(), skipped: '비활성' }; return { ok: false, reason: '비활성' }; }
+  if (!ranges.length) { lastRun = { at: Date.now(), skipped: '대역 없음' }; return { ok: false, reason: '스캔 대역이 없습니다.' }; }
   running = true;
   const started = Date.now();
   progress = { total: 0, done: 0, alive: 0, startedAt: started };
   try {
-    const { scanned, alive } = await scanRanges(s.ranges, {
+    const { scanned, alive } = await scanRanges(ranges, {
       ports: s.ports, concurrency: s.concurrency, timeoutMs: s.timeoutMs, reverseDns: s.reverseDns,
       onProgress: (done, total, aliveCount) => { progress = { total, done, alive: aliveCount, startedAt: started }; },
     });
@@ -45,7 +53,7 @@ export async function runScanOnce({ manual = false } = {}) {
 export function startScan({ manual = true } = {}) {
   if (running) return { ok: false, reason: '이미 스캔 중입니다.', running: true };
   const s = loadScanSettings();
-  if (!s.ranges.length) return { ok: false, reason: '스캔 대역이 없습니다.' };
+  if (!effectiveRanges(s).length) return { ok: false, reason: '스캔 대역이 없습니다.' };
   runScanOnce({ manual }).catch((e) => console.error('[ipscan] 백그라운드 스캔 실패:', e.message));
   return { ok: true, started: true };
 }
@@ -53,7 +61,7 @@ export function startScan({ manual = true } = {}) {
 export function scanStatus() {
   const s = loadScanSettings();
   const pct = progress && progress.total ? Math.round((progress.done / progress.total) * 100) : null;
-  return { enabled: s.enabled, ranges: s.ranges.length, intervalMs: s.intervalMs, running, lastRun, progress: progress ? { ...progress, pct } : null };
+  return { enabled: s.enabled, ranges: effectiveRanges(s).length, localRanges: (s.ranges || []).length, vcRanges: enabledVcRanges().length, intervalMs: s.intervalMs, running, lastRun, progress: progress ? { ...progress, pct } : null };
 }
 
 export function rescheduleScanPoller() {

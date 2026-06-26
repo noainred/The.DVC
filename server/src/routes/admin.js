@@ -43,6 +43,7 @@ import { probeRelayPath } from '../vcenter/relayProbe.js';
 import { portalDbReport } from '../insights/portalDb.js';
 import { loadScanSettings, saveScanSettings, scanResultList, scanInfo, listScanAgents, getAgentReports, getScanRuns, LOCAL } from '../ipam/scanStore.js';
 import { startScan, scanStatus, rescheduleScanPoller } from '../ipam/scanPoller.js';
+import { listVcRanges, saveVcRanges, removeVcRanges } from '../ipam/rangeStore.js';
 import { listAssignments as listIdracAssignments, getResults as getAgentResults } from '../central/assignments.js';
 import { centralTokenInfo, generateCentralToken, setCentralToken } from '../central/token.js';
 import { listInventory } from '../central/inventory.js';
@@ -388,6 +389,22 @@ adminRouter.get('/ipam/scan/status', adminOnly, (_req, res) => {
 });
 adminRouter.get('/ipam/scan/results', adminOnly, (_req, res) => {
   res.json({ results: scanResultList().slice(0, 5000), info: scanInfo() });
+});
+
+// vCenter별 스캔 대역 저장/삭제 + 즉시 스캔(주기 스캔이 이 대역들을 함께 스캔).
+adminRouter.put('/ipam/vc-ranges', adminOnly, (req, res) => {
+  const b = req.body || {};
+  const r = saveVcRanges(b.vcenterId, { ranges: b.ranges, enabled: b.enabled });
+  if (r.ok) { try { rescheduleScanPoller(); } catch { /* */ } }
+  res.status(r.ok ? 200 : 400).json(r);
+});
+adminRouter.delete('/ipam/vc-ranges/:vcenterId', adminOnly, (req, res) => {
+  const r = removeVcRanges(req.params.vcenterId);
+  res.status(r.ok ? 200 : 404).json(r);
+});
+adminRouter.post('/ipam/vc-ranges/scan', adminOnly, (_req, res) => {
+  const r = startScan({ manual: true });
+  res.json({ ...r, status: scanStatus() });
 });
 
 // Metrics sampler settings: 온도/용량/GPU 수집 주기 + 보존기간 (런타임 변경).
