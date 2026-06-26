@@ -3,6 +3,7 @@ import { generateSnapshot } from './mock/generator.js';
 import { collectFromVCenter } from './vcenter/restClient.js';
 import { describeError } from './util/errors.js';
 import { latestPowerByHostName, latestPowerByServiceTag, allMeasuredPower } from './idrac/service.js';
+import { loadRegistry as loadIdracRegistry } from './idrac/registry.js';
 import { buildHostIndex, resolveServerVcenter } from './idrac/attribution.js';
 import { applyMutes } from './alarm-mutes.js';
 import { getDataSource } from './runtime-settings.js';
@@ -13,6 +14,11 @@ import { isStopped } from './security/emergencyStop.js';
 
 // 사이트 위임 vCenter가 이 시간 이상 push가 없으면 'stale'로 표시(데이터는 계속 서빙).
 const SITE_STALE_MS = Number(process.env.SITE_INVENTORY_STALE_MS) || 300_000;
+
+// 등록된 iDRAC 서버 수(OME 자동발견 엔트리 제외). best-effort.
+function idracRegisteredCount() {
+  try { return loadIdracRegistry().filter((s) => s.type !== 'ome').length; } catch { return 0; }
+}
 
 /**
  * Overlay real iDRAC power (Watts) onto hosts by matching the ESXi host name to
@@ -248,6 +254,8 @@ function withRollups(snap) {
     powerWatts: snap.measuredPower ? snap.measuredPower.totalWatts : sum(snap.hosts, (h) => h.powerWatts),
     powerKw: round((snap.measuredPower ? snap.measuredPower.totalWatts : sum(snap.hosts, (h) => h.powerWatts)) / 1000, 1),
     powerReporting: snap.measuredPower ? snap.measuredPower.servers : snap.hosts.filter((h) => h.powerWatts > 0).length,
+    // 등록된 Dell iDRAC 서버 수(OME 자동발견 엔트리 제외) — '전력 보고 중' 수량과 비교용.
+    powerRegistered: idracRegisteredCount(),
     powerUnmappedKw: round((snap.measuredPower?.byVc?.['(미매핑)'] || 0) / 1000, 1),
   };
 

@@ -99,31 +99,47 @@ export async function allMeasuredPower() {
   const db = await getDb();
   const latest = db.latestAll(); // Map<serverId,{watts,ts}>
   const out = [];
-  const seen = new Set();
+  const seen = new Set();        // serverId 중복 방지
+  const seenIdent = new Set();   // 같은 물리 서버(서비스태그/호스트)가 여러 소스(iDRAC/OME/원격)로
+                                 // 중복 집계되어 서버 수·전력 합이 부풀려지는 것을 방지.
+  const identKeys = (serviceTag, hostNames) => {
+    const keys = [];
+    const st = norm(serviceTag); if (st) keys.push(`st:${st}`);
+    for (const h of (hostNames || [])) { const n = norm(h); if (n) keys.push(`h:${n}`); }
+    return keys;
+  };
+  // entry를 추가하되, serverId 또는 물리 식별자(서비스태그/호스트)가 이미 집계됐으면 건너뛴다.
+  const tryAdd = (entry, serviceTag, hostNames) => {
+    if (seen.has(entry.serverId)) return;
+    const keys = identKeys(serviceTag, hostNames);
+    if (keys.some((k) => seenIdent.has(k))) return; // 다른 소스로 이미 집계된 동일 서버
+    out.push(entry);
+    seen.add(entry.serverId);
+    keys.forEach((k) => seenIdent.add(k));
+  };
+
   for (const s of loadRegistry()) {
     if (s.type === 'ome') continue;
     const sample = latest.get(s.id);
     if (!sample || sample.watts == null || !Number.isFinite(sample.watts)) continue;
     const { model, serviceTag } = serverIdentity(s.id, s);
-    out.push({ serverId: s.id, serverName: s.name, watts: sample.watts, ts: sample.ts, host: norm(s.host || matchKeys(s)[0] || s.name), hostNames: matchKeys(s), model, serviceTag, vcenterId: s.vcenterId || '', source: 'idrac' });
-    seen.add(s.id);
+    const hostNames = matchKeys(s);
+    tryAdd({ serverId: s.id, serverName: s.name, watts: sample.watts, ts: sample.ts, host: norm(s.host || hostNames[0] || s.name), hostNames, model, serviceTag, vcenterId: s.vcenterId || '', source: 'idrac' }, serviceTag, hostNames);
   }
   for (const { entryId, at, device } of allOmeDevices()) {
     if (device.watts == null) continue;
     const key = dbKey(entryId, device);
-    if (seen.has(key)) continue;
     const sample = latest.get(key) || { watts: device.watts, ts: at };
     if (sample.watts == null || !Number.isFinite(sample.watts)) continue;
     const st = norm(device.serviceTag);
-    out.push({ serverId: key, serverName: device.name, watts: sample.watts, ts: sample.ts, host: st || norm(device.name), hostNames: [st, norm(device.name)].filter(Boolean), model: (device.model || '').trim(), serviceTag: device.serviceTag || '', source: 'ome' });
-    seen.add(key);
+    const hostNames = [st, norm(device.name)].filter(Boolean);
+    tryAdd({ serverId: key, serverName: device.name, watts: sample.watts, ts: sample.ts, host: st || norm(device.name), hostNames, model: (device.model || '').trim(), serviceTag: device.serviceTag || '', source: 'ome' }, device.serviceTag, hostNames);
   }
   for (const [host, r] of remotePowerByHost()) {
     if (r.watts == null || !Number.isFinite(r.watts)) continue;
     const id = `remote:${r.collectorId}:${host}`;
-    if (seen.has(id)) continue;
-    out.push({ serverId: id, serverName: r.serverName || host, watts: r.watts, ts: r.ts, host: norm(host), hostNames: [norm(host)], model: (r.model || '').trim(), serviceTag: r.serviceTag || '', source: 'remote' });
-    seen.add(id);
+    const hostNames = [norm(host)];
+    tryAdd({ serverId: id, serverName: r.serverName || host, watts: r.watts, ts: r.ts, host: norm(host), hostNames, model: (r.model || '').trim(), serviceTag: r.serviceTag || '', source: 'remote' }, r.serviceTag, hostNames);
   }
   return out;
 }

@@ -74,12 +74,12 @@ import { createJob as createProvisionJob } from '../provision/jobs.js';
 import { updateSaved, removeSaved } from '../provision/saved.js';
 import {
   listRegistry as listServers, addServer, updateServer, removeServer,
-  testServer, importServers, parseCsv, bulkAddByIps, registerScanned, assignVcenter,
+  testServer, importServers, parseCsv, bulkAddByIps, registerScanned, assignVcenter, deleteServers,
   loadRegistry as loadIdracRegistry,
 } from '../idrac/registry.js';
 import { expandIpList } from '../idrac/iprange.js';
 import { scanForIdracs } from '../idrac/scan.js';
-import { enqueueIdracScan, getIdracScanResult } from '../central/idracScanJobs.js';
+import { enqueueIdracScan, enqueueIdracRegister, getIdracScanResult } from '../central/idracScanJobs.js';
 import { getPollerStatus, pollNow } from '../idrac/poller.js';
 import { getInventory as getIdracInventory } from '../idrac/invCache.js';
 import { getSensorSeries } from '../idrac/sensorStore.js';
@@ -1137,7 +1137,8 @@ adminRouter.post('/idrac/scan', adminOnly, async (req, res) => {
   // 에이전트 위임 스캔(원격 사이트 iDRAC에 중앙이 직접 못 닿는 경우).
   if (agent && agent !== '__local__') {
     if (!config.central.token) return res.status(400).json({ ok: false, reason: '중앙(CENTRAL_TOKEN) 미설정 — 에이전트 위임 스캔을 사용할 수 없습니다.' });
-    const reqId = enqueueIdracScan(agent, { ips, username, password, vcenterId: String(req.body?.vcenterId || '').trim() });
+    // noRegister: 스캔만 하고 등록은 UI 확인 후 별도 '등록' 잡으로(자동등록 안 함).
+    const reqId = enqueueIdracScan(agent, { ips, username, password, vcenterId: String(req.body?.vcenterId || '').trim(), noRegister: true });
     if (!reqId) return res.status(429).json({ ok: false, reason: '대기 중인 스캔 잡이 너무 많습니다. 잠시 후 다시 시도하세요.' });
     return res.json({ ok: true, delegated: true, agent, reqId });
   }
@@ -1167,10 +1168,32 @@ adminRouter.get('/idrac/scan-agents', adminOnly, (_req, res) => {
 });
 
 // Register iDRACs found by a scan, applying the shared credentials, then poll.
-// Body: { found:[{ip,serviceTag,hostName,model}], username, password, mode?, vcenterId? }
+// Body: { found:[...], username, password, mode?, vcenterId?, agent? }
+// mode: 'merge'(기본) | 'replace'(전체 교체) | 'replace-vcenter'(소속 vCenter만 교체).
+// agent 지정(위임): 에이전트가 현지에 등록(중앙 못 닿는 대역) → reqId 반환, UI가 폴링.
+const normIdracMode = (m) => (['replace', 'replace-vcenter', 'merge'].includes(m) ? m : 'merge');
 adminRouter.post('/idrac/register-scanned', adminOnly, (req, res) => {
-  const { found, username, password, mode, vcenterId } = req.body || {};
-  const result = registerScanned(found, username, password, mode === 'replace' ? 'replace' : 'merge', vcenterId || '');
+  const { found, username, password, mode, vcenterId, agent } = req.body || {};
+  const ag = String(agent || '').trim();
+  if (ag && ag !== '__local__') {
+    if (!config.central.token) return res.status(400).json({ ok: false, reason: '중앙(CENTRAL_TOKEN) 미설정 — 위임 등록을 사용할 수 없습니다.' });
+    const reqId = enqueueIdracRegister(ag, { found, username, password, vcenterId: vcenterId || '', mode: normIdracMode(mode) });
+    if (!reqId) return res.status(429).json({ ok: false, reason: '등록할 iDRAC가 없거나 대기 잡이 너무 많습니다.' });
+    return res.json({ ok: true, delegated: true, agent: ag, reqId });
+  }
+  const result = registerScanned(found, username, password, normIdracMode(mode), vcenterId || '');
+  if (result.ok) pollNow().catch(() => {});
+  res.status(result.ok ? 200 : 400).json(result);
+});
+
+// 서버 일괄 삭제. Body: { all:true } 또는 { vcenterId } (빈 문자열=미지정 서버 삭제).
+adminRouter.post('/idrac/delete', adminOnly, (req, res) => {
+  const b = req.body || {};
+  const result = b.all
+    ? deleteServers({ all: true })
+    : (Object.prototype.hasOwnProperty.call(b, 'vcenterId')
+      ? deleteServers({ vcenterId: b.vcenterId })
+      : { ok: false, reason: 'all=true 또는 vcenterId가 필요합니다.' });
   if (result.ok) pollNow().catch(() => {});
   res.status(result.ok ? 200 : 400).json(result);
 });

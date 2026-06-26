@@ -43,6 +43,16 @@ export async function runIdracScanWorkerOnce() {
     for (const job of jobs) {
       const started = Date.now();
       try {
+        // '등록' 잡: UI가 스캔에서 확인한 found 목록을 현지 레지스트리에 등록.
+        if (job.action === 'register') {
+          const rr = registerScanned(job.found || [], job.username, job.password, job.mode || 'merge', job.vcenterId || '');
+          const registered = rr.ok ? ((rr.added || 0) + (rr.updated || 0)) : 0;
+          if (rr.ok) pollNow().catch(() => {});
+          await postResult({ reqId: job.reqId, agent: config.agent.name, scanned: 0, found: job.found || [], foundCount: (job.found || []).length, registered, error: rr.ok ? null : (rr.reason || '등록 실패'), durationMs: Date.now() - started });
+          last = { at: Date.now(), reqId: job.reqId, registered };
+          console.log(`[idrac-scan-agent] ${config.agent.name}: 등록 잡 — ${registered}대 현지 등록`);
+          continue;
+        }
         // 진행률을 중앙에 보고(최소 1.5s 간격으로 스로틀) → UI 프로세스 바.
         let lastSent = 0;
         const onProgress = (scanned, total) => {
@@ -52,14 +62,15 @@ export async function runIdracScanWorkerOnce() {
           postProgress(job.reqId, scanned, total);
         };
         const scan = await scanForIdracs({ ips: job.ips, username: job.username, password: job.password, onProgress });
+        // noRegister면 스캔만(UI에서 확인 후 별도 '등록' 잡으로 등록). 그 외엔 기존처럼 자동등록.
         let registered = 0;
-        if (config.agent.autoRegister && scan.found.length) {
+        if (!job.noRegister && config.agent.autoRegister && scan.found.length) {
           const rr = registerScanned(scan.found, job.username, job.password, 'merge', job.vcenterId || '');
           if (rr.ok) { registered = (rr.added || 0) + (rr.updated || 0); pollNow().catch(() => {}); }
         }
         await postResult({ reqId: job.reqId, agent: config.agent.name, ...scan, registered, durationMs: Date.now() - started });
         last = { at: Date.now(), reqId: job.reqId, foundCount: scan.foundCount, registered };
-        console.log(`[idrac-scan-agent] ${config.agent.name}: ${scan.foundCount}/${scan.scanned} iDRAC, ${registered} 현지 등록`);
+        console.log(`[idrac-scan-agent] ${config.agent.name}: ${scan.foundCount}/${scan.scanned} iDRAC, ${registered} 현지 등록${job.noRegister ? ' (등록 보류)' : ''}`);
       } catch (e) {
         await postResult({ reqId: job.reqId, agent: config.agent.name, error: e.message });
         last = { at: Date.now(), reqId: job.reqId, error: e.message };

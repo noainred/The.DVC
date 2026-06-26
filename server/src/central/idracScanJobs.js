@@ -35,8 +35,8 @@ function newReqId() {
   return `idscan_${Date.now().toString(36)}_${seq.toString(36)}`;
 }
 
-/** UI가 위임 스캔 요청 → reqId 반환. */
-export function enqueueIdracScan(agent, { ips, username, password, vcenterId = '' }) {
+/** UI가 위임 스캔 요청 → reqId 반환. noRegister=true면 에이전트가 스캔만 하고 등록은 보류(UI 확인 후 등록). */
+export function enqueueIdracScan(agent, { ips, username, password, vcenterId = '', noRegister = false }) {
   gc();
   const key = String(agent || '').trim().toLowerCase();
   if (!key) return null;
@@ -46,7 +46,21 @@ export function enqueueIdracScan(agent, { ips, username, password, vcenterId = '
   // 총 IP 수를 미리 계산해 UI가 진행률 분모를 바로 표시할 수 있게 한다(스캔 max=2048 반영).
   let total = 0;
   try { total = Math.min(expandIpList(ips).ips.length, 2048); } catch { total = 0; }
-  jobs.set(reqId, { reqId, agent, ips, username, password, vcenterId, state: 'pending', createdAt: Date.now(), progress: { scanned: 0, total, at: Date.now() } });
+  jobs.set(reqId, { reqId, agent, action: 'scan', ips, username, password, vcenterId, noRegister: !!noRegister, state: 'pending', createdAt: Date.now(), progress: { scanned: 0, total, at: Date.now() } });
+  pend.add(reqId); byAgent.set(key, pend);
+  return reqId;
+}
+
+/** UI가 위임 '등록' 요청(스캔에서 확인한 found 목록을 에이전트 현지에 등록) → reqId 반환. */
+export function enqueueIdracRegister(agent, { found, username, password, vcenterId = '', mode = 'merge' }) {
+  gc();
+  const key = String(agent || '').trim().toLowerCase();
+  if (!key) return null;
+  if (!Array.isArray(found) || !found.length) return null;
+  const pend = byAgent.get(key) || new Set();
+  if (pend.size >= MAX_PENDING) return null;
+  const reqId = newReqId();
+  jobs.set(reqId, { reqId, agent, action: 'register', found, username, password, vcenterId, mode, state: 'pending', createdAt: Date.now(), progress: { scanned: 0, total: found.length, at: Date.now() } });
   pend.add(reqId); byAgent.set(key, pend);
   return reqId;
 }
@@ -62,7 +76,7 @@ export function takeIdracScanJobs(agentName) {
     const j = jobs.get(reqId);
     if (!j) continue;
     j.state = 'running'; j.takenAt = Date.now();
-    out.push({ reqId, ips: j.ips, username: j.username, password: j.password, vcenterId: j.vcenterId || '' });
+    out.push({ reqId, action: j.action || 'scan', ips: j.ips, username: j.username, password: j.password, vcenterId: j.vcenterId || '', noRegister: !!j.noRegister, found: j.found || undefined, mode: j.mode || 'merge' });
   }
   byAgent.delete(key);
   return out;

@@ -16,6 +16,7 @@ export default function IdracAdmin() {
   const [busy, setBusy] = useState(false);
   const [importMsg, setImportMsg] = useState(null);
   const [replaceMode, setReplaceMode] = useState(false);
+  const [bulkMode, setBulkMode] = useState('merge'); // IP 일괄 등록 교체 모드: merge|replace|replace-vcenter
   const [csvText, setCsvText] = useState(null);   // null = closed
   const [bulk, setBulk] = useState(null);          // null = closed
   const [bulkPreview, setBulkPreview] = useState(null);
@@ -49,6 +50,36 @@ export default function IdracAdmin() {
       if (r.ok) await load();
     } catch (e) { setImportMsg({ ok: false, text: e.message }); }
     finally { setBusy(false); }
+  };
+
+  // 전체 삭제 / 소속 vCenter 삭제. by==='all' 전체, 그 외엔 assignVc(빈문자=미지정) 대상.
+  const deleteServers = async (by) => {
+    const isAll = by === 'all';
+    const vcName = assignVc ? (vcenters.find((v) => v.id === assignVc)?.name || assignVc) : '미지정';
+    const msg = isAll
+      ? `등록된 iDRAC 서버를 전부 삭제할까요? 이 작업은 되돌릴 수 없습니다.`
+      : `소속 vCenter '${vcName}'에 속한 iDRAC 서버를 모두 삭제할까요? (되돌릴 수 없음)`;
+    if (!window.confirm(msg)) return;
+    setBusy(true); setImportMsg(null);
+    try {
+      const r = await postJson('/admin/idrac/delete', isAll ? { all: true } : { vcenterId: assignVc });
+      setImportMsg(r.ok ? { ok: true, text: `${r.removed}대를 삭제했습니다. (남은 ${r.total}대)` } : { ok: false, text: r.reason });
+      if (r.ok) await load();
+    } catch (e) { setImportMsg({ ok: false, text: e.message }); }
+    finally { setBusy(false); }
+  };
+
+  // 에이전트 이름 → 소속 vCenter 자동 매칭(같은 id 또는 이름). 위임 스캔 시 vCenter를 자동 선택.
+  const vcForAgent = (agentName) => {
+    const a = String(agentName || '').trim().toLowerCase();
+    if (!a) return '';
+    const v = vcenters.find((x) => String(x.id).toLowerCase() === a || String(x.name || '').toLowerCase() === a);
+    return v ? v.id : '';
+  };
+  // 스캔 수행 Agent 변경: 위임이면 소속 vCenter를 자동 지정(드롭다운 숨김). 로컬이면 수동 선택 유지.
+  const onChangeAgent = (val) => {
+    setScanAgent(val);
+    if (val !== '__local__') setBulk((b) => (b ? { ...b, vcenterId: vcForAgent(val) } : b));
   };
 
   if (error) return <ErrorBox message={error} />;
@@ -168,8 +199,7 @@ export default function IdracAdmin() {
           setScanProgress(null); setScanPct(null);
           if (s.state === 'error') { setImportMsg({ ok: false, text: `에이전트 스캔 오류: ${s.error || '알 수 없음'}` }); return; }
           setScanResult({ ...s, delegated: true });
-          setSelected(new Set()); // 위임 스캔은 현지 자동등록되므로 중앙 재등록 불필요
-          await load();
+          setSelected(new Set((s.found || []).map((f) => f.ip))); // 스캔만 한 상태 — 확인 후 '등록' 버튼으로 등록
           return;
         }
         if (s.state === 'unknown') { setImportMsg({ ok: false, text: '스캔 잡을 찾을 수 없습니다(만료되었거나 에이전트 미응답).' }); return; }
@@ -186,24 +216,52 @@ export default function IdracAdmin() {
 
   const toggleSel = (ip) => setSelected((s) => { const n = new Set(s); n.has(ip) ? n.delete(ip) : n.add(ip); return n; });
 
+  // 스캔 결과 등록(확인). 로컬은 중앙 등록, 위임은 에이전트 현지 등록(잡 폴링).
   const registerScanned = async () => {
     const found = (scanResult?.found || []).filter((f) => selected.has(f.ip));
     if (!found.length) return;
     setBusy(true); setImportMsg(null);
     try {
-      const r = await postJson('/admin/idrac/register-scanned', { found, username: bulk.username, password: bulk.password, mode: replaceMode ? 'replace' : 'merge', vcenterId: bulk.vcenterId || '' });
+      const body = { found, username: bulk.username, password: bulk.password, mode: bulkMode, vcenterId: bulk.vcenterId || '' };
+      if (scanResult.delegated) body.agent = scanResult.agent || scanAgent;
+      const r = await postJson('/admin/idrac/register-scanned', body);
+      // 위임 등록: 에이전트 잡 결과를 폴링.
+      if (r.delegated && r.reqId) {
+        setScanProgress(`에이전트 '${r.agent}'에 등록을 요청했습니다. 현지 등록 결과를 기다리는 중…`);
+        const deadline = Date.now() + 120_000;
+        // eslint-disable-next-line no-await-in-loop
+        while (Date.now() < deadline) {
+          await new Promise((res) => setTimeout(res, 2000));
+          // eslint-disable-next-line no-await-in-loop
+          const s = await fetchJson(`/admin/idrac/scan-result?reqId=${encodeURIComponent(r.reqId)}`).catch(() => null);
+          if (!s) continue;
+          if (s.state === 'done' || s.state === 'error') {
+            setScanProgress(null);
+            if (s.state === 'error') setImportMsg({ ok: false, text: `에이전트 등록 오류: ${s.error || '알 수 없음'}` });
+            else { setImportMsg({ ok: true, text: `에이전트 '${r.agent}'에 iDRAC ${s.registered || found.length}대 등록 완료.` }); await load(); setBulk(null); setBulkPreview(null); setScanResult(null); }
+            return;
+          }
+          if (s.state === 'unknown') { setScanProgress(null); setImportMsg({ ok: false, text: '등록 잡을 찾을 수 없습니다(만료/에이전트 미응답).' }); return; }
+        }
+        setScanProgress(null); setImportMsg({ ok: false, text: '에이전트 등록이 2분 내 완료되지 않았습니다. 에이전트 상태를 확인하세요.' });
+        return;
+      }
+      // 로컬 등록
       setImportMsg(r.ok
         ? { ok: true, text: `iDRAC ${found.length}대 등록 — 추가 ${r.added}, 갱신 ${r.updated} (총 ${r.total})`, skipped: r.skipped }
         : { ok: false, text: r.reason });
       if (r.ok) { await load(); setBulk(null); setBulkPreview(null); setScanResult(null); }
-    } catch (e) { setImportMsg({ ok: false, text: e.message }); }
+    } catch (e) { setScanProgress(null); setImportMsg({ ok: false, text: e.message }); }
     finally { setBusy(false); }
   };
+
+  // 스캔 결과 등록 취소 — 등록하지 않고 결과만 비운다(모달 유지, 재스캔 가능).
+  const cancelScan = () => { setScanResult(null); setSelected(new Set()); };
 
   const submitBulk = async () => {
     setBusy(true); setImportMsg(null);
     try {
-      const r = await postJson('/admin/idrac/bulk-add', { ...bulk, mode: replaceMode ? 'replace' : 'merge' });
+      const r = await postJson('/admin/idrac/bulk-add', { ...bulk, namePrefix: scanAgent !== '__local__' ? `${scanAgent}-` : '', mode: bulkMode });
       if (r.ok) {
         setImportMsg({ ok: true, skipped: r.skipped,
           text: `IP ${r.expanded}개 → 추가 ${r.added}, 갱신 ${r.updated} (총 ${r.total})${r.truncated ? ' · 상한 4096 적용됨' : ''}${r.ipErrors?.length ? ` · 무시된 항목 ${r.ipErrors.length}` : ''}` });
@@ -233,6 +291,8 @@ export default function IdracAdmin() {
             {vcenters.map((v) => <option key={v.id} value={v.id}>{v.name || v.id}</option>)}
           </select>
           <button className="logout-btn" style={{ padding: '9px 14px' }} disabled={busy} onClick={assignAllVcenter} title="목록 전체에 적용">전체 적용</button>
+          <button className="logout-btn" style={{ padding: '9px 14px', color: 'var(--amber)' }} disabled={busy} onClick={() => deleteServers('vcenter')} title="위에서 선택한 소속 vCenter의 서버만 삭제(미지정 선택 시 미지정 서버 삭제)">선택 vCenter 삭제</button>
+          <button className="logout-btn" style={{ padding: '9px 14px', color: 'var(--red)' }} disabled={busy} onClick={() => deleteServers('all')} title="등록된 모든 iDRAC 서버 삭제">전체 삭제</button>
           <input ref={fileRef} type="file" accept=".json,.csv,application/json,text/csv" style={{ display: 'none' }} onChange={onImportFile} />
           <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={() => fileRef.current?.click()}>파일 업로드(JSON/CSV)</button>
           <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={() => { setCsvText(''); }}>CSV 붙여넣기</button>
@@ -415,26 +475,29 @@ export default function IdracAdmin() {
             <div className="spec-grid" style={{ marginTop: 10 }}>
               <label>iDRAC 계정 *<input className="input" value={bulk.username} onChange={(e) => setBulk((b) => ({ ...b, username: e.target.value }))} placeholder="root" /></label>
               <label>iDRAC 비밀번호 *<input className="input" type="password" value={bulk.password} onChange={(e) => setBulk((b) => ({ ...b, password: e.target.value }))} /></label>
-              <label>이름 접두어<input className="input" value={bulk.namePrefix} onChange={(e) => setBulk((b) => ({ ...b, namePrefix: e.target.value }))} placeholder="(선택) 예: SEOUL-" /></label>
               <label>스캔 수행 Agent
-                <select className="input" value={scanAgent} onChange={(e) => setScanAgent(e.target.value)}
-                  title="원격 사이트 iDRAC는 중앙에서 직접 못 닿으므로, 그 사이트의 현장 에이전트가 스캔을 대행합니다.">
+                <select className="input" value={scanAgent} onChange={(e) => onChangeAgent(e.target.value)}
+                  title="원격 사이트 iDRAC는 중앙에서 직접 못 닿으므로, 그 사이트의 현장 에이전트가 스캔을 대행합니다. 에이전트를 선택하면 소속 vCenter가 자동 지정됩니다.">
                   <option value="__local__">이 포탈에서 직접</option>
                   {(agents.agents || []).map((a) => <option key={a} value={a}>에이전트: {a}</option>)}
                 </select>
               </label>
-              <label>소속 vCenter
-                <select className="input" value={bulk.vcenterId || ''} onChange={(e) => setBulk((b) => ({ ...b, vcenterId: e.target.value }))}
-                  title="이 배치의 서버 전력을 지정한 vCenter로 귀속합니다(ESXi 호스트가 아니어도 됨). 비우면 호스트명·서비스태그 매칭을 따릅니다.">
-                  <option value="">(자동: 이름·태그 매칭)</option>
-                  {vcenters.map((v) => <option key={v.id} value={v.id}>{v.name || v.id}</option>)}
-                </select>
-              </label>
+              {/* 로컬 스캔일 때만 소속 vCenter 수동 선택. 위임(에이전트)이면 에이전트 이름으로 자동 지정되어 숨김. */}
+              {scanAgent === '__local__' && (
+                <label>소속 vCenter
+                  <select className="input" value={bulk.vcenterId || ''} onChange={(e) => setBulk((b) => ({ ...b, vcenterId: e.target.value }))}
+                    title="이 배치의 서버 전력을 지정한 vCenter로 귀속합니다(ESXi 호스트가 아니어도 됨). 비우면 호스트명·서비스태그 매칭을 따릅니다.">
+                    <option value="">(자동: 이름·태그 매칭)</option>
+                    {vcenters.map((v) => <option key={v.id} value={v.id}>{v.name || v.id}</option>)}
+                  </select>
+                </label>
+              )}
             </div>
             {scanAgent !== '__local__' && (
               <div className="muted" style={{ fontSize: 11, marginTop: 6, lineHeight: 1.6 }}>
-                위임 스캔: 에이전트 <b>{scanAgent}</b>가 현지에서 Redfish 스캔 후 <b>현지에 자동 등록</b>해 전력 수집을 시작합니다.
-                발견 목록은 아래에 표시되며, 전력은 중앙이 수집서버(collector)에서 취합합니다(중앙 재등록 불필요).
+                위임 스캔: 에이전트 <b>{scanAgent}</b>가 현지에서 Redfish 스캔합니다(자동 등록 안 함 — 발견 후 <b>등록 버튼</b>으로 확인 등록).
+                소속 vCenter는 <b>{vcForAgent(scanAgent) ? (vcenters.find((v) => v.id === vcForAgent(scanAgent))?.name || vcForAgent(scanAgent)) : '미지정(이름 매칭 없음)'}</b>,
+                이름 접두어는 <b>{scanAgent}-</b>로 자동 지정됩니다. 전력은 중앙이 수집서버(collector)에서 취합합니다.
               </div>
             )}
             {!agents.centralEnabled && (
@@ -448,12 +511,19 @@ export default function IdracAdmin() {
                 {busy ? '스캔 중…' : '🔍 스캔하여 iDRAC만 찾기'}
               </button>
               <button className="logout-btn" style={{ padding: '10px 16px' }} disabled={!bulk.ips.trim()} onClick={() => previewBulk(bulk.ips)}>IP 미리보기</button>
-              <button className="logout-btn" style={{ padding: '10px 16px' }}
-                disabled={busy || !bulk.ips.trim() || !bulk.username.trim() || !bulk.password} onClick={submitBulk} title="스캔 없이 입력한 모든 IP를 그대로 등록">
-                스캔없이 전체 등록
-              </button>
-              <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12 }}>
-                <input type="checkbox" checked={replaceMode} onChange={(e) => setReplaceMode(e.target.checked)} /> 전체 교체
+              {scanAgent === '__local__' && (
+                <button className="logout-btn" style={{ padding: '10px 16px' }}
+                  disabled={busy || !bulk.ips.trim() || !bulk.username.trim() || !bulk.password} onClick={submitBulk} title="스캔 없이 입력한 모든 IP를 그대로 등록(로컬)">
+                  스캔없이 전체 등록
+                </button>
+              )}
+              <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12 }} title="등록 시 기존 목록 처리 방식">
+                교체
+                <select className="input" style={{ padding: '4px 8px', fontSize: 12 }} value={bulkMode} onChange={(e) => setBulkMode(e.target.value)}>
+                  <option value="merge">병합(추가/갱신)</option>
+                  <option value="replace">전체 교체</option>
+                  <option value="replace-vcenter">소속 vCenter만 교체</option>
+                </select>
               </label>
               {bulkPreview && (
                 <span className="muted" style={{ fontSize: 12 }}>
@@ -490,7 +560,7 @@ export default function IdracAdmin() {
                   <b style={{ fontSize: 13 }}>
                     {scanResult.delegated && <span className="badge teal" style={{ marginRight: 6 }}>에이전트 {scanResult.agent}</span>}
                     스캔 {scanResult.scanned}개 → iDRAC <span style={{ color: 'var(--green)' }}>{scanResult.foundCount}</span>대 발견
-                    {scanResult.delegated && scanResult.registered != null && <span className="muted" style={{ fontWeight: 400 }}> · 현지 등록 {scanResult.registered}대</span>}
+                    {scanResult.delegated && <span className="badge teal" style={{ marginLeft: 6, fontWeight: 400 }}>에이전트 {scanResult.agent}</span>}
                   </b>
                   <span className="muted" style={{ fontSize: 12 }}>
                     미응답 {scanResult.unreachable} · 타장비 {scanResult.notIdrac} · 인증실패 {scanResult.authFailed}{scanResult.truncated ? ' · 상한 적용' : ''}
@@ -503,14 +573,14 @@ export default function IdracAdmin() {
                     <div style={{ maxHeight: 240, overflowY: 'auto', border: '1px solid rgba(36,48,73,.5)', borderRadius: 8 }}>
                       <table>
                         <thead><tr>
-                          {!scanResult.delegated && <th style={{ width: 32 }}><input type="checkbox" checked={selected.size === scanResult.found.length}
-                            onChange={(e) => setSelected(e.target.checked ? new Set(scanResult.found.map((f) => f.ip)) : new Set())} /></th>}
+                          <th style={{ width: 32 }}><input type="checkbox" checked={selected.size === scanResult.found.length}
+                            onChange={(e) => setSelected(e.target.checked ? new Set(scanResult.found.map((f) => f.ip)) : new Set())} /></th>
                           <th>IP</th><th>서비스태그</th><th>호스트명</th><th>모델</th>
                         </tr></thead>
                         <tbody>
                           {scanResult.found.map((f) => (
-                            <tr key={f.ip} style={{ cursor: scanResult.delegated ? 'default' : 'pointer' }} onClick={() => !scanResult.delegated && toggleSel(f.ip)}>
-                              {!scanResult.delegated && <td><input type="checkbox" checked={selected.has(f.ip)} onChange={() => toggleSel(f.ip)} onClick={(e) => e.stopPropagation()} /></td>}
+                            <tr key={f.ip} style={{ cursor: 'pointer' }} onClick={() => toggleSel(f.ip)}>
+                              <td><input type="checkbox" checked={selected.has(f.ip)} onChange={() => toggleSel(f.ip)} onClick={(e) => e.stopPropagation()} /></td>
                               <td><b>{f.ip}</b></td>
                               <td className="muted">{f.serviceTag || '—'}</td>
                               <td className="muted">{f.hostName || '—'}</td>
@@ -520,32 +590,18 @@ export default function IdracAdmin() {
                         </tbody>
                       </table>
                     </div>
-                    {scanResult.delegated ? (
-                      <div style={{ marginTop: 10 }}>
-                        {(scanResult.registered || 0) > 0 ? (
-                          <div style={{ fontSize: 13, lineHeight: 1.6, padding: '10px 12px', borderRadius: 8, background: 'rgba(34,197,94,.12)', color: '#4ade80' }}>
-                            ✅ <b>등록 완료</b> — 에이전트 <b>{scanResult.agent}</b>의 현지 레지스트리에 <b>{scanResult.registered}대</b>가 등록되어 전력 수집이 시작되었습니다.
-                            <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>위임 스캔은 <b>별도 등록 버튼이 없습니다</b> — 에이전트가 현지에서 자동 등록하고, 중앙은 수집서버(collector)로 전력만 취합합니다(중앙 재등록 불필요).</div>
-                          </div>
-                        ) : (
-                          <div style={{ fontSize: 13, lineHeight: 1.6, padding: '10px 12px', borderRadius: 8, background: 'rgba(245,158,11,.12)', color: 'var(--amber)' }}>
-                            ⚠️ iDRAC <b>{scanResult.foundCount}대</b>를 발견했지만 <b>현지 등록 수가 0</b>입니다. 에이전트 <b>{scanResult.agent}</b>의 등록 권한/디스크 또는 자동등록(AGENT_AUTO_REGISTER) 설정을 확인하세요.
-                          </div>
-                        )}
-                        <div className="flex gap" style={{ marginTop: 10, alignItems: 'center' }}>
-                          <button className="login-btn" style={{ flex: 'none', padding: '10px 18px' }} onClick={() => { setBulk(null); setBulkPreview(null); setScanResult(null); load(); }}>
-                            완료 · 서버 목록 보기
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="flex gap" style={{ marginTop: 10, alignItems: 'center' }}>
-                        <button className="login-btn" style={{ flex: 'none', padding: '10px 18px' }} disabled={busy || selected.size === 0} onClick={registerScanned}>
-                          {busy ? '등록 중…' : `선택한 iDRAC ${selected.size}대 등록`}
-                        </button>
-                        <span className="muted" style={{ fontSize: 12 }}>체크한 iDRAC를 중앙 레지스트리에 등록합니다.</span>
-                      </div>
-                    )}
+                    {/* 스캔 완료 — 등록 여부를 사용자가 선택(등록/취소). 위임이면 에이전트 현지에, 로컬이면 중앙에 등록. */}
+                    <div className="flex gap" style={{ marginTop: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <button className="login-btn" style={{ flex: 'none', padding: '10px 18px' }} disabled={busy || selected.size === 0} onClick={registerScanned}>
+                        {busy ? '등록 중…' : `✓ 선택한 iDRAC ${selected.size}대 등록`}
+                      </button>
+                      <button className="logout-btn" style={{ padding: '10px 16px' }} disabled={busy} onClick={cancelScan}>취소(등록 안 함)</button>
+                      <span className="muted" style={{ fontSize: 12 }}>
+                        {scanResult.delegated
+                          ? <>에이전트 <b>{scanResult.agent}</b> 현지에 등록합니다(소속 vCenter: <b>{bulk.vcenterId || '미지정'}</b>).</>
+                          : <>중앙 레지스트리에 등록합니다.</>}
+                      </span>
+                    </div>
                   </>
                 )}
               </div>

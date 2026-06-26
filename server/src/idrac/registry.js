@@ -130,7 +130,16 @@ export function removeServer(id) {
 export function importServers(incoming, mode = 'merge') {
   if (!Array.isArray(incoming)) return { ok: false, reason: 'servers 배열을 찾을 수 없습니다.' };
   const existing = loadRegistry();
-  const result = mode === 'replace' ? [] : [...existing];
+  // mode:
+  //  - 'replace'         : 레지스트리 전체 교체(기존 모두 삭제 후 incoming만)
+  //  - 'replace-vcenter' : incoming에 등장한 소속 vCenter의 기존 항목만 삭제 후 교체(다른 vCenter는 유지)
+  //  - 'merge'(기본)     : id 기준 upsert
+  let result;
+  if (mode === 'replace') result = [];
+  else if (mode === 'replace-vcenter') {
+    const vcs = new Set(incoming.map((r) => String(r?.vcenterId || '').trim()).filter(Boolean));
+    result = vcs.size ? existing.filter((s) => !vcs.has(String(s.vcenterId || '').trim())) : [...existing];
+  } else result = [...existing];
   let added = 0, updated = 0;
   const skipped = [];
   for (const raw of incoming) {
@@ -214,6 +223,26 @@ export function assignVcenter({ ids = null, vcenterId = '' } = {}) {
   }
   if (updated) saveRegistry(list);
   return { ok: true, updated, total: list.length };
+}
+
+/**
+ * 서버 일괄 삭제. { all:true } 전체 삭제, { vcenterId } 해당 소속 vCenter 서버만 삭제
+ * (빈 vcenterId는 '미지정' 서버를 삭제). Returns { ok, removed, total }.
+ */
+export function deleteServers({ all = false, vcenterId = undefined } = {}) {
+  const list = loadRegistry();
+  let next;
+  if (all) {
+    next = [];
+  } else if (vcenterId !== undefined) {
+    const vc = String(vcenterId || '').trim();
+    next = list.filter((s) => String(s.vcenterId || '').trim() !== vc);
+  } else {
+    return { ok: false, reason: '삭제 대상(all=true 또는 vcenterId)이 필요합니다.' };
+  }
+  const removed = list.length - next.length;
+  saveRegistry(next);
+  return { ok: true, removed, total: next.length };
 }
 
 /**
