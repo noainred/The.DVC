@@ -521,15 +521,29 @@ export default function IdracAdmin() {
                       </table>
                     </div>
                     {scanResult.delegated ? (
-                      <div className="muted" style={{ fontSize: 12, marginTop: 10, lineHeight: 1.6 }}>
-                        ✅ 위 iDRAC는 에이전트 <b>{scanResult.agent}</b>의 현지 레지스트리에 등록되어 전력 수집이 시작되었습니다.
-                        중앙에서는 별도 등록 없이 수집서버(collector) 취합으로 전력이 반영됩니다.
+                      <div style={{ marginTop: 10 }}>
+                        {(scanResult.registered || 0) > 0 ? (
+                          <div style={{ fontSize: 13, lineHeight: 1.6, padding: '10px 12px', borderRadius: 8, background: 'rgba(34,197,94,.12)', color: '#4ade80' }}>
+                            ✅ <b>등록 완료</b> — 에이전트 <b>{scanResult.agent}</b>의 현지 레지스트리에 <b>{scanResult.registered}대</b>가 등록되어 전력 수집이 시작되었습니다.
+                            <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>위임 스캔은 <b>별도 등록 버튼이 없습니다</b> — 에이전트가 현지에서 자동 등록하고, 중앙은 수집서버(collector)로 전력만 취합합니다(중앙 재등록 불필요).</div>
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: 13, lineHeight: 1.6, padding: '10px 12px', borderRadius: 8, background: 'rgba(245,158,11,.12)', color: 'var(--amber)' }}>
+                            ⚠️ iDRAC <b>{scanResult.foundCount}대</b>를 발견했지만 <b>현지 등록 수가 0</b>입니다. 에이전트 <b>{scanResult.agent}</b>의 등록 권한/디스크 또는 자동등록(AGENT_AUTO_REGISTER) 설정을 확인하세요.
+                          </div>
+                        )}
+                        <div className="flex gap" style={{ marginTop: 10, alignItems: 'center' }}>
+                          <button className="login-btn" style={{ flex: 'none', padding: '10px 18px' }} onClick={() => { setBulk(null); setBulkPreview(null); setScanResult(null); load(); }}>
+                            완료 · 서버 목록 보기
+                          </button>
+                        </div>
                       </div>
                     ) : (
                       <div className="flex gap" style={{ marginTop: 10, alignItems: 'center' }}>
                         <button className="login-btn" style={{ flex: 'none', padding: '10px 18px' }} disabled={busy || selected.size === 0} onClick={registerScanned}>
                           {busy ? '등록 중…' : `선택한 iDRAC ${selected.size}대 등록`}
                         </button>
+                        <span className="muted" style={{ fontSize: 12 }}>체크한 iDRAC를 중앙 레지스트리에 등록합니다.</span>
                       </div>
                     )}
                   </>
