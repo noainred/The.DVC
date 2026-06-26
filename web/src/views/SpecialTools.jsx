@@ -952,11 +952,41 @@ function IpmsSettings({ onClose }) {
   const [vcs, setVcs] = useState([]);
   const [vc, setVc] = useState('');
   const [msg, setMsg] = useState(null);
+  // vCenter별 스캔 대역(사전 정리 + 주기 스캔) — rangeStore(/vc-ranges) 백엔드 재사용.
+  const [vcRanges, setVcRanges] = useState(null);
+  const [scanText, setScanText] = useState('');
+  const [scanEnabled, setScanEnabled] = useState(true);
+  const [scanBusy, setScanBusy] = useState(false);
+  const [scanMsg, setScanMsg] = useState(null);
+  const loadVcRanges = () => fetchJson('/tools/ipam/vc-ranges').then(setVcRanges).catch(() => {});
   useEffect(() => {
     fetchJson('/admin/ipam/settings').then((r) => setS(r.settings)).catch((e) => setMsg(e.message));
     fetchJson('/vcenters').then((list) => { setVcs(list); if (list[0]) setVc(list[0].id); }).catch(() => {});
+    loadVcRanges();
   }, []);
+  // 선택한 vCenter의 저장된 스캔 대역을 폼에 채운다.
+  useEffect(() => {
+    if (!vcRanges) return;
+    const e = (vcRanges.ranges || []).find((x) => x.vcenterId === vc);
+    setScanText(e ? (e.ranges || []).join('\n') : '');
+    setScanEnabled(e ? e.enabled !== false : true);
+  }, [vc, vcRanges]);
+  const saveScanRanges = async () => {
+    if (!vc) return;
+    setScanBusy(true); setScanMsg(null);
+    try {
+      const r = await putJson('/admin/ipam/vc-ranges', { vcenterId: vc, ranges: scanText, enabled: scanEnabled });
+      setScanMsg(r.ok ? { ok: true, text: `저장됨 — 대역 ${(r.ranges || []).length}개` } : { ok: false, text: r.reason });
+      if (r.ok) await loadVcRanges();
+    } catch (e) { setScanMsg({ ok: false, text: e.message }); } finally { setScanBusy(false); }
+  };
+  const scanNow = async () => {
+    setScanBusy(true); setScanMsg(null);
+    try { const r = await postJson('/admin/ipam/vc-ranges/scan', {}); setScanMsg(r.ok ? { ok: true, text: '스캔을 시작했습니다(백그라운드).' } : { ok: false, text: r.reason }); }
+    catch (e) { setScanMsg({ ok: false, text: e.message }); } finally { setScanBusy(false); }
+  };
   if (!s) return <Modal title="IPMS 설정" onClose={onClose}>{msg ? <ErrorBox message={msg} /> : <Loading />}</Modal>;
+  const vcRangeEntry = (vcRanges?.ranges || []).find((x) => x.vcenterId === vc);
 
   const globalText = (s.global || []).join('\n');
   const vcText = (s.vcenters?.[vc] || []).join('\n');
@@ -972,7 +1002,7 @@ function IpmsSettings({ onClose }) {
   };
 
   return (
-    <Modal title="IPMS 설정 — 무시할 IP 대역" onClose={onClose} width={560}>
+    <Modal title="IPMS 설정 — 무시 대역 · vCenter 스캔 대역" onClose={onClose} width={560}>
       <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>여기 입력한 대역의 IP는 IP 관리대장/검색/공유DB에서 제외됩니다. 형식: CIDR(10.0.0.0/8), 범위(10.0.0.1-10.0.0.50), 단일 IP. 한 줄에 하나.</div>
       {msg && <div className="login-error" style={{ marginBottom: 8 }}>{msg}</div>}
       <label style={{ display: 'block', marginBottom: 12 }}>전체 무시 대역 (모든 vCenter)
@@ -987,6 +1017,23 @@ function IpmsSettings({ onClose }) {
         </div>
         <textarea className="input" rows={5} value={vcText} onChange={(e) => setVcText(e.target.value)} placeholder={'172.16.0.0/12'} style={{ resize: 'vertical', fontFamily: 'monospace', fontSize: 12 }} />
         <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>선택한 <b>{vcs.find((v) => v.id === vc)?.name || vc}</b> 에서만 위 대역을 숨깁니다.</div>
+      </div>
+
+      {/* vCenter별 스캔 대역 — 사전 정리 + 주기 스캔(rangeStore) */}
+      <div style={{ borderTop: '1px solid rgba(255,255,255,.08)', paddingTop: 10, marginTop: 12 }}>
+        <div className="flex between wrap" style={{ alignItems: 'center', marginBottom: 6 }}>
+          <b style={{ fontSize: 13 }}>vCenter별 스캔 대역 (주기 스캔)</b>
+          <span className="muted" style={{ fontSize: 11 }}>대상: <b>{vcs.find((v) => v.id === vc)?.name || vc}</b>{vcRangeEntry ? ` · 약 ${(vcRangeEntry.ipCount || 0).toLocaleString()} IP` : ''}</span>
+        </div>
+        <div className="muted" style={{ fontSize: 11, marginBottom: 6 }}>여기 정리한 대역은 주기 IP 스캔이 함께 스캔해 사용 현황(네트워크 맵·관리대장)을 자동 갱신합니다. 위 vCenter 선택기와 연동됩니다. 형식: CIDR·범위·단일 IP, 한 줄에 하나.</div>
+        <textarea className="input" rows={5} value={scanText} onChange={(e) => setScanText(e.target.value)} placeholder={'10.94.42.0/24\n10.94.43.1-10.94.43.200'} style={{ resize: 'vertical', fontFamily: 'monospace', fontSize: 12 }} />
+        <div className="flex gap" style={{ marginTop: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12 }}><input type="checkbox" checked={scanEnabled} onChange={(e) => setScanEnabled(e.target.checked)} /> 주기 스캔 포함</label>
+          <button className="login-btn" style={{ flex: 'none', padding: '7px 14px' }} disabled={scanBusy || !vc} onClick={saveScanRanges}>대역 저장</button>
+          <button className="logout-btn" style={{ padding: '7px 12px' }} disabled={scanBusy} onClick={scanNow}>🛰️ 지금 스캔</button>
+          <span className="muted" style={{ fontSize: 11 }}>스캔 주기는 ‘IP 스캔’ 설정의 간격을 따릅니다.</span>
+        </div>
+        {scanMsg && <div style={{ marginTop: 8, padding: '7px 10px', borderRadius: 8, fontSize: 12, background: scanMsg.ok ? 'rgba(34,197,94,.12)' : 'rgba(239,68,68,.12)', color: scanMsg.ok ? '#4ade80' : '#f87171' }}>{scanMsg.text}</div>}
       </div>
       <div style={{ borderTop: '1px solid rgba(255,255,255,.08)', paddingTop: 10, marginTop: 12 }}>
         <b style={{ fontSize: 13 }}>공인 / 사설 IP 분류</b>
