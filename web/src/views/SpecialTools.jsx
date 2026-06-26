@@ -402,6 +402,7 @@ function Ipam({ scope, onScope }) {
         <div className="flex gap" style={{ alignItems: 'center' }}>
           <button className={view === 'list' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setView('list')}>목록</button>
           <button className={view === 'sheet' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={openSheets}>서브넷 대장(엑셀형)</button>
+          <button className={view === 'insights' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setView('insights')} title="유명 IPAM 솔루션 대표 기능 30선을 수집 데이터로 계산">🧠 추천 기능 30선</button>
           {view === 'list' && <SearchBox className="input" style={{ maxWidth: 260 }} placeholder="IP / VM / 호스트 검색" value={q} onChange={setQ} />}
         </div>
         <div className="flex gap">
@@ -413,7 +414,9 @@ function Ipam({ scope, onScope }) {
         </div>
       </div>
 
-      {view === 'sheet' ? (
+      {view === 'insights' ? (
+        <IpamInsights scope={scope} />
+      ) : view === 'sheet' ? (
         <>
           <div className="flex gap wrap" style={{ marginBottom: 8, alignItems: 'center' }}>
             {subnets.map((s) => (
@@ -605,6 +608,60 @@ function IpHistoryModal({ row, scope, onClose }) {
       </div>
       {showDetail && row.owner && <EntityDetail type={row.ownerType} item={row.owner} onClose={() => setShowDetail(false)} />}
     </Modal>
+  );
+}
+
+/**
+ * IPAM 추천 기능 30선 — 유명 IPAM 솔루션(phpIPAM·NetBox·SolarWinds·Infoblox 등)의 대표
+ * 기능을 수집 데이터로 계산해 카드로 보여준다. 각 카드 클릭 시 상세 항목 펼침.
+ */
+function IpamInsights({ scope }) {
+  const { loading, data, error } = useTool('/tools/ipam/insights', scope ? { vcenterId: scope } : {});
+  const [open, setOpen] = useState(null); // 펼친 카드 key
+  const [q, setQ] = useState('');
+  if (loading) return <Loading />;
+  if (error) return <ErrorBox message={error} />;
+  const fmt = (n) => Number(n || 0).toLocaleString();
+  const sevColor = { warn: 'var(--amber)', info: 'var(--accent-2, #38bdf8)' };
+  const t = data.totals || {};
+  const term = q.trim().toLowerCase();
+  const feats = (data.features || []).filter((f) => !term || f.title.toLowerCase().includes(term) || (f.tool || '').toLowerCase().includes(term) || (f.detail || '').toLowerCase().includes(term));
+  return (
+    <>
+      <div className="flex gap wrap" style={{ marginBottom: 12, alignItems: 'center' }}>
+        <Card label="IP" value={fmt(t.ips)} meta={`서브넷 ${fmt(t.subnets)}개`} />
+        <Card label="전체 사용률" value={`${t.overallUtil || 0}%`} meta={`사용 ${fmt(t.used)} / 용량 ${fmt(t.capacity)}`} accent="var(--amber)" />
+        <Card label="스캔 커버리지" value={`${t.scannedCoverage || 0}%`} meta="vCenter 인식 중 스캔 확인" accent="var(--green)" />
+        <SearchBox className="input" style={{ maxWidth: 240, alignSelf: 'center' }} placeholder="기능/솔루션 검색" value={q} onChange={setQ} />
+      </div>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
+        업계 표준 IPAM 솔루션(phpIPAM · NetBox · SolarWinds IPAM · Infoblox · Device42 · ManageEngine OpUtils)의 대표 기능 <b>30선</b>을
+        수집된 IP 대장으로 실시간 계산했습니다. 카드를 누르면 상세 항목이 펼쳐집니다.
+      </div>
+      <div className="vc-grid">
+        {feats.map((f) => (
+          <div key={f.key} className="card" style={{ cursor: f.items?.length ? 'pointer' : 'default', borderColor: f.severity === 'warn' ? 'var(--amber)' : undefined }}
+            onClick={() => f.items?.length && setOpen((o) => (o === f.key ? null : f.key))}>
+            <div className="flex between" style={{ alignItems: 'baseline' }}>
+              <b style={{ fontSize: 14 }}><span className="muted" style={{ fontSize: 12 }}>{String(f.n).padStart(2, '0')}.</span> {f.title}</b>
+              <span style={{ fontSize: 15, fontWeight: 700, color: sevColor[f.severity] || 'var(--text)' }}>{f.value}</span>
+            </div>
+            <div className="muted" style={{ fontSize: 12, marginTop: 5, lineHeight: 1.5 }}>{f.detail}</div>
+            <div className="vc-foot"><span className="muted" style={{ fontSize: 11 }}>📚 {f.tool}</span>{f.items?.length ? <span className="muted" style={{ fontSize: 11 }}>{open === f.key ? '▲ 닫기' : `▼ 상세 ${f.items.length}`}</span> : <span />}</div>
+            {open === f.key && f.items?.length > 0 && (
+              <div style={{ marginTop: 8, borderTop: '1px solid rgba(36,48,73,.5)', paddingTop: 8, maxHeight: 220, overflowY: 'auto' }}>
+                {f.items.map((it, i) => (
+                  <div key={i} className="flex between" style={{ fontSize: 12, padding: '3px 0' }}>
+                    <span style={{ fontFamily: 'monospace' }}>{it.label}</span>
+                    <span className="muted">{it.value}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </>
   );
 }
 

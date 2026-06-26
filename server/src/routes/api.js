@@ -6,6 +6,7 @@ import { hostPower } from '../idrac/service.js';
 import { fetchVmMetric, fetchHostMetric, PERF_INTERVALS, upgradeVmTools, getVmConsole } from '../vcenter/soapClient.js';
 import { listMutes, addMute, removeMute } from '../alarm-mutes.js';
 import { buildIpamRows, buildSubnetSheets, listSubnets } from '../ipam/ledger.js';
+import { buildIpamInsights } from '../ipam/insights.js';
 import { getAnnotation, setAnnotation } from '../ipam/annotations.js';
 import { getIpHistory, scanResultList, getIpHistoryMap } from '../ipam/scanStore.js';
 import { getClassifier } from '../ipam/settings.js';
@@ -442,6 +443,11 @@ api.get('/release-notes', (_req, res) => {
 // by center, with the owning entity embedded so the UI can show details on click.
 api.get('/tools/ipam', (req, res) => {
   res.json(buildIpamRows(store.get(), req.query.vcenterId));
+});
+
+// IPAM 추천 기능 30선 — 유명 IPAM 솔루션 대표 기능을 수집 데이터로 계산.
+api.get('/tools/ipam/insights', (req, res) => {
+  res.json(buildIpamInsights(store.get(), req.query.vcenterId || ''));
 });
 
 // Per-/24 subnet ledger (Excel-style): subnet list, one subnet's rows, or full .xlsx.
