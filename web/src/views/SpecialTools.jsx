@@ -417,9 +417,9 @@ function Ipam({ scope, onScope }) {
       </div>
 
       {view === 'ranges' ? (
-        <IpamRanges scope={scope} />
+        <IpamRanges />
       ) : view === 'netmap' ? (
-        <IpamNetMap scope={scope} />
+        <IpamNetMap />
       ) : view === 'insights' ? (
         <IpamInsights scope={scope} />
       ) : view === 'sheet' ? (

@@ -14,13 +14,18 @@ import { config } from '../config.js';
 const FILE = path.join(config.configDir, 'ipam-vcenter-ranges.json');
 
 let cache = null;
+let cacheMtime = -1;
 
 function read() {
-  if (cache) return cache;
+  // 파일 mtime이 캐시 적재 이후 변했으면(외부 편집·백업 복원·다른 프로세스) 재파싱한다.
+  let mtime = -1;
+  try { mtime = fs.statSync(FILE).mtimeMs; } catch { mtime = 0; /* 파일 없음 */ }
+  if (cache && mtime === cacheMtime) return cache;
   try {
     const j = JSON.parse(fs.readFileSync(FILE, 'utf8'));
     cache = j && typeof j.vcenters === 'object' ? j : { vcenters: {} };
   } catch { cache = { vcenters: {} }; }
+  cacheMtime = mtime;
   return cache;
 }
 
@@ -30,6 +35,7 @@ function write(data) {
     fs.mkdirSync(path.dirname(FILE), { recursive: true });
     fs.writeFileSync(FILE, JSON.stringify(data, null, 2), { mode: 0o600 });
     try { fs.chmodSync(FILE, 0o600); } catch { /* */ }
+    try { cacheMtime = fs.statSync(FILE).mtimeMs; } catch { cacheMtime = -1; }
   } catch (e) { console.error('[ipam-ranges] 저장 실패:', e.message); }
 }
 

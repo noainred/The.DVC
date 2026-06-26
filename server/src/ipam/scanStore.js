@@ -131,17 +131,24 @@ function recordSeen(h, ts, agent) {
   }
 }
 
-/** 일정 시간(idleMs) 이상 응답이 없던 'up' IP를 '해제(down)'로 마킹한다. */
-export function sweepReleases(idleMs, now = Date.now()) {
+/**
+ * 일정 시간(idleMs) 이상 응답이 없던 'up' IP를 '해제(down)'로 마킹한다.
+ * opts.agent를 주면 그 에이전트가 마지막으로 보고한 IP만 대상으로 한다 — 중앙이 직접 스캔한
+ * 로컬 대역만 down 처리하고, 원격 사이트 에이전트 소유 IP를 중앙 스캔이 오탐 down하지 않게 한다.
+ */
+export function sweepReleases(idleMs, opts = {}) {
+  const now = typeof opts === 'number' ? opts : (opts.now || Date.now());
+  const onlyAgent = typeof opts === 'object' ? opts.agent : undefined;
   if (!idleMs || idleMs <= 0) return 0;
   let changed = 0;
   for (const e of Object.values(history)) {
-    if (e.status === 'up' && (e.lastSeen || 0) < now - idleMs) {
+    const owned = onlyAgent === undefined || (e.agent || LOCAL) === onlyAgent;
+    if (owned && e.status === 'up' && (e.lastSeen || 0) < now - idleMs) {
       e.status = 'down';
       pushEvent(e, { ts: now, type: 'down' });
       changed++;
     }
-    // 아주 오래 안 보인 IP의 이력은 정리(무한 증식 방지)
+    // 아주 오래 안 보인 IP의 이력은 정리(무한 증식 방지) — 소유 무관 전역.
     if ((e.lastSeen || 0) < now - HISTORY_RETENTION_MS) { delete history[e.ip]; changed++; }
   }
   if (changed) { histDirty = true; persistHist(); scanRevN++; }

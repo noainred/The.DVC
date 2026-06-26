@@ -9,7 +9,7 @@ import { buildIpamRows, buildSubnetSheets, listSubnets } from '../ipam/ledger.js
 import { buildIpamInsights } from '../ipam/insights.js';
 import { buildNetmap } from '../ipam/netmap.js';
 import { listVcRanges } from '../ipam/rangeStore.js';
-import { expandRange } from '../ipam/scan.js';
+import { rangeSize } from '../ipam/scan.js';
 import { getAnnotation, setAnnotation } from '../ipam/annotations.js';
 import { getIpHistory, scanResultList, getIpHistoryMap } from '../ipam/scanStore.js';
 import { getClassifier } from '../ipam/settings.js';
@@ -474,7 +474,7 @@ api.get('/tools/ipam/vc-ranges', (req, res) => {
   for (const vc of snap.vcenters || []) vcName[vc.id] = vc.name;
   const list = listVcRanges().map((e) => ({
     ...e, vcenterName: vcName[e.vcenterId] || e.vcenterId,
-    ipCount: e.ranges.reduce((a, s) => a + expandRange(s).length, 0),
+    ipCount: e.ranges.reduce((a, s) => a + rangeSize(s), 0),
   }));
   // 등록 안 된 vCenter도 선택할 수 있게 전체 vCenter 목록을 함께 내려준다.
   res.json({ ranges: list, vcenters: (snap.vcenters || []).map((v) => ({ id: v.id, name: v.name })) });

@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildNetmap, osCategory, netmapBases } from '../src/ipam/netmap.js';
+import { rangeSize, expandRange } from '../src/ipam/scan.js';
 
 const snap = {
   generatedAt: Date.now(),
@@ -48,4 +49,16 @@ test('buildNetmap: base 미지정 시 사용 가능한 base 중 첫 번째 자�
 test('netmapBases: 대장 IP에서 /24 추출', () => {
   const bases = netmapBases(snap, '');
   assert.ok(bases.includes('10.55.55'));
+});
+
+test('rangeSize: 배열 생성 없이 정확한 IP 수(4096 상한 미적용) — 대형 대역 표시 정확', () => {
+  assert.equal(rangeSize('10.0.0.0/24'), 254);
+  assert.equal(rangeSize('10.0.0.0/19'), 8190);   // 4096 상한에 잘리지 않음
+  assert.equal(rangeSize('10.0.0.0/30'), 2);
+  assert.equal(rangeSize('10.0.0.0/31'), 2);
+  assert.equal(rangeSize('10.0.0.1-10.0.0.50'), 50);
+  assert.equal(rangeSize('10.0.0.5'), 1);
+  assert.equal(rangeSize('garbage'), 0);
+  // 스캔용 expandRange는 4096 상한 유지(미스캔 방지는 표시/경고로 분리)
+  assert.equal(expandRange('10.0.0.0/19').length, 4096);
 });

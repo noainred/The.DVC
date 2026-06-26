@@ -39,7 +39,9 @@ export async function runScanOnce({ manual = false } = {}) {
     });
     mergeScanResults(alive, Date.now(), LOCAL);
     recordAgentReport(LOCAL, { scanned, alive: alive.length, durationMs: Date.now() - started });
-    sweepReleases(releaseIdleMs()); // 미응답 IP를 '해제'로 마킹(사용 이력)
+    // 중앙 직접 스캔이 끝난 직후의 해제 마킹은 '중앙(LOCAL)이 소유한 IP'에만 적용한다.
+    // (원격 사이트 에이전트가 보고한 IP를 중앙 스캔 결과로 오탐 down하지 않게 — 전역 staleness는 releaseTimer가 담당)
+    sweepReleases(releaseIdleMs(), { agent: LOCAL });
     pruneScanResults(s.retentionDays);
     lastRun = { at: Date.now(), durationMs: Date.now() - started, scanned, alive: alive.length, manual };
     return { ok: true, ...lastRun };
@@ -60,8 +62,10 @@ export function startScan({ manual = true } = {}) {
 
 export function scanStatus() {
   const s = loadScanSettings();
+  const vcN = enabledVcRanges().length;
   const pct = progress && progress.total ? Math.round((progress.done / progress.total) * 100) : null;
-  return { enabled: s.enabled, ranges: effectiveRanges(s).length, localRanges: (s.ranges || []).length, vcRanges: enabledVcRanges().length, intervalMs: s.intervalMs, running, lastRun, progress: progress ? { ...progress, pct } : null };
+  // 폴러는 __local__ enabled이거나 enabled인 vCenter 대역이 있으면 실제로 돈다 → enabled를 그 기준으로 노출.
+  return { enabled: s.enabled || vcN > 0, localEnabled: s.enabled, ranges: effectiveRanges(s).length, localRanges: (s.ranges || []).length, vcRanges: vcN, intervalMs: s.intervalMs, running, lastRun, progress: progress ? { ...progress, pct } : null };
 }
 
 export function rescheduleScanPoller() {

@@ -9,7 +9,7 @@
 import { buildIpamRows } from './ledger.js';
 import { getIpHistory } from './scanStore.js';
 import { rangesForVcenter } from './rangeStore.js';
-import { expandRange } from './scan.js';
+import { expandRange, portService } from './scan.js';
 
 const DAY = 86_400_000;
 
@@ -38,11 +38,12 @@ export function osCategory(osName, services = []) {
 }
 
 // 시각 t에서 IP의 상태: 1=사용(up), 0=미사용(down/유휴), -1=관측이력 없음(미발견)
+// hist.events는 호출 전 시간 오름차순 정렬돼 있다고 가정(buildNetmap에서 IP당 1회 정렬).
 function stateAt(hist, t) {
   if (!hist) return -1;
   const first = hist.firstSeen || 0;
   if (first && t < first) return -1;                 // 아직 처음 관측되기 전
-  const evs = (hist.events || []).slice().sort((a, b) => (a.ts || 0) - (b.ts || 0));
+  const evs = hist.events || [];
   if (evs.length) {
     let st = null;
     for (const e of evs) { if ((e.ts || 0) <= t) st = e.type; else break; }
@@ -101,10 +102,15 @@ export function buildNetmap(snap, { vcenterId = '', base = '', days = 30, bucket
     const ip = `${b}.${i}`;
     const row = byIp.get(ip);
     const hist = getIpHistory(ip);
-    const services = row?.services || hist?.events?.[hist.events.length - 1]?.ports?.map(String) || [];
+    // events는 append-only(시간 오름차순)이므로 IP당 1회만 정렬해 stateAt 재사용(버킷 루프 내 정렬 제거).
+    const evs = hist?.events ? hist.events.slice().sort((a, c) => (a.ts || 0) - (c.ts || 0)) : [];
+    const histS = hist ? { firstSeen: hist.firstSeen, lastSeen: hist.lastSeen, status: hist.status, events: evs } : null;
+    // 서비스명: 대장 services(이미 'SSH','RDP' 등) 우선, 없으면 이력의 마지막 포트를 서비스명으로 변환.
+    const services = (row?.services && row.services.length) ? row.services
+      : (evs[evs.length - 1]?.ports || []).map((p) => portService(Number(p)));
     const osName = row ? [row.osName, row.osVersion].filter(Boolean).join(' ') : '';
-    const cat = osCategory(osName, row?.services || []);
-    const states = bucketTs.map((t) => stateAt(hist, t));
+    const cat = osCategory(osName, services);
+    const states = bucketTs.map((t) => stateAt(histS, t));
     const ever = (hist && hist.firstSeen) || row?.firstSeen ? true : states.some((s) => s >= 0);
     const up = hist ? hist.status === 'up' : (row?.powerState === 'POWERED_ON');
     if (hist || row) {
