@@ -96,6 +96,7 @@ class Store {
       // don't get re-polled every base tick; disabled ones are skipped.
       const due = vcenters.filter((vc) => {
         if (vc.enabled === false) return false;
+        if (vc.maintenance) return false; // 점검중: 수집 일시 중단(연결 실패로 잡지 않음)
         if (vc.collectMode === 'site') return false; // 사이트 위임: 중앙은 직접 폴링하지 않음
         const last = this.vcLast.get(vc.id) || 0;
         const intervalMs = vc.pollIntervalSec > 0 ? vc.pollIntervalSec * 1000 : globalMs;
@@ -129,6 +130,22 @@ class Store {
       for (const vc of vcenters) {
         if (vc.enabled === false) {
           merged.vcenters.push({ id: vc.id, name: vc.name, location: vc.location, status: 'disabled' });
+          continue;
+        }
+        // 점검중: 수집 중단. 직전 수집 데이터가 있으면 유지(숫자 사라지지 않게)하되 상태는 '점검중'.
+        if (vc.maintenance) {
+          const c = this.vcCache.get(vc.id);
+          if (c?.ok) {
+            const s = c.data;
+            merged.vcenters.push({ ...s.vcenter, status: 'maintenance', maintenance: true });
+            merged.hosts.push(...s.hosts);
+            merged.vms.push(...s.vms);
+            merged.datastores.push(...s.datastores);
+            merged.networks.push(...s.networks);
+            merged.alarms.push(...s.alarms);
+          } else {
+            merged.vcenters.push({ id: vc.id, name: vc.name, location: vc.location, status: 'maintenance', maintenance: true });
+          }
           continue;
         }
         // 사이트 위임 vCenter: 현장 서버가 push한 인벤토리를 병합(중앙 폴링 없음).
@@ -228,6 +245,7 @@ function withRollups(snap) {
   const global = {
     vcenters: snap.vcenters.length,
     vcentersConnected: snap.vcenters.filter((v) => v.status === 'connected').length,
+    vcentersMaintenance: snap.vcenters.filter((v) => v.status === 'maintenance').length,
     hosts: snap.hosts.length,
     hostsConnected: snap.hosts.filter((h) => h.connectionState === 'CONNECTED').length,
     hostsMaintenance: snap.hosts.filter((h) => h.connectionState === 'MAINTENANCE').length,

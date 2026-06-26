@@ -84,13 +84,17 @@ function normalize(body, existing = null) {
   const enabled = body.enabled !== undefined ? body.enabled !== false : (e.enabled !== false);
   // 수집 방식: 'direct'(중앙이 직접 폴링) | 'site'(현장 서버가 수집해 중앙으로 push)
   const collectMode = (body.collectMode ?? e.collectMode) === 'site' ? 'site' : 'direct';
+  // 점검중: 수집을 일시 중단하고 '연결 실패'가 아닌 '점검중'으로 표시(알림·불가 카운트 제외).
+  const maintenance = body.maintenance !== undefined
+    ? (body.maintenance === true || body.maintenance === 'true')
+    : (e.maintenance === true);
 
   const entry = {
     id, name, host, username,
     // keep existing password if not provided / blank
     password: body.password ? String(body.password) : e.password || '',
     location: { city, country, region, lat, lon },
-    enabled, pollIntervalSec, timeoutMs, collectMode,
+    enabled, pollIntervalSec, timeoutMs, collectMode, maintenance,
   };
   return [entry, null];
 }

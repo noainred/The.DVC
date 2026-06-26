@@ -6,7 +6,7 @@ import EscClose from '../components/EscClose.jsx';
 const REGIONS = ['아시아', '중국', '유럽', '북미'];
 const EMPTY = {
   id: '', name: '', host: 'https://', username: '', password: '',
-  enabled: true, pollIntervalSec: '', timeoutMs: '', collectMode: 'direct',
+  enabled: true, maintenance: false, pollIntervalSec: '', timeoutMs: '', collectMode: 'direct',
   location: { city: '', country: '', region: '아시아', lat: '', lon: '' },
 };
 
@@ -101,6 +101,14 @@ export default function VCenterAdmin() {
     if (!window.confirm(`'${vc.name}' (${vc.id}) 을(를) 삭제할까요?`)) return;
     try { await delJson(`/admin/vcenters/${encodeURIComponent(vc.id)}`); await load(); }
     catch (e) { setError(e.message); }
+  };
+
+  // 점검중 빠른 전환 — 수집 일시중단/재개(비밀번호는 비워서 보냄 → 기존 유지).
+  const toggleMaintenance = async (vc) => {
+    try {
+      const r = await putJson(`/admin/vcenters/${encodeURIComponent(vc.id)}`, { maintenance: !vc.maintenance, password: '' });
+      if (r.ok) await load(); else setError(r.reason);
+    } catch (e) { setError(e.message); }
   };
 
   // Auto-fill map coordinates from the city/country name (offline geocoder).
@@ -198,13 +206,17 @@ export default function VCenterAdmin() {
             {list.map((vc) => (
               <tr key={vc.id}>
                 <td><b>{vc.id}</b></td>
-                <td>{vc.name}{vc.collectMode === 'site' && <span className="badge amber" style={{ marginLeft: 6, fontSize: 10 }} title="사이트 위임 수집 — 현장 서버가 수집해 중앙으로 push">사이트 위임</span>}</td>
+                <td>{vc.name}
+                  {vc.collectMode === 'site' && <span className="badge amber" style={{ marginLeft: 6, fontSize: 10 }} title="사이트 위임 수집 — 현장 서버가 수집해 중앙으로 push">사이트 위임</span>}
+                  {vc.maintenance && <span className="badge amber" style={{ marginLeft: 6, fontSize: 10 }} title="점검중 — 수집 일시중단, 연결불가/알림 제외">🛠 점검중</span>}
+                </td>
                 <td className="muted">{vc.host}</td>
                 <td className="muted">{vc.username}</td>
                 <td><span className="badge blue">{vc.location?.region || '-'}</span></td>
                 <td className="muted">{[vc.location?.city, vc.location?.country].filter(Boolean).join(', ') || '-'}</td>
                 <td>{vc.hasPassword ? <span className="badge green">설정됨</span> : <span className="badge gray">없음</span>}</td>
                 <td className="right nowrap">
+                  <button className="tab" onClick={() => toggleMaintenance(vc)} title="점검중 표시 전환(수집 일시중단/재개)">{vc.maintenance ? '점검해제' : '점검중'}</button>
                   <button className="tab" onClick={() => openEdit(vc)}>수정</button>
                   <button className="tab" style={{ color: 'var(--red)' }} onClick={() => remove(vc)}>삭제</button>
                 </td>
@@ -247,6 +259,9 @@ export default function VCenterAdmin() {
               </label>
               <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }}>
                 <input type="checkbox" checked={form.enabled !== false} onChange={(e) => setForm((f) => ({ ...f, enabled: e.target.checked }))} /> 수집 사용
+              </label>
+              <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }} title="점검중으로 표시하면 수집을 일시 중단하고 '연결 실패'가 아닌 '점검중'으로 보여줍니다(알림·연결불가 카운트 제외).">
+                <input type="checkbox" checked={!!form.maintenance} onChange={(e) => setForm((f) => ({ ...f, maintenance: e.target.checked }))} /> 점검중(수집 일시중단)
               </label>
             </div>
             <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>

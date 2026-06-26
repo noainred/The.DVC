@@ -69,7 +69,9 @@ export default function Overview({ onSelectSite, onGotoTab }) {
     <>
       <div className="section-title">글로벌 현황</div>
       <div className="kpis" ref={kpisRef} title="한 줄에 안 들어가는 KPI는 자동으로 숨겨집니다(창을 넓히면 더 보입니다).">
-        <Kpi label="vCenter" value={`${g.vcentersConnected}/${g.vcenters}`} meta={`${g.vcenters - g.vcentersConnected}개 연결 불가`} accent="var(--accent-2)" onClick={() => onGotoTab?.('vcenters')} />
+        <Kpi label="vCenter" value={`${g.vcentersConnected}/${g.vcenters}`}
+          meta={`${Math.max(0, g.vcenters - g.vcentersConnected - (g.vcentersMaintenance || 0))}개 연결 불가${g.vcentersMaintenance ? ` · 점검중 ${g.vcentersMaintenance}` : ''}`}
+          accent="var(--accent-2)" onClick={() => onGotoTab?.('vcenters')} />
         <Kpi label="ESXi 호스트" value={fmt(g.hosts)} meta={`정상 ${g.hostsConnected} · 점검 ${g.hostsMaintenance} · 끊김 ${g.hostsDisconnected}`} onClick={() => onGotoTab?.('hosts')} />
         <Kpi label="가상머신" value={fmt(g.vms)} meta={`구동중 ${fmt(g.vmsPoweredOn)} · 정지 ${fmt(g.vmsPoweredOff)}`} accent="var(--green)" onClick={() => onGotoTab?.('vms')} />
         <Kpi label="CPU 사용률" value={`${g.cpuUsagePct}%`} pct={g.cpuUsagePct} meta={`${g.cpuUsedGhz} / ${g.cpuTotalGhz} GHz · ${fmt(g.cpuCores)} cores`} />

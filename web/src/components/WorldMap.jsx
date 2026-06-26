@@ -6,6 +6,9 @@ import { Modal } from './ui.jsx';
 /** Marker color/size driven by the worst alarm state at a site. */
 function markerStyle(site) {
   const m = site.metrics || {};
+  // 점검중/비활성은 장애가 아니므로 빨강이 아닌 회색/주황으로 구분.
+  if (site.status === 'maintenance') return { fill: '#f59e0b', r: 6, ring: '#f59e0b' };
+  if (site.status === 'disabled') return { fill: '#6b7280', r: 5, ring: '#6b7280' };
   if (site.status !== 'connected') return { fill: '#ef4444', r: 7, ring: '#ef4444' };
   if (m.alarmsCritical > 0) return { fill: '#ef4444', r: 6, ring: '#ef4444' };
   if (m.alarmsWarning > 0) return { fill: '#f59e0b', r: 6, ring: '#f59e0b' };
