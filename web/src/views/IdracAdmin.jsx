@@ -29,6 +29,7 @@ export default function IdracAdmin() {
   const [vcenters, setVcenters] = useState([]);           // vCenter 목록(소속 지정용)
   const [assignVc, setAssignVc] = useState('');           // 일괄 지정 대상 vCenter
   const fileRef = useRef(null);
+  const pollAbort = useRef(false); // 위임 등록/스캔 폴링 취소 플래그
 
   const load = async () => {
     try { setData(await fetchJson('/admin/idrac')); setError(null); }
@@ -227,11 +228,13 @@ export default function IdracAdmin() {
       const r = await postJson('/admin/idrac/register-scanned', body);
       // 위임 등록: 에이전트 잡 결과를 폴링.
       if (r.delegated && r.reqId) {
-        setScanProgress(`에이전트 '${r.agent}'에 등록을 요청했습니다. 현지 등록 결과를 기다리는 중…`);
+        setScanProgress(`에이전트 '${r.agent}'에 등록을 요청했습니다. 현지 등록 결과를 기다리는 중… (취소 가능)`);
+        pollAbort.current = false;
         const deadline = Date.now() + 120_000;
         // eslint-disable-next-line no-await-in-loop
         while (Date.now() < deadline) {
           await new Promise((res) => setTimeout(res, 2000));
+          if (pollAbort.current) { pollAbort.current = false; setScanProgress(null); setImportMsg({ ok: false, text: '등록 대기를 취소했습니다(에이전트에는 이미 전달됨 — 결과는 서버 목록에서 확인).' }); return; }
           // eslint-disable-next-line no-await-in-loop
           const s = await fetchJson(`/admin/idrac/scan-result?reqId=${encodeURIComponent(r.reqId)}`).catch(() => null);
           if (!s) continue;

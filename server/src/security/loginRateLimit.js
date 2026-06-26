@@ -20,8 +20,14 @@ const keyOf = (ip, username) => `${String(ip || '?')}|${String(username || '?').
 
 function prune(now) {
   if (attempts.size < 5000) return;            // 메모리 상한 방어
+  // 1차: 창 만료 + 잠금 해제된 항목 정리.
   for (const [k, v] of attempts) {
     if ((v.lockUntil || 0) < now && (now - (v.first || 0)) > WINDOW_MS) attempts.delete(k);
+  }
+  // 2차(하드캡): 분산 공격으로 모두 활성 창이라 1차로 안 줄면, 가장 오래된 것부터 강제 제거.
+  if (attempts.size >= 5000) {
+    const oldest = [...attempts.entries()].sort((a, b) => (a[1].first || 0) - (b[1].first || 0));
+    for (let i = 0; i < oldest.length && attempts.size >= 4000; i++) attempts.delete(oldest[i][0]);
   }
 }
 

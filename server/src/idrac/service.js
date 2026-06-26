@@ -123,8 +123,10 @@ export async function allMeasuredPower() {
     const sample = latest.get(s.id);
     if (!sample || sample.watts == null || !Number.isFinite(sample.watts)) continue;
     const { model, serviceTag } = serverIdentity(s.id, s);
-    const hostNames = matchKeys(s);
-    tryAdd({ serverId: s.id, serverName: s.name, watts: sample.watts, ts: sample.ts, host: norm(s.host || hostNames[0] || s.name), hostNames, model, serviceTag, vcenterId: s.vcenterId || '', source: 'idrac' }, serviceTag, hostNames);
+    const hostNames = matchKeys(s);                  // 출력/귀속용(표시이름·태그 별칭 포함)
+    // dedup 식별은 '실제 호스트명/IP'만 사용(표시 이름은 사용자가 임의 지정 가능 → 충돌로 오드롭 방지).
+    const dedupHosts = [...(s.hostNames || []), s.host].filter(Boolean);
+    tryAdd({ serverId: s.id, serverName: s.name, watts: sample.watts, ts: sample.ts, host: norm(s.host || hostNames[0] || s.name), hostNames, model, serviceTag, vcenterId: s.vcenterId || '', source: 'idrac' }, serviceTag, dedupHosts);
   }
   for (const { entryId, at, device } of allOmeDevices()) {
     if (device.watts == null) continue;
@@ -133,13 +135,15 @@ export async function allMeasuredPower() {
     if (sample.watts == null || !Number.isFinite(sample.watts)) continue;
     const st = norm(device.serviceTag);
     const hostNames = [st, norm(device.name)].filter(Boolean);
-    tryAdd({ serverId: key, serverName: device.name, watts: sample.watts, ts: sample.ts, host: st || norm(device.name), hostNames, model: (device.model || '').trim(), serviceTag: device.serviceTag || '', source: 'ome' }, device.serviceTag, hostNames);
+    // OME 식별은 서비스태그 우선(태그 없으면 디바이스 호스트명).
+    const dedupHosts = device.serviceTag ? [] : [device.name].filter(Boolean);
+    tryAdd({ serverId: key, serverName: device.name, watts: sample.watts, ts: sample.ts, host: st || norm(device.name), hostNames, model: (device.model || '').trim(), serviceTag: device.serviceTag || '', source: 'ome' }, device.serviceTag, dedupHosts);
   }
   for (const [host, r] of remotePowerByHost()) {
     if (r.watts == null || !Number.isFinite(r.watts)) continue;
     const id = `remote:${r.collectorId}:${host}`;
     const hostNames = [norm(host)];
-    tryAdd({ serverId: id, serverName: r.serverName || host, watts: r.watts, ts: r.ts, host: norm(host), hostNames, model: (r.model || '').trim(), serviceTag: r.serviceTag || '', source: 'remote' }, r.serviceTag, hostNames);
+    tryAdd({ serverId: id, serverName: r.serverName || host, watts: r.watts, ts: r.ts, host: norm(host), hostNames, model: (r.model || '').trim(), serviceTag: r.serviceTag || '', source: 'remote' }, r.serviceTag, [host].filter(Boolean));
   }
   return out;
 }
