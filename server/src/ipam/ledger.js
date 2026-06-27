@@ -18,6 +18,8 @@ const _ipamKey = (snap, vcenterId) => `${snap?.generatedAt || ''}|${vcenterId ||
 // vcenter=vCenter만 인식 · scan=스캔만 발견(수동) · both=양쪽 · manual=운영자 등록(자동발견 없음)
 const reconcileOf = (discovery) => (discovery === 'both' ? 'both' : discovery === 'scan' ? 'scan' : discovery === 'vcenter' ? 'vcenter' : 'manual');
 
+const RESERVE_SOON_MS = 14 * 86_400_000; // 예약 만료 임박 기준(14일)
+
 export function ipToNum(s) {
   const p = String(s || '').split('.').map(Number);
   return p.length === 4 && p.every((n) => Number.isInteger(n) && n >= 0 && n <= 255)
@@ -169,7 +171,11 @@ export function buildIpamRows(snap, vcenterId) {
       // override 전용 필드(정책 미지원): 예약 만료·호스트명 덮어쓰기
       if (ov) {
         r.reservedUntil = ov.reservedUntil || null;
-        if (ov.reservedUntil && Date.parse(ov.reservedUntil) < now) r.reservedExpired = true;
+        if (ov.reservedUntil) {
+          const due = Date.parse(ov.reservedUntil);
+          if (due < now) r.reservedExpired = true;
+          else if (due < now + RESERVE_SOON_MS) r.reservedExpiringSoon = true; // 14일 내 만료 임박
+        }
         if (ov.hostnameOverride) r.hostName = ov.hostnameOverride;
       }
       const lbl = (ov?.label) || (erp?.label);
@@ -195,12 +201,14 @@ export function buildIpamRows(snap, vcenterId) {
   const reconCounts = { vcenter: 0, scan: 0, both: 0, manual: 0, conflict: 0 };
   const mgmtCounts = {};
   const appliedCounts = { override: 0, 'range-policy': 0, auto: 0 };
-  let managedN = 0;
+  let managedN = 0; let reservedExpiredN = 0; let reservedSoonN = 0;
   for (const r of rows) {
     if (reconCounts[r.reconcile] !== undefined) reconCounts[r.reconcile]++;
     if (r.managed) managedN++;
     if (r.mgmtStatus) mgmtCounts[r.mgmtStatus] = (mgmtCounts[r.mgmtStatus] || 0) + 1;
     if (appliedCounts[r.appliedBy] !== undefined) appliedCounts[r.appliedBy]++;
+    if (r.reservedExpired) reservedExpiredN++;
+    if (r.reservedExpiringSoon) reservedSoonN++;
   }
   const out = {
     total: rows.length,
@@ -211,6 +219,9 @@ export function buildIpamRows(snap, vcenterId) {
     conflicts: reconCounts.conflict,
     reconcile: reconCounts,
     managed: managedN,
+    unmanaged: rows.length - managedN,
+    reservedExpired: reservedExpiredN,
+    reservedExpiringSoon: reservedSoonN,
     mgmtStatus: mgmtCounts,
     appliedBy: appliedCounts,
     byVcenter: Object.entries(byVc).map(([id, c]) => ({ vcenterId: id, vcenterName: vcName[id] || (id || '네트워크 스캔'), scanned: !id, count: c })).sort((a, b) => b.count - a.count),

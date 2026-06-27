@@ -527,12 +527,16 @@ api.get('/tools/ipam/manage-meta', (_req, res) => {
   res.json({ statuses: STATUSES, deviceTypes: DEVICE_TYPES, summary: overridesSummary(),
     policyStatuses: POLICY_STATUSES, policiesSummary: policiesSummary() });
 });
+// vCenter 귀속 값 검증 — 알 수 없는 vCenter id를 붙이면 거부(오타·고아 참조 방지). 빈값=전역=허용.
+// 설정 읽기 실패 시엔 막지 않는다(fail-open).
+const isKnownVcenter = (id) => { if (!id) return true; try { return (loadVcenterConfig().vcenters || []).some((v) => v.id === id); } catch { return true; } };
 // 한 IP의 override 조회.
 api.get('/tools/ipam/ip/:ip', (req, res) => {
   res.json({ ip: req.params.ip, override: getOverride(req.params.ip) });
 });
 // 한 IP의 override 생성/수정(부분). 변경은 운영자/관리자만.
 api.put('/tools/ipam/ip/:ip', requireRole('admin', 'operator'), (req, res) => {
+  if (req.body?.claimedVcenterId && !isKnownVcenter(req.body.claimedVcenterId)) return res.status(400).json({ ok: false, reason: '알 수 없는 vCenter입니다.' });
   const r = setOverride(req.params.ip, req.body || {}, req.user);
   if (r.ok) logAudit({ user: req.user?.username, action: 'IP 관리상태 저장', target: `IP ${req.params.ip}`, detail: JSON.stringify(r.override || {}).slice(0, 500) });
   res.status(r.ok ? 200 : 400).json(r);
@@ -546,6 +550,7 @@ api.delete('/tools/ipam/ip/:ip', requireRole('admin', 'operator'), (req, res) =>
 // 여러 IP 일괄 관리(예: 한 대역 전체를 'reserved'로). body: { ips:[...], ...fields }.
 api.post('/tools/ipam/bulk', requireRole('admin', 'operator'), (req, res) => {
   const { ips, ...fields } = req.body || {};
+  if (fields.claimedVcenterId && !isKnownVcenter(fields.claimedVcenterId)) return res.status(400).json({ ok: false, reason: '알 수 없는 vCenter입니다.' });
   const r = setOverrideBatch(ips, fields, req.user);
   if (r.ok) logAudit({ user: req.user?.username, action: 'IP 관리상태 일괄 적용', target: `${r.changed}개 IP`, detail: JSON.stringify(fields).slice(0, 500) });
   res.status(r.ok ? 200 : 400).json(r);
@@ -570,12 +575,14 @@ api.get('/tools/ipam/policies/preview', (req, res) => {
 });
 // 정책 생성. body: { spec, status?, priority?, claimedVcenterId?, owner?, label?, deviceType?, note?, enabled? }.
 api.post('/tools/ipam/policies', requireRole('admin', 'operator'), (req, res) => {
+  if (req.body?.claimedVcenterId && !isKnownVcenter(req.body.claimedVcenterId)) return res.status(400).json({ ok: false, reason: '알 수 없는 vCenter입니다.' });
   const r = setPolicy(req.body || {}, req.user);
   if (r.ok) { logAudit({ user: req.user?.username, action: '대역정책 저장', target: `정책 ${r.policy.spec}`, detail: JSON.stringify(r.policy).slice(0, 800) }); try { store.syncLedger(); } catch { /* */ } }
   res.status(r.ok ? 200 : 400).json(r);
 });
 // 정책 수정(부분). :id.
 api.put('/tools/ipam/policies/:id', requireRole('admin', 'operator'), (req, res) => {
+  if (req.body?.claimedVcenterId && !isKnownVcenter(req.body.claimedVcenterId)) return res.status(400).json({ ok: false, reason: '알 수 없는 vCenter입니다.' });
   const r = setPolicy({ ...(req.body || {}), id: req.params.id }, req.user);
   if (r.ok) { logAudit({ user: req.user?.username, action: '대역정책 수정', target: `정책 ${r.policy.spec}`, detail: JSON.stringify(r.policy).slice(0, 800) }); try { store.syncLedger(); } catch { /* */ } }
   res.status(r.ok ? 200 : 400).json(r);

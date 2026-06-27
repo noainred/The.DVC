@@ -8,8 +8,8 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ipam-scan-'));
 process.env.CONFIG_DIR = tmp;
 process.env.IPAM_WRITE_DEBOUNCE_MS = '20'; // 테스트는 짧은 디바운스
 
-let ss;
-before(async () => { ss = await import('../src/ipam/scanStore.js'); });
+let ss, ov;
+before(async () => { ss = await import('../src/ipam/scanStore.js'); ov = await import('../src/ipam/overrides.js'); });
 after(() => { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* */ } });
 
 test('mergeScanResults: 잘못된 IP는 무시(키 오염 차단)', () => {
@@ -38,6 +38,16 @@ test('flushAllNow: 디바운스 중인 변경을 즉시 원자적으로 디스�
   assert.ok(fs.existsSync(file));
   const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
   assert.ok(saved['10.3.3.3']);
+});
+
+test('sweepReleases: 관리(override) IP의 이력은 보존기간 초과여도 보존, 비관리는 정리', () => {
+  ss.mergeScanResults([{ ip: '10.6.6.1', openPorts: [22], services: ['SSH'] }, { ip: '10.6.6.2', openPorts: [22], services: ['SSH'] }], 0, 'a1');
+  ov.setOverride('10.6.6.2', { status: 'reserved' }, { username: 'op' }); // 관리 대상
+  const farFuture = 400 * 86400000; // 400일 후 → 두 IP 모두 보존기간(365일) 초과
+  ss.sweepReleases(1000, { now: farFuture });
+  assert.equal(ss.getIpHistory('10.6.6.1'), null, '비관리 IP 이력은 정리됨');
+  assert.ok(ss.getIpHistory('10.6.6.2'), '관리 IP 이력은 보존됨');
+  ov.clearOverride('10.6.6.2');
 });
 
 test('mergeScanResults: 내용 변화 없으면 scanRev 불변(불필요 재계산 방지)', () => {

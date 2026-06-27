@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { fetchJson, postJson, putJson, usePolling, getToken } from '../api.js';
 import { DataTable, Loading, ErrorBox, StateBadge, UsageCell, EntityDetail, Modal, ResultCount, SearchBox, VmLink } from '../components/ui.jsx';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Brush } from 'recharts';
@@ -346,30 +346,36 @@ function Ipam({ scope, onScope }) {
   const c192 = subnets.filter((s) => s.base.startsWith('192.')).length;
   const c172 = subnets.filter((s) => s.base.startsWith('172.')).length;
 
+  // reconcile/관리 집계 + 행 필터를 메모이즈 — 수천 행에서 무관한 리렌더 시 재계산을 피한다(렌더 성능).
+  const term = q.trim().toLowerCase();
+  const recon = useMemo(() => {
+    const c = { vcenter: 0, scan: 0, both: 0, manual: 0, conflict: 0, managed: 0, unmanaged: 0, reserved: 0 };
+    for (const r of (data?.rows || [])) {
+      if (c[r.reconcile] !== undefined) c[r.reconcile]++;
+      if (r.managed) c.managed++; else c.unmanaged++;
+      if (r.reservedExpired || r.reservedExpiringSoon) c.reserved++;
+    }
+    return c;
+  }, [data]);
+  const rows = useMemo(() => (data?.rows || []).filter((r) => {
+    if (rowFilter === 'duplicate' && !r.duplicate) return false;
+    if (rowFilter === 'multihomed' && !r.multiHomed) return false;
+    if (rowFilter === 'public' && r.scope !== 'public') return false;
+    if (rowFilter === 'private' && r.scope !== 'private') return false;
+    if (reconFilter === 'managed' && !r.managed) return false;
+    if (reconFilter === 'unmanaged' && r.managed) return false;
+    if (reconFilter === 'reserved' && !(r.reservedExpired || r.reservedExpiringSoon)) return false;
+    if (reconFilter && !['managed', 'unmanaged', 'reserved'].includes(reconFilter) && r.reconcile !== reconFilter) return false;
+    if (term && !(r.ip.includes(term) || (r.ownerName || '').toLowerCase().includes(term) || (r.hostName || '').toLowerCase().includes(term) || (r.label || '').toLowerCase().includes(term) || (r.owner_ || '').toLowerCase().includes(term) || (r.note || '').toLowerCase().includes(term))) return false;
+    return true;
+  }), [data, term, rowFilter, reconFilter]);
+
   if (loading) return <Loading />;
   if (error) return <ErrorBox message={error} />;
 
   const ROWBG = { used: 'rgba(34,197,94,.12)', multihomed: 'rgba(59,130,246,.14)', duplicate: 'rgba(239,68,68,.14)', network: 'rgba(148,163,184,.14)', released: 'rgba(245,158,11,.13)', scanned: 'rgba(20,184,166,.14)', empty: 'transparent' };
   const STLAB = { used: '사용', multihomed: '멀티홈', duplicate: '중복', network: 'Network ID', released: '해제(이력)', scanned: '스캔 확인', empty: '' };
 
-  // reconcile(출처 대조) 집계 — vCenter 수집 IP와 스캔/수동 IP를 한눈에 대조.
-  const recon = { vcenter: 0, scan: 0, both: 0, manual: 0, conflict: 0, managed: 0 };
-  for (const r of data.rows) {
-    if (recon[r.reconcile] !== undefined) recon[r.reconcile]++;
-    if (r.managed) recon.managed++;
-  }
-
-  const term = q.trim().toLowerCase();
-  const rows = data.rows.filter((r) => {
-    if (rowFilter === 'duplicate' && !r.duplicate) return false;
-    if (rowFilter === 'multihomed' && !r.multiHomed) return false;
-    if (rowFilter === 'public' && r.scope !== 'public') return false;
-    if (rowFilter === 'private' && r.scope !== 'private') return false;
-    if (reconFilter === 'managed' && !r.managed) return false;
-    if (reconFilter && reconFilter !== 'managed' && r.reconcile !== reconFilter) return false;
-    if (term && !(r.ip.includes(term) || (r.ownerName || '').toLowerCase().includes(term) || (r.hostName || '').toLowerCase().includes(term) || (r.label || '').toLowerCase().includes(term) || (r.owner_ || '').toLowerCase().includes(term) || (r.note || '').toLowerCase().includes(term))) return false;
-    return true;
-  });
   const toggleRowFilter = (k) => { setRowFilter((cur) => (cur === k ? '' : k)); setView('list'); };
   const toggleRecon = (k) => { setReconFilter((cur) => (cur === k ? '' : k)); setView('list'); };
 
@@ -392,6 +398,7 @@ function Ipam({ scope, onScope }) {
         {r.duplicate && <span className="badge red" style={{ marginLeft: 6 }}>중복</span>}
         {r.multiHomed && <span className="badge amber" style={{ marginLeft: 4 }}>멀티홈</span>}
         {r.reservedExpired && <span className="badge amber" style={{ marginLeft: 4 }} title="예약 만료일이 지났습니다">⏳ 예약만료</span>}
+        {!r.reservedExpired && r.reservedExpiringSoon && <span className="badge amber" style={{ marginLeft: 4 }} title={`예약 만료 임박: ${r.reservedUntil ? new Date(r.reservedUntil).toLocaleDateString() : ''}`}>⏳ 임박</span>}
       </button>
     ) },
     { key: 'scope', label: '분류', sortValue: (r) => r.scope || '', render: (r) => (
@@ -435,6 +442,9 @@ function Ipam({ scope, onScope }) {
           active={reconFilter === 'conflict'} onClick={() => toggleRecon('conflict')} />
         <Card label="관리상태 지정" value={recon.managed} meta={reconFilter === 'managed' ? '관리 IP만 보기 ✓' : '운영자 수동 관리 IP'}
           active={reconFilter === 'managed'} onClick={() => toggleRecon('managed')} />
+        <Card label="예약 만료/임박" value={recon.reserved} accent={recon.reserved ? 'var(--amber,#f59e0b)' : undefined}
+          meta={reconFilter === 'reserved' ? '예약 만료/임박만 ✓' : (recon.reserved ? '클릭: 예약 정리 대상' : '14일 내 만료 예약 없음')}
+          active={reconFilter === 'reserved'} onClick={() => toggleRecon('reserved')} />
         {db && <Card label="공유 DB 레코드" value={db.count.toLocaleString()} meta={db.kind.toUpperCase()} />}
       </div>
       {rowFilter && view === 'list' && (
@@ -585,7 +595,9 @@ function Ipam({ scope, onScope }) {
               ['scan', `스캔만(수동확인) (${recon.scan})`, 'teal'],
               ['manual', `수동등록 (${recon.manual})`, 'purple'],
               ['conflict', `⚠ 충돌 (${recon.conflict})`, 'red'],
-              ['managed', `관리상태 지정됨 (${recon.managed})`, 'amber']].map(([k, label]) => (
+              ['managed', `관리상태 지정됨 (${recon.managed})`, 'amber'],
+              ['unmanaged', `미관리 (${recon.unmanaged})`, 'gray'],
+              ['reserved', `⏳ 예약 만료/임박 (${recon.reserved})`, 'amber']].map(([k, label]) => (
               <button key={k} className={reconFilter === k ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '5px 11px', fontSize: 12 }} onClick={() => k ? toggleRecon(k) : setReconFilter('')}>{label}</button>
             ))}
             {canManage && <button className="logout-btn" style={{ flex: 'none', padding: '5px 11px', fontSize: 12 }} title="수동으로 IP를 등록하거나 한 대역을 일괄 관리(예약 등)" onClick={() => setEditOv({ ip: '', __new: true })}>＋ IP 수동 등록 / 일괄 관리</button>}

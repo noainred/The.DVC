@@ -12,8 +12,20 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { DEFAULT_PORTS, isIpv4 } from './scan.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { getOverrides } from './overrides.js';
+import { getPolicies, findPolicy } from './rangePolicies.js';
 
 const MAX_MERGE = 20_000; // 한 보고당 병합 상한(악의/오작동 에이전트의 대량 주입 방지)
+
+const _ipNum = (s) => { const p = String(s).split('.').map(Number); return p.length === 4 && p.every((n) => Number.isInteger(n) && n >= 0 && n <= 255) ? (((p[0] << 24) >>> 0) + (p[1] << 16) + (p[2] << 8) + p[3]) : null; };
+// 운영자가 관리(수동 override 또는 대역 정책)하는 IP인지 판단하는 '예측자'를 1회 구성해 반환.
+// 루프 안에서 매번 override 맵/정책 목록을 다시 읽지 않도록 컨텍스트를 캡처하고,
+// 활성 정책이 하나도 없으면 findPolicy 자체를 건너뛴다(대다수 환경에서 O(N)로 동작).
+function managedChecker() {
+  const ovMap = getOverrides();
+  const hasPolicies = getPolicies().some((p) => p.enabled !== false);
+  return (ip) => (Object.prototype.hasOwnProperty.call(ovMap, ip)) || (hasPolicies && findPolicy(_ipNum(ip), '') != null);
+}
 
 const CFG = path.join(config.configDir, 'ipam-scan.json');
 const RES = path.join(config.configDir, 'ipam-scan-results.json');
@@ -195,6 +207,7 @@ export function sweepReleases(idleMs, opts = {}) {
   const onlyAgent = typeof opts === 'object' ? opts.agent : undefined;
   if (!idleMs || idleMs <= 0) return 0;
   let changed = 0;
+  const isManaged = managedChecker(); // 루프 시작 시 1회 구성(O(N) 유지)
   for (const e of Object.values(history)) {
     const owned = onlyAgent === undefined || (e.agent || LOCAL) === onlyAgent;
     if (owned && e.status === 'up' && (e.lastSeen || 0) < now - idleMs) {
@@ -202,8 +215,9 @@ export function sweepReleases(idleMs, opts = {}) {
       pushEvent(e, { ts: now, type: 'down' });
       changed++;
     }
-    // 아주 오래 안 보인 IP의 이력은 정리(무한 증식 방지) — 소유 무관 전역.
-    if ((e.lastSeen || 0) < now - HISTORY_RETENTION_MS) { delete history[e.ip]; changed++; }
+    // 아주 오래 안 보인 IP의 이력은 정리(무한 증식 방지). 단, 운영자가 관리(override/대역정책)하는
+    // IP는 사용 추이를 계속 보존한다(관리 대상의 이력 손실 방지).
+    if ((e.lastSeen || 0) < now - HISTORY_RETENTION_MS && !isManaged(e.ip)) { delete history[e.ip]; changed++; }
   }
   if (changed) { histDirty = true; persistHist(); scanRevN++; }
   return changed;
@@ -238,7 +252,9 @@ export function pruneScanResults(retentionDays) {
   if (!retentionDays) return;
   const cut = Date.now() - retentionDays * 86_400_000;
   let changed = false;
-  for (const [ip, r] of Object.entries(results)) if ((r.lastSeen || 0) < cut) { delete results[ip]; changed = true; }
+  const isManaged = managedChecker();
+  // 관리(override/대역정책) IP의 스캔 결과는 보존(보존기간 초과여도 운영 가시성 유지).
+  for (const [ip, r] of Object.entries(results)) if ((r.lastSeen || 0) < cut && !isManaged(ip)) { delete results[ip]; changed = true; }
   if (changed) { scheduleWrite(RES); scanRevN++; }
 }
 

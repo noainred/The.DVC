@@ -83,6 +83,30 @@ test('ledger: status=ignored 인 IP는 대장에서 숨김', () => {
   ov.clearOverride('10.88.0.30');
 });
 
+test('ledger: 예약 만료/임박 플래그 + 요약 카운트', () => {
+  const soon = new Date(Date.now() + 7 * 86400000).toISOString();   // 7일 후(임박)
+  const far = new Date(Date.now() + 60 * 86400000).toISOString();   // 60일 후(여유)
+  const past = new Date(Date.now() - 86400000).toISOString();       // 어제(만료)
+  ov.setOverride('10.91.0.1', { status: 'reserved', reservedUntil: soon }, { username: 'op' });
+  ov.setOverride('10.91.0.2', { status: 'reserved', reservedUntil: far }, { username: 'op' });
+  ov.setOverride('10.91.0.3', { status: 'reserved', reservedUntil: past }, { username: 'op' });
+  const snap = {
+    generatedAt: 'rsv', vcenters: [{ id: 'vc1', name: 'SEOUL' }],
+    vms: ['10.91.0.1', '10.91.0.2', '10.91.0.3'].map((ip, i) => ({ name: `v${i}`, vcenterId: 'vc1', ipAddress: ip, powerState: 'POWERED_ON' })),
+    hosts: [],
+  };
+  const out = ledger.buildIpamRows(snap);
+  const byIp = Object.fromEntries(out.rows.map((r) => [r.ip, r]));
+  assert.equal(byIp['10.91.0.1'].reservedExpiringSoon, true);
+  assert.ok(!byIp['10.91.0.1'].reservedExpired);
+  assert.ok(!byIp['10.91.0.2'].reservedExpiringSoon && !byIp['10.91.0.2'].reservedExpired);
+  assert.equal(byIp['10.91.0.3'].reservedExpired, true);
+  assert.equal(out.reservedExpired, 1);
+  assert.equal(out.reservedExpiringSoon, 1);
+  assert.ok(out.unmanaged >= 0 && out.managed >= 3);
+  ['10.91.0.1', '10.91.0.2', '10.91.0.3'].forEach((ip) => ov.clearOverride(ip));
+});
+
 test('overrides: 잘못된 IP 키는 거부(오염 차단)', () => {
   assert.equal(ov.setOverride('not-an-ip', { status: 'reserved' }).ok, false);
   assert.equal(ov.setOverride('333.0.0.1', { status: 'reserved' }).ok, false);
