@@ -23,9 +23,12 @@ authRouter.post('/login', async (req, res) => {
     return res.status(400).json({ error: 'username and password are required' });
   }
   const ip = (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').toString().split(',')[0];
+  // 잠금 키는 클라이언트가 위조할 수 없는 '실제 peer 주소'를 쓴다(X-Forwarded-For는 스푸핑으로
+  // 계정별 잠금을 무력화할 수 있으므로 키에 사용하지 않는다 — 감사 로그에는 XFF를 그대로 남김).
+  const gateIp = (req.socket?.remoteAddress || ip || '').toString();
 
-  // 무차별 대입 방어: IP+계정 잠금 상태면 인증 시도 자체를 막는다.
-  const gate = checkLoginAllowed(ip, username);
+  // 무차별 대입 방어: peer+계정 잠금 상태면 인증 시도 자체를 막는다.
+  const gate = checkLoginAllowed(gateIp, username);
   if (gate.blocked) {
     logAudit({ user: username, action: '로그인 차단(잠금)', detail: `${gate.retryAfterSec}s`, ip });
     return res.status(429).set('Retry-After', String(gate.retryAfterSec))
@@ -34,7 +37,7 @@ authRouter.post('/login', async (req, res) => {
 
   const user = await authenticate(username, password);
   if (!user) {
-    const lk = recordLoginFailure(ip, username);
+    const lk = recordLoginFailure(gateIp, username);
     logAudit({ user: username, action: lk.locked ? '로그인 실패(잠금 발동)' : '로그인 실패', ip });
     try { recordPortalLoginFail({ username, ip, reason: 'invalid credentials' }); } catch { /* */ }
     if (lk.locked) {
@@ -44,7 +47,7 @@ authRouter.post('/login', async (req, res) => {
     return res.status(401).json({ error: 'invalid credentials' });
   }
 
-  recordLoginSuccess(ip, username);
+  recordLoginSuccess(gateIp, username);
   const token = signToken({ sub: user.username, role: user.role, name: user.name });
   logAudit({ user: user.username, action: '로그인', detail: user.role, ip });
   res.json({ token, user });

@@ -10,6 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
 
 const FILE = path.join(config.configDir, 'agent-assignments.json');
 const RESULT_FILE = path.join(config.configDir, 'agent-results.json');
@@ -25,9 +26,7 @@ export function loadAssignments() {
 }
 
 function save(list) {
-  fs.mkdirSync(path.dirname(FILE), { recursive: true });
-  fs.writeFileSync(FILE, JSON.stringify({ assignments: list }, null, 2), { mode: 0o600 });
-  try { fs.chmodSync(FILE, 0o600); } catch { /* best effort */ }
+  atomicWriteFileSync(FILE, JSON.stringify({ assignments: list }, null, 2), { mode: 0o600 });
 }
 
 export function redact(a) {

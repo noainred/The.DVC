@@ -11,6 +11,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { describeError } from '../util/errors.js';
 import { fetchPower, fetchInventory } from './redfish.js';
 import { testOme } from './ome.js';
@@ -29,9 +30,7 @@ export function loadRegistry() {
 }
 
 function saveRegistry(list) {
-  fs.mkdirSync(path.dirname(FILE), { recursive: true });
-  fs.writeFileSync(FILE, JSON.stringify({ servers: list }, null, 2), { mode: 0o600 });
-  try { fs.chmodSync(FILE, 0o600); } catch { /* best effort */ }
+  atomicWriteFileSync(FILE, JSON.stringify({ servers: list }, null, 2), { mode: 0o600 });
 }
 
 /** Strip the password before returning an entry to the client. */
@@ -134,18 +133,25 @@ export function importServers(incoming, mode = 'merge') {
   //  - 'replace'         : 레지스트리 전체 교체(기존 모두 삭제 후 incoming만)
   //  - 'replace-vcenter' : incoming에 등장한 소속 vCenter의 기존 항목만 삭제 후 교체(다른 vCenter는 유지)
   //  - 'merge'(기본)     : id 기준 upsert
-  let result;
-  if (mode === 'replace') result = [];
-  else if (mode === 'replace-vcenter') {
-    const vcs = new Set(incoming.map((r) => String(r?.vcenterId || '').trim()).filter(Boolean));
-    result = vcs.size ? existing.filter((s) => !vcs.has(String(s.vcenterId || '').trim())) : [...existing];
-  } else result = [...existing];
-  let added = 0, updated = 0;
+  // 먼저 incoming을 검증해 '유효 항목'만 추린다(검증 실패 항목은 skip).
   const skipped = [];
+  const valid = [];
   for (const raw of incoming) {
     const base = mode === 'replace' ? null : existing.find((s) => s.id === raw?.id);
     const [entry, err] = normalize(raw || {}, base);
     if (err) { skipped.push({ id: raw?.id || '(id 없음)', reason: err }); continue; }
+    valid.push(entry);
+  }
+  let result;
+  if (mode === 'replace') result = [];
+  else if (mode === 'replace-vcenter') {
+    // 삭제 대상 vCenter는 '유효한 incoming'이 실제 존재하는 vCenter로 한정한다.
+    // (검증 실패로 0건이 된 vCenter의 기존 데이터를 통째로 지우는 사고 방지)
+    const vcs = new Set(valid.map((e) => String(e.vcenterId || '').trim()).filter(Boolean));
+    result = vcs.size ? existing.filter((s) => !vcs.has(String(s.vcenterId || '').trim())) : [...existing];
+  } else result = [...existing];
+  let added = 0, updated = 0;
+  for (const entry of valid) {
     const idx = result.findIndex((s) => s.id === entry.id);
     if (idx >= 0) { result[idx] = entry; updated++; } else { result.push(entry); added++; }
   }

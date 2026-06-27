@@ -35,7 +35,8 @@ remoteRouter.get('/mappings', (req, res) => {
 
 // Reachability probe: from the assigned proxy, ping the target and check the
 // TCP port. Used to colour the VM "원격 접속" button (blue=open, red=closed).
-const SAFE_HOST = /^[A-Za-z0-9._:-]+$/;
+// 선행 '-'를 막아 ping/포트체크에 플래그(인자) 주입을 차단(첫 글자는 영숫자/IP만).
+const SAFE_HOST = /^[A-Za-z0-9._:][A-Za-z0-9._:-]*$/;
 remoteRouter.post('/probe', async (req, res) => {
   const { vcenterId, targetHost } = req.body || {};
   const targetPort = Math.min(65535, Math.max(1, Number((req.body || {}).targetPort) || 22));
@@ -47,7 +48,7 @@ remoteRouter.post('/probe', async (req, res) => {
   const creds = { host: proxy.deploy.host, port: proxy.deploy.port, username: proxy.deploy.username, password: proxy.deploy.password, privateKey: proxy.deploy.privateKey || undefined };
   try {
     const out = await withSsh(creds, async ({ exec }) => {
-      const ping = await exec(`ping -c1 -W1 ${targetHost} 2>/dev/null | sed -n 's/.*time=\\([0-9.]*\\).*/\\1/p' | head -1`);
+      const ping = await exec(`ping -c1 -W1 -- ${targetHost} 2>/dev/null | sed -n 's/.*time=\\([0-9.]*\\).*/\\1/p' | head -1`);
       const pingMs = parseFloat(ping.stdout.trim());
       const port = await exec(`timeout 2 bash -c '</dev/tcp/${targetHost}/${targetPort}' 2>/dev/null && echo OPEN || echo CLOSED`);
       return { pingOk: Number.isFinite(pingMs), pingMs: Number.isFinite(pingMs) ? pingMs : null, portOpen: port.stdout.includes('OPEN') };

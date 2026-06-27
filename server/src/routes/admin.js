@@ -856,9 +856,17 @@ adminRouter.get('/vcenters/import-suggestions', adminOnly, (_req, res) => {
 });
 
 // Import a vcenters.json already stored on the server. Body: { path, mode? }
+// 임의 파일 읽기 방지: configDir 하위(.json) 또는 알려진 표준 위치만 허용.
+function isAllowedImportPath(p) {
+  const abs = path.resolve(String(p));
+  if (!abs.endsWith('.json')) return false;
+  const allowDirs = [path.resolve(config.configDir), '/etc/vmware-portal', '/opt/vmware-portal/app/server/config'];
+  return allowDirs.some((d) => abs === d || abs.startsWith(d + path.sep));
+}
 adminRouter.post('/vcenters/import-file', adminOnly, (req, res) => {
   const { path: filePath, mode } = req.body || {};
   if (!filePath || typeof filePath !== 'string') return res.status(400).json({ ok: false, reason: '파일 경로가 필요합니다.' });
+  if (!isAllowedImportPath(filePath)) return res.status(400).json({ ok: false, reason: '허용된 경로(설정 디렉터리의 .json)만 불러올 수 있습니다.' });
   try {
     const stat = fs.statSync(filePath);
     if (!stat.isFile()) return res.status(400).json({ ok: false, reason: '파일이 아닙니다.' });

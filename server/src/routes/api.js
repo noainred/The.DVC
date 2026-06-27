@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { requireRole } from '../auth/auth.js';
 import { store } from '../store.js';
 import { currentVersion, config, loadVcenterConfig } from '../config.js';
 import { loadUiSettings, saveUiSettings } from '../ui-settings.js';
@@ -1391,7 +1392,7 @@ api.get('/tools/licenses', (req, res) => {
 });
 
 // Trigger VMware Tools upgrade on one or more VMs. Body: { ids:[vmId,...] }.
-api.post('/vms/upgrade-tools', async (req, res) => {
+api.post('/vms/upgrade-tools', requireRole('admin', 'operator'), async (req, res) => {
   const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
   if (!ids.length) return res.status(400).json({ ok: false, reason: '대상 VM이 없습니다.' });
   const snap = store.get();
@@ -1732,12 +1733,12 @@ api.get('/alarms', (req, res) => {
 
 // Alarm mute rules — "이 알람 앞으로 무시". Muted alarms are filtered globally.
 api.get('/alarm-mutes', (_req, res) => res.json({ mutes: listMutes() }));
-api.post('/alarm-mutes', (req, res) => {
+api.post('/alarm-mutes', requireRole('admin', 'operator'), (req, res) => {
   const result = addMute(req.body || {});
   if (result.ok) store.refresh().catch(() => {}); // re-apply immediately
   res.status(result.ok ? 200 : 400).json(result);
 });
-api.delete('/alarm-mutes/:id', (req, res) => {
+api.delete('/alarm-mutes/:id', requireRole('admin', 'operator'), (req, res) => {
   const result = removeMute(decodeURIComponent(req.params.id));
   if (result.ok) store.refresh().catch(() => {});
   res.status(result.ok ? 200 : 404).json(result);

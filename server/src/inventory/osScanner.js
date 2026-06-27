@@ -111,12 +111,15 @@ function rawSettings() { const s = loadOsScanSettings(); return { enabled: s.ena
 export function osScanStatus() { const s = loadOsScanSettings(); return { settings: rawSettings(), lastRun: s.lastRun, lastFound: s.lastFound, lastErr: s.lastErr, summary: osSummary() }; }
 
 let timer = null;
+let running = false; // 재진입 방지 — 긴 스캔이 다음 tick과 겹쳐 SSH/SOAP 세션 폭증하는 것을 막는다.
 export function startOsScanner() {
   timer = setInterval(() => {
+    if (running) return;
     const s = loadOsScanSettings();
     if (!s.enabled) return;
     if (s.lastRun && Date.now() - s.lastRun < s.intervalMin * 60_000) return;
-    runOsScanNow().catch((e) => console.warn('[osscan] 실행 실패:', e?.message));
+    running = true;
+    runOsScanNow().catch((e) => console.warn('[osscan] 실행 실패:', e?.message)).finally(() => { running = false; });
   }, 60_000);
   timer.unref?.();
   console.log('[osscan] 실제 OS 인벤토리 스캐너 시작');

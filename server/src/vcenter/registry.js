@@ -10,6 +10,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { VCenterClient } from './restClient.js';
 import { describeError } from '../util/errors.js';
 import { geocode } from './geocode.js';
@@ -32,9 +33,7 @@ export function loadRegistry() {
 }
 
 function saveRegistry(list) {
-  fs.mkdirSync(path.dirname(FILE), { recursive: true });
-  fs.writeFileSync(FILE, JSON.stringify({ vcenters: list }, null, 2), { mode: 0o600 });
-  try { fs.chmodSync(FILE, 0o600); } catch { /* best effort */ }
+  atomicWriteFileSync(FILE, JSON.stringify({ vcenters: list }, null, 2), { mode: 0o600 });
 }
 
 /** Strip secrets before sending an entry to the client. */

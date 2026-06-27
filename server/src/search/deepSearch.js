@@ -68,7 +68,8 @@ const shq = (s) => `'${String(s).replace(/'/g, "'\\''")}'`; // 셸 작은따옴�
 function probeScript(probe, isWindows) {
   if (isWindows) {
     if (probe.type === 'gpuDriver') return '@echo off\r\nwhere nvidia-smi >nul 2>&1 && (echo MATCH & nvidia-smi -L) || echo NOMATCH\r\n';
-    if (probe.type === 'process') { const p = String(probe.pattern || '').replace(/["%]/g, ''); return `@echo off\r\ntasklist | findstr /I /C:"${p}" >nul 2>&1 && (echo MATCH & tasklist ^| findstr /I /C:"${p}") || echo NOMATCH\r\n`; }
+    // cmd.exe 배치는 안전한 인용이 없어 메타문자(& | < > ^ ( ) " %)를 화이트리스트로 제거한다(프로세스명만 허용).
+    if (probe.type === 'process') { const p = String(probe.pattern || '').replace(/[^A-Za-z0-9._ -]/g, ''); return `@echo off\r\ntasklist | findstr /I /C:"${p}" >nul 2>&1 && (echo MATCH & tasklist ^| findstr /I /C:"${p}") || echo NOMATCH\r\n`; }
     return '@echo off\r\necho NOMATCH\r\n';
   }
   if (probe.type === 'gpuDriver') return 'if command -v nvidia-smi >/dev/null 2>&1; then echo MATCH; nvidia-smi -L 2>/dev/null | head -2; else echo NOMATCH; fi';

@@ -76,13 +76,16 @@ async function runMonitor(m) {
 }
 
 let timer = null;
+const runningMon = new Set(); // 모니터 id별 재진입 방지(긴 캡처가 다음 tick과 겹치지 않게)
 export function startCaptureMonitor() {
   // 1분마다 점검, 각 모니터의 주기가 도래하면 실행.
   timer = setInterval(() => {
     const now = Date.now();
     for (const m of load()) {
-      if (!m.enabled) continue;
-      if (!m.lastRun || now - m.lastRun >= m.intervalMin * 60_000) runMonitor(m).catch(() => {});
+      if (!m.enabled || runningMon.has(m.id)) continue;
+      if (m.lastRun && now - m.lastRun < m.intervalMin * 60_000) continue;
+      runningMon.add(m.id);
+      runMonitor(m).catch(() => {}).finally(() => runningMon.delete(m.id));
     }
   }, 60_000);
   timer.unref?.();

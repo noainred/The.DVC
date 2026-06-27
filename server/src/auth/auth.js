@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { authenticateAD } from './ad.js';
 import * as totp from './totp.js';
 
@@ -104,10 +105,8 @@ export function loadUsers() {
 
 function persistUsers() {
   const file = path.join(CONFIG_DIR, 'users.json');
-  fs.mkdirSync(CONFIG_DIR, { recursive: true });
-  fs.writeFileSync(file, JSON.stringify({ users: loadUsers() }, null, 2), { mode: 0o600 });
-  // mode 옵션은 '신규 생성' 시에만 적용되므로, 기존 파일 덮어쓰기에도 0600을 보장한다.
-  try { fs.chmodSync(file, 0o600); } catch { /* */ }
+  // 원자적 쓰기 — 자격증명 파일이 부분기록으로 손상돼 전 사용자가 유실되는 사고를 방지.
+  atomicWriteFileSync(file, JSON.stringify({ users: loadUsers() }, null, 2), { mode: 0o600 });
 }
 
 /**

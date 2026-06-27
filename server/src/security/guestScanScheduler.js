@@ -93,10 +93,16 @@ async function runJob(j) {
 }
 
 let timer = null;
+const runningJobs = new Set(); // 작업 id별 재진입 방지(긴 조사가 다음 tick과 겹치지 않게)
 export function startGuestScanScheduler() {
   timer = setInterval(() => {
     const now = Date.now();
-    for (const j of load()) if (j.enabled && (!j.lastRun || now - j.lastRun >= j.intervalMin * 60_000)) runJob(j).catch(() => {});
+    for (const j of load()) {
+      if (!j.enabled || runningJobs.has(j.id)) continue;
+      if (j.lastRun && now - j.lastRun < j.intervalMin * 60_000) continue;
+      runningJobs.add(j.id);
+      runJob(j).catch(() => {}).finally(() => runningJobs.delete(j.id));
+    }
   }, 60_000);
   timer.unref?.();
   console.log('[gscan] 게스트 조사 스케줄러 시작');

@@ -1,6 +1,18 @@
 {
   "notes": [
     {
+      "version": "2.43.0",
+      "date": "2026-06-27",
+      "title": "전체 소스 감사(69건) + 안전 패치 일괄 적용",
+      "notes": [
+        "전체 소스를 8개 영역으로 다차원 감사하고 각 발견을 적대적 검증해 확정 69건(critical 4·high 21·medium 22·low 22)을 docs/AUDIT-2026-06-27.md로 정리했습니다.",
+        "이번에 적용한 안전 패치(접근/수집을 깨지 않는 것 우선): 로그인 잠금 키를 위조 불가한 실제 peer IP로 변경(X-Forwarded-For 스푸핑으로 계정 잠금 우회 차단), 원격 probe의 선행 대시 인자주입 차단(ping --), Windows 게스트 프로세스 탐침 cmd 인젝션 화이트리스트, vcenters import-file을 설정 디렉터리 .json으로 제한(임의 파일 읽기 차단).",
+        "데이터 무결성: 설정/자격증명 파일(users.json·vcenters·idrac·assignments)을 원자적 쓰기(임시파일+rename)로 변경해 기록 중 크래시 시 손상·전량 유실 방지. iDRAC 'replace-vcenter' 가져오기가 검증 실패한 vCenter의 기존 데이터를 지우던 문제 수정.",
+        "동시성: OS/게스트 조사·네트워크 모니터 스케줄러에 재진입 가드 추가(긴 작업이 다음 주기와 겹쳐 SSH/SOAP 세션 폭증 방지). 권한: 운영 VM Tools 업그레이드·알람 뮤트 라우트에 역할 가드(admin/operator) 추가 — viewer 권한상승 차단.",
+        "보류(접근/업그레이드 흐름에 영향이 커 별도 결정 필요): 전역 TLS 검증 비활성화 범위 축소(C1/C3), 업그레이드 번들 서명(C4), 원격 quick-connect admin 제한, AD/TLS 기본값, WebSocket 자격증명 전송 방식 등 — 보고서에 정리."
+      ]
+    },
+    {
       "version": "2.42.2",
       "date": "2026-06-26",
       "title": "IPMS 설정에 vCenter별 스캔 대역(사전 정리 + 주기 스캔) 통합",
