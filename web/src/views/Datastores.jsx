@@ -1,6 +1,7 @@
 import React from 'react';
 import { usePolling } from '../api.js';
 import { DataTable, UsageCell, Kpi, Loading, ErrorBox, ResultCount } from '../components/ui.jsx';
+import IpmsMatches from '../components/IpmsMatches.jsx';
 
 export default function Datastores({ filters }) {
   const { data, error, loading } = usePolling('/datastores', filters, 15_000);
@@ -38,6 +39,7 @@ export default function Datastores({ filters }) {
       </div>
       <ResultCount total={data.total} label="데이터스토어" filtered={filtered} />
       <DataTable columns={columns} rows={rows} initialSort={{ key: 'usagePct', dir: 'desc' }} />
+      <IpmsMatches filters={filters} />
     </>
   );
 }

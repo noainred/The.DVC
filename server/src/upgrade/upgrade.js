@@ -15,6 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { parseTarGz, parseZip, MAX_BUNDLE_BYTES, MAX_MEMBERS } from './archive.js';
+import { upgradeAgent } from './upgradeAgent.js';
 
 const ARCHIVE_RE = /vmware-portal-(\d+)\.(\d+)\.(\d+)\.(?:tar\.gz|tgz|zip)$/;
 
@@ -280,7 +281,7 @@ function authHeaders(url, token) {
 export async function fetchRemoteVersions(base, { token, timeout = 10_000 } = {}) {
   const url = joinUrl(base, 'versions.json');
   try {
-    const res = await fetch(url, { headers: authHeaders(url, token), signal: AbortSignal.timeout(timeout) });
+    const res = await fetch(url, { dispatcher: upgradeAgent, headers: authHeaders(url, token), signal: AbortSignal.timeout(timeout) });
     if (!res.ok) return [null, `versions.json HTTP ${res.status}`];
     return [await res.json(), null];
   } catch (err) {
@@ -322,7 +323,7 @@ export async function downloadArchive(url, destDir, { token, timeout = 120_000, 
   const name = path.basename(String(url || '').split('?')[0]);
   if (!ARCHIVE_RE.test(name)) return { ok: false, reason: `disallowed archive name: ${name || '(none)'}` };
   try {
-    const res = await fetch(url, { headers: authHeaders(url, token), signal: AbortSignal.timeout(timeout) });
+    const res = await fetch(url, { dispatcher: upgradeAgent, headers: authHeaders(url, token), signal: AbortSignal.timeout(timeout) });
     if (!res.ok) return { ok: false, reason: `download HTTP ${res.status}` };
     const buf = Buffer.from(await res.arrayBuffer());
     if (buf.length > maxBytes) return { ok: false, reason: `download too large (>${maxBytes} bytes)` };

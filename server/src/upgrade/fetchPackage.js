@@ -10,12 +10,13 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { getPackageBaseUrl, getPackageDir } from './packageSettings.js';
+import { upgradeAgent } from './upgradeAgent.js';
 
 const trim = (u) => String(u || '').replace(/\/+$/, '');
 
 export async function fetchRemoteVersions(baseUrl) {
   const base = baseUrl || getPackageBaseUrl();
-  const res = await fetch(`${trim(base)}/versions.json`, { signal: AbortSignal.timeout(20000) });
+  const res = await fetch(`${trim(base)}/versions.json`, { dispatcher: upgradeAgent, signal: AbortSignal.timeout(20000) });
   if (!res.ok) throw new Error(`versions.json HTTP ${res.status}`);
   return res.json();
 }
@@ -51,11 +52,13 @@ export async function downloadPackage({ kind = 'installer', version, baseUrl, di
   if (!fname) return { ok: false, reason: `버전 ${v.version}에 ${kind} 파일이 없습니다.` };
 
   fs.mkdirSync(dir, { recursive: true });
-  const res = await fetch(`${trim(baseUrl)}/${fname}`, { signal: AbortSignal.timeout(600000) });
+  const res = await fetch(`${trim(baseUrl)}/${fname}`, { dispatcher: upgradeAgent, signal: AbortSignal.timeout(600000) });
   if (!res.ok) return { ok: false, reason: `다운로드 실패 HTTP ${res.status}` };
   const buf = Buffer.from(await res.arrayBuffer());
   const got = crypto.createHash('sha256').update(buf).digest('hex');
   if (sha && got !== sha) return { ok: false, reason: '체크섬 불일치 — 파일 손상/변조 가능' };
+  // versions.json은 검증 TLS로 받으므로 sha가 있으면 신뢰 가능한 무결성 검사다. 없으면 경고.
+  if (!sha) console.warn(`[upgrade] ${fname}에 sha256이 없어 무결성 검증을 건너뜁니다(versions.json에 ${k.sha} 추가 권장).`);
 
   const dest = path.join(dir, fname);
   fs.writeFileSync(dest, buf);

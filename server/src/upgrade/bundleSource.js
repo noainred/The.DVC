@@ -8,6 +8,7 @@
 import fs from 'node:fs';
 import { findNewerArchive, checkRemote, vstr } from './upgrade.js';
 import { currentVersion } from '../config.js';
+import { upgradeAgent } from './upgradeAgent.js';
 
 const cmp3 = (a, b) => { for (let i = 0; i < 3; i++) { if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) - (b[i] || 0); } return 0; };
 
@@ -29,6 +30,7 @@ export async function resolveBundleBytes(settings) {
     const info = await checkRemote(s.remoteBase, '0.0.0', { token: s.token, timeout: 15_000 });
     if (info.ok && info.downloadUrl) {
       const res = await fetch(info.downloadUrl, {
+        dispatcher: upgradeAgent,
         headers: s.token ? { Authorization: `Bearer ${s.token}` } : {},
         signal: AbortSignal.timeout(180_000),
       });

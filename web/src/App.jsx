@@ -310,7 +310,7 @@ function Portal({ user, onLogout, settingsOwners }) {
                 <input type="checkbox" checked={qNotes} onChange={(e) => setQNotes(e.target.checked)} /> 메모 포함
               </label>
             )}
-            {showTextSearch && (tab === 'vms' || tab === 'networks') && (
+            {showTextSearch && ['vms', 'networks', 'hosts', 'datastores'].includes(tab) && (
               <label className="flex gap" style={{ alignItems: 'center', fontSize: 12, whiteSpace: 'nowrap', cursor: 'pointer' }}
                 title="체크하면 IP로 검색할 때 IPMS(IP 스캔) 자료의 해당 대역 IP도 함께 보여줍니다. (vCenter가 모르는 스캔 IP 포함)">
                 <input type="checkbox" checked={qIpms} onChange={(e) => setQIpms(e.target.checked)} /> IPMS 포함
