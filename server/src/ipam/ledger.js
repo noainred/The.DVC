@@ -6,11 +6,16 @@
 import { getIgnoreMatcher, getClassifier, settingsRev } from './settings.js';
 import { getAnnotations, annotationsRev } from './annotations.js';
 import { scanResultList, getIpHistoryMap, scanRev } from './scanStore.js';
+import { getOverrides, overridesRev } from './overrides.js';
 
-// buildIpamRows 결과 메모이즈 — 같은 스냅샷·스코프·설정/주석/스캔 리비전이면 재계산하지 않는다.
+// buildIpamRows 결과 메모이즈 — 같은 스냅샷·스코프·설정/주석/스캔/override 리비전이면 재계산하지 않는다.
 // (API·서브넷대장·xlsx·CSV·syncLedger가 같은 입력으로 여러 번 호출 → 중복 계산 제거)
 const _ipamCache = new Map(); // key -> rows결과
-const _ipamKey = (snap, vcenterId) => `${snap?.generatedAt || ''}|${vcenterId || ''}|s${settingsRev()}|a${annotationsRev()}|n${scanRev()}`;
+const _ipamKey = (snap, vcenterId) => `${snap?.generatedAt || ''}|${vcenterId || ''}|s${settingsRev()}|a${annotationsRev()}|n${scanRev()}|o${overridesRev()}`;
+
+// 자동 발견 출처(discovery)를 사용자 친화 reconcile 상태로 매핑.
+// vcenter=vCenter만 인식 · scan=스캔만 발견(수동) · both=양쪽 · manual=운영자 등록(자동발견 없음)
+const reconcileOf = (discovery) => (discovery === 'both' ? 'both' : discovery === 'scan' ? 'scan' : discovery === 'vcenter' ? 'vcenter' : 'manual');
 
 export function ipToNum(s) {
   const p = String(s || '').split('.').map(Number);
@@ -110,6 +115,47 @@ export function buildIpamRows(snap, vcenterId) {
     const h = histMap[r.ip];
     if (h && r.firstSeen == null) { r.firstSeen = h.firstSeen; r.lastSeen = r.lastSeen || h.lastSeen; r.usageStatus = h.status; }
   }
+
+  // ---- 수동 관리(override) 병합 ----------------------------------------------
+  // 운영자가 IP 단위로 부여한 관리 상태(담당자/라벨/디바이스종류/예약 등)를 행에 입힌다.
+  // override만 있고 vCenter/스캔 어디에도 없는 IP는 'manual' 행으로 추가해(예약/계획 IP) 함께 관리.
+  const overrides = getOverrides();
+  const seenAll = new Set(rows.map((r) => r.ip));
+  for (const [ip, ov] of Object.entries(overrides)) {
+    if (seenAll.has(ip) || ipToNum(ip) == null) continue;
+    if (vcenterId && ov.claimedVcenterId && ov.claimedVcenterId !== vcenterId) continue; // 특정 vCenter에 귀속 예약이면 스코프 존중
+    count.set(ip, (count.get(ip) || 0) + 1);
+    rows.push({
+      ip, ipNum: ipToNum(ip), vcenterId: ov.claimedVcenterId || '', vcenterName: vcName[ov.claimedVcenterId] || '(수동 등록)',
+      ownerType: 'manual', serverType: 'Manual', ownerName: ov.label || ov.hostnameOverride || ip,
+      powerState: '', guestOS: '', osName: '', osVersion: '',
+      hostName: ov.hostnameOverride || '', cluster: '', multiHomed: false, scope: classify(ip),
+      discovery: 'manual', owner: null,
+    });
+  }
+  // 모든 행에 override 필드를 입히고 reconcile 상태를 계산. status:'ignored'면 숨김.
+  const applied = [];
+  for (const r of rows) {
+    const ov = overrides[r.ip];
+    if (ov) {
+      if (ov.status === 'ignored') continue; // 운영자가 명시적으로 숨긴 IP
+      r.mgmtStatus = ov.status || '';
+      r.owner_ = ov.owner || '';
+      r.label = ov.label || '';
+      r.deviceType = ov.deviceType || '';
+      r.note = ov.note || '';
+      r.reservedUntil = ov.reservedUntil || null;
+      r.managed = true;
+      if (ov.hostnameOverride) r.hostName = ov.hostnameOverride;
+      if (ov.label) r.displayName = ov.label;
+    }
+    if (!r.displayName) r.displayName = r.hostName || r.ownerName || r.ip;
+    r.reconcile = reconcileOf(r.discovery);
+    applied.push(r);
+  }
+  rows.length = 0;
+  rows.push(...applied);
+
   for (const r of rows) r.duplicate = count.get(r.ip) > 1;
   rows.sort((a, b) => (a.ipNum ?? Infinity) - (b.ipNum ?? Infinity));
 

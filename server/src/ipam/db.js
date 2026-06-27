@@ -18,12 +18,16 @@ let impl = null;
 let ready = null;
 
 const COLUMNS = ['ip', 'ip_num', 'vcenter_id', 'vcenter_name', 'owner_type', 'server_type', 'owner_name',
-  'power_state', 'guest_os', 'os_name', 'os_version', 'host_name', 'cluster', 'scope', 'multi_homed', 'duplicate', 'updated_at'];
+  'power_state', 'guest_os', 'os_name', 'os_version', 'host_name', 'cluster', 'scope', 'multi_homed', 'duplicate', 'updated_at',
+  // 출처 대조 + 수동 관리(override) 노출 — 외부 프로그램이 vCenter/스캔/수동을 구분하고 관리상태를 읽을 수 있게.
+  'discovery', 'reconcile', 'mgmt_status', 'mgmt_owner', 'label', 'device_type', 'first_seen', 'last_seen', 'usage_status'];
 
 function toRecord(r, updatedAt) {
   return [r.ip, r.ipNum ?? null, r.vcenterId, r.vcenterName, r.ownerType, r.serverType || (r.ownerType === 'host' ? 'BareMetal' : 'VM'), r.ownerName,
     r.powerState || '', r.guestOS || '', r.osName || '', r.osVersion || '', r.hostName || '', r.cluster || '', r.scope || '',
-    r.multiHomed ? 1 : 0, r.duplicate ? 1 : 0, updatedAt];
+    r.multiHomed ? 1 : 0, r.duplicate ? 1 : 0, updatedAt,
+    r.discovery || '', r.reconcile || '', r.mgmtStatus || '', r.owner_ || '', r.label || '', r.deviceType || '',
+    r.firstSeen ? new Date(r.firstSeen).toISOString() : '', r.lastSeen ? new Date(r.lastSeen).toISOString() : '', r.usageStatus || ''];
 }
 
 function initSqlite() {
@@ -59,6 +63,9 @@ function initSqlite() {
     try { db.exec('ALTER TABLE ip_records ADD COLUMN server_type TEXT'); } catch { /* already present */ }
     try { db.exec('ALTER TABLE ip_records ADD COLUMN os_name TEXT'); } catch { /* already present */ }
     try { db.exec('ALTER TABLE ip_records ADD COLUMN os_version TEXT'); } catch { /* already present */ }
+    for (const col of ['discovery', 'reconcile', 'mgmt_status', 'mgmt_owner', 'label', 'device_type', 'first_seen', 'last_seen', 'usage_status']) {
+      try { db.exec(`ALTER TABLE ip_records ADD COLUMN ${col} TEXT`); } catch { /* already present */ }
+    }
     try { fs.chmodSync(DB_PATH, 0o600); } catch { /* best effort */ }
     const del = db.prepare('DELETE FROM ip_records');
     const ins = db.prepare(`INSERT INTO ip_records (${COLUMNS.join(', ')}) VALUES (${COLUMNS.map(() => '?').join(', ')})`);

@@ -12,6 +12,7 @@ import { buildNetmap } from '../ipam/netmap.js';
 import { listVcRanges } from '../ipam/rangeStore.js';
 import { rangeSize } from '../ipam/scan.js';
 import { getAnnotation, setAnnotation } from '../ipam/annotations.js';
+import { getOverride, setOverride, clearOverride, setOverrideBatch, overridesSummary, STATUSES, DEVICE_TYPES } from '../ipam/overrides.js';
 import { getIpHistory, scanResultList, getIpHistoryMap } from '../ipam/scanStore.js';
 import { getClassifier } from '../ipam/settings.js';
 import { buildWorkbook } from '../ipam/excel.js';
@@ -514,6 +515,31 @@ api.get('/tools/ipam/annotation', (req, res) => {
 api.put('/tools/ipam/annotation', (req, res) => {
   const { ip, memo, tags } = req.body || {};
   const r = setAnnotation(ip, { memo, tags }, req.user);
+  res.status(r.ok ? 200 : 400).json(r);
+});
+
+// ---- IP 수동 관리(override) — vCenter/스캔 자동발견과 별개의 운영자 관리상태 -------------
+// 선택지(상태/디바이스종류)와 현재 관리 요약을 함께 내려준다(프론트 폼 구성용).
+api.get('/tools/ipam/manage-meta', (_req, res) => {
+  res.json({ statuses: STATUSES, deviceTypes: DEVICE_TYPES, summary: overridesSummary() });
+});
+// 한 IP의 override 조회.
+api.get('/tools/ipam/ip/:ip', (req, res) => {
+  res.json({ ip: req.params.ip, override: getOverride(req.params.ip) });
+});
+// 한 IP의 override 생성/수정(부분). 변경은 운영자/관리자만.
+api.put('/tools/ipam/ip/:ip', requireRole('admin', 'operator'), (req, res) => {
+  const r = setOverride(req.params.ip, req.body || {}, req.user);
+  res.status(r.ok ? 200 : 400).json(r);
+});
+// 한 IP의 override 삭제(자동발견 상태로 되돌림).
+api.delete('/tools/ipam/ip/:ip', requireRole('admin', 'operator'), (req, res) => {
+  res.json(clearOverride(req.params.ip));
+});
+// 여러 IP 일괄 관리(예: 한 대역 전체를 'reserved'로). body: { ips:[...], ...fields }.
+api.post('/tools/ipam/bulk', requireRole('admin', 'operator'), (req, res) => {
+  const { ips, ...fields } = req.body || {};
+  const r = setOverrideBatch(ips, fields, req.user);
   res.status(r.ok ? 200 : 400).json(r);
 });
 api.get('/tools/ipam.xlsx', async (req, res) => {

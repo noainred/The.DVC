@@ -15,6 +15,19 @@ import { isStopped } from './security/emergencyStop.js';
 // 사이트 위임 vCenter가 이 시간 이상 push가 없으면 'stale'로 표시(데이터는 계속 서빙).
 const SITE_STALE_MS = Number(process.env.SITE_INVENTORY_STALE_MS) || 300_000;
 
+// IP 대장의 '내용' 지문(djb2). generatedAt 같은 비본질 변화는 제외하고 외부 DB에 반영할
+// 실제 변동(IP·소유자·전원·관리상태 등)만 감지해 불필요한 SQLite 재기록을 막는다.
+function ledgerSignature(rows) {
+  let h = 5381;
+  const mix = (s) => { const str = String(s ?? ''); for (let i = 0; i < str.length; i++) h = (((h << 5) + h) ^ str.charCodeAt(i)) >>> 0; };
+  mix(rows.length);
+  for (const r of rows) {
+    mix(r.ip); mix('|'); mix(r.ownerName); mix('|'); mix(r.powerState); mix('|');
+    mix(r.mgmtStatus); mix('|'); mix(r.usageStatus); mix('|'); mix(r.duplicate ? 1 : 0); mix(';');
+  }
+  return h;
+}
+
 // 등록된 iDRAC 서버 수(OME 자동발견 엔트리 제외). best-effort.
 function idracRegisteredCount() {
   try { return loadIdracRegistry().filter((s) => s.type !== 'ome').length; } catch { return 0; }
@@ -195,8 +208,16 @@ class Store {
 
   // Export the current IP inventory to the shareable SQLite ledger (best-effort,
   // non-blocking) so other programs can read CONFIG_DIR/ipam.db.
+  // 폴링마다 generatedAt이 바뀌어도 IP 내용이 동일하면 DELETE+INSERT(디스크 fsync)를 건너뛴다
+  // — 30개·고RTT 확장 시 매 주기 수천 행 재기록으로 이벤트 루프가 막히는 것을 방지(성능 설계).
   syncLedger() {
-    try { syncLedger(buildIpamRows(this.snapshot).rows); } catch { /* best effort */ }
+    try {
+      const { rows } = buildIpamRows(this.snapshot);
+      const sig = ledgerSignature(rows);
+      if (sig === this._lastLedgerSig) return; // 내용 변동 없음 → 쓰기 생략
+      this._lastLedgerSig = sig;
+      syncLedger(rows);
+    } catch { /* best effort */ }
   }
 
   start() {

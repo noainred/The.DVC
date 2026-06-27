@@ -11,12 +11,29 @@ import { IdracDetailModal } from './IdracAdmin.jsx';
 import VmProvision from './VmProvision.jsx';
 
 // IP 확인 출처 배지: vCenter 인식 / Ping(TCP)스캔 / 둘 다
-const DISCOVERY = { vcenter: ['vCenter', 'blue'], scan: ['Ping스캔', 'teal'], both: ['vCenter+스캔', 'green'] };
+const DISCOVERY = { vcenter: ['vCenter', 'blue'], scan: ['Ping스캔', 'teal'], both: ['vCenter+스캔', 'green'], manual: ['수동등록', 'purple'] };
 function DiscoveryBadge({ d }) {
   const m = DISCOVERY[d];
   if (!m) return <span className="muted">—</span>;
-  return <span className={`badge ${m[1]}`} title={d === 'both' ? 'vCenter 인벤토리 + 능동 스캔 양쪽에서 확인' : d === 'scan' ? '능동 스캔(Ping/TCP)으로만 확인' : 'vCenter 인벤토리에서 확인'}>{m[0]}</span>;
+  const tip = d === 'both' ? 'vCenter 인벤토리 + 능동 스캔 양쪽에서 확인' : d === 'scan' ? '능동 스캔(Ping/TCP)으로만 확인'
+    : d === 'manual' ? '운영자가 직접 등록한 IP(자동 발견 없음)' : 'vCenter 인벤토리에서 확인';
+  return <span className={`badge ${m[1]}`} title={tip}>{m[0]}</span>;
 }
+
+// IP 수동 관리상태(override) 라벨/색 — 백엔드 overrides.js STATUSES와 일치.
+const MGMT = {
+  active: ['사용중(확정)', 'green'], reserved: ['예약', 'blue'], deprecated: ['폐기예정', 'gray'],
+  dhcp: ['DHCP', 'amber'], static: ['고정할당', 'teal'], ignored: ['숨김', 'gray'],
+};
+function MgmtBadge({ s }) {
+  const m = MGMT[s];
+  if (!m) return null;
+  return <span className={`badge ${m[1]}`} title="운영자가 지정한 IP 관리상태">{m[0]}</span>;
+}
+const DEVTYPE_LABEL = {
+  vm: 'VM', host: 'ESXi', switch: '스위치', router: '라우터', firewall: '방화벽', storage: '스토리지',
+  idrac: 'iDRAC', printer: '프린터', server: '서버', loadbalancer: 'LB', appliance: '어플라이언스', other: '기타',
+};
 
 const TOOLS = [
   { k: 'aisearch', icon: '🔎', label: 'AI 검색 (자연어)', desc: '자연어로 VM/호스트/IP 검색 · 로컬 LLM' },
@@ -278,7 +295,8 @@ function AiSearch() {
 }
 
 function Ipam({ scope, onScope }) {
-  const { loading, data, error } = useTool('/tools/ipam', scope ? { vcenterId: scope } : {});
+  const [reload, setReload] = useState(0);
+  const { loading, data, error } = useTool('/tools/ipam', { ...(scope ? { vcenterId: scope } : {}), _r: reload });
   const [q, setQ] = useState('');
   const [sel, setSel] = useState(null);
   const [db, setDb] = useState(null);
@@ -291,7 +309,11 @@ function Ipam({ scope, onScope }) {
   const [base, setBase] = useState('');
   const [sheet, setSheet] = useState(null);
   const [stFilter, setStFilter] = useState(''); // '' = 전체 | used | multihomed | duplicate | empty
+  const [reconFilter, setReconFilter] = useState(''); // '' | vcenter | scan | both | manual | managed
+  const [editOv, setEditOv] = useState(null); // IP 관리상태(override) 편집 대상 row
+  const [canManage, setCanManage] = useState(false); // operator/admin → 관리상태 편집 가능
   useEffect(() => { fetchJson('/admin/ipam/db-info').then(setDb).catch(() => setDb(null)); }, []);
+  useEffect(() => { fetchJson('/auth/me').then((r) => setCanManage(['admin', 'operator'].includes(r.user?.role))).catch(() => {}); }, []);
 
   const sp = scope ? `?vcenterId=${encodeURIComponent(scope)}` : '';
   const pickBase = async (b, vc = scope) => { setBase(b); setSheet(await fetchJson(`/tools/ipam/sheet?base=${b}${vc ? `&vcenterId=${encodeURIComponent(vc)}` : ''}`).catch(() => null)); };
@@ -330,16 +352,26 @@ function Ipam({ scope, onScope }) {
   const ROWBG = { used: 'rgba(34,197,94,.12)', multihomed: 'rgba(59,130,246,.14)', duplicate: 'rgba(239,68,68,.14)', network: 'rgba(148,163,184,.14)', released: 'rgba(245,158,11,.13)', scanned: 'rgba(20,184,166,.14)', empty: 'transparent' };
   const STLAB = { used: '사용', multihomed: '멀티홈', duplicate: '중복', network: 'Network ID', released: '해제(이력)', scanned: '스캔 확인', empty: '' };
 
+  // reconcile(출처 대조) 집계 — vCenter 수집 IP와 스캔/수동 IP를 한눈에 대조.
+  const recon = { vcenter: 0, scan: 0, both: 0, manual: 0, managed: 0 };
+  for (const r of data.rows) {
+    if (recon[r.reconcile] !== undefined) recon[r.reconcile]++;
+    if (r.managed) recon.managed++;
+  }
+
   const term = q.trim().toLowerCase();
   const rows = data.rows.filter((r) => {
     if (rowFilter === 'duplicate' && !r.duplicate) return false;
     if (rowFilter === 'multihomed' && !r.multiHomed) return false;
     if (rowFilter === 'public' && r.scope !== 'public') return false;
     if (rowFilter === 'private' && r.scope !== 'private') return false;
-    if (term && !(r.ip.includes(term) || (r.ownerName || '').toLowerCase().includes(term) || (r.hostName || '').toLowerCase().includes(term))) return false;
+    if (reconFilter === 'managed' && !r.managed) return false;
+    if (reconFilter && reconFilter !== 'managed' && r.reconcile !== reconFilter) return false;
+    if (term && !(r.ip.includes(term) || (r.ownerName || '').toLowerCase().includes(term) || (r.hostName || '').toLowerCase().includes(term) || (r.label || '').toLowerCase().includes(term) || (r.owner_ || '').toLowerCase().includes(term))) return false;
     return true;
   });
   const toggleRowFilter = (k) => { setRowFilter((cur) => (cur === k ? '' : k)); setView('list'); };
+  const toggleRecon = (k) => { setReconFilter((cur) => (cur === k ? '' : k)); setView('list'); };
 
   const downloadCsv = async () => {
     const res = await fetch(`/api/tools/ipam.csv${scope ? `?vcenterId=${encodeURIComponent(scope)}` : ''}`,
@@ -366,7 +398,15 @@ function Ipam({ scope, onScope }) {
     { key: 'vcenterName', label: '센터(vCenter)' },
     { key: 'serverType', label: '서버종류', sortValue: (r) => r.serverType || '', render: (r) => <span className={`badge ${r.serverType === 'BareMetal' ? 'amber' : r.serverType === 'Scanned' ? 'teal' : 'blue'}`} title={r.serverType === 'Scanned' ? 'vCenter가 모르는 IP를 능동 스캔으로 확인' : undefined}>{r.serverType === 'BareMetal' ? '베어메탈' : r.serverType === 'Scanned' ? '🛰 스캔 확인' : 'VM'}</span> },
     { key: 'discovery', label: '확인 방식', sortValue: (r) => r.discovery || '', render: (r) => <DiscoveryBadge d={r.discovery} /> },
-    { key: 'ownerName', label: '소유 자원', render: (r) => (r.owner ? <button className="cell-link" onClick={() => setSel({ ownerType: r.ownerType, owner: r.owner })}>{r.ownerName}</button> : <span>{r.ownerName}{(r.services || []).length ? <span className="muted" style={{ fontSize: 11 }}> · {(r.services || []).join(',')}</span> : ''}</span>) },
+    { key: 'mgmt', label: '관리상태', sortValue: (r) => r.mgmtStatus || (r.managed ? 'zz' : 'zzz'), render: (r) => (
+      <span className="flex gap" style={{ alignItems: 'center', gap: 5 }}>
+        {r.mgmtStatus ? <MgmtBadge s={r.mgmtStatus} /> : <span className="muted" style={{ fontSize: 11 }}>—</span>}
+        {r.deviceType && <span className="badge gray" style={{ fontSize: 10 }}>{DEVTYPE_LABEL[r.deviceType] || r.deviceType}</span>}
+        {r.reservedUntil && <span className="muted" style={{ fontSize: 10 }} title={`예약 만료: ${new Date(r.reservedUntil).toLocaleString()}`}>⏳</span>}
+        {canManage && <button className="tab" style={{ padding: '1px 7px', fontSize: 11 }} title="IP 관리상태 편집(담당자·예약·디바이스 종류 등)" onClick={() => setEditOv(r)}>{r.managed ? '✎' : '+'}</button>}
+      </span>
+    ) },
+    { key: 'ownerName', label: '소유 자원', sortValue: (r) => r.displayName || r.ownerName || '', render: (r) => (r.owner ? <button className="cell-link" onClick={() => setSel({ ownerType: r.ownerType, owner: r.owner })}>{r.label || r.ownerName}</button> : <span>{r.label || r.ownerName}{r.owner_ ? <span className="muted" style={{ fontSize: 11 }}> · 👤{r.owner_}</span> : ''}{(r.services || []).length ? <span className="muted" style={{ fontSize: 11 }}> · {(r.services || []).join(',')}</span> : ''}</span>) },
     { key: 'powerState', label: '전원', render: (r) => <StateBadge state={r.powerState} /> },
     { key: 'osName', label: 'OS 종류', sortValue: (r) => r.osName || '', render: (r) => r.osName || <span className="muted">—</span> },
     { key: 'osVersion', label: 'OS 버전', sortValue: (r) => r.osVersion || '', render: (r) => r.osVersion || <span className="muted">—</span> },
@@ -512,7 +552,20 @@ function Ipam({ scope, onScope }) {
         </>
       ) : (
         <>
-          <ResultCount total={data.rows.length} shown={rows.length} label="IP" filtered={!!term} />
+          {/* 출처 대조(reconcile) 필터 — vCenter 수집 IP와 스캔/수동 IP를 분리해 본다 */}
+          <div className="flex gap wrap" style={{ marginBottom: 8, alignItems: 'center' }}>
+            <span className="muted" style={{ fontSize: 12 }}>출처 대조</span>
+            {[['', `전체 (${data.rows.length})`, 'gray'],
+              ['vcenter', `vCenter만 (${recon.vcenter})`, 'blue'],
+              ['both', `vCenter+스캔 (${recon.both})`, 'green'],
+              ['scan', `스캔만(수동확인) (${recon.scan})`, 'teal'],
+              ['manual', `수동등록 (${recon.manual})`, 'purple'],
+              ['managed', `관리상태 지정됨 (${recon.managed})`, 'amber']].map(([k, label]) => (
+              <button key={k} className={reconFilter === k ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '5px 11px', fontSize: 12 }} onClick={() => k ? toggleRecon(k) : setReconFilter('')}>{label}</button>
+            ))}
+            {canManage && <button className="logout-btn" style={{ flex: 'none', padding: '5px 11px', fontSize: 12 }} title="수동으로 IP를 등록하거나 한 대역을 일괄 관리(예약 등)" onClick={() => setEditOv({ ip: '', __new: true })}>＋ IP 수동 등록 / 일괄 관리</button>}
+          </div>
+          <ResultCount total={data.rows.length} shown={rows.length} label="IP" filtered={!!term || !!reconFilter} />
           <DataTable columns={cols} rows={rows} initialSort={{ key: 'ip', dir: 'asc' }} />
         </>
       )}
@@ -526,6 +579,7 @@ function Ipam({ scope, onScope }) {
       {ipms && <IpmsSettings onClose={() => setIpms(false)} />}
       {scanOpen && <IpScanSettings onClose={() => setScanOpen(false)} />}
       {editMemo && <MemoEditor init={editMemo} onClose={() => setEditMemo(null)} onSaved={() => { setEditMemo(null); pickBase(base); }} />}
+      {editOv && <OverrideEditor row={editOv} vcenters={data.byVcenter} onClose={() => setEditOv(null)} onSaved={() => { setEditOv(null); setReload((n) => n + 1); }} />}
       {histIp && <IpHistoryModal row={histIp} scope={scope} onClose={() => setHistIp(null)} />}
       {scanStatusOpen && <ScanStatusModal onClose={() => setScanStatusOpen(false)} />}
     </>
@@ -948,6 +1002,121 @@ function MemoEditor({ init, onClose, onSaved }) {
           <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} disabled={busy} onClick={save}>{busy ? '저장 중…' : '저장'}</button>
           <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={onClose}>취소</button>
         </div>
+      </div>
+    </Modal>
+  );
+}
+
+/**
+ * IP 수동 관리(override) 편집기 — vCenter/스캔으로 자동 발견되는 정보와 별개로, 운영자가
+ * IP 단위로 관리상태(예약/폐기/고정 등)·담당자·라벨·디바이스 종류·예약 만료·vCenter 귀속을
+ * 지정한다. 신규(빈 IP)면 IP 직접 입력 + 콤마/줄바꿈으로 여러 IP 일괄 적용도 가능.
+ */
+function OverrideEditor({ row, vcenters = [], onClose, onSaved }) {
+  const isNew = !!row.__new;
+  const [ip, setIp] = useState(row.ip || '');
+  const [meta, setMeta] = useState(null);
+  const [status, setStatus] = useState(row.mgmtStatus || '');
+  const [owner, setOwner] = useState(row.owner_ || '');
+  const [label, setLabel] = useState(row.label || '');
+  const [deviceType, setDeviceType] = useState(row.deviceType || '');
+  const [hostnameOverride, setHostnameOverride] = useState((row.managed && row.hostName) || '');
+  const [claimedVcenterId, setClaimedVcenterId] = useState(row.vcenterId || '');
+  const [reservedUntil, setReservedUntil] = useState(row.reservedUntil ? String(row.reservedUntil).slice(0, 10) : '');
+  const [note, setNote] = useState(row.note || '');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  useEffect(() => { fetchJson('/tools/ipam/manage-meta').then(setMeta).catch(() => setMeta({ statuses: Object.keys(MGMT), deviceTypes: Object.keys(DEVTYPE_LABEL) })); }, []);
+  // 기존 IP면 서버에서 현재 override를 한 번 더 정확히 불러와 폼을 채운다(목록값 보강).
+  useEffect(() => {
+    if (isNew || !row.ip) return;
+    fetchJson(`/tools/ipam/ip/${encodeURIComponent(row.ip)}`).then((r) => {
+      const o = r.override; if (!o) return;
+      setStatus(o.status || ''); setOwner(o.owner || ''); setLabel(o.label || '');
+      setDeviceType(o.deviceType || ''); setHostnameOverride(o.hostnameOverride || '');
+      setClaimedVcenterId(o.claimedVcenterId || ''); setNote(o.note || '');
+      setReservedUntil(o.reservedUntil ? String(o.reservedUntil).slice(0, 10) : '');
+    }).catch(() => {});
+  }, [row.ip, isNew]);
+
+  const ipList = String(ip).split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
+  const bulk = ipList.length > 1;
+  const fields = { status, owner, label, deviceType, hostnameOverride, claimedVcenterId, note, reservedUntil: reservedUntil || null };
+  const save = async () => {
+    if (!ipList.length) { setErr('IP를 입력하세요.'); return; }
+    setBusy(true); setErr(null);
+    let r;
+    if (bulk) r = await postJson('/tools/ipam/bulk', { ips: ipList, ...fields }).catch((e) => ({ ok: false, reason: e.message }));
+    else r = await putJson(`/tools/ipam/ip/${encodeURIComponent(ipList[0])}`, fields).catch((e) => ({ ok: false, reason: e.message }));
+    setBusy(false);
+    if (r.ok) onSaved(); else setErr(r.reason || '저장 실패');
+  };
+  const remove = async () => {
+    if (!ipList.length || bulk) return;
+    setBusy(true); setErr(null);
+    const r = await fetch(`/api/tools/ipam/ip/${encodeURIComponent(ipList[0])}`, { method: 'DELETE', headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {} }).then((x) => x.json()).catch((e) => ({ ok: false, reason: e.message }));
+    setBusy(false);
+    if (r.ok) onSaved(); else setErr(r.reason || '삭제 실패');
+  };
+
+  const L = { fontWeight: 600, paddingTop: 9, whiteSpace: 'nowrap' };
+  const statuses = meta?.statuses || Object.keys(MGMT);
+  const devTypes = meta?.deviceTypes || Object.keys(DEVTYPE_LABEL);
+  return (
+    <Modal title={isNew ? 'IP 수동 등록 / 일괄 관리' : `IP 관리상태 — ${row.ip}`} onClose={onClose} width={760} resizable minWidth={520} minHeight={440}>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 12 }}>
+        vCenter 수집·스캔으로 자동 채워지는 값과 <b>별개로</b> 운영자가 직접 지정하는 관리 정보입니다(수집 갱신에도 유지).
+        {isNew && ' 여러 IP를 콤마/줄바꿈으로 넣으면 한 번에 같은 상태로 일괄 적용됩니다.'}
+      </div>
+      {err && <div className="login-error" style={{ marginBottom: 8 }}>{err}</div>}
+      <div style={{ display: 'grid', gridTemplateColumns: 'max-content 1fr', columnGap: 16, rowGap: 14, alignItems: 'start' }}>
+        <label style={L}>IP{isNew && <span className="muted" style={{ fontWeight: 400, fontSize: 11 }}> (여러 개 가능)</span>}</label>
+        {isNew
+          ? <textarea className="input" value={ip} onChange={(e) => setIp(e.target.value)} placeholder="예: 10.20.0.5  또는  10.20.0.5, 10.20.0.6" style={{ resize: 'vertical', minHeight: 56, width: '100%', boxSizing: 'border-box' }} />
+          : <input className="input" value={ip} disabled style={{ width: '100%', boxSizing: 'border-box', opacity: .8 }} />}
+
+        <label style={L}>관리상태</label>
+        <select className="select" value={status} onChange={(e) => setStatus(e.target.value)} style={{ width: '100%' }}>
+          <option value="">— 미지정 —</option>
+          {statuses.map((s) => <option key={s} value={s}>{(MGMT[s]?.[0]) || s}</option>)}
+        </select>
+
+        <label style={L}>디바이스 종류</label>
+        <select className="select" value={deviceType} onChange={(e) => setDeviceType(e.target.value)} style={{ width: '100%' }}>
+          <option value="">— 미지정 —</option>
+          {devTypes.map((d) => <option key={d} value={d}>{DEVTYPE_LABEL[d] || d}</option>)}
+        </select>
+
+        <label style={L}>담당자/팀</label>
+        <input className="input" value={owner} onChange={(e) => setOwner(e.target.value)} placeholder="예: 인프라팀 / 홍길동" style={{ width: '100%', boxSizing: 'border-box' }} />
+
+        <label style={L}>라벨(표시명)</label>
+        <input className="input" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="자동 호스트명 대신 표시할 이름" style={{ width: '100%', boxSizing: 'border-box' }} />
+
+        <label style={L}>호스트명 override</label>
+        <input className="input" value={hostnameOverride} onChange={(e) => setHostnameOverride(e.target.value)} placeholder="자동 수집 호스트명을 덮어쓸 이름(선택)" style={{ width: '100%', boxSizing: 'border-box' }} />
+
+        <label style={L}>vCenter 귀속</label>
+        <select className="select" value={claimedVcenterId} onChange={(e) => setClaimedVcenterId(e.target.value)} style={{ width: '100%' }}>
+          <option value="">— 없음(네트워크) —</option>
+          {vcenters.filter((v) => v.vcenterId).map((v) => <option key={v.vcenterId} value={v.vcenterId}>{v.vcenterName}</option>)}
+        </select>
+
+        <label style={L}>예약 만료일</label>
+        <input className="input" type="date" value={reservedUntil} onChange={(e) => setReservedUntil(e.target.value)} style={{ width: 200, boxSizing: 'border-box' }} />
+
+        <label style={L}>비고</label>
+        <textarea className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="상태 관련 한 줄 메모(상세 메모/태그는 목록의 '메모·태그' 사용)" style={{ resize: 'vertical', minHeight: 56, width: '100%', boxSizing: 'border-box' }} />
+
+        <div />
+        <div className="flex gap" style={{ marginTop: 4, alignItems: 'center' }}>
+          <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} disabled={busy} onClick={save}>{busy ? '저장 중…' : (bulk ? `일괄 적용 (${ipList.length}개)` : '저장')}</button>
+          <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={onClose}>취소</button>
+          {!isNew && row.managed && <button className="logout-btn" style={{ padding: '9px 14px', marginLeft: 'auto', color: 'var(--red)' }} disabled={busy} onClick={remove} title="관리상태 삭제(자동 발견 상태로 되돌림)">관리상태 삭제</button>}
+        </div>
+      </div>
+      <div className="muted" style={{ fontSize: 11, marginTop: 12, lineHeight: 1.7 }}>
+        ※ 관리상태를 <b>숨김</b>으로 두면 대장 목록에서 해당 IP가 제외됩니다(오탐/사용 안 함 IP 정리용).
       </div>
     </Modal>
   );
