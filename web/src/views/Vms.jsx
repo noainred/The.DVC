@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { usePolling, fetchJson } from '../api.js';
+import React, { useState } from 'react';
+import { usePolling } from '../api.js';
 import { DataTable, UsageCell, StateBadge, Loading, ErrorBox, ResultCount, Modal, VmIpPing } from '../components/ui.jsx';
+import IpmsMatches from '../components/IpmsMatches.jsx';
 import { VmMetricButton } from '../components/VmMetrics.jsx';
 import { VmConsoleButton } from '../components/VmConsole.jsx';
 import { VmRemoteButton } from '../components/VmRemote.jsx';
@@ -91,23 +92,6 @@ export default function Vms({ filters }) {
   if (gpuOnly) params.gpu = '1';
   if (gpuType) { params.gpu = '1'; params.gpuType = gpuType; }
   const { data, error, loading } = usePolling('/vms', params, 15_000);
-
-  // IPMS 포함: IP 검색 시 IPMS(IP 관리대장=스캔 포함) 자료에서 해당 대역 IP를 함께 보여준다.
-  const qIpms = !!filters?.qIpms;
-  const qStr = (filters?.q || '').trim();
-  const [ipmsRows, setIpmsRows] = useState([]);
-  useEffect(() => {
-    if (!qIpms || !qStr) { setIpmsRows([]); return undefined; }
-    let on = true;
-    const p = filters?.vcenterId ? { vcenterId: filters.vcenterId } : {};
-    fetchJson('/tools/ipam', p).then((r) => {
-      if (!on) return;
-      const ql = qStr.toLowerCase();
-      setIpmsRows((r.rows || []).filter((row) => String(row.ip || '').toLowerCase().includes(ql)).slice(0, 2000));
-    }).catch(() => { if (on) setIpmsRows([]); });
-    return () => { on = false; };
-  }, [qIpms, qStr, filters?.vcenterId]);
-
   if (loading && !data) return <Loading />;
   if (error) return <ErrorBox message={error} />;
   const rows = data?.items || [];
@@ -173,36 +157,8 @@ export default function Vms({ filters }) {
       <ResultCount total={data.total} shown={rows.length} label="VM" filtered={Object.keys(filters || {}).length > 0 || gpuOnly || !!gpuType} />
       <DataTable columns={columns} rows={rows} initialSort={{ key: 'cpuUsagePct', dir: 'desc' }} />
 
-      {qIpms && qStr && <IpmsMatches rows={ipmsRows} q={qStr} />}
+      <IpmsMatches filters={filters} />
       {selected && <VmDetail vm={selected} onClose={() => setSelected(null)} />}
     </>
-  );
-}
-
-const IPMS_DISC = { vcenter: ['blue', 'vCenter'], scan: ['teal', '스캔'], both: ['green', 'vC+스캔'] };
-
-/** IP 검색어가 가리키는 대역의 IPMS(IP 관리대장=vCenter 인식+능동 스캔) 자료를 표로 보여준다. */
-function IpmsMatches({ rows, q }) {
-  const fmtT = (t) => (t ? new Date(t).toLocaleString('ko-KR') : '—');
-  const cols = [
-    { key: 'ip', label: 'IP', sortValue: (r) => r.ipNum ?? 0, render: (r) => <b>{r.ip}</b> },
-    { key: 'ownerName', label: '호스트 / 소유자', render: (r) => r.ownerName || r.hostName || '—' },
-    { key: 'os', label: 'OS / 서비스', sortValue: (r) => r.osName || '', render: (r) => (r.serverType === 'Scanned'
-      ? <span className="muted">{(r.services || []).join(', ') || '—'}</span>
-      : ([r.osName, r.osVersion].filter(Boolean).join(' ') || r.guestOS || '—')) },
-    { key: 'status', label: '상태', render: (r) => (r.usageStatus
-      ? <StateBadge state={r.usageStatus === 'up' ? 'POWERED_ON' : 'POWERED_OFF'} />
-      : (r.powerState ? <StateBadge state={r.powerState} /> : '—')) },
-    { key: 'discovery', label: '확인출처', sortValue: (r) => r.discovery || '', render: (r) => { const d = IPMS_DISC[r.discovery] || ['gray', r.discovery || '—']; return <span className={`badge ${d[0]}`}>{d[1]}</span>; } },
-    { key: 'vcenterName', label: 'vCenter', render: (r) => <span className="muted">{r.vcenterName || '(스캔)'}</span> },
-    { key: 'lastSeen', label: '최근 관측', align: 'right', sortValue: (r) => r.lastSeen || 0, render: (r) => <span className="muted" style={{ fontSize: 12 }}>{fmtT(r.lastSeen)}</span> },
-  ];
-  return (
-    <div style={{ marginTop: 18 }}>
-      <div className="section-title">🛰️ IPMS 스캔 IP <span className="muted" style={{ fontWeight: 400, fontSize: 13 }}>— “{q}” 대역 {rows.length}개 (IP 관리대장 · vCenter 인식 + 능동 스캔)</span></div>
-      {rows.length === 0
-        ? <div className="card"><span className="muted">해당 검색어와 일치하는 IPMS 자료가 없습니다. (특수 기능 → 센터별 IP 관리대장에서 스캔 설정/실행)</span></div>
-        : <DataTable columns={cols} rows={rows} initialSort={{ key: 'ip', dir: 'asc' }} />}
-    </div>
   );
 }
