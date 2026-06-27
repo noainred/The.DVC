@@ -151,11 +151,13 @@ function Portal({ user, onLogout, settingsOwners }) {
   const vcenterId = cur.vcenterId || '';
   const q = cur.q || '';
   const qNotes = !!cur.qNotes; // 메모 포함 검색 (기본 꺼짐)
+  const qIpms = !!cur.qIpms;   // IPMS(IP 스캔) 자료 포함 — IP 검색 시 해당 대역 스캔 IP도 표시
   const patchFilter = (patch, t = tab) => setTabFilters((m) => ({ ...m, [t]: { ...(m[t] || {}), ...patch } }));
   const setRegion = (v) => patchFilter({ region: v, vcenterId: '' });
   const setVcenterId = (v) => patchFilter({ vcenterId: v });
   const setQ = (v) => patchFilter({ q: v });
   const setQNotes = (v) => patchFilter({ qNotes: v });
+  const setQIpms = (v) => patchFilter({ qIpms: v });
 
   // Keep the URL hash in sync with the active tab, and follow back/forward.
   const setTab = (id) => { setTabState(id); window.location.hash = `#/${id}`; };
@@ -205,11 +207,11 @@ function Portal({ user, onLogout, settingsOwners }) {
     const f = {};
     if (vcenterId) f.vcenterId = vcenterId;
     else if (region) f.region = region;
-    if (q) { f.q = q; if (qNotes) f.notes = '1'; }
+    if (q) { f.q = q; if (qNotes) f.notes = '1'; if (qIpms) f.qIpms = '1'; }
     const mf = MENU_FILTERS[tab];
     if (mf && menuFilter[tab]) f[mf.key] = menuFilter[tab];
     return f;
-  }, [vcenterId, region, q, qNotes, tab, menuFilter]);
+  }, [vcenterId, region, q, qNotes, qIpms, tab, menuFilter]);
 
   // Scope (region/vCenter) without the free-text query, used by Explore.
   const scope = useMemo(() => {
@@ -310,8 +312,14 @@ function Portal({ user, onLogout, settingsOwners }) {
                 <input type="checkbox" checked={qNotes} onChange={(e) => setQNotes(e.target.checked)} /> 메모 포함
               </label>
             )}
+            {showTextSearch && tab === 'vms' && (
+              <label className="flex gap" style={{ alignItems: 'center', fontSize: 12, whiteSpace: 'nowrap', cursor: 'pointer' }}
+                title="체크하면 IP로 검색할 때 IPMS(IP 스캔) 자료의 해당 대역 IP도 함께 보여줍니다. (vCenter가 모르는 스캔 IP 포함)">
+                <input type="checkbox" checked={qIpms} onChange={(e) => setQIpms(e.target.checked)} /> IPMS 포함
+              </label>
+            )}
             {(region || vcenterId || q || menuFilter[tab]) && (
-              <button className="tab" onClick={() => { patchFilter({ region: '', vcenterId: '', q: '', qNotes: false }); setMenuFilter((m) => ({ ...m, [tab]: '' })); }}>필터 초기화</button>
+              <button className="tab" onClick={() => { patchFilter({ region: '', vcenterId: '', q: '', qNotes: false, qIpms: false }); setMenuFilter((m) => ({ ...m, [tab]: '' })); }}>필터 초기화</button>
             )}
           </div>
         )}
