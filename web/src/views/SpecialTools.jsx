@@ -8,6 +8,7 @@ import { ServiceCheck, NetworkCheck, VmwareConfigBackup } from './DavinciChecks.
 import NetTrafficAnalysis from './NetTrafficAnalysis.jsx';
 import DeepSearch from './DeepSearch.jsx';
 import { IdracDetailModal } from './IdracAdmin.jsx';
+import VmProvision from './VmProvision.jsx';
 
 // IP 확인 출처 배지: vCenter 인식 / Ping(TCP)스캔 / 둘 다
 const DISCOVERY = { vcenter: ['vCenter', 'blue'], scan: ['Ping스캔', 'teal'], both: ['vCenter+스캔', 'green'] };
@@ -54,6 +55,7 @@ const TOOLS = [
   { k: 'backup', icon: '💾', label: '백업', desc: '설정 백업/복원 (준비 중)', disabled: true, comingSoon: true },
   { k: 'massdeploy', icon: '🚀', label: '대용량 배포', desc: '대량 배포 (준비 중)', disabled: true, comingSoon: true },
   { k: 'shutdown', icon: '🛑', label: '긴급중단', desc: '모든 수집 즉시 정지 — 관리자 2명 OTP(2인 승인) 필요', danger: true },
+  { k: 'vmprovision', icon: '🆕', label: 'VM 생성', desc: '템플릿/사양 지정으로 신규 VM 생성 (관리자)', adminOnly: true },
 ];
 
 const tb = (gb) => (gb >= 1024 ? `${(gb / 1024).toFixed(1)} TB` : `${gb} GB`);
@@ -78,6 +80,7 @@ const toolFromHash = () => {
 export default function SpecialTools() {
   const [tool, setTool] = useState(() => toolFromHash());
   const [menuQ, setMenuQ] = useState(''); // 메뉴 빠른 찾기
+  const [isAdmin, setIsAdmin] = useState(false); // 관리자 전용 도구(VM 생성 등) 노출 제어
   const openTool = (k) => { setTool(k); window.location.hash = k ? `#/tools/${k}` : '#/tools'; };
   // 뒤로/앞으로 가기 및 외부에서 바로가기로 진입할 때 동기화.
   useEffect(() => {
@@ -85,11 +88,13 @@ export default function SpecialTools() {
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
-  if (tool) return <ToolPanel tool={tool} onBack={() => openTool(null)} />;
+  useEffect(() => { fetchJson('/auth/me').then((r) => setIsAdmin(r.user?.role === 'admin')).catch(() => {}); }, []);
+  if (tool) return <ToolPanel tool={tool} isAdmin={isAdmin} onBack={() => openTool(null)} />;
+  const base = TOOLS.filter((t) => !t.adminOnly || isAdmin); // 관리자 전용은 admin에게만 노출
   const ql = menuQ.trim().toLowerCase();
   const shown = ql
-    ? TOOLS.filter((t) => t.label.toLowerCase().startsWith(ql) || t.label.toLowerCase().includes(ql) || (t.desc || '').toLowerCase().includes(ql))
-    : TOOLS;
+    ? base.filter((t) => t.label.toLowerCase().startsWith(ql) || t.label.toLowerCase().includes(ql) || (t.desc || '').toLowerCase().includes(ql))
+    : base;
   return (
     <>
       <div className="section-title" style={{ marginTop: 0 }}>🛠️ 특수 기능</div>
@@ -119,7 +124,7 @@ export default function SpecialTools() {
   );
 }
 
-function ToolPanel({ tool, onBack }) {
+function ToolPanel({ tool, onBack, isAdmin }) {
   const meta = TOOLS.find((t) => t.k === tool);
   const [scope, setScope] = useState('');
   const { data: vcList } = usePolling('/vcenters', {}, 60_000);
@@ -173,6 +178,7 @@ function ToolPanel({ tool, onBack }) {
       {tool === 'vmware-backup' && <VmwareConfigBackup />}
       {tool === 'portaldb' && <PortalDb />}
       {tool === 'shutdown' && <Shutdown />}
+      {tool === 'vmprovision' && (isAdmin ? <VmProvision /> : <div className="card"><span className="muted">관리자 전용 기능입니다.</span></div>)}
     </>
   );
 }
