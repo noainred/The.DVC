@@ -70,6 +70,20 @@ test('정책 ignored: 대역 자동발견 행 제거, 단 override 있는 IP는 
   ov.clearOverride('10.24.0.9'); rp.deletePolicy(p.policy.id);
 });
 
+test('정책 ignored는 override 행에 어떤 필드도 누설하지 않음(완전 숨김)', () => {
+  // ignored /24 + 그 안 IP에 owner만 override → 정책의 label/owner/id가 절대 새지 않아야 함
+  const p = rp.setPolicy({ spec: '10.30.0.0/24', status: 'ignored', label: 'SECRET-LAN', owner: 'HiddenTeam' }, { username: 'op' });
+  ov.setOverride('10.30.0.7', { owner: '담당' }, { username: 'op' });
+  const r = row(snapWith('p11', [['10.30.0.7']]), '10.30.0.7');
+  assert.ok(r, 'override 있는 IP는 유지');
+  assert.equal(r.appliedBy, 'override');
+  assert.equal(r.rangePolicyId, undefined);     // 정책 id 누설 금지
+  assert.equal(r.rangePolicySpec, undefined);   // 정책 spec 누설 금지
+  assert.notEqual(r.label, 'SECRET-LAN');       // 정책 label 누설 금지
+  assert.equal(r.owner_, '담당');                // override owner만
+  ov.clearOverride('10.30.0.7'); rp.deletePolicy(p.policy.id);
+});
+
 test('reconcile/conflict는 정책 적용돼도 불변', () => {
   const p = rp.setPolicy({ spec: '10.25.0.0/24', status: 'reserved' }, { username: 'op' });
   // 교차 vCenter 충돌 IP

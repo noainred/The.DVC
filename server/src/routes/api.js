@@ -571,20 +571,20 @@ api.get('/tools/ipam/policies/preview', (req, res) => {
 // 정책 생성. body: { spec, status?, priority?, claimedVcenterId?, owner?, label?, deviceType?, note?, enabled? }.
 api.post('/tools/ipam/policies', requireRole('admin', 'operator'), (req, res) => {
   const r = setPolicy(req.body || {}, req.user);
-  if (r.ok) logAudit({ user: req.user?.username, action: '대역정책 저장', target: `정책 ${r.policy.spec}`, detail: JSON.stringify(r.policy).slice(0, 500) });
+  if (r.ok) { logAudit({ user: req.user?.username, action: '대역정책 저장', target: `정책 ${r.policy.spec}`, detail: JSON.stringify(r.policy).slice(0, 800) }); try { store.syncLedger(); } catch { /* */ } }
   res.status(r.ok ? 200 : 400).json(r);
 });
 // 정책 수정(부분). :id.
 api.put('/tools/ipam/policies/:id', requireRole('admin', 'operator'), (req, res) => {
   const r = setPolicy({ ...(req.body || {}), id: req.params.id }, req.user);
-  if (r.ok) logAudit({ user: req.user?.username, action: '대역정책 수정', target: `정책 ${r.policy.spec}`, detail: JSON.stringify(r.policy).slice(0, 500) });
+  if (r.ok) { logAudit({ user: req.user?.username, action: '대역정책 수정', target: `정책 ${r.policy.spec}`, detail: JSON.stringify(r.policy).slice(0, 800) }); try { store.syncLedger(); } catch { /* */ } }
   res.status(r.ok ? 200 : 400).json(r);
 });
 // 정책 삭제. :id. (적용 IP는 자동발견 상태로 복귀)
 api.delete('/tools/ipam/policies/:id', requireRole('admin', 'operator'), (req, res) => {
   const pol = getPolicy(req.params.id);
   const r = deletePolicy(req.params.id);
-  if (r.ok) logAudit({ user: req.user?.username, action: '대역정책 삭제', target: `정책 ${pol?.spec || req.params.id}` });
+  if (r.ok) { logAudit({ user: req.user?.username, action: '대역정책 삭제', target: `정책 ${pol?.spec || req.params.id}`, detail: pol ? JSON.stringify(pol).slice(0, 800) : '' }); try { store.syncLedger(); } catch { /* */ } }
   res.status(r.ok ? 200 : 400).json(r);
 });
 api.get('/tools/ipam.xlsx', async (req, res) => {
@@ -602,12 +602,12 @@ api.get('/tools/ipam.xlsx', async (req, res) => {
 api.get('/tools/ipam.csv', (req, res) => {
   const { rows } = buildIpamRows(store.get(), req.query.vcenterId);
   const head = ['ip', 'vcenter_id', 'vcenter_name', 'owner_type', 'owner_name', 'power_state', 'guest_os', 'host_name', 'cluster', 'scope', 'multi_homed', 'duplicate',
-    'discovery', 'reconcile', 'mgmt_status', 'mgmt_owner', 'label', 'device_type', 'reserved_until', 'first_seen', 'last_seen', 'usage_status'];
+    'discovery', 'reconcile', 'mgmt_status', 'mgmt_owner', 'label', 'device_type', 'applied_by', 'range_policy_spec', 'reserved_until', 'first_seen', 'last_seen', 'usage_status'];
   const esc = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   const iso = (t) => (t ? new Date(t).toISOString() : '');
   const lines = [head.join(',')];
   for (const r of rows) lines.push([r.ip, r.vcenterId, r.vcenterName, r.ownerType, r.ownerName, r.powerState, r.guestOS, r.hostName, r.cluster, r.scope, r.multiHomed ? 1 : 0, r.duplicate ? 1 : 0,
-    r.discovery || '', r.reconcile || '', r.mgmtStatus || '', r.owner_ || '', r.label || '', r.deviceType || '', iso(r.reservedUntil), iso(r.firstSeen), iso(r.lastSeen), r.usageStatus || ''].map(esc).join(','));
+    r.discovery || '', r.reconcile || '', r.mgmtStatus || '', r.owner_ || '', r.label || '', r.deviceType || '', r.appliedBy || '', r.rangePolicySpec || '', iso(r.reservedUntil), iso(r.firstSeen), iso(r.lastSeen), r.usageStatus || ''].map(esc).join(','));
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="ipam-${new Date().toISOString().slice(0, 10)}.csv"`);
   res.send('﻿' + lines.join('\r\n')); // BOM for Excel
