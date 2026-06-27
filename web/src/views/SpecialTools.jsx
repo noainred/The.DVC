@@ -353,7 +353,7 @@ function Ipam({ scope, onScope }) {
   const STLAB = { used: '사용', multihomed: '멀티홈', duplicate: '중복', network: 'Network ID', released: '해제(이력)', scanned: '스캔 확인', empty: '' };
 
   // reconcile(출처 대조) 집계 — vCenter 수집 IP와 스캔/수동 IP를 한눈에 대조.
-  const recon = { vcenter: 0, scan: 0, both: 0, manual: 0, managed: 0 };
+  const recon = { vcenter: 0, scan: 0, both: 0, manual: 0, conflict: 0, managed: 0 };
   for (const r of data.rows) {
     if (recon[r.reconcile] !== undefined) recon[r.reconcile]++;
     if (r.managed) recon.managed++;
@@ -367,7 +367,7 @@ function Ipam({ scope, onScope }) {
     if (rowFilter === 'private' && r.scope !== 'private') return false;
     if (reconFilter === 'managed' && !r.managed) return false;
     if (reconFilter && reconFilter !== 'managed' && r.reconcile !== reconFilter) return false;
-    if (term && !(r.ip.includes(term) || (r.ownerName || '').toLowerCase().includes(term) || (r.hostName || '').toLowerCase().includes(term) || (r.label || '').toLowerCase().includes(term) || (r.owner_ || '').toLowerCase().includes(term))) return false;
+    if (term && !(r.ip.includes(term) || (r.ownerName || '').toLowerCase().includes(term) || (r.hostName || '').toLowerCase().includes(term) || (r.label || '').toLowerCase().includes(term) || (r.owner_ || '').toLowerCase().includes(term) || (r.note || '').toLowerCase().includes(term))) return false;
     return true;
   });
   const toggleRowFilter = (k) => { setRowFilter((cur) => (cur === k ? '' : k)); setView('list'); };
@@ -388,8 +388,10 @@ function Ipam({ scope, onScope }) {
     { key: 'ip', label: 'IP 주소', sortValue: (r) => r.ipNum ?? Infinity, render: (r) => (
       <button style={link} onClick={() => setSel(r)}>
         <b>{r.ip}</b>
+        {r.reconcile === 'conflict' && <span className="badge red" style={{ marginLeft: 6 }} title={`교차 vCenter 충돌 — 같은 IP를 주장: ${(r.conflictVcenters || []).join(', ')}`}>⚠ 충돌</span>}
         {r.duplicate && <span className="badge red" style={{ marginLeft: 6 }}>중복</span>}
         {r.multiHomed && <span className="badge amber" style={{ marginLeft: 4 }}>멀티홈</span>}
+        {r.reservedExpired && <span className="badge amber" style={{ marginLeft: 4 }} title="예약 만료일이 지났습니다">⏳ 예약만료</span>}
       </button>
     ) },
     { key: 'scope', label: '분류', sortValue: (r) => r.scope || '', render: (r) => (
@@ -426,6 +428,11 @@ function Ipam({ scope, onScope }) {
           meta={rowFilter === 'duplicate' ? '중복만 보기 ✓' : '클릭하여 중복만'} active={rowFilter === 'duplicate'} onClick={() => toggleRowFilter('duplicate')} />
         <Card label="멀티홈 IP" value={data.multiHomed}
           meta={rowFilter === 'multihomed' ? '멀티홈만 보기 ✓' : '클릭하여 멀티홈만'} active={rowFilter === 'multihomed'} onClick={() => toggleRowFilter('multihomed')} />
+        <Card label="교차 vCenter 충돌" value={recon.conflict} accent={recon.conflict ? 'var(--red)' : undefined}
+          meta={reconFilter === 'conflict' ? '충돌만 보기 ✓' : (recon.conflict ? '클릭: 충돌 IP만' : '둘 이상 vCenter가 같은 IP 주장')}
+          active={reconFilter === 'conflict'} onClick={() => toggleRecon('conflict')} />
+        <Card label="관리상태 지정" value={recon.managed} meta={reconFilter === 'managed' ? '관리 IP만 보기 ✓' : '운영자 수동 관리 IP'}
+          active={reconFilter === 'managed'} onClick={() => toggleRecon('managed')} />
         {db && <Card label="공유 DB 레코드" value={db.count.toLocaleString()} meta={db.kind.toUpperCase()} />}
       </div>
       {rowFilter && view === 'list' && (
@@ -560,6 +567,7 @@ function Ipam({ scope, onScope }) {
               ['both', `vCenter+스캔 (${recon.both})`, 'green'],
               ['scan', `스캔만(수동확인) (${recon.scan})`, 'teal'],
               ['manual', `수동등록 (${recon.manual})`, 'purple'],
+              ['conflict', `⚠ 충돌 (${recon.conflict})`, 'red'],
               ['managed', `관리상태 지정됨 (${recon.managed})`, 'amber']].map(([k, label]) => (
               <button key={k} className={reconFilter === k ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '5px 11px', fontSize: 12 }} onClick={() => k ? toggleRecon(k) : setReconFilter('')}>{label}</button>
             ))}

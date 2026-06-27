@@ -82,3 +82,36 @@ test('ledger: status=ignored 인 IP는 대장에서 숨김', () => {
   assert.equal(rows.find((r) => r.ip === '10.88.0.30'), undefined);
   ov.clearOverride('10.88.0.30');
 });
+
+test('overrides: 잘못된 IP 키는 거부(오염 차단)', () => {
+  assert.equal(ov.setOverride('not-an-ip', { status: 'reserved' }).ok, false);
+  assert.equal(ov.setOverride('333.0.0.1', { status: 'reserved' }).ok, false);
+  assert.equal(ov.setOverride('__proto__', { status: 'reserved' }).ok, false);
+  // batch는 유효 IP만 남기고 무효는 버린다
+  const r = ov.setOverrideBatch(['10.5.5.5', 'bad', '999.1.1.1', '10.5.5.6'], { status: 'reserved' }, { username: 'op' });
+  assert.equal(r.ok, true);
+  assert.equal(r.changed, 2);
+  ov.clearOverride('10.5.5.5'); ov.clearOverride('10.5.5.6');
+  assert.equal(ov.getOverride('bad'), null);
+});
+
+test('ledger: 같은 IP를 둘 이상 vCenter가 주장하면 reconcile=conflict', () => {
+  const snap = {
+    generatedAt: 'tc', vcenters: [{ id: 'vc1', name: 'SEOUL' }, { id: 'vc2', name: 'TOKYO' }],
+    vms: [
+      { name: 'a', vcenterId: 'vc1', ipAddress: '10.90.0.7', powerState: 'POWERED_ON' },
+      { name: 'b', vcenterId: 'vc2', ipAddress: '10.90.0.7', powerState: 'POWERED_ON' },
+      { name: 'c', vcenterId: 'vc1', ipAddress: '10.90.0.8', powerState: 'POWERED_ON' },
+    ],
+    hosts: [],
+  };
+  const { rows, conflicts, reconcile } = ledger.buildIpamRows(snap);
+  const conflictRows = rows.filter((r) => r.ip === '10.90.0.7');
+  assert.ok(conflictRows.length >= 1);
+  assert.ok(conflictRows.every((r) => r.reconcile === 'conflict'));
+  assert.ok(conflictRows[0].conflictVcenters.includes('vc1') && conflictRows[0].conflictVcenters.includes('vc2'));
+  // 단일 vCenter IP는 conflict 아님
+  assert.equal(rows.find((r) => r.ip === '10.90.0.8').reconcile, 'vcenter');
+  assert.ok(conflicts >= 1);
+  assert.equal(reconcile.conflict, conflicts);
+});

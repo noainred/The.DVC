@@ -17,6 +17,8 @@ const SERVICE = {
 export const portService = (p) => SERVICE[p] || String(p);
 
 const ipToNum = (s) => { const p = String(s).split('.').map(Number); return p.length === 4 && p.every((n) => n >= 0 && n <= 255) ? (((p[0] << 24) >>> 0) + (p[1] << 16) + (p[2] << 8) + p[3]) : null; };
+/** 유효한 IPv4 점표기인지(키 오염·잘못된 입력 차단용 공용 검증기). */
+export const isIpv4 = (s) => ipToNum(s) != null;
 const numToIp = (n) => [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].join('.');
 
 export const RANGE_CAP = 4096; // spec 1개당 확장 IP 안전 상한

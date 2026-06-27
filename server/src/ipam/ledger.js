@@ -133,6 +133,16 @@ export function buildIpamRows(snap, vcenterId) {
       discovery: 'manual', owner: null,
     });
   }
+  // 교차 vCenter 충돌 탐지 — '전체' 스냅샷 기준(스코프와 무관)으로 한 IP를 둘 이상 vCenter가
+  // 주장하면 conflict. (스코프 뷰에서도 충돌을 놓치지 않게 full snapshot으로 계산)
+  const vcByIp = new Map();
+  for (const vm of (snap.vms || [])) {
+    const ips = vm.ipAddresses?.length ? vm.ipAddresses : (vm.ipAddress ? [vm.ipAddress] : []);
+    for (const ip of ips) { if (!vcByIp.has(ip)) vcByIp.set(ip, new Set()); if (vm.vcenterId) vcByIp.get(ip).add(vm.vcenterId); }
+  }
+  for (const h of (snap.hosts || [])) { if (ipToNum(h.name) == null) continue; if (!vcByIp.has(h.name)) vcByIp.set(h.name, new Set()); if (h.vcenterId) vcByIp.get(h.name).add(h.vcenterId); }
+  const now = Date.now();
+
   // 모든 행에 override 필드를 입히고 reconcile 상태를 계산. status:'ignored'면 숨김.
   const applied = [];
   for (const r of rows) {
@@ -146,11 +156,14 @@ export function buildIpamRows(snap, vcenterId) {
       r.note = ov.note || '';
       r.reservedUntil = ov.reservedUntil || null;
       r.managed = true;
+      if (ov.reservedUntil && Date.parse(ov.reservedUntil) < now) r.reservedExpired = true; // 예약 만료 표시
       if (ov.hostnameOverride) r.hostName = ov.hostnameOverride;
       if (ov.label) r.displayName = ov.label;
     }
     if (!r.displayName) r.displayName = r.hostName || r.ownerName || r.ip;
-    r.reconcile = reconcileOf(r.discovery);
+    const vcs = vcByIp.get(r.ip);
+    if (vcs && vcs.size > 1) { r.reconcile = 'conflict'; r.conflictVcenters = [...vcs]; }
+    else r.reconcile = reconcileOf(r.discovery);
     applied.push(r);
   }
   rows.length = 0;
@@ -161,12 +174,25 @@ export function buildIpamRows(snap, vcenterId) {
 
   const byVc = {};
   for (const r of rows) byVc[r.vcenterId] = (byVc[r.vcenterId] || 0) + 1;
+  // reconcile(출처 대조) 분포 + 관리상태 분포 — 대시보드 요약 카드용.
+  const reconCounts = { vcenter: 0, scan: 0, both: 0, manual: 0, conflict: 0 };
+  const mgmtCounts = {};
+  let managedN = 0;
+  for (const r of rows) {
+    if (reconCounts[r.reconcile] !== undefined) reconCounts[r.reconcile]++;
+    if (r.managed) managedN++;
+    if (r.mgmtStatus) mgmtCounts[r.mgmtStatus] = (mgmtCounts[r.mgmtStatus] || 0) + 1;
+  }
   const out = {
     total: rows.length,
     multiHomed: rows.filter((r) => r.multiHomed).length,
     duplicateIps: [...count.values()].filter((c) => c > 1).length,
     publicIps: rows.filter((r) => r.scope === 'public').length,
     privateIps: rows.filter((r) => r.scope === 'private').length,
+    conflicts: reconCounts.conflict,
+    reconcile: reconCounts,
+    managed: managedN,
+    mgmtStatus: mgmtCounts,
     byVcenter: Object.entries(byVc).map(([id, c]) => ({ vcenterId: id, vcenterName: vcName[id] || (id || '네트워크 스캔'), scanned: !id, count: c })).sort((a, b) => b.count - a.count),
     rows,
   };

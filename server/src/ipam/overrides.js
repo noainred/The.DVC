@@ -20,8 +20,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { isIpv4 } from './scan.js';
 
 const FILE = path.join(config.configDir, 'ipam-overrides.json');
+const MAX_BATCH = 10_000; // 일괄 적용 IP 상한(대량 입력 DoS/오염 방지)
 
 export const STATUSES = ['active', 'reserved', 'deprecated', 'dhcp', 'static', 'ignored'];
 export const DEVICE_TYPES = ['vm', 'host', 'switch', 'router', 'firewall', 'storage', 'idrac', 'printer', 'server', 'loadbalancer', 'appliance', 'other'];
@@ -83,7 +85,7 @@ function persist(data) {
  */
 export function setOverride(ip, partial = {}, user) {
   const key = String(ip || '').trim();
-  if (!key) return { ok: false, reason: 'IP가 필요합니다.' };
+  if (!isIpv4(key)) return { ok: false, reason: '유효한 IPv4 주소가 아닙니다.' };
   const data = load();
   const prev = data[key] || {};
   const next = { ...prev, ...clean(partial) };
@@ -112,8 +114,10 @@ export function clearOverride(ip) {
  * ips: string[] | "a,b\nc" — 반환 { ok, changed }.
  */
 export function setOverrideBatch(ips, partial = {}, user) {
-  const list = (Array.isArray(ips) ? ips : String(ips || '').split(/[\s,]+/)).map((s) => String(s).trim()).filter(Boolean);
-  if (!list.length) return { ok: false, reason: '대상 IP가 없습니다.' };
+  const raw = (Array.isArray(ips) ? ips : String(ips || '').split(/[\s,]+/)).map((s) => String(s).trim()).filter(Boolean);
+  const list = [...new Set(raw.filter(isIpv4))]; // 유효 IPv4만, 중복 제거
+  if (!list.length) return { ok: false, reason: '유효한 대상 IP가 없습니다.' };
+  if (list.length > MAX_BATCH) return { ok: false, reason: `한 번에 ${MAX_BATCH}개까지만 일괄 적용할 수 있습니다.` };
   const data = load();
   const patch = clean(partial);
   const now = new Date().toISOString();

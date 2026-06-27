@@ -13,6 +13,7 @@ import { listVcRanges } from '../ipam/rangeStore.js';
 import { rangeSize } from '../ipam/scan.js';
 import { getAnnotation, setAnnotation } from '../ipam/annotations.js';
 import { getOverride, setOverride, clearOverride, setOverrideBatch, overridesSummary, STATUSES, DEVICE_TYPES } from '../ipam/overrides.js';
+import { logAudit } from '../audit.js';
 import { getIpHistory, scanResultList, getIpHistoryMap } from '../ipam/scanStore.js';
 import { getClassifier } from '../ipam/settings.js';
 import { buildWorkbook } from '../ipam/excel.js';
@@ -530,16 +531,20 @@ api.get('/tools/ipam/ip/:ip', (req, res) => {
 // 한 IP의 override 생성/수정(부분). 변경은 운영자/관리자만.
 api.put('/tools/ipam/ip/:ip', requireRole('admin', 'operator'), (req, res) => {
   const r = setOverride(req.params.ip, req.body || {}, req.user);
+  if (r.ok) logAudit({ user: req.user?.username, action: 'IP 관리상태 저장', target: `IP ${req.params.ip}`, detail: JSON.stringify(r.override || {}).slice(0, 500) });
   res.status(r.ok ? 200 : 400).json(r);
 });
 // 한 IP의 override 삭제(자동발견 상태로 되돌림).
 api.delete('/tools/ipam/ip/:ip', requireRole('admin', 'operator'), (req, res) => {
-  res.json(clearOverride(req.params.ip));
+  const r = clearOverride(req.params.ip);
+  logAudit({ user: req.user?.username, action: 'IP 관리상태 삭제', target: `IP ${req.params.ip}` });
+  res.json(r);
 });
 // 여러 IP 일괄 관리(예: 한 대역 전체를 'reserved'로). body: { ips:[...], ...fields }.
 api.post('/tools/ipam/bulk', requireRole('admin', 'operator'), (req, res) => {
   const { ips, ...fields } = req.body || {};
   const r = setOverrideBatch(ips, fields, req.user);
+  if (r.ok) logAudit({ user: req.user?.username, action: 'IP 관리상태 일괄 적용', target: `${r.changed}개 IP`, detail: JSON.stringify(fields).slice(0, 500) });
   res.status(r.ok ? 200 : 400).json(r);
 });
 api.get('/tools/ipam.xlsx', async (req, res) => {
@@ -556,10 +561,13 @@ api.get('/tools/ipam.xlsx', async (req, res) => {
 // CSV export of the IP ledger for sharing with other tools/spreadsheets.
 api.get('/tools/ipam.csv', (req, res) => {
   const { rows } = buildIpamRows(store.get(), req.query.vcenterId);
-  const head = ['ip', 'vcenter_id', 'vcenter_name', 'owner_type', 'owner_name', 'power_state', 'guest_os', 'host_name', 'cluster', 'scope', 'multi_homed', 'duplicate'];
+  const head = ['ip', 'vcenter_id', 'vcenter_name', 'owner_type', 'owner_name', 'power_state', 'guest_os', 'host_name', 'cluster', 'scope', 'multi_homed', 'duplicate',
+    'discovery', 'reconcile', 'mgmt_status', 'mgmt_owner', 'label', 'device_type', 'reserved_until', 'first_seen', 'last_seen', 'usage_status'];
   const esc = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const iso = (t) => (t ? new Date(t).toISOString() : '');
   const lines = [head.join(',')];
-  for (const r of rows) lines.push([r.ip, r.vcenterId, r.vcenterName, r.ownerType, r.ownerName, r.powerState, r.guestOS, r.hostName, r.cluster, r.scope, r.multiHomed ? 1 : 0, r.duplicate ? 1 : 0].map(esc).join(','));
+  for (const r of rows) lines.push([r.ip, r.vcenterId, r.vcenterName, r.ownerType, r.ownerName, r.powerState, r.guestOS, r.hostName, r.cluster, r.scope, r.multiHomed ? 1 : 0, r.duplicate ? 1 : 0,
+    r.discovery || '', r.reconcile || '', r.mgmtStatus || '', r.owner_ || '', r.label || '', r.deviceType || '', iso(r.reservedUntil), iso(r.firstSeen), iso(r.lastSeen), r.usageStatus || ''].map(esc).join(','));
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="ipam-${new Date().toISOString().slice(0, 10)}.csv"`);
   res.send('﻿' + lines.join('\r\n')); // BOM for Excel

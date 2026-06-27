@@ -23,7 +23,8 @@ function ledgerSignature(rows) {
   mix(rows.length);
   for (const r of rows) {
     mix(r.ip); mix('|'); mix(r.ownerName); mix('|'); mix(r.powerState); mix('|');
-    mix(r.mgmtStatus); mix('|'); mix(r.usageStatus); mix('|'); mix(r.duplicate ? 1 : 0); mix(';');
+    mix(r.mgmtStatus); mix('|'); mix(r.usageStatus); mix('|'); mix(r.duplicate ? 1 : 0); mix('|');
+    mix(r.reconcile); mix(';');
   }
   return h;
 }

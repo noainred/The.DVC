@@ -40,6 +40,8 @@ server/config/packages/
 server/config/packages.json
 server/config/ipam-settings.json
 server/config/ipam-annotations.json
+server/config/ipam-overrides.json
+server/config/ipam-vcenter-ranges.json
 server/config/ipam-scan-agents.json
 server/config/ipam-scan-history.json
 server/config/ipam-scan-results.json
