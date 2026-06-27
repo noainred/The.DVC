@@ -403,6 +403,8 @@ function Ipam({ scope, onScope }) {
     { key: 'mgmt', label: '관리상태', sortValue: (r) => r.mgmtStatus || (r.managed ? 'zz' : 'zzz'), render: (r) => (
       <span className="flex gap" style={{ alignItems: 'center', gap: 5 }}>
         {r.mgmtStatus ? <MgmtBadge s={r.mgmtStatus} /> : <span className="muted" style={{ fontSize: 11 }}>—</span>}
+        {r.appliedBy === 'range-policy' && <span className="badge purple" style={{ fontSize: 9 }} title={`대역 정책 적용: ${r.rangePolicySpec || ''}`}>정책</span>}
+        {r.appliedBy === 'override' && r.managed && <span className="badge teal" style={{ fontSize: 9 }} title="IP 단위 수동 지정">IP수동</span>}
         {r.deviceType && <span className="badge gray" style={{ fontSize: 10 }}>{DEVTYPE_LABEL[r.deviceType] || r.deviceType}</span>}
         {r.reservedUntil && <span className="muted" style={{ fontSize: 10 }} title={`예약 만료: ${new Date(r.reservedUntil).toLocaleString()}`}>⏳</span>}
         {canManage && <button className="tab" style={{ padding: '1px 7px', fontSize: 11 }} title="IP 관리상태 편집(담당자·예약·디바이스 종류 등)" onClick={() => setEditOv(r)}>{r.managed ? '✎' : '+'}</button>}
@@ -458,6 +460,7 @@ function Ipam({ scope, onScope }) {
           <button className={view === 'insights' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setView('insights')} title="유명 IPAM 솔루션 대표 기능 30선을 수집 데이터로 계산">🧠 추천 기능 30선</button>
           <button className={view === 'ranges' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setView('ranges')} title="vCenter별 IP 대역을 저장하고 주기적으로 스캔 + 결과 다운로드">🗂️ 대역·스캔</button>
           <button className={view === 'netmap' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setView('netmap')} title="대역 선택 → OS별·시간대별 사용/미사용 네트워크 맵">🗺️ 네트워크 맵</button>
+          <button className={view === 'policies' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setView('policies')} title="대역(/24 등) 단위로 관리상태(예약·DHCP풀·폐기 등)를 일괄 지정 — IP override보다 낮은 우선순위의 '기본값'">🧩 대역 정책</button>
           {view === 'list' && <SearchBox className="input" style={{ maxWidth: 260 }} placeholder="IP / VM / 호스트 검색" value={q} onChange={setQ} />}
         </div>
         <div className="flex gap">
@@ -473,6 +476,8 @@ function Ipam({ scope, onScope }) {
         <IpamRanges />
       ) : view === 'netmap' ? (
         <IpamNetMap />
+      ) : view === 'policies' ? (
+        <RangePolicies scope={scope} canManage={canManage} vcenters={data.byVcenter} onChanged={() => setReload((n) => n + 1)} />
       ) : view === 'insights' ? (
         <IpamInsights scope={scope} />
       ) : view === 'sheet' ? (
@@ -517,6 +522,14 @@ function Ipam({ scope, onScope }) {
                   ))}
                   <span className="muted" style={{ fontSize: 12, marginLeft: 4 }}>🟩 사용 · 🟦 멀티홈 · 🟥 중복 · 🟦 스캔 확인 · 🟧 해제(이력) · ⬜ 미사용</span>
                 </div>
+                {(sheet.policies || []).length > 0 && (
+                  <div className="flex gap wrap" style={{ marginBottom: 8, alignItems: 'center' }}>
+                    <span className="muted" style={{ fontSize: 12 }}>🧩 이 대역 적용 정책:</span>
+                    {sheet.policies.map((p) => (
+                      <span key={p.id} className="badge purple" style={{ fontSize: 11 }} title={`priority ${p.priority}`}>{p.spec} · {MGMT[p.status]?.[0] || p.status || '필드'}{p.label ? ` (${p.label})` : ''}</span>
+                    ))}
+                  </div>
+                )}
                 <div className="table-wrap" style={{ maxHeight: '62vh' }}>
                   <table>
                     <thead><tr><th>{base}.X</th><th>Purpose</th><th>Hostname</th><th>서버종류</th><th>확인 방식</th><th>OS</th><th>메모(Notes)</th><th>전원</th><th>분류</th><th>상태</th><th>사용이력</th><th>메모 · 태그</th></tr></thead>
@@ -533,7 +546,11 @@ function Ipam({ scope, onScope }) {
                           <td className="muted" style={{ fontSize: 12 }}>{r.notes}</td>
                           <td>{r.power}</td>
                           <td className="muted" style={{ fontSize: 12 }}>{r.scope}</td>
-                          <td className="muted" style={{ fontSize: 12 }}>{r.status === 'released' ? <span className="badge amber">해제</span> : r.status === 'scanned' ? <span className="badge teal" title="vCenter가 모르는 IP를 능동 스캔으로 확인">🛰 스캔 확인</span> : STLAB[r.status]}</td>
+                          <td className="muted" style={{ fontSize: 12 }}>
+                            {r.status === 'released' ? <span className="badge amber">해제</span> : r.status === 'scanned' ? <span className="badge teal" title="vCenter가 모르는 IP를 능동 스캔으로 확인">🛰 스캔 확인</span> : STLAB[r.status]}
+                            {r.mgmtStatus && <MgmtBadge s={r.mgmtStatus} />}
+                            {r.appliedBy === 'range-policy' && <span className="badge purple" style={{ fontSize: 9, marginLeft: 3 }} title={`대역 정책: ${r.rangePolicySpec || ''}`}>정책</span>}
+                          </td>
                           <td style={{ fontSize: 11 }}>
                             {r.usageStatus
                               ? <button className="tab" style={{ padding: '2px 8px', fontSize: 11 }} title={`최초 발견: ${r.firstSeen ? new Date(r.firstSeen).toLocaleString() : '—'}\n마지막 확인: ${r.lastSeen ? new Date(r.lastSeen).toLocaleString() : '—'}\n현재: ${r.usageStatus === 'up' ? '사용 중' : '해제됨'}`}
@@ -1125,6 +1142,179 @@ function OverrideEditor({ row, vcenters = [], onClose, onSaved }) {
       </div>
       <div className="muted" style={{ fontSize: 11, marginTop: 12, lineHeight: 1.7 }}>
         ※ 관리상태를 <b>숨김</b>으로 두면 대장 목록에서 해당 IP가 제외됩니다(오탐/사용 안 함 IP 정리용).
+      </div>
+    </Modal>
+  );
+}
+
+// 대역 spec → IP 개수(미리보기). 백엔드 specToRange와 동일 규칙(클라 즉시 계산).
+function rangeSpecSize(spec) {
+  const s = String(spec || '').trim();
+  const toNum = (x) => { const p = String(x).split('.').map(Number); return p.length === 4 && p.every((n) => Number.isInteger(n) && n >= 0 && n <= 255) ? ((p[0] << 24) >>> 0) + (p[1] << 16) + (p[2] << 8) + p[3] : null; };
+  if (!s) return 0;
+  if (s.includes('/')) { const [b, bits] = s.split('/'); const n = Number(bits); if (toNum(b) == null || !(n >= 8 && n <= 32)) return 0; const sz = 2 ** (32 - n); return n >= 31 ? sz : Math.max(0, sz - 2); }
+  if (s.includes('-')) { const [a, bRaw] = s.split('-').map((x) => x.trim()); const an = toNum(a); let bn = toNum(bRaw); if (bn == null && /^\d{1,3}$/.test(bRaw) && an != null) bn = (an & 0xffffff00) + Number(bRaw); if (an == null || bn == null || bn < an) return 0; return bn - an + 1; }
+  return toNum(s) != null ? 1 : 0;
+}
+
+/**
+ * 대역(subnet/range) 단위 정책 관리 — 한 대역을 통째로 예약/DHCP풀/폐기 등으로 지정한다.
+ * 우선순위: IP 단위 수동(override) > 대역 정책 > 자동발견. 정책은 행을 만들지 않고 오버레이만 한다.
+ */
+function RangePolicies({ scope, canManage, vcenters = [], onChanged }) {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState(null);
+  const [edit, setEdit] = useState(null); // 편집/생성 대상
+  const [busy, setBusy] = useState('');
+  const load = () => fetchJson('/tools/ipam/policies').then(setData).catch((e) => setErr(e.message));
+  useEffect(() => { load(); }, []);
+  const vcName = {};
+  for (const v of vcenters) vcName[v.vcenterId] = v.vcenterName;
+  const remove = async (p) => {
+    if (!window.confirm(`정책 '${p.spec}'을(를) 삭제할까요? 적용 IP(${p.specSize}개)가 자동발견 상태로 복귀합니다.`)) return;
+    setBusy(p.id); setErr(null);
+    const r = await fetch(`/api/tools/ipam/policies/${encodeURIComponent(p.id)}`, { method: 'DELETE', headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {} }).then((x) => x.json()).catch((e) => ({ ok: false, reason: e.message }));
+    setBusy('');
+    if (r.ok) { await load(); onChanged?.(); } else setErr(r.reason || '삭제 실패');
+  };
+  const toggle = async (p) => {
+    setBusy(p.id);
+    const r = await putJson(`/tools/ipam/policies/${encodeURIComponent(p.id)}`, { enabled: !(p.enabled !== false) }).catch((e) => ({ ok: false, reason: e.message }));
+    setBusy('');
+    if (r.ok) { await load(); onChanged?.(); } else setErr(r.reason || '변경 실패');
+  };
+  if (err && !data) return <ErrorBox message={err} />;
+  if (!data) return <Loading />;
+  const policies = [...(data.policies || [])].sort((a, b) => (b.priority - a.priority) || (a.specLo - b.specLo));
+  // 겹침 경고: 같은(또는 교차) 범위를 가진 다른 정책이 있는지(O(M^2), M 작음).
+  const overlaps = (p) => policies.some((q) => q.id !== p.id && q.enabled !== false && p.enabled !== false && p.specLo <= q.specHi && q.specLo <= p.specHi && (!p.claimedVcenterId || !q.claimedVcenterId || p.claimedVcenterId === q.claimedVcenterId));
+  const sm = data.summary || {};
+  return (
+    <>
+      <div className="kpis" style={{ marginBottom: 12 }}>
+        <Card label="정책 수" value={sm.total || 0} meta={`활성 ${sm.enabled || 0}`} />
+        <Card label="커버 IP(합)" value={(sm.coverageIps || 0).toLocaleString()} meta="정책이 덮는 IP 총합" />
+        <Card label="상태 분포" value={Object.keys(sm.byStatus || {}).length} meta={Object.entries(sm.byStatus || {}).map(([k, v]) => `${MGMT[k]?.[0] || k} ${v}`).join(' · ') || '—'} />
+      </div>
+      {err && <div className="login-error" style={{ marginBottom: 8 }}>{err}</div>}
+      <div className="flex between" style={{ marginBottom: 10, alignItems: 'center' }}>
+        <div className="muted" style={{ fontSize: 12 }}>우선순위: <b>IP 수동(override)</b> &gt; <b>대역 정책</b> &gt; 자동발견. 좁은 대역·높은 priority가 겹침 시 우선.</div>
+        {canManage && <button className="login-btn" style={{ flex: 'none', padding: '8px 14px' }} onClick={() => setEdit({ __new: true, priority: 100, enabled: true })}>＋ 새 정책</button>}
+      </div>
+      {policies.length === 0 ? (
+        <div className="card"><span className="muted">등록된 대역 정책이 없습니다. ‘＋ 새 정책’으로 대역(예: 10.0.0.0/24)에 기본 관리상태를 지정하세요.</span></div>
+      ) : (
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>활성</th><th>대역(spec)</th><th>커버 IP</th><th>상태</th><th>vCenter</th><th>우선순위</th><th>담당/라벨</th><th>비고</th><th></th></tr></thead>
+            <tbody>
+              {policies.map((p) => (
+                <tr key={p.id} style={{ opacity: p.enabled === false ? 0.5 : 1 }}>
+                  <td>{canManage
+                    ? <input type="checkbox" checked={p.enabled !== false} disabled={busy === p.id} onChange={() => toggle(p)} title="활성/비활성" />
+                    : (p.enabled !== false ? '✓' : '—')}</td>
+                  <td><b>{p.spec}</b>{overlaps(p) && <span className="badge amber" style={{ marginLeft: 6, fontSize: 10 }} title="다른 정책과 범위가 겹칩니다(좁은 대역·높은 priority 우선)">겹침</span>}</td>
+                  <td className="muted">{(p.specSize || 0).toLocaleString()}</td>
+                  <td>{p.status ? <MgmtBadge s={p.status} /> : <span className="muted">—</span>}{p.status === 'ignored' && <span className="muted" style={{ fontSize: 10 }} title="이 대역 전체가 대장에서 숨겨집니다(개별 override 제외)"> 숨김</span>}</td>
+                  <td className="muted" style={{ fontSize: 12 }}>{p.claimedVcenterId ? (vcName[p.claimedVcenterId] || p.claimedVcenterId) : '전역'}</td>
+                  <td className="muted">{p.priority ?? 100}</td>
+                  <td style={{ fontSize: 12 }}>{p.label || p.owner ? <span>{p.label}{p.owner ? <span className="muted"> · 👤{p.owner}</span> : ''}</span> : <span className="muted">—</span>}</td>
+                  <td className="muted" style={{ fontSize: 12, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={p.note || ''}>{p.note || ''}</td>
+                  <td>{canManage && <span className="flex gap">
+                    <button className="tab" style={{ padding: '2px 8px', fontSize: 11 }} onClick={() => setEdit(p)}>✎</button>
+                    <button className="tab" style={{ padding: '2px 8px', fontSize: 11, color: 'var(--red)' }} disabled={busy === p.id} onClick={() => remove(p)}>삭제</button>
+                  </span>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {edit && <PolicyForm policy={edit} vcenters={vcenters} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); load(); onChanged?.(); }} />}
+    </>
+  );
+}
+
+function PolicyForm({ policy, vcenters = [], onClose, onSaved }) {
+  const isNew = !!policy.__new;
+  const [spec, setSpec] = useState(policy.spec || '');
+  const [status, setStatus] = useState(policy.status || '');
+  const [priority, setPriority] = useState(policy.priority ?? 100);
+  const [claimedVcenterId, setClaimedVcenterId] = useState(policy.claimedVcenterId || '');
+  const [owner, setOwner] = useState(policy.owner || '');
+  const [label, setLabel] = useState(policy.label || '');
+  const [deviceType, setDeviceType] = useState(policy.deviceType || '');
+  const [note, setNote] = useState(policy.note || '');
+  const [enabled, setEnabled] = useState(policy.enabled !== false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const size = rangeSpecSize(spec);
+  const save = async () => {
+    if (size <= 0) { setErr('유효한 대역(CIDR/범위/IP)이 아닙니다.'); return; }
+    setBusy(true); setErr(null);
+    const body = { spec, status, priority: Number(priority), claimedVcenterId, owner, label, deviceType, note, enabled };
+    const r = isNew
+      ? await postJson('/tools/ipam/policies', body).catch((e) => ({ ok: false, reason: e.message }))
+      : await putJson(`/tools/ipam/policies/${encodeURIComponent(policy.id)}`, body).catch((e) => ({ ok: false, reason: e.message }));
+    setBusy(false);
+    if (r.ok) onSaved(); else setErr(r.reason || '저장 실패');
+  };
+  const L = { fontWeight: 600, paddingTop: 9, whiteSpace: 'nowrap' };
+  return (
+    <Modal title={isNew ? '새 대역 정책' : `대역 정책 — ${policy.spec}`} onClose={onClose} width={760} resizable minWidth={520} minHeight={460}>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 12 }}>대역 전체에 적용할 <b>기본 관리상태</b>입니다. 개별 IP를 다르게 두려면 그 IP에 수동(override)을 지정하세요(override 우선).</div>
+      {err && <div className="login-error" style={{ marginBottom: 8 }}>{err}</div>}
+      <div style={{ display: 'grid', gridTemplateColumns: 'max-content 1fr', columnGap: 16, rowGap: 14, alignItems: 'start' }}>
+        <label style={L}>대역(spec)</label>
+        <div>
+          <input className="input" value={spec} onChange={(e) => setSpec(e.target.value)} placeholder="예: 10.0.0.0/24  ·  10.0.0.1-50  ·  10.0.0.5" style={{ width: '100%', boxSizing: 'border-box' }} />
+          <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>{size > 0 ? `≈ ${size.toLocaleString()}개 IP 커버` : <span style={{ color: 'var(--red)' }}>유효한 대역이 아닙니다</span>}</div>
+        </div>
+
+        <label style={L}>관리상태</label>
+        <div>
+          <select className="select" value={status} onChange={(e) => setStatus(e.target.value)} style={{ width: '100%' }}>
+            <option value="">— 미지정(필드만 적용) —</option>
+            {Object.keys(MGMT).map((s) => <option key={s} value={s}>{MGMT[s][0]}</option>)}
+          </select>
+          {status === 'ignored' && <div className="muted" style={{ fontSize: 11, marginTop: 4, color: 'var(--amber,#f59e0b)' }}>⚠ 이 대역 전체가 대장에서 숨겨집니다(개별 IP override 제외). 1024개 이하 대역만 허용됩니다.</div>}
+        </div>
+
+        <label style={L}>우선순위</label>
+        <div className="flex gap" style={{ alignItems: 'center' }}>
+          <input className="input" type="number" min={0} max={1000} value={priority} onChange={(e) => setPriority(e.target.value)} style={{ width: 120 }} />
+          <span className="muted" style={{ fontSize: 11 }}>0~1000 (기본 100). 겹침 시 좁은 대역 우선, 같으면 priority 높은 쪽.</span>
+        </div>
+
+        <label style={L}>vCenter 귀속</label>
+        <select className="select" value={claimedVcenterId} onChange={(e) => setClaimedVcenterId(e.target.value)} style={{ width: '100%' }}>
+          <option value="">전역(모든 vCenter)</option>
+          {vcenters.filter((v) => v.vcenterId).map((v) => <option key={v.vcenterId} value={v.vcenterId}>{v.vcenterName}</option>)}
+        </select>
+
+        <label style={L}>디바이스 종류</label>
+        <select className="select" value={deviceType} onChange={(e) => setDeviceType(e.target.value)} style={{ width: '100%' }}>
+          <option value="">— 미지정 —</option>
+          {Object.keys(DEVTYPE_LABEL).map((d) => <option key={d} value={d}>{DEVTYPE_LABEL[d]}</option>)}
+        </select>
+
+        <label style={L}>담당자/팀</label>
+        <input className="input" value={owner} onChange={(e) => setOwner(e.target.value)} placeholder="예: 인프라팀" style={{ width: '100%', boxSizing: 'border-box' }} />
+
+        <label style={L}>라벨</label>
+        <input className="input" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="예: 사무실 DHCP 풀" style={{ width: '100%', boxSizing: 'border-box' }} />
+
+        <label style={L}>비고</label>
+        <textarea className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="대역 용도/주의사항" style={{ resize: 'vertical', minHeight: 54, width: '100%', boxSizing: 'border-box' }} />
+
+        <label style={L}>활성</label>
+        <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }}><input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} /> 이 정책 적용</label>
+
+        <div />
+        <div className="flex gap" style={{ marginTop: 4 }}>
+          <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} disabled={busy || size <= 0} onClick={save}>{busy ? '저장 중…' : '저장'}</button>
+          <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={onClose}>취소</button>
+        </div>
       </div>
     </Modal>
   );

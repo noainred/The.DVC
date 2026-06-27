@@ -7,11 +7,12 @@ import { getIgnoreMatcher, getClassifier, settingsRev } from './settings.js';
 import { getAnnotations, annotationsRev } from './annotations.js';
 import { scanResultList, getIpHistoryMap, scanRev } from './scanStore.js';
 import { getOverrides, overridesRev } from './overrides.js';
+import { findPolicy, policiesRev, getPolicies } from './rangePolicies.js';
 
-// buildIpamRows 결과 메모이즈 — 같은 스냅샷·스코프·설정/주석/스캔/override 리비전이면 재계산하지 않는다.
+// buildIpamRows 결과 메모이즈 — 같은 스냅샷·스코프·설정/주석/스캔/override/정책 리비전이면 재계산하지 않는다.
 // (API·서브넷대장·xlsx·CSV·syncLedger가 같은 입력으로 여러 번 호출 → 중복 계산 제거)
 const _ipamCache = new Map(); // key -> rows결과
-const _ipamKey = (snap, vcenterId) => `${snap?.generatedAt || ''}|${vcenterId || ''}|s${settingsRev()}|a${annotationsRev()}|n${scanRev()}|o${overridesRev()}`;
+const _ipamKey = (snap, vcenterId) => `${snap?.generatedAt || ''}|${vcenterId || ''}|s${settingsRev()}|a${annotationsRev()}|n${scanRev()}|o${overridesRev()}|p${policiesRev()}`;
 
 // 자동 발견 출처(discovery)를 사용자 친화 reconcile 상태로 매핑.
 // vcenter=vCenter만 인식 · scan=스캔만 발견(수동) · both=양쪽 · manual=운영자 등록(자동발견 없음)
@@ -143,22 +144,36 @@ export function buildIpamRows(snap, vcenterId) {
   for (const h of (snap.hosts || [])) { if (ipToNum(h.name) == null) continue; if (!vcByIp.has(h.name)) vcByIp.set(h.name, new Set()); if (h.vcenterId) vcByIp.get(h.name).add(h.vcenterId); }
   const now = Date.now();
 
-  // 모든 행에 override 필드를 입히고 reconcile 상태를 계산. status:'ignored'면 숨김.
+  // 모든 행에 관리 정보를 입힌다 — 필드별 폭포식: IP override(개별 예외) > 대역 정책(대역 기본값) > 자동발견.
+  // 예: 정책이 /24를 'dhcp'로 두고, 그 안 한 IP에 owner만 override → 결과 status='dhcp'(정책 보충)+owner=override값.
   const applied = [];
   for (const r of rows) {
     const ov = overrides[r.ip];
-    if (ov) {
-      if (ov.status === 'ignored') continue; // 운영자가 명시적으로 숨긴 IP
-      r.mgmtStatus = ov.status || '';
-      r.owner_ = ov.owner || '';
-      r.label = ov.label || '';
-      r.deviceType = ov.deviceType || '';
-      r.note = ov.note || '';
-      r.reservedUntil = ov.reservedUntil || null;
+    if (ov && ov.status === 'ignored') continue;        // 게이트: override 명시 숨김(최우선)
+    const rp = findPolicy(r.ipNum, vcenterId);           // 적용 대역 정책(없으면 null)
+    if (!ov && rp && rp.status === 'ignored') continue;  // 게이트: 정책 대역 숨김(override 없을 때만 — override 있으면 행 유지)
+
+    if (ov || rp) {
+      // 정책 'ignored'는 (override로 살아남은) 가시 행의 표시 상태로는 쓰지 않는다.
+      const rpStatus = rp && rp.status !== 'ignored' ? rp.status : '';
+      r.mgmtStatus = (ov?.status) || rpStatus || '';
+      r.owner_ = (ov?.owner) || (rp?.owner) || '';
+      r.label = (ov?.label) || (rp?.label) || '';
+      r.deviceType = (ov?.deviceType) || (rp?.deviceType) || '';
+      r.note = (ov?.note) || (rp?.note) || '';
       r.managed = true;
-      if (ov.reservedUntil && Date.parse(ov.reservedUntil) < now) r.reservedExpired = true; // 예약 만료 표시
-      if (ov.hostnameOverride) r.hostName = ov.hostnameOverride;
-      if (ov.label) r.displayName = ov.label;
+      r.appliedBy = ov ? 'override' : 'range-policy';
+      if (rp) { r.rangePolicyId = rp.id; r.rangePolicySpec = rp.spec; }
+      // override 전용 필드(정책 미지원): 예약 만료·호스트명 덮어쓰기
+      if (ov) {
+        r.reservedUntil = ov.reservedUntil || null;
+        if (ov.reservedUntil && Date.parse(ov.reservedUntil) < now) r.reservedExpired = true;
+        if (ov.hostnameOverride) r.hostName = ov.hostnameOverride;
+      }
+      const lbl = (ov?.label) || (rp?.label);
+      if (lbl) r.displayName = lbl;
+    } else {
+      r.appliedBy = 'auto';
     }
     if (!r.displayName) r.displayName = r.hostName || r.ownerName || r.ip;
     const vcs = vcByIp.get(r.ip);
@@ -174,14 +189,16 @@ export function buildIpamRows(snap, vcenterId) {
 
   const byVc = {};
   for (const r of rows) byVc[r.vcenterId] = (byVc[r.vcenterId] || 0) + 1;
-  // reconcile(출처 대조) 분포 + 관리상태 분포 — 대시보드 요약 카드용.
+  // reconcile(출처 대조) 분포 + 관리상태 분포 + 관리 방식(override/정책/자동) 분포 — 대시보드 요약 카드용.
   const reconCounts = { vcenter: 0, scan: 0, both: 0, manual: 0, conflict: 0 };
   const mgmtCounts = {};
+  const appliedCounts = { override: 0, 'range-policy': 0, auto: 0 };
   let managedN = 0;
   for (const r of rows) {
     if (reconCounts[r.reconcile] !== undefined) reconCounts[r.reconcile]++;
     if (r.managed) managedN++;
     if (r.mgmtStatus) mgmtCounts[r.mgmtStatus] = (mgmtCounts[r.mgmtStatus] || 0) + 1;
+    if (appliedCounts[r.appliedBy] !== undefined) appliedCounts[r.appliedBy]++;
   }
   const out = {
     total: rows.length,
@@ -193,6 +210,7 @@ export function buildIpamRows(snap, vcenterId) {
     reconcile: reconCounts,
     managed: managedN,
     mgmtStatus: mgmtCounts,
+    appliedBy: appliedCounts,
     byVcenter: Object.entries(byVc).map(([id, c]) => ({ vcenterId: id, vcenterName: vcName[id] || (id || '네트워크 스캔'), scanned: !id, count: c })).sort((a, b) => b.count - a.count),
     rows,
   };
@@ -208,6 +226,7 @@ export function buildIpamRows(snap, vcenterId) {
  * + Hostname + Notes + power + status. `onlyBase` returns a single subnet.
  */
 export function buildSubnetSheets(snap, { vcenterId, onlyBase } = {}) {
+  const scopeVc = vcenterId; // 아래 셀 루프에서 vcenterId가 가려지므로(shadow) 정책 매칭용으로 보존
   const { rows } = buildIpamRows(snap, vcenterId);
   const byIp = new Map();
   const bases = new Set();
@@ -223,14 +242,20 @@ export function buildSubnetSheets(snap, { vcenterId, onlyBase } = {}) {
   const sortedBases = [...bases].sort((a, b) => baseNum(a) - baseNum(b)).filter((b) => !onlyBase || b === onlyBase);
 
   const annotations = getAnnotations();
+  const allPolicies = getPolicies().filter((p) => p.enabled !== false);
   const sheets = sortedBases.map((base) => {
     const sheetRows = [];
     let used = 0;
+    // 이 /24를 (일부라도) 덮는 정책 목록 — 시트 헤더 표시 + 빈 셀 오버레이용.
+    const b0 = baseNum(base);
+    const sheetPolicies = allPolicies.filter((p) => p.specLo <= (b0 + 255) && p.specHi >= b0
+      && (!p.claimedVcenterId || p.claimedVcenterId === scopeVc));
     for (let i = 0; i < 256; i++) {
       const ip = `${base}.${i}`;
       const recs = byIp.get(ip) || [];
       let status = 'empty', purpose = '', hostname = '', notes = '', power = '', scope = '', serverType = '', os = '';
       let firstSeen = null, lastSeen = null, usageStatus = null;
+      let mgmtStatus = '', appliedBy = '', rangePolicySpec = ''; // 관리상태/방식/적용정책
       let owner = null, ownerType = '', vcenterId = '', discovery = ''; // 상세/원격접속/확인출처
       if (i === 0) { status = 'network'; purpose = 'Network ID'; }
       else if (recs.length) {
@@ -256,11 +281,19 @@ export function buildSubnetSheets(snap, { vcenterId, onlyBase } = {}) {
         // 전원: 행의 powerState 기준(스캔 IP는 owner가 없지만 ping/TCP 응답=살아있음=On).
         power = r.powerState === 'POWERED_ON' ? 'On' : (r.powerState ? 'Off' : '');
         scope = r.scope === 'public' ? '공인' : '사설';
+        mgmtStatus = r.mgmtStatus || ''; appliedBy = r.appliedBy || ''; rangePolicySpec = r.rangePolicySpec || '';
+      } else if (i >= 1 && i <= 254 && sheetPolicies.length) {
+        // 빈(미사용) 셀이라도 정책이 덮으면 커버리지를 표시(행은 생성하지 않고 셀 메타만).
+        const rp = findPolicy(b0 + i, scopeVc);
+        if (rp && rp.status !== 'ignored') { mgmtStatus = rp.status || ''; appliedBy = 'range-policy'; rangePolicySpec = rp.spec; purpose = `정책: ${rp.label || rp.spec}`; }
       }
       const ann = annotations[ip];
-      sheetRows.push({ ip, last: i, purpose, hostname, serverType, os, notes, power, status, scope, firstSeen, lastSeen, usageStatus, discovery, owner, ownerType, vcenterId, memo: ann?.memo || '', tags: ann?.tags || [] });
+      sheetRows.push({ ip, last: i, purpose, hostname, serverType, os, notes, power, status, scope, firstSeen, lastSeen, usageStatus, discovery, mgmtStatus, appliedBy, rangePolicySpec, owner, ownerType, vcenterId, memo: ann?.memo || '', tags: ann?.tags || [] });
     }
-    return { subnet: `${base}.0/24`, base, used, rows: sheetRows };
+    return {
+      subnet: `${base}.0/24`, base, used, rows: sheetRows,
+      policies: sheetPolicies.map((p) => ({ id: p.id, spec: p.spec, status: p.status, label: p.label, priority: p.priority })),
+    };
   });
   return sheets;
 }

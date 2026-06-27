@@ -13,6 +13,8 @@ import { listVcRanges } from '../ipam/rangeStore.js';
 import { rangeSize } from '../ipam/scan.js';
 import { getAnnotation, setAnnotation } from '../ipam/annotations.js';
 import { getOverride, setOverride, clearOverride, setOverrideBatch, overridesSummary, STATUSES, DEVICE_TYPES } from '../ipam/overrides.js';
+import { getPolicies, getPolicy, setPolicy, deletePolicy, policiesSummary, findPolicy, specToRange, POLICY_STATUSES } from '../ipam/rangePolicies.js';
+import { ipToNum } from '../ipam/ledger.js';
 import { logAudit } from '../audit.js';
 import { getIpHistory, scanResultList, getIpHistoryMap } from '../ipam/scanStore.js';
 import { getClassifier } from '../ipam/settings.js';
@@ -522,7 +524,8 @@ api.put('/tools/ipam/annotation', (req, res) => {
 // ---- IP 수동 관리(override) — vCenter/스캔 자동발견과 별개의 운영자 관리상태 -------------
 // 선택지(상태/디바이스종류)와 현재 관리 요약을 함께 내려준다(프론트 폼 구성용).
 api.get('/tools/ipam/manage-meta', (_req, res) => {
-  res.json({ statuses: STATUSES, deviceTypes: DEVICE_TYPES, summary: overridesSummary() });
+  res.json({ statuses: STATUSES, deviceTypes: DEVICE_TYPES, summary: overridesSummary(),
+    policyStatuses: POLICY_STATUSES, policiesSummary: policiesSummary() });
 });
 // 한 IP의 override 조회.
 api.get('/tools/ipam/ip/:ip', (req, res) => {
@@ -545,6 +548,43 @@ api.post('/tools/ipam/bulk', requireRole('admin', 'operator'), (req, res) => {
   const { ips, ...fields } = req.body || {};
   const r = setOverrideBatch(ips, fields, req.user);
   if (r.ok) logAudit({ user: req.user?.username, action: 'IP 관리상태 일괄 적용', target: `${r.changed}개 IP`, detail: JSON.stringify(fields).slice(0, 500) });
+  res.status(r.ok ? 200 : 400).json(r);
+});
+
+// ---- 대역(subnet/range) 단위 정책 — IP override와 평행. 대역 기본 관리상태를 한 항목으로. -------
+// 정책 목록 + 요약 + 상태 enum.
+api.get('/tools/ipam/policies', (_req, res) => {
+  res.json({ policies: getPolicies(), summary: policiesSummary(), statuses: POLICY_STATUSES });
+});
+// 특정 IP에 무엇이 적용되는지 미리보기(정책 + override). 대역 입력 시 size 미리보기 겸용.
+api.get('/tools/ipam/policies/ip/:ip', (req, res) => {
+  const ip = req.params.ip;
+  const n = ipToNum(ip);
+  const applied = n == null ? null : findPolicy(n, req.query.vcenterId || '');
+  res.json({ ip, vcenterId: req.query.vcenterId || '', applied: applied || null, override: getOverride(ip), size: specToRange(ip)?.size ?? null });
+});
+// 대역 spec 미리보기(IP 개수) — 폼 입력 검증용(조회).
+api.get('/tools/ipam/policies/preview', (req, res) => {
+  const r = specToRange(String(req.query.spec || ''));
+  res.json({ spec: req.query.spec || '', valid: !!r, size: r?.size ?? 0, lo: r?.lo ?? null, hi: r?.hi ?? null });
+});
+// 정책 생성. body: { spec, status?, priority?, claimedVcenterId?, owner?, label?, deviceType?, note?, enabled? }.
+api.post('/tools/ipam/policies', requireRole('admin', 'operator'), (req, res) => {
+  const r = setPolicy(req.body || {}, req.user);
+  if (r.ok) logAudit({ user: req.user?.username, action: '대역정책 저장', target: `정책 ${r.policy.spec}`, detail: JSON.stringify(r.policy).slice(0, 500) });
+  res.status(r.ok ? 200 : 400).json(r);
+});
+// 정책 수정(부분). :id.
+api.put('/tools/ipam/policies/:id', requireRole('admin', 'operator'), (req, res) => {
+  const r = setPolicy({ ...(req.body || {}), id: req.params.id }, req.user);
+  if (r.ok) logAudit({ user: req.user?.username, action: '대역정책 수정', target: `정책 ${r.policy.spec}`, detail: JSON.stringify(r.policy).slice(0, 500) });
+  res.status(r.ok ? 200 : 400).json(r);
+});
+// 정책 삭제. :id. (적용 IP는 자동발견 상태로 복귀)
+api.delete('/tools/ipam/policies/:id', requireRole('admin', 'operator'), (req, res) => {
+  const pol = getPolicy(req.params.id);
+  const r = deletePolicy(req.params.id);
+  if (r.ok) logAudit({ user: req.user?.username, action: '대역정책 삭제', target: `정책 ${pol?.spec || req.params.id}` });
   res.status(r.ok ? 200 : 400).json(r);
 });
 api.get('/tools/ipam.xlsx', async (req, res) => {
