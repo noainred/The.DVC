@@ -120,7 +120,8 @@ function handleConnection(ws) {
       ssh.connect({
         host, port, username: msg.username, password: msg.password,
         tryKeyboard: true, debug: onDebug,
-        readyTimeout: 20000, keepaliveInterval: 15000,
+        // 고RTT(800ms+) + 프록시 경유 + keyboard-interactive 인증의 다중 왕복을 고려해 상향(20s→60s).
+        readyTimeout: Number(process.env.SSH_READY_TIMEOUT_MS) || 60000, keepaliveInterval: 15000,
       });
     } else if (msg.type === 'data' && stream) {
       stream.write(msg.data);

@@ -24,7 +24,8 @@ export async function getNetworkCheck() {
   for (const v of vcCfg) { const h = hostOf(v.host); if (h) targets.push({ kind: 'vcenter', id: v.id, name: v.id, host: h, port: 443, collected: vcStatus.get(v.id) || 'unknown' }); }
   for (const m of listNsxRegistry()) { const h = hostOf(m.host); if (h && m.enabled !== false) targets.push({ kind: 'nsx', id: m.id, name: m.name || h, host: h, port: 443, region: m.region || '' }); }
 
-  const probed = await tcpProbeMany(targets, { timeoutMs: 2500, concurrency: 12 });
+  // 고RTT(800ms+) 사이트는 왕복+재전송 여유를 위해 5s. 짧으면 살아있는 vCenter도 'unreachable' 오판.
+  const probed = await tcpProbeMany(targets, { timeoutMs: Number(process.env.HEALTH_PROBE_TIMEOUT_MS) || 5000, concurrency: 12 });
   const endpoints = probed.map((t) => ({
     kind: t.kind, id: t.id, name: t.name, host: t.host, region: t.region || '',
     reachable: t.alive, rttMs: t.rttMs, grade: rttGrade(t.rttMs),

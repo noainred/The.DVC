@@ -7,7 +7,7 @@
 import { loadCollectors } from './registry.js';
 import { setCollectorStatus, getCollectorStatus } from './state.js';
 
-export async function pushBundleToCollector(c, bytes, { restart = true, force = false, timeout = 180_000 } = {}) {
+export async function pushBundleToCollector(c, bytes, { restart = true, force = false, timeout = Number(process.env.EDGE_PUSH_TIMEOUT_MS) || 600_000 } = {}) {
   const url = `${String(c.url).replace(/\/+$/, '')}/api/collector/upgrade?restart=${restart}${force ? '&force=true' : ''}`;
   try {
     const res = await fetch(url, {

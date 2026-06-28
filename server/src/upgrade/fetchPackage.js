@@ -11,12 +11,14 @@ import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { getPackageBaseUrl, getPackageDir } from './packageSettings.js';
 import { upgradeAgent } from './upgradeAgent.js';
+import { resilientFetch } from '../util/resilientFetch.js';
 
 const trim = (u) => String(u || '').replace(/\/+$/, '');
 
 export async function fetchRemoteVersions(baseUrl) {
   const base = baseUrl || getPackageBaseUrl();
-  const res = await fetch(`${trim(base)}/versions.json`, { dispatcher: upgradeAgent, signal: AbortSignal.timeout(20000) });
+  // 고RTT·일시 오류 재시도. 단 TLS 검증 디스패처(upgradeAgent)는 유지(MITM→RCE 방지).
+  const res = await resilientFetch(`${trim(base)}/versions.json`, { dispatcher: upgradeAgent, timeoutMs: 20000, retries: 2 });
   if (!res.ok) throw new Error(`versions.json HTTP ${res.status}`);
   return res.json();
 }
@@ -52,7 +54,8 @@ export async function downloadPackage({ kind = 'installer', version, baseUrl, di
   if (!fname) return { ok: false, reason: `버전 ${v.version}에 ${kind} 파일이 없습니다.` };
 
   fs.mkdirSync(dir, { recursive: true });
-  const res = await fetch(`${trim(baseUrl)}/${fname}`, { dispatcher: upgradeAgent, signal: AbortSignal.timeout(600000) });
+  // 대용량 다운로드(수십~수백MB)도 고RTT/일시 끊김 시 재시도(체크섬으로 무결성 검증되므로 안전).
+  const res = await resilientFetch(`${trim(baseUrl)}/${fname}`, { dispatcher: upgradeAgent, timeoutMs: 600000, retries: 2, retryBackoffMs: 2000 });
   if (!res.ok) return { ok: false, reason: `다운로드 실패 HTTP ${res.status}` };
   const buf = Buffer.from(await res.arrayBuffer());
   const got = crypto.createHash('sha256').update(buf).digest('hex');

@@ -38,11 +38,14 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  * @returns {Promise<Response>} 최종 응답(성공 또는 재시도 소진 후의 마지막 응답). 연결 자체가
  *          끝까지 실패하면 마지막 오류를 throw 한다.
  */
-export async function resilientFetch(url, { timeoutMs = 20_000, retries = 2, retryBackoffMs = 400, onRetry, ...init } = {}) {
+export async function resilientFetch(url, { timeoutMs = 20_000, retries = 2, retryBackoffMs = 400, onRetry, dispatcher, ...init } = {}) {
   let lastErr;
+  // dispatcher 옵션: 업그레이드 다운로드처럼 'TLS 검증 강제' 디스패처(upgradeAgent)를 넘겨야 하는
+  // 경로는 wanAgent(검증 off) 대신 그 디스패처로 재시도한다(보안 보존).
+  const disp = dispatcher || wanAgent;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const res = await fetch(url, { ...init, dispatcher: wanAgent, signal: AbortSignal.timeout(timeoutMs) });
+      const res = await fetch(url, { ...init, dispatcher: disp, signal: AbortSignal.timeout(timeoutMs) });
       if (RETRYABLE_STATUS.has(res.status) && attempt < retries) {
         onRetry?.({ attempt: attempt + 1, status: res.status });
         await sleep(retryBackoffMs * 2 ** attempt);
@@ -56,6 +59,25 @@ export async function resilientFetch(url, { timeoutMs = 20_000, retries = 2, ret
         await sleep(retryBackoffMs * 2 ** attempt);
         continue;
       }
+      throw err;
+    }
+  }
+  throw lastErr;
+}
+
+/**
+ * fetch가 아닌 임의 비동기 작업(클라이언트 ping·SSH 등)을 일시 오류에 한해 재시도한다.
+ * 연결 테스트 버튼처럼 한 번의 블립으로 '연결 안 됨' 오판되는 것을 막는다.
+ * @param {() => Promise<any>} fn
+ * @param {object} opts - { retries=1, backoffMs=400 }
+ */
+export async function retryTransient(fn, { retries = 1, backoffMs = 400 } = {}) {
+  let lastErr;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try { return await fn(); }
+    catch (err) {
+      lastErr = err;
+      if (attempt < retries && isTransientErr(err)) { await sleep(backoffMs * 2 ** attempt); continue; }
       throw err;
     }
   }

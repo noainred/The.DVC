@@ -13,6 +13,7 @@ export function SshConsole({ mapping, initialCreds, onCreds, onHostname }) {
   const termRef = useRef(null);
   const wsRef = useRef(null);
   const timerRef = useRef(null);
+  const connTimerRef = useRef(null); // WS 연결/인증 타임아웃(고RTT에서 무한 '연결 중' 방지)
   const fitRef = useRef(null);
   const roRef = useRef(null);
   const phaseRef = useRef('form');
@@ -23,7 +24,7 @@ export function SshConsole({ mapping, initialCreds, onCreds, onHostname }) {
   const [formErr, setFormErr] = useState(''); // 폼 상단 안내(인증 실패 사유 등)
 
   const setPhase = (p) => { phaseRef.current = p; setPhaseState(p); };
-  const stopTimer = () => { try { clearInterval(timerRef.current); } catch { /* */ } timerRef.current = null; };
+  const stopTimer = () => { try { clearInterval(timerRef.current); } catch { /* */ } timerRef.current = null; try { clearTimeout(connTimerRef.current); } catch { /* */ } connTimerRef.current = null; };
   useEffect(() => () => { stopTimer(); try { roRef.current?.disconnect(); } catch { /* */ } try { wsRef.current?.close(); } catch { /* */ } try { termRef.current?.dispose(); } catch { /* */ } }, []);
   // Auto-connect when duplicated (credentials carried over).
   useEffect(() => { if (initialCreds && initialCreds.username) connect(); /* eslint-disable-next-line */ }, []);
@@ -51,6 +52,16 @@ export function SshConsole({ mapping, initialCreds, onCreds, onHostname }) {
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
       const ws = new WebSocket(`${proto}://${location.host}/api/remote/ssh?token=${encodeURIComponent(getToken() || '')}`);
       wsRef.current = ws;
+      // 고RTT/반열림 연결에서 브라우저가 무한 '연결 중'으로 멈추는 것 방지 — 일정 시간 내
+      // 라이브 전환이 없으면 명확한 타임아웃 오류로 종료(SSH 협상+프록시 지연 고려해 45s 기본).
+      connTimerRef.current = setTimeout(() => {
+        if (phaseRef.current !== 'live') {
+          setPhase('error');
+          setStatus('연결 타임아웃 — 고지연/프록시 지연 또는 네트워크를 확인하세요. 다시 시도하세요.');
+          try { ws.close(); } catch { /* */ }
+          stopTimer();
+        }
+      }, 45000);
       ws.onopen = () => { setStatus('인증 중… (자격증명 전송)'); ws.send(JSON.stringify({ type: 'auth', mappingId: mapping.id, username: creds.username, password: creds.password, cols: term.cols, rows: term.rows })); };
       ws.onmessage = (e) => {
         const s = typeof e.data === 'string' ? e.data : '';

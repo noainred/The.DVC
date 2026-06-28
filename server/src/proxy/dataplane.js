@@ -5,6 +5,8 @@
  * transaction which is committed (triggering a graceful HAProxy reload).
  */
 
+import { resilientFetch } from '../util/resilientFetch.js';
+
 const feName = (id) => `ra_fe_${id}`;
 const beName = (id) => `ra_be_${id}`;
 
@@ -17,9 +19,11 @@ async function call(dp, method, pathQuery, body) {
   const headers = { Accept: 'application/json' };
   if (dp.username) headers.Authorization = 'Basic ' + Buffer.from(`${dp.username}:${dp.password || ''}`).toString('base64');
   if (body !== undefined) headers['Content-Type'] = 'application/json';
-  const res = await fetch(`${base(dp)}${pathQuery}`, {
+  // 고RTT 상향(15s→30s) + 일시 오류 1회 재시도. resilientFetch는 연결오류·5xx만 재시도하고
+  // 4xx(이미 존재 등)는 재시도하지 않으므로 트랜잭션 변경의 중복 적용 위험이 낮다.
+  const res = await resilientFetch(`${base(dp)}${pathQuery}`, {
     method, headers, body: body !== undefined ? JSON.stringify(body) : undefined,
-    signal: AbortSignal.timeout(15000),
+    timeoutMs: 30000, retries: 1,
   });
   const text = await res.text();
   let json; try { json = text ? JSON.parse(text) : null; } catch { json = text; }

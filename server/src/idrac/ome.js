@@ -16,6 +16,16 @@
 import { Agent } from 'undici';
 import { constants as cryptoConstants } from 'node:crypto';
 import { config } from '../config.js';
+import { retryTransient } from '../util/resilientFetch.js';
+
+// 동시성 제한 실행기 — 고RTT OME에서 장치별 전력 조회를 직렬(N×RTT)이 아닌 병렬(캡)로.
+async function eachLimited(items, limit, fn) {
+  const q = [...items];
+  const workers = Array.from({ length: Math.min(limit, q.length || 1) }, async () => {
+    while (q.length) { const it = q.shift(); try { await fn(it); } catch { /* isolated */ } }
+  });
+  await Promise.all(workers);
+}
 
 const dispatcher = new Agent({
   connect: {
@@ -172,14 +182,15 @@ export async function fetchOmeDevices(entry) {
   try {
     const devices = await c.listDevices();
     let usedMetricService = false;
-    // Auto-detect: probe Power Manager on the first powered device; if it
-    // yields a value, use it for all, otherwise fall back per device.
-    for (const d of devices) {
-      let watts = await c.powerViaMetricService(d.id);
+    // 장치별 전력 조회를 동시성 캡으로 병렬화 — 직렬 N×RTT(예: 500대×800ms)로 OME 폴이
+    // 타임아웃되던 문제 방지. per-device 실패는 격리(eachLimited)되어 전체를 막지 않는다.
+    const conc = Number(process.env.OME_POWER_CONCURRENCY) || 16;
+    await eachLimited(devices, conc, async (d) => {
+      let watts = await c.powerViaMetricService(d.id).catch(() => null);
       if (watts != null) usedMetricService = true;
-      if (watts == null) watts = await c.powerViaDevice(d.id);
+      if (watts == null) watts = await c.powerViaDevice(d.id).catch(() => null);
       d.watts = watts;
-    }
+    });
     return { devices, usedMetricService, count: devices.length };
   } finally {
     await c.logout();
@@ -190,7 +201,8 @@ export async function fetchOmeDevices(entry) {
 export async function testOme(entry) {
   const c = new OmeClient(entry);
   const started = Date.now();
-  await c.login();
+  // 고RTT 블립으로 '연결 실패' 오판되지 않도록 로그인은 1회 재시도.
+  await retryTransient(() => c.login());
   try {
     const devices = await c.listDevices();
     let sampleWatts = null;

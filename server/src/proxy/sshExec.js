@@ -6,7 +6,7 @@
 
 import { Client as SSHClient } from 'ssh2';
 
-function connect({ host, port = 22, username, password, privateKey, readyTimeout = 20000 }) {
+function connect({ host, port = 22, username, password, privateKey, readyTimeout = Number(process.env.SSH_READY_TIMEOUT_MS) || 60000 }) {
   return new Promise((resolve, reject) => {
     const conn = new SSHClient();
     conn.on('ready', () => resolve(conn));

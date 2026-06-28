@@ -16,6 +16,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { parseTarGz, parseZip, MAX_BUNDLE_BYTES, MAX_MEMBERS } from './archive.js';
 import { upgradeAgent } from './upgradeAgent.js';
+import { resilientFetch } from '../util/resilientFetch.js';
 
 const ARCHIVE_RE = /vmware-portal-(\d+)\.(\d+)\.(\d+)\.(?:tar\.gz|tgz|zip)$/;
 
@@ -281,7 +282,7 @@ function authHeaders(url, token) {
 export async function fetchRemoteVersions(base, { token, timeout = 10_000 } = {}) {
   const url = joinUrl(base, 'versions.json');
   try {
-    const res = await fetch(url, { dispatcher: upgradeAgent, headers: authHeaders(url, token), signal: AbortSignal.timeout(timeout) });
+    const res = await resilientFetch(url, { dispatcher: upgradeAgent, headers: authHeaders(url, token), timeoutMs: timeout, retries: 2 });
     if (!res.ok) return [null, `versions.json HTTP ${res.status}`];
     return [await res.json(), null];
   } catch (err) {
@@ -323,7 +324,7 @@ export async function downloadArchive(url, destDir, { token, timeout = 120_000, 
   const name = path.basename(String(url || '').split('?')[0]);
   if (!ARCHIVE_RE.test(name)) return { ok: false, reason: `disallowed archive name: ${name || '(none)'}` };
   try {
-    const res = await fetch(url, { dispatcher: upgradeAgent, headers: authHeaders(url, token), signal: AbortSignal.timeout(timeout) });
+    const res = await resilientFetch(url, { dispatcher: upgradeAgent, headers: authHeaders(url, token), timeoutMs: timeout, retries: 2, retryBackoffMs: 2000 });
     if (!res.ok) return { ok: false, reason: `download HTTP ${res.status}` };
     const buf = Buffer.from(await res.arrayBuffer());
     if (buf.length > maxBytes) return { ok: false, reason: `download too large (>${maxBytes} bytes)` };
@@ -354,8 +355,9 @@ export async function upgradeFromRemote(baseUrl, installDir, currentVersion, des
 
 /* ------------------------------- edge push -------------------------------- */
 
-/** Push a bundle (tar.gz bytes) to a registered edge's upgrade endpoint. */
-export async function pushBundleToEdge(edge, archivePath, { timeout = 120_000 } = {}) {
+/** Push a bundle (tar.gz bytes) to a registered edge's upgrade endpoint.
+ *  대용량 번들+고RTT를 고려해 타임아웃을 넉넉히 둔다. 재시도는 적용하지 않는다(적용=재시작이라 경합 오탐 위험). */
+export async function pushBundleToEdge(edge, archivePath, { timeout = Number(process.env.EDGE_PUSH_TIMEOUT_MS) || 600_000 } = {}) {
   const data = fs.readFileSync(archivePath);
   const url = `${String(edge.url).replace(/\/+$/, '')}/api/upgrade/bundle`;
   try {

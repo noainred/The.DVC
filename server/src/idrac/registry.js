@@ -13,6 +13,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { describeError } from '../util/errors.js';
+import { retryTransient } from '../util/resilientFetch.js';
 import { fetchPower, fetchInventory } from './redfish.js';
 import { testOme } from './ome.js';
 import { expandIpList } from './iprange.js';
@@ -299,7 +300,8 @@ export async function testServer(body) {
       const r = await testOme(normalized);
       return { ok: true, ms: r.ms, devices: r.devices, auth: r.auth, watts: r.sampleWatts, type: 'ome' };
     }
-    const r = await fetchPower(normalized);
+    // 고RTT 블립으로 '연결 실패' 오판되지 않도록 전력 확인은 1회 재시도.
+    const r = await retryTransient(() => fetchPower(normalized));
     let info = null;
     try { info = await fetchInventory(normalized); } catch { /* power test still succeeds */ }
     return { ok: true, ms: Date.now() - started, watts: r.watts, model: r.model, serviceTag: r.serviceTag, powerState: r.powerState, info };

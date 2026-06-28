@@ -130,6 +130,15 @@ const server = app.listen(config.port, () => {
   console.log(`  ▸ auth: ${config.auth.enabled ? 'enabled' : 'disabled'}\n`);
 });
 
+// 고RTT·대용량 push(분산 에이전트의 인벤토리/번들)를 고려한 명시적 서버 타임아웃.
+// - keepAliveTimeout: 기본 5s는 고RTT 클라이언트의 유휴 keep-alive 소켓을 너무 빨리 끊어
+//   재연결 churn/죽은 소켓 재사용을 유발 → 75s로 상향.
+// - headersTimeout는 keepAliveTimeout보다 커야 함(Node 권장). requestTimeout은 느린 대용량
+//   업로드가 중간에 끊기지 않도록 넉넉히(0=무제한 대신 명시적 큰 값).
+server.keepAliveTimeout = Number(process.env.SERVER_KEEPALIVE_MS) || 75_000;
+server.headersTimeout = Number(process.env.SERVER_HEADERS_TIMEOUT_MS) || 90_000;
+server.requestTimeout = Number(process.env.SERVER_REQUEST_TIMEOUT_MS) || 600_000;
+
 // listen 오류(포트 충돌/특권포트 등)를 명확히 안내. 특권포트(<1024) EACCES가 흔한 원인.
 server.on('error', (err) => {
   if (err.code === 'EACCES') console.error(`[listen] 포트 ${config.port} 권한 거부(EACCES). 1024 미만 특권포트입니다. PORT를 1024 이상(예: 4000)으로 설정하세요. (portal.env의 PORT 확인)`);

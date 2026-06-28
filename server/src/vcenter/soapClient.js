@@ -909,10 +909,10 @@ export async function collectFromVCenterSoap(vc) {
       hostByRef.set(o.ref, host);
     }
 
-    // Real-time host power draw (Watts) via PerformanceManager. Best-effort:
-    // not all hardware/hosts report the power.power.average counter, and a
-    // failure here must never break the rest of the collection.
-    if (config.vcSoapMetrics && c.sc.perfManager && hostByRef.size) {
+    // Real-time host power draw (Watts) via PerformanceManager. Best-effort.
+    // 전력·GPU 메트릭은 서로 독립적이므로 병렬로 수집한다 — 고RTT에서 두 블록이 직렬로
+    // 합산(최대 2×timeout)되어 폴 주기를 밀어내는 것을 방지. 둘 다 실패해도 수집 전체는 안 막음.
+    const collectPower = async () => {
       try {
         const counterId = await c.powerCounterId();
         if (counterId) {
@@ -922,11 +922,11 @@ export async function collectFromVCenterSoap(vc) {
       } catch (err) {
         console.warn(`[collect] ${vc.id} 전력 수집 건너뜀: ${err.message}`);
       }
-    }
+    };
 
     // 호스트 GPU 사용률(gpu.utilization.average) — GPU 호스트만, 설정 주기로 throttle.
     // 패스쓰루는 ESXi가 못 보므로 게스트 수집이 보완(store overlay). 실패해도 수집 전체는 안 막음.
-    if (config.vcSoapMetrics && c.sc.perfManager && hostByRef.size) {
+    const collectGpu = async () => {
       try {
         const ms = loadMetricsSettings();
         if (ms.gpuUtilEnabled !== false) {
@@ -959,6 +959,9 @@ export async function collectFromVCenterSoap(vc) {
       } catch (err) {
         console.warn(`[collect] ${vc.id} GPU 사용률 수집 건너뜀: ${err.message}`);
       }
+    };
+    if (config.vcSoapMetrics && c.sc.perfManager && hostByRef.size) {
+      await Promise.allSettled([collectPower(), collectGpu()]);
     }
 
     const vms = [];
@@ -1072,11 +1075,11 @@ export async function collectFromVCenterSoap(vc) {
       if (d.usagePct > 90) mkAlarm(d.name, 'datastore', d.usagePct > 95 ? 'critical' : 'warning', `Datastore usage at ${d.usagePct}%`);
     }
 
-    // Installed solutions / plug-ins + licenses (best-effort).
-    let solutions = [];
-    try { solutions = (await c.retrieveExtensions()).slice(0, 300); } catch { /* optional */ }
-    let licenses = [];
-    try { licenses = (await c.retrieveLicenses()).slice(0, 200); } catch { /* optional */ }
+    // Installed solutions / plug-ins + licenses (best-effort) — 병렬로 조회해 고RTT에서 두 호출이
+    // 직렬로 합산(최대 2×timeout)되어 다음 폴 주기를 밀어내는 것을 방지.
+    const [solRes, licRes] = await Promise.allSettled([c.retrieveExtensions(), c.retrieveLicenses()]);
+    const solutions = solRes.status === 'fulfilled' ? solRes.value.slice(0, 300) : [];
+    const licenses = licRes.status === 'fulfilled' ? licRes.value.slice(0, 200) : [];
 
     return {
       vcenter: {

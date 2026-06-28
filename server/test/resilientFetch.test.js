@@ -1,7 +1,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { resilientFetch, _internals } from '../src/util/resilientFetch.js';
+import { resilientFetch, retryTransient, _internals } from '../src/util/resilientFetch.js';
 
 let server, base, hits;
 before(async () => {
@@ -49,6 +49,17 @@ test('연결 불가(포트 닫힘)는 일시 오류로 재시도 후 throw', asy
     resilientFetch('http://127.0.0.1:1/api', { retries: 1, retryBackoffMs: 5, timeoutMs: 1500 }),
     (e) => e instanceof Error,
   );
+});
+
+test('retryTransient: 일시 오류는 재시도, 비일시 오류는 즉시 throw', async () => {
+  let n = 0;
+  const v = await retryTransient(async () => { n++; if (n < 3) { const e = new Error('reset'); e.code = 'ECONNRESET'; throw e; } return 'ok'; }, { retries: 3, backoffMs: 5 });
+  assert.equal(v, 'ok');
+  assert.equal(n, 3);
+  // 비일시(인증 실패 등)는 재시도 안 함
+  let m = 0;
+  await assert.rejects(retryTransient(async () => { m++; throw new Error('토큰 불일치(인증 실패)'); }, { retries: 3, backoffMs: 5 }));
+  assert.equal(m, 1);
 });
 
 test('정상 응답은 재시도 없이 1회', async () => {

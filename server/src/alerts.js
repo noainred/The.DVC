@@ -13,6 +13,7 @@ import path from 'node:path';
 import { config } from './config.js';
 import { store } from './store.js';
 import { logAudit } from './audit.js';
+import { resilientFetch } from './util/resilientFetch.js';
 
 const FILE = path.join(config.configDir, 'alerts.json');
 
@@ -184,7 +185,8 @@ function updatePrevPower(prev, snap) {
 }
 
 async function post(url, payload) {
-  return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: AbortSignal.timeout(10000) });
+  // 일시적 네트워크 오류로 알림이 조용히 유실되지 않도록 1회 재시도(고RTT 외부 웹훅 대응).
+  return resilientFetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), timeoutMs: 15000, retries: 1 });
 }
 export async function notify(alert, cfg = loadAlertConfig()) {
   const text = `[${alert.severity === 'critical' ? '🔴 위험' : '🟠 경고'}] ${alert.title}${alert.detail ? `\n${alert.detail}` : ''}`;

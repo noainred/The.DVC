@@ -10,6 +10,7 @@ import { config } from '../config.js';
 import { NsxClient } from './client.js';
 import { ensureNsxDial } from './proxy.js';
 import { describeError } from '../util/errors.js';
+import { retryTransient } from '../util/resilientFetch.js';
 
 const FILE = path.join(config.configDir, 'nsx.json');
 const REGIONS = ['아시아', '중국', '유럽', '북미'];
@@ -115,10 +116,14 @@ export async function testConnection(body) {
   }
   const started = Date.now();
   try {
-    const dial = await ensureNsxDial(entry); // proxyId가 있으면 HAProxy 경유로 테스트
-    const client = new NsxClient(entry, dial);
-    await client.ping();
-    return { ok: true, ms: Date.now() - started, viaProxy: !!dial };
+    // 고RTT 블립으로 '연결 안 됨' 오판되지 않도록 일시 오류는 1회 재시도.
+    const viaProxy = await retryTransient(async () => {
+      const dial = await ensureNsxDial(entry); // proxyId가 있으면 HAProxy 경유로 테스트
+      const client = new NsxClient(entry, dial);
+      await client.ping();
+      return !!dial;
+    });
+    return { ok: true, ms: Date.now() - started, viaProxy };
   } catch (err) {
     const d = describeError(err);
     return { ok: false, reason: d.message, hint: d.hint, code: d.code, ms: Date.now() - started };

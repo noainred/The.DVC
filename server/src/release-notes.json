@@ -1,6 +1,20 @@
 {
   "notes": [
     {
+      "version": "2.49.0",
+      "date": "2026-06-27",
+      "title": "고RTT 신뢰성 전역 강화 — 원격 접속/운영 시 지연으로 인한 오류 방지(전체 점검·개선)",
+      "notes": [
+        "전체 코드에서 원격지(포탈·vCenter·NSX·iDRAC/OME·HAProxy·Ollama·업그레이드 미러)에 접속하거나 운영 중 RTT가 높을 때 오류날 수 있는 지점을 5개 영역으로 병렬 점검(적대적 검증)하고, 검증된 안전 개선만 반영했습니다.",
+        "업그레이드 다운로드/버전조회(fetchPackage·upgrade·bundleSource)에 재시도를 추가했습니다 — 대용량 번들이 고RTT에서 중간에 끊겨 실패하던 문제 해소. 단 TLS 검증 디스패처(upgradeAgent)는 유지해 MITM→RCE 방지를 보존합니다(resilientFetch에 dispatcher 옵션 추가).",
+        "원격 연동의 일시 오류 재시도 확대: 알림 웹훅(Slack/webhook)·Ollama LLM·HAProxy Data Plane API에 재시도를 적용하고, NSX·iDRAC·OME '연결 테스트'는 한 번의 블립으로 '연결 안 됨' 오판되지 않도록 재시도(retryTransient)를 추가했습니다.",
+        "N×RTT 직렬 호출 완화: OME 장치별 전력 조회를 직렬→동시성 캡 병렬로, vCenter의 확장/라이선스 조회와 전력/GPU 메트릭 수집을 병렬화해 고RTT vCenter 하나가 폴 주기를 밀어내지 않게 했습니다.",
+        "타임아웃 적정화: SSH 콘솔/배포 readyTimeout 20s→60s(고RTT+keyboard-interactive), 헬스 TCP 프로브 2.5s→5s(살아있는 vCenter 오판 방지), HTTP 서버 keepAlive/headers/request 타임아웃 명시(대용량 push 중단 방지). 모두 환경변수로 조정 가능.",
+        "프론트엔드: 모든 조회 fetch에 타임아웃(20s)+일시오류 재시도를 추가해 고RTT 반열림 연결에서 무한 스피너를 없앴고, 폴링에 in-flight 가드(요청 적체 방지)와 직전 데이터 유지(일시 오류 시 화면 깜빡임 방지), 언마운트 시 요청 취소를 적용했습니다. 변경(POST/PUT/DELETE)은 정상 장기작업을 끊지 않도록 넉넉한 백스톱(180s)만 둡니다. 원격 콘솔 WebSocket에 연결 타임아웃(45s)을 추가해 무한 '연결 중'을 방지합니다.",
+        "주의 깊게 배제한 항목: 토큰 비교 randomBytes(상수시간 보안 의도·마이크로초, 변경 시 보안 약화)·업그레이드 푸시 재시도(재시작 경합 오탐)·JSON 바디 한도 축소(정상 대용량 push 거부 위험)는 적용하지 않았습니다."
+      ]
+    },
+    {
       "version": "2.48.2",
       "date": "2026-06-27",
       "title": "중앙↔엣지 견고 연결 확대 — 에이전트 워커 전 경로 재시도 + 연결 상태(재시도·저하) 표시",
