@@ -51,6 +51,9 @@ export const config = {
     // CONFIG_DIR/idrac.json. Enabled automatically when any entry is registered.
     enabled: process.env.IDRAC_ENABLED !== 'false',
     pollIntervalMs: Number(process.env.IDRAC_POLL_INTERVAL_MS) || 60_000,
+    // vCenter별 IP 대역을 주기적으로 스캔해 iDRAC을 자동 발견·등록하는 주기. 스캔은 무거우므로
+    // 기본 6시간. 0 이하면 비활성(주기 스캔 끔, 수동 '지금 스캔'은 가능). IDRAC_SCAN_INTERVAL_MS.
+    scanIntervalMs: Number(process.env.IDRAC_SCAN_INTERVAL_MS) || 6 * 3_600_000,
     // SQLite database file for power samples. Kept in CONFIG_DIR so upgrades
     // preserve history. Override with IDRAC_DB_PATH.
     dbPath: process.env.IDRAC_DB_PATH ||

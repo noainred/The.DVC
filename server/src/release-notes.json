@@ -1,6 +1,18 @@
 {
   "notes": [
     {
+      "version": "2.51.0",
+      "date": "2026-06-28",
+      "title": "vCenter별 iDRAC 스캔 대역 + 주기 자동 발견/등록 (IPMS 방식)",
+      "notes": [
+        "IPMS의 'vCenter별 스캔 대역'처럼, 전력 수집(iDRAC)에도 vCenter별로 iDRAC IP 대역과 계정을 저장해두면 주기 스캐너가 그 대역을 돌며 Dell iDRAC을 자동 발견해 해당 vCenter로 자동 등록하는 기능을 추가했습니다. 매번 수동으로 IP를 넣어 스캔/등록할 필요가 없어집니다.",
+        "전력 수집 메뉴 상단에 'vCenter별 iDRAC 스캔 대역 — 주기 자동 발견' 패널을 추가했습니다. vCenter 선택 + IP 대역(CIDR/범위/단일, 한 줄에 하나) + iDRAC 계정/비밀번호 + 스캔 수행 Agent(이 포탈 직접 또는 현장 에이전트 위임) + 주기 스캔 포함 여부 + 등록 모드(병합/이 vCenter만 교체)를 저장합니다. 행별 '스캔'·'수정'·'삭제', 전체 '지금 스캔', 실시간 진행률 바, vCenter별 최근 결과(발견/등록/스캔 수)를 제공합니다.",
+        "주기 스캐너 설계(고RTT·다수 vCenter 안전): 한 번에 한 사이클만(single-flight), vCenter는 순차 스캔(각 스캔 내부 동시성 32로 총 동시성 제한, 이벤트 루프 비차단), vCenter 단위 try/catch 격리. 등록은 기본 '병합'이며 스캔이 일시적으로 0건이면 기존 등록을 지우지 않습니다(블립으로 인한 대량 삭제 방지). 중앙이 못 닿는 사설망은 에이전트에 위임(현장 스캔+등록).",
+        "주기는 기본 6시간(IDRAC_SCAN_INTERVAL_MS로 조정, 0이하면 주기 스캔 끔·수동만). 발견 즉시 1회 전력 수집을 트리거해 대시보드에 바로 반영합니다. 저장: CONFIG_DIR/idrac-scan-ranges.json(0600). API: GET/PUT/DELETE /admin/idrac/scan-ranges, POST /admin/idrac/scan-ranges/scan, GET /admin/idrac/scan-ranges/status.",
+        "단위 테스트(idracScanRanges.test.js): 저장/비밀번호 마스킹·유지, enabled 필터(대역·계정 있는 것만), 삭제·실행기록, 폴러 가드/상태 형태를 검증합니다."
+      ]
+    },
+    {
       "version": "2.50.5",
       "date": "2026-06-28",
       "title": "수집 서버(원격) 화면에 등록 에이전트 수량 표시",

@@ -82,6 +82,8 @@ import { expandIpList } from '../idrac/iprange.js';
 import { scanForIdracs } from '../idrac/scan.js';
 import { enqueueIdracScan, enqueueIdracRegister, getIdracScanResult } from '../central/idracScanJobs.js';
 import { getPollerStatus, pollNow } from '../idrac/poller.js';
+import { listScanRanges, saveScanRanges, removeScanRanges } from '../idrac/scanRanges.js';
+import { startIdracScanNow, idracScanStatus } from '../idrac/scanPoller.js';
 import { allMeasuredPower, buildPowerDashboard, purgeStalePower, measuredPowerBreakdown } from '../idrac/service.js';
 import { computeFinOps, loadFinopsConfig } from '../insights/finops.js';
 import { loadPowerSettings, savePowerSettings, filterMeasuredByMapping } from '../idrac/powerSettings.js';
@@ -1281,6 +1283,34 @@ adminRouter.post('/idrac/register-scanned', adminOnly, (req, res) => {
   if (result.ok) pollNow().catch(() => {});
   res.status(result.ok ? 200 : 400).json(result);
 });
+
+// ---- vCenter별 iDRAC 스캔 대역 + 주기 자동 발견(IPMS의 'vCenter별 스캔 대역'과 동일 흐름) ----
+// 각 vCenter에 iDRAC IP 대역 + 계정을 저장하면, 주기 스캐너가 그 대역을 돌며 Dell iDRAC을
+// 발견해 해당 vCenter로 자동 등록한다. 비밀번호는 응답에서 마스킹된다.
+adminRouter.get('/idrac/scan-ranges', adminOnly, (_req, res) => {
+  res.json({ ok: true, ranges: listScanRanges(), status: idracScanStatus(), centralEnabled: Boolean(config.central.token) });
+});
+// 저장/수정. Body: { vcenterId, ranges?, username?, password?, agent?, enabled?, mode? }
+adminRouter.put('/idrac/scan-ranges', adminOnly, (req, res) => {
+  const b = req.body || {};
+  const r = saveScanRanges(b.vcenterId, b);
+  if (r.ok) logAudit({ user: req.user?.username, action: 'iDRAC 스캔 대역 저장', target: `${b.vcenterId} (대역 ${(r.ranges || []).length}개${r.enabled ? '' : ', 비활성'})` });
+  res.status(r.ok ? 200 : 400).json(r);
+});
+adminRouter.delete('/idrac/scan-ranges/:vcenterId', adminOnly, (req, res) => {
+  const r = removeScanRanges(req.params.vcenterId);
+  if (r.ok) logAudit({ user: req.user?.username, action: 'iDRAC 스캔 대역 삭제', target: req.params.vcenterId });
+  res.status(r.ok ? 200 : 404).json(r);
+});
+// 지금 스캔(비동기). Body: { vcenterId? } 미지정 시 enabled인 전체 대역.
+adminRouter.post('/idrac/scan-ranges/scan', adminOnly, (req, res) => {
+  const vcenterId = String(req.body?.vcenterId || '').trim();
+  const r = startIdracScanNow(vcenterId ? { vcenterId } : {});
+  logAudit({ user: req.user?.username, action: 'iDRAC 대역 즉시 스캔', target: vcenterId || '(전체)' });
+  res.status(r.ok ? 200 : 400).json({ ...r, status: idracScanStatus() });
+});
+// 진행 상태(가벼운 폴링용).
+adminRouter.get('/idrac/scan-ranges/status', adminOnly, (_req, res) => res.json({ ok: true, status: idracScanStatus() }));
 
 // 서버 일괄 삭제. Body: { all:true } 또는 { vcenterId } (빈 문자열=미지정 서버 삭제).
 adminRouter.post('/idrac/delete', adminOnly, (req, res) => {

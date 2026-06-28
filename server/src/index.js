@@ -34,6 +34,7 @@ import { dlSourceRouter } from './routes/dlsource.js';
 import { insightsRouter } from './routes/insights.js';
 import { metricsExportRouter } from './routes/metricsExport.js';
 import { startIdracPoller } from './idrac/poller.js';
+import { startIdracScanPoller } from './idrac/scanPoller.js';
 import { startNsxPoller } from './nsx/store.js';
 import { startAlertEngine } from './alerts.js';
 import { startMetricsSampler } from './metrics/sampler.js';
@@ -115,7 +116,7 @@ if (fs.existsSync(config.webDist)) {
 store.start();
 upgradeManager.start();
 const stagger = [
-  startIdracPoller, startNsxPoller, startAlertEngine, startMetricsSampler, startGpuGuestPoller, startPhysicalGpuPoller,
+  startIdracPoller, startIdracScanPoller, startNsxPoller, startAlertEngine, startMetricsSampler, startGpuGuestPoller, startPhysicalGpuPoller,
   startIpScanPoller, startIpScanAgent, startCollectorPuller, startAgentScanner, startIdracScanWorker, startInventoryPush,
   startGpuGuestPush, startPingWorker, startConfigPush, startBackupScheduler, startLogPoller, startLogQueryWorker, startCaptureWorker, startCaptureMonitor, startLoginMonitor, startGuestScanScheduler, startOsScanner,
   startDbSizeSampler,
