@@ -41,6 +41,8 @@ function normalize(body, existing = null) {
   const name = String(body.name ?? e.name ?? '').trim();
   let url = String(body.url ?? e.url ?? '').trim();
   const datacenter = String(body.datacenter ?? e.datacenter ?? '').trim();
+  // 이 수집서버가 보고하는 원격 호스트를 귀속시킬 vCenter(전력 집계에서 '미매핑' 방지). 선택.
+  const vcenterId = String(body.vcenterId ?? e.vcenterId ?? '').trim();
 
   if (!id) return [null, 'id는 필수입니다.'];
   if (id.length > 128 || [...id].some((c) => c.charCodeAt(0) < 32)) return [null, 'id에 사용할 수 없는 문자가 있습니다.'];
@@ -50,7 +52,7 @@ function normalize(body, existing = null) {
   url = url.replace(/\/+$/, '');
 
   const entry = {
-    id, name, url, datacenter,
+    id, name, url, datacenter, vcenterId,
     token: body.token ? String(body.token) : e.token || '',
     enabled: body.enabled != null ? Boolean(body.enabled) : (e.enabled != null ? e.enabled : true),
   };

@@ -1,6 +1,18 @@
 {
   "notes": [
     {
+      "version": "2.50.4",
+      "date": "2026-06-28",
+      "title": "원격 수집기 → vCenter 매핑(미매핑 해소) + vCenter 미매핑 전력 제외 기능",
+      "notes": [
+        "원격 수집기가 보고하는 호스트가 전부 '(미매핑)'으로 잡히던 문제를 해결했습니다. 원인은 원격 전력 샘플에 vCenter 귀속 정보가 없어서, 중앙이 호스트명을 자신의 인벤토리와 매칭하지 못하면 모두 미매핑으로 처리한 것입니다(예: OC2 수집기 240대·agent-WA 107대가 전부 미매핑).",
+        "수집서버에 '귀속 vCenter'를 지정하는 기능을 추가했습니다. 전력 수집 메뉴의 '전력 보고 출처 진단' 패널 → 수집서버별 표에서 각 수집서버의 vCenter를 드롭다운으로 선택하면, 그 수집서버가 보고하는 원격 호스트 전체가 해당 vCenter로 귀속됩니다(다음 수집 주기에 반영, 즉시 재수집 트리거). 이것이 '미매핑을 정상 매핑으로 재등록'하는 방법입니다.",
+        "'☐ 미매핑 제외' 토글을 추가했습니다. vCenter에 귀속되지 않는 측정 전력을 총 소비전력·전력 보고 수·서버 목록·인사이트(FinOps·전력 분석)에서 영구적으로 제외합니다. 수집기가 매 주기 다시 보내도 표시에서 빠지므로, 매핑이 불가능한 잡음 장비를 깔끔하게 숨길 수 있습니다(설정은 CONFIG_DIR/power-settings.json에 저장, 감사 기록).",
+        "백엔드: collector 레지스트리에 vcenterId 필드 추가 → puller가 원격 샘플에 각인 → allMeasuredPower/귀속 로직이 명시 vCenter로 매핑. idrac/powerSettings.js(excludeUnmapped) + filterMeasuredByMapping을 store(Overview)·power-dashboard·insights에 일관 적용. API: GET/PUT /admin/idrac/power-settings, 수집서버 vCenter는 기존 PUT /admin/idrac/collectors/:id { vcenterId }.",
+        "단위 테스트(powerSettings.test.js): 미매핑 제외 필터 on/off + 수집서버 vcenterId 저장/부분업데이트 보존을 검증합니다."
+      ]
+    },
+    {
       "version": "2.50.3",
       "date": "2026-06-28",
       "title": "[근본 수정] '전력 보고' 수 과다의 진짜 원인 해결 — 원격 수집 서버 별칭 중복 집계 버그",

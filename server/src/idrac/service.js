@@ -151,7 +151,7 @@ export async function allMeasuredPower() {
     }
     const id = `remote:${r.collectorId}:${r.serverId != null ? r.serverId : host}`;
     const hostNames = [norm(host)];
-    tryAdd({ serverId: id, serverName: r.serverName || host, watts: r.watts, ts: r.ts, host: norm(host), hostNames, model: (r.model || '').trim(), serviceTag: r.serviceTag || '', source: 'remote' }, r.serviceTag, [host].filter(Boolean));
+    tryAdd({ serverId: id, serverName: r.serverName || host, watts: r.watts, ts: r.ts, host: norm(host), hostNames, model: (r.model || '').trim(), serviceTag: r.serviceTag || '', vcenterId: r.vcenterId || '', source: 'remote' }, r.serviceTag, [host].filter(Boolean));
   }
   return out;
 }
@@ -191,6 +191,7 @@ export async function measuredPowerBreakdown() {
   const collectors = [...remoteByCol.entries()].map(([collectorId, hosts]) => ({
     collectorId, name: activeCollectors.get(collectorId)?.name || collectorId,
     registered: activeCollectors.has(collectorId), hosts,
+    vcenterId: activeCollectors.get(collectorId)?.vcenterId || '', // 귀속 vCenter(미지정 시 미매핑)
   })).sort((a, z) => z.hosts - a.hosts);
 
   return {

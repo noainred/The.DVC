@@ -84,6 +84,7 @@ import { enqueueIdracScan, enqueueIdracRegister, getIdracScanResult } from '../c
 import { getPollerStatus, pollNow } from '../idrac/poller.js';
 import { allMeasuredPower, buildPowerDashboard, purgeStalePower, measuredPowerBreakdown } from '../idrac/service.js';
 import { computeFinOps, loadFinopsConfig } from '../insights/finops.js';
+import { loadPowerSettings, savePowerSettings, filterMeasuredByMapping } from '../idrac/powerSettings.js';
 import { getInventory as getIdracInventory } from '../idrac/invCache.js';
 import { getSensorSeries } from '../idrac/sensorStore.js';
 import { fetchInventory as fetchIdracInventory, fetchSensors as fetchIdracSensors, probeGpuTelemetry } from '../idrac/redfish.js';
@@ -925,7 +926,7 @@ adminRouter.post('/idrac/poll', adminOnly, async (_req, res) => {
 adminRouter.get('/idrac/power-dashboard', adminOnly, async (req, res) => {
   try {
     const hours = Number(req.query.hours) || 24;
-    const measured = await allMeasuredPower();
+    const measured = filterMeasuredByMapping(await allMeasuredPower(), store.get());
     const dash = await buildPowerDashboard(measured, { hours });
     // 에너지/비용/CO2(기존 FinOps 재사용) + vCenter 이름 매핑.
     let finops = null; try { finops = computeFinOps(store.get(), measured); } catch { /* */ }
@@ -961,6 +962,15 @@ adminRouter.get('/idrac/power-dashboard', adminOnly, async (req, res) => {
 adminRouter.get('/idrac/power-sources', adminOnly, async (_req, res) => {
   try { res.json({ ok: true, ...(await measuredPowerBreakdown()) }); }
   catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+});
+
+// 전력 집계 표시 설정 — excludeUnmapped: vCenter 미매핑 측정 전력을 총합/보고/목록에서 제외.
+adminRouter.get('/idrac/power-settings', adminOnly, (_req, res) => res.json({ ok: true, settings: loadPowerSettings() }));
+adminRouter.put('/idrac/power-settings', adminOnly, async (req, res) => {
+  const settings = savePowerSettings(req.body || {});
+  await store.refresh().catch(() => {}); // Overview 총합/보고 즉시 반영
+  logAudit({ user: req.user?.username, action: '전력 집계 설정 변경', target: `미매핑 제외=${settings.excludeUnmapped}` });
+  res.json({ ok: true, settings });
 });
 
 // 오류/고아 전력 데이터 정리 — '전력 보고' 수가 등록 수보다 비정상적으로 많을 때 정리한다.

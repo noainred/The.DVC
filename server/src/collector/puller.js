@@ -36,7 +36,7 @@ async function pullOne(c) {
     if (!host || h.watts == null) continue;
     // 같은 수집기에서 온 동일 서버(serverId)가 여러 별칭으로 중복 보고되면 첫 행만 반영한다.
     if (h.serverId != null) { if (seenServers.has(h.serverId)) continue; seenServers.add(h.serverId); }
-    const sample = { watts: h.watts, ts: h.ts || ts, datacenter: data.datacenter || c.datacenter, collectorId: c.id, serverName: h.serverName, serverId: h.serverId, source: 'remote' };
+    const sample = { watts: h.watts, ts: h.ts || ts, datacenter: data.datacenter || c.datacenter, collectorId: c.id, serverName: h.serverName, serverId: h.serverId, vcenterId: c.vcenterId || '', source: 'remote' };
     setRemoteHost(host, sample);
     db.insert(`rmt:${host}`, h.watts, h.ts || ts);
     hosts++;

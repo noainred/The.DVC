@@ -34,6 +34,7 @@ export default function IdracAdmin() {
   const [dashHours, setDashHours] = useState(24); // 추세/통계 시간 창
   const [sort, setSort] = useState({ key: 'currentW', dir: 'desc' }); // 서버 테이블 정렬
   const [sources, setSources] = useState(null); // 전력 보고 수 출처 분해(iDRAC/OME/원격)
+  const [pwSettings, setPwSettings] = useState({ excludeUnmapped: false }); // 전력 집계 표시 설정
 
   const load = async () => {
     try { setData(await fetchJson('/admin/idrac')); setError(null); }
@@ -41,11 +42,13 @@ export default function IdracAdmin() {
   };
   const loadDash = (hours = dashHours) => fetchJson('/admin/idrac/power-dashboard', { hours }).then(setDash).catch(() => {});
   const loadSources = () => fetchJson('/admin/idrac/power-sources').then(setSources).catch(() => {});
+  const loadPwSettings = () => fetchJson('/admin/idrac/power-settings').then((d) => setPwSettings(d.settings || { excludeUnmapped: false })).catch(() => {});
   useEffect(() => {
     load();
     fetchJson('/admin/idrac/scan-agents').then(setAgents).catch(() => {});
     fetchJson('/admin/vcenters').then((d) => setVcenters(d.vcenters || d || [])).catch(() => fetchJson('/vcenters').then((d) => setVcenters(d || [])).catch(() => {}));
     loadSources();
+    loadPwSettings();
     const t = setInterval(load, 30_000); // refresh current power/poller status
     const td = setInterval(() => { loadDash(); loadSources(); }, 30_000);
     return () => { clearInterval(t); clearInterval(td); };
@@ -160,6 +163,31 @@ export default function IdracAdmin() {
       setImportMsg(r.ok
         ? { ok: true, text: `${all ? '강제 전체 초기화' : '정리'} 완료 — 고아 이력 ${r.dbRemoved}건 · OME 캐시 ${r.omeCleared}건 · 원격 잔여 ${r.remoteCleared}건 삭제${delta}. 잠시 후 집계가 갱신됩니다.` }
         : { ok: false, text: r.reason });
+      await load(); await loadDash(); await loadSources();
+    } catch (e) { setImportMsg({ ok: false, text: e.message }); }
+    finally { setBusy(false); }
+  };
+
+  // 수집서버 → vCenter 매핑(미매핑 해소). 그 수집서버가 보고하는 원격 호스트가 해당 vCenter로 귀속된다.
+  const mapCollector = async (collectorId, vcenterId) => {
+    setBusy(true); setImportMsg(null);
+    try {
+      const r = await putJson(`/admin/idrac/collectors/${encodeURIComponent(collectorId)}`, { vcenterId });
+      const vcName = vcenterId ? (vcenters.find((v) => v.id === vcenterId)?.name || vcenterId) : '(해제)';
+      setImportMsg(r.ok ? { ok: true, text: `수집서버 '${collectorId}'의 원격 호스트를 vCenter ${vcName}(으)로 귀속했습니다. 다음 수집 주기에 반영됩니다.` } : { ok: false, text: r.reason });
+      await loadDash(); await loadSources();
+    } catch (e) { setImportMsg({ ok: false, text: e.message }); }
+    finally { setBusy(false); }
+  };
+
+  // vCenter 미매핑 측정 전력을 총합/보고/목록에서 제외(영구). 수집기가 다시 보내도 표시에서 빠진다.
+  const toggleExcludeUnmapped = async () => {
+    const next = !pwSettings.excludeUnmapped;
+    setBusy(true); setImportMsg(null);
+    try {
+      const r = await putJson('/admin/idrac/power-settings', { excludeUnmapped: next });
+      if (r.ok) setPwSettings(r.settings);
+      setImportMsg(r.ok ? { ok: true, text: next ? 'vCenter 미매핑 전력을 집계에서 제외했습니다(총합·전력 보고·목록 반영).' : '미매핑 제외를 해제했습니다(모든 측정 전력 포함).' } : { ok: false, text: r.reason });
       await load(); await loadDash(); await loadSources();
     } catch (e) { setImportMsg({ ok: false, text: e.message }); }
     finally { setBusy(false); }
@@ -335,11 +363,12 @@ export default function IdracAdmin() {
           <button className="logout-btn" style={{ padding: '9px 14px' }} disabled={busy} onClick={pollNow}>지금 수집</button>
           <button className="logout-btn" style={{ padding: '9px 14px', color: 'var(--amber)' }} disabled={busy} onClick={() => purgeStale('stale')} title="등록/활성 소스에 없는 오류·고아 전력 데이터(제거된 OME·수집서버 잔여, 고아 이력) 삭제">🧹 오류 전력 정리</button>
           <button className="logout-btn" style={{ padding: '9px 14px', color: 'var(--red)' }} disabled={busy} onClick={() => purgeStale('all')} title="등록 여부 무관하게 OME 디바이스 캐시·원격 호스트 전체 비우고 등록 iDRAC 외 전력 이력 삭제(등록된 OME/수집기가 있으면 다음 폴링에 재수집됨)">⚠️ 강제 전체 초기화</button>
+          <button className="logout-btn" style={{ padding: '9px 14px', color: pwSettings.excludeUnmapped ? 'var(--green, #22c55e)' : 'var(--amber)' }} disabled={busy} onClick={toggleExcludeUnmapped} title="vCenter에 귀속되지 않는(미매핑) 측정 전력을 총합·전력 보고·목록에서 제외/포함 (수집기가 다시 보내도 표시에서 빠짐)">{pwSettings.excludeUnmapped ? '☑ 미매핑 제외중' : '☐ 미매핑 제외'}</button>
           <button className="login-btn" style={{ flex: 'none', padding: '9px 16px' }} onClick={openAdd}>+ 서버 추가</button>
         </div>
       </div>
 
-      {sources && <PowerSources sources={sources} />}
+      {sources && <PowerSources sources={sources} vcenters={vcenters} onMapCollector={mapCollector} busy={busy} />}
 
       <div className="card" style={{ marginBottom: 12, padding: '10px 14px' }}>
         <div className="muted" style={{ fontSize: 12, lineHeight: 1.7 }}>
@@ -957,7 +986,7 @@ export function IdracDetailModal({ server, onClose }) {
 // '전력 보고 N대'가 어디서 오는지(iDRAC 등록 / OME 자동발견 / 원격 수집)를 분해해 보여준다.
 // 등록 iDRAC보다 훨씬 큰 수가 보일 때, 그 출처(어느 OME 연결·어느 수집서버)와 등록 여부를
 // 한눈에 확인하고 정리 방법을 안내한다. /admin/idrac/power-sources 응답을 렌더.
-function PowerSources({ sources }) {
+function PowerSources({ sources, vcenters = [], onMapCollector, busy }) {
   const s = sources || {};
   const bs = s.bySource || {};
   const omeEntries = s.ome?.entries || [];
@@ -1022,16 +1051,27 @@ function PowerSources({ sources }) {
             </div>
           )}
           {collectors.length > 0 && (
-            <div style={{ flex: '1 1 280px' }}>
-              <div className="muted" style={{ fontSize: 11.5, marginBottom: 4 }}>수집서버별 원격 호스트</div>
+            <div style={{ flex: '1 1 420px' }}>
+              <div className="muted" style={{ fontSize: 11.5, marginBottom: 4 }}>수집서버별 원격 호스트 — vCenter 매핑(미매핑 해소)</div>
               <table className="data-table" style={{ fontSize: 12, width: '100%' }}>
-                <thead><tr><th>수집서버</th><th>등록</th><th style={{ textAlign: 'right' }}>호스트</th></tr></thead>
+                <thead><tr><th>수집서버</th><th>등록</th><th style={{ textAlign: 'right' }}>호스트</th><th>귀속 vCenter</th></tr></thead>
                 <tbody>
                   {collectors.map((c) => (
                     <tr key={c.collectorId}>
                       <td>{c.name}</td>
                       <td>{c.registered ? <span style={{ color: '#22c55e' }}>등록</span> : <span style={{ color: 'var(--amber)' }}>해제됨</span>}</td>
                       <td style={{ textAlign: 'right' }}>{c.hosts}</td>
+                      <td>
+                        {c.registered && onMapCollector ? (
+                          <select value={c.vcenterId || ''} disabled={busy}
+                            onChange={(e) => onMapCollector(c.collectorId, e.target.value)}
+                            style={{ fontSize: 12, padding: '3px 6px', maxWidth: 200 }}
+                            title="이 수집서버가 보고하는 원격 호스트를 이 vCenter로 귀속">
+                            <option value="">(미매핑)</option>
+                            {vcenters.map((v) => <option key={v.id} value={v.id}>{v.name || v.id}</option>)}
+                          </select>
+                        ) : (c.vcenterId || <span className="muted">(미매핑)</span>)}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
