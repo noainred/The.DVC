@@ -8,6 +8,7 @@
  */
 
 import { config } from '../config.js';
+import { resilientFetch } from '../util/resilientFetch.js';
 import { scanForIdracs } from '../idrac/scan.js';
 import { registerScanned } from '../idrac/registry.js';
 import { pollNow } from '../idrac/poller.js';
@@ -21,14 +22,14 @@ function headers() {
 }
 
 async function postResult(payload) {
-  await fetch(`${config.agent.centralUrl}/api/central/idrac-scan-result`, {
-    method: 'POST', headers: headers(), body: JSON.stringify(payload), signal: AbortSignal.timeout(30_000),
+  await resilientFetch(`${config.agent.centralUrl}/api/central/idrac-scan-result`, {
+    method: 'POST', headers: headers(), body: JSON.stringify(payload), timeoutMs: 30_000, retries: 2,
   }).catch(() => {});
 }
 
 async function postProgress(reqId, scanned, total) {
-  await fetch(`${config.agent.centralUrl}/api/central/idrac-scan-progress`, {
-    method: 'POST', headers: headers(), body: JSON.stringify({ reqId, scanned, total }), signal: AbortSignal.timeout(10_000),
+  await resilientFetch(`${config.agent.centralUrl}/api/central/idrac-scan-progress`, {
+    method: 'POST', headers: headers(), body: JSON.stringify({ reqId, scanned, total }), timeoutMs: 10_000, retries: 2,
   }).catch(() => {});
 }
 
@@ -36,7 +37,7 @@ export async function runIdracScanWorkerOnce() {
   if (!config.agent.centralUrl) return null;
   try {
     const url = `${config.agent.centralUrl}/api/central/idrac-scan-jobs?agent=${encodeURIComponent(config.agent.name)}`;
-    const r = await fetch(url, { headers: headers(), signal: AbortSignal.timeout(15_000) });
+    const r = await resilientFetch(url, { headers: headers(), timeoutMs: 15_000, retries: 2 });
     if (!r.ok) return null;
     const { jobs } = await r.json();
     if (!jobs || !jobs.length) return null;

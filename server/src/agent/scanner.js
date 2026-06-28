@@ -7,6 +7,7 @@
  */
 
 import { config } from '../config.js';
+import { resilientFetch } from '../util/resilientFetch.js';
 import { scanForIdracs } from '../idrac/scan.js';
 import { registerScanned } from '../idrac/registry.js';
 import { pollNow } from '../idrac/poller.js';
@@ -20,14 +21,14 @@ function headers() {
 
 async function pullAssignment() {
   const url = `${config.agent.centralUrl}/api/central/assignment?agent=${encodeURIComponent(config.agent.name)}`;
-  const res = await fetch(url, { headers: headers(), signal: AbortSignal.timeout(20_000) });
+  const res = await resilientFetch(url, { headers: headers(), timeoutMs: 20_000, retries: 2 });
   if (!res.ok) throw new Error(`assignment -> ${res.status}`);
   return res.json();
 }
 
 async function postResult(payload) {
   const url = `${config.agent.centralUrl}/api/central/result`;
-  await fetch(url, { method: 'POST', headers: headers(), body: JSON.stringify(payload), signal: AbortSignal.timeout(30_000) });
+  await resilientFetch(url, { method: 'POST', headers: headers(), body: JSON.stringify(payload), timeoutMs: 30_000, retries: 2 });
 }
 
 export async function runAgentScan() {

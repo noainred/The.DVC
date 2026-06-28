@@ -7,6 +7,7 @@
  */
 
 import { config } from '../config.js';
+import { resilientFetch } from '../util/resilientFetch.js';
 import { scanRanges } from '../ipam/scan.js';
 
 let timer = null;
@@ -20,15 +21,15 @@ export async function runIpScanAgentOnce() {
   if (!config.agent.centralUrl) return null;
   try {
     const url = `${config.agent.centralUrl}/api/central/ip-scan-assignment?agent=${encodeURIComponent(config.agent.name)}`;
-    const aRes = await fetch(url, { headers: headers(), signal: AbortSignal.timeout(20_000) });
+    const aRes = await resilientFetch(url, { headers: headers(), timeoutMs: 20_000, retries: 2 });
     if (!aRes.ok) throw new Error(`assignment ${aRes.status}`);
     const a = await aRes.json();
     if (!a?.assigned) { last = { at: Date.now(), assigned: false }; return last; }
     const { alive, scanned } = await scanRanges(a.ranges, {
       ports: a.ports, concurrency: a.concurrency, timeoutMs: a.timeoutMs, reverseDns: a.reverseDns,
     });
-    await fetch(`${config.agent.centralUrl}/api/central/ip-scan-result`, {
-      method: 'POST', headers: headers(), body: JSON.stringify({ agent: config.agent.name, alive, scanned }), signal: AbortSignal.timeout(30_000),
+    await resilientFetch(`${config.agent.centralUrl}/api/central/ip-scan-result`, {
+      method: 'POST', headers: headers(), body: JSON.stringify({ agent: config.agent.name, alive, scanned }), timeoutMs: 30_000, retries: 2,
     });
     last = { at: Date.now(), assigned: true, scanned, alive: alive.length };
     return last;

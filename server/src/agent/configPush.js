@@ -6,6 +6,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { resilientFetch } from '../util/resilientFetch.js';
 import { collectConfigDir } from '../backup/service.js';
 
 let timer = null;
@@ -20,9 +21,9 @@ export async function pushConfigNow() {
   if (!config.agent.centralUrl) return null;
   try {
     const files = collectConfigDir(); // 자기 설정(*.json/*.env), 대용량 데이터 제외
-    const res = await fetch(`${config.agent.centralUrl}/api/central/agent-config`, {
+    const res = await resilientFetch(`${config.agent.centralUrl}/api/central/agent-config`, {
       method: 'POST', headers: headers(),
-      body: JSON.stringify({ agent: config.agent.name, files }), signal: AbortSignal.timeout(20_000),
+      body: JSON.stringify({ agent: config.agent.name, files }), timeoutMs: 20_000, retries: 2,
     });
     if (res.ok) console.log(`[config-push] sent → ${config.agent.centralUrl} (${Object.keys(files).length}개 설정)`);
     return res.ok;

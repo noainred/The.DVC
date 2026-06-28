@@ -11,6 +11,7 @@
  */
 
 import { config } from '../config.js';
+import { resilientFetch } from '../util/resilientFetch.js';
 import { getGuestGpuVms, getGuestGpuAllHosts } from '../gpu/store.js';
 import { getGpuGuestDiag } from '../gpu/poller.js';
 
@@ -28,8 +29,8 @@ export async function pushGpuGuestNow() {
   const diag = getGpuGuestDiag(); // 선별 깔때기 + VM별 성공/실패(웹 '수집 진단'에서 표시)
   // 진단은 데이터가 없어도(=어디서 막혔는지가 핵심) 항상 보낸다.
   try {
-    const res = await fetch(`${config.agent.centralUrl}/api/central/gpu-guest-data`, {
-      method: 'POST', headers: headers(), body: JSON.stringify({ agent: config.agent.name, hosts, vms, diag }), signal: AbortSignal.timeout(30_000),
+    const res = await resilientFetch(`${config.agent.centralUrl}/api/central/gpu-guest-data`, {
+      method: 'POST', headers: headers(), body: JSON.stringify({ agent: config.agent.name, hosts, vms, diag }), timeoutMs: 30_000, retries: 2,
     });
     if (!res.ok) throw new Error(`gpu-guest -> ${res.status}`);
     last = { at: Date.now(), hosts: hosts.length, vms: vms.length };

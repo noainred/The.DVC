@@ -5,6 +5,7 @@
  */
 
 import { config, loadVcenterConfig } from '../config.js';
+import { resilientFetch } from '../util/resilientFetch.js';
 import { getLogsDb } from '../logs/db.js';
 
 let timer = null;
@@ -20,7 +21,7 @@ export async function runLogQueryWorkerOnce() {
   if (!vcIds.length) return null;
   try {
     const url = `${config.agent.centralUrl}/api/central/log-queries?vcenters=${encodeURIComponent(vcIds.join(','))}`;
-    const r = await fetch(url, { headers: headers(), signal: AbortSignal.timeout(15_000) });
+    const r = await resilientFetch(url, { headers: headers(), timeoutMs: 15_000, retries: 2 });
     if (!r.ok) return null;
     const { queries } = await r.json();
     if (!queries || !queries.length) return null;
@@ -29,8 +30,8 @@ export async function runLogQueryWorkerOnce() {
       const f = q.filter || {};
       let total = 0, rows = [];
       try { total = db.count(f); rows = db.query(f, f.limit || 200, 0); } catch (e) { /* 빈 결과 보고 */ }
-      await fetch(`${config.agent.centralUrl}/api/central/log-query-result`, {
-        method: 'POST', headers: headers(), body: JSON.stringify({ reqId: q.reqId, vcenterId: q.vcenterId, total, rows, dbKind: db.kind }), signal: AbortSignal.timeout(15_000),
+      await resilientFetch(`${config.agent.centralUrl}/api/central/log-query-result`, {
+        method: 'POST', headers: headers(), body: JSON.stringify({ reqId: q.reqId, vcenterId: q.vcenterId, total, rows, dbKind: db.kind }), timeoutMs: 15_000, retries: 2,
       }).catch(() => {});
       console.log(`[logq-agent] ${q.vcenterId}: ${rows.length}/${total}건 응답`);
     }

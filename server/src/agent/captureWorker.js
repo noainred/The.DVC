@@ -5,6 +5,7 @@
  */
 
 import { config } from '../config.js';
+import { resilientFetch } from '../util/resilientFetch.js';
 import { runTrafficCapture, runDualCapture } from '../net/tcpdump.js';
 
 let timer = null;
@@ -19,7 +20,7 @@ export async function runCaptureWorkerOnce() {
   if (!config.agent.centralUrl || busy) return null;
   try {
     const url = `${config.agent.centralUrl}/api/central/capture-jobs?agent=${encodeURIComponent(config.agent.name)}`;
-    const r = await fetch(url, { headers: headers(), signal: AbortSignal.timeout(15_000) });
+    const r = await resilientFetch(url, { headers: headers(), timeoutMs: 15_000, retries: 2 });
     if (!r.ok) return null;
     const { jobs } = await r.json();
     if (!jobs || !jobs.length) return null;
@@ -38,8 +39,8 @@ export async function runCaptureWorkerOnce() {
             });
           }
         } catch (e) { result = { ok: false, reason: e.message }; }
-        await fetch(`${config.agent.centralUrl}/api/central/capture-result`, {
-          method: 'POST', headers: headers(), body: JSON.stringify({ reqId: job.reqId, result }), signal: AbortSignal.timeout(20_000),
+        await resilientFetch(`${config.agent.centralUrl}/api/central/capture-result`, {
+          method: 'POST', headers: headers(), body: JSON.stringify({ reqId: job.reqId, result }), timeoutMs: 20_000, retries: 2,
         }).catch(() => {});
         console.log(`[capture-agent] 캡처 완료 reqId=${job.reqId}${result?.dual ? ' (dual)' : ''}`);
       }

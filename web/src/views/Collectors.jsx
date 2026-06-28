@@ -62,9 +62,10 @@ export default function Collectors() {
     setBusy(true); setMsg(null);
     try {
       const r = await postJson('/admin/collectors/test', form);
+      const retryNote = r.retried ? ` · 재시도 ${r.retried}회` : '';
       setMsg(r.ok
-        ? { ok: true, text: `연결 성공 (${r.ms}ms) · 호스트 ${r.hosts ?? '—'}대 · v${r.version || '?'}${r.datacenter ? ` · ${r.datacenter}` : ''}` }
-        : { ok: false, text: `연결 실패: ${r.reason}` });
+        ? { ok: true, text: `연결 성공 (${r.ms}ms${retryNote}) · 호스트 ${r.hosts ?? '—'}대 · v${r.version || '?'}${r.datacenter ? ` · ${r.datacenter}` : ''}` }
+        : { ok: false, text: `연결 실패: ${r.reason}${r.retried ? ` (재시도 ${r.retried}회 후)` : ''}` });
     } catch (e) { setMsg({ ok: false, text: e.message }); }
     finally { setBusy(false); }
   };
@@ -106,7 +107,7 @@ export default function Collectors() {
       case 'name': return c.name || '';
       case 'datacenter': return c.datacenter || '';
       case 'url': return c.url || '';
-      case 'state': return s.ok === true ? 2 : (s.ok === false ? 0 : 1); // 오류<대기<정상
+      case 'state': return s.ok ? (s.degraded ? 1.5 : 2) : (s.ok === false ? 0 : 1); // 오류<대기<저하<정상
       case 'hosts': return s.ok ? (s.hosts || 0) : -1;
       case 'version': return s.version || '';
       case 'sync': return s.at || 0;
@@ -170,7 +171,10 @@ export default function Collectors() {
                   <td>{c.name}</td>
                   <td>{c.datacenter ? <span className="badge blue">{c.datacenter}</span> : <span className="muted">—</span>}</td>
                   <td className="muted">{c.url}</td>
-                  <td>{!s ? <span className="badge gray">대기</span> : s.ok ? <span className="badge green">정상</span> : <span className="badge red" title={s.error}>오류</span>}</td>
+                  <td>{!s ? <span className="badge gray">대기</span>
+                    : (s.ok && s.degraded) ? <span className="badge amber" title={`일시적 연결 오류: ${s.error || ''} — 직전 데이터·온라인 유지 중(연속 실패 ${s.fails || 1}회). 한 번 더 실패하면 '오류'로 내려갑니다.`}>저하</span>
+                      : s.ok ? <span className="badge green">정상</span>
+                        : <span className="badge red" title={s.error}>오류</span>}</td>
                   <td className="tabular">{s?.ok ? (s.hosts ?? 0).toLocaleString() : '—'}</td>
                   <td className="muted">
                     {s?.version ? <>v{s.version}{central && s.version !== central && <span className="badge amber" style={{ marginLeft: 6 }} title={`중앙 v${central}`}>구버전</span>}</> : '—'}

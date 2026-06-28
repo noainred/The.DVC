@@ -7,6 +7,7 @@
  */
 
 import { config, loadVcenterConfig } from '../config.js';
+import { resilientFetch } from '../util/resilientFetch.js';
 import { pingMany } from '../util/ping.js';
 
 let timer = null;
@@ -22,15 +23,15 @@ export async function runPingWorkerOnce() {
   if (!vcIds.length) return null;
   try {
     const url = `${config.agent.centralUrl}/api/central/ping-jobs?vcenters=${encodeURIComponent(vcIds.join(','))}`;
-    const r = await fetch(url, { headers: headers(), signal: AbortSignal.timeout(15_000) });
+    const r = await resilientFetch(url, { headers: headers(), timeoutMs: 15_000, retries: 2 });
     if (!r.ok) return null;
     const { jobs } = await r.json();
     if (!jobs || !Object.keys(jobs).length) return null;
     for (const [vcenterId, ips] of Object.entries(jobs)) {
       if (!Array.isArray(ips) || !ips.length) continue;
       const results = await pingMany(ips, { timeoutMs: 1500, concurrency: 8 });
-      await fetch(`${config.agent.centralUrl}/api/central/ping-result`, {
-        method: 'POST', headers: headers(), body: JSON.stringify({ vcenterId, results }), signal: AbortSignal.timeout(15_000),
+      await resilientFetch(`${config.agent.centralUrl}/api/central/ping-result`, {
+        method: 'POST', headers: headers(), body: JSON.stringify({ vcenterId, results }), timeoutMs: 15_000, retries: 2,
       }).catch(() => {});
       console.log(`[ping-agent] ${vcenterId}: ${results.filter((x) => x.alive).length}/${results.length} 응답`);
     }
