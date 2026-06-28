@@ -28,3 +28,13 @@ export function allOmeDevices() {
   }
   return out;
 }
+
+/** 등록되지 않은(제거된) OME 항목의 캐시를 제거 — 전력 보고 수에 유령으로 잡히는 것 방지.
+ *  activeEntryIds(Set)에 없는 entryId의 디바이스 캐시를 비운다. 제거된 디바이스 총수를 반환. */
+export function clearOmeExcept(activeEntryIds) {
+  let removed = 0;
+  for (const [entryId, v] of [...cache]) {
+    if (!activeEntryIds.has(entryId)) { removed += (v.devices || []).length; cache.delete(entryId); }
+  }
+  return removed;
+}

@@ -42,9 +42,13 @@ function initSqlite() {
     // 집계(전력 대시보드): 서버별 24h 피크/평균/최소/마지막 + 시간버킷 평균 — SQL GROUP BY로 효율 계산.
     const statsStmt = db.prepare('SELECT server_id, MAX(watts) AS peak, MIN(watts) AS minw, AVG(watts) AS avgw, MAX(ts) AS last, COUNT(*) AS n FROM power_samples WHERE ts >= ? GROUP BY server_id');
     const bucketStmt = db.prepare('SELECT server_id, CAST(ts / ? AS INTEGER) AS bk, AVG(watts) AS avgw FROM power_samples WHERE ts >= ? GROUP BY server_id, bk');
+    const idsStmt = db.prepare('SELECT DISTINCT server_id AS id FROM power_samples');
+    const delOneStmt = db.prepare('DELETE FROM power_samples WHERE server_id = ?');
     return {
       kind: 'sqlite',
       insert: (serverId, watts, ts) => insertStmt.run(serverId, watts, ts),
+      serverIds: () => idsStmt.all().map((r) => r.id),
+      deleteServers: (ids) => { let n = 0; db.exec('BEGIN'); try { for (const id of ids) n += delOneStmt.run(id).changes || 0; db.exec('COMMIT'); } catch (e) { try { db.exec('ROLLBACK'); } catch { /* */ } throw e; } return n; },
       latest: (serverId) => latestStmt.get(serverId) || null,
       latestAll: () => {
         const map = new Map();
@@ -73,6 +77,7 @@ function initJsonFallback() {
       try { const r = JSON.parse(line); if (r && r.s) rows.push(r); } catch { /* skip */ }
     }
   }
+  const rewrite = () => { try { fs.writeFileSync(file, rows.map((r) => JSON.stringify(r)).join('\n') + '\n', { mode: 0o600 }); } catch { /* best effort */ } };
   return {
     kind: 'json',
     insert: (serverId, watts, ts) => {
@@ -80,6 +85,8 @@ function initJsonFallback() {
       rows.push(r);
       try { fs.appendFileSync(file, JSON.stringify(r) + '\n', { mode: 0o600 }); } catch { /* best effort */ }
     },
+    serverIds: () => [...new Set(rows.map((r) => r.s))],
+    deleteServers: (ids) => { const set = new Set(ids); const before = rows.length; rows = rows.filter((r) => !set.has(r.s)); const n = before - rows.length; if (n) rewrite(); return n; },
     latest: (serverId) => {
       let best = null;
       for (const r of rows) if (r.s === serverId && (!best || r.t > best.ts)) best = { watts: r.w, ts: r.t };

@@ -36,6 +36,20 @@ test('statsSince: sinceTs 이전 샘플은 제외', () => {
   assert.equal(m.get('srvA').avg, 150);
 });
 
+test('serverIds/deleteServers: 고아 server_id 삭제(활성 보존)', () => {
+  const base = 4_000_000_000_000;
+  db.insert('keep1', 100, base + 1);
+  db.insert('orphanA', 100, base + 1);
+  db.insert('orphanB', 100, base + 1);
+  const ids = db.serverIds();
+  assert.ok(ids.includes('keep1') && ids.includes('orphanA') && ids.includes('orphanB'));
+  const removed = db.deleteServers(['orphanA', 'orphanB']);
+  assert.equal(removed >= 2, true);
+  const after = db.serverIds();
+  assert.ok(after.includes('keep1'));
+  assert.ok(!after.includes('orphanA') && !after.includes('orphanB'));
+});
+
 test('bucketsSince: 시간 버킷별 서버 평균', () => {
   const base = 3_000_000_000_000;
   const H = 3_600_000;

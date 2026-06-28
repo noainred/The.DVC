@@ -82,7 +82,7 @@ import { expandIpList } from '../idrac/iprange.js';
 import { scanForIdracs } from '../idrac/scan.js';
 import { enqueueIdracScan, enqueueIdracRegister, getIdracScanResult } from '../central/idracScanJobs.js';
 import { getPollerStatus, pollNow } from '../idrac/poller.js';
-import { allMeasuredPower, buildPowerDashboard } from '../idrac/service.js';
+import { allMeasuredPower, buildPowerDashboard, purgeStalePower } from '../idrac/service.js';
 import { computeFinOps, loadFinopsConfig } from '../insights/finops.js';
 import { getInventory as getIdracInventory } from '../idrac/invCache.js';
 import { getSensorSeries } from '../idrac/sensorStore.js';
@@ -953,6 +953,16 @@ adminRouter.get('/idrac/power-dashboard', adminOnly, async (req, res) => {
       } : null,
       psu: { healthy: psuHealthy, degraded: psuDegraded, noRedundancy, issues: psuIssues.slice(0, 20) },
     });
+  } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+});
+
+// 오류/고아 전력 데이터 정리 — '전력 보고' 수가 등록 수보다 비정상적으로 많을 때(제거된 OME/수집서버
+// 잔여, 고아 DB 행) 정리한다. 활성 소스(등록 iDRAC·활성 OME·활성 수집서버)는 보존.
+adminRouter.post('/idrac/power-purge', adminOnly, async (req, res) => {
+  try {
+    const r = await purgeStalePower();
+    logAudit({ user: req.user?.username, action: '전력 데이터 정리(고아 삭제)', target: `DB ${r.dbRemoved} · OME ${r.omeCleared} · 원격 ${r.remoteCleared}` });
+    res.json({ ok: true, ...r });
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 

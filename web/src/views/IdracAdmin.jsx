@@ -141,6 +141,21 @@ export default function IdracAdmin() {
     finally { setBusy(false); }
   };
 
+  // 오류/고아 전력 데이터 정리 — '전력 보고' 수가 등록 수보다 비정상적으로 많을 때(제거된 OME/수집서버
+  // 잔여, 고아 DB 행). 활성 소스는 보존.
+  const purgeStale = async () => {
+    if (!window.confirm('등록/활성 소스에 속하지 않는 오류·고아 전력 데이터(제거된 OME·수집서버 잔여, 고아 이력)를 삭제할까요?\n현재 등록된 서버·활성 수집은 보존됩니다.')) return;
+    setBusy(true); setImportMsg(null);
+    try {
+      const r = await postJson('/admin/idrac/power-purge', {});
+      setImportMsg(r.ok
+        ? { ok: true, text: `정리 완료 — 고아 이력 ${r.dbRemoved}건 · OME 캐시 ${r.omeCleared}건 · 원격 잔여 ${r.remoteCleared}건 삭제 (활성 ${r.activeKept}건 보존). 잠시 후 집계가 갱신됩니다.` }
+        : { ok: false, text: r.reason });
+      await load(); await loadDash();
+    } catch (e) { setImportMsg({ ok: false, text: e.message }); }
+    finally { setBusy(false); }
+  };
+
   const onImportFile = async (e) => {
     const file = e.target.files?.[0];
     e.target.value = '';
@@ -309,6 +324,7 @@ export default function IdracAdmin() {
           <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={() => { setCsvText(''); }}>CSV 붙여넣기</button>
           <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={() => { setBulk({ ips: '', username: 'root', password: '', namePrefix: '' }); setBulkPreview(null); setScanResult(null); }}>IP 일괄 등록</button>
           <button className="logout-btn" style={{ padding: '9px 14px' }} disabled={busy} onClick={pollNow}>지금 수집</button>
+          <button className="logout-btn" style={{ padding: '9px 14px', color: 'var(--amber)' }} disabled={busy} onClick={purgeStale} title="등록/활성 소스에 없는 오류·고아 전력 데이터(제거된 OME·수집서버 잔여, 고아 이력) 삭제">🧹 오류 전력 정리</button>
           <button className="login-btn" style={{ flex: 'none', padding: '9px 16px' }} onClick={openAdd}>+ 서버 추가</button>
         </div>
       </div>

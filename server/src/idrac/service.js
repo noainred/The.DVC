@@ -6,9 +6,10 @@
 
 import { loadRegistry, matchKeys } from './registry.js';
 import { getDb } from './db.js';
-import { allOmeDevices, dbKey } from './omeCache.js';
+import { allOmeDevices, dbKey, clearOmeExcept } from './omeCache.js';
 import { getInventory } from './invCache.js';
-import { remotePowerByHost } from '../collector/state.js';
+import { remotePowerByHost, clearStaleRemote } from '../collector/state.js';
+import { loadCollectors } from '../collector/registry.js';
 
 // 서버의 모델/서비스태그를 인벤토리(Redfish)·레지스트리에서 최선의 값으로 해석.
 function serverIdentity(serverId, entry) {
@@ -146,6 +147,35 @@ export async function allMeasuredPower() {
     tryAdd({ serverId: id, serverName: r.serverName || host, watts: r.watts, ts: r.ts, host: norm(host), hostNames, model: (r.model || '').trim(), serviceTag: r.serviceTag || '', source: 'remote' }, r.serviceTag, [host].filter(Boolean));
   }
   return out;
+}
+
+/**
+ * 오류/고아 전력 데이터 정리 — '전력 보고' 수가 등록 서버 수보다 비정상적으로 많을 때 사용.
+ * (1) 제거된 OME의 디바이스 캐시, (2) 등록 해제된 수집서버가 남긴 원격 호스트(in-memory),
+ * (3) 현재 활성 소스(등록 iDRAC·활성 OME 디바이스·활성 원격 호스트)에 속하지 않는 전력 DB 행을 삭제한다.
+ * 활성 소스는 보존한다. { dbRemoved, omeCleared, remoteCleared, activeKept } 반환.
+ */
+export async function purgeStalePower() {
+  const reg = loadRegistry();
+  const omeEntryIds = new Set(reg.filter((s) => s.type === 'ome').map((s) => s.id));
+  const idracIds = new Set(reg.filter((s) => s.type !== 'ome').map((s) => s.id));
+  // 1) 제거된 OME 캐시 비우기, 2) 등록 해제 수집서버의 원격 호스트 비우기.
+  const omeCleared = clearOmeExcept(omeEntryIds);
+  const activeCollectors = new Set(loadCollectors().map((c) => c.id));
+  const remoteCleared = clearStaleRemote(activeCollectors);
+  // 3) 전력 DB에서 활성 소스에 없는 server_id 삭제.
+  const active = new Set(idracIds);
+  for (const { entryId, device } of allOmeDevices()) active.add(dbKey(entryId, device)); // 활성 OME 디바이스 키
+  for (const host of remotePowerByHost().keys()) active.add(`rmt:${host}`);               // 활성 원격 호스트 키
+  let dbRemoved = 0;
+  try {
+    const db = await getDb();
+    if (db.serverIds && db.deleteServers) {
+      const orphans = db.serverIds().filter((id) => !active.has(id));
+      dbRemoved = db.deleteServers(orphans);
+    }
+  } catch { /* best effort */ }
+  return { dbRemoved, omeCleared, remoteCleared, activeKept: active.size };
 }
 
 /**
