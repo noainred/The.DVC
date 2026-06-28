@@ -10,6 +10,7 @@
 
 import { config } from '../config.js';
 import { store } from '../store.js';
+import { resilientFetch } from '../util/resilientFetch.js';
 
 let timer = null;
 let last = null; // { at, sent, errors }
@@ -30,8 +31,10 @@ async function pushVcenter(snap, vc) {
     alarms: snap.alarms.filter((a) => a.vcenterId === vc.id),
     generatedAt: snap.generatedAt,
   };
-  const res = await fetch(`${config.agent.centralUrl}/api/central/inventory`, {
-    method: 'POST', headers: headers(), body: JSON.stringify(slice), signal: AbortSignal.timeout(60_000),
+  // 대용량 인벤토리 + 고RTT를 고려해 타임아웃을 넉넉히, 일시 오류는 1회 재시도(중복 push는 멱등).
+  const res = await resilientFetch(`${config.agent.centralUrl}/api/central/inventory`, {
+    method: 'POST', headers: headers(), body: JSON.stringify(slice),
+    timeoutMs: Number(process.env.AGENT_PUSH_TIMEOUT_MS) || 120_000, retries: 1,
   });
   if (!res.ok) throw new Error(`inventory -> ${res.status}`);
 }

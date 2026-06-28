@@ -89,6 +89,7 @@ import { listCollectors, addCollector, updateCollector, removeCollector, loadCol
 import { allCollectorStatus, getCollectorStatus } from '../collector/state.js';
 import { pullNow } from '../collector/puller.js';
 import { pushUpgradeToCollectors } from '../collector/upgradePush.js';
+import { resilientFetch } from '../util/resilientFetch.js';
 import { resolveBundleBytes } from '../upgrade/bundleSource.js';
 import { upgradeManager } from '../upgrade/manager.js';
 import {
@@ -1285,16 +1286,19 @@ adminRouter.post('/collectors/test', adminOnly, async (req, res) => {
   if (!url) return res.status(400).json({ ok: false, reason: 'url이 필요합니다.' });
   if (!/^https?:\/\//.test(url)) url = `http://${url}`;
   const started = Date.now();
+  let retried = 0;
   try {
-    const r = await fetch(`${url.replace(/\/+$/, '')}/api/collector/export`, {
+    // 단발 fetch는 고RTT·일시적 네트워크 블립에 '가끔 연결 안 됨'으로 오판된다 → 재시도로 흡수.
+    const r = await resilientFetch(`${url.replace(/\/+$/, '')}/api/collector/export`, {
       headers: { Accept: 'application/json', ...(token ? { 'X-Collector-Token': token } : {}) },
-      signal: AbortSignal.timeout(config.collector.timeoutMs),
+      timeoutMs: config.collector.timeoutMs, retries: 2,
+      onRetry: () => { retried++; },
     });
-    if (!r.ok) return res.json({ ok: false, reason: `HTTP ${r.status}`, ms: Date.now() - started });
+    if (!r.ok) return res.json({ ok: false, reason: `HTTP ${r.status}`, ms: Date.now() - started, retried });
     const data = await r.json();
-    res.json({ ok: true, ms: Date.now() - started, hosts: data.hosts, version: data.version, datacenter: data.datacenter });
+    res.json({ ok: true, ms: Date.now() - started, retried, hosts: data.hosts, version: data.version, datacenter: data.datacenter });
   } catch (err) {
-    res.json({ ok: false, reason: err.message, ms: Date.now() - started });
+    res.json({ ok: false, reason: err.message, ms: Date.now() - started, retried });
   }
 });
 

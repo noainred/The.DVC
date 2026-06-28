@@ -1,0 +1,66 @@
+/**
+ * 크로스-WAN(중앙↔수집서버/에이전트) 호출용 견고한 fetch.
+ *
+ * 중앙포탈이 엣지(수집서버)에 연결하거나 에이전트가 중앙에 push할 때, 고RTT(폴란드·미국동부
+ * 800ms+)·NAT/방화벽 유휴 타임아웃·일시적 패킷손실로 '가끔' 연결이 실패한다. 단발 fetch는
+ * 그 한 번의 일시 오류로 곧장 '연결 안 됨'이 되어 버린다(재시도 없음).
+ *
+ * 이 헬퍼는:
+ *  1) 전용 디스패처로 vCenter 폴링 커넥션 풀과 분리 — vCenter 폴링이 풀을 포화시켜
+ *     수집서버 연결이 굶는 현상을 막는다.
+ *  2) keep-alive를 짧게 둬서 NAT 유휴 타임아웃으로 '죽은' 소켓을 재사용하다 나는
+ *     ECONNRESET 빈도를 줄인다(잔여분은 재시도로 흡수).
+ *  3) 일시적 오류(연결 리셋/타임아웃/5xx 게이트웨이)는 지수 백오프로 재시도한다.
+ */
+
+import { Agent } from 'undici';
+
+// 수집서버/중앙도 자체서명 인증서일 수 있어 전역(vCenter)과 동일하게 검증 off. 단 커넥션 풀은 분리.
+const wanAgent = new Agent({
+  connect: { rejectUnauthorized: process.env.WAN_TLS_INSECURE === 'false' ? true : false },
+  connectTimeout: Number(process.env.WAN_CONNECT_TIMEOUT_MS) || 20_000,
+  keepAliveTimeout: 10_000,
+  keepAliveMaxTimeout: 30_000,
+});
+
+const TRANSIENT_RE = /timed?\s?out|timeout|abort|reset|hang ?up|ECONNRESET|ECONNREFUSED|EAI_AGAIN|ENOTFOUND|EPIPE|ETIMEDOUT|other side closed|socket|UND_ERR/i;
+function isTransientErr(err) {
+  const parts = [err?.code, err?.message, err?.name, err?.cause?.code, err?.cause?.message].filter(Boolean).join(' ');
+  return TRANSIENT_RE.test(parts);
+}
+const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * 고RTT·간헐 네트워크에 견디는 fetch. 일시 오류는 지수 백오프로 재시도한다.
+ * @param {string} url
+ * @param {object} opts - { timeoutMs=20000, retries=2, retryBackoffMs=400, onRetry, ...fetchInit }
+ * @returns {Promise<Response>} 최종 응답(성공 또는 재시도 소진 후의 마지막 응답). 연결 자체가
+ *          끝까지 실패하면 마지막 오류를 throw 한다.
+ */
+export async function resilientFetch(url, { timeoutMs = 20_000, retries = 2, retryBackoffMs = 400, onRetry, ...init } = {}) {
+  let lastErr;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(url, { ...init, dispatcher: wanAgent, signal: AbortSignal.timeout(timeoutMs) });
+      if (RETRYABLE_STATUS.has(res.status) && attempt < retries) {
+        onRetry?.({ attempt: attempt + 1, status: res.status });
+        await sleep(retryBackoffMs * 2 ** attempt);
+        continue;
+      }
+      return res;
+    } catch (err) {
+      lastErr = err;
+      if (attempt < retries && isTransientErr(err)) {
+        onRetry?.({ attempt: attempt + 1, error: err.message });
+        await sleep(retryBackoffMs * 2 ** attempt);
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastErr;
+}
+
+// 테스트/진단용 노출.
+export const _internals = { isTransientErr, RETRYABLE_STATUS, wanAgent };

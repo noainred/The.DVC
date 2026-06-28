@@ -10,13 +10,17 @@ import { loadCollectors } from './registry.js';
 import { setRemoteHost, clearCollectorHosts, setCollectorStatus } from './state.js';
 import { getDb } from '../idrac/db.js';
 import { describeError } from '../util/errors.js';
+import { resilientFetch } from '../util/resilientFetch.js';
 
 let timer = null;
+const fails = new Map(); // collectorId -> 연속 실패 사이클 수(상태 깜빡임 방지용)
 
 async function pullOne(c) {
-  const res = await fetch(`${c.url}/api/collector/export`, {
+  // 고RTT·일시적 네트워크 오류는 재시도로 흡수(단발 실패로 '연결 안 됨' 되는 문제 해결).
+  const res = await resilientFetch(`${c.url}/api/collector/export`, {
     headers: { Accept: 'application/json', ...(c.token ? { 'X-Collector-Token': c.token } : {}) },
-    signal: AbortSignal.timeout(config.collector.timeoutMs),
+    timeoutMs: config.collector.timeoutMs, retries: 2,
+    onRetry: (i) => console.warn(`[collector] ${c.id} 재시도 ${i.attempt} (${i.error || 'HTTP ' + i.status})`),
   });
   if (res.status === 401 || res.status === 403) throw new Error('수집 서버 토큰 불일치(인증 실패)');
   if (!res.ok) throw new Error(`export -> ${res.status} ${res.statusText}`);
@@ -41,11 +45,21 @@ export async function pullNow() {
   await Promise.all(collectors.map(async (c) => {
     try {
       const r = await pullOne(c);
+      fails.set(c.id, 0);
       setCollectorStatus(c.id, { ok: true, hosts: r.hosts, version: r.version, datacenter: r.datacenter, error: null });
     } catch (err) {
       const d = describeError(err);
-      setCollectorStatus(c.id, { ok: false, error: d.message });
-      console.warn(`[collector] ${c.id} pull 실패: ${d.message}`);
+      const isAuth = /인증 실패|토큰/.test(d.message);
+      const n = (fails.get(c.id) || 0) + 1;
+      fails.set(c.id, n);
+      // 깜빡임 방지: 한 사이클(이미 내부 재시도 포함)만 실패하면 '저하(degraded)'로 두고 직전 데이터·온라인을
+      // 유지한다. 두 사이클 연속(또는 명백한 인증 실패) 실패해야 '연결 안 됨'으로 내린다.
+      if (n >= 2 || isAuth) {
+        setCollectorStatus(c.id, { ok: false, error: d.message, fails: n });
+      } else {
+        setCollectorStatus(c.id, { ok: true, degraded: true, error: d.message, fails: n });
+      }
+      console.warn(`[collector] ${c.id} pull 실패(${n}): ${d.message}`);
     }
   }));
 }
