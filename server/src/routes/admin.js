@@ -82,6 +82,8 @@ import { expandIpList } from '../idrac/iprange.js';
 import { scanForIdracs } from '../idrac/scan.js';
 import { enqueueIdracScan, enqueueIdracRegister, getIdracScanResult } from '../central/idracScanJobs.js';
 import { getPollerStatus, pollNow } from '../idrac/poller.js';
+import { allMeasuredPower, buildPowerDashboard } from '../idrac/service.js';
+import { computeFinOps, loadFinopsConfig } from '../insights/finops.js';
 import { getInventory as getIdracInventory } from '../idrac/invCache.js';
 import { getSensorSeries } from '../idrac/sensorStore.js';
 import { fetchInventory as fetchIdracInventory, fetchSensors as fetchIdracSensors, probeGpuTelemetry } from '../idrac/redfish.js';
@@ -918,6 +920,42 @@ adminRouter.post('/idrac/poll', adminOnly, async (_req, res) => {
 });
 
 // 서버 분석 — 전체 iDRAC의 PSU(전원공급장치)를 평탄화(용량/출력/상태 정렬용) + 용량별 집계.
+// 전력 대시보드 — 플릿 KPI(현재/피크/평균·에너지/비용/CO2) + 시간추세 + 서버별 24h 통계 +
+// vCenter 롤업 + PSU 헬스 요약. 한 번의 호출로 메뉴 상단 대시보드를 그린다.
+adminRouter.get('/idrac/power-dashboard', adminOnly, async (req, res) => {
+  try {
+    const hours = Number(req.query.hours) || 24;
+    const measured = await allMeasuredPower();
+    const dash = await buildPowerDashboard(measured, { hours });
+    // 에너지/비용/CO2(기존 FinOps 재사용) + vCenter 이름 매핑.
+    let finops = null; try { finops = computeFinOps(store.get(), measured); } catch { /* */ }
+    const vcName = {}; for (const v of (store.get()?.vcenters || [])) vcName[v.id] = v.name;
+    dash.byVcenter = dash.byVcenter.map((g) => ({ ...g, name: g.vcenterId ? (vcName[g.vcenterId] || g.vcenterId) : '(미매핑)' }));
+    // PSU 헬스 요약(인벤토리 기반).
+    const servers = idracServersForAnalysis(req);
+    const okRe = /^ok$|정상|healthy/i;
+    let psuHealthy = 0, psuDegraded = 0, noRedundancy = 0; const psuIssues = [];
+    for (const s of servers) {
+      const inv = getIdracInventory(s.id); if (!inv) continue;
+      const psus = inv.psus || []; if (!psus.length) continue;
+      if (psus.length < 2) noRedundancy++;
+      for (const p of psus) {
+        if (okRe.test(p.health || p.state || 'ok')) psuHealthy++;
+        else { psuDegraded++; psuIssues.push({ server: s.name, serverId: s.id, name: p.name, health: p.health || p.state || '' }); }
+      }
+    }
+    res.json({
+      ...dash,
+      energy: finops ? {
+        kwhDay: finops.totals?.kwhDay, costDay: finops.totals?.costDay, co2MonthKg: finops.totals?.co2MonthKg,
+        currency: loadFinopsConfig().currency, pue: loadFinopsConfig().pue,
+        totalHosts: finops.totalHosts, measuredHosts: finops.measuredHosts, unmappedServers: finops.unmappedServers, unmappedWatts: finops.unmappedWatts,
+      } : null,
+      psu: { healthy: psuHealthy, degraded: psuDegraded, noRedundancy, issues: psuIssues.slice(0, 20) },
+    });
+  } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+});
+
 adminRouter.get('/idrac/psu-inventory', adminOnly, (req, res) => {
   const servers = idracServersForAnalysis(req);
   const rows = [];

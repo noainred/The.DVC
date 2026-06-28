@@ -149,6 +149,51 @@ export async function allMeasuredPower() {
 }
 
 /**
+ * 전력 대시보드용 집계 — 플릿 현재/피크/평균(지정 시간), 시간대별 추세(시간 버킷), 서버별
+ * 24h 피크/평균/최소·마지막관측·유휴 플래그, vCenter별 현재 전력 롤업. measured=allMeasuredPower() 결과.
+ */
+export async function buildPowerDashboard(measured, { hours = 24 } = {}) {
+  const db = await getDb();
+  const IDLE_W = Number(process.env.IDLE_WATT_THRESHOLD) || 100; // 평균<이 값 → '유휴 의심'
+  const win = Math.max(1, Math.min(720, Number(hours) || 24));
+  const since = Date.now() - win * 3_600_000;
+  const stats = db.statsSince ? db.statsSince(since) : new Map();
+  const buckets = db.bucketsSince ? db.bucketsSince(since, 3_600_000) : [];
+
+  const perServer = measured.map((m) => {
+    const st = stats.get(m.serverId) || {};
+    const avg = st.avg ?? null;
+    return {
+      serverId: m.serverId, name: m.serverName, source: m.source, vcenterId: m.vcenterId || '',
+      model: m.model || '', currentW: m.watts, ts: m.ts,
+      peakW: st.peak ?? null, avgW: avg, minW: st.min ?? null, lastSeen: st.last ?? m.ts,
+      idle: avg != null && avg < IDLE_W,
+    };
+  });
+
+  // 플릿 시간 추세 — 버킷별로 각 서버 평균을 합산(누락 버킷은 직전값 forward-fill). O(서버×버킷).
+  const bMap = new Map(); const bucketTimes = new Set();
+  for (const b of buckets) {
+    bucketTimes.add(b.bucket);
+    if (!bMap.has(b.serverId)) bMap.set(b.serverId, new Map());
+    bMap.get(b.serverId).set(b.bucket, b.avg);
+  }
+  const times = [...bucketTimes].sort((a, z) => a - z);
+  const arrs = [];
+  for (const [, m] of bMap) { let last = null; const arr = new Array(times.length); for (let i = 0; i < times.length; i++) { const v = m.get(times[i]); if (v != null) last = v; arr[i] = last; } arrs.push(arr); }
+  const timeline = times.map((t, i) => { let tot = 0; for (const arr of arrs) { if (arr[i] != null) tot += arr[i]; } return { t, totalW: Math.round(tot) }; });
+  const peakW = timeline.length ? timeline.reduce((mx, p) => Math.max(mx, p.totalW), 0) : null;
+  const avgW = timeline.length ? Math.round(timeline.reduce((a, p) => a + p.totalW, 0) / timeline.length) : null;
+  const currentW = measured.reduce((a, m) => a + (m.watts || 0), 0);
+
+  const byVc = new Map();
+  for (const m of measured) { const k = m.vcenterId || ''; const e = byVc.get(k) || { vcenterId: k, watts: 0, servers: 0 }; e.watts += (m.watts || 0); e.servers++; byVc.set(k, e); }
+  const byVcenter = [...byVc.values()].sort((a, z) => z.watts - a.watts);
+
+  return { windowHours: win, currentW, peakW, avgW, measured: measured.length, idleCount: perServer.filter((p) => p.idle).length, perServer, timeline, byVcenter };
+}
+
+/**
  * 서비스태그(정규화) → 최신 전력 샘플. ESXi 호스트의 서비스태그와 대조해, 호스트명이 달라도
  * Dell 서버 전력을 호스트에 귀속할 수 있게 한다(이름 매칭 실패 보완).
  * Map<serviceTagLower, { watts, ts, serverName }>.

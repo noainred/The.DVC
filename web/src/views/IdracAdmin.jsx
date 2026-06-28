@@ -30,18 +30,25 @@ export default function IdracAdmin() {
   const [assignVc, setAssignVc] = useState('');           // 일괄 지정 대상 vCenter
   const fileRef = useRef(null);
   const pollAbort = useRef(false); // 위임 등록/스캔 폴링 취소 플래그
+  const [dash, setDash] = useState(null);       // 전력 대시보드(KPI·추세·서버별 통계·PSU)
+  const [dashHours, setDashHours] = useState(24); // 추세/통계 시간 창
+  const [sort, setSort] = useState({ key: 'currentW', dir: 'desc' }); // 서버 테이블 정렬
 
   const load = async () => {
     try { setData(await fetchJson('/admin/idrac')); setError(null); }
     catch (e) { setError(e.message); }
   };
+  const loadDash = (hours = dashHours) => fetchJson('/admin/idrac/power-dashboard', { hours }).then(setDash).catch(() => {});
   useEffect(() => {
     load();
     fetchJson('/admin/idrac/scan-agents').then(setAgents).catch(() => {});
     fetchJson('/admin/vcenters').then((d) => setVcenters(d.vcenters || d || [])).catch(() => fetchJson('/vcenters').then((d) => setVcenters(d || [])).catch(() => {}));
     const t = setInterval(load, 30_000); // refresh current power/poller status
-    return () => clearInterval(t);
+    const td = setInterval(() => loadDash(), 30_000);
+    return () => { clearInterval(t); clearInterval(td); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  useEffect(() => { loadDash(dashHours); /* eslint-disable-next-line */ }, [dashHours]);
 
   const assignAllVcenter = async () => {
     setBusy(true); setImportMsg(null);
@@ -278,6 +285,7 @@ export default function IdracAdmin() {
   const poller = data.poller || {};
   const lastResults = poller.lastRun?.results || [];
   const wattsById = Object.fromEntries(lastResults.map((r) => [r.id, r]));
+  const statsById = Object.fromEntries((dash?.perServer || []).map((p) => [p.serverId, p])); // 24h 피크/평균/유휴
   const fmtW = (w) => (w != null ? `${(w / 1000).toFixed(2)} kW (${w} W)` : '—');
 
   return (
@@ -313,6 +321,8 @@ export default function IdracAdmin() {
         </div>
       </div>
 
+      {dash && <PowerDashboard dash={dash} hours={dashHours} onHours={setDashHours} />}
+
       {importMsg && (
         <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 8, fontSize: 13,
           background: importMsg.ok ? 'rgba(34,197,94,.12)' : 'rgba(239,68,68,.12)',
@@ -347,7 +357,10 @@ export default function IdracAdmin() {
                     {s.vcenterId && <div><span className="badge teal" title="소속 vCenter로 명시 지정됨">vC: {s.vcenterId}</span></div>}
                     {isOme ? (r?.devices != null ? `장비 ${r.devices}대${r.measured != null ? ` · 측정 ${r.measured}` : ''}` : <span className="badge gray">자동 발견</span>) : ((s.hostNames || []).join(', ') || (!s.vcenterId && <span className="badge gray">미지정</span>))}
                   </td>
-                  <td className="tabular">{isOme ? (r?.error ? <span className="badge red" title={r.error}>오류</span> : (r?.metric ? <span className="muted">{r.metric === 'powermanager' ? 'Power Mgr' : '인벤토리'}</span> : '—')) : (r?.watts != null ? fmtW(r.watts) : (r?.error ? <span className="badge red" title={r.error}>오류</span> : '—'))}</td>
+                  <td className="tabular">
+                    {isOme ? (r?.error ? <span className="badge red" title={r.error}>오류</span> : (r?.metric ? <span className="muted">{r.metric === 'powermanager' ? 'Power Mgr' : '인벤토리'}</span> : '—')) : (r?.watts != null ? fmtW(r.watts) : (r?.error ? <span className="badge red" title={r.error}>오류</span> : '—'))}
+                    {!isOme && statsById[s.id]?.peakW != null && <div className="muted" style={{ fontSize: 10 }}>24h 피크 {(statsById[s.id].peakW / 1000).toFixed(2)}kW · 평균 {(statsById[s.id].avgW / 1000).toFixed(2)}kW{statsById[s.id].idle && <span className="badge amber" style={{ marginLeft: 4, fontSize: 9 }} title="평균 소비전력이 낮아 유휴 의심">유휴?</span>}</div>}
+                  </td>
                   <td>{s.enabled === false ? <span className="badge gray">중지</span> : <span className="badge green">수집</span>}</td>
                   <td className="right nowrap">
                     {!isOme && <button className="tab" onClick={() => setDetail({ id: s.id, name: s.name })} title="iDRAC/BIOS/드라이버 버전 · 온도센서·CPU 사용량 차트">상세</button>}
@@ -908,6 +921,139 @@ export function IdracDetailModal({ server, onClose }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ---- 전력 대시보드 ---------------------------------------------------------
+// 플릿 KPI(현재/피크/평균·에너지/비용/CO2) + 시간 추세 차트 + vCenter 롤업 + PSU 헬스 +
+// 서버별 24h 통계(정렬·CSV). /admin/idrac/power-dashboard 응답을 렌더.
+function PowerDashboard({ dash, hours, onHours }) {
+  const [sort, setSort] = useState({ key: 'currentW', dir: 'desc' });
+  const kw = (w) => (w == null ? '—' : `${(w / 1000).toFixed(2)} kW`);
+  const e = dash.energy || {};
+  const cur = e.currency || '';
+  const kpi = (label, value, meta, accent) => (
+    <div className="card" style={{ flex: '1 1 150px', minWidth: 150, padding: '10px 14px', borderLeft: accent ? `3px solid ${accent}` : undefined }}>
+      <div className="muted" style={{ fontSize: 12 }}>{label}</div>
+      <div style={{ fontSize: 20, fontWeight: 700, marginTop: 2 }}>{value}</div>
+      {meta && <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{meta}</div>}
+    </div>
+  );
+
+  // 추세 차트 데이터
+  const chart = (dash.timeline || []).map((p) => ({ t: p.t, kw: +(p.totalW / 1000).toFixed(2),
+    label: new Date(p.t).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit' }) }));
+
+  // 서버별 정렬
+  const dir = sort.dir === 'asc' ? 1 : -1;
+  const rows = [...(dash.perServer || [])].sort((a, b) => {
+    const va = a[sort.key], vb = b[sort.key];
+    if (typeof va === 'number' || typeof vb === 'number') return ((va ?? -Infinity) - (vb ?? -Infinity)) * dir;
+    return String(va ?? '').localeCompare(String(vb ?? '')) * dir;
+  });
+  const th = (k, label) => <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => setSort((s) => ({ key: k, dir: s.key === k && s.dir === 'desc' ? 'asc' : 'desc' }))}>{label}{sort.key === k ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : ''}</th>;
+
+  const exportCsv = () => {
+    const head = ['server', 'source', 'vcenterId', 'model', 'current_w', 'peak_w', 'avg_w', 'min_w', 'idle', 'last_seen'];
+    const esc = (v) => { const x = String(v ?? ''); return /[",\n]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x; };
+    const lines = [head.join(',')];
+    for (const p of dash.perServer || []) lines.push([p.name, p.source, p.vcenterId, p.model, p.currentW, p.peakW, p.avgW, p.minW, p.idle ? 1 : 0, p.lastSeen ? new Date(p.lastSeen).toISOString() : ''].map(esc).join(','));
+    const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `power-${new Date().toISOString().slice(0, 10)}.csv`; a.click(); URL.revokeObjectURL(a.href);
+  };
+
+  const maxVc = Math.max(1, ...(dash.byVcenter || []).map((g) => g.watts));
+  const psu = dash.psu || {};
+
+  return (
+    <div className="card" style={{ marginBottom: 12, padding: 14 }}>
+      <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 10 }}>
+        <div className="section-title" style={{ margin: 0 }}>⚡ 전력 대시보드</div>
+        <div className="flex gap" style={{ alignItems: 'center' }}>
+          <span className="muted" style={{ fontSize: 12 }}>기간</span>
+          {[[24, '24시간'], [168, '7일'], [720, '30일']].map(([h, l]) => (
+            <button key={h} className={hours === h ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '5px 11px', fontSize: 12 }} onClick={() => onHours(h)}>{l}</button>
+          ))}
+          <button className="logout-btn" style={{ padding: '6px 12px', fontSize: 12 }} onClick={exportCsv}>CSV 내보내기</button>
+        </div>
+      </div>
+
+      <div className="flex gap wrap" style={{ marginBottom: 12 }}>
+        {kpi('현재 소비전력', kw(dash.currentW), `측정 서버 ${dash.measured}대`, 'var(--accent,#2563eb)')}
+        {kpi(`피크 (${dash.windowHours}h)`, kw(dash.peakW), `평균 ${kw(dash.avgW)}`, 'var(--red)')}
+        {e.kwhDay != null && kpi('금일 에너지(추정)', `${Math.round(e.kwhDay).toLocaleString()} kWh`, `PUE ${e.pue} 반영`)}
+        {e.costDay != null && kpi('금일 비용(추정)', `${cur}${Math.round(e.costDay).toLocaleString()}`, `월 CO₂ ${e.co2MonthKg != null ? Math.round(e.co2MonthKg).toLocaleString() + ' kg' : '—'}`)}
+        {dash.idleCount > 0 && kpi('유휴 의심', `${dash.idleCount}대`, '평균 소비전력 낮음', 'var(--amber,#f59e0b)')}
+        {e.unmappedServers > 0 && kpi('미매핑 서버', `${e.unmappedServers}대`, `${kw(e.unmappedWatts)} (vCenter 귀속 안 됨)`, 'var(--amber,#f59e0b)')}
+        {(psu.degraded > 0 || psu.noRedundancy > 0) && kpi('PSU 점검', `${psu.degraded || 0}건 이상`, `정상 ${psu.healthy || 0} · 단일전원 ${psu.noRedundancy || 0}대`, psu.degraded ? 'var(--red)' : 'var(--amber,#f59e0b)')}
+      </div>
+
+      {chart.length > 1 && (
+        <div style={{ marginBottom: 14 }}>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>플릿 소비전력 추세 (kW)</div>
+          <ResponsiveContainer width="100%" height={200}>
+            <LineChart data={chart} margin={{ top: 6, right: 12, left: -10, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,.15)" />
+              <XAxis dataKey="label" tick={{ fontSize: 10 }} minTickGap={40} />
+              <YAxis tick={{ fontSize: 10 }} width={44} />
+              <Tooltip formatter={(v) => [`${v} kW`, '소비전력']} labelStyle={{ color: '#111' }} />
+              <Line type="monotone" dataKey="kw" stroke="#f59e0b" strokeWidth={2} dot={false} name="kW" />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      <div className="flex gap wrap" style={{ alignItems: 'flex-start' }}>
+        {(dash.byVcenter || []).length > 0 && (
+          <div style={{ flex: '1 1 320px', minWidth: 280 }}>
+            <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>vCenter별 현재 전력</div>
+            {dash.byVcenter.map((g) => (
+              <div key={g.vcenterId || '__none__'} style={{ marginBottom: 6 }}>
+                <div className="flex between" style={{ fontSize: 12 }}><span>{g.name || g.vcenterId || '(미매핑)'} <span className="muted">· {g.servers}대</span></span><span className="tabular">{kw(g.watts)}</span></div>
+                <div style={{ height: 6, background: 'rgba(148,163,184,.15)', borderRadius: 3, overflow: 'hidden' }}>
+                  <div style={{ width: `${Math.round((g.watts / maxVc) * 100)}%`, height: '100%', background: g.vcenterId ? 'var(--accent,#2563eb)' : 'var(--amber,#f59e0b)' }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {(psu.issues || []).length > 0 && (
+          <div style={{ flex: '1 1 320px', minWidth: 280 }}>
+            <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>PSU 이상 ({psu.degraded}건)</div>
+            <div className="table-wrap" style={{ maxHeight: 160 }}>
+              <table><thead><tr><th>서버</th><th>PSU</th><th>상태</th></tr></thead>
+                <tbody>{psu.issues.map((p, i) => <tr key={i}><td>{p.server}</td><td className="muted">{p.name}</td><td><span className="badge red">{p.health || '이상'}</span></td></tr>)}</tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {rows.length > 0 && (
+        <div style={{ marginTop: 14 }}>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>서버별 전력 ({dash.windowHours}h) — 헤더 클릭 정렬</div>
+          <div className="table-wrap" style={{ maxHeight: 360 }}>
+            <table>
+              <thead><tr>{th('name', '서버')}{th('source', '소스')}{th('vcenterId', 'vCenter')}{th('currentW', '현재')}{th('peakW', '피크')}{th('avgW', '평균')}{th('minW', '최소')}{th('lastSeen', '마지막관측')}</tr></thead>
+              <tbody>
+                {rows.map((p) => (
+                  <tr key={p.serverId} style={{ background: p.idle ? 'rgba(245,158,11,.08)' : undefined }}>
+                    <td>{p.name}{p.idle && <span className="badge amber" style={{ marginLeft: 6, fontSize: 9 }} title="평균 소비전력이 낮아 유휴 의심">유휴?</span>}</td>
+                    <td className="muted" style={{ fontSize: 11 }}>{p.source}</td>
+                    <td className="muted" style={{ fontSize: 11 }}>{p.vcenterId || '—'}</td>
+                    <td className="tabular">{kw(p.currentW)}</td>
+                    <td className="tabular">{kw(p.peakW)}</td>
+                    <td className="tabular">{kw(p.avgW)}</td>
+                    <td className="tabular">{kw(p.minW)}</td>
+                    <td className="muted" style={{ fontSize: 11 }}>{p.lastSeen ? new Date(p.lastSeen).toLocaleString('ko-KR') : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
