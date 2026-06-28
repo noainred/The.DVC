@@ -82,7 +82,7 @@ import { expandIpList } from '../idrac/iprange.js';
 import { scanForIdracs } from '../idrac/scan.js';
 import { enqueueIdracScan, enqueueIdracRegister, getIdracScanResult } from '../central/idracScanJobs.js';
 import { getPollerStatus, pollNow } from '../idrac/poller.js';
-import { allMeasuredPower, buildPowerDashboard, purgeStalePower } from '../idrac/service.js';
+import { allMeasuredPower, buildPowerDashboard, purgeStalePower, measuredPowerBreakdown } from '../idrac/service.js';
 import { computeFinOps, loadFinopsConfig } from '../insights/finops.js';
 import { getInventory as getIdracInventory } from '../idrac/invCache.js';
 import { getSensorSeries } from '../idrac/sensorStore.js';
@@ -956,13 +956,25 @@ adminRouter.get('/idrac/power-dashboard', adminOnly, async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 
-// 오류/고아 전력 데이터 정리 — '전력 보고' 수가 등록 수보다 비정상적으로 많을 때(제거된 OME/수집서버
-// 잔여, 고아 DB 행) 정리한다. 활성 소스(등록 iDRAC·활성 OME·활성 수집서버)는 보존.
+// 전력 보고 수 출처 진단 — '전력 보고 N대'가 어디서 오는지 소스별(iDRAC/OME/원격)로 분해해서
+// 보여준다. OME 연결별 디바이스 수·수집서버별 호스트 수·각 소스 등록 여부 포함 → 유령/실데이터 판별.
+adminRouter.get('/idrac/power-sources', adminOnly, async (_req, res) => {
+  try { res.json({ ok: true, ...(await measuredPowerBreakdown()) }); }
+  catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+});
+
+// 오류/고아 전력 데이터 정리 — '전력 보고' 수가 등록 수보다 비정상적으로 많을 때 정리한다.
+// body.mode='stale'(기본): 등록 해제된 OME/수집서버 잔여 + 고아 DB 행만 삭제(활성 소스 보존).
+// body.mode='all'(강제): 등록 여부 무관하게 OME 캐시·원격 호스트 전체를 비우고 등록 iDRAC 외 DB 행 삭제.
+//   (등록된 OME/수집기가 있으면 다음 폴링에 다시 채워질 수 있음 = 출처가 실데이터.) 정리 후 분해 결과 반환.
 adminRouter.post('/idrac/power-purge', adminOnly, async (req, res) => {
   try {
-    const r = await purgeStalePower();
-    logAudit({ user: req.user?.username, action: '전력 데이터 정리(고아 삭제)', target: `DB ${r.dbRemoved} · OME ${r.omeCleared} · 원격 ${r.remoteCleared}` });
-    res.json({ ok: true, ...r });
+    const mode = (req.body || {}).mode === 'all' ? 'all' : 'stale';
+    const before = await measuredPowerBreakdown().catch(() => null);
+    const r = await purgeStalePower({ mode });
+    const after = await measuredPowerBreakdown().catch(() => null);
+    logAudit({ user: req.user?.username, action: `전력 데이터 정리(${mode === 'all' ? '강제 전체' : '고아 삭제'})`, target: `DB ${r.dbRemoved} · OME ${r.omeCleared} · 원격 ${r.remoteCleared} · ${before?.total ?? '?'}→${after?.total ?? '?'}대` });
+    res.json({ ok: true, ...r, beforeTotal: before?.total ?? null, afterTotal: after?.total ?? null, breakdown: after });
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 

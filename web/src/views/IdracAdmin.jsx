@@ -33,18 +33,21 @@ export default function IdracAdmin() {
   const [dash, setDash] = useState(null);       // 전력 대시보드(KPI·추세·서버별 통계·PSU)
   const [dashHours, setDashHours] = useState(24); // 추세/통계 시간 창
   const [sort, setSort] = useState({ key: 'currentW', dir: 'desc' }); // 서버 테이블 정렬
+  const [sources, setSources] = useState(null); // 전력 보고 수 출처 분해(iDRAC/OME/원격)
 
   const load = async () => {
     try { setData(await fetchJson('/admin/idrac')); setError(null); }
     catch (e) { setError(e.message); }
   };
   const loadDash = (hours = dashHours) => fetchJson('/admin/idrac/power-dashboard', { hours }).then(setDash).catch(() => {});
+  const loadSources = () => fetchJson('/admin/idrac/power-sources').then(setSources).catch(() => {});
   useEffect(() => {
     load();
     fetchJson('/admin/idrac/scan-agents').then(setAgents).catch(() => {});
     fetchJson('/admin/vcenters').then((d) => setVcenters(d.vcenters || d || [])).catch(() => fetchJson('/vcenters').then((d) => setVcenters(d || [])).catch(() => {}));
+    loadSources();
     const t = setInterval(load, 30_000); // refresh current power/poller status
-    const td = setInterval(() => loadDash(), 30_000);
+    const td = setInterval(() => { loadDash(); loadSources(); }, 30_000);
     return () => { clearInterval(t); clearInterval(td); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -141,17 +144,23 @@ export default function IdracAdmin() {
     finally { setBusy(false); }
   };
 
-  // 오류/고아 전력 데이터 정리 — '전력 보고' 수가 등록 수보다 비정상적으로 많을 때(제거된 OME/수집서버
-  // 잔여, 고아 DB 행). 활성 소스는 보존.
-  const purgeStale = async () => {
-    if (!window.confirm('등록/활성 소스에 속하지 않는 오류·고아 전력 데이터(제거된 OME·수집서버 잔여, 고아 이력)를 삭제할까요?\n현재 등록된 서버·활성 수집은 보존됩니다.')) return;
+  // 오류/고아 전력 데이터 정리.
+  // mode='stale'(기본): 등록 해제된 OME/수집서버 잔여 + 고아 DB 행만 삭제(활성 소스 보존).
+  // mode='all'(강제): 등록 여부 무관하게 OME 캐시·원격 호스트 전체 비우고 등록 iDRAC 외 DB 행 삭제.
+  const purgeStale = async (mode = 'stale') => {
+    const all = mode === 'all';
+    const msg = all
+      ? '⚠️ 강제 전체 초기화\n\n등록 여부와 무관하게 OME 자동발견 디바이스 캐시와 원격 수집 호스트를 모두 비우고, 등록된 iDRAC 외의 모든 전력 이력을 삭제합니다.\n\n※ 등록된 OME/수집서버가 있으면 다음 폴링에서 다시 채워집니다(= 그 수치는 실제 데이터). 영구 제거하려면 해당 OME 연결/수집서버 등록 자체를 삭제하세요.\n\n계속할까요?'
+      : '등록/활성 소스에 속하지 않는 오류·고아 전력 데이터(제거된 OME·수집서버 잔여, 고아 이력)를 삭제할까요?\n현재 등록된 서버·활성 수집은 보존됩니다.';
+    if (!window.confirm(msg)) return;
     setBusy(true); setImportMsg(null);
     try {
-      const r = await postJson('/admin/idrac/power-purge', {});
+      const r = await postJson('/admin/idrac/power-purge', { mode });
+      const delta = (r.beforeTotal != null && r.afterTotal != null) ? ` · 전력 보고 ${r.beforeTotal}→${r.afterTotal}대` : '';
       setImportMsg(r.ok
-        ? { ok: true, text: `정리 완료 — 고아 이력 ${r.dbRemoved}건 · OME 캐시 ${r.omeCleared}건 · 원격 잔여 ${r.remoteCleared}건 삭제 (활성 ${r.activeKept}건 보존). 잠시 후 집계가 갱신됩니다.` }
+        ? { ok: true, text: `${all ? '강제 전체 초기화' : '정리'} 완료 — 고아 이력 ${r.dbRemoved}건 · OME 캐시 ${r.omeCleared}건 · 원격 잔여 ${r.remoteCleared}건 삭제${delta}. 잠시 후 집계가 갱신됩니다.` }
         : { ok: false, text: r.reason });
-      await load(); await loadDash();
+      await load(); await loadDash(); await loadSources();
     } catch (e) { setImportMsg({ ok: false, text: e.message }); }
     finally { setBusy(false); }
   };
@@ -324,10 +333,13 @@ export default function IdracAdmin() {
           <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={() => { setCsvText(''); }}>CSV 붙여넣기</button>
           <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={() => { setBulk({ ips: '', username: 'root', password: '', namePrefix: '' }); setBulkPreview(null); setScanResult(null); }}>IP 일괄 등록</button>
           <button className="logout-btn" style={{ padding: '9px 14px' }} disabled={busy} onClick={pollNow}>지금 수집</button>
-          <button className="logout-btn" style={{ padding: '9px 14px', color: 'var(--amber)' }} disabled={busy} onClick={purgeStale} title="등록/활성 소스에 없는 오류·고아 전력 데이터(제거된 OME·수집서버 잔여, 고아 이력) 삭제">🧹 오류 전력 정리</button>
+          <button className="logout-btn" style={{ padding: '9px 14px', color: 'var(--amber)' }} disabled={busy} onClick={() => purgeStale('stale')} title="등록/활성 소스에 없는 오류·고아 전력 데이터(제거된 OME·수집서버 잔여, 고아 이력) 삭제">🧹 오류 전력 정리</button>
+          <button className="logout-btn" style={{ padding: '9px 14px', color: 'var(--red)' }} disabled={busy} onClick={() => purgeStale('all')} title="등록 여부 무관하게 OME 디바이스 캐시·원격 호스트 전체 비우고 등록 iDRAC 외 전력 이력 삭제(등록된 OME/수집기가 있으면 다음 폴링에 재수집됨)">⚠️ 강제 전체 초기화</button>
           <button className="login-btn" style={{ flex: 'none', padding: '9px 16px' }} onClick={openAdd}>+ 서버 추가</button>
         </div>
       </div>
+
+      {sources && <PowerSources sources={sources} />}
 
       <div className="card" style={{ marginBottom: 12, padding: '10px 14px' }}>
         <div className="muted" style={{ fontSize: 12, lineHeight: 1.7 }}>
@@ -937,6 +949,97 @@ export function IdracDetailModal({ server, onClose }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ---- 전력 보고 수 출처 진단 -------------------------------------------------
+// '전력 보고 N대'가 어디서 오는지(iDRAC 등록 / OME 자동발견 / 원격 수집)를 분해해 보여준다.
+// 등록 iDRAC보다 훨씬 큰 수가 보일 때, 그 출처(어느 OME 연결·어느 수집서버)와 등록 여부를
+// 한눈에 확인하고 정리 방법을 안내한다. /admin/idrac/power-sources 응답을 렌더.
+function PowerSources({ sources }) {
+  const s = sources || {};
+  const bs = s.bySource || {};
+  const omeEntries = s.ome?.entries || [];
+  const collectors = s.remote?.collectors || [];
+  // '비정상'은 등록 iDRAC 외 소스가 등록 수보다 많을 때(= 유령 의심).
+  const extra = (s.total || 0) - (bs.idrac || 0);
+  const abnormal = extra > 0 && (s.total || 0) > (s.registeredIdrac || 0);
+  // 미등록(제거된 OME/수집서버 잔여)이 있으면 '오류 전력 정리'로 제거 가능.
+  const hasStaleOme = omeEntries.some((e) => !e.registered && e.measured > 0);
+  const hasStaleRemote = collectors.some((c) => !c.registered && c.hosts > 0);
+  const hasRegisteredExtra = omeEntries.some((e) => e.registered && e.measured > 0) || collectors.some((c) => c.registered && c.hosts > 0);
+
+  const pill = (label, n, color) => (
+    <span style={{ display: 'inline-flex', gap: 6, alignItems: 'baseline', padding: '4px 10px', borderRadius: 999, background: 'rgba(148,163,184,.12)', marginRight: 8 }}>
+      <b style={{ color, fontSize: 15 }}>{n}</b><span className="muted" style={{ fontSize: 12 }}>{label}</span>
+    </span>
+  );
+
+  return (
+    <div className="card" style={{ marginBottom: 12, padding: '12px 16px', borderLeft: `3px solid ${abnormal ? 'var(--amber)' : 'var(--green, #22c55e)'}` }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+        <b style={{ fontSize: 13, marginRight: 8 }}>전력 보고 출처 진단</b>
+        {pill('전력 보고 합계', s.total ?? '—', 'var(--accent, #60a5fa)')}
+        {pill('iDRAC 등록', bs.idrac || 0, '#22c55e')}
+        {pill('OME 디바이스', bs.ome || 0, '#f59e0b')}
+        {pill('원격 수집', bs.remote || 0, '#a78bfa')}
+      </div>
+
+      {abnormal ? (
+        <div className="muted" style={{ fontSize: 12.5, lineHeight: 1.7 }}>
+          등록된 iDRAC <b>{s.registeredIdrac}</b>대 외에 <b style={{ color: 'var(--amber)' }}>{extra}</b>대가
+          {' '}{bs.ome ? `OME 자동발견(${bs.ome}대)` : ''}{bs.ome && bs.remote ? ' · ' : ''}{bs.remote ? `원격 수집(${bs.remote}대)` : ''}에서 보고되고 있습니다.
+          {hasStaleOme || hasStaleRemote
+            ? <> 이 중 <b>등록 해제된 잔여</b>가 있어 <b>🧹 오류 전력 정리</b>로 제거할 수 있습니다.</>
+            : null}
+          {hasRegisteredExtra
+            ? <> <b>등록된 OME/수집서버</b>가 보고하는 값은 실제 데이터이며, 정리해도 다음 폴링에 다시 채워집니다 — 영구 제거하려면 아래 목록의 해당 <b>OME 연결/수집서버 등록을 삭제</b>하세요.</>
+            : null}
+        </div>
+      ) : (
+        <div className="muted" style={{ fontSize: 12.5 }}>등록/활성 소스와 보고 수가 일치합니다 — 유령 데이터 없음.</div>
+      )}
+
+      {(omeEntries.length > 0 || collectors.length > 0) && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginTop: 10 }}>
+          {omeEntries.length > 0 && (
+            <div style={{ flex: '1 1 280px' }}>
+              <div className="muted" style={{ fontSize: 11.5, marginBottom: 4 }}>OME 연결별 디바이스</div>
+              <table className="data-table" style={{ fontSize: 12, width: '100%' }}>
+                <thead><tr><th>OME</th><th>등록</th><th style={{ textAlign: 'right' }}>디바이스</th><th style={{ textAlign: 'right' }}>전력보고</th></tr></thead>
+                <tbody>
+                  {omeEntries.map((e) => (
+                    <tr key={e.entryId}>
+                      <td>{e.name}</td>
+                      <td>{e.registered ? <span style={{ color: '#22c55e' }}>등록</span> : <span style={{ color: 'var(--amber)' }}>해제됨</span>}</td>
+                      <td style={{ textAlign: 'right' }}>{e.devices}</td>
+                      <td style={{ textAlign: 'right' }}>{e.measured}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {collectors.length > 0 && (
+            <div style={{ flex: '1 1 280px' }}>
+              <div className="muted" style={{ fontSize: 11.5, marginBottom: 4 }}>수집서버별 원격 호스트</div>
+              <table className="data-table" style={{ fontSize: 12, width: '100%' }}>
+                <thead><tr><th>수집서버</th><th>등록</th><th style={{ textAlign: 'right' }}>호스트</th></tr></thead>
+                <tbody>
+                  {collectors.map((c) => (
+                    <tr key={c.collectorId}>
+                      <td>{c.name}</td>
+                      <td>{c.registered ? <span style={{ color: '#22c55e' }}>등록</span> : <span style={{ color: 'var(--amber)' }}>해제됨</span>}</td>
+                      <td style={{ textAlign: 'right' }}>{c.hosts}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

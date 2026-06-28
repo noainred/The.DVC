@@ -150,23 +150,75 @@ export async function allMeasuredPower() {
 }
 
 /**
- * 오류/고아 전력 데이터 정리 — '전력 보고' 수가 등록 서버 수보다 비정상적으로 많을 때 사용.
- * (1) 제거된 OME의 디바이스 캐시, (2) 등록 해제된 수집서버가 남긴 원격 호스트(in-memory),
- * (3) 현재 활성 소스(등록 iDRAC·활성 OME 디바이스·활성 원격 호스트)에 속하지 않는 전력 DB 행을 삭제한다.
- * 활성 소스는 보존한다. { dbRemoved, omeCleared, remoteCleared, activeKept } 반환.
+ * '전력 보고' 수가 등록 서버 수보다 많은 이유를 소스별로 정확히 분해한다.
+ * allMeasuredPower()의 각 항목 source(idrac/ome/remote)별 집계 + OME 연결별 디바이스 수 +
+ * 수집서버별 원격 호스트 수 + 각 소스가 현재 '등록'돼 있는지(=정상) 여부를 반환한다.
+ * 이걸로 "916대가 OME 'X'에서 온다 / 원격 수집기 'Y'에서 온다"를 화면에서 바로 확인할 수 있다.
+ * { total, bySource, registeredIdrac, ome:{...}, remote:{...} }.
  */
-export async function purgeStalePower() {
+export async function measuredPowerBreakdown() {
+  const measured = await allMeasuredPower();
+  const bySource = { idrac: 0, ome: 0, remote: 0 };
+  for (const m of measured) { if (bySource[m.source] != null) bySource[m.source]++; }
+
+  const reg = loadRegistry();
+  const registeredOme = new Map(reg.filter((s) => s.type === 'ome').map((s) => [s.id, s]));
+  const registeredIdrac = reg.filter((s) => s.type !== 'ome').length;
+
+  // OME 연결별: 캐시에 들어있는 디바이스 수 + 전력 보고(watts!=null) 수 + 등록 여부.
+  const omeByEntry = new Map(); // entryId -> { devices, measured }
+  for (const { entryId, device } of allOmeDevices()) {
+    const e = omeByEntry.get(entryId) || { devices: 0, measured: 0 };
+    e.devices++; if (device.watts != null) e.measured++;
+    omeByEntry.set(entryId, e);
+  }
+  const omeEntries = [...omeByEntry.entries()].map(([entryId, v]) => ({
+    entryId, name: registeredOme.get(entryId)?.name || entryId,
+    registered: registeredOme.has(entryId), devices: v.devices, measured: v.measured,
+  })).sort((a, z) => z.measured - a.measured);
+
+  // 수집서버별: 원격 호스트 수 + 등록 여부.
+  const activeCollectors = new Map(loadCollectors().map((c) => [c.id, c]));
+  const remoteByCol = new Map(); // collectorId -> hosts
+  for (const [, r] of remotePowerByHost()) remoteByCol.set(r.collectorId, (remoteByCol.get(r.collectorId) || 0) + 1);
+  const collectors = [...remoteByCol.entries()].map(([collectorId, hosts]) => ({
+    collectorId, name: activeCollectors.get(collectorId)?.name || collectorId,
+    registered: activeCollectors.has(collectorId), hosts,
+  })).sort((a, z) => z.hosts - a.hosts);
+
+  return {
+    total: measured.length, bySource, registeredIdrac,
+    ome: { entries: omeEntries, cachedEntries: omeByEntry.size, cachedDevices: allOmeDevices().length },
+    remote: { collectors, hosts: remotePowerByHost().size },
+  };
+}
+
+/**
+ * 오류/고아 전력 데이터 정리 — '전력 보고' 수가 등록 서버 수보다 비정상적으로 많을 때 사용.
+ * mode='stale'(기본): 등록 해제된 소스만 정리한다.
+ *   (1) 제거된 OME의 디바이스 캐시, (2) 등록 해제된 수집서버가 남긴 원격 호스트(in-memory),
+ *   (3) 현재 활성 소스(등록 iDRAC·활성 OME 디바이스·활성 원격 호스트)에 속하지 않는 전력 DB 행.
+ *   활성(등록) 소스는 보존한다.
+ * mode='all'(강제): 등록 여부와 무관하게 OME 디바이스 캐시 전체 + 원격 호스트 전체를 비우고,
+ *   전력 DB에서 등록 iDRAC 외의 모든 행을 삭제한다. (등록된 OME/수집기가 있으면 다음 폴링에
+ *   다시 채워질 수 있음 — 그 경우 출처가 '실데이터'라는 뜻이며, 영구 제거하려면 해당 OME/수집기
+ *   등록을 삭제해야 한다.) Returns { mode, dbRemoved, omeCleared, remoteCleared, activeKept }.
+ */
+export async function purgeStalePower(opts = {}) {
+  const mode = opts.mode === 'all' ? 'all' : 'stale';
   const reg = loadRegistry();
   const omeEntryIds = new Set(reg.filter((s) => s.type === 'ome').map((s) => s.id));
   const idracIds = new Set(reg.filter((s) => s.type !== 'ome').map((s) => s.id));
-  // 1) 제거된 OME 캐시 비우기, 2) 등록 해제 수집서버의 원격 호스트 비우기.
-  const omeCleared = clearOmeExcept(omeEntryIds);
-  const activeCollectors = new Set(loadCollectors().map((c) => c.id));
+  // 1) OME 캐시 비우기, 2) 원격 호스트 비우기 — mode='all'이면 등록된 것도 모두 비운다.
+  const omeCleared = clearOmeExcept(mode === 'all' ? new Set() : omeEntryIds);
+  const activeCollectors = new Set(mode === 'all' ? [] : loadCollectors().map((c) => c.id));
   const remoteCleared = clearStaleRemote(activeCollectors);
-  // 3) 전력 DB에서 활성 소스에 없는 server_id 삭제.
-  const active = new Set(idracIds);
-  for (const { entryId, device } of allOmeDevices()) active.add(dbKey(entryId, device)); // 활성 OME 디바이스 키
-  for (const host of remotePowerByHost().keys()) active.add(`rmt:${host}`);               // 활성 원격 호스트 키
+  // 3) 전력 DB에서 보존 대상이 아닌 server_id 삭제.
+  const active = new Set(idracIds); // 등록 iDRAC은 항상 보존
+  if (mode !== 'all') {
+    for (const { entryId, device } of allOmeDevices()) active.add(dbKey(entryId, device)); // 잔여 활성 OME 디바이스 키
+    for (const host of remotePowerByHost().keys()) active.add(`rmt:${host}`);               // 잔여 활성 원격 호스트 키
+  }
   let dbRemoved = 0;
   try {
     const db = await getDb();
@@ -175,7 +227,7 @@ export async function purgeStalePower() {
       dbRemoved = db.deleteServers(orphans);
     }
   } catch { /* best effort */ }
-  return { dbRemoved, omeCleared, remoteCleared, activeKept: active.size };
+  return { mode, dbRemoved, omeCleared, remoteCleared, activeKept: active.size };
 }
 
 /**
