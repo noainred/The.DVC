@@ -140,9 +140,16 @@ export async function allMeasuredPower() {
     const dedupHosts = device.serviceTag ? [] : [device.name].filter(Boolean);
     tryAdd({ serverId: key, serverName: device.name, watts: sample.watts, ts: sample.ts, host: st || norm(device.name), hostNames, model: (device.model || '').trim(), serviceTag: device.serviceTag || '', source: 'ome' }, device.serviceTag, dedupHosts);
   }
+  const seenRemoteOrigin = new Set(); // 같은 수집기의 동일 서버(여러 별칭 보고)를 한 번만 집계
   for (const [host, r] of remotePowerByHost()) {
     if (r.watts == null || !Number.isFinite(r.watts)) continue;
-    const id = `remote:${r.collectorId}:${host}`;
+    // 출처 서버 식별: serverId가 있으면 그 기준으로 중복 제거(구버전 수집기의 별칭 중복 행 흡수).
+    if (r.serverId != null) {
+      const origin = `${r.collectorId}:${r.serverId}`;
+      if (seenRemoteOrigin.has(origin)) continue;
+      seenRemoteOrigin.add(origin);
+    }
+    const id = `remote:${r.collectorId}:${r.serverId != null ? r.serverId : host}`;
     const hostNames = [norm(host)];
     tryAdd({ serverId: id, serverName: r.serverName || host, watts: r.watts, ts: r.ts, host: norm(host), hostNames, model: (r.model || '').trim(), serviceTag: r.serviceTag || '', source: 'remote' }, r.serviceTag, [host].filter(Boolean));
   }
