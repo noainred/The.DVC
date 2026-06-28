@@ -99,6 +99,12 @@ export default function Collectors() {
   const status = data.status || {};
   const totalHosts = Object.values(status).reduce((a, s) => a + (s.ok ? (s.hosts || 0) : 0), 0);
   const erroredCount = list.filter((c) => status[c.id] && status[c.id].ok === false).length;
+  // 등록된 에이전트 수량 통계(상태별).
+  const registeredCount = list.length;
+  const onlineCount = list.filter((c) => { const s = status[c.id]; return s && s.ok && !s.degraded; }).length;
+  const degradedCount = list.filter((c) => { const s = status[c.id]; return s && s.ok && s.degraded; }).length;
+  const pendingCount = list.filter((c) => !status[c.id]).length;
+  const enabledCount = list.filter((c) => c.enabled !== false).length;
 
   // 정렬 — 헤더 클릭으로 키/방향 토글. status 파생 컬럼(상태·호스트·버전·동기화)도 지원.
   const sortVal = (c) => {
@@ -129,7 +135,17 @@ export default function Collectors() {
   return (
     <>
       <div className="flex between wrap gap" style={{ marginBottom: 6 }}>
-        <div className="section-title" style={{ margin: '6px 0' }}>수집 서버 — 분산 수집 (관리자)</div>
+        <div className="section-title" style={{ margin: '6px 0', display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+          수집 서버 — 분산 수집 (관리자)
+          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--accent, #60a5fa)' }} title="등록된 수집 에이전트 총 수량">등록 {registeredCount}대</span>
+          <span className="muted" style={{ fontSize: 12, fontWeight: 400 }}>
+            (정상 {onlineCount}
+            {degradedCount ? ` · 저하 ${degradedCount}` : ''}
+            {erroredCount ? ` · 오류 ${erroredCount}` : ''}
+            {pendingCount ? ` · 대기 ${pendingCount}` : ''}
+            {' · 수집 ON '}{enabledCount})
+          </span>
+        </div>
         <div className="flex gap" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
           {central && <span className="muted" style={{ fontSize: 12 }}>중앙 버전 <b style={{ color: 'var(--text)' }}>v{central}</b></span>}
           <button className="logout-btn" style={{ padding: '9px 14px' }} disabled={busy} onClick={pullNow}>지금 동기화</button>
@@ -150,7 +166,8 @@ export default function Collectors() {
           각 데이터센터에 포탈을 <b>수집 에이전트</b>로 설치하면(<code>COLLECTOR_TOKEN</code>·<code>COLLECTOR_DATACENTER</code> 설정),
           그 서버가 로컬 iDRAC/OME 전력을 수집합니다. 중앙 포탈은 여기에 등록된 수집 서버들을 주기적으로
           당겨와(<code>/api/collector/export</code>) 호스트 전력에 병합합니다. 1천대+·13개 DC 같은 대규모 환경에 적합합니다.
-          {' '}현재 병합된 호스트: <b style={{ color: 'var(--text)' }}>{totalHosts.toLocaleString()}</b>대.
+          {' '}등록된 수집 에이전트: <b style={{ color: 'var(--text)' }}>{registeredCount}</b>대(정상 {onlineCount}대)
+          {' · '}현재 병합된 호스트: <b style={{ color: 'var(--text)' }}>{totalHosts.toLocaleString()}</b>대.
           <br />🔄 <b>자동 업그레이드</b>: 중앙 포탈이 새 버전으로 업그레이드되면 등록된 모든 에이전트로 자동 푸시됩니다.
           수동으로는 “모두 업그레이드”(또는 행별 “업그레이드”)로 즉시 동일 버전으로 맞출 수 있습니다.
         </div>
