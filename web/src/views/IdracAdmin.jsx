@@ -215,7 +215,7 @@ export default function IdracAdmin() {
   const mapCollector = async (collectorId, vcenterId) => {
     setBusy(true); setImportMsg(null);
     try {
-      const r = await putJson(`/admin/idrac/collectors/${encodeURIComponent(collectorId)}`, { vcenterId });
+      const r = await putJson(`/admin/collectors/${encodeURIComponent(collectorId)}`, { vcenterId });
       const vcName = vcenterId ? (vcenters.find((v) => v.id === vcenterId)?.name || vcenterId) : '(해제)';
       setImportMsg(r.ok ? { ok: true, text: `수집서버 '${collectorId}'의 원격 호스트를 vCenter ${vcName}(으)로 귀속했습니다. 다음 수집 주기에 반영됩니다.` } : { ok: false, text: r.reason });
       await loadDash(); await loadSources();
