@@ -901,16 +901,8 @@ adminRouter.post('/idrac', adminOnly, async (req, res) => {
   res.status(result.ok ? 201 : 400).json(result);
 });
 
-adminRouter.put('/idrac/:id', adminOnly, async (req, res) => {
-  const result = updateServer(req.params.id, req.body || {});
-  if (result.ok) pollNow().catch(() => {});
-  res.status(result.ok ? 200 : 400).json(result);
-});
-
-adminRouter.delete('/idrac/:id', adminOnly, async (req, res) => {
-  const result = removeServer(req.params.id);
-  res.status(result.ok ? 200 : 404).json(result);
-});
+// NOTE: 파라미터 라우트 PUT/DELETE '/idrac/:id'는 '/idrac/scan-ranges'·'/idrac/power-settings'
+// 같은 리터럴 라우트를 가리지 않도록 이 섹션의 '맨 끝'(모든 리터럴 라우트 뒤)에 정의한다.
 
 // Test connectivity + read current power for a server (new or saved by id).
 adminRouter.post('/idrac/test', adminOnly, async (req, res) => {
@@ -1333,6 +1325,20 @@ adminRouter.post('/idrac/assign-vcenter', adminOnly, (req, res) => {
   const result = assignVcenter({ ids, vcenterId: b.vcenterId || '' });
   if (result.ok) pollNow().catch(() => {});
   res.json(result);
+});
+
+// 파라미터 라우트는 반드시 위의 모든 리터럴 '/idrac/...' 라우트 뒤에 둔다. 그렇지 않으면
+// PUT/DELETE '/idrac/:id'가 '/idrac/scan-ranges'·'/idrac/power-settings' 같은 리터럴을 가려
+// id="scan-ranges"로 잘못 처리되어 '없는 서버: scan-ranges' 오류가 난다.
+adminRouter.put('/idrac/:id', adminOnly, async (req, res) => {
+  const result = updateServer(req.params.id, req.body || {});
+  if (result.ok) pollNow().catch(() => {});
+  res.status(result.ok ? 200 : 400).json(result);
+});
+
+adminRouter.delete('/idrac/:id', adminOnly, async (req, res) => {
+  const result = removeServer(req.params.id);
+  res.status(result.ok ? 200 : 404).json(result);
 });
 
 // ---- Distributed collection: remote collector agents ----------------------
