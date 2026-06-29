@@ -125,3 +125,28 @@ export function getIdracScanResult(reqId) {
   if (!j) return { state: 'unknown' };
   return { state: j.state, agent: j.agent, takenAt: j.takenAt || null, progress: j.progress || null, ...(j.result || {}) };
 }
+
+/**
+ * 진행 중·최근 위임 스캔/등록 잡 목록(민감정보 제외). '스캔 현황' 패널이 어디서든 진행을 확인하게 한다.
+ * 최신순 정렬. 비밀번호/IP 원문은 노출하지 않고 요약만.
+ */
+export function listIdracScanJobs() {
+  gc();
+  const out = [];
+  for (const j of jobs.values()) {
+    out.push({
+      reqId: j.reqId,
+      agent: j.agent,
+      action: j.action || 'scan',
+      vcenterId: j.vcenterId || '',
+      state: j.state,
+      progress: j.progress ? { scanned: j.progress.scanned || 0, total: j.progress.total || 0, found: j.progress.found || 0, at: j.progress.at || null } : null,
+      result: j.result ? { foundCount: j.result.foundCount || 0, registered: j.result.registered || 0, scanned: j.result.scanned || 0, error: j.result.error || null, durationMs: j.result.durationMs || null } : null,
+      createdAt: j.createdAt || null,
+      takenAt: j.takenAt || null,
+      doneAt: j.doneAt || null,
+    });
+  }
+  out.sort((a, z) => (z.createdAt || 0) - (a.createdAt || 0));
+  return out;
+}

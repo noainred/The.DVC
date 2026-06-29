@@ -80,7 +80,7 @@ import {
 } from '../idrac/registry.js';
 import { expandIpList } from '../idrac/iprange.js';
 import { scanForIdracs } from '../idrac/scan.js';
-import { enqueueIdracScan, enqueueIdracRegister, getIdracScanResult } from '../central/idracScanJobs.js';
+import { enqueueIdracScan, enqueueIdracRegister, getIdracScanResult, listIdracScanJobs } from '../central/idracScanJobs.js';
 import { getPollerStatus, pollNow } from '../idrac/poller.js';
 import { listScanRanges, saveScanRanges, removeScanRanges } from '../idrac/scanRanges.js';
 import { startIdracScanNow, idracScanStatus } from '../idrac/scanPoller.js';
@@ -1303,6 +1303,11 @@ adminRouter.post('/idrac/scan-ranges/scan', adminOnly, (req, res) => {
 });
 // 진행 상태(가벼운 폴링용).
 adminRouter.get('/idrac/scan-ranges/status', adminOnly, (_req, res) => res.json({ ok: true, status: idracScanStatus() }));
+
+// 스캔 현황 — 주기 스캐너 상태 + 진행 중·최근 위임 스캔/등록 잡 목록(어디서든 진행 확인용).
+adminRouter.get('/idrac/scan-jobs', adminOnly, (_req, res) => {
+  res.json({ ok: true, status: idracScanStatus(), jobs: listIdracScanJobs(), centralEnabled: Boolean(config.central.token) });
+});
 
 // 서버 일괄 삭제. Body: { all:true } 또는 { vcenterId } (빈 문자열=미지정 서버 삭제).
 adminRouter.post('/idrac/delete', adminOnly, (req, res) => {

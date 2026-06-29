@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'idscan-'));
-const { enqueueIdracScan, takeIdracScanJobs, setIdracScanResult, setIdracScanProgress, getIdracScanResult } = await import('../src/central/idracScanJobs.js');
+const { enqueueIdracScan, takeIdracScanJobs, setIdracScanResult, setIdracScanProgress, getIdracScanResult, listIdracScanJobs } = await import('../src/central/idracScanJobs.js');
 
 test('위임 스캔: enqueue → take(에이전트 이름) → result → 폴링 라이프사이클', () => {
   const reqId = enqueueIdracScan('SEOUL', { ips: '10.0.0.1-10', username: 'root', password: 'pw' });
@@ -61,4 +61,20 @@ test('위임 스캔: enqueue 시 총 IP 수 + 진행률 보고', () => {
 
 test('위임 스캔: 알 수 없는 reqId는 unknown', () => {
   assert.equal(getIdracScanResult('nope').state, 'unknown');
+});
+
+test('listIdracScanJobs: 잡 목록 요약(비밀번호·IP 원문 미노출, 최신순)', () => {
+  const reqId = enqueueIdracScan('BERLIN', { ips: '10.3.0.1-10.3.0.5', username: 'root', password: 'SECRET', vcenterId: 'OC2' });
+  const list = listIdracScanJobs();
+  const j = list.find((x) => x.reqId === reqId);
+  assert.ok(j, '목록에 포함');
+  assert.equal(j.vcenterId, 'OC2');
+  assert.equal(j.state, 'pending');
+  assert.ok(j.progress && j.progress.total === 5);
+  // 민감정보(비밀번호·IP 원문)는 절대 노출 금지.
+  const serialized = JSON.stringify(list);
+  assert.ok(!serialized.includes('SECRET'), '비밀번호 미노출');
+  assert.ok(!('password' in j) && !('ips' in j), '비밀번호/IP 필드 없음');
+  // 최신순(createdAt 내림차순) — BERLIN이 가장 최근이므로 맨 앞.
+  assert.equal(list[0].reqId, reqId);
 });

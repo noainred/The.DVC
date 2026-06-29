@@ -41,6 +41,7 @@ export default function IdracAdmin() {
   const [scanRanges, setScanRanges] = useState({ ranges: [], status: null, centralEnabled: false }); // vCenter별 iDRAC 스캔 대역
   const [srForm, setSrForm] = useState(null); // 스캔 대역 편집 폼 { vcenterId, ranges, username, password, agent, enabled, mode } | null
   const [srMsg, setSrMsg] = useState(null); // 스캔 대역 폼 인라인 피드백 { ok, text }
+  const [scanJobs, setScanJobs] = useState({ status: null, jobs: [], centralEnabled: false }); // 스캔 현황(주기+위임 잡)
 
   const load = async () => {
     try { setData(await fetchJson('/admin/idrac')); setError(null); }
@@ -50,6 +51,7 @@ export default function IdracAdmin() {
   const loadSources = () => fetchJson('/admin/idrac/power-sources').then(setSources).catch(() => {});
   const loadPwSettings = () => fetchJson('/admin/idrac/power-settings').then((d) => setPwSettings(d.settings || { excludeUnmapped: false })).catch(() => {});
   const loadScanRanges = () => fetchJson('/admin/idrac/scan-ranges').then((d) => setScanRanges({ ranges: d.ranges || [], status: d.status || null, centralEnabled: !!d.centralEnabled })).catch(() => {});
+  const loadScanJobs = () => fetchJson('/admin/idrac/scan-jobs').then((d) => setScanJobs({ status: d.status || null, jobs: d.jobs || [], centralEnabled: !!d.centralEnabled })).catch(() => {});
   useEffect(() => {
     load();
     fetchJson('/admin/idrac/scan-agents').then(setAgents).catch(() => {});
@@ -57,8 +59,9 @@ export default function IdracAdmin() {
     loadSources();
     loadPwSettings();
     loadScanRanges();
+    loadScanJobs();
     const t = setInterval(load, 30_000); // refresh current power/poller status
-    const td = setInterval(() => { loadDash(); loadSources(); loadScanRanges(); }, 30_000);
+    const td = setInterval(() => { loadDash(); loadSources(); loadScanRanges(); loadScanJobs(); }, 30_000);
     return () => { clearInterval(t); clearInterval(td); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -72,6 +75,15 @@ export default function IdracAdmin() {
 
   // 언마운트(메뉴 이탈) 시 진행 중인 스캔/등록 폴링 루프를 중단(백그라운드 폴링·언마운트 후 setState 방지).
   useEffect(() => () => { scanAbort.current = true; pollAbort.current = true; }, []);
+
+  // 스캔 잡이 진행 중(주기 스캐너 running 또는 위임 잡 pending/running)이면 3초마다 현황 갱신.
+  const scanBusy = !!scanJobs.status?.running || (scanJobs.jobs || []).some((j) => j.state === 'pending' || j.state === 'running');
+  useEffect(() => {
+    if (!scanBusy) return undefined;
+    const iv = setInterval(() => { loadScanJobs(); loadScanRanges(); }, 3_000);
+    return () => clearInterval(iv);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scanBusy]);
 
   // 스캔 진행 중이면 상태를 빠르게(2.5s) 폴링해 진행률·결과를 갱신.
   useEffect(() => {
@@ -267,7 +279,7 @@ export default function IdracAdmin() {
       const r = await postJson('/admin/idrac/scan-ranges/scan', vcenterId ? { vcenterId } : {});
       setImportMsg(r.ok ? { ok: true, text: vcenterId ? `'${vcenterId}' 대역 스캔을 시작했습니다(백그라운드).` : '전체 대역 스캔을 시작했습니다(백그라운드).' } : { ok: false, text: r.reason });
       if (r.status) setScanRanges((s) => ({ ...s, status: r.status }));
-      await loadScanRanges();
+      await loadScanRanges(); await loadScanJobs();
     } catch (e) { setImportMsg({ ok: false, text: e.message }); }
     finally { setBusy(false); }
   };
@@ -476,6 +488,8 @@ export default function IdracAdmin() {
       </div>
 
       {sources && <PowerSources sources={sources} vcenters={vcenters} onMapCollector={mapCollector} busy={busy} />}
+
+      <IdracScanJobs data={scanJobs} vcenters={vcenters} busy={busy} onRefresh={loadScanJobs} onScanAll={() => srScanNow()} />
 
       <IdracScanRanges
         data={scanRanges} vcenters={vcenters} agents={agents} busy={busy}
@@ -1115,6 +1129,116 @@ export function IdracDetailModal({ server, onClose }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ---- 스캔 현황(주기 스캐너 + 진행 중/최근 위임 잡) --------------------------
+// iDRAC 스캔이 지금 어디까지 진행됐는지 어디서든 한눈에 확인. 주기 스캐너 상태 + 진행 중·최근
+// 위임 잡(에이전트 대행)을 실시간으로 보여준다. /admin/idrac/scan-jobs 응답을 렌더.
+function IdracScanJobs({ data, vcenters, busy, onRefresh, onScanAll }) {
+  const st = data?.status || {};
+  const jobs = data?.jobs || [];
+  const vcName = (id) => (vcenters.find((v) => v.id === id)?.name || id || '');
+  const active = jobs.filter((j) => j.state === 'pending' || j.state === 'running');
+  const recent = jobs.filter((j) => j.state === 'done' || j.state === 'error');
+  const ago = (ts) => {
+    if (!ts) return '';
+    const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+    return s >= 3600 ? `${Math.floor(s / 3600)}시간 전` : s >= 60 ? `${Math.floor(s / 60)}분 전` : `${s}초 전`;
+  };
+  const stateBadge = (s) => {
+    const map = { pending: ['대기', 'gray'], running: ['진행 중', 'amber'], done: ['완료', 'green'], error: ['오류', 'red'], unknown: ['만료', 'gray'] };
+    const [label, cls] = map[s] || [s, 'gray'];
+    return <span className={`badge ${cls}`}>{label}</span>;
+  };
+  const Bar = ({ p }) => {
+    if (!p || !p.total) return <span className="muted" style={{ fontSize: 11.5 }}>대기 중…</span>;
+    const pct = Math.min(100, Math.round((p.scanned / p.total) * 100));
+    return (
+      <div style={{ minWidth: 160 }}>
+        <div className="flex between" style={{ fontSize: 11, marginBottom: 2 }}>
+          <span className="muted">{(p.scanned || 0).toLocaleString()}/{(p.total || 0).toLocaleString()}{p.found ? ` · 발견 ${p.found}` : ''}</span>
+          <b>{pct}%</b>
+        </div>
+        <div style={{ height: 6, borderRadius: 4, background: 'rgba(36,48,73,.8)', overflow: 'hidden' }}>
+          <div style={{ height: '100%', width: `${pct}%`, background: 'var(--accent)', transition: 'width .4s', borderRadius: 4 }} />
+        </div>
+      </div>
+    );
+  };
+
+  const pollerRunning = !!st.running;
+  const anyActive = pollerRunning || active.length > 0;
+  const borderColor = anyActive ? 'var(--amber)' : 'var(--green, #22c55e)';
+
+  return (
+    <div className="card" style={{ marginBottom: 12, padding: '12px 16px', borderLeft: `3px solid ${borderColor}` }}>
+      <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 8 }}>
+        <b style={{ fontSize: 13 }}>스캔 현황 {anyActive ? <span style={{ color: 'var(--amber)' }}>· 진행 중</span> : <span className="muted" style={{ fontWeight: 400 }}>· 유휴</span>}</b>
+        <div className="flex gap" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+          <span className="muted" style={{ fontSize: 12 }}>
+            주기 스캐너: {pollerRunning ? <span style={{ color: 'var(--amber)' }}>스캔 중</span> : '대기'}
+            {' '}· 활성 {st.enabledVcenters ?? 0} vCenter
+            {st.intervalMs ? ` · 주기 ${Math.round(st.intervalMs / 3600000 * 10) / 10}h` : ''}
+          </span>
+          <button className="logout-btn" style={{ padding: '7px 12px', fontSize: 12 }} disabled={busy} onClick={onRefresh}>새로고침</button>
+          <button className="logout-btn" style={{ padding: '7px 12px', fontSize: 12 }} disabled={busy || pollerRunning} onClick={onScanAll} title="활성 vCenter 대역 전체를 지금 스캔">⚡ 지금 스캔(전체)</button>
+        </div>
+      </div>
+
+      {/* 주기 스캐너 자체 진행률(중앙 직접 스캔 중) */}
+      {pollerRunning && st.progress && (
+        <div style={{ marginBottom: 8 }}>
+          <div className="muted" style={{ fontSize: 11.5, marginBottom: 3 }}>
+            중앙 직접 스캔: {vcName(st.progress.vcenterId)} ({(st.progress.idx ?? 0) + 1}/{st.progress.totalVcenters})
+            {st.progress.total ? ` — ${st.progress.done}/${st.progress.total} (${st.progress.pct ?? 0}%)` : ''}
+            {st.progress.foundSoFar != null ? ` · 누적 발견 ${st.progress.foundSoFar}` : ''}
+          </div>
+          <div style={{ height: 6, borderRadius: 4, background: 'rgba(36,48,73,.8)', overflow: 'hidden' }}>
+            <div style={{ height: '100%', width: `${st.progress.pct ?? 0}%`, background: 'var(--accent)', transition: 'width .4s', borderRadius: 4 }} />
+          </div>
+        </div>
+      )}
+
+      {jobs.length === 0 && !pollerRunning ? (
+        <div className="muted" style={{ fontSize: 12 }}>
+          진행 중인 스캔이 없습니다. 아래 ‘스캔 대역’에서 ‘스캔’을 누르거나, 주기 스캐너가 {st.intervalMs ? `${Math.round(st.intervalMs / 3600000 * 10) / 10}시간` : '설정 주기'}마다 자동 실행합니다.
+          {data?.centralEnabled === false && <span style={{ color: 'var(--amber)' }}> (에이전트 위임 스캔은 중앙 토큰 설정 필요)</span>}
+        </div>
+      ) : (
+        <div className="table-wrap">
+          <table>
+            <thead><tr>
+              <th>상태</th><th>유형</th><th>대상</th><th>에이전트</th><th>진행/결과</th><th>시각</th>
+            </tr></thead>
+            <tbody>
+              {[...active, ...recent].map((j) => (
+                <tr key={j.reqId}>
+                  <td>{stateBadge(j.state)}</td>
+                  <td className="muted">{j.action === 'register' ? '등록' : '스캔'}</td>
+                  <td>{j.vcenterId ? <b>{vcName(j.vcenterId)}</b> : <span className="muted">—</span>}</td>
+                  <td>{j.agent ? <span className="badge" style={{ background: 'rgba(167,139,250,.2)', color: '#a78bfa' }}>{j.agent}</span> : <span className="muted">직접</span>}</td>
+                  <td>
+                    {(j.state === 'pending' || j.state === 'running') ? <Bar p={j.progress} />
+                      : j.state === 'error' ? <span style={{ color: '#f87171', fontSize: 12 }} title={j.result?.error || ''}>오류: {(j.result?.error || '').slice(0, 60) || '알 수 없음'}</span>
+                        : <span className="muted" style={{ fontSize: 12 }}>발견 {j.result?.foundCount ?? 0} · 등록 {j.result?.registered ?? 0}{j.result?.scanned != null ? ` · 스캔 ${j.result.scanned}` : ''}</span>}
+                  </td>
+                  <td className="muted" style={{ fontSize: 11.5 }}>{ago(j.doneAt || j.takenAt || j.createdAt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {st.lastRun && !pollerRunning && (
+        <div className="muted" style={{ fontSize: 11.5, marginTop: 8 }}>
+          최근 주기 스캔: {st.lastRun.at ? new Date(st.lastRun.at).toLocaleString('ko-KR') : ''}
+          {st.lastRun.vcenters != null ? ` — ${st.lastRun.vcenters} vCenter · 발견 ${st.lastRun.found ?? 0} · 등록 ${st.lastRun.registered ?? 0}${st.lastRun.delegated ? ` · 위임 ${st.lastRun.delegated}` : ''}` : ''}
+          {st.lastRun.skipped ? ` — ${st.lastRun.skipped}` : ''}
+        </div>
+      )}
     </div>
   );
 }
