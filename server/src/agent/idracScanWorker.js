@@ -27,9 +27,9 @@ async function postResult(payload) {
   }).catch(() => {});
 }
 
-async function postProgress(reqId, scanned, total) {
+async function postProgress(reqId, scanned, total, found) {
   await resilientFetch(`${config.agent.centralUrl}/api/central/idrac-scan-progress`, {
-    method: 'POST', headers: headers(), body: JSON.stringify({ reqId, scanned, total }), timeoutMs: 10_000, retries: 2,
+    method: 'POST', headers: headers(), body: JSON.stringify({ reqId, scanned, total, found }), timeoutMs: 10_000, retries: 2,
   }).catch(() => {});
 }
 
@@ -54,13 +54,13 @@ export async function runIdracScanWorkerOnce() {
           console.log(`[idrac-scan-agent] ${config.agent.name}: 등록 잡 — ${registered}대 현지 등록`);
           continue;
         }
-        // 진행률을 중앙에 보고(최소 1.5s 간격으로 스로틀) → UI 프로세스 바.
+        // 진행률을 중앙에 보고(최소 1.5s 간격으로 스로틀) → UI 프로세스 바. found=현재까지 발견 수.
         let lastSent = 0;
-        const onProgress = (scanned, total) => {
+        const onProgress = (scanned, total, found) => {
           const now = Date.now();
           if (now - lastSent < 1500 && scanned < total) return;
           lastSent = now;
-          postProgress(job.reqId, scanned, total);
+          postProgress(job.reqId, scanned, total, found);
         };
         const scan = await scanForIdracs({ ips: job.ips, username: job.username, password: job.password, onProgress });
         // noRegister면 스캔만(UI에서 확인 후 별도 '등록' 잡으로 등록). 그 외엔 기존처럼 자동등록.

@@ -25,7 +25,10 @@ export default function IdracAdmin() {
   const [scanAgent, setScanAgent] = useState('__local__'); // 스캔 수행 주체(로컬 또는 에이전트 이름)
   const [agents, setAgents] = useState({ agents: [], centralEnabled: false });
   const [scanProgress, setScanProgress] = useState(null); // 위임 스캔 진행 안내문
-  const [scanPct, setScanPct] = useState(null); // { scanned, total } 진행률 바
+  const [scanPct, setScanPct] = useState(null); // { scanned, total, found } 진행률 바
+  const [scanStartedAt, setScanStartedAt] = useState(null); // 진행 창 경과시간 기준
+  const [scanTick, setScanTick] = useState(0); // 1초마다 증가(경과시간/애니메이션 갱신)
+  const scanAbort = useRef(false); // 스캔/등록 대기 취소 플래그
   const [vcenters, setVcenters] = useState([]);           // vCenter 목록(소속 지정용)
   const [assignVc, setAssignVc] = useState('');           // 일괄 지정 대상 vCenter
   const fileRef = useRef(null);
@@ -58,6 +61,16 @@ export default function IdracAdmin() {
     return () => { clearInterval(t); clearInterval(td); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 진행 창이 떠 있는 동안 1초마다 틱 → 경과시간·애니메이션이 항상 움직여 '멈춤'처럼 보이지 않게.
+  useEffect(() => {
+    if (!scanProgress) return undefined;
+    const iv = setInterval(() => setScanTick((t) => t + 1), 1000);
+    return () => clearInterval(iv);
+  }, [scanProgress]);
+
+  // 언마운트(메뉴 이탈) 시 진행 중인 스캔/등록 폴링 루프를 중단(백그라운드 폴링·언마운트 후 setState 방지).
+  useEffect(() => () => { scanAbort.current = true; pollAbort.current = true; }, []);
 
   // 스캔 진행 중이면 상태를 빠르게(2.5s) 폴링해 진행률·결과를 갱신.
   useEffect(() => {
@@ -292,22 +305,37 @@ export default function IdracAdmin() {
   };
 
   const scanIdracs = async () => {
-    setBusy(true); setScanResult(null); setImportMsg(null); setScanProgress(null); setScanPct(null);
+    setBusy(true); setScanResult(null); setImportMsg(null); setScanPct(null);
+    scanAbort.current = false;
+    setScanStartedAt(Date.now());
+    const delegated = scanAgent && scanAgent !== '__local__';
+    // 로컬 스캔은 단일 요청(동기)이라 증분 진행률이 없다 → 경과시간·애니메이션으로 '진행 중'을 표시.
+    setScanProgress(delegated ? '에이전트에 스캔 요청을 전송하는 중…' : '이 포탈에서 직접 스캔 중… (대역이 크면 다소 걸립니다)');
     try {
       const r = await postJson('/admin/idrac/scan', { ips: bulk.ips, username: bulk.username, password: bulk.password, agent: scanAgent, vcenterId: bulk.vcenterId || '' });
-      if (!r.ok) { setImportMsg({ ok: false, text: r.reason }); return; }
+      if (!r.ok) { setScanProgress(null); setImportMsg({ ok: false, text: r.reason }); return; }
       if (!r.delegated) {
+        setScanProgress(null); setScanPct(null);
         setScanResult({ ...r, delegated: false });
         setSelected(new Set(r.found.map((f) => f.ip)));
         return;
       }
       // 위임 스캔: reqId로 결과를 폴링(에이전트가 현지 스캔→현지 등록 후 회신).
-      setScanProgress(`에이전트 '${r.agent}'에 스캔 요청을 전달했습니다. 현지 스캔 결과를 기다리는 중…`);
       const reqId = r.reqId;
-      const deadline = Date.now() + 180_000; // 최대 3분 대기
+      setScanProgress(`에이전트 '${r.agent}'가 잡을 인출하기를 기다리는 중… (에이전트 실행/연결 확인)`);
+      const start = Date.now();
+      const ABS_MAX_MS = 30 * 60_000; // 절대 상한 30분(대역이 크고 미응답이 많아도 진행 중이면 유지)
+      let lastScanned = -1, lastAdvance = Date.now();
       // eslint-disable-next-line no-await-in-loop
-      while (Date.now() < deadline) {
-        await new Promise((res) => setTimeout(res, 2500));
+      while (!scanAbort.current) {
+        if (Date.now() - start > ABS_MAX_MS) {
+          setScanProgress(null); setScanPct(null);
+          setImportMsg({ ok: false, text: '스캔이 30분 내 끝나지 않았습니다. 에이전트 상태/대역 크기를 확인하세요.' });
+          return;
+        }
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise((res) => setTimeout(res, 2000));
+        if (scanAbort.current) break;
         // eslint-disable-next-line no-await-in-loop
         const s = await fetchJson(`/admin/idrac/scan-result?reqId=${encodeURIComponent(reqId)}`).catch(() => null);
         if (!s) continue;
@@ -318,16 +346,28 @@ export default function IdracAdmin() {
           setSelected(new Set((s.found || []).map((f) => f.ip))); // 스캔만 한 상태 — 확인 후 '등록' 버튼으로 등록
           return;
         }
-        if (s.state === 'unknown') { setImportMsg({ ok: false, text: '스캔 잡을 찾을 수 없습니다(만료되었거나 에이전트 미응답).' }); return; }
-        if (s.progress && s.progress.total > 0) setScanPct({ scanned: s.progress.scanned || 0, total: s.progress.total });
+        if (s.state === 'unknown') { setScanProgress(null); setScanPct(null); setImportMsg({ ok: false, text: '스캔 잡을 찾을 수 없습니다(만료되었거나 에이전트 미응답).' }); return; }
+        if (s.progress && s.progress.total > 0) {
+          setScanPct({ scanned: s.progress.scanned || 0, total: s.progress.total, found: s.progress.found || 0 });
+          if ((s.progress.scanned || 0) > lastScanned) { lastScanned = s.progress.scanned || 0; lastAdvance = Date.now(); }
+        }
+        const stalled = Date.now() - lastAdvance > 90_000; // 90초 무진행 → 미응답 IP 많음 안내(계속 대기)
         setScanProgress(s.state === 'running'
-          ? `에이전트 '${r.agent}'가 스캔 중입니다…`
-          : `에이전트 '${r.agent}'가 잡을 인출하기를 기다리는 중… (에이전트가 실행/연결되어 있는지 확인)`);
+          ? `에이전트 '${r.agent}'가 스캔 중…${stalled ? ' (응답이 느립니다 — 미응답 IP가 많을 수 있어요)' : ''}`
+          : `에이전트 '${r.agent}'가 잡을 인출하기를 기다리는 중… (에이전트 실행/연결 확인)`);
       }
-      setScanProgress(null);
-      setImportMsg({ ok: false, text: '에이전트 스캔이 3분 내 완료되지 않았습니다. 에이전트 상태를 확인하세요(대역이 크면 더 걸릴 수 있음).' });
+      // 사용자 취소
+      setScanProgress(null); setScanPct(null);
+      setImportMsg({ ok: false, text: '스캔 대기를 취소했습니다. 에이전트에는 이미 전달됐을 수 있으니, 결과는 잠시 후 다시 스캔하거나 서버 목록에서 확인하세요.' });
     } catch (e) { setScanProgress(null); setScanPct(null); setImportMsg({ ok: false, text: e.message }); }
     finally { setBusy(false); }
+  };
+
+  // 모달 닫기 — 진행 중인 스캔/등록 대기 폴링도 중단(닫은 뒤 백그라운드에서 계속 도는 것 방지).
+  const closeBulk = () => {
+    scanAbort.current = true; pollAbort.current = true;
+    setScanProgress(null); setScanPct(null);
+    setBulk(null); setBulkPreview(null); setScanResult(null);
   };
 
   const toggleSel = (ip) => setSelected((s) => { const n = new Set(s); n.has(ip) ? n.delete(ip) : n.add(ip); return n; });
@@ -343,8 +383,9 @@ export default function IdracAdmin() {
       const r = await postJson('/admin/idrac/register-scanned', body);
       // 위임 등록: 에이전트 잡 결과를 폴링.
       if (r.delegated && r.reqId) {
+        setScanStartedAt(Date.now());
         setScanProgress(`에이전트 '${r.agent}'에 등록을 요청했습니다. 현지 등록 결과를 기다리는 중… (취소 가능)`);
-        pollAbort.current = false;
+        pollAbort.current = false; scanAbort.current = false;
         const deadline = Date.now() + 120_000;
         // eslint-disable-next-line no-await-in-loop
         while (Date.now() < deadline) {
@@ -591,12 +632,12 @@ export default function IdracAdmin() {
       )}
 
       {bulk != null && (
-        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) { setBulk(null); setBulkPreview(null); } }}>
-          <EscClose onClose={() => { setBulk(null); setBulkPreview(null); }} />
+        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) closeBulk(); }}>
+          <EscClose onClose={closeBulk} />
           <div className="modal card" style={{ maxWidth: 720 }}>
             <div className="flex between" style={{ marginBottom: 10 }}>
               <b style={{ fontSize: 15 }}>IP 일괄 등록 (동일 계정/비밀번호)</b>
-              <button className="logout-btn" onClick={() => { setBulk(null); setBulkPreview(null); }}>닫기</button>
+              <button className="logout-btn" onClick={closeBulk}>닫기</button>
             </div>
             <div className="muted" style={{ fontSize: 12, marginBottom: 8, lineHeight: 1.7 }}>
               IP를 한 줄에 하나씩. 범위 <code>10.0.0.1 - 10.0.0.20</code>, CIDR <code>10.0.0.0/24</code>,
@@ -672,22 +713,46 @@ export default function IdracAdmin() {
               “스캔”은 각 IP의 Redfish에 접속해 <b>Dell iDRAC만</b> 골라냅니다(미응답/타 장비/인증실패 제외). 대역이 크면 다소 걸립니다.
             </div>
 
-            {scanProgress && (
-              <div className="card" style={{ marginTop: 12, padding: '10px 14px', borderLeft: '3px solid var(--accent-2)', fontSize: 13 }}>
-                ⏳ {scanProgress}
-                {scanPct && scanPct.total > 0 && (
+            {scanProgress && (() => {
+              const spin = ['◐', '◓', '◑', '◒'][scanTick % 4];
+              const elapsed = scanStartedAt ? Math.max(0, Math.floor((Date.now() - scanStartedAt) / 1000)) : 0;
+              const fmtEl = (s) => (s >= 60 ? `${Math.floor(s / 60)}분 ${s % 60}초` : `${s}초`);
+              const has = scanPct && scanPct.total > 0;
+              const pct = has ? Math.min(100, Math.round((scanPct.scanned / scanPct.total) * 100)) : 0;
+              return (
+                <div className="card" style={{ marginTop: 12, padding: '12px 16px', borderLeft: '3px solid var(--accent)', fontSize: 13 }}>
+                  <div className="flex between" style={{ alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ color: 'var(--accent)', fontSize: 16, width: 18, display: 'inline-block', textAlign: 'center' }}>{spin}</span>
+                      <span>{scanProgress}</span>
+                    </span>
+                    <span className="flex gap" style={{ alignItems: 'center' }}>
+                      <span className="muted" style={{ fontSize: 12 }}>경과 {fmtEl(elapsed)}</span>
+                      <button className="logout-btn" style={{ padding: '4px 12px', fontSize: 12 }}
+                        onClick={() => { scanAbort.current = true; pollAbort.current = true; }}
+                        title="대기를 멈춥니다(에이전트에는 이미 전달됐을 수 있음)">취소</button>
+                    </span>
+                  </div>
                   <div style={{ marginTop: 8 }}>
-                    <div className="flex between" style={{ fontSize: 12, marginBottom: 4 }}>
-                      <span className="muted">{scanPct.scanned.toLocaleString()} / {scanPct.total.toLocaleString()} IP</span>
-                      <b>{Math.min(100, Math.round((scanPct.scanned / scanPct.total) * 100))}%</b>
-                    </div>
+                    {has && (
+                      <div className="flex between" style={{ fontSize: 12, marginBottom: 4 }}>
+                        <span className="muted">{scanPct.scanned.toLocaleString()} / {scanPct.total.toLocaleString()} IP{scanPct.found ? ` · iDRAC ${scanPct.found}대 발견` : ''}</span>
+                        <b>{pct}%</b>
+                      </div>
+                    )}
                     <div style={{ height: 8, borderRadius: 6, background: 'rgba(36,48,73,.8)', overflow: 'hidden' }}>
-                      <div style={{ height: '100%', width: `${Math.min(100, Math.round((scanPct.scanned / scanPct.total) * 100))}%`, background: 'var(--accent)', transition: 'width .4s ease', borderRadius: 6 }} />
+                      {has ? (
+                        <div style={{ height: '100%', width: `${pct}%`, background: 'var(--accent)', transition: 'width .4s ease', borderRadius: 6 }} />
+                      ) : (
+                        // 증분 진행률이 아직 없을 때(전송/인출 대기/로컬 스캔): 좌우로 흐르는 막대로 '진행 중' 표시.
+                        // CSS keyframes 무한 애니메이션 — 경계에서 보간 없이 반복(역방향 스윕 글리치 방지).
+                        <div style={{ height: '100%', width: '28%', background: 'var(--accent)', borderRadius: 6, opacity: 0.85, animation: 'indeterminate-bar 1.6s linear infinite' }} />
+                      )}
                     </div>
                   </div>
-                )}
-              </div>
-            )}
+                </div>
+              );
+            })()}
 
             {scanResult && (
               <div style={{ marginTop: 12, borderTop: '1px solid rgba(36,48,73,.6)', paddingTop: 10 }}>

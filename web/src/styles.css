@@ -69,6 +69,8 @@ body {
 .dot.live { animation: pulse 2s infinite; }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
 @keyframes blink-red { 0%,100% { opacity: 1; } 50% { opacity: .2; } }
+/* 미정형(진행률 미상) 막대 — 좌→우로 매끄럽게 반복(경계에서 보간 없이 점프). */
+@keyframes indeterminate-bar { 0% { margin-left: -28%; } 100% { margin-left: 100%; } }
 .blink-red { color: var(--red,#ef4444); font-weight: 700; animation: blink-red 1s infinite; }
 
 /* Layout */

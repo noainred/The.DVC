@@ -82,13 +82,14 @@ export function takeIdracScanJobs(agentName) {
   return out;
 }
 
-/** 에이전트가 스캔 진행률 보고(중간) — { scanned, total }. */
-export function setIdracScanProgress(reqId, { scanned, total } = {}) {
+/** 에이전트가 스캔 진행률 보고(중간) — { scanned, total, found }. */
+export function setIdracScanProgress(reqId, { scanned, total, found } = {}) {
   const j = jobs.get(reqId);
   if (!j) return false;
   j.progress = {
     scanned: Number(scanned) || 0,
     total: Number(total) || j.progress?.total || 0,
+    found: found != null ? Number(found) || 0 : (j.progress?.found || 0),
     at: Date.now(),
   };
   if (j.state === 'running' || j.state === 'pending') j.state = 'running';

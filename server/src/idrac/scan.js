@@ -18,7 +18,8 @@ export async function scanForIdracs({ ips, username, password, concurrency = 32,
   // 진행률 콜백(스로틀): 너무 잦은 호출을 피하려 일정 개수마다만 보고.
   const total = targets.length;
   const step = Math.max(1, Math.floor(total / 100)); // 약 1%마다
-  const report = () => { if (onProgress) { try { onProgress(done, total); } catch { /* ignore */ } } };
+  // (done, total, found) — found는 지금까지 발견한 iDRAC 수(진행 창의 '발견 N대' 표시용).
+  const report = () => { if (onProgress) { try { onProgress(done, total, found.length); } catch { /* ignore */ } } };
 
   async function worker() {
     while (idx < targets.length) {
