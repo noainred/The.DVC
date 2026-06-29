@@ -84,7 +84,7 @@ import { enqueueIdracScan, enqueueIdracRegister, getIdracScanResult, listIdracSc
 import { getPollerStatus, pollNow } from '../idrac/poller.js';
 import { listScanRanges, saveScanRanges, removeScanRanges } from '../idrac/scanRanges.js';
 import { startIdracScanNow, idracScanStatus } from '../idrac/scanPoller.js';
-import { allMeasuredPower, buildPowerDashboard, purgeStalePower, measuredPowerBreakdown } from '../idrac/service.js';
+import { allMeasuredPower, buildPowerDashboard, purgeStalePower, measuredPowerBreakdown, vcenterPowerCheck } from '../idrac/service.js';
 import { computeFinOps, loadFinopsConfig } from '../insights/finops.js';
 import { loadPowerSettings, savePowerSettings, filterMeasuredByMapping } from '../idrac/powerSettings.js';
 import { getInventory as getIdracInventory } from '../idrac/invCache.js';
@@ -956,6 +956,12 @@ adminRouter.get('/idrac/power-dashboard', adminOnly, async (req, res) => {
 adminRouter.get('/idrac/power-sources', adminOnly, async (_req, res) => {
   try { res.json({ ok: true, ...(await measuredPowerBreakdown({ hosts: store.get().hosts })) }); }
   catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+});
+
+// vCenter 전력 수집 점검 — vCenter별로 ESXi 호스트 전력(하드웨어 상태 'Pwr Consumption' 센서)이
+// 실제로 수집되고 있는지 진단. soapMetrics on/off + vCenter별 수집/0W/미수집 + 합계 반환.
+adminRouter.get('/idrac/vcenter-power-check', adminOnly, (_req, res) => {
+  res.json({ ok: true, soapMetrics: config.vcSoapMetrics, dataSource: store.get().source, ...vcenterPowerCheck(store.get()) });
 });
 
 // 전력 집계 표시 설정 — excludeUnmapped: vCenter 미매핑 측정 전력을 총합/보고/목록에서 제외.

@@ -42,6 +42,7 @@ export default function IdracAdmin() {
   const [srForm, setSrForm] = useState(null); // 스캔 대역 편집 폼 { vcenterId, ranges, username, password, agent, enabled, mode } | null
   const [srMsg, setSrMsg] = useState(null); // 스캔 대역 폼 인라인 피드백 { ok, text }
   const [scanJobs, setScanJobs] = useState({ status: null, jobs: [], collectors: [], centralEnabled: false }); // 스캔 현황(주기+위임 잡)
+  const [vcCheck, setVcCheck] = useState(null); // vCenter 전력 수집 점검 결과(모달) | null
 
   const load = async () => {
     try { setData(await fetchJson('/admin/idrac')); setError(null); }
@@ -235,7 +236,15 @@ export default function IdracAdmin() {
     finally { setBusy(false); }
   };
 
-  // vCenter 호스트 전력(power.power.average) 합산 on/off. off면 iDRAC/OME/원격만 집계.
+  // vCenter 전력 수집 점검 — vCenter별로 호스트 전력이 실제 수집되는지 확인(모달).
+  const openVcCheck = async () => {
+    setBusy(true);
+    try { setVcCheck(await fetchJson('/admin/idrac/vcenter-power-check')); }
+    catch (e) { setImportMsg({ ok: false, text: e.message }); }
+    finally { setBusy(false); }
+  };
+
+  // vCenter 호스트 전력(하드웨어 상태 센서/power.power.average) 합산 on/off. off면 iDRAC/OME/원격만.
   const toggleVcenterPower = async () => {
     const next = !(pwSettings.includeVcenterPower !== false);
     setBusy(true); setImportMsg(null);
@@ -495,7 +504,8 @@ export default function IdracAdmin() {
           <button className="logout-btn" style={{ padding: '9px 14px' }} disabled={busy} onClick={pollNow}>지금 수집</button>
           <button className="logout-btn" style={{ padding: '9px 14px', color: 'var(--amber)' }} disabled={busy} onClick={() => purgeStale('stale')} title="등록/활성 소스에 없는 오류·고아 전력 데이터(제거된 OME·수집서버 잔여, 고아 이력) 삭제">🧹 오류 전력 정리</button>
           <button className="logout-btn" style={{ padding: '9px 14px', color: 'var(--red)' }} disabled={busy} onClick={() => purgeStale('all')} title="등록 여부 무관하게 OME 디바이스 캐시·원격 호스트 전체 비우고 등록 iDRAC 외 전력 이력 삭제(등록된 OME/수집기가 있으면 다음 폴링에 재수집됨)">⚠️ 강제 전체 초기화</button>
-          <button className="logout-btn" style={{ padding: '9px 14px', color: (pwSettings.includeVcenterPower !== false) ? 'var(--accent, #38bdf8)' : 'var(--amber)' }} disabled={busy} onClick={toggleVcenterPower} title="vCenter PerformanceManager(power.power.average)로 수집한 ESXi 호스트 전력을 총 소비전력·대시보드·FinOps에 합산/제외. iDRAC/OME/원격과 중복 제거.">{(pwSettings.includeVcenterPower !== false) ? '☑ vCenter 전력 포함' : '☐ vCenter 전력'}</button>
+          <button className="logout-btn" style={{ padding: '9px 14px', color: (pwSettings.includeVcenterPower !== false) ? 'var(--accent, #38bdf8)' : 'var(--amber)' }} disabled={busy} onClick={toggleVcenterPower} title="vCenter에서 수집한 ESXi 호스트 전력(하드웨어 상태 'Pwr Consumption' 센서/성능 카운터)을 총 소비전력·대시보드·FinOps에 합산/제외. iDRAC/OME/원격과 중복 제거.">{(pwSettings.includeVcenterPower !== false) ? '☑ vCenter 전력 포함' : '☐ vCenter 전력'}</button>
+          <button className="logout-btn" style={{ padding: '9px 14px', color: 'var(--accent, #38bdf8)' }} disabled={busy} onClick={openVcCheck} title="vCenter별로 ESXi 호스트 전력이 실제로 수집되고 있는지 점검">🔌 vCenter 전력 점검</button>
           <button className="logout-btn" style={{ padding: '9px 14px', color: pwSettings.excludeUnmapped ? 'var(--green, #22c55e)' : 'var(--amber)' }} disabled={busy} onClick={toggleExcludeUnmapped} title="vCenter에 귀속되지 않는(미매핑) 측정 전력을 총합·전력 보고·목록에서 제외/포함 (수집기가 다시 보내도 표시에서 빠짐)">{pwSettings.excludeUnmapped ? '☑ 미매핑 제외중' : '☐ 미매핑 제외'}</button>
           <button className="login-btn" style={{ flex: 'none', padding: '9px 16px' }} onClick={openAdd}>+ 서버 추가</button>
         </div>
@@ -573,6 +583,8 @@ export default function IdracAdmin() {
       </div>
 
       {detail && <IdracDetailModal server={detail} onClose={() => setDetail(null)} />}
+
+      {vcCheck && <VcenterPowerCheckModal data={vcCheck} onClose={() => setVcCheck(null)} onRefresh={openVcCheck} busy={busy} />}
 
       {form && (
         <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) close(); }}>
@@ -853,6 +865,74 @@ export default function IdracAdmin() {
 
 const LINE_COLORS = ['#60a5fa', '#f87171', '#34d399', '#fbbf24', '#a78bfa', '#f472b6', '#22d3ee', '#fb923c', '#4ade80', '#e879f9', '#94a3b8', '#fca5a5'];
 const FW_TYPE_ORDER = ['iDRAC', 'BIOS', 'NIC', 'Storage', 'GPU', 'PSU', 'Disk', 'CPLD', 'Driver', '기타'];
+
+// ---- vCenter 전력 수집 점검 모달 -------------------------------------------
+// vCenter별로 ESXi 호스트 전력(하드웨어 상태 'Pwr Consumption' 센서/성능 카운터)이 실제로
+// 수집되고 있는지 진단. /admin/idrac/vcenter-power-check 응답을 렌더.
+function VcenterPowerCheckModal({ data, onClose, onRefresh, busy }) {
+  const rows = data?.rows || [];
+  const t = data?.totals || { hosts: 0, reporting: 0, watts: 0 };
+  const stateBadge = (s) => {
+    const map = {
+      collecting: ['수집됨', 'green'], zero: ['센서 0W', 'amber'],
+      nodata: ['미수집', 'red'], empty: ['호스트 없음', 'gray'],
+    };
+    const [label, cls] = map[s] || [s, 'gray'];
+    return <span className={`badge ${cls}`}>{label}</span>;
+  };
+  const kw = (w) => `${(w / 1000).toFixed(1)} kW`;
+  return (
+    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <EscClose onClose={onClose} />
+      <div className="modal card" style={{ maxWidth: 880 }}>
+        <div className="flex between" style={{ marginBottom: 8, alignItems: 'center' }}>
+          <b style={{ fontSize: 15 }}>🔌 vCenter 전력 수집 점검</b>
+          <div className="flex gap" style={{ alignItems: 'center' }}>
+            <button className="logout-btn" style={{ padding: '6px 12px', fontSize: 12 }} disabled={busy} onClick={onRefresh}>새로고침</button>
+            <button className="logout-btn" style={{ padding: '6px 12px', fontSize: 12 }} onClick={onClose}>닫기</button>
+          </div>
+        </div>
+        <div className="muted" style={{ fontSize: 12, lineHeight: 1.7, marginBottom: 10 }}>
+          각 vCenter에서 ESXi 호스트 소비전력을 수집 중인지 점검합니다. 출처는 <b>하드웨어 상태의 'Pwr Consumption' 센서</b>(IPMI)이며,
+          없으면 <code>power.power.average</code> 성능 카운터로 폴백합니다.
+          {data?.soapMetrics === false && <span style={{ color: 'var(--amber)' }}> · ⚠ SOAP 메트릭이 꺼져 있어(VC_SOAP_METRICS=false) 전력이 수집되지 않습니다.</span>}
+          {data?.dataSource && data.dataSource !== 'live' && <span style={{ color: 'var(--amber)' }}> · 현재 데이터소스={data.dataSource}(실데이터 아님)</span>}
+          <br />합계: 호스트 <b style={{ color: 'var(--text)' }}>{t.hosts}</b> · 전력 보고 <b style={{ color: 'var(--text)' }}>{t.reporting}</b> · <b style={{ color: 'var(--text)' }}>{kw(t.watts)}</b>
+        </div>
+        <div className="table-wrap" style={{ maxHeight: '56vh', overflow: 'auto' }}>
+          <table>
+            <thead><tr>
+              <th>vCenter</th><th>지역</th><th>수집</th><th>상태</th>
+              <th className="right">호스트</th><th className="right">전력 보고</th><th className="right">센서 0W</th><th className="right">미수집</th><th className="right">합계</th>
+            </tr></thead>
+            <tbody>
+              {rows.length === 0 && <tr><td colSpan={9} className="center muted" style={{ padding: 24 }}>vCenter가 없습니다.</td></tr>}
+              {rows.map((r) => (
+                <tr key={r.vcenterId}>
+                  <td><b>{r.name}</b></td>
+                  <td className="muted">{r.region || '—'}</td>
+                  <td>{r.collectSource === 'site' ? <span className="badge blue">사이트</span> : <span className="muted">직접</span>}</td>
+                  <td>{stateBadge(r.state)}</td>
+                  <td className="right tabular">{r.hosts}</td>
+                  <td className="right tabular" style={{ color: r.reporting ? '#4ade80' : undefined }}>{r.reporting}</td>
+                  <td className="right tabular">{r.zeroW || ''}</td>
+                  <td className="right tabular" style={{ color: r.noData ? '#f87171' : undefined }}>{r.noData || ''}</td>
+                  <td className="right tabular"><b>{r.watts ? kw(r.watts) : '—'}</b></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="muted" style={{ fontSize: 11.5, marginTop: 8, lineHeight: 1.7 }}>
+          <b>상태 의미</b> — <span style={{ color: '#4ade80' }}>수집됨</span>: 호스트 전력이 들어옴 ·
+          {' '}<span style={{ color: '#fbbf24' }}>센서 0W</span>: 센서는 있으나 0 보고(중첩 ESXi/센서 미지원) ·
+          {' '}<span style={{ color: '#f87171' }}>미수집</span>: 'Pwr Consumption' 센서도 성능 카운터도 없음.
+          {' '}'미수집'이면 그 vCenter의 호스트는 vCenter 전력에 안 잡힙니다(iDRAC 등록으로 보완 가능).
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /** iDRAC 서버 상세 — 버전(iDRAC/BIOS/드라이버) + 온도센서·CPU 사용량 1분 시계열 차트. */
 export function IdracDetailModal({ server, onClose }) {

@@ -584,6 +584,40 @@ function parseTemps(xml) {
 }
 
 /**
+ * numericSensorInfo(하드웨어 상태)에서 호스트 소비전력(W)을 파싱. vSphere Client의
+ * '하드웨어 상태'에 보이는 "System Board 1 Pwr Consumption" 같은 센서가 여기에 온다.
+ * power.power.average 성능 카운터가 없는 환경에서도 IPMI 센서로 호스트 전력을 얻는다.
+ * 반환: 와트(number) 또는 null(전력 센서 없음). value = currentReading × 10^unitModifier.
+ */
+export function parsePowerSensorWatts(xml) {
+  if (!xml) return null;
+  const sensors = [];
+  for (const blk of xml.split(/<HostNumericSensorInfo(?=[ >])/).slice(1)) {
+    const type = (/<sensorType>([^<]*)<\/sensorType>/i.exec(blk)?.[1] || '').trim().toLowerCase();
+    const base = (/<baseUnits>([^<]*)<\/baseUnits>/i.exec(blk)?.[1] || '').trim().toLowerCase();
+    const isWatt = /watt/.test(base);
+    if (type !== 'power' && !isWatt) continue;            // 전력 센서만(전압/팬 등 제외)
+    if (/volt/.test(base)) continue;                       // Power Supply Voltage 류 제외
+    const name = (/<name>([^<]*)<\/name>/.exec(blk)?.[1] || '').trim();
+    const reading = Number(/<currentReading>(-?\d+)<\/currentReading>/.exec(blk)?.[1]);
+    const mod = Number(/<unitModifier>(-?\d+)<\/unitModifier>/.exec(blk)?.[1] || 0);
+    if (!Number.isFinite(reading)) continue;
+    const w = Math.round(reading * (10 ** mod));
+    if (w <= 0 || w > 100000) continue;                    // 비정상치 제외
+    sensors.push({ name, w });
+  }
+  if (!sensors.length) return null;
+  // 1) 전체 소비전력 센서(Pwr/Power Consumption · System Board Power) 우선 — 보통 1개.
+  const consumption = sensors.filter((s) => /consumption|소비|총\s*전력/i.test(s.name) || /(system|sys)\b.*\b(pwr|power)/i.test(s.name));
+  if (consumption.length) return consumption.reduce((a, s) => Math.max(a, s.w), 0);
+  // 2) PSU 입력 전력 합(서버 총 소비에 근접).
+  const inputs = sensors.filter((s) => /input/i.test(s.name));
+  if (inputs.length) return inputs.reduce((a, s) => a + s.w, 0);
+  // 3) 그 외: 단일 최대값.
+  return sensors.reduce((a, s) => Math.max(a, s.w), 0);
+}
+
+/**
  * Classify a datastore's backing storage from its DatastoreInfo XML + summary.type.
  * Returns { storageType, remoteHost, ssd }.
  *   storageType: local | san | nas | vsan | vvol | other
@@ -900,6 +934,9 @@ export async function collectFromVCenterSoap(vc) {
         })(),
         hbas: parseHbas(p['config.storageDevice.hostBusAdapter']),
         ...parseTemps(p['runtime.healthSystemRuntime.systemHealthInfo.numericSensorInfo']),
+        // 하드웨어 상태 IPMI 센서의 호스트 소비전력(W). vSphere '하드웨어 상태'의 Pwr Consumption과 동일.
+        // 성능 카운터(power.power.average)가 없어도 이 값으로 vCenter 전력을 수집한다(아래 collectPower는 폴백).
+        ...(() => { const w = parsePowerSensorWatts(p['runtime.healthSystemRuntime.systemHealthInfo.numericSensorInfo']); return w != null ? { powerWatts: w, vcPowerWatts: w } : {}; })(),
         vendor: p['summary.hardware.vendor'] || '',
         model: p['summary.hardware.model'] || '',
         serviceTag: parseServiceTag(p['summary.hardware.otherIdentifyingInfo']),
@@ -912,15 +949,25 @@ export async function collectFromVCenterSoap(vc) {
     // Real-time host power draw (Watts) via PerformanceManager. Best-effort.
     // 전력·GPU 메트릭은 서로 독립적이므로 병렬로 수집한다 — 고RTT에서 두 블록이 직렬로
     // 합산(최대 2×timeout)되어 폴 주기를 밀어내는 것을 방지. 둘 다 실패해도 수집 전체는 안 막음.
+    // IPMI 센서(하드웨어 상태)로 이미 전력을 얻은 호스트가 대부분이면 성능 카운터 조회는 생략(폴백).
     const collectPower = async () => {
       try {
+        const need = [...hostByRef].filter(([, h]) => h.vcPowerWatts == null).map(([ref]) => ref);
+        if (!need.length) return; // 센서로 모두 수집됨
         const counterId = await c.powerCounterId();
         if (counterId) {
-          const powerMap = await c.queryHostPower(counterId, [...hostByRef.keys()]);
-          for (const [ref, host] of hostByRef) host.powerWatts = powerMap.get(ref) || 0;
+          const powerMap = await c.queryHostPower(counterId, need);
+          for (const ref of need) {
+            const host = hostByRef.get(ref);
+            const w = powerMap.get(ref) || 0;
+            host.powerWatts = w;
+            host.vcPowerWatts = w; // 카운터 존재 → 0이라도 '수집됨(0W)'으로 구분(undefined=미수집)
+          }
+        } else {
+          console.warn(`[collect] ${vc.id} 호스트 전력 미수집: IPMI 'Pwr Consumption' 센서도, power.power.average 카운터도 없음(${need.length}대)`);
         }
       } catch (err) {
-        console.warn(`[collect] ${vc.id} 전력 수집 건너뜀: ${err.message}`);
+        console.warn(`[collect] ${vc.id} 전력 수집(폴백) 건너뜀: ${err.message}`);
       }
     };
 

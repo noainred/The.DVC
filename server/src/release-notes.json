@@ -1,6 +1,17 @@
 {
   "notes": [
     {
+      "version": "2.54.0",
+      "date": "2026-06-29",
+      "title": "vCenter 전력 수집 정상화(하드웨어 상태 센서) + 'vCenter 전력 점검' 진단",
+      "notes": [
+        "vCenter에서 전력이 수집되는데도 합산되지 않던 문제를 해결했습니다. 원인은 호스트 전력이 vSphere '하드웨어 상태'의 IPMI 센서(예: 'System Board 1 Pwr Consumption' = 624W)에는 있지만, 기존에 쓰던 power.power.average 성능 카운터에는 없는 환경이었던 것입니다.",
+        "이제 호스트 전력을 '하드웨어 상태'의 전력 센서(numericSensorInfo, 온도와 같은 경로)에서 직접 읽습니다. 전체 소비전력 센서(Pwr/Power Consumption)를 우선 쓰고, 없으면 PSU 입력 전력 합, 그래도 없으면 power.power.average 성능 카운터로 폴백합니다. vCenter 원본값은 host.vcPowerWatts로 보존해 iDRAC 오버레이와 무관하게 진단·집계합니다.",
+        "'🔌 vCenter 전력 점검' 옵션을 전력 수집 메뉴에 추가했습니다. vCenter별로 ESXi 호스트 전력이 실제 수집되는지(수집됨/센서 0W/미수집), 전력 보고 호스트 수와 합계 kW를 표로 보여줍니다. SOAP 메트릭 on/off·데이터소스도 함께 표시합니다. API: GET /admin/idrac/vcenter-power-check.",
+        "단위 테스트(vcenterPowerCheck.test.js): 'Pwr Consumption' 센서 파싱(전압 제외·PSU 입력 합)과 vCenter별 수집 상태 집계를 검증합니다."
+      ]
+    },
+    {
       "version": "2.53.0",
       "date": "2026-06-29",
       "title": "vCenter 호스트 전력 합산 — iDRAC 없이도 전세계 전력 현황 표시(베어메탈 iDRAC 확장 대비)",

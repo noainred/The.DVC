@@ -177,6 +177,38 @@ export async function allMeasuredPower({ hosts = [] } = {}) {
 }
 
 /**
+ * vCenter 전력 수집 점검 — 스냅샷의 호스트별 vCenter 원본 전력(host.vcPowerWatts)을 vCenter별로
+ * 집계해 '수집되고 있는지' 진단한다. host.vcPowerWatts는 하드웨어 상태 IPMI 'Pwr Consumption'
+ * 센서(또는 power.power.average 폴백)에서 채워진다(null=미수집).
+ * 행 state: collecting(수집됨) | zero(센서 0W) | nodata(전력 센서/카운터 없음) | empty(호스트 없음).
+ */
+export function vcenterPowerCheck(snap) {
+  const byVc = new Map();
+  for (const v of (snap?.vcenters || [])) {
+    byVc.set(v.id, {
+      vcenterId: v.id, name: v.name || v.id, region: v.location?.region || v.region || '',
+      status: v.status || '', collectSource: v.collectSource || (v.collectMode === 'site' ? 'site' : 'direct'),
+      hosts: 0, reporting: 0, zeroW: 0, noData: 0, watts: 0,
+    });
+  }
+  for (const h of (snap?.hosts || [])) {
+    const e = byVc.get(h.vcenterId);
+    if (!e) continue;
+    e.hosts++;
+    const w = h.vcPowerWatts;
+    if (w == null) e.noData++;
+    else if (w > 0) { e.reporting++; e.watts += w; }
+    else e.zeroW++;
+  }
+  const rows = [...byVc.values()].map((e) => ({
+    ...e, watts: Math.round(e.watts),
+    state: e.hosts === 0 ? 'empty' : (e.reporting > 0 ? 'collecting' : (e.zeroW > 0 ? 'zero' : 'nodata')),
+  })).sort((a, z) => z.watts - a.watts || z.reporting - a.reporting);
+  const totals = rows.reduce((a, r) => ({ hosts: a.hosts + r.hosts, reporting: a.reporting + r.reporting, watts: a.watts + r.watts }), { hosts: 0, reporting: 0, watts: 0 });
+  return { rows, totals };
+}
+
+/**
  * '전력 보고' 수가 등록 서버 수보다 많은 이유를 소스별로 정확히 분해한다.
  * allMeasuredPower()의 각 항목 source(idrac/ome/remote)별 집계 + OME 연결별 디바이스 수 +
  * 수집서버별 원격 호스트 수 + 각 소스가 현재 '등록'돼 있는지(=정상) 여부를 반환한다.
