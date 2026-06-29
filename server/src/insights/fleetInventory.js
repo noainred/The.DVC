@@ -66,7 +66,8 @@ export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = 
     else if (a) { id = a; src = 'assigned'; }
     else if (fb) {
       id = fb;
-      src = server?.vcInferred ? 'inferred' : (server?.source === 'remote' ? 'collector' : (server?.source === 'host' ? 'host' : 'registry'));
+      // OME 소속은 연결의 법인 상속(자동 추론), 원격은 수집기 귀속, 호스트는 호스팅 vCenter.
+      src = server?.source === 'ome' ? 'inferred' : (server?.source === 'remote' ? 'collector' : (server?.source === 'host' ? 'host' : 'registry'));
     }
     id = knownVc(id);
     if (!id) src = '';
@@ -147,9 +148,11 @@ export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = 
     const claimed = (h.serviceTag && claimedHostKeys.has(`t:${norm(h.serviceTag)}`)) || claimedHostKeys.has(`n:${altKey}`);
 
     if (t === 'baremetal') {
+      // 받침 서버가 있으면 그 키도 점유 처리 → 같은 서버에 매칭되는 다른 호스트의 가상화 중복 방지.
+      if (m) { if (m.serviceTag) claimedHostKeys.add(`t:${norm(m.serviceTag)}`); for (const n of (m.hostNames || [])) if (n) claimedHostKeys.add(`n:${norm(n)}`); }
       if (!usedBmKeys.has(hk)) {
         usedBmKeys.add(hk);
-        const w = (m ? pos(m.watts) : undefined) ?? pos(h.powerWatts) ?? (Number.isFinite(h.vcPowerWatts) ? h.vcPowerWatts : undefined);
+        const w = (m ? pos(m.watts) : undefined) ?? pos(h.powerWatts) ?? (Number.isFinite(h.vcPowerWatts) && h.vcPowerWatts >= 0 ? h.vcPowerWatts : undefined);
         const vc = resolveVc(h.serviceTag, h.name, { vcenterId: h.vcenterId, source: 'host' });
         bareMetal.push({
           serverId: `host:${h.vcenterId}:${h.name}`, fleetId: hk, name: h.name, model: h.model || '',
@@ -165,7 +168,7 @@ export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = 
     const via = backed ? (h.serviceTag && norm(m.serviceTag) === norm(h.serviceTag) ? 'tag' : 'name') : '';
     const watts = (backed ? pos(m.watts) : undefined)
       ?? pos(h.powerWatts)
-      ?? (Number.isFinite(h.vcPowerWatts) ? h.vcPowerWatts : undefined)
+      ?? (Number.isFinite(h.vcPowerWatts) && h.vcPowerWatts >= 0 ? h.vcPowerWatts : undefined)
       ?? (m ? pos(m.watts) : undefined)
       ?? null;
     virtualizationHosts.push({
@@ -240,24 +243,17 @@ export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = 
  */
 async function buildServerUniverse(hosts) {
   const measured = await allMeasuredPower({ hosts });
+  const registry = loadRegistry();      // 1회만 읽는다(과거 3회 중복 I/O 제거)
+  const omeDevices = allOmeDevices();    // 1회만 순회
   const seenTag = new Set(measured.map((s) => norm(s.serviceTag)).filter(Boolean));
   const seenHost = new Set(measured.flatMap((s) => (s.hostNames || []).map(norm)).filter(Boolean));
 
-  // OME 연결(레지스트리 type=ome)에 지정된 법인 → 그 연결이 발견한 디바이스가 상속(서비스태그/이름 기준).
-  const omeEntryVc = new Map(loadRegistry().filter((s) => s.type === 'ome' && s.vcenterId).map((s) => [s.id, s.vcenterId]));
-  const omeInfer = new Map();
-  if (omeEntryVc.size) {
-    for (const { entryId, device } of allOmeDevices()) {
-      const vc = omeEntryVc.get(entryId);
-      if (!vc) continue;
-      const t = norm(device.serviceTag); const n = norm(device.name);
-      if (t && !omeInfer.has(t)) omeInfer.set(t, vc);
-      if (n && !omeInfer.has(n)) omeInfer.set(n, vc);
-    }
-  }
+  // OME 연결(레지스트리 type=ome)에 지정된 법인 → 그 연결이 발견한 디바이스가 상속(entryId 기준, 모호성 없음).
+  // 전력 보고분(measured)은 service.js에서 이미 vcenterId가 채워지고, 무전력 발견분(extras)은 아래에서 채운다.
+  const omeEntryVc = new Map(registry.filter((s) => s.type === 'ome' && s.vcenterId).map((s) => [s.id, s.vcenterId]));
 
   const extras = [];
-  for (const s of loadRegistry()) {
+  for (const s of registry) {
     if (s.type === 'ome') continue;
     const keys = matchKeys(s);
     const regTag = norm(s.serviceTag);
@@ -274,29 +270,46 @@ async function buildServerUniverse(hosts) {
     if (tag) seenTag.add(tag);
     keys.forEach((k) => seenHost.add(k));
   }
-  for (const { entryId, device } of allOmeDevices()) {
+  for (const { entryId, device } of omeDevices) {
     const tag = norm(device.serviceTag);
     const nameKey = norm(device.name);
-    if (tag ? seenTag.has(tag) : seenHost.has(nameKey)) continue; // 서비스태그 없으면 이름 기준 dedup
+    // 대칭 dedup: 서비스태그/이름 어느 쪽이든 이미 집계된 물리 서버면 skip(중복 추가 방지).
+    if ((tag && (seenTag.has(tag) || seenHost.has(tag))) || (nameKey && seenHost.has(nameKey))) continue;
     extras.push({
       serverId: dbKey(entryId, device), serverName: device.name, serviceTag: device.serviceTag || '',
       model: (device.model || '').trim(), host: tag || nameKey,
       hostNames: [tag, nameKey].filter(Boolean), watts: null,
-      vcenterId: omeEntryVc.get(entryId) || '', vcInferred: !!omeEntryVc.get(entryId), source: 'ome',
+      vcenterId: omeEntryVc.get(entryId) || '', source: 'ome',
     });
-    if (tag) seenTag.add(tag); else if (nameKey) seenHost.add(nameKey);
+    if (tag) { seenTag.add(tag); seenHost.add(tag); } // 항상 양쪽 갱신(후속 동일 서버 dedup)
+    if (nameKey) seenHost.add(nameKey);
   }
 
-  const all = [...measured, ...extras];
-  // OME 자동 추론: 소속 vcenterId가 비어 있는 OME 서버에 연결의 법인을 상속(레지스트리/원격값은 보존).
-  if (omeInfer.size) {
-    for (const s of all) {
-      if (s.source !== 'ome' || s.vcenterId) continue;
-      const vc = omeInfer.get(norm(s.serviceTag)) || omeInfer.get(norm(s.host)) || omeInfer.get(norm((s.hostNames || [])[0]));
-      if (vc) { s.vcenterId = vc; s.vcInferred = true; }
-    }
+  return [...measured, ...extras];
+}
+
+/**
+ * prune 전용 'live 키' 집합 — 전력 DB를 거치지 않고 레지스트리(등록된 모든 서버) + OME 캐시 + 호스트에서
+ * 직접 키를 모은다. 전원오프·전력미보고라도 '등록된' 서버는 보호되어 prune이 정상 키를 지우지 않게 한다.
+ */
+export function fleetLiveKeys(snap) {
+  const live = new Set();
+  for (const s of loadRegistry()) {
+    const id = norm(s.id); if (id) live.add(id);
+    const t = norm(s.serviceTag); if (t) live.add(t);
+    const invTag = norm(getInventory(s.id)?.system?.serviceTag); if (invTag) live.add(invTag);
+    for (const n of (s.hostNames || [])) { const k = norm(n); if (k) live.add(k); }
   }
-  return all;
+  for (const { entryId, device } of allOmeDevices()) {
+    live.add(norm(dbKey(entryId, device)));
+    const t = norm(device.serviceTag); if (t) live.add(t);
+    const n = norm(device.name); if (n) live.add(n);
+  }
+  for (const h of (snap?.hosts || [])) {
+    const t = norm(h.serviceTag); if (t) live.add(t);
+    const n = norm(h.name); if (n) live.add(n);
+  }
+  return live;
 }
 
 /** 이 인스턴스 역할: 중앙(central) / 엣지(edge=중앙에 push하는 에이전트) / 단독(standalone). */

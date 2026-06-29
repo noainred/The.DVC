@@ -135,6 +135,8 @@ export async function allMeasuredPower({ hosts = [] } = {}) {
     const dedupHosts = [...(s.hostNames || []), s.host].filter(Boolean);
     tryAdd({ serverId: s.id, serverName: s.name, watts: sample.watts, ts: sample.ts, host: norm(s.host || hostNames[0] || s.name), hostNames, model, serviceTag, vcenterId: s.vcenterId || '', source: 'idrac' }, serviceTag, dedupHosts);
   }
+  // OME 연결의 소속 법인 → 그 연결이 발견한 디바이스가 상속(전력 귀속을 PowerMap/FinOps/플릿이 공유).
+  const omeEntryVc = new Map(loadRegistry().filter((s) => s.type === 'ome' && s.vcenterId).map((s) => [s.id, s.vcenterId]));
   for (const { entryId, at, device } of allOmeDevices()) {
     if (device.watts == null) continue;
     const key = dbKey(entryId, device);
@@ -144,7 +146,7 @@ export async function allMeasuredPower({ hosts = [] } = {}) {
     const hostNames = [st, norm(device.name)].filter(Boolean);
     // OME 식별은 서비스태그 우선(태그 없으면 디바이스 호스트명).
     const dedupHosts = device.serviceTag ? [] : [device.name].filter(Boolean);
-    tryAdd({ serverId: key, serverName: device.name, watts: sample.watts, ts: sample.ts, host: st || norm(device.name), hostNames, model: (device.model || '').trim(), serviceTag: device.serviceTag || '', source: 'ome' }, device.serviceTag, dedupHosts);
+    tryAdd({ serverId: key, serverName: device.name, watts: sample.watts, ts: sample.ts, host: st || norm(device.name), hostNames, model: (device.model || '').trim(), serviceTag: device.serviceTag || '', vcenterId: omeEntryVc.get(entryId) || '', source: 'ome' }, device.serviceTag, dedupHosts);
   }
   const seenRemoteOrigin = new Set(); // 같은 수집기의 동일 서버(여러 별칭 보고)를 한 번만 집계
   for (const [host, r] of remotePowerByHost()) {

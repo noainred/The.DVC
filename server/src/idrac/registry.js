@@ -17,6 +17,7 @@ import { retryTransient } from '../util/resilientFetch.js';
 import { fetchPower, fetchInventory } from './redfish.js';
 import { testOme } from './ome.js';
 import { expandIpList } from './iprange.js';
+import { bumpFleetRev } from '../insights/fleetRev.js';
 
 const FILE = path.join(config.configDir, 'idrac.json');
 
@@ -32,6 +33,8 @@ export function loadRegistry() {
 
 function saveRegistry(list) {
   atomicWriteFileSync(FILE, JSON.stringify({ servers: list }, null, 2), { mode: 0o600 });
+  // 레지스트리(서버 vcenterId·멤버십) 변경은 통합 인벤토리/전력 집계에 영향 → 플릿 캐시 무효화.
+  bumpFleetRev();
 }
 
 /** Strip the password before returning an entry to the client. */

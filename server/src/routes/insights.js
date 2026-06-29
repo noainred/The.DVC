@@ -11,11 +11,11 @@ import { filterMeasuredByMapping, loadPowerSettings } from '../idrac/powerSettin
 import { snapMemo, sendCached } from '../util/snapCache.js';
 import { computeFinOps, loadFinopsConfig, saveFinopsConfig } from '../insights/finops.js';
 import { computePowerBreakdown } from '../insights/powerBreakdown.js';
-import { getFleetInventory } from '../insights/fleetInventory.js';
-import { setFleetTag, pruneFleetTags } from '../insights/fleetTags.js';
-import { setFleetAssign, applyFleetAssign, pruneFleetAssign } from '../insights/fleetAssign.js';
+import { getFleetInventory, fleetLiveKeys } from '../insights/fleetInventory.js';
+import { setFleetTag, pruneFleetTags, loadFleetTags } from '../insights/fleetTags.js';
+import { setFleetAssign, setFleetAssignMany, applyFleetAssign, pruneFleetAssign, loadFleetAssign } from '../insights/fleetAssign.js';
 import { fleetRev } from '../insights/fleetRev.js';
-import { loadRegistry, updateServer } from '../idrac/registry.js';
+import { loadRegistry, updateServer, assignVcenter } from '../idrac/registry.js';
 import { logAudit } from '../audit.js';
 import { detectAnomalies } from '../insights/anomaly.js';
 import { forecastCapacity } from '../insights/forecast.js';
@@ -111,29 +111,50 @@ insightsRouter.put('/fleet/assign', adminOnly, (req, res) => {
 });
 
 // 여러 베어메탈을 한 법인으로 일괄 귀속(관리자). body: { items:[{serverId,serviceTag,key}], vcenterId }.
+// 배치 I/O: 레지스트리 서버는 assignVcenter 1회(전체 1 read+1 write), 나머지는 setFleetAssignMany 1회.
+// (과거: 서버당 updateServer+setFleetAssign → 수천 회 동기 전체파일 쓰기로 이벤트 루프 블로킹)
 insightsRouter.put('/fleet/assign-bulk', adminOnly, (req, res) => {
   const items = Array.isArray(req.body?.items) ? req.body.items.slice(0, 5000) : [];
   const vcenterId = String(req.body?.vcenterId || '').trim();
   if (!items.length) return res.status(400).json({ ok: false, reason: 'items가 비었습니다.' });
   const validIds = new Set((store.get().vcenters || []).map((v) => v.id));
   if (vcenterId && !validIds.has(vcenterId)) return res.status(400).json({ ok: false, reason: `존재하지 않는 vCenter id: ${vcenterId}` });
-  let ok = 0; const errors = [];
+
+  const regIds = new Set(loadRegistry().filter((s) => s.type !== 'ome').map((s) => String(s.id)));
+  const regTargets = [];      // 레지스트리 갱신 대상 serverId
+  const assignEntries = [];   // fleet-assign 일괄 [key, vc]
+  const staleClears = [];     // 레지스트리로 옮긴 서버의 과거 fleet-assign 정리 [key, '']
   for (const it of items) {
-    const r = assignOne({
-      serverId: String(it?.serverId || '').trim(), serviceTag: String(it?.serviceTag || '').trim(),
-      key: String(it?.key || '').trim(), vcenterId, validIds,
-    });
-    if (r.ok) ok += 1; else errors.push({ key: it?.key || it?.serviceTag || it?.serverId, reason: r.reason });
+    const serverId = String(it?.serverId || '').trim();
+    const serviceTag = String(it?.serviceTag || '').trim();
+    const key = String(it?.key || serviceTag || serverId).trim();
+    if (!key) continue;
+    if (serverId && regIds.has(serverId)) {
+      regTargets.push(serverId);
+      staleClears.push([key, '']);
+      if (serviceTag) staleClears.push([serviceTag, '']);
+    } else {
+      assignEntries.push([key, vcenterId]);
+    }
   }
-  logAudit({ user: req.user?.username, action: '플릿 법인 일괄 귀속', target: vcenterId || '(해제)', detail: `${ok}/${items.length}대`, ip: req.ip || '' });
-  res.json({ ok: true, assigned: ok, total: items.length, errors: errors.slice(0, 20) });
+  if (regTargets.length) assignVcenter({ ids: regTargets, vcenterId });           // 레지스트리 1 read+1 write
+  if (assignEntries.length || staleClears.length) setFleetAssignMany([...assignEntries, ...staleClears], validIds); // fleet-assign 1 write
+  const assigned = regTargets.length + assignEntries.length;
+  logAudit({ user: req.user?.username, action: '플릿 법인 일괄 귀속', target: vcenterId || '(해제)', detail: `${assigned}/${items.length}대 (레지스트리 ${regTargets.length} · 소속 ${assignEntries.length})`, ip: req.ip || '' });
+  res.json({ ok: true, assigned, total: items.length, errors: [] });
 });
 
-// 유령 태그/소속 키 정리(관리자) — 현재 어느 서버/호스트와도 매칭 안 되는 잔재 키 제거.
-insightsRouter.post('/fleet/prune', adminOnly, async (req, res) => {
+// 유령 태그/소속 키 정리(관리자) — 현재 어느 '등록된' 서버/호스트와도 매칭 안 되는 잔재 키 제거.
+// liveKeys는 레지스트리(전원오프 포함)+OME 캐시+호스트에서 직접 산출(전력 DB 미경유) → 등록 서버 보호.
+// body.dryRun=true면 삭제하지 않고 제거 대상 수만 반환(미리보기).
+insightsRouter.post('/fleet/prune', adminOnly, (req, res) => {
   try {
-    const { liveKeys } = await getFleetInventory(store.get());
-    const live = new Set(liveKeys || []);
+    const live = fleetLiveKeys(store.get());
+    if (req.body?.dryRun) {
+      const ghostT = Object.keys(loadFleetTags()).filter((k) => !live.has(k)).length;
+      const ghostA = Object.keys(loadFleetAssign()).filter((k) => !live.has(k)).length;
+      return res.json({ ok: true, dryRun: true, wouldRemoveTags: ghostT, wouldRemoveAssign: ghostA });
+    }
     const tags = pruneFleetTags(live);
     const assign = pruneFleetAssign(live);
     logAudit({ user: req.user?.username, action: '플릿 유령 키 정리', target: `태그 ${tags} · 소속 ${assign}`, ip: req.ip || '' });

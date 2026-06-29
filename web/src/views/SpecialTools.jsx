@@ -2504,6 +2504,14 @@ function TagSelect({ value, onChange, disabled }) {
 }
 
 const MODE_BADGE = { edge: ['엣지(현장)', 'teal'], central: ['중앙', 'blue'], standalone: ['단독', 'purple'] };
+// 소속 법인 출처 라벨 [짧은표시, 툴팁].
+const VC_SRC = {
+  assigned: ['수동', '관리자가 직접 등록'],
+  registry: ['레지스트리', 'iDRAC 레지스트리의 소속 vCenter'],
+  host: ['호스트', '호스팅 vCenter'],
+  collector: ['수집기', '원격 수집기 귀속'],
+  inferred: ['자동(OME)', 'OME 연결의 법인을 상속(자동 추론)'],
+};
 
 // 베어메탈 서버의 소속 법인(vCenter) 등록 드롭다운. 목록에 없는 값(삭제된 vCenter 등)도 표시.
 function VcAssignSelect({ value, vcenters, onChange, disabled }) {
@@ -2525,6 +2533,7 @@ function FleetInventory({ isAdmin }) {
   const [q, setQ] = useState('');
   const [fvc, setFvc] = useState('');             // 법인(vCenter)/DC 필터: '' 전체, '__none__' 미지정
   const [busy, setBusy] = useState('');
+  const [notice, setNotice] = useState('');        // 성공 안내(에러와 분리 — 성공이 에러를 덮지 않게)
   const [sel, setSel] = useState(() => new Set()); // 일괄 등록용 선택(fleetId)
   const [bulkVc, setBulkVc] = useState('');        // 일괄 등록 대상 법인('' = 미지정으로 해제)
   const seqRef = React.useRef(0);                  // load 응답 경합 가드(오래된 응답이 최신을 덮어쓰지 않게)
@@ -2556,10 +2565,13 @@ function FleetInventory({ isAdmin }) {
     finally { setBusy(''); }
   };
   const toggleSel = (id) => setSel((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
-  // 유령(교체·삭제된 서버의 잔재) 분류/소속 키 정리.
+  // 유령(교체·삭제된 서버의 잔재) 분류/소속 키 정리. 등록된 서버는 보호되며, 삭제 전 확인한다.
   const prune = async () => {
+    const ghost = d?.summary?.ghostKeys ?? 0;
+    if (!window.confirm(`현재 어느 등록 서버/호스트와도 매칭되지 않는 유령 키 ${ghost}개를 제거합니다.\n(등록된 서버는 전원오프여도 보호됩니다.) 진행할까요?`)) return;
     setBusy('__prune__');
-    try { const r = await postJson('/insights/fleet/prune', {}); setErr(null); await load(); if (r) setErr(`정리 완료 — 태그 ${r.removedTags}개 · 소속 ${r.removedAssign}개 제거`); }
+    setNotice('');
+    try { const r = await postJson('/insights/fleet/prune', {}); await load(); setErr(null); setNotice(`유령 키 정리 완료 — 태그 ${r.removedTags}개 · 소속 ${r.removedAssign}개 제거`); }
     catch (e) { setErr(e.message); }
     finally { setBusy(''); }
   };
@@ -2575,7 +2587,8 @@ function FleetInventory({ isAdmin }) {
   const vh = (d.virtualizationHosts || []).filter((h) => inVc(h.vcenterId) && match(h.name, h.model, h.serviceTag, h.vcenter));
   const modeBadge = MODE_BADGE[d.mode];
   const selKey = (b) => b.fleetId || rowKey(b);
-  const selectedItems = bm.filter((b) => sel.has(selKey(b)));
+  // 선택은 '전체 베어메탈' 기준으로 유지 — 필터를 바꿔도 숨은 선택이 조용히 누락되지 않게.
+  const selectedItems = (d.bareMetal || []).filter((b) => sel.has(selKey(b)));
   const allShownSelected = bm.length > 0 && bm.every((b) => sel.has(selKey(b)));
   const toggleAllShown = () => setSel((prev) => {
     const n = new Set(prev);
@@ -2586,12 +2599,16 @@ function FleetInventory({ isAdmin }) {
   const bulkAssign = async () => {
     const items = selectedItems.map((b) => ({ serverId: b.serverId, serviceTag: b.serviceTag, key: tagKeyOf(b) }));
     if (!items.length) return;
+    const dest = bulkVc ? (vcenters.find((v) => v.id === bulkVc)?.name || bulkVc) : '미지정(해제)';
+    if (!window.confirm(`선택한 ${items.length}대를 '${dest}'(으)로 일괄 등록할까요?`)) return;
     setBusy('__bulk__');
+    setNotice('');
     try {
       const r = await putJson('/insights/fleet/assign-bulk', { items, vcenterId: bulkVc });
       setSel(new Set());
       await load();
-      setErr(r && r.errors && r.errors.length ? `${r.assigned}/${r.total}대 등록(일부 실패 ${r.errors.length})` : null);
+      setErr(null);
+      setNotice(`${r.assigned}/${r.total}대 일괄 등록 완료`);
     } catch (e) { setErr(e.message); }
     finally { setBusy(''); }
   };
@@ -2644,7 +2661,8 @@ function FleetInventory({ isAdmin }) {
         </div>
       </div>
 
-      {err && d && <div className="card" style={{ padding: '8px 12px', marginBottom: 10, borderLeft: '3px solid var(--amber)', fontSize: 13 }}>{err}</div>}
+      {err && d && <div className="card flex between gap" style={{ padding: '8px 12px', marginBottom: 10, borderLeft: '3px solid var(--red)', fontSize: 13, alignItems: 'center' }}><span>⚠ {err}</span><button className="logout-btn" style={{ padding: '2px 8px' }} onClick={() => setErr(null)}>✕</button></div>}
+      {notice && <div className="card flex between gap" style={{ padding: '8px 12px', marginBottom: 10, borderLeft: '3px solid var(--green)', fontSize: 13, alignItems: 'center' }}><span>✓ {notice}</span><button className="logout-btn" style={{ padding: '2px 8px' }} onClick={() => setNotice('')}>✕</button></div>}
       {isAdmin && s.ghostKeys > 0 && (
         <div className="card flex between wrap gap" style={{ padding: '8px 12px', marginBottom: 10, borderLeft: '3px solid var(--amber)', alignItems: 'center' }}>
           <span style={{ fontSize: 13 }}>⚠ 유령 분류/소속 키 <b>{s.ghostKeys}</b>개 — 교체·삭제된 서버의 잔재가 남아 있습니다.</span>
@@ -2680,8 +2698,7 @@ function FleetInventory({ isAdmin }) {
                       {isAdmin
                         ? <VcAssignSelect value={b.vcenterId || ''} vcenters={vcenters} disabled={busy === rowKey(b)} onChange={(vid) => setVc(b, vid)} />
                         : (b.vcenter ? <span>{b.vcenter}</span> : <span className="badge purple">미지정</span>)}
-                      {b.vcSource === 'inferred' && <span className="muted" style={{ fontSize: 11, marginLeft: 4 }} title="OME 연결의 법인을 상속(자동 추론)">· 자동(OME)</span>}
-                      {b.vcSource === 'collector' && <span className="muted" style={{ fontSize: 11, marginLeft: 4 }} title="원격 수집기 귀속">· 수집기</span>}
+                      {b.vcenterId && VC_SRC[b.vcSource] && <span className="muted" style={{ fontSize: 11, marginLeft: 4 }} title={VC_SRC[b.vcSource][1]}>· {VC_SRC[b.vcSource][0]}</span>}
                     </td>
                     <td className="muted" style={{ fontSize: 12 }}>{b.source}</td>
                     <td style={{ textAlign: 'right' }}>{b.watts != null ? <b>{fmtWatts(b.watts)}</b> : <span className="muted">미측정</span>}</td>

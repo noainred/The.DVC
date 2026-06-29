@@ -49,7 +49,10 @@ export function setFleetAssign(key, vcenterId, validIds = null) {
   const vc = String(vcenterId || '').trim();
   if (vc.length > 128) return { ok: false, reason: 'vcenterId가 너무 깁니다.' };
   if (vc && validIds && !validIds.has(vc)) return { ok: false, reason: `존재하지 않는 vCenter id: ${vc}` };
-  const next = { ...loadFleetAssign() };
+  const cur = loadFleetAssign();
+  if (!vc && !(k in cur)) return { ok: true, assign: cur };  // 해제인데 이미 없음 → 불필요한 디스크 write 생략
+  if (cur[k] === vc) return { ok: true, assign: cur };        // 값 동일 → no-op
+  const next = { ...cur };
   if (!vc) delete next[k];
   else next[k] = vc;
   try { atomicWriteFileSync(FILE, JSON.stringify({ assign: next }, null, 2)); }
@@ -61,6 +64,31 @@ export function setFleetAssign(key, vcenterId, validIds = null) {
 }
 
 /**
+ * 여러 키의 소속을 한 번의 디스크 쓰기로 일괄 설정/해제(일괄 등록·stale 정리용).
+ * entries: [[key, vcenterId|''], ...]. vcenterId 빈값이면 해제. 반환 { ok, changed }.
+ */
+export function setFleetAssignMany(entries = [], validIds = null) {
+  const next = { ...loadFleetAssign() };
+  let changed = 0;
+  for (const [rawKey, rawVc] of entries) {
+    const k = norm(rawKey);
+    if (!k || k.length > 128) continue;
+    const vc = String(rawVc || '').trim();
+    if (vc.length > 128) continue;
+    if (vc && validIds && !validIds.has(vc)) continue;
+    if (!vc) { if (k in next) { delete next[k]; changed += 1; } }
+    else if (next[k] !== vc) { next[k] = vc; changed += 1; }
+  }
+  if (!changed) return { ok: true, changed: 0 };
+  try { atomicWriteFileSync(FILE, JSON.stringify({ assign: next }, null, 2)); }
+  catch (e) { return { ok: false, reason: `저장 실패: ${e.message}` }; }
+  cache = next;
+  cacheMtimeMs = fileMtimeMs();
+  bumpFleetRev();
+  return { ok: true, changed };
+}
+
+/**
  * 측정 전력 목록에 소속 법인(fleet-assign)을 덧입힌다 — PowerMap/FinOps가 OME/원격 베어메탈의
  * 수동 귀속을 똑같이 반영하도록(화면 간 귀속 불일치 방지). vcenterId가 비어 있는 항목만 채운다
  * (레지스트리/원격이 제공한 값은 권위로 유지).
@@ -69,9 +97,9 @@ export function applyFleetAssign(measured) {
   const a = loadFleetAssign();
   if (!a || !Object.keys(a).length) return measured;
   for (const m of (measured || [])) {
-    if (m.vcenterId) continue;
+    if (m.source === 'idrac') continue; // iDRAC 레지스트리 vcenterId가 권위 — fleet-assign으로 덮지 않음
     const v = a[norm(m.serviceTag)] || a[norm(m.serverId)];
-    if (v) m.vcenterId = v;
+    if (v) m.vcenterId = v;             // 수동 등록은 OME 추론/원격 귀속보다 우선(플릿 화면과 일치)
   }
   return measured;
 }
