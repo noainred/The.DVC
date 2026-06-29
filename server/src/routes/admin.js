@@ -87,6 +87,7 @@ import { startIdracScanNow, idracScanStatus } from '../idrac/scanPoller.js';
 import { allMeasuredPower, buildPowerDashboard, purgeStalePower, measuredPowerBreakdown, vcenterPowerCheck } from '../idrac/service.js';
 import { computeFinOps, loadFinopsConfig } from '../insights/finops.js';
 import { loadPowerSettings, savePowerSettings, filterMeasuredByMapping } from '../idrac/powerSettings.js';
+import { snapMemo, sendCached } from '../util/snapCache.js';
 import { getInventory as getIdracInventory } from '../idrac/invCache.js';
 import { getSensorSeries } from '../idrac/sensorStore.js';
 import { fetchInventory as fetchIdracInventory, fetchSensors as fetchIdracSensors, probeGpuTelemetry } from '../idrac/redfish.js';
@@ -920,34 +921,39 @@ adminRouter.post('/idrac/poll', adminOnly, async (_req, res) => {
 adminRouter.get('/idrac/power-dashboard', adminOnly, async (req, res) => {
   try {
     const hours = Number(req.query.hours) || 24;
-    const measured = filterMeasuredByMapping(await allMeasuredPower({ hosts: store.get().hosts }), store.get());
-    const dash = await buildPowerDashboard(measured, { hours });
-    // 에너지/비용/CO2(기존 FinOps 재사용) + vCenter 이름 매핑.
-    let finops = null; try { finops = computeFinOps(store.get(), measured); } catch { /* */ }
-    const vcName = {}; for (const v of (store.get()?.vcenters || [])) vcName[v.id] = v.name;
-    dash.byVcenter = dash.byVcenter.map((g) => ({ ...g, name: g.vcenterId ? (vcName[g.vcenterId] || g.vcenterId) : '(미매핑)' }));
-    // PSU 헬스 요약(인벤토리 기반).
-    const servers = idracServersForAnalysis(req);
-    const okRe = /^ok$|정상|healthy/i;
-    let psuHealthy = 0, psuDegraded = 0, noRedundancy = 0; const psuIssues = [];
-    for (const s of servers) {
-      const inv = getIdracInventory(s.id); if (!inv) continue;
-      const psus = inv.psus || []; if (!psus.length) continue;
-      if (psus.length < 2) noRedundancy++;
-      for (const p of psus) {
-        if (okRe.test(p.health || p.state || 'ok')) psuHealthy++;
-        else { psuDegraded++; psuIssues.push({ server: s.name, serverId: s.id, name: p.name, health: p.health || p.state || '' }); }
+    const vc = String(req.query.vcenterId || '');
+    const snap = store.get();
+    // 같은 스냅샷·파라미터면 재계산하지 않고 캐시(동시 폴링 N명 → 계산 1회). 30s 폴 주기 기준 백스톱 60s.
+    const key = `${snap.generatedAt}|${hours}|${vc}|${JSON.stringify(loadPowerSettings())}|${JSON.stringify(loadFinopsConfig())}`;
+    const payload = await snapMemo('power-dashboard', key, 60_000, async () => {
+      const measured = filterMeasuredByMapping(await allMeasuredPower({ hosts: snap.hosts }), snap);
+      const dash = await buildPowerDashboard(measured, { hours });
+      let finops = null; try { finops = computeFinOps(snap, measured); } catch { /* */ }
+      const vcName = {}; for (const v of (snap.vcenters || [])) vcName[v.id] = v.name;
+      dash.byVcenter = dash.byVcenter.map((g) => ({ ...g, name: g.vcenterId ? (vcName[g.vcenterId] || g.vcenterId) : '(미매핑)' }));
+      const servers = idracServersForAnalysis(req);
+      const okRe = /^ok$|정상|healthy/i;
+      let psuHealthy = 0, psuDegraded = 0, noRedundancy = 0; const psuIssues = [];
+      for (const s of servers) {
+        const inv = getIdracInventory(s.id); if (!inv) continue;
+        const psus = inv.psus || []; if (!psus.length) continue;
+        if (psus.length < 2) noRedundancy++;
+        for (const p of psus) {
+          if (okRe.test(p.health || p.state || 'ok')) psuHealthy++;
+          else { psuDegraded++; psuIssues.push({ server: s.name, serverId: s.id, name: p.name, health: p.health || p.state || '' }); }
+        }
       }
-    }
-    res.json({
-      ...dash,
-      energy: finops ? {
-        kwhDay: finops.totals?.kwhDay, costDay: finops.totals?.costDay, co2MonthKg: finops.totals?.co2MonthKg,
-        currency: loadFinopsConfig().currency, pue: loadFinopsConfig().pue,
-        totalHosts: finops.totalHosts, measuredHosts: finops.measuredHosts, unmappedServers: finops.unmappedServers, unmappedWatts: finops.unmappedWatts,
-      } : null,
-      psu: { healthy: psuHealthy, degraded: psuDegraded, noRedundancy, issues: psuIssues.slice(0, 20) },
+      return {
+        ...dash,
+        energy: finops ? {
+          kwhDay: finops.totals?.kwhDay, costDay: finops.totals?.costDay, co2MonthKg: finops.totals?.co2MonthKg,
+          currency: loadFinopsConfig().currency, pue: loadFinopsConfig().pue,
+          totalHosts: finops.totalHosts, measuredHosts: finops.measuredHosts, unmappedServers: finops.unmappedServers, unmappedWatts: finops.unmappedWatts,
+        } : null,
+        psu: { healthy: psuHealthy, degraded: psuDegraded, noRedundancy, issues: psuIssues.slice(0, 20) },
+      };
     });
+    sendCached(req, res, key, payload);
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 

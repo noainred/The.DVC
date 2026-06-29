@@ -16,6 +16,8 @@ import cors from 'cors';
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from './config.js';
+import { compression } from './util/compress.js';
+import { rateLimit } from './util/rateLimit.js';
 import { store } from './store.js';
 import { api } from './routes/api.js';
 import { authRouter } from './routes/auth.js';
@@ -61,6 +63,13 @@ import { startDbSizeSampler } from './insights/portalDb.js';
 
 const app = express();
 app.use(cors());
+// 응답 gzip 압축(큰 JSON만, 비동기) + 레이트 리밋(폭주/DoS 방어). 헬스/정적/메트릭은 제외.
+app.use(compression());
+app.use(rateLimit({ skip: (req) => {
+  const p = req.path || '';
+  return p === '/api/health' || p === '/metrics' || p === '/dl' || p.startsWith('/dl/')
+    || !p.startsWith('/api'); // 정적 자산/SPA는 제한 제외
+} }));
 // 사이트 위임 수집의 인벤토리 push(/api/central/inventory)만 수MB가 될 수 있어 큰 한도를 적용.
 // 그 외 모든 라우트는 기본 1mb로 제한해 메모리/요청 남용 면적을 줄인다.
 const BIG_JSON = express.json({ limit: process.env.JSON_BODY_LIMIT || '64mb' });

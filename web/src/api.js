@@ -116,7 +116,44 @@ export async function fetchMe() {
   return data.user;
 }
 
-/** Poll an endpoint on an interval and expose {data, error, loading}. */
+// 폴링용 조건부 fetch — ETag(If-None-Match) 지원. 서버가 캐시 헤더(ETag)를 주는 무거운
+// 엔드포인트는 변동 없으면 304(본문 없음)를 받아 대역폭/직렬화를 아낀다. ETag 미지원 응답은
+// 기존과 동일하게 전체 본문을 받는다(하위호환). 반환 { notModified, data, etag }.
+async function pollFetch(path, params, signal, etag) {
+  const qs = new URLSearchParams(
+    Object.entries(params).filter(([, v]) => v !== undefined && v !== '' && v !== null)
+  ).toString();
+  const url = `${BASE}${path}${qs ? `?${qs}` : ''}`;
+  const retries = 2;
+  let lastErr;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    let res;
+    try {
+      res = await fetch(url, {
+        headers: authHeaders(etag ? { 'If-None-Match': etag } : {}),
+        signal: withTimeout(signal, GET_TIMEOUT_MS),
+        cache: 'no-store', // 브라우저 캐시 대신 우리가 ETag/304를 직접 구동(결정적)
+      });
+    } catch (err) {
+      lastErr = err;
+      if (signal?.aborted) throw err;
+      if (attempt < retries && isTransientFront(err)) { await sleep(300 * 2 ** attempt); continue; }
+      throw err;
+    }
+    if (res.status === 401) { setToken(null); onUnauthorized(); throw new Error('세션이 만료되었습니다. 다시 로그인하세요.'); }
+    if (res.status === 304) return { notModified: true, etag: res.headers.get('ETag') || etag };
+    if (!res.ok) {
+      if (attempt < retries && isTransientFront(null, res.status)) { await sleep(300 * 2 ** attempt); continue; }
+      throw new Error(`${path} -> ${res.status}`);
+    }
+    return { notModified: false, data: await res.json(), etag: res.headers.get('ETag') || null };
+  }
+  throw lastErr;
+}
+
+/** Poll an endpoint on an interval and expose {data, error, loading}.
+ *  최적화: 백그라운드 탭이면 폴링 일시정지(가시화 시 즉시 갱신), 주기에 ±10% 지터(동시 사용자
+ *  부하 분산), ETag/304로 변동 없는 응답은 본문 미수신. in-flight 가드·언마운트 취소 유지. */
 export function usePolling(path, params = {}, intervalMs = 15_000) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
@@ -126,29 +163,54 @@ export function usePolling(path, params = {}, intervalMs = 15_000) {
   savedParams.current = params;
 
   useEffect(() => {
-    // A falsy path disables polling (e.g. conditional/late-bound endpoints).
     if (!path) { setLoading(false); return undefined; }
     let active = true;
-    let inFlight = false; // 고RTT에서 이전 요청이 끝나기 전 다음 tick이 겹쳐 쌓이는 것 방지
-    let timer;
+    let inFlight = false;
+    let timer = null;
+    let lastEtag = null; // 이 (path,params)에 대한 마지막 ETag(효과 재실행 시 리셋)
     const controller = new AbortController();
+
     const tick = async () => {
-      if (inFlight) return; // 직전 요청 진행 중이면 이번 주기는 건너뜀(적체 방지)
+      if (inFlight || !active) return;
       inFlight = true;
       try {
-        const json = await fetchJson(path, savedParams.current, controller.signal);
-        if (active) { setData(json); setError(null); }
+        const r = await pollFetch(path, savedParams.current, controller.signal, lastEtag);
+        if (active) {
+          lastEtag = r.etag || lastEtag;
+          if (!r.notModified) setData(r.data); // 304면 직전 데이터 유지(변동 없음)
+          setError(null);
+        }
       } catch (err) {
-        // 일시 실패 시 직전 데이터(setData)는 유지하고 error만 표시 → 화면이 깜빡이지 않음.
         if (active && !controller.signal.aborted) setError(err.message);
       } finally {
         inFlight = false;
         if (active) setLoading(false);
       }
     };
-    tick();
-    timer = setInterval(tick, intervalMs);
-    return () => { active = false; clearInterval(timer); controller.abort(); };
+
+    // 자가 스케줄(지터 적용) — setInterval 대신 매 주기 ±10% 흔들어 다수 사용자 폴링이 한꺼번에
+    // 몰리지 않게 분산. 백그라운드 탭(document.hidden)이면 네트워크 호출을 건너뛴다.
+    const schedule = () => {
+      const jitter = intervalMs * (0.9 + Math.random() * 0.2);
+      timer = setTimeout(loop, jitter);
+    };
+    const loop = async () => {
+      if (!active) return;
+      if (typeof document === 'undefined' || !document.hidden) await tick();
+      if (active) schedule();
+    };
+    // 탭이 다시 보이면 즉시 한 번 갱신(백그라운드 동안 멈춰 있던 데이터 최신화).
+    const onVisible = () => { if (active && typeof document !== 'undefined' && !document.hidden) tick(); };
+
+    tick().then(() => { if (active) schedule(); });
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      active = false;
+      if (timer) clearTimeout(timer);
+      controller.abort();
+      if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisible);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path, paramsKey, intervalMs]);
 

@@ -81,19 +81,19 @@ export default function IdracAdmin() {
   const scanBusy = !!scanJobs.status?.running || (scanJobs.jobs || []).some((j) => j.state === 'pending' || j.state === 'running');
   useEffect(() => {
     if (!scanBusy) return undefined;
-    const iv = setInterval(() => { loadScanJobs(); loadScanRanges(); }, 3_000);
+    const iv = setInterval(() => { loadScanJobs(); loadScanRanges(); }, 5_000);
     return () => clearInterval(iv);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scanBusy]);
 
-  // 스캔 진행 중이면 상태를 빠르게(2.5s) 폴링해 진행률·결과를 갱신.
+  // 스캔 진행 중이면 상태를 주기(5s) 폴링해 진행률·결과를 갱신.
   useEffect(() => {
     if (!scanRanges.status?.running) return undefined;
     const iv = setInterval(() => {
       fetchJson('/admin/idrac/scan-ranges/status')
         .then((d) => { setScanRanges((s) => ({ ...s, status: d.status || s.status })); if (!d.status?.running) loadScanRanges(); })
         .catch(() => {});
-    }, 2_500);
+    }, 5_000);
     return () => clearInterval(iv);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scanRanges.status?.running]);
