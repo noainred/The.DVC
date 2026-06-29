@@ -47,6 +47,7 @@ import { listVcRanges, saveVcRanges, removeVcRanges } from '../ipam/rangeStore.j
 import { listAssignments as listIdracAssignments, getResults as getAgentResults } from '../central/assignments.js';
 import { centralTokenInfo, generateCentralToken, setCentralToken } from '../central/token.js';
 import { listInventory } from '../central/inventory.js';
+import { getIngestStats, resetIngestStats } from '../central/ingestStats.js';
 import { listAgentConfigs } from '../central/agentConfig.js';
 import { createBackup, listBackups, backupPath, deleteBackup, readBackup, restoreCentral } from '../backup/service.js';
 import { loadBackupSettings, saveBackupSettings, backupStatus } from '../backup/settings.js';
@@ -351,6 +352,10 @@ adminRouter.put('/ipam/settings', adminOnly, (req, res) => res.json({ ok: true, 
 adminRouter.get('/central-token', adminOnly, (_req, res) => res.json(centralTokenInfo()));
 // 사이트 위임 수집 현황(어떤 vCenter를 어떤 에이전트가 언제 push했는지).
 adminRouter.get('/central/inventory', adminOnly, (_req, res) => res.json({ inventory: listInventory() }));
+// 에이전트별 수신 트래픽 진단 — 누가 무엇을 얼마나 보내는지(와이어 바이트·push 빈도·페이로드 규모).
+// iftop에서 특정 에이전트 트래픽이 비정상적으로 높을 때 원인(큰 페이로드 vs 잦은 push)을 짚어낸다.
+adminRouter.get('/central/ingest-stats', adminOnly, (_req, res) => res.json({ ok: true, ...getIngestStats() }));
+adminRouter.post('/central/ingest-stats/reset', adminOnly, (req, res) => { resetIngestStats(); logAudit({ user: req.user?.username, action: '수신 트래픽 통계 초기화', target: 'ingest-stats' }); res.json({ ok: true }); });
 adminRouter.post('/central-token/generate', adminOnly, (req, res) => {
   const r = generateCentralToken({ force: !!(req.body && req.body.force) });
   res.json({ ok: true, ...r });

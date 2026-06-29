@@ -15,15 +15,21 @@ export default function Collectors() {
   const [banner, setBanner] = useState(null);
   const [central, setCentral] = useState(null);
   const [sort, setSort] = useState({ key: 'id', dir: 'asc' });
+  const [ingest, setIngest] = useState(null); // 에이전트별 수신 트래픽 진단
 
   const load = async () => {
     try { setData(await fetchJson('/admin/collectors')); setError(null); }
     catch (e) { setError(e.message); }
   };
+  const loadIngest = () => fetchJson('/admin/central/ingest-stats').then(setIngest).catch(() => {});
+  const resetIngest = async () => {
+    if (!window.confirm('수신 트래픽 통계를 초기화할까요? (다시 0부터 집계)')) return;
+    try { await postJson('/admin/central/ingest-stats/reset', {}); await loadIngest(); } catch { /* */ }
+  };
   useEffect(() => {
-    load();
+    load(); loadIngest();
     fetchJson('/health').then((h) => setCentral(h.version)).catch(() => {});
-    const t = setInterval(load, 15_000);
+    const t = setInterval(() => { load(); loadIngest(); }, 15_000);
     return () => clearInterval(t);
   }, []);
 
@@ -161,6 +167,8 @@ export default function Collectors() {
           color: banner.ok ? '#4ade80' : '#f87171' }}>{banner.text}</div>
       )}
 
+      <IngestStats data={ingest} onReset={resetIngest} />
+
       <div className="card" style={{ marginBottom: 12, padding: '10px 14px' }}>
         <div className="muted" style={{ fontSize: 12, lineHeight: 1.8 }}>
           각 데이터센터에 포탈을 <b>수집 에이전트</b>로 설치하면(<code>COLLECTOR_TOKEN</code>·<code>COLLECTOR_DATACENTER</code> 설정),
@@ -255,5 +263,67 @@ export default function Collectors() {
         </div>
       )}
     </>
+  );
+}
+
+// ---- 에이전트 수신 트래픽 진단 ---------------------------------------------
+// 누가(어느 에이전트) 무엇을(엔드포인트·페이로드) 얼마나(와이어 바이트·빈도) 중앙에 보내는지.
+// iftop에서 특정 에이전트 트래픽이 비정상적으로 높을 때, 원인이 '큰 페이로드'인지 '잦은 push'인지 짚어낸다.
+function IngestStats({ data, onReset }) {
+  const rows = data?.rows || [];
+  const fmtB = (n) => (n == null ? '—' : n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${(n / 1024).toFixed(0)} KB` : `${n} B`);
+  const fmtRate = (bps) => (bps == null ? '—' : `${fmtB(bps)}/s`);
+  const ago = (ts) => { if (!ts) return ''; const s = Math.floor((Date.now() - ts) / 1000); return s >= 60 ? `${Math.floor(s / 60)}분 전` : `${s}초 전`; };
+  // 상위 에이전트가 평균의 몇 배인지로 '비정상' 강조.
+  const avgRate = rows.length ? rows.reduce((a, r) => a + (r.bytesPerSec || 0), 0) / rows.length : 0;
+  const ep = (e) => (e || '').replace(/^\//, '');
+
+  return (
+    <div className="card" style={{ marginBottom: 12, padding: '12px 16px', borderLeft: '3px solid var(--accent, #60a5fa)' }}>
+      <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 8 }}>
+        <b style={{ fontSize: 13 }}>에이전트 수신 트래픽 진단 {data?.since ? <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>(집계 시작 {ago(data.since)})</span> : null}</b>
+        <button className="logout-btn" style={{ padding: '6px 12px', fontSize: 12 }} onClick={onReset}>통계 초기화</button>
+      </div>
+      <div className="muted" style={{ fontSize: 12, lineHeight: 1.7, marginBottom: 8 }}>
+        에이전트→중앙 push의 <b>와이어 바이트</b>(압축 포함)와 페이로드 규모(vCenter·호스트·VM)·push 빈도를 집계합니다.
+        트래픽은 <b>호스트 수가 아니라 VM 수·페이로드 크기 × push 빈도</b>에 비례합니다. 한 에이전트가 유독 높으면 아래에서 원인(큰 페이로드 vs 잦은 push)을 확인하세요.
+      </div>
+      {rows.length === 0 ? (
+        <div className="muted" style={{ fontSize: 12 }}>아직 수신된 push가 없습니다(사이트 위임 에이전트가 push하면 집계됩니다).</div>
+      ) : (
+        <div className="table-wrap">
+          <table>
+            <thead><tr>
+              <th>에이전트</th><th className="right">총 수신</th><th className="right">push 수</th><th className="right">평균 크기</th>
+              <th className="right">평균 간격</th><th className="right">평균 수신율</th><th>최근 페이로드</th><th className="right">최근</th>
+            </tr></thead>
+            <tbody>
+              {rows.map((r) => {
+                const hot = avgRate > 0 && (r.bytesPerSec || 0) > avgRate * 3; // 평균의 3배↑ = 비정상 강조
+                return (
+                  <tr key={r.agent} style={{ background: hot ? 'rgba(245,158,11,.10)' : undefined }}>
+                    <td><b>{r.agent}</b>{hot && <span style={{ color: 'var(--amber)' }} title="평균 대비 비정상적으로 높음"> ⚠</span>}</td>
+                    <td className="right tabular"><b>{fmtB(r.wireBytes)}</b></td>
+                    <td className="right tabular">{r.pushes}</td>
+                    <td className="right tabular">{fmtB(r.avgBytes)}</td>
+                    <td className="right tabular">{r.intervalSec != null ? `${r.intervalSec}s` : '—'}</td>
+                    <td className="right tabular" style={{ color: hot ? 'var(--amber)' : undefined }}>{fmtRate(r.bytesPerSec)}</td>
+                    <td className="muted" style={{ fontSize: 12 }}>
+                      {r.last ? <>{ep(r.last.endpoint)}{r.last.vcenterId ? ` · ${r.last.vcenterId}` : ''}{r.last.vms != null ? ` · 호스트 ${r.last.hosts}·VM ${r.last.vms}` : ''}{r.last.gzip ? ' · gzip' : ' · 무압축'}</> : '—'}
+                    </td>
+                    <td className="right muted" style={{ fontSize: 11.5 }}>{ago(r.lastAt)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <div className="muted" style={{ fontSize: 11.5, marginTop: 8, lineHeight: 1.7 }}>
+        <b>해석</b> — <b>평균 크기</b>가 크면 그 사이트 인벤토리(특히 VM 수)가 많은 것 ·
+        <b>평균 간격</b>이 짧으면(예: 수초) push 주기가 과도(<code>AGENT_INVENTORY_INTERVAL_MS</code> 확인) ·
+        <b>무압축</b>이면 에이전트가 구버전(gzip 미적용 → 업그레이드 시 ~1/10). ⚠는 평균 대비 3배↑.
+      </div>
+    </div>
   );
 }

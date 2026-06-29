@@ -14,6 +14,7 @@ import { setGpuGuestDiag } from '../central/gpuGuestDiag.js';
 import { takePingJobs, setPingResults } from '../central/pingJobs.js';
 import { takeIdracScanJobs, setIdracScanResult, setIdracScanProgress } from '../central/idracScanJobs.js';
 import { pullNow as pullCollectorsNow } from '../collector/puller.js';
+import { recordIngest } from '../central/ingestStats.js';
 import { setAgentConfig } from '../central/agentConfig.js';
 import { takeLogQueries, setLogQueryResult } from '../central/logQueries.js';
 import { takeCaptureJobs, setCaptureResult } from '../central/captureJobs.js';
@@ -21,6 +22,30 @@ import { recordCapture } from '../net/captureHistory.js';
 import { loadScanSettings, mergeScanResults, recordAgentReport } from '../ipam/scanStore.js';
 
 export const centralRouter = Router();
+
+// 수신 트래픽 진단 — 에이전트→중앙 POST의 와이어 바이트(Content-Length)·페이로드 요약을 에이전트·
+// 엔드포인트별로 집계한다(특정 에이전트가 무엇을 얼마나 보내는지 화면에서 확인). 응답 완료 시 1회 기록.
+centralRouter.use((req, res, next) => {
+  if (req.method === 'POST') {
+    res.on('finish', () => {
+      try {
+        if (res.statusCode >= 400) return; // 인증 실패/오류는 집계 제외
+        const agent = String(req.body?.agent || req.get('X-Agent-Name') || '').trim() || '(unknown)';
+        const wireBytes = Number(req.get('content-length')) || 0;
+        if (!wireBytes && agent === '(unknown)') return;
+        // 인벤토리 push는 페이로드 규모(vCenter·호스트·VM 수)도 함께 기록 → '왜 큰지' 바로 파악.
+        const b = req.body || {};
+        const summary = req.path === '/inventory'
+          ? { vcenterId: b.vcenterId || '', hosts: (b.hosts || []).length, vms: (b.vms || []).length,
+              datastores: (b.datastores || []).length, networks: (b.networks || []).length, alarms: (b.alarms || []).length,
+              gzip: (req.get('content-encoding') || '').includes('gzip') }
+          : null;
+        recordIngest(agent, req.path, { wireBytes, summary });
+      } catch { /* 진단은 best-effort */ }
+    });
+  }
+  next();
+});
 
 function authed(req) {
   if (!config.central.token) return false;
