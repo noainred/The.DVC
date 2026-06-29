@@ -68,14 +68,19 @@ test('수동 예외: baremetal 태그는 매칭돼도 베어메탈로 강제', (
   assert.equal(virtualizationHosts[0].name, 'esxi-02');
 });
 
-test('수동 예외: virtualization 태그는 매칭 안 돼도 베어메탈에서 제외', () => {
+test('수동 예외: virtualization 강제 + 무매칭 서버는 합성 가상화 호스트로 보존(증발 금지)', () => {
   const servers = [
     { serverId: 'bm-1', serverName: 'db-bare-01', serviceTag: 'ZZZ900', host: '10.0.9.1', hostNames: ['zzz900'], model: 'R760', watts: 300, source: 'idrac' },
   ];
   const tags = { zzz900: 'virtualization' };
-  const { bareMetal, summary } = classifyFleet({ hosts, vcenters, servers, tags });
-  assert.equal(bareMetal.length, 0);
-  assert.equal(summary.bareMetalWatts, 0);
+  const { bareMetal, virtualizationHosts, summary } = classifyFleet({ hosts, vcenters, servers, tags });
+  assert.equal(bareMetal.length, 0);            // 베어메탈 아님
+  // 사라지지 않고 가상화 호스트 목록에 합성 행으로 등장 + watts 보존
+  const syn = virtualizationHosts.find((h) => h.name === 'db-bare-01');
+  assert.ok(syn, '합성 가상화 행이 존재해야 함');
+  assert.equal(syn.synthetic, true);
+  assert.equal(syn.watts, 300);
+  assert.equal(summary.syntheticVirt, 1);
 });
 
 test('수동 예외: exclude 태그는 인벤토리/전력에서 완전히 제외', () => {
@@ -129,8 +134,78 @@ test('법인 등록: 레지스트리 vcenterId(서버가 들고 온 값)가 fall
   ];
   const { bareMetal } = classifyFleet({ hosts, vcenters, servers }); // assign 없음
   assert.equal(bareMetal[0].vcenterId, 'vc-kr'); // 서버가 들고 온 vcenterId 사용
-  // assign이 있으면 우선
-  const r2 = classifyFleet({ hosts, vcenters, servers, assign: { 'bm-1': '' } });
   // 빈 문자열 매핑은 falsy → fallback(vc-kr) 유지
+  const r2 = classifyFleet({ hosts, vcenters, servers, assign: { 'bm-1': '' } });
   assert.equal(r2.bareMetal[0].vcenterId, 'vc-kr');
+});
+
+const vcenters2 = [{ id: 'vc-kr', name: '한국 본사', location: { region: 'KR' } }, { id: 'vc-eu', name: '유럽', location: { region: 'EU' } }];
+
+test('[classification-2] 이름매칭(서비스태그 불일치) 호스트를 서버 태그로 베어메탈 강제 → 중복 없음', () => {
+  const hostsL = [{ name: 'esxi-09', vcenterId: 'vc-kr', serviceTag: 'HHH999', model: 'R750', powerWatts: 420, cpuCores: 32, memTotalMB: 262144 }];
+  const servers = [
+    // idrac-9는 서비스태그(SSS888)는 다르지만 호스트명(esxi-09)으로 esxi-09를 받침
+    { serverId: 'idrac-9', serverName: 'idrac-09', serviceTag: 'SSS888', host: '10.0.0.9', hostNames: ['esxi-09'], model: 'R750', watts: 300, source: 'idrac' },
+  ];
+  const tags = { sss888: 'baremetal' }; // 서버의 서비스태그로 강제
+  const { bareMetal, virtualizationHosts } = classifyFleet({ hosts: hostsL, vcenters, servers, tags });
+  assert.equal(bareMetal.length, 1);
+  assert.equal(bareMetal[0].name, 'idrac-09');
+  // 같은 물리 박스가 가상화 호스트에 또 나타나면 안 됨(중복 방지) → esxi-09 제외
+  assert.equal(virtualizationHosts.find((h) => h.name === 'esxi-09'), undefined);
+  assert.equal(virtualizationHosts.length, 0);
+});
+
+test('[classification-3] 호스트 베어메탈 강제 시 받침 iDRAC 실측 전력을 사용(버리지 않음)', () => {
+  const hostsL = [{ name: 'esxi-09', vcenterId: 'vc-kr', serviceTag: 'HHH999', model: 'R750', powerWatts: 420 }];
+  const servers = [
+    { serverId: 'idrac-9', serverName: 'idrac-09', serviceTag: 'SSS888', host: '10.0.0.9', hostNames: ['esxi-09'], model: 'R750', watts: 300, source: 'idrac' },
+  ];
+  const tags = { hhh999: 'baremetal' }; // 호스트의 서비스태그로 강제 → 호스트-강제 분기
+  const { bareMetal } = classifyFleet({ hosts: hostsL, vcenters, servers, tags });
+  assert.equal(bareMetal.length, 1);
+  assert.equal(bareMetal[0].watts, 300); // vCenter 420이 아니라 iDRAC 실측 300
+});
+
+test('[power-aggregation-1] byVcenter 합 == summary.bareMetalWatts(0/측정누락 포함 일치)', () => {
+  const servers = [
+    { serverId: 'bm-1', serverName: 'b1', serviceTag: 'Z1', hostNames: ['z1'], watts: 300, source: 'idrac' },
+    { serverId: 'bm-2', serverName: 'b2', serviceTag: 'Z2', hostNames: ['z2'], watts: 0, source: 'idrac' },   // 0W = 미측정
+    { serverId: 'bm-3', serverName: 'b3', serviceTag: 'Z3', hostNames: ['z3'], watts: 200, source: 'ome' },
+  ];
+  const assign = { z1: 'vc-kr', z3: 'vc-eu' };
+  const { byVcenter, summary } = classifyFleet({ hosts: [], vcenters: vcenters2, servers, assign });
+  const sumByVc = byVcenter.reduce((a, g) => a + g.watts, 0);
+  assert.equal(sumByVc, summary.bareMetalWatts);
+  assert.equal(summary.bareMetalWatts, 500); // 300 + 200 (0W 제외)
+});
+
+test('[power-aggregation-2] 받침 iDRAC가 0W면 유효한 vCenter 전력을 0으로 덮어쓰지 않음', () => {
+  const hostsL = [{ name: 'esxi-01', vcenterId: 'vc-kr', serviceTag: 'AAA111', powerWatts: 420 }];
+  const servers = [
+    { serverId: 'idrac-1', serverName: 'i1', serviceTag: 'AAA111', hostNames: ['aaa111'], watts: 0, source: 'idrac' },
+  ];
+  const { virtualizationHosts } = classifyFleet({ hosts: hostsL, vcenters, servers });
+  const h1 = virtualizationHosts.find((h) => h.name === 'esxi-01');
+  assert.equal(h1.watts, 420); // iDRAC 0W가 아니라 vCenter 420
+  assert.equal(h1.idracBacked, true);
+});
+
+test('[data-consistency-1] iDRAC 레지스트리 vcenterId가 stale assign보다 우선(split-brain 방지)', () => {
+  const servers = [
+    { serverId: 'bm-1', serverName: 'b1', serviceTag: 'Z9', hostNames: ['z9'], watts: 100, source: 'idrac', vcenterId: 'vc-kr' },
+  ];
+  const assign = { z9: 'vc-eu' }; // 과거에 남은 stale 귀속
+  const { bareMetal } = classifyFleet({ hosts: [], vcenters: vcenters2, servers, assign });
+  assert.equal(bareMetal[0].vcenterId, 'vc-kr'); // 레지스트리(권위)가 이김
+});
+
+test('[data-consistency-5] 삭제된/유령 vCenter로의 귀속은 미지정 처리', () => {
+  const servers = [
+    { serverId: 'bm-1', serverName: 'b1', serviceTag: 'Z9', hostNames: ['z9'], watts: 100, source: 'ome' },
+  ];
+  const assign = { z9: 'ghost-vc' }; // vcenters에 없는 id
+  const { bareMetal, byVcenter } = classifyFleet({ hosts: [], vcenters: vcenters2, servers, assign });
+  assert.equal(bareMetal[0].vcenterId, ''); // 유령 → 미지정
+  assert.equal(byVcenter.find((g) => g.vcenterId === 'ghost-vc'), undefined);
 });

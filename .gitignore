@@ -28,6 +28,9 @@ download/*.tar.gz
 download/*.zip
 download/*.sha256
 server/config/alarm-mutes.json
+server/config/tool-usage.json
+server/config/fleet-tags.json
+server/config/fleet-assign.json
 server/config/auth.json
 server/config/runtime.json
 server/config/ipam.db

@@ -6,15 +6,17 @@
 import { Router } from 'express';
 import { requireRole } from '../auth/auth.js';
 import { store } from '../store.js';
-import { latestPowerByHostName, allMeasuredPower } from '../idrac/service.js';
+import { allMeasuredPower } from '../idrac/service.js';
 import { filterMeasuredByMapping, loadPowerSettings } from '../idrac/powerSettings.js';
 import { snapMemo, sendCached } from '../util/snapCache.js';
 import { computeFinOps, loadFinopsConfig, saveFinopsConfig } from '../insights/finops.js';
 import { computePowerBreakdown } from '../insights/powerBreakdown.js';
 import { getFleetInventory } from '../insights/fleetInventory.js';
-import { loadFleetTags, setFleetTag } from '../insights/fleetTags.js';
-import { loadFleetAssign, setFleetAssign } from '../insights/fleetAssign.js';
+import { setFleetTag } from '../insights/fleetTags.js';
+import { setFleetAssign, applyFleetAssign } from '../insights/fleetAssign.js';
+import { fleetRev } from '../insights/fleetRev.js';
 import { loadRegistry, updateServer } from '../idrac/registry.js';
+import { logAudit } from '../audit.js';
 import { detectAnomalies } from '../insights/anomaly.js';
 import { forecastCapacity } from '../insights/forecast.js';
 import { computeSecurityPosture } from '../insights/cve.js';
@@ -30,9 +32,9 @@ const adminOnly = requireRole('admin');
 insightsRouter.get('/finops', async (req, res) => {
   try {
     const snap = store.get();
-    const key = `${snap.generatedAt}|${JSON.stringify(loadPowerSettings())}|${JSON.stringify(loadFinopsConfig())}`;
+    const key = `${snap.generatedAt}|${JSON.stringify(loadPowerSettings())}|${JSON.stringify(loadFinopsConfig())}|${fleetRev()}`;
     const payload = await snapMemo('finops', key, 60_000, async () => {
-      const measured = filterMeasuredByMapping(await allMeasuredPower({ hosts: snap.hosts }), snap);
+      const measured = filterMeasuredByMapping(applyFleetAssign(await allMeasuredPower({ hosts: snap.hosts })), snap);
       return computeFinOps(snap, measured);
     });
     sendCached(req, res, key, payload);
@@ -45,9 +47,9 @@ insightsRouter.get('/power-breakdown', async (req, res) => {
   try {
     const snap = store.get();
     const vc = String(req.query.vcenterId || '');
-    const key = `${snap.generatedAt}|${vc}|${JSON.stringify(loadPowerSettings())}`;
+    const key = `${snap.generatedAt}|${vc}|${JSON.stringify(loadPowerSettings())}|${fleetRev()}`;
     const payload = await snapMemo('power-breakdown', key, 60_000, async () => {
-      const measured = filterMeasuredByMapping(await allMeasuredPower({ hosts: snap.hosts }), snap);
+      const measured = filterMeasuredByMapping(applyFleetAssign(await allMeasuredPower({ hosts: snap.hosts })), snap);
       return computePowerBreakdown(snap, measured, { vcenterId: vc });
     });
     sendCached(req, res, key, payload);
@@ -59,36 +61,46 @@ insightsRouter.put('/finops/config', adminOnly, (req, res) => res.json(saveFinop
 insightsRouter.get('/fleet', async (req, res) => {
   try {
     const snap = store.get();
-    const key = `${snap.generatedAt}|${JSON.stringify(loadFleetTags())}|${JSON.stringify(loadFleetAssign())}`;
+    // 캐시 키: 스냅샷 생성시각 + 플릿 리비전(태그/소속/레지스트리 변경 시 즉시 +1). 매 요청 파일 읽기 없음.
+    const key = `${snap.generatedAt}|${fleetRev()}`;
     const payload = await snapMemo('fleet', key, 60_000, async () => getFleetInventory(snap));
     sendCached(req, res, key, payload);
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 // 수동 분류 예외 지정/해제(관리자). body: { key, tag: 'baremetal'|'virtualization'|'exclude'|'auto' }
-insightsRouter.put('/fleet/tag', adminOnly, async (req, res) => {
+// 전체 vCenter 재폴링(store.refresh) 없이 fleetRev만 올려 다음 GET에서 즉시 재계산(고RTT·30개 환경 보호).
+insightsRouter.put('/fleet/tag', adminOnly, (req, res) => {
   const r = setFleetTag(req.body?.key, req.body?.tag);
-  if (r.ok) await store.refresh().catch(() => {}); // 분류 즉시 반영
+  if (r.ok) logAudit({ user: req.user?.username, action: '플릿 분류 변경', target: String(req.body?.key || ''), detail: String(req.body?.tag || 'auto'), ip: req.ip || '' });
   res.json(r);
 });
-// 베어메탈 서버의 소속 법인(vCenter) 등록/해제(관리자). body: { serverId, serviceTag, vcenterId }.
-// iDRAC 레지스트리에 등록된 서버는 레지스트리 vcenterId(전력 귀속과 공유)를 직접 갱신하고,
-// 그 외(OME/원격/무전력 발견분)는 fleet-assign 저장소에 서비스태그 기준으로 보관한다.
-insightsRouter.put('/fleet/assign', adminOnly, async (req, res) => {
+// 베어메탈 서버의 소속 법인(vCenter) 등록/해제(관리자). body: { serverId, serviceTag, key, vcenterId }.
+// iDRAC 레지스트리에 등록된 서버는 레지스트리 vcenterId(전력 귀속과 공유)를 직접 갱신하고(권위 소스),
+// 동일 키의 stale fleet-assign은 정리해 split-brain을 막는다. 그 외(OME/원격/무전력 발견분)는
+// fleet-assign 저장소에 키 기준으로 보관한다. vcenterId는 실제 존재하는 vCenter만 허용(유령 법인 차단).
+insightsRouter.put('/fleet/assign', adminOnly, (req, res) => {
   const serverId = String(req.body?.serverId || '').trim();
   const serviceTag = String(req.body?.serviceTag || '').trim();
+  const assignKey = String(req.body?.key || serviceTag || serverId).trim();
   const vcenterId = String(req.body?.vcenterId || '').trim();
-  if (!serverId && !serviceTag) return res.status(400).json({ ok: false, reason: 'serverId 또는 serviceTag가 필요합니다.' });
+  if (!assignKey) return res.status(400).json({ ok: false, reason: 'serverId/serviceTag/key 중 하나가 필요합니다.' });
+  const validIds = new Set((store.get().vcenters || []).map((v) => v.id));
+  if (vcenterId && !validIds.has(vcenterId)) return res.status(400).json({ ok: false, reason: `존재하지 않는 vCenter id: ${vcenterId}` });
+
   const reg = serverId ? loadRegistry().find((s) => s.id === serverId && s.type !== 'ome') : null;
   let via = 'assign';
   if (reg) {
     const r = updateServer(serverId, { vcenterId });
     if (!r.ok) return res.status(400).json(r);
+    // 레지스트리가 권위 소스가 되었으므로 동일 키의 과거 fleet-assign(OME 발견기 등)을 정리.
+    setFleetAssign(assignKey, '');
+    if (serviceTag) setFleetAssign(serviceTag, '');
     via = 'registry';
   } else {
-    const r = setFleetAssign(serviceTag || serverId, vcenterId);
+    const r = setFleetAssign(assignKey, vcenterId, validIds);
     if (!r.ok) return res.status(400).json(r);
   }
-  await store.refresh().catch(() => {}); // 귀속 즉시 반영
+  logAudit({ user: req.user?.username, action: '플릿 법인 귀속', target: assignKey, detail: vcenterId ? `→ ${vcenterId} (${via})` : `해제 (${via})`, ip: req.ip || '' });
   res.json({ ok: true, via, vcenterId });
 });
 

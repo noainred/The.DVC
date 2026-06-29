@@ -2505,13 +2505,15 @@ function TagSelect({ value, onChange, disabled }) {
 
 const MODE_BADGE = { edge: ['엣지(현장)', 'teal'], central: ['중앙', 'blue'], standalone: ['단독', 'purple'] };
 
-// 베어메탈 서버의 소속 법인(vCenter) 등록 드롭다운.
+// 베어메탈 서버의 소속 법인(vCenter) 등록 드롭다운. 목록에 없는 값(삭제된 vCenter 등)도 표시.
 function VcAssignSelect({ value, vcenters, onChange, disabled }) {
+  const known = vcenters.some((v) => v.id === value);
   return (
     <select className="select" value={value} disabled={disabled} style={{ padding: '3px 6px', fontSize: 12, maxWidth: 180 }}
       onChange={(e) => onChange(e.target.value)} title="소속 법인(vCenter) 등록">
       <option value="">미지정</option>
       {vcenters.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+      {value && !known && <option value={value}>{value} (알 수 없음)</option>}
     </select>
   );
 }
@@ -2523,23 +2525,31 @@ function FleetInventory({ isAdmin }) {
   const [q, setQ] = useState('');
   const [fvc, setFvc] = useState('');             // 법인(vCenter)/DC 필터: '' 전체, '__none__' 미지정
   const [busy, setBusy] = useState('');
+  const seqRef = React.useRef(0);                 // load 응답 경합 가드(오래된 응답이 최신을 덮어쓰지 않게)
 
-  const load = () => fetchJson('/insights/fleet').then((r) => { setD(r); setErr(null); }).catch((e) => setErr(e.message));
+  const load = () => {
+    const my = ++seqRef.current;
+    return fetchJson('/insights/fleet')
+      .then((r) => { if (my === seqRef.current) { setD(r); setErr(null); } })
+      .catch((e) => { if (my === seqRef.current) setErr(e.message); });
+  };
   useEffect(() => { load(); }, []);
 
-  const tagKeyOf = (row) => (row.serviceTag || '').toLowerCase() || String(row.serverId || '');
-  const setTag = async (key, tag) => {
-    if (!key) return;
-    setBusy(key);
+  // 분류/소속 변경 키: 서버가 내려준 안정 키(tagKey) 우선. 백엔드 저장/조회 키와 정확히 일치.
+  const tagKeyOf = (row) => row.tagKey || (row.serviceTag || '').toLowerCase() || String(row.serverId || '');
+  const rowKey = (row) => String(row.serverId || row.tagKey || row.serviceTag || ''); // busy 표시용 단일 키
+  const setTag = async (row, tag) => {
+    const key = tagKeyOf(row);
+    if (!key) { setErr('이 항목은 식별 키가 없어 분류를 바꿀 수 없습니다(서비스태그/호스트명 필요).'); return; }
+    setBusy(rowKey(row));
     try { await putJson('/insights/fleet/tag', { key, tag }); await load(); }
     catch (e) { setErr(e.message); }
     finally { setBusy(''); }
   };
-  // 베어메탈 행의 소속 법인(vCenter) 등록/해제.
+  // 베어메탈 행의 소속 법인(vCenter) 등록/해제. tagKey를 함께 보내 백엔드 저장 키를 일치시킨다.
   const setVc = async (row, vcenterId) => {
-    const id = row.serverId || row.serviceTag;
-    setBusy(id);
-    try { await putJson('/insights/fleet/assign', { serverId: row.serverId, serviceTag: row.serviceTag, vcenterId }); await load(); }
+    setBusy(rowKey(row));
+    try { await putJson('/insights/fleet/assign', { serverId: row.serverId, serviceTag: row.serviceTag, key: tagKeyOf(row), vcenterId }); await load(); }
     catch (e) { setErr(e.message); }
     finally { setBusy(''); }
   };
@@ -2573,7 +2583,7 @@ function FleetInventory({ isAdmin }) {
         <Card label="가상화 호스트" value={s.virtualizationHosts ?? 0} accent="var(--accent-2,#22d3ee)" meta={`iDRAC 받침 ${s.idracBackedHosts ?? 0}대`} onClick={() => setView('virt')} active={view === 'virt'} />
         <Card label="베어메탈 서버" value={s.bareMetal ?? 0} accent="var(--amber)" meta={`전력 측정 ${s.bareMetalMeasured ?? 0}대${s.forcedBareMetal ? ` · 수동 ${s.forcedBareMetal}` : ''}`} onClick={() => setView('baremetal')} active={view === 'baremetal'} />
         <Card label="베어메탈 총전력" value={fmtWatts(s.bareMetalWatts || 0)} accent="#fbbf24" meta={`${s.bareMetalKw ?? 0} kW · 현재 측정 합계`} />
-        <Card label="제외(수동)" value={s.excluded ?? 0} meta="인벤토리/전력에서 제외" />
+        <Card label="법인 미지정" value={s.bareMetalUnassigned ?? 0} accent={s.bareMetalUnassigned ? 'var(--amber)' : 'var(--green)'} meta={s.excluded ? `제외(수동) ${s.excluded}대` : '베어메탈 중 소속 법인 없음'} />
       </div>
 
       <div className="card" style={{ padding: '10px 14px', marginBottom: 12, borderLeft: '3px solid var(--accent-2,#22d3ee)' }}>
@@ -2605,7 +2615,7 @@ function FleetInventory({ isAdmin }) {
 
       {view === 'baremetal' && (
         <>
-          <ResultCount total={(d.bareMetal || []).length} shown={bm.length} label="베어메탈" filtered={!!term} />
+          <ResultCount total={(d.bareMetal || []).length} shown={bm.length} label="베어메탈" filtered={!!term || !!fvc} />
           <div className="table-wrap" style={{ maxHeight: '60vh' }}>
             <table>
               <thead><tr><th>서버</th><th>모델</th><th>서비스태그</th><th>법인(vCenter)</th><th>수집</th><th style={{ textAlign: 'right' }}>현재 전력</th>{isAdmin && <th>분류</th>}</tr></thead>
@@ -2616,11 +2626,11 @@ function FleetInventory({ isAdmin }) {
                     <td className="muted" style={{ fontSize: 12 }}>{b.model || '—'}</td>
                     <td className="muted" style={{ fontSize: 12 }}>{b.serviceTag || '—'}</td>
                     <td>{isAdmin
-                      ? <VcAssignSelect value={b.vcenterId || ''} vcenters={vcenters} disabled={busy === (b.serverId || b.serviceTag)} onChange={(vid) => setVc(b, vid)} />
-                      : (b.vcenter ? <span>{b.vcenter}</span> : <span className="muted">미지정</span>)}</td>
+                      ? <VcAssignSelect value={b.vcenterId || ''} vcenters={vcenters} disabled={busy === rowKey(b)} onChange={(vid) => setVc(b, vid)} />
+                      : (b.vcenter ? <span>{b.vcenter}</span> : <span className="badge purple">미지정</span>)}</td>
                     <td className="muted" style={{ fontSize: 12 }}>{b.source}</td>
                     <td style={{ textAlign: 'right' }}>{b.watts != null ? <b>{fmtWatts(b.watts)}</b> : <span className="muted">미측정</span>}</td>
-                    {isAdmin && <td><TagSelect value={b.forced ? 'baremetal' : 'auto'} disabled={busy === tagKeyOf(b)} onChange={(t) => setTag(tagKeyOf(b), t)} /></td>}
+                    {isAdmin && <td><TagSelect value={b.tag || 'auto'} disabled={busy === rowKey(b)} onChange={(t) => setTag(b, t)} /></td>}
                   </tr>
                 ))}
                 {!bm.length && <tr><td colSpan={isAdmin ? 7 : 6} className="center muted" style={{ padding: 20 }}>베어메탈 서버가 없습니다.</td></tr>}
@@ -2632,23 +2642,23 @@ function FleetInventory({ isAdmin }) {
 
       {view === 'virt' && (
         <>
-          <ResultCount total={(d.virtualizationHosts || []).length} shown={vh.length} label="호스트" filtered={!!term} />
+          <ResultCount total={(d.virtualizationHosts || []).length} shown={vh.length} label="호스트" filtered={!!term || !!fvc} />
           <div className="table-wrap" style={{ maxHeight: '60vh' }}>
             <table>
               <thead><tr><th>호스트</th><th>vCenter</th><th>지역</th><th>모델</th><th>서비스태그</th><th style={{ textAlign: 'right' }}>코어</th><th style={{ textAlign: 'right' }}>메모리</th><th>전력원</th><th style={{ textAlign: 'right' }}>현재 전력</th>{isAdmin && <th>분류</th>}</tr></thead>
               <tbody>
                 {vh.map((h, i) => (
                   <tr key={`${h.vcenterId}-${h.name}-${i}`}>
-                    <td><b>{h.name}</b></td>
+                    <td><b>{h.name}</b>{h.synthetic && <span className="badge teal" style={{ marginLeft: 6 }} title="ESXi 호스트와 자동 매칭되진 않았지만 관리자가 가상화로 지정">발견</span>}</td>
                     <td>{h.vcenter}</td>
                     <td className="muted" style={{ fontSize: 12 }}>{h.region || '—'}</td>
                     <td className="muted" style={{ fontSize: 12 }}>{h.model || '—'}</td>
                     <td className="muted" style={{ fontSize: 12 }}>{h.serviceTag || '—'}</td>
                     <td style={{ textAlign: 'right' }}>{h.cpuCores || '—'}</td>
                     <td style={{ textAlign: 'right' }} className="muted">{h.memGB ? `${h.memGB} GB` : '—'}</td>
-                    <td>{h.idracBacked ? <span className="badge green">iDRAC</span> : (h.powerSource === 'vcenter' ? <span className="badge blue">vCenter</span> : <span className="muted">—</span>)}</td>
+                    <td>{h.idracBacked ? <span className="badge green" title={h.via === 'tag' ? '서비스태그 매칭' : (h.via === 'name' ? '호스트명 매칭' : '')}>iDRAC</span> : (h.powerSource === 'vcenter' ? <span className="badge blue">vCenter</span> : <span className="muted">—</span>)}</td>
                     <td style={{ textAlign: 'right' }}>{h.watts != null ? <b>{fmtWatts(h.watts)}</b> : <span className="muted">—</span>}</td>
-                    {isAdmin && <td><TagSelect value="auto" disabled={busy === tagKeyOf(h)} onChange={(t) => setTag(tagKeyOf(h), t)} /></td>}
+                    {isAdmin && <td><TagSelect value={h.tag || 'auto'} disabled={busy === rowKey(h)} onChange={(t) => setTag(h, t)} /></td>}
                   </tr>
                 ))}
                 {!vh.length && <tr><td colSpan={isAdmin ? 10 : 9} className="center muted" style={{ padding: 20 }}>가상화 호스트가 없습니다.</td></tr>}
