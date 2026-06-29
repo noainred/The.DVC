@@ -310,7 +310,11 @@ function Topology() {
           <option value="">전체 vCenter (호스트까지)</option>
           {(d?.vcenters || []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
         </select>
-        <span className="muted" style={{ fontSize: 12 }}>노드 {num(d?.nodeCount)} · {fmtAgo(d?.generatedAt)}</span>
+        <span className="muted" style={{ fontSize: 12 }} title="'노드'는 트리의 모든 항목 합계입니다 — vCenter+클러스터+호스트(+선택 vCenter 시 VM). 호스트 수가 아닙니다.">
+          노드 {num(d?.nodeCount)}
+          {d?.counts && <> (vCenter {num(d.counts.vcenters)} · 클러스터 {num(d.counts.clusters)} · 호스트 {num(d.counts.hosts)}{d.counts.vms ? ` · VM ${num(d.counts.vms)}` : ''})</>}
+          {' · '}{fmtAgo(d?.generatedAt)}
+        </span>
       </div>
       <div className="card" style={{ padding: 14, maxHeight: '64vh', overflow: 'auto' }}>
         {(d?.tree || []).length === 0 ? <div className="muted">표시할 토폴로지가 없습니다.</div>

@@ -26,6 +26,8 @@ export function buildTopology(snap, { vcenterId = null, host = null } = {}) {
 
   const tree = [];
   let nodeCount = 0;
+  // 노드 내역(노드 합이 호스트 수로 오해되지 않게 분해해서 노출): vCenter+클러스터+호스트(+focus 시 VM).
+  const counts = { vcenters: 0, clusters: 0, hosts: 0, vms: 0 };
   for (const v of vcs) {
     const hs = hostsByVc.get(v.id) || [];
     const clusters = new Map();
@@ -54,11 +56,14 @@ export function buildTopology(snap, { vcenterId = null, host = null } = {}) {
             guestOS: vm.guestOS, gpu: vm.gpu ? (vm.gpu.mode || 'gpu') : null, ip: vm.ipAddress || (vm.ipAddresses || [])[0] || '',
           }));
           nodeCount += node.children.length;
+          counts.vms += node.children.length;
         }
         nodeCount++;
+        counts.hosts++;
         return node;
       }).sort((a, b) => b.vmCount - a.vmCount);
       nodeCount++;
+      counts.clusters++;
       return {
         id: `${v.id}|cluster|${cl}`, type: 'cluster', label: cl,
         hosts: hostNodes.length, vmCount: hostNodes.reduce((a, h) => a + h.vmCount, 0),
@@ -66,6 +71,7 @@ export function buildTopology(snap, { vcenterId = null, host = null } = {}) {
       };
     }).sort((a, b) => b.vmCount - a.vmCount);
     nodeCount++;
+    counts.vcenters++;
     tree.push({
       id: v.id, type: 'vcenter', label: v.name || v.id, status: v.status,
       region: v.location?.region || v.region || '', version: v.version,
@@ -78,6 +84,7 @@ export function buildTopology(snap, { vcenterId = null, host = null } = {}) {
   return {
     focus: { vcenterId: vcenterId || null, host: host || null },
     nodeCount,
+    counts, // { vcenters, clusters, hosts, vms } — '노드 N'의 구성 내역
     vcenters: (snap.vcenters || []).map((v) => ({ id: v.id, name: v.name || v.id })),
     tree,
     generatedAt: Date.now(),
