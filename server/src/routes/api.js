@@ -6,6 +6,7 @@ import { loadUiSettings, saveUiSettings } from '../ui-settings.js';
 import { hostPower } from '../idrac/service.js';
 import { fetchVmMetric, fetchHostMetric, PERF_INTERVALS, upgradeVmTools, getVmConsole } from '../vcenter/soapClient.js';
 import { listMutes, addMute, removeMute } from '../alarm-mutes.js';
+import { recordToolUse, getTopTools } from '../tool-usage.js';
 import { buildIpamRows, buildSubnetSheets, listSubnets } from '../ipam/ledger.js';
 import { buildIpamInsights } from '../ipam/insights.js';
 import { buildNetmap } from '../ipam/netmap.js';
@@ -1823,4 +1824,13 @@ api.delete('/alarm-mutes/:id', requireRole('admin', 'operator'), (req, res) => {
   const result = removeMute(decodeURIComponent(req.params.id));
   if (result.ok) store.refresh().catch(() => {});
   res.status(result.ok ? 200 : 404).json(result);
+});
+
+// 특수 기능 사용 빈도 — 자주 쓰는 메뉴 자동 추천. 모든 로그인 사용자 합산 집계.
+api.get('/tool-usage/top', (req, res) => {
+  const n = Math.min(12, Math.max(1, Number(req.query.n) || 3));
+  res.json({ top: getTopTools(n) });
+});
+api.post('/tool-usage', (req, res) => {
+  res.json(recordToolUse(req.body?.k));
 });

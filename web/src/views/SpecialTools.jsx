@@ -98,7 +98,12 @@ export default function SpecialTools() {
   const [tool, setTool] = useState(() => toolFromHash());
   const [menuQ, setMenuQ] = useState(''); // 메뉴 빠른 찾기
   const [isAdmin, setIsAdmin] = useState(false); // 관리자 전용 도구(VM 생성 등) 노출 제어
-  const openTool = (k) => { setTool(k); window.location.hash = k ? `#/tools/${k}` : '#/tools'; };
+  const [topKeys, setTopKeys] = useState([]); // 자주 쓰는 기능(전체 사용자 합산 상위 3)
+  // 기능 실행 시 사용 횟수를 중앙에 기록(자주 쓰는 메뉴 자동 추천용). 실패는 조용히 무시.
+  const openTool = (k) => {
+    if (k) postJson('/tool-usage', { k }).catch(() => {});
+    setTool(k); window.location.hash = k ? `#/tools/${k}` : '#/tools';
+  };
   // 뒤로/앞으로 가기 및 외부에서 바로가기로 진입할 때 동기화.
   useEffect(() => {
     const onHash = () => setTool(toolFromHash());
@@ -106,12 +111,21 @@ export default function SpecialTools() {
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
   useEffect(() => { fetchJson('/auth/me').then((r) => setIsAdmin(r.user?.role === 'admin')).catch(() => {}); }, []);
+  // 그리드(메뉴 목록)로 돌아올 때마다 상위 사용 기능을 갱신.
+  useEffect(() => {
+    if (tool) return;
+    fetchJson('/tool-usage/top', { n: 3 }).then((r) => setTopKeys(r.top || [])).catch(() => {});
+  }, [tool]);
   if (tool) return <ToolPanel tool={tool} isAdmin={isAdmin} onBack={() => openTool(null)} />;
   const base = TOOLS.filter((t) => !t.adminOnly || isAdmin); // 관리자 전용은 admin에게만 노출
   const ql = menuQ.trim().toLowerCase();
   const shown = ql
     ? base.filter((t) => t.label.toLowerCase().startsWith(ql) || t.label.toLowerCase().includes(ql) || (t.desc || '').toLowerCase().includes(ql))
     : base;
+  // 상위 키를 실제 도구로 매핑(노출 불가/비활성은 제외). 검색 중에는 추천을 숨긴다.
+  const favorites = ql ? [] : topKeys
+    .map((u) => ({ ...base.find((t) => t.k === u.k), count: u.count }))
+    .filter((t) => t && t.k && !t.disabled);
   return (
     <>
       <div className="section-title" style={{ marginTop: 0 }}>🛠️ 특수 기능</div>
@@ -119,6 +133,29 @@ export default function SpecialTools() {
         <div className="muted" style={{ fontSize: 13 }}>아래 기능을 클릭하면 해당 진단을 실행해 보여줍니다.</div>
         <SearchBox className="input" style={{ maxWidth: 280 }} placeholder="메뉴 빠른 찾기 (예: G, GPU, IP)" value={menuQ} onChange={setMenuQ} />
       </div>
+      {favorites.length > 0 && (
+        <div style={{ marginBottom: 18 }}>
+          <div className="muted" style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+            ⭐ 자주 쓰는 기능 <span style={{ fontWeight: 400 }}>· 전체 사용자가 가장 많이 연 메뉴</span>
+          </div>
+          <div className="vc-grid">
+            {favorites.map((t, i) => (
+              <div key={t.k} className="card vc-card"
+                style={{ cursor: 'pointer', borderColor: 'var(--accent, #6aa9ff)', ...(t.danger ? { borderColor: 'var(--red)' } : {}) }}
+                onClick={() => openTool(t.k)}
+                title={`바로가기: #/tools/${t.k}`}>
+                <div className="flex between" style={{ alignItems: 'flex-start' }}>
+                  <div style={{ fontSize: 30 }}>{t.icon}</div>
+                  <span className="badge" style={{ fontSize: 11 }}>{['🥇', '🥈', '🥉'][i] || `#${i + 1}`} {t.count}회</span>
+                </div>
+                <div className="vc-name" style={{ marginTop: 8, ...(t.danger ? { color: 'var(--red)' } : {}) }}>{t.label}</div>
+                <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>{t.desc}</div>
+                <div className="vc-foot"><span className="muted">클릭하여 실행</span><span className="muted">→</span></div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="vc-grid">
         {shown.length === 0 && <div className="muted" style={{ gridColumn: '1 / -1', padding: 24 }}>“{menuQ}”에 해당하는 메뉴가 없습니다.</div>}
         {shown.map((t) => (
