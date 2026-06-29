@@ -13,6 +13,7 @@ import { setGuestGpu } from '../gpu/store.js';
 import { setGpuGuestDiag } from '../central/gpuGuestDiag.js';
 import { takePingJobs, setPingResults } from '../central/pingJobs.js';
 import { takeIdracScanJobs, setIdracScanResult, setIdracScanProgress } from '../central/idracScanJobs.js';
+import { pullNow as pullCollectorsNow } from '../collector/puller.js';
 import { setAgentConfig } from '../central/agentConfig.js';
 import { takeLogQueries, setLogQueryResult } from '../central/logQueries.js';
 import { takeCaptureJobs, setCaptureResult } from '../central/captureJobs.js';
@@ -99,6 +100,13 @@ centralRouter.post('/idrac-scan-result', (req, res) => {
   const b = req.body || {};
   if (!b.reqId) return res.status(400).json({ ok: false, reason: 'reqId가 필요합니다.' });
   setIdracScanResult(String(b.reqId), b);
+  // 위임 스캔이 에이전트 현지에 서버를 등록했으면, 그 전력은 '원격 수집(collector pull)'로 중앙에
+  // 반영된다. 다음 정기 풀(최대 60s)을 기다리지 않고 즉시 + 지연(에이전트 전력 수집 시간 고려)으로
+  // 당겨와 반영을 앞당긴다. best-effort(실패 무시).
+  if (Number(b.registered) > 0) {
+    pullCollectorsNow().catch(() => {});
+    setTimeout(() => pullCollectorsNow().catch(() => {}), 30_000).unref?.();
+  }
   res.json({ ok: true });
 });
 

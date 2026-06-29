@@ -41,7 +41,7 @@ export default function IdracAdmin() {
   const [scanRanges, setScanRanges] = useState({ ranges: [], status: null, centralEnabled: false }); // vCenter별 iDRAC 스캔 대역
   const [srForm, setSrForm] = useState(null); // 스캔 대역 편집 폼 { vcenterId, ranges, username, password, agent, enabled, mode } | null
   const [srMsg, setSrMsg] = useState(null); // 스캔 대역 폼 인라인 피드백 { ok, text }
-  const [scanJobs, setScanJobs] = useState({ status: null, jobs: [], centralEnabled: false }); // 스캔 현황(주기+위임 잡)
+  const [scanJobs, setScanJobs] = useState({ status: null, jobs: [], collectors: [], centralEnabled: false }); // 스캔 현황(주기+위임 잡)
 
   const load = async () => {
     try { setData(await fetchJson('/admin/idrac')); setError(null); }
@@ -51,7 +51,7 @@ export default function IdracAdmin() {
   const loadSources = () => fetchJson('/admin/idrac/power-sources').then(setSources).catch(() => {});
   const loadPwSettings = () => fetchJson('/admin/idrac/power-settings').then((d) => setPwSettings(d.settings || { excludeUnmapped: false })).catch(() => {});
   const loadScanRanges = () => fetchJson('/admin/idrac/scan-ranges').then((d) => setScanRanges({ ranges: d.ranges || [], status: d.status || null, centralEnabled: !!d.centralEnabled })).catch(() => {});
-  const loadScanJobs = () => fetchJson('/admin/idrac/scan-jobs').then((d) => setScanJobs({ status: d.status || null, jobs: d.jobs || [], centralEnabled: !!d.centralEnabled })).catch(() => {});
+  const loadScanJobs = () => fetchJson('/admin/idrac/scan-jobs').then((d) => setScanJobs({ status: d.status || null, jobs: d.jobs || [], collectors: d.collectors || [], centralEnabled: !!d.centralEnabled })).catch(() => {});
   useEffect(() => {
     load();
     fetchJson('/admin/idrac/scan-agents').then(setAgents).catch(() => {});
@@ -1139,9 +1139,36 @@ export function IdracDetailModal({ server, onClose }) {
 function IdracScanJobs({ data, vcenters, busy, onRefresh, onScanAll }) {
   const st = data?.status || {};
   const jobs = data?.jobs || [];
+  const collectors = data?.collectors || [];
   const vcName = (id) => (vcenters.find((v) => v.id === id)?.name || id || '');
   const active = jobs.filter((j) => j.state === 'pending' || j.state === 'running');
   const recent = jobs.filter((j) => j.state === 'done' || j.state === 'error');
+
+  // 위임 스캔 에이전트 → 수집 서버 매칭(id/datacenter/name, 대소문자 무시). 전력이 '원격 수집'으로
+  // 반영되려면 그 에이전트가 수집 서버로 등록돼 있어야 한다.
+  const norm = (s) => String(s || '').trim().toLowerCase();
+  const collectorForAgent = (agent) => {
+    const a = norm(agent);
+    return collectors.find((c) => norm(c.id) === a || norm(c.datacenter) === a || norm(c.name) === a) || null;
+  };
+  // 등록(registered>0) 완료된 위임 잡 중 가장 최근 것으로 반영 상태 안내.
+  const lastReg = recent.find((j) => j.agent && (j.result?.registered || 0) > 0);
+  let advisory = null;
+  if (lastReg) {
+    const col = collectorForAgent(lastReg.agent);
+    const reg = lastReg.result?.registered || 0;
+    if (!col) {
+      advisory = { ok: false, text: `에이전트 '${lastReg.agent}'가 ${reg}대를 현지 등록했지만, '${lastReg.agent}'가 '수집 서버(원격)'로 등록되어 있지 않습니다. 전력이 중앙에 반영되려면 설정 → 수집 서버(원격)에서 이 에이전트를 수집 서버로 등록하세요(소속 vCenter 매핑 권장).` };
+    } else if (col.enabled === false) {
+      advisory = { ok: false, text: `수집 서버 '${col.name || col.id}'가 비활성 상태입니다. 활성화하면 에이전트가 등록한 ${reg}대의 전력이 '원격 수집'으로 반영됩니다.` };
+    } else if (col.ok === false) {
+      advisory = { ok: false, text: `수집 서버 '${col.name || col.id}' 연결 오류(${col.error || '확인 필요'}). 해결되면 등록한 ${reg}대 전력이 반영됩니다.` };
+    } else if (!col.hosts) {
+      advisory = { ok: true, text: `에이전트 '${lastReg.agent}'에 ${reg}대 등록됨 — 에이전트가 전력을 수집하고 중앙이 당겨오는 중입니다(보통 1~2분). 잠시 후 '원격 수집'에 반영됩니다.` };
+    } else {
+      advisory = { ok: true, text: `'원격 수집'으로 반영 중 — 수집 서버 '${col.name || col.id}'에서 호스트 ${col.hosts}대 수신.` };
+    }
+  }
   const ago = (ts) => {
     if (!ts) return '';
     const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
@@ -1229,6 +1256,14 @@ function IdracScanJobs({ data, vcenters, busy, onRefresh, onScanAll }) {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {advisory && (
+        <div style={{ marginTop: 8, padding: '8px 12px', borderRadius: 8, fontSize: 12.5,
+          background: advisory.ok ? 'rgba(96,165,250,.12)' : 'rgba(245,158,11,.14)',
+          color: advisory.ok ? '#93c5fd' : '#fbbf24' }}>
+          {advisory.ok ? 'ℹ️ ' : '⚠ '}{advisory.text}
         </div>
       )}
 

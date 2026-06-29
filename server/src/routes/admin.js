@@ -1305,8 +1305,15 @@ adminRouter.post('/idrac/scan-ranges/scan', adminOnly, (req, res) => {
 adminRouter.get('/idrac/scan-ranges/status', adminOnly, (_req, res) => res.json({ ok: true, status: idracScanStatus() }));
 
 // 스캔 현황 — 주기 스캐너 상태 + 진행 중·최근 위임 스캔/등록 잡 목록(어디서든 진행 확인용).
+// 위임 스캔으로 에이전트 현지 등록된 전력은 '원격 수집(collector)'로 반영되므로, 스캔 에이전트가
+// 수집 서버로 등록돼 있는지 UI가 진단할 수 있게 수집 서버 요약(상태 포함)도 함께 반환한다.
 adminRouter.get('/idrac/scan-jobs', adminOnly, (_req, res) => {
-  res.json({ ok: true, status: idracScanStatus(), jobs: listIdracScanJobs(), centralEnabled: Boolean(config.central.token) });
+  const st = allCollectorStatus();
+  const collectors = listCollectors().map((c) => ({
+    id: c.id, name: c.name, datacenter: c.datacenter || '', enabled: c.enabled !== false,
+    ok: st[c.id]?.ok ?? null, hosts: st[c.id]?.ok ? (st[c.id]?.hosts ?? 0) : 0, at: st[c.id]?.at || null, error: st[c.id]?.error || null,
+  }));
+  res.json({ ok: true, status: idracScanStatus(), jobs: listIdracScanJobs(), collectors, centralEnabled: Boolean(config.central.token) });
 });
 
 // 서버 일괄 삭제. Body: { all:true } 또는 { vcenterId } (빈 문자열=미지정 서버 삭제).
