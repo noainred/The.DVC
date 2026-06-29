@@ -45,7 +45,11 @@ function VcpuRatioModal({ rows, onClose }) {
   return (
     <Modal title="vCenter별 가상화율 (vCPU : 물리코어)" onClose={onClose} width={720} resizable minWidth={480} minHeight={360}>
       <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>할당된 vCPU ÷ 물리 코어 수. <b style={{ color: 'var(--amber)' }}>4:1 초과</b>는 높은 오버커밋입니다. <span style={{ opacity: .8 }}>제목을 클릭하면 정렬됩니다.</span></div>
-      <div className="table-wrap" style={{ maxHeight: '60vh' }}>
+      {/* 모달 본문(overflowY:auto)이 이미 세로 스크롤을 담당하므로, 표 자체는 별도 스크롤
+          컨테이너를 두지 않는다(overflow:visible). 안쪽 maxHeight 캡이 모달 높이를 초과해
+          스크롤바가 이중으로 생기던 문제 해결. thead의 position:sticky는 모달 본문 기준으로
+          그대로 고정된다. */}
+      <div className="table-wrap" style={{ overflow: 'visible' }}>
         <table>
           <thead><tr>
             {COLS.map(([key, label, align]) => (
