@@ -62,6 +62,22 @@ export function setFleetTag(key, tag) {
   return { ok: true, tags: next };
 }
 
+/** live 키 집합에 없는 유령 키(교체/삭제된 서버의 잔재)를 제거. 제거 수 반환. */
+export function pruneFleetTags(liveKeys) {
+  const live = liveKeys instanceof Set ? liveKeys : new Set(liveKeys || []);
+  const cur = loadFleetTags();
+  const next = {};
+  let removed = 0;
+  for (const [k, v] of Object.entries(cur)) { if (live.has(k)) next[k] = v; else removed += 1; }
+  if (!removed) return 0;
+  try { atomicWriteFileSync(FILE, JSON.stringify({ tags: next }, null, 2)); }
+  catch { return 0; }
+  cache = next;
+  cacheMtimeMs = fileMtimeMs();
+  bumpFleetRev();
+  return removed;
+}
+
 /** 테스트/관리용 초기화. */
 export function resetFleetTags() {
   cache = {};

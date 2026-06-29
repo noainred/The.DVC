@@ -12,8 +12,8 @@ import { snapMemo, sendCached } from '../util/snapCache.js';
 import { computeFinOps, loadFinopsConfig, saveFinopsConfig } from '../insights/finops.js';
 import { computePowerBreakdown } from '../insights/powerBreakdown.js';
 import { getFleetInventory } from '../insights/fleetInventory.js';
-import { setFleetTag } from '../insights/fleetTags.js';
-import { setFleetAssign, applyFleetAssign } from '../insights/fleetAssign.js';
+import { setFleetTag, pruneFleetTags } from '../insights/fleetTags.js';
+import { setFleetAssign, applyFleetAssign, pruneFleetAssign } from '../insights/fleetAssign.js';
 import { fleetRev } from '../insights/fleetRev.js';
 import { loadRegistry, updateServer } from '../idrac/registry.js';
 import { logAudit } from '../audit.js';
@@ -63,7 +63,8 @@ insightsRouter.get('/fleet', async (req, res) => {
     const snap = store.get();
     // 캐시 키: 스냅샷 생성시각 + 플릿 리비전(태그/소속/레지스트리 변경 시 즉시 +1). 매 요청 파일 읽기 없음.
     const key = `${snap.generatedAt}|${fleetRev()}`;
-    const payload = await snapMemo('fleet', key, 60_000, async () => getFleetInventory(snap));
+    const full = await snapMemo('fleet', key, 60_000, async () => getFleetInventory(snap));
+    const { liveKeys, ...payload } = full; // liveKeys는 prune 내부용 — 응답에서 제외
     sendCached(req, res, key, payload);
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
@@ -78,30 +79,66 @@ insightsRouter.put('/fleet/tag', adminOnly, (req, res) => {
 // iDRAC 레지스트리에 등록된 서버는 레지스트리 vcenterId(전력 귀속과 공유)를 직접 갱신하고(권위 소스),
 // 동일 키의 stale fleet-assign은 정리해 split-brain을 막는다. 그 외(OME/원격/무전력 발견분)는
 // fleet-assign 저장소에 키 기준으로 보관한다. vcenterId는 실제 존재하는 vCenter만 허용(유령 법인 차단).
-insightsRouter.put('/fleet/assign', adminOnly, (req, res) => {
-  const serverId = String(req.body?.serverId || '').trim();
-  const serviceTag = String(req.body?.serviceTag || '').trim();
-  const assignKey = String(req.body?.key || serviceTag || serverId).trim();
-  const vcenterId = String(req.body?.vcenterId || '').trim();
-  if (!assignKey) return res.status(400).json({ ok: false, reason: 'serverId/serviceTag/key 중 하나가 필요합니다.' });
-  const validIds = new Set((store.get().vcenters || []).map((v) => v.id));
-  if (vcenterId && !validIds.has(vcenterId)) return res.status(400).json({ ok: false, reason: `존재하지 않는 vCenter id: ${vcenterId}` });
-
+// 한 서버의 소속 법인 귀속(단건). 반환 { ok, via?, reason? }.
+function assignOne({ serverId, serviceTag, key, vcenterId, validIds }) {
+  const assignKey = String(key || serviceTag || serverId || '').trim();
+  if (!assignKey) return { ok: false, reason: 'serverId/serviceTag/key 중 하나가 필요합니다.' };
   const reg = serverId ? loadRegistry().find((s) => s.id === serverId && s.type !== 'ome') : null;
-  let via = 'assign';
   if (reg) {
     const r = updateServer(serverId, { vcenterId });
-    if (!r.ok) return res.status(400).json(r);
+    if (!r.ok) return r;
     // 레지스트리가 권위 소스가 되었으므로 동일 키의 과거 fleet-assign(OME 발견기 등)을 정리.
     setFleetAssign(assignKey, '');
     if (serviceTag) setFleetAssign(serviceTag, '');
-    via = 'registry';
-  } else {
-    const r = setFleetAssign(assignKey, vcenterId, validIds);
-    if (!r.ok) return res.status(400).json(r);
+    return { ok: true, via: 'registry' };
   }
-  logAudit({ user: req.user?.username, action: '플릿 법인 귀속', target: assignKey, detail: vcenterId ? `→ ${vcenterId} (${via})` : `해제 (${via})`, ip: req.ip || '' });
-  res.json({ ok: true, via, vcenterId });
+  const r = setFleetAssign(assignKey, vcenterId, validIds);
+  if (!r.ok) return r;
+  return { ok: true, via: 'assign' };
+}
+
+insightsRouter.put('/fleet/assign', adminOnly, (req, res) => {
+  const vcenterId = String(req.body?.vcenterId || '').trim();
+  const validIds = new Set((store.get().vcenters || []).map((v) => v.id));
+  if (vcenterId && !validIds.has(vcenterId)) return res.status(400).json({ ok: false, reason: `존재하지 않는 vCenter id: ${vcenterId}` });
+  const r = assignOne({
+    serverId: String(req.body?.serverId || '').trim(), serviceTag: String(req.body?.serviceTag || '').trim(),
+    key: String(req.body?.key || '').trim(), vcenterId, validIds,
+  });
+  if (!r.ok) return res.status(400).json(r);
+  logAudit({ user: req.user?.username, action: '플릿 법인 귀속', target: String(req.body?.key || req.body?.serviceTag || req.body?.serverId || ''), detail: vcenterId ? `→ ${vcenterId} (${r.via})` : `해제 (${r.via})`, ip: req.ip || '' });
+  res.json({ ok: true, via: r.via, vcenterId });
+});
+
+// 여러 베어메탈을 한 법인으로 일괄 귀속(관리자). body: { items:[{serverId,serviceTag,key}], vcenterId }.
+insightsRouter.put('/fleet/assign-bulk', adminOnly, (req, res) => {
+  const items = Array.isArray(req.body?.items) ? req.body.items.slice(0, 5000) : [];
+  const vcenterId = String(req.body?.vcenterId || '').trim();
+  if (!items.length) return res.status(400).json({ ok: false, reason: 'items가 비었습니다.' });
+  const validIds = new Set((store.get().vcenters || []).map((v) => v.id));
+  if (vcenterId && !validIds.has(vcenterId)) return res.status(400).json({ ok: false, reason: `존재하지 않는 vCenter id: ${vcenterId}` });
+  let ok = 0; const errors = [];
+  for (const it of items) {
+    const r = assignOne({
+      serverId: String(it?.serverId || '').trim(), serviceTag: String(it?.serviceTag || '').trim(),
+      key: String(it?.key || '').trim(), vcenterId, validIds,
+    });
+    if (r.ok) ok += 1; else errors.push({ key: it?.key || it?.serviceTag || it?.serverId, reason: r.reason });
+  }
+  logAudit({ user: req.user?.username, action: '플릿 법인 일괄 귀속', target: vcenterId || '(해제)', detail: `${ok}/${items.length}대`, ip: req.ip || '' });
+  res.json({ ok: true, assigned: ok, total: items.length, errors: errors.slice(0, 20) });
+});
+
+// 유령 태그/소속 키 정리(관리자) — 현재 어느 서버/호스트와도 매칭 안 되는 잔재 키 제거.
+insightsRouter.post('/fleet/prune', adminOnly, async (req, res) => {
+  try {
+    const { liveKeys } = await getFleetInventory(store.get());
+    const live = new Set(liveKeys || []);
+    const tags = pruneFleetTags(live);
+    const assign = pruneFleetAssign(live);
+    logAudit({ user: req.user?.username, action: '플릿 유령 키 정리', target: `태그 ${tags} · 소속 ${assign}`, ip: req.ip || '' });
+    res.json({ ok: true, removedTags: tags, removedAssign: assign });
+  } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 
 // --- AI 이상탐지 ---

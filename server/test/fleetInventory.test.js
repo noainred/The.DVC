@@ -209,3 +209,32 @@ test('[data-consistency-5] 삭제된/유령 vCenter로의 귀속은 미지정 �
   assert.equal(bareMetal[0].vcenterId, ''); // 유령 → 미지정
   assert.equal(byVcenter.find((g) => g.vcenterId === 'ghost-vc'), undefined);
 });
+
+test('[자동추론] OME 상속(vcInferred) 베어메탈은 vcSource=inferred, 수동 assign이 우선', () => {
+  const servers = [
+    { serverId: 'ome:c1:Z9', serverName: 'ome-b1', serviceTag: 'Z9', hostNames: ['z9'], watts: 100, source: 'ome', vcenterId: 'vc-eu', vcInferred: true },
+    { serverId: 'ome:c1:Z8', serverName: 'ome-b2', serviceTag: 'Z8', hostNames: ['z8'], watts: 50, source: 'ome', vcenterId: 'vc-eu', vcInferred: true },
+  ];
+  const assign = { z8: 'vc-kr' }; // 수동 등록은 추론보다 우선
+  const { bareMetal, summary } = classifyFleet({ hosts: [], vcenters: vcenters2, servers, assign });
+  const b1 = bareMetal.find((b) => b.name === 'ome-b1');
+  assert.equal(b1.vcenterId, 'vc-eu');
+  assert.equal(b1.vcSource, 'inferred');
+  const b2 = bareMetal.find((b) => b.name === 'ome-b2');
+  assert.equal(b2.vcenterId, 'vc-kr');     // 수동 우선
+  assert.equal(b2.vcSource, 'assigned');
+  assert.equal(summary.bareMetalInferred, 1);
+});
+
+test('[유령키] tags/assign에 매칭 안 되는 키는 ghostKeys로 집계, excluded는 live만', () => {
+  const servers = [
+    { serverId: 'bm-1', serverName: 'b1', serviceTag: 'Z1', hostNames: ['z1'], watts: 100, source: 'idrac' },
+  ];
+  const tags = { z1: 'exclude', deadtag: 'exclude' }; // deadtag는 어느 서버에도 없음
+  const assign = { z1: 'vc-kr', deadassign: 'vc-eu' };
+  const { summary, liveKeys } = classifyFleet({ hosts: [], vcenters: vcenters2, servers, tags, assign });
+  assert.equal(summary.excluded, 1);   // z1만 live 제외(deadtag 제외)
+  assert.equal(summary.ghostKeys, 2);  // deadtag + deadassign
+  assert.ok(liveKeys.includes('z1'));
+  assert.ok(!liveKeys.includes('deadtag'));
+});

@@ -76,6 +76,22 @@ export function applyFleetAssign(measured) {
   return measured;
 }
 
+/** live 키 집합에 없는 유령 키(교체/삭제된 서버의 잔재)를 제거. 제거 수 반환. */
+export function pruneFleetAssign(liveKeys) {
+  const live = liveKeys instanceof Set ? liveKeys : new Set(liveKeys || []);
+  const cur = loadFleetAssign();
+  const next = {};
+  let removed = 0;
+  for (const [k, v] of Object.entries(cur)) { if (live.has(k)) next[k] = v; else removed += 1; }
+  if (!removed) return 0;
+  try { atomicWriteFileSync(FILE, JSON.stringify({ assign: next }, null, 2)); }
+  catch { return 0; }
+  cache = next;
+  cacheMtimeMs = fileMtimeMs();
+  bumpFleetRev();
+  return removed;
+}
+
 /** 테스트/관리용 초기화. */
 export function resetFleetAssign() {
   cache = {};

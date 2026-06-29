@@ -2525,7 +2525,9 @@ function FleetInventory({ isAdmin }) {
   const [q, setQ] = useState('');
   const [fvc, setFvc] = useState('');             // 법인(vCenter)/DC 필터: '' 전체, '__none__' 미지정
   const [busy, setBusy] = useState('');
-  const seqRef = React.useRef(0);                 // load 응답 경합 가드(오래된 응답이 최신을 덮어쓰지 않게)
+  const [sel, setSel] = useState(() => new Set()); // 일괄 등록용 선택(fleetId)
+  const [bulkVc, setBulkVc] = useState('');        // 일괄 등록 대상 법인('' = 미지정으로 해제)
+  const seqRef = React.useRef(0);                  // load 응답 경합 가드(오래된 응답이 최신을 덮어쓰지 않게)
 
   const load = () => {
     const my = ++seqRef.current;
@@ -2553,8 +2555,16 @@ function FleetInventory({ isAdmin }) {
     catch (e) { setErr(e.message); }
     finally { setBusy(''); }
   };
+  const toggleSel = (id) => setSel((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  // 유령(교체·삭제된 서버의 잔재) 분류/소속 키 정리.
+  const prune = async () => {
+    setBusy('__prune__');
+    try { const r = await postJson('/insights/fleet/prune', {}); setErr(null); await load(); if (r) setErr(`정리 완료 — 태그 ${r.removedTags}개 · 소속 ${r.removedAssign}개 제거`); }
+    catch (e) { setErr(e.message); }
+    finally { setBusy(''); }
+  };
 
-  if (err) return <ErrorBox message={err} />;
+  if (err && !d) return <ErrorBox message={err} />;
   if (!d) return <Loading />;
   const s = d.summary || {};
   const vcenters = d.vcenters || [];
@@ -2564,12 +2574,33 @@ function FleetInventory({ isAdmin }) {
   const bm = (d.bareMetal || []).filter((b) => inVc(b.vcenterId) && match(b.name, b.model, b.serviceTag, b.vcenter));
   const vh = (d.virtualizationHosts || []).filter((h) => inVc(h.vcenterId) && match(h.name, h.model, h.serviceTag, h.vcenter));
   const modeBadge = MODE_BADGE[d.mode];
+  const selKey = (b) => b.fleetId || rowKey(b);
+  const selectedItems = bm.filter((b) => sel.has(selKey(b)));
+  const allShownSelected = bm.length > 0 && bm.every((b) => sel.has(selKey(b)));
+  const toggleAllShown = () => setSel((prev) => {
+    const n = new Set(prev);
+    if (allShownSelected) bm.forEach((b) => n.delete(selKey(b)));
+    else bm.forEach((b) => n.add(selKey(b)));
+    return n;
+  });
+  const bulkAssign = async () => {
+    const items = selectedItems.map((b) => ({ serverId: b.serverId, serviceTag: b.serviceTag, key: tagKeyOf(b) }));
+    if (!items.length) return;
+    setBusy('__bulk__');
+    try {
+      const r = await putJson('/insights/fleet/assign-bulk', { items, vcenterId: bulkVc });
+      setSel(new Set());
+      await load();
+      setErr(r && r.errors && r.errors.length ? `${r.assigned}/${r.total}대 등록(일부 실패 ${r.errors.length})` : null);
+    } catch (e) { setErr(e.message); }
+    finally { setBusy(''); }
+  };
 
   const csv = () => {
     const isBm = view === 'baremetal';
-    const head = isBm ? ['서버', '모델', '서비스태그', '법인(vCenter)', '수집원', 'W'] : ['호스트', 'vCenter', '지역', '모델', '서비스태그', 'iDRAC받침', 'W'];
+    const head = isBm ? ['서버', '모델', '서비스태그', '법인(vCenter)', '법인출처', '수집원', 'W'] : ['호스트', 'vCenter', '지역', '모델', '서비스태그', 'iDRAC받침', 'W'];
     const rows = isBm
-      ? bm.map((b) => [b.name, b.model, b.serviceTag, b.vcenter || '미지정', b.source, b.watts ?? ''])
+      ? bm.map((b) => [b.name, b.model, b.serviceTag, b.vcenter || '미지정', b.vcSource || '', b.source, b.watts ?? ''])
       : vh.map((h) => [h.name, h.vcenter, h.region, h.model, h.serviceTag, h.idracBacked ? 'O' : 'X', h.watts ?? '']);
     const body = [head, ...rows].map((r) => r.map((c) => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\r\n');
     const blob = new Blob(['﻿' + body], { type: 'text/csv;charset=utf-8' });
@@ -2613,27 +2644,51 @@ function FleetInventory({ isAdmin }) {
         </div>
       </div>
 
+      {err && d && <div className="card" style={{ padding: '8px 12px', marginBottom: 10, borderLeft: '3px solid var(--amber)', fontSize: 13 }}>{err}</div>}
+      {isAdmin && s.ghostKeys > 0 && (
+        <div className="card flex between wrap gap" style={{ padding: '8px 12px', marginBottom: 10, borderLeft: '3px solid var(--amber)', alignItems: 'center' }}>
+          <span style={{ fontSize: 13 }}>⚠ 유령 분류/소속 키 <b>{s.ghostKeys}</b>개 — 교체·삭제된 서버의 잔재가 남아 있습니다.</span>
+          <button className="logout-btn" style={{ padding: '6px 12px' }} disabled={busy === '__prune__'} onClick={prune}>{busy === '__prune__' ? '정리 중…' : '유령 키 정리'}</button>
+        </div>
+      )}
+
       {view === 'baremetal' && (
         <>
+          {isAdmin && (
+            <div className="flex wrap gap" style={{ alignItems: 'center', marginBottom: 8 }}>
+              <span className="muted" style={{ fontSize: 12 }}>일괄 등록: <b>{selectedItems.length}</b>대 선택</span>
+              <select className="select" value={bulkVc} onChange={(e) => setBulkVc(e.target.value)} style={{ maxWidth: 200, padding: '5px 8px', fontSize: 12 }}>
+                <option value="">미지정(해제)</option>
+                {vcenters.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+              </select>
+              <button className="login-btn" style={{ flex: 'none', padding: '6px 12px' }} disabled={!selectedItems.length || busy === '__bulk__'} onClick={bulkAssign}>{busy === '__bulk__' ? '등록 중…' : '선택 일괄 등록'}</button>
+              {sel.size > 0 && <button className="logout-btn" style={{ padding: '6px 10px' }} onClick={() => setSel(new Set())}>선택 해제</button>}
+            </div>
+          )}
           <ResultCount total={(d.bareMetal || []).length} shown={bm.length} label="베어메탈" filtered={!!term || !!fvc} />
           <div className="table-wrap" style={{ maxHeight: '60vh' }}>
             <table>
-              <thead><tr><th>서버</th><th>모델</th><th>서비스태그</th><th>법인(vCenter)</th><th>수집</th><th style={{ textAlign: 'right' }}>현재 전력</th>{isAdmin && <th>분류</th>}</tr></thead>
+              <thead><tr>{isAdmin && <th style={{ width: 28 }}><input type="checkbox" checked={allShownSelected} onChange={toggleAllShown} title="현재 목록 전체 선택" /></th>}<th>서버</th><th>모델</th><th>서비스태그</th><th>법인(vCenter)</th><th>수집</th><th style={{ textAlign: 'right' }}>현재 전력</th>{isAdmin && <th>분류</th>}</tr></thead>
               <tbody>
                 {bm.map((b, i) => (
-                  <tr key={b.serverId || i}>
+                  <tr key={b.serverId || b.fleetId || i}>
+                    {isAdmin && <td><input type="checkbox" checked={sel.has(selKey(b))} onChange={() => toggleSel(selKey(b))} /></td>}
                     <td><b>{b.name}</b>{b.forced && <span className="badge purple" style={{ marginLeft: 6 }}>수동</span>}</td>
                     <td className="muted" style={{ fontSize: 12 }}>{b.model || '—'}</td>
                     <td className="muted" style={{ fontSize: 12 }}>{b.serviceTag || '—'}</td>
-                    <td>{isAdmin
-                      ? <VcAssignSelect value={b.vcenterId || ''} vcenters={vcenters} disabled={busy === rowKey(b)} onChange={(vid) => setVc(b, vid)} />
-                      : (b.vcenter ? <span>{b.vcenter}</span> : <span className="badge purple">미지정</span>)}</td>
+                    <td>
+                      {isAdmin
+                        ? <VcAssignSelect value={b.vcenterId || ''} vcenters={vcenters} disabled={busy === rowKey(b)} onChange={(vid) => setVc(b, vid)} />
+                        : (b.vcenter ? <span>{b.vcenter}</span> : <span className="badge purple">미지정</span>)}
+                      {b.vcSource === 'inferred' && <span className="muted" style={{ fontSize: 11, marginLeft: 4 }} title="OME 연결의 법인을 상속(자동 추론)">· 자동(OME)</span>}
+                      {b.vcSource === 'collector' && <span className="muted" style={{ fontSize: 11, marginLeft: 4 }} title="원격 수집기 귀속">· 수집기</span>}
+                    </td>
                     <td className="muted" style={{ fontSize: 12 }}>{b.source}</td>
                     <td style={{ textAlign: 'right' }}>{b.watts != null ? <b>{fmtWatts(b.watts)}</b> : <span className="muted">미측정</span>}</td>
                     {isAdmin && <td><TagSelect value={b.tag || 'auto'} disabled={busy === rowKey(b)} onChange={(t) => setTag(b, t)} /></td>}
                   </tr>
                 ))}
-                {!bm.length && <tr><td colSpan={isAdmin ? 7 : 6} className="center muted" style={{ padding: 20 }}>베어메탈 서버가 없습니다.</td></tr>}
+                {!bm.length && <tr><td colSpan={isAdmin ? 8 : 6} className="center muted" style={{ padding: 20 }}>베어메탈 서버가 없습니다.</td></tr>}
               </tbody>
             </table>
           </div>

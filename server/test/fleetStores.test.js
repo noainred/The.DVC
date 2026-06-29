@@ -1,7 +1,7 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { setFleetAssign, loadFleetAssign, applyFleetAssign, resetFleetAssign } from '../src/insights/fleetAssign.js';
-import { setFleetTag, loadFleetTags, resetFleetTags } from '../src/insights/fleetTags.js';
+import { setFleetAssign, loadFleetAssign, applyFleetAssign, pruneFleetAssign, resetFleetAssign } from '../src/insights/fleetAssign.js';
+import { setFleetTag, loadFleetTags, pruneFleetTags, resetFleetTags } from '../src/insights/fleetTags.js';
 
 beforeEach(() => { resetFleetAssign(); resetFleetTags(); });
 
@@ -39,4 +39,19 @@ test('setFleetTag: 잘못된 tag 거부, 유효 태그 저장/해제', () => {
   assert.equal(loadFleetTags().z1, 'baremetal');
   assert.equal(setFleetTag('z1', 'auto').ok, true); // auto = 해제
   assert.equal(loadFleetTags().z1, undefined);
+});
+
+test('pruneFleetTags/Assign: live 키만 남기고 유령 키 제거', () => {
+  setFleetTag('z1', 'exclude');
+  setFleetTag('dead', 'baremetal');
+  setFleetAssign('z1', 'vc-kr');
+  setFleetAssign('deadkey', 'vc-eu');
+  const live = new Set(['z1']);
+  assert.equal(pruneFleetTags(live), 1);   // 'dead' 제거
+  assert.equal(pruneFleetAssign(live), 1); // 'deadkey' 제거
+  assert.equal(loadFleetTags().z1, 'exclude');
+  assert.equal(loadFleetTags().dead, undefined);
+  assert.equal(loadFleetAssign().z1, 'vc-kr');
+  assert.equal(loadFleetAssign().deadkey, undefined);
+  assert.equal(pruneFleetTags(live), 0);   // 더 이상 제거할 것 없음
 });
