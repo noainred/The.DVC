@@ -48,6 +48,7 @@ import { startCollectorPuller } from './collector/puller.js';
 import { startAgentScanner } from './agent/scanner.js';
 import { startIdracScanWorker } from './agent/idracScanWorker.js';
 import { startInventoryPush } from './agent/inventoryPush.js';
+import { startFleetPush } from './agent/fleetPush.js';
 import { startGpuGuestPush } from './agent/gpuGuestPush.js';
 import { startPingWorker } from './agent/pingWorker.js';
 import { startConfigPush } from './agent/configPush.js';
@@ -127,7 +128,7 @@ upgradeManager.start();
 const stagger = [
   startIdracPoller, startIdracScanPoller, startNsxPoller, startAlertEngine, startMetricsSampler, startGpuGuestPoller, startPhysicalGpuPoller,
   startIpScanPoller, startIpScanAgent, startCollectorPuller, startAgentScanner, startIdracScanWorker, startInventoryPush,
-  startGpuGuestPush, startPingWorker, startConfigPush, startBackupScheduler, startLogPoller, startLogQueryWorker, startCaptureWorker, startCaptureMonitor, startLoginMonitor, startGuestScanScheduler, startOsScanner,
+  startGpuGuestPush, startPingWorker, startConfigPush, startFleetPush, startBackupScheduler, startLogPoller, startLogQueryWorker, startCaptureWorker, startCaptureMonitor, startLoginMonitor, startGuestScanScheduler, startOsScanner,
   startDbSizeSampler,
 ];
 stagger.forEach((start, i) => setTimeout(() => { try { start(); } catch (e) { console.error('[start] 폴러 기동 실패:', e?.message); } }, i * 1500).unref?.());

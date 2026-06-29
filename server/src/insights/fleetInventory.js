@@ -31,6 +31,7 @@ import { allOmeDevices, dbKey } from '../idrac/omeCache.js';
 import { getInventory } from '../idrac/invCache.js';
 import { loadFleetTags } from './fleetTags.js';
 import { loadFleetAssign } from './fleetAssign.js';
+import { getEdgeFleetServers } from '../central/fleet.js';
 
 const norm = (s) => String(s || '').trim().toLowerCase();
 const round = (n) => (Number.isFinite(n) ? Math.round(n) : null);
@@ -66,8 +67,11 @@ export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = 
     else if (a) { id = a; src = 'assigned'; }
     else if (fb) {
       id = fb;
-      // OME 소속은 연결의 법인 상속(자동 추론), 원격은 수집기 귀속, 호스트는 호스팅 vCenter.
-      src = server?.source === 'ome' ? 'inferred' : (server?.source === 'remote' ? 'collector' : (server?.source === 'host' ? 'host' : 'registry'));
+      // OME 소속은 연결의 법인 상속(자동 추론), 원격은 수집기 귀속, 엣지는 현장 보고, 호스트는 호스팅 vCenter.
+      src = server?.source === 'ome' ? 'inferred'
+        : server?.source === 'remote' ? 'collector'
+          : server?.source === 'edge' ? 'edge'
+            : server?.source === 'host' ? 'host' : 'registry';
     }
     id = knownVc(id);
     if (!id) src = '';
@@ -131,6 +135,7 @@ export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = 
       serverId: s.serverId, fleetId: dk, name: s.serverName || s.host || s.serviceTag || s.serverId,
       model: s.model || '', serviceTag: s.serviceTag || '', source: s.source,
       watts: posOrNull(s.watts), forced: t === 'baremetal', tag: t || '', tagKey: dk,
+      remoteAgent: s.remoteAgent || '', // 엣지 보고 시 출처 DC/에이전트
       ...vcRow(vc.id, vc.src),
     });
   }
@@ -314,17 +319,24 @@ export function fleetLiveKeys(snap) {
 
 /** 이 인스턴스 역할: 중앙(central) / 엣지(edge=중앙에 push하는 에이전트) / 단독(standalone). */
 function instanceMode() {
-  if (config.central?.centralUrl) return 'edge';
-  if (config.central?.token) return 'central';
+  if (config.agent?.centralUrl) return 'edge';   // 중앙으로 push하는 현장/엣지 에이전트
+  if (config.central?.token) return 'central';   // 에이전트 push를 받는 중앙
   return 'standalone';
 }
 
 /** 스냅샷 기준 통합 인벤토리 산출(라우트에서 호출). */
 export async function getFleetInventory(snap) {
   const servers = await buildServerUniverse(snap?.hosts || []);
+  // 중앙: 엣지가 push한 베어메탈(전력 미보고 발견분 포함)을 병합 — 서비스태그로 dedup(로컬·원격 우선).
+  if (config.central?.token) {
+    try { servers.push(...getEdgeFleetServers()); } catch { /* 엣지 데이터 없음 무시 */ }
+  }
   const result = classifyFleet({
     hosts: snap?.hosts || [], vcenters: snap?.vcenters || [], servers,
     tags: loadFleetTags(), assign: loadFleetAssign(),
   });
+  const edgeAgents = new Set(result.bareMetal.filter((b) => b.remoteAgent).map((b) => b.remoteAgent));
+  result.summary.edgeReported = result.bareMetal.filter((b) => b.remoteAgent).length;
+  result.summary.edgeAgents = edgeAgents.size;
   return { ...result, mode: instanceMode() };
 }

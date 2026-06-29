@@ -2511,6 +2511,7 @@ const VC_SRC = {
   host: ['호스트', '호스팅 vCenter'],
   collector: ['수집기', '원격 수집기 귀속'],
   inferred: ['자동(OME)', 'OME 연결의 법인을 상속(자동 추론)'],
+  edge: ['엣지', '엣지(현장) 포탈이 보고한 소속'],
 };
 
 // 베어메탈 서버의 소속 법인(vCenter) 등록 드롭다운. 목록에 없는 값(삭제된 vCenter 등)도 표시.
@@ -2640,7 +2641,7 @@ function FleetInventory({ isAdmin }) {
           iDRAC/OME가 수집한 물리 서버를 <b>Dell 서비스태그</b>로 vCenter ESXi 호스트와 대조합니다. 호스트에 매칭되면 <b>가상화 호스트</b>, 매칭이 없으면 <b>베어메탈</b>입니다.
         </div>
         <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-          {d.mode === 'edge' ? '이 엣지 포탈은 자기 데이터센터에 등록된 서버만 보여줍니다(로컬 검색). ' : (d.mode === 'central' ? '중앙 포탈 — 법인(vCenter) 필터로 데이터센터별 검색이 가능합니다. ' : '')}
+          {d.mode === 'edge' ? '이 엣지 포탈은 자기 데이터센터에 등록된 서버만 보여줍니다(로컬 검색). 중앙으로 베어메탈을 보고합니다. ' : (d.mode === 'central' ? `중앙 포탈 — 법인(vCenter) 필터로 데이터센터별 검색이 가능합니다. ${s.edgeReported ? `🛰 엣지 ${s.edgeAgents}곳에서 ${s.edgeReported}대 집계. ` : ''}` : '')}
           베어메탈 행에서 소속 <b>법인(vCenter)</b>을 바로 등록할 수 있고, 자동 분류가 틀리면 분류도 직접 바꿀 수 있습니다(서비스태그 기준 저장). 베어메탈 총전력은 이미 수집 중인 iDRAC/OME 측정값을 합산합니다.
         </div>
       </div>
@@ -2691,7 +2692,7 @@ function FleetInventory({ isAdmin }) {
                 {bm.map((b, i) => (
                   <tr key={b.serverId || b.fleetId || i}>
                     {isAdmin && <td><input type="checkbox" checked={sel.has(selKey(b))} onChange={() => toggleSel(selKey(b))} /></td>}
-                    <td><b>{b.name}</b>{b.forced && <span className="badge purple" style={{ marginLeft: 6 }}>수동</span>}</td>
+                    <td><b>{b.name}</b>{b.forced && <span className="badge purple" style={{ marginLeft: 6 }}>수동</span>}{b.remoteAgent && <span className="badge teal" style={{ marginLeft: 6 }} title="엣지(현장) 포탈이 보고한 베어메탈">🛰 {b.remoteAgent}</span>}</td>
                     <td className="muted" style={{ fontSize: 12 }}>{b.model || '—'}</td>
                     <td className="muted" style={{ fontSize: 12 }}>{b.serviceTag || '—'}</td>
                     <td>

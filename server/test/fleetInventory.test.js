@@ -226,6 +226,22 @@ test('[자동추론] OME 상속(vcInferred) 베어메탈은 vcSource=inferred, �
   assert.equal(summary.bareMetalInferred, 1);
 });
 
+test('[엣지집계] source=edge 베어메탈은 remoteAgent + vcSource=edge, 서비스태그로 중앙과 dedup', () => {
+  const servers = [
+    { serverId: 'remote:c1:X1', serverName: 'central-x1', serviceTag: 'X1', hostNames: ['x1'], watts: 100, source: 'remote', vcenterId: 'vc-kr' }, // 중앙(원격) 먼저
+    { serverId: 'edge:dc-pl:X1', serverName: 'edge-x1', serviceTag: 'X1', hostNames: ['x1'], watts: null, source: 'edge', remoteAgent: 'dc-pl', vcenterId: 'vc-eu' }, // 같은 태그 → dedup
+    { serverId: 'edge:dc-pl:E2', serverName: 'edge-e2', serviceTag: 'E2', hostNames: ['e2'], watts: null, source: 'edge', remoteAgent: 'dc-pl', vcenterId: 'vc-eu' },
+  ];
+  const { bareMetal } = classifyFleet({ hosts: [], vcenters: vcenters2, servers });
+  assert.equal(bareMetal.length, 2); // X1 중복 제거(중앙 우선)
+  const x1 = bareMetal.find((b) => b.serviceTag === 'X1');
+  assert.equal(x1.source, 'remote');
+  const e2 = bareMetal.find((b) => b.serviceTag === 'E2');
+  assert.equal(e2.remoteAgent, 'dc-pl');
+  assert.equal(e2.vcSource, 'edge');
+  assert.equal(e2.vcenterId, 'vc-eu');
+});
+
 test('[유령키] tags/assign에 매칭 안 되는 키는 ghostKeys로 집계, excluded는 live만', () => {
   const servers = [
     { serverId: 'bm-1', serverName: 'b1', serviceTag: 'Z1', hostNames: ['z1'], watts: 100, source: 'idrac' },

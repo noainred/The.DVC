@@ -9,6 +9,7 @@ import { config } from '../config.js';
 import { getAssignment, setResult } from '../central/assignments.js';
 import { tokenMatches } from '../util/secureCompare.js';
 import { setInventory } from '../central/inventory.js';
+import { setEdgeFleet } from '../central/fleet.js';
 import { setGuestGpu } from '../gpu/store.js';
 import { setGpuGuestDiag } from '../central/gpuGuestDiag.js';
 import { takePingJobs, setPingResults } from '../central/pingJobs.js';
@@ -98,6 +99,18 @@ centralRouter.post('/inventory', (req, res) => {
   };
   setInventory(String(b.vcenterId), slice, String(b.agent || ''), b.generatedAt || null);
   res.json({ ok: true, vcenterId: b.vcenterId, hosts: slice.hosts.length, vms: slice.vms.length });
+});
+
+// 엣지 베어메탈 집계: 현장 포탈이 자기 DC의 베어메탈 목록(전력 미보고 포함)을 push.
+// Body: { agent, baremetal:[{fleetId,name,model,serviceTag,watts,vcenterId,source}], generatedAt }
+centralRouter.post('/fleet', (req, res) => {
+  if (!config.central.token) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: '토큰 불일치' });
+  const b = req.body || {};
+  if (!b.agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
+  const list = Array.isArray(b.baremetal) ? b.baremetal : [];
+  setEdgeFleet(String(b.agent), list, b.generatedAt || null);
+  res.json({ ok: true, agent: b.agent, baremetal: list.length });
 });
 
 // 위임 iDRAC 스캔: 에이전트가 자기 이름의 온디맨드 스캔 잡을 인출.
