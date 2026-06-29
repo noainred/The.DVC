@@ -223,6 +223,18 @@ export default function IdracAdmin() {
     finally { setBusy(false); }
   };
 
+  // 수집 서버 삭제(원격 수집 영구 제거). 등록을 지우면 그 수집서버의 원격 호스트가 더는 안 들어온다.
+  const deleteCollector = async (collectorId, name) => {
+    if (!window.confirm(`수집 서버 '${name || collectorId}'를 삭제할까요?\n이 수집서버가 보고하던 원격 호스트 전력이 더 이상 집계되지 않습니다.\n(에이전트 자체는 계속 동작하며, 중앙 등록만 제거됩니다.)`)) return;
+    setBusy(true); setImportMsg(null);
+    try {
+      const r = await delJson(`/admin/collectors/${encodeURIComponent(collectorId)}`);
+      setImportMsg(r.ok ? { ok: true, text: `수집 서버 '${name || collectorId}' 삭제됨. 남은 원격 잔여는 ‘⚠ 강제 전체 초기화’로 정돈하세요.` } : { ok: false, text: r.reason || '삭제 실패' });
+      await load(); await loadDash(); await loadSources(); await loadScanJobs();
+    } catch (e) { setImportMsg({ ok: false, text: e.message }); }
+    finally { setBusy(false); }
+  };
+
   // vCenter 미매핑 측정 전력을 총합/보고/목록에서 제외(영구). 수집기가 다시 보내도 표시에서 빠진다.
   const toggleExcludeUnmapped = async () => {
     const next = !pwSettings.excludeUnmapped;
@@ -511,7 +523,7 @@ export default function IdracAdmin() {
         </div>
       </div>
 
-      {sources && <PowerSources sources={sources} vcenters={vcenters} onMapCollector={mapCollector} busy={busy} />}
+      {sources && <PowerSources sources={sources} vcenters={vcenters} onMapCollector={mapCollector} onDeleteCollector={deleteCollector} busy={busy} />}
 
       <IdracScanJobs data={scanJobs} vcenters={vcenters} busy={busy} onRefresh={loadScanJobs} onScanAll={() => srScanNow()} />
 
@@ -1525,7 +1537,7 @@ function IdracScanRanges({ data, vcenters, agents, busy, form, setForm, msg, set
 // '전력 보고 N대'가 어디서 오는지(iDRAC 등록 / OME 자동발견 / 원격 수집)를 분해해 보여준다.
 // 등록 iDRAC보다 훨씬 큰 수가 보일 때, 그 출처(어느 OME 연결·어느 수집서버)와 등록 여부를
 // 한눈에 확인하고 정리 방법을 안내한다. /admin/idrac/power-sources 응답을 렌더.
-function PowerSources({ sources, vcenters = [], onMapCollector, busy }) {
+function PowerSources({ sources, vcenters = [], onMapCollector, onDeleteCollector, busy }) {
   const s = sources || {};
   const bs = s.bySource || {};
   const omeEntries = s.ome?.entries || [];
@@ -1592,9 +1604,9 @@ function PowerSources({ sources, vcenters = [], onMapCollector, busy }) {
           )}
           {collectors.length > 0 && (
             <div style={{ flex: '1 1 420px' }}>
-              <div className="muted" style={{ fontSize: 11.5, marginBottom: 4 }}>수집서버별 원격 호스트 — vCenter 매핑(미매핑 해소)</div>
+              <div className="muted" style={{ fontSize: 11.5, marginBottom: 4 }}>수집서버별 원격 호스트 — vCenter 매핑(미매핑 해소) / 삭제</div>
               <table className="data-table" style={{ fontSize: 12, width: '100%' }}>
-                <thead><tr><th>수집서버</th><th>등록</th><th style={{ textAlign: 'right' }}>호스트</th><th>귀속 vCenter</th></tr></thead>
+                <thead><tr><th>수집서버</th><th>등록</th><th style={{ textAlign: 'right' }}>호스트</th><th>귀속 vCenter</th><th style={{ textAlign: 'right' }}>작업</th></tr></thead>
                 <tbody>
                   {collectors.map((c) => (
                     <tr key={c.collectorId}>
@@ -1611,6 +1623,11 @@ function PowerSources({ sources, vcenters = [], onMapCollector, busy }) {
                             {vcenters.map((v) => <option key={v.id} value={v.id}>{v.name || v.id}</option>)}
                           </select>
                         ) : (c.vcenterId || <span className="muted">(미매핑)</span>)}
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        {c.registered && onDeleteCollector
+                          ? <button className="logout-btn" style={{ padding: '4px 10px', fontSize: 12, color: 'var(--red)' }} disabled={busy} onClick={() => onDeleteCollector(c.collectorId, c.name)} title="이 수집 서버 등록을 삭제(원격 수집 영구 제거)">삭제</button>
+                          : <span className="muted">—</span>}
                       </td>
                     </tr>
                   ))}
