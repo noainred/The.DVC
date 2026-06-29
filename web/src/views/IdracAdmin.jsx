@@ -235,6 +235,19 @@ export default function IdracAdmin() {
     finally { setBusy(false); }
   };
 
+  // vCenter 호스트 전력(power.power.average) 합산 on/off. off면 iDRAC/OME/원격만 집계.
+  const toggleVcenterPower = async () => {
+    const next = !(pwSettings.includeVcenterPower !== false);
+    setBusy(true); setImportMsg(null);
+    try {
+      const r = await putJson('/admin/idrac/power-settings', { includeVcenterPower: next });
+      if (r.ok) setPwSettings(r.settings);
+      setImportMsg(r.ok ? { ok: true, text: next ? 'vCenter 호스트 전력을 집계에 포함했습니다(iDRAC/OME/원격과 중복 제거).' : 'vCenter 호스트 전력 합산을 해제했습니다.' } : { ok: false, text: r.reason });
+      await load(); await loadDash(); await loadSources();
+    } catch (e) { setImportMsg({ ok: false, text: e.message }); }
+    finally { setBusy(false); }
+  };
+
   // ── vCenter별 iDRAC 스캔 대역 (주기 자동 발견) ──────────────────────────
   const srOpenNew = () => { setSrMsg(null); setSrForm({ vcenterId: '', ranges: '', username: 'root', password: '', agent: '__local__', enabled: true, mode: 'merge', isNew: true }); };
   const srEdit = (e) => { setSrMsg(null); setSrForm({ vcenterId: e.vcenterId, ranges: (e.ranges || []).join('\n'), username: e.username || 'root', password: '', agent: e.agent || '__local__', enabled: e.enabled !== false, mode: e.mode || 'merge', hasPassword: e.hasPassword, isNew: false }); };
@@ -482,6 +495,7 @@ export default function IdracAdmin() {
           <button className="logout-btn" style={{ padding: '9px 14px' }} disabled={busy} onClick={pollNow}>지금 수집</button>
           <button className="logout-btn" style={{ padding: '9px 14px', color: 'var(--amber)' }} disabled={busy} onClick={() => purgeStale('stale')} title="등록/활성 소스에 없는 오류·고아 전력 데이터(제거된 OME·수집서버 잔여, 고아 이력) 삭제">🧹 오류 전력 정리</button>
           <button className="logout-btn" style={{ padding: '9px 14px', color: 'var(--red)' }} disabled={busy} onClick={() => purgeStale('all')} title="등록 여부 무관하게 OME 디바이스 캐시·원격 호스트 전체 비우고 등록 iDRAC 외 전력 이력 삭제(등록된 OME/수집기가 있으면 다음 폴링에 재수집됨)">⚠️ 강제 전체 초기화</button>
+          <button className="logout-btn" style={{ padding: '9px 14px', color: (pwSettings.includeVcenterPower !== false) ? 'var(--accent, #38bdf8)' : 'var(--amber)' }} disabled={busy} onClick={toggleVcenterPower} title="vCenter PerformanceManager(power.power.average)로 수집한 ESXi 호스트 전력을 총 소비전력·대시보드·FinOps에 합산/제외. iDRAC/OME/원격과 중복 제거.">{(pwSettings.includeVcenterPower !== false) ? '☑ vCenter 전력 포함' : '☐ vCenter 전력'}</button>
           <button className="logout-btn" style={{ padding: '9px 14px', color: pwSettings.excludeUnmapped ? 'var(--green, #22c55e)' : 'var(--amber)' }} disabled={busy} onClick={toggleExcludeUnmapped} title="vCenter에 귀속되지 않는(미매핑) 측정 전력을 총합·전력 보고·목록에서 제외/포함 (수집기가 다시 보내도 표시에서 빠짐)">{pwSettings.excludeUnmapped ? '☑ 미매핑 제외중' : '☐ 미매핑 제외'}</button>
           <button className="login-btn" style={{ flex: 'none', padding: '9px 16px' }} onClick={openAdd}>+ 서버 추가</button>
         </div>
@@ -1458,6 +1472,7 @@ function PowerSources({ sources, vcenters = [], onMapCollector, busy }) {
         {pill('iDRAC 등록', bs.idrac || 0, '#22c55e')}
         {pill('OME 디바이스', bs.ome || 0, '#f59e0b')}
         {pill('원격 수집', bs.remote || 0, '#a78bfa')}
+        {pill('vCenter 호스트', bs.vcenter || 0, '#38bdf8')}
       </div>
 
       {abnormal ? (

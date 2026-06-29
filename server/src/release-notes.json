@@ -1,6 +1,18 @@
 {
   "notes": [
     {
+      "version": "2.53.0",
+      "date": "2026-06-29",
+      "title": "vCenter 호스트 전력 합산 — iDRAC 없이도 전세계 전력 현황 표시(베어메탈 iDRAC 확장 대비)",
+      "notes": [
+        "이제 모든 vCenter에서 수집한 ESXi 호스트 소비전력을 현황판에 표시합니다. vCenter의 PerformanceManager 카운터 power.power.average(호스트별 W, ESXi가 BMC/IPMI 센서에서 읽는 값)를 이미 수집하고 있었는데, 이를 정식 측정 소스로 합산하도록 했습니다. iDRAC을 등록하지 않아도 vCenter만으로 Overview 총 소비전력·전력 대시보드·FinOps·특수기능 전력분석이 채워집니다.",
+        "중복 제거: vCenter 호스트 전력은 iDRAC/OME/원격 수집으로 이미 잡힌 서버는 제외하고(전용 소스 우선), 나머지 호스트만 채웁니다. 따라서 나중에 VMware를 쓰지 않는 베어메탈 서버를 iDRAC으로 등록하면 그 전력이 vCenter 전력 위에 자연스럽게 합산됩니다(이중 집계 없음).",
+        "시계열 적재: vCenter 호스트 전력을 전력 DB에 매 폴 트랜잭션 배치로 저장(키 vc:<vCenter>:<호스트>)해 대시보드의 24h 피크/평균·추세 차트에도 반영됩니다(590+ 호스트도 비차단). 보존기간 prune은 약 10주기마다.",
+        "전력 수집 메뉴에 '☑ vCenter 전력 포함' 토글을 추가했고(기본 on), '전력 보고 출처 진단'에 'vCenter 호스트' 항목을 추가했습니다. 설정은 CONFIG_DIR/power-settings.json(includeVcenterPower). API: PUT /admin/idrac/power-settings { includeVcenterPower }.",
+        "단위 테스트(vcenterPower.test.js): vCenter 합산·iDRAC 중복 제거·토글·트랜잭션 배치 적재를 검증합니다."
+      ]
+    },
+    {
       "version": "2.52.1",
       "date": "2026-06-29",
       "title": "위임 스캔 발견분이 중앙에 반영되도록 — 즉시 수집 풀 + 반영 경로 진단",

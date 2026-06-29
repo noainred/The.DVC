@@ -10,6 +10,12 @@ import { allOmeDevices, dbKey, clearOmeExcept } from './omeCache.js';
 import { getInventory } from './invCache.js';
 import { remotePowerByHost, clearStaleRemote } from '../collector/state.js';
 import { loadCollectors } from '../collector/registry.js';
+import { loadPowerSettings } from './powerSettings.js';
+
+/** vCenter 호스트 전력 샘플의 안정적 DB/측정 키(현재값·시계열이 같은 키를 쓰도록). */
+export function vcPowerKey(vcenterId, hostName) {
+  return `vc:${String(vcenterId || '').trim().toLowerCase()}:${String(hostName || '').trim().toLowerCase()}`;
+}
 
 // 서버의 모델/서비스태그를 인벤토리(Redfish)·레지스트리에서 최선의 값으로 해석.
 function serverIdentity(serverId, entry) {
@@ -96,7 +102,7 @@ export async function latestPowerByHostName() {
  * 매핑 여부와 무관하게 집계된다. 각 항목의 host는 매핑 기준 이름(인벤토리 매칭 시도용).
  * 반환 [{ serverId, serverName, watts, ts, host, source }].
  */
-export async function allMeasuredPower() {
+export async function allMeasuredPower({ hosts = [] } = {}) {
   const db = await getDb();
   const latest = db.latestAll(); // Map<serverId,{watts,ts}>
   const out = [];
@@ -153,6 +159,20 @@ export async function allMeasuredPower() {
     const hostNames = [norm(host)];
     tryAdd({ serverId: id, serverName: r.serverName || host, watts: r.watts, ts: r.ts, host: norm(host), hostNames, model: (r.model || '').trim(), serviceTag: r.serviceTag || '', vcenterId: r.vcenterId || '', source: 'remote' }, r.serviceTag, [host].filter(Boolean));
   }
+  // vCenter PerformanceManager로 수집한 ESXi 호스트 전력(host.powerWatts) — '맨 마지막'에 추가해
+  // iDRAC/OME/원격으로 이미 잡힌 서버는 dedup으로 건너뛴다(전용 소스 우선, vCenter는 빈 곳을 채움).
+  // iDRAC 없이도 vCenter만으로 플릿 전력이 집계되며, 베어메탈 iDRAC을 추후 등록하면 그 위에 합산된다.
+  if (loadPowerSettings().includeVcenterPower !== false) {
+    const now = Date.now();
+    for (const h of (hosts || [])) {
+      const w = Number(h.powerWatts);
+      if (!Number.isFinite(w) || w <= 0) continue;
+      const name = norm(h.name);
+      const id = vcPowerKey(h.vcenterId, h.name);
+      const hostNames = [name, norm(h.serviceTag)].filter(Boolean);
+      tryAdd({ serverId: id, serverName: h.name, watts: w, ts: now, host: name, hostNames, model: (h.model || '').trim(), serviceTag: h.serviceTag || '', vcenterId: h.vcenterId || '', source: 'vcenter' }, h.serviceTag, [h.name].filter(Boolean));
+    }
+  }
   return out;
 }
 
@@ -163,9 +183,9 @@ export async function allMeasuredPower() {
  * 이걸로 "916대가 OME 'X'에서 온다 / 원격 수집기 'Y'에서 온다"를 화면에서 바로 확인할 수 있다.
  * { total, bySource, registeredIdrac, ome:{...}, remote:{...} }.
  */
-export async function measuredPowerBreakdown() {
-  const measured = await allMeasuredPower();
-  const bySource = { idrac: 0, ome: 0, remote: 0 };
+export async function measuredPowerBreakdown({ hosts = [] } = {}) {
+  const measured = await allMeasuredPower({ hosts });
+  const bySource = { idrac: 0, ome: 0, remote: 0, vcenter: 0 };
   for (const m of measured) { if (bySource[m.source] != null) bySource[m.source]++; }
 
   const reg = loadRegistry();

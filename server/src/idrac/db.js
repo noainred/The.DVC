@@ -47,6 +47,14 @@ function initSqlite() {
     return {
       kind: 'sqlite',
       insert: (serverId, watts, ts) => insertStmt.run(serverId, watts, ts),
+      // 다수 샘플을 한 트랜잭션으로 적재(매 폴 590+ 호스트 기록이 이벤트 루프를 막지 않게).
+      insertMany: (samples) => {
+        if (!samples || !samples.length) return 0;
+        db.exec('BEGIN');
+        try { for (const s of samples) insertStmt.run(s.serverId, s.watts, s.ts); db.exec('COMMIT'); }
+        catch (e) { try { db.exec('ROLLBACK'); } catch { /* */ } throw e; }
+        return samples.length;
+      },
       serverIds: () => idsStmt.all().map((r) => r.id),
       deleteServers: (ids) => { let n = 0; db.exec('BEGIN'); try { for (const id of ids) n += delOneStmt.run(id).changes || 0; db.exec('COMMIT'); } catch (e) { try { db.exec('ROLLBACK'); } catch { /* */ } throw e; } return n; },
       latest: (serverId) => latestStmt.get(serverId) || null,
@@ -84,6 +92,13 @@ function initJsonFallback() {
       const r = { s: serverId, w: watts, t: ts };
       rows.push(r);
       try { fs.appendFileSync(file, JSON.stringify(r) + '\n', { mode: 0o600 }); } catch { /* best effort */ }
+    },
+    insertMany: (samples) => {
+      if (!samples || !samples.length) return 0;
+      const lines = [];
+      for (const s of samples) { const r = { s: s.serverId, w: s.watts, t: s.ts }; rows.push(r); lines.push(JSON.stringify(r)); }
+      try { fs.appendFileSync(file, lines.join('\n') + '\n', { mode: 0o600 }); } catch { /* best effort */ }
+      return samples.length;
     },
     serverIds: () => [...new Set(rows.map((r) => r.s))],
     deleteServers: (ids) => { const set = new Set(ids); const before = rows.length; rows = rows.filter((r) => !set.has(r.s)); const n = before - rows.length; if (n) rewrite(); return n; },

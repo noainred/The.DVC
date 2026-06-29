@@ -920,7 +920,7 @@ adminRouter.post('/idrac/poll', adminOnly, async (_req, res) => {
 adminRouter.get('/idrac/power-dashboard', adminOnly, async (req, res) => {
   try {
     const hours = Number(req.query.hours) || 24;
-    const measured = filterMeasuredByMapping(await allMeasuredPower(), store.get());
+    const measured = filterMeasuredByMapping(await allMeasuredPower({ hosts: store.get().hosts }), store.get());
     const dash = await buildPowerDashboard(measured, { hours });
     // 에너지/비용/CO2(기존 FinOps 재사용) + vCenter 이름 매핑.
     let finops = null; try { finops = computeFinOps(store.get(), measured); } catch { /* */ }
@@ -954,7 +954,7 @@ adminRouter.get('/idrac/power-dashboard', adminOnly, async (req, res) => {
 // 전력 보고 수 출처 진단 — '전력 보고 N대'가 어디서 오는지 소스별(iDRAC/OME/원격)로 분해해서
 // 보여준다. OME 연결별 디바이스 수·수집서버별 호스트 수·각 소스 등록 여부 포함 → 유령/실데이터 판별.
 adminRouter.get('/idrac/power-sources', adminOnly, async (_req, res) => {
-  try { res.json({ ok: true, ...(await measuredPowerBreakdown()) }); }
+  try { res.json({ ok: true, ...(await measuredPowerBreakdown({ hosts: store.get().hosts })) }); }
   catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 

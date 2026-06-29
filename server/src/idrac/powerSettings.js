@@ -13,7 +13,9 @@ import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { buildHostIndex, resolveServerVcenter } from './attribution.js';
 
 const FILE = path.join(config.configDir, 'power-settings.json');
-const DEFAULTS = { excludeUnmapped: false };
+// includeVcenterPower: vCenter PerformanceManager(power.power.average)로 수집한 ESXi 호스트
+//   전력을 측정 소스로 합산할지(기본 on). iDRAC/OME/원격으로 이미 잡힌 서버와는 중복 제거.
+const DEFAULTS = { excludeUnmapped: false, includeVcenterPower: true };
 
 let cache = null;
 export function loadPowerSettings() {
@@ -26,7 +28,11 @@ export function loadPowerSettings() {
 }
 
 export function savePowerSettings(body = {}) {
-  const next = { excludeUnmapped: Boolean(body.excludeUnmapped) };
+  const cur = loadPowerSettings();
+  const next = {
+    excludeUnmapped: body.excludeUnmapped !== undefined ? Boolean(body.excludeUnmapped) : cur.excludeUnmapped,
+    includeVcenterPower: body.includeVcenterPower !== undefined ? Boolean(body.includeVcenterPower) : (cur.includeVcenterPower !== false),
+  };
   atomicWriteFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
   cache = next;
   return next;

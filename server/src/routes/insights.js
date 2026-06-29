@@ -24,7 +24,7 @@ const adminOnly = requireRole('admin');
 // --- FinOps: 전력 → kWh·비용·CO2 ---
 insightsRouter.get('/finops', async (_req, res) => {
   try {
-    const measured = filterMeasuredByMapping(await allMeasuredPower(), store.get());
+    const measured = filterMeasuredByMapping(await allMeasuredPower({ hosts: store.get().hosts }), store.get());
     res.json(computeFinOps(store.get(), measured));
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
@@ -33,7 +33,7 @@ insightsRouter.get('/finops/config', (_req, res) => res.json(loadFinopsConfig())
 // --- 전력 분석: 법인(vCenter)·모델·지역별 소비전력 분해 ---
 insightsRouter.get('/power-breakdown', async (req, res) => {
   try {
-    const measured = filterMeasuredByMapping(await allMeasuredPower(), store.get());
+    const measured = filterMeasuredByMapping(await allMeasuredPower({ hosts: store.get().hosts }), store.get());
     res.json(computePowerBreakdown(store.get(), measured, { vcenterId: req.query.vcenterId || '' }));
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });

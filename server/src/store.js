@@ -2,8 +2,9 @@ import { config, loadVcenterConfig } from './config.js';
 import { generateSnapshot } from './mock/generator.js';
 import { collectFromVCenter } from './vcenter/restClient.js';
 import { describeError } from './util/errors.js';
-import { latestPowerByHostName, latestPowerByServiceTag, allMeasuredPower } from './idrac/service.js';
-import { filterMeasuredByMapping } from './idrac/powerSettings.js';
+import { latestPowerByHostName, latestPowerByServiceTag, allMeasuredPower, vcPowerKey } from './idrac/service.js';
+import { filterMeasuredByMapping, loadPowerSettings } from './idrac/powerSettings.js';
+import { getDb as getPowerDb } from './idrac/db.js';
 import { loadRegistry as loadIdracRegistry } from './idrac/registry.js';
 import { buildHostIndex, resolveServerVcenter } from './idrac/attribution.js';
 import { applyMutes } from './alarm-mutes.js';
@@ -40,6 +41,29 @@ function idracRegisteredCount() {
  * a registered Dell server. When matched, the measured value takes precedence
  * over any mock/SOAP estimate and is flagged with powerSource='idrac'.
  */
+// vCenter 호스트 전력 시계열 적재(throttled prune 포함). 설정 off면 건너뜀.
+let _vcPersistTicks = 0;
+async function persistVcenterPower(snap) {
+  try {
+    if (loadPowerSettings().includeVcenterPower === false) return;
+    const ts = Date.now();
+    const samples = [];
+    for (const h of (snap.hosts || [])) {
+      const w = Number(h.powerWatts);
+      if (!Number.isFinite(w) || w <= 0) continue;
+      if (h.powerSource === 'idrac') continue; // iDRAC 전용 소스가 별도 저장하므로 제외
+      samples.push({ serverId: vcPowerKey(h.vcenterId, h.name), watts: Math.round(w), ts });
+    }
+    if (!samples.length) return;
+    const db = await getPowerDb();
+    if (db.insertMany) db.insertMany(samples);
+    // 보존기간 prune은 매 폴이 아니라 가끔(약 10주기)만 — DELETE 스캔 비용 절감.
+    if (config.idrac.retentionDays > 0 && (++_vcPersistTicks % 10 === 0)) {
+      try { db.prune(ts - config.idrac.retentionDays * 86_400_000); } catch { /* best effort */ }
+    }
+  } catch { /* best effort — 전력 적재 실패는 수집을 막지 않음 */ }
+}
+
 async function overlayIdracPower(snap) {
   try {
     const byName = await latestPowerByHostName();
@@ -51,10 +75,14 @@ async function overlayIdracPower(snap) {
       if (m) { h.powerWatts = m.watts; h.powerSource = 'idrac'; }
     }
 
-    // 전체 측정 전력(iDRAC/OME/원격, 매핑 무관)을 vCenter별로 귀속 — Overview 총합·per-vCenter 롤업의 근거.
+    // vCenter PerformanceManager로 수집한 ESXi 호스트 전력을 시계열 DB에 적재(대시보드 24h 피크/평균·추세용).
+    // iDRAC으로 이미 덮어쓴 호스트(powerSource='idrac')는 제외(중복 저장 방지). 트랜잭션 배치로 비차단.
+    await persistVcenterPower(snap);
+
+    // 전체 측정 전력(iDRAC/OME/원격/vCenter, 매핑 무관)을 vCenter별로 귀속 — Overview 총합·per-vCenter 롤업의 근거.
     // 우선순위: 서버에 명시 지정된 vcenterId → 호스트명 → 서비스태그 → (미매핑).
     // 설정 시 vCenter 미매핑(귀속 안 됨) 측정 전력을 총합/보고/롤업에서 제외.
-    const measured = filterMeasuredByMapping(await allMeasuredPower(), snap);
+    const measured = filterMeasuredByMapping(await allMeasuredPower({ hosts: snap.hosts }), snap);
     const idx = buildHostIndex(snap.hosts);
     const validVcIds = new Set(snap.vcenters.map((v) => v.id));
     const byVc = new Map();
