@@ -2503,11 +2503,25 @@ function TagSelect({ value, onChange, disabled }) {
   );
 }
 
+const MODE_BADGE = { edge: ['엣지(현장)', 'teal'], central: ['중앙', 'blue'], standalone: ['단독', 'purple'] };
+
+// 베어메탈 서버의 소속 법인(vCenter) 등록 드롭다운.
+function VcAssignSelect({ value, vcenters, onChange, disabled }) {
+  return (
+    <select className="select" value={value} disabled={disabled} style={{ padding: '3px 6px', fontSize: 12, maxWidth: 180 }}
+      onChange={(e) => onChange(e.target.value)} title="소속 법인(vCenter) 등록">
+      <option value="">미지정</option>
+      {vcenters.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+    </select>
+  );
+}
+
 function FleetInventory({ isAdmin }) {
   const [d, setD] = useState(null);
   const [err, setErr] = useState(null);
   const [view, setView] = useState('baremetal'); // baremetal | virt
   const [q, setQ] = useState('');
+  const [fvc, setFvc] = useState('');             // 법인(vCenter)/DC 필터: '' 전체, '__none__' 미지정
   const [busy, setBusy] = useState('');
 
   const load = () => fetchJson('/insights/fleet').then((r) => { setD(r); setErr(null); }).catch((e) => setErr(e.message));
@@ -2521,20 +2535,31 @@ function FleetInventory({ isAdmin }) {
     catch (e) { setErr(e.message); }
     finally { setBusy(''); }
   };
+  // 베어메탈 행의 소속 법인(vCenter) 등록/해제.
+  const setVc = async (row, vcenterId) => {
+    const id = row.serverId || row.serviceTag;
+    setBusy(id);
+    try { await putJson('/insights/fleet/assign', { serverId: row.serverId, serviceTag: row.serviceTag, vcenterId }); await load(); }
+    catch (e) { setErr(e.message); }
+    finally { setBusy(''); }
+  };
 
   if (err) return <ErrorBox message={err} />;
   if (!d) return <Loading />;
   const s = d.summary || {};
+  const vcenters = d.vcenters || [];
   const term = q.trim().toLowerCase();
   const match = (...fields) => !term || fields.some((f) => (f || '').toLowerCase().includes(term));
-  const bm = (d.bareMetal || []).filter((b) => match(b.name, b.model, b.serviceTag));
-  const vh = (d.virtualizationHosts || []).filter((h) => match(h.name, h.model, h.serviceTag, h.vcenter));
+  const inVc = (vid) => !fvc || (fvc === '__none__' ? !vid : vid === fvc);
+  const bm = (d.bareMetal || []).filter((b) => inVc(b.vcenterId) && match(b.name, b.model, b.serviceTag, b.vcenter));
+  const vh = (d.virtualizationHosts || []).filter((h) => inVc(h.vcenterId) && match(h.name, h.model, h.serviceTag, h.vcenter));
+  const modeBadge = MODE_BADGE[d.mode];
 
   const csv = () => {
     const isBm = view === 'baremetal';
-    const head = isBm ? ['서버', '모델', '서비스태그', '수집원', 'W'] : ['호스트', 'vCenter', '지역', '모델', '서비스태그', 'iDRAC받침', 'W'];
+    const head = isBm ? ['서버', '모델', '서비스태그', '법인(vCenter)', '수집원', 'W'] : ['호스트', 'vCenter', '지역', '모델', '서비스태그', 'iDRAC받침', 'W'];
     const rows = isBm
-      ? bm.map((b) => [b.name, b.model, b.serviceTag, b.source, b.watts ?? ''])
+      ? bm.map((b) => [b.name, b.model, b.serviceTag, b.vcenter || '미지정', b.source, b.watts ?? ''])
       : vh.map((h) => [h.name, h.vcenter, h.region, h.model, h.serviceTag, h.idracBacked ? 'O' : 'X', h.watts ?? '']);
     const body = [head, ...rows].map((r) => r.map((c) => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\r\n');
     const blob = new Blob(['﻿' + body], { type: 'text/csv;charset=utf-8' });
@@ -2552,8 +2577,14 @@ function FleetInventory({ isAdmin }) {
       </div>
 
       <div className="card" style={{ padding: '10px 14px', marginBottom: 12, borderLeft: '3px solid var(--accent-2,#22d3ee)' }}>
-        <div style={{ fontSize: 13 }}>iDRAC/OME가 수집한 물리 서버를 <b>Dell 서비스태그</b>로 vCenter ESXi 호스트와 대조합니다. 호스트에 매칭되면 <b>가상화 호스트</b>, 매칭이 없으면 <b>베어메탈</b>입니다.</div>
-        <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>자동 판정이 틀리면 행의 분류를 직접 바꿀 수 있습니다(서비스태그 기준 저장). 베어메탈 총전력은 이미 수집 중인 iDRAC/OME 측정값을 합산합니다.</div>
+        <div style={{ fontSize: 13 }}>
+          {modeBadge && <span className={`badge ${modeBadge[1]}`} style={{ marginRight: 6 }} title="이 포탈 인스턴스 역할">{modeBadge[0]} 포탈</span>}
+          iDRAC/OME가 수집한 물리 서버를 <b>Dell 서비스태그</b>로 vCenter ESXi 호스트와 대조합니다. 호스트에 매칭되면 <b>가상화 호스트</b>, 매칭이 없으면 <b>베어메탈</b>입니다.
+        </div>
+        <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+          {d.mode === 'edge' ? '이 엣지 포탈은 자기 데이터센터에 등록된 서버만 보여줍니다(로컬 검색). ' : (d.mode === 'central' ? '중앙 포탈 — 법인(vCenter) 필터로 데이터센터별 검색이 가능합니다. ' : '')}
+          베어메탈 행에서 소속 <b>법인(vCenter)</b>을 바로 등록할 수 있고, 자동 분류가 틀리면 분류도 직접 바꿀 수 있습니다(서비스태그 기준 저장). 베어메탈 총전력은 이미 수집 중인 iDRAC/OME 측정값을 합산합니다.
+        </div>
       </div>
 
       <div className="flex between wrap gap" style={{ marginBottom: 10, alignItems: 'center' }}>
@@ -2561,8 +2592,13 @@ function FleetInventory({ isAdmin }) {
           <button className={view === 'baremetal' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setView('baremetal')}>베어메탈 ({(d.bareMetal || []).length})</button>
           <button className={view === 'virt' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setView('virt')}>가상화 호스트 ({(d.virtualizationHosts || []).length})</button>
         </div>
-        <div className="flex gap" style={{ alignItems: 'center' }}>
-          <SearchBox className="input" style={{ maxWidth: 280 }} placeholder="서버/모델/서비스태그/vCenter 검색" value={q} onChange={setQ} />
+        <div className="flex gap" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+          <select className="select" value={fvc} onChange={(e) => setFvc(e.target.value)} style={{ maxWidth: 220 }} title="법인(vCenter)/데이터센터 필터">
+            <option value="">전체 법인(vCenter)</option>
+            {vcenters.map((v) => <option key={v.id} value={v.id}>{v.name}{v.region ? ` · ${v.region}` : ''}</option>)}
+            <option value="__none__">(미지정)</option>
+          </select>
+          <SearchBox className="input" style={{ maxWidth: 240 }} placeholder="서버/모델/서비스태그 검색" value={q} onChange={setQ} />
           <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={csv}>CSV</button>
         </div>
       </div>
@@ -2572,19 +2608,22 @@ function FleetInventory({ isAdmin }) {
           <ResultCount total={(d.bareMetal || []).length} shown={bm.length} label="베어메탈" filtered={!!term} />
           <div className="table-wrap" style={{ maxHeight: '60vh' }}>
             <table>
-              <thead><tr><th>서버</th><th>모델</th><th>서비스태그</th><th>수집</th><th style={{ textAlign: 'right' }}>현재 전력</th>{isAdmin && <th>분류</th>}</tr></thead>
+              <thead><tr><th>서버</th><th>모델</th><th>서비스태그</th><th>법인(vCenter)</th><th>수집</th><th style={{ textAlign: 'right' }}>현재 전력</th>{isAdmin && <th>분류</th>}</tr></thead>
               <tbody>
                 {bm.map((b, i) => (
                   <tr key={b.serverId || i}>
                     <td><b>{b.name}</b>{b.forced && <span className="badge purple" style={{ marginLeft: 6 }}>수동</span>}</td>
                     <td className="muted" style={{ fontSize: 12 }}>{b.model || '—'}</td>
                     <td className="muted" style={{ fontSize: 12 }}>{b.serviceTag || '—'}</td>
+                    <td>{isAdmin
+                      ? <VcAssignSelect value={b.vcenterId || ''} vcenters={vcenters} disabled={busy === (b.serverId || b.serviceTag)} onChange={(vid) => setVc(b, vid)} />
+                      : (b.vcenter ? <span>{b.vcenter}</span> : <span className="muted">미지정</span>)}</td>
                     <td className="muted" style={{ fontSize: 12 }}>{b.source}</td>
                     <td style={{ textAlign: 'right' }}>{b.watts != null ? <b>{fmtWatts(b.watts)}</b> : <span className="muted">미측정</span>}</td>
                     {isAdmin && <td><TagSelect value={b.forced ? 'baremetal' : 'auto'} disabled={busy === tagKeyOf(b)} onChange={(t) => setTag(tagKeyOf(b), t)} /></td>}
                   </tr>
                 ))}
-                {!bm.length && <tr><td colSpan={isAdmin ? 6 : 5} className="center muted" style={{ padding: 20 }}>베어메탈 서버가 없습니다.</td></tr>}
+                {!bm.length && <tr><td colSpan={isAdmin ? 7 : 6} className="center muted" style={{ padding: 20 }}>베어메탈 서버가 없습니다.</td></tr>}
               </tbody>
             </table>
           </div>

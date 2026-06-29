@@ -18,12 +18,14 @@
  * 전력 DB·레지스트리·OME 캐시에서 입력을 모아 호출하는 얇은 래퍼다.
  */
 
-import { buildHostIndex, resolveServerVcenter } from '../idrac/attribution.js';
+import { config } from '../config.js';
+import { buildHostIndex } from '../idrac/attribution.js';
 import { allMeasuredPower } from '../idrac/service.js';
 import { loadRegistry, matchKeys } from '../idrac/registry.js';
 import { allOmeDevices, dbKey } from '../idrac/omeCache.js';
 import { getInventory } from '../idrac/invCache.js';
 import { loadFleetTags } from './fleetTags.js';
+import { loadFleetAssign } from './fleetAssign.js';
 
 const norm = (s) => String(s || '').trim().toLowerCase();
 const round = (n) => (Number.isFinite(n) ? Math.round(n) : null);
@@ -35,13 +37,26 @@ const round = (n) => (Number.isFinite(n) ? Math.round(n) : null);
  * @param servers   물리 서버 목록 [{ serverId, serverName, serviceTag, host, hostNames, model, watts, source, vcenterId }]
  *                  (allMeasuredPower 결과 + 전력 미보고 등록서버). 물리 1대당 1행(상위에서 dedup).
  * @param tags      { 키(소문자 서비스태그 또는 serverId) -> 'baremetal'|'virtualization'|'exclude' }
+ * @param assign    { 키(소문자 서비스태그 또는 serverId) -> 소속 법인(vCenter) id } — 베어메탈 수동 귀속
  */
-export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = {} } = {}) {
+export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = {}, assign = {} } = {}) {
   const vcName = new Map(vcenters.map((v) => [v.id, v.name || v.id]));
   const vcRegion = new Map(vcenters.map((v) => [v.id, v.location?.region || v.region || '']));
   const idx = buildHostIndex(hosts);
   const tagOf = (serviceTag, serverId) =>
     tags[norm(serviceTag)] || (serverId != null ? tags[String(serverId)] : '') || '';
+  // 소속 법인: 수동 등록(assign) 우선, 없으면 서버가 들고 온 vcenterId(레지스트리/원격).
+  const vcenterOf = (serviceTag, serverId, fallback) =>
+    assign[norm(serviceTag)] || (serverId != null ? assign[String(serverId)] : '') || fallback || '';
+  // '실제 ESXi 호스트인가' 판정 — 호스트 인덱스(이름/서비스태그) 직접 매칭만 사용한다.
+  // 명시 vcenterId(법인 소유권 지정)는 호스트 여부와 무관하므로 여기서 보지 않는다(베어메탈에 법인만 등록 가능).
+  const matchesHost = (s) => {
+    if (s.serviceTag && idx.byTag.has(norm(s.serviceTag))) return true;
+    for (const n of (s.hostNames && s.hostNames.length ? s.hostNames : [s.host])) {
+      if (n && idx.byName.has(norm(n))) return true;
+    }
+    return false;
+  };
 
   // 호스트 전력/매칭용 서버 인덱스(제외 태그는 빼고).
   const serverByTag = new Map();
@@ -65,17 +80,17 @@ export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = 
     if (t === 'virtualization') continue;       // 가상화로 강제 → 베어메탈 아님
     if (t !== 'baremetal') {
       if (s.source === 'vcenter') continue;     // vCenter 원본 행은 호스트 자체
-      if (resolveServerVcenter(
-        { vcenterId: s.vcenterId, hostNames: s.hostNames, host: s.host, serviceTag: s.serviceTag, model: s.model }, idx,
-      )) continue;                              // vCenter 호스트에 매칭 → 가상화
+      if (matchesHost(s)) continue;             // 실제 ESXi 호스트에 매칭 → 가상화
     }
     const dk = norm(s.serviceTag) || String(s.serverId);
     if (usedBmKeys.has(dk)) continue;
     usedBmKeys.add(dk);
+    const vcId = vcenterOf(s.serviceTag, s.serverId, s.vcenterId);
     bareMetal.push({
       serverId: s.serverId, name: s.serverName || s.host || s.serviceTag || s.serverId,
       model: s.model || '', serviceTag: s.serviceTag || '', source: s.source,
       watts: round(s.watts), forced: t === 'baremetal', tagKey: dk,
+      vcenterId: vcId, vcenter: vcId ? (vcName.get(vcId) || vcId) : '', region: vcId ? (vcRegion.get(vcId) || '') : '',
     });
   }
 
@@ -90,9 +105,11 @@ export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = 
         usedBmKeys.add(dk);
         const w = Number.isFinite(h.powerWatts) && h.powerWatts > 0 ? h.powerWatts
           : (Number.isFinite(h.vcPowerWatts) ? h.vcPowerWatts : null);
+        const vcId = vcenterOf(h.serviceTag, null, h.vcenterId);
         bareMetal.push({
           serverId: `host:${h.vcenterId}:${h.name}`, name: h.name, model: h.model || '',
           serviceTag: h.serviceTag || '', source: 'vcenter', watts: round(w), forced: true, tagKey: dk,
+          vcenterId: vcId, vcenter: vcId ? (vcName.get(vcId) || vcId) : '', region: vcId ? (vcRegion.get(vcId) || '') : '',
         });
       }
       continue;
@@ -118,6 +135,19 @@ export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = 
 
   const measured = bareMetal.filter((b) => Number.isFinite(b.watts) && b.watts > 0);
   const bareMetalWatts = measured.reduce((acc, b) => acc + b.watts, 0);
+
+  // 베어메탈을 소속 법인(vCenter)별로 묶는다('' = 미지정). 중앙 DC별 검색/집계용.
+  const byVcMap = new Map();
+  for (const b of bareMetal) {
+    const id = b.vcenterId || '';
+    const e = byVcMap.get(id) || { vcenterId: id, name: id ? (vcName.get(id) || id) : '(미지정)', region: id ? (vcRegion.get(id) || '') : '', servers: 0, watts: 0 };
+    e.servers += 1;
+    if (Number.isFinite(b.watts)) e.watts += b.watts;
+    byVcMap.set(id, e);
+  }
+  const byVcenter = [...byVcMap.values()].map((e) => ({ ...e, watts: round(e.watts) || 0 }))
+    .sort((a, z) => z.watts - a.watts || z.servers - a.servers);
+
   const summary = {
     virtualizationHosts: virtualizationHosts.length,
     idracBackedHosts: virtualizationHosts.filter((h) => h.idracBacked).length,
@@ -125,10 +155,12 @@ export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = 
     bareMetalMeasured: measured.length,
     bareMetalWatts: round(bareMetalWatts) || 0,
     bareMetalKw: Math.round(bareMetalWatts / 100) / 10,
+    bareMetalAssigned: bareMetal.filter((b) => b.vcenterId).length,
     forcedBareMetal: bareMetal.filter((b) => b.forced).length,
     excluded: Object.values(tags).filter((t) => t === 'exclude').length,
   };
-  return { virtualizationHosts, bareMetal, summary };
+  const vcList = vcenters.map((v) => ({ id: v.id, name: v.name || v.id, region: v.location?.region || v.region || '' }));
+  return { virtualizationHosts, bareMetal, byVcenter, vcenters: vcList, summary };
 }
 
 /**
@@ -166,10 +198,19 @@ async function buildServerUniverse(hosts) {
   return [...measured, ...extras];
 }
 
+/** 이 인스턴스 역할: 중앙(central) / 엣지(edge=중앙에 push하는 에이전트) / 단독(standalone). */
+function instanceMode() {
+  if (config.central?.centralUrl) return 'edge';   // 중앙으로 보내는 현장/엣지 인스턴스
+  if (config.central?.token) return 'central';     // 에이전트 push를 받는 중앙
+  return 'standalone';
+}
+
 /** 스냅샷 기준 통합 인벤토리 산출(라우트에서 호출). */
 export async function getFleetInventory(snap) {
   const servers = await buildServerUniverse(snap?.hosts || []);
-  return classifyFleet({
-    hosts: snap?.hosts || [], vcenters: snap?.vcenters || [], servers, tags: loadFleetTags(),
+  const result = classifyFleet({
+    hosts: snap?.hosts || [], vcenters: snap?.vcenters || [], servers,
+    tags: loadFleetTags(), assign: loadFleetAssign(),
   });
+  return { ...result, mode: instanceMode() };
 }

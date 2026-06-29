@@ -13,6 +13,8 @@ import { computeFinOps, loadFinopsConfig, saveFinopsConfig } from '../insights/f
 import { computePowerBreakdown } from '../insights/powerBreakdown.js';
 import { getFleetInventory } from '../insights/fleetInventory.js';
 import { loadFleetTags, setFleetTag } from '../insights/fleetTags.js';
+import { loadFleetAssign, setFleetAssign } from '../insights/fleetAssign.js';
+import { loadRegistry, updateServer } from '../idrac/registry.js';
 import { detectAnomalies } from '../insights/anomaly.js';
 import { forecastCapacity } from '../insights/forecast.js';
 import { computeSecurityPosture } from '../insights/cve.js';
@@ -57,7 +59,7 @@ insightsRouter.put('/finops/config', adminOnly, (req, res) => res.json(saveFinop
 insightsRouter.get('/fleet', async (req, res) => {
   try {
     const snap = store.get();
-    const key = `${snap.generatedAt}|${JSON.stringify(loadFleetTags())}`;
+    const key = `${snap.generatedAt}|${JSON.stringify(loadFleetTags())}|${JSON.stringify(loadFleetAssign())}`;
     const payload = await snapMemo('fleet', key, 60_000, async () => getFleetInventory(snap));
     sendCached(req, res, key, payload);
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
@@ -67,6 +69,27 @@ insightsRouter.put('/fleet/tag', adminOnly, async (req, res) => {
   const r = setFleetTag(req.body?.key, req.body?.tag);
   if (r.ok) await store.refresh().catch(() => {}); // 분류 즉시 반영
   res.json(r);
+});
+// 베어메탈 서버의 소속 법인(vCenter) 등록/해제(관리자). body: { serverId, serviceTag, vcenterId }.
+// iDRAC 레지스트리에 등록된 서버는 레지스트리 vcenterId(전력 귀속과 공유)를 직접 갱신하고,
+// 그 외(OME/원격/무전력 발견분)는 fleet-assign 저장소에 서비스태그 기준으로 보관한다.
+insightsRouter.put('/fleet/assign', adminOnly, async (req, res) => {
+  const serverId = String(req.body?.serverId || '').trim();
+  const serviceTag = String(req.body?.serviceTag || '').trim();
+  const vcenterId = String(req.body?.vcenterId || '').trim();
+  if (!serverId && !serviceTag) return res.status(400).json({ ok: false, reason: 'serverId 또는 serviceTag가 필요합니다.' });
+  const reg = serverId ? loadRegistry().find((s) => s.id === serverId && s.type !== 'ome') : null;
+  let via = 'assign';
+  if (reg) {
+    const r = updateServer(serverId, { vcenterId });
+    if (!r.ok) return res.status(400).json(r);
+    via = 'registry';
+  } else {
+    const r = setFleetAssign(serviceTag || serverId, vcenterId);
+    if (!r.ok) return res.status(400).json(r);
+  }
+  await store.refresh().catch(() => {}); // 귀속 즉시 반영
+  res.json({ ok: true, via, vcenterId });
 });
 
 // --- AI 이상탐지 ---
