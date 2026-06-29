@@ -20,7 +20,7 @@ export async function buildExport() {
   for (const [host, r] of byNameMap) {
     if (r.serverId != null && seen.has(r.serverId)) continue;
     if (r.serverId != null) seen.add(r.serverId);
-    byHost.push({ host, watts: r.watts, ts: r.ts, serverName: r.serverName, serverId: r.serverId });
+    byHost.push({ host, watts: r.watts, ts: r.ts, serverName: r.serverName, serverId: r.serverId, serviceTag: r.serviceTag || '', model: r.model || '' });
   }
   return {
     version: currentVersion(),

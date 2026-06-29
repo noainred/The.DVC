@@ -73,15 +73,19 @@ export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = 
           : server?.source === 'edge' ? 'edge'
             : server?.source === 'host' ? 'host' : 'registry';
     }
-    id = knownVc(id);
+    // 엣지가 보고한 vcenterId는 중앙 vCenter 목록에 없더라도 출처(DC) 정보를 보존(미지정 강등 방지).
+    id = server?.source === 'edge' ? id : knownVc(id);
     if (!id) src = '';
     return { id, src };
   };
   const vcRow = (id, src) => ({ vcenterId: id, vcenter: id ? (vcName.get(id) || id) : '', region: id ? (vcRegion.get(id) || '') : '', vcSource: id ? src : '' });
 
   // '실제 ESXi 호스트인가' — 호스트 인덱스(서비스태그/호스트명) 직접 매칭. 매칭 근거(via) 반환.
+  // 엣지 보고 서버는 현장에서 이미 베어메탈로 확정됐고 name이 전역 단축 호스트명(esxi-01 등)과
+  // 충돌하기 쉬우므로, 중앙에서는 '전역 유일한 서비스태그'로만 매칭한다(이름 기반 오매칭 차단).
   const matchesHost = (s) => {
     if (s.serviceTag && idx.byTag.has(norm(s.serviceTag))) return 'tag';
+    if (s.source === 'edge') return '';
     for (const n of (s.hostNames && s.hostNames.length ? s.hostNames : [s.host])) {
       if (n && idx.byName.has(norm(n))) return 'name';
     }
@@ -98,6 +102,7 @@ export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = 
   const serverByName = new Map();
   for (const s of servers) {
     if (tagOf(s.serviceTag, s.serverId) === 'exclude') continue;
+    if (s.source === 'edge') continue; // 엣지 보고 서버는 중앙 ESXi 호스트를 '받치지' 않음(전역 이름 오염 방지)
     const t = norm(s.serviceTag);
     if (t && !serverByTag.has(t)) serverByTag.set(t, s);
     for (const n of (s.hostNames && s.hostNames.length ? s.hostNames : [s.host])) {
@@ -314,6 +319,16 @@ export function fleetLiveKeys(snap) {
     const t = norm(h.serviceTag); if (t) live.add(t);
     const n = norm(h.name); if (n) live.add(n);
   }
+  // 엣지 보고 베어메탈의 키도 보호(중앙에서 단 태그/소속이 유령으로 오삭제되지 않게).
+  if (config.central?.token && !config.agent?.centralUrl) {
+    try {
+      for (const e of getEdgeFleetServers()) {
+        const id = norm(e.serverId); if (id) live.add(id);
+        const t = norm(e.serviceTag); if (t) live.add(t);
+        const n = norm(e.serverName); if (n) live.add(n);
+      }
+    } catch { /* */ }
+  }
   return live;
 }
 
@@ -327,9 +342,20 @@ function instanceMode() {
 /** 스냅샷 기준 통합 인벤토리 산출(라우트에서 호출). */
 export async function getFleetInventory(snap) {
   const servers = await buildServerUniverse(snap?.hosts || []);
-  // 중앙: 엣지가 push한 베어메탈(전력 미보고 발견분 포함)을 병합 — 서비스태그로 dedup(로컬·원격 우선).
-  if (config.central?.token) {
-    try { servers.push(...getEdgeFleetServers()); } catch { /* 엣지 데이터 없음 무시 */ }
+  // 중앙(엣지가 아닌)일 때만 엣지 push 베어메탈을 병합 — 자가 병합 방지(한 노드가 양쪽 설정인 경우).
+  if (config.central?.token && !config.agent?.centralUrl) {
+    try {
+      // 로컬/원격으로 이미 잡힌 물리 서버는 제외하고 병합(서비스태그/호스트명 사전 dedup → 이중계산 방지).
+      const seenTag = new Set(servers.map((s) => norm(s.serviceTag)).filter(Boolean));
+      const seenHost = new Set(servers.flatMap((s) => (s.hostNames || []).map(norm)).filter(Boolean));
+      for (const e of getEdgeFleetServers()) {
+        const t = norm(e.serviceTag);
+        if (t ? seenTag.has(t) : (e.hostNames || []).some((h) => seenHost.has(norm(h)))) continue;
+        servers.push(e);
+        if (t) seenTag.add(t);
+        for (const h of (e.hostNames || [])) { const k = norm(h); if (k) seenHost.add(k); }
+      }
+    } catch { /* 엣지 데이터 없음 무시 */ }
   }
   const result = classifyFleet({
     hosts: snap?.hosts || [], vcenters: snap?.vcenters || [], servers,

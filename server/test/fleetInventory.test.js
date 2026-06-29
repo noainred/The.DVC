@@ -242,6 +242,30 @@ test('[엣지집계] source=edge 베어메탈은 remoteAgent + vcSource=edge, �
   assert.equal(e2.vcenterId, 'vc-eu');
 });
 
+test('[엣지격리] 엣지 베어메탈 name이 타 DC ESXi 호스트명과 충돌해도 베어메탈 유지(silent loss 방지)', () => {
+  const hostsL = [{ name: 'esxi-prod-01', vcenterId: 'vc-kr', serviceTag: 'KRHOST1', powerWatts: 400 }];
+  const servers = [
+    { serverId: 'edge:dc-pl:ABC123', serverName: 'esxi-prod-01', serviceTag: 'ABC123', hostNames: ['abc123', 'esxi-prod-01'], watts: 250, source: 'edge', remoteAgent: 'dc-pl', vcenterId: 'vc-eu' },
+  ];
+  const { bareMetal, virtualizationHosts } = classifyFleet({ hosts: hostsL, vcenters: vcenters2, servers });
+  const bm = bareMetal.find((b) => b.serviceTag === 'ABC123');
+  assert.ok(bm, '엣지 베어메탈이 유지되어야 함(이름 충돌 무시)');
+  assert.equal(bm.remoteAgent, 'dc-pl');
+  // 중앙 호스트가 엣지 서버에 받쳐지지 않음(전력/idracBacked 오염 없음)
+  const h = virtualizationHosts.find((x) => x.name === 'esxi-prod-01');
+  assert.equal(h.idracBacked, false);
+  assert.equal(h.watts, 400); // 엣지 250W로 오염되지 않고 호스트 자체 400W 유지
+});
+
+test('[엣지소속] 엣지가 보고한 미인식 vCenter는 미지정 강등 없이 출처 보존', () => {
+  const servers = [
+    { serverId: 'edge:dc-x:E9', serverName: 'e9', serviceTag: 'E9', hostNames: ['e9'], watts: null, source: 'edge', remoteAgent: 'dc-x', vcenterId: 'vc-unknown' },
+  ];
+  const { bareMetal } = classifyFleet({ hosts: [], vcenters: vcenters2, servers });
+  assert.equal(bareMetal[0].vcenterId, 'vc-unknown'); // knownVc 우회로 보존
+  assert.equal(bareMetal[0].vcSource, 'edge');
+});
+
 test('[유령키] tags/assign에 매칭 안 되는 키는 ghostKeys로 집계, excluded는 live만', () => {
   const servers = [
     { serverId: 'bm-1', serverName: 'b1', serviceTag: 'Z1', hostNames: ['z1'], watts: 100, source: 'idrac' },

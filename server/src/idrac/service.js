@@ -58,13 +58,14 @@ export async function localPowerByHostName() {
   const latest = db.latestAll(); // Map<serverId, {watts, ts}>
   const out = new Map();
 
-  // iDRAC-direct entries: match by registry keys.
+  // iDRAC-direct entries: match by registry keys. (serviceTag/model을 함께 실어 중앙 dedup·표시에 사용)
   for (const s of loadRegistry()) {
     if (s.type === 'ome') continue;
     const sample = latest.get(s.id);
     if (!sample) continue;
+    const { model, serviceTag } = serverIdentity(s.id, s);
     for (const key of matchKeys(s)) {
-      out.set(key, { watts: sample.watts, ts: sample.ts, serverId: s.id, serverName: s.name });
+      out.set(key, { watts: sample.watts, ts: sample.ts, serverId: s.id, serverName: s.name, serviceTag, model });
     }
   }
 
@@ -73,7 +74,7 @@ export async function localPowerByHostName() {
     if (device.watts == null) continue;
     const sample = latest.get(dbKey(entryId, device)) || { watts: device.watts, ts: at };
     for (const k of [norm(device.serviceTag), norm(device.name)]) {
-      if (k) out.set(k, { watts: sample.watts, ts: sample.ts, serverId: dbKey(entryId, device), serverName: device.name });
+      if (k) out.set(k, { watts: sample.watts, ts: sample.ts, serverId: dbKey(entryId, device), serverName: device.name, serviceTag: device.serviceTag || '', model: (device.model || '').trim() });
     }
   }
   return out;

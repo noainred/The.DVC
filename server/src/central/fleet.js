@@ -11,10 +11,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { bumpFleetRev } from '../insights/fleetRev.js';
 
 const FILE = path.join(config.configDir, 'central-fleet.json');
 const TTL_MS = Number(process.env.CENTRAL_FLEET_TTL_MS) || 30 * 60_000; // 30분 무보고 시 만료
+const MAX_AGENTS = Number(process.env.CENTRAL_FLEET_MAX_AGENTS) || 500; // 에이전트 수 상한(메모리 보호)
+const MAX_WATTS = 1_000_000; // 비현실적 전력값 차단(KPI 오염 방지)
 const norm = (s) => String(s || '').trim().toLowerCase();
+const cleanWatts = (w) => (Number.isFinite(w) && w >= 0 && w <= MAX_WATTS ? w : null);
 
 let cache = {}; // agent -> { at, generatedAt, baremetal: [ {fleetId,name,model,serviceTag,watts,vcenterId,source} ] }
 try {
@@ -41,11 +45,17 @@ export function setEdgeFleet(agent, baremetal, generatedAt) {
     name: String(b.name || '').slice(0, 256),
     model: String(b.model || '').slice(0, 256),
     serviceTag: String(b.serviceTag || '').slice(0, 128),
-    watts: Number.isFinite(b.watts) ? b.watts : null,
+    watts: cleanWatts(b.watts),
     vcenterId: String(b.vcenterId || '').slice(0, 128),
     source: String(b.source || '').slice(0, 32),
   })) : [];
+  // 신규 에이전트인데 상한 초과 → 가장 오래된 보고를 밀어내고 받는다(메모리 무한 누적 방지).
+  if (!cache[a] && Object.keys(cache).length >= MAX_AGENTS) {
+    const oldest = Object.entries(cache).sort((x, y) => (x[1]?.at || 0) - (y[1]?.at || 0))[0];
+    if (oldest) delete cache[oldest[0]];
+  }
   cache[a] = { at: Date.now(), generatedAt: generatedAt || null, baremetal: list };
+  bumpFleetRev(); // 중앙 GET /fleet 캐시 즉시 무효화(엣지 보고 반영)
   persistSoon();
 }
 

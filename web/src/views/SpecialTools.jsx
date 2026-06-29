@@ -2584,7 +2584,7 @@ function FleetInventory({ isAdmin }) {
   const term = q.trim().toLowerCase();
   const match = (...fields) => !term || fields.some((f) => (f || '').toLowerCase().includes(term));
   const inVc = (vid) => !fvc || (fvc === '__none__' ? !vid : vid === fvc);
-  const bm = (d.bareMetal || []).filter((b) => inVc(b.vcenterId) && match(b.name, b.model, b.serviceTag, b.vcenter));
+  const bm = (d.bareMetal || []).filter((b) => inVc(b.vcenterId) && match(b.name, b.model, b.serviceTag, b.vcenter, b.remoteAgent));
   const vh = (d.virtualizationHosts || []).filter((h) => inVc(h.vcenterId) && match(h.name, h.model, h.serviceTag, h.vcenter));
   const modeBadge = MODE_BADGE[d.mode];
   const selKey = (b) => b.fleetId || rowKey(b);
