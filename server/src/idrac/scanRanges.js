@@ -75,6 +75,7 @@ export function enabledScanRanges() {
     const ranges = (e.ranges || []).filter(Boolean);
     if (!ranges.length) continue;
     if (!String(e.username || '').trim()) continue; // 계정 없으면 스캔 불가 → 건너뜀
+    if (!String(e.password || '')) continue;        // 비밀번호 없으면 인증 불가 → 건너뜀(스캔 보류)
     out.push({
       vcenterId, ranges,
       username: String(e.username || '').trim(),

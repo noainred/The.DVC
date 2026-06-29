@@ -60,9 +60,12 @@ export async function runIdracScanOnce(opts = {}) {
   let entries = enabledScanRanges();
   if (opts.vcenterId) {
     const raw = getScanRangeRaw(opts.vcenterId);
-    // 수동 단건: enabled가 아니어도 실행하되 대역/계정은 필요.
+    // 수동 단건: enabled가 아니어도 실행하되 대역/계정/비밀번호는 필요.
     if (!raw || !(raw.ranges || []).length || !String(raw.username || '').trim()) {
       return { ok: false, reason: '대상 vCenter의 대역/계정이 없습니다.' };
+    }
+    if (!String(raw.password || '')) {
+      return { ok: false, reason: '대상 vCenter의 iDRAC 비밀번호가 없습니다(스캔 대역 수정에서 입력하세요).' };
     }
     entries = [{ vcenterId: String(opts.vcenterId).trim(), ranges: (raw.ranges || []).filter(Boolean), username: String(raw.username).trim(), password: raw.password || '', agent: String(raw.agent || '').trim(), mode: raw.mode || 'merge' }];
   }

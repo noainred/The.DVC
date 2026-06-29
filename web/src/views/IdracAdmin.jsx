@@ -40,6 +40,7 @@ export default function IdracAdmin() {
   const [pwSettings, setPwSettings] = useState({ excludeUnmapped: false }); // 전력 집계 표시 설정
   const [scanRanges, setScanRanges] = useState({ ranges: [], status: null, centralEnabled: false }); // vCenter별 iDRAC 스캔 대역
   const [srForm, setSrForm] = useState(null); // 스캔 대역 편집 폼 { vcenterId, ranges, username, password, agent, enabled, mode } | null
+  const [srMsg, setSrMsg] = useState(null); // 스캔 대역 폼 인라인 피드백 { ok, text }
 
   const load = async () => {
     try { setData(await fetchJson('/admin/idrac')); setError(null); }
@@ -223,22 +224,31 @@ export default function IdracAdmin() {
   };
 
   // ── vCenter별 iDRAC 스캔 대역 (주기 자동 발견) ──────────────────────────
-  const srOpenNew = () => setSrForm({ vcenterId: '', ranges: '', username: 'root', password: '', agent: '__local__', enabled: true, mode: 'merge', isNew: true });
-  const srEdit = (e) => setSrForm({ vcenterId: e.vcenterId, ranges: (e.ranges || []).join('\n'), username: e.username || 'root', password: '', agent: e.agent || '__local__', enabled: e.enabled !== false, mode: e.mode || 'merge', hasPassword: e.hasPassword, isNew: false });
+  const srOpenNew = () => { setSrMsg(null); setSrForm({ vcenterId: '', ranges: '', username: 'root', password: '', agent: '__local__', enabled: true, mode: 'merge', isNew: true }); };
+  const srEdit = (e) => { setSrMsg(null); setSrForm({ vcenterId: e.vcenterId, ranges: (e.ranges || []).join('\n'), username: e.username || 'root', password: '', agent: e.agent || '__local__', enabled: e.enabled !== false, mode: e.mode || 'merge', hasPassword: e.hasPassword, isNew: false }); };
   const srSave = async () => {
     const f = srForm; if (!f) return;
-    if (!f.vcenterId) { setImportMsg({ ok: false, text: '소속 vCenter를 선택하세요.' }); return; }
-    if (!(f.ranges || '').trim()) { setImportMsg({ ok: false, text: 'IP 대역을 한 줄에 하나씩 입력하세요.' }); return; }
-    if (!(f.username || '').trim()) { setImportMsg({ ok: false, text: 'iDRAC 계정을 입력하세요.' }); return; }
-    if (!f.hasPassword && !(f.password || '').trim()) { setImportMsg({ ok: false, text: 'iDRAC 비밀번호를 입력하세요.' }); return; }
-    setBusy(true); setImportMsg(null);
+    // 폼 바로 옆에 보이는 인라인 검증(상단 배너만 뜨면 폼에서 안 보여 '저장 안 됨'처럼 느껴짐).
+    if (!f.vcenterId) { setSrMsg({ ok: false, text: '소속 vCenter를 선택하세요.' }); return; }
+    if (!(f.ranges || '').trim()) { setSrMsg({ ok: false, text: 'IP 대역을 한 줄에 하나씩 입력하세요.' }); return; }
+    if (!(f.username || '').trim()) { setSrMsg({ ok: false, text: 'iDRAC 계정을 입력하세요.' }); return; }
+    // 비밀번호는 권장이지만 필수는 아님 — 없이도 저장(스캔은 비번 입력 시까지 보류). 저장이 막히지 않게.
+    const noPw = !f.hasPassword && !(f.password || '').trim();
+    setBusy(true); setSrMsg(null);
     try {
       const body = { vcenterId: f.vcenterId, ranges: f.ranges, username: f.username, agent: f.agent === '__local__' ? '' : f.agent, enabled: f.enabled, mode: f.mode };
       if ((f.password || '').trim()) body.password = f.password; // 빈 비번은 서버가 기존 유지
       const r = await putJson('/admin/idrac/scan-ranges', body);
-      setImportMsg(r.ok ? { ok: true, text: `스캔 대역 저장됨 — ${f.vcenterId} (대역 ${(r.ranges || []).length}개${r.enabled ? ', 주기 스캔 포함' : ', 비활성'})` } : { ok: false, text: r.reason });
-      if (r.ok) { setSrForm(null); await loadScanRanges(); }
-    } catch (e) { setImportMsg({ ok: false, text: e.message }); }
+      if (r.ok) {
+        const note = noPw ? ' · ⚠ 비밀번호 미설정 — 스캔하려면 비밀번호를 입력하세요' : '';
+        const text = `스캔 대역 저장됨 — ${f.vcenterId} (대역 ${(r.ranges || []).length}개${r.enabled ? ', 주기 스캔 포함' : ', 비활성'})${note}`;
+        setImportMsg({ ok: true, text }); // 상단 배너에도 표시
+        setSrForm(null); setSrMsg(null);
+        await loadScanRanges();
+      } else {
+        setSrMsg({ ok: false, text: r.reason || '저장 실패' });
+      }
+    } catch (e) { setSrMsg({ ok: false, text: `저장 실패: ${e.message}` }); }
     finally { setBusy(false); }
   };
   const srDelete = async (vcenterId) => {
@@ -469,7 +479,7 @@ export default function IdracAdmin() {
 
       <IdracScanRanges
         data={scanRanges} vcenters={vcenters} agents={agents} busy={busy}
-        form={srForm} setForm={setSrForm}
+        form={srForm} setForm={setSrForm} msg={srMsg} setMsg={setSrMsg}
         onNew={srOpenNew} onEdit={srEdit} onSave={srSave} onDelete={srDelete} onScan={srScanNow}
       />
 
@@ -1112,7 +1122,7 @@ export function IdracDetailModal({ server, onClose }) {
 // ---- vCenter별 iDRAC 스캔 대역(주기 자동 발견) ------------------------------
 // 각 vCenter에 iDRAC IP 대역 + 계정을 저장하면, 주기 스캐너가 그 대역을 돌며 Dell iDRAC을
 // 발견해 해당 vCenter로 자동 등록한다(IPMS의 'vCenter별 스캔 대역'과 같은 흐름).
-function IdracScanRanges({ data, vcenters, agents, busy, form, setForm, onNew, onEdit, onSave, onDelete, onScan }) {
+function IdracScanRanges({ data, vcenters, agents, busy, form, setForm, msg, setMsg, onNew, onEdit, onSave, onDelete, onScan }) {
   const list = data?.ranges || [];
   const st = data?.status || {};
   const prog = st.progress;
@@ -1165,7 +1175,7 @@ function IdracScanRanges({ data, vcenters, agents, busy, form, setForm, onNew, o
         <div className="card" style={{ marginBottom: 10, padding: '12px 14px', background: 'rgba(96,165,250,.06)' }}>
           <div className="flex between" style={{ alignItems: 'center', marginBottom: 8 }}>
             <b style={{ fontSize: 13 }}>{form.isNew ? '스캔 대역 추가' : `스캔 대역 수정 — ${form.vcenterId}`}</b>
-            <button className="logout-btn" style={{ padding: '5px 10px', fontSize: 12 }} onClick={() => setForm(null)}>닫기</button>
+            <button className="logout-btn" style={{ padding: '5px 10px', fontSize: 12 }} onClick={() => { setMsg && setMsg(null); setForm(null); }}>닫기</button>
           </div>
           <div className="flex gap wrap" style={{ alignItems: 'flex-start' }}>
             <div style={{ flex: '1 1 220px', minWidth: 200 }}>
@@ -1210,8 +1220,13 @@ function IdracScanRanges({ data, vcenters, agents, busy, form, setForm, onNew, o
             <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12, padding: '8px 0' }} title="체크 시 주기 스캔에 포함">
               <input type="checkbox" checked={form.enabled} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} /> 주기 스캔 포함
             </label>
-            <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} disabled={busy} onClick={onSave}>저장</button>
+            <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} disabled={busy} onClick={onSave}>{busy ? '저장 중…' : '저장'}</button>
           </div>
+          {msg && (
+            <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 8, fontSize: 12.5,
+              background: msg.ok ? 'rgba(34,197,94,.12)' : 'rgba(239,68,68,.12)',
+              color: msg.ok ? '#4ade80' : '#f87171' }}>{msg.ok ? '✅ ' : '⚠ '}{msg.text}</div>
+          )}
         </div>
       )}
 

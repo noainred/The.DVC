@@ -38,6 +38,7 @@ test('enabledScanRanges: enabled + 대역 + 계정 있는 것만(비번 포함)'
   sr.saveScanRanges('WA', { ranges: '192.168.1.0/24', username: 'root', password: 'pw2' });
   sr.saveScanRanges('NOCRED', { ranges: '172.16.0.0/24', username: '' }); // 계정 없음 → 제외
   sr.saveScanRanges('NORANGE', { ranges: '', username: 'root', password: 'x' }); // 대역 없음 → 제외
+  sr.saveScanRanges('NOPW', { ranges: '172.16.1.0/24', username: 'root' }); // 비밀번호 없음 → 제외(스캔 보류)
   const en = sr.enabledScanRanges();
   const ids = en.map((e) => e.vcenterId).sort();
   assert.deepEqual(ids, ['OC2', 'WA']);
