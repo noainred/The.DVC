@@ -62,6 +62,7 @@ const TOOLS = [
   { k: 'hba', icon: '🔌', label: 'HBA 카드 속도', desc: '호스트 FC/iSCSI 어댑터 속도' },
   { k: 'gpu', icon: '🎮', label: 'GPU 인벤토리', desc: '호스트/모델별 GPU + 사용률 최근 5년 추이' },
   { k: 'serveranalysis', icon: '🔬', label: '서버 분석', desc: 'iDRAC 수집 하드웨어 분석 · GPU 찾기(모델별 장수)' },
+  { k: 'fleet', icon: '🗂️', label: '통합 서버 인벤토리', desc: 'iDRAC 태그 + vCenter 조합 → 가상화 호스트 / 베어메탈 자동 분류 · 베어메탈 전력 합계 · 수동 예외 · CSV' },
   { k: 'topo3d', icon: '🌐', label: '구성도 (3D)', desc: '설정된 구성을 3D 네트워크로 — 줌인/아웃·회전·VM 펼치기' },
   { k: 'davinci-svc', icon: '🩺', label: '다빈치 서비스 점검', desc: '포탈 내부 서비스/수집기(vCenter·NSX·전력·지표·GPU·알림·백업·에이전트) 상태 한눈에' },
   { k: 'net-check', icon: '📡', label: '글로벌 네트워크 점검', desc: '전세계 vCenter·NSX 제어플레인 도달성·RTT + 네트워크 객체 요약' },
@@ -219,6 +220,7 @@ function ToolPanel({ tool, onBack, isAdmin }) {
       {tool === 'hba' && <Hba scope={scope} />}
       {tool === 'gpu' && <Gpu scope={scope} />}
       {tool === 'serveranalysis' && <ServerAnalysis />}
+      {tool === 'fleet' && <FleetInventory isAdmin={isAdmin} />}
       {tool === 'hardware' && <Hardware scope={scope} />}
       {tool === 'powermap' && <PowerMap scope={scope} />}
       {tool === 'esxi' && <Esxi scope={scope} />}
@@ -2488,6 +2490,138 @@ function DualOtpModal({ action, onClose, onDone }) {
 }
 
 /** Generic on-demand fetch hook (runs when params change). */
+// 통합 서버 인벤토리 — iDRAC/OME 물리 서버 + vCenter 호스트를 가상화/베어메탈로 분류.
+function TagSelect({ value, onChange, disabled }) {
+  return (
+    <select className="select" value={value} disabled={disabled} style={{ padding: '3px 6px', fontSize: 12 }}
+      onChange={(e) => onChange(e.target.value)}>
+      <option value="auto">자동</option>
+      <option value="baremetal">베어메탈</option>
+      <option value="virtualization">가상화</option>
+      <option value="exclude">제외</option>
+    </select>
+  );
+}
+
+function FleetInventory({ isAdmin }) {
+  const [d, setD] = useState(null);
+  const [err, setErr] = useState(null);
+  const [view, setView] = useState('baremetal'); // baremetal | virt
+  const [q, setQ] = useState('');
+  const [busy, setBusy] = useState('');
+
+  const load = () => fetchJson('/insights/fleet').then((r) => { setD(r); setErr(null); }).catch((e) => setErr(e.message));
+  useEffect(() => { load(); }, []);
+
+  const tagKeyOf = (row) => (row.serviceTag || '').toLowerCase() || String(row.serverId || '');
+  const setTag = async (key, tag) => {
+    if (!key) return;
+    setBusy(key);
+    try { await putJson('/insights/fleet/tag', { key, tag }); await load(); }
+    catch (e) { setErr(e.message); }
+    finally { setBusy(''); }
+  };
+
+  if (err) return <ErrorBox message={err} />;
+  if (!d) return <Loading />;
+  const s = d.summary || {};
+  const term = q.trim().toLowerCase();
+  const match = (...fields) => !term || fields.some((f) => (f || '').toLowerCase().includes(term));
+  const bm = (d.bareMetal || []).filter((b) => match(b.name, b.model, b.serviceTag));
+  const vh = (d.virtualizationHosts || []).filter((h) => match(h.name, h.model, h.serviceTag, h.vcenter));
+
+  const csv = () => {
+    const isBm = view === 'baremetal';
+    const head = isBm ? ['서버', '모델', '서비스태그', '수집원', 'W'] : ['호스트', 'vCenter', '지역', '모델', '서비스태그', 'iDRAC받침', 'W'];
+    const rows = isBm
+      ? bm.map((b) => [b.name, b.model, b.serviceTag, b.source, b.watts ?? ''])
+      : vh.map((h) => [h.name, h.vcenter, h.region, h.model, h.serviceTag, h.idracBacked ? 'O' : 'X', h.watts ?? '']);
+    const body = [head, ...rows].map((r) => r.map((c) => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\r\n');
+    const blob = new Blob(['﻿' + body], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = `fleet-${view}-${new Date().toISOString().slice(0, 10)}.csv`; a.click(); URL.revokeObjectURL(url);
+  };
+
+  return (
+    <>
+      <div className="kpis" style={{ marginBottom: 14 }}>
+        <Card label="가상화 호스트" value={s.virtualizationHosts ?? 0} accent="var(--accent-2,#22d3ee)" meta={`iDRAC 받침 ${s.idracBackedHosts ?? 0}대`} onClick={() => setView('virt')} active={view === 'virt'} />
+        <Card label="베어메탈 서버" value={s.bareMetal ?? 0} accent="var(--amber)" meta={`전력 측정 ${s.bareMetalMeasured ?? 0}대${s.forcedBareMetal ? ` · 수동 ${s.forcedBareMetal}` : ''}`} onClick={() => setView('baremetal')} active={view === 'baremetal'} />
+        <Card label="베어메탈 총전력" value={fmtWatts(s.bareMetalWatts || 0)} accent="#fbbf24" meta={`${s.bareMetalKw ?? 0} kW · 현재 측정 합계`} />
+        <Card label="제외(수동)" value={s.excluded ?? 0} meta="인벤토리/전력에서 제외" />
+      </div>
+
+      <div className="card" style={{ padding: '10px 14px', marginBottom: 12, borderLeft: '3px solid var(--accent-2,#22d3ee)' }}>
+        <div style={{ fontSize: 13 }}>iDRAC/OME가 수집한 물리 서버를 <b>Dell 서비스태그</b>로 vCenter ESXi 호스트와 대조합니다. 호스트에 매칭되면 <b>가상화 호스트</b>, 매칭이 없으면 <b>베어메탈</b>입니다.</div>
+        <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>자동 판정이 틀리면 행의 분류를 직접 바꿀 수 있습니다(서비스태그 기준 저장). 베어메탈 총전력은 이미 수집 중인 iDRAC/OME 측정값을 합산합니다.</div>
+      </div>
+
+      <div className="flex between wrap gap" style={{ marginBottom: 10, alignItems: 'center' }}>
+        <div className="flex gap" style={{ flexWrap: 'wrap' }}>
+          <button className={view === 'baremetal' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setView('baremetal')}>베어메탈 ({(d.bareMetal || []).length})</button>
+          <button className={view === 'virt' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setView('virt')}>가상화 호스트 ({(d.virtualizationHosts || []).length})</button>
+        </div>
+        <div className="flex gap" style={{ alignItems: 'center' }}>
+          <SearchBox className="input" style={{ maxWidth: 280 }} placeholder="서버/모델/서비스태그/vCenter 검색" value={q} onChange={setQ} />
+          <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={csv}>CSV</button>
+        </div>
+      </div>
+
+      {view === 'baremetal' && (
+        <>
+          <ResultCount total={(d.bareMetal || []).length} shown={bm.length} label="베어메탈" filtered={!!term} />
+          <div className="table-wrap" style={{ maxHeight: '60vh' }}>
+            <table>
+              <thead><tr><th>서버</th><th>모델</th><th>서비스태그</th><th>수집</th><th style={{ textAlign: 'right' }}>현재 전력</th>{isAdmin && <th>분류</th>}</tr></thead>
+              <tbody>
+                {bm.map((b, i) => (
+                  <tr key={b.serverId || i}>
+                    <td><b>{b.name}</b>{b.forced && <span className="badge purple" style={{ marginLeft: 6 }}>수동</span>}</td>
+                    <td className="muted" style={{ fontSize: 12 }}>{b.model || '—'}</td>
+                    <td className="muted" style={{ fontSize: 12 }}>{b.serviceTag || '—'}</td>
+                    <td className="muted" style={{ fontSize: 12 }}>{b.source}</td>
+                    <td style={{ textAlign: 'right' }}>{b.watts != null ? <b>{fmtWatts(b.watts)}</b> : <span className="muted">미측정</span>}</td>
+                    {isAdmin && <td><TagSelect value={b.forced ? 'baremetal' : 'auto'} disabled={busy === tagKeyOf(b)} onChange={(t) => setTag(tagKeyOf(b), t)} /></td>}
+                  </tr>
+                ))}
+                {!bm.length && <tr><td colSpan={isAdmin ? 6 : 5} className="center muted" style={{ padding: 20 }}>베어메탈 서버가 없습니다.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {view === 'virt' && (
+        <>
+          <ResultCount total={(d.virtualizationHosts || []).length} shown={vh.length} label="호스트" filtered={!!term} />
+          <div className="table-wrap" style={{ maxHeight: '60vh' }}>
+            <table>
+              <thead><tr><th>호스트</th><th>vCenter</th><th>지역</th><th>모델</th><th>서비스태그</th><th style={{ textAlign: 'right' }}>코어</th><th style={{ textAlign: 'right' }}>메모리</th><th>전력원</th><th style={{ textAlign: 'right' }}>현재 전력</th>{isAdmin && <th>분류</th>}</tr></thead>
+              <tbody>
+                {vh.map((h, i) => (
+                  <tr key={`${h.vcenterId}-${h.name}-${i}`}>
+                    <td><b>{h.name}</b></td>
+                    <td>{h.vcenter}</td>
+                    <td className="muted" style={{ fontSize: 12 }}>{h.region || '—'}</td>
+                    <td className="muted" style={{ fontSize: 12 }}>{h.model || '—'}</td>
+                    <td className="muted" style={{ fontSize: 12 }}>{h.serviceTag || '—'}</td>
+                    <td style={{ textAlign: 'right' }}>{h.cpuCores || '—'}</td>
+                    <td style={{ textAlign: 'right' }} className="muted">{h.memGB ? `${h.memGB} GB` : '—'}</td>
+                    <td>{h.idracBacked ? <span className="badge green">iDRAC</span> : (h.powerSource === 'vcenter' ? <span className="badge blue">vCenter</span> : <span className="muted">—</span>)}</td>
+                    <td style={{ textAlign: 'right' }}>{h.watts != null ? <b>{fmtWatts(h.watts)}</b> : <span className="muted">—</span>}</td>
+                    {isAdmin && <td><TagSelect value="auto" disabled={busy === tagKeyOf(h)} onChange={(t) => setTag(tagKeyOf(h), t)} /></td>}
+                  </tr>
+                ))}
+                {!vh.length && <tr><td colSpan={isAdmin ? 10 : 9} className="center muted" style={{ padding: 20 }}>가상화 호스트가 없습니다.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
 function useTool(path, params) {
   const [state, setState] = useState({ loading: true });
   const key = JSON.stringify(params);

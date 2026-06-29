@@ -11,6 +11,8 @@ import { filterMeasuredByMapping, loadPowerSettings } from '../idrac/powerSettin
 import { snapMemo, sendCached } from '../util/snapCache.js';
 import { computeFinOps, loadFinopsConfig, saveFinopsConfig } from '../insights/finops.js';
 import { computePowerBreakdown } from '../insights/powerBreakdown.js';
+import { getFleetInventory } from '../insights/fleetInventory.js';
+import { loadFleetTags, setFleetTag } from '../insights/fleetTags.js';
 import { detectAnomalies } from '../insights/anomaly.js';
 import { forecastCapacity } from '../insights/forecast.js';
 import { computeSecurityPosture } from '../insights/cve.js';
@@ -50,6 +52,22 @@ insightsRouter.get('/power-breakdown', async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 insightsRouter.put('/finops/config', adminOnly, (req, res) => res.json(saveFinopsConfig(req.body || {})));
+
+// --- 통합 서버 인벤토리: iDRAC/OME 물리 서버 + vCenter 호스트 → 가상화/베어메탈 분류 + 베어메탈 전력 ---
+insightsRouter.get('/fleet', async (req, res) => {
+  try {
+    const snap = store.get();
+    const key = `${snap.generatedAt}|${JSON.stringify(loadFleetTags())}`;
+    const payload = await snapMemo('fleet', key, 60_000, async () => getFleetInventory(snap));
+    sendCached(req, res, key, payload);
+  } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+});
+// 수동 분류 예외 지정/해제(관리자). body: { key, tag: 'baremetal'|'virtualization'|'exclude'|'auto' }
+insightsRouter.put('/fleet/tag', adminOnly, async (req, res) => {
+  const r = setFleetTag(req.body?.key, req.body?.tag);
+  if (r.ok) await store.refresh().catch(() => {}); // 분류 즉시 반영
+  res.json(r);
+});
 
 // --- AI 이상탐지 ---
 insightsRouter.get('/anomalies', async (req, res) => {
