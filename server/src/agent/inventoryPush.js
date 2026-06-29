@@ -22,6 +22,8 @@ const PUSH_GZIP = process.env.AGENT_PUSH_GZIP !== 'false';
 
 let timer = null;
 let last = null; // { at, sent, errors, bytes, gzBytes }
+let running = false; // 한 push 사이클이 (대용량/고RTT로) 주기보다 길어질 때 다음 사이클이 겹쳐
+                     // 연결·트래픽이 누적되는 것을 방지(single-flight).
 
 function headers(extra = {}) {
   return { 'Content-Type': 'application/json', ...extra, ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
@@ -55,14 +57,18 @@ async function pushVcenter(snap, vc) {
 }
 
 export async function pushInventoryNow() {
+  if (running) return { ok: false, reason: '이전 push 진행 중(겹침 방지)' };
   const snap = store.get();
   if (!snap?.vcenters?.length) return { ok: false, reason: '수집된 vCenter 없음' };
+  running = true;
   let sent = 0; let bytes = 0; let gzBytes = 0; const errors = [];
-  for (const vc of snap.vcenters) {
-    if (!vc.id || vc.status === 'disabled' || vc.collectSource === 'site') continue; // 위임받은 건 재전송 안 함
-    try { const r = await pushVcenter(snap, vc); sent++; bytes += r.bytes || 0; gzBytes += r.gzBytes || 0; }
-    catch (e) { errors.push(`${vc.id}: ${e.message}`); console.warn(`[inv-push] ${vc.id} 실패: ${e.message}`); }
-  }
+  try {
+    for (const vc of snap.vcenters) {
+      if (!vc.id || vc.status === 'disabled' || vc.collectSource === 'site') continue; // 위임받은 건 재전송 안 함
+      try { const r = await pushVcenter(snap, vc); sent++; bytes += r.bytes || 0; gzBytes += r.gzBytes || 0; }
+      catch (e) { errors.push(`${vc.id}: ${e.message}`); console.warn(`[inv-push] ${vc.id} 실패: ${e.message}`); }
+    }
+  } finally { running = false; }
   last = { at: Date.now(), sent, errors, bytes, gzBytes, gzip: PUSH_GZIP };
   return { ok: errors.length === 0, sent, errors, bytes, gzBytes };
 }

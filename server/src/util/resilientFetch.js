@@ -16,11 +16,15 @@
 import { Agent } from 'undici';
 
 // 수집서버/중앙도 자체서명 인증서일 수 있어 전역(vCenter)과 동일하게 검증 off. 단 커넥션 풀은 분리.
+// connections: origin(중앙/엣지)당 동시 연결 상한. undici 기본은 무제한이라 여러 워커가 동시에
+// 요청을 쏘면 연결이 수십 개까지 쌓이고 keep-alive로 한동안 남는다(소켓 폭증). 상한을 둬서 재사용·
+// 큐잉으로 연결 수를 묶는다. WAN_MAX_CONNECTIONS로 조정(기본 6).
 const wanAgent = new Agent({
   connect: { rejectUnauthorized: process.env.WAN_TLS_INSECURE === 'false' ? true : false },
   connectTimeout: Number(process.env.WAN_CONNECT_TIMEOUT_MS) || 20_000,
   keepAliveTimeout: 10_000,
   keepAliveMaxTimeout: 30_000,
+  connections: Number(process.env.WAN_MAX_CONNECTIONS) || 6,
 });
 
 const TRANSIENT_RE = /timed?\s?out|timeout|abort|reset|hang ?up|ECONNRESET|ECONNREFUSED|EAI_AGAIN|ENOTFOUND|EPIPE|ETIMEDOUT|other side closed|socket|UND_ERR/i;
