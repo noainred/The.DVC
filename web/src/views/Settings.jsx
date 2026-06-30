@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import VCenterAdmin from './VCenterAdmin.jsx';
+import DatacenterAdmin from './DatacenterAdmin.jsx';
 import VCenterConnTest from './VCenterConnTest.jsx';
 import NsxAdmin from './NsxAdmin.jsx';
 import IdracAdmin from './IdracAdmin.jsx';
@@ -30,6 +31,7 @@ import About from './About.jsx';
 
 // 모든 하위 화면 정의(키→라벨→컴포넌트). 그룹에 속한 항목은 group 키로 묶는다.
 const SUB = [
+  { k: 'datacenter-admin', label: 'DataCenter(법인)', C: DatacenterAdmin },
   { k: 'vcenter-admin', label: 'vCenter 관리', C: VCenterAdmin },
   { k: 'vcenter-test', label: 'vCenter 연결 테스트', C: VCenterConnTest },
   { k: 'nsx-admin', label: 'NSX 관리', C: NsxAdmin },

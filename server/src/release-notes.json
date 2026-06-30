@@ -1,6 +1,16 @@
 {
   "notes": [
     {
+      "version": "2.71.0",
+      "date": "2026-06-30",
+      "title": "DataCenter(법인) 개념 도입 — 설정에서 정의 + vCenter 할당 (1단계)",
+      "notes": [
+        "vCenter의 상위 개념으로 DataCenter(=법인)를 도입했습니다. 설정 › DataCenter(법인) 메뉴에서 DataCenter 종류를 사전 정의(추가/수정/삭제)하고, 각 vCenter를 DataCenter에 할당할 수 있습니다.",
+        "백엔드: DataCenter 레지스트리(CONFIG_DIR/datacenters.json) + 관리 API(/admin/datacenters, /datacenters/assign). vCenter→DataCenter 매핑 일괄 저장, DataCenter 삭제 시 매핑 자동 정리. 단위테스트 5건 추가(전체 223건 통과).",
+        "다음 단계(2단계, 확인 후 진행): iDRAC 장비 스캔 화면의 소속을 vCenter→DataCenter 기준으로 전환하고, 법인 물리 서버를 독립 수집(DB)으로 분리."
+      ]
+    },
+    {
       "version": "2.70.1",
       "date": "2026-06-30",
       "title": "특수 기능 '자주 쓰는 기능' 카드 수 화면폭 자동 조정",
