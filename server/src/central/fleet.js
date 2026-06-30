@@ -16,9 +16,7 @@ import { bumpFleetRev } from '../insights/fleetRev.js';
 const FILE = path.join(config.configDir, 'central-fleet.json');
 const TTL_MS = Number(process.env.CENTRAL_FLEET_TTL_MS) || 30 * 60_000; // 30분 무보고 시 만료
 const MAX_AGENTS = Number(process.env.CENTRAL_FLEET_MAX_AGENTS) || 500; // 에이전트 수 상한(메모리 보호)
-const MAX_WATTS = 1_000_000; // 비현실적 전력값 차단(KPI 오염 방지)
 const norm = (s) => String(s || '').trim().toLowerCase();
-const cleanWatts = (w) => (Number.isFinite(w) && w >= 0 && w <= MAX_WATTS ? w : null);
 
 let cache = {}; // agent -> { at, generatedAt, baremetal: [ {fleetId,name,model,serviceTag,watts,vcenterId,source} ] }
 try {
@@ -36,6 +34,20 @@ function persistSoon() {
   writeTimer.unref?.();
 }
 
+// 종료(SIGTERM/SIGINT/exit) 시 디바운스 대기 중인 마지막 엣지 보고를 동기로 flush — 재시작 시 ~5초
+// 윈도우 유실 방지. 중앙 역할일 때만 핸들러 등록(테스트/엣지에서 부작용·중복 쓰기 방지).
+export function flushEdgeFleetNow() {
+  if (writeTimer) { clearTimeout(writeTimer); writeTimer = null; }
+  try { fs.mkdirSync(path.dirname(FILE), { recursive: true }); fs.writeFileSync(FILE, JSON.stringify({ fleet: cache }), { mode: 0o600 }); } catch { /* best-effort */ }
+}
+if (config.central?.token && !config.agent?.centralUrl) {
+  let flushed = false;
+  const onExit = () => { if (flushed) return; flushed = true; flushEdgeFleetNow(); };
+  process.once('exit', onExit);
+  process.once('SIGTERM', () => { onExit(); process.exit(0); });
+  process.once('SIGINT', () => { onExit(); process.exit(0); });
+}
+
 /** 엣지가 push한 베어메탈 목록 저장. */
 export function setEdgeFleet(agent, baremetal, generatedAt) {
   const a = String(agent || '').trim();
@@ -45,7 +57,9 @@ export function setEdgeFleet(agent, baremetal, generatedAt) {
     name: String(b.name || '').slice(0, 256),
     model: String(b.model || '').slice(0, 256),
     serviceTag: String(b.serviceTag || '').slice(0, 128),
-    watts: cleanWatts(b.watts),
+    // 엣지 push는 '전력 미보고 베어메탈' 메타 전용(설계). 전력은 원격 수집(collector pull) 경로로만
+    // 중앙에 반영되므로 엣지 watts는 항상 null로 정규화 — fleet KPI와 FinOps/PowerMap의 이중계상 차단.
+    watts: null,
     vcenterId: String(b.vcenterId || '').slice(0, 128),
     source: String(b.source || '').slice(0, 32),
   })) : [];
@@ -77,7 +91,9 @@ function liveCache() {
   for (const [a, e] of Object.entries(cache)) {
     if (!e || (now - (e.at || 0)) > TTL_MS) { delete cache[a]; changed = true; }
   }
-  if (changed) persistSoon();
+  // 만료로 에이전트가 빠지면 /fleet 캐시 키를 무효화 — 오프라인 엣지 베어메탈이 최대 60s stale로
+  // 남지 않게 즉시 반영.
+  if (changed) { persistSoon(); bumpFleetRev(); }
   return cache;
 }
 

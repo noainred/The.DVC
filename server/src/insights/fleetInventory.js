@@ -165,7 +165,7 @@ export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = 
       if (m) { if (m.serviceTag) claimedHostKeys.add(`t:${norm(m.serviceTag)}`); for (const n of (m.hostNames || [])) if (n) claimedHostKeys.add(`n:${norm(n)}`); }
       if (!usedBmKeys.has(hk)) {
         usedBmKeys.add(hk);
-        const w = (m ? pos(m.watts) : undefined) ?? pos(h.powerWatts) ?? (Number.isFinite(h.vcPowerWatts) && h.vcPowerWatts >= 0 ? h.vcPowerWatts : undefined);
+        const w = (m ? pos(m.watts) : undefined) ?? pos(h.powerWatts) ?? pos(h.vcPowerWatts);
         const vc = resolveVc(h.serviceTag, h.name, { vcenterId: h.vcenterId, source: 'host' });
         bareMetal.push({
           serverId: `host:${h.vcenterId}:${h.name}`, fleetId: hk, name: h.name, model: h.model || '',
@@ -179,9 +179,10 @@ export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = 
 
     const backed = !!(m && m.source !== 'vcenter');
     const via = backed ? (h.serviceTag && norm(m.serviceTag) === norm(h.serviceTag) ? 'tag' : 'name') : '';
+    // 0W·음수 vcPowerWatts 센서값은 '미측정'으로 간주(null 폴백) — pos()로 통일.
     const watts = (backed ? pos(m.watts) : undefined)
       ?? pos(h.powerWatts)
-      ?? (Number.isFinite(h.vcPowerWatts) && h.vcPowerWatts >= 0 ? h.vcPowerWatts : undefined)
+      ?? pos(h.vcPowerWatts)
       ?? (m ? pos(m.watts) : undefined)
       ?? null;
     virtualizationHosts.push({

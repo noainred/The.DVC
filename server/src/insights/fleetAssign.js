@@ -19,10 +19,11 @@ const FILE = path.join(config.configDir, 'fleet-assign.json');
 const norm = (s) => String(s || '').trim().toLowerCase();
 
 let cache = null;
-let cacheMtimeMs = 0;
+let cacheMtimeMs = '';
 
+// (mtimeMs, size) 복합 토큰 — coarse mtime 동일-틱에 외부 편집된 경우도 size 변화로 무효화.
 function fileMtimeMs() {
-  try { return fs.statSync(FILE).mtimeMs; } catch { return 0; }
+  try { const st = fs.statSync(FILE); return `${st.mtimeMs}:${st.size}`; } catch { return ''; }
 }
 
 export function loadFleetAssign() {
@@ -90,16 +91,25 @@ export function setFleetAssignMany(entries = [], validIds = null) {
 
 /**
  * 측정 전력 목록에 소속 법인(fleet-assign)을 덧입힌다 — PowerMap/FinOps가 OME/원격 베어메탈의
- * 수동 귀속을 똑같이 반영하도록(화면 간 귀속 불일치 방지). vcenterId가 비어 있는 항목만 채운다
- * (레지스트리/원격이 제공한 값은 권위로 유지).
+ * 수동 귀속을 똑같이 반영하도록(화면 간 귀속 불일치 방지). 수동 등록은 OME 추론/원격 귀속보다
+ * 우선(플릿 화면과 일치). iDRAC 레지스트리·vCenter 호스트 PerfMgr 전력은 권위로 유지(덮지 않음).
+ *
+ * 조회 키: 서비스태그 → 서버ID → 호스트명(들) → host 순. 플릿 화면에서 호스트명 키로 귀속한
+ * ESXi 호스트도 PowerMap/FinOps에 동일 반영되게 한다.
+ * @param validIds  선택. 유효 vCenter id Set. 주어지면 미포함 귀속은 무시(죽은 법인으로의 split-brain 방지).
  */
-export function applyFleetAssign(measured) {
+export function applyFleetAssign(measured, validIds = null) {
   const a = loadFleetAssign();
   if (!a || !Object.keys(a).length) return measured;
   for (const m of (measured || [])) {
-    if (m.source === 'idrac') continue; // iDRAC 레지스트리 vcenterId가 권위 — fleet-assign으로 덮지 않음
-    const v = a[norm(m.serviceTag)] || a[norm(m.serverId)];
-    if (v) m.vcenterId = v;             // 수동 등록은 OME 추론/원격 귀속보다 우선(플릿 화면과 일치)
+    // iDRAC 레지스트리 vcenterId, vCenter 호스트 PerfMgr 전력(source 'vcenter')은 권위 — 옮기지 않음.
+    if (m.source === 'idrac' || m.source === 'vcenter') continue;
+    let v = a[norm(m.serviceTag)] || a[norm(m.serverId)];
+    if (!v) {
+      for (const h of (m.hostNames || [])) { const hit = a[norm(h)]; if (hit) { v = hit; break; } }
+      if (!v && m.host) v = a[norm(m.host)];
+    }
+    if (v && (!validIds || validIds.has(v))) m.vcenterId = v;
   }
   return measured;
 }
@@ -112,8 +122,8 @@ export function pruneFleetAssign(liveKeys) {
   let removed = 0;
   for (const [k, v] of Object.entries(cur)) { if (live.has(k)) next[k] = v; else removed += 1; }
   if (!removed) return 0;
-  try { atomicWriteFileSync(FILE, JSON.stringify({ assign: next }, null, 2)); }
-  catch { return 0; }
+  // 쓰기 실패는 '0건 제거'와 구분해 throw — 라우트가 부분실패를 500으로 드러낼 수 있게(조용한 은폐 방지).
+  atomicWriteFileSync(FILE, JSON.stringify({ assign: next }, null, 2));
   cache = next;
   cacheMtimeMs = fileMtimeMs();
   bumpFleetRev();
@@ -123,6 +133,6 @@ export function pruneFleetAssign(liveKeys) {
 /** 테스트/관리용 초기화. */
 export function resetFleetAssign() {
   cache = {};
-  cacheMtimeMs = 0;
+  cacheMtimeMs = '';
   try { if (fs.existsSync(FILE)) fs.unlinkSync(FILE); } catch { /* */ }
 }

@@ -299,3 +299,12 @@ test('[유령키] tags/assign에 매칭 안 되는 키는 ghostKeys로 집계, e
   assert.ok(liveKeys.includes('z1'));
   assert.ok(!liveKeys.includes('deadtag'));
 });
+
+test('가상화 호스트: 0W vcPowerWatts 센서는 미측정(null)로 폴백', () => {
+  // iDRAC 받침 없고 호스트 자체 powerWatts도 없음. vcPowerWatts만 0(센서가 0W 보고).
+  const h = [{ name: 'esxi-z', vcenterId: 'vc-kr', serviceTag: 'ZZZ000', model: 'R750', cpuCores: 8, memTotalMB: 16384, connectionState: 'CONNECTED', vcPowerWatts: 0 }];
+  const { virtualizationHosts } = classifyFleet({ hosts: h, vcenters, servers: [] });
+  const row = virtualizationHosts.find((x) => x.name === 'esxi-z');
+  assert.equal(row.watts, null);          // 0W → 미측정
+  assert.equal(row.powerSource, null);    // 'vcenter'로 오표기하지 않음
+});

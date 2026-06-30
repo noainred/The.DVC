@@ -57,6 +57,12 @@ function normalize(body, existing = null) {
     const u = new URL(url);
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return [null, 'http/https URL만 허용됩니다.'];
     if (!u.hostname) return [null, '수집 서버 URL의 호스트가 올바르지 않습니다.'];
+    // 링크로컬/클라우드 메타데이터(169.254.0.0/16, fd00::/8 등)는 차단(SSRF 방어). 수집 서버는
+    // 사설 IP(192.168.x.x 등)에 두므로 RFC1918 사설 대역은 허용한다.
+    const host = u.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+    if (/^169\.254\./.test(host) || /^fe80:/.test(host) || /^f[cd][0-9a-f]{2}:/.test(host)) {
+      return [null, '링크로컬/메타데이터 주소는 수집 서버로 사용할 수 없습니다.'];
+    }
   } catch { return [null, '수집 서버 URL 형식이 올바르지 않습니다.']; }
 
   const entry = {

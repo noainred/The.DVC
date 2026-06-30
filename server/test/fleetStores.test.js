@@ -1,7 +1,7 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { setFleetAssign, setFleetAssignMany, loadFleetAssign, applyFleetAssign, pruneFleetAssign, resetFleetAssign } from '../src/insights/fleetAssign.js';
-import { setFleetTag, loadFleetTags, pruneFleetTags, resetFleetTags } from '../src/insights/fleetTags.js';
+import { setFleetTag, loadFleetTags, pruneFleetTags, resetFleetTags, applyFleetExclude } from '../src/insights/fleetTags.js';
 
 beforeEach(() => { resetFleetAssign(); resetFleetTags(); });
 
@@ -33,6 +33,33 @@ test('applyFleetAssign: 수동 등록이 비-iDRAC를 덮고, iDRAC(레지스트
   assert.equal(measured[1].vcenterId, 'vc-eu');
   assert.equal(measured[2].vcenterId, 'vc-existing'); // idrac 보존
   assert.equal(measured[3].vcenterId, 'vc-kr');       // ome는 수동 우선
+});
+
+test('applyFleetAssign: 호스트명 키 폴백 + vcenter 소스 보존 + validIds 거부', () => {
+  setFleetAssign('esxi-7.lab', 'vc-kr'); // 호스트명(FQDN) 키로 귀속
+  setFleetAssign('z9', 'vc-dead');       // 죽은(미존재) 법인 키
+  const measured = [
+    { serverId: 'srv-a', serviceTag: '', hostNames: ['esxi-7.lab'], vcenterId: '', source: 'remote' }, // 호스트명 폴백
+    { serverId: 'srv-b', serviceTag: 'Z9', vcenterId: 'vc-host', source: 'vcenter' },                   // vcenter 권위 → 보존
+    { serverId: 'srv-c', serviceTag: 'Z9', vcenterId: '', source: 'ome' },                              // validIds 미포함 → 무시
+  ];
+  applyFleetAssign(measured, new Set(['vc-kr'])); // valid엔 vc-dead 없음
+  assert.equal(measured[0].vcenterId, 'vc-kr');  // 호스트명 키로 채워짐
+  assert.equal(measured[1].vcenterId, 'vc-host'); // vcenter 소스 보존(옮기지 않음)
+  assert.equal(measured[2].vcenterId, '');        // 죽은 법인 귀속은 validIds로 거부
+});
+
+test('applyFleetExclude: exclude 태그 서버를 전력 목록에서 제거', () => {
+  setFleetTag('z1', 'exclude');          // 서비스태그 기준
+  setFleetTag('srv-x', 'exclude');       // serverId 기준
+  const measured = [
+    { serverId: 'srv-1', serviceTag: 'Z1', hostNames: [] },   // 제외(태그)
+    { serverId: 'srv-x', serviceTag: '', hostNames: [] },     // 제외(serverId)
+    { serverId: 'srv-2', serviceTag: 'Z2', hostNames: ['keep-1'] }, // 유지
+  ];
+  const out = applyFleetExclude(measured);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].serverId, 'srv-2');
 });
 
 test('setFleetTag: 잘못된 tag 거부, 유효 태그 저장/해제', () => {

@@ -31,10 +31,11 @@ export async function pushFleetNow() {
   try {
     const snap = store.get();
     const inv = await getFleetInventory(snap);
-    // 메타만 — 자격증명/전력 시계열 제외. 중앙은 서비스태그로 dedup해 병합한다.
+    // 메타만 — 자격증명/전력 제외. 엣지 베어메탈의 전력은 원격 수집(collector pull) 경로로만
+    // 중앙에 반영하므로 watts는 보내지 않는다(이중계상 방지). 중앙은 서비스태그로 dedup해 병합한다.
     const baremetal = (inv.bareMetal || []).map((b) => ({
       fleetId: b.fleetId, name: b.name, model: b.model, serviceTag: b.serviceTag,
-      watts: b.watts, vcenterId: b.vcenterId, source: b.source,
+      vcenterId: b.vcenterId, source: b.source,
     }));
     const res = await resilientFetch(`${config.agent.centralUrl}/api/central/fleet`, {
       method: 'POST', headers: headers(),

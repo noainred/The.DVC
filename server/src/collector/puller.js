@@ -39,9 +39,11 @@ async function pullOne(c) {
     if (!Number.isFinite(watts) || watts < 0 || watts > 1_000_000) continue;
     // 같은 수집기에서 온 동일 서버(serverId)가 여러 별칭으로 중복 보고되면 첫 행만 반영한다.
     if (h.serverId != null) { if (seenServers.has(h.serverId)) continue; seenServers.add(h.serverId); }
-    const sample = { watts, ts: h.ts || ts, datacenter: data.datacenter || c.datacenter, collectorId: c.id, serverName: h.serverName, serverId: h.serverId, serviceTag: h.serviceTag || '', model: h.model || '', vcenterId: c.vcenterId || '', source: 'remote' };
+    // 위조/오류 미래 타임스탬프는 거부('최신 ts 승리' 로직을 가리지 못하게) — 5분 skew 초과면 수신 시각 사용.
+    const sTs = (Number.isFinite(h.ts) && h.ts > 0 && h.ts <= ts + 5 * 60_000) ? h.ts : ts;
+    const sample = { watts, ts: sTs, datacenter: data.datacenter || c.datacenter, collectorId: c.id, serverName: h.serverName, serverId: h.serverId, serviceTag: h.serviceTag || '', model: h.model || '', vcenterId: c.vcenterId || '', source: 'remote' };
     setRemoteHost(host, sample);
-    db.insert(`rmt:${host}`, watts, h.ts || ts);
+    db.insert(`rmt:${host}`, watts, sTs);
     hosts++;
   }
   return { hosts, version: data.version, datacenter: data.datacenter || c.datacenter };

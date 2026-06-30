@@ -12,7 +12,7 @@ import { snapMemo, sendCached } from '../util/snapCache.js';
 import { computeFinOps, loadFinopsConfig, saveFinopsConfig } from '../insights/finops.js';
 import { computePowerBreakdown } from '../insights/powerBreakdown.js';
 import { getFleetInventory, fleetLiveKeys } from '../insights/fleetInventory.js';
-import { setFleetTag, pruneFleetTags, loadFleetTags } from '../insights/fleetTags.js';
+import { setFleetTag, pruneFleetTags, loadFleetTags, applyFleetExclude } from '../insights/fleetTags.js';
 import { setFleetAssign, setFleetAssignMany, applyFleetAssign, pruneFleetAssign, loadFleetAssign } from '../insights/fleetAssign.js';
 import { fleetRev } from '../insights/fleetRev.js';
 import { loadRegistry, updateServer, assignVcenter } from '../idrac/registry.js';
@@ -33,8 +33,9 @@ insightsRouter.get('/finops', async (req, res) => {
   try {
     const snap = store.get();
     const key = `${snap.generatedAt}|${JSON.stringify(loadPowerSettings())}|${JSON.stringify(loadFinopsConfig())}|${fleetRev()}`;
+    const validIds = new Set((snap.vcenters || []).map((v) => v.id));
     const payload = await snapMemo('finops', key, 60_000, async () => {
-      const measured = filterMeasuredByMapping(applyFleetAssign(await allMeasuredPower({ hosts: snap.hosts })), snap);
+      const measured = filterMeasuredByMapping(applyFleetExclude(applyFleetAssign(await allMeasuredPower({ hosts: snap.hosts }), validIds)), snap);
       return computeFinOps(snap, measured);
     });
     sendCached(req, res, key, payload);
@@ -48,8 +49,9 @@ insightsRouter.get('/power-breakdown', async (req, res) => {
     const snap = store.get();
     const vc = String(req.query.vcenterId || '');
     const key = `${snap.generatedAt}|${vc}|${JSON.stringify(loadPowerSettings())}|${fleetRev()}`;
+    const validIds = new Set((snap.vcenters || []).map((v) => v.id));
     const payload = await snapMemo('power-breakdown', key, 60_000, async () => {
-      const measured = filterMeasuredByMapping(applyFleetAssign(await allMeasuredPower({ hosts: snap.hosts })), snap);
+      const measured = filterMeasuredByMapping(applyFleetExclude(applyFleetAssign(await allMeasuredPower({ hosts: snap.hosts }), validIds)), snap);
       return computePowerBreakdown(snap, measured, { vcenterId: vc });
     });
     sendCached(req, res, key, payload);

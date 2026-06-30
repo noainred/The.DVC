@@ -1381,18 +1381,19 @@ adminRouter.get('/collectors', adminOnly, (_req, res) => {
 
 adminRouter.post('/collectors', adminOnly, (req, res) => {
   const result = addCollector(req.body || {});
-  if (result.ok) pullNow().catch(() => {});
+  if (result.ok) { pullNow().catch(() => {}); logAudit({ user: req.user?.username, action: '수집 서버 등록', target: result.collector?.id || '', detail: `url=${result.collector?.url || ''} vcenterId=${result.collector?.vcenterId || ''}`, ip: req.ip || '' }); }
   res.status(result.ok ? 201 : 400).json(result);
 });
 
 adminRouter.put('/collectors/:id', adminOnly, (req, res) => {
   const result = updateCollector(req.params.id, req.body || {});
-  if (result.ok) pullNow().catch(() => {});
+  if (result.ok) { pullNow().catch(() => {}); logAudit({ user: req.user?.username, action: '수집 서버 수정', target: req.params.id, detail: `url=${result.collector?.url || ''} vcenterId=${result.collector?.vcenterId || ''}`, ip: req.ip || '' }); }
   res.status(result.ok ? 200 : 400).json(result);
 });
 
 adminRouter.delete('/collectors/:id', adminOnly, (req, res) => {
   const result = removeCollector(req.params.id);
+  if (result.ok) logAudit({ user: req.user?.username, action: '수집 서버 삭제', target: req.params.id, ip: req.ip || '' });
   res.status(result.ok ? 200 : 404).json(result);
 });
 

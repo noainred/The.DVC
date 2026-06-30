@@ -22,10 +22,11 @@ const FILE = path.join(config.configDir, 'fleet-tags.json');
 const VALID = new Set(['baremetal', 'virtualization', 'exclude']);
 
 let cache = null;
-let cacheMtimeMs = 0;
+let cacheMtimeMs = '';
 
+// (mtimeMs, size) 복합 토큰 — coarse mtime 동일-틱에 외부 편집된 경우도 size 변화로 무효화.
 function fileMtimeMs() {
-  try { return fs.statSync(FILE).mtimeMs; } catch { return 0; }
+  try { const st = fs.statSync(FILE); return `${st.mtimeMs}:${st.size}`; } catch { return ''; }
 }
 
 export function loadFleetTags() {
@@ -70,17 +71,31 @@ export function pruneFleetTags(liveKeys) {
   let removed = 0;
   for (const [k, v] of Object.entries(cur)) { if (live.has(k)) next[k] = v; else removed += 1; }
   if (!removed) return 0;
-  try { atomicWriteFileSync(FILE, JSON.stringify({ tags: next }, null, 2)); }
-  catch { return 0; }
+  // 쓰기 실패는 '0건 제거'와 구분해 throw — 라우트가 부분실패를 500으로 드러낼 수 있게(조용한 은폐 방지).
+  atomicWriteFileSync(FILE, JSON.stringify({ tags: next }, null, 2));
   cache = next;
   cacheMtimeMs = fileMtimeMs();
   bumpFleetRev();
   return removed;
 }
 
+/**
+ * 측정 전력 목록에서 'exclude' 태그가 달린 물리 서버를 제거 — FinOps/PowerMap 등 전력 화면이
+ * 통합 인벤토리(classifyFleet)와 같은 제외 집합을 쓰도록(화면 간 제외 불일치 방지).
+ * 키는 서비스태그/서버ID/호스트명(들) 중 하나라도 'exclude'면 제외.
+ */
+export function applyFleetExclude(measured) {
+  const t = loadFleetTags();
+  if (!t || !Object.keys(t).length) return measured;
+  const norm = (s) => String(s || '').trim().toLowerCase();
+  const isExcluded = (m) =>
+    [m.serviceTag, m.serverId, m.host, ...(m.hostNames || [])].some((k) => t[norm(k)] === 'exclude');
+  return (measured || []).filter((m) => !isExcluded(m));
+}
+
 /** 테스트/관리용 초기화. */
 export function resetFleetTags() {
   cache = {};
-  cacheMtimeMs = 0;
+  cacheMtimeMs = '';
   try { if (fs.existsSync(FILE)) fs.unlinkSync(FILE); } catch { /* */ }
 }
