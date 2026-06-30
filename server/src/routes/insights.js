@@ -35,7 +35,7 @@ insightsRouter.get('/finops', async (req, res) => {
     const key = `${snap.generatedAt}|${JSON.stringify(loadPowerSettings())}|${JSON.stringify(loadFinopsConfig())}|${fleetRev()}`;
     const validIds = new Set((snap.vcenters || []).map((v) => v.id));
     const payload = await snapMemo('finops', key, 60_000, async () => {
-      const measured = filterMeasuredByMapping(applyFleetExclude(applyFleetAssign(await allMeasuredPower({ hosts: snap.hosts }), validIds)), snap);
+      const measured = filterMeasuredByMapping(applyFleetExclude(applyFleetAssign(await allMeasuredPower({ hosts: snap.hosts, vcenterFirst: true }), validIds)), snap);
       return computeFinOps(snap, measured);
     });
     sendCached(req, res, key, payload);
@@ -51,7 +51,7 @@ insightsRouter.get('/power-breakdown', async (req, res) => {
     const key = `${snap.generatedAt}|${vc}|${JSON.stringify(loadPowerSettings())}|${fleetRev()}`;
     const validIds = new Set((snap.vcenters || []).map((v) => v.id));
     const payload = await snapMemo('power-breakdown', key, 60_000, async () => {
-      const measured = filterMeasuredByMapping(applyFleetExclude(applyFleetAssign(await allMeasuredPower({ hosts: snap.hosts }), validIds)), snap);
+      const measured = filterMeasuredByMapping(applyFleetExclude(applyFleetAssign(await allMeasuredPower({ hosts: snap.hosts, vcenterFirst: true }), validIds)), snap);
       return computePowerBreakdown(snap, measured, { vcenterId: vc });
     });
     sendCached(req, res, key, payload);

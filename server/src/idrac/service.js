@@ -103,7 +103,7 @@ export async function latestPowerByHostName() {
  * 매핑 여부와 무관하게 집계된다. 각 항목의 host는 매핑 기준 이름(인벤토리 매칭 시도용).
  * 반환 [{ serverId, serverName, watts, ts, host, source }].
  */
-export async function allMeasuredPower({ hosts = [] } = {}) {
+export async function allMeasuredPower({ hosts = [], vcenterFirst = false } = {}) {
   const db = await getDb();
   const latest = db.latestAll(); // Map<serverId,{watts,ts}>
   const out = [];
@@ -126,46 +126,49 @@ export async function allMeasuredPower({ hosts = [] } = {}) {
     keys.forEach((k) => seenIdent.add(k));
   };
 
-  for (const s of loadRegistry()) {
-    if (s.type === 'ome') continue;
-    const sample = latest.get(s.id);
-    if (!sample || sample.watts == null || !Number.isFinite(sample.watts)) continue;
-    const { model, serviceTag } = serverIdentity(s.id, s);
-    const hostNames = matchKeys(s);                  // 출력/귀속용(표시이름·태그 별칭 포함)
-    // dedup 식별은 '실제 호스트명/IP'만 사용(표시 이름은 사용자가 임의 지정 가능 → 충돌로 오드롭 방지).
-    const dedupHosts = [...(s.hostNames || []), s.host].filter(Boolean);
-    tryAdd({ serverId: s.id, serverName: s.name, watts: sample.watts, ts: sample.ts, host: norm(s.host || hostNames[0] || s.name), hostNames, model, serviceTag, vcenterId: s.vcenterId || '', source: 'idrac' }, serviceTag, dedupHosts);
-  }
-  // OME 연결의 소속 법인 → 그 연결이 발견한 디바이스가 상속(전력 귀속을 PowerMap/FinOps/플릿이 공유).
-  const omeEntryVc = new Map(loadRegistry().filter((s) => s.type === 'ome' && s.vcenterId).map((s) => [s.id, s.vcenterId]));
-  for (const { entryId, at, device } of allOmeDevices()) {
-    if (device.watts == null) continue;
-    const key = dbKey(entryId, device);
-    const sample = latest.get(key) || { watts: device.watts, ts: at };
-    if (sample.watts == null || !Number.isFinite(sample.watts)) continue;
-    const st = norm(device.serviceTag);
-    const hostNames = [st, norm(device.name)].filter(Boolean);
-    // OME 식별: 서비스태그 + 호스트명 모두 dedup 키로(서비스태그 없는 iDRAC과 같은 박스도 이름으로 dedup).
-    const dedupHosts = [device.serviceTag, device.name].filter(Boolean);
-    tryAdd({ serverId: key, serverName: device.name, watts: sample.watts, ts: sample.ts, host: st || norm(device.name), hostNames, model: (device.model || '').trim(), serviceTag: device.serviceTag || '', vcenterId: omeEntryVc.get(entryId) || '', source: 'ome' }, device.serviceTag, dedupHosts);
-  }
-  const seenRemoteOrigin = new Set(); // 같은 수집기의 동일 서버(여러 별칭 보고)를 한 번만 집계
-  for (const [host, r] of remotePowerByHost()) {
-    if (r.watts == null || !Number.isFinite(r.watts)) continue;
-    // 출처 서버 식별: serverId가 있으면 그 기준으로 중복 제거(구버전 수집기의 별칭 중복 행 흡수).
-    if (r.serverId != null) {
-      const origin = `${r.collectorId}:${r.serverId}`;
-      if (seenRemoteOrigin.has(origin)) continue;
-      seenRemoteOrigin.add(origin);
+  // 물리 실측 소스(iDRAC 직접 + OME 장비 + 원격 수집기).
+  const addPhysical = () => {
+    for (const s of loadRegistry()) {
+      if (s.type === 'ome') continue;
+      const sample = latest.get(s.id);
+      if (!sample || sample.watts == null || !Number.isFinite(sample.watts)) continue;
+      const { model, serviceTag } = serverIdentity(s.id, s);
+      const hostNames = matchKeys(s);                  // 출력/귀속용(표시이름·태그 별칭 포함)
+      // dedup 식별은 '실제 호스트명/IP'만 사용(표시 이름은 사용자가 임의 지정 가능 → 충돌로 오드롭 방지).
+      const dedupHosts = [...(s.hostNames || []), s.host].filter(Boolean);
+      tryAdd({ serverId: s.id, serverName: s.name, watts: sample.watts, ts: sample.ts, host: norm(s.host || hostNames[0] || s.name), hostNames, model, serviceTag, vcenterId: s.vcenterId || '', source: 'idrac' }, serviceTag, dedupHosts);
     }
-    const id = `remote:${r.collectorId}:${r.serverId != null ? r.serverId : host}`;
-    const hostNames = [norm(host)];
-    tryAdd({ serverId: id, serverName: r.serverName || host, watts: r.watts, ts: r.ts, host: norm(host), hostNames, model: (r.model || '').trim(), serviceTag: r.serviceTag || '', vcenterId: r.vcenterId || '', source: 'remote' }, r.serviceTag, [host].filter(Boolean));
-  }
-  // vCenter PerformanceManager로 수집한 ESXi 호스트 전력(host.powerWatts) — '맨 마지막'에 추가해
-  // iDRAC/OME/원격으로 이미 잡힌 서버는 dedup으로 건너뛴다(전용 소스 우선, vCenter는 빈 곳을 채움).
-  // iDRAC 없이도 vCenter만으로 플릿 전력이 집계되며, 베어메탈 iDRAC을 추후 등록하면 그 위에 합산된다.
-  if (loadPowerSettings().includeVcenterPower !== false) {
+    // OME 연결의 소속 법인 → 그 연결이 발견한 디바이스가 상속(전력 귀속을 PowerMap/FinOps/플릿이 공유).
+    const omeEntryVc = new Map(loadRegistry().filter((s) => s.type === 'ome' && s.vcenterId).map((s) => [s.id, s.vcenterId]));
+    for (const { entryId, at, device } of allOmeDevices()) {
+      if (device.watts == null) continue;
+      const key = dbKey(entryId, device);
+      const sample = latest.get(key) || { watts: device.watts, ts: at };
+      if (sample.watts == null || !Number.isFinite(sample.watts)) continue;
+      const st = norm(device.serviceTag);
+      const hostNames = [st, norm(device.name)].filter(Boolean);
+      // OME 식별: 서비스태그 + 호스트명 모두 dedup 키로(서비스태그 없는 iDRAC과 같은 박스도 이름으로 dedup).
+      const dedupHosts = [device.serviceTag, device.name].filter(Boolean);
+      tryAdd({ serverId: key, serverName: device.name, watts: sample.watts, ts: sample.ts, host: st || norm(device.name), hostNames, model: (device.model || '').trim(), serviceTag: device.serviceTag || '', vcenterId: omeEntryVc.get(entryId) || '', source: 'ome' }, device.serviceTag, dedupHosts);
+    }
+    const seenRemoteOrigin = new Set(); // 같은 수집기의 동일 서버(여러 별칭 보고)를 한 번만 집계
+    for (const [host, r] of remotePowerByHost()) {
+      if (r.watts == null || !Number.isFinite(r.watts)) continue;
+      // 출처 서버 식별: serverId가 있으면 그 기준으로 중복 제거(구버전 수집기의 별칭 중복 행 흡수).
+      if (r.serverId != null) {
+        const origin = `${r.collectorId}:${r.serverId}`;
+        if (seenRemoteOrigin.has(origin)) continue;
+        seenRemoteOrigin.add(origin);
+      }
+      const id = `remote:${r.collectorId}:${r.serverId != null ? r.serverId : host}`;
+      const hostNames = [norm(host)];
+      tryAdd({ serverId: id, serverName: r.serverName || host, watts: r.watts, ts: r.ts, host: norm(host), hostNames, model: (r.model || '').trim(), serviceTag: r.serviceTag || '', vcenterId: r.vcenterId || '', source: 'remote' }, r.serviceTag, [host].filter(Boolean));
+    }
+  };
+
+  // vCenter PerformanceManager로 수집한 ESXi 호스트 전력(host.powerWatts).
+  const addVcenter = () => {
+    if (loadPowerSettings().includeVcenterPower === false) return;
     const now = Date.now();
     for (const h of (hosts || [])) {
       const w = Number(h.powerWatts);
@@ -175,7 +178,14 @@ export async function allMeasuredPower({ hosts = [] } = {}) {
       const hostNames = [name, norm(h.serviceTag)].filter(Boolean);
       tryAdd({ serverId: id, serverName: h.name, watts: w, ts: now, host: name, hostNames, model: (h.model || '').trim(), serviceTag: h.serviceTag || '', vcenterId: h.vcenterId || '', source: 'vcenter' }, h.serviceTag, [h.name].filter(Boolean));
     }
-  }
+  };
+
+  // 소스 우선순위(먼저 추가된 소스가 dedup에서 이김):
+  //  - 기본(iDRAC 우선): 물리 실측을 먼저 → 같은 박스의 vCenter 추정은 dedup으로 스킵. iDRAC 메뉴/물리 집계용.
+  //  - vcenterFirst(호스트=vCenter 추정): vCenter 호스트를 먼저 → 매칭된 Dell 호스트는 vCenter 값으로,
+  //    iDRAC은 매칭 안 되는 '베어메탈'만 채운다. Overview/FinOps 등 메인 전력이 iDRAC을 호스트에 섞지 않게.
+  if (vcenterFirst) { addVcenter(); addPhysical(); }
+  else { addPhysical(); addVcenter(); }
   return out;
 }
 
