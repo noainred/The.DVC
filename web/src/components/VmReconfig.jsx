@@ -20,6 +20,13 @@ export function VmReconfigButton({ vm }) {
 }
 
 const numOr = (v, d) => { const n = Number(v); return Number.isFinite(n) ? n : d; };
+// 용량 표기: 1000GB 이상은 TB로(소수 1자리, 정수면 소수 생략). 예: 11517GB→11.5TB, 1000GB→1TB.
+const fmtCap = (gb) => {
+  if (gb == null || !Number.isFinite(Number(gb))) return '?';
+  const g = Number(gb);
+  if (g >= 1000) { const t = g / 1000; return `${t % 1 === 0 ? t : t.toFixed(1)}TB`; }
+  return `${Math.round(g)}GB`;
+};
 
 function VmReconfigModal({ vm, onClose }) {
   const [hw, setHw] = useState(null);
@@ -143,7 +150,7 @@ function VmReconfigModal({ vm, onClose }) {
                 {datastores.length > 0 && (
                   <select className="select" value={a.ds} onChange={(e) => setAdds((arr) => arr.map((x, j) => (j === i ? { ...x, ds: e.target.value } : x)))} style={{ maxWidth: 200, fontSize: 12 }} title="디스크를 생성할 데이터스토어">
                     <option value="">기존 위치(자동)</option>
-                    {datastores.map((d) => <option key={d.name} value={d.name}>{d.name}{d.freeGB != null ? ` · ${d.freeGB}GB 여유` : ''}</option>)}
+                    {datastores.map((d) => <option key={d.name} value={d.name}>{d.name} · 여유 {fmtCap(d.freeGB)} / 총 {fmtCap(d.capacityGB)}</option>)}
                   </select>
                 )}
                 <button className="logout-btn" style={{ padding: '2px 8px' }} onClick={() => setAdds((arr) => arr.filter((_, j) => j !== i))}>✕</button>
