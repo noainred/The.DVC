@@ -73,7 +73,9 @@ async function overlayIdracPower(snap) {
       // 1) 호스트명 일치, 2) 서비스태그 일치(이름이 달라도 Dell 서버 전력 귀속).
       const m = byName.get(String(h.name || '').trim().toLowerCase())
         || byTag.get(String(h.serviceTag || '').trim().toLowerCase());
-      if (m) { h.powerWatts = m.watts; h.powerSource = 'idrac'; }
+      // iDRAC 실측을 호스트 '주' 전력(powerWatts)에 덮어쓰지 않는다 — 호스트 전력은 vCenter 추정 유지.
+      // iDRAC 값은 참조용으로만 병기(호스트 상세 'iDRAC 실측' 표기 + iDRAC 서버 등록 메뉴에서 별도 집계).
+      if (m) { h.powerWattsIdrac = m.watts; h.idracBacked = true; }
     }
 
     // vCenter PerformanceManager로 수집한 ESXi 호스트 전력을 시계열 DB에 적재(대시보드 24h 피크/평균·추세용).
@@ -83,7 +85,8 @@ async function overlayIdracPower(snap) {
     // 전체 측정 전력(iDRAC/OME/원격/vCenter, 매핑 무관)을 vCenter별로 귀속 — Overview 총합·per-vCenter 롤업의 근거.
     // 우선순위: 서버에 명시 지정된 vcenterId → 호스트명 → 서비스태그 → (미매핑).
     // 설정 시 vCenter 미매핑(귀속 안 됨) 측정 전력을 총합/보고/롤업에서 제외.
-    const measured = filterMeasuredByMapping(applyFleetAssign(await allMeasuredPower({ hosts: snap.hosts })), snap);
+    // vcenterFirst: 매칭된 Dell 호스트는 vCenter 추정 전력으로, iDRAC은 베어메탈만 — 호스트 전력에 iDRAC을 섞지 않는다.
+    const measured = filterMeasuredByMapping(applyFleetAssign(await allMeasuredPower({ hosts: snap.hosts, vcenterFirst: true })), snap);
     const idx = buildHostIndex(snap.hosts);
     const validVcIds = new Set(snap.vcenters.map((v) => v.id));
     const byVc = new Map();
