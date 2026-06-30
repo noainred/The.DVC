@@ -30,24 +30,23 @@ function intervalMs() {
   return config.idrac.scanIntervalMs;
 }
 
-/** 한 vCenter 대역을 스캔+등록(또는 위임). 반환 { vcenterId, scanned, found, registered, delegated, error }. */
-async function scanOneVcenter(e, onProgress) {
+/** 한 법인(DataCenter) 대역을 스캔+등록(또는 위임). 반환 { datacenterId, scanned, found, registered, delegated, error }. */
+async function scanOneDatacenter(e, onProgress) {
   const ips = e.ranges.join('\n');
   // 위임: 에이전트가 현지에서 스캔+자동등록(noRegister:false). 중앙 토큰 필요.
   if (e.agent && e.agent !== '__local__') {
-    if (!config.central.token) return { vcenterId: e.vcenterId, delegated: false, error: '중앙 토큰 미설정으로 위임 불가' };
-    const reqId = enqueueIdracScan(e.agent, { ips, username: e.username, password: e.password, vcenterId: e.vcenterId, noRegister: false });
-    return { vcenterId: e.vcenterId, delegated: true, agent: e.agent, reqId: reqId || null, error: reqId ? null : '위임 잡 적재 실패(대기 한도 초과)' };
+    if (!config.central.token) return { datacenterId: e.datacenterId, delegated: false, error: '중앙 토큰 미설정으로 위임 불가' };
+    const reqId = enqueueIdracScan(e.agent, { ips, username: e.username, password: e.password, datacenterId: e.datacenterId, noRegister: false });
+    return { datacenterId: e.datacenterId, delegated: true, agent: e.agent, reqId: reqId || null, error: reqId ? null : '위임 잡 적재 실패(대기 한도 초과)' };
   }
-  // 중앙 직접 스캔.
+  // 중앙 직접 스캔 → 발견한 iDRAC을 그 법인(DataCenter)에 등록(법인 DB).
   const r = await scanForIdracs({ ips, username: e.username, password: e.password, onProgress });
   let registered = 0;
   if (r.found.length) {
-    // 주기 스캔 등록 모드: merge(기본) 또는 replace-vcenter(found 0건이면 registerScanned가 no-op).
-    const reg = registerScanned(r.found, e.username, e.password, e.mode === 'replace-vcenter' ? 'replace-vcenter' : 'merge', e.vcenterId);
+    const reg = registerScanned(r.found, e.username, e.password, e.mode === 'replace-datacenter' ? 'replace-datacenter' : 'merge', '', e.datacenterId);
     if (reg.ok) registered = (reg.added || 0) + (reg.updated || 0);
   }
-  return { vcenterId: e.vcenterId, delegated: false, scanned: r.scanned, found: r.found.length, registered, truncated: r.truncated };
+  return { datacenterId: e.datacenterId, delegated: false, scanned: r.scanned, found: r.found.length, registered, truncated: r.truncated };
 }
 
 /**
@@ -58,16 +57,16 @@ export async function runIdracScanOnce(opts = {}) {
   if (running) return { ok: false, reason: '이미 스캔 중입니다.' };
   if (isStopped()) return { ok: false, reason: '긴급중단 중' };
   let entries = enabledScanRanges();
-  if (opts.vcenterId) {
-    const raw = getScanRangeRaw(opts.vcenterId);
+  if (opts.datacenterId) {
+    const raw = getScanRangeRaw(opts.datacenterId);
     // 수동 단건: enabled가 아니어도 실행하되 대역/계정/비밀번호는 필요.
     if (!raw || !(raw.ranges || []).length || !String(raw.username || '').trim()) {
-      return { ok: false, reason: '대상 vCenter의 대역/계정이 없습니다.' };
+      return { ok: false, reason: '대상 법인의 대역/계정이 없습니다.' };
     }
     if (!String(raw.password || '')) {
-      return { ok: false, reason: '대상 vCenter의 iDRAC 비밀번호가 없습니다(스캔 대역 수정에서 입력하세요).' };
+      return { ok: false, reason: '대상 법인의 iDRAC 비밀번호가 없습니다(스캔 대역 수정에서 입력하세요).' };
     }
-    entries = [{ vcenterId: String(opts.vcenterId).trim(), ranges: (raw.ranges || []).filter(Boolean), username: String(raw.username).trim(), password: raw.password || '', agent: String(raw.agent || '').trim(), mode: raw.mode || 'merge' }];
+    entries = [{ datacenterId: String(opts.datacenterId).trim(), ranges: (raw.ranges || []).filter(Boolean), username: String(raw.username).trim(), password: raw.password || '', agent: String(raw.agent || '').trim(), mode: raw.mode || 'merge' }];
   }
   if (!entries.length) { lastRun = { at: Date.now(), skipped: '대상 없음' }; return { ok: false, reason: '스캔할 대역이 없습니다.' }; }
 
@@ -78,24 +77,24 @@ export async function runIdracScanOnce(opts = {}) {
   try {
     for (let i = 0; i < entries.length; i++) {
       const e = entries[i];
-      progress = { vcenterId: e.vcenterId, done: 0, total: 0, foundSoFar: foundTotal, idx: i, totalVcenters: entries.length, startedAt: started };
+      progress = { datacenterId: e.datacenterId, done: 0, total: 0, foundSoFar: foundTotal, idx: i, totalDatacenters: entries.length, startedAt: started };
       try {
-        const r = await scanOneVcenter(e, (done, total) => { progress = { vcenterId: e.vcenterId, done, total, foundSoFar: foundTotal, idx: i, totalVcenters: entries.length, startedAt: started }; });
+        const r = await scanOneDatacenter(e, (done, total) => { progress = { datacenterId: e.datacenterId, done, total, foundSoFar: foundTotal, idx: i, totalDatacenters: entries.length, startedAt: started }; });
         results.push(r);
         if (r.delegated) delegatedTotal++;
         foundTotal += (r.found || 0);
         registeredTotal += (r.registered || 0);
-        if (r.error) errors.push(`${e.vcenterId}: ${r.error}`);
-        recordScanRangeRun(e.vcenterId, { scanned: r.scanned ?? null, found: r.found ?? null, registered: r.registered ?? null, delegated: !!r.delegated, agent: r.agent || null, error: r.error || null });
+        if (r.error) errors.push(`${e.datacenterId}: ${r.error}`);
+        recordScanRangeRun(e.datacenterId, { scanned: r.scanned ?? null, found: r.found ?? null, registered: r.registered ?? null, delegated: !!r.delegated, agent: r.agent || null, error: r.error || null });
       } catch (err) {
-        errors.push(`${e.vcenterId}: ${err.message}`);
-        results.push({ vcenterId: e.vcenterId, error: err.message });
-        recordScanRangeRun(e.vcenterId, { error: err.message });
+        errors.push(`${e.datacenterId}: ${err.message}`);
+        results.push({ datacenterId: e.datacenterId, error: err.message });
+        recordScanRangeRun(e.datacenterId, { error: err.message });
       }
     }
     // 새로 등록된 서버가 있으면 즉시 전력 1회 수집(대시보드에 바로 반영).
     if (registeredTotal > 0) pollNow().catch(() => {});
-    lastRun = { at: Date.now(), durationMs: Date.now() - started, vcenters: entries.length, found: foundTotal, registered: registeredTotal, delegated: delegatedTotal, errors, manual: !!opts.manual, results };
+    lastRun = { at: Date.now(), durationMs: Date.now() - started, datacenters: entries.length, found: foundTotal, registered: registeredTotal, delegated: delegatedTotal, errors, manual: !!opts.manual, results };
     return { ok: true, ...lastRun };
   } catch (e) {
     lastRun = { at: Date.now(), error: e.message };
@@ -106,8 +105,8 @@ export async function runIdracScanOnce(opts = {}) {
 /** 비동기 시작(요청 즉시 반환, 창 닫아도 백그라운드 지속). */
 export function startIdracScanNow(opts = {}) {
   if (running) return { ok: false, reason: '이미 스캔 중입니다.', running: true };
-  const entries = opts.vcenterId ? [opts.vcenterId] : enabledScanRanges();
-  if (!opts.vcenterId && !entries.length) return { ok: false, reason: '스캔할 대역이 없습니다.' };
+  const entries = opts.datacenterId ? [opts.datacenterId] : enabledScanRanges();
+  if (!opts.datacenterId && !entries.length) return { ok: false, reason: '스캔할 대역이 없습니다.' };
   runIdracScanOnce({ ...opts, manual: true }).catch((e) => console.error('[idrac-scan] 백그라운드 스캔 실패:', e.message));
   return { ok: true, started: true };
 }
@@ -116,7 +115,7 @@ export function idracScanStatus() {
   const enabled = enabledScanRanges();
   const pct = progress && progress.total ? Math.round((progress.done / progress.total) * 100) : null;
   return {
-    enabledVcenters: enabled.length,
+    enabledDatacenters: enabled.length,
     totalRanges: enabled.reduce((a, e) => a + e.ranges.length, 0),
     intervalMs: intervalMs(),
     running, lastRun,

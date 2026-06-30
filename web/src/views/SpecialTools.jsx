@@ -2004,26 +2004,29 @@ function Nsx() {
 }
 
 /** 법인별 서버 정보 — 등록된 iDRAC/OME 서버를 소속 법인(vCenter)별로 묶어 본다. */
-function ServerInfoByVcenter({ vc, onServer, vcs = [] }) {
+function ServerInfoByVcenter({ onServer }) {
   const [d, setD] = useState(null);
+  const [dcs, setDcs] = useState({ datacenters: [], assign: {} });
   const [err, setErr] = useState(null);
   const [q, setQ] = useState('');
-  const load = () => fetchJson('/admin/idrac').then((r) => { setD(r.servers || []); setErr(null); }).catch((e) => setErr(e.message));
+  const load = () => Promise.all([
+    fetchJson('/admin/idrac').then((r) => r.servers || []),
+    fetchJson('/admin/datacenters').then((r) => ({ datacenters: r.datacenters || [], assign: r.assign || {} })).catch(() => ({ datacenters: [], assign: {} })),
+  ]).then(([servers, dc]) => { setD(servers); setDcs(dc); setErr(null); }).catch((e) => setErr(e.message));
   useEffect(() => { setD(null); load(); /* eslint-disable-next-line */ }, []);
   if (err) return <ErrorBox message={err} />;
   if (!d) return <Loading />;
-  const vcName = new Map(vcs.map((v) => [v.id, v.name || v.id]));
+  const dcName = new Map((dcs.datacenters || []).map((x) => [x.id, x.name || x.id]));
+  const assign = dcs.assign || {};
+  // 서버의 소속 법인: 스캔 등록분은 datacenterId 직접, 그 외는 vCenter→DataCenter 할당으로 해석.
+  const dcOf = (s) => s.datacenterId || assign[s.vcenterId] || '';
   const ql = q.trim().toLowerCase();
   const match = (s) => !ql || [s.name, s.serviceTag, s.host, s.model].some((x) => String(x || '').toLowerCase().includes(ql));
-  const rows = d.filter((s) => {
-    if (vc === '__unmapped__') return !s.vcenterId && match(s);
-    if (vc) return s.vcenterId === vc && match(s);
-    return match(s);
-  });
+  const rows = d.filter(match);
   const groups = new Map();
-  for (const s of rows) { const id = s.vcenterId || '__unmapped__'; if (!groups.has(id)) groups.set(id, []); groups.get(id).push(s); }
+  for (const s of rows) { const id = dcOf(s) || '__unmapped__'; if (!groups.has(id)) groups.set(id, []); groups.get(id).push(s); }
   const groupList = [...groups.entries()]
-    .map(([id, list]) => ({ id, name: id === '__unmapped__' ? '⚠ 미지정(소속 없음)' : (vcName.get(id) || id), list }))
+    .map(([id, list]) => ({ id, name: id === '__unmapped__' ? '⚠ 미지정(법인 없음)' : (dcName.get(id) || id), list }))
     .sort((a, b) => (a.id === '__unmapped__' ? 1 : 0) - (b.id === '__unmapped__' ? 1 : 0) || b.list.length - a.list.length || String(a.name).localeCompare(String(b.name)));
   const corpCount = groupList.filter((g) => g.id !== '__unmapped__').length;
   return (

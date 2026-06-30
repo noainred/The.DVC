@@ -17,6 +17,7 @@ server/config/idrac-power.ndjson
 server/config/idrac-inventory.json
 server/config/collectors.json
 server/config/datacenters.json
+server/config/idrac-scan-ranges.json
 server/config/agent-assignments.json
 server/config/agent-results.json
 server/.upgrade-cache/

@@ -1,6 +1,17 @@
 {
   "notes": [
     {
+      "version": "2.72.0",
+      "date": "2026-06-30",
+      "title": "iDRAC 장비 스캔을 법인(DataCenter) 기준으로 — 법인 DB 수집 (2단계)",
+      "notes": [
+        "iDRAC 장비 스캔의 소속을 vCenter→법인(DataCenter)으로 전환했습니다. 스캔 대역 추가 폼의 '소속 vCenter'를 '법인(DataCenter)' 선택으로 바꾸고, 선택한 법인 대역을 스캔하면 발견된 Dell 물리 서버를 그 법인 DB(iDRAC 레지스트리의 datacenterId)에 등록합니다(vCenter와 독립).",
+        "백엔드: 스캔 대역 저장소를 datacenterId로 재키잉(구버전 vcenter 저장 자동 호환), 레지스트리 서버에 datacenterId 추가, registerScanned/스캔 폴러/위임 잡(에이전트)까지 datacenterId 전파.",
+        "특수 기능 › 서버 분석 '법인별 서버 정보'를 법인(DataCenter) 기준 그룹으로 변경 — 스캔 등록분은 datacenterId 직접, 그 외는 vCenter→DataCenter 할당으로 해석.",
+        "전체 단위테스트 223건 통과."
+      ]
+    },
+    {
       "version": "2.71.0",
       "date": "2026-06-30",
       "title": "DataCenter(법인) 개념 도입 — 설정에서 정의 + vCenter 할당 (1단계)",

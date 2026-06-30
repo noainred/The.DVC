@@ -46,7 +46,7 @@ export async function runIdracScanWorkerOnce() {
       try {
         // '등록' 잡: UI가 스캔에서 확인한 found 목록을 현지 레지스트리에 등록.
         if (job.action === 'register') {
-          const rr = registerScanned(job.found || [], job.username, job.password, job.mode || 'merge', job.vcenterId || '');
+          const rr = registerScanned(job.found || [], job.username, job.password, job.mode || 'merge', job.vcenterId || '', job.datacenterId || '');
           const registered = rr.ok ? ((rr.added || 0) + (rr.updated || 0)) : 0;
           if (rr.ok) pollNow().catch(() => {});
           await postResult({ reqId: job.reqId, agent: config.agent.name, scanned: 0, found: job.found || [], foundCount: (job.found || []).length, registered, error: rr.ok ? null : (rr.reason || '등록 실패'), durationMs: Date.now() - started });
@@ -66,7 +66,7 @@ export async function runIdracScanWorkerOnce() {
         // noRegister면 스캔만(UI에서 확인 후 별도 '등록' 잡으로 등록). 그 외엔 기존처럼 자동등록.
         let registered = 0;
         if (!job.noRegister && config.agent.autoRegister && scan.found.length) {
-          const rr = registerScanned(scan.found, job.username, job.password, 'merge', job.vcenterId || '');
+          const rr = registerScanned(scan.found, job.username, job.password, 'merge', job.vcenterId || '', job.datacenterId || '');
           if (rr.ok) { registered = (rr.added || 0) + (rr.updated || 0); pollNow().catch(() => {}); }
         }
         await postResult({ reqId: job.reqId, agent: config.agent.name, ...scan, registered, durationMs: Date.now() - started });

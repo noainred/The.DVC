@@ -91,6 +91,7 @@ function normalize(body, existing = null) {
     password: body.password ? String(body.password) : e.password || '',
     serviceTag: String(body.serviceTag ?? e.serviceTag ?? '').trim(),
     vcenterId: String(body.vcenterId ?? e.vcenterId ?? '').trim(), // 명시 지정 시 전력이 이 vCenter로 귀속(이름·태그 매칭보다 우선)
+    datacenterId: String(body.datacenterId ?? e.datacenterId ?? '').trim(), // 소속 법인(DataCenter) — iDRAC 스캔으로 수집한 물리 서버의 법인 귀속
     hostNames,
     enabled: body.enabled != null ? Boolean(body.enabled) : (e.enabled != null ? e.enabled : true),
   };
@@ -200,10 +201,11 @@ export function bulkAddByIps(body) {
  * (ip, serviceTag, hostName, model); the shared username/password are applied
  * to all. hostNames includes the discovered hostname + IP for auto-matching.
  */
-export function registerScanned(found, username, password, mode = 'merge', vcenterId = '') {
+export function registerScanned(found, username, password, mode = 'merge', vcenterId = '', datacenterId = '') {
   if (!Array.isArray(found) || !found.length) return { ok: false, reason: '등록할 iDRAC가 없습니다.' };
   if (!username || !password) return { ok: false, reason: 'username/password가 필요합니다.' };
   const vc = String(vcenterId || '').trim();
+  const dc = String(datacenterId || '').trim();
   const servers = found.map((f) => ({
     id: f.ip,
     name: f.hostName || f.serviceTag || f.ip,
@@ -213,6 +215,7 @@ export function registerScanned(found, username, password, mode = 'merge', vcent
     serviceTag: f.serviceTag || '',
     hostNames: [f.hostName, f.ip].filter(Boolean),
     vcenterId: vc,
+    datacenterId: dc, // 법인(DataCenter) 스캔으로 발견 → 그 법인에 귀속(법인 DB)
     enabled: true,
   }));
   return importServers(servers, mode);

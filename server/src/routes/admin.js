@@ -1302,23 +1302,25 @@ adminRouter.post('/idrac/register-scanned', adminOnly, (req, res) => {
 adminRouter.get('/idrac/scan-ranges', adminOnly, (_req, res) => {
   res.json({ ok: true, ranges: listScanRanges(), status: idracScanStatus(), centralEnabled: Boolean(config.central.token) });
 });
-// 저장/수정. Body: { vcenterId, ranges?, username?, password?, agent?, enabled?, mode? }
+// 저장/수정. Body: { datacenterId, ranges?, username?, password?, agent?, enabled?, mode? }
+// (구버전 클라이언트 호환: vcenterId로 와도 datacenterId로 처리)
 adminRouter.put('/idrac/scan-ranges', adminOnly, (req, res) => {
   const b = req.body || {};
-  const r = saveScanRanges(b.vcenterId, b);
-  if (r.ok) logAudit({ user: req.user?.username, action: 'iDRAC 스캔 대역 저장', target: `${b.vcenterId} (대역 ${(r.ranges || []).length}개${r.enabled ? '' : ', 비활성'})` });
+  const dcId = b.datacenterId || b.vcenterId;
+  const r = saveScanRanges(dcId, b);
+  if (r.ok) logAudit({ user: req.user?.username, action: 'iDRAC 스캔 대역 저장', target: `${dcId} (대역 ${(r.ranges || []).length}개${r.enabled ? '' : ', 비활성'})` });
   res.status(r.ok ? 200 : 400).json(r);
 });
-adminRouter.delete('/idrac/scan-ranges/:vcenterId', adminOnly, (req, res) => {
-  const r = removeScanRanges(req.params.vcenterId);
-  if (r.ok) logAudit({ user: req.user?.username, action: 'iDRAC 스캔 대역 삭제', target: req.params.vcenterId });
+adminRouter.delete('/idrac/scan-ranges/:datacenterId', adminOnly, (req, res) => {
+  const r = removeScanRanges(req.params.datacenterId);
+  if (r.ok) logAudit({ user: req.user?.username, action: 'iDRAC 스캔 대역 삭제', target: req.params.datacenterId });
   res.status(r.ok ? 200 : 404).json(r);
 });
-// 지금 스캔(비동기). Body: { vcenterId? } 미지정 시 enabled인 전체 대역.
+// 지금 스캔(비동기). Body: { datacenterId? } 미지정 시 enabled인 전체 대역.
 adminRouter.post('/idrac/scan-ranges/scan', adminOnly, (req, res) => {
-  const vcenterId = String(req.body?.vcenterId || '').trim();
-  const r = startIdracScanNow(vcenterId ? { vcenterId } : {});
-  logAudit({ user: req.user?.username, action: 'iDRAC 대역 즉시 스캔', target: vcenterId || '(전체)' });
+  const datacenterId = String(req.body?.datacenterId || req.body?.vcenterId || '').trim();
+  const r = startIdracScanNow(datacenterId ? { datacenterId } : {});
+  logAudit({ user: req.user?.username, action: 'iDRAC 대역 즉시 스캔', target: datacenterId || '(전체)' });
   res.status(r.ok ? 200 : 400).json({ ...r, status: idracScanStatus() });
 });
 // 진행 상태(가벼운 폴링용).
