@@ -36,7 +36,7 @@ function newReqId() {
 }
 
 /** UI가 위임 스캔 요청 → reqId 반환. noRegister=true면 에이전트가 스캔만 하고 등록은 보류(UI 확인 후 등록). */
-export function enqueueIdracScan(agent, { ips, username, password, vcenterId = '', noRegister = false }) {
+export function enqueueIdracScan(agent, { ips, username, password, vcenterId = '', datacenterId = '', noRegister = false }) {
   gc();
   const key = String(agent || '').trim().toLowerCase();
   if (!key) return null;
@@ -46,7 +46,7 @@ export function enqueueIdracScan(agent, { ips, username, password, vcenterId = '
   // 총 IP 수를 미리 계산해 UI가 진행률 분모를 바로 표시할 수 있게 한다(스캔 max=2048 반영).
   let total = 0;
   try { total = Math.min(expandIpList(ips).ips.length, 2048); } catch { total = 0; }
-  jobs.set(reqId, { reqId, agent, action: 'scan', ips, username, password, vcenterId, noRegister: !!noRegister, state: 'pending', createdAt: Date.now(), progress: { scanned: 0, total, at: Date.now() } });
+  jobs.set(reqId, { reqId, agent, action: 'scan', ips, username, password, vcenterId, datacenterId, noRegister: !!noRegister, state: 'pending', createdAt: Date.now(), progress: { scanned: 0, total, at: Date.now() } });
   pend.add(reqId); byAgent.set(key, pend);
   return reqId;
 }

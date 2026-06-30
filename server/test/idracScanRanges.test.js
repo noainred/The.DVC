@@ -22,7 +22,7 @@ test('saveScanRanges: 저장 + 비밀번호 마스킹/유지', () => {
   assert.equal(r.username, 'root');
   // 목록 응답에는 평문 비밀번호가 없어야 함.
   const list = sr.listScanRanges();
-  const e = list.find((x) => x.vcenterId === 'OC2');
+  const e = list.find((x) => x.datacenterId === 'OC2');
   assert.ok(e && !('password' in e));
   assert.equal(e.hasPassword, true);
 
@@ -40,28 +40,28 @@ test('enabledScanRanges: enabled + 대역 + 계정 있는 것만(비번 포함)'
   sr.saveScanRanges('NORANGE', { ranges: '', username: 'root', password: 'x' }); // 대역 없음 → 제외
   sr.saveScanRanges('NOPW', { ranges: '172.16.1.0/24', username: 'root' }); // 비밀번호 없음 → 제외(스캔 보류)
   const en = sr.enabledScanRanges();
-  const ids = en.map((e) => e.vcenterId).sort();
+  const ids = en.map((e) => e.datacenterId).sort();
   assert.deepEqual(ids, ['OC2', 'WA']);
-  const oc2 = en.find((e) => e.vcenterId === 'OC2');
+  const oc2 = en.find((e) => e.datacenterId === 'OC2');
   assert.equal(oc2.password, 'secret', '폴러용은 비밀번호 포함');
 });
 
 test('removeScanRanges + recordScanRangeRun', () => {
   sr.recordScanRangeRun('WA', { scanned: 256, found: 3, registered: 3 });
-  let e = sr.listScanRanges().find((x) => x.vcenterId === 'WA');
+  let e = sr.listScanRanges().find((x) => x.datacenterId === 'WA');
   assert.ok(e.lastRun && e.lastRun.found === 3 && e.lastRun.at);
   assert.equal(sr.removeScanRanges('WA').ok, true);
-  assert.equal(sr.listScanRanges().some((x) => x.vcenterId === 'WA'), false);
+  assert.equal(sr.listScanRanges().some((x) => x.datacenterId === 'WA'), false);
   assert.equal(sr.removeScanRanges('WA').ok, false); // 이미 없음
 });
 
 test('runIdracScanOnce: 대상 없으면 사유 반환 / 단건 대역·계정 없으면 거부', async () => {
-  // 단건 대상이 대역/계정 없는 vCenter면 거부.
-  const r1 = await poller.runIdracScanOnce({ vcenterId: 'NORANGE' });
+  // 단건 대상이 대역/계정 없는 법인이면 거부.
+  const r1 = await poller.runIdracScanOnce({ datacenterId: 'NORANGE' });
   assert.equal(r1.ok, false);
   // 상태 객체 형태 점검.
   const st = poller.idracScanStatus();
-  assert.equal(typeof st.enabledVcenters, 'number');
+  assert.equal(typeof st.enabledDatacenters, 'number');
   assert.equal(typeof st.intervalMs, 'number');
   assert.equal(st.running, false);
 });
