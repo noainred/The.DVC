@@ -25,6 +25,7 @@ import LoginFails from './LoginFails.jsx';
 import NetIssues from './NetIssues.jsx';
 import AnomalyDetection from './AnomalyDetection.jsx';
 import SessionSecurity from './SessionSecurity.jsx';
+import Upgrade from './Upgrade.jsx';
 import About from './About.jsx';
 
 // 모든 하위 화면 정의(키→라벨→컴포넌트). 그룹에 속한 항목은 group 키로 묶는다.
@@ -57,6 +58,9 @@ const SUB = [
   { k: 'audit', label: '감사 로그', C: Audit },
   { k: 'login-fails', label: '로그인 실패 분석', C: LoginFails },
   { k: 'net-issues', label: '네트워크 이슈 분석', C: NetIssues },
+  // 업그레이드: 상단 '업그레이드' 탭은 SHOW_UPGRADE_TAB로 숨겨져 있어도, 관리자 설정 안에서는
+  // 항상 접근 가능하게 둔다(오프라인 업그레이드 번들 적용/원격 자동 업그레이드 설정).
+  { k: 'upgrade', label: '⬆ 업그레이드', C: Upgrade },
   { k: 'about', label: 'About', C: About },
 ];
 
