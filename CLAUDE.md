@@ -36,10 +36,19 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
   - 머지된 경우 main 기준 ZIP:
     `https://github.com/noainred/The.DVC/archive/refs/heads/main.zip`
   - 해당 PR 링크도 함께 제공한다.
-- **작업 완료 시 업데이트 버전을 GitHub에 게시**: 기능 작업이 끝나면
-  `package.json` 버전을 올리고(semver), `packaging/offline/build-package.sh`로
-  설치 패키지와 업그레이드 번들을 빌드해 `download/` 에 갱신 커밋한다
-  (`versions.json` 의 `latest` 도 갱신). 그래야 원격/오프라인 업그레이드가 가능하다.
-  - 설치 패키지: `download/vmware-portal-offline-<버전>-el9-x64.tar.gz`
-  - 업그레이드 번들: `download/vmware-portal-<버전>.tar.gz`
-  - 다운로드(raw): `https://github.com/noainred/The.DVC/raw/<branch>/download/<파일>`
+- **작업 완료 시 자동 업그레이드가 되도록 반드시 릴리스를 게시**(★사용자 강조): 기능 작업이
+  끝나면 버전업·커밋·PR 로 끝내지 말고, **운영 포탈이 원격으로 새 버전을 받을 수 있게
+  GitHub 릴리스까지 게시**한다. 바이너리는 git에 커밋하지 않고 GitHub Actions(`.github/
+  workflows/release.yml`)가 롤링 `downloads` 릴리스에 게시한다. 절차:
+  1. `package.json`(루트/서버/웹 3개) 버전 semver 인상 + `server/src/release-notes.json` 추가.
+  2. 변경을 개발 브랜치에 커밋·push 하고 PR 생성/갱신.
+  3. **릴리스 게시(필수)**: PR 을 main 에 머지한 뒤, release 워크플로를 돌린다.
+     - 권장: main 에 `v<버전>` 태그 push → CI 가 main(=새 버전) 기준으로 빌드·게시.
+     - 태그 push 가 프록시 등으로 막히면 대안: release 워크플로를 **main 기준 workflow_dispatch**
+       로 수동 실행(`actions_run_trigger run_workflow release.yml ref=main`). 버전은 태그명이
+       아니라 `package.json` 에서 읽으므로 동일하게 동작한다.
+  4. CI 가 `versions.json` 의 `latest` 를 새 버전으로 갱신하고 설치 패키지·업그레이드 번들을
+     `downloads` 릴리스 자산으로 올린다 → 그래야 원격/오프라인 **자동 업그레이드가 작동**한다.
+  - 릴리스 자산 베이스: `https://github.com/noainred/The.DVC/releases/download/downloads`
+  - 게시 누락 = 자동 업그레이드 정지의 직접 원인이므로, 기능 PR 머지 후 릴리스 게시·CI 성공까지
+    확인하고 사용자에게 보고한다.
