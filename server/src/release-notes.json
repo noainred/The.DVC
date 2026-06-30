@@ -1,6 +1,16 @@
 {
   "notes": [
     {
+      "version": "2.75.0",
+      "date": "2026-06-30",
+      "title": "코드 리뷰 — '이 법인만 교체' 스캔 등록 버그 수정 + 회귀 테스트 + 죽은 상태 정리",
+      "notes": [
+        "버그 수정: iDRAC 법인별 스캔의 등록 모드 'replace-datacenter'(이 법인만 교체)가 importServers에서 처리되지 않아 조용히 merge로 동작했습니다. 폐기된(미발견) 서버가 제거되지 않고 stale 상태로 남던 문제를 수정했습니다. 이제 해당 법인의 미발견 서버만 정확히 제거하고 다른 법인은 보존합니다.",
+        "회귀 테스트 추가(server/test/registryImportModes.test.js, 4건): replace-datacenter의 stale 제거·신규 추가/갱신·빈 incoming 안전망(블립 방지)·법인 간 격리를 검증합니다. 전체 단위 테스트 227건 통과.",
+        "정리: iDRAC 관리 화면에서 전력 대시보드 제거 후 남아 있던 죽은 상태/파생값(dash·dashHours·sort·sources·pwSettings·poller·lastResults·wattsById·statsById·fmtW)을 삭제했습니다(동작 변화 없음)."
+      ]
+    },
+    {
       "version": "2.74.0",
       "date": "2026-06-30",
       "title": "하드웨어 집계 — 모든 데이터센터 iDRAC을 모델/CPU/메모리/GPU 종류별 분석",
