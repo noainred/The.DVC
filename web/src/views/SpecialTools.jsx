@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { fetchJson, postJson, putJson, usePolling, getToken } from '../api.js';
 import { DataTable, Loading, ErrorBox, StateBadge, UsageCell, EntityDetail, Modal, ResultCount, SearchBox, VmLink } from '../components/ui.jsx';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Brush } from 'recharts';
@@ -99,7 +99,9 @@ export default function SpecialTools() {
   const [tool, setTool] = useState(() => toolFromHash());
   const [menuQ, setMenuQ] = useState(''); // 메뉴 빠른 찾기
   const [isAdmin, setIsAdmin] = useState(false); // 관리자 전용 도구(VM 생성 등) 노출 제어
-  const [topKeys, setTopKeys] = useState([]); // 자주 쓰는 기능(전체 사용자 합산 상위 3)
+  const [topKeys, setTopKeys] = useState([]); // 자주 쓰는 기능(전체 사용자 합산 상위)
+  const gridRef = useRef(null);               // 메뉴 그리드 너비 측정용
+  const [favCount, setFavCount] = useState(4); // 한 줄에 들어가는 카드 수(화면폭 자동, 기본 4)
   // 기능 실행 시 사용 횟수를 중앙에 기록(자주 쓰는 메뉴 자동 추천용). 실패는 조용히 무시.
   const openTool = (k) => {
     if (k) postJson('/tool-usage', { k }).catch(() => {});
@@ -115,7 +117,22 @@ export default function SpecialTools() {
   // 그리드(메뉴 목록)로 돌아올 때마다 상위 사용 기능을 갱신.
   useEffect(() => {
     if (tool) return;
-    fetchJson('/tool-usage/top', { n: 3 }).then((r) => setTopKeys(r.top || [])).catch(() => {});
+    fetchJson('/tool-usage/top', { n: 12 }).then((r) => setTopKeys(r.top || [])).catch(() => {});
+  }, [tool]);
+  // '자주 쓰는 기능' 카드 수를 메뉴 그리드 한 줄에 들어가는 칸 수에 맞춘다(화면폭 자동, vc-grid=minmax 330px·gap 16px).
+  useEffect(() => {
+    if (tool) return undefined;
+    const el = gridRef.current;
+    if (!el) return undefined;
+    const calc = () => {
+      const w = el.clientWidth || el.offsetWidth || 0;
+      setFavCount(Math.max(1, Math.floor((w + 16) / (330 + 16))));
+    };
+    calc();
+    const ro = (typeof ResizeObserver !== 'undefined') ? new ResizeObserver(calc) : null;
+    if (ro) ro.observe(el);
+    window.addEventListener('resize', calc);
+    return () => { if (ro) ro.disconnect(); window.removeEventListener('resize', calc); };
   }, [tool]);
   if (tool) return <ToolPanel tool={tool} isAdmin={isAdmin} onBack={() => openTool(null)} />;
   const base = TOOLS.filter((t) => !t.adminOnly || isAdmin); // 관리자 전용은 admin에게만 노출
@@ -126,7 +143,8 @@ export default function SpecialTools() {
   // 상위 키를 실제 도구로 매핑(노출 불가/비활성은 제외). 검색 중에는 추천을 숨긴다.
   const favorites = ql ? [] : topKeys
     .map((u) => ({ ...base.find((t) => t.k === u.k), count: u.count }))
-    .filter((t) => t && t.k && !t.disabled);
+    .filter((t) => t && t.k && !t.disabled)
+    .slice(0, favCount); // 한 줄에 들어가는 만큼만(화면폭 자동)
   return (
     <>
       <div className="section-title" style={{ marginTop: 0 }}>🛠️ 특수 기능</div>
@@ -157,7 +175,7 @@ export default function SpecialTools() {
           </div>
         </div>
       )}
-      <div className="vc-grid">
+      <div className="vc-grid" ref={gridRef}>
         {shown.length === 0 && <div className="muted" style={{ gridColumn: '1 / -1', padding: 24 }}>“{menuQ}”에 해당하는 메뉴가 없습니다.</div>}
         {shown.map((t) => (
           <div key={t.k} className="card vc-card"
