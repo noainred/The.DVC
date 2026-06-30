@@ -1,7 +1,11 @@
 # 다운로드 — 오프라인 설치/업그레이드 패키지
 
 RHEL 9 계열(Rocky/CentOS Stream/Alma/RHEL 9) air-gapped 설치/업그레이드용 미리 빌드된 패키지입니다.
-**최신 버전: 1.47.0**
+
+> 바이너리는 git에 커밋하지 않고 **GitHub Releases(롤링 `downloads` 태그)** 로 발행합니다.
+> 최신 버전·다운로드: <https://github.com/noainred/The.DVC/releases> ·
+> 자동 업그레이드 base: `https://github.com/noainred/The.DVC/releases/download/downloads`
+> 설치 방법은 [docs/INSTALL.md](../docs/INSTALL.md) 참고.
 
 | 파일 | 용도 |
 |------|------|

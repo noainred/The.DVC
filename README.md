@@ -14,6 +14,9 @@
 - 저장소: Node 내장 `node:sqlite`(시계열/IPAM) + NDJSON 폴백, 설정 JSON(0600)
 - 배포: 에어갭 오프라인 설치(Rocky/CentOS 9), Windows 패키지, 자가 업그레이드
 
+> 📦 **설치는 [docs/INSTALL.md — 설치 가이드(중앙/엣지/수집기 + 토큰·방화벽)](docs/INSTALL.md)** 참고.
+> 오프라인 패키지/업그레이드 상세는 [packaging/offline/OFFLINE-INSTALL.md](packaging/offline/OFFLINE-INSTALL.md).
+
 ---
 
 ## 목차
@@ -45,7 +48,9 @@
 - **전력(iDRAC/OME)** — Dell Redfish/OpenManage로 호스트 전력(W) 수집·시계열, ESXi 전력은 vim25에서도 수집. IP 대역 스캔으로 iDRAC 대량 등록.
 - **온도 / GPU / 용량** — ESXi 온도(현재/5분평균/최대 + 5년 추이, 분/시간/일 단위), GPU 인벤토리(**vGPU/패스쓰루 구분**, 사용률 5년 추이, 게스트 OS 수집), 데이터스토어 용량 추세·포화 예측.
 - **IP 관리대장(IPAM)** — vCenter 수집 IP(서버종류 VM/베어메탈, OS 종류·버전) + **능동 스캔(TCP 커넥트)** 으로 물리/기타 장비 IP 보강. 서브넷 엑셀형 대장, 중복 IP, CSV/XLSX, 외부 공유 SQLite(`ipam.db`).
+- **통합 서버 인벤토리** — iDRAC/OME 수집 물리 서버 + vCenter ESXi 호스트를 Dell 서비스태그로 조합해 **가상화 호스트 / 베어메탈**을 자동 분류. 베어메탈 **총전력 집계**, 소속 **법인(vCenter) 등록**(자동 추론·일괄 등록·수동 예외), **엣지→중앙 집계**(전력 없는 발견분까지 DC별 검색).
 - **VM 생성(프로비저닝)** — 단건/대량 클론 + 게스트 커스터마이징(이름/IP 규칙), 동시성 제한 작업 큐, 작업 이력·메모/태그.
+- **VM 사양 변경(관리자)** — `ReconfigVM_Task`로 vCPU·RAM 증설, 코어/소켓, 디스크 증설/추가(컨트롤러 선택), NIC 추가/삭제·연결 토글. **증설만**(감소·축소 차단) + hot-add 판정 + 확인창 + 감사로그.
 - **원격 접속** — 브라우저 SSH(xterm.js/WebSocket)·RDP(Guacamole), HAProxy Data Plane API로 임시 포트 매핑(TTL 1일), `.rdp` 다운로드, VM에서 빠른 접속.
 - **AI 자연어 검색** — 로컬 LLM(Ollama)로 "북미 메모리 90% 넘는 호스트" 같은 질의 → 구조화 검색(불가 시 규칙 기반 폴백).
 
@@ -160,6 +165,8 @@ npm run build && npm start   # API가 web/dist 서빙 → http://localhost:4000
 | `COLLECTOR_PULL_INTERVAL_MS` | `60000` | 중앙이 에이전트 pull 주기 |
 | `CENTRAL_TOKEN` | — | 중앙↔에이전트 API 토큰(중앙·에이전트 동일값) |
 | `AGENT_NAME` / `CENTRAL_URL` / `AGENT_SCAN_INTERVAL_MS` | hostname / — / `3600000` | 에이전트 이름·중앙 주소·스캔 주기 |
+| `AGENT_PUSH_INVENTORY` / `AGENT_PUSH_FLEET` | `false` / `true` | 엣지→중앙 vCenter 인벤토리 push · 베어메탈 push(엣지 기본 on) |
+| `CENTRAL_FLEET_TTL_MS` / `CENTRAL_FLEET_MAX_AGENTS` | `1800000` / `500` | 중앙의 엣지 베어메탈 만료시간 · 에이전트 상한 |
 | `AGENT_PING_POLL_MS` / `AGENT_LOGQ_POLL_MS` / `AGENT_CAPTURE_POLL_MS` | `4000` | 위임 ping·로그조회·캡처 워커 폴링 주기 |
 | `AGENT_CONFIG_PUSH_MS` | `1800000` | 엣지 설정 → 중앙 push 주기(백업 통합) |
 
@@ -201,10 +208,10 @@ npm run build && npm start   # API가 web/dist 서빙 → http://localhost:4000
 `gpu`(+`/history`,`/vms`), `esxi-temp`(+`/history`), `capacity`, `capacity-forecast`, `waste`, `thin-vms`, `guest-os`, `hba`, `licenses`, `esxi`, `solutions`, `hardware`, `vmtools`, `snapshots`, `duplicate-ips`, `vm-finder`(POST), `ipam`(+`/subnets`,`/sheet`,`/annotation`,`.xlsx`,`.csv`), `deep-search`(POST), `ip-ping`, `service-check`, `network-check`, `vmware-config`, `vclogs`(+`/export.csv`,`/federate`,`/sources`)
 
 ### 인사이트 `/api/insights/*`
-`finops`(+`/config`), `anomalies`, `forecast`, `security`, `topology`, `graph`, `incidents`, `chatops`(POST) · 익스포터 `GET /metrics`(Prometheus)
+`finops`(+`/config`), `power-breakdown`, `fleet`(+`/tag`,`/assign`,`/assign-bulk`,`/prune` — 통합 인벤토리), `anomalies`, `forecast`, `security`, `topology`, `graph`, `incidents`, `chatops`(POST) · 익스포터 `GET /metrics`(Prometheus)
 
 ### 관리자 `/api/admin/*` (발췌)
-`users`, `vcenters`(+`/test`,`/import`,`/order`), `nsx/managers`, `idrac`(+`/scan`,`/bulk-add`), `collectors`, `assignments`, `agent-deploy`, `metrics/settings`, `gpu-guest/{settings,vms,test,diag}`, `ipam/settings`, `ipam/scan/{settings,run,results}`, `alerts`(+`/test`), `audit`, `data-source`, `llm-config`, `packages`, `geocode`, `logs`, `backup/*`, `vclogs/*`, `net/{capture,pcap,history,monitors,agents,log-issues}`, `guest/add-user`, `deep-search/probe`
+`users`, `vcenters`(+`/test`,`/import`,`/order`), `nsx/managers`, `idrac`(+`/scan`,`/bulk-add`,`/power-dashboard`), `collectors`(+`/:id` vCenter 매핑), `vm/:id/{hardware,reconfig}`(VM 사양 변경), `assignments`, `agent-deploy`, `metrics/settings`, `gpu-guest/{settings,vms,test,diag}`, `ipam/settings`, `ipam/scan/{settings,run,results}`, `alerts`(+`/test`), `audit`, `data-source`, `llm-config`, `packages`, `geocode`, `logs`, `backup/*`, `vclogs/*`, `net/{capture,pcap,history,monitors,agents,log-issues}`, `guest/add-user`, `deep-search/probe`
 
 ### 원격접속 `/api/remote/*`
 `mappings`, `quick-connect`, `proxies`, `config`, `deploy`, `probe`, `targets`, `rdp/:id`
@@ -213,7 +220,7 @@ npm run build && npm start   # API가 web/dist 서빙 → http://localhost:4000
 `status`, `check`, `apply`, `restart`, `settings`, `bundle`
 
 ### 토큰 라우터(에이전트↔중앙, `X-Central-Token`)
-`/api/collector/{export,ping,upgrade}` · `/api/central/{assignment,result,inventory,ip-scan-assignment,ip-scan-result,gpu-guest-data,agent-config,ping-jobs,ping-result,log-queries,log-query-result,capture-jobs,capture-result}`
+`/api/collector/{export,ping,upgrade}` · `/api/central/{assignment,result,inventory,fleet,ip-scan-assignment,ip-scan-result,gpu-guest-data,agent-config,ping-jobs,ping-result,log-queries,log-query-result,capture-jobs,capture-result}`
 
 ---
 
@@ -235,6 +242,8 @@ npm run build && npm start   # API가 web/dist 서빙 → http://localhost:4000
 | `deepsearch` | 심층 검색(게이트웨이·GPU·프로세스·다중 vCenter) | `topo3d` | 구성도(3D 네트워크) |
 | `davinci-svc` | 다빈치 서비스 점검 | `net-check` | 글로벌 네트워크 점검 |
 | `net-traffic` | 네트워크 트래픽 분석(tcpdump) | `vmware-backup` | VMware 구성 백업 |
+| `powermap` | 전력 분석(법인·모델·지역별) | `serveranalysis` | 서버 분석(iDRAC 하드웨어·GPU) |
+| `fleet` | **통합 서버 인벤토리**(가상화/베어메탈·법인 등록·엣지 집계) | `portaldb` | 포탈 DB 현황 |
 
 > 상단 **인사이트** 탭(FinOps·이상탐지·예측·보안·토폴로지·인시던트·ChatOps)과
 > **설정**의 포탈 백업 · vCenter 로그 보관 · 게스트 계정 추가 · GPU 게스트 수집/진단도 참고.
