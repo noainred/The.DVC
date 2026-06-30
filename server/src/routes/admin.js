@@ -947,6 +947,37 @@ adminRouter.post('/idrac/power-purge', adminOnly, async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 
+// 하드웨어 집계 — 모든 데이터센터(법인)의 iDRAC 수집 인벤토리를 모델/CPU/메모리/GPU 종류별로
+// 집계한다. ?datacenterId= 로 특정 법인만. 서버의 법인은 datacenterId(스캔 등록) 또는
+// vCenter→DataCenter 할당으로 해석. 응답: { totalServers, collected, missing, byModel/byCpu/byMemory/byGpu }.
+adminRouter.get('/idrac/hardware-summary', adminOnly, (req, res) => {
+  const dcFilter = String(req.query.datacenterId || '').trim();
+  const assign = getDatacenterAssign();
+  const dcOf = (s) => String(s.datacenterId || assign[String(s.vcenterId || '')] || '');
+  const servers = loadIdracRegistry().filter((s) => s.type !== 'ome' && (!dcFilter || dcOf(s) === (dcFilter === '__unmapped__' ? '' : dcFilter)) && (dcFilter !== '__unmapped__' || !dcOf(s)));
+  const byModel = new Map(), byCpu = new Map(), byMem = new Map(), byGpu = new Map();
+  let collected = 0, missing = 0, totalGpuCards = 0;
+  const bump = (map, key, by = 1) => { const k = String(key || '').trim(); if (!k) return; map.set(k, (map.get(k) || 0) + by); };
+  for (const s of servers) {
+    const inv = getIdracInventory(s.id);
+    if (!inv || !inv.collectedAt) { missing++; continue; }
+    collected++;
+    bump(byModel, inv.system?.model || '미상');
+    const cpu = inv.cpu || {};
+    const cpuLabel = (cpu.model || '미상') + (cpu.count ? ` ×${cpu.count}` : '');
+    bump(byCpu, cpuLabel);
+    const gib = inv.memory?.totalGiB;
+    if (gib != null && Number.isFinite(Number(gib))) bump(byMem, `${Math.round(Number(gib))} GiB`);
+    for (const g of (inv.gpus || [])) { const m = (g.model || g.name || '').trim(); if (m) { bump(byGpu, m); totalGpuCards++; } }
+  }
+  const toArr = (map, numericKey = false) => [...map.entries()].map(([key, count]) => ({ key, count }))
+    .sort((a, b) => (numericKey ? (parseInt(b.key) - parseInt(a.key)) : 0) || b.count - a.count || String(a.key).localeCompare(String(b.key), undefined, { numeric: true }));
+  res.json({
+    ok: true, datacenterId: dcFilter, totalServers: servers.length, collected, missing, totalGpuCards,
+    byModel: toArr(byModel), byCpu: toArr(byCpu), byMemory: toArr(byMem, true), byGpu: toArr(byGpu),
+  });
+});
+
 // 서버 분석 — 전체 iDRAC 서버의 최신 온도센서(CPU/GPU/Inlet/Exhaust 등) 평탄화(정렬용).
 adminRouter.get('/idrac/temps', adminOnly, (req, res) => {
   const servers = idracServersForAnalysis(req);
