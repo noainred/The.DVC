@@ -39,6 +39,7 @@ import { physicalPollerStatus, pollPhysicalOnce } from '../gpu/physicalPoller.js
 import { getGuestGpuVms } from '../gpu/store.js';
 import { getAllGpuGuestDiag } from '../central/gpuGuestDiag.js';
 import { loadVcenterConfig } from '../config.js';
+import { getVmHardware, reconfigVm } from '../provision/reconfig.js';
 import { probeRelayPath } from '../vcenter/relayProbe.js';
 import { portalDbReport } from '../insights/portalDb.js';
 import { loadScanSettings, saveScanSettings, scanResultList, scanInfo, listScanAgents, getAgentReports, getScanRuns, LOCAL } from '../ipam/scanStore.js';
@@ -1392,6 +1393,64 @@ adminRouter.put('/collectors/:id', adminOnly, (req, res) => {
 adminRouter.delete('/collectors/:id', adminOnly, (req, res) => {
   const result = removeCollector(req.params.id);
   res.status(result.ok ? 200 : 404).json(result);
+});
+
+// ── VM 사양 변경(ReconfigVM) — vCPU/RAM/디스크 증설·추가, NIC 추가/삭제 (관리자) ──────────
+// vmId 형식 '<vcId>:<moref>'. 스냅샷으로 VM 존재·vCenter 자격증명을 확인한 뒤 SOAP 실행.
+function resolveVmTarget(vmId) {
+  const snap = store.get();
+  const vm = (snap.vms || []).find((v) => v.id === vmId);
+  if (!vm) return { error: 'VM을 찾을 수 없습니다.', code: 404 };
+  if (snap.source === 'mock') return { error: '데모(mock) 모드에서는 사양 변경을 사용할 수 없습니다.', code: 400 };
+  const sep = String(vmId).indexOf(':');
+  const vcId = sep >= 0 ? vmId.slice(0, sep) : vmId;
+  const moref = sep >= 0 ? vmId.slice(sep + 1) : '';
+  const vc = (loadVcenterConfig().vcenters || []).find((v) => v.id === vcId);
+  if (!vc) return { error: 'vCenter 설정을 찾을 수 없습니다.', code: 404 };
+  return { vm, vc, moref, snap };
+}
+
+// 현재 하드웨어 + NIC 추가용 네트워크 목록.
+adminRouter.get('/vm/:id/hardware', adminOnly, async (req, res) => {
+  const t = resolveVmTarget(req.params.id);
+  if (t.error) return res.status(t.code).json({ ok: false, reason: t.error });
+  try {
+    const hw = await getVmHardware(t.vc, t.moref);
+    const networks = (t.snap.networks || [])
+      .filter((n) => n.vcenterId === t.vc.id)
+      .map((n) => ({ id: n.id, name: n.name, type: n.type, moref: String(n.id).split(':').slice(1).join(':') }))
+      .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    res.json({ ok: true, vmName: t.vm.name, powerState: hw.powerState, hw, networks });
+  } catch (e) { res.status(502).json({ ok: false, reason: e.message }); }
+});
+
+// 사양 변경 실행. body: { numCPUs?, memoryMB?, diskGrows?, diskAdds?, nicAdds?, nicRemoves? }
+adminRouter.post('/vm/:id/reconfig', adminOnly, async (req, res) => {
+  const t = resolveVmTarget(req.params.id);
+  if (t.error) return res.status(t.code).json({ ok: false, reason: t.error });
+  const b = req.body || {};
+  const plan = {
+    numCPUs: b.numCPUs != null ? Number(b.numCPUs) : undefined,
+    memoryMB: b.memoryMB != null ? Number(b.memoryMB) : undefined,
+    diskGrows: Array.isArray(b.diskGrows) ? b.diskGrows.slice(0, 64) : [],
+    diskAdds: Array.isArray(b.diskAdds) ? b.diskAdds.slice(0, 16) : [],
+    nicAdds: Array.isArray(b.nicAdds) ? b.nicAdds.slice(0, 10) : [],
+    nicRemoves: Array.isArray(b.nicRemoves) ? b.nicRemoves.slice(0, 10) : [],
+  };
+  try {
+    const r = await reconfigVm(t.vc, t.moref, plan);
+    logAudit({
+      user: req.user?.username, action: 'VM 사양 변경',
+      target: t.vm.name,
+      detail: r.ok ? (r.changes || []).join(', ') : `실패: ${r.error}`,
+      ip: req.ip || '',
+    });
+    if (r.ok) { store.refresh().catch(() => {}); return res.json({ ok: true, changes: r.changes }); }
+    res.status(400).json({ ok: false, reason: r.error, changes: r.changes });
+  } catch (e) {
+    logAudit({ user: req.user?.username, action: 'VM 사양 변경', target: t.vm.name, detail: `오류: ${e.message}`, ip: req.ip || '' });
+    res.status(502).json({ ok: false, reason: e.message });
+  }
 });
 
 // Trigger an immediate pull of all collectors.

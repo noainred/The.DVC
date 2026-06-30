@@ -5,6 +5,7 @@ import IpmsMatches from '../components/IpmsMatches.jsx';
 import { VmMetricButton } from '../components/VmMetrics.jsx';
 import { VmConsoleButton } from '../components/VmConsole.jsx';
 import { VmRemoteButton } from '../components/VmRemote.jsx';
+import { VmReconfigButton } from '../components/VmReconfig.jsx';
 
 /** Render every IPv4 a VM has (multi-homed), one per line; IPv6 is excluded upstream. */
 function ipList(vm) {
@@ -76,6 +77,7 @@ function VmDetail({ vm, onClose }) {
         </div>
       </div>
       <div className="flex gap" style={{ marginTop: 16, justifyContent: 'flex-end' }}>
+        <VmReconfigButton vm={vm} />
         <VmConsoleButton vmId={vm.id} vmName={vm.name} />
         <VmRemoteButton item={vm} />
         <VmMetricButton vmId={vm.id} vmName={vm.name} />
