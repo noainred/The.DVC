@@ -135,9 +135,10 @@ export function importServers(incoming, mode = 'merge') {
   if (!Array.isArray(incoming)) return { ok: false, reason: 'servers 배열을 찾을 수 없습니다.' };
   const existing = loadRegistry();
   // mode:
-  //  - 'replace'         : 레지스트리 전체 교체(기존 모두 삭제 후 incoming만)
-  //  - 'replace-vcenter' : incoming에 등장한 소속 vCenter의 기존 항목만 삭제 후 교체(다른 vCenter는 유지)
-  //  - 'merge'(기본)     : id 기준 upsert
+  //  - 'replace'            : 레지스트리 전체 교체(기존 모두 삭제 후 incoming만)
+  //  - 'replace-vcenter'    : incoming에 등장한 소속 vCenter의 기존 항목만 삭제 후 교체(다른 vCenter는 유지)
+  //  - 'replace-datacenter' : incoming에 등장한 소속 법인(DataCenter)의 기존 항목만 삭제 후 교체(다른 법인은 유지)
+  //  - 'merge'(기본)        : id 기준 upsert
   // 먼저 incoming을 검증해 '유효 항목'만 추린다(검증 실패 항목은 skip).
   const skipped = [];
   const valid = [];
@@ -154,6 +155,11 @@ export function importServers(incoming, mode = 'merge') {
     // (검증 실패로 0건이 된 vCenter의 기존 데이터를 통째로 지우는 사고 방지)
     const vcs = new Set(valid.map((e) => String(e.vcenterId || '').trim()).filter(Boolean));
     result = vcs.size ? existing.filter((s) => !vcs.has(String(s.vcenterId || '').trim())) : [...existing];
+  } else if (mode === 'replace-datacenter') {
+    // incoming에 등장한 법인(DataCenter)의 기존 항목만 삭제 후 교체(다른 법인은 유지).
+    // 유효 incoming이 0건이면 기존을 지우지 않음(블립으로 인한 대량 삭제 방지).
+    const dcs = new Set(valid.map((e) => String(e.datacenterId || '').trim()).filter(Boolean));
+    result = dcs.size ? existing.filter((s) => !dcs.has(String(s.datacenterId || '').trim())) : [...existing];
   } else result = [...existing];
   let added = 0, updated = 0;
   for (const entry of valid) {

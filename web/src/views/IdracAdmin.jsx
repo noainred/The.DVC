@@ -34,11 +34,6 @@ export default function IdracAdmin() {
   const [assignVc, setAssignVc] = useState('');           // 일괄 지정 대상 vCenter
   const fileRef = useRef(null);
   const pollAbort = useRef(false); // 위임 등록/스캔 폴링 취소 플래그
-  const [dash, setDash] = useState(null);       // 전력 대시보드(KPI·추세·서버별 통계·PSU)
-  const [dashHours, setDashHours] = useState(24); // 추세/통계 시간 창
-  const [sort, setSort] = useState({ key: 'currentW', dir: 'desc' }); // 서버 테이블 정렬
-  const [sources, setSources] = useState(null); // 전력 보고 수 출처 분해(iDRAC/OME/원격)
-  const [pwSettings, setPwSettings] = useState({ excludeUnmapped: false }); // 전력 집계 표시 설정
   const [scanRanges, setScanRanges] = useState({ ranges: [], status: null, centralEnabled: false }); // vCenter별 iDRAC 스캔 대역
   const [srForm, setSrForm] = useState(null); // 스캔 대역 편집 폼 { vcenterId, ranges, username, password, agent, enabled, mode } | null
   const [srMsg, setSrMsg] = useState(null); // 스캔 대역 폼 인라인 피드백 { ok, text }
@@ -427,11 +422,6 @@ export default function IdracAdmin() {
   };
 
   const list = data.servers || [];
-  const poller = data.poller || {};
-  const lastResults = poller.lastRun?.results || [];
-  const wattsById = Object.fromEntries(lastResults.map((r) => [r.id, r]));
-  const statsById = Object.fromEntries((dash?.perServer || []).map((p) => [p.serverId, p])); // 24h 피크/평균/유휴
-  const fmtW = (w) => (w != null ? `${(w / 1000).toFixed(2)} kW (${w} W)` : '—');
 
   return (
     <>
