@@ -1419,15 +1419,17 @@ adminRouter.get('/vm/:id/hardware', adminOnly, async (req, res) => {
   if (t.error) return res.status(t.code).json({ ok: false, reason: t.error });
   try {
     const hw = await getVmHardware(t.vc, t.moref);
+    // 이름 자연정렬(숫자 접미사 고려: uplink1 < uplink10, VMAX-2 < VMAX-10).
+    const byName = (a, b) => String(a.name).localeCompare(String(b.name), undefined, { numeric: true, sensitivity: 'base' });
     const networks = (t.snap.networks || [])
       .filter((n) => n.vcenterId === t.vc.id)
       .map((n) => ({ id: n.id, name: n.name, type: n.type, moref: String(n.id).split(':').slice(1).join(':') }))
-      .sort((a, b) => String(a.name).localeCompare(String(b.name)));
-    // 디스크 추가 시 선택할 데이터스토어 후보(해당 vCenter, 여유공간 많은 순).
+      .sort(byName);
+    // 디스크 추가 시 선택할 데이터스토어 후보(해당 vCenter). 이름순으로 정렬(여유/총용량은 라벨에 표시).
     const datastores = (t.snap.datastores || [])
       .filter((d) => d.vcenterId === t.vc.id)
       .map((d) => ({ name: d.name, freeGB: d.freeGB, capacityGB: d.capacityGB }))
-      .sort((a, b) => (b.freeGB || 0) - (a.freeGB || 0));
+      .sort(byName);
     res.json({ ok: true, vmName: t.vm.name, powerState: hw.powerState, hw, networks, datastores });
   } catch (e) { res.status(502).json({ ok: false, reason: e.message }); }
 });

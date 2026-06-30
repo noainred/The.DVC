@@ -24,11 +24,13 @@ export async function getPlacement(vcenterId) {
     hosts: hosts.filter((h) => h.cluster === c).length,
   }));
 
+  // 이름 자연정렬(숫자 접미사 고려: esxi-01 < esxi-10, ds-2 < ds-10).
+  const byName = (a, b) => String(a.name).localeCompare(String(b.name), undefined, { numeric: true, sensitivity: 'base' });
   const hostsOut = hosts.map((h) => ({ id: h.id, name: h.name, cluster: h.cluster || '', connectionState: h.connectionState }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .sort(byName);
 
   const datastoresOut = datastores.map((d) => ({ id: d.id, name: d.name, type: d.type, freeGB: d.freeGB, capacityGB: d.capacityGB }))
-    .sort((a, b) => (b.freeGB || 0) - (a.freeGB || 0));
+    .sort(byName);
 
   const mock = getDataSource() === 'mock';
   // Folders + resource pools: read live from the chosen vCenter when possible.
