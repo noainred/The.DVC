@@ -105,6 +105,21 @@ test('buildReconfigSpec: 코어/소켓 — 약수면 적용, 아니면 거부', 
   assert.match(only.specXml, /<numCoresPerSocket>2<\/numCoresPerSocket>/);
 });
 
+test('buildReconfigSpec: 디스크 추가 데이터스토어 선택', () => {
+  const hw = parseHardware(DEVICE_XML, META);
+  // 데이터스토어 명시 → 그 데이터스토어 bracket으로 생성(기존 [ds1] 무시).
+  const sel = buildReconfigSpec(hw, { diskAdds: [{ sizeGB: 50, datastore: 'ds-fast' }] });
+  assert.equal(sel.ok, true);
+  assert.match(sel.specXml, /<fileName>\[ds-fast\]<\/fileName>/);
+  assert.match(sel.changes.join(), /ds-fast/);
+  // 대괄호를 직접 넣어도 정규화.
+  const br = buildReconfigSpec(hw, { diskAdds: [{ sizeGB: 50, datastore: '[ds-fast]' }] });
+  assert.match(br.specXml, /<fileName>\[ds-fast\]<\/fileName>/);
+  // 미지정 → 기존 디스크 위치([ds1]) 재사용.
+  const auto = buildReconfigSpec(hw, { diskAdds: [{ sizeGB: 50 }] });
+  assert.match(auto.specXml, /<fileName>\[ds1\]<\/fileName>/);
+});
+
 test('buildReconfigSpec: 디스크 추가 컨트롤러 선택', () => {
   const hw = parseHardware(DEVICE_XML, META);
   const ok = buildReconfigSpec(hw, { diskAdds: [{ sizeGB: 50, controllerKey: 1000 }] });
