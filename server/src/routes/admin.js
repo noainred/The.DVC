@@ -1432,11 +1432,13 @@ adminRouter.post('/vm/:id/reconfig', adminOnly, async (req, res) => {
   const b = req.body || {};
   const plan = {
     numCPUs: b.numCPUs != null ? Number(b.numCPUs) : undefined,
+    coresPerSocket: b.coresPerSocket != null ? Number(b.coresPerSocket) : undefined,
     memoryMB: b.memoryMB != null ? Number(b.memoryMB) : undefined,
     diskGrows: Array.isArray(b.diskGrows) ? b.diskGrows.slice(0, 64) : [],
     diskAdds: Array.isArray(b.diskAdds) ? b.diskAdds.slice(0, 16) : [],
     nicAdds: Array.isArray(b.nicAdds) ? b.nicAdds.slice(0, 10) : [],
     nicRemoves: Array.isArray(b.nicRemoves) ? b.nicRemoves.slice(0, 10) : [],
+    nicConnects: Array.isArray(b.nicConnects) ? b.nicConnects.slice(0, 20) : [],
   };
   try {
     const r = await reconfigVm(t.vc, t.moref, plan);

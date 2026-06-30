@@ -56,11 +56,14 @@ export function parseHardware(deviceXml, meta = {}) {
         network: stdNet || (dvsKey ? `(DVS:${dvsKey})` : ''),
         macAddress: pickTag(blk, 'macAddress'),
         connected: /<connected>true<\/connected>/.test(blk),
+        // 연결 토글 시 backing을 그대로 echo해야 안전(특히 DVS).
+        backingXml: /<backing xsi:type="[^"]+">[\s\S]*?<\/backing>/.exec(blk)?.[0] || '',
       });
     }
   }
   return {
     cpu: Number(meta.numCPU) || 0,
+    coresPerSocket: Number(meta.coresPerSocket) || 0,
     memMB: Number(meta.memoryMB) || 0,
     cpuHotAdd: meta.cpuHotAdd === true || meta.cpuHotAdd === 'true',
     memHotAdd: meta.memHotAdd === true || meta.memHotAdd === 'true',
@@ -79,13 +82,24 @@ export function buildReconfigSpec(hw, plan = {}) {
   const errors = []; const changes = []; const parts = []; const dev = [];
   const poweredOn = /on/i.test(hw.powerState);
 
-  // --- CPU ---
+  // --- CPU (총 vCPU + 코어/소켓) ---
+  const cps = plan.coresPerSocket != null ? Number(plan.coresPerSocket) : null;
   if (plan.numCPUs != null && Number(plan.numCPUs) !== hw.cpu) {
     const n = Number(plan.numCPUs);
     if (!Number.isInteger(n) || n < 1) errors.push('vCPU 수가 올바르지 않습니다.');
     else if (n < hw.cpu) errors.push(`vCPU 감소는 허용되지 않습니다(증설만): ${hw.cpu} → ${n}`);
     else if (poweredOn && !hw.cpuHotAdd) errors.push('이 VM은 CPU hot-add가 비활성화되어 전원 ON 상태에서 vCPU 증설이 불가합니다. 전원 OFF 후 시도하세요.');
-    else { parts.push(`<numCPUs>${n}</numCPUs>`); changes.push(`vCPU ${hw.cpu}→${n}`); }
+    else {
+      parts.push(`<numCPUs>${n}</numCPUs>`);
+      let lbl = `vCPU ${hw.cpu}→${n}`;
+      if (cps && Number.isInteger(cps) && cps >= 1 && n % cps === 0) { parts.push(`<numCoresPerSocket>${cps}</numCoresPerSocket>`); lbl += ` (코어/소켓 ${cps})`; }
+      else if (cps != null && cps >= 1 && n % cps !== 0) errors.push(`코어/소켓(${cps})은 총 vCPU(${n})의 약수여야 합니다.`);
+      changes.push(lbl);
+    }
+  } else if (cps != null && cps >= 1) {
+    // vCPU 수 변경 없이 코어/소켓만 조정.
+    if (!Number.isInteger(cps) || hw.cpu % cps !== 0) errors.push(`코어/소켓(${cps})은 총 vCPU(${hw.cpu})의 약수여야 합니다.`);
+    else { parts.push(`<numCoresPerSocket>${cps}</numCoresPerSocket>`); changes.push(`코어/소켓 →${cps}`); }
   }
 
   // --- RAM ---
@@ -115,30 +129,31 @@ export function buildReconfigSpec(hw, plan = {}) {
 
   // --- 디스크 추가(add+create) ---
   const adds = plan.diskAdds || [];
-  if (adds.length) {
-    const ctrl = hw.scsi[0];
-    if (!ctrl) errors.push('디스크를 추가할 SCSI 컨트롤러가 없습니다.');
-    else {
-      const used = new Set(hw.disks.filter((d) => d.controllerKey === ctrl.key).map((d) => d.unitNumber));
-      // 같은 컨트롤러의 기존 디스크 데이터스토어를 재사용([ds]만 주면 vCenter가 파일명을 정함).
-      const sampleFile = hw.disks.find((d) => d.controllerKey === ctrl.key)?.fileName || hw.disks[0]?.fileName || '';
-      const dsBracket = (/^\[[^\]]+\]/.exec(sampleFile)?.[0]) || '';
-      let nextUnit = 0; let negKey = -101;
-      const freeUnit = () => { while (used.has(nextUnit) || nextUnit === 7) nextUnit++; used.add(nextUnit); return nextUnit; };
-      for (const a of adds) {
-        const gb = Number(a.sizeGB);
-        if (!(gb > 0)) { errors.push('추가 디스크 용량이 올바르지 않습니다.'); continue; }
-        if (!dsBracket) { errors.push('데이터스토어를 확인할 수 없어 디스크를 추가할 수 없습니다.'); continue; }
-        const unit = freeUnit();
-        dev.push(
-          `<deviceChange><operation>add</operation><fileOperation>create</fileOperation><device xsi:type="VirtualDisk">` +
-          `<key>${negKey--}</key>` +
-          `<backing xsi:type="VirtualDiskFlatVer2BackingInfo"><fileName>${esc(dsBracket)}</fileName><diskMode>persistent</diskMode><thinProvisioned>true</thinProvisioned></backing>` +
-          `<controllerKey>${ctrl.key}</controllerKey><unitNumber>${unit}</unitNumber>` +
-          `<capacityInKB>${Math.round(gb * GB_KB)}</capacityInKB>` +
-          `</device></deviceChange>`);
-        changes.push(`디스크 추가 +${gb}GB`);
-      }
+  if (adds.length && !hw.scsi.length) errors.push('디스크를 추가할 SCSI 컨트롤러가 없습니다.');
+  else if (adds.length) {
+    // 컨트롤러별 사용 유닛 추적(여러 디스크를 같은 컨트롤러에 추가해도 충돌 없게).
+    const usedByCtrl = new Map();
+    const usedUnits = (ck) => { if (!usedByCtrl.has(ck)) usedByCtrl.set(ck, new Set(hw.disks.filter((d) => d.controllerKey === ck).map((d) => d.unitNumber))); return usedByCtrl.get(ck); };
+    const dsFor = (ck) => { const f = hw.disks.find((d) => d.controllerKey === ck)?.fileName || hw.disks[0]?.fileName || ''; return /^\[[^\]]+\]/.exec(f)?.[0] || ''; };
+    let negKey = -101;
+    for (const a of adds) {
+      const gb = Number(a.sizeGB);
+      if (!(gb > 0)) { errors.push('추가 디스크 용량이 올바르지 않습니다.'); continue; }
+      // 컨트롤러 선택(미지정 시 첫 SCSI). 유효성 검사.
+      const ctrl = a.controllerKey != null ? hw.scsi.find((s) => s.key === Number(a.controllerKey)) : hw.scsi[0];
+      if (!ctrl) { errors.push('지정한 디스크 컨트롤러를 찾을 수 없습니다.'); continue; }
+      const dsBracket = dsFor(ctrl.key);
+      if (!dsBracket) { errors.push('데이터스토어를 확인할 수 없어 디스크를 추가할 수 없습니다.'); continue; }
+      const used = usedUnits(ctrl.key);
+      let unit = 0; while (used.has(unit) || unit === 7) unit++; used.add(unit);
+      dev.push(
+        `<deviceChange><operation>add</operation><fileOperation>create</fileOperation><device xsi:type="VirtualDisk">` +
+        `<key>${negKey--}</key>` +
+        `<backing xsi:type="VirtualDiskFlatVer2BackingInfo"><fileName>${esc(dsBracket)}</fileName><diskMode>persistent</diskMode><thinProvisioned>true</thinProvisioned></backing>` +
+        `<controllerKey>${ctrl.key}</controllerKey><unitNumber>${unit}</unitNumber>` +
+        `<capacityInKB>${Math.round(gb * GB_KB)}</capacityInKB>` +
+        `</device></deviceChange>`);
+      changes.push(`디스크 추가 +${gb}GB (${ctrl.label || `ctrl ${ctrl.key}`})`);
     }
   }
 
@@ -167,6 +182,22 @@ export function buildReconfigSpec(hw, plan = {}) {
     changes.push(`NIC 삭제 (${nic.network || nic.macAddress || nic.key})`);
   }
 
+  // --- NIC 연결 토글(connect/disconnect) ---
+  const removeSet = new Set((plan.nicRemoves || []).map(Number));
+  for (const nc of (plan.nicConnects || [])) {
+    const nic = hw.nics.find((x) => x.key === Number(nc.key));
+    if (!nic) { errors.push(`NIC(key=${nc.key})를 찾을 수 없습니다.`); continue; }
+    if (removeSet.has(Number(nc.key))) continue; // 삭제 대상이면 토글 무시
+    const connected = !!nc.connected;
+    if (connected === nic.connected) continue;    // 변화 없음
+    dev.push(
+      `<deviceChange><operation>edit</operation><device xsi:type="${nic.type}"><key>${nic.key}</key>` +
+      `${nic.backingXml || ''}` +
+      `<connectable><startConnected>${connected}</startConnected><connected>${connected}</connected><allowGuestControl>true</allowGuestControl></connectable>` +
+      `</device></deviceChange>`);
+    changes.push(`NIC ${connected ? '연결' : '연결 해제'} (${nic.network || nic.macAddress || nic.key})`);
+  }
+
   if (errors.length) return { ok: false, errors, changes: [], specXml: '' };
   if (!parts.length && !dev.length) return { ok: false, errors: ['변경 사항이 없습니다.'], changes: [], specXml: '' };
   return { ok: true, errors: [], changes, specXml: parts.join('') + dev.join('') };
@@ -193,12 +224,12 @@ export async function getVmHardware(vc, moref) {
   await c.login();
   try {
     const objs = await c.retrieveObjectProps('VirtualMachine', moref, [
-      'config.hardware.device', 'config.hardware.numCPU', 'config.hardware.memoryMB',
+      'config.hardware.device', 'config.hardware.numCPU', 'config.hardware.numCoresPerSocket', 'config.hardware.memoryMB',
       'config.cpuHotAddEnabled', 'config.memoryHotAddEnabled', 'runtime.powerState',
     ]);
     const p = objs[0]?.props || {};
     return parseHardware(p['config.hardware.device'], {
-      numCPU: p['config.hardware.numCPU'], memoryMB: p['config.hardware.memoryMB'],
+      numCPU: p['config.hardware.numCPU'], coresPerSocket: p['config.hardware.numCoresPerSocket'], memoryMB: p['config.hardware.memoryMB'],
       cpuHotAdd: p['config.cpuHotAddEnabled'], memHotAdd: p['config.memoryHotAddEnabled'],
       powerState: p['runtime.powerState'],
     });
@@ -227,12 +258,12 @@ export async function reconfigVm(vc, moref, plan = {}) {
   try {
     // 최신 하드웨어 재조회(스냅샷과 어긋나도 안전하게 검증).
     const objs = await c.retrieveObjectProps('VirtualMachine', moref, [
-      'config.hardware.device', 'config.hardware.numCPU', 'config.hardware.memoryMB',
+      'config.hardware.device', 'config.hardware.numCPU', 'config.hardware.numCoresPerSocket', 'config.hardware.memoryMB',
       'config.cpuHotAddEnabled', 'config.memoryHotAddEnabled', 'runtime.powerState',
     ]);
     const p = objs[0]?.props || {};
     const hw = parseHardware(p['config.hardware.device'], {
-      numCPU: p['config.hardware.numCPU'], memoryMB: p['config.hardware.memoryMB'],
+      numCPU: p['config.hardware.numCPU'], coresPerSocket: p['config.hardware.numCoresPerSocket'], memoryMB: p['config.hardware.memoryMB'],
       cpuHotAdd: p['config.cpuHotAddEnabled'], memHotAdd: p['config.memoryHotAddEnabled'],
       powerState: p['runtime.powerState'],
     });

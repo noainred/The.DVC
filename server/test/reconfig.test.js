@@ -91,6 +91,41 @@ test('buildReconfigSpec: NIC 추가(표준/ DVS) + 삭제', () => {
   assert.match(rm.specXml, /<operation>remove<\/operation><device xsi:type="VirtualVmxnet3"><key>4000<\/key>/);
 });
 
+test('buildReconfigSpec: 코어/소켓 — 약수면 적용, 아니면 거부', () => {
+  const hw = parseHardware(DEVICE_XML, META); // cpu=4
+  const ok = buildReconfigSpec(hw, { numCPUs: 8, coresPerSocket: 4 });
+  assert.equal(ok.ok, true);
+  assert.match(ok.specXml, /<numCoresPerSocket>4<\/numCoresPerSocket>/);
+  const bad = buildReconfigSpec(hw, { numCPUs: 8, coresPerSocket: 3 });
+  assert.equal(bad.ok, false);
+  assert.match(bad.errors.join(), /약수여야/);
+  // vCPU 변경 없이 코어/소켓만
+  const only = buildReconfigSpec(hw, { coresPerSocket: 2 });
+  assert.equal(only.ok, true);
+  assert.match(only.specXml, /<numCoresPerSocket>2<\/numCoresPerSocket>/);
+});
+
+test('buildReconfigSpec: 디스크 추가 컨트롤러 선택', () => {
+  const hw = parseHardware(DEVICE_XML, META);
+  const ok = buildReconfigSpec(hw, { diskAdds: [{ sizeGB: 50, controllerKey: 1000 }] });
+  assert.equal(ok.ok, true);
+  assert.match(ok.specXml, /<controllerKey>1000<\/controllerKey>/);
+  const bad = buildReconfigSpec(hw, { diskAdds: [{ sizeGB: 50, controllerKey: 9999 }] });
+  assert.equal(bad.ok, false);
+  assert.match(bad.errors.join(), /지정한 디스크 컨트롤러/);
+});
+
+test('buildReconfigSpec: NIC 연결 토글', () => {
+  const hw = parseHardware(DEVICE_XML, META); // nic 4000 connected:true
+  const off = buildReconfigSpec(hw, { nicConnects: [{ key: 4000, connected: false }] });
+  assert.equal(off.ok, true);
+  assert.match(off.specXml, /<operation>edit<\/operation>/);
+  assert.match(off.specXml, /<connected>false<\/connected>/);
+  // 이미 연결 상태 → 변화 없음
+  const noop = buildReconfigSpec(hw, { nicConnects: [{ key: 4000, connected: true }] });
+  assert.equal(noop.ok, false);
+});
+
 test('buildReconfigSpec: 변경 없음 → ok=false', () => {
   const hw = parseHardware(DEVICE_XML, META);
   const r = buildReconfigSpec(hw, { numCPUs: 4, memoryMB: 8192 });
