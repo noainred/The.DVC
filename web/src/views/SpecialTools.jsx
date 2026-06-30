@@ -1985,9 +1985,73 @@ function Nsx() {
   );
 }
 
+/** 법인별 서버 정보 — 등록된 iDRAC/OME 서버를 소속 법인(vCenter)별로 묶어 본다. */
+function ServerInfoByVcenter({ vc, onServer, vcs = [] }) {
+  const [d, setD] = useState(null);
+  const [err, setErr] = useState(null);
+  const [q, setQ] = useState('');
+  const load = () => fetchJson('/admin/idrac').then((r) => { setD(r.servers || []); setErr(null); }).catch((e) => setErr(e.message));
+  useEffect(() => { setD(null); load(); /* eslint-disable-next-line */ }, []);
+  if (err) return <ErrorBox message={err} />;
+  if (!d) return <Loading />;
+  const vcName = new Map(vcs.map((v) => [v.id, v.name || v.id]));
+  const ql = q.trim().toLowerCase();
+  const match = (s) => !ql || [s.name, s.serviceTag, s.host, s.model].some((x) => String(x || '').toLowerCase().includes(ql));
+  const rows = d.filter((s) => {
+    if (vc === '__unmapped__') return !s.vcenterId && match(s);
+    if (vc) return s.vcenterId === vc && match(s);
+    return match(s);
+  });
+  const groups = new Map();
+  for (const s of rows) { const id = s.vcenterId || '__unmapped__'; if (!groups.has(id)) groups.set(id, []); groups.get(id).push(s); }
+  const groupList = [...groups.entries()]
+    .map(([id, list]) => ({ id, name: id === '__unmapped__' ? '⚠ 미지정(소속 없음)' : (vcName.get(id) || id), list }))
+    .sort((a, b) => (a.id === '__unmapped__' ? 1 : 0) - (b.id === '__unmapped__' ? 1 : 0) || b.list.length - a.list.length || String(a.name).localeCompare(String(b.name)));
+  const corpCount = groupList.filter((g) => g.id !== '__unmapped__').length;
+  return (
+    <div>
+      <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 12 }}>
+        <div className="muted" style={{ fontSize: 13 }}>
+          등록 서버 <b style={{ color: 'var(--accent)' }}>{rows.length}</b>대 · 법인 <b>{corpCount}</b>개
+          {groups.has('__unmapped__') && <> · <span className="badge amber">미지정 {groups.get('__unmapped__').length}</span></>}
+          <span style={{ marginLeft: 8 }}>· 서버 행을 클릭하면 iDRAC 상세(버전·온도·CPU)를 봅니다.</span>
+        </div>
+        <div className="flex gap" style={{ alignItems: 'center' }}>
+          <input className="input" placeholder="이름/서비스태그/주소 검색" value={q} onChange={(e) => setQ(e.target.value)} style={{ minWidth: 220 }} />
+          <button className="logout-btn" style={{ padding: '7px 12px' }} onClick={load}>↻ 새로고침</button>
+        </div>
+      </div>
+      {groupList.length === 0 ? (
+        <div className="card" style={{ padding: 16 }}><span className="muted">등록된 서버가 없습니다. ‘설정 › iDRAC 서버 등록 › 법인별 iDRAC 장비 스캔’에서 등록하세요.</span></div>
+      ) : groupList.map((g) => (
+        <div key={g.id} className="card" style={{ padding: 14, marginBottom: 14 }}>
+          <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 10 }}>{g.id === '__unmapped__' ? '⚠ ' : '🏢 '}{g.name} <span className="muted" style={{ fontWeight: 400 }}>· {g.list.length}대</span></div>
+          <table className="data-table" style={{ width: '100%', fontSize: 13 }}>
+            <thead><tr>
+              <th style={{ textAlign: 'left' }}>이름</th><th>유형</th><th style={{ textAlign: 'left' }}>주소</th><th style={{ textAlign: 'left' }}>서비스태그</th><th>상태</th>
+            </tr></thead>
+            <tbody>{g.list.slice().sort((a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id), undefined, { numeric: true })).map((s) => {
+              const isOme = s.type === 'ome';
+              return (
+                <tr key={s.id} style={{ cursor: isOme ? 'default' : 'pointer' }} onClick={() => { if (!isOme) onServer(s); }}>
+                  <td><b>{s.name || s.id}</b></td>
+                  <td>{isOme ? <span className="badge blue">OME</span> : <span className="badge gray">iDRAC</span>}</td>
+                  <td className="muted">{String(s.host || '').replace(/^https?:\/\//, '') || '—'}</td>
+                  <td className="muted">{s.serviceTag || '—'}</td>
+                  <td>{s.enabled === false ? <span className="badge gray">중지</span> : <span className="badge green">수집</span>}</td>
+                </tr>
+              );
+            })}</tbody>
+          </table>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /** 서버 분석 — iDRAC가 수집한 하드웨어 정보 분석. vCenter(법인)별 필터 + 서버 클릭 상세 공용. */
 function ServerAnalysis() {
-  const [sub, setSub] = useState('gpu'); // 향후 분석 추가 여지
+  const [sub, setSub] = useState('info'); // 법인별 서버 정보가 기본
   const [vc, setVc] = useState(''); // '' 전체 | vCenterId | __unmapped__
   const [vcs, setVcs] = useState([]);
   const [detail, setDetail] = useState(null); // { id, name } → iDRAC 상세 모달
@@ -1998,9 +2062,10 @@ function ServerAnalysis() {
     <div>
       <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 12 }}>
         <div className="flex gap wrap">
-          <button className={sub === 'gpu' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('gpu')}>🎮 GPU 찾기</button>
-          <button className={sub === 'fw' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('fw')}>🏷 펌웨어 보기</button>
-          <button className={sub === 'temp' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('temp')}>🌡 온도 보기</button>
+          <button className={sub === 'info' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('info')}>🗄 법인별 서버 정보</button>
+          <button className={sub === 'temp' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('temp')}>🌡 법인별 온도</button>
+          <button className={sub === 'gpu' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('gpu')}>🎮 GPU 정보</button>
+          <button className={sub === 'fw' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('fw')}>🏷 BIOS/iDRAC 버전 정보</button>
           <button className={sub === 'psu' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('psu')}>🔌 전력(PSU)</button>
           <button className={sub === 'issues' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px', ...(sub === 'issues' ? {} : { borderColor: 'var(--red)', color: 'var(--red)' }) }} onClick={() => setSub('issues')}>⚠ 이상만</button>
         </div>
@@ -2013,6 +2078,7 @@ function ServerAnalysis() {
           </select>
         </label>
       </div>
+      {sub === 'info' && <ServerInfoByVcenter {...sp} vcs={vcs} />}
       {sub === 'gpu' && <ServerGpuFinder {...sp} />}
       {sub === 'fw' && <ServerFirmwareFinder {...sp} />}
       {sub === 'temp' && <ServerTempFinder {...sp} />}
