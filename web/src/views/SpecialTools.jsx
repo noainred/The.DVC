@@ -2087,8 +2087,6 @@ function ServerAnalysis() {
           <button className={sub === 'temp' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('temp')}>🌡 법인별 온도</button>
           <button className={sub === 'gpu' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('gpu')}>🎮 GPU 정보</button>
           <button className={sub === 'fw' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('fw')}>🏷 BIOS/iDRAC 버전 정보</button>
-          <button className={sub === 'psu' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('psu')}>🔌 전력(PSU)</button>
-          <button className={sub === 'issues' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px', ...(sub === 'issues' ? {} : { borderColor: 'var(--red)', color: 'var(--red)' }) }} onClick={() => setSub('issues')}>⚠ 이상만</button>
         </div>
         <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }} title="iDRAC 서버에 지정된 소속 vCenter(법인) 기준. '미지정'은 소속이 지정 안 된 서버.">
           <span className="muted">법인/vCenter</span>
@@ -2103,131 +2101,12 @@ function ServerAnalysis() {
       {sub === 'gpu' && <ServerGpuFinder {...sp} />}
       {sub === 'fw' && <ServerFirmwareFinder {...sp} />}
       {sub === 'temp' && <ServerTempFinder {...sp} />}
-      {sub === 'psu' && <ServerPsuFinder {...sp} />}
-      {sub === 'issues' && <ServerHealthIssues {...sp} />}
       {detail && <IdracDetailModal server={detail} onClose={() => setDetail(null)} />}
     </div>
   );
 }
 
 const vcQS = (vc) => (vc ? `?vcenterId=${encodeURIComponent(vc)}` : '');
-
-/** 전력(PSU) — 전체 서버의 설치된 PSU를 용량/출력/입력전압/상태로 정렬해 본다. */
-function ServerPsuFinder({ vc, onServer }) {
-  const [d, setD] = useState(null);
-  const [err, setErr] = useState(null);
-  const [q, setQ] = useState('');
-  const [cap, setCap] = useState(''); // 용량 필터(W)
-  const [badOnly, setBadOnly] = useState(false);
-  const load = () => fetchJson(`/admin/idrac/psu-inventory${vcQS(vc)}`).then((r) => { setD(r); setErr(null); }).catch((e) => setErr(e.message));
-  useEffect(() => { setD(null); load(); const t = setInterval(load, 30_000); return () => clearInterval(t); /* eslint-disable-next-line */ }, [vc]);
-  if (err) return <ErrorBox message={err} />;
-  if (!d) return <Loading />;
-  const ql = q.trim().toLowerCase();
-  const rows = (d.rows || []).filter((r) =>
-    (!cap || String(r.capacityWatts) === cap)
-    && (!badOnly || (r.health && !/^ok$/i.test(r.health)))
-    && (!ql || [r.server, r.model, r.name, r.vcenterId, r.serviceTag].some((x) => String(x || '').toLowerCase().includes(ql))),
-  );
-  return (
-    <div>
-      <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 12 }}>
-        <div className="muted" style={{ fontSize: 13 }}>
-          PSU <b style={{ color: 'var(--accent)' }}>{d.totalPsus}</b>개 · 서버 {d.collectedServers}/{d.totalServers} · 총 출력 {Math.round(d.totalOutputW).toLocaleString()}W
-          {d.missing > 0 && <span className="badge amber" style={{ marginLeft: 8 }}>미수집 {d.missing}대</span>}
-        </div>
-        <div className="flex gap" style={{ alignItems: 'center' }}>
-          <select className="select select-sm" value={cap} onChange={(e) => setCap(e.target.value)} style={{ minWidth: 120 }}>
-            <option value="">용량 전체</option>
-            {(d.byCapacity || []).map((c) => <option key={c.capacityWatts} value={String(c.capacityWatts)}>{c.capacityWatts ? `${c.capacityWatts}W` : '미상'} ({c.count})</option>)}
-          </select>
-          <label className="flex gap muted" style={{ alignItems: 'center', fontSize: 12 }}><input type="checkbox" checked={badOnly} onChange={(e) => setBadOnly(e.target.checked)} /> OK 아닌것만</label>
-          <SearchBox className="input" style={{ maxWidth: 220 }} placeholder="서버/모델/서비스태그 검색" value={q} onChange={setQ} />
-          <button className="logout-btn" style={{ padding: '7px 12px' }} onClick={load}>↻</button>
-        </div>
-      </div>
-      {(d.byCapacity || []).length > 0 && (
-        <div className="flex gap wrap" style={{ marginBottom: 12 }}>
-          {d.byCapacity.map((c) => (
-            <span key={c.capacityWatts} className={`badge ${String(c.capacityWatts) === cap ? 'blue' : 'gray'}`} style={{ cursor: 'pointer' }} onClick={() => setCap(String(c.capacityWatts) === cap ? '' : String(c.capacityWatts))}>
-              {c.capacityWatts ? `${c.capacityWatts}W` : '미상'} × <b>{c.count}</b>
-            </span>
-          ))}
-        </div>
-      )}
-      {rows.length === 0 ? (
-        <div className="card" style={{ padding: 16 }}><span className="muted">표시할 PSU가 없습니다(iDRAC 인벤토리 30분 갱신).</span></div>
-      ) : (
-        <DataTable
-          rows={rows}
-          initialSort={{ key: 'capacityWatts', dir: 'desc' }}
-          columns={[
-            { key: 'server', label: '서버', render: (r) => <span><button className="cell-link" onClick={() => onServer(r)}>{r.server}</button>{r.serviceTag && <div className="muted" style={{ fontSize: 11 }}>{r.serviceTag}</div>}</span> },
-            { key: 'name', label: 'PSU', render: (r) => <span>{r.name}<div className="muted" style={{ fontSize: 11 }}>{r.model}</div></span> },
-            { key: 'capacityWatts', label: '용량', align: 'right', render: (r) => r.capacityWatts != null ? <b>{r.capacityWatts}W</b> : '—' },
-            { key: 'outputWatts', label: '출력', align: 'right', render: (r) => r.outputWatts != null ? `${r.outputWatts}W` : '—' },
-            { key: 'voltage', label: '입력', align: 'right', render: (r) => r.voltage != null ? <span>{r.voltage}V{r.inputWatts != null ? <span className="muted"> · {r.inputWatts}W</span> : ''}</span> : '—' },
-            { key: 'health', label: '상태', render: (r) => <span className={`badge ${/ok/i.test(r.health) ? 'green' : r.health ? 'amber' : 'gray'}`}>{r.health || '—'}</span> },
-          ]} />
-      )}
-    </div>
-  );
-}
-
-/** 이상만 — 전체 iDRAC에서 'OK가 아닌' 구성요소(헬스·디스크·PSU·메모리·GPU·NIC)만 모아 보여준다. */
-function ServerHealthIssues({ vc, onServer }) {
-  const [d, setD] = useState(null);
-  const [err, setErr] = useState(null);
-  const [q, setQ] = useState('');
-  const load = () => fetchJson(`/admin/idrac/health-issues${vcQS(vc)}`).then((r) => { setD(r); setErr(null); }).catch((e) => setErr(e.message));
-  useEffect(() => { setD(null); load(); const t = setInterval(load, 30_000); return () => clearInterval(t); /* eslint-disable-next-line */ }, [vc]);
-  if (err) return <ErrorBox message={err} />;
-  if (!d) return <Loading />;
-  const ql = q.trim().toLowerCase();
-  const rows = (d.issues || []).filter((r) => !ql || [r.server, r.category, r.item, r.status, r.vcenterId, r.serviceTag].some((x) => String(x || '').toLowerCase().includes(ql)));
-  return (
-    <div>
-      <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 12 }}>
-        <div className="muted" style={{ fontSize: 13 }}>
-          서버 {d.collectedServers}/{d.totalServers} 수집 · <b style={{ color: d.issueServers ? 'var(--red)' : 'var(--green)' }}>이상 {d.issueServers}대</b> · 정상 {d.okServers}대 · 문제 항목 <b style={{ color: 'var(--red)' }}>{d.issues.length}</b>건
-        </div>
-        <div className="flex gap" style={{ alignItems: 'center' }}>
-          <SearchBox className="input" style={{ maxWidth: 240 }} placeholder="서버/서비스태그/항목 검색" value={q} onChange={setQ} />
-          <button className="logout-btn" style={{ padding: '7px 12px' }} onClick={load}>↻ 새로고침</button>
-        </div>
-      </div>
-      {d.issues.length === 0 ? (
-        <div className="card" style={{ padding: 24, textAlign: 'center', borderColor: 'var(--green)' }}>
-          <div style={{ fontSize: 36 }}>✅</div>
-          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--green)', marginTop: 8 }}>모든 서버 정상 — OK 아닌 항목이 없습니다</div>
-          <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>iDRAC 인벤토리(30분 갱신) 기준. 갱신이 필요하면 전력 수집 › 상세 › 즉시 재수집.</div>
-        </div>
-      ) : (
-        <DataTable
-          rows={rows}
-          initialSort={{ key: 'category', dir: 'asc' }}
-          columns={[
-            { key: 'server', label: '서버', render: (r) => <span><button className="cell-link" onClick={() => onServer(r)}>{r.server}</button>{r.serviceTag && <div className="muted" style={{ fontSize: 11 }}>{r.serviceTag}</div>}</span> },
-            { key: 'vcenterId', label: 'vCenter', render: (r) => <span className="muted">{r.vcenterId || '—'}</span> },
-            { key: 'category', label: '구분', render: (r) => <span className="badge gray">{r.category}</span> },
-            { key: 'item', label: '항목', render: (r) => <span>{r.item}{r.detail && <span className="muted" style={{ fontSize: 11 }}> · {r.detail}</span>}</span> },
-            { key: 'status', label: '상태', render: (r) => <span className={`badge ${/예측|fail|crit|critical/i.test(r.status) ? 'red' : 'amber'}`}>{r.status}</span> },
-          ]} />
-      )}
-    </div>
-  );
-}
-
-const TEMP_KINDS = [['', '전체 센서'], ['cpu', 'CPU'], ['gpu', 'GPU'], ['inlet', 'Inlet/흡기'], ['exhaust', 'Exhaust/배기'], ['board', 'System Board']];
-const tempKindMatch = (kind, name) => {
-  const n = String(name).toLowerCase();
-  if (kind === 'cpu') return /cpu|proc/.test(n);
-  if (kind === 'gpu') return /gpu|video|accel/.test(n);
-  if (kind === 'inlet') return /inlet|intake|ambient/.test(n);
-  if (kind === 'exhaust') return /exhaust|outlet/.test(n);
-  if (kind === 'board') return /board|system|planar|mb\b/.test(n);
-  return true;
-};
 
 /** 온도 보기 — 전체 서버의 최신 온도센서(CPU/GPU/Inlet/Exhaust 등)를 한 표에 모아 정렬. */
 function ServerTempFinder({ vc, onServer }) {

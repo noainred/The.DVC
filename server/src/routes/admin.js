@@ -923,61 +923,6 @@ adminRouter.post('/idrac/poll', adminOnly, async (_req, res) => {
   res.json({ ok: true, lastRun: await pollNow() });
 });
 
-// 서버 분석 — 전체 iDRAC의 PSU(전원공급장치)를 평탄화(용량/출력/상태 정렬용) + 용량별 집계.
-// 전력 대시보드 — 플릿 KPI(현재/피크/평균·에너지/비용/CO2) + 시간추세 + 서버별 24h 통계 +
-// vCenter 롤업 + PSU 헬스 요약. 한 번의 호출로 메뉴 상단 대시보드를 그린다.
-adminRouter.get('/idrac/power-dashboard', adminOnly, async (req, res) => {
-  try {
-    const hours = Number(req.query.hours) || 24;
-    const vc = String(req.query.vcenterId || '');
-    const snap = store.get();
-    // 같은 스냅샷·파라미터면 재계산하지 않고 캐시(동시 폴링 N명 → 계산 1회). 30s 폴 주기 기준 백스톱 60s.
-    const key = `${snap.generatedAt}|${hours}|${vc}|${JSON.stringify(loadPowerSettings())}|${JSON.stringify(loadFinopsConfig())}`;
-    const payload = await snapMemo('power-dashboard', key, 60_000, async () => {
-      const measured = filterMeasuredByMapping(applyFleetAssign(await allMeasuredPower({ hosts: snap.hosts })), snap);
-      const dash = await buildPowerDashboard(measured, { hours });
-      let finops = null; try { finops = computeFinOps(snap, measured); } catch { /* */ }
-      const vcName = {}; for (const v of (snap.vcenters || [])) vcName[v.id] = v.name;
-      dash.byVcenter = dash.byVcenter.map((g) => ({ ...g, name: g.vcenterId ? (vcName[g.vcenterId] || g.vcenterId) : '(미매핑)' }));
-      const servers = idracServersForAnalysis(req);
-      const okRe = /^ok$|정상|healthy/i;
-      let psuHealthy = 0, psuDegraded = 0, noRedundancy = 0; const psuIssues = [];
-      for (const s of servers) {
-        const inv = getIdracInventory(s.id); if (!inv) continue;
-        const psus = inv.psus || []; if (!psus.length) continue;
-        if (psus.length < 2) noRedundancy++;
-        for (const p of psus) {
-          if (okRe.test(p.health || p.state || 'ok')) psuHealthy++;
-          else { psuDegraded++; psuIssues.push({ server: s.name, serverId: s.id, name: p.name, health: p.health || p.state || '' }); }
-        }
-      }
-      return {
-        ...dash,
-        energy: finops ? {
-          kwhDay: finops.totals?.kwhDay, costDay: finops.totals?.costDay, co2MonthKg: finops.totals?.co2MonthKg,
-          currency: loadFinopsConfig().currency, pue: loadFinopsConfig().pue,
-          totalHosts: finops.totalHosts, measuredHosts: finops.measuredHosts, unmappedServers: finops.unmappedServers, unmappedWatts: finops.unmappedWatts,
-        } : null,
-        psu: { healthy: psuHealthy, degraded: psuDegraded, noRedundancy, issues: psuIssues.slice(0, 20) },
-      };
-    });
-    sendCached(req, res, key, payload);
-  } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
-});
-
-// 전력 보고 수 출처 진단 — '전력 보고 N대'가 어디서 오는지 소스별(iDRAC/OME/원격)로 분해해서
-// 보여준다. OME 연결별 디바이스 수·수집서버별 호스트 수·각 소스 등록 여부 포함 → 유령/실데이터 판별.
-adminRouter.get('/idrac/power-sources', adminOnly, async (_req, res) => {
-  try { res.json({ ok: true, ...(await measuredPowerBreakdown({ hosts: store.get().hosts })) }); }
-  catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
-});
-
-// vCenter 전력 수집 점검 — vCenter별로 ESXi 호스트 전력(하드웨어 상태 'Pwr Consumption' 센서)이
-// 실제로 수집되고 있는지 진단. soapMetrics on/off + vCenter별 수집/0W/미수집 + 합계 반환.
-adminRouter.get('/idrac/vcenter-power-check', adminOnly, (_req, res) => {
-  res.json({ ok: true, soapMetrics: config.vcSoapMetrics, dataSource: store.get().source, ...vcenterPowerCheck(store.get()) });
-});
-
 // 전력 집계 표시 설정 — excludeUnmapped: vCenter 미매핑 측정 전력을 총합/보고/목록에서 제외.
 adminRouter.get('/idrac/power-settings', adminOnly, (_req, res) => res.json({ ok: true, settings: loadPowerSettings() }));
 adminRouter.put('/idrac/power-settings', adminOnly, async (req, res) => {
@@ -1000,66 +945,6 @@ adminRouter.post('/idrac/power-purge', adminOnly, async (req, res) => {
     logAudit({ user: req.user?.username, action: `전력 데이터 정리(${mode === 'all' ? '강제 전체' : '고아 삭제'})`, target: `DB ${r.dbRemoved} · OME ${r.omeCleared} · 원격 ${r.remoteCleared} · ${before?.total ?? '?'}→${after?.total ?? '?'}대` });
     res.json({ ok: true, ...r, beforeTotal: before?.total ?? null, afterTotal: after?.total ?? null, breakdown: after });
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
-});
-
-adminRouter.get('/idrac/psu-inventory', adminOnly, (req, res) => {
-  const servers = idracServersForAnalysis(req);
-  const rows = [];
-  let collected = 0; let missing = 0;
-  for (const s of servers) {
-    const inv = getIdracInventory(s.id);
-    if (!inv) { missing++; continue; }
-    collected++;
-    const serviceTag = s.serviceTag || inv.system?.serviceTag || '';
-    for (const p of (inv.psus || [])) {
-      rows.push({
-        server: s.name, serverId: s.id, serviceTag, vcenterId: s.vcenterId || '',
-        name: p.name, model: p.model || '',
-        capacityWatts: p.capacityWatts ?? null, outputWatts: p.outputWatts ?? null, inputWatts: p.inputWatts ?? null,
-        voltage: p.lineInputVoltage ?? null, health: p.health || p.state || '',
-      });
-    }
-  }
-  const byCap = new Map();
-  for (const r of rows) { const k = r.capacityWatts ?? 0; const e = byCap.get(k) || { capacityWatts: r.capacityWatts ?? null, count: 0 }; e.count++; byCap.set(k, e); }
-  rows.sort((a, b) => (b.outputWatts || 0) - (a.outputWatts || 0));
-  res.json({
-    rows,
-    byCapacity: [...byCap.values()].sort((a, b) => (b.capacityWatts || 0) - (a.capacityWatts || 0)),
-    totalPsus: rows.length, totalOutputW: rows.reduce((a, b) => a + (b.outputWatts || 0), 0),
-    collectedServers: collected, totalServers: servers.length, missing,
-  });
-});
-
-// 서버 분석 — 전체 iDRAC에서 'OK가 아닌'(문제) 구성요소만 모아 보여준다.
-adminRouter.get('/idrac/health-issues', adminOnly, (req, res) => {
-  const notOk = (h) => h && !/^ok$/i.test(String(h));
-  const servers = idracServersForAnalysis(req);
-  const issues = [];
-  let collected = 0; const okSet = new Set(); const badSet = new Set();
-  for (const s of servers) {
-    const inv = getIdracInventory(s.id);
-    if (!inv) continue;
-    collected++;
-    const ctx = { server: s.name, serverId: s.id, serviceTag: s.serviceTag || inv.system?.serviceTag || '', vcenterId: s.vcenterId || '' };
-    const push = (category, item, status, detail) => { issues.push({ ...ctx, category, item, status: String(status || ''), detail: detail || '' }); badSet.add(s.id); };
-    const H = inv.health || {};
-    for (const [k, label] of [['overall', '전체'], ['processor', 'CPU'], ['memory', '메모리'], ['storage', '스토리지'], ['psu', 'PSU'], ['gpu', 'GPU']]) {
-      if (notOk(H[k])) push('헬스', label, H[k]);
-    }
-    for (const d of (inv.disks || [])) {
-      if (d.predictiveFailure) push('디스크', d.name || d.model, 'SMART 예측 실패', d.model);
-      else if (notOk(d.health)) push('디스크', d.name || d.model, d.health, d.model);
-    }
-    for (const p of (inv.psus || [])) if (notOk(p.health)) push('PSU', p.name, p.health, p.model);
-    for (const m of (inv.memoryDimms || [])) if (notOk(m.health)) push('메모리', m.locator, m.health);
-    for (const g of (inv.gpus || [])) if (notOk(g.health)) push('GPU', g.name, g.health, g.model);
-    for (const n of (inv.nics || [])) for (const port of (n.ports || [])) {
-      if (port.link && !/up|enabled|linkup/i.test(port.link)) push('NIC', `${n.model || n.name} · ${port.id}`, `링크 ${port.link}`);
-    }
-    if (!badSet.has(s.id)) okSet.add(s.id);
-  }
-  res.json({ issues, totalServers: servers.length, collectedServers: collected, okServers: okSet.size, issueServers: badSet.size });
 });
 
 // 서버 분석 — 전체 iDRAC 서버의 최신 온도센서(CPU/GPU/Inlet/Exhaust 등) 평탄화(정렬용).

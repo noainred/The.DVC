@@ -1,6 +1,17 @@
 {
   "notes": [
     {
+      "version": "2.73.0",
+      "date": "2026-06-30",
+      "title": "서버 분석 탭 정리(PSU·이상만 제거) + 죽은 전력 대시보드/컴포넌트·엔드포인트 삭제",
+      "notes": [
+        "서버 분석 서브탭을 요청한 4종(법인별 서버 정보·법인별 온도·GPU 정보·BIOS/iDRAC 버전 정보)만 남기고 전력(PSU)·이상만 탭을 제거했습니다.",
+        "화면에서 빠졌던 죽은 코드 정리: PowerSources/PowerDashboard/vCenter 전력점검 모달/PSU·이상만 컴포넌트 삭제, iDRAC 화면의 죽은 전력 대시보드 핸들러/로더 제거.",
+        "죽은 백엔드 엔드포인트 삭제: /admin/idrac/power-dashboard·power-sources·vcenter-power-check·psu-inventory·health-issues. (power-settings/temps/firmware/gpu/scan-ranges 등 사용 중 엔드포인트는 유지.)",
+        "단위테스트 223건 통과."
+      ]
+    },
+    {
       "version": "2.72.0",
       "date": "2026-06-30",
       "title": "iDRAC 장비 스캔을 법인(DataCenter) 기준으로 — 법인 DB 수집 (2단계)",
