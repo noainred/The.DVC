@@ -7,6 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { bumpFleetRev } from '../insights/fleetRev.js';
 
 const FILE = path.join(config.configDir, 'collectors.json');
 
@@ -24,6 +25,7 @@ function save(list) {
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
   fs.writeFileSync(FILE, JSON.stringify({ collectors: list }, null, 2), { mode: 0o600 });
   try { fs.chmodSync(FILE, 0o600); } catch { /* best effort */ }
+  bumpFleetRev(); // 수집서버 vcenterId 매핑 변경 → fleet/finops 캐시 즉시 무효화
 }
 
 export function redact(c) {
@@ -50,6 +52,12 @@ function normalize(body, existing = null) {
   if (!url) return [null, '수집 서버 URL은 필수입니다.'];
   if (!/^https?:\/\//.test(url)) url = `http://${url}`;
   url = url.replace(/\/+$/, '');
+  // URL 형식 검증 — http/https + 유효 호스트만 허용(잘못된 스킴/입력 차단).
+  try {
+    const u = new URL(url);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return [null, 'http/https URL만 허용됩니다.'];
+    if (!u.hostname) return [null, '수집 서버 URL의 호스트가 올바르지 않습니다.'];
+  } catch { return [null, '수집 서버 URL 형식이 올바르지 않습니다.']; }
 
   const entry = {
     id, name, url, datacenter, vcenterId,

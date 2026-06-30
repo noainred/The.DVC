@@ -128,9 +128,12 @@ export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = 
       if (s.source === 'vcenter') continue;
       if (matchesHost(s)) continue;
     } else {
+      // 엣지 서버는 전역 유일 서비스태그(t:)로만 점유 — 전역 짧은 이름(n:)은 타 DC 동명 호스트를 억제하므로 금지.
       if (s.serviceTag) claimedHostKeys.add(`t:${norm(s.serviceTag)}`);
-      for (const n of (s.hostNames || [])) if (n) claimedHostKeys.add(`n:${norm(n)}`);
-      if (s.host) claimedHostKeys.add(`n:${norm(s.host)}`);
+      if (s.source !== 'edge') {
+        for (const n of (s.hostNames || [])) if (n) claimedHostKeys.add(`n:${norm(n)}`);
+        if (s.host) claimedHostKeys.add(`n:${norm(s.host)}`);
+      }
     }
     const dk = norm(s.serviceTag) || norm(s.serverId);
     if (usedBmKeys.has(dk)) continue;
@@ -243,6 +246,11 @@ export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = 
     ghostKeys,
   };
   const vcList = vcenters.map((v) => ({ id: v.id, name: v.name || v.id, region: v.location?.region || v.region || '' }));
+  // 엣지가 보고한, 중앙에 없는 vCenter id도 필터 목록에 노출(그 DC 베어메탈을 법인 필터로 좁힐 수 있게).
+  const knownVcIds = new Set(vcList.map((v) => v.id));
+  for (const b of bareMetal) {
+    if (b.vcenterId && !knownVcIds.has(b.vcenterId)) { knownVcIds.add(b.vcenterId); vcList.push({ id: b.vcenterId, name: b.vcenterId, region: '', external: true }); }
+  }
   return { virtualizationHosts, bareMetal, byVcenter, vcenters: vcList, summary, liveKeys: [...liveKeys] };
 }
 
@@ -350,9 +358,11 @@ export async function getFleetInventory(snap) {
       const seenHost = new Set(servers.flatMap((s) => (s.hostNames || []).map(norm)).filter(Boolean));
       for (const e of getEdgeFleetServers()) {
         const t = norm(e.serviceTag);
-        if (t ? seenTag.has(t) : (e.hostNames || []).some((h) => seenHost.has(norm(h)))) continue;
+        const hostHit = (e.hostNames || []).some((h) => seenHost.has(norm(h)));
+        // 대칭 dedup: 서비스태그가 있어도 호스트명 충돌을 함께 검사(서비스태그 없는 로컬 행과의 이중계산 방지).
+        if ((t && (seenTag.has(t) || seenHost.has(t))) || hostHit) continue;
         servers.push(e);
-        if (t) seenTag.add(t);
+        if (t) { seenTag.add(t); seenHost.add(t); }
         for (const h of (e.hostNames || [])) { const k = norm(h); if (k) seenHost.add(k); }
       }
     } catch { /* 엣지 데이터 없음 무시 */ }

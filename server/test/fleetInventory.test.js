@@ -257,6 +257,27 @@ test('[엣지격리] 엣지 베어메탈 name이 타 DC ESXi 호스트명과 충
   assert.equal(h.watts, 400); // 엣지 250W로 오염되지 않고 호스트 자체 400W 유지
 });
 
+test('[엣지격리2] 엣지 force-baremetal이 타 DC 동명 가상화 호스트를 억제하지 않음', () => {
+  const hostsL = [{ name: 'esxi-01', vcenterId: 'vc-kr', serviceTag: 'KRTAG', powerWatts: 300 }];
+  const servers = [
+    { serverId: 'edge:dc-pl:esxi-01', serverName: 'esxi-01', serviceTag: '', host: 'esxi-01', hostNames: ['esxi-01'], watts: null, source: 'edge', remoteAgent: 'dc-pl', vcenterId: 'vc-eu' },
+  ];
+  const tags = { 'edge:dc-pl:esxi-01': 'baremetal' }; // 관리자가 엣지 행을 강제 baremetal
+  const { virtualizationHosts, bareMetal } = classifyFleet({ hosts: hostsL, vcenters: vcenters2, servers, tags });
+  // 한국 esxi-01 호스트는 가상화 목록에 그대로 남아야 함(엣지 이름이 억제하면 안 됨)
+  assert.ok(virtualizationHosts.find((h) => h.name === 'esxi-01'), '동명 호스트가 유지되어야 함');
+  assert.equal(virtualizationHosts.length, 1);
+  assert.ok(bareMetal.find((b) => b.serverId === 'edge:dc-pl:esxi-01'));
+});
+
+test('[필터] 엣지 미인식 vCenter가 vcenters 목록에 노출되어 필터 가능', () => {
+  const servers = [
+    { serverId: 'edge:dc-x:E1', serverName: 'e1', serviceTag: 'E1', hostNames: ['e1'], watts: null, source: 'edge', remoteAgent: 'dc-x', vcenterId: 'vc-ghost' },
+  ];
+  const { vcenters: vcList } = classifyFleet({ hosts: [], vcenters: vcenters2, servers });
+  assert.ok(vcList.find((v) => v.id === 'vc-ghost' && v.external), '미인식 vCenter가 필터 목록에 추가되어야 함');
+});
+
 test('[엣지소속] 엣지가 보고한 미인식 vCenter는 미지정 강등 없이 출처 보존', () => {
   const servers = [
     { serverId: 'edge:dc-x:E9', serverName: 'e9', serviceTag: 'E9', hostNames: ['e9'], watts: null, source: 'edge', remoteAgent: 'dc-x', vcenterId: 'vc-unknown' },

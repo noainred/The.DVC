@@ -145,8 +145,8 @@ export async function allMeasuredPower({ hosts = [] } = {}) {
     if (sample.watts == null || !Number.isFinite(sample.watts)) continue;
     const st = norm(device.serviceTag);
     const hostNames = [st, norm(device.name)].filter(Boolean);
-    // OME 식별은 서비스태그 우선(태그 없으면 디바이스 호스트명).
-    const dedupHosts = device.serviceTag ? [] : [device.name].filter(Boolean);
+    // OME 식별: 서비스태그 + 호스트명 모두 dedup 키로(서비스태그 없는 iDRAC과 같은 박스도 이름으로 dedup).
+    const dedupHosts = [device.serviceTag, device.name].filter(Boolean);
     tryAdd({ serverId: key, serverName: device.name, watts: sample.watts, ts: sample.ts, host: st || norm(device.name), hostNames, model: (device.model || '').trim(), serviceTag: device.serviceTag || '', vcenterId: omeEntryVc.get(entryId) || '', source: 'ome' }, device.serviceTag, dedupHosts);
   }
   const seenRemoteOrigin = new Set(); // 같은 수집기의 동일 서버(여러 별칭 보고)를 한 번만 집계

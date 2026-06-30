@@ -40,6 +40,7 @@ import { getGuestGpuVms } from '../gpu/store.js';
 import { getAllGpuGuestDiag } from '../central/gpuGuestDiag.js';
 import { loadVcenterConfig } from '../config.js';
 import { getVmHardware, reconfigVm } from '../provision/reconfig.js';
+import { applyFleetAssign } from '../insights/fleetAssign.js';
 import { probeRelayPath } from '../vcenter/relayProbe.js';
 import { portalDbReport } from '../insights/portalDb.js';
 import { loadScanSettings, saveScanSettings, scanResultList, scanInfo, listScanAgents, getAgentReports, getScanRuns, LOCAL } from '../ipam/scanStore.js';
@@ -932,7 +933,7 @@ adminRouter.get('/idrac/power-dashboard', adminOnly, async (req, res) => {
     // 같은 스냅샷·파라미터면 재계산하지 않고 캐시(동시 폴링 N명 → 계산 1회). 30s 폴 주기 기준 백스톱 60s.
     const key = `${snap.generatedAt}|${hours}|${vc}|${JSON.stringify(loadPowerSettings())}|${JSON.stringify(loadFinopsConfig())}`;
     const payload = await snapMemo('power-dashboard', key, 60_000, async () => {
-      const measured = filterMeasuredByMapping(await allMeasuredPower({ hosts: snap.hosts }), snap);
+      const measured = filterMeasuredByMapping(applyFleetAssign(await allMeasuredPower({ hosts: snap.hosts })), snap);
       const dash = await buildPowerDashboard(measured, { hours });
       let finops = null; try { finops = computeFinOps(snap, measured); } catch { /* */ }
       const vcName = {}; for (const v of (snap.vcenters || [])) vcName[v.id] = v.name;

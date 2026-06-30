@@ -4,6 +4,7 @@ import { collectFromVCenter } from './vcenter/restClient.js';
 import { describeError } from './util/errors.js';
 import { latestPowerByHostName, latestPowerByServiceTag, allMeasuredPower, vcPowerKey } from './idrac/service.js';
 import { filterMeasuredByMapping, loadPowerSettings } from './idrac/powerSettings.js';
+import { applyFleetAssign } from './insights/fleetAssign.js';
 import { getDb as getPowerDb } from './idrac/db.js';
 import { loadRegistry as loadIdracRegistry } from './idrac/registry.js';
 import { buildHostIndex, resolveServerVcenter } from './idrac/attribution.js';
@@ -82,7 +83,7 @@ async function overlayIdracPower(snap) {
     // 전체 측정 전력(iDRAC/OME/원격/vCenter, 매핑 무관)을 vCenter별로 귀속 — Overview 총합·per-vCenter 롤업의 근거.
     // 우선순위: 서버에 명시 지정된 vcenterId → 호스트명 → 서비스태그 → (미매핑).
     // 설정 시 vCenter 미매핑(귀속 안 됨) 측정 전력을 총합/보고/롤업에서 제외.
-    const measured = filterMeasuredByMapping(await allMeasuredPower({ hosts: snap.hosts }), snap);
+    const measured = filterMeasuredByMapping(applyFleetAssign(await allMeasuredPower({ hosts: snap.hosts })), snap);
     const idx = buildHostIndex(snap.hosts);
     const validVcIds = new Set(snap.vcenters.map((v) => v.id));
     const byVc = new Map();

@@ -34,11 +34,14 @@ async function pullOne(c) {
   for (const h of data?.power?.byHost || []) {
     const host = String(h.host || '').trim().toLowerCase();
     if (!host || h.watts == null) continue;
+    // 전력값 범위 검증 — 음수/비현실값은 거른다(수집서버가 KPI를 오염시키지 못하게).
+    const watts = Number(h.watts);
+    if (!Number.isFinite(watts) || watts < 0 || watts > 1_000_000) continue;
     // 같은 수집기에서 온 동일 서버(serverId)가 여러 별칭으로 중복 보고되면 첫 행만 반영한다.
     if (h.serverId != null) { if (seenServers.has(h.serverId)) continue; seenServers.add(h.serverId); }
-    const sample = { watts: h.watts, ts: h.ts || ts, datacenter: data.datacenter || c.datacenter, collectorId: c.id, serverName: h.serverName, serverId: h.serverId, serviceTag: h.serviceTag || '', model: h.model || '', vcenterId: c.vcenterId || '', source: 'remote' };
+    const sample = { watts, ts: h.ts || ts, datacenter: data.datacenter || c.datacenter, collectorId: c.id, serverName: h.serverName, serverId: h.serverId, serviceTag: h.serviceTag || '', model: h.model || '', vcenterId: c.vcenterId || '', source: 'remote' };
     setRemoteHost(host, sample);
-    db.insert(`rmt:${host}`, h.watts, h.ts || ts);
+    db.insert(`rmt:${host}`, watts, h.ts || ts);
     hosts++;
   }
   return { hosts, version: data.version, datacenter: data.datacenter || c.datacenter };

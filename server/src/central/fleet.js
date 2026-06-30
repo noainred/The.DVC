@@ -52,11 +52,22 @@ export function setEdgeFleet(agent, baremetal, generatedAt) {
   // 신규 에이전트인데 상한 초과 → 가장 오래된 보고를 밀어내고 받는다(메모리 무한 누적 방지).
   if (!cache[a] && Object.keys(cache).length >= MAX_AGENTS) {
     const oldest = Object.entries(cache).sort((x, y) => (x[1]?.at || 0) - (y[1]?.at || 0))[0];
-    if (oldest) delete cache[oldest[0]];
+    if (oldest) { delete cache[oldest[0]]; console.warn(`[central-fleet] 에이전트 상한(${MAX_AGENTS}) 초과 — 가장 오래된 '${oldest[0]}' 퇴출(신규 '${a}' 수용)`); }
   }
-  cache[a] = { at: Date.now(), generatedAt: generatedAt || null, baremetal: list };
-  bumpFleetRev(); // 중앙 GET /fleet 캐시 즉시 무효화(엣지 보고 반영)
+  // 내용 해시(전력 제외 — 미세 변동으로 무효화 폭증 방지). 분류에 영향 주는 필드만.
+  const sig = hashList(list);
+  const prev = cache[a];
+  cache[a] = { at: Date.now(), generatedAt: generatedAt || null, baremetal: list, sig };
+  if (!prev || prev.sig !== sig) bumpFleetRev(); // 내용이 바뀐 경우에만 캐시 무효화
   persistSoon();
+}
+
+// 분류 관련 필드만으로 안정 해시(djb2). 전력(watts)은 remote 경로/TTL로 반영하므로 제외.
+function hashList(list) {
+  let h = 5381;
+  const s = list.map((b) => `${b.fleetId}|${b.serviceTag}|${b.vcenterId}|${b.name}`).sort().join('\n');
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+  return h;
 }
 
 /** TTL 지난(무보고) 에이전트 제거 후 살아있는 캐시 반환. */
