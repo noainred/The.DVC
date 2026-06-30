@@ -95,6 +95,7 @@ import { getInventory as getIdracInventory } from '../idrac/invCache.js';
 import { getSensorSeries } from '../idrac/sensorStore.js';
 import { fetchInventory as fetchIdracInventory, fetchSensors as fetchIdracSensors, probeGpuTelemetry } from '../idrac/redfish.js';
 import { listCollectors, addCollector, updateCollector, removeCollector, loadCollectors } from '../collector/registry.js';
+import { listDatacenters, getDatacenterAssign, addDatacenter, updateDatacenter, removeDatacenter, setVcenterDatacenterMany } from '../datacenter/store.js';
 import { allCollectorStatus, getCollectorStatus } from '../collector/state.js';
 import { pullNow } from '../collector/puller.js';
 import { pushUpgradeToCollectors } from '../collector/upgradePush.js';
@@ -1395,6 +1396,32 @@ adminRouter.delete('/collectors/:id', adminOnly, (req, res) => {
   const result = removeCollector(req.params.id);
   if (result.ok) logAudit({ user: req.user?.username, action: '수집 서버 삭제', target: req.params.id, ip: req.ip || '' });
   res.status(result.ok ? 200 : 404).json(result);
+});
+
+// ── DataCenter(법인) — vCenter의 상위 개념. 설정에서 종류 정의 + vCenter 할당 (관리자) ────────
+adminRouter.get('/datacenters', adminOnly, (_req, res) => res.json({ datacenters: listDatacenters(), assign: getDatacenterAssign() }));
+adminRouter.post('/datacenters', adminOnly, (req, res) => {
+  const r = addDatacenter(req.body || {});
+  if (r.ok) logAudit({ user: req.user?.username, action: 'DataCenter 등록', target: r.datacenter?.id || '', detail: r.datacenter?.name || '', ip: req.ip || '' });
+  res.status(r.ok ? 201 : 400).json(r);
+});
+// '/datacenters/assign'을 '/:id'보다 먼저 둬야 라우트 충돌이 없다.
+adminRouter.put('/datacenters/assign', adminOnly, (req, res) => {
+  const entries = Array.isArray(req.body?.entries) ? req.body.entries.slice(0, 5000) : [];
+  if (!entries.length) return res.status(400).json({ ok: false, reason: 'entries가 비었습니다.' });
+  const r = setVcenterDatacenterMany(entries);
+  if (r.ok) logAudit({ user: req.user?.username, action: 'vCenter→DataCenter 할당', target: `${r.changed}건`, ip: req.ip || '' });
+  res.status(r.ok ? 200 : 400).json(r);
+});
+adminRouter.put('/datacenters/:id', adminOnly, (req, res) => {
+  const r = updateDatacenter(req.params.id, req.body || {});
+  if (r.ok) logAudit({ user: req.user?.username, action: 'DataCenter 수정', target: req.params.id, ip: req.ip || '' });
+  res.status(r.ok ? 200 : 400).json(r);
+});
+adminRouter.delete('/datacenters/:id', adminOnly, (req, res) => {
+  const r = removeDatacenter(req.params.id);
+  if (r.ok) logAudit({ user: req.user?.username, action: 'DataCenter 삭제', target: req.params.id, ip: req.ip || '' });
+  res.status(r.ok ? 200 : 404).json(r);
 });
 
 // ── VM 사양 변경(ReconfigVM) — vCPU/RAM/디스크 증설·추가, NIC 추가/삭제 (관리자) ──────────
