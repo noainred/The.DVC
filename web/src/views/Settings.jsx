@@ -34,7 +34,7 @@ const SUB = [
   { k: 'vcenter-test', label: 'vCenter 연결 테스트', C: VCenterConnTest },
   { k: 'nsx-admin', label: 'NSX 관리', C: NsxAdmin },
   // --- 수집 서버 그룹 ---
-  { k: 'idrac-admin', label: '전력 수집', C: IdracAdmin, group: 'collect' },
+  { k: 'idrac-admin', label: 'iDRAC 서버 등록', C: IdracAdmin, group: 'collect' },
   { k: 'metrics', label: '지표 수집', C: MetricsSettings, group: 'collect' },
   { k: 'gpu-collect', label: 'GPU 수집', C: GpuSettings, group: 'collect' },
   { k: 'gpu-guest', label: 'GPU 게스트 수집', C: GpuGuestSettings, group: 'collect' },

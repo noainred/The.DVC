@@ -496,7 +496,7 @@ export default function IdracAdmin() {
   return (
     <>
       <div className="flex between wrap gap" style={{ marginBottom: 6 }}>
-        <div className="section-title" style={{ margin: '6px 0' }}>전력 수집 — Dell iDRAC (관리자)</div>
+        <div className="section-title" style={{ margin: '6px 0' }}>iDRAC 서버 등록 — Dell 베어메탈/물리 서버 (관리자)</div>
         <div className="flex gap" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
           <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12 }} title="체크 시 기존 목록을 모두 교체">
             <input type="checkbox" checked={replaceMode} onChange={(e) => setReplaceMode(e.target.checked)} /> 전체 교체
