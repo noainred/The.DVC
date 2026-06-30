@@ -1,0 +1,86 @@
+node_modules/
+dist/
+build/
+.env
+.env.local
+*.log
+npm-debug.log*
+.DS_Store
+coverage/
+server/config/vcenters.json
+server/config/nsx.json
+server/config/users.json
+server/config/upgrade.json
+server/config/idrac.json
+server/config/idrac-power.db
+server/config/idrac-power.ndjson
+server/config/idrac-inventory.json
+server/config/collectors.json
+server/config/agent-assignments.json
+server/config/agent-results.json
+server/.upgrade-cache/
+*.bak.[0-9]*
+*.new.[0-9]*
+dist-offline/
+# 릴리스 바이너리는 GitHub Releases(롤링 'downloads' 태그)로 발행 — git에 커밋하지 않는다.
+# (.git 비대화 방지). versions.json/README 는 추적 유지.
+download/*.tar.gz
+download/*.zip
+download/*.sha256
+server/config/alarm-mutes.json
+server/config/tool-usage.json
+server/config/fleet-tags.json
+server/config/fleet-assign.json
+server/config/auth.json
+server/config/runtime.json
+server/config/ipam.db
+server/config/ipam.ndjson
+server/config/remote-access.json
+server/config/release-notes.json
+server/config/agent-deploy-targets.json
+server/config/llm.json
+server/config/packages/
+server/config/packages.json
+server/config/ipam-settings.json
+server/config/ipam-annotations.json
+server/config/ipam-overrides.json
+server/config/ipam-range-policies.json
+server/config/ipam-vcenter-ranges.json
+server/config/ipam-scan-agents.json
+server/config/ipam-scan-history.json
+server/config/ipam-scan-results.json
+server/config/ipam-scan-runs.json
+server/config/audit.ndjson
+server/config/alerts.json
+server/config/host-temp.db
+server/config/host-temp.ndjson
+
+# 포탈 백업(런타임)
+server/config/backups/
+server/config/backup.json
+server/config/central-agent-config.json
+
+# vCenter 로그 보관(런타임)
+server/config/vcenter-logs.db
+server/config/vcenter-logs.ndjson
+server/config/vcenter-logs.json
+
+# 네트워크 캡처(런타임)
+server/config/capture-history.json
+server/config/capture-monitors.json
+
+# 로그인 실패 분석(런타임)
+server/config/login-fails.ndjson
+server/config/login-monitor.json
+
+# 게스트 조사 스케줄러 · 네트워크 이슈(런타임)
+server/config/guest-scans.json
+server/config/net-issues.ndjson
+server/config/net-issues-state.json
+
+# 세션 보안(유휴 로그아웃) 설정(런타임)
+server/config/security-session.json
+
+# 실제 OS 인벤토리(런타임)
+server/config/os-inventory.json
+server/config/os-scan.json

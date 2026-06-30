@@ -1,0 +1,87 @@
+/**
+ * Metrics sampler — on an interval, snapshots host temperature and GPU
+ * utilization (per host + per-cluster/per-vCenter averages) and datastore used
+ * GB into the time-series DB. Enables 5-year history (온도/GPU) and capacity forecast.
+ * Failures are isolated; sampling never blocks the event loop meaningfully.
+ */
+
+import { config } from '../config.js';
+import { store } from './../store.js';
+import { getMetricsDb } from './db.js';
+import { loadMetricsSettings } from './settings.js';
+import { getGuestGpuHost } from '../gpu/store.js';
+
+let timer = null;
+let lastRun = null;
+
+const avg = (arr) => (arr.length ? arr.reduce((a, x) => a + x, 0) / arr.length : null);
+
+async function sampleOnce() {
+  const snap = store.get();
+  const db = await getMetricsDb();
+  const ts = Date.now();
+  const rows = [];
+
+  // Host temperature (only hosts that report a sensor reading).
+  const hostsWithTemp = (snap.hosts || []).filter((h) => h.tempC != null);
+  const byCluster = new Map();
+  const byVc = new Map();
+  for (const h of hostsWithTemp) {
+    rows.push({ metric: 'temp_host', k: h.id, v: h.tempC });
+    const ck = `${h.vcenterId}|${h.cluster || 'standalone'}`;
+    (byCluster.get(ck) || byCluster.set(ck, []).get(ck)).push(h.tempC);
+    (byVc.get(h.vcenterId) || byVc.set(h.vcenterId, []).get(h.vcenterId)).push(h.tempC);
+  }
+  for (const [k, arr] of byCluster) rows.push({ metric: 'temp_cluster', k, v: round1(avg(arr)) });
+  for (const [k, arr] of byVc) rows.push({ metric: 'temp_vc', k, v: round1(avg(arr)) });
+
+  // Datastore used GB (for capacity forecast).
+  for (const d of snap.datastores || []) if (d.usedGB != null) rows.push({ metric: 'ds_usedgb', k: d.id, v: d.usedGB });
+
+  // GPU utilization — ESXi 보고값 우선, 없으면 게스트 OS 수집 오버레이(패스쓰루).
+  // per host + per-cluster/per-vCenter averages.
+  const gpuByCluster = new Map();
+  const gpuByVc = new Map();
+  for (const h of snap.hosts || []) {
+    const util = h.gpuUtilPct ?? (getGuestGpuHost(h.id)?.utilPct ?? null);
+    if (util == null) continue;
+    rows.push({ metric: 'gpu_util', k: h.id, v: util });
+    const ck = `${h.vcenterId}|${h.cluster || 'standalone'}`;
+    (gpuByCluster.get(ck) || gpuByCluster.set(ck, []).get(ck)).push(util);
+    (gpuByVc.get(h.vcenterId) || gpuByVc.set(h.vcenterId, []).get(h.vcenterId)).push(util);
+  }
+  for (const [k, arr] of gpuByCluster) rows.push({ metric: 'gpu_cluster', k, v: round1(avg(arr)) });
+  for (const [k, arr] of gpuByVc) rows.push({ metric: 'gpu_vc', k, v: round1(avg(arr)) });
+
+  if (rows.length) { try { db.insertMany(rows, ts); } catch (e) { console.warn('[metrics] insert 실패:', e.message); } }
+
+  // Retention prune (runtime-configurable).
+  const { retentionDays } = loadMetricsSettings();
+  if (retentionDays > 0) { try { db.prune(ts - retentionDays * 86_400_000); } catch { /* */ } }
+  lastRun = { at: ts, rows: rows.length, hostsWithTemp: hostsWithTemp.length };
+}
+
+const round1 = (x) => (x == null ? null : Number(x.toFixed(1)));
+
+export function metricsSamplerStatus() {
+  const s = loadMetricsSettings();
+  return { intervalMs: s.sampleIntervalMs, retentionDays: s.retentionDays, lastRun };
+}
+
+/** (Re)arm the periodic timer from the current effective settings. */
+export function rescheduleMetricsSampler() {
+  if (timer) clearInterval(timer);
+  const { sampleIntervalMs } = loadMetricsSettings();
+  timer = setInterval(() => sampleOnce().catch(() => {}), sampleIntervalMs);
+  timer.unref?.();
+  console.log(`[metrics] sampler rescheduled — every ${Math.round(sampleIntervalMs / 1000)}s`);
+  return sampleIntervalMs;
+}
+
+export function startMetricsSampler() {
+  const { sampleIntervalMs, retentionDays } = loadMetricsSettings();
+  setTimeout(() => sampleOnce().catch((e) => console.error('[metrics] sample 실패:', e.message)), 12_000).unref?.();
+  timer = setInterval(() => sampleOnce().catch(() => {}), sampleIntervalMs);
+  timer.unref?.();
+  console.log(`[metrics] sampler started (every ${Math.round(sampleIntervalMs / 1000)}s, retention ${retentionDays}d)`);
+}

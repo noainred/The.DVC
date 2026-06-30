@@ -1,0 +1,36 @@
+[Unit]
+Description=VMware Global Monitoring Portal
+Documentation=https://github.com/noainred/The.DVC
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+Group=@USER@
+EnvironmentFile=@CONFIG_DIR@/portal.env
+WorkingDirectory=@PREFIX@/app
+# Enable Node's built-in SQLite (used for iDRAC power history). Harmless on
+# newer Node where it is unflagged; portal.env may append more options.
+Environment=NODE_OPTIONS=--experimental-sqlite
+ExecStart=@PREFIX@/runtime/node/bin/node @PREFIX@/app/server/src/index.js
+# Auto-restart on exit — this is also how the in-app upgrade "재시작" works
+# (the process exits under systemd and is restarted with the new code).
+Restart=always
+RestartSec=2
+TimeoutStopSec=20
+KillMode=mixed
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ProtectControlGroups=true
+ProtectKernelTunables=true
+RestrictSUIDSGID=true
+# Allow upgrade to swap @PREFIX@/app (writes alongside it). Adjust if needed.
+ReadWritePaths=@PREFIX@ @CONFIG_DIR@
+
+[Install]
+WantedBy=multi-user.target
