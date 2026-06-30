@@ -24,6 +24,7 @@ const numOr = (v, d) => { const n = Number(v); return Number.isFinite(n) ? n : d
 function VmReconfigModal({ vm, onClose }) {
   const [hw, setHw] = useState(null);
   const [networks, setNetworks] = useState([]);
+  const [datastores, setDatastores] = useState([]);
   const [powerState, setPowerState] = useState('');
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -39,7 +40,7 @@ function VmReconfigModal({ vm, onClose }) {
   const [nicConn, setNicConn] = useState({});      // nicKey -> 원하는 연결상태(bool)
 
   const load = () => fetchJson(`/admin/vm/${encodeURIComponent(vm.id)}/hardware`).then((r) => {
-    setHw(r.hw); setNetworks(r.networks || []); setPowerState(r.powerState || '');
+    setHw(r.hw); setNetworks(r.networks || []); setDatastores(r.datastores || []); setPowerState(r.powerState || '');
     setCpu(r.hw.cpu); setCps(r.hw.coresPerSocket || 1); setRamGB(Math.round((r.hw.memMB || 0) / 1024)); setErr(null);
     setNicConn(Object.fromEntries((r.hw.nics || []).map((n) => [n.key, n.connected])));
   }).catch((e) => setErr(e.message));
@@ -58,7 +59,7 @@ function VmReconfigModal({ vm, onClose }) {
       .map(([key, gb]) => ({ key: Number(key), newGB: numOr(gb, 0) }))
       .filter((g) => { const d = hw.disks.find((x) => x.key === g.key); return d && g.newGB > d.capacityGB; });
     if (diskGrows.length) plan.diskGrows = diskGrows;
-    const diskAdds = adds.map((a) => ({ sizeGB: numOr(a.gb, 0), controllerKey: a.ctrl ? Number(a.ctrl) : undefined })).filter((a) => a.sizeGB > 0);
+    const diskAdds = adds.map((a) => ({ sizeGB: numOr(a.gb, 0), controllerKey: a.ctrl ? Number(a.ctrl) : undefined, datastore: a.ds || undefined })).filter((a) => a.sizeGB > 0);
     if (diskAdds.length) plan.diskAdds = diskAdds;
     const nicAddList = nicAdds.map((id) => networks.find((n) => n.id === id)).filter(Boolean)
       .map((n) => (n.type === 'DISTRIBUTED_PORTGROUP' ? { type: n.type, networkMoref: n.moref } : { type: n.type, networkName: n.name }));
@@ -75,7 +76,7 @@ function VmReconfigModal({ vm, onClose }) {
     if (hw && numOr(cps, hw.coresPerSocket) !== (hw.coresPerSocket || 0) && numOr(cps, 0) >= 1) s.push(`코어/소켓 →${numOr(cps, 0)}`);
     if (hw && numOr(ramGB, 0) * 1024 !== hw.memMB) s.push(`RAM ${Math.round(hw.memMB / 1024)}→${numOr(ramGB, 0)}GB`);
     Object.entries(grows).forEach(([key, gb]) => { const d = hw?.disks.find((x) => x.key === Number(key)); if (d && numOr(gb, 0) > d.capacityGB) s.push(`${d.label} ${d.capacityGB}→${numOr(gb, 0)}GB`); });
-    adds.forEach((a) => { if (numOr(a.gb, 0) > 0) s.push(`디스크 추가 +${numOr(a.gb, 0)}GB`); });
+    adds.forEach((a) => { if (numOr(a.gb, 0) > 0) s.push(`디스크 추가 +${numOr(a.gb, 0)}GB${a.ds ? ` (${a.ds})` : ''}`); });
     nicAdds.forEach((id) => { const n = networks.find((x) => x.id === id); if (n) s.push(`NIC 추가(${n.name})`); });
     [...nicRemoves].forEach((k) => { const n = hw?.nics.find((x) => x.key === k); if (n) s.push(`NIC 삭제(${n.network || n.macAddress || k})`); });
     (hw?.nics || []).forEach((n) => { if (!nicRemoves.has(n.key) && nicConn[n.key] !== n.connected) s.push(`NIC ${nicConn[n.key] ? '연결' : '연결해제'}(${n.network || n.key})`); });
@@ -139,10 +140,16 @@ function VmReconfigModal({ vm, onClose }) {
                     {hw.scsi.map((s) => <option key={s.key} value={s.key}>{s.label || `SCSI ${s.busNumber}`}</option>)}
                   </select>
                 )}
+                {datastores.length > 0 && (
+                  <select className="select" value={a.ds} onChange={(e) => setAdds((arr) => arr.map((x, j) => (j === i ? { ...x, ds: e.target.value } : x)))} style={{ maxWidth: 200, fontSize: 12 }} title="디스크를 생성할 데이터스토어">
+                    <option value="">기존 위치(자동)</option>
+                    {datastores.map((d) => <option key={d.name} value={d.name}>{d.name}{d.freeGB != null ? ` · ${d.freeGB}GB 여유` : ''}</option>)}
+                  </select>
+                )}
                 <button className="logout-btn" style={{ padding: '2px 8px' }} onClick={() => setAdds((arr) => arr.filter((_, j) => j !== i))}>✕</button>
               </span>
             ))}
-            <button className="logout-btn" style={{ padding: '5px 10px' }} onClick={() => setAdds((arr) => [...arr, { gb: '', ctrl: hw.scsi[0]?.key || '' }])}>+ 디스크 추가</button>
+            <button className="logout-btn" style={{ padding: '5px 10px' }} onClick={() => setAdds((arr) => [...arr, { gb: '', ctrl: hw.scsi[0]?.key || '', ds: '' }])}>+ 디스크 추가</button>
           </div>
 
           <div className="muted" style={{ fontSize: 12, margin: '14px 0 4px' }}>네트워크 어댑터(NIC)</div>

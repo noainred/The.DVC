@@ -1402,13 +1402,14 @@ adminRouter.delete('/collectors/:id', adminOnly, (req, res) => {
 function resolveVmTarget(vmId) {
   const snap = store.get();
   const vm = (snap.vms || []).find((v) => v.id === vmId);
-  if (!vm) return { error: 'VM을 찾을 수 없습니다.', code: 404 };
+  if (!vm) return { error: 'VM을 찾을 수 없습니다(현재 스냅샷에 없음 — 해당 vCenter 연결이 끊겼거나 폴링 전일 수 있습니다).', code: 404 };
   if (snap.source === 'mock') return { error: '데모(mock) 모드에서는 사양 변경을 사용할 수 없습니다.', code: 400 };
   const sep = String(vmId).indexOf(':');
   const vcId = sep >= 0 ? vmId.slice(0, sep) : vmId;
   const moref = sep >= 0 ? vmId.slice(sep + 1) : '';
   const vc = (loadVcenterConfig().vcenters || []).find((v) => v.id === vcId);
-  if (!vc) return { error: 'vCenter 설정을 찾을 수 없습니다.', code: 404 };
+  // vCenter가 이 포탈에 직접 등록돼 있지 않으면(위임/엣지 수집 vCenter) 자격증명이 없어 사양 변경 불가.
+  if (!vc) return { error: `이 VM의 vCenter('${vcId}')가 이 포탈에 등록되어 있지 않아 사양 변경을 할 수 없습니다(위임/엣지 수집 vCenter). 해당 vCenter가 직접 등록된 포탈에서 변경하세요.`, code: 400 };
   return { vm, vc, moref, snap };
 }
 
@@ -1422,7 +1423,12 @@ adminRouter.get('/vm/:id/hardware', adminOnly, async (req, res) => {
       .filter((n) => n.vcenterId === t.vc.id)
       .map((n) => ({ id: n.id, name: n.name, type: n.type, moref: String(n.id).split(':').slice(1).join(':') }))
       .sort((a, b) => String(a.name).localeCompare(String(b.name)));
-    res.json({ ok: true, vmName: t.vm.name, powerState: hw.powerState, hw, networks });
+    // 디스크 추가 시 선택할 데이터스토어 후보(해당 vCenter, 여유공간 많은 순).
+    const datastores = (t.snap.datastores || [])
+      .filter((d) => d.vcenterId === t.vc.id)
+      .map((d) => ({ name: d.name, freeGB: d.freeGB, capacityGB: d.capacityGB }))
+      .sort((a, b) => (b.freeGB || 0) - (a.freeGB || 0));
+    res.json({ ok: true, vmName: t.vm.name, powerState: hw.powerState, hw, networks, datastores });
   } catch (e) { res.status(502).json({ ok: false, reason: e.message }); }
 });
 
@@ -1436,11 +1442,19 @@ adminRouter.post('/vm/:id/reconfig', adminOnly, async (req, res) => {
     coresPerSocket: b.coresPerSocket != null ? Number(b.coresPerSocket) : undefined,
     memoryMB: b.memoryMB != null ? Number(b.memoryMB) : undefined,
     diskGrows: Array.isArray(b.diskGrows) ? b.diskGrows.slice(0, 64) : [],
-    diskAdds: Array.isArray(b.diskAdds) ? b.diskAdds.slice(0, 16) : [],
+    diskAdds: Array.isArray(b.diskAdds) ? b.diskAdds.slice(0, 16).map((a) => ({
+      sizeGB: a?.sizeGB, controllerKey: a?.controllerKey,
+      datastore: a?.datastore ? String(a.datastore) : undefined,
+    })) : [],
     nicAdds: Array.isArray(b.nicAdds) ? b.nicAdds.slice(0, 10) : [],
     nicRemoves: Array.isArray(b.nicRemoves) ? b.nicRemoves.slice(0, 10) : [],
     nicConnects: Array.isArray(b.nicConnects) ? b.nicConnects.slice(0, 20) : [],
   };
+  // 선택한 데이터스토어가 이 vCenter의 실제 데이터스토어인지 검증(오타·타 vCenter 차단).
+  const validDs = new Set((t.snap.datastores || []).filter((d) => d.vcenterId === t.vc.id).map((d) => d.name));
+  for (const a of plan.diskAdds) {
+    if (a.datastore && !validDs.has(a.datastore)) return res.status(400).json({ ok: false, reason: `데이터스토어 '${a.datastore}'를 찾을 수 없습니다(이 vCenter의 데이터스토어를 선택하세요).` });
+  }
   try {
     const r = await reconfigVm(t.vc, t.moref, plan);
     logAudit({

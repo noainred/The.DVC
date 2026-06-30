@@ -53,7 +53,9 @@ export async function fetchJson(path, params = {}, signal) {
     if (res.status === 401) { setToken(null); onUnauthorized(); throw new Error('세션이 만료되었습니다. 다시 로그인하세요.'); }
     if (!res.ok) {
       if (attempt < retries && isTransientFront(null, res.status)) { await sleep(300 * 2 ** attempt); continue; }
-      throw new Error(`${path} -> ${res.status}`);
+      // 서버가 준 사유(reason/error)를 우선 노출 — 불투명한 'path -> 404' 대신 원인을 보여준다.
+      const data = await res.json().catch(() => null);
+      throw new Error(data?.reason || data?.error || `${path} -> ${res.status}`);
     }
     return res.json();
   }

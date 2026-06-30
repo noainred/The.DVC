@@ -74,7 +74,7 @@ export function parseHardware(deviceXml, meta = {}) {
 
 /**
  * 변경 요청(plan)을 검증하고 ReconfigVM_Task의 <spec> 내부 XML을 만든다(순수).
- * plan: { numCPUs?, memoryMB?, diskGrows?:[{key,newGB}], diskAdds?:[{sizeGB}],
+ * plan: { numCPUs?, memoryMB?, diskGrows?:[{key,newGB}], diskAdds?:[{sizeGB, controllerKey?, datastore?}],
  *         nicAdds?:[{network, dvs?:{switchUuid,portgroupKey}}], nicRemoves?:[key] }
  * 반환: { ok, errors[], changes[], specXml }  (errors 있으면 ok=false, 실행 금지)
  */
@@ -142,8 +142,10 @@ export function buildReconfigSpec(hw, plan = {}) {
       // 컨트롤러 선택(미지정 시 첫 SCSI). 유효성 검사.
       const ctrl = a.controllerKey != null ? hw.scsi.find((s) => s.key === Number(a.controllerKey)) : hw.scsi[0];
       if (!ctrl) { errors.push('지정한 디스크 컨트롤러를 찾을 수 없습니다.'); continue; }
-      const dsBracket = dsFor(ctrl.key);
-      if (!dsBracket) { errors.push('데이터스토어를 확인할 수 없어 디스크를 추가할 수 없습니다.'); continue; }
+      // 데이터스토어: 명시 선택 시 그 데이터스토어에 배치(`[이름]`), 미지정이면 기존 디스크 위치 재사용.
+      const dsName = a.datastore ? String(a.datastore).replace(/^\[|\]$/g, '').trim() : '';
+      const dsBracket = dsName ? `[${dsName}]` : dsFor(ctrl.key);
+      if (!dsBracket) { errors.push('데이터스토어를 확인할 수 없어 디스크를 추가할 수 없습니다(데이터스토어를 선택하세요).'); continue; }
       const used = usedUnits(ctrl.key);
       let unit = 0; while (used.has(unit) || unit === 7) unit++; used.add(unit);
       dev.push(
@@ -153,7 +155,7 @@ export function buildReconfigSpec(hw, plan = {}) {
         `<controllerKey>${ctrl.key}</controllerKey><unitNumber>${unit}</unitNumber>` +
         `<capacityInKB>${Math.round(gb * GB_KB)}</capacityInKB>` +
         `</device></deviceChange>`);
-      changes.push(`디스크 추가 +${gb}GB (${ctrl.label || `ctrl ${ctrl.key}`})`);
+      changes.push(`디스크 추가 +${gb}GB (${ctrl.label || `ctrl ${ctrl.key}`}${dsName ? `, ${dsName}` : ''})`);
     }
   }
 
