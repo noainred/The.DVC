@@ -2004,6 +2004,64 @@ function Nsx() {
 }
 
 /** 법인별 서버 정보 — 등록된 iDRAC/OME 서버를 소속 법인(vCenter)별로 묶어 본다. */
+/** 하드웨어 집계 — 모든 데이터센터(법인)의 iDRAC 수집 인벤토리를 모델/CPU/메모리/GPU 종류별로 집계. */
+function HardwareSummary() {
+  const [d, setD] = useState(null);
+  const [dcs, setDcs] = useState([]);
+  const [dc, setDc] = useState('');
+  const [err, setErr] = useState(null);
+  useEffect(() => { fetchJson('/admin/datacenters').then((r) => setDcs(r.datacenters || [])).catch(() => {}); }, []);
+  useEffect(() => {
+    setD(null);
+    fetchJson(`/admin/idrac/hardware-summary${dc ? `?datacenterId=${encodeURIComponent(dc)}` : ''}`).then((r) => { setD(r); setErr(null); }).catch((e) => setErr(e.message));
+  }, [dc]);
+  if (err) return <ErrorBox message={err} />;
+  if (!d) return <Loading />;
+  const Bars = ({ title, rows, unit = '대' }) => {
+    const max = Math.max(1, ...rows.map((r) => r.count));
+    return (
+      <div className="card" style={{ padding: 14 }}>
+        <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 10 }}>{title} <span className="muted" style={{ fontWeight: 400 }}>· {rows.length}종</span></div>
+        {rows.length === 0 ? <span className="muted">데이터 없음</span> : rows.map((r) => (
+          <div key={r.key} style={{ marginBottom: 7 }}>
+            <div className="flex between" style={{ fontSize: 12.5, marginBottom: 2, gap: 8 }}>
+              <span title={r.key} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.key}</span>
+              <b style={{ flex: 'none' }}>{r.count}{unit}</b>
+            </div>
+            <div style={{ height: 6, borderRadius: 4, background: 'rgba(148,163,184,.15)', overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: `${(r.count / max) * 100}%`, background: 'var(--accent, #60a5fa)' }} />
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  };
+  return (
+    <div>
+      <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 12 }}>
+        <div className="muted" style={{ fontSize: 13 }}>
+          대상 서버 <b style={{ color: 'var(--accent)' }}>{d.totalServers}</b>대 · 수집 <b>{d.collected}</b> · 미수집 <span className="badge amber">{d.missing}</span> · GPU 카드 <b>{d.totalGpuCards}</b>장
+          <span style={{ marginLeft: 6 }}>— iDRAC 인벤토리는 30분마다 갱신됩니다.</span>
+        </div>
+        <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }} title="법인(DataCenter) 기준. 스캔 등록분은 법인 직접, 그 외는 vCenter→법인 할당으로 해석.">
+          <span className="muted">법인(DataCenter)</span>
+          <select className="select" value={dc} onChange={(e) => setDc(e.target.value)} style={{ minWidth: 180 }}>
+            <option value="">전체 데이터센터</option>
+            {dcs.map((x) => <option key={x.id} value={x.id}>{x.name || x.id}</option>)}
+            <option value="__unmapped__">⚠ 미지정(법인 없음)</option>
+          </select>
+        </label>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 14 }}>
+        <Bars title="🖥 서버 모델 종류" rows={d.byModel} />
+        <Bars title="⚙ CPU 종류" rows={d.byCpu} />
+        <Bars title="💾 메모리 용량" rows={d.byMemory} />
+        <Bars title="🎮 GPU 종류" rows={d.byGpu} unit="장" />
+      </div>
+    </div>
+  );
+}
+
 function ServerInfoByVcenter({ onServer }) {
   const [d, setD] = useState(null);
   const [dcs, setDcs] = useState({ datacenters: [], assign: {} });
@@ -2084,6 +2142,7 @@ function ServerAnalysis() {
       <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 12 }}>
         <div className="flex gap wrap">
           <button className={sub === 'info' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('info')}>🗄 법인별 서버 정보</button>
+          <button className={sub === 'hw' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('hw')}>🔩 하드웨어 집계</button>
           <button className={sub === 'temp' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('temp')}>🌡 법인별 온도</button>
           <button className={sub === 'gpu' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('gpu')}>🎮 GPU 정보</button>
           <button className={sub === 'fw' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('fw')}>🏷 BIOS/iDRAC 버전 정보</button>
@@ -2098,6 +2157,7 @@ function ServerAnalysis() {
         </label>
       </div>
       {sub === 'info' && <ServerInfoByVcenter {...sp} vcs={vcs} />}
+      {sub === 'hw' && <HardwareSummary />}
       {sub === 'gpu' && <ServerGpuFinder {...sp} />}
       {sub === 'fw' && <ServerFirmwareFinder {...sp} />}
       {sub === 'temp' && <ServerTempFinder {...sp} />}
