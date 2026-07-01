@@ -77,11 +77,12 @@ test('위임 스캔: 알 수 없는 reqId는 unknown', () => {
 });
 
 test('listIdracScanJobs: 잡 목록 요약(비밀번호·IP 원문 미노출, 최신순)', () => {
-  const reqId = enqueueIdracScan('BERLIN', { ips: '10.3.0.1-10.3.0.5', username: 'root', password: 'SECRET', vcenterId: 'OC2' });
+  const reqId = enqueueIdracScan('BERLIN', { ips: '10.3.0.1-10.3.0.5', username: 'root', password: 'SECRET', vcenterId: 'OC2', datacenterId: 'oc1' });
   const list = listIdracScanJobs();
   const j = list.find((x) => x.reqId === reqId);
   assert.ok(j, '목록에 포함');
   assert.equal(j.vcenterId, 'OC2');
+  assert.equal(j.datacenterId, 'oc1', "'대상' 칸 표시용 datacenterId 노출");
   assert.equal(j.state, 'pending');
   assert.ok(j.progress && j.progress.total === 5);
   // 민감정보(비밀번호·IP 원문)는 절대 노출 금지.
