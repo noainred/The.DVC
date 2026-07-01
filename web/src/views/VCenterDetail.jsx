@@ -71,6 +71,11 @@ export default function VCenterDetail({ site, onBack }) {
     if (!query) return [];
     return vms.filter((v) => (v.name || '').toLowerCase().includes(query));
   }, [vms, query]);
+  // '호스트 및 클러스터' 탭 검색은 호스트 이름도 매칭한다(예: '26' → leshesxpma26). VM만 되던 버그 수정.
+  const hostMatches = useMemo(() => {
+    if (!query) return [];
+    return hosts.filter((h) => (h.name || '').toLowerCase().includes(query));
+  }, [hosts, query]);
 
   // Datastore storage-type filter + per-kind counts.
   const dsCounts = useMemo(() => {
@@ -112,9 +117,9 @@ export default function VCenterDetail({ site, onBack }) {
 
       {(view === 'hosts' || view === 'vms') && (
         <div className="flex gap" style={{ alignItems: 'center', margin: '10px 0' }}>
-          <SearchBox value={q} onChange={setQ} placeholder="🔍 VM 이름 검색 (한 글자만 입력해도 포함된 VM 표시)"
+          <SearchBox value={q} onChange={setQ} placeholder={view === 'hosts' ? '🔍 호스트·VM 이름 검색 (한 글자만 입력해도 포함 표시)' : '🔍 VM 이름 검색 (한 글자만 입력해도 포함된 VM 표시)'}
             style={{ flex: 1, maxWidth: 420 }} />
-          {query && <span className="muted" style={{ fontSize: 12 }}>{matches.length}개 일치{matches.length > SEARCH_CAP ? ` (처음 ${SEARCH_CAP}개 표시)` : ''}</span>}
+          {query && <span className="muted" style={{ fontSize: 12 }}>{view === 'hosts' && hostMatches.length ? `호스트 ${hostMatches.length} · ` : ''}{matches.length} VM 일치{matches.length > SEARCH_CAP ? ` (처음 ${SEARCH_CAP}개 표시)` : ''}</span>}
           {q && <button className="tab" style={{ flex: 'none', padding: '6px 10px' }} onClick={() => setQ('')}>지우기</button>}
         </div>
       )}
@@ -134,17 +139,25 @@ export default function VCenterDetail({ site, onBack }) {
       )}
 
       <div className="vcd-tree card">
-        {(view === 'hosts' || view === 'vms') && query && (
-          <Node label="🔍 검색 결과" defaultOpen sub={`${matches.length} VM`}>
-            {matches.length === 0
-              ? <div className="vcd-node vcd-leaf"><span className="vcd-caret" /><span className="muted">일치하는 VM이 없습니다</span></div>
-              : matches.slice(0, SEARCH_CAP).map((vm) => (
+        {(view === 'hosts' || view === 'vms') && query && (() => {
+          const hm = view === 'hosts' ? hostMatches : [];
+          const empty = hm.length === 0 && matches.length === 0;
+          return (
+            <Node label="🔍 검색 결과" defaultOpen sub={view === 'hosts' ? `${hm.length} 호스트 · ${matches.length} VM` : `${matches.length} VM`}>
+              {empty && <div className="vcd-node vcd-leaf"><span className="vcd-caret" /><span className="muted">일치하는 항목이 없습니다</span></div>}
+              {hm.slice(0, SEARCH_CAP).map((h) => (
+                <Leaf key={`h:${h.id}`} icon="🖥️" onClick={() => setSel({ type: 'host', item: h })}
+                  label={<Highlight text={h.name} q={query} />} badge={<StateBadge state={h.connectionState} />}
+                  sub={`🧩 ${h.cluster || 'standalone'} · CPU ${h.cpuUsagePct ?? '-'}% · MEM ${h.memUsagePct ?? '-'}% · VM ${h.vmCount ?? '-'}`} />
+              ))}
+              {matches.slice(0, SEARCH_CAP).map((vm) => (
                 <Leaf key={vm.id} icon="🧊" onClick={() => setSel({ type: 'vm', item: vm })}
                   label={<Highlight text={vm.name} q={query} />} badge={<StateBadge state={vm.powerState} />}
                   sub={`🧩 ${vm.cluster || '—'} · 🖥️ ${vm.host || '—'} · 📁 ${vm.folder || 'vm'}`} />
               ))}
-          </Node>
-        )}
+            </Node>
+          );
+        })()}
 
         {view === 'hosts' && !query && (
           <Node label={`🗄️ ${site.name}`} defaultOpen
