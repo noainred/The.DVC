@@ -146,7 +146,38 @@ export default function VCenterAdmin() {
         </div>
       </div>
 
-      <div className="card" style={{ marginBottom: 12, padding: '12px 14px' }}>
+      <div className="table-wrap">
+        <table>
+          <thead><tr>
+            <th>ID</th><th>이름</th><th>호스트</th><th>계정</th><th>리전</th><th>위치</th><th>자격증명</th><th className="right">작업</th>
+          </tr></thead>
+          <tbody>
+            {list.length === 0 && <tr><td colSpan={8} className="center muted" style={{ padding: 28 }}>등록된 vCenter가 없습니다. “+ vCenter 추가”로 등록하세요.</td></tr>}
+            {list.map((vc) => (
+              <tr key={vc.id}>
+                <td><b>{vc.id}</b></td>
+                <td>{vc.name}
+                  {vc.collectMode === 'site' && <span className="badge amber" style={{ marginLeft: 6, fontSize: 10 }} title="사이트 위임 수집 — 현장 서버가 수집해 중앙으로 push">사이트 위임</span>}
+                  {vc.maintenance && <span className="badge amber" style={{ marginLeft: 6, fontSize: 10 }} title="점검중 — 수집 일시중단, 연결불가/알림 제외">🛠 점검중</span>}
+                </td>
+                <td className="muted">{vc.host}</td>
+                <td className="muted">{vc.username}</td>
+                <td><span className="badge blue">{vc.location?.region || '-'}</span></td>
+                <td className="muted">{[vc.location?.city, vc.location?.country].filter(Boolean).join(', ') || '-'}</td>
+                <td>{vc.hasPassword ? <span className="badge green">설정됨</span> : <span className="badge gray">없음</span>}</td>
+                <td className="right nowrap">
+                  <button className="tab" onClick={() => toggleMaintenance(vc)} title="점검중 표시 전환(수집 일시중단/재개)">{vc.maintenance ? '점검해제' : '점검중'}</button>
+                  <button className="tab" onClick={() => openEdit(vc)}>수정</button>
+                  <button className="tab" style={{ color: 'var(--red)' }} onClick={() => remove(vc)}>삭제</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* 데이터 소스 / 서버 파일 불러오기 / vCenter 표시 순서 — 페이지 하단으로 이동 */}
+      <div className="card" style={{ marginTop: 16, marginBottom: 12, padding: '12px 14px' }}>
         <div className="flex gap wrap" style={{ alignItems: 'center' }}>
           <span className="muted" style={{ fontSize: 12, fontWeight: 600 }}>데이터 소스</span>
           <select className="select" value={data.dataSource} onChange={changeSource} style={{ maxWidth: 160 }}>
@@ -195,36 +226,6 @@ export default function VCenterAdmin() {
       )}
 
       <VcenterOrderCard />
-
-      <div className="table-wrap">
-        <table>
-          <thead><tr>
-            <th>ID</th><th>이름</th><th>호스트</th><th>계정</th><th>리전</th><th>위치</th><th>자격증명</th><th className="right">작업</th>
-          </tr></thead>
-          <tbody>
-            {list.length === 0 && <tr><td colSpan={8} className="center muted" style={{ padding: 28 }}>등록된 vCenter가 없습니다. “+ vCenter 추가”로 등록하세요.</td></tr>}
-            {list.map((vc) => (
-              <tr key={vc.id}>
-                <td><b>{vc.id}</b></td>
-                <td>{vc.name}
-                  {vc.collectMode === 'site' && <span className="badge amber" style={{ marginLeft: 6, fontSize: 10 }} title="사이트 위임 수집 — 현장 서버가 수집해 중앙으로 push">사이트 위임</span>}
-                  {vc.maintenance && <span className="badge amber" style={{ marginLeft: 6, fontSize: 10 }} title="점검중 — 수집 일시중단, 연결불가/알림 제외">🛠 점검중</span>}
-                </td>
-                <td className="muted">{vc.host}</td>
-                <td className="muted">{vc.username}</td>
-                <td><span className="badge blue">{vc.location?.region || '-'}</span></td>
-                <td className="muted">{[vc.location?.city, vc.location?.country].filter(Boolean).join(', ') || '-'}</td>
-                <td>{vc.hasPassword ? <span className="badge green">설정됨</span> : <span className="badge gray">없음</span>}</td>
-                <td className="right nowrap">
-                  <button className="tab" onClick={() => toggleMaintenance(vc)} title="점검중 표시 전환(수집 일시중단/재개)">{vc.maintenance ? '점검해제' : '점검중'}</button>
-                  <button className="tab" onClick={() => openEdit(vc)}>수정</button>
-                  <button className="tab" style={{ color: 'var(--red)' }} onClick={() => remove(vc)}>삭제</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
 
       {form && (
         <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) close(); }}>
