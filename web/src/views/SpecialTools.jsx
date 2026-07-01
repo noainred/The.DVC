@@ -2189,10 +2189,14 @@ function ServerInfoByVcenter({ vc, onServer }) {
         });
         return (
         <div key={g.id} className="card" style={{ padding: 14 }}>
-          <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>{g.id === '__unmapped__' ? '⚠ ' : '🏢 '}{g.name}</div>
+          <div className="cell-link" style={{ fontWeight: 700, fontSize: 15, marginBottom: 4, cursor: 'pointer' }}
+            title={`${g.name} 전체 서버 목록 보기`}
+            onClick={() => setModelDetail({ corpName: g.name, model: null, servers: g.list.map((s) => ({ ...s, _vc: effVc(s) })) })}>
+            {g.id === '__unmapped__' ? '⚠ ' : '🏢 '}{g.name} <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>›</span>
+          </div>
           <div className="muted" style={{ fontSize: 12, marginBottom: 12 }}>
             🖥 서버 모델 종류 · <b>{modelCounts.length}</b>종 · 총 <b style={{ color: 'var(--accent, #60a5fa)' }}>{g.list.length}</b>대
-            <span style={{ opacity: 0.8 }}> — 모델을 클릭하면 상세를 봅니다</span>
+            <span style={{ opacity: 0.8 }}> — 법인명은 전체, 모델은 해당 모델 목록</span>
           </div>
           {/* 서버 모델 종류 — 가로 막대(대수 비례). 막대 클릭 → 해당 모델 서버 상세 모달 */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -2225,37 +2229,38 @@ function ServerInfoByVcenter({ vc, onServer }) {
   );
 }
 
-/** 특정 법인의 특정 모델 서버 상세 목록 모달. 모델 막대 클릭 시 열림. 행 클릭 → iDRAC 상세. */
+/** 법인 서버 상세 목록 모달. model 지정 시 그 모델만, model=null(법인명 클릭) 시 전체 목록(모델 컬럼 포함). 행 클릭 → iDRAC 상세. */
 function ModelServersModal({ corpName, model, servers, onRow, onClose }) {
   const [q, setQ] = useState('');
+  const allMode = !model; // 법인명 클릭 → 전체 서버(모델 컬럼 표시)
   const ql = q.trim().toLowerCase();
   const rows = (servers || [])
-    .filter((s) => !ql || [s.name, s.serviceTag, s.host].some((x) => String(x || '').toLowerCase().includes(ql)))
-    .sort((a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id), undefined, { numeric: true }));
+    .filter((s) => !ql || [s.name, s.serviceTag, s.host, s.model].some((x) => String(x || '').toLowerCase().includes(ql)))
+    .sort((a, b) => (allMode ? String(a.model || '').localeCompare(String(b.model || '')) : 0) || String(a.name || a.id).localeCompare(String(b.name || b.id), undefined, { numeric: true }));
   const exportCsv = () => {
     const esc = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
     const head = ['name', 'model', 'type', 'host', 'service_tag', 'vcenter', 'status'];
     const lines = [head.join(',')];
-    for (const s of (servers || [])) lines.push([s.name || s.id, model, s.type === 'ome' ? 'OME' : 'iDRAC', String(s.host || '').replace(/^https?:\/\//, ''), s.serviceTag || '', s._vc || '', s.enabled === false ? '중지' : '수집'].map(esc).join(','));
+    for (const s of (servers || [])) lines.push([s.name || s.id, s.model || model || '', s.type === 'ome' ? 'OME' : 'iDRAC', String(s.host || '').replace(/^https?:\/\//, ''), s.serviceTag || '', s._vc || '', s.enabled === false ? '중지' : '수집'].map(esc).join(','));
     const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = `model-${String(model).replace(/[^a-zA-Z0-9._-]+/g, '_')}-${new Date().toISOString().slice(0, 10)}.csv`; a.click(); URL.revokeObjectURL(url);
+    const a = document.createElement('a'); a.href = url; a.download = `servers-${String(model || corpName).replace(/[^a-zA-Z0-9._-]+/g, '_')}-${new Date().toISOString().slice(0, 10)}.csv`; a.click(); URL.revokeObjectURL(url);
   };
   return (
-    <Modal title={`${model} — ${corpName}`} onClose={onClose} width={900} resizable minWidth={560} minHeight={360}>
+    <Modal title={allMode ? `${corpName} — 전체 서버` : `${model} — ${corpName}`} onClose={onClose} width={960} resizable minWidth={560} minHeight={360}>
       <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 10 }}>
         <span className="muted" style={{ fontSize: 13 }}>
-          <b style={{ color: 'var(--accent, #60a5fa)' }}>{model}</b> 서버 <b>{(servers || []).length}</b>대{ql ? ` · ${rows.length} 표시` : ''}
+          {allMode ? <><b style={{ color: 'var(--accent, #60a5fa)' }}>{corpName}</b> 서버</> : <><b style={{ color: 'var(--accent, #60a5fa)' }}>{model}</b> 서버</>} <b>{(servers || []).length}</b>대{ql ? ` · ${rows.length} 표시` : ''}
           <span style={{ marginLeft: 6 }}>· 행을 클릭하면 iDRAC 상세(버전·온도·CPU)를 봅니다.</span>
         </span>
         <div className="flex gap" style={{ alignItems: 'center' }}>
-          <input className="input" placeholder="이름/태그/주소 검색" value={q} onChange={(e) => setQ(e.target.value)} style={{ minWidth: 180 }} />
+          <input className="input" placeholder="이름/모델/태그/주소 검색" value={q} onChange={(e) => setQ(e.target.value)} style={{ minWidth: 180 }} />
           <button className="logout-btn" style={{ flex: 'none', padding: '7px 12px' }} disabled={!(servers || []).length} onClick={exportCsv}>⬇ CSV</button>
         </div>
       </div>
       <table className="data-table" style={{ width: '100%', fontSize: 13 }}>
         <thead><tr>
-          <th style={{ textAlign: 'left' }}>이름</th><th>유형</th><th style={{ textAlign: 'left' }}>주소</th><th style={{ textAlign: 'left' }}>서비스태그</th><th>상태</th>
+          <th style={{ textAlign: 'left' }}>이름</th><th>유형</th>{allMode && <th style={{ textAlign: 'left' }}>모델</th>}<th style={{ textAlign: 'left' }}>주소</th><th style={{ textAlign: 'left' }}>서비스태그</th><th>상태</th>
         </tr></thead>
         <tbody>{rows.map((s) => {
           const isOme = s.type === 'ome';
@@ -2263,6 +2268,7 @@ function ModelServersModal({ corpName, model, servers, onRow, onClose }) {
             <tr key={s.id} style={{ cursor: isOme ? 'default' : 'pointer' }} onClick={() => onRow(s)}>
               <td><b>{s.name || s.id}</b></td>
               <td>{isOme ? <span className="badge blue">OME</span> : <span className="badge gray">iDRAC</span>}{s.remote && <span className="badge amber" style={{ marginLeft: 4 }} title="위임 법인 스캔으로 엣지 에이전트가 수집한 서버(원격 인벤토리)">원격</span>}{!isOme && s._vc && <span className="badge blue" style={{ marginLeft: 4 }} title={`서비스태그가 vCenter '${s._vc}'의 ESXi 호스트와 일치 — 가상화 호스트`}>🖧 {s._vc}</span>}</td>
+              {allMode && <td className="muted">{s.model || '—'}</td>}
               <td className="muted">{String(s.host || '').replace(/^https?:\/\//, '') || '—'}</td>
               <td className="muted">{s.serviceTag || '—'}</td>
               <td>{s.enabled === false ? <span className="badge gray">중지</span> : <span className="badge green">수집</span>}</td>
