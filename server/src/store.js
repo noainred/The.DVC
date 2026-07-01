@@ -155,23 +155,38 @@ class Store {
     this.vcLast = new Map();  // vcId -> last collection attempt (ms)
   }
 
+  /**
+   * 스냅샷 갱신. opts:
+   *  - scheduled: 타이머 틱 — 이전 수집이 진행 중이면 건너뜀(중첩→CPU 누적 악화 방지).
+   *  - (기본, 뮤테이션 콜러): 진행 중이면 완료를 기다렸다가 1회 더 실행 — 'vCenter 저장 시 즉시
+   *    재수집' 같은 계약이 폴링과 겹쳐도 조용히 유실되지 않는다. 폭주 시 대기 1회로 병합(coalesce).
+   *  - collectAll: due(주기) 필터를 무시하고 활성 vCenter 전부 수집 — 'GPU 지금 수집' 등
+   *    명시적 수동 수집용(방금 폴링된 vCenter도 다시 수집해 강제 플래그가 소비되게 한다).
+   */
   async refresh(opts = {}) {
-    const force = !!opts.force;
-    // 재진입 방지: 스케줄 틱(force 아님)은 이전 수집이 진행 중이면 건너뛴다(중첩→CPU 누적 악화
-    // 방지, 스킵해도 캐시 스냅샷은 계속 서빙). 수동 강제(force)는 진행 중 refresh 완료를 기다린 뒤
-    // 새 refresh를 한 번 더 실행해 '지금 수집' 강제 플래그가 모든 vCenter에 반드시 반영되게 한다.
+    const scheduled = !!opts.scheduled;
+    const force = opts.force != null ? !!opts.force : !scheduled;
+    if (opts.collectAll) this._collectAllPending = true;
     if (this._refreshing) {
       if (!force) return undefined;
-      try { await this._inflight; } catch { /* */ }
-      return this.refresh({ force: true });
+      if (!this._forcePending) {
+        this._forcePending = (async () => {
+          try { await this._inflight; } catch { /* */ }
+          this._forcePending = null;
+          return this.refresh({ force: true });
+        })();
+      }
+      return this._forcePending;
     }
+    const collectAll = this._collectAllPending === true;
+    this._collectAllPending = false;
     this._refreshing = true;
-    this._inflight = this._refreshBody();
+    this._inflight = this._refreshBody(collectAll);
     try { await this._inflight; } finally { this._refreshing = false; this._inflight = null; }
     return undefined;
   }
 
-  async _refreshBody() {
+  async _refreshBody(collectAll = false) {
     try {
       // 긴급중단(2인 승인) 활성 시 모든 수집 정지 — 마지막 스냅샷은 그대로 유지.
       if (isStopped()) return;
@@ -193,6 +208,7 @@ class Store {
         if (vc.enabled === false) return false;
         if (vc.maintenance) return false; // 점검중: 수집 일시 중단(연결 실패로 잡지 않음)
         if (vc.collectMode === 'site') return false; // 사이트 위임: 중앙은 직접 폴링하지 않음
+        if (collectAll) return true; // 수동 '지금 수집': 주기 무시하고 전부(동시성 제한은 유지)
         const last = this.vcLast.get(vc.id) || 0;
         const intervalMs = vc.pollIntervalSec > 0 ? vc.pollIntervalSec * 1000 : globalMs;
         return now - last >= intervalMs - 500;
@@ -308,8 +324,8 @@ class Store {
   }
 
   start() {
-    this.refresh();
-    this.timer = setInterval(() => this.refresh(), config.pollIntervalMs);
+    this.refresh({ scheduled: true }); // 최초 1회(가드 비어 있어 즉시 실행)
+    this.timer = setInterval(() => this.refresh({ scheduled: true }), config.pollIntervalMs);
     this.timer.unref?.();
   }
 

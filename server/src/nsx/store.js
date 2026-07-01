@@ -20,14 +20,25 @@ class NsxStore {
     this.timer = null;
   }
 
-  async refresh() {
-    if (this._refreshing) return; // 재진입 방지(이전 폴 진행 중이면 이번 틱 건너뜀)
-    this._refreshing = true;
-    try {
-      return await this._refreshInner();
-    } finally {
-      this._refreshing = false;
+  /** scheduled 틱은 진행 중이면 스킵, 그 외(매니저 등록/수정 등 뮤테이션)는 완료 대기 후 1회 더 실행. */
+  async refresh(opts = {}) {
+    const scheduled = !!opts.scheduled;
+    if (this._refreshing) {
+      if (scheduled) return undefined; // 재진입 방지(이전 폴 진행 중이면 이번 틱 건너뜀)
+      if (!this._forcePending) {
+        this._forcePending = (async () => {
+          try { await this._inflight; } catch { /* */ }
+          this._forcePending = null;
+          return this.refresh();
+        })();
+      }
+      return this._forcePending;
     }
+    this._refreshing = true;
+    this._inflight = (async () => {
+      try { return await this._refreshInner(); } finally { this._refreshing = false; this._inflight = null; }
+    })();
+    return this._inflight;
   }
 
   async _refreshInner() {
@@ -80,8 +91,8 @@ class NsxStore {
   }
 
   start() {
-    this.refresh().catch((e) => console.error('[nsx] refresh 실패:', e.message));
-    this.timer = setInterval(() => this.refresh().catch(() => {}), config.pollIntervalMs);
+    this.refresh({ scheduled: true }).catch((e) => console.error('[nsx] refresh 실패:', e.message));
+    this.timer = setInterval(() => this.refresh({ scheduled: true }).catch(() => {}), config.pollIntervalMs);
     this.timer.unref?.();
   }
 

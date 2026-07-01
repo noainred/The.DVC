@@ -506,9 +506,10 @@ adminRouter.put('/metrics/settings', adminOnly, (req, res) => {
 adminRouter.post('/gpu/collect-util', adminOnly, async (_req, res) => {
   try {
     forceGpuUtilCollect();
-    // force:true — 스케줄 수집이 진행 중이어도 완료 후 강제 수집 refresh를 한 번 더 보장 실행
-    // (재진입 가드로 즉시 스킵돼 강제 플래그가 소비되지 못한 채 버려지던 문제 방지).
-    await store.refresh({ force: true });
+    // collectAll — 진행 중 수집이 있어도 완료 후 1회 더 실행 + due(주기) 필터를 무시하고 전
+    // vCenter를 수집한다. 방금 폴링된 vCenter가 due에서 빠져 강제 플래그가 소비되지 못한 채
+    // 버려지던 문제까지 방지(동시성 제한은 그대로 적용돼 부하는 평탄).
+    await store.refresh({ force: true, collectAll: true });
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ ok: false, reason: e.message });
