@@ -96,6 +96,7 @@ import { getSensorSeries } from '../idrac/sensorStore.js';
 import { fetchInventory as fetchIdracInventory, fetchSensors as fetchIdracSensors, probeGpuTelemetry } from '../idrac/redfish.js';
 import { listCollectors, addCollector, updateCollector, removeCollector, loadCollectors } from '../collector/registry.js';
 import { allRemoteServers, findRemoteServer } from '../collector/remoteInventory.js';
+import { matchDatacenterId } from '../collector/datacenterMatch.js';
 import { listDatacenters, getDatacenterAssign, addDatacenter, updateDatacenter, removeDatacenter, setVcenterDatacenterMany } from '../datacenter/store.js';
 import { allCollectorStatus, getCollectorStatus } from '../collector/state.js';
 import { pullNow } from '../collector/puller.js';
@@ -125,13 +126,31 @@ function idracServersForAnalysis(req) {
   return servers;
 }
 
+// 수집기(에이전트) → DataCenter id 매핑. collector.datacenter 라벨/이름/ id를 등록된
+// DataCenter(id 또는 name, 대소문자 무시)에 맞춘다. '에이전트로 검색하면 그 법인에 속하게'의 근거.
+function collectorToDatacenterMap() {
+  const dcs = listDatacenters();
+  const map = new Map();
+  for (const c of loadCollectors()) {
+    map.set(String(c.id), matchDatacenterId([c.datacenter, c.id, c.name], dcs));
+  }
+  return map;
+}
+
+// 원격 서버 + DataCenter 해석: 엣지가 datacenterId를 태깅하지 못한 경우(스캔 시점/버전 차이)에도
+// 그 서버를 보고한 수집기(에이전트)의 소속 DataCenter로 자동 귀속시킨다.
+function remoteServersResolved() {
+  const m = collectorToDatacenterMap();
+  return allRemoteServers().map((s) => ({ ...s, datacenterId: s.datacenterId || m.get(String(s.collectorId)) || '' }));
+}
+
 // 서버 분석 공용(원격 포함) — 중앙 로컬 + 위임 법인의 원격 인벤토리를 병합(id 중복은 중앙 우선).
 // 위임 스캔으로 엣지에만 등록된 서버가 서버 분석에 나타나게 한다. 온도(시계열)만 제외한다.
 function analysisServersWithRemote(req) {
   const local = idracServersForAnalysis(req);
   const seen = new Set(local.map((s) => String(s.id)));
   const vc = String(req?.query?.vcenterId || '').trim();
-  let remote = allRemoteServers().filter((s) => !seen.has(String(s.id)));
+  let remote = remoteServersResolved().filter((s) => !seen.has(String(s.id)));
   if (vc) remote = remote.filter((s) => (vc === '__unmapped__' ? !s.vcenterId : s.vcenterId === vc));
   return local.concat(remote);
 }
@@ -922,7 +941,7 @@ adminRouter.post('/vcenters/import-file', adminOnly, (req, res) => {
 adminRouter.get('/idrac', adminOnly, (_req, res) => {
   const local = listServers();
   const seen = new Set(local.map((s) => String(s.id)));
-  const remote = allRemoteServers()
+  const remote = remoteServersResolved()
     .filter((s) => !seen.has(String(s.id)))
     .map((s) => ({ id: s.id, name: s.name, host: s.host, serviceTag: s.serviceTag || '', model: s.model || s.inv?.system?.model || '', vcenterId: s.vcenterId || '', datacenterId: s.datacenterId || '', type: s.type || 'idrac', remote: true, collectorId: s.collectorId, hasInventory: !!s.inv }));
   res.json({ servers: local.concat(remote), poller: getPollerStatus() });
@@ -982,7 +1001,7 @@ adminRouter.get('/idrac/hardware-summary', adminOnly, (req, res) => {
   // 중앙 로컬 + 위임 법인 원격 서버 병합(id 중복은 중앙 우선).
   const localAll = loadIdracRegistry().filter((s) => s.type !== 'ome');
   const seen = new Set(localAll.map((s) => String(s.id)));
-  const merged = localAll.concat(allRemoteServers().filter((s) => !seen.has(String(s.id))));
+  const merged = localAll.concat(remoteServersResolved().filter((s) => !seen.has(String(s.id))));
   const servers = merged.filter((s) => (!dcFilter || dcOf(s) === (dcFilter === '__unmapped__' ? '' : dcFilter)) && (dcFilter !== '__unmapped__' || !dcOf(s)));
   const byModel = new Map(), byCpu = new Map(), byMem = new Map(), byGpu = new Map();
   let collected = 0, missing = 0, totalGpuCards = 0;
