@@ -18,6 +18,28 @@ import { isStopped } from './security/emergencyStop.js';
 // 사이트 위임 vCenter가 이 시간 이상 push가 없으면 'stale'로 표시(데이터는 계속 서빙).
 const SITE_STALE_MS = Number(process.env.SITE_INVENTORY_STALE_MS) || 300_000;
 
+// 매 폴링 주기의 동시 vCenter 수집 개수 상한(고RTT·다수 vCenter에서 CPU 스파이크 완화).
+const COLLECT_CONCURRENCY = Math.max(1, Number(process.env.COLLECT_CONCURRENCY) || 8);
+
+/**
+ * Promise.allSettled과 같은 결과 배열([{status,value|reason}])을 돌려주되, 동시 실행을
+ * `limit`개로 제한한다. 빈 슬롯이 나는 대로 다음 항목을 시작 → 28개가 한꺼번에 몰리지 않음.
+ */
+async function collectPool(items, limit, fn) {
+  const results = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    for (;;) {
+      const idx = next++;
+      if (idx >= items.length) return;
+      try { results[idx] = { status: 'fulfilled', value: await fn(items[idx]) }; }
+      catch (reason) { results[idx] = { status: 'rejected', reason }; }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
 // IP 대장의 '내용' 지문(djb2). generatedAt 같은 비본질 변화는 제외하고 외부 DB에 반영할
 // 실제 변동(IP·소유자·전원·관리상태 등)만 감지해 불필요한 SQLite 재기록을 막는다.
 function ledgerSignature(rows) {
@@ -150,7 +172,10 @@ class Store {
         const intervalMs = vc.pollIntervalSec > 0 ? vc.pollIntervalSec * 1000 : globalMs;
         return now - last >= intervalMs - 500;
       });
-      const results = await Promise.allSettled(due.map((vc) => collectFromVCenter(vc)));
+      // 성능: 28개 vCenter를 한꺼번에 수집하면 매 주기 SOAP 파싱이 몰려 CPU가 순간 100%를
+      // 찍고 UI가 끊긴다. 동시 수집을 제한(기본 8)해 같은 작업을 평탄하게 흘려보낸다.
+      // 느린 1곳은 per-vCenter 타임아웃으로 격리되고, 나머지는 빈 슬롯이 나는 대로 진행.
+      const results = await collectPool(due, COLLECT_CONCURRENCY, (vc) => collectFromVCenter(vc));
       results.forEach((r, i) => {
         const vc = due[i];
         this.vcLast.set(vc.id, Date.now());
@@ -333,6 +358,19 @@ function withRollups(snap) {
     powerUnmappedKw: round((snap.measuredPower?.byVc?.['(미매핑)'] || 0) / 1000, 1),
   };
 
+  // 성능: 호스트/VM/DS/알람을 vCenter별로 '한 번만' 그룹핑한 뒤 조회한다. 이전에는
+  // 그룹마다 snap.hosts.filter(...) 등 전체 재순회로 O(N×그룹수)였다(28 vCenter × 6천 VM).
+  const groupByVc = (arr) => {
+    const m = new Map();
+    for (const x of arr) { let a = m.get(x.vcenterId); if (!a) m.set(x.vcenterId, a = []); a.push(x); }
+    return m;
+  };
+  const hostsByVc = groupByVc(snap.hosts);
+  const vmsByVc = groupByVc(snap.vms);
+  const dsByVc = groupByVc(snap.datastores);
+  const alarmsByVc = groupByVc(snap.alarms);
+  const pick = (map, ids) => { const out = []; for (const id of ids) { const a = map.get(id); if (a) for (const x of a) out.push(x); } return out; };
+
   const byKey = (key) => {
     const groups = new Map();
     for (const v of snap.vcenters) {
@@ -341,10 +379,10 @@ function withRollups(snap) {
       groups.get(k).push(v.id);
     }
     return [...groups.entries()].map(([k, ids]) => {
-      const h = snap.hosts.filter((x) => ids.includes(x.vcenterId));
-      const v = snap.vms.filter((x) => ids.includes(x.vcenterId));
-      const d = snap.datastores.filter((x) => ids.includes(x.vcenterId));
-      const a = snap.alarms.filter((x) => ids.includes(x.vcenterId));
+      const h = pick(hostsByVc, ids);
+      const v = pick(vmsByVc, ids);
+      const d = pick(dsByVc, ids);
+      const a = pick(alarmsByVc, ids);
       const cpuT = sum(h, (x) => x.cpuTotalMhz), cpuU = sum(h, (x) => x.cpuUsageMhz);
       const memT = sum(h, (x) => x.memTotalMB), memU = sum(h, (x) => x.memUsageMB);
       const stC = sum(d, (x) => x.capacityGB), stU = sum(d, (x) => x.usedGB);

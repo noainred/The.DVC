@@ -69,7 +69,25 @@ jobs:
           [ -f prev/versions.json ] || echo '{"latest":"","versions":[]}' > prev/versions.json
 
       - name: Build versions.json
+        env:
+          VERSIONS_KEEP: '15'
         run: node packaging/release/update-versions.mjs "${{ steps.ver.outputs.version }}" dist-offline prev/versions.json dist-offline/versions.json
+
+      # 롤링 릴리스는 자산 1000개 상한이 있다. 오래된 버전 자산을 먼저 정리해 업로드 실패(422)를 막는다.
+      - name: Prune old release assets (keep latest 15 versions)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$RELEASE_TAG" --json assets -q '.assets[].name' > all_assets.txt 2>/dev/null || true
+          if [ -s all_assets.txt ]; then
+            node packaging/release/prune-assets.mjs 15 < all_assets.txt > to_delete.txt || true
+            while IFS= read -r name; do
+              [ -n "$name" ] && gh release delete-asset "$RELEASE_TAG" "$name" -y 2>/dev/null || true
+            done < to_delete.txt
+            echo "prune 완료: $(grep -c . to_delete.txt 2>/dev/null || echo 0) 자산 삭제"
+          else
+            echo "prune 생략: 기존 자산 없음"
+          fi
 
       - name: Publish assets to rolling '${{ env.RELEASE_TAG }}' release
         env:
