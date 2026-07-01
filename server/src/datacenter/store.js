@@ -75,6 +75,15 @@ export function addDatacenter(body = {}) {
   return { ok: true, datacenter: entry };
 }
 
+/** DataCenter가 없으면 생성(있으면 no-op). 수집 서버 등록/에이전트 배포 시 그 법인을 자동 등록해
+ *  '스캔 대역 추가' 등 DataCenter 목록에 바로 뜨게 한다. id는 정규화(소문자), name 없으면 id 사용. */
+export function ensureDatacenter(body = {}) {
+  const id = idOf(body.id);
+  if (!id || !/^[a-z0-9._-]{1,64}$/.test(id)) return { ok: false, reason: 'invalid id' };
+  if (loadRaw().datacenters.some((d) => d.id === id)) return { ok: true, existed: true, datacenter: { id } };
+  return addDatacenter({ id, name: norm(body.name) || id, region: body.region, note: body.note });
+}
+
 export function updateDatacenter(id, body = {}) {
   const cur = loadRaw();
   const idx = cur.datacenters.findIndex((d) => d.id === id);

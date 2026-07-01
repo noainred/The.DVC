@@ -100,7 +100,7 @@ import { matchDatacenterId } from '../collector/datacenterMatch.js';
 import { serverInScope } from '../insights/analysisScope.js';
 import { findHostByServiceTag } from '../idrac/hostMatch.js';
 import { hardwareDimMatch } from '../idrac/hwMatch.js';
-import { listDatacenters, getDatacenterAssign, addDatacenter, updateDatacenter, removeDatacenter, setVcenterDatacenterMany } from '../datacenter/store.js';
+import { listDatacenters, getDatacenterAssign, addDatacenter, updateDatacenter, removeDatacenter, setVcenterDatacenterMany, ensureDatacenter } from '../datacenter/store.js';
 import { allCollectorStatus, getCollectorStatus } from '../collector/state.js';
 import { pullNow } from '../collector/puller.js';
 import { pushUpgradeToCollectors } from '../collector/upgradePush.js';
@@ -332,7 +332,7 @@ function autoRegisterCollector(target, portalPort) {
   const body = { id, name: target.agentName || target.collectorDatacenter || target.host, datacenter: target.collectorDatacenter || '', url, token: target.collectorToken, enabled: true };
   const exists = loadCollectors().find((c) => c.id === id);
   const r = exists ? updateCollector(id, body) : addCollector(body);
-  if (r.ok) pullNow().catch(() => {});
+  if (r.ok) { ensureCollectorDatacenter(r.collector); pullNow().catch(() => {}); }
   return r.ok ? { registered: true, id, url, updated: !!exists } : { registered: false, reason: r.reason };
 }
 
@@ -1455,15 +1455,24 @@ adminRouter.get('/collectors', adminOnly, (_req, res) => {
   res.json({ collectors: listCollectors(), status: allCollectorStatus() });
 });
 
+// 수집 서버의 데이터센터(라벨/ id)를 DataCenter로 자동 등록 — '스캔 대역 추가' 등 DataCenter
+// 목록에 바로 뜨게 한다(수집 서버만 있고 법인 미등록이면 스캔 대상에 안 보이던 문제 해결).
+function ensureCollectorDatacenter(c) {
+  if (!c) return;
+  const label = String(c.datacenter || '').trim();
+  const id = (label || c.id || '').toString();
+  if (id) ensureDatacenter({ id, name: label || c.name || c.id });
+}
+
 adminRouter.post('/collectors', adminOnly, (req, res) => {
   const result = addCollector(req.body || {});
-  if (result.ok) { pullNow().catch(() => {}); logAudit({ user: req.user?.username, action: '수집 서버 등록', target: result.collector?.id || '', detail: `url=${result.collector?.url || ''} vcenterId=${result.collector?.vcenterId || ''}`, ip: req.ip || '' }); }
+  if (result.ok) { ensureCollectorDatacenter(result.collector); pullNow().catch(() => {}); logAudit({ user: req.user?.username, action: '수집 서버 등록', target: result.collector?.id || '', detail: `url=${result.collector?.url || ''} vcenterId=${result.collector?.vcenterId || ''}`, ip: req.ip || '' }); }
   res.status(result.ok ? 201 : 400).json(result);
 });
 
 adminRouter.put('/collectors/:id', adminOnly, (req, res) => {
   const result = updateCollector(req.params.id, req.body || {});
-  if (result.ok) { pullNow().catch(() => {}); logAudit({ user: req.user?.username, action: '수집 서버 수정', target: req.params.id, detail: `url=${result.collector?.url || ''} vcenterId=${result.collector?.vcenterId || ''}`, ip: req.ip || '' }); }
+  if (result.ok) { ensureCollectorDatacenter(result.collector); pullNow().catch(() => {}); logAudit({ user: req.user?.username, action: '수집 서버 수정', target: req.params.id, detail: `url=${result.collector?.url || ''} vcenterId=${result.collector?.vcenterId || ''}`, ip: req.ip || '' }); }
   res.status(result.ok ? 200 : 400).json(result);
 });
 
@@ -1474,7 +1483,12 @@ adminRouter.delete('/collectors/:id', adminOnly, (req, res) => {
 });
 
 // ── DataCenter(법인) — vCenter의 상위 개념. 설정에서 종류 정의 + vCenter 할당 (관리자) ────────
-adminRouter.get('/datacenters', adminOnly, (_req, res) => res.json({ datacenters: listDatacenters(), assign: getDatacenterAssign() }));
+adminRouter.get('/datacenters', adminOnly, (_req, res) => {
+  // 백필: 등록된 수집 서버의 데이터센터를 DataCenter 목록에 없으면 자동 생성(이미 등록된 OC1 같은
+  // 수집기도 재등록 없이 '스캔 대역 추가' 등에서 바로 보이게 한다). idempotent.
+  try { for (const c of loadCollectors()) ensureCollectorDatacenter(c); } catch { /* best effort */ }
+  res.json({ datacenters: listDatacenters(), assign: getDatacenterAssign() });
+});
 adminRouter.post('/datacenters', adminOnly, (req, res) => {
   const r = addDatacenter(req.body || {});
   if (r.ok) logAudit({ user: req.user?.username, action: 'DataCenter 등록', target: r.datacenter?.id || '', detail: r.datacenter?.name || '', ip: req.ip || '' });
