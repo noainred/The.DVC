@@ -161,6 +161,11 @@ export function importServers(incoming, mode = 'merge') {
     const dcs = new Set(valid.map((e) => String(e.datacenterId || '').trim()).filter(Boolean));
     result = dcs.size ? existing.filter((s) => !dcs.has(String(s.datacenterId || '').trim())) : [...existing];
   } else result = [...existing];
+  // 안전장치: 'replace'인데 유효 incoming이 0건이면 전체 삭제하지 않는다(빈/전부무효 CSV로
+  // 등록 서버·자격증명이 소실되는 사고 방지). replace-vcenter/datacenter는 위에서 이미 0건 가드됨.
+  if (mode === 'replace' && valid.length === 0) {
+    return { ok: false, mode, added: 0, updated: 0, skipped, total: existing.length, reason: '가져올 유효한 서버가 없어 전체 교체를 취소했습니다(기존 목록 유지).' };
+  }
   let added = 0, updated = 0;
   for (const entry of valid) {
     const idx = result.findIndex((s) => s.id === entry.id);

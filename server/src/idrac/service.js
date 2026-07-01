@@ -296,7 +296,10 @@ export async function purgeStalePower(opts = {}) {
   try {
     const db = await getDb();
     if (db.serverIds && db.deleteServers) {
-      const orphans = db.serverIds().filter((id) => !active.has(id));
+      // stale 모드는 '등록 해제된 소스만' 정리하고 활성 소스는 보존해야 한다. vCenter 호스트 전력
+      // (vc:* 키)은 iDRAC/OME/원격 '등록'과 무관하게 vCenter 폴이 적재하는 활성 시계열이므로,
+      // active 집합에 없더라도 stale 모드에서는 삭제하지 않는다(대시보드 24h 통계 소실 방지).
+      const orphans = db.serverIds().filter((id) => !active.has(id) && (mode === 'all' || !String(id).startsWith('vc:')));
       dbRemoved = db.deleteServers(orphans);
     }
   } catch { /* best effort */ }

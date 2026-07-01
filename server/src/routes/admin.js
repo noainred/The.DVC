@@ -868,7 +868,11 @@ adminRouter.get('/os-scan/results', adminOnly, (req, res) => {
 });
 adminRouter.get('/os-scan/results.csv', adminOnly, (req, res) => {
   const rows = getOsResults({ vcenterId: req.query.vcenterId || '', mismatch: req.query.mismatch === '1' });
-  const esc = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const esc = (v) => {
+    let s = String(v ?? '');
+    if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;        // 스프레드시트 수식 인젝션 무력화(=,+,-,@ 로 시작)
+    return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; // 단독 CR도 quoting
+  };
   const head = ['vm', 'vcenter', 'cluster', 'host', 'esxi_guest_os', 'real_os', 'real_version', 'family', 'kernel', 'mismatch', 'scanned_at', 'error'];
   const lines = [head.join(',')];
   for (const r of rows) lines.push([r.vmName, r.vcenterId, r.cluster, r.host, r.esxiGuestOS, r.os, r.osVersion, r.family, r.kernel, r.mismatch ? 'Y' : 'N', new Date(r.at).toISOString(), r.error].map(esc).join(','));

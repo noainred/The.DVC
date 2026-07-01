@@ -188,8 +188,8 @@ function recordSeen(h, ts, agent) {
     histDirty = true;
     return;
   }
-  e.lastSeen = ts;
-  e.agent = agent;
+  // 최신 관측만 반영 — stale(오래된) 보고가 lastSeen을 뒤로 돌려 IP가 조기 down 처리되지 않게 한다.
+  if (ts > (e.lastSeen || 0)) { e.lastSeen = ts; e.agent = agent; }
   if (e.status !== 'up') {
     e.status = 'up';
     pushEvent(e, { ts, type: 'up', hostname: h.hostname || '', ports: h.openPorts || [], agent });

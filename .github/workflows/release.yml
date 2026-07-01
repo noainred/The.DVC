@@ -74,13 +74,15 @@ jobs:
         run: node packaging/release/update-versions.mjs "${{ steps.ver.outputs.version }}" dist-offline prev/versions.json dist-offline/versions.json
 
       # 롤링 릴리스는 자산 1000개 상한이 있다. 오래된 버전 자산을 먼저 정리해 업로드 실패(422)를 막는다.
-      - name: Prune old release assets (keep latest 15 versions)
+      # 유지 기준은 방금 만든 dist-offline/versions.json 의 버전 목록 — versions.json이 참조하는
+      # 버전과 릴리스 자산을 정확히 일치시켜(고아/누락 없이) 자동 업그레이드를 안전하게 유지한다.
+      - name: Prune old release assets (keep exactly versions.json's versions)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release view "$RELEASE_TAG" --json assets -q '.assets[].name' > all_assets.txt 2>/dev/null || true
           if [ -s all_assets.txt ]; then
-            node packaging/release/prune-assets.mjs 15 < all_assets.txt > to_delete.txt || true
+            node packaging/release/prune-assets.mjs dist-offline/versions.json < all_assets.txt > to_delete.txt || true
             while IFS= read -r name; do
               [ -n "$name" ] && gh release delete-asset "$RELEASE_TAG" "$name" -y 2>/dev/null || true
             done < to_delete.txt

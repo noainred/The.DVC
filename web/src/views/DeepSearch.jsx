@@ -4,6 +4,12 @@ import { VmLink, Loading } from '../components/ui.jsx';
 
 const GPU_MODE = [['', '전체'], ['any', 'GPU 있음'], ['passthrough', '패스쓰루'], ['vgpu', 'vGPU'], ['none', 'GPU 없음']];
 
+// 모듈 스코프에 둔다 — 컴포넌트 내부에서 정의하면 매 렌더마다 새 타입이 되어 input이
+// 언마운트/재마운트되고 한 글자마다 포커스를 잃는다.
+function Field({ f, setF, k, ph, w = 130 }) {
+  return <input className="input" placeholder={ph} style={{ width: w }} value={f[k]} onChange={(e) => setF((prev) => ({ ...prev, [k]: e.target.value }))} />;
+}
+
 export default function DeepSearch() {
   const { data: vcs } = usePolling('/vcenters', {}, 60_000);
   const [scope, setScope] = useState(new Set()); // 빈 set = 전체
@@ -30,7 +36,6 @@ export default function DeepSearch() {
     try { const r = await postJson('/admin/deep-search/probe', { ...body(), probe: { type: probeType, pattern }, guestUser: guest.user, guestPass: guest.pass, maxVms: Number(guest.maxVms) || 100 }); setProbe(r); } catch (e) { setProbe({ error: e.message }); } finally { setProbeBusy(false); }
   };
 
-  const Field = ({ k, ph, w = 130 }) => <input className="input" placeholder={ph} style={{ width: w }} value={f[k]} onChange={(e) => setF({ ...f, [k]: e.target.value })} />;
   const rows = probe?.matched || items;
   const VmTable = ({ list, evidence }) => (
     <div className="table-wrap" style={{ maxHeight: '46vh' }}>
@@ -67,22 +72,22 @@ export default function DeepSearch() {
       {/* 조건 */}
       <div className="card" style={{ padding: 14, marginBottom: 10 }}>
         <div className="flex gap wrap" style={{ alignItems: 'center', gap: 10 }}>
-          <Field k="q" ph="이름/IP/OS/호스트" w={170} />
-          <Field k="gateway" ph="게이트웨이 (예 192.168.10.1)" w={190} />
-          <Field k="ip" ph="IP 시작" w={120} />
-          <Field k="subnet" ph="서브넷 CIDR (10.0.0.0/8)" w={170} />
-          <Field k="guestOS" ph="Guest OS 포함" w={130} />
+          <Field f={f} setF={setF} k="q" ph="이름/IP/OS/호스트" w={170} />
+          <Field f={f} setF={setF} k="gateway" ph="게이트웨이 (예 192.168.10.1)" w={190} />
+          <Field f={f} setF={setF} k="ip" ph="IP 시작" w={120} />
+          <Field f={f} setF={setF} k="subnet" ph="서브넷 CIDR (10.0.0.0/8)" w={170} />
+          <Field f={f} setF={setF} k="guestOS" ph="Guest OS 포함" w={130} />
           <select className="select" value={f.powerState} onChange={(e) => setF({ ...f, powerState: e.target.value })}><option value="">전원 전체</option><option value="POWERED_ON">On</option><option value="POWERED_OFF">Off</option></select>
           <select className="select" value={f.toolsStatus} onChange={(e) => setF({ ...f, toolsStatus: e.target.value })}><option value="">Tools 전체</option><option value="RUNNING">가동</option><option value="NOT_RUNNING">미실행</option></select>
           <select className="select" value={f.gpuMode} onChange={(e) => setF({ ...f, gpuMode: e.target.value })}>{GPU_MODE.map(([v, l]) => <option key={v} value={v}>{`GPU: ${l}`}</option>)}</select>
         </div>
         <div className="flex gap wrap" style={{ alignItems: 'center', gap: 10, marginTop: 10 }}>
-          <Field k="cluster" ph="클러스터" w={120} />
-          <Field k="host" ph="호스트" w={120} />
-          <span className="muted">vCPU≥</span><Field k="vcpuMin" ph="" w={56} />
-          <span className="muted">RAM≥GB</span><Field k="ramMinGB" ph="" w={56} />
-          <span className="muted">디스크≥GB</span><Field k="diskMinGB" ph="" w={64} />
-          <span className="muted">CPU사용%≥</span><Field k="cpuUsageMin" ph="" w={56} />
+          <Field f={f} setF={setF} k="cluster" ph="클러스터" w={120} />
+          <Field f={f} setF={setF} k="host" ph="호스트" w={120} />
+          <span className="muted">vCPU≥</span><Field f={f} setF={setF} k="vcpuMin" ph="" w={56} />
+          <span className="muted">RAM≥GB</span><Field f={f} setF={setF} k="ramMinGB" ph="" w={56} />
+          <span className="muted">디스크≥GB</span><Field f={f} setF={setF} k="diskMinGB" ph="" w={64} />
+          <span className="muted">CPU사용%≥</span><Field f={f} setF={setF} k="cpuUsageMin" ph="" w={56} />
           <label className="flex gap" style={{ alignItems: 'center', fontSize: 13, cursor: 'pointer' }}><input type="checkbox" checked={f.hasSnapshot} onChange={(e) => setF({ ...f, hasSnapshot: e.target.checked })} /> 스냅샷 있음</label>
           <button className="login-btn" style={{ padding: '8px 18px' }} disabled={busy} onClick={search}>{busy ? '검색 중…' : '🔍 검색'}</button>
         </div>

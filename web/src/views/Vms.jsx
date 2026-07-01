@@ -50,7 +50,7 @@ function VmDetail({ vm, onClose }) {
         })()}</DetailRow>
         <DetailRow label="VMware Tools"><StateBadge state={vm.toolsStatus} /></DetailRow>
         <DetailRow label="vCPU">{vm.cpuCount} 코어</DetailRow>
-        <DetailRow label="RAM">{Math.round(vm.memMB / 1024)} GB ({vm.memMB.toLocaleString()} MB)</DetailRow>
+        <DetailRow label="RAM">{vm.memMB != null ? <>{Math.round(vm.memMB / 1024)} GB ({vm.memMB.toLocaleString()} MB)</> : '—'}</DetailRow>
         <DetailRow label="디스크">{vm.storageGB} GB</DetailRow>
         <DetailRow label="Tools 버전">{vm.toolsVersion || '—'}</DetailRow>
         <DetailRow label="스냅샷">{vm.snapshotCount ? `${vm.snapshotCount}개 · ${vm.snapshotSizeGB || 0} GB` : '없음'}</DetailRow>

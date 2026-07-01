@@ -46,10 +46,19 @@ function ledgerSignature(rows) {
   let h = 5381;
   const mix = (s) => { const str = String(s ?? ''); for (let i = 0; i < str.length; i++) h = (((h << 5) + h) ^ str.charCodeAt(i)) >>> 0; };
   mix(rows.length);
+  // db.js toRecord가 ipam.db에 쓰는 '모든' 식별/귀속/관리 컬럼을 지문에 포함한다(타임스탬프
+  // firstSeen/lastSeen/updatedAt만 제외). 이전엔 7개 필드만 해시해, label·owner·deviceType·
+  // vcenter·host·guestOS·os·cluster·scope·multiHomed 등만 바뀌면 재기록이 스킵되어 외부
+  // ipam.db가 stale로 남던 버그가 있었다.
   for (const r of rows) {
-    mix(r.ip); mix('|'); mix(r.ownerName); mix('|'); mix(r.powerState); mix('|');
-    mix(r.mgmtStatus); mix('|'); mix(r.usageStatus); mix('|'); mix(r.duplicate ? 1 : 0); mix('|');
-    mix(r.reconcile); mix(';');
+    mix(r.ip); mix('|'); mix(r.ipNum); mix('|'); mix(r.vcenterId); mix('|'); mix(r.vcenterName); mix('|');
+    mix(r.ownerType); mix('|'); mix(r.serverType); mix('|'); mix(r.ownerName); mix('|');
+    mix(r.powerState); mix('|'); mix(r.guestOS); mix('|'); mix(r.osName); mix('|'); mix(r.osVersion); mix('|');
+    mix(r.hostName); mix('|'); mix(r.cluster); mix('|'); mix(r.scope); mix('|');
+    mix(r.multiHomed ? 1 : 0); mix('|'); mix(r.duplicate ? 1 : 0); mix('|');
+    mix(r.discovery); mix('|'); mix(r.reconcile); mix('|'); mix(r.mgmtStatus); mix('|'); mix(r.owner_); mix('|');
+    mix(r.label); mix('|'); mix(r.deviceType); mix('|'); mix(r.usageStatus); mix('|');
+    mix(r.appliedBy); mix('|'); mix(r.rangePolicySpec); mix(';');
   }
   return h;
 }

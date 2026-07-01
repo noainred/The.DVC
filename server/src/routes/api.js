@@ -871,7 +871,9 @@ api.get('/tools/gpu/vms', (req, res) => {
         powerState: v.powerState, model: hostModel[v.host] || '', gpu: v.gpu,
         guestUtilPct: g ? g.utilPct : null, guestMemPct: g ? (g.memUsedPct ?? null) : null, guestAt: g ? g.at : null,
       };
-    }).sort((a, b) => (a.vcenterId === b.vcenterId ? a.name.localeCompare(b.name) : a.vcenterId.localeCompare(b.vcenterId))).slice(0, 5000),
+    }).sort((a, b) => (a.vcenterId === b.vcenterId
+      ? String(a.name || '').localeCompare(String(b.name || ''))
+      : String(a.vcenterId || '').localeCompare(String(b.vcenterId || '')))).slice(0, 5000),
   });
 });
 
@@ -1232,7 +1234,7 @@ api.post('/tools/vm-finder', async (req, res) => {
     inList(v.folder, b.folders) && inList(v.cluster, b.clusters) && inList(v.resourcePool, b.resourcePools)
     && (!b.powerState || v.powerState === b.powerState)
     && (!b.os || String(v.guestOS || '').toLowerCase().includes(String(b.os).toLowerCase()))
-    && (!term || v.name.toLowerCase().includes(term) || String(v.ipAddress || '').includes(term))
+    && (!term || String(v.name || '').toLowerCase().includes(term) || String(v.ipAddress || '').includes(term))
     && (b.includeTemplates || !v.template));
 
   const round1 = (x) => Number((x || 0).toFixed(1));
@@ -1824,7 +1826,9 @@ api.post('/alarm-mutes', requireRole('admin', 'operator'), (req, res) => {
   res.status(result.ok ? 200 : 400).json(result);
 });
 api.delete('/alarm-mutes/:id', requireRole('admin', 'operator'), (req, res) => {
-  const result = removeMute(decodeURIComponent(req.params.id));
+  // req.params.id는 Express가 이미 1회 URL 디코드한 값 — 추가 decodeURIComponent는 이중
+  // 디코드가 되어 '%' 포함 규칙(사용률 알람 등)에서 값 손상/URIError(500)를 유발한다.
+  const result = removeMute(req.params.id);
   if (result.ok) store.refresh().catch(() => {});
   res.status(result.ok ? 200 : 404).json(result);
 });

@@ -61,7 +61,8 @@ export class VCenterClient {
         ...headers,
       },
       body: body ? JSON.stringify(body) : undefined,
-      signal: AbortSignal.timeout(15_000),
+      // per-vCenter 타임아웃 존중(고RTT 사이트가 15초에 abort되지 않게) — SOAP 경로와 동일 규칙.
+      signal: AbortSignal.timeout(this.vc?.timeoutMs > 0 ? this.vc.timeoutMs : 15_000),
     });
     if (!res.ok) {
       const text = await res.text().catch(() => '');

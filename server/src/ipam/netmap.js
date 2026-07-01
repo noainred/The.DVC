@@ -78,7 +78,14 @@ export function netmapBases(snap, vcenterId = '') {
  * 반환: { base, cidr, days, bucketMs, buckets:[ts], cells:[{...,states:[...]}], osLegend, summary }
  */
 export function buildNetmap(snap, { vcenterId = '', base = '', days = 30, buckets = 24 } = {}) {
-  const now = snap?.generatedAt || Date.now();
+  // generatedAt은 운영에서 ISO 문자열(store.js)이라 숫자 산술 시 NaN이 되어 시간축이 통째로
+  // 깨진다 — epoch(ms)로 정규화한다.
+  const now = (() => {
+    const g = snap?.generatedAt;
+    if (typeof g === 'number' && Number.isFinite(g)) return g;
+    const p = g != null ? Date.parse(g) : NaN;
+    return Number.isFinite(p) ? p : Date.now();
+  })();
   const bases = netmapBases(snap, vcenterId);
   const b = base && /^\d+\.\d+\.\d+$/.test(base) ? base : bases[0] || '';
   const D = Math.max(1, Math.min(365, Number(days) || 30));
