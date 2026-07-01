@@ -1,6 +1,16 @@
 {
   "notes": [
     {
+      "version": "2.82.0",
+      "date": "2026-07-01",
+      "title": "서버 분석 필터를 2단 박스로 — 1차 법인(DataCenter) → 2차 vCenter/Baremetal",
+      "notes": [
+        "서버 분석 상단 필터를 박스 2개로 분리했습니다. 1차 박스에서 법인(DataCenter)을 고르면 그 법인의 모든 장비가 보이고, 2차 박스에서 vCenter를 고르면 가상화 장비만, Baremetal을 고르면 vCenter에 속하지 않는 물리 서버만 보입니다.",
+        "2차 박스의 vCenter 목록은 1차에서 고른 법인 소속으로 자동 연동됩니다(법인→vCenter 할당 기준). 1차를 바꾸면 2차는 '전체'로 초기화됩니다.",
+        "법인+Baremetal 조합(그 법인의 베어메탈만)도 지원합니다. 스코프 참조를 useMemo로 안정화해 불필요한 재조회를 방지했습니다."
+      ]
+    },
+    {
       "version": "2.81.0",
       "date": "2026-07-01",
       "title": "서버 분석 필터 — 법인(DataCenter)/vCenter/Baremetal 구분 선택",

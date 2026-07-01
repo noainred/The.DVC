@@ -2092,16 +2092,14 @@ function ServerInfoByVcenter({ vc, onServer }) {
   const assign = dcs.assign || {};
   // 서버의 소속 법인: 스캔 등록분은 datacenterId 직접, 그 외는 vCenter→DataCenter 할당으로 해석.
   const dcOf = (s) => s.datacenterId || assign[s.vcenterId] || '';
-  // 상단 분류 필터: dc:<id>=그 법인 전체, vc:<id>=그 vCenter 가상화만, baremetal=vCenter 미소속 물리,
-  // __nodc__=법인 미지정. (접두어 없으면 하위호환으로 vcenterId 취급.)
+  // 상단 2단 필터(스코프 객체 { datacenterId?, vcenterId?, baremetal? })를 적용. 백엔드
+  // serverInScope와 동일 규칙: 법인=그 법인 전체, vCenter=그 vCenter 가상화, Baremetal=vCenter 미소속.
   const scopeMatch = (s) => {
-    const v = String(vc || '');
-    if (!v) return true;
-    if (v.startsWith('dc:')) return dcOf(s) === v.slice(3);
-    if (v.startsWith('vc:')) return s.vcenterId === v.slice(3);
-    if (v === 'baremetal') return !s.vcenterId;
-    if (v === '__nodc__') return !dcOf(s);
-    return s.vcenterId === v;
+    const sc = (vc && typeof vc === 'object') ? vc : {};
+    if (sc.vcenterId) { if (sc.vcenterId === '__unmapped__' ? s.vcenterId : s.vcenterId !== sc.vcenterId) return false; }
+    if (sc.datacenterId) { if (dcOf(s) !== (sc.datacenterId === '__unmapped__' ? '' : sc.datacenterId)) return false; }
+    if (sc.baremetal && s.vcenterId) return false;
+    return true;
   };
   const ql = q.trim().toLowerCase();
   const match = (s) => !ql || [s.name, s.serviceTag, s.host, s.model].some((x) => String(x || '').toLowerCase().includes(ql));
@@ -2156,14 +2154,25 @@ function ServerInfoByVcenter({ vc, onServer }) {
 /** 서버 분석 — iDRAC가 수집한 하드웨어 정보 분석. vCenter(법인)별 필터 + 서버 클릭 상세 공용. */
 function ServerAnalysis() {
   const [sub, setSub] = useState('info'); // 법인별 서버 정보가 기본
-  const [vc, setVc] = useState(''); // '' 전체 | dc:<id> | vc:<id> | baremetal | __nodc__
+  const [dc, setDc] = useState('');   // 1차 박스: '' 전체 | DataCenter id
+  const [lvl2, setLvl2] = useState(''); // 2차 박스: '' 전체 | vc:<id> | baremetal
   const [vcs, setVcs] = useState([]);
   const [dcs, setDcs] = useState([]); // 등록된 DataCenter(법인)
+  const [assign, setAssign] = useState({}); // vCenter → DataCenter 할당
   const [detail, setDetail] = useState(null); // { id, name } → iDRAC 상세 모달
   useEffect(() => { fetchJson('/vcenters').then((d) => setVcs(d || [])).catch(() => fetchJson('/admin/vcenters').then((d) => setVcs(d.vcenters || [])).catch(() => {})); }, []);
-  useEffect(() => { fetchJson('/admin/datacenters').then((r) => setDcs(r.datacenters || [])).catch(() => {}); }, []);
+  useEffect(() => { fetchJson('/admin/datacenters').then((r) => { setDcs(r.datacenters || []); setAssign(r.assign || {}); }).catch(() => {}); }, []);
   const onServer = (s) => setDetail({ id: s.id || s.serverId, name: s.name || s.server });
-  const sp = { vc, onServer };
+  // 2차 박스의 vCenter 목록: 1차에서 법인을 고르면 그 법인 소속 vCenter만, '전체'면 모든 vCenter.
+  const dcVcs = dc ? vcs.filter((v) => assign[v.id] === dc) : vcs;
+  // (1차 dc, 2차 lvl2) → 스코프 객체. vCenter를 고르면 그 vCenter(가상화), Baremetal이면 (법인)+baremetal.
+  // useMemo로 참조를 안정화(안 하면 finder의 useEffect([vc])가 매 렌더 재요청).
+  const scope = useMemo(() => (
+    lvl2.startsWith('vc:') ? { vcenterId: lvl2.slice(3) }
+      : lvl2 === 'baremetal' ? { ...(dc ? { datacenterId: dc } : {}), baremetal: true }
+        : (dc ? { datacenterId: dc } : {})
+  ), [dc, lvl2]);
+  const sp = { vc: scope, onServer };
   return (
     <div>
       <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 12 }}>
@@ -2174,26 +2183,29 @@ function ServerAnalysis() {
           <button className={sub === 'gpu' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('gpu')}>🎮 GPU 정보</button>
           <button className={sub === 'fw' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('fw')}>🏷 BIOS/iDRAC 버전 정보</button>
         </div>
-        <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }} title="법인(DataCenter)=그 법인의 모든 장비 · vCenter=가상화 장비만 · Baremetal=vCenter에 속하지 않는 물리 서버">
-          <span className="muted">분류</span>
-          <select className="select" value={vc} onChange={(e) => setVc(e.target.value)} style={{ minWidth: 220 }}>
-            <option value="">전체</option>
-            {dcs.length > 0 && (
-              <optgroup label="🏢 법인(DataCenter) — 전체 장비">
-                {dcs.map((d) => <option key={`dc:${d.id}`} value={`dc:${d.id}`}>{d.name || d.id}</option>)}
-              </optgroup>
-            )}
-            {vcs.length > 0 && (
-              <optgroup label="🖥 vCenter — 가상화 장비만">
-                {vcs.map((v) => <option key={`vc:${v.id}`} value={`vc:${v.id}`}>{v.name || v.id}</option>)}
-              </optgroup>
-            )}
-            <optgroup label="그 외">
-              <option value="baremetal">🔩 Baremetal — 미가상화 물리서버</option>
-              <option value="__nodc__">⚠ 법인 미지정</option>
-            </optgroup>
-          </select>
-        </label>
+        <div className="flex gap" style={{ alignItems: 'center', fontSize: 13 }}>
+          {/* 1차 박스: 법인(DataCenter) — 고르면 그 법인의 모든 장비 */}
+          <label className="flex gap" style={{ alignItems: 'center' }} title="1차: 법인(DataCenter). 고르면 그 법인의 모든 장비가 보입니다.">
+            <span className="muted">법인(DataCenter)</span>
+            <select className="select" value={dc} onChange={(e) => { setDc(e.target.value); setLvl2(''); }} style={{ minWidth: 150 }}>
+              <option value="">전체</option>
+              {dcs.map((d) => <option key={d.id} value={d.id}>{d.name || d.id}</option>)}
+            </select>
+          </label>
+          {/* 2차 박스: vCenter(가상화) / Baremetal — 1차 선택에 연동 */}
+          <label className="flex gap" style={{ alignItems: 'center' }} title="2차: vCenter=가상화 장비만 · Baremetal=vCenter에 속하지 않는 물리 서버">
+            <span className="muted">구분</span>
+            <select className="select" value={lvl2} onChange={(e) => setLvl2(e.target.value)} style={{ minWidth: 180 }}>
+              <option value="">{dc ? '전체 (법인 모든 장비)' : '전체'}</option>
+              {dcVcs.length > 0 && (
+                <optgroup label="🖥 vCenter (가상화 장비만)">
+                  {dcVcs.map((v) => <option key={v.id} value={`vc:${v.id}`}>{v.name || v.id}</option>)}
+                </optgroup>
+              )}
+              <option value="baremetal">🔩 Baremetal (미가상화 물리)</option>
+            </select>
+          </label>
+        </div>
       </div>
       {sub === 'info' && <ServerInfoByVcenter {...sp} vcs={vcs} />}
       {sub === 'hw' && <HardwareSummary />}
@@ -2205,16 +2217,15 @@ function ServerAnalysis() {
   );
 }
 
-// 서버 분석 스코프 → 쿼리스트링. 계층 필터: dc:<id>=법인 전체, vc:<id>=가상화만,
-// baremetal=미가상화 물리, __nodc__=법인 미지정. 접두어 없으면 하위호환(vcenterId).
-const vcQS = (s) => {
-  const v = String(s || '');
-  if (!v) return '';
-  if (v.startsWith('dc:')) return `?datacenterId=${encodeURIComponent(v.slice(3))}`;
-  if (v.startsWith('vc:')) return `?vcenterId=${encodeURIComponent(v.slice(3))}`;
-  if (v === 'baremetal') return '?baremetal=1';
-  if (v === '__nodc__') return '?datacenterId=__unmapped__';
-  return `?vcenterId=${encodeURIComponent(v)}`;
+// 서버 분석 스코프 객체 { datacenterId?, vcenterId?, baremetal? } → 쿼리스트링.
+// 세 축을 조합할 수 있다(예: 법인 A의 Baremetal = datacenterId=A & baremetal=1).
+const vcQS = (sc) => {
+  if (!sc || typeof sc !== 'object') return '';
+  const p = [];
+  if (sc.vcenterId) p.push(`vcenterId=${encodeURIComponent(sc.vcenterId)}`);
+  if (sc.datacenterId) p.push(`datacenterId=${encodeURIComponent(sc.datacenterId)}`);
+  if (sc.baremetal) p.push('baremetal=1');
+  return p.length ? `?${p.join('&')}` : '';
 };
 
 /** 온도 보기 — 전체 서버의 최신 온도센서(CPU/GPU/Inlet/Exhaust 등)를 한 표에 모아 정렬. */
