@@ -99,6 +99,7 @@ import { allRemoteServers, findRemoteServer } from '../collector/remoteInventory
 import { matchDatacenterId } from '../collector/datacenterMatch.js';
 import { serverInScope } from '../insights/analysisScope.js';
 import { findHostByServiceTag } from '../idrac/hostMatch.js';
+import { hardwareDimMatch } from '../idrac/hwMatch.js';
 import { listDatacenters, getDatacenterAssign, addDatacenter, updateDatacenter, removeDatacenter, setVcenterDatacenterMany } from '../datacenter/store.js';
 import { allCollectorStatus, getCollectorStatus } from '../collector/state.js';
 import { pullNow } from '../collector/puller.js';
@@ -1059,6 +1060,36 @@ adminRouter.get('/idrac/hardware-summary', adminOnly, (req, res) => {
     ok: true, datacenterId: dcFilter, totalServers: servers.length, collected, missing, totalGpuCards,
     byModel: toArr(byModel), byCpu: toArr(byCpu), byMemory: toArr(byMem, true), byGpu: toArr(byGpu),
   });
+});
+
+// 하드웨어 집계 드릴다운 — 특정 dim(model|cpu|memory|gpu) + key에 해당하는 서버 목록.
+// 하드웨어 집계 화면에서 항목(예: PowerEdge R750)을 클릭하면 그 서버만 보여주는 데 쓴다.
+adminRouter.get('/idrac/hardware-servers', adminOnly, (req, res) => {
+  const dcFilter = String(req.query.datacenterId || '').trim();
+  const dim = String(req.query.dim || '').trim();
+  const key = String(req.query.key || '').trim();
+  if (!['model', 'cpu', 'memory', 'gpu'].includes(dim) || !key) return res.status(400).json({ ok: false, reason: 'dim(model|cpu|memory|gpu)·key가 필요합니다.' });
+  const assign = getDatacenterAssign();
+  const dcOf = (s) => String(s.datacenterId || assign[String(s.vcenterId || '')] || '');
+  const localAll = loadIdracRegistry().filter((s) => s.type !== 'ome');
+  const seen = new Set(localAll.map((s) => String(s.id)));
+  const merged = localAll.concat(remoteServersResolved().filter((s) => !seen.has(String(s.id))));
+  const inDc = merged.filter((s) => (!dcFilter || dcOf(s) === (dcFilter === '__unmapped__' ? '' : dcFilter)) && (dcFilter !== '__unmapped__' || !dcOf(s)));
+  const out = [];
+  for (const s of inDc) {
+    const inv = invForServer(s);
+    if (!inv || !inv.collectedAt) continue;
+    const { match, gpuCount } = hardwareDimMatch(inv, dim, key);
+    if (!match) continue;
+    out.push({
+      id: s.id, name: s.name, host: String(s.host || '').replace(/^https?:\/\//, ''),
+      serviceTag: s.serviceTag || inv.system?.serviceTag || '',
+      model: inv.system?.model || '', vcenterId: s.vcenterId || '', datacenterId: dcOf(s), remote: !!s.remote,
+      ...(dim === 'gpu' ? { gpuCount } : {}),
+    });
+  }
+  out.sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { numeric: true }));
+  res.json({ ok: true, dim, key, datacenterId: dcFilter, count: out.length, servers: out });
 });
 
 // 서버 분석 — 전체 iDRAC 서버의 최신 온도센서(CPU/GPU/Inlet/Exhaust 등) 평탄화(정렬용).

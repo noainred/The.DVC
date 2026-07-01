@@ -2019,11 +2019,51 @@ function Nsx() {
 
 /** 법인별 서버 정보 — 등록된 iDRAC/OME 서버를 소속 법인(vCenter)별로 묶어 본다. */
 /** 하드웨어 집계 — 모든 데이터센터(법인)의 iDRAC 수집 인벤토리를 모델/CPU/메모리/GPU 종류별로 집계. */
+// 하드웨어 집계 드릴다운 모달 — 특정 dim+key(예: 모델 R750)의 서버 목록만 표시.
+const HW_DIM_LABEL = { model: '모델', cpu: 'CPU', memory: '메모리', gpu: 'GPU' };
+function HwDrillModal({ dc, dim, keyVal, onClose, onServer }) {
+  const { loading, data, error } = useTool('/admin/idrac/hardware-servers', { datacenterId: dc || '', dim, key: keyVal });
+  const rows = data?.servers || [];
+  return (
+    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="modal card" style={{ maxWidth: 820, width: '92vw', maxHeight: '82vh', overflow: 'auto' }}>
+        <div className="flex between" style={{ marginBottom: 10 }}>
+          <b style={{ fontSize: 15 }}>{dim === 'gpu' ? '🎮' : dim === 'cpu' ? '⚙' : dim === 'memory' ? '💾' : '🖥'} {HW_DIM_LABEL[dim] || dim}: <span style={{ color: 'var(--accent)' }}>{keyVal}</span> <span className="muted" style={{ fontWeight: 400, fontSize: 13 }}>· {rows.length}대</span></b>
+          <button className="logout-btn" onClick={onClose}>닫기</button>
+        </div>
+        {loading ? <Loading /> : error ? <ErrorBox message={error} /> : rows.length === 0 ? (
+          <div className="muted" style={{ padding: 16 }}>해당 서버가 없습니다.</div>
+        ) : (
+          <table className="data-table" style={{ width: '100%', fontSize: 12.5 }}>
+            <thead><tr>
+              <th style={{ textAlign: 'left' }}>이름</th><th style={{ textAlign: 'left' }}>주소</th>
+              <th style={{ textAlign: 'left' }}>서비스태그</th><th style={{ textAlign: 'left' }}>모델</th>
+              {dim === 'gpu' && <th style={{ textAlign: 'right' }}>GPU</th>}
+            </tr></thead>
+            <tbody>{rows.map((s) => (
+              <tr key={s.id} style={{ cursor: 'pointer' }} onClick={() => onServer(s)} title="클릭 — iDRAC 상세">
+                <td><b>{s.name}</b>{s.remote && <span className="badge amber" style={{ marginLeft: 4, fontSize: 10 }}>원격</span>}</td>
+                <td className="muted">{s.host || '—'}</td>
+                <td className="muted">{s.serviceTag || '—'}</td>
+                <td className="muted">{s.model || '—'}</td>
+                {dim === 'gpu' && <td style={{ textAlign: 'right' }}>{s.gpuCount}장</td>}
+              </tr>
+            ))}</tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** 하드웨어 집계 — 모든 데이터센터(법인)의 iDRAC 수집 인벤토리를 모델/CPU/메모리/GPU 종류별로 집계. */
 function HardwareSummary() {
   const [d, setD] = useState(null);
   const [dcs, setDcs] = useState([]);
   const [dc, setDc] = useState('');
   const [err, setErr] = useState(null);
+  const [drill, setDrill] = useState(null); // { dim, key } — 항목 클릭 시 서버 목록
+  const [detail, setDetail] = useState(null); // 드릴 목록에서 클릭한 서버의 iDRAC 상세
   useEffect(() => { fetchJson('/admin/datacenters').then((r) => setDcs(r.datacenters || [])).catch(() => {}); }, []);
   useEffect(() => {
     setD(null);
@@ -2031,13 +2071,14 @@ function HardwareSummary() {
   }, [dc]);
   if (err) return <ErrorBox message={err} />;
   if (!d) return <Loading />;
-  const Bars = ({ title, rows, unit = '대' }) => {
+  const Bars = ({ title, rows, unit = '대', dim }) => {
     const max = Math.max(1, ...rows.map((r) => r.count));
     return (
       <div className="card" style={{ padding: 14 }}>
         <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 10 }}>{title} <span className="muted" style={{ fontWeight: 400 }}>· {rows.length}종</span></div>
         {rows.length === 0 ? <span className="muted">데이터 없음</span> : rows.map((r) => (
-          <div key={r.key} style={{ marginBottom: 7 }}>
+          <div key={r.key} className="hw-bar-row" style={{ marginBottom: 7, cursor: 'pointer', padding: '2px 4px', margin: '0 -4px 5px', borderRadius: 5 }}
+            onClick={() => setDrill({ dim, key: r.key })} title={`클릭 — '${r.key}' 서버만 보기`}>
             <div className="flex between" style={{ fontSize: 12.5, marginBottom: 2, gap: 8 }}>
               <span title={r.key} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.key}</span>
               <b style={{ flex: 'none' }}>{r.count}{unit}</b>
@@ -2055,7 +2096,7 @@ function HardwareSummary() {
       <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 12 }}>
         <div className="muted" style={{ fontSize: 13 }}>
           대상 서버 <b style={{ color: 'var(--accent)' }}>{d.totalServers}</b>대 · 수집 <b>{d.collected}</b> · 미수집 <span className="badge amber">{d.missing}</span> · GPU 카드 <b>{d.totalGpuCards}</b>장
-          <span style={{ marginLeft: 6 }}>— iDRAC 인벤토리는 30분마다 갱신됩니다.</span>
+          <span style={{ marginLeft: 6 }}>— 항목을 클릭하면 그 서버만 볼 수 있습니다.</span>
         </div>
         <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }} title="법인(DataCenter) 기준. 스캔 등록분은 법인 직접, 그 외는 vCenter→법인 할당으로 해석.">
           <span className="muted">법인(DataCenter)</span>
@@ -2067,11 +2108,13 @@ function HardwareSummary() {
         </label>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 14 }}>
-        <Bars title="🖥 서버 모델 종류" rows={d.byModel} />
-        <Bars title="⚙ CPU 종류" rows={d.byCpu} />
-        <Bars title="💾 메모리 용량" rows={d.byMemory} />
-        <Bars title="🎮 GPU 종류" rows={d.byGpu} unit="장" />
+        <Bars title="🖥 서버 모델 종류" rows={d.byModel} dim="model" />
+        <Bars title="⚙ CPU 종류" rows={d.byCpu} dim="cpu" />
+        <Bars title="💾 메모리 용량" rows={d.byMemory} dim="memory" />
+        <Bars title="🎮 GPU 종류" rows={d.byGpu} unit="장" dim="gpu" />
       </div>
+      {drill && <HwDrillModal dc={dc} dim={drill.dim} keyVal={drill.key} onClose={() => setDrill(null)} onServer={(s) => setDetail({ id: s.id, name: s.name })} />}
+      {detail && <IdracDetailModal server={detail} onClose={() => setDetail(null)} />}
     </div>
   );
 }
