@@ -2241,7 +2241,7 @@ function ModelServersModal({ corpName, model, servers, onRow, onClose }) {
     const esc = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
     const head = ['name', 'model', 'type', 'host', 'service_tag', 'vcenter', 'status'];
     const lines = [head.join(',')];
-    for (const s of (servers || [])) lines.push([s.name || s.id, s.model || model || '', s.type === 'ome' ? 'OME' : 'iDRAC', String(s.host || '').replace(/^https?:\/\//, ''), s.serviceTag || '', s._vc || '', s.enabled === false ? '중지' : '수집'].map(esc).join(','));
+    for (const s of rows) lines.push([s.name || s.id, s.model || model || '', s.type === 'ome' ? 'OME' : 'iDRAC', String(s.host || '').replace(/^https?:\/\//, ''), s.serviceTag || '', s._vc || '', s.enabled === false ? '중지' : '수집'].map(esc).join(','));
     const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = `servers-${String(model || corpName).replace(/[^a-zA-Z0-9._-]+/g, '_')}-${new Date().toISOString().slice(0, 10)}.csv`; a.click(); URL.revokeObjectURL(url);
@@ -3377,7 +3377,7 @@ export function GuestOsVmsModal({ label, params, onClose }) {
     const esc = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
     const head = ['vm', 'vcenter', 'cluster', 'host', 'cpu', 'memory_gb', 'disk_gb', 'ip', 'power'];
     const lines = [head.join(',')];
-    for (const r of (d?.items || [])) lines.push([r.name, r.vcenterId, r.cluster, r.host, r.cpu, r.memGB, r.diskGB, r.ip, r.powerState === 'POWERED_ON' ? 'On' : 'Off'].map(esc).join(','));
+    for (const r of items) lines.push([r.name, r.vcenterId, r.cluster, r.host, r.cpu, r.memGB, r.diskGB, r.ip, r.powerState === 'POWERED_ON' ? 'On' : 'Off'].map(esc).join(','));
     const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = `guestos-${String(label).replace(/[^a-zA-Z0-9._-]+/g, '_')}-${new Date().toISOString().slice(0, 10)}.csv`; a.click(); URL.revokeObjectURL(url);
@@ -3415,7 +3415,7 @@ export function GuestOsVmsModal({ label, params, onClose }) {
                 </label>
               )}
             </div>
-            <button className="logout-btn" style={{ flex: 'none', padding: '7px 14px' }} disabled={!d.items?.length} onClick={exportCsv}>⬇ CSV 내보내기</button>
+            <button className="logout-btn" style={{ flex: 'none', padding: '7px 14px' }} disabled={!items.length} onClick={exportCsv}>⬇ CSV 내보내기</button>
           </div>
           <DataTable columns={cols} rows={items} initialSort={{ key: 'name', dir: 'asc' }} />
         </>

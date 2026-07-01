@@ -1426,7 +1426,9 @@ api.get('/tools/guest-os/vms', (req, res) => {
     guestOS: v.guestOS || '', powerState: v.powerState,
     cpu: v.cpuCount || 0, memGB: Math.round((v.memMB || 0) / 1024), diskGB: v.storageGB || 0,
     ip: (v.ipAddresses?.length ? v.ipAddresses : (v.ipAddress ? [v.ipAddress] : [])).join(' '),
-  })).sort((a, b) => (a.vcenterId === b.vcenterId ? a.name.localeCompare(b.name) : a.vcenterId.localeCompare(b.vcenterId)));
+  })).sort((a, b) => (a.vcenterId === b.vcenterId
+    ? String(a.name || '').localeCompare(String(b.name || ''))
+    : String(a.vcenterId || '').localeCompare(String(b.vcenterId || ''))));
   res.json({ total: items.length, items: items.slice(0, 10000) });
 });
 
