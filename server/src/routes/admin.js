@@ -98,6 +98,7 @@ import { listCollectors, addCollector, updateCollector, removeCollector, loadCol
 import { allRemoteServers, findRemoteServer } from '../collector/remoteInventory.js';
 import { matchDatacenterId } from '../collector/datacenterMatch.js';
 import { serverInScope } from '../insights/analysisScope.js';
+import { findHostByServiceTag } from '../idrac/hostMatch.js';
 import { listDatacenters, getDatacenterAssign, addDatacenter, updateDatacenter, removeDatacenter, setVcenterDatacenterMany } from '../datacenter/store.js';
 import { allCollectorStatus, getCollectorStatus } from '../collector/state.js';
 import { pullNow } from '../collector/puller.js';
@@ -1167,6 +1168,36 @@ adminRouter.get('/idrac/:id/inventory', adminOnly, async (req, res) => {
   }
   const inv = getIdracInventory(s.id);
   res.json({ ok: true, fresh: false, inventory: inv?.data || inv || null });
+});
+
+// 서비스태그(= ESXi 하드웨어 일련번호)로 이 iDRAC 물리 서버에 대응하는 vCenter 가상화 호스트 조회.
+// 물리(iDRAC/베어메탈) ↔ 가상화(vCenter ESXi) 브릿지: Dell 서비스태그 == 호스트 일련번호.
+adminRouter.get('/idrac/:id/vcenter-host', adminOnly, (req, res) => {
+  const id = req.params.id;
+  const s = loadIdracRegistry().find((x) => x.id === id) || findRemoteServer(id);
+  if (!s) return res.status(404).json({ ok: false, reason: '서버를 찾을 수 없습니다.' });
+  const norm = (t) => String(t || '').trim().toLowerCase();
+  const tag = norm(s.serviceTag || getIdracInventory(id)?.system?.serviceTag || s.inv?.system?.serviceTag || '');
+  if (!tag) return res.json({ ok: true, matched: false, serviceTag: '', reason: '서비스태그 없음' });
+  const snap = store.get();
+  const assign = getDatacenterAssign();
+  const host = findHostByServiceTag(tag, snap.hosts || []);
+  if (!host) return res.json({ ok: true, matched: false, serviceTag: s.serviceTag || tag });
+  res.json({
+    ok: true, matched: true, serviceTag: host.serviceTag || tag,
+    host: {
+      name: host.name,
+      vcenterId: host.vcenterId || '',
+      datacenterId: assign[String(host.vcenterId || '')] || '',
+      cluster: host.cluster || '',
+      connectionState: host.connectionState || '',
+      cpuUsagePct: host.cpuUsagePct ?? null,
+      memUsagePct: host.memUsagePct ?? null,
+      vmCount: host.vmCount ?? null,
+      model: host.model || '',
+      powerState: host.powerState || '',
+    },
+  });
 });
 
 // 온도센서 + CPU 사용량 시계열(차트용). ?minutes=N 으로 최근 구간만. ?live=1 즉시 1샘플 수집.
