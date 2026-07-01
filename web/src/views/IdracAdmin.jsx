@@ -448,11 +448,16 @@ export function IdracDetailModal({ server, onClose }) {
   const [sensors, setSensors] = useState(null);
   const [tab, setTab] = useState('charts'); // charts | versions | gpu
   const [gpuProbe, setGpuProbe] = useState(null); // null | 'loading' | result
+  const [vh, setVh] = useState(null); // 서비스태그로 매칭된 vCenter 가상화 호스트
   const runGpuProbe = () => { setGpuProbe('loading'); fetchJson(`/admin/idrac/${encodeURIComponent(server.id)}/gpu-probe`).then(setGpuProbe).catch((e) => setGpuProbe({ ok: false, reason: e.message })); };
   const loadInv = (refresh) => fetchJson(`/admin/idrac/${encodeURIComponent(server.id)}/inventory${refresh ? '?refresh=1' : ''}`)
     .then((r) => { setInv(r.inventory); setInvErr(null); }).catch((e) => setInvErr(e.message));
   const loadSensors = () => fetchJson(`/admin/idrac/${encodeURIComponent(server.id)}/sensors?minutes=180`).then(setSensors).catch(() => {});
-  useEffect(() => { loadInv(false); loadSensors(); const t = setInterval(loadSensors, 30_000); return () => clearInterval(t); /* eslint-disable-next-line */ }, [server.id]);
+  useEffect(() => {
+    loadInv(false); loadSensors();
+    fetchJson(`/admin/idrac/${encodeURIComponent(server.id)}/vcenter-host`).then(setVh).catch(() => setVh(null));
+    const t = setInterval(loadSensors, 30_000); return () => clearInterval(t); /* eslint-disable-next-line */
+  }, [server.id]);
 
   const sensorNames = (sensors?.sensors || []).slice(0, 12);
   const fanNames = (sensors?.fanNames || []).slice(0, 12);
@@ -475,6 +480,35 @@ export function IdracDetailModal({ server, onClose }) {
           <b style={{ fontSize: 15 }}>🖥 {server.name} — iDRAC 상세 / 센서</b>
           <button className="logout-btn" onClick={onClose}>닫기</button>
         </div>
+
+        {/* 물리 ↔ 가상화 브릿지: 서비스태그(= ESXi 일련번호)로 매칭된 vCenter 호스트 */}
+        {vh && (
+          <div className="card" style={{ padding: '10px 12px', marginBottom: 12, borderLeft: `3px solid ${vh.matched ? 'var(--accent, #60a5fa)' : 'rgba(148,163,184,.4)'}` }}>
+            {vh.matched ? (
+              <div className="flex between wrap gap" style={{ alignItems: 'center' }}>
+                <div style={{ fontSize: 13 }}>
+                  🖧 <b>연결된 vCenter 호스트</b>: <b style={{ color: 'var(--accent, #60a5fa)' }}>{vh.host.name}</b>
+                  <span className="muted" style={{ marginLeft: 8 }}>
+                    · vCenter <b>{vh.host.vcenterId || '—'}</b>
+                    {vh.host.cluster ? <> · 클러스터 {vh.host.cluster}</> : null}
+                    {vh.host.connectionState ? <> · {vh.host.connectionState}</> : null}
+                  </span>
+                  <span className="muted" style={{ marginLeft: 8, fontSize: 11 }}>(서비스태그 {vh.serviceTag} 일치)</span>
+                </div>
+                <div className="flex gap" style={{ fontSize: 12.5 }}>
+                  <span className="muted">CPU <b style={{ color: 'var(--text)' }}>{vh.host.cpuUsagePct ?? '—'}%</b></span>
+                  <span className="muted">MEM <b style={{ color: 'var(--text)' }}>{vh.host.memUsagePct ?? '—'}%</b></span>
+                  <span className="muted">VM <b style={{ color: 'var(--text)' }}>{vh.host.vmCount ?? '—'}</b></span>
+                </div>
+              </div>
+            ) : (
+              <div className="muted" style={{ fontSize: 12.5 }}>
+                🔩 연결된 vCenter 호스트 없음 — 서비스태그 <b>{vh.serviceTag || '—'}</b>와 일치하는 ESXi 호스트가 없습니다(순수 베어메탈이거나 해당 vCenter 미수집).
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="flex gap" style={{ marginBottom: 12 }}>
           <button className={tab === 'charts' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 14px' }} onClick={() => setTab('charts')}>📈 센서 차트(온도·CPU)</button>
           <button className={tab === 'versions' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 14px' }} onClick={() => setTab('versions')}>🏷 하드웨어 / 버전</button>
