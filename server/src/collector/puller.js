@@ -8,6 +8,7 @@
 import { config } from '../config.js';
 import { loadCollectors } from './registry.js';
 import { setRemoteHost, clearCollectorHosts, setCollectorStatus } from './state.js';
+import { setCollectorServers } from './remoteInventory.js';
 import { getDb } from '../idrac/db.js';
 import { describeError } from '../util/errors.js';
 import { resilientFetch } from '../util/resilientFetch.js';
@@ -46,7 +47,10 @@ async function pullOne(c) {
     db.insert(`rmt:${host}`, watts, sTs);
     hosts++;
   }
-  return { hosts, version: data.version, datacenter: data.datacenter || c.datacenter };
+  // 서버 분석용 인벤토리 병합: 엣지가 보낸 서버 목록(자격증명 없음)을 그 수집기 것으로 교체
+  // 저장한다. 위임 법인 서버가 중앙 '서버 분석'에 나타난다. 구버전 엣지는 servers가 없어 빈 배열.
+  setCollectorServers(c.id, data.datacenter || c.datacenter, Array.isArray(data.servers) ? data.servers : []);
+  return { hosts, version: data.version, datacenter: data.datacenter || c.datacenter, servers: Array.isArray(data.servers) ? data.servers.length : 0 };
 }
 
 export async function pullNow() {
