@@ -31,7 +31,9 @@ export default function GpuGuestSettings() {
         fetchJson('/admin/vcenters').catch(() => ({ vcenters: [] })),
       ]);
       setData(d); setVcs(v.vcenters || []);
-      if (!form) setForm(toForm(d.settings, v.vcenters || []));
+      // 함수형 업데이트로 '현재' form을 확인(effect deps=[]라 클로저의 form은 첫 렌더값 null에
+      // 영구 바인딩 — 조건 없이 매 30초 폴링마다 미저장 입력을 덮어쓰던 버그). 최초 1회만 채운다.
+      setForm((cur) => cur ?? toForm(d.settings, v.vcenters || []));
       setError(null);
     } catch (e) { setError(e.message); }
   };

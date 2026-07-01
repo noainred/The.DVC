@@ -1883,7 +1883,7 @@ function Threats({ scope }) {
           <div className="muted" style={{ fontSize: 12, margin: '0 0 8px' }}>스캔에서 확인된 위험 서비스 포트(Telnet/SMB/RDP/DB 등). <b>공인 IP 노출</b>은 즉시 점검 권장.</div>
           <table><thead><tr><th>IP</th><th>호스트명</th><th>위험 포트</th><th>분류</th><th>위험도</th></tr></thead>
             <tbody>{data.risky.length === 0 && <tr><td colSpan={5} className="center muted" style={{ padding: 18 }}>해당 없음</td></tr>}
-              {data.risky.map((r) => <tr key={r.ip} style={{ background: r.public ? 'rgba(239,68,68,.10)' : undefined }}><td><b>{r.ip}</b></td><td className="muted">{r.hostname || '—'}</td><td>{r.ports.map((p) => <span key={p} className="badge amber" style={{ marginRight: 4 }}>{p}</span>)}</td><td>{r.public ? <span className="badge red">공인</span> : <span className="badge gray">사설</span>}</td><td>{r.severity === 'high' ? <span className="badge red">높음</span> : <span className="badge amber">보통</span>}</td></tr>)}</tbody></table>
+              {data.risky.map((r) => <tr key={r.ip} style={{ background: r.public ? 'rgba(239,68,68,.10)' : undefined }}><td><b>{r.ip}</b></td><td className="muted">{r.hostname || '—'}</td><td>{(r.ports || []).map((p) => <span key={p} className="badge amber" style={{ marginRight: 4 }}>{p}</span>)}</td><td>{r.public ? <span className="badge red">공인</span> : <span className="badge gray">사설</span>}</td><td>{r.severity === 'high' ? <span className="badge red">높음</span> : <span className="badge amber">보통</span>}</td></tr>)}</tbody></table>
         </div>
       )}
       {sec === 'eol' && (
@@ -2066,8 +2066,10 @@ function HardwareSummary() {
   const [detail, setDetail] = useState(null); // 드릴 목록에서 클릭한 서버의 iDRAC 상세
   useEffect(() => { fetchJson('/admin/datacenters').then((r) => setDcs(r.datacenters || [])).catch(() => {}); }, []);
   useEffect(() => {
+    let active = true; // 법인(dc)을 빠르게 바꾸면 느린 이전 응답이 최신을 덮어쓰던 경쟁 방지.
     setD(null);
-    fetchJson(`/admin/idrac/hardware-summary${dc ? `?datacenterId=${encodeURIComponent(dc)}` : ''}`).then((r) => { setD(r); setErr(null); }).catch((e) => setErr(e.message));
+    fetchJson(`/admin/idrac/hardware-summary${dc ? `?datacenterId=${encodeURIComponent(dc)}` : ''}`).then((r) => { if (active) { setD(r); setErr(null); } }).catch((e) => { if (active) setErr(e.message); });
+    return () => { active = false; };
   }, [dc]);
   if (err) return <ErrorBox message={err} />;
   if (!d) return <Loading />;
@@ -2385,7 +2387,10 @@ function ServerTempFinder({ vc, onServer }) {
   const [err, setErr] = useState(null);
   const [q, setQ] = useState('');
   const [kind, setKind] = useState('');
-  const load = () => fetchJson(`/admin/idrac/temps${vcQS(vc)}`).then((r) => { setD(r); setErr(null); }).catch((e) => setErr(e.message));
+  const genRef = useRef(0);
+  // 세대 가드: 고RTT vCenter에서 스코프를 빠르게 바꾸면 느린 이전 응답이 나중에 도착해 최신
+  // 스코프 데이터를 덮어쓰던 경쟁을 막는다(가장 마지막 요청 결과만 반영).
+  const load = () => { const g = ++genRef.current; return fetchJson(`/admin/idrac/temps${vcQS(vc)}`).then((r) => { if (g === genRef.current) { setD(r); setErr(null); } }).catch((e) => { if (g === genRef.current) setErr(e.message); }); };
   useEffect(() => { setD(null); load(); const t = setInterval(load, 30_000); return () => clearInterval(t); /* eslint-disable-next-line */ }, [vc]);
   if (err) return <ErrorBox message={err} />;
   if (!d) return <Loading />;
@@ -2437,7 +2442,8 @@ function ServerFirmwareFinder({ vc }) {
   const [d, setD] = useState(null);
   const [err, setErr] = useState(null);
   const [model, setModel] = useState(null);
-  const load = () => fetchJson(`/admin/idrac/firmware-inventory${vcQS(vc)}`).then((r) => { setD(r); setErr(null); }).catch((e) => setErr(e.message));
+  const genRef = useRef(0);
+  const load = () => { const g = ++genRef.current; return fetchJson(`/admin/idrac/firmware-inventory${vcQS(vc)}`).then((r) => { if (g === genRef.current) { setD(r); setErr(null); } }).catch((e) => { if (g === genRef.current) setErr(e.message); }); };
   useEffect(() => { setD(null); load(); /* eslint-disable-next-line */ }, [vc]);
   if (err) return <ErrorBox message={err} />;
   if (!d) return <Loading />;
@@ -2502,7 +2508,8 @@ function ServerGpuFinder({ vc, onServer }) {
   const [err, setErr] = useState(null);
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(null); // 펼친 모델
-  const load = () => fetchJson(`/admin/idrac/gpu-inventory${vcQS(vc)}`).then((r) => { setD(r); setErr(null); }).catch((e) => setErr(e.message));
+  const genRef = useRef(0);
+  const load = () => { const g = ++genRef.current; return fetchJson(`/admin/idrac/gpu-inventory${vcQS(vc)}`).then((r) => { if (g === genRef.current) { setD(r); setErr(null); } }).catch((e) => { if (g === genRef.current) setErr(e.message); }); };
   useEffect(() => { setD(null); load(); /* eslint-disable-next-line */ }, [vc]);
   if (err) return <ErrorBox message={err} />;
   if (!d) return <Loading />;
@@ -3184,6 +3191,23 @@ function Waste({ scope }) {
   );
 }
 
+// 모듈 스코프(props만 사용) — VmFinder 렌더 바디 안에 정의하면 매 렌더 새 타입이 되어 칩
+// 목록(overflowY:auto)이 remount, 스크롤/포커스가 매번 맨 위로 튀던 문제 방지.
+function Chips({ label, list, sel, onToggle, nameOf }) {
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>{label} {sel.length ? `(${sel.length})` : ''}</div>
+      <div className="flex gap wrap" style={{ maxHeight: 92, overflowY: 'auto' }}>
+        {list.length === 0 && <span className="muted" style={{ fontSize: 12 }}>—</span>}
+        {list.map((x) => (
+          <span key={x} className="badge gray" style={{ cursor: 'pointer', padding: '4px 10px', fontSize: 12, border: sel.includes(x) ? '1px solid var(--accent,#6366f1)' : undefined, color: sel.includes(x) ? '#c7d2fe' : undefined }}
+            onClick={() => onToggle(x)}>{nameOf ? nameOf(x) : x}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function VmFinder() {
   const { data: vcenters } = usePolling('/vcenters', {}, 60_000);
   const [f, setF] = useState({ vcenterIds: [], folders: [], clusters: [], resourcePools: [], powerState: '', os: '', q: '', includeTemplates: false });
@@ -3208,19 +3232,6 @@ function VmFinder() {
     const ia = vcOrder.indexOf(a); const ib = vcOrder.indexOf(b);
     return (ia < 0 ? 1e9 : ia) - (ib < 0 ? 1e9 : ib);
   });
-
-  const Chips = ({ label, list, sel, onToggle, nameOf }) => (
-    <div style={{ marginBottom: 8 }}>
-      <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>{label} {sel.length ? `(${sel.length})` : ''}</div>
-      <div className="flex gap wrap" style={{ maxHeight: 92, overflowY: 'auto' }}>
-        {list.length === 0 && <span className="muted" style={{ fontSize: 12 }}>—</span>}
-        {list.map((x) => (
-          <span key={x} className="badge gray" style={{ cursor: 'pointer', padding: '4px 10px', fontSize: 12, border: sel.includes(x) ? '1px solid var(--accent,#6366f1)' : undefined, color: sel.includes(x) ? '#c7d2fe' : undefined }}
-            onClick={() => onToggle(x)}>{nameOf ? nameOf(x) : x}</span>
-        ))}
-      </div>
-    </div>
-  );
 
   const items = data?.items || [];
   const withAvg = data?.avgComputed;
@@ -3281,7 +3292,7 @@ function ThinVms({ scope }) {
   if (loading) return <Loading />;
   if (error) return <ErrorBox message={error} />;
   const term = q.trim().toLowerCase();
-  const rows = data.items.filter((r) => !term || r.name.toLowerCase().includes(term) || (r.guestOS || '').toLowerCase().includes(term) || (r.host || '').toLowerCase().includes(term));
+  const rows = data.items.filter((r) => !term || (r.name || '').toLowerCase().includes(term) || (r.guestOS || '').toLowerCase().includes(term) || (r.host || '').toLowerCase().includes(term));
   const cols = [
     { key: 'name', label: 'VM', render: (r) => <VmLink name={r.name} vcenterId={r.vcenterId} label={r.name} /> },
     { key: 'vcenterId', label: 'vCenter', render: (r) => <span className="muted">{r.vcenterId}</span> },
@@ -3566,7 +3577,7 @@ function PowerMap({ scope }) {
 
   const term = q.trim().toLowerCase();
   const servers = (data.servers || []).filter((s) => !term
-    || s.name.toLowerCase().includes(term) || (s.model || '').toLowerCase().includes(term)
+    || (s.name || '').toLowerCase().includes(term) || (s.model || '').toLowerCase().includes(term)
     || (s.serviceTag || '').toLowerCase().includes(term) || (s.vcenterId || '').toLowerCase().includes(term));
 
   const TABS = [['datacenter', `DataCenter별 (${(data.byDatacenter || []).length})`], ['vcenter', `vCenter별 (${(data.byVcenter || []).length})`], ['model', `모델별 (${(data.byModel || []).length})`], ['region', `지역별 (${(data.byRegion || []).length})`], ['server', `서버 (${data.totalServers})`]];

@@ -40,17 +40,18 @@ export default function VmProvision() {
   // Load clonable templates/VMs for the selected 법인(vCenter), prefix-filtered by
   // the name box (A → all starting with A). Debounced so typing stays smooth.
   useEffect(() => {
+    let active = true; // 느린 이전 응답이 최신 검색 결과를 덮어쓰지 않게(고RTT + 빠른 타이핑).
     setSrcLoading(true);
     const params = new URLSearchParams();
     if (form.vcenterId) params.set('vcenterId', form.vcenterId);
     if (srcQuery.trim()) params.set('q', srcQuery.trim());
     const t = setTimeout(() => {
       fetchJson(`/provision/sources?${params.toString()}`)
-        .then((r) => { setSources(r.sources || []); setSrcTotal(r.total ?? (r.sources || []).length); })
-        .catch(() => { setSources([]); setSrcTotal(0); })
-        .finally(() => setSrcLoading(false));
+        .then((r) => { if (active) { setSources(r.sources || []); setSrcTotal(r.total ?? (r.sources || []).length); } })
+        .catch(() => { if (active) { setSources([]); setSrcTotal(0); } })
+        .finally(() => { if (active) setSrcLoading(false); });
     }, 250);
-    return () => clearTimeout(t);
+    return () => { active = false; clearTimeout(t); };
   }, [form.vcenterId, srcQuery]);
 
   const setF = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));

@@ -37,7 +37,10 @@ function initSqlite() {
       SELECT s.server_id AS server_id, s.watts AS watts, s.ts AS ts FROM power_samples s
       JOIN (SELECT server_id, MAX(ts) AS mts FROM power_samples GROUP BY server_id) m
         ON s.server_id = m.server_id AND s.ts = m.mts`);
-    const historyStmt = db.prepare('SELECT ts, watts FROM power_samples WHERE server_id = ? AND ts >= ? ORDER BY ts ASC LIMIT ?');
+    // 최신 limit개를 뽑아야 한다(ASC+LIMIT은 '가장 오래된' limit개를 반환해 최근 데이터가 잘림
+    // — 60s 폴×24h=1440 > limit 1000이면 최근 ~7h가 차트에서 사라짐). DESC로 최신 limit개를
+    // 선택한 뒤 오름차순으로 되돌려 NDJSON 폴백(slice(-limit))과 순서·의미를 일치시킨다.
+    const historyStmt = db.prepare('SELECT ts, watts FROM power_samples WHERE server_id = ? AND ts >= ? ORDER BY ts DESC LIMIT ?');
     const pruneStmt = db.prepare('DELETE FROM power_samples WHERE ts < ?');
     // 집계(전력 대시보드): 서버별 24h 피크/평균/최소/마지막 + 시간버킷 평균 — SQL GROUP BY로 효율 계산.
     const statsStmt = db.prepare('SELECT server_id, MAX(watts) AS peak, MIN(watts) AS minw, AVG(watts) AS avgw, MAX(ts) AS last, COUNT(*) AS n FROM power_samples WHERE ts >= ? GROUP BY server_id');
@@ -63,7 +66,7 @@ function initSqlite() {
         for (const r of latestAllStmt.all()) map.set(r.server_id, { watts: r.watts, ts: r.ts });
         return map;
       },
-      history: (serverId, sinceTs, limit) => historyStmt.all(serverId, sinceTs, limit),
+      history: (serverId, sinceTs, limit) => historyStmt.all(serverId, sinceTs, limit).reverse(),
       statsSince: (sinceTs) => {
         const m = new Map();
         for (const r of statsStmt.all(sinceTs)) m.set(r.server_id, { peak: Math.round(r.peak), min: Math.round(r.minw), avg: Math.round(r.avgw), last: r.last, count: r.n });

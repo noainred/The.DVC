@@ -10,6 +10,28 @@ function Field({ f, setF, k, ph, w = 130 }) {
   return <input className="input" placeholder={ph} style={{ width: w }} value={f[k]} onChange={(e) => setF((prev) => ({ ...prev, [k]: e.target.value }))} />;
 }
 
+// 결과 테이블도 모듈 스코프(렌더 내부 정의 시 상위 리렌더마다 subtree가 remount되어 열린 모달·스크롤 소실).
+function VmTable({ list, evidence }) {
+  return (
+    <div className="table-wrap" style={{ maxHeight: '46vh' }}>
+      <table><thead><tr><th>VM</th><th>vCenter</th><th>호스트</th><th>Guest OS</th><th>IP</th><th>게이트웨이</th><th>GPU</th><th>전원</th>{evidence && <th>증거</th>}</tr></thead>
+        <tbody>{(list || []).map((v) => (
+          <tr key={v.id}>
+            <td><VmLink name={v.name} vcenterId={v.vcenterId} ip={v.ipAddress} /></td>
+            <td className="muted" style={{ fontSize: 12 }}>{v.vcenterId}</td>
+            <td className="muted" style={{ fontSize: 12 }}>{v.host}</td>
+            <td className="muted" style={{ fontSize: 12 }}>{v.guestOS}</td>
+            <td style={{ fontSize: 12 }}>{(v.ipAddresses || []).slice(0, 2).join(', ')}</td>
+            <td style={{ fontSize: 12 }}>{(v.gateways || []).join(', ') || '—'}</td>
+            <td>{v.gpu ? <span className="badge amber">{v.gpu.type}</span> : <span className="muted">—</span>}</td>
+            <td>{v.powerState === 'POWERED_ON' ? <span className="badge green">On</span> : <span className="badge gray">Off</span>}</td>
+            {evidence && <td style={{ fontSize: 11, maxWidth: 280 }}><span className="muted">{v.evidence}</span></td>}
+          </tr>
+        ))}</tbody></table>
+    </div>
+  );
+}
+
 export default function DeepSearch() {
   const { data: vcs } = usePolling('/vcenters', {}, 60_000);
   const [scope, setScope] = useState(new Set()); // 빈 set = 전체
@@ -37,24 +59,6 @@ export default function DeepSearch() {
   };
 
   const rows = probe?.matched || items;
-  const VmTable = ({ list, evidence }) => (
-    <div className="table-wrap" style={{ maxHeight: '46vh' }}>
-      <table><thead><tr><th>VM</th><th>vCenter</th><th>호스트</th><th>Guest OS</th><th>IP</th><th>게이트웨이</th><th>GPU</th><th>전원</th>{evidence && <th>증거</th>}</tr></thead>
-        <tbody>{(list || []).map((v) => (
-          <tr key={v.id}>
-            <td><VmLink name={v.name} vcenterId={v.vcenterId} ip={v.ipAddress} /></td>
-            <td className="muted" style={{ fontSize: 12 }}>{v.vcenterId}</td>
-            <td className="muted" style={{ fontSize: 12 }}>{v.host}</td>
-            <td className="muted" style={{ fontSize: 12 }}>{v.guestOS}</td>
-            <td style={{ fontSize: 12 }}>{(v.ipAddresses || []).slice(0, 2).join(', ')}</td>
-            <td style={{ fontSize: 12 }}>{(v.gateways || []).join(', ') || '—'}</td>
-            <td>{v.gpu ? <span className="badge amber">{v.gpu.type}</span> : <span className="muted">—</span>}</td>
-            <td>{v.powerState === 'POWERED_ON' ? <span className="badge green">On</span> : <span className="badge gray">Off</span>}</td>
-            {evidence && <td style={{ fontSize: 11, maxWidth: 280 }}><span className="muted">{v.evidence}</span></td>}
-          </tr>
-        ))}</tbody></table>
-    </div>
-  );
 
   return (
     <div>

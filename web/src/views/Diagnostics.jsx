@@ -159,7 +159,7 @@ export default function Diagnostics() {
           {shown.map((l) => (
             <div key={l.id} className="log-line">
               <span className="log-time">{new Date(l.time).toLocaleTimeString('ko-KR', { hour12: false })}</span>
-              <span className="log-level" style={{ color: LEVEL_COLOR[l.level] || '#93c5fd' }}>{l.level.toUpperCase().padEnd(5)}</span>
+              <span className="log-level" style={{ color: LEVEL_COLOR[l.level] || '#93c5fd' }}>{String(l.level || 'info').toUpperCase().padEnd(5)}</span>
               <span className="log-msg">{highlight(l.msg, q)}</span>
             </div>
           ))}
