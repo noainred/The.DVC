@@ -2090,15 +2090,19 @@ function ServerInfoByVcenter({ vc, onServer }) {
   if (!d) return <Loading />;
   const dcName = new Map((dcs.datacenters || []).map((x) => [x.id, x.name || x.id]));
   const assign = dcs.assign || {};
-  // 서버의 소속 법인: 스캔 등록분은 datacenterId 직접, 그 외는 vCenter→DataCenter 할당으로 해석.
-  const dcOf = (s) => s.datacenterId || assign[s.vcenterId] || '';
+  // 가상화 소속 vCenter: 명시 vcenterId가 있으면 그것, 없으면 mappedVcenterId(서비스태그=ESXi
+  // 일련번호 매칭으로 찾은 vCenter). 스캔 등록 iDRAC 서버도 서비스태그가 ESXi와 일치하면 그 vCenter로.
+  const effVc = (s) => s.vcenterId || s.mappedVcenterId || '';
+  // 서버의 소속 법인: 스캔 등록분은 datacenterId 직접, 그 외는 (매핑 포함) vCenter→DataCenter 할당.
+  const dcOf = (s) => s.datacenterId || assign[effVc(s)] || '';
   // 상단 2단 필터(스코프 객체 { datacenterId?, vcenterId?, baremetal? })를 적용. 백엔드
   // serverInScope와 동일 규칙: 법인=그 법인 전체, vCenter=그 vCenter 가상화, Baremetal=vCenter 미소속.
   const scopeMatch = (s) => {
     const sc = (vc && typeof vc === 'object') ? vc : {};
-    if (sc.vcenterId) { if (sc.vcenterId === '__unmapped__' ? s.vcenterId : s.vcenterId !== sc.vcenterId) return false; }
+    const ev = effVc(s);
+    if (sc.vcenterId) { if (sc.vcenterId === '__unmapped__' ? ev : ev !== sc.vcenterId) return false; }
     if (sc.datacenterId) { if (dcOf(s) !== (sc.datacenterId === '__unmapped__' ? '' : sc.datacenterId)) return false; }
-    if (sc.baremetal && s.vcenterId) return false;
+    if (sc.baremetal && ev) return false;
     return true;
   };
   const ql = q.trim().toLowerCase();
@@ -2137,7 +2141,7 @@ function ServerInfoByVcenter({ vc, onServer }) {
               return (
                 <tr key={s.id} style={{ cursor: isOme ? 'default' : 'pointer' }} onClick={() => { if (!isOme) onServer(s); }}>
                   <td><b>{s.name || s.id}</b></td>
-                  <td>{isOme ? <span className="badge blue">OME</span> : <span className="badge gray">iDRAC</span>}{s.remote && <span className="badge amber" style={{ marginLeft: 4 }} title="위임 법인 스캔으로 엣지 에이전트가 수집한 서버(원격 인벤토리)">원격</span>}</td>
+                  <td>{isOme ? <span className="badge blue">OME</span> : <span className="badge gray">iDRAC</span>}{s.remote && <span className="badge amber" style={{ marginLeft: 4 }} title="위임 법인 스캔으로 엣지 에이전트가 수집한 서버(원격 인벤토리)">원격</span>}{!isOme && effVc(s) && <span className="badge blue" style={{ marginLeft: 4 }} title={`서비스태그가 vCenter '${effVc(s)}'의 ESXi 호스트와 일치 — 가상화 호스트`}>🖧 {effVc(s)}</span>}</td>
                   <td className="muted">{String(s.host || '').replace(/^https?:\/\//, '') || '—'}</td>
                   <td className="muted">{s.serviceTag || '—'}</td>
                   <td>{s.enabled === false ? <span className="badge gray">중지</span> : <span className="badge green">수집</span>}</td>

@@ -134,11 +134,29 @@ function analysisFilter(req) {
   return (s) => serverInScope(s, scope, assign);
 }
 
-// 서버 분석 공용 — iDRAC 서버 목록(OME 제외) + 위 필터. 중앙 로컬 레지스트리만
+// 서비스태그(정규화) → vCenter id 맵(스냅샷 호스트 기준). Dell 서비스태그 == ESXi 하드웨어
+// 일련번호이므로, 물리 iDRAC 서버를 그 서버가 실제로 돌리는 ESXi 호스트의 vCenter에 매핑한다.
+function hostVcByTag() {
+  const m = new Map();
+  for (const h of (store.get().hosts || [])) {
+    const t = String(h.serviceTag || '').trim().toLowerCase();
+    if (t && h.vcenterId && !m.has(t)) m.set(t, h.vcenterId);
+  }
+  return m;
+}
+// 서버에 mappedVcenterId(서비스태그로 찾은 vCenter)를 부여. 스캔 등록분은 vcenterId가 비어도
+// 서비스태그가 ESXi 호스트와 일치하면 그 vCenter의 '가상화 장비'로 분류된다.
+function withMappedVc(s, tagMap) {
+  const tag = String(s.serviceTag || s.inv?.system?.serviceTag || '').trim().toLowerCase();
+  return { ...s, mappedVcenterId: (tag && tagMap.get(tag)) || '' };
+}
+
+// 서버 분석 공용 — iDRAC 서버 목록(OME 제외) + mappedVcenterId 부여 후 필터. 중앙 로컬 레지스트리만
 // (온도 시계열처럼 중앙 직접 수집분에만 의미 있는 뷰용).
 function idracServersForAnalysis(req) {
   const pred = analysisFilter(req);
-  return loadIdracRegistry().filter((s) => s.type !== 'ome' && pred(s));
+  const tagMap = hostVcByTag();
+  return loadIdracRegistry().filter((s) => s.type !== 'ome').map((s) => withMappedVc(s, tagMap)).filter(pred);
 }
 
 // 수집기(에이전트) → DataCenter id 매핑. collector.datacenter 라벨/이름/ id를 등록된
@@ -163,9 +181,10 @@ function remoteServersResolved() {
 // 위임 스캔으로 엣지에만 등록된 서버가 서버 분석에 나타나게 한다. 온도(시계열)만 제외한다.
 function analysisServersWithRemote(req) {
   const pred = analysisFilter(req);
-  const local = loadIdracRegistry().filter((s) => s.type !== 'ome' && pred(s));
+  const tagMap = hostVcByTag();
+  const local = loadIdracRegistry().filter((s) => s.type !== 'ome').map((s) => withMappedVc(s, tagMap)).filter(pred);
   const seen = new Set(local.map((s) => String(s.id)));
-  const remote = remoteServersResolved().filter((s) => !seen.has(String(s.id)) && pred(s));
+  const remote = remoteServersResolved().map((s) => withMappedVc(s, tagMap)).filter((s) => !seen.has(String(s.id)) && pred(s));
   return local.concat(remote);
 }
 
@@ -953,11 +972,13 @@ adminRouter.post('/vcenters/import-file', adminOnly, (req, res) => {
 // 중앙 로컬 레지스트리 + 위임 법인의 원격 서버(엣지 수집분)를 병합해 반환한다(id 중복은 중앙 우선).
 // 원격 서버는 remote:true로 표시(프론트가 구분/상세 처리). 서버 자격증명은 애초에 실려오지 않는다.
 adminRouter.get('/idrac', adminOnly, (_req, res) => {
-  const local = listServers();
+  const tagMap = hostVcByTag();
+  const mapTag = (s) => (tagMap.get(String(s.serviceTag || s.inv?.system?.serviceTag || '').trim().toLowerCase()) || '');
+  const local = listServers().map((s) => ({ ...s, mappedVcenterId: s.vcenterId || mapTag(s) }));
   const seen = new Set(local.map((s) => String(s.id)));
   const remote = remoteServersResolved()
     .filter((s) => !seen.has(String(s.id)))
-    .map((s) => ({ id: s.id, name: s.name, host: s.host, serviceTag: s.serviceTag || '', model: s.model || s.inv?.system?.model || '', vcenterId: s.vcenterId || '', datacenterId: s.datacenterId || '', type: s.type || 'idrac', remote: true, collectorId: s.collectorId, hasInventory: !!s.inv }));
+    .map((s) => ({ id: s.id, name: s.name, host: s.host, serviceTag: s.serviceTag || '', model: s.model || s.inv?.system?.model || '', vcenterId: s.vcenterId || '', mappedVcenterId: s.vcenterId || mapTag(s), datacenterId: s.datacenterId || '', type: s.type || 'idrac', remote: true, collectorId: s.collectorId, hasInventory: !!s.inv }));
   res.json({ servers: local.concat(remote), poller: getPollerStatus() });
 });
 
