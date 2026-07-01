@@ -16,6 +16,7 @@ export default function Collectors() {
   const [central, setCentral] = useState(null);
   const [sort, setSort] = useState({ key: 'id', dir: 'asc' });
   const [ingest, setIngest] = useState(null); // 에이전트별 수신 트래픽 진단
+  const [showToken, setShowToken] = useState(false); // 토큰 입력칸 표시/가리기
 
   const load = async () => {
     try { setData(await fetchJson('/admin/collectors')); setError(null); }
@@ -50,10 +51,29 @@ export default function Collectors() {
   if (error) return <ErrorBox message={error} />;
   if (!data) return <Loading />;
 
-  const openAdd = () => { setEditing(false); setForm({ ...EMPTY }); setMsg(null); };
-  const openEdit = (c) => { setEditing(true); setForm({ ...EMPTY, ...c, token: '' }); setMsg(null); };
-  const close = () => { setForm(null); setMsg(null); };
+  const openAdd = () => { setEditing(false); setForm({ ...EMPTY }); setMsg(null); setShowToken(false); };
+  const openEdit = (c) => { setEditing(true); setForm({ ...EMPTY, ...c, token: '' }); setMsg(null); setShowToken(false); };
+  const close = () => { setForm(null); setMsg(null); setShowToken(false); };
   const setF = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  // 안전한 랜덤 COLLECTOR_TOKEN 자동 생성(브라우저 CSPRNG). 24바이트 → URL-safe base64(약 32자).
+  // 생성 즉시 필드에 채우고 표시로 전환, 가능하면 클립보드에도 복사한다(에이전트에 동일 토큰 설정용).
+  const genToken = () => {
+    const rng = (typeof window !== 'undefined' && (window.crypto || window.msCrypto));
+    if (!rng || !rng.getRandomValues) { setMsg({ ok: false, text: '이 브라우저에서 보안 난수를 생성할 수 없습니다.' }); return; }
+    const bytes = new Uint8Array(24);
+    rng.getRandomValues(bytes);
+    let bin = '';
+    for (const b of bytes) bin += String.fromCharCode(b);
+    const tok = btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    setForm((f) => ({ ...f, token: tok }));
+    setShowToken(true);
+    const done = (copied) => setMsg({ ok: true, text: `토큰을 생성했습니다${copied ? ' · 클립보드에 복사됨' : ''}. 에이전트를 COLLECTOR_TOKEN=${tok} 로 실행하세요(값은 위 칸에서 확인).` });
+    try {
+      if (navigator.clipboard?.writeText) navigator.clipboard.writeText(tok).then(() => done(true)).catch(() => done(false));
+      else done(false);
+    } catch { done(false); }
+  };
 
   const save = async () => {
     setBusy(true); setMsg(null);
@@ -239,7 +259,11 @@ export default function Collectors() {
               </label>
               <label style={{ gridColumn: '1 / -1' }}>수집 서버 URL *<input className="input" value={form.url} onChange={setF('url')} placeholder="http://10.10.0.5:4000" /></label>
               <label style={{ gridColumn: '1 / -1' }}>토큰 (COLLECTOR_TOKEN) {editing && <span className="muted">(비우면 유지)</span>}
-                <input className="input" type="password" value={form.token} onChange={setF('token')} placeholder={editing ? '••••••' : '에이전트의 COLLECTOR_TOKEN'} />
+                <div className="flex gap" style={{ alignItems: 'stretch' }}>
+                  <input className="input" style={{ flex: 1 }} type={showToken ? 'text' : 'password'} value={form.token} onChange={setF('token')} placeholder={editing ? '••••••' : '에이전트의 COLLECTOR_TOKEN'} />
+                  <button type="button" className="logout-btn" style={{ flex: 'none', padding: '0 12px' }} onClick={() => setShowToken((v) => !v)} title={showToken ? '가리기' : '표시'}>{showToken ? '🙈' : '👁'}</button>
+                  <button type="button" className="logout-btn" style={{ flex: 'none', padding: '0 12px', whiteSpace: 'nowrap' }} onClick={genToken} title="안전한 랜덤 토큰을 자동 생성해 채웁니다">🎲 자동 생성</button>
+                </div>
               </label>
             </div>
 
