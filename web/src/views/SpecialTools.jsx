@@ -2172,9 +2172,25 @@ function ServerInfoByVcenter({ vc, onServer }) {
       </div>
       {groupList.length === 0 ? (
         <div className="card" style={{ padding: 16 }}><span className="muted">등록된 서버가 없습니다. ‘설정 › iDRAC 서버 등록 › 법인별 iDRAC 장비 스캔’에서 등록하세요.</span></div>
-      ) : groupList.map((g) => (
+      ) : groupList.map((g) => {
+        // 이 법인에 어떤 모델이 몇 대 있는지 집계(대수 많은 순). 칩 클릭 시 그 모델로 검색 필터.
+        const modelCounts = (() => {
+          const m = new Map();
+          for (const s of g.list) { const k = (s.model || '').trim() || '미상'; m.set(k, (m.get(k) || 0) + 1); }
+          return [...m.entries()].sort((a, b) => b[1] - a[1]);
+        })();
+        return (
         <div key={g.id} className="card" style={{ padding: 14, marginBottom: 14 }}>
-          <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 10 }}>{g.id === '__unmapped__' ? '⚠ ' : '🏢 '}{g.name} <span className="muted" style={{ fontWeight: 400 }}>· {g.list.length}대</span></div>
+          <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 10 }}>{g.id === '__unmapped__' ? '⚠ ' : '🏢 '}{g.name} <span className="muted" style={{ fontWeight: 400 }}>· {g.list.length}대 · {modelCounts.length}종 모델</span></div>
+          {/* 모델별 대수 요약 카드(칩). 클릭하면 그 모델로 검색 필터. */}
+          <div className="flex gap wrap" style={{ marginBottom: 10 }}>
+            {modelCounts.map(([model, n]) => (
+              <span key={model} className="badge" style={{ fontSize: 12, padding: '4px 10px', cursor: 'pointer', background: q.trim() && model.toLowerCase().includes(q.trim().toLowerCase()) ? 'rgba(96,169,255,.25)' : 'rgba(148,163,184,.15)' }}
+                title={`'${model}'로 검색 필터`} onClick={() => setQ(q.trim().toLowerCase() === model.toLowerCase() ? '' : model)}>
+                🖥 {model} <b style={{ color: 'var(--accent, #60a5fa)' }}>{n}대</b>
+              </span>
+            ))}
+          </div>
           <table className="data-table" style={{ width: '100%', fontSize: 13 }}>
             <thead><tr>
               <th style={{ textAlign: 'left' }}>이름</th><th>유형</th><th style={{ textAlign: 'left' }}>모델</th><th style={{ textAlign: 'left' }}>주소</th><th style={{ textAlign: 'left' }}>서비스태그</th><th>상태</th>
@@ -2194,7 +2210,8 @@ function ServerInfoByVcenter({ vc, onServer }) {
             })}</tbody>
           </table>
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -2277,6 +2294,28 @@ const vcQS = (sc) => {
 };
 
 /** 온도 보기 — 전체 서버의 최신 온도센서(CPU/GPU/Inlet/Exhaust 등)를 한 표에 모아 정렬. */
+// 온도 센서 종류 필터(라벨). iDRAC 센서명(CPU1 Temp·Inlet Temp·Exhaust Temp·GPU1 Temp·DIMM…)에 매칭.
+const TEMP_KINDS = [
+  ['', '전체 센서'],
+  ['cpu', 'CPU'],
+  ['gpu', 'GPU'],
+  ['inlet', '흡기(Inlet)'],
+  ['exhaust', '배기(Exhaust)'],
+  ['mem', '메모리(DIMM)'],
+  ['other', '기타'],
+];
+function tempKindMatch(kind, sensor) {
+  if (!kind) return true;
+  const s = String(sensor || '').toLowerCase();
+  if (kind === 'cpu') return /cpu|proc/.test(s);
+  if (kind === 'gpu') return /gpu|accel/.test(s);
+  if (kind === 'inlet') return /inlet|intake|흡기/.test(s);
+  if (kind === 'exhaust') return /exhaust|outlet|배기/.test(s);
+  if (kind === 'mem') return /dimm|mem|메모리/.test(s);
+  if (kind === 'other') return !/cpu|proc|gpu|accel|inlet|intake|exhaust|outlet|dimm|mem/.test(s);
+  return true;
+}
+
 function ServerTempFinder({ vc, onServer }) {
   const [d, setD] = useState(null);
   const [err, setErr] = useState(null);
