@@ -2076,7 +2076,7 @@ function HardwareSummary() {
   );
 }
 
-function ServerInfoByVcenter({ onServer }) {
+function ServerInfoByVcenter({ vc, onServer }) {
   const [d, setD] = useState(null);
   const [dcs, setDcs] = useState({ datacenters: [], assign: {} });
   const [err, setErr] = useState(null);
@@ -2092,9 +2092,20 @@ function ServerInfoByVcenter({ onServer }) {
   const assign = dcs.assign || {};
   // 서버의 소속 법인: 스캔 등록분은 datacenterId 직접, 그 외는 vCenter→DataCenter 할당으로 해석.
   const dcOf = (s) => s.datacenterId || assign[s.vcenterId] || '';
+  // 상단 분류 필터: dc:<id>=그 법인 전체, vc:<id>=그 vCenter 가상화만, baremetal=vCenter 미소속 물리,
+  // __nodc__=법인 미지정. (접두어 없으면 하위호환으로 vcenterId 취급.)
+  const scopeMatch = (s) => {
+    const v = String(vc || '');
+    if (!v) return true;
+    if (v.startsWith('dc:')) return dcOf(s) === v.slice(3);
+    if (v.startsWith('vc:')) return s.vcenterId === v.slice(3);
+    if (v === 'baremetal') return !s.vcenterId;
+    if (v === '__nodc__') return !dcOf(s);
+    return s.vcenterId === v;
+  };
   const ql = q.trim().toLowerCase();
   const match = (s) => !ql || [s.name, s.serviceTag, s.host, s.model].some((x) => String(x || '').toLowerCase().includes(ql));
-  const rows = d.filter(match);
+  const rows = d.filter((s) => scopeMatch(s) && match(s));
   const groups = new Map();
   for (const s of rows) { const id = dcOf(s) || '__unmapped__'; if (!groups.has(id)) groups.set(id, []); groups.get(id).push(s); }
   const groupList = [...groups.entries()]
@@ -2145,10 +2156,12 @@ function ServerInfoByVcenter({ onServer }) {
 /** 서버 분석 — iDRAC가 수집한 하드웨어 정보 분석. vCenter(법인)별 필터 + 서버 클릭 상세 공용. */
 function ServerAnalysis() {
   const [sub, setSub] = useState('info'); // 법인별 서버 정보가 기본
-  const [vc, setVc] = useState(''); // '' 전체 | vCenterId | __unmapped__
+  const [vc, setVc] = useState(''); // '' 전체 | dc:<id> | vc:<id> | baremetal | __nodc__
   const [vcs, setVcs] = useState([]);
+  const [dcs, setDcs] = useState([]); // 등록된 DataCenter(법인)
   const [detail, setDetail] = useState(null); // { id, name } → iDRAC 상세 모달
   useEffect(() => { fetchJson('/vcenters').then((d) => setVcs(d || [])).catch(() => fetchJson('/admin/vcenters').then((d) => setVcs(d.vcenters || [])).catch(() => {})); }, []);
+  useEffect(() => { fetchJson('/admin/datacenters').then((r) => setDcs(r.datacenters || [])).catch(() => {}); }, []);
   const onServer = (s) => setDetail({ id: s.id || s.serverId, name: s.name || s.server });
   const sp = { vc, onServer };
   return (
@@ -2161,12 +2174,24 @@ function ServerAnalysis() {
           <button className={sub === 'gpu' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('gpu')}>🎮 GPU 정보</button>
           <button className={sub === 'fw' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('fw')}>🏷 BIOS/iDRAC 버전 정보</button>
         </div>
-        <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }} title="iDRAC 서버에 지정된 소속 vCenter(법인) 기준. '미지정'은 소속이 지정 안 된 서버.">
-          <span className="muted">법인/vCenter</span>
-          <select className="select" value={vc} onChange={(e) => setVc(e.target.value)} style={{ minWidth: 180 }}>
+        <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }} title="법인(DataCenter)=그 법인의 모든 장비 · vCenter=가상화 장비만 · Baremetal=vCenter에 속하지 않는 물리 서버">
+          <span className="muted">분류</span>
+          <select className="select" value={vc} onChange={(e) => setVc(e.target.value)} style={{ minWidth: 220 }}>
             <option value="">전체</option>
-            {vcs.map((v) => <option key={v.id} value={v.id}>{v.name || v.id}</option>)}
-            <option value="__unmapped__">⚠ 미지정(소속 없음)</option>
+            {dcs.length > 0 && (
+              <optgroup label="🏢 법인(DataCenter) — 전체 장비">
+                {dcs.map((d) => <option key={`dc:${d.id}`} value={`dc:${d.id}`}>{d.name || d.id}</option>)}
+              </optgroup>
+            )}
+            {vcs.length > 0 && (
+              <optgroup label="🖥 vCenter — 가상화 장비만">
+                {vcs.map((v) => <option key={`vc:${v.id}`} value={`vc:${v.id}`}>{v.name || v.id}</option>)}
+              </optgroup>
+            )}
+            <optgroup label="그 외">
+              <option value="baremetal">🔩 Baremetal — 미가상화 물리서버</option>
+              <option value="__nodc__">⚠ 법인 미지정</option>
+            </optgroup>
           </select>
         </label>
       </div>
@@ -2180,7 +2205,17 @@ function ServerAnalysis() {
   );
 }
 
-const vcQS = (vc) => (vc ? `?vcenterId=${encodeURIComponent(vc)}` : '');
+// 서버 분석 스코프 → 쿼리스트링. 계층 필터: dc:<id>=법인 전체, vc:<id>=가상화만,
+// baremetal=미가상화 물리, __nodc__=법인 미지정. 접두어 없으면 하위호환(vcenterId).
+const vcQS = (s) => {
+  const v = String(s || '');
+  if (!v) return '';
+  if (v.startsWith('dc:')) return `?datacenterId=${encodeURIComponent(v.slice(3))}`;
+  if (v.startsWith('vc:')) return `?vcenterId=${encodeURIComponent(v.slice(3))}`;
+  if (v === 'baremetal') return '?baremetal=1';
+  if (v === '__nodc__') return '?datacenterId=__unmapped__';
+  return `?vcenterId=${encodeURIComponent(v)}`;
+};
 
 /** 온도 보기 — 전체 서버의 최신 온도센서(CPU/GPU/Inlet/Exhaust 등)를 한 표에 모아 정렬. */
 function ServerTempFinder({ vc, onServer }) {

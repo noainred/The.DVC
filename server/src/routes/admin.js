@@ -97,6 +97,7 @@ import { fetchInventory as fetchIdracInventory, fetchSensors as fetchIdracSensor
 import { listCollectors, addCollector, updateCollector, removeCollector, loadCollectors } from '../collector/registry.js';
 import { allRemoteServers, findRemoteServer } from '../collector/remoteInventory.js';
 import { matchDatacenterId } from '../collector/datacenterMatch.js';
+import { serverInScope } from '../insights/analysisScope.js';
 import { listDatacenters, getDatacenterAssign, addDatacenter, updateDatacenter, removeDatacenter, setVcenterDatacenterMany } from '../datacenter/store.js';
 import { allCollectorStatus, getCollectorStatus } from '../collector/state.js';
 import { pullNow } from '../collector/puller.js';
@@ -117,13 +118,26 @@ const adminOnly = requireRole('admin');
 // (계정명/passwordless 여부는 디버그에 유용하므로 유지)
 const maskPw = (p) => (p === '' || p == null) ? '(빈 비번/passwordless)' : `•••• (${String(p).length}자)`;
 
-// 서버 분석 공용 — iDRAC 서버 목록(OME 제외) + vCenter 필터(?vcenterId=, __unmapped__=미지정).
-// 중앙 로컬 레지스트리만(온도 시계열처럼 중앙 직접 수집분에만 의미 있는 뷰용).
+// 서버 분석 공용 필터 술어. 쿼리로 3가지 축을 지원한다:
+//   ?vcenterId=<id>      — 그 vCenter의 가상화 장비만 (vcenterId 일치). __unmapped__=vCenter 미지정.
+//   ?datacenterId=<id>   — 그 법인(DataCenter)의 모든 장비 (dcOf 일치). __unmapped__=법인 미지정.
+//   ?baremetal=1         — vCenter에 속하지 않는 물리(베어메탈) 장비만.
+// dcOf: 스캔 등록분은 datacenterId 직접, 그 외는 vCenter→DataCenter 할당으로 해석.
+function analysisFilter(req) {
+  const scope = {
+    vcenterId: String(req?.query?.vcenterId || '').trim(),
+    datacenterId: String(req?.query?.datacenterId || '').trim(),
+    baremetal: String(req?.query?.baremetal || '') === '1',
+  };
+  const assign = getDatacenterAssign();
+  return (s) => serverInScope(s, scope, assign);
+}
+
+// 서버 분석 공용 — iDRAC 서버 목록(OME 제외) + 위 필터. 중앙 로컬 레지스트리만
+// (온도 시계열처럼 중앙 직접 수집분에만 의미 있는 뷰용).
 function idracServersForAnalysis(req) {
-  const vc = String(req?.query?.vcenterId || '').trim();
-  let servers = loadIdracRegistry().filter((s) => s.type !== 'ome');
-  if (vc) servers = servers.filter((s) => (vc === '__unmapped__' ? !s.vcenterId : s.vcenterId === vc));
-  return servers;
+  const pred = analysisFilter(req);
+  return loadIdracRegistry().filter((s) => s.type !== 'ome' && pred(s));
 }
 
 // 수집기(에이전트) → DataCenter id 매핑. collector.datacenter 라벨/이름/ id를 등록된
@@ -147,11 +161,10 @@ function remoteServersResolved() {
 // 서버 분석 공용(원격 포함) — 중앙 로컬 + 위임 법인의 원격 인벤토리를 병합(id 중복은 중앙 우선).
 // 위임 스캔으로 엣지에만 등록된 서버가 서버 분석에 나타나게 한다. 온도(시계열)만 제외한다.
 function analysisServersWithRemote(req) {
-  const local = idracServersForAnalysis(req);
+  const pred = analysisFilter(req);
+  const local = loadIdracRegistry().filter((s) => s.type !== 'ome' && pred(s));
   const seen = new Set(local.map((s) => String(s.id)));
-  const vc = String(req?.query?.vcenterId || '').trim();
-  let remote = remoteServersResolved().filter((s) => !seen.has(String(s.id)));
-  if (vc) remote = remote.filter((s) => (vc === '__unmapped__' ? !s.vcenterId : s.vcenterId === vc));
+  const remote = remoteServersResolved().filter((s) => !seen.has(String(s.id)) && pred(s));
   return local.concat(remote);
 }
 

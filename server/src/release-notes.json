@@ -1,6 +1,16 @@
 {
   "notes": [
     {
+      "version": "2.81.0",
+      "date": "2026-07-01",
+      "title": "서버 분석 필터 — 법인(DataCenter)/vCenter/Baremetal 구분 선택",
+      "notes": [
+        "서버 분석 상단의 분류 드롭다운을 계층형으로 바꿨습니다. '법인(DataCenter)'을 고르면 그 법인의 모든 장비(가상화+베어메탈)가, 'vCenter'를 고르면 그 vCenter의 가상화 장비만, 'Baremetal'을 고르면 vCenter에 속하지 않는 물리 서버만 보입니다. '법인 미지정'도 선택 가능.",
+        "이전에는 '법인별 서버 정보' 탭이 이 필터를 무시하고 전체를 표시하던 문제를 수정했습니다. 이제 필터가 목록·GPU·BIOS/온도 탭 모두에 적용됩니다.",
+        "백엔드 서버 분석 필터가 vcenterId/datacenterId/baremetal 세 축을 지원하도록 확장(순수 함수 serverInScope + 회귀 테스트). 전체 242건 통과."
+      ]
+    },
+    {
       "version": "2.80.0",
       "date": "2026-07-01",
       "title": "전력 분석 — DataCenter별 보기(1차 법인 → 2차 vCenter/Baremetal)",
