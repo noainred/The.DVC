@@ -1,6 +1,17 @@
 {
   "notes": [
     {
+      "version": "2.98.0",
+      "date": "2026-07-01",
+      "title": "가장 자세한 버그 점검 — 업그레이드 데이터 손실·프로비저닝 클론·보안·재진입 등 18건 수정",
+      "notes": [
+        "★ 자동 업그레이드 데이터 손실 방지(중요): 기본 설치(CONFIG_DIR=<app>/server/config)에서 원격 업그레이드 시 앱 루트를 통째로 교체하며 vcenters/users/upgrade.json '3개'만 보존해, auth·backup·capture·보안 설정과 전력/온도/IPAM 시계열 DB가 유실되던 문제를 수정 — 이제 server/config 디렉터리 전체를 이관합니다.",
+        "★ 프로비저닝(VM 클론) 실패 수정: RelocateSpec의 host/datastore 순서와 CustomizationGlobalIPSettings의 DNS 서버/서픽스 순서가 vim25 스키마 순서와 어긋나, 호스트+데이터스토어 지정 또는 정적 IP 클론이 매 VM 실패하던 문제를 수정. 잡 레벨 실패 시 VM 상태가 '실행 중'에 영구 고착되던 문제도 수정.",
+        "보안: 원격 업그레이드 번들에 sha256 무결성 검증 추가(변조 번들 차단), AD LDAPS 인증서 검증 기본 ON(MITM 방지, 자체서명 DC는 opt-out), LDAP 필터 인젝션 이스케이프, Windows 게스트 계정 생성 시 비밀번호 몰래 변조·배치 인젝션 차단, 게스트 인증 빈 자격증명 정규화.",
+        "안정성: 자가 업그레이드 후 엣지 푸시가 항상 no-op이던 문제(appliedArchive 미설정) 수정, ping/로그조회/iDRAC스캔/캡처 워커에 재진입 가드 추가, 중앙 인벤토리 저장 시 대용량 stringify 예외로 프로세스가 죽던 문제 격리, 중앙 캐시의 프로토타입 오염(에이전트 제어 키) 방지, 게스트 GPU 오버레이가 중앙(push-only)에서 만료 안 돼 무한 증가하던 메모리 누수 수정, 심층검색 CIDR 옥텟 검증."
+      ]
+    },
+    {
       "version": "2.97.0",
       "date": "2026-07-01",
       "title": "버그 점검·패치 3회 — 잔여 확정 버그 8건 + 널가드 크래시 5건 수정",

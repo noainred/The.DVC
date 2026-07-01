@@ -11,13 +11,27 @@ import { loadGpuGuestSettings, resolveVmCreds } from '../gpu/settings.js';
 const has = (s, q) => String(s || '').toLowerCase().includes(String(q).toLowerCase());
 const numOr = (x) => (x === '' || x == null || Number.isNaN(Number(x)) ? null : Number(x));
 
+// 엄격 IPv4 → uint32. 4옥텟·각 0~255가 아니면 null(예: '10/8', '999.1.1.1', IPv6 → 오매칭 방지).
+function ipToInt(a) {
+  const parts = String(a).split('.');
+  if (parts.length !== 4) return null;
+  let acc = 0;
+  for (const p of parts) {
+    if (!/^\d{1,3}$/.test(p)) return null;
+    const n = Number(p);
+    if (n > 255) return null;
+    acc = (acc << 8) + n;
+  }
+  return acc >>> 0;
+}
 function ipInCidr(ip, cidr) {
   try {
     const [net, bitsStr] = String(cidr).split('/');
     const bits = Number(bitsStr); if (!net || !(bits >= 0 && bits <= 32)) return false;
-    const toInt = (a) => a.split('.').reduce((acc, o) => (acc << 8) + (Number(o) & 255), 0) >>> 0;
+    const ni = ipToInt(net); const ii = ipToInt(ip);
+    if (ni == null || ii == null) return false;
     const mask = bits === 0 ? 0 : (~((1 << (32 - bits)) - 1)) >>> 0;
-    return (toInt(ip) & mask) === (toInt(net) & mask);
+    return (ii & mask) === (ni & mask);
   } catch { return false; }
 }
 

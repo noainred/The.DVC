@@ -25,3 +25,10 @@ export function pruneGuestGpu(staleMs) {
 }
 
 export function guestGpuCounts() { return { hosts: byHost.size, vms: byVm.size }; }
+
+// 독립 GC — 로컬 GPU 폴러가 꺼진 중앙(오버레이가 POST /api/central/gpu-guest-data 로만 들어오는)
+// 배치에서는 poller의 pruneGuestGpu가 실행되지 않아 삭제된 VM의 stale 항목이 영구 누적된다.
+// 폴러 상태와 무관하게 오래된 항목을 만료시켜 byVm/byHost Map의 무한 증가를 막는다.
+const GC_TTL_MS = Number(process.env.GUEST_GPU_TTL_MS) || 30 * 60_000; // 30분 무갱신 시 만료
+const _gcTimer = setInterval(() => { try { pruneGuestGpu(GC_TTL_MS); } catch { /* best effort */ } }, 5 * 60_000);
+_gcTimer.unref?.();

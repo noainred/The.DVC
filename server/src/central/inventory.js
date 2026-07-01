@@ -15,10 +15,12 @@ import { config } from '../config.js';
 
 const FILE = path.join(config.configDir, 'central-inventory.json');
 
-let cache = {}; // vcenterId -> { at, agent, generatedAt, data:{ vcenter, hosts, vms, datastores, networks, alarms } }
+// null-proto 캐시: 에이전트가 제어하는 vcenterId가 '__proto__'/'constructor' 등이어도 프로토타입을
+// 오염시키지 않고 일반 키로 저장된다(엔트리가 Object.keys에서 사라져 prune/persist 누락되는 것 방지).
+let cache = Object.create(null); // vcenterId -> { at, agent, generatedAt, data:{...} }
 try {
-  if (fs.existsSync(FILE)) { const p = JSON.parse(fs.readFileSync(FILE, 'utf8')); if (p && typeof p === 'object') cache = p.inventory || p || {}; }
-} catch { cache = {}; }
+  if (fs.existsSync(FILE)) { const p = JSON.parse(fs.readFileSync(FILE, 'utf8')); if (p && typeof p === 'object') cache = Object.assign(Object.create(null), p.inventory || p || {}); }
+} catch { cache = Object.create(null); }
 
 let writeTimer = null;
 function persistSoon() {
@@ -26,8 +28,12 @@ function persistSoon() {
   if (writeTimer) return;
   writeTimer = setTimeout(() => {
     writeTimer = null;
-    fs.mkdirSync(path.dirname(FILE), { recursive: true });
-    fs.promises.writeFile(FILE, JSON.stringify({ inventory: cache }), { mode: 0o600 }).catch(() => {});
+    // 타이머 콜백의 동기 예외(stringify 문자열 길이 상한 초과·mkdir 실패 등)는 uncaught가 되어
+    // 프로세스를 죽이므로 반드시 격리한다.
+    try {
+      fs.mkdirSync(path.dirname(FILE), { recursive: true });
+      fs.promises.writeFile(FILE, JSON.stringify({ inventory: cache }), { mode: 0o600 }).catch(() => {});
+    } catch { /* best effort — 쓰기 실패가 수집을 막지 않게 */ }
   }, 5_000);
   writeTimer.unref?.();
 }

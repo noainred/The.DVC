@@ -106,6 +106,9 @@ export function createJob(spec, { user } = {}) {
   // Run in the background; never await here so the HTTP response returns at once.
   runJob(job, source).catch((err) => {
     job.status = 'error';
+    // 잡 레벨 실패(예: createProvisioner/loadVcenterConfig 예외) 시 아직 종료되지 않은 VM들이
+    // queued/running에 영구 고착돼 UI가 '실행 중'으로 계속 표시하지 않게 error로 마감한다.
+    for (const v of job.vms) { if (v.status !== 'done' && v.status !== 'error') { v.status = 'error'; v.error = v.error || err.message; } }
     console.error('[provision] job 실패:', err.message);
   });
   return { ok: true, job: redact(job) };

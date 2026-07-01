@@ -33,8 +33,15 @@ async function postProgress(reqId, scanned, total, found) {
   }).catch(() => {});
 }
 
+let running = false; // 재진입 방지(긴 Redfish 스캔이 다음 폴 틱과 겹쳐 별개 잡이 동시 실행되는 것 차단)
 export async function runIdracScanWorkerOnce() {
   if (!config.agent.centralUrl) return null;
+  if (running) return null;
+  running = true;
+  try { return await runIdracScanWorkerInner(); } finally { running = false; }
+}
+
+async function runIdracScanWorkerInner() {
   try {
     const url = `${config.agent.centralUrl}/api/central/idrac-scan-jobs?agent=${encodeURIComponent(config.agent.name)}`;
     const r = await resilientFetch(url, { headers: headers(), timeoutMs: 15_000, retries: 2 });

@@ -13,6 +13,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { parseTarGz, parseZip, MAX_BUNDLE_BYTES, MAX_MEMBERS } from './archive.js';
 import { upgradeAgent } from './upgradeAgent.js';
@@ -153,7 +154,12 @@ export function applyPackage(members, installDir) {
   return hadOld ? backup : '';
 }
 
-// User-owned files that must survive an upgrade (kept out of the bundle).
+// 업그레이드에서 반드시 보존해야 하는 사용자 데이터가 들어있는 디렉터리(번들에 포함되지 않음).
+// 기본 CONFIG_DIR = <app>/server/config 이 installDir 내부라, 앱 루트를 통째로 스왑하면 이 안의
+// 파일이 전부 새 번들(빈 상태)로 대체된다. 개별 파일 나열은 auth.json/backup.json/packages.json/
+// 캡처·보안 설정과 시계열 SQLite(idrac-power/host-temp/ipam.db)를 누락시키므로 '디렉터리 통째' 이관.
+const PRESERVE_DIRS = ['server/config'];
+// (하위호환) 디렉터리 밖에 있을 수 있는 개별 파일도 추가 보존.
 const PRESERVE_PATHS = [
   'server/config/vcenters.json',
   'server/config/users.json',
@@ -162,6 +168,17 @@ const PRESERVE_PATHS = [
 
 /** Copy preserved config from the old install (backup) into the new one (staging). */
 function preserveUserConfig(fromDir, toDir) {
+  // 1) config 디렉터리 전체 이관(재귀). 새 번들이 시드한 기본 파일은 old에 없으면 그대로 유지된다.
+  for (const rel of PRESERVE_DIRS) {
+    try {
+      const src = path.join(fromDir, rel);
+      if (!fs.existsSync(src)) continue;
+      const dst = path.join(toDir, rel);
+      fs.mkdirSync(dst, { recursive: true });
+      fs.cpSync(src, dst, { recursive: true, force: true });
+    } catch { /* best effort — never block the upgrade on this */ }
+  }
+  // 2) 명시 경로 개별 보존(중복이어도 안전 — 위 디렉터리 밖 배치 대비).
   for (const rel of PRESERVE_PATHS) {
     try {
       const src = path.join(fromDir, rel);
@@ -183,7 +200,12 @@ export function upgradeFromArchive(archivePath, installDir, currentVersion, pkgN
   } catch (err) {
     return { ok: false, reason: `failed to read archive: ${err.message}` };
   }
-  return applyIfNewer(members, installDir, currentVersion);
+  const res = applyIfNewer(members, installDir, currentVersion);
+  // 적용된 아카이브 경로를 노출 — manager.pushToEdges가 이 경로로 엣지에 같은 번들을 푸시한다.
+  // (이전엔 res.appliedArchive가 항상 undefined라, watchDir 없는 remoteBase-only 중앙은 엣지
+  //  업그레이드 푸시가 조용히 no-op이 되어 버전이 갈라졌다.)
+  if (res.ok) res.appliedArchive = archivePath;
+  return res;
 }
 
 /** Apply pushed bundle bytes (edge side). allowSame re-installs an equal version. */
@@ -312,6 +334,7 @@ export async function checkRemote(baseUrl, currentVersion, { token, timeout = 10
     if (String(v.version) === latest) {
       out.tarGz = v.tar_gz;
       out.sizeBytes = v.size_bytes;
+      out.sha256 = v.sha256 || v.tar_gz_sha256 || '';
       if (v.tar_gz) out.downloadUrl = joinUrl(base, v.tar_gz);
       break;
     }
@@ -320,7 +343,7 @@ export async function checkRemote(baseUrl, currentVersion, { token, timeout = 10
 }
 
 /** Download a remote archive into destDir (validates name, caps size, auth). */
-export async function downloadArchive(url, destDir, { token, timeout = 120_000, maxBytes = MAX_BUNDLE_BYTES } = {}) {
+export async function downloadArchive(url, destDir, { token, timeout = 120_000, maxBytes = MAX_BUNDLE_BYTES, sha256 } = {}) {
   const name = path.basename(String(url || '').split('?')[0]);
   if (!ARCHIVE_RE.test(name)) return { ok: false, reason: `disallowed archive name: ${name || '(none)'}` };
   try {
@@ -328,6 +351,13 @@ export async function downloadArchive(url, destDir, { token, timeout = 120_000, 
     if (!res.ok) return { ok: false, reason: `download HTTP ${res.status}` };
     const buf = Buffer.from(await res.arrayBuffer());
     if (buf.length > maxBytes) return { ok: false, reason: `download too large (>${maxBytes} bytes)` };
+    // 무결성 검증: versions.json의 sha256과 대조(TLS 미검증 미러/변조 번들 차단). sha가 없으면 스킵.
+    if (sha256) {
+      const got = crypto.createHash('sha256').update(buf).digest('hex');
+      if (got.toLowerCase() !== String(sha256).toLowerCase()) {
+        return { ok: false, reason: `sha256 불일치 — 번들 무결성 검증 실패(기대 ${String(sha256).slice(0, 12)}…, 실제 ${got.slice(0, 12)}…)` };
+      }
+    }
     fs.mkdirSync(destDir, { recursive: true });
     const dest = path.join(destDir, name);
     fs.writeFileSync(dest, buf);
@@ -344,7 +374,7 @@ export async function upgradeFromRemote(baseUrl, installDir, currentVersion, des
   if (!info.available) return { ok: false, reason: `already up to date (${info.latest})`, check: info, upToDate: true };
   if (!info.downloadUrl) return { ok: false, reason: 'no download URL found', check: info };
 
-  const dl = await downloadArchive(info.downloadUrl, destDir, { token, timeout });
+  const dl = await downloadArchive(info.downloadUrl, destDir, { token, timeout, sha256: info.sha256 });
   if (!dl.ok) return { ok: false, reason: dl.reason, check: info };
 
   const res = upgradeFromArchive(dl.path, installDir, currentVersion, pkgName);
