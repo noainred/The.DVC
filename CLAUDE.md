@@ -12,12 +12,18 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
 
 ## 운영 환경 (성능 설계 시 반드시 고려)
 
-- vCenter: **현재 13개 DC/13개 vCenter, 향후 30개까지 확장 예정**. 글로벌 분산.
+- vCenter: **현재 약 28개 vCenter(~653 호스트·~5,800 VM), 향후 30+까지 확장 예정**. 글로벌 분산.
 - 사용자(포탈)는 **한국**에 위치. 일부 vCenter(예: **폴란드, 미국 동부**)는 **RTT 800ms 초과**.
 - 고지연·다수 vCenter 환경이므로:
   - **매 폴링 주기마다 이벤트 루프를 블로킹하는 동기 작업 금지**(예: 대량 SQLite write는 반드시 트랜잭션으로 묶기). 과거 IPAM 동기화가 무트랜잭션으로 6천 행 25초 블로킹 → 전체 UI 지연 발생, 트랜잭션으로 해결.
   - vCenter 수집은 **병렬 + per-vCenter 타임아웃**. 느린 1개가 전체 폴링을 막지 않게 한다.
   - 30개 vCenter·고RTT 확장을 가정해 수집/직렬화/DB write를 O(N)·논블로킹으로 유지.
+- 적용된 성능 메커니즘(회귀 방지 — 유지할 것):
+  - **수집 동시성 제한**(`store.collectPool`, `COLLECT_CONCURRENCY` 기본 8): 28개를 한꺼번에 수집하면 매 주기 SOAP 파싱이 몰려 CPU 순간 100%. 동시 개수를 제한해 평탄화.
+  - **폴러 재진입 가드**: `setInterval(()=>asyncFn())` 폴러는 이전 주기가 간격을 넘기면 중첩 실행돼 CPU 누적 악화. store.refresh/idrac.pollOnce/metrics.sampleOnce/nsx.refresh/gpu.pollOnce는 진행 중이면 이번 틱을 건너뛴다(새 폴러 추가 시 동일 가드 필수).
+  - **롤업 O(N)**(`withRollups`): 호스트/VM/DS/알람을 vCenter별 1회 그룹핑 후 조회(`pick`). 그룹마다 전체 재순회(O(N×vCenter)) 금지.
+  - **시계열 prune 스로틀**: 매 샘플 DELETE 스캔 금지 — N틱마다 1회(metrics·idrac 전력 적재 동일 패턴).
+  - 미해결 후속: node worker_threads로 동기 SQLite 쓰기/SOAP 파싱 오프로딩(스파이크 추가 절감).
 
 ## 사용자 선호 (반드시 준수)
 
@@ -52,3 +58,9 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
   - 릴리스 자산 베이스: `https://github.com/noainred/The.DVC/releases/download/downloads`
   - 게시 누락 = 자동 업그레이드 정지의 직접 원인이므로, 기능 PR 머지 후 릴리스 게시·CI 성공까지
     확인하고 사용자에게 보고한다.
+  - ⚠️ **자산 1000개 상한**: 롤링 `downloads` 릴리스는 GitHub 상한(릴리스당 1000 자산)에 걸리면
+    업로드가 422로 전부 실패한다(자동 업그레이드 정지). release.yml이 업로드 직전
+    `prune-assets.mjs`로 **최근 15개 버전만 유지**(`VERSIONS_KEEP`)하고 `versions.json`도 트리밍한다.
+    릴리스가 실패하면 CI 로그에서 `file_count limited to 1000` 여부를 먼저 확인할 것.
+  - 릴리스 폴링 확인: `versions.json` 의 `latest` 가 새 버전으로 바뀌는지 확인
+    (`https://github.com/noainred/The.DVC/releases/download/downloads/versions.json`).

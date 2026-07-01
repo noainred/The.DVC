@@ -75,7 +75,7 @@
 - **알림** — 임계치 규칙 → Slack/Webhook(상태전이·쿨다운).
 - **자동 업그레이드** — `versions.json` 모니터링 → 다운로드·적용·재시작(롤백 가능), 엣지 푸시.
 - **분산 수집** — 원격 데이터센터 에이전트 pull(전력 등) + 중앙 할당(iDRAC/IP 스캔).
-- **장애 내성** — 한 vCenter/매니저가 죽어도 포탈은 정상(해당만 `unreachable`). 고RTT·다수 vCenter 대비 **병렬 수집 + per-vCenter 타임아웃 + 논블로킹 DB write(트랜잭션)**.
+- **장애 내성 & 성능** — 한 vCenter/매니저가 죽어도 포탈은 정상(해당만 `unreachable`). 고RTT·다수 vCenter(현재 28, 향후 30+) 대비 **동시 수집 개수 제한(`COLLECT_CONCURRENCY`, 기본 8) + per-vCenter 타임아웃 + 폴러 재진입 가드(주기 초과 시 중첩 실행 방지) + O(N) 롤업 집계 + 논블로킹 DB write(트랜잭션·prune 스로틀)**로 매 주기 CPU 스파이크를 평탄화.
 
 ---
 
@@ -93,7 +93,7 @@
                               └─────────────────────────────┘           └───────────────┘
 ```
 
-- **server/** — `store.js`가 `POLL_INTERVAL_MS`마다 전 vCenter를 병렬 폴링해 정규화 스냅샷 유지. 느린/장애 vCenter가 전체를 막지 않음.
+- **server/** — `store.js`가 `POLL_INTERVAL_MS`마다 전 vCenter를 **동시성 제한(`COLLECT_CONCURRENCY`) 병렬** 폴링해 정규화 스냅샷 유지. 느린/장애 vCenter가 전체를 막지 않음. 이전 주기가 아직 진행 중이면 이번 틱은 건너뛰어(재진입 가드) 수집이 겹치지 않음. 롤업은 vCenter별 1회 그룹핑(O(N)).
   - `vcenter/soapClient.js` — vim25 SOAP(PropertyCollector/PerformanceManager): 호스트/VM 실측 메트릭, 온도/GPU/HBA, VM GPU 할당(vGPU/패스쓰루), 성능 시계열, VM 클론.
   - `vcenter/restClient.js` — vSphere Automation REST(7.0/8.0) 폴백.
   - `nsx/`, `idrac/`, `ipam/`, `gpu/`, `metrics/`, `provision/`, `proxy/`, `llm/`, `collector/`, `central/`, `agent/`, `upgrade/`, `auth/` — 각 하위 시스템.
@@ -134,7 +134,8 @@ npm run build && npm start   # API가 web/dist 서빙 → http://localhost:4000
 | `PORT` | `4000` | API 포트 |
 | `DATA_SOURCE` | `mock` | `mock`/`live`/`auto` |
 | `CONFIG_DIR` | `server/config` | 설정·DB 저장 위치(오프라인 설치 시 `/etc/vmware-portal` → 업그레이드해도 보존) |
-| `POLL_INTERVAL_MS` | `30000` | vCenter 폴링 주기(ms) |
+| `POLL_INTERVAL_MS` | `30000` | vCenter 폴링 주기(ms). 이전 주기가 끝나기 전이면 이번 틱은 건너뜀(재진입 가드) |
+| `COLLECT_CONCURRENCY` | `8` | 매 주기 동시 수집 vCenter 개수 상한(고RTT·다수 vCenter에서 CPU 스파이크 완화) |
 | `VC_SOAP_METRICS` | `true` | vim25 SOAP 실측 메트릭 수집 |
 | `VC_TLS_REJECT_UNAUTHORIZED` | `false` | 자체서명 인증서 거부 여부 |
 | `VC_TLS_MIN_VERSION` / `VC_TLS_CIPHERS` | `TLSv1` / `DEFAULT@SECLEVEL=0` | 레거시 vCenter TLS 호환 |
@@ -288,7 +289,7 @@ sudo ./install.sh --port 4000
 | `vmware-portal-offline-<버전>-cent9-x64.tar.gz` | CentOS Stream 9 표기 변형 |
 | `vmware-portal-win-<버전>-x64.zip` | Windows 설치(~49MB, 포탈/수집 에이전트) |
 | `vmware-portal-<버전>.tar.gz` | 업그레이드 번들(~9MB, 앱만) |
-| `versions.json` | 자동 업그레이드 메타데이터(`latest` + sha256) |
+| `versions.json` | 자동 업그레이드 메타데이터(`latest` + sha256). 롤링 릴리스 자산 1000개 상한을 피해 **최근 15개 버전만 유지**(`VERSIONS_KEEP`, CI가 오래된 버전 자산을 자동 prune) |
 | `*.sha256` | 무결성 검증 |
 
 자세한 내용: `packaging/README.md`, `packaging/offline/OFFLINE-INSTALL.md`, `packaging/windows/README-WINDOWS.md`.
