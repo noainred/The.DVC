@@ -45,6 +45,7 @@ const TOOLS = [
   { k: 'waste', icon: '♻️', label: '낭비 리소스', desc: '정지 VM·스냅샷·thin 회수가능·Tools 미설치' },
   { k: 'esxitemp', icon: '🌡️', label: 'ESXi 온도', desc: '호스트/클러스터/법인별 현재 온도 + 최근 5년 추이' },
   { k: 'forecast', icon: '🔮', label: '용량 추세/예측', desc: '데이터스토어 증가율·가득 찰 예상일' },
+  { k: 'dsusage', icon: '💽', label: 'vCenter별 스토리지', desc: 'DataCenter/vCenter별 데이터스토어 연결 현황 · 가용/전체 용량' },
   { k: 'guestos', icon: '🐧', label: 'Guest OS 종류/버전', desc: 'OS·버전별 VM 수 · 전체/법인별 · 검색' },
   { k: 'real-os', icon: '🔎', label: '실제 OS 확인(게스트)', desc: '게스트 OS에서 실제 설치 OS(/etc/os-release 등) 읽기 · ESXi 보고와 불일치 탐지 · 주기 스캔 · CSV' },
   { k: 'thinvms', icon: '💧', label: 'Thin VM 찾기', desc: 'Thin 프로비저닝 VM · 회수 가능 용량(추정)' },
@@ -114,10 +115,11 @@ export default function SpecialTools() {
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
   useEffect(() => { fetchJson('/auth/me').then((r) => setIsAdmin(r.user?.role === 'admin')).catch(() => {}); }, []);
-  // 그리드(메뉴 목록)로 돌아올 때마다 상위 사용 기능을 갱신.
+  // 그리드(메뉴 목록)로 돌아올 때마다 사용 횟수를 갱신. 전체 메뉴를 클릭순으로 정렬하므로
+  // 상위 몇 개가 아니라 전체 도구 수를 덮을 만큼 넉넉히 가져온다(현재 42개 → 200).
   useEffect(() => {
     if (tool) return;
-    fetchJson('/tool-usage/top', { n: 12 }).then((r) => setTopKeys(r.top || [])).catch(() => {});
+    fetchJson('/tool-usage/top', { n: 200 }).then((r) => setTopKeys(r.top || [])).catch(() => {});
   }, [tool]);
   // '자주 쓰는 기능' 카드 수를 메뉴 그리드 한 줄에 들어가는 칸 수에 맞춘다(화면폭 자동, vc-grid=minmax 330px·gap 16px).
   useEffect(() => {
@@ -141,10 +143,15 @@ export default function SpecialTools() {
     ? base.filter((t) => t.label.toLowerCase().startsWith(ql) || t.label.toLowerCase().includes(ql) || (t.desc || '').toLowerCase().includes(ql))
     : base;
   // 상위 키를 실제 도구로 매핑(노출 불가/비활성은 제외). 검색 중에는 추천을 숨긴다.
+  const countOf = new Map(topKeys.map((u) => [u.k, u.count]));
   const favorites = ql ? [] : topKeys
     .map((u) => ({ ...base.find((t) => t.k === u.k), count: u.count }))
     .filter((t) => t && t.k && !t.disabled)
     .slice(0, favCount); // 한 줄에 들어가는 만큼만(화면폭 자동)
+  // 전체 메뉴를 클릭(사용) 많은 순으로 정렬한다. 동점·미사용(0회)은 원래 순서를 유지(안정 정렬).
+  // 비활성(준비 중) 카드는 항상 맨 뒤로 보낸다.
+  const shownSorted = shown.slice().sort((a, b) =>
+    (a.disabled ? 1 : 0) - (b.disabled ? 1 : 0) || (countOf.get(b.k) || 0) - (countOf.get(a.k) || 0));
   return (
     <>
       <div className="section-title" style={{ marginTop: 0 }}>🛠️ 특수 기능</div>
@@ -175,9 +182,12 @@ export default function SpecialTools() {
           </div>
         </div>
       )}
+      <div className="muted" style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>
+        📋 전체 메뉴 <span style={{ fontWeight: 400 }}>· 클릭(사용) 많은 순 정렬</span>
+      </div>
       <div className="vc-grid" ref={gridRef}>
         {shown.length === 0 && <div className="muted" style={{ gridColumn: '1 / -1', padding: 24 }}>“{menuQ}”에 해당하는 메뉴가 없습니다.</div>}
-        {shown.map((t) => (
+        {shownSorted.map((t) => (
           <div key={t.k} className="card vc-card"
             style={{
               cursor: t.disabled ? 'not-allowed' : 'pointer',
@@ -186,7 +196,10 @@ export default function SpecialTools() {
             }}
             onClick={t.disabled ? undefined : () => openTool(t.k)}
             title={t.disabled ? (t.comingSoon ? '준비 중 (곧 제공)' : '비활성화됨 (관리자 전용)') : `바로가기: #/tools/${t.k}`}>
-            <div style={{ fontSize: 30, filter: t.disabled ? 'grayscale(1)' : 'none' }}>{t.icon}</div>
+            <div className="flex between" style={{ alignItems: 'flex-start' }}>
+              <div style={{ fontSize: 30, filter: t.disabled ? 'grayscale(1)' : 'none' }}>{t.icon}</div>
+              {countOf.get(t.k) > 0 && <span className="badge gray" style={{ fontSize: 11 }} title="전체 사용자 누적 실행 횟수">{countOf.get(t.k)}회</span>}
+            </div>
             <div className="vc-name" style={{ marginTop: 8, ...(t.danger && !t.disabled ? { color: 'var(--red)' } : {}) }}>{t.label}</div>
             <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>{t.desc}</div>
             <div className="vc-foot"><span className="muted">{t.disabled ? (t.comingSoon ? '준비 중' : '비활성화됨') : '클릭하여 실행'}</span><span className="muted">{t.disabled ? '' : '→'}</span></div>
@@ -201,7 +214,7 @@ function ToolPanel({ tool, onBack, isAdmin }) {
   const meta = TOOLS.find((t) => t.k === tool);
   const [scope, setScope] = useState('');
   const { data: vcList } = usePolling('/vcenters', {}, 60_000);
-  const scoped = ['ipam', 'dupip', 'vmtools', 'snapshots', 'hba', 'gpu', 'licenses', 'esxi', 'hardware', 'powermap', 'guestos', 'real-os', 'thinvms', 'capacity', 'waste', 'esxitemp', 'forecast'].includes(tool);
+  const scoped = ['ipam', 'dupip', 'vmtools', 'snapshots', 'hba', 'gpu', 'licenses', 'esxi', 'hardware', 'powermap', 'guestos', 'real-os', 'thinvms', 'capacity', 'waste', 'esxitemp', 'forecast', 'dsusage'].includes(tool);
 
   return (
     <>
@@ -226,6 +239,7 @@ function ToolPanel({ tool, onBack, isAdmin }) {
       {tool === 'waste' && <Waste scope={scope} />}
       {tool === 'esxitemp' && <EsxiTemp scope={scope} />}
       {tool === 'forecast' && <Forecast scope={scope} />}
+      {tool === 'dsusage' && <DatastoreUsage scope={scope} />}
       {tool === 'guestos' && <GuestOs scope={scope} />}
       {tool === 'real-os' && <RealOs scope={scope} />}
       {tool === 'thinvms' && <ThinVms scope={scope} />}
@@ -3535,6 +3549,154 @@ function Snapshots({ scope }) {
         : <DataTable columns={cols} rows={data.items} initialSort={{ key: 'snapshotSizeGB', dir: 'desc' }} />}
       {detail && <EntityDetail type="vm" item={detail} onClose={() => setDetail(null)} />}
     </>
+  );
+}
+
+// vCenter별/DataCenter별 데이터스토어(스토리지) 용량 현황. 각 vCenter에 어떤 스토리지가
+// 연결돼 있고 전체/여유 용량이 얼마인지 한눈에. 1차 DataCenter → 2차 vCenter(스토리지는
+// baremetal 개념이 없어 vCenter 하위만). /datastores(스냅샷)를 vCenter/DataCenter로 그룹핑.
+function dsFmtGB(gb) {
+  const g = Number(gb) || 0;
+  if (g >= 1000) { const t = g / 1000; return `${t % 1 === 0 ? t : t.toFixed(1)} TB`; } // 1000GB=1TB(사용자 선호)
+  return `${Math.round(g)} GB`;
+}
+function dsSum(arr, k) { return arr.reduce((a, d) => a + (Number(d[k]) || 0), 0); }
+function dsUsageColor(pct) { return pct >= 90 ? 'var(--red)' : pct >= 75 ? 'var(--amber)' : 'var(--green)'; }
+
+// 한 그룹(vCenter 또는 DataCenter 소계)의 용량 바 + 요약.
+function DsCapBar({ capacityGB, freeGB }) {
+  const cap = capacityGB || 0, free = freeGB || 0, used = Math.max(0, cap - free);
+  const pct = cap > 0 ? Math.round((used / cap) * 100) : 0;
+  return (
+    <div style={{ minWidth: 220 }}>
+      <div className="flex between" style={{ fontSize: 12, marginBottom: 3 }}>
+        <span className="muted">사용 {dsFmtGB(used)} / 전체 {dsFmtGB(cap)}</span>
+        <b style={{ color: dsUsageColor(pct) }}>{pct}%</b>
+      </div>
+      <div style={{ height: 7, borderRadius: 4, background: 'rgba(148,163,184,.15)', overflow: 'hidden' }}>
+        <div style={{ height: '100%', width: `${Math.min(100, pct)}%`, background: dsUsageColor(pct) }} />
+      </div>
+      <div className="muted" style={{ fontSize: 11.5, marginTop: 3 }}>여유 {dsFmtGB(free)}</div>
+    </div>
+  );
+}
+
+// 한 vCenter의 데이터스토어 표(이름 정렬).
+function DsVcTable({ items }) {
+  const sorted = items.slice().sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { numeric: true }));
+  return (
+    <table className="data-table" style={{ width: '100%', fontSize: 12.5, marginTop: 8 }}>
+      <thead><tr>
+        <th style={{ textAlign: 'left' }}>데이터스토어</th><th>유형</th>
+        <th style={{ textAlign: 'right' }}>전체</th><th style={{ textAlign: 'right' }}>사용</th>
+        <th style={{ textAlign: 'right' }}>여유</th><th style={{ minWidth: 120 }}>사용률</th>
+      </tr></thead>
+      <tbody>{sorted.map((d) => {
+        const pct = d.usagePct != null ? d.usagePct : (d.capacityGB > 0 ? Math.round((d.usedGB || 0) / d.capacityGB * 100) : 0);
+        return (
+          <tr key={d.id || `${d.vcenterId}:${d.name}`}>
+            <td><b>{d.name}</b></td>
+            <td className="center"><span className="badge gray" style={{ fontSize: 11 }}>{d.type || '—'}</span></td>
+            <td style={{ textAlign: 'right' }}>{dsFmtGB(d.capacityGB)}</td>
+            <td style={{ textAlign: 'right' }}>{dsFmtGB(d.usedGB)}</td>
+            <td style={{ textAlign: 'right', color: dsUsageColor(pct) }}>{dsFmtGB(d.freeGB)}</td>
+            <td>
+              <div style={{ height: 6, borderRadius: 4, background: 'rgba(148,163,184,.15)', overflow: 'hidden' }} title={`${pct}%`}>
+                <div style={{ height: '100%', width: `${Math.min(100, pct)}%`, background: dsUsageColor(pct) }} />
+              </div>
+            </td>
+          </tr>
+        );
+      })}</tbody>
+    </table>
+  );
+}
+
+function DatastoreUsage({ scope }) {
+  const { loading, data, error } = usePolling('/datastores', {}, 15_000);
+  const { data: vcList } = usePolling('/vcenters', {}, 60_000);
+  const [dc, setDc] = useState({ datacenters: [], assign: {} });
+  const [view, setView] = useState('dc'); // 'dc'(1차 DataCenter) | 'vc'(vCenter 평면)
+  const [q, setQ] = useState('');
+  useEffect(() => { fetchJson('/admin/datacenters').then((r) => setDc({ datacenters: r.datacenters || [], assign: r.assign || {} })).catch(() => {}); }, []);
+  if (loading && !data) return <Loading />;
+  if (error) return <ErrorBox message={error} />;
+  const vcName = new Map((vcList || []).map((v) => [v.id, v.name || v.id]));
+  const dcName = new Map((dc.datacenters || []).map((x) => [x.id, x.name || x.id]));
+  const assign = dc.assign || {};
+  const dcOfVc = (vcId) => assign[String(vcId || '')] || '';
+  const ql = q.trim().toLowerCase();
+  let list = (data || []).filter((d) => !scope || d.vcenterId === scope);
+  if (ql) list = list.filter((d) => [d.name, d.type, d.vcenterId].some((x) => String(x || '').toLowerCase().includes(ql)));
+
+  const totCap = dsSum(list, 'capacityGB'), totFree = dsSum(list, 'freeGB'), totUsed = Math.max(0, totCap - totFree);
+  const totPct = totCap > 0 ? Math.round(totUsed / totCap * 100) : 0;
+  const vcIds = new Set(list.map((d) => d.vcenterId));
+
+  // vCenter 단위 그룹.
+  const byVc = new Map();
+  for (const d of list) { const k = d.vcenterId || '(미지정)'; if (!byVc.has(k)) byVc.set(k, []); byVc.get(k).push(d); }
+  const vcBlocks = [...byVc.entries()].map(([id, items]) => ({
+    id, name: vcName.get(id) || id, items,
+    capacityGB: dsSum(items, 'capacityGB'), freeGB: dsSum(items, 'freeGB'),
+  })).sort((a, b) => b.capacityGB - a.capacityGB);
+
+  return (
+    <div>
+      <div className="kpis" style={{ marginBottom: 14 }}>
+        <Card label="전체 용량" value={dsFmtGB(totCap)} accent="var(--accent)" />
+        <Card label="사용" value={`${dsFmtGB(totUsed)} (${totPct}%)`} accent={dsUsageColor(totPct)} />
+        <Card label="여유" value={dsFmtGB(totFree)} accent="var(--green)" />
+        <Card label="데이터스토어" value={list.length} meta={`${vcIds.size} vCenter`} />
+      </div>
+
+      <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 12 }}>
+        <div className="flex gap">
+          <button className={view === 'dc' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setView('dc')}>🏢 DataCenter별</button>
+          <button className={view === 'vc' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setView('vc')}>🖥 vCenter별</button>
+        </div>
+        <input className="input" placeholder="데이터스토어/유형/vCenter 검색" value={q} onChange={(e) => setQ(e.target.value)} style={{ maxWidth: 260 }} />
+      </div>
+
+      {list.length === 0 && <div className="card" style={{ padding: 16 }}><span className="muted">표시할 데이터스토어가 없습니다.</span></div>}
+
+      {view === 'vc' && vcBlocks.map((vc) => (
+        <div key={vc.id} className="card" style={{ padding: 14, marginBottom: 14 }}>
+          <div className="flex between wrap gap" style={{ alignItems: 'center' }}>
+            <div style={{ fontWeight: 700, fontSize: 15 }}>🖥 {vc.name} <span className="muted" style={{ fontWeight: 400, fontSize: 13 }}>· {vc.items.length}개 · {dcName.get(dcOfVc(vc.id)) || dcOfVc(vc.id) || '법인 미지정'}</span></div>
+            <DsCapBar capacityGB={vc.capacityGB} freeGB={vc.freeGB} />
+          </div>
+          <DsVcTable items={vc.items} />
+        </div>
+      ))}
+
+      {view === 'dc' && (() => {
+        // 1차: DataCenter(vCenter의 소속 법인). 2차: vCenter.
+        const byDc = new Map();
+        for (const vc of vcBlocks) { const k = dcOfVc(vc.id) || '__unassigned__'; if (!byDc.has(k)) byDc.set(k, []); byDc.get(k).push(vc); }
+        const dcBlocks = [...byDc.entries()].map(([id, vcs]) => ({
+          id, name: id === '__unassigned__' ? '⚠ 법인 미지정' : (dcName.get(id) || id), vcs,
+          capacityGB: dsSum(vcs, 'capacityGB'), freeGB: dsSum(vcs, 'freeGB'),
+        })).sort((a, b) => (a.id === '__unassigned__' ? 1 : 0) - (b.id === '__unassigned__' ? 1 : 0) || b.capacityGB - a.capacityGB);
+        return dcBlocks.map((d) => (
+          <div key={d.id} className="card" style={{ padding: 14, marginBottom: 16, borderLeft: '3px solid var(--accent, #60a5fa)' }}>
+            <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 6 }}>
+              <div style={{ fontWeight: 800, fontSize: 16 }}>🏢 {d.name} <span className="muted" style={{ fontWeight: 400, fontSize: 13 }}>· {d.vcs.length} vCenter · {dsSum(d.vcs.flatMap((v) => v.items), 'capacityGB') ? d.vcs.reduce((a, v) => a + v.items.length, 0) : 0}개 데이터스토어</span></div>
+              <DsCapBar capacityGB={d.capacityGB} freeGB={d.freeGB} />
+            </div>
+            {d.vcs.map((vc) => (
+              <div key={vc.id} style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid rgba(148,163,184,.15)' }}>
+                <div className="flex between wrap gap" style={{ alignItems: 'center' }}>
+                  <div style={{ fontWeight: 600, fontSize: 13.5 }}>🖥 {vc.name} <span className="muted" style={{ fontWeight: 400 }}>· {vc.items.length}개</span></div>
+                  <DsCapBar capacityGB={vc.capacityGB} freeGB={vc.freeGB} />
+                </div>
+                <DsVcTable items={vc.items} />
+              </div>
+            ))}
+          </div>
+        ));
+      })()}
+    </div>
   );
 }
 
