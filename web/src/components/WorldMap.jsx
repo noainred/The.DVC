@@ -68,6 +68,29 @@ export default function WorldMap({ sites = [], onSelect, height = 420, onResizeE
     drag.current = null;
   };
 
+  // 같은/비슷한 지역에 여러 사이트가 있으면 마커가 겹친다. 좌표를 약 1°로 반올림해 군집을 만들고,
+  // 군집 내 각 마커를 원형으로 소량 분산(offset)해 겹치지 않게 한다(원위치는 가는 선으로 연결).
+  const spread = (() => {
+    const clusters = new Map();
+    for (const s of sites) {
+      const loc = s.location || {};
+      if (loc.lon == null || loc.lat == null) continue;
+      const k = `${Math.round(loc.lon)}|${Math.round(loc.lat)}`;
+      if (!clusters.has(k)) clusters.set(k, []);
+      clusters.get(k).push(s.id);
+    }
+    const m = new Map();
+    for (const ids of clusters.values()) ids.forEach((id, i) => m.set(id, { idx: i, total: ids.length }));
+    return m;
+  })();
+  const offsetOf = (id) => {
+    const c = spread.get(id);
+    if (!c || c.total <= 1) return [0, 0];
+    const R = 10 + c.total * 1.6;                 // 군집이 클수록 반경 약간 키움
+    const ang = (c.idx / c.total) * Math.PI * 2 - Math.PI / 2; // 위쪽(12시)부터 시계방향
+    return [Math.cos(ang) * R, Math.sin(ang) * R];
+  };
+
   return (
     <div className="card map-wrap" style={{ padding: 8 }}>
       {/* map height controls (saved server-side, shared by all users) */}
@@ -108,6 +131,8 @@ export default function WorldMap({ sites = [], onSelect, height = 420, onResizeE
           const loc = s.location || {};
           if (loc.lon == null || loc.lat == null) return null;
           const st = markerStyle(s);
+          const [dx, dy] = offsetOf(s.id);
+          const clustered = dx !== 0 || dy !== 0;
           return (
             <Marker
               key={s.id}
@@ -117,14 +142,19 @@ export default function WorldMap({ sites = [], onSelect, height = 420, onResizeE
               onMouseLeave={() => setTip(null)}
               onClick={() => { if (!moved.current) { setTip(null); setPicked(s); } }}
             >
-              {/* decorative pulse + marker — ignore pointer events so hover is stable */}
-              <circle r={st.r + 5} fill={st.ring} opacity={0.18} style={{ pointerEvents: 'none' }}>
-                <animate attributeName="r" from={st.r + 3} to={st.r + 11} dur="2.2s" repeatCount="indefinite" />
-                <animate attributeName="opacity" from="0.35" to="0" dur="2.2s" repeatCount="indefinite" />
-              </circle>
-              <circle r={st.r} fill={st.fill} stroke="#0a0e17" strokeWidth={1.2} style={{ pointerEvents: 'none' }} />
-              {/* larger transparent hit area so hovering (not clicking) reliably shows info */}
-              <circle r={15} fill="transparent" style={{ cursor: 'pointer' }} />
+              {/* 겹침 방지: 같은 지역 군집이면 원위치에서 소량 이동. 원위치는 가는 선으로 연결. */}
+              {clustered && <line x1={0} y1={0} x2={dx} y2={dy} stroke={st.ring} strokeWidth={0.8} strokeDasharray="1.5 1.5" opacity={0.5} style={{ pointerEvents: 'none' }} />}
+              {clustered && <circle r={1.6} fill={st.ring} opacity={0.6} style={{ pointerEvents: 'none' }} />}
+              <g transform={clustered ? `translate(${dx}, ${dy})` : undefined}>
+                {/* decorative pulse + marker — ignore pointer events so hover is stable */}
+                <circle r={st.r + 5} fill={st.ring} opacity={0.18} style={{ pointerEvents: 'none' }}>
+                  <animate attributeName="r" from={st.r + 3} to={st.r + 11} dur="2.2s" repeatCount="indefinite" />
+                  <animate attributeName="opacity" from="0.35" to="0" dur="2.2s" repeatCount="indefinite" />
+                </circle>
+                <circle r={st.r} fill={st.fill} stroke="#0a0e17" strokeWidth={1.2} style={{ pointerEvents: 'none' }} />
+                {/* larger transparent hit area so hovering (not clicking) reliably shows info */}
+                <circle r={15} fill="transparent" style={{ cursor: 'pointer' }} />
+              </g>
             </Marker>
           );
         })}
