@@ -2,10 +2,24 @@ import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   listDatacenters, getDatacenterAssign, addDatacenter, updateDatacenter, removeDatacenter,
-  setVcenterDatacenter, setVcenterDatacenterMany, datacenterOfVcenter, resetDatacenters,
+  setVcenterDatacenter, setVcenterDatacenterMany, datacenterOfVcenter, resetDatacenters, ensureDatacenter,
 } from '../src/datacenter/store.js';
 
 beforeEach(() => resetDatacenters());
+
+test('ensureDatacenter: 없으면 생성, 있으면 no-op(수집 서버 자동 등록용)', () => {
+  const r1 = ensureDatacenter({ id: 'OC1', name: 'OC1' });
+  assert.equal(r1.ok, true);
+  assert.equal(listDatacenters().find((d) => d.id === 'oc1').name, 'OC1'); // id 정규화(소문자)
+  // 두 번째 호출은 no-op(중복 생성 없음).
+  const r2 = ensureDatacenter({ id: 'oc1', name: 'OC1' });
+  assert.equal(r2.ok, true);
+  assert.equal(r2.existed, true);
+  assert.equal(listDatacenters().filter((d) => d.id === 'oc1').length, 1);
+  // name 없으면 id를 이름으로.
+  ensureDatacenter({ id: 'nb' });
+  assert.equal(listDatacenters().find((d) => d.id === 'nb').name, 'nb');
+});
 
 test('addDatacenter: id 정규화/검증 + 중복 거부', () => {
   assert.equal(addDatacenter({ id: 'Seoul-DC1', name: '서울 IDC', region: 'KR' }).ok, true);
