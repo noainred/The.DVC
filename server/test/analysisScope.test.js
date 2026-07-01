@@ -43,3 +43,18 @@ test('법인 dc + baremetal 조합 → 그 법인의 baremetal만', () => {
   assert.equal(serverInScope(bmA, { datacenterId: 'corpA', baremetal: true }, assign), true);
   assert.equal(serverInScope(virtA, { datacenterId: 'corpA', baremetal: true }, assign), false); // 가상화 제외
 });
+
+test('mappedVcenterId: vcenterId가 비어도 서비스태그 매핑 vCenter로 가상화 분류', () => {
+  // 스캔 등록된 iDRAC 서버(vcenterId 없음)지만 서비스태그가 vc1의 ESXi 호스트와 일치 → mappedVcenterId=vc1.
+  const mapped = { id: 'm', vcenterId: '', mappedVcenterId: 'vc1' };
+  const assign2 = { vc1: 'corpA' };
+  // vCenter(vc1) 선택 시 이 서버가 가상화 장비로 잡힘.
+  assert.equal(serverInScope(mapped, { vcenterId: 'vc1' }, assign2), true);
+  // Baremetal 선택 시 제외(가상화이므로).
+  assert.equal(serverInScope(mapped, { baremetal: true }, assign2), false);
+  // 법인(dc)은 매핑 vCenter의 소속 법인으로 해석.
+  assert.equal(serverInScope(mapped, { datacenterId: 'corpA' }, assign2), true);
+  // 명시 datacenterId가 있으면 그게 우선(매핑보다).
+  const mappedWithDc = { id: 'm2', vcenterId: '', mappedVcenterId: 'vc1', datacenterId: 'corpB' };
+  assert.equal(serverInScope(mappedWithDc, { datacenterId: 'corpB' }, assign2), true);
+});
