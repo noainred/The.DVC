@@ -40,6 +40,7 @@ async function pollOnceInner() {
   const db = await getDb();
   const ts = Date.now();
   const results = [];
+  const samples = []; // 전력 샘플을 모아 폴 종료 후 단일 트랜잭션으로 적재(서버 수만큼 fsync 방지).
   await Promise.all(servers.map(async (s) => {
     try {
       if (s.type === 'ome') {
@@ -47,13 +48,13 @@ async function pollOnceInner() {
         const { devices, usedMetricService, count } = await fetchOmeDevices(s);
         let measured = 0;
         for (const d of devices) {
-          if (d.watts != null) { db.insert(dbKey(s.id, d), d.watts, ts); measured++; }
+          if (d.watts != null) { samples.push({ serverId: dbKey(s.id, d), watts: d.watts, ts }); measured++; }
         }
         setOmeDevices(s.id, devices, { usedMetricService });
         results.push({ id: s.id, name: s.name, type: 'ome', devices: count, measured, metric: usedMetricService ? 'powermanager' : 'inventory' });
       } else {
         const r = await fetchPower(s);
-        db.insert(s.id, r.watts, ts);
+        samples.push({ serverId: s.id, watts: r.watts, ts });
         // 온도센서 + CPU 사용량을 매 주기(1분) 수집해 시계열에 적재(차트용, 격리).
         try { const sn = await fetchSensors(s); pushSensorSample(s.id, { t: ts, cpuUsagePct: sn.cpuUsagePct, temps: sn.temps, fans: sn.fans }); } catch { /* 센서 실패는 전력 수집과 무관 */ }
         // Refresh rich inventory on a slow cadence (best-effort, non-blocking).
@@ -67,6 +68,9 @@ async function pollOnceInner() {
       results.push({ id: s.id, name: s.name, type: s.type || 'idrac', error: d.message });
     }
   }));
+  // 모든 서버 폴 후 한 트랜잭션으로 배치 적재(insertMany 없으면 개별 insert 폴백).
+  try { if (db.insertMany) db.insertMany(samples); else for (const sm of samples) db.insert(sm.serverId, sm.watts, sm.ts); }
+  catch (e) { console.warn('[idrac] 전력 적재 실패:', e.message); }
   // Retention pruning
   if (config.idrac.retentionDays > 0) {
     try { db.prune(ts - config.idrac.retentionDays * 86_400_000); } catch { /* best effort */ }

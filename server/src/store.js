@@ -155,12 +155,23 @@ class Store {
     this.vcLast = new Map();  // vcId -> last collection attempt (ms)
   }
 
-  async refresh() {
-    // 재진입 방지: 이전 수집이 아직 진행 중이면 이번 틱은 건너뛴다. 고RTT·다수 vCenter에서
-    // 한 주기가 pollIntervalMs를 초과하면 setInterval이 겹쳐 실행돼 수집이 중첩되고 CPU가
-    // 누적 악화되던 문제를 막는다(스킵해도 캐시 기반 스냅샷은 계속 서빙됨).
-    if (this._refreshing) return;
+  async refresh(opts = {}) {
+    const force = !!opts.force;
+    // 재진입 방지: 스케줄 틱(force 아님)은 이전 수집이 진행 중이면 건너뛴다(중첩→CPU 누적 악화
+    // 방지, 스킵해도 캐시 스냅샷은 계속 서빙). 수동 강제(force)는 진행 중 refresh 완료를 기다린 뒤
+    // 새 refresh를 한 번 더 실행해 '지금 수집' 강제 플래그가 모든 vCenter에 반드시 반영되게 한다.
+    if (this._refreshing) {
+      if (!force) return undefined;
+      try { await this._inflight; } catch { /* */ }
+      return this.refresh({ force: true });
+    }
     this._refreshing = true;
+    this._inflight = this._refreshBody();
+    try { await this._inflight; } finally { this._refreshing = false; this._inflight = null; }
+    return undefined;
+  }
+
+  async _refreshBody() {
     try {
       // 긴급중단(2인 승인) 활성 시 모든 수집 정지 — 마지막 스냅샷은 그대로 유지.
       if (isStopped()) return;
@@ -263,7 +274,9 @@ class Store {
           merged.alarms.push(...s.alarms);
         } else if (c && !c.ok) {
           merged.collectionErrors.push({ vcenterId: vc.id, name: vc.name, ...c.err, at: c.at, fallback: isAuto });
-          if (isAuto) pushSite(merged, getMock(), vc.id);
+          // auto 폴백: 목 데이터에 이 vc.id가 있으면 그걸로 채우고, 없으면(목 id가 실제 config와
+          // 불일치) 최소한 unreachable 엔트리라도 넣어 vCenter가 스냅샷에서 사라지지 않게 한다.
+          if (isAuto && pushSite(merged, getMock(), vc.id)) { /* pushed mock site */ }
           else merged.vcenters.push({ id: vc.id, name: vc.name, location: vc.location, status: 'unreachable', error: c.err.message, hint: c.err.hint, code: c.err.code });
         } else {
           merged.vcenters.push({ id: vc.id, name: vc.name, location: vc.location, status: 'pending' });
@@ -277,8 +290,6 @@ class Store {
     } catch (err) {
       this.lastError = err.message;
       console.error('[store] refresh failed:', err.message);
-    } finally {
-      this._refreshing = false;
     }
   }
 
@@ -307,6 +318,8 @@ class Store {
   }
 }
 
+// 목 스냅샷에서 vcId에 해당하는 사이트를 target에 복사. vc를 찾았으면 true(호출부가 폴백
+// 엔트리 삽입 여부를 판단).
 function pushSite(target, source, vcId) {
   const vc = source.vcenters.find((v) => v.id === vcId);
   if (vc) target.vcenters.push(vc);
@@ -315,6 +328,7 @@ function pushSite(target, source, vcId) {
   target.datastores.push(...source.datastores.filter((d) => d.vcenterId === vcId));
   target.networks.push(...source.networks.filter((n) => n.vcenterId === vcId));
   target.alarms.push(...source.alarms.filter((a) => a.vcenterId === vcId));
+  return !!vc;
 }
 
 function emptySnapshot() {

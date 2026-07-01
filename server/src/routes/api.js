@@ -1556,7 +1556,8 @@ api.get('/summary', (req, res) => {
   // OS allocation table can be filtered by power state and VM/template.
   const osVms = vms.filter((v) => {
     if (req.query.power === 'on' && v.powerState !== 'POWERED_ON') return false;
-    if (req.query.power === 'off' && v.powerState !== 'POWERED_OFF') return false;
+    // 'off' = POWERED_ON이 아님(정지+일시중단 포함) — vmsPoweredOff·guest-os 엔드포인트와 정의 통일.
+    if (req.query.power === 'off' && v.powerState === 'POWERED_ON') return false;
     if (req.query.kind === 'template' && !v.template) return false;
     if (req.query.kind === 'vm' && v.template) return false;
     return true;
