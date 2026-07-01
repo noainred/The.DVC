@@ -3325,11 +3325,13 @@ function Bar({ frac, color = 'var(--accent-2,#22d3ee)' }) {
 
 function PowerMap({ scope }) {
   const { loading, data, error } = useTool('/insights/power-breakdown', scope ? { vcenterId: scope } : {});
-  const [view, setView] = useState('vcenter'); // vcenter | model | region | server
+  const { data: vcList } = usePolling('/vcenters', {}, 60_000);
+  const [view, setView] = useState('datacenter'); // datacenter | vcenter | model | region | server
   const [q, setQ] = useState('');
   if (loading) return <Loading />;
   if (error) return <ErrorBox message={error} />;
   if (!data) return null;
+  const vcName = new Map((vcList || []).map((v) => [v.id, v.name || v.id]));
   const cur = data.config?.currency || '₩';
   const won = (v) => `${cur}${Number(v || 0).toLocaleString()}`;
   const maxW = Math.max(1, ...(data.byVcenter || []).map((r) => r.watts), ...(data.byModel || []).map((r) => r.watts));
@@ -3350,7 +3352,7 @@ function PowerMap({ scope }) {
     || s.name.toLowerCase().includes(term) || (s.model || '').toLowerCase().includes(term)
     || (s.serviceTag || '').toLowerCase().includes(term) || (s.vcenterId || '').toLowerCase().includes(term));
 
-  const TABS = [['vcenter', `법인별 (${(data.byVcenter || []).length})`], ['model', `모델별 (${(data.byModel || []).length})`], ['region', `지역별 (${(data.byRegion || []).length})`], ['server', `서버 (${data.totalServers})`]];
+  const TABS = [['datacenter', `DataCenter별 (${(data.byDatacenter || []).length})`], ['vcenter', `vCenter별 (${(data.byVcenter || []).length})`], ['model', `모델별 (${(data.byModel || []).length})`], ['region', `지역별 (${(data.byRegion || []).length})`], ['server', `서버 (${data.totalServers})`]];
 
   return (
     <>
@@ -3375,6 +3377,52 @@ function PowerMap({ scope }) {
         </div>
         <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={csv}>CSV</button>
       </div>
+
+      {view === 'datacenter' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {(data.byDatacenter || []).map((d) => {
+            const dcMax = Math.max(1, ...d.children.map((c) => c.watts));
+            return (
+              <div key={d.datacenterId || '__nodc__'} className="card" style={{ padding: 14, borderLeft: '3px solid var(--accent, #60a5fa)' }}>
+                <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 8 }}>
+                  <div style={{ fontWeight: 800, fontSize: 16 }}>
+                    🏢 {d.datacenterName}
+                    <span className="muted" style={{ fontWeight: 400, fontSize: 13, marginLeft: 8 }}>· {d.servers}대 · {d.children.length}개 (vCenter/Baremetal)</span>
+                  </div>
+                  <div className="flex gap" style={{ alignItems: 'center', fontSize: 13 }}>
+                    <b style={{ color: 'var(--amber)' }}>{fmtWatts(d.watts)}</b>
+                    <span className="muted">월 {won(d.costMonth)} · 연 {won(d.costYear)}</span>
+                  </div>
+                </div>
+                <table style={{ width: '100%', fontSize: 13 }}>
+                  <thead><tr>
+                    <th style={{ textAlign: 'left' }}>2차 분류</th><th style={{ textAlign: 'right' }}>서버</th>
+                    <th style={{ textAlign: 'right' }}>현재 전력</th><th style={{ width: 160 }}>비중</th>
+                    <th style={{ textAlign: 'right' }}>월 요금</th><th style={{ textAlign: 'right' }}>연 요금</th>
+                  </tr></thead>
+                  <tbody>
+                    {d.children.map((c) => (
+                      <tr key={c.key || c.name}>
+                        <td>
+                          {c.type === 'baremetal'
+                            ? <span className="badge amber" title="이 법인엔 속하지만 어떤 vCenter에도 속하지 않는 물리 서버">🔩 Baremetal</span>
+                            : <><span className="badge blue" style={{ marginRight: 6 }}>vCenter</span><b>{vcName.get(c.vcenterId) || c.vcenterId}</b></>}
+                        </td>
+                        <td style={{ textAlign: 'right' }}>{c.servers}</td>
+                        <td style={{ textAlign: 'right' }}><b>{fmtWatts(c.watts)}</b></td>
+                        <td><Bar frac={c.watts / dcMax} color={c.type === 'baremetal' ? 'var(--amber)' : undefined} /></td>
+                        <td style={{ textAlign: 'right' }}>{won(c.costMonth)}</td>
+                        <td style={{ textAlign: 'right' }} className="muted">{won(c.costYear)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            );
+          })}
+          {!(data.byDatacenter || []).length && <div className="card" style={{ padding: 16 }}><span className="muted">측정된 전력이 없습니다.</span></div>}
+        </div>
+      )}
 
       {view === 'vcenter' && (
         <div className="table-wrap" style={{ maxHeight: '60vh' }}>
