@@ -2177,7 +2177,7 @@ function ServerInfoByVcenter({ vc, onServer }) {
           <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 10 }}>{g.id === '__unmapped__' ? '⚠ ' : '🏢 '}{g.name} <span className="muted" style={{ fontWeight: 400 }}>· {g.list.length}대</span></div>
           <table className="data-table" style={{ width: '100%', fontSize: 13 }}>
             <thead><tr>
-              <th style={{ textAlign: 'left' }}>이름</th><th>유형</th><th style={{ textAlign: 'left' }}>주소</th><th style={{ textAlign: 'left' }}>서비스태그</th><th>상태</th>
+              <th style={{ textAlign: 'left' }}>이름</th><th>유형</th><th style={{ textAlign: 'left' }}>모델</th><th style={{ textAlign: 'left' }}>주소</th><th style={{ textAlign: 'left' }}>서비스태그</th><th>상태</th>
             </tr></thead>
             <tbody>{g.list.slice().sort((a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id), undefined, { numeric: true })).map((s) => {
               const isOme = s.type === 'ome';
@@ -2185,6 +2185,7 @@ function ServerInfoByVcenter({ vc, onServer }) {
                 <tr key={s.id} style={{ cursor: isOme ? 'default' : 'pointer' }} onClick={() => { if (!isOme) onServer(s); }}>
                   <td><b>{s.name || s.id}</b></td>
                   <td>{isOme ? <span className="badge blue">OME</span> : <span className="badge gray">iDRAC</span>}{s.remote && <span className="badge amber" style={{ marginLeft: 4 }} title="위임 법인 스캔으로 엣지 에이전트가 수집한 서버(원격 인벤토리)">원격</span>}{!isOme && effVc(s) && <span className="badge blue" style={{ marginLeft: 4 }} title={`서비스태그가 vCenter '${effVc(s)}'의 ESXi 호스트와 일치 — 가상화 호스트`}>🖧 {effVc(s)}</span>}</td>
+                  <td className="muted">{s.model || '—'}</td>
                   <td className="muted">{String(s.host || '').replace(/^https?:\/\//, '') || '—'}</td>
                   <td className="muted">{s.serviceTag || '—'}</td>
                   <td>{s.enabled === false ? <span className="badge gray">중지</span> : <span className="badge green">수집</span>}</td>

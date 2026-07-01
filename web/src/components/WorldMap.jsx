@@ -86,7 +86,7 @@ export default function WorldMap({ sites = [], onSelect, height = 420, onResizeE
   const offsetOf = (id) => {
     const c = spread.get(id);
     if (!c || c.total <= 1) return [0, 0];
-    const R = 10 + c.total * 1.6;                 // 군집이 클수록 반경 약간 키움
+    const R = 14 + c.total * 2;                    // 군집이 클수록 반경 키움(겹치지 않게 넉넉히)
     const ang = (c.idx / c.total) * Math.PI * 2 - Math.PI / 2; // 위쪽(12시)부터 시계방향
     return [Math.cos(ang) * R, Math.sin(ang) * R];
   };
@@ -142,9 +142,7 @@ export default function WorldMap({ sites = [], onSelect, height = 420, onResizeE
               onMouseLeave={() => setTip(null)}
               onClick={() => { if (!moved.current) { setTip(null); setPicked(s); } }}
             >
-              {/* 겹침 방지: 같은 지역 군집이면 원위치에서 소량 이동. 원위치는 가는 선으로 연결. */}
-              {clustered && <line x1={0} y1={0} x2={dx} y2={dy} stroke={st.ring} strokeWidth={0.8} strokeDasharray="1.5 1.5" opacity={0.5} style={{ pointerEvents: 'none' }} />}
-              {clustered && <circle r={1.6} fill={st.ring} opacity={0.6} style={{ pointerEvents: 'none' }} />}
+              {/* 겹침 방지: 같은 지역 군집이면 원위치에서 이동해 마커만 깔끔히 분산(연결선/점 없음). */}
               <g transform={clustered ? `translate(${dx}, ${dy})` : undefined}>
                 {/* decorative pulse + marker — ignore pointer events so hover is stable */}
                 <circle r={st.r + 5} fill={st.ring} opacity={0.18} style={{ pointerEvents: 'none' }}>

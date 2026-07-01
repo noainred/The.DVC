@@ -975,7 +975,7 @@ adminRouter.post('/vcenters/import-file', adminOnly, (req, res) => {
 adminRouter.get('/idrac', adminOnly, (_req, res) => {
   const tagMap = hostVcByTag();
   const mapTag = (s) => (tagMap.get(String(s.serviceTag || s.inv?.system?.serviceTag || '').trim().toLowerCase()) || '');
-  const local = listServers().map((s) => ({ ...s, mappedVcenterId: s.vcenterId || mapTag(s) }));
+  const local = listServers().map((s) => ({ ...s, mappedVcenterId: s.vcenterId || mapTag(s), model: s.model || getIdracInventory(s.id)?.system?.model || '' }));
   const seen = new Set(local.map((s) => String(s.id)));
   const remote = remoteServersResolved()
     .filter((s) => !seen.has(String(s.id)))
