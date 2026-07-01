@@ -192,7 +192,11 @@ export function buildIpamRows(snap, vcenterId) {
   rows.length = 0;
   rows.push(...applied);
 
-  for (const r of rows) r.duplicate = count.get(r.ip) > 1;
+  // 중복 여부는 '가시 행'(ignored 게이트로 숨겨진 행 제외) 기준으로 재계산한다 — 원본 count는
+  // 숨김 이전 값이라, 한쪽이 정책/override로 숨겨지면 살아남은 유일 행이 duplicate로 오표시됐다.
+  const visCount = new Map();
+  for (const r of rows) visCount.set(r.ip, (visCount.get(r.ip) || 0) + 1);
+  for (const r of rows) r.duplicate = (visCount.get(r.ip) || 0) > 1;
   rows.sort((a, b) => (a.ipNum ?? Infinity) - (b.ipNum ?? Infinity));
 
   const byVc = {};

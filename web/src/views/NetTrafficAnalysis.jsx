@@ -124,7 +124,7 @@ export default function NetTrafficAnalysis() {
 
 function StatGrid({ st }) {
   if (!st) return null;
-  const cells = [['패킷', st.packets], ['SYN/SYN-ACK', `${st.syn}/${st.synAck}`], ['RST', st.rst, st.rst ? '#ef4444' : ''], ['재전송', `${st.retransPct}%`, st.retransPct >= 5 ? '#f59e0b' : ''], ['RTT', st.rttMs != null ? `${st.rttMs} ms` : '—'], ['송신', `${st.toPeer.packets}p`], ['수신', `${st.fromPeer.packets}p`], ['기간', `${st.durSec}s`]];
+  const cells = [['패킷', st.packets], ['SYN/SYN-ACK', `${st.syn}/${st.synAck}`], ['RST', st.rst, st.rst ? '#ef4444' : ''], ['재전송', `${st.retransPct}%`, st.retransPct >= 5 ? '#f59e0b' : ''], ['RTT', st.rttMs != null ? `${st.rttMs} ms` : '—'], ['송신', `${st.toPeer?.packets ?? 0}p`], ['수신', `${st.fromPeer?.packets ?? 0}p`], ['기간', `${st.durSec}s`]];
   return (
     <div className="flex gap wrap" style={{ marginBottom: 8 }}>
       {cells.map(([l, v, c]) => <div key={l} className="card" style={{ padding: '6px 10px', minWidth: 76 }}><div className="muted" style={{ fontSize: 10 }}>{l}</div><div style={{ fontSize: 15, fontWeight: 700, color: c || 'inherit' }}>{v}</div></div>)}

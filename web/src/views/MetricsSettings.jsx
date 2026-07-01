@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, putJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 
@@ -31,14 +31,19 @@ export default function MetricsSettings() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
 
+  const inited = useRef(false);
   const load = async () => {
     try {
       const d = await fetchJson('/admin/metrics/settings');
-      setData(d);
-      setIntervalSec(Math.round((d.settings.sampleIntervalMs || 60000) / 1000));
-      setRetentionDays(d.settings.retentionDays ?? 1830);
-      setGpuEnabled(d.settings.gpuUtilEnabled !== false);
-      setGpuSec(d.settings.gpuUtilIntervalSec ?? 60);
+      setData(d); // '마지막 수집' 상태는 매 폴링 갱신
+      // 입력 폼은 최초 1회만 서버값으로 채운다 — 20초 폴링이 편집 중인 값을 되돌리던 버그 방지.
+      if (!inited.current) {
+        inited.current = true;
+        setIntervalSec(Math.round((d.settings.sampleIntervalMs || 60000) / 1000));
+        setRetentionDays(d.settings.retentionDays ?? 1830);
+        setGpuEnabled(d.settings.gpuUtilEnabled !== false);
+        setGpuSec(d.settings.gpuUtilIntervalSec ?? 60);
+      }
       setError(null);
     } catch (e) { setError(e.message); }
   };

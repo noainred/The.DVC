@@ -237,7 +237,10 @@ export class VimSoapClient {
     while ((m = re.exec(xml))) {
       const blk = m[1];
       const ent = /<entity type="HostSystem">([^<]+)<\/entity>/.exec(blk)?.[1];
-      const val = /<value>[\s\S]*?<value>(\d+)<\/value>/.exec(blk)?.[1];
+      // 샘플값 <value>N</value> 하나를 뽑는다(형제 파서 queryHostGpuUtil/queryEntityPerf와 동일).
+      // 이전의 이중 <value> 정규식은 계열 래퍼가 <value xsi:type="PerfMetricIntSeries">처럼 속성을
+      // 가지는 vCenter 버전에서 매칭 실패 → 전력 0W가 되던 취약점이 있었다. maxSample=1이라 샘플은 1개.
+      const val = [...blk.matchAll(/<value>(-?\d+)<\/value>/g)].pop()?.[1];
       if (ent && val != null) out.set(ent, Number(val));
     }
     return out;

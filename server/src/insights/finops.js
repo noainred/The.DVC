@@ -34,7 +34,9 @@ export function saveFinopsConfig(body = {}) {
   const next = {
     tariffPerKwh: Math.max(0, Number(body.tariffPerKwh) || cur.tariffPerKwh),
     currency: String(body.currency || cur.currency).slice(0, 8),
-    co2KgPerKwh: Math.max(0, Number(body.co2KgPerKwh) ?? cur.co2KgPerKwh),
+    // Number(undefined)=NaN이고 NaN ?? x = NaN이라 co2 생략 시 NaN→null 저장돼 CO2 지표가 0이
+    // 되던 버그. 유한성으로 판정해 0(무탄소 전력)은 보존하고 누락/NaN만 기존값으로 폴백한다.
+    co2KgPerKwh: (() => { const c = Number(body.co2KgPerKwh); return Number.isFinite(c) ? Math.max(0, c) : cur.co2KgPerKwh; })(),
     pue: Math.min(5, Math.max(1, Number(body.pue) || cur.pue)),
   };
   fs.mkdirSync(path.dirname(FILE), { recursive: true });

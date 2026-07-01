@@ -520,7 +520,7 @@ export function IdracDetailModal({ server, onClose }) {
           <div>
             <div className="flex gap wrap" style={{ marginBottom: 10 }}>
               <span className="badge blue">CPU 사용량 {latest?.cpu != null ? `${latest.cpu}%` : '— (텔레메트리 미지원)'}</span>
-              <span className="badge amber">최고 온도 {latest ? `${Math.max(...Object.values(latest.temps || { _: 0 }))}℃` : '—'}</span>
+              <span className="badge amber">최고 온도 {(() => { const t = Object.values(latest?.temps || {}); return t.length ? `${Math.max(...t)}℃` : '—'; })()}</span>
               <span className="muted" style={{ fontSize: 12, alignSelf: 'center' }}>1분 간격 · 최근 {sensors?.count || 0}샘플 · 30초마다 갱신</span>
             </div>
             <div style={{ fontSize: 13, fontWeight: 700, margin: '6px 0' }}>CPU 사용량 (%)</div>

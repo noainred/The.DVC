@@ -33,8 +33,10 @@ function initSqlite() {
     const ins = db.prepare('INSERT INTO samples (metric, k, v, ts) VALUES (?, ?, ?, ?)');
     const latestAll = db.prepare(`SELECT s.k AS k, s.v AS v, s.ts AS ts FROM samples s
       JOIN (SELECT k, MAX(ts) mts FROM samples WHERE metric=? GROUP BY k) m ON s.k=m.k AND s.ts=m.mts WHERE s.metric=?`);
+    // 최신 limit개 버킷을 선택(ASC+LIMIT은 오래된 것부터 잘라 최근 데이터가 사라짐 — 현재
+    // 호출부는 limit이 커서 미발현이나 idrac.history와 정책을 통일). DESC로 뽑아 JS에서 되돌린다.
     const bucket = db.prepare(`SELECT (ts/?)*? AS b, AVG(v) avg, MIN(v) min, MAX(v) max FROM samples
-      WHERE metric=? AND k=? AND ts>=? GROUP BY b ORDER BY b LIMIT ?`);
+      WHERE metric=? AND k=? AND ts>=? GROUP BY b ORDER BY b DESC LIMIT ?`);
     const recentAvgAll = db.prepare(`SELECT k, AVG(v) avg, MAX(v) max FROM samples WHERE metric=? AND ts>=? GROUP BY k`);
     const metaStmt = db.prepare('SELECT MIN(ts) AS mn, MAX(ts) AS mx, COUNT(*) AS n FROM samples WHERE metric=?');
     const dumpStmt = db.prepare('SELECT k, v, ts FROM samples WHERE metric=? AND ts>=? AND ts<=? ORDER BY ts, k LIMIT ?');
@@ -43,7 +45,7 @@ function initSqlite() {
       kind: 'sqlite',
       insertMany: (rows, ts) => { db.exec('BEGIN'); try { for (const r of rows) ins.run(r.metric, r.k, r.v, ts); db.exec('COMMIT'); } catch (e) { try { db.exec('ROLLBACK'); } catch { /* */ } throw e; } },
       latestAll: (metric) => { const map = new Map(); for (const r of latestAll.all(metric, metric)) map.set(r.k, { v: r.v, ts: r.ts }); return map; },
-      history: (metric, k, sinceTs, bucketMs, limit) => bucket.all(bucketMs, bucketMs, metric, k, sinceTs, limit).map((r) => ({ ts: r.b, avg: round1(r.avg), min: round1(r.min), max: round1(r.max) })),
+      history: (metric, k, sinceTs, bucketMs, limit) => bucket.all(bucketMs, bucketMs, metric, k, sinceTs, limit).reverse().map((r) => ({ ts: r.b, avg: round1(r.avg), min: round1(r.min), max: round1(r.max) })),
       recentAvg: (metric, sinceTs) => { const map = new Map(); for (const r of recentAvgAll.all(metric, sinceTs)) map.set(r.k, { avg: round1(r.avg), max: round1(r.max) }); return map; },
       meta: (metric) => { const r = metaStmt.get(metric); return { firstTs: r?.mn ?? null, lastTs: r?.mx ?? null, count: Number(r?.n || 0) }; },
       dump: (metric, sinceTs, untilTs, limit) => dumpStmt.all(metric, sinceTs, untilTs, limit).map((r) => ({ k: r.k, v: r.v, ts: r.ts })),
