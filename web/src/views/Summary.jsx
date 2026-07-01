@@ -5,6 +5,7 @@ import {
 } from 'recharts';
 import { usePolling } from '../api.js';
 import { Loading, ErrorBox, usageColor, Modal } from '../components/ui.jsx';
+import { GuestOsVmsModal } from './SpecialTools.jsx';
 
 const OS_COLORS = {
   Windows: '#3b82f6', RHEL: '#ef4444', Ubuntu: '#f59e0b', CentOS: '#a855f7',
@@ -97,6 +98,7 @@ export default function Summary({ scope, onGotoTab }) {
   const [osPower, setOsPower] = useState('all'); // all | on | off
   const [osKind, setOsKind] = useState('all');   // all | vm | template
   const [showRatio, setShowRatio] = useState(false); // vCenter별 가상화율 모달
+  const [osDrill, setOsDrill] = useState(null); // Guest OS 계열 클릭 → 대상 VM 모달(계열명)
   const params = {
     ...scope, ...(corp ? { vcenterId: corp } : {}),
     ...(osPower !== 'all' ? { power: osPower } : {}),
@@ -250,13 +252,15 @@ export default function Summary({ scope, onGotoTab }) {
             <b>Guest OS 분포 (전체 VM)</b>
             <button className="tab" onClick={() => onGotoTab?.('vms')}>VM 보기 →</button>
           </div>
+          <div className="muted" style={{ fontSize: 11, marginBottom: 2 }}>OS 계열을 클릭하면 해당 VM 목록을 vCenter별로 볼 수 있습니다.</div>
           <ResponsiveContainer width="100%" height={260}>
             <PieChart>
-              <Pie data={osPie} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={60} outerRadius={95} paddingAngle={2}>
-                {osPie.map((d, i) => <Cell key={i} fill={d.fill} />)}
+              <Pie data={osPie} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={60} outerRadius={95} paddingAngle={2}
+                onClick={(slice) => slice?.name && setOsDrill(slice.name)} style={{ cursor: 'pointer' }}>
+                {osPie.map((d, i) => <Cell key={i} fill={d.fill} style={{ cursor: 'pointer' }} />)}
               </Pie>
               <Tooltip contentStyle={tipStyle} itemStyle={itemStyle} labelStyle={labelStyle} formatter={(v, n) => [`${fmt(v)} VM`, n]} />
-              <Legend wrapperStyle={{ fontSize: 12 }} />
+              <Legend wrapperStyle={{ fontSize: 12, cursor: 'pointer' }} onClick={(e) => e?.value && setOsDrill(e.value)} />
             </PieChart>
           </ResponsiveContainer>
         </div>
@@ -308,6 +312,18 @@ export default function Summary({ scope, onGotoTab }) {
         </table>
       </div>
       {showRatio && <VcpuRatioModal rows={s.byVcenter} onClose={() => setShowRatio(false)} />}
+      {osDrill && (
+        <GuestOsVmsModal
+          label={`${osDrill}${corp ? ` — ${corpName}` : ''}`}
+          params={{
+            family: osDrill,
+            ...(corp ? { vcenterId: corp } : {}),
+            ...(osPower !== 'all' ? { power: osPower } : {}),
+            ...(osKind !== 'all' ? { kind: osKind } : {}),
+          }}
+          onClose={() => setOsDrill(null)}
+        />
+      )}
     </>
   );
 }
