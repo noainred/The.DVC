@@ -147,13 +147,19 @@ export default function VCenterDetail({ site, onBack }) {
         )}
 
         {view === 'hosts' && !query && (
-          <Node label={`🗄️ ${site.name}`} defaultOpen sub={`${hosts.length} 호스트`}>
-            {clusters.map(([cl, chosts]) => (
-              <Tree key={cl} k={`cl:${cl}`} open={open} toggle={toggle} icon="🧩" label={cl} sub={`${chosts.length} 호스트`}>
+          <Node label={`🗄️ ${site.name}`} defaultOpen
+            sub={<UsageBars lead={<span className="muted">{hosts.length} 호스트</span>} cpu={m.cpuUsagePct} mem={m.memUsagePct} />}>
+            {clusters.map(([cl, chosts]) => {
+              const n = chosts.length || 1;
+              const avgCpu = Math.round(chosts.reduce((a, h) => a + (h.cpuUsagePct || 0), 0) / n);
+              const avgMem = Math.round(chosts.reduce((a, h) => a + (h.memUsagePct || 0), 0) / n);
+              return (
+              <Tree key={cl} k={`cl:${cl}`} open={open} toggle={toggle} icon="🧩" label={cl}
+                sub={<UsageBars lead={<span className="muted">{chosts.length} 호스트</span>} cpu={avgCpu} mem={avgMem} />}>
                 {chosts.map((h) => (
                   <Tree key={h.id} k={`h:${h.id}`} open={open} toggle={toggle} icon="🖥️"
                     label={<span className="vcd-link" onClick={(e) => { e.stopPropagation(); setSel({ type: 'host', item: h }); }}>{h.name}</span>}
-                    sub={<><StateBadge state={h.connectionState} /> <span className="muted">CPU {h.cpuUsagePct}% · MEM {h.memUsagePct}% · VM {h.vmCount}</span></>}>
+                    sub={<UsageBars lead={<StateBadge state={h.connectionState} />} cpu={h.cpuUsagePct} mem={h.memUsagePct} tail={<span className="muted" style={{ fontSize: 12 }}>VM {h.vmCount}</span>} />}>
                     {(vmsByHost.get(h.name) || []).map((vm) => (
                       <Leaf key={vm.id} icon="🧊" onClick={() => setSel({ type: 'vm', item: vm })}
                         label={vm.name} badge={<StateBadge state={vm.powerState} />}
@@ -162,7 +168,8 @@ export default function VCenterDetail({ site, onBack }) {
                   </Tree>
                 ))}
               </Tree>
-            ))}
+              );
+            })}
           </Node>
         )}
 
@@ -236,6 +243,36 @@ function Leaf({ icon, label, sub, badge, onClick }) {
     <div className="vcd-node vcd-leaf" onClick={onClick}>
       <span className="vcd-caret" /><span>{icon}</span> <span className="vcd-link">{label}</span> {badge} {sub && <span className="vcd-sub">{sub}</span>}
     </div>
+  );
+}
+
+// 사용률 색상 임계값(승인): 초록 <60% · 주황 60~85% · 빨강 ≥85%.
+const usageColor = (p) => (p >= 85 ? 'var(--red)' : p >= 60 ? 'var(--amber)' : 'var(--green)');
+
+// 한 지표(CPU/MEM)의 인라인 미니 바 + 수치. 트리 한 줄에 들어가도록 inline-flex.
+function MiniBar({ label, pct }) {
+  const p = Math.max(0, Math.min(100, Math.round(Number(pct) || 0)));
+  const c = usageColor(p);
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, verticalAlign: 'middle' }} title={`${label} ${p}%`}>
+      <span className="muted" style={{ fontSize: 11 }}>{label}</span>
+      <span style={{ display: 'inline-block', position: 'relative', width: 92, height: 7, borderRadius: 5, background: 'rgba(148,163,184,.15)', overflow: 'hidden', verticalAlign: 'middle' }}>
+        <span style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${p}%`, background: c, borderRadius: 5 }} />
+      </span>
+      <b style={{ fontSize: 12, color: c, minWidth: 34, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{p}%</b>
+    </span>
+  );
+}
+
+// 호스트/클러스터/vCenter 행의 CPU·MEM 1줄 차트. lead=앞 배지/텍스트, tail=뒤 텍스트(VM 수 등).
+function UsageBars({ cpu, mem, lead, tail }) {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+      {lead}
+      <MiniBar label="CPU" pct={cpu} />
+      <MiniBar label="MEM" pct={mem} />
+      {tail}
+    </span>
   );
 }
 
