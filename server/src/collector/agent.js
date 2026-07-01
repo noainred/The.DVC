@@ -9,6 +9,46 @@ import { config, currentVersion } from '../config.js';
 import { localPowerByHostName } from '../idrac/service.js';
 import { getPollerStatus } from '../idrac/poller.js';
 import { allOmeDevices } from '../idrac/omeCache.js';
+import { loadRegistry as loadIdracRegistry } from '../idrac/registry.js';
+import { getInventory } from '../idrac/invCache.js';
+
+// 서버 분석용 콤팩트 인벤토리(중앙 '서버 분석' 4개 탭이 쓰는 필드만; 자격증명·잡정보 제외).
+// 큰 항목은 firmware 배열뿐이라 O(구성요소 수)로 유지된다.
+function compactInv(inv) {
+  if (!inv) return null;
+  return {
+    system: inv.system ? { model: inv.system.model, serviceTag: inv.system.serviceTag, biosVersion: inv.system.biosVersion } : undefined,
+    cpu: inv.cpu ? { model: inv.cpu.model, count: inv.cpu.count, cores: inv.cpu.cores } : undefined,
+    memory: inv.memory ? { totalGiB: inv.memory.totalGiB } : undefined,
+    gpus: Array.isArray(inv.gpus) ? inv.gpus.map((g) => ({ model: g.model, name: g.name, memoryMiB: g.memoryMiB })) : [],
+    idrac: inv.idrac ? { firmwareVersion: inv.idrac.firmwareVersion } : undefined,
+    bios: inv.bios ? { version: inv.bios.version } : undefined,
+    firmware: Array.isArray(inv.firmware) ? inv.firmware.map((f) => ({ type: f.type, version: f.version, name: f.name })) : [],
+    collectedAt: inv.collectedAt,
+  };
+}
+
+// 이 엣지의 iDRAC 레지스트리를 '서버 분석'용으로 직렬화(자격증명 제외). 위임 스캔으로 현지
+// 등록된 서버 + 캐시 인벤토리를 중앙이 병합해 위임 법인도 서버 분석에 나타나게 한다.
+function localServersForExport() {
+  const out = [];
+  for (const s of loadIdracRegistry()) {
+    if (s.type === 'ome') continue; // OME는 상세 인벤토리 미지원
+    const inv = getInventory(s.id);
+    out.push({
+      id: s.id,
+      name: s.name || s.id,
+      host: s.host || '',
+      serviceTag: s.serviceTag || inv?.system?.serviceTag || '',
+      model: s.model || inv?.system?.model || '',
+      vcenterId: s.vcenterId || '',
+      datacenterId: s.datacenterId || '',
+      type: s.type || 'idrac',
+      inv: compactInv(inv),
+    });
+  }
+  return out;
+}
 
 export async function buildExport() {
   const byNameMap = await localPowerByHostName();
@@ -22,6 +62,7 @@ export async function buildExport() {
     if (r.serverId != null) seen.add(r.serverId);
     byHost.push({ host, watts: r.watts, ts: r.ts, serverName: r.serverName, serverId: r.serverId, serviceTag: r.serviceTag || '', model: r.model || '' });
   }
+  const servers = localServersForExport();
   return {
     version: currentVersion(),
     datacenter: config.collector.datacenter || '',
@@ -30,5 +71,8 @@ export async function buildExport() {
     omeDevices: allOmeDevices().length,
     hosts: byHost.length,
     power: { byHost },
+    // 서버 분석용 인벤토리(위임 법인 서버가 중앙 '서버 분석'에 나타나게 함). 전력만 쓰던
+    // 구버전 중앙은 이 필드를 무시하므로 하위호환.
+    servers,
   };
 }

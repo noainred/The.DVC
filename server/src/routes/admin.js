@@ -95,6 +95,7 @@ import { getInventory as getIdracInventory } from '../idrac/invCache.js';
 import { getSensorSeries } from '../idrac/sensorStore.js';
 import { fetchInventory as fetchIdracInventory, fetchSensors as fetchIdracSensors, probeGpuTelemetry } from '../idrac/redfish.js';
 import { listCollectors, addCollector, updateCollector, removeCollector, loadCollectors } from '../collector/registry.js';
+import { allRemoteServers, findRemoteServer } from '../collector/remoteInventory.js';
 import { listDatacenters, getDatacenterAssign, addDatacenter, updateDatacenter, removeDatacenter, setVcenterDatacenterMany } from '../datacenter/store.js';
 import { allCollectorStatus, getCollectorStatus } from '../collector/state.js';
 import { pullNow } from '../collector/puller.js';
@@ -116,11 +117,28 @@ const adminOnly = requireRole('admin');
 const maskPw = (p) => (p === '' || p == null) ? '(빈 비번/passwordless)' : `•••• (${String(p).length}자)`;
 
 // 서버 분석 공용 — iDRAC 서버 목록(OME 제외) + vCenter 필터(?vcenterId=, __unmapped__=미지정).
+// 중앙 로컬 레지스트리만(온도 시계열처럼 중앙 직접 수집분에만 의미 있는 뷰용).
 function idracServersForAnalysis(req) {
   const vc = String(req?.query?.vcenterId || '').trim();
   let servers = loadIdracRegistry().filter((s) => s.type !== 'ome');
   if (vc) servers = servers.filter((s) => (vc === '__unmapped__' ? !s.vcenterId : s.vcenterId === vc));
   return servers;
+}
+
+// 서버 분석 공용(원격 포함) — 중앙 로컬 + 위임 법인의 원격 인벤토리를 병합(id 중복은 중앙 우선).
+// 위임 스캔으로 엣지에만 등록된 서버가 서버 분석에 나타나게 한다. 온도(시계열)만 제외한다.
+function analysisServersWithRemote(req) {
+  const local = idracServersForAnalysis(req);
+  const seen = new Set(local.map((s) => String(s.id)));
+  const vc = String(req?.query?.vcenterId || '').trim();
+  let remote = allRemoteServers().filter((s) => !seen.has(String(s.id)));
+  if (vc) remote = remote.filter((s) => (vc === '__unmapped__' ? !s.vcenterId : s.vcenterId === vc));
+  return local.concat(remote);
+}
+
+// 인벤토리 조회: 원격 서버는 엣지가 실어 보낸 콤팩트 인벤토리(s.inv)를, 중앙 서버는 캐시를 쓴다.
+function invForServer(s) {
+  return (s && s.remote) ? (s.inv || null) : getIdracInventory(s.id);
 }
 
 // ── 긴급중단(Emergency Stop) — 관리자 2명 OTP(2인 승인)로만 켜고/끈다 ──────────
@@ -899,8 +917,15 @@ adminRouter.post('/vcenters/import-file', adminOnly, (req, res) => {
 // ---- iDRAC power collection (Dell Redfish) --------------------------------
 
 // List registered Dell servers (credentials redacted) + poller status.
+// 중앙 로컬 레지스트리 + 위임 법인의 원격 서버(엣지 수집분)를 병합해 반환한다(id 중복은 중앙 우선).
+// 원격 서버는 remote:true로 표시(프론트가 구분/상세 처리). 서버 자격증명은 애초에 실려오지 않는다.
 adminRouter.get('/idrac', adminOnly, (_req, res) => {
-  res.json({ servers: listServers(), poller: getPollerStatus() });
+  const local = listServers();
+  const seen = new Set(local.map((s) => String(s.id)));
+  const remote = allRemoteServers()
+    .filter((s) => !seen.has(String(s.id)))
+    .map((s) => ({ id: s.id, name: s.name, host: s.host, serviceTag: s.serviceTag || '', model: s.model || s.inv?.system?.model || '', vcenterId: s.vcenterId || '', datacenterId: s.datacenterId || '', type: s.type || 'idrac', remote: true, collectorId: s.collectorId, hasInventory: !!s.inv }));
+  res.json({ servers: local.concat(remote), poller: getPollerStatus() });
 });
 
 // Register a server, then poll immediately so power shows up right away.
@@ -954,12 +979,16 @@ adminRouter.get('/idrac/hardware-summary', adminOnly, (req, res) => {
   const dcFilter = String(req.query.datacenterId || '').trim();
   const assign = getDatacenterAssign();
   const dcOf = (s) => String(s.datacenterId || assign[String(s.vcenterId || '')] || '');
-  const servers = loadIdracRegistry().filter((s) => s.type !== 'ome' && (!dcFilter || dcOf(s) === (dcFilter === '__unmapped__' ? '' : dcFilter)) && (dcFilter !== '__unmapped__' || !dcOf(s)));
+  // 중앙 로컬 + 위임 법인 원격 서버 병합(id 중복은 중앙 우선).
+  const localAll = loadIdracRegistry().filter((s) => s.type !== 'ome');
+  const seen = new Set(localAll.map((s) => String(s.id)));
+  const merged = localAll.concat(allRemoteServers().filter((s) => !seen.has(String(s.id))));
+  const servers = merged.filter((s) => (!dcFilter || dcOf(s) === (dcFilter === '__unmapped__' ? '' : dcFilter)) && (dcFilter !== '__unmapped__' || !dcOf(s)));
   const byModel = new Map(), byCpu = new Map(), byMem = new Map(), byGpu = new Map();
   let collected = 0, missing = 0, totalGpuCards = 0;
   const bump = (map, key, by = 1) => { const k = String(key || '').trim(); if (!k) return; map.set(k, (map.get(k) || 0) + by); };
   for (const s of servers) {
-    const inv = getIdracInventory(s.id);
+    const inv = invForServer(s);
     if (!inv || !inv.collectedAt) { missing++; continue; }
     collected++;
     bump(byModel, inv.system?.model || '미상');
@@ -1002,11 +1031,11 @@ adminRouter.get('/idrac/temps', adminOnly, (req, res) => {
 // 서버 분석 — 서버 모델(R760/R770 등)별로 펌웨어/드라이버 버전 분포(버전별 설치 서버 수).
 adminRouter.get('/idrac/firmware-inventory', adminOnly, (req, res) => {
   const CAT_ORDER = ['iDRAC', 'BIOS', 'NIC', 'HBA', 'Storage', 'GPU', 'PSU', 'CPLD', 'Disk', 'Driver', '기타'];
-  const servers = idracServersForAnalysis(req);
+  const servers = analysisServersWithRemote(req);
   const models = new Map(); // model -> { servers:Set, cats: Map<cat, Map<version, Set<serverName>>> }
   const missing = [];
   for (const s of servers) {
-    const inv = getIdracInventory(s.id);
+    const inv = invForServer(s);
     if (!inv) { missing.push({ id: s.id, name: s.name }); continue; }
     const model = (inv.system?.model || '미상').trim() || '미상';
     let m = models.get(model);
@@ -1036,13 +1065,13 @@ adminRouter.get('/idrac/firmware-inventory', adminOnly, (req, res) => {
 
 // 서버 분석 — 모든 iDRAC가 수집한 GPU를 모델별로 집계(어떤 모델 몇 장, 어느 서버).
 adminRouter.get('/idrac/gpu-inventory', adminOnly, (req, res) => {
-  const servers = idracServersForAnalysis(req);
+  const servers = analysisServersWithRemote(req);
   const byModel = new Map();
   const serverList = [];
   const missing = [];
   let collected = 0;
   for (const s of servers) {
-    const inv = getIdracInventory(s.id);
+    const inv = invForServer(s);
     if (!inv) { missing.push({ id: s.id, name: s.name }); continue; }
     collected++;
     const gpus = inv.gpus || [];
@@ -1093,7 +1122,12 @@ adminRouter.get('/idrac/gpu-inventory', adminOnly, (req, res) => {
 // 서버 상세 인벤토리(iDRAC/BIOS/드라이버 버전 등). 캐시 우선, ?refresh=1이면 즉시 재수집.
 adminRouter.get('/idrac/:id/inventory', adminOnly, async (req, res) => {
   const s = loadIdracRegistry().find((x) => x.id === req.params.id);
-  if (!s) return res.status(404).json({ ok: false, reason: '서버를 찾을 수 없습니다.' });
+  if (!s) {
+    // 위임 법인의 원격 서버 — 중앙이 직접 못 닿으므로 엣지가 실어보낸 인벤토리를 그대로 반환(재수집 불가).
+    const rs = findRemoteServer(req.params.id);
+    if (rs) return res.json({ ok: true, fresh: false, remote: true, collectorId: rs.collectorId, inventory: rs.inv || null });
+    return res.status(404).json({ ok: false, reason: '서버를 찾을 수 없습니다.' });
+  }
   if (s.type === 'ome') return res.status(400).json({ ok: false, reason: 'OME 소스는 상세 인벤토리를 지원하지 않습니다(iDRAC 직접만).' });
   if (req.query.refresh === '1') {
     try { return res.json({ ok: true, fresh: true, inventory: await fetchIdracInventory(s) }); }
@@ -1106,7 +1140,11 @@ adminRouter.get('/idrac/:id/inventory', adminOnly, async (req, res) => {
 // 온도센서 + CPU 사용량 시계열(차트용). ?minutes=N 으로 최근 구간만. ?live=1 즉시 1샘플 수집.
 adminRouter.get('/idrac/:id/sensors', adminOnly, async (req, res) => {
   const s = loadIdracRegistry().find((x) => x.id === req.params.id);
-  if (!s) return res.status(404).json({ ok: false, reason: '서버를 찾을 수 없습니다.' });
+  if (!s) {
+    // 위임 법인 원격 서버: 중앙에 시계열이 없음(온도 동기화는 후속). 상세 팝업이 에러나지 않게 빈 응답.
+    if (findRemoteServer(req.params.id)) return res.json({ ok: true, remote: true, latest: null, series: [], live: null });
+    return res.status(404).json({ ok: false, reason: '서버를 찾을 수 없습니다.' });
+  }
   if (s.type === 'ome') return res.status(400).json({ ok: false, reason: 'OME 소스는 센서 시계열을 지원하지 않습니다.' });
   let live = null;
   if (req.query.live === '1') {
@@ -1119,7 +1157,11 @@ adminRouter.get('/idrac/:id/sensors', adminOnly, async (req, res) => {
 // iDRAC에서 GPU 사용률 수집 가능 여부 실측 확인(GPU 목록 + 텔레메트리 리포트).
 adminRouter.get('/idrac/:id/gpu-probe', adminOnly, async (req, res) => {
   const s = loadIdracRegistry().find((x) => x.id === req.params.id);
-  if (!s) return res.status(404).json({ ok: false, reason: '서버를 찾을 수 없습니다.' });
+  if (!s) {
+    // 위임 법인 원격 서버: 중앙이 iDRAC에 직접 못 닿아 실시간 프로브 불가(현장 에이전트에서 수행).
+    if (findRemoteServer(req.params.id)) return res.status(400).json({ ok: false, reason: '위임 법인의 원격 서버는 중앙에서 실시간 GPU 프로브를 할 수 없습니다(현장 에이전트가 수집). 인벤토리의 GPU 목록을 참고하세요.' });
+    return res.status(404).json({ ok: false, reason: '서버를 찾을 수 없습니다.' });
+  }
   if (s.type === 'ome') return res.status(400).json({ ok: false, reason: 'OME 소스는 GPU 프로브를 지원하지 않습니다(iDRAC 직접만).' });
   try { res.json({ ok: true, ...(await probeGpuTelemetry(s)) }); }
   catch (e) { res.status(502).json({ ok: false, reason: e.message }); }

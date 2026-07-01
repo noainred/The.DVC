@@ -2114,7 +2114,7 @@ function ServerInfoByVcenter({ onServer }) {
               return (
                 <tr key={s.id} style={{ cursor: isOme ? 'default' : 'pointer' }} onClick={() => { if (!isOme) onServer(s); }}>
                   <td><b>{s.name || s.id}</b></td>
-                  <td>{isOme ? <span className="badge blue">OME</span> : <span className="badge gray">iDRAC</span>}</td>
+                  <td>{isOme ? <span className="badge blue">OME</span> : <span className="badge gray">iDRAC</span>}{s.remote && <span className="badge amber" style={{ marginLeft: 4 }} title="위임 법인 스캔으로 엣지 에이전트가 수집한 서버(원격 인벤토리)">원격</span>}</td>
                   <td className="muted">{String(s.host || '').replace(/^https?:\/\//, '') || '—'}</td>
                   <td className="muted">{s.serviceTag || '—'}</td>
                   <td>{s.enabled === false ? <span className="badge gray">중지</span> : <span className="badge green">수집</span>}</td>
