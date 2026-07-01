@@ -1695,6 +1695,7 @@ api.get('/vms', (req, res) => {
   const q = req.query;
   let vms = applyFilters(snap.vms, q, snap, ['name', 'guestOS', 'ipAddress', 'host']);
   if (q.powerState) vms = vms.filter((v) => v.powerState === q.powerState);
+  if (q.host) vms = vms.filter((v) => v.host === q.host); // 특정 ESXi 호스트의 VM만(호스트 상세 → VM 목록)
 
   // Spec-based search: numeric range filters on VM sizing & live usage.
   const num = (v) => (v === undefined || v === '' ? undefined : Number(v));

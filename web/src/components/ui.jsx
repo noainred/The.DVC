@@ -245,8 +245,65 @@ export function VmIpPing({ vcenterId, ips }) {
   );
 }
 
+/**
+ * 특정 ESXi 호스트에서 구동/등록된 VM 목록 모달.
+ * 호스트 상세에서 호스트명을 클릭하면 열린다. VM 행 클릭 → VM 상세.
+ */
+export function HostVmsModal({ host, vcenterId, onClose }) {
+  const [d, setD] = useState(null);
+  const [err, setErr] = useState(null);
+  const [q, setQ] = useState('');
+  useEffect(() => {
+    const qs = new URLSearchParams({ host, ...(vcenterId ? { vcenterId } : {}), limit: '5000', sortBy: 'name', order: 'asc' }).toString();
+    fetchJson(`/vms?${qs}`).then(setD).catch((e) => setErr(e.message));
+  }, [host, vcenterId]);
+  const all = d?.items || [];
+  const ql = q.trim().toLowerCase();
+  const rows = ql ? all.filter((v) => [v.name, v.guestOS, v.ipAddress].some((x) => String(x || '').toLowerCase().includes(ql))) : all;
+  const onN = all.filter((v) => v.powerState === 'POWERED_ON').length;
+  const gbv = (mb) => (mb != null ? `${Math.round(mb / 1024)}GB` : '—');
+  return (
+    <Modal title={`호스트 VM — ${host}`} onClose={onClose} width={860} resizable minWidth={560} minHeight={360}>
+      {err ? <ErrorBox message={err} /> : !d ? <Loading /> : (
+        <>
+          <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 10 }}>
+            <span className="muted" style={{ fontSize: 13 }}>
+              VM <b style={{ color: 'var(--accent)' }}>{all.length}</b>대 · 구동중 <b style={{ color: 'var(--green)' }}>{onN}</b> · 정지 {all.length - onN}
+              {ql ? <> · {rows.length} 표시</> : null}
+              <span style={{ marginLeft: 6 }}>· VM 행을 클릭하면 상세를 봅니다.</span>
+            </span>
+            <input className="input" placeholder="VM/OS/IP 검색" value={q} onChange={(e) => setQ(e.target.value)} style={{ minWidth: 200 }} />
+          </div>
+          <div className="table-wrap" style={{ maxHeight: '52vh' }}>
+            <table>
+              <thead><tr>
+                <th style={{ textAlign: 'left' }}>VM</th><th>전원</th><th style={{ textAlign: 'left' }}>Guest OS</th>
+                <th style={{ textAlign: 'right' }}>vCPU</th><th style={{ textAlign: 'right' }}>RAM</th><th style={{ textAlign: 'left' }}>IP</th>
+              </tr></thead>
+              <tbody>
+                {rows.length === 0 && <tr><td colSpan={6} className="muted" style={{ padding: 14 }}>표시할 VM이 없습니다.</td></tr>}
+                {rows.map((v) => (
+                  <tr key={v.id}>
+                    <td><VmLink item={v} name={v.name} vcenterId={v.vcenterId} label={v.name} /></td>
+                    <td>{v.powerState === 'POWERED_ON' ? <span className="badge green">On</span> : <span className="badge gray">Off</span>}</td>
+                    <td className="muted" style={{ fontSize: 12 }}>{v.guestOS || '—'}</td>
+                    <td style={{ textAlign: 'right' }}>{v.cpuCount != null ? v.cpuCount : '—'}</td>
+                    <td style={{ textAlign: 'right' }}>{gbv(v.memMB)}</td>
+                    <td className="muted" style={{ fontSize: 12 }}>{(v.ipAddresses?.length ? v.ipAddresses : (v.ipAddress ? [v.ipAddress] : [])).join(' ') || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </Modal>
+  );
+}
+
 export function EntityDetail({ type, item, onClose }) {
   const titles = { vm: 'VM', host: '호스트', datastore: '데이터스토어' };
+  const [showHostVms, setShowHostVms] = useState(false);
   return (
     <Modal title={`${titles[type] || ''} 상세 — ${item.name}`} onClose={onClose} width={640}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 24px' }}>
@@ -279,7 +336,10 @@ export function EntityDetail({ type, item, onClose }) {
         )}
         {type === 'host' && (
           <>
-            <DRow label="이름"><b>{item.name}</b></DRow>
+            <DRow label="이름">
+              <b className="cell-link" style={{ cursor: 'pointer' }} title="이 호스트의 VM 목록 보기" onClick={() => setShowHostVms(true)}>{item.name}</b>
+              <span className="muted" style={{ fontSize: 11, marginLeft: 6 }}>· VM {item.vmCount ?? 0}대 보기 ›</span>
+            </DRow>
             <DRow label="상태"><StateBadge state={item.connectionState} /></DRow>
             <DRow label="vCenter">{item.vcenterId}</DRow>
             <DRow label="클러스터">{item.cluster || '—'}</DRow>
@@ -351,6 +411,9 @@ export function EntityDetail({ type, item, onClose }) {
           <VmRemoteButton item={item} />
           <VmMetricButton vmId={item.id} vmName={item.name} />
         </div>
+      )}
+      {type === 'host' && showHostVms && (
+        <HostVmsModal host={item.name} vcenterId={item.vcenterId} onClose={() => setShowHostVms(false)} />
       )}
     </Modal>
   );
