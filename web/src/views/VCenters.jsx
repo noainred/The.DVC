@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { usePolling } from '../api.js';
 import { Loading, ErrorBox, StateBadge, usageColor } from '../components/ui.jsx';
 import VCenterDetail from './VCenterDetail.jsx';
@@ -15,6 +15,17 @@ function Bar({ label, pct, detail }) {
 export default function VCenters({ onSelectSite }) {
   const { data, error, loading } = usePolling('/vcenters', {}, 15_000);
   const [openId, setOpenId] = useState(null);
+  const cardRefs = useRef({}); // vCenter id → 카드 DOM(바로가기 스크롤/반짝용)
+  // 바로가기 버튼 클릭: 해당 카드로 스크롤 이동 + 반짝 하이라이트.
+  const gotoCard = (id) => {
+    const el = cardRefs.current[id];
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.remove('flash');
+    void el.offsetWidth; // 리플로우로 애니메이션 재시작 보장
+    el.classList.add('flash');
+    setTimeout(() => el.classList.remove('flash'), 1600);
+  };
   if (loading && !data) return <Loading />;
   if (error) return <ErrorBox message={error} />;
 
@@ -35,12 +46,29 @@ export default function VCenters({ onSelectSite }) {
         <div className="card kpi"><div className="label">활성 알람</div><div className="value" style={{ color: totalAlarms ? 'var(--amber)' : undefined }}>{totalAlarms}</div></div>
       </div>
 
+      {sites.length > 0 && (
+        <div className="vc-quicknav">
+          <span className="qn-label">⚡ 바로가기</span>
+          {sites.map((s) => {
+            const m = s.metrics || {};
+            const down = s.status !== 'connected';
+            const alarms = (m.alarmsCritical || 0) + (m.alarmsWarning || 0);
+            const dot = down ? 'var(--red)' : alarms ? 'var(--amber)' : 'var(--green)';
+            return (
+              <button key={s.id} className={`qn-btn${down ? ' down' : ''}`} title={`${s.name} 카드로 이동`} onClick={() => gotoCard(s.id)}>
+                <span className="qn-dot" style={{ background: dot }} />{s.id}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       <div className="vc-grid">
         {sites.map((s) => {
           const m = s.metrics || {};
           const down = s.status !== 'connected';
           return (
-            <div className="card vc-card" key={s.id} onClick={() => setOpenId(s.id)}>
+            <div className="card vc-card" key={s.id} ref={(el) => { cardRefs.current[s.id] = el; }} onClick={() => setOpenId(s.id)}>
               <div className="vc-head">
                 <div>
                   <div className="vc-name">{s.name}</div>
