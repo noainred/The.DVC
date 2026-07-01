@@ -21,6 +21,16 @@ class NsxStore {
   }
 
   async refresh() {
+    if (this._refreshing) return; // 재진입 방지(이전 폴 진행 중이면 이번 틱 건너뜀)
+    this._refreshing = true;
+    try {
+      return await this._refreshInner();
+    } finally {
+      this._refreshing = false;
+    }
+  }
+
+  async _refreshInner() {
     const dataSource = getDataSource();
     const managers = loadRegistry();
 

@@ -21,8 +21,19 @@ const INVENTORY_MAX_AGE_MS = 30 * 60_000;
 
 let timer = null;
 let lastRun = null; // { at, ok, failed, results: [{id, watts?, devices?, error?}] }
+let running = false; // 재진입 방지(이전 폴이 끝나기 전 다음 틱이 겹쳐 도는 것 차단)
 
 async function pollOnce() {
+  if (running) return; // 고RTT iDRAC 다수에서 한 주기가 간격을 넘겨 폴이 중첩되는 것 방지
+  running = true;
+  try {
+    return await pollOnceInner();
+  } finally {
+    running = false;
+  }
+}
+
+async function pollOnceInner() {
   if (isStopped()) { lastRun = { at: Date.now(), ok: 0, failed: 0, skipped: '긴급중단', results: [] }; return; }
   const servers = loadRegistry().filter((s) => s.enabled !== false && s.host && s.username && s.password);
   if (!servers.length) { lastRun = { at: Date.now(), ok: 0, failed: 0, results: [] }; return; }
