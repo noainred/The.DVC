@@ -98,8 +98,8 @@ export default function WorldMap({ sites = [], onSelect, height = 420, onResizeE
   const offsetOf = (id) => {
     const c = spread.get(id);
     if (!c || c.total <= 1) return [0, 0];
-    // 군집 크기에 따라 반경을 키워 확실히 분리(마커+글로우가 겹치지 않게 넉넉히).
-    const R = 20 + c.total * 3;
+    // 겹침만 살짝 풀 정도로 최소한만 분산(너무 멀어지지 않게 반경을 작게).
+    const R = 9 + c.total * 1.5;
     const ang = (c.idx / c.total) * Math.PI * 2 - Math.PI / 2; // 위쪽(12시)부터 시계방향
     return [Math.cos(ang) * R, Math.sin(ang) * R];
   };
