@@ -18,14 +18,14 @@ function headers() {
 
 export async function runCaptureWorkerOnce() {
   if (!config.agent.centralUrl || busy) return null;
+  busy = true; // fetch '전에' 즉시 설정 — 4s 두 틱이 fetch 창에서 모두 통과해 잡을 중복 인출하는 것 방지
   try {
     const url = `${config.agent.centralUrl}/api/central/capture-jobs?agent=${encodeURIComponent(config.agent.name)}`;
     const r = await resilientFetch(url, { headers: headers(), timeoutMs: 15_000, retries: 2 });
     if (!r.ok) return null;
     const { jobs } = await r.json();
     if (!jobs || !jobs.length) return null;
-    busy = true;
-    try {
+    {
       for (const job of jobs) {
         let result;
         try {
@@ -44,9 +44,10 @@ export async function runCaptureWorkerOnce() {
         }).catch(() => {});
         console.log(`[capture-agent] 캡처 완료 reqId=${job.reqId}${result?.dual ? ' (dual)' : ''}`);
       }
-    } finally { busy = false; }
+    }
     return { at: Date.now() };
-  } catch { busy = false; return null; }
+  } catch { return null; }
+  finally { busy = false; }
 }
 
 export function startCaptureWorker() {

@@ -83,8 +83,10 @@ export async function testVmGuest(c, vmMoref, creds, { isWindows = false, timeou
 }
 
 function authXml(creds) {
+  // username/password가 없으면 esc(undefined)가 문자열 'undefined'가 되어 엉뚱한 자격증명으로
+  // 인증하므로 빈 문자열로 정규화한다.
   return `<auth xsi:type="NamePasswordAuthentication"><interactiveSession>false</interactiveSession>` +
-    `<username>${esc(creds.username)}</username><password>${esc(creds.password)}</password></auth>`;
+    `<username>${esc(creds.username ?? '')}</username><password>${esc(creds.password ?? '')}</password></auth>`;
 }
 
 // 게스트 파일 1개를 InitiateFileTransferFromGuest → HTTP GET 으로 회수.
@@ -371,7 +373,10 @@ export async function addGuestUser(c, vmMoref, creds, { username, password, sudo
   if (!password) throw new Error('비밀번호가 필요합니다.');
   const ts = Date.now();
   if (isWindows) {
-    const p = String(password).replace(/"/g, '');
+    const p = String(password);
+    // 비밀번호를 조용히 변조(따옴표 제거)하면 요청과 다른 계정이 생겨 잠금된다. 배치에 안전하게
+    // 넣을 수 없는 문자(따옴표/퍼센트 변수확장/개행)는 재작성하지 않고 거부한다.
+    if (/["%\r\n]/.test(p)) throw new Error('Windows 비밀번호에 사용할 수 없는 문자가 있습니다("(따옴표), %(퍼센트), 개행 제외).');
     const script = `@echo off\r\nnet user "${u}" "${p}" /add\r\nnet localgroup Administrators "${u}" /add\r\nnet user "${u}"\r\n`;
     return runGuestScript(c, vmMoref, creds, script, { isWindows: true, dlHosts, timeoutMs });
   }

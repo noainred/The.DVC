@@ -33,10 +33,12 @@ const isWindows = (guestOS = '') => /win|microsoft/i.test(guestOS);
 
 function customizationXml(vm, guest, windows) {
   const dns = (guest.dnsServers || []).filter(Boolean);
+  // vim25 CustomizationGlobalIPSettings 시퀀스는 dnsSuffixList → dnsServerList 순서다.
+  // (순서가 뒤바뀌면 vCenter SOAP 디시리얼라이저가 unexpected-element로 거부 → 정적 IP 클론 전부 실패.)
   const globalIp =
     `<globalIPSettings>` +
-    dns.map((d) => `<dnsServerList>${esc(d)}</dnsServerList>`).join('') +
     (guest.domain ? `<dnsSuffixList>${esc(guest.domain)}</dnsSuffixList>` : '') +
+    dns.map((d) => `<dnsServerList>${esc(d)}</dnsServerList>`).join('') +
     `</globalIPSettings>`;
 
   const identity = windows
@@ -101,9 +103,12 @@ export function createProvisioner(vc) {
       // RelocateSpec: pin host / datastore when chosen (resolved from snapshot).
       const hostRef = placement.host ? findHostRef(source.vcenterId, placement.host) : null;
       const dsRef = placement.datastore ? findDatastoreRef(source.vcenterId, placement.datastore) : null;
+      // vim25 VirtualMachineRelocateSpec 시퀀스: (…) datastore → (…) host → profile.
+      // datastore를 host보다 먼저 emit해야 한다 — 순서가 뒤바뀌면 host+datastore를 함께 지정한
+      // 클론 요청이 unexpected-element로 매 VM 실패한다.
       const reloc =
-        (hostRef ? `<host type="HostSystem">${hostRef}</host>` : '') +
         (dsRef ? `<datastore type="Datastore">${dsRef}</datastore>` : '') +
+        (hostRef ? `<host type="HostSystem">${hostRef}</host>` : '') +
         (placement.storageProfile ? `<profile><profile xsi:type="VirtualMachineDefinedProfileSpec"><profileName>${esc(placement.storageProfile)}</profileName></profile></profile>` : '');
       const windows = isWindows(source.guestOS);
       const spec =

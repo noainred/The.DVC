@@ -18,18 +18,21 @@ const TTL_MS = Number(process.env.CENTRAL_FLEET_TTL_MS) || 30 * 60_000; // 30분
 const MAX_AGENTS = Number(process.env.CENTRAL_FLEET_MAX_AGENTS) || 500; // 에이전트 수 상한(메모리 보호)
 const norm = (s) => String(s || '').trim().toLowerCase();
 
-let cache = {}; // agent -> { at, generatedAt, baremetal: [ {fleetId,name,model,serviceTag,watts,vcenterId,source} ] }
+// null-proto: 에이전트 이름이 '__proto__' 등이어도 프로토타입 오염 없이 일반 키로 저장.
+let cache = Object.create(null); // agent -> { at, generatedAt, baremetal: [...] }
 try {
-  if (fs.existsSync(FILE)) { const p = JSON.parse(fs.readFileSync(FILE, 'utf8')); if (p && typeof p === 'object') cache = p.fleet || {}; }
-} catch { cache = {}; }
+  if (fs.existsSync(FILE)) { const p = JSON.parse(fs.readFileSync(FILE, 'utf8')); if (p && typeof p === 'object') cache = Object.assign(Object.create(null), p.fleet || {}); }
+} catch { cache = Object.create(null); }
 
 let writeTimer = null;
 function persistSoon() {
   if (writeTimer) return;
   writeTimer = setTimeout(() => {
     writeTimer = null;
-    fs.mkdirSync(path.dirname(FILE), { recursive: true });
-    fs.promises.writeFile(FILE, JSON.stringify({ fleet: cache }), { mode: 0o600 }).catch(() => {});
+    try {
+      fs.mkdirSync(path.dirname(FILE), { recursive: true });
+      fs.promises.writeFile(FILE, JSON.stringify({ fleet: cache }), { mode: 0o600 }).catch(() => {});
+    } catch { /* best effort */ }
   }, 5_000);
   writeTimer.unref?.();
 }

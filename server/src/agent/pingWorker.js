@@ -11,6 +11,7 @@ import { resilientFetch } from '../util/resilientFetch.js';
 import { pingMany } from '../util/ping.js';
 
 let timer = null;
+let running = false; // 재진입 방지(긴 ping이 다음 4s 틱과 겹쳐 중복 인출/실행되는 것 차단)
 const POLL_MS = Number(process.env.AGENT_PING_POLL_MS) || 4_000;
 
 function headers() {
@@ -19,6 +20,12 @@ function headers() {
 
 export async function runPingWorkerOnce() {
   if (!config.agent.centralUrl) return null;
+  if (running) return null;
+  running = true;
+  try { return await runPingWorkerInner(); } finally { running = false; }
+}
+
+async function runPingWorkerInner() {
   const vcIds = (loadVcenterConfig().vcenters || []).map((v) => v.id).filter(Boolean);
   if (!vcIds.length) return null;
   try {

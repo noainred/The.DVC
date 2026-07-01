@@ -9,6 +9,7 @@ import { resilientFetch } from '../util/resilientFetch.js';
 import { getLogsDb } from '../logs/db.js';
 
 let timer = null;
+let running = false; // 재진입 방지
 const POLL_MS = Number(process.env.AGENT_LOGQ_POLL_MS) || 4_000;
 
 function headers() {
@@ -17,6 +18,12 @@ function headers() {
 
 export async function runLogQueryWorkerOnce() {
   if (!config.agent.centralUrl) return null;
+  if (running) return null;
+  running = true;
+  try { return await runLogQueryWorkerInner(); } finally { running = false; }
+}
+
+async function runLogQueryWorkerInner() {
   const vcIds = (loadVcenterConfig().vcenters || []).map((v) => v.id).filter(Boolean);
   if (!vcIds.length) return null;
   try {

@@ -9,8 +9,9 @@ import { config } from '../config.js';
 
 const FILE = path.join(config.configDir, 'central-agent-config.json');
 
-let byAgent = {}; // agent -> { at, files:{ name: content } }
-try { if (fs.existsSync(FILE)) byAgent = JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}; } catch { byAgent = {}; }
+// null-proto: 에이전트 이름을 키로 쓰므로 '__proto__' 등에 의한 프로토타입 오염 방지.
+let byAgent = Object.create(null); // agent -> { at, files:{ name: content } }
+try { if (fs.existsSync(FILE)) byAgent = Object.assign(Object.create(null), JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}); } catch { byAgent = Object.create(null); }
 
 let writeTimer = null;
 function persistSoon() {
