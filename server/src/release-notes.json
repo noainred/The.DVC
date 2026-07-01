@@ -1,6 +1,16 @@
 {
   "notes": [
     {
+      "version": "2.80.0",
+      "date": "2026-07-01",
+      "title": "전력 분석 — DataCenter별 보기(1차 법인 → 2차 vCenter/Baremetal)",
+      "notes": [
+        "전력 분석(특수 기능)에 'DataCenter별' 탭을 추가했습니다. 1차 분류는 DataCenter(법인), 2차 분류는 vCenter와 Baremetal입니다. 법인엔 속하지만 어떤 vCenter에도 매핑되지 않는 물리 서버는 'Baremetal' 카테고리로 vCenter와 동일 레벨에서 집계됩니다.",
+        "서버의 DataCenter 귀속: ① vCenter에 매핑되면 그 vCenter의 소속 법인(설정의 vCenter→DataCenter 할당), ② 아니면 iDRAC 스캔의 datacenterId, ③ 그래도 없으면 원격 수집기(에이전트)의 소속 법인으로 자동 매칭. 각 DataCenter/2차 그룹별 서버 수·현재 전력·월/연 요금을 표로 보여줍니다.",
+        "측정 전력 파이프라인(allMeasuredPower)에 서버별 datacenterId/collectorId를 전파하고, 전력 분석 집계(computePowerBreakdown)에 byDatacenter(중첩 children)를 추가했습니다. 회귀 테스트 포함, 전체 236건 통과."
+      ]
+    },
+    {
       "version": "2.79.0",
       "date": "2026-07-01",
       "title": "특수 기능 전체 메뉴 클릭순 정렬 + vCenter별 스토리지(Datastore) 용량 메뉴",

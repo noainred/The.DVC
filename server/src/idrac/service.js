@@ -136,7 +136,7 @@ export async function allMeasuredPower({ hosts = [], vcenterFirst = false } = {}
       const hostNames = matchKeys(s);                  // 출력/귀속용(표시이름·태그 별칭 포함)
       // dedup 식별은 '실제 호스트명/IP'만 사용(표시 이름은 사용자가 임의 지정 가능 → 충돌로 오드롭 방지).
       const dedupHosts = [...(s.hostNames || []), s.host].filter(Boolean);
-      tryAdd({ serverId: s.id, serverName: s.name, watts: sample.watts, ts: sample.ts, host: norm(s.host || hostNames[0] || s.name), hostNames, model, serviceTag, vcenterId: s.vcenterId || '', source: 'idrac' }, serviceTag, dedupHosts);
+      tryAdd({ serverId: s.id, serverName: s.name, watts: sample.watts, ts: sample.ts, host: norm(s.host || hostNames[0] || s.name), hostNames, model, serviceTag, vcenterId: s.vcenterId || '', datacenterId: s.datacenterId || '', source: 'idrac' }, serviceTag, dedupHosts);
     }
     // OME 연결의 소속 법인 → 그 연결이 발견한 디바이스가 상속(전력 귀속을 PowerMap/FinOps/플릿이 공유).
     const omeEntryVc = new Map(loadRegistry().filter((s) => s.type === 'ome' && s.vcenterId).map((s) => [s.id, s.vcenterId]));
@@ -162,7 +162,7 @@ export async function allMeasuredPower({ hosts = [], vcenterFirst = false } = {}
       }
       const id = `remote:${r.collectorId}:${r.serverId != null ? r.serverId : host}`;
       const hostNames = [norm(host)];
-      tryAdd({ serverId: id, serverName: r.serverName || host, watts: r.watts, ts: r.ts, host: norm(host), hostNames, model: (r.model || '').trim(), serviceTag: r.serviceTag || '', vcenterId: r.vcenterId || '', source: 'remote' }, r.serviceTag, [host].filter(Boolean));
+      tryAdd({ serverId: id, serverName: r.serverName || host, watts: r.watts, ts: r.ts, host: norm(host), hostNames, model: (r.model || '').trim(), serviceTag: r.serviceTag || '', vcenterId: r.vcenterId || '', datacenterId: r.datacenterId || '', collectorId: r.collectorId || '', datacenterLabel: r.datacenter || '', source: 'remote' }, r.serviceTag, [host].filter(Boolean));
     }
   };
 

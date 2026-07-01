@@ -11,6 +11,7 @@ import { filterMeasuredByMapping, loadPowerSettings } from '../idrac/powerSettin
 import { snapMemo, sendCached } from '../util/snapCache.js';
 import { computeFinOps, loadFinopsConfig, saveFinopsConfig } from '../insights/finops.js';
 import { computePowerBreakdown } from '../insights/powerBreakdown.js';
+import { getDatacenterAssign, listDatacenters } from '../datacenter/store.js';
 import { getFleetInventory, fleetLiveKeys } from '../insights/fleetInventory.js';
 import { setFleetTag, pruneFleetTags, loadFleetTags, applyFleetExclude } from '../insights/fleetTags.js';
 import { setFleetAssign, setFleetAssignMany, applyFleetAssign, pruneFleetAssign, loadFleetAssign } from '../insights/fleetAssign.js';
@@ -48,11 +49,15 @@ insightsRouter.get('/power-breakdown', async (req, res) => {
   try {
     const snap = store.get();
     const vc = String(req.query.vcenterId || '');
-    const key = `${snap.generatedAt}|${vc}|${JSON.stringify(loadPowerSettings())}|${fleetRev()}`;
+    const assign = getDatacenterAssign();
+    const datacenters = listDatacenters();
+    // DataCenter 할당/목록이 바뀌면 캐시 무효화되도록 키에 포함.
+    const dcKey = `${JSON.stringify(assign)}|${datacenters.map((d) => `${d.id}:${d.name}`).join(',')}`;
+    const key = `${snap.generatedAt}|${vc}|${JSON.stringify(loadPowerSettings())}|${fleetRev()}|${dcKey}`;
     const validIds = new Set((snap.vcenters || []).map((v) => v.id));
     const payload = await snapMemo('power-breakdown', key, 60_000, async () => {
       const measured = filterMeasuredByMapping(applyFleetExclude(applyFleetAssign(await allMeasuredPower({ hosts: snap.hosts, vcenterFirst: true }), validIds)), snap);
-      return computePowerBreakdown(snap, measured, { vcenterId: vc });
+      return computePowerBreakdown(snap, measured, { vcenterId: vc, assign, datacenters });
     });
     sendCached(req, res, key, payload);
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }

@@ -65,6 +65,36 @@ test('전력분석: 명시 지정 vcenterId가 이름/태그 매칭보다 우선
   assert.equal(r.mappedServers, 2);
 });
 
+test('전력분석: DataCenter 2단 분류(1차 DC → 2차 vCenter/Baremetal)', () => {
+  // vc1은 DataCenter corpA에 할당. 미매핑 서버는 datacenterId/원격라벨로 corpA 베어메탈로 귀속.
+  const measured = [
+    { serverName: 'esxi-a', host: 'esxi-a', hostNames: ['esxi-a'], watts: 400 }, // vc1(→corpA) 매핑
+    { serverName: 'bm1', host: 'bm1', hostNames: ['bm1'], watts: 300, datacenterId: 'corpA' }, // 명시 datacenterId → corpA baremetal
+    { serverName: 'bm2', host: 'bm2', hostNames: ['bm2'], watts: 200, source: 'remote', datacenterLabel: 'CorpA', collectorId: 'corpa-agent' }, // 원격 라벨 → corpA baremetal
+    { serverName: 'orphan', host: 'orphan', watts: 50 }, // 법인 미지정
+  ];
+  const r = computePowerBreakdown(snap, measured, {
+    assign: { vc1: 'corpA' },
+    datacenters: [{ id: 'corpA', name: '법인 A' }],
+  });
+  const corpA = r.byDatacenter.find((d) => d.datacenterId === 'corpA');
+  assert.ok(corpA, 'corpA DataCenter 그룹 존재');
+  assert.equal(corpA.datacenterName, '법인 A');
+  assert.equal(corpA.servers, 3);
+  assert.equal(corpA.watts, 900); // 400 + 300 + 200
+  const vcChild = corpA.children.find((c) => c.type === 'vcenter');
+  const bmChild = corpA.children.find((c) => c.type === 'baremetal');
+  assert.equal(vcChild.vcenterId, 'vc1');
+  assert.equal(vcChild.watts, 400);
+  assert.equal(bmChild.name, 'Baremetal');
+  assert.equal(bmChild.watts, 500); // 300 + 200 (명시 + 원격라벨 모두 baremetal)
+  assert.equal(bmChild.servers, 2);
+  // 법인 미지정은 별도 그룹(datacenterId 빈값), 맨 뒤로 정렬.
+  const nodc = r.byDatacenter.find((d) => !d.datacenterId);
+  assert.ok(nodc && nodc.watts === 50);
+  assert.equal(r.byDatacenter[r.byDatacenter.length - 1].datacenterId, '', '미지정 법인이 맨 뒤');
+});
+
 test('전력분석: vcenterId 범위 지정 시 해당 법인만', () => {
   const measured = [
     { serverName: 'esxi-a', host: 'esxi-a', hostNames: ['esxi-a'], watts: 400 },
