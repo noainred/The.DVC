@@ -56,7 +56,9 @@ export function getOsResults({ vcenterId = '', mismatch = false } = {}) {
   let rows = [...map.values()];
   if (vcenterId) rows = rows.filter((r) => r.vcenterId === vcenterId);
   if (mismatch) rows = rows.filter((r) => r.mismatch);
-  return rows.sort((a, b) => (a.vcenterId === b.vcenterId ? a.vmName.localeCompare(b.vmName) : a.vcenterId.localeCompare(b.vcenterId)));
+  return rows.sort((a, b) => (a.vcenterId === b.vcenterId
+    ? String(a.vmName || '').localeCompare(String(b.vmName || ''))
+    : String(a.vcenterId || '').localeCompare(String(b.vcenterId || ''))));
 }
 
 export function getScannedIds() { load(); return new Set(map.keys()); }

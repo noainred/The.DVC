@@ -179,9 +179,14 @@ async function collectFromVCenterRest(vc) {
         memMB: m.memory_size_MiB,
       })),
       datastores: datastores.map((d) => {
-        const capacityGB = Math.round((d.capacity || 0) / 1024 ** 3);
-        const freeGB = Math.round((d.free_space || 0) / 1024 ** 3);
-        const usedGB = Math.max(0, capacityGB - freeGB);
+        // 사용량/사용률은 '바이트' 기준으로 먼저 계산한 뒤 GB로 반올림한다 — capacity·free를 각각
+        // GB로 반올림한 뒤 빼면 반올림 오차가 usedGB/usagePct에 누적된다.
+        const capBytes = d.capacity || 0;
+        const freeBytes = d.free_space || 0;
+        const usedBytes = Math.max(0, capBytes - freeBytes);
+        const capacityGB = Math.round(capBytes / 1024 ** 3);
+        const freeGB = Math.round(freeBytes / 1024 ** 3);
+        const usedGB = Math.round(usedBytes / 1024 ** 3);
         return {
           id: `${vc.id}:${d.datastore}`,
           vcenterId: vc.id,
@@ -190,7 +195,7 @@ async function collectFromVCenterRest(vc) {
           capacityGB,
           freeGB,
           usedGB,
-          usagePct: capacityGB > 0 ? Math.round((usedGB / capacityGB) * 100) : 0,
+          usagePct: capBytes > 0 ? Math.round((usedBytes / capBytes) * 100) : 0,
           accessible: true,
         };
       }),

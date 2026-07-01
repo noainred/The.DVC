@@ -6,6 +6,23 @@
 
 import { runGuestScript } from '../gpu/guestops.js';
 
+const MONTHS = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 };
+// 로그 라인의 타임스탬프를 안정적으로 뽑는다. ISO(journalctl -o short-iso)와 syslog('Mmm D HH:MM:SS',
+// /var/log/secure·auth.log)를 모두 인식 — 이전엔 syslog 형식이 불일치해 매 조사마다 ts=Date.now()로
+// 기록돼 동일 실패가 중복 적재되고 브루트포스 오탐을 유발했다. 같은 라인은 항상 같은 ts가 나오게 한다.
+function parseLogTs(line) {
+  const iso = /(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2})/.exec(line);
+  if (iso) { const t = Date.parse(iso[1].replace(' ', 'T')); if (Number.isFinite(t)) return t; }
+  const sl = /^([A-Z][a-z]{2})\s+(\d{1,2})\s+(\d{2}):(\d{2}):(\d{2})/.exec(line);
+  if (sl && MONTHS[sl[1]] != null) {
+    const now = new Date();
+    const d = new Date(now.getFullYear(), MONTHS[sl[1]], Number(sl[2]), Number(sl[3]), Number(sl[4]), Number(sl[5]));
+    if (d.getTime() - now.getTime() > 86_400_000) d.setFullYear(now.getFullYear() - 1); // 미래면 작년(연말→연초 롤오버)
+    return d.getTime();
+  }
+  return null;
+}
+
 const LINUX_SCRIPT = (days, n) =>
   `( journalctl _COMM=sshd -o short-iso --since "-${days} day" 2>/dev/null; cat /var/log/secure /var/log/auth.log 2>/dev/null ) ` +
   `| grep -iE "Failed password|Invalid user|authentication failure" | tail -${n}`;
@@ -33,8 +50,7 @@ export async function scanGuestLoginFails(c, vmMoref, creds, { isWindows = false
     } else {
       const ip = /(?:from|rhost=)\s*(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/i.exec(line)?.[1] || /(\d{1,3}\.){3}\d{1,3}/.exec(line)?.[0] || '';
       const user = /(?:invalid user|user|for)\s+([A-Za-z0-9._\\-]+)\s+from/i.exec(line)?.[1] || /for\s+([A-Za-z0-9._\\-]+)/i.exec(line)?.[1] || '(unknown)';
-      const tsm = /^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2})/.exec(line);
-      const ts = tsm ? (Date.parse(tsm[1].replace(' ', 'T')) || Date.now()) : Date.now();
+      const ts = parseLogTs(line) ?? Date.now();
       fails.push({ user, ip, ts, reason: line.slice(0, 140) });
     }
   }

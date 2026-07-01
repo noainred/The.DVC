@@ -319,7 +319,10 @@ export async function buildPowerDashboard(measured, { hours = 24 } = {}) {
   const buckets = db.bucketsSince ? db.bucketsSince(since, 3_600_000) : [];
 
   const perServer = measured.map((m) => {
-    const st = stats.get(m.serverId) || {};
+    // 원격(remote) 전력은 DB에 'rmt:<host>' 키로 적재되지만(puller.js), measured.serverId는
+    // 'remote:<collectorId>:...' 형식이라 그대로 조회하면 항상 miss → 24h 통계가 null이 된다.
+    const statKey = (m.source === 'remote' && m.host) ? `rmt:${m.host}` : m.serverId;
+    const st = stats.get(statKey) || {};
     const avg = st.avg ?? null;
     return {
       serverId: m.serverId, name: m.serverName, source: m.source, vcenterId: m.vcenterId || '',

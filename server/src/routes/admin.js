@@ -506,7 +506,9 @@ adminRouter.put('/metrics/settings', adminOnly, (req, res) => {
 adminRouter.post('/gpu/collect-util', adminOnly, async (_req, res) => {
   try {
     forceGpuUtilCollect();
-    await store.refresh();
+    // force:true — 스케줄 수집이 진행 중이어도 완료 후 강제 수집 refresh를 한 번 더 보장 실행
+    // (재진입 가드로 즉시 스킵돼 강제 플래그가 소비되지 못한 채 버려지던 문제 방지).
+    await store.refresh({ force: true });
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ ok: false, reason: e.message });
@@ -553,7 +555,7 @@ adminRouter.get('/gpu-guest/vms', adminOnly, (req, res) => {
         collected: c ? { utilPct: c.utilPct, memUsedPct: c.memUsedPct ?? null, at: c.at } : null,
       };
     })
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
   res.json({ vcenterId: vcId, vcShared: { username: s.vcenters[vcId]?.username || '', hasPassword: !!s.vcenters[vcId]?.password }, vms });
 });
 

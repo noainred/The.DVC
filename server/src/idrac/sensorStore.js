@@ -40,7 +40,9 @@ export function getSensorSeries(serverId, { minutes = 0 } = {}) {
     const cutoff = Date.now() - minutes * 60_000;
     samples = samples.filter((x) => x.t >= cutoff);
   }
-  const latest = s.samples[s.samples.length - 1] || null;
+  // latest/sensors는 '반환하는 samples' 기준으로 뽑는다 — minutes 필터로 최근 구간이 비었는데
+  // 오래된 전체 보유 샘플에서 latest를 뽑아 '빈 그래프 + 센서 라벨'만 나오던 불일치 방지.
+  const latest = samples[samples.length - 1] || null;
   // 센서 이름은 최신 샘플 기준(정렬해 안정적 순서).
   const sensors = latest ? Object.keys(latest.temps).sort() : [...s.sensors].sort();
   const fanNames = latest ? Object.keys(latest.fans || {}).sort() : [...(s.fans || [])].sort();

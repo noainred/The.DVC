@@ -467,7 +467,9 @@ export async function fetchFirmwareInventory(entry) {
     } catch { /* skip one component */ }
   }
   // 종류 → 이름순 정렬(같은 종류끼리 묶임)
-  out.sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name) : a.type.localeCompare(b.type)));
+  out.sort((a, b) => (a.type === b.type
+    ? String(a.name || '').localeCompare(String(b.name || ''))
+    : String(a.type || '').localeCompare(String(b.type || ''))));
   return out;
 }
 

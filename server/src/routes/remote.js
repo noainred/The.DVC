@@ -74,10 +74,10 @@ remoteRouter.get('/targets', (req, res) => {
     if (req.query.vcenterId && vm.vcenterId !== req.query.vcenterId) continue;
     const ips = vm.ipAddresses?.length ? vm.ipAddresses : (vm.ipAddress ? [vm.ipAddress] : []);
     if (!ips.length) continue;
-    if (q && !vm.name.toLowerCase().includes(q) && !ips.some((ip) => ip.includes(q))) continue;
+    if (q && !String(vm.name || '').toLowerCase().includes(q) && !ips.some((ip) => ip.includes(q))) continue;
     targets.push({ id: vm.id, name: vm.name, vcenterId: vm.vcenterId, guestOS: vm.guestOS, powerState: vm.powerState, ips });
   }
-  targets.sort((a, b) => a.name.localeCompare(b.name));
+  targets.sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
   res.json({ targets: targets.slice(0, 500), total: targets.length });
 });
 
