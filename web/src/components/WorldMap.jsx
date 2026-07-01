@@ -68,25 +68,38 @@ export default function WorldMap({ sites = [], onSelect, height = 420, onResizeE
     drag.current = null;
   };
 
-  // 같은/비슷한 지역에 여러 사이트가 있으면 마커가 겹친다. 좌표를 약 1°로 반올림해 군집을 만들고,
-  // 군집 내 각 마커를 원형으로 소량 분산(offset)해 겹치지 않게 한다(원위치는 가는 선으로 연결).
+  // 같은/비슷한 지역에 여러 사이트가 있으면 마커가 겹친다. 격자 반올림은 경계에 걸친 근접 사이트를
+  // 놓치므로, '실제 근접 거리(경위도 유클리드)'로 군집화한다(단일연결 그리디). 군집 내 마커를 원형으로
+  // 분산(offset)해 겹치지 않게 한다.
   const spread = (() => {
-    const clusters = new Map();
+    const pts = [];
     for (const s of sites) {
       const loc = s.location || {};
       if (loc.lon == null || loc.lat == null) continue;
-      const k = `${Math.round(loc.lon)}|${Math.round(loc.lat)}`;
-      if (!clusters.has(k)) clusters.set(k, []);
-      clusters.get(k).push(s.id);
+      pts.push({ id: s.id, lon: Number(loc.lon), lat: Number(loc.lat) });
     }
+    const THRESH = 4; // 도(°) 이내면 같은 지역으로 묶음(≈ 수백 km, '비슷한 지역')
+    const cid = new Map();
+    let next = 0;
+    for (const p of pts) {
+      let found = -1;
+      for (const q of pts) {
+        if (q.id === p.id || !cid.has(q.id)) continue;
+        if (Math.hypot(p.lon - q.lon, p.lat - q.lat) <= THRESH) { found = cid.get(q.id); break; }
+      }
+      cid.set(p.id, found >= 0 ? found : next++);
+    }
+    const byC = new Map();
+    for (const p of pts) { const c = cid.get(p.id); if (!byC.has(c)) byC.set(c, []); byC.get(c).push(p.id); }
     const m = new Map();
-    for (const ids of clusters.values()) ids.forEach((id, i) => m.set(id, { idx: i, total: ids.length }));
+    for (const ids of byC.values()) ids.forEach((id, i) => m.set(id, { idx: i, total: ids.length }));
     return m;
   })();
   const offsetOf = (id) => {
     const c = spread.get(id);
     if (!c || c.total <= 1) return [0, 0];
-    const R = 14 + c.total * 2;                    // 군집이 클수록 반경 키움(겹치지 않게 넉넉히)
+    // 군집 크기에 따라 반경을 키워 확실히 분리(마커+글로우가 겹치지 않게 넉넉히).
+    const R = 20 + c.total * 3;
     const ang = (c.idx / c.total) * Math.PI * 2 - Math.PI / 2; // 위쪽(12시)부터 시계방향
     return [Math.cos(ang) * R, Math.sin(ang) * R];
   };

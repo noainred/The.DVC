@@ -3298,13 +3298,17 @@ function GuestOs({ scope }) {
   );
 }
 
-function GuestOsVmsModal({ label, params, onClose }) {
+export function GuestOsVmsModal({ label, params, onClose }) {
   const [d, setD] = useState(null);
   const [err, setErr] = useState(null);
+  const [vcf, setVcf] = useState(''); // vCenter 필터(로드된 VM을 vCenter별로 보기)
   useEffect(() => {
     const qs = new URLSearchParams(Object.entries(params || {}).filter(([, v]) => v)).toString();
     fetchJson(`/tools/guest-os/vms${qs ? `?${qs}` : ''}`).then(setD).catch((e) => setErr(e.message));
   }, []);
+  const allItems = d?.items || [];
+  const vcenters = [...new Set(allItems.map((r) => r.vcenterId).filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b)));
+  const items = vcf ? allItems.filter((r) => r.vcenterId === vcf) : allItems;
   const exportCsv = () => {
     const esc = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
     const head = ['vm', 'vcenter', 'cluster', 'host', 'cpu', 'memory_gb', 'disk_gb', 'ip', 'power'];
@@ -3329,11 +3333,27 @@ function GuestOsVmsModal({ label, params, onClose }) {
     <Modal title={`대상 VM — ${label}`} onClose={onClose} width={1040} resizable minWidth={620} minHeight={380}>
       {err ? <ErrorBox message={err} /> : !d ? <Loading /> : (
         <>
-          <div className="flex between" style={{ alignItems: 'center', marginBottom: 10 }}>
-            <span className="muted" style={{ fontSize: 13 }}>대상 VM <b>{d.total.toLocaleString()}</b>개{d.total > (d.items?.length || 0) ? ` (상위 ${d.items.length} 표시)` : ''}</span>
+          <div className="flex between" style={{ alignItems: 'center', marginBottom: 10, gap: 10, flexWrap: 'wrap' }}>
+            <div className="flex" style={{ alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <span className="muted" style={{ fontSize: 13 }}>
+                대상 VM <b>{d.total.toLocaleString()}</b>개{d.total > (d.items?.length || 0) ? ` (상위 ${d.items.length} 로드)` : ''}
+                {vcf ? <> · <b>{items.length.toLocaleString()}</b>개 표시</> : null}
+              </span>
+              {vcenters.length > 1 && (
+                <label className="flex" style={{ alignItems: 'center', gap: 6, fontSize: 12 }}>
+                  <span className="muted">vCenter</span>
+                  <select value={vcf} onChange={(e) => setVcf(e.target.value)} style={{ padding: '4px 8px', fontSize: 12 }}>
+                    <option value="">전체 ({vcenters.length})</option>
+                    {vcenters.map((vc) => (
+                      <option key={vc} value={vc}>{vc} ({allItems.filter((r) => r.vcenterId === vc).length})</option>
+                    ))}
+                  </select>
+                </label>
+              )}
+            </div>
             <button className="logout-btn" style={{ flex: 'none', padding: '7px 14px' }} disabled={!d.items?.length} onClick={exportCsv}>⬇ CSV 내보내기</button>
           </div>
-          <DataTable columns={cols} rows={d.items || []} initialSort={{ key: 'name', dir: 'asc' }} />
+          <DataTable columns={cols} rows={items} initialSort={{ key: 'name', dir: 'asc' }} />
         </>
       )}
     </Modal>
