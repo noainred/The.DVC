@@ -41,6 +41,16 @@ export function enqueueIdracScan(agent, { ips, username, password, vcenterId = '
   const key = String(agent || '').trim().toLowerCase();
   if (!key) return null;
   const pend = byAgent.get(key) || new Set();
+  // 중복 적재 방지: 같은 에이전트+법인(datacenterId)의 '대기 중' 스캔 잡이 이미 있으면 새로 만들지 않고
+  // 그 reqId를 그대로 반환한다. (버그: 스캔 버튼 중복 클릭·주기 스캐너 겹침으로 같은 대역 잡이 쌓임)
+  const dcNorm = String(datacenterId || '').trim();
+  for (const rid of pend) {
+    const jj = jobs.get(rid);
+    if (jj && (jj.action || 'scan') === 'scan' && jj.state === 'pending'
+      && String(jj.datacenterId || '').trim() === dcNorm) {
+      return rid;
+    }
+  }
   if (pend.size >= MAX_PENDING) return null;
   const reqId = newReqId();
   // 총 IP 수를 미리 계산해 UI가 진행률 분모를 바로 표시할 수 있게 한다(스캔 max=2048 반영).
