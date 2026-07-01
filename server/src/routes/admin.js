@@ -1610,7 +1610,19 @@ adminRouter.post('/collectors/test', adminOnly, async (req, res) => {
       timeoutMs: config.collector.timeoutMs, retries: 2,
       onRetry: () => { retried++; },
     });
-    if (!r.ok) return res.json({ ok: false, reason: `HTTP ${r.status}`, ms: Date.now() - started, retried });
+    if (!r.ok) {
+      // 서버가 준 사유(collector 라우터의 error 필드)와 상태코드별 해결 힌트를 함께 안내한다.
+      let serverMsg = '';
+      try { const j = await r.json(); serverMsg = j?.error || j?.reason || ''; } catch { /* 본문 없음/비JSON */ }
+      const hint = r.status === 404
+        ? "수집 서버에 COLLECTOR_TOKEN이 설정되지 않았습니다(export 비활성). 그 에이전트를 'COLLECTOR_TOKEN=<토큰>' 환경변수와 함께 실행/재시작하세요(리눅스: /etc/vmware-portal/portal.env)."
+        : (r.status === 403 || r.status === 401)
+          ? '토큰 불일치(인증 실패). 이 화면의 토큰을 에이전트의 COLLECTOR_TOKEN과 동일하게 맞추세요.'
+          : (r.status === 405 || r.status === 400)
+            ? '이 주소가 수집 에이전트(포탈)가 아닐 수 있습니다. URL/포트를 확인하세요.'
+            : '';
+      return res.json({ ok: false, reason: `HTTP ${r.status}${serverMsg ? ` — ${serverMsg}` : ''}${hint ? ` · ${hint}` : ''}`, status: r.status, ms: Date.now() - started, retried });
+    }
     const data = await r.json();
     res.json({ ok: true, ms: Date.now() - started, retried, hosts: data.hosts, version: data.version, datacenter: data.datacenter });
   } catch (err) {
