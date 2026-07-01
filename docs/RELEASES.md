@@ -28,6 +28,19 @@ git push origin v2.18.0
 `versions.json`은 워크플로가 이전 자산을 받아 새 버전 항목을 prepend하고 latest를 갱신한다
 (`packaging/release/update-versions.mjs`). 즉 버전 히스토리는 릴리스 자산 안에서 유지된다.
 
+### ⚠️ 자산 1000개 상한 & 자동 prune (필수)
+
+GitHub는 **릴리스 1개당 자산 1000개** 상한이 있다. 롤링 `downloads` 릴리스는 버전마다
+설치/오프라인/윈도우/업그레이드 번들 + `.sha256`(버전당 ~8개)이 쌓이므로, 방치하면
+~125버전에서 상한에 도달해 업로드가 `HTTP 422 (file_count limited to 1000 assets)` 로
+**전부 실패**한다(= `versions.json` 갱신 중단 → 자동 업그레이드 정지). 이를 막기 위해:
+
+- 워크플로가 업로드 **직전** `packaging/release/prune-assets.mjs` 로 오래된 버전 자산을 지워
+  **최근 N개 버전만 유지**한다(기본 `VERSIONS_KEEP=15`). `versions.json` 항목도 동일하게 최근 15개로 트리밍.
+- 자동 업그레이드는 `latest`만 있으면 되므로 오래된 버전 자산 삭제는 안전하다.
+- 최초 정리 실행은 삭제 대상이 많아(수백 개) prune 단계가 수 분 걸릴 수 있으나 **일회성**이며,
+  이후에는 한두 개만 정리해 빠르다.
+
 ## 컷오버(이전 절차)
 
 1. 워크플로/스크립트 커밋·push (이 커밋).

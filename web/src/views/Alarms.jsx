@@ -6,11 +6,13 @@ const ENDPOINT = { vm: '/vms', host: '/hosts', datastore: '/datastores' };
 
 export default function Alarms({ filters }) {
   const { data, error, loading } = usePolling('/alarms', filters, 15_000);
-  const { data: muteData } = usePolling('/alarm-mutes', {}, 30_000);
+  const [muteRev, setMuteRev] = useState(0); // 해제 후 즉시 재조회용(파라미터 변경으로 refetch)
+  const { data: muteData } = usePolling('/alarm-mutes', { _r: muteRev }, 30_000);
   const [detail, setDetail] = useState(null);
   const [muteFor, setMuteFor] = useState(null);  // alarm being muted
   const [showMutes, setShowMutes] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [muteErr, setMuteErr] = useState(null);
 
   const openEntity = async (a) => {
     const ep = ENDPOINT[a.entityType];
@@ -78,6 +80,7 @@ export default function Alarms({ filters }) {
 
       {showMutes && (
         <Modal title="알람 무시 규칙" onClose={() => setShowMutes(false)} width={620}>
+          {muteErr && <div className="error-box" style={{ marginBottom: 8 }}>해제 실패: {muteErr}</div>}
           {mutes.length === 0 ? <div className="muted" style={{ padding: 12 }}>무시 규칙이 없습니다.</div> : (
             <div className="table-wrap">
               <table>
@@ -88,7 +91,7 @@ export default function Alarms({ filters }) {
                       <td><span className="badge gray">{m.entityType || '전체'}</span></td>
                       <td><b>{m.template}</b><div className="muted" style={{ fontSize: 11 }}>예: {m.sample}</div></td>
                       <td className="muted">{m.vcenterId || '전체'}</td>
-                      <td className="right"><button className="tab" style={{ color: 'var(--red)' }} onClick={async () => { await delJson(`/alarm-mutes/${encodeURIComponent(m.id)}`); }}>해제</button></td>
+                      <td className="right"><button className="tab" style={{ color: 'var(--red)' }} onClick={async () => { setMuteErr(null); try { await delJson(`/alarm-mutes/${encodeURIComponent(m.id)}`); setMuteRev((x) => x + 1); } catch (e) { setMuteErr(e.message); } }}>해제</button></td>
                     </tr>
                   ))}
                 </tbody>

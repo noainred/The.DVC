@@ -146,6 +146,11 @@ export function importVcenters(incoming, mode = 'merge') {
     const idx = result.findIndex((v) => v.id === entry.id);
     if (idx >= 0) { result[idx] = entry; updated++; } else { result.push(entry); added++; }
   }
+  // 안전장치: 'replace'인데 유효 항목이 하나도 없으면(빈 배열/전부 무효) 레지스트리를 통째로
+  // 비우지 않는다 — 실수로 빈 파일을 replace 임포트해 등록 vCenter·자격증명이 소실되는 것 방지.
+  if (mode === 'replace' && result.length === 0) {
+    return { ok: false, mode, added: 0, updated: 0, skipped, total: existing.length, reason: '가져올 유효한 vCenter가 없어 전체 교체를 취소했습니다(기존 목록 유지).' };
+  }
   saveRegistry(result);
   return { ok: true, mode, added, updated, skipped, total: result.length };
 }

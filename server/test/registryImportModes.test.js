@@ -12,8 +12,9 @@ let registry;
 before(async () => { registry = await import('../src/idrac/registry.js'); });
 after(() => { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* */ } });
 
-// 각 테스트는 깨끗한 레지스트리에서 시작.
-beforeEach(() => { registry.importServers([], 'replace'); });
+// 각 테스트는 깨끗한 레지스트리에서 시작. (importServers([],'replace')는 이제 안전장치로
+// 빈 목록 전체교체를 거부하므로, 레지스트리 파일을 직접 지워 초기화한다.)
+beforeEach(() => { for (const f of fs.readdirSync(tmp)) { try { fs.rmSync(path.join(tmp, f), { force: true }); } catch { /* */ } } });
 
 const srv = (id, datacenterId, extra = {}) => ({
   id, name: id, host: id, username: 'root', password: 'x', datacenterId, ...extra,

@@ -131,6 +131,10 @@ export function importAssignments(incoming, mode = 'merge') {
     const idx = result.findIndex((a) => a.agent.toLowerCase() === entry.agent.toLowerCase());
     if (idx >= 0) { result[idx] = entry; updated++; } else { result.push(entry); added++; }
   }
+  // 안전장치: 'replace'인데 유효 항목이 0건이면 전체 삭제 금지(빈/무효 CSV로 스캔 할당 소실 방지).
+  if (mode === 'replace' && result.length === 0) {
+    return { ok: false, mode, added: 0, updated: 0, skipped, total: existing.length, reason: '가져올 유효한 할당이 없어 전체 교체를 취소했습니다(기존 유지).' };
+  }
   save(result);
   return { ok: true, mode, added, updated, skipped, total: result.length };
 }

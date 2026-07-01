@@ -30,7 +30,9 @@ const names = {
 
 function stat(name) {
   const p = path.join(distDir, name);
-  const buf = fs.readFileSync(p);
+  let buf;
+  try { buf = fs.readFileSync(p); }
+  catch (e) { throw new Error(`릴리스 산출물 누락: ${p} (${e.code || e.message}). 빌드 단계에서 이 파일이 생성됐는지 확인하세요.`); }
   return { size: buf.length, sha: crypto.createHash('sha256').update(buf).digest('hex') };
 }
 

@@ -41,13 +41,17 @@ export function enqueueIdracScan(agent, { ips, username, password, vcenterId = '
   const key = String(agent || '').trim().toLowerCase();
   if (!key) return null;
   const pend = byAgent.get(key) || new Set();
-  // 중복 적재 방지: 같은 에이전트+법인(datacenterId)의 '대기 중' 스캔 잡이 이미 있으면 새로 만들지 않고
-  // 그 reqId를 그대로 반환한다. (버그: 스캔 버튼 중복 클릭·주기 스캐너 겹침으로 같은 대역 잡이 쌓임)
+  // 중복 적재 방지: 같은 에이전트+법인(datacenterId)+대역(ips)의 '대기 중' 스캔 잡이 이미 있으면
+  // 새로 만들지 않고 그 reqId를 그대로 반환한다(스캔 버튼 중복 클릭·주기 스캐너 겹침 방지).
+  // ips를 키에 포함해야 한다 — 수동 스캔은 datacenterId를 넘기지 않아(dcNorm='') 서로 다른
+  // 대역으로 보낸 두 스캔이 같은 잡으로 병합되어 두 번째 요청이 조용히 유실되던 버그 방지.
   const dcNorm = String(datacenterId || '').trim();
+  const ipsNorm = String(ips || '').trim();
   for (const rid of pend) {
     const jj = jobs.get(rid);
     if (jj && (jj.action || 'scan') === 'scan' && jj.state === 'pending'
-      && String(jj.datacenterId || '').trim() === dcNorm) {
+      && String(jj.datacenterId || '').trim() === dcNorm
+      && String(jj.ips || '').trim() === ipsNorm) {
       return rid;
     }
   }

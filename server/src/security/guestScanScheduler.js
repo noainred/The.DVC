@@ -107,4 +107,13 @@ export function startGuestScanScheduler() {
   timer.unref?.();
   console.log('[gscan] 게스트 조사 스케줄러 시작');
 }
-export async function runGuestScanNow(id) { const j = load().find((x) => x.id === id); if (!j) return { ok: false, reason: '작업 없음' }; await runJob(j); return { ok: true, ...redact(j) }; }
+export async function runGuestScanNow(id) {
+  const j = load().find((x) => x.id === id);
+  if (!j) return { ok: false, reason: '작업 없음' };
+  // 스케줄러와 동일한 재진입 가드 공유 — 수동 '지금 실행'이 진행 중 스캔과 겹쳐 같은 job에
+  // 두 runJob이 동시에 돌며 게스트 ops·파일 저장이 경쟁하는 것을 막는다(중복 클릭 포함).
+  if (runningJobs.has(id)) return { ok: false, reason: '이미 실행 중입니다.' };
+  runningJobs.add(id);
+  try { await runJob(j); return { ok: true, ...redact(j) }; }
+  finally { runningJobs.delete(id); }
+}
