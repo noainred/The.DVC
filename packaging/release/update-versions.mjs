@@ -58,5 +58,10 @@ doc.versions = (doc.versions || []).filter((v) => v && v.version !== version);
 doc.versions.unshift(entry);
 doc.latest = version;
 
+// 롤링 릴리스는 자산 1000개 상한이 있으므로 최근 N개 버전만 유지(그 이상은 자산도 prune됨).
+// 자동 업그레이드는 latest만 있으면 되므로 오래된 항목은 안전하게 정리한다.
+const KEEP = Math.max(1, Number(process.env.VERSIONS_KEEP) || 15);
+if (doc.versions.length > KEEP) doc.versions = doc.versions.slice(0, KEEP);
+
 fs.writeFileSync(outPath, `${JSON.stringify(doc, null, 2)}\n`);
-console.log(`versions.json 갱신: latest=${version}, 항목 ${doc.versions.length}개 → ${outPath}`);
+console.log(`versions.json 갱신: latest=${version}, 항목 ${doc.versions.length}개(최대 ${KEEP}) → ${outPath}`);

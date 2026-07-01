@@ -13,6 +13,7 @@ import { getGuestGpuHost } from '../gpu/store.js';
 
 let timer = null;
 let lastRun = null;
+let _pruneTicks = 0; // retention prune 주기 카운터(매 샘플 DELETE 스캔 방지)
 
 const avg = (arr) => (arr.length ? arr.reduce((a, x) => a + x, 0) / arr.length : null);
 
@@ -55,9 +56,10 @@ async function sampleOnce() {
 
   if (rows.length) { try { db.insertMany(rows, ts); } catch (e) { console.warn('[metrics] insert 실패:', e.message); } }
 
-  // Retention prune (runtime-configurable).
+  // Retention prune (runtime-configurable). 매 샘플마다 DELETE 스캔하면 비용이 크므로
+  // 약 20샘플(기본 60s면 ~20분)에 1회만 실행한다 — store의 전력 적재 prune과 동일한 절감 패턴.
   const { retentionDays } = loadMetricsSettings();
-  if (retentionDays > 0) { try { db.prune(ts - retentionDays * 86_400_000); } catch { /* */ } }
+  if (retentionDays > 0 && (++_pruneTicks % 20 === 1)) { try { db.prune(ts - retentionDays * 86_400_000); } catch { /* */ } }
   lastRun = { at: ts, rows: rows.length, hostsWithTemp: hostsWithTemp.length };
 }
 
