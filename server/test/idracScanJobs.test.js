@@ -59,6 +59,19 @@ test('위임 스캔: enqueue 시 총 IP 수 + 진행률 보고', () => {
   assert.equal(r.progress.total, 20);
 });
 
+test('위임 스캔: 같은 에이전트+법인의 대기 잡은 중복 적재되지 않음(dedup)', () => {
+  const a = enqueueIdracScan('agent-MI', { ips: '10.94.42.1-10', username: 'root', password: 'pw', datacenterId: 'mi' });
+  const b = enqueueIdracScan('agent-MI', { ips: '10.94.42.1-10', username: 'root', password: 'pw', datacenterId: 'mi' });
+  assert.equal(a, b, '동일 에이전트+법인의 대기 스캔은 같은 reqId(중복 미적재)');
+  // 다른 법인은 별개 잡.
+  const c = enqueueIdracScan('agent-MI', { ips: '10.94.50.1-10', username: 'root', password: 'pw', datacenterId: 'mi2' });
+  assert.notEqual(a, c);
+  // 인출(running)되면 dedup 대상이 아니므로, 이후 같은 법인 재요청은 새 잡을 만든다.
+  takeIdracScanJobs('agent-MI');
+  const d = enqueueIdracScan('agent-MI', { ips: '10.94.42.1-10', username: 'root', password: 'pw', datacenterId: 'mi' });
+  assert.notEqual(a, d, '이미 running으로 넘어간 뒤에는 새 스캔 허용');
+});
+
 test('위임 스캔: 알 수 없는 reqId는 unknown', () => {
   assert.equal(getIdracScanResult('nope').state, 'unknown');
 });
