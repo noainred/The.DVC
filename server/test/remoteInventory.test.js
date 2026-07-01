@@ -76,3 +76,29 @@ test('buildExport: 인벤토리 없는 서버는 inv=null로 직렬화', async (
   assert.ok(s);
   assert.equal(s.inv, null);
 });
+
+test('buildExport: 표시 이름을 hostname으로 통일(태그를 이름으로 쓰지 않음)', async () => {
+  registry.importServers([
+    // ① hostNames에 실제 hostname 있음 → 그 hostname을 이름으로.
+    { id: '10.0.0.11', name: 'ABC1234', host: '10.0.0.11', username: 'root', password: 'x', serviceTag: 'ABC1234', hostNames: ['leshost11', '10.0.0.11'] },
+    // ② 저장된 name이 서비스태그와 동일(과거 등록분) + hostname 없음 → IP로 대체(태그 금지).
+    { id: '10.0.0.12', name: 'DEF5678', host: '10.0.0.12', username: 'root', password: 'x', serviceTag: 'DEF5678', hostNames: ['10.0.0.12'] },
+  ], 'replace');
+  const exp = await agent.buildExport();
+  const a = exp.servers.find((x) => x.id === '10.0.0.11');
+  const b = exp.servers.find((x) => x.id === '10.0.0.12');
+  assert.equal(a.name, 'leshost11', 'hostNames의 실제 hostname을 이름으로');
+  assert.equal(b.name, '10.0.0.12', 'hostname 없으면 IP로(서비스태그는 이름으로 안 씀)');
+  assert.notEqual(b.name, 'DEF5678');
+});
+
+test('registerScanned: 이름은 hostName || IP(서비스태그는 이름으로 쓰지 않음)', () => {
+  registry.importServers([], 'replace');
+  registry.registerScanned([
+    { ip: '10.0.1.1', serviceTag: 'TAG1', hostName: 'lesreal01' }, // hostName 있음
+    { ip: '10.0.1.2', serviceTag: 'TAG2', hostName: '' },           // hostName 없음 → IP
+  ], 'root', 'pw', 'merge', '', 'corpX');
+  const list = registry.loadRegistry();
+  assert.equal(list.find((s) => s.id === '10.0.1.1').name, 'lesreal01');
+  assert.equal(list.find((s) => s.id === '10.0.1.2').name, '10.0.1.2', 'hostName 없으면 IP');
+});

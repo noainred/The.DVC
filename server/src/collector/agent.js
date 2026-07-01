@@ -30,6 +30,18 @@ function compactInv(inv) {
 
 // 이 엣지의 iDRAC 레지스트리를 '서버 분석'용으로 직렬화(자격증명 제외). 위임 스캔으로 현지
 // 등록된 서버 + 캐시 인벤토리를 중앙이 병합해 위임 법인도 서버 분석에 나타나게 한다.
+// 표시 이름을 hostname으로 통일해 도출한다: ① hostNames 중 IP가 아닌 항목(=hostname) 우선,
+// ② 없으면 저장된 name이 서비스태그가 아닐 때만 그 name, ③ 그래도 없으면 host(IP)/id.
+// (과거 등록분이 name=서비스태그로 저장돼 있어도 재스캔 없이 다음 수집에서 교정된다.)
+const IPV4_RE = /^\d{1,3}(\.\d{1,3}){3}$/;
+function serverDisplayName(s) {
+  const tag = String(s.serviceTag || '').trim();
+  const hn = (s.hostNames || []).find((h) => h && !IPV4_RE.test(String(h).trim()) && String(h).trim() !== tag);
+  if (hn) return String(hn).trim();
+  if (s.name && String(s.name).trim() !== tag) return String(s.name).trim();
+  return String(s.host || '').replace(/^https?:\/\//, '') || s.id; // 스킴 제거한 IP
+}
+
 function localServersForExport() {
   const out = [];
   for (const s of loadIdracRegistry()) {
@@ -37,7 +49,7 @@ function localServersForExport() {
     const inv = getInventory(s.id);
     out.push({
       id: s.id,
-      name: s.name || s.id,
+      name: serverDisplayName(s),
       host: s.host || '',
       serviceTag: s.serviceTag || inv?.system?.serviceTag || '',
       model: s.model || inv?.system?.model || '',

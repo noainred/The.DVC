@@ -214,7 +214,10 @@ export function registerScanned(found, username, password, mode = 'merge', vcent
   const dc = String(datacenterId || '').trim();
   const servers = found.map((f) => ({
     id: f.ip,
-    name: f.hostName || f.serviceTag || f.ip,
+    // 표시 이름은 hostname으로 통일한다: iDRAC이 보고한 HostName이 있으면 그걸 쓰고,
+    // 없으면 IP(주소)로 대체한다. 서비스태그는 이름으로 쓰지 않는다(서비스태그 열에만 표시).
+    // 과거엔 hostName 없으면 serviceTag를 이름으로 써서 '어떤 건 이름=태그'로 뒤섞였다.
+    name: f.hostName || f.ip,
     host: f.ip,
     username,
     password,
