@@ -148,6 +148,7 @@ export function listIdracScanJobs() {
       reqId: j.reqId,
       agent: j.agent,
       action: j.action || 'scan',
+      datacenterId: j.datacenterId || '', // '대상' 칸에 표시할 스캔 대상 법인(DataCenter)
       vcenterId: j.vcenterId || '',
       state: j.state,
       progress: j.progress ? { scanned: j.progress.scanned || 0, total: j.progress.total || 0, found: j.progress.found || 0, at: j.progress.at || null } : null,
