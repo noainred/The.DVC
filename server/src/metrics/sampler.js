@@ -14,10 +14,21 @@ import { getGuestGpuHost } from '../gpu/store.js';
 let timer = null;
 let lastRun = null;
 let _pruneTicks = 0; // retention prune 주기 카운터(매 샘플 DELETE 스캔 방지)
+let sampling = false; // 재진입 방지
 
 const avg = (arr) => (arr.length ? arr.reduce((a, x) => a + x, 0) / arr.length : null);
 
 async function sampleOnce() {
+  if (sampling) return; // 이전 샘플이 아직 진행 중이면 이번 틱 건너뜀
+  sampling = true;
+  try {
+    return await sampleOnceInner();
+  } finally {
+    sampling = false;
+  }
+}
+
+async function sampleOnceInner() {
   const snap = store.get();
   const db = await getMetricsDb();
   const ts = Date.now();

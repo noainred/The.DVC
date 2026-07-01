@@ -147,6 +147,11 @@ class Store {
   }
 
   async refresh() {
+    // 재진입 방지: 이전 수집이 아직 진행 중이면 이번 틱은 건너뛴다. 고RTT·다수 vCenter에서
+    // 한 주기가 pollIntervalMs를 초과하면 setInterval이 겹쳐 실행돼 수집이 중첩되고 CPU가
+    // 누적 악화되던 문제를 막는다(스킵해도 캐시 기반 스냅샷은 계속 서빙됨).
+    if (this._refreshing) return;
+    this._refreshing = true;
     try {
       // 긴급중단(2인 승인) 활성 시 모든 수집 정지 — 마지막 스냅샷은 그대로 유지.
       if (isStopped()) return;
@@ -263,6 +268,8 @@ class Store {
     } catch (err) {
       this.lastError = err.message;
       console.error('[store] refresh failed:', err.message);
+    } finally {
+      this._refreshing = false;
     }
   }
 
