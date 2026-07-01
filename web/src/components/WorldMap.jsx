@@ -79,16 +79,19 @@ export default function WorldMap({ sites = [], onSelect, height = 420, onResizeE
       pts.push({ id: s.id, lon: Number(loc.lon), lat: Number(loc.lat) });
     }
     const THRESH = 4; // 도(°) 이내면 같은 지역으로 묶음(≈ 수백 km, '비슷한 지역')
-    const cid = new Map();
-    let next = 0;
-    for (const p of pts) {
-      let found = -1;
-      for (const q of pts) {
-        if (q.id === p.id || !cid.has(q.id)) continue;
-        if (Math.hypot(p.lon - q.lon, p.lat - q.lat) <= THRESH) { found = cid.get(q.id); break; }
+    // union-find로 THRESH 이내 쌍을 모두 병합 → 배열 순서와 무관하게 전이적으로 같은 군집으로
+    // 묶는다(A–C, C–B가 가까우면 A·B도 같은 군집). 이전 단일연결 방식은 순서에 따라 겹치는
+    // 마커가 다른 군집으로 남아 분산이 안 되던 문제가 있었다.
+    const parent = new Map(pts.map((p) => [p.id, p.id]));
+    const find = (x) => { let r = x; while (parent.get(r) !== r) r = parent.get(r); while (parent.get(x) !== r) { const nx = parent.get(x); parent.set(x, r); x = nx; } return r; };
+    const union = (a, b) => { const ra = find(a); const rb = find(b); if (ra !== rb) parent.set(ra, rb); };
+    for (let i = 0; i < pts.length; i++) {
+      for (let j = i + 1; j < pts.length; j++) {
+        if (Math.hypot(pts[i].lon - pts[j].lon, pts[i].lat - pts[j].lat) <= THRESH) union(pts[i].id, pts[j].id);
       }
-      cid.set(p.id, found >= 0 ? found : next++);
     }
+    const cid = new Map();
+    for (const p of pts) cid.set(p.id, find(p.id)); // 군집 키 = 대표(root) id
     const byC = new Map();
     for (const p of pts) { const c = cid.get(p.id); if (!byC.has(c)) byC.set(c, []); byC.get(c).push(p.id); }
     const m = new Map();
