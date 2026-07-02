@@ -2127,6 +2127,9 @@ function ServerInfoByVcenter({ vc, onServer }) {
   const [err, setErr] = useState(null);
   const [q, setQ] = useState('');
   const [modelDetail, setModelDetail] = useState(null); // { corpName, model, servers } → 모델 상세 모달
+  const [inlineCorp, setInlineCorp] = useState(null); // 법인명 클릭 → 카드 아래 인라인 상세 표(팝업 아님)
+  const inlineRef = useRef(null);
+  useEffect(() => { if (inlineCorp) inlineRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }, [inlineCorp]);
   const load = () => Promise.all([
     fetchJson('/admin/idrac').then((r) => r.servers || []),
     fetchJson('/admin/datacenters').then((r) => ({ datacenters: r.datacenters || [], assign: r.assign || {} })).catch(() => ({ datacenters: [], assign: {} })),
@@ -2190,15 +2193,15 @@ function ServerInfoByVcenter({ vc, onServer }) {
           servers: g.list.filter((s) => ((s.model || '').trim() || '미상') === model).map((s) => ({ ...s, _vc: effVc(s) })),
         });
         return (
-        <div key={g.id} className="card" style={{ padding: 14 }}>
+        <div key={g.id} className="card" style={{ padding: 14, ...(inlineCorp === g.id ? { borderColor: 'var(--accent)' } : {}) }}>
           <div className="cell-link" style={{ fontWeight: 700, fontSize: 15, marginBottom: 4, cursor: 'pointer' }}
-            title={`${g.name} 전체 서버 목록 보기`}
-            onClick={() => setModelDetail({ corpName: g.name, model: null, servers: g.list.map((s) => ({ ...s, _vc: effVc(s) })) })}>
-            {g.id === '__unmapped__' ? '⚠ ' : '🏢 '}{g.name} <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>›</span>
+            title={`${g.name} 전체 서버 목록을 아래에 표시`}
+            onClick={() => setInlineCorp((cur) => (cur === g.id ? null : g.id))}>
+            {g.id === '__unmapped__' ? '⚠ ' : '🏢 '}{g.name} <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>{inlineCorp === g.id ? '▲' : '▼'}</span>
           </div>
           <div className="muted" style={{ fontSize: 12, marginBottom: 12 }}>
             🖥 서버 모델 종류 · <b>{modelCounts.length}</b>종 · 총 <b style={{ color: 'var(--accent, #60a5fa)' }}>{g.list.length}</b>대
-            <span style={{ opacity: 0.8 }}> — 법인명은 전체, 모델은 해당 모델 목록</span>
+            <span style={{ opacity: 0.8 }}> — 법인명 클릭=아래 전체 표, 모델 클릭=해당 모델 목록</span>
           </div>
           {/* 서버 모델 종류 — 가로 막대(대수 비례). 막대 클릭 → 해당 모델 서버 상세 모달 */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -2220,6 +2223,28 @@ function ServerInfoByVcenter({ vc, onServer }) {
         })}
       </div>
       )}
+
+      {/* 법인명 클릭 → 카드 아래 인라인 세부 표(팝업 아님). 다시 클릭하거나 [닫기]로 접음. */}
+      {inlineCorp && (() => {
+        const g = groupList.find((x) => x.id === inlineCorp);
+        if (!g) return null; // 필터 변경으로 그룹이 사라지면 표시 안 함
+        return (
+          <div ref={inlineRef} className="card" style={{ marginTop: 14, padding: 14, borderColor: 'var(--accent)' }}>
+            <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 10 }}>
+              <b style={{ fontSize: 15 }}>{g.id === '__unmapped__' ? '⚠ ' : '🏢 '}{g.name} — 전체 서버 <span style={{ color: 'var(--accent, #60a5fa)' }}>{g.list.length}</span>대</b>
+              <button className="logout-btn" style={{ flex: 'none', padding: '6px 14px' }} onClick={() => setInlineCorp(null)}>닫기 ▲</button>
+            </div>
+            <ServerListBody
+              key={g.id}
+              corpName={g.name}
+              model={null}
+              servers={g.list.map((s) => ({ ...s, _vc: effVc(s) }))}
+              onRow={(s) => { if (s.type !== 'ome') onServer(s); }}
+            />
+          </div>
+        );
+      })()}
+
       {modelDetail && (
         <ModelServersModal
           {...modelDetail}
@@ -2231,8 +2256,8 @@ function ServerInfoByVcenter({ vc, onServer }) {
   );
 }
 
-/** 법인 서버 상세 목록 모달. model 지정 시 그 모델만, model=null(법인명 클릭) 시 전체 목록(모델 컬럼 포함). 행 클릭 → iDRAC 상세. */
-function ModelServersModal({ corpName, model, servers, onRow, onClose }) {
+/** 법인 서버 상세 목록 '본문'(검색/CSV/표) — 모달(모델 클릭)과 인라인 패널(법인명 클릭)이 공유. */
+function ServerListBody({ corpName, model, servers, onRow }) {
   const [q, setQ] = useState('');
   const allMode = !model; // 법인명 클릭 → 전체 서버(모델 컬럼 표시)
   const ql = q.trim().toLowerCase();
@@ -2249,7 +2274,7 @@ function ModelServersModal({ corpName, model, servers, onRow, onClose }) {
     const a = document.createElement('a'); a.href = url; a.download = `servers-${String(model || corpName).replace(/[^a-zA-Z0-9._-]+/g, '_')}-${new Date().toISOString().slice(0, 10)}.csv`; a.click(); URL.revokeObjectURL(url);
   };
   return (
-    <Modal title={allMode ? `${corpName} — 전체 서버` : `${model} — ${corpName}`} onClose={onClose} width={960} resizable minWidth={560} minHeight={360}>
+    <>
       <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 10 }}>
         <span className="muted" style={{ fontSize: 13 }}>
           {allMode ? <><b style={{ color: 'var(--accent, #60a5fa)' }}>{corpName}</b> 서버</> : <><b style={{ color: 'var(--accent, #60a5fa)' }}>{model}</b> 서버</>} <b>{(servers || []).length}</b>대{ql ? ` · ${rows.length} 표시` : ''}
@@ -2278,6 +2303,15 @@ function ModelServersModal({ corpName, model, servers, onRow, onClose }) {
           );
         })}</tbody>
       </table>
+    </>
+  );
+}
+
+/** 특정 모델 서버 상세 목록 모달(모델 막대 클릭 시). 법인명 클릭은 모달 대신 인라인 표를 사용. */
+function ModelServersModal({ corpName, model, servers, onRow, onClose }) {
+  return (
+    <Modal title={model ? `${model} — ${corpName}` : `${corpName} — 전체 서버`} onClose={onClose} width={960} resizable minWidth={560} minHeight={360}>
+      <ServerListBody corpName={corpName} model={model} servers={servers} onRow={onRow} />
     </Modal>
   );
 }
