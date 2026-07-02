@@ -13,21 +13,59 @@
  *    잡을 적재(fire-and-forget). 결과 전력은 수집서버(collector) 경로로 병합된다.
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
 import { config } from '../config.js';
 import { scanForIdracs } from './scan.js';
 import { registerScanned } from './registry.js';
 import { pollNow } from './poller.js';
 import { enabledScanRanges, recordScanRangeRun, getScanRangeRaw } from './scanRanges.js';
-import { enqueueIdracScan } from '../central/idracScanJobs.js';
+import { enqueueIdracScan, cancelPendingIdracScanJobs } from '../central/idracScanJobs.js';
 import { isStopped } from '../security/emergencyStop.js';
 
 let timer = null;
 let running = false;
+let stopRequested = false; // 사용자 '스캔 중지' — 진행 중 사이클을 안전하게 끊는다
 let lastRun = null;     // { at, durationMs, vcenters, found, registered, delegated, errors }
 let progress = null;    // { vcenterId, done, total, foundSoFar, idx, totalVcenters, startedAt }
 
+// 주기(런타임 설정) — 웹에서 변경 시 CONFIG_DIR/idrac-scan-settings.json에 보존(업그레이드 유지).
+// 미설정이면 환경변수/기본값(IDRAC_SCAN_INTERVAL_MS, 6h). 0 = 주기 비활성(수동 스캔만).
+const SETTINGS_FILE = path.join(config.configDir, 'idrac-scan-settings.json');
+let settingsCache;
+function loadScanSettingsFile() {
+  if (settingsCache !== undefined) return settingsCache;
+  try { settingsCache = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')); }
+  catch { settingsCache = null; }
+  return settingsCache;
+}
 function intervalMs() {
-  return config.idrac.scanIntervalMs;
+  const s = loadScanSettingsFile();
+  return (s && Number.isFinite(Number(s.intervalMs))) ? Number(s.intervalMs) : config.idrac.scanIntervalMs;
+}
+
+/** 주기 변경(웹 설정) — ms 단위(0=주기 끔). 저장 후 타이머 즉시 재적용. */
+export function setIdracScanIntervalMs(ms) {
+  const v = Math.max(0, Math.min(30 * 86_400_000, Number(ms) || 0)); // 상한 30일
+  settingsCache = { ...(loadScanSettingsFile() || {}), intervalMs: v };
+  try {
+    fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settingsCache, null, 2), { mode: 0o600 });
+  } catch (e) { return { ok: false, reason: `저장 실패: ${e.message}` }; }
+  rescheduleIdracScanPoller();
+  return { ok: true, intervalMs: v };
+}
+
+/**
+ * 스캔 중지 — ① 진행 중인 중앙 직접 스캔은 다음 IP/법인부터 중단(진행 중 probe만 마침),
+ * ② 아직 에이전트가 인출하지 않은 '대기' 위임 잡은 취소한다. 이미 에이전트가 가져간(진행 중)
+ * 위임 잡은 원격에서 멈출 수 없어 그대로 완료된다(결과는 무해).
+ */
+export function stopIdracScanNow() {
+  const wasRunning = running;
+  if (running) stopRequested = true;
+  const canceledJobs = cancelPendingIdracScanJobs();
+  return { ok: true, stoppingCentral: wasRunning, canceledJobs };
 }
 
 /** 한 법인(DataCenter) 대역을 스캔+등록(또는 위임). 반환 { datacenterId, scanned, found, registered, delegated, error }. */
@@ -40,7 +78,7 @@ async function scanOneDatacenter(e, onProgress) {
     return { datacenterId: e.datacenterId, delegated: true, agent: e.agent, reqId: reqId || null, error: reqId ? null : '위임 잡 적재 실패(대기 한도 초과)' };
   }
   // 중앙 직접 스캔 → 발견한 iDRAC을 그 법인(DataCenter)에 등록(법인 DB).
-  const r = await scanForIdracs({ ips, username: e.username, password: e.password, onProgress });
+  const r = await scanForIdracs({ ips, username: e.username, password: e.password, onProgress, shouldAbort: () => stopRequested });
   let registered = 0;
   if (r.found.length) {
     const reg = registerScanned(r.found, e.username, e.password, e.mode === 'replace-datacenter' ? 'replace-datacenter' : 'merge', '', e.datacenterId);
@@ -76,6 +114,7 @@ export async function runIdracScanOnce(opts = {}) {
   let foundTotal = 0, registeredTotal = 0, delegatedTotal = 0; const errors = [];
   try {
     for (let i = 0; i < entries.length; i++) {
+      if (stopRequested) { errors.push('사용자가 스캔을 중지했습니다.'); break; }
       const e = entries[i];
       progress = { datacenterId: e.datacenterId, done: 0, total: 0, foundSoFar: foundTotal, idx: i, totalDatacenters: entries.length, startedAt: started };
       try {
@@ -94,12 +133,12 @@ export async function runIdracScanOnce(opts = {}) {
     }
     // 새로 등록된 서버가 있으면 즉시 전력 1회 수집(대시보드에 바로 반영).
     if (registeredTotal > 0) pollNow().catch(() => {});
-    lastRun = { at: Date.now(), durationMs: Date.now() - started, datacenters: entries.length, found: foundTotal, registered: registeredTotal, delegated: delegatedTotal, errors, manual: !!opts.manual, results };
+    lastRun = { at: Date.now(), durationMs: Date.now() - started, datacenters: entries.length, found: foundTotal, registered: registeredTotal, delegated: delegatedTotal, errors, manual: !!opts.manual, stopped: stopRequested || undefined, results };
     return { ok: true, ...lastRun };
   } catch (e) {
     lastRun = { at: Date.now(), error: e.message };
     return { ok: false, reason: e.message };
-  } finally { running = false; progress = null; }
+  } finally { running = false; progress = null; stopRequested = false; }
 }
 
 /** 비동기 시작(요청 즉시 반환, 창 닫아도 백그라운드 지속). */
