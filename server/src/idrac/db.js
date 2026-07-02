@@ -22,6 +22,9 @@ function initSqlite() {
   return import('node:sqlite').then(({ DatabaseSync }) => {
     fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
     const db = new DatabaseSync(DB_PATH);
+    // WAL + synchronous=NORMAL: 커밋당 fsync 2회(DELETE 저널) → 배치화(단건 insert 5ms→0.01ms 실측).
+    // busy_timeout: 동시 접근 시 즉시 SQLITE_BUSY 실패 대신 대기.
+    try { db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=3000;'); } catch { /* 구버전 폴백 */ }
     db.exec(`
       CREATE TABLE IF NOT EXISTS power_samples (
         server_id TEXT NOT NULL,
@@ -155,17 +158,42 @@ function initJsonFallback() {
   };
 }
 
+/**
+ * '서버별 최신 샘플' 인메모리 캐시 래퍼 — latestAll의 GROUP BY MAX는 테이블 전체 인덱스
+ * 스캔이라(90일 보존 수렴 시 수억 행) 매 refresh(30초)마다 3회 호출되며 이벤트 루프를
+ * 초 단위로 블로킹했다. 기동 시 1회만 시드하고 이후 쓰기 경로에서 O(1) 갱신, 읽기는 O(서버수).
+ */
+function withLatestCache(db) {
+  const cache = db.latestAll(); // 시드(기동 시 1회 풀스캔) — 이후 재스캔 없음
+  const bump = (serverId, watts, ts) => {
+    const cur = cache.get(serverId);
+    if (!cur || ts >= cur.ts) cache.set(serverId, { watts, ts });
+  };
+  return {
+    ...db,
+    insert: (serverId, watts, ts) => { const r = db.insert(serverId, watts, ts); bump(serverId, watts, ts); return r; },
+    insertMany: (samples) => {
+      const n = db.insertMany(samples);
+      for (const s of samples || []) bump(s.serverId, s.watts, s.ts);
+      return n;
+    },
+    deleteServers: (ids) => { const n = db.deleteServers(ids); for (const id of ids) cache.delete(id); return n; },
+    latest: (serverId) => cache.get(serverId) || null,
+    latestAll: () => new Map(cache),
+  };
+}
+
 /** Lazily initialize and memoize the storage backend (single-flight — 동시 첫 호출 시 이중 커넥션 방지). */
 let ready = null;
 export async function getDb() {
   if (impl) return impl;
   if (!ready) {
     ready = initSqlite().then((db) => {
-      impl = db;
+      impl = withLatestCache(db);
       console.log(`[idrac] power DB: SQLite (${DB_PATH})`);
       return impl;
     }).catch((err) => {
-      impl = initJsonFallback();
+      impl = withLatestCache(initJsonFallback());
       console.warn(`[idrac] node:sqlite 사용 불가(${err.code || err.message}); NDJSON 폴백 사용. ` +
         `SQLite를 쓰려면 NODE_OPTIONS=--experimental-sqlite 로 실행하세요.`);
       return impl;

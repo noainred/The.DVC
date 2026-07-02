@@ -1032,8 +1032,10 @@ function IdracScanRanges({ data, vcenters, datacenters = [], agents, busy, form,
     const hours = Number(ivEdit);
     if (!Number.isFinite(hours) || hours < 0) { setIvMsg('0 이상 숫자(시간)를 입력하세요.'); return; }
     try {
-      await putJson('/admin/idrac/scan-ranges/interval', { hours });
-      setIvMsg(hours === 0 ? '주기 스캔을 껐습니다(수동만).' : `주기 ${hours}시간으로 저장됨`);
+      const r = await putJson('/admin/idrac/scan-ranges/interval', { hours });
+      // 서버가 하한(10분) 등으로 클램프할 수 있으므로 실제 적용된 값으로 안내한다.
+      const appliedH = Number.isFinite(r?.intervalMs) ? Math.round(r.intervalMs / 3600000 * 10) / 10 : hours;
+      setIvMsg(appliedH === 0 ? '주기 스캔을 껐습니다(수동만).' : `주기 ${appliedH}시간으로 저장됨${appliedH !== hours ? ` (입력 ${hours} → 하한/상한 적용)` : ''}`);
       setIvEdit(null);
       onReload?.(); // 버튼 라벨('주기 N시간')을 즉시 갱신 — 폴링 전까지 이전 값이 남아 저장 실패로 오인 방지
       setTimeout(() => setIvMsg(null), 4000);

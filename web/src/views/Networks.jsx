@@ -6,7 +6,7 @@ import IpmsMatches from '../components/IpmsMatches.jsx';
 export default function Networks({ filters }) {
   const { data, error, loading } = usePolling('/networks', filters, 15_000);
   if (loading && !data) return <Loading />;
-  if (error) return <ErrorBox message={error} />;
+  if (error && !data) return <ErrorBox message={error} />; // 데이터 보유 중 일시 폴링 오류는 화면 유지
   const rows = data?.items || [];
 
   const label = (t) =>

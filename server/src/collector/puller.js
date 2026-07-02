@@ -26,6 +26,10 @@ async function pullOne(c) {
   if (res.status === 401 || res.status === 403) throw new Error('수집 서버 토큰 불일치(인증 실패)');
   if (!res.ok) throw new Error(`export -> ${res.status} ${res.statusText}`);
   const data = await res.json();
+  // 응답 대기(재시도 포함 최대 60초+) 중 이 수집기가 삭제/비활성됐을 수 있다 — 그대로 쓰면
+  // 관리 라우트의 정리(clear)를 뒤늦게 도착한 이 쓰기가 되돌려 유령 데이터가 재등장한다.
+  const still = loadCollectors().find((x) => x.id === c.id && x.enabled !== false);
+  if (!still) return { hosts: 0, skipped: 'removed-or-disabled' };
   const db = await getDb();
   const ts = Date.now();
   clearCollectorHosts(c.id);

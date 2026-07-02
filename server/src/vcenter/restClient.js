@@ -138,10 +138,14 @@ async function collectFromVCenterRest(vc) {
   const client = new VCenterClient(vc);
   await client.login();
   try {
+    // 핵심 목록(호스트/VM/데이터스토어)의 실패를 빈 배열로 삼키면 vCenter가 'connected'인데
+    // VM 0대인 스냅샷이 정상처럼 유통돼 인벤토리/IPAM/집계가 오염된다(REST 목록은 무필터
+    // 4000 VM 상한 초과 시에도 오류를 던짐). 핵심 목록 실패는 이 vCenter의 수집 실패로 던져
+    // 상위(store)가 마지막 정상 캐시를 유지하게 한다. 부가 목록(네트워크/클러스터)만 관용.
     const [hosts, vms, datastores, networks, clusters] = await Promise.all([
-      client.listHosts().catch(() => []),
-      client.listVms().catch(() => []),
-      client.listDatastores().catch(() => []),
+      client.listHosts(),
+      client.listVms(),
+      client.listDatastores(),
       client.listNetworks().catch(() => []),
       client.listClusters().catch(() => []),
     ]);

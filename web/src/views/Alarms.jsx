@@ -18,22 +18,24 @@ export default function Alarms({ filters }) {
     const ep = ENDPOINT[a.entityType];
     if (!ep) return;
     try {
-      const res = await fetchJson(ep, { vcenterId: a.vcenterId, name: a.entity, limit: 100 });
+      // 서버 검색 파라미터는 q(이름 부분일치) — name은 무시되어 앞 100개만 받아와
+      // 엉뚱한 첫 항목이 열리던 문제 수정. 정확 일치를 우선 선택하고, 없으면 열지 않는다.
+      const res = await fetchJson(ep, { vcenterId: a.vcenterId, q: a.entity, limit: 100 });
       const item = (res.items || []).find((x) => x.name === a.entity) || (res.items || [])[0];
       if (item) setDetail({ type: a.entityType, item });
     } catch { /* ignore */ }
   };
 
   const mute = async (scope) => {
-    setBusy(true);
+    setBusy(true); setMuteErr(null);
     try {
       await postJson('/alarm-mutes', { message: muteFor.message, entityType: muteFor.entityType, vcenterId: muteFor.vcenterId, scope });
       setMuteFor(null);
-    } catch { /* ignore */ } finally { setBusy(false); }
+    } catch (e) { setMuteErr(`무시 등록 실패: ${e.message}`); } finally { setBusy(false); }
   };
 
   if (loading && !data) return <Loading />;
-  if (error) return <ErrorBox message={error} />;
+  if (error && !data) return <ErrorBox message={error} />;
   const rows = data?.items || [];
   const mutes = muteData?.mutes || [];
 
@@ -50,6 +52,7 @@ export default function Alarms({ filters }) {
 
   return (
     <>
+      {error && <div className="badge red" style={{ marginBottom: 8 }}>갱신 실패(직전 데이터 표시 중): {error}</div>}
       <div className="flex between wrap" style={{ marginBottom: 10, alignItems: 'center' }}>
         <div className="muted">
           총 <b style={{ color: 'var(--text)' }}>{data.total.toLocaleString()}</b>개 알람 · 위험 {rows.filter((a) => a.severity === 'critical').length} · 경고 {rows.filter((a) => a.severity === 'warning').length}
@@ -63,6 +66,7 @@ export default function Alarms({ filters }) {
 
       {muteFor && (
         <Modal title="앞으로 이 알람 무시" onClose={() => setMuteFor(null)} width={480}>
+          {muteErr && <div className="error-box" style={{ marginBottom: 8 }}>{muteErr}</div>}
           <div style={{ fontSize: 13, lineHeight: 1.7 }}>
             <div className="muted">대상 유형 / 메시지 패턴</div>
             <div style={{ margin: '6px 0 14px', padding: '8px 10px', background: 'rgba(12,19,34,.6)', borderRadius: 8 }}>

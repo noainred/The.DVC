@@ -184,6 +184,10 @@ export function importServers(incoming, mode = 'merge') {
     if (idx >= 0) { result[idx] = entry; updated++; } else { result.push(entry); added++; }
   }
   saveRegistry(result);
+  // replace 계열로 밀려난(교체로 사라진) 서버의 파생 캐시도 정리 — removeServer/deleteServers와 동일.
+  const keptIds = new Set(result.map((s) => s.id));
+  const droppedIds = existing.filter((s) => !keptIds.has(s.id)).map((s) => s.id);
+  if (droppedIds.length) dropDerivedCaches(droppedIds);
   return { ok: true, mode, added, updated, skipped, total: result.length };
 }
 

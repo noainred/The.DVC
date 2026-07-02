@@ -55,7 +55,9 @@ function ensurePerms() {
   try { fs.chmodSync(FILE, 0o600); } catch { /* */ }
 }
 
-let appendsSinceTrim = 0;
+// 카운터는 프로세스 메모리라, 자동 업그레이드로 재시작이 잦은 환경에서 재시작 사이 500건 미만이면
+// 트림이 영영 안 돌아 파일이 MAX를 넘어 계속 자란다 — 첫 append 시 1회는 무조건 트림을 시도한다.
+let appendsSinceTrim = 499;
 function maybeTrim() {
   if (++appendsSinceTrim < 500) return;
   appendsSinceTrim = 0;

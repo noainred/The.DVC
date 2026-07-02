@@ -73,7 +73,9 @@ app.use(rateLimit({ skip: (req) => {
 } }));
 // 사이트 위임 수집의 인벤토리 push(/api/central/inventory)만 수MB가 될 수 있어 큰 한도를 적용.
 // 그 외 모든 라우트는 기본 1mb로 제한해 메모리/요청 남용 면적을 줄인다.
-const BIG_JSON = express.json({ limit: process.env.JSON_BODY_LIMIT || '64mb' });
+// 한도 16mb: 실제 사이트 push는 수백 KB~수 MB 수준 — 64mb는 동기 JSON.parse가 최악 수 초
+// 이벤트 루프를 막는 것을 허용하는 과대 한도였다(필요 시 JSON_BODY_LIMIT로 상향 가능).
+const BIG_JSON = express.json({ limit: process.env.JSON_BODY_LIMIT || '16mb' });
 app.use('/api/central/inventory', BIG_JSON);
 app.use('/api/central/agent-config', BIG_JSON); // 엣지 설정 통합 push(다수 파일)
 app.use(express.json({ limit: '1mb' }));

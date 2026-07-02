@@ -86,7 +86,7 @@ export default function App() {
       if (!getToken()) return setUser(null);
       const me = await fetchMe();
       setUser(me || null);
-    })();
+    })().catch(() => setUser(null)); // 부팅 fetch 실패 시 무한 '로딩' 고착 대신 로그인 화면으로
   }, []);
 
   // 유휴 자동 로그아웃 — 로그인(실세션) 상태에서 설정된 시간(기본 30분) 동안 입력이 없으면 강제 로그아웃.

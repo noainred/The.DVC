@@ -66,12 +66,16 @@ export default function Topology3D() {
     })();
     return () => {
       destroyed = true;
+      loadGen.current++; // 진행 중 load 무효화 — 파괴된 그래프 인스턴스에 graphData 호출 방지
+      graphRef.current = null;
       try { if (Graph?.__resize) window.removeEventListener('resize', Graph.__resize); Graph?._destructor?.(); } catch { /* */ }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const loadGen = useRef(0); // vCenter/호스트 연타 시 늦은 응답이 최신 그래프를 덮거나, 언마운트 후 파괴된 그래프에 접근하는 것 방지
   const load = async () => {
+    const gen = ++loadGen.current;
     const f = focusRef.current;
     setLoading(true); setError(null);
     try {
@@ -80,15 +84,16 @@ export default function Topology3D() {
       if (f.vc) qs.set('vcenterId', f.vc);
       if (f.host) qs.set('host', f.host);
       const d = await fetchJson(`/insights/graph${qs.toString() ? `?${qs}` : ''}`);
+      if (gen !== loadGen.current) return;
       setCounts(d.counts);
       if (Array.isArray(d.vcenters)) setVcList(d.vcenters);
       setHostList(d.hosts || []);
       if (graphRef.current) {
         graphRef.current.graphData({ nodes: d.nodes, links: d.links });
-        setTimeout(() => graphRef.current?.zoomToFit?.(600, 40), 400);
+        setTimeout(() => { if (gen === loadGen.current) graphRef.current?.zoomToFit?.(600, 40); }, 400);
       }
-    } catch (e) { setError(e.message); }
-    setLoading(false);
+    } catch (e) { if (gen === loadGen.current) setError(e.message); }
+    if (gen === loadGen.current) setLoading(false);
   };
   const pickVc = (id) => { setVc(id); setHost(''); focusRef.current = { vc: id, host: '', showVms }; load(); };
   const pickHost = (h) => { setHost(h); focusRef.current = { vc, host: h, showVms }; load(); };

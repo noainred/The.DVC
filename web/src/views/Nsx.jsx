@@ -19,7 +19,7 @@ export default function Nsx() {
   // NOTE: all hooks must run before any early return (React error #310).
   const rules = useMemo(() => (data?.dfw || []).flatMap((p) => p.rules || []), [data]);
   if (loading && !data) return <Loading />;
-  if (error) return <ErrorBox message={error} />;
+  if (error && !data) return <ErrorBox message={error} />; // 데이터 보유 중 일시 폴링 오류는 화면 유지
   const r = data.rollup || {};
   const managers = data.managers || [];
 

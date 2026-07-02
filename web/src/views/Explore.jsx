@@ -55,7 +55,7 @@ export default function Explore({ scope }) {
   const { data: vmResult } = usePolling('/vms', { ...searchParams, sortBy: 'cpuUsagePct', order: 'desc', limit: 200 }, 20_000);
 
   if (loading && !top) return <Loading />;
-  if (error) return <ErrorBox message={error} />;
+  if (error && !top) return <ErrorBox message={error} />; // 데이터 보유 중 일시 폴링 오류는 화면 유지
 
   const tb = (gb) => (gb >= 1024 ? `${(gb / 1024).toFixed(1)} TB` : `${gb} GB`);
 

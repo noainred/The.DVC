@@ -8,7 +8,7 @@ import {
 
 const fmtAgo = (ts) => {
   if (!ts) return '—';
-  const s = Math.round((Date.now() - ts) / 1000);
+  const s = Math.max(0, Math.round((Date.now() - ts) / 1000)); // 서버-브라우저 시계 오차로 음수("-12초 전") 방지
   if (s < 60) return `${s}초 전`;
   if (s < 3600) return `${Math.round(s / 60)}분 전`;
   return `${Math.round(s / 3600)}시간 전`;
@@ -125,7 +125,7 @@ function FinOps() {
 function Anomaly() {
   const [z, setZ] = useState(3.5);
   const { data: d, error, loading } = usePolling('/insights/anomalies', { z, windowHours: 24 }, 30_000);
-  if (error) return <ErrorBox message={error} />;
+  if (error && !d) return <ErrorBox message={error} />; // 데이터 보유 중 일시 폴링 오류는 화면 유지
   if (loading && !d) return <Loading />;
   return (
     <div>
@@ -235,7 +235,7 @@ function Forecast() {
 /* ───────────────────────── 보안 자세 ───────────────────────── */
 function Security() {
   const { data: d, error, loading } = usePolling('/insights/security', {}, 60_000);
-  if (error) return <ErrorBox message={error} />;
+  if (error && !d) return <ErrorBox message={error} />; // 데이터 보유 중 일시 폴링 오류는 화면 유지
   if (loading && !d) return <Loading />;
   const badge = (w) => <span className={`badge ${w === 'critical' ? 'red' : w === 'warning' ? 'amber' : 'green'}`}>{w === 'critical' ? '위험' : w === 'warning' ? '주의' : '정상'}</span>;
   const advCell = (x) => (
@@ -300,7 +300,7 @@ function TreeNode({ node, depth }) {
 function Topology() {
   const [vc, setVc] = useState('');
   const { data: d, error, loading } = usePolling('/insights/topology', vc ? { vcenterId: vc } : {}, 30_000);
-  if (error) return <ErrorBox message={error} />;
+  if (error && !d) return <ErrorBox message={error} />; // 데이터 보유 중 일시 폴링 오류는 화면 유지
   if (loading && !d) return <Loading />;
   return (
     <div>
@@ -328,7 +328,7 @@ function Topology() {
 function Incidents() {
   const { data: d, error, loading } = usePolling('/insights/incidents', {}, 20_000);
   const [notif, setNotif] = useState(typeof Notification !== 'undefined' ? Notification.permission : 'unsupported');
-  if (error) return <ErrorBox message={error} />;
+  if (error && !d) return <ErrorBox message={error} />; // 데이터 보유 중 일시 폴링 오류는 화면 유지
   if (loading && !d) return <Loading />;
   const sev = (s) => <span className={`badge ${s === 'critical' ? 'red' : s === 'warning' ? 'amber' : s === 'resolved' ? 'green' : 'gray'}`}>{s === 'critical' ? '위험' : s === 'warning' ? '경고' : s === 'resolved' ? '해소' : s}</span>;
   return (
