@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, putJson, delJson, usePolling } from '../api.js';
 import { ErrorBox, Modal } from '../components/ui.jsx';
 
@@ -270,7 +270,9 @@ function LogIssues() {
   const [days, setDays] = useState(7);
   const [d, setD] = useState(null);
   const [err, setErr] = useState(null);
-  const load = () => fetchJson(`/admin/net/log-issues?days=${days}${vc ? `&vcenterId=${encodeURIComponent(vc)}` : ''}`).then((r) => { setD(r); setErr(null); }).catch((e) => setErr(e.message));
+  // 세대 가드: vCenter/기간을 빠르게 바꿀 때 느린 이전 응답이 최신을 덮어쓰지 않게.
+  const genRef = useRef(0);
+  const load = () => { const g = ++genRef.current; return fetchJson(`/admin/net/log-issues?days=${days}${vc ? `&vcenterId=${encodeURIComponent(vc)}` : ''}`).then((r) => { if (g === genRef.current) { setD(r); setErr(null); } }).catch((e) => { if (g === genRef.current) setErr(e.message); }); };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [vc, days]);
   return (
     <div className="card" style={{ padding: 16 }}>

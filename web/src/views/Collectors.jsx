@@ -27,11 +27,12 @@ export default function Collectors() {
     if (!window.confirm('수신 트래픽 통계를 초기화할까요? (다시 0부터 집계)')) return;
     try { await postJson('/admin/central/ingest-stats/reset', {}); await loadIngest(); } catch { /* */ }
   };
+  const reloadTimer = useRef(null); // 업그레이드 후 지연 재조회 타이머(언마운트 시 정리)
   useEffect(() => {
     load(); loadIngest();
     fetchJson('/health').then((h) => setCentral(h.version)).catch(() => {});
     const t = setInterval(() => { load(); loadIngest(); }, 15_000);
-    return () => clearInterval(t);
+    return () => { clearInterval(t); if (reloadTimer.current) clearTimeout(reloadTimer.current); };
   }, []);
 
   const upgrade = async (id) => {
@@ -43,7 +44,8 @@ export default function Collectors() {
       setBanner(r.ok
         ? { ok: true, text: `업그레이드 푸시 완료: ${r.succeeded}/${r.pushed} 성공 (v${r.version}, ${r.source})` }
         : { ok: false, text: r.reason });
-      setTimeout(load, 5000);
+      if (reloadTimer.current) clearTimeout(reloadTimer.current);
+      reloadTimer.current = setTimeout(load, 5000);
     } catch (e) { setBanner({ ok: false, text: e.message }); }
     finally { setBusy(false); }
   };
