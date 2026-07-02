@@ -1023,7 +1023,23 @@ function IdracScanRanges({ data, vcenters, datacenters = [], agents, busy, form,
     if (r.delegated) return <span style={{ color: '#a78bfa' }} title={`에이전트 ${r.agent || ''} 위임`}>위임{r.agent ? `(${r.agent})` : ''} · {when}</span>;
     return <span className="muted">발견 {r.found ?? 0} · 등록 {r.registered ?? 0}{r.scanned != null ? ` · 스캔 ${r.scanned}` : ''} · {when}</span>;
   };
-  const intervalH = st.intervalMs ? Math.round(st.intervalMs / 3600000 * 10) / 10 : null;
+  const intervalH = st.intervalMs != null ? Math.round(st.intervalMs / 3600000 * 10) / 10 : null;
+  // 주기 설정(시간) — 저장 시 즉시 재적용(0=주기 끔, 수동 스캔만). 스캔 중지 버튼과 함께 헤더에 배치.
+  const [ivEdit, setIvEdit] = useState(null); // null=보기 모드, 문자열=편집 중 값
+  const [ivMsg, setIvMsg] = useState(null);
+  const saveInterval = async () => {
+    const hours = Number(ivEdit);
+    if (!Number.isFinite(hours) || hours < 0) { setIvMsg('0 이상 숫자(시간)를 입력하세요.'); return; }
+    try { await putJson('/admin/idrac/scan-ranges/interval', { hours }); setIvMsg(hours === 0 ? '주기 스캔을 껐습니다(수동만).' : `주기 ${hours}시간으로 저장됨`); setIvEdit(null); setTimeout(() => setIvMsg(null), 4000); }
+    catch (e) { setIvMsg(e.message); }
+  };
+  const stopScan = async () => {
+    try {
+      const r = await postJson('/admin/idrac/scan-ranges/stop', {});
+      setIvMsg(`중지 요청됨 — 중앙 스캔 ${r.stoppingCentral ? '중단' : '없음'} · 대기 위임 잡 ${r.canceledJobs}건 취소(진행 중 위임 잡은 원격 중지 불가)`);
+      setTimeout(() => setIvMsg(null), 6000);
+    } catch (e) { setIvMsg(e.message); }
+  };
 
   return (
     <div className="card" style={{ marginBottom: 12, padding: '12px 16px', borderLeft: '3px solid var(--accent, #60a5fa)' }}>
@@ -1032,13 +1048,29 @@ function IdracScanRanges({ data, vcenters, datacenters = [], agents, busy, form,
         <div className="flex gap" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
           <span className="muted" style={{ fontSize: 12 }}>
             활성 {st.enabledDatacenters ?? 0} 법인 · 대역 {st.totalRanges ?? 0}개
-            {intervalH != null && <> · 주기 {intervalH}시간</>}
             {st.running && <span style={{ color: 'var(--amber)' }}> · 스캔 중…</span>}
           </span>
+          {/* 주기 표시/설정 — 클릭해 편집, 시간 단위(0=끔) */}
+          {ivEdit === null ? (
+            <button className="tab" style={{ padding: '5px 10px', fontSize: 12 }} title="클릭하여 주기 변경(시간 단위, 0=주기 끔)"
+              onClick={() => setIvEdit(String(intervalH ?? 6))}>
+              주기 {intervalH === 0 ? '끔(수동만)' : `${intervalH}시간`} ✎
+            </button>
+          ) : (
+            <span className="flex gap" style={{ alignItems: 'center' }}>
+              <input className="input" type="number" min={0} max={720} step={0.5} value={ivEdit} onChange={(e) => setIvEdit(e.target.value)} style={{ width: 76, padding: '5px 8px', fontSize: 12 }} />
+              <span className="muted" style={{ fontSize: 12 }}>시간</span>
+              <button className="login-btn" style={{ flex: 'none', padding: '5px 12px', fontSize: 12 }} onClick={saveInterval}>저장</button>
+              <button className="logout-btn" style={{ padding: '5px 10px', fontSize: 12 }} onClick={() => setIvEdit(null)}>취소</button>
+            </span>
+          )}
           <button className="logout-btn" style={{ padding: '8px 12px' }} disabled={busy || st.running} onClick={() => onScan()} title="활성화된 모든 법인 대역을 지금 스캔(백그라운드)">⚡ 지금 스캔(전체)</button>
+          <button className="logout-btn" style={{ padding: '8px 12px', color: 'var(--red)' }} disabled={busy} onClick={stopScan}
+            title="진행 중인 중앙 스캔을 중단하고, 대기 중인 위임 잡을 취소합니다(진행 중 위임 잡은 원격 중지 불가)">⏹ 스캔 중지</button>
           <button className="login-btn" style={{ flex: 'none', padding: '8px 14px' }} disabled={busy} onClick={onNew}>+ 대역 추가</button>
         </div>
       </div>
+      {ivMsg && <div className="muted" style={{ fontSize: 12, marginBottom: 6, color: '#93c5fd' }}>{ivMsg}</div>}
 
       <div className="muted" style={{ fontSize: 12, lineHeight: 1.7, marginBottom: 8 }}>
         <b>법인(DataCenter)별</b>로 iDRAC IP 대역과 계정을 저장하면, 주기 스캐너가 각 대역의 Redfish에 접속해 <b>Dell iDRAC만 골라</b>

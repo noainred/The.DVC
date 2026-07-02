@@ -86,7 +86,7 @@ import { scanForIdracs } from '../idrac/scan.js';
 import { enqueueIdracScan, enqueueIdracRegister, getIdracScanResult, listIdracScanJobs, getIdracScanJobLog } from '../central/idracScanJobs.js';
 import { getPollerStatus, pollNow } from '../idrac/poller.js';
 import { listScanRanges, saveScanRanges, removeScanRanges } from '../idrac/scanRanges.js';
-import { startIdracScanNow, idracScanStatus } from '../idrac/scanPoller.js';
+import { startIdracScanNow, idracScanStatus, stopIdracScanNow, setIdracScanIntervalMs } from '../idrac/scanPoller.js';
 import { allMeasuredPower, buildPowerDashboard, purgeStalePower, measuredPowerBreakdown, vcenterPowerCheck } from '../idrac/service.js';
 import { computeFinOps, loadFinopsConfig } from '../insights/finops.js';
 import { loadPowerSettings, savePowerSettings, filterMeasuredByMapping } from '../idrac/powerSettings.js';
@@ -1409,6 +1409,22 @@ adminRouter.post('/idrac/scan-ranges/scan', adminOnly, (req, res) => {
 });
 // 진행 상태(가벼운 폴링용).
 adminRouter.get('/idrac/scan-ranges/status', adminOnly, (_req, res) => res.json({ ok: true, status: idracScanStatus() }));
+
+// 스캔 중지 — 진행 중 중앙 직접 스캔 중단 + 대기 중 위임 잡 취소(이미 인출된 위임 잡은 원격 중지 불가).
+adminRouter.post('/idrac/scan-ranges/stop', adminOnly, (req, res) => {
+  const r = stopIdracScanNow();
+  logAudit({ user: req.user?.username, action: 'iDRAC 스캔 중지', target: '(전체)', detail: `중앙중단=${r.stoppingCentral} 위임취소=${r.canceledJobs}` });
+  res.json({ ...r, status: idracScanStatus() });
+});
+
+// 주기 스캔 간격 설정(시간 단위, 0=주기 끔·수동만). 저장 즉시 타이머 재적용, 업그레이드 후에도 유지.
+adminRouter.put('/idrac/scan-ranges/interval', adminOnly, (req, res) => {
+  const hours = Number(req.body?.hours);
+  if (!Number.isFinite(hours) || hours < 0 || hours > 720) return res.status(400).json({ ok: false, reason: '주기는 0~720 시간이어야 합니다(0=주기 끔).' });
+  const r = setIdracScanIntervalMs(Math.round(hours * 3_600_000));
+  if (r.ok) logAudit({ user: req.user?.username, action: 'iDRAC 스캔 주기 변경', target: `${hours}시간` });
+  res.status(r.ok ? 200 : 500).json({ ...r, status: idracScanStatus() });
+});
 
 // 스캔 현황 — 주기 스캐너 상태 + 진행 중·최근 위임 스캔/등록 잡 목록(어디서든 진행 확인용).
 // 위임 스캔으로 에이전트 현지 등록된 전력은 '원격 수집(collector)'로 반영되므로, 스캔 에이전트가

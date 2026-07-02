@@ -115,6 +115,28 @@ export function agentLastScanPoll(agentName) {
   return agentPolls.get(String(agentName || '').trim().toLowerCase()) || null;
 }
 
+/**
+ * '스캔 중지' — 아직 에이전트가 인출하지 않은 '대기' 잡을 모두 취소한다(큐에서 제거 + error 종결).
+ * 이미 인출된(진행 중) 잡은 원격에서 멈출 수 없어 그대로 둔다. 반환: 취소된 잡 수.
+ */
+export function cancelPendingIdracScanJobs() {
+  let n = 0;
+  for (const [key, pend] of byAgent) {
+    for (const reqId of [...pend]) {
+      const j = jobs.get(reqId);
+      if (!j || j.state !== 'pending') { pend.delete(reqId); continue; }
+      j.state = 'error';
+      j.doneAt = Date.now();
+      j.result = { scanned: 0, foundCount: 0, found: [], registered: 0, error: '사용자가 스캔을 중지(취소)했습니다.' };
+      addEvent(j, '사용자가 스캔을 중지 — 대기 중이던 잡을 취소했습니다.', 'warn');
+      pend.delete(reqId);
+      n++;
+    }
+    if (!pend.size) byAgent.delete(key);
+  }
+  return n;
+}
+
 /** 에이전트가 스캔 진행률 보고(중간) — { scanned, total, found }. */
 export function setIdracScanProgress(reqId, { scanned, total, found } = {}) {
   const j = jobs.get(reqId);

@@ -7,7 +7,7 @@
 import { expandIpList } from './iprange.js';
 import { probeIdrac } from './redfish.js';
 
-export async function scanForIdracs({ ips, username, password, concurrency = 32, perHostTimeout = 3000, max = 2048, onProgress = null }) {
+export async function scanForIdracs({ ips, username, password, concurrency = 32, perHostTimeout = 3000, max = 2048, onProgress = null, shouldAbort = null }) {
   const { ips: list, errors, truncated } = expandIpList(ips);
   const targets = list.slice(0, max);
 
@@ -21,8 +21,11 @@ export async function scanForIdracs({ ips, username, password, concurrency = 32,
   // (done, total, found) — found는 지금까지 발견한 iDRAC 수(진행 창의 '발견 N대' 표시용).
   const report = () => { if (onProgress) { try { onProgress(done, total, found.length); } catch { /* ignore */ } } };
 
+  let aborted = false;
   async function worker() {
     while (idx < targets.length) {
+      // 사용자 '스캔 중지' — 진행 중인 probe는 마치되 새 IP는 시작하지 않는다.
+      if (shouldAbort && shouldAbort()) { aborted = true; break; }
       const ip = targets[idx++];
       const r = await probeIdrac(ip, username, password, perHostTimeout);
       if (!r.ok) unreachable++;
@@ -40,7 +43,8 @@ export async function scanForIdracs({ ips, username, password, concurrency = 32,
 
   found.sort((a, b) => a.ip.localeCompare(b.ip, undefined, { numeric: true }));
   return {
-    scanned: targets.length,
+    scanned: aborted ? done : targets.length,
+    aborted,
     found,
     foundCount: found.length,
     unreachable,
