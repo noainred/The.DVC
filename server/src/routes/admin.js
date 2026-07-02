@@ -154,11 +154,7 @@ function withMappedVc(s, tagMap) {
 
 // 서버 분석 공용 — iDRAC 서버 목록(OME 제외) + mappedVcenterId 부여 후 필터. 중앙 로컬 레지스트리만
 // (온도 시계열처럼 중앙 직접 수집분에만 의미 있는 뷰용).
-function idracServersForAnalysis(req) {
-  const pred = analysisFilter(req);
-  const tagMap = hostVcByTag();
-  return loadIdracRegistry().filter((s) => s.type !== 'ome').map((s) => withMappedVc(s, tagMap)).filter(pred);
-}
+// (구) 중앙 로컬 등록 서버만 — 모든 분석 탭이 analysisServersWithRemote(원격 포함)로 이전해 미사용.
 
 // 수집기(에이전트) → DataCenter id 매핑. collector.datacenter 라벨/이름/ id를 등록된
 // DataCenter(id 또는 name, 대소문자 무시)에 맞춘다. '에이전트로 검색하면 그 법인에 속하게'의 근거.
@@ -179,7 +175,8 @@ function remoteServersResolved() {
 }
 
 // 서버 분석 공용(원격 포함) — 중앙 로컬 + 위임 법인의 원격 인벤토리를 병합(id 중복은 중앙 우선).
-// 위임 스캔으로 엣지에만 등록된 서버가 서버 분석에 나타나게 한다. 온도(시계열)만 제외한다.
+// 위임 스캔으로 엣지에만 등록된 서버가 서버 분석에 나타나게 한다. 온도도 엣지 export의
+// 최신 센서(s.sensors)로 포함된다(법인별 온도 탭).
 function analysisServersWithRemote(req) {
   const pred = analysisFilter(req);
   const tagMap = hostVcByTag();
@@ -1101,12 +1098,14 @@ adminRouter.get('/idrac/hardware-servers', adminOnly, (req, res) => {
 
 // 서버 분석 — 전체 iDRAC 서버의 최신 온도센서(CPU/GPU/Inlet/Exhaust 등) 평탄화(정렬용).
 adminRouter.get('/idrac/temps', adminOnly, (req, res) => {
-  const servers = idracServersForAnalysis(req);
+  // 원격(위임 법인 엣지 등록) 서버 포함 — 엣지가 export에 실어 보낸 최신 센서(s.sensors)를 쓴다.
+  // 이전엔 중앙 로컬 등록 서버만 집계해, 전부 위임인 환경에서 '법인별 온도'가 0/0으로 비었다.
+  const servers = analysisServersWithRemote(req);
   const rows = [];
   const serverList = [];
   let missing = 0;
   for (const s of servers) {
-    const latest = getSensorSeries(s.id).latest;
+    const latest = s.remote ? s.sensors : getSensorSeries(s.id).latest;
     const temps = latest?.temps || {};
     if (!Object.keys(temps).length) { missing++; continue; }
     const list = Object.entries(temps).map(([name, celsius]) => ({ name, celsius }));
