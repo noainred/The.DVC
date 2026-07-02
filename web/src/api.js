@@ -3,8 +3,13 @@ import { useEffect, useRef, useState } from 'react';
 const BASE = '/api';
 const TOKEN_KEY = 'vmportal.token';
 
-export const getToken = () => localStorage.getItem(TOKEN_KEY);
-export const setToken = (t) => (t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY));
+// 토큰은 두 저장소를 모두 조회 — 로그인의 'KEEP SESSION' 체크 여부에 따라
+// localStorage(브라우저 재시작에도 유지) 또는 sessionStorage(탭/브라우저 종료 시 로그아웃)에 저장된다.
+export const getToken = () => localStorage.getItem(TOKEN_KEY) || sessionStorage.getItem(TOKEN_KEY);
+export const setToken = (t, { persist = true } = {}) => {
+  try { localStorage.removeItem(TOKEN_KEY); sessionStorage.removeItem(TOKEN_KEY); } catch { /* */ }
+  if (t) (persist ? localStorage : sessionStorage).setItem(TOKEN_KEY, t);
+};
 
 // Invoked when the API reports the session is no longer valid (401).
 let onUnauthorized = () => {};
@@ -100,7 +105,7 @@ export const putJson = (path, body) => sendJson(path, 'PUT', body);
 export const patchJson = (path, body) => sendJson(path, 'PATCH', body);
 export const delJson = (path) => sendJson(path, 'DELETE');
 
-export async function login(username, password) {
+export async function login(username, password, { keep = true } = {}) {
   const res = await fetch(`${BASE}/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -111,7 +116,7 @@ export async function login(username, password) {
     throw new Error(msg);
   }
   const data = await res.json();
-  setToken(data.token);
+  setToken(data.token, { persist: keep }); // keep=false → 브라우저/탭 종료 시 자동 로그아웃
   return data.user;
 }
 

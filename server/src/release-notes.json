@@ -1,6 +1,17 @@
 {
   "notes": [
     {
+      "version": "2.108.0",
+      "date": "2026-07-02",
+      "title": "로그인 화면 리디자인 — THE DAVINCI 오퍼레이터 콘솔",
+      "notes": [
+        "로그인 화면을 Davinci Login 디자인으로 전면 교체했습니다: 다크 테마 + 도트 월드맵 배경(실제 지리 데이터 기반, 글로우 사이트 마커 PDX·IAD·GRU·LHR·FRA·ICN·NRT) + 'Eyes on every rack, in every region.' 히어로 + 오퍼레이터 로그인 카드(SECURE ACCESS // AUTH-01).",
+        "기존 인증 동작은 모두 유지됩니다 — 아이디/비밀번호·OTP 6자리 로그인, 자동 로그아웃 안내, 3회 실패 경고, SSO 인사말.",
+        "신규: 비밀번호 SHOW/HIDE 토글 · 'KEEP SESSION · 8H' 체크(해제 시 브라우저/탭 종료 시 자동 로그아웃 — sessionStorage 저장) · FORGOT PASSWORD? 안내.",
+        "지도는 마운트/리사이즈 시에만 캔버스에 1회 렌더링되어 런타임 부하가 없습니다."
+      ]
+    },
+    {
       "version": "2.107.0",
       "date": "2026-07-02",
       "title": "엣지 포탈 비밀번호 일괄 변경 — 기본 비번을 중앙에서 한 번에 교체",
