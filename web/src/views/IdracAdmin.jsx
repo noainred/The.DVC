@@ -990,10 +990,32 @@ function IdracScanJobs({ data, vcenters, datacenters = [], busy, onRefresh, onSc
 // 각 vCenter에 iDRAC IP 대역 + 계정을 저장하면, 주기 스캐너가 그 대역을 돌며 Dell iDRAC을
 // 발견해 해당 vCenter로 자동 등록한다(IPMS의 'vCenter별 스캔 대역'과 같은 흐름).
 function IdracScanRanges({ data, vcenters, datacenters = [], agents, busy, form, setForm, msg, setMsg, onNew, onEdit, onSave, onDelete, onScan }) {
-  const list = data?.ranges || [];
   const st = data?.status || {};
   const prog = st.progress;
   const dcName = (id) => (datacenters.find((d) => d.id === id)?.name || id);
+  // 컬럼 정렬 — 헤더 클릭으로 asc/desc 토글. 기본은 법인명 오름차순.
+  const [sort, setSort] = useState({ key: 'name', dir: 'asc' });
+  const SORT_VAL = {
+    name: (e) => String(dcName(e.datacenterId) || '').toLowerCase(),
+    ranges: (e) => (e.ranges || []).length,
+    username: (e) => String(e.username || '').toLowerCase(),
+    agent: (e) => String(e.agent || '').toLowerCase(), // 빈 값(직접)이 맨 앞/뒤
+    enabled: (e) => (e.enabled ? 1 : 0),
+    lastRun: (e) => e.lastRun?.at || 0,
+  };
+  const list = [...(data?.ranges || [])].sort((a, b) => {
+    const f = SORT_VAL[sort.key] || SORT_VAL.name;
+    const x = f(a); const y = f(b);
+    const c = typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y));
+    return sort.dir === 'asc' ? c : -c;
+  });
+  const clickSort = (key) => setSort((s) => (s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }));
+  const Th = ({ k, children, right }) => (
+    <th className={right ? 'right' : undefined} style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }}
+      title="클릭하여 정렬" onClick={() => clickSort(k)}>
+      {children}{sort.key === k ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : <span style={{ opacity: 0.35 }}> ↕</span>}
+    </th>
+  );
   const fmtRun = (r) => {
     if (!r) return <span className="muted">—</span>;
     const when = r.at ? new Date(r.at).toLocaleString('ko-KR') : '';
@@ -1101,7 +1123,7 @@ function IdracScanRanges({ data, vcenters, datacenters = [], agents, busy, form,
       <div className="table-wrap">
         <table>
           <thead><tr>
-            <th>법인(DataCenter)</th><th>대역</th><th>계정</th><th>스캔 주체</th><th>주기</th><th>최근 결과</th><th className="right">작업</th>
+            <Th k="name">법인(DataCenter)</Th><Th k="ranges">대역</Th><Th k="username">계정</Th><Th k="agent">스캔 주체</Th><Th k="enabled">주기</Th><Th k="lastRun">최근 결과</Th><th className="right">작업</th>
           </tr></thead>
           <tbody>
             {list.length === 0 && <tr><td colSpan={7} className="center muted" style={{ padding: 24 }}>저장된 스캔 대역이 없습니다. “+ 대역 추가”로 등록하세요.</td></tr>}
