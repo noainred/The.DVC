@@ -18,6 +18,17 @@ import { fetchPower, fetchInventory } from './redfish.js';
 import { testOme } from './ome.js';
 import { expandIpList } from './iprange.js';
 import { bumpFleetRev } from '../insights/fleetRev.js';
+import { removeInventory } from './invCache.js';
+import { clearSensorSeries } from './sensorStore.js';
+
+// 삭제된 서버의 파생 캐시 정리 — 안 하면 인벤토리(디스크 영속)와 센서 시계열(메모리, 서버당
+// 최대 1440샘플×64센서)이 프로세스 수명 내내 남아 서버 등록/삭제 반복 시 무한 증식한다.
+function dropDerivedCaches(ids) {
+  for (const id of ids) {
+    try { removeInventory(id); } catch { /* best effort */ }
+    try { clearSensorSeries(id); } catch { /* best effort */ }
+  }
+}
 
 const FILE = path.join(config.configDir, 'idrac.json');
 
@@ -124,6 +135,7 @@ export function removeServer(id) {
   const next = list.filter((s) => s.id !== id);
   if (next.length === list.length) return { ok: false, reason: `없는 서버: ${id}` };
   saveRegistry(next);
+  dropDerivedCaches([id]);
   return { ok: true };
 }
 
@@ -269,6 +281,8 @@ export function deleteServers({ all = false, vcenterId = undefined } = {}) {
   }
   const removed = list.length - next.length;
   saveRegistry(next);
+  const kept = new Set(next.map((s) => s.id));
+  dropDerivedCaches(list.filter((s) => !kept.has(s.id)).map((s) => s.id));
   return { ok: true, removed, total: next.length };
 }
 

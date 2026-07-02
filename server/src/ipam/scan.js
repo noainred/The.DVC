@@ -38,7 +38,8 @@ export function rangeSize(spec) {
     const [a, bRaw] = s.split('-').map((x) => x.trim());
     const an = ipToNum(a);
     let bn = ipToNum(bRaw);
-    if (bn == null && /^\d{1,3}$/.test(bRaw) && an != null) bn = (an & 0xffffff00) + Number(bRaw);
+    // & 는 int32라 첫 옥텟 ≥128(192.168.x 등)이면 음수가 됨 — >>>0 으로 부호 제거 필수.
+    if (bn == null && /^\d{1,3}$/.test(bRaw) && an != null) bn = ((an & 0xffffff00) >>> 0) + Number(bRaw);
     if (an == null || bn == null || bn < an) return 0;
     return bn - an + 1;
   }
@@ -67,7 +68,7 @@ export function expandRange(spec) {
     const [a, bRaw] = s.split('-').map((x) => x.trim());
     const an = ipToNum(a);
     let bn = ipToNum(bRaw);
-    if (bn == null && /^\d{1,3}$/.test(bRaw) && an != null) bn = (an & 0xffffff00) + Number(bRaw); // a.b.c.d-e
+    if (bn == null && /^\d{1,3}$/.test(bRaw) && an != null) bn = ((an & 0xffffff00) >>> 0) + Number(bRaw); // a.b.c.d-e (>>>0: 192.168.x 부호 버그 방지)
     if (an == null || bn == null || bn < an) return [];
     const total = bn - an + 1;
     if (total > RANGE_CAP) console.warn(`[ipscan] 범위 ${s}이(가) ${total}개로 ${RANGE_CAP} 상한 초과 — 앞 ${RANGE_CAP}개만 스캔합니다.`);

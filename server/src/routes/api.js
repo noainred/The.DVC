@@ -516,7 +516,7 @@ api.get('/tools/ipam/scan-report.csv', (req, res) => {
 api.get('/tools/ipam/annotation', (req, res) => {
   res.json({ ip: req.query.ip, annotation: getAnnotation(req.query.ip) });
 });
-api.put('/tools/ipam/annotation', (req, res) => {
+api.put('/tools/ipam/annotation', requireRole('admin', 'operator'), (req, res) => {
   const { ip, memo, tags } = req.body || {};
   const r = setAnnotation(ip, { memo, tags }, req.user);
   res.status(r.ok ? 200 : 400).json(r);

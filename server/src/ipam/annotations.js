@@ -8,6 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
 
 const FILE = path.join(config.configDir, 'ipam-annotations.json');
 
@@ -44,7 +45,7 @@ export function setAnnotation(ip, { memo = '', tags = [] } = {}, user) {
     data[key] = { memo: m, tags: t, updatedAt: new Date().toISOString(), updatedBy: user?.username || 'unknown' };
   }
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
-  fs.writeFileSync(FILE, JSON.stringify(data, null, 2), { mode: 0o600 });
+  atomicWriteFileSync(FILE, JSON.stringify(data, null, 2)); // 부분기록 시 메모/태그 전량 유실 방지
   cache = data; rev++;
   return { ok: true, annotation: data[key] || null };
 }

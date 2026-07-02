@@ -151,7 +151,32 @@ export function applyPackage(members, installDir) {
     fs.rmSync(staging, { recursive: true, force: true });
     throw err;
   }
+  pruneOldBackups(target);
   return hadOld ? backup : '';
+}
+
+/**
+ * 오래된 업그레이드 부산물 정리 — 백업(<install>.bak.<ts>)은 최근 2개만 남기고, 실패로 남은
+ * 스테이징(<install>.new.<ts>)은 모두 지운다. 백업 하나가 node_modules 포함 앱 전체 사본이라
+ * 릴리스마다 수백 MB씩 쌓여 방치 시 디스크 고갈로 다음 업그레이드/DB 쓰기까지 실패한다.
+ */
+function pruneOldBackups(target, keep = 2) {
+  try {
+    const dir = path.dirname(target);
+    const base = path.basename(target);
+    const bakPrefix = `${base}.bak.`;
+    const newPrefix = `${base}.new.`;
+    const baks = fs.readdirSync(dir)
+      .filter((n) => n.startsWith(bakPrefix) && /^\d+$/.test(n.slice(bakPrefix.length)))
+      .sort((a, b) => Number(b.slice(bakPrefix.length)) - Number(a.slice(bakPrefix.length)));
+    for (const n of baks.slice(keep)) fs.rmSync(path.join(dir, n), { recursive: true, force: true });
+    // 이 함수는 스왑 성공 직후(동기) 호출되므로 남아있는 .new.*는 전부 과거 실패의 잔재다.
+    for (const n of fs.readdirSync(dir)) {
+      if (n.startsWith(newPrefix) && /^\d+$/.test(n.slice(newPrefix.length))) {
+        fs.rmSync(path.join(dir, n), { recursive: true, force: true });
+      }
+    }
+  } catch { /* best effort — 정리 실패가 업그레이드를 막으면 안 됨 */ }
 }
 
 // 업그레이드에서 반드시 보존해야 하는 사용자 데이터가 들어있는 디렉터리(번들에 포함되지 않음).
@@ -389,7 +414,9 @@ export async function upgradeFromRemote(baseUrl, installDir, currentVersion, des
  *  대용량 번들+고RTT를 고려해 타임아웃을 넉넉히 둔다. 재시도는 적용하지 않는다(적용=재시작이라 경합 오탐 위험). */
 export async function pushBundleToEdge(edge, archivePath, { timeout = Number(process.env.EDGE_PUSH_TIMEOUT_MS) || 600_000 } = {}) {
   const data = fs.readFileSync(archivePath);
-  const url = `${String(edge.url).replace(/\/+$/, '')}/api/upgrade/bundle`;
+  // restart=true 필수 — 없으면 엣지는 설치 디렉터리만 교체하고 구버전 프로세스가 계속 돈다.
+  // (currentVersion()이 디스크의 package.json을 읽어 '새 버전'으로 보고하므로 재푸시도 거부됨.)
+  const url = `${String(edge.url).replace(/\/+$/, '')}/api/upgrade/bundle?restart=true`;
   try {
     const res = await fetch(url, {
       method: 'POST',

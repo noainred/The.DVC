@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { ipToNum } from './ledger.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
 
 const FILE = path.join(config.configDir, 'ipam-settings.json');
 
@@ -35,7 +36,7 @@ export function saveSettings(body = {}) {
     privateRanges: cleanList(body.privateRanges),
   };
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
-  fs.writeFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
+  atomicWriteFileSync(FILE, JSON.stringify(next, null, 2)); // 크래시/디스크풀 중 부분기록으로 설정 유실 방지
   cache = next; matcherCache = null; classifierCache = null; rev++;
   return next;
 }

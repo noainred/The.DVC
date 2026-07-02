@@ -22,6 +22,7 @@ const INVENTORY_MAX_AGE_MS = 30 * 60_000;
 let timer = null;
 let lastRun = null; // { at, ok, failed, results: [{id, watts?, devices?, error?}] }
 let running = false; // 재진입 방지(이전 폴이 끝나기 전 다음 틱이 겹쳐 도는 것 차단)
+let pruneTick = 0; // retention prune 스로틀(10틱마다 1회)
 
 async function pollOnce() {
   if (running) return; // 고RTT iDRAC 다수에서 한 주기가 간격을 넘겨 폴이 중첩되는 것 방지
@@ -71,8 +72,8 @@ async function pollOnceInner() {
   // 모든 서버 폴 후 한 트랜잭션으로 배치 적재(insertMany 없으면 개별 insert 폴백).
   try { if (db.insertMany) db.insertMany(samples); else for (const sm of samples) db.insert(sm.serverId, sm.watts, sm.ts); }
   catch (e) { console.warn('[idrac] 전력 적재 실패:', e.message); }
-  // Retention pruning
-  if (config.idrac.retentionDays > 0) {
+  // Retention pruning — 매 폴 DELETE 스캔 금지(store.js/metrics 샘플러와 동일 스로틀 패턴).
+  if (config.idrac.retentionDays > 0 && (++pruneTick % 10 === 0)) {
     try { db.prune(ts - config.idrac.retentionDays * 86_400_000); } catch { /* best effort */ }
   }
   const failed = results.filter((r) => r.error).length;

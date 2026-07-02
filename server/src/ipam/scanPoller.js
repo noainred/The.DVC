@@ -5,7 +5,7 @@
  */
 
 import { scanRanges } from './scan.js';
-import { loadScanSettings, mergeScanResults, pruneScanResults, recordAgentReport, sweepReleases, LOCAL } from './scanStore.js';
+import { loadScanSettings, mergeScanResults, pruneScanResults, recordAgentReport, sweepReleases, listScanAgents, LOCAL } from './scanStore.js';
 import { enabledVcRanges } from './rangeStore.js';
 
 // 로컬 폴러가 실제로 스캔할 대역 = __local__ 설정 대역 ∪ enabled인 모든 vCenter 대역(유니크).
@@ -84,7 +84,14 @@ export function startIpScanPoller() {
   timer.unref?.();
   // 분산 에이전트가 중앙으로 보고하는 경우 로컬 스캔이 꺼져 있어도 '해제' 전이는 기록해야 하므로
   // 별도 주기(10분)로 미응답 IP를 마킹한다(중앙/로컬 공통).
-  releaseTimer = setInterval(() => { try { sweepReleases(releaseIdleMs()); } catch { /* */ } }, 10 * 60_000);
+  releaseTimer = setInterval(() => {
+    try {
+      // 에이전트별 스캔 주기(최대 7일 설정 가능) 기준으로 각자 임계(주기×3, 최소 3h)를 적용한다 —
+      // 로컬 주기 기준 일괄 판정이면 주기가 긴 원격 사이트 IP가 스캔 사이마다 가짜 down/up 플립된다.
+      const idleMsByAgent = new Map(listScanAgents().map((a) => [a.name, Math.max((a.intervalMs || 0) * 3, 3 * 3_600_000)]));
+      sweepReleases(releaseIdleMs(), { idleMsByAgent });
+    } catch { /* */ }
+  }, 10 * 60_000);
   releaseTimer.unref?.();
   console.log(`[ipscan] poller started (enabled=${s.enabled}, ranges=${s.ranges.length}, every ${Math.round(s.intervalMs / 1000)}s)`);
 }

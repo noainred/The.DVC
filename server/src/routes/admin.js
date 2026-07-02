@@ -95,13 +95,13 @@ import { getInventory as getIdracInventory } from '../idrac/invCache.js';
 import { getSensorSeries } from '../idrac/sensorStore.js';
 import { fetchInventory as fetchIdracInventory, fetchSensors as fetchIdracSensors, probeGpuTelemetry } from '../idrac/redfish.js';
 import { listCollectors, addCollector, updateCollector, removeCollector, loadCollectors } from '../collector/registry.js';
-import { allRemoteServers, findRemoteServer } from '../collector/remoteInventory.js';
+import { allRemoteServers, findRemoteServer, clearCollectorServers } from '../collector/remoteInventory.js';
 import { matchDatacenterId } from '../collector/datacenterMatch.js';
 import { serverInScope } from '../insights/analysisScope.js';
 import { findHostByServiceTag } from '../idrac/hostMatch.js';
 import { hardwareDimMatch } from '../idrac/hwMatch.js';
 import { listDatacenters, getDatacenterAssign, addDatacenter, updateDatacenter, removeDatacenter, setVcenterDatacenterMany, ensureDatacenter } from '../datacenter/store.js';
-import { allCollectorStatus, getCollectorStatus } from '../collector/state.js';
+import { allCollectorStatus, getCollectorStatus, clearCollectorHosts } from '../collector/state.js';
 import { pullNow } from '../collector/puller.js';
 import { pushUpgradeToCollectors } from '../collector/upgradePush.js';
 import { resilientFetch } from '../util/resilientFetch.js';
@@ -1327,7 +1327,7 @@ adminRouter.post('/idrac/scan', adminOnly, async (req, res) => {
   if (agent && agent !== '__local__') {
     if (!config.central.token) return res.status(400).json({ ok: false, reason: '중앙(CENTRAL_TOKEN) 미설정 — 에이전트 위임 스캔을 사용할 수 없습니다.' });
     // noRegister: 스캔만 하고 등록은 UI 확인 후 별도 '등록' 잡으로(자동등록 안 함).
-    const reqId = enqueueIdracScan(agent, { ips, username, password, vcenterId: String(req.body?.vcenterId || '').trim(), noRegister: true });
+    const reqId = enqueueIdracScan(agent, { ips, username, password, vcenterId: String(req.body?.vcenterId || '').trim(), datacenterId: String(req.body?.datacenterId || '').trim(), noRegister: true });
     if (!reqId) return res.status(429).json({ ok: false, reason: '대기 중인 스캔 잡이 너무 많습니다. 잠시 후 다시 시도하세요.' });
     return res.json({ ok: true, delegated: true, agent, reqId });
   }
@@ -1367,11 +1367,11 @@ adminRouter.get('/idrac/scan-agents', adminOnly, (_req, res) => {
 // agent 지정(위임): 에이전트가 현지에 등록(중앙 못 닿는 대역) → reqId 반환, UI가 폴링.
 const normIdracMode = (m) => (['replace', 'replace-vcenter', 'merge'].includes(m) ? m : 'merge');
 adminRouter.post('/idrac/register-scanned', adminOnly, (req, res) => {
-  const { found, username, password, mode, vcenterId, agent } = req.body || {};
+  const { found, username, password, mode, vcenterId, datacenterId, agent } = req.body || {};
   const ag = String(agent || '').trim();
   if (ag && ag !== '__local__') {
     if (!config.central.token) return res.status(400).json({ ok: false, reason: '중앙(CENTRAL_TOKEN) 미설정 — 위임 등록을 사용할 수 없습니다.' });
-    const reqId = enqueueIdracRegister(ag, { found, username, password, vcenterId: vcenterId || '', mode: normIdracMode(mode) });
+    const reqId = enqueueIdracRegister(ag, { found, username, password, vcenterId: vcenterId || '', datacenterId: String(datacenterId || '').trim(), mode: normIdracMode(mode) });
     if (!reqId) return res.status(429).json({ ok: false, reason: '등록할 iDRAC가 없거나 대기 잡이 너무 많습니다.' });
     return res.json({ ok: true, delegated: true, agent: ag, reqId });
   }
@@ -1505,13 +1505,24 @@ adminRouter.post('/collectors', adminOnly, (req, res) => {
 
 adminRouter.put('/collectors/:id', adminOnly, (req, res) => {
   const result = updateCollector(req.params.id, req.body || {});
-  if (result.ok) { ensureCollectorDatacenter(result.collector); pullNow().catch(() => {}); logAudit({ user: req.user?.username, action: '수집 서버 수정', target: req.params.id, detail: `url=${result.collector?.url || ''} vcenterId=${result.collector?.vcenterId || ''}`, ip: req.ip || '' }); }
+  if (result.ok) {
+    ensureCollectorDatacenter(result.collector);
+    // 비활성화 시 그 수집기의 원격 데이터도 즉시 걷어낸다 — 풀러는 disabled를 건너뛰므로
+    // 남겨두면 서버 분석/전력 화면에 유령 서버가 재시작 전까지 계속 표시된다.
+    if (result.collector?.enabled === false) { clearCollectorHosts(req.params.id); clearCollectorServers(req.params.id); }
+    pullNow().catch(() => {});
+    logAudit({ user: req.user?.username, action: '수집 서버 수정', target: req.params.id, detail: `url=${result.collector?.url || ''} vcenterId=${result.collector?.vcenterId || ''}`, ip: req.ip || '' });
+  }
   res.status(result.ok ? 200 : 400).json(result);
 });
 
 adminRouter.delete('/collectors/:id', adminOnly, (req, res) => {
   const result = removeCollector(req.params.id);
-  if (result.ok) logAudit({ user: req.user?.username, action: '수집 서버 삭제', target: req.params.id, ip: req.ip || '' });
+  if (result.ok) {
+    clearCollectorHosts(req.params.id);   // 원격 전력 병합 상태 제거
+    clearCollectorServers(req.params.id); // 서버 분석용 원격 인벤토리 제거(유령 서버 방지)
+    logAudit({ user: req.user?.username, action: '수집 서버 삭제', target: req.params.id, ip: req.ip || '' });
+  }
   res.status(result.ok ? 200 : 404).json(result);
 });
 

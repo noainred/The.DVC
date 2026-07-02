@@ -23,7 +23,8 @@ import { enabledScanRanges, recordScanRangeRun, getScanRangeRaw } from './scanRa
 import { enqueueIdracScan, cancelPendingIdracScanJobs } from '../central/idracScanJobs.js';
 import { isStopped } from '../security/emergencyStop.js';
 
-let timer = null;
+let timer = null;      // 주기 타이머(setTimeout 체인 — 32비트 한계 초과 주기 지원)
+let bootTimer = null;  // 부팅 60초 첫 스캔 타이머(주기 변경/끔 시 함께 취소)
 let running = false;
 let stopRequested = false; // 사용자 '스캔 중지' — 진행 중 사이클을 안전하게 끊는다
 let lastRun = null;     // { at, durationMs, vcenters, found, registered, delegated, errors }
@@ -46,7 +47,8 @@ function intervalMs() {
 
 /** 주기 변경(웹 설정) — ms 단위(0=주기 끔). 저장 후 타이머 즉시 재적용. */
 export function setIdracScanIntervalMs(ms) {
-  const v = Math.max(0, Math.min(30 * 86_400_000, Number(ms) || 0)); // 상한 30일
+  let v = Math.max(0, Math.min(30 * 86_400_000, Number(ms) || 0)); // 상한 30일
+  if (v > 0) v = Math.max(600_000, v); // 하한 10분 — 소수 시간 오입력으로 초 단위 전 대역 프로빙 폭주 방지
   settingsCache = { ...(loadScanSettingsFile() || {}), intervalMs: v };
   try {
     fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
@@ -144,9 +146,23 @@ export async function runIdracScanOnce(opts = {}) {
 /** 비동기 시작(요청 즉시 반환, 창 닫아도 백그라운드 지속). */
 export function startIdracScanNow(opts = {}) {
   if (running) return { ok: false, reason: '이미 스캔 중입니다.', running: true };
-  const entries = opts.datacenterId ? [opts.datacenterId] : enabledScanRanges();
-  if (!opts.datacenterId && !entries.length) return { ok: false, reason: '스캔할 대역이 없습니다.' };
-  runIdracScanOnce({ ...opts, manual: true }).catch((e) => console.error('[idrac-scan] 백그라운드 스캔 실패:', e.message));
+  // 대역/계정 검증은 여기서 동기로 — runIdracScanOnce의 resolve({ok:false})는 아래 fire-and-forget에서
+  // 버려지므로, 검증 실패를 '시작됨'으로 응답하지 않도록 사전에 걸러 사유를 그대로 돌려준다.
+  if (opts.datacenterId) {
+    const raw = getScanRangeRaw(opts.datacenterId);
+    if (!raw || !(raw.ranges || []).length || !String(raw.username || '').trim()) {
+      return { ok: false, reason: '대상 법인의 대역/계정이 없습니다.' };
+    }
+    if (!String(raw.password || '')) {
+      return { ok: false, reason: '대상 법인의 iDRAC 비밀번호가 없습니다(스캔 대역 수정에서 입력하세요).' };
+    }
+  } else if (!enabledScanRanges().length) {
+    return { ok: false, reason: '스캔할 대역이 없습니다.' };
+  }
+  runIdracScanOnce({ ...opts, manual: true }).then(
+    (r) => { if (r && r.ok === false && r.reason) console.error('[idrac-scan] 백그라운드 스캔 미실행:', r.reason); },
+    (e) => console.error('[idrac-scan] 백그라운드 스캔 실패:', e.message),
+  );
   return { ok: true, started: true };
 }
 
@@ -162,12 +178,28 @@ export function idracScanStatus() {
   };
 }
 
+// Node 타이머는 지연이 2^31-1ms(≈596시간)를 넘으면 1ms로 강제된다(TimeoutOverflowWarning).
+// 주기 상한이 30일(720h)이므로 setInterval 대신 한계 미만 조각으로 나눈 setTimeout 체인을 쓴다.
+const MAX_TIMER_MS = 2_147_000_000;
+function armScanTimer(ms) {
+  const step = (left) => {
+    const d = Math.min(left, MAX_TIMER_MS);
+    timer = setTimeout(() => {
+      if (left - d > 0) return step(left - d);
+      runIdracScanOnce().catch(() => {});
+      step(ms);
+    }, d);
+    timer.unref?.();
+  };
+  step(ms);
+}
+
 export function rescheduleIdracScanPoller() {
-  if (timer) { clearInterval(timer); timer = null; }
+  if (timer) { clearTimeout(timer); timer = null; }
+  if (bootTimer) { clearTimeout(bootTimer); bootTimer = null; }
   const ms = intervalMs();
   if (ms <= 0) return 0; // 주기 비활성(수동 스캔만)
-  timer = setInterval(() => runIdracScanOnce().catch(() => {}), ms);
-  timer.unref?.();
+  armScanTimer(ms);
   return ms;
 }
 
@@ -176,8 +208,8 @@ export function startIdracScanPoller() {
   const ms = intervalMs();
   if (ms <= 0) { console.log('[idrac-scan] periodic scan disabled (IDRAC_SCAN_INTERVAL_MS<=0) — manual scan only'); return; }
   // 첫 스캔은 부팅 60초 후(다른 수집과 겹치지 않게), 이후 주기 반복.
-  setTimeout(() => runIdracScanOnce().catch((e) => console.error('[idrac-scan] 실패:', e.message)), 60_000).unref?.();
-  timer = setInterval(() => runIdracScanOnce().catch(() => {}), ms);
-  timer.unref?.();
+  bootTimer = setTimeout(() => { bootTimer = null; runIdracScanOnce().catch((e) => console.error('[idrac-scan] 실패:', e.message)); }, 60_000);
+  bootTimer.unref?.();
+  armScanTimer(ms);
   console.log(`[idrac-scan] poller started (every ${Math.round(ms / 1000)}s)`);
 }

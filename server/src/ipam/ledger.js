@@ -217,7 +217,9 @@ export function buildIpamRows(snap, vcenterId) {
   const out = {
     total: rows.length,
     multiHomed: rows.filter((r) => r.multiHomed).length,
-    duplicateIps: [...count.values()].filter((c) => c > 1).length,
+    // 요약도 행 플래그와 같은 '가시 행' 기준(visCount) — 숨김 이전 count를 쓰면 표에는 중복 0인데
+    // 카드에는 중복 N으로 남아 집계-표 불일치가 생긴다.
+    duplicateIps: [...visCount.values()].filter((c) => c > 1).length,
     publicIps: rows.filter((r) => r.scope === 'public').length,
     privateIps: rows.filter((r) => r.scope === 'private').length,
     conflicts: reconCounts.conflict,

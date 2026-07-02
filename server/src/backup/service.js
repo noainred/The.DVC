@@ -10,6 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { config, currentVersion } from '../config.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { getAllAgentConfigs } from '../central/agentConfig.js';
 
 const CONFIG_DIR = config.configDir;
@@ -116,7 +117,9 @@ export function restoreCentral(archive) {
   for (const [name, content] of Object.entries(archive.central.files)) {
     const base = path.basename(name);
     if (DENY_NAMES.has(base) || !ALLOW_EXT.has(path.extname(base).toLowerCase())) continue;
-    try { fs.writeFileSync(path.join(CONFIG_DIR, base), String(content), { mode: 0o600 }); restored++; } catch { /* */ }
+    // 원자적 쓰기 — 복원 도중 정전/디스크풀이면 users.json 같은 핵심 설정이 부분기록으로
+    // 손상된 채 남는다(복원이 오히려 파손 유발). tmp+rename으로 온전본만 남긴다.
+    try { atomicWriteFileSync(path.join(CONFIG_DIR, base), String(content)); restored++; } catch { /* */ }
   }
   return { restored, edges: Object.keys(archive.edges || {}).length };
 }

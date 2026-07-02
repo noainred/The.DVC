@@ -231,6 +231,7 @@ class Store {
       // Drop cache entries for vCenters that were removed from the registry.
       const ids = new Set(vcenters.map((v) => v.id));
       for (const id of [...this.vcCache.keys()]) if (!ids.has(id)) this.vcCache.delete(id);
+      for (const id of [...this.vcLast.keys()]) if (!ids.has(id)) this.vcLast.delete(id); // 마지막 수집시각 맵도 동기화
       pruneInventory(ids); // 위임 인벤토리 캐시도 동기화
 
       // Rebuild the merged snapshot from cache every tick (cheap), so non-due
@@ -318,8 +319,9 @@ class Store {
       const { rows } = buildIpamRows(this.snapshot);
       const sig = ledgerSignature(rows);
       if (sig === this._lastLedgerSig) return; // 내용 변동 없음 → 쓰기 생략
-      this._lastLedgerSig = sig;
-      syncLedger(rows);
+      // 서명은 쓰기 '성공 후'에 기록 — 외부 리더의 락 등으로 쓰기가 실패했는데 서명만 갱신되면
+      // 내용이 실제로 바뀔 때까지 재시도가 영영 없어 ipam.db가 낡은 채 남는다.
+      syncLedger(rows).then((ok) => { if (ok) this._lastLedgerSig = sig; });
     } catch { /* best effort */ }
   }
 

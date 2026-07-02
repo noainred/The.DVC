@@ -67,6 +67,15 @@ class UpgradeManager {
 
   /** Install the newest available bundle. source: 'auto' | 'watch' | 'remote'. */
   async apply({ source = 'auto', restart = false } = {}) {
+    // single-flight — 적용 후 엣지/수집기 푸시(타깃당 최대 600s)가 끝나기 전에 다음 tick이나
+    // 수동 apply가 겹치면 같은 installDir에 renameSync 스왑이 경합해 설치가 깨질 수 있다.
+    if (this._applying) return { ok: false, reason: '업그레이드 적용이 이미 진행 중입니다.' };
+    this._applying = true;
+    try { return await this.#applyInner({ source, restart }); }
+    finally { this._applying = false; }
+  }
+
+  async #applyInner({ source, restart }) {
     const s = this.settings;
     if (!s.installDir) return { ok: false, reason: '설치 경로(installDir)가 설정되지 않아 적용할 수 없습니다.' };
     const cur = currentVersion();

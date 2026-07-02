@@ -10,6 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
 
 const FILE = path.join(config.configDir, 'ipam-vcenter-ranges.json');
 
@@ -33,7 +34,7 @@ function write(data) {
   cache = data;
   try {
     fs.mkdirSync(path.dirname(FILE), { recursive: true });
-    fs.writeFileSync(FILE, JSON.stringify(data, null, 2), { mode: 0o600 });
+    atomicWriteFileSync(FILE, JSON.stringify(data, null, 2));
     try { fs.chmodSync(FILE, 0o600); } catch { /* */ }
     try { cacheMtime = fs.statSync(FILE).mtimeMs; } catch { cacheMtime = -1; }
   } catch (e) { console.error('[ipam-ranges] 저장 실패:', e.message); }
