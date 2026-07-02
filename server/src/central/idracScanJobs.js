@@ -33,8 +33,19 @@ function gc() {
   const now = Date.now();
   for (const [reqId, j] of jobs) {
     const done = j.state === 'done' || j.state === 'error';
-    if (done && now - (j.doneAt || 0) > TTL) jobs.delete(reqId);
-    else if (!done && now - j.createdAt > TTL) jobs.delete(reqId); // 영영 안 가져간 잡도 정리
+    // 미완료 잡은 '마지막 활동'(생성/인출/진행 보고) 기준으로 만료 — createdAt 기준이면 2048 IP처럼
+    // 10분을 넘기는 정상 진행(running) 잡이 도중에 삭제돼 에이전트의 결과 회신이 유실된다.
+    const lastActivity = done
+      ? (j.doneAt || 0)
+      : Math.max(j.createdAt || 0, j.takenAt || 0, j.progress?.at || 0);
+    if (now - lastActivity > TTL) {
+      jobs.delete(reqId);
+      // byAgent 대기 셋도 함께 정리 — 남겨두면 유령 reqId가 MAX_PENDING을 영구 점유해
+      // 오프라인 에이전트로의 신규 위임이 전부 거부된다.
+      const key = String(j.agent || '').trim().toLowerCase();
+      const pend = byAgent.get(key);
+      if (pend) { pend.delete(reqId); if (!pend.size) byAgent.delete(key); }
+    }
   }
 }
 
@@ -58,7 +69,8 @@ export function enqueueIdracScan(agent, { ips, username, password, vcenterId = '
   const ipsNorm = String(ips || '').trim();
   for (const rid of pend) {
     const jj = jobs.get(rid);
-    if (jj && (jj.action || 'scan') === 'scan' && jj.state === 'pending'
+    if (!jj) { pend.delete(rid); continue; } // gc로 사라진 잡의 잔여 reqId 정리
+    if ((jj.action || 'scan') === 'scan' && jj.state === 'pending'
       && String(jj.datacenterId || '').trim() === dcNorm
       && String(jj.ips || '').trim() === ipsNorm) {
       addEvent(jj, '동일 대상의 대기 중 스캔 잡이 있어 새 요청을 이 잡으로 병합했습니다(중복 방지).');
@@ -78,7 +90,7 @@ export function enqueueIdracScan(agent, { ips, username, password, vcenterId = '
 }
 
 /** UI가 위임 '등록' 요청(스캔에서 확인한 found 목록을 에이전트 현지에 등록) → reqId 반환. */
-export function enqueueIdracRegister(agent, { found, username, password, vcenterId = '', mode = 'merge' }) {
+export function enqueueIdracRegister(agent, { found, username, password, vcenterId = '', datacenterId = '', mode = 'merge' }) {
   gc();
   const key = String(agent || '').trim().toLowerCase();
   if (!key) return null;
@@ -86,7 +98,7 @@ export function enqueueIdracRegister(agent, { found, username, password, vcenter
   const pend = byAgent.get(key) || new Set();
   if (pend.size >= MAX_PENDING) return null;
   const reqId = newReqId();
-  jobs.set(reqId, { reqId, agent, action: 'register', found, username, password, vcenterId, mode, state: 'pending', createdAt: Date.now(), progress: { scanned: 0, total: found.length, at: Date.now() } });
+  jobs.set(reqId, { reqId, agent, action: 'register', found, username, password, vcenterId, datacenterId, mode, state: 'pending', createdAt: Date.now(), progress: { scanned: 0, total: found.length, at: Date.now() } });
   pend.add(reqId); byAgent.set(key, pend);
   return reqId;
 }
@@ -104,7 +116,7 @@ export function takeIdracScanJobs(agentName) {
     if (!j) continue;
     j.state = 'running'; j.takenAt = Date.now();
     addEvent(j, `에이전트 '${j.agent}'가 잡을 인출 — 현지 스캔 시작(대기 ${Math.round((j.takenAt - j.createdAt) / 1000)}초).`);
-    out.push({ reqId, action: j.action || 'scan', ips: j.ips, username: j.username, password: j.password, vcenterId: j.vcenterId || '', noRegister: !!j.noRegister, found: j.found || undefined, mode: j.mode || 'merge' });
+    out.push({ reqId, action: j.action || 'scan', ips: j.ips, username: j.username, password: j.password, vcenterId: j.vcenterId || '', datacenterId: j.datacenterId || '', noRegister: !!j.noRegister, found: j.found || undefined, mode: j.mode || 'merge' });
   }
   byAgent.delete(key);
   return out;

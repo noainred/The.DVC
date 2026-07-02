@@ -28,7 +28,9 @@ function readFile() {
 export function loadMetricsSettings() {
   const eff = { sampleIntervalMs: config.temp.sampleIntervalMs, retentionDays: config.temp.retentionDays, gpuUtilEnabled: true, gpuUtilIntervalSec: 60 };
   const persisted = readFile();
-  for (const f of FIELDS) if (persisted[f] !== undefined) eff[f] = persisted[f];
+  // 로드에도 coerce 적용 — 손으로 고친/손상된 metrics.json의 0·문자열 주기가 그대로
+  // setInterval에 흘러들면 Node가 1ms로 클램프해 초당 1000회 샘플러 틱이 돈다.
+  for (const f of FIELDS) if (persisted[f] !== undefined) eff[f] = coerce(f, persisted[f]);
   return eff;
 }
 

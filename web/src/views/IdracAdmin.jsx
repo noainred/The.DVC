@@ -433,6 +433,7 @@ export default function IdracAdmin() {
         data={scanRanges} vcenters={vcenters} datacenters={datacenters} agents={agents} busy={busy}
         form={srForm} setForm={setSrForm} msg={srMsg} setMsg={setSrMsg}
         onNew={srOpenNew} onEdit={srEdit} onSave={srSave} onDelete={srDelete} onScan={srScanNow}
+        onReload={loadScanRanges}
       />
     </>
   );
@@ -989,7 +990,7 @@ function IdracScanJobs({ data, vcenters, datacenters = [], busy, onRefresh, onSc
 // ---- vCenter별 iDRAC 스캔 대역(주기 자동 발견) ------------------------------
 // 각 vCenter에 iDRAC IP 대역 + 계정을 저장하면, 주기 스캐너가 그 대역을 돌며 Dell iDRAC을
 // 발견해 해당 vCenter로 자동 등록한다(IPMS의 'vCenter별 스캔 대역'과 같은 흐름).
-function IdracScanRanges({ data, vcenters, datacenters = [], agents, busy, form, setForm, msg, setMsg, onNew, onEdit, onSave, onDelete, onScan }) {
+function IdracScanRanges({ data, vcenters, datacenters = [], agents, busy, form, setForm, msg, setMsg, onNew, onEdit, onSave, onDelete, onScan, onReload }) {
   const st = data?.status || {};
   const prog = st.progress;
   const dcName = (id) => (datacenters.find((d) => d.id === id)?.name || id);
@@ -1030,7 +1031,13 @@ function IdracScanRanges({ data, vcenters, datacenters = [], agents, busy, form,
   const saveInterval = async () => {
     const hours = Number(ivEdit);
     if (!Number.isFinite(hours) || hours < 0) { setIvMsg('0 이상 숫자(시간)를 입력하세요.'); return; }
-    try { await putJson('/admin/idrac/scan-ranges/interval', { hours }); setIvMsg(hours === 0 ? '주기 스캔을 껐습니다(수동만).' : `주기 ${hours}시간으로 저장됨`); setIvEdit(null); setTimeout(() => setIvMsg(null), 4000); }
+    try {
+      await putJson('/admin/idrac/scan-ranges/interval', { hours });
+      setIvMsg(hours === 0 ? '주기 스캔을 껐습니다(수동만).' : `주기 ${hours}시간으로 저장됨`);
+      setIvEdit(null);
+      onReload?.(); // 버튼 라벨('주기 N시간')을 즉시 갱신 — 폴링 전까지 이전 값이 남아 저장 실패로 오인 방지
+      setTimeout(() => setIvMsg(null), 4000);
+    }
     catch (e) { setIvMsg(e.message); }
   };
   const stopScan = async () => {

@@ -49,9 +49,12 @@ export default function DeepSearch() {
   const toggleVc = (id) => setScope((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const body = () => ({ vcenterIds: [...scope], filters: Object.fromEntries(Object.entries(f).filter(([, v]) => v !== '' && v !== false)) });
 
+  const [searchErr, setSearchErr] = useState(null);
   const search = async () => {
-    setBusy(true); setProbe(null);
-    try { const r = await postJson('/tools/deep-search', body()); setItems(r.items || []); setTotal(r.total || 0); } catch { setItems([]); } finally { setBusy(false); }
+    setBusy(true); setProbe(null); setSearchErr(null);
+    try { const r = await postJson('/tools/deep-search', body()); setItems(r.items || []); setTotal(r.total || 0); }
+    catch (e) { setItems([]); setTotal(0); setSearchErr(e.message); } // 실패를 무음 처리하면 이전 total이 남아 '결과 0건'으로 오인
+    finally { setBusy(false); }
   };
   const runProbe = async () => {
     setProbeBusy(true); setProbe(null);
@@ -122,7 +125,8 @@ export default function DeepSearch() {
       {!probe && items != null && (
         <div className="card" style={{ padding: 14 }}>
           <div className="section-title" style={{ marginTop: 0, fontSize: 15 }}>검색 결과 — {total.toLocaleString()}대{total > 2000 ? ' (상위 2000 표시)' : ''}</div>
-          {busy ? <Loading /> : items.length === 0 ? <div className="muted" style={{ fontSize: 12 }}>조건에 맞는 VM이 없습니다.</div> : <VmTable list={items} />}
+          {searchErr && <div className="badge red" style={{ marginBottom: 8 }}>검색 실패: {searchErr}</div>}
+          {busy ? <Loading /> : items.length === 0 ? <div className="muted" style={{ fontSize: 12 }}>{searchErr ? '오류로 결과를 가져오지 못했습니다. 다시 시도하세요.' : '조건에 맞는 VM이 없습니다.'}</div> : <VmTable list={items} />}
         </div>
       )}
     </div>

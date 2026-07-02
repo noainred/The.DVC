@@ -10,6 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { buildHostIndex, resolveServerVcenter } from '../idrac/attribution.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
 
 const FILE = path.join(config.configDir, 'finops.json');
 
@@ -40,7 +41,7 @@ export function saveFinopsConfig(body = {}) {
     pue: Math.min(5, Math.max(1, Number(body.pue) || cur.pue)),
   };
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
-  fs.writeFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
+  atomicWriteFileSync(FILE, JSON.stringify(next, null, 2));
   cache = next;
   return next;
 }

@@ -44,7 +44,7 @@ export function specToRange(spec) {
   if (s.includes('-')) {
     const [a, bRaw] = s.split('-').map((x) => x.trim());
     const an = ipToNum(a); let bn = ipToNum(bRaw);
-    if (bn == null && /^\d{1,3}$/.test(bRaw) && an != null) bn = (an & 0xffffff00) + Number(bRaw); // a.b.c.d-e 단축형
+    if (bn == null && /^\d{1,3}$/.test(bRaw) && an != null) bn = ((an & 0xffffff00) >>> 0) + Number(bRaw); // a.b.c.d-e 단축형 (>>>0: 192.168.x 등 첫 옥텟≥128 부호 버그 방지)
     if (an == null || bn == null || bn < an) return null;
     return { lo: an, hi: bn, size: bn - an + 1 };
   }

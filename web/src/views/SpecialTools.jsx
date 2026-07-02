@@ -388,7 +388,13 @@ function Ipam({ scope, onScope }) {
   useEffect(() => { fetchJson('/auth/me').then((r) => setCanManage(['admin', 'operator'].includes(r.user?.role))).catch(() => {}); }, []);
 
   const sp = scope ? `?vcenterId=${encodeURIComponent(scope)}` : '';
-  const pickBase = async (b, vc = scope) => { setBase(b); setSheet(await fetchJson(`/tools/ipam/sheet?base=${b}${vc ? `&vcenterId=${encodeURIComponent(vc)}` : ''}`).catch(() => null)); };
+  const sheetGen = useRef(0); // 세대 가드 — 칩 A→B 연타 시 늦은 A 응답이 B 시트를 덮어쓰지 않게(고RTT)
+  const pickBase = async (b, vc = scope) => {
+    const gen = ++sheetGen.current;
+    setBase(b);
+    const r = await fetchJson(`/tools/ipam/sheet?base=${b}${vc ? `&vcenterId=${encodeURIComponent(vc)}` : ''}`).catch(() => null);
+    if (gen === sheetGen.current) setSheet(r);
+  };
   const openSheets = async (vc = scope) => {
     setView('sheet');
     const q = vc ? `?vcenterId=${encodeURIComponent(vc)}` : '';
@@ -970,9 +976,11 @@ function IpamNetMap() {
   const [sel, setSel] = useState(null);
   useEffect(() => { fetchJson('/tools/ipam/vc-ranges').then((d) => setVcs(d.vcenters || [])).catch(() => {}); }, []);
   useEffect(() => {
+    let active = true; // 필터 연타 시 늦은 응답이 최신 선택을 덮어쓰거나 stale base로 되돌리는 것 방지
     const qs = new URLSearchParams();
     if (vc) qs.set('vcenterId', vc); if (base) qs.set('base', base); qs.set('days', String(days)); qs.set('buckets', '32');
-    fetchJson(`/tools/ipam/netmap?${qs.toString()}`).then((d) => { setData(d); setError(null); setSel(null); if (!base && d.base) setBase(d.base); }).catch((e) => setError(e.message));
+    fetchJson(`/tools/ipam/netmap?${qs.toString()}`).then((d) => { if (!active) return; setData(d); setError(null); setSel(null); if (!base && d.base) setBase(d.base); }).catch((e) => { if (active) setError(e.message); });
+    return () => { active = false; };
     // eslint-disable-next-line
   }, [vc, base, days]);
   if (error) return <ErrorBox message={error} />;
@@ -3061,12 +3069,16 @@ function EsxiTemp({ scope }) {
   const [hist, setHist] = useState(null); // { level, key, days, points, synthesized }
   const [days, setDays] = useState(7);
   const [bucket, setBucket] = useState('auto'); // auto | minute | hour | day
+  const histGen = useRef(0); // 세대 가드 — 늦은 응답이 닫힌 모달을 재오픈하거나 다른 대상 차트를 덮어쓰지 않게
   const openHist = async (level, key) => {
+    const gen = ++histGen.current;
     setHist({ level, key, loading: true });
     const bq = bucket && bucket !== 'auto' ? `&bucket=${bucket}` : '';
     const r = await fetchJson(`/tools/esxi-temp/history?level=${level}&key=${encodeURIComponent(key)}&days=${days}${bq}`).catch(() => null);
+    if (gen !== histGen.current) return;
     setHist(r ? { ...r } : { error: true });
   };
+  const closeHist = () => { histGen.current++; setHist(null); };
   useEffect(() => { if (hist && hist.key) openHist(hist.level, hist.key); /* eslint-disable-next-line */ }, [days, bucket]);
   if (loading) return <Loading />;
   if (error) return <ErrorBox message={error} />;
@@ -3098,7 +3110,7 @@ function EsxiTemp({ scope }) {
       ]} />
 
       {hist && (
-        <Modal title={`온도 추이 — ${hist.key || ''}`} onClose={() => setHist(null)} width={760}>
+        <Modal title={`온도 추이 — ${hist.key || ''}`} onClose={closeHist} width={760}>
           <div className="flex gap wrap" style={{ marginBottom: 8 }}>
             {[[1, '1일'], [7, '1주'], [30, '1달'], [365, '1년'], [1830, '5년']].map(([d, l]) => (
               <button key={d} className={days === d ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '6px 12px', fontSize: 12 }} onClick={() => setDays(d)}>{l}</button>
@@ -4181,11 +4193,15 @@ function Gpu({ scope }) {
   const [hist, setHist] = useState(null);   // { level, key, days, points, synthesized }
   const [vmList, setVmList] = useState(null); // { title, params } for GpuVmsModal
   const [days, setDays] = useState(7);
+  const histGen = useRef(0); // 세대 가드 — 늦은 응답의 모달 재오픈/다른 대상 덮어쓰기 방지
   const openHist = async (level, key) => {
+    const gen = ++histGen.current;
     setHist({ level, key, loading: true });
     const r = await fetchJson(`/tools/gpu/history?level=${level}&key=${encodeURIComponent(key)}&days=${days}`).catch(() => null);
+    if (gen !== histGen.current) return;
     setHist(r ? { ...r } : { error: true });
   };
+  const closeHist = () => { histGen.current++; setHist(null); };
   const [mode, setMode] = useState(''); // '' | vgpu | passthrough | vsga
   const [modelFilter, setModelFilter] = useState(''); // '' = 전체 모델, 아니면 특정 GPU 모델
   const [power, setPower] = useState(''); // '' | on(켜진 VM 있는 호스트) | off(꺼진 VM 있는 호스트)
@@ -4389,7 +4405,7 @@ function Gpu({ scope }) {
       )}
 
       {hist && (
-        <Modal title={`GPU 사용률 추이 — ${hist.key || ''}`} onClose={() => setHist(null)} width={760}>
+        <Modal title={`GPU 사용률 추이 — ${hist.key || ''}`} onClose={closeHist} width={760}>
           <div className="flex gap" style={{ marginBottom: 10 }}>
             {[[1, '1일'], [7, '1주'], [30, '1달'], [365, '1년'], [1830, '5년']].map(([d, l]) => (
               <button key={d} className={days === d ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '6px 12px', fontSize: 12 }} onClick={() => setDays(d)}>{l}</button>

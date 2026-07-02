@@ -78,6 +78,12 @@ export function SeverityBadge({ severity }) {
 /** Sortable, client-side table. columns: [{key,label,render?,align?,sortValue?}] */
 export function DataTable({ columns, rows, initialSort, emptyText = '데이터가 없습니다.' }) {
   const [sort, setSort] = useState(initialSort || { key: columns[0].key, dir: 'asc' });
+  // 같은 위치의 DataTable이 뷰 전환으로 다른 columns를 받으면(initialSort는 최초 마운트만 반영)
+  // 존재하지 않는 컬럼 키에 정렬이 고착돼 사실상 무정렬이 된다 → 키가 사라지면 리셋.
+  useEffect(() => {
+    if (!columns.some((c) => c.key === sort.key)) setSort(initialSort || { key: columns[0].key, dir: 'asc' });
+    // eslint-disable-next-line
+  }, [columns]);
 
   const sorted = useMemo(() => {
     const col = columns.find((c) => c.key === sort.key);
@@ -439,7 +445,10 @@ export function VmLink({ name, ip, vcenterId, label, item, className = 'cell-lin
       if (ip) params.ip = ip;
       if (vcenterId) params.vcenterId = vcenterId;
       const r = await fetchJson('/vms/lookup', params);
-      if (r.vm) setVm((cur) => ({ ...(cur || {}), ...r.vm }));        // 전체 스냅샷으로 보강
+      // seed로 이미 열렸는데 cur가 null이면 사용자가 닫은 것 — 늦은 응답이 모달을 다시 열지 않게 한다.
+      // (seed가 없던 경우엔 아직 안 열린 상태이므로 정상적으로 연다.)
+      if (r.vm) setVm((cur) => (cur ? { ...cur, ...r.vm } : (seed ? cur : { ...r.vm })));
+
       else if (!seed) setMsg(`해당 VM을 찾을 수 없습니다 (${label || name || ip}).`);
     } catch (err) { if (!seed) setMsg(err.message); }
     finally { setBusy(false); }

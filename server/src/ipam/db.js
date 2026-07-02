@@ -125,13 +125,15 @@ async function getImpl() {
   return impl;
 }
 
-/** Replace the entire shared ledger with the given rows. Best-effort. */
+/** Replace the entire shared ledger with the given rows. Best-effort. 성공 여부를 반환한다. */
 export async function syncLedger(rows) {
   try {
     const i = await getImpl();
     i.sync(rows, new Date().toISOString());
+    return true;
   } catch (err) {
     console.warn(`[ipam] 레저 저장 실패: ${err.message}`);
+    return false;
   }
 }
 

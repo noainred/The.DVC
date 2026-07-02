@@ -29,6 +29,7 @@ function initSqlite() {
         ts INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_power_server_ts ON power_samples (server_id, ts);
+      CREATE INDEX IF NOT EXISTS idx_power_ts ON power_samples (ts);
     `);
     try { fs.chmodSync(DB_PATH, 0o600); } catch { /* best effort */ }
     const insertStmt = db.prepare('INSERT INTO power_samples (server_id, watts, ts) VALUES (?, ?, ?)');
@@ -154,16 +155,21 @@ function initJsonFallback() {
   };
 }
 
-/** Lazily initialize and memoize the storage backend. */
+/** Lazily initialize and memoize the storage backend (single-flight — 동시 첫 호출 시 이중 커넥션 방지). */
+let ready = null;
 export async function getDb() {
   if (impl) return impl;
-  try {
-    impl = await initSqlite();
-    console.log(`[idrac] power DB: SQLite (${DB_PATH})`);
-  } catch (err) {
-    impl = initJsonFallback();
-    console.warn(`[idrac] node:sqlite 사용 불가(${err.code || err.message}); NDJSON 폴백 사용. ` +
-      `SQLite를 쓰려면 NODE_OPTIONS=--experimental-sqlite 로 실행하세요.`);
+  if (!ready) {
+    ready = initSqlite().then((db) => {
+      impl = db;
+      console.log(`[idrac] power DB: SQLite (${DB_PATH})`);
+      return impl;
+    }).catch((err) => {
+      impl = initJsonFallback();
+      console.warn(`[idrac] node:sqlite 사용 불가(${err.code || err.message}); NDJSON 폴백 사용. ` +
+        `SQLite를 쓰려면 NODE_OPTIONS=--experimental-sqlite 로 실행하세요.`);
+      return impl;
+    });
   }
-  return impl;
+  return ready;
 }

@@ -101,7 +101,7 @@ function loadAll() {
 
 function saveAll(all) {
   fs.mkdirSync(path.dirname(CFG), { recursive: true });
-  fs.writeFileSync(CFG, JSON.stringify(all, null, 2), { mode: 0o600 });
+  atomicWriteFileSync(CFG, JSON.stringify(all, null, 2));
 }
 
 /** 한 에이전트(기본=로컬)의 설정. */
@@ -205,12 +205,16 @@ function recordSeen(h, ts, agent) {
 export function sweepReleases(idleMs, opts = {}) {
   const now = typeof opts === 'number' ? opts : (opts.now || Date.now());
   const onlyAgent = typeof opts === 'object' ? opts.agent : undefined;
-  if (!idleMs || idleMs <= 0) return 0;
+  // opts.idleMsByAgent(Map name→ms): 소유 에이전트별 임계 — 주기가 긴(최대 7일) 원격 에이전트의
+  // IP를 로컬 주기 기준으로 일괄 판정하면 스캔 사이마다 가짜 down/up 플립이 생긴다.
+  const byAgent = (typeof opts === 'object' && opts.idleMsByAgent instanceof Map) ? opts.idleMsByAgent : null;
+  if ((!idleMs || idleMs <= 0) && !byAgent) return 0;
   let changed = 0;
   const isManaged = managedChecker(); // 루프 시작 시 1회 구성(O(N) 유지)
   for (const e of Object.values(history)) {
     const owned = onlyAgent === undefined || (e.agent || LOCAL) === onlyAgent;
-    if (owned && e.status === 'up' && (e.lastSeen || 0) < now - idleMs) {
+    const eff = byAgent ? (byAgent.get(e.agent || LOCAL) ?? idleMs) : idleMs;
+    if (owned && e.status === 'up' && eff > 0 && (e.lastSeen || 0) < now - eff) {
       e.status = 'down';
       pushEvent(e, { ts: now, type: 'down' });
       changed++;

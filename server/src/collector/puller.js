@@ -32,6 +32,7 @@ async function pullOne(c) {
   let hosts = 0;
   // 출처 서버 단위로 한 번만 집계하기 위한 set(구버전 수집기가 별칭별 중복 행을 보내도 중앙이 흡수).
   const seenServers = new Set();
+  const samples = []; // 호스트별 개별 INSERT(각각 자체 커밋+fsync) 대신 한 트랜잭션으로 배치 적재
   for (const h of data?.power?.byHost || []) {
     const host = String(h.host || '').trim().toLowerCase();
     if (!host || h.watts == null) continue;
@@ -44,16 +45,26 @@ async function pullOne(c) {
     const sTs = (Number.isFinite(h.ts) && h.ts > 0 && h.ts <= ts + 5 * 60_000) ? h.ts : ts;
     const sample = { watts, ts: sTs, datacenter: data.datacenter || c.datacenter, collectorId: c.id, serverName: h.serverName, serverId: h.serverId, serviceTag: h.serviceTag || '', model: h.model || '', vcenterId: c.vcenterId || '', source: 'remote' };
     setRemoteHost(host, sample);
-    db.insert(`rmt:${host}`, watts, sTs);
+    samples.push({ serverId: `rmt:${host}`, watts, ts: sTs });
     hosts++;
   }
+  try { if (db.insertMany) db.insertMany(samples); else for (const sm of samples) db.insert(sm.serverId, sm.watts, sm.ts); }
+  catch (e) { console.warn(`[collector] ${c.id} 원격 전력 적재 실패:`, e.message); }
   // 서버 분석용 인벤토리 병합: 엣지가 보낸 서버 목록(자격증명 없음)을 그 수집기 것으로 교체
   // 저장한다. 위임 법인 서버가 중앙 '서버 분석'에 나타난다. 구버전 엣지는 servers가 없어 빈 배열.
   setCollectorServers(c.id, data.datacenter || c.datacenter, Array.isArray(data.servers) ? data.servers : []);
   return { hosts, version: data.version, datacenter: data.datacenter || c.datacenter, servers: Array.isArray(data.servers) ? data.servers.length : 0 };
 }
 
+let pulling = false; // 재진입 가드 — 저하된 수집기(재시도 포함 60초+)가 있으면 주기가 겹쳐
+// 같은 수집기의 clearCollectorHosts/setRemoteHost가 교차 실행돼 호스트가 일시 증발한다.
 export async function pullNow() {
+  if (pulling) return;
+  pulling = true;
+  try { await pullNowInner(); } finally { pulling = false; }
+}
+
+async function pullNowInner() {
   const collectors = loadCollectors().filter((c) => c.enabled !== false && c.url);
   await Promise.all(collectors.map(async (c) => {
     try {

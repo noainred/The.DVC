@@ -22,9 +22,15 @@ function headers() {
 }
 
 async function postResult(payload) {
-  await resilientFetch(`${config.agent.centralUrl}/api/central/idrac-scan-result`, {
-    method: 'POST', headers: headers(), body: JSON.stringify(payload), timeoutMs: 30_000, retries: 2,
-  }).catch(() => {});
+  // 회신 실패를 무음 처리하면 "엣지는 완주했는데 중앙 잡만 멎는" 상황을 엣지 로그로 진단할 수 없다.
+  try {
+    const r = await resilientFetch(`${config.agent.centralUrl}/api/central/idrac-scan-result`, {
+      method: 'POST', headers: headers(), body: JSON.stringify(payload), timeoutMs: 30_000, retries: 2,
+    });
+    if (!r.ok) console.error(`[idrac-scan-agent] 결과 회신 거부 HTTP ${r.status} (reqId=${payload.reqId}) — CENTRAL_TOKEN/중앙 버전을 확인하세요.`);
+  } catch (e) {
+    console.error(`[idrac-scan-agent] 결과 회신 실패: ${e.message} (reqId=${payload.reqId})`);
+  }
 }
 
 async function postProgress(reqId, scanned, total, found) {

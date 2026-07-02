@@ -73,6 +73,7 @@ class NsxStore {
     });
     const ids = new Set(managers.map((m) => m.id));
     for (const id of [...this.cache.keys()]) if (!ids.has(id)) this.cache.delete(id);
+    for (const id of [...this.last.keys()]) if (!ids.has(id)) this.last.delete(id); // 마지막 수집시각 맵도 동기화
 
     const parts = [];
     const errors = [];

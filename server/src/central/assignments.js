@@ -141,8 +141,10 @@ export function importAssignments(incoming, mode = 'merge') {
 
 // ---- results --------------------------------------------------------------
 
-let results = {};
-try { if (fs.existsSync(RESULT_FILE)) results = JSON.parse(fs.readFileSync(RESULT_FILE, 'utf8')) || {}; } catch { results = {}; }
+// Object.create(null): 에이전트가 보낸 이름이 '__proto__' 등 프로토타입 키여도 오염되지 않게
+// (inventory.js/fleet.js와 동일한 방어 — 일반 {}는 results['__proto__'] 대입이 조용히 유실된다).
+let results = Object.create(null);
+try { if (fs.existsSync(RESULT_FILE)) results = Object.assign(Object.create(null), JSON.parse(fs.readFileSync(RESULT_FILE, 'utf8')) || {}); } catch { results = Object.create(null); }
 
 let persistTimer = null;
 function persistResults() {

@@ -28,6 +28,7 @@ function initSqlite() {
         metric TEXT NOT NULL, k TEXT NOT NULL, v REAL NOT NULL, ts INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_samples_mkt ON samples (metric, k, ts);
+      CREATE INDEX IF NOT EXISTS idx_samples_ts ON samples (ts); -- prune(ts<?)가 풀스캔 없이 타도록
     `);
     try { fs.chmodSync(DB_PATH, 0o600); } catch { /* best effort */ }
     const ins = db.prepare('INSERT INTO samples (metric, k, v, ts) VALUES (?, ?, ?, ?)');

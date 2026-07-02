@@ -42,7 +42,9 @@ export default function Overview({ onSelectSite, onGotoTab }) {
   });
 
   if (loading && !ov) return <Loading />;
-  if (error) return <ErrorBox message={error} />;
+  // 데이터가 이미 있으면 일시적 폴링 실패 1건으로 대시보드 전체를 오류 화면으로 갈아치우지 않는다
+  // (고RTT 환경에서 지도·KPI가 다음 주기까지 통째로 사라지던 문제) — 데이터 위 배너로 표시.
+  if (error && !ov) return <ErrorBox message={error} />;
   if (!ov) return null;
 
   const g = ov.global;
@@ -67,6 +69,7 @@ export default function Overview({ onSelectSite, onGotoTab }) {
 
   return (
     <>
+      {error && <div className="badge red" style={{ marginBottom: 8 }}>갱신 실패(직전 데이터 표시 중): {error}</div>}
       <div className="section-title">글로벌 현황</div>
       <div className="kpis" ref={kpisRef} title="한 줄에 안 들어가는 KPI는 자동으로 숨겨집니다(창을 넓히면 더 보입니다).">
         <Kpi label="vCenter" value={`${g.vcentersConnected}/${g.vcenters}`}
