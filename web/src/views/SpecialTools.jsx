@@ -3,6 +3,7 @@ import { fetchJson, postJson, putJson, usePolling, getToken } from '../api.js';
 import { DataTable, Loading, ErrorBox, StateBadge, UsageCell, EntityDetail, Modal, ResultCount, SearchBox, VmLink } from '../components/ui.jsx';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Brush } from 'recharts';
 import { VmRemoteButton } from '../components/VmRemote.jsx';
+import EscClose from '../components/EscClose.jsx';
 import Topology3D from './Topology3D.jsx';
 import { ServiceCheck, NetworkCheck, VmwareConfigBackup } from './DavinciChecks.jsx';
 import NetTrafficAnalysis from './NetTrafficAnalysis.jsx';
@@ -2026,6 +2027,7 @@ function HwDrillModal({ dc, dim, keyVal, onClose, onServer }) {
   const rows = data?.servers || [];
   return (
     <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <EscClose onClose={onClose} />
       <div className="modal card" style={{ maxWidth: 820, width: '92vw', maxHeight: '82vh', overflow: 'auto' }}>
         <div className="flex between" style={{ marginBottom: 10 }}>
           <b style={{ fontSize: 15 }}>{dim === 'gpu' ? '🎮' : dim === 'cpu' ? '⚙' : dim === 'memory' ? '💾' : '🖥'} {HW_DIM_LABEL[dim] || dim}: <span style={{ color: 'var(--accent)' }}>{keyVal}</span> <span className="muted" style={{ fontWeight: 400, fontSize: 13 }}>· {rows.length}대</span></b>

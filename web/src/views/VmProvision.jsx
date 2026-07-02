@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { fetchJson, postJson, putJson, delJson, usePolling } from '../api.js';
 import { Loading, ErrorBox, SearchBox } from '../components/ui.jsx';
+import EscClose from '../components/EscClose.jsx';
 
 const chipStyle = { cursor: 'pointer', padding: '5px 12px', fontSize: 12, userSelect: 'none' };
 const chipActive = { border: '1px solid var(--accent,#6366f1)', color: '#c7d2fe', background: 'rgba(99,102,241,.15)' };
@@ -467,6 +468,7 @@ function SavedJobs({ onLoad, vcenters, reloadKey }) {
       )}
       {edit && (
         <div className="modal-overlay" onClick={(ev) => { if (ev.target === ev.currentTarget) setEdit(null); }}>
+          <EscClose onClose={() => setEdit(null)} />
           <div className="modal card" style={{ maxWidth: 460 }}>
             <div className="flex between" style={{ marginBottom: 12 }}><b>메모 · 태그</b><button className="logout-btn" onClick={() => setEdit(null)}>닫기</button></div>
             <label style={{ display: 'block', marginBottom: 10 }}>메모<textarea className="input" rows={3} value={edit.memo} onChange={(e) => setEdit({ ...edit, memo: e.target.value })} style={{ resize: 'vertical' }} /></label>
@@ -488,6 +490,7 @@ function IpGuideModal({ onClose }) {
   const code = { fontFamily: 'monospace', background: 'rgba(255,255,255,.06)', padding: '1px 5px', borderRadius: 4 };
   return (
     <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <EscClose onClose={onClose} />
       <div className="modal card" style={{ maxWidth: 640, maxHeight: '88vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <div className="flex between" style={{ marginBottom: 8, flex: '0 0 auto' }}>
           <b style={{ fontSize: 15 }}>ⓘ IP 입력 가이드</b>

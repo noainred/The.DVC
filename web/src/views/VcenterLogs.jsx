@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, putJson, postJson, usePolling, getToken } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 
@@ -89,21 +89,27 @@ function LogViewer() {
   useEffect(() => { fetchJson('/tools/vclogs/sources').then(setSources).catch(() => {}); }, []);
 
   // 엣지 보관 vCenter면 연합 조회(요청 큐잉 → 폴링). 데이터는 엣지에 남고 결과만 중계.
+  // 세대 가드: 폴링 중 다른 vCenter로 전환/재조회하면 옛 루프 결과가 새 화면을 덮지 않게 무효화.
+  const fedGen = useRef(0);
   const federate = async () => {
+    const gen = ++fedGen.current;
     setMode('edge'); setLoading(true); setRows([]);
     try {
       const { reqId } = await postJson('/tools/vclogs/federate', { vcenterId: f.vcenterId, severity: f.severity, q: f.q, limit: LIMIT });
       for (let i = 0; i < 9; i++) {
         await new Promise((r) => setTimeout(r, 1500));
+        if (gen !== fedGen.current) return; // 다른 조회로 대체됨 → 이 루프 폐기
         const d = await fetchJson(`/tools/vclogs/federate?reqId=${encodeURIComponent(reqId)}`);
+        if (gen !== fedGen.current) return;
         if (d.state === 'done') { setRows(d.rows || []); setTotal(d.total || 0); setLoading(false); return; }
       }
-      setLoading(false); // 타임아웃(엣지 미응답)
-    } catch { setLoading(false); }
+      if (gen === fedGen.current) setLoading(false); // 타임아웃(엣지 미응답)
+    } catch { if (gen === fedGen.current) setLoading(false); }
   };
 
   const load = (reset = true) => {
     if (f.vcenterId && remoteAgent(f.vcenterId)) return federate(); // 엣지 보관 → 연합 조회
+    const gen = ++fedGen.current; // 진행 중이던 연합 폴링 무효화 + 이 로컬 조회의 세대
     setMode('local'); setLoading(true);
     const off = reset ? 0 : offset;
     const qs = new URLSearchParams({ limit: String(LIMIT), offset: String(off) });
@@ -111,8 +117,9 @@ function LogViewer() {
     if (f.severity) qs.set('severity', f.severity);
     if (f.q) qs.set('q', f.q);
     fetchJson(`/tools/vclogs?${qs}`).then((d) => {
+      if (gen !== fedGen.current) return; // 더 새 조회로 대체됨
       setTotal(d.total); setRows((prev) => (reset ? d.rows : [...prev, ...d.rows])); setOffset(off + d.rows.length);
-    }).catch(() => {}).finally(() => setLoading(false));
+    }).catch(() => {}).finally(() => { if (gen === fedGen.current) setLoading(false); });
   };
   useEffect(() => { load(true); /* eslint-disable-next-line */ }, [f.vcenterId, f.severity, sources]);
 

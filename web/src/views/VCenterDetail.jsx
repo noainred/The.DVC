@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { usePolling } from '../api.js';
 import { Loading, ErrorBox, StateBadge, UsageCell, EntityDetail, DataTable, SearchBox } from '../components/ui.jsx';
+import EscClose from '../components/EscClose.jsx';
 
 const VIEWS = [
   { k: 'hosts', label: '호스트 및 클러스터', icon: '🖥️' },
@@ -371,6 +372,7 @@ function VCenterCompare({ site, onClose }) {
   };
   return (
     <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <EscClose onClose={onClose} />
       <div className="modal card" style={{ maxWidth: 720, width: '94vw' }}>
         <div className="flex between" style={{ marginBottom: 12, alignItems: 'center' }}>
           <b style={{ fontSize: 15 }}>⇄ vCenter 비교</b>
