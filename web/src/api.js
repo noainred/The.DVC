@@ -26,9 +26,18 @@ const isTransientFront = (err, status) => {
   const m = `${err?.name || ''} ${err?.message || ''}`;
   return /AbortError|TimeoutError|timeout|Failed to fetch|NetworkError|network|load failed|ERR_NETWORK/i.test(m);
 };
+// 타임아웃 signal — 구형 브라우저(Chrome<103 등, 업데이트가 막힌 관리 단말)에는
+// AbortSignal.timeout이 없어 'AbortSignal.timeout is not a function'으로 모든 요청이 죽는다.
+// 미지원이면 AbortController+setTimeout으로 동일 동작을 폴백한다.
+function timeoutSignal(ms) {
+  if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') return AbortSignal.timeout(ms);
+  const c = new AbortController();
+  setTimeout(() => c.abort(new DOMException('timeout', 'TimeoutError')), ms);
+  return c.signal;
+}
 // 호출자 signal(언마운트 취소)과 타임아웃을 결합(미지원 브라우저는 호출자 signal만).
 function withTimeout(signal, ms) {
-  const to = AbortSignal.timeout(ms);
+  const to = timeoutSignal(ms);
   if (!signal) return to;
   return typeof AbortSignal.any === 'function' ? AbortSignal.any([signal, to]) : signal;
 }
@@ -67,7 +76,7 @@ export async function postJson(path, body = {}) {
     method: 'POST',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(MUT_TIMEOUT_MS),
+    signal: timeoutSignal(MUT_TIMEOUT_MS),
   });
   if (res.status === 401) { setToken(null); onUnauthorized(); throw new Error('세션이 만료되었습니다.'); }
   const data = await res.json().catch(() => ({}));
@@ -80,7 +89,7 @@ export async function sendJson(path, method, body = {}) {
     method,
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: method === 'DELETE' && !Object.keys(body).length ? undefined : JSON.stringify(body),
-    signal: AbortSignal.timeout(MUT_TIMEOUT_MS),
+    signal: timeoutSignal(MUT_TIMEOUT_MS),
   });
   if (res.status === 401) { setToken(null); onUnauthorized(); throw new Error('세션이 만료되었습니다.'); }
   const data = await res.json().catch(() => ({}));

@@ -1,6 +1,16 @@
 {
   "notes": [
     {
+      "version": "2.100.1",
+      "date": "2026-07-02",
+      "title": "구형 브라우저 호환 — 'AbortSignal.timeout is not a function' 오류 수정",
+      "notes": [
+        "업데이트가 막힌 관리 단말의 구형 브라우저(Chrome/Edge 103 미만 등)에서 포탈 접속 시 'AbortSignal.timeout is not a function' 오류로 모든 화면이 비어 보이던 문제를 수정했습니다. 미지원 브라우저에서는 동일 동작의 폴백(AbortController+타이머)을 사용합니다.",
+        "관리 화면 폼 초기화에 쓰는 structuredClone(Chrome 98+ 필요)도 폴리필을 추가해, VM 생성·vCenter 관리·NSX 관리 화면이 구형 브라우저에서도 동작합니다.",
+        "권장: 가능하면 브라우저를 최신으로 유지하세요(이 수정은 업데이트 불가 단말을 위한 호환 조치입니다)."
+      ]
+    },
+    {
       "version": "2.100.0",
       "date": "2026-07-02",
       "title": "스캔 현황 — 세부 로그창(이벤트 타임라인 + 멈춤 진단)",
