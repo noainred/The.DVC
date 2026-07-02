@@ -1345,15 +1345,20 @@ adminRouter.get('/idrac/scan-result', adminOnly, (req, res) => {
   res.json(getIdracScanResult(String(req.query.reqId || '')));
 });
 
-// 위임 스캔에 사용할 수 있는 에이전트 이름 목록(중앙에 보고/등록된 에이전트들).
+// 위임 스캔에 사용할 수 있는 에이전트 이름 목록 — 중앙에 보고/등록된 에이전트 + 등록된
+// '수집 서버(원격)'(id·이름)를 병합한다. 수집 서버로는 등록됐지만 아직 아무 보고가 없는
+// 에이전트도 선택할 수 있게 한다(대소문자 무시 중복 제거 — 잡 매칭도 소문자 기준).
 adminRouter.get('/idrac/scan-agents', adminOnly, (_req, res) => {
   const names = new Set();
-  for (const k of Object.keys(getAllAgentConfigs() || {})) if (k) names.add(k);
-  for (const x of listInventory()) if (x.agent) names.add(x.agent);
-  for (const x of getAllGpuGuestDiag()) if (x.agent) names.add(x.agent);
-  for (const a of listAssignments()) if (a.agent) names.add(a.agent);
-  for (const k of Object.keys(getResults() || {})) if (k) names.add(k);
-  res.json({ agents: [...names].sort(), centralEnabled: Boolean(config.central.token) });
+  const lower = new Set();
+  const add = (v) => { const s = String(v || '').trim(); if (!s) return; const k = s.toLowerCase(); if (!lower.has(k)) { lower.add(k); names.add(s); } };
+  for (const k of Object.keys(getAllAgentConfigs() || {})) add(k);
+  for (const x of listInventory()) add(x.agent);
+  for (const x of getAllGpuGuestDiag()) add(x.agent);
+  for (const a of listAssignments()) add(a.agent);
+  for (const k of Object.keys(getResults() || {})) add(k);
+  for (const c of listCollectors()) { add(c.id); add(c.name); } // 수집 서버(원격) 등록분
+  res.json({ agents: [...names].sort((a, b) => a.localeCompare(b)), centralEnabled: Boolean(config.central.token) });
 });
 
 // Register iDRACs found by a scan, applying the shared credentials, then poll.
