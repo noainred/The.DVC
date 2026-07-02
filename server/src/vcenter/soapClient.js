@@ -809,12 +809,25 @@ export function parseEventsXml(xml) {
       ts: createdTime ? Date.parse(createdTime) : Date.now(),
       type: type.replace(/^.*:/, ''),
       severity: ['error', 'warning', 'info'].includes(severity) ? severity : (severity === 'red' ? 'error' : severity === 'yellow' ? 'warning' : 'info'),
-      user: userName,
-      entity,
-      message: message.slice(0, 1000),
+      user: xmlUnescape(userName),
+      entity: xmlUnescape(entity),
+      message: xmlUnescape(message.slice(0, 1000)),
     });
   }
   return out;
+}
+
+// XML 엔티티 복원 — '&' 포함 VM/호스트/폴더 이름·주석이 '&amp;' 그대로 스냅샷에 실리면
+// 화면 표기가 깨지고, 사용자 입력 원본 이름과의 매칭(placement 이름→MoRef, 검색)이 실패한다.
+const XML_ENT_RE = /&(amp|lt|gt|quot|apos|#(\d+)|#x([0-9a-fA-F]+));/g;
+const XML_ENT_MAP = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+export function xmlUnescape(s) {
+  if (!s || s.indexOf('&') === -1) return s;
+  return s.replace(XML_ENT_RE, (whole, name, dec, hex) => {
+    if (dec) return String.fromCodePoint(Number(dec));
+    if (hex) return String.fromCodePoint(parseInt(hex, 16));
+    return XML_ENT_MAP[name] ?? whole;
+  });
 }
 
 /** Parse RetrieveProperties response into [{type, ref, props:{path:value}}]. */
@@ -830,7 +843,8 @@ export function parseObjectContent(xml) {
     const psRe = /<propSet>\s*<name>([^<]+)<\/name>\s*<val[^>]*>([\s\S]*?)<\/val>\s*<\/propSet>/g;
     let p;
     while ((p = psRe.exec(block))) {
-      props[p[1]] = p[2];
+      // 스칼라 텍스트 값만 엔티티 복원(중첩 XML은 이후 내부 파서가 다루므로 원형 유지).
+      props[p[1]] = p[2].indexOf('<') === -1 ? xmlUnescape(p[2]) : p[2];
     }
     out.push({ type: objM[1], ref: objM[2], props });
   }
@@ -1111,18 +1125,21 @@ export async function collectFromVCenterSoap(vc) {
 
     // Build host/datastore-derived alarms (high usage / connection issues).
     const alarms = [];
-    const mkAlarm = (entity, entityType, severity, message) => alarms.push({
-      id: `${vc.id}:${entity}:${alarms.length}`, vcenterId: vc.id, entity, entityType,
+    // id는 (vCenter, 대상, 알람 종류)로 안정적이어야 한다 — 배열 인덱스를 넣으면 앞의 알람 하나가
+    // 생기고 사라질 때마다 뒤쪽 id가 전부 밀려, 알림 엔진의 firing 추적 키가 바뀌며 60분 쿨다운이
+    // 무력화되고(즉시 재발송) 가짜 '해소' 이력이 쌓인다.
+    const mkAlarm = (entity, entityType, severity, message, kind) => alarms.push({
+      id: `${vc.id}:${entityType}:${entity}:${kind}`, vcenterId: vc.id, entity, entityType,
       severity, message, time: new Date().toISOString(), acknowledged: false,
     });
     for (const h of hosts) {
-      if (h.connectionState === 'DISCONNECTED') mkAlarm(h.name, 'host', 'critical', 'Host disconnected from vCenter');
-      else if (h.connectionState === 'MAINTENANCE') mkAlarm(h.name, 'host', 'info', 'Host in maintenance mode');
-      else if (h.cpuUsagePct > 90) mkAlarm(h.name, 'host', 'warning', `High CPU usage (${h.cpuUsagePct}%)`);
-      else if (h.memUsagePct > 92) mkAlarm(h.name, 'host', 'warning', `High memory usage (${h.memUsagePct}%)`);
+      if (h.connectionState === 'DISCONNECTED') mkAlarm(h.name, 'host', 'critical', 'Host disconnected from vCenter', 'disconnected');
+      else if (h.connectionState === 'MAINTENANCE') mkAlarm(h.name, 'host', 'info', 'Host in maintenance mode', 'maintenance');
+      else if (h.cpuUsagePct > 90) mkAlarm(h.name, 'host', 'warning', `High CPU usage (${h.cpuUsagePct}%)`, 'high-cpu');
+      else if (h.memUsagePct > 92) mkAlarm(h.name, 'host', 'warning', `High memory usage (${h.memUsagePct}%)`, 'high-mem');
     }
     for (const d of datastores) {
-      if (d.usagePct > 90) mkAlarm(d.name, 'datastore', d.usagePct > 95 ? 'critical' : 'warning', `Datastore usage at ${d.usagePct}%`);
+      if (d.usagePct > 90) mkAlarm(d.name, 'datastore', d.usagePct > 95 ? 'critical' : 'warning', `Datastore usage at ${d.usagePct}%`, 'high-usage');
     }
 
     // Installed solutions / plug-ins + licenses (best-effort) — 병렬로 조회해 고RTT에서 두 호출이

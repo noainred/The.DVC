@@ -95,9 +95,19 @@
 
 - **server/** — `store.js`가 `POLL_INTERVAL_MS`마다 전 vCenter를 **동시성 제한(`COLLECT_CONCURRENCY`) 병렬** 폴링해 정규화 스냅샷 유지. 느린/장애 vCenter가 전체를 막지 않음. 이전 주기가 아직 진행 중이면 이번 틱은 건너뛰어(재진입 가드) 수집이 겹치지 않음. 롤업은 vCenter별 1회 그룹핑(O(N)).
   - `vcenter/soapClient.js` — vim25 SOAP(PropertyCollector/PerformanceManager): 호스트/VM 실측 메트릭, 온도/GPU/HBA, VM GPU 할당(vGPU/패스쓰루), 성능 시계열, VM 클론.
-  - `vcenter/restClient.js` — vSphere Automation REST(7.0/8.0) 폴백.
+  - `vcenter/restClient.js` — vSphere Automation REST(7.0/8.0) 폴백(핵심 목록 실패는 vCenter 수집 실패로 처리해 빈 스냅샷 유통을 막음).
   - `nsx/`, `idrac/`, `ipam/`, `gpu/`, `metrics/`, `provision/`, `proxy/`, `llm/`, `collector/`, `central/`, `agent/`, `upgrade/`, `auth/` — 각 하위 시스템.
-- **web/** — React + Vite. 해시 라우팅 `#/<탭>`, 특수기능 딥링크 `#/tools/<기능>`.
+- **web/** — React + Vite. 해시 라우팅 `#/<탭>`, 특수기능 딥링크 `#/tools/<기능>`. 전 뷰 lazy 청크 분할, 3D 토폴로지(1.3MB)는 클릭 시 동적 로드.
+
+### 성능 설계 (28 vCenter · 고RTT 최적화, v2.106+)
+
+| 계층 | 메커니즘 |
+|---|---|
+| HTTP 응답 | 자체 gzip 미들웨어(비동기 zlib) + **ETag/304** — 스냅샷(30초)보다 짧은 폴링(15초)의 무변동 응답은 본문 0바이트로 재검증만. 프론트 `pollFetch`가 If-None-Match 자동 처리 |
+| SQLite | 전 시계열 DB **WAL + synchronous=NORMAL + busy_timeout**(커밋 fsync 대폭 절감 — 단건 insert 5ms→0.01ms 실측). 외부 프로그램이 읽는 `ipam.db`만 기본 저널 + busy_timeout 유지 |
+| 전력 시계열 | 서버별 최신값 **인메모리 캐시**(기동 시 1회 시드, 쓰기 시 O(1) 갱신) — 매 30초 GROUP BY 풀스캔 제거. 대시보드 24h 집계는 60초 캐시. 적재는 단일 트랜잭션 배치(insertMany), prune은 10틱 스로틀 + `ts` 인덱스 |
+| 대량 export | GPU 시계열 등은 5만 행 청크 + `setImmediate` 양보로 조회(이벤트 루프 10초 정지 방지), 기본 상한 30만 행(`GPU_EXPORT_MAX_ROWS`) |
+| 수집 | vCenter 병렬+동시성 제한, 모든 폴러 재진입 가드, 수집서버 풀러 배치 적재, 위임 잡 활동 기준 GC |
 
 ---
 

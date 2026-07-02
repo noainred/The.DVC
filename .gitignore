@@ -86,3 +86,7 @@ server/config/security-session.json
 # 실제 OS 인벤토리(런타임)
 server/config/os-inventory.json
 server/config/os-scan.json
+
+# SQLite WAL 부산물(런타임 생성 — 커밋 금지)
+server/config/*.db-wal
+server/config/*.db-shm

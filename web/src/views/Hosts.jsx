@@ -7,7 +7,7 @@ export default function Hosts({ filters }) {
   const { data, error, loading } = usePolling('/hosts', filters, 15_000);
   const [detail, setDetail] = useState(null);
   if (loading && !data) return <Loading />;
-  if (error) return <ErrorBox message={error} />;
+  if (error && !data) return <ErrorBox message={error} />; // 데이터 보유 중 일시 폴링 오류는 화면 유지
   const rows = data?.items || [];
 
   const columns = [
@@ -18,7 +18,7 @@ export default function Hosts({ filters }) {
     { key: 'cpuCores', label: 'Cores', align: 'right', render: (h) => h.cpuCores },
     { key: 'cpuUsagePct', label: 'CPU', render: (h) => <UsageCell pct={h.cpuUsagePct} /> },
     { key: 'memUsagePct', label: '메모리', render: (h) => <UsageCell pct={h.memUsagePct} /> },
-    { key: 'memTotalMB', label: 'RAM', align: 'right', render: (h) => `${Math.round(h.memTotalMB / 1024)} GB` },
+    { key: 'memTotalMB', label: 'RAM', align: 'right', render: (h) => (Number.isFinite(h.memTotalMB) ? `${Math.round(h.memTotalMB / 1024)} GB` : '—') }, // REST 폴백 수집엔 메모리 정보 없음 — 'NaN GB' 방지
     { key: 'powerWatts', label: '전력', align: 'right', render: (h) => (h.powerWatts > 0 ? `${(h.powerWatts / 1000).toFixed(2)} kW` : '—') },
     { key: 'vmCount', label: 'VM', align: 'right' },
   ];

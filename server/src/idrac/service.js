@@ -310,13 +310,28 @@ export async function purgeStalePower(opts = {}) {
  * 전력 대시보드용 집계 — 플릿 현재/피크/평균(지정 시간), 시간대별 추세(시간 버킷), 서버별
  * 24h 피크/평균/최소·마지막관측·유휴 플래그, vCenter별 현재 전력 롤업. measured=allMeasuredPower() 결과.
  */
+// 집계 캐시(윈도우별 60초) — statsSince/bucketsSince는 지정 윈도우의 전 행을 동기 스캔한다
+// (24h ≈ 190만 행 시 요청당 수 초 이벤트 루프 블로킹 실측). 대시보드는 다사용자가 반복 폴링하므로
+// 60초 캐시로 스캔을 분당 1회 이하로 묶는다(샘플 주기 30~60초라 신선도 손실 없음).
+const aggCache = new Map(); // win(hours) -> { at, stats, buckets }
+const AGG_TTL_MS = 60_000;
+
 export async function buildPowerDashboard(measured, { hours = 24 } = {}) {
   const db = await getDb();
   const IDLE_W = Number(process.env.IDLE_WATT_THRESHOLD) || 100; // 평균<이 값 → '유휴 의심'
   const win = Math.max(1, Math.min(720, Number(hours) || 24));
-  const since = Date.now() - win * 3_600_000;
-  const stats = db.statsSince ? db.statsSince(since) : new Map();
-  const buckets = db.bucketsSince ? db.bucketsSince(since, 3_600_000) : [];
+  let agg = aggCache.get(win);
+  if (!agg || Date.now() - agg.at > AGG_TTL_MS) {
+    const since = Date.now() - win * 3_600_000;
+    agg = {
+      at: Date.now(),
+      stats: db.statsSince ? db.statsSince(since) : new Map(),
+      buckets: db.bucketsSince ? db.bucketsSince(since, 3_600_000) : [],
+    };
+    aggCache.set(win, agg);
+    if (aggCache.size > 8) aggCache.delete(aggCache.keys().next().value); // 윈도우 종류 상한
+  }
+  const { stats, buckets } = agg;
 
   const perServer = measured.map((m) => {
     // 원격(remote) 전력은 DB에 'rmt:<host>' 키로 적재되지만(puller.js), measured.serverId는

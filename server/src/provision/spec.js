@@ -52,13 +52,16 @@ export function expandSpec(spec = {}) {
 
   // When an explicit IP list is given and no count is set, default the count to
   // the number of IPs so users can just paste a column of addresses.
-  let count = Math.max(0, Math.min(500, Math.round(Number(spec.count) || 0)));
+  // 상한 검사는 클램프 '이전' 원본 값으로 — 클램프를 먼저 하면 600대 요청이 오류 없이 500대만
+  // 생성되고(IP 부족 검증도 잘린 수 기준으로 통과) 사용자가 누락을 인지하지 못한다.
+  const rawCount = Math.round(Number(spec.count) || 0);
+  if (rawCount > 500) errors.push(`한 번에 최대 500대까지 생성할 수 있습니다 (요청: ${rawCount}대).`);
+  let count = Math.max(0, Math.min(500, rawCount));
   if (useList && count < 1) count = Math.min(500, ipList.length);
   const start = Math.round(Number(spec.startIndex) || 1);
   const pad = Math.max(0, Math.round(Number(spec.pad) || 0));
   if (!spec.namePattern) errors.push('이름 패턴이 필요합니다 (예: web-{n}).');
   if (count < 1) errors.push('생성 개수는 1 이상이어야 합니다.');
-  if (count > 500) errors.push('한 번에 최대 500대까지 생성할 수 있습니다.');
 
   if (useList) {
     for (const ip of ipList) if (ipToNum(ip) == null) errors.push(`잘못된 IP: ${ip}`);

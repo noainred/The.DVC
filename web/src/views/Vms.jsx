@@ -51,7 +51,7 @@ function VmDetail({ vm, onClose }) {
         <DetailRow label="VMware Tools"><StateBadge state={vm.toolsStatus} /></DetailRow>
         <DetailRow label="vCPU">{vm.cpuCount} 코어</DetailRow>
         <DetailRow label="RAM">{vm.memMB != null ? <>{Math.round(vm.memMB / 1024)} GB ({vm.memMB.toLocaleString()} MB)</> : '—'}</DetailRow>
-        <DetailRow label="디스크">{vm.storageGB} GB</DetailRow>
+        <DetailRow label="디스크">{vm.storageGB != null ? `${vm.storageGB} GB` : '—'}</DetailRow>
         <DetailRow label="Tools 버전">{vm.toolsVersion || '—'}</DetailRow>
         <DetailRow label="스냅샷">{vm.snapshotCount ? `${vm.snapshotCount}개 · ${vm.snapshotSizeGB || 0} GB` : '없음'}</DetailRow>
         <DetailRow label="GPU">{vm.gpu ? <GpuBadge gpu={vm.gpu} /> : <span className="muted">없음</span>}</DetailRow>
@@ -95,7 +95,7 @@ export default function Vms({ filters }) {
   if (gpuType) { params.gpu = '1'; params.gpuType = gpuType; }
   const { data, error, loading } = usePolling('/vms', params, 15_000);
   if (loading && !data) return <Loading />;
-  if (error) return <ErrorBox message={error} />;
+  if (error && !data) return <ErrorBox message={error} />; // 데이터 보유 중 일시 폴링 오류는 화면 유지
   const rows = data?.items || [];
 
   const showGpuCol = gpuOnly || gpuType || rows.some((v) => v.gpu);
@@ -106,11 +106,11 @@ export default function Vms({ filters }) {
     { key: 'guestOS', label: 'Guest OS' },
     { key: 'ipAddress', label: 'IP', render: (v) => ipList(v) },
     { key: 'cpuCount', label: 'vCPU', align: 'right' },
-    { key: 'memMB', label: 'RAM', align: 'right', render: (v) => `${Math.round(v.memMB / 1024)} GB` },
+    { key: 'memMB', label: 'RAM', align: 'right', render: (v) => (Number.isFinite(v.memMB) ? `${Math.round(v.memMB / 1024)} GB` : '—') },
     ...(showGpuCol ? [{ key: 'gpu', label: 'GPU', sortValue: (v) => v.gpu?.type || '', render: (v) => <GpuBadge gpu={v.gpu} /> }] : []),
     { key: 'cpuUsagePct', label: 'CPU', render: (v) => <UsageCell pct={v.cpuUsagePct} /> },
     { key: 'memUsagePct', label: '메모리', render: (v) => <UsageCell pct={v.memUsagePct} /> },
-    { key: 'storageGB', label: '디스크', align: 'right', render: (v) => `${v.storageGB} GB` },
+    { key: 'storageGB', label: '디스크', align: 'right', render: (v) => (v.storageGB != null ? `${v.storageGB} GB` : '—') },
     { key: 'host', label: '호스트', render: (v) => <span className="muted">{v.host}</span> },
   ];
 

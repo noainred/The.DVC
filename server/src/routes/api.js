@@ -785,23 +785,42 @@ async function gpuSeriesExport(req, res, fmt) {
   const meta = db.meta('gpu_util');
   const until = Date.now();
   const since = range === 'days' ? until - days * 86_400_000 : (meta.firstTs ?? 0);
-  const raw = db.dump('gpu_util', since, until, 1_000_000);
-  // 법인 스코프면 해당 법인 호스트만. 이름/클러스터는 현재 스냅샷 기준으로 매핑.
+  // 대량 dump를 한 번에 하지 않는다 — 1M행 동기 조회+매핑은 이벤트 루프를 ~10초 정지시켰다(실측).
+  // ts 윈도우 청크(5만 행)로 나눠 조회하고 청크 사이 setImmediate로 양보해 폴링/API가 굶지 않게 한다.
+  const MAX_ROWS = Math.max(1000, Number(process.env.GPU_EXPORT_MAX_ROWS) || 300_000);
+  const CHUNK = 50_000;
   const out = [];
   // gpu_util은 %(0~100). 과거 일부 샘플이 vSphere 1/100% 단위로 ×100 저장된 경우가 있어
   // 100 초과면 ÷100로 정규화하고 0~100으로 클램프(util 최대 100이라 안전).
   const normPct = (v) => { const n = Number(v); if (!Number.isFinite(n)) return 0; const p = n > 100 ? n / 100 : n; return Math.max(0, Math.min(100, Math.round(p))); };
-  for (const r of raw) {
-    const h = hostMap.get(r.k);
-    if (vcId && (!h || h.vcenterId !== vcId)) continue;
-    out.push({ ts: r.ts, host: h?.name || r.k, vcenterId: h?.vcenterId || '', cluster: h?.cluster || '', utilPct: normPct(r.v) });
+  let cursor = since;
+  let truncated = false;
+  while (out.length < MAX_ROWS) {
+    const chunk = db.dump('gpu_util', cursor, until, CHUNK);
+    if (!chunk.length) break;
+    let rows = chunk;
+    if (chunk.length === CHUNK) {
+      // 경계 ts의 행이 청크에 걸쳐 잘릴 수 있어, 마지막 ts 행들은 버리고 다음 청크(since=그 ts)에서
+      // 다시 읽는다(중복/누락 없이 페이지네이션 — 동일 ts 행 수는 호스트 수 이하라 항상 CHUNK 미만).
+      const lastTs = chunk[chunk.length - 1].ts;
+      rows = chunk.filter((r) => r.ts < lastTs);
+      cursor = lastTs;
+    }
+    for (const r of rows) {
+      const h = hostMap.get(r.k);
+      if (vcId && (!h || h.vcenterId !== vcId)) continue;
+      out.push({ ts: r.ts, host: h?.name || r.k, vcenterId: h?.vcenterId || '', cluster: h?.cluster || '', utilPct: normPct(r.v) });
+      if (out.length >= MAX_ROWS) { truncated = true; break; }
+    }
+    if (chunk.length < CHUNK) break;
+    await new Promise((r) => setImmediate(r)); // 청크 사이 이벤트 루프 양보
   }
   const stamp = new Date().toISOString().slice(0, 10);
   const sinceIso = meta.firstTs ? new Date(meta.firstTs).toISOString() : '없음';
   if (fmt === 'json') {
     const body = JSON.stringify({
       generatedAt: new Date().toISOString(), collectedSince: meta.firstTs ? new Date(meta.firstTs).toISOString() : null,
-      range, days: range === 'days' ? days : null, vcenterId: vcId, sampleCount: out.length,
+      range, days: range === 'days' ? days : null, vcenterId: vcId, sampleCount: out.length, truncated,
       points: out.map((p) => ({ ...p, tsIso: new Date(p.ts).toISOString() })),
     }, null, 2);
     sendMaybeZip(res, `gpu-history-${range}-${stamp}.json`, body, 'application/json; charset=utf-8');
@@ -810,7 +829,7 @@ async function gpuSeriesExport(req, res, fmt) {
   const esc = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   const head = ['timestamp_iso', 'epoch_ms', 'host', 'vcenter_id', 'cluster', 'gpu_util_pct'];
   const lines = [
-    `# GPU 사용률 수집 데이터 — 수집 시작: ${sinceIso} (그날부터 누적) | 범위: ${range === 'all' ? '전체' : `최근 ${days}일`} | 생성: ${new Date().toISOString()} | 샘플 ${out.length}`,
+    `# GPU 사용률 수집 데이터 — 수집 시작: ${sinceIso} (그날부터 누적) | 범위: ${range === 'all' ? '전체' : `최근 ${days}일`} | 생성: ${new Date().toISOString()} | 샘플 ${out.length}${truncated ? ' (상한 도달 — 기간을 좁혀 다시 내보내세요)' : ''}`,
     '# 단위: gpu_util_pct = GPU 사용률 %(0~100) · epoch_ms = Unix epoch 밀리초(엑셀은 지수표기로 보일 수 있음) · timestamp_iso = ISO8601 시각',
     head.join(','),
   ];

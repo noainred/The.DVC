@@ -189,8 +189,10 @@ export function beginTotpEnroll(username, host = '') {
   const u = getUser(username);
   if (!u) return { ok: false, reason: '사용자를 찾을 수 없습니다.' };
   const secret = totp.generateSecret();
-  u.totpSecret = secret;
-  u.totpEnabled = false; // not active until a code is confirmed
+  // 확정(confirm) 전에는 기존 등록을 절대 건드리지 않는다 — 이전에는 여기서 totpSecret을
+  // 교체하고 totpEnabled=false로 영속화해, OTP 전용 계정(passwordHash 삭제됨)이 '재등록 시작'
+  // 버튼만 눌러도 기존 OTP·비밀번호 모두 불가한 벽돌 상태가 됐다(마지막 관리자면 복구 불가).
+  u.totpPendingSecret = secret;
   persistUsers();
   const base = config.auth.totpIssuer || 'VMware Portal';
   const issuer = host ? (base.includes('VMware') ? base.replace('VMware', `VMware(${host})`) : `${base}(${host})`) : base;
@@ -212,8 +214,13 @@ export function verifyUserOtp(username, code) {
 /** Confirm enrollment by verifying a code from the authenticator app. */
 export function confirmTotpEnroll(username, code) {
   const u = getUser(username);
-  if (!u || !u.totpSecret) return { ok: false, reason: '먼저 OTP 등록을 시작하세요.' };
-  if (!totp.verifyToken(code, u.totpSecret)) return { ok: false, reason: 'OTP 코드가 일치하지 않습니다.' };
+  // 신규 흐름은 pending 시크릿으로 확정, (하위호환) 구버전에서 begin만 하고 미확정이던
+  // 계정(totpSecret 있고 enabled=false)은 기존 시크릿으로 확정을 이어간다.
+  const pending = u?.totpPendingSecret || (u && !u.totpEnabled ? u.totpSecret : null);
+  if (!u || !pending) return { ok: false, reason: '먼저 OTP 등록을 시작하세요.' };
+  if (!totp.verifyToken(code, pending)) return { ok: false, reason: 'OTP 코드가 일치하지 않습니다.' };
+  u.totpSecret = pending;
+  delete u.totpPendingSecret;
   u.totpEnabled = true;
   delete u.passwordHash; // OTP-only from now on
   persistUsers();
@@ -226,6 +233,7 @@ export function disableTotp(username, { password } = {}) {
   if (!u) return { ok: false, reason: '사용자를 찾을 수 없습니다.' };
   u.totpEnabled = false;
   delete u.totpSecret;
+  delete u.totpPendingSecret;
   if (password) u.passwordHash = hashPassword(password); // restore a temp password so they can log in to re-enroll
   persistUsers();
   return { ok: true };

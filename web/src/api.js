@@ -175,6 +175,9 @@ export function usePolling(path, params = {}, intervalMs = 15_000) {
 
   useEffect(() => {
     if (!path) { setLoading(false); return undefined; }
+    // 파라미터(스코프) 변경 시 직전 스코프의 데이터를 비운다 — 남겨두면 새 응답이 오기 전까지
+    // (고RTT에서 수 초) 이전 스코프의 데이터가 새 선택의 화면처럼 표시된다.
+    setData(null); setError(null); setLoading(true);
     let active = true;
     let inFlight = false;
     let timer = null;

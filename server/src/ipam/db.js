@@ -37,6 +37,10 @@ function initSqlite() {
   return import('node:sqlite').then(({ DatabaseSync }) => {
     fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
     const db = new DatabaseSync(DB_PATH);
+    // ipam.db는 외부 프로그램이 직접 읽는 공유 파일 — WAL(-wal/-shm 파일 필요)은 외부 리더
+    // 호환이 불확실해 저널 모드는 기본(DELETE) 유지, busy_timeout만 적용(리더 락 시 즉시
+    // SQLITE_BUSY 실패 대신 3초 대기 — store의 서명 재시도 로직과 결합돼 유실 방지).
+    try { db.exec('PRAGMA busy_timeout=3000;'); } catch { /* 구버전 폴백 */ }
     db.exec(`
       CREATE TABLE IF NOT EXISTS ip_records (
         ip TEXT NOT NULL,

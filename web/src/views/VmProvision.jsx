@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { fetchJson, postJson, putJson, delJson, usePolling } from '../api.js';
 import { Loading, ErrorBox, SearchBox } from '../components/ui.jsx';
 import EscClose from '../components/EscClose.jsx';
@@ -79,10 +79,14 @@ export default function VmProvision() {
   const delNic = (idx) => setForm((f) => ({ ...f, guest: { ...f.guest, extraNics: f.guest.extraNics.filter((_, i) => i !== idx) } }));
   const [ipGuide, setIpGuide] = useState(false);
 
+  const previewGen = useRef(0); // 연타 입력 시 늦은 응답이 최신 미리보기(확인창 count 근거)를 덮지 않게
   const doPreview = async () => {
+    const gen = ++previewGen.current;
     setMsg(null);
-    try { setPreview(await postJson('/provision/preview', specBody)); }
-    catch (e) { setMsg({ ok: false, text: e.message }); }
+    try {
+      const p = await postJson('/provision/preview', specBody);
+      if (gen === previewGen.current) setPreview(p);
+    } catch (e) { if (gen === previewGen.current) setMsg({ ok: false, text: e.message }); }
   };
   // Auto-refresh the preview as the user types the pattern/count/IP.
   useEffect(() => { const t = setTimeout(doPreview, 350); return () => clearTimeout(t); /* eslint-disable-next-line */ }, [form.namePattern, form.count, form.startIndex, form.pad, form.guest.ipMode, form.guest.ipStart, form.guest.ipAssign, form.guest.ipList, form.guest.hostnamePattern]);

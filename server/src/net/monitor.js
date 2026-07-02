@@ -92,4 +92,13 @@ export function startCaptureMonitor() {
   console.log('[netmon] 연속 네트워크 모니터 시작');
 }
 
-export async function runMonitorNow(id) { const m = load().find((x) => x.id === id); if (!m) return { ok: false, reason: '모니터 없음' }; await runMonitor(m); return { ok: true, ...redact(m) }; }
+export async function runMonitorNow(id) {
+  const m = load().find((x) => x.id === id);
+  if (!m) return { ok: false, reason: '모니터 없음' };
+  // 스케줄러와 같은 재진입 가드를 공유 — 진행 중인 캡처와 같은 모니터의 tcpdump SSH 세션이
+  // 이중으로 돌고 lastRun/persist가 경쟁하는 것을 방지.
+  if (runningMon.has(m.id)) return { ok: false, reason: '이미 실행 중입니다.' };
+  runningMon.add(m.id);
+  try { await runMonitor(m); } finally { runningMon.delete(m.id); }
+  return { ok: true, ...redact(m) };
+}

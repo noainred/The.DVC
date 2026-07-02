@@ -11,8 +11,17 @@ const MONTHS = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7,
 // /var/log/secure·auth.log)를 모두 인식 — 이전엔 syslog 형식이 불일치해 매 조사마다 ts=Date.now()로
 // 기록돼 동일 실패가 중복 적재되고 브루트포스 오탐을 유발했다. 같은 라인은 항상 같은 ts가 나오게 한다.
 function parseLogTs(line) {
-  const iso = /(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2})/.exec(line);
-  if (iso) { const t = Date.parse(iso[1].replace(' ', 'T')); if (Number.isFinite(t)) return t; }
+  // 타임존 오프셋(+0200, +02:00, Z)까지 캡처 — journalctl -o short-iso는 오프셋을 붙이는데,
+  // 오프셋을 잘라내면 원격 게스트(폴란드·미국동부)의 시각이 포탈 로컬(한국)로 해석돼 최대
+  // ±13시간 어긋나 브루트포스 창(10분) 판정이 통째로 빗나간다.
+  const iso = /(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[+-]\d{2}:?\d{2}|Z)?)/.exec(line);
+  if (iso) {
+    let s = iso[1].replace(' ', 'T');
+    const m = /([+-]\d{2})(\d{2})$/.exec(s); // '+0200' → '+02:00' (Date.parse 호환)
+    if (m) s = s.slice(0, -4) + `${m[1]}:${m[2]}`;
+    const t = Date.parse(s);
+    if (Number.isFinite(t)) return t;
+  }
   const sl = /^([A-Z][a-z]{2})\s+(\d{1,2})\s+(\d{2}):(\d{2}):(\d{2})/.exec(line);
   if (sl && MONTHS[sl[1]] != null) {
     const now = new Date();

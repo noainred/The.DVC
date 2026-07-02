@@ -14,6 +14,7 @@ import { config } from './config.js';
 import { store } from './store.js';
 import { logAudit } from './audit.js';
 import { resilientFetch } from './util/resilientFetch.js';
+import { Agent as UndiciAgent } from 'undici';
 
 const FILE = path.join(config.configDir, 'alerts.json');
 
@@ -66,6 +67,7 @@ export function saveAlertConfig(body = {}) {
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
   fs.writeFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
   cache = next;
+  rescheduleAlertEngine(); // 주기(intervalSec) 변경 즉시 반영 — 이전엔 재시작 전까지 저장만 되고 무시됐다
   return next;
 }
 
@@ -184,9 +186,12 @@ function updatePrevPower(prev, snap) {
   return prev;
 }
 
+// 웹훅은 Slack 등 '공인 CA' SaaS가 대상 — 내부 자체서명용 wanAgent(검증 off)로 보내면
+// 웹훅 URL(시크릿 포함)이 무검증 TLS로 나간다. 검증 켠 전용 디스패처를 사용한다.
+const webhookAgent = new UndiciAgent({ connect: { rejectUnauthorized: true }, connections: 4 });
 async function post(url, payload) {
   // 일시적 네트워크 오류로 알림이 조용히 유실되지 않도록 1회 재시도(고RTT 외부 웹훅 대응).
-  return resilientFetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), timeoutMs: 15000, retries: 1 });
+  return resilientFetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), timeoutMs: 15000, retries: 1, dispatcher: webhookAgent });
 }
 export async function notify(alert, cfg = loadAlertConfig()) {
   const text = `[${alert.severity === 'critical' ? '🔴 위험' : '🟠 경고'}] ${alert.title}${alert.detail ? `\n${alert.detail}` : ''}`;
@@ -268,6 +273,15 @@ export function startAlertEngine() {
   timer = setInterval(() => tick().catch(() => {}), iv);
   timer.unref?.();
   console.log(`[alerts] engine started (every ${Math.round(iv / 1000)}s)`);
+}
+
+/** 설정 저장 시 평가 주기를 즉시 재적용(엔진이 켜져 있을 때만). */
+function rescheduleAlertEngine() {
+  if (!timer) return;
+  clearInterval(timer);
+  const iv = Math.max(15, loadAlertConfig().intervalSec || 60) * 1000;
+  timer = setInterval(() => tick().catch(() => {}), iv);
+  timer.unref?.();
 }
 
 /** Send a test notification to verify channel config. */
