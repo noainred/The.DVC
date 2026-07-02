@@ -11,6 +11,8 @@ import { buildExport } from '../collector/agent.js';
 import { upgradeManager } from '../upgrade/manager.js';
 import { tokenMatches } from '../util/secureCompare.js';
 import { upgradeFromBundleBytes, restartProcess } from '../upgrade/upgrade.js';
+import { setLocalPassword } from '../auth/auth.js';
+import { logAudit } from '../audit.js';
 
 export const collectorRouter = Router();
 
@@ -40,6 +42,17 @@ collectorRouter.get('/ping', (req, res) => {
   if (!config.collector.token) return res.status(404).json({ ok: false });
   if (!checkToken(req)) return res.status(403).json({ ok: false });
   res.json({ ok: true, datacenter: config.collector.datacenter || '', version: currentVersion() });
+});
+
+// 중앙 포탈이 이 엣지의 로컬 계정 비밀번호를 원격 변경(기본 비번 일괄 교체용).
+// COLLECTOR_TOKEN 가드 — 토큰을 가진 중앙만 호출 가능. 비밀번호는 로그/감사에 남기지 않는다.
+collectorRouter.post('/set-password', express.json({ limit: '4kb' }), (req, res) => {
+  if (!config.collector.token) return res.status(404).json({ ok: false, reason: 'collector 비활성화(COLLECTOR_TOKEN 미설정)' });
+  if (!checkToken(req)) return res.status(403).json({ ok: false, reason: '토큰 불일치' });
+  const username = String(req.body?.username || 'admin').trim();
+  const r = setLocalPassword(username, req.body?.password);
+  if (r.ok) logAudit({ user: 'central-portal', action: '엣지 비밀번호 원격 변경', target: username, ip: req.ip || '' });
+  res.status(r.ok ? 200 : 400).json({ ...r, version: currentVersion() });
 });
 
 // Receive an upgrade bundle pushed by the central portal and self-install.

@@ -17,6 +17,9 @@ export default function Collectors() {
   const [sort, setSort] = useState({ key: 'id', dir: 'asc' });
   const [ingest, setIngest] = useState(null); // 에이전트별 수신 트래픽 진단
   const [showToken, setShowToken] = useState(false); // 토큰 입력칸 표시/가리기
+  const [pwForm, setPwForm] = useState(null);   // 엣지 비번 일괄 변경 폼 | null
+  const [pwResult, setPwResult] = useState(null); // 일괄 변경 결과 { total, succeeded, results, central }
+  const [pwBusy, setPwBusy] = useState(false);
 
   const load = async () => {
     try { setData(await fetchJson('/admin/collectors')); setError(null); }
@@ -104,6 +107,24 @@ export default function Collectors() {
     catch (e) { setError(e.message); }
   };
 
+  // 엣지 비번 일괄 변경 실행. ids를 주면 그 대상만(실패분 재시도용).
+  const bulkSetPassword = async (ids) => {
+    const f = pwForm;
+    if (!f) return;
+    if (!String(f.username || '').trim()) { setMsg({ ok: false, text: '계정명을 입력하세요.' }); return; }
+    if ((f.password || '').length < 8) { setMsg({ ok: false, text: '비밀번호는 8자 이상이어야 합니다.' }); return; }
+    if (f.password !== f.confirm) { setMsg({ ok: false, text: '비밀번호 확인이 일치하지 않습니다.' }); return; }
+    if (!window.confirm(`${Array.isArray(ids) && ids.length ? `엣지 ${ids.length}대` : '활성 엣지 전체'}의 '${f.username.trim()}' 비밀번호를 변경할까요?${f.includeCentral ? '\n(이 중앙 포탈의 같은 계정도 함께 변경됩니다)' : ''}`)) return;
+    setPwBusy(true); setMsg(null);
+    try {
+      const body = { username: f.username.trim(), password: f.password, includeCentral: !!f.includeCentral };
+      if (Array.isArray(ids) && ids.length) body.ids = ids;
+      const r = await postJson('/admin/collectors/set-password', body);
+      setPwResult(r);
+    } catch (e) { setMsg({ ok: false, text: e.message }); }
+    finally { setPwBusy(false); }
+  };
+
   // 상태가 '오류'(status.ok === false)인 수집 서버를 일괄 삭제.
   const removeErrored = async () => {
     const st = data.status || {}; const cols = data.collectors || [];
@@ -178,6 +199,7 @@ export default function Collectors() {
           {central && <span className="muted" style={{ fontSize: 12 }}>중앙 버전 <b style={{ color: 'var(--text)' }}>v{central}</b></span>}
           <button className="logout-btn" style={{ padding: '9px 14px' }} disabled={busy} onClick={pullNow}>지금 동기화</button>
           <button className="logout-btn" style={{ padding: '9px 14px' }} disabled={busy} onClick={() => upgrade(null)}>모두 업그레이드</button>
+          <button className="logout-btn" style={{ padding: '9px 14px' }} disabled={busy || !enabledCount} title="모든(또는 선택한) 엣지 포탈의 로컬 계정 비밀번호를 한 번에 변경" onClick={() => { setPwForm({ username: 'admin', password: '', confirm: '', includeCentral: false }); setPwResult(null); }}>🔑 엣지 비번 일괄 변경</button>
           <button className="logout-btn" style={{ padding: '9px 14px', color: 'var(--red)', borderColor: erroredCount ? 'var(--red)' : undefined }} disabled={busy || !erroredCount} title="상태가 '오류'인 수집 서버를 일괄 삭제" onClick={removeErrored}>오류 서버 일괄 삭제{erroredCount ? ` (${erroredCount})` : ''}</button>
           <button className="login-btn" style={{ flex: 'none', padding: '9px 16px' }} onClick={openAdd}>+ 수집 서버 추가</button>
         </div>
@@ -285,6 +307,77 @@ export default function Collectors() {
               에이전트 서버는 다음으로 실행합니다: <code>COLLECTOR_TOKEN=&lt;토큰&gt; COLLECTOR_DATACENTER=Seoul-DC1</code>.
               그 서버의 ‘전력 수집’ 메뉴에서 로컬 iDRAC/OME를 등록하세요. 토큰은 <code>$CONFIG_DIR/collectors.json</code>(0600)에만 저장됩니다.
             </div>
+          </div>
+        </div>
+      )}
+
+      {pwForm && (
+        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget && !pwBusy) setPwForm(null); }}>
+          <EscClose onClose={() => { if (!pwBusy) setPwForm(null); }} />
+          <div className="modal card" style={{ maxWidth: 640 }}>
+            <div className="flex between" style={{ marginBottom: 12 }}>
+              <b style={{ fontSize: 15 }}>🔑 엣지 포탈 비밀번호 일괄 변경</b>
+              <button className="logout-btn" disabled={pwBusy} onClick={() => setPwForm(null)}>닫기</button>
+            </div>
+            {!pwResult ? (
+              <>
+                <div className="muted" style={{ fontSize: 12, lineHeight: 1.7, marginBottom: 12 }}>
+                  등록된 <b>활성 수집 서버 {enabledCount}대</b>의 로컬 계정 비밀번호를 한 번에 변경합니다
+                  (기본 설치 비번 교체용). 엣지의 <code>COLLECTOR_TOKEN</code>으로 인증하므로 토큰이 저장된
+                  서버만 대상이 되며, v2.107 미만 엣지는 먼저 업그레이드가 필요합니다.
+                  OTP를 등록한 계정은 로그인에 OTP가 계속 우선됩니다(비번은 폴백).
+                </div>
+                <div className="spec-grid">
+                  <label>계정<input className="input" value={pwForm.username} onChange={(e) => setPwForm((f) => ({ ...f, username: e.target.value }))} placeholder="admin" /></label>
+                  <label>새 비밀번호 (8자 이상)<input className="input" type="password" value={pwForm.password} onChange={(e) => setPwForm((f) => ({ ...f, password: e.target.value }))} autoComplete="new-password" /></label>
+                  <label>새 비밀번호 확인<input className="input" type="password" value={pwForm.confirm} onChange={(e) => setPwForm((f) => ({ ...f, confirm: e.target.value }))} autoComplete="new-password" /></label>
+                  <label className="flex gap" style={{ alignItems: 'center', alignSelf: 'end', cursor: 'pointer', fontSize: 13 }}>
+                    <input type="checkbox" checked={pwForm.includeCentral} onChange={(e) => setPwForm((f) => ({ ...f, includeCentral: e.target.checked }))} />
+                    이 중앙 포탈의 같은 계정도 함께 변경
+                  </label>
+                </div>
+                {msg && pwForm && (
+                  <div style={{ marginTop: 12, padding: '9px 12px', borderRadius: 8, fontSize: 13, background: 'rgba(239,68,68,.12)', color: '#f87171' }}>{msg.text}</div>
+                )}
+                <div className="flex gap" style={{ marginTop: 16 }}>
+                  <button className="login-btn" style={{ flex: 'none', padding: '10px 18px' }} disabled={pwBusy} onClick={bulkSetPassword}>
+                    {pwBusy ? '변경 중…' : `${enabledCount}대 일괄 변경`}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ marginBottom: 10, padding: '9px 12px', borderRadius: 8, fontSize: 13,
+                  background: pwResult.succeeded === pwResult.total ? 'rgba(34,197,94,.12)' : 'rgba(245,158,11,.12)',
+                  color: pwResult.succeeded === pwResult.total ? '#4ade80' : '#fbbf24' }}>
+                  완료 — 엣지 {pwResult.succeeded}/{pwResult.total}대 성공
+                  {pwResult.central && ` · 중앙 포탈 ${pwResult.central.ok ? '변경됨' : `실패(${pwResult.central.reason})`}`}
+                </div>
+                <div className="table-wrap" style={{ maxHeight: '40vh' }}>
+                  <table>
+                    <thead><tr><th>엣지</th><th>결과</th><th>비고</th></tr></thead>
+                    <tbody>
+                      {(pwResult.results || []).map((r) => (
+                        <tr key={r.id}>
+                          <td><b>{r.name}</b> <span className="muted">({r.id})</span></td>
+                          <td>{r.ok ? <span className="badge green">성공</span> : <span className="badge red">실패</span>}</td>
+                          <td className="muted" style={{ fontSize: 12 }}>{r.ok ? `${r.edgeVersion ? `v${r.edgeVersion}` : ''}${r.totpEnabled ? ' · OTP 계정(로그인엔 OTP 우선)' : ''}` : r.reason}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="flex gap" style={{ marginTop: 14 }}>
+                  <button className="logout-btn" style={{ padding: '10px 18px' }} onClick={() => setPwForm(null)}>닫기</button>
+                  {pwResult.succeeded < pwResult.total && (
+                    <button className="login-btn" style={{ flex: 'none', padding: '10px 18px' }} disabled={pwBusy}
+                      onClick={() => bulkSetPassword((pwResult.results || []).filter((r) => !r.ok).map((r) => r.id))}>
+                      실패한 {pwResult.total - pwResult.succeeded}대만 재시도
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
