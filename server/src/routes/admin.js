@@ -83,7 +83,7 @@ import {
 } from '../idrac/registry.js';
 import { expandIpList } from '../idrac/iprange.js';
 import { scanForIdracs } from '../idrac/scan.js';
-import { enqueueIdracScan, enqueueIdracRegister, getIdracScanResult, listIdracScanJobs } from '../central/idracScanJobs.js';
+import { enqueueIdracScan, enqueueIdracRegister, getIdracScanResult, listIdracScanJobs, getIdracScanJobLog } from '../central/idracScanJobs.js';
 import { getPollerStatus, pollNow } from '../idrac/poller.js';
 import { listScanRanges, saveScanRanges, removeScanRanges } from '../idrac/scanRanges.js';
 import { startIdracScanNow, idracScanStatus } from '../idrac/scanPoller.js';
@@ -1416,6 +1416,12 @@ adminRouter.get('/idrac/scan-jobs', adminOnly, (_req, res) => {
     ok: st[c.id]?.ok ?? null, hosts: st[c.id]?.ok ? (st[c.id]?.hosts ?? 0) : 0, at: st[c.id]?.at || null, error: st[c.id]?.error || null,
   }));
   res.json({ ok: true, status: idracScanStatus(), jobs: listIdracScanJobs(), collectors, centralEnabled: Boolean(config.central.token) });
+});
+
+// 스캔 잡 세부 로그 — '스캔 현황' 로그창. 이벤트 타임라인 + 멈춤 진단(hints).
+adminRouter.get('/idrac/scan-job-log', adminOnly, (req, res) => {
+  const r = getIdracScanJobLog(String(req.query.reqId || ''));
+  res.status(r.ok ? 200 : 404).json(r);
 });
 
 // 서버 일괄 삭제. Body: { all:true } 또는 { vcenterId } (빈 문자열=미지정 서버 삭제).

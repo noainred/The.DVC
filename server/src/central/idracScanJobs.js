@@ -14,11 +14,20 @@
 
 import { expandIpList } from '../idrac/iprange.js';
 
-const jobs = new Map();    // reqId -> { reqId, agent, ips, username, password, state, createdAt, takenAt, result, doneAt, progress }
+const jobs = new Map();    // reqId -> { reqId, agent, ips, username, password, state, createdAt, takenAt, result, doneAt, progress, events }
 const byAgent = new Map(); // agentLower -> Set<reqId> (대기 중)
+const agentPolls = new Map(); // agentLower -> 마지막 잡 인출 폴링 시각(ms) — '에이전트가 살아있나' 진단용
 
 const TTL = 10 * 60_000;   // 완료/오류 잡 보존 10분
 const MAX_PENDING = 50;    // 에이전트당 동시 대기 잡 상한(남용 방지)
+const MAX_EVENTS = 300;    // 잡당 이벤트 로그 상한
+
+/** 잡 이벤트 로그 한 줄 추가(로그창용 타임라인). level: info|warn|error */
+function addEvent(j, msg, level = 'info') {
+  if (!j.events) j.events = [];
+  j.events.push({ ts: Date.now(), level, msg: String(msg).slice(0, 300) });
+  if (j.events.length > MAX_EVENTS) j.events.splice(0, j.events.length - MAX_EVENTS);
+}
 
 function gc() {
   const now = Date.now();
@@ -52,6 +61,7 @@ export function enqueueIdracScan(agent, { ips, username, password, vcenterId = '
     if (jj && (jj.action || 'scan') === 'scan' && jj.state === 'pending'
       && String(jj.datacenterId || '').trim() === dcNorm
       && String(jj.ips || '').trim() === ipsNorm) {
+      addEvent(jj, '동일 대상의 대기 중 스캔 잡이 있어 새 요청을 이 잡으로 병합했습니다(중복 방지).');
       return rid;
     }
   }
@@ -60,7 +70,9 @@ export function enqueueIdracScan(agent, { ips, username, password, vcenterId = '
   // 총 IP 수를 미리 계산해 UI가 진행률 분모를 바로 표시할 수 있게 한다(스캔 max=2048 반영).
   let total = 0;
   try { total = Math.min(expandIpList(ips).ips.length, 2048); } catch { total = 0; }
-  jobs.set(reqId, { reqId, agent, action: 'scan', ips, username, password, vcenterId, datacenterId, noRegister: !!noRegister, state: 'pending', createdAt: Date.now(), progress: { scanned: 0, total, at: Date.now() } });
+  const j = { reqId, agent, action: 'scan', ips, username, password, vcenterId, datacenterId, noRegister: !!noRegister, state: 'pending', createdAt: Date.now(), progress: { scanned: 0, total, at: Date.now() } };
+  addEvent(j, `스캔 잡 생성 — 에이전트 '${agent}'${datacenterId ? ` · 법인 ${datacenterId}` : ''} · 대상 IP ${total}개. 에이전트 인출 대기 중.`);
+  jobs.set(reqId, j);
   pend.add(reqId); byAgent.set(key, pend);
   return reqId;
 }
@@ -83,6 +95,7 @@ export function enqueueIdracRegister(agent, { found, username, password, vcenter
 export function takeIdracScanJobs(agentName) {
   const key = String(agentName || '').trim().toLowerCase();
   if (!key) return [];
+  agentPolls.set(key, Date.now()); // 빈 폴링이어도 '에이전트 살아있음'으로 기록(로그창 진단용)
   const pend = byAgent.get(key);
   if (!pend || !pend.size) return [];
   const out = [];
@@ -90,16 +103,23 @@ export function takeIdracScanJobs(agentName) {
     const j = jobs.get(reqId);
     if (!j) continue;
     j.state = 'running'; j.takenAt = Date.now();
+    addEvent(j, `에이전트 '${j.agent}'가 잡을 인출 — 현지 스캔 시작(대기 ${Math.round((j.takenAt - j.createdAt) / 1000)}초).`);
     out.push({ reqId, action: j.action || 'scan', ips: j.ips, username: j.username, password: j.password, vcenterId: j.vcenterId || '', noRegister: !!j.noRegister, found: j.found || undefined, mode: j.mode || 'merge' });
   }
   byAgent.delete(key);
   return out;
 }
 
+/** 에이전트의 마지막 잡 인출 폴링 시각(ms). 없으면 null — 로그창에서 '에이전트 미접속' 진단. */
+export function agentLastScanPoll(agentName) {
+  return agentPolls.get(String(agentName || '').trim().toLowerCase()) || null;
+}
+
 /** 에이전트가 스캔 진행률 보고(중간) — { scanned, total, found }. */
 export function setIdracScanProgress(reqId, { scanned, total, found } = {}) {
   const j = jobs.get(reqId);
   if (!j) return false;
+  const prevFound = j.progress?.found || 0;
   j.progress = {
     scanned: Number(scanned) || 0,
     total: Number(total) || j.progress?.total || 0,
@@ -107,6 +127,12 @@ export function setIdracScanProgress(reqId, { scanned, total, found } = {}) {
     at: Date.now(),
   };
   if (j.state === 'running' || j.state === 'pending') j.state = 'running';
+  // 진행 이벤트는 스팸 방지 스로틀: 발견 수가 늘었거나, 마지막 진행 이벤트 후 10초 지났을 때만 기록.
+  const now = Date.now();
+  if (j.progress.found > prevFound || now - (j._lastProgEvt || 0) >= 10_000) {
+    j._lastProgEvt = now;
+    addEvent(j, `진행 ${j.progress.scanned}/${j.progress.total}${j.progress.found ? ` · iDRAC 발견 ${j.progress.found}대` : ''}`);
+  }
   return true;
 }
 
@@ -116,6 +142,8 @@ export function setIdracScanResult(reqId, data = {}) {
   if (!j) return false;
   j.state = data.error ? 'error' : 'done';
   j.doneAt = Date.now();
+  if (data.error) addEvent(j, `오류로 종료 — ${data.error}`, 'error');
+  else addEvent(j, `완료 — 스캔 ${data.scanned || 0}개 · iDRAC ${data.foundCount ?? (Array.isArray(data.found) ? data.found.length : 0)}대 발견 · 현지 등록 ${data.registered || 0}대 · 무응답 ${data.unreachable || 0} · 비iDRAC ${data.notIdrac || 0} · 인증실패 ${data.authFailed || 0}${data.durationMs ? ` · 소요 ${Math.round(data.durationMs / 1000)}초` : ''}`);
   // 비밀번호 등 민감정보는 저장하지 않는다(result는 발견 목록·요약만).
   j.result = {
     scanned: data.scanned || 0,
@@ -138,6 +166,47 @@ export function getIdracScanResult(reqId) {
   const j = jobs.get(reqId);
   if (!j) return { state: 'unknown' };
   return { state: j.state, agent: j.agent, takenAt: j.takenAt || null, progress: j.progress || null, ...(j.result || {}) };
+}
+
+/**
+ * 잡 하나의 세부 로그(이벤트 타임라인 + 진단) — '스캔 현황' 로그창용. 비밀번호 미포함.
+ * 진단(hints): 멈춘 것처럼 보일 때 어디를 봐야 하는지 서버가 판정해 함께 내려준다.
+ */
+export function getIdracScanJobLog(reqId) {
+  gc();
+  const j = jobs.get(reqId);
+  if (!j) return { ok: false, reason: '잡을 찾을 수 없습니다(완료 후 10분이 지나 정리됐을 수 있음).' };
+  const now = Date.now();
+  const lastPoll = agentLastScanPoll(j.agent);
+  const hints = [];
+  if (j.state === 'pending') {
+    if (!lastPoll) hints.push({ level: 'error', msg: `에이전트 '${j.agent}'의 잡 인출 폴링 기록이 없습니다 — 엣지 포탈이 꺼져 있거나 AGENT_NAME 불일치, CENTRAL_URL/CENTRAL_TOKEN 미설정일 수 있습니다.` });
+    else if (now - lastPoll > 30_000) hints.push({ level: 'warn', msg: `에이전트가 ${Math.round((now - lastPoll) / 1000)}초째 폴링하지 않습니다(정상 주기 5초) — 엣지 포탈 상태/네트워크를 확인하세요.` });
+    else hints.push({ level: 'info', msg: '에이전트는 정상 폴링 중이며 곧 잡을 인출합니다.' });
+  }
+  if (j.state === 'running') {
+    const progAt = j.progress?.at || j.takenAt || j.createdAt;
+    if (now - progAt > 60_000) hints.push({ level: 'warn', msg: `진행 보고가 ${Math.round((now - progAt) / 1000)}초째 없습니다 — 엣지에서 스캔이 멈췄거나(재시작 등) 결과 회신이 유실됐을 수 있습니다. 엣지 포탈 로그(journalctl)에서 [idrac-scan-agent]를 확인하세요.` });
+    if (lastPoll && now - lastPoll > 60_000) hints.push({ level: 'warn', msg: `에이전트의 중앙 폴링도 ${Math.round((now - lastPoll) / 1000)}초째 끊겼습니다 — 엣지 프로세스 중단/네트워크 단절 가능성이 큽니다.` });
+  }
+  return {
+    ok: true,
+    reqId: j.reqId,
+    agent: j.agent,
+    action: j.action || 'scan',
+    datacenterId: j.datacenterId || '',
+    vcenterId: j.vcenterId || '',
+    ips: j.ips || '', // 스캔 대상 대역(관리자 로그창 — 어떤 대역이 멈췄는지 식별용)
+    state: j.state,
+    createdAt: j.createdAt || null,
+    takenAt: j.takenAt || null,
+    doneAt: j.doneAt || null,
+    agentLastPoll: lastPoll,
+    progress: j.progress ? { ...j.progress } : null,
+    result: j.result ? { ...j.result, found: undefined, foundCount: j.result.foundCount || 0 } : null,
+    hints,
+    events: [...(j.events || [])],
+  };
 }
 
 /**

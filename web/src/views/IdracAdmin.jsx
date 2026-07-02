@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, putJson, delJson } from '../api.js';
-import { Loading, ErrorBox } from '../components/ui.jsx';
+import { Loading, ErrorBox, Modal } from '../components/ui.jsx';
 import EscClose from '../components/EscClose.jsx';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
 
@@ -768,10 +768,80 @@ export function IdracDetailModal({ server, onClose }) {
   );
 }
 
+// ---- 스캔 잡 세부 로그창 ------------------------------------------------------
+// '스캔 현황' 행의 [로그]를 누르면 열림. 잡의 이벤트 타임라인(생성→인출→진행→완료/오류) +
+// 멈춤 진단(에이전트 폴링 두절/진행 보고 끊김)을 2.5초 주기로 갱신해 보여준다.
+function ScanJobLogModal({ reqId, dcName, onClose }) {
+  const [d, setD] = useState(null);
+  const [err, setErr] = useState(null);
+  useEffect(() => {
+    let active = true;
+    const load = () => fetchJson(`/admin/idrac/scan-job-log?reqId=${encodeURIComponent(reqId)}`)
+      .then((r) => { if (active) { setD(r); setErr(null); } })
+      .catch((e) => { if (active) setErr(e.message); });
+    load();
+    const t = setInterval(load, 2500);
+    return () => { active = false; clearInterval(t); };
+  }, [reqId]);
+  const fmt = (ts) => (ts ? new Date(ts).toLocaleTimeString('ko-KR', { hour12: false }) : '—');
+  const dur = (a, b) => (a && b ? `${Math.max(0, Math.round((b - a) / 1000))}초` : '—');
+  const lvColor = { info: 'var(--text-dim, #8b9bb4)', warn: '#fbbf24', error: '#f87171' };
+  const stateLabel = { pending: '대기(에이전트 인출 전)', running: '진행 중', done: '완료', error: '오류' };
+  const now = Date.now();
+  return (
+    <Modal title={`스캔 세부 로그 — ${reqId}`} onClose={onClose} width={860} resizable minWidth={560} minHeight={380}>
+      {err ? <ErrorBox message={err} /> : !d ? <Loading /> : (
+        <>
+          {/* 요약 헤더 */}
+          <div className="flex gap wrap" style={{ fontSize: 12.5, marginBottom: 8, alignItems: 'center' }}>
+            <span className="badge blue">{d.action === 'register' ? '등록' : '스캔'}</span>
+            <span><b>{stateLabel[d.state] || d.state}</b></span>
+            <span className="muted">에이전트 <b style={{ color: '#a78bfa' }}>{d.agent}</b></span>
+            {d.datacenterId && <span className="muted">법인 <b>{dcName ? dcName(d.datacenterId) : d.datacenterId}</b></span>}
+            {d.progress?.total ? <span className="muted">진행 <b>{d.progress.scanned}/{d.progress.total}</b>{d.progress.found ? ` · 발견 ${d.progress.found}` : ''}</span> : null}
+            <span className="muted">경과 {dur(d.createdAt, d.doneAt || now)}</span>
+          </div>
+          <div className="muted" style={{ fontSize: 11.5, marginBottom: 8 }}>
+            생성 {fmt(d.createdAt)} · 인출 {fmt(d.takenAt)}{d.doneAt ? ` · 종료 ${fmt(d.doneAt)}` : ''}
+            {' '}· 에이전트 최근 폴링 {d.agentLastPoll ? `${Math.max(0, Math.round((now - d.agentLastPoll) / 1000))}초 전` : '기록 없음'}
+            {' '}· 최근 진행보고 {d.progress?.at ? `${Math.max(0, Math.round((now - d.progress.at) / 1000))}초 전` : '—'}
+            {d.ips ? <> · 대역 <span style={{ fontFamily: 'ui-monospace, monospace' }}>{String(d.ips).slice(0, 120)}</span></> : null}
+          </div>
+          {/* 멈춤 진단 */}
+          {(d.hints || []).map((h, i) => (
+            <div key={i} style={{ marginBottom: 6, padding: '7px 11px', borderRadius: 8, fontSize: 12.5,
+              background: h.level === 'error' ? 'rgba(239,68,68,.14)' : h.level === 'warn' ? 'rgba(245,158,11,.14)' : 'rgba(96,165,250,.12)',
+              color: h.level === 'error' ? '#f87171' : h.level === 'warn' ? '#fbbf24' : '#93c5fd' }}>
+              {h.level === 'error' ? '⛔ ' : h.level === 'warn' ? '⚠ ' : 'ℹ️ '}{h.msg}
+            </div>
+          ))}
+          {/* 이벤트 타임라인(최신 위) */}
+          <div className="table-wrap" style={{ maxHeight: '46vh' }}>
+            <table>
+              <thead><tr><th style={{ width: 90 }}>시각</th><th>내용</th></tr></thead>
+              <tbody>
+                {(d.events || []).length === 0 && <tr><td colSpan={2} className="muted" style={{ padding: 14 }}>이벤트가 없습니다.</td></tr>}
+                {[...(d.events || [])].reverse().map((e, i) => (
+                  <tr key={i}>
+                    <td className="muted" style={{ fontSize: 11.5, whiteSpace: 'nowrap' }}>{fmt(e.ts)}</td>
+                    <td style={{ fontSize: 12.5, color: lvColor[e.level] || undefined }}>{e.msg}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {d.result?.error && <div style={{ marginTop: 8, fontSize: 12.5, color: '#f87171' }}>오류: {d.result.error}</div>}
+        </>
+      )}
+    </Modal>
+  );
+}
+
 // ---- 스캔 현황(주기 스캐너 + 진행 중/최근 위임 잡) --------------------------
 // iDRAC 스캔이 지금 어디까지 진행됐는지 어디서든 한눈에 확인. 주기 스캐너 상태 + 진행 중·최근
 // 위임 잡(에이전트 대행)을 실시간으로 보여준다. /admin/idrac/scan-jobs 응답을 렌더.
 function IdracScanJobs({ data, vcenters, datacenters = [], busy, onRefresh, onScanAll }) {
+  const [logFor, setLogFor] = useState(null); // reqId → 세부 로그 모달
   const st = data?.status || {};
   const jobs = data?.jobs || [];
   const collectors = data?.collectors || [];
@@ -872,7 +942,7 @@ function IdracScanJobs({ data, vcenters, datacenters = [], busy, onRefresh, onSc
         <div className="table-wrap">
           <table>
             <thead><tr>
-              <th>상태</th><th>유형</th><th>대상</th><th>에이전트</th><th>진행/결과</th><th>시각</th>
+              <th>상태</th><th>유형</th><th>대상</th><th>에이전트</th><th>진행/결과</th><th>시각</th><th>로그</th>
             </tr></thead>
             <tbody>
               {[...active, ...recent].map((j) => (
@@ -887,6 +957,7 @@ function IdracScanJobs({ data, vcenters, datacenters = [], busy, onRefresh, onSc
                         : <span className="muted" style={{ fontSize: 12 }}>발견 {j.result?.foundCount ?? 0} · 등록 {j.result?.registered ?? 0}{j.result?.scanned != null ? ` · 스캔 ${j.result.scanned}` : ''}</span>}
                   </td>
                   <td className="muted" style={{ fontSize: 11.5 }}>{ago(j.doneAt || j.takenAt || j.createdAt)}</td>
+                  <td><button className="tab" style={{ padding: '3px 10px', fontSize: 12 }} title="이벤트 타임라인 + 멈춤 진단" onClick={() => setLogFor(j.reqId)}>로그</button></td>
                 </tr>
               ))}
             </tbody>
@@ -909,6 +980,8 @@ function IdracScanJobs({ data, vcenters, datacenters = [], busy, onRefresh, onSc
           {st.lastRun.skipped ? ` — ${st.lastRun.skipped}` : ''}
         </div>
       )}
+
+      {logFor && <ScanJobLogModal reqId={logFor} dcName={dcName} onClose={() => setLogFor(null)} />}
     </div>
   );
 }
