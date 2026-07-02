@@ -154,6 +154,21 @@ export function createUser({ username, name, role = 'viewer', password } = {}) {
   return { ok: true };
 }
 
+/**
+ * 로컬 사용자 비밀번호 설정(관리자 리셋/중앙 일괄 변경용). OTP 등록 계정은 로그인에 OTP가
+ * 우선되므로 해시 갱신은 무해하며, OTP 해제 시 폴백 비밀번호가 된다.
+ */
+export function setLocalPassword(username, password) {
+  const pw = String(password || '');
+  if (pw.length < 8) return { ok: false, reason: '비밀번호는 8자 이상이어야 합니다.' };
+  if (pw.length > 128) return { ok: false, reason: '비밀번호는 128자 이하여야 합니다.' };
+  const u = getUser(String(username || '').trim());
+  if (!u) return { ok: false, reason: '사용자를 찾을 수 없습니다.' };
+  u.passwordHash = hashPassword(pw);
+  persistUsers();
+  return { ok: true, totpEnabled: !!u.totpEnabled };
+}
+
 export function updateUser(username, { name, role } = {}) {
   const u = getUser(username);
   if (!u) return { ok: false, reason: '사용자를 찾을 수 없습니다.' };

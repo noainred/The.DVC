@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import fs from 'node:fs';
 import { config } from '../config.js';
-import { requireRole, listUsers, createUser, updateUser, deleteUser, beginTotpEnroll, confirmTotpEnroll, disableTotp, verifyUserOtp, getUser } from '../auth/auth.js';
+import { requireRole, listUsers, createUser, updateUser, deleteUser, beginTotpEnroll, confirmTotpEnroll, disableTotp, verifyUserOtp, getUser, setLocalPassword } from '../auth/auth.js';
 import { getEmergencyStatus, setEmergencyStop } from '../security/emergencyStop.js';
 import { loadSessionSecurity, saveSessionSecurity } from '../security/securitySettings.js';
 import { saveOsScanSettings, runOsScanNow, osScanStatus } from '../inventory/osScanner.js';
@@ -1524,6 +1524,47 @@ adminRouter.delete('/collectors/:id', adminOnly, (req, res) => {
     logAudit({ user: req.user?.username, action: '수집 서버 삭제', target: req.params.id, ip: req.ip || '' });
   }
   res.status(result.ok ? 200 : 404).json(result);
+});
+
+// 엣지 포탈 로컬 계정 비밀번호 일괄 변경 — 기본(admin) 비번을 중앙에서 한 번에 교체.
+// Body: { username?='admin', password, ids?: string[](미지정=활성 전체), includeCentral?: boolean }
+// 엣지의 /api/collector/set-password(COLLECTOR_TOKEN 가드)로 병렬 푸시. 비밀번호는 어디에도 로깅하지 않는다.
+adminRouter.post('/collectors/set-password', adminOnly, async (req, res) => {
+  const username = String(req.body?.username || 'admin').trim();
+  const password = String(req.body?.password || '');
+  if (password.length < 8) return res.status(400).json({ ok: false, reason: '비밀번호는 8자 이상이어야 합니다.' });
+  if (password.length > 128) return res.status(400).json({ ok: false, reason: '비밀번호는 128자 이하여야 합니다.' });
+  const idFilter = Array.isArray(req.body?.ids) && req.body.ids.length ? new Set(req.body.ids.map(String)) : null;
+  const targets = loadCollectors().filter((c) => c.enabled !== false && c.url && (!idFilter || idFilter.has(String(c.id))));
+
+  const results = await Promise.all(targets.map(async (c) => {
+    if (!c.token) return { id: c.id, name: c.name || c.id, ok: false, reason: '이 수집 서버에 저장된 토큰이 없습니다(수정에서 토큰 입력).' };
+    try {
+      const r = await resilientFetch(`${String(c.url).replace(/\/+$/, '')}/api/collector/set-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Collector-Token': c.token },
+        body: JSON.stringify({ username, password }),
+        timeoutMs: 15_000, retries: 1,
+      });
+      const body = await r.json().catch(() => ({}));
+      if (r.status === 404) return { id: c.id, name: c.name || c.id, ok: false, reason: '엣지가 이 기능을 지원하지 않습니다(v2.107 미만 — 먼저 업그레이드하세요).' };
+      if (r.status === 403) return { id: c.id, name: c.name || c.id, ok: false, reason: '토큰 불일치(엣지 COLLECTOR_TOKEN 확인).' };
+      return { id: c.id, name: c.name || c.id, ok: r.ok && body.ok !== false, reason: body.reason || (r.ok ? null : `HTTP ${r.status}`), edgeVersion: body.version || null, totpEnabled: body.totpEnabled || false };
+    } catch (e) {
+      return { id: c.id, name: c.name || c.id, ok: false, reason: `연결 실패: ${e.message}` };
+    }
+  }));
+
+  // 옵션: 중앙 포탈 자신의 동일 계정도 함께 변경(엣지/중앙 비번 통일용).
+  let central = null;
+  if (req.body?.includeCentral === true) {
+    const r = setLocalPassword(username, password);
+    central = { ok: r.ok, reason: r.reason || null };
+  }
+
+  const okN = results.filter((r) => r.ok).length;
+  logAudit({ user: req.user?.username, action: '엣지 비밀번호 일괄 변경', target: username, detail: `성공 ${okN}/${results.length}${central ? ` · 중앙 ${central.ok ? '변경' : '실패'}` : ''}`, ip: req.ip || '' });
+  res.json({ ok: true, username, total: results.length, succeeded: okN, results, central });
 });
 
 // ── DataCenter(법인) — vCenter의 상위 개념. 설정에서 종류 정의 + vCenter 할당 (관리자) ────────
