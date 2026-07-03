@@ -26,7 +26,11 @@ export async function snapMemo(name, key, ttlMs, compute) {
   }
   const promise = (async () => {
     const value = await compute();
-    store.set(name, { key, at: Date.now(), value, promise: null });
+    // 이 계산이 끝났을 때 이미 더 새로운 key의 계산이 진행 중이면(스냅샷이 넘어감) 그 항목을
+    // 덮어쓰지 않는다 — 덮어쓰면 새 key의 in-flight promise가 사라져 후속 요청이 다시 재계산
+    // (single-flight 붕괴). 내 항목이거나 같은 key일 때만 결과를 커밋한다.
+    const s = store.get(name);
+    if (!s || s.promise === promise || s.key === key) store.set(name, { key, at: Date.now(), value, promise: null });
     return value;
   })();
   // 진행 중 표시(같은 key 동시 요청이 위에서 promise에 합류). 이전 값은 key가 같을 때만 임시 보존.

@@ -142,10 +142,13 @@ export async function collectFromNsx(mgr) {
     } catch { /* 권한/미지원 시 null 유지(=미조회) */ }
   });
 
-  // Pull the actual DFW rules for each policy (bounded) so the UI can browse them.
+  // Pull the actual DFW rules for each policy so the UI can browse them. 세그먼트 포트 조회와
+  // 동일하게 동시성 8로 제한 — 무제한 Promise.all(최대 60 동시)은 고RTT 매니저를 과부하시킨다.
   const policies = (pols.results || []).slice(0, 60);
-  const ruleSets = await Promise.all(policies.map((p) =>
-    client.policyRules(p.id).then((r) => r.results || []).catch(() => null)));
+  const ruleSets = new Array(policies.length).fill(null);
+  await eachLimited(policies, 8, async (p, i) => {
+    try { ruleSets[i] = (await client.policyRules(p.id)).results || []; } catch { ruleSets[i] = null; }
+  });
   const dfw = policies.map((p, i) => {
     const rawRules = ruleSets[i] != null ? ruleSets[i] : [];
     const rules = rawRules.map((r) => ({

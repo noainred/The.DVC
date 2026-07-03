@@ -134,11 +134,15 @@ function handleConnection(ws) {
     }
   });
 
-  ws.on('close', () => {
+  const cleanup = () => {
     clearTimeout(idleTimer);
     if (counted) { activeSessions = Math.max(0, activeSessions - 1); counted = false; }
     try { stream?.end(); } catch { /* */ } try { ssh?.end(); } catch { /* */ }
-  });
+  };
+  ws.on('close', cleanup);
+  // ws 오류(비정상 소켓 종료)에도 SSH 연결·카운터를 정리 — 리스너가 없으면 정상 종료 노이즈가
+  // 전역 fatal 로그로 새고, close가 안 오는 경우 세션 카운트가 새어 MAX_SESSIONS를 잠식한다.
+  ws.on('error', cleanup);
 }
 
 /** 현재 동시 SSH 세션 수(상태/진단용). */

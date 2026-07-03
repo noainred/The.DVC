@@ -12,9 +12,14 @@ export function atomicWriteFileSync(file, data, { mode = 0o600 } = {}) {
   fs.mkdirSync(dir, { recursive: true });
   const tmp = path.join(dir, `.${path.basename(file)}.tmp-${process.pid}-${Date.now()}`);
   try {
-    fs.writeFileSync(tmp, data, { mode });
+    // 임시파일 데이터를 디스크에 fsync한 뒤 rename — fsync 없이는 rename 메타데이터가 데이터보다
+    // 먼저 디스크에 닿아, 정전 시 대상이 0바이트/부분 파일로 남을 수 있다(정전 안전성 확보).
+    const fd = fs.openSync(tmp, 'w', mode);
+    try { fs.writeSync(fd, data); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
     try { fs.chmodSync(tmp, mode); } catch { /* */ }
     fs.renameSync(tmp, file); // 같은 FS에서 원자적 교체
+    // 디렉터리 엔트리(rename)도 fsync — 새 파일명이 정전에도 유실되지 않게. 미지원 플랫폼은 무시.
+    try { const dfd = fs.openSync(dir, 'r'); try { fs.fsyncSync(dfd); } finally { fs.closeSync(dfd); } } catch { /* */ }
   } catch (e) {
     try { fs.unlinkSync(tmp); } catch { /* */ }
     throw e;

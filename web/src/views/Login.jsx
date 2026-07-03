@@ -216,11 +216,11 @@ export default function Login({ onSuccess, notice }) {
       onSuccess(user);
     } catch (err) {
       setError(err.message);
-      setFails((n) => {
-        const c = n + 1;
-        if (c >= 3) setWarn(true); // 3회 연속 실패 → 법적 경고
-        return c;
-      });
+      // updater 안에서 setWarn을 호출하지 않는다(React updater는 순수해야 하며 StrictMode에서
+      // 이중 호출됨). 다음 실패 횟수를 밖에서 계산해 상태를 갱신한다.
+      const c = fails + 1;
+      setFails(c);
+      if (c >= 3) setWarn(true); // 3회 연속 실패 → 법적 경고
     } finally {
       setBusy(false);
     }
