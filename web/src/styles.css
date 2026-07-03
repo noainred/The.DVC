@@ -416,10 +416,12 @@ tbody tr:last-child td { border-bottom: none; }
    민트 액센트 + 모노스페이스 콘솔 헤더 + KPI 상단 액센트 바. .ov 스코프로 한정. */
 .ov-console {
   display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;
-  margin: 2px 0 20px; padding: 13px 16px; border-radius: var(--radius);
+  margin: 2px 0 14px; padding: 13px 16px; border-radius: var(--radius);
   background: linear-gradient(180deg, rgba(20,27,45,.9), rgba(13,20,28,.85));
   border: 1px solid var(--border); border-left: 2px solid var(--mint);
 }
+/* 콘솔 헤더가 '글로벌 현황' 섹션 라벨을 겸하므로, 그 아래 첫 섹션 타이틀(지도 위)만 위 여백 축소 */
+.ov .kpis + .section-title { margin-top: 18px; }
 .ov-console-label { font-family: var(--mono); font-size: 12px; letter-spacing: .26em; color: var(--text-dim); text-transform: uppercase; }
 .ov-console-label b { color: var(--mint); margin-right: 10px; font-weight: 400; }
 .ov-console-status { font-family: var(--mono); font-size: 11px; letter-spacing: .16em; color: var(--text-faint); display: flex; align-items: center; gap: 8px; text-transform: uppercase; }

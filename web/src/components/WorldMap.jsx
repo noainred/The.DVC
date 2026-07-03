@@ -1,7 +1,93 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ComposableMap, Geographies, Geography, Marker } from 'react-simple-maps';
+import { geoEqualEarth } from 'd3-geo';
 import geoData from 'world-atlas/countries-110m.json';
 import { Modal } from './ui.jsx';
+
+// ComposableMap과 동일한 투영(geoEqualEarth · scale 175 · rotate[lambda] · translate[400,h/2])을
+// 재현해, 사이트 마커와 정확히 겹치는 좌표로 '데이터센터 간 네트워크 흐름' 아크를 그린다.
+// 곡선(2차 베지어)로 위로 볼록하게 띄우고, 흐르는 대시 + 이동 입자로 흐름을 표현. 드래그/회전 시
+// lambda가 바뀌면 아크도 함께 재계산돼 마커에 붙어 움직인다. 순수 SVG 애니메이션(프레임당 JS 없음).
+function FlowArcs({ sites, lambda, h, hubMatch = 'oc2' }) {
+  const projection = geoEqualEarth().scale(175).rotate([lambda, 0, 0]).translate([400, h / 2]);
+  // 허브 후보(예: OC2)는 상태와 무관하게 항상 중심으로 포함, 나머지는 연결된 DC만.
+  const isHub = (s) => {
+    const m = String(hubMatch || '').toLowerCase();
+    return m && (String(s.id || '').toLowerCase().includes(m)
+      || String(s.name || '').toLowerCase().includes(m)
+      || String(s.datacenterId || s.datacenter || '').toLowerCase().includes(m)
+      || String(s.location?.city || '').toLowerCase().includes(m));
+  };
+  const conn = [];
+  for (const s of sites) {
+    const loc = s.location || {};
+    if (loc.lon == null || loc.lat == null) continue;
+    const hubCand = isHub(s);
+    if (!hubCand && s.status && s.status !== 'connected') continue; // 허브 외에는 연결된 DC만
+    const p = projection([Number(loc.lon), Number(loc.lat)]);
+    if (!p || !Number.isFinite(p[0]) || !Number.isFinite(p[1])) continue;
+    conn.push({ id: s.id, x: p[0], y: p[1], hosts: s.metrics?.hosts || 0, isHub: hubCand });
+  }
+  if (conn.length < 2) return null;
+  // 허브 = OC2(hubMatch). 없으면 호스트가 가장 많은 DC로 폴백. 여기서 각 법인과 데이터를 주고받는다.
+  let hub = conn.find((c) => c.isHub) || null;
+  if (!hub) { hub = conn[0]; for (const c of conn) if (c.hosts > hub.hosts) hub = c; }
+
+  const arcs = [];
+  for (const c of conn) {
+    if (c.id === hub.id) continue;
+    const dx = c.x - hub.x, dy = c.y - hub.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist < 6) continue;              // 너무 가까우면 생략
+    if (Math.abs(dx) > 600) continue;    // 지도 가장자리 wrap(가로 스트리크) 방지
+    // 중점에서 수직으로 띄운 제어점(위로 볼록). 거리에 비례한 곡률.
+    const mx = (hub.x + c.x) / 2, my = (hub.y + c.y) / 2;
+    let nx = -dy, ny = dx; const nl = Math.hypot(nx, ny) || 1; nx /= nl; ny /= nl;
+    if (ny > 0) { nx = -nx; ny = -ny; } // 항상 위쪽으로 볼록
+    const curv = Math.min(dist * 0.22, 90);
+    const cx = mx + nx * curv, cy = my + ny * curv;
+    const d = `M ${hub.x.toFixed(1)} ${hub.y.toFixed(1)} Q ${cx.toFixed(1)} ${cy.toFixed(1)} ${c.x.toFixed(1)} ${c.y.toFixed(1)}`;
+    arcs.push({ key: c.id, d, dur: Math.max(2.4, Math.min(5, dist / 90)), delay: (arcs.length % 5) * 0.5 });
+  }
+  if (!arcs.length) return null;
+
+  return (
+    <g style={{ pointerEvents: 'none' }}>
+      {arcs.map((a) => {
+        const pid = `flow-${a.key}`;
+        return (
+          <g key={a.key}>
+            {/* 은은한 베이스 라인 */}
+            <path id={pid} d={a.d} fill="none" stroke="#2dd4bf" strokeWidth={0.7} opacity={0.18} strokeLinecap="round" />
+            {/* 흐르는 대시 오버레이 */}
+            <path d={a.d} fill="none" stroke="#5eead4" strokeWidth={1.1} opacity={0.55} strokeLinecap="round" strokeDasharray="1.5 7">
+              <animate attributeName="stroke-dashoffset" from="8.5" to="0" dur={`${a.dur * 0.35}s`} repeatCount="indefinite" />
+            </path>
+            {/* OC2 → 법인: 나가는 글로우 입자 */}
+            <circle r={2.2} fill="#a7f3e4">
+              <animateMotion dur={`${a.dur}s`} begin={`${a.delay}s`} repeatCount="indefinite" keyPoints="0;1" keyTimes="0;1" calcMode="linear">
+                <mpath xlinkHref={`#${pid}`} href={`#${pid}`} />
+              </animateMotion>
+              <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.12;0.88;1" dur={`${a.dur}s`} begin={`${a.delay}s`} repeatCount="indefinite" />
+            </circle>
+            {/* 법인 → OC2: 돌아오는 입자(데이터 주고받기 — 반대 방향, 색 구분) */}
+            <circle r={1.9} fill="#67e8f9">
+              <animateMotion dur={`${a.dur}s`} begin={`${a.delay + a.dur / 2}s`} repeatCount="indefinite" keyPoints="1;0" keyTimes="0;1" calcMode="linear">
+                <mpath xlinkHref={`#${pid}`} href={`#${pid}`} />
+              </animateMotion>
+              <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.12;0.88;1" dur={`${a.dur}s`} begin={`${a.delay + a.dur / 2}s`} repeatCount="indefinite" />
+            </circle>
+          </g>
+        );
+      })}
+      {/* 허브 강조: 은은한 민트 링 */}
+      <circle cx={hub.x} cy={hub.y} r={9} fill="none" stroke="#2dd4bf" strokeWidth={1} opacity={0.5}>
+        <animate attributeName="r" from="7" to="16" dur="2.8s" repeatCount="indefinite" />
+        <animate attributeName="opacity" from="0.5" to="0" dur="2.8s" repeatCount="indefinite" />
+      </circle>
+    </g>
+  );
+}
 
 /** Marker color/size driven by the worst alarm state at a site. */
 function markerStyle(site) {
@@ -142,6 +228,9 @@ export default function WorldMap({ sites = [], onSelect, height = 420, onResizeE
             ))
           }
         </Geographies>
+
+        {/* 데이터센터 간 네트워크 흐름 아크(마커 뒤에 그려 마커가 위로) */}
+        <FlowArcs sites={sites} lambda={lambda} h={h} />
 
         {sites.map((s) => {
           const loc = s.location || {};

@@ -83,7 +83,6 @@ export default function Overview({ onSelectSite, onGotoTab }) {
           <span style={{ color: 'var(--mint)' }}>LIVE</span>
         </div>
       </div>
-      <div className="section-title">글로벌 현황</div>
       <div className="kpis" ref={kpisRef} title="한 줄에 안 들어가는 KPI는 자동으로 숨겨집니다(창을 넓히면 더 보입니다).">
         <Kpi label="vCenter" value={`${g.vcentersConnected}/${g.vcenters}`}
           meta={`${Math.max(0, g.vcenters - g.vcentersConnected - (g.vcentersMaintenance || 0))}개 연결 불가${g.vcentersMaintenance ? ` · 점검중 ${g.vcentersMaintenance}` : ''}`}
