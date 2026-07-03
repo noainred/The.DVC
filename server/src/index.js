@@ -31,6 +31,7 @@ import { attachSshGateway } from './proxy/sshGateway.js';
 import { attachRdpGateway } from './proxy/guacdTunnel.js';
 import { startMappingExpiry } from './proxy/expiry.js';
 import { collectorRouter } from './routes/collector.js';
+import { startSelfRegister } from './agent/selfRegister.js';
 import { centralRouter } from './routes/central.js';
 import { dlSourceRouter } from './routes/dlsource.js';
 import { insightsRouter } from './routes/insights.js';
@@ -136,6 +137,7 @@ if (fs.existsSync(config.webDist)) {
 store.start();
 upgradeManager.start();
 const stagger = [
+  startSelfRegister, // 엣지 자기등록(EDGE_MODE=all) — 중앙 수집 서버 목록에 자동 등록
   startIdracPoller, startIdracScanPoller, startNsxPoller, startAlertEngine, startMetricsSampler, startGpuGuestPoller, startPhysicalGpuPoller,
   startIpScanPoller, startIpScanAgent, startCollectorPuller, startAgentScanner, startIdracScanWorker, startInventoryPush,
   startGpuGuestPush, startPingWorker, startConfigPush, startFleetPush, startBackupScheduler, startLogPoller, startLogQueryWorker, startCaptureWorker, startCaptureMonitor, startLoginMonitor, startGuestScanScheduler, startOsScanner,

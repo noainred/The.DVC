@@ -18,6 +18,27 @@
 
 ## 1) 각 DC에 수집 에이전트 설치
 
+### ★ 통합 엣지 모드 (권장 — 하나만 설치하면 모든 기능)
+설치 패키지는 하나이고, `portal.env` 에 **딱 3줄**이면 엣지의 전 기능이 켜집니다:
+```bash
+EDGE_MODE=all
+CENTRAL_URL=http://중앙포탈:4000
+EDGE_TOKEN=강력한-공유-토큰        # 중앙의 CENTRAL_TOKEN과 같은 값
+# (선택) COLLECTOR_DATACENTER=Poland-DC1   # 표시용 DC 이름
+```
+자동으로 활성화되는 것:
+- **수집기 export**(COLLECTOR_TOKEN 자동 설정) — 중앙이 전력 데이터를 당겨감
+- **위임 워커 전부** — iDRAC 스캔·IP 스캔·핑·패킷 캡처·로그 질의(중앙 할당분 자동 수행)
+- **사이트 인벤토리 push**(live 수집) — 이 엣지가 로컬 vCenter를 수집해 중앙으로 전송
+- **중앙발 자동 업그레이드** — 중앙 포탈의 `/dl` 을 소스로 1시간마다 확인·자동 적용
+- **중앙 자동 등록** — 부팅 시 스스로 중앙 '수집 서버' 목록에 등록(아래 2단계 수동 절차 불필요).
+  NAT/프록시 뒤면 `EDGE_ADVERTISE_URL=http://엣지실주소:4000` 로 접근 주소를 명시.
+
+개별 env(DATA_SOURCE, AGENT_PUSH_INVENTORY=false, UPGRADE_ENABLED=false 등)를 명시하면
+그 값이 우선하므로 기능 단위로 끌 수 있습니다.
+중앙 쪽은 기존처럼 `CENTRAL_TOKEN=강력한-공유-토큰` 하나만 있으면 됩니다.
+
+### (기존 방식) 역할별 개별 env
 ### Rocky Linux 9
 기존 오프라인 설치 패키지를 그대로 설치한 뒤 `portal.env` 에 추가:
 ```bash

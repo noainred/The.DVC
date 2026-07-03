@@ -1,6 +1,18 @@
 {
   "notes": [
     {
+      "version": "2.117.0",
+      "date": "2026-07-03",
+      "title": "통합 엣지 모드(EDGE_MODE=all) — 하나만 설치하면 모든 기능",
+      "notes": [
+        "에이전트가 하나로 통합됐습니다. 설치 패키지는 원래 하나(포탈=수집기=에이전트가 같은 프로그램)였지만, 전 기능을 켜려면 env 7~9개와 중앙 수동 등록이 필요했습니다 — 이제 엣지 portal.env에 3줄이면 끝: EDGE_MODE=all · CENTRAL_URL=http://중앙:4000 · EDGE_TOKEN=공유토큰.",
+        "자동 활성 내용: ① 수집기 export(전력 데이터, COLLECTOR_TOKEN 자동) ② 위임 워커 전부(iDRAC 스캔·IP 스캔·핑·패킷 캡처·로그 질의) ③ 사이트 인벤토리 push + live 수집(고RTT 사이트의 vCenter 수집을 현장이 전담) ④ 중앙발 자동 업그레이드(중앙 /dl 소스, 1시간 주기, 자동 적용, 설치경로 자동) — 개별 env를 명시하면 그 값이 우선하므로 기능 단위로 끌 수 있습니다.",
+        "중앙 자동 등록: 엣지가 부팅하면 스스로 중앙의 수집 서버 목록에 등록됩니다(신규 API POST /api/central/register-collector, CENTRAL_TOKEN 인증). 관리자의 '수집 서버 추가' 수동 절차가 사라지고, IP가 바뀌어도 6시간 주기 재알림으로 자가 치유됩니다. 관리자가 설정한 vCenter 매핑·표시 이름·활성 여부는 재등록에도 보존됩니다. NAT/프록시 뒤면 EDGE_ADVERTISE_URL로 접근 주소를 명시하세요.",
+        "보안: EDGE_TOKEN은 CENTRAL_TOKEN과 달리 엣지 자신의 /api/central 엔드포인트를 열지 않습니다(엣지가 또 다른 중앙이 되는 부작용 차단). 중앙은 기존처럼 CENTRAL_TOKEN 하나만 설정하면 됩니다.",
+        "문서 갱신(packaging/DISTRIBUTED-COLLECTION.md, portal.env.example) 및 회귀 테스트 8종 추가 — 총 288건 통과. 기존 개별 env 방식은 그대로 동작합니다(하위호환)."
+      ]
+    },
+    {
       "version": "2.116.0",
       "date": "2026-07-03",
       "title": "외부 공개용 소개 페이지(/intro) 추가",

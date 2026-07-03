@@ -15,6 +15,7 @@ import { setGpuGuestDiag } from '../central/gpuGuestDiag.js';
 import { takePingJobs, setPingResults } from '../central/pingJobs.js';
 import { takeIdracScanJobs, setIdracScanResult, setIdracScanProgress } from '../central/idracScanJobs.js';
 import { pullNow as pullCollectorsNow } from '../collector/puller.js';
+import { upsertCollectorFromAgent } from '../collector/registry.js';
 import { recordIngest } from '../central/ingestStats.js';
 import { setAgentConfig } from '../central/agentConfig.js';
 import { takeLogQueries, setLogQueryResult } from '../central/logQueries.js';
@@ -61,6 +62,30 @@ centralRouter.get('/assignment', (req, res) => {
   const a = getAssignment(req.query.agent);
   if (!a || a.enabled === false) return res.json({ ok: true, assigned: false });
   res.json({ ok: true, assigned: true, agent: a.agent, ips: a.ips, username: a.username, password: a.password });
+});
+
+// 엣지 자기등록(EDGE_MODE=all): 부팅한 엣지가 자기 이름/포트/수집토큰을 알리면 수집 서버
+// 목록에 자동 upsert — 관리자의 '수집 서버 추가' 수동 절차가 필요 없어진다.
+// Body: { name, port, collectorToken, datacenter?, urlHint?, version? }
+centralRouter.post('/register-collector', (req, res) => {
+  if (!config.central.token) return res.status(404).json({ ok: false, reason: 'central 비활성화 (CENTRAL_TOKEN 미설정)' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: '토큰 불일치' });
+  const b = req.body || {};
+  const name = String(b.name || '').trim();
+  if (!name) return res.status(400).json({ ok: false, reason: 'name이 필요합니다.' });
+  if (!b.collectorToken) return res.status(400).json({ ok: false, reason: 'collectorToken이 필요합니다(엣지의 export 인증 토큰).' });
+  // URL: 엣지가 명시(urlHint)하지 않으면 요청 peer IP + 알린 포트로 유도(NAT 없는 사내망 가정).
+  let url = String(b.urlHint || '').trim();
+  if (!url) {
+    const port = Number(b.port) || 4000;
+    let ip = String(req.socket?.remoteAddress || '').replace(/^::ffff:/, '');
+    if (!ip) return res.status(400).json({ ok: false, reason: '요청 IP를 확인할 수 없습니다(urlHint를 지정하세요).' });
+    if (ip.includes(':')) ip = `[${ip}]`; // IPv6
+    url = `http://${ip}:${port}`;
+  }
+  const r = upsertCollectorFromAgent({ name, url, token: String(b.collectorToken), datacenter: String(b.datacenter || '') });
+  if (r.ok) console.log(`[central] 엣지 자기등록: ${name} → ${url}${b.version ? ` (v${b.version})` : ''}`);
+  res.status(r.ok ? 200 : 400).json(r);
 });
 
 // Agent posts its scan result. Body: { agent, scanned, found:[...], unreachable, notIdrac, authFailed }
