@@ -19,7 +19,7 @@ import { config } from '../config.js';
 import { scanForIdracs } from './scan.js';
 import { registerScanned } from './registry.js';
 import { pollNow } from './poller.js';
-import { enabledScanRanges, recordScanRangeRun, getScanRangeRaw } from './scanRanges.js';
+import { enabledScanRanges, recordScanRangeRun, getScanRangeRaw, lastScanCycleAt } from './scanRanges.js';
 import { enqueueIdracScan, cancelPendingIdracScanJobs } from '../central/idracScanJobs.js';
 import { isStopped } from '../security/emergencyStop.js';
 
@@ -207,9 +207,26 @@ export function startIdracScanPoller() {
   if (!config.idrac.enabled) { console.log('[idrac-scan] poller disabled (IDRAC_ENABLED=false)'); return; }
   const ms = intervalMs();
   if (ms <= 0) { console.log('[idrac-scan] periodic scan disabled (IDRAC_SCAN_INTERVAL_MS<=0) — manual scan only'); return; }
-  // 첫 스캔은 부팅 60초 후(다른 수집과 겹치지 않게), 이후 주기 반복.
-  bootTimer = setTimeout(() => { bootTimer = null; runIdracScanOnce().catch((e) => console.error('[idrac-scan] 실패:', e.message)); }, 60_000);
-  bootTimer.unref?.();
-  armScanTimer(ms);
-  console.log(`[idrac-scan] poller started (every ${Math.round(ms / 1000)}s)`);
+  // 재시작(업그레이드)이 스캔을 앞당기지 않게 한다 — 마지막 스캔 시각을 기준으로 '다음 예정 시각'에
+  // 첫 실행을 맞춘다. 아직 주기가 안 지났으면 재시작만으로 스캔하지 않는다(무조건 60초 후 실행 버그 수정).
+  const last = lastScanCycleAt();
+  const now = Date.now();
+  const BOOT_MIN = 60_000; // 미실행/기한초과 시에도 다른 수집과 겹치지 않게 60초는 지연
+  let firstDelay;
+  if (last <= 0) firstDelay = BOOT_MIN;                       // 한 번도 스캔한 적 없음 → 최초 1회
+  else if (now - last >= ms) firstDelay = BOOT_MIN;           // 이미 주기 경과(기한 초과) → 곧 실행
+  else firstDelay = Math.max(BOOT_MIN, (last + ms) - now);    // 아직 주기 전 → 다음 예정 시각까지 대기
+  // 32비트 타이머 한계를 넘는 지연(장주기)도 조각으로 나눠 대기(armScanTimer와 동일 패턴).
+  const step = (left) => {
+    const d = Math.min(left, MAX_TIMER_MS);
+    bootTimer = setTimeout(() => {
+      if (left - d > 0) return step(left - d); // 아직 남음 → 계속 대기(스캔 안 함)
+      bootTimer = null;
+      runIdracScanOnce().catch((e) => console.error('[idrac-scan] 실패:', e.message));
+      armScanTimer(ms); // 이후 주기 반복
+    }, d);
+    bootTimer.unref?.();
+  };
+  step(firstDelay);
+  console.log(`[idrac-scan] poller started — first scan in ${Math.round(firstDelay / 1000)}s (last=${last ? new Date(last).toISOString() : 'never'}), then every ${Math.round(ms / 1000)}s`);
 }
