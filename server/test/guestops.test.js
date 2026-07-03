@@ -47,3 +47,30 @@ test('parseNvidiaSmiCsv: 일부만 N/A면 아는 값으로 평균', () => {
   assert.equal(r.utilPct, 50);     // 아는 GPU(50)만 평균
   assert.equal(r.utilNA, false);
 });
+
+test('addGuestUser: 리눅스 비번의 개행 거부(chpasswd 형식 보호), 그 외 특수문자는 통과해 클라이언트 호출 단계까지 진행', async () => {
+  const { addGuestUser } = await import('../src/gpu/guestops.js');
+  await assert.rejects(
+    () => addGuestUser(null, 'vm-1', {}, { username: 'user1', password: 'a\nb', isWindows: false }),
+    /줄바꿈/);
+  await assert.rejects(
+    () => addGuestUser(null, 'vm-1', {}, { username: 'user1', password: 'a\rb', isWindows: false }),
+    /줄바꿈/);
+  // 특수문자 비번은 검증을 통과해 vCenter 클라이언트 호출까지 가야 한다(null 클라이언트라 TypeError).
+  await assert.rejects(
+    () => addGuestUser(null, 'vm-1', {}, { username: 'user1', password: 'p@ss,w0rd"\'\\:$# 한글', isWindows: false }),
+    (e) => !/줄바꿈|형식|비밀번호/.test(e.message));
+});
+
+test('addGuestUser: Windows 비번은 배치에 안전하지 않은 문자("·%·개행)만 거부', async () => {
+  const { addGuestUser } = await import('../src/gpu/guestops.js');
+  for (const bad of ['a"b', 'a%b', 'a\r\nb']) {
+    await assert.rejects(
+      () => addGuestUser(null, 'vm-1', {}, { username: 'winuser', password: bad, isWindows: true }),
+      /사용할 수 없는 문자/);
+  }
+  // 그 외 특수문자는 통과해 클라이언트 호출 단계까지 진행.
+  await assert.rejects(
+    () => addGuestUser(null, 'vm-1', {}, { username: 'winuser', password: "p@ss,w0rd'!$#&", isWindows: true }),
+    (e) => !/사용할 수 없는 문자/.test(e.message));
+});

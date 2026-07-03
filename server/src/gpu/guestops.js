@@ -371,6 +371,8 @@ export async function addGuestUser(c, vmMoref, creds, { username, password, sudo
   if (!isWindows && !USERRE.test(u)) throw new Error('사용자명 형식 오류(영소문자/숫자/_/-, 첫 글자 영문 또는 _, 32자 이내).');
   if (isWindows && !/^[A-Za-z0-9._-]{1,20}$/.test(u)) throw new Error('Windows 사용자명 형식 오류.');
   if (!password) throw new Error('비밀번호가 필요합니다.');
+  // 개행이 섞이면 chpasswd 입력 파일이 여러 줄이 되어 요청과 다른 비밀번호가 설정된다(조용한 변조 금지 — 거부).
+  if (!isWindows && /[\r\n]/.test(String(password))) throw new Error('비밀번호에 줄바꿈 문자는 사용할 수 없습니다(그 외 특수문자는 모두 지원).');
   const ts = Date.now();
   if (isWindows) {
     const p = String(password);

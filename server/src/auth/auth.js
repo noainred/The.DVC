@@ -159,6 +159,11 @@ export function createUser({ username, name, role = 'viewer', password } = {}) {
  * 우선되므로 해시 갱신은 무해하며, OTP 해제 시 폴백 비밀번호가 된다.
  */
 export function setLocalPassword(username, password) {
+  // 문자열만 허용 — 객체가 String()으로 "[object Object]"가 되어 의도치 않은 비번이 설정되는 것 방지.
+  // 특수문자·유니코드는 전부 그대로 허용(scrypt는 바이트 안전).
+  if (password !== undefined && password !== null && typeof password !== 'string') {
+    return { ok: false, reason: '비밀번호 형식이 올바르지 않습니다(문자열이어야 합니다).' };
+  }
   const pw = String(password || '');
   if (pw.length < 8) return { ok: false, reason: '비밀번호는 8자 이상이어야 합니다.' };
   if (pw.length > 128) return { ok: false, reason: '비밀번호는 128자 이하여야 합니다.' };

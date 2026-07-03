@@ -32,3 +32,16 @@ test('setLocalPassword: users.json에 영속화(해시만, 평문 없음)', () =
   assert.ok(u.passwordHash);
   assert.ok(!JSON.stringify(saved).includes('persistedPw456'));
 });
+
+test('setLocalPassword: 비문자열(객체/배열/숫자) 거부 — "[object Object]" 비번 사고 방지', () => {
+  assert.equal(auth.setLocalPassword('admin', { a: 1 }).ok, false);
+  assert.equal(auth.setLocalPassword('admin', ['longenough1']).ok, false);
+  assert.equal(auth.setLocalPassword('admin', 12345678).ok, false);
+});
+
+test('setLocalPassword: 특수문자·유니코드·공백 비번 그대로 저장/검증', () => {
+  const pw = ' p@ss,w0rd"\'\\<>&%$#! 비밀🔑 ';
+  assert.equal(auth.setLocalPassword('admin', pw).ok, true);
+  assert.ok(auth.authenticateLocal('admin', pw));
+  assert.equal(auth.authenticateLocal('admin', pw.trim()), null); // 앞뒤 공백도 비번의 일부
+});

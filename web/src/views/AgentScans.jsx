@@ -207,7 +207,9 @@ export default function AgentScans() {
             <div className="muted" style={{ fontSize: 12, marginBottom: 8, lineHeight: 1.8 }}>
               컬럼: <code>agent,ips,username,password,enabled</code> · 첫 줄 헤더는 선택입니다.
               <b> ips</b> 칸에 여러 대역은 <code>;</code> 로 구분(쉼표는 CSV 구분자라 사용 불가).
-              예) <code>10.0.0.0/24;10.0.1.0/24</code>
+              예) <code>10.0.0.0/24;10.0.1.0/24</code><br />
+              <b>비밀번호 특수문자</b>: 쉼표·따옴표가 들어간 비번은 큰따옴표로 감싸면 그대로 처리됩니다
+              (따옴표 자체는 두 번: <code>"p@ss,w0rd""!"</code> → <code>p@ss,w0rd"!</code>). 앞뒤 공백도 보존됩니다.
             </div>
 
             <div className="card" style={{ background: 'rgba(12,19,34,.6)', padding: 10, marginBottom: 10 }}>

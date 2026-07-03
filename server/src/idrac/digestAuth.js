@@ -25,6 +25,10 @@ export function parseDigestChallenge(headerValue) {
   return params.nonce ? params : null;
 }
 
+// RFC 7616 quoted-string 이스케이프 — 사용자명/realm에 " 또는 \ 가 있으면 헤더 구조가 깨져
+// 인증이 항상 실패한다(특수문자 계정 지원). 해시 계산에는 원본 값을 쓰고 직렬화에서만 이스케이프.
+const quote = (v) => `"${String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+
 /** Digest Authorization 헤더 문자열을 만든다. uri는 요청 경로(예: /redfish/v1/Systems). */
 export function buildDigestHeader({ username, password, method, uri, challenge, cnonce, nc = '00000001' }) {
   const realm = challenge.realm || '';
@@ -40,14 +44,14 @@ export function buildDigestHeader({ username, password, method, uri, challenge, 
     ? md5(`${ha1}:${nonce}:${nc}:${cn}:${qop}:${ha2}`)
     : md5(`${ha1}:${nonce}:${ha2}`);
   const parts = [
-    `username="${username}"`,
-    `realm="${realm}"`,
-    `nonce="${nonce}"`,
-    `uri="${uri}"`,
+    `username=${quote(username)}`,
+    `realm=${quote(realm)}`,
+    `nonce=${quote(nonce)}`,
+    `uri=${quote(uri)}`,
     `response="${response}"`,
     `algorithm=${algorithm}`,
   ];
   if (qop) { parts.push(`qop=${qop}`, `nc=${nc}`, `cnonce="${cn}"`); }
-  if (opaque !== undefined) parts.push(`opaque="${opaque}"`);
+  if (opaque !== undefined) parts.push(`opaque=${quote(opaque)}`);
   return 'Digest ' + parts.join(', ');
 }

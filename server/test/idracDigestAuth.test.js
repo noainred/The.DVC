@@ -41,3 +41,23 @@ test('buildDigestHeader: qop 없는(RFC2069) 응답 해시', () => {
   const ha2 = md5(`GET:${uri}`);
   assert.equal(resp, md5(`${ha1}:${nonce}:${ha2}`));
 });
+
+test('buildDigestHeader: 사용자명/realm의 따옴표·백슬래시는 헤더에서 이스케이프(해시는 원본값)', () => {
+  const username = 'do"ma\\in', password = 'p w,d"x', realm = 'iD"RAC', nonce = 'N', uri = '/x';
+  const header = buildDigestHeader({ username, password, method: 'GET', uri, challenge: { realm, nonce } });
+  // 직렬화: \ → \\, " → \" (RFC7616 quoted-string) — 구조가 깨지지 않아야 한다.
+  assert.match(header, /username="do\\"ma\\\\in"/);
+  assert.match(header, /realm="iD\\"RAC"/);
+  // 해시 계산은 이스케이프 전 원본 값으로.
+  const resp = /response="([^"]+)"/.exec(header)[1];
+  const ha1 = md5(`${username}:${realm}:${password}`);
+  const ha2 = md5(`GET:${uri}`);
+  assert.equal(resp, md5(`${ha1}:${nonce}:${ha2}`));
+});
+
+test('buildDigestHeader: 한글·이모지 등 유니코드 비밀번호도 해시 일치', () => {
+  const username = 'root', password = '비밀번호🔑#1', realm = 'r', nonce = 'N', uri = '/x';
+  const header = buildDigestHeader({ username, password, method: 'GET', uri, challenge: { realm, nonce } });
+  const resp = /response="([^"]+)"/.exec(header)[1];
+  assert.equal(resp, md5(`${md5(`${username}:${realm}:${password}`)}:${nonce}:${md5(`GET:${uri}`)}`));
+});
