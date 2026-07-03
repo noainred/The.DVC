@@ -44,8 +44,27 @@ import { expandSpec } from '../provision/spec.js';
 import { listSources, listJobs, getJob } from '../provision/jobs.js';
 import { getPlacement } from '../provision/placement.js';
 import { listSaved, getSaved } from '../provision/saved.js';
+import { snapMemo, sendCached } from '../util/snapCache.js';
 
 export const api = Router();
+
+// 동시 다발 폴링/클릭 최적화 — 여러 사용자가 같은 스냅샷에 대해 같은 무거운 계산을 각자 재실행하던
+// 것을 single-flight로 1회에 합류시키고(같은 key 동시요청은 하나의 계산 결과를 공유), 짧은 TTL
+// 캐시 + ETag/304로 재직렬화·재전송까지 줄인다. key는 스냅샷 리비전 + 요청 URL(경로+쿼리).
+// 스냅샷은 poller가 ~30초마다 1회 갱신하므로 그 창 안의 동일 요청은 계산 0회.
+// 주의: 관리자가 즉시 반영을 기대하는 변경(뮤트/오버라이드 등)에 걸리는 엔드포인트에는 쓰지 않는다
+// (순수 스냅샷 파생 분석에만). 콜백은 async가 아니어도 되며 예외는 그대로 전파된다.
+async function memoJson(req, res, name, compute, { ttlMs = 12_000, extraKey = '' } = {}) {
+  try {
+    const snap = store.get();
+    const key = `${snap.generatedAt}|${req.originalUrl}|${extraKey}`;
+    const payload = await snapMemo(name, key, ttlMs, async () => compute(snap));
+    sendCached(req, res, key, payload);
+  } catch (e) {
+    // async 경로라 Express가 sync throw처럼 자동 처리하지 못한다 — 직접 500으로 응답(클라 hang 방지).
+    if (!res.headersSent) res.status(500).json({ ok: false, reason: e?.message || 'internal error' });
+  }
+}
 
 const METRIC_TYPES = ['cpu', 'mem', 'disk', 'net'];
 const METRIC_UNIT = { cpu: '%', mem: '%', disk: 'KBps', net: 'KBps' };
@@ -238,8 +257,8 @@ api.get('/health', (_req, res) => {
 });
 
 // High-level KPIs + regional / per-site rollups for the dashboard landing view.
-api.get('/overview', (_req, res) => {
-  const snap = store.get();
+// 랜딩 화면이라 전 사용자가 15초마다 폴링 → single-flight로 동시요청을 1회 계산에 합류.
+api.get('/overview', (req, res) => memoJson(req, res, 'overview', (snap) => {
   // GPU 집계: 설치된 GPU 카드 총 장수 + GPU 평균 사용률(글로벌 현황 KPI용).
   // 사용률은 GPU 보유 호스트의 util(ESXi 보고 + 게스트 오버레이)을 평균.
   let gpuCards = 0, gpuVms = 0;
@@ -254,8 +273,8 @@ api.get('/overview', (_req, res) => {
   }
   for (const v of snap.vms) if (v.gpu) gpuVms++;
   const gpuUtilPct = utilN ? Math.round(utilSum / utilN) : 0;
-  res.json({ generatedAt: snap.generatedAt, source: snap.source, ...snap.rollups, gpuCards, gpuVms, gpuUtilPct, gpuUtilHosts: utilN });
-});
+  return { generatedAt: snap.generatedAt, source: snap.source, ...snap.rollups, gpuCards, gpuVms, gpuUtilPct, gpuUtilHosts: utilN };
+}));
 
 // NSX overview — aggregated snapshot from the NSX Manager poller (separate from
 // vCenter). Optional ?managerId= / ?region= scoping for the detail tables.
@@ -983,8 +1002,7 @@ api.get('/tools/vclogs/export.csv', async (req, res) => {
 // 운영 인사이트 — 기존 스냅샷만으로 계산하는 모니터링 분석 묶음:
 //  ② VM 라이트사이징(유휴/과대/과소)  ④ 클러스터 N+1(호스트 1대 장애 여력)
 //  ⑧ 알람 핫스팟(심각도/엔티티/센터)   ⑩ GPU 유휴/낭비
-api.get('/tools/insights', (req, res) => {
-  const snap = store.get();
+api.get('/tools/insights', (req, res) => memoJson(req, res, 'tools-insights', (snap) => {
   const vc = req.query.vcenterId;
   const hosts = vc ? snap.hosts.filter((h) => h.vcenterId === vc) : snap.hosts;
   const vms = vc ? snap.vms.filter((v) => v.vcenterId === vc) : snap.vms;
@@ -1050,8 +1068,8 @@ api.get('/tools/insights', (req, res) => {
     unreporting: gpuHosts.filter((h) => h.gpuUtilPct == null).length, list: idleGpu.slice(0, 100),
   };
 
-  res.json({ generatedAt: snap.generatedAt, rightsizing, clusters, alarmHotspot, gpuWaste });
-});
+  return { generatedAt: snap.generatedAt, rightsizing, clusters, alarmHotspot, gpuWaste };
+}));
 
 // 위협 탐지 — (A) 텔레메트리 기반 + (B) NSX 분산 IDS 이벤트. 자사 인프라 방어 목적.
 const RISKY_PORTS = { 21: 'FTP', 23: 'Telnet', 135: 'RPC', 139: 'NetBIOS', 445: 'SMB', 1433: 'MSSQL', 3306: 'MySQL', 3389: 'RDP', 5432: 'PostgreSQL', 5900: 'VNC', 6379: 'Redis', 9200: 'Elasticsearch', 27017: 'MongoDB', 11211: 'Memcached' };
@@ -1062,8 +1080,7 @@ const EOL_OS = [
   [/ubuntu.*(1[0-6]\.(04|10)|8\.04|9\.|0[0-9]\.)/i, 'Ubuntu (EOL)'],
   [/debian.*(\b[1-9]\b)\b/i, 'Debian old'],
 ];
-api.get('/tools/threats', (req, res) => {
-  const snap = store.get();
+api.get('/tools/threats', (req, res) => memoJson(req, res, 'tools-threats', (snap) => {
   const vc = req.query.vcenterId;
   const vms = vc ? snap.vms.filter((v) => v.vcenterId === vc) : snap.vms;
   const on = vms.filter((v) => v.powerState === 'POWERED_ON');
@@ -1102,7 +1119,7 @@ api.get('/tools/threats', (req, res) => {
   const sev = (e) => e.severity;
   idsEvents = idsEvents.slice(0, 500);
 
-  res.json({
+  return {
     generatedAt: snap.generatedAt,
     summary: {
       mining: mining.length, eol: eol.length, riskyPublic: risky.filter((r) => r.public).length, riskyTotal: risky.length,
@@ -1110,8 +1127,8 @@ api.get('/tools/threats', (req, res) => {
     },
     mining: mining.slice(0, 200), eol: eol.slice(0, 300), risky: risky.slice(0, 300), rogue: rogue.slice(0, 300),
     ids: { managers: idsManagers, events: idsEvents },
-  });
-});
+  };
+}));
 
 // GPU 사용률 히스토리(5년까지). level=host|cluster|vc, key=대상키, days=기간.
 api.get('/tools/gpu/history', async (req, res) => {
@@ -1139,8 +1156,7 @@ api.get('/tools/gpu/history', async (req, res) => {
 });
 
 // Capacity report — per-cluster compute capacity, allocation, overcommit, headroom.
-api.get('/tools/capacity', (req, res) => {
-  const snap = store.get();
+api.get('/tools/capacity', (req, res) => memoJson(req, res, 'tools-capacity', (snap) => {
   const vcId = req.query.vcenterId;
   const hosts = snap.hosts.filter((h) => !vcId || h.vcenterId === vcId);
   const vms = snap.vms.filter((v) => (!vcId || v.vcenterId === vcId) && !v.template);
@@ -1172,7 +1188,7 @@ api.get('/tools/capacity', (req, res) => {
     ramHeadroomGB: Math.round(c.memTotalGB - c.ramOnGB),
   })).sort((a, b) => b.ramOvercommitPct - a.ramOvercommitPct);
   const sum = (f) => clusters.reduce((a, x) => a + f(x), 0);
-  res.json({
+  return {
     scope: vcId || 'all',
     clusters,
     totals: {
@@ -1181,13 +1197,12 @@ api.get('/tools/capacity', (req, res) => {
       vcpuPerCore: sum((c) => c.cores) ? r1(sum((c) => c.vcpuAllocated) / sum((c) => c.cores)) : 0,
       ramHeadroomGB: sum((c) => c.ramHeadroomGB),
     },
-  });
-});
+  };
+}));
 
 // Waste report — 자원 낭비 후보 모음(스냅샷 기반): 전원 꺼진 VM, 스냅샷 보유 VM,
 // thin 회수가능, Tools 미설치. (고아 VMDK는 데이터스토어 파일 스캔이 필요해 미포함)
-api.get('/tools/waste', (req, res) => {
-  const snap = store.get();
+api.get('/tools/waste', (req, res) => memoJson(req, res, 'tools-waste', (snap) => {
   const vcId = req.query.vcenterId;
   const vms = snap.vms.filter((v) => (!vcId || v.vcenterId === vcId) && !v.template);
   const r1 = (x) => Number((x || 0).toFixed(1));
@@ -1196,7 +1211,7 @@ api.get('/tools/waste', (req, res) => {
   const thin = vms.filter((v) => v.thin);
   const noTools = vms.filter((v) => v.powerState === 'POWERED_ON' && v.toolsStatus && v.toolsStatus !== 'RUNNING');
   const top = (arr, fn, n = 50) => [...arr].sort((a, b) => fn(b) - fn(a)).slice(0, n);
-  res.json({
+  return {
     scope: vcId || 'all',
     poweredOff: { count: off.length, storageGB: off.reduce((a, v) => a + (v.storageGB || 0), 0),
       vms: top(off, (v) => v.storageGB || 0).map((v) => ({ id: v.id, name: v.name, vcenterId: v.vcenterId, storageGB: v.storageGB, guestOS: v.guestOS })) },
@@ -1204,13 +1219,12 @@ api.get('/tools/waste', (req, res) => {
       vms: top(snaps, (v) => v.snapshotSizeGB || 0).map((v) => ({ id: v.id, name: v.name, vcenterId: v.vcenterId, snapshotCount: v.snapshotCount, snapshotSizeGB: v.snapshotSizeGB })) },
     thinReclaim: { count: thin.length, reclaimableGB: thin.reduce((a, v) => a + (v.uncommittedGB || 0), 0) },
     noTools: { count: noTools.length, vms: noTools.slice(0, 50).map((v) => ({ id: v.id, name: v.name, vcenterId: v.vcenterId, toolsStatus: v.toolsStatus })) },
-  });
-});
+  };
+}));
 
 // Thin-provisioned VM finder. thin = uncommitted(여유)이 큰 VM(추정). committed=실사용,
 // provisioned=committed+uncommitted. 회수 가능 추정 = uncommitted 합계.
-api.get('/tools/thin-vms', (req, res) => {
-  const snap = store.get();
+api.get('/tools/thin-vms', (req, res) => memoJson(req, res, 'tools-thin-vms', (snap) => {
   let vms = snap.vms;
   if (req.query.vcenterId) vms = vms.filter((v) => v.vcenterId === req.query.vcenterId);
   const round = (v, d = 1) => Number((v || 0).toFixed(d));
@@ -1221,7 +1235,7 @@ api.get('/tools/thin-vms', (req, res) => {
     uncommittedGB: v.uncommittedGB || 0,
     provisionedGB: (v.storageGB || 0) + (v.uncommittedGB || 0),
   })).sort((a, b) => b.uncommittedGB - a.uncommittedGB);
-  res.json({
+  return {
     scope: req.query.vcenterId || 'all',
     totalVms: vms.length,
     thinVms: items.length,
@@ -1230,8 +1244,8 @@ api.get('/tools/thin-vms', (req, res) => {
     provisionedTB: round(items.reduce((a, x) => a + x.provisionedGB, 0) / 1024, 1),
     reclaimableTB: round(items.reduce((a, x) => a + x.uncommittedGB, 0) / 1024, 1),
     items,
-  });
-});
+  };
+}));
 
 // Advanced VM finder: scope by 다수 vCenter + folder/cluster/resourcePool +
 // conditions. Optional withAvg → 1일/1주 평균 CPU(유휴 판정). 평균은 live는
@@ -1400,8 +1414,7 @@ api.get('/tools/capacity-forecast', async (req, res) => {
 
 // Guest OS distribution — VM counts grouped by Guest OS (종류·버전), optionally
 // per vCenter. Family rollup + full-name detail; power(on/off) split.
-api.get('/tools/guest-os', (req, res) => {
-  const snap = store.get();
+api.get('/tools/guest-os', (req, res) => memoJson(req, res, 'tools-guest-os', (snap) => {
   let vms = snap.vms;
   if (req.query.vcenterId) vms = vms.filter((v) => v.vcenterId === req.query.vcenterId);
   // 전원(on/off) · 종류(vm/template) 필터
@@ -1422,13 +1435,13 @@ api.get('/tools/guest-os', (req, res) => {
     f.total++; if (on) f.on++;
     byFamily.set(fam, f);
   }
-  res.json({
+  return {
     total: vms.length,
     distinctOs: byName.size,
     families: [...byFamily.values()].sort((a, b) => b.total - a.total),
     items: [...byName.values()].sort((a, b) => b.total - a.total),
-  });
-});
+  };
+}));
 
 // 특정 Guest OS(종류·버전) 또는 계열에 해당하는 VM 목록 — VM 수 클릭 시 대상 VM/CSV용.
 // 쿼리: vcenterId·power(on/off)·kind(vm/template) + os(정확 일치) 또는 family(계열).
@@ -1547,8 +1560,9 @@ function osFamily(os = '') {
 // Consolidated summary: SUM of every resource across all vCenters, with
 // allocation totals, overcommit ratios, OS distribution and per-vCenter
 // contribution. Optional ?vcenterId= / ?region= scoping.
-api.get('/summary', (req, res) => {
-  const snap = store.get();
+// 랜딩/요약 화면 — 전 사용자가 15초마다 폴링하는 무거운 경로. single-flight로 동시요청을 1회
+// 계산에 합류시켜 '다수 동시 클릭 시 사용자 수만큼 재계산'을 제거한다.
+api.get('/summary', (req, res) => memoJson(req, res, 'summary', (snap) => {
   const vcenters = applyFilters(snap.vcenters.map((v) => ({ ...v, vcenterId: v.id })), req.query, snap, ['name']);
   const vcIds = new Set(vcenters.map((v) => v.id));
   const hosts = snap.hosts.filter((h) => vcIds.has(h.vcenterId));
@@ -1596,30 +1610,35 @@ api.get('/summary', (req, res) => {
   const round = (v, d = 0) => Number((v || 0).toFixed(d));
   const pct = (u, t) => (t > 0 ? Math.round((u / t) * 100) : 0);
 
-  // Per-vCenter contribution (the SUM each site adds to the whole)
+  // Per-vCenter contribution (the SUM each site adds to the whole).
+  // vCenter마다 hosts/vms/datastores 전체를 재필터하면 O(vCenter×N)이라 28×5,800으로 커진다.
+  // 호스트/VM/DS를 vcenterId 기준으로 '1회' 그룹핑(O(N))한 뒤 누적한다(롤업 규칙).
+  const acc = new Map(); // vcId -> { hosts, vms, vmsOn, cpuCores, memMB, dsCapGB, vcpu, ramMB, provGB, powerW }
+  const bucket = (id) => { let b = acc.get(id); if (!b) { b = { hosts: 0, vms: 0, vmsOn: 0, cpuCores: 0, memMB: 0, dsCapGB: 0, vcpu: 0, ramMB: 0, provGB: 0, powerW: 0 }; acc.set(id, b); } return b; };
+  for (const h of hosts) { const b = bucket(h.vcenterId); b.hosts++; b.cpuCores += h.cpuCores || 0; b.memMB += h.memTotalMB || 0; b.powerW += h.powerWatts || 0; }
+  for (const v of vms) { const b = bucket(v.vcenterId); b.vms++; if (v.powerState === 'POWERED_ON') b.vmsOn++; b.vcpu += v.cpuCount || 0; b.ramMB += v.memMB || 0; b.provGB += v.storageGB || 0; }
+  for (const d of datastores) { const b = bucket(d.vcenterId); b.dsCapGB += d.capacityGB || 0; }
   const byVcenter = vcenters.map((vc) => {
-    const h = hosts.filter((x) => x.vcenterId === vc.id);
-    const v = vms.filter((x) => x.vcenterId === vc.id);
-    const d = datastores.filter((x) => x.vcenterId === vc.id);
+    const b = acc.get(vc.id) || bucket(vc.id);
     return {
       id: vc.id, name: vc.name, region: vc.location?.region, status: vc.status,
-      hosts: h.length,
-      vms: v.length,
-      vmsPoweredOn: v.filter((x) => x.powerState === 'POWERED_ON').length,
-      cpuCores: sum(h, (x) => x.cpuCores),
-      memTotalGB: round(sum(h, (x) => x.memTotalMB) / 1024),
-      storageTotalTB: round(sum(d, (x) => x.capacityGB) / 1024, 1),
-      vcpuAllocated: sum(v, (x) => x.cpuCount),
-      ramAllocatedGB: round(sum(v, (x) => x.memMB) / 1024),
-      provisionedTB: round(sum(v, (x) => x.storageGB) / 1024, 1),
-      powerKw: round(sum(h, (x) => x.powerWatts) / 1000, 1),
+      hosts: b.hosts,
+      vms: b.vms,
+      vmsPoweredOn: b.vmsOn,
+      cpuCores: b.cpuCores,
+      memTotalGB: round(b.memMB / 1024),
+      storageTotalTB: round(b.dsCapGB / 1024, 1),
+      vcpuAllocated: b.vcpu,
+      ramAllocatedGB: round(b.ramMB / 1024),
+      provisionedTB: round(b.provGB / 1024, 1),
+      powerKw: round(b.powerW / 1000, 1),
     };
   }).sort((a, b) => b.vms - a.vms);
 
   const powerWatts = sum(hosts, (h) => h.powerWatts);
   const powerReporting = hosts.filter((h) => h.powerWatts > 0).length;
 
-  res.json({
+  return {
     generatedAt: snap.generatedAt,
     source: snap.source,
     counts: {
@@ -1680,8 +1699,8 @@ api.get('/summary', (req, res) => {
       diskTB: round(a.diskGB / 1024, 1),
     })).sort((a, b) => b.vcpu - a.vcpu),
     byVcenter,
-  });
-});
+  };
+}));
 
 api.get('/hosts', (req, res) => {
   const snap = store.get();
