@@ -15,6 +15,7 @@
 import { Agent } from 'undici';
 import { constants as cryptoConstants } from 'node:crypto';
 import { config } from '../config.js';
+import { parseDigestChallenge, buildDigestHeader } from './digestAuth.js';
 
 // Dedicated dispatcher so iDRAC self-signed certs / legacy TLS always work,
 // regardless of the global vCenter dispatcher.
@@ -31,12 +32,32 @@ const dispatcher = new Agent({
   connectTimeout: config.idrac.timeoutMs,
 });
 
-async function get(base, pathname, auth) {
-  const res = await fetch(`${base}${pathname}`, {
-    headers: { Authorization: auth, Accept: 'application/json' },
-    signal: AbortSignal.timeout(config.idrac.timeoutMs),
+const basicHeader = (username, password) => 'Basic ' + Buffer.from(`${username}:${password}`).toString('base64');
+
+/**
+ * Redfish GET with Basic 인증 → 401+Digest 챌린지면 Digest로 자동 재시도.
+ * timeoutMs를 넘기면 그 값으로 각 요청을 제한한다(스캔은 짧게). 응답 객체를 그대로 반환.
+ */
+async function rawGet(base, pathname, username, password, timeoutMs = config.idrac.timeoutMs) {
+  const doFetch = (authHeader) => fetch(`${base}${pathname}`, {
+    headers: { Authorization: authHeader, Accept: 'application/json' },
+    signal: AbortSignal.timeout(timeoutMs),
     dispatcher,
   });
+  let res = await doFetch(basicHeader(username, password));
+  // Basic 거부(401) + Digest 요구 → Digest로 1회 재시도(iDRAC이 Basic을 막은 경우).
+  if (res.status === 401) {
+    const challenge = parseDigestChallenge(res.headers.get('www-authenticate'));
+    if (challenge) {
+      try { await res.body?.cancel?.(); } catch { /* drain */ }
+      res = await doFetch(buildDigestHeader({ username, password, method: 'GET', uri: pathname, challenge }));
+    }
+  }
+  return res;
+}
+
+async function get(base, pathname, username, password) {
+  const res = await rawGet(base, pathname, username, password);
   if (res.status === 401) throw new Error('iDRAC 인증 실패 (사용자/비밀번호 확인)');
   if (!res.ok) throw new Error(`Redfish ${pathname} -> ${res.status} ${res.statusText}`);
   return res.json();
@@ -51,15 +72,15 @@ const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
  */
 export async function fetchPower(entry) {
   const base = entry.host.replace(/\/+$/, '');
-  const auth = 'Basic ' + Buffer.from(`${entry.username}:${entry.password}`).toString('base64');
+  const { username, password } = entry;
 
   // 1) sum PowerConsumedWatts across all chassis
-  const chassisRoot = await get(base, '/redfish/v1/Chassis', auth);
+  const chassisRoot = await get(base, '/redfish/v1/Chassis', username, password);
   const members = (chassisRoot.Members || []).map((m) => m['@odata.id']).filter(Boolean);
   let watts = null;
   for (const m of members) {
     let power;
-    try { power = await get(base, `${m}/Power`, auth); } catch { continue; }
+    try { power = await get(base, `${m}/Power`, username, password); } catch { continue; }
     for (const pc of power.PowerControl || []) {
       const w = num(pc.PowerConsumedWatts);
       if (w != null) watts = (watts || 0) + w;
@@ -69,10 +90,10 @@ export async function fetchPower(entry) {
   // 2) best-effort identity (model / service tag / power state)
   let model = '', serviceTag = entry.serviceTag || '', powerState = '';
   try {
-    const sysRoot = await get(base, '/redfish/v1/Systems', auth);
+    const sysRoot = await get(base, '/redfish/v1/Systems', username, password);
     const first = (sysRoot.Members || [])[0]?.['@odata.id'];
     if (first) {
-      const sys = await get(base, first, auth);
+      const sys = await get(base, first, username, password);
       model = [sys.Manufacturer, sys.Model].filter(Boolean).join(' ').trim();
       serviceTag = sys.SKU || sys.SerialNumber || serviceTag;
       powerState = sys.PowerState || '';
@@ -105,7 +126,6 @@ const firstMember = (root) => (root?.Members || [])[0]?.['@odata.id'];
 export async function probeIdrac(host, username, password, timeoutMs = 3000) {
   let base = String(host).replace(/\/+$/, '');
   if (!/^https?:\/\//.test(base)) base = `https://${base}`;
-  const auth = 'Basic ' + Buffer.from(`${username}:${password}`).toString('base64');
   const opt = (extra) => ({ headers: { Accept: 'application/json', ...extra }, signal: AbortSignal.timeout(timeoutMs), dispatcher });
 
   // 1) Redfish service root (no auth). Identifies Redfish + Dell signature.
@@ -120,16 +140,23 @@ export async function probeIdrac(host, username, password, timeoutMs = 3000) {
   const sig = JSON.stringify(root || {}).toLowerCase();
   let dell = root?.Vendor === 'Dell' || Boolean(root?.Oem?.Dell) || sig.includes('idrac') || sig.includes('dell');
 
-  // 2) System identity (with auth). Confirms credentials + enriches result.
-  let model = '', manufacturer = '', serviceTag = '', hostName = '';
+  // 2) System identity (with auth). Basic → 401+Digest면 Digest로 자동 재시도(iDRAC이 Basic 거부 시).
+  let model = '', manufacturer = '', serviceTag = '', hostName = '', authHint = '';
   try {
-    const sres = await fetch(`${base}/redfish/v1/Systems`, opt({ Authorization: auth }));
-    if (sres.status === 401) return { ok: true, isIdrac: dell, dell, authFailed: true };
+    const sres = await rawGet(base, '/redfish/v1/Systems', username, password, timeoutMs);
+    if (sres.status === 401) {
+      // 왜 실패했는지 진단 힌트를 남긴다(계정 맞는데 401 = Basic 거부/락아웃 구분).
+      const wa = String(sres.headers.get('www-authenticate') || '');
+      authHint = /digest/i.test(wa) ? 'Digest 인증 요구(Basic 거부) — 재시도했으나 실패: 계정/권한 확인'
+        : /lock|deny|blocked/i.test(wa) ? '계정 잠금/차단 가능(iDRAC 로그인 실패 임계) — iDRAC에서 잠금 해제'
+          : '자격증명 거부(사용자/비밀번호/권한 확인)';
+      return { ok: true, isIdrac: dell, dell, authFailed: true, authHint };
+    }
     if (sres.ok) {
       const sroot = await sres.json();
       const first = firstMember(sroot);
       if (first) {
-        const s2 = await fetch(`${base}${first}`, opt({ Authorization: auth }));
+        const s2 = await rawGet(base, first, username, password, timeoutMs);
         if (s2.ok) {
           const s = await s2.json();
           model = s.Model || ''; manufacturer = s.Manufacturer || '';
@@ -151,8 +178,7 @@ export async function probeIdrac(host, username, password, timeoutMs = 3000) {
  */
 export async function fetchInventory(entry) {
   const base = entry.host.replace(/\/+$/, '');
-  const auth = 'Basic ' + Buffer.from(`${entry.username}:${entry.password}`).toString('base64');
-  const G = (p) => get(base, p, auth);
+  const G = (p) => get(base, p, entry.username, entry.password);
 
   const inv = { collectedAt: Date.now(), system: {}, idrac: {}, cpu: {}, memory: {}, network: [], bios: {} };
 
@@ -447,8 +473,7 @@ export async function fetchInventory(entry) {
  */
 export async function fetchFirmwareInventory(entry) {
   const base = entry.host.replace(/\/+$/, '');
-  const auth = 'Basic ' + Buffer.from(`${entry.username}:${entry.password}`).toString('base64');
-  const G = (p) => get(base, p, auth);
+  const G = (p) => get(base, p, entry.username, entry.password);
   const root = await G('/redfish/v1/UpdateService/FirmwareInventory');
   const members = (root.Members || []).map((m) => m['@odata.id']).filter(Boolean)
     .filter((id) => /\/Installed-/i.test(id)) // 현재 설치된 버전만
@@ -498,8 +523,7 @@ function classifyFw(name) {
  */
 export async function probeGpuTelemetry(entry) {
   const base = entry.host.replace(/\/+$/, '');
-  const auth = 'Basic ' + Buffer.from(`${entry.username}:${entry.password}`).toString('base64');
-  const G = (p) => get(base, p, auth);
+  const G = (p) => get(base, p, entry.username, entry.password);
   const out = { gpus: [], telemetry: { available: false, gpuReports: [] }, utilizationAvailable: false, notes: [] };
 
   // 1) Processors → GPU/Accelerator
@@ -562,8 +586,7 @@ export async function probeGpuTelemetry(entry) {
  */
 export async function fetchSensors(entry) {
   const base = entry.host.replace(/\/+$/, '');
-  const auth = 'Basic ' + Buffer.from(`${entry.username}:${entry.password}`).toString('base64');
-  const G = (p) => get(base, p, auth);
+  const G = (p) => get(base, p, entry.username, entry.password);
 
   const temps = [];
   const fans = [];
