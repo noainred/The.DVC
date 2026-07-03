@@ -19,7 +19,9 @@ authRouter.get('/config', (_req, res) => {
 
 authRouter.post('/login', async (req, res) => {
   const { username, password } = req.body || {};
-  if (!username || !password) {
+  // 문자열만 허용 — 객체/배열이 오면 String() 강제변환으로 "[object Object]" 같은 값이 인증에
+  // 쓰이는 사고를 막는다(특수문자 자체는 어떤 것이든 그대로 통과).
+  if (typeof username !== 'string' || typeof password !== 'string' || !username || !password) {
     return res.status(400).json({ error: 'username and password are required' });
   }
   const ip = (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').toString().split(',')[0];
