@@ -68,8 +68,21 @@ export default function Overview({ onSelectSite, onGotoTab }) {
   const osPie = regions.map((r) => ({ name: r.key, value: r.vms, fill: REGION_COLORS[r.key] || '#64748b' }));
 
   return (
-    <>
+    <div className="ov">
       {error && <div className="badge red" style={{ marginBottom: 8 }}>갱신 실패(직전 데이터 표시 중): {error}</div>}
+      <div className="ov-console">
+        <div className="ov-console-label"><b>▸</b> GLOBAL INFRASTRUCTURE OVERVIEW</div>
+        <div className="ov-console-status">
+          <i />
+          <span><b>{g.vcentersConnected}</b>/{g.vcenters} VCENTERS</span>
+          <span style={{ color: 'var(--border)' }}>·</span>
+          <span><b>{fmt(g.hosts)}</b> HOSTS</span>
+          <span style={{ color: 'var(--border)' }}>·</span>
+          <span><b>{fmt(g.vms)}</b> VMS</span>
+          <span style={{ color: 'var(--border)' }}>·</span>
+          <span style={{ color: 'var(--mint)' }}>LIVE</span>
+        </div>
+      </div>
       <div className="section-title">글로벌 현황</div>
       <div className="kpis" ref={kpisRef} title="한 줄에 안 들어가는 KPI는 자동으로 숨겨집니다(창을 넓히면 더 보입니다).">
         <Kpi label="vCenter" value={`${g.vcentersConnected}/${g.vcenters}`}
@@ -165,7 +178,7 @@ export default function Overview({ onSelectSite, onGotoTab }) {
           </ResponsiveContainer>
         </div>
       </div>
-    </>
+    </div>
   );
 }
 

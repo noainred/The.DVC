@@ -21,6 +21,7 @@ export function Kpi({ label, value, unit, meta, pct, accent, onClick }) {
       tabIndex={onClick ? 0 : undefined}
       onKeyDown={onClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } } : undefined}
       title={onClick ? '클릭하여 보기' : undefined}
+      style={accent ? { '--kpi-accent': accent } : undefined}
     >
       <div className="label">{label}</div>
       <div className="value" style={accent ? { color: accent } : undefined}>
