@@ -94,6 +94,21 @@ export function updateCollector(id, body) {
   return { ok: true, collector: redact(entry) };
 }
 
+/**
+ * 엣지 자기등록(EDGE_MODE=all) upsert — 같은 id(에이전트 이름)가 있으면 URL/토큰/DC를
+ * 갱신하고, 없으면 추가한다. 관리자가 수동 등록한 항목의 enabled/vcenterId는 보존.
+ */
+export function upsertCollectorFromAgent({ name, url, token, datacenter = '' } = {}) {
+  const id = String(name || '').trim();
+  if (!id) return { ok: false, reason: 'name(에이전트 이름)은 필수입니다.' };
+  const list = loadCollectors();
+  const existing = list.find((c) => c.id === id);
+  if (existing) {
+    return updateCollector(id, { url, token, datacenter: datacenter || existing.datacenter, name: existing.name || id });
+  }
+  return addCollector({ id, name: id, url, token, datacenter, enabled: true });
+}
+
 export function removeCollector(id) {
   const list = loadCollectors();
   const next = list.filter((c) => c.id !== id);

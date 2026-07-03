@@ -20,9 +20,23 @@ const DEFAULT_REMOTE_BASE =
  *   - "live"  : only query the real vCenters listed in config/vcenters.json
  *   - "auto"  : try live; for any vCenter that fails, fall back to mock
  */
+// ─── 통합 엣지 모드 (EDGE_MODE=all) ────────────────────────────────────────
+// 엣지에 이 3개만 설정하면 전 기능이 켜진다:
+//   EDGE_MODE=all  CENTRAL_URL=http://중앙:4000  EDGE_TOKEN=공유토큰
+// 활성 내용: 수집기 export(COLLECTOR_TOKEN=EDGE_TOKEN) · 위임 스캔/핑/캡처/로그 워커 ·
+// 사이트 인벤토리 push · live 수집(DATA_SOURCE=live) · 중앙발 자동 업그레이드(/dl) ·
+// 부팅 시 중앙 자동 등록(수집 서버 수동 추가 불필요). 개별 env를 명시하면 그 값이 우선.
+// 주의: EDGE_TOKEN은 CENTRAL_TOKEN과 달리 이 인스턴스의 /api/central 엔드포인트를 열지
+// 않는다(엣지가 또 다른 중앙이 되는 부작용 없음) — 엣지에서는 EDGE_TOKEN 사용을 권장.
+const EDGE_ALL = (process.env.EDGE_MODE || '').trim().toLowerCase() === 'all';
+const EDGE_TOKEN = process.env.EDGE_TOKEN || process.env.CENTRAL_TOKEN || '';
+const EDGE_CENTRAL_URL = (process.env.CENTRAL_URL || '').replace(/\/+$/, '');
+
 export const config = {
   port: Number(process.env.PORT) || 4000,
-  dataSource: (process.env.DATA_SOURCE || 'mock').toLowerCase(),
+  dataSource: (process.env.DATA_SOURCE || (EDGE_ALL ? 'live' : 'mock')).toLowerCase(),
+  // 통합 엣지 모드 여부(로깅/자기등록 판단용).
+  edgeAll: EDGE_ALL,
   // Where user config (vcenters.json / users.json / upgrade.json) is read/written.
   // Defaults to the app's server/config; set CONFIG_DIR (e.g. /etc/vmware-portal)
   // to keep it OUTSIDE the app dir so upgrades never touch it.
@@ -107,7 +121,8 @@ export const config = {
     //
     // Token this instance REQUIRES on its own export endpoint. Empty = export
     // endpoint disabled (this instance is central-only, not an agent).
-    token: process.env.COLLECTOR_TOKEN || '',
+    // EDGE_MODE=all 이면 EDGE_TOKEN으로 자동 활성.
+    token: process.env.COLLECTOR_TOKEN || (EDGE_ALL ? EDGE_TOKEN : ''),
     // Friendly datacenter label advertised by this agent's export.
     datacenter: process.env.COLLECTOR_DATACENTER || process.env.DATACENTER || '',
     // Central portal: pull registered collectors on this interval. 0 disables.
@@ -130,7 +145,8 @@ export const config = {
     // Empty = agent scanning disabled.
     centralUrl: (process.env.CENTRAL_URL || '').replace(/\/+$/, ''),
     // Token presented to the central (must match the central's CENTRAL_TOKEN).
-    centralToken: process.env.CENTRAL_TOKEN || '',
+    // 엣지에서는 EDGE_TOKEN 사용 권장(이 인스턴스의 central 엔드포인트를 열지 않음).
+    centralToken: process.env.CENTRAL_TOKEN || (EDGE_ALL ? EDGE_TOKEN : ''),
     // How often the agent pulls its assignment and scans (ms).
     scanIntervalMs: Number(process.env.AGENT_SCAN_INTERVAL_MS) || 3_600_000,
     // Auto-register discovered iDRACs into this agent's local registry so it
@@ -138,7 +154,8 @@ export const config = {
     autoRegister: process.env.AGENT_AUTO_REGISTER !== 'false',
     // 사이트 위임 수집: 이 서버가 자기 로컬 vCenter 인벤토리를 수집해 중앙으로 push.
     // 고RTT 원격 사이트의 vCenter 수집을 현장 서버가 전담하게 해 중앙↔vCenter RTT를 제거.
-    pushInventory: process.env.AGENT_PUSH_INVENTORY === 'true',
+    // EDGE_MODE=all 이면 기본 on(AGENT_PUSH_INVENTORY=false로 명시적 off 가능).
+    pushInventory: EDGE_ALL ? process.env.AGENT_PUSH_INVENTORY !== 'false' : process.env.AGENT_PUSH_INVENTORY === 'true',
     inventoryIntervalMs: Number(process.env.AGENT_INVENTORY_INTERVAL_MS) || 60_000,
   },
   auth: {
@@ -155,24 +172,32 @@ export const config = {
   },
   upgrade: {
     // Opt-in: the whole feature is OFF unless explicitly enabled.
-    enabled: process.env.UPGRADE_ENABLED === 'true',
+    // EDGE_MODE=all + CENTRAL_URL 이면 중앙발 자동 업그레이드 기본 on(UPGRADE_ENABLED=false로 off).
+    enabled: process.env.UPGRADE_ENABLED === 'true'
+      || (EDGE_ALL && !!EDGE_CENTRAL_URL && process.env.UPGRADE_ENABLED !== 'false'),
     // Local folder watched for vmware-portal-<ver>.tar.gz/.zip bundles.
     watchDir: process.env.UPGRADE_WATCH_DIR || '',
     // Directory that gets replaced on upgrade (the running install). Required to apply.
-    installDir: process.env.UPGRADE_INSTALL_DIR || '',
+    // EDGE_MODE=all 이면 실행 중인 앱 루트(server/web 상위)로 자동 설정.
+    installDir: process.env.UPGRADE_INSTALL_DIR || (EDGE_ALL ? path.resolve(ROOT, '..') : ''),
     // Top-level package directory name inside bundles.
     packageName: process.env.UPGRADE_PACKAGE_NAME || 'vmware-portal',
     // Remote source base = the directory that contains versions.json. Defaults
     // to this repo's download/ on GitHub so the portal monitors it out of the box.
-    remoteBase: process.env.UPGRADE_REMOTE_BASE || DEFAULT_REMOTE_BASE,
+    // EDGE_MODE=all 엣지는 중앙 포탈의 /dl 을 소스로 사용(폐쇄망에서도 동작).
+    remoteBase: process.env.UPGRADE_REMOTE_BASE
+      || (EDGE_ALL && EDGE_CENTRAL_URL ? `${EDGE_CENTRAL_URL}/dl` : DEFAULT_REMOTE_BASE),
     // PAT for private remote sources, optional.
     token: process.env.UPGRADE_TOKEN || '',
     // Where downloaded bundles are stored before install.
     downloadDir: process.env.UPGRADE_DOWNLOAD_DIR || path.resolve(ROOT, '.upgrade-cache'),
     // Background check interval (ms). 0 disables the background watcher.
-    pollIntervalMs: Number(process.env.UPGRADE_POLL_INTERVAL_MS) || 0,
+    // EDGE_MODE=all 엣지는 1시간 주기 기본 on.
+    pollIntervalMs: Number(process.env.UPGRADE_POLL_INTERVAL_MS)
+      || (EDGE_ALL && EDGE_CENTRAL_URL ? 3_600_000 : 0),
     // When true, a newer version found by the watcher is applied + restarts automatically.
-    autoApply: process.env.UPGRADE_AUTO_APPLY === 'true',
+    autoApply: process.env.UPGRADE_AUTO_APPLY === 'true'
+      || (EDGE_ALL && !!EDGE_CENTRAL_URL && process.env.UPGRADE_AUTO_APPLY !== 'false'),
     // Edge agents this portal pushes new bundles to after self-upgrade.
     // JSON array: [{"url":"https://edge1","token":"..."}]
     edges: parseEdges(process.env.UPGRADE_EDGES),
