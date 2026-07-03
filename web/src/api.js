@@ -46,11 +46,21 @@ function timeoutSignal(ms) {
   setTimeout(() => c.abort(new DOMException('timeout', 'TimeoutError')), ms);
   return c.signal;
 }
-// 호출자 signal(언마운트 취소)과 타임아웃을 결합(미지원 브라우저는 호출자 signal만).
+// 호출자 signal(언마운트 취소)과 타임아웃을 결합. AbortSignal.any(Chrome 116+)가 없으면
+// 이전에는 호출자 signal만 반환해 타임아웃이 통째로 사라졌다(구형 브라우저에서 반열림 TCP가
+// 영구 pending → inFlight 가드로 폴링 정지). 폴백에서 두 signal의 abort를 수동 중계한다.
 function withTimeout(signal, ms) {
   const to = timeoutSignal(ms);
   if (!signal) return to;
-  return typeof AbortSignal.any === 'function' ? AbortSignal.any([signal, to]) : signal;
+  if (typeof AbortSignal.any === 'function') return AbortSignal.any([signal, to]);
+  const c = new AbortController();
+  const onAbort = (src) => { try { c.abort(src?.reason); } catch { c.abort(); } };
+  if (signal.aborted || to.aborted) onAbort(signal.aborted ? signal : to);
+  else {
+    signal.addEventListener('abort', () => onAbort(signal), { once: true });
+    to.addEventListener('abort', () => onAbort(to), { once: true });
+  }
+  return c.signal;
 }
 
 export async function fetchJson(path, params = {}, signal) {

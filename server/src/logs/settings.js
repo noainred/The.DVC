@@ -5,6 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
 
 const FILE = path.join(config.configDir, 'vcenter-logs.json');
 
@@ -40,8 +41,7 @@ export function saveLogSettings(body = {}) {
     minSeverity: ['info', 'warning', 'error'].includes(body.minSeverity) ? body.minSeverity : cur.minSeverity,
     storagePath: typeof body.storagePath === 'string' ? body.storagePath.trim() : cur.storagePath,
   };
-  fs.mkdirSync(path.dirname(FILE), { recursive: true });
-  fs.writeFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
+  atomicWriteFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
   const pathChanged = next.storagePath !== cur.storagePath;
   cache = next;
   return { ...next, _pathChanged: pathChanged };

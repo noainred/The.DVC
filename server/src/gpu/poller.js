@@ -133,7 +133,11 @@ async function pollLive(snap, vc, s) {
         const order = learnedMethod.get(v.id) === 'ssh' ? ['ssh', 'guestops'] : ['guestops', 'ssh'];
         for (const m of order) {
           r = await (m === 'ssh' ? viaSsh() : viaGuestops()).catch((e) => { err = e.message; return null; });
-          if (r && r.utilPct != null) { usedMethod = m; learnedMethod.set(v.id, m); break; }
+          if (r && r.utilPct != null) {
+            // 삭제된 VM의 키가 무한 누적되지 않도록 상한 — 넘으면 비우고 다시 학습(무해).
+            if (learnedMethod.size > 20000) learnedMethod.clear();
+            usedMethod = m; learnedMethod.set(v.id, m); break;
+          }
         }
       } else {
         r = await viaGuestops().catch((e) => { err = e.message; return null; });

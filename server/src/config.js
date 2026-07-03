@@ -71,7 +71,10 @@ export const config = {
     // in SQLite. The registry (server name, iDRAC host, credentials) lives in
     // CONFIG_DIR/idrac.json. Enabled automatically when any entry is registered.
     enabled: process.env.IDRAC_ENABLED !== 'false',
-    pollIntervalMs: Number(process.env.IDRAC_POLL_INTERVAL_MS) || 60_000,
+    pollIntervalMs: numEnv(process.env.IDRAC_POLL_INTERVAL_MS, 60_000),
+    // 전력 폴 시 동시에 조회할 iDRAC 수 상한 — 무제한 Promise.all은 자동등록 후 수백 대에
+    // 동시 TLS 핸드셰이크를 열어 CPU 스파이크·소켓 고갈을 유발한다(vCenter 수집과 동일 원칙).
+    pollConcurrency: Math.max(1, numEnv(process.env.IDRAC_POLL_CONCURRENCY, 16)),
     // vCenter별 IP 대역을 주기적으로 스캔해 iDRAC을 자동 발견·등록하는 주기. 스캔은 무거우므로
     // 기본 6시간. 0 이하면 비활성(주기 스캔 끔, 수동 '지금 스캔'은 가능). IDRAC_SCAN_INTERVAL_MS.
     scanIntervalMs: numEnv(process.env.IDRAC_SCAN_INTERVAL_MS, 6 * 3_600_000),

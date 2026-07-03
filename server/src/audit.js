@@ -8,6 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from './config.js';
+import { atomicWriteFileSync } from './util/atomicWrite.js';
 
 const FILE = path.join(config.configDir, 'audit.ndjson');
 const MAX = Number(process.env.AUDIT_MAX) || 20000;
@@ -63,7 +64,9 @@ function maybeTrim() {
   appendsSinceTrim = 0;
   try {
     const lines = fs.readFileSync(FILE, 'utf8').split('\n').filter(Boolean);
-    if (lines.length > MAX) { fs.writeFileSync(FILE, lines.slice(lines.length - MAX).join('\n') + '\n', { mode: 0o600 }); try { fs.chmodSync(FILE, 0o600); } catch { /* */ } }
+    // 감사 로그 트림도 원자적으로 — 대량 재작성 중 크래시/정전 시 보안 감사 기록이 통째로
+    // 잘리거나 비는 것을 방지(atomicWrite: 온전한 이전본 또는 새본만 남음).
+    if (lines.length > MAX) atomicWriteFileSync(FILE, lines.slice(lines.length - MAX).join('\n') + '\n', { mode: 0o600 });
   } catch { /* ignore */ }
 }
 

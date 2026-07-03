@@ -8,6 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
 
 const FILE = path.join(config.configDir, 'packages.json');
 
@@ -40,8 +41,7 @@ export function savePackageSettings(body = {}) {
   if (body.baseUrl !== undefined) next.baseUrl = String(body.baseUrl || '').trim();
   if (body.dir !== undefined) next.dir = String(body.dir || '').trim();
   if (body.token !== undefined && body.token !== '********') next.token = String(body.token || '');
-  fs.mkdirSync(path.dirname(FILE), { recursive: true });
-  fs.writeFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
+  atomicWriteFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
   cache = next;
   return getPackageSettings();
 }

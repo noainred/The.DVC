@@ -9,7 +9,7 @@ import { config } from '../config.js';
 import { loadRegistry } from './registry.js';
 import { fetchPower, fetchInventory, fetchSensors } from './redfish.js';
 import { pushSensorSample } from './sensorStore.js';
-import { fetchOmeDevices } from './ome.js';
+import { fetchOmeDevices, eachLimited } from './ome.js';
 import { setOmeDevices, dbKey } from './omeCache.js';
 import { setInventory, inventoryStale } from './invCache.js';
 import { getDb } from './db.js';
@@ -42,7 +42,8 @@ async function pollOnceInner() {
   const ts = Date.now();
   const results = [];
   const samples = []; // 전력 샘플을 모아 폴 종료 후 단일 트랜잭션으로 적재(서버 수만큼 fsync 방지).
-  await Promise.all(servers.map(async (s) => {
+  // 동시성 상한 — 무제한 Promise.all은 수백 대에 동시 TLS를 열어 CPU 스파이크/소켓 고갈.
+  await eachLimited(servers, config.idrac.pollConcurrency, async (s) => {
     try {
       if (s.type === 'ome') {
         // One OME -> many devices. Persist a sample per device + cache for lookups.
@@ -68,7 +69,7 @@ async function pollOnceInner() {
       const d = describeError(err);
       results.push({ id: s.id, name: s.name, type: s.type || 'idrac', error: d.message });
     }
-  }));
+  });
   // 모든 서버 폴 후 한 트랜잭션으로 배치 적재(insertMany 없으면 개별 insert 폴백).
   try { if (db.insertMany) db.insertMany(samples); else for (const sm of samples) db.insert(sm.serverId, sm.watts, sm.ts); }
   catch (e) { console.warn('[idrac] 전력 적재 실패:', e.message); }

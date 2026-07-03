@@ -71,8 +71,12 @@ function handle(ws, params) {
   };
 
   const guacd = net.connect(proxy.guacd.port || 4822, proxy.guacd.host);
+  // guacd 호스트가 방화벽/미도달이면 SYN_SENT로 OS 타임아웃(~2분)까지 ws가 열린 채 쌓인다 →
+  // 연결 타임아웃을 명시(핸드셰이크 완료 전만; ready 후에는 정상 유휴 대비 해제).
+  guacd.setTimeout(20_000, () => { if (!ready) { try { ws.close(1011, 'guacd 연결 타임아웃'); } catch { /* */ } try { guacd.destroy(); } catch { /* */ } } });
   let ready = false;
   let buf = '';
+  const MAX_HANDSHAKE_BUF = 256 * 1024; // 핸드셰이크 중 파싱 불가 데이터가 무한 누적되는 것 차단
 
   guacd.on('connect', () => guacd.write(enc('select', 'rdp')));
 
@@ -92,13 +96,25 @@ function handle(ws, params) {
         buf = buf.slice(inst.end);
       } else if (inst.opcode === 'ready') {
         ready = true;
+        guacd.setTimeout(0); // 핸드셰이크 완료 — 연결 타임아웃 해제(정상 세션은 오래 유휴 가능)
         // forward 'ready' + anything buffered after it to the browser client
         if (ws.readyState === ws.OPEN) ws.send(buf);
         buf = '';
         break;
+      } else if (inst.opcode === 'error') {
+        // guacd가 핸드셰이크 중 error를 보내면(연결 실패 등) 조용히 무시하면 ws가 영영 hang한다.
+        // 브라우저에 알리고 종료한다.
+        try { ws.close(1011, `guacd: ${(inst.args && inst.args[0]) || 'error'}`); } catch { /* */ }
+        try { guacd.destroy(); } catch { /* */ }
+        return;
       } else {
         buf = buf.slice(inst.end); // ignore other handshake instructions
       }
+    }
+    // 파싱 가능한 명령이 없는데 버퍼가 상한을 넘으면(오작동/오염 스트림) 무한 증식 차단.
+    if (!ready && buf.length > MAX_HANDSHAKE_BUF) {
+      try { ws.close(1011, 'guacd 핸드셰이크 오류(버퍼 초과)'); } catch { /* */ }
+      try { guacd.destroy(); } catch { /* */ }
     }
   });
 
@@ -107,4 +123,5 @@ function handle(ws, params) {
 
   ws.on('message', (msg) => { try { guacd.write(msg.toString()); } catch { /* */ } });
   ws.on('close', () => { try { guacd.end(); } catch { /* */ } });
+  ws.on('error', () => { try { guacd.destroy(); } catch { /* */ } }); // ws 오류에도 소켓 정리
 }

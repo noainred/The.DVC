@@ -11,6 +11,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from './config.js';
+import { atomicWriteFileSync } from './util/atomicWrite.js';
 import { store } from './store.js';
 import { logAudit } from './audit.js';
 import { resilientFetch } from './util/resilientFetch.js';
@@ -64,8 +65,7 @@ export function saveAlertConfig(body = {}) {
     cooldownMin: Math.max(1, Number(body.cooldownMin) || cur.cooldownMin),
     intervalSec: Math.max(15, Number(body.intervalSec) || cur.intervalSec),
   };
-  fs.mkdirSync(path.dirname(FILE), { recursive: true });
-  fs.writeFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
+  atomicWriteFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
   cache = next;
   rescheduleAlertEngine(); // 주기(intervalSec) 변경 즉시 반영 — 이전엔 재시작 전까지 저장만 되고 무시됐다
   return next;
@@ -182,7 +182,15 @@ export function saveAnomalySettings(body = {}) {
 
 /** 현재 스냅샷의 VM 전원상태로 직전상태 맵을 갱신(존재하는 VM만 → 수집 실패 시 직전값 유지). */
 function updatePrevPower(prev, snap) {
-  for (const v of snap.vms || []) { if (!v.template) prev.set(v.id, v.powerState); }
+  const vms = snap.vms || [];
+  // 정상 수집(현재 스냅샷에 VM이 있음)일 때만, 스냅샷에서 사라진 VM 키를 제거한다 — 무한 증식과
+  // moref 재사용 시 옛 POWERED_ON 잔재로 인한 오탐(대량 전원차단 감지) 방지. 수집 실패(빈 스냅샷)
+  // 시에는 직전값을 보존한다.
+  if (vms.length) {
+    const live = new Set(vms.map((v) => v.id));
+    for (const id of prev.keys()) if (!live.has(id)) prev.delete(id);
+  }
+  for (const v of vms) { if (!v.template) prev.set(v.id, v.powerState); }
   return prev;
 }
 

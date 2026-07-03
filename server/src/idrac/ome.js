@@ -19,7 +19,7 @@ import { config } from '../config.js';
 import { retryTransient } from '../util/resilientFetch.js';
 
 // 동시성 제한 실행기 — 고RTT OME에서 장치별 전력 조회를 직렬(N×RTT)이 아닌 병렬(캡)로.
-async function eachLimited(items, limit, fn) {
+export async function eachLimited(items, limit, fn) {
   const q = [...items];
   const workers = Array.from({ length: Math.min(limit, q.length || 1) }, async () => {
     while (q.length) { const it = q.shift(); try { await fn(it); } catch { /* isolated */ } }

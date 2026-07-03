@@ -8,6 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
 
 // Persisted in CONFIG_DIR (default app/server/config; set to e.g.
 // /etc/vmware-portal to survive upgrades).
@@ -47,9 +48,7 @@ export function saveSettings(partial) {
     }
   }
   if (Array.isArray(partial.edges)) next.edges = partial.edges;
-  fs.mkdirSync(path.dirname(FILE), { recursive: true });
-  fs.writeFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
-  try { fs.chmodSync(FILE, 0o600); } catch { /* best effort */ }
+  atomicWriteFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
   return loadSettings();
 }
 

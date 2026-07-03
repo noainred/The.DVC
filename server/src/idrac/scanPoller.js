@@ -125,7 +125,10 @@ export async function runIdracScanOnce(opts = {}) {
       const e = entries[i];
       progress = { datacenterId: e.datacenterId, done: 0, total: 0, foundSoFar: foundTotal, idx: i, totalDatacenters: entries.length, startedAt: started };
       try {
-        const r = await scanOneDatacenter(e, (done, total) => { progress = { datacenterId: e.datacenterId, done, total, foundSoFar: foundTotal, idx: i, totalDatacenters: entries.length, startedAt: started }; });
+        // scanForIdracs는 onProgress(done, total, foundNow)로 현재 DC의 실시간 발견 수를 준다.
+        // 이전엔 3번째 인자를 버리고 foundTotal(직전 DC까지 누계)만 써서 스캔 중 '발견 0대'로
+        // 보이다가 끝에 점프했다 → 누계 + 현재 DC 실시간을 합산해 표시.
+        const r = await scanOneDatacenter(e, (done, total, foundNow = 0) => { progress = { datacenterId: e.datacenterId, done, total, foundSoFar: foundTotal + foundNow, idx: i, totalDatacenters: entries.length, startedAt: started }; });
         results.push(r);
         if (r.delegated) delegatedTotal++;
         foundTotal += (r.found || 0);
