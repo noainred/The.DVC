@@ -133,6 +133,21 @@ export function removeScanRanges(datacenterId) {
   return { ok: true };
 }
 
+/**
+ * 마지막으로 '어느 법인이든' 스캔이 실행된 시각(ms). 없으면 0.
+ * 재시작(업그레이드) 후 '아직 주기가 안 됐으면 스캔을 앞당기지 않기' 위한 기준값.
+ * 위임/직접/수동 스캔 모두 recordScanRangeRun으로 lastRun.at를 남기므로 그 최대값을 쓴다.
+ */
+export function lastScanCycleAt() {
+  const map = read().datacenters || {};
+  let max = 0;
+  for (const e of Object.values(map)) {
+    const at = e?.lastRun?.at;
+    if (typeof at === 'number' && at > max) max = at;
+  }
+  return max;
+}
+
 /** 폴러가 실행 결과를 기록(per-법인 lastRun). 저장 충돌 없이 lastRun만 갱신. */
 export function recordScanRangeRun(datacenterId, run) {
   const id = String(datacenterId || '').trim();
