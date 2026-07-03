@@ -38,6 +38,9 @@ export const config = {
   vcSoapMetrics: process.env.VC_SOAP_METRICS !== 'false',
   // Directory of the built web client to serve in production (optional).
   webDist: path.resolve(ROOT, '..', 'web', 'dist'),
+  // 외부 공개용 소개 페이지(정적 데모 — 포탈 데이터/인증과 무관). server/src 안에 두어
+  // 오프라인 패키지·업그레이드 번들(server/src 통째 복사)에 자동 포함된다.
+  introDir: path.resolve(__dirname, 'intro'),
   // The app root (contains server/ + web/ + package.json). Used as the default
   // install dir when applying a centrally-pushed upgrade on a collector agent.
   appRoot: path.resolve(ROOT, '..'),

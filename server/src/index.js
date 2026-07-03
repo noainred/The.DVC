@@ -103,6 +103,14 @@ app.use('/api/remote', authMiddleware, auditMiddleware, remoteRouter);   // remo
 app.use('/api/insights', authMiddleware, insightsRouter); // FinOps·이상탐지·예측·보안·토폴로지·인시던트·ChatOps
 app.use('/api', authMiddleware, api);                   // protected resource endpoints
 
+// 외부 공개용 소개 페이지 — 로그인 없이 접근 가능한 정적 데모(/intro, /intro/light.html).
+// 실데이터·API와 완전히 분리된 셀프부트 페이지라 인증 미들웨어를 타지 않는다.
+if (fs.existsSync(config.introDir)) {
+  app.use('/intro', express.static(config.introDir, {
+    setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache, must-revalidate'),
+  }));
+}
+
 // Serve the built web client when it exists (production single-port mode).
 if (fs.existsSync(config.webDist)) {
   // Hashed assets can cache forever; index.html must never be cached so the
