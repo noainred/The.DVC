@@ -51,6 +51,10 @@ function handleConnection(ws) {
     let msg; try { msg = JSON.parse(raw.toString()); } catch { return; }
 
     if (msg.type === 'auth') {
+      // 재인증(auth 프레임 중복) 거부 — 한 소켓에서 여러 auth를 보내면 매번 새 SSHClient가
+      // 생성되는데 ssh 참조는 마지막 것만 남아 이전 연결이 누수되고, counted가 이미 true라
+      // MAX_SESSIONS 한도도 우회된다(소켓 1개로 무제한 SSH 연결). 이미 인증됐으면 무시.
+      if (ssh || counted) return send({ type: 'status', text: '이미 인증된 세션입니다.' });
       const m = getMapping(msg.mappingId);
       if (!m || m.protocol !== 'ssh') return send({ type: 'status', text: 'SSH 매핑을 찾을 수 없습니다.' }) || ws.close();
       if (!counted && activeSessions >= MAX_SESSIONS) {

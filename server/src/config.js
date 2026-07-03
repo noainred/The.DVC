@@ -28,6 +28,10 @@ const DEFAULT_REMOTE_BASE =
 // 부팅 시 중앙 자동 등록(수집 서버 수동 추가 불필요). 개별 env를 명시하면 그 값이 우선.
 // 주의: EDGE_TOKEN은 CENTRAL_TOKEN과 달리 이 인스턴스의 /api/central 엔드포인트를 열지
 // 않는다(엣지가 또 다른 중앙이 되는 부작용 없음) — 엣지에서는 EDGE_TOKEN 사용을 권장.
+// 숫자 env 파서 — 명시된 유한 숫자면 그 값(0 포함), 아니면 기본값. `Number(x) || d`는
+// 0을 falsy로 흘려 "0=비활성" 계약을 깨므로(주기 0으로 끄기 불가) 이 헬퍼로 통일한다.
+const numEnv = (raw, def) => { const n = Number(raw); return Number.isFinite(n) ? n : def; };
+
 const EDGE_ALL = (process.env.EDGE_MODE || '').trim().toLowerCase() === 'all';
 const EDGE_TOKEN = process.env.EDGE_TOKEN || process.env.CENTRAL_TOKEN || '';
 const EDGE_CENTRAL_URL = (process.env.CENTRAL_URL || '').replace(/\/+$/, '');
@@ -70,7 +74,7 @@ export const config = {
     pollIntervalMs: Number(process.env.IDRAC_POLL_INTERVAL_MS) || 60_000,
     // vCenter별 IP 대역을 주기적으로 스캔해 iDRAC을 자동 발견·등록하는 주기. 스캔은 무거우므로
     // 기본 6시간. 0 이하면 비활성(주기 스캔 끔, 수동 '지금 스캔'은 가능). IDRAC_SCAN_INTERVAL_MS.
-    scanIntervalMs: Number(process.env.IDRAC_SCAN_INTERVAL_MS) || 6 * 3_600_000,
+    scanIntervalMs: numEnv(process.env.IDRAC_SCAN_INTERVAL_MS, 6 * 3_600_000),
     // SQLite database file for power samples. Kept in CONFIG_DIR so upgrades
     // preserve history. Override with IDRAC_DB_PATH.
     dbPath: process.env.IDRAC_DB_PATH ||
@@ -126,7 +130,7 @@ export const config = {
     // Friendly datacenter label advertised by this agent's export.
     datacenter: process.env.COLLECTOR_DATACENTER || process.env.DATACENTER || '',
     // Central portal: pull registered collectors on this interval. 0 disables.
-    pullIntervalMs: Number(process.env.COLLECTOR_PULL_INTERVAL_MS) || 60_000,
+    pullIntervalMs: numEnv(process.env.COLLECTOR_PULL_INTERVAL_MS, 60_000),
     // Per-request timeout when pulling a remote collector.
     timeoutMs: Number(process.env.COLLECTOR_TIMEOUT_MS) || 20_000,
   },
@@ -193,8 +197,8 @@ export const config = {
     downloadDir: process.env.UPGRADE_DOWNLOAD_DIR || path.resolve(ROOT, '.upgrade-cache'),
     // Background check interval (ms). 0 disables the background watcher.
     // EDGE_MODE=all 엣지는 1시간 주기 기본 on.
-    pollIntervalMs: Number(process.env.UPGRADE_POLL_INTERVAL_MS)
-      || (EDGE_ALL && EDGE_CENTRAL_URL ? 3_600_000 : 0),
+    pollIntervalMs: numEnv(process.env.UPGRADE_POLL_INTERVAL_MS,
+      EDGE_ALL && EDGE_CENTRAL_URL ? 3_600_000 : 0),
     // When true, a newer version found by the watcher is applied + restarts automatically.
     autoApply: process.env.UPGRADE_AUTO_APPLY === 'true'
       || (EDGE_ALL && !!EDGE_CENTRAL_URL && process.env.UPGRADE_AUTO_APPLY !== 'false'),

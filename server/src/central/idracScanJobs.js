@@ -73,6 +73,15 @@ export function enqueueIdracScan(agent, { ips, username, password, vcenterId = '
     if ((jj.action || 'scan') === 'scan' && jj.state === 'pending'
       && String(jj.datacenterId || '').trim() === dcNorm
       && String(jj.ips || '').trim() === ipsNorm) {
+      // 대상(대역·법인)이 같아도 자격증명/등록플래그가 다르면 병합하면 안 된다 — 비밀번호를
+      // 고쳐 재스캔했는데 옛 잡을 재사용해 틀린 비번으로 스캔되거나, noRegister 의도(등록 보류
+      // ↔ 자동등록)가 뒤바뀐다. 다르면 기존 대기 잡을 새 값으로 갱신(가장 최근 의도 반영).
+      if (String(jj.username || '') !== String(username || '') || String(jj.password || '') !== String(password || '')
+        || !!jj.noRegister !== !!noRegister || String(jj.vcenterId || '') !== String(vcenterId || '')) {
+        jj.username = username; jj.password = password; jj.noRegister = !!noRegister; jj.vcenterId = vcenterId;
+        addEvent(jj, '동일 대상의 대기 중 스캔 잡을 새 자격증명/옵션으로 갱신했습니다.');
+        return rid;
+      }
       addEvent(jj, '동일 대상의 대기 중 스캔 잡이 있어 새 요청을 이 잡으로 병합했습니다(중복 방지).');
       return rid;
     }

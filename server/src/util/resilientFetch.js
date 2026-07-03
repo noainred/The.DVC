@@ -52,6 +52,9 @@ export async function resilientFetch(url, { timeoutMs = 20_000, retries = 2, ret
       const res = await fetch(url, { ...init, dispatcher: disp, signal: AbortSignal.timeout(timeoutMs) });
       if (RETRYABLE_STATUS.has(res.status) && attempt < retries) {
         onRetry?.({ attempt: attempt + 1, status: res.status });
+        // 재시도 전 이전 응답 본문을 취소 — undici는 미소진 본문이 연결을 붙잡아, 제한된
+        // 커넥션풀(wanAgent connections:6)이 flapping 오리진의 5xx 재시도로 고갈된다.
+        try { await res.body?.cancel?.(); } catch { /* */ }
         await sleep(retryBackoffMs * 2 ** attempt);
         continue;
       }

@@ -59,10 +59,13 @@ export function expandRange(spec) {
     const out = [];
     // /31·/32는 전체, 그 외는 네트워크/브로드캐스트 제외.
     const start = bits >= 31 ? 0 : 1;
-    const end = bits >= 31 ? size : size - 1;
+    const fullEnd = bits >= 31 ? size : size - 1;
+    // 상한을 '생성 후 slice'가 아니라 루프 종료조건으로 적용 — /8(1670만) 등은 slice 전에 이미
+    // 전체 배열(~1GB)을 할당하며 이벤트 루프를 수 초 블로킹한다. 앞 RANGE_CAP개만 만든다.
+    const end = Math.min(fullEnd, start + RANGE_CAP);
     for (let i = start; i < end; i++) out.push(numToIp((net0 + i) >>> 0));
-    if (out.length > RANGE_CAP) console.warn(`[ipscan] 대역 ${s}이(가) ${out.length}개로 ${RANGE_CAP} 상한 초과 — 앞 ${RANGE_CAP}개만 스캔합니다. /24 단위로 나눠 등록하세요.`);
-    return out.slice(0, RANGE_CAP); // 안전 상한
+    if (fullEnd - start > RANGE_CAP) console.warn(`[ipscan] 대역 ${s}이(가) ${fullEnd - start}개로 ${RANGE_CAP} 상한 초과 — 앞 ${RANGE_CAP}개만 스캔합니다. /24 단위로 나눠 등록하세요.`);
+    return out; // 이미 상한 적용됨
   }
   if (s.includes('-')) {
     const [a, bRaw] = s.split('-').map((x) => x.trim());

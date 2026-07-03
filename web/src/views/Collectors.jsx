@@ -53,7 +53,9 @@ export default function Collectors() {
     finally { setBusy(false); }
   };
 
-  if (error) return <ErrorBox message={error} />;
+  // 데이터 보유 중 일시 폴링 오류(고RTT WAN·업그레이드 직후 502)로 화면 전체를 오류로
+  // 갈아치우지 않는다 — 데이터가 없을 때만 전체 오류, 그 외엔 아래 배너로 표시(깜빡임 방지).
+  if (error && !data) return <ErrorBox message={error} />;
   if (!data) return <Loading />;
 
   const openAdd = () => { setEditing(false); setForm({ ...EMPTY }); setMsg(null); setShowToken(false); };
@@ -183,6 +185,7 @@ export default function Collectors() {
 
   return (
     <>
+      {error && <div className="card" style={{ marginBottom: 8, padding: '8px 12px', color: 'var(--red)', fontSize: 12 }}>일시적 갱신 오류: {String(error.message || error)} — 직전 데이터를 표시 중입니다.</div>}
       <div className="flex between wrap gap" style={{ marginBottom: 6 }}>
         <div className="section-title" style={{ margin: '6px 0', display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
           수집 서버 — 분산 수집 (관리자)

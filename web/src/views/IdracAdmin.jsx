@@ -131,7 +131,9 @@ export default function IdracAdmin() {
     if (val !== '__local__') setBulk((b) => (b ? { ...b, vcenterId: vcForAgent(val) } : b));
   };
 
-  if (error) return <ErrorBox message={error} />;
+  // data(/admin/idrac)는 렌더에 직접 쓰이지 않지만, 이 fetch가 마운트 시 1회 실패하면 스캔
+  // 현황 화면 전체가 영구 ErrorBox가 되던 문제 → 데이터 없을 때만 전체 오류(그 외엔 계속 표시).
+  if (error && !data) return <ErrorBox message={error} />;
   if (!data) return <Loading />;
 
   const openAdd = () => { setEditing(false); setForm({ ...EMPTY }); setMsg(null); };
@@ -428,6 +430,14 @@ export default function IdracAdmin() {
   return (
     <>
       <div className="section-title" style={{ margin: '6px 0' }}>iDRAC 서버 등록 — Dell 베어메탈/물리 서버 (관리자)</div>
+
+      {/* 스캔/삭제 등 결과 배너 — 이전에는 setImportMsg만 하고 렌더 JSX가 없어
+          "비밀번호 미설정"·"이미 스캔 중" 같은 실패가 화면에 안 나오고 무음이었다. */}
+      {importMsg && (
+        <div className="card" style={{ marginBottom: 10, padding: '9px 13px', fontSize: 13, color: importMsg.ok ? 'var(--green)' : 'var(--red)' }}>
+          {importMsg.text}
+        </div>
+      )}
 
       <IdracScanJobs data={scanJobs} vcenters={vcenters} datacenters={datacenters} busy={busy} onRefresh={loadScanJobs} onScanAll={() => srScanNow()} />
 

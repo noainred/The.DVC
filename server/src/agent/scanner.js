@@ -14,6 +14,7 @@ import { pollNow } from '../idrac/poller.js';
 
 let timer = null;
 let last = null; // { at, agent, scanned, foundCount, registered, error }
+let running = false; // 재진입 가드 — 스캔이 인터벌을 넘기면 중첩 실행돼 이중 스캔/보고, CPU 누적
 
 function headers() {
   return { 'Content-Type': 'application/json', ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
@@ -33,6 +34,8 @@ async function postResult(payload) {
 
 export async function runAgentScan() {
   if (!config.agent.centralUrl) return null;
+  if (running) return last; // 이전 주기 진행 중이면 이번 틱 건너뜀
+  running = true;
   const started = Date.now();
   try {
     const a = await pullAssignment();
@@ -64,6 +67,8 @@ export async function runAgentScan() {
     last = { at: Date.now(), agent: config.agent.name, error: err.message };
     console.warn(`[agent] 스캔 실패: ${err.message}`);
     return last;
+  } finally {
+    running = false;
   }
 }
 

@@ -77,9 +77,17 @@ centralRouter.post('/register-collector', (req, res) => {
   // URL: 엣지가 명시(urlHint)하지 않으면 요청 peer IP + 알린 포트로 유도(NAT 없는 사내망 가정).
   let url = String(b.urlHint || '').trim();
   if (!url) {
-    const port = Number(b.port) || 4000;
+    const port = Number(b.port);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      return res.status(400).json({ ok: false, reason: 'port가 올바르지 않습니다(1~65535) — urlHint로 전체 주소를 지정하세요.' });
+    }
     let ip = String(req.socket?.remoteAddress || '').replace(/^::ffff:/, '');
     if (!ip) return res.status(400).json({ ok: false, reason: '요청 IP를 확인할 수 없습니다(urlHint를 지정하세요).' });
+    // 중앙이 리버스 프록시(nginx/HAProxy) 뒤면 peer가 127.0.0.1이 되어 모든 엣지가 중앙
+    // 자신으로 등록되는 사고가 난다 → 루프백이면 거절하고 urlHint를 요구.
+    if (/^(127\.|::1$|::$)/.test(ip) || ip === 'localhost') {
+      return res.status(400).json({ ok: false, reason: '요청 IP가 루프백입니다(중앙이 프록시 뒤). 엣지에 EDGE_ADVERTISE_URL(urlHint)를 지정하세요.' });
+    }
     if (ip.includes(':')) ip = `[${ip}]`; // IPv6
     url = `http://${ip}:${port}`;
   }

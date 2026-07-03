@@ -7,6 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { bumpFleetRev } from '../insights/fleetRev.js';
 
 const FILE = path.join(config.configDir, 'collectors.json');
@@ -23,8 +24,10 @@ export function loadCollectors() {
 
 function save(list) {
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
-  fs.writeFileSync(FILE, JSON.stringify({ collectors: list }, null, 2), { mode: 0o600 });
-  try { fs.chmodSync(FILE, 0o600); } catch { /* best effort */ }
+  // 원자적 쓰기 — 크래시/정전 시 부분기록으로 collectors.json이 손상되면 loadCollectors가
+  // []를 반환하고 다음 저장이 빈 목록으로 덮어써 전 수집서버·토큰이 영구 유실된다(자기등록으로
+  // 쓰기 빈도가 늘어 노출 창이 커짐). atomicWrite(임시파일+rename)로 방지.
+  atomicWriteFileSync(FILE, JSON.stringify({ collectors: list }, null, 2), { mode: 0o600 });
   bumpFleetRev(); // 수집서버 vcenterId 매핑 변경 → fleet/finops 캐시 즉시 무효화
 }
 

@@ -27,6 +27,9 @@ export function compression() {
     res.json = (body) => {
       let str;
       try { str = JSON.stringify(body); } catch { return origJson(body); }
+      // JSON.stringify(undefined)는 예외 없이 undefined 반환 → Buffer.from(undefined)가
+      // TypeError로 500. Express 기본 res.json(undefined)은 빈 본문을 보내므로 그 동작에 위임.
+      if (str === undefined) return origJson(body);
       const buf = Buffer.from(str);
 
       // ETag/304 — GET 200 응답에만. 해시는 압축 전 본문 기준(Content-Encoding과 무관하게 동일).

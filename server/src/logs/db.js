@@ -35,6 +35,9 @@ function initSqlite() {
       );
       CREATE UNIQUE INDEX IF NOT EXISTS idx_events_uniq ON events (vcenterId, k);
       CREATE INDEX IF NOT EXISTS idx_events_ts ON events (vcenterId, ts);
+      -- prune(DELETE WHERE ts<?)·pruneOldest(ORDER BY ts)는 ts 단독 인덱스가 있어야 풀스캔/
+      -- 풀정렬을 피한다(복합 (vcenterId,ts)로는 선행열 없는 ts 조건을 못 탐 — CLAUDE.md 규칙).
+      CREATE INDEX IF NOT EXISTS idx_events_ts_only ON events (ts);
     `);
     try { fs.chmodSync(DB_PATH, 0o600); } catch { /* */ }
     const ins = db.prepare('INSERT OR IGNORE INTO events (vcenterId,k,ts,severity,type,user,entity,message) VALUES (?,?,?,?,?,?,?,?)');

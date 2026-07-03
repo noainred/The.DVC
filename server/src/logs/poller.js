@@ -15,6 +15,8 @@ const DAY = 86_400_000;
 let timer = null;
 let lastRun = null;
 let running = false;
+let tick = 0; // prune/용량점검 스로틀용(매 폴 DELETE 스캔 방지)
+const PRUNE_EVERY = 10; // N폴마다 1회만 보관기간/용량 정리
 
 const MOCK_TYPES = [
   ['UserLoginSessionEvent', 'info', (u, e) => `User ${u} logged in`],
@@ -67,22 +69,26 @@ export async function pollLogsOnce() {
         if (rows.length) { db.insertMany(rows); collected += rows.length; }
       } catch (e) { console.warn(`[vclogs] ${vc.id} 수집 실패: ${e.message}`); }
     }
-    if (s.retentionDays > 0) {
-      const removed = db.prune(Date.now() - s.retentionDays * DAY);
-      if (removed) console.log(`[vclogs] 보관기간(${s.retentionDays}일) 초과 ${removed}건 정리`);
-    }
-    // 용량 제한: DB가 maxSizeMB를 넘으면 오래된 것부터 삭제 + VACUUM.
-    if (s.maxSizeMB > 0) {
-      const limit = s.maxSizeMB * 1024 * 1024;
-      let size = db.sizeBytes(), guard = 0, dropped = 0;
-      while (size > limit && guard++ < 50) {
-        const cnt = db.meta().count;
-        if (cnt <= 0) break;
-        const n = db.pruneOldest(Math.max(500, Math.floor(cnt * 0.1)));
-        if (!n) break;
-        dropped += n; db.vacuum(); size = db.sizeBytes();
+    // prune/용량 점검은 매 폴이 아니라 N폴마다 1회(DELETE 스캔·크기 계산 비용 절감).
+    if (tick++ % PRUNE_EVERY === 0) {
+      if (s.retentionDays > 0) {
+        const removed = db.prune(Date.now() - s.retentionDays * DAY);
+        if (removed) console.log(`[vclogs] 보관기간(${s.retentionDays}일) 초과 ${removed}건 정리`);
       }
-      if (dropped) console.log(`[vclogs] 용량 제한(${s.maxSizeMB}MB) 초과 → 오래된 ${dropped}건 정리`);
+      // 용량 제한: DB가 maxSizeMB를 넘으면 오래된 것부터 삭제. VACUUM(전체 재작성, 동기)은
+      // 삭제 루프 '밖'에서 1회만 — 루프 안에서 매 회 VACUUM하면 이벤트 루프가 초~분 단위로 멈춘다.
+      if (s.maxSizeMB > 0) {
+        const limit = s.maxSizeMB * 1024 * 1024;
+        let size = db.sizeBytes(), guard = 0, dropped = 0;
+        while (size > limit && guard++ < 50) {
+          const cnt = db.meta().count;
+          if (cnt <= 0) break;
+          const n = db.pruneOldest(Math.max(500, Math.floor(cnt * 0.1)));
+          if (!n) break;
+          dropped += n; size -= n * 220; // 행당 대략치로 추정(매 회 statSync/ VACUUM 회피)
+        }
+        if (dropped) { db.vacuum(); console.log(`[vclogs] 용량 제한(${s.maxSizeMB}MB) 초과 → 오래된 ${dropped}건 정리`); }
+      }
     }
     lastRun = { at: Date.now(), collected };
     if (collected) console.log(`[vclogs] ${collected}건 장기 보관`);

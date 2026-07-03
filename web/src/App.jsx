@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react';
-import { usePolling, getToken, setToken, setUnauthorizedHandler, fetchAuthConfig, fetchMe } from './api.js';
+import { usePolling, getToken, setToken, setUnauthorizedHandler, fetchAuthConfig, fetchMe, broadcastLogout, LOGOUT_BROADCAST_KEY } from './api.js';
 import { SearchBox } from './components/ui.jsx';
 import { RemoteConsoleWindow } from './remote/RemoteConsoleWindow.jsx';
 import Login from './views/Login.jsx';
@@ -96,7 +96,7 @@ export default function App() {
     const mins = Math.max(1, Number(authCfg?.idleLogoutMin) || 30);
     const IDLE_MS = mins * 60 * 1000;
     let t;
-    const doLogout = () => { setToken(null); setLoginNotice(`${mins}분 동안 활동이 없어 자동 로그아웃되었습니다. 다시 로그인하세요.`); setUser(null); };
+    const doLogout = () => { setToken(null); broadcastLogout(); setLoginNotice(`${mins}분 동안 활동이 없어 자동 로그아웃되었습니다. 다시 로그인하세요.`); setUser(null); };
     const reset = () => { clearTimeout(t); t = setTimeout(doLogout, IDLE_MS); };
     const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'click', 'visibilitychange'];
     events.forEach((e) => window.addEventListener(e, reset, { passive: true }));
@@ -104,7 +104,17 @@ export default function App() {
     return () => { clearTimeout(t); events.forEach((e) => window.removeEventListener(e, reset)); };
   }, [user, authCfg]);
 
-  const logout = () => { setToken(null); setUser(null); };
+  const logout = () => { setToken(null); broadcastLogout(); setUser(null); };
+
+  // 크로스탭 로그아웃 — 한 탭에서 로그아웃하면 다른 탭도 즉시 세션 종료(sessionStorage 토큰
+  // 탭 포함). 이전에는 리스너가 없어 복제 탭이 무기한 인증 상태로 남았다.
+  useEffect(() => {
+    const onStorage = (e) => {
+      if (e.key === LOGOUT_BROADCAST_KEY) { setToken(null); setUser(null); }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
 
   if (user === 'loading') {
     return <div className="login-screen"><div className="loading">불러오는 중…</div></div>;

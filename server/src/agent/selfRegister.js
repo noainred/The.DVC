@@ -55,7 +55,10 @@ export function startSelfRegister() {
   const arm = (ms) => { timer = setTimeout(tick, ms); timer.unref?.(); };
   const tick = async () => {
     const r = await registerOnce().catch(() => null);
-    arm(r && r.ok ? REANNOUNCE_MS : RETRY_MS);
+    // 성공(ok) 또는 구버전/권한거부(404/403)면 긴 주기로 물러남 — 미지원 중앙에 60초마다
+    // 재시도하며 양쪽 로그를 스팸하지 않는다. 연결 실패 등 일시 오류만 60초 재시도.
+    const backoff = (r && r.ok) || (r && (r.status === 404 || r.status === 403)) ? REANNOUNCE_MS : RETRY_MS;
+    arm(backoff);
   };
   arm(3_000); // 부팅 직후 살짝 늦게(라우터/리스너 준비 후)
   console.log(`[self-register] started (central=${config.agent.centralUrl}, agent=${config.agent.name})`);
