@@ -20,6 +20,7 @@ import { expandIpList } from './iprange.js';
 import { bumpFleetRev } from '../insights/fleetRev.js';
 import { removeInventory } from './invCache.js';
 import { clearSensorSeries } from './sensorStore.js';
+import { parseCsvRows } from '../util/csv.js';
 
 // 삭제된 서버의 파생 캐시 정리 — 안 하면 인벤토리(디스크 영속)와 센서 시계열(메모리, 서버당
 // 최대 1440샘플×64센서)이 프로세스 수명 내내 남아 서버 등록/삭제 반복 시 무한 증식한다.
@@ -293,16 +294,17 @@ export function deleteServers({ all = false, vcenterId = undefined } = {}) {
 /**
  * Parse a CSV with header columns: name, host, username, password, serviceTag,
  * hostNames (hostNames may be ';'-separated). Returns an array of server objects.
+ * 비밀번호 등 값에 쉼표·따옴표·줄바꿈이 있으면 "..."로 감싸면 온전히 보존된다.
  */
 export function parseCsv(text) {
-  const lines = String(text).split(/\r?\n/).filter((l) => l.trim());
-  if (!lines.length) return [];
-  const header = lines[0].split(',').map((h) => h.trim().toLowerCase());
+  const rows = parseCsvRows(text);
+  if (!rows.length) return [];
+  const header = rows[0].map((h) => h.trim().toLowerCase());
   const out = [];
-  for (const line of lines.slice(1)) {
-    const cells = line.split(',');
+  for (const cells of rows.slice(1)) {
     const row = {};
-    header.forEach((h, i) => { row[h] = (cells[i] || '').trim(); });
+    // 비밀번호는 앞뒤 공백이 유의미할 수 있어 trim하지 않는다(다른 필드만 trim).
+    header.forEach((h, i) => { const v = cells[i] ?? ''; row[h] = h === 'password' ? v : v.trim(); });
     if (!row.name && !row.host) continue;
     out.push({
       id: row.id || row.servicetag || row.name || row.host,
