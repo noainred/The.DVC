@@ -12,6 +12,7 @@ import { scanRanges } from '../ipam/scan.js';
 
 let timer = null;
 let last = null;
+let running = false; // 재진입 가드 — 대역 스캔이 인터벌을 넘기면 중첩 실행돼 이중 스캔/보고
 
 function headers() {
   return { 'Content-Type': 'application/json', ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
@@ -19,6 +20,8 @@ function headers() {
 
 export async function runIpScanAgentOnce() {
   if (!config.agent.centralUrl) return null;
+  if (running) return last; // 이전 주기 진행 중이면 이번 틱 건너뜀
+  running = true;
   try {
     const url = `${config.agent.centralUrl}/api/central/ip-scan-assignment?agent=${encodeURIComponent(config.agent.name)}`;
     const aRes = await resilientFetch(url, { headers: headers(), timeoutMs: 20_000, retries: 2 });
@@ -34,6 +37,7 @@ export async function runIpScanAgentOnce() {
     last = { at: Date.now(), assigned: true, scanned, alive: alive.length };
     return last;
   } catch (e) { last = { at: Date.now(), error: e.message }; return last; }
+  finally { running = false; }
 }
 
 export function startIpScanAgent() {

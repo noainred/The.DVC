@@ -7,6 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { NsxClient } from './client.js';
 import { ensureNsxDial } from './proxy.js';
 import { describeError } from '../util/errors.js';
@@ -27,8 +28,9 @@ export function loadRegistry() {
 
 function saveRegistry(list) {
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
-  fs.writeFileSync(FILE, JSON.stringify({ managers: list }, null, 2), { mode: 0o600 });
-  try { fs.chmodSync(FILE, 0o600); } catch { /* best effort */ }
+  // 원자적 쓰기 — 자격증명(NSX 매니저 계정/비번) 파일이 부분기록으로 손상되면 로드가 []를
+  // 반환하고 다음 저장이 빈 목록으로 덮어써 전 매니저가 영구 유실된다.
+  atomicWriteFileSync(FILE, JSON.stringify({ managers: list }, null, 2), { mode: 0o600 });
 }
 
 export function redact(m) {

@@ -190,11 +190,22 @@ function nextPublicPort(proxyId, base) {
 
 const PROTO_PORT = { ssh: 22, rdp: 3389, nsx: 443 }; // nsx = HTTPS API(TCP 패스스루) 경유용
 
+// 대상 호스트 형식 검증 — IP/호스트명만 허용(첫 글자 영숫자/IP). 개행·공백·셸/설정
+// 메타문자를 막아 HAProxy 설정(`server target <host>:<port>`)·SSH 프로브 인젝션을 차단한다.
+// (remote.js /probe의 SAFE_HOST와 동일 규칙 — 생성 경로에도 반드시 적용.)
+const SAFE_TARGET_HOST = /^[A-Za-z0-9._:][A-Za-z0-9._:-]*$/;
+
 export function addMapping({ name, vcenterId, protocol, targetHost, targetPort, publicPort, proxyId, owner, ephemeral } = {}) {
   const c = load();
   protocol = PROTO_PORT[protocol] ? protocol : 'ssh';
   targetPort = Number(targetPort) || PROTO_PORT[protocol];
+  targetHost = String(targetHost || '').trim();
   if (!targetHost) return { ok: false, reason: '대상 호스트(IP)를 입력하세요.' };
+  if (!SAFE_TARGET_HOST.test(targetHost) || targetHost.length > 255) {
+    return { ok: false, reason: '대상 호스트 형식이 올바르지 않습니다(IP/호스트명만, 공백·특수문자 불가).' };
+  }
+  // 표시 이름은 HAProxy 설정 주석(`# <name>`)에 들어가므로 개행/제어문자를 제거(설정 구조 보호).
+  name = name != null ? String(name).replace(/[\r\n\t]/g, ' ').slice(0, 120) : name;
   const proxy = proxyId ? getProxyById(proxyId) : resolveProxy(vcenterId);
   const pid = proxy.id;
   publicPort = Number(publicPort) || nextPublicPort(pid, proxy.publicPortBase);

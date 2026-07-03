@@ -107,7 +107,8 @@ export default function Summary({ scope, onGotoTab }) {
   const { data: s, error, loading } = usePolling('/summary', params, 15_000);
   const { data: vcList } = usePolling('/vcenters', {}, 60_000); // 법인 목록(필터)
   if (loading && !s) return <Loading />;
-  if (error) return <ErrorBox message={error} />;
+  // 데이터 보유 중 일시 폴링 오류로 전체 화면을 갈아치우지 않는다(고RTT 깜빡임 방지).
+  if (error && !s) return <ErrorBox message={error} />;
   if (!s) return null;
 
   const c = s.counts, comp = s.compute, st = s.storage, al = s.allocation;
@@ -141,6 +142,7 @@ export default function Summary({ scope, onGotoTab }) {
 
   return (
     <>
+      {error && <div className="card" style={{ marginBottom: 8, padding: '8px 12px', color: 'var(--red)', fontSize: 12 }}>일시적 갱신 오류: {String(error.message || error)} — 직전 데이터를 표시 중입니다.</div>}
       <div className="flex between wrap" style={{ marginBottom: 4, alignItems: 'center' }}>
         <div className="section-title" style={{ margin: '6px 0' }}>전체 통합 합계 {corp ? `— ${corpName}` : '(모든 vCenter 자원 SUM)'}</div>
         <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }}>

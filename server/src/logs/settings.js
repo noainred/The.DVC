@@ -31,8 +31,11 @@ export function saveLogSettings(body = {}) {
   const next = {
     enabled: body.enabled != null ? !!body.enabled : cur.enabled,
     pollIntervalMin: Math.max(1, Math.min(1440, Number(body.pollIntervalMin) || cur.pollIntervalMin)),
-    retentionDays: Math.max(0, Math.min(3650, Number(body.retentionDays) ?? cur.retentionDays)),
-    maxSizeMB: Math.max(0, Math.min(1024 * 1024, Number(body.maxSizeMB) ?? cur.maxSizeMB)),
+    // Number(undefined)=NaN이고 NaN ?? x = NaN(??는 null/undefined만 잡음) → 부분 수정(예:
+    // enabled만 토글) 시 보관기간/용량이 NaN→null로 영속화돼 prune·용량제한이 조용히 영구
+    // 정지, DB 무한 증식. 유한 숫자일 때만 채택하고 아니면 기존값 유지.
+    retentionDays: Math.max(0, Math.min(3650, Number.isFinite(Number(body.retentionDays)) ? Number(body.retentionDays) : cur.retentionDays)),
+    maxSizeMB: Math.max(0, Math.min(1024 * 1024, Number.isFinite(Number(body.maxSizeMB)) ? Number(body.maxSizeMB) : cur.maxSizeMB)),
     maxPerPoll: Math.max(100, Math.min(50000, Number(body.maxPerPoll) || cur.maxPerPoll)),
     minSeverity: ['info', 'warning', 'error'].includes(body.minSeverity) ? body.minSeverity : cur.minSeverity,
     storagePath: typeof body.storagePath === 'string' ? body.storagePath.trim() : cur.storagePath,

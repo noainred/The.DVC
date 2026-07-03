@@ -27,7 +27,8 @@ export default function VCenters({ onSelectSite }) {
     setTimeout(() => el.classList.remove('flash'), 1600);
   };
   if (loading && !data) return <Loading />;
-  if (error) return <ErrorBox message={error} />;
+  // 데이터 보유 중 일시 폴링 오류로 전체 화면을 갈아치우지 않는다(고RTT 깜빡임 방지).
+  if (error && !data) return <ErrorBox message={error} />;
 
   const sites = data || [];
   const openSite = sites.find((s) => s.id === openId);
@@ -39,6 +40,7 @@ export default function VCenters({ onSelectSite }) {
 
   return (
     <>
+      {error && <div className="card" style={{ marginBottom: 8, padding: '8px 12px', color: 'var(--red)', fontSize: 12 }}>일시적 갱신 오류: {String(error.message || error)} — 직전 데이터를 표시 중입니다.</div>}
       <div className="kpis" style={{ marginBottom: 18 }}>
         <div className="card kpi"><div className="label">전체 vCenter</div><div className="value">{sites.length}</div><div className="meta">연결됨 {connected} · 불가 {sites.length - connected}</div></div>
         <div className="card kpi"><div className="label">전체 호스트</div><div className="value">{totalHosts.toLocaleString()}</div></div>

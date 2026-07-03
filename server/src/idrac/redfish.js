@@ -89,15 +89,16 @@ async function rawGet(base, pathname, username, password, timeoutMs = config.idr
 
   // 2) Digest 챌린지면 Digest
   const challenge = parseDigestChallenge(res.headers.get('www-authenticate'));
+  await drain(res); // Basic 401 본문 소진(undici 소켓 반환) — 챌린지 유무 관계없이.
   if (challenge) {
-    await drain(res);
     const r = await doFetch({ Authorization: buildDigestHeader({ username, password, method: 'GET', uri: pathname, challenge }) });
-    if (r.ok) touchAuthCache(key, { mode: 'digest', challenge });
-    return r;
+    if (r.ok) { touchAuthCache(key, { mode: 'digest', challenge }); return r; }
+    // Digest가 401이어도 여기서 반환하면 3단계(세션)에 못 감 → 3단 폴백이 사실상 2단이 된다.
+    // Digest 광고하지만 실패하는 펌웨어(SHA-256 챌린지·digest 로그인 비활성 등)를 위해 세션으로 진행.
+    await drain(r);
   }
 
-  // 3) 세션 토큰 폴백(Basic 비활성 iDRAC)
-  await drain(res);
+  // 3) 세션 토큰 폴백(Basic/Digest 비활성 iDRAC)
   try {
     const sres = await doFetch({}, 'POST', '/redfish/v1/SessionService/Sessions', JSON.stringify({ UserName: username, Password: password }));
     const token = sres.headers.get('x-auth-token');
@@ -112,8 +113,10 @@ async function rawGet(base, pathname, username, password, timeoutMs = config.idr
 
 async function get(base, pathname, username, password) {
   const res = await rawGet(base, pathname, username, password);
-  if (res.status === 401) throw new Error('iDRAC 인증 실패 (사용자/비밀번호 확인)');
-  if (!res.ok) throw new Error(`Redfish ${pathname} -> ${res.status} ${res.statusText}`);
+  // 오류 응답은 본문을 소진(cancel)한 뒤 throw — undici는 미소진 본문이 소켓을 붙잡아
+  // 다수 iDRAC 폴링/스캔에서 연결·FD 누수가 누적된다.
+  if (res.status === 401) { try { await res.body?.cancel?.(); } catch { /* */ } throw new Error('iDRAC 인증 실패 (사용자/비밀번호 확인)'); }
+  if (!res.ok) { try { await res.body?.cancel?.(); } catch { /* */ } throw new Error(`Redfish ${pathname} -> ${res.status} ${res.statusText}`); }
   return res.json();
 }
 

@@ -82,11 +82,16 @@ async function scanOneDatacenter(e, onProgress) {
   // 중앙 직접 스캔 → 발견한 iDRAC을 그 법인(DataCenter)에 등록(법인 DB).
   const r = await scanForIdracs({ ips, username: e.username, password: e.password, onProgress, shouldAbort: () => stopRequested });
   let registered = 0;
+  // replace-datacenter는 이 법인의 기존 등록을 '발견 목록'으로 통째 교체한다. 스캔이 중단
+  // (aborted)되거나 IP 상한으로 절단(truncated)돼 부분 결과면, 스캔 안 된 서버가 삭제된다
+  // (자격증명·전력 이력까지). 부분 결과일 때는 merge로 강등해 데이터 손실을 막는다.
+  const partial = r.aborted || r.truncated;
+  const effectiveMode = (e.mode === 'replace-datacenter' && !partial) ? 'replace-datacenter' : 'merge';
   if (r.found.length) {
-    const reg = registerScanned(r.found, e.username, e.password, e.mode === 'replace-datacenter' ? 'replace-datacenter' : 'merge', '', e.datacenterId);
+    const reg = registerScanned(r.found, e.username, e.password, effectiveMode, '', e.datacenterId);
     if (reg.ok) registered = (reg.added || 0) + (reg.updated || 0);
   }
-  return { datacenterId: e.datacenterId, delegated: false, scanned: r.scanned, found: r.found.length, registered, truncated: r.truncated };
+  return { datacenterId: e.datacenterId, delegated: false, scanned: r.scanned, found: r.found.length, registered, truncated: r.truncated, aborted: r.aborted, modeDowngraded: e.mode === 'replace-datacenter' && partial };
 }
 
 /**

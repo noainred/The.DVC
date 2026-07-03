@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 
 const BASE = '/api';
 const TOKEN_KEY = 'vmportal.token';
+// 크로스탭 로그아웃 브로드캐스트 키 — sessionStorage 토큰 탭은 자기 sessionStorage 변경으로는
+// 다른 탭의 storage 이벤트를 못 받으므로, localStorage에 마커를 써서 모든 탭이 수신하게 한다.
+export const LOGOUT_BROADCAST_KEY = 'vmportal.logout';
 
 // 토큰은 두 저장소를 모두 조회 — 로그인의 'KEEP SESSION' 체크 여부에 따라
 // localStorage(브라우저 재시작에도 유지) 또는 sessionStorage(탭/브라우저 종료 시 로그아웃)에 저장된다.
@@ -10,6 +13,9 @@ export const setToken = (t, { persist = true } = {}) => {
   try { localStorage.removeItem(TOKEN_KEY); sessionStorage.removeItem(TOKEN_KEY); } catch { /* */ }
   if (t) (persist ? localStorage : sessionStorage).setItem(TOKEN_KEY, t);
 };
+
+/** 다른 탭에 로그아웃을 알린다(localStorage 이벤트는 sessionStorage 토큰 탭도 수신). */
+export const broadcastLogout = () => { try { localStorage.setItem(LOGOUT_BROADCAST_KEY, String(Date.now())); } catch { /* */ } };
 
 // Invoked when the API reports the session is no longer valid (401).
 let onUnauthorized = () => {};
