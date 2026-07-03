@@ -120,6 +120,26 @@ async function get(base, pathname, username, password) {
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
 /**
+ * iDRAC이 401과 함께 돌려주는 실제 오류 메시지를 캡처한다(잘못된 자격증명 vs 계정 잠금 vs
+ * 로그인 권한 없음 구분용). Redfish 오류는 error['@Message.ExtendedInfo'][].Message에 담긴다.
+ * 진단 전용이라 실패 IP에만 1회 추가 호출(스캔 대다수인 무응답 IP는 여기 오지 않음).
+ */
+async function readIdracAuthMessage(base, pathname, username, password, timeoutMs) {
+  try {
+    const res = await fetch(`${base}${pathname}`, {
+      headers: { Authorization: basicHeader(username, password), Accept: 'application/json' },
+      signal: AbortSignal.timeout(timeoutMs), dispatcher,
+    });
+    const body = await res.json().catch(() => null);
+    const err = body?.error;
+    const info = err?.['@Message.ExtendedInfo'];
+    let msg = (Array.isArray(info) && info[0]?.Message) || err?.message || '';
+    msg = String(msg).replace(/\s+/g, ' ').trim();
+    return msg ? msg.slice(0, 160) : '';
+  } catch { return ''; }
+}
+
+/**
  * Fetch current power (Watts) and identity for one iDRAC.
  * Returns { watts, model, serviceTag, powerState, chassis }.
  * Throws on connection / auth failure.
@@ -199,10 +219,15 @@ export async function probeIdrac(host, username, password, timeoutMs = 3000) {
   try {
     const sres = await rawGet(base, '/redfish/v1/Systems', username, password, timeoutMs);
     if (sres.status === 401) {
-      // Basic·Digest·세션 토큰 모두 거부됨 → 자격증명/권한/잠금 문제로 판정(진단 힌트).
-      const wa = String(sres.headers.get('www-authenticate') || '');
-      authHint = /lock|deny|blocked/i.test(wa)
-        ? '계정 잠금/차단 가능(iDRAC 로그인 실패 임계) — iDRAC에서 잠금 해제'
+      // Basic·Digest·세션 토큰 모두 거부됨 → iDRAC이 준 실제 오류 메시지를 캡처해 원인을 구분한다
+      // (잘못된 자격증명 vs 계정 잠금 vs 로그인 권한 없음). iDRAC 메시지가 있으면 그대로 노출.
+      const idracMsg = await readIdracAuthMessage(base, '/redfish/v1/Systems', username, password, timeoutMs);
+      const lockish = /lock|attempt|exceed|잠금|blocked|denied/i.test(idracMsg);
+      const privish = /privile|permission|not allow|권한|access/i.test(idracMsg);
+      authHint = idracMsg
+        ? (lockish ? `계정 잠금 추정 — iDRAC: "${idracMsg}"`
+          : privish ? `로그인 권한 없음 추정 — iDRAC: "${idracMsg}"`
+            : `자격증명 거부 — iDRAC: "${idracMsg}"`)
         : '자격증명 거부 — Basic·Digest·세션 인증 모두 실패(사용자/비밀번호/로그인 권한/계정 잠금 확인)';
       return { ok: true, isIdrac: dell, dell, authFailed: true, authHint };
     }
