@@ -1,0 +1,1195 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Global Infra Portal — 소개 (Light)</title>
+<script src="./vendor/react.production.min.js"></script>
+<script src="./vendor/react-dom.production.min.js"></script>
+<script src="./vendor/babel.min.js"></script>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<script src="./vendor/topojson-client.min.js"></script>
+<style>
+html,body{margin:0;padding:0;background:#F2F4F7}
+*{box-sizing:border-box}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:#CBD4E0;border-radius:6px;border:2px solid #F2F4F7}
+::-webkit-scrollbar-track{background:transparent}
+select option{background:#FFFFFF;color:#1A2233}
+input::placeholder{color:#98A2B3}
+@keyframes imPulse{0%{transform:scale(.55);opacity:.95}70%{transform:scale(2.5);opacity:0}100%{transform:scale(2.5);opacity:0}}
+@keyframes imBlink{0%,100%{opacity:1}50%{opacity:.2}}
+</style>
+</helmet>
+<div style="display:flex;width:100%;height:100vh;min-height:620px;background:#F2F4F7;color:#1A2233;font-family:'Pretendard Variable',Pretendard,-apple-system,'Malgun Gothic',sans-serif;font-size:13px;overflow:hidden;-webkit-font-smoothing:antialiased">
+
+  <!-- ══ 좌측 네비게이션 레일 ══ -->
+  <div style="width:80px;flex:none;background:#FFFFFF;border-right:1px solid #E6E9EF;display:flex;flex-direction:column;align-items:center;padding:16px 0 14px;gap:4px">
+    <div style="width:42px;height:42px;border-radius:11px;background:#A50034;display:flex;align-items:center;justify-content:center;font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:16px;color:#FFFFFF;letter-spacing:-0.03em">LG</div>
+    <div style="font-size:8px;font-weight:600;color:#98A2B3;letter-spacing:0.1em;text-align:center;line-height:1.5;margin:8px 0 14px">GLOBAL<br>INFRA<br>PORTAL</div>
+    <button onClick="{{ goOverview }}" style="width:66px;padding:10px 0 8px;border-radius:10px;border:none;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:5px;font-family:inherit;font-size:10px;font-weight:600;background:{{ navDashBg }};color:{{ navDashFg }}">
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="3" width="8" height="8" rx="2"></rect><rect x="13" y="3" width="8" height="5" rx="2"></rect><rect x="13" y="10" width="8" height="11" rx="2"></rect><rect x="3" y="13" width="8" height="8" rx="2"></rect></svg>
+      <span>대시보드</span>
+    </button>
+    <button onClick="{{ goAssets }}" style="width:66px;padding:10px 0 8px;border-radius:10px;border:none;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:5px;font-family:inherit;font-size:10px;font-weight:600;background:{{ navAssetsBg }};color:{{ navAssetsFg }}">
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="4" width="18" height="7" rx="2"></rect><rect x="3" y="13" width="18" height="7" rx="2"></rect><circle cx="7" cy="7.5" r="0.8" fill="currentColor"></circle><circle cx="7" cy="16.5" r="0.8" fill="currentColor"></circle></svg>
+      <span>자산</span>
+    </button>
+    <button onClick="{{ goAlarms }}" style="position:relative;width:66px;padding:10px 0 8px;border-radius:10px;border:none;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:5px;font-family:inherit;font-size:10px;font-weight:600;background:{{ navAlarmsBg }};color:{{ navAlarmsFg }}">
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"></path><path d="M10.5 20a1.8 1.8 0 0 0 3 0"></path></svg>
+      <span>알람</span>
+      <sc-if value="{{ hasOpenAlarms }}" hint-placeholder-val="{{ false }}">
+        <span style="position:absolute;top:5px;right:9px;min-width:16px;height:16px;padding:0 4px;border-radius:9px;background:#DC2626;color:#FFFFFF;font-size:9.5px;font-weight:700;display:flex;align-items:center;justify-content:center;font-family:'IBM Plex Mono',monospace">{{ openAlarmCount }}</span>
+      </sc-if>
+    </button>
+    <div style="flex:1"></div>
+    <div style="font-size:8.5px;color:#B3BCC9;font-family:'IBM Plex Mono',monospace">v2.4.1</div>
+  </div>
+
+  <!-- ══ 메인 컬럼 ══ -->
+  <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+
+    <!-- 상단 바 -->
+    <div style="height:56px;flex:none;border-bottom:1px solid #E6E9EF;display:flex;align-items:center;gap:16px;padding:0 20px;background:#FFFFFF">
+      <div style="min-width:0;overflow:hidden">
+        <div style="font-size:14.5px;font-weight:700;letter-spacing:-0.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">통합 인프라 모니터링</div>
+        <div style="font-size:10px;color:#98A2B3;letter-spacing:0.06em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">LG ENERGY SOLUTION · GLOBAL DC OPERATIONS</div>
+      </div>
+      <div style="flex:1"></div>
+      <div style="display:flex;align-items:center;gap:8px;background:#F6F8FB;border:1px solid #DCE2EA;border-radius:9px;padding:7px 12px;flex:0 1 250px;min-width:130px">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#98A2B3" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.8-3.8"></path></svg>
+        <input onKeyDown="{{ searchKey }}" placeholder="VM · 호스트 · 장비 검색" style="flex:1;background:transparent;border:none;outline:none;color:#1A2233;font-family:inherit;font-size:12px;min-width:0">
+      </div>
+      <div style="display:flex;flex:none;background:#EEF1F5;border:1px solid #E3E7EE;border-radius:9px;padding:3px;gap:2px">
+        <button onClick="{{ setRoleOps }}" style="border:none;cursor:pointer;font-family:inherit;font-size:11px;font-weight:600;white-space:nowrap;padding:5px 11px;border-radius:7px;background:{{ roleOpsBg }};color:{{ roleOpsFg }}">운영자</button>
+        <button onClick="{{ setRoleEng }}" style="border:none;cursor:pointer;font-family:inherit;font-size:11px;font-weight:600;white-space:nowrap;padding:5px 11px;border-radius:7px;background:{{ roleEngBg }};color:{{ roleEngFg }}">엔지니어</button>
+        <button onClick="{{ setRoleExec }}" style="border:none;cursor:pointer;font-family:inherit;font-size:11px;font-weight:600;white-space:nowrap;padding:5px 11px;border-radius:7px;background:{{ roleExecBg }};color:{{ roleExecFg }}">경영진</button>
+      </div>
+      <a href="./" style="font-size:10.5px;font-weight:600;color:#667085;text-decoration:none;padding:7px 11px;border:1px solid #DCE2EA;border-radius:8px;background:#FFFFFF;white-space:nowrap" style-hover="background:#F6F8FB">다크 버전 ↗</a>
+      <div style="text-align:right;flex:none;white-space:nowrap">
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:14px;font-weight:600;letter-spacing:0.02em">{{ clockTime }}</div>
+        <div style="font-size:9.5px;color:#98A2B3">{{ clockDate }} · 갱신 {{ lastSync }}</div>
+      </div>
+      <button onClick="{{ goAlarms }}" style="position:relative;width:36px;height:36px;border-radius:9px;border:1px solid #DCE2EA;background:#FFFFFF;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#667085">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"></path><path d="M10.5 20a1.8 1.8 0 0 0 3 0"></path></svg>
+        <sc-if value="{{ hasOpenAlarms }}" hint-placeholder-val="{{ false }}">
+          <span style="position:absolute;top:-5px;right:-5px;min-width:17px;height:17px;padding:0 4px;border-radius:9px;background:#DC2626;color:#FFFFFF;font-size:9.5px;font-weight:700;display:flex;align-items:center;justify-content:center;font-family:'IBM Plex Mono',monospace;border:2px solid #FFFFFF">{{ openAlarmCount }}</span>
+        </sc-if>
+      </button>
+    </div>
+
+    <!-- 콘텐츠 -->
+    <div ref="{{ contentRef }}" style="flex:1;overflow:auto;padding:18px 20px 28px;min-width:0">
+
+      <!-- ════════ 뷰 1 · 글로벌 대시보드 ════════ -->
+      <sc-if value="{{ vOverview }}" hint-placeholder-val="{{ true }}">
+        <div data-screen-label="글로벌 대시보드">
+          <div style="display:flex;align-items:center;gap:10px;row-gap:6px;flex-wrap:wrap;margin-bottom:14px">
+            <div style="font-size:17px;font-weight:700;letter-spacing:-0.01em;white-space:nowrap">글로벌 대시보드</div>
+            <div style="font-size:11px;color:#98A2B3;white-space:nowrap">전 세계 사이트 통합 현황 · Global Overview</div>
+            <div style="flex:1"></div>
+            <div style="display:flex;flex:none;background:#EEF1F5;border:1px solid #E3E7EE;border-radius:9px;padding:3px;gap:2px">
+              <button onClick="{{ setLayA }}" style="border:none;cursor:pointer;font-family:inherit;font-size:11px;font-weight:600;white-space:nowrap;padding:5px 11px;border-radius:7px;background:{{ layABg }};color:{{ layAFg }}">지도 중심</button>
+              <button onClick="{{ setLayB }}" style="border:none;cursor:pointer;font-family:inherit;font-size:11px;font-weight:600;white-space:nowrap;padding:5px 11px;border-radius:7px;background:{{ layBBg }};color:{{ layBFg }}">카드 그리드</button>
+            </div>
+          </div>
+
+          <!-- KPI -->
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(178px,1fr));gap:10px;margin-bottom:12px">
+            <sc-for list="{{ kpis }}" as="k" hint-placeholder-count="6">
+              <div style="background:#FFFFFF;border:1px solid #E3E7EE;border-radius:12px;padding:13px 15px 12px;box-shadow:0 1px 2px rgba(16,24,40,0.04)">
+                <div style="display:flex;align-items:baseline;gap:6px;margin-bottom:8px">
+                  <span style="font-size:11.5px;font-weight:600;color:#5B6779">{{ k.ko }}</span>
+                  <span style="font-size:8.5px;font-weight:600;color:#B3BCC9;letter-spacing:0.08em">{{ k.en }}</span>
+                </div>
+                <div style="font-family:'IBM Plex Mono',monospace;font-size:23px;font-weight:600;line-height:1;letter-spacing:-0.02em;color:{{ k.vc }}">{{ k.value }}</div>
+                <div style="font-size:10.5px;color:#98A2B3;margin-top:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ k.sub }}</div>
+              </div>
+            </sc-for>
+          </div>
+
+          <!-- 지도 + 우측 레일 -->
+          <div style="display:flex;gap:12px;align-items:stretch;margin-bottom:12px">
+            <div style="flex:1;min-width:0;background:#FFFFFF;border:1px solid #E3E7EE;border-radius:12px;box-shadow:0 1px 2px rgba(16,24,40,0.04);display:flex;flex-direction:column">
+              <div style="display:flex;align-items:center;gap:10px;row-gap:4px;flex-wrap:wrap;padding:13px 16px 10px">
+                <span style="font-size:13.5px;font-weight:700;white-space:nowrap">글로벌 사이트 현황</span>
+                <span style="font-size:9px;font-weight:600;color:#B3BCC9;letter-spacing:0.08em">GLOBAL SITE STATUS</span>
+                <div style="flex:1"></div>
+                <span style="display:inline-flex;align-items:center;gap:5px;font-size:10.5px;color:#5B6779;white-space:nowrap;flex:none"><span style="width:7px;height:7px;border-radius:50%;background:#17985A"></span>정상</span>
+                <span style="display:inline-flex;align-items:center;gap:5px;font-size:10.5px;color:#5B6779;white-space:nowrap;flex:none"><span style="width:7px;height:7px;border-radius:50%;background:#D97706"></span>주의</span>
+                <span style="display:inline-flex;align-items:center;gap:5px;font-size:10.5px;color:#5B6779;white-space:nowrap;flex:none"><span style="width:7px;height:7px;border-radius:50%;background:#DC2626"></span>위험</span>
+                <span style="width:1px;height:12px;background:#E3E7EE"></span>
+                {{ liveBadge }}
+              </div>
+              <div style="position:relative;margin:2px 14px 8px">
+                <canvas ref="{{ mapRef }}" width="2400" height="894" style="width:100%;height:auto;display:block"></canvas>
+                <canvas ref="{{ flowRef }}" width="2400" height="894" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none"></canvas>
+                <sc-for list="{{ sites }}" as="s" hint-placeholder-count="0">
+                  <div style="position:absolute;left:{{ s.mx }};top:{{ s.my }};transform:translate(-50%,-50%);width:22px;height:22px">
+                    {{ s.pulse }}
+                    <button onClick="{{ s.open }}" onMouseEnter="{{ s.hoverOn }}" onMouseLeave="{{ hoverOff }}" style="position:absolute;inset:0;border-radius:50%;background:transparent;border:none;cursor:pointer;padding:0;display:flex;align-items:center;justify-content:center">
+                      <span style="width:9px;height:9px;border-radius:50%;background:{{ s.color }};box-shadow:{{ s.glow }}"></span>
+                    </button>
+                    <span style="position:absolute;font-family:'IBM Plex Mono',monospace;font-size:9.5px;font-weight:600;letter-spacing:0.02em;white-space:nowrap;pointer-events:none;display:{{ lblDisp }};color:{{ s.lblColor }};left:{{ s.lx }};top:{{ s.ly }};transform:{{ s.lt }}">{{ s.code }}</span>
+                  </div>
+                </sc-for>
+                <sc-if value="{{ hasHover }}" hint-placeholder-val="{{ false }}">
+                  <div style="position:absolute;z-index:6;pointer-events:none;left:{{ hv.mx }};top:{{ hv.my }};transform:translate(-50%,calc(-100% - 16px));background:#FFFFFF;border:1px solid #E3E7EE;border-radius:10px;padding:10px 12px;min-width:196px;box-shadow:0 12px 32px rgba(16,24,40,0.16)">
+                    <div style="display:flex;align-items:center;gap:7px;margin-bottom:7px">
+                      <span style="font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:600;color:#101828">{{ hv.code }}</span>
+                      <span style="font-size:11px;color:#667085">{{ hv.cityL }}</span>
+                      <span style="flex:1"></span>
+                      <span style="display:inline-flex;padding:2px 7px;border-radius:999px;font-size:9.5px;font-weight:700;background:{{ hv.chipBg }};color:{{ hv.chipFg }}">{{ hv.statusLabel }}</span>
+                    </div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;font-size:10.5px;color:#667085">
+                      <span>VM <span style="color:#101828;font-family:'IBM Plex Mono',monospace">{{ hv.vmsF }}</span></span>
+                      <span>Host <span style="color:#101828;font-family:'IBM Plex Mono',monospace">{{ hv.hostsT }}</span></span>
+                      <span>CPU <span style="color:#101828;font-family:'IBM Plex Mono',monospace">{{ hv.cpuT }}%</span></span>
+                      <span>전력 <span style="color:#101828;font-family:'IBM Plex Mono',monospace">{{ hv.powerF }}</span></span>
+                    </div>
+                  </div>
+                </sc-if>
+              </div>
+              <sc-if value="{{ mapFail }}" hint-placeholder-val="{{ false }}">
+                <div style="padding:0 16px 8px;font-size:10px;color:#98A2B3">지도 데이터를 불러오지 못해 격자 배경으로 표시 중입니다 (오프라인)</div>
+              </sc-if>
+              <div style="display:flex;gap:8px;padding:0 16px 13px;flex-wrap:wrap">
+                <sc-for list="{{ regions }}" as="r" hint-placeholder-count="3">
+                  <span style="display:inline-flex;align-items:center;gap:7px;padding:5px 11px;border-radius:999px;background:#F6F8FB;border:1px solid #E6E9EF;font-size:10.5px;color:#5B6779">
+                    <span style="width:6px;height:6px;border-radius:50%;background:{{ r.dot }}"></span>{{ r.name }}
+                    <span style="font-family:'IBM Plex Mono',monospace;color:#101828">{{ r.count }}</span>
+                  </span>
+                </sc-for>
+              </div>
+            </div>
+
+            <!-- 우측 레일: 운영자 -->
+            <sc-if value="{{ railOps }}" hint-placeholder-val="{{ true }}">
+              <div style="width:336px;flex:none;background:#FFFFFF;border:1px solid #E3E7EE;border-radius:12px;box-shadow:0 1px 2px rgba(16,24,40,0.04);display:flex;flex-direction:column;min-height:0">
+                <div style="display:flex;align-items:center;gap:8px;padding:13px 16px 9px">
+                  <span style="font-size:13.5px;font-weight:700">실시간 알람</span>
+                  <span style="font-size:9px;font-weight:600;color:#B3BCC9;letter-spacing:0.08em">LIVE ALARMS</span>
+                  <span style="flex:1"></span>
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#DC2626;font-weight:600">{{ openAlarmCount }}</span>
+                </div>
+                <div style="flex:1;overflow:auto;padding:0 8px">
+                  <sc-for list="{{ alarmsTop }}" as="a" hint-placeholder-count="5">
+                    <button onClick="{{ a.go }}" style="width:100%;text-align:left;display:flex;gap:10px;padding:9px 8px;border:none;background:transparent;cursor:pointer;font-family:inherit;border-radius:8px" style-hover="background:#F6F8FB">
+                      <span style="width:3px;border-radius:2px;background:{{ a.sevColor }};flex:none"></span>
+                      <span style="min-width:0;flex:1">
+                        <span style="display:block;font-size:12px;color:#344054;line-height:1.4;margin-bottom:3px">{{ a.msg }}</span>
+                        <span style="display:block;font-family:'IBM Plex Mono',monospace;font-size:9.5px;color:#98A2B3">{{ a.site }} · {{ a.src }} · {{ a.time }}</span>
+                      </span>
+                    </button>
+                  </sc-for>
+                </div>
+                <button onClick="{{ goAlarms }}" style="margin:8px 14px 13px;padding:8px;border-radius:8px;border:1px solid #DCE2EA;background:#FFFFFF;color:#5B6779;font-family:inherit;font-size:11px;font-weight:600;cursor:pointer" style-hover="background:#F6F8FB;color:#1A2233">알람 센터 전체 보기 →</button>
+              </div>
+            </sc-if>
+
+            <!-- 우측 레일: 엔지니어 -->
+            <sc-if value="{{ railEng }}" hint-placeholder-val="{{ false }}">
+              <div style="width:336px;flex:none;background:#FFFFFF;border:1px solid #E3E7EE;border-radius:12px;box-shadow:0 1px 2px rgba(16,24,40,0.04);display:flex;flex-direction:column">
+                <div style="display:flex;align-items:center;gap:8px;padding:13px 16px 6px">
+                  <span style="font-size:13.5px;font-weight:700">용량 추이</span>
+                  <span style="font-size:9px;font-weight:600;color:#B3BCC9;letter-spacing:0.08em">CAPACITY · 30D</span>
+                </div>
+                <div style="padding:4px 16px 6px;display:flex;flex-direction:column;gap:12px">
+                  <sc-for list="{{ trends }}" as="t" hint-placeholder-count="3">
+                    <div>
+                      <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:4px">
+                        <span style="font-size:11.5px;font-weight:600;color:#5B6779">{{ t.label }}</span>
+                        <span style="flex:1"></span>
+                        <span style="font-family:'IBM Plex Mono',monospace;font-size:15px;font-weight:600;color:#101828">{{ t.now }}</span>
+                        <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:{{ t.color }}">{{ t.delta }}</span>
+                      </div>
+                      <svg viewBox="0 0 260 44" preserveAspectRatio="none" style="width:100%;height:44px;display:block">
+                        <path d="{{ t.area }}" fill="{{ t.fill }}" stroke="none"></path>
+                        <polyline points="{{ t.pts }}" fill="none" stroke="{{ t.color }}" stroke-width="1.6" vector-effect="non-scaling-stroke"></polyline>
+                      </svg>
+                    </div>
+                  </sc-for>
+                </div>
+                <div style="height:1px;background:#EEF1F5;margin:2px 16px 10px"></div>
+                <div style="padding:0 16px 6px;font-size:11px;font-weight:600;color:#5B6779">리소스 상위 사이트 <span style="font-size:8.5px;color:#B3BCC9;letter-spacing:0.08em">TOP CPU</span></div>
+                <div style="padding:0 16px 14px;display:flex;flex-direction:column;gap:8px">
+                  <sc-for list="{{ topConsumers }}" as="c" hint-placeholder-count="4">
+                    <div style="display:flex;align-items:center;gap:10px">
+                      <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;width:34px">{{ c.code }}</span>
+                      <span style="font-size:10.5px;color:#98A2B3;width:64px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ c.cityKo }}</span>
+                      <span style="flex:1;height:5px;border-radius:3px;background:#EEF1F5;overflow:hidden;display:block"><span style="display:block;height:100%;border-radius:3px;width:{{ c.cpuP }};background:{{ c.barC }}"></span></span>
+                      <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#101828;width:34px;text-align:right">{{ c.cpuT }}%</span>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+            </sc-if>
+
+            <!-- 우측 레일: 경영진 -->
+            <sc-if value="{{ railExec }}" hint-placeholder-val="{{ false }}">
+              <div style="width:336px;flex:none;background:#FFFFFF;border:1px solid #E3E7EE;border-radius:12px;box-shadow:0 1px 2px rgba(16,24,40,0.04);display:flex;flex-direction:column">
+                <div style="display:flex;align-items:center;gap:8px;padding:13px 16px 8px">
+                  <span style="font-size:13.5px;font-weight:700">서비스 요약</span>
+                  <span style="font-size:9px;font-weight:600;color:#B3BCC9;letter-spacing:0.08em">EXECUTIVE SUMMARY</span>
+                </div>
+                <div style="margin:2px 16px 12px;padding:14px 16px;border-radius:10px;background:rgba(23,152,90,0.07);border:1px solid rgba(23,152,90,0.22)">
+                  <div style="font-size:10.5px;color:#5B6779;margin-bottom:5px">전체 서비스 가용성 <span style="font-size:8.5px;color:#98A2B3;letter-spacing:0.06em">MTD</span></div>
+                  <div style="font-family:'IBM Plex Mono',monospace;font-size:28px;font-weight:600;color:#17985A;line-height:1">{{ availMtd }}</div>
+                </div>
+                <div style="padding:0 16px;display:flex;flex-direction:column">
+                  <sc-for list="{{ execRows }}" as="e" hint-placeholder-count="5">
+                    <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #EEF1F5">
+                      <span style="font-size:11.5px;color:#5B6779">{{ e.k }}</span>
+                      <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:600;color:#101828">{{ e.v }}</span>
+                    </div>
+                  </sc-for>
+                </div>
+                <div style="padding:12px 16px 6px;font-size:11px;font-weight:600;color:#5B6779">권역별 사이트 상태</div>
+                <div style="padding:0 16px 16px;display:flex;flex-direction:column;gap:9px">
+                  <sc-for list="{{ regionBars }}" as="rb" hint-placeholder-count="3">
+                    <div>
+                      <div style="display:flex;justify-content:space-between;font-size:10.5px;color:#98A2B3;margin-bottom:4px"><span>{{ rb.name }}</span><span style="font-family:'IBM Plex Mono',monospace">{{ rb.count }}</span></div>
+                      <div style="display:flex;height:6px;border-radius:3px;overflow:hidden;gap:2px">
+                        <sc-for list="{{ rb.segs }}" as="g" hint-placeholder-count="2">
+                          <span style="display:block;height:100%;width:{{ g.w }};background:{{ g.c }}"></span>
+                        </sc-for>
+                      </div>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+            </sc-if>
+          </div>
+
+          <!-- 레이아웃 A · 사이트 테이블 -->
+          <sc-if value="{{ isLayA }}" hint-placeholder-val="{{ true }}">
+            <div style="background:#FFFFFF;border:1px solid #E3E7EE;border-radius:12px;box-shadow:0 1px 2px rgba(16,24,40,0.04);overflow:hidden">
+              <div style="display:flex;align-items:center;gap:8px;padding:13px 16px 10px">
+                <span style="font-size:13.5px;font-weight:700">사이트 상세</span>
+                <span style="font-size:9px;font-weight:600;color:#B3BCC9;letter-spacing:0.08em">SITE OVERVIEW</span>
+                <span style="flex:1"></span>
+                <span style="font-size:10.5px;color:#98A2B3">행 클릭 시 상세 화면으로 이동</span>
+              </div>
+              <div style="overflow-x:auto">
+                <div style="min-width:1080px">
+                  <div style="display:grid;grid-template-columns:150px 90px 84px 92px 76px minmax(110px,1fr) minmax(110px,1fr) minmax(110px,1fr) 96px 72px 64px;gap:0 12px;padding:7px 16px;border-top:1px solid #EEF1F5;border-bottom:1px solid #EEF1F5;background:#F9FAFC;font-size:9.5px;font-weight:700;color:#667085;letter-spacing:0.05em">
+                    <span>사이트</span><span>권역</span><span>상태</span><span style="text-align:right">VMs</span><span style="text-align:right">HOSTS</span><span>CPU</span><span>MEM</span><span>STORAGE</span><span style="text-align:right">전력</span><span style="text-align:right">온도</span><span style="text-align:right">알람</span>
+                  </div>
+                  <sc-for list="{{ sites }}" as="s" hint-placeholder-count="6">
+                    <div onClick="{{ s.open }}" style="display:grid;grid-template-columns:150px 90px 84px 92px 76px minmax(110px,1fr) minmax(110px,1fr) minmax(110px,1fr) 96px 72px 64px;gap:0 12px;padding:9px 16px;border-bottom:1px solid #F2F4F7;cursor:pointer;align-items:center" style-hover="background:#F6F8FB">
+                      <span style="display:flex;align-items:baseline;gap:8px;min-width:0"><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:600;color:#101828">{{ s.code }}</span><span style="font-size:10.5px;color:#98A2B3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ s.ko }}</span></span>
+                      <span style="font-size:11px;color:#5B6779">{{ s.regionKo }}</span>
+                      <span><span style="display:inline-flex;padding:2px 8px;border-radius:999px;font-size:9.5px;font-weight:700;background:{{ s.chipBg }};color:{{ s.chipFg }}">{{ s.statusLabel }}</span></span>
+                      <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;text-align:right;color:#101828">{{ s.vmsF }}</span>
+                      <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;text-align:right;color:#101828">{{ s.hostsT }}</span>
+                      <span style="display:flex;align-items:center;gap:7px"><span style="flex:1;height:4px;border-radius:2px;background:#EEF1F5;overflow:hidden"><span style="display:block;height:100%;width:{{ s.cpuP }};background:#2563EB;border-radius:2px"></span></span><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#5B6779;width:30px;text-align:right">{{ s.cpuT }}%</span></span>
+                      <span style="display:flex;align-items:center;gap:7px"><span style="flex:1;height:4px;border-radius:2px;background:#EEF1F5;overflow:hidden"><span style="display:block;height:100%;width:{{ s.memP }};background:#7C3AED;border-radius:2px"></span></span><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#5B6779;width:30px;text-align:right">{{ s.memT }}%</span></span>
+                      <span style="display:flex;align-items:center;gap:7px"><span style="flex:1;height:4px;border-radius:2px;background:#EEF1F5;overflow:hidden"><span style="display:block;height:100%;width:{{ s.stoP }};background:{{ s.stoC }};border-radius:2px"></span></span><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#5B6779;width:30px;text-align:right">{{ s.stoT }}%</span></span>
+                      <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;text-align:right;color:#5B6779">{{ s.powerF }}</span>
+                      <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;text-align:right;color:{{ s.tempC }}">{{ s.tempF }}</span>
+                      <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;text-align:right;color:{{ s.alC }}">{{ s.alarmDisp }}</span>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+            </div>
+          </sc-if>
+
+          <!-- 레이아웃 B · 사이트 카드 그리드 -->
+          <sc-if value="{{ isLayB }}" hint-placeholder-val="{{ false }}">
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(216px,1fr));gap:10px">
+              <sc-for list="{{ sites }}" as="s" hint-placeholder-count="6">
+                <div onClick="{{ s.open }}" style="background:#FFFFFF;border:1px solid #E3E7EE;border-radius:12px;padding:13px 14px 12px;cursor:pointer;box-shadow:0 1px 2px rgba(16,24,40,0.04)" style-hover="border-color:#C9D2DE;box-shadow:0 3px 10px rgba(16,24,40,0.08)">
+                  <div style="display:flex;align-items:center;gap:8px;margin-bottom:2px">
+                    <span style="font-family:'IBM Plex Mono',monospace;font-size:14.5px;font-weight:600;color:#101828">{{ s.code }}</span>
+                    <span style="flex:1"></span>
+                    <span style="display:inline-flex;padding:2px 8px;border-radius:999px;font-size:9.5px;font-weight:700;background:{{ s.chipBg }};color:{{ s.chipFg }}">{{ s.statusLabel }}</span>
+                  </div>
+                  <div style="font-size:10.5px;color:#98A2B3;margin-bottom:11px">{{ s.ko }} · {{ s.cc }}</div>
+                  <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:11px">
+                    <div style="display:flex;align-items:center;gap:8px"><span style="font-size:9px;font-weight:600;color:#98A2B3;width:26px;letter-spacing:0.04em">CPU</span><span style="flex:1;height:4px;border-radius:2px;background:#EEF1F5;overflow:hidden"><span style="display:block;height:100%;width:{{ s.cpuP }};background:#2563EB;border-radius:2px"></span></span><span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#5B6779;width:28px;text-align:right">{{ s.cpuT }}%</span></div>
+                    <div style="display:flex;align-items:center;gap:8px"><span style="font-size:9px;font-weight:600;color:#98A2B3;width:26px;letter-spacing:0.04em">MEM</span><span style="flex:1;height:4px;border-radius:2px;background:#EEF1F5;overflow:hidden"><span style="display:block;height:100%;width:{{ s.memP }};background:#7C3AED;border-radius:2px"></span></span><span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#5B6779;width:28px;text-align:right">{{ s.memT }}%</span></div>
+                    <div style="display:flex;align-items:center;gap:8px"><span style="font-size:9px;font-weight:600;color:#98A2B3;width:26px;letter-spacing:0.04em">STO</span><span style="flex:1;height:4px;border-radius:2px;background:#EEF1F5;overflow:hidden"><span style="display:block;height:100%;width:{{ s.stoP }};background:{{ s.stoC }};border-radius:2px"></span></span><span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#5B6779;width:28px;text-align:right">{{ s.stoT }}%</span></div>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:6px;font-size:10px;color:#98A2B3">
+                    <span>VM <span style="font-family:'IBM Plex Mono',monospace;color:#5B6779">{{ s.vmsF }}</span></span>
+                    <span>·</span>
+                    <span style="font-family:'IBM Plex Mono',monospace;color:#5B6779">{{ s.powerF }}</span>
+                    <span style="flex:1"></span>
+                    <span style="font-family:'IBM Plex Mono',monospace;color:{{ s.alC }}">알람 {{ s.alarmDisp }}</span>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </sc-if>
+        </div>
+      </sc-if>
+
+      <!-- ════════ 뷰 2 · 데이터센터 상세 ════════ -->
+      <sc-if value="{{ vDc }}" hint-placeholder-val="{{ false }}">
+        <div data-screen-label="데이터센터 상세">
+          <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px;flex-wrap:wrap">
+            <button onClick="{{ goOverview }}" style="width:32px;height:32px;border-radius:9px;border:1px solid #DCE2EA;background:#FFFFFF;cursor:pointer;color:#667085;display:flex;align-items:center;justify-content:center" style-hover="color:#1A2233;background:#F6F8FB">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"></path></svg>
+            </button>
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:23px;font-weight:600;letter-spacing:-0.01em;color:#101828">{{ d.code }}</span>
+            <span>
+              <span style="display:block;font-size:13.5px;font-weight:600">{{ d.ko }} <span style="color:#98A2B3;font-weight:400">{{ d.cityEn }}</span></span>
+              <span style="display:block;font-size:10.5px;color:#98A2B3;margin-top:1px">{{ d.regionKo }} · {{ d.cc }} · {{ d.tier }} · 현지 시각 {{ d.localTime }}</span>
+            </span>
+            <span style="display:inline-flex;padding:4px 11px;border-radius:999px;font-size:10.5px;font-weight:700;background:{{ d.chipBg }};color:{{ d.chipFg }}">{{ d.statusLabel }}</span>
+            <span style="flex:1"></span>
+            <button onClick="{{ d.goAssets }}" style="padding:8px 13px;border-radius:9px;border:1px solid #DCE2EA;background:#FFFFFF;color:#344054;font-family:inherit;font-size:11.5px;font-weight:600;cursor:pointer" style-hover="background:#F6F8FB">자산 목록</button>
+            <button onClick="{{ d.goAlarms }}" style="padding:8px 13px;border-radius:9px;border:1px solid #DCE2EA;background:#FFFFFF;color:#344054;font-family:inherit;font-size:11.5px;font-weight:600;cursor:pointer" style-hover="background:#F6F8FB">알람 보기</button>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:12px">
+            <sc-for list="{{ d.stats }}" as="st" hint-placeholder-count="7">
+              <div style="background:#FFFFFF;border:1px solid #E3E7EE;border-radius:12px;padding:11px 14px;box-shadow:0 1px 2px rgba(16,24,40,0.04)">
+                <div style="font-size:10px;color:#98A2B3;margin-bottom:6px;white-space:nowrap">{{ st.k }}</div>
+                <div style="font-family:'IBM Plex Mono',monospace;font-size:18px;font-weight:600;line-height:1;color:#101828">{{ st.v }}</div>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(12,1fr);gap:12px">
+            <div style="grid-column:span 5;background:#FFFFFF;border:1px solid #E3E7EE;border-radius:12px;padding:14px 16px;box-shadow:0 1px 2px rgba(16,24,40,0.04)">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+                <span style="font-size:13px;font-weight:700">가상화</span>
+                <span style="font-size:9px;font-weight:600;color:#B3BCC9;letter-spacing:0.08em">VMWARE VSPHERE</span>
+                <span style="flex:1"></span>
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#98A2B3">{{ d.vcName }}</span>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:13px">
+                <sc-for list="{{ d.usage }}" as="u" hint-placeholder-count="3">
+                  <div>
+                    <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:5px">
+                      <span style="font-size:11.5px;font-weight:600;color:#5B6779">{{ u.label }}</span>
+                      <span style="flex:1"></span>
+                      <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#98A2B3">{{ u.txt }}</span>
+                      <span style="font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:600;color:#101828;width:38px;text-align:right">{{ u.pctT }}%</span>
+                    </div>
+                    <div style="height:6px;border-radius:3px;background:#EEF1F5;overflow:hidden"><span style="display:block;height:100%;width:{{ u.pct }};background:{{ u.color }};border-radius:3px"></span></div>
+                  </div>
+                </sc-for>
+              </div>
+              <div style="margin-top:14px;padding-top:12px;border-top:1px solid #EEF1F5;display:flex;gap:14px;font-size:10.5px;color:#98A2B3;flex-wrap:wrap">
+                <span>클러스터 <span style="font-family:'IBM Plex Mono',monospace;color:#5B6779">{{ d.clusters }}</span></span>
+                <span>DRS <span style="color:#17985A">활성</span></span>
+                <span>HA <span style="color:#17985A">활성</span></span>
+                <span>vSAN <span style="color:#17985A">정상</span></span>
+              </div>
+            </div>
+
+            <div style="grid-column:span 7;background:#FFFFFF;border:1px solid #E3E7EE;border-radius:12px;padding:14px 16px;box-shadow:0 1px 2px rgba(16,24,40,0.04)">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+                <span style="font-size:13px;font-weight:700">전력 · 환경</span>
+                <span style="font-size:9px;font-weight:600;color:#B3BCC9;letter-spacing:0.08em">POWER &amp; ENVIRONMENT</span>
+                <span style="flex:1"></span>
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#D97706;font-weight:600">{{ d.powerNow }}</span>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr 88px 88px;gap:10px;margin-bottom:12px">
+                <div style="background:#F8FAFC;border:1px solid #EEF1F5;border-radius:9px;padding:9px 11px">
+                  <div style="display:flex;justify-content:space-between;font-size:10px;color:#98A2B3;margin-bottom:6px"><span>PDU Feed A</span><span style="font-family:'IBM Plex Mono',monospace;color:{{ d.feedA.color }}">{{ d.feedA.pctT }}%</span></div>
+                  <div style="height:5px;border-radius:3px;background:#EEF1F5;overflow:hidden"><span style="display:block;height:100%;width:{{ d.feedA.pct }};background:{{ d.feedA.color }};border-radius:3px"></span></div>
+                </div>
+                <div style="background:#F8FAFC;border:1px solid #EEF1F5;border-radius:9px;padding:9px 11px">
+                  <div style="display:flex;justify-content:space-between;font-size:10px;color:#98A2B3;margin-bottom:6px"><span>PDU Feed B</span><span style="font-family:'IBM Plex Mono',monospace;color:{{ d.feedB.color }}">{{ d.feedB.pctT }}%</span></div>
+                  <div style="height:5px;border-radius:3px;background:#EEF1F5;overflow:hidden"><span style="display:block;height:100%;width:{{ d.feedB.pct }};background:{{ d.feedB.color }};border-radius:3px"></span></div>
+                </div>
+                <div style="background:#F8FAFC;border:1px solid #EEF1F5;border-radius:9px;padding:9px 11px">
+                  <div style="font-size:10px;color:#98A2B3;margin-bottom:4px">온도</div>
+                  <div style="font-family:'IBM Plex Mono',monospace;font-size:15px;font-weight:600;color:{{ d.tempC }}">{{ d.tempF }}</div>
+                </div>
+                <div style="background:#F8FAFC;border:1px solid #EEF1F5;border-radius:9px;padding:9px 11px">
+                  <div style="font-size:10px;color:#98A2B3;margin-bottom:4px">습도</div>
+                  <div style="font-family:'IBM Plex Mono',monospace;font-size:15px;font-weight:600;color:#101828">{{ d.humF }}</div>
+                </div>
+              </div>
+              <div style="font-size:10px;color:#98A2B3;margin-bottom:4px">전력 사용량 · 최근 24시간 <span style="float:right;font-family:'IBM Plex Mono',monospace">피크 {{ d.powerPeak }}</span></div>
+              <svg viewBox="0 0 560 110" preserveAspectRatio="none" style="width:100%;height:96px;display:block">
+                <line x1="0" y1="28" x2="560" y2="28" stroke="rgba(16,24,40,0.06)" stroke-width="1"></line>
+                <line x1="0" y1="55" x2="560" y2="55" stroke="rgba(16,24,40,0.06)" stroke-width="1"></line>
+                <line x1="0" y1="82" x2="560" y2="82" stroke="rgba(16,24,40,0.06)" stroke-width="1"></line>
+                <path d="{{ d.powerArea }}" fill="rgba(217,119,6,0.10)" stroke="none"></path>
+                <polyline points="{{ d.powerLine }}" fill="none" stroke="#D97706" stroke-width="1.6" vector-effect="non-scaling-stroke"></polyline>
+              </svg>
+            </div>
+
+            <div style="grid-column:span 7;background:#FFFFFF;border:1px solid #E3E7EE;border-radius:12px;padding:14px 16px;box-shadow:0 1px 2px rgba(16,24,40,0.04)">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+                <span style="font-size:13px;font-weight:700">네트워크</span>
+                <span style="font-size:9px;font-weight:600;color:#B3BCC9;letter-spacing:0.08em">NETWORK &amp; UPLINKS</span>
+                <span style="flex:1"></span>
+                <span style="display:inline-flex;align-items:center;gap:5px;font-size:10px;color:#98A2B3"><span style="width:8px;height:2px;background:#2563EB"></span>In</span>
+                <span style="display:inline-flex;align-items:center;gap:5px;font-size:10px;color:#98A2B3"><span style="width:8px;height:2px;background:#17985A"></span>Out</span>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:7px;margin-bottom:12px">
+                <sc-for list="{{ d.uplinks }}" as="u" hint-placeholder-count="3">
+                  <div style="display:flex;align-items:center;gap:10px;background:#F8FAFC;border:1px solid #EEF1F5;border-radius:9px;padding:8px 11px">
+                    <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;width:78px;color:#101828">{{ u.name }}</span>
+                    <span style="display:inline-flex;padding:2px 8px;border-radius:999px;font-size:9px;font-weight:700;background:{{ u.chipBg }};color:{{ u.chipFg }}">{{ u.stateL }}</span>
+                    <span style="flex:1"></span>
+                    <span style="font-size:10px;color:#98A2B3">지연 <span style="font-family:'IBM Plex Mono',monospace;color:#5B6779">{{ u.lat }}</span></span>
+                    <span style="font-size:10px;color:#98A2B3">사용률 <span style="font-family:'IBM Plex Mono',monospace;color:#5B6779">{{ u.util }}</span></span>
+                  </div>
+                </sc-for>
+              </div>
+              <div style="font-size:10px;color:#98A2B3;margin-bottom:4px">트래픽 · 최근 24시간 <span style="float:right;font-family:'IBM Plex Mono',monospace">피크 In {{ d.trafPeak }}</span></div>
+              <svg viewBox="0 0 560 100" preserveAspectRatio="none" style="width:100%;height:86px;display:block">
+                <line x1="0" y1="25" x2="560" y2="25" stroke="rgba(16,24,40,0.06)" stroke-width="1"></line>
+                <line x1="0" y1="50" x2="560" y2="50" stroke="rgba(16,24,40,0.06)" stroke-width="1"></line>
+                <line x1="0" y1="75" x2="560" y2="75" stroke="rgba(16,24,40,0.06)" stroke-width="1"></line>
+                <polyline points="{{ d.trafIn }}" fill="none" stroke="#2563EB" stroke-width="1.6" vector-effect="non-scaling-stroke"></polyline>
+                <polyline points="{{ d.trafOut }}" fill="none" stroke="#17985A" stroke-width="1.5" vector-effect="non-scaling-stroke"></polyline>
+              </svg>
+            </div>
+
+            <div style="grid-column:span 5;background:#FFFFFF;border:1px solid #E3E7EE;border-radius:12px;padding:14px 16px;box-shadow:0 1px 2px rgba(16,24,40,0.04)">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+                <span style="font-size:13px;font-weight:700">물리 자산</span>
+                <span style="font-size:9px;font-weight:600;color:#B3BCC9;letter-spacing:0.08em">PHYSICAL ASSETS</span>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:11px">
+                <sc-for list="{{ d.phys }}" as="p" hint-placeholder-count="4">
+                  <div>
+                    <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:5px">
+                      <span style="font-size:11.5px;font-weight:600;color:#5B6779">{{ p.label }}</span>
+                      <span style="font-size:9.5px;color:#B3BCC9">{{ p.names }}</span>
+                      <span style="flex:1"></span>
+                      <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:600;color:#101828">{{ p.count }}</span>
+                    </div>
+                    <div style="display:flex;height:5px;border-radius:3px;overflow:hidden;gap:2px">
+                      <sc-for list="{{ p.segs }}" as="g" hint-placeholder-count="2">
+                        <span style="display:block;height:100%;width:{{ g.w }};background:{{ g.c }}"></span>
+                      </sc-for>
+                    </div>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+
+            <div style="grid-column:span 12;background:#FFFFFF;border:1px solid #E3E7EE;border-radius:12px;padding:14px 16px;box-shadow:0 1px 2px rgba(16,24,40,0.04)">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+                <span style="font-size:13px;font-weight:700">사이트 알람</span>
+                <span style="font-size:9px;font-weight:600;color:#B3BCC9;letter-spacing:0.08em">SITE EVENTS</span>
+              </div>
+              <sc-if value="{{ d.hasAlarms }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex;flex-direction:column">
+                  <sc-for list="{{ d.alarms }}" as="a" hint-placeholder-count="2">
+                    <div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid #F2F4F7">
+                      <span style="display:inline-flex;padding:2px 8px;border-radius:999px;font-size:9px;font-weight:700;background:{{ a.sevBg }};color:{{ a.sevColor }};width:56px;justify-content:center">{{ a.sevLabel }}</span>
+                      <span style="font-size:12px;flex:1;min-width:0;color:#344054">{{ a.msg }}</span>
+                      <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#98A2B3;white-space:nowrap">{{ a.src }} · {{ a.time }}</span>
+                    </div>
+                  </sc-for>
+                </div>
+              </sc-if>
+              <sc-if value="{{ d.noAlarms }}" hint-placeholder-val="{{ false }}">
+                <div style="padding:10px 0;font-size:12px;color:#17985A">활성 알람 없음 — 모든 시스템 정상 동작 중</div>
+              </sc-if>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ════════ 뷰 3 · 자산 ════════ -->
+      <sc-if value="{{ vAssets }}" hint-placeholder-val="{{ false }}">
+        <div data-screen-label="자산 목록">
+          <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px">
+            <button onClick="{{ goOverview }}" style="width:32px;height:32px;border-radius:9px;border:1px solid #DCE2EA;background:#FFFFFF;cursor:pointer;color:#667085;display:flex;align-items:center;justify-content:center" style-hover="color:#1A2233;background:#F6F8FB">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"></path></svg>
+            </button>
+            <div>
+              <div style="font-size:17px;font-weight:700;letter-spacing:-0.01em">자산 인벤토리</div>
+              <div style="font-size:10.5px;color:#98A2B3;margin-top:1px">Assets · 필터 결과 <span style="font-family:'IBM Plex Mono',monospace;color:#5B6779">{{ assetCountF }}</span>건 (프로토타입 샘플 데이터)</div>
+            </div>
+          </div>
+
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+            <sc-for list="{{ assetTypes }}" as="t" hint-placeholder-count="7">
+              <button onClick="{{ t.set }}" style="border:1px solid {{ t.bd }};cursor:pointer;font-family:inherit;font-size:11px;font-weight:600;padding:6px 12px;border-radius:999px;background:{{ t.bg }};color:{{ t.fg }};display:inline-flex;align-items:center;gap:6px">{{ t.label }}<span style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;opacity:0.7">{{ t.count }}</span></button>
+            </sc-for>
+            <span style="flex:1"></span>
+            <select onChange="{{ setASite }}" value="{{ aSiteVal }}" style="background:#FFFFFF;border:1px solid #DCE2EA;border-radius:9px;color:#1A2233;font-family:inherit;font-size:11.5px;padding:7px 10px;outline:none;cursor:pointer">
+              <option value="all">전체 사이트</option>
+              <sc-for list="{{ siteOpts }}" as="o" hint-placeholder-count="0"><option value="{{ o.code }}">{{ o.label }}</option></sc-for>
+            </select>
+            <select onChange="{{ setAStatus }}" value="{{ aStatusVal }}" style="background:#FFFFFF;border:1px solid #DCE2EA;border-radius:9px;color:#1A2233;font-family:inherit;font-size:11.5px;padding:7px 10px;outline:none;cursor:pointer">
+              <option value="all">전체 상태</option>
+              <option value="ok">정상</option>
+              <option value="warn">주의</option>
+              <option value="crit">위험</option>
+            </select>
+            <div style="display:flex;align-items:center;gap:7px;background:#FFFFFF;border:1px solid #DCE2EA;border-radius:9px;padding:7px 11px;width:210px">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#98A2B3" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.8-3.8"></path></svg>
+              <input value="{{ aQueryVal }}" onChange="{{ setAQuery }}" placeholder="이름 검색" style="flex:1;background:transparent;border:none;outline:none;color:#1A2233;font-family:inherit;font-size:11.5px;min-width:0">
+            </div>
+          </div>
+
+          <div style="background:#FFFFFF;border:1px solid #E3E7EE;border-radius:12px;box-shadow:0 1px 2px rgba(16,24,40,0.04);overflow:hidden">
+            <div style="overflow-x:auto">
+              <div style="min-width:1040px">
+                <div style="display:grid;grid-template-columns:210px 92px 64px 140px 76px 70px 70px 130px minmax(70px,1fr);gap:0 12px;padding:9px 16px;border-bottom:1px solid #EEF1F5;background:#F9FAFC;font-size:9.5px;font-weight:700;color:#667085;letter-spacing:0.05em">
+                  <span>이름</span><span>유형</span><span>사이트</span><span>위치</span><span>상태</span><span style="text-align:right">CPU</span><span style="text-align:right">MEM</span><span>IP</span><span style="text-align:right">UPTIME</span>
+                </div>
+                <sc-for list="{{ assetRows }}" as="r" hint-placeholder-count="8">
+                  <div onClick="{{ r.open }}" style="display:grid;grid-template-columns:210px 92px 64px 140px 76px 70px 70px 130px minmax(70px,1fr);gap:0 12px;padding:8px 16px;border-bottom:1px solid #F2F4F7;cursor:pointer;align-items:center" style-hover="background:#F6F8FB">
+                    <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#101828">{{ r.name }}</span>
+                    <span style="font-size:11px;color:#5B6779">{{ r.typeL }}</span>
+                    <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#5B6779">{{ r.siteCode }}</span>
+                    <span style="font-size:11px;color:#98A2B3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.loc }}</span>
+                    <span><span style="display:inline-flex;padding:2px 8px;border-radius:999px;font-size:9px;font-weight:700;background:{{ r.chipBg }};color:{{ r.chipFg }}">{{ r.statusL }}</span></span>
+                    <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;text-align:right;color:#5B6779">{{ r.cpuF }}</span>
+                    <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;text-align:right;color:#5B6779">{{ r.memF }}</span>
+                    <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#98A2B3">{{ r.ip }}</span>
+                    <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;text-align:right;color:#98A2B3">{{ r.up }}</span>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+            <sc-if value="{{ hasMoreAssets }}" hint-placeholder-val="{{ false }}">
+              <div style="padding:10px 16px;font-size:10.5px;color:#98A2B3">상위 30건 표시 중 — 필터로 범위를 좁혀 주세요</div>
+            </sc-if>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ════════ 뷰 4 · 알람 센터 ════════ -->
+      <sc-if value="{{ vAlarms }}" hint-placeholder-val="{{ false }}">
+        <div data-screen-label="알람 센터">
+          <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px">
+            <button onClick="{{ goOverview }}" style="width:32px;height:32px;border-radius:9px;border:1px solid #DCE2EA;background:#FFFFFF;cursor:pointer;color:#667085;display:flex;align-items:center;justify-content:center" style-hover="color:#1A2233;background:#F6F8FB">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"></path></svg>
+            </button>
+            <div>
+              <div style="font-size:17px;font-weight:700;letter-spacing:-0.01em">알람 센터</div>
+              <div style="font-size:10.5px;color:#98A2B3;margin-top:1px">Alarm Center · 미확인 <span style="font-family:'IBM Plex Mono',monospace;color:#DC2626">{{ openAlarmCount }}</span>건</div>
+            </div>
+            <span style="flex:1"></span>
+            <select onChange="{{ setAlSite }}" value="{{ alSiteVal }}" style="background:#FFFFFF;border:1px solid #DCE2EA;border-radius:9px;color:#1A2233;font-family:inherit;font-size:11.5px;padding:7px 10px;outline:none;cursor:pointer">
+              <option value="all">전체 사이트</option>
+              <sc-for list="{{ siteOpts }}" as="o" hint-placeholder-count="0"><option value="{{ o.code }}">{{ o.label }}</option></sc-for>
+            </select>
+            <button onClick="{{ ackAll }}" style="padding:8px 13px;border-radius:9px;border:1px solid #DCE2EA;background:#FFFFFF;color:#344054;font-family:inherit;font-size:11.5px;font-weight:600;cursor:pointer" style-hover="background:#F6F8FB">모두 확인 처리</button>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px">
+            <sc-for list="{{ sevCards }}" as="c" hint-placeholder-count="4">
+              <button onClick="{{ c.set }}" style="text-align:left;background:#FFFFFF;border:1px solid {{ c.bd }};border-radius:12px;padding:12px 15px;cursor:pointer;font-family:inherit;box-shadow:0 1px 2px rgba(16,24,40,0.04)">
+                <div style="font-size:10.5px;font-weight:600;color:#5B6779;margin-bottom:7px">{{ c.label }}</div>
+                <div style="font-family:'IBM Plex Mono',monospace;font-size:22px;font-weight:600;line-height:1;color:{{ c.fg }}">{{ c.count }}</div>
+              </button>
+            </sc-for>
+          </div>
+
+          <div style="background:#FFFFFF;border:1px solid #E3E7EE;border-radius:12px;box-shadow:0 1px 2px rgba(16,24,40,0.04);padding:13px 16px;margin-bottom:12px">
+            <div style="font-size:10px;color:#98A2B3;margin-bottom:8px">발생 추이 · 최근 24시간</div>
+            <div style="display:flex;align-items:flex-end;gap:3px;height:56px">
+              <sc-for list="{{ bars24 }}" as="b" hint-placeholder-count="24">
+                <span style="flex:1;border-radius:2px 2px 0 0;height:{{ b.h }};background:{{ b.c }}"></span>
+              </sc-for>
+            </div>
+            <div style="display:flex;justify-content:space-between;font-size:9px;color:#B3BCC9;font-family:'IBM Plex Mono',monospace;margin-top:4px"><span>-24h</span><span>-18h</span><span>-12h</span><span>-6h</span><span>지금</span></div>
+          </div>
+
+          <div style="background:#FFFFFF;border:1px solid #E3E7EE;border-radius:12px;box-shadow:0 1px 2px rgba(16,24,40,0.04);overflow:hidden">
+            <sc-for list="{{ alarmRows }}" as="a" hint-placeholder-count="8">
+              <div style="display:flex;align-items:center;gap:12px;padding:11px 16px;border-bottom:1px solid #F2F4F7;opacity:{{ a.op }}">
+                <span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:9px;font-weight:700;background:{{ a.sevBg }};color:{{ a.sevColor }};width:60px;justify-content:center;flex:none">{{ a.sevLabel }}</span>
+                <span style="min-width:0;flex:1">
+                  <span style="display:block;font-size:12.5px;line-height:1.4;color:#344054">{{ a.msg }}</span>
+                  <span style="display:block;font-family:'IBM Plex Mono',monospace;font-size:9.5px;color:#98A2B3;margin-top:2px">{{ a.site }} · {{ a.src }} · {{ a.cat }}</span>
+                </span>
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#98A2B3;white-space:nowrap">{{ a.time }}</span>
+                <button onClick="{{ a.ackFn }}" style="padding:6px 12px;border-radius:8px;border:1px solid {{ a.ackBd }};background:{{ a.ackBg }};color:{{ a.ackFg }};font-family:inherit;font-size:10.5px;font-weight:600;cursor:pointer;flex:none;width:70px">{{ a.ackLabel }}</button>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{
+  &quot;layout&quot;: { &quot;editor&quot;: &quot;enum&quot;, &quot;options&quot;: [&quot;map-hero&quot;, &quot;map-grid&quot;], &quot;default&quot;: &quot;map-hero&quot;, &quot;tsType&quot;: &quot;string&quot;, &quot;section&quot;: &quot;레이아웃&quot; },
+  &quot;defaultRole&quot;: { &quot;editor&quot;: &quot;enum&quot;, &quot;options&quot;: [&quot;ops&quot;, &quot;eng&quot;, &quot;exec&quot;], &quot;default&quot;: &quot;ops&quot;, &quot;tsType&quot;: &quot;string&quot;, &quot;section&quot;: &quot;레이아웃&quot; },
+  &quot;live&quot;: { &quot;editor&quot;: &quot;boolean&quot;, &quot;default&quot;: true, &quot;tsType&quot;: &quot;boolean&quot;, &quot;section&quot;: &quot;동작&quot; }
+}">
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.mapRef = React.createRef();
+    this.flowRef = React.createRef();
+    this.contentRef = React.createRef();
+    this.buildStatic();
+    this.state = {
+      view: 'overview', role: null, layout: null, dcCode: null, hover: null,
+      aType: 'all', aSite: 'all', aStatus: 'all', aQuery: '',
+      alSev: 'all', alSite: 'all', acked: [],
+      now: new Date(), sync: 0, mapFail: false, mapW: 1000,
+      sites: this.SITES.map(s => Object.assign({}, s))
+    };
+  }
+
+  m32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; var t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+  fmt(n) { return Math.round(n).toLocaleString('en-US'); }
+
+  genDay(seed, base, amp) {
+    const r = this.m32(seed); const out = [];
+    for (let h = 0; h < 24; h++) {
+      out.push(base * (1 + amp * Math.sin((h - 7) / 24 * 2 * Math.PI) + (r() - 0.5) * amp * 0.7));
+    }
+    return out;
+  }
+  genWalk(seed, n, start, step, drift, min, max) {
+    const r = this.m32(seed); const out = []; let v = start;
+    for (let i = 0; i < n; i++) { v += (r() - 0.5) * step + drift; v = Math.max(min, Math.min(max, v)); out.push(v); }
+    return out;
+  }
+  ptsArr(arr, W, H) {
+    const mn = Math.min.apply(null, arr), mx = Math.max.apply(null, arr); const rg = (mx - mn) || 1;
+    return arr.map((v, i) => ((i / (arr.length - 1) * W).toFixed(1)) + ',' + ((H - 5 - ((v - mn) / rg) * (H - 10)).toFixed(1)));
+  }
+  pts(arr, W, H) { return this.ptsArr(arr, W, H).join(' '); }
+  area(arr, W, H) { const p = this.ptsArr(arr, W, H); return 'M0,' + H + ' L' + p.join(' L') + ' L' + W + ',' + H + ' Z'; }
+
+  buildStatic() {
+    this.SITES = [
+      { code: 'OC1', ko: '오창 1캠퍼스', en: 'Ochang', cc: 'KR', region: 'APAC', lat: 36.72, lon: 127.44, mlat: 37.4, mlon: 125.2, tz: 'Asia/Seoul', lp: 't', tier: 'Tier IV', hosts: 96, vms: 2610, phys: 412, str: 18, net: 146, pdu: 64, cpu: 68, mem: 74, sd: 71, pw: 3840, temp: 23.1, st: 'ok', al: 0 },
+      { code: 'OC2', ko: '오창 2캠퍼스', en: 'Ochang', cc: 'KR', region: 'APAC', lat: 36.70, lon: 127.50, mlat: 35.2, mlon: 129.8, tz: 'Asia/Seoul', lp: 'r', tier: 'Tier IV', hosts: 74, vms: 1980, phys: 356, str: 14, net: 118, pdu: 52, cpu: 62, mem: 70, sd: 66, pw: 3120, temp: 22.8, st: 'ok', al: 0 },
+      { code: 'NA', ko: '난징 A', en: 'Nanjing', cc: 'CN', region: 'APAC', lat: 32.06, lon: 118.80, mlat: 34.8, mlon: 112.5, tz: 'Asia/Shanghai', lp: 'l', tier: 'Tier III', hosts: 58, vms: 1490, phys: 268, str: 12, net: 96, pdu: 40, cpu: 71, mem: 78, sd: 91, pw: 2460, temp: 24.2, st: 'warn', al: 1 },
+      { code: 'NB', ko: '난징 B', en: 'Nanjing', cc: 'CN', region: 'APAC', lat: 31.95, lon: 118.90, mlat: 31.2, mlon: 117.5, tz: 'Asia/Shanghai', lp: 'l', tier: 'Tier III', hosts: 52, vms: 1345, phys: 241, str: 10, net: 88, pdu: 38, cpu: 66, mem: 72, sd: 74, pw: 2210, temp: 23.6, st: 'ok', al: 0 },
+      { code: 'NJ', ko: '난징 신강', en: 'Nanjing', cc: 'CN', region: 'APAC', lat: 32.15, lon: 118.65, mlat: 28.6, mlon: 114.0, tz: 'Asia/Shanghai', lp: 'l', tier: 'Tier III', hosts: 44, vms: 1120, phys: 198, str: 9, net: 74, pdu: 34, cpu: 59, mem: 68, sd: 62, pw: 1890, temp: 23.9, st: 'ok', al: 0 },
+      { code: 'HD', ko: '카라왕', en: 'Karawang', cc: 'ID', region: 'APAC', lat: -6.35, lon: 107.30, tz: 'Asia/Jakarta', lp: 'b', tier: 'Tier III', hosts: 24, vms: 588, phys: 104, str: 5, net: 42, pdu: 20, cpu: 49, mem: 58, sd: 44, pw: 940, temp: 25.6, st: 'ok', al: 0 },
+      { code: 'MI', ko: '홀랜드', en: 'Holland', cc: 'US', region: 'AMER', lat: 42.79, lon: -86.11, mlat: 46.2, mlon: -91.0, tz: 'America/Detroit', lp: 'l', tier: 'Tier III', hosts: 56, vms: 1444, phys: 259, str: 11, net: 92, pdu: 42, cpu: 61, mem: 69, sd: 64, pw: 2380, temp: 23.4, st: 'ok', al: 0 },
+      { code: 'MIL', ko: '랜싱', en: 'Lansing', cc: 'US', region: 'AMER', lat: 42.73, lon: -84.55, mlat: 44.9, mlon: -84.8, tz: 'America/Detroit', lp: 't', tier: 'Tier III', hosts: 30, vms: 742, phys: 136, str: 6, net: 52, pdu: 24, cpu: 55, mem: 63, sd: 51, pw: 1240, temp: 22.9, st: 'ok', al: 0 },
+      { code: 'ST', ko: '윈저', en: 'Windsor', cc: 'CA', region: 'AMER', lat: 42.30, lon: -83.02, mlat: 43.6, mlon: -78.8, tz: 'America/Toronto', lp: 'r', tier: 'Tier III', hosts: 36, vms: 902, phys: 166, str: 7, net: 62, pdu: 30, cpu: 57, mem: 65, sd: 59, pw: 1560, temp: 23.0, st: 'ok', al: 0 },
+      { code: 'GM1', ko: '워런', en: 'Warren', cc: 'US', region: 'AMER', lat: 41.24, lon: -80.82, mlat: 40.2, mlon: -76.0, tz: 'America/New_York', lp: 'r', tier: 'Tier III', hosts: 46, vms: 1178, phys: 214, str: 9, net: 78, pdu: 36, cpu: 63, mem: 70, sd: 68, pw: 1980, temp: 23.2, st: 'ok', al: 0 },
+      { code: 'HM', ko: '제퍼슨빌', en: 'Jeffersonville', cc: 'US', region: 'AMER', lat: 39.65, lon: -83.56, mlat: 37.2, mlon: -85.2, tz: 'America/New_York', lp: 'r', tier: 'Tier III', hosts: 34, vms: 856, phys: 158, str: 7, net: 58, pdu: 28, cpu: 74, mem: 81, sd: 66, pw: 1490, temp: 26.9, st: 'crit', al: 2 },
+      { code: 'GM2', ko: '스프링힐', en: 'Spring Hill', cc: 'US', region: 'AMER', lat: 35.75, lon: -86.93, mlat: 34.6, mlon: -89.3, tz: 'America/Chicago', lp: 'l', tier: 'Tier III', hosts: 40, vms: 1015, phys: 183, str: 8, net: 70, pdu: 32, cpu: 60, mem: 67, sd: 61, pw: 1710, temp: 23.7, st: 'warn', al: 1 },
+      { code: 'HG', ko: '서배나', en: 'Savannah', cc: 'US', region: 'AMER', lat: 32.08, lon: -81.10, mlat: 31.9, mlon: -80.3, tz: 'America/New_York', lp: 'r', tier: 'Tier III', hosts: 28, vms: 690, phys: 124, str: 6, net: 48, pdu: 22, cpu: 52, mem: 60, sd: 48, pw: 1130, temp: 24.4, st: 'ok', al: 0 },
+      { code: 'AZ', ko: '퀸크릭', en: 'Queen Creek', cc: 'US', region: 'AMER', lat: 33.25, lon: -111.63, tz: 'America/Phoenix', lp: 'b', tier: 'Tier III', hosts: 38, vms: 968, phys: 172, str: 8, net: 66, pdu: 30, cpu: 58, mem: 66, sd: 57, pw: 1620, temp: 25.1, st: 'ok', al: 0 },
+      { code: 'WA', ko: '브로츠와프', en: 'Wroclaw', cc: 'PL', region: 'EMEA', lat: 51.11, lon: 17.04, tz: 'Europe/Warsaw', lp: 'r', tier: 'Tier III', hosts: 62, vms: 1602, phys: 287, str: 13, net: 102, pdu: 46, cpu: 64, mem: 71, sd: 69, pw: 2740, temp: 27.8, st: 'warn', al: 1 }
+    ];
+
+    this.ALARMS = [
+      { id: 1, sev: 'crit', site: 'HM', src: 'pdu-hm-a2', msg: 'PDU 출력 부하 불균형 — Feed A 97% / Feed B 41%', time: '4분 전', cat: '전력' },
+      { id: 2, sev: 'crit', site: 'HM', src: 'esx-hm-14', msg: 'ESXi 호스트 응답 없음 — HA 페일오버 진행 중', time: '9분 전', cat: '가상화' },
+      { id: 3, sev: 'warn', site: 'NA', src: 'str-na-01', msg: 'vSAN 데이터스토어 사용률 91% — 임계치 90% 초과', time: '23분 전', cat: '스토리지' },
+      { id: 4, sev: 'warn', site: 'WA', src: 'sensor-wa-04', msg: 'Cold aisle 온도 27.8°C — 임계 28.0°C 접근', time: '31분 전', cat: '환경' },
+      { id: 5, sev: 'warn', site: 'GM2', src: 'sw-gm2-spine-01', msg: 'Uplink ISP-B BGP 세션 플래핑 — 10분 내 3회 재수립', time: '44분 전', cat: '네트워크' },
+      { id: 6, sev: 'info', site: 'OC1', src: 'str-oc1-01', msg: '컨트롤러 캐시 배터리 교체 예정 — 7/10 작업 승인', time: '1시간 전', cat: '스토리지' },
+      { id: 7, sev: 'info', site: 'NJ', src: 'pdu-nj-a2', msg: 'PDU 부하율 78% → 임계 미만 복귀', time: '2시간 전', cat: '전력' },
+      { id: 8, sev: 'info', site: 'ST', src: 'esx-st-07', msg: '호스트 메모리 사용률 정상 범위 복귀 (84%)', time: '3시간 전', cat: '가상화' },
+      { id: 9, sev: 'info', site: 'HD', src: 'ups-hd-01', msg: 'UPS 배터리 정기 점검 완료 — 이상 없음', time: '4시간 전', cat: '전력' },
+      { id: 10, sev: 'info', site: 'MI', src: 'job-backup-118', msg: '야간 백업 완료 — 1,444 VM · 실패 0건', time: '5시간 전', cat: '백업' },
+      { id: 11, sev: 'info', site: 'OC2', src: 'vc-oc2-01', msg: 'DRS 자동 마이그레이션 12건 수행', time: '6시간 전', cat: '가상화' },
+      { id: 12, sev: 'info', site: 'AZ', src: 'net-fw-batch', msg: '네트워크 펌웨어 일괄 배포 완료 — 66대', time: '8시간 전', cat: '네트워크' },
+      { id: 13, sev: 'info', site: 'HG', src: 'vc-hg-01', msg: 'vCenter 인증서 갱신 완료 — 만료 342일 전', time: '12시간 전', cat: '보안' }
+    ];
+
+    this.LP = {
+      r: { lx: '26px', ly: '50%', lt: 'translate(0,-50%)' },
+      l: { lx: '-4px', ly: '50%', lt: 'translate(-100%,-50%)' },
+      t: { lx: '50%', ly: '-3px', lt: 'translate(-50%,-100%)' },
+      b: { lx: '50%', ly: '25px', lt: 'translate(-50%,0)' }
+    };
+    this.STC = { ok: '#17985A', warn: '#D97706', crit: '#DC2626' };
+    this.STBG = { ok: 'rgba(23,152,90,0.10)', warn: 'rgba(217,119,6,0.12)', crit: 'rgba(220,38,38,0.10)' };
+    this.STL = { ok: '정상', warn: '주의', crit: '위험' };
+    this.GLOW = {
+      ok: '0 0 0 2px #FFFFFF, 0 0 0 3.5px rgba(23,152,90,0.40)',
+      warn: '0 0 0 2px #FFFFFF, 0 0 0 3.5px rgba(217,119,6,0.45)',
+      crit: '0 0 0 2px #FFFFFF, 0 0 0 3.5px rgba(220,38,38,0.45)'
+    };
+    this.SEVC = { crit: '#DC2626', warn: '#D97706', info: '#2563EB' };
+    this.SEVBG = { crit: 'rgba(220,38,38,0.08)', warn: 'rgba(217,119,6,0.10)', info: 'rgba(37,99,235,0.08)' };
+    this.SEVL = { crit: 'CRITICAL', warn: 'WARNING', info: 'INFO' };
+
+    this.pulseEl = React.createElement('span', { style: { position: 'absolute', left: '50%', top: '50%', width: '26px', height: '26px', margin: '-13px 0 0 -13px', borderRadius: '50%', border: '1.5px solid rgba(220,38,38,0.75)', animation: 'imPulse 1.8s ease-out infinite', pointerEvents: 'none' } });
+    this.badgeLive = React.createElement('span', { style: { display: 'inline-flex', alignItems: 'center', gap: '6px' } },
+      React.createElement('span', { style: { width: '6px', height: '6px', borderRadius: '50%', background: '#17985A', animation: 'imBlink 1.6s ease-in-out infinite' } }),
+      React.createElement('span', { style: { fontFamily: "'IBM Plex Mono',monospace", fontSize: '9.5px', fontWeight: 600, color: '#17985A', letterSpacing: '0.12em' } }, 'LIVE'));
+    this.badgePaused = React.createElement('span', { style: { display: 'inline-flex', alignItems: 'center', gap: '6px' } },
+      React.createElement('span', { style: { width: '6px', height: '6px', borderRadius: '50%', background: '#98A2B3' } }),
+      React.createElement('span', { style: { fontFamily: "'IBM Plex Mono',monospace", fontSize: '9.5px', fontWeight: 600, color: '#98A2B3', letterSpacing: '0.12em' } }, 'PAUSED'));
+
+    const tw = (seed, start, drift) => this.genWalk(seed, 30, start, 2.4, drift, 30, 96);
+    const mkTrend = (label, seed, start, drift, color, fill) => {
+      const arr = tw(seed, start, drift);
+      const first = arr[0], last = arr[arr.length - 1];
+      const dl = (last - first);
+      return { label, now: Math.round(last) + '%', delta: (dl >= 0 ? '+' : '') + dl.toFixed(1) + '%p', color, fill, pts: this.pts(arr, 260, 44), area: this.area(arr, 260, 44) };
+    };
+    this.trendDefs = [
+      mkTrend('CPU 사용률', 101, 60.5, 0.14, '#2563EB', 'rgba(37,99,235,0.10)'),
+      mkTrend('Memory 사용률', 202, 69.2, 0.09, '#7C3AED', 'rgba(124,58,237,0.10)'),
+      mkTrend('Storage 사용률', 303, 61.8, 0.17, '#17985A', 'rgba(23,152,90,0.10)')
+    ];
+
+    this.BARS24 = [0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 2].map((v, i) => ({
+      h: v === 0 ? '8%' : (v === 1 ? '48%' : '92%'),
+      c: v === 0 ? 'rgba(16,24,40,0.06)' : (i === 23 ? 'rgba(220,38,38,0.75)' : 'rgba(217,119,6,0.45)')
+    }));
+
+    this.POOL = [];
+    const over = { 'esx-hm-14': 'crit', 'pdu-hm-a2': 'crit', 'str-na-01': 'warn', 'sw-gm2-spine-01': 'warn' };
+    this.SITES.forEach((s, si) => {
+      const lc = s.code.toLowerCase();
+      const r = this.m32(1000 + si * 7);
+      const rows = [
+        ['vm-' + lc + '-app-' + (11 + si), 'VM', 'cl-' + lc + '-01'],
+        ['vm-' + lc + '-db-' + (4 + (si % 5)), 'VM', 'cl-' + lc + '-01'],
+        ['vm-' + lc + '-web-' + (21 + (si % 9)), 'VM', 'cl-' + lc + '-02'],
+        ['esx-' + lc + '-07', 'Host', 'cl-' + lc + '-01 / R' + (3 + (si % 6))],
+        ['esx-' + lc + '-14', 'Host', 'cl-' + lc + '-02 / R' + (5 + (si % 6))],
+        ['srv-' + lc + '-b' + (10 + (si % 8)), 'Server', 'R' + (2 + (si % 9)) + '-U' + (12 + (si % 20))],
+        ['str-' + lc + '-01', 'Storage', 'R' + (1 + (si % 4))],
+        ['sw-' + lc + '-leaf-03', 'Network', 'MDF-1'],
+        ['sw-' + lc + '-spine-01', 'Network', 'MDF-1'],
+        ['pdu-' + lc + '-a2', 'PDU', 'Feed A']
+      ];
+      rows.forEach((row, ri) => {
+        const name = row[0];
+        this.POOL.push({
+          name, type: row[1], site: s.code, loc: row[2],
+          st: over[name] || 'ok',
+          cpu: Math.round(18 + r() * 62), mem: Math.round(25 + r() * 60),
+          ip: '10.' + (20 + si) + '.' + (1 + (ri % 4)) + '.' + (10 + Math.round(r() * 200)),
+          up: Math.round(15 + r() * 400) + 'd'
+        });
+      });
+    });
+    this.typeCounts = { all: this.POOL.length };
+    this.POOL.forEach(p => { this.typeCounts[p.type] = (this.typeCounts[p.type] || 0) + 1; });
+
+    const P2 = (s) => {
+      const lon = s.mlon ?? s.lon, lat = s.mlat ?? s.lat;
+      return [(((lon - 127.5 + 180) % 360 + 360) % 360) / 360 * 2400, (78 - lat) / 134 * 894];
+    };
+    const hubSite = this.SITES.find(s => s.code === 'OC2') || this.SITES[0];
+    this.NODEPTS = [P2(hubSite)].concat(this.SITES.filter(s => s.code !== hubSite.code).map(s => P2(s)));
+
+    this._ss = {};
+  }
+
+  startFlow() {
+    this._arcs = [];
+    this._lastArc = 0;
+    const loop = (t) => {
+      this._flowRaf = requestAnimationFrame(loop);
+      const c = this.flowRef.current; if (!c) return;
+      const ctx = c.getContext('2d');
+      ctx.clearRect(0, 0, c.width, c.height);
+      const live = this.props.live ?? true;
+      if (!live) return;
+      this.NODEPTS.forEach((p, i) => {
+        const ph = ((t * 0.00035) + i * 0.13) % 1;
+        ctx.strokeStyle = 'rgba(37,99,235,' + ((1 - ph) * 0.30).toFixed(3) + ')';
+        ctx.lineWidth = 2.4;
+        ctx.beginPath(); ctx.arc(p[0], p[1], 7 + ph * 50, 0, 7); ctx.stroke();
+      });
+      if (t - this._lastArc > 1500 && this._arcs.length < 5) {
+        this._lastArc = t;
+        const others = this.NODEPTS.slice(1);
+        const b = others[Math.floor(Math.random() * others.length)];
+        const out = Math.random() < 0.5;
+        this._arcs.push({ a: out ? this.NODEPTS[0] : b, b: out ? b : this.NODEPTS[0], t0: t, d: 1800 + Math.random() * 900 });
+      }
+      this._arcs = this._arcs.filter(a => t - a.t0 < a.d + 700);
+      for (const arc of this._arcs) {
+        const p = Math.min(1, (t - arc.t0) / arc.d);
+        const ax = arc.a[0], ay = arc.a[1], bx = arc.b[0], by = arc.b[1];
+        const mx = (ax + bx) / 2;
+        const my = (ay + by) / 2 - Math.min(300, Math.hypot(bx - ax, by - ay) * 0.25);
+        const pt = (u) => [
+          (1 - u) * (1 - u) * ax + 2 * (1 - u) * u * mx + u * u * bx,
+          (1 - u) * (1 - u) * ay + 2 * (1 - u) * u * my + u * u * by
+        ];
+        const tail = Math.max(0, p - 0.3);
+        ctx.strokeStyle = 'rgba(37,99,235,0.50)';
+        ctx.lineWidth = 2.8;
+        ctx.beginPath();
+        let first = true;
+        for (let u = tail; u <= p; u += 0.02) {
+          const q = pt(u);
+          if (first) { ctx.moveTo(q[0], q[1]); first = false; } else ctx.lineTo(q[0], q[1]);
+        }
+        ctx.stroke();
+        if (p < 1) {
+          const h = pt(p);
+          ctx.fillStyle = '#1D4ED8';
+          ctx.beginPath(); ctx.arc(h[0], h[1], 4.2, 0, 7); ctx.fill();
+        } else {
+          const k = (t - arc.t0 - arc.d) / 700;
+          if (k < 1) {
+            ctx.strokeStyle = 'rgba(37,99,235,' + ((1 - k) * 0.55).toFixed(3) + ')';
+            ctx.lineWidth = 2.4;
+            ctx.beginPath(); ctx.arc(bx, by, 7 + k * 43, 0, 7); ctx.stroke();
+          }
+        }
+      }
+    };
+    this._flowRaf = requestAnimationFrame(loop);
+  }
+
+  siteSeries(s) {
+    if (!this._ss[s.code]) {
+      let seed = 0; for (let i = 0; i < s.code.length; i++) seed += s.code.charCodeAt(i) * 31;
+      const power = this.genDay(seed, s.pw, 0.10);
+      const tin = this.genDay(seed + 7, s.vms / 280, 0.24);
+      const tout = this.genDay(seed + 13, s.vms / 280 * 0.62, 0.22);
+      this._ss[s.code] = {
+        powerLine: this.pts(power, 560, 110), powerArea: this.area(power, 560, 110),
+        powerPeak: this.fmt(Math.max.apply(null, power)) + ' kW',
+        trafIn: this.pts(tin, 560, 100), trafOut: this.pts(tout, 560, 100),
+        trafPeak: Math.max.apply(null, tin).toFixed(1) + ' Gbps'
+      };
+    }
+    return this._ss[s.code];
+  }
+
+  attachRO() {
+    const c = this.mapRef.current;
+    if (!c || this._roEl === c) return;
+    if (this._ro) this._ro.disconnect();
+    this._roEl = c;
+    if (typeof ResizeObserver === 'undefined') return;
+    this._ro = new ResizeObserver((entries) => {
+      const w = entries[0].contentRect.width;
+      if (Math.abs(w - this.state.mapW) > 24) this.setState({ mapW: w });
+    });
+    this._ro.observe(c);
+  }
+  componentDidMount() {
+    this._timer = setInterval(() => this.tick(), 1000);
+    this.loadMap();
+    this.attachRO();
+    this.startFlow();
+  }
+  componentWillUnmount() { if (this._timer) clearInterval(this._timer); if (this._ro) this._ro.disconnect(); if (this._flowRaf) cancelAnimationFrame(this._flowRaf); }
+  componentDidUpdate() {
+    const c = this.mapRef.current;
+    if (c && this._paintedOn !== c && this._mapDone) this.paintMap();
+    this.attachRO();
+  }
+
+  tick() {
+    const sync = this.state.sync + 1;
+    const upd = { now: new Date(), sync };
+    if ((this.props.live ?? true) && sync % 5 === 0) {
+      const sites = this.state.sites.map(s => Object.assign({}, s));
+      for (let k = 0; k < 4; k++) {
+        const s = sites[Math.floor(Math.random() * sites.length)];
+        s.cpu = Math.max(38, Math.min(96, s.cpu + (Math.random() - 0.5) * 3));
+        s.mem = Math.max(42, Math.min(94, s.mem + (Math.random() - 0.5) * 2));
+        s.pw = Math.max(500, s.pw + (Math.random() - 0.5) * 40);
+      }
+      upd.sites = sites;
+    }
+    this.setState(upd);
+  }
+
+  async loadMap() {
+    try {
+      const t0 = Date.now();
+      while (!window.topojson && Date.now() - t0 < 7000) { await new Promise(r => setTimeout(r, 150)); }
+      if (!window.topojson) throw new Error('no lib');
+      const res = await fetch('./vendor/land-110m.json');
+      if (!res.ok) throw new Error('fetch fail');
+      const topo = await res.json();
+      this._land = window.topojson.feature(topo, topo.objects.land);
+      this._mapDone = true;
+      this.paintMap();
+    } catch (e) {
+      this._land = null; this._mapDone = true;
+      this.paintMap();
+      this.setState({ mapFail: true });
+    }
+  }
+
+  paintMap() {
+    const c = this.mapRef.current; if (!c) return;
+    const ctx = c.getContext('2d');
+    ctx.clearRect(0, 0, c.width, c.height);
+    if (this._land) {
+      const ow = 1200, oh = 447;
+      const off = document.createElement('canvas'); off.width = ow; off.height = oh;
+      const octx = off.getContext('2d'); octx.fillStyle = '#fff';
+      const geoms = [];
+      const g = this._land;
+      if (g.type === 'FeatureCollection') g.features.forEach(f => geoms.push(f.geometry));
+      else if (g.type === 'Feature') geoms.push(g.geometry);
+      else geoms.push(g);
+      octx.beginPath();
+      geoms.forEach(gm => {
+        const polys = gm.type === 'Polygon' ? [gm.coordinates] : gm.coordinates;
+        polys.forEach(poly => poly.forEach(ring => {
+          ring.forEach((pt, i) => {
+            const x = (pt[0] + 180) / 360 * ow, y = (78 - pt[1]) / 134 * oh;
+            if (i === 0) octx.moveTo(x, y); else octx.lineTo(x, y);
+          });
+          octx.closePath();
+        }));
+      });
+      octx.fill('evenodd');
+      const img = octx.getImageData(0, 0, ow, oh).data;
+      const shift = Math.round(127.5 / 360 * ow);
+      ctx.fillStyle = 'rgba(120,134,156,0.40)';
+      for (let y = 3; y < oh; y += 6) {
+        for (let x = 3; x < ow; x += 6) {
+          const sx = (x + shift) % ow;
+          if (img[(y * ow + sx) * 4 + 3] > 120) { ctx.beginPath(); ctx.arc(x * 2, y * 2, 3.1, 0, 6.2832); ctx.fill(); }
+        }
+      }
+    } else {
+      ctx.strokeStyle = 'rgba(120,134,156,0.15)'; ctx.lineWidth = 1;
+      for (let lon = -180; lon <= 180; lon += 20) {
+        const x = (lon + 180) / 360 * 2400;
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, 894); ctx.stroke();
+      }
+      for (let lat = -40; lat <= 70; lat += 20) {
+        const y = (78 - lat) / 134 * 894;
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(2400, y); ctx.stroke();
+      }
+    }
+    this._paintedOn = c;
+  }
+
+  snapTop() { const el = this.contentRef.current; if (el) el.scrollTop = 0; }
+  openDc(code) { this.setState({ view: 'dc', dcCode: code, hover: null }); this.snapTop(); }
+
+  renderVals() {
+    const S = this.state;
+    const view = S.view;
+    const role = S.role ?? (this.props.defaultRole ?? 'ops');
+    const layout = S.layout ?? (this.props.layout ?? 'map-hero');
+    const isLayA = layout === 'map-hero', isLayB = !isLayA;
+    const seg = (act) => ({ bg: act ? '#FFFFFF' : 'transparent', fg: act ? '#1A2233' : '#667085' });
+    const nav = (act) => ({ bg: act ? 'rgba(165,0,52,0.08)' : 'transparent', fg: act ? '#A50034' : '#667085' });
+
+    const sites = S.sites.map(s => {
+      const mlon = s.mlon ?? s.lon, mlat = s.mlat ?? s.lat;
+      const lp = this.LP[s.lp] || this.LP.r;
+      return Object.assign({}, s, {
+        mx: ((((mlon - 127.5 + 180) % 360 + 360) % 360) / 360 * 100).toFixed(2) + '%',
+        my: ((78 - mlat) / 134 * 100).toFixed(2) + '%',
+        lx: lp.lx, ly: lp.ly, lt: lp.lt,
+        color: this.STC[s.st], glow: this.GLOW[s.st],
+        lblColor: s.st === 'ok' ? '#64748B' : this.STC[s.st],
+        chipBg: this.STBG[s.st], chipFg: this.STC[s.st],
+        statusLabel: this.STL[s.st],
+        regionKo: s.region === 'APAC' ? '아시아' : (s.region === 'AMER' ? '북미' : '유럽'),
+        vmsF: this.fmt(s.vms), hostsT: s.hosts,
+        cpuT: Math.round(s.cpu), cpuP: Math.round(s.cpu) + '%',
+        memT: Math.round(s.mem), memP: Math.round(s.mem) + '%',
+        stoT: Math.round(s.sd), stoP: Math.round(s.sd) + '%',
+        stoC: s.sd >= 90 ? '#DC2626' : (s.sd >= 80 ? '#D97706' : '#17985A'),
+        powerF: this.fmt(s.pw) + ' kW',
+        tempF: s.temp.toFixed(1) + '°C',
+        tempC: s.temp >= 27 ? '#D97706' : '#5B6779',
+        alarmDisp: s.al > 0 ? String(s.al) : '–',
+        alC: s.al > 0 ? '#DC2626' : '#C2CAD6',
+        cityL: s.ko + ' · ' + s.cc,
+        pulse: s.st === 'crit' ? this.pulseEl : null,
+        open: () => this.openDc(s.code),
+        hoverOn: () => this.setState({ hover: s.code })
+      });
+    });
+    const hv = sites.find(s => s.code === S.hover) || sites[0];
+
+    const totPw = S.sites.reduce((a, s) => a + s.pw, 0);
+    const openIds = this.ALARMS.filter(a => a.sev !== 'info').map(a => a.id);
+    const openAlarmCount = openIds.filter(id => !S.acked.includes(id)).length;
+    const kpis = [
+      { ko: '데이터센터', en: 'DATA CENTERS', value: '15', sub: '정상 11 · 주의 3 · 위험 1', vc: '#101828' },
+      { ko: '베어메탈 서버', en: 'BARE-METAL SERVERS', value: '3,278', sub: '가동 3,266 · 유지보수 12', vc: '#101828' },
+      { ko: '가상머신', en: 'VIRTUAL MACHINES', value: '18,530', sub: 'vCenter 18 · 클러스터 64', vc: '#101828' },
+      { ko: '가상화 호스트', en: 'ESXI HOSTS', value: '718', sub: '가동 714 · 유지보수 4', vc: '#101828' },
+      { ko: '네트워크 장비', en: 'NETWORK DEVICES', value: '1,192', sub: 'Spine 96 · Leaf 486 · 기타 610', vc: '#101828' },
+      { ko: 'GPU 카드', en: 'GPU CARDS', value: '1,248', sub: 'H100 768 · A100 480', vc: '#101828' },
+      { ko: '전력 부하', en: 'POWER LOAD', value: (totPw / 1000).toFixed(1) + ' MW', sub: 'PDU 538 · 평균 부하율 61%', vc: '#101828' }
+    ];
+
+    const enrichAlarm = (a) => Object.assign({}, a, {
+      sevColor: this.SEVC[a.sev], sevBg: this.SEVBG[a.sev], sevLabel: this.SEVL[a.sev],
+      go: () => { this.setState({ view: 'alarms' }); this.snapTop(); }
+    });
+    const alarmsTop = this.ALARMS.slice(0, 7).map(enrichAlarm);
+
+    let d = null;
+    if (S.dcCode) {
+      const s = sites.find(x => x.code === S.dcCode) || sites[0];
+      const ser = this.siteSeries(this.SITES.find(x => x.code === s.code));
+      const vcpuT = s.hosts * 64, vcpuU = Math.round(vcpuT * s.cpu / 100);
+      const memT = Math.round(s.hosts * 0.75), memU = Math.round(memT * s.mem / 100);
+      const stoT = (s.str * 0.35).toFixed(1), stoU = (s.str * 0.35 * s.sd / 100).toFixed(1);
+      const fa = s.st === 'crit' ? 97 : Math.min(88, Math.round(s.cpu) + 9);
+      const fb = s.st === 'crit' ? 41 : Math.max(32, Math.round(s.cpu) - 14);
+      const fc = (v) => v >= 90 ? '#DC2626' : (v >= 80 ? '#D97706' : '#2563EB');
+      let localTime = '—';
+      try { localTime = new Intl.DateTimeFormat('ko-KR', { timeZone: s.tz, hour: '2-digit', minute: '2-digit', hour12: false }).format(S.now); } catch (e) { }
+      const siteAlarms = this.ALARMS.filter(a => a.site === s.code).map(enrichAlarm);
+      d = Object.assign({}, s, {
+        cityEn: s.en, localTime,
+        stats: [
+          { k: 'Virtual Machines', v: s.vmsF }, { k: 'ESXi Hosts', v: String(s.hosts) },
+          { k: '물리 서버', v: this.fmt(s.phys) }, { k: '스토리지 어레이', v: String(s.str) },
+          { k: '네트워크 장비', v: String(s.net) }, { k: 'PDU', v: String(s.pdu) },
+          { k: '가용성 (MTD)', v: s.st === 'crit' ? '99.62%' : (s.st === 'warn' ? '99.94%' : '99.98%') }
+        ],
+        usage: [
+          { label: 'CPU', txt: this.fmt(vcpuU) + ' / ' + this.fmt(vcpuT) + ' vCPU', pct: s.cpuP, pctT: s.cpuT, color: '#2563EB' },
+          { label: 'Memory', txt: memU + ' / ' + memT + ' TB', pct: s.memP, pctT: s.memT, color: '#7C3AED' },
+          { label: 'Storage (vSAN)', txt: stoU + ' / ' + stoT + ' PB', pct: s.stoP, pctT: s.stoT, color: s.stoC }
+        ],
+        vcName: 'vc-' + s.code.toLowerCase() + '-01',
+        clusters: Math.ceil(s.hosts / 12),
+        feedA: { pct: fa + '%', pctT: fa, color: fc(fa) },
+        feedB: { pct: fb + '%', pctT: fb, color: fc(fb) },
+        humF: (42 + (s.code.charCodeAt(0) % 12)) + '%',
+        powerNow: this.fmt(s.pw) + ' kW',
+        powerLine: ser.powerLine, powerArea: ser.powerArea, powerPeak: ser.powerPeak,
+        trafIn: ser.trafIn, trafOut: ser.trafOut, trafPeak: ser.trafPeak,
+        uplinks: [
+          { name: 'ISP-A', stateL: '정상', chipBg: this.STBG.ok, chipFg: this.STC.ok, lat: (s.region === 'APAC' ? 8 : (s.region === 'EMEA' ? 11 : 14)) + 'ms', util: Math.round(30 + s.cpu / 4) + '%' },
+          { name: 'ISP-B', stateL: s.code === 'GM2' ? '플래핑' : '정상', chipBg: s.code === 'GM2' ? this.STBG.warn : this.STBG.ok, chipFg: s.code === 'GM2' ? this.STC.warn : this.STC.ok, lat: (s.region === 'APAC' ? 9 : (s.region === 'EMEA' ? 13 : 16)) + 'ms', util: Math.round(14 + s.cpu / 6) + '%' },
+          { name: 'DCI 백본', stateL: '정상', chipBg: this.STBG.ok, chipFg: this.STC.ok, lat: '4ms', util: Math.round(38 + s.mem / 5) + '%' }
+        ],
+        phys: [
+          { label: '서버', names: 'Dell · HPE · SMC', count: this.fmt(s.phys) + '대', segs: [{ w: '46%', c: '#2563EB' }, { w: '34%', c: '#7C3AED' }, { w: '20%', c: '#17985A' }] },
+          { label: '스토리지', names: 'Pure · NetApp', count: s.str + '대', segs: [{ w: '60%', c: '#2563EB' }, { w: '40%', c: '#7C3AED' }] },
+          { label: '네트워크', names: 'Arista · Cisco', count: s.net + '대', segs: [{ w: '55%', c: '#2563EB' }, { w: '45%', c: '#7C3AED' }] },
+          { label: 'PDU', names: 'Vertiv · APC', count: s.pdu + '대', segs: [{ w: '70%', c: '#2563EB' }, { w: '30%', c: '#7C3AED' }] }
+        ],
+        alarms: siteAlarms, hasAlarms: siteAlarms.length > 0, noAlarms: siteAlarms.length === 0,
+        goAssets: () => { this.setState({ view: 'assets', aSite: s.code, aType: 'all', aStatus: 'all', aQuery: '' }); this.snapTop(); },
+        goAlarms: () => { this.setState({ view: 'alarms', alSite: s.code }); this.snapTop(); }
+      });
+    }
+    const dEmpty = { code: '', ko: '', cityEn: '', cc: '', regionKo: '', tier: '', localTime: '', chipBg: 'transparent', chipFg: '#101828', statusLabel: '', stats: [], usage: [], vcName: '', clusters: 0, feedA: { pct: '0%', pctT: 0, color: '#2563EB' }, feedB: { pct: '0%', pctT: 0, color: '#2563EB' }, tempF: '', tempC: '#5B6779', humF: '', powerNow: '', powerLine: '', powerArea: '', powerPeak: '', trafIn: '', trafOut: '', trafPeak: '', uplinks: [], phys: [], alarms: [], hasAlarms: false, noAlarms: false, goAssets: () => { }, goAlarms: () => { } };
+
+    const tdefs = [['all', '전체'], ['VM', 'VM'], ['Host', 'ESXi Host'], ['Server', '물리 서버'], ['Storage', 'Storage'], ['Network', 'Network'], ['PDU', 'PDU']];
+    const assetTypes = tdefs.map(t => {
+      const act = S.aType === t[0];
+      return {
+        label: t[1], count: String(this.typeCounts[t[0]] || 0),
+        bg: act ? 'rgba(37,99,235,0.08)' : '#FFFFFF',
+        fg: act ? '#2563EB' : '#5B6779',
+        bd: act ? 'rgba(37,99,235,0.40)' : '#DCE2EA',
+        set: () => this.setState({ aType: t[0] })
+      };
+    });
+    const q = S.aQuery.trim().toLowerCase();
+    const filtered = this.POOL.filter(p =>
+      (S.aType === 'all' || p.type === S.aType) &&
+      (S.aSite === 'all' || p.site === S.aSite) &&
+      (S.aStatus === 'all' || p.st === S.aStatus) &&
+      (!q || p.name.includes(q)));
+    const typeL = { VM: 'VM', Host: 'ESXi Host', Server: '물리 서버', Storage: 'Storage', Network: 'Network', PDU: 'PDU' };
+    const assetRows = filtered.slice(0, 30).map(p => ({
+      name: p.name, typeL: typeL[p.type], siteCode: p.site, loc: p.loc,
+      chipBg: this.STBG[p.st], chipFg: this.STC[p.st], statusL: this.STL[p.st],
+      cpuF: (p.type === 'VM' || p.type === 'Host' || p.type === 'Server') ? p.cpu + '%' : '–',
+      memF: (p.type === 'VM' || p.type === 'Host' || p.type === 'Server') ? p.mem + '%' : '–',
+      ip: p.ip, up: p.up,
+      open: () => this.openDc(p.site)
+    }));
+
+    const svdefs = [['all', '전체'], ['crit', 'Critical'], ['warn', 'Warning'], ['info', 'Info']];
+    const svCount = { all: this.ALARMS.length, crit: 2, warn: 3, info: 8 };
+    const svColor = { all: '#101828', crit: '#DC2626', warn: '#D97706', info: '#2563EB' };
+    const sevCards = svdefs.map(t => ({
+      label: t[1], count: String(svCount[t[0]]),
+      fg: svColor[t[0]],
+      bd: S.alSev === t[0] ? 'rgba(16,24,40,0.35)' : '#E3E7EE',
+      set: () => this.setState({ alSev: t[0] })
+    }));
+    const alarmRows = this.ALARMS
+      .filter(a => (S.alSev === 'all' || a.sev === S.alSev) && (S.alSite === 'all' || a.site === S.alSite))
+      .map(a => {
+        const acked = S.acked.includes(a.id);
+        return Object.assign(enrichAlarm(a), {
+          op: acked ? '0.45' : '1',
+          ackLabel: acked ? '확인됨' : '확인',
+          ackBg: acked ? 'transparent' : '#FFFFFF',
+          ackFg: acked ? '#98A2B3' : '#344054',
+          ackBd: acked ? '#EEF1F5' : '#D8DEE7',
+          ackFn: () => { if (!S.acked.includes(a.id)) this.setState({ acked: S.acked.concat([a.id]) }); }
+        });
+      });
+
+    return {
+      mapRef: this.mapRef, flowRef: this.flowRef, contentRef: this.contentRef,
+      vOverview: view === 'overview', vDc: view === 'dc' && !!d, vAssets: view === 'assets', vAlarms: view === 'alarms',
+      goOverview: () => { this.setState({ view: 'overview' }); this.snapTop(); },
+      goAssets: () => { this.setState({ view: 'assets' }); this.snapTop(); },
+      goAlarms: () => { this.setState({ view: 'alarms' }); this.snapTop(); },
+      searchKey: (e) => { if (e.key === 'Enter') { this.setState({ view: 'assets', aQuery: e.target.value, aType: 'all', aSite: 'all', aStatus: 'all' }); this.snapTop(); } },
+      navDashBg: nav(view === 'overview' || view === 'dc').bg, navDashFg: nav(view === 'overview' || view === 'dc').fg,
+      navAssetsBg: nav(view === 'assets').bg, navAssetsFg: nav(view === 'assets').fg,
+      navAlarmsBg: nav(view === 'alarms').bg, navAlarmsFg: nav(view === 'alarms').fg,
+      hasOpenAlarms: openAlarmCount > 0, openAlarmCount,
+      roleOpsBg: seg(role === 'ops').bg, roleOpsFg: seg(role === 'ops').fg, setRoleOps: () => this.setState({ role: 'ops' }),
+      roleEngBg: seg(role === 'eng').bg, roleEngFg: seg(role === 'eng').fg, setRoleEng: () => this.setState({ role: 'eng' }),
+      roleExecBg: seg(role === 'exec').bg, roleExecFg: seg(role === 'exec').fg, setRoleExec: () => this.setState({ role: 'exec' }),
+      clockTime: S.now.toLocaleTimeString('en-GB'),
+      clockDate: S.now.toLocaleDateString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit', weekday: 'short' }),
+      lastSync: (S.sync % 5) + '초 전',
+      liveBadge: (this.props.live ?? true) ? this.badgeLive : this.badgePaused,
+      layABg: seg(isLayA).bg, layAFg: seg(isLayA).fg, setLayA: () => this.setState({ layout: 'map-hero' }),
+      layBBg: seg(isLayB).bg, layBFg: seg(isLayB).fg, setLayB: () => this.setState({ layout: 'map-grid' }),
+      isLayA, isLayB, kpis, sites,
+      hoverOff: () => this.setState({ hover: null }),
+      hasHover: !!S.hover, hv, mapFail: S.mapFail,
+      lblDisp: S.mapW >= 640 ? 'block' : 'none',
+      regions: [
+        { name: '아시아 태평양', count: 6, dot: '#D97706' },
+        { name: '북미', count: 8, dot: '#DC2626' },
+        { name: '유럽', count: 1, dot: '#D97706' }
+      ],
+      railOps: isLayA && role === 'ops', railEng: isLayA && role === 'eng', railExec: isLayA && role === 'exec',
+      alarmsTop,
+      trends: this.trendDefs,
+      topConsumers: sites.slice().sort((a, b) => b.cpu - a.cpu).slice(0, 4).map(s => ({
+        code: s.code, cityKo: s.ko, cpuT: s.cpuT, cpuP: s.cpuP, barC: s.cpu >= 70 ? '#D97706' : '#2563EB'
+      })),
+      availMtd: '99.982%',
+      execRows: [
+        { k: '진행 중 장애', v: '1건 (HM)' },
+        { k: '이번 달 장애', v: '1건 · 전월 4건' },
+        { k: '전력 사용량 (30d)', v: '21.8 GWh' },
+        { k: 'VM 증설 (30d)', v: '+412' },
+        { k: '백업 성공률', v: '99.7%' }
+      ],
+      regionBars: [
+        { name: '아시아 태평양', count: '6 사이트', segs: [{ w: '83.3%', c: '#17985A' }, { w: '16.7%', c: '#D97706' }] },
+        { name: '북미', count: '8 사이트', segs: [{ w: '75%', c: '#17985A' }, { w: '12.5%', c: '#D97706' }, { w: '12.5%', c: '#DC2626' }] },
+        { name: '유럽', count: '1 사이트', segs: [{ w: '100%', c: '#D97706' }] }
+      ],
+      d: d || dEmpty,
+      assetTypes, siteOpts: this.SITES.map(s => ({ code: s.code, label: s.code + ' · ' + s.ko })),
+      aSiteVal: S.aSite, setASite: (e) => this.setState({ aSite: e.target.value }),
+      aStatusVal: S.aStatus, setAStatus: (e) => this.setState({ aStatus: e.target.value }),
+      aQueryVal: S.aQuery, setAQuery: (e) => this.setState({ aQuery: e.target.value }),
+      assetRows, assetCountF: this.fmt(filtered.length), hasMoreAssets: filtered.length > 30,
+      sevCards, bars24: this.BARS24,
+      alSiteVal: S.alSite, setAlSite: (e) => this.setState({ alSite: e.target.value }),
+      alarmRows,
+      ackAll: () => this.setState({ acked: this.ALARMS.map(a => a.id) })
+    };
+  }
+}
+</script>
+</body>
+</html>
