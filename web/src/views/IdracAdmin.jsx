@@ -834,12 +834,26 @@ function ScanJobLogModal({ reqId, dcName, onClose }) {
             </table>
           </div>
           {d.result?.error && <div style={{ marginTop: 8, fontSize: 12.5, color: '#f87171' }}>오류: {d.result.error}</div>}
-          {d.result?.authFailed > 0 && d.result?.authFailReason && (
+          {d.result?.authFailed > 0 && (
             <div style={{ marginTop: 8, fontSize: 12.5, color: '#fbbf24' }}>
-              ⚠ 인증실패 {d.result.authFailed}건 — {d.result.authFailReason}
+              ⚠ 인증실패 {d.result.authFailed}건{d.result.authFailReason ? ` — ${d.result.authFailReason}` : ''}
               <div className="muted" style={{ fontSize: 11.5, marginTop: 3 }}>
-                계정이 맞는데 실패하면: iDRAC이 Redfish Basic 인증을 막았을 수 있습니다(자동으로 Digest 재시도함) · 로그인 실패 임계로 계정이 잠겼는지 · Redfish/권한(로그인 권한) 설정을 확인하세요.
+                계정이 맞는데 실패하면: iDRAC이 Redfish Basic 인증을 막았을 수 있습니다(자동으로 Digest·세션 토큰 재시도함) · 로그인 실패 임계로 계정이 잠겼는지 · Redfish/로그인 권한 설정을 확인하세요.
               </div>
+              {Array.isArray(d.result.authFailedIps) && d.result.authFailedIps.length > 0 && (
+                <div style={{ marginTop: 6 }}>
+                  <div className="flex" style={{ alignItems: 'center', gap: 8, marginBottom: 3 }}>
+                    <b style={{ fontSize: 12 }}>인증 거부된 IP ({d.result.authFailedIps.length}{d.result.authFailedIpsTruncated ? '+' : ''}개)</b>
+                    <button className="logout-btn" style={{ padding: '2px 8px', fontSize: 11 }}
+                      onClick={() => { try { navigator.clipboard?.writeText(d.result.authFailedIps.join('\n')); } catch { /* */ } }}
+                      title="IP 목록을 클립보드로 복사">복사</button>
+                  </div>
+                  <textarea readOnly value={d.result.authFailedIps.join('\n')}
+                    onFocus={(e) => e.target.select()}
+                    style={{ width: '100%', minHeight: 88, maxHeight: 200, fontFamily: 'ui-monospace, monospace', fontSize: 12, padding: '6px 8px', background: 'rgba(0,0,0,.25)', color: '#e2e8f0', border: '1px solid rgba(148,163,184,.25)', borderRadius: 6, resize: 'vertical' }} />
+                  {d.result.authFailedIpsTruncated && <div className="muted" style={{ fontSize: 11 }}>※ 인증실패가 목록보다 많습니다(상위 {d.result.authFailedIps.length}개만 표시).</div>}
+                </div>
+              )}
             </div>
           )}
         </>

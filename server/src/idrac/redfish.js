@@ -34,26 +34,80 @@ const dispatcher = new Agent({
 
 const basicHeader = (username, password) => 'Basic ' + Buffer.from(`${username}:${password}`).toString('base64');
 
+// 호스트별 '성공한 인증 방식' 캐시 — 한 iDRAC에 여러 번 GET(probe 2회, fetchPower 다수)할 때
+// 매번 Basic-401 왕복/세션 재생성을 피한다. 세션 토큰은 iDRAC idle 타임아웃(기본 30분)보다 짧게
+// 재사용(20분). basic/digest/session 중 무엇이 통했는지 기억.
+const AUTH_CACHE = new Map(); // `${base}\0${username}\0${pwFp}` -> { mode, challenge?, token?, at }
+const AUTH_TTL_MS = 20 * 60_000;
+function touchAuthCache(key, val) {
+  AUTH_CACHE.set(key, { ...val, at: Date.now() });
+  if (AUTH_CACHE.size > 512) { const k = AUTH_CACHE.keys().next().value; AUTH_CACHE.delete(k); }
+}
+// 비밀번호 지문(비-암호 djb2) — 캐시 키에 포함해, 같은 호스트/계정을 '다른 비밀번호'로 시도할 때
+// 이전(정확한 비번)의 세션 토큰이 잘못 재사용되지 않게 한다(평문은 키에 담지 않음).
+function pwFingerprint(pw) {
+  let h = 5381;
+  const s = String(pw);
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36);
+}
+
 /**
- * Redfish GET with Basic 인증 → 401+Digest 챌린지면 Digest로 자동 재시도.
- * timeoutMs를 넘기면 그 값으로 각 요청을 제한한다(스캔은 짧게). 응답 객체를 그대로 반환.
+ * Redfish GET — Basic 인증 → 401이면 (1) Digest 챌린지 시 Digest, (2) 아니면 세션 토큰
+ * (POST SessionService/Sessions → X-Auth-Token)으로 자동 재시도한다. 일부 iDRAC은 보안 강화로
+ * Redfish의 Basic 인증을 비활성화하고 세션 토큰만 허용한다(웹 UI 로그인은 되는데 Basic만 막힘 —
+ * '계정 맞는데 인증실패'의 실제 원인). 응답 객체를 그대로 반환(401이면 세 방식 모두 실패).
  */
 async function rawGet(base, pathname, username, password, timeoutMs = config.idrac.timeoutMs) {
-  const doFetch = (authHeader) => fetch(`${base}${pathname}`, {
-    headers: { Authorization: authHeader, Accept: 'application/json' },
+  const doFetch = (headers, method = 'GET', path = pathname, body) => fetch(`${base}${path}`, {
+    method,
+    headers: { Accept: 'application/json', ...(body ? { 'Content-Type': 'application/json' } : {}), ...headers },
+    body,
     signal: AbortSignal.timeout(timeoutMs),
     dispatcher,
   });
-  let res = await doFetch(basicHeader(username, password));
-  // Basic 거부(401) + Digest 요구 → Digest로 1회 재시도(iDRAC이 Basic을 막은 경우).
-  if (res.status === 401) {
-    const challenge = parseDigestChallenge(res.headers.get('www-authenticate'));
-    if (challenge) {
-      try { await res.body?.cancel?.(); } catch { /* drain */ }
-      res = await doFetch(buildDigestHeader({ username, password, method: 'GET', uri: pathname, challenge }));
+  const drain = async (r) => { try { await r.body?.cancel?.(); } catch { /* */ } };
+  const key = `${base}\0${username}\0${pwFingerprint(password)}`;
+  const cached = AUTH_CACHE.get(key);
+
+  // 캐시된 성공 방식이 있으면 그것부터(만료 전) — Basic-401 왕복 생략.
+  if (cached && Date.now() - cached.at < AUTH_TTL_MS) {
+    if (cached.mode === 'session' && cached.token) {
+      const r = await doFetch({ 'X-Auth-Token': cached.token });
+      if (r.status !== 401) return r;
+      AUTH_CACHE.delete(key); await drain(r); // 토큰 만료 → 아래에서 재수립
+    } else if (cached.mode === 'digest' && cached.challenge) {
+      const r = await doFetch({ Authorization: buildDigestHeader({ username, password, method: 'GET', uri: pathname, challenge: cached.challenge }) });
+      if (r.status !== 401) return r;
+      AUTH_CACHE.delete(key); await drain(r);
     }
   }
-  return res;
+
+  // 1) Basic
+  const res = await doFetch({ Authorization: basicHeader(username, password) });
+  if (res.status !== 401) { if (res.ok) touchAuthCache(key, { mode: 'basic' }); return res; }
+
+  // 2) Digest 챌린지면 Digest
+  const challenge = parseDigestChallenge(res.headers.get('www-authenticate'));
+  if (challenge) {
+    await drain(res);
+    const r = await doFetch({ Authorization: buildDigestHeader({ username, password, method: 'GET', uri: pathname, challenge }) });
+    if (r.ok) touchAuthCache(key, { mode: 'digest', challenge });
+    return r;
+  }
+
+  // 3) 세션 토큰 폴백(Basic 비활성 iDRAC)
+  await drain(res);
+  try {
+    const sres = await doFetch({}, 'POST', '/redfish/v1/SessionService/Sessions', JSON.stringify({ UserName: username, Password: password }));
+    const token = sres.headers.get('x-auth-token');
+    await drain(sres);
+    if ((sres.status === 201 || sres.ok) && token) {
+      touchAuthCache(key, { mode: 'session', token });
+      return await doFetch({ 'X-Auth-Token': token });
+    }
+  } catch { /* 세션 생성 실패 → 아래에서 원래 401 반환 */ }
+  return res; // 세 방식 모두 실패 — 401(자격증명/권한/잠금)
 }
 
 async function get(base, pathname, username, password) {
@@ -140,16 +194,16 @@ export async function probeIdrac(host, username, password, timeoutMs = 3000) {
   const sig = JSON.stringify(root || {}).toLowerCase();
   let dell = root?.Vendor === 'Dell' || Boolean(root?.Oem?.Dell) || sig.includes('idrac') || sig.includes('dell');
 
-  // 2) System identity (with auth). Basic → 401+Digest면 Digest로 자동 재시도(iDRAC이 Basic 거부 시).
+  // 2) System identity (with auth). rawGet이 Basic → Digest → 세션 토큰 순으로 자동 시도한다.
   let model = '', manufacturer = '', serviceTag = '', hostName = '', authHint = '';
   try {
     const sres = await rawGet(base, '/redfish/v1/Systems', username, password, timeoutMs);
     if (sres.status === 401) {
-      // 왜 실패했는지 진단 힌트를 남긴다(계정 맞는데 401 = Basic 거부/락아웃 구분).
+      // Basic·Digest·세션 토큰 모두 거부됨 → 자격증명/권한/잠금 문제로 판정(진단 힌트).
       const wa = String(sres.headers.get('www-authenticate') || '');
-      authHint = /digest/i.test(wa) ? 'Digest 인증 요구(Basic 거부) — 재시도했으나 실패: 계정/권한 확인'
-        : /lock|deny|blocked/i.test(wa) ? '계정 잠금/차단 가능(iDRAC 로그인 실패 임계) — iDRAC에서 잠금 해제'
-          : '자격증명 거부(사용자/비밀번호/권한 확인)';
+      authHint = /lock|deny|blocked/i.test(wa)
+        ? '계정 잠금/차단 가능(iDRAC 로그인 실패 임계) — iDRAC에서 잠금 해제'
+        : '자격증명 거부 — Basic·Digest·세션 인증 모두 실패(사용자/비밀번호/로그인 권한/계정 잠금 확인)';
       return { ok: true, isIdrac: dell, dell, authFailed: true, authHint };
     }
     if (sres.ok) {
