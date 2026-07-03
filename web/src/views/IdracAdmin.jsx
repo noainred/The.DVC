@@ -214,11 +214,13 @@ export default function IdracAdmin() {
     if (!(f.ranges || '').trim()) { setSrMsg({ ok: false, text: 'IP 대역을 한 줄에 하나씩 입력하세요.' }); return; }
     if (!(f.username || '').trim()) { setSrMsg({ ok: false, text: 'iDRAC 계정을 입력하세요.' }); return; }
     // 비밀번호는 권장이지만 필수는 아님 — 없이도 저장(스캔은 비번 입력 시까지 보류). 저장이 막히지 않게.
-    const noPw = !f.hasPassword && !(f.password || '').trim();
+    // '입력했는지' 판정은 빈 문자열 여부로만 한다(trim 금지) — 공백/특수문자로만 이뤄진 비밀번호도
+    // 온전히 전송되게(과거 trim 판정으로 공백 비번이 조용히 누락됐다).
+    const noPw = !f.hasPassword && (f.password || '') === '';
     setBusy(true); setSrMsg(null);
     try {
       const body = { datacenterId: f.datacenterId, ranges: f.ranges, username: f.username, agent: f.agent === '__local__' ? '' : f.agent, enabled: f.enabled, mode: f.mode };
-      if ((f.password || '').trim()) body.password = f.password; // 빈 비번은 서버가 기존 유지
+      if ((f.password || '') !== '') body.password = f.password; // 빈 비번은 서버가 기존 유지, 그 외엔 원본 그대로 전송
       const r = await putJson('/admin/idrac/scan-ranges', body);
       if (r.ok) {
         const note = noPw ? ' · ⚠ 비밀번호 미설정 — 스캔하려면 비밀번호를 입력하세요' : '';
@@ -994,6 +996,7 @@ function IdracScanRanges({ data, vcenters, datacenters = [], agents, busy, form,
   const st = data?.status || {};
   const prog = st.progress;
   const dcName = (id) => (datacenters.find((d) => d.id === id)?.name || id);
+  const [showPw, setShowPw] = useState(false); // 비밀번호 표시 토글 — 특수문자 입력을 눈으로 확인
   // 컬럼 정렬 — 헤더 클릭으로 asc/desc 토글. 기본은 법인명 오름차순.
   const [sort, setSort] = useState({ key: 'name', dir: 'asc' });
   const SORT_VAL = {
@@ -1132,7 +1135,18 @@ function IdracScanRanges({ data, vcenters, datacenters = [], agents, busy, form,
             </div>
             <div style={{ flex: '1 1 150px' }}>
               <label className="muted" style={{ fontSize: 11.5 }}>iDRAC 비밀번호 {form.hasPassword ? '(저장됨, 변경 시만 입력)' : '*'}</label>
-              <input className="input" type="password" style={{ width: '100%', padding: '8px 10px' }} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder={form.hasPassword ? '•••• (유지)' : ''} />
+              <div style={{ position: 'relative' }}>
+                {/* 특수문자·공백 포함 비밀번호를 온전히 보존한다: 함수형 setState로 빠른 입력/조합 시 문자 유실 방지,
+                    SHOW 토글로 마스킹된 특수문자를 눈으로 확인(입력이 안 된 것처럼 보이는 문제 해소). */}
+                <input className="input" type={showPw ? 'text' : 'password'} autoComplete="off" autoCapitalize="off" autoCorrect="off" spellCheck={false}
+                  style={{ width: '100%', padding: '8px 44px 8px 10px' }} value={form.password}
+                  onChange={(e) => { const v = e.target.value; setForm((f) => ({ ...f, password: v })); }}
+                  placeholder={form.hasPassword ? '•••• (유지)' : ''} />
+                <button type="button" onClick={() => setShowPw((v) => !v)} title={showPw ? '가리기' : '표시'}
+                  style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, letterSpacing: '.05em', color: 'var(--muted, #94a3b8)', padding: '2px 4px' }}>
+                  {showPw ? '가림' : '표시'}
+                </button>
+              </div>
             </div>
             <div style={{ flex: '1 1 160px' }}>
               <label className="muted" style={{ fontSize: 11.5 }}>스캔 수행 Agent</label>

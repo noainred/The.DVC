@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { parseCsvRows } from '../util/csv.js';
 
 const FILE = path.join(config.configDir, 'agent-assignments.json');
 const RESULT_FILE = path.join(config.configDir, 'agent-results.json');
@@ -92,23 +93,26 @@ export function removeAssignment(agent) {
  * CSV delimiter). A header row is optional. Lines starting with '#' are skipped.
  */
 export function parseCsv(text) {
-  const lines = String(text || '').split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
-  if (!lines.length) return [];
-  const headerCells = lines[0].split(',').map((h) => h.trim().toLowerCase());
+  // RFC4180 파서로 통일 — 위임 스캔용 iDRAC 비밀번호에 쉼표/따옴표/줄바꿈이 있어도 온전히 보존한다
+  // (idrac/registry.js와 동일). 이전 line.split(',')는 p@ss,w0rd 같은 비번을 잘라 위임 스캔이 전부
+  // 인증 실패(401)했다. 주석(#)으로 시작하는 레코드는 건너뛴다.
+  const rows = parseCsvRows(text).filter((r) => !String(r[0] ?? '').trim().startsWith('#'));
+  if (!rows.length) return [];
+  const headerCells = rows[0].map((h) => h.trim().toLowerCase());
   const hasHeader = headerCells.includes('agent') && headerCells.includes('ips');
   const cols = hasHeader ? headerCells : ['agent', 'ips', 'username', 'password', 'enabled'];
   const out = [];
-  for (const line of lines.slice(hasHeader ? 1 : 0)) {
-    const cells = line.split(',');
+  for (const cells of rows.slice(hasHeader ? 1 : 0)) {
     const row = {};
-    cols.forEach((c, i) => { row[c] = (cells[i] || '').trim(); });
+    // 비밀번호는 앞뒤 공백이 유의미할 수 있어 trim하지 않는다(다른 필드만 trim).
+    cols.forEach((c, i) => { const v = cells[i] ?? ''; row[c] = c === 'password' ? v : v.trim(); });
     if (!row.agent) continue;
     out.push({
       agent: row.agent,
       ips: (row.ips || '').split(/[;|]/).map((s) => s.trim()).filter(Boolean).join('\n'),
       username: row.username || 'root',
       password: row.password || '',
-      enabled: !/^(0|false|no|off|중지|disabled)$/i.test(row.enabled || 'true'),
+      enabled: !/^(0|false|no|off|중지|disabled)$/i.test((row.enabled || 'true').trim()),
     });
   }
   return out;
