@@ -182,6 +182,12 @@ export function setIdracScanResult(reqId, data = {}) {
     addEvent(j, `완료 — 스캔 ${data.scanned || 0}개 · iDRAC ${data.foundCount ?? (Array.isArray(data.found) ? data.found.length : 0)}대 발견 · 현지 등록 ${data.registered || 0}대 · 무응답 ${data.unreachable || 0} · 비iDRAC ${data.notIdrac || 0} · 인증실패 ${af}${data.durationMs ? ` · 소요 ${Math.round(data.durationMs / 1000)}초` : ''}`);
     // 인증실패가 있으면 원인을 별도 경고 이벤트로 남긴다('계정 맞는데 401'의 실제 이유).
     if (af > 0 && data.authFailReason) addEvent(j, `인증실패 원인: ${data.authFailReason}`, 'warn');
+    // '계정 맞는데 막힌' IP 목록을 이벤트에 남긴다(어느 iDRAC을 점검할지 — 처음 몇 개는 인라인, 전체는 result).
+    if (af > 0 && Array.isArray(data.authFailedIps) && data.authFailedIps.length) {
+      const ips = data.authFailedIps;
+      const preview = ips.slice(0, 20).join(', ');
+      addEvent(j, `인증 거부 IP(${ips.length}${data.authFailedIpsTruncated ? '+' : ''}): ${preview}${ips.length > 20 ? ` … 외 ${ips.length - 20}개(전체는 로그창 하단)` : ''}`, 'warn');
+    }
   }
   // 비밀번호 등 민감정보는 저장하지 않는다(result는 발견 목록·요약만).
   j.result = {
@@ -192,6 +198,8 @@ export function setIdracScanResult(reqId, data = {}) {
     notIdrac: data.notIdrac || 0,
     authFailed: af,
     authFailReason: data.authFailReason || null,
+    authFailedIps: Array.isArray(data.authFailedIps) ? data.authFailedIps.slice(0, 200) : [],
+    authFailedIpsTruncated: !!data.authFailedIpsTruncated,
     registered: data.registered || 0,
     truncated: !!data.truncated,
     durationMs: data.durationMs || null,
