@@ -176,8 +176,13 @@ export function setIdracScanResult(reqId, data = {}) {
   if (!j) return false;
   j.state = data.error ? 'error' : 'done';
   j.doneAt = Date.now();
+  const af = data.authFailed || 0;
   if (data.error) addEvent(j, `오류로 종료 — ${data.error}`, 'error');
-  else addEvent(j, `완료 — 스캔 ${data.scanned || 0}개 · iDRAC ${data.foundCount ?? (Array.isArray(data.found) ? data.found.length : 0)}대 발견 · 현지 등록 ${data.registered || 0}대 · 무응답 ${data.unreachable || 0} · 비iDRAC ${data.notIdrac || 0} · 인증실패 ${data.authFailed || 0}${data.durationMs ? ` · 소요 ${Math.round(data.durationMs / 1000)}초` : ''}`);
+  else {
+    addEvent(j, `완료 — 스캔 ${data.scanned || 0}개 · iDRAC ${data.foundCount ?? (Array.isArray(data.found) ? data.found.length : 0)}대 발견 · 현지 등록 ${data.registered || 0}대 · 무응답 ${data.unreachable || 0} · 비iDRAC ${data.notIdrac || 0} · 인증실패 ${af}${data.durationMs ? ` · 소요 ${Math.round(data.durationMs / 1000)}초` : ''}`);
+    // 인증실패가 있으면 원인을 별도 경고 이벤트로 남긴다('계정 맞는데 401'의 실제 이유).
+    if (af > 0 && data.authFailReason) addEvent(j, `인증실패 원인: ${data.authFailReason}`, 'warn');
+  }
   // 비밀번호 등 민감정보는 저장하지 않는다(result는 발견 목록·요약만).
   j.result = {
     scanned: data.scanned || 0,
@@ -185,7 +190,8 @@ export function setIdracScanResult(reqId, data = {}) {
     found: Array.isArray(data.found) ? data.found.slice(0, 5000) : [],
     unreachable: data.unreachable || 0,
     notIdrac: data.notIdrac || 0,
-    authFailed: data.authFailed || 0,
+    authFailed: af,
+    authFailReason: data.authFailReason || null,
     registered: data.registered || 0,
     truncated: !!data.truncated,
     durationMs: data.durationMs || null,
