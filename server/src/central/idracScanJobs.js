@@ -14,6 +14,17 @@
 
 import { expandIpList } from '../idrac/iprange.js';
 
+// 스캔에 실제로 사용된 자격증명의 '지문' — 평문은 절대 남기지 않는다. 계정명 + 비밀번호 길이 +
+// 비복원 해시(djb2)만 표시해, "다른 법인은 되는데 이 법인만 인증 실패"일 때 법인 간 설정을
+// 눈으로 비교(계정/길이/지문이 같은지)할 수 있게 한다. 앞뒤 공백은 [공백] 표기로 드러낸다.
+function credFingerprint(username, password) {
+  const u = String(username ?? '');
+  const p = String(password ?? '');
+  let h = 5381; for (let i = 0; i < p.length; i++) h = (((h << 5) + h) ^ p.charCodeAt(i)) >>> 0;
+  const edge = /^\s|\s$/.test(p) ? ' · ⚠앞뒤공백' : '';
+  return `계정 '${u}'${/^\s|\s$/.test(u) ? '(⚠공백)' : ''} · 비번 ${p.length}자·#${h.toString(16).slice(0, 4)}${edge}`;
+}
+
 const jobs = new Map();    // reqId -> { reqId, agent, ips, username, password, state, createdAt, takenAt, result, doneAt, progress, events }
 const byAgent = new Map(); // agentLower -> Set<reqId> (대기 중)
 const agentPolls = new Map(); // agentLower -> 마지막 잡 인출 폴링 시각(ms) — '에이전트가 살아있나' 진단용
@@ -93,6 +104,8 @@ export function enqueueIdracScan(agent, { ips, username, password, vcenterId = '
   try { total = Math.min(expandIpList(ips).ips.length, 2048); } catch { total = 0; }
   const j = { reqId, agent, action: 'scan', ips, username, password, vcenterId, datacenterId, noRegister: !!noRegister, state: 'pending', createdAt: Date.now(), progress: { scanned: 0, total, at: Date.now() } };
   addEvent(j, `스캔 잡 생성 — 에이전트 '${agent}'${datacenterId ? ` · 법인 ${datacenterId}` : ''} · 대상 IP ${total}개. 에이전트 인출 대기 중.`);
+  // 사용된 자격증명 지문(평문 아님) — 법인 간 비교로 "이 법인만 인증 실패" 원인 파악용.
+  addEvent(j, `사용 자격증명: ${credFingerprint(username, password)} (평문 미기록 — 정상 법인과 계정/길이/지문 비교하세요)`);
   jobs.set(reqId, j);
   pend.add(reqId); byAgent.set(key, pend);
   return reqId;
