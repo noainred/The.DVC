@@ -41,6 +41,26 @@ export function allRemoteServers() {
   return out;
 }
 
+/**
+ * 물리 식별키(서비스태그>id>주소)로 원격 서버 목록을 dedup한다. 같은 엣지를 둘 이상의
+ * 수집서버(예: 대소문자만 다른 'nj'·'NJ')가 pull하면 동일 서버가 중복 유입돼 목록·집계가
+ * 2배로 부풀던 것을 방지한다. 중복 시 datacenterId가 채워진 쪽을 우선 보존(귀속 손실 방지).
+ * 서로 다른 엣지는 태그/id가 달라 합쳐지지 않는다.
+ */
+export function dedupRemoteServers(list = []) {
+  const norm = (v) => String(v || '').trim().toLowerCase();
+  const byKey = new Map();
+  const out = [];
+  for (const s of list) {
+    const key = norm(s.serviceTag) || norm(s.id) || norm(String(s.host || '').replace(/^https?:\/\//, ''));
+    if (!key) { out.push(s); continue; } // 키 없으면 합치지 않고 그대로
+    const idx = byKey.get(key);
+    if (idx === undefined) { byKey.set(key, out.length); out.push(s); continue; }
+    if (!out[idx].datacenterId && s.datacenterId) out[idx] = s; // 중복: datacenterId 있는 쪽 우선
+  }
+  return out;
+}
+
 /** Find one remote server by id (for the detail-inventory popup). */
 export function findRemoteServer(id) {
   const want = String(id || '');

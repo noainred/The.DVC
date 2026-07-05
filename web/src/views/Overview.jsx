@@ -15,9 +15,17 @@ export default function Overview({ onSelectSite, onGotoTab }) {
   const { data: alarmData } = usePolling('/alarms', { severity: undefined }, 15_000);
 
   // Shared (server-saved) map height + drag view(가로 회전 lambda·세로 이동)so everyone sees the same.
-  const [mapHeight, setMapHeight] = useState(420);
+  const [mapHeight, setMapHeight] = useState(320);
   const [mapView, setMapView] = useState({ lambda: -127, offsetY: 0 });
-  useEffect(() => { fetchJson('/ui-settings').then((s) => { setMapHeight(s.mapHeight || 420); setMapView({ lambda: s.mapLambda ?? -127, offsetY: s.mapOffsetY ?? 0 }); }).catch(() => {}); }, []);
+  useEffect(() => { fetchJson('/ui-settings').then((s) => {
+    // 과거 저장값이 상한(옛 1200)까지 커져 지도가 화면을 다 차지하던 것을 로드 시 새 상한(560)으로
+    // 줄이고, 서버에도 교정값을 저장해 재발을 막는다.
+    const raw = s.mapHeight || 320;
+    const fixed = Math.max(200, Math.min(560, raw));
+    setMapHeight(fixed);
+    if (raw !== fixed) putJson('/ui-settings', { mapHeight: fixed }).catch(() => {});
+    setMapView({ lambda: s.mapLambda ?? -127, offsetY: s.mapOffsetY ?? 0 });
+  }).catch(() => {}); }, []);
   const saveMapHeight = (px) => { setMapHeight(px); putJson('/ui-settings', { mapHeight: px }).catch(() => {}); };
   const saveMapView = ({ lambda, offsetY }) => { setMapView({ lambda, offsetY }); putJson('/ui-settings', { mapLambda: lambda, mapOffsetY: offsetY }).catch(() => {}); };
 
