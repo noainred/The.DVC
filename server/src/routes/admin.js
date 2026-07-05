@@ -95,7 +95,7 @@ import { getInventory as getIdracInventory } from '../idrac/invCache.js';
 import { getSensorSeries } from '../idrac/sensorStore.js';
 import { fetchInventory as fetchIdracInventory, fetchSensors as fetchIdracSensors, probeGpuTelemetry } from '../idrac/redfish.js';
 import { listCollectors, addCollector, updateCollector, removeCollector, loadCollectors } from '../collector/registry.js';
-import { allRemoteServers, findRemoteServer, clearCollectorServers } from '../collector/remoteInventory.js';
+import { allRemoteServers, findRemoteServer, clearCollectorServers, dedupRemoteServers } from '../collector/remoteInventory.js';
 import { matchDatacenterId } from '../collector/datacenterMatch.js';
 import { serverInScope } from '../insights/analysisScope.js';
 import { findHostByServiceTag } from '../idrac/hostMatch.js';
@@ -171,7 +171,10 @@ function collectorToDatacenterMap() {
 // 그 서버를 보고한 수집기(에이전트)의 소속 DataCenter로 자동 귀속시킨다.
 function remoteServersResolved() {
   const m = collectorToDatacenterMap();
-  return allRemoteServers().map((s) => ({ ...s, datacenterId: s.datacenterId || m.get(String(s.collectorId)) || '' }));
+  const resolved = allRemoteServers().map((s) => ({ ...s, datacenterId: s.datacenterId || m.get(String(s.collectorId)) || '' }));
+  // 같은 엣지를 둘 이상의 수집서버(대소문자만 다른 'nj'·'NJ' 등)가 pull하면 동일 물리 서버가
+  // 중복 유입돼 목록·집계가 2배가 된다 → 물리 식별키로 dedup.
+  return dedupRemoteServers(resolved);
 }
 
 // 서버 분석 공용(원격 포함) — 중앙 로컬 + 위임 법인의 원격 인벤토리를 병합(id 중복은 중앙 우선).
