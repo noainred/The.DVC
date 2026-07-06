@@ -17,6 +17,7 @@ export default function DatacenterAdmin() {
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState(null);    // { id, name, region, note, isNew } | null
   const [dirty, setDirty] = useState({});    // 변경된 vcenterId -> datacenterId (저장 전)
+  const [sort, setSort] = useState({ key: 'name', dir: 'asc' }); // 기본: 이름 오름차순(자동정렬)
 
   const loadDcs = () => fetchJson('/admin/datacenters').then((d) => { setDcs(d.datacenters || []); setAssign(d.assign || {}); setErr(null); }).catch((e) => setErr(e.message));
   useEffect(() => {
@@ -67,6 +68,21 @@ export default function DatacenterAdmin() {
   const countByDc = {};
   for (const vc of vcs) { const dc = curDc(vc.id); if (dc) countByDc[dc] = (countByDc[dc] || 0) + 1; }
 
+  // 정렬(자동: 기본 이름순 / 수동: 헤더 클릭). 한글·숫자 자연 정렬.
+  const toggleSort = (key) => setSort((s) => ({ key, dir: s.key === key && s.dir === 'asc' ? 'desc' : 'asc' }));
+  const arrow = (key) => (sort.key === key ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : '');
+  const sortVal = (d, key) => (key === 'count' ? (countByDc[d.id] || 0) : String(d[key] || '').toLowerCase());
+  const sortedDcs = [...dcs].sort((a, a2) => {
+    const va = sortVal(a, sort.key); const vb = sortVal(a2, sort.key);
+    let c;
+    if (sort.key === 'count') c = va - vb;
+    else c = String(va).localeCompare(String(vb), 'ko', { numeric: true });
+    return sort.dir === 'asc' ? c : -c;
+  });
+  const Th = ({ k, label, cls }) => (
+    <th className={cls} onClick={() => toggleSort(k)} style={{ cursor: 'pointer', userSelect: 'none' }} title="클릭하여 정렬">{label}{arrow(k)}</th>
+  );
+
   return (
     <>
       <div className="section-title" style={{ marginTop: 0 }}>🏢 DataCenter(법인) 관리</div>
@@ -98,10 +114,13 @@ export default function DatacenterAdmin() {
       )}
       <div className="table-wrap" style={{ marginBottom: 22 }}>
         <table>
-          <thead><tr><th>ID</th><th>이름</th><th>리전</th><th>vCenter 수</th><th>메모</th><th className="right">작업</th></tr></thead>
+          <thead><tr>
+            <Th k="id" label="ID" /><Th k="name" label="이름" /><Th k="region" label="리전" />
+            <Th k="count" label="vCenter 수" /><Th k="note" label="메모" /><th className="right">작업</th>
+          </tr></thead>
           <tbody>
             {dcs.length === 0 && <tr><td colSpan={6} className="center muted" style={{ padding: 24 }}>정의된 DataCenter가 없습니다. “+ DataCenter 추가”로 등록하세요.</td></tr>}
-            {dcs.map((d) => (
+            {sortedDcs.map((d) => (
               <tr key={d.id}>
                 <td><b>{d.id}</b></td>
                 <td>{d.name}</td>
