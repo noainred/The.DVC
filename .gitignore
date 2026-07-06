@@ -56,6 +56,9 @@ server/config/audit.ndjson
 server/config/alerts.json
 server/config/host-temp.db
 server/config/host-temp.ndjson
+server/config/ping-monitor.db
+server/config/ping-monitor.ndjson
+server/config/ping-targets.json
 
 # 포탈 백업(런타임)
 server/config/backups/

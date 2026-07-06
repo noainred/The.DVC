@@ -58,6 +58,8 @@ import { startLogPoller } from './logs/poller.js';
 import { startLogQueryWorker } from './agent/logQueryWorker.js';
 import { startCaptureWorker } from './agent/captureWorker.js';
 import { startCaptureMonitor } from './net/monitor.js';
+import { pingRouter } from './routes/ping.js';
+import { startPingMonitor } from './ping/monitor.js';
 import { startLoginMonitor } from './security/loginMonitor.js';
 import { startGuestScanScheduler } from './security/guestScanScheduler.js';
 import { startOsScanner } from './inventory/osScanner.js';
@@ -102,6 +104,7 @@ app.use('/api/upgrade', authMiddleware, upgradeRouter); // admin-gated auto-upgr
 app.use('/api/admin', authMiddleware, auditMiddleware, adminRouter);     // admin-gated vCenter management
 app.use('/api/remote', authMiddleware, auditMiddleware, remoteRouter);   // remote access (HAProxy/SSH/RDP)
 app.use('/api/insights', authMiddleware, insightsRouter); // FinOps·이상탐지·예측·보안·토폴로지·인시던트·ChatOps
+app.use('/api/ping', authMiddleware, pingRouter);       // 네트워크 Ping 모니터링(조회=인증, 대상관리=관리자)
 app.use('/api', authMiddleware, api);                   // protected resource endpoints
 
 // 외부 공개용 소개 페이지 — 로그인 없이 접근 가능한 정적 데모(/intro, /intro/light.html).
@@ -141,7 +144,7 @@ const stagger = [
   startIdracPoller, startIdracScanPoller, startNsxPoller, startAlertEngine, startMetricsSampler, startGpuGuestPoller, startPhysicalGpuPoller,
   startIpScanPoller, startIpScanAgent, startCollectorPuller, startAgentScanner, startIdracScanWorker, startInventoryPush,
   startGpuGuestPush, startPingWorker, startConfigPush, startFleetPush, startBackupScheduler, startLogPoller, startLogQueryWorker, startCaptureWorker, startCaptureMonitor, startLoginMonitor, startGuestScanScheduler, startOsScanner,
-  startDbSizeSampler,
+  startDbSizeSampler, startPingMonitor,
 ];
 stagger.forEach((start, i) => setTimeout(() => { try { start(); } catch (e) { console.error('[start] 폴러 기동 실패:', e?.message); } }, i * 1500).unref?.());
 
