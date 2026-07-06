@@ -49,7 +49,11 @@ public sealed class Database : IDisposable
                 sort INTEGER NOT NULL DEFAULT 0,
                 type TEXT NOT NULL DEFAULT 'UAG',
                 scheme TEXT NOT NULL DEFAULT 'https',
-                match_text TEXT NOT NULL DEFAULT ''
+                match_text TEXT NOT NULL DEFAULT '',
+                lat REAL NOT NULL DEFAULT 0,
+                lon REAL NOT NULL DEFAULT 0,
+                region TEXT NOT NULL DEFAULT '',
+                city TEXT NOT NULL DEFAULT ''
             );
             CREATE TABLE IF NOT EXISTS samples (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -72,6 +76,10 @@ public sealed class Database : IDisposable
         TryExec("ALTER TABLE endpoints ADD COLUMN type TEXT NOT NULL DEFAULT 'UAG'");
         TryExec("ALTER TABLE endpoints ADD COLUMN scheme TEXT NOT NULL DEFAULT 'https'");
         TryExec("ALTER TABLE endpoints ADD COLUMN match_text TEXT NOT NULL DEFAULT ''");
+        TryExec("ALTER TABLE endpoints ADD COLUMN lat REAL NOT NULL DEFAULT 0");
+        TryExec("ALTER TABLE endpoints ADD COLUMN lon REAL NOT NULL DEFAULT 0");
+        TryExec("ALTER TABLE endpoints ADD COLUMN region TEXT NOT NULL DEFAULT ''");
+        TryExec("ALTER TABLE endpoints ADD COLUMN city TEXT NOT NULL DEFAULT ''");
     }
 
     private void TryExec(string sql)
@@ -100,7 +108,7 @@ public sealed class Database : IDisposable
         {
             var list = new List<Endpoint>();
             using var cmd = _conn.CreateCommand();
-            cmd.CommandText = "SELECT id,name,datacenter,host,port,path,interval_sec,timeout_ms,enabled,sort,type,scheme,match_text FROM endpoints ORDER BY sort, datacenter, name";
+            cmd.CommandText = "SELECT id,name,datacenter,host,port,path,interval_sec,timeout_ms,enabled,sort,type,scheme,match_text,lat,lon,region,city FROM endpoints ORDER BY sort, datacenter, name";
             using var r = cmd.ExecuteReader();
             while (r.Read())
             {
@@ -119,6 +127,10 @@ public sealed class Database : IDisposable
                     Type = r.IsDBNull(10) ? "UAG" : r.GetString(10),
                     Scheme = r.IsDBNull(11) ? "https" : r.GetString(11),
                     MatchText = r.IsDBNull(12) ? "" : r.GetString(12),
+                    Lat = r.IsDBNull(13) ? 0 : r.GetDouble(13),
+                    Lon = r.IsDBNull(14) ? 0 : r.GetDouble(14),
+                    Region = r.IsDBNull(15) ? "" : r.GetString(15),
+                    City = r.IsDBNull(16) ? "" : r.GetString(16),
                 });
             }
             return list;
@@ -133,13 +145,13 @@ public sealed class Database : IDisposable
             if (e.Id > 0)
             {
                 cmd.CommandText = @"UPDATE endpoints SET name=$n,datacenter=$dc,host=$h,port=$p,path=$pa,
-                    interval_sec=$iv,timeout_ms=$to,enabled=$en,sort=$so,type=$ty,scheme=$sc,match_text=$mt WHERE id=$id";
+                    interval_sec=$iv,timeout_ms=$to,enabled=$en,sort=$so,type=$ty,scheme=$sc,match_text=$mt,lat=$lat,lon=$lon,region=$rg,city=$ci WHERE id=$id";
                 cmd.Parameters.AddWithValue("$id", e.Id);
             }
             else
             {
-                cmd.CommandText = @"INSERT INTO endpoints (name,datacenter,host,port,path,interval_sec,timeout_ms,enabled,sort,type,scheme,match_text)
-                    VALUES ($n,$dc,$h,$p,$pa,$iv,$to,$en,$so,$ty,$sc,$mt)";
+                cmd.CommandText = @"INSERT INTO endpoints (name,datacenter,host,port,path,interval_sec,timeout_ms,enabled,sort,type,scheme,match_text,lat,lon,region,city)
+                    VALUES ($n,$dc,$h,$p,$pa,$iv,$to,$en,$so,$ty,$sc,$mt,$lat,$lon,$rg,$ci)";
             }
             cmd.Parameters.AddWithValue("$n", e.Name);
             cmd.Parameters.AddWithValue("$dc", e.Datacenter ?? "");
@@ -153,6 +165,10 @@ public sealed class Database : IDisposable
             cmd.Parameters.AddWithValue("$ty", string.IsNullOrWhiteSpace(e.Type) ? "UAG" : e.Type);
             cmd.Parameters.AddWithValue("$sc", string.Equals(e.Scheme, "http", StringComparison.OrdinalIgnoreCase) ? "http" : "https");
             cmd.Parameters.AddWithValue("$mt", e.MatchText ?? "");
+            cmd.Parameters.AddWithValue("$lat", e.Lat);
+            cmd.Parameters.AddWithValue("$lon", e.Lon);
+            cmd.Parameters.AddWithValue("$rg", e.Region ?? "");
+            cmd.Parameters.AddWithValue("$ci", e.City ?? "");
             cmd.ExecuteNonQuery();
             if (e.Id > 0) return e.Id;
             // last_insert_rowid()는 같은 연결에서 별도 조회(배치+ExecuteScalar의 미묘한 동작 회피).

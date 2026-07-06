@@ -19,17 +19,22 @@ public sealed class MainForm : Form
 
     private readonly SummaryHeader _header = new();
     private readonly Panel _content = new() { Dock = DockStyle.Fill };
-    private readonly FlowLayoutPanel _dashboard = new() { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = true, AutoScroll = true, BackColor = Color.FromArgb(243, 244, 246), Padding = new Padding(12) };
+    private readonly WorldMap _map = new() { Dock = DockStyle.Fill };
+    private readonly FlowLayoutPanel _dashboard = new() { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = true, AutoScroll = true, BackColor = Color.FromArgb(243, 244, 246), Padding = new Padding(12), Visible = false };
     private readonly List<Label> _groupHeaders = new();
     private readonly DataGridView _grid = new() { Dock = DockStyle.Fill, Visible = false };
     private readonly Label _summary = new();
+    private readonly ToolStripButton _viewMap;
     private readonly ToolStripButton _viewCards;
     private readonly ToolStripButton _viewTable;
     private readonly System.Windows.Forms.Timer _uiTimer = new();
 
+    private enum ViewMode { Map, Cards, Table }
     private readonly Dictionary<long, EndpointCard> _cards = new();
     private string _layoutSig = "";
-    private bool _tableView;
+    private ViewMode _view = ViewMode.Map;
+    private int _sortCol = -1;      // 표 정렬 컬럼(-1=기본)
+    private bool _sortAsc = true;   // 정렬 방향
     private volatile bool _dirty = true;
     private int _uiTick;
     private Icon? _formIcon;
@@ -54,8 +59,10 @@ public sealed class MainForm : Form
         tool.Items.Add(new ToolStripButton("CSV 내보내기", null, (_, _) => ExportCsv()));
         tool.Items.Add(new ToolStripButton("새로고침", null, (_, _) => { _dirty = true; }));
         tool.Items.Add(new ToolStripSeparator());
-        _viewCards = new ToolStripButton("카드", null, (_, _) => SetView(false)) { Checked = true };
-        _viewTable = new ToolStripButton("표", null, (_, _) => SetView(true));
+        _viewMap = new ToolStripButton("지도", null, (_, _) => SetView(ViewMode.Map)) { Checked = true };
+        _viewCards = new ToolStripButton("카드", null, (_, _) => SetView(ViewMode.Cards));
+        _viewTable = new ToolStripButton("표", null, (_, _) => SetView(ViewMode.Table));
+        tool.Items.Add(_viewMap);
         tool.Items.Add(_viewCards);
         tool.Items.Add(_viewTable);
         tool.Items.Add(new ToolStripButton("DB 위치 열기", null, (_, _) => OpenDbFolder()) { Alignment = ToolStripItemAlignment.Right });
@@ -73,6 +80,7 @@ public sealed class MainForm : Form
         _dashboard.Resize += (_, _) => UpdateHeaderWidths();
 
         SetupGrid();
+        _content.Controls.Add(_map);
         _content.Controls.Add(_dashboard);
         _content.Controls.Add(_grid);
 
@@ -85,29 +93,47 @@ public sealed class MainForm : Form
         _uiTimer.Tick += (_, _) => { if (_dirty || (++_uiTick % 5 == 0)) { _dirty = false; RefreshAll(); } };
         _uiTimer.Start();
 
+        LoadUserLocation();
         _monitor.Updated += OnMonitorUpdated;
         Load += (_, _) => RefreshAll();
     }
 
     private void OnMonitorUpdated() => _dirty = true;
 
-    private void SetView(bool table)
+    private void SetView(ViewMode v)
     {
-        _tableView = table;
-        _viewCards.Checked = !table;
-        _viewTable.Checked = table;
-        _dashboard.Visible = !table;
-        _grid.Visible = table;
+        _view = v;
+        _viewMap.Checked = v == ViewMode.Map;
+        _viewCards.Checked = v == ViewMode.Cards;
+        _viewTable.Checked = v == ViewMode.Table;
+        _map.Visible = v == ViewMode.Map;
+        _dashboard.Visible = v == ViewMode.Cards;
+        _grid.Visible = v == ViewMode.Table;
         _dirty = true;
     }
+
+    /// <summary>DB 설정에서 사용자(매니저) 위치를 읽어 지도에 반영.</summary>
+    private void LoadUserLocation()
+    {
+        double lat = ParseD(_db.GetSetting("userLat"));
+        double lon = ParseD(_db.GetSetting("userLon"));
+        var label = _db.GetSetting("userCity") ?? "내 위치";
+        _map.SetUser(lat, lon, string.IsNullOrWhiteSpace(label) ? "내 위치" : label);
+    }
+
+    private static double ParseD(string? s) => double.TryParse(s, System.Globalization.NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : 0;
 
     // ── 공통 새로고침 ─────────────────────────────────────────────────────────
     private void RefreshAll()
     {
         var snap = _monitor.Snapshot();
         UpdateHeader(snap);
-        if (_tableView) RefreshGrid(snap);
-        else RefreshDashboard(snap);
+        switch (_view)
+        {
+            case ViewMode.Map: _map.SetData(snap); break;
+            case ViewMode.Cards: RefreshDashboard(snap); break;
+            case ViewMode.Table: RefreshGrid(snap); break;
+        }
         _summary.Text = $"DB: {_db.DbPath}";
     }
 
@@ -230,10 +256,62 @@ public sealed class MainForm : Form
         Col("resp", "응답(ms)", 9);
         Col("cert", "인증서(일)", 9);
         Col("checked", "마지막 점검", 14);
+        // 제목 클릭 정렬(오름/내림 토글). 자동 새로고침에도 유지되도록 데이터 정렬 방식 사용.
+        foreach (DataGridViewColumn c in _grid.Columns) c.SortMode = DataGridViewColumnSortMode.NotSortable;
+        _grid.ColumnHeaderMouseClick += (_, e) => OnHeaderClick(e.ColumnIndex);
     }
+
+    private void OnHeaderClick(int col)
+    {
+        if (col < 0) return;
+        if (_sortCol == col) _sortAsc = !_sortAsc; else { _sortCol = col; _sortAsc = true; }
+        foreach (DataGridViewColumn c in _grid.Columns) c.HeaderCell.SortGlyphDirection = SortOrder.None;
+        _grid.Columns[col].HeaderCell.SortGlyphDirection = _sortAsc ? SortOrder.Ascending : SortOrder.Descending;
+        _dirty = true;
+    }
+
+    private List<EndpointStatus> SortSnap(List<EndpointStatus> snap)
+    {
+        if (_sortCol < 0) return snap;
+        bool numeric = _sortCol is 0 or 5 or 6 or 7 or 8 or 9;
+        double sentinel = _sortAsc ? double.PositiveInfinity : double.NegativeInfinity;
+        if (numeric)
+        {
+            double Key(EndpointStatus es)
+            {
+                var s = es.Latest;
+                return _sortCol switch
+                {
+                    0 => SeverityRank(es.Status, es.Endpoint.Enabled),
+                    5 => s?.HttpStatus ?? sentinel,
+                    6 => s?.ConnectMs ?? sentinel,
+                    7 => s?.ResponseMs ?? sentinel,
+                    8 => s?.CertExpiryDays ?? sentinel,
+                    9 => s != null ? s.TimestampUtc.Ticks : sentinel,
+                    _ => 0,
+                };
+            }
+            return (_sortAsc ? snap.OrderBy(Key) : snap.OrderByDescending(Key)).ToList();
+        }
+        string SKey(EndpointStatus es)
+        {
+            var e = es.Endpoint;
+            return _sortCol switch
+            {
+                1 => e.Name, 2 => e.Type, 3 => e.Datacenter, 4 => $"{e.Scheme}://{e.Host}:{e.Port}", _ => e.Name,
+            } ?? "";
+        }
+        return (_sortAsc ? snap.OrderBy(SKey, StringComparer.OrdinalIgnoreCase) : snap.OrderByDescending(SKey, StringComparer.OrdinalIgnoreCase)).ToList();
+    }
+
+    private static int SeverityRank(HealthStatus s, bool enabled) => !enabled ? 0 : s switch
+    {
+        HealthStatus.Down => 4, HealthStatus.Warn => 3, HealthStatus.Up => 2, _ => 1,
+    };
 
     private void RefreshGrid(List<EndpointStatus> snap)
     {
+        snap = SortSnap(snap); // 현재 정렬 컬럼/방향으로 정렬(자동 새로고침에도 유지)
         _grid.SuspendLayout();
         _grid.Rows.Clear();
         foreach (var es in snap)
@@ -263,7 +341,7 @@ public sealed class MainForm : Form
     private void OpenSettings()
     {
         using var f = new SettingsForm(_db, _monitor);
-        if (f.ShowDialog(this) == DialogResult.OK) { _monitor.ApplyThresholds(); _monitor.CheckAllNow(); _layoutSig = ""; _dirty = true; }
+        if (f.ShowDialog(this) == DialogResult.OK) { _monitor.ApplyThresholds(); LoadUserLocation(); _monitor.CheckAllNow(); _layoutSig = ""; _dirty = true; }
     }
 
     private void OpenHistory()

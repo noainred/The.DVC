@@ -31,6 +31,11 @@ public sealed class Endpoint
     public string Scheme { get; set; } = "https";
     // 콘텐츠 검증 키워드(선택): 응답 본문에 이 문자열이 있어야 '정상'. 비면 검사 안 함(포탈 정상 로딩 확인용).
     public string MatchText { get; set; } = "";
+    // 세계지도 표시용 위치/리전. Lat/Lon 둘 다 0이면 지도에 표시 안 함.
+    public double Lat { get; set; } = 0;
+    public double Lon { get; set; } = 0;
+    public string Region { get; set; } = "";
+    public string City { get; set; } = ""; // 도시명(입력 시 좌표 자동 조회)
 
     [JsonIgnore]
     public string Url
