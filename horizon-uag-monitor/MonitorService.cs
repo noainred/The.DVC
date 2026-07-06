@@ -1,0 +1,246 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using System.Net.Http;
+using System.Net.Security;
+using System.Net.Sockets;
+using System.Security.Cryptography.X509Certificates;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace HorizonUagMonitor;
+
+/// <summary>
+/// 점검 엔진 — 대상별 주기(interval)에 맞춰 443 TCP 연결·TLS 인증서·HTTPS 응답을 점검하고
+/// 결과를 DB에 누적한다. 동시성 제한(SemaphoreSlim), 대상별 재진입 방지(_inFlight),
+/// prune 스로틀을 적용해 다수 대상·고지연에서도 안정적으로 동작한다.
+/// </summary>
+public sealed class MonitorService : IDisposable
+{
+    private readonly Database _db;
+    private readonly SemaphoreSlim _concurrency;
+    private readonly object _gate = new();
+    private readonly HashSet<long> _inFlight = new();
+    private readonly Dictionary<long, DateTime> _lastCheck = new();
+    private CancellationTokenSource? _cts;
+    private Task? _loop;
+    private int _tick;
+    private volatile bool _forceAll;
+
+    public int CertWarnDays { get; set; } = 30;
+    public double WarnLatencyMs { get; set; } = 3000;
+    public int RetentionDays { get; set; } = 365;
+
+    /// <summary>한 대상 점검이 끝날 때마다 발생(백그라운드 스레드). UI는 스스로 스레드 마샬링할 것.</summary>
+    public event Action? Updated;
+
+    public MonitorService(Database db, int maxConcurrency = 8)
+    {
+        _db = db;
+        _concurrency = new SemaphoreSlim(Math.Max(1, maxConcurrency));
+        CertWarnDays = db.GetIntSetting("certWarnDays", 30);
+        WarnLatencyMs = db.GetIntSetting("warnLatencyMs", 3000);
+        RetentionDays = db.GetIntSetting("retentionDays", 365);
+    }
+
+    public void Start()
+    {
+        if (_loop != null) return;
+        _cts = new CancellationTokenSource();
+        _loop = Task.Run(() => LoopAsync(_cts.Token));
+    }
+
+    public void Stop()
+    {
+        try { _cts?.Cancel(); } catch { /* ignore */ }
+        try { _loop?.Wait(3000); } catch { /* ignore */ }
+        _loop = null;
+    }
+
+    /// <summary>즉시 전체 재점검 요청(다음 틱에 모든 활성 대상 점검).</summary>
+    public void CheckAllNow() => _forceAll = true;
+
+    /// <summary>설정 변경 후 임계값 재적용.</summary>
+    public void ApplyThresholds()
+    {
+        CertWarnDays = _db.GetIntSetting("certWarnDays", 30);
+        WarnLatencyMs = _db.GetIntSetting("warnLatencyMs", 3000);
+        RetentionDays = _db.GetIntSetting("retentionDays", 365);
+    }
+
+    /// <summary>현재 대상 + 최신 상태 스냅샷(UI 그리드용).</summary>
+    public List<EndpointStatus> Snapshot()
+    {
+        var eps = _db.ListEndpoints();
+        var latest = _db.LatestByEndpoint();
+        return eps.Select(e => new EndpointStatus { Endpoint = e, Latest = latest.TryGetValue(e.Id, out var s) ? s : null }).ToList();
+    }
+
+    public HealthStatus OverallStatus()
+    {
+        var snap = Snapshot().Where(s => s.Endpoint.Enabled).ToList();
+        if (snap.Count == 0) return HealthStatus.Unknown;
+        if (snap.Any(s => s.Status == HealthStatus.Down)) return HealthStatus.Down;
+        if (snap.Any(s => s.Status == HealthStatus.Warn)) return HealthStatus.Warn;
+        if (snap.All(s => s.Status == HealthStatus.Unknown)) return HealthStatus.Unknown;
+        return HealthStatus.Up;
+    }
+
+    private async Task LoopAsync(CancellationToken token)
+    {
+        while (!token.IsCancellationRequested)
+        {
+            try
+            {
+                var force = _forceAll;
+                _forceAll = false;
+                var now = DateTime.UtcNow;
+                foreach (var ep in _db.ListEndpoints())
+                {
+                    if (!ep.Enabled) continue;
+                    bool due;
+                    lock (_gate)
+                    {
+                        if (_inFlight.Contains(ep.Id)) continue; // 진행 중이면 이번 틱 건너뜀
+                        due = force || !_lastCheck.TryGetValue(ep.Id, out var last)
+                              || (now - last).TotalSeconds >= Math.Max(5, ep.IntervalSec);
+                        if (!due) continue;
+                        _inFlight.Add(ep.Id);
+                        _lastCheck[ep.Id] = now;
+                    }
+                    _ = RunCheckAsync(ep, token);
+                }
+
+                // prune 스로틀: 약 5분마다(틱 1s 기준 300틱).
+                if (RetentionDays > 0 && (++_tick % 300 == 0))
+                {
+                    try { _db.Prune(RetentionDays); } catch { /* ignore */ }
+                }
+            }
+            catch { /* 루프는 죽지 않는다 */ }
+
+            try { await Task.Delay(1000, token); } catch { break; }
+        }
+    }
+
+    private async Task RunCheckAsync(Endpoint ep, CancellationToken token)
+    {
+        await _concurrency.WaitAsync(token).ConfigureAwait(false);
+        try
+        {
+            var sample = await CheckEndpointAsync(ep, token).ConfigureAwait(false);
+            _db.InsertSample(sample);
+        }
+        catch { /* 개별 점검 실패는 격리 */ }
+        finally
+        {
+            _concurrency.Release();
+            lock (_gate) { _inFlight.Remove(ep.Id); }
+            try { Updated?.Invoke(); } catch { /* ignore */ }
+        }
+    }
+
+    /// <summary>대상 1개 점검: TCP(443) 연결 → HTTPS GET(인증서·상태·지연). 예외는 상태로 환원.</summary>
+    private async Task<Sample> CheckEndpointAsync(Endpoint ep, CancellationToken token)
+    {
+        var sample = new Sample { EndpointId = ep.Id, TimestampUtc = DateTime.UtcNow, Status = HealthStatus.Unknown };
+        var timeout = Math.Max(1000, ep.TimeoutMs);
+
+        // 1) TCP 연결 지연(443 도달성)
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(token);
+            linked.CancelAfter(timeout);
+            using var tcp = new TcpClient();
+            await tcp.ConnectAsync(ep.Host, ep.Port, linked.Token).ConfigureAwait(false);
+            sw.Stop();
+            sample.TcpOk = true;
+            sample.ConnectMs = sw.Elapsed.TotalMilliseconds;
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            sample.TcpOk = false;
+            sample.Status = HealthStatus.Down;
+            sample.Error = $"TCP {ep.Port} 연결 실패: {Short(ex)}";
+            return sample;
+        }
+
+        // 2) HTTPS GET — 인증서(만료일) 캡처 + HTTP 상태 + 응답시간
+        DateTime? certNotAfterUtc = null;
+        bool tlsHandshook = false;
+        using var handler = new HttpClientHandler
+        {
+            CheckCertificateRevocationList = false,
+            // UAG는 자체/사설 인증서가 흔하므로 신뢰검증에 실패해도 도달성 모니터링은 계속한다(만료일만 기록).
+            // 콜백에서 만료일만 읽어둔다(인증서 객체는 콜백 이후 파기될 수 있으므로 보관하지 않음).
+            ServerCertificateCustomValidationCallback = (msg, c, chain, errors) =>
+            {
+                if (c != null) { try { certNotAfterUtc = c.NotAfter.ToUniversalTime(); tlsHandshook = true; } catch { /* ignore */ } }
+                return true;
+            },
+            AllowAutoRedirect = false,
+        };
+        using var client = new HttpClient(handler) { Timeout = TimeSpan.FromMilliseconds(timeout) };
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("HorizonUagMonitor/1.0");
+
+        var sw2 = Stopwatch.StartNew();
+        try
+        {
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(token);
+            linked.CancelAfter(timeout);
+            using var resp = await client.GetAsync(ep.HttpsUrl, HttpCompletionOption.ResponseHeadersRead, linked.Token).ConfigureAwait(false);
+            sw2.Stop();
+            sample.ResponseMs = sw2.Elapsed.TotalMilliseconds;
+            sample.HttpStatus = (int)resp.StatusCode;
+            sample.TlsOk = tlsHandshook;
+        }
+        catch (Exception ex)
+        {
+            sw2.Stop();
+            sample.ResponseMs = sw2.Elapsed.TotalMilliseconds;
+            sample.TlsOk = tlsHandshook;
+            sample.Error = $"HTTPS 오류: {Short(ex)}";
+        }
+
+        if (certNotAfterUtc != null)
+        {
+            var days = (int)Math.Floor((certNotAfterUtc.Value - DateTime.UtcNow).TotalDays);
+            sample.CertExpiryDays = days;
+        }
+
+        sample.Status = Classify(sample);
+        return sample;
+    }
+
+    private HealthStatus Classify(Sample s)
+    {
+        if (!s.TcpOk) return HealthStatus.Down;
+        var httpOk = s.HttpStatus is >= 200 and <= 399;
+        var certOk = s.CertExpiryDays is null || s.CertExpiryDays > CertWarnDays;
+        var latencyOk = s.ResponseMs is null || s.ResponseMs <= WarnLatencyMs;
+        if (httpOk && certOk && latencyOk && s.Error == null) return HealthStatus.Up;
+        // 도달은 하나 HTTP 비정상 / 인증서 임박·만료 / 지연 과다 / TLS 오류
+        var reasons = new List<string>();
+        if (!httpOk) reasons.Add(s.HttpStatus is null ? "HTTPS 무응답" : $"HTTP {s.HttpStatus}");
+        if (!certOk) reasons.Add(s.CertExpiryDays <= 0 ? "인증서 만료" : $"인증서 {s.CertExpiryDays}일 남음");
+        if (!latencyOk) reasons.Add($"지연 {s.ResponseMs:F0}ms");
+        if (reasons.Count > 0 && s.Error == null) s.Error = string.Join(", ", reasons);
+        return HealthStatus.Warn;
+    }
+
+    private static string Short(Exception ex)
+    {
+        var m = ex is OperationCanceledException ? "시간 초과" : (ex.InnerException?.Message ?? ex.Message);
+        return m.Length > 120 ? m.Substring(0, 120) : m;
+    }
+
+    public void Dispose()
+    {
+        Stop();
+        _cts?.Dispose();
+        _concurrency.Dispose();
+    }
+}
