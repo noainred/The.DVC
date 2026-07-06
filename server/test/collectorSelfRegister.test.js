@@ -61,3 +61,40 @@ test('idracScanJobs: 스캔 잡에 자격증명 지문(평문 아님) 이벤트 
   const d = j.enqueueIdracScan('dcD', { ips: '10.9.3.0/30', username: 'root', password: 'S3cret!x ', datacenterId: 'dcD' });
   assert.match(fp(d), /공백/);
 });
+
+// 대소문자 중복 방지 — 'GM1' 수동 등록 후 엣지가 'gm1'로 자기등록해도 새 항목이 생기지 않고
+// 기존 'GM1'을 갱신한다(수집서버가 2개씩 뜨던 버그 방지).
+test('upsertCollectorFromAgent: 대소문자만 다른 이름은 기존 항목 갱신(중복 미생성)', () => {
+  reg.addCollector({ id: 'GM1', name: 'GM1', url: 'http://192.168.60.221:4000', token: 't1', datacenter: 'GM1', vcenterId: 'vc-gm1' });
+  const r = reg.upsertCollectorFromAgent({ name: 'gm1', url: 'http://192.168.60.221:4000', token: 't2' });
+  assert.equal(r.ok, true);
+  const gm = reg.loadCollectors().filter((c) => String(c.id).toLowerCase() === 'gm1');
+  assert.equal(gm.length, 1);          // 2개가 아니라 1개
+  assert.equal(gm[0].id, 'GM1');       // 기존 id 보존
+  assert.equal(gm[0].vcenterId, 'vc-gm1'); // 관리자 매핑 보존
+  assert.equal(gm[0].token, 't2');     // 토큰 갱신
+});
+
+test('addCollector: 대소문자만 다른 id 중복 등록 거부', () => {
+  reg.addCollector({ id: 'HD', name: 'HD', url: 'http://192.168.79.221:4000', token: 'x' });
+  const r = reg.addCollector({ id: 'hd', name: 'hd', url: 'http://192.168.79.221:4000', token: 'y' });
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /이미 존재/);
+});
+
+test('loadCollectors: 기존 대소문자 중복(수동+자기등록 잔재)을 로드 시 1개로 병합', () => {
+  // collectors.json에 대소문자 중복이 이미 있는 상태를 직접 만든 뒤 로드 시 자동 정리 확인.
+  const FILE = path.join(tmp, 'collectors.json');
+  const dupes = { collectors: [
+    { id: 'HM', name: 'HM', url: 'http://192.168.80.221:4000', token: 'a', datacenter: 'HM', vcenterId: 'vc-hm', enabled: true },
+    { id: 'hm', name: 'HM', url: 'http://192.168.80.221:4000', token: 'a', datacenter: 'HM', enabled: true },
+    { id: 'ST', name: 'ST', url: 'http://192.168.84.221:4000', token: 'b', enabled: true },
+  ] };
+  fs.writeFileSync(FILE, JSON.stringify(dupes), { mode: 0o600 });
+  const loaded = reg.loadCollectors();
+  const hm = loaded.filter((c) => String(c.id).toLowerCase() === 'hm');
+  assert.equal(hm.length, 1);           // HM/hm → 1개
+  assert.equal(hm[0].vcenterId, 'vc-hm'); // vcenterId 있는 쪽이 생존
+  const st = loaded.filter((c) => String(c.id).toLowerCase() === 'st');
+  assert.equal(st.length, 1);           // 중복 없던 것은 그대로
+});
