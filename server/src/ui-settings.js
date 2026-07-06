@@ -9,7 +9,8 @@ import path from 'node:path';
 import { config } from './config.js';
 
 const FILE = path.join(config.configDir, 'ui.json');
-const DEFAULTS = { mapHeight: 420, mapLambda: -127, mapOffsetY: 0 };
+// mapSpread: 같은/비슷한 좌표의 법인 마커를 겹치지 않게 흩뜨리는 반경(px). 0이면 분산 안 함(겹침).
+const DEFAULTS = { mapHeight: 420, mapLambda: -127, mapOffsetY: 0, mapSpread: 10 };
 
 export function loadUiSettings() {
   try {
@@ -33,6 +34,10 @@ export function saveUiSettings(partial = {}) {
   }
   if (partial.mapOffsetY != null && Number.isFinite(Number(partial.mapOffsetY))) {
     next.mapOffsetY = Math.max(-1200, Math.min(1200, Math.round(Number(partial.mapOffsetY))));
+  }
+  // 마커 분산 반경(px) — 0~60. 0이면 겹침(분산 off).
+  if (partial.mapSpread != null && Number.isFinite(Number(partial.mapSpread))) {
+    next.mapSpread = Math.max(0, Math.min(60, Math.round(Number(partial.mapSpread))));
   }
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
   fs.writeFileSync(FILE, JSON.stringify(next, null, 2));

@@ -17,6 +17,7 @@ export default function Overview({ onSelectSite, onGotoTab }) {
   // Shared (server-saved) map height + drag view(가로 회전 lambda·세로 이동)so everyone sees the same.
   const [mapHeight, setMapHeight] = useState(320);
   const [mapView, setMapView] = useState({ lambda: -127, offsetY: 0 });
+  const [mapSpread, setMapSpread] = useState(10); // 마커 분산 반경(px), 0=off
   useEffect(() => { fetchJson('/ui-settings').then((s) => {
     // 과거 저장값이 상한(옛 1200)까지 커져 지도가 화면을 다 차지하던 것을 로드 시 새 상한(560)으로
     // 줄이고, 서버에도 교정값을 저장해 재발을 막는다.
@@ -25,9 +26,11 @@ export default function Overview({ onSelectSite, onGotoTab }) {
     setMapHeight(fixed);
     if (raw !== fixed) putJson('/ui-settings', { mapHeight: fixed }).catch(() => {});
     setMapView({ lambda: s.mapLambda ?? -127, offsetY: s.mapOffsetY ?? 0 });
+    setMapSpread(s.mapSpread ?? 10);
   }).catch(() => {}); }, []);
   const saveMapHeight = (px) => { setMapHeight(px); putJson('/ui-settings', { mapHeight: px }).catch(() => {}); };
   const saveMapView = ({ lambda, offsetY }) => { setMapView({ lambda, offsetY }); putJson('/ui-settings', { mapLambda: lambda, mapOffsetY: offsetY }).catch(() => {}); };
+  const saveMapSpread = (px) => { setMapSpread(px); putJson('/ui-settings', { mapSpread: px }).catch(() => {}); };
 
   // 글로벌 현황 KPI를 '1줄'로 유지 — 한 줄에 안 들어가 둘째 줄로 넘어간 박스는 통째로 숨긴다(부분 잘림 없음).
   const kpisRef = useRef(null);
@@ -113,7 +116,7 @@ export default function Overview({ onSelectSite, onGotoTab }) {
 
       <div className="section-title">전세계 데이터센터 분포 <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>(+/- 로 크기 조절 · 드래그로 이동 · 모든 사용자 공유)</span></div>
       <ErrorBoundary fallback={<div className="card error-box">지도를 불러올 수 없습니다.</div>}>
-        <WorldMap sites={sites} onSelect={onSelectSite} height={mapHeight} onResizeEnd={saveMapHeight} lambda={mapView.lambda} offsetY={mapView.offsetY} onViewEnd={saveMapView} />
+        <WorldMap sites={sites} onSelect={onSelectSite} height={mapHeight} onResizeEnd={saveMapHeight} lambda={mapView.lambda} offsetY={mapView.offsetY} onViewEnd={saveMapView} spreadPx={mapSpread} onSpreadEnd={saveMapSpread} />
       </ErrorBoundary>
 
       <div className="grid cols-2" style={{ marginTop: 16 }}>
