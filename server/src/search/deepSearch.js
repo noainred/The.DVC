@@ -35,6 +35,32 @@ function ipInCidr(ip, cidr) {
   } catch { return false; }
 }
 
+/**
+ * IP 스캔으로 발견된 항목(vCenter가 모르는 물리서버·네트워크장비 등)을 검색 필터(f)로 거른다.
+ * IP성 조건(ip/subnet/q)이 하나라도 있을 때만 매칭(빈 검색에 스캔 전체를 쏟지 않도록).
+ * scan: [{ ip, hostname, openPorts, services, lastSeen }], histMap: ip→{firstSeen,lastSeen}.
+ */
+export function filterScanResults(scan = [], f = {}, histMap = {}) {
+  const ipf = String(f.ip || '').trim();
+  const subnet = String(f.subnet || '').trim();
+  const q = String(f.q || '').trim().toLowerCase();
+  if (!ipf && !subnet && !q) return []; // IP성 조건 없으면 스캔 결과 미포함
+  const out = [];
+  for (const s of scan) {
+    if (!s || !s.ip) continue;
+    if (ipf && !(s.ip === ipf || s.ip.startsWith(ipf))) continue;
+    if (subnet && subnet.includes('/') && !ipInCidr(s.ip, subnet)) continue;
+    if (q && !(s.ip.includes(q) || String(s.hostname || '').toLowerCase().includes(q)
+      || (s.services || []).some((v) => String(v).toLowerCase().includes(q)))) continue;
+    const h = histMap[s.ip] || {};
+    out.push({
+      ip: s.ip, hostname: s.hostname || '', openPorts: s.openPorts || [], services: s.services || [],
+      firstSeen: h.firstSeen || null, lastSeen: s.lastSeen || h.lastSeen || null, agent: s.agent || '',
+    });
+  }
+  return out;
+}
+
 /** 스냅샷 1차 필터. { vcenterIds[], f{} } → matching VM[]. */
 export function snapshotFilter(snap, { vcenterIds = [], f = {} } = {}) {
   const set = new Set(vcenterIds || []);
