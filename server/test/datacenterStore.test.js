@@ -65,3 +65,29 @@ test('updateDatacenter: 이름/리전 수정', () => {
   assert.equal(updateDatacenter('dc1', { name: '' }).ok, false); // name 비우기 불가
   assert.equal(updateDatacenter('nope', { name: 'x' }).ok, false);
 });
+
+test('removeDatacenter + ensureDatacenter: 삭제한 법인은 자동 백필로 부활하지 않음(tombstone)', () => {
+  // 수집서버 백필 시나리오: WA-IRS 법인이 ensure로 생성됨
+  ensureDatacenter({ id: 'WA-IRS', name: 'WA-IRS' });
+  assert.ok(listDatacenters().some((d) => d.id === 'wa-irs'));
+  // 관리자가 삭제
+  const del = removeDatacenter('wa-irs');
+  assert.equal(del.ok, true);
+  assert.equal(listDatacenters().some((d) => d.id === 'wa-irs'), false);
+  // 수집서버가 계속 존재해 다시 ensure(백필)해도 부활하지 않아야 한다
+  const re = ensureDatacenter({ id: 'WA-IRS', name: 'WA-IRS' });
+  assert.equal(re.skipped, 'deleted');
+  assert.equal(listDatacenters().some((d) => d.id === 'wa-irs'), false);
+});
+
+test('addDatacenter: 명시적 재등록은 tombstone 해제(다시 원하면 살아남)', () => {
+  ensureDatacenter({ id: 'wa-irs', name: 'WA-IRS' });
+  removeDatacenter('wa-irs');
+  assert.equal(ensureDatacenter({ id: 'wa-irs' }).skipped, 'deleted'); // 아직 tombstone
+  // 관리자가 명시적으로 다시 추가
+  const add = addDatacenter({ id: 'wa-irs', name: 'WA-IRS' });
+  assert.equal(add.ok, true);
+  assert.ok(listDatacenters().some((d) => d.id === 'wa-irs'));
+  // 이제 ensure가 정상 no-op(부활 아님, 이미 존재)
+  assert.equal(ensureDatacenter({ id: 'wa-irs', name: 'WA-IRS' }).existed, true);
+});

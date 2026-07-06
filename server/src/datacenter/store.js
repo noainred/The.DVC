@@ -34,8 +34,11 @@ function loadRaw() {
     cache = {
       datacenters: Array.isArray(p.datacenters) ? p.datacenters : [],
       assign: (p.assign && typeof p.assign === 'object') ? p.assign : {},
+      // 관리자가 명시적으로 삭제한 DataCenter id(tombstone). 수집서버 백필(ensureDatacenter)이
+      // 삭제한 법인을 매 조회마다 되살리던 문제 방지 — 명시적 재등록(addDatacenter) 시 해제.
+      deleted: Array.isArray(p.deleted) ? p.deleted : [],
     };
-  } catch { cache = { datacenters: [], assign: {} }; }
+  } catch { cache = { datacenters: [], assign: {}, deleted: [] }; }
   cacheTok = t;
   return cache;
 }
@@ -70,7 +73,8 @@ export function addDatacenter(body = {}) {
   const cur = loadRaw();
   if (cur.datacenters.some((d) => d.id === id)) return { ok: false, reason: `이미 존재하는 DataCenter: ${id}` };
   const entry = { id, name: name.slice(0, 128), region: norm(body.region).slice(0, 64), note: norm(body.note).slice(0, 256) };
-  try { save({ ...cur, datacenters: [...cur.datacenters, entry] }); }
+  // 명시적 추가는 tombstone 해제(관리자가 다시 원함).
+  try { save({ ...cur, datacenters: [...cur.datacenters, entry], deleted: (cur.deleted || []).filter((x) => x !== id) }); }
   catch (e) { return { ok: false, reason: `저장 실패: ${e.message}` }; }
   return { ok: true, datacenter: entry };
 }
@@ -80,7 +84,10 @@ export function addDatacenter(body = {}) {
 export function ensureDatacenter(body = {}) {
   const id = idOf(body.id);
   if (!id || !/^[a-z0-9._-]{1,64}$/.test(id)) return { ok: false, reason: 'invalid id' };
-  if (loadRaw().datacenters.some((d) => d.id === id)) return { ok: true, existed: true, datacenter: { id } };
+  const cur = loadRaw();
+  if (cur.datacenters.some((d) => d.id === id)) return { ok: true, existed: true, datacenter: { id } };
+  // 관리자가 삭제한 법인은 자동 재생성하지 않는다(백필로 부활 방지). 다시 원하면 명시적 등록.
+  if ((cur.deleted || []).includes(id)) return { ok: true, skipped: 'deleted', datacenter: { id } };
   return addDatacenter({ id, name: norm(body.name) || id, region: body.region, note: body.note });
 }
 
@@ -104,7 +111,10 @@ export function removeDatacenter(id) {
   // 이 DataCenter에 할당돼 있던 vCenter 매핑도 함께 정리(유령 매핑 방지).
   const assign = {};
   for (const [vc, dc] of Object.entries(cur.assign)) if (dc !== id) assign[vc] = dc;
-  try { save({ datacenters: cur.datacenters.filter((d) => d.id !== id), assign }); }
+  // tombstone 기록 — 수집서버 백필(ensureDatacenter)이 삭제한 법인을 매 조회마다 되살리던
+  // 문제 방지(예: WA-IRS 수집서버가 계속 존재해 삭제 직후 재생성되던 것).
+  const deleted = Array.from(new Set([...(cur.deleted || []), idOf(id)]));
+  try { save({ datacenters: cur.datacenters.filter((d) => d.id !== id), assign, deleted }); }
   catch (e) { return { ok: false, reason: `저장 실패: ${e.message}` }; }
   return { ok: true };
 }
