@@ -37,13 +37,13 @@ public sealed class SettingsForm : Form
         _list.GridLines = true;
         _list.Dock = DockStyle.Top;
         _list.Height = 300;
-        _list.Columns.Add("이름", 130);
-        _list.Columns.Add("데이터센터", 130);
-        _list.Columns.Add("호스트", 190);
-        _list.Columns.Add("포트", 55);
-        _list.Columns.Add("경로", 90);
-        _list.Columns.Add("주기(s)", 60);
-        _list.Columns.Add("활성", 55);
+        _list.Columns.Add("이름", 120);
+        _list.Columns.Add("유형", 55);
+        _list.Columns.Add("데이터센터", 110);
+        _list.Columns.Add("주소", 210);
+        _list.Columns.Add("경로", 80);
+        _list.Columns.Add("주기(s)", 55);
+        _list.Columns.Add("활성", 50);
         _list.DoubleClick += (_, _) => EditSelected();
 
         var btns = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 40, Padding = new Padding(4) };
@@ -98,7 +98,7 @@ public sealed class SettingsForm : Form
         _list.Items.Clear();
         foreach (var e in _db.ListEndpoints())
         {
-            var it = new ListViewItem(new[] { e.Name, e.Datacenter, e.Host, e.Port.ToString(CultureInfo.InvariantCulture), e.Path, e.IntervalSec.ToString(CultureInfo.InvariantCulture), e.Enabled ? "예" : "아니오" })
+            var it = new ListViewItem(new[] { e.Name, e.Type, e.Datacenter, $"{e.Scheme}://{e.Host}:{e.Port}", e.Path, e.IntervalSec.ToString(CultureInfo.InvariantCulture), e.Enabled ? "예" : "아니오" })
             { Tag = e };
             _list.Items.Add(it);
         }
@@ -232,10 +232,13 @@ public sealed class EndpointEditForm : Form
 {
     private readonly Endpoint _e;
     private readonly TextBox _name = new();
+    private readonly ComboBox _type = new();
     private readonly TextBox _dc = new();
+    private readonly ComboBox _scheme = new();
     private readonly TextBox _host = new();
     private readonly NumericUpDown _port = new();
     private readonly TextBox _path = new();
+    private readonly TextBox _match = new();
     private readonly NumericUpDown _interval = new();
     private readonly NumericUpDown _timeout = new();
     private readonly CheckBox _enabled = new();
@@ -244,32 +247,42 @@ public sealed class EndpointEditForm : Form
     {
         _e = e;
         Text = "대상 편집";
-        Width = 440;
-        Height = 360;
+        Width = 460;
+        Height = 500;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = false; MaximizeBox = false;
         Font = new System.Drawing.Font("Segoe UI", 9f);
 
-        var t = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, Padding = new Padding(12), RowCount = 9 };
-        t.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
+        var t = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, Padding = new Padding(12), RowCount = 12 };
+        t.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 140));
         t.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         void Row(string label, Control c) { t.Controls.Add(new Label { Text = label, AutoSize = true, Anchor = AnchorStyles.Left }); c.Dock = DockStyle.Fill; t.Controls.Add(c); }
 
         _name.Text = e.Name;
+        _type.DropDownStyle = ComboBoxStyle.DropDownList; _type.Items.AddRange(new object[] { "UAG", "포탈" });
+        _type.SelectedItem = e.Type == "포탈" ? "포탈" : "UAG";
         _dc.Text = e.Datacenter;
+        _scheme.DropDownStyle = ComboBoxStyle.DropDownList; _scheme.Items.AddRange(new object[] { "https", "http" });
+        _scheme.SelectedItem = string.Equals(e.Scheme, "http", StringComparison.OrdinalIgnoreCase) ? "http" : "https";
         _host.Text = e.Host;
         _port.Minimum = 1; _port.Maximum = 65535; _port.Value = e.Port is >= 1 and <= 65535 ? e.Port : 443;
+        // 스킴 변경 시 기본 포트(443/80)면 그에 맞춰 자동 조정(사용자가 바꾼 값은 유지).
+        _scheme.SelectedIndexChanged += (_, _) => { if (_port.Value == 443 || _port.Value == 80) _port.Value = (string)_scheme.SelectedItem! == "http" ? 80 : 443; };
         _path.Text = string.IsNullOrEmpty(e.Path) ? "/" : e.Path;
+        _match.Text = e.MatchText;
         _interval.Minimum = 5; _interval.Maximum = 86400; _interval.Value = Math.Max(5, Math.Min(86400, e.IntervalSec));
         _timeout.Minimum = 1000; _timeout.Maximum = 60000; _timeout.Increment = 500; _timeout.Value = Math.Max(1000, Math.Min(60000, e.TimeoutMs));
         _enabled.Text = "활성(점검)"; _enabled.Checked = e.Enabled; _enabled.AutoSize = true;
 
         Row("이름", _name);
+        Row("유형", _type);
         Row("데이터센터", _dc);
+        Row("프로토콜", _scheme);
         Row("호스트/IP", _host);
         Row("포트", _port);
         Row("경로(예: /)", _path);
+        Row("콘텐츠 키워드(선택)", _match);
         Row("점검 주기(초)", _interval);
         Row("타임아웃(ms)", _timeout);
         t.Controls.Add(new Label()); t.Controls.Add(_enabled);
@@ -300,10 +313,13 @@ public sealed class EndpointEditForm : Form
         if (colon >= 0) host = host.Substring(0, colon);
 
         _e.Name = _name.Text.Trim();
+        _e.Type = (string?)_type.SelectedItem == "포탈" ? "포탈" : "UAG";
         _e.Datacenter = _dc.Text.Trim();
+        _e.Scheme = (string?)_scheme.SelectedItem == "http" ? "http" : "https";
         _e.Host = host;
         _e.Port = (int)_port.Value;
         _e.Path = string.IsNullOrWhiteSpace(_path.Text) ? "/" : _path.Text.Trim();
+        _e.MatchText = _match.Text.Trim();
         _e.IntervalSec = (int)_interval.Value;
         _e.TimeoutMs = (int)_timeout.Value;
         _e.Enabled = _enabled.Checked;

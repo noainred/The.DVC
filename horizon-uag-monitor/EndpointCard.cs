@@ -68,9 +68,10 @@ public sealed class EndpointCard : Panel
         using var dark = new SolidBrush(Color.FromArgb(33, 37, 41));
         using var gray = new SolidBrush(Color.FromArgb(134, 142, 150));
         g.DrawString(Ellipsis(g, ep.Name, FName, w - 120), FName, dark, 16, 10);
-        if (!string.IsNullOrEmpty(ep.Datacenter))
-            g.DrawString(Ellipsis(g, ep.Datacenter, FDc, w - 120), FDc, gray, 16, 33);
-        g.DrawString(Ellipsis(g, $"{ep.Host}:{ep.Port}", FHost, w - 24), FHost, gray, 16, 52);
+        var typeLabel = string.IsNullOrWhiteSpace(ep.Type) ? "UAG" : ep.Type;
+        var sub = string.IsNullOrEmpty(ep.Datacenter) ? typeLabel : $"{typeLabel} · {ep.Datacenter}";
+        g.DrawString(Ellipsis(g, sub, FDc, w - 120), FDc, gray, 16, 33);
+        g.DrawString(Ellipsis(g, $"{ep.Scheme}://{ep.Host}:{ep.Port}", FHost, w - 24), FHost, gray, 16, 52);
 
         // 우측 상단: 큰 현재 RTT + 상태 라벨
         using var statBrush = new SolidBrush(color);

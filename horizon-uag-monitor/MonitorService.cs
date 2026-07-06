@@ -179,13 +179,13 @@ public sealed class MonitorService : IDisposable
             return sample;
         }
 
-        // 2) HTTPS GET — 인증서(만료일) 캡처 + HTTP 상태 + 응답시간
+        // 2) HTTP(S) GET — (HTTPS면 인증서 만료일 캡처) + HTTP 상태 + 응답시간 + (선택) 콘텐츠 검증
         DateTime? certNotAfterUtc = null;
         bool tlsHandshook = false;
         using var handler = new HttpClientHandler
         {
             CheckCertificateRevocationList = false,
-            // UAG는 자체/사설 인증서가 흔하므로 신뢰검증에 실패해도 도달성 모니터링은 계속한다(만료일만 기록).
+            // UAG/포탈은 자체·사설 인증서가 흔하므로 신뢰검증 실패해도 도달성 모니터링은 계속한다(만료일만 기록).
             // 콜백에서 만료일만 읽어둔다(인증서 객체는 콜백 이후 파기될 수 있으므로 보관하지 않음).
             ServerCertificateCustomValidationCallback = (msg, c, chain, errors) =>
             {
@@ -197,23 +197,31 @@ public sealed class MonitorService : IDisposable
         using var client = new HttpClient(handler) { Timeout = TimeSpan.FromMilliseconds(timeout) };
         client.DefaultRequestHeaders.UserAgent.ParseAdd("HorizonUagMonitor/1.0");
 
+        bool wantBody = !string.IsNullOrWhiteSpace(ep.MatchText);
+        bool contentOk = true; // MatchText 없으면 검사 안 함(항상 통과)
         var sw2 = Stopwatch.StartNew();
         try
         {
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(token);
             linked.CancelAfter(timeout);
-            using var resp = await client.GetAsync(ep.HttpsUrl, HttpCompletionOption.ResponseHeadersRead, linked.Token).ConfigureAwait(false);
-            sw2.Stop();
+            var completion = wantBody ? HttpCompletionOption.ResponseContentRead : HttpCompletionOption.ResponseHeadersRead;
+            using var resp = await client.GetAsync(ep.Url, completion, linked.Token).ConfigureAwait(false);
             sample.ResponseMs = sw2.Elapsed.TotalMilliseconds;
             sample.HttpStatus = (int)resp.StatusCode;
             sample.TlsOk = tlsHandshook;
+            if (wantBody)
+            {
+                var body = await resp.Content.ReadAsStringAsync(linked.Token).ConfigureAwait(false);
+                contentOk = body.Contains(ep.MatchText, StringComparison.OrdinalIgnoreCase);
+            }
+            sw2.Stop();
         }
         catch (Exception ex)
         {
             sw2.Stop();
             sample.ResponseMs = sw2.Elapsed.TotalMilliseconds;
             sample.TlsOk = tlsHandshook;
-            sample.Error = $"HTTPS 오류: {Short(ex)}";
+            sample.Error = $"{(ep.Scheme == "http" ? "HTTP" : "HTTPS")} 오류: {Short(ex)}";
         }
 
         if (certNotAfterUtc != null)
@@ -222,22 +230,23 @@ public sealed class MonitorService : IDisposable
             sample.CertExpiryDays = days;
         }
 
-        sample.Status = Classify(sample);
+        sample.Status = Classify(sample, contentOk);
         return sample;
     }
 
-    private HealthStatus Classify(Sample s)
+    private HealthStatus Classify(Sample s, bool contentOk)
     {
         if (!s.TcpOk) return HealthStatus.Down;
         var httpOk = s.HttpStatus is >= 200 and <= 399;
         var certOk = s.CertExpiryDays is null || s.CertExpiryDays > CertWarnDays;
         var latencyOk = s.ResponseMs is null || s.ResponseMs <= WarnLatencyMs;
-        if (httpOk && certOk && latencyOk && s.Error == null) return HealthStatus.Up;
-        // 도달은 하나 HTTP 비정상 / 인증서 임박·만료 / 지연 과다 / TLS 오류
+        if (httpOk && certOk && latencyOk && contentOk && s.Error == null) return HealthStatus.Up;
+        // 도달은 하나 HTTP 비정상 / 인증서 임박·만료 / 지연 과다 / 콘텐츠 불일치 / TLS 오류
         var reasons = new List<string>();
-        if (!httpOk) reasons.Add(s.HttpStatus is null ? "HTTPS 무응답" : $"HTTP {s.HttpStatus}");
+        if (!httpOk) reasons.Add(s.HttpStatus is null ? "무응답" : $"HTTP {s.HttpStatus}");
         if (!certOk) reasons.Add(s.CertExpiryDays <= 0 ? "인증서 만료" : $"인증서 {s.CertExpiryDays}일 남음");
         if (!latencyOk) reasons.Add($"지연 {s.ResponseMs:F0}ms");
+        if (!contentOk) reasons.Add("콘텐츠 불일치");
         if (reasons.Count > 0 && s.Error == null) s.Error = string.Join(", ", reasons);
         return HealthStatus.Warn;
     }
