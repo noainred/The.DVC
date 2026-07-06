@@ -25,6 +25,7 @@ function loadRaw() {
   if (cache && t === cacheTok) return cache;
   try {
     const p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+<<<<<<< HEAD
     cache = {
       targets: Array.isArray(p.targets) ? p.targets : [],
       // 이미 자동 시드한 vCenter id 목록(tombstone). 사용자가 자동 대상을 삭제해도
@@ -32,10 +33,15 @@ function loadRaw() {
       seededVc: Array.isArray(p.seededVc) ? p.seededVc.map(String) : [],
     };
   } catch { cache = { targets: [], seededVc: [] }; }
+=======
+    cache = { targets: Array.isArray(p.targets) ? p.targets : [] };
+  } catch { cache = { targets: [] }; }
+>>>>>>> origin/claude/vmware-global-monitoring-portal-nrnpnt
   cacheTok = t;
   return cache;
 }
 
+<<<<<<< HEAD
 /** URL/호스트에서 호스트명(또는 IP)만 추출 — 'https://vc.corp:443/path' → 'vc.corp'. */
 function hostFromUrl(h) {
   const s = String(h || '').trim();
@@ -44,6 +50,8 @@ function hostFromUrl(h) {
   catch { return s.replace(/^https?:\/\//i, '').replace(/[/:].*$/, ''); }
 }
 
+=======
+>>>>>>> origin/claude/vmware-global-monitoring-portal-nrnpnt
 function save(next) {
   atomicWriteFileSync(FILE, JSON.stringify(next, null, 2));
   cache = next;
@@ -90,7 +98,11 @@ export function addTarget(body = {}) {
   if (!id) id = `t_${Date.now().toString(36)}_${cur.targets.length}`;
   if (cur.targets.some((t) => t.id === id)) return { ok: false, reason: `이미 존재하는 대상 id: ${id}` };
   const entry = { id, ...n };
+<<<<<<< HEAD
   try { save({ ...cur, targets: [...cur.targets, entry] }); } catch (e) { return { ok: false, reason: `저장 실패: ${e.message}` }; }
+=======
+  try { save({ targets: [...cur.targets, entry] }); } catch (e) { return { ok: false, reason: `저장 실패: ${e.message}` }; }
+>>>>>>> origin/claude/vmware-global-monitoring-portal-nrnpnt
   return { ok: true, target: clean(entry) };
 }
 
@@ -103,7 +115,11 @@ export function updateTarget(id, body = {}) {
   if (!SAFE_HOST.test(n.host)) return { ok: false, reason: 'host 형식이 올바르지 않습니다.' };
   if (n.kind === 'tcp' && !n.port) return { ok: false, reason: 'TCP 대상은 port가 필요합니다.' };
   const entry = { id: cur.targets[idx].id, ...n };
+<<<<<<< HEAD
   try { save({ ...cur, targets: cur.targets.map((t, i) => (i === idx ? entry : t)) }); } catch (e) { return { ok: false, reason: `저장 실패: ${e.message}` }; }
+=======
+  try { save({ targets: cur.targets.map((t, i) => (i === idx ? entry : t)) }); } catch (e) { return { ok: false, reason: `저장 실패: ${e.message}` }; }
+>>>>>>> origin/claude/vmware-global-monitoring-portal-nrnpnt
   return { ok: true, target: clean(entry) };
 }
 
@@ -111,6 +127,7 @@ export function removeTarget(id) {
   const cur = loadRaw();
   const tid = idOf(id);
   if (!cur.targets.some((t) => t.id === tid)) return { ok: false, reason: `없는 대상: ${id}` };
+<<<<<<< HEAD
   try { save({ ...cur, targets: cur.targets.filter((t) => t.id !== tid) }); } catch (e) { return { ok: false, reason: `저장 실패: ${e.message}` }; }
   return { ok: true, id: tid };
 }
@@ -143,6 +160,12 @@ export function seedVcenterTargets(vcenters = []) {
   return { ok: true, added: added.length };
 }
 
+=======
+  try { save({ targets: cur.targets.filter((t) => t.id !== tid) }); } catch (e) { return { ok: false, reason: `저장 실패: ${e.message}` }; }
+  return { ok: true, id: tid };
+}
+
+>>>>>>> origin/claude/vmware-global-monitoring-portal-nrnpnt
 /** 테스트/관리용 초기화. */
 export function resetTargets() {
   cache = null; cacheTok = '';

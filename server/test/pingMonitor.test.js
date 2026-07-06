@@ -1,7 +1,11 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+<<<<<<< HEAD
   listTargets, addTarget, updateTarget, removeTarget, getTarget, enabledTargets, resetTargets, seedVcenterTargets,
+=======
+  listTargets, addTarget, updateTarget, removeTarget, getTarget, enabledTargets, resetTargets,
+>>>>>>> origin/claude/vmware-global-monitoring-portal-nrnpnt
 } from '../src/ping/store.js';
 import { getPingDb } from '../src/ping/db.js';
 import { statusAll, seriesOf } from '../src/ping/service.js';
@@ -61,6 +65,7 @@ test('statusAll: baseline 대비 분류(ok/warn/crit/down)', async () => {
   ids.forEach((id) => db.dropTarget(id));
 });
 
+<<<<<<< HEAD
 test('seedVcenterTargets: vCenter 자동 등록(TCP 443) + 멱등 + 삭제 후 부활 방지', () => {
   const vcs = [
     { id: 'vc-eu', name: '유럽 vCenter', host: 'https://vcenter-eu.corp.local:443/sdk' },
@@ -85,6 +90,8 @@ test('seedVcenterTargets: vCenter 자동 등록(TCP 443) + 멱등 + 삭제 후 �
   assert.equal(getTarget('vc_vc-kr').host, '10.1.1.1');
 });
 
+=======
+>>>>>>> origin/claude/vmware-global-monitoring-portal-nrnpnt
 test('seriesOf: 자동 baseline(중앙값) + 다운샘플 버킷', async () => {
   const db = await getPingDb();
   const { target } = addTarget({ name: 'auto', host: '10.9.8.1' }); // baselineMs 없음 → 자동

@@ -99,7 +99,10 @@ export default function PingMonitor() {
     if (r.ok) { if (sel === t.id) setSel(null); flash(true, '삭제했습니다.'); } else flash(false, r.reason || '삭제 실패');
   };
   const pollNow = async () => { setBusy(true); const r = await postJson('/ping/poll-now').catch((e) => ({ ok: false, reason: e.message })); setBusy(false); flash(r.ok, r.ok ? `측정 완료 (${r.up ?? 0}/${r.measured ?? 0} 응답)` : (r.reason || '측정 실패')); if (r.ok) setTimeout(loadSeries, 500); };
+<<<<<<< HEAD
   const syncVc = async () => { setBusy(true); const r = await postJson('/ping/seed-vcenters').catch((e) => ({ ok: false, reason: e.message })); setBusy(false); flash(r.ok, r.ok ? (r.added ? `vCenter ${r.added}개를 대상으로 추가했습니다.` : '추가할 새 vCenter가 없습니다.') : (r.reason || '동기화 실패')); };
+=======
+>>>>>>> origin/claude/vmware-global-monitoring-portal-nrnpnt
 
   const counts = data?.counts || {};
   const selTarget = targets.find((t) => t.id === sel);
@@ -117,7 +120,10 @@ export default function PingMonitor() {
           <span className="muted" style={{ fontSize: 12 }}>총 {targets.length}개 대상 · 자동 측정</span>
         </div>
         {isAdmin && <div className="flex gap">
+<<<<<<< HEAD
           <button className="logout-btn" style={{ padding: '7px 12px' }} disabled={busy} onClick={syncVc} title="등록된 vCenter를 Ping 대상으로 자동 추가(TCP 443)">vCenter 동기화</button>
+=======
+>>>>>>> origin/claude/vmware-global-monitoring-portal-nrnpnt
           <button className="logout-btn" style={{ padding: '7px 12px' }} disabled={busy} onClick={pollNow}>지금 측정</button>
           <button className="login-btn" style={{ flex: 'none', padding: '7px 12px' }} onClick={() => setForm({ ...EMPTY })}>+ 대상 추가</button>
         </div>}
