@@ -20,6 +20,7 @@ export default function Collectors() {
   const [pwForm, setPwForm] = useState(null);   // 엣지 비번 일괄 변경 폼 | null
   const [pwResult, setPwResult] = useState(null); // 일괄 변경 결과 { total, succeeded, results, central }
   const [pwBusy, setPwBusy] = useState(false);
+  const [dcs, setDcs] = useState([]); // 데이터센터(법인) 목록 — 등록 폼 콤보박스용
 
   const load = async () => {
     try { setData(await fetchJson('/admin/collectors')); setError(null); }
@@ -34,6 +35,8 @@ export default function Collectors() {
   useEffect(() => {
     load(); loadIngest();
     fetchJson('/health').then((h) => setCentral(h.version)).catch(() => {});
+    fetchJson('/admin/datacenters').then((d) => setDcs(d.datacenters || [])).catch(() => {}); // 데이터센터 콤보박스 옵션
+
     const t = setInterval(() => { load(); loadIngest(); }, 15_000);
     return () => { clearInterval(t); if (reloadTimer.current) clearTimeout(reloadTimer.current); };
   }, []);
@@ -277,7 +280,13 @@ export default function Collectors() {
             <div className="spec-grid">
               <label>ID *<input className="input" value={form.id} onChange={setF('id')} disabled={editing} placeholder="dc-seoul" /></label>
               <label>표시 이름 *<input className="input" value={form.name} onChange={setF('name')} placeholder="서울 수집서버" /></label>
-              <label>데이터센터<input className="input" value={form.datacenter} onChange={setF('datacenter')} placeholder="Seoul-DC1" /></label>
+              <label>데이터센터
+                {/* 콤보박스: 등록된 법인 목록에서 선택하거나 직접 입력(datalist). */}
+                <input className="input" list="collector-dc-list" value={form.datacenter} onChange={setF('datacenter')} placeholder="목록에서 선택 또는 입력" autoComplete="off" />
+                <datalist id="collector-dc-list">
+                  {dcs.map((d) => <option key={d.id} value={d.id}>{d.name && d.name !== d.id ? `${d.name}${d.region ? ` · ${d.region}` : ''}` : (d.region || '')}</option>)}
+                </datalist>
+              </label>
               <label>수집 여부
                 <select className="select" value={form.enabled ? '1' : '0'} onChange={(e) => setForm((f) => ({ ...f, enabled: e.target.value === '1' }))}>
                   <option value="1">수집</option>
