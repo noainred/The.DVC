@@ -1,4 +1,5 @@
 using System;
+using System.Text.Json.Serialization;
 
 namespace HorizonUagMonitor;
 
@@ -25,6 +26,7 @@ public sealed class Endpoint
     public bool Enabled { get; set; } = true;
     public int Sort { get; set; } = 0;
 
+    [JsonIgnore]
     public string HttpsUrl
     {
         get

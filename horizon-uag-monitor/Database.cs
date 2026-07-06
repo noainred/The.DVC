@@ -200,6 +200,32 @@ public sealed class Database : IDisposable
         }
     }
 
+    /// <summary>대상별 최근 N개 샘플(오래된→최신) — 카드 스파크라인용(가볍게).</summary>
+    public List<Sample> RecentSamples(long endpointId, int limit = 40)
+    {
+        lock (_gate)
+        {
+            var list = new List<Sample>();
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = @"SELECT endpoint_id, ts, status, tcp_ok, connect_ms, tls_ok, http_status, response_ms, cert_expiry_days, error
+                FROM samples WHERE endpoint_id=$e ORDER BY ts DESC LIMIT $lim";
+            cmd.Parameters.AddWithValue("$e", endpointId);
+            cmd.Parameters.AddWithValue("$lim", limit);
+            using var r = cmd.ExecuteReader();
+            while (r.Read()) list.Add(ReadSample(r, epIdCol: 0, tsCol: 1, baseCol: 2));
+            list.Reverse();
+            return list;
+        }
+    }
+
+    /// <summary>대상별 최근 N개 샘플을 한 번에(대시보드 카드 다수용). 반환: id → 오래된→최신 리스트.</summary>
+    public Dictionary<long, List<Sample>> RecentSamplesAll(IEnumerable<long> ids, int limit = 40)
+    {
+        var map = new Dictionary<long, List<Sample>>();
+        foreach (var id in ids) map[id] = RecentSamples(id, limit);
+        return map;
+    }
+
     public List<Sample> History(long endpointId, DateTime sinceUtc, int maxRows = 20000)
     {
         lock (_gate)

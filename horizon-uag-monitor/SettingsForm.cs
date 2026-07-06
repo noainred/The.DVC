@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Windows.Forms;
@@ -50,6 +51,8 @@ public sealed class SettingsForm : Form
         btns.Controls.Add(MakeBtn("수정", (_, _) => EditSelected()));
         btns.Controls.Add(MakeBtn("삭제", (_, _) => DeleteSelected()));
         btns.Controls.Add(MakeBtn("기본 12개 데이터센터 채우기", (_, _) => SeedDefaults()));
+        btns.Controls.Add(MakeBtn("JSON 가져오기", (_, _) => ImportJson()));
+        btns.Controls.Add(MakeBtn("JSON 내보내기", (_, _) => ExportJson()));
 
         var thresh = new TableLayoutPanel { Dock = DockStyle.Top, Height = 130, ColumnCount = 2, Padding = new Padding(8) };
         thresh.Controls.Add(new Label { Text = "인증서 경고 임계(일 이하)", AutoSize = true }, 0, 0);
@@ -140,6 +143,58 @@ public sealed class SettingsForm : Form
         }
         LoadList();
     }
+
+    // ── JSON 가져오기/내보내기(실서버 대량 등록용) ─────────────────────────────
+    private static readonly System.Text.Json.JsonSerializerOptions JsonOpts = new()
+    {
+        WriteIndented = true,
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping, // 한글 그대로
+    };
+
+    private void ExportJson()
+    {
+        using var sfd = new SaveFileDialog { Filter = "JSON (*.json)|*.json", FileName = "horizon-uag-endpoints.json" };
+        if (sfd.ShowDialog(this) != DialogResult.OK) return;
+        try
+        {
+            var json = System.Text.Json.JsonSerializer.Serialize(_db.ListEndpoints(), JsonOpts);
+            System.IO.File.WriteAllText(sfd.FileName, json, new System.Text.UTF8Encoding(false));
+            MessageBox.Show(this, "내보내기 완료", "JSON", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex) { MessageBox.Show(this, ex.Message, "내보내기 오류", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+    }
+
+    private void ImportJson()
+    {
+        using var ofd = new OpenFileDialog { Filter = "JSON (*.json)|*.json" };
+        if (ofd.ShowDialog(this) != DialogResult.OK) return;
+        try
+        {
+            var json = System.IO.File.ReadAllText(ofd.FileName);
+            var imported = System.Text.Json.JsonSerializer.Deserialize<List<Endpoint>>(json) ?? new List<Endpoint>();
+            if (imported.Count == 0) { MessageBox.Show(this, "가져올 대상이 없습니다.", "JSON", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+            // 기존과 (이름+호스트+포트)로 매칭: 있으면 갱신, 없으면 추가(중복 방지).
+            var existing = _db.ListEndpoints().ToDictionary(x => Key(x), x => x.Id);
+            int added = 0, updated = 0, sort = _db.ListEndpoints().Count;
+            foreach (var e in imported)
+            {
+                if (string.IsNullOrWhiteSpace(e.Host)) continue;
+                if (e.Port is < 1 or > 65535) e.Port = 443;
+                if (string.IsNullOrWhiteSpace(e.Name)) e.Name = e.Host;
+                if (string.IsNullOrWhiteSpace(e.Path)) e.Path = "/";
+                if (e.IntervalSec < 5) e.IntervalSec = 60;
+                if (e.TimeoutMs < 1000) e.TimeoutMs = 5000;
+                if (existing.TryGetValue(Key(e), out var id)) { e.Id = id; updated++; }
+                else { e.Id = 0; e.Sort = sort++; added++; }
+                _db.UpsertEndpoint(e);
+            }
+            LoadList();
+            MessageBox.Show(this, $"가져오기 완료 — 추가 {added}건, 갱신 {updated}건", "JSON", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex) { MessageBox.Show(this, $"가져오기 실패: {ex.Message}", "JSON 오류", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+    }
+
+    private static string Key(Endpoint e) => $"{e.Name}|{e.Host}|{e.Port}".ToLowerInvariant();
 
     private void Save()
     {
