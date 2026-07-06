@@ -221,8 +221,9 @@ public sealed class MainForm : Form
         void Col(string name, string header, int fill)
             => _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = name, HeaderText = header, FillWeight = fill });
         Col("status", "상태", 8);
-        Col("name", "이름", 14);
-        Col("dc", "데이터센터", 16);
+        Col("name", "이름", 13);
+        Col("type", "유형", 7);
+        Col("dc", "데이터센터", 14);
         Col("host", "호스트:포트", 22);
         Col("http", "HTTP", 8);
         Col("connect", "연결(ms)", 9);
@@ -239,7 +240,7 @@ public sealed class MainForm : Form
         {
             var e = es.Endpoint; var s = es.Latest;
             var idx = _grid.Rows.Add(
-                StatusText(es.Status, e.Enabled), e.Name, e.Datacenter, $"{e.Host}:{e.Port}",
+                StatusText(es.Status, e.Enabled), e.Name, e.Type, e.Datacenter, $"{e.Scheme}://{e.Host}:{e.Port}",
                 s?.HttpStatus?.ToString(CultureInfo.InvariantCulture) ?? "—",
                 s?.ConnectMs is double cm ? cm.ToString("F0", CultureInfo.InvariantCulture) : "—",
                 s?.ResponseMs is double rm ? rm.ToString("F0", CultureInfo.InvariantCulture) : "—",

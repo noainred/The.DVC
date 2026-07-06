@@ -46,7 +46,10 @@ public sealed class Database : IDisposable
                 interval_sec INTEGER NOT NULL DEFAULT 60,
                 timeout_ms INTEGER NOT NULL DEFAULT 5000,
                 enabled INTEGER NOT NULL DEFAULT 1,
-                sort INTEGER NOT NULL DEFAULT 0
+                sort INTEGER NOT NULL DEFAULT 0,
+                type TEXT NOT NULL DEFAULT 'UAG',
+                scheme TEXT NOT NULL DEFAULT 'https',
+                match_text TEXT NOT NULL DEFAULT ''
             );
             CREATE TABLE IF NOT EXISTS samples (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -65,6 +68,19 @@ public sealed class Database : IDisposable
             CREATE INDEX IF NOT EXISTS idx_samples_ts ON samples (ts);
             CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
         ");
+        // 기존 DB 마이그레이션 — 신규 컬럼을 추가(이미 있으면 오류 무시). 포탈 모니터링 필드.
+        TryExec("ALTER TABLE endpoints ADD COLUMN type TEXT NOT NULL DEFAULT 'UAG'");
+        TryExec("ALTER TABLE endpoints ADD COLUMN scheme TEXT NOT NULL DEFAULT 'https'");
+        TryExec("ALTER TABLE endpoints ADD COLUMN match_text TEXT NOT NULL DEFAULT ''");
+    }
+
+    private void TryExec(string sql)
+    {
+        lock (_gate)
+        {
+            try { using var cmd = _conn.CreateCommand(); cmd.CommandText = sql; cmd.ExecuteNonQuery(); }
+            catch { /* 이미 존재하는 컬럼 등은 무시 */ }
+        }
     }
 
     private void Exec(string sql)
@@ -84,7 +100,7 @@ public sealed class Database : IDisposable
         {
             var list = new List<Endpoint>();
             using var cmd = _conn.CreateCommand();
-            cmd.CommandText = "SELECT id,name,datacenter,host,port,path,interval_sec,timeout_ms,enabled,sort FROM endpoints ORDER BY sort, datacenter, name";
+            cmd.CommandText = "SELECT id,name,datacenter,host,port,path,interval_sec,timeout_ms,enabled,sort,type,scheme,match_text FROM endpoints ORDER BY sort, datacenter, name";
             using var r = cmd.ExecuteReader();
             while (r.Read())
             {
@@ -100,6 +116,9 @@ public sealed class Database : IDisposable
                     TimeoutMs = r.GetInt32(7),
                     Enabled = r.GetInt32(8) != 0,
                     Sort = r.GetInt32(9),
+                    Type = r.IsDBNull(10) ? "UAG" : r.GetString(10),
+                    Scheme = r.IsDBNull(11) ? "https" : r.GetString(11),
+                    MatchText = r.IsDBNull(12) ? "" : r.GetString(12),
                 });
             }
             return list;
@@ -114,13 +133,13 @@ public sealed class Database : IDisposable
             if (e.Id > 0)
             {
                 cmd.CommandText = @"UPDATE endpoints SET name=$n,datacenter=$dc,host=$h,port=$p,path=$pa,
-                    interval_sec=$iv,timeout_ms=$to,enabled=$en,sort=$so WHERE id=$id";
+                    interval_sec=$iv,timeout_ms=$to,enabled=$en,sort=$so,type=$ty,scheme=$sc,match_text=$mt WHERE id=$id";
                 cmd.Parameters.AddWithValue("$id", e.Id);
             }
             else
             {
-                cmd.CommandText = @"INSERT INTO endpoints (name,datacenter,host,port,path,interval_sec,timeout_ms,enabled,sort)
-                    VALUES ($n,$dc,$h,$p,$pa,$iv,$to,$en,$so)";
+                cmd.CommandText = @"INSERT INTO endpoints (name,datacenter,host,port,path,interval_sec,timeout_ms,enabled,sort,type,scheme,match_text)
+                    VALUES ($n,$dc,$h,$p,$pa,$iv,$to,$en,$so,$ty,$sc,$mt)";
             }
             cmd.Parameters.AddWithValue("$n", e.Name);
             cmd.Parameters.AddWithValue("$dc", e.Datacenter ?? "");
@@ -131,6 +150,9 @@ public sealed class Database : IDisposable
             cmd.Parameters.AddWithValue("$to", e.TimeoutMs);
             cmd.Parameters.AddWithValue("$en", e.Enabled ? 1 : 0);
             cmd.Parameters.AddWithValue("$so", e.Sort);
+            cmd.Parameters.AddWithValue("$ty", string.IsNullOrWhiteSpace(e.Type) ? "UAG" : e.Type);
+            cmd.Parameters.AddWithValue("$sc", string.Equals(e.Scheme, "http", StringComparison.OrdinalIgnoreCase) ? "http" : "https");
+            cmd.Parameters.AddWithValue("$mt", e.MatchText ?? "");
             cmd.ExecuteNonQuery();
             if (e.Id > 0) return e.Id;
             // last_insert_rowid()는 같은 연결에서 별도 조회(배치+ExecuteScalar의 미묘한 동작 회피).

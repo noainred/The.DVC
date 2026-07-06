@@ -25,15 +25,23 @@ public sealed class Endpoint
     public int TimeoutMs { get; set; } = 5000;
     public bool Enabled { get; set; } = true;
     public int Sort { get; set; } = 0;
+    // 대상 유형(표시/분류용): 'UAG' | '포탈'(웹 포탈) 등. 기본 UAG.
+    public string Type { get; set; } = "UAG";
+    // 프로토콜: 'https' | 'http'. 포탈이 http/비-443일 수 있어 스킴을 명시한다.
+    public string Scheme { get; set; } = "https";
+    // 콘텐츠 검증 키워드(선택): 응답 본문에 이 문자열이 있어야 '정상'. 비면 검사 안 함(포탈 정상 로딩 확인용).
+    public string MatchText { get; set; } = "";
 
     [JsonIgnore]
-    public string HttpsUrl
+    public string Url
     {
         get
         {
+            var scheme = string.Equals(Scheme, "http", StringComparison.OrdinalIgnoreCase) ? "http" : "https";
             var p = string.IsNullOrEmpty(Path) ? "/" : (Path.StartsWith("/") ? Path : "/" + Path);
-            var portPart = Port == 443 ? "" : ":" + Port;
-            return $"https://{Host}{portPart}{p}";
+            var isDefault = (scheme == "https" && Port == 443) || (scheme == "http" && Port == 80);
+            var portPart = isDefault ? "" : ":" + Port;
+            return $"{scheme}://{Host}{portPart}{p}";
         }
     }
 }
