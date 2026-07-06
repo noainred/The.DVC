@@ -11,7 +11,8 @@
 
 import express from 'express';
 import { requireRole } from '../auth/auth.js';
-import { listTargets, addTarget, updateTarget, removeTarget } from '../ping/store.js';
+import { loadVcenterConfig } from '../config.js';
+import { listTargets, addTarget, updateTarget, removeTarget, seedVcenterTargets } from '../ping/store.js';
 import { statusAll, seriesOf } from '../ping/service.js';
 import { getPingDb } from '../ping/db.js';
 import { pollOnce } from '../ping/monitor.js';
@@ -57,5 +58,11 @@ pingRouter.delete('/targets/:id', adminOnly, async (req, res) => {
 
 pingRouter.post('/poll-now', adminOnly, async (_req, res) => {
   try { const r = await pollOnce(); res.json({ ok: true, ...(r || {}) }); }
+  catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+});
+
+// vCenter를 Ping 대상으로 동기화(신규 vCenter 자동 등록). 재시작 없이 즉시 반영.
+pingRouter.post('/seed-vcenters', adminOnly, (_req, res) => {
+  try { const { vcenters } = loadVcenterConfig(); res.json(seedVcenterTargets(vcenters)); }
   catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });

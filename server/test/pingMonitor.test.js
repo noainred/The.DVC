@@ -1,7 +1,7 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  listTargets, addTarget, updateTarget, removeTarget, getTarget, enabledTargets, resetTargets,
+  listTargets, addTarget, updateTarget, removeTarget, getTarget, enabledTargets, resetTargets, seedVcenterTargets,
 } from '../src/ping/store.js';
 import { getPingDb } from '../src/ping/db.js';
 import { statusAll, seriesOf } from '../src/ping/service.js';
@@ -59,6 +59,30 @@ test('statusAll: baseline 대비 분류(ok/warn/crit/down)', async () => {
     assert.equal(row.baselineAuto, false);
   }
   ids.forEach((id) => db.dropTarget(id));
+});
+
+test('seedVcenterTargets: vCenter 자동 등록(TCP 443) + 멱등 + 삭제 후 부활 방지', () => {
+  const vcs = [
+    { id: 'vc-eu', name: '유럽 vCenter', host: 'https://vcenter-eu.corp.local:443/sdk' },
+    { id: 'vc-us', name: 'US', host: '10.0.0.5' },       // 스킴 없는 IP
+    { id: 'bad', name: 'x', host: '' },                  // 호스트 없음 → 대상 미생성(시드만 기록)
+  ];
+  const r1 = seedVcenterTargets(vcs);
+  assert.equal(r1.added, 2);
+  const eu = getTarget('vc_vc-eu');
+  assert.equal(eu.host, 'vcenter-eu.corp.local'); // URL에서 호스트만 추출(포트/경로 제거)
+  assert.equal(eu.kind, 'tcp');
+  assert.equal(eu.port, 443);
+  assert.equal(getTarget('vc_vc-us').host, '10.0.0.5');
+  // 멱등: 다시 시드해도 추가 없음.
+  assert.equal(seedVcenterTargets(vcs).added, 0);
+  // 사용자가 삭제하면 재시드해도 부활하지 않음(seededVc tombstone).
+  assert.equal(removeTarget('vc_vc-eu').ok, true);
+  assert.equal(seedVcenterTargets(vcs).added, 0);
+  assert.equal(getTarget('vc_vc-eu'), null);
+  // 새 vCenter는 재시드에서 추가됨.
+  assert.equal(seedVcenterTargets([...vcs, { id: 'vc-kr', name: '서울', host: 'https://10.1.1.1' }]).added, 1);
+  assert.equal(getTarget('vc_vc-kr').host, '10.1.1.1');
 });
 
 test('seriesOf: 자동 baseline(중앙값) + 다운샘플 버킷', async () => {

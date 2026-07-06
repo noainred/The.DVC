@@ -10,9 +10,9 @@
  *  - 배치 insert는 트랜잭션(insertMany)으로 묶어 fsync 폭주/이벤트 루프 블로킹을 막는다.
  */
 
-import { config } from '../config.js';
+import { config, loadVcenterConfig } from '../config.js';
 import { getPingDb } from './db.js';
-import { enabledTargets } from './store.js';
+import { enabledTargets, seedVcenterTargets } from './store.js';
 import { pingOne, tcpConnect } from '../util/ping.js';
 
 let timer = null;
@@ -60,6 +60,8 @@ export async function pollOnce() {
 
 export function startPingMonitor() {
   if (!config.ping.enabled) { console.log('[ping] 모니터 비활성(PING_MON_ENABLED=false)'); return; }
+  // vCenter를 기본 Ping 대상으로 자동 등록(제어플레인 443). 이미 시드했거나 사용자가 삭제한 건 건너뜀.
+  try { const { vcenters } = loadVcenterConfig(); const r = seedVcenterTargets(vcenters); if (r.added) console.log(`[ping] vCenter ${r.added}개 자동 대상 등록`); } catch (e) { console.warn('[ping] vCenter 시드 실패:', e.message); }
   timer = setInterval(() => { pollOnce().catch((e) => console.warn('[ping] poll 오류:', e.message)); }, config.ping.pollIntervalMs);
   timer.unref?.();
   console.log(`[ping] 모니터 시작 (interval=${config.ping.pollIntervalMs}ms, timeout=${config.ping.timeoutMs}ms, conc=${config.ping.concurrency})`);
