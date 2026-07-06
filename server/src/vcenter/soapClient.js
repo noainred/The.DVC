@@ -392,11 +392,14 @@ function extractIPv4s(netXml, primary) {
     ip = String(ip || '').trim();
     if (isIPv4(ip) && !ip.startsWith('127.') && !ip.startsWith('169.254.') && ip !== '0.0.0.0' && !out.includes(ip)) out.push(ip);
   };
-  if (netXml) { for (const m of netXml.matchAll(/<ipAddress>([^<]+)<\/ipAddress>/g)) add(m[1]); }
+  // 일부 vCenter는 guest.net의 IP 원소를 <ipAddress xsi:type="xsd:string">처럼 속성을 붙여
+  // 직렬화한다 → 속성을 허용하지 않으면 guest.net의 IP가 전부 누락되고 primary(=주로 사설)만
+  // 남아, 'VM에 공인/추가 IP가 있어도 사설만 보이는' 문제가 생긴다. [^>]* 로 속성을 허용한다.
+  if (netXml) { for (const m of netXml.matchAll(/<ipAddress[^>]*>([^<]+)<\/ipAddress>/g)) add(m[1]); }
   add(primary);
   return out;
 }
-function vmIps(netXml, primary) {
+export function vmIps(netXml, primary) {
   const ips = extractIPv4s(netXml, primary);
   return { ipAddress: ips[0] || (isIPv4(primary) ? String(primary) : null), ipAddresses: ips };
 }
@@ -413,7 +416,7 @@ function vmGateways(ipStackXml) {
     const net = /<network>([^<]*)<\/network>/.exec(blk)?.[1] || '';
     const prefix = /<prefixLength>(\d+)<\/prefixLength>/.exec(blk)?.[1] || '';
     if ((net === '0.0.0.0' || net === '::') && (prefix === '0' || prefix === '')) {
-      const gw = /<gateway>[\s\S]*?<ipAddress>([^<]+)<\/ipAddress>/.exec(blk)?.[1];
+      const gw = /<gateway>[\s\S]*?<ipAddress[^>]*>([^<]+)<\/ipAddress>/.exec(blk)?.[1];
       if (gw && isIPv4(gw)) out.add(gw);
     }
   }
@@ -942,7 +945,7 @@ export async function collectFromVCenterSoap(vc) {
         build: p['summary.config.product.build'] || '',
         // 게스트 파일 회수용: vCenter 실제 IP(호스트가 보고) + ESXi 관리 IP(vmk).
         mgmtServerIp: p['summary.managementServerIp'] || '',
-        mgmtIp: (/<ipAddress>([^<]+)<\/ipAddress>/.exec(p['config.network.vnic'] || '')?.[1]) || '',
+        mgmtIp: (/<ipAddress[^>]*>([^<]+)<\/ipAddress>/.exec(p['config.network.vnic'] || '')?.[1]) || '',
         gpus: (() => {
           const gfx = parseGpus(p['config.graphicsInfo']);
           // vGPU/vSGA로 이미 잡힌 물리 GPU(pciId)는 패스쓰루에서 제외해 이중 집계 방지.
