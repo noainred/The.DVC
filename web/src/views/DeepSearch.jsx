@@ -35,8 +35,9 @@ function VmTable({ list, evidence }) {
 export default function DeepSearch() {
   const { data: vcs } = usePolling('/vcenters', {}, 60_000);
   const [scope, setScope] = useState(new Set()); // 빈 set = 전체
-  const [f, setF] = useState({ q: '', gateway: '', ip: '', subnet: '', guestOS: '', powerState: '', toolsStatus: '', gpuMode: '', cluster: '', host: '', vcpuMin: '', ramMinGB: '', diskMinGB: '', cpuUsageMin: '', hasSnapshot: false, notes: '' });
+  const [f, setF] = useState({ q: '', gateway: '', ip: '', subnet: '', guestOS: '', powerState: '', toolsStatus: '', gpuMode: '', cluster: '', host: '', vcpuMin: '', ramMinGB: '', diskMinGB: '', cpuUsageMin: '', hasSnapshot: false, notes: '', includeScan: false });
   const [items, setItems] = useState(null);
+  const [scanItems, setScanItems] = useState([]);
   const [total, setTotal] = useState(0);
   const [busy, setBusy] = useState(false);
   // 게스트 탐침
@@ -52,8 +53,8 @@ export default function DeepSearch() {
   const [searchErr, setSearchErr] = useState(null);
   const search = async () => {
     setBusy(true); setProbe(null); setSearchErr(null);
-    try { const r = await postJson('/tools/deep-search', body()); setItems(r.items || []); setTotal(r.total || 0); }
-    catch (e) { setItems([]); setTotal(0); setSearchErr(e.message); } // 실패를 무음 처리하면 이전 total이 남아 '결과 0건'으로 오인
+    try { const r = await postJson('/tools/deep-search', body()); setItems(r.items || []); setTotal(r.total || 0); setScanItems(r.scanItems || []); }
+    catch (e) { setItems([]); setTotal(0); setScanItems([]); setSearchErr(e.message); } // 실패를 무음 처리하면 이전 total이 남아 '결과 0건'으로 오인
     finally { setBusy(false); }
   };
   const runProbe = async () => {
@@ -65,7 +66,7 @@ export default function DeepSearch() {
 
   return (
     <div>
-      <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>다조건으로 VM을 검색합니다. 범위는 전체/특정/복수 vCenter. 게이트웨이·서브넷·OS·전원·GPU 등은 즉시 검색, GPU 드라이버·프로세스는 게스트 탐침(관리자).</p>
+      <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>다조건으로 VM을 검색합니다. 범위는 전체/특정/복수 vCenter. 게이트웨이·서브넷·OS·전원·GPU 등은 즉시 검색, GPU 드라이버·프로세스는 게스트 탐침(관리자). ‘IP 스캔 결과 포함’을 켜면 vCenter가 모르는 IP(물리서버·네트워크장비 등)도 함께 찾습니다.</p>
 
       {/* 범위 */}
       <div className="card" style={{ padding: 12, marginBottom: 10 }}>
@@ -96,6 +97,7 @@ export default function DeepSearch() {
           <span className="muted">디스크≥GB</span><Field f={f} setF={setF} k="diskMinGB" ph="" w={64} />
           <span className="muted">CPU사용%≥</span><Field f={f} setF={setF} k="cpuUsageMin" ph="" w={56} />
           <label className="flex gap" style={{ alignItems: 'center', fontSize: 13, cursor: 'pointer' }}><input type="checkbox" checked={f.hasSnapshot} onChange={(e) => setF({ ...f, hasSnapshot: e.target.checked })} /> 스냅샷 있음</label>
+          <label className="flex gap" style={{ alignItems: 'center', fontSize: 13, cursor: 'pointer' }} title="vCenter가 모르는 IP도 IP 스캔 결과에서 함께 검색(IP/서브넷/검색어 조건 필요)"><input type="checkbox" checked={f.includeScan} onChange={(e) => setF({ ...f, includeScan: e.target.checked })} /> IP 스캔 결과 포함</label>
           <button className="login-btn" style={{ padding: '8px 18px' }} disabled={busy} onClick={search}>{busy ? '검색 중…' : '🔍 검색'}</button>
         </div>
       </div>
@@ -127,6 +129,34 @@ export default function DeepSearch() {
           <div className="section-title" style={{ marginTop: 0, fontSize: 15 }}>검색 결과 — {total.toLocaleString()}대{total > 2000 ? ' (상위 2000 표시)' : ''}</div>
           {searchErr && <div className="badge red" style={{ marginBottom: 8 }}>검색 실패: {searchErr}</div>}
           {busy ? <Loading /> : items.length === 0 ? <div className="muted" style={{ fontSize: 12 }}>{searchErr ? '오류로 결과를 가져오지 못했습니다. 다시 시도하세요.' : '조건에 맞는 VM이 없습니다.'}</div> : <VmTable list={items} />}
+        </div>
+      )}
+
+      {/* IP 스캔으로 발견된(=vCenter가 모르는) 항목 — '포함' 옵션 켜고 IP/서브넷/검색어로 검색 시 */}
+      {!probe && f.includeScan && items != null && !busy && (
+        <div className="card" style={{ padding: 14, marginTop: 10 }}>
+          <div className="section-title" style={{ marginTop: 0, fontSize: 15 }}>IP 스캔 발견 항목 — {scanItems.length.toLocaleString()}건 <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>(vCenter가 모르는 IP · 물리서버/네트워크장비 등)</span></div>
+          {scanItems.length === 0 ? (
+            <div className="muted" style={{ fontSize: 12 }}>스캔 결과에서 일치하는 IP가 없습니다. (IP/서브넷/검색어 조건이 있어야 하며, IP 스캔이 실행돼 결과가 있어야 합니다)</div>
+          ) : (
+            <table className="data-table" style={{ width: '100%', fontSize: 12.5 }}>
+              <thead><tr>
+                <th style={{ textAlign: 'left' }}>IP</th><th style={{ textAlign: 'left' }}>호스트명</th>
+                <th style={{ textAlign: 'left' }}>열린 포트</th><th style={{ textAlign: 'left' }}>서비스</th>
+                <th style={{ textAlign: 'left' }}>최초 발견</th><th style={{ textAlign: 'left' }}>최근</th>
+              </tr></thead>
+              <tbody>{scanItems.slice(0, 500).map((s) => (
+                <tr key={s.ip}>
+                  <td><b>{s.ip}</b></td>
+                  <td className="muted">{s.hostname || '—'}</td>
+                  <td className="muted">{(s.openPorts || []).join(', ') || '—'}</td>
+                  <td className="muted">{(s.services || []).join(', ') || '—'}</td>
+                  <td className="muted">{s.firstSeen ? new Date(s.firstSeen).toLocaleString() : '—'}</td>
+                  <td className="muted">{s.lastSeen ? new Date(s.lastSeen).toLocaleString() : '—'}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          )}
         </div>
       )}
     </div>

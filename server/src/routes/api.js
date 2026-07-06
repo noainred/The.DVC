@@ -28,7 +28,7 @@ import { sendMaybeZip } from '../util/zip.js';
 import { getGuestGpuHost, getGuestGpuVms } from '../gpu/store.js';
 import { enqueuePing, getPingResults, setPingResults } from '../central/pingJobs.js';
 import { pingMany } from '../util/ping.js';
-import { snapshotFilter, slimVm } from '../search/deepSearch.js';
+import { snapshotFilter, slimVm, filterScanResults } from '../search/deepSearch.js';
 import { getServiceCheck } from '../health/services.js';
 import { getNetworkCheck } from '../health/network.js';
 import { buildVmwareConfigExport } from '../backup/vmwareExport.js';
@@ -918,8 +918,14 @@ api.get('/tools/gpu/vms', (req, res) => {
 // 심층 검색(스냅샷 1차) — 다조건 + 범위(전체/특정/복수 vCenter). Body: { vcenterIds[], filters{} }.
 api.post('/tools/deep-search', (req, res) => {
   const b = req.body || {};
-  const vms = snapshotFilter(store.get(), { vcenterIds: b.vcenterIds || [], f: b.filters || {} });
-  res.json({ total: vms.length, items: vms.slice(0, 2000).map(slimVm) });
+  const f = b.filters || {};
+  const vms = snapshotFilter(store.get(), { vcenterIds: b.vcenterIds || [], f });
+  // 옵션: IP 스캔으로 발견된(=vCenter가 모르는) 항목도 함께 검색. IP/서브넷/검색어 조건이 있을 때만.
+  let scanItems = [];
+  if (f.includeScan || b.includeScan) {
+    try { scanItems = filterScanResults(scanResultList(), f, getIpHistoryMap()).slice(0, 2000); } catch { scanItems = []; }
+  }
+  res.json({ total: vms.length, items: vms.slice(0, 2000).map(slimVm), scanTotal: scanItems.length, scanItems });
 });
 
 // 다빈치 서비스 점검 — 포탈 내부 서비스/수집기 상태 통합.
