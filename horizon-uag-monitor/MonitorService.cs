@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -23,6 +24,7 @@ public sealed class MonitorService : IDisposable
     private readonly object _gate = new();
     private readonly HashSet<long> _inFlight = new();
     private readonly Dictionary<long, DateTime> _lastCheck = new();
+    private readonly ConcurrentDictionary<Task, byte> _running = new(); // 진행 중 점검 태스크(종료 시 드레인)
     private CancellationTokenSource? _cts;
     private Task? _loop;
     private int _tick;
@@ -55,6 +57,9 @@ public sealed class MonitorService : IDisposable
     {
         try { _cts?.Cancel(); } catch { /* ignore */ }
         try { _loop?.Wait(3000); } catch { /* ignore */ }
+        // 진행 중이던 개별 점검 태스크(fire-and-forget)를 배수 — 이후 _db.Dispose()가
+        // in-flight writer와 겹치지 않도록 보장(마지막 샘플 유실·핸들 경합 방지).
+        try { Task.WaitAll(_running.Keys.ToArray(), 3000); } catch { /* 취소/타임아웃 무시 */ }
         _loop = null;
     }
 
@@ -109,7 +114,10 @@ public sealed class MonitorService : IDisposable
                         _inFlight.Add(ep.Id);
                         _lastCheck[ep.Id] = now;
                     }
-                    _ = RunCheckAsync(ep, token);
+                    // 태스크를 추적해 Stop()에서 배수(fire-and-forget이지만 종료 시 대기 가능하게).
+                    var t = RunCheckAsync(ep, token);
+                    _running.TryAdd(t, 0);
+                    _ = t.ContinueWith(x => _running.TryRemove(x, out _), TaskScheduler.Default);
                 }
 
                 // prune 스로틀: 약 5분마다(틱 1s 기준 300틱).
@@ -126,18 +134,21 @@ public sealed class MonitorService : IDisposable
 
     private async Task RunCheckAsync(Endpoint ep, CancellationToken token)
     {
-        await _concurrency.WaitAsync(token).ConfigureAwait(false);
+        bool acquired = false;
         try
         {
+            await _concurrency.WaitAsync(token).ConfigureAwait(false);
+            acquired = true;
             var sample = await CheckEndpointAsync(ep, token).ConfigureAwait(false);
             _db.InsertSample(sample);
         }
-        catch { /* 개별 점검 실패는 격리 */ }
+        catch { /* 개별 점검 실패/취소는 격리 */ }
         finally
         {
-            _concurrency.Release();
+            // WaitAsync가 취소로 던져도(acquired=false) 재진입 가드는 반드시 해제(_inFlight 누수 방지).
+            if (acquired) { try { _concurrency.Release(); } catch { /* ignore */ } }
             lock (_gate) { _inFlight.Remove(ep.Id); }
-            try { Updated?.Invoke(); } catch { /* ignore */ }
+            if (acquired) { try { Updated?.Invoke(); } catch { /* ignore */ } }
         }
     }
 

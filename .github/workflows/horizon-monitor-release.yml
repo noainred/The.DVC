@@ -9,7 +9,6 @@ on:
   workflow_dispatch:
   push:
     tags: ['horizon-v*']
-    paths: ['horizon-uag-monitor/**', '.github/workflows/horizon-monitor-release.yml']
 
 permissions:
   contents: write

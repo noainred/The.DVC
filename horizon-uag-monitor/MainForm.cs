@@ -16,6 +16,7 @@ public sealed class MainForm : Form
     private readonly Label _summary = new();
     private volatile bool _dirty = true;
     private int _uiTick;
+    private Icon? _formIcon; // SetFormIcon가 만든 직전 클론(공유 DefaultIcon 파기 방지)
 
     public MainForm(Database db, MonitorService monitor)
     {
@@ -220,18 +221,26 @@ public sealed class MainForm : Form
         return $"{s / 86400:F0}일 전";
     }
 
-    /// <summary>트레이 상태 아이콘을 작업표시줄/창 아이콘에도 반영(복제해 소유권 분리).</summary>
+    /// <summary>
+    /// 트레이 상태 아이콘을 작업표시줄/창 아이콘에도 반영(복제해 소유권 분리).
+    /// 주의: Form.Icon getter는 미지정 시 프로세스 공유 DefaultIcon을 반환하므로 그 값을
+    /// Dispose하면 안 된다 — 우리가 만든 직전 클론(_formIcon)만 파기한다.
+    /// </summary>
     public void SetFormIcon(Icon icon)
     {
-        var old = Icon;
-        try { Icon = (Icon)icon.Clone(); } catch { return; }
-        if (old != null && !ReferenceEquals(old, icon)) { try { old.Dispose(); } catch { /* ignore */ } }
+        Icon clone;
+        try { clone = (Icon)icon.Clone(); } catch { return; }
+        Icon = clone;                 // 공유 DefaultIcon(getter 반환값)은 건드리지 않음
+        var old = _formIcon;          // 직전에 우리가 만든 클론(최초엔 null)
+        _formIcon = clone;
+        if (old != null) { try { old.Dispose(); } catch { /* ignore */ } }
     }
 
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
         _monitor.Updated -= OnMonitorUpdated;
         _uiTimer.Stop();
+        try { _formIcon?.Dispose(); } catch { /* ignore */ }
         base.OnFormClosed(e);
     }
 }

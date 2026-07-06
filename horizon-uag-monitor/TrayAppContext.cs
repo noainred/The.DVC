@@ -23,6 +23,8 @@ public sealed class TrayAppContext : ApplicationContext
     private Icon? _currentIcon;
     private IntPtr _currentIconHandle = IntPtr.Zero;
     private HealthStatus _lastOverall = (HealthStatus)(-1);
+    private readonly System.Windows.Forms.Timer _uiTimer = new() { Interval = 1000 };
+    private volatile bool _dirty;
 
     public TrayAppContext(string? dbPath = null, bool startHidden = false)
     {
@@ -43,9 +45,12 @@ public sealed class TrayAppContext : ApplicationContext
 
         _main = new MainForm(_db, _monitor);
         _main.FormClosing += MainOnFormClosing;
-        _ = _main.Handle; // 핸들 미리 생성 — 백그라운드 점검 결과를 항상 UI 스레드로 마샬링 가능하게.
 
         _monitor.Updated += OnMonitorUpdated;
+
+        // 트레이 아이콘/툴팁 갱신은 UI 스레드 타이머로 디바운스(점검 완료가 몰려도 초당 최대 1회 DB 조회).
+        _uiTimer.Tick += (_, _) => { if (!_exiting && _dirty) { _dirty = false; RefreshTray(); } };
+        _uiTimer.Start();
 
         if (!startHidden) _main.Show();
         else ShowStartupBalloon();
@@ -63,21 +68,18 @@ public sealed class TrayAppContext : ApplicationContext
 
     private void OnMonitorUpdated()
     {
-        // 백그라운드 스레드 → UI 스레드로 마샬링해 트레이 아이콘/툴팁 갱신(핸들은 ctor에서 선생성).
-        try
-        {
-            if (!_exiting && _main.IsHandleCreated && !_main.IsDisposed)
-                _main.BeginInvoke(new Action(RefreshTray));
-        }
-        catch { /* 종료 경합 무시 */ }
+        // 백그라운드 스레드에서 호출 — 플래그만 세우고 실제 갱신은 UI 스레드 타이머가 수행(마샬링·디바운스).
+        _dirty = true;
     }
+
+    // NotifyIcon.Text는 63자 제한. 초과 시 안전하게 자른다.
+    private static string Truncate(string s, int n) => s.Length <= n ? s : s.Substring(0, n);
 
     private void RefreshTray()
     {
         if (_exiting) return;
-        var overall = _monitor.OverallStatus();
-        var snap = _monitor.Snapshot();
-        int up = 0, warn = 0, down = 0;
+        var snap = _monitor.Snapshot(); // 1회 조회로 카운트와 전체 상태 모두 계산(중복 DB 조회 제거).
+        int up = 0, warn = 0, down = 0, unknown = 0;
         foreach (var es in snap)
         {
             if (!es.Endpoint.Enabled) continue;
@@ -86,8 +88,14 @@ public sealed class TrayAppContext : ApplicationContext
                 case HealthStatus.Up: up++; break;
                 case HealthStatus.Warn: warn++; break;
                 case HealthStatus.Down: down++; break;
+                default: unknown++; break;
             }
         }
+        var overall = (up + warn + down + unknown) == 0 ? HealthStatus.Unknown
+            : down > 0 ? HealthStatus.Down
+            : warn > 0 ? HealthStatus.Warn
+            : (up == 0 && unknown > 0) ? HealthStatus.Unknown
+            : HealthStatus.Up;
         _tray.Text = Truncate($"Horizon UAG: 정상 {up} / 주의 {warn} / 위험 {down}", 63);
         UpdateTrayIcon(overall);
     }
@@ -169,6 +177,7 @@ public sealed class TrayAppContext : ApplicationContext
         if (_exiting) return;
         _exiting = true;
         _monitor.Updated -= OnMonitorUpdated;
+        try { _uiTimer.Stop(); _uiTimer.Dispose(); } catch { /* ignore */ }
         try { _monitor.Stop(); } catch { /* ignore */ }
         try { _tray.Visible = false; } catch { /* ignore */ }
         try { _main.FormClosing -= MainOnFormClosing; _main.Close(); } catch { /* ignore */ }

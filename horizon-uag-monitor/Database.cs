@@ -280,6 +280,11 @@ public sealed class Database : IDisposable
 
     public void Dispose()
     {
-        try { _conn.Dispose(); } catch { /* ignore */ }
+        // 다른 모든 접근과 동일하게 _gate로 직렬화 — 종료 시점에 in-flight 명령(InsertSample 등)이
+        // 실행 중이면 완료를 기다린 뒤 연결을 파기(네이티브 핸들 동시 접근/크래시 방지).
+        lock (_gate)
+        {
+            try { _conn.Dispose(); } catch { /* ignore */ }
+        }
     }
 }
