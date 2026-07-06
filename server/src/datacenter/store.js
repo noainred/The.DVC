@@ -37,8 +37,10 @@ function loadRaw() {
       // 관리자가 명시적으로 삭제한 DataCenter id(tombstone). 수집서버 백필(ensureDatacenter)이
       // 삭제한 법인을 매 조회마다 되살리던 문제 방지 — 명시적 재등록(addDatacenter) 시 해제.
       deleted: Array.isArray(p.deleted) ? p.deleted : [],
+      // 사용자가 지정한 표시 순서(id 배열). 모든 'DataCenter 선택' 콤보박스/목록에 적용.
+      order: Array.isArray(p.order) ? p.order.map(String) : [],
     };
-  } catch { cache = { datacenters: [], assign: {}, deleted: [] }; }
+  } catch { cache = { datacenters: [], assign: {}, deleted: [], order: [] }; }
   cacheTok = t;
   return cache;
 }
@@ -49,9 +51,38 @@ function save(next) {
   cacheTok = fileTok();
 }
 
-/** DataCenter 목록(설정에서 정의한 종류). */
+/** 저장된 표시 순서로 정렬(순서에 없는 것은 원래 순서 유지하며 뒤로). */
+function applyOrder(list, order) {
+  if (!order || !order.length) return list;
+  const rank = new Map(order.map((id, i) => [id, i]));
+  return list
+    .map((x, i) => [x, i])
+    .sort((a, b) => {
+      const ra = rank.has(a[0].id) ? rank.get(a[0].id) : Number.MAX_SAFE_INTEGER;
+      const rb = rank.has(b[0].id) ? rank.get(b[0].id) : Number.MAX_SAFE_INTEGER;
+      return ra - rb || a[1] - b[1];
+    })
+    .map(([x]) => x);
+}
+
+/** DataCenter 목록(설정에서 정의한 종류) — 저장된 표시 순서 적용. */
 export function listDatacenters() {
-  return loadRaw().datacenters.map((d) => ({ ...d }));
+  const cur = loadRaw();
+  return applyOrder(cur.datacenters.map((d) => ({ ...d })), cur.order);
+}
+
+/** 사용자가 지정한 표시 순서(id 배열). */
+export function getDatacenterOrder() { return [...loadRaw().order]; }
+
+/** 표시 순서 저장. 등록된 id만 유지(정리), 중복 제거. */
+export function saveDatacenterOrder(ids) {
+  const cur = loadRaw();
+  const valid = new Set(cur.datacenters.map((d) => d.id));
+  const order = Array.isArray(ids)
+    ? [...new Set(ids.map((x) => String(x).trim()).filter((id) => valid.has(id)))]
+    : [];
+  try { save({ ...cur, order }); } catch (e) { return { ok: false, reason: `저장 실패: ${e.message}` }; }
+  return { ok: true, order };
 }
 
 /** vCenter → DataCenter 할당 맵 사본. */
@@ -114,7 +145,8 @@ export function removeDatacenter(id) {
   // tombstone 기록 — 수집서버 백필(ensureDatacenter)이 삭제한 법인을 매 조회마다 되살리던
   // 문제 방지(예: WA-IRS 수집서버가 계속 존재해 삭제 직후 재생성되던 것).
   const deleted = Array.from(new Set([...(cur.deleted || []), idOf(id)]));
-  try { save({ datacenters: cur.datacenters.filter((d) => d.id !== id), assign, deleted }); }
+  const order = (cur.order || []).filter((x) => x !== id); // 삭제된 id는 순서에서도 제거
+  try { save({ datacenters: cur.datacenters.filter((d) => d.id !== id), assign, deleted, order }); }
   catch (e) { return { ok: false, reason: `저장 실패: ${e.message}` }; }
   return { ok: true };
 }

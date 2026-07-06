@@ -100,7 +100,7 @@ import { matchDatacenterId } from '../collector/datacenterMatch.js';
 import { serverInScope } from '../insights/analysisScope.js';
 import { findHostByServiceTag } from '../idrac/hostMatch.js';
 import { hardwareDimMatch } from '../idrac/hwMatch.js';
-import { listDatacenters, getDatacenterAssign, addDatacenter, updateDatacenter, removeDatacenter, setVcenterDatacenterMany, ensureDatacenter } from '../datacenter/store.js';
+import { listDatacenters, getDatacenterAssign, addDatacenter, updateDatacenter, removeDatacenter, setVcenterDatacenterMany, ensureDatacenter, getDatacenterOrder, saveDatacenterOrder } from '../datacenter/store.js';
 import { allCollectorStatus, getCollectorStatus, clearCollectorHosts } from '../collector/state.js';
 import { pullNow } from '../collector/puller.js';
 import { pushUpgradeToCollectors } from '../collector/upgradePush.js';
@@ -1599,6 +1599,15 @@ adminRouter.delete('/datacenters/:id', adminOnly, (req, res) => {
   const r = removeDatacenter(req.params.id);
   if (r.ok) logAudit({ user: req.user?.username, action: 'DataCenter 삭제', target: req.params.id, ip: req.ip || '' });
   res.status(r.ok ? 200 : 404).json(r);
+});
+// DataCenter 표시 순서(vCenter 순서와 동일한 개념) — 모든 'DataCenter 선택' 목록에 적용.
+adminRouter.get('/datacenter-order', adminOnly, (_req, res) => {
+  res.json({ order: getDatacenterOrder(), datacenters: listDatacenters().map((d) => ({ id: d.id, name: d.name, region: d.region || '' })) });
+});
+adminRouter.put('/datacenter-order', adminOnly, (req, res) => {
+  const r = saveDatacenterOrder((req.body || {}).order);
+  if (r.ok) logAudit({ user: req.user?.username, action: 'DataCenter 순서 변경', detail: `${(r.order || []).length}개`, ip: req.ip || '' });
+  res.status(r.ok ? 200 : 400).json(r);
 });
 
 // ── VM 사양 변경(ReconfigVM) — vCPU/RAM/디스크 증설·추가, NIC 추가/삭제 (관리자) ──────────
