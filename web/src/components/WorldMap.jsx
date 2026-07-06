@@ -21,7 +21,7 @@ function markerStyle(site) {
   return { fill: '#22c55e', r: 5, ring: '#22c55e' };
 }
 
-export default function WorldMap({ sites = [], onSelect, height = 320, onResizeEnd, lambda: lambda0 = -127, offsetY: offsetY0 = 0, onViewEnd }) {
+export default function WorldMap({ sites = [], onSelect, height = 320, onResizeEnd, lambda: lambda0 = -127, offsetY: offsetY0 = 0, onViewEnd, spreadPx = 10, onSpreadEnd }) {
   const [tip, setTip] = useState(null);
   const [picked, setPicked] = useState(null); // vCenter clicked on the map
   const [h, setH] = useState(clampH(height));
@@ -103,11 +103,14 @@ export default function WorldMap({ sites = [], onSelect, height = 320, onResizeE
     for (const ids of byC.values()) ids.forEach((id, i) => m.set(id, { idx: i, total: ids.length }));
     return m;
   })();
+  // 분산 반경(px) — 설정에서 지정(0이면 분산 안 함=겹침). 로컬 편집 상태로 즉시 반영 후 서버 저장.
+  const [spr, setSpr] = useState(spreadPx);
+  useEffect(() => { setSpr(spreadPx); }, [spreadPx]);
+  const changeSpread = (delta) => { const ns = Math.max(0, Math.min(60, spr + delta)); setSpr(ns); onSpreadEnd?.(ns); };
   const offsetOf = (id) => {
     const c = spread.get(id);
-    if (!c || c.total <= 1) return [0, 0];
-    // 비슷한 위치의 마커를 겹치지 않게 흩뜨리는 반경 — 고정 10px.
-    const R = 10;
+    if (!c || c.total <= 1 || spr <= 0) return [0, 0]; // spr=0이면 분산 off(겹침)
+    const R = spr;
     const ang = (c.idx / c.total) * Math.PI * 2 - Math.PI / 2; // 위쪽(12시)부터 시계방향
     return [Math.cos(ang) * R, Math.sin(ang) * R];
   };
@@ -119,6 +122,13 @@ export default function WorldMap({ sites = [], onSelect, height = 320, onResizeE
         <button onClick={() => changeHeight(-60)} title="지도 축소" disabled={h <= MAP_MIN}>−</button>
         <span className="map-size-val">{Math.round(h)}px</span>
         <button onClick={() => changeHeight(60)} title="지도 확대" disabled={h >= MAP_MAX}>+</button>
+      </div>
+      {/* 마커 분산 반경(px) — 같은 좌표 겹침 시 흩뜨리는 거리. 0이면 분산 안 함. 서버 공유 저장. */}
+      <div className="map-size-ctrl" style={{ right: 'auto', left: 8 }} title="같은/비슷한 좌표의 법인 마커를 흩뜨리는 반경(px). 0이면 겹쳐서 표시(분산 off)">
+        <span className="map-size-val" style={{ opacity: 0.8 }}>분산</span>
+        <button onClick={() => changeSpread(-2)} title="분산 줄이기" disabled={spr <= 0}>−</button>
+        <span className="map-size-val">{spr}px</span>
+        <button onClick={() => changeSpread(2)} title="분산 늘리기" disabled={spr >= 60}>+</button>
       </div>
       <div ref={wrapRef} style={{ overflow: 'hidden', borderRadius: 8 }}>
       <ComposableMap
