@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Horizon UAG Monitor — Windows 11 시스템 트레이 모니터링 프로그램.
+    전세계 데이터센터의 VMware Horizon UAG / Virtual App 포탈(443)을 주기 점검하고
+    자체 SQLite DB에 시계열로 누적한다. '닫기'는 트레이로 숨고, '종료'만 실제 종료.
+
+    단일 실행 파일(.exe) 빌드(설치형 .NET 런타임 불필요, Win11 x64):
+      dotnet publish -c Release -r win-x64 --self-contained true \
+        -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+    산출물: bin/Release/net8.0-windows/win-x64/publish/HorizonUagMonitor.exe
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>HorizonUagMonitor</RootNamespace>
+    <AssemblyName>HorizonUagMonitor</AssemblyName>
+    <Product>Horizon UAG Monitor</Product>
+    <AssemblyTitle>Horizon UAG Monitor</AssemblyTitle>
+    <Version>1.0.0</Version>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- 단일 exe 자동압축 해제 방식(네이티브 SQLite 포함). -->
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 자체 DB: 파일 기반 SQLite. SQLitePCLRaw 네이티브 번들 포함(추가 설치 불필요). -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.10" />
+  </ItemGroup>
+
+</Project>
