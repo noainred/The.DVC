@@ -40,17 +40,18 @@ function classify(rtt, ok, baseline) {
   return 'ok';
 }
 
-/** 전체 대상의 현재 상태 요약(대시보드 상단 카드/목록용). */
-export async function statusAll() {
+/** 대상의 현재 상태 요약(대시보드 상단 카드/목록용). sources 지정 시 해당 출처만. */
+export async function statusAll(sources = null) {
   const db = await getPingDb();
-  const targets = listTargets();
+  const set = Array.isArray(sources) ? new Set(sources) : null;
+  const targets = listTargets().filter((t) => (set ? set.has(t.source) : true));
   const rows = [];
   for (const t of targets) {
     const latest = db.latest(t.id);
     const { baseline, auto } = await baselineOf(db, t);
     const status = latest ? classify(latest.rtt, latest.ok, baseline) : 'unknown';
     rows.push({
-      id: t.id, name: t.name, host: t.host, port: t.port, kind: t.kind, enabled: t.enabled, note: t.note,
+      id: t.id, name: t.name, host: t.host, port: t.port, kind: t.kind, enabled: t.enabled, note: t.note, source: t.source,
       rtt: latest ? latest.rtt : null, ok: latest ? latest.ok : null, lastTs: latest ? latest.ts : null,
       baseline, baselineAuto: auto, status,
     });
@@ -76,4 +77,44 @@ export async function seriesOf(id, { rangeMs = 6 * 3_600_000, points = 240 } = {
   }));
   const meta = db.meta(t.id);
   return { ok: true, target: { id: t.id, name: t.name, host: t.host, port: t.port, kind: t.kind }, baseline, baselineAuto: auto, bucketMs, series, meta };
+}
+
+/**
+ * 특정 출처(source)의 모든 대상 시계열을 groupKey로 그룹핑해 한 번에 반환(그룹 대시보드용).
+ * 각 대상마다 baseline 대비 상태가 색상 코딩된 다운샘플 포인트를 포함한다.
+ * @param source 'edge' | 'vcport'
+ * @param groupKey 'datacenterId' | 'vcenterId'
+ * @param groupName (id)=>표시명 리졸버
+ * @param groupOrder 그룹 표시 순서(id 배열; 없는 것은 뒤로)
+ */
+export async function overviewGrouped(source, groupKey, { rangeMs = 86_400_000, points = 300, groupName = (x) => x, groupOrder = [] } = {}) {
+  const db = await getPingDb();
+  const targets = listTargets(source);
+  const now = Date.now();
+  const since = now - rangeMs;
+  const bucketMs = Math.max(1000, Math.round(rangeMs / points));
+  const groups = new Map();
+  for (const t of targets) {
+    const { baseline } = await baselineOf(db, t);
+    const raw = db.history(t.id, since, bucketMs, points);
+    const latest = db.latest(t.id);
+    const series = raw.map((b) => ({ ts: b.ts, rtt: b.avg, loss: b.loss, status: b.loss >= 1 ? 'down' : classify(b.avg, b.avg != null, baseline) }));
+    const item = {
+      id: t.id, name: t.name, host: t.host, port: t.port, enabled: t.enabled,
+      baseline, status: latest ? classify(latest.rtt, latest.ok, baseline) : 'unknown', rtt: latest ? latest.rtt : null, lastTs: latest ? latest.ts : null,
+      series,
+    };
+    const gid = t[groupKey] || '';
+    if (!groups.has(gid)) groups.set(gid, []);
+    groups.get(gid).push(item);
+  }
+  const rank = new Map(groupOrder.map((id, i) => [String(id), i]));
+  const out = [...groups.entries()]
+    .map(([gid, items]) => ({ id: gid, name: gid ? groupName(gid) : '미지정', items: items.sort((a, b) => a.name.localeCompare(b.name, 'ko', { numeric: true })) }))
+    .sort((a, b) => {
+      const ra = rank.has(a.id) ? rank.get(a.id) : Number.MAX_SAFE_INTEGER;
+      const rb = rank.has(b.id) ? rank.get(b.id) : Number.MAX_SAFE_INTEGER;
+      return ra - rb || a.name.localeCompare(b.name, 'ko', { numeric: true });
+    });
+  return { ok: true, bucketMs, rangeMs, groups: out, total: targets.length };
 }

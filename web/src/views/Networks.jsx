@@ -4,6 +4,8 @@ import { DataTable, Loading, ErrorBox, ResultCount } from '../components/ui.jsx'
 import IpmsMatches from '../components/IpmsMatches.jsx';
 
 const PingMonitor = lazy(() => import('./PingMonitor.jsx'));
+const NetworkCheck = lazy(() => import('./NetworkCheck.jsx'));
+const VcenterPorts = lazy(() => import('./VcenterPorts.jsx'));
 
 function NetworkList({ filters }) {
   const { data, error, loading } = usePolling('/networks', filters, 15_000);
@@ -33,17 +35,26 @@ function NetworkList({ filters }) {
   );
 }
 
+const SUBS = [
+  ['list', '네트워크 목록'],
+  ['check', '네트워크 체크 (서버 Ping)'],
+  ['vcport', 'vCenter 포트 응답속도'],
+  ['ping', 'Ping 모니터링'],
+];
+
 export default function Networks({ filters }) {
-  const [sub, setSub] = useState('list'); // 'list' | 'ping'
+  const [sub, setSub] = useState('list');
   return (
     <>
-      <div className="flex gap" style={{ marginBottom: 12 }}>
-        <button className={sub === 'list' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setSub('list')}>네트워크 목록</button>
-        <button className={sub === 'ping' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setSub('ping')}>Ping 모니터링</button>
+      <div className="flex gap wrap" style={{ marginBottom: 12 }}>
+        {SUBS.map(([k, l]) => (
+          <button key={k} className={sub === k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setSub(k)}>{l}</button>
+        ))}
       </div>
-      {sub === 'list'
-        ? <NetworkList filters={filters} />
-        : <Suspense fallback={<Loading />}><PingMonitor /></Suspense>}
+      {sub === 'list' && <NetworkList filters={filters} />}
+      {sub === 'check' && <Suspense fallback={<Loading />}><NetworkCheck /></Suspense>}
+      {sub === 'vcport' && <Suspense fallback={<Loading />}><VcenterPorts /></Suspense>}
+      {sub === 'ping' && <Suspense fallback={<Loading />}><PingMonitor /></Suspense>}
     </>
   );
 }
