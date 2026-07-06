@@ -1,0 +1,14 @@
+{
+  "targets": [
+    {
+      "id": "t_mr8y5jki_0",
+      "name": "auto",
+      "host": "10.9.8.1",
+      "port": 0,
+      "kind": "icmp",
+      "enabled": true,
+      "baselineMs": null,
+      "note": ""
+    }
+  ]
+}

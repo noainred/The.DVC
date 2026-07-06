@@ -104,6 +104,19 @@ export const config = {
     sampleIntervalMs: Number(process.env.TEMP_SAMPLE_INTERVAL_MS) || 60_000,  // 1분 (설정에서 변경 가능)
     retentionDays: Number(process.env.TEMP_RETENTION_DAYS) || 1830,           // ~5년
   },
+  ping: {
+    // 네트워크 Ping 모니터링 — 등록한 대상(호스트)의 도달성/지연(RTT)을 주기적으로 측정해
+    // 별도 SQLite(ping-monitor.db)에 시계열로 저장한다. iDRAC/온도 DB와 동일 정책(WAL 등).
+    // CONFIG_DIR에 두어 업그레이드에도 이력이 보존된다. 대상 정의는 CONFIG_DIR/ping-targets.json.
+    enabled: process.env.PING_MON_ENABLED !== 'false',
+    dbPath: process.env.PING_DB_PATH ||
+      path.join(process.env.CONFIG_DIR || path.resolve(ROOT, 'config'), 'ping-monitor.db'),
+    pollIntervalMs: Math.max(5_000, numEnv(process.env.PING_MON_INTERVAL_MS, 60_000)), // 기본 1분
+    timeoutMs: numEnv(process.env.PING_MON_TIMEOUT_MS, 2_500),
+    // 동시에 프로브할 대상 수 상한(고RTT·다수 대상에서 이벤트 루프/소켓 폭주 방지).
+    concurrency: Math.max(1, numEnv(process.env.PING_MON_CONCURRENCY, 8)),
+    retentionDays: Number(process.env.PING_MON_RETENTION_DAYS) || 365, // ~1년
+  },
   ipam: {
     // Shareable IP ledger DB (SQLite). Replaced on every refresh so external
     // programs can read the current per-center IP inventory. In CONFIG_DIR so
