@@ -20,6 +20,9 @@ public sealed class SettingsForm : Form
     private readonly NumericUpDown _latency = new();
     private readonly NumericUpDown _retention = new();
     private readonly CheckBox _autostart = new();
+    private readonly TextBox _userCity = new();
+    private readonly TextBox _userLat = new();
+    private readonly TextBox _userLon = new();
 
     public SettingsForm(Database db, MonitorService monitor)
     {
@@ -27,7 +30,7 @@ public sealed class SettingsForm : Form
         _monitor = monitor;
         Text = "설정 — 대상 관리";
         Width = 820;
-        Height = 560;
+        Height = 620;
         StartPosition = FormStartPosition.CenterParent;
         Font = new System.Drawing.Font("Segoe UI", 9f);
         MinimizeBox = false;
@@ -54,7 +57,9 @@ public sealed class SettingsForm : Form
         btns.Controls.Add(MakeBtn("JSON 가져오기", (_, _) => ImportJson()));
         btns.Controls.Add(MakeBtn("JSON 내보내기", (_, _) => ExportJson()));
 
-        var thresh = new TableLayoutPanel { Dock = DockStyle.Top, Height = 130, ColumnCount = 2, Padding = new Padding(8) };
+        var thresh = new TableLayoutPanel { Dock = DockStyle.Top, Height = 190, ColumnCount = 2, Padding = new Padding(8) };
+        thresh.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 200));
+        thresh.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         thresh.Controls.Add(new Label { Text = "인증서 경고 임계(일 이하)", AutoSize = true }, 0, 0);
         _certWarn.Minimum = 1; _certWarn.Maximum = 365; _certWarn.Value = Clamp(_db.GetIntSetting("certWarnDays", 30), 1, 365);
         thresh.Controls.Add(_certWarn, 1, 0);
@@ -64,10 +69,30 @@ public sealed class SettingsForm : Form
         thresh.Controls.Add(new Label { Text = "이력 보존(일, 0=무제한)", AutoSize = true }, 0, 2);
         _retention.Minimum = 0; _retention.Maximum = 3650; _retention.Value = Clamp(_db.GetIntSetting("retentionDays", 365), 0, 3650);
         thresh.Controls.Add(_retention, 1, 2);
+        // 내 위치(사용자/매니저 위치) — 지도에 사용자 마커 + 사이트별 RTT 기준
+        thresh.Controls.Add(new Label { Text = "내 위치 도시(→ 좌표찾기)", AutoSize = true }, 0, 3);
+        var uCell = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 4, Height = 26, Margin = new Padding(0) };
+        uCell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 40));
+        uCell.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 78));
+        uCell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
+        uCell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
+        _userCity.Text = _db.GetSetting("userCity") ?? "";
+        _userLat.Text = _db.GetSetting("userLat") ?? "";
+        _userLon.Text = _db.GetSetting("userLon") ?? "";
+        _userCity.Dock = DockStyle.Fill; _userLat.Dock = DockStyle.Fill; _userLon.Dock = DockStyle.Fill;
+        _userLat.Margin = new Padding(4, 0, 2, 0); _userLon.Margin = new Padding(2, 0, 0, 0);
+        var uFind = new Button { Text = "좌표찾기", Dock = DockStyle.Fill, Margin = new Padding(4, 0, 0, 0) };
+        uFind.Click += (_, _) => LookupUserCity();
+        uCell.Controls.Add(_userCity, 0, 0);
+        uCell.Controls.Add(uFind, 1, 0);
+        uCell.Controls.Add(_userLat, 2, 0);
+        uCell.Controls.Add(_userLon, 3, 0);
+        thresh.Controls.Add(uCell, 1, 3);
+        thresh.Controls.Add(new Label { Text = "(위도, 경도 직접 입력 가능)", AutoSize = true, ForeColor = System.Drawing.Color.Gray }, 1, 4);
         _autostart.Text = "Windows 시작 시 자동 실행(현재 사용자)";
         _autostart.AutoSize = true;
         _autostart.Checked = IsAutostartEnabled();
-        thresh.Controls.Add(_autostart, 0, 3);
+        thresh.Controls.Add(_autostart, 0, 5);
 
         var bottom = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 46, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(8) };
         var ok = MakeBtn("저장", (_, _) => Save());
@@ -201,11 +226,33 @@ public sealed class SettingsForm : Form
         _db.SetSetting("certWarnDays", ((int)_certWarn.Value).ToString(CultureInfo.InvariantCulture));
         _db.SetSetting("warnLatencyMs", ((int)_latency.Value).ToString(CultureInfo.InvariantCulture));
         _db.SetSetting("retentionDays", ((int)_retention.Value).ToString(CultureInfo.InvariantCulture));
+        // 내 위치(사용자) — 지도 사용자 마커/RTT 기준. 숫자만 정규화 저장.
+        _db.SetSetting("userCity", _userCity.Text.Trim());
+        _db.SetSetting("userLat", ParseD(_userLat.Text).ToString(CultureInfo.InvariantCulture));
+        _db.SetSetting("userLon", ParseD(_userLon.Text).ToString(CultureInfo.InvariantCulture));
         SetAutostart(_autostart.Checked);
         _monitor.ApplyThresholds();
         DialogResult = DialogResult.OK;
         Close();
     }
+
+    private void LookupUserCity()
+    {
+        var geo = CityGeo.Lookup(_userCity.Text);
+        if (geo is CityGeo.Geo g)
+        {
+            _userLat.Text = g.Lat.ToString(CultureInfo.InvariantCulture);
+            _userLon.Text = g.Lon.ToString(CultureInfo.InvariantCulture);
+        }
+        else
+        {
+            MessageBox.Show(this, "도시를 찾을 수 없습니다. 위도/경도를 직접 입력하세요.",
+                "좌표찾기", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+    }
+
+    private static double ParseD(string? s)
+        => double.TryParse((s ?? "").Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : 0;
 
     // ── 자동 실행(HKCU Run) ─────────────────────────────────────────────────
     private static bool IsAutostartEnabled()
@@ -239,6 +286,10 @@ public sealed class EndpointEditForm : Form
     private readonly NumericUpDown _port = new();
     private readonly TextBox _path = new();
     private readonly TextBox _match = new();
+    private readonly TextBox _city = new();
+    private readonly TextBox _region = new();
+    private readonly TextBox _lat = new();
+    private readonly TextBox _lon = new();
     private readonly NumericUpDown _interval = new();
     private readonly NumericUpDown _timeout = new();
     private readonly CheckBox _enabled = new();
@@ -247,14 +298,15 @@ public sealed class EndpointEditForm : Form
     {
         _e = e;
         Text = "대상 편집";
-        Width = 460;
-        Height = 500;
+        Width = 470;
+        Height = 640;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = false; MaximizeBox = false;
         Font = new System.Drawing.Font("Segoe UI", 9f);
+        AutoScroll = true;
 
-        var t = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, Padding = new Padding(12), RowCount = 12 };
+        var t = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, Padding = new Padding(12), RowCount = 16, AutoSize = true };
         t.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 140));
         t.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         void Row(string label, Control c) { t.Controls.Add(new Label { Text = label, AutoSize = true, Anchor = AnchorStyles.Left }); c.Dock = DockStyle.Fill; t.Controls.Add(c); }
@@ -271,9 +323,31 @@ public sealed class EndpointEditForm : Form
         _scheme.SelectedIndexChanged += (_, _) => { if (_port.Value == 443 || _port.Value == 80) _port.Value = (string)_scheme.SelectedItem! == "http" ? 80 : 443; };
         _path.Text = string.IsNullOrEmpty(e.Path) ? "/" : e.Path;
         _match.Text = e.MatchText;
+        _city.Text = e.City;
+        _region.Text = e.Region;
+        _lat.Text = e.Lat.ToString(CultureInfo.InvariantCulture);
+        _lon.Text = e.Lon.ToString(CultureInfo.InvariantCulture);
         _interval.Minimum = 5; _interval.Maximum = 86400; _interval.Value = Math.Max(5, Math.Min(86400, e.IntervalSec));
         _timeout.Minimum = 1000; _timeout.Maximum = 60000; _timeout.Increment = 500; _timeout.Value = Math.Max(1000, Math.Min(60000, e.TimeoutMs));
         _enabled.Text = "활성(점검)"; _enabled.Checked = e.Enabled; _enabled.AutoSize = true;
+
+        // 도시 + '좌표찾기' 버튼(한 셀)
+        var cityCell = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, Height = 26, Margin = new Padding(0) };
+        cityCell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        cityCell.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 84));
+        _city.Dock = DockStyle.Fill;
+        var findBtn = new Button { Text = "좌표찾기", Dock = DockStyle.Fill, Margin = new Padding(4, 0, 0, 0) };
+        findBtn.Click += (_, _) => LookupCity();
+        cityCell.Controls.Add(_city, 0, 0);
+        cityCell.Controls.Add(findBtn, 1, 0);
+        // 위도/경도(한 셀 2칸)
+        var llCell = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, Height = 26, Margin = new Padding(0) };
+        llCell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        llCell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        _lat.Dock = DockStyle.Fill; _lon.Dock = DockStyle.Fill;
+        _lat.Margin = new Padding(0, 0, 3, 0); _lon.Margin = new Padding(3, 0, 0, 0);
+        llCell.Controls.Add(_lat, 0, 0);
+        llCell.Controls.Add(_lon, 1, 0);
 
         Row("이름", _name);
         Row("유형", _type);
@@ -283,6 +357,9 @@ public sealed class EndpointEditForm : Form
         Row("포트", _port);
         Row("경로(예: /)", _path);
         Row("콘텐츠 키워드(선택)", _match);
+        Row("도시(입력 후 좌표찾기)", cityCell);
+        Row("리전", _region);
+        Row("위도 / 경도", llCell);
         Row("점검 주기(초)", _interval);
         Row("타임아웃(ms)", _timeout);
         t.Controls.Add(new Label()); t.Controls.Add(_enabled);
@@ -320,10 +397,33 @@ public sealed class EndpointEditForm : Form
         _e.Port = (int)_port.Value;
         _e.Path = string.IsNullOrWhiteSpace(_path.Text) ? "/" : _path.Text.Trim();
         _e.MatchText = _match.Text.Trim();
+        _e.City = _city.Text.Trim();
+        _e.Region = _region.Text.Trim();
+        _e.Lat = ParseD(_lat.Text);
+        _e.Lon = ParseD(_lon.Text);
         _e.IntervalSec = (int)_interval.Value;
         _e.TimeoutMs = (int)_timeout.Value;
         _e.Enabled = _enabled.Checked;
         DialogResult = DialogResult.OK;
         Close();
     }
+
+    private void LookupCity()
+    {
+        var geo = CityGeo.Lookup(_city.Text);
+        if (geo is CityGeo.Geo g)
+        {
+            _lat.Text = g.Lat.ToString(CultureInfo.InvariantCulture);
+            _lon.Text = g.Lon.ToString(CultureInfo.InvariantCulture);
+            if (string.IsNullOrWhiteSpace(_region.Text)) _region.Text = g.Region;
+        }
+        else
+        {
+            MessageBox.Show(this, "도시를 찾을 수 없습니다. 위도/경도를 직접 입력하거나 다른 도시명을 시도하세요.",
+                "좌표찾기", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+    }
+
+    private static double ParseD(string? s)
+        => double.TryParse((s ?? "").Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : 0;
 }
