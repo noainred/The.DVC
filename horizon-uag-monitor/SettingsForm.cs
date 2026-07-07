@@ -23,6 +23,7 @@ public sealed class SettingsForm : Form
     private readonly TextBox _userCity = new();
     private readonly TextBox _userLat = new();
     private readonly TextBox _userLon = new();
+    private readonly ComboBox _mapShow = new();
 
     public SettingsForm(Database db, MonitorService monitor)
     {
@@ -30,7 +31,7 @@ public sealed class SettingsForm : Form
         _monitor = monitor;
         Text = "설정 — 대상 관리";
         Width = 820;
-        Height = 620;
+        Height = 680;
         StartPosition = FormStartPosition.CenterParent;
         Font = new System.Drawing.Font("Segoe UI", 9f);
         MinimizeBox = false;
@@ -57,7 +58,7 @@ public sealed class SettingsForm : Form
         btns.Controls.Add(MakeBtn("JSON 가져오기", (_, _) => ImportJson()));
         btns.Controls.Add(MakeBtn("JSON 내보내기", (_, _) => ExportJson()));
 
-        var thresh = new TableLayoutPanel { Dock = DockStyle.Top, Height = 190, ColumnCount = 2, Padding = new Padding(8) };
+        var thresh = new TableLayoutPanel { Dock = DockStyle.Top, Height = 224, ColumnCount = 2, Padding = new Padding(8) };
         thresh.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 200));
         thresh.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         thresh.Controls.Add(new Label { Text = "인증서 경고 임계(일 이하)", AutoSize = true }, 0, 0);
@@ -89,10 +90,18 @@ public sealed class SettingsForm : Form
         uCell.Controls.Add(_userLon, 3, 0);
         thresh.Controls.Add(uCell, 1, 3);
         thresh.Controls.Add(new Label { Text = "(위도, 경도 직접 입력 가능)", AutoSize = true, ForeColor = System.Drawing.Color.Gray }, 1, 4);
+        // 지도 RTT 표시 모드
+        thresh.Controls.Add(new Label { Text = "지도 RTT 표시", AutoSize = true }, 0, 5);
+        _mapShow.DropDownStyle = ComboBoxStyle.DropDownList;
+        _mapShow.Items.AddRange(new object[] { "둘 다 (UAG+포탈)", "UAG만", "포탈만" });
+        var showCur = _db.GetSetting("mapShow") ?? "both";
+        _mapShow.SelectedIndex = showCur == "uag" ? 1 : showCur == "portal" ? 2 : 0;
+        _mapShow.Width = 200;
+        thresh.Controls.Add(_mapShow, 1, 5);
         _autostart.Text = "Windows 시작 시 자동 실행(현재 사용자)";
         _autostart.AutoSize = true;
         _autostart.Checked = IsAutostartEnabled();
-        thresh.Controls.Add(_autostart, 0, 5);
+        thresh.Controls.Add(_autostart, 0, 6);
 
         var bottom = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 46, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(8) };
         var ok = MakeBtn("저장", (_, _) => Save());
@@ -287,6 +296,7 @@ public sealed class SettingsForm : Form
         _db.SetSetting("userCity", _userCity.Text.Trim());
         _db.SetSetting("userLat", ParseD(_userLat.Text).ToString(CultureInfo.InvariantCulture));
         _db.SetSetting("userLon", ParseD(_userLon.Text).ToString(CultureInfo.InvariantCulture));
+        _db.SetSetting("mapShow", _mapShow.SelectedIndex == 1 ? "uag" : _mapShow.SelectedIndex == 2 ? "portal" : "both");
         SetAutostart(_autostart.Checked);
         _monitor.ApplyThresholds();
         DialogResult = DialogResult.OK;

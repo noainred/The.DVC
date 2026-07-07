@@ -29,17 +29,20 @@ public sealed class WorldMap : Panel
         public string Code = "";
         public string Region = "";
         public double Lat, Lon;
-        public HealthStatus Status = HealthStatus.Unknown;
-        public bool Enabled;
-        public int Sev;
-        public double RttSum;
-        public int RttCount;
-        public double? RttMs => RttCount > 0 ? RttSum / RttCount : (double?)null;
+        // 유형별(UAG / 포탈) 분리 집계 — 지도 표시 모드에 따라 선택.
+        public bool UagPresent, PortalPresent, UagOn, PortalOn;
+        public int UagSev, PortalSev;
+        public HealthStatus UagStatus = HealthStatus.Unknown, PortalStatus = HealthStatus.Unknown;
+        public double UagSum, PortalSum;
+        public int UagCnt, PortalCnt;
+        public double? UagRtt => UagCnt > 0 ? UagSum / UagCnt : (double?)null;
+        public double? PortalRtt => PortalCnt > 0 ? PortalSum / PortalCnt : (double?)null;
     }
 
     private const double CenterLon = 127.5; // 지도 가로 중앙 경도(한국)
 
     private List<Site> _sites = new();
+    private string _show = "both"; // 지도 표시 모드: "uag" | "portal" | "both"
     private double _userLat, _userLon;
     private string _userLabel = "내 위치";
     private bool _hasUser;
@@ -106,6 +109,7 @@ public sealed class WorldMap : Panel
         var map = MapRect();
         foreach (var s in _sites)
         {
+            if (!View(s).Present) continue;
             var c = SiteCenter(s, map);
             if (Math.Abs(c.X - e.X) <= 12 && Math.Abs(c.Y - e.Y) <= 12)
             {
@@ -126,7 +130,7 @@ public sealed class WorldMap : Panel
         }
         // 마커 위에 있으면 손 커서(드래그 가능 힌트)
         bool over = false;
-        foreach (var s in _sites) { var c = SiteCenter(s, map); if (Math.Abs(c.X - e.X) <= 12 && Math.Abs(c.Y - e.Y) <= 12) { over = true; break; } }
+        foreach (var s in _sites) { if (!View(s).Present) continue; var c = SiteCenter(s, map); if (Math.Abs(c.X - e.X) <= 12 && Math.Abs(c.Y - e.Y) <= 12) { over = true; break; } }
         Cursor = over ? Cursors.Hand : Cursors.Default;
     }
     private void OnMouseUpMap(object? sender, MouseEventArgs e)
@@ -165,24 +169,64 @@ public sealed class WorldMap : Panel
                 map[key] = site;
             }
             if (string.IsNullOrEmpty(site.Region) && !string.IsNullOrEmpty(ep.Region)) site.Region = ep.Region;
+            bool portal = IsPortal(ep.Type);
+            if (portal) site.PortalPresent = true; else site.UagPresent = true;
             if (ep.Enabled)
             {
-                site.Enabled = true;
                 int sev = Severity(es.Status);
-                if (sev > site.Sev) { site.Sev = sev; site.Status = es.Status; }
-                // 사용자 기준 RTT = 응답 지연(없으면 연결 지연) 평균.
-                var rtt = es.Latest?.ResponseMs ?? es.Latest?.ConnectMs;
-                if (rtt is double v) { site.RttSum += v; site.RttCount++; }
+                var rtt = es.Latest?.ResponseMs ?? es.Latest?.ConnectMs; // 사용자 기준 RTT
+                if (portal)
+                {
+                    site.PortalOn = true;
+                    if (sev > site.PortalSev) { site.PortalSev = sev; site.PortalStatus = es.Status; }
+                    if (rtt is double vp) { site.PortalSum += vp; site.PortalCnt++; }
+                }
+                else
+                {
+                    site.UagOn = true;
+                    if (sev > site.UagSev) { site.UagSev = sev; site.UagStatus = es.Status; }
+                    if (rtt is double vu) { site.UagSum += vu; site.UagCnt++; }
+                }
             }
         }
         _sites = map.Values.ToList();
         Invalidate();
     }
 
+    /// <summary>지도 표시 모드 설정: "uag" | "portal" | "both".</summary>
+    public void SetShow(string mode)
+    {
+        _show = mode == "uag" || mode == "portal" ? mode : "both";
+        Invalidate();
+    }
+
+    private static bool IsPortal(string type)
+        => !string.IsNullOrEmpty(type) && (type.Contains("포탈") || type.Equals("portal", StringComparison.OrdinalIgnoreCase));
+
     private static int Severity(HealthStatus s) => s switch
     {
         HealthStatus.Down => 3, HealthStatus.Warn => 2, HealthStatus.Up => 1, _ => 0,
     };
+
+    /// <summary>현재 모드에서 사이트의 표시 상태/RTT.</summary>
+    private (bool Present, HealthStatus Status, bool Enabled, string RttText) View(Site s)
+    {
+        if (_show == "uag")
+            return (s.UagPresent, s.UagStatus, s.UagOn, s.UagRtt is double a ? $"{a:F0}ms" : "");
+        if (_show == "portal")
+            return (s.PortalPresent, s.PortalStatus, s.PortalOn, s.PortalRtt is double b ? $"{b:F0}ms" : "");
+        // both
+        bool present = s.UagPresent || s.PortalPresent;
+        bool enabled = s.UagOn || s.PortalOn;
+        var status = HealthStatus.Unknown; int sev = -1;
+        if (s.UagOn && s.UagSev > sev) { sev = s.UagSev; status = s.UagStatus; }
+        if (s.PortalOn && s.PortalSev > sev) { sev = s.PortalSev; status = s.PortalStatus; }
+        var parts = new List<string>();
+        if (s.UagRtt is double u) parts.Add($"U{u:F0}");
+        if (s.PortalRtt is double p) parts.Add($"P{p:F0}");
+        var rtt = parts.Count > 0 ? string.Join("/", parts) + "ms" : "";
+        return (present, status, enabled, rtt);
+    }
 
     protected override void OnPaint(PaintEventArgs e)
     {
@@ -208,7 +252,9 @@ public sealed class WorldMap : Panel
         {
             foreach (var s in _sites)
             {
-                var color = MainForm.StatusColor(s.Status, s.Enabled);
+                var v = View(s);
+                if (!v.Present) continue;
+                var color = MainForm.StatusColor(v.Status, v.Enabled);
                 DrawArc(g, up, SiteCenter(s, map), Color.FromArgb(70, color));
             }
         }
@@ -216,9 +262,11 @@ public sealed class WorldMap : Panel
         // 마커
         foreach (var s in _sites)
         {
+            var v = View(s);
+            if (!v.Present) continue; // 현재 모드(UAG/포탈/둘다)에 해당하는 사이트만
             var c0 = SiteCenter(s, map);
             float cx = c0.X, cy = c0.Y;
-            var color = MainForm.StatusColor(s.Status, s.Enabled);
+            var color = MainForm.StatusColor(v.Status, v.Enabled);
             using (var halo = new SolidBrush(Color.FromArgb(38, color)))
                 g.FillEllipse(halo, cx - 15, cy - 15, 30, 30);
             using (var ring = new Pen(Color.FromArgb(90, color)))
@@ -228,7 +276,7 @@ public sealed class WorldMap : Panel
             using (var wp = new Pen(Color.White, 1.6f))
                 g.DrawEllipse(wp, cx - 5.5f, cy - 5.5f, 11, 11);
             // 라벨(사이트 코드 + 사용자 기준 RTT) — 흰색 외곽 후 진한 글씨로 가독성 확보
-            var label = s.RttMs is double r ? $"{s.Code}  {r:F0}ms" : s.Code;
+            var label = v.RttText.Length > 0 ? $"{s.Code}  {v.RttText}" : s.Code;
             var lp = new PointF(cx + 9, cy - 7);
             using var wbr = new SolidBrush(Color.FromArgb(220, 255, 255, 255));
             using var dbr = new SolidBrush(Color.FromArgb(52, 58, 64));
@@ -258,19 +306,21 @@ public sealed class WorldMap : Panel
         DrawStatusLegend(g, map);
         DrawRegionLegend(g, map);
 
-        // 드래그 힌트(우하단, 은은하게)
-        if (_sites.Count > 0)
+        bool anyVisible = _sites.Any(x => View(x).Present);
+        // 드래그 힌트(우하단, 은은하게) + 현재 표시 모드
+        if (anyVisible)
         {
             using var hintBr = new SolidBrush(Color.FromArgb(150, 158, 166));
-            const string hintTxt = "마커를 드래그해 위치 조정 (자동 저장)";
+            var modeTxt = _show == "uag" ? "UAG" : _show == "portal" ? "포탈" : "UAG+포탈";
+            var hintTxt = $"표시: {modeTxt} · 마커를 드래그해 위치 조정 (자동 저장)";
             var hs = g.MeasureString(hintTxt, FTitleEn);
             g.DrawString(hintTxt, FTitleEn, hintBr, Width - hs.Width - 18, Height - 26);
         }
 
-        if (_sites.Count == 0)
+        if (!anyVisible)
         {
             using var hint = new SolidBrush(Color.FromArgb(150, 150, 150));
-            g.DrawString("지도에 표시할 좌표(위도/경도)가 지정된 대상이 없습니다. 설정에서 위경도를 입력하세요.",
+            g.DrawString("이 모드에서 표시할 대상이 없습니다. 설정에서 위경도를 입력하거나 표시 모드를 바꾸세요.",
                 new Font("Segoe UI", 9f), hint, map.Left + 20, map.Top + map.Height / 2);
         }
     }
@@ -322,6 +372,7 @@ public sealed class WorldMap : Panel
         var counts = new Dictionary<string, int>();
         foreach (var s in _sites)
         {
+            if (!View(s).Present) continue; // 현재 모드에 표시되는 사이트만 집계
             var rg = string.IsNullOrWhiteSpace(s.Region) ? "기타" : s.Region;
             if (!counts.ContainsKey(rg)) { counts[rg] = 0; order.Add(rg); }
             counts[rg]++;
