@@ -94,8 +94,65 @@ public sealed class MainForm : Form
         _uiTimer.Start();
 
         LoadUserLocation();
+        LoadMapOverrides();
+        _map.SiteMoved += OnSiteMoved;
         _monitor.Updated += OnMonitorUpdated;
         Load += (_, _) => RefreshAll();
+    }
+
+    // ── 지도 마커 수동 재배치 위치(드래그) 저장/복원 ──────────────────────────
+    private Dictionary<string, (double Lat, double Lon)> _mapOverrides = new(StringComparer.OrdinalIgnoreCase);
+
+    private void LoadMapOverrides()
+    {
+        _mapOverrides = ParseOverrides(_db.GetSetting("mapPositions"));
+        _map.SetOverrides(_mapOverrides);
+    }
+
+    private void OnSiteMoved(string code, double lat, double lon)
+    {
+        _mapOverrides[code] = (lat, lon);
+        _db.SetSetting("mapPositions", SerializeOverrides(_mapOverrides));
+        _map.SetOverrides(_mapOverrides);
+    }
+
+    private static Dictionary<string, (double Lat, double Lon)> ParseOverrides(string? json)
+    {
+        var d = new Dictionary<string, (double Lat, double Lon)>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(json)) return d;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object) return d;
+            foreach (var p in doc.RootElement.EnumerateObject())
+            {
+                var a = p.Value;
+                if (a.ValueKind == System.Text.Json.JsonValueKind.Array && a.GetArrayLength() >= 2
+                    && a[0].ValueKind == System.Text.Json.JsonValueKind.Number && a[1].ValueKind == System.Text.Json.JsonValueKind.Number)
+                    d[p.Name] = (a[0].GetDouble(), a[1].GetDouble());
+            }
+        }
+        catch { /* 손상 시 무시 */ }
+        return d;
+    }
+
+    private static string SerializeOverrides(Dictionary<string, (double Lat, double Lon)> d)
+    {
+        using var ms = new System.IO.MemoryStream();
+        using (var w = new System.Text.Json.Utf8JsonWriter(ms))
+        {
+            w.WriteStartObject();
+            foreach (var kv in d)
+            {
+                w.WritePropertyName(kv.Key);
+                w.WriteStartArray();
+                w.WriteNumberValue(kv.Value.Lat);
+                w.WriteNumberValue(kv.Value.Lon);
+                w.WriteEndArray();
+            }
+            w.WriteEndObject();
+        }
+        return System.Text.Encoding.UTF8.GetString(ms.ToArray());
     }
 
     private void OnMonitorUpdated() => _dirty = true;
