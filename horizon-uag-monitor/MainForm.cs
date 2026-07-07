@@ -97,6 +97,7 @@ public sealed class MainForm : Form
         LoadMapOverrides();
         LoadMapShow();
         _map.SiteMoved += OnSiteMoved;
+        _map.SiteActivated += OnSiteActivated;
         _monitor.Updated += OnMonitorUpdated;
         Load += (_, _) => RefreshAll();
     }
@@ -266,7 +267,7 @@ public sealed class MainForm : Form
             foreach (var es in byDc[dc])
             {
                 var card = new EndpointCard { Tag = es.Endpoint.Id };
-                card.Click += (s, _) => OpenHistoryFor((long)((Control)s!).Tag!);
+                card.DoubleClick += (s, _) => OpenHistoryFor((long)((Control)s!).Tag!);
                 _cards[es.Endpoint.Id] = card;
                 _dashboard.Controls.Add(card);
                 last = card;
@@ -420,6 +421,23 @@ public sealed class MainForm : Form
         if (ep == null) return;
         using var f = new HistoryForm(_db, ep);
         f.ShowDialog(this);
+    }
+
+    // 지도 마커 더블클릭 — 해당 사이트(데이터센터)의 대상 이력을 연다. 여러 개면 선택 메뉴.
+    private void OnSiteActivated(string code)
+    {
+        var eps = _monitor.Snapshot().Select(x => x.Endpoint)
+            .Where(e => string.Equals(string.IsNullOrWhiteSpace(e.Datacenter) ? e.Name : e.Datacenter, code, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (eps.Count == 0) return;
+        if (eps.Count == 1) { OpenHistoryFor(eps[0].Id); return; }
+        var menu = new ContextMenuStrip();
+        foreach (var e in eps)
+        {
+            var eid = e.Id;
+            menu.Items.Add($"{e.Name} · {e.Type}", null, (_, _) => OpenHistoryFor(eid));
+        }
+        menu.Show(System.Windows.Forms.Cursor.Position);
     }
 
     private void ExportCsv()

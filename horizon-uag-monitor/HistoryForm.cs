@@ -15,7 +15,7 @@ public sealed class HistoryForm : Form
     private readonly Endpoint _ep;
     private readonly ChartPanel _chart = new();
     private readonly Label _stats = new();
-    private int _rangeMinutes = 1440; // 기본 1일
+    private int _rangeMinutes = 180; // 기본 3시간
 
     // 라벨, 분 단위 범위. 분/시간 단기 범위 + 일 단위 장기 범위.
     private static readonly (string Label, int Minutes)[] Ranges =

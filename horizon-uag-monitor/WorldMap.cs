@@ -50,17 +50,22 @@ public sealed class WorldMap : Panel
     private Dictionary<string, (double Lat, double Lon)> _overrides = new(StringComparer.OrdinalIgnoreCase);
     private string? _dragCode;
     private PointF _dragPoint;
+    private PointF _dragStart;
 
     /// <summary>사이트를 드래그로 옮겼을 때 발생(코드, 새 위도, 새 경도) — 상위에서 저장.</summary>
     public event Action<string, double, double>? SiteMoved;
+    /// <summary>마커 더블클릭 시 발생(사이트 코드) — 상위에서 이력 차트 열기.</summary>
+    public event Action<string>? SiteActivated;
 
     public WorldMap()
     {
         DoubleBuffered = true;
         BackColor = Color.White;
+        SetStyle(ControlStyles.StandardClick | ControlStyles.StandardDoubleClick, true); // 더블클릭 이벤트 활성
         MouseDown += OnMouseDownMap;
         MouseMove += OnMouseMoveMap;
         MouseUp += OnMouseUpMap;
+        MouseDoubleClick += OnMouseDoubleClickMap;
     }
 
     /// <summary>저장된 표시 위치 오버라이드 적용.</summary>
@@ -113,7 +118,22 @@ public sealed class WorldMap : Panel
             var c = SiteCenter(s, map);
             if (Math.Abs(c.X - e.X) <= 12 && Math.Abs(c.Y - e.Y) <= 12)
             {
-                _dragCode = s.Code; _dragPoint = new PointF(e.X, e.Y); Cursor = Cursors.SizeAll; Invalidate();
+                _dragCode = s.Code; _dragStart = _dragPoint = new PointF(e.X, e.Y); Cursor = Cursors.SizeAll; Invalidate();
+                return;
+            }
+        }
+    }
+    private void OnMouseDoubleClickMap(object? sender, MouseEventArgs e)
+    {
+        if (e.Button != MouseButtons.Left) return;
+        var map = MapRect();
+        foreach (var s in _sites)
+        {
+            if (!View(s).Present) continue;
+            var c = SiteCenter(s, map);
+            if (Math.Abs(c.X - e.X) <= 12 && Math.Abs(c.Y - e.Y) <= 12)
+            {
+                try { SiteActivated?.Invoke(s.Code); } catch { /* ignore */ }
                 return;
             }
         }
@@ -137,10 +157,12 @@ public sealed class WorldMap : Panel
     {
         if (_dragCode == null) return;
         var map = MapRect();
-        double lon = InvLon(_dragPoint.X, map);
-        double lat = Math.Max(-85, Math.Min(85, InvLat(_dragPoint.Y, map)));
         var code = _dragCode;
         _dragCode = null; Cursor = Cursors.Default;
+        // 거의 움직이지 않았으면 클릭(더블클릭 포함)으로 간주 — 위치 저장하지 않음.
+        if (Math.Abs(_dragPoint.X - _dragStart.X) + Math.Abs(_dragPoint.Y - _dragStart.Y) < 4) { Invalidate(); return; }
+        double lon = InvLon(_dragPoint.X, map);
+        double lat = Math.Max(-85, Math.Min(85, InvLat(_dragPoint.Y, map)));
         _overrides[code] = (lat, lon); // 즉시 반영(저장은 상위에서)
         Invalidate();
         try { SiteMoved?.Invoke(code, lat, lon); } catch { /* ignore */ }
@@ -222,8 +244,8 @@ public sealed class WorldMap : Panel
         if (s.UagOn && s.UagSev > sev) { sev = s.UagSev; status = s.UagStatus; }
         if (s.PortalOn && s.PortalSev > sev) { sev = s.PortalSev; status = s.PortalStatus; }
         var parts = new List<string>();
-        if (s.UagRtt is double u) parts.Add($"U{u:F0}");
-        if (s.PortalRtt is double p) parts.Add($"P{p:F0}");
+        if (s.UagRtt is double u) parts.Add($"{u:F0}");
+        if (s.PortalRtt is double p) parts.Add($"{p:F0}");
         var rtt = parts.Count > 0 ? string.Join("/", parts) + "ms" : "";
         return (present, status, enabled, rtt);
     }
