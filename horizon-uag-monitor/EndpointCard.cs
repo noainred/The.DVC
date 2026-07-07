@@ -29,6 +29,7 @@ public sealed class EndpointCard : Panel
     public EndpointCard()
     {
         DoubleBuffered = true;
+        SetStyle(ControlStyles.StandardClick | ControlStyles.StandardDoubleClick, true); // 더블클릭 이벤트 활성
         Width = 300;
         Height = 152;
         Margin = new Padding(8);
