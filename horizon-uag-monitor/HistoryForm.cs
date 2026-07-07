@@ -15,11 +15,13 @@ public sealed class HistoryForm : Form
     private readonly Endpoint _ep;
     private readonly ChartPanel _chart = new();
     private readonly Label _stats = new();
-    private int _rangeDays = 1;
+    private int _rangeMinutes = 1440; // 기본 1일
 
-    private static readonly (string Label, int Days)[] Ranges =
+    // 라벨, 분 단위 범위. 분/시간 단기 범위 + 일 단위 장기 범위.
+    private static readonly (string Label, int Minutes)[] Ranges =
     {
-        ("1일", 1), ("7일", 7), ("30일", 30), ("90일", 90), ("365일", 365),
+        ("1분", 1), ("10분", 10), ("30분", 30), ("1시간", 60), ("3시간", 180), ("6시간", 360),
+        ("1일", 1440), ("7일", 10080), ("30일", 43200), ("90일", 129600), ("365일", 525600),
     };
 
     public HistoryForm(Database db, Endpoint ep)
@@ -27,16 +29,16 @@ public sealed class HistoryForm : Form
         _db = db;
         _ep = ep;
         Text = $"이력 — {ep.Name} ({ep.Host}:{ep.Port})";
-        Width = 900;
+        Width = 1020;
         Height = 520;
         StartPosition = FormStartPosition.CenterParent;
         Font = new Font("Segoe UI", 9f);
 
-        var top = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 40, Padding = new Padding(6) };
-        foreach (var (label, days) in Ranges)
+        var top = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 40, Padding = new Padding(6), WrapContents = false, AutoScroll = true };
+        foreach (var (label, minutes) in Ranges)
         {
-            var b = new Button { Text = label, AutoSize = true, Tag = days };
-            b.Click += (s, _) => { _rangeDays = (int)((Button)s!).Tag!; Reload(); };
+            var b = new Button { Text = label, AutoSize = true, Tag = minutes };
+            b.Click += (s, _) => { _rangeMinutes = (int)((Button)s!).Tag!; Reload(); };
             top.Controls.Add(b);
         }
         var refresh = new Button { Text = "새로고침", AutoSize = true };
@@ -59,7 +61,7 @@ public sealed class HistoryForm : Form
 
     private void Reload()
     {
-        var since = DateTime.UtcNow.AddDays(-_rangeDays);
+        var since = DateTime.UtcNow.AddMinutes(-_rangeMinutes);
         var rows = _db.History(_ep.Id, since);
         // 과다 시 스트라이드 다운샘플(최대 ~1500점).
         const int max = 1500;
@@ -69,7 +71,7 @@ public sealed class HistoryForm : Form
             var stride = (int)Math.Ceiling(rows.Count / (double)max);
             pts = rows.Where((_, i) => i % stride == 0).ToList();
         }
-        _chart.SetData(pts, DateTime.UtcNow.AddDays(-_rangeDays), DateTime.UtcNow);
+        _chart.SetData(pts, DateTime.UtcNow.AddMinutes(-_rangeMinutes), DateTime.UtcNow);
 
         if (rows.Count == 0) { _stats.Text = "이 기간에 데이터가 없습니다."; return; }
         var resp = rows.Where(r => r.ResponseMs.HasValue).Select(r => r.ResponseMs!.Value).ToList();
