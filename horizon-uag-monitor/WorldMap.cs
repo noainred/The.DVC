@@ -43,11 +43,103 @@ public sealed class WorldMap : Panel
     private double _userLat, _userLon;
     private string _userLabel = "내 위치";
     private bool _hasUser;
+    // 사용자가 드래그로 재배치한 사이트 표시 위치(코드→위경도). 저장/복원.
+    private Dictionary<string, (double Lat, double Lon)> _overrides = new(StringComparer.OrdinalIgnoreCase);
+    private string? _dragCode;
+    private PointF _dragPoint;
+
+    /// <summary>사이트를 드래그로 옮겼을 때 발생(코드, 새 위도, 새 경도) — 상위에서 저장.</summary>
+    public event Action<string, double, double>? SiteMoved;
 
     public WorldMap()
     {
         DoubleBuffered = true;
         BackColor = Color.White;
+        MouseDown += OnMouseDownMap;
+        MouseMove += OnMouseMoveMap;
+        MouseUp += OnMouseUpMap;
+    }
+
+    /// <summary>저장된 표시 위치 오버라이드 적용.</summary>
+    public void SetOverrides(Dictionary<string, (double Lat, double Lon)> ov)
+    {
+        _overrides = ov ?? new Dictionary<string, (double, double)>(StringComparer.OrdinalIgnoreCase);
+        Invalidate();
+    }
+
+    // ── 투영(한국 중앙) + 역투영 — 페인트/마우스 공용 ────────────────────────
+    private Rectangle MapRect()
+    {
+        int padL = 20, padR = 20, padT = 46, padB = 44;
+        return new Rectangle(padL, padT, Math.Max(50, Width - padL - padR), Math.Max(50, Height - padT - padB));
+    }
+    private static float ProjX(double lon, Rectangle map)
+    {
+        double rel = lon - CenterLon;
+        while (rel < -180) rel += 360;
+        while (rel > 180) rel -= 360;
+        return map.Left + (float)((rel + 180.0) / 360.0 * map.Width);
+    }
+    private static float ProjY(double lat, Rectangle map) => map.Top + (float)((90.0 - lat) / 180.0 * map.Height);
+    private static double InvLon(float x, Rectangle map)
+    {
+        double lon = ((x - map.Left) / (double)map.Width) * 360.0 - 180.0 + CenterLon;
+        while (lon < -180) lon += 360;
+        while (lon > 180) lon -= 360;
+        return lon;
+    }
+    private static double InvLat(float y, Rectangle map) => 90.0 - ((y - map.Top) / (double)map.Height) * 180.0;
+
+    private (double Lat, double Lon) EffLatLon(Site s)
+        => _overrides.TryGetValue(s.Code, out var o) ? o : (s.Lat, s.Lon);
+
+    private PointF SiteCenter(Site s, Rectangle map)
+    {
+        if (_dragCode != null && string.Equals(_dragCode, s.Code, StringComparison.OrdinalIgnoreCase)) return _dragPoint;
+        var (la, lo) = EffLatLon(s);
+        return new PointF(ProjX(lo, map), ProjY(la, map));
+    }
+
+    private void OnMouseDownMap(object? sender, MouseEventArgs e)
+    {
+        if (e.Button != MouseButtons.Left) return;
+        var map = MapRect();
+        foreach (var s in _sites)
+        {
+            var c = SiteCenter(s, map);
+            if (Math.Abs(c.X - e.X) <= 12 && Math.Abs(c.Y - e.Y) <= 12)
+            {
+                _dragCode = s.Code; _dragPoint = new PointF(e.X, e.Y); Cursor = Cursors.SizeAll; Invalidate();
+                return;
+            }
+        }
+    }
+    private void OnMouseMoveMap(object? sender, MouseEventArgs e)
+    {
+        var map = MapRect();
+        if (_dragCode != null)
+        {
+            float x = Math.Max(map.Left, Math.Min(map.Right, e.X));
+            float y = Math.Max(map.Top, Math.Min(map.Bottom, e.Y));
+            _dragPoint = new PointF(x, y); Invalidate();
+            return;
+        }
+        // 마커 위에 있으면 손 커서(드래그 가능 힌트)
+        bool over = false;
+        foreach (var s in _sites) { var c = SiteCenter(s, map); if (Math.Abs(c.X - e.X) <= 12 && Math.Abs(c.Y - e.Y) <= 12) { over = true; break; } }
+        Cursor = over ? Cursors.Hand : Cursors.Default;
+    }
+    private void OnMouseUpMap(object? sender, MouseEventArgs e)
+    {
+        if (_dragCode == null) return;
+        var map = MapRect();
+        double lon = InvLon(_dragPoint.X, map);
+        double lat = Math.Max(-85, Math.Min(85, InvLat(_dragPoint.Y, map)));
+        var code = _dragCode;
+        _dragCode = null; Cursor = Cursors.Default;
+        _overrides[code] = (lat, lon); // 즉시 반영(저장은 상위에서)
+        Invalidate();
+        try { SiteMoved?.Invoke(code, lat, lon); } catch { /* ignore */ }
     }
 
     /// <summary>사용자(매니저) 위치 지정 — 지도에 마커 + 각 사이트까지 arc/RTT 표시 기준.</summary>
@@ -99,8 +191,7 @@ public sealed class WorldMap : Panel
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
 
-        int padL = 20, padR = 20, padT = 46, padB = 44;
-        var map = new Rectangle(padL, padT, Math.Max(50, Width - padL - padR), Math.Max(50, Height - padT - padB));
+        var map = MapRect();
 
         // 배경 도트 그리드(세계 캔버스)
         using (var dot = new SolidBrush(Color.FromArgb(224, 227, 231)))
@@ -111,31 +202,22 @@ public sealed class WorldMap : Panel
                     g.FillEllipse(dot, x, y, 2f, 2f);
         }
 
-        // 한국(≈127.5°E)을 가로 중앙에 두는 태평양 중심 투영: 중심 경도 기준으로 상대 경도를 [-180,180]로 감쌈.
-        float X(double lon)
-        {
-            double rel = lon - CenterLon;
-            while (rel < -180) rel += 360;
-            while (rel > 180) rel -= 360;
-            return map.Left + (float)((rel + 180.0) / 360.0 * map.Width);
-        }
-        float Y(double lat) => map.Top + (float)((90.0 - lat) / 180.0 * map.Height);
-
         // 사용자 → 사이트 arc(마커 아래에 먼저 그린다). 상태 색상으로 곡선.
-        PointF? userPt = _hasUser ? new PointF(X(_userLon), Y(_userLat)) : null;
+        PointF? userPt = _hasUser ? new PointF(ProjX(_userLon, map), ProjY(_userLat, map)) : null;
         if (userPt is PointF up)
         {
             foreach (var s in _sites)
             {
                 var color = MainForm.StatusColor(s.Status, s.Enabled);
-                DrawArc(g, up, new PointF(X(s.Lon), Y(s.Lat)), Color.FromArgb(70, color));
+                DrawArc(g, up, SiteCenter(s, map), Color.FromArgb(70, color));
             }
         }
 
         // 마커
         foreach (var s in _sites)
         {
-            float cx = X(s.Lon), cy = Y(s.Lat);
+            var c0 = SiteCenter(s, map);
+            float cx = c0.X, cy = c0.Y;
             var color = MainForm.StatusColor(s.Status, s.Enabled);
             using (var halo = new SolidBrush(Color.FromArgb(38, color)))
                 g.FillEllipse(halo, cx - 15, cy - 15, 30, 30);
@@ -175,6 +257,15 @@ public sealed class WorldMap : Panel
         DrawTitle(g);
         DrawStatusLegend(g, map);
         DrawRegionLegend(g, map);
+
+        // 드래그 힌트(우하단, 은은하게)
+        if (_sites.Count > 0)
+        {
+            using var hintBr = new SolidBrush(Color.FromArgb(150, 158, 166));
+            const string hintTxt = "마커를 드래그해 위치 조정 (자동 저장)";
+            var hs = g.MeasureString(hintTxt, FTitleEn);
+            g.DrawString(hintTxt, FTitleEn, hintBr, Width - hs.Width - 18, Height - 26);
+        }
 
         if (_sites.Count == 0)
         {
