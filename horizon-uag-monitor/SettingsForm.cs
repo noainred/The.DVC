@@ -170,23 +170,47 @@ public sealed class SettingsForm : Form
     }
 
     // ── JSON 가져오기/내보내기(실서버 대량 등록용) ─────────────────────────────
-    private static readonly System.Text.Json.JsonSerializerOptions JsonOpts = new()
-    {
-        WriteIndented = true,
-        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping, // 한글 그대로
-    };
-
+    // 단일 파일(self-contained) 배포에서도 안전하도록 리플렉션 직렬화(System.Text.Json 자동)를
+    // 쓰지 않고 Utf8JsonWriter/JsonDocument로 직접 처리한다.
     private void ExportJson()
     {
         using var sfd = new SaveFileDialog { Filter = "JSON (*.json)|*.json", FileName = "horizon-uag-endpoints.json" };
         if (sfd.ShowDialog(this) != DialogResult.OK) return;
         try
         {
-            var json = System.Text.Json.JsonSerializer.Serialize(_db.ListEndpoints(), JsonOpts);
-            System.IO.File.WriteAllText(sfd.FileName, json, new System.Text.UTF8Encoding(false));
-            MessageBox.Show(this, "내보내기 완료", "JSON", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            var list = _db.ListEndpoints();
+            var opts = new System.Text.Json.JsonWriterOptions { Indented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+            using (var stream = System.IO.File.Create(sfd.FileName))
+            using (var w = new System.Text.Json.Utf8JsonWriter(stream, opts))
+            {
+                w.WriteStartArray();
+                foreach (var e in list)
+                {
+                    w.WriteStartObject();
+                    w.WriteString("name", e.Name);
+                    w.WriteString("type", e.Type);
+                    w.WriteString("datacenter", e.Datacenter);
+                    w.WriteString("scheme", e.Scheme);
+                    w.WriteString("host", e.Host);
+                    w.WriteNumber("port", e.Port);
+                    w.WriteString("path", e.Path);
+                    w.WriteString("matchText", e.MatchText);
+                    w.WriteString("city", e.City);
+                    w.WriteString("region", e.Region);
+                    w.WriteNumber("lat", e.Lat);
+                    w.WriteNumber("lon", e.Lon);
+                    w.WriteNumber("intervalSec", e.IntervalSec);
+                    w.WriteNumber("timeoutMs", e.TimeoutMs);
+                    w.WriteBoolean("enabled", e.Enabled);
+                    w.WriteNumber("sort", e.Sort);
+                    w.WriteEndObject();
+                }
+                w.WriteEndArray();
+                w.Flush();
+            }
+            MessageBox.Show(this, $"내보내기 완료 — {list.Count}건\n{sfd.FileName}", "JSON", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
-        catch (Exception ex) { MessageBox.Show(this, ex.Message, "내보내기 오류", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+        catch (Exception ex) { MessageBox.Show(this, $"내보내기 실패:\n{ex}", "내보내기 오류", MessageBoxButtons.OK, MessageBoxIcon.Error); }
     }
 
     private void ImportJson()
@@ -196,19 +220,34 @@ public sealed class SettingsForm : Form
         try
         {
             var json = System.IO.File.ReadAllText(ofd.FileName);
-            var imported = System.Text.Json.JsonSerializer.Deserialize<List<Endpoint>>(json) ?? new List<Endpoint>();
-            if (imported.Count == 0) { MessageBox.Show(this, "가져올 대상이 없습니다.", "JSON", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
-            // 기존과 (이름+호스트+포트)로 매칭: 있으면 갱신, 없으면 추가(중복 방지).
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.ValueKind != System.Text.Json.JsonValueKind.Array) { MessageBox.Show(this, "JSON 최상위가 배열이어야 합니다.", "JSON", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
             var existing = _db.ListEndpoints().ToDictionary(x => Key(x), x => x.Id);
             int added = 0, updated = 0, sort = _db.ListEndpoints().Count;
-            foreach (var e in imported)
+            foreach (var o in root.EnumerateArray())
             {
-                if (string.IsNullOrWhiteSpace(e.Host)) continue;
-                if (e.Port is < 1 or > 65535) e.Port = 443;
-                if (string.IsNullOrWhiteSpace(e.Name)) e.Name = e.Host;
-                if (string.IsNullOrWhiteSpace(e.Path)) e.Path = "/";
-                if (e.IntervalSec < 5) e.IntervalSec = 60;
-                if (e.TimeoutMs < 1000) e.TimeoutMs = 5000;
+                if (o.ValueKind != System.Text.Json.JsonValueKind.Object) continue;
+                var host = Str(o, "host");
+                if (string.IsNullOrWhiteSpace(host)) continue;
+                var e = new Endpoint
+                {
+                    Name = Str(o, "name", host),
+                    Type = Str(o, "type", "UAG"),
+                    Datacenter = Str(o, "datacenter"),
+                    Scheme = string.Equals(Str(o, "scheme", "https"), "http", StringComparison.OrdinalIgnoreCase) ? "http" : "https",
+                    Host = host,
+                    Port = ClampPort(Int(o, "port", 443)),
+                    Path = NormPath(Str(o, "path", "/")),
+                    MatchText = Str(o, "matchText"),
+                    City = Str(o, "city"),
+                    Region = Str(o, "region"),
+                    Lat = Dbl(o, "lat", 0),
+                    Lon = Dbl(o, "lon", 0),
+                    IntervalSec = Math.Max(5, Int(o, "intervalSec", 60)),
+                    TimeoutMs = Math.Max(1000, Int(o, "timeoutMs", 5000)),
+                    Enabled = Bool(o, "enabled", true),
+                };
                 if (existing.TryGetValue(Key(e), out var id)) { e.Id = id; updated++; }
                 else { e.Id = 0; e.Sort = sort++; added++; }
                 _db.UpsertEndpoint(e);
@@ -216,10 +255,28 @@ public sealed class SettingsForm : Form
             LoadList();
             MessageBox.Show(this, $"가져오기 완료 — 추가 {added}건, 갱신 {updated}건", "JSON", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
-        catch (Exception ex) { MessageBox.Show(this, $"가져오기 실패: {ex.Message}", "JSON 오류", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+        catch (Exception ex) { MessageBox.Show(this, $"가져오기 실패:\n{ex}", "JSON 오류", MessageBoxButtons.OK, MessageBoxIcon.Error); }
     }
 
+    private static int ClampPort(int p) => p is >= 1 and <= 65535 ? p : 443;
+    private static string NormPath(string p) => string.IsNullOrWhiteSpace(p) ? "/" : p;
     private static string Key(Endpoint e) => $"{e.Name}|{e.Host}|{e.Port}".ToLowerInvariant();
+
+    // JsonElement에서 대소문자 무시로 값 읽기(수동 파싱, 리플렉션 불필요).
+    private static bool TryProp(System.Text.Json.JsonElement o, string name, out System.Text.Json.JsonElement v)
+    {
+        foreach (var p in o.EnumerateObject())
+            if (string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)) { v = p.Value; return true; }
+        v = default; return false;
+    }
+    private static string Str(System.Text.Json.JsonElement o, string name, string def = "")
+        => TryProp(o, name, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String ? (v.GetString() ?? def) : def;
+    private static int Int(System.Text.Json.JsonElement o, string name, int def)
+        => TryProp(o, name, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.Number && v.TryGetInt32(out var n) ? n : def;
+    private static double Dbl(System.Text.Json.JsonElement o, string name, double def)
+        => TryProp(o, name, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.Number && v.TryGetDouble(out var n) ? n : def;
+    private static bool Bool(System.Text.Json.JsonElement o, string name, bool def)
+        => TryProp(o, name, out var v) ? v.ValueKind == System.Text.Json.JsonValueKind.True || (v.ValueKind != System.Text.Json.JsonValueKind.False && def) : def;
 
     private void Save()
     {
