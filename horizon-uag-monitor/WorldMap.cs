@@ -37,6 +37,8 @@ public sealed class WorldMap : Panel
         public double? RttMs => RttCount > 0 ? RttSum / RttCount : (double?)null;
     }
 
+    private const double CenterLon = 127.5; // 지도 가로 중앙 경도(한국)
+
     private List<Site> _sites = new();
     private double _userLat, _userLon;
     private string _userLabel = "내 위치";
@@ -109,7 +111,14 @@ public sealed class WorldMap : Panel
                     g.FillEllipse(dot, x, y, 2f, 2f);
         }
 
-        float X(double lon) => map.Left + (float)((lon + 180.0) / 360.0 * map.Width);
+        // 한국(≈127.5°E)을 가로 중앙에 두는 태평양 중심 투영: 중심 경도 기준으로 상대 경도를 [-180,180]로 감쌈.
+        float X(double lon)
+        {
+            double rel = lon - CenterLon;
+            while (rel < -180) rel += 360;
+            while (rel > 180) rel -= 360;
+            return map.Left + (float)((rel + 180.0) / 360.0 * map.Width);
+        }
         float Y(double lat) => map.Top + (float)((90.0 - lat) / 180.0 * map.Height);
 
         // 사용자 → 사이트 arc(마커 아래에 먼저 그린다). 상태 색상으로 곡선.
