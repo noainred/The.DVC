@@ -149,6 +149,14 @@ export function agentLastScanPoll(agentName) {
   return agentPolls.get(String(agentName || '').trim().toLowerCase()) || null;
 }
 
+/** 최근 withinMs 이내에 잡 인출 폴링한 에이전트 이름(소문자) 목록 — AGENT_NAME 불일치 진단용. */
+export function recentPollingAgents(withinMs = 30_000) {
+  const now = Date.now();
+  const out = [];
+  for (const [name, ts] of agentPolls) if (now - ts <= withinMs) out.push(name);
+  return out;
+}
+
 /**
  * '스캔 중지' — 아직 에이전트가 인출하지 않은 '대기' 잡을 모두 취소한다(큐에서 제거 + error 종결).
  * 이미 인출된(진행 중) 잡은 원격에서 멈출 수 없어 그대로 둔다. 반환: 취소된 잡 수.
@@ -250,7 +258,13 @@ export function getIdracScanJobLog(reqId) {
   const lastPoll = agentLastScanPoll(j.agent);
   const hints = [];
   if (j.state === 'pending') {
-    if (!lastPoll) hints.push({ level: 'error', msg: `에이전트 '${j.agent}'의 잡 인출 폴링 기록이 없습니다 — 엣지 포탈이 꺼져 있거나 AGENT_NAME 불일치, CENTRAL_URL/CENTRAL_TOKEN 미설정일 수 있습니다.` });
+    if (!lastPoll) {
+      hints.push({ level: 'error', msg: `에이전트 '${j.agent}'의 잡 인출 폴링 기록이 없습니다 — 엣지 포탈이 꺼져 있거나 AGENT_NAME 불일치, CENTRAL_URL/CENTRAL_TOKEN 미설정일 수 있습니다.` });
+      // 다른 이름으로 폴링 중인 에이전트가 있으면 AGENT_NAME 불일치를 바로 짚어준다(가장 흔한 원인).
+      const others = recentPollingAgents(30_000);
+      if (others.length) hints.push({ level: 'warn', msg: `현재 폴링 중인 에이전트: ${others.join(', ')} — 이 잡은 '${j.agent}'용인데 그 이름으로는 폴링이 없습니다. 엣지의 AGENT_NAME이 '${j.agent}'와 일치하는지(대소문자 무관) 확인하세요.` });
+      else hints.push({ level: 'warn', msg: '현재 중앙에 폴링하는 에이전트가 하나도 없습니다 — 엣지 프로세스 미기동, CENTRAL_URL 미설정, 또는 네트워크/토큰 문제일 수 있습니다.' });
+    }
     else if (now - lastPoll > 30_000) hints.push({ level: 'warn', msg: `에이전트가 ${Math.round((now - lastPoll) / 1000)}초째 폴링하지 않습니다(정상 주기 5초) — 엣지 포탈 상태/네트워크를 확인하세요.` });
     else hints.push({ level: 'info', msg: '에이전트는 정상 폴링 중이며 곧 잡을 인출합니다.' });
   }
