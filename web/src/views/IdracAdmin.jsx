@@ -207,8 +207,9 @@ export default function IdracAdmin() {
 
 
   // ── 법인(DataCenter)별 iDRAC 장비 스캔 ──────────────────────────
-  const srOpenNew = () => { setSrMsg(null); setSrForm({ datacenterId: '', ranges: '', username: 'root', password: '', agent: '__local__', enabled: true, mode: 'merge', isNew: true }); };
-  const srEdit = (e) => { setSrMsg(null); setSrForm({ datacenterId: e.datacenterId, ranges: (e.ranges || []).join('\n'), username: e.username || 'root', password: '', agent: e.agent || '__local__', enabled: e.enabled !== false, mode: e.mode || 'merge', hasPassword: e.hasPassword, isNew: false }); };
+  const dcNameOf = (id) => (datacenters.find((d) => d.id === id)?.name || id || '');
+  const srOpenNew = () => { setSrMsg(null); setSrForm({ id: '', datacenterId: '', service: '', ranges: '', username: 'root', password: '', agent: '__local__', enabled: true, mode: 'merge', isNew: true }); };
+  const srEdit = (e) => { setSrMsg(null); setSrForm({ id: e.id || '', datacenterId: e.datacenterId, service: e.service || '', ranges: (e.ranges || []).join('\n'), username: e.username || 'root', password: '', agent: e.agent || '__local__', enabled: e.enabled !== false, mode: e.mode || 'merge', hasPassword: e.hasPassword, isNew: false }); };
   const srSave = async () => {
     const f = srForm; if (!f) return;
     // 폼 바로 옆에 보이는 인라인 검증(상단 배너만 뜨면 폼에서 안 보여 '저장 안 됨'처럼 느껴짐).
@@ -221,12 +222,12 @@ export default function IdracAdmin() {
     const noPw = !f.hasPassword && (f.password || '') === '';
     setBusy(true); setSrMsg(null);
     try {
-      const body = { datacenterId: f.datacenterId, ranges: f.ranges, username: f.username, agent: f.agent === '__local__' ? '' : f.agent, enabled: f.enabled, mode: f.mode };
+      const body = { id: f.id || undefined, datacenterId: f.datacenterId, service: f.service || '', ranges: f.ranges, username: f.username, agent: f.agent === '__local__' ? '' : f.agent, enabled: f.enabled, mode: f.mode };
       if ((f.password || '') !== '') body.password = f.password; // 빈 비번은 서버가 기존 유지, 그 외엔 원본 그대로 전송
       const r = await putJson('/admin/idrac/scan-ranges', body);
       if (r.ok) {
         const note = noPw ? ' · ⚠ 비밀번호 미설정 — 스캔하려면 비밀번호를 입력하세요' : '';
-        const text = `스캔 대역 저장됨 — ${f.datacenterId} (대역 ${(r.ranges || []).length}개${r.enabled ? ', 주기 스캔 포함' : ', 비활성'})${note}`;
+        const text = `스캔 대역 저장됨 — ${f.datacenterId}${f.service ? `/${f.service}` : ''} (대역 ${(r.ranges || []).length}개${r.enabled ? ', 주기 스캔 포함' : ', 비활성'})${note}`;
         setImportMsg({ ok: true, text }); // 상단 배너에도 표시
         setSrForm(null); setSrMsg(null);
         await loadScanRanges();
@@ -236,24 +237,28 @@ export default function IdracAdmin() {
     } catch (e) { setSrMsg({ ok: false, text: `저장 실패: ${e.message}` }); }
     finally { setBusy(false); }
   };
-  const srDelete = async (datacenterId) => {
-    if (!window.confirm(`'${datacenterId}' 법인의 iDRAC 스캔 대역을 삭제할까요? (등록된 서버는 그대로 유지됩니다)`)) return;
+  const srDelete = async (e) => {
+    const label = `${dcNameOf(e.datacenterId)}${e.service ? ` / ${e.service}` : ''}`;
+    if (!window.confirm(`'${label}' iDRAC 스캔 대역을 삭제할까요? (등록된 서버는 그대로 유지됩니다)`)) return;
     setBusy(true); setImportMsg(null);
     try {
-      const r = await delJson(`/admin/idrac/scan-ranges/${encodeURIComponent(datacenterId)}`);
-      setImportMsg(r.ok ? { ok: true, text: `스캔 대역 삭제됨 — ${datacenterId}` } : { ok: false, text: r.reason });
+      const r = await delJson(`/admin/idrac/scan-ranges/${encodeURIComponent(e.id)}`);
+      setImportMsg(r.ok ? { ok: true, text: `스캔 대역 삭제됨 — ${label}` } : { ok: false, text: r.reason });
       await loadScanRanges();
-    } catch (e) { setImportMsg({ ok: false, text: e.message }); }
+    } catch (err) { setImportMsg({ ok: false, text: err.message }); }
     finally { setBusy(false); }
   };
-  const srScanNow = async (datacenterId) => {
+  // e: 엔트리 객체(단건 스캔) | { datacenterId } (법인 전체) | undefined (전체)
+  const srScanNow = async (e) => {
     setBusy(true); setImportMsg(null);
+    const body = e?.id ? { id: e.id } : e?.datacenterId ? { datacenterId: e.datacenterId } : {};
+    const label = e?.id ? `${dcNameOf(e.datacenterId)}${e.service ? ` / ${e.service}` : ''}` : e?.datacenterId ? `${dcNameOf(e.datacenterId)} 법인 전체` : '전체 대역';
     try {
-      const r = await postJson('/admin/idrac/scan-ranges/scan', datacenterId ? { datacenterId } : {});
-      setImportMsg(r.ok ? { ok: true, text: datacenterId ? `'${datacenterId}' 법인 대역 스캔을 시작했습니다(백그라운드).` : '전체 대역 스캔을 시작했습니다(백그라운드).' } : { ok: false, text: r.reason });
+      const r = await postJson('/admin/idrac/scan-ranges/scan', body);
+      setImportMsg(r.ok ? { ok: true, text: `${label} 스캔을 시작했습니다(백그라운드).` } : { ok: false, text: r.reason });
       if (r.status) setScanRanges((s) => ({ ...s, status: r.status }));
       await loadScanRanges(); await loadScanJobs();
-    } catch (e) { setImportMsg({ ok: false, text: e.message }); }
+    } catch (err) { setImportMsg({ ok: false, text: err.message }); }
     finally { setBusy(false); }
   };
 
@@ -1057,6 +1062,7 @@ function IdracScanRanges({ data, vcenters, datacenters = [], agents, busy, form,
   const [sort, setSort] = useState({ key: 'name', dir: 'asc' });
   const SORT_VAL = {
     name: (e) => String(dcName(e.datacenterId) || '').toLowerCase(),
+    service: (e) => String(e.service || '').toLowerCase(),
     ranges: (e) => (e.ranges || []).length,
     username: (e) => String(e.username || '').toLowerCase(),
     agent: (e) => String(e.agent || '').toLowerCase(), // 빈 값(직접)이 맨 앞/뒤
@@ -1164,20 +1170,23 @@ function IdracScanRanges({ data, vcenters, datacenters = [], agents, busy, form,
       {form && (
         <div className="card" style={{ marginBottom: 10, padding: '12px 14px', background: 'rgba(96,165,250,.06)' }}>
           <div className="flex between" style={{ alignItems: 'center', marginBottom: 8 }}>
-            <b style={{ fontSize: 13 }}>{form.isNew ? '스캔 대역 추가' : `스캔 대역 수정 — ${dcName(form.datacenterId)}`}</b>
+            <b style={{ fontSize: 13 }}>{form.isNew ? '스캔 대역 추가' : `스캔 대역 수정 — ${dcName(form.datacenterId)}${form.service ? ` / ${form.service}` : ''}`}</b>
             <button className="logout-btn" style={{ padding: '5px 10px', fontSize: 12 }} onClick={() => { setMsg && setMsg(null); setForm(null); }}>닫기</button>
           </div>
           <div className="flex gap wrap" style={{ alignItems: 'flex-start' }}>
-            <div style={{ flex: '1 1 220px', minWidth: 200 }}>
+            <div style={{ flex: '1 1 200px', minWidth: 180 }}>
               <label className="muted" style={{ fontSize: 11.5 }}>법인(DataCenter) *</label>
               <select className="input" style={{ width: '100%', padding: '8px 10px' }} value={form.datacenterId}
-                disabled={!form.isNew}
                 onChange={(e) => setForm({ ...form, datacenterId: e.target.value })}>
                 <option value="">(선택)</option>
                 {datacenters.map((d) => <option key={d.id} value={d.id}>{d.name || d.id}{d.region ? ` · ${d.region}` : ''}</option>)}
               </select>
             </div>
-            <div style={{ flex: '2 1 320px', minWidth: 260 }}>
+            <div style={{ flex: '1 1 180px', minWidth: 160 }}>
+              <label className="muted" style={{ fontSize: 11.5 }}>서비스명 <span className="muted">(한 법인 내 여러 서비스 구분)</span></label>
+              <input className="input" style={{ width: '100%', padding: '8px 10px' }} value={form.service || ''} onChange={(e) => setForm({ ...form, service: e.target.value })} placeholder="예: 서비스A / VDI / 관리망" />
+            </div>
+            <div style={{ flex: '2 1 300px', minWidth: 240 }}>
               <label className="muted" style={{ fontSize: 11.5 }}>IP 대역 (한 줄에 하나) *</label>
               <textarea value={form.ranges} onChange={(e) => setForm({ ...form, ranges: e.target.value })}
                 placeholder={'10.0.0.0/24\n10.0.1.1-10.0.1.50\n10.0.2.10'}
@@ -1246,22 +1255,23 @@ function IdracScanRanges({ data, vcenters, datacenters = [], agents, busy, form,
       <div className="table-wrap">
         <table>
           <thead><tr>
-            <Th k="name">법인(DataCenter)</Th><Th k="ranges">대역</Th><Th k="username">계정</Th><Th k="agent">스캔 주체</Th><Th k="enabled">주기</Th><Th k="lastRun">최근 결과</Th><th className="right">작업</th>
+            <Th k="name">법인(DataCenter)</Th><Th k="service">서비스</Th><Th k="ranges">대역</Th><Th k="username">계정</Th><Th k="agent">스캔 주체</Th><Th k="enabled">주기</Th><Th k="lastRun">최근 결과</Th><th className="right">작업</th>
           </tr></thead>
           <tbody>
-            {list.length === 0 && <tr><td colSpan={7} className="center muted" style={{ padding: 24 }}>저장된 스캔 대역이 없습니다. “+ 대역 추가”로 등록하세요.</td></tr>}
+            {list.length === 0 && <tr><td colSpan={8} className="center muted" style={{ padding: 24 }}>저장된 스캔 대역이 없습니다. “+ 대역 추가”로 등록하세요.</td></tr>}
             {list.map((e) => (
-              <tr key={e.datacenterId} style={{ opacity: e.enabled ? 1 : 0.55 }}>
+              <tr key={e.id || e.datacenterId} style={{ opacity: e.enabled ? 1 : 0.55 }}>
                 <td><b>{dcName(e.datacenterId)}</b>{dcName(e.datacenterId) !== e.datacenterId && <span className="muted" style={{ fontSize: 11 }}> ({e.datacenterId})</span>}</td>
+                <td>{e.service ? <span className="muted">{e.service}</span> : <span className="muted" style={{ opacity: 0.5 }}>—</span>}</td>
                 <td className="muted" title={(e.ranges || []).join('\n')}>{(e.ranges || []).length}개</td>
                 <td className="muted">{e.username || '—'}{e.hasPassword ? '' : <span style={{ color: 'var(--amber)' }} title="비밀번호 미설정 — 스캔 불가"> ⚠</span>}</td>
                 <td>{e.agent ? <span className="badge" style={{ background: 'rgba(167,139,250,.2)', color: '#a78bfa' }}>{e.agent}</span> : <span className="muted">직접</span>}</td>
                 <td>{e.enabled ? <span className="badge green">포함</span> : <span className="badge gray">제외</span>}</td>
                 <td style={{ fontSize: 12 }}>{fmtRun(e.lastRun)}</td>
                 <td className="right">
-                  <button className="logout-btn" style={{ padding: '5px 9px', fontSize: 12 }} disabled={busy || st.running} onClick={() => onScan(e.datacenterId)} title="이 대역만 지금 스캔">스캔</button>
+                  <button className="logout-btn" style={{ padding: '5px 9px', fontSize: 12 }} disabled={busy || st.running} onClick={() => onScan(e)} title="이 서비스 대역만 지금 스캔">스캔</button>
                   {' '}<button className="logout-btn" style={{ padding: '5px 9px', fontSize: 12 }} disabled={busy} onClick={() => onEdit(e)}>수정</button>
-                  {' '}<button className="logout-btn" style={{ padding: '5px 9px', fontSize: 12, color: 'var(--red)' }} disabled={busy} onClick={() => onDelete(e.datacenterId)}>삭제</button>
+                  {' '}<button className="logout-btn" style={{ padding: '5px 9px', fontSize: 12, color: 'var(--red)' }} disabled={busy} onClick={() => onDelete(e)}>삭제</button>
                 </td>
               </tr>
             ))}
