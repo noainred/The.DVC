@@ -270,18 +270,27 @@ export function getIdracScanResult(reqId) {
  * 잡 하나의 세부 로그(이벤트 타임라인 + 진단) — '스캔 현황' 로그창용. 비밀번호 미포함.
  * 진단(hints): 멈춘 것처럼 보일 때 어디를 봐야 하는지 서버가 판정해 함께 내려준다.
  */
-export function getIdracScanJobLog(reqId) {
+export function getIdracScanJobLog(reqId, opts = {}) {
   gc();
   const j = jobs.get(reqId);
   if (!j) return { ok: false, reason: '잡을 찾을 수 없습니다(완료 후 10분이 지나 정리됐을 수 있음).' };
   const now = Date.now();
   const lastPoll = agentLastScanPoll(j.agent);
+  // 이 에이전트가 '수집 서버(원격)'로 등록돼 있는지(id/이름, 소문자). 등록·정상인데 폴링만
+  // 없으면 방향이 반대인 '스캔 폴링(엣지→중앙)' 미설정이 원인일 가능성이 크다.
+  const collectorSet = opts.collectors instanceof Set ? opts.collectors : null;
+  const agentKey = String(j.agent || '').trim().toLowerCase();
+  const isRegisteredCollector = collectorSet ? collectorSet.has(agentKey) : false;
   const hints = [];
   if (j.state === 'pending') {
     if (!lastPoll) {
       hints.push({ level: 'error', msg: `에이전트 '${j.agent}'의 잡 인출 폴링 기록이 없습니다 — 엣지 포탈이 꺼져 있거나 AGENT_NAME 불일치, CENTRAL_URL/CENTRAL_TOKEN 미설정일 수 있습니다.` });
       // 다른 이름으로 폴링 중인 에이전트가 있으면 AGENT_NAME 불일치를 바로 짚어준다(가장 흔한 원인).
       const others = recentPollingAgents(30_000);
+      if (isRegisteredCollector) {
+        // 수집 서버로는 등록·정상인데 스캔 폴링만 없는 전형적 케이스 — 방향 차이를 명확히 설명.
+        hints.push({ level: 'warn', msg: `'${j.agent}'는 수집 서버(원격)로 등록되어 있습니다(중앙이 엣지에서 수집 = 중앙→엣지 PULL). 하지만 위임 스캔은 반대로 엣지가 중앙으로 '폴링'해야 동작합니다(엣지→중앙). 수집이 정상이어도 스캔 폴링은 별개이므로, 엣지 포탈에 CENTRAL_URL(중앙 주소)과 CENTRAL_TOKEN이 설정·재시작됐는지 확인하세요. 엣지 로그에 '[idrac-scan-agent] started (central=…, name=${j.agent})'가 보여야 합니다.` });
+      }
       if (others.length) hints.push({ level: 'warn', msg: `현재 폴링 중인 에이전트: ${others.join(', ')} — 이 잡은 '${j.agent}'용인데 그 이름으로는 폴링이 없습니다. 엣지의 AGENT_NAME이 '${j.agent}'와 일치하는지(대소문자 무관) 확인하세요.` });
       else hints.push({ level: 'warn', msg: '현재 중앙에 폴링하는 에이전트가 하나도 없습니다 — 엣지 프로세스 미기동, CENTRAL_URL 미설정, 또는 네트워크/토큰 문제일 수 있습니다.' });
     }
