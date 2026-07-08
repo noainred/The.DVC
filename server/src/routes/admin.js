@@ -109,7 +109,7 @@ import { resolveBundleBytes } from '../upgrade/bundleSource.js';
 import { upgradeManager } from '../upgrade/manager.js';
 import {
   listAssignments, addAssignment, updateAssignment, removeAssignment, getResults,
-  parseCsv as parseAssignmentsCsv, importAssignments,
+  parseCsv as parseAssignmentsCsv, importAssignments, mergeKnownAgents,
 } from '../central/assignments.js';
 
 export const adminRouter = Router();
@@ -1746,7 +1746,11 @@ adminRouter.post('/collectors/test', adminOnly, async (req, res) => {
 // List per-agent IP assignments (credentials redacted) + each agent's last
 // reported scan result.
 adminRouter.get('/assignments', adminOnly, (_req, res) => {
-  res.json({ assignments: listAssignments(), results: getResults(), centralEnabled: Boolean(config.central.token) });
+  // knownAgents: 폼에서 '에이전트 이름'을 직접 타이핑하지 않고 목록에서 고르게 한다(AGENT_NAME
+  // 오타로 인한 잡 인출 불일치 방지). 출처 = 등록된 수집 서버(원격, 실제 AGENT_NAME) + 중앙에
+  // 한 번이라도 보고한 에이전트 + 기존 할당. mergeKnownAgents가 대소문자 무시 중복 제거.
+  const knownAgents = mergeKnownAgents({ assignments: listAssignments(), results: getResults(), collectors: listCollectors() });
+  res.json({ assignments: listAssignments(), results: getResults(), knownAgents, centralEnabled: Boolean(config.central.token) });
 });
 
 adminRouter.post('/assignments', adminOnly, (req, res) => {
