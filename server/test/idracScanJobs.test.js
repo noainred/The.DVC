@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'idscan-'));
-const { enqueueIdracScan, takeIdracScanJobs, setIdracScanResult, setIdracScanProgress, getIdracScanResult, listIdracScanJobs } = await import('../src/central/idracScanJobs.js');
+const { enqueueIdracScan, takeIdracScanJobs, setIdracScanResult, setIdracScanProgress, getIdracScanResult, listIdracScanJobs, getIdracScanJobLog, recentPollingAgents } = await import('../src/central/idracScanJobs.js');
 
 test('위임 스캔: enqueue → take(에이전트 이름) → result → 폴링 라이프사이클', () => {
   const reqId = enqueueIdracScan('SEOUL', { ips: '10.0.0.1-10', username: 'root', password: 'pw' });
@@ -74,6 +74,21 @@ test('위임 스캔: 같은 에이전트+법인의 대기 잡은 중복 적재�
 
 test('위임 스캔: 알 수 없는 reqId는 unknown', () => {
   assert.equal(getIdracScanResult('nope').state, 'unknown');
+});
+
+test('스캔 로그 진단: 폴링 기록 없는 pending은 error 힌트 + AGENT_NAME 불일치 시 폴링 중 목록 안내', () => {
+  // 담당 에이전트가 한 번도 폴링하지 않은 pending 잡.
+  const reqId = enqueueIdracScan('OC2Sandbox', { ips: '10.9.0.1-10', username: 'root', password: 'pw', datacenterId: 'oc2' });
+  // 다른 이름('EdgeSeoul')만 중앙에 폴링 중인 상황을 재현.
+  takeIdracScanJobs('EdgeSeoul');
+  assert.ok(recentPollingAgents(30_000).includes('edgeseoul'), '폴링 기록은 소문자 키로 남는다');
+
+  const log = getIdracScanJobLog(reqId);
+  const msgs = log.hints.map((h) => h.msg).join('\n');
+  assert.ok(log.hints.some((h) => h.level === 'error' && h.msg.includes('폴링 기록이 없습니다')), '폴링 무기록 error 힌트');
+  // OC2Sandbox 이름으로는 폴링이 없지만 EdgeSeoul은 폴링 중 → 불일치를 짚어줘야 한다.
+  assert.ok(msgs.includes('edgeseoul'), '현재 폴링 중인 에이전트 이름을 안내');
+  assert.ok(msgs.includes('AGENT_NAME'), 'AGENT_NAME 불일치 점검 안내');
 });
 
 test('listIdracScanJobs: 잡 목록 요약(비밀번호·IP 원문 미노출, 최신순)', () => {
