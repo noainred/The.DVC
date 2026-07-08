@@ -19,7 +19,7 @@ import { config } from '../config.js';
 import { scanForIdracs } from './scan.js';
 import { registerScanned } from './registry.js';
 import { pollNow } from './poller.js';
-import { enabledScanRanges, recordScanRangeRun, getScanRangeRaw, lastScanCycleAt } from './scanRanges.js';
+import { enabledScanRanges, recordScanRangeRun, getScanRangeRaw, scanRangesForDatacenter, lastScanCycleAt } from './scanRanges.js';
 import { enqueueIdracScan, cancelPendingIdracScanJobs } from '../central/idracScanJobs.js';
 import { isStopped } from '../security/emergencyStop.js';
 
@@ -102,16 +102,22 @@ export async function runIdracScanOnce(opts = {}) {
   if (running) return { ok: false, reason: '이미 스캔 중입니다.' };
   if (isStopped()) return { ok: false, reason: '긴급중단 중' };
   let entries = enabledScanRanges();
-  if (opts.datacenterId) {
-    const raw = getScanRangeRaw(opts.datacenterId);
-    // 수동 단건: enabled가 아니어도 실행하되 대역/계정/비밀번호는 필요.
+  if (opts.id) {
+    // 수동 단건(엔트리 하나): enabled가 아니어도 실행하되 대역/계정/비밀번호는 필요.
+    const raw = getScanRangeRaw(opts.id);
     if (!raw || !(raw.ranges || []).length || !String(raw.username || '').trim()) {
-      return { ok: false, reason: '대상 법인의 대역/계정이 없습니다.' };
+      return { ok: false, reason: '대상 항목의 대역/계정이 없습니다.' };
     }
     if (!String(raw.password || '')) {
-      return { ok: false, reason: '대상 법인의 iDRAC 비밀번호가 없습니다(스캔 대역 수정에서 입력하세요).' };
+      return { ok: false, reason: '대상 항목의 iDRAC 비밀번호가 없습니다(스캔 대역 수정에서 입력하세요).' };
     }
-    entries = [{ datacenterId: String(opts.datacenterId).trim(), ranges: (raw.ranges || []).filter(Boolean), username: String(raw.username).trim(), password: raw.password || '', agent: String(raw.agent || '').trim(), mode: raw.mode || 'merge' }];
+    entries = [{ id: raw.id, datacenterId: String(raw.datacenterId || '').trim(), service: raw.service || '', ranges: (raw.ranges || []).filter(Boolean), username: String(raw.username).trim(), password: raw.password || '', agent: String(raw.agent || '').trim(), mode: raw.mode || 'merge' }];
+  } else if (opts.datacenterId) {
+    // 한 법인의 모든 서비스 엔트리(비밀번호/대역/계정 갖춘 것만).
+    entries = scanRangesForDatacenter(opts.datacenterId)
+      .filter((e) => (e.ranges || []).filter(Boolean).length && String(e.username || '').trim() && String(e.password || ''))
+      .map((e) => ({ id: e.id, datacenterId: String(e.datacenterId || '').trim(), service: e.service || '', ranges: (e.ranges || []).filter(Boolean), username: String(e.username).trim(), password: e.password || '', agent: String(e.agent || '').trim(), mode: e.mode || 'merge' }));
+    if (!entries.length) return { ok: false, reason: '대상 법인에 스캔 가능한 대역/계정이 없습니다.' };
   }
   if (!entries.length) { lastRun = { at: Date.now(), skipped: '대상 없음' }; return { ok: false, reason: '스캔할 대역이 없습니다.' }; }
 
@@ -134,11 +140,11 @@ export async function runIdracScanOnce(opts = {}) {
         foundTotal += (r.found || 0);
         registeredTotal += (r.registered || 0);
         if (r.error) errors.push(`${e.datacenterId}: ${r.error}`);
-        recordScanRangeRun(e.datacenterId, { scanned: r.scanned ?? null, found: r.found ?? null, registered: r.registered ?? null, delegated: !!r.delegated, agent: r.agent || null, error: r.error || null });
+        if (e.id) recordScanRangeRun(e.id, { scanned: r.scanned ?? null, found: r.found ?? null, registered: r.registered ?? null, delegated: !!r.delegated, agent: r.agent || null, error: r.error || null });
       } catch (err) {
         errors.push(`${e.datacenterId}: ${err.message}`);
         results.push({ datacenterId: e.datacenterId, error: err.message });
-        recordScanRangeRun(e.datacenterId, { error: err.message });
+        if (e.id) recordScanRangeRun(e.id, { error: err.message });
       }
     }
     // 새로 등록된 서버가 있으면 즉시 전력 1회 수집(대시보드에 바로 반영).
@@ -156,14 +162,18 @@ export function startIdracScanNow(opts = {}) {
   if (running) return { ok: false, reason: '이미 스캔 중입니다.', running: true };
   // 대역/계정 검증은 여기서 동기로 — runIdracScanOnce의 resolve({ok:false})는 아래 fire-and-forget에서
   // 버려지므로, 검증 실패를 '시작됨'으로 응답하지 않도록 사전에 걸러 사유를 그대로 돌려준다.
-  if (opts.datacenterId) {
-    const raw = getScanRangeRaw(opts.datacenterId);
+  if (opts.id) {
+    const raw = getScanRangeRaw(opts.id);
     if (!raw || !(raw.ranges || []).length || !String(raw.username || '').trim()) {
-      return { ok: false, reason: '대상 법인의 대역/계정이 없습니다.' };
+      return { ok: false, reason: '대상 항목의 대역/계정이 없습니다.' };
     }
     if (!String(raw.password || '')) {
-      return { ok: false, reason: '대상 법인의 iDRAC 비밀번호가 없습니다(스캔 대역 수정에서 입력하세요).' };
+      return { ok: false, reason: '대상 항목의 iDRAC 비밀번호가 없습니다(스캔 대역 수정에서 입력하세요).' };
     }
+  } else if (opts.datacenterId) {
+    const list = scanRangesForDatacenter(opts.datacenterId)
+      .filter((e) => (e.ranges || []).filter(Boolean).length && String(e.username || '').trim() && String(e.password || ''));
+    if (!list.length) return { ok: false, reason: '대상 법인에 스캔 가능한 대역/계정이 없습니다.' };
   } else if (!enabledScanRanges().length) {
     return { ok: false, reason: '스캔할 대역이 없습니다.' };
   }
