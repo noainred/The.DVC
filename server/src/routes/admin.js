@@ -83,7 +83,7 @@ import {
 } from '../idrac/registry.js';
 import { expandIpList } from '../idrac/iprange.js';
 import { scanForIdracs } from '../idrac/scan.js';
-import { enqueueIdracScan, enqueueIdracRegister, getIdracScanResult, listIdracScanJobs, getIdracScanJobLog } from '../central/idracScanJobs.js';
+import { enqueueIdracScan, enqueueIdracRegister, getIdracScanResult, listIdracScanJobs, getIdracScanJobLog, cancelIdracScanJob } from '../central/idracScanJobs.js';
 import { getPollerStatus, pollNow } from '../idrac/poller.js';
 import { listScanRanges, saveScanRanges, removeScanRanges } from '../idrac/scanRanges.js';
 import { startIdracScanNow, idracScanStatus, stopIdracScanNow, setIdracScanIntervalMs } from '../idrac/scanPoller.js';
@@ -1445,6 +1445,14 @@ adminRouter.get('/idrac/scan-jobs', adminOnly, (_req, res) => {
 adminRouter.get('/idrac/scan-job-log', adminOnly, (req, res) => {
   const r = getIdracScanJobLog(String(req.query.reqId || ''));
   res.status(r.ok ? 200 : 404).json(r);
+});
+
+// 개별 대기 잡 취소 — 잘못된 AGENT_NAME 등으로 영원히 '대기'하는 잡 하나를 전체 중지 없이 정리.
+adminRouter.post('/idrac/scan-job/cancel', adminOnly, (req, res) => {
+  const reqId = String(req.body?.reqId || '');
+  const r = cancelIdracScanJob(reqId);
+  if (r.ok) logAudit({ user: req.user?.username, action: 'iDRAC 대기 잡 취소', target: reqId });
+  res.status(r.ok ? 200 : 400).json(r);
 });
 
 // 서버 일괄 삭제. Body: { all:true } 또는 { vcenterId } (빈 문자열=미지정 서버 삭제).

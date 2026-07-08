@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'idscan-'));
-const { enqueueIdracScan, takeIdracScanJobs, setIdracScanResult, setIdracScanProgress, getIdracScanResult, listIdracScanJobs, getIdracScanJobLog, recentPollingAgents } = await import('../src/central/idracScanJobs.js');
+const { enqueueIdracScan, takeIdracScanJobs, setIdracScanResult, setIdracScanProgress, getIdracScanResult, listIdracScanJobs, getIdracScanJobLog, recentPollingAgents, cancelIdracScanJob } = await import('../src/central/idracScanJobs.js');
 
 test('위임 스캔: enqueue → take(에이전트 이름) → result → 폴링 라이프사이클', () => {
   const reqId = enqueueIdracScan('SEOUL', { ips: '10.0.0.1-10', username: 'root', password: 'pw' });
@@ -74,6 +74,28 @@ test('위임 스캔: 같은 에이전트+법인의 대기 잡은 중복 적재�
 
 test('위임 스캔: 알 수 없는 reqId는 unknown', () => {
   assert.equal(getIdracScanResult('nope').state, 'unknown');
+});
+
+test('개별 잡 취소: 대기 잡만 취소되고 큐에서 빠진다(인출 후엔 취소 불가)', () => {
+  const reqId = enqueueIdracScan('CancelMe', { ips: '10.8.0.1-10', username: 'root', password: 'pw', datacenterId: 'cm' });
+  assert.equal(getIdracScanResult(reqId).state, 'pending');
+
+  // 대기 잡 개별 취소 → error, 큐에서 제거되어 인출되지 않음.
+  const c = cancelIdracScanJob(reqId);
+  assert.equal(c.ok, true);
+  assert.equal(getIdracScanResult(reqId).state, 'error');
+  assert.equal(takeIdracScanJobs('CancelMe').length, 0, '취소된 잡은 인출되지 않음');
+
+  // 이미 종료된(error) 잡은 재취소 불가.
+  assert.equal(cancelIdracScanJob(reqId).ok, false);
+  // 알 수 없는 reqId도 실패.
+  assert.equal(cancelIdracScanJob('nope').ok, false);
+
+  // 이미 인출된(running) 잡은 개별 취소 대상이 아니다.
+  const r2 = enqueueIdracScan('CancelMe2', { ips: '10.8.1.1-5', username: 'root', password: 'pw' });
+  takeIdracScanJobs('CancelMe2');
+  assert.equal(getIdracScanResult(r2).state, 'running');
+  assert.equal(cancelIdracScanJob(r2).ok, false, 'running 잡은 개별 취소 불가');
 });
 
 test('스캔 로그 진단: 폴링 기록 없는 pending은 error 힌트 + AGENT_NAME 불일치 시 폴링 중 목록 안내', () => {
