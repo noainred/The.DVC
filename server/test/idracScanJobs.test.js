@@ -113,6 +113,20 @@ test('스캔 로그 진단: 폴링 기록 없는 pending은 error 힌트 + AGENT
   assert.ok(msgs.includes('AGENT_NAME'), 'AGENT_NAME 불일치 점검 안내');
 });
 
+test('스캔 로그 진단: 수집 서버로 등록·정상인데 폴링만 없으면 방향(PULL/폴링) 차이를 안내', () => {
+  // 잡 에이전트가 수집 서버(원격)로는 등록돼 있으나 스캔 폴링 기록이 없는 상황.
+  const reqId = enqueueIdracScan('OS2SDBX', { ips: '10.84.76.1-10', username: 'root', password: 'pw', datacenterId: 'oc2sandbox' });
+  const collectors = new Set(['os2sdbx', 'oc2sandbox']); // 수집 서버 id/이름(소문자)
+  const log = getIdracScanJobLog(reqId, { collectors });
+  const msgs = log.hints.map((h) => h.msg).join('\n');
+  assert.ok(log.hints.some((h) => h.level === 'error' && h.msg.includes('폴링 기록이 없습니다')), '폴링 무기록 error');
+  assert.ok(msgs.includes('수집 서버(원격)로 등록'), '수집 등록 사실 안내');
+  assert.ok(msgs.includes('CENTRAL_URL'), '엣지 CENTRAL_URL/TOKEN 점검 안내');
+  // 수집 서버로 등록돼 있지 않으면(collectors 미전달) 그 특화 힌트는 나오지 않는다.
+  const log2 = getIdracScanJobLog(reqId);
+  assert.ok(!log2.hints.some((h) => h.msg.includes('수집 서버(원격)로 등록')), '미등록 시 특화 힌트 없음');
+});
+
 test('listIdracScanJobs: 잡 목록 요약(비밀번호·IP 원문 미노출, 최신순)', () => {
   const reqId = enqueueIdracScan('BERLIN', { ips: '10.3.0.1-10.3.0.5', username: 'root', password: 'SECRET', vcenterId: 'OC2', datacenterId: 'oc1' });
   const list = listIdracScanJobs();

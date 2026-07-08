@@ -1451,7 +1451,10 @@ adminRouter.get('/idrac/scan-jobs', adminOnly, (_req, res) => {
 
 // 스캔 잡 세부 로그 — '스캔 현황' 로그창. 이벤트 타임라인 + 멈춤 진단(hints).
 adminRouter.get('/idrac/scan-job-log', adminOnly, (req, res) => {
-  const r = getIdracScanJobLog(String(req.query.reqId || ''));
+  // 수집 서버(원격)로 등록된 id/이름(소문자) — '등록·정상인데 폴링만 없음' 진단에 사용.
+  const collectors = new Set();
+  for (const c of listCollectors()) { if (c.id) collectors.add(String(c.id).toLowerCase()); if (c.name) collectors.add(String(c.name).toLowerCase()); }
+  const r = getIdracScanJobLog(String(req.query.reqId || ''), { collectors });
   res.status(r.ok ? 200 : 404).json(r);
 });
 
