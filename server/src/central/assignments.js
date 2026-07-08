@@ -171,3 +171,27 @@ export function setResult(agent, data) {
 export function getResults() {
   return results;
 }
+
+/**
+ * 폼의 '에이전트 이름' 선택 목록. 자유 타이핑으로 인한 AGENT_NAME 오타·불일치를 막기 위해,
+ * 이미 알려진 에이전트 이름을 한 목록으로 합친다(대소문자 무시 중복 제거 — 잡 매칭도 소문자 기준).
+ * 출처 우선순위: collector(수집 서버로 등록된 실제 이름) > reported(중앙에 보고) > assignment.
+ * @param {{assignments?:Array, results?:object, collectors?:Array}} src
+ * @returns {Array<{name:string, source:'collector'|'reported'|'assignment'}>}
+ */
+export function mergeKnownAgents({ assignments = [], results = {}, collectors = [] } = {}) {
+  const known = new Map(); // lowerKey → { name, source }
+  const add = (v, source) => {
+    const s = String(v || '').trim();
+    if (!s) return;
+    const k = s.toLowerCase();
+    const cur = known.get(k);
+    // collector는 비-collector를 덮어쓴다(권위 있는 실제 이름). 단, 이미 collector면
+    // 덮어쓰지 않는다 — 먼저 넣은 name(수집 서버 표시명)이 id(소문자)에 밀리지 않게.
+    if (!cur || (source === 'collector' && cur.source !== 'collector')) known.set(k, { name: s, source });
+  };
+  for (const a of assignments) add(a?.agent, 'assignment');
+  for (const k of Object.keys(results || {})) add(k, 'reported');
+  for (const c of collectors) { add(c?.name, 'collector'); add(c?.id, 'collector'); }
+  return [...known.values()].sort((a, b) => a.name.localeCompare(b.name));
+}

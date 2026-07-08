@@ -22,6 +22,7 @@ export default function AgentScans() {
   const [csvText, setCsvText] = useState('');
   const [replaceMode, setReplaceMode] = useState(false);
   const [importMsg, setImportMsg] = useState(null);
+  const [customAgent, setCustomAgent] = useState(false); // true=에이전트 이름 직접 입력, false=목록 선택
   const fileRef = useRef(null);
 
   const downloadSample = () => {
@@ -64,8 +65,9 @@ export default function AgentScans() {
   if (error) return <ErrorBox message={error} />;
   if (!data) return <Loading />;
 
-  const openAdd = () => { setEditing(false); setForm({ ...EMPTY }); setMsg(null); };
-  const openEdit = (a) => { setEditing(true); setForm({ ...EMPTY, ...a, password: '' }); setMsg(null); };
+  // 등록된 에이전트가 없으면 처음부터 직접 입력, 있으면 목록 선택을 기본값으로.
+  const openAdd = () => { setEditing(false); setForm({ ...EMPTY }); setMsg(null); setCustomAgent(!((data.knownAgents || []).length)); };
+  const openEdit = (a) => { setEditing(true); setForm({ ...EMPTY, ...a, password: '' }); setMsg(null); setCustomAgent(false); };
   const close = () => { setForm(null); setMsg(null); };
   const setF = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
@@ -166,7 +168,33 @@ export default function AgentScans() {
               <button className="logout-btn" onClick={close}>닫기</button>
             </div>
             <div className="spec-grid">
-              <label>에이전트 이름 *<input className="input" value={form.agent} onChange={setF('agent')} disabled={editing} placeholder="Seoul-DC1" /></label>
+              <label>에이전트 이름 *
+                {editing ? (
+                  <input className="input" value={form.agent} disabled />
+                ) : customAgent ? (
+                  <>
+                    <input className="input" value={form.agent} onChange={setF('agent')} placeholder="Seoul-DC1" autoFocus />
+                    {(data.knownAgents || []).length > 0 && (
+                      <button type="button" className="tab" style={{ marginTop: 6, fontSize: 11 }}
+                        onClick={() => { setCustomAgent(false); setForm((f) => ({ ...f, agent: '' })); }}>← 목록에서 선택</button>
+                    )}
+                  </>
+                ) : (
+                  <select className="select" value={form.agent || ''} onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === '__custom__') { setCustomAgent(true); setForm((f) => ({ ...f, agent: '' })); }
+                    else setForm((f) => ({ ...f, agent: v }));
+                  }}>
+                    <option value="" disabled>— 등록된 에이전트 선택 —</option>
+                    {(data.knownAgents || []).map((a) => (
+                      <option key={a.name} value={a.name}>
+                        {a.name}{a.source === 'collector' ? ' · 수집 서버' : a.source === 'reported' ? ' · 보고됨' : ''}
+                      </option>
+                    ))}
+                    <option value="__custom__">＋ 직접 입력(목록에 없는 새 이름)…</option>
+                  </select>
+                )}
+              </label>
               <label>수집 여부
                 <select className="select" value={form.enabled ? '1' : '0'} onChange={(e) => setForm((f) => ({ ...f, enabled: e.target.value === '1' }))}>
                   <option value="1">활성</option><option value="0">중지</option>
@@ -189,7 +217,9 @@ export default function AgentScans() {
               </button>
             </div>
             <div className="muted" style={{ marginTop: 10, fontSize: 12 }}>
-              에이전트 이름은 각 DC 서버의 <code>AGENT_NAME</code>과 일치해야 합니다. 자격증명은 중앙 서버
+              에이전트 이름은 각 DC 서버의 <code>AGENT_NAME</code>과 <b>정확히 일치</b>해야 합니다(대소문자 무관).
+              오타로 인한 잡 인출 불일치를 막으려면 <b>등록된 에이전트(수집 서버·보고됨) 목록에서 선택</b>하세요.
+              목록에 없는 신규 에이전트만 ‘직접 입력’으로 추가합니다. 자격증명은 중앙 서버
               <code> $CONFIG_DIR/agent-assignments.json</code>(0600)에만 저장됩니다.
             </div>
           </div>
