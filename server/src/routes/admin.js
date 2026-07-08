@@ -83,7 +83,7 @@ import {
 } from '../idrac/registry.js';
 import { expandIpList } from '../idrac/iprange.js';
 import { scanForIdracs } from '../idrac/scan.js';
-import { enqueueIdracScan, enqueueIdracRegister, getIdracScanResult, listIdracScanJobs, getIdracScanJobLog, cancelIdracScanJob } from '../central/idracScanJobs.js';
+import { enqueueIdracScan, enqueueIdracRegister, getIdracScanResult, listIdracScanJobs, getIdracScanJobLog, cancelIdracScanJob, recentPollingAgents } from '../central/idracScanJobs.js';
 import { getPollerStatus, pollNow } from '../idrac/poller.js';
 import { listScanRanges, saveScanRanges, removeScanRanges } from '../idrac/scanRanges.js';
 import { startIdracScanNow, idracScanStatus, stopIdracScanNow, setIdracScanIntervalMs } from '../idrac/scanPoller.js';
@@ -1349,8 +1349,10 @@ adminRouter.get('/idrac/scan-result', adminOnly, (req, res) => {
 });
 
 // 위임 스캔에 사용할 수 있는 에이전트 이름 목록 — 중앙에 보고/등록된 에이전트 + 등록된
-// '수집 서버(원격)'(id·이름)를 병합한다. 수집 서버로는 등록됐지만 아직 아무 보고가 없는
-// 에이전트도 선택할 수 있게 한다(대소문자 무시 중복 제거 — 잡 매칭도 소문자 기준).
+// '수집 서버(원격)'(id·이름) + 지금 실제로 잡을 인출 폴링 중인 에이전트를 병합한다. 폴링 중인
+// 이름은 반드시 목록에 넣는다 — 잡을 실제로 인출하는 건 '폴링 중인 이름'이므로, 등록만 되고
+// 폴링하지 않는 이름(예: OC2Sandbox)이 아니라 실제 폴링 이름(예: oc2)을 고를 수 있어야 한다.
+// 대소문자 무시 중복 제거(잡 매칭도 소문자 기준).
 adminRouter.get('/idrac/scan-agents', adminOnly, (_req, res) => {
   const names = new Set();
   const lower = new Set();
@@ -1361,7 +1363,9 @@ adminRouter.get('/idrac/scan-agents', adminOnly, (_req, res) => {
   for (const a of listAssignments()) add(a.agent);
   for (const k of Object.keys(getResults() || {})) add(k);
   for (const c of listCollectors()) { add(c.id); add(c.name); } // 수집 서버(원격) 등록분
-  res.json({ agents: [...names].sort((a, b) => a.localeCompare(b)), centralEnabled: Boolean(config.central.token) });
+  const polling = recentPollingAgents(5 * 60_000); // 최근 5분 내 잡 인출 폴링(소문자)
+  for (const p of polling) add(p); // 실제 폴링 중인 이름을 반드시 선택 가능하게
+  res.json({ agents: [...names].sort((a, b) => a.localeCompare(b)), pollingAgents: polling, centralEnabled: Boolean(config.central.token) });
 });
 
 // Register iDRACs found by a scan, applying the shared credentials, then poll.
