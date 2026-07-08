@@ -787,6 +787,8 @@ export function IdracDetailModal({ server, onClose }) {
 function ScanJobLogModal({ reqId, dcName, onClose }) {
   const [d, setD] = useState(null);
   const [err, setErr] = useState(null);
+  const [canceling, setCanceling] = useState(false);
+  const [cancelMsg, setCancelMsg] = useState(null);
   useEffect(() => {
     let active = true;
     const load = () => fetchJson(`/admin/idrac/scan-job-log?reqId=${encodeURIComponent(reqId)}`)
@@ -796,6 +798,16 @@ function ScanJobLogModal({ reqId, dcName, onClose }) {
     const t = setInterval(load, 2500);
     return () => { active = false; clearInterval(t); };
   }, [reqId]);
+  // 잘못된 AGENT_NAME 등으로 영원히 '대기'하는 이 잡만 개별 취소.
+  const cancelJob = async () => {
+    if (!window.confirm('이 대기 잡을 취소할까요? (큐에서 제거되고 오류로 종결됩니다)')) return;
+    setCanceling(true); setCancelMsg(null);
+    try {
+      const r = await postJson('/admin/idrac/scan-job/cancel', { reqId });
+      setCancelMsg(r.ok ? { ok: true, text: '이 잡을 취소했습니다.' } : { ok: false, text: r.reason || '취소 실패' });
+    } catch (e) { setCancelMsg({ ok: false, text: e.message }); }
+    finally { setCanceling(false); }
+  };
   const fmt = (ts) => (ts ? new Date(ts).toLocaleTimeString('ko-KR', { hour12: false }) : '—');
   const dur = (a, b) => (a && b ? `${Math.max(0, Math.round((b - a) / 1000))}초` : '—');
   const lvColor = { info: 'var(--text-dim, #8b9bb4)', warn: '#fbbf24', error: '#f87171' };
@@ -813,7 +825,19 @@ function ScanJobLogModal({ reqId, dcName, onClose }) {
             {d.datacenterId && <span className="muted">법인 <b>{dcName ? dcName(d.datacenterId) : d.datacenterId}</b></span>}
             {d.progress?.total ? <span className="muted">진행 <b>{d.progress.scanned}/{d.progress.total}</b>{d.progress.found ? ` · 발견 ${d.progress.found}` : ''}</span> : null}
             <span className="muted">경과 {dur(d.createdAt, d.doneAt || now)}</span>
+            {d.state === 'pending' && (
+              <button className="logout-btn" style={{ marginLeft: 'auto', padding: '4px 12px', fontSize: 12, color: '#f87171', borderColor: 'rgba(239,68,68,.4)' }}
+                disabled={canceling} onClick={cancelJob} title="이 대기 잡을 큐에서 제거">
+                {canceling ? '취소 중…' : '이 잡 취소'}
+              </button>
+            )}
           </div>
+          {cancelMsg && (
+            <div style={{ marginBottom: 8, padding: '7px 11px', borderRadius: 8, fontSize: 12.5,
+              background: cancelMsg.ok ? 'rgba(34,197,94,.14)' : 'rgba(239,68,68,.14)', color: cancelMsg.ok ? '#4ade80' : '#f87171' }}>
+              {cancelMsg.text}
+            </div>
+          )}
           <div className="muted" style={{ fontSize: 11.5, marginBottom: 8 }}>
             생성 {fmt(d.createdAt)} · 인출 {fmt(d.takenAt)}{d.doneAt ? ` · 종료 ${fmt(d.doneAt)}` : ''}
             {' '}· 에이전트 최근 폴링 {d.agentLastPoll ? `${Math.max(0, Math.round((now - d.agentLastPoll) / 1000))}초 전` : '기록 없음'}

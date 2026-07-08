@@ -179,6 +179,26 @@ export function cancelPendingIdracScanJobs() {
   return n;
 }
 
+/**
+ * 개별 대기 잡 취소 — reqId 하나만 큐에서 제거하고 error로 종결한다. 잘못된 AGENT_NAME으로
+ * 만들어져 영원히 '대기'하는 잡을 전체 중지 없이 정리할 때 사용. 이미 인출된(running) 잡이나
+ * 이미 종료된 잡은 취소하지 않는다. 반환: { ok, reason? }.
+ */
+export function cancelIdracScanJob(reqId) {
+  const rid = String(reqId || '');
+  const j = jobs.get(rid);
+  if (!j) return { ok: false, reason: '잡을 찾을 수 없습니다(이미 정리되었을 수 있음).' };
+  if (j.state !== 'pending') return { ok: false, reason: `이 잡은 '${j.state}' 상태라 개별 취소할 수 없습니다(대기 상태만 취소 가능).` };
+  j.state = 'error';
+  j.doneAt = Date.now();
+  j.result = { scanned: 0, foundCount: 0, found: [], registered: 0, error: '관리자가 이 대기 잡을 취소했습니다.' };
+  addEvent(j, '관리자가 이 대기 잡을 개별 취소했습니다.', 'warn');
+  const key = String(j.agent || '').trim().toLowerCase();
+  const pend = byAgent.get(key);
+  if (pend) { pend.delete(rid); if (!pend.size) byAgent.delete(key); }
+  return { ok: true };
+}
+
 /** 에이전트가 스캔 진행률 보고(중간) — { scanned, total, found }. */
 export function setIdracScanProgress(reqId, { scanned, total, found } = {}) {
   const j = jobs.get(reqId);
