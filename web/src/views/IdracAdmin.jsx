@@ -1208,7 +1208,19 @@ function IdracScanRanges({ data, vcenters, datacenters = [], agents, busy, form,
               <label className="muted" style={{ fontSize: 11.5 }}>스캔 수행 Agent</label>
               <select className="input" style={{ width: '100%', padding: '8px 10px' }} value={form.agent} onChange={(e) => setForm({ ...form, agent: e.target.value })}>
                 <option value="__local__">이 포탈에서 직접</option>
-                {(agents?.agents || []).map((a) => <option key={a} value={a}>{a}</option>)}
+                {(() => {
+                  // 실제 잡을 인출하는 건 '지금 폴링 중인 이름'이다. 폴링 중인 에이전트를 위에 모아
+                  // '· 폴링 중'으로 표시해, 등록만 되고 폴링 안 하는 이름(예: OC2Sandbox) 대신 실제
+                  // 폴링 이름(예: oc2)을 고르도록 유도한다.
+                  const pollSet = new Set((agents?.pollingAgents || []).map((p) => p.toLowerCase()));
+                  const all = agents?.agents || [];
+                  const polling = all.filter((a) => pollSet.has(a.toLowerCase()));
+                  const idle = all.filter((a) => !pollSet.has(a.toLowerCase()));
+                  return (<>
+                    {polling.length > 0 && <optgroup label="폴링 중(권장)">{polling.map((a) => <option key={a} value={a}>{a} · 폴링 중</option>)}</optgroup>}
+                    {idle.length > 0 && <optgroup label="등록됨(현재 미폴링)">{idle.map((a) => <option key={a} value={a}>{a}</option>)}</optgroup>}
+                  </>);
+                })()}
               </select>
             </div>
             <div style={{ flex: '1 1 140px' }}>
