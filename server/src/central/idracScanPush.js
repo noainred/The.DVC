@@ -9,14 +9,18 @@
  */
 
 import { resilientFetch } from '../util/resilientFetch.js';
-import { listCollectors } from '../collector/registry.js';
+import { loadCollectors } from '../collector/registry.js';
 import { createPushScanJob, setIdracScanResult } from './idracScanJobs.js';
 
-/** 에이전트 이름/‌id에 매칭되는 수집 서버(원격)를 찾는다(대소문자 무관). URL이 있어야 PUSH 가능. */
+/**
+ * 에이전트 이름/‌id에 매칭되는 수집 서버(원격)를 찾는다(대소문자 무관). URL이 있어야 PUSH 가능.
+ * ⚠ 반드시 loadCollectors(원본, 토큰 포함)를 쓴다 — listCollectors()는 UI용으로 token을 마스킹
+ * 하므로, 그걸 쓰면 X-Collector-Token 없이 엣지에 요청해 403이 난다(엣지는 정상).
+ */
 export function findCollectorForAgent(agent) {
   const key = String(agent || '').trim().toLowerCase();
   if (!key) return null;
-  return listCollectors().find((c) => String(c.id || '').toLowerCase() === key || String(c.name || '').toLowerCase() === key) || null;
+  return loadCollectors().find((c) => String(c.id || '').toLowerCase() === key || String(c.name || '').toLowerCase() === key) || null;
 }
 
 // 대역이 크면 엣지 스캔이 수십 초~수 분 걸린다 — 넉넉한 타임아웃(15분).
