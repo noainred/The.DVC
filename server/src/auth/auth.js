@@ -93,13 +93,25 @@ export function loadUsers() {
     }
   }
   // Seed a default admin so the portal is usable out of the box.
-  const pw = config.auth.defaultAdminPassword;
-  users = [{ username: 'admin', name: 'Administrator', role: 'admin', passwordHash: hashPassword(pw) }];
-  // 비밀번호는 절대 로그에 남기지 않는다(로그버퍼는 /admin/logs로 노출됨).
-  console.warn('[auth] users.json이 없어 기본 관리자 "admin"을 시드했습니다. 운영 환경에서는 DEFAULT_ADMIN_PASSWORD를 설정하거나 config/users.json을 생성하세요.');
-  if (pw === 'admin123') {
-    console.warn('[auth] ⚠ 보안 경고: 기본 비밀번호(admin123)를 그대로 사용 중입니다. 즉시 변경하세요(DEFAULT_ADMIN_PASSWORD 또는 사용자 관리에서 비번 변경).');
+  // 보안(H4): 알려진 기본 비번(admin123) 대신 — DEFAULT_ADMIN_PASSWORD가 있으면 그것을,
+  // 없으면 '임의 비번'을 생성해 CONFIG_DIR/initial-admin-password.txt(0600)에 기록한다.
+  // (비밀번호는 절대 로그/로그버퍼에 남기지 않는다 — /admin/logs로 노출되므로.)
+  const envPw = process.env.DEFAULT_ADMIN_PASSWORD;
+  let pw = envPw; let note;
+  if (envPw) {
+    note = 'DEFAULT_ADMIN_PASSWORD로 시드';
+  } else {
+    pw = crypto.randomBytes(12).toString('base64url'); // 알려지지 않은 임의 비번
+    try {
+      const pwFile = path.join(CONFIG_DIR, 'initial-admin-password.txt');
+      atomicWriteFileSync(pwFile, `${pw}\n`, { mode: 0o600 });
+      note = `임의 비밀번호 생성 → ${pwFile} (0600)에 저장. 로그인 후 즉시 변경하고 이 파일을 삭제하세요`;
+    } catch (e) {
+      note = `임의 비밀번호 생성했으나 파일 기록 실패(${e.message}) — DEFAULT_ADMIN_PASSWORD로 재시드하세요`;
+    }
   }
+  users = [{ username: 'admin', name: 'Administrator', role: 'admin', passwordHash: hashPassword(pw), mustChangePassword: !envPw }];
+  console.warn(`[auth] users.json이 없어 기본 관리자 "admin"을 시드했습니다 — ${note}.`);
   return users;
 }
 
@@ -115,11 +127,19 @@ function persistUsers() {
  * longer works). Until enrolled, the password is accepted so the account can be
  * bootstrapped/enrolled.
  */
+const _dummySalt = crypto.randomBytes(16);
 export function authenticateLocal(username, credential) {
   const user = loadUsers().find((u) => u.username === username);
-  if (!user) return null;
+  if (!user) {
+    // 없는 사용자도 동일 비용의 scrypt를 태워 응답시간 차이로 사용자명을 열거하지 못하게 한다.
+    try { crypto.scryptSync(String(credential || ''), _dummySalt, 64); } catch { /* */ }
+    return null;
+  }
   if (user.totpEnabled && user.totpSecret) {
-    if (!totp.verifyToken(credential, user.totpSecret)) return null;
+    const ctr = totp.verifyToken(credential, user.totpSecret, { minCounter: Number.isInteger(user.totpLastCounter) ? user.totpLastCounter : -1 });
+    if (ctr == null) return null;
+    // TOTP 재사용(replay) 방지 — 이미 쓴 카운터 이하 코드는 거부하고, 성공 카운터를 기록.
+    if (ctr !== user.totpLastCounter) { user.totpLastCounter = ctr; try { persistUsers(); } catch { /* */ } }
   } else if (!user.passwordHash || !verifyPassword(credential, user.passwordHash)) {
     return null;
   }

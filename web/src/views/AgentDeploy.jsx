@@ -154,7 +154,7 @@ export default function AgentDeploy() {
 
       <div className="flex gap wrap" style={{ marginBottom: 12 }}>
         <button className={subtab === 'status' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 14px' }} onClick={() => setSubtab('status')}>📋 에이전트 현황</button>
-        <button className={subtab === 'add' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 14px' }} onClick={() => setSubtab('add')}>➕ 에이전트 추가</button>
+        <button className={subtab === 'add' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 14px' }} onClick={() => setSubtab('add')}>➕ 에이전트 추가/변경</button>
         <button className={subtab === 'packages' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 14px' }} onClick={() => setSubtab('packages')}>⬇ 에이전트 설치 패키지 자동 다운로드</button>
       </div>
 
@@ -378,9 +378,23 @@ export default function AgentDeploy() {
             {result.collector && (result.collector.registered
               ? <div style={{ color: 'var(--green)', marginTop: 4 }}>✅ 중앙 '수집 서버'에 {result.collector.updated ? '갱신' : '자동 등록'}됨 — id <code>{result.collector.id}</code> · <code>{result.collector.url}</code></div>
               : <div style={{ color: 'var(--amber)', marginTop: 4 }}>⚠ 수집 서버 자동 등록 건너뜀{result.collector.reason ? ` — ${result.collector.reason}` : ''}</div>)}
-            {result.gpuGuest && (result.gpuGuest.ok
-              ? <div style={{ color: 'var(--green)', marginTop: 4 }}>✅ GPU 게스트 수집 자동 구성됨 — vCenter <code>{result.gpuGuest.vcenterId}</code> @ <code>{result.gpuGuest.vcenterHost}</code> · 게스트 계정 <code>{result.gpuGuest.guestUser || '(미입력)'}</code></div>
-              : <div style={{ color: 'var(--amber)', marginTop: 4 }}>⚠ GPU 게스트 수집 구성 실패{result.gpuGuest.reason ? ` — ${result.gpuGuest.reason}` : ''}</div>)}
+            {result.gpuGuest && ('ok' in result.gpuGuest
+              ? (result.gpuGuest.ok
+                ? <div style={{ color: 'var(--green)', marginTop: 4 }}>✅ GPU 게스트 수집 자동 구성됨 — vCenter <code>{result.gpuGuest.vcenterId}</code> @ <code>{result.gpuGuest.vcenterHost}</code> · 게스트 계정 <code>{result.gpuGuest.guestUser || '(미입력)'}</code></div>
+                : <div style={{ color: 'var(--amber)', marginTop: 4 }}>⚠ GPU 게스트 수집 구성 실패{result.gpuGuest.reason ? ` — ${result.gpuGuest.reason}` : ''}</div>)
+              : (
+                <div style={{ marginTop: 4 }}>
+                  {result.gpuGuest.configured
+                    ? <span style={{ color: result.gpuGuest.enabled ? 'var(--green)' : 'var(--amber)' }}>
+                      {result.gpuGuest.enabled ? '✅ GPU 게스트 수집 설정 활성' : '⚠ GPU 게스트 수집 설정은 있으나 비활성(enabled=false)'}
+                      {result.gpuGuest.configMtime ? ` · 설정 갱신 ${new Date(result.gpuGuest.configMtime).toLocaleString('ko-KR')}` : ''}
+                    </span>
+                    : <span className="muted">GPU 게스트 수집 미구성 (gpu-guest.json 없음)</span>}
+                  {result.gpuGuest.recentLog
+                    ? <pre style={{ background: '#0b1220', border: '1px solid #243049', borderRadius: 8, padding: 8, fontSize: 11, lineHeight: 1.5, marginTop: 4, maxHeight: '20vh', overflow: 'auto', whiteSpace: 'pre-wrap' }}>{result.gpuGuest.recentLog}</pre>
+                    : (result.gpuGuest.configured ? <div className="muted" style={{ fontSize: 11, marginTop: 3 }}>최근 [gpu-guest] 수집 로그 없음 — 아직 수집 전이거나 폴링 주기 대기 중</div> : null)}
+                </div>
+              ))}
             {typeof result.log === 'string' && result.log.trim() && (
               <div style={{ marginTop: 8 }}>
                 <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>대상 호스트 서비스 로그(journalctl/status)</div>

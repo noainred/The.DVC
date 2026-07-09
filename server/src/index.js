@@ -66,7 +66,25 @@ import { startOsScanner } from './inventory/osScanner.js';
 import { startDbSizeSampler } from './insights/portalDb.js';
 
 const app = express();
-app.use(cors());
+
+// 보안 응답 헤더(helmet 무의존 최소 세트) — 클릭재킹·MIME 스니핑·레퍼러 유출·전송보안.
+// CSP는 인라인 스타일/intro 페이지 호환 이슈로 기본 비활성(CSP env로 옵트인 지정 가능).
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');            // 웹에 iframe 없음 → 클릭재킹 차단
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('X-Permitted-Cross-Domain-Policies', 'none');
+  if (req.secure || req.get('x-forwarded-proto') === 'https') {
+    res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains'); // 실제 HTTPS일 때만
+  }
+  if (process.env.CSP) res.setHeader('Content-Security-Policy', process.env.CSP);
+  next();
+});
+
+// CORS: SPA는 API와 동일 출처라 교차출처 불필요 → 기본은 교차출처 차단(과거 와일드카드 '*' 제거).
+// 별도 출처가 필요하면 CORS_ORIGINS(콤마 구분)로 명시 허용.
+const CORS_ORIGINS = (process.env.CORS_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean);
+app.use(cors(CORS_ORIGINS.length ? { origin: CORS_ORIGINS } : { origin: false }));
 // 응답 gzip 압축(큰 JSON만, 비동기) + 레이트 리밋(폭주/DoS 방어). 헬스/정적/메트릭은 제외.
 app.use(compression());
 app.use(rateLimit({ skip: (req) => {

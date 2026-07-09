@@ -140,8 +140,10 @@ export async function testTarget(target) {
 }
 
 /** Deploy/refresh the agent on the target host. */
-export async function deployAgent(target, { installerPath, port = 4000 } = {}) {
+export async function deployAgent(target, { installerPath, port: portIn = 4000 } = {}) {
   if (!target?.host || !target?.username) return { ok: false, reason: 'host/username을 입력하세요.' };
+  // 포탈 포트는 숫자로만 — SSH 명령(install.sh --port, ss grep)에 문자열이 그대로 들어가는 것을 차단(명령 주입 방어심층).
+  const port = Number.isInteger(Number(portIn)) && Number(portIn) > 0 && Number(portIn) <= 65535 ? Number(portIn) : 4000;
   const installer = resolveInstaller(installerPath);
   if (!installer) return { ok: false, reason: '설치 패키지(offline tarball)를 찾을 수 없습니다. download/ 에 두거나 경로를 지정하세요.' };
 
@@ -227,13 +229,26 @@ export async function checkAgentStatus(target) {
       const isActive = active === 'active';
       const sub = (await exec('systemctl show vmware-portal -p SubState,ActiveEnterTimestamp,MainPID 2>/dev/null').catch(() => ({ stdout: '' }))).stdout.trim().replace(/\n/g, ' · ');
       const ver = (await exec('cat /etc/vmware-portal/VERSION 2>/dev/null || cat /opt/vmware-portal/app/VERSION 2>/dev/null || true').catch(() => ({ stdout: '' }))).stdout.trim();
+
+      // GPU 게스트(패스쓰루) 수집 상태 — 에이전트의 gpu-guest.json 존재/활성 + 최근 [gpu-guest] 로그(수집/push 시각).
+      const ggMtime = (await exec("stat -c '%Y' /etc/vmware-portal/gpu-guest.json 2>/dev/null || echo 0").catch(() => ({ stdout: '0' }))).stdout.trim();
+      const ggEnabled = (await exec("grep -Eo '\"enabled\"[[:space:]]*:[[:space:]]*true' /etc/vmware-portal/gpu-guest.json 2>/dev/null | head -1 || true").catch(() => ({ stdout: '' }))).stdout.trim();
+      const ggLog = (await exec("journalctl -u vmware-portal --no-pager -n 800 2>/dev/null | grep -F '[gpu-guest]' | tail -3 || true").catch(() => ({ stdout: '' }))).stdout.trim();
+      const ggConfigured = ggMtime && ggMtime !== '0';
+      const gpuGuest = {
+        configured: !!ggConfigured,
+        enabled: !!ggEnabled,
+        configMtime: ggConfigured ? Number(ggMtime) * 1000 : null,
+        recentLog: ggLog || '',
+      };
+
       let log = '';
       if (!isActive) {
         const jc = (await exec('journalctl -u vmware-portal --no-pager -n 60 2>&1').catch(() => ({ stdout: '' }))).stdout;
         const st = (await exec('systemctl status vmware-portal --no-pager -l 2>&1 | head -20').catch(() => ({ stdout: '' }))).stdout;
         log = [st, '--- journalctl ---', jc].filter(Boolean).join('\n').slice(-4000);
       }
-      return { ok: isActive, active, version: ver || undefined, detail: sub, log, reason: isActive ? undefined : `서비스 상태: ${active}` };
+      return { ok: isActive, active, version: ver || undefined, detail: sub, gpuGuest, log, reason: isActive ? undefined : `서비스 상태: ${active}` };
     });
   } catch (err) {
     return { ok: false, reason: err.message };
