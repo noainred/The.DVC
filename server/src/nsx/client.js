@@ -19,9 +19,16 @@
  * (self-signed certs are common on private NSX appliances).
  */
 
+import { Agent } from 'undici';
 import { ensureNsxDial } from './proxy.js';
 
 const norm = (s) => String(s || '').replace(/\/+$/, '');
+
+// 보안(H1): NSX는 자체서명이 흔해 기본은 전역(미검증) 디스패처를 따른다(현행 유지 — 무회귀).
+// 검증이 필요한 환경은 NSX_TLS_REJECT_UNAUTHORIZED=true로 검증 디스패처를 켜 MITM(관리자 Basic 자격증명 탈취)을 막는다.
+const nsxVerifyDispatcher = process.env.NSX_TLS_REJECT_UNAUTHORIZED === 'true'
+  ? new Agent({ connect: { rejectUnauthorized: true } })
+  : null;
 
 export class NsxClient {
   // dial(선택): { proxyHost, publicPort } — 주어지면 등록된 HAProxy frontend로 다이얼한다
@@ -39,6 +46,7 @@ export class NsxClient {
   async #get(pathname) {
     const res = await fetch(`${this.baseUrl}${pathname}`, {
       headers: { Authorization: this.auth, Accept: 'application/json' },
+      ...(nsxVerifyDispatcher ? { dispatcher: nsxVerifyDispatcher } : {}),
       signal: AbortSignal.timeout(this.timeoutMs),
     });
     if (!res.ok) {

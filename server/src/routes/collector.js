@@ -103,10 +103,15 @@ collectorRouter.post('/idrac-scan', express.json({ limit: '256kb' }), async (req
 // Receive an upgrade bundle pushed by the central portal and self-install.
 // Token-gated by COLLECTOR_TOKEN (no user account needed on the agent).
 collectorRouter.post('/upgrade',
-  express.raw({ type: ['application/gzip', 'application/octet-stream'], limit: '256mb' }),
-  async (req, res) => {
+  // ★ 인증을 256MB raw 바디 버퍼링 '앞'에서 수행 — 미인증 요청이 대용량 바디를 메모리에
+  //   적재하는 DoS 증폭을 막는다(토큰 검사 후에만 번들을 받는다).
+  (req, res, next) => {
     if (!config.collector.token) { logCollectorDeny(req, 'upgrade'); return res.status(404).json({ ok: false, reason: 'collector 비활성화' }); }
     if (!checkToken(req)) { logCollectorDeny(req, 'upgrade'); return res.status(403).json({ ok: false, reason: '토큰 불일치' }); }
+    next();
+  },
+  express.raw({ type: ['application/gzip', 'application/octet-stream'], limit: '256mb' }),
+  async (req, res) => {
     if (!req.body || !req.body.length) return res.status(400).json({ ok: false, reason: 'empty bundle' });
 
     // 파일 복사(config 보존) 전에 라이브 WAL SQLite 체크포인트 → 엣지 복사본 정합성 확보(best-effort).

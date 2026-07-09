@@ -376,8 +376,16 @@ export async function downloadArchive(url, destDir, { token, timeout = 120_000, 
     if (!res.ok) return { ok: false, reason: `download HTTP ${res.status}` };
     const buf = Buffer.from(await res.arrayBuffer());
     if (buf.length > maxBytes) return { ok: false, reason: `download too large (>${maxBytes} bytes)` };
-    // 무결성 검증: versions.json의 sha256과 대조(TLS 미검증 미러/변조 번들 차단). sha가 없으면 스킵.
-    if (sha256) {
+    // 무결성 검증: versions.json의 sha256과 대조(TLS 미검증 미러/변조 번들 차단).
+    // 보안(H2): sha256이 없으면 기본적으로 '검증 불가'로 설치를 거부한다(공식 릴리스는 항상 sha256 제공).
+    // 서명 없는 사내 미러 등 부득이한 경우만 UPGRADE_ALLOW_UNVERIFIED=true로 우회(비권장).
+    if (!sha256) {
+      if (process.env.UPGRADE_ALLOW_UNVERIFIED === 'true') {
+        console.warn('[upgrade] ⚠ sha256 없이 설치(UPGRADE_ALLOW_UNVERIFIED=true) — 무결성 미검증 번들. 신뢰 미러에서만 사용하세요.');
+      } else {
+        return { ok: false, reason: 'sha256이 없어 번들 무결성을 검증할 수 없습니다 — 설치를 거부합니다(신뢰 미러라면 UPGRADE_ALLOW_UNVERIFIED=true로 우회 가능).' };
+      }
+    } else {
       const got = crypto.createHash('sha256').update(buf).digest('hex');
       if (got.toLowerCase() !== String(sha256).toLowerCase()) {
         return { ok: false, reason: `sha256 불일치 — 번들 무결성 검증 실패(기대 ${String(sha256).slice(0, 12)}…, 실제 ${got.slice(0, 12)}…)` };
@@ -425,6 +433,10 @@ export async function pushBundleToEdge(edge, archivePath, { timeout = Number(pro
         ...(edge.token ? { Authorization: `Bearer ${edge.token}` } : {}),
       },
       body: data,
+      // 보안(H1): 전역 미검증 TLS 디스패처(vCenter 자체서명용) 대신 검증 디스패처 사용 —
+      // 엣지 토큰+번들이 미검증 TLS로 나가 MITM에 노출되던 것 차단(http 엣지엔 무영향).
+      // https 자체서명 엣지면 UPGRADE_TLS_INSECURE=true로 완화(upgradeAgent가 반영).
+      dispatcher: upgradeAgent,
       signal: AbortSignal.timeout(timeout),
     });
     const body = await res.json().catch(() => ({}));

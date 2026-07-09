@@ -95,7 +95,7 @@ import { snapMemo, sendCached } from '../util/snapCache.js';
 import { getInventory as getIdracInventory } from '../idrac/invCache.js';
 import { getSensorSeries } from '../idrac/sensorStore.js';
 import { fetchInventory as fetchIdracInventory, fetchSensors as fetchIdracSensors, probeGpuTelemetry } from '../idrac/redfish.js';
-import { listCollectors, addCollector, updateCollector, removeCollector, loadCollectors } from '../collector/registry.js';
+import { listCollectors, addCollector, updateCollector, removeCollector, loadCollectors, ssrfBlockReason } from '../collector/registry.js';
 import { allRemoteServers, findRemoteServer, clearCollectorServers, dedupRemoteServers } from '../collector/remoteInventory.js';
 import { matchDatacenterId } from '../collector/datacenterMatch.js';
 import { serverInScope } from '../insights/analysisScope.js';
@@ -1751,6 +1751,9 @@ adminRouter.post('/collectors/test', adminOnly, async (req, res) => {
   if (body.id) { const saved = loadCollectors().find((c) => c.id === body.id); if (saved) { url = url || saved.url; token = token || saved.token; } }
   if (!url) return res.status(400).json({ ok: false, reason: 'url이 필요합니다.' });
   if (!/^https?:\/\//.test(url)) url = `http://${url}`;
+  // SSRF 방어: 링크로컬/클라우드 메타데이터 주소로는 토큰을 붙여 요청하지 않는다(등록 경로와 동일 가드).
+  const ssrf = ssrfBlockReason(url);
+  if (ssrf) return res.status(400).json({ ok: false, reason: ssrf });
   const started = Date.now();
   let retried = 0;
   try {

@@ -140,8 +140,10 @@ export async function testTarget(target) {
 }
 
 /** Deploy/refresh the agent on the target host. */
-export async function deployAgent(target, { installerPath, port = 4000 } = {}) {
+export async function deployAgent(target, { installerPath, port: portIn = 4000 } = {}) {
   if (!target?.host || !target?.username) return { ok: false, reason: 'host/username을 입력하세요.' };
+  // 포탈 포트는 숫자로만 — SSH 명령(install.sh --port, ss grep)에 문자열이 그대로 들어가는 것을 차단(명령 주입 방어심층).
+  const port = Number.isInteger(Number(portIn)) && Number(portIn) > 0 && Number(portIn) <= 65535 ? Number(portIn) : 4000;
   const installer = resolveInstaller(installerPath);
   if (!installer) return { ok: false, reason: '설치 패키지(offline tarball)를 찾을 수 없습니다. download/ 에 두거나 경로를 지정하세요.' };
 

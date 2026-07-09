@@ -45,18 +45,24 @@ export function generateToken(secret, { period = 30, digits = 6, counter } = {})
   return String(bin % 10 ** digits).padStart(digits, '0');
 }
 
-/** Verify a user-supplied token against the secret within ±window steps. */
-export function verifyToken(token, secret, { period = 30, digits = 6, window = 1 } = {}) {
-  if (!secret || !token) return false;
+/**
+ * Verify a user-supplied token against the secret within ±window steps.
+ * 반환: 일치한 카운터(정수) 또는 null(불일치). 카운터는 항상 큰 양수라 `if (!verifyToken())`
+ * 형태의 기존 부울 호출도 그대로 동작한다. minCounter 이하 카운터의 코드는 재사용(replay) 거부.
+ */
+export function verifyToken(token, secret, { period = 30, digits = 6, window = 1, minCounter = -Infinity } = {}) {
+  if (!secret || !token) return null;
   const clean = String(token).replace(/\s/g, '');
-  if (!/^\d{4,8}$/.test(clean)) return false;
+  if (!/^\d{4,8}$/.test(clean)) return null;
   const now = Math.floor(Date.now() / 1000 / period);
   for (let w = -window; w <= window; w++) {
-    const expected = generateToken(secret, { period, digits, counter: now + w });
+    const ctr = now + w;
+    if (ctr <= minCounter) continue; // 이미 사용된(또는 그 이전) 카운터의 코드는 재사용 거부
+    const expected = generateToken(secret, { period, digits, counter: ctr });
     // constant-time-ish compare
-    if (expected.length === clean.length && crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(clean))) return true;
+    if (expected.length === clean.length && crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(clean))) return ctr;
   }
-  return false;
+  return null;
 }
 
 /** Build the otpauth:// URI for QR enrollment in an authenticator app. */

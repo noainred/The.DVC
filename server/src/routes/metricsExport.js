@@ -23,8 +23,11 @@ function line(name, labels, value) {
 
 metricsExportRouter.get('/', async (req, res) => {
   if (TOKEN) {
-    const t = req.query.token || (req.get('Authorization') || '').replace(/^Bearer\s+/i, '');
-    if (!tokenMatches(t, TOKEN)) return res.status(403).type('text/plain').send('# 403 토큰 불일치 (METRICS_EXPORT_TOKEN)\n');
+    // 기본은 Authorization 헤더만 허용 — ?token=은 프록시/접근로그/브라우저 히스토리에 토큰이
+    // 남아 유출된다. 기존 Grafana 연동 호환이 필요하면 METRICS_ALLOW_QUERY_TOKEN=true로 옵트인.
+    let t = (req.get('Authorization') || '').replace(/^Bearer\s+/i, '');
+    if (!t && process.env.METRICS_ALLOW_QUERY_TOKEN === 'true') t = req.query.token || '';
+    if (!tokenMatches(t, TOKEN)) return res.status(403).type('text/plain').send('# 403 토큰 불일치 (METRICS_EXPORT_TOKEN) — Authorization: Bearer 헤더 사용(쿼리 토큰은 METRICS_ALLOW_QUERY_TOKEN=true 시에만)\n');
   }
   const snap = store.get();
   let powerMap = new Map();

@@ -76,6 +76,23 @@ export function listCollectors() {
   return loadCollectors().map(redact);
 }
 
+// 링크로컬/클라우드 메타데이터(169.254.0.0/16 = AWS/GCP/Azure 169.254.169.254 포함, fe80::/10,
+// fc00::/7)로의 SSRF를 차단. 사설 RFC1918 대역(192.168.x 등)은 수집 서버가 거기 있으므로 허용.
+// URL 문자열을 받아 차단 사유(문자열) 또는 null(허용) 반환. 여러 경로에서 공용으로 쓴다.
+export function ssrfBlockReason(urlStr) {
+  let u;
+  // 스킴이 없는 'host:port'만 http://를 붙인다(이미 스킴이 있으면 그대로 → 비-http 스킴을 제대로 거부).
+  try { u = new URL(/:\/\//.test(String(urlStr)) ? urlStr : `http://${urlStr}`); }
+  catch { return 'URL 형식이 올바르지 않습니다.'; }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return 'http/https URL만 허용됩니다.';
+  const host = u.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  if (!host) return 'URL의 호스트가 올바르지 않습니다.';
+  if (/^169\.254\./.test(host) || /^fe80:/.test(host) || /^f[cd][0-9a-f]{2}:/.test(host)) {
+    return '링크로컬/메타데이터 주소는 사용할 수 없습니다.';
+  }
+  return null;
+}
+
 function normalize(body, existing = null) {
   const e = existing ? { ...existing } : {};
   const id = String(body.id ?? e.id ?? '').trim();

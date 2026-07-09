@@ -154,7 +154,7 @@ export default function AgentDeploy() {
 
       <div className="flex gap wrap" style={{ marginBottom: 12 }}>
         <button className={subtab === 'status' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 14px' }} onClick={() => setSubtab('status')}>📋 에이전트 현황</button>
-        <button className={subtab === 'add' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 14px' }} onClick={() => setSubtab('add')}>➕ 에이전트 추가</button>
+        <button className={subtab === 'add' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 14px' }} onClick={() => setSubtab('add')}>➕ 에이전트 추가/변경</button>
         <button className={subtab === 'packages' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 14px' }} onClick={() => setSubtab('packages')}>⬇ 에이전트 설치 패키지 자동 다운로드</button>
       </div>
 
