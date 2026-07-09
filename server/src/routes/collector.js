@@ -14,6 +14,7 @@ import { upgradeFromBundleBytes, restartProcess } from '../upgrade/upgrade.js';
 import { setLocalPassword } from '../auth/auth.js';
 import { logAudit } from '../audit.js';
 import { runLocalIdracScan } from '../idrac/localScan.js';
+import { checkpointConfigDbs } from '../upgrade/dbCheckpoint.js';
 
 export const collectorRouter = Router();
 
@@ -84,10 +85,13 @@ collectorRouter.post('/idrac-scan', express.json({ limit: '256kb' }), async (req
 // Token-gated by COLLECTOR_TOKEN (no user account needed on the agent).
 collectorRouter.post('/upgrade',
   express.raw({ type: ['application/gzip', 'application/octet-stream'], limit: '256mb' }),
-  (req, res) => {
+  async (req, res) => {
     if (!config.collector.token) return res.status(404).json({ ok: false, reason: 'collector 비활성화' });
     if (!checkToken(req)) return res.status(403).json({ ok: false, reason: '토큰 불일치' });
     if (!req.body || !req.body.length) return res.status(400).json({ ok: false, reason: 'empty bundle' });
+
+    // 파일 복사(config 보존) 전에 라이브 WAL SQLite 체크포인트 → 엣지 복사본 정합성 확보(best-effort).
+    try { await checkpointConfigDbs(config.configDir); } catch { /* never block upgrade */ }
 
     // Default the install dir to the running app root so agents can be upgraded
     // without configuring UPGRADE_INSTALL_DIR explicitly.

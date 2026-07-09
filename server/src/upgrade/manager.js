@@ -7,8 +7,9 @@
  * and can be reloaded at runtime. Everything is a no-op unless enabled.
  */
 
-import { currentVersion } from '../config.js';
+import { currentVersion, config } from '../config.js';
 import { loadSettings, saveSettings, redactSettings } from './settings.js';
+import { checkpointConfigDbs } from './dbCheckpoint.js';
 import {
   findNewerArchive, upgradeFromArchive, checkRemote, upgradeFromRemote,
   restartProcess, pushBundleToEdge, vstr,
@@ -80,6 +81,13 @@ class UpgradeManager {
     if (!s.installDir) return { ok: false, reason: '설치 경로(installDir)가 설정되지 않아 적용할 수 없습니다.' };
     const cur = currentVersion();
     let res = null;
+
+    // 파일 복사(config 디렉터리 보존) 전에 라이브 WAL SQLite를 체크포인트 → 복사본 정합성 확보.
+    // best-effort: 실패/미지원이어도 업그레이드는 그대로 진행.
+    try {
+      const r = await checkpointConfigDbs(config.configDir);
+      if (r.ok && r.checkpointed?.length) console.log(`[upgrade] 라이브 SQLite 체크포인트 완료(복사 정합성): ${r.checkpointed.join(', ')}`);
+    } catch { /* never block upgrade */ }
 
     if ((source === 'auto' || source === 'watch') && s.watchDir) {
       const found = findNewerArchive(s.watchDir, cur);
