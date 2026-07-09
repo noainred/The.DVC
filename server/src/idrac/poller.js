@@ -15,6 +15,7 @@ import { setInventory, inventoryStale } from './invCache.js';
 import { getDb } from './db.js';
 import { describeError } from '../util/errors.js';
 import { isStopped } from '../security/emergencyStop.js';
+import { isMockMode, mockIdracPollTick } from '../mock/seed.js';
 
 // Hardware inventory is largely static — refresh it at most every 30 minutes.
 const INVENTORY_MAX_AGE_MS = 30 * 60_000;
@@ -36,7 +37,13 @@ async function pollOnce() {
 
 async function pollOnceInner() {
   if (isStopped()) { lastRun = { at: Date.now(), ok: 0, failed: 0, skipped: '긴급중단', results: [] }; return; }
-  const servers = loadRegistry().filter((s) => s.enabled !== false && s.host && s.username && s.password);
+  // mock 데모: 실제 Redfish 폴 대신 합성 전력 샘플 적재(전력 화면이 비지 않게). live/auto엔 무영향.
+  if (isMockMode()) {
+    try { const { store } = await import('../store.js'); const r = await mockIdracPollTick(store.get?.()); lastRun = { at: Date.now(), ok: r?.measured || 0, failed: 0, mock: true, results: [] }; } catch { /* */ }
+    return;
+  }
+  // live/auto: mock 데모 잔존 항목(id 'mock-')은 실제 폴 대상에서 제외(가짜 주소 폴 잡음 방지).
+  const servers = loadRegistry().filter((s) => s.enabled !== false && s.host && s.username && s.password && !String(s.id).startsWith('mock-'));
   if (!servers.length) { lastRun = { at: Date.now(), ok: 0, failed: 0, results: [] }; return; }
   const db = await getDb();
   const ts = Date.now();
