@@ -33,7 +33,35 @@ function initSqlite() {
       );
       CREATE INDEX IF NOT EXISTS idx_power_server_ts ON power_samples (server_id, ts);
       CREATE INDEX IF NOT EXISTS idx_power_ts ON power_samples (ts);
+      -- 시간당 롤업(전력 대시보드 집계 가속): 원시 power_samples 24h 스캔(90일 수렴 시 수억 행,
+      -- 캐시 미스 첫 요청이 초 단위 블로킹) 대신, (server_id, 시간버킷)별 합/개수/최대/최소/최근ts를
+      -- 증분 유지해 24h 통계를 ~24행 스캔으로 계산한다. 원시 테이블은 상세 차트(history)용으로 유지.
+      CREATE TABLE IF NOT EXISTS power_hourly (
+        server_id TEXT NOT NULL,
+        hb INTEGER NOT NULL,        -- floor(ts / 3600000) 시간 버킷
+        sumw INTEGER NOT NULL,
+        cnt INTEGER NOT NULL,
+        maxw INTEGER NOT NULL,
+        minw INTEGER NOT NULL,
+        last_ts INTEGER NOT NULL,
+        PRIMARY KEY (server_id, hb)
+      );
+      CREATE INDEX IF NOT EXISTS idx_power_hourly_hb ON power_hourly (hb);
     `);
+    // 구버전 DB(원시 샘플만 있고 롤업이 비어 있음) 최초 마이그레이션: 기존 원시 데이터를 1회 백필.
+    // (풀스캔 1회 — 신규 설치는 원시가 비어 즉시 통과, 기존 설치는 기동 시 1회만 수행.)
+    try {
+      const hh = db.prepare('SELECT COUNT(*) AS n FROM power_hourly').get();
+      if (!hh.n) {
+        const ps = db.prepare('SELECT COUNT(*) AS n FROM power_samples').get();
+        if (ps.n) {
+          db.exec(`INSERT INTO power_hourly (server_id, hb, sumw, cnt, maxw, minw, last_ts)
+            SELECT server_id, CAST(ts / 3600000 AS INTEGER) AS hb, SUM(watts), COUNT(*), MAX(watts), MIN(watts), MAX(ts)
+            FROM power_samples GROUP BY server_id, hb`);
+          console.log('[idrac] power_hourly 롤업 백필 완료(구버전 원시 데이터 → 시간당 집계).');
+        }
+      }
+    } catch (e) { console.warn('[idrac] power_hourly 백필 실패(무시, 이후 증분으로 채워짐):', e.message); }
     try { fs.chmodSync(DB_PATH, 0o600); } catch { /* best effort */ }
     const insertStmt = db.prepare('INSERT INTO power_samples (server_id, watts, ts) VALUES (?, ?, ?)');
     const latestStmt = db.prepare('SELECT watts, ts FROM power_samples WHERE server_id = ? ORDER BY ts DESC LIMIT 1');
@@ -47,23 +75,42 @@ function initSqlite() {
     const historyStmt = db.prepare('SELECT ts, watts FROM power_samples WHERE server_id = ? AND ts >= ? ORDER BY ts DESC LIMIT ?');
     const pruneStmt = db.prepare('DELETE FROM power_samples WHERE ts < ?');
     // 집계(전력 대시보드): 서버별 24h 피크/평균/최소/마지막 + 시간버킷 평균 — SQL GROUP BY로 효율 계산.
-    const statsStmt = db.prepare('SELECT server_id, MAX(watts) AS peak, MIN(watts) AS minw, AVG(watts) AS avgw, MAX(ts) AS last, COUNT(*) AS n FROM power_samples WHERE ts >= ? GROUP BY server_id');
+    // 비-시간 버킷(예외적)만 원시 테이블에서 계산 — 현재 대시보드는 항상 1시간 버킷이라 롤업 사용.
     const bucketStmt = db.prepare('SELECT server_id, CAST(ts / ? AS INTEGER) AS bk, AVG(watts) AS avgw FROM power_samples WHERE ts >= ? GROUP BY server_id, bk');
     const idsStmt = db.prepare('SELECT DISTINCT server_id AS id FROM power_samples');
     const delOneStmt = db.prepare('DELETE FROM power_samples WHERE server_id = ?');
+    // ── 시간당 롤업 문장 ──
+    const HOUR_MS = 3_600_000;
+    // 증분 upsert: 같은 (server_id, 시간버킷)이면 합/개수 누적, 최대/최소/최근ts 갱신.
+    const rollupStmt = db.prepare(`
+      INSERT INTO power_hourly (server_id, hb, sumw, cnt, maxw, minw, last_ts)
+      VALUES (?, ?, ?, 1, ?, ?, ?)
+      ON CONFLICT(server_id, hb) DO UPDATE SET
+        sumw = sumw + excluded.sumw,
+        cnt = cnt + 1,
+        maxw = CASE WHEN excluded.maxw > maxw THEN excluded.maxw ELSE maxw END,
+        minw = CASE WHEN excluded.minw < minw THEN excluded.minw ELSE minw END,
+        last_ts = CASE WHEN excluded.last_ts > last_ts THEN excluded.last_ts ELSE last_ts END`);
+    const rollupOne = (serverId, watts, ts) => rollupStmt.run(serverId, Math.floor(ts / HOUR_MS), watts, watts, watts, ts);
+    // 24h 통계를 시간당 롤업에서 계산: peak=MAX(maxw), min=MIN(minw), avg=SUM(sumw)/SUM(cnt), last=MAX(last_ts).
+    const statsHourlyStmt = db.prepare('SELECT server_id, MAX(maxw) AS peak, MIN(minw) AS minw, SUM(sumw) AS sumw, SUM(cnt) AS cnt, MAX(last_ts) AS last FROM power_hourly WHERE hb >= ? GROUP BY server_id');
+    const bucketsHourlyStmt = db.prepare('SELECT server_id, hb, sumw, cnt FROM power_hourly WHERE hb >= ?');
+    const pruneHourlyStmt = db.prepare('DELETE FROM power_hourly WHERE hb < ?');
+    const delOneHourlyStmt = db.prepare('DELETE FROM power_hourly WHERE server_id = ?');
     return {
       kind: 'sqlite',
-      insert: (serverId, watts, ts) => insertStmt.run(serverId, watts, ts),
+      insert: (serverId, watts, ts) => { const r = insertStmt.run(serverId, watts, ts); rollupOne(serverId, watts, ts); return r; },
       // 다수 샘플을 한 트랜잭션으로 적재(매 폴 590+ 호스트 기록이 이벤트 루프를 막지 않게).
+      // 원시 + 시간당 롤업을 같은 트랜잭션에서 갱신해 항상 정합(원시와 집계가 어긋나지 않음).
       insertMany: (samples) => {
         if (!samples || !samples.length) return 0;
         db.exec('BEGIN');
-        try { for (const s of samples) insertStmt.run(s.serverId, s.watts, s.ts); db.exec('COMMIT'); }
+        try { for (const s of samples) { insertStmt.run(s.serverId, s.watts, s.ts); rollupOne(s.serverId, s.watts, s.ts); } db.exec('COMMIT'); }
         catch (e) { try { db.exec('ROLLBACK'); } catch { /* */ } throw e; }
         return samples.length;
       },
       serverIds: () => idsStmt.all().map((r) => r.id),
-      deleteServers: (ids) => { let n = 0; db.exec('BEGIN'); try { for (const id of ids) n += delOneStmt.run(id).changes || 0; db.exec('COMMIT'); } catch (e) { try { db.exec('ROLLBACK'); } catch { /* */ } throw e; } return n; },
+      deleteServers: (ids) => { let n = 0; db.exec('BEGIN'); try { for (const id of ids) { n += delOneStmt.run(id).changes || 0; delOneHourlyStmt.run(id); } db.exec('COMMIT'); } catch (e) { try { db.exec('ROLLBACK'); } catch { /* */ } throw e; } return n; },
       latest: (serverId) => latestStmt.get(serverId) || null,
       latestAll: () => {
         const map = new Map();
@@ -71,13 +118,22 @@ function initSqlite() {
         return map;
       },
       history: (serverId, sinceTs, limit) => historyStmt.all(serverId, sinceTs, limit).reverse(),
+      // 시간당 롤업에서 계산(24h 윈도우 ≈ 24 시간버킷 스캔). 윈도우는 시간 단위로 정렬됨(대시보드 집계엔 무해).
       statsSince: (sinceTs) => {
+        const hbSince = Math.floor(sinceTs / HOUR_MS);
         const m = new Map();
-        for (const r of statsStmt.all(sinceTs)) m.set(r.server_id, { peak: Math.round(r.peak), min: Math.round(r.minw), avg: Math.round(r.avgw), last: r.last, count: r.n });
+        for (const r of statsHourlyStmt.all(hbSince)) m.set(r.server_id, { peak: Math.round(r.peak), min: Math.round(r.minw), avg: Math.round(r.sumw / r.cnt), last: r.last, count: r.cnt });
         return m;
       },
-      bucketsSince: (sinceTs, bucketMs) => bucketStmt.all(bucketMs, sinceTs).map((r) => ({ serverId: r.server_id, bucket: r.bk * bucketMs, avg: r.avgw })),
-      prune: (beforeTs) => pruneStmt.run(beforeTs),
+      bucketsSince: (sinceTs, bucketMs) => {
+        if (bucketMs === HOUR_MS) {
+          const hbSince = Math.floor(sinceTs / HOUR_MS);
+          return bucketsHourlyStmt.all(hbSince).map((r) => ({ serverId: r.server_id, bucket: r.hb * HOUR_MS, avg: r.sumw / r.cnt }));
+        }
+        // 비-시간 버킷은 원시 테이블에서(현재 대시보드는 항상 1시간이라 이 경로는 예외적).
+        return bucketStmt.all(bucketMs, sinceTs).map((r) => ({ serverId: r.server_id, bucket: r.bk * bucketMs, avg: r.avgw }));
+      },
+      prune: (beforeTs) => { const r = pruneStmt.run(beforeTs); try { pruneHourlyStmt.run(Math.floor(beforeTs / HOUR_MS)); } catch { /* */ } return r; },
     };
   });
 }
