@@ -120,7 +120,7 @@ npm run dev                  # API :4000 + 웹 :5173 (핫리로드) → http://l
 npm run build && npm start   # API가 web/dist 서빙 → http://localhost:4000
 ```
 
-기본 데모 계정: **`admin` / `admin123`** (`users.json` 없으면 자동 시드). 운영 시 반드시 변경 + `AUTH_SECRET` 지정.
+최초 계정: **`admin`** + 비밀번호는 `DEFAULT_ADMIN_PASSWORD`(설정 시) 또는 **최초 기동 시 임의 생성되어 `$CONFIG_DIR/initial-admin-password.txt`(0600)에 저장**됩니다(알려진 기본 비번 폐지, v2.152.0). 로그인 후 즉시 변경하고 파일 삭제. 운영 시 `AUTH_SECRET` 지정 권장(미지정 시 재시작마다 세션 무효).
 
 ---
 
@@ -156,7 +156,7 @@ npm run build && npm start   # API가 web/dist 서빙 → http://localhost:4000
 | `AUTH_ENABLED` | `true` | 로그인 인증 사용 |
 | `AUTH_SECRET` | (랜덤) | JWT 서명 시크릿 — **운영 필수**(미지정 시 재시작마다 토큰 무효) |
 | `AUTH_TOKEN_TTL` | `8h` | 토큰 유효기간 |
-| `DEFAULT_ADMIN_PASSWORD` | `admin123` | 초기 admin 비밀번호 |
+| `DEFAULT_ADMIN_PASSWORD` | (임의생성) | 초기 admin 비밀번호. 미설정 시 최초 기동에 임의 생성 → `$CONFIG_DIR/initial-admin-password.txt` |
 | `TOTP_ISSUER` | `VMware Portal` | TOTP 표시명 |
 | `AD_ENABLED`, `AD_URL`, `AD_DOMAIN`, `AD_BASE_DN`, `AD_*_GROUP`, `AD_DEFAULT_ROLE` | — | Active Directory(LDAP) 연동·그룹→역할 매핑 |
 
@@ -323,6 +323,6 @@ sudo ./install.sh --port 4000
 
 ## 보안 / 운영 메모
 
-- 자격증명/시크릿(`vcenters.json`, `users.json`, `*-assignments.json`, 스캔/게스트 계정 등)은 `CONFIG_DIR`에 `0600`으로 저장되고 API 응답에서 마스킹됩니다. 운영 시 `AUTH_SECRET` 지정 + 기본 비밀번호 변경 필수.
+- 자격증명/시크릿(`vcenters.json`, `users.json`, `*-assignments.json`, 스캔/게스트 계정 등)은 `CONFIG_DIR`에 `0600`으로 저장되고 API 응답에서 마스킹됩니다. 운영 시 `AUTH_SECRET` 지정 + 최초 임의 비밀번호(`initial-admin-password.txt`) 변경 필수. 보안 응답 헤더(X-Frame-Options·nosniff·HSTS)·CORS 기본 차단·업그레이드 sha256 필수 등은 [설치 가이드 §7](docs/INSTALL.md) 참고.
 - 시계열(온도/GPU/용량)을 분 단위·장기 보존하면 데이터가 커집니다 — **설정 › 지표 수집**에서 주기/보존기간을 조절하세요.
 - 모니터링은 **읽기 전용 vCenter 계정** 권장. VM 생성/Tools 업그레이드/원격접속 등 쓰기·운영 기능은 권한 있는 계정과 승인 절차로 사용하세요.
