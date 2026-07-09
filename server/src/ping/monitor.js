@@ -15,6 +15,7 @@ import { getPingDb } from './db.js';
 import { enabledTargets, seedVcenterTargets, seedEdgeTargets, syncVcPortTargets } from './store.js';
 import { listCollectors } from '../collector/registry.js';
 import { pingOne, tcpConnect } from '../util/ping.js';
+import { isMockMode, mockPingPollTick } from '../mock/seed.js';
 
 let timer = null;
 let running = false;      // 재진입 가드
@@ -40,7 +41,10 @@ export async function pollOnce() {
   if (running) return null;
   running = true;
   try {
-    const targets = enabledTargets();
+    // mock 데모: 실제 프로브 대신 합성 RTT 적재(핑/네트워크·vCenter 포트 화면이 비지 않게).
+    if (isMockMode()) { try { const { store } = await import('../store.js'); return await mockPingPollTick(store.get?.()); } catch { return { measured: 0 }; } }
+    // live: mock 데모 잔존 대상(id 'mock-')은 실제 프로브에서 제외(가짜 주소 프로브 잡음 방지).
+    const targets = enabledTargets().filter((t) => !String(t.id).startsWith('mock-'));
     if (!targets.length) return { measured: 0 };
     const db = await getPingDb();
     const results = [];
