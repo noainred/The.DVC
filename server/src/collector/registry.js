@@ -112,24 +112,29 @@ function normalize(body, existing = null) {
   return [entry, null];
 }
 
-export function addCollector(body) {
+// managed=true: 관리자가 UI에서 직접 등록/수정한 항목(=수동 고정). 엣지 자기등록이 URL/토큰을
+// 덮어쓰지 않는다(NAT/포트포워딩으로 관리자가 URL·토큰을 실제 값과 다르게 지정하는 경우 보존).
+export function addCollector(body, { managed = false } = {}) {
   const list = loadCollectors();
   const [entry, err] = normalize(body);
   if (err) return { ok: false, reason: err };
   // 대소문자 무시 중복 방지 — 'GM1'이 있으면 'gm1' 추가를 막는다(같은 엣지 이중 등록 방지).
   const dupe = list.find((c) => String(c.id).toLowerCase() === String(entry.id).toLowerCase());
   if (dupe) return { ok: false, reason: `이미 존재하는 id: ${dupe.id}` };
+  entry.managed = Boolean(managed);
   list.push(entry);
   save(list);
   return { ok: true, collector: redact(entry) };
 }
 
-export function updateCollector(id, body) {
+export function updateCollector(id, body, { managed } = {}) {
   const list = loadCollectors();
   const idx = list.findIndex((c) => c.id === id);
   if (idx === -1) return { ok: false, reason: `없는 수집 서버: ${id}` };
   const [entry, err] = normalize({ ...body, id }, list[idx]);
   if (err) return { ok: false, reason: err };
+  // managed 명시 시 갱신, 아니면 기존 값 보존(자기등록이 고정 플래그를 지우지 않게).
+  entry.managed = managed != null ? Boolean(managed) : Boolean(list[idx].managed);
   list[idx] = entry;
   save(list);
   return { ok: true, collector: redact(entry) };
@@ -138,6 +143,8 @@ export function updateCollector(id, body) {
 /**
  * 엣지 자기등록(EDGE_MODE=all) upsert — 같은 id(에이전트 이름)가 있으면 URL/토큰/DC를
  * 갱신하고, 없으면 추가한다. 관리자가 수동 등록한 항목의 enabled/vcenterId는 보존.
+ * ★ 관리자가 수동 수정(managed=true)한 항목은 URL/토큰을 덮어쓰지 않는다 — 저장한 값이
+ *   다음 자기등록 주기에 원복되던 버그 방지. (관리자 편집이 곧 '이 값으로 고정' 의사표시)
  */
 export function upsertCollectorFromAgent({ name, url, token, datacenter = '' } = {}) {
   const id = String(name || '').trim();
@@ -147,9 +154,10 @@ export function upsertCollectorFromAgent({ name, url, token, datacenter = '' } =
   // 기존 항목의 실제 id를 그대로 두고 URL/토큰만 갱신한다(관리자 매핑·표시이름 보존).
   const existing = list.find((c) => String(c.id).toLowerCase() === id.toLowerCase());
   if (existing) {
-    return updateCollector(existing.id, { url, token, datacenter: datacenter || existing.datacenter, name: existing.name || existing.id });
+    if (existing.managed) return { ok: true, collector: redact(existing), skipped: 'managed' };
+    return updateCollector(existing.id, { url, token, datacenter: datacenter || existing.datacenter, name: existing.name || existing.id }, { managed: false });
   }
-  return addCollector({ id, name: id, url, token, datacenter, enabled: true });
+  return addCollector({ id, name: id, url, token, datacenter, enabled: true }, { managed: false });
 }
 
 export function removeCollector(id) {
