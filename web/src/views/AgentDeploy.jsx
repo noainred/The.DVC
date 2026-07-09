@@ -19,6 +19,7 @@ export default function AgentDeploy() {
   const [pkg, setPkg] = useState(null);
   const [dl, setDl] = useState({ kinds: ['installer_cent9'], version: '', busy: false });
   const [pkgCfg, setPkgCfg] = useState(null); // { baseUrl, dir } editable
+  const [subtab, setSubtab] = useState('status'); // status(에이전트 현황·기본) | add(에이전트 추가) | packages(설치 패키지 자동 다운로드)
 
   const loadInstaller = () => fetchJson('/admin/agent-deploy/installer').then(setInstaller).catch(() => setInstaller({ available: false }));
   const loadPkg = () => fetchJson('/admin/packages').then((p) => { setPkg(p); setPkgCfg({ baseUrl: p.baseUrl || '', dir: p.dir || '' }); }).catch(() => setPkg(null));
@@ -81,7 +82,8 @@ export default function AgentDeploy() {
     setResult({ kind: 'autofill', ok: true });
   };
   const [vcs, setVcs] = useState([]); // 중앙에 등록된 vCenter(드롭다운으로 id/host 자동 채움)
-  useEffect(() => { loadInstaller(); loadTargets(); loadPkg(); loadToken(); loadDefaults(); fetchJson('/admin/vcenters').then((d) => setVcs(d.vcenters || [])).catch(() => {}); }, []);
+  const [dcs, setDcs] = useState([]); // 데이터센터(법인) 목록 — 수집 DC명 콤보박스(오타 방지)용
+  useEffect(() => { loadInstaller(); loadTargets(); loadPkg(); loadToken(); loadDefaults(); fetchJson('/admin/vcenters').then((d) => setVcs(d.vcenters || [])).catch(() => {}); fetchJson('/admin/datacenters').then((d) => setDcs(d.datacenters || [])).catch(() => {}); }, []);
   // GPU 게스트 수집 폼(중첩) 세터.
   const setG = (k) => (e) => setF((s) => ({ ...s, gpuGuest: { ...s.gpuGuest, [k]: e.target.value } }));
   const pickGpuVc = (id) => {
@@ -112,7 +114,7 @@ export default function AgentDeploy() {
     else setResult({ kind: 'save', ok: false, reason: r.reason });
   };
   // gpuGuest는 EMPTY 기본값과 깊게 병합(저장 안 된 옛 대상도 안전) + 비밀번호는 비우고 has* 플래그 보존.
-  const editTarget = (t) => setF({ ...EMPTY, ...t, gpuGuest: { ...EMPTY.gpuGuest, ...(t.gpuGuest || {}) }, password: '', privateKey: '' });
+  const editTarget = (t) => { setF({ ...EMPTY, ...t, gpuGuest: { ...EMPTY.gpuGuest, ...(t.gpuGuest || {}) }, password: '', privateKey: '' }); setSubtab('add'); };
   const removeTarget = async (t) => { if (window.confirm(`'${t.host}' 대상을 삭제할까요?`)) { await delJson(`/admin/agent-deploy/targets/${t.id}`).catch(() => {}); await loadTargets(); } };
   const deployTarget = async (t) => {
     if (!window.confirm(`${t.host} 에 배포할까요?`)) return;
@@ -150,6 +152,13 @@ export default function AgentDeploy() {
     <>
       <div className="section-title" style={{ margin: '6px 0 10px' }}>에이전트 자동배포 (SSH 설치)</div>
 
+      <div className="flex gap wrap" style={{ marginBottom: 12 }}>
+        <button className={subtab === 'status' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 14px' }} onClick={() => setSubtab('status')}>📋 에이전트 현황</button>
+        <button className={subtab === 'add' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 14px' }} onClick={() => setSubtab('add')}>➕ 에이전트 추가</button>
+        <button className={subtab === 'packages' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 14px' }} onClick={() => setSubtab('packages')}>⬇ 에이전트 설치 패키지 자동 다운로드</button>
+      </div>
+
+      {subtab === 'packages' && (
       <div className="card" style={{ marginBottom: 12 }}>
         <b style={{ fontSize: 14 }}>설치 패키지 자동 다운로드</b>
         <div className="muted" style={{ fontSize: 12, margin: '4px 0 8px' }}>
@@ -206,7 +215,9 @@ export default function AgentDeploy() {
           </div>
         )}
       </div>
+      )}
 
+      {subtab === 'add' && (<>
       <div className="card" style={{ marginBottom: 12, borderColor: installer.available ? undefined : 'var(--red)' }}>
         {installer.available
           ? <span className="muted" style={{ fontSize: 13 }}>설치 패키지: <code>{installer.name}</code> ({(installer.sizeBytes / 1048576).toFixed(1)} MB) — 중앙 서버에서 SFTP 전송됩니다.</span>
@@ -262,7 +273,11 @@ export default function AgentDeploy() {
           <label title="(선택) 이 에이전트를 '전력/데이터 pull 대상'으로도 쓸 때만. 중앙이 이 에이전트의 /api/collector/export 를 당겨갈 때 쓰는 임의 비밀입니다. iDRAC/IP 스캔만 할 거면 비워두세요. 자동 채우기는 랜덤값을 넣습니다. 중앙 '설정 › 수집 서버' 등록 시 같은 값을 사용하세요.">
             <span className="cap">전력수집 토큰(COLLECTOR_TOKEN, 선택)</span><input className="input" value={f.collectorToken} onChange={set('collectorToken')} placeholder="(전력수집 시에만)" /></label>
           <label title="(선택) 전력수집 에이전트가 보고할 데이터센터 라벨. 수집 토큰을 쓸 때만 의미 있습니다. 예: OC2. 안 쓰면 비움. ※ 아래 '수집 서버 자동 등록'을 켜면 배포 후 중앙에 자동 등록됩니다.">
-            <span className="cap">수집 DC명(COLLECTOR_DATACENTER, 선택)</span><input className="input" value={f.collectorDatacenter} onChange={set('collectorDatacenter')} placeholder="예: OC2" /></label>
+            <span className="cap">수집 DC명(COLLECTOR_DATACENTER, 선택)</span>
+            <input className="input" list="collector-dc-list" value={f.collectorDatacenter} onChange={set('collectorDatacenter')} placeholder="예: OC2 (목록에서 선택 또는 직접 입력)" />
+            <datalist id="collector-dc-list">
+              {dcs.map((d) => <option key={d.id} value={d.id}>{d.name && d.name !== d.id ? `${d.name}${d.region ? ` · ${d.region}` : ''}` : (d.region || d.id)}</option>)}
+            </datalist></label>
           <label title="에이전트 인스턴스가 자기 서버에서 열 HTTP 포트(기본 4000). 그 호스트에서 포트 충돌이 없으면 그대로 두세요.">
             <span className="cap">포탈 포트</span><input className="input" type="number" value={f.portalPort} onChange={set('portalPort')} /></label>
           <label style={{ gridColumn: '1 / -1' }} title="보통 비워두세요 — 중앙이 download/의 el9 오프라인 패키지를 자동 선택해 SSH로 전송·설치합니다. 특정 tarball을 강제하려면 '중앙 서버' 상의 절대경로를 입력하세요.">
@@ -311,13 +326,21 @@ export default function AgentDeploy() {
         <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} disabled={busy || !f.host || !installer.available} onClick={deploy}>{busy ? '진행 중…' : '배포 + 설치'}</button>
       </div>
 
-      {targets.length > 0 && (
+      <div className="muted" style={{ fontSize: 12, marginTop: 12, lineHeight: 1.7 }}>
+        동작: 중앙 서버의 오프라인 설치 패키지를 대상 호스트로 SFTP 전송 → <code>install.sh</code> 실행 →
+        portal.env에 에이전트 설정 주입 → <code>vmware-portal</code> 서비스 재시작. 설치 후 설정 → 수집 서버/에이전트 작업에서 등록·확인하세요.
+      </div>
+      </>)}
+
+      {subtab === 'status' && (
         <div className="card" style={{ marginBottom: 14 }}>
           <div className="flex between wrap" style={{ alignItems: 'center', marginBottom: 8 }}>
             <b style={{ fontSize: 14 }}>저장된 대상 ({targets.length})</b>
-            <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={busy || !installer.available} onClick={deployAll}>전체 배포</button>
+            {targets.length > 0 && <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={busy || !installer.available} onClick={deployAll}>전체 배포</button>}
           </div>
-          <div className="table-wrap">
+          {targets.length === 0
+            ? <span className="muted" style={{ fontSize: 13 }}>저장된 대상이 없습니다. '➕ 에이전트 추가' 탭에서 대상을 저장한 뒤 여기서 배포·상태확인·관리하세요.</span>
+            : <div className="table-wrap">
             <table>
               <thead><tr><th>호스트</th><th>에이전트</th><th>중앙</th><th>마지막 결과</th><th style={{ textAlign: 'right' }}>작업</th></tr></thead>
               <tbody>
@@ -337,7 +360,7 @@ export default function AgentDeploy() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </div>}
         </div>
       )}
 
@@ -388,11 +411,6 @@ export default function AgentDeploy() {
           )}
         </div>
       )}
-
-      <div className="muted" style={{ fontSize: 12, marginTop: 12, lineHeight: 1.7 }}>
-        동작: 중앙 서버의 오프라인 설치 패키지를 대상 호스트로 SFTP 전송 → <code>install.sh</code> 실행 →
-        portal.env에 에이전트 설정 주입 → <code>vmware-portal</code> 서비스 재시작. 설치 후 설정 → 수집 서버/에이전트 작업에서 등록·확인하세요.
-      </div>
     </>
   );
 }
