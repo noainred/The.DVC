@@ -1,6 +1,15 @@
 {
   "notes": [
     {
+      "version": "2.145.0",
+      "date": "2026-07-09",
+      "title": "업그레이드 적용 중 라이브 SQLite 정합성 — 복사 전 WAL 체크포인트",
+      "notes": [
+        "업그레이드 적용 시 config 디렉터리를 통째로 복사(cpSync)해 사용자 데이터를 보존하는데, WAL 모드 SQLite는 최근 커밋이 아직 본 .db가 아니라 -wal 파일에 있을 수 있어 라이브 쓰기 중 복사하면 부분/불일치 스냅샷이 될 수 있었습니다. 이제 복사 직전에 라이브 SQLite에 wal_checkpoint(TRUNCATE)를 걸어 -wal을 본 .db로 flush해, 복사본이 자기완결적이 되도록 했습니다.",
+        "중앙 자동/수동 적용(manager)과 엣지 푸시 수신(collector /upgrade) 두 경로 모두에 적용. best-effort로 실패/미지원(NDJSON 폴백)이어도 업그레이드를 막지 않으며, 외부 프로그램이 공유하는 ipam.db(비 WAL)는 대상에서 제외합니다. 신규 upgrade/dbCheckpoint.js + 회귀 테스트 2종 추가(339건 통과)."
+      ]
+    },
+    {
       "version": "2.144.0",
       "date": "2026-07-09",
       "title": "위임 스캔 잡 인출 2단계 확인응답(claim→ack) — 인출 직후 엣지 단절 시 유실 방지",
