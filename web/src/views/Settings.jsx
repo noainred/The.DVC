@@ -5,7 +5,6 @@ import VCenterConnTest from './VCenterConnTest.jsx';
 import NsxAdmin from './NsxAdmin.jsx';
 import IdracAdmin from './IdracAdmin.jsx';
 import Collectors from './Collectors.jsx';
-import AgentScans from './AgentScans.jsx';
 import AgentDeploy from './AgentDeploy.jsx';
 import ProxySettings from './ProxySettings.jsx';
 import RemoteAccess from './RemoteAccess.jsx';
@@ -43,7 +42,6 @@ const SUB = [
   { k: 'gpu-guest-diag', label: 'GPU 수집 진단', C: GpuGuestDiag, group: 'collect' },
   { k: 'guest-account', label: '게스트 계정 추가', C: GuestAccount, group: 'collect' },
   { k: 'collectors', label: '수집 서버(원격)', C: Collectors, group: 'collect' },
-  { k: 'agent-scans', label: '에이전트 작업', C: AgentScans, group: 'collect' },
   { k: 'agent-deploy', label: '에이전트 배포', C: AgentDeploy, group: 'collect' },
   // --- 원격 접속 서버 그룹 ---
   { k: 'proxy', label: '중계 서버', C: ProxySettings, group: 'remote-srv' },

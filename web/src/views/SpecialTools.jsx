@@ -10,6 +10,7 @@ import NetTrafficAnalysis from './NetTrafficAnalysis.jsx';
 import DeepSearch from './DeepSearch.jsx';
 import { IdracDetailModal } from './IdracAdmin.jsx';
 import VmProvision from './VmProvision.jsx';
+import AgentScans from './AgentScans.jsx';
 
 // IP 확인 출처 배지: vCenter 인식 / Ping(TCP)스캔 / 둘 다
 const DISCOVERY = { vcenter: ['vCenter', 'blue'], scan: ['Ping스캔', 'teal'], both: ['vCenter+스캔', 'green'], manual: ['수동등록', 'purple'] };
@@ -76,6 +77,7 @@ const TOOLS = [
   { k: 'massdeploy', icon: '🚀', label: '대용량 배포', desc: '대량 배포 (준비 중)', disabled: true, comingSoon: true },
   { k: 'shutdown', icon: '🛑', label: '긴급중단', desc: '모든 수집 즉시 정지 — 관리자 2명 OTP(2인 승인) 필요', danger: true },
   { k: 'vmprovision', icon: '🆕', label: 'VM 생성', desc: '템플릿/사양 지정으로 신규 VM 생성 (관리자)', adminOnly: true },
+  { k: 'agent-scans', icon: '🛰️', label: '에이전트 작업', desc: '에이전트별 IP 대역+iDRAC 계정 할당 → 각 에이전트가 로컬 스캔·자동등록·보고 (관리자)', adminOnly: true },
 ];
 
 const tb = (gb) => (gb >= 1024 ? `${(gb / 1024).toFixed(1)} TB` : `${gb} GB`);
@@ -268,6 +270,7 @@ function ToolPanel({ tool, onBack, isAdmin }) {
       {tool === 'portaldb' && <PortalDb />}
       {tool === 'shutdown' && <Shutdown />}
       {tool === 'vmprovision' && (isAdmin ? <VmProvision /> : <div className="card"><span className="muted">관리자 전용 기능입니다.</span></div>)}
+      {tool === 'agent-scans' && (isAdmin ? <AgentScans /> : <div className="card"><span className="muted">관리자 전용 기능입니다.</span></div>)}
     </>
   );
 }
