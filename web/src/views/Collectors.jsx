@@ -13,6 +13,7 @@ export default function Collectors() {
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
   const [banner, setBanner] = useState(null);
+  const [upgFails, setUpgFails] = useState(null); // 모두 업그레이드 실패 엣지별 원인 [{name, reason}]
   const [central, setCentral] = useState(null);
   const [sort, setSort] = useState({ key: 'id', dir: 'asc' });
   const [ingest, setIngest] = useState(null); // 에이전트별 수신 트래픽 진단
@@ -44,11 +45,16 @@ export default function Collectors() {
   const upgrade = async (id) => {
     const who = id ? `'${id}' 에이전트` : '모든 수집 에이전트';
     if (!window.confirm(`${who}를 중앙 포탈 버전(v${central || '?'})으로 업그레이드하고 재시작할까요?`)) return;
-    setBusy(true); setBanner(null);
+    setBusy(true); setBanner(null); setUpgFails(null);
     try {
       const r = await postJson('/admin/collectors/upgrade', id ? { id } : {});
+      // 실패한 엣지별 원인(403 토큰/연결불가/구버전 등)을 목록으로 노출 — 'X/Y 성공'만으론
+      // 어디를 점검할지 알 수 없다. 중앙→엣지 방향 문제 진단의 핵심.
+      const fails = (r.results || []).filter((x) => !x.ok)
+        .map((x) => ({ name: x.name || x.id, reason: x.reason || `HTTP ${x.status || '?'}` }));
+      setUpgFails(fails.length ? fails : null);
       setBanner(r.ok
-        ? { ok: true, text: `업그레이드 푸시 완료: ${r.succeeded}/${r.pushed} 성공 (v${r.version}, ${r.source})` }
+        ? { ok: r.succeeded === r.pushed, text: `업그레이드 푸시: ${r.succeeded}/${r.pushed} 성공 (v${r.version}, ${r.source})${r.succeeded < r.pushed ? ' — 실패 원인은 아래 참고' : ''}` }
         : { ok: false, text: r.reason });
       if (reloadTimer.current) clearTimeout(reloadTimer.current);
       reloadTimer.current = setTimeout(load, 5000);
@@ -215,6 +221,26 @@ export default function Collectors() {
         <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 8, fontSize: 13,
           background: banner.ok ? 'rgba(34,197,94,.12)' : 'rgba(239,68,68,.12)',
           color: banner.ok ? '#4ade80' : '#f87171' }}>{banner.text}</div>
+      )}
+
+      {upgFails && upgFails.length > 0 && (
+        <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 8, fontSize: 12.5,
+          background: 'rgba(245,158,11,.10)', border: '1px solid rgba(245,158,11,.25)' }}>
+          <div style={{ color: '#fbbf24', fontWeight: 600, marginBottom: 6 }}>
+            업그레이드 실패 {upgFails.length}대 — 엣지별 원인 (중앙→엣지 방향 점검)
+          </div>
+          <div style={{ display: 'grid', gap: 4 }}>
+            {upgFails.map((f, i) => (
+              <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                <span style={{ color: '#e5e7eb', fontWeight: 600, minWidth: 90 }}>{f.name}</span>
+                <span style={{ color: '#cbd5e1' }}>{f.reason}</span>
+              </div>
+            ))}
+          </div>
+          <div style={{ color: '#94a3b8', marginTop: 6, fontSize: 11.5 }}>
+            토큰(403): 엣지 COLLECTOR_TOKEN과 동일하게 저장 · 연결불가: NAT/포트포워딩·포탈 기동 확인 · 구버전(404): 엣지가 자체 원격 소스로 자동 업그레이드될 때까지 대기
+          </div>
+        </div>
       )}
 
       <IngestStats data={ingest} onReset={resetIngest} />
