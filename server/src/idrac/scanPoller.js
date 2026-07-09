@@ -21,6 +21,7 @@ import { registerScanned } from './registry.js';
 import { pollNow } from './poller.js';
 import { enabledScanRanges, recordScanRangeRun, getScanRangeRaw, scanRangesForDatacenter, lastScanCycleAt } from './scanRanges.js';
 import { enqueueIdracScan, cancelPendingIdracScanJobs } from '../central/idracScanJobs.js';
+import { pushIdracScan } from '../central/idracScanPush.js';
 import { isStopped } from '../security/emergencyStop.js';
 
 let timer = null;      // 주기 타이머(setTimeout 체인 — 32비트 한계 초과 주기 지원)
@@ -73,11 +74,17 @@ export function stopIdracScanNow() {
 /** 한 법인(DataCenter) 대역을 스캔+등록(또는 위임). 반환 { datacenterId, scanned, found, registered, delegated, error }. */
 async function scanOneDatacenter(e, onProgress) {
   const ips = e.ranges.join('\n');
-  // 위임: 에이전트가 현지에서 스캔+자동등록(noRegister:false). 중앙 토큰 필요.
+  // 위임: 에이전트가 현지에서 스캔+자동등록(noRegister:false).
   if (e.agent && e.agent !== '__local__') {
+    // dispatch=push: 중앙이 수집 서버 URL로 엣지에 직접 스캔 전송(엣지 폴링 불필요). 중앙 토큰 불요.
+    if (e.dispatch === 'push') {
+      const pr = pushIdracScan(e.agent, { ips, username: e.username, password: e.password, datacenterId: e.datacenterId, noRegister: false });
+      return { datacenterId: e.datacenterId, delegated: true, dispatch: 'push', agent: e.agent, reqId: pr.reqId || null, error: pr.ok ? null : pr.reason };
+    }
+    // 기본(poll): 에이전트가 중앙으로 폴링해 잡을 인출. 중앙 토큰 필요.
     if (!config.central.token) return { datacenterId: e.datacenterId, delegated: false, error: '중앙 토큰 미설정으로 위임 불가' };
     const reqId = enqueueIdracScan(e.agent, { ips, username: e.username, password: e.password, datacenterId: e.datacenterId, noRegister: false });
-    return { datacenterId: e.datacenterId, delegated: true, agent: e.agent, reqId: reqId || null, error: reqId ? null : '위임 잡 적재 실패(대기 한도 초과)' };
+    return { datacenterId: e.datacenterId, delegated: true, dispatch: 'poll', agent: e.agent, reqId: reqId || null, error: reqId ? null : '위임 잡 적재 실패(대기 한도 초과)' };
   }
   // 중앙 직접 스캔 → 발견한 iDRAC을 그 법인(DataCenter)에 등록(법인 DB).
   const r = await scanForIdracs({ ips, username: e.username, password: e.password, onProgress, shouldAbort: () => stopRequested });
@@ -111,12 +118,12 @@ export async function runIdracScanOnce(opts = {}) {
     if (!String(raw.password || '')) {
       return { ok: false, reason: '대상 항목의 iDRAC 비밀번호가 없습니다(스캔 대역 수정에서 입력하세요).' };
     }
-    entries = [{ id: raw.id, datacenterId: String(raw.datacenterId || '').trim(), service: raw.service || '', ranges: (raw.ranges || []).filter(Boolean), username: String(raw.username).trim(), password: raw.password || '', agent: String(raw.agent || '').trim(), mode: raw.mode || 'merge' }];
+    entries = [{ id: raw.id, datacenterId: String(raw.datacenterId || '').trim(), service: raw.service || '', ranges: (raw.ranges || []).filter(Boolean), username: String(raw.username).trim(), password: raw.password || '', agent: String(raw.agent || '').trim(), dispatch: raw.dispatch === 'push' ? 'push' : 'poll', mode: raw.mode || 'merge' }];
   } else if (opts.datacenterId) {
     // 한 법인의 모든 서비스 엔트리(비밀번호/대역/계정 갖춘 것만).
     entries = scanRangesForDatacenter(opts.datacenterId)
       .filter((e) => (e.ranges || []).filter(Boolean).length && String(e.username || '').trim() && String(e.password || ''))
-      .map((e) => ({ id: e.id, datacenterId: String(e.datacenterId || '').trim(), service: e.service || '', ranges: (e.ranges || []).filter(Boolean), username: String(e.username).trim(), password: e.password || '', agent: String(e.agent || '').trim(), mode: e.mode || 'merge' }));
+      .map((e) => ({ id: e.id, datacenterId: String(e.datacenterId || '').trim(), service: e.service || '', ranges: (e.ranges || []).filter(Boolean), username: String(e.username).trim(), password: e.password || '', agent: String(e.agent || '').trim(), dispatch: e.dispatch === 'push' ? 'push' : 'poll', mode: e.mode || 'merge' }));
     if (!entries.length) return { ok: false, reason: '대상 법인에 스캔 가능한 대역/계정이 없습니다.' };
   }
   if (!entries.length) { lastRun = { at: Date.now(), skipped: '대상 없음' }; return { ok: false, reason: '스캔할 대역이 없습니다.' }; }

@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'idscan-'));
-const { enqueueIdracScan, takeIdracScanJobs, setIdracScanResult, setIdracScanProgress, getIdracScanResult, listIdracScanJobs, getIdracScanJobLog, recentPollingAgents, cancelIdracScanJob } = await import('../src/central/idracScanJobs.js');
+const { enqueueIdracScan, takeIdracScanJobs, setIdracScanResult, setIdracScanProgress, getIdracScanResult, listIdracScanJobs, getIdracScanJobLog, recentPollingAgents, cancelIdracScanJob, createPushScanJob } = await import('../src/central/idracScanJobs.js');
 
 test('위임 스캔: enqueue → take(에이전트 이름) → result → 폴링 라이프사이클', () => {
   const reqId = enqueueIdracScan('SEOUL', { ips: '10.0.0.1-10', username: 'root', password: 'pw' });
@@ -111,6 +111,26 @@ test('스캔 로그 진단: 폴링 기록 없는 pending은 error 힌트 + AGENT
   // OC2Sandbox 이름으로는 폴링이 없지만 EdgeSeoul은 폴링 중 → 불일치를 짚어줘야 한다.
   assert.ok(msgs.includes('edgeseoul'), '현재 폴링 중인 에이전트 이름을 안내');
   assert.ok(msgs.includes('AGENT_NAME'), 'AGENT_NAME 불일치 점검 안내');
+});
+
+test('중앙→엣지 PUSH 잡: 즉시 running·dispatch=push, 로그는 폴링 불필요 안내', () => {
+  const reqId = createPushScanJob('PushEdge1', { ips: '10.84.76.1-5', username: 'root', password: 'pw', datacenterId: 'oc2sandbox', edgeUrl: 'http://10.0.0.9:4000' });
+  assert.ok(reqId, 'reqId 발급');
+  const r = getIdracScanResult(reqId);
+  assert.equal(r.state, 'running', 'PUSH는 폴링 대기 없이 즉시 running');
+
+  // 폴링 큐에 들어가지 않으므로 takeIdracScanJobs로는 인출되지 않는다(다른 이름으로 인출 확인).
+  assert.equal(takeIdracScanJobs('PushEdge1').length, 0, 'PUSH 잡은 폴링 인출 대상 아님');
+
+  const log = getIdracScanJobLog(reqId);
+  const msgs = log.hints.map((h) => h.msg).join('\n');
+  assert.ok(msgs.includes('PUSH'), 'PUSH 실행 중 안내');
+  assert.ok(msgs.includes('폴링 설정은 필요 없') || msgs.includes('폴링'), '엣지 폴링 불필요 안내');
+  assert.ok(!msgs.includes('진행 보고가'), 'PUSH는 진행보고 없음 경고를 내지 않는다');
+
+  // 엣지 결과 반영 → done.
+  setIdracScanResult(reqId, { scanned: 5, found: [{ ip: '10.84.76.3', serviceTag: 'X1' }], registered: 1 });
+  assert.equal(getIdracScanResult(reqId).state, 'done');
 });
 
 test('스캔 로그 진단: 수집 서버로 등록·정상인데 폴링만 없으면 방향(PULL/폴링) 차이를 안내', () => {

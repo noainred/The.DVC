@@ -13,6 +13,7 @@ import { tokenMatches } from '../util/secureCompare.js';
 import { upgradeFromBundleBytes, restartProcess } from '../upgrade/upgrade.js';
 import { setLocalPassword } from '../auth/auth.js';
 import { logAudit } from '../audit.js';
+import { runLocalIdracScan } from '../idrac/localScan.js';
 
 export const collectorRouter = Router();
 
@@ -53,6 +54,30 @@ collectorRouter.post('/set-password', express.json({ limit: '4kb' }), (req, res)
   const r = setLocalPassword(username, req.body?.password);
   if (r.ok) logAudit({ user: 'central-portal', action: '엣지 비밀번호 원격 변경', target: username, ip: req.ip || '' });
   res.status(r.ok ? 200 : 400).json({ ...r, version: currentVersion() });
+});
+
+// 중앙→엣지 직접(PUSH) iDRAC 스캔 — 엣지가 중앙으로 폴링하지 않아도, 중앙이 이 엣지의
+// COLLECTOR_TOKEN으로 직접 스캔을 시키고 결과를 동기로 받는다(엣지 CENTRAL_URL 미설정에도 동작).
+// 엣지가 현지에서 Redfish 스캔 → (noRegister 아니면) 현지 등록 → 요약 반환.
+collectorRouter.post('/idrac-scan', express.json({ limit: '256kb' }), async (req, res) => {
+  if (!config.collector.token) return res.status(404).json({ ok: false, reason: 'collector 비활성화(COLLECTOR_TOKEN 미설정)' });
+  if (!checkToken(req)) return res.status(403).json({ ok: false, reason: '토큰 불일치' });
+  const b = req.body || {};
+  const ips = b.ips; const username = String(b.username || '').trim(); const password = b.password;
+  if (!ips || !username || (password == null || password === '')) {
+    return res.status(400).json({ ok: false, reason: 'ips/username/password가 필요합니다.' });
+  }
+  try {
+    const r = await runLocalIdracScan({
+      ips, username, password,
+      noRegister: !!b.noRegister, vcenterId: String(b.vcenterId || '').trim(),
+      datacenterId: String(b.datacenterId || '').trim(), mode: b.mode || 'merge',
+    });
+    logAudit({ user: 'central-portal', action: '중앙 PUSH iDRAC 스캔', target: String(b.datacenterId || '') || '(대역)', detail: `발견 ${r.foundCount || 0} · 등록 ${r.registered || 0}`, ip: req.ip || '' });
+    res.json({ ok: true, ...r });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: e.message });
+  }
 });
 
 // Receive an upgrade bundle pushed by the central portal and self-install.

@@ -208,8 +208,8 @@ export default function IdracAdmin() {
 
   // ── 법인(DataCenter)별 iDRAC 장비 스캔 ──────────────────────────
   const dcNameOf = (id) => (datacenters.find((d) => d.id === id)?.name || id || '');
-  const srOpenNew = () => { setSrMsg(null); setSrForm({ id: '', datacenterId: '', service: '', ranges: '', username: 'root', password: '', agent: '__local__', enabled: true, mode: 'merge', isNew: true }); };
-  const srEdit = (e) => { setSrMsg(null); setSrForm({ id: e.id || '', datacenterId: e.datacenterId, service: e.service || '', ranges: (e.ranges || []).join('\n'), username: e.username || 'root', password: '', agent: e.agent || '__local__', enabled: e.enabled !== false, mode: e.mode || 'merge', hasPassword: e.hasPassword, isNew: false }); };
+  const srOpenNew = () => { setSrMsg(null); setSrForm({ id: '', datacenterId: '', service: '', ranges: '', username: 'root', password: '', agent: '__local__', dispatch: 'poll', enabled: true, mode: 'merge', isNew: true }); };
+  const srEdit = (e) => { setSrMsg(null); setSrForm({ id: e.id || '', datacenterId: e.datacenterId, service: e.service || '', ranges: (e.ranges || []).join('\n'), username: e.username || 'root', password: '', agent: e.agent || '__local__', dispatch: e.dispatch === 'push' ? 'push' : 'poll', enabled: e.enabled !== false, mode: e.mode || 'merge', hasPassword: e.hasPassword, isNew: false }); };
   const srSave = async () => {
     const f = srForm; if (!f) return;
     // 폼 바로 옆에 보이는 인라인 검증(상단 배너만 뜨면 폼에서 안 보여 '저장 안 됨'처럼 느껴짐).
@@ -222,7 +222,7 @@ export default function IdracAdmin() {
     const noPw = !f.hasPassword && (f.password || '') === '';
     setBusy(true); setSrMsg(null);
     try {
-      const body = { id: f.id || undefined, datacenterId: f.datacenterId, service: f.service || '', ranges: f.ranges, username: f.username, agent: f.agent === '__local__' ? '' : f.agent, enabled: f.enabled, mode: f.mode };
+      const body = { id: f.id || undefined, datacenterId: f.datacenterId, service: f.service || '', ranges: f.ranges, username: f.username, agent: f.agent === '__local__' ? '' : f.agent, dispatch: f.agent !== '__local__' ? (f.dispatch === 'push' ? 'push' : 'poll') : 'poll', enabled: f.enabled, mode: f.mode };
       if ((f.password || '') !== '') body.password = f.password; // 빈 비번은 서버가 기존 유지, 그 외엔 원본 그대로 전송
       const r = await putJson('/admin/idrac/scan-ranges', body);
       if (r.ok) {
@@ -1151,6 +1151,8 @@ function IdracScanRanges({ data, vcenters, datacenters = [], agents, busy, form,
         해당 <b>법인 DB로 자동 등록</b>합니다(vCenter와 독립). 형식: CIDR(10.0.0.0/24)·범위(10.0.0.1-50)·단일 IP, 한 줄에 하나.
         등록 모드는 기본 <b>병합</b>(기존 유지+추가/갱신)이며, 스캔이 일시적으로 0건이면 기존 등록을 지우지 않습니다.
         중앙이 못 닿는 사설망은 <b>스캔 수행 Agent</b>를 지정해 현장 에이전트가 대행합니다.
+        <b> 스캔 방식</b>은 <b>에이전트 폴링</b>(엣지가 중앙으로 폴링해 잡 인출 — 엣지에 CENTRAL_URL/토큰 필요)과
+        <b> 중앙→엣지 직접(PUSH)</b>(중앙이 등록된 수집 서버 URL로 엣지에 직접 스캔 전송 — 엣지 폴링 설정 없이도 동작) 중 선택합니다.
         {datacenters.length === 0 && <span style={{ color: 'var(--amber)' }}> · ⚠ 먼저 <b>설정 › DataCenter(법인)</b>에서 법인을 1개 이상 정의하세요.</span>}
       </div>
 
@@ -1232,6 +1234,15 @@ function IdracScanRanges({ data, vcenters, datacenters = [], agents, busy, form,
                 })()}
               </select>
             </div>
+            {form.agent && form.agent !== '__local__' && (
+              <div style={{ flex: '1 1 200px' }}>
+                <label className="muted" style={{ fontSize: 11.5 }}>스캔 방식</label>
+                <select className="input" style={{ width: '100%', padding: '8px 10px' }} value={form.dispatch || 'poll'} onChange={(e) => setForm({ ...form, dispatch: e.target.value })}>
+                  <option value="poll">에이전트 폴링(기본) — 엣지가 중앙으로 폴링</option>
+                  <option value="push">중앙→엣지 직접(PUSH) — 엣지 폴링 불필요</option>
+                </select>
+              </div>
+            )}
             <div style={{ flex: '1 1 140px' }}>
               <label className="muted" style={{ fontSize: 11.5 }}>등록 모드</label>
               <select className="input" style={{ width: '100%', padding: '8px 10px' }} value={form.mode} onChange={(e) => setForm({ ...form, mode: e.target.value })}>
@@ -1265,7 +1276,12 @@ function IdracScanRanges({ data, vcenters, datacenters = [], agents, busy, form,
                 <td>{e.service ? <span className="muted">{e.service}</span> : <span className="muted" style={{ opacity: 0.5 }}>—</span>}</td>
                 <td className="muted" title={(e.ranges || []).join('\n')}>{(e.ranges || []).length}개</td>
                 <td className="muted">{e.username || '—'}{e.hasPassword ? '' : <span style={{ color: 'var(--amber)' }} title="비밀번호 미설정 — 스캔 불가"> ⚠</span>}</td>
-                <td>{e.agent ? <span className="badge" style={{ background: 'rgba(167,139,250,.2)', color: '#a78bfa' }}>{e.agent}</span> : <span className="muted">직접</span>}</td>
+                <td>{e.agent ? <>
+                  <span className="badge" style={{ background: 'rgba(167,139,250,.2)', color: '#a78bfa' }}>{e.agent}</span>
+                  {e.dispatch === 'push'
+                    ? <span className="badge" style={{ marginLeft: 4, background: 'rgba(34,197,94,.18)', color: '#4ade80' }} title="중앙이 엣지로 직접 스캔 전송(엣지 폴링 불필요)">PUSH</span>
+                    : <span className="badge" style={{ marginLeft: 4, background: 'rgba(96,165,250,.15)', color: '#93c5fd' }} title="엣지가 중앙으로 폴링해 잡 인출">폴링</span>}
+                </> : <span className="muted">직접</span>}</td>
                 <td>{e.enabled ? <span className="badge green">포함</span> : <span className="badge gray">제외</span>}</td>
                 <td style={{ fontSize: 12 }}>{fmtRun(e.lastRun)}</td>
                 <td className="right">

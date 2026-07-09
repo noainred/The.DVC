@@ -1,6 +1,16 @@
 {
   "notes": [
     {
+      "version": "2.140.0",
+      "date": "2026-07-08",
+      "title": "iDRAC 위임 스캔 — '중앙→엣지 직접(PUSH)' 방식 추가 + 스캔 방식 선택",
+      "notes": [
+        "엣지가 중앙으로 폴링하지 않아도 스캔이 되도록 '중앙→엣지 직접(PUSH)' 방식을 추가했습니다. 중앙이 등록된 수집 서버(원격) URL로 엣지에 직접 스캔을 전송하고(엣지의 COLLECTOR_TOKEN 인증), 엣지가 현지에서 iDRAC을 스캔·등록한 뒤 결과를 동기로 회신합니다. 엣지에 CENTRAL_URL/CENTRAL_TOKEN이 없어도(수집 서버로만 등록돼 있어도) 동작하므로 OS2SDBX처럼 '대기'에서 멈추던 문제를 폴링 설정 없이 해결할 수 있습니다.",
+        "iDRAC 스캔 대역 추가/수정 폼에 '스캔 방식' 선택을 추가했습니다 — '에이전트 폴링(기본)' 또는 '중앙→엣지 직접(PUSH)'. 목록에는 각 대역의 방식(PUSH/폴링) 배지를 표시합니다. 수동 스캔 API(POST /admin/idrac/scan)와 주기 스캐너 모두 방식을 반영합니다.",
+        "신규: 엣지 수신 엔드포인트 POST /api/collector/idrac-scan(COLLECTOR_TOKEN 가드), 중앙 디스패처 central/idracScanPush.js(pushIdracScan/findCollectorForAgent), createPushScanJob(폴링 큐 미적재·즉시 running). 스캔+현지등록 코어를 idrac/localScan.js로 공유(폴링 워커와 PUSH 엔드포인트 동일 동작). scanRanges에 dispatch 필드(기본 poll, 구버전 자동 poll) + 회귀 테스트 3종 추가(330건 통과)."
+      ]
+    },
+    {
       "version": "2.139.0",
       "date": "2026-07-08",
       "title": "위임 스캔 진단 — '수집 서버로는 정상인데 스캔 폴링만 없음'(방향 차이)을 정확히 안내",

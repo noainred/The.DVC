@@ -111,6 +111,32 @@ export function enqueueIdracScan(agent, { ips, username, password, vcenterId = '
   return reqId;
 }
 
+/**
+ * 중앙→엣지 직접(PUSH) 스캔 잡 생성 — 엣지가 중앙으로 폴링하지 않아도, 중앙이 수집 서버(원격)
+ * URL로 엣지에 직접 스캔을 시켜 결과를 받는다. 폴링 대기 없이 즉시 'running'으로 시작하며,
+ * 실제 전송/결과 반영은 호출측(idracScanPush)이 setIdracScanResult로 처리한다.
+ * 폴링 큐(byAgent)에는 넣지 않는다 — 에이전트 인출 대상이 아님.
+ * @returns reqId 또는 null(대기 한도 초과)
+ */
+export function createPushScanJob(agent, { ips, username, password, vcenterId = '', datacenterId = '', noRegister = false, mode = 'merge', edgeUrl = '' }) {
+  gc();
+  // 인메모리 잡 총량 상한(폴링 큐와 별개) — 남용/누수 방지.
+  if (jobs.size >= MAX_PENDING * 20) return null;
+  const reqId = newReqId();
+  let total = 0;
+  try { total = Math.min(expandIpList(ips).ips.length, 2048); } catch { total = 0; }
+  const now = Date.now();
+  const j = {
+    reqId, agent, action: 'scan', dispatch: 'push', edgeUrl,
+    ips, username, password, vcenterId, datacenterId, noRegister: !!noRegister, mode: mode || 'merge',
+    state: 'running', createdAt: now, takenAt: now, progress: { scanned: 0, total, at: now },
+  };
+  addEvent(j, `중앙→엣지 직접 전송(PUSH) 스캔 시작 — 에이전트 '${agent}'${datacenterId ? ` · 법인 ${datacenterId}` : ''} · 대상 IP ${total}개 · 엣지 ${edgeUrl || '(URL 미상)'}. 엣지 폴링 없이 중앙이 직접 실행합니다.`);
+  addEvent(j, `사용 자격증명: ${credFingerprint(username, password)} (평문 미기록 — 정상 법인과 계정/길이/지문 비교하세요)`);
+  jobs.set(reqId, j);
+  return reqId;
+}
+
 /** UI가 위임 '등록' 요청(스캔에서 확인한 found 목록을 에이전트 현지에 등록) → reqId 반환. */
 export function enqueueIdracRegister(agent, { found, username, password, vcenterId = '', datacenterId = '', mode = 'merge' }) {
   gc();
@@ -298,9 +324,14 @@ export function getIdracScanJobLog(reqId, opts = {}) {
     else hints.push({ level: 'info', msg: '에이전트는 정상 폴링 중이며 곧 잡을 인출합니다.' });
   }
   if (j.state === 'running') {
-    const progAt = j.progress?.at || j.takenAt || j.createdAt;
-    if (now - progAt > 60_000) hints.push({ level: 'warn', msg: `진행 보고가 ${Math.round((now - progAt) / 1000)}초째 없습니다 — 엣지에서 스캔이 멈췄거나(재시작 등) 결과 회신이 유실됐을 수 있습니다. 엣지 포탈 로그(journalctl)에서 [idrac-scan-agent]를 확인하세요.` });
-    if (lastPoll && now - lastPoll > 60_000) hints.push({ level: 'warn', msg: `에이전트의 중앙 폴링도 ${Math.round((now - lastPoll) / 1000)}초째 끊겼습니다 — 엣지 프로세스 중단/네트워크 단절 가능성이 큽니다.` });
+    if (j.dispatch === 'push') {
+      // PUSH는 중앙이 엣지에 동기 요청 → 결과 반영까지 진행 보고가 없다(정상). 장시간이면 대역이 큰 것.
+      hints.push({ level: 'info', msg: `중앙→엣지 직접 전송(PUSH)으로 실행 중입니다 — 엣지가 대역을 스캔하고 결과를 회신할 때까지 대기합니다(대역이 크면 수십 초~수 분). 엣지 폴링 설정은 필요 없습니다.` });
+    } else {
+      const progAt = j.progress?.at || j.takenAt || j.createdAt;
+      if (now - progAt > 60_000) hints.push({ level: 'warn', msg: `진행 보고가 ${Math.round((now - progAt) / 1000)}초째 없습니다 — 엣지에서 스캔이 멈췄거나(재시작 등) 결과 회신이 유실됐을 수 있습니다. 엣지 포탈 로그(journalctl)에서 [idrac-scan-agent]를 확인하세요.` });
+      if (lastPoll && now - lastPoll > 60_000) hints.push({ level: 'warn', msg: `에이전트의 중앙 폴링도 ${Math.round((now - lastPoll) / 1000)}초째 끊겼습니다 — 엣지 프로세스 중단/네트워크 단절 가능성이 큽니다.` });
+    }
   }
   return {
     ok: true,

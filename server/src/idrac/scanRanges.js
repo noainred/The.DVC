@@ -88,6 +88,7 @@ function redact(id, e) {
     ranges: rest.ranges || [],
     username: rest.username || '',
     agent: rest.agent || '',
+    dispatch: rest.dispatch === 'push' ? 'push' : 'poll', // 위임 전달 방식: poll(에이전트 폴링) | push(중앙→엣지 직접)
     enabled: rest.enabled !== false,
     mode: rest.mode || 'merge',
     updatedAt: rest.updatedAt || null,
@@ -122,6 +123,7 @@ export function enabledScanRanges() {
       username: String(e.username || '').trim(),
       password: e.password || '',
       agent: String(e.agent || '').trim(),
+      dispatch: e.dispatch === 'push' ? 'push' : 'poll',
       mode: e.mode || 'merge',
     });
   }
@@ -155,7 +157,7 @@ export function saveScanRanges(body = {}) {
   if (service.length > 128 || [...service].some((c) => c.charCodeAt(0) < 32)) return { ok: false, reason: '서비스명에 사용할 수 없는 문자가 있습니다.' };
   const data = read();
   const id = String(body.id || '').trim() && data.entries[String(body.id).trim()] ? String(body.id).trim() : crypto.randomUUID();
-  const cur = data.entries[id] || { datacenterId: dcId, service: '', ranges: [], username: '', password: '', agent: '', enabled: true, mode: 'merge' };
+  const cur = data.entries[id] || { datacenterId: dcId, service: '', ranges: [], username: '', password: '', agent: '', dispatch: 'poll', enabled: true, mode: 'merge' };
   const next = {
     datacenterId: dcId,
     service: body.service !== undefined ? service : (cur.service || ''),
@@ -164,6 +166,7 @@ export function saveScanRanges(body = {}) {
     // 빈 비밀번호는 기존 유지(편집 시 비번 재입력 강요하지 않음).
     password: (body.password != null && body.password !== '') ? String(body.password) : (cur.password || ''),
     agent: body.agent !== undefined ? String(body.agent || '').trim() : (cur.agent || ''),
+    dispatch: body.dispatch !== undefined ? (body.dispatch === 'push' ? 'push' : 'poll') : (cur.dispatch === 'push' ? 'push' : 'poll'),
     enabled: body.enabled !== undefined ? body.enabled !== false : (cur.enabled !== false),
     mode: body.mode !== undefined ? (['merge', 'replace-datacenter'].includes(body.mode) ? body.mode : 'merge') : (cur.mode || 'merge'),
     updatedAt: Date.now(),

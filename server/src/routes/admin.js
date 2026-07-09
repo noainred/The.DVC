@@ -84,6 +84,7 @@ import {
 import { expandIpList } from '../idrac/iprange.js';
 import { scanForIdracs } from '../idrac/scan.js';
 import { enqueueIdracScan, enqueueIdracRegister, getIdracScanResult, listIdracScanJobs, getIdracScanJobLog, cancelIdracScanJob, recentPollingAgents } from '../central/idracScanJobs.js';
+import { pushIdracScan } from '../central/idracScanPush.js';
 import { getPollerStatus, pollNow } from '../idrac/poller.js';
 import { listScanRanges, saveScanRanges, removeScanRanges } from '../idrac/scanRanges.js';
 import { startIdracScanNow, idracScanStatus, stopIdracScanNow, setIdracScanIntervalMs } from '../idrac/scanPoller.js';
@@ -1328,11 +1329,18 @@ adminRouter.post('/idrac/scan', adminOnly, async (req, res) => {
 
   // 에이전트 위임 스캔(원격 사이트 iDRAC에 중앙이 직접 못 닿는 경우).
   if (agent && agent !== '__local__') {
-    if (!config.central.token) return res.status(400).json({ ok: false, reason: '중앙(CENTRAL_TOKEN) 미설정 — 에이전트 위임 스캔을 사용할 수 없습니다.' });
+    const dispatch = String(req.body?.dispatch || 'poll') === 'push' ? 'push' : 'poll';
+    // dispatch=push: 중앙이 수집 서버 URL로 엣지에 직접 스캔 전송(엣지 폴링/중앙 토큰 불필요).
+    if (dispatch === 'push') {
+      const pr = pushIdracScan(agent, { ips, username, password, vcenterId: String(req.body?.vcenterId || '').trim(), datacenterId: String(req.body?.datacenterId || '').trim(), noRegister: true });
+      if (!pr.ok) return res.status(400).json({ ok: false, reason: pr.reason });
+      return res.json({ ok: true, delegated: true, dispatch: 'push', agent, reqId: pr.reqId });
+    }
+    if (!config.central.token) return res.status(400).json({ ok: false, reason: '중앙(CENTRAL_TOKEN) 미설정 — 에이전트 폴링 위임 스캔을 사용할 수 없습니다(중앙→엣지 직접 PUSH 방식은 토큰 없이도 가능).' });
     // noRegister: 스캔만 하고 등록은 UI 확인 후 별도 '등록' 잡으로(자동등록 안 함).
     const reqId = enqueueIdracScan(agent, { ips, username, password, vcenterId: String(req.body?.vcenterId || '').trim(), datacenterId: String(req.body?.datacenterId || '').trim(), noRegister: true });
     if (!reqId) return res.status(429).json({ ok: false, reason: '대기 중인 스캔 잡이 너무 많습니다. 잠시 후 다시 시도하세요.' });
-    return res.json({ ok: true, delegated: true, agent, reqId });
+    return res.json({ ok: true, delegated: true, dispatch: 'poll', agent, reqId });
   }
 
   try {
