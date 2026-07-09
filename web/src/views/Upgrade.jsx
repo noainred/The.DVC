@@ -79,6 +79,42 @@ export default function Upgrade() {
     <>
       <div className="section-title">시스템 자동 업그레이드 (관리자)</div>
 
+      {/* 현재 상태 + 최근 확인 결과 — 화면 최상단(설정 위)에 먼저 보여준다. */}
+      <div className="grid cols-2" style={{ marginBottom: 16 }}>
+        <div className="card">
+          <b>현재 상태</b>
+          <div style={{ marginTop: 10 }}>
+            <Row label="활성화"><StateBadge state={status.enabled ? 'CONNECTED' : 'POWERED_OFF'} /></Row>
+            <Row label="현재 버전"><b className="tabular">v{status.version}</b></Row>
+            <Row label="설치 경로">{status.installDir || <span className="muted">미설정</span>}</Row>
+            <Row label="감시 대상(versions.json)">
+              {status.remoteVersionsUrl
+                ? <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 11, wordBreak: 'break-all' }}>{status.remoteVersionsUrl}</span>
+                : <span className="muted">미설정</span>}
+            </Row>
+            <Row label="감시 폴더">{status.watchDir || <span className="muted">미설정</span>}</Row>
+            <Row label="자동 적용">{status.autoApply ? '예' : '아니오'}{status.pollIntervalMs ? ` · ${Math.round(status.pollIntervalMs / 60000)}분 주기` : ''}</Row>
+          </div>
+        </div>
+
+        <div className="card">
+          <b>최근 확인 결과</b>
+          {!check && <div className="muted" style={{ padding: 12 }}>아직 확인하지 않았습니다.</div>}
+          {check && (
+            <div style={{ marginTop: 10 }}>
+              <Row label="확인 시각">{new Date(check.at).toLocaleString('ko-KR')}</Row>
+              {check.watch && <Row label="감시 폴더">{check.watch.available
+                ? <b style={{ color: 'var(--green)' }}>새 버전 v{check.watch.version}</b>
+                : <span className="muted">최신</span>}</Row>}
+              {check.remote && <Row label="원격(GitHub)">{check.remote.available
+                ? <b style={{ color: 'var(--green)' }}>새 버전 v{check.remote.latest}</b>
+                : <span className="muted">{check.remote.error ? `오류: ${check.remote.error}` : `최신 (v${check.remote.latest || '?'})`}</span>}</Row>}
+              <Row label="업그레이드 가능">{newer ? <span className="badge green">예</span> : <span className="badge gray">아니오</span>}</Row>
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* Editable settings */}
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="flex between" style={{ marginBottom: 12 }}>
@@ -153,41 +189,6 @@ export default function Upgrade() {
               : (msg.r.reason || '실패')}
           </div>
         )}
-      </div>
-
-      <div className="grid cols-2">
-        <div className="card">
-          <b>현재 상태</b>
-          <div style={{ marginTop: 10 }}>
-            <Row label="활성화"><StateBadge state={status.enabled ? 'CONNECTED' : 'POWERED_OFF'} /></Row>
-            <Row label="현재 버전"><b className="tabular">v{status.version}</b></Row>
-            <Row label="설치 경로">{status.installDir || <span className="muted">미설정</span>}</Row>
-            <Row label="감시 대상(versions.json)">
-              {status.remoteVersionsUrl
-                ? <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 11, wordBreak: 'break-all' }}>{status.remoteVersionsUrl}</span>
-                : <span className="muted">미설정</span>}
-            </Row>
-            <Row label="감시 폴더">{status.watchDir || <span className="muted">미설정</span>}</Row>
-            <Row label="자동 적용">{status.autoApply ? '예' : '아니오'}{status.pollIntervalMs ? ` · ${Math.round(status.pollIntervalMs / 60000)}분 주기` : ''}</Row>
-          </div>
-        </div>
-
-        <div className="card">
-          <b>최근 확인 결과</b>
-          {!check && <div className="muted" style={{ padding: 12 }}>아직 확인하지 않았습니다.</div>}
-          {check && (
-            <div style={{ marginTop: 10 }}>
-              <Row label="확인 시각">{new Date(check.at).toLocaleString('ko-KR')}</Row>
-              {check.watch && <Row label="감시 폴더">{check.watch.available
-                ? <b style={{ color: 'var(--green)' }}>새 버전 v{check.watch.version}</b>
-                : <span className="muted">최신</span>}</Row>}
-              {check.remote && <Row label="원격(GitHub)">{check.remote.available
-                ? <b style={{ color: 'var(--green)' }}>새 버전 v{check.remote.latest}</b>
-                : <span className="muted">{check.remote.error ? `오류: ${check.remote.error}` : `최신 (v${check.remote.latest || '?'})`}</span>}</Row>}
-              <Row label="업그레이드 가능">{newer ? <span className="badge green">예</span> : <span className="badge gray">아니오</span>}</Row>
-            </div>
-          )}
-        </div>
       </div>
 
       {result && (
