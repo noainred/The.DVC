@@ -74,6 +74,19 @@ test('enabledScanRanges: enabled + 대역 + 계정 + 비번 있는 것만', () =
   assert.equal(sr.removeScanRanges(wa.id).ok, false); // 이미 없음
 });
 
+test('dispatch(전달 방식) 저장/기본값 — poll 기본, push 저장·유지', () => {
+  const a = sr.saveScanRanges({ datacenterId: 'DCP', service: 'poll기본', ranges: '10.7.0.0/24', username: 'root', password: 'pw', agent: 'agentP' });
+  assert.equal(a.dispatch, 'poll', '미지정 시 기본 poll');
+  const b = sr.saveScanRanges({ datacenterId: 'DCP', service: 'push서비스', ranges: '10.7.1.0/24', username: 'root', password: 'pw', agent: 'agentQ', dispatch: 'push' });
+  assert.equal(b.dispatch, 'push', 'push 저장');
+  // 다른 필드만 수정해도 dispatch 유지.
+  const b2 = sr.saveScanRanges({ id: b.id, datacenterId: 'DCP', enabled: false });
+  assert.equal(b2.dispatch, 'push', '부분 수정 시 dispatch 유지');
+  // 폴러용 원본에도 dispatch 포함.
+  const en = sr.enabledScanRanges().find((e) => e.id === a.id);
+  assert.equal(en.dispatch, 'poll');
+});
+
 test('runIdracScanOnce: 대상 없으면 사유 반환 / 단건(id) 대역·계정 없으면 거부', async () => {
   const nr = sr.saveScanRanges({ datacenterId: 'NORANGE2', ranges: '', username: 'root' });
   const r1 = await poller.runIdracScanOnce({ id: nr.id });

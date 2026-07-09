@@ -9,7 +9,7 @@
 
 import { config } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
-import { scanForIdracs } from '../idrac/scan.js';
+import { runLocalIdracScan } from '../idrac/localScan.js';
 import { registerScanned } from '../idrac/registry.js';
 import { pollNow } from '../idrac/poller.js';
 
@@ -75,16 +75,11 @@ async function runIdracScanWorkerInner() {
           lastSent = now;
           postProgress(job.reqId, scanned, total, found);
         };
-        const scan = await scanForIdracs({ ips: job.ips, username: job.username, password: job.password, onProgress });
-        // noRegister면 스캔만(UI에서 확인 후 별도 '등록' 잡으로 등록). 그 외엔 기존처럼 자동등록.
-        let registered = 0;
-        if (!job.noRegister && config.agent.autoRegister && scan.found.length) {
-          const rr = registerScanned(scan.found, job.username, job.password, 'merge', job.vcenterId || '', job.datacenterId || '');
-          if (rr.ok) { registered = (rr.added || 0) + (rr.updated || 0); pollNow().catch(() => {}); }
-        }
-        await postResult({ reqId: job.reqId, agent: config.agent.name, ...scan, registered, durationMs: Date.now() - started });
-        last = { at: Date.now(), reqId: job.reqId, foundCount: scan.foundCount, registered };
-        console.log(`[idrac-scan-agent] ${config.agent.name}: ${scan.foundCount}/${scan.scanned} iDRAC, ${registered} 현지 등록${job.noRegister ? ' (등록 보류)' : ''}`);
+        // 스캔+현지등록 코어는 PUSH 엔드포인트와 공유(runLocalIdracScan). durationMs는 헬퍼가 계산.
+        const scan = await runLocalIdracScan({ ips: job.ips, username: job.username, password: job.password, noRegister: job.noRegister, vcenterId: job.vcenterId || '', datacenterId: job.datacenterId || '', mode: job.mode || 'merge', onProgress });
+        await postResult({ reqId: job.reqId, agent: config.agent.name, ...scan });
+        last = { at: Date.now(), reqId: job.reqId, foundCount: scan.foundCount, registered: scan.registered };
+        console.log(`[idrac-scan-agent] ${config.agent.name}: ${scan.foundCount}/${scan.scanned} iDRAC, ${scan.registered} 현지 등록${job.noRegister ? ' (등록 보류)' : ''}`);
       } catch (e) {
         await postResult({ reqId: job.reqId, agent: config.agent.name, error: e.message });
         last = { at: Date.now(), reqId: job.reqId, error: e.message };
