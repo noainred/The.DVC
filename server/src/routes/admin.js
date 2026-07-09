@@ -1528,13 +1528,15 @@ function ensureCollectorDatacenter(c) {
 }
 
 adminRouter.post('/collectors', adminOnly, (req, res) => {
-  const result = addCollector(req.body || {});
+  // 관리자 UI 등록 = 수동 고정(managed) — 엣지 자기등록이 URL/토큰을 덮어쓰지 못하게.
+  const result = addCollector(req.body || {}, { managed: true });
   if (result.ok) { ensureCollectorDatacenter(result.collector); pullNow().catch(() => {}); logAudit({ user: req.user?.username, action: '수집 서버 등록', target: result.collector?.id || '', detail: `url=${result.collector?.url || ''} vcenterId=${result.collector?.vcenterId || ''}`, ip: req.ip || '' }); }
   res.status(result.ok ? 201 : 400).json(result);
 });
 
 adminRouter.put('/collectors/:id', adminOnly, (req, res) => {
-  const result = updateCollector(req.params.id, req.body || {});
+  // 관리자 UI 수정 = 수동 고정(managed) — 저장한 URL/토큰이 자기등록으로 원복되던 버그 방지.
+  const result = updateCollector(req.params.id, req.body || {}, { managed: true });
   if (result.ok) {
     ensureCollectorDatacenter(result.collector);
     // 비활성화 시 그 수집기의 원격 데이터도 즉시 걷어낸다 — 풀러는 disabled를 건너뛰므로

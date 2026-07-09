@@ -271,7 +271,9 @@ export default function Collectors() {
                   <td><b>{c.id}</b></td>
                   <td>{c.name}</td>
                   <td>{c.datacenter ? <span className="badge blue">{c.datacenter}</span> : <span className="muted">—</span>}</td>
-                  <td className="muted">{c.url}</td>
+                  <td className="muted">{c.url}
+                    {c.managed && <span className="badge gray" style={{ marginLeft: 6 }} title="관리자가 수동 수정한 항목 — 엣지 자기등록이 URL/토큰을 덮어쓰지 않습니다">🔒 고정</span>}
+                  </td>
                   <td>{!s ? <span className="badge gray">대기</span>
                     : (s.ok && s.degraded) ? <span className="badge amber" title={`일시적 연결 오류: ${s.error || ''} — 직전 데이터·온라인 유지 중(연속 실패 ${s.fails || 1}회). 한 번 더 실패하면 '오류'로 내려갑니다.`}>저하</span>
                       : s.ok ? <span className="badge green">정상</span>
@@ -327,6 +329,10 @@ export default function Collectors() {
                   <button type="button" className="logout-btn" style={{ flex: 'none', padding: '0 12px', whiteSpace: 'nowrap' }} onClick={genToken} title="안전한 랜덤 토큰을 자동 생성해 채웁니다">🎲 자동 생성</button>
                 </div>
               </label>
+            </div>
+
+            <div className="muted" style={{ marginTop: 8, fontSize: 12, color: '#94a3b8' }}>
+              🔒 저장하면 이 항목은 <b>관리자 고정</b>이 되어, 엣지 자기등록이 URL/토큰을 덮어쓰지 않습니다(저장 값이 원복되지 않음).
             </div>
 
             {msg && (
