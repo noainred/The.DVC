@@ -61,7 +61,7 @@ sudo ./install.sh --port 4000
 
 - 서비스: `vmware-portal` (systemd, 부팅 시 자동 시작)
 - URL: `http://<서버 IP>:4000`
-- 기본 로그인: **admin / admin123** (운영 시 반드시 변경)
+- 최초 로그인: **admin** + 비번은 `DEFAULT_ADMIN_PASSWORD`(설정 시) 또는 최초 기동에 임의 생성되어 `sudo cat /etc/vmware-portal/initial-admin-password.txt` (로그인 후 즉시 변경·파일 삭제)
 
 ## 설치 후 설정
 
