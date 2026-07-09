@@ -46,6 +46,14 @@ const redact = (t) => {
 
 export function listTargets() { return load().map(redact); }
 export function getTargetRaw(id) { return load().find((t) => t.id === id) || null; }
+// 같은 호스트(+SSH포트/계정)로 저장된 대상 — 배포 시 중복 생성 없이 기존 대상을 upsert 하기 위함.
+export function findTargetByHost(host, port, username) {
+  const h = String(host || '').trim();
+  if (!h) return null;
+  return load().find((t) => String(t.host || '').trim() === h
+    && String(t.port || 22) === String(port || 22)
+    && String(t.username || '') === String(username || '')) || null;
+}
 
 export function saveTarget(body = {}) {
   if (!body.host) return { ok: false, reason: 'host는 필수입니다.' };

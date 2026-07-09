@@ -17,7 +17,7 @@ import { installOllama } from '../llm/ollamaDeploy.js';
 import { deployAgent, testTarget, installerInfo, checkAgentStatus } from '../agent/deploy.js';
 import { fetchRemoteVersions, listLocalPackages, downloadPackage } from '../upgrade/fetchPackage.js';
 import { getPackageSettings, savePackageSettings } from '../upgrade/packageSettings.js';
-import { listTargets, getTargetRaw, saveTarget, removeTarget, recordResult } from '../agent/deployRegistry.js';
+import { listTargets, getTargetRaw, saveTarget, removeTarget, recordResult, findTargetByHost } from '../agent/deployRegistry.js';
 import { getLogs } from '../logbuffer.js';
 import {
   listRegistry, addVcenter, updateVcenter, removeVcenter, testConnection, importVcenters,
@@ -343,6 +343,16 @@ adminRouter.post('/agent-deploy', adminOnly, async (req, res) => {
   const { installerPath, portalPort, ...target } = req.body || {};
   const r = await deployAgent(target, { installerPath, port: Number(portalPort) || 4000 });
   if (r.ok) r.collector = autoRegisterCollector(target, portalPort); // 설치 성공 시 중앙에 수집 서버로 자동 등록
+  // 배포에 사용한 설정(gpuGuest·에이전트 설정 포함)을 '저장된 대상'에 반영해 '편집' 시 그대로 보이게 한다.
+  // id가 없으면 같은 호스트의 기존 대상을 찾아 갱신(중복 생성 방지). '배포+설치'만 눌러도 설정이 유실되지 않음.
+  try {
+    const b = req.body || {};
+    if (b.host) {
+      const id = b.id || findTargetByHost(b.host, b.port, b.username)?.id;
+      saveTarget({ ...b, id });
+      r.targetSaved = true;
+    }
+  } catch { /* 저장 실패는 배포 결과에 영향 주지 않음 */ }
   res.status(r.ok ? 200 : 400).json(r);
 });
 
