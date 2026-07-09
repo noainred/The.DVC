@@ -15,6 +15,7 @@ import { resilientFetch } from '../util/resilientFetch.js';
 
 let timer = null;
 const fails = new Map(); // collectorId -> 연속 실패 사이클 수(상태 깜빡임 방지용)
+const inflight = new Set(); // 즉시 당김 진행 중인 collectorId — 주기 폴/중복 즉시당김과 겹침 방지
 
 async function pullOne(c) {
   // 고RTT·일시적 네트워크 오류는 재시도로 흡수(단발 실패로 '연결 안 됨' 되는 문제 해결).
@@ -68,8 +69,35 @@ export async function pullNow() {
   try { await pullNowInner(); } finally { pulling = false; }
 }
 
+/**
+ * 특정 에이전트(수집 서버)만 즉시 1회 당긴다 — 위임/PUSH 스캔이 엣지에 서버를 현지 등록한
+ * 직후 호출하면, 다음 주기(기본 60초)를 기다리지 않고 바로 중앙 인벤토리·전력에 반영된다.
+ * 주기 폴(pullNow)·다른 즉시 당김과 겹치면 건너뛴다(그쪽이 곧 반영하므로 무해).
+ * @returns {Promise<boolean>} 실제로 당겼으면 true.
+ */
+export async function pullCollectorByAgent(agentName) {
+  const key = String(agentName || '').trim().toLowerCase();
+  if (!key) return false;
+  const c = loadCollectors().find((x) => x.enabled !== false && x.url
+    && (String(x.id || '').toLowerCase() === key || String(x.name || '').toLowerCase() === key));
+  if (!c) return false;
+  if (pulling || inflight.has(c.id)) return false; // 주기 폴/중복과 겹치지 않게
+  inflight.add(c.id);
+  try {
+    const r = await pullOne(c);
+    fails.set(c.id, 0);
+    setCollectorStatus(c.id, { ok: true, hosts: r.hosts, version: r.version, datacenter: r.datacenter, error: null });
+    return true;
+  } catch (err) {
+    // 실패해도 다음 주기 폴러가 재시도 — 여기선 조용히 로그만(즉시 반영은 best-effort).
+    console.warn(`[collector] '${key}' 즉시 당김 실패: ${describeError(err).message}`);
+    return false;
+  } finally { inflight.delete(c.id); }
+}
+
 async function pullNowInner() {
-  const collectors = loadCollectors().filter((c) => c.enabled !== false && c.url);
+  // 즉시 당김이 진행 중인 수집기는 이번 주기에서 건너뛴다(같은 수집기 pullOne 교차 실행 방지).
+  const collectors = loadCollectors().filter((c) => c.enabled !== false && c.url && !inflight.has(c.id));
   await Promise.all(collectors.map(async (c) => {
     try {
       const r = await pullOne(c);

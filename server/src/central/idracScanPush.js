@@ -10,6 +10,7 @@
 
 import { resilientFetch } from '../util/resilientFetch.js';
 import { loadCollectors } from '../collector/registry.js';
+import { pullCollectorByAgent } from '../collector/puller.js';
 import { createPushScanJob, setIdracScanResult } from './idracScanJobs.js';
 
 /**
@@ -57,6 +58,12 @@ export function pushIdracScan(agent, { ips, username, password, vcenterId = '', 
       const data = await r.json().catch(() => ({}));
       if (!data || data.ok === false) { setIdracScanResult(reqId, { error: data?.reason || '엣지 스캔 실패(형식 오류)' }); return; }
       setIdracScanResult(reqId, data); // { scanned, found, foundCount, registered, ... }
+      // 엣지가 현지 등록한 서버를 다음 주기(기본 60초)까지 기다리지 않고 즉시 중앙 인벤토리에 반영.
+      // 전력값은 엣지 로컬 폴러가 수집한 뒤라야 나오므로 30초 후 한 번 더 당겨 전력까지 앞당긴다.
+      if ((data.registered || 0) > 0) {
+        pullCollectorByAgent(agent).catch(() => {});
+        setTimeout(() => pullCollectorByAgent(agent).catch(() => {}), 30_000).unref?.();
+      }
     } catch (e) {
       setIdracScanResult(reqId, { error: `엣지 접속 실패: ${e.message} — 중앙에서 ${col.url} 에 접근 가능한지(방화벽/네트워크) 확인하세요.` });
     }
