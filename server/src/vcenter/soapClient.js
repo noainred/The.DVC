@@ -12,6 +12,11 @@
 import tls from 'node:tls';
 import { config } from '../config.js';
 import { loadMetricsSettings } from '../metrics/settings.js';
+import { parseObjectContent, xmlUnescape } from './soapParse.js';
+import { parseObjectContentAsync } from '../util/soapParsePool.js';
+
+// soapParse.js로 분리된 순수 파서를 재-export(기존 import 경로 호환: 테스트가 여기서 가져옴).
+export { parseObjectContent, xmlUnescape };
 
 // 호스트 GPU 사용률 캐시(주기 throttle용). key=`${vcId}:${ref}` → { pct, at }.
 const _gpuUtilCache = new Map();
@@ -178,7 +183,8 @@ export class VimSoapClient {
       `<selectSet xsi:type="TraversalSpec"><name>view</name><type>ContainerView</type><path>view</path><skip>false</skip></selectSet>` +
       `</objectSet></specSet></RetrieveProperties>`;
     const xml = await this.#call(body);
-    return parseObjectContent(xml);
+    // 전체 인벤토리 응답(수 MB)의 CPU 바운드 파싱은 워커로 오프로딩(대형만, 실패 시 인라인 폴백).
+    return parseObjectContentAsync(xml);
   }
 
   /** RetrieveProperties for a single managed object (no traversal). */
@@ -822,37 +828,7 @@ export function parseEventsXml(xml) {
 
 // XML 엔티티 복원 — '&' 포함 VM/호스트/폴더 이름·주석이 '&amp;' 그대로 스냅샷에 실리면
 // 화면 표기가 깨지고, 사용자 입력 원본 이름과의 매칭(placement 이름→MoRef, 검색)이 실패한다.
-const XML_ENT_RE = /&(amp|lt|gt|quot|apos|#(\d+)|#x([0-9a-fA-F]+));/g;
-const XML_ENT_MAP = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
-export function xmlUnescape(s) {
-  if (!s || s.indexOf('&') === -1) return s;
-  return s.replace(XML_ENT_RE, (whole, name, dec, hex) => {
-    if (dec) return String.fromCodePoint(Number(dec));
-    if (hex) return String.fromCodePoint(parseInt(hex, 16));
-    return XML_ENT_MAP[name] ?? whole;
-  });
-}
-
-/** Parse RetrieveProperties response into [{type, ref, props:{path:value}}]. */
-export function parseObjectContent(xml) {
-  const out = [];
-  const objRe = /<returnval>([\s\S]*?)<\/returnval>/g;
-  let m;
-  while ((m = objRe.exec(xml))) {
-    const block = m[1];
-    const objM = /<obj type="([^"]+)">([^<]+)<\/obj>/.exec(block);
-    if (!objM) continue;
-    const props = {};
-    const psRe = /<propSet>\s*<name>([^<]+)<\/name>\s*<val[^>]*>([\s\S]*?)<\/val>\s*<\/propSet>/g;
-    let p;
-    while ((p = psRe.exec(block))) {
-      // 스칼라 텍스트 값만 엔티티 복원(중첩 XML은 이후 내부 파서가 다루므로 원형 유지).
-      props[p[1]] = p[2].indexOf('<') === -1 ? xmlUnescape(p[2]) : p[2];
-    }
-    out.push({ type: objM[1], ref: objM[2], props });
-  }
-  return out;
-}
+// xmlUnescape / parseObjectContent는 soapParse.js로 이동(워커 재사용). 위에서 import·re-export.
 
 const num = (v) => (v == null || v === '' ? 0 : Number(v) || 0);
 const pct = (used, total) => (total > 0 ? Math.round((used / total) * 100) : 0);
