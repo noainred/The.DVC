@@ -1,6 +1,15 @@
 {
   "notes": [
     {
+      "version": "2.146.0",
+      "date": "2026-07-09",
+      "title": "vCenter 수집 SOAP 파싱을 worker_threads로 오프로딩 — 매 주기 이벤트 루프 블로킹 제거",
+      "notes": [
+        "28+ vCenter를 매 주기 수집할 때 RetrieveProperties 응답(대형 vCenter는 수 MB XML)의 정규식 파싱이 메인 이벤트 루프를 점유해, 그동안 다른 vCenter I/O와 HTTP 응답이 밀렸습니다. 이제 대형 응답의 CPU 바운드 파싱을 worker_threads 풀로 오프로딩해 메인 루프를 비웁니다. 수집 동시성(COLLECT_CONCURRENCY)에 맞춰 소수 워커(기본 min(4, CPU-1))가 파싱만 전담하며, 워커는 순수 파서(soapParse.js)만 로드해 DB/네트워크에 일절 접촉하지 않습니다.",
+        "best-effort 설계: 워커 미지원/생성 실패·소형 페이로드(256KB 미만)는 기존과 100% 동일한 메인 스레드 인라인 파싱으로 폴백하며, 워커가 죽어도 해당 작업을 인라인으로 재처리하고 워커를 자동 재생성합니다(수집을 절대 중단시키지 않음). 유휴 워커는 unref로 프로세스 종료를 막지 않고, 처리 중에만 ref합니다. 튜닝 환경변수: SOAP_PARSE_WORKERS(0=비활성), SOAP_PARSE_MIN_CHARS. 회귀 테스트 3종 추가(342건 통과)."
+      ]
+    },
+    {
       "version": "2.145.0",
       "date": "2026-07-09",
       "title": "업그레이드 적용 중 라이브 SQLite 정합성 — 복사 전 WAL 체크포인트",
