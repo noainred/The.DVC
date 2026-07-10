@@ -31,8 +31,9 @@ import About from './About.jsx';
 // 모든 하위 화면 정의(키→라벨→컴포넌트). 그룹에 속한 항목은 group 키로 묶는다.
 const SUB = [
   { k: 'datacenter-admin', label: 'DataCenter(법인)', C: DatacenterAdmin },
-  { k: 'vcenter-admin', label: 'vCenter 관리', C: VCenterAdmin },
-  { k: 'vcenter-test', label: 'vCenter 연결 테스트', C: VCenterConnTest },
+  // --- vCenter 관리 그룹 ---
+  { k: 'vcenter-admin', label: 'vCenter 등록·관리', C: VCenterAdmin, group: 'vcenter' },
+  { k: 'vcenter-test', label: 'vCenter 연결 테스트', C: VCenterConnTest, group: 'vcenter' },
   { k: 'nsx-admin', label: 'NSX 관리', C: NsxAdmin },
   // --- 수집 서버 그룹 ---
   { k: 'idrac-admin', label: 'iDRAC 서버 등록', C: IdracAdmin, group: 'collect' },
@@ -67,6 +68,7 @@ const SUB = [
 
 // 수집/원격접속 관련 화면을 2개 그룹으로 묶어 상단을 단순화(서버가 많아 보이지 않게).
 const GROUPS = {
+  vcenter: { label: '🖥️ vCenter 관리', desc: 'vCenter 등록·관리와 연결 테스트를 한 곳에서.' },
   collect: { label: '🗄 수집 서버', desc: 'iDRAC 전력·지표 수집 + 게스트 계정 + 원격 수집 서버 등록 + 분산 에이전트 배포를 한 곳에서.' },
   gpu: { label: '🎮 GPU 사용량 수집', desc: 'GPU 수집(ESXi vGPU/사용률) · GPU 게스트 수집(패스쓰루, 게스트 OS 내부) · GPU 수집 진단을 한 곳에서.' },
   'remote-srv': { label: '🔌 원격 접속 서버', desc: '브라우저 SSH/RDP 중계 서버(프록시)와 원격접속 설정을 한 곳에서.' },
