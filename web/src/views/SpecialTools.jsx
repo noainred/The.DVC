@@ -11,6 +11,8 @@ import DeepSearch from './DeepSearch.jsx';
 import { IdracDetailModal } from './IdracAdmin.jsx';
 import VmProvision from './VmProvision.jsx';
 import AgentScans from './AgentScans.jsx';
+import LoginFails from './LoginFails.jsx';
+import NetIssues from './NetIssues.jsx';
 
 // IP 확인 출처 배지: vCenter 인식 / Ping(TCP)스캔 / 둘 다
 const DISCOVERY = { vcenter: ['vCenter', 'blue'], scan: ['Ping스캔', 'teal'], both: ['vCenter+스캔', 'green'], manual: ['수동등록', 'purple'] };
@@ -78,6 +80,8 @@ const TOOLS = [
   { k: 'shutdown', icon: '🛑', label: '긴급중단', desc: '모든 수집 즉시 정지 — 관리자 2명 OTP(2인 승인) 필요', danger: true },
   { k: 'vmprovision', icon: '🆕', label: 'VM 생성', desc: '템플릿/사양 지정으로 신규 VM 생성 (관리자)', adminOnly: true },
   { k: 'agent-scans', icon: '🛰️', label: '에이전트 작업', desc: '에이전트별 IP 대역+iDRAC 계정 할당 → 각 에이전트가 로컬 스캔·자동등록·보고 (관리자)', adminOnly: true },
+  { k: 'login-fails', icon: '🔐', label: '로그인 실패 분석', desc: 'vCenter/포탈 로그인 실패 이벤트 원인·추이 분석 (관리자)', adminOnly: true },
+  { k: 'net-issues', icon: '🩺', label: '네트워크 이슈 분석', desc: '로그·캡처 기반 네트워크 장애 징후(재전송·RST·핸드셰이크) 분석 (관리자)', adminOnly: true },
 ];
 
 const tb = (gb) => (gb >= 1024 ? `${(gb / 1024).toFixed(1)} TB` : `${gb} GB`);
@@ -271,6 +275,8 @@ function ToolPanel({ tool, onBack, isAdmin }) {
       {tool === 'shutdown' && <Shutdown />}
       {tool === 'vmprovision' && (isAdmin ? <VmProvision /> : <div className="card"><span className="muted">관리자 전용 기능입니다.</span></div>)}
       {tool === 'agent-scans' && (isAdmin ? <AgentScans /> : <div className="card"><span className="muted">관리자 전용 기능입니다.</span></div>)}
+      {tool === 'login-fails' && (isAdmin ? <LoginFails /> : <div className="card"><span className="muted">관리자 전용 기능입니다.</span></div>)}
+      {tool === 'net-issues' && (isAdmin ? <NetIssues /> : <div className="card"><span className="muted">관리자 전용 기능입니다.</span></div>)}
     </>
   );
 }

@@ -21,8 +21,6 @@ import GpuSettings from './GpuSettings.jsx';
 import PortalBackup from './PortalBackup.jsx';
 import VcenterLogs from './VcenterLogs.jsx';
 import GuestAccount from './GuestAccount.jsx';
-import LoginFails from './LoginFails.jsx';
-import NetIssues from './NetIssues.jsx';
 import AnomalyDetection from './AnomalyDetection.jsx';
 import SessionSecurity from './SessionSecurity.jsx';
 import Upgrade from './Upgrade.jsx';
@@ -59,8 +57,6 @@ const SUB = [
   { k: 'vclogs', label: 'vCenter 로그 보관', C: VcenterLogs },
   { k: 'diagnostics', label: '진단·로그', C: Diagnostics },
   { k: 'audit', label: '감사 로그', C: Audit },
-  { k: 'login-fails', label: '로그인 실패 분석', C: LoginFails },
-  { k: 'net-issues', label: '네트워크 이슈 분석', C: NetIssues },
   // 업그레이드: 상단 '업그레이드' 탭은 SHOW_UPGRADE_TAB로 숨겨져 있어도, 관리자 설정 안에서는
   // 항상 접근 가능하게 둔다(오프라인 업그레이드 번들 적용/원격 자동 업그레이드 설정).
   { k: 'upgrade', label: '⬆ 업그레이드', C: Upgrade },
@@ -107,12 +103,23 @@ export default function Settings({ initialSub }) {
       </div>
       {activeGroup && (
         <>
-          <div className="vcd-views" style={{ marginBottom: 8, paddingLeft: 6, borderLeft: '2px solid var(--accent,#2563eb)' }}>
-            {groupChildren(activeGroup).map((s) => (
-              <button key={s.k} className={sub === s.k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 13px', fontSize: 13 }} onClick={() => setSub(s.k)}>{s.label}</button>
-            ))}
+          {/* 2차(하위) 메뉴 — 들여쓰기 + 반투명 패널 + 좌측 강조바로 1차 메뉴와 계층 구분 */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginLeft: 14, marginBottom: 10,
+            padding: '8px 12px', borderRadius: 10, background: 'rgba(37,99,235,.07)', borderLeft: '3px solid var(--accent,#2563eb)' }}>
+            <span className="muted" style={{ fontSize: 11, whiteSpace: 'nowrap', opacity: .75, paddingRight: 2 }}>{GROUPS[activeGroup].label} ›</span>
+            {groupChildren(activeGroup).map((s) => {
+              const on = sub === s.k;
+              return (
+                <button key={s.k} onClick={() => setSub(s.k)}
+                  style={{ flex: 'none', padding: '6px 12px', fontSize: 12.5, borderRadius: 7, cursor: 'pointer',
+                    background: on ? 'rgba(37,99,235,.22)' : 'transparent',
+                    color: on ? '#93c5fd' : 'var(--muted,#9aa4b2)',
+                    border: on ? '1px solid rgba(37,99,235,.55)' : '1px solid transparent',
+                    fontWeight: on ? 600 : 400 }}>{s.label}</button>
+              );
+            })}
           </div>
-          <div className="muted" style={{ fontSize: 12, marginBottom: 14 }}>{GROUPS[activeGroup].desc}</div>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 14, marginLeft: 14 }}>{GROUPS[activeGroup].desc}</div>
         </>
       )}
       <Cur />
