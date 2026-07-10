@@ -126,6 +126,9 @@ npm run build && npm start   # API가 web/dist 서빙 → http://localhost:4000
 
 최초 계정: **`admin`** + 비밀번호는 `DEFAULT_ADMIN_PASSWORD`(설정 시) 또는 **최초 기동 시 임의 생성되어 `$CONFIG_DIR/initial-admin-password.txt`(0600)에 저장**됩니다(알려진 기본 비번 폐지, v2.152.0). 로그인 후 즉시 변경하고 파일 삭제. 운영 시 `AUTH_SECRET` 지정 권장(미지정 시 재시작마다 세션 무효).
 
+> 🧑‍💻 **git 소스에서 설치**(Node 직접 설치·systemd·업데이트 상세): [docs/INSTALL.md 부록 A](docs/INSTALL.md#부록-a-git-소스에서-설치-개발커스터마이징).
+> 운영(에어갭)은 오프라인 패키지 방식([docs/INSTALL.md](docs/INSTALL.md)) 권장.
+
 ---
 
 ## 실제 vCenter 연결
