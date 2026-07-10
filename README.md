@@ -47,6 +47,7 @@
 - **NSX** — NSX-T/4.x 매니저별 게이트웨이(T0/T1)·세그먼트(Overlay/VLAN, 연결 VM 포트 수)·분산방화벽(DFW, 허용/차단·로깅)·보안그룹(**라이브 멤버 조회**).
 - **전력(iDRAC/OME)** — Dell Redfish/OpenManage로 호스트 전력(W) 수집·시계열, ESXi 전력은 vim25에서도 수집. IP 대역 스캔으로 iDRAC 대량 등록.
 - **온도 / GPU / 용량** — ESXi 온도(현재/5분평균/최대 + 5년 추이, 분/시간/일 단위), GPU 인벤토리(**vGPU/패스쓰루 구분**, 사용률 5년 추이, 게스트 OS 수집), 데이터스토어 용량 추세·포화 예측.
+- **핑/네트워크 모니터링** — 네트워크 탭의 ① Ping 모니터링(등록 대상 ICMP/TCP 도달성·RTT 시계열) ② 서버 Ping 체크(엣지/수집 노드 TCP 지연을 DC별 산점도) ③ vCenter 포트 응답속도(사용자 지정 포트를 vCenter별 측정). 별도 시계열 DB(`ping-monitor.db`, 1년 보존)·baseline 대비 색상 추세.
 - **IP 관리대장(IPAM)** — vCenter 수집 IP(서버종류 VM/베어메탈, OS 종류·버전) + **능동 스캔(TCP 커넥트)** 으로 물리/기타 장비 IP 보강. 서브넷 엑셀형 대장, 중복 IP, CSV/XLSX, 외부 공유 SQLite(`ipam.db`).
 - **통합 서버 인벤토리** — iDRAC/OME 수집 물리 서버 + vCenter ESXi 호스트를 Dell 서비스태그로 조합해 **가상화 호스트 / 베어메탈**을 자동 분류. 베어메탈 **총전력 집계**, 소속 **법인(vCenter) 등록**(자동 추론·일괄 등록·수동 예외), **엣지→중앙 집계**(전력 없는 발견분까지 DC별 검색).
 - **VM 생성(프로비저닝)** — 단건/대량 클론 + 게스트 커스터마이징(이름/IP 규칙), 동시성 제한 작업 큐, 작업 이력·메모/태그.
@@ -74,7 +75,9 @@
 - **감사 로그 / 진단·로그** — 쓰기 작업 감사(JSONL), 연결 실패 원인(한국어 힌트) + 실시간 서버 로그 뷰어.
 - **알림** — 임계치 규칙 → Slack/Webhook(상태전이·쿨다운).
 - **자동 업그레이드** — `versions.json` 모니터링 → 다운로드·적용·재시작(롤백 가능), 엣지 푸시.
-- **분산 수집** — 원격 데이터센터 에이전트 pull(전력 등) + 중앙 할당(iDRAC/IP 스캔).
+- **분산 수집** — 원격 데이터센터 에이전트 pull(전력 등) + 중앙 할당(iDRAC/IP 스캔). **통합 엣지 모드**(`EDGE_MODE=all` + `CENTRAL_URL` + `EDGE_TOKEN` 3줄)로 수집·위임 스캔/핑/캡처/로그 워커·인벤토리 push·자동 업그레이드·부팅 시 중앙 자동 등록을 일괄 활성. **위임 iDRAC 스캔**은 엣지 폴링 또는 **중앙→엣지 직접(PUSH)** 방식 + 2단계 claim→ack로 인출 유실 방지. 중앙 **에이전트 배포**(SSH 원클릭 설치)·**에이전트 작업**(IP대역 할당) 지원.
+- **보안** — scrypt+HS256 JWT·TOTP·AD 외에, 보안 응답 헤더(X-Frame-Options/nosniff/HSTS)·CORS 기본 차단·임의 초기 관리자 비번(`initial-admin-password.txt`)·TOTP replay 방지·검증 TLS 업그레이드 푸시·SSRF/명령주입 방어·번들 sha256 필수(v2.152.0). 상세 [설치 가이드 §7](docs/INSTALL.md).
+- **데모(mock) 모드** — vCenter 없이 `DATA_SOURCE=mock`으로 전세계 11개 가상 vCenter + iDRAC 전력·핑/네트워크·지표·온도·GPU 게스트·로그까지 채워진 화면을 즉시 시연(v2.154.0 목업 완비).
 - **장애 내성 & 성능** — 한 vCenter/매니저가 죽어도 포탈은 정상(해당만 `unreachable`). 고RTT·다수 vCenter(현재 28, 향후 30+) 대비 **동시 수집 개수 제한(`COLLECT_CONCURRENCY`, 기본 8) + per-vCenter 타임아웃 + 폴러 재진입 가드(주기 초과 시 중첩 실행 방지) + O(N) 롤업 집계 + 논블로킹 DB write(트랜잭션·prune 스로틀)**로 매 주기 CPU 스파이크를 평탄화.
 
 ---
@@ -104,8 +107,9 @@
 | 계층 | 메커니즘 |
 |---|---|
 | HTTP 응답 | 자체 gzip 미들웨어(비동기 zlib) + **ETag/304** — 스냅샷(30초)보다 짧은 폴링(15초)의 무변동 응답은 본문 0바이트로 재검증만. 프론트 `pollFetch`가 If-None-Match 자동 처리 |
+| SOAP 파싱 | 대형(256KB↑) RetrieveProperties XML 정규식 파싱을 **worker_threads 풀**(기본 min(4, CPU-1))로 zero-copy 오프로딩 — 매 주기 파싱이 메인 이벤트 루프를 막지 않음. 소형·워커 실패 시 인라인 폴백(동일 결과), 워커 사망 시 자기치유(`SOAP_PARSE_WORKERS`) |
 | SQLite | 전 시계열 DB **WAL + synchronous=NORMAL + busy_timeout**(커밋 fsync 대폭 절감 — 단건 insert 5ms→0.01ms 실측). 외부 프로그램이 읽는 `ipam.db`만 기본 저널 + busy_timeout 유지 |
-| 전력 시계열 | 서버별 최신값 **인메모리 캐시**(기동 시 1회 시드, 쓰기 시 O(1) 갱신) — 매 30초 GROUP BY 풀스캔 제거. 대시보드 24h 집계는 60초 캐시. 적재는 단일 트랜잭션 배치(insertMany), prune은 10틱 스로틀 + `ts` 인덱스 |
+| 전력 시계열 | 서버별 최신값 **인메모리 캐시**(기동 시 1회 시드, 쓰기 시 O(1) 갱신) — 매 30초 GROUP BY 풀스캔 제거. 24h 집계는 **시간당 롤업 테이블**(`power_hourly`, 적재 트랜잭션 내 증분 upsert)로 수억 행 대신 ~24행 스캔 + 60초 캐시. 적재는 단일 트랜잭션 배치(insertMany), prune은 10틱 스로틀 + `ts` 인덱스 |
 | 대량 export | GPU 시계열 등은 5만 행 청크 + `setImmediate` 양보로 조회(이벤트 루프 10초 정지 방지), 기본 상한 30만 행(`GPU_EXPORT_MAX_ROWS`) |
 | 수집 | vCenter 병렬+동시성 제한, 모든 폴러 재진입 가드, 수집서버 풀러 배치 적재, 위임 잡 활동 기준 GC |
 
@@ -146,6 +150,7 @@ npm run build && npm start   # API가 web/dist 서빙 → http://localhost:4000
 | `CONFIG_DIR` | `server/config` | 설정·DB 저장 위치(오프라인 설치 시 `/etc/vmware-portal` → 업그레이드해도 보존) |
 | `POLL_INTERVAL_MS` | `30000` | vCenter 폴링 주기(ms). 이전 주기가 끝나기 전이면 이번 틱은 건너뜀(재진입 가드) |
 | `COLLECT_CONCURRENCY` | `8` | 매 주기 동시 수집 vCenter 개수 상한(고RTT·다수 vCenter에서 CPU 스파이크 완화) |
+| `SOAP_PARSE_WORKERS` / `SOAP_PARSE_MIN_CHARS` | `min(4,CPU-1)` / `262144` | SOAP XML 파싱 worker_threads 수(0=비활성) / 워커 오프로딩 최소 크기 |
 | `VC_SOAP_METRICS` | `true` | vim25 SOAP 실측 메트릭 수집 |
 | `VC_TLS_REJECT_UNAUTHORIZED` | `false` | 자체서명 인증서 거부 여부 |
 | `VC_TLS_MIN_VERSION` / `VC_TLS_CIPHERS` | `TLSv1` / `DEFAULT@SECLEVEL=0` | 레거시 vCenter TLS 호환 |
@@ -159,6 +164,11 @@ npm run build && npm start   # API가 web/dist 서빙 → http://localhost:4000
 | `DEFAULT_ADMIN_PASSWORD` | (임의생성) | 초기 admin 비밀번호. 미설정 시 최초 기동에 임의 생성 → `$CONFIG_DIR/initial-admin-password.txt` |
 | `TOTP_ISSUER` | `VMware Portal` | TOTP 표시명 |
 | `AD_ENABLED`, `AD_URL`, `AD_DOMAIN`, `AD_BASE_DN`, `AD_*_GROUP`, `AD_DEFAULT_ROLE` | — | Active Directory(LDAP) 연동·그룹→역할 매핑 |
+| `CORS_ORIGINS` | (교차출처 차단) | 허용 교차출처 목록(콤마). 미설정 시 same-origin만(와일드카드 제거) |
+| `CSP` | — | Content-Security-Policy 헤더 값(옵트인) |
+| `METRICS_ALLOW_QUERY_TOKEN` | `false` | `/metrics` 토큰을 `?token=`로도 허용(기본은 Authorization 헤더 전용) |
+| `NSX_TLS_REJECT_UNAUTHORIZED` | `false` | NSX TLS 인증서 검증 강제(기본은 자체서명 허용) |
+| `LOGIN_MAX_FAILS` / `LOGIN_LOCKOUT_MS` / `API_RATE_LIMIT` | `8` / `900000` / `1800` | 로그인 잠금·분당 IP API 상한 |
 
 ### 전력(iDRAC/OME) · 시계열
 | 변수 | 기본값 | 설명 |
@@ -168,10 +178,12 @@ npm run build && npm start   # API가 web/dist 서빙 → http://localhost:4000
 | `OME_POWER_PLUGIN_ID` / `OME_POWER_METRIC_TYPES` | — | OpenManage Power Manager |
 | `TEMP_DB_PATH` / `TEMP_SAMPLE_INTERVAL_MS` / `TEMP_RETENTION_DAYS` | `CONFIG_DIR/host-temp.db` / `60000`(1분) / `1830`(~5년) | 온도·GPU·용량 시계열(설정에서도 변경) |
 | `IPAM_DB_PATH` | `CONFIG_DIR/ipam.db` | 외부 공유 IP 대장 DB |
+| `PING_MON_ENABLED` / `PING_DB_PATH` / `PING_MON_INTERVAL_MS` / `PING_MON_RETENTION_DAYS` | `true` / `CONFIG_DIR/ping-monitor.db` / `60000` / `365` | 핑/네트워크 모니터링 시계열 |
 
 ### 분산(수집/중앙/에이전트)
 | 변수 | 기본값 | 설명 |
 |---|---|---|
+| `EDGE_MODE` / `EDGE_TOKEN` | — | **통합 엣지 모드**(`all`): 3줄로 전 엣지 기능 활성. `EDGE_TOKEN`이 CENTRAL/COLLECTOR 토큰 겸함 |
 | `COLLECTOR_TOKEN` / `COLLECTOR_DATACENTER` | — | 이 인스턴스를 수집 에이전트로 노출(토큰), 사이트 라벨 |
 | `COLLECTOR_PULL_INTERVAL_MS` | `60000` | 중앙이 에이전트 pull 주기 |
 | `CENTRAL_TOKEN` | — | 중앙↔에이전트 API 토큰(중앙·에이전트 동일값) |
@@ -230,8 +242,11 @@ npm run build && npm start   # API가 web/dist 서빙 → http://localhost:4000
 ### 업그레이드 `/api/upgrade/*`
 `status`, `check`, `apply`, `restart`, `settings`, `bundle`
 
-### 토큰 라우터(에이전트↔중앙, `X-Central-Token`)
-`/api/collector/{export,ping,upgrade}` · `/api/central/{assignment,result,inventory,fleet,ip-scan-assignment,ip-scan-result,gpu-guest-data,agent-config,ping-jobs,ping-result,log-queries,log-query-result,capture-jobs,capture-result}`
+### 토큰 라우터(에이전트↔중앙)
+- `/api/collector/{export,ping,idrac-scan,upgrade,set-password}` — **`X-Collector-Token`** 게이트(전력 export·중앙→엣지 PUSH 스캔·원격 업그레이드).
+- `/api/central/{register-collector,assignment,result,inventory,fleet,idrac-scan-jobs,idrac-scan-progress,idrac-scan-result,ip-scan-assignment,ip-scan-result,gpu-guest-data,agent-config,ping-jobs,ping-result,log-queries,log-query-result,capture-jobs,capture-result}` — **`X-Central-Token`** 게이트(엣지→중앙 보고·위임 잡 인출).
+- `/dl/{versions.json,<번들>}` — 공개 업그레이드 소스(자동 업그레이드 원격 베이스).
+- `/api/ping/*` — 핑/네트워크 모니터링(조회=인증, 대상 관리=관리자).
 
 ---
 
@@ -255,6 +270,8 @@ npm run build && npm start   # API가 web/dist 서빙 → http://localhost:4000
 | `net-traffic` | 네트워크 트래픽 분석(tcpdump) | `vmware-backup` | VMware 구성 백업 |
 | `powermap` | 전력 분석(법인·모델·지역별) | `serveranalysis` | 서버 분석(iDRAC 하드웨어·GPU) |
 | `fleet` | **통합 서버 인벤토리**(가상화/베어메탈·법인 등록·엣지 집계) | `portaldb` | 포탈 DB 현황 |
+| `real-os` | 실제 OS 확인(게스트 탐침·불일치) | `vmprovision` | VM 생성(관리자) |
+| `agent-scans` | **에이전트 작업**(IP대역 할당 위임 스캔, 관리자) | `shutdown` | 긴급중단(2인 OTP) |
 
 > 상단 **인사이트** 탭(FinOps·이상탐지·예측·보안·토폴로지·인시던트·ChatOps)과
 > **설정**의 포탈 백업 · vCenter 로그 보관 · 게스트 계정 추가 · GPU 게스트 수집/진단도 참고.
@@ -316,6 +333,9 @@ sudo ./install.sh --port 4000
 | `UPGRADE_REMOTE_BASE` / `UPGRADE_TOKEN` | 원격 소스(versions.json 디렉터리) / 사설 레포 PAT |
 | `UPGRADE_WATCH_DIR` / `UPGRADE_INSTALL_DIR` / `UPGRADE_PACKAGE_NAME` | 로컬 번들 감시 / 교체 대상 / 번들 최상위 디렉터리명 |
 | `UPGRADE_POLL_INTERVAL_MS` / `UPGRADE_AUTO_APPLY` / `UPGRADE_EDGES` | 확인 주기 / 자동 적용 / 엣지 푸시 목록 |
+| `UPGRADE_ALLOW_UNVERIFIED` / `UPGRADE_TLS_INSECURE` | sha256 미검증 번들 허용(기본 거부) / 업그레이드 fetch TLS 완화 |
+
+> **무결성**: 번들 sha256 검증이 **필수**입니다(공식 릴리스는 항상 제공). 중앙→엣지 푸시는 검증 TLS 디스패처를 사용합니다. 서명 없는 사내 미러만 부득이 `UPGRADE_ALLOW_UNVERIFIED=true`로 우회하세요.
 
 관리자 **업그레이드** 탭에서 GUI로 설정·확인·적용·재시작. 설정은 `config/upgrade.json`(gitignore)에 보존, 환경변수는 기본값. 실행 버전은 상단 바 배지로 표시.
 
