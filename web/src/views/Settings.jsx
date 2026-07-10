@@ -37,9 +37,10 @@ const SUB = [
   // --- 수집 서버 그룹 ---
   { k: 'idrac-admin', label: 'iDRAC 서버 등록', C: IdracAdmin, group: 'collect' },
   { k: 'metrics', label: '지표 수집', C: MetricsSettings, group: 'collect' },
-  { k: 'gpu-collect', label: 'GPU 수집', C: GpuSettings, group: 'collect' },
-  { k: 'gpu-guest', label: 'GPU 게스트 수집', C: GpuGuestSettings, group: 'collect' },
-  { k: 'gpu-guest-diag', label: 'GPU 수집 진단', C: GpuGuestDiag, group: 'collect' },
+  // --- GPU 사용량 수집 그룹 ---
+  { k: 'gpu-collect', label: 'GPU 수집', C: GpuSettings, group: 'gpu' },
+  { k: 'gpu-guest', label: 'GPU 게스트 수집', C: GpuGuestSettings, group: 'gpu' },
+  { k: 'gpu-guest-diag', label: 'GPU 수집 진단', C: GpuGuestDiag, group: 'gpu' },
   { k: 'guest-account', label: '게스트 계정 추가', C: GuestAccount, group: 'collect' },
   { k: 'collectors', label: '수집 서버(원격)', C: Collectors, group: 'collect' },
   { k: 'agent-deploy', label: '에이전트 배포', C: AgentDeploy, group: 'collect' },
@@ -66,7 +67,8 @@ const SUB = [
 
 // 수집/원격접속 관련 화면을 2개 그룹으로 묶어 상단을 단순화(서버가 많아 보이지 않게).
 const GROUPS = {
-  collect: { label: '🗄 수집 서버', desc: '전력·지표·GPU 게스트 수집 + 원격 수집 서버 등록 + 분산 에이전트 작업/배포를 한 곳에서.' },
+  collect: { label: '🗄 수집 서버', desc: 'iDRAC 전력·지표 수집 + 게스트 계정 + 원격 수집 서버 등록 + 분산 에이전트 배포를 한 곳에서.' },
+  gpu: { label: '🎮 GPU 사용량 수집', desc: 'GPU 수집(ESXi vGPU/사용률) · GPU 게스트 수집(패스쓰루, 게스트 OS 내부) · GPU 수집 진단을 한 곳에서.' },
   'remote-srv': { label: '🔌 원격 접속 서버', desc: '브라우저 SSH/RDP 중계 서버(프록시)와 원격접속 설정을 한 곳에서.' },
 };
 const groupChildren = (g) => SUB.filter((s) => s.group === g);
