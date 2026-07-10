@@ -43,7 +43,7 @@ const SUB = [
   { k: 'gpu-guest-diag', label: 'GPU 수집 진단', C: GpuGuestDiag, group: 'gpu' },
   { k: 'guest-account', label: '게스트 계정 추가', C: GuestAccount, group: 'collect' },
   { k: 'collectors', label: '수집 서버(원격)', C: Collectors, group: 'collect' },
-  { k: 'agent-deploy', label: '에이전트 배포', C: AgentDeploy, group: 'collect' },
+  { k: 'agent-deploy', label: '원격 법인(DC)에 Edge 노드 포탈 설치', C: AgentDeploy, group: 'collect' },
   // --- 원격 접속 서버 그룹 ---
   { k: 'proxy', label: '중계 서버', C: ProxySettings, group: 'remote-srv' },
   { k: 'remote', label: '원격접속 설정', C: RemoteAccess, group: 'remote-srv' },
