@@ -48,9 +48,10 @@ const SUB = [
   // --- 원격 접속 서버 그룹 ---
   { k: 'proxy', label: '중계 서버', C: ProxySettings, group: 'remote-srv' },
   { k: 'remote', label: '원격접속 설정', C: RemoteAccess, group: 'remote-srv' },
-  { k: 'users', label: '사용자 관리', C: UserAdmin },
+  // --- User Control 그룹 ---
+  { k: 'users', label: '사용자 관리', C: UserAdmin, group: 'usercontrol' },
+  { k: 'auth-ad', label: '인증(AD)', C: AdSettings, group: 'usercontrol' },
   { k: 'session-security', label: '세션 보안', C: SessionSecurity },
-  { k: 'auth-ad', label: '인증(AD)', C: AdSettings },
   { k: 'ai-search', label: 'AI 검색', C: LlmSettings },
   { k: 'alerts', label: '알림', C: Alerts2 },
   { k: 'anomaly', label: '이상동작 탐지', C: AnomalyDetection },
@@ -72,6 +73,7 @@ const GROUPS = {
   collect: { label: '🗄 수집 서버', desc: 'iDRAC 전력·지표 수집 + 게스트 계정 + 원격 수집 서버 등록 + 분산 에이전트 배포를 한 곳에서.' },
   gpu: { label: '🎮 GPU 사용량 수집', desc: 'GPU 수집(ESXi vGPU/사용률) · GPU 게스트 수집(패스쓰루, 게스트 OS 내부) · GPU 수집 진단을 한 곳에서.' },
   'remote-srv': { label: '🔌 원격 접속 서버', desc: '브라우저 SSH/RDP 중계 서버(프록시)와 원격접속 설정을 한 곳에서.' },
+  usercontrol: { label: '👤 User Control', desc: '사용자 계정(역할·2FA)과 인증(AD/LDAP) 연동을 한 곳에서.' },
 };
 const groupChildren = (g) => SUB.filter((s) => s.group === g);
 
