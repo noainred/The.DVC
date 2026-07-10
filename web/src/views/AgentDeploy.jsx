@@ -150,7 +150,7 @@ export default function AgentDeploy() {
 
   return (
     <>
-      <div className="section-title" style={{ margin: '6px 0 10px' }}>에이전트 자동배포 (SSH 설치)</div>
+      <div className="section-title" style={{ margin: '6px 0 10px' }}>원격 법인(DC)에 Edge 노드 포탈 설치 (SSH 자동 배포)</div>
 
       <div className="flex gap wrap" style={{ marginBottom: 12 }}>
         <button className={subtab === 'status' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 14px' }} onClick={() => setSubtab('status')}>📋 에이전트 현황</button>
