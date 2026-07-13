@@ -182,7 +182,8 @@ api.get('/idrac/host-power', async (req, res) => {
   if (!name) return res.status(400).json({ matched: false, reason: 'name이 필요합니다.' });
   try {
     const hours = Math.min(720, Math.max(1, Number(req.query.hours) || 24));
-    res.json(await hostPower(String(name), { hours }));
+    const serviceTag = req.query.serviceTag ? String(req.query.serviceTag) : '';
+    res.json(await hostPower(String(name), { hours, serviceTag }));
   } catch (err) {
     res.status(500).json({ matched: false, reason: err.message });
   }

@@ -12,17 +12,21 @@ const labelStyle = { color: '#8b9bb4' };
  * Shows real Dell iDRAC power for one ESXi host: current draw + recent history.
  * Renders a helpful hint when the host isn't mapped to a registered iDRAC.
  */
-export default function HostPowerPanel({ hostName }) {
+export default function HostPowerPanel({ hostName, serviceTag }) {
   const [state, setState] = useState({ loading: true });
 
   useEffect(() => {
     let active = true;
     setState({ loading: true });
-    fetchJson('/idrac/host-power', { name: hostName, hours: 24 })
+    // serviceTag를 함께 넘겨, 호스트명이 iDRAC 등록명과 달라도 Dell 서비스태그로 매칭되게 한다
+    // (호스트 상세 요약의 'iDRAC 실측'과 동일 기준).
+    const q = { name: hostName, hours: 24 };
+    if (serviceTag) q.serviceTag = serviceTag;
+    fetchJson('/idrac/host-power', q)
       .then((d) => { if (active) setState({ loading: false, data: d }); })
       .catch((e) => { if (active) setState({ loading: false, error: e.message }); });
     return () => { active = false; };
-  }, [hostName]);
+  }, [hostName, serviceTag]);
 
   const { loading, data, error } = state;
 
