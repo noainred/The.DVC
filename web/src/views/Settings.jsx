@@ -54,9 +54,9 @@ const SUB = [
   { k: 'alerts', label: '알림', C: Alerts2 },
   { k: 'anomaly', label: '이상동작 탐지', C: AnomalyDetection },
   { k: 'backup', label: '포탈 백업', C: PortalBackup },
-  { k: 'vclogs', label: 'vCenter 로그 보관', C: VcenterLogs },
-  { k: 'diagnostics', label: '진단·로그', C: Diagnostics },
-  { k: 'audit', label: '감사 로그', C: Audit },
+  { k: 'vclogs', label: 'vCenter 로그 보관', C: VcenterLogs, group: 'log' },
+  { k: 'diagnostics', label: '진단·로그', C: Diagnostics, group: 'log' },
+  { k: 'audit', label: '감사 로그', C: Audit, group: 'log' },
   // 업그레이드: 상단 '업그레이드' 탭은 SHOW_UPGRADE_TAB로 숨겨져 있어도, 관리자 설정 안에서는
   // 항상 접근 가능하게 둔다(오프라인 업그레이드 번들 적용/원격 자동 업그레이드 설정).
   { k: 'upgrade', label: '⬆ 업그레이드', C: Upgrade },
@@ -70,6 +70,7 @@ const GROUPS = {
   gpu: { label: '🎮 GPU 사용량 수집', desc: 'GPU 수집(ESXi vGPU/사용률) · GPU 게스트 수집(패스쓰루, 게스트 OS 내부) · GPU 수집 진단을 한 곳에서.' },
   'remote-srv': { label: '🔌 원격 접속 서버', desc: '브라우저 SSH/RDP 중계 서버(프록시)와 원격접속 설정을 한 곳에서.' },
   usercontrol: { label: '👤 User Control', desc: '사용자 계정(역할·2FA)과 인증(AD/LDAP) 연동을 한 곳에서.' },
+  log: { label: '📋 Log', desc: 'vCenter 로그 보관 · 진단·로그 · 감사 로그를 한 곳에서.' },
 };
 const groupChildren = (g) => SUB.filter((s) => s.group === g);
 
