@@ -301,6 +301,7 @@ export async function purgeStalePower(opts = {}) {
       // active 집합에 없더라도 stale 모드에서는 삭제하지 않는다(대시보드 24h 통계 소실 방지).
       const orphans = db.serverIds().filter((id) => !active.has(id) && (mode === 'all' || !String(id).startsWith('vc:')));
       dbRemoved = db.deleteServers(orphans);
+      if (dbRemoved) aggCache.clear(); // 삭제된 서버가 60초 캐시에 남아 대시보드에 유령 표시되는 것 방지
     }
   } catch { /* best effort */ }
   return { mode, dbRemoved, omeCleared, remoteCleared, activeKept: active.size };

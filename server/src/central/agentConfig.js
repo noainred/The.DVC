@@ -6,6 +6,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
 
 const FILE = path.join(config.configDir, 'central-agent-config.json');
 
@@ -18,7 +19,7 @@ function persistSoon() {
   if (writeTimer) return;
   writeTimer = setTimeout(() => {
     writeTimer = null;
-    try { fs.writeFileSync(FILE, JSON.stringify(byAgent), { mode: 0o600 }); } catch { /* */ }
+    try { atomicWriteFileSync(FILE, JSON.stringify(byAgent), { mode: 0o600 }); } catch { /* */ }
   }, 3_000);
   writeTimer.unref?.();
 }

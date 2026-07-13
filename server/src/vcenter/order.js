@@ -8,6 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
 
 const FILE = path.join(config.configDir, 'vcenter-order.json');
 
@@ -24,7 +25,7 @@ export function getOrder() { return [...load()]; }
 export function saveOrder(ids) {
   const order = Array.isArray(ids) ? [...new Set(ids.map((x) => String(x).trim()).filter(Boolean))] : [];
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
-  fs.writeFileSync(FILE, JSON.stringify({ order }, null, 2), { mode: 0o600 });
+  atomicWriteFileSync(FILE, JSON.stringify({ order }, null, 2), { mode: 0o600 });
   cache = order;
   return order;
 }
