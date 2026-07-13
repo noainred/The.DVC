@@ -387,7 +387,7 @@ export async function latestPowerByServiceTag() {
 }
 
 /** Detailed power for one host: current reading + history series + server info. */
-export async function hostPower(hostName, { hours = 24, limit = 1000 } = {}) {
+export async function hostPower(hostName, { hours = 24, limit = 1000, serviceTag = '' } = {}) {
   const db = await getDb();
   const since = Date.now() - hours * 3600_000;
 
@@ -431,6 +431,27 @@ export async function hostPower(hostName, { hours = 24, limit = 1000 } = {}) {
       current: r.watts != null ? { watts: r.watts, ts: r.ts } : null,
       history: db.history(`rmt:${norm(hostName)}`, since, limit),
     };
+  }
+
+  // 4) 서비스태그 폴백 — 호스트명이 iDRAC 등록명과 달라도(FQDN↔짧은이름·스캔 등록 등) ESXi
+  //    호스트의 Dell 서비스태그로 측정 전력을 귀속한다. 호스트 상세 요약의 'iDRAC 실측'(store.js
+  //    overlayIdracPower의 byTag 경로)과 동일 기준 — 요약엔 값이 뜨는데 이 패널만 '매핑 없음'으로
+  //    나오던 불일치를 제거한다. name 매칭이 모두 실패한 경우에만 시도.
+  const tag = norm(serviceTag);
+  if (tag) {
+    for (const m of await allMeasuredPower()) {
+      if (norm(m.serviceTag) !== tag) continue;
+      const latest = db.latest(m.serverId) || (m.watts != null ? { watts: m.watts, ts: m.ts } : null);
+      return {
+        matched: true,
+        source: m.source || 'idrac',
+        matchedBy: 'serviceTag',
+        server: { id: m.serverId, name: m.serverName || hostName, host: m.host ? String(m.host) : '', serviceTag: m.serviceTag || '', model: m.model || '', enabled: true },
+        current: latest ? { watts: latest.watts, ts: latest.ts } : null,
+        history: db.history(m.serverId, since, limit),
+        info: getInventory(m.serverId),
+      };
+    }
   }
 
   return { matched: false };

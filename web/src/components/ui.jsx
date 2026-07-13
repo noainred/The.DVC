@@ -411,7 +411,7 @@ export function EntityDetail({ type, item, onClose }) {
           </div>
         </div>
       )}
-      {type === 'host' && <HostPowerPanel hostName={item.name} />}
+      {type === 'host' && <HostPowerPanel hostName={item.name} serviceTag={item.serviceTag} />}
       {type === 'host' && (
         <div className="flex gap" style={{ marginTop: 14, justifyContent: 'flex-end' }}>
           <HostMetricButton hostId={item.id} hostName={item.name} />
