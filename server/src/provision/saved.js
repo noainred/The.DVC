@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { config } from '../config.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
 
 const FILE = path.join(config.configDir, 'provision-saved.json');
 
@@ -21,7 +22,7 @@ function load() {
 }
 function persist() {
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
-  fs.writeFileSync(FILE, JSON.stringify(cache, null, 2), { mode: 0o600 });
+  atomicWriteFileSync(FILE, JSON.stringify(cache, null, 2), { mode: 0o600 });
 }
 const cleanTags = (v) => (Array.isArray(v) ? v : String(v || '').split(/[,\n]/)).map((s) => String(s).trim()).filter(Boolean).slice(0, 20);
 

@@ -327,7 +327,7 @@ class Store {
 
   start() {
     this.refresh({ scheduled: true }); // 최초 1회(가드 비어 있어 즉시 실행)
-    this.timer = setInterval(() => this.refresh({ scheduled: true }), config.pollIntervalMs);
+    this.timer = setInterval(() => { this.refresh({ scheduled: true }).catch(() => {}); }, config.pollIntervalMs);
     this.timer.unref?.();
   }
 
