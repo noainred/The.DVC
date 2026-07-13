@@ -141,6 +141,10 @@ function initSqlite() {
 function initJsonFallback() {
   const file = DB_PATH.replace(/\.db$/, '') + '.ndjson';
   fs.mkdirSync(path.dirname(file), { recursive: true });
+  // SQLite 없이 동작하는 폴백이라 prune만으로는 상한이 없다(90일 보존·다수 서버면 수백만 행이
+  // 전부 RAM 상주 → OOM 위험). ts 오름차순 append 특성을 이용해 상한 초과 시 가장 오래된 행을
+  // 잘라내고 파일도 재기록한다(newest 우선 보존). SQLite가 정상이면 이 경로는 애초에 안 탄다.
+  const MAX_ROWS = Number(process.env.POWER_NDJSON_MAX_ROWS) || 2_000_000;
   let rows = [];
   if (fs.existsSync(file)) {
     for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
@@ -149,18 +153,22 @@ function initJsonFallback() {
     }
   }
   const rewrite = () => { try { fs.writeFileSync(file, rows.map((r) => JSON.stringify(r)).join('\n') + '\n', { mode: 0o600 }); } catch { /* best effort */ } };
+  // 상한 초과 시 오래된 앞부분을 10% 잘라 파일 재기록(잦은 재기록 방지 위해 여유분을 남긴다).
+  const capRows = () => { if (rows.length > MAX_ROWS) { rows = rows.slice(rows.length - Math.floor(MAX_ROWS * 0.9)); rewrite(); } };
   return {
     kind: 'json',
     insert: (serverId, watts, ts) => {
       const r = { s: serverId, w: watts, t: ts };
       rows.push(r);
       try { fs.appendFileSync(file, JSON.stringify(r) + '\n', { mode: 0o600 }); } catch { /* best effort */ }
+      capRows();
     },
     insertMany: (samples) => {
       if (!samples || !samples.length) return 0;
       const lines = [];
       for (const s of samples) { const r = { s: s.serverId, w: s.watts, t: s.ts }; rows.push(r); lines.push(JSON.stringify(r)); }
       try { fs.appendFileSync(file, lines.join('\n') + '\n', { mode: 0o600 }); } catch { /* best effort */ }
+      capRows();
       return samples.length;
     },
     serverIds: () => [...new Set(rows.map((r) => r.s))],
@@ -234,6 +242,9 @@ function withLatestCache(db) {
       return n;
     },
     deleteServers: (ids) => { const n = db.deleteServers(ids); for (const id of ids) cache.delete(id); return n; },
+    // prune으로 beforeTs 이전 행이 전부 지워진 서버(죽은 서버)는 캐시에서도 축출한다.
+    // 안 그러면 latest/latestAll이 사라진 서버의 낡은 최신값을 영원히 반환한다.
+    prune: (beforeTs) => { const r = db.prune(beforeTs); for (const [id, v] of cache) if (v.ts < beforeTs) cache.delete(id); return r; },
     latest: (serverId) => cache.get(serverId) || null,
     latestAll: () => new Map(cache),
   };

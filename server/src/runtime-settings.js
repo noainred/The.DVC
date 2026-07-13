@@ -7,6 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from './config.js';
+import { atomicWriteFileSync } from './util/atomicWrite.js';
 
 const FILE = path.join(config.configDir, 'runtime.json');
 const VALID_SOURCES = ['mock', 'live', 'auto'];
@@ -22,7 +23,7 @@ function load() {
 
 function save() {
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
-  fs.writeFileSync(FILE, JSON.stringify(cache, null, 2), { mode: 0o600 });
+  atomicWriteFileSync(FILE, JSON.stringify(cache, null, 2), { mode: 0o600 });
 }
 
 /** Effective data source: UI override if set, else the env default. */

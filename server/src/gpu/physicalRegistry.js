@@ -10,6 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
 
 const FILE = path.join(config.configDir, 'gpu-physical.json');
 
@@ -24,7 +25,7 @@ export function loadPhysical() {
 
 function persist() {
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
-  fs.writeFileSync(FILE, JSON.stringify({ servers: cache }, null, 2), { mode: 0o600 });
+  atomicWriteFileSync(FILE, JSON.stringify({ servers: cache }, null, 2), { mode: 0o600 });
   try { fs.chmodSync(FILE, 0o600); } catch { /* best effort */ }
 }
 

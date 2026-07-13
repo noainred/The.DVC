@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
 
 const FILE = path.join(config.configDir, 'remote-access.json');
 
@@ -64,7 +65,7 @@ function load() {
 
 function persist() {
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
-  fs.writeFileSync(FILE, JSON.stringify(cache, null, 2), { mode: 0o600 });
+  atomicWriteFileSync(FILE, JSON.stringify(cache, null, 2), { mode: 0o600 });
   try { fs.chmodSync(FILE, 0o600); } catch { /* mode는 신규생성 시에만 적용 — 덮어쓰기에도 0600 보장 */ }
 }
 

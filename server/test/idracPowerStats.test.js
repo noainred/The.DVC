@@ -74,6 +74,18 @@ test('serverIds/deleteServers: 고아 server_id 삭제(활성 보존)', () => {
   assert.ok(!after.includes('orphanA') && !after.includes('orphanB'));
 });
 
+test('prune: 죽은 서버(모든 행이 beforeTs 이전)는 latest 캐시에서도 축출', () => {
+  const base = 6_000_000_000_000;
+  db.insert('dead1', 111, base + 1000);   // 오래된 서버(이후 신규 샘플 없음)
+  db.insert('live1', 222, base + 1000);
+  db.insert('live1', 333, base + 50_000); // live1은 최신 샘플이 prune 경계 이후
+  assert.equal(db.latest('dead1').watts, 111);
+  // base+40_000 이전 행을 prune → dead1 전부 삭제, live1은 최신(base+50_000) 생존
+  db.prune(base + 40_000);
+  assert.equal(db.latest('dead1'), null, 'prune 후 죽은 서버 캐시 축출');
+  assert.equal(db.latest('live1').watts, 333, '활성 서버 최신값 보존');
+});
+
 test('bucketsSince: 시간 버킷별 서버 평균', () => {
   const base = 3_000_000_000_000;
   const H = 3_600_000;
