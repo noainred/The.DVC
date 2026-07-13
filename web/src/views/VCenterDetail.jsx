@@ -60,6 +60,18 @@ export default function VCenterDetail({ site, onBack }) {
     for (const v of vms) { const k = v.host || ''; if (!map.has(k)) map.set(k, []); map.get(k).push(v); }
     return map;
   }, [vms]);
+  // 호스트별 할당 vCPU 합계(가상화율 = 할당 vCPU ÷ 물리 코어). VM은 host=호스트명으로 매핑.
+  const vcpuByHost = useMemo(() => {
+    const map = new Map();
+    for (const v of vms) { const k = v.host || ''; map.set(k, (map.get(k) || 0) + (Number(v.cpuCount) || 0)); }
+    return map;
+  }, [vms]);
+  // 호스트 묶음(클러스터·DC)의 할당 vCPU·물리 코어 합계.
+  const virtSum = (list) => {
+    let alloc = 0, cores = 0, vmc = 0;
+    for (const h of list) { alloc += vcpuByHost.get(h.name) || 0; cores += Number(h.cpuCores) || 0; vmc += Number(h.vmCount) || 0; }
+    return { alloc, cores, vmc };
+  };
 
   // folder path -> vms (vSphere "VMs and Templates")
   const folderTree = useMemo(() => buildFolderTree(vms), [vms]);
@@ -160,20 +172,23 @@ export default function VCenterDetail({ site, onBack }) {
           );
         })()}
 
-        {view === 'hosts' && !query && (
+        {view === 'hosts' && !query && (() => { const dc = virtSum(hosts); return (
           <Node label={`🗄️ ${site.name}`} defaultOpen
-            sub={<UsageBars lead={<span className="muted">{hosts.length} 호스트</span>} cpu={m.cpuUsagePct} mem={m.memUsagePct} />}>
+            sub={<UsageBars lead={<span className="muted">{hosts.length} 호스트</span>} cpu={m.cpuUsagePct} mem={m.memUsagePct}
+              tail={<VirtBadge alloc={dc.alloc} cores={dc.cores} />} />}>
             {clusters.map(([cl, chosts]) => {
               const n = chosts.length || 1;
               const avgCpu = Math.round(chosts.reduce((a, h) => a + (h.cpuUsagePct || 0), 0) / n);
               const avgMem = Math.round(chosts.reduce((a, h) => a + (h.memUsagePct || 0), 0) / n);
+              const cv = virtSum(chosts);
               return (
               <Tree key={cl} k={`cl:${cl}`} open={open} toggle={toggle} icon="🧩" label={cl}
-                sub={<UsageBars lead={<span className="muted">{chosts.length} 호스트</span>} cpu={avgCpu} mem={avgMem} />}>
+                sub={<UsageBars lead={<span className="muted">{chosts.length} 호스트</span>} cpu={avgCpu} mem={avgMem}
+                  tail={<VirtBadge alloc={cv.alloc} cores={cv.cores} />} />}>
                 {chosts.map((h) => (
                   <Tree key={h.id} k={`h:${h.id}`} open={open} toggle={toggle} icon="🖥️"
                     label={<span className="vcd-link" onClick={(e) => { e.stopPropagation(); setSel({ type: 'host', item: h }); }}>{h.name}</span>}
-                    sub={<UsageBars lead={<StateBadge state={h.connectionState} />} cpu={h.cpuUsagePct} mem={h.memUsagePct} tail={<span className="muted" style={{ fontSize: 12 }}>VM {h.vmCount}</span>} />}>
+                    sub={<UsageBars lead={<StateBadge state={h.connectionState} />} cpu={h.cpuUsagePct} mem={h.memUsagePct} tail={<span className="muted" style={{ fontSize: 12, display: 'inline-flex', gap: 10, alignItems: 'center' }}><span>VM {h.vmCount}</span><VirtBadge alloc={vcpuByHost.get(h.name) || 0} cores={h.cpuCores} /></span>} />}>
                     {(vmsByHost.get(h.name) || []).map((vm) => (
                       <Leaf key={vm.id} icon="🧊" onClick={() => setSel({ type: 'vm', item: vm })}
                         label={vm.name} badge={<StateBadge state={vm.powerState} />}
@@ -185,7 +200,7 @@ export default function VCenterDetail({ site, onBack }) {
               );
             })}
           </Node>
-        )}
+          ); })()}
 
         {view === 'vms' && !query && (
           <Node label={`📁 ${site.name} / vm`} defaultOpen sub={`${vms.length} VM`}>
@@ -274,6 +289,19 @@ function MiniBar({ label, pct }) {
         <span style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${p}%`, background: c, borderRadius: 5 }} />
       </span>
       <b style={{ fontSize: 12, color: c, minWidth: 34, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{p}%</b>
+    </span>
+  );
+}
+
+// 가상화율(할당 vCPU : 물리 코어) 배지 — 과커밋 수준에 따라 색상. 물리코어/할당이 없으면 미표시.
+function VirtBadge({ alloc, cores }) {
+  if (!cores || !alloc) return null;
+  const r = alloc / cores;
+  const color = r >= 4 ? '#ef4444' : r >= 2.5 ? '#f59e0b' : '#22c55e'; // >4:1 위험 · 2.5~4 주의 · 이하 정상
+  const txt = (Math.round(r * 10) / 10).toFixed(1);
+  return (
+    <span className="muted" style={{ fontSize: 12 }} title={`가상화율 = 할당 vCPU ${alloc} ÷ 물리 코어 ${cores} = ${txt}:1`}>
+      가상화 <b style={{ color, fontVariantNumeric: 'tabular-nums' }}>{txt}:1</b>
     </span>
   );
 }
