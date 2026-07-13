@@ -172,11 +172,11 @@ export function Modal({ title, onClose, children, width = 560, resizable = false
   );
 }
 
-function DRow({ label, children }) {
+function DRow({ label, children, full = false, nowrap = false }) {
   return (
-    <div className="flex between" style={{ padding: '8px 0', borderBottom: '1px solid rgba(36,48,73,.4)', gap: 16 }}>
-      <span className="muted">{label}</span>
-      <span style={{ textAlign: 'right', wordBreak: 'break-all' }}>{children}</span>
+    <div className="flex between" style={{ padding: '8px 0', borderBottom: '1px solid rgba(36,48,73,.4)', gap: 16, gridColumn: full ? '1 / -1' : 'auto' }}>
+      <span className="muted" style={{ whiteSpace: 'nowrap' }}>{label}</span>
+      <span style={{ textAlign: 'right', wordBreak: nowrap ? 'keep-all' : 'break-all', whiteSpace: nowrap ? 'nowrap' : 'normal' }}>{children}</span>
     </div>
   );
 }
@@ -349,8 +349,10 @@ export function EntityDetail({ type, item, onClose }) {
         {type === 'host' && (
           <>
             <DRow label="이름">
-              <b className="cell-link" style={{ cursor: 'pointer' }} title="이 호스트의 VM 목록 보기" onClick={() => setShowHostVms(true)}>{item.name}</b>
-              <span className="muted" style={{ fontSize: 11, marginLeft: 6 }}>· VM {item.vmCount ?? 0}대 보기 ›</span>
+              <span style={{ display: 'inline-flex', flexWrap: 'wrap', alignItems: 'baseline', gap: 6 }}>
+                <b className="cell-link" style={{ cursor: 'pointer', wordBreak: 'break-all' }} title="이 호스트의 VM 목록 보기" onClick={() => setShowHostVms(true)}>{item.name}</b>
+                <span className="cell-link" style={{ fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap' }} title="이 호스트의 VM 목록 보기" onClick={() => setShowHostVms(true)}>· VM {item.vmCount ?? 0}대 보기 ›</span>
+              </span>
             </DRow>
             <DRow label="상태"><StateBadge state={item.connectionState} /></DRow>
             <DRow label="vCenter">{item.vcenterId}</DRow>
@@ -362,8 +364,8 @@ export function EntityDetail({ type, item, onClose }) {
             <DRow label="CPU 사용률"><UsageCell pct={item.cpuUsagePct} /></DRow>
             <DRow label="메모리">{gb(item.memTotalMB)}{item.memUsageMB ? ` · 사용 ${gb(item.memUsageMB)}` : ''}</DRow>
             <DRow label="메모리 사용률"><UsageCell pct={item.memUsagePct} /></DRow>
-            {item.powerWatts > 0 && <DRow label="소비전력">{(item.powerWatts / 1000).toFixed(2)} kW ({item.powerWatts} W){item.powerSource === 'idrac' ? ' · iDRAC' : (item.idracBacked ? ' · vCenter 추정' : '')}</DRow>}
-            {item.idracBacked && item.powerWattsIdrac > 0 && <DRow label="iDRAC 실측">{(item.powerWattsIdrac / 1000).toFixed(2)} kW ({item.powerWattsIdrac} W) <span className="muted" style={{ fontSize: 11 }}>· iDRAC 서버 등록 메뉴 집계</span></DRow>}
+            {item.powerWatts > 0 && <DRow label="소비전력" full nowrap>{(item.powerWatts / 1000).toFixed(2)} kW ({item.powerWatts} W){item.powerSource === 'idrac' ? ' · iDRAC' : (item.idracBacked ? ' · vCenter 추정' : '')}</DRow>}
+            {item.idracBacked && item.powerWattsIdrac > 0 && <DRow label="iDRAC 실측" full nowrap>{(item.powerWattsIdrac / 1000).toFixed(2)} kW ({item.powerWattsIdrac} W) <span className="muted" style={{ fontSize: 11 }}>· iDRAC 서버 등록 메뉴 집계</span></DRow>}
             <DRow label="VM 수">{item.vmCount}</DRow>
             <DRow label="HBA / GPU">{(item.hbas?.length || 0)}개 / {(item.gpus?.length || 0)}개</DRow>
           </>
