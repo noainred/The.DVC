@@ -1,0 +1,16 @@
+{
+  "managers": [
+    {
+      "id": "nsx-seoul",
+      "name": "nsx-mgr-seoul",
+      "host": "https://nsx-seoul.corp.local",
+      "username": "admin",
+      "password": "CHANGE_ME",
+      "vcenterId": "vc-seoul",
+      "location": { "region": "아시아" },
+      "enabled": true,
+      "pollIntervalSec": 0,
+      "timeoutMs": 0
+    }
+  ]
+}
