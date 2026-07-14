@@ -37,12 +37,42 @@ function Funnel({ c }) {
   );
 }
 
+// 클릭하면 정렬되는 테이블 헤더(오름/내림 토글 + 방향 화살표).
+function SortTh({ k, sort, onSort, children }) {
+  const active = sort.key === k;
+  return (
+    <th style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }} onClick={() => onSort(k)} title="클릭하여 정렬(다시 클릭 시 방향 전환)">
+      {children}<span style={{ marginLeft: 4, opacity: active ? 1 : 0.25, fontSize: 10 }}>{active ? (sort.dir === 'asc' ? '▲' : '▼') : '↕'}</span>
+    </th>
+  );
+}
+
 function VcDiag({ d, failOnly }) {
   const stageOk = d.stage === '완료';
   const all = d.results || [];
-  const results = failOnly ? all.filter((r) => !r.ok) : all;
+  const [sort, setSort] = useState({ key: '', dir: 'asc' }); // 헤더 클릭 정렬(빈 key=원래 순서)
   const failN = all.filter((r) => !r.ok).length;
   const hasOsAcct = all.some((r) => r.os || r.account); // 구버전 agent는 OS/계정이 없을 수 있음
+  const sortVal = (r, key) => {
+    switch (key) {
+      case 'vm': return String(r.vm || '').toLowerCase();
+      case 'host': return String(r.host || '').toLowerCase();
+      case 'os': return String(r.os || '').toLowerCase();
+      case 'result': return r.ok ? (Number(r.util) || 0) : -1; // 성공=사용률순 · 실패=-1(한데 모임)
+      default: return '';
+    }
+  };
+  const toggleSort = (key) => setSort((s) => (s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }));
+  let results = failOnly ? all.filter((r) => !r.ok) : all.slice();
+  if (sort.key) {
+    const dir = sort.dir === 'desc' ? -1 : 1;
+    results = [...results].sort((a, b) => {
+      const av = sortVal(a, sort.key), bv = sortVal(b, sort.key);
+      if (av < bv) return -1 * dir;
+      if (av > bv) return 1 * dir;
+      return String(a.vm || '').localeCompare(String(b.vm || '')); // 동률은 이름순(안정)
+    });
+  }
   return (
     <div className="card" style={{ padding: 12, marginTop: 8, borderLeft: `3px solid ${stageOk ? 'var(--green)' : 'var(--amber,#f59e0b)'}` }}>
       <div className="flex between wrap" style={{ alignItems: 'center', gap: 8 }}>
@@ -55,7 +85,12 @@ function VcDiag({ d, failOnly }) {
       {d.error && <div className="badge red" style={{ marginTop: 4, whiteSpace: 'normal' }}>오류: {d.error}</div>}
       {all.length > 0 && (
         <div className="table-wrap" style={{ maxHeight: '40vh', marginTop: 6 }}>
-          <table><thead><tr><th>VM</th><th>호스트</th>{hasOsAcct && <th>OS / 계정</th>}<th>결과</th></tr></thead>
+          <table><thead><tr>
+            <SortTh k="vm" sort={sort} onSort={toggleSort}>VM</SortTh>
+            <SortTh k="host" sort={sort} onSort={toggleSort}>호스트</SortTh>
+            {hasOsAcct && <SortTh k="os" sort={sort} onSort={toggleSort}>OS / 계정</SortTh>}
+            <SortTh k="result" sort={sort} onSort={toggleSort}>결과</SortTh>
+          </tr></thead>
             <tbody>
               {results.length === 0 && <tr><td colSpan={hasOsAcct ? 4 : 3} className="center muted" style={{ padding: 14 }}>{failOnly ? '실패한 VM 없음' : '결과 없음'}</td></tr>}
               {results.map((r, i) => (
