@@ -39,6 +39,7 @@ import { physicalPollerStatus, pollPhysicalOnce } from '../gpu/physicalPoller.js
 import { getGuestGpuVms } from '../gpu/store.js';
 import { getAllGpuGuestDiag } from '../central/gpuGuestDiag.js';
 import { getAssignedGpuGuest, setAssignedGpuGuest, listAssignedGpuGuestAgents, redactAssignedGpuGuest } from '../central/agentGpuGuestConfig.js';
+import { upsertAgentUser, removeAgentUser, listAgentUsers, listAgentUserAgents } from '../central/agentUsers.js';
 import { loadVcenterConfig } from '../config.js';
 import { getVmHardware, reconfigVm } from '../provision/reconfig.js';
 import { applyFleetAssign } from '../insights/fleetAssign.js';
@@ -598,6 +599,33 @@ adminRouter.put('/gpu-guest/deploy/:agent', adminOnly, (req, res) => {
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent 필요' });
   setAssignedGpuGuest(agent, req.body || {});
   res.json({ ok: true, ...redactAssignedGpuGuest(agent) });
+});
+
+// ── 중앙→엣지 배포 사용자 관리 ──────────────────────────────────────────────────
+// 원격 엣지 포탈에 접속(설정 열람 등)할 수 있는 사용자를 중앙에서 지정 → 엣지가 pull해 반영.
+// 후보 agent 목록(수집 서버 등록분 + gpu-guest push 이력 + 이미 사용자 배포된 것).
+adminRouter.get('/edge-users/agents', adminOnly, (_req, res) => {
+  const withUsers = new Map(listAgentUserAgents().map((a) => [a.agent, a]));
+  const names = new Set();
+  for (const c of listCollectors()) if (c.name) names.add(c.name);
+  for (const x of getAllGpuGuestDiag()) if (x.agent) names.add(x.agent);
+  for (const a of withUsers.keys()) names.add(a);
+  const agents = [...names].sort().map((agent) => ({ agent, users: withUsers.get(agent)?.users || 0, at: withUsers.get(agent)?.at || 0 }));
+  res.json({ agents });
+});
+// 특정 엣지 앞 배포 사용자 목록(비밀번호 해시 가림).
+adminRouter.get('/edge-users/:agent', adminOnly, (req, res) => {
+  res.json({ agent: req.params.agent, users: listAgentUsers(req.params.agent) });
+});
+// 사용자 추가/수정(비밀번호 주면 해시로 변환 저장). Body { username, name, role, password }.
+adminRouter.post('/edge-users/:agent', adminOnly, (req, res) => {
+  const r = upsertAgentUser(req.params.agent, req.body || {});
+  res.status(r.ok ? 200 : 400).json(r.ok ? { ok: true, users: listAgentUsers(req.params.agent) } : r);
+});
+// 사용자 제거(다음 pull에 엣지에서도 삭제).
+adminRouter.delete('/edge-users/:agent/:username', adminOnly, (req, res) => {
+  const r = removeAgentUser(req.params.agent, req.params.username);
+  res.status(r.ok ? 200 : 400).json(r.ok ? { ok: true, users: listAgentUsers(req.params.agent) } : r);
 });
 
 // ── 물리(베어메탈) 서버 GPU 수집 — IP+계정으로 SSH nvidia-smi(가상화 안 한 서버) ──────

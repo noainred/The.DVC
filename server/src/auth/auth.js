@@ -155,6 +155,7 @@ export function listUsers() {
   return loadUsers().map((u) => ({
     username: u.username, name: u.name || u.username, role: u.role || 'viewer',
     totpEnabled: !!u.totpEnabled, hasPassword: !!u.passwordHash,
+    managedBy: u.managedBy || null, // 'central' = 중앙에서 배포·관리하는 계정
   }));
 }
 
@@ -220,6 +221,49 @@ export function deleteUser(username) {
   users = list.filter((x) => x.username !== username);
   persistUsers();
   return { ok: true };
+}
+
+/**
+ * 중앙 배포 사용자 적용(엣지 측) — 중앙이 지정한 사용자 집합을 로컬 users.json에 반영한다.
+ * 중앙 소유 계정은 managedBy:'central' 태그로 표시하며, 중앙이 생성/갱신/삭제한다.
+ *  - 같은 이름의 '로컬(비managed)' 계정은 건드리지 않는다(로컬 관리자 하이재킹 방지 — skip).
+ *  - 배포 목록에서 빠진 managed 계정은 제거(단, 마지막 admin은 보호).
+ *  - passwordHash가 오면 갱신, 없으면 기존 유지(역할·이름만 변경 가능).
+ * 반환 { created, updated, removed, skipped[] }.
+ */
+export function applyManagedUsers(managed = []) {
+  const list = loadUsers();
+  const want = new Map((managed || []).filter((u) => u && u.username).map((u) => [String(u.username).trim(), u]));
+  const result = { created: 0, updated: 0, removed: 0, skipped: [] };
+  for (const [username, m] of want) {
+    if (!/^[A-Za-z0-9._@-]{2,64}$/.test(username)) { result.skipped.push(`${username}(ID 형식)`); continue; }
+    if (!VALID_ROLES.includes(m.role)) { result.skipped.push(`${username}(역할)`); continue; }
+    const existing = list.find((x) => x.username === username);
+    if (existing && existing.managedBy !== 'central') { result.skipped.push(`${username}(로컬 계정 충돌)`); continue; }
+    if (!existing) {
+      const u = { username, name: m.name || username, role: m.role, managedBy: 'central' };
+      if (m.passwordHash) u.passwordHash = m.passwordHash;
+      list.push(u); result.created++;
+    } else {
+      existing.name = m.name || username; existing.role = m.role; existing.managedBy = 'central';
+      if (m.passwordHash) existing.passwordHash = m.passwordHash;
+      result.updated++;
+    }
+  }
+  for (let i = list.length - 1; i >= 0; i--) {
+    const u = list[i];
+    if (u.managedBy === 'central' && !want.has(u.username)) {
+      if (u.role === 'admin' && list.filter((x) => x.role === 'admin').length <= 1) { result.skipped.push(`${u.username}(마지막 admin 삭제 보류)`); continue; }
+      list.splice(i, 1); result.removed++;
+    }
+  }
+  if (result.created || result.updated || result.removed) persistUsers();
+  return result;
+}
+
+/** 중앙이 관리 중인(managed) 로컬 계정 목록(요약) — 엣지 상태 표시용. */
+export function listManagedUsers() {
+  return loadUsers().filter((u) => u.managedBy === 'central').map((u) => ({ username: u.username, name: u.name || u.username, role: u.role || 'viewer' }));
 }
 
 /** Start TOTP enrollment: generate a secret (pending until confirmed).
