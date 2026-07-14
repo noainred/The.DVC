@@ -1,6 +1,18 @@
 {
   "notes": [
     {
+      "version": "2.167.0",
+      "date": "2026-07-13",
+      "title": "GPU 게스트 수집 — Windows VM은 SSH 대신 VMware Tools 게스트 작업으로 수집",
+      "notes": [
+        "Windows VM의 패스쓰루 GPU 사용량 수집이 SSH로 시도되어 실패하던 문제를 개선했습니다. Windows Server는 기본적으로 OpenSSH 서버(sshd)가 없어 SSH 수집이 불가합니다.",
+        "이제 수집 방식이 'SSH 직접'이어도 Windows VM은 자동으로 VMware Tools 게스트 작업(cmd.exe로 nvidia-smi.exe 실행)으로 수집합니다(리눅스는 관리자 설정 그대로). 폴러 수집과 '테스트' 버튼 모두 동일하게 적용됩니다.",
+        "'auto' 방식에서도 Windows는 항상 게스트 작업을 먼저 시도하도록 조정해, 무의미한 SSH 타임아웃을 줄였습니다.",
+        "수집 방식이 'SSH 직접만'일 때 Windows VM 관련 안내 문구를 설정 화면에 표시합니다.",
+        "회귀 테스트 추가(resolveCollectMethod — Windows ssh→auto 조정, 367 pass)."
+      ]
+    },
+    {
       "version": "2.166.0",
       "date": "2026-07-13",
       "title": "GPU 게스트 수집 — VM별 SSH 접속 IP 지정(다중 NIC VM 도달성 개선)",

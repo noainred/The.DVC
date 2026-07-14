@@ -95,6 +95,12 @@ export default function GpuGuestSettings() {
               value={form.sshPort} onChange={(e) => setForm((f) => ({ ...f, sshPort: Math.max(1, Number(e.target.value) || 22) }))} /></Field>
           )}
         </div>
+        {form.collectMethod === 'ssh' && (
+          <div className="muted" style={{ fontSize: 12, marginTop: 6, color: 'var(--amber,#f59e0b)' }}>
+            ℹ Windows VM은 기본적으로 SSH 서버(sshd)가 없어 <b>SSH 직접</b> 방식으로는 수집되지 않습니다.
+            Windows VM은 자동으로 <b>VMware Tools 게스트 작업</b>(nvidia-smi.exe)으로 수집합니다(리눅스는 SSH 그대로).
+          </div>
+        )}
         <div className="flex gap" style={{ alignItems: 'center', marginTop: 12 }}>
           <button className="login-btn" style={{ flex: 'none', padding: '8px 18px' }} disabled={busy} onClick={save}>{busy ? '저장 중…' : '설정 저장'}</button>
           <span className="muted" style={{ fontSize: 12 }}>수집 방식·주기·동시성 등 전역 설정을 저장합니다(아래 공용 계정도 함께).</span>
