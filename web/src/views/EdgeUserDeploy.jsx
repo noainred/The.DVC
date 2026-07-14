@@ -58,6 +58,14 @@ export default function EdgeUserDeploy() {
     } else setMsg(`오류: ${r.reason || (r.failed && r.failed.map((f) => `${f.agent}:${f.reason}`).join(', '))}`);
     setBusy(false);
   };
+  const editUser = (u) => {
+    // 선택 행을 배포 폼으로 불러온다(비밀번호는 보안상 비움 — 비우면 기존 유지). 대상은 현재 보기 대상.
+    setForm({ username: u.username, name: u.name || '', role: u.role || 'viewer', password: '' });
+    if (viewTarget === ALL) { setAllEdges(true); setSelEdges(new Set()); }
+    else { setAllEdges(false); setSelEdges(new Set([viewTarget])); }
+    setMsg(`'${u.username}' 수정 — 위 배포 폼에서 값을 바꾼 뒤 '배포'를 누르세요(비밀번호를 비우면 기존 유지).`);
+    try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch { /* */ }
+  };
   const removeUser = async (u) => {
     const label = viewTarget === ALL ? '모든 엣지(전체)' : viewTarget;
     if (!confirm(`'${u.username}' 사용자를 [${label}] 배포에서 제거할까요? (엣지에서도 다음 pull에 삭제)`)) return;
@@ -138,7 +146,10 @@ export default function EdgeUserDeploy() {
                   <td className="muted">{u.name || '—'}</td>
                   <td><span className={`badge ${u.role === 'admin' ? 'red' : u.role === 'operator' ? 'amber' : 'blue'}`}>{ROLE_LABEL[u.role] || u.role}</span></td>
                   <td className="muted" style={{ fontSize: 12 }}>{u.hasPassword ? '설정됨' : '없음'}</td>
-                  <td style={{ textAlign: 'right' }}><button className="tab" style={{ padding: '4px 10px' }} onClick={() => removeUser(u)}>제거</button></td>
+                  <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                    <button className="tab" style={{ padding: '4px 10px', marginRight: 6 }} onClick={() => editUser(u)}>수정</button>
+                    <button className="tab" style={{ padding: '4px 10px' }} onClick={() => removeUser(u)}>제거</button>
+                  </td>
                 </tr>
               ))}
             </tbody>
