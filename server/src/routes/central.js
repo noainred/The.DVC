@@ -19,7 +19,7 @@ import { upsertCollectorFromAgent } from '../collector/registry.js';
 import { recordIngest } from '../central/ingestStats.js';
 import { setAgentConfig } from '../central/agentConfig.js';
 import { getAssignedGpuGuest } from '../central/agentGpuGuestConfig.js';
-import { getAgentUsers } from '../central/agentUsers.js';
+import { getEffectiveUsers } from '../central/agentUsers.js';
 import { takeLogQueries, setLogQueryResult } from '../central/logQueries.js';
 import { takeCaptureJobs, setCaptureResult } from '../central/captureJobs.js';
 import { recordCapture } from '../net/captureHistory.js';
@@ -221,7 +221,8 @@ centralRouter.get('/users-config', (req, res) => {
   if (!authed(req)) return res.status(403).json({ ok: false, reason: '토큰 불일치' });
   const agent = String(req.query.agent || req.get('X-Agent-Name') || '').trim();
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
-  res.json({ ok: true, agent, users: getAgentUsers(agent) });
+  // 글로벌('*') 공통 사용자 + 이 엣지 전용을 합쳐서 반환(개별이 글로벌보다 우선).
+  res.json({ ok: true, agent, users: getEffectiveUsers(agent) });
 });
 
 // 위임 Ping: 현장 에이전트가 자기 담당 vCenter들의 대기 IP를 인출 → ping → 결과 보고.

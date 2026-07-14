@@ -21,6 +21,9 @@ import { hashPassword } from '../auth/auth.js';
 const FILE = path.join(config.configDir, 'central-agent-users.json');
 const VALID_ROLES = ['admin', 'operator', 'viewer'];
 const USER_RE = /^[A-Za-z0-9._@-]{2,64}$/;
+// 특수 키 '*' = 모든 엣지에 공통 배포되는 글로벌 목록. 엣지 pull 시 자기 목록과 합쳐 적용되므로
+// 신규 엣지도 자동으로 글로벌 사용자를 받는다(대상을 스냅샷하지 않아 동적).
+export const GLOBAL_AGENT = '*';
 
 let byAgent = Object.create(null); // agent -> { at, users: [...] }
 try { if (fs.existsSync(FILE)) byAgent = Object.assign(Object.create(null), JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}); } catch { byAgent = Object.create(null); }
@@ -31,10 +34,22 @@ function persist() {
 }
 const cleanAgent = (a) => String(a || '').trim();
 
-/** 배포용 사용자 목록(비밀번호 해시 포함) — 엣지 pull이 사용. */
+/** 특정 대상(agent 또는 '*')에 직접 지정된 사용자 목록(해시 포함). 관리 화면의 대상별 목록용. */
 export function getAgentUsers(agent) {
   const a = cleanAgent(agent);
   return a && byAgent[a] ? (byAgent[a].users || []) : [];
+}
+
+/**
+ * 엣지 pull이 실제로 적용할 '유효 사용자' = 글로벌('*') + 이 엣지 전용. 같은 ID면 엣지 전용이
+ * 글로벌을 덮어쓴다(개별 지정이 우선). 엣지는 이 결과를 로컬 users.json에 managed로 반영.
+ */
+export function getEffectiveUsers(agent) {
+  const a = cleanAgent(agent);
+  const byName = new Map();
+  for (const u of getAgentUsers(GLOBAL_AGENT)) byName.set(u.username, u);
+  if (a && a !== GLOBAL_AGENT) for (const u of getAgentUsers(a)) byName.set(u.username, u); // 개별이 글로벌 우선
+  return [...byName.values()];
 }
 
 /** 사용자 추가/수정(비밀번호 주면 해시로 변환 저장, 없으면 기존 유지). 반환 { ok, reason? }. */
@@ -62,6 +77,18 @@ export function upsertAgentUser(agent, { username, name, role = 'viewer', passwo
   byAgent[a] = { at: Date.now(), users };
   persist();
   return { ok: true };
+}
+
+/** 여러 대상(엣지들 또는 '*')에 같은 사용자를 한 번에 배포. 반환 { ok, applied:[], failed:[] }. */
+export function upsertAgentUsersBulk(targets, spec) {
+  const list = Array.isArray(targets) ? [...new Set(targets.map(cleanAgent).filter(Boolean))] : [];
+  if (!list.length) return { ok: false, reason: '대상이 없습니다.' };
+  const applied = []; const failed = [];
+  for (const t of list) {
+    const r = upsertAgentUser(t, spec);
+    if (r.ok) applied.push(t); else failed.push({ agent: t, reason: r.reason });
+  }
+  return { ok: applied.length > 0, applied, failed };
 }
 
 /** 사용자 제거(다음 pull에 엣지에서도 삭제됨). */
