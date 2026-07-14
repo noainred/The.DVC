@@ -44,3 +44,17 @@ test('redactGpuGuestSettings: vmIps 포함(민감정보 아님)', () => {
   const red = settings.redactGpuGuestSettings(settings.loadGpuGuestSettings());
   assert.equal(red.vcenters.OC2.vmIps['OC2:vm-2'], '192.168.1.9');
 });
+
+test('resolveCollectMethod: Windows는 ssh 단독을 게스트작업 우선(auto)으로 조정', () => {
+  const { resolveCollectMethod } = settings;
+  // Windows + ssh → auto(게스트작업 우선). sshd 없는 Windows에서 수집 실패 방지.
+  assert.equal(resolveCollectMethod('ssh', true), 'auto');
+  // Windows라도 guestops/auto는 그대로.
+  assert.equal(resolveCollectMethod('guestops', true), 'guestops');
+  assert.equal(resolveCollectMethod('auto', true), 'auto');
+  // Linux는 관리자 설정 그대로(ssh 유지).
+  assert.equal(resolveCollectMethod('ssh', false), 'ssh');
+  assert.equal(resolveCollectMethod('guestops', false), 'guestops');
+  // 잘못된 값은 auto로 안전 폴백.
+  assert.equal(resolveCollectMethod('bogus', false), 'auto');
+});

@@ -29,7 +29,7 @@ import { alertStatus, saveAlertConfig, testAlert, getAnomalySettings, saveAnomal
 import { loadMetricsSettings, saveMetricsSettings, METRICS_LIMITS } from '../metrics/settings.js';
 import { forceGpuUtilCollect, clearGpuUtilForce } from '../vcenter/soapClient.js';
 import { metricsSamplerStatus, rescheduleMetricsSampler } from '../metrics/sampler.js';
-import { loadGpuGuestSettings, saveGpuGuestSettings, redactGpuGuestSettings, resolveVmCreds } from '../gpu/settings.js';
+import { loadGpuGuestSettings, saveGpuGuestSettings, redactGpuGuestSettings, resolveVmCreds, resolveCollectMethod } from '../gpu/settings.js';
 import { gpuGuestStatus, rescheduleGpuGuestPoller, gpuHostIds, vmUsesGpu, getGpuGuestDiag } from '../gpu/poller.js';
 import { testVmGuest, VimSoapClient } from '../gpu/guestops.js';
 import { testVmGuestSsh, detectPhysicalGpu, guestIps } from '../gpu/sshCollect.js';
@@ -719,9 +719,13 @@ adminRouter.post('/gpu-guest/test', adminOnly, async (req, res) => {
         const dlHosts = dlByHost.get(v.host) || [];
         // SSH 접속 고정 IP: 요청에 실린 선택값(it.ip, 저장 전 실시간 테스트) 우선, 없으면 저장된 vmIps.
         const preferIp = it.ip !== undefined ? String(it.ip || '').trim() : ((s.vcenters[vcenterId]?.vmIps || {})[it.vmId] || '');
-        const method = ['guestops', 'ssh', 'auto'].includes(req.body?.method) ? req.body.method : (s.collectMethod || 'guestops');
+        const reqMethod = ['guestops', 'ssh', 'auto'].includes(req.body?.method) ? req.body.method : (s.collectMethod || 'guestops');
+        // Windows는 기본적으로 sshd가 없어 SSH 단독이면 실패 → VMware Tools 게스트작업 우선(auto)으로 조정.
+        const method = resolveCollectMethod(reqMethod, isWindows);
+        const winMethodAdjusted = method !== reqMethod;
         // 디버그(revealCreds): 실제 전송되는 id/pw를 평문으로 trace에 기록(이 응답에만, 디스크/중앙 미기록).
         const seed = revealCreds ? [{ t: Date.now(), msg: `🔓 자격증명: id=${creds.username} · pw=${maskPw(creds.password)} · 방식=${method} · 출처=${it.useShared ? '공용' : (it.passwordless ? '별도(비번없음)' : '별도입력')}` }] : [];
+        if (winMethodAdjusted) seed.push({ t: Date.now(), msg: 'ℹ Windows VM — SSH 대신 VMware Tools 게스트작업 우선(auto)으로 수집' });
         let r;
         if (method === 'ssh') {
           r = await testVmGuestSsh(v, creds, { timeoutMs: s.timeoutMs, port: s.sshPort, trace: seed, preferIp }).catch((e) => ({ login: false, read: false, error: e.message, trace: seed.concat({ t: Date.now(), msg: `✗ 예외: ${e.message}` }) }));
