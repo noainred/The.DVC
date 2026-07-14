@@ -38,8 +38,14 @@ async function runNvsmi(sh, argStr) {
 const usableIp = (ip) => typeof ip === 'string' && /^\d{1,3}(\.\d{1,3}){3}$/.test(ip)
   && !ip.startsWith('127.') && !ip.startsWith('169.254.') && ip !== '0.0.0.0';
 
-/** VM이 보고한 IP들 중 SSH 시도 가능한 IPv4(루프백/링크로컬 제외). */
-export function guestIps(vm) {
+/**
+ * VM이 보고한 IP들 중 SSH 시도 가능한 IPv4(루프백/링크로컬 제외).
+ * preferIp가 지정되면(사용자가 고른 고정 IP) 그 IP '하나만' 반환한다 — 다중 NIC VM에서
+ * 순차 시도로 잘못된 인터페이스에 붙는 문제를 피하려는 것이므로 폴백하지 않는다.
+ */
+export function guestIps(vm, preferIp = '') {
+  const pref = String(preferIp || '').trim();
+  if (pref && usableIp(pref)) return [pref];
   return [...new Set([...(vm.ipAddresses || []), vm.ipAddress].filter(Boolean))].filter(usableIp);
 }
 
@@ -56,8 +62,8 @@ function cleanSshErr(m) {
  * 게스트에 SSH로 nvidia-smi 실행 → 파싱. 여러 IP 중 하나라도 되면 성공.
  * 반환 parseNvidiaSmiCsv 결과({ count, utilPct, memUsedPct, ... }). 실패 시 throw(e.guestDiag).
  */
-export async function collectVmGpuSsh(vm, creds, { timeoutMs = 20_000, port = 22, trace = null } = {}) {
-  const ips = guestIps(vm);
+export async function collectVmGpuSsh(vm, creds, { timeoutMs = 20_000, port = 22, trace = null, preferIp = '' } = {}) {
+  const ips = guestIps(vm, preferIp);
   if (!ips.length) { const e = new Error('게스트 IP 없음(VMware Tools가 IP 미보고) — SSH 수집 불가'); e.guestDiag = true; throw e; }
   let lastErr = '모든 IP 접속 실패';
   let connected = false;
@@ -117,11 +123,11 @@ export async function detectPhysicalGpu(host, creds, { timeoutMs = 20_000, port 
 }
 
 /** SSH 로그인+읽기 테스트 — testVmGuest와 동일한 { login, read, error, sample, trace } 형태. */
-export async function testVmGuestSsh(vm, creds, { timeoutMs = 20_000, port = 22, trace = null } = {}) {
+export async function testVmGuestSsh(vm, creds, { timeoutMs = 20_000, port = 22, trace = null, preferIp = '' } = {}) {
   const out = { login: false, read: false, error: null, sample: null, trace: trace || [], via: 'ssh' };
   const tr = out.trace;
   try {
-    const r = await collectVmGpuSsh(vm, creds, { timeoutMs, port, trace: tr });
+    const r = await collectVmGpuSsh(vm, creds, { timeoutMs, port, trace: tr, preferIp });
     out.login = true; // 접속+명령 실행 성공 = 로그인 성공
     if (r && r.utilPct != null) { out.read = true; out.sample = { gpus: r.count, utilPct: r.utilPct, utilNA: !!r.utilNA, memUsedPct: r.memUsedPct, migEnabled: r.migEnabled || 0 }; }
     else out.error = 'nvidia-smi 출력 없음';

@@ -9,7 +9,7 @@
 
 import { config, loadVcenterConfig } from '../config.js';
 import { store } from '../store.js';
-import { loadGpuGuestSettings, resolveVmCreds } from './settings.js';
+import { loadGpuGuestSettings, resolveVmCreds, resolveVmIp } from './settings.js';
 import { setGuestGpu, pruneGuestGpu, guestGpuCounts } from './store.js';
 import { collectVmGpu, VimSoapClient } from './guestops.js';
 import { collectVmGpuSsh, guestIps } from './sshCollect.js';
@@ -123,7 +123,7 @@ async function pollLive(snap, vc, s) {
       console.log(`[gpu-guest]   → ${v.name} (${moref}) host=${v.host} 계정=${creds.username}(${creds.source}) 방식=${method} dl후보=[${dlHosts.join(', ')}]`);
       let err = null;
       // 'ssh'=직접 SSH+nvidia-smi · 'auto'=게스트작업 먼저→실패 시 SSH(+VM별 성공 방식 학습) · 'guestops'=VMware Tools.
-      const viaSsh = () => collectVmGpuSsh(v, creds, { timeoutMs: s.timeoutMs, port: s.sshPort });
+      const viaSsh = () => collectVmGpuSsh(v, creds, { timeoutMs: s.timeoutMs, port: s.sshPort, preferIp: resolveVmIp(s, vc.id, v.id) });
       const viaGuestops = () => collectVmGpu(c, moref, creds, { isWindows, timeoutMs: s.timeoutMs, dlHosts });
       let r = null, usedMethod = method;
       if (method === 'ssh') {
