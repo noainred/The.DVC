@@ -11,6 +11,7 @@ import RemoteAccess from './RemoteAccess.jsx';
 import AdSettings from './AdSettings.jsx';
 import LlmSettings from './LlmSettings.jsx';
 import UserAdmin from './UserAdmin.jsx';
+import EdgeUserDeploy from './EdgeUserDeploy.jsx';
 import Diagnostics from './Diagnostics.jsx';
 import Alerts2 from './Alerts2.jsx';
 import Audit from './Audit.jsx';
@@ -48,6 +49,7 @@ const SUB = [
   { k: 'remote', label: '원격접속 설정', C: RemoteAccess, group: 'remote-srv' },
   // --- User Control 그룹 ---
   { k: 'users', label: '사용자 관리', C: UserAdmin, group: 'usercontrol' },
+  { k: 'edge-users', label: '엣지 사용자 배포', C: EdgeUserDeploy, group: 'usercontrol' },
   { k: 'auth-ad', label: '인증(AD)', C: AdSettings, group: 'usercontrol' },
   // --- Security 그룹 ---
   { k: 'session-security', label: '세션 보안', C: SessionSecurity, group: 'security' },
@@ -70,7 +72,7 @@ const GROUPS = {
   collect: { label: '🗄 수집 서버', desc: 'iDRAC 전력·지표 수집 + 게스트 계정 + 원격 수집 서버 등록 + 분산 에이전트 배포를 한 곳에서.' },
   gpu: { label: '🎮 GPU 사용량 수집', desc: 'GPU 수집(ESXi vGPU/사용률) · GPU 게스트 수집(패스쓰루, 게스트 OS 내부) · GPU 수집 진단을 한 곳에서.' },
   'remote-srv': { label: '🔌 원격 접속 서버', desc: '브라우저 SSH/RDP 중계 서버(프록시)와 원격접속 설정을 한 곳에서.' },
-  usercontrol: { label: '👤 User Control', desc: '사용자 계정(역할·2FA)과 인증(AD/LDAP) 연동을 한 곳에서.' },
+  usercontrol: { label: '👤 User Control', desc: '사용자 계정(역할·2FA)·엣지 사용자 배포(중앙→엣지)·인증(AD/LDAP) 연동을 한 곳에서.' },
   security: { label: '🛡️ Security', desc: '세션 보안과 이상동작 탐지를 한 곳에서.' },
   log: { label: '📋 Log', desc: 'vCenter 로그 보관 · 진단·로그 · 감사 로그를 한 곳에서.' },
 };
