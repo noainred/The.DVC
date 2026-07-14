@@ -237,7 +237,8 @@ function sortBy(items, key, order = 'desc') {
 
 api.get('/health', (_req, res) => {
   const snap = store.get();
-  const connected = snap.vcenters.filter((v) => v.status === 'connected').length;
+  const byStatus = (s) => snap.vcenters.filter((v) => v.status === s).length;
+  const connected = byStatus('connected');
   const g = snap.rollups?.global || {};
   res.json({
     status: 'ok',
@@ -247,6 +248,11 @@ api.get('/health', (_req, res) => {
     uptimeSec: Math.floor(process.uptime()),
     vcenters: snap.vcenters.length,
     vcentersConnected: connected,
+    // 상태 분류 — 'pending'(첫 수집 전/수집 중)을 'unreachable'(연결 실패)과 구분해 헤더가
+    // 수집 직후 잠깐을 '불가'로 잘못 표시하지 않게 한다.
+    vcentersPending: byStatus('pending'),
+    vcentersUnreachable: byStatus('unreachable'),
+    vcentersMaintenance: byStatus('maintenance'),
     hosts: g.hosts || 0,
     vms: g.vms || 0,
     vmsPoweredOn: g.vmsPoweredOn || 0,
