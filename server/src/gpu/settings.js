@@ -151,3 +151,13 @@ export function resolveVmCreds(s, vcId, vmId, isWindows = false) {
 export function resolveVmIp(s, vcId, vmId) {
   return String((((s.vcenters || {})[vcId] || {}).vmIps || {})[vmId] || '').trim();
 }
+
+/**
+ * OS별 수집 방식 조정. Windows는 기본적으로 OpenSSH 서버(sshd)가 없어 'ssh' 단독이면
+ * 수집이 실패하므로, Windows VM은 VMware Tools 게스트 작업(nvidia-smi.exe) 우선인 'auto'로
+ * 바꾼다. Linux 및 guestops/auto는 그대로 둔다.
+ */
+export function resolveCollectMethod(method, isWindows = false) {
+  const m = ['guestops', 'ssh', 'auto'].includes(method) ? method : 'auto';
+  return (isWindows && m === 'ssh') ? 'auto' : m;
+}

@@ -9,7 +9,7 @@
 
 import { config, loadVcenterConfig } from '../config.js';
 import { store } from '../store.js';
-import { loadGpuGuestSettings, resolveVmCreds, resolveVmIp } from './settings.js';
+import { loadGpuGuestSettings, resolveVmCreds, resolveVmIp, resolveCollectMethod } from './settings.js';
 import { setGuestGpu, pruneGuestGpu, guestGpuCounts } from './store.js';
 import { collectVmGpu, VimSoapClient } from './guestops.js';
 import { collectVmGpuSsh, guestIps } from './sshCollect.js';
@@ -119,8 +119,11 @@ async function pollLive(snap, vc, s) {
       if (!creds) return;
       const moref = String(v.id).split(':').slice(1).join(':');
       const dlHosts = dlByHost.get(v.host) || [];
-      const method = s.collectMethod || 'auto';
-      console.log(`[gpu-guest]   → ${v.name} (${moref}) host=${v.host} 계정=${creds.username}(${creds.source}) 방식=${method} dl후보=[${dlHosts.join(', ')}]`);
+      // Windows는 기본적으로 OpenSSH 서버가 없어 SSH 단독('ssh')이면 수집이 실패한다. Windows VM은
+      // VMware Tools 게스트 작업(cmd.exe /c nvidia-smi.exe) 우선(auto)으로 자동 조정(리눅스는 그대로).
+      const method = resolveCollectMethod(s.collectMethod, isWindows);
+      const winAdjusted = isWindows && (s.collectMethod || 'auto') === 'ssh';
+      console.log(`[gpu-guest]   → ${v.name} (${moref}) host=${v.host} 계정=${creds.username}(${creds.source}) OS=${isWindows ? 'Windows' : 'Linux'} 방식=${method}${winAdjusted ? '(Windows용 게스트작업 우선 조정)' : ''} dl후보=[${dlHosts.join(', ')}]`);
       let err = null;
       // 'ssh'=직접 SSH+nvidia-smi · 'auto'=게스트작업 먼저→실패 시 SSH(+VM별 성공 방식 학습) · 'guestops'=VMware Tools.
       const viaSsh = () => collectVmGpuSsh(v, creds, { timeoutMs: s.timeoutMs, port: s.sshPort, preferIp: resolveVmIp(s, vc.id, v.id) });
@@ -130,7 +133,8 @@ async function pollLive(snap, vc, s) {
         r = await viaSsh().catch((e) => { err = e.message; return null; });
       } else if (method === 'auto') {
         // 직전 성공 방식을 먼저(학습). 처음엔 게스트작업 → 실패하면 SSH 폴백. 추가 설정 없이 자동 수집.
-        const order = learnedMethod.get(v.id) === 'ssh' ? ['ssh', 'guestops'] : ['guestops', 'ssh'];
+        // Windows는 SSH 폴백이 대개 무의미(무sshd)하므로 항상 게스트작업 우선(학습된 ssh 무시).
+        const order = (!isWindows && learnedMethod.get(v.id) === 'ssh') ? ['ssh', 'guestops'] : ['guestops', 'ssh'];
         for (const m of order) {
           r = await (m === 'ssh' ? viaSsh() : viaGuestops()).catch((e) => { err = e.message; return null; });
           if (r && r.utilPct != null) {
