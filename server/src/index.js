@@ -51,6 +51,7 @@ import { startIdracScanWorker } from './agent/idracScanWorker.js';
 import { startInventoryPush } from './agent/inventoryPush.js';
 import { startFleetPush } from './agent/fleetPush.js';
 import { startGpuGuestPush } from './agent/gpuGuestPush.js';
+import { startGpuGuestConfigPull } from './agent/gpuGuestConfigPull.js';
 import { startPingWorker } from './agent/pingWorker.js';
 import { startConfigPush } from './agent/configPush.js';
 import { startBackupScheduler } from './backup/settings.js';
@@ -161,7 +162,7 @@ const stagger = [
   startSelfRegister, // 엣지 자기등록(EDGE_MODE=all) — 중앙 수집 서버 목록에 자동 등록
   startIdracPoller, startIdracScanPoller, startNsxPoller, startAlertEngine, startMetricsSampler, startGpuGuestPoller, startPhysicalGpuPoller,
   startIpScanPoller, startIpScanAgent, startCollectorPuller, startAgentScanner, startIdracScanWorker, startInventoryPush,
-  startGpuGuestPush, startPingWorker, startConfigPush, startFleetPush, startBackupScheduler, startLogPoller, startLogQueryWorker, startCaptureWorker, startCaptureMonitor, startLoginMonitor, startGuestScanScheduler, startOsScanner,
+  startGpuGuestPush, startGpuGuestConfigPull, startPingWorker, startConfigPush, startFleetPush, startBackupScheduler, startLogPoller, startLogQueryWorker, startCaptureWorker, startCaptureMonitor, startLoginMonitor, startGuestScanScheduler, startOsScanner,
   startDbSizeSampler, startPingMonitor,
 ];
 stagger.forEach((start, i) => setTimeout(() => { try { start(); } catch (e) { console.error('[start] 폴러 기동 실패:', e?.message); } }, i * 1500).unref?.());

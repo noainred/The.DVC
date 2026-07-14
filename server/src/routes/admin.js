@@ -38,6 +38,7 @@ import { getAllPhysicalGpu } from '../gpu/physicalStore.js';
 import { physicalPollerStatus, pollPhysicalOnce } from '../gpu/physicalPoller.js';
 import { getGuestGpuVms } from '../gpu/store.js';
 import { getAllGpuGuestDiag } from '../central/gpuGuestDiag.js';
+import { getAssignedGpuGuest, setAssignedGpuGuest, listAssignedGpuGuestAgents, redactAssignedGpuGuest } from '../central/agentGpuGuestConfig.js';
 import { loadVcenterConfig } from '../config.js';
 import { getVmHardware, reconfigVm } from '../provision/reconfig.js';
 import { applyFleetAssign } from '../insights/fleetAssign.js';
@@ -550,7 +551,10 @@ adminRouter.get('/gpu-guest/vms', adminOnly, (req, res) => {
   if (!vcId) return res.status(400).json({ error: 'vcenterId 필요' });
   const snap = store.get();
   const hostNames = gpuHostIds(snap, vcId);
-  const s = loadGpuGuestSettings();
+  // agent 지정 시(중앙 UI에서 원격 엣지 설정 배포 편집) '이 엣지 앞으로 지정한 배포 설정' 기준으로
+  // 저장 여부/공용계정/IP를 표시. 지정 없으면 로컬 설정 기준(기존 동작).
+  const agent = String(req.query.agent || '').trim();
+  const s = agent ? (getAssignedGpuGuest(agent) || { vcenters: {} }) : loadGpuGuestSettings();
   const saved = (s.vcenters[vcId]?.vms) || {};
   // 실제 수집 상태(게스트에서 읽어온 마지막 값) — vmId 기준.
   const collectedBy = new Map(getGuestGpuVms().map((x) => [x.vmId, x]));
@@ -570,6 +574,30 @@ adminRouter.get('/gpu-guest/vms', adminOnly, (req, res) => {
     })
     .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
   res.json({ vcenterId: vcId, vcShared: { username: s.vcenters[vcId]?.username || '', hasPassword: !!s.vcenters[vcId]?.password }, vms });
+});
+
+// ── 중앙→엣지 GPU 게스트 설정 배포 관리 ────────────────────────────────────────────
+// 원격 엣지(agent) 앞으로 GPU 게스트 수집 설정을 지정 → 엣지가 pull해 로컬 적용.
+// 배포 대상 후보 agent 목록(수집 서버 등록분 + gpu-guest push 이력 + 이미 배포 지정된 것).
+adminRouter.get('/gpu-guest/deploy/agents', adminOnly, (_req, res) => {
+  const assigned = new Map(listAssignedGpuGuestAgents().map((a) => [a.agent, a]));
+  const names = new Set();
+  for (const c of listCollectors()) if (c.name) names.add(c.name); // 수집 서버(원격) 이름 = agent 이름
+  for (const x of getAllGpuGuestDiag()) if (x.agent) names.add(x.agent); // gpu-guest 수집을 push한 엣지
+  for (const a of assigned.keys()) names.add(a);
+  const agents = [...names].sort().map((agent) => ({ agent, ...(assigned.get(agent) || { at: 0, vcenters: 0, vmCreds: 0, vmIps: 0, enabled: false, assigned: false }), assigned: assigned.has(agent) }));
+  res.json({ agents });
+});
+// 특정 엣지 앞 배포 설정 조회(비밀번호 가림).
+adminRouter.get('/gpu-guest/deploy/:agent', adminOnly, (req, res) => {
+  res.json(redactAssignedGpuGuest(req.params.agent));
+});
+// 특정 엣지 앞 배포 설정 저장(병합). 엣지가 다음 pull 주기에 가져가 적용.
+adminRouter.put('/gpu-guest/deploy/:agent', adminOnly, (req, res) => {
+  const agent = String(req.params.agent || '').trim();
+  if (!agent) return res.status(400).json({ ok: false, reason: 'agent 필요' });
+  setAssignedGpuGuest(agent, req.body || {});
+  res.json({ ok: true, ...redactAssignedGpuGuest(agent) });
 });
 
 // ── 물리(베어메탈) 서버 GPU 수집 — IP+계정으로 SSH nvidia-smi(가상화 안 한 서버) ──────

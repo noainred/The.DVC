@@ -53,9 +53,11 @@ function clamp(v, min, max, dflt) {
   return Math.max(min, Math.min(max, n));
 }
 
-/** Persist a partial update. vcenters는 병합하며, 빈 password는 기존 값을 유지한다. */
-export function saveGpuGuestSettings(partial) {
-  const cur = readFile();
+/**
+ * 현재 설정(cur)에 partial을 병합해 새 설정 객체를 반환한다(순수 함수 — 디스크 접근 없음).
+ * 로컬 저장(saveGpuGuestSettings)과 중앙의 'agent별 배포 설정' 저장이 동일 병합 규칙을 공유한다.
+ */
+export function mergeGpuGuestSettings(cur, partial = {}) {
   const next = { ...DEFAULTS, ...cur };
   if (partial.enabled !== undefined) next.enabled = Boolean(partial.enabled);
   if (partial.pollIntervalMs !== undefined) next.pollIntervalMs = clamp(partial.pollIntervalMs, 10_000, 86_400_000, DEFAULTS.pollIntervalMs);
@@ -103,6 +105,13 @@ export function saveGpuGuestSettings(partial) {
       next.vcenters[id] = merged;
     }
   }
+  return next;
+}
+
+/** Persist a partial update. vcenters는 병합하며, 빈 password는 기존 값을 유지한다. */
+export function saveGpuGuestSettings(partial) {
+  const cur = readFile();
+  const next = mergeGpuGuestSettings(cur, partial);
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
   fs.writeFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
   try { fs.chmodSync(FILE, 0o600); } catch { /* best effort */ }
