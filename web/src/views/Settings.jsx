@@ -48,7 +48,7 @@ const SUB = [
   { k: 'proxy', label: '중계 서버', C: ProxySettings, group: 'remote-srv' },
   { k: 'remote', label: '원격접속 설정', C: RemoteAccess, group: 'remote-srv' },
   // --- User Control 그룹 ---
-  { k: 'users', label: '사용자 관리', C: UserAdmin, group: 'usercontrol' },
+  { k: 'users', label: '메인포탈 사용자 관리', C: UserAdmin, group: 'usercontrol' },
   { k: 'edge-users', label: '엣지 사용자 배포', C: EdgeUserDeploy, group: 'usercontrol' },
   { k: 'auth-ad', label: '인증(AD)', C: AdSettings, group: 'usercontrol' },
   // --- Security 그룹 ---
