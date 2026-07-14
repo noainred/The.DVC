@@ -16,6 +16,7 @@ import cors from 'cors';
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from './config.js';
+import { writeReleaseFile } from './util/releaseFile.js';
 import { compression } from './util/compress.js';
 import { rateLimit } from './util/rateLimit.js';
 import { store } from './store.js';
@@ -156,6 +157,8 @@ if (fs.existsSync(config.webDist)) {
 
 // 메인 수집(vCenter)만 즉시 기동하고, 보조 폴러들은 초기 기동을 스태거(분산)해
 // 부팅 직후 동시 폴링으로 인한 CPU 스파이크를 평탄화한다(이후 각자 주기 반복).
+// CONFIG_DIR/vmware-portal-release 에 현재 버전을 명시(redhat-release 방식). 기동 시마다 갱신.
+try { const rf = writeReleaseFile(); if (rf) console.log(`[release] ${rf} 기록`); } catch { /* best effort */ }
 store.start();
 upgradeManager.start();
 const stagger = [
