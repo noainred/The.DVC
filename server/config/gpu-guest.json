@@ -1,0 +1,22 @@
+{
+  "enabled": false,
+  "pollIntervalMs": 60000,
+  "concurrency": 4,
+  "timeoutMs": 20000,
+  "maxVmsPerVcenter": 1000,
+  "collectMethod": "auto",
+  "sshPort": 22,
+  "vcenters": {
+    "OC2": {
+      "enabled": true,
+      "username": "root",
+      "password": "",
+      "winUsername": "",
+      "winPassword": "",
+      "vms": {},
+      "vmIps": {
+        "OC2:vm-2": "192.168.1.9"
+      }
+    }
+  }
+}

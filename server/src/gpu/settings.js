@@ -78,7 +78,15 @@ export function saveGpuGuestSettings(partial) {
         winUsername: v.winUsername !== undefined ? String(v.winUsername || '') : (prev.winUsername || ''),
         winPassword: (v.winPassword !== undefined && v.winPassword !== '') ? String(v.winPassword) : (prev.winPassword || ''),
         vms: { ...(prev.vms || {}) }, // VM별 자격증명 override
+        // VM별 SSH 접속 IP 고정(다중 NIC일 때). 자격증명(vms)과 독립 — 공용 계정 VM도 지정 가능.
+        vmIps: { ...(prev.vmIps || {}) },
       };
+      if (v.vmIps && typeof v.vmIps === 'object') {
+        for (const [vmId, ip] of Object.entries(v.vmIps)) {
+          const t = String(ip || '').trim();
+          if (t) merged.vmIps[vmId] = t; else delete merged.vmIps[vmId]; // 빈 값 = 자동(모든 IP)으로 복귀
+        }
+      }
       if (v.vms && typeof v.vms === 'object') {
         for (const [vmId, cred] of Object.entries(v.vms)) {
           if (cred === null) { delete merged.vms[vmId]; continue; } // 공용으로 전환 = override 제거
@@ -107,7 +115,7 @@ export function redactGpuGuestSettings(s) {
   for (const [id, v] of Object.entries(s.vcenters || {})) {
     const vms = {};
     for (const [vmId, c] of Object.entries(v.vms || {})) vms[vmId] = { username: c.username || '', hasPassword: !!c.password, passwordless: !!c.passwordless };
-    vcenters[id] = { enabled: !!v.enabled, username: v.username || '', hasPassword: !!v.password, winUsername: v.winUsername || '', hasWinPassword: !!v.winPassword, vms };
+    vcenters[id] = { enabled: !!v.enabled, username: v.username || '', hasPassword: !!v.password, winUsername: v.winUsername || '', hasWinPassword: !!v.winPassword, vms, vmIps: v.vmIps || {} };
   }
   return { enabled: s.enabled, pollIntervalMs: s.pollIntervalMs, concurrency: s.concurrency, timeoutMs: s.timeoutMs, maxVmsPerVcenter: s.maxVmsPerVcenter, collectMethod: s.collectMethod, sshPort: s.sshPort, vcenters };
 }
@@ -137,4 +145,9 @@ export function resolveVmCreds(s, vcId, vmId, isWindows = false) {
   if (isWindows && vc.winUsername) return { username: vc.winUsername, password: vc.winPassword || '', source: 'vc-win' };
   if (vc.username) return { username: vc.username, password: vc.password || '', source: 'vc' };
   return null;
+}
+
+/** VM별 SSH 접속 고정 IP(다중 NIC일 때 사용자가 지정). 없으면 '' (자동=모든 IP 시도). */
+export function resolveVmIp(s, vcId, vmId) {
+  return String((((s.vcenters || {})[vcId] || {}).vmIps || {})[vmId] || '').trim();
 }
