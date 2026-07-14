@@ -18,6 +18,7 @@ import { pullNow as pullCollectorsNow } from '../collector/puller.js';
 import { upsertCollectorFromAgent } from '../collector/registry.js';
 import { recordIngest } from '../central/ingestStats.js';
 import { setAgentConfig } from '../central/agentConfig.js';
+import { getAssignedGpuGuest } from '../central/agentGpuGuestConfig.js';
 import { takeLogQueries, setLogQueryResult } from '../central/logQueries.js';
 import { takeCaptureJobs, setCaptureResult } from '../central/captureJobs.js';
 import { recordCapture } from '../net/captureHistory.js';
@@ -195,6 +196,20 @@ centralRouter.post('/gpu-guest-data', (req, res) => {
   if (b.diag) setGpuGuestDiag(b.agent, b.diag, { hosts: hosts.length, vms: vms.length }); // 수집 진단 보관
   console.log(`[central] gpu-guest-data 수신: agent=${b.agent} hosts=${hosts.length} vms=${vms.length}`);
   res.json({ ok: true, agent: b.agent, hosts: hosts.length, vms: vms.length });
+});
+
+// 중앙→엣지 GPU 게스트 설정 배포(pull): 엣지가 자기 이름으로 배포 설정을 가져가 로컬 적용.
+// 폐쇄망/NAT 엣지도 아웃바운드 GET만으로 동작. 비밀번호 포함(엣지가 실제 인증에 사용) → 토큰 필수.
+// GET /api/central/gpu-guest-config?agent=<이름>
+centralRouter.get('/gpu-guest-config', (req, res) => {
+  if (!config.central.token) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: '토큰 불일치' });
+  const agent = String(req.query.agent || req.get('X-Agent-Name') || '').trim();
+  if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
+  const settings = getAssignedGpuGuest(agent);
+  if (!settings) return res.json({ ok: true, agent, assigned: false }); // 지정 없음 → 엣지는 로컬 설정 유지
+  const { _updatedAt, ...s } = settings;
+  res.json({ ok: true, agent, assigned: true, at: _updatedAt || 0, settings: s });
 });
 
 // 위임 Ping: 현장 에이전트가 자기 담당 vCenter들의 대기 IP를 인출 → ping → 결과 보고.

@@ -23,21 +23,37 @@ export default function GpuGuestSettings() {
   const [form, setForm] = useState(null);   // local editable copy (전역 + 공용 계정)
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
+  // 설정 대상: '' = 이 포탈(로컬 수집), 그 외 = 원격 엣지(agent) 앞으로 배포(엣지가 pull해 적용).
+  const [deployAgent, setDeployAgent] = useState('');
+  const [agents, setAgents] = useState([]);
 
-  const load = async () => {
+  const settingsUrl = (agent) => (agent ? `/admin/gpu-guest/deploy/${encodeURIComponent(agent)}` : '/admin/gpu-guest/settings');
+
+  const load = async (agent = deployAgent, force = false) => {
     try {
       const [d, v] = await Promise.all([
-        fetchJson('/admin/gpu-guest/settings'),
+        fetchJson(settingsUrl(agent)),
         fetchJson('/admin/vcenters').catch(() => ({ vcenters: [] })),
       ]);
-      setData(d); setVcs(v.vcenters || []);
-      // 함수형 업데이트로 '현재' form을 확인(effect deps=[]라 클로저의 form은 첫 렌더값 null에
-      // 영구 바인딩 — 조건 없이 매 30초 폴링마다 미저장 입력을 덮어쓰던 버그). 최초 1회만 채운다.
-      setForm((cur) => cur ?? toForm(d.settings, v.vcenters || []));
+      // 로컬: { settings, status } · 배포: { assigned, settings } (미지정이면 settings=null)
+      const settings = agent ? (d.settings || { vcenters: {} }) : d.settings;
+      setData(agent ? { settings, status: {}, deploy: true, assigned: !!d.assigned } : d);
+      setVcs(v.vcenters || []);
+      // 대상 전환(force) 시 폼을 새로 채움. 로컬 30초 폴링은 최초 1회만(미저장 입력 보존).
+      setForm((cur) => (force || !cur ? toForm(settings || { vcenters: {} }, v.vcenters || []) : cur));
       setError(null);
     } catch (e) { setError(e.message); }
   };
-  useEffect(() => { load(); const t = setInterval(load, 30_000); return () => clearInterval(t); /* eslint-disable-next-line */ }, []);
+  // 배포 대상 후보 목록(1회).
+  useEffect(() => { fetchJson('/admin/gpu-guest/deploy/agents').then((r) => setAgents(r.agents || [])).catch(() => {}); }, []);
+  // 대상 전환 시 폼 재로딩. 로컬일 때만 30초 자동 폴링(배포 편집 중 덮어쓰기 방지).
+  useEffect(() => {
+    load(deployAgent, true);
+    if (deployAgent) return undefined;
+    const t = setInterval(() => load('', false), 30_000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line
+  }, [deployAgent]);
 
   if (error) return <ErrorBox message={error} />;
   if (!data || !form) return <Loading />;
@@ -47,10 +63,14 @@ export default function GpuGuestSettings() {
   const save = async () => {
     setBusy(true); setMsg(null);
     try {
-      const r = await putJson('/admin/gpu-guest/settings', form);
-      setData(r);
-      setForm(toForm(r.settings, vcs, form));
-      setMsg('저장되었습니다. 새 설정이 다음 주기부터 적용됩니다.');
+      const r = await putJson(settingsUrl(deployAgent), form);
+      const settings = deployAgent ? (r.settings || form) : r.settings;
+      if (!deployAgent) setData(r);
+      setForm(toForm(settings, vcs, form));
+      setMsg(deployAgent
+        ? `원격 엣지 [${deployAgent}]로 배포 저장됨 — 엣지가 다음 pull 주기(약 1분)에 가져가 적용합니다.`
+        : '저장되었습니다. 새 설정이 다음 주기부터 적용됩니다.');
+      if (deployAgent) fetchJson('/admin/gpu-guest/deploy/agents').then((rr) => setAgents(rr.agents || [])).catch(() => {});
     } catch (e) { setMsg(`오류: ${e.message}`); }
     finally { setBusy(false); }
   };
@@ -68,6 +88,24 @@ export default function GpuGuestSettings() {
         VM마다 계정이 다르면 <b>VM별 계정</b>을 등록하세요.
         <span className="badge amber" style={{ marginLeft: 6 }}>실환경 BETA</span>
       </p>
+
+      {/* 설정 대상: 이 포탈(로컬) vs 원격 엣지 배포. 원격 엣지는 폐쇄망/NAT라 중앙이 직접 접속 못 하므로,
+          여기서 지정한 설정을 엣지가 pull해 자기 로컬에 적용한다(실제 SSH/게스트작업은 엣지에서 수행). */}
+      <div className="card" style={{ padding: '10px 16px', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <b style={{ fontSize: 13 }}>설정 대상</b>
+        <select className="select" style={{ minWidth: 260 }} value={deployAgent} onChange={(e) => { setDeployAgent(e.target.value); setMsg(null); }}
+          title="이 포탈(로컬)에서 직접 수집할지, 원격 엣지 앞으로 설정을 배포할지 선택. 원격 엣지 앞 설정은 엣지가 주기적으로 가져가 적용합니다.">
+          <option value="">🖥️ 이 포탈(로컬 수집)</option>
+          {agents.length > 0 && <optgroup label="원격 엣지에 배포(pull)">
+            {agents.map((a) => <option key={a.agent} value={a.agent}>📡 {a.agent}{a.assigned ? ` · 배포됨(vC ${a.vcenters}·VM계정 ${a.vmCreds})` : ''}</option>)}
+          </optgroup>}
+        </select>
+        {deployAgent && (
+          <span className="muted" style={{ fontSize: 12, color: 'var(--amber,#f59e0b)' }}>
+            ℹ 이 설정은 원격 엣지 <b>{deployAgent}</b>로 배포됩니다. 엣지가 다음 pull 주기(약 1분)에 가져가 로컬에 적용하고, <b>실제 SSH/게스트작업은 엣지에서</b> 수행합니다. (테스트 버튼은 중앙에서 원격 VM에 도달 못 하므로 비활성)
+          </span>
+        )}
+      </div>
 
       <div className="card" style={{ padding: 16 }}>
         <label className="flex gap" style={{ alignItems: 'center', cursor: 'pointer' }}>
@@ -161,22 +199,30 @@ export default function GpuGuestSettings() {
       <QuickSshTest />
 
       {/* VM별 계정 관리 + 테스트 */}
-      <VmCredManager vcs={vcs} vcenters={form.vcenters} collectMethod={form.collectMethod} onSavedShared={load} />
+      <VmCredManager vcs={vcs} vcenters={form.vcenters} collectMethod={form.collectMethod} onSavedShared={() => load(deployAgent, false)} deployAgent={deployAgent} />
 
-      {/* 물리(베어메탈) 서버 GPU 수집 — 가상화 안 한 서버 SSH nvidia-smi */}
-      <PhysicalGpuManager vcs={vcs} />
+      {/* 물리(베어메탈) 서버 GPU 수집 — 가상화 안 한 서버 SSH nvidia-smi. 로컬 전용(엣지 배포 대상 아님). */}
+      {!deployAgent && <PhysicalGpuManager vcs={vcs} />}
 
-      <div className="card" style={{ padding: 16, marginTop: 14 }}>
-        <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>현재 상태</div>
-        <div className="flex gap wrap" style={{ fontSize: 13 }}>
-          <span className="muted">상태 <b style={{ color: status.enabled ? 'var(--green)' : 'var(--text-dim)' }}>{status.enabled ? '활성' : '비활성'}</b></span>
-          <span className="muted">대상 법인 <b style={{ color: 'var(--text)' }}>{status.monitored ?? 0}</b></span>
-          <span className="muted">마지막 수집 <b style={{ color: 'var(--text)' }}>{fmtAgo(last?.at)}</b></span>
-          {last && (last.skipped
-            ? <span className="muted">({last.skipped})</span>
-            : <span className="muted">[{last.mode}] 호스트 <b style={{ color: 'var(--text)' }}>{last.hosts}</b> · VM <b style={{ color: 'var(--text)' }}>{last.vms}</b>{last.errors ? ` · 오류 ${last.errors}` : ''}</span>)}
+      {deployAgent ? (
+        <div className="card" style={{ padding: 16, marginTop: 14 }}>
+          <div className="muted" style={{ fontSize: 12 }}>
+            원격 엣지 <b style={{ color: 'var(--text)' }}>{deployAgent}</b> 배포 모드 — 실제 수집 상태/진단은 이 엣지에서 수행되며, GPU 수집 진단 화면의 <b>Agent: {deployAgent}</b> 블록에서 확인하세요.
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="card" style={{ padding: 16, marginTop: 14 }}>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>현재 상태</div>
+          <div className="flex gap wrap" style={{ fontSize: 13 }}>
+            <span className="muted">상태 <b style={{ color: status.enabled ? 'var(--green)' : 'var(--text-dim)' }}>{status.enabled ? '활성' : '비활성'}</b></span>
+            <span className="muted">대상 법인 <b style={{ color: 'var(--text)' }}>{status.monitored ?? 0}</b></span>
+            <span className="muted">마지막 수집 <b style={{ color: 'var(--text)' }}>{fmtAgo(last?.at)}</b></span>
+            {last && (last.skipped
+              ? <span className="muted">({last.skipped})</span>
+              : <span className="muted">[{last.mode}] 호스트 <b style={{ color: 'var(--text)' }}>{last.hosts}</b> · VM <b style={{ color: 'var(--text)' }}>{last.vms}</b>{last.errors ? ` · 오류 ${last.errors}` : ''}</span>)}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -249,8 +295,10 @@ function SortTh({ k, sort, onSort, children }) {
   );
 }
 
-/** VM별 계정 관리 — 법인 선택 → 패스쓰루 GPU VM 조회 → 공용/별도 선택 + 로그인/읽기 테스트(개별·일괄). */
-function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared }) {
+/** VM별 계정 관리 — 법인 선택 → 패스쓰루 GPU VM 조회 → 공용/별도 선택 + 로그인/읽기 테스트(개별·일괄).
+ * deployAgent 지정 시: 저장이 로컬이 아니라 '그 엣지 앞 배포 설정'으로 가고, 테스트는 비활성(중앙이
+ * 원격 VM에 도달 못 하므로). VM 목록/저장 표시는 배포 설정 기준. */
+function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared, deployAgent = '' }) {
   const [selVc, setSelVc] = useState('');
   const [rows, setRows] = useState(null);   // null=미조회, []=없음
   const [osFilter, setOsFilter] = useState('all'); // all | linux | windows
@@ -276,7 +324,7 @@ function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared }) {
     if (!vcId) { setRows(null); return; }
     setLoading(true); setMsg(null);
     try {
-      const r = await fetchJson(`/admin/gpu-guest/vms?vcenterId=${encodeURIComponent(vcId)}`);
+      const r = await fetchJson(`/admin/gpu-guest/vms?vcenterId=${encodeURIComponent(vcId)}${deployAgent ? `&agent=${encodeURIComponent(deployAgent)}` : ''}`);
       setRows((r.vms || []).map((v) => ({
         ...v,
         mode: v.hasOwnCred ? 'own' : 'shared',   // 'shared'=공용 | 'own'=별도
@@ -303,6 +351,8 @@ function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared }) {
 
   const pickVc = (vcId) => { setSelVc(vcId); setRows(null); loadVms(vcId); };
   const setRow = (id, patch) => setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  // 배포 대상(로컬↔엣지)이 바뀌면 저장 표시 기준이 달라지므로 조회된 VM 목록을 다시 불러온다.
+  useEffect(() => { if (selVc) loadVms(selVc); /* eslint-disable-next-line */ }, [deployAgent]);
 
   const runTest = async (subset) => {
     const targets = subset || rows;
@@ -372,14 +422,17 @@ function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared }) {
       // SSH를 절대 시도하지 않아 "테스트는 되는데 수집은 안 됨"이 된다. 이때 수집 방식을 'auto'로
       // 올려 SSH 폴백을 켠다(게스트작업이 잘 되는 VM은 그대로, 막힌 VM만 SSH). 'ssh'로 강제하면
       // 게스트작업으로 잘 수집되던 VM이 끊길 수 있어 안전한 'auto'를 쓴다.
-      const bumpToAuto = (testMethod === 'ssh' || testMethod === 'auto') && collectMethod === 'guestops';
-      await putJson('/admin/gpu-guest/settings', {
+      const bumpToAuto = !deployAgent && (testMethod === 'ssh' || testMethod === 'auto') && collectMethod === 'guestops';
+      const url = deployAgent ? `/admin/gpu-guest/deploy/${encodeURIComponent(deployAgent)}` : '/admin/gpu-guest/settings';
+      await putJson(url, {
         vcenters: { [selVc]: { vms, vmIps } },
         ...(bumpToAuto ? { collectMethod: 'auto' } : {}),
       });
-      setMsg(bumpToAuto
-        ? "VM별 계정 저장 완료 — 수집 방식이 'VMware Tools만'이라 SSH 수집이 안 되던 걸 'auto(자동 폴백)'로 바꿔 켰습니다. 다음 주기부터 SSH로 수집됩니다."
-        : 'VM별 계정을 저장했습니다. (수집 방식이 SSH/auto인지 위 설정에서 확인하세요)');
+      setMsg(deployAgent
+        ? `원격 엣지 [${deployAgent}]로 VM별 계정/IP 배포 저장됨 — 엣지가 다음 pull 주기에 가져가 적용합니다.`
+        : (bumpToAuto
+          ? "VM별 계정 저장 완료 — 수집 방식이 'VMware Tools만'이라 SSH 수집이 안 되던 걸 'auto(자동 폴백)'로 바꿔 켰습니다. 다음 주기부터 SSH로 수집됩니다."
+          : 'VM별 계정을 저장했습니다. (수집 방식이 SSH/auto인지 위 설정에서 확인하세요)'));
       if (bumpToAuto) onSavedShared?.();
       await loadVms(selVc);
     } catch (e) { setMsg(`오류: ${e.message}`); }
@@ -522,7 +575,7 @@ function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared }) {
                       </td>
                       <td>
                         <div className="flex gap" style={{ alignItems: 'center', gap: 6 }}>
-                          <button className="tab" style={{ padding: '4px 8px' }} disabled={!ready} title={ready ? '' : '전원 On + Tools RUNNING 필요'} onClick={() => runTest([r])}>테스트</button>
+                          <button className="tab" style={{ padding: '4px 8px' }} disabled={!ready || !!deployAgent} title={deployAgent ? '원격 엣지 배포 모드 — 테스트는 엣지에서 수행됩니다(중앙은 원격 VM에 도달 못 함)' : (ready ? '' : '전원 On + Tools RUNNING 필요')} onClick={() => runTest([r])}>테스트</button>
                           <TestResult t={r.test} />
                         </div>
                       </td>
@@ -534,10 +587,10 @@ function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared }) {
           </div>
 
           <div className="flex gap wrap" style={{ alignItems: 'center', marginTop: 12 }}>
-            <button className="login-btn" style={{ flex: 'none', padding: '8px 14px' }} disabled={!!testProg || selected.size === 0}
-              title={selected.size === 0 ? '체크박스로 VM을 선택하세요' : `선택한 ${selected.size}대만 테스트`}
+            <button className="login-btn" style={{ flex: 'none', padding: '8px 14px' }} disabled={!!testProg || selected.size === 0 || !!deployAgent}
+              title={deployAgent ? '원격 엣지 배포 모드 — 테스트는 엣지에서 수행됩니다' : (selected.size === 0 ? '체크박스로 VM을 선택하세요' : `선택한 ${selected.size}대만 테스트`)}
               onClick={() => runTest(rows.filter((r) => selected.has(r.id)))}>✅ 선택 테스트 ({selected.size})</button>
-            <button className="logout-btn" style={{ padding: '8px 14px' }} disabled={!!testProg} onClick={() => runTest(shown)}>⚡ {osFilter === 'all' ? '모두' : osFilter} 테스트</button>
+            <button className="logout-btn" style={{ padding: '8px 14px' }} disabled={!!testProg || !!deployAgent} title={deployAgent ? '원격 엣지 배포 모드 — 테스트는 엣지에서 수행됩니다' : ''} onClick={() => runTest(shown)}>⚡ {osFilter === 'all' ? '모두' : osFilter} 테스트</button>
             {selected.size > 0 && <button className="tab" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => setSelected(new Set())}>선택 해제</button>}
             <label className="flex gap" style={{ alignItems: 'center', fontSize: 12 }} title="테스트 수집 방식. SSH=게스트 IP로 직접 접속해 nvidia-smi(VMware Tools 게스트작업 인증이 막힐 때). auto=SSH 우선 실패 시 게스트작업.">
               <span className="muted">방식</span>
