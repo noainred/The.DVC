@@ -1,0 +1,29 @@
+{
+  "_comment": "Copy to vcenters.json and fill in real credentials. Use env vars or a secrets manager in production. region is used to group sites on the global dashboard.",
+  "vcenters": [
+    {
+      "id": "vc-us-east",
+      "name": "vcenter-us-east.corp.local",
+      "host": "https://vcenter-us-east.corp.local",
+      "username": "monitor@vsphere.local",
+      "password": "CHANGE_ME",
+      "location": { "city": "Ashburn", "country": "USA", "region": "Americas", "lat": 39.04, "lon": -77.49 }
+    },
+    {
+      "id": "vc-eu-central",
+      "name": "vcenter-eu-central.corp.local",
+      "host": "https://vcenter-eu-central.corp.local",
+      "username": "monitor@vsphere.local",
+      "password": "CHANGE_ME",
+      "location": { "city": "Frankfurt", "country": "Germany", "region": "EMEA", "lat": 50.11, "lon": 8.68 }
+    },
+    {
+      "id": "vc-ap-northeast",
+      "name": "vcenter-ap-northeast.corp.local",
+      "host": "https://vcenter-ap-northeast.corp.local",
+      "username": "monitor@vsphere.local",
+      "password": "CHANGE_ME",
+      "location": { "city": "Seoul", "country": "South Korea", "region": "APAC", "lat": 37.57, "lon": 126.98 }
+    }
+  ]
+}
