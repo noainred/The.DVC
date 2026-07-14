@@ -268,16 +268,24 @@ function Portal({ user, onLogout, settingsOwners }) {
           {(() => {
             const total = health?.vcenters ?? 0;
             const conn = health?.vcentersConnected ?? 0;
-            const allOk = total === 0 || conn === total;
-            const color = allOk ? 'var(--green)' : conn === 0 ? 'var(--red)' : 'var(--amber)';
+            const pending = health?.vcentersPending ?? 0;      // 첫 수집 전/수집 중 — '불가' 아님
+            const unreach = health?.vcentersUnreachable ?? 0;  // 실제 연결 실패
+            const maint = health?.vcentersMaintenance ?? 0;    // 점검중 — '불가' 아님
+            const allOk = total === 0 || conn + maint === total; // 점검중도 정상 취급(연결 실패 아님)
+            const color = allOk ? 'var(--green)' : unreach > 0 ? 'var(--red)' : 'var(--amber)';
+            // 상태 문구: 실제 불가만 빨간 '불가', 수집 전/중은 노란 '수집 중'.
+            let tail = null;
+            if (health && !allOk) {
+              if (unreach > 0) tail = <span style={{ color: '#f87171', fontWeight: 700 }}> ({unreach} 불가{pending ? ` · ${pending} 수집중` : ''})</span>;
+              else if (pending > 0) tail = <span style={{ color: '#fbbf24', fontWeight: 700 }}> ({pending} 수집중)</span>;
+              else tail = <span style={{ color: '#fbbf24', fontWeight: 700 }}> ({total - conn - maint} 확인중)</span>;
+            }
             return (
               <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.3 }}>
                 <span>
                   <span className="dot live" style={{ background: color, boxShadow: `0 0 8px ${color}` }} />
                   {health ? `${conn}/${total} vCenter` : '연결 중…'}
-                  {health && (allOk
-                    ? <span style={{ color: '#fbbf24', fontWeight: 700 }}> OK</span>
-                    : <span style={{ color: '#f87171', fontWeight: 700 }}> ({total - conn} 불가)</span>)}
+                  {health && (allOk ? <span style={{ color: '#fbbf24', fontWeight: 700 }}> OK</span> : tail)}
                 </span>
                 {health?.generatedAt && <span className="muted" style={{ fontSize: 11, textAlign: 'center' }}>{new Date(health.generatedAt).toLocaleTimeString('ko-KR')}</span>}
               </div>
