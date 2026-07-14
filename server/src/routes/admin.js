@@ -39,7 +39,7 @@ import { physicalPollerStatus, pollPhysicalOnce } from '../gpu/physicalPoller.js
 import { getGuestGpuVms } from '../gpu/store.js';
 import { getAllGpuGuestDiag } from '../central/gpuGuestDiag.js';
 import { getAssignedGpuGuest, setAssignedGpuGuest, listAssignedGpuGuestAgents, redactAssignedGpuGuest } from '../central/agentGpuGuestConfig.js';
-import { upsertAgentUser, removeAgentUser, listAgentUsers, listAgentUserAgents } from '../central/agentUsers.js';
+import { upsertAgentUser, upsertAgentUsersBulk, removeAgentUser, listAgentUsers, listAgentUserAgents, GLOBAL_AGENT } from '../central/agentUsers.js';
 import { loadVcenterConfig } from '../config.js';
 import { getVmHardware, reconfigVm } from '../provision/reconfig.js';
 import { applyFleetAssign } from '../insights/fleetAssign.js';
@@ -609,9 +609,10 @@ adminRouter.get('/edge-users/agents', adminOnly, (_req, res) => {
   const names = new Set();
   for (const c of listCollectors()) if (c.name) names.add(c.name);
   for (const x of getAllGpuGuestDiag()) if (x.agent) names.add(x.agent);
-  for (const a of withUsers.keys()) names.add(a);
+  for (const a of withUsers.keys()) if (a !== GLOBAL_AGENT) names.add(a); // '*'(글로벌)은 개별 목록서 제외
   const agents = [...names].sort().map((agent) => ({ agent, users: withUsers.get(agent)?.users || 0, at: withUsers.get(agent)?.at || 0 }));
-  res.json({ agents });
+  const g = withUsers.get(GLOBAL_AGENT);
+  res.json({ agents, global: { users: g?.users || 0, at: g?.at || 0 } }); // global = 모든 엣지(전체) 배포 목록
 });
 // 특정 엣지 앞 배포 사용자 목록(비밀번호 해시 가림).
 adminRouter.get('/edge-users/:agent', adminOnly, (req, res) => {
@@ -621,6 +622,12 @@ adminRouter.get('/edge-users/:agent', adminOnly, (req, res) => {
 adminRouter.post('/edge-users/:agent', adminOnly, (req, res) => {
   const r = upsertAgentUser(req.params.agent, req.body || {});
   res.status(r.ok ? 200 : 400).json(r.ok ? { ok: true, users: listAgentUsers(req.params.agent) } : r);
+});
+// 여러 엣지(또는 '*'=모든 엣지)에 같은 사용자를 한 번에 배포. Body { targets:[...], username, name, role, password }.
+adminRouter.post('/edge-users-bulk', adminOnly, (req, res) => {
+  const { targets, ...spec } = req.body || {};
+  const r = upsertAgentUsersBulk(targets, spec);
+  res.status(r.ok ? 200 : 400).json(r);
 });
 // 사용자 제거(다음 pull에 엣지에서도 삭제).
 adminRouter.delete('/edge-users/:agent/:username', adminOnly, (req, res) => {
