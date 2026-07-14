@@ -86,3 +86,21 @@ test('applyManagedUsers: 생성/갱신/삭제 + 로컬 충돌 skip + 마지막 a
   // 3) 로그인 검증 — 배포된 해시로 인증 가능
   assert.ok(auth.authenticateLocal('c-admin', 'pw12345678'), '배포 해시로 로그인');
 });
+
+test('settingsOwners: 중앙 배포 admin은 설정 소유 계정에 자동 포함(파일 미저장)', async () => {
+  const sec = await import('../src/security/securitySettings.js');
+  // 중앙 배포 admin 계정 반영(applyManagedUsers → managedBy:'central', role:admin)
+  auth.applyManagedUsers([{ username: 'edgeadmin', role: 'admin', passwordHash: auth.hashPassword('edgepass12') }]);
+  // 유효 소유 계정에 edgeadmin 포함(설정 메뉴 노출 근거)
+  assert.ok(sec.loadSessionSecurity().settingsOwners.includes('edgeadmin'), 'edgeadmin 자동 포함');
+  // 자동 포함 대상 목록에도 노출
+  assert.ok(sec.managedAdminOwners().includes('edgeadmin'));
+  // '설정된' 목록(편집/저장 기준)에는 미포함 — 파일에 안 남김
+  assert.ok(!sec.loadConfiguredSecurity().settingsOwners.includes('edgeadmin'), '설정된 목록엔 미포함');
+  // 저장해도 edgeadmin이 파일에 배어들지 않음
+  const saved = sec.saveSessionSecurity({ idleLogoutMin: 20 });
+  assert.ok(!saved.settingsOwners.includes('edgeadmin'), '저장 결과(설정된 목록)에 미포함');
+  // 중앙에서 admin 제거 → 자동 소유자에서도 빠짐
+  auth.applyManagedUsers([]); // 배포 목록 비움
+  assert.ok(!sec.loadSessionSecurity().settingsOwners.includes('edgeadmin'), '중앙 제거 시 자동 해제');
+});

@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import { config } from '../config.js';
 import { requireRole, listUsers, createUser, updateUser, deleteUser, beginTotpEnroll, confirmTotpEnroll, disableTotp, verifyUserOtp, getUser, setLocalPassword } from '../auth/auth.js';
 import { getEmergencyStatus, setEmergencyStop } from '../security/emergencyStop.js';
-import { loadSessionSecurity, saveSessionSecurity } from '../security/securitySettings.js';
+import { loadSessionSecurity, saveSessionSecurity, loadConfiguredSecurity, managedAdminOwners } from '../security/securitySettings.js';
 import { saveOsScanSettings, runOsScanNow, osScanStatus } from '../inventory/osScanner.js';
 import { getOsResults } from '../inventory/osStore.js';
 import { store } from '../store.js';
@@ -921,7 +921,8 @@ adminRouter.get('/anomaly', adminOnly, (_req, res) => res.json(getAnomalySetting
 adminRouter.put('/anomaly', adminOnly, (req, res) => res.json({ ok: true, settings: saveAnomalySettings(req.body || {}) }));
 
 // 세션 보안(유휴 자동 로그아웃) — 조회는 자유, 변경은 OTP 재인증 + 감사 기록.
-adminRouter.get('/security/session', adminOnly, (_req, res) => res.json(loadSessionSecurity()));
+// 편집 UI에는 '설정된' 소유 계정만(자동 포함된 중앙 배포 admin은 별도 autoOwners로 읽기전용 안내).
+adminRouter.get('/security/session', adminOnly, (_req, res) => res.json({ ...loadConfiguredSecurity(), autoOwners: managedAdminOwners() }));
 adminRouter.put('/security/session', adminOnly, (req, res) => {
   const username = req.user?.username || 'unknown';
   // 인증이 켜져 있으면 변경 시 본인 OTP 재인증을 강제(누가 바꿨는지 신원 확정 + 무단변경 방지).
@@ -929,7 +930,7 @@ adminRouter.put('/security/session', adminOnly, (req, res) => {
     const v = verifyUserOtp(username, req.body?.otp);
     if (!v.ok) return res.status(401).json({ ok: false, reason: v.reason, needEnroll: !!v.needEnroll });
   }
-  const before = loadSessionSecurity();
+  const before = loadConfiguredSecurity();
   let after;
   try {
     after = saveSessionSecurity({ idleLogoutEnabled: req.body?.idleLogoutEnabled, idleLogoutMin: req.body?.idleLogoutMin, settingsOwners: req.body?.settingsOwners });

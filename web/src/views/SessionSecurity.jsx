@@ -53,6 +53,11 @@ export default function SessionSecurity() {
           <input className="input" style={{ width: '100%', maxWidth: 480 }} placeholder="noainred, admin" value={s.settingsOwners || ''}
             onChange={(e) => setS({ ...s, settingsOwners: e.target.value })} />
           <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>⚠ 본인 계정을 빼면 다음부터 설정에 못 들어올 수 있으니 주의하세요.</div>
+          {(s.autoOwners || []).length > 0 && (
+            <div className="muted" style={{ fontSize: 11, marginTop: 6, color: 'var(--accent-2,#22d3ee)' }}>
+              ＋ 자동 포함(중앙 배포 admin): <b>{(s.autoOwners || []).join(', ')}</b> — 중앙에서 이 엣지로 배포한 관리자 계정은 설정에 접근할 수 있습니다(여기서 지우지 않아도 됨. 중앙에서 제거하면 자동 해제).
+            </div>
+          )}
         </div>
 
         <div style={{ borderTop: '1px solid rgba(255,255,255,.08)', marginTop: 16, paddingTop: 14 }}>
