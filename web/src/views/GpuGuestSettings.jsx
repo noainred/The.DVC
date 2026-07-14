@@ -266,6 +266,8 @@ function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared }) {
         password: '',
         hadOwn: !!v.hasOwnCred,
         pwless: v.ownPwless ? true : undefined,  // true/false=명시 · undefined=자동(별도+id만+비번빈칸+저장없음)
+        ipOverride: v.ipOverride || '',          // SSH 접속 고정 IP('' = 자동/모든 IP)
+        hadIp: !!v.ipOverride,
         test: null,                              // {login,read,error,sample} | {pending}
       })));
     } catch (e) { setMsg(`오류: ${e.message}`); setRows([]); }
@@ -302,7 +304,7 @@ function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared }) {
       const chunk = targets.slice(off, off + CHUNK);
       const ci = Math.floor(off / CHUNK) + 1;
       appendLog([{ t: Date.now(), line: `━━━ 묶음 ${ci}/${nChunks} 시작 — ${chunk.map((r) => r.name).join(', ')}` }]);
-      const items = chunk.map((r) => ({ vmId: r.id, useShared: r.mode === 'shared', username: r.mode === 'own' ? r.username : '', password: r.mode === 'own' ? r.password : '', passwordless: isPwless(r) }));
+      const items = chunk.map((r) => ({ vmId: r.id, useShared: r.mode === 'shared', username: r.mode === 'own' ? r.username : '', password: r.mode === 'own' ? r.password : '', passwordless: isPwless(r), ip: r.ipOverride || '' }));
       try {
         const res = await postJson('/admin/gpu-guest/test', { vcenterId: selVc, items, ...(testMethod ? { method: testMethod } : {}), revealCreds });
         const byId = new Map((res.results || []).map((x) => [x.vmId, x]));
@@ -333,6 +335,7 @@ function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared }) {
     setBusy(true); setMsg(null);
     try {
       const vms = {};
+      const vmIps = {}; // VM별 SSH 고정 IP(자격증명과 독립 — 공용 계정 VM도 지정 가능)
       for (const r of rows) {
         if (r.mode === 'own') {
           if (r.username) {
@@ -343,6 +346,9 @@ function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared }) {
         } else if (r.hadOwn) {
           vms[r.id] = null; // 공용으로 전환 → override 제거
         }
+        // IP 고정: 지정됐거나(저장), 지웠으면(빈 값으로 삭제). 변경 없는 행은 전송 생략.
+        if (r.ipOverride) vmIps[r.id] = r.ipOverride;
+        else if (r.hadIp) vmIps[r.id] = '';
       }
       // SSH/auto로 테스트해 성공했는데 실제 수집 방식이 'VMware Tools만(guestops)'이면, 폴러는
       // SSH를 절대 시도하지 않아 "테스트는 되는데 수집은 안 됨"이 된다. 이때 수집 방식을 'auto'로
@@ -350,7 +356,7 @@ function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared }) {
       // 게스트작업으로 잘 수집되던 VM이 끊길 수 있어 안전한 'auto'를 쓴다.
       const bumpToAuto = (testMethod === 'ssh' || testMethod === 'auto') && collectMethod === 'guestops';
       await putJson('/admin/gpu-guest/settings', {
-        vcenters: { [selVc]: { vms } },
+        vcenters: { [selVc]: { vms, vmIps } },
         ...(bumpToAuto ? { collectMethod: 'auto' } : {}),
       });
       setMsg(bumpToAuto
@@ -417,10 +423,11 @@ function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared }) {
                 <th style={{ textAlign: 'left' }}>수집(읽기)</th>
                 <th style={{ textAlign: 'left' }}>계정 방식</th>
                 <th style={{ textAlign: 'left' }}>계정 / 비밀번호</th>
+                <th style={{ textAlign: 'left' }}>SSH 접속 IP</th>
                 <th style={{ textAlign: 'left' }}>테스트</th>
               </tr></thead>
               <tbody>
-                {shown.length === 0 && <tr><td colSpan={8} className="muted" style={{ padding: 14, textAlign: 'center' }}>해당 OS({osFilter})의 VM이 없습니다.</td></tr>}
+                {shown.length === 0 && <tr><td colSpan={9} className="muted" style={{ padding: 14, textAlign: 'center' }}>해당 OS({osFilter})의 VM이 없습니다.</td></tr>}
                 {shown.map((r) => {
                   const ready = r.powerState === 'POWERED_ON' && r.toolsStatus === 'RUNNING';
                   return (
@@ -461,6 +468,17 @@ function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared }) {
                             </label>
                           </div>
                         ) : <span className="muted" style={{ fontSize: 12 }}>공용 계정</span>}
+                      </td>
+                      <td>
+                        {(r.ipAddresses || []).length > 0 ? (
+                          <select className="select" style={{ width: 148 }} value={r.ipOverride || ''}
+                            onChange={(e) => setRow(r.id, { ipOverride: e.target.value })}
+                            title="SSH 접속에 사용할 IP를 고정합니다. 다중 NIC VM에서 도달 가능한 IP를 직접 지정하세요. '자동'이면 보고된 모든 IP를 순차 시도합니다.">
+                            <option value="">자동(모든 IP)</option>
+                            {(r.ipAddresses || []).map((ip) => <option key={ip} value={ip}>{ip}</option>)}
+                            {r.ipOverride && !(r.ipAddresses || []).includes(r.ipOverride) && <option value={r.ipOverride}>{r.ipOverride} (미보고)</option>}
+                          </select>
+                        ) : <span className="muted" style={{ fontSize: 11 }} title="VMware Tools가 IP를 보고하지 않아 선택할 IP가 없습니다.">IP 없음</span>}
                       </td>
                       <td>
                         <div className="flex gap" style={{ alignItems: 'center', gap: 6 }}>
