@@ -6,6 +6,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { listManagedUsers } from '../auth/auth.js';
 
 const FILE = path.join(config.configDir, 'security-session.json');
 const DEFAULTS = { idleLogoutEnabled: true, idleLogoutMin: 30, settingsOwners: ['noainred'] };
@@ -23,7 +24,8 @@ function normOwners(arr) {
   return out.slice(0, 20);
 }
 
-export function loadSessionSecurity() {
+/** 파일에 저장된 '설정된' 값만 로드(자동 포함분 미반영). 저장/편집 경로가 기준으로 삼는다. */
+export function loadConfiguredSecurity() {
   let p = {};
   try { if (fs.existsSync(FILE)) p = JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}; } catch { p = {}; }
   const owners = normOwners(p.settingsOwners);
@@ -34,8 +36,23 @@ export function loadSessionSecurity() {
   };
 }
 
+/** 중앙이 배포(managed)한 admin 계정명 — 이 엣지의 설정 소유 계정에 자동 포함할 대상. */
+export function managedAdminOwners() {
+  try { return listManagedUsers().filter((u) => u.role === 'admin').map((u) => u.username); } catch { return []; }
+}
+
+/**
+ * 유효 세션 보안 설정(클라이언트 제공용). 설정 소유 계정 = '설정된 계정' + '중앙 배포 admin'.
+ * 중앙이 admin 권한을 명시 부여한 계정은 그 엣지의 설정을 관리할 수 있게 자동 소유자에 포함한다
+ * (파일에는 남기지 않으므로 중앙에서 제거하면 자동으로 소유자에서도 빠진다).
+ */
+export function loadSessionSecurity() {
+  const raw = loadConfiguredSecurity();
+  return { ...raw, settingsOwners: [...new Set([...raw.settingsOwners, ...managedAdminOwners()])] };
+}
+
 export function saveSessionSecurity(partial = {}) {
-  const cur = loadSessionSecurity();
+  const cur = loadConfiguredSecurity(); // 저장 기준은 '설정된' 소유 계정만(자동 포함된 managed admin은 파일에 안 남김)
   let owners = cur.settingsOwners;
   if (partial.settingsOwners !== undefined) {
     const n = normOwners(partial.settingsOwners);
