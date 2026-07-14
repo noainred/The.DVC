@@ -42,6 +42,7 @@ server/config/release-notes.json
 server/config/gpu-guest.json
 server/config/gpu-physical.json
 server/config/central-agent-gpu-guest.json
+server/config/central-agent-users.json
 server/config/vmware-portal-release
 server/config/agent-deploy-targets.json
 server/config/llm.json

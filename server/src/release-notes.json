@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "2.173.0",
+      "date": "2026-07-14",
+      "title": "중앙에서 원격 엣지 접속 사용자 관리(배포) — User Control › 엣지 사용자 배포",
+      "notes": [
+        "중앙 포탈에서 원격 엣지 포탈에 접속(설정 열람 등)할 수 있는 사용자를 지정·관리하는 기능을 추가했습니다. 설정 › User Control › '엣지 사용자 배포'.",
+        "대상 엣지를 선택하고 사용자(ID·이름·역할·비밀번호)를 추가/수정/삭제하면, 그 엣지가 주기적으로(약 1분) 가져가(pull) 자기 로컬 계정에 반영합니다. 폐쇄망/NAT 엣지도 아웃바운드 pull이라 동작합니다(GPU 게스트 설정 배포와 동일 패턴).",
+        "안전 장치: 엣지의 로컬(비-중앙관리) 계정은 절대 건드리지 않습니다(같은 ID 충돌 시 건너뜀). 배포 목록에서 빼면 엣지에서도 삭제되지만 마지막 관리자 계정은 보호합니다. 중앙 배포 계정은 엣지 사용자 목록에 '중앙 관리' 표시가 붙습니다.",
+        "비밀번호는 중앙에서 scrypt 해시로 변환해 배포하며 평문으로 보관하지 않습니다(노드 간 해시 호환). OTP(2FA)는 각 엣지에서 등록합니다.",
+        "새 엔드포인트: 엣지 pull `GET /api/central/users-config?agent=`(X-Central-Token), 중앙 관리 `GET/POST/DELETE /admin/edge-users/:agent`·`GET /admin/edge-users/agents`. 배포 사용자는 `central-agent-users.json`(0600, 원자적 쓰기)에 보관.",
+        "회귀 테스트 추가(해시 저장·목록 가림·엣지 적용 생성/갱신/삭제·로컬 충돌 skip·마지막 admin 보호, 373 pass)."
+      ]
+    },
+    {
       "version": "2.172.0",
       "date": "2026-07-14",
       "title": "버전 릴리스 파일 — CONFIG_DIR/vmware-portal-release (redhat-release 방식)",

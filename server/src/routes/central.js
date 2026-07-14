@@ -19,6 +19,7 @@ import { upsertCollectorFromAgent } from '../collector/registry.js';
 import { recordIngest } from '../central/ingestStats.js';
 import { setAgentConfig } from '../central/agentConfig.js';
 import { getAssignedGpuGuest } from '../central/agentGpuGuestConfig.js';
+import { getAgentUsers } from '../central/agentUsers.js';
 import { takeLogQueries, setLogQueryResult } from '../central/logQueries.js';
 import { takeCaptureJobs, setCaptureResult } from '../central/captureJobs.js';
 import { recordCapture } from '../net/captureHistory.js';
@@ -210,6 +211,17 @@ centralRouter.get('/gpu-guest-config', (req, res) => {
   if (!settings) return res.json({ ok: true, agent, assigned: false }); // 지정 없음 → 엣지는 로컬 설정 유지
   const { _updatedAt, ...s } = settings;
   res.json({ ok: true, agent, assigned: true, at: _updatedAt || 0, settings: s });
+});
+
+// 중앙→엣지 배포 사용자(pull): 엣지가 자기 이름으로 '중앙이 지정한 사용자 목록'을 가져가 로컬
+// users.json에 managed로 반영. 비밀번호 해시 포함(엣지가 로그인 검증에 사용) → 토큰 필수.
+// GET /api/central/users-config?agent=<이름>
+centralRouter.get('/users-config', (req, res) => {
+  if (!config.central.token) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: '토큰 불일치' });
+  const agent = String(req.query.agent || req.get('X-Agent-Name') || '').trim();
+  if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
+  res.json({ ok: true, agent, users: getAgentUsers(agent) });
 });
 
 // 위임 Ping: 현장 에이전트가 자기 담당 vCenter들의 대기 IP를 인출 → ping → 결과 보고.
