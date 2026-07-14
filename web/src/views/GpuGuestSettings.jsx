@@ -238,12 +238,24 @@ function QuickSshTest() {
   );
 }
 
+/** 클릭하면 정렬되는 테이블 헤더(오름/내림 토글 + 방향 화살표). */
+function SortTh({ k, sort, onSort, children }) {
+  const active = sort.key === k;
+  return (
+    <th style={{ textAlign: 'left', cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }}
+      onClick={() => onSort(k)} title="클릭하여 정렬(다시 클릭 시 방향 전환)">
+      {children}<span style={{ marginLeft: 4, opacity: active ? 1 : 0.25, fontSize: 10 }}>{active ? (sort.dir === 'asc' ? '▲' : '▼') : '↕'}</span>
+    </th>
+  );
+}
+
 /** VM별 계정 관리 — 법인 선택 → 패스쓰루 GPU VM 조회 → 공용/별도 선택 + 로그인/읽기 테스트(개별·일괄). */
 function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared }) {
   const [selVc, setSelVc] = useState('');
   const [rows, setRows] = useState(null);   // null=미조회, []=없음
   const [osFilter, setOsFilter] = useState('all'); // all | linux | windows
   const [powerFilter, setPowerFilter] = useState('all'); // all | on | off
+  const [sort, setSort] = useState({ key: '', dir: 'asc' }); // 헤더 클릭 정렬(빈 key=원래 순서=이름)
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
@@ -377,10 +389,32 @@ function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared }) {
   const vcShared = vcenters[selVc] || {};
   const isWin = (r) => /windows/i.test(r.guestOS || '');
   const isOn = (r) => r.powerState === 'POWERED_ON';
-  const shown = rows ? rows.filter((r) =>
+  // 헤더 클릭 정렬: 열별 정렬 키 추출값. 문자열은 소문자, 상태/수집은 숫자 순위.
+  const sortVal = (r, key) => {
+    switch (key) {
+      case 'name': return String(r.name || '').toLowerCase();
+      case 'host': return String(r.host || '').toLowerCase();
+      case 'state': return (isOn(r) ? 0 : 1) * 10 + (r.toolsStatus === 'RUNNING' ? 0 : 1); // On·ToolsOK 먼저
+      case 'collected': return r.collected && r.collected.utilPct != null ? r.collected.utilPct : -1; // 미수집=-1(끝)
+      case 'mode': return String(r.mode || '');       // own/shared
+      case 'ip': return String(r.ipOverride || '');    // 지정 IP(빈값=자동)
+      default: return '';
+    }
+  };
+  const toggleSort = (key) => setSort((s) => (s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }));
+  let shown = rows ? rows.filter((r) =>
     (osFilter === 'all' ? true : osFilter === 'windows' ? isWin(r) : !isWin(r))
     && (powerFilter === 'all' ? true : powerFilter === 'on' ? isOn(r) : !isOn(r)),
   ) : rows;
+  if (shown && sort.key) {
+    const dir = sort.dir === 'desc' ? -1 : 1;
+    shown = [...shown].sort((a, b) => {
+      const av = sortVal(a, sort.key), bv = sortVal(b, sort.key);
+      if (av < bv) return -1 * dir;
+      if (av > bv) return 1 * dir;
+      return String(a.name || '').localeCompare(String(b.name || '')); // 동률은 이름순(안정)
+    });
+  }
   const ownCount = shown ? shown.filter((r) => r.mode === 'own').length : 0;
   const onCount = rows ? rows.filter(isOn).length : 0;
 
@@ -423,13 +457,13 @@ function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared }) {
                     checked={shown.length > 0 && shown.every((r) => selected.has(r.id))}
                     onChange={(e) => setSelected(() => (e.target.checked ? new Set(shown.map((r) => r.id)) : new Set()))} />
                 </th>
-                <th style={{ textAlign: 'left' }}>VM</th>
-                <th style={{ textAlign: 'left' }}>호스트</th>
-                <th style={{ textAlign: 'left' }}>상태</th>
-                <th style={{ textAlign: 'left' }}>수집(읽기)</th>
-                <th style={{ textAlign: 'left' }}>계정 방식</th>
+                <SortTh k="name" sort={sort} onSort={toggleSort}>VM</SortTh>
+                <SortTh k="host" sort={sort} onSort={toggleSort}>호스트</SortTh>
+                <SortTh k="state" sort={sort} onSort={toggleSort}>상태</SortTh>
+                <SortTh k="collected" sort={sort} onSort={toggleSort}>수집(읽기)</SortTh>
+                <SortTh k="mode" sort={sort} onSort={toggleSort}>계정 방식</SortTh>
                 <th style={{ textAlign: 'left' }}>계정 / 비밀번호</th>
-                <th style={{ textAlign: 'left' }}>SSH 접속 IP</th>
+                <SortTh k="ip" sort={sort} onSort={toggleSort}>SSH 접속 IP</SortTh>
                 <th style={{ textAlign: 'left' }}>테스트</th>
               </tr></thead>
               <tbody>
