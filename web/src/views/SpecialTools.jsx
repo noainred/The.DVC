@@ -77,7 +77,7 @@ const TOOLS = [
   { k: 'diskadd', icon: '🧩', label: '디스크 추가 자동화', desc: 'VM 디스크 추가 할당 자동화 (준비 중)', disabled: true, comingSoon: true },
   { k: 'backup', icon: '💾', label: '백업', desc: '설정 백업/복원 (준비 중)', disabled: true, comingSoon: true },
   { k: 'massdeploy', icon: '🚀', label: '대용량 배포', desc: '대량 배포 (준비 중)', disabled: true, comingSoon: true },
-  { k: 'shutdown', icon: '🛑', label: '긴급중단', desc: '모든 수집 즉시 정지 — 관리자 2명 OTP(2인 승인) 필요', danger: true },
+  { k: 'shutdown', icon: '🛑', label: '긴급중단', desc: '온도 상승·재난·PM 등 긴급 시 법인 전 장비 shutdown — 2인 이상 관리자 동의 필요', danger: true },
   { k: 'vmprovision', icon: '🆕', label: 'VM 생성', desc: '템플릿/사양 지정으로 신규 VM 생성 (관리자)', adminOnly: true },
   { k: 'agent-scans', icon: '🛰️', label: '에이전트 작업', desc: '에이전트별 IP 대역+iDRAC 계정 할당 → 각 에이전트가 로컬 스캔·자동등록·보고 (관리자)', adminOnly: true },
   { k: 'login-fails', icon: '🔐', label: '로그인 실패 분석', desc: 'vCenter/포탈 로그인 실패 이벤트 원인·추이 분석 (관리자)', adminOnly: true },
@@ -2719,8 +2719,9 @@ function Shutdown() {
           {active && status?.by?.length === 2 && (
             <div className="muted" style={{ fontSize: 13 }}>승인: <b>{status.by[0]}</b> + <b>{status.by[1]}</b>{status.at ? ` · ${new Date(status.at).toLocaleString('ko-KR')}` : ''}</div>
           )}
-          <div className="muted" style={{ fontSize: 13, margin: '14px auto 18px', maxWidth: 560, lineHeight: 1.6 }}>
-            긴급중단을 켜면 <b>vCenter 폴링·GPU 게스트 수집·iDRAC 전력 수집</b> 등 모든 백그라운드 수집이 다음 주기부터 즉시 멈춥니다(이미 수집된 화면 데이터는 그대로 유지). <b>관리자 2명이 각각 OTP로 인증</b>해야 실행/해제됩니다(2인 승인).
+          <div className="muted" style={{ fontSize: 13, margin: '14px auto 18px', maxWidth: 600, lineHeight: 1.7 }}>
+            이 기능은 법인의 <b>온도 상승·재난·PM</b> 등의 이유로 긴급하게 법인의 모든 장비를 Shutdown 해야 하는 경우, <b>사전에 정의된 정책과 절차에 따라 모든 장비를 shutdown</b> 하는 작업을 수행합니다.
+            <br />매우 중요하고 위험한 작업으로 <b>2인 이상의 관리자 동의</b>가 필요합니다(관리자 2명이 각각 OTP로 인증).
           </div>
           {!active ? (
             <button className="login-btn" style={{ flex: 'none', padding: '12px 28px', background: 'var(--red)', borderColor: 'var(--red)' }} onClick={() => setOpen('stop')}>
