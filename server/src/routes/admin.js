@@ -1151,6 +1151,67 @@ adminRouter.get('/idrac/hardware-summary', adminOnly, (req, res) => {
   });
 });
 
+// 서버 NIC(물리 네트워크 어댑터) 속도별 구분 — iDRAC Redfish 인벤토리(inv.nics[].ports[].speedMbps,
+// 미링크여도 지원속도 fallback)로 10G/25G/100G 등 최고 속도별 서버를 분류한다. DataCenter(법인)·
+// 가상화(ESXi 호스트)/베어메탈로 필터. 추가 수집 없이 이미 수집된 인벤토리만 집계.
+adminRouter.get('/idrac/nic-speed', adminOnly, (req, res) => {
+  const dcFilter = String(req.query.datacenterId || '').trim();
+  const typeFilter = String(req.query.type || '').trim(); // '' | 'virtual' | 'baremetal'
+  const assign = getDatacenterAssign();
+  const tagMap = hostVcByTag();
+  const dcNameById = new Map(listDatacenters().map((d) => [String(d.id), d.name || d.id]));
+  const dcOf = (s) => String(s.datacenterId || assign[String(s.vcenterId || s.mappedVcenterId || '')] || '');
+  const speedLabel = (mbps) => {
+    if (!mbps) return '';
+    if (mbps % 1000 === 0) return `${mbps / 1000}G`;
+    if (mbps >= 1000) return `${(mbps / 1000).toFixed(1)}G`;
+    return `${mbps}M`;
+  };
+  const localAll = loadIdracRegistry().filter((s) => s.type !== 'ome').map((s) => withMappedVc(s, tagMap));
+  const seen = new Set(localAll.map((s) => String(s.id)));
+  const merged = localAll.concat(remoteServersResolved().map((s) => withMappedVc(s, tagMap)).filter((s) => !seen.has(String(s.id))));
+
+  const rows = []; let collected = 0; let missing = 0;
+  for (const s of merged) {
+    // 가상화(ESXi 호스트)=서비스태그가 vCenter 호스트와 일치(mappedVcenterId) 또는 명시 vcenterId. 아니면 베어메탈.
+    const type = (s.mappedVcenterId || s.vcenterId) ? 'virtual' : 'baremetal';
+    const dcId = dcOf(s);
+    if (dcFilter) { if (dcFilter === '__unmapped__') { if (dcId) continue; } else if (dcId !== dcFilter) continue; }
+    if (typeFilter && type !== typeFilter) continue;
+    const inv = invForServer(s);
+    if (!inv || !inv.collectedAt) { missing++; continue; }
+    collected++;
+    const speeds = new Set(); const models = new Set(); let ports = 0;
+    for (const n of (inv.nics || [])) {
+      if (n.model) models.add(String(n.model).trim());
+      for (const p of (n.ports || [])) { const mb = Number(p.speedMbps); if (Number.isFinite(mb) && mb > 0) { speeds.add(mb); ports++; } }
+    }
+    const maxMbps = speeds.size ? Math.max(...speeds) : 0;
+    rows.push({
+      id: s.id, name: s.name || inv.system?.hostName || s.id,
+      serviceTag: inv.system?.serviceTag || s.serviceTag || '',
+      model: inv.system?.model || '',
+      datacenterId: dcId, datacenter: dcNameById.get(dcId) || dcId || '(미매핑)',
+      type, // 'virtual' | 'baremetal'
+      nicPorts: ports, nicModels: [...models],
+      speeds: [...speeds].sort((a, b) => b - a).map(speedLabel),
+      maxSpeedMbps: maxMbps, maxSpeed: speedLabel(maxMbps) || '정보없음',
+    });
+  }
+  // 서버는 '최고 속도'로 1회 분류(가장 빠른 NIC 기준).
+  const bySpeed = new Map();
+  for (const r of rows) { const e = bySpeed.get(r.maxSpeed) || { count: 0, mbps: r.maxSpeedMbps }; e.count++; bySpeed.set(r.maxSpeed, e); }
+  const speedBuckets = [...bySpeed.entries()].map(([speed, e]) => ({ speed, count: e.count, mbps: e.mbps }))
+    .sort((a, b) => b.mbps - a.mbps || b.count - a.count);
+  const virtualN = rows.filter((r) => r.type === 'virtual').length;
+  res.json({
+    ok: true, datacenterId: dcFilter, type: typeFilter,
+    totalServers: rows.length, collected, missing, virtual: virtualN, baremetal: rows.length - virtualN,
+    bySpeed: speedBuckets, servers: rows,
+    datacenters: listDatacenters().map((d) => ({ id: d.id, name: d.name || d.id })),
+  });
+});
+
 // 하드웨어 집계 드릴다운 — 특정 dim(model|cpu|memory|gpu) + key에 해당하는 서버 목록.
 // 하드웨어 집계 화면에서 항목(예: PowerEdge R750)을 클릭하면 그 서버만 보여주는 데 쓴다.
 adminRouter.get('/idrac/hardware-servers', adminOnly, (req, res) => {
