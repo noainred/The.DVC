@@ -24,7 +24,7 @@ function compactSensors(serverId) {
 
 // 서버 분석용 콤팩트 인벤토리(중앙 '서버 분석' 4개 탭이 쓰는 필드만; 자격증명·잡정보 제외).
 // 큰 항목은 firmware 배열뿐이라 O(구성요소 수)로 유지된다.
-function compactInv(inv) {
+export function compactInv(inv) {
   if (!inv) return null;
   return {
     system: inv.system ? { model: inv.system.model, serviceTag: inv.system.serviceTag, biosVersion: inv.system.biosVersion } : undefined,
@@ -34,6 +34,12 @@ function compactInv(inv) {
     idrac: inv.idrac ? { firmwareVersion: inv.idrac.firmwareVersion } : undefined,
     bios: inv.bios ? { version: inv.bios.version } : undefined,
     firmware: Array.isArray(inv.firmware) ? inv.firmware.map((f) => ({ type: f.type, version: f.version, name: f.name })) : [],
+    // NIC 어댑터/포트 — 중앙 '서버 NIC 속도/모델 확인'용. 과거 이 필드가 누락돼 엣지 원격
+    // 서버가 전부 '정보없음'(모델 0종)으로 나왔다. 포트는 id/link/speedMbps만(콤팩트 유지).
+    nics: Array.isArray(inv.nics) ? inv.nics.map((n) => ({
+      name: n.name, model: n.model,
+      ports: Array.isArray(n.ports) ? n.ports.map((p) => ({ id: p.id, link: p.link, speedMbps: p.speedMbps })) : [],
+    })) : [],
     collectedAt: inv.collectedAt,
   };
 }

@@ -148,6 +148,18 @@ function hostVcByTag() {
   }
   return m;
 }
+// 서비스태그(정규화) → vCenter 호스트 물리 NIC(config.network.pnic 수집분). NIC 속도/모델
+// 화면의 'vCenter 수집' 별도 컬럼용 — iDRAC 인벤토리와 독립된 교차 검증 소스. 엣지 위임
+// vCenter도 인벤토리 push에 호스트 객체 전체가 실리므로 중앙에서 동일하게 조회된다.
+function hostNicsByTag() {
+  const m = new Map();
+  for (const h of (store.get().hosts || [])) {
+    const t = String(h.serviceTag || '').trim().toLowerCase();
+    if (t && Array.isArray(h.nics) && h.nics.length && !m.has(t)) m.set(t, h.nics);
+  }
+  return m;
+}
+
 // 서버에 mappedVcenterId(서비스태그로 찾은 vCenter)를 부여. 스캔 등록분은 vcenterId가 비어도
 // 서비스태그가 ESXi 호스트와 일치하면 그 vCenter의 '가상화 장비'로 분류된다.
 function withMappedVc(s, tagMap) {
@@ -1170,8 +1182,9 @@ adminRouter.get('/idrac/nic-speed', adminOnly, (req, res) => {
   const localAll = loadIdracRegistry().filter((s) => s.type !== 'ome').map((s) => withMappedVc(s, tagMap));
   const seen = new Set(localAll.map((s) => String(s.id)));
   const merged = localAll.concat(remoteServersResolved().map((s) => withMappedVc(s, tagMap)).filter((s) => !seen.has(String(s.id))));
+  const vcNicMap = hostNicsByTag(); // vCenter 수집 물리 NIC(별도 컬럼) — iDRAC과 독립 소스
 
-  const rows = []; let collected = 0; let missing = 0;
+  const rows = []; let collected = 0; let missing = 0; let vcCollected = 0;
   for (const s of merged) {
     // 가상화(ESXi 호스트)=서비스태그가 vCenter 호스트와 일치(mappedVcenterId) 또는 명시 vcenterId. 아니면 베어메탈.
     const type = (s.mappedVcenterId || s.vcenterId) ? 'virtual' : 'baremetal';
@@ -1187,6 +1200,13 @@ adminRouter.get('/idrac/nic-speed', adminOnly, (req, res) => {
       for (const p of (n.ports || [])) { const mb = Number(p.speedMbps); if (Number.isFinite(mb) && mb > 0) { speeds.add(mb); ports++; } }
     }
     const maxMbps = speeds.size ? Math.max(...speeds) : 0;
+    // vCenter 관점 NIC 속도(별도 컬럼) — 서비스태그로 ESXi 호스트 pnic과 매칭.
+    const tag = String(inv.system?.serviceTag || s.serviceTag || '').trim().toLowerCase();
+    const vcNics = (tag && vcNicMap.get(tag)) || [];
+    const vcSpeeds = new Set(); let vcPorts = 0;
+    for (const n of vcNics) { vcPorts++; const mb = Number(n.maxSpeedMb || n.speedMb); if (Number.isFinite(mb) && mb > 0) vcSpeeds.add(mb); }
+    const vcMaxMbps = vcSpeeds.size ? Math.max(...vcSpeeds) : 0;
+    if (vcNics.length) vcCollected++;
     rows.push({
       id: s.id, name: s.name || inv.system?.hostName || s.id,
       serviceTag: inv.system?.serviceTag || s.serviceTag || '',
@@ -1196,6 +1216,8 @@ adminRouter.get('/idrac/nic-speed', adminOnly, (req, res) => {
       nicPorts: ports, nicModels: [...models],
       speeds: [...speeds].sort((a, b) => b - a).map(speedLabel),
       maxSpeedMbps: maxMbps, maxSpeed: speedLabel(maxMbps) || '정보없음',
+      vcPorts, vcSpeeds: [...vcSpeeds].sort((a, b) => b - a).map(speedLabel),
+      vcMaxSpeedMbps: vcMaxMbps, vcMaxSpeed: speedLabel(vcMaxMbps) || '',
     });
   }
   // 서버는 '최고 속도'로 1회 분류(가장 빠른 NIC 기준).
@@ -1206,7 +1228,7 @@ adminRouter.get('/idrac/nic-speed', adminOnly, (req, res) => {
   const virtualN = rows.filter((r) => r.type === 'virtual').length;
   res.json({
     ok: true, datacenterId: dcFilter, type: typeFilter,
-    totalServers: rows.length, collected, missing, virtual: virtualN, baremetal: rows.length - virtualN,
+    totalServers: rows.length, collected, missing, vcCollected, virtual: virtualN, baremetal: rows.length - virtualN,
     bySpeed: speedBuckets, servers: rows,
     datacenters: listDatacenters().map((d) => ({ id: d.id, name: d.name || d.id })),
   });
@@ -1226,8 +1248,10 @@ adminRouter.get('/idrac/nic-models', adminOnly, (req, res) => {
   const seen = new Set(localAll.map((s) => String(s.id)));
   const merged = localAll.concat(remoteServersResolved().map((s) => withMappedVc(s, tagMap)).filter((s) => !seen.has(String(s.id))));
 
+  const vcNicMap = hostNicsByTag(); // vCenter 수집 물리 NIC(별도 컬럼) — iDRAC과 독립 소스
   const byModel = new Map(); // model -> { servers:Set, ports }
-  const rows = []; let collected = 0; let missing = 0;
+  const vcByModel = new Map(); // vCenter 기준 model -> { servers:Set, ports }
+  const rows = []; let collected = 0; let missing = 0; let vcCollected = 0;
   for (const s of merged) {
     const type = (s.mappedVcenterId || s.vcenterId) ? 'virtual' : 'baremetal';
     const dcId = dcOf(s);
@@ -1247,21 +1271,40 @@ adminRouter.get('/idrac/nic-models', adminOnly, (req, res) => {
       const e = byModel.get(model) || { servers: new Set(), ports: 0 };
       e.servers.add(s.id); e.ports += ports; byModel.set(model, e);
     }
+    // vCenter 관점 NIC(별도 컬럼) — pnic(장치/드라이버/속도) + pciDevice(모델명) 매칭 결과를
+    // 모델별로 묶어 iDRAC 어댑터와 나란히 보여준다(교차 검증·iDRAC 인벤토리 공백 보완).
+    const tag = String(inv.system?.serviceTag || s.serviceTag || '').trim().toLowerCase();
+    const vcNics = (tag && vcNicMap.get(tag)) || [];
+    const vcGroup = new Map();
+    for (const n of vcNics) {
+      const model = String(n.model || '').trim() || (n.driver ? `(드라이버 ${n.driver})` : '(모델 미상)');
+      const e = vcGroup.get(model) || { ports: 0, speeds: new Set() };
+      e.ports++; const mb = Number(n.maxSpeedMb || n.speedMb); if (Number.isFinite(mb) && mb > 0) e.speeds.add(mb);
+      vcGroup.set(model, e);
+    }
+    const vcAdapters = [...vcGroup.entries()].map(([model, e]) => {
+      const arr = [...e.speeds].sort((a, b) => b - a);
+      const g = vcByModel.get(model) || { servers: new Set(), ports: 0 };
+      g.servers.add(s.id); g.ports += e.ports; vcByModel.set(model, g);
+      return { model, ports: e.ports, speeds: arr.map(speedLabel), maxSpeed: speedLabel(arr[0] || 0) || '—' };
+    });
+    if (vcAdapters.length) vcCollected++;
     rows.push({
       id: s.id, name: s.name || inv.system?.hostName || s.id,
       serviceTag: inv.system?.serviceTag || s.serviceTag || '',
       model: inv.system?.model || '',
       datacenterId: dcId, datacenter: dcNameById.get(dcId) || dcId || '(미매핑)',
       type, adapters, nicModels: [...new Set(adapters.map((a) => a.model))],
+      vcAdapters, vcModels: vcAdapters.map((a) => a.model),
     });
   }
-  const modelBuckets = [...byModel.entries()].map(([model, e]) => ({ model, servers: e.servers.size, ports: e.ports }))
+  const toBuckets = (map) => [...map.entries()].map(([model, e]) => ({ model, servers: e.servers.size, ports: e.ports }))
     .sort((a, b) => b.servers - a.servers || String(a.model).localeCompare(b.model));
   const virtualN = rows.filter((r) => r.type === 'virtual').length;
   res.json({
     ok: true, datacenterId: dcFilter, type: typeFilter,
-    totalServers: rows.length, collected, missing, virtual: virtualN, baremetal: rows.length - virtualN,
-    byModel: modelBuckets, servers: rows,
+    totalServers: rows.length, collected, missing, vcCollected, virtual: virtualN, baremetal: rows.length - virtualN,
+    byModel: toBuckets(byModel), vcByModel: toBuckets(vcByModel), servers: rows,
     datacenters: listDatacenters().map((d) => ({ id: d.id, name: d.name || d.id })),
   });
 });
