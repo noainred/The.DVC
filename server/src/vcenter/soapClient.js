@@ -544,6 +544,50 @@ function parseServiceTag(xml) {
   return assetTag; // 서비스태그가 없으면 자산태그라도 매핑 보조키로 사용.
 }
 
+/**
+ * config.network.pnic(물리 NIC) 파싱 — [{ device, mac, driver, model, vendor, speedMb, maxSpeedMb, link }].
+ * linkSpeed는 링크가 살아있을 때만 있고, 다운 포트는 validLinkSpecification(지원속도)의 최대값으로
+ * 정격을 판별한다(iDRAC NIC 속도 화면과 동일한 규칙). 모델명은 pnic의 <pci> 주소를
+ * hardware.pciDevice의 <id>와 매칭해 deviceName/vendorName에서 얻는다(pnic 자체엔 모델이 없음).
+ */
+export function parsePnics(pnicXml, pciDeviceXml) {
+  if (!pnicXml) return [];
+  // PCI 주소 → { deviceName, vendorName } (NIC 모델명 도출용).
+  const pciById = new Map();
+  if (pciDeviceXml) {
+    for (const blk of pciDeviceXml.split(/<HostPciDevice(?=[ >])/).slice(1)) {
+      const id = /<id>([^<]+)<\/id>/.exec(blk)?.[1];
+      if (!id) continue;
+      pciById.set(id, {
+        deviceName: xmlUnescape(/<deviceName>([^<]*)<\/deviceName>/.exec(blk)?.[1] || ''),
+        vendorName: xmlUnescape(/<vendorName>([^<]*)<\/vendorName>/.exec(blk)?.[1] || ''),
+      });
+    }
+  }
+  const out = [];
+  for (const blk of pnicXml.split(/<PhysicalNic(?=[ >])/).slice(1)) {
+    const device = /<device>([^<]+)<\/device>/.exec(blk)?.[1] || '';
+    if (!device) continue;
+    const pci = /<pci>([^<]*)<\/pci>/.exec(blk)?.[1] || '';
+    const driver = /<driver>([^<]*)<\/driver>/.exec(blk)?.[1] || '';
+    const mac = /<mac>([^<]*)<\/mac>/.exec(blk)?.[1] || '';
+    // 현재 링크 속도 — <linkSpeed><speedMb>N</speedMb>… (링크 다운이면 요소 자체가 없음).
+    const cur = Number(/<linkSpeed[^>]*>\s*<speedMb>(\d+)<\/speedMb>/.exec(blk)?.[1] || 0);
+    // 지원 속도(정격) — validLinkSpecification 반복 요소들의 speedMb 최대값.
+    let maxMb = 0;
+    for (const m of blk.matchAll(/<validLinkSpecification[^>]*>\s*<speedMb>(\d+)<\/speedMb>/g)) {
+      const v = Number(m[1]); if (Number.isFinite(v) && v > maxMb) maxMb = v;
+    }
+    const pciInfo = pciById.get(pci);
+    out.push({
+      device, mac, driver, pci,
+      model: pciInfo?.deviceName || '', vendor: pciInfo?.vendorName || '',
+      speedMb: cur || 0, maxSpeedMb: Math.max(maxMb, cur) || 0, link: cur > 0,
+    });
+  }
+  return out;
+}
+
 function parseHbas(xml) {
   if (!xml) return [];
   const out = [];
@@ -856,7 +900,7 @@ export async function collectFromVCenterSoap(vc) {
         'config.pciPassthruInfo', 'hardware.pciDevice',
         'summary.hardware.vendor', 'summary.hardware.model', 'summary.hardware.otherIdentifyingInfo', 'config.storageDevice.hostBusAdapter',
         'runtime.healthSystemRuntime.systemHealthInfo.numericSensorInfo',
-        'summary.managementServerIp', 'config.network.vnic',
+        'summary.managementServerIp', 'config.network.vnic', 'config.network.pnic',
         'summary.quickStats.overallCpuUsage', 'summary.quickStats.overallMemoryUsage'] },
       { type: 'ResourcePool', paths: ['name'] },
       { type: 'VirtualMachine', paths: [
@@ -929,6 +973,9 @@ export async function collectFromVCenterSoap(vc) {
           return [...gfx, ...parsePassthruGpus(p['config.pciPassthruInfo'], p['hardware.pciDevice'], gfxIds)];
         })(),
         hbas: parseHbas(p['config.storageDevice.hostBusAdapter']),
+        // 물리 NIC(vCenter 관점) — 특수기능 'NIC 속도/모델 확인'의 vCenter 별도 컬럼용.
+        // 모델명은 pciDevice 매칭으로 도출(pnic 자체엔 없음). 다운 포트도 지원속도로 정격 판별.
+        nics: parsePnics(p['config.network.pnic'], p['hardware.pciDevice']),
         ...parseTemps(p['runtime.healthSystemRuntime.systemHealthInfo.numericSensorInfo']),
         // 하드웨어 상태 IPMI 센서의 호스트 소비전력(W). vSphere '하드웨어 상태'의 Pwr Consumption과 동일.
         // 성능 카운터(power.power.average)가 없어도 이 값으로 vCenter 전력을 수집한다(아래 collectPower는 폴백).
