@@ -68,6 +68,7 @@ const TOOLS = [
   { k: 'gpu', icon: '🎮', label: 'GPU 인벤토리', desc: '호스트/모델별 GPU + 사용률 최근 5년 추이' },
   { k: 'serveranalysis', icon: '🔬', label: '서버 분석', desc: 'iDRAC 수집 하드웨어 분석 · GPU 찾기(모델별 장수)' },
   { k: 'fleet', icon: '🗂️', label: '통합 서버 인벤토리', desc: 'iDRAC 태그 + vCenter 조합 → 가상화 호스트 / 베어메탈 자동 분류 · 베어메탈 전력 합계 · 수동 예외 · CSV' },
+  { k: 'nic-speed', icon: '🔌', label: '서버 NIC 속도 구분', desc: 'iDRAC 수집 서버의 물리 NIC 속도(10G/25G/100G…)별 분류 — DataCenter·가상화/베어메탈 필터 + CSV' },
   { k: 'topo3d', icon: '🌐', label: '구성도 (3D)', desc: '설정된 구성을 3D 네트워크로 — 줌인/아웃·회전·VM 펼치기' },
   { k: 'davinci-svc', icon: '🩺', label: '다빈치 서비스 점검', desc: '포탈 내부 서비스/수집기(vCenter·NSX·전력·지표·GPU·알림·백업·에이전트) 상태 한눈에' },
   { k: 'net-check', icon: '📡', label: '글로벌 네트워크 점검', desc: '전세계 vCenter·NSX 제어플레인 도달성·RTT + 네트워크 객체 요약' },
@@ -260,6 +261,7 @@ function ToolPanel({ tool, onBack, isAdmin }) {
       {tool === 'gpu' && <Gpu scope={scope} />}
       {tool === 'serveranalysis' && <ServerAnalysis />}
       {tool === 'fleet' && <FleetInventory isAdmin={isAdmin} />}
+      {tool === 'nic-speed' && <NicSpeed />}
       {tool === 'hardware' && <Hardware scope={scope} />}
       {tool === 'powermap' && <PowerMap scope={scope} />}
       {tool === 'esxi' && <Esxi scope={scope} />}
@@ -2698,6 +2700,113 @@ function PortalDb() {
         · <code>미생성</code>은 해당 기능을 아직 쓰지 않아 파일이 만들어지지 않은 상태입니다.
       </div>
     </>
+  );
+}
+
+/**
+ * 서버 NIC 속도 구분 — iDRAC 수집 서버의 물리 NIC 최고 속도(10G/25G/100G…)별 분류.
+ * DataCenter(법인)·가상화(ESXi 호스트)/베어메탈 필터. 이미 수집된 인벤토리만 집계(추가 수집 없음).
+ */
+function NicSpeed() {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState(null);
+  const [dc, setDc] = useState('');
+  const [type, setType] = useState('');       // '' | virtual | baremetal
+  const [speedSel, setSpeedSel] = useState(''); // 표 필터: 특정 속도만
+  const [sort, setSort] = useState({ key: 'maxSpeedMbps', dir: 'desc' });
+
+  const load = () => {
+    const qs = new URLSearchParams({ ...(dc ? { datacenterId: dc } : {}), ...(type ? { type } : {}) }).toString();
+    fetchJson(`/admin/idrac/nic-speed${qs ? `?${qs}` : ''}`).then((d) => { setData(d); setErr(null); }).catch((e) => setErr(e.message));
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [dc, type]);
+
+  if (err) return <ErrorBox message={err} />;
+  if (!data) return <Loading />;
+
+  const typeLabel = (t) => (t === 'virtual' ? '가상화(ESXi)' : '베어메탈');
+  let servers = (data.servers || []).filter((s) => !speedSel || s.maxSpeed === speedSel);
+  const val = (s, k) => (k === 'maxSpeedMbps' ? s.maxSpeedMbps : k === 'nicPorts' ? s.nicPorts : String(s[k] || '').toLowerCase());
+  servers = [...servers].sort((a, b) => { const av = val(a, sort.key), bv = val(b, sort.key); const d = av < bv ? -1 : av > bv ? 1 : 0; return (sort.dir === 'desc' ? -d : d) || String(a.name).localeCompare(String(b.name)); });
+  const toggleSort = (k) => setSort((s) => (s.key === k ? { key: k, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key: k, dir: 'desc' }));
+  const Th = ({ k, children, right }) => <th style={{ textAlign: right ? 'right' : 'left', cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }} onClick={() => toggleSort(k)}>{children}<span style={{ opacity: sort.key === k ? 1 : 0.25, fontSize: 10, marginLeft: 3 }}>{sort.key === k ? (sort.dir === 'asc' ? '▲' : '▼') : '↕'}</span></th>;
+
+  const exportCsv = () => {
+    const head = ['server', 'serviceTag', 'model', 'datacenter', 'type', 'maxSpeed', 'allSpeeds', 'nicPorts', 'nicModels'];
+    const rows = servers.map((s) => [s.name, s.serviceTag, s.model, s.datacenter, typeLabel(s.type), s.maxSpeed, (s.speeds || []).join(' '), s.nicPorts, (s.nicModels || []).join(' | ')]);
+    const csv = [head, ...rows].map((r) => r.map((x) => `"${String(x ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
+    const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }));
+    const a = document.createElement('a'); a.href = url; a.download = `nic-speed${dc ? `-${dc}` : ''}${type ? `-${type}` : ''}.csv`; a.click(); URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div style={{ maxWidth: 1200 }}>
+      <div className="section-title" style={{ marginTop: 0 }}>🔌 서버 NIC 속도 구분</div>
+      <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
+        iDRAC로 수집 중인 서버의 물리 NIC(네트워크 어댑터) <b>최고 속도</b>별 분류입니다(포트가 미링크여도 카드 지원속도로 판별). 서버는 가장 빠른 NIC 기준으로 1회 집계됩니다.
+        <span className="muted"> · ESXi가 물리 NIC 속도를 제공하지 않아 iDRAC 미등록 호스트는 제외됩니다.</span>
+      </p>
+
+      <div className="card" style={{ padding: 14 }}>
+        <div className="flex gap wrap" style={{ alignItems: 'center' }}>
+          <label style={{ fontSize: 13 }}>DataCenter&nbsp;
+            <select className="select" value={dc} onChange={(e) => { setDc(e.target.value); setSpeedSel(''); }} style={{ minWidth: 160 }}>
+              <option value="">전체</option>
+              {(data.datacenters || []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+              <option value="__unmapped__">(미매핑)</option>
+            </select>
+          </label>
+          <label style={{ fontSize: 13 }}>유형&nbsp;
+            <select className="select" value={type} onChange={(e) => { setType(e.target.value); setSpeedSel(''); }} style={{ minWidth: 130 }}>
+              <option value="">전체</option>
+              <option value="virtual">가상화(ESXi)</option>
+              <option value="baremetal">베어메탈</option>
+            </select>
+          </label>
+          <span className="muted" style={{ fontSize: 12 }}>
+            대상 {data.totalServers} · 수집됨 {data.collected}{data.missing ? ` · 미수집 ${data.missing}` : ''} · 가상화 {data.virtual} · 베어메탈 {data.baremetal}
+          </span>
+          <button className="tab" style={{ marginLeft: 'auto', padding: '6px 12px' }} onClick={exportCsv}>CSV 내보내기</button>
+        </div>
+
+        <div className="flex gap wrap" style={{ marginTop: 12, gap: 8 }}>
+          <button className="tab" style={{ padding: '6px 12px', fontWeight: 700, background: !speedSel ? 'rgba(34,211,238,.12)' : undefined }} onClick={() => setSpeedSel('')}>전체 {data.totalServers}</button>
+          {(data.bySpeed || []).map((b) => (
+            <button key={b.speed} className="tab" style={{ padding: '6px 12px', fontWeight: 700, background: speedSel === b.speed ? 'rgba(34,211,238,.18)' : undefined, color: b.mbps >= 10000 ? 'var(--green)' : undefined }}
+              onClick={() => setSpeedSel(speedSel === b.speed ? '' : b.speed)} title={`최고 NIC ${b.speed}인 서버 ${b.count}대`}>
+              {b.speed} <b>{b.count}</b>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="card" style={{ padding: 0, marginTop: 12 }}>
+        <div className="table-wrap" style={{ maxHeight: '60vh' }}>
+          <table>
+            <thead><tr>
+              <Th k="name">서버</Th><Th k="serviceTag">서비스태그</Th><Th k="model">모델</Th>
+              <Th k="datacenter">DataCenter</Th><Th k="type">유형</Th><Th k="maxSpeedMbps">최고 속도</Th>
+              <th style={{ textAlign: 'left' }}>모든 NIC 속도</th><Th k="nicPorts" right>포트</Th>
+            </tr></thead>
+            <tbody>
+              {servers.length === 0 && <tr><td colSpan={8} className="muted" style={{ padding: 16, textAlign: 'center' }}>조건에 맞는 서버가 없습니다.</td></tr>}
+              {servers.map((s) => (
+                <tr key={s.id}>
+                  <td><b>{s.name}</b></td>
+                  <td className="muted" style={{ fontSize: 12 }}>{s.serviceTag || '—'}</td>
+                  <td className="muted" style={{ fontSize: 12 }}>{s.model || '—'}</td>
+                  <td>{s.datacenter}</td>
+                  <td><span className={`badge ${s.type === 'virtual' ? 'blue' : 'amber'}`}>{typeLabel(s.type)}</span></td>
+                  <td><span className={`badge ${s.maxSpeedMbps >= 10000 ? 'green' : 'gray'}`}>{s.maxSpeed}</span></td>
+                  <td className="muted" style={{ fontSize: 12 }} title={(s.nicModels || []).join(' | ')}>{(s.speeds || []).join(', ') || '—'}</td>
+                  <td style={{ textAlign: 'right' }}>{s.nicPorts}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
   );
 }
 
