@@ -1,6 +1,18 @@
 {
   "notes": [
     {
+      "version": "2.180.0",
+      "date": "2026-07-14",
+      "title": "NIC 속도 '정보없음' 수정 — 다운 포트/신형 Redfish 스키마에서도 속도 인식",
+      "notes": [
+        "'서버 NIC 속도 구분'에서 R750 등 대부분 서버가 '정보없음'으로 나오던 문제를 수정했습니다. 원인은 NIC 포트 속도 추출 버그였습니다: 링크가 다운된 포트(현재 속도=0)에서 정격 속도(SupportedLinkCapabilities) 폴백이 0으로 단락돼 무시됐습니다.",
+        "이제 카드 정격/최고 속도(SupportedLinkCapabilities·MaxSpeedGbps)를 현재 링크 속도보다 우선 사용해, 포트가 미링크여도 10G/25G 카드를 정확히 식별합니다.",
+        "iDRAC9 신형 Redfish 스키마도 지원: 포트가 Controllers[].Links로 연결되거나 속도가 Gbps(CurrentSpeedGbps/MaxSpeedGbps)로 오는 경우를 처리하고, NetworkAdapters에서 못 얻으면 Systems/EthernetInterfaces의 SpeedMbps로 폴백합니다.",
+        "인벤토리는 30분 주기로 재수집되므로, 업그레이드 후 최대 약 30분 내 각 서버의 NIC 속도가 채워집니다.",
+        "회귀 테스트 추가(다운 포트 정격 식별·Gbps 스키마·정보없음, 380 pass)."
+      ]
+    },
+    {
       "version": "2.179.0",
       "date": "2026-07-14",
       "title": "특수 기능 — '서버 NIC 속도 구분'(10G/25G/100G 등, DC·가상화/베어메탈 필터)",
