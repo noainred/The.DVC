@@ -123,6 +123,17 @@ async function get(base, pathname, username, password) {
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
 /**
+ * Redfish NIC 포트의 '설치된 카드 속도'(Mbps)를 추출한다. 정격/최고(SupportedLinkCapabilities·
+ * MaxSpeedGbps)를 현재 링크속도보다 우선해, 포트가 다운(current=0)이어도 10G/25G 카드를 식별한다.
+ * ⚠️ 과거 버그: `num(current) ?? caps` 는 current=0에서 0으로 단락돼 정격 폴백이 무시됐다.
+ */
+export function nicPortSpeedMbps(p = {}) {
+  const toMb = (v) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : 0; };
+  const caps = Math.max(0, ...((p.SupportedLinkCapabilities || []).map((c) => toMb(c.LinkSpeedMbps))));
+  return caps || (toMb(p.MaxSpeedGbps) * 1000) || (toMb(p.CurrentSpeedGbps) * 1000) || toMb(p.CurrentLinkSpeedMbps) || null;
+}
+
+/**
  * iDRAC이 401과 함께 돌려주는 실제 오류 메시지를 캡처한다(잘못된 자격증명 vs 계정 잠금 vs
  * 로그인 권한 없음 구분용). Redfish 오류는 error['@Message.ExtendedInfo'][].Message에 담긴다.
  * 진단 전용이라 실패 IP에만 1회 추가 호출(스캔 대다수인 무응답 IP는 여기 오지 않음).
@@ -478,34 +489,54 @@ export async function fetchInventory(entry) {
   } catch { /* gpu optional */ }
 
   // --- NIC 어댑터/포트: 모델·링크 상태·속도 ---
+  // iDRAC9(R750 등)는 포트가 어댑터의 NetworkPorts/Ports 또는 Controllers[].Links 로 흩어져 있고,
+  // 속도 필드도 SupportedLinkCapabilities.LinkSpeedMbps(정격)·CurrentLinkSpeedMbps·(신형)
+  // MaxSpeedGbps/CurrentSpeedGbps 로 제각각이다. '설치된 카드 속도'가 중요하므로 정격/최고를
+  // 우선 추출한다(다운 포트여도 10G 카드 식별). ⚠️ 과거 버그: `num(current) ?? caps` 는 다운 포트
+  // (current=0)에서 0으로 단락돼 정격 폴백이 무시됐다 → 대부분 서버가 '정보없음'으로 나왔다.
+  const toMb = (v) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : 0; };
+  const portSpeedMbps = nicPortSpeedMbps;
   inv.nics = [];
   try {
     const chassisRoot = await G('/redfish/v1/Chassis');
-    for (const cm of (chassisRoot.Members || []).map((x) => x['@odata.id']).filter(Boolean).slice(0, 4)) {
+    for (const cm of (chassisRoot.Members || []).map((x) => x['@odata.id']).filter(Boolean).slice(0, 6)) {
       let na; try { na = await G(`${cm}/NetworkAdapters`); } catch { continue; }
-      for (const am of (na.Members || []).slice(0, 8)) {
+      for (const am of (na.Members || []).slice(0, 12)) {
         let a; try { a = await G(am['@odata.id']); } catch { continue; }
+        // 포트 링크 후보: 어댑터의 NetworkPorts/Ports + 각 컨트롤러의 Links.(NetworkPorts|Ports).
+        const collLinks = new Set();
+        for (const l of [a.NetworkPorts?.['@odata.id'], a.Ports?.['@odata.id']]) if (l) collLinks.add(l);
+        for (const ctl of (a.Controllers || [])) {
+          for (const arr of [ctl.Links?.NetworkPorts, ctl.Links?.Ports]) for (const ref of (arr || [])) if (ref?.['@odata.id']) collLinks.add(ref['@odata.id']);
+        }
+        // 컬렉션 링크(.../NetworkPorts)면 Members 순회, 개별 포트 링크면 그대로 조회.
+        const portRefs = [];
+        for (const link of collLinks) {
+          try { const r = await G(link); if (Array.isArray(r.Members)) portRefs.push(...r.Members.map((m) => m['@odata.id']).filter(Boolean)); else portRefs.push(link); }
+          catch { /* skip link */ }
+        }
         const ports = [];
-        const portsLink = a.NetworkPorts?.['@odata.id'] || a.Ports?.['@odata.id'];
-        if (portsLink) {
-          try {
-            const pr = await G(portsLink);
-            for (const pm of (pr.Members || []).slice(0, 8)) {
-              try {
-                const p = await G(pm['@odata.id']);
-                ports.push({
-                  id: p.Id || p.Name || '',
-                  link: p.LinkStatus || p.Status?.State || '',
-                  speedMbps: num(p.CurrentLinkSpeedMbps) ?? (p.SupportedLinkCapabilities?.[0]?.LinkSpeedMbps ?? null),
-                });
-              } catch { /* skip port */ }
-            }
-          } catch { /* ports optional */ }
+        for (const pref of [...new Set(portRefs)].slice(0, 16)) {
+          try { const p = await G(pref); ports.push({ id: p.Id || p.Name || '', link: p.LinkStatus || p.Status?.State || '', speedMbps: portSpeedMbps(p) }); }
+          catch { /* skip port */ }
         }
         inv.nics.push({ name: a.Id || a.Model || '', model: a.Model || a.Manufacturer || '', ports });
       }
     }
   } catch { /* nics optional */ }
+  // 폴백: NetworkAdapters에서 속도를 못 얻으면 Systems/EthernetInterfaces의 SpeedMbps 사용
+  // (Dell은 물리 포트가 EthernetInterfaces로도 노출되며 SpeedMbps에 링크 속도가 담긴다).
+  if (!inv.nics.some((n) => (n.ports || []).some((p) => p.speedMbps)) && sysId) {
+    try {
+      const ei = await G(`${sysId}/EthernetInterfaces`);
+      const eports = [];
+      for (const em of (ei.Members || []).slice(0, 32)) {
+        try { const e = await G(em['@odata.id']); const mb = toMb(e.SpeedMbps); if (mb) eports.push({ id: e.Id || e.Name || '', link: e.LinkStatus || '', speedMbps: mb }); }
+        catch { /* skip */ }
+      }
+      if (eports.length) inv.nics.push({ name: 'EthernetInterfaces', model: '(EthernetInterfaces)', ports: eports });
+    } catch { /* optional */ }
+  }
 
   // --- iDRAC 라이선스(Enterprise/DataCenter — GPU 텔레메트리 가용성과 직결) ---
   inv.licenses = [];
