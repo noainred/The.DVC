@@ -105,6 +105,10 @@ const toolFromHash = () => {
   return TOOLS.some((t) => t.k === k) ? k : null;
 };
 
+// 최근 검색어(브라우저 로컬) — 특수 기능 '메뉴 빠른 찾기'에서 Enter 또는 검색 중 메뉴 클릭 시 기록.
+const RECENT_KEY = 'tools.recentSearches';
+const loadRecent = () => { try { const a = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]'); return Array.isArray(a) ? a.filter((s) => typeof s === 'string' && s.trim()) : []; } catch { return []; } };
+
 export default function SpecialTools() {
   const [tool, setTool] = useState(() => toolFromHash());
   const [menuQ, setMenuQ] = useState(''); // 메뉴 빠른 찾기
@@ -112,9 +116,21 @@ export default function SpecialTools() {
   const [topKeys, setTopKeys] = useState([]); // 자주 쓰는 기능(전체 사용자 합산 상위)
   const gridRef = useRef(null);               // 메뉴 그리드 너비 측정용
   const [favCount, setFavCount] = useState(4); // 한 줄에 들어가는 카드 수(화면폭 자동, 기본 4)
+  const [recent, setRecent] = useState(loadRecent); // 최근 검색어(최신순, 1줄 표시)
+  const addRecent = (q) => {
+    const t = String(q || '').trim();
+    if (!t) return;
+    setRecent((prev) => {
+      const next = [t, ...prev.filter((s) => s.toLowerCase() !== t.toLowerCase())].slice(0, 15);
+      try { localStorage.setItem(RECENT_KEY, JSON.stringify(next)); } catch { /* 저장 실패 무시 */ }
+      return next;
+    });
+  };
+  const clearRecent = () => { setRecent([]); try { localStorage.removeItem(RECENT_KEY); } catch { /* ignore */ } };
   // 기능 실행 시 사용 횟수를 중앙에 기록(자주 쓰는 메뉴 자동 추천용). 실패는 조용히 무시.
   const openTool = (k) => {
     if (k) postJson('/tool-usage', { k }).catch(() => {});
+    if (k) addRecent(menuQ); // 검색 중에 메뉴를 열면 그 검색어를 최근 검색어로 기록
     setTool(k); window.location.hash = k ? `#/tools/${k}` : '#/tools';
   };
   // 뒤로/앞으로 가기 및 외부에서 바로가기로 진입할 때 동기화.
@@ -164,10 +180,26 @@ export default function SpecialTools() {
   return (
     <>
       <div className="section-title" style={{ marginTop: 0 }}>🛠️ 특수 기능</div>
-      <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 14 }}>
+      <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: recent.length ? 6 : 14 }}>
         <div className="muted" style={{ fontSize: 13 }}>아래 기능을 클릭하면 해당 진단을 실행해 보여줍니다.</div>
-        <SearchBox className="input" style={{ maxWidth: 280 }} placeholder="메뉴 빠른 찾기 (예: G, GPU, IP)" value={menuQ} onChange={setMenuQ} />
+        <SearchBox className="input" style={{ maxWidth: 280 }} placeholder="메뉴 빠른 찾기 (예: G, GPU, IP)" value={menuQ} onChange={setMenuQ}
+          onKeyDown={(e) => { if (e.key === 'Enter') addRecent(e.target.value); }} />
       </div>
+      {recent.length > 0 && (
+        // 최근 검색어 — 정확히 1줄만: nowrap + overflow hidden으로 화면 폭에 들어가는 만큼만 표시.
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 14, flexWrap: 'nowrap', minWidth: 0 }}>
+          <span className="muted" style={{ fontSize: 12, flexShrink: 0 }}>🕘 최근 검색:</span>
+          <div style={{ display: 'flex', gap: 6, flex: 1, minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap' }}>
+            {recent.map((q) => (
+              <button key={q} className="tab" style={{ padding: '3px 10px', fontSize: 12, flexShrink: 0, background: menuQ === q ? 'rgba(34,211,238,.15)' : undefined }}
+                onClick={() => setMenuQ(menuQ === q ? '' : q)} title={`"${q}" 다시 검색 (다시 클릭하면 해제)`}>
+                {q}
+              </button>
+            ))}
+          </div>
+          <button className="tab" style={{ padding: '3px 8px', fontSize: 11, flexShrink: 0, opacity: 0.6 }} onClick={clearRecent} title="최근 검색어 전체 지우기">✕ 지우기</button>
+        </div>
+      )}
       {favorites.length > 0 && (
         <div style={{ marginBottom: 18 }}>
           <div className="muted" style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
