@@ -1212,6 +1212,60 @@ adminRouter.get('/idrac/nic-speed', adminOnly, (req, res) => {
   });
 });
 
+// 서버 NIC 종류·모델 확인 — iDRAC 인벤토리(inv.nics[].model)로 설치된 NIC 어댑터 모델별 분류.
+// DataCenter(법인)·가상화(ESXi)/베어메탈 필터. 모델별 서버/포트 수 + 서버별 어댑터 상세.
+adminRouter.get('/idrac/nic-models', adminOnly, (req, res) => {
+  const dcFilter = String(req.query.datacenterId || '').trim();
+  const typeFilter = String(req.query.type || '').trim();
+  const assign = getDatacenterAssign();
+  const tagMap = hostVcByTag();
+  const dcNameById = new Map(listDatacenters().map((d) => [String(d.id), d.name || d.id]));
+  const dcOf = (s) => String(s.datacenterId || assign[String(s.vcenterId || s.mappedVcenterId || '')] || '');
+  const speedLabel = (mbps) => { if (!mbps) return ''; if (mbps % 1000 === 0) return `${mbps / 1000}G`; if (mbps >= 1000) return `${(mbps / 1000).toFixed(1)}G`; return `${mbps}M`; };
+  const localAll = loadIdracRegistry().filter((s) => s.type !== 'ome').map((s) => withMappedVc(s, tagMap));
+  const seen = new Set(localAll.map((s) => String(s.id)));
+  const merged = localAll.concat(remoteServersResolved().map((s) => withMappedVc(s, tagMap)).filter((s) => !seen.has(String(s.id))));
+
+  const byModel = new Map(); // model -> { servers:Set, ports }
+  const rows = []; let collected = 0; let missing = 0;
+  for (const s of merged) {
+    const type = (s.mappedVcenterId || s.vcenterId) ? 'virtual' : 'baremetal';
+    const dcId = dcOf(s);
+    if (dcFilter) { if (dcFilter === '__unmapped__') { if (dcId) continue; } else if (dcId !== dcFilter) continue; }
+    if (typeFilter && type !== typeFilter) continue;
+    const inv = invForServer(s);
+    if (!inv || !inv.collectedAt) { missing++; continue; }
+    collected++;
+    const adapters = [];
+    for (const n of (inv.nics || [])) {
+      const model = String(n.model || n.name || '').trim() || '(모델 미상)';
+      if (String(n.model || '').trim() === '(EthernetInterfaces)') continue; // 폴백 합성 어댑터는 모델 집계서 제외
+      const speeds = new Set(); let ports = 0;
+      for (const p of (n.ports || [])) { const mb = Number(p.speedMbps); if (Number.isFinite(mb) && mb > 0) { speeds.add(mb); } ports++; }
+      const maxMbps = speeds.size ? Math.max(...speeds) : 0;
+      adapters.push({ model, name: n.name || '', ports, speeds: [...speeds].sort((a, b) => b - a).map(speedLabel), maxSpeed: speedLabel(maxMbps) || '—' });
+      const e = byModel.get(model) || { servers: new Set(), ports: 0 };
+      e.servers.add(s.id); e.ports += ports; byModel.set(model, e);
+    }
+    rows.push({
+      id: s.id, name: s.name || inv.system?.hostName || s.id,
+      serviceTag: inv.system?.serviceTag || s.serviceTag || '',
+      model: inv.system?.model || '',
+      datacenterId: dcId, datacenter: dcNameById.get(dcId) || dcId || '(미매핑)',
+      type, adapters, nicModels: [...new Set(adapters.map((a) => a.model))],
+    });
+  }
+  const modelBuckets = [...byModel.entries()].map(([model, e]) => ({ model, servers: e.servers.size, ports: e.ports }))
+    .sort((a, b) => b.servers - a.servers || String(a.model).localeCompare(b.model));
+  const virtualN = rows.filter((r) => r.type === 'virtual').length;
+  res.json({
+    ok: true, datacenterId: dcFilter, type: typeFilter,
+    totalServers: rows.length, collected, missing, virtual: virtualN, baremetal: rows.length - virtualN,
+    byModel: modelBuckets, servers: rows,
+    datacenters: listDatacenters().map((d) => ({ id: d.id, name: d.name || d.id })),
+  });
+});
+
 // 하드웨어 집계 드릴다운 — 특정 dim(model|cpu|memory|gpu) + key에 해당하는 서버 목록.
 // 하드웨어 집계 화면에서 항목(예: PowerEdge R750)을 클릭하면 그 서버만 보여주는 데 쓴다.
 adminRouter.get('/idrac/hardware-servers', adminOnly, (req, res) => {
