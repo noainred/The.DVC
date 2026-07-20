@@ -209,10 +209,10 @@ export async function deployAgent(target, { installerPath, port: portIn = 4000 }
 }
 
 // systemd 서비스가 active 될 때까지 폴링. active면 즉시 반환, 아니면 마지막 상태 반환.
-async function waitActive(exec, tries = 15, delaySec = 2) {
+async function waitActive(exec, tries = 15, delaySec = 2, unit = 'vmware-portal') {
   let state = '';
   for (let i = 0; i < tries; i++) {
-    state = (await exec('systemctl is-active vmware-portal').catch(() => ({ stdout: '' }))).stdout.trim();
+    state = (await exec(`systemctl is-active ${unit}`).catch(() => ({ stdout: '' }))).stdout.trim();
     if (state === 'active') return 'active';
     if (state === 'failed' && i >= 2) return 'failed'; // 명백 실패면 빨리 종료
     await exec(`sleep ${delaySec}`);
@@ -221,11 +221,44 @@ async function waitActive(exec, tries = 15, delaySec = 2) {
 }
 
 /**
- * 토큰 강제 동기화 — 수집 서버 '연결 테스트'가 403(토큰 불일치)일 때, SSH로 엣지의
- * /etc/vmware-portal/portal.env 에서 COLLECTOR_TOKEN을 중앙 화면의 토큰으로 교체하고
- * 서비스를 재시작한다(재배포 없이 토큰만). 값은 셸 주입 차단을 위해 문자 집합을 제한한다.
+ * 수집 서버 URL의 포트를 실제로 서비스 중인 systemd 유닛/환경파일을 역추적한다.
+ * 같은 호스트에 포탈 인스턴스가 여러 개(예: 기본 4000 + 별도 4001)면 기본 유닛만 고치는 것은
+ * 무의미하므로, 리슨 중인 프로세스(pid→unit→EnvironmentFiles) 기준으로 대상을 결정하고,
+ * 특정할 수 없으면 추측으로 진행하지 않고 명확한 진단과 함께 실패시킨다(exec 주입 방지 검증 포함).
  */
-export async function forceCollectorToken(target, token) {
+export async function resolvePortalUnit(exec, urlPort) {
+  const def = { unit: 'vmware-portal', envFile: '/etc/vmware-portal/portal.env', note: '' };
+  const port = Number(urlPort);
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) return def; // 포트 불명 → 기본 인스턴스
+  const lsn = (await exec(`ss -ltnp 2>/dev/null | grep -E '[:.]${port}\\s' || true`).catch(() => ({ stdout: '' }))).stdout;
+  const pid = /pid=(\d+)/.exec(lsn)?.[1];
+  if (!pid) {
+    // 리슨 없음: 기본 인스턴스의 PORT와 같으면 '그 서비스가 중지된 상태'로 보고 기본에 적용,
+    // 다르면 NAT/다른 장비/별도 인스턴스 중지 가능성 — 엉뚱한 파일을 고치지 않는다.
+    const envPort = (await exec(`grep -E '^PORT=' ${def.envFile} 2>/dev/null | tail -1 || true`).catch(() => ({ stdout: '' }))).stdout.trim().replace(/^PORT=/, '');
+    if (envPort && Number(envPort) !== port) {
+      return { error: `이 호스트에서 :${port} 를 리슨하는 프로세스가 없고, 기본 인스턴스(portal.env)는 PORT=${envPort} 입니다. 수집 서버 URL(:${port})이 포트포워딩(NAT)으로 다른 장비를 가리키거나 별도 인스턴스가 중지된 상태일 수 있습니다 — SSH 대상 호스트/URL을 확인하세요.` };
+    }
+    return { ...def, note: `:${port} 리슨 프로세스 없음(서비스 중지 추정) — 기본 인스턴스에 적용` };
+  }
+  const unitRaw = (await exec(`ps -o unit= -p ${pid} 2>/dev/null || true`).catch(() => ({ stdout: '' }))).stdout.trim();
+  const unit = /^[A-Za-z0-9@:._-]+\.service$/.test(unitRaw) ? unitRaw.replace(/\.service$/, '') : '';
+  if (!unit) return { error: `:${port} 는 systemd 서비스가 아닌 프로세스(pid ${pid})가 서비스 중입니다(docker/수동 실행 등). 자동 토큰 동기화를 적용할 수 없습니다 — 해당 프로세스의 COLLECTOR_TOKEN을 직접 수정하세요.` };
+  if (unit === def.unit) return def;
+  const ef = (await exec(`systemctl show ${unit} -p EnvironmentFiles 2>/dev/null || true`).catch(() => ({ stdout: '' }))).stdout;
+  const m = /EnvironmentFiles=(\S+)/.exec(ef);
+  const envFile = m && /^[A-Za-z0-9/._-]+$/.test(m[1]) ? m[1] : '';
+  if (!envFile) return { error: `:${port} 를 서비스 중인 유닛(${unit})의 EnvironmentFile을 확인할 수 없습니다.` };
+  return { unit, envFile, note: `별도 인스턴스 감지: ${unit} (${envFile})` };
+}
+
+/**
+ * 토큰 강제 동기화 — 수집 서버 '연결 테스트'가 403(토큰 불일치)일 때, SSH로 엣지의
+ * portal.env 에서 COLLECTOR_TOKEN을 중앙 화면의 토큰으로 교체하고 서비스를 재시작한다
+ * (재배포 없이 토큰만). urlPort가 있으면 그 포트를 서비스 중인 인스턴스를 역추적해 적용한다.
+ * 값은 셸 주입 차단을 위해 문자 집합을 제한한다.
+ */
+export async function forceCollectorToken(target, token, { urlPort } = {}) {
   if (!target?.host || !target?.username) return { ok: false, reason: 'host/username이 필요합니다.' };
   const tk = String(token || '').trim();
   if (!tk) return { ok: false, reason: '토큰이 비어 있습니다.' };
@@ -234,19 +267,23 @@ export async function forceCollectorToken(target, token) {
     return await withSsh(creds(target), async ({ exec }) => {
       const idu = await exec('id -u');
       if (idu.stdout.trim() !== '0') return { ok: false, reason: 'portal.env 수정에는 root 권한이 필요합니다.' };
-      const envOk = (await exec('test -f /etc/vmware-portal/portal.env && echo yes || echo no')).stdout.includes('yes');
-      if (!envOk) return { ok: false, reason: '/etc/vmware-portal/portal.env 가 없습니다. 이 호스트에 먼저 에이전트를 배포하세요.' };
-      await exec("sed -i '/^COLLECTOR_TOKEN=/d' /etc/vmware-portal/portal.env");
-      await exec(`printf 'COLLECTOR_TOKEN=%s\\n' '${tk}' >> /etc/vmware-portal/portal.env`);
-      await exec('systemctl restart vmware-portal 2>&1 || true');
-      const state = await waitActive(exec, 15, 2);
+      const inst = await resolvePortalUnit(exec, urlPort);
+      if (inst.error) return { ok: false, reason: inst.error };
+      const { unit, envFile } = inst;
+      const envOk = (await exec(`test -f ${envFile} && echo yes || echo no`)).stdout.includes('yes');
+      if (!envOk) return { ok: false, reason: `${envFile} 가 없습니다. 이 호스트에 먼저 에이전트를 배포하세요.` };
+      await exec(`sed -i '/^COLLECTOR_TOKEN=/d' ${envFile}`);
+      // 마지막 줄에 개행이 없어도 앞 줄에 붙지 않도록 선행 개행 포함(빈 줄은 무해).
+      await exec(`printf '\\nCOLLECTOR_TOKEN=%s\\n' '${tk}' >> ${envFile}`);
+      await exec(`systemctl restart ${unit} 2>&1 || true`);
+      const state = await waitActive(exec, 15, 2, unit);
       const isActive = state === 'active';
       let log = '';
       if (!isActive) {
-        const jc = (await exec('journalctl -u vmware-portal --no-pager -n 40 2>&1').catch(() => ({ stdout: '' }))).stdout;
+        const jc = (await exec(`journalctl -u ${unit} --no-pager -n 40 2>&1`).catch(() => ({ stdout: '' }))).stdout;
         log = jc.slice(-3000);
       }
-      return { ok: isActive, active: state, log, reason: isActive ? undefined : `토큰은 교체됐지만 서비스 상태가 ${state}입니다. 로그를 확인하세요.` };
+      return { ok: isActive, active: state, unit, envFile, note: inst.note || '', log, reason: isActive ? undefined : `토큰은 교체됐지만 서비스(${unit}) 상태가 ${state}입니다. 로그를 확인하세요.` };
     });
   } catch (err) {
     return { ok: false, reason: err.message };

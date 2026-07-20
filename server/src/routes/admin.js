@@ -2024,14 +2024,16 @@ adminRouter.post('/collectors/:id/force-token', adminOnly, async (req, res) => {
   if (url && !/^https?:\/\//.test(url)) url = `http://${url}`;
   const ssrf = url ? ssrfBlockReason(url) : 'URL이 없습니다.';
   if (ssrf) return res.status(400).json({ ok: false, reason: ssrf });
-  let host = '';
-  try { host = new URL(url).hostname; } catch { /* 아래에서 처리 */ }
+  let host = ''; let urlPort = 0;
+  try { const u = new URL(url); host = u.hostname; urlPort = Number(u.port) || (u.protocol === 'https:' ? 443 : 80); } catch { /* 아래에서 처리 */ }
   if (!host) return res.status(400).json({ ok: false, reason: '수집 서버 URL에서 호스트를 확인할 수 없습니다.' });
   const target = listTargets().map((t) => getTargetRaw(t.id)).find((t) => t && String(t.host || '').trim() === host);
   if (!target) {
     return res.status(404).json({ ok: false, reason: `SSH 배포 대상에 ${host} 가 없습니다. '수집 서버 → 원격 법인(DC)에 Edge 노드 포탈 설치'에서 이 호스트를 먼저 저장(SSH 계정 포함)하세요.` });
   }
-  const r = await forceCollectorToken(target, token);
+  // URL 포트를 실제 서비스 중인 인스턴스를 역추적해 적용 — 같은 호스트 다중 인스턴스(:4000/:4001)나
+  // NAT 포워딩(다른 장비)일 때 기본 인스턴스만 고치고 '성공'으로 오판하던 버그 방지.
+  const r = await forceCollectorToken(target, token, { urlPort });
   logAudit({ user: req.user?.username, action: '수집 서버 토큰 강제 동기화', target: `${saved.id} (${host})`, detail: r.ok ? `성공 · 서비스 ${r.active}` : `실패 — ${r.reason}`, ip: req.ip || '' });
   if (!r.ok) return res.status(400).json({ ok: false, reason: r.reason, host, sshTarget: target.id, log: r.log });
   // 중앙 저장 토큰도 동일 값으로 고정(managed) — 엣지 자기등록이 이 값을 덮어쓰지 않게.
@@ -2047,7 +2049,7 @@ adminRouter.post('/collectors/:id/force-token', adminOnly, async (req, res) => {
     if (!vr.ok) verifyReason = `HTTP ${vr.status}`;
   } catch (e) { verifyReason = e.message; }
   if (verified) pullNow().catch(() => {});
-  res.json({ ok: true, host, sshTarget: target.id, active: r.active, savedToken: upd.ok, verified, verifyReason: verified ? undefined : verifyReason });
+  res.json({ ok: true, host, sshTarget: target.id, active: r.active, unit: r.unit, envFile: r.envFile, note: r.note || undefined, savedToken: upd.ok, verified, verifyReason: verified ? undefined : verifyReason });
 });
 
 // ---- Agent scan assignments (central orchestration) -----------------------
