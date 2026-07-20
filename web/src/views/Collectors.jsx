@@ -121,7 +121,7 @@ export default function Collectors() {
     try {
       const r = await postJson(`/admin/collectors/${encodeURIComponent(form.id)}/force-token`, { token: form.token || undefined, url: form.url || undefined });
       setMsg(r.ok
-        ? { ok: true, text: `토큰 강제 동기화 완료 — ${r.host} (SSH 대상: ${r.sshTarget}) · 서비스 ${r.active}${r.verified ? ' · 연결 재검증 성공 ✅' : ` · 재검증 실패(${r.verifyReason || '?'}) — 잠시 후 '연결 테스트'를 다시 실행하세요`}` }
+        ? { ok: true, text: `토큰 강제 동기화 완료 — ${r.host} (SSH 대상: ${r.sshTarget}${r.unit && r.unit !== 'vmware-portal' ? ` · 인스턴스 ${r.unit}` : ''}) · 서비스 ${r.active}${r.note ? ` · ${r.note}` : ''}${r.verified ? ' · 연결 재검증 성공 ✅' : ` · 재검증 실패(${r.verifyReason || '?'}) — 잠시 후 '연결 테스트'를 다시 실행하세요`}` }
         : { ok: false, text: `토큰 강제 동기화 실패: ${r.reason}` });
       if (r.ok) await load();
     } catch (e) { setMsg({ ok: false, text: `토큰 강제 동기화 실패: ${e.message}` }); }
