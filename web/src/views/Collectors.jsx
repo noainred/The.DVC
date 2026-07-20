@@ -112,6 +112,22 @@ export default function Collectors() {
     finally { setBusy(false); }
   };
 
+  // 토큰 강제 동기화 — 연결 테스트 403(토큰 불일치) 시, 이 화면의 토큰(비우면 저장된 토큰)을
+  // 'Edge 노드 포탈 설치'의 저장된 SSH 대상으로 엣지 portal.env에 강제 반영 + 서비스 재시작.
+  const forceToken = async () => {
+    if (!editing) return;
+    if (!window.confirm(`'${form.id}' 엣지(${form.url})의 COLLECTOR_TOKEN을 이 화면의 토큰으로 강제 교체하고 서비스를 재시작할까요?\n\n· 저장된 'Edge 노드 포탈 설치' SSH 대상을 사용합니다.\n· 중앙 저장 토큰도 같은 값으로 고정(🔒)됩니다.`)) return;
+    setBusy(true); setMsg(null);
+    try {
+      const r = await postJson(`/admin/collectors/${encodeURIComponent(form.id)}/force-token`, { token: form.token || undefined, url: form.url || undefined });
+      setMsg(r.ok
+        ? { ok: true, text: `토큰 강제 동기화 완료 — ${r.host} (SSH 대상: ${r.sshTarget}) · 서비스 ${r.active}${r.verified ? ' · 연결 재검증 성공 ✅' : ` · 재검증 실패(${r.verifyReason || '?'}) — 잠시 후 '연결 테스트'를 다시 실행하세요`}` }
+        : { ok: false, text: `토큰 강제 동기화 실패: ${r.reason}` });
+      if (r.ok) await load();
+    } catch (e) { setMsg({ ok: false, text: `토큰 강제 동기화 실패: ${e.message}` }); }
+    finally { setBusy(false); }
+  };
+
   const remove = async (c) => {
     if (!window.confirm(`'${c.name}' (${c.id}) 수집 서버를 삭제할까요?`)) return;
     try { await delJson(`/admin/collectors/${encodeURIComponent(c.id)}`); await load(); }
@@ -346,10 +362,18 @@ export default function Collectors() {
                 {busy ? '저장 중…' : (editing ? '저장' : '등록')}
               </button>
               <button className="logout-btn" style={{ padding: '10px 18px' }} disabled={busy} onClick={test}>연결 테스트</button>
+              {editing && (
+                <button className="logout-btn" style={{ padding: '10px 18px', whiteSpace: 'nowrap' }} disabled={busy} onClick={forceToken}
+                  title="토큰 불일치(403) 시: 저장된 SSH 배포 대상으로 엣지 portal.env의 COLLECTOR_TOKEN을 이 화면의 토큰으로 교체하고 서비스를 재시작합니다.">
+                  🔧 토큰 강제 동기화
+                </button>
+              )}
             </div>
             <div className="muted" style={{ marginTop: 10, fontSize: 12, lineHeight: 1.7 }}>
               에이전트 서버는 다음으로 실행합니다: <code>COLLECTOR_TOKEN=&lt;토큰&gt; COLLECTOR_DATACENTER=Seoul-DC1</code>.
               그 서버의 ‘전력 수집’ 메뉴에서 로컬 iDRAC/OME를 등록하세요. 토큰은 <code>$CONFIG_DIR/collectors.json</code>(0600)에만 저장됩니다.
+              {editing && <><br />🔧 <b>토큰 강제 동기화</b>: 연결 테스트가 403(토큰 불일치)일 때, 이 화면의 토큰(비우면 저장된 토큰)을
+                ‘원격 법인(DC)에 Edge 노드 포탈 설치’에 저장된 SSH 대상으로 엣지에 직접 반영하고 서비스를 재시작한 뒤 재검증합니다.</>}
             </div>
           </div>
         </div>

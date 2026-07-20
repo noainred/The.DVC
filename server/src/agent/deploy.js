@@ -220,6 +220,39 @@ async function waitActive(exec, tries = 15, delaySec = 2) {
   return state || 'unknown';
 }
 
+/**
+ * 토큰 강제 동기화 — 수집 서버 '연결 테스트'가 403(토큰 불일치)일 때, SSH로 엣지의
+ * /etc/vmware-portal/portal.env 에서 COLLECTOR_TOKEN을 중앙 화면의 토큰으로 교체하고
+ * 서비스를 재시작한다(재배포 없이 토큰만). 값은 셸 주입 차단을 위해 문자 집합을 제한한다.
+ */
+export async function forceCollectorToken(target, token) {
+  if (!target?.host || !target?.username) return { ok: false, reason: 'host/username이 필요합니다.' };
+  const tk = String(token || '').trim();
+  if (!tk) return { ok: false, reason: '토큰이 비어 있습니다.' };
+  if (!/^[A-Za-z0-9._~+/=-]{4,512}$/.test(tk)) return { ok: false, reason: '토큰에 사용할 수 없는 문자가 있습니다(영숫자·._~+/=- 만 허용).' };
+  try {
+    return await withSsh(creds(target), async ({ exec }) => {
+      const idu = await exec('id -u');
+      if (idu.stdout.trim() !== '0') return { ok: false, reason: 'portal.env 수정에는 root 권한이 필요합니다.' };
+      const envOk = (await exec('test -f /etc/vmware-portal/portal.env && echo yes || echo no')).stdout.includes('yes');
+      if (!envOk) return { ok: false, reason: '/etc/vmware-portal/portal.env 가 없습니다. 이 호스트에 먼저 에이전트를 배포하세요.' };
+      await exec("sed -i '/^COLLECTOR_TOKEN=/d' /etc/vmware-portal/portal.env");
+      await exec(`printf 'COLLECTOR_TOKEN=%s\\n' '${tk}' >> /etc/vmware-portal/portal.env`);
+      await exec('systemctl restart vmware-portal 2>&1 || true');
+      const state = await waitActive(exec, 15, 2);
+      const isActive = state === 'active';
+      let log = '';
+      if (!isActive) {
+        const jc = (await exec('journalctl -u vmware-portal --no-pager -n 40 2>&1').catch(() => ({ stdout: '' }))).stdout;
+        log = jc.slice(-3000);
+      }
+      return { ok: isActive, active: state, log, reason: isActive ? undefined : `토큰은 교체됐지만 서비스 상태가 ${state}입니다. 로그를 확인하세요.` };
+    });
+  } catch (err) {
+    return { ok: false, reason: err.message };
+  }
+}
+
 /** 배포 후 에이전트(대상 호스트)의 vmware-portal 서비스 상태를 SSH로 재확인. */
 export async function checkAgentStatus(target) {
   if (!target?.host || !target?.username) return { ok: false, reason: 'host/username이 필요합니다.' };
