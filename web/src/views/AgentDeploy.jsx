@@ -20,6 +20,7 @@ export default function AgentDeploy() {
   const [dl, setDl] = useState({ kinds: ['installer_cent9'], version: '', busy: false });
   const [pkgCfg, setPkgCfg] = useState(null); // { baseUrl, dir } editable
   const [subtab, setSubtab] = useState('status'); // status(에이전트 현황·기본) | add(에이전트 추가) | packages(설치 패키지 자동 다운로드)
+  const [sort, setSort] = useState({ key: 'agentName', dir: 'asc' }); // 에이전트 현황 표 헤더 정렬
 
   const loadInstaller = () => fetchJson('/admin/agent-deploy/installer').then(setInstaller).catch(() => setInstaller({ available: false }));
   const loadPkg = () => fetchJson('/admin/packages').then((p) => { setPkg(p); setPkgCfg({ baseUrl: p.baseUrl || '', dir: p.dir || '' }); }).catch(() => setPkg(null));
@@ -342,9 +343,24 @@ export default function AgentDeploy() {
             ? <span className="muted" style={{ fontSize: 13 }}>저장된 대상이 없습니다. '➕ 에이전트 추가' 탭에서 대상을 저장한 뒤 여기서 배포·상태확인·관리하세요.</span>
             : <div className="table-wrap">
             <table>
-              <thead><tr><th>호스트</th><th>에이전트</th><th>중앙</th><th>마지막 결과</th><th style={{ textAlign: 'right' }}>작업</th></tr></thead>
+              <thead><tr>
+                {[['host', '호스트'], ['agentName', '에이전트'], ['centralUrl', '중앙'], ['lastResult', '마지막 결과']].map(([k, label]) => (
+                  <th key={k} style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }}
+                    onClick={() => setSort((s) => (s.key === k ? { key: k, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key: k, dir: 'asc' }))}>
+                    {label}<span style={{ opacity: sort.key === k ? 1 : 0.25, fontSize: 10, marginLeft: 3 }}>{sort.key === k ? (sort.dir === 'asc' ? '▲' : '▼') : '↕'}</span>
+                  </th>
+                ))}
+                <th style={{ textAlign: 'right' }}>작업</th>
+              </tr></thead>
               <tbody>
-                {targets.map((t) => (
+                {targets.slice().sort((a, b) => {
+                  // 마지막 결과는 성공(active)>실패>미확인 순의 등급으로, 나머지는 문자열로 비교. IP는 숫자 인지 정렬(numeric).
+                  const grade = (t) => (t.lastResult ? (t.lastResult.ok ? 2 : 1) : 0);
+                  const v = (t) => (sort.key === 'lastResult' ? grade(t) : String(t[sort.key] || '').toLowerCase());
+                  const av = v(a); const bv = v(b);
+                  const d = typeof av === 'number' ? av - bv : av.localeCompare(bv, undefined, { numeric: true });
+                  return (sort.dir === 'desc' ? -d : d) || String(a.host || '').localeCompare(String(b.host || ''), undefined, { numeric: true });
+                }).map((t) => (
                   <tr key={t.id}>
                     <td><b>{t.host}</b>:{t.port || 22} <span className="muted" style={{ fontSize: 11 }}>{t.username}</span></td>
                     <td>{t.agentName || '—'}</td>
