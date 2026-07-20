@@ -14,7 +14,7 @@ import { saveNote, deleteNote } from '../release-notes.js';
 import { loadLlmConfig, saveLlmConfig } from '../llm/config.js';
 import { ollamaTest } from '../llm/ollama.js';
 import { installOllama } from '../llm/ollamaDeploy.js';
-import { deployAgent, testTarget, installerInfo, checkAgentStatus } from '../agent/deploy.js';
+import { deployAgent, testTarget, installerInfo, checkAgentStatus, forceCollectorToken } from '../agent/deploy.js';
 import { fetchRemoteVersions, listLocalPackages, downloadPackage } from '../upgrade/fetchPackage.js';
 import { getPackageSettings, savePackageSettings } from '../upgrade/packageSettings.js';
 import { listTargets, getTargetRaw, saveTarget, removeTarget, recordResult, findTargetByHost } from '../agent/deployRegistry.js';
@@ -2010,6 +2010,44 @@ adminRouter.post('/collectors/test', adminOnly, async (req, res) => {
   } catch (err) {
     res.json({ ok: false, reason: err.message, ms: Date.now() - started, retried });
   }
+});
+
+// 토큰 강제 동기화 — 연결 테스트가 403(토큰 불일치)일 때, 수집 서버 URL의 호스트와 일치하는
+// 'Edge 노드 포탈 설치' 저장 대상(SSH)을 찾아 엣지 portal.env의 COLLECTOR_TOKEN을 이 화면의
+// 토큰으로 교체·재시작하고, 중앙 저장 토큰도 같은 값으로 고정(managed)한 뒤 재검증한다.
+adminRouter.post('/collectors/:id/force-token', adminOnly, async (req, res) => {
+  const saved = loadCollectors().find((c) => c.id === req.params.id);
+  if (!saved) return res.status(404).json({ ok: false, reason: `없는 수집 서버: ${req.params.id}` });
+  const token = String(req.body?.token || saved.token || '').trim();
+  if (!token) return res.status(400).json({ ok: false, reason: '토큰이 없습니다. 이 화면에서 토큰을 입력(또는 자동 생성)한 뒤 다시 시도하세요.' });
+  let url = String(req.body?.url || saved.url || '').trim();
+  if (url && !/^https?:\/\//.test(url)) url = `http://${url}`;
+  const ssrf = url ? ssrfBlockReason(url) : 'URL이 없습니다.';
+  if (ssrf) return res.status(400).json({ ok: false, reason: ssrf });
+  let host = '';
+  try { host = new URL(url).hostname; } catch { /* 아래에서 처리 */ }
+  if (!host) return res.status(400).json({ ok: false, reason: '수집 서버 URL에서 호스트를 확인할 수 없습니다.' });
+  const target = listTargets().map((t) => getTargetRaw(t.id)).find((t) => t && String(t.host || '').trim() === host);
+  if (!target) {
+    return res.status(404).json({ ok: false, reason: `SSH 배포 대상에 ${host} 가 없습니다. '수집 서버 → 원격 법인(DC)에 Edge 노드 포탈 설치'에서 이 호스트를 먼저 저장(SSH 계정 포함)하세요.` });
+  }
+  const r = await forceCollectorToken(target, token);
+  logAudit({ user: req.user?.username, action: '수집 서버 토큰 강제 동기화', target: `${saved.id} (${host})`, detail: r.ok ? `성공 · 서비스 ${r.active}` : `실패 — ${r.reason}`, ip: req.ip || '' });
+  if (!r.ok) return res.status(400).json({ ok: false, reason: r.reason, host, sshTarget: target.id, log: r.log });
+  // 중앙 저장 토큰도 동일 값으로 고정(managed) — 엣지 자기등록이 이 값을 덮어쓰지 않게.
+  const upd = updateCollector(saved.id, { ...saved, token, url: saved.url }, { managed: true });
+  // 재검증: 새 토큰으로 export가 200인지 확인(서비스 기동 직후라 재시도 여유).
+  let verified = false; let verifyReason = '';
+  try {
+    const vr = await resilientFetch(`${String(saved.url || url).replace(/\/+$/, '')}/api/collector/export`, {
+      headers: { Accept: 'application/json', 'X-Collector-Token': token },
+      timeoutMs: config.collector.timeoutMs, retries: 2,
+    });
+    verified = vr.ok;
+    if (!vr.ok) verifyReason = `HTTP ${vr.status}`;
+  } catch (e) { verifyReason = e.message; }
+  if (verified) pullNow().catch(() => {});
+  res.json({ ok: true, host, sshTarget: target.id, active: r.active, savedToken: upd.ok, verified, verifyReason: verified ? undefined : verifyReason });
 });
 
 // ---- Agent scan assignments (central orchestration) -----------------------
