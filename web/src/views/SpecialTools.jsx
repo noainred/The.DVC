@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
-import { fetchJson, postJson, putJson, usePolling, getToken } from '../api.js';
+import { fetchJson, postJson, putJson, delJson, usePolling, getToken } from '../api.js';
 import { DataTable, Loading, ErrorBox, StateBadge, UsageCell, EntityDetail, Modal, ResultCount, SearchBox, VmLink } from '../components/ui.jsx';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Brush } from 'recharts';
 import { VmRemoteButton } from '../components/VmRemote.jsx';
@@ -59,6 +59,7 @@ const TOOLS = [
   { k: 'snapshots', icon: '📸', label: '스냅샷 있는 VM', desc: 'vCenter/용량/개수별 정렬' },
   { k: 'solutions', icon: '🧱', label: 'VMware 솔루션 / NSX', desc: 'vCenter별 설치 버전' },
   { k: 'licenses', icon: '🔑', label: '라이선스 한눈에', desc: '제품별 할당/사용/만료' },
+  { k: 'license-expiry', icon: '📅', label: '라이선스 만료일 확인', desc: 'ESXi·vCenter·vSAN·VCF/VVF·NSX·Horizon 등 수집 가능한 전 라이선스의 유효/만료 날짜 — 만료·90일 임박 강조, Horizon 연결 서버 등록, CSV' },
   { k: 'esxi', icon: '🖳', label: 'ESXi 버전별', desc: '호스트 ESXi 버전 분포/목록' },
   { k: 'vcversion', icon: '🏛️', label: 'vCenter 버전별', desc: 'vCenter 버전 분포' },
   { k: 'nsx', icon: '🛡️', label: 'NSX 관리', desc: 'NSX 배포 현황 / 버전' },
@@ -255,7 +256,7 @@ function ToolPanel({ tool, onBack, isAdmin }) {
   const meta = TOOLS.find((t) => t.k === tool);
   const [scope, setScope] = useState('');
   const { data: vcList } = usePolling('/vcenters', {}, 60_000);
-  const scoped = ['ipam', 'dupip', 'vmtools', 'snapshots', 'hba', 'gpu', 'licenses', 'esxi', 'hardware', 'powermap', 'guestos', 'real-os', 'thinvms', 'capacity', 'waste', 'esxitemp', 'forecast', 'dsusage'].includes(tool);
+  const scoped = ['ipam', 'dupip', 'vmtools', 'snapshots', 'hba', 'gpu', 'licenses', 'license-expiry', 'esxi', 'hardware', 'powermap', 'guestos', 'real-os', 'thinvms', 'capacity', 'waste', 'esxitemp', 'forecast', 'dsusage'].includes(tool);
 
   return (
     <>
@@ -290,6 +291,7 @@ function ToolPanel({ tool, onBack, isAdmin }) {
       {tool === 'snapshots' && <Snapshots scope={scope} />}
       {tool === 'solutions' && <Solutions />}
       {tool === 'licenses' && <Licenses scope={scope} />}
+      {tool === 'license-expiry' && <LicenseExpiry scope={scope} isAdmin={isAdmin} />}
       {tool === 'hba' && <Hba scope={scope} />}
       {tool === 'gpu' && <Gpu scope={scope} />}
       {tool === 'serveranalysis' && <ServerAnalysis />}
@@ -4395,6 +4397,159 @@ function Licenses({ scope }) {
   );
 }
 function isSoon(d) { if (!d) return false; const t = Date.parse(d); return t && t - Date.now() < 90 * 86400000; }
+
+/**
+ * 라이선스 만료일 확인 — vCenter LicenseManager(ESXi·vCenter·vSAN·VCF/VVF 등 등록 전 제품)
+ * + NSX Manager + Horizon Connection Server(등록 시 REST 직수집)의 유효/만료 날짜 통합.
+ * 만료(빨강)/90일 임박(노랑)/정상/영구 분류 + 제품군 필터 + CSV. 관리자는 Horizon 서버 등록 가능.
+ */
+function LicenseExpiry({ scope, isAdmin }) {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState(null);
+  const [statusSel, setStatusSel] = useState('');
+  const [familySel, setFamilySel] = useState('');
+  const [hz, setHz] = useState(null); // Horizon 서버 목록(관리자)
+  const [hzForm, setHzForm] = useState({ id: '', name: '', host: '', username: '', password: '', domain: '' });
+  const [hzMsg, setHzMsg] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = () => {
+    fetchJson('/tools/license-expiry', scope ? { vcenterId: scope } : {}).then((d) => { setData(d); setErr(null); }).catch((e) => setErr(e.message));
+    if (isAdmin) fetchJson('/admin/horizon').then((r) => setHz(r.servers || [])).catch(() => {});
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [scope]);
+
+  if (err) return <ErrorBox message={err} />;
+  if (!data) return <Loading />;
+
+  const STATUS = [
+    ['expired', '만료', 'var(--red)'], ['expiring', '90일 이내 만료', 'var(--amber)'],
+    ['ok', '정상', 'var(--green)'], ['perpetual', '영구/만료없음', 'var(--text-faint)'],
+  ];
+  const statusLabel = Object.fromEntries(STATUS.map(([k, l]) => [k, l]));
+  const statusColor = Object.fromEntries(STATUS.map(([k, , c]) => [k, c]));
+  const rows = (data.items || []).filter((i) => (!statusSel || i.status === statusSel) && (!familySel || i.family === familySel));
+
+  const dday = (i) => (i.daysLeft == null ? '' : i.daysLeft < 0 ? `D+${-i.daysLeft}` : `D-${i.daysLeft}`);
+  const cols = [
+    { key: 'family', label: '제품군', render: (i) => <span className="badge blue">{i.family}</span> },
+    { key: 'name', label: '라이선스', render: (i) => <b>{i.name}</b> },
+    { key: 'source', label: '소스', render: (i) => <span className="muted">{i.source} · {i.where}</span> },
+    { key: 'productVersion', label: '버전', render: (i) => <span className="muted">{i.productVersion || '—'}</span> },
+    { key: 'key', label: '키', render: (i) => <span className="muted" style={{ fontSize: 11 }}>{i.key || '—'}</span> },
+    { key: 'used', label: '사용/총량', align: 'right', sortValue: (i) => i.used ?? -1, render: (i) => (i.total != null ? `${i.used ?? '—'}/${i.total}` : '—') },
+    { key: 'expires', label: '만료일', sortValue: (i) => (i.expires ? Date.parse(i.expires) : Infinity), render: (i) => (i.expires ? <b style={{ color: statusColor[i.status] }}>{i.expires}</b> : <span className="muted">영구/미표기</span>) },
+    { key: 'daysLeft', label: '남은 기간', align: 'right', sortValue: (i) => (i.daysLeft == null ? Infinity : i.daysLeft), render: (i) => <b style={{ color: statusColor[i.status] }}>{dday(i) || '—'}</b> },
+    { key: 'status', label: '상태', render: (i) => <span className="badge" style={{ color: statusColor[i.status], borderColor: statusColor[i.status] }}>{statusLabel[i.status]}</span> },
+  ];
+
+  const exportCsv = () => {
+    const head = ['family', 'name', 'source', 'where', 'edition', 'productVersion', 'key', 'used', 'total', 'expires', 'daysLeft', 'status'];
+    const lines = rows.map((i) => [i.family, i.name, i.source, i.where, i.edition, i.productVersion, i.key, i.used ?? '', i.total ?? '', i.expires || 'perpetual', i.daysLeft ?? '', statusLabel[i.status]]);
+    const csv = [head, ...lines].map((r) => r.map((x) => `"${String(x ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
+    const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }));
+    const a = document.createElement('a'); a.href = url; a.download = 'license-expiry.csv'; a.click(); URL.revokeObjectURL(url);
+  };
+
+  const hzSet = (k) => (e) => setHzForm((f) => ({ ...f, [k]: e.target.value }));
+  const hzSave = async () => {
+    setBusy(true); setHzMsg(null);
+    try {
+      const body = { ...hzForm, id: hzForm.id || hzForm.host.replace(/^https?:\/\//, '').replace(/[^A-Za-z0-9.-]+/g, '-') };
+      const r = await postJson('/admin/horizon', body);
+      setHzMsg(r.ok ? { ok: true, text: '저장됨 — 라이선스를 다시 불러옵니다.' } : { ok: false, text: r.reason });
+      if (r.ok) { setHzForm({ id: '', name: '', host: '', username: '', password: '', domain: '' }); load(); }
+    } catch (e) { setHzMsg({ ok: false, text: e.message }); }
+    finally { setBusy(false); }
+  };
+  const hzTest = async () => {
+    setBusy(true); setHzMsg(null);
+    try {
+      const r = await postJson('/admin/horizon/test', hzForm.host ? hzForm : { id: hzForm.id });
+      setHzMsg(r.ok ? { ok: true, text: `연결 성공 (${r.ms}ms) · 라이선스 ${r.licenses}건${r.first ? ` · ${r.first}` : ''}` } : { ok: false, text: `${r.reason}${r.hint ? ` · ${r.hint}` : ''}` });
+    } catch (e) { setHzMsg({ ok: false, text: e.message }); }
+    finally { setBusy(false); }
+  };
+  const hzDel = async (id) => {
+    if (!window.confirm(`Horizon 서버 '${id}' 등록을 삭제할까요?`)) return;
+    try { await delJson(`/admin/horizon/${encodeURIComponent(id)}`); load(); } catch (e) { setHzMsg({ ok: false, text: e.message }); }
+  };
+
+  return (
+    <>
+      <div className="kpis" style={{ marginBottom: 12 }}>
+        <Card label="전체 라이선스" value={data.total} meta={scope ? '선택 vCenter' : `vCenter+NSX+Horizon${data.horizonServers ? `(${data.horizonServers})` : ''}`} />
+        {STATUS.map(([k, l]) => <Card key={k} label={l} value={data.summary?.[k] || 0} />)}
+      </div>
+
+      {(data.collectionErrors || []).length > 0 && (
+        <div style={{ marginBottom: 10, padding: '8px 12px', borderRadius: 8, fontSize: 12, background: 'rgba(251,191,36,.1)', color: 'var(--amber)' }}>
+          ⚠ 일부 수집 실패: {data.collectionErrors.join(' · ')}
+        </div>
+      )}
+
+      <div className="flex gap wrap" style={{ marginBottom: 10, alignItems: 'center' }}>
+        {STATUS.map(([k, l, c]) => (
+          <button key={k} className="tab" style={{ padding: '5px 12px', fontWeight: 700, color: c, background: statusSel === k ? 'rgba(148,163,184,.15)' : undefined }}
+            onClick={() => setStatusSel(statusSel === k ? '' : k)}>{l} <b>{data.summary?.[k] || 0}</b></button>
+        ))}
+        <span style={{ width: 10 }} />
+        {(data.families || []).map((f) => (
+          <button key={f} className="tab" style={{ padding: '5px 12px', background: familySel === f ? 'rgba(34,211,238,.15)' : undefined }}
+            onClick={() => setFamilySel(familySel === f ? '' : f)}>{f}</button>
+        ))}
+        <button className="tab" style={{ marginLeft: 'auto', padding: '5px 12px' }} onClick={exportCsv}>CSV 내보내기</button>
+      </div>
+
+      <DataTable columns={cols} rows={rows} initialSort={{ key: 'daysLeft', dir: 'asc' }} />
+
+      <div className="muted" style={{ fontSize: 12, marginTop: 10, lineHeight: 1.7 }}>
+        vCenter 소스는 LicenseManager에 등록된 모든 키(ESXi·vCenter·vSAN·VCF/VVF 및 vCenter에 할당된 타 제품 포함)이고, NSX는 각 매니저에서 직접 수집합니다.
+        Horizon은 아래에 Connection Server를 등록하면 REST API로 만료일을 직수집합니다(10분 캐시).
+      </div>
+
+      {isAdmin && (
+        <details style={{ marginTop: 14 }} open={(hz || []).length === 0}>
+          <summary style={{ cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>🖥️ Horizon 연결 서버 관리 ({(hz || []).length}대 등록)</summary>
+          <div className="card" style={{ marginTop: 8, padding: 14 }}>
+            {(hz || []).length > 0 && (
+              <table style={{ marginBottom: 10 }}>
+                <thead><tr><th>ID</th><th>이름</th><th>host</th><th>계정</th><th>도메인</th><th className="right">작업</th></tr></thead>
+                <tbody>
+                  {hz.map((s) => (
+                    <tr key={s.id}>
+                      <td><b>{s.id}</b></td><td>{s.name}</td><td className="muted">{s.host}</td><td className="muted">{s.username}</td><td className="muted">{s.domain}</td>
+                      <td className="right nowrap">
+                        <button className="tab" disabled={busy} onClick={() => { setHzForm({ id: s.id, name: s.name, host: s.host, username: s.username, password: '', domain: s.domain }); }}>편집</button>{' '}
+                        <button className="tab" style={{ color: 'var(--red)' }} onClick={() => hzDel(s.id)}>삭제</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            <div className="spec-grid">
+              <label>ID <input className="input" value={hzForm.id} onChange={hzSet('id')} placeholder="비우면 host로 자동" /></label>
+              <label>표시 이름 <input className="input" value={hzForm.name} onChange={hzSet('name')} placeholder="본사 Horizon" /></label>
+              <label>Connection Server <input className="input" value={hzForm.host} onChange={hzSet('host')} placeholder="https://horizon.example.com" /></label>
+              <label>계정 <input className="input" value={hzForm.username} onChange={hzSet('username')} placeholder="administrator" /></label>
+              <label>비밀번호 <input className="input" type="password" value={hzForm.password} onChange={hzSet('password')} placeholder={hzForm.id && (hz || []).some((s) => s.id === hzForm.id) ? '●●●●● (비우면 유지)' : ''} /></label>
+              <label>AD 도메인 <input className="input" value={hzForm.domain} onChange={hzSet('domain')} placeholder="corp" /></label>
+            </div>
+            {hzMsg && <div style={{ marginTop: 8, padding: '7px 10px', borderRadius: 8, fontSize: 12, background: hzMsg.ok ? 'rgba(34,197,94,.12)' : 'rgba(239,68,68,.12)', color: hzMsg.ok ? '#4ade80' : '#f87171' }}>{hzMsg.text}</div>}
+            <div className="flex gap" style={{ marginTop: 10 }}>
+              <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={busy || !hzForm.host} onClick={hzSave}>{busy ? '저장 중…' : '저장'}</button>
+              <button className="logout-btn" style={{ padding: '8px 16px' }} disabled={busy || (!hzForm.host && !hzForm.id)} onClick={hzTest}>연결 테스트</button>
+            </div>
+            <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>
+              Horizon 8(2006+) REST API(<code>/rest/login → /rest/config/v1/licenses</code>)를 사용합니다. 읽기 전용 관리자 계정을 권장하며, 자격증명은 <code>$CONFIG_DIR/horizon.json</code>(0600)에만 저장됩니다.
+            </div>
+          </div>
+        </details>
+      )}
+    </>
+  );
+}
 
 function Hba({ scope }) {
   const { loading, data, error } = useTool('/tools/hba', scope ? { vcenterId: scope } : {});
