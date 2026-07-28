@@ -1,6 +1,17 @@
 {
   "notes": [
     {
+      "version": "2.189.0",
+      "date": "2026-07-28",
+      "title": "특수 기능 — '라이선스 만료일 확인' (ESXi·vCenter·vSAN·VCF/VVF·NSX·Horizon)",
+      "notes": [
+        "특수 기능에 '라이선스 만료일 확인'을 추가했습니다. 수집 가능한 모든 라이선스의 유효/만료 날짜를 한 화면에서 봅니다: vCenter LicenseManager에 등록된 전 제품 키(ESXi/vSphere·vCenter·vSAN·VCF/VVF 및 vCenter에 할당된 타 제품) + NSX Manager 직수집(/api/v1/licenses) + Horizon Connection Server 직수집.",
+        "상태 분류: 만료(빨강)·90일 이내 임박(노랑)·정상·영구/만료없음. 제품군(ESXi·vCenter·vSAN·VCF·VVF·NSX·Horizon·Tanzu) 필터 + 상태 칩 필터 + 남은 기간(D-일수) 정렬 + CSV 내보내기. vCenter 범위 선택 지원.",
+        "Horizon 지원: 화면 하단(관리자)에서 Connection Server를 등록하면 Horizon 8 REST API(/rest/login → /rest/config/v1/licenses)로 만료일을 직수집합니다(10분 캐시, 자격증명은 CONFIG_DIR/horizon.json 0600 저장, 연결 테스트 제공). 구독 슬라이스 만료(subscription_slice_expiry)도 인식합니다.",
+        "NSX 수집기에 라이선스 조회가 추가되어 NSX 갱신 주기마다 만료일이 최신화됩니다. 신규 엔드포인트: GET /tools/license-expiry, /admin/horizon(등록/삭제/테스트). 테스트 2건 추가."
+      ]
+    },
+    {
       "version": "2.188.0",
       "date": "2026-07-28",
       "title": "호스트 상세 — 'VM N대 보기' 가독성 개선",

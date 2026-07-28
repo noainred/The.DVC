@@ -71,6 +71,7 @@ export class NsxClient {
   groupVmMembers(groupId) { return this.#get(`/policy/api/v1/infra/domains/default/groups/${encodeURIComponent(groupId)}/members/virtual-machines`); }
   groupIpMembers(groupId) { return this.#get(`/policy/api/v1/infra/domains/default/groups/${encodeURIComponent(groupId)}/members/ip-addresses`); }
   // 분산 IDS/IPS — 활성 설정 + 최근 침입 이벤트(베스트에포트; 버전/NAPP에 따라 미지원일 수 있음).
+  licenses() { return this.#get('/api/v1/licenses'); } // 라이선스 만료일 확인용(만료 epoch ms)
   idsConfig() { return this.#get('/policy/api/v1/infra/settings/firewall/security/intrusion-services'); }
   idsProfiles() { return this.#get('/policy/api/v1/infra/intrusion-service-profiles'); }
   idsEvents() { return this.#get('/api/v1/intrusion-detection-system-events?page_size=200'); }
@@ -188,12 +189,25 @@ export async function collectFromNsx(mgr) {
     criteria: (g.expression || []).map(exprText).filter(Boolean).join(' ') || '—',
   }));
 
-  // 분산 IDS/IPS(베스트에포트) — 활성 여부 + 프로파일 수 + 최근 침입 이벤트.
-  const [idsCfg, idsProf, idsEv] = await Promise.all([
+  // 분산 IDS/IPS(베스트에포트) — 활성 여부 + 프로파일 수 + 최근 침입 이벤트. 라이선스도 함께.
+  const [idsCfg, idsProf, idsEv, licRes] = await Promise.all([
     client.idsConfig().catch(() => null),
     client.idsProfiles().catch(() => ({ results: [] })),
     client.idsEvents().catch(() => ({ results: [] })),
+    client.licenses().catch(() => ({ results: [] })),
   ]);
+  // NSX 라이선스(만료일) — 특수기능 '라이선스 만료일 확인'용. 키는 마스킹해 저장.
+  const licenses = (licRes?.results || []).map((l) => {
+    const k = String(l.license_key || '');
+    return {
+      key: k ? `${k.slice(0, 5)}-…-${k.slice(-5)}` : '',
+      description: l.description || '',
+      expiry: Number(l.expiry) > 0 ? Number(l.expiry) : null, // epoch ms, 없으면 영구
+      isExpired: l.is_expired === true,
+      quantity: l.quantity ?? null,
+      capacityType: l.capacity_type || '',
+    };
+  });
   const ids = {
     enabled: idsCfg ? (idsCfg.ids_enabled ?? idsCfg.enabled ?? null) : null,
     profiles: (idsProf?.results || []).length,
@@ -214,6 +228,7 @@ export async function collectFromNsx(mgr) {
       status: clusterHealth(cluster), version: node?.node_version || node?.product_version || 'unknown',
       nodeCount: (cluster?.mgmt_cluster_status?.online_nodes?.length) || (cluster?.detailed_cluster_status?.groups?.length) || 1,
       idsEnabled: ids.enabled, idsProfiles: ids.profiles, idsEventCount: ids.events.length,
+      licenses, // 만료일 확인용 — store.merge가 manager 필드로 그대로 실어 나른다
     },
     gateways: [...mkGw(t0, 'T0'), ...mkGw(t1, 'T1')],
     segments,

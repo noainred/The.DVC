@@ -45,6 +45,8 @@ import { listSources, listJobs, getJob } from '../provision/jobs.js';
 import { getPlacement } from '../provision/placement.js';
 import { listSaved, getSaved } from '../provision/saved.js';
 import { snapMemo, sendCached } from '../util/snapCache.js';
+import { licenseFamilyOf, licenseExpiryStatus } from '../util/licenseExpiry.js';
+import { collectHorizonLicenses, listHorizon } from '../horizon/horizon.js';
 
 export const api = Router();
 
@@ -1520,6 +1522,73 @@ api.get('/tools/licenses', (req, res) => {
     byLicense: [...roll.values()].sort((a, b) => b.used - a.used),
     totalAssigned: items.reduce((a, l) => a + (l.used || 0), 0),
   });
+});
+
+// 라이선스 만료일 확인 — vCenter LicenseManager에 등록된 모든 키(ESXi/vSphere·vCenter·vSAN·
+// VCF/VVF 등 vCenter에 할당된 전 제품) + NSX Manager(/api/v1/licenses) + Horizon Connection
+// Server(REST /config/v1/licenses, 10분 캐시) 취합. 만료/임박(90일)/정상/영구 + 제품군 분류.
+// vCenter/NSX는 캐시 스냅샷만 사용(추가 수집 없음), Horizon만 캐시 만료 시 라이브 조회.
+api.get('/tools/license-expiry', async (req, res) => {
+  const snap = store.get();
+  let vcs = snap.vcenters || [];
+  const scoped = Boolean(req.query.vcenterId);
+  if (scoped) vcs = vcs.filter((v) => v.id === req.query.vcenterId);
+  const items = [];
+  for (const vc of vcs) {
+    for (const l of (vc.licenses || [])) {
+      // eval 키('Evaluation Mode')는 total=0·만료 별도 표기 그대로 노출.
+      const ts = l.expires ? (Date.parse(l.expires) || null) : null;
+      const st = licenseExpiryStatus(ts);
+      items.push({
+        source: 'vCenter', where: vc.name || vc.id, vcenterId: vc.id,
+        name: l.name || l.edition || '(이름 없음)',
+        family: licenseFamilyOf(`${l.name} ${l.edition} ${l.product}`),
+        edition: l.edition || '', product: l.product || '', productVersion: l.productVersion || '',
+        key: l.key || '', total: l.total ?? null, used: l.used ?? null,
+        expires: ts ? new Date(ts).toISOString().slice(0, 10) : '',
+        status: st.status, daysLeft: st.daysLeft,
+      });
+    }
+  }
+  // NSX 매니저 직수집 라이선스 — vCenter 스코프 필터와 무관하므로 전체 조회에서만 포함.
+  if (!scoped) {
+    for (const m of (nsxStore.get()?.managers || [])) {
+      for (const l of (m.licenses || [])) {
+        const st = licenseExpiryStatus(l.expiry || null, { forcedExpired: l.isExpired });
+        items.push({
+          source: 'NSX', where: m.name || m.id, vcenterId: m.vcenterId || '',
+          name: l.description || 'NSX License', family: 'NSX',
+          edition: l.capacityType || '', product: 'NSX', productVersion: m.version || '',
+          key: l.key || '', total: l.quantity ?? null, used: null,
+          expires: l.expiry ? new Date(l.expiry).toISOString().slice(0, 10) : '',
+          status: st.status, daysLeft: st.daysLeft,
+        });
+      }
+    }
+  }
+  // Horizon Connection Server 직수집(등록된 서버가 있을 때만) — vCenter 스코프와 무관.
+  const collectionErrors = [];
+  if (!scoped) {
+    try {
+      const hz = await collectHorizonLicenses();
+      for (const { server: s, lic: l } of hz.rows) {
+        const st = licenseExpiryStatus(l.expiry || null, { forcedExpired: l.isExpired });
+        items.push({
+          source: 'Horizon', where: s.name || s.id, vcenterId: '',
+          name: l.name, family: 'Horizon',
+          edition: l.usageModel || '', product: 'Horizon', productVersion: '',
+          key: l.key || '', total: null, used: null,
+          expires: l.expiry ? new Date(l.expiry).toISOString().slice(0, 10) : '',
+          status: st.status, daysLeft: st.daysLeft,
+        });
+      }
+      for (const e of hz.errors) collectionErrors.push(`Horizon ${e.name || e.id}: ${e.reason}`);
+    } catch (e) { collectionErrors.push(`Horizon: ${e.message}`); }
+  }
+  const summary = { expired: 0, expiring: 0, ok: 0, perpetual: 0 };
+  for (const it of items) summary[it.status] = (summary[it.status] || 0) + 1;
+  const families = [...new Set(items.map((i) => i.family))].sort();
+  res.json({ items, summary, families, total: items.length, collectionErrors, horizonServers: listHorizon().length, generatedAt: snap.generatedAt });
 });
 
 // Trigger VMware Tools upgrade on one or more VMs. Body: { ids:[vmId,...] }.
