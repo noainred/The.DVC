@@ -351,7 +351,12 @@ export function EntityDetail({ type, item, onClose }) {
             <DRow label="이름">
               <span style={{ display: 'inline-flex', flexWrap: 'wrap', alignItems: 'baseline', gap: 6 }}>
                 <b className="cell-link" style={{ cursor: 'pointer', wordBreak: 'break-all' }} title="이 호스트의 VM 목록 보기" onClick={() => setShowHostVms(true)}>{item.name}</b>
-                <span className="cell-link" style={{ fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap' }} title="이 호스트의 VM 목록 보기" onClick={() => setShowHostVms(true)}>· VM {item.vmCount ?? 0}대 보기 ›</span>
+                {/* 저대비 텍스트 링크 → 버튼형 배지(테두리+배경)로 가독성 강화 */}
+                <button type="button" title="이 호스트의 VM 목록 보기" onClick={() => setShowHostVms(true)}
+                  style={{ fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', padding: '3px 10px', borderRadius: 999,
+                    color: '#7dd3fc', background: 'rgba(56,189,248,.12)', border: '1px solid rgba(56,189,248,.45)', lineHeight: 1.4 }}>
+                  🖥️ VM {item.vmCount ?? 0}대 보기 ›
+                </button>
               </span>
             </DRow>
             <DRow label="상태"><StateBadge state={item.connectionState} /></DRow>
