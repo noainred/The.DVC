@@ -47,8 +47,11 @@ export function attachRdpGateway(server) {
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url, 'http://localhost');
     if (url.pathname !== '/api/remote/rdp') return;
-    if (config.auth.enabled && !verifyToken(url.searchParams.get('token'))) {
-      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); return socket.destroy();
+    // 역할 검사(감사/SECURITY-AUDIT H3): RDP 터널 개통은 admin/operator만(viewer 차단).
+    if (config.auth.enabled) {
+      const payload = verifyToken(url.searchParams.get('token'));
+      if (!payload) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); return socket.destroy(); }
+      if (!['admin', 'operator'].includes(payload.role)) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); return socket.destroy(); }
     }
     wss.handleUpgrade(req, socket, head, (ws) => handle(ws, url.searchParams));
   });

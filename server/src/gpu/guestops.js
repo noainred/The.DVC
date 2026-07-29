@@ -15,7 +15,9 @@
  * 없으면 해당 VM은 자연스럽게 건너뜁니다.
  */
 
+import crypto from 'node:crypto';
 import { VimSoapClient } from '../vcenter/soapClient.js';
+import { vcDispatcher } from '../vcenter/restClient.js';
 
 // mig.mode.current(Enabled/Disabled/N/A)를 마지막 컬럼으로 추가 수집 → MIG(분할 GPU) 가시화.
 // 문자열 컬럼이므로 파서에서 원본 문자열로 별도 처리(숫자 변환 금지).
@@ -46,6 +48,9 @@ function cleanGuestError(msg) {
 // 단계별 trace 기록기 — 게스트 작업의 명령/로그를 UI로 노출하기 위해 결과에 함께 담는다.
 // tr이 null이면 무시(폴러 등 trace 불필요 경로). 비밀번호/티켓은 절대 담지 않는다.
 const tlog = (tr, msg) => { if (tr) tr.push({ t: Date.now(), msg: String(msg) }); };
+// 게스트 임시파일 이름 — Date.now()만 쓰면 예측 가능해 /tmp 심볼릭링크 선점(TOCTOU) 여지가
+// 있으므로(감사 M9) 랜덤 접미사를 붙인다.
+const tmpId = () => `${Date.now()}-${crypto.randomBytes(6).toString('hex')}`;
 
 
 /**
@@ -136,7 +141,7 @@ async function readGuestFile(c, fileManager, vmRef, auth, guestPath, timeoutMs, 
     const isOrig = cand === url;
     const t0 = Date.now();
     try {
-      const res = await fetch(cand, { signal: AbortSignal.timeout(timeoutMs) });
+      const res = await fetch(cand, { dispatcher: vcDispatcher, signal: AbortSignal.timeout(timeoutMs) });
       if (res.ok) {
         console.log(`[gpu-guest]     [${tag}] 다운로드 ${candHost}${isOrig ? '(원본)' : ''} → HTTP ${res.status} ✓`);
         tlog(tr, `  ✓ GET ${candHost}${isOrig ? '(원본)' : ''} → HTTP ${res.status} (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
@@ -173,7 +178,7 @@ export async function collectVmGpu(c, vmMoref, creds, { isWindows, timeoutMs = 2
   const auth = authXml(creds);
   const vmRef = `<vm type="VirtualMachine">${vmMoref}</vm>`;
   // stdout/stderr 분리 캡처(쉘 리다이렉트). stderr를 버리지 않아야 원인 진단 가능.
-  const ts = Date.now();
+  const ts = tmpId();
   const outFile = isWindows ? `C:\\Windows\\Temp\\nvsmi_${ts}.out` : `/tmp/nvsmi_${ts}.out`;
   const errFile = isWindows ? `C:\\Windows\\Temp\\nvsmi_${ts}.err` : `/tmp/nvsmi_${ts}.err`;
   // 비대화형 게스트 작업 셸은 PATH가 비어있을 수 있어 /usr/bin 등을 보강(절대경로 지정 X, 이름 그대로 실행).
@@ -323,7 +328,7 @@ async function writeGuestFile(c, fileManager, vmRef, auth, guestPath, content, {
   const tries = [];
   for (const cand of candidateUrls(c, url, preferHosts)) {
     try {
-      const res = await fetch(cand, { method: 'PUT', body: content, headers: { 'Content-Type': 'application/octet-stream', 'Content-Length': String(bytes) }, signal: AbortSignal.timeout(timeoutMs) });
+      const res = await fetch(cand, { method: 'PUT', body: content, dispatcher: vcDispatcher, headers: { 'Content-Type': 'application/octet-stream', 'Content-Length': String(bytes) }, signal: AbortSignal.timeout(timeoutMs) });
       if (res.ok) return { ok: true };
       tries.push(`HTTP${res.status}`);
     } catch (e) { tries.push(String(e.message).slice(0, 50)); }
@@ -336,7 +341,7 @@ export async function runGuestScript(c, vmMoref, creds, scriptText, { isWindows 
   const { processManager, fileManager } = await guestManagers(c);
   const auth = authXml(creds);
   const vmRef = `<vm type="VirtualMachine">${vmMoref}</vm>`;
-  const ts = Date.now();
+  const ts = tmpId();
   const scriptPath = isWindows ? `C:\\Windows\\Temp\\portal-acct-${ts}.bat` : `/tmp/portal-acct-${ts}.sh`;
   const outFile = isWindows ? `C:\\Windows\\Temp\\portal-acct-${ts}.out` : `/tmp/portal-acct-${ts}.out`;
   const errFile = isWindows ? `C:\\Windows\\Temp\\portal-acct-${ts}.err` : `/tmp/portal-acct-${ts}.err`;
@@ -373,7 +378,7 @@ export async function addGuestUser(c, vmMoref, creds, { username, password, sudo
   if (!password) throw new Error('비밀번호가 필요합니다.');
   // 개행이 섞이면 chpasswd 입력 파일이 여러 줄이 되어 요청과 다른 비밀번호가 설정된다(조용한 변조 금지 — 거부).
   if (!isWindows && /[\r\n]/.test(String(password))) throw new Error('비밀번호에 줄바꿈 문자는 사용할 수 없습니다(그 외 특수문자는 모두 지원).');
-  const ts = Date.now();
+  const ts = tmpId(); // 비밀번호 임시파일(portal-pw-*) 경로 예측 차단(감사 M9)
   if (isWindows) {
     const p = String(password);
     // 비밀번호를 조용히 변조(따옴표 제거)하면 요청과 다른 계정이 생겨 잠금된다. 배치에 안전하게

@@ -24,11 +24,10 @@ import { ensureNsxDial } from './proxy.js';
 
 const norm = (s) => String(s || '').replace(/\/+$/, '');
 
-// 보안(H1): NSX는 자체서명이 흔해 기본은 전역(미검증) 디스패처를 따른다(현행 유지 — 무회귀).
-// 검증이 필요한 환경은 NSX_TLS_REJECT_UNAUTHORIZED=true로 검증 디스패처를 켜 MITM(관리자 Basic 자격증명 탈취)을 막는다.
-const nsxVerifyDispatcher = process.env.NSX_TLS_REJECT_UNAUTHORIZED === 'true'
-  ? new Agent({ connect: { rejectUnauthorized: true } })
-  : null;
+// 보안: 과거엔 기본 분기가 '전역(미검증)' 디스패처에 기댔으나, 전역 디스패처가 검증 ON 기본으로
+// 복원되면서(감사 C1/C3) NSX 전용 '로컬' 디스패처로 명시한다 — 자체서명 NSX 기본 동작은 그대로.
+// 검증이 필요한 환경은 NSX_TLS_REJECT_UNAUTHORIZED=true로 켠다(MITM·관리자 Basic 자격증명 탈취 방지).
+const nsxDispatcher = new Agent({ connect: { rejectUnauthorized: process.env.NSX_TLS_REJECT_UNAUTHORIZED === 'true' } });
 
 export class NsxClient {
   // dial(선택): { proxyHost, publicPort } — 주어지면 등록된 HAProxy frontend로 다이얼한다
@@ -46,7 +45,7 @@ export class NsxClient {
   async #get(pathname) {
     const res = await fetch(`${this.baseUrl}${pathname}`, {
       headers: { Authorization: this.auth, Accept: 'application/json' },
-      ...(nsxVerifyDispatcher ? { dispatcher: nsxVerifyDispatcher } : {}),
+      dispatcher: nsxDispatcher,
       signal: AbortSignal.timeout(this.timeoutMs),
     });
     if (!res.ok) {

@@ -4134,6 +4134,9 @@ function VmTools({ scope }) {
   const { loading, data, error } = useTool('/tools/vmtools', scope ? { vcenterId: scope } : {});
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
+  // Tools 업그레이드는 서버가 admin/operator만 허용 — viewer에게 버튼을 숨겨 403 체험 방지.
+  const [canManage, setCanManage] = useState(false);
+  useEffect(() => { fetchJson('/auth/me').then((r) => setCanManage(['admin', 'operator'].includes(r.user?.role))).catch(() => {}); }, []);
   if (loading) return <Loading />;
   if (error) return <ErrorBox message={error} />;
 
@@ -4151,7 +4154,7 @@ function VmTools({ scope }) {
     { key: 'count', label: 'VM 수', align: 'right' },
     { key: 'running', label: '정상', align: 'right' },
     { key: 'outdated', label: '오래됨', align: 'right', render: (r) => <span style={{ color: r.outdated ? 'var(--amber)' : undefined }}>{r.outdated}</span> },
-    { key: 'act', label: '작업', sortable: false, render: (r) => <button className="tab" disabled={busy} onClick={() => upgrade(r)}>업그레이드</button> },
+    { key: 'act', label: '작업', sortable: false, render: (r) => (canManage ? <button className="tab" disabled={busy} onClick={() => upgrade(r)}>업그레이드</button> : null) },
   ];
   return (
     <>

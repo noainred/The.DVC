@@ -28,9 +28,18 @@ function checkToken(req) {
 // 인증 거부(403/404) 진단 로그 — 요청이 이 엣지에 '도달했는지'와 '왜 거부됐는지'를 남긴다.
 // (기존엔 403이 무로그라, 엣지에서 '요청이 안 옴'과 '토큰 틀림'을 구분할 수 없었다 — WA-IRS 사례.)
 // 토큰 값은 절대 남기지 않는다(길이만). (endpoint, src IP)별 30초 스로틀로 스팸 방지.
+// deny 통계(관측성): 엣지에서 무음으로 삼켜지던 인증 거부를 집계해 export에 실어 중앙 UI가
+// '이 엣지에 최근 토큰 거부 N건'을 보여줄 수 있게 한다(토큰 값은 절대 포함하지 않음).
+const denyStats = { count: 0, lastAt: null, lastWhy: '', lastEndpoint: '' };
+export function getCollectorDenyStats() { return { ...denyStats }; }
 const _denyLogAt = new Map();
 function logCollectorDeny(req, endpoint) {
   const ip = req.ip || req.socket?.remoteAddress || '?';
+  // 통계는 스로틀과 무관하게 매 거부마다 집계(로그만 스로틀).
+  denyStats.count++;
+  denyStats.lastAt = Date.now();
+  denyStats.lastEndpoint = endpoint;
+  denyStats.lastWhy = !config.collector.token ? 'COLLECTOR_TOKEN 미설정' : '토큰 불일치/누락';
   const key = `${endpoint}:${ip}`;
   const now = Date.now();
   if (now - (_denyLogAt.get(key) || 0) < 30_000) return;

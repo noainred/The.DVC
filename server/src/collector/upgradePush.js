@@ -6,6 +6,7 @@
 
 import { loadCollectors } from './registry.js';
 import { setCollectorStatus, getCollectorStatus } from './state.js';
+import { _internals as _rf } from '../util/resilientFetch.js'; // wanAgent — WAN 전용 로컬 디스패처(전역 오염 없음)
 
 // 실패 HTTP 상태를 사람이 이해할 원인으로 분류(엣지별로 '무엇을 점검할지' 바로 알려주기 위함).
 export function httpFailHint(status) {
@@ -33,6 +34,7 @@ export async function pushBundleToCollector(c, bytes, { restart = true, force = 
       method: 'POST',
       headers: { 'Content-Type': 'application/gzip', ...(c.token ? { 'X-Collector-Token': c.token } : {}) },
       body: bytes,
+      dispatcher: _rf.wanAgent, // 전역 디스패처가 검증 ON으로 복원돼(감사 C1/C3) 자체서명 https 엣지 호환용 WAN 디스패처 명시
       signal: AbortSignal.timeout(timeout),
     });
     const body = await res.json().catch(() => ({}));

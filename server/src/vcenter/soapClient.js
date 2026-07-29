@@ -13,6 +13,7 @@ import tls from 'node:tls';
 import { config } from '../config.js';
 import { loadMetricsSettings } from '../metrics/settings.js';
 import { parseObjectContent, xmlUnescape } from './soapParse.js';
+import { vcDispatcher } from './restClient.js';
 import { parseObjectContentAsync } from '../util/soapParsePool.js';
 
 // soapParse.js로 분리된 순수 파서를 재-export(기존 import 경로 호환: 테스트가 여기서 가져옴).
@@ -99,6 +100,7 @@ export class VimSoapClient {
   async #call(body) {
     const res = await fetch(this.url, {
       method: 'POST',
+      dispatcher: vcDispatcher, // vCenter 전용 TLS 정책 — 전역 디스패처 오염 제거(감사 C1/C3)
       headers: {
         'Content-Type': 'text/xml; charset=utf-8',
         SOAPAction: '"urn:vim25/8.0.0.1"',

@@ -150,6 +150,10 @@ export function authenticateLocal(username, credential) {
 
 const VALID_ROLES = ['admin', 'operator', 'viewer'];
 
+// 서버측 토큰 폐기(감사 M5) — 자격증명/역할이 바뀌면 버전을 올려 그 전에 발급된 토큰을
+// authMiddleware에서 즉시 무효화한다(로컬 계정 한정; AD는 다음 로그인에 반영).
+function bumpTokenVersion(u) { u.tokenVersion = (u.tokenVersion || 0) + 1; }
+
 /** Public-safe user list (no secrets/hashes). */
 export function listUsers() {
   return loadUsers().map((u) => ({
@@ -191,6 +195,7 @@ export function setLocalPassword(username, password) {
   const u = getUser(String(username || '').trim());
   if (!u) return { ok: false, reason: '사용자를 찾을 수 없습니다.' };
   u.passwordHash = hashPassword(pw);
+  bumpTokenVersion(u); // 비번 변경 → 기존 세션 토큰 즉시 폐기
   persistUsers();
   return { ok: true, totpEnabled: !!u.totpEnabled };
 }
@@ -204,6 +209,7 @@ export function updateUser(username, { name, role } = {}) {
     if (u.role === 'admin' && role !== 'admin' && loadUsers().filter((x) => x.role === 'admin').length <= 1) {
       return { ok: false, reason: '마지막 관리자는 역할을 변경할 수 없습니다.' };
     }
+    if (u.role !== role) bumpTokenVersion(u); // 역할 변경(강등 포함) → 기존 토큰 폐기
     u.role = role;
   }
   if (name !== undefined) u.name = name || u.username;
@@ -286,12 +292,16 @@ export function beginTotpEnroll(username, host = '') {
   };
 }
 
-/** 민감 작업 재인증용 — 사용자의 현재 OTP 코드를 검증. OTP 미등록이면 needEnroll. */
+/** 민감 작업 재인증용 — 사용자의 현재 OTP 코드를 검증. OTP 미등록이면 needEnroll.
+ *  로그인 경로와 동일하게 사용 카운터(minCounter)를 대조·기록해 같은 코드의 재사용(replay)을
+ *  차단한다 — 긴급중단 2인 승인에서 어깨너머로 본 코드를 재사용하는 우회(감사 M1/M2) 방지. */
 export function verifyUserOtp(username, code) {
   const u = getUser(username);
   if (!u) return { ok: false, reason: '사용자를 찾을 수 없습니다.' };
   if (!u.totpEnabled || !u.totpSecret) return { ok: false, reason: 'OTP가 등록되지 않은 계정입니다. 먼저 OTP를 등록하세요.', needEnroll: true };
-  if (!totp.verifyToken(String(code || '').trim(), u.totpSecret)) return { ok: false, reason: 'OTP 코드가 일치하지 않습니다.' };
+  const ctr = totp.verifyToken(String(code || '').trim(), u.totpSecret, { minCounter: Number.isInteger(u.totpLastCounter) ? u.totpLastCounter : -1 });
+  if (ctr == null) return { ok: false, reason: 'OTP 코드가 일치하지 않습니다(또는 이미 사용된 코드).' };
+  if (ctr !== u.totpLastCounter) { u.totpLastCounter = ctr; try { persistUsers(); } catch { /* 기록 실패해도 검증 결과는 유효 */ } }
   return { ok: true };
 }
 
@@ -307,6 +317,7 @@ export function confirmTotpEnroll(username, code) {
   delete u.totpPendingSecret;
   u.totpEnabled = true;
   delete u.passwordHash; // OTP-only from now on
+  bumpTokenVersion(u); // 인증수단 변경 → 기존 토큰 폐기
   persistUsers();
   return { ok: true };
 }
@@ -319,6 +330,7 @@ export function disableTotp(username, { password } = {}) {
   delete u.totpSecret;
   delete u.totpPendingSecret;
   if (password) u.passwordHash = hashPassword(password); // restore a temp password so they can log in to re-enroll
+  bumpTokenVersion(u); // 인증수단 변경 → 기존 토큰 폐기
   persistUsers();
   return { ok: true };
 }
@@ -338,15 +350,35 @@ export async function authenticate(username, password) {
 
 /* -------------------------------- middleware ------------------------------- */
 
+// 인증 비활성(AUTH_ENABLED=false) 시 익명 사용자에게 부여할 역할(감사 H13). 과거엔 무조건
+// admin이라 env 한 줄 실수로 전체 mutation이 익명 개방됐다. 기본은 하위호환(admin) 유지하되
+// AUTH_DISABLED_ROLE=viewer|operator 로 낮출 수 있고, requireRole도 이 역할로 실제 검사한다.
+const AUTH_DISABLED_ROLE = VALID_ROLES.includes(process.env.AUTH_DISABLED_ROLE)
+  ? process.env.AUTH_DISABLED_ROLE : 'admin';
+if (!config.auth.enabled) {
+  console.warn(`[auth] ⚠ 인증이 비활성(AUTH_ENABLED=false) — 모든 요청이 익명 '${AUTH_DISABLED_ROLE}' 권한으로 처리됩니다. 운영 환경에서는 인증을 켜거나 AUTH_DISABLED_ROLE=viewer 로 제한하세요.`);
+}
+
 export function authMiddleware(req, res, next) {
   if (!config.auth.enabled) {
-    req.user = { username: 'anonymous', role: 'admin', name: 'Anonymous' };
+    req.user = { username: 'anonymous', role: AUTH_DISABLED_ROLE, name: 'Anonymous' };
     return next();
   }
   const header = req.headers.authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
   const payload = token && verifyToken(token);
   if (!payload) return res.status(401).json({ error: 'unauthorized' });
+  // 서버측 토큰 폐기(감사 M5): 로컬 계정 토큰(src:'local')은 사용자 레코드의 tokenVersion과
+  // 대조한다 — 비밀번호/역할 변경·계정 삭제 시 버전이 올라가 기존 토큰이 즉시 무효화된다.
+  // (loadUsers는 메모이즈되어 요청당 파일 IO 없음. 구버전 토큰(src 없음)은 8h 내 자연 만료.)
+  if (payload.src === 'local') {
+    const u = getUser(payload.sub);
+    if (!u) return res.status(401).json({ error: 'unauthorized' }); // 삭제된 계정
+    if ((u.tokenVersion || 0) !== (payload.tv || 0)) return res.status(401).json({ error: 'unauthorized', reason: 'token revoked' });
+    // 역할은 토큰이 아니라 현재 사용자 레코드 기준(강등 즉시 반영).
+    req.user = { username: payload.sub, role: u.role || 'viewer', name: payload.name };
+    return next();
+  }
   req.user = { username: payload.sub, role: payload.role, name: payload.name };
   next();
 }
@@ -354,7 +386,12 @@ export function authMiddleware(req, res, next) {
 /** Require the authenticated user to hold one of the given roles. */
 export function requireRole(...roles) {
   return (req, res, next) => {
-    if (!config.auth.enabled) return next();
+    // 인증 비활성 시에도 '무조건 통과'가 아니라 익명 역할(AUTH_DISABLED_ROLE)로 검사한다 —
+    // 기본(admin)은 기존과 동일하게 통과하고, viewer로 낮춘 배포에선 mutation이 차단된다.
+    if (!config.auth.enabled) {
+      return roles.includes(AUTH_DISABLED_ROLE) ? next()
+        : res.status(403).json({ error: 'forbidden', requiredRole: roles });
+    }
     if (!req.user || !roles.includes(req.user.role)) {
       return res.status(403).json({ error: 'forbidden', requiredRole: roles });
     }

@@ -24,9 +24,13 @@ export function attachSshGateway(server) {
     const url = new URL(req.url, 'http://localhost');
     if (url.pathname !== '/api/remote/ssh') return; // let other upgrade handlers run
     // Auth via token query param (browsers can't set WS headers).
+    // 역할 검사(감사/SECURITY-AUDIT H3): 원격 SSH 터널 개통은 admin/operator만 — viewer 토큰으로
+    // 내부 서버 SSH 접속이 열리던 문제 차단. (operator 역할의 실효 권한이기도 하다.)
     if (config.auth.enabled) {
       const token = url.searchParams.get('token');
-      if (!verifyToken(token)) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); return socket.destroy(); }
+      const payload = verifyToken(token);
+      if (!payload) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); return socket.destroy(); }
+      if (!['admin', 'operator'].includes(payload.role)) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); return socket.destroy(); }
     }
     wss.handleUpgrade(req, socket, head, (ws) => handleConnection(ws));
   });

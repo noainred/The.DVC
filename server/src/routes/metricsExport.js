@@ -22,6 +22,12 @@ function line(name, labels, value) {
 }
 
 metricsExportRouter.get('/', async (req, res) => {
+  // 보안(감사 M18): 토큰 미설정 시 과거엔 전체 인벤토리(호스트/VM/전력 토폴로지)가 무인증
+  // 공개였다. 이제 기본 비활성(404) — 무인증 공개가 정말 필요하면 METRICS_ALLOW_ANON=true 옵트인.
+  if (!TOKEN && process.env.METRICS_ALLOW_ANON !== 'true') {
+    return res.status(404).type('text/plain')
+      .send('# /metrics 비활성 — METRICS_EXPORT_TOKEN을 설정하고 Authorization: Bearer로 접근하세요(무인증 공개는 METRICS_ALLOW_ANON=true 옵트인).\n');
+  }
   if (TOKEN) {
     // 기본은 Authorization 헤더만 허용 — ?token=은 프록시/접근로그/브라우저 히스토리에 토큰이
     // 남아 유출된다. 기존 Grafana 연동 호환이 필요하면 METRICS_ALLOW_QUERY_TOKEN=true로 옵트인.

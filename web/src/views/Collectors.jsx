@@ -293,7 +293,13 @@ export default function Collectors() {
                   <td>{!s ? <span className="badge gray">대기</span>
                     : (s.ok && s.degraded) ? <span className="badge amber" title={`일시적 연결 오류: ${s.error || ''} — 직전 데이터·온라인 유지 중(연속 실패 ${s.fails || 1}회). 한 번 더 실패하면 '오류'로 내려갑니다.`}>저하</span>
                       : s.ok ? <span className="badge green">정상</span>
-                        : <span className="badge red" title={s.error}>오류</span>}</td>
+                        : <span className="badge red" title={s.error}>오류</span>}
+                    {s?.authDeny?.count > 0 && (
+                      <span className="badge amber" style={{ marginLeft: 4, fontSize: 10 }}
+                        title={`엣지에서 인증 거부 ${s.authDeny.count}건(기동 후 누적) — 마지막: ${s.authDeny.lastWhy || ''}${s.authDeny.lastAt ? ` · ${new Date(s.authDeny.lastAt).toLocaleString('ko-KR')}` : ''} (${s.authDeny.lastEndpoint || ''}). 다른 중앙/구버전 토큰이 이 엣지를 두드리고 있을 수 있습니다.`}>
+                        거부 {s.authDeny.count}
+                      </span>
+                    )}</td>
                   <td className="tabular">{s?.ok ? (s.hosts ?? 0).toLocaleString() : '—'}</td>
                   <td className="muted">
                     {s?.version ? <>v{s.version}{central && s.version !== central && <span className="badge amber" style={{ marginLeft: 6 }} title={`중앙 v${central}`}>구버전</span>}</> : '—'}

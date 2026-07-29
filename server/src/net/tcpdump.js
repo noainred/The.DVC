@@ -6,10 +6,11 @@
  * ⚠️ tcpdump는 root 권한 필요. SSH 사용자가 root가 아니면 무비밀번호 sudo(`sudo -n`)를 시도한다.
  */
 
+import crypto from 'node:crypto';
 import { withSsh } from '../proxy/sshExec.js';
 
-const PEERRE = /^[a-zA-Z0-9._:-]+$/;    // IP 또는 호스트명(셸 메타문자 차단)
-const IFRE = /^[a-zA-Z0-9._-]+$/;       // 인터페이스명
+const PEERRE = /^[a-zA-Z0-9._:][a-zA-Z0-9._:-]*$/;  // IP/호스트명 — 셸 메타문자 + 선행 '-' 차단(tcpdump 플래그 주입 방지, 감사 L1)
+const IFRE = /^[a-zA-Z0-9._][a-zA-Z0-9._-]*$/;      // 인터페이스명 — 선행 '-' 차단
 
 /** tcpdump 한 줄(`-n -tt`) 파싱 → { ts, src, sport, dst, dport, flags, len } 또는 null. */
 export function parseTcpdumpLine(line) {
@@ -146,8 +147,8 @@ export async function runPcapCapture({ hostA, peer, iface = 'any', seconds = 10,
   const max = Math.min(20000, Math.max(10, Number(maxPackets) || 2000));
   const isRoot = (hostA.username || '').trim() === 'root';
   const sudo = isRoot ? '' : (useSudo ? 'sudo -n ' : '');
-  const ts = Date.now();
-  const file = `/tmp/portal-cap-${ts}.pcap`;
+  // 예측 불가 파일명(감사 M9) — Date.now()만으로는 원격 /tmp에서 심볼릭링크 선점(TOCTOU) 가능.
+  const file = `/tmp/portal-cap-${Date.now()}-${crypto.randomBytes(6).toString('hex')}.pcap`;
   return withSsh(hostA, async ({ exec }) => {
     const cap = await exec(`${sudo}timeout ${sec} tcpdump -i ${iface} -n -w ${file} -c ${max} host ${peer} 2>&1; echo RC=$?`);
     const capOut = (cap.stdout || '') + (cap.stderr || '');

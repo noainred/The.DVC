@@ -878,7 +878,7 @@ async function pingLocallyAndStore(vcenterId, ips) {
 // VM IP Ping(위임) — 중앙은 VM 사설 IP에 직접 못 가므로, 그 vCenter 담당 에이전트가
 // ping을 대행한다. POST로 요청 큐잉 → 에이전트가 인출/실행/보고 → GET으로 녹/적 조회.
 // 중앙이 직접 수집하는 vCenter(에이전트 없음)는 중앙이 직접 ping해 즉시 결과를 채운다.
-api.post('/tools/ip-ping', async (req, res) => {
+api.post('/tools/ip-ping', requireRole('admin', 'operator'), async (req, res) => {
   const vcenterId = String(req.body?.vcenterId || '').trim();
   const ips = Array.isArray(req.body?.ips) ? req.body.ips.map((s) => String(s).trim()).filter(Boolean).slice(0, 16) : [];
   if (!vcenterId || !ips.length) return res.status(400).json({ ok: false, reason: 'vcenterId·ips가 필요합니다.' });
@@ -1625,7 +1625,8 @@ api.post('/vms/upgrade-tools', requireRole('admin', 'operator'), async (req, res
 
 // Shared UI settings (e.g. dashboard map height) — same for all users.
 api.get('/ui-settings', (_req, res) => res.json(loadUiSettings()));
-api.put('/ui-settings', (req, res) => res.json(saveUiSettings(req.body || {})));
+// 전 사용자 공유 설정 쓰기 — viewer가 전역 UI 설정을 덮어쓰지 못하게 역할 제한(감사 C2 잔여).
+api.put('/ui-settings', requireRole('admin', 'operator'), (req, res) => res.json(saveUiSettings(req.body || {})));
 
 /** Map a guest OS string to a coarse family for distribution charts. */
 function osFamily(os = '') {

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { usePolling, fetchJson, postJson, delJson } from '../api.js';
 import { DataTable, SeverityBadge, Loading, ErrorBox, EntityDetail, Modal } from '../components/ui.jsx';
 
@@ -13,6 +13,9 @@ export default function Alarms({ filters }) {
   const [showMutes, setShowMutes] = useState(false);
   const [busy, setBusy] = useState(false);
   const [muteErr, setMuteErr] = useState(null);
+  // 알람 무시(뮤트)는 서버가 admin/operator만 허용 — viewer에게 버튼을 숨겨 403 체험 방지.
+  const [canManage, setCanManage] = useState(false);
+  useEffect(() => { fetchJson('/auth/me').then((r) => setCanManage(['admin', 'operator'].includes(r.user?.role))).catch(() => {}); }, []);
 
   const openEntity = async (a) => {
     const ep = ENDPOINT[a.entityType];
@@ -47,7 +50,7 @@ export default function Alarms({ filters }) {
     { key: 'entity', label: '대상', render: (a) => (ENDPOINT[a.entityType] ? <button className="cell-link" onClick={() => openEntity(a)}>{a.entity}</button> : a.entity) },
     { key: 'vcenterId', label: 'vCenter', render: (a) => <span className="muted">{a.vcenterId}</span> },
     { key: 'time', label: '발생시각', render: (a) => new Date(a.time).toLocaleString('ko-KR') },
-    { key: 'act', label: '', sortable: false, render: (a) => <button className="tab" title="앞으로 동일한 알람 무시" onClick={() => setMuteFor(a)}>🔕 무시</button> },
+    { key: 'act', label: '', sortable: false, render: (a) => (canManage ? <button className="tab" title="앞으로 동일한 알람 무시" onClick={() => setMuteFor(a)}>🔕 무시</button> : null) },
   ];
 
   return (
