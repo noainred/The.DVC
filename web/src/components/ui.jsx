@@ -208,11 +208,14 @@ const pingTip = (ip, r) => {
 export function VmIpPing({ vcenterId, ips }) {
   const [res, setRes] = useState({}); // ip -> { state, rttMs }
   const [run, setRun] = useState(0);
+  const [denied, setDenied] = useState(false); // viewer 403 — 영구 '확인 중…' 대신 권한 안내
   useEffect(() => {
     if (!vcenterId || !ips.length) return;
     let alive = true;
     const qs = `vcenterId=${encodeURIComponent(vcenterId)}&ips=${encodeURIComponent(ips.join(','))}`;
-    postJson('/tools/ip-ping', { vcenterId, ips }).catch(() => {});
+    // ping 트리거는 admin/operator 전용 — viewer의 403은 '권한 필요' 상태로 종결해
+    // 영구 '확인 중…' 점멸을 막는다(결과 폴링은 읽기라 계속 동작).
+    postJson('/tools/ip-ping', { vcenterId, ips }).catch((e) => { if (/403|forbidden/i.test(String(e.message))) setDenied(true); });
     const poll = () => fetchJson(`/tools/ip-ping?${qs}`).then((d) => { if (alive) setRes(d.results || {}); }).catch(() => {});
     poll();
     const t = setInterval(poll, 3000);
@@ -225,6 +228,9 @@ export function VmIpPing({ vcenterId, ips }) {
       boxShadow: state === 'up' ? '0 0 6px var(--green,#22c55e)' : 'none', marginRight: 6, flex: '0 0 auto',
       animation: state === 'pending' || state === 'unknown' ? 'pulse 1.2s infinite' : 'none' }} />;
   };
+  if (denied) {
+    return <span className="muted" style={{ fontSize: 12 }}>IP ping 확인은 operator/admin 권한이 필요합니다. IP: {ips.join(', ')}</span>;
+  }
   // 정렬: 도달(up) → 확인중(pending/unknown) → 실패(error/down) 순, 같은 상태면 RTT 오름차순.
   const ORDER = { up: 0, pending: 1, unknown: 1, error: 2, down: 3 };
   const sorted = [...ips].sort((a, b) => {

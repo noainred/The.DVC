@@ -98,7 +98,7 @@ export default function Alarms({ filters }) {
                       <td><span className="badge gray">{m.entityType || '전체'}</span></td>
                       <td><b>{m.template}</b><div className="muted" style={{ fontSize: 11 }}>예: {m.sample}</div></td>
                       <td className="muted">{m.vcenterId || '전체'}</td>
-                      <td className="right"><button className="tab" style={{ color: 'var(--red)' }} onClick={async () => { setMuteErr(null); try { await delJson(`/alarm-mutes/${encodeURIComponent(m.id)}`); setMuteRev((x) => x + 1); } catch (e) { setMuteErr(e.message); } }}>해제</button></td>
+                      <td className="right">{canManage && <button className="tab" style={{ color: 'var(--red)' }} onClick={async () => { setMuteErr(null); try { await delJson(`/alarm-mutes/${encodeURIComponent(m.id)}`); setMuteRev((x) => x + 1); } catch (e) { setMuteErr(e.message); } }}>해제</button>}</td>
                     </tr>
                   ))}
                 </tbody>

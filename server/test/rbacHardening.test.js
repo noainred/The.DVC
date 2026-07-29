@@ -76,6 +76,21 @@ test('레거시 토큰(src 없음)은 통과(하위호환) — 만료로 자연 
   assert.equal(passed, true);
 });
 
+test('M5(WS 게이트웨이): resolveTokenUser가 폐기 토큰 거부 + 최신 역할 반환', () => {
+  // SSH/RDP WebSocket 게이트웨이 우회 회귀 방지 — payload.role 신뢰가 아니라 사용자 레코드 기준.
+  assert.equal(auth.createUser({ username: 'ws.test', role: 'operator', password: 'password-1' }).ok, true);
+  const u = auth.getUser('ws.test');
+  const token = auth.signToken({ sub: 'ws.test', role: 'operator', name: 'w', src: 'local', tv: u.tokenVersion || 0 });
+  assert.equal(auth.resolveTokenUser(token)?.role, 'operator');
+  // 강등: tokenVersion 인상으로 구토큰 자체가 무효(터널 개통 불가).
+  assert.equal(auth.updateUser('ws.test', { role: 'viewer' }).ok, true);
+  assert.equal(auth.resolveTokenUser(token), null, '강등 후 구토큰은 WS 경로에서도 거부');
+  // 새 토큰은 최신 역할(viewer)로 해석 — admin/operator 게이트에서 차단됨.
+  const u2 = auth.getUser('ws.test');
+  const tk2 = auth.signToken({ sub: 'ws.test', role: 'operator', name: 'w', src: 'local', tv: u2.tokenVersion || 0 });
+  assert.equal(auth.resolveTokenUser(tk2)?.role, 'viewer', '역할은 토큰이 아니라 사용자 레코드 기준');
+});
+
 test('M1/M2: 민감작업 재인증(verifyUserOtp)도 같은 OTP 코드 재사용(replay) 거부', () => {
   assert.equal(auth.createUser({ username: 'otp.test', role: 'admin', password: 'password-1' }).ok, true);
   const u = auth.getUser('otp.test');

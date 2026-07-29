@@ -10,7 +10,8 @@
         "세션 강화(감사 M1/M2/M5): 비밀번호/역할 변경·계정 삭제 시 해당 로컬 계정의 기존 토큰이 즉시 무효화됩니다(tokenVersion). 역할 강등은 다음 요청부터 바로 반영됩니다. 민감작업 재인증·긴급중단 OTP도 1회용(같은 코드 재사용 거부)이 됐습니다.",
         "기타(감사 M9/M12/M18/M21/L1): /metrics는 토큰 미설정 시 404(METRICS_ALLOW_ANON=true로만 공개) · tcpdump/게스트 임시파일 무작위화(TOCTOU 차단) · tcpdump 인자 선행 '-' 차단 · 삭제된 수집서버 잔류 데이터 자동 정리 · RDP 콘솔 키보드 리스너 누수 수정.",
         "관측성: 엣지가 무음으로 삼키던 수집 인증 거부(토큰 불일치 등)를 집계해 중앙 '수집 서버' 상태에 '거부 N' 배지로 표시합니다(원인·시각 툴팁). viewer에게는 알람 무시·Tools 업그레이드 버튼을 숨겨 403 혼란을 없앴습니다.",
-        "⚠ 동작 변경 주의: (1) viewer 계정은 이제 원격 SSH/RDP 접속·알람 무시·Tools 업그레이드가 불가(의도된 권한 통제 — 필요 시 operator 부여). (2) /metrics를 토큰 없이 쓰던 연동은 METRICS_EXPORT_TOKEN 설정 또는 METRICS_ALLOW_ANON=true 필요. (3) 비밀번호 일괄 변경 시 해당 사용자는 재로그인이 필요합니다. 테스트 404건 통과(신규 9건: RBAC·토큰 폐기·OTP replay·tcpdump 인자)."
+        "적대적 리뷰 반영: WebSocket SSH/RDP 게이트웨이도 HTTP와 동일한 토큰 폐기·최신 역할 검증을 공유(resolveTokenUser) — 강등/삭제된 계정의 구토큰으로 터널이 열리던 우회 차단. NSX TLS는 vCenter 전역 검증 설정을 승계하고 구형 TLS 호환 파라미터를 유지. 중앙 배포 계정 비번 회전 시 기존 세션 즉시 만료.",
+        "⚠ 동작 변경 주의: (1) viewer 계정은 이제 원격 SSH/RDP 접속·알람 무시·Tools 업그레이드가 불가(의도된 권한 통제 — 필요 시 operator 부여). (2) /metrics를 토큰 없이 쓰던 연동은 METRICS_EXPORT_TOKEN 설정 또는 METRICS_ALLOW_ANON=true 필요. (3) 비밀번호 일괄 변경 시 해당 사용자는 재로그인이 필요합니다. 테스트 405건 통과(신규 10건: RBAC·토큰 폐기·OTP replay·WS 게이트웨이 폐기·tcpdump 인자)."
       ]
     },
     {

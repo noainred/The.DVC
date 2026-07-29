@@ -252,7 +252,9 @@ export function applyManagedUsers(managed = []) {
       list.push(u); result.created++;
     } else {
       existing.name = m.name || username; existing.role = m.role; existing.managedBy = 'central';
-      if (m.passwordHash) existing.passwordHash = m.passwordHash;
+      // 비번이 '실제로 바뀐' 경우에만 기존 토큰 폐기(M5) — 매 동기화마다 세션이 끊기지 않게
+      // 동일 해시 재전송은 무시한다(중앙이 비번을 회전하면 라이브 세션도 함께 만료돼야 함).
+      if (m.passwordHash && m.passwordHash !== existing.passwordHash) { existing.passwordHash = m.passwordHash; bumpTokenVersion(existing); }
       result.updated++;
     }
   }
@@ -359,6 +361,25 @@ if (!config.auth.enabled) {
   console.warn(`[auth] ⚠ 인증이 비활성(AUTH_ENABLED=false) — 모든 요청이 익명 '${AUTH_DISABLED_ROLE}' 권한으로 처리됩니다. 운영 환경에서는 인증을 켜거나 AUTH_DISABLED_ROLE=viewer 로 제한하세요.`);
 }
 
+/**
+ * 토큰 → 유효 사용자 해석(공용) — 서명/만료 검증 + 서버측 토큰 폐기(감사 M5) + 최신 역할 적용.
+ * 로컬 계정 토큰(src:'local')은 사용자 레코드의 tokenVersion과 대조(비번/역할 변경·삭제 시
+ * 즉시 무효)하고, 역할은 토큰이 아니라 현재 사용자 레코드에서 읽는다(강등 즉시 반영).
+ * HTTP authMiddleware뿐 아니라 WS SSH/RDP 게이트웨이도 이 함수를 써야 폐기가 우회되지 않는다.
+ * (loadUsers는 메모이즈되어 호출당 파일 IO 없음. 구버전 토큰(src 없음)은 TTL 내 자연 만료.)
+ */
+export function resolveTokenUser(token) {
+  const payload = token && verifyToken(token);
+  if (!payload) return null;
+  if (payload.src === 'local') {
+    const u = getUser(payload.sub);
+    if (!u) return null; // 삭제된 계정
+    if ((u.tokenVersion || 0) !== (payload.tv || 0)) return null; // 폐기된 토큰
+    return { username: payload.sub, role: u.role || 'viewer', name: payload.name };
+  }
+  return { username: payload.sub, role: payload.role, name: payload.name };
+}
+
 export function authMiddleware(req, res, next) {
   if (!config.auth.enabled) {
     req.user = { username: 'anonymous', role: AUTH_DISABLED_ROLE, name: 'Anonymous' };
@@ -366,20 +387,9 @@ export function authMiddleware(req, res, next) {
   }
   const header = req.headers.authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
-  const payload = token && verifyToken(token);
-  if (!payload) return res.status(401).json({ error: 'unauthorized' });
-  // 서버측 토큰 폐기(감사 M5): 로컬 계정 토큰(src:'local')은 사용자 레코드의 tokenVersion과
-  // 대조한다 — 비밀번호/역할 변경·계정 삭제 시 버전이 올라가 기존 토큰이 즉시 무효화된다.
-  // (loadUsers는 메모이즈되어 요청당 파일 IO 없음. 구버전 토큰(src 없음)은 8h 내 자연 만료.)
-  if (payload.src === 'local') {
-    const u = getUser(payload.sub);
-    if (!u) return res.status(401).json({ error: 'unauthorized' }); // 삭제된 계정
-    if ((u.tokenVersion || 0) !== (payload.tv || 0)) return res.status(401).json({ error: 'unauthorized', reason: 'token revoked' });
-    // 역할은 토큰이 아니라 현재 사용자 레코드 기준(강등 즉시 반영).
-    req.user = { username: payload.sub, role: u.role || 'viewer', name: payload.name };
-    return next();
-  }
-  req.user = { username: payload.sub, role: payload.role, name: payload.name };
+  const user = resolveTokenUser(token);
+  if (!user) return res.status(401).json({ error: 'unauthorized' });
+  req.user = user;
   next();
 }
 

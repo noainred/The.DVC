@@ -20,14 +20,26 @@
  */
 
 import { Agent } from 'undici';
+import { constants as cryptoConstants } from 'node:crypto';
+import { config } from '../config.js';
 import { ensureNsxDial } from './proxy.js';
 
 const norm = (s) => String(s || '').replace(/\/+$/, '');
 
 // 보안: 과거엔 기본 분기가 '전역(미검증)' 디스패처에 기댔으나, 전역 디스패처가 검증 ON 기본으로
 // 복원되면서(감사 C1/C3) NSX 전용 '로컬' 디스패처로 명시한다 — 자체서명 NSX 기본 동작은 그대로.
-// 검증이 필요한 환경은 NSX_TLS_REJECT_UNAUTHORIZED=true로 켠다(MITM·관리자 Basic 자격증명 탈취 방지).
-const nsxDispatcher = new Agent({ connect: { rejectUnauthorized: process.env.NSX_TLS_REJECT_UNAUTHORIZED === 'true' } });
+// 검증 여부: NSX_TLS_REJECT_UNAUTHORIZED=true 명시 또는 vCenter 전역 검증(VC_TLS_REJECT_
+// UNAUTHORIZED=true)을 승계 — 검증 ON 배포에서 NSX만 조용히 무검증이 되지 않게 한다.
+// 미검증일 때는 종전 전역 디스패처가 갖던 구형 TLS 호환(legacy 재협상·SECLEVEL)도 유지한다.
+const nsxVerify = process.env.NSX_TLS_REJECT_UNAUTHORIZED === 'true' || config.rejectUnauthorized;
+const nsxDispatcher = new Agent({
+  connect: nsxVerify ? { rejectUnauthorized: true } : {
+    rejectUnauthorized: false,
+    minVersion: config.vcTlsMinVersion,
+    ciphers: config.vcTlsCiphers,
+    secureOptions: cryptoConstants.SSL_OP_LEGACY_SERVER_CONNECT | cryptoConstants.SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION,
+  },
+});
 
 export class NsxClient {
   // dial(선택): { proxyHost, publicPort } — 주어지면 등록된 HAProxy frontend로 다이얼한다

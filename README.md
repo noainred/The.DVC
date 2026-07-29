@@ -58,7 +58,7 @@
 ### 인사이트 / 분석 (v1.88+)
 - **인사이트 패널** — 💰 FinOps(전력→kWh·요금·CO₂, PUE/단가 설정) · 🤖 AI 이상탐지(중앙값·MAD Z-score) · 📈 용량/수명 예측(선형회귀 ETA) · 🛡 보안(ESXi/vCenter 빌드 ↔ 내장 VMSA·EOL) · 🌐 토폴로지 · 🚨 인시던트 타임라인 · 💬 LLM ChatOps.
 - **구성도(3D)** — 설정된 라이브 구성을 3D 네트워크 그래프로(중앙→엣지→vCenter→NSX/호스트→VM, 줌·회전, vCenter/호스트 포커스로 VM 단위 탐색).
-- **Prometheus/OTel 익스포터** — `/metrics`로 호스트 CPU·MEM·전력·GPU, 데이터스토어, VM 카운트 노출(선택 토큰).
+- **Prometheus/OTel 익스포터** — `/metrics`로 호스트 CPU·MEM·전력·GPU, 데이터스토어, VM 카운트 노출(`METRICS_EXPORT_TOKEN` 필요 — 미설정 시 비활성).
 - **다빈치 서비스 점검 / 글로벌 네트워크 점검** — 내부 서비스·수집기 상태 + 제어플레인(vCenter/NSX) 도달성·RTT.
 - **심층 검색** — 게이트웨이·서브넷(CIDR)·OS·GPU·범위 등 다조건 + 게스트 탐침(GPU 드라이버/특정 프로세스). 전체/특정/복수 vCenter.
 
@@ -203,7 +203,7 @@ npm run build && npm start   # API가 web/dist 서빙 → http://localhost:4000
 | `REMOTE_MAPPING_TTL_MS` | `86400000` | 원격 매핑 TTL(1일) |
 | `LLM_ENABLED` / `OLLAMA_URL` / `OLLAMA_MODEL` | `false` / `http://localhost:11434` / `llama3.1` | AI 자연어 검색 |
 | `PROVISION_CONCURRENCY` | `4` | 동시 VM 클론 수 |
-| `METRICS_EXPORT_TOKEN` | — | `/metrics`(Prometheus) 접근 토큰(미설정 시 공개) |
+| `METRICS_EXPORT_TOKEN` | — | `/metrics`(Prometheus) 접근 토큰. **미설정 시 /metrics는 404(비활성)** — 무인증 공개는 `METRICS_ALLOW_ANON=true` 옵트인 |
 | `UPGRADE_*` | — | 자동 업그레이드(아래 참조) |
 
 ---
