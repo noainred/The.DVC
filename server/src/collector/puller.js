@@ -7,7 +7,7 @@
 
 import { config } from '../config.js';
 import { loadCollectors } from './registry.js';
-import { setRemoteHost, clearCollectorHosts, setCollectorStatus } from './state.js';
+import { setRemoteHost, clearCollectorHosts, setCollectorStatus, clearStaleRemote } from './state.js';
 import { setCollectorServers } from './remoteInventory.js';
 import { getDb } from '../idrac/db.js';
 import { describeError } from '../util/errors.js';
@@ -58,7 +58,7 @@ async function pullOne(c) {
   // 서버 분석용 인벤토리 병합: 엣지가 보낸 서버 목록(자격증명 없음)을 그 수집기 것으로 교체
   // 저장한다. 위임 법인 서버가 중앙 '서버 분석'에 나타난다. 구버전 엣지는 servers가 없어 빈 배열.
   setCollectorServers(c.id, data.datacenter || c.datacenter, Array.isArray(data.servers) ? data.servers : []);
-  return { hosts, version: data.version, datacenter: data.datacenter || c.datacenter, servers: Array.isArray(data.servers) ? data.servers.length : 0 };
+  return { hosts, version: data.version, datacenter: data.datacenter || c.datacenter, servers: Array.isArray(data.servers) ? data.servers.length : 0, authDeny: data.authDeny || null };
 }
 
 let pulling = false; // 재진입 가드 — 저하된 수집기(재시도 포함 60초+)가 있으면 주기가 겹쳐
@@ -98,11 +98,14 @@ export async function pullCollectorByAgent(agentName) {
 async function pullNowInner() {
   // 즉시 당김이 진행 중인 수집기는 이번 주기에서 건너뛴다(같은 수집기 pullOne 교차 실행 방지).
   const collectors = loadCollectors().filter((c) => c.enabled !== false && c.url && !inflight.has(c.id));
+  // 레지스트리에서 제거/교체된 수집기의 잔류 호스트·상태 자동 정리(감사 M12) — 과거엔 수동
+  // power-purge에서만 정리돼 유령 항목이 전력 합산을 오염시켰다.
+  try { clearStaleRemote(new Set(loadCollectors().map((c) => c.id))); } catch { /* 정리 실패는 폴링에 영향 없음 */ }
   await Promise.all(collectors.map(async (c) => {
     try {
       const r = await pullOne(c);
       fails.set(c.id, 0);
-      setCollectorStatus(c.id, { ok: true, hosts: r.hosts, version: r.version, datacenter: r.datacenter, error: null });
+      setCollectorStatus(c.id, { ok: true, hosts: r.hosts, version: r.version, datacenter: r.datacenter, authDeny: r.authDeny, error: null });
     } catch (err) {
       const d = describeError(err);
       const isAuth = /인증 실패|토큰/.test(d.message);

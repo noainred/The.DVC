@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { postJson, getToken } from '../api.js';
+import { postJson, fetchJson, getToken } from '../api.js';
 import { Modal } from './ui.jsx';
 import { openRemoteSession } from '../remote/sessions.js';
 
@@ -24,6 +24,10 @@ export function VmRemoteButton({ item }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [probes, setProbes] = useState({}); // ip -> { loading, ok, portOpen, pingOk, pingMs, proxyName, reason }
+  // 원격 접속(터널·probe)은 서버가 admin/operator만 허용 — viewer는 probe를 생략하고
+  // 403을 '도달 불가'로 오표시하지 않게 권한 안내를 보여준다.
+  const [canRemote, setCanRemote] = useState(null); // null=확인 중
+  useEffect(() => { fetchJson('/auth/me').then((r) => setCanRemote(['admin', 'operator'].includes(r.user?.role))).catch(() => setCanRemote(true)); }, []);
 
   const noIp = ips.length === 0;
   const guessPort = isWindows ? 3389 : 22;
@@ -35,7 +39,8 @@ export function VmRemoteButton({ item }) {
   // 사전 도달성 확인 — 다수 IP를 '모두' 프록시 경유로 ping+TCP 포트 점검(어느 IP로 붙을지 판단).
   useEffect(() => {
     let alive = true;
-    if (noIp) return;
+    if (noIp || canRemote === false) return;
+    if (canRemote === null) return; // 권한 확인 후 1회 실행
     setProbes(Object.fromEntries(ips.map((ip) => [ip, { loading: true }])));
     ips.forEach((ip) => {
       postJson('/remote/probe', { vcenterId: item.vcenterId, targetHost: ip, targetPort: probePort })
@@ -44,7 +49,7 @@ export function VmRemoteButton({ item }) {
     });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [item.id, protocol]);
+  }, [item.id, protocol, canRemote]);
 
   // 포트가 열린(접속 가능) IP가 있으면 그 IP를 자동 선택(현재 선택이 도달 불가일 때).
   const openIps = ips.filter((x) => probes[x]?.portOpen);
@@ -55,11 +60,12 @@ export function VmRemoteButton({ item }) {
 
   const anyLoading = ips.some((x) => probes[x]?.loading);
   const anyOpen = openIps.length > 0;
-  const probeColor = noIp ? '#f59e0b' : anyLoading ? null : anyOpen ? '#22c55e' : '#f87171';
-  const probeTip = noIp ? '수집된 IP가 없습니다.'
-    : anyLoading ? '프록시 경유 접속 점검 중…'
-      : anyOpen ? `접속 가능 IP: ${openIps.join(', ')} (:${probePort})`
-        : `모든 IP 접속 불가(:${probePort}) — 방화벽/포트/프록시 경로 확인`;
+  const probeColor = canRemote === false ? '#94a3b8' : noIp ? '#f59e0b' : anyLoading ? null : anyOpen ? '#22c55e' : '#f87171';
+  const probeTip = canRemote === false ? '원격 접속은 operator/admin 권한이 필요합니다.'
+    : noIp ? '수집된 IP가 없습니다.'
+      : anyLoading ? '프록시 경유 접속 점검 중…'
+        : anyOpen ? `접속 가능 IP: ${openIps.join(', ')} (:${probePort})`
+          : `모든 IP 접속 불가(:${probePort}) — 방화벽/포트/프록시 경로 확인`;
   const connect = async () => {
     setBusy(true); setError(null);
     try {
@@ -85,7 +91,7 @@ export function VmRemoteButton({ item }) {
 
   return (
     <>
-      <button className="logout-btn" style={{ padding: '8px 14px', color: probeColor || undefined, borderColor: probeColor || undefined }}
+      <button className="logout-btn" disabled={canRemote === false} title={probeTip} style={{ padding: '8px 14px', opacity: canRemote === false ? 0.5 : 1, color: probeColor || undefined, borderColor: probeColor || undefined }}
         onClick={() => { setError(null); setOpen(true); }} title={probeTip}>
         🔗 원격 접속{anyLoading ? ' …' : ' ●'}
       </button>

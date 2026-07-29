@@ -1,6 +1,20 @@
 {
   "notes": [
     {
+      "version": "2.190.0",
+      "date": "2026-07-29",
+      "title": "보안 하드닝 일괄 적용 — 감사(AUDIT-2026-06-27) 미수정 항목 처리",
+      "notes": [
+        "전역 TLS 무검증 제거(감사 C1/C3): 과거 vCenter용 setGlobalDispatcher가 프로세스 전체 fetch(업그레이드 번들·NSX 등)의 인증서 검증을 껐던 것을 제거했습니다. 이제 전역은 검증 ON이며, 자체서명이 필요한 vCenter(REST/SOAP)·게스트 파일전송·NSX·엣지 업그레이드 푸시에만 각각 로컬 디스패처를 명시합니다(기존 연결 동작은 그대로).",
+        "RBAC 완성(감사 C2/H3/H13): PUT /ui-settings·POST /tools/ip-ping·원격 probe/quick-connect에 admin/operator 역할을 강제하고, 브라우저 SSH/RDP 터널(WebSocket)도 admin/operator만 개통되게 했습니다(viewer 차단) — operator 역할이 실효 권한을 갖습니다. 인증 비활성 시 익명 역할을 AUTH_DISABLED_ROLE(기본 admin, viewer 권장)로 제어하고 기동 경고를 남깁니다.",
+        "세션 강화(감사 M1/M2/M5): 비밀번호/역할 변경·계정 삭제 시 해당 로컬 계정의 기존 토큰이 즉시 무효화됩니다(tokenVersion). 역할 강등은 다음 요청부터 바로 반영됩니다. 민감작업 재인증·긴급중단 OTP도 1회용(같은 코드 재사용 거부)이 됐습니다.",
+        "기타(감사 M9/M12/M18/M21/L1): /metrics는 토큰 미설정 시 404(METRICS_ALLOW_ANON=true로만 공개) · tcpdump/게스트 임시파일 무작위화(TOCTOU 차단) · tcpdump 인자 선행 '-' 차단 · 삭제된 수집서버 잔류 데이터 자동 정리 · RDP 콘솔 키보드 리스너 누수 수정.",
+        "관측성: 엣지가 무음으로 삼키던 수집 인증 거부(토큰 불일치 등)를 집계해 중앙 '수집 서버' 상태에 '거부 N' 배지로 표시합니다(원인·시각 툴팁). viewer에게는 알람 무시·Tools 업그레이드 버튼을 숨겨 403 혼란을 없앴습니다.",
+        "적대적 리뷰 반영: WebSocket SSH/RDP 게이트웨이도 HTTP와 동일한 토큰 폐기·최신 역할 검증을 공유(resolveTokenUser) — 강등/삭제된 계정의 구토큰으로 터널이 열리던 우회 차단. NSX TLS는 vCenter 전역 검증 설정을 승계하고 구형 TLS 호환 파라미터를 유지. 중앙 배포 계정 비번 회전 시 기존 세션 즉시 만료.",
+        "⚠ 동작 변경 주의: (1) viewer 계정은 이제 원격 SSH/RDP 접속·알람 무시·Tools 업그레이드가 불가(의도된 권한 통제 — 필요 시 operator 부여). (2) /metrics를 토큰 없이 쓰던 연동은 METRICS_EXPORT_TOKEN 설정 또는 METRICS_ALLOW_ANON=true 필요. (3) 비밀번호 일괄 변경 시 해당 사용자는 재로그인이 필요합니다. 테스트 405건 통과(신규 10건: RBAC·토큰 폐기·OTP replay·WS 게이트웨이 폐기·tcpdump 인자)."
+      ]
+    },
+    {
       "version": "2.189.0",
       "date": "2026-07-28",
       "title": "특수 기능 — '라이선스 만료일 확인' (ESXi·vCenter·vSAN·VCF/VVF·NSX·Horizon)",

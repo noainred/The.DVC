@@ -6,6 +6,7 @@
  */
 
 import { config, currentVersion } from '../config.js';
+import { getCollectorDenyStats } from '../routes/collector.js';
 import { localPowerByHostName } from '../idrac/service.js';
 import { getPollerStatus } from '../idrac/poller.js';
 import { allOmeDevices } from '../idrac/omeCache.js';
@@ -99,6 +100,8 @@ export async function buildExport() {
     poller: getPollerStatus(),
     omeDevices: allOmeDevices().length,
     hosts: byHost.length,
+    // 인증 거부 통계(관측성) — 토큰 불일치 등 무음 실패를 중앙 '수집 서버' 상태에 노출.
+    authDeny: getCollectorDenyStats(),
     power: { byHost },
     // 서버 분석용 인벤토리(위임 법인 서버가 중앙 '서버 분석'에 나타나게 함). 전력만 쓰던
     // 구버전 중앙은 이 필드를 무시하므로 하위호환.

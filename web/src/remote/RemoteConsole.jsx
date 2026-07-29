@@ -132,12 +132,18 @@ export function SshConsole({ mapping, initialCreds, onCreds, onHostname }) {
 export function RdpConsole({ mapping, active, initialCreds, onCreds }) {
   const elRef = useRef(null);
   const clientRef = useRef(null);
+  const kbdRef = useRef(null); // document 전역 키보드 핸들러 — 언마운트 시 반드시 해제(리스너 누수 방지, 감사 M21)
   const activeRef = useRef(active);
   const [creds, setCreds] = useState(initialCreds && initialCreds.username ? initialCreds : { username: '', password: '', domain: '' });
   const [connected, setConnected] = useState(false);
   const [status, setStatus] = useState('');
   useEffect(() => { activeRef.current = active; }, [active]);
-  useEffect(() => () => { try { clientRef.current?.disconnect(); } catch { /* */ } }, []);
+  useEffect(() => () => {
+    try { clientRef.current?.disconnect(); } catch { /* */ }
+    // Guacamole.Keyboard는 document에 직접 addEventListener하므로 disconnect로는 제거되지 않는다 —
+    // 핸들러를 끊어 콘솔을 여닫을 때마다 죽은 리스너가 쌓이는 것을 방지.
+    if (kbdRef.current) { kbdRef.current.onkeydown = null; kbdRef.current.onkeyup = null; kbdRef.current = null; }
+  }, []);
   useEffect(() => { if (initialCreds && initialCreds.username) connect(); /* eslint-disable-next-line */ }, []);
 
   const connect = () => {
@@ -159,6 +165,7 @@ export function RdpConsole({ mapping, active, initialCreds, onCreds }) {
       const mouse = new Guacamole.Mouse(display);
       mouse.onmousedown = mouse.onmouseup = mouse.onmousemove = (st) => { if (activeRef.current) client.sendMouseState(st); };
       const kbd = new Guacamole.Keyboard(document);
+      kbdRef.current = kbd;
       kbd.onkeydown = (k) => { if (activeRef.current) client.sendKeyEvent(1, k); };
       kbd.onkeyup = (k) => { if (activeRef.current) client.sendKeyEvent(0, k); };
     }, 0);

@@ -37,7 +37,8 @@ remoteRouter.get('/mappings', (req, res) => {
 // TCP port. Used to colour the VM "원격 접속" button (blue=open, red=closed).
 // 선행 '-'를 막아 ping/포트체크에 플래그(인자) 주입을 차단(첫 글자는 영숫자/IP만).
 const SAFE_HOST = /^[A-Za-z0-9._:][A-Za-z0-9._:-]*$/;
-remoteRouter.post('/probe', async (req, res) => {
+// 프록시에서 SSH로 ping/포트체크를 대행 — 내부망 도달성 탐침이므로 admin/operator만(감사 H3/H7).
+remoteRouter.post('/probe', requireRole('admin', 'operator'), async (req, res) => {
   const { vcenterId, targetHost } = req.body || {};
   const targetPort = Math.min(65535, Math.max(1, Number((req.body || {}).targetPort) || 22));
   if (!targetHost || !SAFE_HOST.test(targetHost)) return res.status(400).json({ ok: false, reason: '대상 호스트가 올바르지 않습니다.' });
@@ -158,8 +159,10 @@ remoteRouter.post('/mappings', adminOnly, async (req, res) => {
 });
 
 // One-click connect from a VM detail: reuse an existing mapping for the same
-// target+port+protocol, else create+provision one. Any authenticated user.
-remoteRouter.post('/quick-connect', async (req, res) => {
+// target+port+protocol, else create+provision one. 매핑 생성=프록시 경유 터널 개통이므로
+// admin/operator만(감사 H3/H7/H14 — viewer의 오픈릴레이/내부 피벗 차단; WS 게이트웨이 역할
+// 검사와 일관). targetHost 형식은 addMapping(SAFE_TARGET_HOST)이 최종 검증한다.
+remoteRouter.post('/quick-connect', requireRole('admin', 'operator'), async (req, res) => {
   const { protocol = 'ssh', targetHost, vcenterId, name } = req.body || {};
   const proto = protocol === 'rdp' ? 'rdp' : 'ssh';
   const targetPort = Number((req.body || {}).targetPort) || (proto === 'rdp' ? 3389 : 22);

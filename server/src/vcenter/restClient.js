@@ -1,4 +1,4 @@
-import { Agent, setGlobalDispatcher } from 'undici';
+import { Agent } from 'undici';
 import { constants as cryptoConstants } from 'node:crypto';
 import { config } from '../config.js';
 
@@ -17,13 +17,15 @@ import { config } from '../config.js';
  * configurable via VC_TLS_REJECT_UNAUTHORIZED (default: off).
  */
 
-// Configure a global dispatcher tuned for older vCenter TLS stacks. Many
-// appliances negotiate legacy TLS versions/ciphers (or legacy renegotiation)
-// that OpenSSL 3 rejects by default, which surfaces as "Client network socket
-// disconnected before secure TLS connection was established". We therefore
-// allow older TLS and lower the security level when cert verification is off.
-if (!config.rejectUnauthorized) {
-  const connect = {
+// vCenter/게스트 파일전송 전용 로컬 디스패처(감사 C1/C3 수정) — 과거에는 setGlobalDispatcher로
+// 프로세스 '전역' fetch의 TLS 검증을 껐고(legacy TLS/SECLEVEL=0 포함), 그 결과 업그레이드 번들·
+// NSX·게스트 전송 등 관련 없는 모든 fetch가 MITM에 노출됐다. 이제 전역 디스패처는 Node 기본
+// (인증서 검증 ON)을 유지하고, 자체서명/구형 TLS가 실제로 필요한 vCenter 계열 fetch에만
+// dispatcher 옵션으로 이 permissive Agent를 명시 주입한다(soapClient/guestops/nsx도 동일 패턴).
+// 구형 어플라이언스는 legacy TLS/재협상을 요구하므로 검증 off일 때 SECLEVEL을 낮춘다(기존 동작 유지).
+const vcConnect = config.rejectUnauthorized
+  ? { rejectUnauthorized: true, timeout: 15_000 }
+  : {
     rejectUnauthorized: false,
     minVersion: config.vcTlsMinVersion,           // default TLSv1
     ciphers: config.vcTlsCiphers,                 // default DEFAULT@SECLEVEL=0
@@ -32,17 +34,16 @@ if (!config.rejectUnauthorized) {
       cryptoConstants.SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION,
     timeout: 15_000,
   };
-  // vCenter를 HAProxy로 중계하는 환경에서는 reload/방화벽 idle로 keep-alive 연결이 끊겨
-  // 죽은 소켓을 재사용하면 응답을 기다리다 타임아웃('operation was aborted due to timeout')한다.
-  // 유휴 소켓을 짧게 회수해 매 폴링마다 새 연결로 재접속하도록 한다(폴링 간격 << keepAlive면 영향 없음).
-  setGlobalDispatcher(new Agent({
-    connect,
-    connectTimeout: 15_000,
-    keepAliveTimeout: Number(process.env.VC_KEEPALIVE_MS) || 4_000,
-    keepAliveMaxTimeout: 10_000,
-    pipelining: 1,
-  }));
-}
+// vCenter를 HAProxy로 중계하는 환경에서는 reload/방화벽 idle로 keep-alive 연결이 끊겨
+// 죽은 소켓을 재사용하면 응답을 기다리다 타임아웃('operation was aborted due to timeout')한다.
+// 유휴 소켓을 짧게 회수해 매 폴링마다 새 연결로 재접속하도록 한다(폴링 간격 << keepAlive면 영향 없음).
+export const vcDispatcher = new Agent({
+  connect: vcConnect,
+  connectTimeout: 15_000,
+  keepAliveTimeout: Number(process.env.VC_KEEPALIVE_MS) || 4_000,
+  keepAliveMaxTimeout: 10_000,
+  pipelining: 1,
+});
 
 export class VCenterClient {
   constructor(vc) {
@@ -61,6 +62,7 @@ export class VCenterClient {
         ...headers,
       },
       body: body ? JSON.stringify(body) : undefined,
+      dispatcher: vcDispatcher, // vCenter 전용 TLS 정책(전역 오염 금지 — 감사 C1/C3)
       // per-vCenter 타임아웃 존중(고RTT 사이트가 15초에 abort되지 않게) — SOAP 경로와 동일 규칙.
       signal: AbortSignal.timeout(this.vc?.timeoutMs > 0 ? this.vc.timeoutMs : 15_000),
     });

@@ -50,7 +50,10 @@ authRouter.post('/login', async (req, res) => {
   }
 
   recordLoginSuccess(gateIp, username);
-  const token = signToken({ sub: user.username, role: user.role, name: user.name });
+  // 로컬 계정 토큰에는 src/tv(tokenVersion)를 실어 서버측 폐기(비번/역할 변경 시 즉시 무효)를
+  // 가능하게 한다(감사 M5). AD 계정은 로컬 레코드가 없어 다음 로그인 시점에 역할이 반영된다.
+  const local = user.source === 'local' ? getUser(user.username) : null;
+  const token = signToken({ sub: user.username, role: user.role, name: user.name, ...(local ? { src: 'local', tv: local.tokenVersion || 0 } : {}) });
   logAudit({ user: user.username, action: '로그인', detail: user.role, ip });
   res.json({ token, user });
 });
