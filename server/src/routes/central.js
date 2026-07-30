@@ -8,6 +8,7 @@ import { Router } from 'express';
 import { config } from '../config.js';
 import { getAssignment, setResult } from '../central/assignments.js';
 import { tokenMatches } from '../util/secureCompare.js';
+import { resolveAgentByToken, hasAnyAgentToken, listAgentTokens } from '../central/agentTokens.js';
 import { setInventory } from '../central/inventory.js';
 import { setEdgeFleet } from '../central/fleet.js';
 import { setGuestGpu } from '../gpu/store.js';
@@ -51,16 +52,69 @@ centralRouter.use((req, res, next) => {
   next();
 });
 
-function authed(req) {
-  if (!config.central.token) return false;
-  const t = req.get('X-Central-Token') || (req.get('Authorization') || '').replace(/^Bearer\s+/i, '');
-  return tokenMatches(t, config.central.token);
+// central 활성 조건 — 공유 CENTRAL_TOKEN 또는 엣지별 개별 토큰이 하나라도 있으면 활성.
+// (개별 토큰만 발급하고 공유 토큰을 없애는 '완전 이관' 구성도 지원하기 위함.)
+const centralEnabled = () => Boolean(config.central.token) || hasAnyAgentToken();
+
+// 공유 토큰을 아예 금지하는 강화 모드(전 엣지 개별 토큰 이관 완료 후 켠다).
+const REQUIRE_AGENT_TOKEN = process.env.CENTRAL_REQUIRE_AGENT_TOKEN === 'true';
+
+// 공유 토큰 사용 통계 — 관리 화면이 '아직 개별 토큰으로 이관되지 않은 엣지가 있다'를 알 수 있게.
+const sharedStats = { uses: 0, lastAt: null, lastAgent: '', lastPath: '' };
+export function getCentralAuthStats() {
+  return { ...sharedStats, requireAgentToken: REQUIRE_AGENT_TOKEN, agentTokens: listAgentTokens().length };
 }
+
+/**
+ * central 인증 — 엣지별 개별 토큰이 우선, 없으면 공유 CENTRAL_TOKEN(하위호환).
+ * 개별 토큰으로 인증하면 req.centralAuth.agent 에 그 엣지 이름이 바인딩되고, 아래 미들웨어가
+ * '자기 agent 데이터만' 접근하도록 강제한다(엣지 1대 침해로 전 사이트 자격증명이 새는 것 차단).
+ */
+function resolveCentralAuth(req) {
+  const t = req.get('X-Central-Token') || (req.get('Authorization') || '').replace(/^Bearer\s+/i, '');
+  const bound = resolveAgentByToken(t);
+  if (bound) return { ok: true, mode: 'agent', agent: bound };
+  if (config.central.token && tokenMatches(t, config.central.token)) {
+    if (REQUIRE_AGENT_TOKEN) return { ok: false, reason: '공유 CENTRAL_TOKEN은 비활성입니다(CENTRAL_REQUIRE_AGENT_TOKEN=true) — 이 엣지의 개별 토큰을 사용하세요.' };
+    return { ok: true, mode: 'shared', agent: null };
+  }
+  return { ok: false, reason: '토큰 불일치' };
+}
+
+// 요청이 다루려는 agent 이름(쿼리·헤더·본문 순).
+// /register-collector 는 자기 이름을 body.name 으로 알리므로 그 필드도 바인딩 대상에 포함한다
+// (개별 토큰을 가진 엣지가 남의 이름으로 수집 서버를 덮어쓰는 것 방지).
+const requestedAgent = (req) => String(
+  req.query?.agent || req.get('X-Agent-Name') || req.body?.agent
+  || (req.path === '/register-collector' ? req.body?.name : '') || '',
+).trim();
+
+// 인증 1회 해석 + agent 바인딩 강제(모든 라우트 공통). 라우트별 authed(req)는 이 결과를 읽는다.
+centralRouter.use((req, res, next) => {
+  const auth = resolveCentralAuth(req);
+  req.centralAuth = auth;
+  if (!auth.ok) return next(); // 각 라우트가 404/403을 구분해 응답(하위호환 유지)
+  const want = requestedAgent(req);
+  if (auth.mode === 'agent' && want && want.toLowerCase() !== String(auth.agent).toLowerCase()) {
+    // 개별 토큰은 남의 이름으로 조회/보고할 수 없다 — 자격증명 횡탈·데이터 위장 차단.
+    console.warn(`[central] agent 불일치 거부 — 토큰=${auth.agent} 요청=${want} (${req.method} ${req.path})`);
+    return res.status(403).json({ ok: false, reason: `이 토큰은 '${auth.agent}' 전용입니다(요청: '${want}').` });
+  }
+  if (auth.mode === 'shared') {
+    sharedStats.uses++; sharedStats.lastAt = Date.now();
+    sharedStats.lastAgent = want || '(unknown)'; sharedStats.lastPath = req.path;
+  }
+  next();
+});
+
+function authed(req) { return Boolean(req.centralAuth?.ok); }
+// 인증 실패 사유(토큰 불일치 / 공유 토큰 금지)를 그대로 전달해 운영자가 원인을 알 수 있게.
+const denyReason = (req) => req.centralAuth?.reason || '토큰 불일치';
 
 // Agent pulls the IP assignment for its name (incl. iDRAC credentials).
 centralRouter.get('/assignment', (req, res) => {
-  if (!config.central.token) return res.status(404).json({ ok: false, reason: 'central 비활성화 (CENTRAL_TOKEN 미설정)' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: '토큰 불일치' });
+  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화 (CENTRAL_TOKEN 미설정)' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
   const a = getAssignment(req.query.agent);
   if (!a || a.enabled === false) return res.json({ ok: true, assigned: false });
   res.json({ ok: true, assigned: true, agent: a.agent, ips: a.ips, username: a.username, password: a.password });
@@ -70,8 +124,8 @@ centralRouter.get('/assignment', (req, res) => {
 // 목록에 자동 upsert — 관리자의 '수집 서버 추가' 수동 절차가 필요 없어진다.
 // Body: { name, port, collectorToken, datacenter?, urlHint?, version? }
 centralRouter.post('/register-collector', (req, res) => {
-  if (!config.central.token) return res.status(404).json({ ok: false, reason: 'central 비활성화 (CENTRAL_TOKEN 미설정)' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: '토큰 불일치' });
+  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화 (CENTRAL_TOKEN 미설정)' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
   const b = req.body || {};
   const name = String(b.name || '').trim();
   if (!name) return res.status(400).json({ ok: false, reason: 'name이 필요합니다.' });
@@ -100,8 +154,8 @@ centralRouter.post('/register-collector', (req, res) => {
 
 // Agent posts its scan result. Body: { agent, scanned, found:[...], unreachable, notIdrac, authFailed }
 centralRouter.post('/result', (req, res) => {
-  if (!config.central.token) return res.status(404).json({ ok: false });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: '토큰 불일치' });
+  if (!centralEnabled()) return res.status(404).json({ ok: false });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
   const b = req.body || {};
   if (!b.agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
   setResult(b.agent, {
@@ -119,8 +173,8 @@ centralRouter.post('/result', (req, res) => {
 // 사이트 위임 수집: 현장 서버가 로컬 vCenter 인벤토리 조각을 push.
 // Body: { agent, vcenterId, vcenter, hosts[], vms[], datastores[], networks[], alarms[], generatedAt }
 centralRouter.post('/inventory', (req, res) => {
-  if (!config.central.token) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: '토큰 불일치' });
+  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
   const b = req.body || {};
   if (!b.vcenterId || !b.vcenter) return res.status(400).json({ ok: false, reason: 'vcenterId/vcenter가 필요합니다.' });
   const arr = (x, n) => (Array.isArray(x) ? x.slice(0, n) : []);
@@ -139,8 +193,8 @@ centralRouter.post('/inventory', (req, res) => {
 // 엣지 베어메탈 집계: 현장 포탈이 자기 DC의 베어메탈 목록(전력 미보고 포함)을 push.
 // Body: { agent, baremetal:[{fleetId,name,model,serviceTag,watts,vcenterId,source}], generatedAt }
 centralRouter.post('/fleet', (req, res) => {
-  if (!config.central.token) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: '토큰 불일치' });
+  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
   const b = req.body || {};
   if (!b.agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
   const list = Array.isArray(b.baremetal) ? b.baremetal : [];
@@ -150,15 +204,15 @@ centralRouter.post('/fleet', (req, res) => {
 
 // 위임 iDRAC 스캔: 에이전트가 자기 이름의 온디맨드 스캔 잡을 인출.
 centralRouter.get('/idrac-scan-jobs', (req, res) => {
-  if (!config.central.token) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: '토큰 불일치' });
+  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
   res.json({ ok: true, jobs: takeIdracScanJobs(req.query.agent) });
 });
 
 // 위임 iDRAC 스캔: 에이전트가 스캔 진행률(중간)을 보고. Body: { reqId, scanned, total }
 centralRouter.post('/idrac-scan-progress', (req, res) => {
-  if (!config.central.token) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: '토큰 불일치' });
+  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
   const b = req.body || {};
   if (!b.reqId) return res.status(400).json({ ok: false, reason: 'reqId가 필요합니다.' });
   setIdracScanProgress(String(b.reqId), b);
@@ -168,8 +222,8 @@ centralRouter.post('/idrac-scan-progress', (req, res) => {
 // 위임 iDRAC 스캔: 에이전트가 발견 목록·요약을 reqId와 함께 회신.
 // Body: { agent, reqId, scanned, found:[...], unreachable, notIdrac, authFailed, registered, error? }
 centralRouter.post('/idrac-scan-result', (req, res) => {
-  if (!config.central.token) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: '토큰 불일치' });
+  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
   const b = req.body || {};
   if (!b.reqId) return res.status(400).json({ ok: false, reason: 'reqId가 필요합니다.' });
   setIdracScanResult(String(b.reqId), b);
@@ -187,8 +241,8 @@ centralRouter.post('/idrac-scan-result', (req, res) => {
 // GPU 사용률을 push. 중앙은 포탈이 ESXi에 직접 못 가는 환경에서 이 값을 오버레이로 사용.
 // Body: { agent, hosts:[{hostId,utilPct}], vms:[{vmId,utilPct,memUsedPct,host,vcenterId}] }
 centralRouter.post('/gpu-guest-data', (req, res) => {
-  if (!config.central.token) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: '토큰 불일치' });
+  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
   const b = req.body || {};
   if (!b.agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
   const hosts = Array.isArray(b.hosts) ? b.hosts.slice(0, 50_000) : [];
@@ -203,8 +257,8 @@ centralRouter.post('/gpu-guest-data', (req, res) => {
 // 폐쇄망/NAT 엣지도 아웃바운드 GET만으로 동작. 비밀번호 포함(엣지가 실제 인증에 사용) → 토큰 필수.
 // GET /api/central/gpu-guest-config?agent=<이름>
 centralRouter.get('/gpu-guest-config', (req, res) => {
-  if (!config.central.token) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: '토큰 불일치' });
+  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
   const agent = String(req.query.agent || req.get('X-Agent-Name') || '').trim();
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
   const settings = getAssignedGpuGuest(agent);
@@ -217,8 +271,8 @@ centralRouter.get('/gpu-guest-config', (req, res) => {
 // users.json에 managed로 반영. 비밀번호 해시 포함(엣지가 로그인 검증에 사용) → 토큰 필수.
 // GET /api/central/users-config?agent=<이름>
 centralRouter.get('/users-config', (req, res) => {
-  if (!config.central.token) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: '토큰 불일치' });
+  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
   const agent = String(req.query.agent || req.get('X-Agent-Name') || '').trim();
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
   // 글로벌('*') 공통 사용자 + 이 엣지 전용을 합쳐서 반환(개별이 글로벌보다 우선).
@@ -228,16 +282,16 @@ centralRouter.get('/users-config', (req, res) => {
 // 위임 Ping: 현장 에이전트가 자기 담당 vCenter들의 대기 IP를 인출 → ping → 결과 보고.
 // 중앙이 VM 사설 IP에 직접 못 가는 환경에서, 그 망에 닿는 에이전트가 ping을 대행.
 centralRouter.get('/ping-jobs', (req, res) => {
-  if (!config.central.token) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: '토큰 불일치' });
+  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
   const vcs = String(req.query.vcenters || '').split(',').map((s) => s.trim()).filter(Boolean);
   res.json({ ok: true, jobs: takePingJobs(vcs) });
 });
 
 // Body: { vcenterId, results:[{ ip, alive, rttMs }] }
 centralRouter.post('/ping-result', (req, res) => {
-  if (!config.central.token) return res.status(404).json({ ok: false });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: '토큰 불일치' });
+  if (!centralEnabled()) return res.status(404).json({ ok: false });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
   const b = req.body || {};
   if (!b.vcenterId) return res.status(400).json({ ok: false, reason: 'vcenterId가 필요합니다.' });
   setPingResults(String(b.vcenterId), Array.isArray(b.results) ? b.results.slice(0, 200) : []);
@@ -247,8 +301,8 @@ centralRouter.post('/ping-result', (req, res) => {
 // 엣지 설정 push: 에이전트가 자기 CONFIG_DIR 설정을 보내 중앙 통합 백업에 합쳐지게 한다.
 // Body: { agent, files:{ name: content } }
 centralRouter.post('/agent-config', (req, res) => {
-  if (!config.central.token) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: '토큰 불일치' });
+  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
   const b = req.body || {};
   if (!b.agent || !b.files || typeof b.files !== 'object') return res.status(400).json({ ok: false, reason: 'agent·files가 필요합니다.' });
   // 파일 수/크기 상한(남용 방지).
@@ -263,15 +317,15 @@ function require_basename(p) { return String(p).split(/[\\/]/).pop().slice(0, 20
 
 // 엣지 로그 연합 조회: 에이전트가 자기 vCenter들의 대기 조회를 인출 → 로컬 로그 DB 조회 → 결과 보고.
 centralRouter.get('/log-queries', (req, res) => {
-  if (!config.central.token) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: '토큰 불일치' });
+  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
   const vcs = String(req.query.vcenters || '').split(',').map((s) => s.trim()).filter(Boolean);
   res.json({ ok: true, queries: takeLogQueries(vcs) });
 });
 // Body: { reqId, vcenterId, total, rows, dbKind }
 centralRouter.post('/log-query-result', (req, res) => {
-  if (!config.central.token) return res.status(404).json({ ok: false });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: '토큰 불일치' });
+  if (!centralEnabled()) return res.status(404).json({ ok: false });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
   const b = req.body || {};
   if (!b.reqId) return res.status(400).json({ ok: false, reason: 'reqId가 필요합니다.' });
   setLogQueryResult(String(b.reqId), b);
@@ -280,14 +334,14 @@ centralRouter.post('/log-query-result', (req, res) => {
 
 // 위임 tcpdump 캡처: 에이전트가 자기 이름의 대기 캡처 작업을 인출 → 로컬 SSH 캡처 → 결과 보고.
 centralRouter.get('/capture-jobs', (req, res) => {
-  if (!config.central.token) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: '토큰 불일치' });
+  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
   res.json({ ok: true, jobs: takeCaptureJobs(String(req.query.agent || '')) });
 });
 // Body: { reqId, result }
 centralRouter.post('/capture-result', (req, res) => {
-  if (!config.central.token) return res.status(404).json({ ok: false });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: '토큰 불일치' });
+  if (!centralEnabled()) return res.status(404).json({ ok: false });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
   const b = req.body || {};
   if (!b.reqId) return res.status(400).json({ ok: false, reason: 'reqId가 필요합니다.' });
   setCaptureResult(String(b.reqId), b.result || { ok: false, reason: '빈 결과' });
@@ -297,8 +351,8 @@ centralRouter.post('/capture-result', (req, res) => {
 
 // Agent pulls its IP-scan assignment (TCP connect scan config) by name.
 centralRouter.get('/ip-scan-assignment', (req, res) => {
-  if (!config.central.token) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: '토큰 불일치' });
+  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
   const cfg = loadScanSettings(String(req.query.agent || ''));
   if (!cfg.enabled || !cfg.ranges.length) return res.json({ ok: true, assigned: false });
   res.json({ ok: true, assigned: true, ...cfg });
@@ -306,8 +360,8 @@ centralRouter.get('/ip-scan-assignment', (req, res) => {
 
 // Agent posts its IP-scan result. Body: { agent, alive:[{ip,openPorts,services,hostname}] }
 centralRouter.post('/ip-scan-result', (req, res) => {
-  if (!config.central.token) return res.status(404).json({ ok: false });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: '토큰 불일치' });
+  if (!centralEnabled()) return res.status(404).json({ ok: false });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
   const b = req.body || {};
   if (!b.agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
   if (Array.isArray(b.alive)) mergeScanResults(b.alive.slice(0, 8000), Date.now(), String(b.agent));

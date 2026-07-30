@@ -15,12 +15,20 @@
 
 import { Agent } from 'undici';
 
-// 수집서버/중앙도 자체서명 인증서일 수 있어 전역(vCenter)과 동일하게 검증 off. 단 커넥션 풀은 분리.
+// TLS 검증은 기본 ON(보안). 과거 이 값은 `WAN_TLS_INSECURE === 'false' ? true : false`로,
+// 이름과 반대로 '미설정=검증 off'였다 — 중앙↔엣지 구간은 수집 토큰·배포 사용자 자격증명이
+// 흐르는 경로라 기본 무검증은 MITM 노출이었다(보안 점검 지적). 이제 기본 검증하고,
+// 자체서명 https 엣지가 있는 사이트만 WAN_TLS_INSECURE=true로 명시적으로 낮춘다.
+// (엣지 자기등록 URL은 기본 http라 대부분 영향 없음 — https 자체서명 엣지만 opt-out 필요.)
 // connections: origin(중앙/엣지)당 동시 연결 상한. undici 기본은 무제한이라 여러 워커가 동시에
 // 요청을 쏘면 연결이 수십 개까지 쌓이고 keep-alive로 한동안 남는다(소켓 폭증). 상한을 둬서 재사용·
 // 큐잉으로 연결 수를 묶는다. WAN_MAX_CONNECTIONS로 조정(기본 6).
+export const WAN_TLS_VERIFY = process.env.WAN_TLS_INSECURE !== 'true';
+if (!WAN_TLS_VERIFY) {
+  console.warn('[wan] ⚠ WAN_TLS_INSECURE=true — 중앙↔엣지 HTTPS 인증서 검증이 비활성입니다(자체서명 엣지 호환용). 가능하면 사설 CA를 신뢰시키고 이 옵션을 끄세요.');
+}
 const wanAgent = new Agent({
-  connect: { rejectUnauthorized: process.env.WAN_TLS_INSECURE === 'false' ? true : false },
+  connect: { rejectUnauthorized: WAN_TLS_VERIFY },
   connectTimeout: Number(process.env.WAN_CONNECT_TIMEOUT_MS) || 20_000,
   keepAliveTimeout: 10_000,
   keepAliveMaxTimeout: 30_000,

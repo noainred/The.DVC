@@ -202,7 +202,8 @@
 
 - **단일 포트 아키텍처**: 포탈은 `4000` 하나만 연다. 앞단에 nginx/HAProxy로 `443(TLS) → 4000` 종단을 두는 것을 권장(포탈 자체는 평문 HTTP listen).
 - **토큰 게이트**: `/api/central/*`(엣지→중앙)는 `X-Central-Token`(`CENTRAL_TOKEN`), `/api/collector/*`(중앙→수집)는 `X-Collector-Token`(`COLLECTOR_TOKEN`)으로만 보호된다(사용자 로그인 밖). 이 토큰은 길고 비밀로 관리하고, 가능하면 해당 포트를 관리망으로 제한.
-- **TLS 검증**: vCenter/iDRAC/NSX는 사설 자가서명 대비 기본 `rejectUnauthorized=false`(`VC_TLS_REJECT_UNAUTHORIZED`/`AD_TLS_REJECT_UNAUTHORIZED` 등). 운영 시 사내 CA 신뢰 + 검증 ON 권장.
+- **★ 엣지별 개별 central 토큰(권장)**: 공유 `CENTRAL_TOKEN` 하나를 전 엣지가 쓰면, 엣지 1대 침해·토큰 유출 시 `?agent=` 이름만 바꿔 **다른 사이트**의 iDRAC 비밀번호(`/assignment`)·게스트 계정(`/gpu-guest-config`)·사용자 해시(`/users-config`)까지 인출된다. 중앙 관리자 화면(설정 → 수집 서버 → **🔑 엣지별 개별 central 토큰**)에서 엣지별 토큰을 발급해 그 엣지의 `CENTRAL_TOKEN`(통합 엣지 모드는 `EDGE_TOKEN`)에 넣으면, 그 토큰은 **자기 엣지 데이터만** 접근할 수 있다(남의 이름은 403). 엣지 코드 변경 불필요·미이관 엣지는 공유 토큰으로 계속 동작(무중단), 전 엣지 이관 후 중앙에 `CENTRAL_REQUIRE_AGENT_TOKEN=true`로 공유 토큰을 금지한다.
+- **TLS 검증**: vCenter/iDRAC/NSX는 사설 자가서명 대비 기본 `rejectUnauthorized=false`(`VC_TLS_REJECT_UNAUTHORIZED`/`AD_TLS_REJECT_UNAUTHORIZED` 등). 운영 시 사내 CA 신뢰 + 검증 ON 권장. **중앙↔엣지(WAN) 구간은 기본 검증 ON**이며, 자체서명 HTTPS 엣지가 있으면 그 노드에서만 `WAN_TLS_INSECURE=true`로 낮춘다.
 - **HAProxy 중계 vCenter**: vCenter 직접 443이 안 닿으면 중계 frontend 커스텀 포트를 `vcenters.json` host에 `https://중계:포트`로 넣는다. 이 포트도 포탈→중계 방향으로 열어야 한다(2-B vCenter 행의 '커스텀').
 - **동적 포트 범위**: 원격접속 frontend는 `PROXY_PUBLIC_PORT_BASE`(20000)부터 매핑 수만큼 증가한다. 방화벽은 넉넉한 범위(예 20000–29999)를 포탈/사용자→중계로 열어두는 것이 운영상 편하다.
 - **능동 스캔/콘솔은 침투성**: IP 스캔(2-B 마지막 그룹)·tcpdump·게스트 SSH는 승인된 대역/호스트에만. 스캔 포트는 설정으로 축소 가능.
@@ -213,7 +214,9 @@
 | 변수 | 기본 | 영향 |
 |---|---|---|
 | `PORT` | 4000 | 포탈 listen 포트 |
-| `CENTRAL_URL` / `CENTRAL_TOKEN` | — | 엣지→중앙 주소·토큰 |
+| `CENTRAL_URL` / `CENTRAL_TOKEN` | — | 엣지→중앙 주소·토큰(엣지별 개별 토큰 값을 넣으면 그 엣지 전용으로 스코프 축소) |
+| `CENTRAL_REQUIRE_AGENT_TOKEN` | false | true면 공유 `CENTRAL_TOKEN` 거부 — 엣지별 개별 토큰만 허용(전 엣지 이관 후 권장) |
+| `WAN_TLS_INSECURE` | false(검증 ON) | 중앙↔엣지 HTTPS 인증서 검증. 자체서명 엣지만 true |
 | `COLLECTOR_TOKEN` | — | 수집 export 토큰 |
 | `HAPROXY_DATAPLANE_URL`/`_USER`/`_PASS` | http://proxy:5555 | Data Plane API |
 | `PROXY_SSH_HOST`/`_PORT`/`_USER`/`_PASS` | 22 | HAProxy SSH 배포 |
@@ -222,7 +225,7 @@
 | `AD_URL`/`AD_TLS_REJECT_UNAUTHORIZED` | 389/636 | AD 인증 |
 | `OLLAMA_URL` | http://localhost:11434 | LLM |
 | `PACKAGE_BASE_URL`/`UPGRADE_REMOTE_BASE` | GitHub releases | 업그레이드 소스 |
-| `METRICS_EXPORT_TOKEN` | (없음=공개) | /metrics 인증 |
+| `METRICS_EXPORT_TOKEN` | (없음=/metrics 404 비활성) | /metrics 인증(무인증 공개는 `METRICS_ALLOW_ANON=true` 옵트인) |
 | `VC_TLS_REJECT_UNAUTHORIZED`/`VC_KEEPALIVE_MS` | false/4000ms | vCenter TLS/keepalive |
 
 > 본 문서는 소스 분석(82개 경로)으로 자동 생성·정리되었습니다. 코드 변경 시 갱신이 필요하면 동일 분석을 재실행하세요.
