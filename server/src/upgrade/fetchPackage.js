@@ -59,9 +59,21 @@ export async function downloadPackage({ kind = 'installer', version, baseUrl, di
   if (!res.ok) return { ok: false, reason: `다운로드 실패 HTTP ${res.status}` };
   const buf = Buffer.from(await res.arrayBuffer());
   const got = crypto.createHash('sha256').update(buf).digest('hex');
-  if (sha && got !== sha) return { ok: false, reason: '체크섬 불일치 — 파일 손상/변조 가능' };
-  // versions.json은 검증 TLS로 받으므로 sha가 있으면 신뢰 가능한 무결성 검사다. 없으면 경고.
-  if (!sha) console.warn(`[upgrade] ${fname}에 sha256이 없어 무결성 검증을 건너뜁니다(versions.json에 ${k.sha} 추가 권장).`);
+  // 무결성 검증 — upgrade.js downloadArchive와 동일 정책으로 통일. 여기 저장된 파일은 설치/
+  // 업그레이드에 그대로 쓰여 코드로 실행되므로, sha 부재를 '경고 후 저장'으로 흘리면 미검증
+  // 패키지가 설치 경로(packages.dir)에 들어와 downloadArchive의 거부 정책이 우회된다.
+  // 공식 릴리스는 4종(tar_gz/installer/installer_cent9/windows) 모두 sha256을 싣는다
+  // (packaging/release/update-versions.mjs) — 부재는 사내 미러·수기 versions.json에서만 발생.
+  // 그런 경우만 UPGRADE_ALLOW_UNVERIFIED=true 로 우회(downloadArchive와 같은 env).
+  if (!sha) {
+    if (process.env.UPGRADE_ALLOW_UNVERIFIED !== 'true') {
+      return { ok: false, reason: `${fname}에 sha256이 없어 무결성을 검증할 수 없습니다 — 다운로드를 거부합니다(versions.json에 ${k.sha} 추가, 신뢰 미러라면 UPGRADE_ALLOW_UNVERIFIED=true로 우회 가능).` };
+    }
+    console.warn(`[upgrade] ⚠ ${fname} sha256 없이 저장(UPGRADE_ALLOW_UNVERIFIED=true) — 무결성 미검증 패키지.`);
+  } else if (got.toLowerCase() !== String(sha).toLowerCase()) {
+    // 대소문자 무시 비교 — 수기 versions.json의 대문자 hex를 '불일치'로 오판하지 않게(downloadArchive와 동일).
+    return { ok: false, reason: '체크섬 불일치 — 파일 손상/변조 가능' };
+  }
 
   const dest = path.join(dir, fname);
   fs.writeFileSync(dest, buf);

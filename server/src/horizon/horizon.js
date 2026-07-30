@@ -15,6 +15,7 @@ import { Agent } from 'undici';
 import { config } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { describeError } from '../util/errors.js';
+import { ssrfBlockReason } from '../collector/registry.js';
 
 const FILE = path.join(config.configDir, 'horizon.json');
 // 사내 Horizon은 사설 인증서가 일반적 — 기본은 TLS 검증 생략, HORIZON_TLS_VERIFY=true로 강제 가능(NSX와 동일 패턴).
@@ -46,6 +47,10 @@ function normalize(body, existing = null) {
   if (!id) return [null, 'id는 필수입니다.'];
   if (id.length > 128 || [...id].some((c) => c.charCodeAt(0) < 32)) return [null, 'id에 사용할 수 없는 문자가 있습니다.'];
   if (!/^https?:\/\//.test(host)) return [null, 'host는 https://커넥션서버 형식이어야 합니다.'];
+  // SSRF 방어 — 저장된 host는 이후 서버가 자격증명을 붙여 호출하므로 링크로컬/메타데이터·
+  // 루프백·미지정 주소는 등록 단계에서 막는다. 사내 IP(RFC1918)·FQDN은 그대로 통과한다.
+  const ssrf = ssrfBlockReason(host);
+  if (ssrf) return [null, `host: ${ssrf}`];
   if (!username) return [null, 'username은 필수입니다.'];
   if (!domain) return [null, 'domain(AD 도메인)은 필수입니다.'];
   const entry = {
@@ -153,6 +158,10 @@ export async function testHorizon(body) {
   if (!entry.host || !entry.username || !entry.password || !entry.domain) {
     return { ok: false, reason: 'host/username/password/domain이 필요합니다.' };
   }
+  // 연결 테스트는 normalize()를 거치지 않으므로(저장 전 임의 host 수용) 여기서 같은 SSRF 가드를
+  // 적용한다 — 미저장 host로 링크로컬/루프백을 찔러 보는 통로가 되지 않게.
+  const ssrf = ssrfBlockReason(String(entry.host));
+  if (ssrf) return { ok: false, reason: `host: ${ssrf}` };
   const started = Date.now();
   try {
     const lic = await fetchHorizonLicenses(entry);

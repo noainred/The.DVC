@@ -34,6 +34,11 @@ server/config/tool-usage.json
 server/config/fleet-tags.json
 server/config/fleet-assign.json
 server/config/auth.json
+# 최초 기동 시 임의 생성되는 관리자 '평문' 비밀번호 파일(0600). CONFIG_DIR 미설정이면
+# 기본값이 server/config 이라 개발/최초 기동 시 저장소 안에 떨어져 커밋될 수 있었다.
+# *.txt 와일드카드도 함께 차단 — 이 경로에 추적 중인 .txt 는 없다(git ls-files 로 확인).
+server/config/initial-admin-password.txt
+server/config/*.txt
 server/config/runtime.json
 server/config/ipam.db
 server/config/ipam.ndjson
@@ -43,6 +48,9 @@ server/config/gpu-guest.json
 server/config/gpu-physical.json
 server/config/central-agent-gpu-guest.json
 server/config/central-agent-users.json
+# 위임(중앙) 에이전트 런타임 파일은 토큰/계정을 담는다 — 앞으로 추가되는 것까지 와일드카드로
+# 선차단(개별 항목 누락으로 시크릿이 커밋되는 사고 방지). 추적 중인 central-agent-* 는 없다.
+server/config/central-agent-*.json
 server/config/vmware-portal-release
 server/config/agent-deploy-targets.json
 server/config/llm.json

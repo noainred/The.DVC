@@ -10,17 +10,39 @@ import { config } from '../config.js';
 import { runTrafficCapture, runDualCapture } from './tcpdump.js';
 import { recordCapture } from './captureHistory.js';
 import { notify } from '../alerts.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
 
 const FILE = path.join(config.configDir, 'capture-monitors.json');
+
+/**
+ * 손상 파일 보존 — 파싱 실패를 조용히 빈 목록으로 리셋하면 다음 persist가 손상본을 덮어써
+ * SSH 자격증명을 포함한 모니터 정의가 영구 유실되고 원인 추적도 불가능해진다.
+ * <file>.corrupt.<ts>로 옮겨 두고(모드 0600 유지) 경고만 남긴다 — 기동은 계속(빈 목록).
+ */
+function backupCorrupt(err) {
+  try {
+    const bak = `${FILE}.corrupt.${Date.now()}`;
+    fs.renameSync(FILE, bak);
+    console.warn(`[netmon] ${FILE} 읽기/파싱 실패(${err?.message || err}) — ${bak}로 보존하고 빈 목록으로 시작합니다.`);
+  } catch { /* 보존 실패가 기동을 막지 않게 */ }
+}
 
 let cache = null;
 function load() {
   if (cache) return cache;
   cache = [];
-  try { if (fs.existsSync(FILE)) cache = JSON.parse(fs.readFileSync(FILE, 'utf8')) || []; } catch { cache = []; }
+  try {
+    if (fs.existsSync(FILE)) {
+      const p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+      if (!Array.isArray(p)) throw new Error('배열이 아님'); // 형식 불일치도 손상으로 취급
+      cache = p;
+    }
+  } catch (e) { cache = []; backupCorrupt(e); }
   return cache;
 }
-function persist() { try { fs.mkdirSync(path.dirname(FILE), { recursive: true }); fs.writeFileSync(FILE, JSON.stringify(cache, null, 2), { mode: 0o600 }); } catch { /* */ } }
+// 원자적 쓰기 — 크래시/정전 중 부분기록으로 파일이 깨지면 load가 []를 반환하고 다음 persist가
+// 빈 목록으로 덮어써 전 모니터 정의(자격증명 포함)가 사라진다. tmp+fsync+rename으로 방지.
+function persist() { try { atomicWriteFileSync(FILE, JSON.stringify(cache, null, 2), { mode: 0o600 }); } catch { /* */ } }
 
 const redact = (m) => ({
   id: m.id, name: m.name, enabled: m.enabled, mode: m.mode, intervalMin: m.intervalMin,

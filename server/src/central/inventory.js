@@ -20,19 +20,44 @@ const FILE = path.join(config.configDir, 'central-inventory.json');
 let cache = Object.create(null); // vcenterId -> { at, agent, generatedAt, data:{...} }
 try {
   if (fs.existsSync(FILE)) { const p = JSON.parse(fs.readFileSync(FILE, 'utf8')); if (p && typeof p === 'object') cache = Object.assign(Object.create(null), p.inventory || p || {}); }
-} catch { cache = Object.create(null); }
+} catch (e) {
+  cache = Object.create(null);
+  // 손상 파일 보존 — 조용히 비우면 다음 push의 persist가 손상본을 덮어써, 콜드 스타트에
+  // 인벤토리가 비었던 원인을 사후에 알 수 없다. <file>.corrupt.<ts>로 옮기고 경고만 남긴다
+  // (빈 캐시로 기동은 계속 — 다음 push가 오면 자동 복구되는 캐시이므로 기동 실패로 만들지 않는다).
+  try {
+    const bak = `${FILE}.corrupt.${Date.now()}`;
+    fs.renameSync(FILE, bak);
+    console.warn(`[central] ${FILE} 파싱 실패(${e?.message || e}) — ${bak}로 보존하고 빈 인벤토리로 시작합니다.`);
+  } catch { /* 보존 실패가 기동을 막지 않게 */ }
+}
 
 let writeTimer = null;
+let writing = false; // 쓰기 중 재진입 방지 — tmp 충돌 및 늦게 끝난 이전 본문이 최신본을 덮는 것 차단
 function persistSoon() {
   // 인벤토리는 수MB가 될 수 있으므로 디스크 쓰기를 비동기 + 디바운스(이벤트 루프 비차단).
   if (writeTimer) return;
   writeTimer = setTimeout(() => {
     writeTimer = null;
+    if (writing) { persistSoon(); return; } // 이전 쓰기 진행 중 — 다음 디바운스 주기로 미룸
     // 타이머 콜백의 동기 예외(stringify 문자열 길이 상한 초과·mkdir 실패 등)는 uncaught가 되어
     // 프로세스를 죽이므로 반드시 격리한다.
     try {
       fs.mkdirSync(path.dirname(FILE), { recursive: true });
-      fs.promises.writeFile(FILE, JSON.stringify({ inventory: cache }), { mode: 0o600 }).catch(() => {});
+      const body = JSON.stringify({ inventory: cache });
+      // 원자성 확보: tmp에 쓰고 rename으로 교체 — 대상 파일에 직접 쓰면 수MB 기록 중 크래시/
+      // 정전 시 잘린 JSON이 남아 다음 기동이 인벤토리를 통째로 잃는다(rename은 같은 FS에서
+      // 원자적이라 '온전한 이전본' 또는 '온전한 새본'만 남는다).
+      // util/atomicWriteFileSync(동기)를 쓰지 않는 이유: 수MB write+fsync가 push마다 이벤트
+      // 루프를 수백ms 블로킹해 28개 vCenter 수집·API 응답을 함께 지연시킨다. fsync를 생략한
+      // 비동기 write→rename으로 '원자성만' 확보한다(정전 시 최근 push 1회 유실 가능하나,
+      // 다음 push로 즉시 복구되는 캐시라 허용).
+      const tmp = `${FILE}.tmp-${process.pid}`;
+      writing = true;
+      fs.promises.writeFile(tmp, body, { mode: 0o600 })
+        .then(() => fs.promises.rename(tmp, FILE))
+        .catch(() => fs.promises.unlink(tmp).catch(() => {}))
+        .finally(() => { writing = false; });
     } catch { /* best effort — 쓰기 실패가 수집을 막지 않게 */ }
   }, 5_000);
   writeTimer.unref?.();

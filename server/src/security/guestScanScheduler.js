@@ -15,12 +15,39 @@ import { scanGuestNetCounters } from './guestNetScan.js';
 import { recordLoginFails } from './loginStore.js';
 import { recordNetScan } from './netIssueStore.js';
 import { notify } from '../alerts.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
 
 const FILE = path.join(config.configDir, 'guest-scans.json');
 
+/**
+ * 손상 파일 보존 — 파싱 실패를 조용히 빈 목록으로 리셋하면 다음 persist(스캔 1회만 돌아도 발생)가
+ * 손상본을 덮어써 게스트 자격증명을 포함한 작업 정의가 영구 유실되고 원인 추적도 불가능해진다.
+ * <file>.corrupt.<ts>로 옮겨 두고(rename이라 0600 그대로) 경고만 — 기동은 계속(빈 목록).
+ */
+function backupCorrupt(err) {
+  try {
+    const bak = `${FILE}.corrupt.${Date.now()}`;
+    fs.renameSync(FILE, bak);
+    console.warn(`[gscan] ${FILE} 읽기/파싱 실패(${err?.message || err}) — ${bak}로 보존하고 빈 목록으로 시작합니다.`);
+  } catch { /* 보존 실패가 기동을 막지 않게 */ }
+}
+
 let cache = null;
-function load() { if (cache) return cache; cache = []; try { if (fs.existsSync(FILE)) cache = JSON.parse(fs.readFileSync(FILE, 'utf8')) || []; } catch { cache = []; } return cache; }
-function persist() { try { fs.mkdirSync(path.dirname(FILE), { recursive: true }); fs.writeFileSync(FILE, JSON.stringify(cache, null, 2), { mode: 0o600 }); } catch { /* */ } }
+function load() {
+  if (cache) return cache;
+  cache = [];
+  try {
+    if (fs.existsSync(FILE)) {
+      const p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+      if (!Array.isArray(p)) throw new Error('배열이 아님'); // 형식 불일치도 손상으로 취급
+      cache = p;
+    }
+  } catch (e) { cache = []; backupCorrupt(e); }
+  return cache;
+}
+// 원자적 쓰기(0600) — runJob이 매 실행마다 lastRun/lastErr을 저장하므로 쓰기 빈도가 높고,
+// 그중 한 번이라도 부분기록으로 끊기면 load가 []가 되어 자격증명 포함 작업 정의가 사라진다.
+function persist() { try { atomicWriteFileSync(FILE, JSON.stringify(cache, null, 2), { mode: 0o600 }); } catch { /* */ } }
 
 const redact = (j) => ({ id: j.id, name: j.name, type: j.type, vcenterId: j.vcenterId, os: j.os, intervalMin: j.intervalMin, days: j.days, maxVms: j.maxVms, enabled: j.enabled, lastRun: j.lastRun || null, lastFound: j.lastFound ?? null, lastErr: j.lastErr || '' });
 export function listGuestScans() { return load().map(redact); }
