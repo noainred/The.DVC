@@ -111,7 +111,7 @@ import { allCollectorStatus, getCollectorStatus, clearCollectorHosts } from '../
 import { pullNow } from '../collector/puller.js';
 import { pushUpgradeToCollectors } from '../collector/upgradePush.js';
 import { resilientFetch } from '../util/resilientFetch.js';
-import { resolveBundleBytes } from '../upgrade/bundleSource.js';
+import { resolveBundleBytes, lastBundleReject } from '../upgrade/bundleSource.js';
 import { upgradeManager } from '../upgrade/manager.js';
 import {
   listAssignments, addAssignment, updateAssignment, removeAssignment, getResults,
@@ -1989,7 +1989,9 @@ adminRouter.post('/collectors/upgrade', adminOnly, async (req, res) => {
   const { id, force } = req.body || {};
   const bundle = await resolveBundleBytes(upgradeManager.settings);
   if (!bundle) {
-    return res.status(409).json({ ok: false, reason: '업그레이드 번들을 찾을 수 없습니다 (감시 폴더/원격 소스 확인).' });
+    // 무결성 검증 실패(sha 불일치/부재)와 '번들 자체가 없음'을 구분해 알린다.
+    const why = lastBundleReject();
+    return res.status(409).json({ ok: false, reason: why || '업그레이드 번들을 찾을 수 없습니다 (감시 폴더/원격 소스 확인).' });
   }
   const results = await pushUpgradeToCollectors(bundle.bytes, { ids: id ? [id] : null, force: Boolean(force) });
   const ok = results.filter((r) => r.ok).length;

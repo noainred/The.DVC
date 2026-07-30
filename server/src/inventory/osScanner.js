@@ -12,15 +12,34 @@ import { VimSoapClient } from '../gpu/guestops.js';
 import { loadGpuGuestSettings, resolveVmCreds } from '../gpu/settings.js';
 import { detectGuestOs } from './osDetect.js';
 import { upsertOs, getScannedIds, getScanInfo, osSummary, pruneMissing } from './osStore.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
 
 const FILE = path.join(config.configDir, 'os-scan.json');
 const DEFAULTS = { enabled: false, intervalMin: 720, scope: 'all', maxVms: 200, rescanDays: 30, concurrency: 4 };
+
+/**
+ * 손상 파일 보존 — 파싱 실패를 조용히 기본값으로 리셋하면 스캐너가 꺼지고(enabled=false 기본)
+ * lastRun까지 사라져 재기동 직후 전 VM 재스캔이 도는데도 원인을 알 수 없다.
+ * <file>.corrupt.<ts>로 옮겨 두고 경고만 — 기동은 계속(기본값).
+ */
+function backupCorrupt(err) {
+  try {
+    const bak = `${FILE}.corrupt.${Date.now()}`;
+    fs.renameSync(FILE, bak);
+    console.warn(`[osscan] ${FILE} 읽기/파싱 실패(${err?.message || err}) — ${bak}로 보존하고 기본 설정으로 시작합니다.`);
+  } catch { /* 보존 실패가 기동을 막지 않게 */ }
+}
 
 let cache = null;
 export function loadOsScanSettings() {
   if (cache) return cache;
   let p = {};
-  try { if (fs.existsSync(FILE)) p = JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}; } catch { p = {}; }
+  try {
+    if (fs.existsSync(FILE)) {
+      p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+      if (!p || typeof p !== 'object' || Array.isArray(p)) throw new Error('객체가 아님'); // 형식 불일치도 손상
+    }
+  } catch (e) { p = {}; backupCorrupt(e); }
   cache = {
     enabled: !!p.enabled,
     intervalMin: clamp(p.intervalMin, 5, 100000, DEFAULTS.intervalMin),
@@ -48,7 +67,9 @@ export function saveOsScanSettings(body = {}) {
   write(next);
   return loadOsScanSettings();
 }
-function write(obj) { try { fs.mkdirSync(path.dirname(FILE), { recursive: true }); fs.writeFileSync(FILE, JSON.stringify(obj, null, 2), { mode: 0o600 }); } catch { /* */ } cache = null; }
+// 원자적 쓰기 — 스캔 1회마다 lastRun/lastFound를 저장하므로(주기 기본 12시간, 수동 실행 포함)
+// 부분기록 시 설정이 기본값으로 리셋되어 스캐너가 조용히 꺼진다. tmp+fsync+rename으로 방지.
+function write(obj) { try { atomicWriteFileSync(FILE, JSON.stringify(obj, null, 2), { mode: 0o600 }); } catch { /* */ } cache = null; }
 
 async function eachLimited(items, limit, fn) { let i = 0; const w = async () => { while (i < items.length) { const x = items[i++]; await fn(x); } }; await Promise.all(Array.from({ length: Math.min(limit, items.length) }, w)); }
 

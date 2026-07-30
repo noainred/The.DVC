@@ -48,8 +48,20 @@ jobs:
       - name: Build cent9 installer
         run: STAMP=cent9-x64 bash packaging/offline/build-package.sh --node-version "$NODE_VERSION" --out dist-offline
 
+      # 공급망 방어: nodejs.org 아카이브를 같은 버전 디렉터리의 공식 SHASUMS256.txt 로 대조한다.
+      # 이 zip 은 그대로 Windows 수집기 패키지에 들어가므로, 변조/전송 손상된 런타임이 고객사에
+      # 배포되면 안 된다. grep 미스(파일명 변경) 또는 해시 불일치면 pipefail/sha256sum 이 비0 종료
+      # → 빌드 중단. 검증 후 다음 스텝이 기대하는 node-win.zip 경로로 rename 한다(스텝 계약 유지).
       - name: Fetch Windows Node runtime
-        run: curl -fSL -o node-win.zip "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-win-x64.zip"
+        run: |
+          set -euo pipefail
+          zip="node-v${NODE_VERSION}-win-x64.zip"
+          curl -fSL -o "$zip" "https://nodejs.org/dist/v${NODE_VERSION}/${zip}"
+          curl -fSL -o SHASUMS256.txt "https://nodejs.org/dist/v${NODE_VERSION}/SHASUMS256.txt"
+          grep -F "  ${zip}" SHASUMS256.txt > node-win.sha256
+          cat node-win.sha256
+          sha256sum -c node-win.sha256
+          mv "$zip" node-win.zip
 
       - name: Build Windows collector package
         run: bash packaging/windows/build-collector-win.sh --node-zip node-win.zip --out dist-offline
