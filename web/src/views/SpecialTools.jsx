@@ -1823,7 +1823,10 @@ function Insights({ scope }) {
           {arr.length === 0 && <tr><td colSpan={7} className="center muted" style={{ padding: 18 }}>해당 VM이 없습니다.</td></tr>}
           {arr.map((v) => (
             <tr key={`${v.vcenterId}:${v.name}`}>
-              <td><b>{v.name}</b></td><td className="muted">{v.vcenterId}</td><td className="muted" style={{ fontSize: 12 }}>{v.host}</td>
+              {/* VM 이름 클릭 → 상세(VmLink가 이름+vCenter로 조회해 모달로 띄운다). 회수 후보를
+                  판단하려면 OS·IP·스냅샷 등 상세가 필요한데 여기서 바로 확인할 수 있게 한다. */}
+              <td><VmLink name={v.name} vcenterId={v.vcenterId} label={v.name} style={{ fontWeight: 700 }} /></td>
+              <td className="muted">{v.vcenterId}</td><td className="muted" style={{ fontSize: 12 }}>{v.host}</td>
               <td style={{ textAlign: 'right' }}>{v.vcpu}</td><td style={{ textAlign: 'right' }}>{v.ramGB} GB</td>
               <td>{v.cpuPct == null ? '—' : <UsageCell pct={v.cpuPct} />}</td><td>{v.memPct == null ? '—' : <UsageCell pct={v.memPct} />}</td>
             </tr>
