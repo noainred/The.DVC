@@ -148,8 +148,10 @@ export function ResultCount({ total = 0, shown, label, filtered }) {
   );
 }
 
-/** Simple centered modal. Click the backdrop, press ESC, or 닫기 to close. */
-export function Modal({ title, onClose, children, width = 560, resizable = false, minWidth = 360, minHeight = 240 }) {
+/** Simple centered modal. Click the backdrop, press ESC, or 닫기 to close.
+ *  bodyScroll=false: 본문 자체는 스크롤하지 않고 flex 컬럼이 된다 — 내부에 자기 스크롤을 갖는
+ *  표(.table-wrap) 하나가 본문 전체를 채우는 모달에서 '스크롤바 두 개'가 겹치는 것을 막는다. */
+export function Modal({ title, onClose, children, width = 560, resizable = false, minWidth = 360, minHeight = 240, bodyScroll = true }) {
   // Header stays pinned while the body scrolls, so long detail content (many
   // rows + action buttons) is always fully reachable by scrolling.
   // resizable=true: 사용자가 모서리를 드래그해 창 크기를 조절할 수 있다.
@@ -164,7 +166,9 @@ export function Modal({ title, onClose, children, width = 560, resizable = false
           <b style={{ fontSize: 15 }}>{title}</b>
           <button className="logout-btn" onClick={onClose}>닫기</button>
         </div>
-        <div style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', overflowX: 'hidden', paddingRight: 4, marginRight: -4 }}>
+        <div style={bodyScroll
+          ? { flex: '1 1 auto', minHeight: 0, overflowY: 'auto', overflowX: 'hidden', paddingRight: 4, marginRight: -4 }
+          : { flex: '1 1 auto', minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
           {children}
         </div>
       </div>
@@ -281,10 +285,10 @@ export function HostVmsModal({ host, vcenterId, onClose }) {
   const onN = all.filter((v) => v.powerState === 'POWERED_ON').length;
   const gbv = (mb) => (mb != null ? `${Math.round(mb / 1024)}GB` : '—');
   return (
-    <Modal title={`호스트 VM — ${host}`} onClose={onClose} width={860} resizable minWidth={560} minHeight={360}>
+    <Modal title={`호스트 VM — ${host}`} onClose={onClose} width={860} resizable minWidth={560} minHeight={360} bodyScroll={false}>
       {err ? <ErrorBox message={err} /> : !d ? <Loading /> : (
         <>
-          <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 10 }}>
+          <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 10, flex: '0 0 auto' }}>
             <span className="muted" style={{ fontSize: 13 }}>
               VM <b style={{ color: 'var(--accent)' }}>{all.length}</b>대 · 구동중 <b style={{ color: 'var(--green)' }}>{onN}</b> · 정지 {all.length - onN}
               {ql ? <> · {rows.length} 표시</> : null}
@@ -292,7 +296,8 @@ export function HostVmsModal({ host, vcenterId, onClose }) {
             </span>
             <input className="input" placeholder="VM/OS/IP 검색" value={q} onChange={(e) => setQ(e.target.value)} style={{ minWidth: 200 }} />
           </div>
-          <div className="table-wrap" style={{ maxHeight: '52vh' }}>
+          {/* 모달 본문이 스크롤하지 않으므로(bodyScroll=false) 표가 남은 높이를 채우고 여기서만 스크롤한다. */}
+          <div className="table-wrap" style={{ flex: '0 1 auto', minHeight: 0 }}>
             <table>
               <thead><tr>
                 <th style={{ textAlign: 'left' }}>VM</th><th>전원</th><th style={{ textAlign: 'left' }}>Guest OS</th>
