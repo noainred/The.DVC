@@ -24,7 +24,8 @@ export default function VCenters({ onSelectSite }) {
     el.classList.remove('flash');
     void el.offsetWidth; // 리플로우로 애니메이션 재시작 보장
     el.classList.add('flash');
-    setTimeout(() => el.classList.remove('flash'), 1600);
+    // 제거 타이머는 CSS 애니메이션(vcFlash 3s)보다 살짝 길게 — 먼저 지우면 반짝임이 잘린다.
+    setTimeout(() => el.classList.remove('flash'), 3200);
   };
   if (loading && !data) return <Loading />;
   // 데이터 보유 중 일시 폴링 오류로 전체 화면을 갈아치우지 않는다(고RTT 깜빡임 방지).
