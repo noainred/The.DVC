@@ -28,13 +28,35 @@ export default function Collectors() {
     catch (e) { setError(e.message); }
   };
   const loadIngest = () => fetchJson('/admin/central/ingest-stats').then(setIngest).catch(() => {});
+  // 엣지별 개별 central 토큰 — 공유 토큰 1개의 광역 스코프를 좁힌다(발급/회수/이관 현황).
+  const [agentTok, setAgentTok] = useState(null);   // { tokens[], auth{} }
+  const [newTok, setNewTok] = useState(null);       // 발급 직후 1회 표시되는 평문 토큰
+  const [tokAgent, setTokAgent] = useState('');
+  const loadAgentTok = () => fetchJson('/admin/central/agent-tokens').then(setAgentTok).catch(() => setAgentTok(null));
+  const issueTok = async () => {
+    const name = tokAgent.trim();
+    if (!name) { setBanner({ ok: false, text: '토큰을 발급할 엣지(에이전트) 이름을 입력하세요.' }); return; }
+    if (!window.confirm(`'${name}' 엣지의 개별 central 토큰을 발급할까요?\n\n· 기존 토큰이 있으면 교체(회전)됩니다 — 그 엣지의 CENTRAL_TOKEN을 새 값으로 바꿔야 통신이 이어집니다.\n· 평문 토큰은 지금 한 번만 표시됩니다.`)) return;
+    setBusy(true); setBanner(null);
+    try {
+      const r = await postJson('/admin/central/agent-tokens', { agent: name });
+      if (r.ok) { setNewTok({ agent: r.agent, token: r.token }); setTokAgent(''); await loadAgentTok(); }
+      else setBanner({ ok: false, text: r.reason });
+    } catch (e) { setBanner({ ok: false, text: e.message }); }
+    finally { setBusy(false); }
+  };
+  const revokeTok = async (agent) => {
+    if (!window.confirm(`'${agent}' 개별 토큰을 회수할까요? 그 엣지는 공유 CENTRAL_TOKEN으로만 접속할 수 있게 됩니다.`)) return;
+    try { await delJson(`/admin/central/agent-tokens/${encodeURIComponent(agent)}`); await loadAgentTok(); }
+    catch (e) { setBanner({ ok: false, text: e.message }); }
+  };
   const resetIngest = async () => {
     if (!window.confirm('수신 트래픽 통계를 초기화할까요? (다시 0부터 집계)')) return;
     try { await postJson('/admin/central/ingest-stats/reset', {}); await loadIngest(); } catch { /* */ }
   };
   const reloadTimer = useRef(null); // 업그레이드 후 지연 재조회 타이머(언마운트 시 정리)
   useEffect(() => {
-    load(); loadIngest();
+    load(); loadIngest(); loadAgentTok();
     fetchJson('/health').then((h) => setCentral(h.version)).catch(() => {});
     fetchJson('/admin/datacenters').then((d) => setDcs(d.datacenters || [])).catch(() => {}); // 데이터센터 콤보박스 옵션
 
@@ -260,6 +282,69 @@ export default function Collectors() {
       )}
 
       <IngestStats data={ingest} onReset={resetIngest} />
+
+      {/* 엣지별 개별 central 토큰 — 공유 토큰 1개면 엣지 1대 침해로 전 사이트 자격증명이 노출된다. */}
+      <details className="card" style={{ marginBottom: 12, padding: '10px 14px' }}>
+        <summary style={{ cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
+          🔑 엣지별 개별 central 토큰 ({(agentTok?.tokens || []).length}개 발급
+          {agentTok?.auth?.uses ? ` · 공유 토큰 사용 ${agentTok.auth.uses}회` : ''})
+        </summary>
+        <div className="muted" style={{ fontSize: 12, lineHeight: 1.8, marginTop: 8 }}>
+          공유 <code>CENTRAL_TOKEN</code> 하나만 쓰면, 엣지 1대가 침해되거나 토큰이 유출될 때 <b>다른 모든 사이트</b>의
+          iDRAC 비밀번호·게스트 계정·사용자 해시를 <code>?agent=</code> 이름만 바꿔 전부 인출할 수 있습니다.
+          엣지별 개별 토큰을 발급하면 그 토큰은 <b>자기 엣지 데이터만</b> 조회할 수 있습니다(남의 이름은 403).
+          <br />이관 방법: 아래에서 발급 → 표시된 값을 그 엣지의 <code>CENTRAL_TOKEN</code>(또는 <code>EDGE_TOKEN</code>)에 넣고 재시작.
+          엣지 코드 변경은 필요 없고, 이관하지 않은 엣지는 공유 토큰으로 계속 동작합니다(무중단).
+          {agentTok?.auth?.lastAt && (
+            <><br />마지막 공유 토큰 사용: <b>{agentTok.auth.lastAgent || '(unknown)'}</b> · {agentTok.auth.lastPath} · {new Date(agentTok.auth.lastAt).toLocaleString('ko-KR')} — 이 엣지가 아직 미이관입니다.</>
+          )}
+          {agentTok?.auth?.requireAgentToken && <><br />🔒 강화 모드(CENTRAL_REQUIRE_AGENT_TOKEN=true) — 공유 토큰은 거부됩니다.</>}
+        </div>
+
+        {newTok && (
+          <div style={{ marginTop: 10, padding: '10px 12px', borderRadius: 8, background: 'rgba(34,197,94,.12)', border: '1px solid var(--green)' }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#4ade80' }}>'{newTok.agent}' 토큰이 발급되었습니다 — 지금만 표시됩니다</div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 6, alignItems: 'center' }}>
+              <input className="input" readOnly value={newTok.token} style={{ flex: 1, fontFamily: 'ui-monospace, monospace', fontSize: 12 }} onFocus={(e) => e.target.select()} />
+              <button className="logout-btn" style={{ padding: '6px 12px', whiteSpace: 'nowrap' }}
+                onClick={() => { try { navigator.clipboard?.writeText(newTok.token); } catch { /* */ } }}>복사</button>
+              <button className="logout-btn" style={{ padding: '6px 12px' }} onClick={() => setNewTok(null)}>닫기</button>
+            </div>
+            <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
+              그 엣지에 <code>CENTRAL_TOKEN={newTok.token.slice(0, 6)}…</code> 로 설정(리눅스: /etc/vmware-portal/portal.env) 후 <code>systemctl restart vmware-portal</code>.
+            </div>
+          </div>
+        )}
+
+        {(agentTok?.tokens || []).length > 0 && (
+          <div className="table-wrap" style={{ marginTop: 10 }}>
+            <table>
+              <thead><tr><th>엣지(에이전트)</th><th>발급</th><th>마지막 사용</th><th className="right">작업</th></tr></thead>
+              <tbody>
+                {agentTok.tokens.map((t) => (
+                  <tr key={t.agent}>
+                    <td><b>{t.agent}</b></td>
+                    <td className="muted">{t.createdAt ? new Date(t.createdAt).toLocaleString('ko-KR') : '—'}</td>
+                    <td className="muted">{t.lastUsedAt ? new Date(t.lastUsedAt).toLocaleString('ko-KR') : <span style={{ color: 'var(--amber)' }}>미사용(엣지 설정 대기)</span>}</td>
+                    <td className="right nowrap">
+                      <button className="tab" disabled={busy} onClick={() => { setTokAgent(t.agent); }}>재발급(회전)</button>{' '}
+                      <button className="tab" style={{ color: 'var(--red)' }} onClick={() => revokeTok(t.agent)}>회수</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <div className="flex gap" style={{ marginTop: 10, alignItems: 'center' }}>
+          <input className="input" style={{ maxWidth: 260 }} list="collector-agent-list" value={tokAgent} onChange={(e) => setTokAgent(e.target.value)} placeholder="엣지 이름(예: OC2)" />
+          <datalist id="collector-agent-list">
+            {(data.collectors || []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </datalist>
+          <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={busy || !tokAgent.trim()} onClick={issueTok}>토큰 발급</button>
+        </div>
+      </details>
 
       <div className="card" style={{ marginBottom: 12, padding: '10px 14px' }}>
         <div className="muted" style={{ fontSize: 12, lineHeight: 1.8 }}>
