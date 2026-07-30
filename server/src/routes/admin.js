@@ -51,6 +51,8 @@ import { startScan, scanStatus, rescheduleScanPoller } from '../ipam/scanPoller.
 import { listVcRanges, saveVcRanges, removeVcRanges } from '../ipam/rangeStore.js';
 import { listAssignments as listIdracAssignments, getResults as getAgentResults } from '../central/assignments.js';
 import { centralTokenInfo, generateCentralToken, setCentralToken } from '../central/token.js';
+import { listAgentTokens, issueAgentToken, revokeAgentToken } from '../central/agentTokens.js';
+import { getCentralAuthStats } from './central.js';
 import { listInventory } from '../central/inventory.js';
 import { getIngestStats, resetIngestStats } from '../central/ingestStats.js';
 import { listAgentConfigs } from '../central/agentConfig.js';
@@ -109,7 +111,7 @@ import { allCollectorStatus, getCollectorStatus, clearCollectorHosts } from '../
 import { pullNow } from '../collector/puller.js';
 import { pushUpgradeToCollectors } from '../collector/upgradePush.js';
 import { resilientFetch } from '../util/resilientFetch.js';
-import { resolveBundleBytes } from '../upgrade/bundleSource.js';
+import { resolveBundleBytes, lastBundleReject } from '../upgrade/bundleSource.js';
 import { upgradeManager } from '../upgrade/manager.js';
 import {
   listAssignments, addAssignment, updateAssignment, removeAssignment, getResults,
@@ -463,6 +465,26 @@ adminRouter.post('/central-token/generate', adminOnly, (req, res) => {
 adminRouter.put('/central-token', adminOnly, (req, res) => {
   try { res.json({ ok: true, token: setCentralToken(req.body && req.body.token) }); }
   catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
+});
+
+// ── 엣지별 개별 central 토큰 (공유 토큰의 광역 스코프 축소) ──────────────────
+// 공유 CENTRAL_TOKEN 하나면 엣지 1대만 침해돼도 '남의 이름'으로 다른 사이트의 iDRAC 평문
+// 비번·게스트 비번·사용자 해시를 전부 인출할 수 있다. 개별 토큰은 토큰↔agent를 바인딩해
+// 자기 데이터만 보게 한다. 엣지는 이 값을 기존 CENTRAL_TOKEN(EDGE_TOKEN) 자리에 넣으면 되므로
+// 엣지 코드 변경 없이 사이트별로 하나씩 이관할 수 있다.
+adminRouter.get('/central/agent-tokens', adminOnly, (_req, res) => {
+  res.json({ ok: true, tokens: listAgentTokens(), auth: getCentralAuthStats() });
+});
+adminRouter.post('/central/agent-tokens', adminOnly, (req, res) => {
+  const r = issueAgentToken(req.body?.agent, { note: req.body?.note });
+  if (r.ok) logAudit({ user: req.user?.username, action: '엣지 개별 central 토큰 발급', target: r.agent, detail: '기존 토큰이 있으면 회전(교체)', ip: req.ip || '' });
+  // 평문 토큰은 이 응답에서만 확인 가능(서버는 해시만 저장) — 화면에서 복사해 엣지에 설정.
+  res.status(r.ok ? 200 : 400).json(r);
+});
+adminRouter.delete('/central/agent-tokens/:agent', adminOnly, (req, res) => {
+  const r = revokeAgentToken(req.params.agent);
+  if (r.ok) logAudit({ user: req.user?.username, action: '엣지 개별 central 토큰 회수', target: req.params.agent, ip: req.ip || '' });
+  res.status(r.ok ? 200 : 400).json(r);
 });
 
 // IP 능동 스캔(TCP 커넥트) — 에이전트별 설정/상태/수동실행/결과.
@@ -1967,7 +1989,9 @@ adminRouter.post('/collectors/upgrade', adminOnly, async (req, res) => {
   const { id, force } = req.body || {};
   const bundle = await resolveBundleBytes(upgradeManager.settings);
   if (!bundle) {
-    return res.status(409).json({ ok: false, reason: '업그레이드 번들을 찾을 수 없습니다 (감시 폴더/원격 소스 확인).' });
+    // 무결성 검증 실패(sha 불일치/부재)와 '번들 자체가 없음'을 구분해 알린다.
+    const why = lastBundleReject();
+    return res.status(409).json({ ok: false, reason: why || '업그레이드 번들을 찾을 수 없습니다 (감시 폴더/원격 소스 확인).' });
   }
   const results = await pushUpgradeToCollectors(bundle.bytes, { ids: id ? [id] : null, force: Boolean(force) });
   const ok = results.filter((r) => r.ok).length;

@@ -8,15 +8,35 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { analyzeLoginFails } from './loginFails.js';
 import { notify } from '../alerts.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
 
 const FILE = path.join(config.configDir, 'login-monitor.json');
 const DEFAULTS = { enabled: true, intervalMin: 15, days: 7, threshold: 5, windowMin: 10, alert: true };
+
+/**
+ * 손상 파일 보존 — 파싱 실패를 조용히 기본값으로 되돌리면 다음 저장이 손상본을 덮어써
+ * 운영자가 조정한 임계/주기가 조용히 기본값으로 되돌아간 사실조차 알 수 없다.
+ * <file>.corrupt.<ts>로 옮겨 두고 경고만 — 기동은 계속(기본값).
+ */
+function backupCorrupt(err) {
+  try {
+    const bak = `${FILE}.corrupt.${Date.now()}`;
+    fs.renameSync(FILE, bak);
+    console.warn(`[loginmon] ${FILE} 읽기/파싱 실패(${err?.message || err}) — ${bak}로 보존하고 기본 설정으로 시작합니다.`);
+  } catch { /* 보존 실패가 기동을 막지 않게 */ }
+}
 
 let cache = null;
 export function loadLoginMonitor() {
   if (cache) return cache;
   cache = { ...DEFAULTS };
-  try { if (fs.existsSync(FILE)) cache = { ...DEFAULTS, ...JSON.parse(fs.readFileSync(FILE, 'utf8')) }; } catch { /* */ }
+  try {
+    if (fs.existsSync(FILE)) {
+      const p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+      if (!p || typeof p !== 'object' || Array.isArray(p)) throw new Error('객체가 아님'); // 형식 불일치도 손상
+      cache = { ...DEFAULTS, ...p };
+    }
+  } catch (e) { cache = { ...DEFAULTS }; backupCorrupt(e); }
   return cache;
 }
 export function saveLoginMonitor(body = {}) {
@@ -29,8 +49,9 @@ export function saveLoginMonitor(body = {}) {
     windowMin: Math.max(1, Math.min(1440, Number(body.windowMin) || c.windowMin)),
     alert: body.alert != null ? !!body.alert : c.alert,
   };
-  fs.mkdirSync(path.dirname(FILE), { recursive: true });
-  fs.writeFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
+  // 원자적 쓰기 — 부분기록으로 파일이 깨지면 다음 기동이 조용히 기본값(enabled=true·임계 5)으로
+  // 돌아가 운영자가 끈 알림이 되살아나거나 조정한 임계가 사라진다.
+  atomicWriteFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
   cache = next; reschedule();
   return next;
 }

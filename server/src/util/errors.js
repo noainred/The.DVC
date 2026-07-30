@@ -21,7 +21,9 @@ export function describeError(err) {
   } else if (/TIMEOUT|ETIMEDOUT|timed out|UND_ERR_CONNECT_TIMEOUT|aborted/i.test(test)) {
     hint = '연결 시간 초과 — telnet(TCP)은 되는데 여기서 막히면 중계(HAProxy) reload·방화벽 idle로 keep-alive 연결이 끊긴 경우가 많습니다(다음 주기에 새 연결로 자동 복구). 지속되면 네트워크 경로·중계 서버 상태를 확인하세요.';
   } else if (/CERT|SELF_SIGNED|self-signed|DEPTH_ZERO|UNABLE_TO_VERIFY|HOSTNAME/i.test(test)) {
-    hint = '인증서 오류 — 자체서명 인증서면 VC_TLS_REJECT_UNAUTHORIZED=false 로 두세요.';
+    // 대상별 env가 다르다: vCenter는 VC_*, 중앙↔엣지(WAN, 수집/배포 경로)는 WAN_TLS_INSECURE.
+    // WAN은 기본 검증 ON이므로, 자체서명 https 엣지에서 이 오류가 나면 그 사이트만 opt-out 한다.
+    hint = '인증서 오류 — vCenter 자체서명이면 VC_TLS_REJECT_UNAUTHORIZED=false, 중앙↔엣지(수집 서버) 자체서명 HTTPS면 WAN_TLS_INSECURE=true 로 두세요(가능하면 사설 CA 신뢰가 우선).';
   } else if (/ECONNRESET/i.test(test)) {
     hint = '연결이 재설정됨 — 네트워크/프록시/TLS 설정을 확인하세요.';
   } else if (/EHOSTUNREACH|ENETUNREACH/i.test(test)) {

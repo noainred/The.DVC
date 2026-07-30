@@ -5,6 +5,7 @@ import { config } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { authenticateAD } from './ad.js';
 import * as totp from './totp.js';
+import { checkOtpAllowed, recordOtpFailure, recordOtpSuccess } from '../security/loginRateLimit.js';
 
 // users.json lives in CONFIG_DIR (default app/server/config; set to e.g.
 // /etc/vmware-portal to keep it outside the app dir across upgrades).
@@ -296,14 +297,29 @@ export function beginTotpEnroll(username, host = '') {
 
 /** 민감 작업 재인증용 — 사용자의 현재 OTP 코드를 검증. OTP 미등록이면 needEnroll.
  *  로그인 경로와 동일하게 사용 카운터(minCounter)를 대조·기록해 같은 코드의 재사용(replay)을
- *  차단한다 — 긴급중단 2인 승인에서 어깨너머로 본 코드를 재사용하는 우회(감사 M1/M2) 방지. */
+ *  차단한다 — 긴급중단 2인 승인에서 어깨너머로 본 코드를 재사용하는 우회(감사 M1/M2) 방지.
+ *  또한 6자리 코드(100만 조합)의 온라인 무차별을 막기 위해 계정별 실패 카운터/잠금을 적용한다
+ *  (감사 M1). 잠금 시 { ok:false, reason, retryAfterSec, locked:true } — 호출부는 reason을
+ *  그대로 표시하면 된다. 오조작으로 관리자가 갇히는 걸 피해야 하는 배포는
+ *  OTP_MAX_FAILS/OTP_LOCKOUT_MS로 조정하거나 OTP_RATELIMIT_DISABLED=true로 끌 수 있다. */
 export function verifyUserOtp(username, code) {
   const u = getUser(username);
   if (!u) return { ok: false, reason: '사용자를 찾을 수 없습니다.' };
   if (!u.totpEnabled || !u.totpSecret) return { ok: false, reason: 'OTP가 등록되지 않은 계정입니다. 먼저 OTP를 등록하세요.', needEnroll: true };
+  const gate = checkOtpAllowed(username);
+  if (gate.blocked) {
+    return { ok: false, locked: true, retryAfterSec: gate.retryAfterSec, reason: `OTP 인증 시도가 일시적으로 잠겼습니다. ${gate.retryAfterSec}초 후 다시 시도하세요.` };
+  }
   const ctr = totp.verifyToken(String(code || '').trim(), u.totpSecret, { minCounter: Number.isInteger(u.totpLastCounter) ? u.totpLastCounter : -1 });
-  if (ctr == null) return { ok: false, reason: 'OTP 코드가 일치하지 않습니다(또는 이미 사용된 코드).' };
+  if (ctr == null) {
+    const lk = recordOtpFailure(username);
+    if (lk.locked) {
+      return { ok: false, locked: true, retryAfterSec: lk.retryAfterSec, reason: `OTP 코드가 일치하지 않습니다. 실패가 많아 ${lk.retryAfterSec}초 후 다시 시도하세요.` };
+    }
+    return { ok: false, reason: 'OTP 코드가 일치하지 않습니다(또는 이미 사용된 코드).', remaining: lk.remaining };
+  }
   if (ctr !== u.totpLastCounter) { u.totpLastCounter = ctr; try { persistUsers(); } catch { /* 기록 실패해도 검증 결과는 유효 */ } }
+  recordOtpSuccess(username); // 성공 시 실패 카운터 리셋
   return { ok: true };
 }
 

@@ -8,6 +8,7 @@
 import net from 'node:net';
 import tls from 'node:tls';
 import https from 'node:https';
+import { ssrfBlockReason } from '../collector/registry.js';
 
 function tcpStep(host, port, timeoutMs) {
   return new Promise((resolve) => {
@@ -58,6 +59,15 @@ export async function probeRelayPath(rawHost, { timeoutMs = 6000 } = {}) {
   const host = clean.split(':')[0];
   const port = Number(clean.split(':')[1]) || 443;
   const steps = { tcp: null, tls: null, http: null };
+
+  // SSRF/내부 포트스캔 방어 — 이 함수는 임의 host:port로 TCP/TLS/HTTP를 찔러 보고 단계별
+  // 성공 여부를 그대로 돌려주므로(오라클), 링크로컬·메타데이터·루프백·미지정 주소는 프로브
+  // 자체를 하지 않는다. 등록된 vCenter는 사내망(RFC1918)에 있어 통과한다(가드에서 허용).
+  // 호출부(admin.js)를 건드리지 않기 위해 여기서 기존 반환 형태(verdict)로 즉시 반환한다.
+  const blocked = ssrfBlockReason(clean);
+  if (blocked) {
+    return { host, port, steps, blocked: true, reason: blocked, verdict: { state: 'blocked', text: `진단을 수행할 수 없는 주소입니다 — ${blocked}` } };
+  }
 
   steps.tcp = await tcpStep(host, port, timeoutMs);
   if (steps.tcp.ok) steps.tls = await tlsStep(host, port, timeoutMs);
