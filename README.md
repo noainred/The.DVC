@@ -82,7 +82,7 @@
 - **분산 수집** — 원격 데이터센터 에이전트 pull(전력 등) + 중앙 할당(iDRAC/IP 스캔). **통합 엣지 모드**(`EDGE_MODE=all` + `CENTRAL_URL` + `EDGE_TOKEN` 3줄)로 수집·위임 스캔/핑/캡처/로그 워커·인벤토리 push·자동 업그레이드·부팅 시 중앙 자동 등록을 일괄 활성. **위임 iDRAC 스캔**은 엣지 폴링 또는 **중앙→엣지 직접(PUSH)** 방식 + 2단계 claim→ack로 인출 유실 방지. 중앙 **에이전트 배포**(SSH 원클릭 설치)·**에이전트 작업**(IP대역 할당) 지원.
 - **중앙 → 엣지 배포 (v2.170+)** — 중앙 UI에서 원격 엣지의 **GPU 게스트 수집 설정**과 **접속 사용자 계정**을 만들어 내려보낸다(엣지가 주기적으로 pull — NAT/폐쇄망 안전). 복수 엣지·전체 엣지 동시 배포, 배포된 계정 수정/제거, 중앙 배포 admin은 엣지 설정 메뉴 자동 허용.
 - **엣지 운영 도구** — 수집 서버 **토큰 강제 동기화**(403 토큰 불일치를 SSH로 즉시 교정 — 리슨 포트로 실제 인스턴스 역추적), Edge 노드 SSH 배포·상태 확인, 엣지 인증 거부 카운터 표시.
-- **보안** — scrypt+HS256 JWT·TOTP(1회용)·AD 외에, 역할(RBAC) 강제(WS SSH/RDP 포함)·**서버측 토큰 폐기**(비번/역할 변경 시 즉시 무효)·보안 응답 헤더·CORS 기본 차단·임의 초기 관리자 비번·SSRF/명령주입 방어·번들 sha256 필수·**엣지별 개별 central 토큰**(공유 토큰 스코프 축소, v2.191.0). 상세 [설치 가이드 §7](docs/INSTALL.md)·[감사 문서](docs/AUDIT-2026-06-27.md).
+- **보안** — scrypt+HS256 JWT·TOTP(1회용)·AD 외에, 역할(RBAC) 강제(WS SSH/RDP 포함)·**서버측 토큰 폐기**(비번/역할 변경 시 즉시 무효)·보안 응답 헤더·CORS 기본 차단·임의 초기 관리자 비번·SSRF/명령주입 방어·번들 sha256 필수·**엣지별 개별 central 토큰**(공유 토큰 스코프 축소, v2.191.0)·**자격증명 파일 손상 보존**(로드 실패 시 `.corrupt` 백업 — 전량 유실 방지)·**RDP 자격증명 1회용 티켓**(URL 미노출)·**설정 소유자 서버측 강제**(v2.195.0). 상세 [설치 가이드 §7](docs/INSTALL.md)·[감사 문서](docs/AUDIT-2026-06-27.md).
 - **데모(mock) 모드** — vCenter 없이 `DATA_SOURCE=mock`으로 전세계 11개 가상 vCenter + iDRAC 전력·핑/네트워크·지표·온도·GPU 게스트·로그까지 채워진 화면을 즉시 시연(v2.154.0 목업 완비).
 - **장애 내성 & 성능** — 한 vCenter/매니저가 죽어도 포탈은 정상(해당만 `unreachable`). 고RTT·다수 vCenter(현재 28, 향후 30+) 대비 **동시 수집 개수 제한(`COLLECT_CONCURRENCY`, 기본 8) + per-vCenter 타임아웃 + 폴러 재진입 가드(주기 초과 시 중첩 실행 방지) + O(N) 롤업 집계 + 논블로킹 DB write(트랜잭션·prune 스로틀)**로 매 주기 CPU 스파이크를 평탄화.
 
@@ -254,10 +254,10 @@ git 소스로 실행하면 `CONFIG_DIR` 기본값이 `server/config` 라 이 파
 `finops`(+`/config`), `power-breakdown`, `fleet`(+`/tag`,`/assign`,`/assign-bulk`,`/prune` — 통합 인벤토리), `anomalies`, `forecast`, `security`, `topology`, `graph`, `incidents`, `chatops`(POST) · 익스포터 `GET /metrics`(Prometheus)
 
 ### 관리자 `/api/admin/*` (발췌)
-`users`, `vcenters`(+`/test`,`/import`,`/order`), `nsx/managers`, `idrac`(+`/scan`,`/bulk-add`,`/power-dashboard`, **`/nic-speed`**, **`/nic-models`**), `collectors`(+`/:id` vCenter 매핑, **`/:id/force-token`** 토큰 강제 동기화), **`central/agent-tokens`**(엣지별 개별 토큰 발급·회수), `central/ingest-stats`, `vm/:id/{hardware,reconfig}`(VM 사양 변경), `assignments`, `agent-deploy`, `metrics/settings`, `gpu-guest/{settings,vms,test,diag}` + **`gpu-guest/deploy/:agent`**(중앙→엣지 GPU 설정 배포), **`edge-users`**(+`-bulk` — 중앙→엣지 계정 배포), **`horizon`**(+`/test` — Horizon 서버 등록), `ipam/settings`, `ipam/scan/{settings,run,results}`, `alerts`(+`/test`), `audit`, `data-source`, `llm-config`, `packages`, `geocode`, `logs`, `backup/*`, `vclogs/*`, `net/{capture,pcap,history,monitors,agents,log-issues}`, `guest/add-user`, `deep-search/probe`, `security/session`, `emergency-stop`
+`users`, `vcenters`(+`/test`,`/import`,`/order`), `nsx/managers`, `idrac`(+`/scan`,`/bulk-add`,`/power-dashboard`, **`/nic-speed`**, **`/nic-models`**, **`/scan-log`**(주기/수동 스캔 실행 이력 — 통합/법인별)), `collectors`(+`/:id` vCenter 매핑, **`/:id/force-token`** 토큰 강제 동기화), **`central/agent-tokens`**(엣지별 개별 토큰 발급·회수), `central/ingest-stats`, `vm/:id/{hardware,reconfig}`(VM 사양 변경), `assignments`, `agent-deploy`, `metrics/settings`, `gpu-guest/{settings,vms,test,diag}` + **`gpu-guest/deploy/:agent`**(중앙→엣지 GPU 설정 배포), **`edge-users`**(+`-bulk` — 중앙→엣지 계정 배포), **`horizon`**(+`/test` — Horizon 서버 등록), `ipam/settings`, `ipam/scan/{settings,run,results}`, `alerts`(+`/test`), `audit`, `data-source`, `llm-config`, `packages`, `geocode`, `logs`, `backup/*`, `vclogs/*`, `net/{capture,pcap,history,monitors,agents,log-issues}`, `guest/add-user`, `deep-search/probe`, `security/session`, `emergency-stop`
 
 ### 원격접속 `/api/remote/*`
-`mappings`, `quick-connect`, `proxies`, `config`, `deploy`, `probe`, `targets`, `rdp/:id`
+`mappings`, `quick-connect`, `proxies`, `config`, `deploy`, `probe`, `targets`, `rdp/:id`, **`rdp-ticket`**(POST — RDP 자격증명 1회용 티켓 발급, admin/operator; 쿼리스트링에 비번 미노출)
 
 ### 업그레이드 `/api/upgrade/*`
 `status`, `check`, `apply`, `restart`, `settings`, `bundle`
@@ -314,7 +314,7 @@ git 소스로 실행하면 `CONFIG_DIR` 기본값이 `server/config` 라 이 파
 | 그룹 | 하위 메뉴 |
 |---|---|
 | 🖥️ **vCenter 관리** | vCenter 등록·관리 · vCenter 연결 테스트 |
-| 🗄 **수집 서버** | iDRAC 서버 등록 · 지표 수집 · 게스트 계정 추가 · 수집 서버(원격) · **원격 법인(DC)에 Edge 노드 포탈 설치** |
+| 🗄 **수집 서버** | iDRAC 서버 등록 · **스캔 로그**(주기/수동 스캔 실행 이력, 통합/법인별) · 지표 수집 · 게스트 계정 추가 · 수집 서버(원격) · **원격 법인(DC)에 Edge 노드 포탈 설치** |
 | 🎮 **GPU 사용량 수집** | GPU 수집 · GPU 게스트 수집 · GPU 수집 진단 |
 | 👤 **User Control** | 메인포탈 사용자 관리 · **엣지 사용자 배포** · 인증(AD) |
 | 🛡️ **Security** | 세션 보안 · 이상동작 탐지 |

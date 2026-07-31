@@ -209,7 +209,7 @@ sudo firewall-cmd --permanent --add-port=4000/tcp && sudo firewall-cmd --reload
 
 ---
 
-## 7. 보안 설정 (권장 — v2.191.0 반영)
+## 7. 보안 설정 (권장 — v2.195.0 반영)
 
 포탈은 기본적으로 안전하게 동작하지만, 운영 환경에서 아래를 확인하세요.
 
