@@ -27,9 +27,11 @@
 - [환경변수](#환경변수)
 - [API 엔드포인트](#api-엔드포인트)
 - [특수 기능](#특수-기능-tools)
+- [설정 메뉴 구조](#설정-메뉴-구조)
 - [분산 수집(에이전트) / IP 스캔](#분산-수집에이전트--ip-스캔)
 - [오프라인 설치 & 패키징](#오프라인-설치--패키징)
 - [자동 업그레이드](#자동-업그레이드)
+- [보안 / 운영 메모](#보안--운영-메모)
 
 ---
 
@@ -47,6 +49,8 @@
 - **NSX** — NSX-T/4.x 매니저별 게이트웨이(T0/T1)·세그먼트(Overlay/VLAN, 연결 VM 포트 수)·분산방화벽(DFW, 허용/차단·로깅)·보안그룹(**라이브 멤버 조회**).
 - **전력(iDRAC/OME)** — Dell Redfish/OpenManage로 호스트 전력(W) 수집·시계열, ESXi 전력은 vim25에서도 수집. IP 대역 스캔으로 iDRAC 대량 등록.
 - **온도 / GPU / 용량** — ESXi 온도(현재/5분평균/최대 + 5년 추이, 분/시간/일 단위), GPU 인벤토리(**vGPU/패스쓰루 구분**, 사용률 5년 추이, 게스트 OS 수집), 데이터스토어 용량 추세·포화 예측.
+- **NIC 분석 (v2.179+)** — iDRAC Redfish 인벤토리로 서버 물리 NIC의 **속도별 분류**(10G/25G/100G — 미링크 포트도 카드 정격으로 판별)와 **모델별 분류**(Intel·Broadcom·Mellanox…). DataCenter·가상화(ESXi)/베어메탈 필터, vCenter 수집(pnic+PCI) 결과를 **별도 컬럼**으로 교차 확인, CSV.
+- **라이선스 만료일 (v2.189+)** — vCenter LicenseManager 전 제품 키(ESXi/vSphere·vCenter·vSAN·VCF/VVF 등) + NSX Manager + **Horizon Connection Server**(REST 직수집, 10분 캐시)를 한 화면에. 만료·90일 임박·정상·영구 분류, 제품군 필터, 남은 기간(D-일수) 정렬, CSV.
 - **핑/네트워크 모니터링** — 네트워크 탭의 ① Ping 모니터링(등록 대상 ICMP/TCP 도달성·RTT 시계열) ② 서버 Ping 체크(엣지/수집 노드 TCP 지연을 DC별 산점도) ③ vCenter 포트 응답속도(사용자 지정 포트를 vCenter별 측정). 별도 시계열 DB(`ping-monitor.db`, 1년 보존)·baseline 대비 색상 추세.
 - **IP 관리대장(IPAM)** — vCenter 수집 IP(서버종류 VM/베어메탈, OS 종류·버전) + **능동 스캔(TCP 커넥트)** 으로 물리/기타 장비 IP 보강. 서브넷 엑셀형 대장, 중복 IP, CSV/XLSX, 외부 공유 SQLite(`ipam.db`).
 - **통합 서버 인벤토리** — iDRAC/OME 수집 물리 서버 + vCenter ESXi 호스트를 Dell 서비스태그로 조합해 **가상화 호스트 / 베어메탈**을 자동 분류. 베어메탈 **총전력 집계**, 소속 **법인(vCenter) 등록**(자동 추론·일괄 등록·수동 예외), **엣지→중앙 집계**(전력 없는 발견분까지 DC별 검색).
@@ -76,7 +80,9 @@
 - **알림** — 임계치 규칙 → Slack/Webhook(상태전이·쿨다운).
 - **자동 업그레이드** — `versions.json` 모니터링 → 다운로드·적용·재시작(롤백 가능), 엣지 푸시.
 - **분산 수집** — 원격 데이터센터 에이전트 pull(전력 등) + 중앙 할당(iDRAC/IP 스캔). **통합 엣지 모드**(`EDGE_MODE=all` + `CENTRAL_URL` + `EDGE_TOKEN` 3줄)로 수집·위임 스캔/핑/캡처/로그 워커·인벤토리 push·자동 업그레이드·부팅 시 중앙 자동 등록을 일괄 활성. **위임 iDRAC 스캔**은 엣지 폴링 또는 **중앙→엣지 직접(PUSH)** 방식 + 2단계 claim→ack로 인출 유실 방지. 중앙 **에이전트 배포**(SSH 원클릭 설치)·**에이전트 작업**(IP대역 할당) 지원.
-- **보안** — scrypt+HS256 JWT·TOTP·AD 외에, 보안 응답 헤더(X-Frame-Options/nosniff/HSTS)·CORS 기본 차단·임의 초기 관리자 비번(`initial-admin-password.txt`)·TOTP replay 방지·검증 TLS 업그레이드 푸시·SSRF/명령주입 방어·번들 sha256 필수(v2.152.0). 상세 [설치 가이드 §7](docs/INSTALL.md).
+- **중앙 → 엣지 배포 (v2.170+)** — 중앙 UI에서 원격 엣지의 **GPU 게스트 수집 설정**과 **접속 사용자 계정**을 만들어 내려보낸다(엣지가 주기적으로 pull — NAT/폐쇄망 안전). 복수 엣지·전체 엣지 동시 배포, 배포된 계정 수정/제거, 중앙 배포 admin은 엣지 설정 메뉴 자동 허용.
+- **엣지 운영 도구** — 수집 서버 **토큰 강제 동기화**(403 토큰 불일치를 SSH로 즉시 교정 — 리슨 포트로 실제 인스턴스 역추적), Edge 노드 SSH 배포·상태 확인, 엣지 인증 거부 카운터 표시.
+- **보안** — scrypt+HS256 JWT·TOTP(1회용)·AD 외에, 역할(RBAC) 강제(WS SSH/RDP 포함)·**서버측 토큰 폐기**(비번/역할 변경 시 즉시 무효)·보안 응답 헤더·CORS 기본 차단·임의 초기 관리자 비번·SSRF/명령주입 방어·번들 sha256 필수·**엣지별 개별 central 토큰**(공유 토큰 스코프 축소, v2.191.0). 상세 [설치 가이드 §7](docs/INSTALL.md)·[감사 문서](docs/AUDIT-2026-06-27.md).
 - **데모(mock) 모드** — vCenter 없이 `DATA_SOURCE=mock`으로 전세계 11개 가상 vCenter + iDRAC 전력·핑/네트워크·지표·온도·GPU 게스트·로그까지 채워진 화면을 즉시 시연(v2.154.0 목업 완비).
 - **장애 내성 & 성능** — 한 vCenter/매니저가 죽어도 포탈은 정상(해당만 `unreachable`). 고RTT·다수 vCenter(현재 28, 향후 30+) 대비 **동시 수집 개수 제한(`COLLECT_CONCURRENCY`, 기본 8) + per-vCenter 타임아웃 + 폴러 재진입 가드(주기 초과 시 중첩 실행 방지) + O(N) 롤업 집계 + 논블로킹 DB write(트랜잭션·prune 스로틀)**로 매 주기 CPU 스파이크를 평탄화.
 
@@ -168,6 +174,10 @@ git 소스로 실행하면 `CONFIG_DIR` 기본값이 `server/config` 라 이 파
 | `DEFAULT_ADMIN_PASSWORD` | (임의생성) | 초기 admin 비밀번호. 미설정 시 최초 기동에 임의 생성 → `$CONFIG_DIR/initial-admin-password.txt` |
 | `TOTP_ISSUER` | `VMware Portal` | TOTP 표시명 |
 | `AD_ENABLED`, `AD_URL`, `AD_DOMAIN`, `AD_BASE_DN`, `AD_*_GROUP`, `AD_DEFAULT_ROLE` | — | Active Directory(LDAP) 연동·그룹→역할 매핑 |
+| `AD_GROUP_MATCH` | `exact` | 그룹→역할 매칭 방식. 기본은 **그룹명(CN)/전체 DN 완전일치**. `substring`은 구버전 호환용(부분문자열 매칭 — 권한 상승 위험, 비권장) |
+| `AD_TLS_REJECT_UNAUTHORIZED` | `true` | LDAPS 인증서 검증(기본 ON — `false`로만 opt-out) |
+| `AUTH_DISABLED_ROLE` | `admin` | `AUTH_ENABLED=false`일 때 익명 요청에 부여할 역할. 운영에서 인증을 끌 수밖에 없다면 `viewer`로 낮춰 변경 동작을 차단 |
+| `OTP_MAX_FAILS` / `OTP_LOCKOUT_MS` / `OTP_FAIL_WINDOW_MS` | `5` / `600000`(10분) / `600000` | 민감작업 재인증 OTP 실패 잠금(로그인 잠금과 별도 키 공간) |
 | `CORS_ORIGINS` | (교차출처 차단) | 허용 교차출처 목록(콤마). 미설정 시 same-origin만(와일드카드 제거) |
 | `CSP` | — | Content-Security-Policy 헤더 값(옵트인) |
 | `METRICS_ALLOW_QUERY_TOKEN` | `false` | `/metrics` 토큰을 `?token=`로도 허용(기본은 Authorization 헤더 전용) |
@@ -190,7 +200,9 @@ git 소스로 실행하면 `CONFIG_DIR` 기본값이 `server/config` 라 이 파
 | `EDGE_MODE` / `EDGE_TOKEN` | — | **통합 엣지 모드**(`all`): 3줄로 전 엣지 기능 활성. `EDGE_TOKEN`이 CENTRAL/COLLECTOR 토큰 겸함 |
 | `COLLECTOR_TOKEN` / `COLLECTOR_DATACENTER` | — | 이 인스턴스를 수집 에이전트로 노출(토큰), 사이트 라벨 |
 | `COLLECTOR_PULL_INTERVAL_MS` | `60000` | 중앙이 에이전트 pull 주기 |
-| `CENTRAL_TOKEN` | — | 중앙↔에이전트 API 토큰(중앙·에이전트 동일값) |
+| `CENTRAL_TOKEN` | — | 중앙↔에이전트 API 토큰. **엣지별 개별 토큰**을 발급했다면 그 엣지에는 개별 토큰 값을 넣는다(자기 데이터만 접근) |
+| `CENTRAL_REQUIRE_AGENT_TOKEN` | `false` | `true`면 공유 `CENTRAL_TOKEN` 거부 — 엣지별 개별 토큰만 허용(전 엣지 이관 후 권장) |
+| `WAN_TLS_INSECURE` | `false`(검증 ON) | 중앙↔엣지 HTTPS 인증서 검증. **자체서명 HTTPS 엣지**가 있는 노드만 `true`(대부분 엣지는 http라 무영향) |
 | `AGENT_NAME` / `CENTRAL_URL` / `AGENT_SCAN_INTERVAL_MS` | hostname / — / `3600000` | 에이전트 이름·중앙 주소·스캔 주기 |
 | `AGENT_PUSH_INVENTORY` / `AGENT_PUSH_FLEET` | `false` / `true` | 엣지→중앙 vCenter 인벤토리 push · 베어메탈 push(엣지 기본 on) |
 | `CENTRAL_FLEET_TTL_MS` / `CENTRAL_FLEET_MAX_AGENTS` | `1800000` / `500` | 중앙의 엣지 베어메탈 만료시간 · 에이전트 상한 |
@@ -205,6 +217,8 @@ git 소스로 실행하면 `CONFIG_DIR` 기본값이 `server/config` 라 이 파
 | `LLM_ENABLED` / `OLLAMA_URL` / `OLLAMA_MODEL` | `false` / `http://localhost:11434` / `llama3.1` | AI 자연어 검색 |
 | `PROVISION_CONCURRENCY` | `4` | 동시 VM 클론 수 |
 | `METRICS_EXPORT_TOKEN` | — | `/metrics`(Prometheus) 접근 토큰. **미설정 시 /metrics는 404(비활성)** — 무인증 공개는 `METRICS_ALLOW_ANON=true` 옵트인 |
+| `HORIZON_TLS_VERIFY` | `false` | Horizon Connection Server TLS 검증(사내 사설 인증서 대비 기본 생략, `true`로 강제) |
+| `SSRF_ALLOW_LOOPBACK` | `false` | SSRF 가드의 루프백(127.x/::1) 차단 해제 — 중앙·엣지를 같은 서버에 올린 랩 구성용 |
 | `UPGRADE_*` | — | 자동 업그레이드(아래 참조) |
 
 ---
@@ -232,13 +246,15 @@ git 소스로 실행하면 `CONFIG_DIR` 기본값이 `server/config` 라 이 파
 | `GET/POST/DELETE /alarm-mutes` `GET/PUT /ui-settings` `POST /search/nl` | 음소거 · UI설정 · 자연어검색 |
 
 ### 특수기능 `/api/tools/*`
-`gpu`(+`/history`,`/vms`), `esxi-temp`(+`/history`), `capacity`, `capacity-forecast`, `waste`, `thin-vms`, `guest-os`, `hba`, `licenses`, `esxi`, `solutions`, `hardware`, `vmtools`, `snapshots`, `duplicate-ips`, `vm-finder`(POST), `ipam`(+`/subnets`,`/sheet`,`/annotation`,`.xlsx`,`.csv`), `deep-search`(POST), `ip-ping`, `service-check`, `network-check`, `vmware-config`, `vclogs`(+`/export.csv`,`/federate`,`/sources`)
+`gpu`(+`/history`,`/vms`), `esxi-temp`(+`/history`), `capacity`, `capacity-forecast`, `waste`, `thin-vms`, `guest-os`, `hba`, `licenses`, **`license-expiry`**(vCenter+NSX+Horizon 만료일), `esxi`, `solutions`, `hardware`, `vmtools`, `snapshots`, `duplicate-ips`, `vm-finder`(POST), `ipam`(+`/subnets`,`/sheet`,`/annotation`,`.xlsx`,`.csv`), `deep-search`(POST), `ip-ping`, `service-check`, `network-check`, `vmware-config`, `vclogs`(+`/export.csv`,`/federate`,`/sources`)
+
+> 상태변경(POST/PUT/DELETE) 라우트는 `requireRole('admin','operator')` — viewer는 조회만 가능합니다(`ip-ping`·`ui-settings`·`alarm-mutes`·IPAM 편집·Tools 업그레이드 포함).
 
 ### 인사이트 `/api/insights/*`
 `finops`(+`/config`), `power-breakdown`, `fleet`(+`/tag`,`/assign`,`/assign-bulk`,`/prune` — 통합 인벤토리), `anomalies`, `forecast`, `security`, `topology`, `graph`, `incidents`, `chatops`(POST) · 익스포터 `GET /metrics`(Prometheus)
 
 ### 관리자 `/api/admin/*` (발췌)
-`users`, `vcenters`(+`/test`,`/import`,`/order`), `nsx/managers`, `idrac`(+`/scan`,`/bulk-add`,`/power-dashboard`), `collectors`(+`/:id` vCenter 매핑), `vm/:id/{hardware,reconfig}`(VM 사양 변경), `assignments`, `agent-deploy`, `metrics/settings`, `gpu-guest/{settings,vms,test,diag}`, `ipam/settings`, `ipam/scan/{settings,run,results}`, `alerts`(+`/test`), `audit`, `data-source`, `llm-config`, `packages`, `geocode`, `logs`, `backup/*`, `vclogs/*`, `net/{capture,pcap,history,monitors,agents,log-issues}`, `guest/add-user`, `deep-search/probe`
+`users`, `vcenters`(+`/test`,`/import`,`/order`), `nsx/managers`, `idrac`(+`/scan`,`/bulk-add`,`/power-dashboard`, **`/nic-speed`**, **`/nic-models`**), `collectors`(+`/:id` vCenter 매핑, **`/:id/force-token`** 토큰 강제 동기화), **`central/agent-tokens`**(엣지별 개별 토큰 발급·회수), `central/ingest-stats`, `vm/:id/{hardware,reconfig}`(VM 사양 변경), `assignments`, `agent-deploy`, `metrics/settings`, `gpu-guest/{settings,vms,test,diag}` + **`gpu-guest/deploy/:agent`**(중앙→엣지 GPU 설정 배포), **`edge-users`**(+`-bulk` — 중앙→엣지 계정 배포), **`horizon`**(+`/test` — Horizon 서버 등록), `ipam/settings`, `ipam/scan/{settings,run,results}`, `alerts`(+`/test`), `audit`, `data-source`, `llm-config`, `packages`, `geocode`, `logs`, `backup/*`, `vclogs/*`, `net/{capture,pcap,history,monitors,agents,log-issues}`, `guest/add-user`, `deep-search/probe`, `security/session`, `emergency-stop`
 
 ### 원격접속 `/api/remote/*`
 `mappings`, `quick-connect`, `proxies`, `config`, `deploy`, `probe`, `targets`, `rdp/:id`
@@ -248,7 +264,8 @@ git 소스로 실행하면 `CONFIG_DIR` 기본값이 `server/config` 라 이 파
 
 ### 토큰 라우터(에이전트↔중앙)
 - `/api/collector/{export,ping,idrac-scan,upgrade,set-password}` — **`X-Collector-Token`** 게이트(전력 export·중앙→엣지 PUSH 스캔·원격 업그레이드).
-- `/api/central/{register-collector,assignment,result,inventory,fleet,idrac-scan-jobs,idrac-scan-progress,idrac-scan-result,ip-scan-assignment,ip-scan-result,gpu-guest-data,agent-config,ping-jobs,ping-result,log-queries,log-query-result,capture-jobs,capture-result}` — **`X-Central-Token`** 게이트(엣지→중앙 보고·위임 잡 인출).
+- `/api/central/{register-collector,assignment,result,inventory,fleet,idrac-scan-jobs,idrac-scan-progress,idrac-scan-result,ip-scan-assignment,ip-scan-result,gpu-guest-data,agent-config,ping-jobs,ping-result,log-queries,log-query-result,capture-jobs,capture-result,users-config,gpu-guest-config}` — **`X-Central-Token`** 게이트(엣지→중앙 보고·위임 잡 인출·중앙 배포 설정 pull).
+  - **엣지별 개별 토큰(v2.191+)**: 설정 → 수집 서버 → 🔑에서 엣지별 토큰을 발급하면 그 토큰은 **자기 `agent` 데이터만** 접근한다(남의 이름으로 조회 시 403). 엣지는 이 값을 기존 `CENTRAL_TOKEN` 자리에 넣기만 하면 되므로 사이트별로 무중단 이관할 수 있고, 이관 완료 후 `CENTRAL_REQUIRE_AGENT_TOKEN=true`로 공유 토큰을 금지한다.
 - `/dl/{versions.json,<번들>}` — 공개 업그레이드 소스(자동 업그레이드 원격 베이스).
 - `/api/ping/*` — 핑/네트워크 모니터링(조회=인증, 대상 관리=관리자).
 
@@ -276,9 +293,34 @@ git 소스로 실행하면 `CONFIG_DIR` 기본값이 `server/config` 라 이 파
 | `fleet` | **통합 서버 인벤토리**(가상화/베어메탈·법인 등록·엣지 집계) | `portaldb` | 포탈 DB 현황 |
 | `real-os` | 실제 OS 확인(게스트 탐침·불일치) | `vmprovision` | VM 생성(관리자) |
 | `agent-scans` | **에이전트 작업**(IP대역 할당 위임 스캔, 관리자) | `shutdown` | 긴급중단(2인 OTP) |
+| `insights` | 운영 인사이트(라이트사이징·N+1·알람 핫스팟·GPU 유휴) | `threats` | 위협 탐지 |
+| `license-expiry` | **라이선스 만료일 확인**(ESXi·vCenter·vSAN·VCF/VVF·NSX·Horizon) | `dsusage` | vCenter별 스토리지 |
+| `nic-speed` | **서버 NIC 속도 구분**(10G/25G/100G·DC/가상화·베어메탈) | `nic-models` | **서버 NIC 모델 확인**(Intel/Broadcom/Mellanox) |
+| `login-fails` | 로그인 실패 분석 | `net-issues` | 네트워크 이슈 분석 |
+| `diskadd` | 디스크 추가 자동화 | `massdeploy` | 대용량 배포 |
+| `backup` | 백업 | | |
 
+> 검색창에서 메뉴를 빠르게 찾을 수 있고(**최근 검색어**가 1줄로 표시), 전체 사용자 클릭수 기준
+> **자주 쓰는 기능**이 상단에 자동 노출됩니다.
 > 상단 **인사이트** 탭(FinOps·이상탐지·예측·보안·토폴로지·인시던트·ChatOps)과
 > **설정**의 포탈 백업 · vCenter 로그 보관 · 게스트 계정 추가 · GPU 게스트 수집/진단도 참고.
+
+---
+
+## 설정 메뉴 구조
+
+**설정** 탭은 6개 그룹으로 묶여 있습니다(v2.155~2.164에서 정리).
+
+| 그룹 | 하위 메뉴 |
+|---|---|
+| 🖥️ **vCenter 관리** | vCenter 등록·관리 · vCenter 연결 테스트 |
+| 🗄 **수집 서버** | iDRAC 서버 등록 · 지표 수집 · 게스트 계정 추가 · 수집 서버(원격) · **원격 법인(DC)에 Edge 노드 포탈 설치** |
+| 🎮 **GPU 사용량 수집** | GPU 수집 · GPU 게스트 수집 · GPU 수집 진단 |
+| 👤 **User Control** | 메인포탈 사용자 관리 · **엣지 사용자 배포** · 인증(AD) |
+| 🛡️ **Security** | 세션 보안 · 이상동작 탐지 |
+| 📋 **Log** | vCenter 로그 보관 · 진단·로그 · 감사 로그 |
+
+그 외 단독 메뉴: DataCenter(법인) · NSX 관리 · 중계 서버 · 원격접속 설정 · AI 검색 · 알림 · 포탈 백업 · ⬆ 업그레이드 · About.
 
 ---
 
@@ -347,6 +389,9 @@ sudo ./install.sh --port 4000
 
 ## 보안 / 운영 메모
 
-- 자격증명/시크릿(`vcenters.json`, `users.json`, `*-assignments.json`, 스캔/게스트 계정 등)은 `CONFIG_DIR`에 `0600`으로 저장되고 API 응답에서 마스킹됩니다. 운영 시 `AUTH_SECRET` 지정 + 최초 임의 비밀번호(`initial-admin-password.txt`) 변경 필수. 보안 응답 헤더(X-Frame-Options·nosniff·HSTS)·CORS 기본 차단·업그레이드 sha256 필수 등은 [설치 가이드 §7](docs/INSTALL.md) 참고.
+- 자격증명/시크릿(`vcenters.json`, `users.json`, `*-assignments.json`, `central-agent-*.json`, `horizon.json`, 스캔/게스트 계정 등)은 `CONFIG_DIR`에 `0600` + **원자적 쓰기**(tmp+fsync+rename)로 저장되고 API 응답에서 마스킹됩니다. 손상 시 `<파일>.corrupt.<ts>`로 보존해 조용한 유실을 막습니다. 운영 시 `AUTH_SECRET` 지정 + 최초 임의 비밀번호(`initial-admin-password.txt`) 변경 필수. 보안 응답 헤더(X-Frame-Options·nosniff·HSTS)·CORS 기본 차단·업그레이드 sha256 필수 등은 [설치 가이드 §7](docs/INSTALL.md) 참고.
+- **역할(RBAC)** — `admin` / `operator` / `viewer`. 상태변경 API와 **브라우저 SSH/RDP 터널**은 `admin`·`operator`만 가능하고 viewer는 조회 전용입니다(해당 버튼은 viewer 화면에서 숨겨집니다). 비밀번호·역할 변경·계정 삭제 시 그 계정의 **기존 토큰이 즉시 무효화**되므로 재로그인이 필요합니다.
+- **엣지 토큰 스코프** — 공유 `CENTRAL_TOKEN` 하나를 전 엣지가 쓰면 엣지 1대 침해로 다른 사이트 자격증명까지 노출됩니다. **설정 → 수집 서버 → 🔑 엣지별 개별 central 토큰**에서 사이트별 토큰을 발급해 이관하세요(무중단, 미이관 엣지는 화면에 표시). 이관 후 `CENTRAL_REQUIRE_AGENT_TOKEN=true`.
+- **버전 파일** — 기동 시 `CONFIG_DIR/vmware-portal-release`에 실행 버전·역할(central/edge/…)을 기록합니다(`/etc/redhat-release` 방식) — 배포 점검·자산 조사용.
 - 시계열(온도/GPU/용량)을 분 단위·장기 보존하면 데이터가 커집니다 — **설정 › 지표 수집**에서 주기/보존기간을 조절하세요.
 - 모니터링은 **읽기 전용 vCenter 계정** 권장. VM 생성/Tools 업그레이드/원격접속 등 쓰기·운영 기능은 권한 있는 계정과 승인 절차로 사용하세요.

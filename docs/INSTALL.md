@@ -209,7 +209,7 @@ sudo firewall-cmd --permanent --add-port=4000/tcp && sudo firewall-cmd --reload
 
 ---
 
-## 7. 보안 설정 (권장 — v2.152.0 반영)
+## 7. 보안 설정 (권장 — v2.191.0 반영)
 
 포탈은 기본적으로 안전하게 동작하지만, 운영 환경에서 아래를 확인하세요.
 
@@ -218,10 +218,17 @@ sudo firewall-cmd --permanent --add-port=4000/tcp && sudo firewall-cmd --reload
 | **초기 비번** | `initial-admin-password.txt`로 로그인 후 **즉시 변경**하고 파일 삭제(§2.2). |
 | **HTTPS 권장** | 리버스 프록시(nginx/HAProxy)로 TLS 종단 권장. HTTPS면 `HSTS` 헤더가 자동 적용됩니다. |
 | **CORS** | 기본은 **교차출처 차단**(같은 포탈에서 SPA 사용 시 무영향). 별도 프론트 출처가 있으면 `CORS_ORIGINS=https://포탈주소`. |
-| **/metrics 토큰** | Prometheus 연동 시 기본 **Authorization 헤더** 전용. 기존 `?token=` 방식이 필요하면 `METRICS_ALLOW_QUERY_TOKEN=true`. |
-| **자동 업그레이드 무결성** | 번들 **sha256 필수**(공식 릴리스는 항상 제공). 서명 없는 사내 미러만 부득이 `UPGRADE_ALLOW_UNVERIFIED=true`. |
-| **NSX 자체서명** | 기본 허용. 검증을 강제하려면 `NSX_TLS_REJECT_UNAUTHORIZED=true`. |
+| **/metrics** | 토큰 **미설정 시 404(비활성)**. Prometheus 연동은 `METRICS_EXPORT_TOKEN` + Authorization 헤더(옛 `?token=`은 `METRICS_ALLOW_QUERY_TOKEN=true`). 무인증 공개가 꼭 필요하면 `METRICS_ALLOW_ANON=true`. |
+| **자동 업그레이드 무결성** | 번들 **sha256 필수**(공식 릴리스는 항상 제공) — 자체 업그레이드와 **엣지 푸시 모두** 검증합니다. 서명 없는 사내 미러만 부득이 `UPGRADE_ALLOW_UNVERIFIED=true`. |
+| **NSX 자체서명** | 기본 허용(vCenter TLS 검증을 켜면 그 설정을 승계). 검증을 강제하려면 `NSX_TLS_REJECT_UNAUTHORIZED=true`. |
+| **★ 엣지별 개별 central 토큰** | 공유 `CENTRAL_TOKEN` 하나면 **엣지 1대 침해로 다른 사이트의 iDRAC/게스트 자격증명까지** 인출됩니다. 설정 → 수집 서버 → **🔑 엣지별 개별 central 토큰**에서 사이트별 토큰을 발급해 그 엣지의 `CENTRAL_TOKEN`(=`EDGE_TOKEN`)에 넣으세요. 엣지 코드 변경 불필요·미이관 엣지는 계속 동작(무중단). 전부 이관 후 중앙에 `CENTRAL_REQUIRE_AGENT_TOKEN=true`. |
+| **중앙↔엣지 TLS** | 기본 **검증 ON**(`WAN_TLS_INSECURE=false`). 자체서명 HTTPS 엣지가 있는 노드만 `WAN_TLS_INSECURE=true`(대부분 엣지는 http라 무영향). |
+| **AD 그룹 매핑** | 그룹→역할은 **CN/전체 DN 완전일치**가 기본입니다. 예전처럼 부분문자열로 맞춰 쓰던 설정은 로그인 시 서버 로그에 `[ad]` 경고가 남으니 실제 그룹명으로 교정하세요(임시 호환은 `AD_GROUP_MATCH=substring`, 권한 상승 위험으로 비권장). |
+| **역할(RBAC)** | 상태변경 API·브라우저 SSH/RDP는 `admin`·`operator`만. 인증을 끌 수밖에 없다면(`AUTH_ENABLED=false`) `AUTH_DISABLED_ROLE=viewer`로 익명 권한을 낮추세요. |
+| **OTP 잠금** | 민감작업 재인증 OTP는 계정별 실패 잠금(`OTP_MAX_FAILS`/`OTP_LOCKOUT_MS`)이 걸립니다. |
 | **CSP(선택)** | 필요 시 `CSP=<정책문자열>`로 옵트인(인라인 스타일/intro 호환 확인 후). |
+
+> 전체 보안 감사 이력과 잔여 백로그는 [docs/AUDIT-2026-06-27.md](AUDIT-2026-06-27.md) 상단의 후속 조치 노트를 참고하세요.
 
 ---
 
