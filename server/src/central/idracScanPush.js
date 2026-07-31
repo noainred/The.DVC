@@ -31,7 +31,7 @@ const PUSH_TIMEOUT_MS = Number(process.env.IDRAC_PUSH_TIMEOUT_MS) || 15 * 60_000
  * PUSH 스캔 시작. 성공 시 { ok, reqId }를 즉시 반환하고, 실제 전송/결과 반영은 백그라운드에서 진행한다.
  * 매칭되는 수집 서버 URL이 없으면 { ok:false, reason }.
  */
-export function pushIdracScan(agent, { ips, username, password, vcenterId = '', datacenterId = '', noRegister = false, mode = 'merge' } = {}) {
+export function pushIdracScan(agent, { ips, username, password, vcenterId = '', datacenterId = '', noRegister = false, mode = 'merge', service = '', trigger = 'manual' } = {}) {
   const col = findCollectorForAgent(agent);
   if (!col || !col.url) {
     return { ok: false, reason: `에이전트 '${agent}'에 매칭되는 '수집 서버(원격)' URL이 없습니다. 설정 → 수집 서버(원격)에 이 에이전트를 URL과 함께 등록하면 중앙이 직접 스캔을 전송할 수 있습니다.` };
@@ -39,7 +39,7 @@ export function pushIdracScan(agent, { ips, username, password, vcenterId = '', 
   // URL 끝 슬래시 제거(연결 테스트와 파리티) — '.../:4000/' 저장 시 PUSH가 '//api/...' 이중
   // 슬래시로 깨지던 것을 방지. 저장 값을 바꾸지 않고 요청 시점에만 정규화한다.
   const edgeUrl = String(col.url).replace(/\/+$/, '');
-  const reqId = createPushScanJob(agent, { ips, username, password, vcenterId, datacenterId, noRegister, mode, edgeUrl });
+  const reqId = createPushScanJob(agent, { ips, username, password, vcenterId, datacenterId, noRegister, mode, edgeUrl, service, trigger });
   if (!reqId) return { ok: false, reason: '진행 중 잡이 너무 많습니다. 잠시 후 다시 시도하세요.' };
 
   // 백그라운드 전송(요청 즉시 반환 — UI는 reqId로 폴링).

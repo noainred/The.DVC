@@ -4,6 +4,7 @@ import DatacenterAdmin from './DatacenterAdmin.jsx';
 import VCenterConnTest from './VCenterConnTest.jsx';
 import NsxAdmin from './NsxAdmin.jsx';
 import IdracAdmin from './IdracAdmin.jsx';
+import IdracScanLog from './IdracScanLog.jsx';
 import Collectors from './Collectors.jsx';
 import AgentDeploy from './AgentDeploy.jsx';
 import ProxySettings from './ProxySettings.jsx';
@@ -36,6 +37,7 @@ const SUB = [
   { k: 'nsx-admin', label: 'NSX 관리', C: NsxAdmin },
   // --- 수집 서버 그룹 ---
   { k: 'idrac-admin', label: 'iDRAC 서버 등록', C: IdracAdmin, group: 'collect' },
+  { k: 'idrac-scan-log', label: '스캔 로그', C: IdracScanLog, group: 'collect' },
   { k: 'metrics', label: '지표 수집', C: MetricsSettings, group: 'collect' },
   // --- GPU 사용량 수집 그룹 ---
   { k: 'gpu-collect', label: 'GPU 수집', C: GpuSettings, group: 'gpu' },
