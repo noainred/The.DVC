@@ -3,7 +3,7 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import Guacamole from 'guacamole-common-js';
 import '@xterm/xterm/css/xterm.css';
-import { getToken } from '../api.js';
+import { getToken, postJson } from '../api.js';
 
 const SPIN = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
@@ -146,8 +146,13 @@ export function RdpConsole({ mapping, active, initialCreds, onCreds }) {
   }, []);
   useEffect(() => { if (initialCreds && initialCreds.username) connect(); /* eslint-disable-next-line */ }, []);
 
-  const connect = () => {
+  const connect = async () => {
     onCreds?.(creds);
+    // 자격증명을 URL 쿼리스트링에 싣지 않기 위해(감사 H18) 접속 직전 1회용 티켓을 발급받아
+    // 쿼리엔 티켓 ID만 싣는다. 티켓 발급 실패 시에만 구경로(쿼리에 자격증명)로 폴백해 가용성 유지.
+    let ticket = '';
+    try { const r = await postJson('/remote/rdp-ticket', { username: creds.username, password: creds.password, domain: creds.domain }); ticket = r?.ticket || ''; }
+    catch { /* 폴백: 아래에서 쿼리에 자격증명 포함 */ }
     setConnected(true);
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     const tunnel = new Guacamole.WebSocketTunnel(`${proto}://${location.host}/api/remote/rdp`);
@@ -159,7 +164,11 @@ export function RdpConsole({ mapping, active, initialCreds, onCreds }) {
       client.onerror = (e) => setStatus(`오류: ${e.message || e}`);
       const w = Math.max(800, elRef.current.clientWidth || 1024);
       const h = Math.max(600, elRef.current.clientHeight || 768);
-      const q = new URLSearchParams({ token: getToken() || '', mappingId: mapping.id, username: creds.username, password: creds.password, domain: creds.domain, width: String(w), height: String(h) }).toString();
+      const base = { token: getToken() || '', mappingId: mapping.id, width: String(w), height: String(h) };
+      // 티켓이 있으면 자격증명은 쿼리에서 제외(서버가 티켓으로 조회). 없으면 구경로 폴백.
+      const q = new URLSearchParams(ticket
+        ? { ...base, ticket }
+        : { ...base, username: creds.username, password: creds.password, domain: creds.domain }).toString();
       client.connect(q);
       const display = client.getDisplay().getElement();
       const mouse = new Guacamole.Mouse(display);

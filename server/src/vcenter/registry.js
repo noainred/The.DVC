@@ -10,7 +10,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { VCenterClient } from './restClient.js';
 import { describeError } from '../util/errors.js';
 import { geocode } from './geocode.js';
@@ -27,7 +27,10 @@ export function loadRegistry() {
   try {
     const parsed = JSON.parse(fs.readFileSync(FILE, 'utf8'));
     return Array.isArray(parsed?.vcenters) ? parsed.vcenters : [];
-  } catch {
+  } catch (e) {
+    // 손상본을 조용히 []로 반환하면 다음 addVcenter/saveRegistry가 빈 목록으로 덮어써
+    // 등록된 모든 vCenter와 자격증명이 영구 유실된다 → 손상본을 .corrupt로 보존 후 시작.
+    preserveCorrupt(FILE, e.message);
     return [];
   }
 }

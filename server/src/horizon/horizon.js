@@ -15,7 +15,7 @@ import { Agent } from 'undici';
 import { config } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { describeError } from '../util/errors.js';
-import { ssrfBlockReason } from '../collector/registry.js';
+import { ssrfBlockReason, ssrfBlockReasonResolved } from '../collector/registry.js';
 
 const FILE = path.join(config.configDir, 'horizon.json');
 // 사내 Horizon은 사설 인증서가 일반적 — 기본은 TLS 검증 생략, HORIZON_TLS_VERIFY=true로 강제 가능(NSX와 동일 패턴).
@@ -159,8 +159,9 @@ export async function testHorizon(body) {
     return { ok: false, reason: 'host/username/password/domain이 필요합니다.' };
   }
   // 연결 테스트는 normalize()를 거치지 않으므로(저장 전 임의 host 수용) 여기서 같은 SSRF 가드를
-  // 적용한다 — 미저장 host로 링크로컬/루프백을 찔러 보는 통로가 되지 않게.
-  const ssrf = ssrfBlockReason(String(entry.host));
+  // 적용한다 — 미저장 host로 링크로컬/루프백을 찔러 보는 통로가 되지 않게. 이 경로는 async라
+  // DNS 해석까지 검사하는 resolved 가드로 '이름 기반 우회'(169.254.169.254로 해석되는 FQDN)도 차단.
+  const ssrf = await ssrfBlockReasonResolved(String(entry.host));
   if (ssrf) return { ok: false, reason: `host: ${ssrf}` };
   const started = Date.now();
   try {
