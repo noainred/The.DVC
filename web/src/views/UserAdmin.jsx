@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
-import { fetchJson, postJson, patchJson, delJson } from '../api.js';
+import { fetchJson, postJson, patchJson, delJson, putJson } from '../api.js';
 import { Loading, ErrorBox, Modal } from '../components/ui.jsx';
 
 const ROLES = ['viewer', 'operator', 'admin'];
+const REGIONS = ['아시아', '중국', '유럽', '북미'];
 
-/** 설정 → 사용자 관리: 계정 CRUD + Google OTP(TOTP) 등록/해제. */
+/** 설정 → 사용자 관리: 계정 CRUD + Google OTP(TOTP) 등록/해제 + 기능 권한 매트릭스 + 데이터 범위(scope). */
 export default function UserAdmin() {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
@@ -13,10 +14,23 @@ export default function UserAdmin() {
   const [adding, setAdding] = useState(false);
   const [form, setForm] = useState({ username: '', name: '', role: 'viewer' });
   const [enroll, setEnroll] = useState(null); // { username, secret, otpauthURL, qr, code, error }
+  const [perms, setPerms] = useState(null);   // { catalog, roles, matrix }
+  const [permDirty, setPermDirty] = useState(false);
+  const [vcx, setVcx] = useState([]);         // 범위 지정용 vCenter 목록 [{id,name,region}]
+  const [scopeEdit, setScopeEdit] = useState(null); // { username, vcenters:[], regions:[] }
 
   const load = async () => {
-    try { setData(await fetchJson('/admin/users')); setError(null); }
-    catch (e) { setError(e.message); }
+    try {
+      const [u, p, vc] = await Promise.all([
+        fetchJson('/admin/users'),
+        fetchJson('/admin/permissions').catch(() => null),
+        fetchJson('/vcenters').catch(() => []),
+      ]);
+      setData(u);
+      if (p) { setPerms(p); setPermDirty(false); }
+      setVcx(Array.isArray(vc) ? vc : []);
+      setError(null);
+    } catch (e) { setError(e.message); }
   };
   useEffect(() => { load(); }, []);
 
@@ -61,6 +75,47 @@ export default function UserAdmin() {
     if (r.ok) { await load(); flash(true, 'OTP를 해제했습니다.'); } else flash(false, r.reason);
   };
 
+  // ── 기능 권한 매트릭스(operator/viewer 편집; admin 은 항상 전체) ──────────────
+  const hasMx = (role, key) => (perms?.matrix?.[role] || []).includes(key);
+  const togglePerm = (role, key) => {
+    setPerms((p) => {
+      const cur = new Set(p.matrix[role] || []);
+      cur.has(key) ? cur.delete(key) : cur.add(key);
+      return { ...p, matrix: { ...p.matrix, [role]: [...cur] } };
+    });
+    setPermDirty(true);
+  };
+  const savePerms = async () => {
+    const r = await putJson('/admin/permissions', { operator: perms.matrix.operator, viewer: perms.matrix.viewer })
+      .catch((e) => ({ ok: false, reason: e.message }));
+    if (r.ok) { setPerms((p) => ({ ...p, matrix: r.matrix })); setPermDirty(false); flash(true, '권한 매트릭스를 저장했습니다.'); }
+    else flash(false, r.reason);
+  };
+  const resetPerms = async () => {
+    if (!window.confirm('권한 매트릭스를 기본값으로 되돌릴까요?')) return;
+    const r = await postJson('/admin/permissions/reset', {}).catch((e) => ({ ok: false, reason: e.message }));
+    if (r.ok) { setPerms((p) => ({ ...p, matrix: r.matrix })); setPermDirty(false); flash(true, '기본값으로 초기화했습니다.'); }
+    else flash(false, r.reason);
+  };
+
+  // ── 데이터 범위(scope) — 사용자가 볼 수 있는 vCenter/리전 제한 ──────────────
+  const openScope = (u) => setScopeEdit({
+    username: u.username,
+    vcenters: [...(u.scope?.vcenters || [])],
+    regions: [...(u.scope?.regions || [])],
+  });
+  const toggleIn = (arr, v) => (arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
+  const saveScope = async () => {
+    const body = { scope: { vcenters: scopeEdit.vcenters, regions: scopeEdit.regions } };
+    const r = await patchJson(`/admin/users/${encodeURIComponent(scopeEdit.username)}`, body).catch((e) => ({ ok: false, reason: e.message }));
+    if (r.ok) { setScopeEdit(null); await load(); flash(true, '데이터 범위를 저장했습니다.'); }
+    else flash(false, r.reason);
+  };
+  const scopeLabel = (u) => {
+    const n = (u.scope?.vcenters?.length || 0) + (u.scope?.regions?.length || 0);
+    return n ? `제한(${n})` : '전체';
+  };
+
   return (
     <>
       <div className="flex between wrap gap" style={{ marginBottom: 10 }}>
@@ -94,7 +149,7 @@ export default function UserAdmin() {
 
       <div className="table-wrap">
         <table>
-          <thead><tr><th>사용자 ID</th><th>이름</th><th>역할</th><th>로그인 방식</th><th style={{ textAlign: 'right' }}>관리</th></tr></thead>
+          <thead><tr><th>사용자 ID</th><th>이름</th><th>역할</th><th>로그인 방식</th><th>데이터 범위</th><th style={{ textAlign: 'right' }}>관리</th></tr></thead>
           <tbody>
             {data.users.map((u) => (
               <tr key={u.username}>
@@ -109,6 +164,12 @@ export default function UserAdmin() {
                   {u.totpEnabled
                     ? <span className="badge green">OTP 전용</span>
                     : <span className="badge amber">{u.hasPassword ? '비밀번호' : '미설정'}</span>}
+                </td>
+                <td>
+                  <button className="tab" style={{ padding: '5px 10px', fontSize: 12 }} onClick={() => openScope(u)}
+                    title="이 계정이 볼 수 있는 vCenter/리전을 제한합니다.">
+                    {scopeLabel(u)}
+                  </button>
                 </td>
                 <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                   {u.totpEnabled
@@ -128,6 +189,84 @@ export default function UserAdmin() {
         등록을 마치면 해당 계정의 비밀번호는 제거되어 <b>OTP 6자리로만</b> 로그인됩니다.
         AD 계정은 AD 비밀번호로 로그인하며 여기서 관리하지 않습니다.
       </div>
+
+      {/* ── 기능 권한 매트릭스(역할 × 기능) ─────────────────────────────────── */}
+      {perms && (
+        <div className="card" style={{ marginTop: 22 }}>
+          <div className="flex between wrap gap" style={{ marginBottom: 8 }}>
+            <div className="section-title" style={{ margin: '4px 0' }}>기능 권한 (역할별)</div>
+            <div className="flex gap">
+              <button className="login-btn" style={{ flex: 'none', padding: '7px 14px', opacity: permDirty ? 1 : 0.55 }} disabled={!permDirty} onClick={savePerms}>저장</button>
+              <button className="logout-btn" style={{ padding: '7px 12px' }} onClick={resetPerms}>기본값</button>
+            </div>
+          </div>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 10, lineHeight: 1.7 }}>
+            역할에 기능 권한을 켜고 끕니다. <b>admin</b>은 항상 전체 권한을 가지며 변경할 수 없습니다.
+            서버에서 강제되므로(메뉴를 숨겨도 API 직접 호출 차단), 저장 즉시 각 사용자에 반영됩니다.
+          </div>
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>기능</th><th style={{ textAlign: 'center' }}>admin</th><th style={{ textAlign: 'center' }}>operator</th><th style={{ textAlign: 'center' }}>viewer</th></tr></thead>
+              <tbody>
+                {(() => {
+                  const rows = [];
+                  let lastGroup = null;
+                  for (const p of perms.catalog) {
+                    if (p.group !== lastGroup) {
+                      lastGroup = p.group;
+                      rows.push(<tr key={`g-${p.group}`}><td colSpan={4} style={{ background: 'rgba(148,163,184,.08)', fontWeight: 700, fontSize: 12 }}>{p.group}</td></tr>);
+                    }
+                    rows.push(
+                      <tr key={p.key}>
+                        <td>{p.label} <span className="muted" style={{ fontSize: 11 }}>({p.key})</span></td>
+                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked readOnly disabled title="admin은 항상 전체" /></td>
+                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={hasMx('operator', p.key)} onChange={() => togglePerm('operator', p.key)} /></td>
+                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={hasMx('viewer', p.key)} onChange={() => togglePerm('viewer', p.key)} /></td>
+                      </tr>,
+                    );
+                  }
+                  return rows;
+                })()}
+              </tbody>
+            </table>
+          </div>
+          {permDirty && <div className="muted" style={{ fontSize: 12, marginTop: 8, color: '#fbbf24' }}>변경사항이 저장되지 않았습니다 — [저장]을 눌러 적용하세요.</div>}
+        </div>
+      )}
+
+      {/* ── 데이터 범위(scope) 편집 모달 ────────────────────────────────────── */}
+      {scopeEdit && (
+        <Modal title={`데이터 범위 — ${scopeEdit.username}`} onClose={() => setScopeEdit(null)} width={520}>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 12, lineHeight: 1.7 }}>
+            선택한 <b>vCenter</b> 또는 <b>리전</b>의 데이터만 볼 수 있습니다. 아무것도 선택하지 않으면 <b>전체</b>를 봅니다.
+            (리전을 고르면 그 리전의 모든 vCenter가 포함됩니다. 서버에서 강제됩니다.)
+          </div>
+          <div style={{ fontWeight: 700, fontSize: 13, margin: '6px 0' }}>리전</div>
+          <div className="flex wrap gap" style={{ marginBottom: 14 }}>
+            {REGIONS.map((r) => (
+              <label key={r} className="flex gap" style={{ alignItems: 'center', fontSize: 13, cursor: 'pointer' }}>
+                <input type="checkbox" checked={scopeEdit.regions.includes(r)}
+                  onChange={() => setScopeEdit((s) => ({ ...s, regions: toggleIn(s.regions, r) }))} /> {r}
+              </label>
+            ))}
+          </div>
+          <div style={{ fontWeight: 700, fontSize: 13, margin: '6px 0' }}>vCenter</div>
+          <div style={{ maxHeight: 240, overflowY: 'auto', border: '1px solid rgba(148,163,184,.2)', borderRadius: 8, padding: 10 }}>
+            {vcx.length === 0 && <div className="muted" style={{ fontSize: 12 }}>표시할 vCenter가 없습니다.</div>}
+            {vcx.map((v) => (
+              <label key={v.id} className="flex gap" style={{ alignItems: 'center', fontSize: 13, cursor: 'pointer', padding: '3px 0' }}>
+                <input type="checkbox" checked={scopeEdit.vcenters.includes(v.id)}
+                  onChange={() => setScopeEdit((s) => ({ ...s, vcenters: toggleIn(s.vcenters, v.id) }))} />
+                {v.name || v.id} {v.region && <span className="muted" style={{ fontSize: 11 }}>· {v.region}</span>}
+              </label>
+            ))}
+          </div>
+          <div className="flex gap" style={{ justifyContent: 'flex-end', marginTop: 16 }}>
+            <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={() => setScopeEdit({ ...scopeEdit, vcenters: [], regions: [] })}>전체(제한 해제)</button>
+            <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} onClick={saveScope}>저장</button>
+          </div>
+        </Modal>
+      )}
 
       {enroll && (
         <Modal title={`OTP 등록 — ${enroll.username}`} onClose={() => setEnroll(null)} width={420}>

@@ -6,6 +6,7 @@ import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { authenticateAD } from './ad.js';
 import * as totp from './totp.js';
 import { checkOtpAllowed, recordOtpFailure, recordOtpSuccess } from '../security/loginRateLimit.js';
+import { rolePermissionSet } from './permissions.js';
 
 // users.json lives in CONFIG_DIR (default app/server/config; set to e.g.
 // /etc/vmware-portal to keep it outside the app dir across upgrades).
@@ -154,6 +155,24 @@ export function authenticateLocal(username, credential) {
 
 const VALID_ROLES = ['admin', 'operator', 'viewer'];
 
+// 사용자별 데이터 범위(scope) — 볼 수 있는 vCenter/리전을 제한한다(권한 키와는 직교: 무엇을
+// '할' 수 있나 ≠ 무엇을 '볼' 수 있나). 둘 다 비면 제한 없음(전체). 형식/타입만 정규화한다.
+function sanitizeScope(scope) {
+  if (scope == null) return undefined;
+  const arr = (v) => [...new Set((Array.isArray(v) ? v : []).map((x) => String(x || '').trim()).filter(Boolean))];
+  const vcenters = arr(scope.vcenters);
+  const regions = arr(scope.regions);
+  if (!vcenters.length && !regions.length) return null; // 명시적 '전체'
+  return { vcenters, regions };
+}
+
+/** 사용자 레코드의 scope 를 공개형(항상 배열)으로 반환. null/undefined → 전체. */
+export function normalizedScope(u) {
+  const s = u && u.scope;
+  if (!s || (!Array.isArray(s.vcenters) && !Array.isArray(s.regions))) return { vcenters: [], regions: [] };
+  return { vcenters: Array.isArray(s.vcenters) ? s.vcenters : [], regions: Array.isArray(s.regions) ? s.regions : [] };
+}
+
 // 서버측 토큰 폐기(감사 M5) — 자격증명/역할이 바뀌면 버전을 올려 그 전에 발급된 토큰을
 // authMiddleware에서 즉시 무효화한다(로컬 계정 한정; AD는 다음 로그인에 반영).
 function bumpTokenVersion(u) { u.tokenVersion = (u.tokenVersion || 0) + 1; }
@@ -164,6 +183,7 @@ export function listUsers() {
     username: u.username, name: u.name || u.username, role: u.role || 'viewer',
     totpEnabled: !!u.totpEnabled, hasPassword: !!u.passwordHash,
     managedBy: u.managedBy || null, // 'central' = 중앙에서 배포·관리하는 계정
+    scope: normalizedScope(u),      // 볼 수 있는 vCenter/리전 제한(빈 배열 = 전체)
   }));
 }
 
@@ -171,13 +191,15 @@ export function getUser(username) {
   return loadUsers().find((u) => u.username === username) || null;
 }
 
-export function createUser({ username, name, role = 'viewer', password } = {}) {
+export function createUser({ username, name, role = 'viewer', password, scope } = {}) {
   username = String(username || '').trim();
   if (!/^[A-Za-z0-9._@-]{2,64}$/.test(username)) return { ok: false, reason: '사용자 ID 형식이 올바르지 않습니다.' };
   if (!VALID_ROLES.includes(role)) return { ok: false, reason: '역할이 올바르지 않습니다.' };
   if (getUser(username)) return { ok: false, reason: '이미 존재하는 사용자입니다.' };
   const u = { username, name: name || username, role };
   if (password) u.passwordHash = hashPassword(password);
+  const sc = sanitizeScope(scope);
+  if (sc) u.scope = sc; // null(명시적 전체)/undefined 는 저장하지 않음(= 전체)
   loadUsers().push(u);
   persistUsers();
   return { ok: true };
@@ -204,7 +226,7 @@ export function setLocalPassword(username, password) {
   return { ok: true, totpEnabled: !!u.totpEnabled };
 }
 
-export function updateUser(username, { name, role } = {}) {
+export function updateUser(username, { name, role, scope } = {}) {
   const u = getUser(username);
   if (!u) return { ok: false, reason: '사용자를 찾을 수 없습니다.' };
   if (role !== undefined) {
@@ -217,6 +239,11 @@ export function updateUser(username, { name, role } = {}) {
     u.role = role;
   }
   if (name !== undefined) u.name = name || u.username;
+  if (scope !== undefined) {
+    const sc = sanitizeScope(scope);
+    if (sc) u.scope = sc; else delete u.scope; // null/빈 값 → 제한 해제(전체)
+    // scope 는 데이터 가시 범위라 인증 유효성과 무관 → 토큰을 폐기하지 않는다(resolveTokenUser 가 매 요청 최신값 반영).
+  }
   persistUsers();
   return { ok: true };
 }
@@ -394,9 +421,11 @@ export function resolveTokenUser(token) {
     const u = getUser(payload.sub);
     if (!u) return null; // 삭제된 계정
     if ((u.tokenVersion || 0) !== (payload.tv || 0)) return null; // 폐기된 토큰
-    return { username: payload.sub, role: u.role || 'viewer', name: payload.name };
+    // role·scope 는 토큰이 아니라 현재 레코드에서 읽어 변경을 즉시 반영한다.
+    return { username: payload.sub, role: u.role || 'viewer', name: payload.name, scope: normalizedScope(u) };
   }
-  return { username: payload.sub, role: payload.role, name: payload.name };
+  // AD 계정 등 로컬 레코드가 없는 토큰은 scope 를 적용하지 않는다(전체 열람).
+  return { username: payload.sub, role: payload.role, name: payload.name, scope: { vcenters: [], regions: [] } };
 }
 
 export function authMiddleware(req, res, next) {
@@ -425,5 +454,21 @@ export function requireRole(...roles) {
       return res.status(403).json({ error: 'forbidden', requiredRole: roles });
     }
     next();
+  };
+}
+
+/**
+ * 기능 권한(Permission) 기반 게이트 — 역할→권한 매트릭스(permissions.js)로 검사한다.
+ * requireRole 과 대칭: 인증 비활성이면 AUTH_DISABLED_ROLE 로 검사하고, admin 은 항상 통과한다.
+ * 여러 키를 주면 그 중 하나라도 있으면 통과(OR). 서버측 강제 — 프론트가 메뉴를 숨겨도
+ * API 직접 호출은 여기서 막힌다.
+ */
+export function requirePerm(...keys) {
+  return (req, res, next) => {
+    const role = !config.auth.enabled ? AUTH_DISABLED_ROLE : (req.user && req.user.role);
+    if (role === 'admin') return next();
+    const set = rolePermissionSet(role);
+    if (keys.some((k) => set.has(k))) return next();
+    return res.status(403).json({ error: 'forbidden', requiredPerm: keys });
   };
 }

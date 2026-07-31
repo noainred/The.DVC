@@ -2,6 +2,7 @@ import { Router } from 'express';
 import fs from 'node:fs';
 import { config } from '../config.js';
 import { requireRole, listUsers, createUser, updateUser, deleteUser, beginTotpEnroll, confirmTotpEnroll, disableTotp, verifyUserOtp, getUser, setLocalPassword } from '../auth/auth.js';
+import { PERMISSION_CATALOG, ROLES, loadMatrix, saveMatrix, resetMatrix, rolePermissions } from '../auth/permissions.js';
 import { getEmergencyStatus, setEmergencyStop } from '../security/emergencyStop.js';
 import { loadSessionSecurity, saveSessionSecurity, loadConfiguredSecurity, managedAdminOwners } from '../security/securitySettings.js';
 import { saveOsScanSettings, runOsScanNow, osScanStatus } from '../inventory/osScanner.js';
@@ -302,6 +303,28 @@ adminRouter.delete('/users/:username', adminOnly, (req, res) => {
   if (req.params.username === req.user.username) return res.status(400).json({ ok: false, reason: '자기 자신은 삭제할 수 없습니다.' });
   const r = deleteUser(req.params.username);
   res.status(r.ok ? 200 : 400).json(r);
+});
+
+// --- 기능 권한 매트릭스(역할 × 권한) — 관리자가 화면에서 켜고 끈다 ---
+// admin 은 항상 전체(매트릭스로 낮출 수 없음). operator/viewer 행만 편집 가능.
+adminRouter.get('/permissions', adminOnly, (_req, res) => {
+  res.json({
+    catalog: PERMISSION_CATALOG,
+    roles: ROLES,
+    matrix: { admin: rolePermissions('admin'), ...loadMatrix() },
+  });
+});
+adminRouter.put('/permissions', adminOnly, (req, res) => {
+  const b = req.body || {};
+  const next = b.matrix || b; // { operator:[...], viewer:[...] } 또는 { matrix:{...} }
+  const matrix = saveMatrix({ operator: next.operator, viewer: next.viewer });
+  logAudit({ user: req.user?.username, action: '기능 권한 매트릭스 변경', target: 'permissions', detail: `operator=${matrix.operator.length}·viewer=${matrix.viewer.length}`, ip: req.ip || '' });
+  res.json({ ok: true, matrix: { admin: rolePermissions('admin'), ...matrix } });
+});
+adminRouter.post('/permissions/reset', adminOnly, (req, res) => {
+  const matrix = resetMatrix();
+  logAudit({ user: req.user?.username, action: '기능 권한 매트릭스 초기화', target: 'permissions', ip: req.ip || '' });
+  res.json({ ok: true, matrix: { admin: rolePermissions('admin'), ...matrix } });
 });
 
 // TOTP (Google Authenticator) management for a user — admin enrolls and hands
