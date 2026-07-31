@@ -13,6 +13,7 @@
  */
 
 import { expandIpList } from '../idrac/iprange.js';
+import { appendIdracScanLog } from '../idrac/scanLog.js';
 
 // 스캔에 실제로 사용된 자격증명의 '지문' — 평문은 절대 남기지 않는다. 계정명 + 비밀번호 길이 +
 // 비복원 해시(djb2)만 표시해, "다른 법인은 되는데 이 법인만 인증 실패"일 때 법인 간 설정을
@@ -101,7 +102,7 @@ function newReqId() {
 }
 
 /** UI가 위임 스캔 요청 → reqId 반환. noRegister=true면 에이전트가 스캔만 하고 등록은 보류(UI 확인 후 등록). */
-export function enqueueIdracScan(agent, { ips, username, password, vcenterId = '', datacenterId = '', noRegister = false }) {
+export function enqueueIdracScan(agent, { ips, username, password, vcenterId = '', datacenterId = '', noRegister = false, service = '', trigger = 'manual' }) {
   gc();
   const key = String(agent || '').trim().toLowerCase();
   if (!key) return null;
@@ -136,7 +137,7 @@ export function enqueueIdracScan(agent, { ips, username, password, vcenterId = '
   // 총 IP 수를 미리 계산해 UI가 진행률 분모를 바로 표시할 수 있게 한다(스캔 max=2048 반영).
   let total = 0;
   try { total = Math.min(expandIpList(ips).ips.length, 2048); } catch { total = 0; }
-  const j = { reqId, agent, action: 'scan', ips, username, password, vcenterId, datacenterId, noRegister: !!noRegister, state: 'pending', createdAt: Date.now(), progress: { scanned: 0, total, at: Date.now() } };
+  const j = { reqId, agent, action: 'scan', ips, username, password, vcenterId, datacenterId, service, trigger, noRegister: !!noRegister, state: 'pending', createdAt: Date.now(), progress: { scanned: 0, total, at: Date.now() } };
   addEvent(j, `스캔 잡 생성 — 에이전트 '${agent}'${datacenterId ? ` · 법인 ${datacenterId}` : ''} · 대상 IP ${total}개. 에이전트 인출 대기 중.`);
   // 사용된 자격증명 지문(평문 아님) — 법인 간 비교로 "이 법인만 인증 실패" 원인 파악용.
   addEvent(j, `사용 자격증명: ${credFingerprint(username, password)} (평문 미기록 — 정상 법인과 계정/길이/지문 비교하세요)`);
@@ -152,7 +153,7 @@ export function enqueueIdracScan(agent, { ips, username, password, vcenterId = '
  * 폴링 큐(byAgent)에는 넣지 않는다 — 에이전트 인출 대상이 아님.
  * @returns reqId 또는 null(대기 한도 초과)
  */
-export function createPushScanJob(agent, { ips, username, password, vcenterId = '', datacenterId = '', noRegister = false, mode = 'merge', edgeUrl = '' }) {
+export function createPushScanJob(agent, { ips, username, password, vcenterId = '', datacenterId = '', noRegister = false, mode = 'merge', edgeUrl = '', service = '', trigger = 'manual' }) {
   gc();
   // 인메모리 잡 총량 상한(폴링 큐와 별개) — 남용/누수 방지.
   if (jobs.size >= MAX_PENDING * 20) return null;
@@ -162,7 +163,7 @@ export function createPushScanJob(agent, { ips, username, password, vcenterId = 
   const now = Date.now();
   const j = {
     reqId, agent, action: 'scan', dispatch: 'push', edgeUrl,
-    ips, username, password, vcenterId, datacenterId, noRegister: !!noRegister, mode: mode || 'merge',
+    ips, username, password, vcenterId, datacenterId, service, trigger, noRegister: !!noRegister, mode: mode || 'merge',
     state: 'running', createdAt: now, takenAt: now, progress: { scanned: 0, total, at: now },
   };
   addEvent(j, `중앙→엣지 직접 전송(PUSH) 스캔 시작 — 에이전트 '${agent}'${datacenterId ? ` · 법인 ${datacenterId}` : ''} · 대상 IP ${total}개 · 엣지 ${edgeUrl || '(URL 미상)'}. 엣지 폴링 없이 중앙이 직접 실행합니다.`);
@@ -321,6 +322,17 @@ export function setIdracScanResult(reqId, data = {}) {
     durationMs: data.durationMs || null,
     error: data.error || null,
   };
+  // 스캔 로그(이력) — 위임 스캔의 '결과'를 영속 기록한다(설정 > 수집 서버 > 스캔 로그).
+  // 폴러가 위임 요청 시 남긴 phase=dispatch 기록과 reqId로 짝을 이룬다. 등록(register) 잡은 제외.
+  if ((j.action || 'scan') === 'scan') {
+    appendIdracScanLog({
+      trigger: j.trigger === 'periodic' ? 'periodic' : 'manual', phase: 'result', kind: 'delegated',
+      datacenterId: j.datacenterId || '', service: j.service || '', agent: j.agent || '',
+      dispatch: j.dispatch === 'push' ? 'push' : 'poll', reqId,
+      scanned: data.scanned ?? null, found: j.result.foundCount, registered: data.registered ?? null,
+      durationMs: data.durationMs ?? null, error: data.error || null,
+    });
+  }
   return true;
 }
 
