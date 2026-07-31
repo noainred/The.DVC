@@ -123,6 +123,19 @@ export const adminRouter = Router();
 
 const adminOnly = requireRole('admin');
 
+// '설정 소유 계정(settingsOwners)' 서버측 강제 — 지금까지 소유자 경계는 UI(App.jsx)에서만
+// 걸려, 소유자가 아닌 admin이 엔드포인트를 직접 호출하면 소유자 목록을 갈아치우고 소유 계층을
+// 탈취할 수 있었다(감사 지적: 클라이언트 전용 접근제어). adminOnly 뒤에 붙여 유효 소유자
+// (설정된 소유자 + 중앙 배포 admin)만 통과시킨다. 인증 비활성 시엔 통과(단일 사용자 모드).
+function requireSettingsOwner(req, res, next) {
+  if (!config.auth.enabled) return next();
+  let owners = [];
+  try { owners = loadSessionSecurity().settingsOwners || []; } catch { owners = []; }
+  const u = req.user || {};
+  if (owners.includes(u.username) || owners.includes(u.name)) return next();
+  return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '설정 소유 계정만 변경할 수 있습니다.' });
+}
+
 // 자격증명 디버그 표시용 마스킹 — 평문 비밀번호는 절대 응답에 넣지 않고 길이만 노출한다.
 // (계정명/passwordless 여부는 디버그에 유용하므로 유지)
 const maskPw = (p) => (p === '' || p == null) ? '(빈 비번/passwordless)' : `•••• (${String(p).length}자)`;
@@ -959,7 +972,7 @@ adminRouter.put('/anomaly', adminOnly, (req, res) => res.json({ ok: true, settin
 // 세션 보안(유휴 자동 로그아웃) — 조회는 자유, 변경은 OTP 재인증 + 감사 기록.
 // 편집 UI에는 '설정된' 소유 계정만(자동 포함된 중앙 배포 admin은 별도 autoOwners로 읽기전용 안내).
 adminRouter.get('/security/session', adminOnly, (_req, res) => res.json({ ...loadConfiguredSecurity(), autoOwners: managedAdminOwners() }));
-adminRouter.put('/security/session', adminOnly, (req, res) => {
+adminRouter.put('/security/session', adminOnly, requireSettingsOwner, (req, res) => {
   const username = req.user?.username || 'unknown';
   // 인증이 켜져 있으면 변경 시 본인 OTP 재인증을 강제(누가 바꿨는지 신원 확정 + 무단변경 방지).
   if (config.auth.enabled) {

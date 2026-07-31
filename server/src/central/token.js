@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
 
 // Windows 패키지는 portal.env.bat(set KEY=VAL), 그 외(systemd)는 portal.env(KEY=VAL).
 const isWin = process.platform === 'win32';
@@ -46,9 +47,10 @@ function persistEnv(key, val) {
   if (idx >= 0) lines[idx] = newLine;
   else { if (lines.length && lines[lines.length - 1].trim() !== '') lines.push(''); lines.push(newLine); }
   const out = lines.join('\n').replace(/\n{3,}/g, '\n\n').replace(/\n*$/, '\n');
-  fs.mkdirSync(path.dirname(ENV_FILE), { recursive: true });
-  fs.writeFileSync(ENV_FILE, out, { mode: 0o600 });
-  try { fs.chmodSync(ENV_FILE, 0o600); } catch { /* best effort */ }
+  // 원자적 쓰기 — portal.env는 CENTRAL_TOKEN(중앙↔에이전트 공유 비밀)을 담는 systemd
+  // EnvironmentFile이다. 비원자적 writeFileSync는 크래시/디스크풀 시 파일을 truncate해
+  // 토큰이 유실되고, 재부팅 시 systemd가 잘린 파일을 읽어 중앙↔에이전트 인증이 붕괴된다.
+  atomicWriteFileSync(ENV_FILE, out, { mode: 0o600 });
 }
 
 export function centralTokenInfo() {

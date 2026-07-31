@@ -25,3 +25,20 @@ export function atomicWriteFileSync(file, data, { mode = 0o600 } = {}) {
     throw e;
   }
 }
+
+/**
+ * 손상된 자격증명/설정 파일을 `<file>.corrupt.<ts>`로 보존한다(로드 시 JSON 파싱 실패 대응).
+ * 손상본을 조용히 빈 값으로 취급하면, 다음 저장이 '온전했던 원본'을 빈/축소 목록으로 덮어써
+ * 자격증명이 영구 유실된다(과거 감사 지적 H11/H12). 파싱 실패한 파일을 먼저 옆으로 치워
+ * 운영자가 수동 복구할 수 있게 하고, 실패해도(권한 등) best-effort로 넘어간다.
+ * @returns 보존에 성공하면 백업 경로, 아니면 null.
+ */
+export function preserveCorrupt(file, reason = '') {
+  try {
+    if (!fs.existsSync(file)) return null;
+    const bak = `${file}.corrupt.${Date.now()}`;
+    fs.renameSync(file, bak);
+    console.error(`[atomicWrite] ${path.basename(file)} 파싱 실패${reason ? `(${reason})` : ''} — 손상본을 ${path.basename(bak)}로 보존하고 빈 값으로 시작합니다. 자동 재저장이 덮어쓰기 전 수동 복구하세요.`);
+    return bak;
+  } catch { return null; }
+}

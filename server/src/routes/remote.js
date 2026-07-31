@@ -16,9 +16,20 @@ import { testDataplane, applyMapping } from '../proxy/dataplane.js';
 import { previewConfig, testDeploy, deployToProxy } from '../proxy/deploy.js';
 import { provision, deprovision } from '../proxy/provision.js';
 import { withSsh } from '../proxy/sshExec.js';
+import { issueRdpTicket } from '../proxy/rdpTicket.js';
 
 export const remoteRouter = Router();
 const adminOnly = requireRole('admin');
+
+// RDP 자격증명을 URL 쿼리스트링 대신 1회용 티켓으로 전달(감사 H18). 클라이언트는 접속 직전
+// 이 엔드포인트로 자격증명을 보내 티켓 ID를 받고, WebSocket 쿼리엔 티켓 ID만 싣는다 →
+// 비밀번호가 브라우저 히스토리/상위 프록시 액세스 로그에 남지 않는다. 터널과 동일 역할(admin/operator).
+remoteRouter.post('/rdp-ticket', requireRole('admin', 'operator'), (req, res) => {
+  const b = req.body || {};
+  if (!b.username) return res.status(400).json({ ok: false, reason: '사용자명이 필요합니다.' });
+  const ticket = issueRdpTicket({ username: b.username, password: b.password, domain: b.domain, security: b.security });
+  res.json({ ok: true, ticket });
+});
 
 // Connection info for a mapping resolves through the mapping's assigned proxy.
 const mappingProxy = (m) => getProxyById(m.proxyId);

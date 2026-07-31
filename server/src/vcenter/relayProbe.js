@@ -8,7 +8,7 @@
 import net from 'node:net';
 import tls from 'node:tls';
 import https from 'node:https';
-import { ssrfBlockReason } from '../collector/registry.js';
+import { ssrfBlockReasonResolved } from '../collector/registry.js';
 
 function tcpStep(host, port, timeoutMs) {
   return new Promise((resolve) => {
@@ -64,7 +64,9 @@ export async function probeRelayPath(rawHost, { timeoutMs = 6000 } = {}) {
   // 성공 여부를 그대로 돌려주므로(오라클), 링크로컬·메타데이터·루프백·미지정 주소는 프로브
   // 자체를 하지 않는다. 등록된 vCenter는 사내망(RFC1918)에 있어 통과한다(가드에서 허용).
   // 호출부(admin.js)를 건드리지 않기 위해 여기서 기존 반환 형태(verdict)로 즉시 반환한다.
-  const blocked = ssrfBlockReason(clean);
+  // 이 함수는 이미 async라 DNS 해석까지 검사하는 resolved 가드를 쓴다 — 169.254.169.254로
+  // 해석되는 '이름'을 통한 우회(동기 가드는 IP 리터럴만 검사)를 차단한다.
+  const blocked = await ssrfBlockReasonResolved(clean);
   if (blocked) {
     return { host, port, steps, blocked: true, reason: blocked, verdict: { state: 'blocked', text: `진단을 수행할 수 없는 주소입니다 — ${blocked}` } };
   }
