@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { usePolling } from '../api.js';
 import { Loading, ErrorBox, StateBadge, usageColor } from '../components/ui.jsx';
 import VCenterDetail from './VCenterDetail.jsx';
@@ -12,9 +12,11 @@ function Bar({ label, pct, detail }) {
   );
 }
 
-export default function VCenters({ onSelectSite }) {
+export default function VCenters({ onSelectSite, resetSignal }) {
   const { data, error, loading } = usePolling('/vcenters', {}, 15_000);
   const [openId, setOpenId] = useState(null);
+  // 상단메뉴 Platform 재클릭(resetSignal 증가) 시 vCenter 상세 드릴다운을 닫고 전체 목록으로 복귀.
+  useEffect(() => { setOpenId(null); }, [resetSignal]);
   const cardRefs = useRef({}); // vCenter id → 카드 DOM(바로가기 스크롤/반짝용)
   // 바로가기 버튼 클릭: 해당 카드로 스크롤 이동 + 반짝 하이라이트.
   const gotoCard = (id) => {

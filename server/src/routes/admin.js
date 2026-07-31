@@ -93,6 +93,7 @@ import { pushIdracScan } from '../central/idracScanPush.js';
 import { getPollerStatus, pollNow } from '../idrac/poller.js';
 import { listScanRanges, saveScanRanges, removeScanRanges } from '../idrac/scanRanges.js';
 import { startIdracScanNow, idracScanStatus, stopIdracScanNow, setIdracScanIntervalMs } from '../idrac/scanPoller.js';
+import { listIdracScanLog, idracScanLogDatacenters } from '../idrac/scanLog.js';
 import { allMeasuredPower, buildPowerDashboard, purgeStalePower, measuredPowerBreakdown, vcenterPowerCheck } from '../idrac/service.js';
 import { computeFinOps, loadFinopsConfig } from '../insights/finops.js';
 import { loadPowerSettings, savePowerSettings, filterMeasuredByMapping } from '../idrac/powerSettings.js';
@@ -1690,6 +1691,13 @@ adminRouter.post('/idrac/scan-ranges/scan', adminOnly, (req, res) => {
 });
 // 진행 상태(가벼운 폴링용).
 adminRouter.get('/idrac/scan-ranges/status', adminOnly, (_req, res) => res.json({ ok: true, status: idracScanStatus() }));
+
+// 스캔 로그(이력) — 주기/수동 스캔의 법인별 실행 기록. datacenterId 미지정 = 전체 통합.
+adminRouter.get('/idrac/scan-log', adminOnly, (req, res) => {
+  const datacenterId = String(req.query.datacenterId || '').trim();
+  const limit = Number(req.query.limit) || 300;
+  res.json({ ok: true, entries: listIdracScanLog({ datacenterId, limit }), datacenters: idracScanLogDatacenters() });
+});
 
 // 스캔 중지 — 진행 중 중앙 직접 스캔 중단 + 대기 중 위임 잡 취소(이미 인출된 위임 잡은 원격 중지 불가).
 adminRouter.post('/idrac/scan-ranges/stop', adminOnly, (req, res) => {

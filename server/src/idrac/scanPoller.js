@@ -20,6 +20,7 @@ import { scanForIdracs } from './scan.js';
 import { registerScanned } from './registry.js';
 import { pollNow } from './poller.js';
 import { enabledScanRanges, recordScanRangeRun, getScanRangeRaw, scanRangesForDatacenter, lastScanCycleAt } from './scanRanges.js';
+import { appendIdracScanLog } from './scanLog.js';
 import { enqueueIdracScan, cancelPendingIdracScanJobs } from '../central/idracScanJobs.js';
 import { pushIdracScan } from '../central/idracScanPush.js';
 import { isStopped } from '../security/emergencyStop.js';
@@ -72,18 +73,18 @@ export function stopIdracScanNow() {
 }
 
 /** 한 법인(DataCenter) 대역을 스캔+등록(또는 위임). 반환 { datacenterId, scanned, found, registered, delegated, error }. */
-async function scanOneDatacenter(e, onProgress) {
+async function scanOneDatacenter(e, onProgress, trigger = 'periodic') {
   const ips = e.ranges.join('\n');
   // 위임: 에이전트가 현지에서 스캔+자동등록(noRegister:false).
   if (e.agent && e.agent !== '__local__') {
     // dispatch=push: 중앙이 수집 서버 URL로 엣지에 직접 스캔 전송(엣지 폴링 불필요). 중앙 토큰 불요.
     if (e.dispatch === 'push') {
-      const pr = pushIdracScan(e.agent, { ips, username: e.username, password: e.password, datacenterId: e.datacenterId, noRegister: false });
+      const pr = pushIdracScan(e.agent, { ips, username: e.username, password: e.password, datacenterId: e.datacenterId, noRegister: false, service: e.service, trigger });
       return { datacenterId: e.datacenterId, delegated: true, dispatch: 'push', agent: e.agent, reqId: pr.reqId || null, error: pr.ok ? null : pr.reason };
     }
     // 기본(poll): 에이전트가 중앙으로 폴링해 잡을 인출. 중앙 토큰 필요.
     if (!config.central.token) return { datacenterId: e.datacenterId, delegated: false, error: '중앙 토큰 미설정으로 위임 불가' };
-    const reqId = enqueueIdracScan(e.agent, { ips, username: e.username, password: e.password, datacenterId: e.datacenterId, noRegister: false });
+    const reqId = enqueueIdracScan(e.agent, { ips, username: e.username, password: e.password, datacenterId: e.datacenterId, noRegister: false, service: e.service, trigger });
     return { datacenterId: e.datacenterId, delegated: true, dispatch: 'poll', agent: e.agent, reqId: reqId || null, error: reqId ? null : '위임 잡 적재 실패(대기 한도 초과)' };
   }
   // 중앙 직접 스캔 → 발견한 iDRAC을 그 법인(DataCenter)에 등록(법인 DB).
@@ -136,22 +137,34 @@ export async function runIdracScanOnce(opts = {}) {
     for (let i = 0; i < entries.length; i++) {
       if (stopRequested) { errors.push('사용자가 스캔을 중지했습니다.'); break; }
       const e = entries[i];
+      const trigger = opts.manual ? 'manual' : 'periodic';
+      const entryStart = Date.now();
       progress = { datacenterId: e.datacenterId, done: 0, total: 0, foundSoFar: foundTotal, idx: i, totalDatacenters: entries.length, startedAt: started };
       try {
         // scanForIdracs는 onProgress(done, total, foundNow)로 현재 DC의 실시간 발견 수를 준다.
         // 이전엔 3번째 인자를 버리고 foundTotal(직전 DC까지 누계)만 써서 스캔 중 '발견 0대'로
         // 보이다가 끝에 점프했다 → 누계 + 현재 DC 실시간을 합산해 표시.
-        const r = await scanOneDatacenter(e, (done, total, foundNow = 0) => { progress = { datacenterId: e.datacenterId, done, total, foundSoFar: foundTotal + foundNow, idx: i, totalDatacenters: entries.length, startedAt: started }; });
+        const r = await scanOneDatacenter(e, (done, total, foundNow = 0) => { progress = { datacenterId: e.datacenterId, done, total, foundSoFar: foundTotal + foundNow, idx: i, totalDatacenters: entries.length, startedAt: started }; }, trigger);
         results.push(r);
         if (r.delegated) delegatedTotal++;
         foundTotal += (r.found || 0);
         registeredTotal += (r.registered || 0);
         if (r.error) errors.push(`${e.datacenterId}: ${r.error}`);
         if (e.id) recordScanRangeRun(e.id, { scanned: r.scanned ?? null, found: r.found ?? null, registered: r.registered ?? null, delegated: !!r.delegated, agent: r.agent || null, error: r.error || null });
+        // 스캔 로그(이력) 적재 — 위임은 '요청' 단계로 기록하고, 결과는 에이전트 회신 시
+        // setIdracScanResult 훅이 별도 1건(phase=result)으로 남긴다(reqId로 짝 맞춤).
+        appendIdracScanLog({
+          trigger, phase: r.delegated ? 'dispatch' : 'result', kind: r.delegated ? 'delegated' : 'central',
+          datacenterId: e.datacenterId, service: e.service, agent: r.delegated ? (r.agent || e.agent) : '',
+          dispatch: r.delegated ? (r.dispatch || e.dispatch) : '', reqId: r.reqId || '',
+          scanned: r.scanned ?? null, found: r.found ?? null, registered: r.registered ?? null,
+          durationMs: r.delegated ? null : Date.now() - entryStart, error: r.error || null, stopped: r.aborted,
+        });
       } catch (err) {
         errors.push(`${e.datacenterId}: ${err.message}`);
         results.push({ datacenterId: e.datacenterId, error: err.message });
         if (e.id) recordScanRangeRun(e.id, { error: err.message });
+        appendIdracScanLog({ trigger, phase: 'result', kind: (e.agent && e.agent !== '__local__') ? 'delegated' : 'central', datacenterId: e.datacenterId, service: e.service, agent: e.agent !== '__local__' ? e.agent : '', durationMs: Date.now() - entryStart, error: err.message });
       }
     }
     // 새로 등록된 서버가 있으면 즉시 전력 1회 수집(대시보드에 바로 반영).

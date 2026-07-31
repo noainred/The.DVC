@@ -169,6 +169,9 @@ function Portal({ user, onLogout, settingsOwners }) {
 
   // Keep the URL hash in sync with the active tab, and follow back/forward.
   const setTab = (id) => { setTabState(id); window.location.hash = `#/${id}`; };
+  // Platform 탭 재클릭 신호 — vCenter 상세로 드릴다운한 상태에서 상단메뉴 Platform을 다시
+  // 누르면 전체 vCenter 목록으로 복귀한다(드릴다운은 VCenters 내부 상태라 탭 클릭만으론 못 되돌림).
+  const [platformResetSeq, setPlatformResetSeq] = useState(0);
   useEffect(() => {
     if (!tabFromHash()) window.history.replaceState(null, '', `#/${tab}`);
     const onHash = () => { const t = tabFromHash(); if (t) setTabState(t); };
@@ -258,7 +261,8 @@ function Portal({ user, onLogout, settingsOwners }) {
         </div>
         <nav className="tabs">
           {visibleTabs.map((t) => (
-            <button key={t.id} className={`tab ${tab === t.id ? 'active' : ''}`} onClick={() => setTab(t.id)}>
+            <button key={t.id} className={`tab ${tab === t.id ? 'active' : ''}`}
+              onClick={() => { if (t.id === 'vcenters') setPlatformResetSeq((n) => n + 1); setTab(t.id); }}>
               {t.label}
             </button>
           ))}
@@ -344,7 +348,7 @@ function Portal({ user, onLogout, settingsOwners }) {
          <Suspense fallback={<div className="muted" style={{ padding: 24 }}>로딩 중…</div>}>
           {tab === 'overview' && <Overview onSelectSite={selectSite} onGotoTab={setTab} />}
           {tab === 'summary' && <Summary scope={scope} onGotoTab={setTab} />}
-          {tab === 'vcenters' && <VCenters onSelectSite={selectSite} />}
+          {tab === 'vcenters' && <VCenters onSelectSite={selectSite} resetSignal={platformResetSeq} />}
           {tab === 'explore' && <Explore scope={scope} />}
           {tab === 'hosts' && <Hosts filters={filters} />}
           {tab === 'vms' && <Vms filters={filters} />}
