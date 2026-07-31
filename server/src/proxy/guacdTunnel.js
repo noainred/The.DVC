@@ -14,6 +14,7 @@
 import net from 'node:net';
 import { WebSocketServer } from 'ws';
 import { resolveTokenUser } from '../auth/auth.js';
+import { userHasPermission } from '../auth/permissions.js';
 import { getMapping, getProxyById, touchMapping } from './registry.js';
 import { consumeRdpTicket } from './rdpTicket.js';
 import { config } from '../config.js';
@@ -53,7 +54,8 @@ export function attachRdpGateway(server) {
       // resolveTokenUser = 서명/만료 + 토큰 폐기(tokenVersion) + 최신 역할 — HTTP와 동일 검증.
       const user = resolveTokenUser(url.searchParams.get('token'));
       if (!user) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); return socket.destroy(); }
-      if (!['admin', 'operator'].includes(user.role)) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); return socket.destroy(); }
+      // 기능 권한 매트릭스로 검사 — admin 은 항상 통과, 그 외는 'remote.access' 보유 시만.
+      if (!userHasPermission(user, 'remote.access')) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); return socket.destroy(); }
     }
     wss.handleUpgrade(req, socket, head, (ws) => handle(ws, url.searchParams));
   });

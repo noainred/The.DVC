@@ -6,7 +6,7 @@
 
 import { Router } from 'express';
 import { store } from '../store.js';
-import { requireRole } from '../auth/auth.js';
+import { requireRole, requirePerm } from '../auth/auth.js';
 import {
   getConfig, getConfigSafe, saveConfig,
   listMappings, listMappingsForUser, getMapping, addMapping, removeMapping, setMappingStatus, touchMapping,
@@ -24,7 +24,7 @@ const adminOnly = requireRole('admin');
 // RDP 자격증명을 URL 쿼리스트링 대신 1회용 티켓으로 전달(감사 H18). 클라이언트는 접속 직전
 // 이 엔드포인트로 자격증명을 보내 티켓 ID를 받고, WebSocket 쿼리엔 티켓 ID만 싣는다 →
 // 비밀번호가 브라우저 히스토리/상위 프록시 액세스 로그에 남지 않는다. 터널과 동일 역할(admin/operator).
-remoteRouter.post('/rdp-ticket', requireRole('admin', 'operator'), (req, res) => {
+remoteRouter.post('/rdp-ticket', requirePerm('remote.access'), (req, res) => {
   const b = req.body || {};
   if (!b.username) return res.status(400).json({ ok: false, reason: '사용자명이 필요합니다.' });
   const ticket = issueRdpTicket({ username: b.username, password: b.password, domain: b.domain, security: b.security });
@@ -49,7 +49,7 @@ remoteRouter.get('/mappings', (req, res) => {
 // 선행 '-'를 막아 ping/포트체크에 플래그(인자) 주입을 차단(첫 글자는 영숫자/IP만).
 const SAFE_HOST = /^[A-Za-z0-9._:][A-Za-z0-9._:-]*$/;
 // 프록시에서 SSH로 ping/포트체크를 대행 — 내부망 도달성 탐침이므로 admin/operator만(감사 H3/H7).
-remoteRouter.post('/probe', requireRole('admin', 'operator'), async (req, res) => {
+remoteRouter.post('/probe', requirePerm('remote.access'), async (req, res) => {
   const { vcenterId, targetHost } = req.body || {};
   const targetPort = Math.min(65535, Math.max(1, Number((req.body || {}).targetPort) || 22));
   if (!targetHost || !SAFE_HOST.test(targetHost)) return res.status(400).json({ ok: false, reason: '대상 호스트가 올바르지 않습니다.' });
@@ -173,7 +173,7 @@ remoteRouter.post('/mappings', adminOnly, async (req, res) => {
 // target+port+protocol, else create+provision one. 매핑 생성=프록시 경유 터널 개통이므로
 // admin/operator만(감사 H3/H7/H14 — viewer의 오픈릴레이/내부 피벗 차단; WS 게이트웨이 역할
 // 검사와 일관). targetHost 형식은 addMapping(SAFE_TARGET_HOST)이 최종 검증한다.
-remoteRouter.post('/quick-connect', requireRole('admin', 'operator'), async (req, res) => {
+remoteRouter.post('/quick-connect', requirePerm('remote.access'), async (req, res) => {
   const { protocol = 'ssh', targetHost, vcenterId, name } = req.body || {};
   const proto = protocol === 'rdp' ? 'rdp' : 'ssh';
   const targetPort = Number((req.body || {}).targetPort) || (proto === 'rdp' ? 3389 : 22);

@@ -23,21 +23,25 @@ const Insights = lazy(() => import('./views/Insights.jsx'));
 const ReleaseNotes = lazy(() => import('./views/ReleaseNotes.jsx'));
 
 const TABS = [
-  { id: 'overview', label: 'Overview' },
-  { id: 'summary', label: 'Summary' },
-  { id: 'vcenters', label: 'Platform' },
-  { id: 'explore', label: '탐색·랭킹' },
-  { id: 'hosts', label: '호스트' },
-  { id: 'vms', label: '가상머신' },
-  { id: 'datastores', label: '스토리지' },
-  { id: 'networks', label: '네트워크' },
-  { id: 'nsx', label: 'NSX' },
-  { id: 'alarms', label: '알람' },
-  { id: 'tools', label: '특수 기능' },
-  { id: 'insights', label: '인사이트' },
-  { id: 'settings', label: '설정', adminOnly: true, ownerOnly: true },
-  { id: 'upgrade', label: '업그레이드', adminOnly: true, feature: 'upgradeTab' },
+  { id: 'overview', label: 'Overview' }, // 랜딩(항상 노출)
+  { id: 'summary', label: 'Summary', perm: 'dashboard' },
+  { id: 'vcenters', label: 'Platform', perm: 'dashboard' },
+  { id: 'explore', label: '탐색·랭킹', perm: 'dashboard' },
+  { id: 'hosts', label: '호스트', perm: 'inv.hosts' },
+  { id: 'vms', label: '가상머신', perm: 'inv.vms' },
+  { id: 'datastores', label: '스토리지', perm: 'inv.datastores' },
+  { id: 'networks', label: '네트워크', perm: 'inv.networks' },
+  { id: 'nsx', label: 'NSX', perm: 'inv.nsx' },
+  { id: 'alarms', label: '알람', perm: 'inv.alarms' },
+  { id: 'tools', label: '특수 기능', perm: 'tools' },
+  { id: 'insights', label: '인사이트', perm: 'insights' },
+  { id: 'settings', label: '설정', adminOnly: true, ownerOnly: true, perm: 'settings' },
+  { id: 'upgrade', label: '업그레이드', adminOnly: true, feature: 'upgradeTab', perm: 'upgrade' },
 ];
+
+// 기능 권한 보유 여부 — admin 은 항상 전체. permissions 배열이 없으면(구버전/인증 비활성) 통과.
+export const hasPerm = (u, key) => !key || !u || u.role === 'admin'
+  || !Array.isArray(u.permissions) || u.permissions.includes(key);
 
 // '설정'은 지정한 소유 계정으로 로그인했을 때만 노출/접근(목록은 설정 › 세션 보안에서 변경).
 // 인증 비활성(Anonymous) 환경은 허용. owners 미전달 시 기본 ['noainred'].
@@ -136,7 +140,7 @@ function Portal({ user, onLogout, settingsOwners }) {
   const isOwner = isSettingsOwner(user, settingsOwners);
   const isAllowed = (id) => {
     const t = TABS.find((x) => x.id === id);
-    return Boolean(t && (!t.adminOnly || user.role === 'admin') && (!t.ownerOnly || isOwner));
+    return Boolean(t && (!t.adminOnly || user.role === 'admin') && (!t.ownerOnly || isOwner) && hasPerm(user, t.perm));
   };
   const tabFromHash = () => {
     // 첫 세그먼트만 탭으로 사용(예: #/tools/esxitemp → tools). 나머지는 각 뷰가 처리.
@@ -211,8 +215,15 @@ function Portal({ user, onLogout, settingsOwners }) {
     if (t.adminOnly && user.role !== 'admin') return false;
     if (t.ownerOnly && !isOwner) return false; // '설정'은 소유 계정만(설정 › 세션 보안에서 지정)
     if (t.feature && !health?.features?.[t.feature]) return false;
+    if (!hasPerm(user, t.perm)) return false;   // 기능 권한 매트릭스로 탭 노출 제어
     return true;
   });
+
+  // 현재 탭이 권한/필터로 더 이상 접근 불가하면 안전한 탭(overview)으로 되돌린다.
+  useEffect(() => {
+    if (tab !== 'overview' && !isAllowed(tab)) setTab('overview');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, user]);
 
   const filters = useMemo(() => {
     const f = {};
@@ -311,7 +322,9 @@ function Portal({ user, onLogout, settingsOwners }) {
           <div className="filters">
             <select className="select" value={region} onChange={(e) => { setRegion(e.target.value); setVcenterId(''); }}>
               <option value="">전체 리전</option>
-              {REGIONS.map((r) => <option key={r} value={r}>{r}</option>)}
+              {/* scope.regions 가 지정된 사용자는 허용 리전만 선택 가능(데이터도 서버에서 동일 제한). */}
+              {((user.scope?.regions?.length) ? REGIONS.filter((r) => user.scope.regions.includes(r)) : REGIONS)
+                .map((r) => <option key={r} value={r}>{r}</option>)}
             </select>
             <select className="select" value={vcenterId} onChange={(e) => setVcenterId(e.target.value)}>
               <option value="">전체 vCenter</option>

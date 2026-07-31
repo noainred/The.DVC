@@ -1,5 +1,6 @@
 import { Router } from 'express';
-import { requireRole } from '../auth/auth.js';
+import { requireRole, requirePerm } from '../auth/auth.js';
+import { scopedVcenterIds } from '../auth/scope.js';
 import { store } from '../store.js';
 import { currentVersion, config, loadVcenterConfig } from '../config.js';
 import { loadUiSettings, saveUiSettings } from '../ui-settings.js';
@@ -211,8 +212,11 @@ async function eachLimited(items, limit, fn) {
   }));
 }
 
-function applyFilters(items, query, snap, searchFields = ['name']) {
+function applyFilters(items, query, snap, searchFields = ['name'], user = null) {
   let out = items;
+  // 사용자 scope 를 먼저 강제 — 요청 필터로 우회할 수 없게(서버측 데이터 경계).
+  const allowed = scopedVcenterIds(user, snap);
+  if (allowed) out = out.filter((x) => allowed.has(x.vcenterId));
   if (query.vcenterId) out = out.filter((x) => x.vcenterId === query.vcenterId);
   if (query.region) {
     const ids = snap.vcenters.filter((v) => v.location?.region === query.region).map((v) => v.id);
@@ -367,8 +371,13 @@ api.get('/provision/jobs/:id', (req, res) => {
   res.json(job);
 });
 
-api.get('/vcenters', (_req, res) => {
-  res.json(sortByOrder(store.get().rollups?.sites ?? [], (s) => s.id));
+api.get('/vcenters', (req, res) => {
+  const snap = store.get();
+  let sites = snap.rollups?.sites ?? [];
+  // 사용자 scope 제한 시 허용된 vCenter(사이트)만 노출 — 필터 드롭다운/데이터 경계 일치.
+  const allowed = scopedVcenterIds(req.user, snap);
+  if (allowed) sites = sites.filter((s) => allowed.has(s.id));
+  res.json(sortByOrder(sites, (s) => s.id));
 });
 
 // Special tool: find IPv4 addresses assigned to more than one VM, optionally
@@ -544,7 +553,7 @@ api.get('/tools/ipam/scan-report.csv', (req, res) => {
 api.get('/tools/ipam/annotation', (req, res) => {
   res.json({ ip: req.query.ip, annotation: getAnnotation(req.query.ip) });
 });
-api.put('/tools/ipam/annotation', requireRole('admin', 'operator'), (req, res) => {
+api.put('/tools/ipam/annotation', requirePerm('tools'), (req, res) => {
   const { ip, memo, tags } = req.body || {};
   const r = setAnnotation(ip, { memo, tags }, req.user);
   res.status(r.ok ? 200 : 400).json(r);
@@ -564,20 +573,20 @@ api.get('/tools/ipam/ip/:ip', (req, res) => {
   res.json({ ip: req.params.ip, override: getOverride(req.params.ip) });
 });
 // 한 IP의 override 생성/수정(부분). 변경은 운영자/관리자만.
-api.put('/tools/ipam/ip/:ip', requireRole('admin', 'operator'), (req, res) => {
+api.put('/tools/ipam/ip/:ip', requirePerm('tools'), (req, res) => {
   if (req.body?.claimedVcenterId && !isKnownVcenter(req.body.claimedVcenterId)) return res.status(400).json({ ok: false, reason: '알 수 없는 vCenter입니다.' });
   const r = setOverride(req.params.ip, req.body || {}, req.user);
   if (r.ok) logAudit({ user: req.user?.username, action: 'IP 관리상태 저장', target: `IP ${req.params.ip}`, detail: JSON.stringify(r.override || {}).slice(0, 500) });
   res.status(r.ok ? 200 : 400).json(r);
 });
 // 한 IP의 override 삭제(자동발견 상태로 되돌림).
-api.delete('/tools/ipam/ip/:ip', requireRole('admin', 'operator'), (req, res) => {
+api.delete('/tools/ipam/ip/:ip', requirePerm('tools'), (req, res) => {
   const r = clearOverride(req.params.ip);
   logAudit({ user: req.user?.username, action: 'IP 관리상태 삭제', target: `IP ${req.params.ip}` });
   res.json(r);
 });
 // 여러 IP 일괄 관리(예: 한 대역 전체를 'reserved'로). body: { ips:[...], ...fields }.
-api.post('/tools/ipam/bulk', requireRole('admin', 'operator'), (req, res) => {
+api.post('/tools/ipam/bulk', requirePerm('tools'), (req, res) => {
   const { ips, ...fields } = req.body || {};
   if (fields.claimedVcenterId && !isKnownVcenter(fields.claimedVcenterId)) return res.status(400).json({ ok: false, reason: '알 수 없는 vCenter입니다.' });
   const r = setOverrideBatch(ips, fields, req.user);
@@ -603,21 +612,21 @@ api.get('/tools/ipam/policies/preview', (req, res) => {
   res.json({ spec: req.query.spec || '', valid: !!r, size: r?.size ?? 0, lo: r?.lo ?? null, hi: r?.hi ?? null });
 });
 // 정책 생성. body: { spec, status?, priority?, claimedVcenterId?, owner?, label?, deviceType?, note?, enabled? }.
-api.post('/tools/ipam/policies', requireRole('admin', 'operator'), (req, res) => {
+api.post('/tools/ipam/policies', requirePerm('tools'), (req, res) => {
   if (req.body?.claimedVcenterId && !isKnownVcenter(req.body.claimedVcenterId)) return res.status(400).json({ ok: false, reason: '알 수 없는 vCenter입니다.' });
   const r = setPolicy(req.body || {}, req.user);
   if (r.ok) { logAudit({ user: req.user?.username, action: '대역정책 저장', target: `정책 ${r.policy.spec}`, detail: JSON.stringify(r.policy).slice(0, 800) }); try { store.syncLedger(); } catch { /* */ } }
   res.status(r.ok ? 200 : 400).json(r);
 });
 // 정책 수정(부분). :id.
-api.put('/tools/ipam/policies/:id', requireRole('admin', 'operator'), (req, res) => {
+api.put('/tools/ipam/policies/:id', requirePerm('tools'), (req, res) => {
   if (req.body?.claimedVcenterId && !isKnownVcenter(req.body.claimedVcenterId)) return res.status(400).json({ ok: false, reason: '알 수 없는 vCenter입니다.' });
   const r = setPolicy({ ...(req.body || {}), id: req.params.id }, req.user);
   if (r.ok) { logAudit({ user: req.user?.username, action: '대역정책 수정', target: `정책 ${r.policy.spec}`, detail: JSON.stringify(r.policy).slice(0, 800) }); try { store.syncLedger(); } catch { /* */ } }
   res.status(r.ok ? 200 : 400).json(r);
 });
 // 정책 삭제. :id. (적용 IP는 자동발견 상태로 복귀)
-api.delete('/tools/ipam/policies/:id', requireRole('admin', 'operator'), (req, res) => {
+api.delete('/tools/ipam/policies/:id', requirePerm('tools'), (req, res) => {
   const pol = getPolicy(req.params.id);
   const r = deletePolicy(req.params.id);
   if (r.ok) { logAudit({ user: req.user?.username, action: '대역정책 삭제', target: `정책 ${pol?.spec || req.params.id}`, detail: pol ? JSON.stringify(pol).slice(0, 800) : '' }); try { store.syncLedger(); } catch { /* */ } }
@@ -878,7 +887,7 @@ async function pingLocallyAndStore(vcenterId, ips) {
 // VM IP Ping(위임) — 중앙은 VM 사설 IP에 직접 못 가므로, 그 vCenter 담당 에이전트가
 // ping을 대행한다. POST로 요청 큐잉 → 에이전트가 인출/실행/보고 → GET으로 녹/적 조회.
 // 중앙이 직접 수집하는 vCenter(에이전트 없음)는 중앙이 직접 ping해 즉시 결과를 채운다.
-api.post('/tools/ip-ping', requireRole('admin', 'operator'), async (req, res) => {
+api.post('/tools/ip-ping', requirePerm('tools'), async (req, res) => {
   const vcenterId = String(req.body?.vcenterId || '').trim();
   const ips = Array.isArray(req.body?.ips) ? req.body.ips.map((s) => String(s).trim()).filter(Boolean).slice(0, 16) : [];
   if (!vcenterId || !ips.length) return res.status(400).json({ ok: false, reason: 'vcenterId·ips가 필요합니다.' });
@@ -1592,7 +1601,7 @@ api.get('/tools/license-expiry', async (req, res) => {
 });
 
 // Trigger VMware Tools upgrade on one or more VMs. Body: { ids:[vmId,...] }.
-api.post('/vms/upgrade-tools', requireRole('admin', 'operator'), async (req, res) => {
+api.post('/vms/upgrade-tools', requirePerm('vm.reconfig'), async (req, res) => {
   const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
   if (!ids.length) return res.status(400).json({ ok: false, reason: '대상 VM이 없습니다.' });
   const snap = store.get();
@@ -1646,7 +1655,7 @@ function osFamily(os = '') {
 // 랜딩/요약 화면 — 전 사용자가 15초마다 폴링하는 무거운 경로. single-flight로 동시요청을 1회
 // 계산에 합류시켜 '다수 동시 클릭 시 사용자 수만큼 재계산'을 제거한다.
 api.get('/summary', (req, res) => memoJson(req, res, 'summary', (snap) => {
-  const vcenters = applyFilters(snap.vcenters.map((v) => ({ ...v, vcenterId: v.id })), req.query, snap, ['name']);
+  const vcenters = applyFilters(snap.vcenters.map((v) => ({ ...v, vcenterId: v.id })), req.query, snap, ['name'], req.user);
   const vcIds = new Set(vcenters.map((v) => v.id));
   const hosts = snap.hosts.filter((h) => vcIds.has(h.vcenterId));
   const vms = snap.vms.filter((v) => vcIds.has(v.vcenterId));
@@ -1787,7 +1796,7 @@ api.get('/summary', (req, res) => memoJson(req, res, 'summary', (snap) => {
 
 api.get('/hosts', (req, res) => {
   const snap = store.get();
-  let hosts = applyFilters(snap.hosts, req.query, snap, ['name', 'cluster']);
+  let hosts = applyFilters(snap.hosts, req.query, snap, ['name', 'cluster'], req.user);
   if (req.query.state) hosts = hosts.filter((h) => h.connectionState === req.query.state);
 
   // Global host summary for the top of the 호스트 screen.
@@ -1819,7 +1828,7 @@ api.get('/hosts', (req, res) => {
 api.get('/vms', (req, res) => {
   const snap = store.get();
   const q = req.query;
-  let vms = applyFilters(snap.vms, q, snap, ['name', 'guestOS', 'ipAddress', 'host']);
+  let vms = applyFilters(snap.vms, q, snap, ['name', 'guestOS', 'ipAddress', 'host'], req.user);
   if (q.powerState) vms = vms.filter((v) => v.powerState === q.powerState);
   if (q.host) vms = vms.filter((v) => v.host === q.host); // 특정 ESXi 호스트의 VM만(호스트 상세 → VM 목록)
 
@@ -1892,14 +1901,14 @@ api.get('/vms/lookup', (req, res) => {
 
 api.get('/datastores', (req, res) => {
   const snap = store.get();
-  let ds = applyFilters(snap.datastores, req.query, snap, ['name', 'type']);
+  let ds = applyFilters(snap.datastores, req.query, snap, ['name', 'type'], req.user);
   if (req.query.type) ds = ds.filter((d) => String(d.type || '').toLowerCase().includes(String(req.query.type).toLowerCase()));
   res.json({ total: ds.length, items: ds });
 });
 
 api.get('/networks', (req, res) => {
   const snap = store.get();
-  let nets = applyFilters(snap.networks, req.query, snap, ['name', 'type']);
+  let nets = applyFilters(snap.networks, req.query, snap, ['name', 'type'], req.user);
   if (req.query.type) nets = nets.filter((n) => n.type === req.query.type);
   res.json({ total: nets.length, items: nets });
 });
@@ -1909,9 +1918,9 @@ api.get('/networks', (req, res) => {
 api.get('/top', (req, res) => {
   const snap = store.get();
   const limit = Math.min(Number(req.query.limit) || 10, 100);
-  const vms = applyFilters(snap.vms, req.query, snap, ['name']);
-  const hosts = applyFilters(snap.hosts, req.query, snap, ['name']);
-  const datastores = applyFilters(snap.datastores, req.query, snap, ['name']);
+  const vms = applyFilters(snap.vms, req.query, snap, ['name'], req.user);
+  const hosts = applyFilters(snap.hosts, req.query, snap, ['name'], req.user);
+  const datastores = applyFilters(snap.datastores, req.query, snap, ['name'], req.user);
   const onVms = vms.filter((v) => v.powerState === 'POWERED_ON');
 
   const top = (arr, key, n = limit) =>
@@ -1935,19 +1944,19 @@ api.get('/top', (req, res) => {
 
 api.get('/alarms', (req, res) => {
   const snap = store.get();
-  let alarms = applyFilters(snap.alarms, req.query, snap, ['message', 'entity']);
+  let alarms = applyFilters(snap.alarms, req.query, snap, ['message', 'entity'], req.user);
   if (req.query.severity) alarms = alarms.filter((a) => a.severity === req.query.severity);
   res.json({ total: alarms.length, items: alarms });
 });
 
 // Alarm mute rules — "이 알람 앞으로 무시". Muted alarms are filtered globally.
 api.get('/alarm-mutes', (_req, res) => res.json({ mutes: listMutes() }));
-api.post('/alarm-mutes', requireRole('admin', 'operator'), (req, res) => {
+api.post('/alarm-mutes', requirePerm('inv.alarms'), (req, res) => {
   const result = addMute(req.body || {});
   if (result.ok) store.refresh().catch(() => {}); // re-apply immediately
   res.status(result.ok ? 200 : 400).json(result);
 });
-api.delete('/alarm-mutes/:id', requireRole('admin', 'operator'), (req, res) => {
+api.delete('/alarm-mutes/:id', requirePerm('inv.alarms'), (req, res) => {
   // req.params.id는 Express가 이미 1회 URL 디코드한 값 — 추가 decodeURIComponent는 이중
   // 디코드가 되어 '%' 포함 규칙(사용률 알람 등)에서 값 손상/URIError(500)를 유발한다.
   const result = removeMute(req.params.id);
