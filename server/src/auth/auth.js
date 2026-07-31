@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { authenticateAD } from './ad.js';
 import * as totp from './totp.js';
 import { checkOtpAllowed, recordOtpFailure, recordOtpSuccess } from '../security/loginRateLimit.js';
@@ -90,6 +90,9 @@ export function loadUsers() {
         return users;
       }
     } catch (err) {
+      // 손상본을 조용히 무시하고 아래에서 기본 admin을 시드하면, 다음 persistUsers가
+      // 실사용자 전부를 시드 1건으로 덮어써 계정이 영구 유실된다 → 손상본을 .corrupt로 보존.
+      preserveCorrupt(file, err.message);
       console.error(`[auth] Failed to parse users.json: ${err.message}`);
     }
   }

@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import dns from 'node:dns';
 import { config } from '../config.js';
-import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { bumpFleetRev } from '../insights/fleetRev.js';
 
 const FILE = path.join(config.configDir, 'collectors.json');
@@ -54,7 +54,10 @@ export function loadCollectors() {
     const { list, changed } = dedupeByIdCase(arr);
     if (changed) { try { save(list); } catch { /* best effort — 다음 로드에서 재시도 */ } }
     return list;
-  } catch {
+  } catch (e) {
+    // save() 주석대로 손상 시 다음 저장이 빈 목록으로 덮어써 전 수집서버·토큰이 유실된다 →
+    // 손상본을 .corrupt로 보존(자기등록으로 쓰기 빈도가 높아 노출 창이 큰 파일).
+    preserveCorrupt(FILE, e.message);
     return [];
   }
 }

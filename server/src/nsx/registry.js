@@ -7,7 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { NsxClient } from './client.js';
 import { ensureNsxDial } from './proxy.js';
 import { describeError } from '../util/errors.js';
@@ -21,7 +21,10 @@ export function loadRegistry() {
   try {
     const parsed = JSON.parse(fs.readFileSync(FILE, 'utf8'));
     return Array.isArray(parsed?.managers) ? parsed.managers : [];
-  } catch {
+  } catch (e) {
+    // save() 주석대로 손상 시 다음 저장이 빈 목록으로 덮어써 전 NSX 매니저가 유실된다 →
+    // 손상본을 .corrupt로 보존해 로드/저장 비대칭(쓰기만 원자적, 로드는 무보존)을 해소.
+    preserveCorrupt(FILE, e.message);
     return [];
   }
 }
