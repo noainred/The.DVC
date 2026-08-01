@@ -1,6 +1,6 @@
 {
   "name": "vmware-global-monitoring-portal",
-  "version": "2.204.0",
+  "version": "2.205.0",
   "private": true,
   "description": "Unified monitoring portal/dashboard for VMware vCenter infrastructure across global data centers",
   "type": "module",
@@ -10,7 +10,8 @@
     "build": "npm --prefix web run build",
     "test": "npm --prefix server test",
     "verify": "npm --prefix server test && npm --prefix web run build",
-    "start": "npm --prefix server run start"
+    "start": "npm --prefix server run start",
+    "otp-enroll": "npm --prefix server run otp-enroll --"
   },
   "devDependencies": {
     "concurrently": "^9.1.0"

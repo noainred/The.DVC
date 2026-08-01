@@ -22,7 +22,7 @@ import { rateLimit } from './util/rateLimit.js';
 import { store } from './store.js';
 import { api } from './routes/api.js';
 import { authRouter } from './routes/auth.js';
-import { authMiddleware } from './auth/auth.js';
+import { authMiddleware, warnIfNoOtpAdmin } from './auth/auth.js';
 import { auditMiddleware } from './audit.js';
 import { upgradeRouter } from './routes/upgrade.js';
 import { upgradeManager } from './upgrade/manager.js';
@@ -177,6 +177,8 @@ const server = app.listen(config.port, () => {
   console.log(`  ▸ data source: ${config.dataSource}`);
   console.log(`  ▸ poll interval: ${config.pollIntervalMs / 1000}s`);
   console.log(`  ▸ auth: ${config.auth.enabled ? 'enabled' : 'disabled'}\n`);
+  // OTP 전용 정책에서 로그인 가능한 관리자가 하나도 없으면 콘솔 등록 절차를 안내(조용한 잠금 방지).
+  try { warnIfNoOtpAdmin(); } catch { /* 안내 실패가 기동을 막지 않게 */ }
 });
 
 // 고RTT·대용량 push(분산 에이전트의 인벤토리/번들)를 고려한 명시적 서버 타임아웃.

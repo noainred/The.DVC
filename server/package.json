@@ -1,6 +1,6 @@
 {
   "name": "vmware-portal-server",
-  "version": "2.204.0",
+  "version": "2.205.0",
   "private": true,
   "type": "module",
   "description": "Aggregation API for the VMware global monitoring portal",
@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "node --watch src/index.js",
     "start": "node src/index.js",
+    "otp-enroll": "node src/tools/otp-enroll.js",
     "test": "node --test --experimental-sqlite test/*.test.js"
   },
   "dependencies": {
