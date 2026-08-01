@@ -80,6 +80,21 @@ export function verifyToken(token) {
 
 let users = null;
 
+// 데모 전용 내장 계정 — 항상 존재하며 viewer 고정. 비밀번호(또는 OTP)가 설정되어 있지 않으면
+// 로그인 자체가 불가능하다(authenticateLocal 이 passwordHash 없는 계정을 거부). 관리자가
+// 설정 › 사용자 관리에서 비밀번호를 설정하면 그때부터 로그인 가능, '로그인 차단'으로 다시 잠근다.
+export const DEMO_USERNAME = 'thedvcdemp';
+
+// 목록에 데모 계정이 없으면 추가(비번 없이 = 로그인 불가 상태로 시작). 같은 이름의 계정을
+// 사용자가 이미 만들어 둔 경우에는 건드리지 않는다(하이재킹 방지 — demo 태그도 붙이지 않음).
+function ensureDemoUser(list) {
+  if (!list.some((u) => u.username === DEMO_USERNAME)) {
+    list.push({ username: DEMO_USERNAME, name: 'Demo', role: 'viewer', demo: true });
+    return true;
+  }
+  return false;
+}
+
 export function loadUsers() {
   if (users) return users;
   const file = path.join(CONFIG_DIR, 'users.json');
@@ -88,6 +103,7 @@ export function loadUsers() {
       const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
       if (Array.isArray(parsed?.users) && parsed.users.length) {
         users = parsed.users;
+        if (ensureDemoUser(users)) { try { persistUsers(); } catch { /* 다음 저장 때 함께 기록 */ } }
         return users;
       }
     } catch (err) {
@@ -116,6 +132,7 @@ export function loadUsers() {
     }
   }
   users = [{ username: 'admin', name: 'Administrator', role: 'admin', passwordHash: hashPassword(pw), mustChangePassword: !envPw }];
+  ensureDemoUser(users);
   console.warn(`[auth] users.json이 없어 기본 관리자 "admin"을 시드했습니다 — ${note}.`);
   return users;
 }
@@ -183,6 +200,7 @@ export function listUsers() {
     username: u.username, name: u.name || u.username, role: u.role || 'viewer',
     totpEnabled: !!u.totpEnabled, hasPassword: !!u.passwordHash,
     managedBy: u.managedBy || null, // 'central' = 중앙에서 배포·관리하는 계정
+    demo: !!u.demo,                 // 내장 데모 계정(viewer 고정·삭제 불가·비번 없으면 로그인 불가)
     scope: normalizedScope(u),      // 볼 수 있는 vCenter/리전 제한(빈 배열 = 전체)
   }));
 }
@@ -226,11 +244,33 @@ export function setLocalPassword(username, password) {
   return { ok: true, totpEnabled: !!u.totpEnabled };
 }
 
+/**
+ * 로그인 차단 — 비밀번호 해시와 OTP 등록을 모두 제거해 이 계정으로 로그인할 수 없게 한다
+ * (데모 계정 잠금용). 기존 세션 토큰도 tokenVersion 인상으로 즉시 폐기된다.
+ * 다시 로그인하게 하려면 setLocalPassword 로 비밀번호를 설정하면 된다.
+ */
+export function clearLoginCredentials(username) {
+  const u = getUser(String(username || '').trim());
+  if (!u) return { ok: false, reason: '사용자를 찾을 수 없습니다.' };
+  if (u.role === 'admin' && loadUsers().filter((x) => x.role === 'admin').length <= 1) {
+    return { ok: false, reason: '마지막 관리자의 로그인은 차단할 수 없습니다.' };
+  }
+  delete u.passwordHash;
+  u.totpEnabled = false;
+  delete u.totpSecret;
+  delete u.totpPendingSecret;
+  bumpTokenVersion(u); // 라이브 세션도 즉시 종료
+  persistUsers();
+  return { ok: true };
+}
+
 export function updateUser(username, { name, role, scope } = {}) {
   const u = getUser(username);
   if (!u) return { ok: false, reason: '사용자를 찾을 수 없습니다.' };
   if (role !== undefined) {
     if (!VALID_ROLES.includes(role)) return { ok: false, reason: '역할이 올바르지 않습니다.' };
+    // 데모 계정은 viewer 고정 — 데모 자격증명이 유출돼도 권한 상승 경로가 없게 서버측에서 잠근다.
+    if (u.demo && role !== 'viewer') return { ok: false, reason: '데모 계정의 역할은 viewer로 고정되어 있습니다.' };
     // Don't allow demoting the last admin.
     if (u.role === 'admin' && role !== 'admin' && loadUsers().filter((x) => x.role === 'admin').length <= 1) {
       return { ok: false, reason: '마지막 관리자는 역할을 변경할 수 없습니다.' };
@@ -252,6 +292,7 @@ export function deleteUser(username) {
   const list = loadUsers();
   const u = list.find((x) => x.username === username);
   if (!u) return { ok: false, reason: '사용자를 찾을 수 없습니다.' };
+  if (u.demo) return { ok: false, reason: '데모 계정은 삭제할 수 없습니다. 로그인을 막으려면 [로그인 차단]으로 비밀번호를 제거하세요.' };
   if (u.role === 'admin' && list.filter((x) => x.role === 'admin').length <= 1) {
     return { ok: false, reason: '마지막 관리자는 삭제할 수 없습니다.' };
   }

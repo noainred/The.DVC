@@ -139,6 +139,22 @@ export default function UserAdmin() {
     return n ? `제한(${n})` : '전체';
   };
 
+  // ── 비밀번호 설정/로그인 차단(데모 계정 활성·잠금용) ─────────────────────────
+  const [pwEdit, setPwEdit] = useState(null); // { username, pw, pw2, error }
+  const savePassword = async () => {
+    if (pwEdit.pw.length < 8) return setPwEdit((s) => ({ ...s, error: '비밀번호는 8자 이상이어야 합니다.' }));
+    if (pwEdit.pw !== pwEdit.pw2) return setPwEdit((s) => ({ ...s, error: '비밀번호가 서로 일치하지 않습니다.' }));
+    const r = await postJson(`/admin/users/${encodeURIComponent(pwEdit.username)}/password`, { password: pwEdit.pw })
+      .catch((e) => ({ ok: false, reason: e.message }));
+    if (r.ok) { setPwEdit(null); await load(); flash(true, '비밀번호를 설정했습니다 — 이제 이 계정으로 로그인할 수 있습니다.'); }
+    else setPwEdit((s) => ({ ...s, error: r.reason }));
+  };
+  const blockLogin = async (u) => {
+    if (!window.confirm(`'${u.username}' 계정의 비밀번호/OTP를 제거해 로그인을 차단할까요?\n(활성 세션도 즉시 종료됩니다. 다시 허용하려면 비밀번호를 새로 설정하면 됩니다.)`)) return;
+    const r = await delJson(`/admin/users/${encodeURIComponent(u.username)}/password`).catch((e) => ({ ok: false, reason: e.message }));
+    if (r?.ok !== false) { await load(); flash(true, '로그인을 차단했습니다(자격증명 제거).'); } else flash(false, r.reason);
+  };
+
   return (
     <>
       <div className="flex between wrap gap" style={{ marginBottom: 10 }}>
@@ -176,17 +192,19 @@ export default function UserAdmin() {
           <tbody>
             {data.users.map((u) => (
               <tr key={u.username}>
-                <td><b>{u.username}</b></td>
+                <td><b>{u.username}</b>{u.demo && <span className="badge blue" style={{ marginLeft: 8 }} title="내장 데모 계정 — viewer 고정·삭제 불가. 비밀번호가 설정된 동안만 로그인할 수 있습니다.">데모</span>}</td>
                 <td>{u.name}</td>
                 <td>
-                  <select className="select" value={u.role} onChange={(e) => changeRole(u, e.target.value)} style={{ maxWidth: 130 }}>
+                  <select className="select" value={u.role} onChange={(e) => changeRole(u, e.target.value)} style={{ maxWidth: 130 }}
+                    disabled={u.demo} title={u.demo ? '데모 계정은 viewer 고정입니다.' : undefined}>
                     {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
                   </select>
                 </td>
                 <td>
                   {u.totpEnabled
                     ? <span className="badge green">OTP 전용</span>
-                    : <span className="badge amber">{u.hasPassword ? '비밀번호' : '미설정'}</span>}
+                    : u.hasPassword ? <span className="badge amber">비밀번호</span>
+                      : <span className="badge gray" title="비밀번호/OTP가 없어 이 계정으로는 로그인할 수 없습니다.">로그인 불가</span>}
                 </td>
                 <td>
                   <button className="tab" style={{ padding: '5px 10px', fontSize: 12 }} onClick={() => openScope(u)}
@@ -195,11 +213,21 @@ export default function UserAdmin() {
                   </button>
                 </td>
                 <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                  <button className="tab" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => setPwEdit({ username: u.username, pw: '', pw2: '', error: null })}
+                    title="비밀번호를 설정/변경합니다. 데모 계정은 비밀번호가 설정된 동안만 로그인할 수 있습니다.">비번 설정</button>
+                  {' '}
+                  {(u.hasPassword || u.totpEnabled) && (
+                    <>
+                      <button className="logout-btn" style={{ padding: '6px 10px' }} onClick={() => blockLogin(u)}
+                        title="비밀번호/OTP를 제거해 이 계정의 로그인을 차단합니다.">로그인 차단</button>
+                      {' '}
+                    </>
+                  )}
                   {u.totpEnabled
                     ? <button className="logout-btn" style={{ padding: '6px 10px' }} onClick={() => disableTotp(u)}>OTP 해제</button>
                     : <button className="login-btn" style={{ flex: 'none', padding: '6px 12px' }} onClick={() => startEnroll(u)}>OTP 등록</button>}
                   {' '}
-                  <button className="logout-btn" style={{ padding: '6px 10px' }} onClick={() => remove(u)}>삭제</button>
+                  {!u.demo && <button className="logout-btn" style={{ padding: '6px 10px' }} onClick={() => remove(u)}>삭제</button>}
                 </td>
               </tr>
             ))}
@@ -288,6 +316,28 @@ export default function UserAdmin() {
 
           {permDirty && <div className="muted" style={{ fontSize: 12, marginTop: 8, color: '#fbbf24' }}>변경사항이 저장되지 않았습니다 — [저장]을 눌러 적용하세요.</div>}
         </div>
+      )}
+
+      {/* ── 비밀번호 설정 모달(데모 계정 활성화 등) ─────────────────────────── */}
+      {pwEdit && (
+        <Modal title={`비밀번호 설정 — ${pwEdit.username}`} onClose={() => setPwEdit(null)} width={420}>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 14, lineHeight: 1.7 }}>
+            8자 이상. 저장하면 이 계정으로 <b>비밀번호 로그인</b>이 가능해집니다(기존 세션 토큰은 폐기).
+            데모 계정은 비밀번호가 설정된 동안만 로그인할 수 있습니다.
+          </div>
+          <label style={{ display: 'block', fontSize: 12, marginBottom: 6 }}>새 비밀번호</label>
+          <input className="input" type="password" autoComplete="new-password" value={pwEdit.pw}
+            onChange={(e) => setPwEdit((s) => ({ ...s, pw: e.target.value, error: null }))} style={{ width: '100%', boxSizing: 'border-box' }} />
+          <label style={{ display: 'block', fontSize: 12, margin: '12px 0 6px' }}>비밀번호 확인</label>
+          <input className="input" type="password" autoComplete="new-password" value={pwEdit.pw2}
+            onChange={(e) => setPwEdit((s) => ({ ...s, pw2: e.target.value, error: null }))} style={{ width: '100%', boxSizing: 'border-box' }}
+            onKeyDown={(e) => { if (e.key === 'Enter') savePassword(); }} />
+          {pwEdit.error && <div className="login-error" style={{ marginTop: 10 }}>{pwEdit.error}</div>}
+          <div className="flex gap" style={{ justifyContent: 'flex-end', marginTop: 16 }}>
+            <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={() => setPwEdit(null)}>취소</button>
+            <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} disabled={!pwEdit.pw} onClick={savePassword}>저장</button>
+          </div>
+        </Modal>
       )}
 
       {/* ── 데이터 범위(scope) 편집 모달 ────────────────────────────────────── */}
