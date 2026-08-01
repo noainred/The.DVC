@@ -130,7 +130,7 @@ api.get('/hosts/:id/metrics', async (req, res) => {
 
 // VM remote console (원격 콘솔). Returns VMRC + HTML5 web-console launch URLs
 // using a one-time vCenter clone ticket. Live only.
-api.get('/vms/:id/console', async (req, res) => {
+api.get('/vms/:id/console', requirePerm('vm.console'), async (req, res) => {
   const id = req.params.id;
   const snap = store.get();
   const vm = snap.vms.find((v) => v.id === id);
@@ -1601,7 +1601,7 @@ api.get('/tools/license-expiry', async (req, res) => {
 });
 
 // Trigger VMware Tools upgrade on one or more VMs. Body: { ids:[vmId,...] }.
-api.post('/vms/upgrade-tools', requirePerm('vm.reconfig'), async (req, res) => {
+api.post('/vms/upgrade-tools', requirePerm('tools'), async (req, res) => {
   const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
   if (!ids.length) return res.status(400).json({ ok: false, reason: '대상 VM이 없습니다.' });
   const snap = store.get();

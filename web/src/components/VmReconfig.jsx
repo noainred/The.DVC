@@ -1,16 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { fetchJson, postJson } from '../api.js';
+import { fetchJson, postJson, can } from '../api.js';
 import { Modal } from './ui.jsx';
 
 /**
- * VM 사양 변경 버튼/모달 — vCPU·RAM 증설, 디스크 증설/추가, NIC 추가/삭제(관리자 전용).
+ * VM 사양 변경 버튼/모달 — vCPU·RAM 증설, 디스크 증설/추가, NIC 추가/삭제.
+ * 접근 권한은 기능 권한 'vm.reconfig'로 통제(기본 admin 전용, 권한 매트릭스에서 부여 가능).
  * 안전: 증설만(감소·축소 차단은 서버에서도 강제), 변경 전 확인창, 감사로그.
  */
 export function VmReconfigButton({ vm }) {
-  const [isAdmin, setIsAdmin] = useState(false);
   const [open, setOpen] = useState(false);
-  useEffect(() => { fetchJson('/auth/me').then((r) => setIsAdmin(r.user?.role === 'admin')).catch(() => {}); }, []);
-  if (!isAdmin) return null;
+  if (!can('vm.reconfig')) return null; // 서버 라우트도 requirePerm('vm.reconfig')로 강제
   return (
     <>
       <button className="logout-btn" onClick={() => setOpen(true)}>⚙ 사양 변경</button>

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { postJson, fetchJson, getToken } from '../api.js';
+import { postJson, getToken, can } from '../api.js';
 import { Modal } from './ui.jsx';
 import { openRemoteSession } from '../remote/sessions.js';
 
@@ -24,10 +24,9 @@ export function VmRemoteButton({ item }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [probes, setProbes] = useState({}); // ip -> { loading, ok, portOpen, pingOk, pingMs, proxyName, reason }
-  // 원격 접속(터널·probe)은 서버가 admin/operator만 허용 — viewer는 probe를 생략하고
-  // 403을 '도달 불가'로 오표시하지 않게 권한 안내를 보여준다.
-  const [canRemote, setCanRemote] = useState(null); // null=확인 중
-  useEffect(() => { fetchJson('/auth/me').then((r) => setCanRemote(['admin', 'operator'].includes(r.user?.role))).catch(() => setCanRemote(true)); }, []);
+  // 원격 접속(터널·probe)은 기능 권한 'remote.access'로 통제(기본 admin/operator). 미보유 시
+  // probe를 생략하고 403을 '도달 불가'로 오표시하지 않게 권한 안내를 보여준다(버튼은 비활성).
+  const canRemote = can('remote.access');
 
   const noIp = ips.length === 0;
   const guessPort = isWindows ? 3389 : 22;

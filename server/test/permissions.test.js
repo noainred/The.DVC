@@ -57,3 +57,28 @@ test('userHasPermission: 사용자 없음/역할 불명 → false, admin → tru
   assert.ok(!perm.userHasPermission({ role: 'ghost' }, 'inv.vms'));
   assert.ok(perm.userHasPermission({ role: 'admin' }, 'anything'));
 });
+
+test('VM 3버튼 기본값: 원격콘솔(vm.console)=operator·viewer 모두, 사양변경(vm.reconfig)=admin 전용', () => {
+  perm.resetMatrix();
+  // 원격 콘솔은 기존에 전원 노출 → operator·viewer 기본 보유(무회귀).
+  assert.ok(perm.userHasPermission({ role: 'operator' }, 'vm.console'));
+  assert.ok(perm.userHasPermission({ role: 'viewer' }, 'vm.console'));
+  // 사양 변경은 기존 admin 전용 → operator·viewer 기본 미보유.
+  assert.ok(!perm.userHasPermission({ role: 'operator' }, 'vm.reconfig'));
+  assert.ok(!perm.userHasPermission({ role: 'viewer' }, 'vm.reconfig'));
+  // admin 은 당연히 전부.
+  assert.ok(perm.userHasPermission({ role: 'admin' }, 'vm.reconfig'));
+});
+
+test('특수기능 거부목록(toolsDenied): 기본 빈 목록, 저장·조회, admin 은 항상 빈 목록', () => {
+  perm.resetMatrix();
+  assert.deepEqual(perm.roleToolsDenied('operator'), []);
+  assert.deepEqual(perm.roleToolsDenied('admin'), []);
+  perm.saveMatrix({ toolsDenied: { operator: ['ipam', 'esxitemp'], viewer: ['bad key!', 'gpu'] } });
+  assert.deepEqual(perm.roleToolsDenied('operator').sort(), ['esxitemp', 'ipam']);
+  // 유효하지 않은 슬러그('bad key!')는 걸러진다.
+  assert.deepEqual(perm.roleToolsDenied('viewer'), ['gpu']);
+  // admin 은 거부되지 않는다.
+  assert.deepEqual(perm.roleToolsDenied('admin'), []);
+  perm.resetMatrix();
+});

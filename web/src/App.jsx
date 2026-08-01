@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react';
-import { usePolling, getToken, setToken, setUnauthorizedHandler, fetchAuthConfig, fetchMe, broadcastLogout, LOGOUT_BROADCAST_KEY } from './api.js';
+import { usePolling, getToken, setToken, setUnauthorizedHandler, fetchAuthConfig, fetchMe, broadcastLogout, LOGOUT_BROADCAST_KEY, setCurrentUser } from './api.js';
 import { SearchBox } from './components/ui.jsx';
 import { RemoteConsoleWindow } from './remote/RemoteConsoleWindow.jsx';
 import Login from './views/Login.jsx';
@@ -119,6 +119,9 @@ export default function App() {
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
   }, []);
+
+  // 전역 권한 접근자(api.can/toolAllowed)에 현재 사용자를 반영 — 버튼/도구 게이팅이 참조한다.
+  setCurrentUser(user === 'loading' ? null : user);
 
   if (user === 'loading') {
     return <div className="login-screen"><div className="loading">불러오는 중…</div></div>;

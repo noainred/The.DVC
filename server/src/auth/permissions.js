@@ -33,10 +33,11 @@ export const PERMISSION_CATALOG = [
   // 도구·분석
   { key: 'tools', label: '특수 기능(IPAM·핑·검색 등)', group: '도구·분석' },
   { key: 'insights', label: '인사이트(FinOps·이상탐지 등)', group: '도구·분석' },
-  // 원격·작업(상태 변경)
-  { key: 'remote.access', label: '원격 접속(SSH/RDP/콘솔)', group: '원격·작업' },
-  { key: 'vm.reconfig', label: 'VM 재구성·툴 업그레이드', group: '원격·작업' },
-  { key: 'vm.provision', label: 'VM 프로비저닝', group: '원격·작업' },
+  // 원격·작업(상태 변경) — VM 상세의 3버튼이 각각 매핑된다.
+  { key: 'remote.access', label: '원격 접속(SSH/RDP 터널)', group: '원격·작업' },
+  { key: 'vm.console', label: '원격 콘솔(VMRC/웹 콘솔)', group: '원격·작업' },
+  { key: 'vm.reconfig', label: 'VM 사양 변경(재구성)', group: '원격·작업' },
+  { key: 'vm.provision', label: 'VM 프로비저닝(생성)', group: '원격·작업' },
   { key: 'guest.deploy', label: '게스트 계정 배포', group: '원격·작업' },
   // 관리(고권한)
   { key: 'settings', label: '설정', group: '관리' },
@@ -50,16 +51,24 @@ const CATALOG_SET = new Set(ALL_PERMISSION_KEYS);
 // 기본 매트릭스(admin 은 항상 전체라 매트릭스에 담지 않는다).
 //   operator: 조회 + 도구/분석 + 원격·작업(상태 변경) — 기존 requireRole('admin','operator') 동작과 동일.
 //   viewer  : 조회 + 인사이트(읽기)만 — 상태 변경 불가.
+// operator 는 원격접속·원격콘솔은 되지만 VM 사양 변경(vm.reconfig)·프로비저닝·게스트배포는
+// 기존과 동일하게 admin 전용(기본 미보유). viewer 는 조회 + 원격 콘솔(기존 콘솔 버튼이 전원
+// 노출이었음 → 무회귀)만.
 const DEFAULT_MATRIX = {
   operator: [
     'dashboard', 'inv.hosts', 'inv.vms', 'inv.datastores', 'inv.networks', 'inv.nsx', 'inv.alarms',
-    'tools', 'insights', 'remote.access', 'vm.reconfig', 'vm.provision', 'guest.deploy',
+    'tools', 'insights', 'remote.access', 'vm.console',
   ],
   viewer: [
     'dashboard', 'inv.hosts', 'inv.vms', 'inv.datastores', 'inv.networks', 'inv.nsx', 'inv.alarms',
-    'insights',
+    'insights', 'vm.console',
   ],
 };
+
+// 특수 기능(SpecialTools) 개별 도구는 '거부목록(deny-list)'으로 관리한다 — 도구 키가 프론트에서
+// 동적으로 늘어나므로(allow-list로 매번 시드 불가), 역할별로 '막을 도구 k'만 저장한다. 빈 목록 =
+// 그 역할이 'tools' 기본 권한을 가지면 모든 도구 접근(기존 동작 유지). admin 은 거부 대상 아님.
+const DEFAULT_TOOLS_DENIED = { operator: [], viewer: [] };
 
 function matrixFile() {
   return path.join(config.configDir, 'permissions.json');
@@ -72,8 +81,17 @@ function sanitizeRow(arr) {
   return [...new Set((Array.isArray(arr) ? arr : []).filter((k) => CATALOG_SET.has(k)))];
 }
 
+// 도구 키(특수 기능 k) — 소문자/숫자/하이픈 슬러그만 허용(임의 값 차단), 중복 제거.
+function sanitizeTools(arr) {
+  return [...new Set((Array.isArray(arr) ? arr : []).map((x) => String(x || '').trim()).filter((k) => /^[a-z0-9-]+$/.test(k)))];
+}
+
 function defaultMatrix() {
-  return { operator: [...DEFAULT_MATRIX.operator], viewer: [...DEFAULT_MATRIX.viewer] };
+  return {
+    operator: [...DEFAULT_MATRIX.operator],
+    viewer: [...DEFAULT_MATRIX.viewer],
+    toolsDenied: { operator: [...DEFAULT_TOOLS_DENIED.operator], viewer: [...DEFAULT_TOOLS_DENIED.viewer] },
+  };
 }
 
 /** 편집 가능한 역할→권한 매트릭스 로드(operator/viewer 만). admin 은 항상 전체. */
@@ -84,9 +102,14 @@ export function loadMatrix() {
     try {
       const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
       const m = parsed && typeof parsed === 'object' ? (parsed.matrix || parsed) : {};
+      const td = m.toolsDenied || {};
       cached = {
         operator: sanitizeRow(m.operator ?? DEFAULT_MATRIX.operator),
         viewer: sanitizeRow(m.viewer ?? DEFAULT_MATRIX.viewer),
+        toolsDenied: {
+          operator: sanitizeTools(td.operator ?? DEFAULT_TOOLS_DENIED.operator),
+          viewer: sanitizeTools(td.viewer ?? DEFAULT_TOOLS_DENIED.viewer),
+        },
       };
       return cached;
     } catch (err) {
@@ -103,12 +126,17 @@ function persistMatrix() {
   atomicWriteFileSync(matrixFile(), JSON.stringify({ matrix: cached }, null, 2), { mode: 0o600 });
 }
 
-/** operator/viewer 두 행을 저장(부분 갱신 허용). admin 행은 무시된다(항상 전체). */
+/** operator/viewer 두 행 + 특수기능 거부목록을 저장(부분 갱신 허용). admin 행은 무시된다. */
 export function saveMatrix(next = {}) {
   const cur = loadMatrix();
+  const td = next.toolsDenied || {};
   cached = {
     operator: next.operator !== undefined ? sanitizeRow(next.operator) : cur.operator,
     viewer: next.viewer !== undefined ? sanitizeRow(next.viewer) : cur.viewer,
+    toolsDenied: {
+      operator: td.operator !== undefined ? sanitizeTools(td.operator) : cur.toolsDenied.operator,
+      viewer: td.viewer !== undefined ? sanitizeTools(td.viewer) : cur.toolsDenied.viewer,
+    },
   };
   persistMatrix();
   return cached;
@@ -119,6 +147,13 @@ export function resetMatrix() {
   cached = defaultMatrix();
   persistMatrix();
   return cached;
+}
+
+/** 역할이 접근할 수 없는 특수기능 도구 k 목록. admin 은 항상 빈 배열(전체 허용). */
+export function roleToolsDenied(role) {
+  if (role === 'admin') return [];
+  const m = loadMatrix();
+  return role === 'operator' ? [...m.toolsDenied.operator] : role === 'viewer' ? [...m.toolsDenied.viewer] : [];
 }
 
 /** 역할이 가진 권한 키 집합(Set). admin → 전체. */

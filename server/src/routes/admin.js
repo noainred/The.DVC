@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import fs from 'node:fs';
 import { config } from '../config.js';
-import { requireRole, listUsers, createUser, updateUser, deleteUser, beginTotpEnroll, confirmTotpEnroll, disableTotp, verifyUserOtp, getUser, setLocalPassword } from '../auth/auth.js';
+import { requireRole, requirePerm, listUsers, createUser, updateUser, deleteUser, beginTotpEnroll, confirmTotpEnroll, disableTotp, verifyUserOtp, getUser, setLocalPassword } from '../auth/auth.js';
 import { PERMISSION_CATALOG, ROLES, loadMatrix, saveMatrix, resetMatrix, rolePermissions } from '../auth/permissions.js';
 import { getEmergencyStatus, setEmergencyStop } from '../security/emergencyStop.js';
 import { loadSessionSecurity, saveSessionSecurity, loadConfiguredSecurity, managedAdminOwners } from '../security/securitySettings.js';
@@ -316,9 +316,9 @@ adminRouter.get('/permissions', adminOnly, (_req, res) => {
 });
 adminRouter.put('/permissions', adminOnly, (req, res) => {
   const b = req.body || {};
-  const next = b.matrix || b; // { operator:[...], viewer:[...] } 또는 { matrix:{...} }
-  const matrix = saveMatrix({ operator: next.operator, viewer: next.viewer });
-  logAudit({ user: req.user?.username, action: '기능 권한 매트릭스 변경', target: 'permissions', detail: `operator=${matrix.operator.length}·viewer=${matrix.viewer.length}`, ip: req.ip || '' });
+  const next = b.matrix || b; // { operator:[...], viewer:[...], toolsDenied:{...} } 또는 { matrix:{...} }
+  const matrix = saveMatrix({ operator: next.operator, viewer: next.viewer, toolsDenied: next.toolsDenied });
+  logAudit({ user: req.user?.username, action: '기능 권한 매트릭스 변경', target: 'permissions', detail: `operator=${matrix.operator.length}·viewer=${matrix.viewer.length}·거부(op/vw)=${matrix.toolsDenied.operator.length}/${matrix.toolsDenied.viewer.length}`, ip: req.ip || '' });
   res.json({ ok: true, matrix: { admin: rolePermissions('admin'), ...matrix } });
 });
 adminRouter.post('/permissions/reset', adminOnly, (req, res) => {
@@ -1962,7 +1962,7 @@ function resolveVmTarget(vmId) {
 }
 
 // 현재 하드웨어 + NIC 추가용 네트워크 목록.
-adminRouter.get('/vm/:id/hardware', adminOnly, async (req, res) => {
+adminRouter.get('/vm/:id/hardware', requirePerm('vm.reconfig'), async (req, res) => {
   const t = resolveVmTarget(req.params.id);
   if (t.error) return res.status(t.code).json({ ok: false, reason: t.error });
   try {
@@ -1983,7 +1983,7 @@ adminRouter.get('/vm/:id/hardware', adminOnly, async (req, res) => {
 });
 
 // 사양 변경 실행. body: { numCPUs?, memoryMB?, diskGrows?, diskAdds?, nicAdds?, nicRemoves? }
-adminRouter.post('/vm/:id/reconfig', adminOnly, async (req, res) => {
+adminRouter.post('/vm/:id/reconfig', requirePerm('vm.reconfig'), async (req, res) => {
   const t = resolveVmTarget(req.params.id);
   if (t.error) return res.status(t.code).json({ ok: false, reason: t.error });
   const b = req.body || {};
