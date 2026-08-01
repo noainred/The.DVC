@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { config } from '../config.js';
-import { authenticate, signToken, authMiddleware, requireRole, getUser, beginTotpEnroll, confirmTotpEnroll } from '../auth/auth.js';
+import { authenticate, signToken, authMiddleware, requireRole, getUser, beginTotpEnroll, confirmTotpEnroll, setupState } from '../auth/auth.js';
 import { rolePermissions, roleToolsDenied } from '../auth/permissions.js';
 import { loadAdConfig, saveAdConfig, testAd } from '../auth/ad.js';
 import { logAudit } from '../audit.js';
@@ -15,7 +15,9 @@ export const authRouter = Router();
 authRouter.get('/config', (_req, res) => {
   const ad = loadAdConfig();
   const sec = loadSessionSecurity();
-  res.json({ authEnabled: config.auth.enabled, adEnabled: Boolean(ad.enabled && ad.url), idleLogoutEnabled: sec.idleLogoutEnabled, idleLogoutMin: sec.idleLogoutMin, settingsOwners: sec.settingsOwners });
+  // setupState: 초기 구축 중이면 로그인 화면이 '최초 관리자 비밀번호 파일 경로'를 안내한다
+  // (비밀번호 값이 아니라 경로만 — 이미 문서에 공개된 고정 위치).
+  res.json({ authEnabled: config.auth.enabled, adEnabled: Boolean(ad.enabled && ad.url), idleLogoutEnabled: sec.idleLogoutEnabled, idleLogoutMin: sec.idleLogoutMin, settingsOwners: sec.settingsOwners, ...setupState() });
 });
 
 authRouter.post('/login', async (req, res) => {
@@ -39,11 +41,6 @@ authRouter.post('/login', async (req, res) => {
   }
 
   const user = await authenticate(username, password);
-  // OTP 전용 정책 차단(비밀번호는 맞음) — 무차별 대입 실패로 집계하지 않고 등록 안내를 반환.
-  if (user && user.policyBlocked) {
-    logAudit({ user: username, action: '로그인 거부(OTP 전용 정책)', detail: 'admin/operator 비밀번호 로그인 차단', ip });
-    return res.status(403).json({ error: user.reason });
-  }
   if (!user) {
     const lk = recordLoginFailure(gateIp, username);
     logAudit({ user: username, action: lk.locked ? '로그인 실패(잠금 발동)' : '로그인 실패', ip });
@@ -60,8 +57,9 @@ authRouter.post('/login', async (req, res) => {
   // 가능하게 한다(감사 M5). AD 계정은 로컬 레코드가 없어 다음 로그인 시점에 역할이 반영된다.
   const local = user.source === 'local' ? getUser(user.username) : null;
   const token = signToken({ sub: user.username, role: user.role, name: user.name, ...(local ? { src: 'local', tv: local.tokenVersion || 0 } : {}) });
-  logAudit({ user: user.username, action: '로그인', detail: user.role, ip });
+  logAudit({ user: user.username, action: '로그인', detail: `${user.role}${user.mustEnrollOtp ? ' · OTP 등록 필요(등록 전용 세션)' : ''}`, ip });
   // 로그인 직후에도 프론트가 메뉴를 바로 게이팅할 수 있게 권한/scope 를 함께 내려준다.
+  // mustEnrollOtp 이면 프론트는 OTP 등록 화면에 고정된다(서버도 requireEnrolled 로 차단).
   const enriched = { ...user, permissions: rolePermissions(user.role), toolsDenied: roleToolsDenied(user.role), scope: (local && local.scope) ? { vcenters: local.scope.vcenters || [], regions: local.scope.regions || [] } : { vcenters: [], regions: [] } };
   res.json({ token, user: enriched });
 });

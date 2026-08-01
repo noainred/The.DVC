@@ -167,15 +167,18 @@ function persistUsers() {
  */
 const _dummySalt = crypto.randomBytes(16);
 
-// 고권한 역할(admin/operator — 수퍼관리자 포함)은 **무조건 OTP 로만** 로그인한다.
-// 비밀번호 로그인은 예외 없이 차단된다(v2.205 — 초기 구축 유예 폐지).
-// viewer(데모 계정 포함)는 비밀번호 로그인 허용. 긴급 시 OTP_ROLE_ENFORCE=false 로 끌 수 있다.
+// 고권한 역할(admin/operator — 수퍼관리자 포함)의 최종 상태는 **OTP 전용 로그인**이다.
+// v2.206 부터 '부트스트랩 → 강제 등록 → 비번 폐기' 흐름으로 그 상태에 도달한다:
 //
-// ⚠️ 유예가 없으므로 '웹 로그인 → OTP 등록' 경로는 첫 admin 에게 존재하지 않는다. 대신 서버
-// 콘솔에서 실행하는 CLI 등록 도구를 쓴다(잠금 방지 필수 경로):
-//     node server/src/tools/otp-enroll.js <username>            # 시크릿 발급
-//     node server/src/tools/otp-enroll.js <username> --confirm 123456
-// 이후 admin 이 웹 사용자 관리에서 다른 admin/operator 의 OTP 를 QR 로 등록해 주면 된다.
+//   1) OTP 미등록 고권한 계정은 비밀번호로 로그인할 수 있다(최초 설치·계정 발급 직후).
+//   2) 단, 그 세션은 **OTP 등록 외 아무 것도 할 수 없다**(mustEnrollOtp → requireEnrolled 가
+//      /api 전 라우터를 차단). 프론트도 등록 화면에 고정된다.
+//   3) 등록을 확정하면 `confirmTotpEnroll` 이 비밀번호 해시를 삭제하고 토큰을 폐기한다
+//      → 이후 그 계정은 영구히 OTP 6자리로만 로그인한다(비번 로그인 경로 소멸).
+//
+// viewer(데모 계정 포함)는 이 강제 대상이 아니며 비밀번호 로그인을 계속 쓴다.
+// OTP_ROLE_ENFORCE=false 로 강제 등록을 끌 수 있다(긴급용).
+// 헤드리스 등록·잠금 복구는 콘솔 도구(server/src/tools/otp-enroll.js, otp-enroll.sh)를 쓴다.
 const OTP_ROLE_ENFORCE = process.env.OTP_ROLE_ENFORCE !== 'false';
 
 /** 고권한 역할(비밀번호 로그인 금지 대상) 여부. */
@@ -187,6 +190,25 @@ export function isOtpOnlyRole(role) {
  * 기동 시 점검 — OTP 를 등록한 admin 이 하나도 없으면 웹으로 로그인할 수 있는 관리자가 없다.
  * 유예가 폐지됐으므로 콘솔 등록 도구를 안내한다(조용히 잠기는 상황 방지).
  */
+/**
+ * 초기 설치 상태 — 로그인 화면 안내용(공개 /auth/config 에 실린다).
+ *  setupPending        : OTP 를 등록한 admin 이 아직 하나도 없음(= 초기 구축 중)
+ *  initialPasswordFile : 임의 생성된 최초 관리자 비밀번호 파일 경로(존재할 때만)
+ * 경로는 이미 문서에 공개된 고정 위치이고 **비밀번호 값 자체는 절대 싣지 않는다**.
+ * 설정이 끝나면(OTP 등록 완료) 더 이상 노출되지 않는다.
+ */
+export function setupState() {
+  try {
+    const list = loadUsers();
+    const setupPending = !list.some((u) => u.role === 'admin' && u.totpEnabled);
+    if (!setupPending) return { setupPending: false, initialPasswordFile: null };
+    const file = path.join(CONFIG_DIR, 'initial-admin-password.txt');
+    return { setupPending: true, initialPasswordFile: fs.existsSync(file) ? file : null };
+  } catch {
+    return { setupPending: false, initialPasswordFile: null };
+  }
+}
+
 export function warnIfNoOtpAdmin() {
   if (!OTP_ROLE_ENFORCE || !config.auth.enabled) return false;
   const list = loadUsers();
@@ -212,17 +234,20 @@ export function authenticateLocal(username, credential) {
     // TOTP 재사용(replay) 방지 — 이미 쓴 카운터 이하 코드는 거부하고, 성공 카운터를 기록.
     if (ctr !== user.totpLastCounter) { user.totpLastCounter = ctr; try { persistUsers(); } catch { /* */ } }
   } else {
-    const role = user.role || 'viewer';
-    // 고권한 역할은 비밀번호 검증 자체를 하지 않는다 — 비번이 맞든 틀리든 동일하게 차단해
-    // 이 경로로 비밀번호 유효성을 확인할 수 없게 한다(오라클 차단). 호출부(login)가 'OTP 등록
-    // 필요'를 안내할 수 있게 구분된 결과를 돌려준다(무차별 대입 카운터 미적용 대상).
-    if (isOtpOnlyRole(role)) {
-      try { crypto.scryptSync(String(credential || ''), _dummySalt, 64); } catch { /* 타이밍 평탄화 */ }
-      return { policyBlocked: true, username: user.username, reason: 'admin/operator 계정은 OTP(Google Authenticator) 6자리 코드로만 로그인할 수 있습니다. 비밀번호 로그인은 허용되지 않습니다 — OTP 미등록이면 관리자에게 등록을 요청하세요(첫 관리자는 서버에서 otp-enroll 도구를 사용).' };
-    }
+    // OTP 미등록 계정 — 비밀번호로 인증한다. 고권한 계정이면 아래에서 mustEnrollOtp 가 붙어
+    // 이 세션은 OTP 등록 외 아무 것도 할 수 없다(등록을 마치면 비밀번호는 삭제된다).
     if (!user.passwordHash || !verifyPassword(credential, user.passwordHash)) return null;
   }
-  return { username: user.username, name: user.name || user.username, role: user.role || 'viewer', source: 'local', totpEnabled: !!user.totpEnabled };
+  const role = user.role || 'viewer';
+  return {
+    username: user.username,
+    name: user.name || user.username,
+    role,
+    source: 'local',
+    totpEnabled: !!user.totpEnabled,
+    // 고권한 계정이 OTP 미등록 상태 → 이번 세션은 'OTP 등록 전용'.
+    mustEnrollOtp: isOtpOnlyRole(role) && !user.totpEnabled,
+  };
 }
 
 /* ------------------------------ user management ---------------------------- */
@@ -467,9 +492,14 @@ export function confirmTotpEnroll(username, code) {
   u.totpSecret = pending;
   delete u.totpPendingSecret;
   u.totpEnabled = true;
-  delete u.passwordHash; // OTP-only from now on
+  delete u.passwordHash; // OTP-only from now on — 등록 즉시 비밀번호 폐기
   bumpTokenVersion(u); // 인증수단 변경 → 기존 토큰 폐기
   persistUsers();
+  // 부트스트랩용 임의 비밀번호 파일은 관리자가 OTP 를 등록하는 순간 역할이 끝난다 → 자동 삭제
+  // (문서상 '로그인 후 수동 삭제' 안내를 잊어 평문 파일이 남는 사고를 막는다).
+  if ((u.role || '') === 'admin') {
+    try { fs.rmSync(path.join(CONFIG_DIR, 'initial-admin-password.txt'), { force: true }); } catch { /* 없으면 무시 */ }
+  }
   return { ok: true };
 }
 
@@ -524,8 +554,12 @@ export function resolveTokenUser(token) {
     const u = getUser(payload.sub);
     if (!u) return null; // 삭제된 계정
     if ((u.tokenVersion || 0) !== (payload.tv || 0)) return null; // 폐기된 토큰
-    // role·scope 는 토큰이 아니라 현재 레코드에서 읽어 변경을 즉시 반영한다.
-    return { username: payload.sub, role: u.role || 'viewer', name: payload.name, scope: normalizedScope(u) };
+    // role·scope·등록강제 여부는 토큰이 아니라 현재 레코드에서 읽어 변경을 즉시 반영한다.
+    const role = u.role || 'viewer';
+    return {
+      username: payload.sub, role, name: payload.name, scope: normalizedScope(u),
+      mustEnrollOtp: isOtpOnlyRole(role) && !u.totpEnabled,
+    };
   }
   // AD 계정 등 로컬 레코드가 없는 토큰은 scope 를 적용하지 않는다(전체 열람).
   return { username: payload.sub, role: payload.role, name: payload.name, scope: { vcenters: [], regions: [] } };
@@ -541,6 +575,21 @@ export function authMiddleware(req, res, next) {
   const user = resolveTokenUser(token);
   if (!user) return res.status(401).json({ error: 'unauthorized' });
   req.user = user;
+  next();
+}
+
+/**
+ * OTP 등록 강제 게이트 — 고권한 계정이 OTP 미등록 상태로(비밀번호로) 로그인한 세션은
+ * **OTP 등록 외 어떤 API 도 쓸 수 없다**. /api/auth/{me,totp/begin,totp/confirm} 만 열려 있고
+ * 나머지 보호 라우터에는 이 미들웨어를 붙인다. 프론트는 403 코드를 보고 등록 화면을 띄운다.
+ */
+export function requireEnrolled(req, res, next) {
+  if (req.user && req.user.mustEnrollOtp) {
+    return res.status(403).json({
+      error: 'otp_enrollment_required',
+      reason: 'OTP 등록을 마쳐야 포탈을 사용할 수 있습니다. 화면의 안내에 따라 인증 앱에 등록하세요.',
+    });
+  }
   next();
 }
 

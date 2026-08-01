@@ -3,6 +3,7 @@ import { usePolling, getToken, setToken, setUnauthorizedHandler, fetchAuthConfig
 import { SearchBox } from './components/ui.jsx';
 import { RemoteConsoleWindow } from './remote/RemoteConsoleWindow.jsx';
 import Login from './views/Login.jsx';
+import ForceOtpEnroll from './views/ForceOtpEnroll.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 
 // 탭 화면은 지연 로드(코드 스플릿)해 초기 번들/첫 로딩을 줄인다(recharts 등 무거운 의존성 분리).
@@ -126,7 +127,14 @@ export default function App() {
   if (user === 'loading') {
     return <div className="login-screen"><div className="loading">불러오는 중…</div></div>;
   }
-  if (!user) return <Login onSuccess={(u) => { setLoginNotice(''); setUser(u); }} notice={loginNotice} />;
+  if (!user) return <Login onSuccess={(u) => { setLoginNotice(''); setUser(u); }} notice={loginNotice} setup={authCfg} />;
+  // 고권한 계정이 OTP 미등록 상태로 로그인 → 등록을 마칠 때까지 이 화면에 고정(서버도 API 차단).
+  if (user.mustEnrollOtp) {
+    return <ForceOtpEnroll user={user} onExit={(completed) => {
+      logout();
+      setLoginNotice(completed ? 'OTP 등록이 완료되었습니다. 인증 앱의 6자리 코드로 로그인하세요.' : '');
+    }} />;
+  }
   return (
     <ErrorBoundary fallback={
       <div className="login-screen"><div className="error-box">

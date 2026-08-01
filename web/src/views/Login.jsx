@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { login, getToken } from '../api.js';
 import { THEMES, THEMES_CSS } from './loginThemes.jsx';
 
@@ -16,8 +16,13 @@ function nameFromToken() {
  * 랜덤 표시된다(재미 요소). 우하단 🎲 버튼으로 다른 테마를 바로 뽑아볼 수도 있다.
  * 인증 로직/상태는 여기서 소유하고, 테마는 폼 바인딩(f)만 받아 시각만 담당한다.
  */
-export default function Login({ onSuccess, notice }) {
+export default function Login({ onSuccess, notice, setup }) {
   const [welcome] = useState(nameFromToken);
+  // 초기 구축 안내 — 아직 OTP 를 등록한 admin 이 없고 최초 비밀번호 파일이 남아 있으면
+  // '서버 어디에 비번이 저장돼 있는지' 팝업으로 알려준다(경로만, 값은 절대 내려받지 않음).
+  const [setupPopup, setSetupPopup] = useState(false);
+  useEffect(() => { if (setup?.setupPending && setup?.initialPasswordFile) setSetupPopup(true); },
+    [setup?.setupPending, setup?.initialPasswordFile]);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
@@ -69,6 +74,34 @@ export default function Login({ onSuccess, notice }) {
         title={`현재 테마: ${name} — 클릭하면 다른 로그인 화면으로 바뀝니다`}>
         🎲 {name}
       </button>
+
+      {setupPopup && (
+        <div className="modal-overlay" style={{ zIndex: 49 }} onClick={(e) => { if (e.target === e.currentTarget) setSetupPopup(false); }}>
+          <div className="modal card" style={{ maxWidth: 560, border: '1px solid var(--accent,#3b82f6)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+              <span style={{ fontSize: 22 }}>🔑</span>
+              <b style={{ fontSize: 16 }}>최초 설치 — 관리자 비밀번호 위치 안내</b>
+            </div>
+            <div style={{ fontSize: 14, lineHeight: 1.8 }}>
+              아직 OTP를 등록한 관리자가 없습니다. 최초 관리자(<b>admin</b>) 비밀번호는 설치 시
+              <b> 임의 생성</b>되어 서버의 아래 파일에 저장되어 있습니다:
+              <div style={{ margin: '12px 0', padding: '10px 12px', borderRadius: 6, background: 'rgba(148,163,184,.12)' }}>
+                <code style={{ fontSize: 13, wordBreak: 'break-all' }}>{setup.initialPasswordFile}</code>
+              </div>
+              서버에서 다음 명령으로 확인하세요:
+              <div style={{ margin: '8px 0 12px', padding: '10px 12px', borderRadius: 6, background: 'rgba(148,163,184,.12)' }}>
+                <code style={{ fontSize: 13, wordBreak: 'break-all' }}>sudo cat {setup.initialPasswordFile}</code>
+              </div>
+              이 비밀번호로 로그인하면 <b>OTP 등록 화면</b>으로 이동하며, 등록을 마치면
+              <b> 비밀번호는 자동으로 삭제</b>되고 이후에는 OTP 6자리로만 로그인합니다
+              (이 파일도 함께 삭제됩니다).
+            </div>
+            <div className="flex" style={{ justifyContent: 'flex-end', marginTop: 16 }}>
+              <button className="login-btn" style={{ flex: 'none', padding: '8px 18px' }} onClick={() => setSetupPopup(false)}>확인</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {warn && (
         <div className="modal-overlay" style={{ zIndex: 50 }} onClick={(e) => { if (e.target === e.currentTarget) setWarn(false); }}>
