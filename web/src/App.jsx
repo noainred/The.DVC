@@ -34,7 +34,8 @@ const TABS = [
   { id: 'networks', label: '네트워크', perm: 'inv.networks' },
   { id: 'nsx', label: 'NSX', perm: 'inv.nsx' },
   { id: 'alarms', label: '알람', perm: 'inv.alarms' },
-  { id: 'tools', label: '특수 기능', perm: 'tools' },
+  // '특수 기능'은 항목이 많아 탭 자체는 항상 노출한다(권한 없는 도구는 화면 안에서 회색·클릭불가).
+  { id: 'tools', label: '특수 기능' },
   { id: 'insights', label: '인사이트', perm: 'insights' },
   { id: 'settings', label: '설정', adminOnly: true, ownerOnly: true, perm: 'settings' },
   { id: 'upgrade', label: '업그레이드', adminOnly: true, feature: 'upgradeTab', perm: 'upgrade' },
