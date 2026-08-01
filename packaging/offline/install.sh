@@ -107,6 +107,14 @@ systemctl daemon-reload
 systemctl enable "$SERVICE_NAME" >/dev/null 2>&1 || true
 systemctl restart "$SERVICE_NAME"
 
+# 6-1) OTP 콘솔 등록 도구 바로가기 -------------------------------------------
+# admin/operator 는 OTP 전용이라 첫 관리자 등록·잠금 복구에 이 도구가 필요하다.
+# 긴 경로를 외우지 않도록 /usr/local/bin 에 링크를 건다(best-effort).
+if [[ -x "$APP_DST/otp-enroll.sh" ]]; then
+  ln -sf "$APP_DST/otp-enroll.sh" /usr/local/bin/vmware-portal-otp 2>/dev/null \
+    && echo "==> OTP 등록 도구: vmware-portal-otp (→ $APP_DST/otp-enroll.sh)"
+fi
+
 # 7) firewalld (optional, best-effort) ---------------------------------------
 if command -v firewall-cmd &>/dev/null && systemctl is-active --quiet firewalld; then
   firewall-cmd --permanent --add-port="${PORT}/tcp" >/dev/null 2>&1 || true
@@ -125,4 +133,12 @@ echo "    URL    : http://<이 서버 IP>:${PORT}"
 echo "    상태   : systemctl status ${SERVICE_NAME}"
 echo "    로그   : journalctl -u ${SERVICE_NAME} -f"
 echo "    설정   : ${CONFIG_DIR}/portal.env  (수정 후 systemctl restart ${SERVICE_NAME})"
-echo "    기본 로그인: admin / admin123  (DEFAULT_ADMIN_PASSWORD 로 변경 가능)"
+echo ""
+echo "  ── 최초 로그인 (admin/operator 는 OTP 전용) ─────────────────────────"
+echo "    1) 임의 생성된 최초 비밀번호 확인:"
+echo "       sudo cat ${CONFIG_DIR}/initial-admin-password.txt"
+echo "       (로그인 화면에도 이 경로가 팝업으로 안내됩니다. DEFAULT_ADMIN_PASSWORD 를"
+echo "        미리 지정했다면 그 값을 쓰세요.)"
+echo "    2) admin 으로 로그인 → 화면의 안내에 따라 OTP(QR) 등록을 마치면"
+echo "       비밀번호는 자동 삭제되고 이후에는 OTP 6자리로만 로그인합니다."
+echo "    · 웹 없이 콘솔에서 등록하려면: sudo vmware-portal-otp admin"

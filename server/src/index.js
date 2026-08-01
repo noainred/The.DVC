@@ -22,7 +22,7 @@ import { rateLimit } from './util/rateLimit.js';
 import { store } from './store.js';
 import { api } from './routes/api.js';
 import { authRouter } from './routes/auth.js';
-import { authMiddleware, warnIfNoOtpAdmin } from './auth/auth.js';
+import { authMiddleware, requireEnrolled, warnIfNoOtpAdmin } from './auth/auth.js';
 import { auditMiddleware } from './audit.js';
 import { upgradeRouter } from './routes/upgrade.js';
 import { upgradeManager } from './upgrade/manager.js';
@@ -121,12 +121,12 @@ app.use('/api/central', centralRouter);                // token-gated agent<->ce
 app.use('/dl', dlSourceRouter);                        // 중앙 업그레이드 소스(versions.json + 번들, 공개)
 app.use('/metrics', metricsExportRouter);              // Prometheus/OTel 익스포터(선택 토큰)
 app.use('/api/auth', authRouter);                      // public: login / config / me
-app.use('/api/upgrade', authMiddleware, upgradeRouter); // admin-gated auto-upgrade control
-app.use('/api/admin', authMiddleware, auditMiddleware, adminRouter);     // admin-gated vCenter management
-app.use('/api/remote', authMiddleware, auditMiddleware, remoteRouter);   // remote access (HAProxy/SSH/RDP)
-app.use('/api/insights', authMiddleware, insightsRouter); // FinOps·이상탐지·예측·보안·토폴로지·인시던트·ChatOps
-app.use('/api/ping', authMiddleware, pingRouter);       // 네트워크 Ping 모니터링(조회=인증, 대상관리=관리자)
-app.use('/api', authMiddleware, api);                   // protected resource endpoints
+app.use('/api/upgrade', authMiddleware, requireEnrolled, upgradeRouter); // admin-gated auto-upgrade control
+app.use('/api/admin', authMiddleware, requireEnrolled, auditMiddleware, adminRouter);     // admin-gated vCenter management
+app.use('/api/remote', authMiddleware, requireEnrolled, auditMiddleware, remoteRouter);   // remote access (HAProxy/SSH/RDP)
+app.use('/api/insights', authMiddleware, requireEnrolled, insightsRouter); // FinOps·이상탐지·예측·보안·토폴로지·인시던트·ChatOps
+app.use('/api/ping', authMiddleware, requireEnrolled, pingRouter);       // 네트워크 Ping 모니터링(조회=인증, 대상관리=관리자)
+app.use('/api', authMiddleware, requireEnrolled, api);                   // protected resource endpoints
 
 // 외부 공개용 소개 페이지 — 로그인 없이 접근 가능한 정적 데모(/intro, /intro/light.html).
 // 실데이터·API와 완전히 분리된 셀프부트 페이지라 인증 미들웨어를 타지 않는다.

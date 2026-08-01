@@ -46,14 +46,22 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
 - **SSRF 가드**: 외부 입력 host를 네트워크로 찌르는 신규 기능은 `collector/registry.js ssrfBlockReason`(또는 async `ssrfBlockReasonResolved`)를 통과시킨다. RFC1918은 사내망 대상이라 허용, 링크로컬/루프백/우회표기(IPv4-mapped·10/16/8진수)는 차단.
 - **셸 명령 조립**: 사용자·원격 출력 값은 화이트리스트 정규식으로 검증 후에만 삽입(선행 `-` 차단 포함). 원격 명령의 출력(유닛명·경로)도 신뢰하지 말고 재검증한다.
 - **OTP는 1회용 + 잠금**: 로그인·민감작업 재인증 모두 사용 카운터(minCounter)를 대조하고 실패 잠금을 건다.
-- **고권한 OTP 전용 로그인(v2.204 → v2.205 강화)**: admin/operator 로컬 계정은 비밀번호 로그인을
-  **예외 없이** 거부한다(`authenticateLocal` → `policyBlocked`). v2.204의 초기 구축 유예
-  (`otpBootstrapGrace`)는 사용자 요청으로 **폐지**됐다. 비번 검증 자체를 수행하지 않아(맞든 틀리든
-  동일 응답) 이 경로가 비밀번호 오라클이 되지 않는다. viewer·데모는 비번 로그인 허용.
-  - ⚠️ **`server/src/tools/otp-enroll.js`(콘솔 등록 도구)를 없애지 말 것** — 유예가 없으므로 첫
-    관리자의 OTP 등록·잠금 복구 경로는 이 CLI가 유일하다(웹은 로그인해야 등록 가능한데 로그인이
-    막힘). 기동 시 `warnIfNoOtpAdmin()`이 OTP 등록 admin 부재를 경고하며 이 절차를 안내한다.
-    긴급 해제는 `OTP_ROLE_ENFORCE=false`.
+- **고권한 OTP 전용 + 강제 등록(v2.206)**: admin/operator 로컬 계정의 최종 상태는 OTP 전용이며,
+  '부트스트랩 → 강제 등록 → 비번 폐기' 3단계로 도달한다. 이 3단계를 하나라도 빼면 안 된다:
+  1. OTP 미등록 계정만 비밀번호 로그인 허용(최초 설치·계정 발급 직후 경로).
+  2. 그 세션은 `mustEnrollOtp`가 붙고 **`requireEnrolled`가 /api 전 보호 라우터를 차단**한다
+     (`/api/auth/{me,totp/begin,totp/confirm}`만 열림). 새 보호 라우터를 mount 할 때
+     `authMiddleware` 뒤에 `requireEnrolled`를 빠뜨리면 등록 전 세션이 그 API를 쓸 수 있다.
+  3. `confirmTotpEnroll`이 **passwordHash 삭제 + tokenVersion 인상**을 수행한다 — 이 삭제를
+     제거하면 비밀번호 로그인 경로가 영구히 남아 정책이 무의미해진다. admin이면
+     `initial-admin-password.txt`도 함께 지운다.
+  - `mustEnrollOtp`는 토큰이 아니라 `resolveTokenUser`에서 **매 요청 사용자 레코드 기준**으로
+    계산한다(등록 즉시 반영·우회 불가).
+  - ⚠️ **콘솔 등록 도구(`server/src/tools/otp-enroll.js` + 래퍼 `otp-enroll.sh`)를 없애지 말 것** —
+    헤드리스 등록과 '모든 admin이 OTP 분실' 잠금 복구 경로다. 래퍼는 번들 Node 경로·CONFIG_DIR·
+    서비스 계정 강등을 처리하므로 문서에서 `node`를 직접 안내하지 말 것(root 실행 시 users.json이
+    root 소유가 되어 포탈이 쓰기 불가). 기동 시 `warnIfNoOtpAdmin()`이 부재를 경고한다.
+    긴급 해제는 `OTP_ROLE_ENFORCE=false`. viewer·데모는 강제 대상이 아니다.
 - **기능 권한은 서버가 진실의 원천**: `auth/permissions.js` 매트릭스 + `requirePerm(key)`로 라우트를
   보호한다. 프론트 `can()/toolAllowed()`는 UX 게이팅일 뿐이므로, 새 상태변경 라우트에 `requirePerm`을
   빠뜨리면 메뉴만 숨겨진 채 API가 열린다. WS SSH/RDP 게이트웨이도 `userHasPermission('remote.access')`로

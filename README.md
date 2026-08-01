@@ -137,13 +137,12 @@ npm run build && npm start   # API가 web/dist 서빙 → http://localhost:4000
 
 최초 계정: **`admin`** + 비밀번호는 `DEFAULT_ADMIN_PASSWORD`(설정 시) 또는 **최초 기동 시 임의 생성되어 `$CONFIG_DIR/initial-admin-password.txt`(0600)에 저장**됩니다(알려진 기본 비번 폐지, v2.152.0). 로그인 후 즉시 변경하고 파일 삭제. 운영 시 `AUTH_SECRET` 지정 권장(미지정 시 재시작마다 세션 무효).
 
-> 🔐 **v2.205+ OTP 전용 정책(예외 없음)**: admin·operator는 **비밀번호로 로그인할 수 없습니다**. 따라서 첫 관리자는 웹이 아니라 **서버 콘솔에서 OTP를 등록**해야 합니다:
-> ```bash
-> npm run otp-enroll -- --list           # 계정·OTP 상태 확인
-> npm run otp-enroll -- admin            # 설정 키(수동 입력 키) 발급
-> npm run otp-enroll -- admin --confirm 123456   # 인증 앱 코드로 확정
-> ```
-> 등록 후 그 계정으로 로그인하면, 다른 admin·operator의 OTP는 **설정 › 사용자 관리에서 QR로** 등록해 줄 수 있습니다. 긴급 시 `OTP_ROLE_ENFORCE=false`로 정책을 임시 해제할 수 있습니다.
+> 🔐 **v2.206+ OTP 전용 정책 + 강제 등록**: admin·operator의 최종 상태는 **OTP 전용 로그인**입니다. 최초 설치에서는 다음 흐름으로 도달합니다.
+> 1. 로그인 화면이 **최초 관리자 비밀번호 파일 경로를 팝업으로 안내**합니다(`sudo cat $CONFIG_DIR/initial-admin-password.txt`).
+> 2. 그 비밀번호로 로그인하면 곧바로 **"OTP 등록" 화면에 고정**됩니다 — 서버가 등록 외 모든 API를 차단합니다.
+> 3. QR 스캔 후 6자리를 입력해 등록을 마치면 **비밀번호가 즉시 삭제**되고(비번 파일도 자동 삭제), 이후에는 OTP로만 로그인합니다.
+>
+> 헤드리스 등록·잠금 복구는 콘솔 도구를 씁니다: `sudo vmware-portal-otp admin`(설치본) 또는 `npm run otp-enroll -- admin`(소스). 긴급 해제는 `OTP_ROLE_ENFORCE=false`.
 > 함께 시드되는 계정: **`noainred`**(수퍼관리자), **`thedvcdemp`**(데모 — viewer라 비밀번호 로그인 가능, 단 비번 설정 전까지는 로그인 불가).
 git 소스로 실행하면 `CONFIG_DIR` 기본값이 `server/config` 라 이 파일이 저장소 안에 생기지만, `.gitignore`(`server/config/*.txt`)로 차단되어 커밋되지 않습니다.
 
@@ -187,7 +186,7 @@ git 소스로 실행하면 `CONFIG_DIR` 기본값이 `server/config` 라 이 파
 | `AUTH_TOKEN_TTL` | `8h` | 토큰 유효기간 |
 | `DEFAULT_ADMIN_PASSWORD` | (임의생성) | 초기 admin 비밀번호. 미설정 시 최초 기동에 임의 생성 → `$CONFIG_DIR/initial-admin-password.txt` |
 | `TOTP_ISSUER` | `VMware Portal` | TOTP 표시명 |
-| `OTP_ROLE_ENFORCE` | `true` | **admin·operator OTP 전용 로그인 강제**(v2.205부터 예외 없음). 고권한 로컬 계정은 비밀번호로 **절대** 로그인할 수 없고 403 + OTP 등록 안내를 받습니다(비번 검증 자체를 하지 않아 오라클도 없음). 첫 관리자 OTP 등록·잠금 복구는 서버 콘솔 도구 `npm run otp-enroll -- <username>`. 긴급 해제는 `false`. AD 계정·viewer·데모 계정은 대상 아님 |
+| `OTP_ROLE_ENFORCE` | `true` | **admin·operator OTP 강제 등록**(v2.206+). OTP 미등록 고권한 계정은 최초 1회 비밀번호로 로그인되지만 그 세션은 **등록 외 모든 API가 차단**되고, 등록을 마치면 **비밀번호가 삭제**되어 이후 OTP 전용이 됩니다. `false`로 강제를 해제(긴급용). AD 계정·viewer·데모 계정은 대상 아님 |
 | `AD_ENABLED`, `AD_URL`, `AD_DOMAIN`, `AD_BASE_DN`, `AD_*_GROUP`, `AD_DEFAULT_ROLE` | — | Active Directory(LDAP) 연동·그룹→역할 매핑 |
 | `AD_GROUP_MATCH` | `exact` | 그룹→역할 매칭 방식. 기본은 **그룹명(CN)/전체 DN 완전일치**. `substring`은 구버전 호환용(부분문자열 매칭 — 권한 상승 위험, 비권장) |
 | `AD_TLS_REJECT_UNAUTHORIZED` | `true` | LDAPS 인증서 검증(기본 ON — `false`로만 opt-out) |
@@ -406,8 +405,12 @@ sudo ./install.sh --port 4000
 
 - 자격증명/시크릿(`vcenters.json`, `users.json`, `*-assignments.json`, `central-agent-*.json`, `horizon.json`, 스캔/게스트 계정 등)은 `CONFIG_DIR`에 `0600` + **원자적 쓰기**(tmp+fsync+rename)로 저장되고 API 응답에서 마스킹됩니다. 손상 시 `<파일>.corrupt.<ts>`로 보존해 조용한 유실을 막습니다. 운영 시 `AUTH_SECRET` 지정 + 최초 임의 비밀번호(`initial-admin-password.txt`) 변경 필수. 보안 응답 헤더(X-Frame-Options·nosniff·HSTS)·CORS 기본 차단·업그레이드 sha256 필수 등은 [설치 가이드 §7](docs/INSTALL.md) 참고.
 - **역할(RBAC) + 기능 권한** — `admin` / `operator` / `viewer` 3역할에 **기능 권한 매트릭스**(17개 키)를 얹어 설정 › 사용자 관리에서 역할별로 조정합니다. 상태변경 API와 **브라우저 SSH/RDP 터널**은 해당 권한(`remote.access` 등)이 있어야 하며, 기본값은 종전대로 `admin`·`operator`만 가능하고 viewer는 조회 전용입니다. **서버가 진실의 원천**이라 UI에서 버튼을 숨기는 것과 별개로 API 직접 호출도 차단됩니다. 비밀번호·역할 변경·계정 삭제·로그인 차단 시 그 계정의 **기존 토큰이 즉시 무효화**됩니다.
-- **고권한 OTP 전용 로그인 (v2.205+, 예외 없음)** — `admin`·`operator`(수퍼관리자 포함) 로컬 계정은 **OTP 6자리로만** 로그인합니다. 비밀번호 로그인은 **어떤 경우에도 불가**하며, 서버는 비번 검증조차 하지 않고(맞든 틀리든 동일 응답 — 비밀번호 오라클 차단) 403 + 'OTP 등록 필요'를 반환합니다(무차별 대입 카운터 미집계, 감사 로그 기록). viewer·데모 계정은 비밀번호 로그인이 가능합니다.
-  - 유예가 없으므로 **첫 관리자의 OTP 등록은 서버 콘솔 도구**로 합니다: `npm run otp-enroll -- <username>` → `--confirm <6자리>`. 이후 다른 계정은 웹 사용자 관리에서 QR로 등록. 기동 시 OTP 등록 admin이 하나도 없으면 서버 로그가 이 절차를 안내합니다. 긴급 해제는 `OTP_ROLE_ENFORCE=false`.
+- **고권한 OTP 전용 로그인 + 강제 등록 (v2.206+)** — `admin`·`operator`(수퍼관리자 포함) 로컬 계정은 최종적으로 **OTP 6자리로만** 로그인합니다. 도달 흐름은 3단계입니다:
+  1. **부트스트랩** — OTP 미등록 계정만 비밀번호로 로그인 가능(최초 설치·계정 발급 직후).
+  2. **강제 등록** — 그 세션은 `mustEnrollOtp`로 표시되어 **OTP 등록 외 모든 API가 차단**(`requireEnrolled` → 403 `otp_enrollment_required`)되고, 프론트도 등록 화면에 고정됩니다.
+  3. **비번 폐기** — 등록 확정 시 서버가 **비밀번호 해시를 삭제**하고 토큰을 폐기 → 이후 비밀번호 로그인 경로 자체가 사라집니다. 최초 관리자용 `initial-admin-password.txt`도 자동 삭제됩니다.
+  - 로그인 화면은 초기 구축 중에만 **비밀번호 파일 경로를 팝업으로 안내**합니다(값이 아닌 경로만, 등록 완료 후 노출 중단).
+  - 헤드리스 등록·잠금 복구: `sudo vmware-portal-otp <username>`(설치본) / `npm run otp-enroll -- <username>`(소스). 기동 시 OTP 등록 admin이 없으면 서버 로그가 절차를 안내합니다. 긴급 해제는 `OTP_ROLE_ENFORCE=false`. viewer·데모 계정은 강제 대상이 아닙니다.
 - **특수 계정** — `noainred`(수퍼관리자)는 항상 admin이 보장되고 강등·삭제·로그인 차단이 거부되며 설정 소유자에 자동 포함됩니다. `thedvcdemp`(데모)는 viewer 고정·삭제 불가이며 **비밀번호가 설정된 동안에만** 로그인됩니다([로그인 차단]으로 즉시 잠금 + 활성 세션 종료).
 - **사용자별 데이터 범위(scope)** — 계정에 허용 vCenter/리전을 지정하면 인벤토리 목록과 vCenter 필터가 서버에서 그 범위로 제한됩니다(외주·감사·데모 계정에 유용). 전역 KPI 합계 등 일부 집계 화면은 후속 확대 예정.
 - **엣지 토큰 스코프** — 공유 `CENTRAL_TOKEN` 하나를 전 엣지가 쓰면 엣지 1대 침해로 다른 사이트 자격증명까지 노출됩니다. **설정 → 수집 서버 → 🔑 엣지별 개별 central 토큰**에서 사이트별 토큰을 발급해 이관하세요(무중단, 미이관 엣지는 화면에 표시). 이관 후 `CENTRAL_REQUIRE_AGENT_TOKEN=true`.

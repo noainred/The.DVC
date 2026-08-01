@@ -78,36 +78,53 @@ sudo ./install.sh --port 4000
 > 예전 문서의 `admin/admin123` 고정 기본값은 **보안상 폐지**되었습니다(알려진 기본 비번 제거).
 > 무인 배포로 비번을 고정하려면 설치 전에 `portal.env`에 `DEFAULT_ADMIN_PASSWORD=<강력한값>`을 넣으세요.
 
-#### ★ 설치 직후 반드시 할 것 — 콘솔에서 OTP 등록 (v2.205.0부터 필수)
+#### ★ 설치 직후 반드시 할 것 — OTP 등록 (v2.206.0 기준)
 
-`admin`·`operator` 계정은 **OTP(Google Authenticator) 6자리로만 로그인**하며, **비밀번호 로그인은
-예외 없이 차단**됩니다. 따라서 **첫 관리자는 웹으로 OTP를 등록할 수 없고**, 반드시 서버 콘솔에서
-등록 도구를 실행해야 합니다(위 `initial-admin-password.txt`는 viewer 계정 생성 등 다른 용도로만
-의미가 있으며, admin 로그인에는 쓸 수 없습니다).
+`admin`·`operator` 계정의 최종 상태는 **OTP(Google Authenticator) 6자리 전용 로그인**입니다.
+최초 설치에서는 아래 흐름으로 그 상태에 도달합니다.
+
+**① 웹에서 등록(권장 — 대부분 이 방법)**
+
+1. 브라우저로 포탈에 접속하면, 아직 OTP를 등록한 관리자가 없는 동안 **최초 관리자 비밀번호가
+   저장된 파일 경로가 팝업으로 안내**됩니다. 그 값을 확인합니다:
+   ```bash
+   sudo cat /etc/vmware-portal/initial-admin-password.txt
+   ```
+2. `admin` + 그 비밀번호로 로그인합니다.
+3. 로그인하면 곧바로 **"OTP 등록이 필요합니다" 화면에 고정**됩니다 — 이 세션은 등록 외에는
+   아무 기능도 쓸 수 없습니다(서버가 API를 차단). QR을 인증 앱으로 스캔하고 6자리 코드를 입력해
+   등록을 완료합니다.
+4. 등록이 확정되는 즉시 **그 계정의 비밀번호가 삭제**되고(`initial-admin-password.txt`도 자동 삭제),
+   이후에는 **OTP 6자리로만** 로그인합니다.
+5. 다른 admin·operator 계정도 동일합니다 — 관리자가 **설정 → User Control → 메인포탈 사용자
+   관리**에서 비밀번호를 발급해 주면, 그 사용자는 최초 1회 비밀번호로 로그인한 뒤 강제로 OTP를
+   등록하고 비밀번호는 사라집니다.
+
+**② 콘솔에서 등록(헤드리스·잠금 복구용)**
+
+웹을 쓸 수 없거나 모든 관리자가 OTP를 잃은 경우 서버에서 직접 등록합니다.
 
 ```bash
-# 오프라인 설치본(설치 경로/CONFIG_DIR 은 환경에 맞게)
-cd /opt/vmware-portal/app
-sudo CONFIG_DIR=/etc/vmware-portal node server/src/tools/otp-enroll.js --list      # 계정·OTP 상태
-sudo CONFIG_DIR=/etc/vmware-portal node server/src/tools/otp-enroll.js admin       # 설정 키 발급
-#  → 인증 앱에서 '설정 키 직접 입력(Enter a setup key)'에 출력된 키를 입력
-sudo CONFIG_DIR=/etc/vmware-portal node server/src/tools/otp-enroll.js admin --confirm 482913
+sudo vmware-portal-otp --list                    # 계정·OTP 상태 (설치 시 생성되는 바로가기)
+sudo vmware-portal-otp admin                     # 설정 키 발급 → 인증 앱에 수동 입력
+sudo vmware-portal-otp admin --confirm 482913    # 앱 코드로 확정
+sudo vmware-portal-otp admin --disable           # 해제(재등록용)
+
+# 바로가기가 없는 경우(구버전 설치본 등)
+sudo /opt/vmware-portal/app/otp-enroll.sh --list
 
 # git 소스/개발 환경
 npm run otp-enroll -- --list
-npm run otp-enroll -- admin
 npm run otp-enroll -- admin --confirm 482913
 ```
 
-1. 위 절차로 **admin 계정 OTP 등록을 확정**합니다(확정 전에는 기존 상태가 유지됩니다).
-2. 그 계정으로 웹 로그인(OTP 6자리) → **설정 → User Control → 메인포탈 사용자 관리**.
-3. 이후 다른 admin·operator 계정의 OTP는 **웹에서 QR로** 등록해 전달하면 됩니다(콘솔 불필요).
-4. 서비스 실행 계정으로 실행해야 `users.json`을 쓸 수 있습니다(보통 `sudo`).
-
-> **잠금 복구**: 모든 admin이 OTP를 잃었다면 같은 도구로 재등록하거나(`--disable` 후 재등록),
-> `portal.env`에 `OTP_ROLE_ENFORCE=false` → 재시작으로 정책을 임시 해제한 뒤 복구하고 다시
-> 제거하세요. 포탈 기동 시 OTP 등록 admin이 하나도 없으면 **서버 로그에 이 절차가 안내**됩니다.
-> AD 계정은 이 정책의 대상이 아닙니다(AD 인증 체계를 따름).
+> 래퍼(`otp-enroll.sh` / `vmware-portal-otp`)가 번들 Node 경로·`CONFIG_DIR`·서비스 계정 강등을
+> 모두 자동 처리합니다. **root로 직접 `node`를 실행하지 마세요** — `users.json`이 root 소유가 되어
+> 이후 포탈이 사용자 정보를 저장하지 못합니다.
+>
+> **긴급 해제**: `portal.env`에 `OTP_ROLE_ENFORCE=false` → 재시작하면 강제 등록이 비활성화됩니다
+> (복구 후 다시 제거하세요). 포탈 기동 시 OTP 등록 admin이 하나도 없으면 **서버 로그에도 이 절차가
+> 안내**됩니다. AD 계정은 이 정책의 대상이 아닙니다(AD 인증 체계를 따름).
 
 #### 함께 시드되는 특수 계정
 
@@ -254,7 +271,7 @@ sudo firewall-cmd --permanent --add-port=4000/tcp && sudo firewall-cmd --reload
 | 항목 | 설명 |
 |---|---|
 | **초기 비번** | `initial-admin-password.txt`로 로그인 후 **즉시 변경**하고 파일 삭제(§2.2). |
-| **★ 고권한 OTP 전용** | `admin`·`operator`는 **OTP로만 로그인**하며 비밀번호 로그인은 **예외 없이 차단**됩니다(v2.205+). 설치 직후 §2.2의 **콘솔 등록 도구**(`otp-enroll.js`)로 첫 관리자 OTP 등록을 반드시 완료하세요. 잠금 시 복구도 같은 도구 또는 `OTP_ROLE_ENFORCE=false`. |
+| **★ 고권한 OTP 전용** | `admin`·`operator`의 최종 상태는 **OTP 전용 로그인**입니다(v2.206+). OTP 미등록 계정만 최초 1회 비밀번호로 로그인할 수 있고, 그 세션은 **OTP 등록 외 모든 API가 차단**되며 등록을 마치면 **비밀번호가 삭제**됩니다. 설치 직후 §2.2 절차로 첫 관리자 등록을 완료하세요. 콘솔 등록·잠금 복구는 `sudo vmware-portal-otp`, 긴급 해제는 `OTP_ROLE_ENFORCE=false`. |
 | **기능 권한 매트릭스** | 설정 → 사용자 관리 하단에서 역할(operator/viewer)별로 **기능 권한 17종**과 **특수기능 도구별 접근**을 켜고 끕니다. 서버(`requirePerm`)와 WS SSH/RDP 게이트웨이가 강제하므로 UI를 우회한 API 호출도 차단됩니다. admin은 항상 전체(잠김 방지). 기본값은 종전 role 동작과 동일. |
 | **데이터 범위(scope)** | 계정별로 **볼 수 있는 vCenter/리전**을 제한할 수 있습니다(외주·감사·데모 계정 권장). 미지정 시 전체. |
 | **특수 계정** | `noainred`(수퍼관리자 — 강등/삭제/차단 불가), `thedvcdemp`(데모 — 비번 설정 시에만 로그인, [로그인 차단]으로 즉시 잠금). §2.2 표 참고. |
