@@ -39,6 +39,11 @@ authRouter.post('/login', async (req, res) => {
   }
 
   const user = await authenticate(username, password);
+  // OTP 전용 정책 차단(비밀번호는 맞음) — 무차별 대입 실패로 집계하지 않고 등록 안내를 반환.
+  if (user && user.policyBlocked) {
+    logAudit({ user: username, action: '로그인 거부(OTP 전용 정책)', detail: 'admin/operator 비밀번호 로그인 차단', ip });
+    return res.status(403).json({ error: user.reason });
+  }
   if (!user) {
     const lk = recordLoginFailure(gateIp, username);
     logAudit({ user: username, action: lk.locked ? '로그인 실패(잠금 발동)' : '로그인 실패', ip });

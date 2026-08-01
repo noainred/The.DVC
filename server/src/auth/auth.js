@@ -166,6 +166,19 @@ function persistUsers() {
  * bootstrapped/enrolled.
  */
 const _dummySalt = crypto.randomBytes(16);
+
+// 고권한 역할(admin/operator — 수퍼관리자 포함)은 OTP 로만 로그인한다(비밀번호 로그인 차단).
+// viewer(데모 계정 포함)는 비밀번호 로그인 허용. 긴급 시 OTP_ROLE_ENFORCE=false 로 끌 수 있다.
+const OTP_ROLE_ENFORCE = process.env.OTP_ROLE_ENFORCE !== 'false';
+
+// 초기 구축 유예: 아직 어떤 admin 도 OTP 를 등록하지 않았다면 admin 비밀번호 로그인을 허용한다.
+// 이 유예가 없으면 첫 설치(시드 admin = 비번만)에서 로그인 → OTP 등록 경로 자체가 막혀 전체
+// 잠김이 된다. admin 하나라도 OTP 를 등록하는 순간 유예는 자동 종료된다(operator 는 유예 없음 —
+// admin 이 사용자 관리에서 QR 로 등록해 주면 된다).
+function otpBootstrapGrace() {
+  return !loadUsers().some((u) => u.role === 'admin' && u.totpEnabled);
+}
+
 export function authenticateLocal(username, credential) {
   const user = loadUsers().find((u) => u.username === username);
   if (!user) {
@@ -178,8 +191,14 @@ export function authenticateLocal(username, credential) {
     if (ctr == null) return null;
     // TOTP 재사용(replay) 방지 — 이미 쓴 카운터 이하 코드는 거부하고, 성공 카운터를 기록.
     if (ctr !== user.totpLastCounter) { user.totpLastCounter = ctr; try { persistUsers(); } catch { /* */ } }
-  } else if (!user.passwordHash || !verifyPassword(credential, user.passwordHash)) {
-    return null;
+  } else {
+    if (!user.passwordHash || !verifyPassword(credential, user.passwordHash)) return null;
+    // 비밀번호는 맞지만 고권한 역할이라 정책상 차단되는 경우 — 호출부(login)가 사용자에게
+    // 'OTP 등록 필요'를 안내할 수 있게 구분된 결과를 돌려준다(무차별 대입 카운터 미적용 대상).
+    const role = user.role || 'viewer';
+    if (OTP_ROLE_ENFORCE && (role === 'admin' || role === 'operator') && !(role === 'admin' && otpBootstrapGrace())) {
+      return { policyBlocked: true, username: user.username, reason: 'admin/operator 계정은 OTP(Google Authenticator) 6자리 코드로만 로그인할 수 있습니다. OTP 미등록이면 관리자에게 등록을 요청하세요.' };
+    }
   }
   return { username: user.username, name: user.name || user.username, role: user.role || 'viewer', source: 'local', totpEnabled: !!user.totpEnabled };
 }
