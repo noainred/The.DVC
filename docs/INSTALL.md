@@ -78,6 +78,30 @@ sudo ./install.sh --port 4000
 > 예전 문서의 `admin/admin123` 고정 기본값은 **보안상 폐지**되었습니다(알려진 기본 비번 제거).
 > 무인 배포로 비번을 고정하려면 설치 전에 `portal.env`에 `DEFAULT_ADMIN_PASSWORD=<강력한값>`을 넣으세요.
 
+#### ★ 설치 직후 반드시 할 것 — OTP 등록 (v2.204.0부터)
+
+`admin`·`operator` 계정은 **OTP(Google Authenticator) 6자리로만 로그인**합니다. 다만 **아직 어떤
+admin도 OTP를 등록하지 않은 초기 상태에서는 admin 비밀번호 로그인이 임시로 허용**됩니다(이 유예가
+없으면 첫 설치에서 로그인 자체가 불가능해 전체 잠김이 됩니다).
+
+1. 위 초기 비밀번호로 로그인.
+2. **설정 → User Control → 메인포탈 사용자 관리** → 해당 계정 **[OTP 등록]** → QR을 Google
+   Authenticator(또는 MS Authenticator/Authy)로 스캔 → 6자리 코드 입력해 확정.
+3. 확정 즉시 그 계정의 비밀번호는 제거되고 **OTP 전용**이 되며, 동시에 유예가 끝나 다른
+   admin·operator 계정도 비밀번호로는 로그인할 수 없게 됩니다(각각 OTP 등록 필요).
+4. operator는 유예가 없으므로, 계정 생성 후 **admin이 대신 QR을 발급**해 전달하면 됩니다.
+
+> 긴급 상황(OTP 기기 분실 등)에는 `portal.env`에 `OTP_ROLE_ENFORCE=false` → 재시작으로 정책을
+> 일시 해제하고, 복구 후 다시 제거하세요. 마지막 admin의 OTP를 해제하면 유예가 자동으로 되살아나
+> 임시 비밀번호로 재등록할 수 있습니다(잠김 없음). AD 계정은 이 정책의 대상이 아닙니다.
+
+#### 함께 시드되는 특수 계정
+
+| 계정 | 역할 | 설명 |
+|---|---|---|
+| `noainred` | admin(수퍼관리자) | 항상 admin 보장(외부에서 강등돼 있어도 기동 시 복구), **강등·삭제·로그인 차단 불가**, 설정 소유자에 자동 포함. 사용하려면 [비번 설정] 후 OTP 등록. |
+| `thedvcdemp` | viewer(데모) | **비밀번호가 설정된 동안에만 로그인 가능**(기본은 미설정 = 로그인 불가). 사용자 관리에서 **[비번 설정]** 으로 열고, 데모가 끝나면 **[로그인 차단]** 으로 잠급니다(활성 세션도 즉시 종료). viewer 고정·삭제 불가. |
+
 ### 2.3 중앙 환경설정
 
 `sudo vi /etc/vmware-portal/portal.env` 후 `sudo systemctl restart vmware-portal`:
@@ -209,13 +233,17 @@ sudo firewall-cmd --permanent --add-port=4000/tcp && sudo firewall-cmd --reload
 
 ---
 
-## 7. 보안 설정 (권장 — v2.195.0 반영)
+## 7. 보안 설정 (권장 — v2.204.0 반영)
 
 포탈은 기본적으로 안전하게 동작하지만, 운영 환경에서 아래를 확인하세요.
 
 | 항목 | 설명 |
 |---|---|
 | **초기 비번** | `initial-admin-password.txt`로 로그인 후 **즉시 변경**하고 파일 삭제(§2.2). |
+| **★ 고권한 OTP 전용** | `admin`·`operator`는 **OTP로만 로그인**합니다(v2.204+). 설치 직후 §2.2의 절차로 **admin OTP 등록을 반드시 완료**하세요 — 첫 admin이 등록하는 순간 유예가 끝나고 정책이 전면 적용됩니다. 긴급 해제는 `OTP_ROLE_ENFORCE=false`. |
+| **기능 권한 매트릭스** | 설정 → 사용자 관리 하단에서 역할(operator/viewer)별로 **기능 권한 17종**과 **특수기능 도구별 접근**을 켜고 끕니다. 서버(`requirePerm`)와 WS SSH/RDP 게이트웨이가 강제하므로 UI를 우회한 API 호출도 차단됩니다. admin은 항상 전체(잠김 방지). 기본값은 종전 role 동작과 동일. |
+| **데이터 범위(scope)** | 계정별로 **볼 수 있는 vCenter/리전**을 제한할 수 있습니다(외주·감사·데모 계정 권장). 미지정 시 전체. |
+| **특수 계정** | `noainred`(수퍼관리자 — 강등/삭제/차단 불가), `thedvcdemp`(데모 — 비번 설정 시에만 로그인, [로그인 차단]으로 즉시 잠금). §2.2 표 참고. |
 | **HTTPS 권장** | 리버스 프록시(nginx/HAProxy)로 TLS 종단 권장. HTTPS면 `HSTS` 헤더가 자동 적용됩니다. |
 | **CORS** | 기본은 **교차출처 차단**(같은 포탈에서 SPA 사용 시 무영향). 별도 프론트 출처가 있으면 `CORS_ORIGINS=https://포탈주소`. |
 | **/metrics** | 토큰 **미설정 시 404(비활성)**. Prometheus 연동은 `METRICS_EXPORT_TOKEN` + Authorization 헤더(옛 `?token=`은 `METRICS_ALLOW_QUERY_TOKEN=true`). 무인증 공개가 꼭 필요하면 `METRICS_ALLOW_ANON=true`. |
@@ -224,7 +252,7 @@ sudo firewall-cmd --permanent --add-port=4000/tcp && sudo firewall-cmd --reload
 | **★ 엣지별 개별 central 토큰** | 공유 `CENTRAL_TOKEN` 하나면 **엣지 1대 침해로 다른 사이트의 iDRAC/게스트 자격증명까지** 인출됩니다. 설정 → 수집 서버 → **🔑 엣지별 개별 central 토큰**에서 사이트별 토큰을 발급해 그 엣지의 `CENTRAL_TOKEN`(=`EDGE_TOKEN`)에 넣으세요. 엣지 코드 변경 불필요·미이관 엣지는 계속 동작(무중단). 전부 이관 후 중앙에 `CENTRAL_REQUIRE_AGENT_TOKEN=true`. |
 | **중앙↔엣지 TLS** | 기본 **검증 ON**(`WAN_TLS_INSECURE=false`). 자체서명 HTTPS 엣지가 있는 노드만 `WAN_TLS_INSECURE=true`(대부분 엣지는 http라 무영향). |
 | **AD 그룹 매핑** | 그룹→역할은 **CN/전체 DN 완전일치**가 기본입니다. 예전처럼 부분문자열로 맞춰 쓰던 설정은 로그인 시 서버 로그에 `[ad]` 경고가 남으니 실제 그룹명으로 교정하세요(임시 호환은 `AD_GROUP_MATCH=substring`, 권한 상승 위험으로 비권장). |
-| **역할(RBAC)** | 상태변경 API·브라우저 SSH/RDP는 `admin`·`operator`만. 인증을 끌 수밖에 없다면(`AUTH_ENABLED=false`) `AUTH_DISABLED_ROLE=viewer`로 익명 권한을 낮추세요. |
+| **역할(RBAC)** | 상태변경 API·브라우저 SSH/RDP는 기본적으로 `admin`·`operator`만(기능 권한 매트릭스로 조정). 인증을 끌 수밖에 없다면(`AUTH_ENABLED=false`) `AUTH_DISABLED_ROLE=viewer`로 익명 권한을 낮추세요. |
 | **OTP 잠금** | 민감작업 재인증 OTP는 계정별 실패 잠금(`OTP_MAX_FAILS`/`OTP_LOCKOUT_MS`)이 걸립니다. |
 | **CSP(선택)** | 필요 시 `CSP=<정책문자열>`로 옵트인(인라인 스타일/intro 호환 확인 후). |
 

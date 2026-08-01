@@ -3,6 +3,29 @@
 > 작성: 전체 소스 6개 영역 병렬 정적분석(인증/권한 · 명령주입 · SSRF/TLS · 시크릿/로깅 · 입력검증 · 프론트엔드).
 > 대상 커밋 기준: `claude/vmware-global-monitoring-portal-nrnpnt`.
 > 성격: 사내 단일테넌트 운영 포탈. 다수 항목이 admin 인증 뒤에 있으나, "포탈 admin → 원격 인프라(수집기/에이전트/게스트)에서 root 코드 실행"으로 신뢰경계를 넘는 것이 핵심 위험.
+>
+> ⚠️ **이 문서는 최초(1차) 감사 시점의 기록이며 대부분 항목은 이미 조치되었습니다.**
+> 조치 이력은 v2.190.0(1차 하드닝) · v2.191.0(2차) · v2.195.0(3차 재감사)에서 진행되었고,
+> 아래 "인증·권한 후속 강화(v2.196~2.204)"에 이후 변경이 정리되어 있습니다.
+> 항목별 최신 상태·잔여 백로그는 [docs/AUDIT-2026-06-27.md](docs/AUDIT-2026-06-27.md)를 기준으로 보세요.
+
+## 인증·권한 후속 강화 (v2.196 ~ v2.204)
+
+1차 감사의 C4(`/api` 역할 가드 없음)·C5(원격접속 비-admin 허용)·H3(WS 게이트웨이 역할 미검증)은
+`requireRole`로 1차 해소되었고, 이후 아래와 같이 **기능 단위 권한 + 인증 강화**로 확장되었습니다.
+
+| 버전 | 강화 내용 |
+|---|---|
+| v2.196.0 | **기능 권한 매트릭스**(17개 권한 키) 도입 — `auth/permissions.js` + `requirePerm(key)`. WS SSH/RDP 게이트웨이도 role 하드코딩 대신 `userHasPermission('remote.access')`로 검사. **사용자별 데이터 범위(scope)** — `auth/scope.js`로 조회 API(`applyFilters`·`/vcenters`)에서 vCenter/리전 가시성 서버측 제한. 매트릭스는 `permissions.json`에 원자적 쓰기 + 손상 시 `.corrupt` 보존. |
+| v2.197.0 | VM 상세 3버튼 개별 권한(`vm.reconfig`/`vm.console`/`remote.access`) — 사양변경·콘솔 라우트에 `requirePerm` 적용. 특수기능 40여 도구 **도구별 접근 제어**(deny-list). |
+| v2.202.0 | 데모 계정 `thedvcdemp` — viewer 고정·삭제 불가, **비번 미설정 시 로그인 불가**. `clearLoginCredentials`(비번/OTP 제거 + tokenVersion 인상으로 활성 세션 즉시 폐기). |
+| v2.203.0 | 수퍼관리자 `noainred` — admin 고정(로드 시 강등 복구)·강등/삭제/로그인차단 거부·settingsOwners 자동 포함. |
+| v2.204.0 | **고권한 OTP 전용 로그인** — admin·operator 로컬 계정의 비밀번호 로그인 차단(403 + 등록 안내, 무차별 대입 카운터 미집계, 감사 로그 기록). 초기 구축 잠금 방지 유예(첫 admin OTP 등록 시 자동 종료). 긴급 해제 `OTP_ROLE_ENFORCE=false`. |
+
+> 잔여 고려사항: scope 제한은 인벤토리 목록·필터에 적용되며 전역 KPI 합계 등 일부 집계 화면은
+> 후속 확대 예정. AD 계정은 OTP 전용 정책의 대상이 아님(AD 인증 체계를 따름).
+
+---
 
 ## 🔴 CRITICAL — 즉시 조치
 
