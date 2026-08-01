@@ -1,6 +1,17 @@
 {
   "notes": [
     {
+      "version": "2.205.0",
+      "date": "2026-08-01",
+      "title": "admin·operator 비밀번호 로그인 완전 차단(예외 없음) + 콘솔 OTP 등록 도구",
+      "notes": [
+        "admin·operator(최고 관리자 포함) 계정은 이제 예외 없이 OTP로만 로그인합니다. v2.204에 있던 '초기 구축 유예'(아무 admin도 OTP 미등록이면 admin 비번 허용)를 폐지했습니다. 서버는 고권한 계정의 비밀번호를 검증조차 하지 않고 즉시 거부하므로, 이 경로로 비밀번호가 맞는지 확인하는 것(오라클)도 불가능합니다.",
+        "★ 첫 관리자 OTP 등록은 서버 콘솔 도구로 합니다(유예가 없어 웹으로는 등록 불가): `node server/src/tools/otp-enroll.js --list` 로 상태 확인 → `... otp-enroll.js admin` 으로 설정 키 발급(인증 앱의 '설정 키 직접 입력'에 입력) → `... otp-enroll.js admin --confirm 123456` 으로 확정. git 소스에서는 `npm run otp-enroll -- admin` 형태로도 실행됩니다. 등록 후에는 그 계정으로 로그인해 다른 admin·operator의 OTP를 웹 사용자 관리에서 QR로 등록해 주면 됩니다.",
+        "포탈 기동 시 OTP가 등록된 admin이 하나도 없으면 서버 로그에 경고와 함께 위 등록 절차를 안내합니다(조용히 잠기는 상황 방지). 잠금 복구는 같은 도구(`--disable` 후 재등록) 또는 긴급용 `OTP_ROLE_ENFORCE=false` 환경변수를 사용하세요.",
+        "viewer·데모 계정(thedvcdemp)은 종전대로 비밀번호 로그인이 가능하며, AD 계정은 이 정책의 대상이 아닙니다."
+      ]
+    },
+    {
       "version": "2.204.0",
       "date": "2026-08-01",
       "title": "고권한 계정 OTP 전용 로그인 — admin·operator(최고 관리자 포함)는 비밀번호 로그인 차단",

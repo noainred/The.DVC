@@ -167,16 +167,36 @@ function persistUsers() {
  */
 const _dummySalt = crypto.randomBytes(16);
 
-// 고권한 역할(admin/operator — 수퍼관리자 포함)은 OTP 로만 로그인한다(비밀번호 로그인 차단).
+// 고권한 역할(admin/operator — 수퍼관리자 포함)은 **무조건 OTP 로만** 로그인한다.
+// 비밀번호 로그인은 예외 없이 차단된다(v2.205 — 초기 구축 유예 폐지).
 // viewer(데모 계정 포함)는 비밀번호 로그인 허용. 긴급 시 OTP_ROLE_ENFORCE=false 로 끌 수 있다.
+//
+// ⚠️ 유예가 없으므로 '웹 로그인 → OTP 등록' 경로는 첫 admin 에게 존재하지 않는다. 대신 서버
+// 콘솔에서 실행하는 CLI 등록 도구를 쓴다(잠금 방지 필수 경로):
+//     node server/src/tools/otp-enroll.js <username>            # 시크릿 발급
+//     node server/src/tools/otp-enroll.js <username> --confirm 123456
+// 이후 admin 이 웹 사용자 관리에서 다른 admin/operator 의 OTP 를 QR 로 등록해 주면 된다.
 const OTP_ROLE_ENFORCE = process.env.OTP_ROLE_ENFORCE !== 'false';
 
-// 초기 구축 유예: 아직 어떤 admin 도 OTP 를 등록하지 않았다면 admin 비밀번호 로그인을 허용한다.
-// 이 유예가 없으면 첫 설치(시드 admin = 비번만)에서 로그인 → OTP 등록 경로 자체가 막혀 전체
-// 잠김이 된다. admin 하나라도 OTP 를 등록하는 순간 유예는 자동 종료된다(operator 는 유예 없음 —
-// admin 이 사용자 관리에서 QR 로 등록해 주면 된다).
-function otpBootstrapGrace() {
-  return !loadUsers().some((u) => u.role === 'admin' && u.totpEnabled);
+/** 고권한 역할(비밀번호 로그인 금지 대상) 여부. */
+export function isOtpOnlyRole(role) {
+  return OTP_ROLE_ENFORCE && (role === 'admin' || role === 'operator');
+}
+
+/**
+ * 기동 시 점검 — OTP 를 등록한 admin 이 하나도 없으면 웹으로 로그인할 수 있는 관리자가 없다.
+ * 유예가 폐지됐으므로 콘솔 등록 도구를 안내한다(조용히 잠기는 상황 방지).
+ */
+export function warnIfNoOtpAdmin() {
+  if (!OTP_ROLE_ENFORCE || !config.auth.enabled) return false;
+  const list = loadUsers();
+  if (list.some((u) => u.role === 'admin' && u.totpEnabled)) return false;
+  console.warn('[auth] ⚠ OTP 가 등록된 admin 계정이 없습니다 — admin/operator 는 비밀번호로 로그인할 수 없습니다(OTP 전용).');
+  console.warn('[auth]   서버에서 다음을 실행해 첫 관리자의 OTP 를 등록하세요:');
+  console.warn('[auth]     node server/src/tools/otp-enroll.js --list');
+  console.warn('[auth]     node server/src/tools/otp-enroll.js <username>');
+  console.warn('[auth]   (긴급 시 OTP_ROLE_ENFORCE=false 로 정책을 임시 해제할 수 있습니다.)');
+  return true;
 }
 
 export function authenticateLocal(username, credential) {
@@ -192,13 +212,15 @@ export function authenticateLocal(username, credential) {
     // TOTP 재사용(replay) 방지 — 이미 쓴 카운터 이하 코드는 거부하고, 성공 카운터를 기록.
     if (ctr !== user.totpLastCounter) { user.totpLastCounter = ctr; try { persistUsers(); } catch { /* */ } }
   } else {
-    if (!user.passwordHash || !verifyPassword(credential, user.passwordHash)) return null;
-    // 비밀번호는 맞지만 고권한 역할이라 정책상 차단되는 경우 — 호출부(login)가 사용자에게
-    // 'OTP 등록 필요'를 안내할 수 있게 구분된 결과를 돌려준다(무차별 대입 카운터 미적용 대상).
     const role = user.role || 'viewer';
-    if (OTP_ROLE_ENFORCE && (role === 'admin' || role === 'operator') && !(role === 'admin' && otpBootstrapGrace())) {
-      return { policyBlocked: true, username: user.username, reason: 'admin/operator 계정은 OTP(Google Authenticator) 6자리 코드로만 로그인할 수 있습니다. OTP 미등록이면 관리자에게 등록을 요청하세요.' };
+    // 고권한 역할은 비밀번호 검증 자체를 하지 않는다 — 비번이 맞든 틀리든 동일하게 차단해
+    // 이 경로로 비밀번호 유효성을 확인할 수 없게 한다(오라클 차단). 호출부(login)가 'OTP 등록
+    // 필요'를 안내할 수 있게 구분된 결과를 돌려준다(무차별 대입 카운터 미적용 대상).
+    if (isOtpOnlyRole(role)) {
+      try { crypto.scryptSync(String(credential || ''), _dummySalt, 64); } catch { /* 타이밍 평탄화 */ }
+      return { policyBlocked: true, username: user.username, reason: 'admin/operator 계정은 OTP(Google Authenticator) 6자리 코드로만 로그인할 수 있습니다. 비밀번호 로그인은 허용되지 않습니다 — OTP 미등록이면 관리자에게 등록을 요청하세요(첫 관리자는 서버에서 otp-enroll 도구를 사용).' };
     }
+    if (!user.passwordHash || !verifyPassword(credential, user.passwordHash)) return null;
   }
   return { username: user.username, name: user.name || user.username, role: user.role || 'viewer', source: 'local', totpEnabled: !!user.totpEnabled };
 }
