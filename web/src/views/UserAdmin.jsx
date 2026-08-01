@@ -244,7 +244,10 @@ export default function UserAdmin() {
       <div className="muted" style={{ fontSize: 12, marginTop: 12, lineHeight: 1.7 }}>
         Google Authenticator(또는 MS Authenticator/Authy)로 QR을 스캔해 등록합니다.
         등록을 마치면 해당 계정의 비밀번호는 제거되어 <b>OTP 6자리로만</b> 로그인됩니다.
-        AD 계정은 AD 비밀번호로 로그인하며 여기서 관리하지 않습니다.
+        <b> admin·operator(최고 관리자 포함) 계정은 OTP 로만 로그인할 수 있습니다</b> — 비밀번호
+        로그인은 서버에서 차단됩니다(단, 아직 어떤 admin 도 OTP 를 등록하지 않은 초기 구축
+        상태에서는 admin 비밀번호 로그인이 임시 허용됩니다). viewer·데모 계정은 비밀번호
+        로그인이 가능합니다. AD 계정은 AD 비밀번호로 로그인하며 여기서 관리하지 않습니다.
       </div>
 
       {/* ── 기능 권한 매트릭스(역할 × 기능) ─────────────────────────────────── */}
