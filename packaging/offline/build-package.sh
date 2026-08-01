@@ -105,6 +105,13 @@ cp -r "$REPO_ROOT/server/config" "$APP/server/config"
 cp "$REPO_ROOT/server/package.json" "$REPO_ROOT/server/package-lock.json" "$APP/server/"
 cp "$REPO_ROOT/package.json" "$APP/"
 cp -r "$REPO_ROOT/web/dist" "$APP/web/dist"
+# 서비스 바로가기 허브(별도 페이지·별도 프로세스, Python 표준 라이브러리 전용).
+# 포탈 본체와 무관하게 동작하므로 소스만 담고 기동은 운영자가 systemd 로 켠다.
+if [[ -d "$REPO_ROOT/pyportal" ]]; then
+  mkdir -p "$APP/pyportal"
+  tar -C "$REPO_ROOT/pyportal" --exclude='data' --exclude='__pycache__' -cf - . \
+    | tar -C "$APP/pyportal" -xf -
+fi
 [[ -f "$REPO_ROOT/README.md" ]] && cp "$REPO_ROOT/README.md" "$APP/"
 
 if [[ "$OFFLINE" == "1" ]]; then

@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>글로벌 데이터센터 서비스 허브</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="shell topbar-inner">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">
+          <span class="brand-glyph">DC</span>
+          <span class="brand-pulse"></span>
+        </div>
+        <div class="brand-text">
+          <div class="brand-title-row">
+            <h1>글로벌 데이터센터 서비스 허브</h1>
+            <span class="chip chip-blue" id="dc-count-chip">28개 DC</span>
+          </div>
+          <p>Global Datacenter Operations &amp; Services Hub</p>
+        </div>
+      </div>
+
+      <nav class="tabs" id="tabs" aria-label="주요 메뉴">
+        <a class="tab" href="#/dashboard" data-tab="dashboard">
+          <span>서비스 바로가기</span><span class="tab-badge" id="tab-count">0</span>
+        </a>
+        <a class="tab" href="#/datacenters" data-tab="datacenters">28개 센터 현황</a>
+        <a class="tab" href="#/health" data-tab="health">링크 상태 점검</a>
+        <a class="tab" href="#/settings" data-tab="settings">설정</a>
+      </nav>
+
+      <div class="topbar-actions">
+        <label class="search" for="search-input">
+          <span class="search-icon" aria-hidden="true">⌕</span>
+          <input id="search-input" type="search" placeholder="서비스 / URL 검색" autocomplete="off" />
+        </label>
+        <button class="btn btn-ghost" id="btn-check-all" type="button" title="등록된 모든 링크의 응답 상태를 점검합니다">
+          <span class="dot-emerald" aria-hidden="true"></span> 링크 점검
+        </button>
+        <a class="btn btn-primary" href="#/settings" id="btn-add">＋ 바로가기 추가</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="shell page" id="page">
+    <!-- 대시보드 -->
+    <section class="view" id="view-dashboard" hidden>
+      <div class="hero">
+        <div>
+          <div class="hero-eyebrow">🛡 28개 글로벌 데이터센터 운영자 전용 포탈</div>
+          <h2>운영 서비스 통합 제어반</h2>
+          <p>설정에서 <strong>이름과 URL</strong>만 입력하면 이 대시보드에 바로가기 카드가 즉시 생성됩니다.</p>
+        </div>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="#/settings">＋ 바로가기 생성</a>
+          <a class="btn btn-ghost" href="#/settings">설정에서 관리</a>
+        </div>
+      </div>
+
+      <div class="section" id="favorites-section" hidden>
+        <div class="section-head section-head-amber">
+          <span>★ 즐겨찾기</span><span class="muted" id="favorites-count"></span>
+        </div>
+        <div class="grid" id="favorites-grid"></div>
+      </div>
+
+      <div class="pills" id="category-pills"></div>
+
+      <div class="section">
+        <div class="section-head">
+          <span id="result-summary">조회 결과</span>
+          <button class="linkbtn" id="clear-search" type="button" hidden>검색어 초기화</button>
+        </div>
+        <div class="grid" id="shortcut-grid"></div>
+        <div class="empty" id="shortcut-empty" hidden>
+          <div class="empty-icon" aria-hidden="true">🔍</div>
+          <h3>표시할 서비스 바로가기가 없습니다</h3>
+          <p>설정 메뉴에서 이름과 URL을 입력해 첫 바로가기를 만들어 보세요.</p>
+          <a class="btn btn-primary" href="#/settings">설정에서 바로가기 등록</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- 데이터센터 현황 -->
+    <section class="view" id="view-datacenters" hidden>
+      <div class="hero">
+        <div>
+          <div class="hero-eyebrow">🌐 Global Data Center Network</div>
+          <h2>전 세계 데이터센터 운영 현황</h2>
+          <p>APAC · EMEA · AMER · LATAM 전역 사이트와 연결된 서비스 링크를 함께 봅니다.</p>
+        </div>
+        <div class="stat-row" id="dc-stats"></div>
+      </div>
+
+      <div class="toolbar">
+        <div class="pills" id="region-pills"></div>
+        <label class="search search-inline" for="dc-search">
+          <span class="search-icon" aria-hidden="true">⌕</span>
+          <input id="dc-search" type="search" placeholder="센터 / 도시 / 코드 검색" autocomplete="off" />
+        </label>
+      </div>
+
+      <div class="map-card">
+        <div class="map-head">
+          <span>사이트 위치 (등장방형 도법 좌표 배치)</span>
+          <span class="muted" id="map-caption"></span>
+        </div>
+        <div class="map-wrap"><svg id="dc-map" viewBox="0 0 1000 460" role="img" aria-label="데이터센터 위치 지도"></svg></div>
+        <div class="legend" id="map-legend"></div>
+      </div>
+
+      <div class="dc-layout">
+        <div class="dc-list" id="dc-list"></div>
+        <aside class="dc-detail" id="dc-detail"></aside>
+      </div>
+    </section>
+
+    <!-- 링크 상태 점검 -->
+    <section class="view" id="view-health" hidden>
+      <div class="hero">
+        <div>
+          <div class="hero-eyebrow">🩺 Service Link Health</div>
+          <h2>등록 링크 응답 점검</h2>
+          <p>서버(Python)가 각 URL에 직접 요청해 응답 코드와 지연을 측정합니다. 리다이렉트는 따라가지 않습니다.</p>
+        </div>
+        <div class="hero-actions">
+          <button class="btn btn-primary" id="btn-check-all-2" type="button">전체 링크 점검 실행</button>
+        </div>
+      </div>
+      <div class="stat-row stat-row-wide" id="health-stats"></div>
+      <div class="section">
+        <div class="section-head"><span>점검 결과</span><span class="muted" id="health-time"></span></div>
+        <div class="table-wrap">
+          <table class="table" id="health-table">
+            <thead>
+              <tr><th>서비스</th><th>URL</th><th>상태</th><th>코드</th><th>지연</th><th>메시지</th></tr>
+            </thead>
+            <tbody id="health-tbody"></tbody>
+          </table>
+        </div>
+        <div class="empty" id="health-empty">
+          <div class="empty-icon" aria-hidden="true">🩺</div>
+          <h3>아직 점검을 실행하지 않았습니다</h3>
+          <p>상단의 [전체 링크 점검 실행]을 누르면 등록된 모든 링크를 동시에 확인합니다.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 설정 -->
+    <section class="view" id="view-settings" hidden>
+      <div class="hero">
+        <div>
+          <div class="hero-eyebrow">⚙ 포탈 설정</div>
+          <h2>바로가기 링크 관리</h2>
+          <p><strong>이름</strong>과 <strong>URL</strong>만 입력하면 대시보드에 바로가기가 생성됩니다. 나머지는 선택 사항입니다.</p>
+        </div>
+      </div>
+
+      <div class="settings-layout">
+        <form class="card form-card" id="shortcut-form" autocomplete="off">
+          <div class="form-head">
+            <h3 id="form-title">새 바로가기 등록</h3>
+            <button class="linkbtn" id="form-cancel" type="button" hidden>편집 취소</button>
+          </div>
+
+          <label class="field">
+            <span class="field-label">이름 <em>*</em></span>
+            <input name="name" id="f-name" type="text" required maxlength="120" placeholder="예) Grafana 글로벌 메트릭" />
+          </label>
+
+          <label class="field">
+            <span class="field-label">URL <em>*</em></span>
+            <input name="url" id="f-url" type="text" required maxlength="2048" placeholder="예) grafana.internal.dc/d/global" />
+            <span class="field-hint">http:// 를 생략하면 https:// 로 저장됩니다.</span>
+          </label>
+
+          <div class="field-row">
+            <label class="field">
+              <span class="field-label">카테고리</span>
+              <select name="category" id="f-category"></select>
+            </label>
+            <label class="field field-narrow">
+              <span class="field-label">아이콘</span>
+              <input name="icon" id="f-icon" type="text" maxlength="4" placeholder="🔗" />
+            </label>
+          </div>
+
+          <label class="field">
+            <span class="field-label">설명</span>
+            <input name="description" id="f-description" type="text" maxlength="240" placeholder="이 서비스가 무엇인지 한 줄 설명" />
+          </label>
+
+          <div class="field-row">
+            <label class="field">
+              <span class="field-label">태그 (쉼표 구분)</span>
+              <input name="tags" id="f-tags" type="text" placeholder="Monitoring, Realtime" />
+            </label>
+            <label class="field">
+              <span class="field-label">연결 데이터센터</span>
+              <select name="datacenterId" id="f-datacenter"></select>
+            </label>
+          </div>
+
+          <label class="checkline">
+            <input type="checkbox" id="f-favorite" /> <span>즐겨찾기로 상단에 고정</span>
+          </label>
+
+          <div class="form-actions">
+            <button class="btn btn-primary" type="submit" id="form-submit">바로가기 생성</button>
+            <span class="form-msg" id="form-msg"></span>
+          </div>
+        </form>
+
+        <div class="card">
+          <div class="form-head">
+            <h3>등록된 바로가기 <span class="muted" id="settings-count"></span></h3>
+          </div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>이름</th><th>URL</th><th>카테고리</th><th>관리</th></tr></thead>
+              <tbody id="settings-tbody"></tbody>
+            </table>
+          </div>
+          <div class="card-footer">
+            <button class="btn btn-ghost" id="btn-export" type="button">JSON 내보내기</button>
+            <button class="btn btn-ghost" id="btn-import" type="button">JSON 가져오기</button>
+            <button class="btn btn-danger" id="btn-reset" type="button">기본값 복원</button>
+            <input type="file" id="import-file" accept="application/json,.json" hidden />
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="shell footer-inner">
+      <span>글로벌 데이터센터 통합 운영 포탈 · Python 표준 라이브러리 단독 구동</span>
+      <span class="muted" id="footer-meta"></span>
+    </div>
+  </footer>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <div class="modal" id="token-modal" hidden>
+    <div class="modal-box">
+      <h3>접근 토큰이 필요합니다</h3>
+      <p class="muted">이 포탈은 <code>HUB_TOKEN</code>으로 보호되어 있습니다. 운영자에게 받은 토큰을 입력하세요.</p>
+      <input type="password" id="token-input" placeholder="접근 토큰" />
+      <div class="form-actions"><button class="btn btn-primary" id="token-save" type="button">확인</button></div>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
