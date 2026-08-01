@@ -12,9 +12,10 @@ function nameFromToken() {
 }
 
 /**
- * 로그인 화면 — 10가지 테마(loginThemes.jsx) 중 하나를 랜덤으로 표시한다(재미 요소).
- * 인증 로직/상태는 여기서 소유하고, 테마는 폼 바인딩(f)만 받아 시각만 담당한다.
- * 우하단 🎲 버튼으로 다른 테마를 바로 뽑아볼 수 있다.
+ * 로그인 화면 — 10가지 테마(loginThemes.jsx) 중 하나가 접속(마운트)할 때마다
+ * 자동으로 랜덤 표시된다(재미 요소). 사용자가 고르는 UI는 없다 — 새로 접속하면
+ * 다른 테마가 나온다. 인증 로직/상태는 여기서 소유하고, 테마는 폼 바인딩(f)만
+ * 받아 시각만 담당한다.
  */
 export default function Login({ onSuccess, notice }) {
   const [welcome] = useState(nameFromToken);
@@ -27,8 +28,9 @@ export default function Login({ onSuccess, notice }) {
   const [busy, setBusy] = useState(false);
   const [fails, setFails] = useState(0);
   const [warn, setWarn] = useState(false); // 3회 실패 경고창
-  // 마운트 시 1회 랜덤 선택(입력 중 리렌더로 테마가 바뀌지 않게 state 로 고정).
-  const [themeIdx, setThemeIdx] = useState(() => Math.floor(Math.random() * THEMES.length));
+  // 마운트 시 1회 자동 랜덤 선택(입력 중 리렌더로 테마가 바뀌지 않게 state 로 고정).
+  // 수동 변경 UI는 없다 — 로그인 화면에 들어올 때마다 자동으로 다른 테마가 나온다.
+  const [themeIdx] = useState(() => Math.floor(Math.random() * THEMES.length));
 
   const submit = async (e) => {
     e.preventDefault();
@@ -57,18 +59,12 @@ export default function Login({ onSuccess, notice }) {
     error, busy, submit, welcome, notice,
   };
 
-  const { Comp, name } = THEMES[themeIdx];
-  const reshuffle = () => setThemeIdx((i) => (THEMES.length <= 1 ? i : (i + 1 + Math.floor(Math.random() * (THEMES.length - 1))) % THEMES.length));
+  const { Comp } = THEMES[themeIdx];
 
   return (
     <>
       <style>{THEMES_CSS}</style>
       <Comp f={f} />
-
-      <button type="button" className="lt-reshuffle" onClick={reshuffle}
-        title={`현재 테마: ${name} — 클릭하면 다른 로그인 화면으로 바뀝니다`}>
-        🎲 {name}
-      </button>
 
       {warn && (
         <div className="modal-overlay" style={{ zIndex: 50 }} onClick={(e) => { if (e.target === e.currentTarget) setWarn(false); }}>
