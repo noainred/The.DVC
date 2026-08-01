@@ -329,6 +329,11 @@ export const THEMES_CSS = `
 .lt-notice { margin-top: 12px; font-size: 12px; color: #fbbf24; line-height: 1.6; }
 .lt-welcome { margin-top: 12px; font-size: 12px; color: var(--lt-accent,#2dd4bf); }
 .lt-hint { margin-top: 10px; font-size: 11px; color: var(--lt-dim,#64748b); line-height: 1.7; }
+.lt-reshuffle { position: fixed; z-index: 6; right: 16px; bottom: 14px; background: rgba(0,0,0,.4);
+  border: 1px solid rgba(255,255,255,.16); color: #cbd5e1; border-radius: 20px; padding: 7px 15px;
+  font-size: 11px; letter-spacing: .1em; cursor: pointer; font-family: 'JetBrains Mono', monospace; }
+.lt-reshuffle:hover { border-color: #94a3b8; color: #fff; }
+
 /* ── 1) Davinci: 좌 히어로 + 우 카드 + 도트맵 ── */
 .lt-davinci { --lt-card: rgba(13,20,28,.93); --lt-accent: #34e0b4; --lt-accent-ink: #052e25; --lt-glow: rgba(45,212,191,.15);
   display: block; background: #0a0e15; }
