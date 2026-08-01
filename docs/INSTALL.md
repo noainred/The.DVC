@@ -264,7 +264,7 @@ sudo firewall-cmd --permanent --add-port=4000/tcp && sudo firewall-cmd --reload
 
 ---
 
-## 7. 보안 설정 (권장 — v2.204.0 반영)
+## 7. 보안 설정 (권장 — v2.210.0 반영)
 
 포탈은 기본적으로 안전하게 동작하지만, 운영 환경에서 아래를 확인하세요.
 
@@ -273,9 +273,10 @@ sudo firewall-cmd --permanent --add-port=4000/tcp && sudo firewall-cmd --reload
 | **초기 비번** | `initial-admin-password.txt`로 로그인 후 **즉시 변경**하고 파일 삭제(§2.2). |
 | **★ 고권한 OTP 전용** | `admin`·`operator`의 최종 상태는 **OTP 전용 로그인**입니다(v2.206+). OTP 미등록 계정만 최초 1회 비밀번호로 로그인할 수 있고, 그 세션은 **OTP 등록 외 모든 API가 차단**되며 등록을 마치면 **비밀번호가 삭제**됩니다. 설치 직후 §2.2 절차로 첫 관리자 등록을 완료하세요. 콘솔 등록·잠금 복구는 `sudo vmware-portal-otp`, 긴급 해제는 `OTP_ROLE_ENFORCE=false`. |
 | **기능 권한 매트릭스** | 설정 → 사용자 관리 하단에서 역할(operator/viewer)별로 **기능 권한 17종**과 **특수기능 도구별 접근**을 켜고 끕니다. 서버(`requirePerm`)와 WS SSH/RDP 게이트웨이가 강제하므로 UI를 우회한 API 호출도 차단됩니다. admin은 항상 전체(잠김 방지). 기본값은 종전 role 동작과 동일. |
-| **데이터 범위(scope)** | 계정별로 **볼 수 있는 vCenter/리전**을 제한할 수 있습니다(외주·감사·데모 계정 권장). 미지정 시 전체. |
+| **데이터 범위(scope)** | 계정별로 **볼 수 있는 vCenter/리전**을 제한할 수 있습니다(외주·감사·데모 계정 권장). 미지정 시 전체. 목록 API뿐 아니라 **id를 직접 받는 단건 라우트**(VM 콘솔 티켓·호스트/VM 지표)도 검사하며, 범위 밖은 **404**로 응답합니다(존재 여부 은닉, v2.207.0). |
 | **특수 계정** | `noainred`(수퍼관리자 — 강등/삭제/차단 불가), `thedvcdemp`(데모 — 비번 설정 시에만 로그인, [로그인 차단]으로 즉시 잠금). §2.2 표 참고. |
 | **★ 설정 접근 계정** | '설정' 탭은 지정 계정만 접근할 수 있습니다(서버측 강제). 세 경로가 **합산** 적용: ① `portal.env` 의 `SETTINGS_OWNERS=계정1,계정2` ② `$CONFIG_DIR/settings-owners.txt`(한 줄에 하나, `#` 주석) ③ 포탈 UI(설정 › 세션 보안). ①②는 **UI 저장으로 지워지지 않아** 아무도 설정에 못 들어가는 잠금 상황의 복구 경로입니다. 편집 후 `systemctl restart vmware-portal` 없이도 즉시 반영되지만(파일은 매 조회 시 읽음), `SETTINGS_OWNERS` 환경변수 변경은 재시작이 필요합니다. |
+| **★ 백업 아카이브 취급** | 포탈 백업에는 `portal.env`(**AUTH_SECRET**·`CENTRAL_TOKEN`)·`users.json`(**TOTP 시크릿**)·`vcenters.json` 사본이 들어갑니다 = **자격증명 사본**. v2.210.0부터 `/api/admin/backup/*` 전부(상태·설정·즉시 백업·다운로드·조회·삭제·복원)와 세션 보안 설정 조회는 **설정 소유자만** 호출할 수 있고, 다운로드·복원은 **감사 로그**에 남습니다. 내려받은 파일은 공유 저장소에 두지 말고 사용 후 삭제하세요(AUTH_SECRET 유출 시 임의 계정 토큰 위조 가능). |
 | **HTTPS 권장** | 리버스 프록시(nginx/HAProxy)로 TLS 종단 권장. HTTPS면 `HSTS` 헤더가 자동 적용됩니다. |
 | **CORS** | 기본은 **교차출처 차단**(같은 포탈에서 SPA 사용 시 무영향). 별도 프론트 출처가 있으면 `CORS_ORIGINS=https://포탈주소`. |
 | **/metrics** | 토큰 **미설정 시 404(비활성)**. Prometheus 연동은 `METRICS_EXPORT_TOKEN` + Authorization 헤더(옛 `?token=`은 `METRICS_ALLOW_QUERY_TOKEN=true`). 무인증 공개가 꼭 필요하면 `METRICS_ALLOW_ANON=true`. |
