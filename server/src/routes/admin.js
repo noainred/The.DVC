@@ -1008,7 +1008,7 @@ adminRouter.put('/anomaly', adminOnly, (req, res) => res.json({ ok: true, settin
 
 // 세션 보안(유휴 자동 로그아웃) — 조회는 자유, 변경은 OTP 재인증 + 감사 기록.
 // 편집 UI에는 '설정된' 소유 계정만(자동 포함된 중앙 배포 admin은 별도 autoOwners로 읽기전용 안내).
-adminRouter.get('/security/session', adminOnly, (_req, res) => res.json({ ...loadConfiguredSecurity(), autoOwners: managedAdminOwners() }));
+adminRouter.get('/security/session', adminOnly, requireSettingsOwner, (_req, res) => res.json({ ...loadConfiguredSecurity(), autoOwners: managedAdminOwners() }));
 adminRouter.put('/security/session', adminOnly, requireSettingsOwner, (req, res) => {
   const username = req.user?.username || 'unknown';
   // 인증이 켜져 있으면 변경 시 본인 OTP 재인증을 강제(누가 바꿨는지 신원 확정 + 무단변경 방지).
@@ -2189,20 +2189,23 @@ adminRouter.post('/assignments/import', adminOnly, (req, res) => {
 
 // ───────────────────────── 포탈 백업 ─────────────────────────
 // 중앙 + 엣지(에이전트 push) 설정 통합 백업. 정기/변경자동/수동 + 다운로드 + 복원.
-adminRouter.get('/backup/status', adminOnly, (_req, res) => {
+adminRouter.get('/backup/status', adminOnly, requireSettingsOwner, (_req, res) => {
   res.json({ ...backupStatus(), backups: listBackups(), edges: listAgentConfigs() });
 });
-adminRouter.put('/backup/settings', adminOnly, (req, res) => res.json(saveBackupSettings(req.body || {})));
-adminRouter.post('/backup/now', adminOnly, (_req, res) => {
+adminRouter.put('/backup/settings', adminOnly, requireSettingsOwner, (req, res) => res.json(saveBackupSettings(req.body || {})));
+adminRouter.post('/backup/now', adminOnly, requireSettingsOwner, (_req, res) => {
   try { res.json({ ok: true, ...createBackup('manual', { retention: loadBackupSettings().retention }) }); }
   catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
-adminRouter.get('/backup/download/:name', adminOnly, (req, res) => {
+adminRouter.get('/backup/download/:name', adminOnly, requireSettingsOwner, (req, res) => {
   const p = backupPath(req.params.name);
   if (!p) return res.status(404).json({ ok: false, reason: '백업을 찾을 수 없습니다.' });
+  // 아카이브에는 portal.env(AUTH_SECRET·CENTRAL_TOKEN)·users.json(TOTP 시크릿)·vCenter 자격증명이
+  // 모두 들어 있다 → 인출은 반드시 감사 로그에 남긴다.
+  logAudit({ user: req.user?.username, action: '포탈 백업 다운로드(자격증명 포함)', target: req.params.name, ip: req.ip || '' });
   res.download(p, path.basename(p));
 });
-adminRouter.get('/backup/view/:name', adminOnly, (req, res) => {
+adminRouter.get('/backup/view/:name', adminOnly, requireSettingsOwner, (req, res) => {
   const a = readBackup(req.params.name);
   if (!a) return res.status(404).json({ ok: false, reason: '백업을 찾을 수 없습니다.' });
   res.json({ // 자격증명 내용은 빼고 요약만.
@@ -2211,12 +2214,13 @@ adminRouter.get('/backup/view/:name', adminOnly, (req, res) => {
     edges: Object.entries(a.edges || {}).map(([agent, e]) => ({ agent, at: e.at, files: Object.keys(e.files || {}) })),
   });
 });
-adminRouter.delete('/backup/:name', adminOnly, (req, res) => res.json({ ok: deleteBackup(req.params.name) }));
-adminRouter.post('/backup/restore/:name', adminOnly, (req, res) => {
+adminRouter.delete('/backup/:name', adminOnly, requireSettingsOwner, (req, res) => res.json({ ok: deleteBackup(req.params.name) }));
+adminRouter.post('/backup/restore/:name', adminOnly, requireSettingsOwner, (req, res) => {
   try {
     const a = readBackup(req.params.name);
     if (!a) return res.status(404).json({ ok: false, reason: '백업을 찾을 수 없습니다.' });
     const r = restoreCentral(a);
+    logAudit({ user: req.user?.username, action: '포탈 설정 복원', target: req.params.name, detail: `${r.restored}개 파일`, ip: req.ip || '' });
     res.json({ ok: true, ...r, note: '중앙 설정 복원 완료 — 적용하려면 포탈 재시작. 복원 전 현재 설정은 자동 백업(pre-restore)됨.' });
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
