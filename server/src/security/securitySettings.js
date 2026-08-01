@@ -49,7 +49,9 @@ export function managedAdminOwners() {
  */
 export function loadSessionSecurity() {
   const raw = loadConfiguredSecurity();
-  return { ...raw, settingsOwners: [...new Set([...raw.settingsOwners, ...managedAdminOwners()])] };
+  // 수퍼관리자(noainred)는 소유자 목록에서 제외돼도 항상 자동 포함 — 최고 권한 계정이 설정
+  // 접근을 잃는 잠금 사고 방지(파일에는 남기지 않아 표시상으로도 '자동 포함'으로 동작).
+  return { ...raw, settingsOwners: [...new Set([...raw.settingsOwners, ...managedAdminOwners(), 'noainred'])] };
 }
 
 export function saveSessionSecurity(partial = {}) {

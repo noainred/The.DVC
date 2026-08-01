@@ -19,6 +19,10 @@ export default function UserAdmin() {
   const [permDirty, setPermDirty] = useState(false);
   const [vcx, setVcx] = useState([]);         // 범위 지정용 vCenter 목록 [{id,name,region}]
   const [scopeEdit, setScopeEdit] = useState(null); // { username, vcenters:[], regions:[] }
+  // ⚠ 모든 훅은 아래 조기 return(if (!data) return <Loading/>) 이전에 선언해야 한다 —
+  // v2.202에서 pwEdit useState 를 조기 return 뒤에 뒀다가 렌더 간 훅 개수가 달라져
+  // React #310(사용자 관리 화면 전체 크래시)이 발생했다.
+  const [pwEdit, setPwEdit] = useState(null); // { username, pw, pw2, error }
 
   const load = async () => {
     try {
@@ -140,7 +144,6 @@ export default function UserAdmin() {
   };
 
   // ── 비밀번호 설정/로그인 차단(데모 계정 활성·잠금용) ─────────────────────────
-  const [pwEdit, setPwEdit] = useState(null); // { username, pw, pw2, error }
   const savePassword = async () => {
     if (pwEdit.pw.length < 8) return setPwEdit((s) => ({ ...s, error: '비밀번호는 8자 이상이어야 합니다.' }));
     if (pwEdit.pw !== pwEdit.pw2) return setPwEdit((s) => ({ ...s, error: '비밀번호가 서로 일치하지 않습니다.' }));
@@ -192,11 +195,14 @@ export default function UserAdmin() {
           <tbody>
             {data.users.map((u) => (
               <tr key={u.username}>
-                <td><b>{u.username}</b>{u.demo && <span className="badge blue" style={{ marginLeft: 8 }} title="내장 데모 계정 — viewer 고정·삭제 불가. 비밀번호가 설정된 동안만 로그인할 수 있습니다.">데모</span>}</td>
+                <td><b>{u.username}</b>
+                  {u.demo && <span className="badge blue" style={{ marginLeft: 8 }} title="내장 데모 계정 — viewer 고정·삭제 불가. 비밀번호가 설정된 동안만 로그인할 수 있습니다.">데모</span>}
+                  {u.superuser && <span className="badge green" style={{ marginLeft: 8 }} title="수퍼관리자 — 항상 admin 이며 강등·삭제·로그인 차단이 불가능합니다.">최고 관리자</span>}
+                </td>
                 <td>{u.name}</td>
                 <td>
                   <select className="select" value={u.role} onChange={(e) => changeRole(u, e.target.value)} style={{ maxWidth: 130 }}
-                    disabled={u.demo} title={u.demo ? '데모 계정은 viewer 고정입니다.' : undefined}>
+                    disabled={u.demo || u.superuser} title={u.demo ? '데모 계정은 viewer 고정입니다.' : u.superuser ? '수퍼관리자는 admin 고정입니다.' : undefined}>
                     {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
                   </select>
                 </td>
@@ -216,7 +222,7 @@ export default function UserAdmin() {
                   <button className="tab" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => setPwEdit({ username: u.username, pw: '', pw2: '', error: null })}
                     title="비밀번호를 설정/변경합니다. 데모 계정은 비밀번호가 설정된 동안만 로그인할 수 있습니다.">비번 설정</button>
                   {' '}
-                  {(u.hasPassword || u.totpEnabled) && (
+                  {(u.hasPassword || u.totpEnabled) && !u.superuser && (
                     <>
                       <button className="logout-btn" style={{ padding: '6px 10px' }} onClick={() => blockLogin(u)}
                         title="비밀번호/OTP를 제거해 이 계정의 로그인을 차단합니다.">로그인 차단</button>
@@ -227,7 +233,7 @@ export default function UserAdmin() {
                     ? <button className="logout-btn" style={{ padding: '6px 10px' }} onClick={() => disableTotp(u)}>OTP 해제</button>
                     : <button className="login-btn" style={{ flex: 'none', padding: '6px 12px' }} onClick={() => startEnroll(u)}>OTP 등록</button>}
                   {' '}
-                  {!u.demo && <button className="logout-btn" style={{ padding: '6px 10px' }} onClick={() => remove(u)}>삭제</button>}
+                  {!u.demo && !u.superuser && <button className="logout-btn" style={{ padding: '6px 10px' }} onClick={() => remove(u)}>삭제</button>}
                 </td>
               </tr>
             ))}
