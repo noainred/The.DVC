@@ -85,6 +85,20 @@ let users = null;
 // 설정 › 사용자 관리에서 비밀번호를 설정하면 그때부터 로그인 가능, '로그인 차단'으로 다시 잠근다.
 export const DEMO_USERNAME = 'thedvcdemp';
 
+// 최고 권한(수퍼관리자) 계정 — 항상 admin 역할이 보장되고(로드 시 강제), 강등·삭제·로그인 차단이
+// 모두 거부된다. 설정 소유자(settingsOwners)에도 항상 포함된다(securitySettings 참고).
+export const SUPER_USERNAME = 'noainred';
+
+// 수퍼관리자 보장: 없으면 생성(비번 없이 = 비번 설정 전 로그인 불가), 있으면 admin 역할 강제.
+function ensureSuperUser(list) {
+  const u = list.find((x) => x.username === SUPER_USERNAME);
+  if (!u) { list.push({ username: SUPER_USERNAME, name: 'noainred', role: 'admin', superuser: true }); return true; }
+  let changed = false;
+  if (u.role !== 'admin') { u.role = 'admin'; changed = true; } // 강등돼 있었다면 복구
+  if (!u.superuser) { u.superuser = true; changed = true; }
+  return changed;
+}
+
 // 목록에 데모 계정이 없으면 추가(비번 없이 = 로그인 불가 상태로 시작). 같은 이름의 계정을
 // 사용자가 이미 만들어 둔 경우에는 건드리지 않는다(하이재킹 방지 — demo 태그도 붙이지 않음).
 function ensureDemoUser(list) {
@@ -103,7 +117,8 @@ export function loadUsers() {
       const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
       if (Array.isArray(parsed?.users) && parsed.users.length) {
         users = parsed.users;
-        if (ensureDemoUser(users)) { try { persistUsers(); } catch { /* 다음 저장 때 함께 기록 */ } }
+        const changed = [ensureDemoUser(users), ensureSuperUser(users)].some(Boolean);
+        if (changed) { try { persistUsers(); } catch { /* 다음 저장 때 함께 기록 */ } }
         return users;
       }
     } catch (err) {
@@ -133,6 +148,7 @@ export function loadUsers() {
   }
   users = [{ username: 'admin', name: 'Administrator', role: 'admin', passwordHash: hashPassword(pw), mustChangePassword: !envPw }];
   ensureDemoUser(users);
+  ensureSuperUser(users);
   console.warn(`[auth] users.json이 없어 기본 관리자 "admin"을 시드했습니다 — ${note}.`);
   return users;
 }
@@ -201,6 +217,7 @@ export function listUsers() {
     totpEnabled: !!u.totpEnabled, hasPassword: !!u.passwordHash,
     managedBy: u.managedBy || null, // 'central' = 중앙에서 배포·관리하는 계정
     demo: !!u.demo,                 // 내장 데모 계정(viewer 고정·삭제 불가·비번 없으면 로그인 불가)
+    superuser: !!u.superuser,       // 수퍼관리자(admin 고정·강등/삭제/로그인차단 불가)
     scope: normalizedScope(u),      // 볼 수 있는 vCenter/리전 제한(빈 배열 = 전체)
   }));
 }
@@ -252,6 +269,7 @@ export function setLocalPassword(username, password) {
 export function clearLoginCredentials(username) {
   const u = getUser(String(username || '').trim());
   if (!u) return { ok: false, reason: '사용자를 찾을 수 없습니다.' };
+  if (u.superuser) return { ok: false, reason: '수퍼관리자 계정의 로그인은 차단할 수 없습니다.' };
   if (u.role === 'admin' && loadUsers().filter((x) => x.role === 'admin').length <= 1) {
     return { ok: false, reason: '마지막 관리자의 로그인은 차단할 수 없습니다.' };
   }
@@ -271,6 +289,8 @@ export function updateUser(username, { name, role, scope } = {}) {
     if (!VALID_ROLES.includes(role)) return { ok: false, reason: '역할이 올바르지 않습니다.' };
     // 데모 계정은 viewer 고정 — 데모 자격증명이 유출돼도 권한 상승 경로가 없게 서버측에서 잠근다.
     if (u.demo && role !== 'viewer') return { ok: false, reason: '데모 계정의 역할은 viewer로 고정되어 있습니다.' };
+    // 수퍼관리자는 admin 고정 — 다른 admin 이 강등시켜 최고 권한을 뺏는 경로를 차단.
+    if (u.superuser && role !== 'admin') return { ok: false, reason: '수퍼관리자 계정의 역할은 admin으로 고정되어 있습니다.' };
     // Don't allow demoting the last admin.
     if (u.role === 'admin' && role !== 'admin' && loadUsers().filter((x) => x.role === 'admin').length <= 1) {
       return { ok: false, reason: '마지막 관리자는 역할을 변경할 수 없습니다.' };
@@ -293,6 +313,7 @@ export function deleteUser(username) {
   const u = list.find((x) => x.username === username);
   if (!u) return { ok: false, reason: '사용자를 찾을 수 없습니다.' };
   if (u.demo) return { ok: false, reason: '데모 계정은 삭제할 수 없습니다. 로그인을 막으려면 [로그인 차단]으로 비밀번호를 제거하세요.' };
+  if (u.superuser) return { ok: false, reason: '수퍼관리자 계정은 삭제할 수 없습니다.' };
   if (u.role === 'admin' && list.filter((x) => x.role === 'admin').length <= 1) {
     return { ok: false, reason: '마지막 관리자는 삭제할 수 없습니다.' };
   }
