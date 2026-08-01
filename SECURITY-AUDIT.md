@@ -22,8 +22,29 @@
 | v2.203.0 | 수퍼관리자 `noainred` — admin 고정(로드 시 강등 복구)·강등/삭제/로그인차단 거부·settingsOwners 자동 포함. |
 | v2.204.0 | **고권한 OTP 전용 로그인** — admin·operator 로컬 계정의 비밀번호 로그인 차단(403 + 등록 안내, 무차별 대입 카운터 미집계, 감사 로그 기록). 초기 구축 잠금 방지 유예(첫 admin OTP 등록 시 자동 종료). 긴급 해제 `OTP_ROLE_ENFORCE=false`. |
 
-> 잔여 고려사항: scope 제한은 인벤토리 목록·필터에 적용되며 전역 KPI 합계 등 일부 집계 화면은
-> 후속 확대 예정. AD 계정은 OTP 전용 정책의 대상이 아님(AD 인증 체계를 따름).
+## 4차 감사 (v2.207.0) — 신규 표면(권한·scope·OTP 온보딩) 집중 점검
+
+v2.196~2.206 에서 도입된 기능 권한 매트릭스 · 사용자 scope · OTP 강제 등록 · 특수 계정 ·
+콘솔 등록 도구를 대상으로 재점검했다. **확정 결함 3건을 수정**했으며, 신규 CRITICAL 은 없다.
+
+| # | 심각도 | 항목 | 원인 | 조치(v2.207.0) |
+|---|---|---|---|---|
+| S1 | 🟠 HIGH | **OTP 등록 전 세션이 SSH/RDP 터널 개통 가능** | HTTP 라우터는 `requireEnrolled` 로 막았지만 **WS 업그레이드는 미들웨어 체인을 타지 않아** 게이트가 없었다. 부트스트랩 비밀번호로 로그인한(아직 OTP 미등록) 관리자가 내부 서버로 대화형 SSH/RDP 를 열 수 있었다 | `sshGateway.js`·`guacdTunnel.js` 의 upgrade 핸들러에서 `user.mustEnrollOtp` 를 직접 검사해 403. 정적 회귀 테스트로 누락 방지 |
+| S2 | 🟠 HIGH | **사용자 scope 우회 — 범위 밖 자원의 콘솔·성능·이름 조회** | scope 는 목록 API(`applyFilters`)와 `/vcenters` 에만 적용돼 있었고, id 를 직접 받는 경로는 무검사였다. 특히 `vm.console` 은 viewer 기본 권한이라 **범위 제한 계정이 전 세계 임의 VM 의 콘솔 티켓을 발급**받을 수 있었다 | `auth/scope.js` 에 `inUserScope()` 추가 후 `/vms/:id/console`·`/vms/:id/metrics`·`/hosts/:id/metrics` 에 적용(범위 밖은 404 — 존재 여부도 미노출), `/vms/lookup`·`/api/remote/targets` 는 허용 집합으로 필터 |
+| S3 | 🟡 MEDIUM | **미인증 응답의 관리 계정명 노출** | `/api/auth/config`(공개)가 `settingsOwners`(설정 소유 *계정명* 목록)를 그대로 내려줘 유효 관리자 계정 열거 단서가 됐다(1차 감사 C1 의 잔여 항목) | 공개 응답에서 제거하고, 인증 후 `/auth/me`·로그인 응답에 **`isSettingsOwner` 불리언**만 제공. 프론트 게이팅을 그 값으로 전환(서버는 계속 `requireSettingsOwner` 로 강제) |
+
+### 점검했으나 문제 없음으로 확인
+- 권한 매트릭스 편집(`/api/admin/permissions`)은 `adminOnly` — operator 가 자기 권한을 상향할 경로 없음. 저장 시 카탈로그 화이트리스트·도구 키 슬러그 검증으로 임의 키 주입 차단.
+- `mustEnrollOtp` 는 토큰이 아니라 `resolveTokenUser` 가 **매 요청 사용자 레코드에서 계산** — 등록 즉시 반영되고 구토큰으로 우회 불가.
+- `confirmTotpEnroll` 의 비밀번호 삭제 + `tokenVersion` 인상으로 등록 후 비밀번호 경로가 실제로 소멸(파일 기준 검증).
+- 특수 계정 보호(`noainred` 강등/삭제/차단 거부, `thedvcdemp` viewer 고정)는 서버측에서 강제.
+- 콘솔 등록 도구/래퍼: 시크릿을 콘솔에만 출력, 래퍼가 서비스 계정으로 강등 실행해 `users.json` 소유권 훼손 방지. 외부 QR 서비스 사용을 경고로 억제.
+- 로그인 테마 20종: `dangerouslySetInnerHTML`/`eval` 없음 — 모든 값이 React 자동 이스케이프 경로.
+- `setupState()` 가 노출하는 비밀번호 **파일 경로**는 이미 문서에 공개된 고정 위치이며 값은 미노출, 등록 완료 후 노출 중단.
+
+> 잔여(수용된) 한계: `/overview`·`/summary` 등 **전역 집계 수치**는 scope 를 적용하지 않는다
+> (단일 스냅샷 단일 계산 캐시 구조 — 식별 정보가 아닌 합계만 노출). 자원 **식별 단위** 유출은
+> 위 S2 로 차단됐다. AD 계정은 OTP 강제 등록 대상이 아니다(AD 인증 체계를 따름).
 
 ---
 

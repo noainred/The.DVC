@@ -68,6 +68,16 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
   검사한다(role 하드코딩 금지). admin은 항상 전 권한(매트릭스로 낮출 수 없음 — 관리자 잠김 방지).
 - **사용자 scope는 조회 경로에서 강제**: `auth/scope.js scopedVcenterIds`를 `applyFilters`·`/vcenters`에
   적용해 요청 필터로 우회할 수 없게 한다. 새 인벤토리 조회 API를 추가하면 동일하게 적용할 것.
+  - **id를 직접 받는 단건 라우트는 `inUserScope()`로 별도 검사**한다(목록 필터가 안 걸리는 경로).
+    `/vms/:id/console`·`/vms/:id/metrics`·`/hosts/:id/metrics`가 그 예이며, 범위 밖은 403이 아니라
+    **404**로 응답해 존재 여부도 흘리지 않는다. 누락 시 범위 제한 계정이 전 사이트 VM의 콘솔
+    티켓을 발급받을 수 있다(v2.207 실제 수정 사례 — `vm.console`은 viewer 기본 권한).
+- **WS 게이트웨이는 미들웨어를 타지 않는다**: SSH/RDP upgrade 핸들러는 `requireEnrolled`·
+  `requirePerm`이 자동 적용되지 않으므로, 인증·권한·**`mustEnrollOtp`**를 모두 핸들러 안에서
+  직접 검사해야 한다(v2.207: 등록 전 세션이 터널을 열 수 있던 결함 수정).
+- **미인증 응답에 계정명을 싣지 않는다**: `/api/auth/config`는 로그인 전 조회되므로
+  `settingsOwners` 같은 *계정명 목록*을 넣으면 관리자 계정 열거 단서가 된다. 소유자 판단은
+  인증 후 `/auth/me`의 `isSettingsOwner` 불리언으로 내려준다(서버는 `requireSettingsOwner` 유지).
 - **특수 계정 보호**: `noainred`(superuser)는 admin 고정·강등/삭제/로그인차단 거부 + settingsOwners 자동
   포함, `thedvcdemp`(demo)는 viewer 고정·삭제 거부. 시드(`ensureSuperUser`/`ensureDemoUser`)는 같은
   이름의 기존 수동 계정을 덮어쓰지 않는다(하이재킹 방지).

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requireRole, requirePerm } from '../auth/auth.js';
-import { scopedVcenterIds } from '../auth/scope.js';
+import { scopedVcenterIds, inUserScope } from '../auth/scope.js';
 import { store } from '../store.js';
 import { currentVersion, config, loadVcenterConfig } from '../config.js';
 import { loadUiSettings, saveUiSettings } from '../ui-settings.js';
@@ -86,6 +86,8 @@ api.get('/vms/:id/metrics', async (req, res) => {
   const snap = store.get();
   const vm = snap.vms.find((v) => v.id === id);
   if (!vm) return res.status(404).json({ ok: false, reason: 'VM을 찾을 수 없습니다.' });
+  // 사용자 scope 밖 자원은 '없음'으로 응답(존재 여부도 흘리지 않는다).
+  if (!inUserScope(req.user, snap, vm.vcenterId)) return res.status(404).json({ ok: false, reason: 'VM을 찾을 수 없습니다.' });
 
   if (snap.source === 'mock') return res.json(synthMetric(vm, type, interval, { start, end }));
 
@@ -113,6 +115,7 @@ api.get('/hosts/:id/metrics', async (req, res) => {
   const snap = store.get();
   const host = (snap.hosts || []).find((h) => h.id === id);
   if (!host) return res.status(404).json({ ok: false, reason: '호스트를 찾을 수 없습니다.' });
+  if (!inUserScope(req.user, snap, host.vcenterId)) return res.status(404).json({ ok: false, reason: '호스트를 찾을 수 없습니다.' });
 
   if (snap.source === 'mock') return res.json(synthMetric(host, type, interval, { start, end }));
 
@@ -135,6 +138,7 @@ api.get('/vms/:id/console', requirePerm('vm.console'), async (req, res) => {
   const snap = store.get();
   const vm = snap.vms.find((v) => v.id === id);
   if (!vm) return res.status(404).json({ ok: false, reason: 'VM을 찾을 수 없습니다.' });
+  if (!inUserScope(req.user, snap, vm.vcenterId)) return res.status(404).json({ ok: false, reason: 'VM을 찾을 수 없습니다.' });
   if (snap.source === 'mock') {
     return res.json({ ok: true, mock: true, vmName: vm.name, reason: '데모 모드입니다. 실제 vCenter(live) 연결 시 VMRC/웹 콘솔 링크가 생성됩니다.' });
   }
@@ -1889,7 +1893,11 @@ api.get('/vms', (req, res) => {
 // VM 단건 조회 — 이름/IP/호스트명으로 스냅샷에서 찾아 상세 팝업에 쓴다(모든 화면 공용).
 api.get('/vms/lookup', (req, res) => {
   const { name, ip, vcenterId } = req.query;
-  const vms = (store.get().vms || []).filter((v) => !vcenterId || v.vcenterId === vcenterId);
+  const snap = store.get();
+  const allowed = scopedVcenterIds(req.user, snap);
+  const vms = (snap.vms || [])
+    .filter((v) => !allowed || allowed.has(v.vcenterId))   // scope 강제(요청 필터로 우회 불가)
+    .filter((v) => !vcenterId || v.vcenterId === vcenterId);
   let vm = null;
   if (ip) vm = vms.find((v) => (v.ipAddresses || []).includes(ip) || v.ipAddress === ip);
   if (!vm && name) {
