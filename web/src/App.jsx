@@ -45,12 +45,13 @@ export const hasPerm = (u, key) => !key || !u || u.role === 'admin'
   || !Array.isArray(u.permissions) || u.permissions.includes(key);
 
 // '설정'은 지정한 소유 계정으로 로그인했을 때만 노출/접근(목록은 설정 › 세션 보안에서 변경).
-// 인증 비활성(Anonymous) 환경은 허용. owners 미전달 시 기본 ['noainred'].
-const isSettingsOwner = (u, owners) => {
+// 판단은 서버가 /auth/me 로 내려주는 isSettingsOwner 불리언을 그대로 쓴다 — 예전에는 미인증
+// /auth/config 가 '소유 계정명 목록'을 내려줘 계정 열거 단서가 됐다(v2.207 에서 제거).
+// 서버도 requireSettingsOwner 로 강제하므로 이 값은 UX 게이팅 용도다.
+const isSettingsOwner = (u) => {
   if (!u) return false;
   if (u.name === 'Anonymous') return true;
-  const list = (owners && owners.length) ? owners : ['noainred'];
-  return list.includes(u.username) || list.includes(u.name);
+  return u.isSettingsOwner === true;
 };
 
 const REGIONS = ['아시아', '중국', '유럽', '북미'];
@@ -142,13 +143,13 @@ export default function App() {
         <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} onClick={() => window.location.reload()}>새로고침</button>
       </div></div>
     }>
-      <Portal user={user} onLogout={logout} settingsOwners={authCfg?.settingsOwners} />
+      <Portal user={user} onLogout={logout} />
     </ErrorBoundary>
   );
 }
 
-function Portal({ user, onLogout, settingsOwners }) {
-  const isOwner = isSettingsOwner(user, settingsOwners);
+function Portal({ user, onLogout }) {
+  const isOwner = isSettingsOwner(user);
   const isAllowed = (id) => {
     const t = TABS.find((x) => x.id === id);
     return Boolean(t && (!t.adminOnly || user.role === 'admin') && (!t.ownerOnly || isOwner) && hasPerm(user, t.perm));

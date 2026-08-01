@@ -17,7 +17,10 @@ authRouter.get('/config', (_req, res) => {
   const sec = loadSessionSecurity();
   // setupState: 초기 구축 중이면 로그인 화면이 '최초 관리자 비밀번호 파일 경로'를 안내한다
   // (비밀번호 값이 아니라 경로만 — 이미 문서에 공개된 고정 위치).
-  res.json({ authEnabled: config.auth.enabled, adEnabled: Boolean(ad.enabled && ad.url), idleLogoutEnabled: sec.idleLogoutEnabled, idleLogoutMin: sec.idleLogoutMin, settingsOwners: sec.settingsOwners, ...setupState() });
+  // ⚠ settingsOwners(설정 소유 '계정명' 목록)는 여기에 싣지 않는다 — 미인증 응답이라
+  // 공격자에게 유효 관정 계정명을 알려주는 열거 단서가 된다(감사 C1 후속). 프론트의 '설정' 탭
+  // 노출 판단은 인증 후 /auth/me 의 isSettingsOwner 불리언을 쓴다(서버는 requireSettingsOwner 로 강제).
+  res.json({ authEnabled: config.auth.enabled, adEnabled: Boolean(ad.enabled && ad.url), idleLogoutEnabled: sec.idleLogoutEnabled, idleLogoutMin: sec.idleLogoutMin, ...setupState() });
 });
 
 authRouter.post('/login', async (req, res) => {
@@ -60,7 +63,14 @@ authRouter.post('/login', async (req, res) => {
   logAudit({ user: user.username, action: '로그인', detail: `${user.role}${user.mustEnrollOtp ? ' · OTP 등록 필요(등록 전용 세션)' : ''}`, ip });
   // 로그인 직후에도 프론트가 메뉴를 바로 게이팅할 수 있게 권한/scope 를 함께 내려준다.
   // mustEnrollOtp 이면 프론트는 OTP 등록 화면에 고정된다(서버도 requireEnrolled 로 차단).
-  const enriched = { ...user, permissions: rolePermissions(user.role), toolsDenied: roleToolsDenied(user.role), scope: (local && local.scope) ? { vcenters: local.scope.vcenters || [], regions: local.scope.regions || [] } : { vcenters: [], regions: [] } };
+  const owners = (() => { try { return loadSessionSecurity().settingsOwners || []; } catch { return []; } })();
+  const enriched = {
+    ...user,
+    permissions: rolePermissions(user.role),
+    toolsDenied: roleToolsDenied(user.role),
+    isSettingsOwner: !config.auth.enabled || owners.includes(user.username) || owners.includes(user.name),
+    scope: (local && local.scope) ? { vcenters: local.scope.vcenters || [], regions: local.scope.regions || [] } : { vcenters: [], regions: [] },
+  };
   res.json({ token, user: enriched });
 });
 
@@ -69,7 +79,10 @@ authRouter.get('/me', authMiddleware, (req, res) => {
   const u = getUser(req.user.username);
   // permissions: 현재 매트릭스 기준 '내 기능 권한'(프론트 메뉴/버튼 게이팅용, 매 조회 시 최신 반영).
   // scope: 볼 수 있는 vCenter/리전 제한(빈 배열 = 전체).
-  res.json({ user: { ...req.user, totpEnabled: !!u?.totpEnabled, local: !!u, permissions: rolePermissions(req.user.role), toolsDenied: roleToolsDenied(req.user.role) } });
+  // isSettingsOwner: '설정' 탭 노출 여부(계정명 목록 대신 불리언만 — 열거 단서 제거).
+  const owners = (() => { try { return loadSessionSecurity().settingsOwners || []; } catch { return []; } })();
+  const isSettingsOwner = !config.auth.enabled || owners.includes(req.user.username) || owners.includes(req.user.name);
+  res.json({ user: { ...req.user, totpEnabled: !!u?.totpEnabled, local: !!u, permissions: rolePermissions(req.user.role), toolsDenied: roleToolsDenied(req.user.role), isSettingsOwner } });
 });
 
 // Self-service TOTP (Google Authenticator) enrollment for the current local user.

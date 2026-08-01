@@ -7,6 +7,7 @@
 import { Router } from 'express';
 import { store } from '../store.js';
 import { requireRole, requirePerm } from '../auth/auth.js';
+import { scopedVcenterIds } from '../auth/scope.js';
 import {
   getConfig, getConfigSafe, saveConfig,
   listMappings, listMappingsForUser, getMapping, addMapping, removeMapping, setMappingStatus, touchMapping,
@@ -81,8 +82,10 @@ remoteRouter.get('/proxies', (_req, res) => {
 remoteRouter.get('/targets', (req, res) => {
   const snap = store.get();
   const q = String(req.query.q || '').toLowerCase();
+  const allowed = scopedVcenterIds(req.user, snap); // 사용자 scope 밖 VM(이름·IP)은 노출 금지
   const targets = [];
   for (const vm of snap.vms) {
+    if (allowed && !allowed.has(vm.vcenterId)) continue;
     if (req.query.vcenterId && vm.vcenterId !== req.query.vcenterId) continue;
     const ips = vm.ipAddresses?.length ? vm.ipAddresses : (vm.ipAddress ? [vm.ipAddress] : []);
     if (!ips.length) continue;
