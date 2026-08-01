@@ -116,11 +116,16 @@ export default function SpecialTools() {
     window.addEventListener('resize', calc);
     return () => { if (ro) ro.disconnect(); window.removeEventListener('resize', calc); };
   }, [tool]);
-  // 도구 접근 가능 여부: 관리자 전용은 admin만 + 기능 권한(거부목록 toolAllowed). 카드 노출·딥링크 공통.
-  const canOpenTool = (k) => {
-    const t = TOOLS.find((x) => x.k === k);
-    return !!t && (!t.adminOnly || isAdmin) && toolAllowed(k);
+  // 도구 잠금 사유 — 접근 가능하면 null. 특수 기능은 항목이 많아 '숨김'보다 '회색 잠금'이 낫다:
+  // 어떤 기능이 있는지는 보이고, 권한이 없으면 클릭만 막아 관리자에게 요청할 수 있게 한다.
+  const lockReasonOf = (t) => {
+    if (!t) return '알 수 없는 기능입니다.';
+    if (t.adminOnly && !isAdmin) return '관리자(admin) 전용 기능입니다.';
+    if (!toolAllowed(t.k)) return '이 기능에 대한 접근 권한이 없습니다 — 관리자에게 요청하세요(설정 › 사용자 관리 › 특수 기능 도구별 접근).';
+    return null;
   };
+  // 접근 가능 여부(딥링크 가드 공통).
+  const canOpenTool = (k) => !lockReasonOf(TOOLS.find((x) => x.k === k));
   // 딥링크(#/tools/<k>)로 권한 없는 도구를 열면 접근 차단 안내(서버 엔드포인트도 별도 강제됨).
   if (tool && !canOpenTool(tool)) {
     return (
@@ -132,7 +137,11 @@ export default function SpecialTools() {
     );
   }
   if (tool) return <ToolPanel tool={tool} isAdmin={isAdmin} onBack={() => openTool(null)} />;
-  const base = TOOLS.filter((t) => canOpenTool(t.k)); // 관리자 전용 + 기능 권한(거부목록)으로 노출 제어
+  // 전 도구를 노출하되, 권한이 없으면 disabled(회색·클릭불가)로 표시한다(숨기지 않음).
+  const base = TOOLS.map((t) => {
+    const lock = lockReasonOf(t);
+    return lock ? { ...t, disabled: true, comingSoon: false, lockReason: lock } : t;
+  });
   const ql = menuQ.trim().toLowerCase();
   const shown = ql
     ? base.filter((t) => t.label.toLowerCase().startsWith(ql) || t.label.toLowerCase().includes(ql) || (t.desc || '').toLowerCase().includes(ql))
@@ -151,7 +160,7 @@ export default function SpecialTools() {
     <>
       <div className="section-title" style={{ marginTop: 0 }}>🛠️ 특수 기능</div>
       <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: recent.length ? 6 : 14 }}>
-        <div className="muted" style={{ fontSize: 13 }}>아래 기능을 클릭하면 해당 진단을 실행해 보여줍니다.</div>
+        <div className="muted" style={{ fontSize: 13 }}>아래 기능을 클릭하면 해당 진단을 실행해 보여줍니다. <b>🔒 회색 카드</b>는 접근 권한이 없어 클릭할 수 없습니다.</div>
         <SearchBox className="input" style={{ maxWidth: 280 }} placeholder="메뉴 빠른 찾기 (예: G, GPU, IP)" value={menuQ} onChange={setMenuQ}
           onKeyDown={(e) => { if (e.key === 'Enter') addRecent(e.target.value); }} />
       </div>
@@ -206,14 +215,19 @@ export default function SpecialTools() {
               ...(t.danger && !t.disabled ? { borderColor: 'var(--red)' } : {}),
             }}
             onClick={t.disabled ? undefined : () => openTool(t.k)}
-            title={t.disabled ? (t.comingSoon ? '준비 중 (곧 제공)' : '비활성화됨 (관리자 전용)') : `바로가기: #/tools/${t.k}`}>
+            title={t.lockReason || (t.disabled ? (t.comingSoon ? '준비 중 (곧 제공)' : '비활성화됨') : `바로가기: #/tools/${t.k}`)}>
             <div className="flex between" style={{ alignItems: 'flex-start' }}>
               <div style={{ fontSize: 30, filter: t.disabled ? 'grayscale(1)' : 'none' }}>{t.icon}</div>
-              {countOf.get(t.k) > 0 && <span className="badge gray" style={{ fontSize: 11 }} title="전체 사용자 누적 실행 횟수">{countOf.get(t.k)}회</span>}
+              {t.lockReason
+                ? <span className="badge gray" style={{ fontSize: 11 }} title={t.lockReason}>🔒 권한 없음</span>
+                : countOf.get(t.k) > 0 && <span className="badge gray" style={{ fontSize: 11 }} title="전체 사용자 누적 실행 횟수">{countOf.get(t.k)}회</span>}
             </div>
             <div className="vc-name" style={{ marginTop: 8, ...(t.danger && !t.disabled ? { color: 'var(--red)' } : {}) }}>{t.label}</div>
             <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>{t.desc}</div>
-            <div className="vc-foot"><span className="muted">{t.disabled ? (t.comingSoon ? '준비 중' : '비활성화됨') : '클릭하여 실행'}</span><span className="muted">{t.disabled ? '' : '→'}</span></div>
+            <div className="vc-foot">
+              <span className="muted">{t.lockReason ? (t.adminOnly ? '관리자 전용' : '접근 권한 없음') : t.disabled ? (t.comingSoon ? '준비 중' : '비활성화됨') : '클릭하여 실행'}</span>
+              <span className="muted">{t.disabled ? '' : '→'}</span>
+            </div>
           </div>
         ))}
       </div>
