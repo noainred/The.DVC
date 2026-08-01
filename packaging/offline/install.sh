@@ -77,6 +77,20 @@ fi
 grep -q '^CONFIG_DIR=' "$CONFIG_DIR/portal.env" || echo "CONFIG_DIR=$CONFIG_DIR" >> "$CONFIG_DIR/portal.env"
 sed -i "s#^CONFIG_DIR=.*#CONFIG_DIR=$CONFIG_DIR#" "$CONFIG_DIR/portal.env"
 
+# '설정' 화면 접근 계정 파일 — 없으면 주석만 담은 예시를 만들어 둔다(운영자가 편집).
+# UI 저장분과 합쳐 적용되므로, 모든 관리자가 설정에 못 들어가는 잠금 상황의 복구 경로가 된다.
+if [[ ! -f "$CONFIG_DIR/settings-owners.txt" ]]; then
+  cat > "$CONFIG_DIR/settings-owners.txt" <<'OWNERS'
+# '설정' 탭을 볼 수 있는 계정 목록 — 한 줄에 하나(# 은 주석).
+# 여기에 적은 계정은 포탈 UI에서 지울 수 없습니다(서버 파일이 우선 합산).
+# 수퍼관리자 noainred 는 항상 자동 포함됩니다.
+# 예)
+# noainred
+OWNERS
+  chmod 0600 "$CONFIG_DIR/settings-owners.txt"
+  echo "==> 설정 접근 계정 파일 생성: $CONFIG_DIR/settings-owners.txt"
+fi
+
 # Migrate user config from an older in-app location (current or backed-up app)
 # into $CONFIG_DIR so existing registrations/users/settings are kept.
 for f in vcenters.json users.json upgrade.json; do
