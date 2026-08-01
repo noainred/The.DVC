@@ -75,14 +75,19 @@
 - **PWA** — 설치 가능 + 위험 인시던트 브라우저 알림.
 
 ### 관리 / 운영 편의
-- **인증/RBAC** — scrypt 해시 + HS256 JWT, 역할(admin/operator/viewer), **TOTP 2FA**, **Active Directory(LDAP)** 연동.
+- **인증/RBAC** — scrypt 해시 + HS256 JWT, 역할(admin/operator/viewer), **TOTP 2FA**, **Active Directory(LDAP)** 연동. **admin·operator는 OTP 전용 로그인**(v2.204+, 아래 참조).
+- **기능별 권한 매트릭스 (v2.196+)** — 역할은 3개로 두되 **기능 단위 권한 키 17종**(대시보드·인벤토리 6종·특수기능·인사이트·원격접속·원격콘솔·VM 사양변경/프로비저닝·게스트계정 배포·설정·업그레이드·사용자관리)을 **설정 › 사용자 관리에서 체크박스로 켜고 끕니다**. 서버(`requirePerm`)와 WS SSH/RDP 게이트웨이가 실제로 강제하므로 메뉴를 숨겨도 API 직접 호출은 차단됩니다. admin은 항상 전체(잠김 방지). 기본값은 기존 role 동작과 동일해 도입만으로 권한이 바뀌지 않습니다.
+- **특수 기능 도구별 접근 (v2.197+)** — 약 40개 특수기능 도구를 역할별로 **개별 차단**(deny-list). '전체허용/전체차단' 일괄 설정 지원, 권한 없는 도구는 딥링크로도 열리지 않습니다.
+- **사용자별 데이터 범위(scope) (v2.196+)** — 계정마다 **볼 수 있는 vCenter/리전**을 지정(예: 폴란드 법인 계정은 유럽 리전만). 호스트·VM·스토리지·네트워크·알람 목록과 vCenter 필터가 서버에서 제한됩니다(미지정 시 전체).
+- **특수 계정 (v2.202~2.204)** — **`noainred` 수퍼관리자**(항상 admin 보장·강등/삭제/로그인차단 불가·설정 소유자 자동 포함), **`thedvcdemp` 데모 계정**(viewer 고정·삭제 불가, **비밀번호가 설정된 동안만 로그인** — 설정 › 사용자 관리에서 [비번 설정]/[로그인 차단]으로 열고 잠금).
 - **감사 로그 / 진단·로그** — 쓰기 작업 감사(JSONL), 연결 실패 원인(한국어 힌트) + 실시간 서버 로그 뷰어.
 - **알림** — 임계치 규칙 → Slack/Webhook(상태전이·쿨다운).
 - **자동 업그레이드** — `versions.json` 모니터링 → 다운로드·적용·재시작(롤백 가능), 엣지 푸시.
 - **분산 수집** — 원격 데이터센터 에이전트 pull(전력 등) + 중앙 할당(iDRAC/IP 스캔). **통합 엣지 모드**(`EDGE_MODE=all` + `CENTRAL_URL` + `EDGE_TOKEN` 3줄)로 수집·위임 스캔/핑/캡처/로그 워커·인벤토리 push·자동 업그레이드·부팅 시 중앙 자동 등록을 일괄 활성. **위임 iDRAC 스캔**은 엣지 폴링 또는 **중앙→엣지 직접(PUSH)** 방식 + 2단계 claim→ack로 인출 유실 방지. 중앙 **에이전트 배포**(SSH 원클릭 설치)·**에이전트 작업**(IP대역 할당) 지원.
 - **중앙 → 엣지 배포 (v2.170+)** — 중앙 UI에서 원격 엣지의 **GPU 게스트 수집 설정**과 **접속 사용자 계정**을 만들어 내려보낸다(엣지가 주기적으로 pull — NAT/폐쇄망 안전). 복수 엣지·전체 엣지 동시 배포, 배포된 계정 수정/제거, 중앙 배포 admin은 엣지 설정 메뉴 자동 허용.
 - **엣지 운영 도구** — 수집 서버 **토큰 강제 동기화**(403 토큰 불일치를 SSH로 즉시 교정 — 리슨 포트로 실제 인스턴스 역추적), Edge 노드 SSH 배포·상태 확인, 엣지 인증 거부 카운터 표시.
-- **보안** — scrypt+HS256 JWT·TOTP(1회용)·AD 외에, 역할(RBAC) 강제(WS SSH/RDP 포함)·**서버측 토큰 폐기**(비번/역할 변경 시 즉시 무효)·보안 응답 헤더·CORS 기본 차단·임의 초기 관리자 비번·SSRF/명령주입 방어·번들 sha256 필수·**엣지별 개별 central 토큰**(공유 토큰 스코프 축소, v2.191.0)·**자격증명 파일 손상 보존**(로드 실패 시 `.corrupt` 백업 — 전량 유실 방지)·**RDP 자격증명 1회용 티켓**(URL 미노출)·**설정 소유자 서버측 강제**(v2.195.0). 상세 [설치 가이드 §7](docs/INSTALL.md)·[감사 문서](docs/AUDIT-2026-06-27.md).
+- **보안** — scrypt+HS256 JWT·TOTP(1회용)·AD 외에, **고권한 OTP 전용 로그인**(admin·operator는 비밀번호 로그인 차단, v2.204.0)·기능 권한 매트릭스 서버측 강제(WS SSH/RDP 포함)·**서버측 토큰 폐기**(비번/역할 변경 시 즉시 무효)·보안 응답 헤더·CORS 기본 차단·임의 초기 관리자 비번·SSRF/명령주입 방어·번들 sha256 필수·**엣지별 개별 central 토큰**(공유 토큰 스코프 축소, v2.191.0)·**자격증명 파일 손상 보존**(로드 실패 시 `.corrupt` 백업 — 전량 유실 방지)·**RDP 자격증명 1회용 티켓**(URL 미노출)·**설정 소유자 서버측 강제**(v2.195.0). 상세 [설치 가이드 §7](docs/INSTALL.md)·[감사 문서](docs/AUDIT-2026-06-27.md).
+- **로그인 화면 20종 랜덤 (v2.199~2.201)** — 접속할 때마다 20가지 디자인(Davinci Map·Aurora Glass·Retro Terminal·Blueprint·Minimal Light·Neon City·Orbital·Matrix Rain·Sunset·Brutalist·Terminal Boot·Split Panel·Radar Ops·Light Console·Region Tiles·Ultra Minimal·NOC Preview·Left Rail·Amber Watch·Data Wall) 중 하나가 자동 표시됩니다. 우하단 🎲 버튼으로 즉시 교체 가능. 인증 로직(OTP·세션유지·3회 실패 경고)은 전 테마 공통.
 - **데모(mock) 모드** — vCenter 없이 `DATA_SOURCE=mock`으로 전세계 11개 가상 vCenter + iDRAC 전력·핑/네트워크·지표·온도·GPU 게스트·로그까지 채워진 화면을 즉시 시연(v2.154.0 목업 완비).
 - **장애 내성 & 성능** — 한 vCenter/매니저가 죽어도 포탈은 정상(해당만 `unreachable`). 고RTT·다수 vCenter(현재 28, 향후 30+) 대비 **동시 수집 개수 제한(`COLLECT_CONCURRENCY`, 기본 8) + per-vCenter 타임아웃 + 폴러 재진입 가드(주기 초과 시 중첩 실행 방지) + O(N) 롤업 집계 + 논블로킹 DB write(트랜잭션·prune 스로틀)**로 매 주기 CPU 스파이크를 평탄화.
 
@@ -131,6 +136,8 @@ npm run build && npm start   # API가 web/dist 서빙 → http://localhost:4000
 ```
 
 최초 계정: **`admin`** + 비밀번호는 `DEFAULT_ADMIN_PASSWORD`(설정 시) 또는 **최초 기동 시 임의 생성되어 `$CONFIG_DIR/initial-admin-password.txt`(0600)에 저장**됩니다(알려진 기본 비번 폐지, v2.152.0). 로그인 후 즉시 변경하고 파일 삭제. 운영 시 `AUTH_SECRET` 지정 권장(미지정 시 재시작마다 세션 무효).
+
+> 🔐 **v2.204+ OTP 전용 정책**: admin·operator는 OTP로만 로그인합니다. 단 **아직 어떤 admin도 OTP를 등록하지 않은 초기 구축 상태에서는 admin 비밀번호 로그인이 임시 허용**되므로, 위 초기 비번으로 로그인 → 설정 › 사용자 관리에서 **OTP 등록(QR)** 을 마치세요. 첫 admin이 OTP를 등록하는 순간 유예가 끝나 전 고권한 계정에 정책이 적용됩니다. 함께 시드되는 계정: **`noainred`**(수퍼관리자), **`thedvcdemp`**(데모 — 비번 설정 전까지 로그인 불가).
 git 소스로 실행하면 `CONFIG_DIR` 기본값이 `server/config` 라 이 파일이 저장소 안에 생기지만, `.gitignore`(`server/config/*.txt`)로 차단되어 커밋되지 않습니다.
 
 > 🧑‍💻 **git 소스에서 설치**(Node 직접 설치·systemd·업데이트 상세): [docs/INSTALL.md 부록 A](docs/INSTALL.md#부록-a-git-소스에서-설치-개발커스터마이징).
@@ -173,6 +180,7 @@ git 소스로 실행하면 `CONFIG_DIR` 기본값이 `server/config` 라 이 파
 | `AUTH_TOKEN_TTL` | `8h` | 토큰 유효기간 |
 | `DEFAULT_ADMIN_PASSWORD` | (임의생성) | 초기 admin 비밀번호. 미설정 시 최초 기동에 임의 생성 → `$CONFIG_DIR/initial-admin-password.txt` |
 | `TOTP_ISSUER` | `VMware Portal` | TOTP 표시명 |
+| `OTP_ROLE_ENFORCE` | `true` | **admin·operator OTP 전용 로그인 강제**(v2.204+). 비밀번호가 맞아도 고권한 로컬 계정은 403 + OTP 등록 안내. 아직 어떤 admin도 OTP 미등록이면 admin 비번 로그인이 임시 허용(초기 구축 유예 — 첫 admin이 OTP를 등록하면 자동 종료). 긴급 시 `false`로 해제. AD 계정·viewer·데모 계정은 대상 아님 |
 | `AD_ENABLED`, `AD_URL`, `AD_DOMAIN`, `AD_BASE_DN`, `AD_*_GROUP`, `AD_DEFAULT_ROLE` | — | Active Directory(LDAP) 연동·그룹→역할 매핑 |
 | `AD_GROUP_MATCH` | `exact` | 그룹→역할 매칭 방식. 기본은 **그룹명(CN)/전체 DN 완전일치**. `substring`은 구버전 호환용(부분문자열 매칭 — 권한 상승 위험, 비권장) |
 | `AD_TLS_REJECT_UNAUTHORIZED` | `true` | LDAPS 인증서 검증(기본 ON — `false`로만 opt-out) |
@@ -248,13 +256,13 @@ git 소스로 실행하면 `CONFIG_DIR` 기본값이 `server/config` 라 이 파
 ### 특수기능 `/api/tools/*`
 `gpu`(+`/history`,`/vms`), `esxi-temp`(+`/history`), `capacity`, `capacity-forecast`, `waste`, `thin-vms`, `guest-os`, `hba`, `licenses`, **`license-expiry`**(vCenter+NSX+Horizon 만료일), `esxi`, `solutions`, `hardware`, `vmtools`, `snapshots`, `duplicate-ips`, `vm-finder`(POST), `ipam`(+`/subnets`,`/sheet`,`/annotation`,`.xlsx`,`.csv`), `deep-search`(POST), `ip-ping`, `service-check`, `network-check`, `vmware-config`, `vclogs`(+`/export.csv`,`/federate`,`/sources`)
 
-> 상태변경(POST/PUT/DELETE) 라우트는 `requireRole('admin','operator')` — viewer는 조회만 가능합니다(`ip-ping`·`ui-settings`·`alarm-mutes`·IPAM 편집·Tools 업그레이드 포함).
+> 상태변경(POST/PUT/DELETE) 라우트는 **기능 권한(`requirePerm`)** 으로 보호됩니다(v2.196+) — IPAM 편집·ip-ping·Tools 업그레이드는 `tools`, 알람 음소거는 `inv.alarms`, VM 사양변경은 `vm.reconfig`, 원격 콘솔은 `vm.console`, SSH/RDP 터널·probe·rdp-ticket은 `remote.access`. 기본 매트릭스는 기존 `requireRole('admin','operator')` 동작과 동일(viewer는 조회 전용)이며, 설정 › 사용자 관리에서 역할별로 조정할 수 있습니다.
 
 ### 인사이트 `/api/insights/*`
 `finops`(+`/config`), `power-breakdown`, `fleet`(+`/tag`,`/assign`,`/assign-bulk`,`/prune` — 통합 인벤토리), `anomalies`, `forecast`, `security`, `topology`, `graph`, `incidents`, `chatops`(POST) · 익스포터 `GET /metrics`(Prometheus)
 
 ### 관리자 `/api/admin/*` (발췌)
-`users`, `vcenters`(+`/test`,`/import`,`/order`), `nsx/managers`, `idrac`(+`/scan`,`/bulk-add`,`/power-dashboard`, **`/nic-speed`**, **`/nic-models`**, **`/scan-log`**(주기/수동 스캔 실행 이력 — 통합/법인별)), `collectors`(+`/:id` vCenter 매핑, **`/:id/force-token`** 토큰 강제 동기화), **`central/agent-tokens`**(엣지별 개별 토큰 발급·회수), `central/ingest-stats`, `vm/:id/{hardware,reconfig}`(VM 사양 변경), `assignments`, `agent-deploy`, `metrics/settings`, `gpu-guest/{settings,vms,test,diag}` + **`gpu-guest/deploy/:agent`**(중앙→엣지 GPU 설정 배포), **`edge-users`**(+`-bulk` — 중앙→엣지 계정 배포), **`horizon`**(+`/test` — Horizon 서버 등록), `ipam/settings`, `ipam/scan/{settings,run,results}`, `alerts`(+`/test`), `audit`, `data-source`, `llm-config`, `packages`, `geocode`, `logs`, `backup/*`, `vclogs/*`, `net/{capture,pcap,history,monitors,agents,log-issues}`, `guest/add-user`, `deep-search/probe`, `security/session`, `emergency-stop`
+`users`(+**`/:username/password`** POST=비번 설정·DELETE=로그인 차단, `/:username/totp/*`), **`permissions`**(GET/PUT + `/reset` — 역할×기능 권한 매트릭스·특수기능 도구별 거부목록), `vcenters`(+`/test`,`/import`,`/order`), `nsx/managers`, `idrac`(+`/scan`,`/bulk-add`,`/power-dashboard`, **`/nic-speed`**, **`/nic-models`**, **`/scan-log`**(주기/수동 스캔 실행 이력 — 통합/법인별)), `collectors`(+`/:id` vCenter 매핑, **`/:id/force-token`** 토큰 강제 동기화), **`central/agent-tokens`**(엣지별 개별 토큰 발급·회수), `central/ingest-stats`, `vm/:id/{hardware,reconfig}`(VM 사양 변경), `assignments`, `agent-deploy`, `metrics/settings`, `gpu-guest/{settings,vms,test,diag}` + **`gpu-guest/deploy/:agent`**(중앙→엣지 GPU 설정 배포), **`edge-users`**(+`-bulk` — 중앙→엣지 계정 배포), **`horizon`**(+`/test` — Horizon 서버 등록), `ipam/settings`, `ipam/scan/{settings,run,results}`, `alerts`(+`/test`), `audit`, `data-source`, `llm-config`, `packages`, `geocode`, `logs`, `backup/*`, `vclogs/*`, `net/{capture,pcap,history,monitors,agents,log-issues}`, `guest/add-user`, `deep-search/probe`, `security/session`, `emergency-stop`
 
 ### 원격접속 `/api/remote/*`
 `mappings`, `quick-connect`, `proxies`, `config`, `deploy`, `probe`, `targets`, `rdp/:id`, **`rdp-ticket`**(POST — RDP 자격증명 1회용 티켓 발급, admin/operator; 쿼리스트링에 비번 미노출)
@@ -316,7 +324,7 @@ git 소스로 실행하면 `CONFIG_DIR` 기본값이 `server/config` 라 이 파
 | 🖥️ **vCenter 관리** | vCenter 등록·관리 · vCenter 연결 테스트 |
 | 🗄 **수집 서버** | iDRAC 서버 등록 · **스캔 로그**(주기/수동 스캔 실행 이력, 통합/법인별) · 지표 수집 · 게스트 계정 추가 · 수집 서버(원격) · **원격 법인(DC)에 Edge 노드 포탈 설치** |
 | 🎮 **GPU 사용량 수집** | GPU 수집 · GPU 게스트 수집 · GPU 수집 진단 |
-| 👤 **User Control** | 메인포탈 사용자 관리 · **엣지 사용자 배포** · 인증(AD) |
+| 👤 **User Control** | 메인포탈 사용자 관리(계정 CRUD·OTP 등록/해제·**비번 설정/로그인 차단**·**데이터 범위(scope)**·**기능 권한 매트릭스**·**특수기능 도구별 접근**) · **엣지 사용자 배포** · 인증(AD) |
 | 🛡️ **Security** | 세션 보안 · 이상동작 탐지 |
 | 📋 **Log** | vCenter 로그 보관 · 진단·로그 · 감사 로그 |
 
@@ -390,7 +398,10 @@ sudo ./install.sh --port 4000
 ## 보안 / 운영 메모
 
 - 자격증명/시크릿(`vcenters.json`, `users.json`, `*-assignments.json`, `central-agent-*.json`, `horizon.json`, 스캔/게스트 계정 등)은 `CONFIG_DIR`에 `0600` + **원자적 쓰기**(tmp+fsync+rename)로 저장되고 API 응답에서 마스킹됩니다. 손상 시 `<파일>.corrupt.<ts>`로 보존해 조용한 유실을 막습니다. 운영 시 `AUTH_SECRET` 지정 + 최초 임의 비밀번호(`initial-admin-password.txt`) 변경 필수. 보안 응답 헤더(X-Frame-Options·nosniff·HSTS)·CORS 기본 차단·업그레이드 sha256 필수 등은 [설치 가이드 §7](docs/INSTALL.md) 참고.
-- **역할(RBAC)** — `admin` / `operator` / `viewer`. 상태변경 API와 **브라우저 SSH/RDP 터널**은 `admin`·`operator`만 가능하고 viewer는 조회 전용입니다(해당 버튼은 viewer 화면에서 숨겨집니다). 비밀번호·역할 변경·계정 삭제 시 그 계정의 **기존 토큰이 즉시 무효화**되므로 재로그인이 필요합니다.
+- **역할(RBAC) + 기능 권한** — `admin` / `operator` / `viewer` 3역할에 **기능 권한 매트릭스**(17개 키)를 얹어 설정 › 사용자 관리에서 역할별로 조정합니다. 상태변경 API와 **브라우저 SSH/RDP 터널**은 해당 권한(`remote.access` 등)이 있어야 하며, 기본값은 종전대로 `admin`·`operator`만 가능하고 viewer는 조회 전용입니다. **서버가 진실의 원천**이라 UI에서 버튼을 숨기는 것과 별개로 API 직접 호출도 차단됩니다. 비밀번호·역할 변경·계정 삭제·로그인 차단 시 그 계정의 **기존 토큰이 즉시 무효화**됩니다.
+- **고권한 OTP 전용 로그인 (v2.204+)** — `admin`·`operator`(수퍼관리자 포함) 로컬 계정은 **OTP 6자리로만** 로그인합니다. 비밀번호가 맞아도 서버가 403 + 'OTP 등록 필요'로 거부하며(무차별 대입 카운터 미집계, 감사 로그 기록), viewer·데모 계정은 비밀번호 로그인이 가능합니다. 초기 구축 잠금을 막기 위해 **첫 admin이 OTP를 등록할 때까지만** admin 비번 로그인이 유예됩니다. 긴급 시 `OTP_ROLE_ENFORCE=false`.
+- **특수 계정** — `noainred`(수퍼관리자)는 항상 admin이 보장되고 강등·삭제·로그인 차단이 거부되며 설정 소유자에 자동 포함됩니다. `thedvcdemp`(데모)는 viewer 고정·삭제 불가이며 **비밀번호가 설정된 동안에만** 로그인됩니다([로그인 차단]으로 즉시 잠금 + 활성 세션 종료).
+- **사용자별 데이터 범위(scope)** — 계정에 허용 vCenter/리전을 지정하면 인벤토리 목록과 vCenter 필터가 서버에서 그 범위로 제한됩니다(외주·감사·데모 계정에 유용). 전역 KPI 합계 등 일부 집계 화면은 후속 확대 예정.
 - **엣지 토큰 스코프** — 공유 `CENTRAL_TOKEN` 하나를 전 엣지가 쓰면 엣지 1대 침해로 다른 사이트 자격증명까지 노출됩니다. **설정 → 수집 서버 → 🔑 엣지별 개별 central 토큰**에서 사이트별 토큰을 발급해 이관하세요(무중단, 미이관 엣지는 화면에 표시). 이관 후 `CENTRAL_REQUIRE_AGENT_TOKEN=true`.
 - **버전 파일** — 기동 시 `CONFIG_DIR/vmware-portal-release`에 실행 버전·역할(central/edge/…)을 기록합니다(`/etc/redhat-release` 방식) — 배포 점검·자산 조사용.
 - 시계열(온도/GPU/용량)을 분 단위·장기 보존하면 데이터가 커집니다 — **설정 › 지표 수집**에서 주기/보존기간을 조절하세요.

@@ -46,6 +46,25 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
 - **SSRF 가드**: 외부 입력 host를 네트워크로 찌르는 신규 기능은 `collector/registry.js ssrfBlockReason`(또는 async `ssrfBlockReasonResolved`)를 통과시킨다. RFC1918은 사내망 대상이라 허용, 링크로컬/루프백/우회표기(IPv4-mapped·10/16/8진수)는 차단.
 - **셸 명령 조립**: 사용자·원격 출력 값은 화이트리스트 정규식으로 검증 후에만 삽입(선행 `-` 차단 포함). 원격 명령의 출력(유닛명·경로)도 신뢰하지 말고 재검증한다.
 - **OTP는 1회용 + 잠금**: 로그인·민감작업 재인증 모두 사용 카운터(minCounter)를 대조하고 실패 잠금을 건다.
+- **고권한 OTP 전용 로그인(v2.204)**: admin/operator 로컬 계정은 비밀번호 로그인을 거부한다
+  (`authenticateLocal` → `policyBlocked`). **초기 구축 유예(`otpBootstrapGrace`)를 제거하지 말 것** —
+  아무 admin도 OTP 미등록이면 admin 비번 로그인을 허용해야 첫 설치에서 OTP 등록 경로가 살아있다
+  (유예를 없애면 신규 설치·마지막 admin OTP 해제 시 전체 잠김). viewer·데모는 비번 로그인 허용.
+- **기능 권한은 서버가 진실의 원천**: `auth/permissions.js` 매트릭스 + `requirePerm(key)`로 라우트를
+  보호한다. 프론트 `can()/toolAllowed()`는 UX 게이팅일 뿐이므로, 새 상태변경 라우트에 `requirePerm`을
+  빠뜨리면 메뉴만 숨겨진 채 API가 열린다. WS SSH/RDP 게이트웨이도 `userHasPermission('remote.access')`로
+  검사한다(role 하드코딩 금지). admin은 항상 전 권한(매트릭스로 낮출 수 없음 — 관리자 잠김 방지).
+- **사용자 scope는 조회 경로에서 강제**: `auth/scope.js scopedVcenterIds`를 `applyFilters`·`/vcenters`에
+  적용해 요청 필터로 우회할 수 없게 한다. 새 인벤토리 조회 API를 추가하면 동일하게 적용할 것.
+- **특수 계정 보호**: `noainred`(superuser)는 admin 고정·강등/삭제/로그인차단 거부 + settingsOwners 자동
+  포함, `thedvcdemp`(demo)는 viewer 고정·삭제 거부. 시드(`ensureSuperUser`/`ensureDemoUser`)는 같은
+  이름의 기존 수동 계정을 덮어쓰지 않는다(하이재킹 방지).
+
+## 프론트엔드 회귀 방지
+
+- **React 훅은 조기 return 위에서 선언**: `if (!data) return <Loading/>` 같은 조기 반환 뒤에 `useState`를
+  추가하면 렌더 간 훅 개수가 달라져 **React #310으로 화면 전체가 크래시**한다(v2.202 사용자 관리에서 실제
+  발생 → v2.203 긴급 수정). 뷰에 상태를 추가할 때는 항상 컴포넌트 최상단에 선언할 것.
 
 ## 사용자 선호 (반드시 준수)
 
