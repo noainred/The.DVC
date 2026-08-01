@@ -345,6 +345,24 @@ sudo cat /etc/vmware-portal/portal.env    # 현재 설정(민감정보 포함 �
 **백업/복원**: 설정·데이터는 전부 `/etc/vmware-portal` 아래에 있습니다. 이 디렉터리를 백업하면
 계정·토큰·vCenter·수집기·시계열 DB가 보존됩니다(포탈 **설정 → 포탈 백업**에서 스냅샷 내보내기도 가능).
 
+### 10.1 (선택) 서비스 바로가기 허브 — 별도 페이지
+
+운영에 쓰는 여러 서비스 포탈을 한 화면에 모아 두는 **독립 페이지**입니다(Python 표준 라이브러리 전용,
+pip 설치 불필요). 설치 패키지의 `app/pyportal/` 에 함께 들어 있고, 이 포탈과 **별도 프로세스·별도 포트**로
+돕니다. 자세한 내용은 [`pyportal/README.md`](../pyportal/README.md).
+
+```bash
+sudo cp -r /opt/vmware-portal/app/pyportal /opt/dc-service-hub
+sudo useradd -r -s /sbin/nologin dchub 2>/dev/null || true
+sudo mkdir -p /etc/dc-service-hub && sudo chown -R dchub:dchub /etc/dc-service-hub
+sudo cp /opt/dc-service-hub/systemd/dc-service-hub.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now dc-service-hub
+sudo firewall-cmd --permanent --add-port=8095/tcp && sudo firewall-cmd --reload
+# → http://<서버>:8095  (설정 탭에서 이름 + URL 입력 → 대시보드에 바로가기 생성)
+```
+
+접근을 제한하려면 유닛 파일의 `Environment=HUB_TOKEN=...` 주석을 풀고 재시작하세요.
+
 ---
 
 ## 11. 자주 묻는 점검

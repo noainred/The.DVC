@@ -1,0 +1,28 @@
+[Unit]
+Description=Global DC Service Hub (service shortcut portal)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=dchub
+Group=dchub
+WorkingDirectory=/opt/dc-service-hub
+Environment=HUB_HOST=0.0.0.0
+Environment=HUB_PORT=8095
+Environment=HUB_DATA_DIR=/etc/dc-service-hub
+# 접근을 제한하려면 토큰을 넣고 재시작한다(브라우저는 최초 1회만 입력).
+# Environment=HUB_TOKEN=change-me
+ExecStart=/usr/bin/python3 /opt/dc-service-hub/app.py
+Restart=always
+RestartSec=3
+
+# 최소 권한 — 설정 디렉터리 외에는 쓰기 불가.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/etc/dc-service-hub
+
+[Install]
+WantedBy=multi-user.target
