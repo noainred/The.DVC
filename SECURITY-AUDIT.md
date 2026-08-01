@@ -42,6 +42,31 @@ v2.196~2.206 에서 도입된 기능 권한 매트릭스 · 사용자 scope · O
 - 로그인 테마 20종: `dangerouslySetInnerHTML`/`eval` 없음 — 모든 값이 React 자동 이스케이프 경로.
 - `setupState()` 가 노출하는 비밀번호 **파일 경로**는 이미 문서에 공개된 고정 위치이며 값은 미노출, 등록 완료 후 노출 중단.
 
+## 5차 감사 (v2.210.0) — 파일 취급·공개 표면·소유자 경계 재점검
+
+파일 경로 처리 · 원격 명령 조립 · 공개 엔드포인트 · 신규분(v2.208 설정 소유자 파일, v2.209 도구
+잠금 표시)을 점검했다. **확정 결함 2건을 수정**했고 신규 CRITICAL 은 없다.
+
+| # | 심각도 | 항목 | 원인 | 조치(v2.210.0) |
+|---|---|---|---|---|
+| S4 | 🟠 HIGH | **백업 아카이브 인출이 설정 소유자 경계를 우회** | 백업은 `CONFIG_DIR` 의 `.json`/`.env` 를 통째로 담는다 — **`portal.env`(AUTH_SECRET·CENTRAL_TOKEN) · `users.json`(TOTP 시크릿·비밀번호 해시) · `vcenters.json`(vCenter 자격증명)** 전부. UI 는 '설정' 탭이 소유자 전용이지만 API 는 `adminOnly` 여서, **소유자가 아닌 admin 이 `/api/admin/backup/download/:name` 을 직접 호출해 통째로 인출**할 수 있었다. `AUTH_SECRET` 이 새면 임의 계정(수퍼관리자 포함) 토큰을 위조할 수 있어 **OTP 전용 정책과 소유자 경계가 동시에 무너지고**, `users.json` 의 TOTP 시크릿으로 OTP 코드까지 생성 가능하다 | 백업 7개 라우트(status·settings·now·download·view·delete·restore)에 `requireSettingsOwner` 추가. 다운로드·복원은 **감사 로그** 기록. 정적 회귀 테스트로 가드 누락 방지 |
+| S5 | 🟡 MEDIUM | **보안 설정 조회가 소유자 계정 목록을 노출** | `GET /api/admin/security/session` 이 `adminOnly` 라, 소유자가 아닌 admin 이 `settingsOwners`(설정 소유 *계정명* 목록)를 열람할 수 있었다. 4차에서 미인증 노출은 막았지만 인증 후 경로가 남아 있었다(누구를 노려야 하는지 알려주는 단서) | 조회에도 `requireSettingsOwner` 적용(변경 PUT 은 4차 이전부터 적용됨) |
+
+### 점검했으나 문제 없음으로 확인
+- **경로 탈출 없음**: 요청값으로 파일을 여는 지점은 백업(`path.basename` + 고정 디렉터리)과 `/dl/:file`(고정 목록 조회)뿐. `res.sendFile`/`createReadStream` 에 사용자 입력이 직접 들어가는 경로 없음.
+- **원격 명령 조립**: `tcpdump` 캡처는 대상 호스트·인터페이스 화이트리스트 정규식 + 수치 클램프 + `crypto.randomBytes` 파일명(TOCTOU 방지)로 이미 하드닝돼 있음.
+- **업로드 복원 미노출**: `parseUploadedArchive()` 는 export 만 되어 있고 **어떤 라우트에도 연결돼 있지 않음**(임의 설정 주입 경로 없음). 회귀 테스트로 고정.
+- **복원 화이트리스트**: `.json`/`.env` 만 허용하므로 `settings-owners.txt`·`initial-admin-password.txt` 는 백업·복원 대상이 아니다 → 복원으로 소유자 목록을 갈아끼울 수 없다.
+- v2.208 `fileSettingsOwners()`: 읽기 전용 + 계정명 정규식 화이트리스트, UI 저장으로 덮이지 않음.
+- v2.209 도구 잠금 표시: 렌더링만 변경, 딥링크 가드·`requirePerm` 불변 → 노출 방식 변경이 권한을 넓히지 않음.
+
+> 수용된 위험: `/api/admin/central-token` 은 설계상 admin 이 엣지 등록용 토큰을 확인하는 기능이라
+> 소유자 전용으로 좁히지 않았다(운영 흐름 유지). 대신 발급/회전은 감사 로그에 남는다.
+> **운영 주의**: 백업 아카이브 자체가 자격증명 사본이므로 내려받은 파일은 안전한 곳에 보관하고
+> 불필요해지면 삭제할 것.
+
+---
+
 > 잔여(수용된) 한계: `/overview`·`/summary` 등 **전역 집계 수치**는 scope 를 적용하지 않는다
 > (단일 스냅샷 단일 계산 캐시 구조 — 식별 정보가 아닌 합계만 노출). 자원 **식별 단위** 유출은
 > 위 S2 로 차단됐다. AD 계정은 OTP 강제 등록 대상이 아니다(AD 인증 체계를 따름).
