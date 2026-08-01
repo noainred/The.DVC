@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { config } from '../config.js';
 import { authenticate, signToken, authMiddleware, requireRole, getUser, beginTotpEnroll, confirmTotpEnroll } from '../auth/auth.js';
-import { rolePermissions } from '../auth/permissions.js';
+import { rolePermissions, roleToolsDenied } from '../auth/permissions.js';
 import { loadAdConfig, saveAdConfig, testAd } from '../auth/ad.js';
 import { logAudit } from '../audit.js';
 import { recordPortalLoginFail } from '../security/loginStore.js';
@@ -57,7 +57,7 @@ authRouter.post('/login', async (req, res) => {
   const token = signToken({ sub: user.username, role: user.role, name: user.name, ...(local ? { src: 'local', tv: local.tokenVersion || 0 } : {}) });
   logAudit({ user: user.username, action: '로그인', detail: user.role, ip });
   // 로그인 직후에도 프론트가 메뉴를 바로 게이팅할 수 있게 권한/scope 를 함께 내려준다.
-  const enriched = { ...user, permissions: rolePermissions(user.role), scope: (local && local.scope) ? { vcenters: local.scope.vcenters || [], regions: local.scope.regions || [] } : { vcenters: [], regions: [] } };
+  const enriched = { ...user, permissions: rolePermissions(user.role), toolsDenied: roleToolsDenied(user.role), scope: (local && local.scope) ? { vcenters: local.scope.vcenters || [], regions: local.scope.regions || [] } : { vcenters: [], regions: [] } };
   res.json({ token, user: enriched });
 });
 
@@ -66,7 +66,7 @@ authRouter.get('/me', authMiddleware, (req, res) => {
   const u = getUser(req.user.username);
   // permissions: 현재 매트릭스 기준 '내 기능 권한'(프론트 메뉴/버튼 게이팅용, 매 조회 시 최신 반영).
   // scope: 볼 수 있는 vCenter/리전 제한(빈 배열 = 전체).
-  res.json({ user: { ...req.user, totpEnabled: !!u?.totpEnabled, local: !!u, permissions: rolePermissions(req.user.role) } });
+  res.json({ user: { ...req.user, totpEnabled: !!u?.totpEnabled, local: !!u, permissions: rolePermissions(req.user.role), toolsDenied: roleToolsDenied(req.user.role) } });
 });
 
 // Self-service TOTP (Google Authenticator) enrollment for the current local user.

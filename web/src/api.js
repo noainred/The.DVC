@@ -21,6 +21,27 @@ export const broadcastLogout = () => { try { localStorage.setItem(LOGOUT_BROADCA
 let onUnauthorized = () => {};
 export const setUnauthorizedHandler = (fn) => { onUnauthorized = fn; };
 
+// 현재 로그인 사용자(권한/도구 게이팅용) — App 이 setCurrentUser 로 채운다.
+let _currentUser = null;
+export const setCurrentUser = (u) => { _currentUser = (u && typeof u === 'object') ? u : null; };
+export const getCurrentUser = () => _currentUser;
+// 기능 권한 보유 여부(프론트 게이팅). admin·권한배열 없음(구버전/인증 비활성)은 통과.
+export const can = (key) => {
+  const u = _currentUser;
+  if (!key || !u) return true;
+  if (u.role === 'admin') return true;
+  if (!Array.isArray(u.permissions)) return true;
+  return u.permissions.includes(key);
+};
+// 특수 기능 개별 도구 접근 가능 여부 — 'tools' 기본 권한 + 역할별 거부목록(toolsDenied)에 없을 것.
+export const toolAllowed = (k) => {
+  const u = _currentUser;
+  if (!u || u.role === 'admin') return true;
+  if (!can('tools')) return false;
+  const denied = Array.isArray(u.toolsDenied) ? u.toolsDenied : [];
+  return !denied.includes(k);
+};
+
 function authHeaders(extra = {}) {
   const token = getToken();
   return token ? { ...extra, Authorization: `Bearer ${token}` } : extra;

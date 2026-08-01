@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { fetchJson } from '../api.js';
+import { fetchJson, can } from '../api.js';
 import EscClose from './EscClose.jsx';
 
 /**
@@ -10,6 +10,7 @@ import EscClose from './EscClose.jsx';
  */
 export function VmConsoleButton({ vmId, vmName }) {
   const [open, setOpen] = useState(false);
+  if (!can('vm.console')) return null; // 기능 권한 'vm.console' — 서버 콘솔 라우트도 동일 강제
   return (
     <>
       <button className="logout-btn" style={{ padding: '8px 14px' }} onClick={() => setOpen(true)}>🖥️ 원격 콘솔</button>

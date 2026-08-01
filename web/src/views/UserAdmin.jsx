@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
 import { fetchJson, postJson, patchJson, delJson, putJson } from '../api.js';
 import { Loading, ErrorBox, Modal } from '../components/ui.jsx';
+import { TOOLS as SPECIAL_TOOLS } from './specialToolsList.js';
 
 const ROLES = ['viewer', 'operator', 'admin'];
 const REGIONS = ['아시아', '중국', '유럽', '북미'];
@@ -86,10 +87,32 @@ export default function UserAdmin() {
     setPermDirty(true);
   };
   const savePerms = async () => {
-    const r = await putJson('/admin/permissions', { operator: perms.matrix.operator, viewer: perms.matrix.viewer })
-      .catch((e) => ({ ok: false, reason: e.message }));
+    const r = await putJson('/admin/permissions', {
+      operator: perms.matrix.operator, viewer: perms.matrix.viewer, toolsDenied: perms.matrix.toolsDenied,
+    }).catch((e) => ({ ok: false, reason: e.message }));
     if (r.ok) { setPerms((p) => ({ ...p, matrix: r.matrix })); setPermDirty(false); flash(true, '권한 매트릭스를 저장했습니다.'); }
     else flash(false, r.reason);
+  };
+
+  // 특수 기능 도구별 접근(거부목록 모델) — 체크 = 허용, 해제 = 거부. admin 은 항상 허용.
+  const toolAllowedMx = (role, k) => !((perms?.matrix?.toolsDenied?.[role]) || []).includes(k);
+  const toggleTool = (role, k) => {
+    setPerms((p) => {
+      const td = { operator: [...(p.matrix.toolsDenied?.operator || [])], viewer: [...(p.matrix.toolsDenied?.viewer || [])] };
+      const cur = new Set(td[role]);
+      cur.has(k) ? cur.delete(k) : cur.add(k); // 목록에 있으면 거부 → 제거하면 허용
+      td[role] = [...cur];
+      return { ...p, matrix: { ...p.matrix, toolsDenied: td } };
+    });
+    setPermDirty(true);
+  };
+  const setAllTools = (role, allow) => {
+    setPerms((p) => {
+      const td = { operator: [...(p.matrix.toolsDenied?.operator || [])], viewer: [...(p.matrix.toolsDenied?.viewer || [])] };
+      td[role] = allow ? [] : SPECIAL_TOOLS.filter((t) => !t.adminOnly).map((t) => t.k); // 허용=거부목록 비움 / 차단=전부 거부
+      return { ...p, matrix: { ...p.matrix, toolsDenied: td } };
+    });
+    setPermDirty(true);
   };
   const resetPerms = async () => {
     if (!window.confirm('권한 매트릭스를 기본값으로 되돌릴까요?')) return;
@@ -230,6 +253,39 @@ export default function UserAdmin() {
               </tbody>
             </table>
           </div>
+
+          {/* 특수 기능 도구별 접근 — '특수 기능' 권한을 가진 역할에 대해 개별 도구를 켜고 끈다. */}
+          <div className="flex between wrap gap" style={{ margin: '20px 0 6px' }}>
+            <div style={{ fontWeight: 700, fontSize: 13 }}>특수 기능 — 도구별 접근</div>
+            <div className="flex gap" style={{ fontSize: 12 }}>
+              <span className="muted">operator:</span>
+              <button className="tab" style={{ padding: '3px 8px' }} onClick={() => setAllTools('operator', true)}>전체허용</button>
+              <button className="tab" style={{ padding: '3px 8px' }} onClick={() => setAllTools('operator', false)}>전체차단</button>
+              <span className="muted" style={{ marginLeft: 8 }}>viewer:</span>
+              <button className="tab" style={{ padding: '3px 8px' }} onClick={() => setAllTools('viewer', true)}>전체허용</button>
+              <button className="tab" style={{ padding: '3px 8px' }} onClick={() => setAllTools('viewer', false)}>전체차단</button>
+            </div>
+          </div>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 8, lineHeight: 1.7 }}>
+            체크 = 해당 도구 접근 허용. '특수 기능' 기본 권한이 있어야 도구가 보이며, 여기서 도구별로 세부 차단할 수 있습니다.
+            <b>관리자 전용</b> 도구(VM 생성·에이전트 작업 등)는 admin에게만 노출되어 목록에서 제외됩니다.
+          </div>
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>도구</th><th style={{ textAlign: 'center' }}>admin</th><th style={{ textAlign: 'center' }}>operator</th><th style={{ textAlign: 'center' }}>viewer</th></tr></thead>
+              <tbody>
+                {SPECIAL_TOOLS.filter((t) => !t.adminOnly).map((t) => (
+                  <tr key={t.k}>
+                    <td>{t.icon} {t.label} <span className="muted" style={{ fontSize: 11 }}>({t.k})</span></td>
+                    <td style={{ textAlign: 'center' }}><input type="checkbox" checked readOnly disabled title="admin은 항상 전체" /></td>
+                    <td style={{ textAlign: 'center' }}><input type="checkbox" checked={toolAllowedMx('operator', t.k)} onChange={() => toggleTool('operator', t.k)} /></td>
+                    <td style={{ textAlign: 'center' }}><input type="checkbox" checked={toolAllowedMx('viewer', t.k)} onChange={() => toggleTool('viewer', t.k)} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
           {permDirty && <div className="muted" style={{ fontSize: 12, marginTop: 8, color: '#fbbf24' }}>변경사항이 저장되지 않았습니다 — [저장]을 눌러 적용하세요.</div>}
         </div>
       )}
