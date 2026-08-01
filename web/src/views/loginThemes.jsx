@@ -272,6 +272,248 @@ function ThemeBrutalist({ f }) {
     fields={<AuthFields f={f} head="THE DAVINCI // NO NONSENSE" title="LOG IN." sub="계정과 비밀번호. 그게 전부." btn="GO" />} />;
 }
 
+/* ────────────── 추가 10종 — 'Infra Monitor Concepts' 세션(1b~1k) 포팅 ────────────── */
+// 원본은 1920×1080 정적 시안. 폼은 공통 AuthFields 로 실동작하게 얹고, 배경/레이아웃/팔레트를 재현.
+
+// 11) 1b Terminal Boot — 부트 시퀀스 로그 + tty 로그인 박스.
+function ThemeBoot({ f }) {
+  return (
+    <div className="lt lt-boot">
+      <div className="lt-scan" aria-hidden />
+      <div className="boot-log" aria-hidden>
+        <div>davinci-core v4.2.1 — boot sequence initiated</div>
+        <div>[ OK ] telemetry bus ......... 28 vCenters linked</div>
+        <div>[ OK ] node registry ......... 5,812 VMs · 654 hosts</div>
+        <div>[ OK ] alert pipeline ........ latency 12ms</div>
+        <div className="boot-auth">[ AUTH ] operator credentials required to continue_</div>
+      </div>
+      <form className="lt-card" onSubmit={f.submit}>
+        <div className="boot-tty"><i /><i /><span>DAVINCI://AUTH</span><em>tty1</em></div>
+        <AuthFields f={f} title="login: operator" sub="$ awaiting credentials_" btn="EXEC LOGIN" idLabel="$ OPERATOR_ID" pwLabel="$ PASSPHRASE / OTP" />
+      </form>
+      <div className="boot-status" aria-hidden><span>UPTIME 99.99%</span><span>ALERTS 0 CRIT</span><span>REGIONS 12/12 UP</span></div>
+    </div>
+  );
+}
+
+// 12) 1c Split Panel — 좌 브랜드 패널(빅타이포+통계) / 우 언더라인 폼.
+function ThemeSplitPanel({ f }) {
+  return (
+    <div className="lt lt-splitp">
+      <div className="sp-left">
+        <div className="sp-brand"><i /><span>THE DAVINCI</span></div>
+        <div className="sp-big">One console.<br />Zero blind spots.</div>
+        <div className="sp-desc">Live telemetry from 5,800+ VMs and 650+ servers across 28 vCenters worldwide.</div>
+        <div className="sp-stats">
+          <div><b>5.8K</b><span>VMS ONLINE</span></div>
+          <div><b>28</b><span>VCENTERS</span></div>
+          <div><b>99.99</b><span>UPTIME %</span></div>
+        </div>
+        <div className="sp-ticker">
+          <div><b>▸</b> icn-03 · rack B7 · thermal nominal</div>
+          <div><b>▸</b> fra-01 · failover drill complete</div>
+        </div>
+      </div>
+      <div className="sp-right">
+        <form className="lt-card" onSubmit={f.submit}>
+          <AuthFields f={f} head={<><span>SECURE ACCESS · TLS 1.3</span></>} title="Operator Sign In" sub="Authenticate to enter the monitoring console." />
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// 13) 1d Radar Ops — 동심원 레이더 + 회전 스윕 + 중앙 카드.
+function ThemeRadar({ f }) {
+  return (
+    <div className="lt lt-radar">
+      <div className="rd-topbar" aria-hidden><span>THE DAVINCI ◆ RADAR</span><span>SCAN CYCLE 8.0s · 12 REGIONS · <b>ALL NOMINAL</b></span></div>
+      <div className="rd-ring r1" aria-hidden /><div className="rd-ring r2" aria-hidden /><div className="rd-ring r3" aria-hidden />
+      <div className="rd-sweep" aria-hidden />
+      <span className="rd-blip" style={{ top: '27%', left: '33%' }} aria-hidden />
+      <span className="rd-blip" style={{ top: '59%', left: '68%', animationDelay: '1s' }} aria-hidden />
+      <span className="rd-blip amber" style={{ top: '72%', left: '40%', animationDelay: '.5s' }} aria-hidden />
+      <form className="lt-card" onSubmit={f.submit}>
+        <div className="rd-icon" aria-hidden>◉</div>
+        <AuthFields f={f} title="Operator Access" sub="Radar console · clearance L2+" />
+      </form>
+    </div>
+  );
+}
+
+// 14) 1e Light Console — 밝은 도트 그리드 데이라이트 모드, 좌 히어로 + 우 흰 카드.
+function ThemeDaylight({ f }) {
+  return (
+    <div className="lt lt-daylight lt-hero-split">
+      <div className="dl-topbar">
+        <div className="dl-brand"><i><b /></i><div><div className="t">THE DAVINCI</div><div className="s">GLOBAL INFRASTRUCTURE MONITOR</div></div></div>
+        <div className="dl-net"><i />NETWORK STATUS · NOMINAL</div>
+      </div>
+      <div className="hs-main">
+        <div className="hs-hero">
+          <div className="dl-label">▸ DAYLIGHT OPS MODE</div>
+          <h1>Eyes on every rack, in every region.</h1>
+          <p>Live telemetry from 5,800+ VMs and 650+ servers across 28 vCenters — in a console that's easy on the eyes, day or night.</p>
+          <div className="dl-kpis"><span>● 5,812 VMS</span><span>● 654 HOSTS</span><span>● 0 CRITICAL</span></div>
+        </div>
+        <form className="lt-card" onSubmit={f.submit}>
+          <AuthFields f={f} title="Operator Sign In" sub="Authenticate to enter the console." />
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// 15) 1f Region Tiles — 리전 타일 월(어둡게) 뒤 '잠긴 콘솔' 카드.
+const TILE_CODES = ['ICN', 'FRA', 'SIN', 'IAD', 'GRU', 'PDX', 'LHR', 'NRT', 'SYD', 'AMS', 'BOM', 'SFO'];
+const TILE_LABELS = ['CPU LOAD', 'MEM PRESSURE', 'NET I/O', 'DISK IOPS', 'LATENCY MS', 'VMS ACTIVE'];
+function ThemeRegionTiles({ f }) {
+  const tiles = Array.from({ length: 30 }, (_, i) => ({
+    code: `${TILE_CODES[i % 12]}-0${(i % 4) + 1}`,
+    amber: i === 7 || i === 19,
+    val: [412, 88, 97, 231, 12, 505][i % 6] + (i % 3 === 0 ? '%' : ''),
+    label: TILE_LABELS[i % 6],
+  }));
+  return (
+    <div className="lt lt-tiles">
+      <div className="tw-wall" aria-hidden>
+        {tiles.map((t, i) => (
+          <div key={i} className="tw-tile">
+            <div className="tw-head"><span>{t.code}</span><b style={{ color: t.amber ? '#e8b84a' : '#39d3b8' }}>●</b></div>
+            <div><div className="tw-val">{t.val}</div><div className="tw-lab">{t.label}</div></div>
+          </div>
+        ))}
+      </div>
+      <div className="tw-vignette" aria-hidden />
+      <form className="lt-card" onSubmit={f.submit}>
+        <div className="tw-brand"><i /><span>THE DAVINCI</span></div>
+        <AuthFields f={f} title="Console locked" sub="28 vCenters are reporting behind this screen. Sign in to unlock." btn="UNLOCK CONSOLE" />
+      </form>
+    </div>
+  );
+}
+
+// 16) 1g Ultra Minimal — 중앙 초미니멀 + 하단 흐르는 티커.
+const TICKER_ITEMS = ['icn-03 · thermal nominal', 'fra-01 · failover drill complete', 'sin-02 · uptime 99.99%', 'iad-04 · patch window 03:00 UTC', 'gru-01 · link restored'];
+function ThemeUltraMinimal({ f }) {
+  return (
+    <div className="lt lt-ultra">
+      <div className="um-topbar" aria-hidden><span>THE DAVINCI</span><span>UTC · <b>NOMINAL</b></span></div>
+      <div className="um-gem" aria-hidden />
+      <form className="lt-card" onSubmit={f.submit}>
+        <AuthFields f={f} title="Sign in to the console" sub="5,812 VMs · 28 vCenters · one console" btn="AUTHENTICATE" />
+      </form>
+      <div className="um-ticker" aria-hidden>
+        <div>{[...TICKER_ITEMS, ...TICKER_ITEMS].map((t, i) => <span key={i}>{t}</span>)}</div>
+      </div>
+    </div>
+  );
+}
+
+// 17) 1h NOC Preview — 블러 처리된 차트보드 위 우측 패널 인증.
+function ThemeNoc({ f }) {
+  const charts = TILE_LABELS.map((title, i) => ({ title, bars: Array.from({ length: 8 }, (_, j) => 22 + ((i * 37 + j * 53) % 68)) }));
+  return (
+    <div className="lt lt-noc">
+      <div className="noc-wall" aria-hidden>
+        {charts.map((c) => (
+          <div key={c.title} className="noc-chart">
+            <div className="noc-title">{c.title}</div>
+            <div className="noc-bars">{c.bars.map((b, j) => <i key={j} style={{ height: `${b}%` }} />)}</div>
+          </div>
+        ))}
+      </div>
+      <form className="lt-card noc-panel" onSubmit={f.submit}>
+        <div className="tw-brand"><i /><span>THE DAVINCI</span></div>
+        <AuthFields f={f} title="Your NOC is one login away." sub="Live boards resume exactly where you left them." btn="RESUME SESSION" />
+      </form>
+    </div>
+  );
+}
+
+// 18) 1i Left Rail — 좌측 인증 레일 + 우측 라이브 토폴로지(SVG 곡선).
+function ThemeLeftRail({ f }) {
+  return (
+    <div className="lt lt-rail">
+      <form className="lt-card rail-card" onSubmit={f.submit}>
+        <div className="rail-brand">◆ THE DAVINCI</div>
+        <AuthFields f={f} title="Operator Sign In" sub="Authenticate to enter the console." />
+      </form>
+      <div className="rail-map" aria-hidden>
+        <div className="rail-topline">LIVE TOPOLOGY · <b>11 UP</b> · <em>1 DEGRADED</em></div>
+        <svg viewBox="0 0 1480 1080" preserveAspectRatio="xMidYMid slice">
+          <path d="M 260 420 Q 560 150 900 350" stroke="rgba(57,211,184,.4)" strokeWidth="1.5" fill="none" strokeDasharray="4 6" />
+          <path d="M 900 350 Q 1130 480 1240 640" stroke="rgba(57,211,184,.4)" strokeWidth="1.5" fill="none" strokeDasharray="4 6" />
+          <path d="M 260 420 Q 500 720 820 780" stroke="rgba(232,184,74,.35)" strokeWidth="1.5" fill="none" strokeDasharray="4 6" />
+          <circle cx="260" cy="420" r="5" fill="#39d3b8" /><circle cx="900" cy="350" r="5" fill="#39d3b8" />
+          <circle cx="1240" cy="640" r="5" fill="#39d3b8" /><circle cx="820" cy="780" r="5" fill="#e8b84a" />
+          <text x="280" y="408" fill="#7ba0a3" fontSize="15" fontFamily="monospace">PDX</text>
+          <text x="918" y="338" fill="#7ba0a3" fontSize="15" fontFamily="monospace">FRA</text>
+          <text x="1258" y="628" fill="#7ba0a3" fontSize="15" fontFamily="monospace">ICN</text>
+          <text x="840" y="812" fill="#c9a13f" fontSize="15" fontFamily="monospace">GRU · DEGRADED</text>
+        </svg>
+        <div className="rail-log">
+          <div>▸ icn-03 · rack B7 · thermal nominal</div>
+          <div>▸ gru-01 · packet loss 2.1% · investigating</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 19) 1j Amber Terminal — 야간 근무용 저휘도 앰버 콘솔.
+function ThemeAmber({ f }) {
+  return (
+    <div className="lt lt-amber lt-hero-split">
+      <div className="lt-scan" aria-hidden />
+      <div className="am-topbar" aria-hidden><span>THE DAVINCI // NIGHT WATCH</span><span><b>●</b> NOMINAL</span></div>
+      <div className="hs-main">
+        <div className="hs-hero">
+          <div className="am-label">▸ AMBER SHIFT CONSOLE</div>
+          <h1>Quiet nights are earned, not lucky.</h1>
+          <p>5,800+ VMs watched around the clock. Low-glare amber mode for overnight operators.</p>
+          <div className="am-log">
+            <div>▸ icn-03 · thermal nominal</div>
+            <div>▸ fra-01 · failover drill complete</div>
+          </div>
+        </div>
+        <form className="lt-card" onSubmit={f.submit}>
+          <AuthFields f={f} head={<><span><b>&gt;_</b>AUTH-01 · TLS 1.3</span></>} title="Operator Sign In" sub="야간 교대 콘솔에 로그인합니다." />
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// 20) 1k Data Wall — 상단 스탯바 + 99.99% 업타임 히트맵 + 우측 인증.
+function ThemeDataWall({ f }) {
+  const days = Array.from({ length: 31 }, (_, i) => (i === 21 ? '#e8b84a' : i % 5 === 4 ? '#1f5a4e' : '#155f52'));
+  return (
+    <div className="lt lt-wall">
+      <div className="dw-topbar">
+        <span className="dw-brand">◆ THE DAVINCI</span>
+        <span className="dw-stats">VMS <b>5,812</b> · HOSTS <b>654</b> · VCENTERS <b>28</b> · CRIT <em>0</em></span>
+      </div>
+      <div className="dw-main">
+        <div className="dw-hero" aria-hidden>
+          <div className="dw-big">99.99<b>%</b></div>
+          <div className="dw-sub">FLEET UPTIME · TRAILING 31 DAYS</div>
+          <div className="dw-days">{days.map((c, i) => <i key={i} style={{ background: c }} />)}</div>
+          <div className="dw-legend">■ nominal &nbsp;■ degraded window — one amber day in 31.</div>
+          <div className="dw-log">
+            <div>▸ icn-03 · rack B7 · thermal nominal</div>
+            <div>▸ fra-01 · failover drill complete</div>
+            <div>▸ sin-02 · uptime 99.99% · 31d window</div>
+          </div>
+        </div>
+        <form className="lt-card" onSubmit={f.submit}>
+          <AuthFields f={f} head={<><span><b>&gt;_</b>SECURE ACCESS // AUTH-01</span></>} title="Operator Sign In" sub="Authenticate to enter the monitoring console." />
+        </form>
+      </div>
+    </div>
+  );
+}
+
 export const THEMES = [
   { id: 'davinci', name: 'Davinci Map', Comp: ThemeDavinci },
   { id: 'aurora', name: 'Aurora Glass', Comp: ThemeAurora },
@@ -283,6 +525,17 @@ export const THEMES = [
   { id: 'matrix', name: 'Matrix Rain', Comp: ThemeMatrix },
   { id: 'sunset', name: 'Sunset', Comp: ThemeSunset },
   { id: 'brutalist', name: 'Brutalist', Comp: ThemeBrutalist },
+  // 'Infra Monitor Concepts' 세션 포팅분(1b~1k)
+  { id: 'boot', name: 'Terminal Boot', Comp: ThemeBoot },
+  { id: 'splitpanel', name: 'Split Panel', Comp: ThemeSplitPanel },
+  { id: 'radar', name: 'Radar Ops', Comp: ThemeRadar },
+  { id: 'daylight', name: 'Light Console', Comp: ThemeDaylight },
+  { id: 'tiles', name: 'Region Tiles', Comp: ThemeRegionTiles },
+  { id: 'ultra', name: 'Ultra Minimal', Comp: ThemeUltraMinimal },
+  { id: 'noc', name: 'NOC Preview', Comp: ThemeNoc },
+  { id: 'rail', name: 'Left Rail', Comp: ThemeLeftRail },
+  { id: 'amber', name: 'Amber Watch', Comp: ThemeAmber },
+  { id: 'wall', name: 'Data Wall', Comp: ThemeDataWall },
 ];
 
 /* ───────────────────────── 공통 + 테마별 CSS ───────────────────────── */
@@ -329,6 +582,11 @@ export const THEMES_CSS = `
 .lt-notice { margin-top: 12px; font-size: 12px; color: #fbbf24; line-height: 1.6; }
 .lt-welcome { margin-top: 12px; font-size: 12px; color: var(--lt-accent,#2dd4bf); }
 .lt-hint { margin-top: 10px; font-size: 11px; color: var(--lt-dim,#64748b); line-height: 1.7; }
+.lt-reshuffle { position: fixed; z-index: 6; right: 16px; bottom: 14px; background: rgba(0,0,0,.4);
+  border: 1px solid rgba(255,255,255,.16); color: #cbd5e1; border-radius: 20px; padding: 7px 15px;
+  font-size: 11px; letter-spacing: .1em; cursor: pointer; font-family: 'JetBrains Mono', monospace; }
+.lt-reshuffle:hover { border-color: #94a3b8; color: #fff; }
+
 /* ── 1) Davinci: 좌 히어로 + 우 카드 + 도트맵 ── */
 .lt-davinci { --lt-card: rgba(13,20,28,.93); --lt-accent: #34e0b4; --lt-accent-ink: #052e25; --lt-glow: rgba(45,212,191,.15);
   display: block; background: #0a0e15; }
@@ -435,4 +693,221 @@ export const THEMES_CSS = `
 .lt-brutal .lt-title { font-size: 30px; font-weight: 800; letter-spacing: -.02em; }
 .lt-brutal .lt-input { border-width: 2px; }
 .lt-brutal .lt-btn { border: 2px solid #111; }
+
+/* ═══ 'Infra Monitor Concepts' 세션 포팅분 (1b~1k) ═══ */
+/* 공용: 좌 히어로 + 우 카드 분할 레이아웃(1e·1j 등) */
+.lt-hero-split { display: block; padding: 0; }
+.lt-hero-split .hs-main { position: relative; z-index: 2; display: flex; align-items: center; gap: 64px;
+  max-width: 1560px; margin: 0 auto; padding: 60px 56px; min-height: calc(100vh - 110px); }
+.lt-hero-split .hs-hero { flex: 1; min-width: 0; }
+.lt-hero-split .hs-hero h1 { margin: 26px 0 0; font-size: clamp(36px, 4.3vw, 62px); font-weight: 700; line-height: 1.16; letter-spacing: -.02em; }
+.lt-hero-split .hs-hero p { margin: 26px 0 0; max-width: 540px; font-size: 15px; line-height: 1.9; }
+.lt-hero-split .lt-card { width: 440px; flex: none; }
+@media (max-width: 1080px) { .lt-hero-split .hs-main { flex-direction: column; align-items: stretch; gap: 36px; padding: 32px 22px; }
+  .lt-hero-split .lt-card { width: 100%; max-width: 460px; margin: 0 auto; } }
+
+/* ── 11) 1b Terminal Boot ── */
+.lt-boot { --lt-font: 'IBM Plex Mono', ui-monospace, monospace; --lt-accent: #39d3b8; --lt-accent-ink: #03110d; --lt-glow: rgba(57,211,184,.2);
+  --lt-card: #070d0b; --lt-border: #1b3d36; --lt-input: #060b09; --lt-text: #c9e8df; --lt-title: #e6f5f0; --lt-dim: #2e6b5f; --lt-faint: #2e6b5f;
+  --lt-ph: #3d5f57; --lt-radius: 2px; --lt-input-radius: 2px; --lt-btn-radius: 2px; background: #050807; }
+.lt-boot .lt-scan { position: absolute; inset: 0; pointer-events: none; opacity: .6;
+  background: repeating-linear-gradient(rgba(255,255,255,.02) 0 1px, transparent 1px 4px); }
+.boot-log { position: absolute; top: 44px; left: 56px; right: 24px; color: #2e6b5f; font: 400 13px/2 'IBM Plex Mono', monospace; pointer-events: none; }
+.boot-log .boot-auth { color: #39d3b8; }
+.boot-tty { display: flex; align-items: center; gap: 8px; padding: 13px 20px; border-bottom: 1px solid #122b26; }
+.boot-tty i { width: 10px; height: 10px; border-radius: 50%; background: #1b3d36; }
+.boot-tty span { color: #39d3b8; font-size: 11px; letter-spacing: .3em; margin-left: 10px; }
+.boot-tty em { margin-left: auto; color: #2e6b5f; font-size: 11px; font-style: normal; }
+.boot-status { position: absolute; left: 0; right: 0; bottom: 0; border-top: 1px solid #122b26; padding: 15px 56px;
+  display: flex; gap: 48px; color: #2e6b5f; font-size: 12px; letter-spacing: .15em; pointer-events: none; }
+@media (max-width: 900px) { .boot-log { position: static; padding: 20px 22px 0; } .boot-status { display: none; } }
+
+/* ── 12) 1c Split Panel ── */
+.lt-splitp { --lt-accent: #39d3b8; --lt-accent-ink: #04231c; --lt-glow: rgba(57,211,184,.16); --lt-card: transparent;
+  --lt-border: #22383f; --lt-input: transparent; --lt-text: #c9dedd; --lt-title: #eef7f4; --lt-dim: #5f8489; --lt-faint: #4a6b70;
+  --lt-ph: #4a6b70; --lt-shadow: none; display: flex; place-items: stretch; padding: 0; background: #0c1219; }
+.lt-splitp .sp-left { width: 46%; background: #101c26; border-right: 1px solid #1c2f3a; padding: 56px 64px;
+  display: flex; flex-direction: column; min-height: 100vh; box-sizing: border-box; }
+.sp-brand { display: flex; gap: 14px; align-items: center; color: #e8f4f1; font-weight: 800; letter-spacing: .32em; font-size: 15px; }
+.sp-brand i { width: 38px; height: 38px; border-radius: 8px; background: #39d3b8; position: relative; }
+.sp-brand i::after { content: ''; position: absolute; inset: 0; margin: auto; width: 12px; height: 12px; background: #0c1219; transform: rotate(45deg); }
+.sp-big { color: #f2f8f6; font: 700 clamp(34px, 3.4vw, 58px)/1.2 'Inter', system-ui, sans-serif; letter-spacing: -.02em; margin-top: 9vh; }
+.sp-desc { color: #84a3ac; font: 400 16px/1.9 'Inter', system-ui, sans-serif; margin-top: 24px; max-width: 520px; }
+.sp-stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1px; background: #1c2f3a; border: 1px solid #1c2f3a; margin-top: 7vh; }
+.sp-stats > div { background: #101c26; padding: 20px; }
+.sp-stats b { display: block; color: #39d3b8; font-size: 30px; font-weight: 700; }
+.sp-stats span { display: block; color: #5c7d86; font-size: 10px; letter-spacing: .25em; margin-top: 8px; }
+.sp-ticker { margin-top: auto; display: grid; gap: 10px; color: #496670; font-size: 12.5px; padding-top: 30px; }
+.sp-ticker b { color: #39d3b8; font-weight: 400; margin-right: 6px; }
+.lt-splitp .sp-right { flex: 1; display: grid; place-items: center; padding: 40px 24px;
+  background-image: radial-gradient(circle, rgba(120,170,185,.12) 1.5px, transparent 1.5px); background-size: 22px 22px; }
+.lt-splitp .lt-card { border: none; max-width: 460px; }
+.lt-splitp .lt-card-body { padding: 0 10px; }
+.lt-splitp .lt-input { border: none; border-bottom: 2px solid #22383f; border-radius: 0; padding: 14px 2px; }
+.lt-splitp .lt-input:focus { box-shadow: none; border-bottom-color: #39d3b8; }
+.lt-splitp .lt-head { border: none; padding: 0 10px 8px; }
+.lt-splitp .lt-restrict { border-top-color: #1c2f3a; }
+@media (max-width: 1080px) { .lt-splitp { flex-direction: column; } .lt-splitp .sp-left { width: 100%; min-height: 0; padding: 32px 26px; }
+  .sp-big { margin-top: 26px; } .sp-stats { margin-top: 30px; } .sp-ticker { display: none; } .lt-splitp .sp-right { padding: 32px 20px; } }
+
+/* ── 13) 1d Radar Ops ── */
+.lt-radar { --lt-accent: #39d3b8; --lt-accent-ink: #04231c; --lt-glow: rgba(57,211,184,.2); --lt-card: rgba(7,12,16,.9);
+  --lt-border: #1a3a35; --lt-input: #0a1216; --lt-text: #c9dedd; --lt-title: #eef7f4; --lt-dim: #6f9298; --lt-faint: #48666c;
+  --lt-ph: #48666c; --lt-radius: 12px; --lt-input-radius: 8px; --lt-btn-radius: 8px; --lt-blur: blur(8px); background: #070b10; overflow: hidden; }
+.rd-topbar { position: absolute; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; padding: 30px 44px;
+  color: #5c7d86; font-size: 11px; letter-spacing: .3em; pointer-events: none; }
+.rd-topbar span:first-child { color: #e8f4f1; font-weight: 800; letter-spacing: .4em; }
+.rd-topbar b { color: #39d3b8; font-weight: 400; }
+.rd-ring { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); border-radius: 50%; pointer-events: none; }
+.rd-ring.r1 { width: min(110vmin, 1100px); height: min(110vmin, 1100px); border: 1px solid rgba(57,211,184,.12); }
+.rd-ring.r2 { width: min(80vmin, 800px); height: min(80vmin, 800px); border: 1px solid rgba(57,211,184,.18); }
+.rd-ring.r3 { width: min(50vmin, 500px); height: min(50vmin, 500px); border: 1px solid rgba(57,211,184,.25); }
+.rd-sweep { position: absolute; top: 50%; left: 50%; width: min(110vmin, 1100px); height: min(110vmin, 1100px);
+  transform: translate(-50%,-50%); border-radius: 50%; pointer-events: none;
+  background: conic-gradient(from 0deg, rgba(57,211,184,.22), transparent 70deg); animation: rdSweep 8s linear infinite; }
+@keyframes rdSweep { from { transform: translate(-50%,-50%) rotate(0); } to { transform: translate(-50%,-50%) rotate(360deg); } }
+.rd-blip { position: absolute; width: 6px; height: 6px; border-radius: 50%; background: #39d3b8; animation: rdBlink 3s infinite; pointer-events: none; }
+.rd-blip.amber { background: #e8b84a; }
+@keyframes rdBlink { 0%,100% { opacity: 1; } 50% { opacity: .15; } }
+.rd-icon { width: 56px; height: 56px; margin: 26px auto 0; border-radius: 50%; border: 1px solid #39d3b8;
+  display: flex; align-items: center; justify-content: center; color: #39d3b8; font-size: 22px; }
+.lt-radar .lt-title, .lt-radar .lt-sub { text-align: center; }
+
+/* ── 14) 1e Light Console (Daylight) ── */
+.lt-daylight { --lt-font: 'Inter', system-ui, sans-serif; --lt-accent: #0d3b33; --lt-accent-ink: #d8f5ec; --lt-glow: rgba(13,159,130,.18);
+  --lt-card: #ffffff; --lt-border: #dde5e2; --lt-input: #fff; --lt-text: #12211e; --lt-title: #101d1a; --lt-dim: #6e8681; --lt-faint: #8fa5a0;
+  --lt-ph: #9db1ac; --lt-radius: 14px; --lt-input-radius: 8px; --lt-btn-radius: 8px; --lt-shadow: 0 20px 50px rgba(13,59,51,.08);
+  background: #f4f6f5; background-image: radial-gradient(circle, rgba(20,60,55,.1) 1.5px, transparent 1.5px); background-size: 22px 22px;
+  color: #101d1a; }
+.dl-topbar { display: flex; justify-content: space-between; align-items: center; padding: 26px 48px;
+  border-bottom: 1px solid #dde5e2; background: rgba(244,246,245,.9); }
+.dl-brand { display: flex; gap: 14px; align-items: center; }
+.dl-brand i { width: 40px; height: 40px; border-radius: 9px; background: #0d3b33; display: flex; align-items: center; justify-content: center; }
+.dl-brand i b { width: 12px; height: 12px; background: #2fd0ae; transform: rotate(45deg); border-radius: 2px; }
+.dl-brand .t { color: #12211e; font-weight: 800; letter-spacing: .32em; font-size: 14px; font-family: 'JetBrains Mono', monospace; }
+.dl-brand .s { color: #6e8681; font-size: 9px; letter-spacing: .26em; margin-top: 4px; font-family: 'JetBrains Mono', monospace; }
+.dl-net { display: flex; gap: 10px; align-items: center; color: #3e5b55; font-size: 11px; letter-spacing: .22em; font-family: 'JetBrains Mono', monospace; }
+.dl-net i { width: 8px; height: 8px; border-radius: 50%; background: #0d9f82; }
+.dl-label { color: #0d7a66; font-size: 12px; letter-spacing: .35em; font-family: 'JetBrains Mono', monospace; }
+.lt-daylight .hs-hero h1 { color: #101d1a; }
+.lt-daylight .hs-hero p { color: #4e6a64; }
+.dl-kpis { display: flex; gap: 34px; margin-top: 48px; color: #3e5b55; font-size: 12px; font-family: 'JetBrains Mono', monospace; flex-wrap: wrap; }
+
+/* ── 15) 1f Region Tiles ── */
+.lt-tiles { --lt-accent: #39d3b8; --lt-accent-ink: #04231c; --lt-glow: rgba(57,211,184,.18); --lt-card: #0e161d;
+  --lt-border: #223842; --lt-input: #0a1116; --lt-text: #c9dedd; --lt-title: #eef7f4; --lt-dim: #7d9ba0; --lt-faint: #5f8489;
+  --lt-ph: #48666c; --lt-radius: 14px; --lt-input-radius: 8px; --lt-btn-radius: 8px; --lt-shadow: 0 40px 100px rgba(0,0,0,.7);
+  background: #0a0e13; overflow: hidden; }
+.tw-wall { position: absolute; inset: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-auto-rows: 150px; gap: 1px; background: #141d26; filter: brightness(.55); pointer-events: none; }
+.tw-tile { background: #0d141b; padding: 18px 20px; display: flex; flex-direction: column; justify-content: space-between; }
+.tw-head { display: flex; justify-content: space-between; color: #6f9298; font-size: 12px; letter-spacing: .15em; font-weight: 600; }
+.tw-val { color: #c9dedd; font-size: 22px; font-weight: 700; }
+.tw-lab { color: #48666c; font-size: 9px; letter-spacing: .2em; margin-top: 5px; }
+.tw-vignette { position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(ellipse 50% 60% at 50% 50%, rgba(10,14,19,.35), rgba(10,14,19,.92)); }
+.tw-brand { display: flex; gap: 12px; align-items: center; padding: 24px 26px 0; color: #e8f4f1; font-weight: 800; letter-spacing: .32em; font-size: 13px; }
+.tw-brand i { width: 34px; height: 34px; border-radius: 8px; background: #39d3b8; position: relative; flex: none; }
+.tw-brand i::after { content: ''; position: absolute; inset: 0; margin: auto; width: 10px; height: 10px; background: #0a0e13; transform: rotate(45deg); }
+
+/* ── 16) 1g Ultra Minimal ── */
+.lt-ultra { --lt-accent: #39d3b8; --lt-accent-ink: #04231c; --lt-glow: rgba(57,211,184,.14); --lt-card: transparent;
+  --lt-border: #1e2c32; --lt-input: transparent; --lt-text: #c7d8d5; --lt-title: #eef4f2; --lt-dim: #3d5158; --lt-faint: #31454d;
+  --lt-ph: #3d5158; --lt-shadow: none; background: #07090b; }
+.um-topbar { position: absolute; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; padding: 32px 52px;
+  color: #3d5158; font-size: 11px; letter-spacing: .4em; pointer-events: none; }
+.um-topbar span:first-child { color: #c7d8d5; }
+.um-topbar b { color: #39d3b8; font-weight: 400; }
+.um-gem { position: absolute; top: calc(50% - 300px); left: 50%; width: 10px; height: 10px; background: #39d3b8;
+  transform: translateX(-50%) rotate(45deg); animation: umPulse 2.5s infinite; }
+@keyframes umPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(57,211,184,.5); } 50% { box-shadow: 0 0 0 10px rgba(57,211,184,0); } }
+.lt-ultra .lt-card { border: none; max-width: 430px; }
+.lt-ultra .lt-title { text-align: center; font-weight: 500; letter-spacing: -.01em; }
+.lt-ultra .lt-sub { text-align: center; }
+.lt-ultra .lt-input { border: none; border-bottom: 1px solid #1e2c32; border-radius: 0; padding: 12px 0; }
+.lt-ultra .lt-input:focus { box-shadow: none; border-bottom-color: #39d3b8; }
+.lt-ultra .lt-btn { background: transparent; border: 1px solid #39d3b8; color: #39d3b8; letter-spacing: .45em; }
+.lt-ultra .lt-btn:hover:not(:disabled) { background: #39d3b8; color: #04231c; filter: none; }
+.lt-ultra .lt-restrict { border-top-color: #131c21; text-align: center; }
+.um-ticker { position: absolute; left: 0; right: 0; bottom: 0; border-top: 1px solid #131c21; padding: 14px 0;
+  overflow: hidden; white-space: nowrap; pointer-events: none; }
+.um-ticker > div { display: inline-flex; gap: 70px; color: #31454d; font-size: 12px; animation: umTicker 30s linear infinite; padding-right: 70px; }
+@keyframes umTicker { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+
+/* ── 17) 1h NOC Preview ── */
+.lt-noc { --lt-accent: #2fbfa6; --lt-accent-ink: #04231c; --lt-glow: rgba(47,191,166,.2); --lt-card: rgba(10,15,20,.96);
+  --lt-border: #1c3038; --lt-input: #0a1116; --lt-text: #c9dedd; --lt-title: #eef7f4; --lt-dim: #7d9ba0; --lt-faint: #48666c;
+  --lt-ph: #48666c; --lt-radius: 0; --lt-input-radius: 8px; --lt-btn-radius: 8px; --lt-shadow: none;
+  background: #0b1016; overflow: hidden; place-items: stretch end; padding: 0; }
+.noc-wall { position: absolute; inset: 0; padding: 44px; display: grid; grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: 1fr 1fr; gap: 20px; filter: blur(3px) brightness(.6); pointer-events: none; }
+.noc-chart { background: #101823; border: 1px solid #1c2a38; border-radius: 10px; padding: 22px; display: flex; flex-direction: column; }
+.noc-title { color: #6f8fa0; font-size: 11px; letter-spacing: .25em; font-weight: 600; }
+.noc-bars { flex: 1; display: flex; align-items: flex-end; gap: 9px; margin-top: 18px; }
+.noc-bars i { flex: 1; background: linear-gradient(180deg, #2fbfa6, #155f52); border-radius: 3px 3px 0 0; }
+.lt-noc .noc-panel { position: relative; margin-left: auto; width: min(520px, 100%); min-height: 100vh; max-width: none;
+  border-top: none; border-bottom: none; border-right: none; border-left: 1px solid #1c3038; backdrop-filter: blur(10px);
+  display: flex; flex-direction: column; justify-content: center; box-sizing: border-box; }
+.lt-noc .lt-btn { background: linear-gradient(180deg, #2fbfa6, #1e9a85); }
+@media (max-width: 900px) { .lt-noc .noc-panel { width: 100%; border-left: none; } }
+
+/* ── 18) 1i Left Rail ── */
+.lt-rail { --lt-accent: #39d3b8; --lt-accent-ink: #04231c; --lt-glow: rgba(57,211,184,.18); --lt-card: #0d151d;
+  --lt-border: #1b2b35; --lt-input: #0a1116; --lt-text: #c9dedd; --lt-title: #eef7f4; --lt-dim: #5f8489; --lt-faint: #42606a;
+  --lt-ph: #48666c; --lt-radius: 0; --lt-input-radius: 6px; --lt-btn-radius: 6px; --lt-shadow: none;
+  display: flex; place-items: stretch; padding: 0; background: #0a1017; }
+.lt-rail .rail-card { width: 440px; flex: none; max-width: none; min-height: 100vh; border-top: none; border-left: none; border-bottom: none;
+  border-right: 1px solid #1b2b35; display: flex; flex-direction: column; justify-content: center; box-sizing: border-box; }
+.rail-brand { padding: 26px 26px 0; color: #e8f4f1; font-weight: 800; letter-spacing: .35em; font-size: 14px; }
+.rail-map { flex: 1; position: relative; overflow: hidden; min-height: 40vh;
+  background-image: radial-gradient(circle, rgba(120,170,185,.13) 1.5px, transparent 1.5px); background-size: 20px 20px; }
+.rail-map::after { content: ''; position: absolute; inset: 0; background: radial-gradient(ellipse 70% 60% at 50% 45%, transparent, rgba(10,16,23,.9)); }
+.rail-map svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.rail-topline { position: absolute; top: 30px; right: 40px; z-index: 2; color: #5c7d86; font-size: 11px; letter-spacing: .25em; }
+.rail-topline b { color: #39d3b8; font-weight: 400; }
+.rail-topline em { color: #e8b84a; font-style: normal; }
+.rail-log { position: absolute; bottom: 30px; left: 40px; z-index: 2; display: grid; gap: 9px; color: #4a6b70; font-size: 12px; }
+@media (max-width: 1080px) { .lt-rail { flex-direction: column; } .lt-rail .rail-card { width: 100%; min-height: 0; border-right: none; border-bottom: 1px solid #1b2b35; }
+  .rail-map { min-height: 340px; } }
+
+/* ── 19) 1j Amber Watch ── */
+.lt-amber { --lt-font: 'IBM Plex Mono', ui-monospace, monospace; --lt-accent: #e8a64a; --lt-accent-ink: #1a1004; --lt-glow: rgba(232,166,74,.2);
+  --lt-card: rgba(18,13,7,.92); --lt-border: #3d2c14; --lt-input: #0e0a05; --lt-text: #f0d9b0; --lt-title: #f5e3c2; --lt-dim: #8a6a3d; --lt-faint: #6e5530;
+  --lt-ph: #6e5530; --lt-radius: 8px; --lt-input-radius: 6px; --lt-btn-radius: 6px;
+  background: #0c0906; background-image: radial-gradient(circle, rgba(232,166,74,.1) 1.5px, transparent 1.5px); background-size: 20px 20px; }
+.lt-amber .lt-scan { position: absolute; inset: 0; pointer-events: none;
+  background: repeating-linear-gradient(0deg, rgba(0,0,0,.16) 0 2px, transparent 2px 5px); }
+.am-topbar { position: relative; z-index: 2; display: flex; justify-content: space-between; padding: 28px 48px 0;
+  color: #8a6a3d; font-size: 11px; letter-spacing: .3em; }
+.am-topbar span:first-child { color: #f0d9b0; font-weight: 700; letter-spacing: .4em; }
+.am-topbar b { color: #e8a64a; font-weight: 400; }
+.am-label { color: #e8a64a; font-size: 12px; letter-spacing: .45em; }
+.lt-amber .hs-hero h1 { color: #f5e3c2; }
+.lt-amber .hs-hero p { color: #a5834f; }
+.am-log { margin-top: 48px; display: grid; gap: 9px; color: #6e5530; font-size: 13px; }
+
+/* ── 20) 1k Data Wall ── */
+.lt-wall { --lt-accent: #2fbfa6; --lt-accent-ink: #04231c; --lt-glow: rgba(47,191,166,.2); --lt-card: transparent;
+  --lt-border: #22333d; --lt-input: #0a1116; --lt-text: #c9dedd; --lt-title: #eef7f4; --lt-dim: #5f8489; --lt-faint: #48666c;
+  --lt-ph: #48666c; --lt-radius: 0; --lt-input-radius: 8px; --lt-btn-radius: 8px; --lt-shadow: none;
+  display: block; padding: 0; background: #080c11; }
+.dw-topbar { display: flex; justify-content: space-between; align-items: center; padding: 24px 48px;
+  border-bottom: 1px solid #16222c; flex-wrap: wrap; gap: 10px; }
+.dw-brand { color: #e8f4f1; font-weight: 800; letter-spacing: .4em; font-size: 14px; }
+.dw-stats { color: #5c7d86; font-size: 11.5px; letter-spacing: .12em; white-space: nowrap; }
+.dw-stats b { color: #c9dedd; font-weight: 600; }
+.dw-stats em { color: #39d3b8; font-style: normal; }
+.dw-main { display: flex; min-height: calc(100vh - 75px); }
+.dw-hero { flex: 1; border-right: 1px solid #16222c; padding: 6vh 64px; display: flex; flex-direction: column; justify-content: center; }
+.dw-big { color: #f2f8f6; font-size: clamp(56px, 6.5vw, 100px); font-weight: 700; letter-spacing: -.03em; line-height: 1.05; }
+.dw-big b { color: #39d3b8; }
+.dw-sub { color: #5c7d86; font-size: 13px; letter-spacing: .3em; margin-top: 18px; }
+.dw-days { display: grid; grid-template-columns: repeat(31, 1fr); gap: 4px; margin-top: 44px; max-width: 640px; }
+.dw-days i { height: 40px; border-radius: 2px; }
+.dw-legend { color: #42606a; font-size: 12px; margin-top: 18px; }
+.dw-log { margin-top: 6vh; display: grid; gap: 10px; color: #4a6b70; font-size: 13px; }
+.lt-wall .lt-card { width: min(560px, 46%); flex: none; max-width: none; border: none; display: flex; flex-direction: column; justify-content: center; }
+.lt-wall .lt-btn { background: linear-gradient(180deg, #2fbfa6, #1e9a85); }
+@media (max-width: 1080px) { .dw-main { flex-direction: column; } .dw-hero { border-right: none; border-bottom: 1px solid #16222c; padding: 32px 26px; }
+  .dw-log { display: none; } .lt-wall .lt-card { width: 100%; } }
 `;
