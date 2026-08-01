@@ -153,7 +153,8 @@ export default function Summary({ scope, onGotoTab }) {
           </select>
         </label>
       </div>
-      <div className="kpis">
+      {/* 전체 통합 합계 — 화면 폭에 맞춰 모든 타일을 항상 '1줄'에 맞춘다(줄바꿈 없이 균등 축소). */}
+      <div className="kpis kpis-1row">
         <Big label="vCenter" value={fmt(c.vcenters)} sub={`연결 ${c.vcentersConnected} · 클러스터 ${c.clusters}`} accent="var(--accent-2)" />
         <Big label="전체 호스트(ESXi)" value={fmt(c.hosts)} sub={`정상 ${c.hostsConnected} · 점검 ${c.hostsMaintenance} · 끊김 ${c.hostsDisconnected}`} />
         <Big label="전체 가상머신(VM)" value={fmt(c.vms)} sub={`구동 ${fmt(c.vmsPoweredOn)} · 정지 ${fmt(c.vmsPoweredOff)}`} accent="var(--green)" />
