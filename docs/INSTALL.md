@@ -275,6 +275,7 @@ sudo firewall-cmd --permanent --add-port=4000/tcp && sudo firewall-cmd --reload
 | **기능 권한 매트릭스** | 설정 → 사용자 관리 하단에서 역할(operator/viewer)별로 **기능 권한 17종**과 **특수기능 도구별 접근**을 켜고 끕니다. 서버(`requirePerm`)와 WS SSH/RDP 게이트웨이가 강제하므로 UI를 우회한 API 호출도 차단됩니다. admin은 항상 전체(잠김 방지). 기본값은 종전 role 동작과 동일. |
 | **데이터 범위(scope)** | 계정별로 **볼 수 있는 vCenter/리전**을 제한할 수 있습니다(외주·감사·데모 계정 권장). 미지정 시 전체. |
 | **특수 계정** | `noainred`(수퍼관리자 — 강등/삭제/차단 불가), `thedvcdemp`(데모 — 비번 설정 시에만 로그인, [로그인 차단]으로 즉시 잠금). §2.2 표 참고. |
+| **★ 설정 접근 계정** | '설정' 탭은 지정 계정만 접근할 수 있습니다(서버측 강제). 세 경로가 **합산** 적용: ① `portal.env` 의 `SETTINGS_OWNERS=계정1,계정2` ② `$CONFIG_DIR/settings-owners.txt`(한 줄에 하나, `#` 주석) ③ 포탈 UI(설정 › 세션 보안). ①②는 **UI 저장으로 지워지지 않아** 아무도 설정에 못 들어가는 잠금 상황의 복구 경로입니다. 편집 후 `systemctl restart vmware-portal` 없이도 즉시 반영되지만(파일은 매 조회 시 읽음), `SETTINGS_OWNERS` 환경변수 변경은 재시작이 필요합니다. |
 | **HTTPS 권장** | 리버스 프록시(nginx/HAProxy)로 TLS 종단 권장. HTTPS면 `HSTS` 헤더가 자동 적용됩니다. |
 | **CORS** | 기본은 **교차출처 차단**(같은 포탈에서 SPA 사용 시 무영향). 별도 프론트 출처가 있으면 `CORS_ORIGINS=https://포탈주소`. |
 | **/metrics** | 토큰 **미설정 시 404(비활성)**. Prometheus 연동은 `METRICS_EXPORT_TOKEN` + Authorization 헤더(옛 `?token=`은 `METRICS_ALLOW_QUERY_TOKEN=true`). 무인증 공개가 꼭 필요하면 `METRICS_ALLOW_ANON=true`. |

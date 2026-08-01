@@ -219,9 +219,17 @@ export default function UserAdmin() {
                   </button>
                 </td>
                 <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                  <button className="tab" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => setPwEdit({ username: u.username, pw: '', pw2: '', error: null })}
-                    title="비밀번호를 설정/변경합니다. 데모 계정은 비밀번호가 설정된 동안만 로그인할 수 있습니다.">비번 설정</button>
-                  {' '}
+                  {/* 비밀번호가 로그인에 쓰일 수 없는 계정에는 [비번 설정]을 노출하지 않는다:
+                       · admin·operator — OTP 전용 정책(비번 로그인 차단). 온보딩은 [OTP 등록](QR)으로 한다.
+                       · OTP 등록 계정 — 서버가 OTP 분기를 우선해 비밀번호를 아예 검증하지 않는다.
+                     viewer(데모 포함)는 비번 로그인을 쓰므로 계속 노출된다. */}
+                  {!u.totpEnabled && u.role !== 'admin' && u.role !== 'operator' && (
+                    <>
+                      <button className="tab" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => setPwEdit({ username: u.username, pw: '', pw2: '', error: null })}
+                        title="비밀번호를 설정/변경합니다. admin·operator 는 이 비밀번호로 최초 1회 로그인한 뒤 OTP 등록을 마쳐야 하며, 등록 시 비밀번호는 삭제됩니다.">비번 설정</button>
+                      {' '}
+                    </>
+                  )}
                   {(u.hasPassword || u.totpEnabled) && !u.superuser && (
                     <>
                       <button className="logout-btn" style={{ padding: '6px 10px' }} onClick={() => blockLogin(u)}
@@ -244,10 +252,12 @@ export default function UserAdmin() {
       <div className="muted" style={{ fontSize: 12, marginTop: 12, lineHeight: 1.7 }}>
         Google Authenticator(또는 MS Authenticator/Authy)로 QR을 스캔해 등록합니다.
         등록을 마치면 해당 계정의 비밀번호는 제거되어 <b>OTP 6자리로만</b> 로그인됩니다.
-        <b> admin·operator(최고 관리자 포함) 계정은 OTP 로만 로그인할 수 있습니다</b> — 비밀번호
-        로그인은 서버에서 차단됩니다(단, 아직 어떤 admin 도 OTP 를 등록하지 않은 초기 구축
-        상태에서는 admin 비밀번호 로그인이 임시 허용됩니다). viewer·데모 계정은 비밀번호
-        로그인이 가능합니다. AD 계정은 AD 비밀번호로 로그인하며 여기서 관리하지 않습니다.
+        <b> admin·operator(최고 관리자 포함) 계정은 OTP 로만 로그인합니다</b> — 비밀번호는 로그인에
+        쓰이지 않으므로 이 계정들에는 [비번 설정] 버튼을 표시하지 않습니다. 새 admin·operator 는
+        <b> [OTP 등록]</b> 으로 QR 을 발급해 전달하거나, 서버에서 <code>vmware-portal-otp &lt;계정&gt;</code>
+        으로 등록하면 됩니다. viewer·데모 계정은 비밀번호 로그인을 쓰므로 [비번 설정]이 표시됩니다
+        (단 OTP 를 등록하면 비밀번호가 삭제되어 버튼이 사라집니다). AD 계정은 AD 비밀번호로
+        로그인하며 여기서 관리하지 않습니다.
       </div>
 
       {/* ── 기능 권한 매트릭스(역할 × 기능) ─────────────────────────────────── */}

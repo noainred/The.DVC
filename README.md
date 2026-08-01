@@ -412,6 +412,7 @@ sudo ./install.sh --port 4000
   - 로그인 화면은 초기 구축 중에만 **비밀번호 파일 경로를 팝업으로 안내**합니다(값이 아닌 경로만, 등록 완료 후 노출 중단).
   - 헤드리스 등록·잠금 복구: `sudo vmware-portal-otp <username>`(설치본) / `npm run otp-enroll -- <username>`(소스). 기동 시 OTP 등록 admin이 없으면 서버 로그가 절차를 안내합니다. 긴급 해제는 `OTP_ROLE_ENFORCE=false`. viewer·데모 계정은 강제 대상이 아닙니다.
 - **특수 계정** — `noainred`(수퍼관리자)는 항상 admin이 보장되고 강등·삭제·로그인 차단이 거부되며 설정 소유자에 자동 포함됩니다. `thedvcdemp`(데모)는 viewer 고정·삭제 불가이며 **비밀번호가 설정된 동안에만** 로그인됩니다([로그인 차단]으로 즉시 잠금 + 활성 세션 종료).
+- **설정 접근 계정(settingsOwners)** — '설정' 탭은 지정 계정만 보고 접근합니다(서버측 강제). 지정 방법 3가지가 **합산** 적용됩니다: ① `portal.env`의 `SETTINGS_OWNERS=계정1,계정2` ② `$CONFIG_DIR/settings-owners.txt`(한 줄에 하나, `#` 주석 가능) ③ 포탈 UI(설정 › 세션 보안). ①②는 서버 파일이라 **UI 저장으로 지워지지 않아**, 아무도 설정에 들어가지 못하는 잠금 상황의 복구 경로가 됩니다(`noainred`는 항상 자동 포함).
 - **사용자별 데이터 범위(scope)** — 계정에 허용 vCenter/리전을 지정하면 인벤토리 목록과 vCenter 필터가 서버에서 그 범위로 제한됩니다(외주·감사·데모 계정에 유용). 전역 KPI 합계 등 일부 집계 화면은 후속 확대 예정.
 - **엣지 토큰 스코프** — 공유 `CENTRAL_TOKEN` 하나를 전 엣지가 쓰면 엣지 1대 침해로 다른 사이트 자격증명까지 노출됩니다. **설정 → 수집 서버 → 🔑 엣지별 개별 central 토큰**에서 사이트별 토큰을 발급해 이관하세요(무중단, 미이관 엣지는 화면에 표시). 이관 후 `CENTRAL_REQUIRE_AGENT_TOKEN=true`.
 - **버전 파일** — 기동 시 `CONFIG_DIR/vmware-portal-release`에 실행 버전·역할(central/edge/…)을 기록합니다(`/etc/redhat-release` 방식) — 배포 점검·자산 조사용.
