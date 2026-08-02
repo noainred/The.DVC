@@ -107,10 +107,75 @@ class PublicApiTest(ServerCase):
         self.assertIn("summary", payload)
 
     def test_health_check_blocks_loopback_targets(self):
+        # 임의 URL 점검은 로그인 필요(6차 감사) — 로그인해도 루프백은 여전히 차단된다.
         code, payload, _ = request(self.url + "/api/health/check", "POST",
-                                   {"urls": ["http://127.0.0.1:9/"]})
+                                   {"urls": ["http://127.0.0.1:9/"]}, self.auth())
         self.assertEqual(code, 200)
         self.assertEqual(payload["results"][0]["status"], "blocked")
+
+
+class AuditSixTest(ServerCase):
+    """6차 감사 회귀 방지 — 정보노출·SSRF 스캐너·CSRF·잠금 DoS."""
+
+    def test_meta_hides_initial_password_path_from_anonymous(self):
+        # 미인증 응답에 절대경로를 실으면 서버 구조가 드러나고, 초기 비밀번호가
+        # 아직 유효하다는 사실까지 알려 주게 된다.
+        code, payload, _ = request(self.url + "/api/meta")
+        self.assertEqual(code, 200)
+        self.assertIsNone(payload["initialPasswordFile"])
+        self.assertIsNone(payload["setupPending"])
+
+    def test_meta_shows_path_to_logged_in_user(self):
+        code, payload, _ = request(self.url + "/api/meta", headers=self.auth())
+        self.assertTrue(payload["initialPasswordFile"])
+        self.assertTrue(payload["setupPending"])
+
+    def test_arbitrary_url_check_requires_login(self):
+        # 로그인 없이 임의 URL 을 찌를 수 있으면 사내망 포트 스캐너가 된다.
+        code, payload, _ = request(self.url + "/api/health/check", "POST",
+                                   {"urls": ["http://192.0.2.2:9999/"]})
+        self.assertEqual(code, 401)
+        self.assertEqual(payload["code"], "settings_login_required")
+
+    def test_arbitrary_url_check_allowed_with_session(self):
+        code, payload, _ = request(self.url + "/api/health/check", "POST",
+                                   {"urls": ["http://192.0.2.2:9/"]}, self.auth())
+        self.assertEqual(code, 200)
+        self.assertEqual(len(payload["results"]), 1)
+
+    def test_anonymous_recheck_is_rate_limited(self):
+        first = request(self.url + "/api/health/check", "POST", {})[0]
+        self.assertEqual(first, 200)
+        code, _, _ = request(self.url + "/api/health/check", "POST", {})
+        self.assertEqual(code, 429, "미인증 재점검이 무제한이면 부하 증폭에 쓰인다.")
+        # 로그인 상태에서는 쿨다운이 적용되지 않는다.
+        self.assertEqual(request(self.url + "/api/health/check", "POST", {}, self.auth())[0], 200)
+
+    def test_cookie_credential_rejected_for_mutations(self):
+        # 쿠키가 상태변경까지 인증하면 교차출처 POST(CSRF)가 성립한다.
+        code, _, _ = request(self.url + "/api/shortcuts", "POST",
+                             {"name": "csrf", "url": "csrf.internal"},
+                             {"Cookie": "hub_settings=" + self.token})
+        self.assertEqual(code, 401)
+
+    def test_cookie_credential_still_works_for_reads(self):
+        code, payload, _ = request(self.url + "/api/settings",
+                                   headers={"Cookie": "hub_settings=" + self.token})
+        self.assertEqual(code, 200)
+
+    def test_cross_site_mutation_blocked(self):
+        code, _, _ = request(self.url + "/api/shortcuts", "POST",
+                             {"name": "x", "url": "x.internal"},
+                             {"X-Settings-Token": self.token, "Origin": "http://evil.example"})
+        self.assertEqual(code, 403)
+
+    def test_same_origin_mutation_allowed(self):
+        host = self.url.replace("http://", "")
+        code, _, _ = request(self.url + "/api/shortcuts", "POST",
+                             {"name": "same-origin 링크", "url": "ok.internal.dc"},
+                             {"X-Settings-Token": self.token, "Origin": self.url,
+                              "Sec-Fetch-Site": "same-origin"})
+        self.assertEqual(code, 201, "같은 출처 요청까지 막으면 화면이 동작하지 않는다. host=" + host)
 
 
 class MutationGuardTest(ServerCase):

@@ -90,6 +90,36 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
   포함, `thedvcdemp`(demo)는 viewer 고정·삭제 거부. 시드(`ensureSuperUser`/`ensureDemoUser`)는 같은
   이름의 기존 수동 계정을 덮어쓰지 않는다(하이재킹 방지).
 
+## 서비스 허브(`pyportal/`) 불변조건 — 6차 감사(v2.214.0)
+
+별도 페이지·별도 프로세스로 도는 Python 허브(표준 라이브러리 단독). **프레임워크가 없다는 것은
+프레임워크가 대신 해 주던 방어를 직접 유지해야 한다**는 뜻이다. 아래를 되돌리면 6차 감사 지적이 재발한다.
+
+- **쿠키 자격증명은 조회(GET/HEAD)에서만**: `X-Settings-Token`·`X-Hub-Token` 쿠키를 상태변경까지
+  인정하면 CSRF 가 성립한다 — 교차출처 POST 는 `Content-Type: text/plain` 이면 프리플라이트 없이
+  전송되고 그 본문이 그대로 JSON 으로 파싱된다(실측 201). 상태변경은 **커스텀 헤더 필수**이며,
+  `Origin`/`Sec-Fetch-Site` 로 교차출처 상태변경을 **403** 으로 한 번 더 막는다(`_credential`/`_cross_site`).
+- **임의 URL 점검은 로그인 필수**: `POST /api/health/check` 의 `urls` 는 서버가 대신 요청을 보내는
+  기능이라 미인증 공개 시 **사내망 포트 스캐너**가 된다(열린 포트 `healthy 200`, 닫힌 포트
+  `Connection refused` 로 구분됨). 미인증은 **등록된 바로가기 재점검만** + 30초 쿨다운(`public_check_cooldown`).
+- **미인증 응답에 서버 경로·설치 상태를 싣지 않는다**: `/api/meta` 의 `initialPasswordFile` 은
+  **로그인한 사용자에게만**. 경로 노출은 구조를 드러낼 뿐 아니라 "초기 비밀번호가 아직 유효하다"는
+  사실을 알려 표적을 지정해 준다(Node 쪽 `/api/auth/config` 계정명 금지와 같은 규칙).
+- **로그인 실패 잠금은 출발지(IP)별**: 전역 카운터 하나만 두면 아무나 몇 번 틀리는 것으로
+  **정상 관리자까지 설정 화면에서 밀어낼 수 있다**(가용성 공격). 전역 상한은 임계값 10배로
+  분산 시도 방어에만 쓴다(`SessionStore.GLOBAL_FACTOR`).
+- **소켓 타임아웃·동시 연결 상한 유지**: 핸들러 `timeout = 20`(slowloris·유휴 keep-alive 정리),
+  `HubServer` 의 연결 세마포어 64(스레드 폭주 차단). 유휴 종료는 오류 로그로 찍지 않는다.
+- **요청 본문은 라우팅 전에 일괄 drain**: 본문을 쓰지 않는 핸들러(리셋·백업 생성) 뒤의 요청이
+  `501 Unsupported method ('{}PUT')` 로 깨진다(keep-alive desync).
+- **SSRF 가드·스킴 화이트리스트·리다이렉트 미추적**: `hub/ssrf.py` 는 **해석된 주소**를 검사해
+  10진수·IPv4-mapped 우회를 자동 차단하고, RFC1918 은 사내 대상이라 허용한다. 저장 URL 은
+  `http`/`https` 만 — `javascript:` 를 허용하면 카드 클릭이 스크립트 실행 경로가 된다.
+- **CSP 때문에 인라인 style/script 금지**: 색상은 CSS 클래스로. 화면은 사용자 입력을 `textContent`
+  로만 렌더한다(innerHTML 조립 금지).
+- **백업은 자격증명 사본**: `users.json`(비밀번호 해시) 포함 → 목록·다운로드·복원은 admin 세션만,
+  파일은 0600.
+
 ## 프론트엔드 회귀 방지
 
 - **React 훅은 조기 return 위에서 선언**: `if (!data) return <Loading/>` 같은 조기 반환 뒤에 `useState`를

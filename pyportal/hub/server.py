@@ -20,6 +20,7 @@ import posixpath
 import re
 from http import HTTPStatus
 from http.cookies import SimpleCookie
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
@@ -56,6 +57,9 @@ def _route(pattern: str):
 class HubHandler(BaseHTTPRequestHandler):
     server_version = f"GlobalDCServiceHub/{VERSION}"
     protocol_version = "HTTP/1.1"
+    # 데이터를 보내지 않고 연결만 붙잡는 클라이언트(slowloris)가 스레드를 점유하지
+    # 못하게 한다. keep-alive 유휴 연결도 이 시간이 지나면 닫힌다.
+    timeout = 20
 
     # ---------- 응답 헬퍼 ----------
 
@@ -147,16 +151,45 @@ class HubHandler(BaseHTTPRequestHandler):
         morsel = jar.get(name)
         return morsel.value if morsel else ""
 
+    def _is_read_method(self) -> bool:
+        return self.command in ("GET", "HEAD")
+
+    def _credential(self, header: str, cookie: str) -> str:
+        """자격증명 조회 — **쿠키는 조회(GET/HEAD)에서만** 인정한다(6차 감사 수정).
+
+        쿠키가 상태변경까지 인증하면 CSRF 가 성립한다. 브라우저는 `text/plain` 본문의
+        교차출처 POST 를 프리플라이트 없이 보내고, 그 본문은 그대로 JSON 으로 파싱된다.
+        상태변경에는 **커스텀 헤더**를 요구해 교차출처에서 붙일 수 없게 만든다.
+        """
+        value = self.headers.get(header, "")
+        if not value and self._is_read_method():
+            value = self._cookie(cookie)
+        return value
+
+    def _cross_site(self) -> bool:
+        """교차출처 상태변경 차단(2차 방어). Origin 또는 Sec-Fetch-Site 로 판정한다."""
+        site = (self.headers.get("Sec-Fetch-Site", "") or "").lower()
+        if site and site not in ("same-origin", "same-site", "none"):
+            return True
+        origin = self.headers.get("Origin", "")
+        if not origin:
+            return False
+        host = self.headers.get("Host", "")
+        try:
+            origin_host = urlsplit(origin).netloc
+        except ValueError:
+            return True
+        return bool(host) and origin_host != host
+
     def _hub_token_ok(self) -> bool:
         """HUB_TOKEN 이 설정된 경우에만 검사한다(미설정이면 사내망 공개 운영)."""
         if not config.token:
             return True
-        supplied = self.headers.get("X-Hub-Token", "") or self._cookie("hub_token")
+        supplied = self._credential("X-Hub-Token", "hub_token")
         return bool(supplied) and hmac.compare_digest(supplied, config.token)
 
     def _session_user(self):
-        token = self.headers.get("X-Settings-Token", "") or self._cookie("hub_settings")
-        return self.ctx.sessions.resolve(token)
+        return self.ctx.sessions.resolve(self._credential("X-Settings-Token", "hub_settings"))
 
     def _require_session(self):
         user = self._session_user()
@@ -199,6 +232,9 @@ class HubHandler(BaseHTTPRequestHandler):
                 return self._serve_static(path)
             return self._error(HTTPStatus.NOT_FOUND, "없는 경로입니다.")
 
+        if not self._is_read_method() and self._cross_site():
+            return self._error(HTTPStatus.FORBIDDEN, "교차 출처 요청은 허용되지 않습니다.")
+
         if not self._hub_token_ok():
             # 설정 로그인 실패(401)와 구분되는 코드를 붙인다 — 화면이 엉뚱한
             # '접근 토큰' 모달을 띄우지 않게 하기 위한 것.
@@ -239,8 +275,12 @@ class HubHandler(BaseHTTPRequestHandler):
             "historyRanges": [{"key": key, "label": RANGE_LABELS[key], "seconds": RANGES[key]}
                               for key in RANGES],
             "session": user,
+            # 경로는 **로그인한 사용자에게만** 준다(6차 감사 수정). 미인증 응답에 절대경로를
+            # 실으면 서버 구조가 드러나고, "초기 비밀번호가 아직 살아 있다"는 사실까지 알려
+            # 공격자에게 표적을 지정해 주는 셈이 된다.
             "initialPasswordFile": (str(config.initial_password_file)
-                                    if self.ctx.users.initial_password_present() else None),
+                                    if user and self.ctx.users.initial_password_present() else None),
+            "setupPending": bool(self.ctx.users.initial_password_present()) if user else None,
         })
 
     def api_shortcuts(self):
@@ -276,6 +316,20 @@ class HubHandler(BaseHTTPRequestHandler):
 
     def api_health_check(self):
         payload = self._read_json()
+
+        # 임의 URL 점검은 '서버가 대신 요청을 보내 주는' 기능이라, 미인증으로 열어 두면
+        # 사내망 포트 스캐너로 쓸 수 있다(응답코드·지연·오류메시지로 생사 판별).
+        # 등록된 바로가기 재점검만 공개하고, urls 지정은 로그인 필수로 둔다(6차 감사 수정).
+        wants_custom = isinstance(payload, dict) and isinstance(payload.get("urls"), list) \
+            and bool(payload.get("urls"))
+        if wants_custom and not self._require_session():
+            return None
+        if not wants_custom and not self._session_user():
+            wait = self.ctx.public_check_cooldown()
+            if wait > 0:
+                return self._error(HTTPStatus.TOO_MANY_REQUESTS,
+                                   f"점검 요청이 너무 잦습니다. {wait}초 후 다시 시도하세요.")
+
         targets = self._health_targets(payload)
         if not targets:
             return self._json({"success": True, "results": [], "skipped": False})
@@ -308,7 +362,8 @@ class HubHandler(BaseHTTPRequestHandler):
         return self._json({"success": True, "user": user})
 
     def api_session_login(self):
-        remaining = self.ctx.sessions.lock_remaining()
+        client = self.client_address[0] if self.client_address else "-"
+        remaining = self.ctx.sessions.lock_remaining(client)
         if remaining > 0:
             return self._error(HTTPStatus.TOO_MANY_REQUESTS,
                                f"로그인 시도가 많아 잠겼습니다. {remaining}초 후 다시 시도하세요.")
@@ -316,10 +371,10 @@ class HubHandler(BaseHTTPRequestHandler):
         password = payload.get("password")
         user = self.ctx.users.authenticate(password if isinstance(password, str) else "")
         if not user:
-            self.ctx.sessions.note_failure()
-            print("[auth] 설정 로그인 실패", flush=True)
+            self.ctx.sessions.note_failure(client)
+            print(f"[auth] 설정 로그인 실패 (from {client})", flush=True)
             return self._error(HTTPStatus.UNAUTHORIZED, "비밀번호가 올바르지 않습니다.")
-        self.ctx.sessions.note_success()
+        self.ctx.sessions.note_success(client)
         session = self.ctx.sessions.create(user)
         print(f"[auth] 설정 로그인: {user['username']}", flush=True)
         return self._json({"success": True, **session})
@@ -572,8 +627,19 @@ class HubHandler(BaseHTTPRequestHandler):
 
     # ---------- 로깅 ----------
 
+    def log_error(self, fmt: str, *args) -> None:  # noqa: D102
+        message = fmt % args
+        # keep-alive 유휴 연결이 타임아웃으로 닫히는 것은 정상 동작이다 —
+        # 오류로 찍으면 운영 로그가 무의미한 줄로 가득 찬다.
+        if "timed out" in message:
+            return
+        self.log_message("ERROR %s", message)
+
     def log_message(self, fmt: str, *args) -> None:  # noqa: D102
-        print(f"[hub] {self.address_string()} {fmt % args}", flush=True)
+        # 요청 라인은 클라이언트가 마음대로 넣는 값이다 — 제어문자/ANSI 이스케이프가
+        # 그대로 찍히면 로그를 위조·오염시킬 수 있어 출력 전에 escape 한다.
+        line = (fmt % args).encode("unicode_escape").decode("ascii", "replace")
+        print(f"[hub] {self.address_string()} {line}", flush=True)
 
 
 # 라우트 표 — (메서드, 패턴, 핸들러). 위에서부터 첫 일치를 쓴다.
@@ -622,14 +688,30 @@ ROUTES = [
 
 
 class HubServer(ThreadingHTTPServer):
-    """요청마다 스레드 — 링크 점검이 몇 초 걸려도 화면 조회가 멈추지 않는다."""
+    """요청마다 스레드 — 링크 점검이 몇 초 걸려도 화면 조회가 멈추지 않는다.
+
+    스레드 수에 상한을 둔다(6차 감사). 연결 하나당 스레드 하나를 무제한으로 만들면
+    미인증 연결만으로 메모리·FD 를 고갈시킬 수 있다.
+    """
 
     daemon_threads = True
     allow_reuse_address = True
+    request_queue_size = 64
 
-    def __init__(self, address, handler, ctx):
+    def __init__(self, address, handler, ctx, max_connections: int = 64):
         super().__init__(address, handler)
         self.ctx = ctx
+        self._slots = threading.BoundedSemaphore(max_connections)
+
+    def process_request_thread(self, request, client_address):
+        if not self._slots.acquire(timeout=5):
+            # 상한을 넘으면 새 연결을 기다리게 하지 않고 즉시 끊는다(큐가 무한정 늘지 않게).
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._slots.release()
 
 
 def create_server(host: str = None, port: int = None, ctx=None) -> HubServer:

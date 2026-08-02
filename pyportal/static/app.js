@@ -1555,7 +1555,8 @@
         state.meta = results[0];
         state.categories = results[0].categories || [];
         state.session = results[0].session || null;
-        state.initialPasswordFile = results[0].initialPasswordFile;
+        // 초기 비밀번호 파일 경로는 로그인 후에만 서버가 내려준다(미인증이면 null).
+        state.initialPasswordFile = results[0].initialPasswordFile || null;
         state.datacenters = results[1].datacenters || [];
         state.dcSummary = results[1].summary || null;
         state.dcRegistered = results[1].totalRegistered || state.datacenters.length;
