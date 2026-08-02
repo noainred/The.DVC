@@ -9,15 +9,13 @@
 
 from __future__ import annotations
 
-import json
-import os
 import threading
-import time
 import uuid
 from pathlib import Path
 
 from .datacenters import DATACENTER_IDS
 from .defaults import CATEGORY_KEYS, DEFAULT_CATEGORY, default_shortcuts
+from .jsonfile import now_iso as _now_iso, read_json, write_json
 from .ssrf import ValidationError, normalize_url
 
 MAX_SHORTCUTS = 500
@@ -55,66 +53,42 @@ def _clean_tags(value) -> list:
     return tags
 
 
-def _clean_datacenter_id(value) -> str:
-    text = _clean_text(value, limit=32, default="all")
-    return text if text in DATACENTER_IDS else "all"
-
-
 def _clean_category(value) -> str:
     text = _clean_text(value, limit=64, default=DEFAULT_CATEGORY)
     return text if text in CATEGORY_KEYS else DEFAULT_CATEGORY
 
 
-def _now_iso() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()) + "Z"
-
-
 class ShortcutStore:
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, datacenter_ids=None):
+        """datacenter_ids: 현재 등록된 DC id 집합을 돌려주는 콜러블.
+
+        설정에서 데이터센터를 추가/삭제할 수 있으므로 고정 목록을 쓰면 새로 만든 사이트에
+        바로가기를 연결할 수 없다. 미지정 시 내장 28개를 쓴다.
+        """
         self._path = Path(path)
+        self._dc_ids = datacenter_ids or (lambda: DATACENTER_IDS)
         self._lock = threading.RLock()
         self._items: list = []
         self._loaded = False
 
+    def _clean_datacenter_id(self, value) -> str:
+        text = _clean_text(value, limit=32, default="all")
+        try:
+            known = self._dc_ids()
+        except Exception:  # noqa: BLE001 — DC 저장소 문제로 바로가기 저장이 막히면 안 된다
+            known = DATACENTER_IDS
+        return text if text in known else "all"
+
     # ---------- 파일 입출력 ----------
 
-    def _preserve_corrupt(self) -> None:
-        """파싱 실패한 파일을 타임스탬프 붙여 보존한다(조용한 유실 방지)."""
-        try:
-            backup = self._path.with_suffix(self._path.suffix + f".corrupt.{int(time.time())}")
-            os.replace(self._path, backup)
-            print(f"[store] 손상된 저장 파일을 보존했습니다: {backup}", flush=True)
-        except OSError as exc:
-            print(f"[store] 손상 파일 보존 실패: {exc}", flush=True)
-
     def _read(self) -> list:
-        if not self._path.exists():
-            return default_shortcuts()
-        try:
-            raw = json.loads(self._path.read_text(encoding="utf-8"))
-        except (OSError, ValueError) as exc:
-            print(f"[store] 저장 파일을 읽을 수 없습니다({exc}) — 보존 후 기본값으로 시작합니다.", flush=True)
-            self._preserve_corrupt()
-            return default_shortcuts()
-        if not isinstance(raw, list):
-            print("[store] 저장 파일 형식이 목록이 아닙니다 — 보존 후 기본값으로 시작합니다.", flush=True)
-            self._preserve_corrupt()
+        raw = read_json(self._path, None, expect=list)
+        if raw is None:
             return default_shortcuts()
         return [item for item in (self._sanitize(entry, keep_id=True) for entry in raw) if item]
 
     def _write(self, items: list) -> None:
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self._path.with_suffix(self._path.suffix + f".tmp.{os.getpid()}")
-        payload = json.dumps(items, ensure_ascii=False, indent=2)
-        with open(tmp, "w", encoding="utf-8") as handle:
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(tmp, self._path)
-        try:
-            os.chmod(self._path, 0o600)
-        except OSError:
-            pass
+        write_json(self._path, items)
 
     def _ensure_loaded(self) -> None:
         if not self._loaded:
@@ -152,7 +126,8 @@ class ShortcutStore:
             "description": _clean_text(
                 data.get("description", base.get("description", "")), limit=240),
             "tags": _clean_tags(data.get("tags", base.get("tags", []))),
-            "datacenterId": _clean_datacenter_id(data.get("datacenterId", base.get("datacenterId"))),
+            "datacenterId": self._clean_datacenter_id(
+                data.get("datacenterId", base.get("datacenterId"))),
             "isFavorite": bool(data.get("isFavorite", base.get("isFavorite", False))),
             "createdViaSettings": bool(
                 data.get("createdViaSettings", base.get("createdViaSettings", False))),

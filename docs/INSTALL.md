@@ -358,10 +358,19 @@ sudo mkdir -p /etc/dc-service-hub && sudo chown -R dchub:dchub /etc/dc-service-h
 sudo cp /opt/dc-service-hub/systemd/dc-service-hub.service /etc/systemd/system/
 sudo systemctl daemon-reload && sudo systemctl enable --now dc-service-hub
 sudo firewall-cmd --permanent --add-port=8095/tcp && sudo firewall-cmd --reload
-# → http://<서버>:8095  (설정 탭에서 이름 + URL 입력 → 대시보드에 바로가기 생성)
+# → http://<서버>:8095  (설정에서 이름 + URL 입력 → 대시보드에 바로가기 생성)
+
+# ★ 설정 화면 초기 비밀번호(첫 기동 시 자동 생성, 0600)
+sudo cat /etc/dc-service-hub/initial-settings-password.txt
 ```
 
-접근을 제한하려면 유닛 파일의 `Environment=HUB_TOKEN=...` 주석을 풀고 재시작하세요.
+- 상단 우측 **[🔒 설정]** 은 비밀번호로 잠겨 있습니다. 위 파일의 값으로 로그인한 뒤
+  **설정 › 사용자 구성 및 설정**에서 비밀번호를 바꾸면 그 파일은 **자동 삭제**됩니다.
+- 설정 하위 메뉴: **바로가기 관리 · 데이터센터 구성 · 사용자 구성 및 설정 · 현재 설정 백업**
+  (백업은 주기·보관 수량을 지정하면 자동 실행). 조회 화면은 로그인 없이 열리고, **변경은 전부 로그인 필요**입니다.
+- **링크 상태 점검**은 자동 주기로 결과를 SQLite에 쌓아 5분~한달 구간의 추이 차트를 보여줍니다.
+  보관 기간은 `HUB_HISTORY_RETENTION_DAYS`(기본 40일).
+- 포탈 전체를 비공개로 하려면 유닛 파일의 `Environment=HUB_TOKEN=...` 주석을 풀고 재시작하세요.
 
 ---
 

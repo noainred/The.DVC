@@ -74,9 +74,46 @@ class Config:
         # 요청 본문 상한(바이트) — 대용량 POST 로 메모리를 밀어 넣지 못하게.
         self.max_body_bytes = _env_int("HUB_MAX_BODY", 1_048_576, low=4096, high=16_777_216)
 
+        # 설정 화면 로그인 세션 유지 시간(분) + 실패 잠금
+        self.session_ttl_min = _env_int("HUB_SESSION_TTL_MIN", 480, low=5, high=10080)
+        self.login_max_fails = _env_int("HUB_LOGIN_MAX_FAILS", 8, low=3, high=100)
+        self.login_lockout_sec = _env_int("HUB_LOGIN_LOCKOUT_SEC", 300, low=30, high=86400)
+
+        # 링크 점검 이력 보관 기간(일). 한 달 차트를 그리려면 최소 31일이 필요하다.
+        self.history_retention_days = _env_int("HUB_HISTORY_RETENTION_DAYS", 40, low=2, high=730)
+
     @property
     def shortcuts_file(self) -> Path:
         return self.data_dir / "shortcuts.json"
+
+    @property
+    def datacenters_file(self) -> Path:
+        return self.data_dir / "datacenters.json"
+
+    @property
+    def users_file(self) -> Path:
+        return self.data_dir / "users.json"
+
+    @property
+    def settings_file(self) -> Path:
+        return self.data_dir / "settings.json"
+
+    @property
+    def history_db(self) -> Path:
+        return self.data_dir / "health-history.db"
+
+    @property
+    def backup_dir(self) -> Path:
+        return self.data_dir / "backups"
+
+    @property
+    def initial_password_file(self) -> Path:
+        """최초 기동 시 생성한 설정 비밀번호를 적어 두는 파일(0600).
+
+        비밀번호를 바꾸면 삭제된다 — 파일이 남아 있으면 초기 비밀번호가 계속
+        유효한 것으로 오해할 수 있다.
+        """
+        return self.data_dir / "initial-settings-password.txt"
 
     def describe(self) -> dict:
         """기동 로그·/api/meta 용 요약(비밀값은 넣지 않는다)."""
