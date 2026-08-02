@@ -123,6 +123,21 @@ class DatacenterStoreTest(unittest.TestCase):
         self.assertEqual(len(self.store.all()), 27)
         self.assertEqual(len(self.store.reset()), 28)
 
+    def test_visible_applies_display_limit(self):
+        # 0(또는 범위 밖)이면 전체, 1~N 이면 등록 순서대로 앞에서 N개.
+        self.assertEqual(len(self.store.visible(0)), 28)
+        self.assertEqual(len(self.store.visible(13)), 13)
+        self.assertEqual(len(self.store.visible(999)), 28)
+        self.assertEqual(len(self.store.visible("bogus")), 28)
+        self.assertEqual(self.store.visible(3)[0]["id"], self.store.all()[0]["id"])
+
+    def test_summary_follows_visible_subset(self):
+        # 표시 개수를 줄이면 상단 통계도 그 부분집합 기준이어야 한다.
+        subset = self.store.visible(5)
+        summary = self.store.summary(subset)
+        self.assertEqual(summary["total"], 5)
+        self.assertEqual(summary["racks"], sum(dc["racks"] for dc in subset))
+
     def test_unknown_region_and_status_fall_back(self):
         created = self.store.add({"code": "X-1", "name": "X", "region": "MARS", "status": "melted"})
         self.assertEqual(created["region"], "APAC")

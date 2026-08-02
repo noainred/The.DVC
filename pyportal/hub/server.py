@@ -231,7 +231,9 @@ class HubHandler(BaseHTTPRequestHandler):
             "version": VERSION,
             "categories": CATEGORIES,
             "regions": ["APAC", "EMEA", "AMER", "LATAM"],
-            "datacenterCount": len(self.ctx.datacenters.all()),
+            "datacenterCount": len(self.ctx.datacenters.visible(
+                self.ctx.settings.section("display").get("datacenterLimit", 0))),
+            "datacenterRegistered": len(self.ctx.datacenters.all()),
             "shortcutCount": len(self.ctx.shortcuts.all()),
             "healthTlsVerify": config.health_tls_verify,
             "historyRanges": [{"key": key, "label": RANGE_LABELS[key], "seconds": RANGES[key]}
@@ -245,10 +247,15 @@ class HubHandler(BaseHTTPRequestHandler):
         return self._json({"success": True, "shortcuts": self.ctx.shortcuts.all()})
 
     def api_datacenters(self):
+        """공개 조회 — 설정의 '표시 개수'를 적용한 목록만 내려준다."""
+        limit = self.ctx.settings.section("display").get("datacenterLimit", 0)
+        visible = self.ctx.datacenters.visible(limit)
         return self._json({
             "success": True,
-            "datacenters": self.ctx.datacenters.all(),
-            "summary": self.ctx.datacenters.summary(),
+            "datacenters": visible,
+            "summary": self.ctx.datacenters.summary(visible),
+            "displayLimit": limit,
+            "totalRegistered": len(self.ctx.datacenters.all()),
         })
 
     def api_health_latest(self):
@@ -398,6 +405,14 @@ class HubHandler(BaseHTTPRequestHandler):
         return self._json({"success": True, "users": users})
 
     # ---- 데이터센터 ----
+
+    def api_dc_list(self):
+        """설정 편집용 — 표시 개수와 무관하게 **등록된 전부**를 준다."""
+        if not self._require_session():
+            return None
+        return self._json({"success": True, "datacenters": self.ctx.datacenters.all(),
+                           "displayLimit": self.ctx.settings.section("display")
+                           .get("datacenterLimit", 0)})
 
     def api_dc_create(self):
         if not self._require_admin():
@@ -575,7 +590,7 @@ ROUTES = [
     ("DELETE", _route(r"/api/settings/session"), HubHandler.api_session_logout),
 
     ("GET", _route(r"/api/settings"), HubHandler.api_settings_state),
-    ("PUT", _route(r"/api/settings/(backup|health)"), HubHandler.api_settings_section),
+    ("PUT", _route(r"/api/settings/(backup|health|display)"), HubHandler.api_settings_section),
 
     ("GET", _route(r"/api/settings/users"), HubHandler.api_users_list),
     ("POST", _route(r"/api/settings/users"), HubHandler.api_users_create),
@@ -584,6 +599,7 @@ ROUTES = [
     ("PUT", _route(r"/api/settings/users/" + ID_PATTERN), HubHandler.api_users_update),
     ("DELETE", _route(r"/api/settings/users/" + ID_PATTERN), HubHandler.api_users_delete),
 
+    ("GET", _route(r"/api/settings/datacenters"), HubHandler.api_dc_list),
     ("POST", _route(r"/api/settings/datacenters/reset"), HubHandler.api_dc_reset),
     ("POST", _route(r"/api/settings/datacenters"), HubHandler.api_dc_create),
     ("PUT", _route(r"/api/settings/datacenters/" + ID_PATTERN), HubHandler.api_dc_update),

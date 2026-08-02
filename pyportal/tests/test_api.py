@@ -181,6 +181,46 @@ class SettingsApiTest(ServerCase):
         self.assertEqual(code, 200)
         self.assertEqual(payload["settings"]["health"]["intervalMinutes"], 5)
 
+    def test_display_limit_controls_public_list(self):
+        code, payload, _ = request(self.url + "/api/datacenters")
+        self.assertEqual(len(payload["datacenters"]), 28)
+        self.assertEqual(payload["displayLimit"], 0)
+
+        code, payload, _ = request(self.url + "/api/settings/display", "PUT",
+                                   {"datacenterLimit": 13}, self.auth())
+        self.assertEqual(code, 200)
+        self.assertEqual(payload["settings"]["display"]["datacenterLimit"], 13)
+
+        code, payload, _ = request(self.url + "/api/datacenters")
+        self.assertEqual(len(payload["datacenters"]), 13)
+        self.assertEqual(payload["totalRegistered"], 28)
+        self.assertEqual(payload["summary"]["total"], 13, "통계도 표시 목록 기준이어야 한다.")
+
+        # 편집 목록은 표시 개수와 무관하게 전부 나와야 한다(줄였다고 수정 불가가 되면 안 됨).
+        code, payload, _ = request(self.url + "/api/settings/datacenters", headers=self.auth())
+        self.assertEqual(len(payload["datacenters"]), 28)
+        self.assertEqual(payload["displayLimit"], 13)
+
+        code, payload, _ = request(self.url + "/api/meta")
+        self.assertEqual(payload["datacenterCount"], 13)
+        self.assertEqual(payload["datacenterRegistered"], 28)
+
+        # 0 = 전체로 복귀
+        request(self.url + "/api/settings/display", "PUT", {"datacenterLimit": 0}, self.auth())
+        self.assertEqual(len(request(self.url + "/api/datacenters")[1]["datacenters"]), 28)
+
+    def test_display_limit_is_clamped(self):
+        code, payload, _ = request(self.url + "/api/settings/display", "PUT",
+                                   {"datacenterLimit": 99999}, self.auth())
+        self.assertLessEqual(payload["settings"]["display"]["datacenterLimit"], 300)
+        code, payload, _ = request(self.url + "/api/settings/display", "PUT",
+                                   {"datacenterLimit": -5}, self.auth())
+        self.assertEqual(payload["settings"]["display"]["datacenterLimit"], 0)
+
+    def test_display_limit_requires_admin(self):
+        code, _, _ = request(self.url + "/api/settings/display", "PUT", {"datacenterLimit": 5})
+        self.assertEqual(code, 401)
+
     def test_datacenter_crud(self):
         code, payload, _ = request(self.url + "/api/settings/datacenters", "POST",
                                    {"code": "BUS-1", "name": "부산 센터", "city": "Busan",
