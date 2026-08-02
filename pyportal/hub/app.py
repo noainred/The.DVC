@@ -45,6 +45,10 @@ class AppContext:
         # 자동 점검과 수동 점검이 같은 가드를 공유한다 — 동시에 두 번 돌지 않는다.
         self.run_health_check = GuardedJob(self._run_health_check)
         self._last_auto_check = 0.0
+        # 미인증 '지금 점검'의 최소 간격(초). 로그인 없이 무한히 재점검을 돌려
+        # 대상 서버에 부하를 주거나 서버 자원을 소모하지 못하게 한다(6차 감사).
+        self.public_check_interval = 30
+        self._last_public_check = 0.0
         self._workers = []
         if start_workers:
             self.start_workers()
@@ -60,6 +64,14 @@ class AppContext:
         self.datacenters._items = None       # noqa: SLF001
         self.users._users = None             # noqa: SLF001
         self.settings._data = None           # noqa: SLF001
+
+    def public_check_cooldown(self) -> int:
+        """미인증 점검 요청의 남은 대기 시간(초). 0이면 지금 실행해도 된다."""
+        remaining = int(self.public_check_interval - (time.time() - self._last_public_check))
+        if remaining > 0:
+            return remaining
+        self._last_public_check = time.time()
+        return 0
 
     # ---------- 링크 점검 ----------
 

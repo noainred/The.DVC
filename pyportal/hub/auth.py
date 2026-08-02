@@ -265,32 +265,55 @@ class UserStore:
 
 
 class SessionStore:
-    """메모리 세션. 재시작하면 전부 만료된다(설정 화면 전용이라 그 편이 안전)."""
+    """메모리 세션. 재시작하면 전부 만료된다(설정 화면 전용이라 그 편이 안전).
+
+    실패 잠금은 **출발지(IP)별**로 건다(6차 감사 수정). 전역 카운터 하나만 두면
+    아무나 8번 틀리는 것만으로 **정상 관리자까지 5분간 설정 화면에 못 들어가고**,
+    이를 반복하면 사실상 영구 차단이 된다(가용성 공격). 전역 상한은 분산 시도를
+    막기 위한 2차 방어로만 남기고 임계값을 훨씬 높게 잡는다.
+    """
+
+    GLOBAL_FACTOR = 10          # 전역 임계값 = max_fails × 이 배수
 
     def __init__(self, ttl_seconds: int, max_fails: int, lockout_seconds: int):
         self._ttl = ttl_seconds
         self._max_fails = max_fails
         self._lockout = lockout_seconds
         self._sessions = {}
-        self._fails = 0
-        self._locked_until = 0.0
+        self._fails = {}         # client -> [실패수, 잠금해제시각]
+        self._global_fails = 0
+        self._global_until = 0.0
         self._lock = threading.RLock()
 
-    def lock_remaining(self) -> int:
+    def lock_remaining(self, client: str = "-") -> int:
         with self._lock:
-            return max(0, int(self._locked_until - time.time()))
+            self._purge_fails()
+            entry = self._fails.get(client)
+            remaining = max(0, int(entry[1] - time.time())) if entry else 0
+            return max(remaining, max(0, int(self._global_until - time.time())))
 
-    def note_failure(self) -> None:
+    def note_failure(self, client: str = "-") -> None:
         with self._lock:
-            self._fails += 1
-            if self._fails >= self._max_fails:
-                self._locked_until = time.time() + self._lockout
-                self._fails = 0
+            entry = self._fails.setdefault(client, [0, 0.0])
+            entry[0] += 1
+            if entry[0] >= self._max_fails:
+                entry[1] = time.time() + self._lockout
+                entry[0] = 0
+            self._global_fails += 1
+            if self._global_fails >= self._max_fails * self.GLOBAL_FACTOR:
+                self._global_until = time.time() + self._lockout
+                self._global_fails = 0
 
-    def note_success(self) -> None:
+    def note_success(self, client: str = "-") -> None:
         with self._lock:
-            self._fails = 0
-            self._locked_until = 0.0
+            self._fails.pop(client, None)
+            self._global_fails = 0
+
+    def _purge_fails(self) -> None:
+        now = time.time()
+        for client, entry in list(self._fails.items()):
+            if entry[0] == 0 and entry[1] < now:
+                self._fails.pop(client, None)
 
     def create(self, user) -> dict:
         token = secrets.token_urlsafe(32)

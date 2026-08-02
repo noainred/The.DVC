@@ -114,11 +114,28 @@ class SessionTest(unittest.TestCase):
 
     def test_lockout_after_failures(self):
         sessions = SessionStore(60, 3, 60)
-        self.assertEqual(sessions.lock_remaining(), 0)
+        self.assertEqual(sessions.lock_remaining("10.0.0.1"), 0)
         for _ in range(3):
-            sessions.note_failure()
-        self.assertGreater(sessions.lock_remaining(), 0,
+            sessions.note_failure("10.0.0.1")
+        self.assertGreater(sessions.lock_remaining("10.0.0.1"), 0,
                            "무차별 대입에 잠금이 걸리지 않으면 비밀번호만으로 뚫린다.")
+
+    def test_lockout_is_per_client_not_global(self):
+        # 6차 감사: 전역 잠금만 있으면 아무나 몇 번 틀리는 것으로 정상 관리자까지
+        # 설정 화면에서 밀어낼 수 있다(가용성 공격).
+        sessions = SessionStore(60, 3, 60)
+        for _ in range(3):
+            sessions.note_failure("203.0.113.9")
+        self.assertGreater(sessions.lock_remaining("203.0.113.9"), 0)
+        self.assertEqual(sessions.lock_remaining("10.0.0.5"), 0,
+                         "다른 출발지까지 잠기면 공격자가 설정 화면을 영구 차단할 수 있다.")
+
+    def test_global_lockout_still_backs_up_per_client(self):
+        # 분산 시도(출발지를 바꿔 가며)는 전역 임계값으로 막는다.
+        sessions = SessionStore(60, 2, 60)
+        for index in range(2 * SessionStore.GLOBAL_FACTOR):
+            sessions.note_failure("10.0.0.%d" % index)
+        self.assertGreater(sessions.lock_remaining("198.51.100.7"), 0)
 
     def test_destroy_user_kills_all_their_sessions(self):
         sessions = SessionStore(60, 3, 60)
