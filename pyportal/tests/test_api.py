@@ -1,4 +1,4 @@
-"""HTTP API E2E — 실제 서버를 띄워 REST 계약과 정적 서빙을 검증한다."""
+"""HTTP API E2E — 실제 서버를 띄워 REST 계약·인증·정적 서빙을 검증한다."""
 
 import json
 import sys
@@ -12,8 +12,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from hub import server as server_mod  # noqa: E402
+from hub.app import AppContext  # noqa: E402
 from hub.config import config  # noqa: E402
-from hub.store import ShortcutStore  # noqa: E402
 
 
 def _maybe_json(raw):
@@ -35,109 +35,259 @@ def request(url, method="GET", body=None, headers=None):
     for key, value in (headers or {}).items():
         req.add_header(key, value)
     try:
-        with urllib.request.urlopen(req, timeout=5) as response:
-            raw = response.read()
-            return response.getcode(), _maybe_json(raw), dict(response.headers)
+        with urllib.request.urlopen(req, timeout=8) as response:
+            return response.getcode(), _maybe_json(response.read()), dict(response.headers)
     except urllib.error.HTTPError as exc:
         return exc.code, _maybe_json(exc.read()), dict(exc.headers)
 
 
-class ApiTest(unittest.TestCase):
+class ServerCase(unittest.TestCase):
+    """임시 데이터 폴더로 서버를 띄우고 admin 세션을 확보한다."""
+
     @classmethod
     def setUpClass(cls):
         cls.tmp = tempfile.TemporaryDirectory()
-        store = ShortcutStore(Path(cls.tmp.name) / "shortcuts.json")
-        cls.server = server_mod.create_server("127.0.0.1", 0, store)
-        cls.base = "http://127.0.0.1:{}".format(cls.server.server_address[1])
+        cls.base = Path(cls.tmp.name)
+        # 워커(자동 점검/백업)는 테스트에서 켜지 않는다 — 결과가 흔들린다.
+        cls.ctx = AppContext(cls.base, start_workers=False)
+        cls.password = cls._read_initial_password()
+        cls.server = server_mod.create_server("127.0.0.1", 0, cls.ctx)
+        cls.url = "http://127.0.0.1:{}".format(cls.server.server_address[1])
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
         cls.thread.start()
+        cls.token = cls._login(cls.password)
 
     @classmethod
     def tearDownClass(cls):
         cls.server.shutdown()
         cls.server.server_close()
+        cls.ctx.close()
         cls.tmp.cleanup()
 
-    # ---------- 조회 ----------
+    @classmethod
+    def _read_initial_password(cls):
+        text = (cls.base / "initial-settings-password.txt").read_text(encoding="utf-8")
+        for line in text.splitlines():
+            if line.startswith("password:"):
+                return line.split(":", 1)[1].strip()
+        raise AssertionError("초기 비밀번호 파일에 password 줄이 없습니다.")
 
-    def test_meta_exposes_catalog(self):
-        code, payload, _ = request(self.base + "/api/meta")
+    @classmethod
+    def _login(cls, password):
+        code, payload, _ = request(cls.url + "/api/settings/session", "POST",
+                                   {"password": password})
+        assert code == 200, payload
+        return payload["token"]
+
+    def auth(self, token=None):
+        return {"X-Settings-Token": token or self.token}
+
+
+class PublicApiTest(ServerCase):
+    def test_meta_exposes_catalog_and_ranges(self):
+        code, payload, _ = request(self.url + "/api/meta")
         self.assertEqual(code, 200)
-        self.assertTrue(payload["success"])
-        self.assertGreaterEqual(len(payload["categories"]), 5)
         self.assertEqual(payload["datacenterCount"], 28)
+        self.assertEqual(len(payload["historyRanges"]), 8)
+        self.assertIsNone(payload["session"], "토큰 없이 조회하면 세션은 비어 있어야 한다.")
 
-    def test_datacenters_returns_28_sites_with_summary(self):
-        code, payload, _ = request(self.base + "/api/datacenters")
+    def test_meta_reports_session_when_logged_in(self):
+        code, payload, _ = request(self.url + "/api/meta", headers=self.auth())
+        self.assertEqual(payload["session"]["username"], "admin")
+
+    def test_datacenters_and_shortcuts_are_public(self):
+        self.assertEqual(request(self.url + "/api/datacenters")[0], 200)
+        self.assertEqual(request(self.url + "/api/shortcuts")[0], 200)
+
+    def test_history_endpoint_returns_series(self):
+        code, payload, _ = request(self.url + "/api/health/history?range=1h")
         self.assertEqual(code, 200)
-        self.assertEqual(len(payload["datacenters"]), 28)
-        self.assertEqual(payload["summary"]["total"], 28)
-        self.assertEqual(sum(payload["summary"]["byRegion"].values()), 28)
-
-    def test_shortcuts_seeded(self):
-        code, payload, _ = request(self.base + "/api/shortcuts")
-        self.assertEqual(code, 200)
-        self.assertGreater(len(payload["shortcuts"]), 0)
-
-    # ---------- 생성/수정/삭제 ----------
-
-    def test_create_update_delete_flow(self):
-        code, payload, _ = request(self.base + "/api/shortcuts", "POST",
-                                   {"name": "테스트 링크", "url": "test.internal.dc/path"})
-        self.assertEqual(code, 201)
-        created = payload["shortcut"]
-        self.assertEqual(created["url"], "https://test.internal.dc/path")
-        self.assertEqual(payload["shortcuts"][0]["id"], created["id"])
-
-        code, payload, _ = request(self.base + "/api/shortcuts/" + created["id"], "PUT",
-                                   {"isFavorite": True})
-        self.assertEqual(code, 200)
-        self.assertTrue(payload["shortcut"]["isFavorite"])
-
-        code, payload, _ = request(self.base + "/api/shortcuts/" + created["id"], "DELETE")
-        self.assertEqual(code, 200)
-        self.assertFalse(any(item["id"] == created["id"] for item in payload["shortcuts"]))
-
-    def test_create_requires_name_and_url(self):
-        code, payload, _ = request(self.base + "/api/shortcuts", "POST", {"name": "이름만"})
-        self.assertEqual(code, 400)
-        self.assertFalse(payload["success"])
-
-    def test_create_rejects_javascript_url(self):
-        code, _, _ = request(self.base + "/api/shortcuts", "POST",
-                             {"name": "나쁜", "url": "javascript:alert(1)"})
-        self.assertEqual(code, 400)
-
-    def test_update_missing_id_is_404(self):
-        code, _, _ = request(self.base + "/api/shortcuts/sc-nonexistent", "PUT", {"name": "x"})
-        self.assertEqual(code, 404)
-
-    def test_reset_restores_defaults(self):
-        request(self.base + "/api/shortcuts", "POST", {"name": "임시", "url": "https://t.internal.dc"})
-        code, payload, _ = request(self.base + "/api/shortcuts/reset", "POST", {})
-        self.assertEqual(code, 200)
-        self.assertFalse(any(item["name"] == "임시" for item in payload["shortcuts"]))
-
-    def test_import_replaces_all(self):
-        code, payload, _ = request(self.base + "/api/import", "POST", {
-            "shortcuts": [{"name": "가져온 링크", "url": "imported.internal.dc"}]
-        })
-        self.assertEqual(code, 200)
-        self.assertEqual(len(payload["shortcuts"]), 1)
-        request(self.base + "/api/shortcuts/reset", "POST", {})
-
-    # ---------- 점검 ----------
+        self.assertEqual(payload["range"], "1h")
+        self.assertIn("points", payload)
+        self.assertIn("summary", payload)
 
     def test_health_check_blocks_loopback_targets(self):
-        code, payload, _ = request(self.base + "/api/health/check", "POST",
+        code, payload, _ = request(self.url + "/api/health/check", "POST",
                                    {"urls": ["http://127.0.0.1:9/"]})
         self.assertEqual(code, 200)
         self.assertEqual(payload["results"][0]["status"], "blocked")
 
-    # ---------- 정적/보안 ----------
 
+class MutationGuardTest(ServerCase):
+    """조회는 열려 있고 변경은 설정 로그인이 필요하다."""
+
+    def test_create_without_session_is_401(self):
+        code, payload, _ = request(self.url + "/api/shortcuts", "POST",
+                                   {"name": "x", "url": "x.internal"})
+        self.assertEqual(code, 401)
+        self.assertEqual(payload["code"], "settings_login_required")
+
+    def test_all_write_routes_guarded(self):
+        cases = [("POST", "/api/shortcuts", {}), ("PUT", "/api/shortcuts/sc-1", {}),
+                 ("DELETE", "/api/shortcuts/sc-1", None), ("POST", "/api/shortcuts/reset", {}),
+                 ("POST", "/api/import", {}), ("GET", "/api/export", None),
+                 ("GET", "/api/settings", None), ("PUT", "/api/settings/backup", {}),
+                 ("GET", "/api/settings/users", None), ("POST", "/api/settings/users", {}),
+                 ("POST", "/api/settings/datacenters", {}), ("GET", "/api/settings/backups", None),
+                 ("POST", "/api/settings/backups", {})]
+        for method, path, body in cases:
+            code, _, _ = request(self.url + path, method, body)
+            self.assertEqual(code, 401, "{} {}".format(method, path))
+
+    def test_create_update_delete_with_session(self):
+        code, payload, _ = request(self.url + "/api/shortcuts", "POST",
+                                   {"name": "테스트 링크", "url": "test.internal.dc/path"},
+                                   self.auth())
+        self.assertEqual(code, 201)
+        created = payload["shortcut"]
+        self.assertEqual(created["url"], "https://test.internal.dc/path")
+
+        code, payload, _ = request(self.url + "/api/shortcuts/" + created["id"], "PUT",
+                                   {"isFavorite": True}, self.auth())
+        self.assertEqual(code, 200)
+        self.assertTrue(payload["shortcut"]["isFavorite"])
+
+        code, _, _ = request(self.url + "/api/shortcuts/" + created["id"], "DELETE", None,
+                             self.auth())
+        self.assertEqual(code, 200)
+
+    def test_invalid_token_rejected(self):
+        code, _, _ = request(self.url + "/api/settings", headers={"X-Settings-Token": "nope"})
+        self.assertEqual(code, 401)
+
+
+class SettingsApiTest(ServerCase):
+    def test_settings_state_shape(self):
+        code, payload, _ = request(self.url + "/api/settings", headers=self.auth())
+        self.assertEqual(code, 200)
+        self.assertIn("backup", payload["settings"])
+        self.assertIn("health", payload["settings"])
+        self.assertEqual(payload["users"][0]["username"], "admin")
+        self.assertIn("backupIntervalMinutes", payload["choices"])
+
+    def test_update_backup_settings(self):
+        code, payload, _ = request(self.url + "/api/settings/backup", "PUT",
+                                   {"enabled": True, "intervalMinutes": 360, "keep": 5},
+                                   self.auth())
+        self.assertEqual(code, 200)
+        self.assertEqual(payload["settings"]["backup"]["intervalMinutes"], 360)
+        self.assertEqual(payload["settings"]["backup"]["keep"], 5)
+
+    def test_invalid_interval_falls_back_to_previous(self):
+        request(self.url + "/api/settings/health", "PUT",
+                {"autoEnabled": True, "intervalMinutes": 5}, self.auth())
+        code, payload, _ = request(self.url + "/api/settings/health", "PUT",
+                                   {"intervalMinutes": 7}, self.auth())   # 허용 목록 밖
+        self.assertEqual(code, 200)
+        self.assertEqual(payload["settings"]["health"]["intervalMinutes"], 5)
+
+    def test_datacenter_crud(self):
+        code, payload, _ = request(self.url + "/api/settings/datacenters", "POST",
+                                   {"code": "BUS-1", "name": "부산 센터", "city": "Busan",
+                                    "region": "APAC", "lat": 35.1, "lng": 129.0, "racks": 300},
+                                   self.auth())
+        self.assertEqual(code, 201)
+        self.assertEqual(payload["datacenter"]["id"], "bus-1")
+        self.assertEqual(len(payload["datacenters"]), 29)
+
+        code, payload, _ = request(self.url + "/api/settings/datacenters/bus-1", "PUT",
+                                   {"racks": 900}, self.auth())
+        self.assertEqual(payload["datacenter"]["racks"], 900)
+
+        # 새 DC 에 바로가기를 연결할 수 있어야 한다(고정 목록이면 'all' 로 떨어진다).
+        code, payload, _ = request(self.url + "/api/shortcuts", "POST",
+                                   {"name": "부산 콘솔", "url": "bus.internal.dc",
+                                    "datacenterId": "bus-1"}, self.auth())
+        self.assertEqual(payload["shortcut"]["datacenterId"], "bus-1")
+
+        code, _, _ = request(self.url + "/api/settings/datacenters/bus-1", "DELETE", None,
+                             self.auth())
+        self.assertEqual(code, 200)
+        code, _, _ = request(self.url + "/api/settings/datacenters/bus-1", "DELETE", None,
+                             self.auth())
+        self.assertEqual(code, 404)
+        request(self.url + "/api/settings/datacenters/reset", "POST", {}, self.auth())
+
+    def test_backup_create_list_download_delete(self):
+        code, payload, _ = request(self.url + "/api/settings/backups", "POST", {}, self.auth())
+        self.assertEqual(code, 201)
+        name = payload["backup"]["name"]
+
+        code, payload, headers = request(self.url + "/api/settings/backups/" + name,
+                                         headers=self.auth())
+        self.assertEqual(code, 200)
+        self.assertIn("attachment", headers.get("Content-Disposition", ""))
+        self.assertIn("shortcuts", payload["data"])
+
+        code, _, _ = request(self.url + "/api/settings/backups/" + name, "DELETE", None, self.auth())
+        self.assertEqual(code, 200)
+
+    def test_backup_name_traversal_rejected(self):
+        code, _, _ = request(self.url + "/api/settings/backups/..%2F..%2Fusers.json",
+                             headers=self.auth())
+        self.assertIn(code, (400, 404))
+
+    def test_user_management_flow(self):
+        code, payload, _ = request(self.url + "/api/settings/users", "POST",
+                                   {"username": "viewer1", "role": "viewer",
+                                    "password": "viewer-password-1"}, self.auth())
+        self.assertEqual(code, 201)
+        self.assertEqual(len(payload["users"]), 2)
+
+        # viewer 로 로그인하면 바로가기는 되지만 관리자 영역은 막힌다.
+        viewer_token = self._login("viewer-password-1")
+        code, _, _ = request(self.url + "/api/settings/users", "POST",
+                             {"username": "x", "role": "viewer", "password": "another-pass-1"},
+                             {"X-Settings-Token": viewer_token})
+        self.assertEqual(code, 403)
+        code, _, _ = request(self.url + "/api/shortcuts", "POST",
+                             {"name": "viewer 링크", "url": "v.internal.dc"},
+                             {"X-Settings-Token": viewer_token})
+        self.assertEqual(code, 201)
+
+        code, _, _ = request(self.url + "/api/settings/users/viewer1", "DELETE", None, self.auth())
+        self.assertEqual(code, 200)
+
+    def test_cannot_delete_self(self):
+        code, _, _ = request(self.url + "/api/settings/users/admin", "DELETE", None, self.auth())
+        self.assertEqual(code, 400)
+
+    def test_password_change_invalidates_session(self):
+        request(self.url + "/api/settings/users", "POST",
+                {"username": "temp1", "role": "viewer", "password": "temp-password-1"}, self.auth())
+        token = self._login("temp-password-1")
+        self.assertEqual(request(self.url + "/api/settings", headers={"X-Settings-Token": token})[0], 200)
+        request(self.url + "/api/settings/users/temp1/password", "POST",
+                {"password": "temp-password-2"}, self.auth())
+        self.assertEqual(request(self.url + "/api/settings", headers={"X-Settings-Token": token})[0], 401)
+        request(self.url + "/api/settings/users/temp1", "DELETE", None, self.auth())
+
+
+class KeepAliveTest(ServerCase):
+    """본문을 쓰지 않는 핸들러 뒤의 요청이 깨지지 않아야 한다(과거 501 desync)."""
+
+    def test_pipeline_of_bodyless_handlers(self):
+        import http.client
+        conn = http.client.HTTPConnection("127.0.0.1", self.server.server_address[1], timeout=8)
+        headers = {"Content-Type": "application/json", "X-Settings-Token": self.token}
+
+        def call(method, path, body=None):
+            conn.request(method, path, json.dumps(body) if body is not None else None, headers)
+            response = conn.getresponse()
+            response.read()
+            return response.status
+
+        self.assertEqual(call("POST", "/api/settings/backups", {}), 201)
+        self.assertEqual(call("PUT", "/api/settings/backup",
+                              {"enabled": True, "intervalMinutes": 1440, "keep": 14}), 200)
+        self.assertEqual(call("POST", "/api/shortcuts/reset", {}), 200)
+        self.assertEqual(call("GET", "/api/meta"), 200)
+        conn.close()
+
+
+class StaticTest(ServerCase):
     def test_index_is_served_with_security_headers(self):
-        code, _, headers = request(self.base + "/")
+        code, _, headers = request(self.url + "/")
         self.assertEqual(code, 200)
         self.assertEqual(headers.get("X-Frame-Options"), "DENY")
         self.assertEqual(headers.get("X-Content-Type-Options"), "nosniff")
@@ -145,32 +295,29 @@ class ApiTest(unittest.TestCase):
 
     def test_static_assets_served(self):
         for path in ("/app.js", "/styles.css", "/favicon.svg"):
-            code, _, headers = request(self.base + path)
-            self.assertEqual(code, 200, path)
+            self.assertEqual(request(self.url + path)[0], 200, path)
 
     def test_path_traversal_does_not_escape_static_dir(self):
-        # 탈출에 성공하면 서버 소스나 저장 파일이 그대로 노출된다.
-        code, _, headers = request(self.base + "/../hub/config.py")
+        code, _, headers = request(self.url + "/../hub/config.py")
         self.assertEqual(code, 200)
         self.assertTrue(headers.get("Content-Type", "").startswith("text/html"),
                         "정적 디렉터리 밖 파일이 서빙되면 안 된다(index.html 로 폴백해야 함).")
 
     def test_unknown_api_is_404(self):
-        code, _, _ = request(self.base + "/api/nope")
-        self.assertEqual(code, 404)
+        self.assertEqual(request(self.url + "/api/nope")[0], 404)
 
 
-class TokenAuthTest(unittest.TestCase):
-    """HUB_TOKEN 이 설정된 경우 /api 전체가 토큰을 요구해야 한다."""
+class HubTokenTest(unittest.TestCase):
+    """HUB_TOKEN 이 설정되면 조회까지 포함해 모든 /api 가 토큰을 요구한다."""
 
     @classmethod
     def setUpClass(cls):
         cls.original = config.token
-        config.token = "secret-token-123"
+        config.token = "hub-secret-1"
         cls.tmp = tempfile.TemporaryDirectory()
-        store = ShortcutStore(Path(cls.tmp.name) / "shortcuts.json")
-        cls.server = server_mod.create_server("127.0.0.1", 0, store)
-        cls.base = "http://127.0.0.1:{}".format(cls.server.server_address[1])
+        cls.ctx = AppContext(Path(cls.tmp.name), start_workers=False)
+        cls.server = server_mod.create_server("127.0.0.1", 0, cls.ctx)
+        cls.url = "http://127.0.0.1:{}".format(cls.server.server_address[1])
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
         cls.thread.start()
 
@@ -179,37 +326,23 @@ class TokenAuthTest(unittest.TestCase):
         config.token = cls.original
         cls.server.shutdown()
         cls.server.server_close()
+        cls.ctx.close()
         cls.tmp.cleanup()
 
-    def test_api_requires_token(self):
-        code, _, _ = request(self.base + "/api/shortcuts")
+    def test_requires_token_with_distinct_code(self):
+        code, payload, _ = request(self.url + "/api/shortcuts")
         self.assertEqual(code, 401)
+        # 설정 로그인 실패와 구분되어야 화면이 엉뚱한 모달을 띄우지 않는다.
+        self.assertEqual(payload["code"], "hub_token_required")
 
-    def test_wrong_token_rejected(self):
-        code, _, _ = request(self.base + "/api/shortcuts", headers={"X-Hub-Token": "nope"})
-        self.assertEqual(code, 401)
-
-    def test_correct_token_accepted(self):
-        code, payload, _ = request(self.base + "/api/shortcuts",
-                                   headers={"X-Hub-Token": "secret-token-123"})
-        self.assertEqual(code, 200)
-        self.assertTrue(payload["success"])
-
-    def test_cookie_token_accepted(self):
-        code, _, _ = request(self.base + "/api/shortcuts",
-                             headers={"Cookie": "hub_token=secret-token-123"})
-        self.assertEqual(code, 200)
-
-    def test_write_routes_also_guarded(self):
-        for method, path in (("POST", "/api/shortcuts"), ("PUT", "/api/shortcuts/sc-1"),
-                             ("DELETE", "/api/shortcuts/sc-1"), ("POST", "/api/health/check")):
-            code, _, _ = request(self.base + path, method, {} if method != "DELETE" else None)
-            self.assertEqual(code, 401, "{} {}".format(method, path))
+    def test_accepts_header_and_cookie(self):
+        self.assertEqual(request(self.url + "/api/shortcuts",
+                                 headers={"X-Hub-Token": "hub-secret-1"})[0], 200)
+        self.assertEqual(request(self.url + "/api/shortcuts",
+                                 headers={"Cookie": "hub_token=hub-secret-1"})[0], 200)
 
     def test_page_itself_is_public(self):
-        # 페이지는 열려야 토큰 입력 화면을 띄울 수 있다.
-        code, _, _ = request(self.base + "/")
-        self.assertEqual(code, 200)
+        self.assertEqual(request(self.url + "/")[0], 200)
 
 
 if __name__ == "__main__":

@@ -318,6 +318,10 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
 .legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 8px; font-size: 11px; color: var(--muted); }
 .legend span { display: inline-flex; align-items: center; gap: 5px; }
 .legend i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.legend i.lg-APAC { background: #38bdf8; }
+.legend i.lg-EMEA { background: #34d399; }
+.legend i.lg-AMER { background: #a78bfa; }
+.legend i.lg-LATAM { background: #fbbf24; }
 
 /* ---------- DC 목록/상세 ---------- */
 .dc-layout { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); gap: 14px; align-items: start; }
@@ -401,6 +405,55 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
 .modal { position: fixed; inset: 0; z-index: 70; display: grid; place-items: center; background: rgba(2, 6, 23, 0.8); }
 .modal-box { width: min(420px, 92vw); display: flex; flex-direction: column; gap: 10px; padding: 22px; border-radius: var(--radius-lg); background: var(--panel); border: 1px solid var(--line); }
 .modal-box input { padding: 9px 11px; border-radius: 11px; background: rgba(2, 6, 23, 0.8); border: 1px solid var(--line); color: var(--text); font-family: inherit; font-size: 12px; }
+
+/* ---------- 설정 드롭다운 메뉴 ---------- */
+.menu { position: relative; }
+.menu .caret { font-size: 10px; opacity: .8; }
+.btn.active { box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.45); }
+.menu-panel {
+  position: absolute; right: 0; top: calc(100% + 8px); z-index: 40;
+  min-width: 232px; padding: 6px;
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: 14px; box-shadow: 0 18px 40px rgba(2, 6, 23, 0.7);
+}
+.menu-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 7px 10px 9px; margin-bottom: 4px;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 11px; color: var(--muted);
+}
+.menu-item {
+  display: flex; align-items: center; gap: 9px; width: 100%;
+  padding: 9px 10px; border-radius: 10px;
+  background: none; border: none; color: var(--text);
+  font-size: 12px; font-family: inherit; text-align: left; cursor: pointer;
+}
+.menu-item:hover { background: rgba(30, 41, 59, 0.9); }
+
+/* ---------- 차트 ---------- */
+.chart-card { display: flex; flex-direction: column; gap: 10px; }
+.chart-wrap { width: 100%; overflow: hidden; }
+.chart-wrap svg { width: 100%; height: auto; display: block; }
+.chart-grid { stroke: rgba(148, 163, 184, 0.14); stroke-width: 1; }
+.chart-grid-v { stroke-dasharray: 3 5; }
+.chart-axis { fill: var(--dim); font-size: 10px; }
+.chart-empty { margin-top: 4px; }
+.select-inline {
+  width: 100%; padding: 8px 11px; font-size: 12px; font-family: inherit;
+  background: rgba(2, 6, 23, 0.8); border: 1px solid var(--line);
+  border-radius: 11px; color: var(--text);
+}
+
+/* ---------- 설정 화면 ---------- */
+.settings-hero { padding: 18px 22px; }
+.settings-pane { display: block; }
+.warn-line {
+  font-size: 11px; color: var(--amber);
+  background: rgba(251, 191, 36, 0.08); border: 1px solid rgba(251, 191, 36, 0.22);
+  border-radius: 11px; padding: 8px 11px; margin-bottom: 10px;
+}
+.form-card .form-head + .checkline { margin-top: 2px; }
+.form-head-gap { margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
 
 /* ---------- 반응형 ---------- */
 @media (max-width: 1080px) {

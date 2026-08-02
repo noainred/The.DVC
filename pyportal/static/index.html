@@ -30,7 +30,6 @@
         </a>
         <a class="tab" href="#/datacenters" data-tab="datacenters">28개 센터 현황</a>
         <a class="tab" href="#/health" data-tab="health">링크 상태 점검</a>
-        <a class="tab" href="#/settings" data-tab="settings">설정</a>
       </nav>
 
       <div class="topbar-actions">
@@ -38,10 +37,25 @@
           <span class="search-icon" aria-hidden="true">⌕</span>
           <input id="search-input" type="search" placeholder="서비스 / URL 검색" autocomplete="off" />
         </label>
-        <button class="btn btn-ghost" id="btn-check-all" type="button" title="등록된 모든 링크의 응답 상태를 점검합니다">
-          <span class="dot-emerald" aria-hidden="true"></span> 링크 점검
-        </button>
-        <a class="btn btn-primary" href="#/settings" id="btn-add">＋ 바로가기 추가</a>
+
+        <!-- 설정 메뉴: 잠금 상태에서는 비밀번호를 먼저 묻는다 -->
+        <div class="menu" id="settings-menu">
+          <button class="btn btn-primary" id="btn-settings" type="button" aria-haspopup="true" aria-expanded="false">
+            <span id="settings-lock" aria-hidden="true">🔒</span>
+            <span>설정</span>
+            <span class="caret" aria-hidden="true">▾</span>
+          </button>
+          <div class="menu-panel" id="settings-panel" hidden>
+            <div class="menu-head">
+              <span id="menu-user">로그인 필요</span>
+              <button class="linkbtn" id="btn-logout" type="button" hidden>로그아웃</button>
+            </div>
+            <button class="menu-item" type="button" data-settings="shortcuts">🔗 <span>바로가기 관리</span></button>
+            <button class="menu-item" type="button" data-settings="datacenters">🏢 <span>데이터센터 구성</span></button>
+            <button class="menu-item" type="button" data-settings="users">👤 <span>사용자 구성 및 설정</span></button>
+            <button class="menu-item" type="button" data-settings="backup">💾 <span>현재 설정 백업</span></button>
+          </div>
+        </div>
       </div>
     </div>
   </header>
@@ -49,18 +63,6 @@
   <main class="shell page" id="page">
     <!-- 대시보드 -->
     <section class="view" id="view-dashboard" hidden>
-      <div class="hero">
-        <div>
-          <div class="hero-eyebrow">🛡 28개 글로벌 데이터센터 운영자 전용 포탈</div>
-          <h2>운영 서비스 통합 제어반</h2>
-          <p>설정에서 <strong>이름과 URL</strong>만 입력하면 이 대시보드에 바로가기 카드가 즉시 생성됩니다.</p>
-        </div>
-        <div class="hero-actions">
-          <a class="btn btn-primary" href="#/settings">＋ 바로가기 생성</a>
-          <a class="btn btn-ghost" href="#/settings">설정에서 관리</a>
-        </div>
-      </div>
-
       <div class="section" id="favorites-section" hidden>
         <div class="section-head section-head-amber">
           <span>★ 즐겨찾기</span><span class="muted" id="favorites-count"></span>
@@ -79,8 +81,8 @@
         <div class="empty" id="shortcut-empty" hidden>
           <div class="empty-icon" aria-hidden="true">🔍</div>
           <h3>표시할 서비스 바로가기가 없습니다</h3>
-          <p>설정 메뉴에서 이름과 URL을 입력해 첫 바로가기를 만들어 보세요.</p>
-          <a class="btn btn-primary" href="#/settings">설정에서 바로가기 등록</a>
+          <p>설정 › 바로가기 관리에서 이름과 URL을 입력해 첫 바로가기를 만들어 보세요.</p>
+          <button class="btn btn-primary" id="empty-settings" type="button">설정에서 바로가기 등록</button>
         </div>
       </div>
     </section>
@@ -124,16 +126,43 @@
       <div class="hero">
         <div>
           <div class="hero-eyebrow">🩺 Service Link Health</div>
-          <h2>등록 링크 응답 점검</h2>
-          <p>서버(Python)가 각 URL에 직접 요청해 응답 코드와 지연을 측정합니다. 리다이렉트는 따라가지 않습니다.</p>
+          <h2>링크 상태 추이</h2>
+          <p>서버가 주기적으로 각 URL에 요청해 결과를 자체 DB에 저장합니다. 기간을 고르면 해당 구간의 추이가 바로 표시됩니다.</p>
         </div>
         <div class="hero-actions">
-          <button class="btn btn-primary" id="btn-check-all-2" type="button">전체 링크 점검 실행</button>
+          <button class="btn btn-ghost" id="btn-check-now" type="button">지금 점검</button>
         </div>
       </div>
+
+      <div class="toolbar">
+        <div class="pills" id="range-pills"></div>
+        <label class="search search-inline" for="history-target">
+          <select id="history-target" class="select-inline"></select>
+        </label>
+      </div>
+
       <div class="stat-row stat-row-wide" id="health-stats"></div>
+
+      <div class="card chart-card">
+        <div class="section-head">
+          <span id="chart-title">가용률 / 응답 지연 추이</span>
+          <span class="muted" id="chart-caption"></span>
+        </div>
+        <div class="chart-wrap">
+          <svg id="chart-uptime" viewBox="0 0 1000 180" role="img" aria-label="가용률 추이 차트"></svg>
+        </div>
+        <div class="chart-wrap">
+          <svg id="chart-latency" viewBox="0 0 1000 200" role="img" aria-label="응답 지연 추이 차트"></svg>
+        </div>
+        <div class="empty chart-empty" id="chart-empty" hidden>
+          <div class="empty-icon" aria-hidden="true">📈</div>
+          <h3>이 기간에 저장된 점검 데이터가 없습니다</h3>
+          <p>[지금 점검]을 누르거나, 자동 점검 주기(설정 › 백업/점검)를 기다리면 데이터가 쌓입니다.</p>
+        </div>
+      </div>
+
       <div class="section">
-        <div class="section-head"><span>점검 결과</span><span class="muted" id="health-time"></span></div>
+        <div class="section-head"><span>최근 상태</span><span class="muted" id="health-time"></span></div>
         <div class="table-wrap">
           <table class="table" id="health-table">
             <thead>
@@ -144,92 +173,278 @@
         </div>
         <div class="empty" id="health-empty">
           <div class="empty-icon" aria-hidden="true">🩺</div>
-          <h3>아직 점검을 실행하지 않았습니다</h3>
-          <p>상단의 [전체 링크 점검 실행]을 누르면 등록된 모든 링크를 동시에 확인합니다.</p>
+          <h3>아직 점검 결과가 없습니다</h3>
+          <p>상단의 [지금 점검]을 누르면 등록된 모든 링크를 동시에 확인합니다.</p>
         </div>
       </div>
     </section>
 
     <!-- 설정 -->
     <section class="view" id="view-settings" hidden>
-      <div class="hero">
+      <div class="hero settings-hero">
         <div>
           <div class="hero-eyebrow">⚙ 포탈 설정</div>
-          <h2>바로가기 링크 관리</h2>
-          <p><strong>이름</strong>과 <strong>URL</strong>만 입력하면 대시보드에 바로가기가 생성됩니다. 나머지는 선택 사항입니다.</p>
+          <h2 id="settings-title">바로가기 관리</h2>
+          <p id="settings-desc">이름과 URL만 입력하면 대시보드에 바로가기가 생성됩니다.</p>
+        </div>
+        <div class="hero-actions">
+          <span class="chip chip-blue" id="settings-who"></span>
         </div>
       </div>
 
-      <div class="settings-layout">
-        <form class="card form-card" id="shortcut-form" autocomplete="off">
-          <div class="form-head">
-            <h3 id="form-title">새 바로가기 등록</h3>
-            <button class="linkbtn" id="form-cancel" type="button" hidden>편집 취소</button>
-          </div>
+      <div class="pills" id="settings-tabs"></div>
 
-          <label class="field">
-            <span class="field-label">이름 <em>*</em></span>
-            <input name="name" id="f-name" type="text" required maxlength="120" placeholder="예) Grafana 글로벌 메트릭" />
-          </label>
-
-          <label class="field">
-            <span class="field-label">URL <em>*</em></span>
-            <input name="url" id="f-url" type="text" required maxlength="2048" placeholder="예) grafana.internal.dc/d/global" />
-            <span class="field-hint">http:// 를 생략하면 https:// 로 저장됩니다.</span>
-          </label>
-
-          <div class="field-row">
+      <!-- 1) 바로가기 -->
+      <div class="settings-pane" id="pane-shortcuts" hidden>
+        <div class="settings-layout">
+          <form class="card form-card" id="shortcut-form" autocomplete="off">
+            <div class="form-head">
+              <h3 id="form-title">새 바로가기 등록</h3>
+              <button class="linkbtn" id="form-cancel" type="button" hidden>편집 취소</button>
+            </div>
             <label class="field">
-              <span class="field-label">카테고리</span>
-              <select name="category" id="f-category"></select>
-            </label>
-            <label class="field field-narrow">
-              <span class="field-label">아이콘</span>
-              <input name="icon" id="f-icon" type="text" maxlength="4" placeholder="🔗" />
-            </label>
-          </div>
-
-          <label class="field">
-            <span class="field-label">설명</span>
-            <input name="description" id="f-description" type="text" maxlength="240" placeholder="이 서비스가 무엇인지 한 줄 설명" />
-          </label>
-
-          <div class="field-row">
-            <label class="field">
-              <span class="field-label">태그 (쉼표 구분)</span>
-              <input name="tags" id="f-tags" type="text" placeholder="Monitoring, Realtime" />
+              <span class="field-label">이름 <em>*</em></span>
+              <input name="name" id="f-name" type="text" required maxlength="120" placeholder="예) Grafana 글로벌 메트릭" />
             </label>
             <label class="field">
-              <span class="field-label">연결 데이터센터</span>
-              <select name="datacenterId" id="f-datacenter"></select>
+              <span class="field-label">URL <em>*</em></span>
+              <input name="url" id="f-url" type="text" required maxlength="2048" placeholder="예) grafana.internal.dc/d/global" />
+              <span class="field-hint">http:// 를 생략하면 https:// 로 저장됩니다.</span>
             </label>
+            <div class="field-row">
+              <label class="field">
+                <span class="field-label">카테고리</span>
+                <select name="category" id="f-category"></select>
+              </label>
+              <label class="field field-narrow">
+                <span class="field-label">아이콘</span>
+                <input name="icon" id="f-icon" type="text" maxlength="4" placeholder="🔗" />
+              </label>
+            </div>
+            <label class="field">
+              <span class="field-label">설명</span>
+              <input name="description" id="f-description" type="text" maxlength="240" placeholder="이 서비스가 무엇인지 한 줄 설명" />
+            </label>
+            <div class="field-row">
+              <label class="field">
+                <span class="field-label">태그 (쉼표 구분)</span>
+                <input name="tags" id="f-tags" type="text" placeholder="Monitoring, Realtime" />
+              </label>
+              <label class="field">
+                <span class="field-label">연결 데이터센터</span>
+                <select name="datacenterId" id="f-datacenter"></select>
+              </label>
+            </div>
+            <label class="checkline">
+              <input type="checkbox" id="f-favorite" /> <span>즐겨찾기로 상단에 고정</span>
+            </label>
+            <div class="form-actions">
+              <button class="btn btn-primary" type="submit" id="form-submit">바로가기 생성</button>
+              <span class="form-msg" id="form-msg"></span>
+            </div>
+          </form>
+
+          <div class="card">
+            <div class="form-head"><h3>등록된 바로가기 <span class="muted" id="settings-count"></span></h3></div>
+            <div class="table-wrap">
+              <table class="table">
+                <thead><tr><th>이름</th><th>URL</th><th>카테고리</th><th>관리</th></tr></thead>
+                <tbody id="settings-tbody"></tbody>
+              </table>
+            </div>
+            <div class="card-footer">
+              <button class="btn btn-ghost" id="btn-export" type="button">JSON 내보내기</button>
+              <button class="btn btn-ghost" id="btn-import" type="button">JSON 가져오기</button>
+              <button class="btn btn-danger" id="btn-reset" type="button">기본값 복원</button>
+              <input type="file" id="import-file" accept="application/json,.json" hidden />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2) 데이터센터 구성 -->
+      <div class="settings-pane" id="pane-datacenters" hidden>
+        <div class="settings-layout">
+          <form class="card form-card" id="dc-form" autocomplete="off">
+            <div class="form-head">
+              <h3 id="dc-form-title">데이터센터 추가</h3>
+              <button class="linkbtn" id="dc-form-cancel" type="button" hidden>편집 취소</button>
+            </div>
+            <div class="field-row">
+              <label class="field">
+                <span class="field-label">코드 <em>*</em></span>
+                <input id="d-code" type="text" maxlength="12" placeholder="ICN-1" required />
+              </label>
+              <label class="field">
+                <span class="field-label">ID</span>
+                <input id="d-id" type="text" maxlength="32" placeholder="icn-01" />
+              </label>
+            </div>
+            <label class="field">
+              <span class="field-label">이름 <em>*</em></span>
+              <input id="d-name" type="text" maxlength="120" placeholder="Seoul South Central DC" required />
+            </label>
+            <div class="field-row">
+              <label class="field">
+                <span class="field-label">도시</span>
+                <input id="d-city" type="text" maxlength="80" placeholder="Seoul (서울)" />
+              </label>
+              <label class="field">
+                <span class="field-label">국가</span>
+                <input id="d-country" type="text" maxlength="60" placeholder="South Korea" />
+              </label>
+            </div>
+            <div class="field-row">
+              <label class="field">
+                <span class="field-label">리전</span>
+                <select id="d-region"></select>
+              </label>
+              <label class="field">
+                <span class="field-label">상태</span>
+                <select id="d-status">
+                  <option value="operational">정상 운영</option>
+                  <option value="degraded">일부 저하</option>
+                  <option value="maintenance">점검 중</option>
+                </select>
+              </label>
+            </div>
+            <div class="field-row">
+              <label class="field">
+                <span class="field-label">PUE</span>
+                <input id="d-pue" type="number" step="0.01" min="1" max="5" placeholder="1.20" />
+              </label>
+              <label class="field">
+                <span class="field-label">랙 수</span>
+                <input id="d-racks" type="number" min="0" max="100000" placeholder="1200" />
+              </label>
+            </div>
+            <div class="field-row">
+              <label class="field">
+                <span class="field-label">위도</span>
+                <input id="d-lat" type="number" step="0.0001" min="-90" max="90" placeholder="37.5665" />
+              </label>
+              <label class="field">
+                <span class="field-label">경도</span>
+                <input id="d-lng" type="number" step="0.0001" min="-180" max="180" placeholder="126.9780" />
+              </label>
+            </div>
+            <label class="field">
+              <span class="field-label">관리 대역</span>
+              <input id="d-subnet" type="text" maxlength="40" placeholder="10.100.0.0/16" />
+            </label>
+            <div class="form-actions">
+              <button class="btn btn-primary" type="submit" id="dc-form-submit">데이터센터 추가</button>
+              <span class="form-msg" id="dc-form-msg"></span>
+            </div>
+          </form>
+
+          <div class="card">
+            <div class="form-head"><h3>등록된 데이터센터 <span class="muted" id="dc-count"></span></h3></div>
+            <div class="table-wrap">
+              <table class="table">
+                <thead><tr><th>코드</th><th>이름 / 도시</th><th>리전</th><th>상태</th><th>관리</th></tr></thead>
+                <tbody id="dc-tbody"></tbody>
+              </table>
+            </div>
+            <div class="card-footer">
+              <button class="btn btn-danger" id="btn-dc-reset" type="button">기본 28개로 복원</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3) 사용자 -->
+      <div class="settings-pane" id="pane-users" hidden>
+        <div class="settings-layout">
+          <form class="card form-card" id="user-form" autocomplete="off">
+            <div class="form-head"><h3>사용자 추가</h3></div>
+            <label class="field">
+              <span class="field-label">사용자명 <em>*</em></span>
+              <input id="u-name" type="text" maxlength="64" placeholder="operator1" required />
+            </label>
+            <label class="field">
+              <span class="field-label">역할</span>
+              <select id="u-role">
+                <option value="admin">admin — 모든 설정 변경</option>
+                <option value="viewer">viewer — 바로가기 관리만</option>
+              </select>
+            </label>
+            <label class="field">
+              <span class="field-label">비밀번호 <em>*</em></span>
+              <input id="u-password" type="password" minlength="8" maxlength="200" placeholder="8자 이상" required />
+              <span class="field-hint">설정 로그인은 비밀번호만 입력하므로 계정마다 서로 다른 값을 사용해야 합니다.</span>
+            </label>
+            <div class="form-actions">
+              <button class="btn btn-primary" type="submit">사용자 추가</button>
+              <span class="form-msg" id="user-form-msg"></span>
+            </div>
+          </form>
+
+          <div class="card">
+            <div class="form-head"><h3>계정 목록 <span class="muted" id="user-count"></span></h3></div>
+            <div class="table-wrap">
+              <table class="table">
+                <thead><tr><th>사용자명</th><th>역할</th><th>상태</th><th>관리</th></tr></thead>
+                <tbody id="user-tbody"></tbody>
+              </table>
+            </div>
+            <div class="card-footer">
+              <span class="muted" id="initial-password-note"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 4) 백업 -->
+      <div class="settings-pane" id="pane-backup" hidden>
+        <div class="settings-layout">
+          <div class="card form-card">
+            <div class="form-head"><h3>자동 백업 설정</h3></div>
+            <label class="checkline">
+              <input type="checkbox" id="b-enabled" /> <span>정기 자동 백업 사용</span>
+            </label>
+            <label class="field">
+              <span class="field-label">백업 주기</span>
+              <select id="b-interval"></select>
+            </label>
+            <label class="field">
+              <span class="field-label">보관 수량</span>
+              <input id="b-keep" type="number" min="1" max="200" />
+              <span class="field-hint">이 수를 넘으면 오래된 백업부터 자동 삭제됩니다.</span>
+            </label>
+            <div class="form-actions">
+              <button class="btn btn-primary" id="b-save" type="button">설정 저장</button>
+              <button class="btn btn-ghost" id="b-now" type="button">지금 백업</button>
+              <span class="form-msg" id="backup-msg"></span>
+            </div>
+
+            <div class="form-head form-head-gap"><h3>자동 점검 설정</h3></div>
+            <label class="checkline">
+              <input type="checkbox" id="h-enabled" /> <span>링크 상태 자동 점검 사용</span>
+            </label>
+            <label class="field">
+              <span class="field-label">점검 주기</span>
+              <select id="h-interval"></select>
+              <span class="field-hint">짧을수록 차트가 촘촘해지지만 대상 서버 부하가 늘어납니다.</span>
+            </label>
+            <div class="form-actions">
+              <button class="btn btn-primary" id="h-save" type="button">점검 설정 저장</button>
+              <span class="form-msg" id="health-cfg-msg"></span>
+            </div>
           </div>
 
-          <label class="checkline">
-            <input type="checkbox" id="f-favorite" /> <span>즐겨찾기로 상단에 고정</span>
-          </label>
-
-          <div class="form-actions">
-            <button class="btn btn-primary" type="submit" id="form-submit">바로가기 생성</button>
-            <span class="form-msg" id="form-msg"></span>
-          </div>
-        </form>
-
-        <div class="card">
-          <div class="form-head">
-            <h3>등록된 바로가기 <span class="muted" id="settings-count"></span></h3>
-          </div>
-          <div class="table-wrap">
-            <table class="table">
-              <thead><tr><th>이름</th><th>URL</th><th>카테고리</th><th>관리</th></tr></thead>
-              <tbody id="settings-tbody"></tbody>
-            </table>
-          </div>
-          <div class="card-footer">
-            <button class="btn btn-ghost" id="btn-export" type="button">JSON 내보내기</button>
-            <button class="btn btn-ghost" id="btn-import" type="button">JSON 가져오기</button>
-            <button class="btn btn-danger" id="btn-reset" type="button">기본값 복원</button>
-            <input type="file" id="import-file" accept="application/json,.json" hidden />
+          <div class="card">
+            <div class="form-head"><h3>백업 목록 <span class="muted" id="backup-count"></span></h3></div>
+            <p class="warn-line">⚠ 백업 파일에는 계정 비밀번호 해시가 포함됩니다. 내려받은 파일은 자격증명과 동급으로 보관하세요.</p>
+            <div class="table-wrap">
+              <table class="table">
+                <thead><tr><th>파일</th><th>생성</th><th>크기</th><th>관리</th></tr></thead>
+                <tbody id="backup-tbody"></tbody>
+              </table>
+            </div>
+            <div class="card-footer">
+              <span class="muted" id="backup-status"></span>
+            </div>
           </div>
         </div>
       </div>
@@ -245,6 +460,21 @@
 
   <div class="toast" id="toast" hidden></div>
 
+  <!-- 설정 로그인 -->
+  <div class="modal" id="login-modal" hidden>
+    <div class="modal-box">
+      <h3>설정 접근 비밀번호</h3>
+      <p class="muted" id="login-hint">설정 화면은 비밀번호로 보호됩니다.</p>
+      <input type="password" id="login-input" placeholder="비밀번호" autocomplete="current-password" />
+      <div class="form-actions">
+        <button class="btn btn-primary" id="login-submit" type="button">확인</button>
+        <button class="btn btn-ghost" id="login-cancel" type="button">취소</button>
+        <span class="form-msg" id="login-msg"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- HUB_TOKEN 보호 시 -->
   <div class="modal" id="token-modal" hidden>
     <div class="modal-box">
       <h3>접근 토큰이 필요합니다</h3>
