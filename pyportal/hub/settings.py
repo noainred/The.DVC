@@ -24,7 +24,23 @@ DEFAULTS = {
         "autoEnabled": True,
         "intervalMinutes": 5,      # 5분 차트를 그리려면 최소 이 정도 해상도가 필요하다
     },
+    "display": {
+        # 화면(상단 칩·센터 현황·지도)에 표시할 데이터센터 수. 0 = 전체.
+        # 등록 순서대로 앞에서 N개만 보이며, 설정 화면의 편집 목록에는 항상 전부 나온다.
+        "datacenterLimit": 0,
+    },
 }
+
+
+MAX_DC_LIMIT = 300
+
+
+def _clamp_int(value, low, high, default):
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(low, min(high, number))
 
 
 def _clamp_choice(value, choices, default):
@@ -51,6 +67,7 @@ class SettingsStore:
     def _normalize(raw):
         backup = raw.get("backup") if isinstance(raw.get("backup"), dict) else {}
         health = raw.get("health") if isinstance(raw.get("health"), dict) else {}
+        display = raw.get("display") if isinstance(raw.get("display"), dict) else {}
         return {
             "backup": {
                 "enabled": bool(backup.get("enabled", DEFAULTS["backup"]["enabled"])),
@@ -65,18 +82,23 @@ class SettingsStore:
                                                  HEALTH_INTERVAL_CHOICES,
                                                  DEFAULTS["health"]["intervalMinutes"]),
             },
+            "display": {
+                "datacenterLimit": _clamp_int(display.get("datacenterLimit"), 0, MAX_DC_LIMIT,
+                                              DEFAULTS["display"]["datacenterLimit"]),
+            },
         }
 
     def all(self):
         with self._lock:
             data = self._load()
-            return {"backup": dict(data["backup"]), "health": dict(data["health"])}
+            return {"backup": dict(data["backup"]), "health": dict(data["health"]),
+                    "display": dict(data["display"])}
 
     def section(self, name):
         return self.all()[name]
 
     def update_section(self, name, values):
-        if name not in ("backup", "health"):
+        if name not in ("backup", "health", "display"):
             raise KeyError(name)
         with self._lock:
             data = self._load()

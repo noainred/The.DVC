@@ -455,6 +455,15 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
 .form-card .form-head + .checkline { margin-top: 2px; }
 .form-head-gap { margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
 
+/* 데이터센터 표시 개수 설정 */
+.inline-setting {
+  margin: 4px 0 12px; padding: 11px 13px;
+  background: rgba(2, 6, 23, 0.5); border: 1px solid var(--line-soft); border-radius: 13px;
+}
+.inline-row { display: flex; gap: 8px; align-items: center; }
+.inline-row input { width: 110px; }
+.row-muted td { opacity: .45; }
+
 /* ---------- 반응형 ---------- */
 @media (max-width: 1080px) {
   .dc-layout, .settings-layout { grid-template-columns: 1fr; }

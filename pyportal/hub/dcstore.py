@@ -103,9 +103,22 @@ class DatacenterStore:
         with self._lock:
             return {dc["id"] for dc in self._load()}
 
-    def summary(self):
+    def visible(self, limit=0):
+        """화면에 노출할 목록. limit 0(또는 범위 밖)이면 전체.
+
+        편집 화면은 항상 all() 을 쓴다 — 표시 개수를 줄였다고 등록된 사이트를
+        수정할 수 없게 되면 안 된다.
+        """
+        items = self.all()
+        try:
+            count = int(limit)
+        except (TypeError, ValueError):
+            return items
+        return items[:count] if 0 < count < len(items) else items
+
+    def summary(self, items=None):
         with self._lock:
-            items = self._load()
+            items = self._load() if items is None else items
             total = len(items)
             by_region = {region: 0 for region in REGIONS}
             for dc in items:

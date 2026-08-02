@@ -38,7 +38,10 @@
     tab: "dashboard",
     settingsPane: "shortcuts",
     shortcuts: [],
-    datacenters: [],
+    datacenters: [],      // 표시 개수 설정이 적용된 목록(공개 화면용)
+    dcAll: [],            // 등록된 전체 목록(설정 편집용)
+    dcLimit: 0,
+    dcRegistered: 0,
     dcSummary: null,
     categories: [],
     meta: null,
@@ -248,9 +251,15 @@
     return key;
   }
 
+  function dcPool() {
+    // 설정에 로그인해 전체 목록을 받아 왔으면 그것을, 아니면 표시 목록을 쓴다.
+    return state.dcAll.length ? state.dcAll : state.datacenters;
+  }
+
   function dcById(id) {
-    for (var i = 0; i < state.datacenters.length; i += 1) {
-      if (state.datacenters[i].id === id) return state.datacenters[i];
+    var pool = dcPool();
+    for (var i = 0; i < pool.length; i += 1) {
+      if (pool[i].id === id) return pool[i];
     }
     return null;
   }
@@ -824,6 +833,9 @@
     if (!state.session) return Promise.resolve();
     return api("/api/settings").then(function (data) {
       state.settings = data.settings;
+      if (data.settings && data.settings.display) {
+        state.dcLimit = data.settings.display.datacenterLimit || 0;
+      }
       state.users = data.users || [];
       state.backupStatus = data.backup;
       state.choices = data.choices;
@@ -833,6 +845,12 @@
     }).then(function (data) {
       state.backups = data.backups || [];
       state.backupStatus = data.status || state.backupStatus;
+      return api("/api/settings/datacenters");
+    }).then(function (data) {
+      // 편집 목록은 표시 개수와 무관하게 전체다.
+      state.dcAll = data.datacenters || [];
+      state.dcLimit = data.displayLimit || 0;
+      fillFormSelects();
       renderSettings();
     }).catch(function (err) {
       if (err.message.indexOf("로그인") === -1) toast(err.message, "err");
@@ -862,7 +880,7 @@
     var keepDc = dcSelect.value;
     clear(dcSelect);
     dcSelect.appendChild(el("option", { value: "all", text: "전체 공통 (모든 DC)" }));
-    state.datacenters.forEach(function (dc) {
+    dcPool().forEach(function (dc) {
       dcSelect.appendChild(el("option", { value: dc.id, text: dc.code + " · " + dc.city }));
     });
     dcSelect.value = keepDc || "all";
@@ -969,12 +987,18 @@
   }
 
   function renderDcSettings() {
-    $("dc-count").textContent = "(" + state.datacenters.length + "개)";
+    var all = dcPool();
+    var shown = state.dcLimit > 0 ? Math.min(state.dcLimit, all.length) : all.length;
+    $("dc-count").textContent = "(등록 " + all.length + "개 · 표시 " + shown + "개)";
+    $("dc-limit").value = state.dcLimit;
+
     var body = $("dc-tbody");
     clear(body);
-    state.datacenters.forEach(function (dc) {
-      body.appendChild(el("tr", {}, [
-        el("td", {}, [el("strong", { text: dc.code })]),
+    all.forEach(function (dc, index) {
+      var hidden = state.dcLimit > 0 && index >= state.dcLimit;
+      body.appendChild(el("tr", { className: hidden ? "row-muted" : "" }, [
+        el("td", {}, [el("strong", { text: dc.code }),
+                      hidden ? el("span", { className: "badge badge-dc", text: "미표시" }) : null]),
         el("td", {}, [el("div", { text: dc.name }),
                       el("div", { className: "muted", text: dc.city + " · " + dc.country })]),
         el("td", { text: dc.region }),
@@ -1010,14 +1034,11 @@
       : api("/api/settings/datacenters", { method: "POST", body: payload });
 
     request.then(function (data) {
-      state.datacenters = data.datacenters;
+      state.dcAll = data.datacenters;
       resetDcForm();
       fillFormSelects();
       toast("데이터센터를 저장했습니다.", "ok");
-      return api("/api/datacenters");
-    }).then(function (data) {
-      state.dcSummary = data.summary;
-      renderAll();
+      return refreshDatacenters();
     }).catch(function (err) { setMsg("dc-form-msg", err.message, "err"); });
   }
 
@@ -1026,14 +1047,55 @@
                         "이 센터에 연결된 바로가기는 '전체 공통'으로 바뀝니다.")) return;
     api("/api/settings/datacenters/" + encodeURIComponent(dc.id), { method: "DELETE" })
       .then(function (data) {
-        state.datacenters = data.datacenters;
+        state.dcAll = data.datacenters;
         if (state.selectedDcId === dc.id) state.selectedDcId = null;
         fillFormSelects();
         toast("삭제했습니다.", "ok");
-        return api("/api/datacenters");
+        return refreshDatacenters();
       })
-      .then(function (data) { state.dcSummary = data.summary; renderAll(); })
       .catch(function (err) { toast(err.message, "err"); });
+  }
+
+  function saveDcLimit() {
+    var value = Number($("dc-limit").value);
+    if (!isFinite(value) || value < 0) {
+      setMsg("dc-limit-msg", "0 이상 숫자를 입력하세요(0=전체).", "err");
+      return;
+    }
+    api("/api/settings/display", { method: "PUT", body: { datacenterLimit: value } })
+      .then(function (data) {
+        state.settings = data.settings;
+        state.dcLimit = data.settings.display.datacenterLimit;
+        setMsg("dc-limit-msg", state.dcLimit === 0
+          ? "전체 표시로 저장했습니다." : state.dcLimit + "개만 표시하도록 저장했습니다.", "ok");
+        return refreshDatacenters();
+      })
+      .catch(function (err) { setMsg("dc-limit-msg", err.message, "err"); });
+  }
+
+  /** 공개 화면용 데이터센터 목록(표시 개수 적용)을 다시 받아 화면에 반영한다. */
+  function refreshDatacenters() {
+    return api("/api/datacenters").then(function (data) {
+      state.datacenters = data.datacenters || [];
+      state.dcSummary = data.summary || null;
+      state.dcRegistered = data.totalRegistered || state.datacenters.length;
+      if (data.displayLimit != null) state.dcLimit = data.displayLimit;
+      updateCounts();
+      renderAll();
+    });
+  }
+
+  function updateCounts() {
+    var shown = state.datacenters.length;
+    if (state.shortcuts.length) {
+      var registered = state.dcRegistered || shown;
+      $("footer-meta").textContent = "바로가기 " + state.shortcuts.length + "개 · 데이터센터 "
+        + shown + "개" + (registered > shown ? " / " + registered : "")
+        + (state.meta ? " · v" + state.meta.version : "");
+    }
+    var registered = state.dcRegistered || shown;
+    $("dc-count-chip").textContent = shown + "개 DC" + (registered > shown ? " / " + registered : "");
+    $("tab-dc-count").textContent = String(shown);
   }
 
   /* ---------------- 설정 3: 사용자 ---------------- */
@@ -1235,8 +1297,8 @@
         toast("복원했습니다: " + (data.restored || []).join(", "), "ok");
         return loadSettings();
       })
-      .then(function () { return api("/api/datacenters"); })
-      .then(function (data) { state.dcSummary = data.summary; applyShortcuts(state.shortcuts); })
+      .then(function () { return refreshDatacenters(); })
+      .then(function () { applyShortcuts(state.shortcuts); })
       .catch(function (err) { toast(err.message, "err"); });
   }
 
@@ -1256,8 +1318,11 @@
   function applyShortcuts(list) {
     state.shortcuts = list || [];
     $("tab-count").textContent = String(state.shortcuts.length);
+    var registered = state.dcRegistered || state.datacenters.length;
     $("footer-meta").textContent = "바로가기 " + state.shortcuts.length + "개 · 데이터센터 "
-      + state.datacenters.length + "개" + (state.meta ? " · v" + state.meta.version : "");
+      + state.datacenters.length + "개"
+      + (registered > state.datacenters.length ? " / " + registered : "")
+      + (state.meta ? " · v" + state.meta.version : "");
     renderAll();
   }
 
@@ -1454,17 +1519,17 @@
     });
 
     $("dc-form").addEventListener("submit", submitDcForm);
+    $("dc-limit-save").addEventListener("click", saveDcLimit);
     $("dc-form-cancel").addEventListener("click", resetDcForm);
     $("btn-dc-reset").addEventListener("click", function () {
-      if (!window.confirm("데이터센터 목록을 기본 28개로 되돌립니다. 계속할까요?")) return;
+      if (!window.confirm("데이터센터 목록을 기본값으로 되돌립니다. 계속할까요?")) return;
       api("/api/settings/datacenters/reset", { method: "POST", body: {} })
         .then(function (data) {
-          state.datacenters = data.datacenters;
+          state.dcAll = data.datacenters;
           fillFormSelects();
-          toast("기본 28개로 복원했습니다.", "ok");
-          return api("/api/datacenters");
+          toast(data.datacenters.length + "개 기본 목록으로 복원했습니다.", "ok");
+          return refreshDatacenters();
         })
-        .then(function (data) { state.dcSummary = data.summary; renderAll(); })
         .catch(function (err) { toast(err.message, "err"); });
     });
 
@@ -1493,10 +1558,12 @@
         state.initialPasswordFile = results[0].initialPasswordFile;
         state.datacenters = results[1].datacenters || [];
         state.dcSummary = results[1].summary || null;
+        state.dcRegistered = results[1].totalRegistered || state.datacenters.length;
+        state.dcLimit = results[1].displayLimit || 0;
         if (!state.selectedDcId && state.datacenters.length) {
           state.selectedDcId = state.datacenters[0].id;
         }
-        $("dc-count-chip").textContent = state.datacenters.length + "개 DC";
+        updateCounts();
         fillFormSelects();
         renderSessionUi();
         applyShortcuts(results[2].shortcuts || []);

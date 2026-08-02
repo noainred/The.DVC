@@ -18,7 +18,7 @@
         <div class="brand-text">
           <div class="brand-title-row">
             <h1>글로벌 데이터센터 서비스 허브</h1>
-            <span class="chip chip-blue" id="dc-count-chip">28개 DC</span>
+            <span class="chip chip-blue" id="dc-count-chip">DC</span>
           </div>
           <p>Global Datacenter Operations &amp; Services Hub</p>
         </div>
@@ -28,7 +28,9 @@
         <a class="tab" href="#/dashboard" data-tab="dashboard">
           <span>서비스 바로가기</span><span class="tab-badge" id="tab-count">0</span>
         </a>
-        <a class="tab" href="#/datacenters" data-tab="datacenters">28개 센터 현황</a>
+        <a class="tab" href="#/datacenters" data-tab="datacenters">
+          <span>센터 현황</span><span class="tab-badge" id="tab-dc-count">0</span>
+        </a>
         <a class="tab" href="#/health" data-tab="health">링크 상태 점검</a>
       </nav>
 
@@ -340,6 +342,19 @@
 
           <div class="card">
             <div class="form-head"><h3>등록된 데이터센터 <span class="muted" id="dc-count"></span></h3></div>
+
+            <div class="inline-setting">
+              <label class="field" for="dc-limit">
+                <span class="field-label">화면에 표시할 데이터센터 수</span>
+                <div class="inline-row">
+                  <input id="dc-limit" type="number" min="0" max="300" />
+                  <button class="btn btn-primary" id="dc-limit-save" type="button">표시 설정 저장</button>
+                </div>
+                <span class="field-hint">0 = 전체 표시. 등록 순서대로 앞에서 N개만 상단 배지·센터 현황·지도에 보입니다(설정 목록에는 항상 전부 표시).</span>
+              </label>
+              <span class="form-msg" id="dc-limit-msg"></span>
+            </div>
+
             <div class="table-wrap">
               <table class="table">
                 <thead><tr><th>코드</th><th>이름 / 도시</th><th>리전</th><th>상태</th><th>관리</th></tr></thead>
@@ -347,7 +362,7 @@
               </table>
             </div>
             <div class="card-footer">
-              <button class="btn btn-danger" id="btn-dc-reset" type="button">기본 28개로 복원</button>
+              <button class="btn btn-danger" id="btn-dc-reset" type="button">기본 목록으로 복원</button>
             </div>
           </div>
         </div>
