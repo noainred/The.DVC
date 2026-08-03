@@ -70,6 +70,27 @@ class BlockTest(unittest.TestCase):
     def test_empty_target_list(self):
         self.assertEqual(health.check_many([]), [])
 
+    def test_port_check_also_honours_ssrf_guard(self):
+        # 포트 점검은 HTTP 를 거치지 않으므로 가드를 따로 통과시켜야 한다 —
+        # 빠뜨리면 이 경로만 사내망 포트 스캐너가 된다.
+        result = health.check_port("http://127.0.0.1:9/")
+        self.assertEqual(result["status"], "blocked")
+        result = health.check_port("http://169.254.169.254/")
+        self.assertEqual(result["status"], "blocked")
+
+    def test_port_check_is_the_default_method(self):
+        result = health.check_one("http://192.0.2.10:8443/x", timeout=0.5)
+        self.assertEqual(result["method"], "port")
+
+
+class TargetPortTest(unittest.TestCase):
+    def test_explicit_port_wins(self):
+        self.assertEqual(health.target_port("https://svc.internal:8443/x"), 8443)
+
+    def test_scheme_defaults(self):
+        self.assertEqual(health.target_port("http://svc.internal/x"), 80)
+        self.assertEqual(health.target_port("https://svc.internal/x"), 443)
+
 
 LOCAL_IP = _outbound_ip()
 
@@ -110,9 +131,43 @@ class LiveTest(unittest.TestCase):
 
     def test_check_many_runs_concurrently(self):
         targets = [{"id": str(i), "url": self.url("/")} for i in range(6)]
-        results = health.check_many(targets, timeout=3.0, concurrency=4)
+        results = health.check_many(targets, timeout=3.0, concurrency=4,
+                                    method=health.METHOD_HTTP)
         self.assertEqual(len(results), 6)
         self.assertTrue(all(row["status"] == "healthy" for row in results))
+
+    def test_port_check_reports_open_port_as_healthy(self):
+        result = health.check_port(self.url("/"), timeout=3.0)
+        self.assertEqual(result["status"], "healthy")
+        self.assertEqual(result["port"], self.port)
+        self.assertEqual(result["statusCode"], 0, "포트 점검에는 HTTP 코드가 없다.")
+
+    def test_port_check_reports_closed_port_as_unreachable(self):
+        closed = "http://{}:{}/".format(LOCAL_IP, self._free_port())
+        result = health.check_port(closed, timeout=2.0)
+        self.assertEqual(result["status"], "unreachable")
+
+    def test_port_check_treats_http_error_pages_as_healthy(self):
+        # 이 방식으로 바꾼 이유 자체 — 401/403/500 을 돌려주는 서비스도 '떠 있는' 것이다.
+        for path in ("/404", "/500"):
+            self.assertEqual(health.check_port(self.url(path), timeout=3.0)["status"], "healthy")
+        self.assertEqual(health.check_url(self.url("/404"), timeout=3.0)["status"], "warning")
+
+    def test_check_many_uses_selected_method(self):
+        targets = [{"id": "a", "url": self.url("/500")}]
+        port_mode = health.check_many(targets, timeout=3.0, method=health.METHOD_PORT)
+        http_mode = health.check_many(targets, timeout=3.0, method=health.METHOD_HTTP)
+        self.assertEqual(port_mode[0]["status"], "healthy")
+        self.assertEqual(http_mode[0]["status"], "warning")
+
+    @staticmethod
+    def _free_port():
+        sock = socket.socket()
+        try:
+            sock.bind((LOCAL_IP, 0))
+            return sock.getsockname()[1]
+        finally:
+            sock.close()
 
 
 if __name__ == "__main__":

@@ -56,12 +56,12 @@ class UserStoreTest(unittest.TestCase):
         self.assertTrue(self.initial.exists())
         self.assertEqual(self.initial.stat().st_mode & 0o777, 0o600)
         # 파일에 적힌 비밀번호로 실제 로그인이 되어야 한다.
-        self.assertEqual(self.store.authenticate(password)["username"], "admin")
+        self.assertEqual(self.store.authenticate("admin", password)["username"], "admin")
 
     def test_bootstrap_is_idempotent(self):
         first = self.store.bootstrap()
         self.assertIsNone(self.store.bootstrap())
-        self.assertEqual(self.store.authenticate(first)["role"], "admin")
+        self.assertEqual(self.store.authenticate("admin", first)["role"], "admin")
 
     def test_password_change_removes_initial_file(self):
         self.store.bootstrap()
@@ -69,21 +69,36 @@ class UserStoreTest(unittest.TestCase):
         self.store.set_password("admin", "new-admin-password-1")
         self.assertFalse(self.initial.exists(),
                          "비밀번호를 바꿨는데 초기 비밀번호 파일이 남으면 낡은 값이 유효한 줄 알게 된다.")
-        self.assertIsNotNone(self.store.authenticate("new-admin-password-1"))
+        self.assertIsNotNone(self.store.authenticate("admin", "new-admin-password-1"))
 
-    def test_duplicate_password_rejected(self):
+    def test_same_password_on_two_accounts_is_allowed(self):
+        # v2.216: 로그인이 사용자명+비밀번호가 되면서 비밀번호는 더 이상 식별자가 아니다.
         self.store.bootstrap()
         self.store.set_password("admin", "shared-password-123")
-        with self.assertRaises(AuthError):
-            # 로그인은 비밀번호만으로 계정을 찾으므로 중복은 '누구로 로그인되는지'를 흐린다.
-            self.store.add("operator", "viewer", "shared-password-123")
+        self.store.add("operator", "viewer", "shared-password-123")
+        self.assertEqual(self.store.authenticate("operator", "shared-password-123")["role"],
+                         "viewer")
+        self.assertEqual(self.store.authenticate("admin", "shared-password-123")["role"], "admin")
+
+    def test_wrong_username_is_rejected(self):
+        self.store.bootstrap()
+        self.store.add("viewer1", "viewer", "viewer-password-123")
+        self.assertIsNone(self.store.authenticate("nosuchuser", "viewer-password-123"),
+                          "다른 계정의 비밀번호로는 로그인할 수 없어야 한다.")
+        self.assertIsNone(self.store.authenticate("", "viewer-password-123"))
+
+    def test_username_match_is_case_insensitive(self):
+        self.store.bootstrap()
+        self.store.add("Viewer1", "viewer", "viewer-password-123")
+        self.assertEqual(self.store.authenticate("viewer1", "viewer-password-123")["username"],
+                         "Viewer1")
 
     def test_disabled_user_cannot_login(self):
         self.store.bootstrap()
         self.store.add("viewer1", "viewer", "viewer-password-123")
-        self.assertIsNotNone(self.store.authenticate("viewer-password-123"))
+        self.assertIsNotNone(self.store.authenticate("viewer1", "viewer-password-123"))
         self.store.update("viewer1", enabled=False)
-        self.assertIsNone(self.store.authenticate("viewer-password-123"))
+        self.assertIsNone(self.store.authenticate("viewer1", "viewer-password-123"))
 
     def test_cannot_remove_last_admin(self):
         self.store.bootstrap()

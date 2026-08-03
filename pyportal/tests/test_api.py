@@ -73,9 +73,9 @@ class ServerCase(unittest.TestCase):
         raise AssertionError("초기 비밀번호 파일에 password 줄이 없습니다.")
 
     @classmethod
-    def _login(cls, password):
+    def _login(cls, password, username="admin"):
         code, payload, _ = request(cls.url + "/api/settings/session", "POST",
-                                   {"password": password})
+                                   {"username": username, "password": password})
         assert code == 200, payload
         return payload["token"]
 
@@ -340,7 +340,7 @@ class SettingsApiTest(ServerCase):
         self.assertEqual(len(payload["users"]), 2)
 
         # viewer 로 로그인하면 바로가기는 되지만 관리자 영역은 막힌다.
-        viewer_token = self._login("viewer-password-1")
+        viewer_token = self._login("viewer-password-1", "viewer1")
         code, _, _ = request(self.url + "/api/settings/users", "POST",
                              {"username": "x", "role": "viewer", "password": "another-pass-1"},
                              {"X-Settings-Token": viewer_token})
@@ -360,7 +360,7 @@ class SettingsApiTest(ServerCase):
     def test_password_change_invalidates_session(self):
         request(self.url + "/api/settings/users", "POST",
                 {"username": "temp1", "role": "viewer", "password": "temp-password-1"}, self.auth())
-        token = self._login("temp-password-1")
+        token = self._login("temp-password-1", "temp1")
         self.assertEqual(request(self.url + "/api/settings", headers={"X-Settings-Token": token})[0], 200)
         request(self.url + "/api/settings/users/temp1/password", "POST",
                 {"password": "temp-password-2"}, self.auth())
@@ -462,13 +462,149 @@ class NotifyAndAuditTest(ServerCase):
         request(self.url + "/api/settings/users", "POST",
                 {"username": "auditviewer", "role": "viewer", "password": "viewer-password-1"},
                 self.auth())
-        token = self._login("viewer-password-1")
+        token = self._login("viewer-password-1", "auditviewer")
         self.assertEqual(request(self.url + "/api/settings/audit",
                                  headers={"X-Settings-Token": token})[0], 403)
         request(self.url + "/api/settings/users/auditviewer", "DELETE", None, self.auth())
 
     def test_audit_is_anonymous_denied(self):
         self.assertEqual(request(self.url + "/api/settings/audit")[0], 401)
+
+
+class LoginTest(ServerCase):
+    """v2.216 — 로그인이 사용자명 + 비밀번호를 받는다."""
+
+    def test_password_alone_is_rejected(self):
+        code, _, _ = request(self.url + "/api/settings/session", "POST",
+                             {"password": self.password})
+        self.assertEqual(code, 401, "비밀번호만으로 로그인되면 비밀번호가 곧 계정 식별자가 된다.")
+
+    def test_wrong_username_is_rejected(self):
+        code, _, _ = request(self.url + "/api/settings/session", "POST",
+                             {"username": "nosuchuser", "password": self.password})
+        self.assertEqual(code, 401)
+
+    def test_error_message_does_not_reveal_which_field_was_wrong(self):
+        _, bad_user, _ = request(self.url + "/api/settings/session", "POST",
+                                 {"username": "nosuchuser", "password": self.password})
+        _, bad_pass, _ = request(self.url + "/api/settings/session", "POST",
+                                 {"username": "admin", "password": "definitely-wrong-1"})
+        self.assertEqual(bad_user["error"], bad_pass["error"],
+                         "구분해서 알려 주면 어떤 사용자명이 존재하는지 드러난다.")
+
+
+class CategoryApiTest(ServerCase):
+    def test_meta_serves_editable_categories(self):
+        _, payload, _ = request(self.url + "/api/meta")
+        ids = [cat["id"] for cat in payload["categories"]]
+        self.assertIn("custom", ids)
+        self.assertIn("color", payload["categories"][0])
+
+    def test_create_update_and_move(self):
+        code, payload, _ = request(self.url + "/api/settings/categories", "POST",
+                                   {"label": "가상화 & 클라우드", "id": "virt", "color": "cyan"},
+                                   self.auth())
+        self.assertEqual(code, 201)
+        self.assertEqual(payload["category"]["color"], "cyan")
+
+        _, payload, _ = request(self.url + "/api/settings/categories/virt", "PUT",
+                                {"label": "가상화", "color": "rose"}, self.auth())
+        self.assertEqual(payload["category"]["label"], "가상화")
+
+        _, payload, _ = request(self.url + "/api/settings/categories/virt/move", "POST",
+                                {"direction": "up"}, self.auth())
+        self.assertTrue(payload["moved"])
+        request(self.url + "/api/settings/categories/virt", "DELETE", None, self.auth())
+
+    def test_delete_moves_shortcuts_to_default(self):
+        request(self.url + "/api/settings/categories", "POST",
+                {"label": "임시분류", "id": "temp"}, self.auth())
+        _, created, _ = request(self.url + "/api/shortcuts", "POST",
+                                {"name": "임시 링크", "url": "temp.internal.dc",
+                                 "category": "temp"}, self.auth())
+        self.assertEqual(created["shortcut"]["category"], "temp")
+
+        _, payload, _ = request(self.url + "/api/settings/categories/temp", "DELETE",
+                                None, self.auth())
+        self.assertEqual(payload["movedShortcuts"], 1)
+        moved = next(sc for sc in payload["shortcuts"] if sc["id"] == created["shortcut"]["id"])
+        self.assertEqual(moved["category"], "custom",
+                         "분류만 사라지고 바로가기는 남아야 한다.")
+        request(self.url + "/api/shortcuts/" + moved["id"], "DELETE", None, self.auth())
+
+    def test_default_category_cannot_be_deleted(self):
+        code, _, _ = request(self.url + "/api/settings/categories/custom", "DELETE",
+                             None, self.auth())
+        self.assertEqual(code, 400)
+
+    def test_unknown_category_on_shortcut_falls_back(self):
+        _, payload, _ = request(self.url + "/api/shortcuts", "POST",
+                                {"name": "분류 없는 링크", "url": "nocat.internal.dc",
+                                 "category": "존재하지않음"}, self.auth())
+        self.assertEqual(payload["shortcut"]["category"], "custom")
+        request(self.url + "/api/shortcuts/" + payload["shortcut"]["id"], "DELETE",
+                None, self.auth())
+
+    def test_category_write_requires_admin(self):
+        self.assertEqual(request(self.url + "/api/settings/categories", "POST",
+                                 {"label": "x"})[0], 401)
+
+
+class CsvApiTest(ServerCase):
+    def test_export_is_csv_attachment(self):
+        code, payload, headers = request(self.url + "/api/export/csv", headers=self.auth())
+        self.assertEqual(code, 200)
+        self.assertIn("text/csv", headers["Content-Type"])
+        self.assertIn(".csv", headers["Content-Disposition"])
+        self.assertIn("name,url,category", payload["raw"])
+
+    def test_export_requires_session(self):
+        self.assertEqual(request(self.url + "/api/export/csv")[0], 401)
+
+    def test_import_appends_and_skips_duplicates(self):
+        csv_text = ("name,url,category\n"
+                    "CSV 링크 A,https://csv-a.internal.dc/,monitoring\n"
+                    "CSV 링크 B,https://csv-b.internal.dc/,custom\n")
+        _, before, _ = request(self.url + "/api/shortcuts")
+        code, payload, _ = request(self.url + "/api/import/csv", "POST",
+                                   {"csv": csv_text}, self.auth())
+        self.assertEqual(code, 200)
+        self.assertEqual(payload["added"], 2)
+        self.assertEqual(len(payload["shortcuts"]), len(before["shortcuts"]) + 2)
+
+        # 같은 파일을 다시 올려도 목록이 두 배가 되면 안 된다.
+        _, again, _ = request(self.url + "/api/import/csv", "POST",
+                              {"csv": csv_text}, self.auth())
+        self.assertEqual(again["added"], 0)
+        self.assertEqual(again["skipped"], 2)
+
+        for shortcut in again["shortcuts"]:
+            if shortcut["url"].startswith("https://csv-"):
+                request(self.url + "/api/shortcuts/" + shortcut["id"], "DELETE", None, self.auth())
+
+    def test_import_rejects_rows_without_name_or_url(self):
+        code, _, _ = request(self.url + "/api/import/csv", "POST",
+                             {"csv": "name,url\n,\n"}, self.auth())
+        self.assertEqual(code, 400)
+
+    def test_import_requires_session(self):
+        self.assertEqual(request(self.url + "/api/import/csv", "POST",
+                                 {"csv": "name,url\nA,https://a.internal/\n"})[0], 401)
+
+
+class HealthMethodTest(ServerCase):
+    def test_default_method_is_port(self):
+        _, payload, _ = request(self.url + "/api/settings", headers=self.auth())
+        self.assertEqual(payload["settings"]["health"]["method"], "port")
+
+    def test_method_can_be_switched_and_is_whitelisted(self):
+        _, payload, _ = request(self.url + "/api/settings/health", "PUT",
+                                {"autoEnabled": True, "intervalMinutes": 5, "method": "http"},
+                                self.auth())
+        self.assertEqual(payload["value"]["method"], "http")
+        _, payload, _ = request(self.url + "/api/settings/health", "PUT",
+                                {"method": "telnet"}, self.auth())
+        self.assertEqual(payload["value"]["method"], "port", "허용 목록 밖은 기본값으로")
 
 
 class KeepAliveTest(ServerCase):

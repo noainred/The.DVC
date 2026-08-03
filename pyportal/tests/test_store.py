@@ -38,7 +38,7 @@ class StoreTest(unittest.TestCase):
         self.assertEqual(created["name"], "사내 위키")
         self.assertEqual(created["url"], "https://wiki.internal.dc/home")
         self.assertEqual(created["tags"], ["Docs", "Wiki"])       # 중복 제거
-        self.assertEqual(created["category"], "Custom Shortcuts")  # 미지의 분류는 기본값으로
+        self.assertEqual(created["category"], "custom")  # 미지의 분류는 기본값으로
         self.assertTrue(created["createdViaSettings"])
 
         # 새 항목이 목록 맨 앞에 오고 파일에도 반영된다.
