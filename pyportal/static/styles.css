@@ -231,13 +231,16 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
 }
 .badge-user { background: rgba(251, 191, 36, 0.1); color: var(--amber); border-color: rgba(251, 191, 36, 0.25); }
 .badge-dc { background: rgba(148, 163, 184, 0.1); color: var(--muted); border-color: rgba(148, 163, 184, 0.2); }
-.cat-monitoring { background: rgba(52, 211, 153, 0.1); color: var(--emerald); border-color: rgba(52, 211, 153, 0.25); }
-.cat-infra { background: rgba(59, 130, 246, 0.1); color: #93c5fd; border-color: rgba(59, 130, 246, 0.25); }
-.cat-network { background: rgba(34, 211, 238, 0.1); color: var(--cyan); border-color: rgba(34, 211, 238, 0.25); }
-.cat-security { background: rgba(251, 191, 36, 0.1); color: var(--amber); border-color: rgba(251, 191, 36, 0.25); }
-.cat-incident { background: rgba(251, 113, 133, 0.1); color: var(--rose); border-color: rgba(251, 113, 133, 0.25); }
-.cat-storage { background: rgba(167, 139, 250, 0.1); color: var(--violet); border-color: rgba(167, 139, 250, 0.25); }
-.cat-custom { background: rgba(129, 140, 248, 0.1); color: #a5b4fc; border-color: rgba(129, 140, 248, 0.25); }
+/* 카테고리 배지 색 — 카테고리는 설정에서 만들 수 있으므로(v2.216) 클래스는 '이름'이 아니라
+   '고른 색'에 붙는다. CSP 가 인라인 style 을 막으므로 임의 색상 문자열은 쓸 수 없다. */
+.cat-emerald { background: rgba(52, 211, 153, 0.1); color: var(--emerald); border-color: rgba(52, 211, 153, 0.25); }
+.cat-blue { background: rgba(59, 130, 246, 0.1); color: #93c5fd; border-color: rgba(59, 130, 246, 0.25); }
+.cat-cyan { background: rgba(34, 211, 238, 0.1); color: var(--cyan); border-color: rgba(34, 211, 238, 0.25); }
+.cat-amber { background: rgba(251, 191, 36, 0.1); color: var(--amber); border-color: rgba(251, 191, 36, 0.25); }
+.cat-rose { background: rgba(251, 113, 133, 0.1); color: var(--rose); border-color: rgba(251, 113, 133, 0.25); }
+.cat-violet { background: rgba(167, 139, 250, 0.1); color: var(--violet); border-color: rgba(167, 139, 250, 0.25); }
+.cat-indigo { background: rgba(129, 140, 248, 0.1); color: #a5b4fc; border-color: rgba(129, 140, 248, 0.25); }
+.cat-slate { background: rgba(148, 163, 184, 0.12); color: #cbd5e1; border-color: rgba(148, 163, 184, 0.28); }
 
 .sc-name { font-size: 13px; font-weight: 700; color: #f1f5f9; word-break: break-all; }
 .sc-actions { display: flex; gap: 2px; flex: none; }

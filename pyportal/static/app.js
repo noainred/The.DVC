@@ -11,25 +11,24 @@
   var HUB_TOKEN_KEY = "hub_token";
   var SETTINGS_TOKEN_KEY = "hub_settings_token";
   var TABS = ["dashboard", "datacenters", "health", "settings"];
-  var SETTINGS_PANES = ["shortcuts", "datacenters", "users", "backup", "alerts"];
+  var SETTINGS_PANES = ["shortcuts", "datacenters", "categories", "users", "backup", "alerts"];
 
   var SETTINGS_META = {
     shortcuts: { title: "바로가기 관리", desc: "이름과 URL만 입력하면 대시보드에 바로가기가 생성됩니다." },
+    categories: { title: "카테고리 구성", desc: "바로가기 분류를 직접 만들고 이름·색상·순서를 정합니다. 대시보드 필터 칩에 즉시 반영됩니다." },
     datacenters: { title: "데이터센터 구성", desc: "사이트 목록·좌표·랙 수·상태를 직접 관리합니다. 지도와 통계에 즉시 반영됩니다." },
     users: { title: "사용자 구성 및 설정", desc: "설정 화면에 들어올 수 있는 계정과 역할을 관리합니다." },
     backup: { title: "현재 설정 백업", desc: "설정 파일 스냅샷을 만들고, 주기와 보관 수량을 정합니다." },
     alerts: { title: "알림 & 감사 로그", desc: "링크가 정상↔장애로 바뀔 때만 웹훅으로 알리고, 설정 변경 이력을 확인합니다." }
   };
 
-  var CATEGORY_CLASS = {
-    "Monitoring & Metrics": "cat-monitoring",
-    "Infrastructure & DCIM": "cat-infra",
-    "Network & Traffic": "cat-network",
-    "Security & IAM": "cat-security",
-    "Incidents & Operations": "cat-incident",
-    "Storage & Backup": "cat-storage",
-    "Custom Shortcuts": "cat-custom"
+  // 카테고리 색상 팔레트(서버 catstore.COLORS 와 같은 목록). 카테고리는 설정에서
+  // 만들 수 있으므로 배지 클래스는 이름이 아니라 '고른 색'으로 정해진다.
+  var COLOR_LABEL = {
+    emerald: "초록", blue: "파랑", cyan: "청록", amber: "노랑",
+    rose: "빨강", violet: "보라", indigo: "남색", slate: "회색"
   };
+  var DEFAULT_CATEGORY_ID = "custom";
 
   var REGION_COLOR = { APAC: "#38bdf8", EMEA: "#34d399", AMER: "#a78bfa", LATAM: "#fbbf24" };
   var HEALTH_LABEL = { healthy: "정상", warning: "확인 필요", unreachable: "응답 없음", blocked: "차단됨" };
@@ -65,6 +64,7 @@
     auditDenied: false,
     editingId: null,
     editingDcId: null,
+    editingCatId: null,
     busy: false,
     pendingPane: null
   };
@@ -208,10 +208,13 @@
   }
 
   function submitLogin() {
+    var username = $("login-user").value.trim();
     var password = $("login-input").value;
+    if (!username) { setMsg("login-msg", "사용자명을 입력하세요.", "err"); return; }
     if (!password) { setMsg("login-msg", "비밀번호를 입력하세요.", "err"); return; }
     $("login-submit").disabled = true;
-    api("/api/settings/session", { method: "POST", body: { password: password }, quiet: true })
+    api("/api/settings/session",
+        { method: "POST", body: { username: username, password: password }, quiet: true })
       .then(function (data) {
         window.localStorage.setItem(SETTINGS_TOKEN_KEY, data.token);
         state.session = data.user;
@@ -247,11 +250,21 @@
 
   /* ---------------- 공통 계산 ---------------- */
 
-  function categoryLabel(key) {
+  function categoryOf(id) {
     for (var i = 0; i < state.categories.length; i += 1) {
-      if (state.categories[i].key === key) return state.categories[i].label;
+      if (state.categories[i].id === id) return state.categories[i];
     }
-    return key;
+    return null;
+  }
+
+  function categoryLabel(id) {
+    var cat = categoryOf(id);
+    return cat ? cat.label : id;
+  }
+
+  function categoryClass(id) {
+    var cat = categoryOf(id);
+    return "cat-" + ((cat && COLOR_LABEL[cat.color]) ? cat.color : "slate");
   }
 
   function dcPool() {
@@ -304,7 +317,7 @@
     var dc = sc.datacenterId && sc.datacenterId !== "all" ? dcById(sc.datacenterId) : null;
 
     var badges = [el("span", {
-      className: "badge " + (CATEGORY_CLASS[sc.category] || "cat-custom"),
+      className: "badge " + categoryClass(sc.category),
       text: categoryLabel(sc.category)
     })];
     if (dc) badges.push(el("span", { className: "badge badge-dc", text: dc.code }));
@@ -367,12 +380,12 @@
 
     var pills = $("category-pills");
     clear(pills);
-    [{ key: "ALL", label: "전체 서비스" }].concat(state.categories).forEach(function (entry) {
-      var count = entry.key === "ALL" ? state.shortcuts.length
-        : state.shortcuts.filter(function (sc) { return sc.category === entry.key; }).length;
+    [{ id: "ALL", label: "전체 서비스" }].concat(state.categories).forEach(function (entry) {
+      var count = entry.id === "ALL" ? state.shortcuts.length
+        : state.shortcuts.filter(function (sc) { return sc.category === entry.id; }).length;
       pills.appendChild(el("button", {
-        className: "pill" + (state.category === entry.key ? " active" : ""), type: "button",
-        on: { click: function () { state.category = entry.key; renderDashboard(); } }
+        className: "pill" + (state.category === entry.id ? " active" : ""), type: "button",
+        on: { click: function () { state.category = entry.id; renderDashboard(); } }
       }, [el("span", { text: entry.label }), el("span", { className: "pill-count", text: String(count) })]));
     });
 
@@ -755,7 +768,8 @@
         el("td", { className: "url", text: row.url, title: row.url }),
         el("td", {}, [el("span", { className: "sc-health h-" + row.status,
                                    text: HEALTH_LABEL[row.status] || row.status })]),
-        el("td", { text: row.statusCode ? String(row.statusCode) : "-" }),
+        el("td", { text: row.statusCode ? String(row.statusCode)
+                         : (row.port ? ":" + row.port : "-") }),
         el("td", { text: row.latencyMs != null ? row.latencyMs + "ms" : "-" }),
         el("td", { className: "muted", text: row.message || "" })
       ]));
@@ -848,6 +862,9 @@
     }).then(function (data) {
       state.backups = data.backups || [];
       state.backupStatus = data.status || state.backupStatus;
+      return api("/api/settings/categories");
+    }).then(function (data) {
+      state.categories = data.categories || state.categories;
       return api("/api/settings/datacenters");
     }).then(function (data) {
       // 편집 목록은 표시 개수와 무관하게 전체다.
@@ -865,6 +882,7 @@
     renderSettingsTabs();
     renderShortcutSettings();
     renderDcSettings();
+    renderCategorySettings();
     renderUserSettings();
     renderBackupSettings();
     renderAlertSettings();
@@ -877,9 +895,9 @@
     var keepCategory = categorySelect.value;
     clear(categorySelect);
     state.categories.forEach(function (cat) {
-      categorySelect.appendChild(el("option", { value: cat.key, text: cat.label }));
+      categorySelect.appendChild(el("option", { value: cat.id, text: cat.label }));
     });
-    categorySelect.value = keepCategory || "Custom Shortcuts";
+    categorySelect.value = keepCategory || DEFAULT_CATEGORY_ID;
 
     var dcSelect = $("f-datacenter");
     var keepDc = dcSelect.value;
@@ -901,7 +919,7 @@
   function resetForm() {
     state.editingId = null;
     $("shortcut-form").reset();
-    $("f-category").value = "Custom Shortcuts";
+    $("f-category").value = DEFAULT_CATEGORY_ID;
     $("f-datacenter").value = "all";
     $("form-title").textContent = "새 바로가기 등록";
     $("form-submit").textContent = "바로가기 생성";
@@ -945,7 +963,7 @@
           sc.isFavorite ? el("span", { className: "badge badge-user", text: "★" }) : null
         ]),
         el("td", { className: "url", text: sc.url, title: sc.url }),
-        el("td", {}, [el("span", { className: "badge " + (CATEGORY_CLASS[sc.category] || "cat-custom"),
+        el("td", {}, [el("span", { className: "badge " + categoryClass(sc.category),
                                    text: categoryLabel(sc.category) })]),
         el("td", {}, [el("div", { className: "row-actions" }, [
           // 대시보드는 이 표의 순서 그대로 그린다 — 자주 쓰는 링크를 위로 올릴 수 있게.
@@ -1231,6 +1249,7 @@
     $("b-keep").value = state.settings.backup.keep;
     $("h-enabled").checked = !!state.settings.health.autoEnabled;
     $("h-interval").value = String(state.settings.health.intervalMinutes);
+    $("h-method").value = state.settings.health.method || "port";
 
     $("backup-count").textContent = "(" + state.backups.length + "개)";
     var status = state.backupStatus || {};
@@ -1274,6 +1293,114 @@
       setMsg("backup-msg", "저장했습니다.", "ok");
       return loadSettings();
     }).catch(function (err) { setMsg("backup-msg", err.message, "err"); });
+  }
+
+  /* ---------------- 설정 2-b: 카테고리 ---------------- */
+
+  function resetCatForm() {
+    state.editingCatId = null;
+    $("cat-form").reset();
+    $("c-id").disabled = false;
+    $("cat-form-title").textContent = "카테고리 추가";
+    $("cat-form-submit").textContent = "카테고리 추가";
+    $("cat-form-cancel").hidden = true;
+    setMsg("cat-form-msg", "");
+  }
+
+  function startCatEdit(cat) {
+    state.editingCatId = cat.id;
+    $("c-label").value = cat.label;
+    $("c-id").value = cat.id;
+    $("c-id").disabled = true;          // id 는 바로가기가 참조하므로 고정
+    $("c-color").value = cat.color;
+    $("cat-form-title").textContent = "카테고리 수정";
+    $("cat-form-submit").textContent = "수정 저장";
+    $("cat-form-cancel").hidden = false;
+    setMsg("cat-form-msg", "");
+    $("c-label").focus();
+  }
+
+  function renderCategorySettings() {
+    var select = $("c-color");
+    if (select && !select.options.length) {
+      Object.keys(COLOR_LABEL).forEach(function (color) {
+        select.appendChild(el("option", { value: color, text: COLOR_LABEL[color] }));
+      });
+    }
+    $("cat-count").textContent = "(" + state.categories.length + "개)";
+
+    var body = $("cat-tbody");
+    if (!body) return;
+    clear(body);
+    state.categories.forEach(function (cat) {
+      var used = state.shortcuts.filter(function (sc) { return sc.category === cat.id; }).length;
+      var isDefault = cat.id === DEFAULT_CATEGORY_ID;
+      body.appendChild(el("tr", {}, [
+        el("td", {}, [el("span", { className: "badge " + categoryClass(cat.id), text: cat.label }),
+                      isDefault ? el("span", { className: "badge badge-dc", text: "기본" }) : null]),
+        el("td", { className: "url", text: cat.id }),
+        el("td", { text: used + "개" }),
+        el("td", {}, [el("div", { className: "row-actions" }, [
+          el("button", { className: "btn btn-ghost btn-sm", type: "button", text: "↑",
+                         attrs: { title: "위로" },
+                         on: { click: function () { moveCategory(cat, "up"); } } }),
+          el("button", { className: "btn btn-ghost btn-sm", type: "button", text: "↓",
+                         attrs: { title: "아래로" },
+                         on: { click: function () { moveCategory(cat, "down"); } } }),
+          el("button", { className: "btn btn-ghost btn-sm", type: "button", text: "수정",
+                         on: { click: function () { startCatEdit(cat); } } }),
+          isDefault ? null
+            : el("button", { className: "btn btn-danger btn-sm", type: "button", text: "삭제",
+                             on: { click: function () { deleteCategory(cat, used); } } })
+        ])])
+      ]));
+    });
+  }
+
+  function submitCatForm(event) {
+    event.preventDefault();
+    var payload = { label: $("c-label").value, color: $("c-color").value };
+    if (!state.editingCatId && $("c-id").value) payload.id = $("c-id").value;
+    if (!payload.label.trim()) { setMsg("cat-form-msg", "이름을 입력하세요.", "err"); return; }
+    var request = state.editingCatId
+      ? api("/api/settings/categories/" + encodeURIComponent(state.editingCatId),
+            { method: "PUT", body: payload })
+      : api("/api/settings/categories", { method: "POST", body: payload });
+    request.then(function (data) {
+      state.categories = data.categories;
+      resetCatForm();
+      fillFormSelects();
+      toast("카테고리를 저장했습니다.", "ok");
+      renderAll();
+    }).catch(function (err) { setMsg("cat-form-msg", err.message, "err"); });
+  }
+
+  function moveCategory(cat, direction) {
+    api("/api/settings/categories/" + encodeURIComponent(cat.id) + "/move",
+        { method: "POST", body: { direction: direction } })
+      .then(function (data) {
+        if (!data.moved) { toast(direction === "up" ? "이미 맨 위입니다." : "이미 맨 아래입니다."); return; }
+        state.categories = data.categories;
+        fillFormSelects();
+        renderAll();
+      })
+      .catch(function (err) { toast(err.message, "err"); });
+  }
+
+  function deleteCategory(cat, used) {
+    var warn = used ? "\n이 분류의 바로가기 " + used + "개는 기본 카테고리로 이동합니다." : "";
+    if (!window.confirm("'" + cat.label + "' 카테고리를 삭제할까요?" + warn)) return;
+    api("/api/settings/categories/" + encodeURIComponent(cat.id), { method: "DELETE" })
+      .then(function (data) {
+        state.categories = data.categories;
+        if (state.category === cat.id) state.category = "ALL";
+        if (state.editingCatId === cat.id) resetCatForm();
+        applyShortcuts(data.shortcuts);
+        fillFormSelects();
+        toast(data.movedShortcuts ? "삭제했습니다. 바로가기 " + data.movedShortcuts + "개를 옮겼습니다."
+                                  : "삭제했습니다.", "ok");
+      })
+      .catch(function (err) { toast(err.message, "err"); });
   }
 
   /* ---------------- 메인 포탈 상호 링크 ---------------- */
@@ -1373,7 +1500,8 @@
   function saveHealthSettings() {
     api("/api/settings/health", { method: "PUT", body: {
       autoEnabled: $("h-enabled").checked,
-      intervalMinutes: Number($("h-interval").value)
+      intervalMinutes: Number($("h-interval").value),
+      method: $("h-method").value
     } }).then(function (data) {
       state.settings = data.settings;
       setMsg("health-cfg-msg", "저장했습니다.", "ok");
@@ -1543,6 +1671,47 @@
     reader.readAsText(file);
   }
 
+  function exportCsv() {
+    // 링크로 열면 X-Settings-Token 이 실리지 않는다 — 받아서 Blob 으로 내려준다.
+    fetch("/api/export/csv", {
+      headers: { "X-Settings-Token": settingsToken(), "X-Hub-Token": hubToken() }
+    }).then(function (res) {
+      if (!res.ok) throw new Error("CSV 내보내기 실패 (HTTP " + res.status + ")");
+      return res.text();
+    }).then(function (text) {
+      var blob = new Blob([text], { type: "text/csv;charset=utf-8" });
+      var url = URL.createObjectURL(blob);
+      var anchor = el("a", { href: url, attrs: { download: "dc-service-shortcuts.csv" } });
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      URL.revokeObjectURL(url);
+      toast("CSV 파일로 내보냈습니다.", "ok");
+    }).catch(function (err) { toast(err.message, "err"); });
+  }
+
+  function importCsv(file) {
+    var reader = new FileReader();
+    reader.onload = function () {
+      var text = String(reader.result);
+      // 덮어쓰기는 되돌릴 수 없으므로 기본은 '추가'이고, 교체는 한 번 더 묻는다.
+      var replace = window.confirm(
+        "CSV 가져오기 방식을 선택하세요.\n\n" +
+        "[확인] 기존 목록을 CSV 내용으로 통째로 교체\n" +
+        "[취소] 기존 목록 뒤에 추가 (같은 URL 은 건너뜀)");
+      api("/api/import/csv", { method: "POST",
+                               body: { csv: text, mode: replace ? "replace" : "append" } })
+        .then(function (data) {
+          applyShortcuts(data.shortcuts);
+          toast(replace
+            ? data.shortcuts.length + "개로 교체했습니다."
+            : data.added + "개 추가" + (data.skipped ? " · " + data.skipped + "개 건너뜀" : ""), "ok");
+        })
+        .catch(function (err) { toast(err.message, "err"); });
+    };
+    reader.readAsText(file);
+  }
+
   /* ---------------- 라우팅 ---------------- */
 
   function navigate(tab) {
@@ -1647,6 +1816,13 @@
     $("btn-reset").addEventListener("click", resetShortcuts);
     $("btn-export").addEventListener("click", exportJson);
     $("btn-import").addEventListener("click", function () { $("import-file").click(); });
+    $("btn-export-csv").addEventListener("click", exportCsv);
+    $("btn-import-csv").addEventListener("click", function () { $("import-csv-file").click(); });
+    $("import-csv-file").addEventListener("change", function (event) {
+      var file = event.target.files && event.target.files[0];
+      if (file) importCsv(file);
+      event.target.value = "";
+    });
     $("import-file").addEventListener("change", function (event) {
       var file = event.target.files && event.target.files[0];
       if (file) importJson(file);
@@ -1656,6 +1832,21 @@
     $("dc-form").addEventListener("submit", submitDcForm);
     $("dc-limit-save").addEventListener("click", saveDcLimit);
     $("dc-form-cancel").addEventListener("click", resetDcForm);
+    $("cat-form").addEventListener("submit", submitCatForm);
+    $("cat-form-cancel").addEventListener("click", resetCatForm);
+    $("btn-cat-reset").addEventListener("click", function () {
+      if (!window.confirm("카테고리를 기본 7종으로 되돌릴까요?\n" +
+                          "기본 목록에 없는 분류의 바로가기는 기본 카테고리로 이동합니다.")) return;
+      api("/api/settings/categories/reset", { method: "POST", body: {} })
+        .then(function (data) {
+          state.categories = data.categories;
+          applyShortcuts(data.shortcuts);
+          resetCatForm();
+          fillFormSelects();
+          toast("기본 카테고리로 복원했습니다.", "ok");
+        })
+        .catch(function (err) { toast(err.message, "err"); });
+    });
     $("btn-dc-reset").addEventListener("click", function () {
       if (!window.confirm("데이터센터 목록을 기본값으로 되돌립니다. 계속할까요?")) return;
       api("/api/settings/datacenters/reset", { method: "POST", body: {} })

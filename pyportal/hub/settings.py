@@ -13,6 +13,7 @@ from .jsonfile import read_json, write_json
 # 백업 주기·점검 주기는 화면에서 고르는 값이라 허용 목록을 서버에서도 강제한다.
 BACKUP_INTERVAL_CHOICES = (30, 60, 180, 360, 720, 1440, 10080)          # 분
 HEALTH_INTERVAL_CHOICES = (1, 5, 10, 15, 30, 60, 180, 360, 720, 1440)   # 분
+HEALTH_METHODS = ("port", "http")                                       # 가동 판정 기준
 
 DEFAULTS = {
     "backup": {
@@ -23,6 +24,10 @@ DEFAULTS = {
     "health": {
         "autoEnabled": True,
         "intervalMinutes": 5,      # 5분 차트를 그리려면 최소 이 정도 해상도가 필요하다
+        # 가동 판정 기준. port = TCP 연결 성공 여부(기본), http = HTTP 상태코드.
+        # 사내 서비스는 로그인 리다이렉트·401/403 을 정상적으로 돌려주므로, HTTP 상태로
+        # 보면 살아 있는 서비스가 계속 '확인 필요'로 뜬다.
+        "method": "port",
     },
     "display": {
         # 화면(상단 칩·센터 현황·지도)에 표시할 데이터센터 수. 0 = 전체.
@@ -107,6 +112,8 @@ class SettingsStore:
                 "intervalMinutes": _clamp_choice(health.get("intervalMinutes"),
                                                  HEALTH_INTERVAL_CHOICES,
                                                  DEFAULTS["health"]["intervalMinutes"]),
+                "method": (health.get("method") if health.get("method") in HEALTH_METHODS
+                           else DEFAULTS["health"]["method"]),
             },
             "display": {
                 "datacenterLimit": _clamp_int(display.get("datacenterLimit"), 0, MAX_DC_LIMIT,

@@ -1,28 +1,94 @@
-"""등록된 바로가기 URL 의 응답 상태·지연을 점검한다.
+"""등록된 바로가기의 서비스 가동 여부·지연을 점검한다.
 
-주의점 두 가지:
-1. **SSRF** — 점검 대상은 사용자가 입력한 URL 이다. 보내기 전에 ssrf.resolve_and_check 로
+점검 방식은 두 가지이며 **기본은 포트 점검**이다(v2.216).
+
+- `port`(기본) — 대상 host:port 로 **TCP 연결이 되는지**만 본다. 사내 서비스는 로그인
+  리다이렉트·401·403 을 정상적으로 돌려주는 경우가 많아 HTTP 상태로 판정하면 살아 있는
+  서비스가 계속 '확인 필요'로 뜬다. "서비스가 떠 있는가"의 답은 **포트가 응답하는가**다.
+- `http` — 예전 방식(HTTP 요청 후 상태코드로 판정). 콘텐츠까지 확인하고 싶을 때 쓴다.
+
+두 방식 모두 지켜야 할 것:
+1. **SSRF** — 점검 대상은 사용자가 입력한 URL 이다. 접속 전에 ssrf.resolve_and_check 로
    해석된 주소를 검사한다.
-2. **리다이렉트 추적 금지** — 3xx 를 따라가면 SSRF 가드를 통과한 주소가 루프백으로
-   되돌려질 수 있다. 리다이렉트는 따라가지 않고 '3xx 응답' 자체를 결과로 보고한다.
+2. **리다이렉트 추적 금지**(http 모드) — 3xx 를 따라가면 SSRF 가드를 통과한 주소가
+   루프백으로 되돌려질 수 있다. 따라가지 않고 '3xx 응답' 자체를 결과로 보고한다.
+3. 포트 모드는 **연결만 하고 즉시 끊는다** — 바이트를 보내지 않으므로 대상 애플리케이션의
+   로그를 오염시키지 않고, TLS 핸드셰이크도 하지 않아 자체서명 인증서와 무관하다.
 """
 
 from __future__ import annotations
 
+import socket
 import ssl
 import time
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import urlsplit
 
 from .ssrf import ValidationError, normalize_url, resolve_and_check
 
 USER_AGENT = "GlobalDCServiceHub-HealthCheck/1.0"
 
-STATUS_HEALTHY = "healthy"      # 2xx/3xx
-STATUS_WARNING = "warning"      # 4xx/5xx — 살아 있으나 정상 응답 아님
+STATUS_HEALTHY = "healthy"      # 포트 응답 / HTTP 2xx·3xx
+STATUS_WARNING = "warning"      # HTTP 4xx·5xx — 살아 있으나 정상 응답 아님(http 모드 전용)
 STATUS_UNREACHABLE = "unreachable"
 STATUS_BLOCKED = "blocked"      # SSRF 가드 차단
+
+METHOD_PORT = "port"
+METHOD_HTTP = "http"
+DEFAULT_SCHEME_PORTS = {"http": 80, "https": 443}
+
+
+def target_port(url: str) -> int:
+    """URL 에서 점검할 TCP 포트. 명시 포트가 우선, 없으면 스킴 기본값."""
+    parts = urlsplit(url)
+    try:
+        if parts.port:
+            return parts.port
+    except ValueError:
+        pass                                    # 포트 자리가 숫자가 아니면 스킴 기본값
+    return DEFAULT_SCHEME_PORTS.get(parts.scheme, 443)
+
+
+def check_port(url: str, *, timeout: float = 4.0, allow_private: bool = True) -> dict:
+    """TCP 연결만으로 가동 여부를 본다. 연결되면 healthy, 거부/타임아웃이면 unreachable."""
+    started = time.monotonic()
+
+    def elapsed_ms() -> int:
+        return int((time.monotonic() - started) * 1000)
+
+    try:
+        target = normalize_url(url)
+    except ValidationError as exc:
+        return {"url": url, "status": STATUS_BLOCKED, "statusCode": 0,
+                "latencyMs": 0, "message": str(exc), "method": METHOD_PORT}
+
+    addresses, reason, kind = resolve_and_check(target, allow_private=allow_private)
+    if reason:
+        status = STATUS_BLOCKED if kind == "blocked" else STATUS_UNREACHABLE
+        return {"url": target, "status": status, "statusCode": 0, "latencyMs": elapsed_ms(),
+                "message": reason, "addresses": addresses, "method": METHOD_PORT}
+
+    host = urlsplit(target).hostname or ""
+    port = target_port(target)
+    try:
+        # 가드가 확인한 그 이름으로 연결한다. create_connection 이 주소군(IPv4/IPv6)을
+        # 알아서 고르고, 실패 시 다음 주소로 넘어간다.
+        with socket.create_connection((host, port), timeout=timeout):
+            pass                                # 연결 확인 즉시 종료 — 바이트를 보내지 않는다
+        return {"url": target, "status": STATUS_HEALTHY, "statusCode": 0,
+                "latencyMs": elapsed_ms(), "message": f"포트 {port} 응답",
+                "addresses": addresses, "port": port, "method": METHOD_PORT}
+    except (TimeoutError, socket.timeout):
+        return {"url": target, "status": STATUS_UNREACHABLE, "statusCode": 0,
+                "latencyMs": elapsed_ms(), "message": f"포트 {port} 응답 없음(시간 초과)",
+                "addresses": addresses, "port": port, "method": METHOD_PORT}
+    except OSError as exc:
+        return {"url": target, "status": STATUS_UNREACHABLE, "statusCode": 0,
+                "latencyMs": elapsed_ms(),
+                "message": f"포트 {port} 연결 실패({exc.strerror or exc})",
+                "addresses": addresses, "port": port, "method": METHOD_PORT}
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -103,8 +169,20 @@ def check_url(url: str, *, timeout: float = 4.0, tls_verify: bool = True,
                 "latencyMs": elapsed_ms(), "message": str(exc), "addresses": addresses}
 
 
+def check_one(url: str, *, method: str = METHOD_PORT, timeout: float = 4.0,
+              tls_verify: bool = True, allow_private: bool = True) -> dict:
+    """설정된 방식으로 1건 점검. 알 수 없는 값은 포트 점검으로 본다(안전한 기본값)."""
+    if method == METHOD_HTTP:
+        result = check_url(url, timeout=timeout, tls_verify=tls_verify,
+                           allow_private=allow_private)
+        result.setdefault("method", METHOD_HTTP)
+        return result
+    return check_port(url, timeout=timeout, allow_private=allow_private)
+
+
 def check_many(targets, *, timeout: float = 4.0, concurrency: int = 8,
-               tls_verify: bool = True, allow_private: bool = True) -> list:
+               tls_verify: bool = True, allow_private: bool = True,
+               method: str = METHOD_PORT) -> list:
     """[{id?, url}] 또는 [url] 목록을 동시 점검한다.
 
     동시 개수를 제한하는 이유는 28개 사이트 × 수십 링크를 한꺼번에 열면 순간
@@ -123,8 +201,8 @@ def check_many(targets, *, timeout: float = 4.0, concurrency: int = 8,
     workers = max(1, min(concurrency, len(normalized)))
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = [
-            pool.submit(check_url, url, timeout=timeout, tls_verify=tls_verify,
-                        allow_private=allow_private)
+            pool.submit(check_one, url, method=method, timeout=timeout,
+                        tls_verify=tls_verify, allow_private=allow_private)
             for _, url in normalized
         ]
         results = []

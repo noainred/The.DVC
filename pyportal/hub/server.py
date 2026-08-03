@@ -26,8 +26,9 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from .auth import AuthError
+from .catstore import COLORS as CATEGORY_COLORS, DEFAULT_CATEGORY_ID
+from . import csvio
 from .config import APP_NAME, STATIC_DIR, VERSION, config
-from .defaults import CATEGORIES
 from .history import RANGE_LABELS, RANGES
 from .settings import BACKUP_INTERVAL_CHOICES, HEALTH_INTERVAL_CHOICES
 from .ssrf import ValidationError
@@ -280,7 +281,7 @@ class HubHandler(BaseHTTPRequestHandler):
             "success": True,
             "app": APP_NAME,
             "version": VERSION,
-            "categories": CATEGORIES,
+            "categories": self.ctx.categories.all(),
             "regions": ["APAC", "EMEA", "AMER", "LATAM"],
             "datacenterCount": len(self.ctx.datacenters.visible(
                 self.ctx.settings.section("display").get("datacenterLimit", 0))),
@@ -386,13 +387,16 @@ class HubHandler(BaseHTTPRequestHandler):
             return self._error(HTTPStatus.TOO_MANY_REQUESTS,
                                f"로그인 시도가 많아 잠겼습니다. {remaining}초 후 다시 시도하세요.")
         payload = self._body_dict()
+        username = payload.get("username")
         password = payload.get("password")
-        user = self.ctx.users.authenticate(password if isinstance(password, str) else "")
+        user = self.ctx.users.authenticate(username if isinstance(username, str) else "",
+                                           password if isinstance(password, str) else "")
         if not user:
             self.ctx.sessions.note_failure(client)
             print(f"[auth] 설정 로그인 실패 (from {client})", flush=True)
             self._audit("login", actor="-", result="fail")
-            return self._error(HTTPStatus.UNAUTHORIZED, "비밀번호가 올바르지 않습니다.")
+            # 사용자명이 틀렸는지 비밀번호가 틀렸는지 구분해서 알리지 않는다(계정 열거 차단).
+            return self._error(HTTPStatus.UNAUTHORIZED, "사용자명 또는 비밀번호가 올바르지 않습니다.")
         self.ctx.sessions.note_success(client)
         session = self.ctx.sessions.create(user)
         print(f"[auth] 설정 로그인: {user['username']}", flush=True)
@@ -581,6 +585,67 @@ class HubHandler(BaseHTTPRequestHandler):
             raise ValidationError("direction 은 up 또는 down 이어야 합니다.")
         return 1 if direction == "down" else -1
 
+    # ---- 카테고리 ----
+
+    def api_cat_list(self):
+        if not self._require_session():
+            return None
+        return self._json({"success": True, "categories": self.ctx.categories.all(),
+                           "colors": list(CATEGORY_COLORS),
+                           "defaultId": DEFAULT_CATEGORY_ID})
+
+    def api_cat_create(self):
+        actor = self._require_admin()
+        if not actor:
+            return None
+        created = self.ctx.categories.add(self._body_dict())
+        self._audit("category.create", actor=actor["username"], detail={"id": created["id"]})
+        return self._json({"success": True, "category": created,
+                           "categories": self.ctx.categories.all()}, status=HTTPStatus.CREATED)
+
+    def api_cat_update(self, cat_id):
+        if not self._require_admin():
+            return None
+        updated = self.ctx.categories.update(cat_id, self._body_dict())
+        if not updated:
+            return self._error(HTTPStatus.NOT_FOUND, "카테고리를 찾을 수 없습니다.")
+        return self._json({"success": True, "category": updated,
+                           "categories": self.ctx.categories.all()})
+
+    def api_cat_delete(self, cat_id):
+        actor = self._require_admin()
+        if not actor:
+            return None
+        if not self.ctx.categories.delete(cat_id):
+            return self._error(HTTPStatus.NOT_FOUND, "카테고리를 찾을 수 없습니다.")
+        # 그 카테고리를 쓰던 바로가기는 사라지면 안 된다 — 기본 카테고리로 옮긴다.
+        moved = self.ctx.shortcuts.reassign_category(cat_id, DEFAULT_CATEGORY_ID)
+        self._audit("category.delete", actor=actor["username"],
+                    detail={"id": cat_id, "movedShortcuts": moved})
+        return self._json({"success": True, "categories": self.ctx.categories.all(),
+                           "shortcuts": self.ctx.shortcuts.all(), "movedShortcuts": moved})
+
+    def api_cat_move(self, cat_id):
+        if not self._require_admin():
+            return None
+        items = self.ctx.categories.move(cat_id, self._move_delta())
+        if items is None:
+            return self._json({"success": True, "moved": False,
+                               "categories": self.ctx.categories.all()})
+        return self._json({"success": True, "moved": True, "categories": items})
+
+    def api_cat_reset(self):
+        actor = self._require_admin()
+        if not actor:
+            return None
+        categories = self.ctx.categories.reset()
+        # 복원된 목록에 없는 카테고리를 참조하던 바로가기를 정리한다.
+        self.ctx.shortcuts.reassign_missing({cat["id"] for cat in categories},
+                                            DEFAULT_CATEGORY_ID)
+        self._audit("category.reset", actor=actor["username"])
+        return self._json({"success": True, "categories": categories,
+                           "shortcuts": self.ctx.shortcuts.all()})
+
     # ---- 백업 ----
 
     def api_backup_list(self):
@@ -693,6 +758,37 @@ class HubHandler(BaseHTTPRequestHandler):
             "Content-Disposition": 'attachment; filename="dc-service-shortcuts.json"',
         })
 
+    def api_export_csv(self):
+        """엑셀에서 바로 열 수 있는 CSV. 백업 용도로도 쓴다."""
+        if not self._require_session():
+            return None
+        body = csvio.export_csv(self.ctx.shortcuts.all()).encode("utf-8")
+        return self._send(HTTPStatus.OK, body, "text/csv; charset=utf-8", {
+            "Content-Disposition": 'attachment; filename="dc-service-shortcuts.csv"',
+        })
+
+    def api_import_csv(self):
+        """CSV 가져오기. mode=append(기본)면 뒤에 덧붙이고, replace 면 통째로 교체한다."""
+        user = self._require_session()
+        if not user:
+            return None
+        payload = self._body_dict()
+        entries = csvio.parse_csv(payload.get("csv"))
+        if not entries:
+            return self._error(HTTPStatus.BAD_REQUEST,
+                               "가져올 수 있는 행이 없습니다(name·url 열을 확인하세요).")
+        replace = str(payload.get("mode", "append")).lower() == "replace"
+        if replace:
+            shortcuts = self.ctx.shortcuts.replace_all(entries)
+            added, skipped = len(shortcuts), 0
+        else:
+            shortcuts, added, skipped = self.ctx.shortcuts.append_many(entries)
+        self._audit("shortcuts.import", actor=user["username"],
+                    detail={"mode": "replace" if replace else "append",
+                            "rows": len(entries), "added": added, "skipped": skipped})
+        return self._json({"success": True, "shortcuts": shortcuts,
+                           "added": added, "skipped": skipped, "rows": len(entries)})
+
     # ---------- 정적 파일 ----------
 
     def _serve_static(self, path: str) -> None:
@@ -774,6 +870,13 @@ ROUTES = [
     ("PUT", _route(r"/api/settings/datacenters/" + ID_PATTERN), HubHandler.api_dc_update),
     ("DELETE", _route(r"/api/settings/datacenters/" + ID_PATTERN), HubHandler.api_dc_delete),
 
+    ("GET", _route(r"/api/settings/categories"), HubHandler.api_cat_list),
+    ("POST", _route(r"/api/settings/categories/reset"), HubHandler.api_cat_reset),
+    ("POST", _route(r"/api/settings/categories/" + ID_PATTERN + r"/move"), HubHandler.api_cat_move),
+    ("POST", _route(r"/api/settings/categories"), HubHandler.api_cat_create),
+    ("PUT", _route(r"/api/settings/categories/" + ID_PATTERN), HubHandler.api_cat_update),
+    ("DELETE", _route(r"/api/settings/categories/" + ID_PATTERN), HubHandler.api_cat_delete),
+
     ("GET", _route(r"/api/settings/backups"), HubHandler.api_backup_list),
     ("POST", _route(r"/api/settings/backups"), HubHandler.api_backup_create),
     ("POST", _route(r"/api/settings/backups/" + NAME_PATTERN + r"/restore"),
@@ -787,7 +890,9 @@ ROUTES = [
     ("PUT", _route(r"/api/shortcuts/" + ID_PATTERN), HubHandler.api_shortcut_update),
     ("DELETE", _route(r"/api/shortcuts/" + ID_PATTERN), HubHandler.api_shortcut_delete),
     ("POST", _route(r"/api/import"), HubHandler.api_shortcut_import),
+    ("POST", _route(r"/api/import/csv"), HubHandler.api_import_csv),
     ("GET", _route(r"/api/export"), HubHandler.api_export),
+    ("GET", _route(r"/api/export/csv"), HubHandler.api_export_csv),
 ]
 
 

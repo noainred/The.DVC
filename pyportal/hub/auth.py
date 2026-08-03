@@ -4,11 +4,12 @@
 - **첫 기동 시 임의 비밀번호를 생성**해 서버 디렉터리에 `initial-settings-password.txt`
   (0600)로 남긴다. 서버에 들어갈 수 있는 사람만 읽을 수 있으므로 '아는 사람만 설정 진입'이
   성립한다. 비밀번호를 바꾸면 그 파일을 삭제한다(낡은 비밀번호가 유효한 것처럼 남지 않게).
-- 로그인은 **비밀번호만** 입력받는다(요청 사양). 입력값을 활성 계정들의 해시와 대조해
-  일치하는 계정으로 로그인한다. 그래서 계정끼리 **같은 비밀번호를 못 쓰게** 막는다.
+- 로그인은 **사용자명 + 비밀번호**를 받는다(v2.216). 이전에는 비밀번호만 받아 일치하는 계정을
+  찾았는데, 그러면 **비밀번호가 곧 계정 식별자**가 되어 ① 계정끼리 같은 비밀번호를 못 쓰고
+  ② 한 번 새어 나간 비밀번호로 '누구인지'까지 드러나며 ③ 계정별 잠금을 걸 수 없다.
 - 해시는 pbkdf2_hmac(sha256) — 표준 라이브러리만으로 가능한 범위에서 반복 횟수를 높게 잡는다.
-- 무차별 대입에는 **전역 실패 카운터 + 잠금**을 건다(계정을 특정하지 않는 로그인이라 계정별
-  잠금은 의미가 없다).
+- 무차별 대입에는 **출발지(IP)별 실패 카운터 + 잠금**을 건다(`SessionStore`).
+  사용자명이 틀렸는지 비밀번호가 틀렸는지는 **구분해서 알려 주지 않는다**(계정 열거 차단).
 """
 
 from __future__ import annotations
@@ -176,15 +177,24 @@ class UserStore:
                     return user
         return None
 
-    def authenticate(self, password: str):
-        """비밀번호만으로 계정을 찾는다. 일치하는 활성 계정이 없으면 None."""
+    def authenticate(self, username: str, password: str):
+        """사용자명 + 비밀번호 대조. 실패 사유(없는 계정/중지/비밀번호 불일치)는 구분하지 않는다.
+
+        구분해서 알려 주면 '어떤 사용자명이 존재하는지'가 드러나 계정 열거가 된다.
+        """
+        name = str(username or "").strip()
+        if not name or not isinstance(password, str) or not password:
+            return None
         with self._lock:
             for user in self._load():
-                if not user["enabled"] or not user["password"]:
+                if user["username"].lower() != name.lower():
                     continue
+                if not user["enabled"] or not user["password"]:
+                    return None
                 if verify_password(user["password"], password):
                     return {"username": user["username"], "role": user["role"],
                             "tokenVersion": user["tokenVersion"]}
+                return None
         return None
 
     def token_version(self, username: str):
@@ -206,14 +216,6 @@ class UserStore:
                     self._save()
                     return
 
-    def _password_in_use(self, password: str, *, exclude=None) -> bool:
-        for user in self._load():
-            if exclude and user["username"] == exclude:
-                continue
-            if user["password"] and verify_password(user["password"], password):
-                return True
-        return False
-
     # ---------- 변경 ----------
 
     def add(self, username: str, role: str, password: str):
@@ -227,9 +229,6 @@ class UserStore:
             if any(u["username"].lower() == username.lower() for u in users):
                 raise AuthError("이미 존재하는 사용자명입니다.")
             record = hash_password(password)
-            if self._password_in_use(password):
-                # 비밀번호만으로 로그인하므로 중복을 허용하면 누구로 로그인되는지 불확실해진다.
-                raise AuthError("다른 계정이 이미 쓰는 비밀번호입니다. 다른 값을 사용하세요.")
             users.append({
                 "username": username, "role": role, "enabled": True,
                 "password": record, "tokenVersion": 1,
@@ -268,8 +267,6 @@ class UserStore:
             if not target:
                 raise AuthError("사용자를 찾을 수 없습니다.")
             record = hash_password(password)
-            if self._password_in_use(password, exclude=username):
-                raise AuthError("다른 계정이 이미 쓰는 비밀번호입니다. 다른 값을 사용하세요.")
             target["password"] = record
             target["tokenVersion"] = int(target["tokenVersion"]) + 1   # 기존 토큰 즉시 무효
             target["updatedAt"] = now_iso()

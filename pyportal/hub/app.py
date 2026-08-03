@@ -12,6 +12,7 @@ from . import health as health_mod
 from .audit import AuditLog
 from .auth import SessionStore, UserStore
 from .backup import BackupService
+from .catstore import CategoryStore
 from .notify import Notifier
 from .config import config
 from .dcstore import DatacenterStore
@@ -28,8 +29,10 @@ class AppContext:
 
         self.settings = SettingsStore(base / "settings.json")
         self.datacenters = DatacenterStore(base / "datacenters.json")
+        self.categories = CategoryStore(base / "categories.json")
         self.shortcuts = ShortcutStore(base / "shortcuts.json",
-                                       datacenter_ids=self.datacenters.ids)
+                                       datacenter_ids=self.datacenters.ids,
+                                       resolve_category=self.categories.resolve)
         self.users = UserStore(base / "users.json", base / "initial-settings-password.txt")
         self.sessions = SessionStore(config.session_ttl_min * 60, config.login_max_fails,
                                      config.login_lockout_sec,
@@ -40,6 +43,7 @@ class AppContext:
         self.backups = BackupService(base / "backups", {
             "shortcuts": base / "shortcuts.json",
             "datacenters": base / "datacenters.json",
+            "categories": base / "categories.json",
             "users": base / "users.json",
             "settings": base / "settings.json",
         }, self.settings)
@@ -67,6 +71,7 @@ class AppContext:
         self.shortcuts._loaded = False       # noqa: SLF001 — 같은 패키지 내부 재적재
         self.shortcuts._items = []           # noqa: SLF001
         self.datacenters._items = None       # noqa: SLF001
+        self.categories._items = None        # noqa: SLF001
         self.users._users = None             # noqa: SLF001
         self.settings._data = None           # noqa: SLF001
 
@@ -92,6 +97,8 @@ class AppContext:
             concurrency=config.health_concurrency,
             tls_verify=config.health_tls_verify,
             allow_private=config.health_allow_private,
+            # 판정 기준은 설정에서 바꿀 수 있다(기본 port) — 매번 다시 읽어 재기동 없이 반영.
+            method=self.settings.section("health").get("method", health_mod.METHOD_PORT),
         )
         if persist:
             # id 가 있는 항목만 이력으로 남긴다(임시 URL 점검은 차트에 섞이면 안 된다).

@@ -13,8 +13,9 @@ import threading
 import uuid
 from pathlib import Path
 
+from .catstore import DEFAULT_CATEGORY_ID, LEGACY_IDS, SEED_CATEGORIES
 from .datacenters import DATACENTER_IDS
-from .defaults import CATEGORY_KEYS, DEFAULT_CATEGORY, default_shortcuts
+from .defaults import default_shortcuts
 from .jsonfile import now_iso as _now_iso, read_json, write_json
 from .ssrf import ValidationError, normalize_url
 
@@ -53,23 +54,43 @@ def _clean_tags(value) -> list:
     return tags
 
 
-def _clean_category(value) -> str:
-    text = _clean_text(value, limit=64, default=DEFAULT_CATEGORY)
-    return text if text in CATEGORY_KEYS else DEFAULT_CATEGORY
+_SEED_CATEGORY_IDS = {cat["id"] for cat in SEED_CATEGORIES}
+
+
+def _fallback_category(value) -> str:
+    """카테고리 저장소를 주입받지 못했을 때(테스트 등)의 최소 정규화.
+
+    모르는 값은 기본 카테고리로 떨어뜨린다 — 그대로 두면 대시보드 칩 어디에도 안 잡히는
+    '유령 분류'가 파일에 남는다.
+    """
+    text = _clean_text(value, limit=64, default=DEFAULT_CATEGORY_ID)
+    resolved = LEGACY_IDS.get(text, text)
+    return resolved if resolved in _SEED_CATEGORY_IDS else DEFAULT_CATEGORY_ID
 
 
 class ShortcutStore:
-    def __init__(self, path: Path, datacenter_ids=None):
+    def __init__(self, path: Path, datacenter_ids=None, resolve_category=None):
         """datacenter_ids: 현재 등록된 DC id 집합을 돌려주는 콜러블.
+        resolve_category: 저장값 → 유효 카테고리 id 를 돌려주는 콜러블(없으면 None).
 
-        설정에서 데이터센터를 추가/삭제할 수 있으므로 고정 목록을 쓰면 새로 만든 사이트에
-        바로가기를 연결할 수 없다. 미지정 시 내장 28개를 쓴다.
+        설정에서 데이터센터·카테고리를 추가/삭제할 수 있으므로 고정 목록을 쓰면 새로 만든
+        사이트/분류에 바로가기를 연결할 수 없다. 미지정 시 내장 기본값을 쓴다.
         """
         self._path = Path(path)
         self._dc_ids = datacenter_ids or (lambda: DATACENTER_IDS)
+        self._resolve_category = resolve_category
         self._lock = threading.RLock()
         self._items: list = []
         self._loaded = False
+
+    def _clean_category(self, value) -> str:
+        if not self._resolve_category:
+            return _fallback_category(value)
+        try:
+            # 삭제된 카테고리를 참조하던 바로가기는 기본 카테고리로 떨어진다(사라지지 않게).
+            return self._resolve_category(value) or DEFAULT_CATEGORY_ID
+        except Exception:  # noqa: BLE001 — 카테고리 저장소 문제로 바로가기 저장이 막히면 안 된다
+            return _fallback_category(value)
 
     def _clean_datacenter_id(self, value) -> str:
         text = _clean_text(value, limit=32, default="all")
@@ -121,7 +142,7 @@ class ShortcutStore:
             "id": str(data.get("id") or base.get("id") or "") if keep_id else base.get("id", ""),
             "name": name,
             "url": url,
-            "category": _clean_category(data.get("category", base.get("category"))),
+            "category": self._clean_category(data.get("category", base.get("category"))),
             "icon": _clean_text(data.get("icon", base.get("icon", "🔗")), limit=8, default="🔗"),
             "description": _clean_text(
                 data.get("description", base.get("description", "")), limit=240),
@@ -185,6 +206,37 @@ class ShortcutStore:
                 return dict(updated)
         return None
 
+    def reassign_category(self, from_id: str, to_id: str) -> int:
+        """카테고리 삭제 시 그 분류를 쓰던 바로가기를 옮긴다. 옮긴 개수를 돌려준다.
+
+        옮기지 않으면 링크가 '없는 카테고리'에 묶여 대시보드 칩 어디에도 안 잡힌다.
+        """
+        with self._lock:
+            self._ensure_loaded()
+            moved = 0
+            for item in self._items:
+                if item["category"] == from_id:
+                    item["category"] = to_id
+                    item["updatedAt"] = _now_iso()
+                    moved += 1
+            if moved:
+                self._write(self._items)
+            return moved
+
+    def reassign_missing(self, valid_ids, to_id: str) -> int:
+        """유효 목록에 없는 카테고리를 전부 기본값으로 정리한다(기본값 복원 후처리)."""
+        with self._lock:
+            self._ensure_loaded()
+            moved = 0
+            for item in self._items:
+                if item["category"] not in valid_ids:
+                    item["category"] = to_id
+                    item["updatedAt"] = _now_iso()
+                    moved += 1
+            if moved:
+                self._write(self._items)
+            return moved
+
     def move(self, shortcut_id: str, delta: int):
         """표시 순서를 한 칸 위/아래로 옮긴다.
 
@@ -223,6 +275,40 @@ class ShortcutStore:
             self._loaded = True
             self._write(self._items)
             return [dict(item) for item in self._items]
+
+    def append_many(self, entries) -> tuple:
+        """CSV 가져오기(덧붙이기) — 유효한 행만 뒤에 추가하고 (목록, 추가수, 건너뛴수).
+
+        **같은 URL 이 이미 있으면 건너뛴다**. 같은 파일을 두 번 올렸을 때 목록이 두 배가 되면
+        사용자는 수백 개를 손으로 지워야 한다.
+        """
+        if not isinstance(entries, list):
+            raise ValidationError("가져오기 데이터가 올바르지 않습니다.")
+        with self._lock:
+            self._ensure_loaded()
+            existing_urls = {item["url"].lower() for item in self._items}
+            added, skipped = 0, 0
+            for entry in entries:
+                if len(self._items) >= MAX_SHORTCUTS:
+                    skipped += 1
+                    continue
+                payload = dict(entry) if isinstance(entry, dict) else {}
+                payload.pop("id", None)
+                payload.setdefault("createdViaSettings", True)
+                item = self._sanitize(payload, keep_id=True)   # 잘못된 행은 예외 대신 폐기
+                if not item:
+                    skipped += 1
+                    continue
+                if item["url"].lower() in existing_urls:
+                    skipped += 1
+                    continue
+                item["id"] = "sc-" + uuid.uuid4().hex[:12]
+                existing_urls.add(item["url"].lower())
+                self._items.append(item)
+                added += 1
+            if added:
+                self._write(self._items)
+            return [dict(item) for item in self._items], added, skipped
 
     def replace_all(self, entries) -> list:
         """JSON 가져오기 — 유효한 항목만 남기고 통째로 교체한다."""
