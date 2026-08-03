@@ -156,6 +156,23 @@ class DatacenterStore:
                 return dict(items[index])
         return None
 
+    def move(self, dc_id, delta):
+        """표시 순서를 한 칸 위/아래로. '표시 개수 N' 이 앞에서 N개를 자르므로,
+        어떤 사이트를 화면에 띄울지는 결국 이 순서로 정해진다.
+        """
+        with self._lock:
+            items = self._load()
+            for index, dc in enumerate(items):
+                if dc["id"] != dc_id:
+                    continue
+                target = index + (1 if delta > 0 else -1)
+                if target < 0 or target >= len(items):
+                    return None
+                items[index], items[target] = items[target], items[index]
+                self._save()
+                return [dict(entry) for entry in items]
+        raise FileNotFoundError(dc_id)
+
     def delete(self, dc_id):
         with self._lock:
             items = self._load()

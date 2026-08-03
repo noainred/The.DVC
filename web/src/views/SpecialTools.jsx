@@ -57,7 +57,8 @@ async function saveResponseAsFile(res, fallbackName) {
 const toolFromHash = () => {
   const parts = window.location.hash.replace(/^#\/?/, '').split('/');
   const k = parts[0] === 'tools' ? parts[1] : '';
-  return TOOLS.some((t) => t.k === k) ? k : null;
+  // 외부 포탈 항목은 이 앱에 패널이 없다 — 딥링크로 들어와도 목록을 보여준다.
+  return TOOLS.some((t) => t.k === k && !t.external) ? k : null;
 };
 
 // 최근 검색어(브라우저 로컬) — 특수 기능 '메뉴 빠른 찾기'에서 Enter 또는 검색 중 메뉴 클릭 시 기록.
@@ -68,6 +69,8 @@ export default function SpecialTools() {
   const [tool, setTool] = useState(() => toolFromHash());
   const [menuQ, setMenuQ] = useState(''); // 메뉴 빠른 찾기
   const [isAdmin, setIsAdmin] = useState(false); // 관리자 전용 도구(VM 생성 등) 노출 제어
+  // 외부 포탈 주소(서버 env SERVICE_HUB_URL). 인증 후에만 내려오며, 없으면 카드도 숨긴다.
+  const [externalUrls, setExternalUrls] = useState({});
   const [topKeys, setTopKeys] = useState([]); // 자주 쓰는 기능(전체 사용자 합산 상위)
   const gridRef = useRef(null);               // 메뉴 그리드 너비 측정용
   const [favCount, setFavCount] = useState(4); // 한 줄에 들어가는 카드 수(화면폭 자동, 기본 4)
@@ -84,6 +87,13 @@ export default function SpecialTools() {
   const clearRecent = () => { setRecent([]); try { localStorage.removeItem(RECENT_KEY); } catch { /* ignore */ } };
   // 기능 실행 시 사용 횟수를 중앙에 기록(자주 쓰는 메뉴 자동 추천용). 실패는 조용히 무시.
   const openTool = (k) => {
+    const ext = TOOLS.find((t) => t.k === k && t.external);
+    if (ext) {
+      // 외부 포탈은 새 탭으로. noopener 로 원본 탭 참조를 넘기지 않는다.
+      postJson('/tool-usage', { k }).catch(() => {});
+      window.open(externalUrls[ext.external], '_blank', 'noopener,noreferrer');
+      return;
+    }
     if (k) postJson('/tool-usage', { k }).catch(() => {});
     if (k) addRecent(menuQ); // 검색 중에 메뉴를 열면 그 검색어를 최근 검색어로 기록
     setTool(k); window.location.hash = k ? `#/tools/${k}` : '#/tools';
@@ -94,7 +104,12 @@ export default function SpecialTools() {
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
-  useEffect(() => { fetchJson('/auth/me').then((r) => setIsAdmin(r.user?.role === 'admin')).catch(() => {}); }, []);
+  useEffect(() => {
+    fetchJson('/auth/me').then((r) => {
+      setIsAdmin(r.user?.role === 'admin');
+      setExternalUrls({ serviceHubUrl: r.user?.serviceHubUrl || '' });
+    }).catch(() => {});
+  }, []);
   // 그리드(메뉴 목록)로 돌아올 때마다 사용 횟수를 갱신. 전체 메뉴를 클릭순으로 정렬하므로
   // 상위 몇 개가 아니라 전체 도구 수를 덮을 만큼 넉넉히 가져온다(현재 42개 → 200).
   useEffect(() => {
@@ -138,7 +153,8 @@ export default function SpecialTools() {
   }
   if (tool) return <ToolPanel tool={tool} isAdmin={isAdmin} onBack={() => openTool(null)} />;
   // 전 도구를 노출하되, 권한이 없으면 disabled(회색·클릭불가)로 표시한다(숨기지 않음).
-  const base = TOOLS.map((t) => {
+  // 외부 포탈 항목은 주소가 설정된 경우에만 노출한다(미설치 환경에 죽은 카드를 남기지 않음).
+  const base = TOOLS.filter((t) => !t.external || externalUrls[t.external]).map((t) => {
     const lock = lockReasonOf(t);
     return lock ? { ...t, disabled: true, comingSoon: false, lockReason: lock } : t;
   });
@@ -215,7 +231,8 @@ export default function SpecialTools() {
               ...(t.danger && !t.disabled ? { borderColor: 'var(--red)' } : {}),
             }}
             onClick={t.disabled ? undefined : () => openTool(t.k)}
-            title={t.lockReason || (t.disabled ? (t.comingSoon ? '준비 중 (곧 제공)' : '비활성화됨') : `바로가기: #/tools/${t.k}`)}>
+            title={t.lockReason || (t.disabled ? (t.comingSoon ? '준비 중 (곧 제공)' : '비활성화됨')
+              : t.external ? `새 탭으로 열기: ${externalUrls[t.external]}` : `바로가기: #/tools/${t.k}`)}>
             <div className="flex between" style={{ alignItems: 'flex-start' }}>
               <div style={{ fontSize: 30, filter: t.disabled ? 'grayscale(1)' : 'none' }}>{t.icon}</div>
               {t.lockReason
@@ -225,8 +242,8 @@ export default function SpecialTools() {
             <div className="vc-name" style={{ marginTop: 8, ...(t.danger && !t.disabled ? { color: 'var(--red)' } : {}) }}>{t.label}</div>
             <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>{t.desc}</div>
             <div className="vc-foot">
-              <span className="muted">{t.lockReason ? (t.adminOnly ? '관리자 전용' : '접근 권한 없음') : t.disabled ? (t.comingSoon ? '준비 중' : '비활성화됨') : '클릭하여 실행'}</span>
-              <span className="muted">{t.disabled ? '' : '→'}</span>
+              <span className="muted">{t.lockReason ? (t.adminOnly ? '관리자 전용' : '접근 권한 없음') : t.disabled ? (t.comingSoon ? '준비 중' : '비활성화됨') : t.external ? '새 탭으로 열기' : '클릭하여 실행'}</span>
+              <span className="muted">{t.disabled ? '' : t.external ? '↗' : '→'}</span>
             </div>
           </div>
         ))}

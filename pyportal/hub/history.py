@@ -51,6 +51,11 @@ BUCKETS = {
 
 PRUNE_EVERY = 20        # 삽입 20회마다 1번만 보관기간 정리
 
+# 원본(checks)을 그대로 집계하면 한 달 차트가 수십만 행을 스캔한다. 적재 트랜잭션 안에서
+# **시간당 집계 테이블(checks_hourly)을 증분 갱신**해 두고, 버킷이 1시간 이상인 기간
+# (일주일·한달)은 이 테이블만 읽는다 — 스캔 대상이 수십만 → 수백 행으로 줄어든다.
+ROLLUP_MIN_BUCKET = 3600
+
 
 class HealthHistory:
     def __init__(self, path, retention_days: int = 40):
@@ -84,7 +89,51 @@ class HealthHistory:
             self._db.execute("CREATE INDEX IF NOT EXISTS idx_checks_ts ON checks(ts)")
             self._db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_checks_sc_ts ON checks(shortcut_id, ts)")
+            # 시간당 롤업 — (시각버킷, 바로가기) 당 1행. 적재 시 증분 upsert 한다.
+            self._db.execute("""
+                CREATE TABLE IF NOT EXISTS checks_hourly (
+                  hour        INTEGER NOT NULL,
+                  shortcut_id TEXT    NOT NULL,
+                  total       INTEGER NOT NULL DEFAULT 0,
+                  up          INTEGER NOT NULL DEFAULT 0,
+                  warn        INTEGER NOT NULL DEFAULT 0,
+                  down        INTEGER NOT NULL DEFAULT 0,
+                  lat_sum     INTEGER NOT NULL DEFAULT 0,
+                  lat_n       INTEGER NOT NULL DEFAULT 0,
+                  lat_max     INTEGER NOT NULL DEFAULT 0,
+                  PRIMARY KEY (hour, shortcut_id)
+                )
+            """)
+            self._db.execute("CREATE INDEX IF NOT EXISTS idx_hourly_hour ON checks_hourly(hour)")
             self._db.commit()
+            self._backfill_rollup()
+
+    def _backfill_rollup(self):
+        """기존 DB(롤업 도입 이전) 마이그레이션 — 원본을 한 번만 접어 넣는다.
+
+        이걸 빼면 업그레이드 직후 일주일·한달 차트가 '데이터 없음'으로 비어 보인다
+        (롤업이 앞으로 들어오는 점검부터만 쌓이므로).
+        """
+        if self._db.execute("SELECT 1 FROM checks_hourly LIMIT 1").fetchone():
+            return
+        if not self._db.execute("SELECT 1 FROM checks LIMIT 1").fetchone():
+            return
+        self._db.execute("""
+            INSERT INTO checks_hourly (hour, shortcut_id, total, up, warn, down,
+                                       lat_sum, lat_n, lat_max)
+            SELECT (ts / 3600) * 3600, shortcut_id,
+                   COUNT(*),
+                   SUM(CASE WHEN status = 'healthy' THEN 1 ELSE 0 END),
+                   SUM(CASE WHEN status = 'warning' THEN 1 ELSE 0 END),
+                   SUM(CASE WHEN status NOT IN ('healthy','warning') THEN 1 ELSE 0 END),
+                   SUM(CASE WHEN status = 'healthy' THEN latency_ms ELSE 0 END),
+                   SUM(CASE WHEN status = 'healthy' THEN 1 ELSE 0 END),
+                   MAX(CASE WHEN status = 'healthy' THEN latency_ms ELSE 0 END)
+            FROM checks
+            WHERE shortcut_id IS NOT NULL
+            GROUP BY 1, shortcut_id
+        """)
+        self._db.commit()
 
     # ---------- 쓰기 ----------
 
@@ -103,11 +152,51 @@ class HealthHistory:
             str(row.get("message", ""))[:300],
         ) for row in results]
 
+        hour = (stamp // 3600) * 3600
+        # (hour, id) 별 증분값을 미리 접어서 한 번에 upsert 한다.
+        folded = {}
+        for row in results:
+            shortcut_id = row.get("id")
+            if not shortcut_id:
+                continue
+            status = str(row.get("status", "unknown"))
+            latency = int(row.get("latencyMs") or 0)
+            acc = folded.setdefault(shortcut_id, [0, 0, 0, 0, 0, 0, 0])
+            acc[0] += 1                                    # total
+            if status == "healthy":
+                acc[1] += 1                                # up
+                acc[4] += latency                          # lat_sum
+                acc[5] += 1                                # lat_n
+                acc[6] = max(acc[6], latency)              # lat_max
+            elif status == "warning":
+                acc[2] += 1                                # warn
+            else:
+                acc[3] += 1                                # down
+
         with self._lock:
-            self._db.executemany(
-                "INSERT INTO checks (ts, shortcut_id, url, status, status_code, latency_ms, message)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?)", rows)
-            self._db.commit()
+            self._db.execute("BEGIN")
+            try:
+                self._db.executemany(
+                    "INSERT INTO checks (ts, shortcut_id, url, status, status_code, latency_ms, message)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?)", rows)
+                if folded:
+                    self._db.executemany("""
+                        INSERT INTO checks_hourly (hour, shortcut_id, total, up, warn, down,
+                                                   lat_sum, lat_n, lat_max)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(hour, shortcut_id) DO UPDATE SET
+                          total   = total   + excluded.total,
+                          up      = up      + excluded.up,
+                          warn    = warn    + excluded.warn,
+                          down    = down    + excluded.down,
+                          lat_sum = lat_sum + excluded.lat_sum,
+                          lat_n   = lat_n   + excluded.lat_n,
+                          lat_max = MAX(lat_max, excluded.lat_max)
+                    """, [(hour, sid, *acc) for sid, acc in folded.items()])
+                self._db.commit()
+            except Exception:
+                self._db.rollback()
+                raise
             self._writes += 1
             if self._writes % PRUNE_EVERY == 0:
                 self.prune()
@@ -117,6 +206,8 @@ class HealthHistory:
         cutoff = int(time.time()) - self._retention * 86400
         with self._lock:
             cursor = self._db.execute("DELETE FROM checks WHERE ts < ?", (cutoff,))
+            # 롤업도 같은 기준으로 정리한다(원본만 지우면 집계가 영원히 남는다).
+            self._db.execute("DELETE FROM checks_hourly WHERE hour < ?", (cutoff,))
             self._db.commit()
             return cursor.rowcount or 0
 
@@ -150,38 +241,67 @@ class HealthHistory:
         now = int(time.time())
         since = now - window
 
-        params = [bucket, bucket, since]
-        where = "ts >= ?"
-        if shortcut_id:
-            where += " AND shortcut_id = ?"
-            params.append(shortcut_id)
-
-        sql = f"""
-            SELECT (ts / ?) * ? AS bucket,
-                   COUNT(*)                                             AS total,
-                   SUM(CASE WHEN status = 'healthy'   THEN 1 ELSE 0 END) AS up,
-                   SUM(CASE WHEN status = 'warning'   THEN 1 ELSE 0 END) AS warn,
-                   SUM(CASE WHEN status NOT IN ('healthy','warning') THEN 1 ELSE 0 END) AS down,
-                   AVG(CASE WHEN status = 'healthy' THEN latency_ms END) AS avg_latency,
-                   MAX(CASE WHEN status = 'healthy' THEN latency_ms END) AS max_latency
-            FROM checks
-            WHERE {where}
-            GROUP BY bucket
-            ORDER BY bucket
-        """
+        # 버킷이 1시간 이상이면 원본 대신 시간당 롤업을 읽는다. 한 달(43200초 버킷) 차트가
+        # 수십만 행 스캔 → 링크당 720행 스캔으로 줄어든다.
+        source_rollup = bucket >= ROLLUP_MIN_BUCKET
+        if source_rollup:
+            params = [bucket, bucket, since]
+            where = "hour >= ?"
+            if shortcut_id:
+                where += " AND shortcut_id = ?"
+                params.append(shortcut_id)
+            sql = f"""
+                SELECT (hour / ?) * ? AS bucket,
+                       SUM(total)   AS total,
+                       SUM(up)      AS up,
+                       SUM(warn)    AS warn,
+                       SUM(down)    AS down,
+                       SUM(lat_sum) AS lat_sum,
+                       SUM(lat_n)   AS lat_n,
+                       MAX(lat_max) AS max_latency
+                FROM checks_hourly
+                WHERE {where}
+                GROUP BY bucket
+                ORDER BY bucket
+            """
+        else:
+            params = [bucket, bucket, since]
+            where = "ts >= ?"
+            if shortcut_id:
+                where += " AND shortcut_id = ?"
+                params.append(shortcut_id)
+            sql = f"""
+                SELECT (ts / ?) * ? AS bucket,
+                       COUNT(*)                                             AS total,
+                       SUM(CASE WHEN status = 'healthy'   THEN 1 ELSE 0 END) AS up,
+                       SUM(CASE WHEN status = 'warning'   THEN 1 ELSE 0 END) AS warn,
+                       SUM(CASE WHEN status NOT IN ('healthy','warning') THEN 1 ELSE 0 END) AS down,
+                       SUM(CASE WHEN status = 'healthy' THEN latency_ms ELSE 0 END) AS lat_sum,
+                       SUM(CASE WHEN status = 'healthy' THEN 1 ELSE 0 END)  AS lat_n,
+                       MAX(CASE WHEN status = 'healthy' THEN latency_ms END) AS max_latency
+                FROM checks
+                WHERE {where}
+                GROUP BY bucket
+                ORDER BY bucket
+            """
         with self._lock:
             rows = self._db.execute(sql, params).fetchall()
 
-        points = [{
-            "ts": int(row["bucket"]),
-            "total": int(row["total"] or 0),
-            "up": int(row["up"] or 0),
-            "warn": int(row["warn"] or 0),
-            "down": int(row["down"] or 0),
-            "avgLatencyMs": round(row["avg_latency"], 1) if row["avg_latency"] is not None else None,
-            "maxLatencyMs": int(row["max_latency"]) if row["max_latency"] is not None else None,
-            "uptimePct": round(100.0 * (row["up"] or 0) / row["total"], 1) if row["total"] else None,
-        } for row in rows]
+        points = []
+        for row in rows:
+            lat_n = int(row["lat_n"] or 0)
+            lat_sum = int(row["lat_sum"] or 0)
+            total = int(row["total"] or 0)
+            points.append({
+                "ts": int(row["bucket"]),
+                "total": total,
+                "up": int(row["up"] or 0),
+                "warn": int(row["warn"] or 0),
+                "down": int(row["down"] or 0),
+                "avgLatencyMs": round(lat_sum / lat_n, 1) if lat_n else None,
+                "maxLatencyMs": int(row["max_latency"]) if row["max_latency"] else None,
+                "uptimePct": round(100.0 * (row["up"] or 0) / total, 1) if total else None,
+            })
 
         total = sum(p["total"] for p in points)
         up = sum(p["up"] for p in points)

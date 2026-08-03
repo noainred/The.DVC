@@ -86,6 +86,55 @@ class HistoryTest(unittest.TestCase):
         self.assertEqual(self.history.prune(), 1)
         self.assertEqual(self.history.stats()["rows"], 1)
 
+    def test_rollup_is_updated_on_record(self):
+        now = int(time.time())
+        self.history.record([result("a", latency=10), result("a", latency=30),
+                             result("b", status="unreachable", latency=0, code=0)], ts=now)
+        row = self.history._db.execute(                         # noqa: SLF001 — 롤업 내용 직접 확인
+            "SELECT total, up, down, lat_sum, lat_n, lat_max FROM checks_hourly "
+            "WHERE shortcut_id='a'").fetchone()
+        self.assertEqual((row["total"], row["up"], row["down"]), (2, 2, 0))
+        self.assertEqual((row["lat_sum"], row["lat_n"], row["lat_max"]), (40, 2, 30))
+
+    def test_long_range_series_uses_rollup(self):
+        """일주일·한달 차트는 롤업 테이블만 읽는다 — 원본을 지워도 값이 유지된다."""
+        now = int(time.time())
+        for day in range(5):
+            self.history.record([result("a"), result("a", status="unreachable", code=0)],
+                                ts=now - day * 86400)
+        before = self.history.series("7d")["summary"]
+        self.assertEqual(before["samples"], 10)
+        self.assertEqual(before["failures"], 5)
+
+        self.history._db.execute("DELETE FROM checks")          # noqa: SLF001 — 원본만 제거
+        self.history._db.commit()                               # noqa: SLF001
+        after = self.history.series("7d")["summary"]
+        self.assertEqual(after["samples"], 10)                  # 롤업에서 그대로 나온다
+        self.assertEqual(self.history.series("1h")["summary"]["samples"], 0)   # 짧은 범위는 원본
+
+    def test_rollup_backfills_existing_db(self):
+        """롤업 도입 이전 DB 를 열면 원본을 한 번 접어 넣는다(빈 장기 차트 방지)."""
+        now = int(time.time())
+        self.history.record([result("a"), result("a")], ts=now - 3600)
+        self.history._db.execute("DELETE FROM checks_hourly")   # noqa: SLF001 — 구버전 상태 재현
+        self.history._db.commit()                               # noqa: SLF001
+        path = self.history._path                               # noqa: SLF001
+        self.history.close()
+
+        reopened = HealthHistory(path, retention_days=3)
+        try:
+            self.assertEqual(reopened.series("7d")["summary"]["samples"], 2)
+        finally:
+            reopened.close()
+            self.history = HealthHistory(path, retention_days=3)   # tearDown 이 닫을 수 있게
+
+    def test_prune_also_clears_rollup(self):
+        now = int(time.time())
+        self.history.record([result("a")], ts=now - 10 * 86400)
+        self.history.prune()
+        self.assertIsNone(self.history._db.execute(              # noqa: SLF001
+            "SELECT 1 FROM checks_hourly LIMIT 1").fetchone())
+
     def test_uptime_percentage(self):
         now = int(time.time())
         rows = [result("a") for _ in range(3)] + [result("a", status="unreachable")]

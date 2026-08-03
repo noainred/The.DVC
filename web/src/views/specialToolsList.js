@@ -1,6 +1,9 @@
 // 특수 기능(SpecialTools) 도구 정의 — 화면 렌더와 권한 매트릭스 편집이 공유하는 단일 소스.
-// k(권한 키의 대상)·label·icon·desc + 플래그(adminOnly/disabled/comingSoon/danger).
+// k(권한 키의 대상)·label·icon·desc + 플래그(adminOnly/disabled/comingSoon/danger/external).
+// external: 이 포탈의 화면이 아니라 다른 포탈을 새 탭으로 여는 항목. 주소는 서버가
+// 인증 후에만 내려주므로(`/auth/me` serviceHubUrl), 미설정이면 카드 자체가 나오지 않는다.
 export const TOOLS = [
+  { k: 'service-hub', icon: '🧰', label: '서비스 허브 (별도 포탈)', desc: '운영 서비스 바로가기 모음 · 링크 상태 점검/추이 · 데이터센터 구성 (새 탭)', external: 'serviceHubUrl' },
   { k: 'aisearch', icon: '🔎', label: 'AI 검색 (자연어)', desc: '자연어로 VM/호스트/IP 검색 · 로컬 LLM' },
   { k: 'insights', icon: '🧠', label: '운영 인사이트', desc: 'VM 라이트사이징 · 클러스터 N+1 여력 · 알람 핫스팟 · GPU 유휴' },
   { k: 'threats', icon: '🛡️', label: '위협 탐지', desc: '마이닝 의심 · 위험 포트 노출 · EOL OS · 신규 rogue IP · NSX IDS' },

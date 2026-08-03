@@ -69,6 +69,8 @@ authRouter.post('/login', async (req, res) => {
     permissions: rolePermissions(user.role),
     toolsDenied: roleToolsDenied(user.role),
     isSettingsOwner: !config.auth.enabled || owners.includes(user.username) || owners.includes(user.name),
+    // 서비스 허브 주소는 인증 후에만 — 미인증 응답에 내부 호스트를 노출하지 않는다.
+    serviceHubUrl: config.serviceHubUrl || '',
     scope: (local && local.scope) ? { vcenters: local.scope.vcenters || [], regions: local.scope.regions || [] } : { vcenters: [], regions: [] },
   };
   res.json({ token, user: enriched });
@@ -82,7 +84,7 @@ authRouter.get('/me', authMiddleware, (req, res) => {
   // isSettingsOwner: '설정' 탭 노출 여부(계정명 목록 대신 불리언만 — 열거 단서 제거).
   const owners = (() => { try { return loadSessionSecurity().settingsOwners || []; } catch { return []; } })();
   const isSettingsOwner = !config.auth.enabled || owners.includes(req.user.username) || owners.includes(req.user.name);
-  res.json({ user: { ...req.user, totpEnabled: !!u?.totpEnabled, local: !!u, permissions: rolePermissions(req.user.role), toolsDenied: roleToolsDenied(req.user.role), isSettingsOwner } });
+  res.json({ user: { ...req.user, totpEnabled: !!u?.totpEnabled, local: !!u, permissions: rolePermissions(req.user.role), toolsDenied: roleToolsDenied(req.user.role), isSettingsOwner, serviceHubUrl: config.serviceHubUrl || '' } });
 });
 
 // Self-service TOTP (Google Authenticator) enrollment for the current local user.

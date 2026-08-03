@@ -82,6 +82,12 @@ class Config:
         # 링크 점검 이력 보관 기간(일). 한 달 차트를 그리려면 최소 31일이 필요하다.
         self.history_retention_days = _env_int("HUB_HISTORY_RETENTION_DAYS", 40, low=2, high=730)
 
+        # 메인 모니터링 포탈(The.DVC) 주소. 설정하면 헤더에 상호 이동 링크가 생긴다.
+        # 두 포탈은 별도 프로세스라 서로의 주소를 모른다 — 하드코딩 대신 env 로 받는다.
+        self.portal_url = _env_str("HUB_PORTAL_URL", "").rstrip("/")
+        if not self.portal_url.lower().startswith(("http://", "https://")):
+            self.portal_url = ""      # 스킴이 없으면 링크로 쓰지 않는다
+
     @property
     def shortcuts_file(self) -> Path:
         return self.data_dir / "shortcuts.json"
@@ -105,6 +111,15 @@ class Config:
     @property
     def backup_dir(self) -> Path:
         return self.data_dir / "backups"
+
+    @property
+    def session_secret_file(self) -> Path:
+        """세션 서명 키(0600). 이 파일이 있어야 재시작해도 로그인이 유지된다."""
+        return self.data_dir / "session-secret"
+
+    @property
+    def audit_log(self) -> Path:
+        return self.data_dir / "audit.log"
 
     @property
     def initial_password_file(self) -> Path:

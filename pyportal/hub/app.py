@@ -9,8 +9,10 @@ from __future__ import annotations
 import time
 
 from . import health as health_mod
+from .audit import AuditLog
 from .auth import SessionStore, UserStore
 from .backup import BackupService
+from .notify import Notifier
 from .config import config
 from .dcstore import DatacenterStore
 from .history import HealthHistory
@@ -30,7 +32,10 @@ class AppContext:
                                        datacenter_ids=self.datacenters.ids)
         self.users = UserStore(base / "users.json", base / "initial-settings-password.txt")
         self.sessions = SessionStore(config.session_ttl_min * 60, config.login_max_fails,
-                                     config.login_lockout_sec)
+                                     config.login_lockout_sec,
+                                     secret_path=base / "session-secret", users=self.users)
+        self.audit = AuditLog(base / "audit.log")
+        self.notifier = Notifier(self.settings, self.audit)
         self.history = HealthHistory(base / "health-history.db", config.history_retention_days)
         self.backups = BackupService(base / "backups", {
             "shortcuts": base / "shortcuts.json",
@@ -93,6 +98,9 @@ class AppContext:
             keep = [row for row in results if row.get("id")]
             if keep:
                 self.history.record(keep)
+                # 상태가 '바뀐' 링크만 알린다 — 매 주기 알림은 곧 무시된다.
+                names = {item["id"]: item["name"] for item in self.shortcuts.all()}
+                self.notifier.notify_transitions(keep, names)
         return results
 
     def _auto_health_tick(self):

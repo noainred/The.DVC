@@ -32,6 +32,10 @@
           <span>센터 현황</span><span class="tab-badge" id="tab-dc-count">0</span>
         </a>
         <a class="tab" href="#/health" data-tab="health">링크 상태 점검</a>
+        <!-- 메인 모니터링 포탈(The.DVC)로 이동. HUB_PORTAL_URL 이 설정된 경우에만 보인다. -->
+        <a class="tab tab-external" id="portal-link" href="#" target="_blank" rel="noopener noreferrer" hidden>
+          <span>모니터링 포탈</span><span aria-hidden="true">↗</span>
+        </a>
       </nav>
 
       <div class="topbar-actions">
@@ -459,6 +463,60 @@
             </div>
             <div class="card-footer">
               <span class="muted" id="backup-status"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 5) 알림 & 감사 로그 -->
+      <div class="settings-pane" id="pane-alerts" hidden>
+        <div class="settings-layout">
+          <div class="card form-card">
+            <div class="form-head"><h3>상태 전환 알림 (웹훅)</h3></div>
+            <p class="muted">링크가 <b>정상 ↔ 장애로 바뀌는 순간</b>에만 보냅니다. 장애가 이어지는 동안
+              같은 알림을 반복하지 않으므로 알림 피로가 생기지 않습니다.</p>
+            <label class="checkline">
+              <input type="checkbox" id="n-enabled" /> <span>상태 전환 알림 사용</span>
+            </label>
+            <label class="field">
+              <span class="field-label">웹훅 URL</span>
+              <input id="n-url" type="text" maxlength="2048" placeholder="https://chat.internal/hooks/xxxx" />
+              <span class="field-hint">Slack·Mattermost 호환 형식({"text": …})으로 POST 합니다. http/https 만 허용됩니다.</span>
+            </label>
+            <div class="field-row">
+              <label class="field">
+                <span class="field-label">장애 확정 연속 실패</span>
+                <input id="n-threshold" type="number" min="1" max="10" />
+                <span class="field-hint">이 횟수 미만의 일시적 실패는 알리지 않습니다.</span>
+              </label>
+              <label class="field">
+                <span class="field-label">같은 링크 최소 간격(분)</span>
+                <input id="n-interval" type="number" min="0" max="1440" />
+                <span class="field-hint">정상↔장애를 오가는 링크(플래핑) 억제.</span>
+              </label>
+            </div>
+            <div class="form-actions">
+              <button class="btn btn-primary" id="n-save" type="button">알림 설정 저장</button>
+              <button class="btn btn-ghost" id="n-test" type="button">테스트 전송</button>
+              <span class="form-msg" id="notify-msg"></span>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="form-head">
+              <h3>감사 로그 <span class="muted" id="audit-count"></span></h3>
+              <button class="linkbtn" id="audit-refresh" type="button">새로고침</button>
+            </div>
+            <p class="muted">로그인·설정 변경·백업 인출처럼 나중에 되짚어야 하는 사건만 기록합니다
+              (조회는 남기지 않습니다). 비밀번호·토큰은 절대 기록되지 않습니다.</p>
+            <div class="table-wrap">
+              <table class="table">
+                <thead><tr><th>시각(UTC)</th><th>행위</th><th>계정</th><th>출발지</th><th>결과</th></tr></thead>
+                <tbody id="audit-tbody"></tbody>
+              </table>
+            </div>
+            <div class="card-footer">
+              <span class="muted" id="audit-file"></span>
             </div>
           </div>
         </div>

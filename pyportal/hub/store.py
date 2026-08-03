@@ -185,6 +185,27 @@ class ShortcutStore:
                 return dict(updated)
         return None
 
+    def move(self, shortcut_id: str, delta: int):
+        """표시 순서를 한 칸 위/아래로 옮긴다.
+
+        대시보드는 저장된 배열 순서 그대로 그린다 — 정렬 기준 필드를 따로 두면
+        가져오기/복원 때 그 필드만 어긋나 순서가 뒤섞인다. 배열 자체를 진실의
+        원천으로 두고 여기서만 바꾼다.
+        """
+        with self._lock:
+            self._ensure_loaded()
+            for index, item in enumerate(self._items):
+                if item["id"] != shortcut_id:
+                    continue
+                target = index + (1 if delta > 0 else -1)
+                if target < 0 or target >= len(self._items):
+                    return None                     # 이미 끝 — 변경 없음
+                self._items[index], self._items[target] = \
+                    self._items[target], self._items[index]
+                self._write(self._items)
+                return [dict(entry) for entry in self._items]
+        raise FileNotFoundError(shortcut_id)
+
     def delete(self, shortcut_id: str) -> bool:
         with self._lock:
             self._ensure_loaded()
