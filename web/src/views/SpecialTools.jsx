@@ -13,6 +13,7 @@ import VmProvision from './VmProvision.jsx';
 import AgentScans from './AgentScans.jsx';
 import LoginFails from './LoginFails.jsx';
 import NetIssues from './NetIssues.jsx';
+import { DailyHealth, SnapshotAge, ZombieVms, CertExpiry, Rightsizing, CapacityForecast, AlertChannels, ComplianceReport, ChangeHistory, UnprotectedVms } from './ToolsReports.jsx';
 
 import { TOOLS } from './specialToolsList.js';
 // IP 확인 출처 배지: vCenter 인식 / Ping(TCP)스캔 / 둘 다
@@ -256,7 +257,8 @@ function ToolPanel({ tool, onBack, isAdmin }) {
   const meta = TOOLS.find((t) => t.k === tool);
   const [scope, setScope] = useState('');
   const { data: vcList } = usePolling('/vcenters', {}, 60_000);
-  const scoped = ['ipam', 'dupip', 'vmtools', 'snapshots', 'hba', 'gpu', 'licenses', 'license-expiry', 'esxi', 'hardware', 'powermap', 'guestos', 'real-os', 'thinvms', 'capacity', 'waste', 'esxitemp', 'forecast', 'dsusage'].includes(tool);
+  const scoped = ['ipam', 'dupip', 'vmtools', 'snapshots', 'hba', 'gpu', 'licenses', 'license-expiry', 'esxi', 'hardware', 'powermap', 'guestos', 'real-os', 'thinvms', 'capacity', 'waste', 'esxitemp', 'forecast', 'dsusage',
+    'daily-health', 'snapshot-age', 'zombie-vms', 'rightsizing', 'capacity-forecast', 'compliance-report', 'change-history', 'unprotected-vms'].includes(tool);
 
   return (
     <>
@@ -289,6 +291,16 @@ function ToolPanel({ tool, onBack, isAdmin }) {
       {tool === 'dupip' && <DupIp scope={scope} />}
       {tool === 'vmtools' && <VmTools scope={scope} />}
       {tool === 'snapshots' && <Snapshots scope={scope} />}
+      {tool === 'daily-health' && <DailyHealth scope={scope} isAdmin={isAdmin} />}
+      {tool === 'snapshot-age' && <SnapshotAge scope={scope} />}
+      {tool === 'zombie-vms' && <ZombieVms scope={scope} />}
+      {tool === 'cert-expiry' && <CertExpiry isAdmin={isAdmin} />}
+      {tool === 'rightsizing' && <Rightsizing scope={scope} />}
+      {tool === 'capacity-forecast' && <CapacityForecast scope={scope} />}
+      {tool === 'alert-channels' && <AlertChannels isAdmin={isAdmin} />}
+      {tool === 'compliance-report' && <ComplianceReport scope={scope} />}
+      {tool === 'change-history' && <ChangeHistory scope={scope} />}
+      {tool === 'unprotected-vms' && <UnprotectedVms scope={scope} />}
       {tool === 'solutions' && <Solutions />}
       {tool === 'licenses' && <Licenses scope={scope} />}
       {tool === 'license-expiry' && <LicenseExpiry scope={scope} isAdmin={isAdmin} />}

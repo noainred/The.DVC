@@ -23,6 +23,7 @@ const DEFAULTS = {
   channels: {
     slack: { enabled: false, url: '' },
     webhook: { enabled: false, url: '' },
+    teams: { enabled: false, url: '' }, // Microsoft Teams incoming webhook (MessageCard)
   },
   rules: {
     criticalAlarms: { enabled: true },
@@ -35,6 +36,9 @@ const DEFAULTS = {
   },
   cooldownMin: 60,
   intervalSec: 60,
+  // 채널 무관 전역 중복 억제 창(분) — 엔진의 firing/cooldown을 거치지 않고 notify()를 직접
+  // 부르는 경로(loginMonitor·netMonitor·guestScanScheduler)까지 같은 key 폭주를 막는다.
+  suppressWindowMin: 5,
 };
 
 let cache = null;
@@ -45,10 +49,15 @@ export function loadAlertConfig() {
     if (fs.existsSync(FILE)) {
       const s = JSON.parse(fs.readFileSync(FILE, 'utf8'));
       cache = {
-        channels: { slack: { ...DEFAULTS.channels.slack, ...s.channels?.slack }, webhook: { ...DEFAULTS.channels.webhook, ...s.channels?.webhook } },
+        channels: {
+          slack: { ...DEFAULTS.channels.slack, ...s.channels?.slack },
+          webhook: { ...DEFAULTS.channels.webhook, ...s.channels?.webhook },
+          teams: { ...DEFAULTS.channels.teams, ...s.channels?.teams },
+        },
         rules: { ...DEFAULTS.rules, ...(s.rules || {}) },
         cooldownMin: s.cooldownMin ?? DEFAULTS.cooldownMin,
         intervalSec: s.intervalSec ?? DEFAULTS.intervalSec,
+        suppressWindowMin: s.suppressWindowMin ?? DEFAULTS.suppressWindowMin,
       };
     }
   } catch { /* defaults */ }
@@ -60,10 +69,12 @@ export function saveAlertConfig(body = {}) {
     channels: {
       slack: { enabled: !!body.channels?.slack?.enabled, url: body.channels?.slack?.url ?? cur.channels.slack.url },
       webhook: { enabled: !!body.channels?.webhook?.enabled, url: body.channels?.webhook?.url ?? cur.channels.webhook.url },
+      teams: { enabled: !!body.channels?.teams?.enabled, url: body.channels?.teams?.url ?? (cur.channels.teams?.url || '') },
     },
     rules: { ...cur.rules, ...(body.rules || {}) },
     cooldownMin: Math.max(1, Number(body.cooldownMin) || cur.cooldownMin),
     intervalSec: Math.max(15, Number(body.intervalSec) || cur.intervalSec),
+    suppressWindowMin: Math.max(0, body.suppressWindowMin != null ? Number(body.suppressWindowMin) || 0 : (cur.suppressWindowMin ?? 5)),
   };
   atomicWriteFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
   cache = next;
@@ -201,14 +212,66 @@ async function post(url, payload) {
   // 일시적 네트워크 오류로 알림이 조용히 유실되지 않도록 1회 재시도(고RTT 외부 웹훅 대응).
   return resilientFetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), timeoutMs: 15000, retries: 1, dispatcher: webhookAgent });
 }
+/** Teams incoming webhook용 MessageCard 페이로드 — 순수 함수(테스트 대상). */
+export function buildTeamsPayload(alert, text) {
+  const color = alert.severity === 'critical' ? 'D73A3A' : alert.severity === 'resolved' ? '2EB67D' : 'E8A33D';
+  return {
+    '@type': 'MessageCard',
+    '@context': 'http://schema.org/extensions',
+    themeColor: color,
+    summary: alert.title || 'VMware Portal 알림',
+    title: alert.title || 'VMware Portal 알림',
+    text: (alert.detail || text || '').replace(/\n/g, '\n\n'), // Teams는 단일 \n을 무시
+  };
+}
+
+/**
+ * 전역 중복 억제 판정 — 같은 key가 창(windowMs) 안에서 재발송되면 true. 순수 함수(맵 주입).
+ * 엔진 cooldown과 별개로 notify() 직접 호출 경로(브루트포스·네트워크 모니터)의 폭주를 막는다.
+ */
+export function shouldSuppress(sentMap, key, now, windowMs) {
+  if (!key || !windowMs) return false;
+  const last = sentMap.get(key) || 0;
+  if (now - last < windowMs) return true;
+  sentMap.set(key, now);
+  // 맵 무한 증식 방지 — 오래된 키 정리(호출 빈도가 낮아 전체 순회 비용 무시 가능).
+  if (sentMap.size > 2000) { for (const [k, t] of sentMap) if (now - t > windowMs * 10) sentMap.delete(k); }
+  return false;
+}
+const _sentAt = new Map(); // key -> lastSentTs (전역 억제 창)
+
 export async function notify(alert, cfg = loadAlertConfig()) {
   const text = `[${alert.severity === 'critical' ? '🔴 위험' : '🟠 경고'}] ${alert.title}${alert.detail ? `\n${alert.detail}` : ''}`;
+  const windowMs = Math.max(0, cfg.suppressWindowMin ?? 5) * 60_000;
+  if (shouldSuppress(_sentAt, alert.key, Date.now(), windowMs)) return ['suppressed'];
   const results = [];
   if (cfg.channels.slack?.enabled && cfg.channels.slack.url) {
     try { const r = await post(cfg.channels.slack.url, { text }); results.push(`slack:${r.status}`); } catch (e) { results.push(`slack:err ${e.message}`); }
   }
   if (cfg.channels.webhook?.enabled && cfg.channels.webhook.url) {
     try { const r = await post(cfg.channels.webhook.url, { source: 'vmware-portal', ...alert, text, at: new Date().toISOString() }); results.push(`webhook:${r.status}`); } catch (e) { results.push(`webhook:err ${e.message}`); }
+  }
+  if (cfg.channels.teams?.enabled && cfg.channels.teams.url) {
+    try { const r = await post(cfg.channels.teams.url, buildTeamsPayload(alert, text)); results.push(`teams:${r.status}`); } catch (e) { results.push(`teams:err ${e.message}`); }
+  }
+  return results;
+}
+
+/**
+ * 일반 텍스트 브로드캐스트(일일 리포트 등) — 알림 규칙/억제와 무관하게 활성 채널 전체로 발송.
+ * title은 Teams 카드 제목·웹훅 메타에 쓰인다.
+ */
+export async function sendText(text, title = 'VMware Portal 리포트') {
+  const cfg = loadAlertConfig();
+  const results = [];
+  if (cfg.channels.slack?.enabled && cfg.channels.slack.url) {
+    try { const r = await post(cfg.channels.slack.url, { text }); results.push(`slack:${r.status}`); } catch (e) { results.push(`slack:err ${e.message}`); }
+  }
+  if (cfg.channels.webhook?.enabled && cfg.channels.webhook.url) {
+    try { const r = await post(cfg.channels.webhook.url, { source: 'vmware-portal', kind: 'report', title, text, at: new Date().toISOString() }); results.push(`webhook:${r.status}`); } catch (e) { results.push(`webhook:err ${e.message}`); }
+  }
+  if (cfg.channels.teams?.enabled && cfg.channels.teams.url) {
+    try { const r = await post(cfg.channels.teams.url, buildTeamsPayload({ title, detail: text, severity: 'info' }, text)); results.push(`teams:${r.status}`); } catch (e) { results.push(`teams:err ${e.message}`); }
   }
   return results;
 }
@@ -223,7 +286,7 @@ function pushRecent(entry) { recent.unshift(entry); if (recent.length > 200) rec
 
 async function tick() {
   const cfg = loadAlertConfig();
-  if (!cfg.channels.slack?.enabled && !cfg.channels.webhook?.enabled) { // still track state for UI
+  if (!cfg.channels.slack?.enabled && !cfg.channels.webhook?.enabled && !cfg.channels.teams?.enabled) { // still track state for UI
     refreshState(cfg, false);
     return;
   }

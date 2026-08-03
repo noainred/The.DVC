@@ -67,6 +67,8 @@ import { startLoginMonitor } from './security/loginMonitor.js';
 import { startGuestScanScheduler } from './security/guestScanScheduler.js';
 import { startOsScanner } from './inventory/osScanner.js';
 import { startDbSizeSampler } from './insights/portalDb.js';
+import { startCertMonitor } from './security/certMonitor.js';
+import { startDailyReport } from './reports/dailyReport.js';
 
 const app = express();
 
@@ -167,7 +169,7 @@ const stagger = [
   startIdracPoller, startIdracScanPoller, startNsxPoller, startAlertEngine, startMetricsSampler, startGpuGuestPoller, startPhysicalGpuPoller,
   startIpScanPoller, startIpScanAgent, startCollectorPuller, startAgentScanner, startIdracScanWorker, startInventoryPush,
   startGpuGuestPush, startGpuGuestConfigPull, startUsersConfigPull, startPingWorker, startConfigPush, startFleetPush, startBackupScheduler, startLogPoller, startLogQueryWorker, startCaptureWorker, startCaptureMonitor, startLoginMonitor, startGuestScanScheduler, startOsScanner,
-  startDbSizeSampler, startPingMonitor,
+  startDbSizeSampler, startPingMonitor, startCertMonitor, startDailyReport,
 ];
 stagger.forEach((start, i) => setTimeout(() => { try { start(); } catch (e) { console.error('[start] 폴러 기동 실패:', e?.message); } }, i * 1500).unref?.());
 

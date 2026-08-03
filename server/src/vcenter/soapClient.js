@@ -12,7 +12,7 @@
 import tls from 'node:tls';
 import { config } from '../config.js';
 import { loadMetricsSettings } from '../metrics/settings.js';
-import { parseObjectContent, xmlUnescape } from './soapParse.js';
+import { parseObjectContent, xmlUnescape, snapshotInfo } from './soapParse.js';
 import { vcDispatcher } from './restClient.js';
 import { parseObjectContentAsync } from '../util/soapParsePool.js';
 
@@ -723,22 +723,7 @@ function parseVmGpu(deviceXml) {
   return { type, count: total, vgpu, passthrough, profile };
 }
 
-// Snapshot count (from the snapshot tree) + approximate size from layoutEx files.
-function snapshotInfo(snapXml, layoutXml) {
-  let snapshotCount = 0;
-  if (snapXml) snapshotCount = (snapXml.match(/<snapshot type="VirtualMachineSnapshot">/g) || []).length
-    || (snapXml.match(/<VirtualMachineSnapshotTree>/g) || []).length;
-  let bytes = 0;
-  if (snapshotCount > 0 && layoutXml) {
-    // Sum sizes of snapshot data (.vmsn) files as a best-effort delta size.
-    for (const blk of layoutXml.split('<file>').slice(1)) {
-      const type = /<type>([^<]+)<\/type>/.exec(blk)?.[1];
-      const size = Number(/<size>(\d+)<\/size>/.exec(blk)?.[1] || 0);
-      if (type === 'snapshotData' || /-(\d{6})\.vmdk/.test(blk)) bytes += size;
-    }
-  }
-  return { snapshotCount, snapshotSizeGB: Math.round(bytes / 1024 ** 3 * 10) / 10 };
-}
+// Snapshot count/size/createTime — soapParse.js의 순수 파서 snapshotInfo를 사용(워커 공유·단위테스트).
 
 // vCenter PerformanceManager intervals and the counters we expose on demand.
 export const PERF_INTERVALS = { realtime: 20, day: 300, week: 1800, month: 7200, year: 86400 };
@@ -909,7 +894,10 @@ export async function collectFromVCenterSoap(vc) {
         'name', 'runtime.host', 'parent', 'resourcePool', 'runtime.powerState', 'summary.config.numCpu', 'summary.config.memorySizeMB',
         'summary.config.guestFullName', 'summary.config.template', 'summary.quickStats.overallCpuUsage', 'summary.quickStats.guestMemoryUsage',
         'summary.storage.committed', 'summary.storage.uncommitted', 'guest.ipAddress', 'guest.net', 'guest.ipStack', 'guest.toolsRunningStatus',
-        'guest.toolsVersion', 'guest.toolsVersionStatus2', 'config.annotation', 'snapshot', 'layoutEx.file'] },
+        'guest.toolsVersion', 'guest.toolsVersionStatus2', 'config.annotation', 'snapshot', 'layoutEx.file',
+        // 버전/패치 준수·좀비 탐지용(추가 SOAP 왕복 없음): VM 하드웨어 버전(vmx-NN)과
+        // 연결 상태(orphaned/inaccessible/invalid = 고아·방치 VM 판별).
+        'config.version', 'runtime.connectionState'] },
       { type: 'Datastore', paths: ['name', 'summary.type', 'summary.capacity', 'summary.freeSpace', 'summary.accessible', 'info'] },
       { type: 'Network', paths: ['name'] },
       { type: 'DistributedVirtualPortgroup', paths: ['name'] },
@@ -1093,6 +1081,9 @@ export async function collectFromVCenterSoap(vc) {
           : powered ? 'NOT_RUNNING' : 'NOT_RUNNING',
         toolsVersion: p['guest.toolsVersion'] || '',
         toolsVersionStatus: p['guest.toolsVersionStatus2'] || '',
+        hwVersion: p['config.version'] || '',
+        // connected 외 값(orphaned/inaccessible/invalid/disconnected)은 좀비/방치 리포트 대상.
+        connectionState: (p['runtime.connectionState'] || 'connected').toLowerCase(),
         notes: (p['config.annotation'] || '').slice(0, 2000),
         tags: [], // vSphere Tags require the tagging REST API; not collected via SOAP
         gpu: null, // 아래에서 GPU 호스트 위 VM만 대상으로 채움

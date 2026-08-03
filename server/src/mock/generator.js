@@ -355,10 +355,19 @@ export function generateSnapshot() {
         resourcePool: RES_POOLS[(vm.idx * 3) % RES_POOLS.length],
         toolsStatus: powered ? (vm.idx % 17 === 0 ? 'OUTDATED' : 'RUNNING') : 'NOT_RUNNING',
         toolsVersion: TOOLS_VERSIONS[vm.idx % TOOLS_VERSIONS.length],
+        // 버전/패치 준수 리포트용 — 실환경 SOAP의 guest.toolsVersionStatus2와 동일한 값 집합.
+        toolsVersionStatus: vm.idx % 17 === 0 ? 'guestToolsNeedUpgrade' : vm.idx % 11 === 0 ? 'guestToolsUnmanaged' : 'guestToolsCurrent',
+        hwVersion: `vmx-${[19, 17, 15, 13, 10][vm.idx % 5]}`,
+        // 좀비 리포트용 — 소수(약 2%)는 고아/접근불가 상태.
+        connectionState: vm.idx % 53 === 0 ? 'orphaned' : vm.idx % 47 === 0 ? 'inaccessible' : 'connected',
         notes: vm.idx % 4 === 0 ? `${pick(['운영', '백업대상', '마이그레이션 예정', 'PoC', '담당: 인프라팀'])} · ${site.id}` : '',
         tags: VM_TAGS[vm.idx % VM_TAGS.length],
         snapshotCount: vm.idx % 6 === 0 ? intBetween(1, 4) : 0,
         snapshotSizeGB: vm.idx % 6 === 0 ? Math.round(vm.storageGB * (0.05 + (vm.idx % 5) * 0.06) * 10) / 10 : 0,
+        // 스냅샷 나이 감시 데모용 — 1일~180일 분포의 생성일.
+        snapshotOldestTs: vm.idx % 6 === 0 ? Date.now() - ((vm.idx % 180) + 1) * 86_400_000 : null,
+        snapshotNewestTs: vm.idx % 6 === 0 ? Date.now() - ((vm.idx % 30) + 1) * 86_400_000 : null,
+        snapshotNames: vm.idx % 6 === 0 ? ['pre-patch', 'before-upgrade'].slice(0, 1 + (vm.idx % 2)) : [],
         gpu: mkVmGpu(hostState, vm.idx),
       });
     }

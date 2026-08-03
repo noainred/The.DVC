@@ -102,7 +102,9 @@ import { snapMemo, sendCached } from '../util/snapCache.js';
 import { getInventory as getIdracInventory } from '../idrac/invCache.js';
 import { getSensorSeries } from '../idrac/sensorStore.js';
 import { fetchInventory as fetchIdracInventory, fetchSensors as fetchIdracSensors, probeGpuTelemetry } from '../idrac/redfish.js';
-import { listCollectors, addCollector, updateCollector, removeCollector, loadCollectors, ssrfBlockReason } from '../collector/registry.js';
+import { listCollectors, addCollector, updateCollector, removeCollector, loadCollectors, ssrfBlockReason, ssrfBlockReasonResolved } from '../collector/registry.js';
+import { dailyReportStatus, saveDailyReportSettings, runDailyReportNow } from '../reports/dailyReport.js';
+import { refreshCerts } from '../security/certMonitor.js';
 import { allRemoteServers, findRemoteServer, clearCollectorServers, dedupRemoteServers } from '../collector/remoteInventory.js';
 import { matchDatacenterId } from '../collector/datacenterMatch.js';
 import { serverInScope } from '../insights/analysisScope.js';
@@ -999,8 +1001,39 @@ adminRouter.get('/audit', adminOnly, (req, res) => {
 
 // Alerting: config + current firing/recent, save config, send a test notification.
 adminRouter.get('/alerts', adminOnly, (_req, res) => res.json(alertStatus()));
-adminRouter.put('/alerts', adminOnly, (req, res) => res.json({ ok: true, config: saveAlertConfig(req.body || {}) }));
+adminRouter.put('/alerts', adminOnly, async (req, res) => {
+  // 웹훅 URL은 서버가 대신 POST하는 주소 — SSRF resolved 가드(DNS 해석 결과까지)로 검증.
+  // 루프백/링크로컬로 해석되는 이름을 저장해 두고 알림이 내부를 찌르는 우회를 차단한다.
+  for (const key of ['slack', 'webhook', 'teams']) {
+    const url = req.body?.channels?.[key]?.url;
+    if (url) {
+      const ssrf = await ssrfBlockReasonResolved(url);
+      if (ssrf) return res.status(400).json({ ok: false, reason: `${key} 웹훅 URL: ${ssrf}` });
+    }
+  }
+  res.json({ ok: true, config: saveAlertConfig(req.body || {}) });
+});
 adminRouter.post('/alerts/test', adminOnly, async (req, res) => res.json(await testAlert(req.user?.username)));
+
+// 일일 헬스체크 리포트 — 스케줄 설정 + 즉시 발송(테스트).
+adminRouter.get('/report/daily', adminOnly, (_req, res) => res.json(dailyReportStatus()));
+adminRouter.put('/report/daily', adminOnly, (req, res) => {
+  const s = saveDailyReportSettings(req.body || {});
+  logAudit({ user: req.user?.username || 'unknown', action: '일일 리포트 설정 변경', detail: `enabled=${s.enabled} ${String(s.hour).padStart(2, '0')}:${String(s.minute).padStart(2, '0')}` });
+  res.json({ ok: true, settings: s });
+});
+adminRouter.post('/report/daily/run', adminOnly, async (req, res) => {
+  const r = await runDailyReportNow();
+  logAudit({ user: req.user?.username || 'unknown', action: '일일 리포트 수동 발송', detail: (r.results || []).join(', ') || r.reason || '' });
+  res.json(r);
+});
+
+// TLS 인증서 만료 감시 — 온디맨드 새로고침(12시간 주기 외 즉시 재프로브).
+adminRouter.post('/certs/refresh', adminOnly, async (req, res) => {
+  const r = await refreshCerts();
+  logAudit({ user: req.user?.username || 'unknown', action: '인증서 프로브 새로고침', detail: `${(r.items || []).length}건` });
+  res.json({ ok: true, count: (r.items || []).length, at: r.at });
+});
 
 // 이상동작 탐지(동시 다운) — vCenter별 임계 설정.
 adminRouter.get('/anomaly', adminOnly, (_req, res) => res.json(getAnomalySettings()));
