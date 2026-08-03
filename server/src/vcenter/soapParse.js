@@ -16,6 +16,53 @@ export function xmlUnescape(s) {
   });
 }
 
+/**
+ * VM 'snapshot'(VirtualMachineSnapshotInfo) + 'layoutEx.file' XML → 스냅샷 요약.
+ * 개수·근사 크기에 더해 생성일(가장 오래된/최신)과 이름 목록을 파싱한다 — 커뮤니티 표준
+ * 점검 항목인 "N일 이상 된 스냅샷" 탐지에 필요(추가 SOAP 왕복 없음, 이미 수집된 XML 재사용).
+ * 반환: { snapshotCount, snapshotSizeGB, snapshotOldestTs, snapshotNewestTs, snapshotNames }.
+ */
+export function snapshotInfo(snapXml, layoutXml) {
+  let snapshotCount = 0;
+  if (snapXml) snapshotCount = (snapXml.match(/<snapshot type="VirtualMachineSnapshot">/g) || []).length
+    || (snapXml.match(/<VirtualMachineSnapshotTree>/g) || []).length;
+  let bytes = 0;
+  if (snapshotCount > 0 && layoutXml) {
+    // Sum sizes of snapshot data (.vmsn) files as a best-effort delta size.
+    for (const blk of layoutXml.split('<file>').slice(1)) {
+      const type = /<type>([^<]+)<\/type>/.exec(blk)?.[1];
+      const size = Number(/<size>(\d+)<\/size>/.exec(blk)?.[1] || 0);
+      if (type === 'snapshotData' || /-(\d{6})\.vmdk/.test(blk)) bytes += size;
+    }
+  }
+  // 트리 내 모든 <createTime>(중첩 child 포함)에서 가장 오래된/최신 생성일을 뽑는다.
+  let oldest = null; let newest = null;
+  const names = [];
+  if (snapshotCount > 0 && snapXml) {
+    const ctRe = /<createTime>([^<]+)<\/createTime>/g;
+    let m;
+    while ((m = ctRe.exec(snapXml))) {
+      const ts = Date.parse(m[1]);
+      if (!Number.isFinite(ts)) continue;
+      if (oldest == null || ts < oldest) oldest = ts;
+      if (newest == null || ts > newest) newest = ts;
+    }
+    // 스냅샷 이름 — currentSnapshot 참조 등에는 <name>이 없고 트리 노드에만 있다.
+    const nameRe = /<name>([^<]*)<\/name>/g;
+    while ((m = nameRe.exec(snapXml)) && names.length < 5) {
+      const n = xmlUnescape(m[1]).trim();
+      if (n) names.push(n);
+    }
+  }
+  return {
+    snapshotCount,
+    snapshotSizeGB: Math.round(bytes / 1024 ** 3 * 10) / 10,
+    snapshotOldestTs: oldest,
+    snapshotNewestTs: newest,
+    snapshotNames: names,
+  };
+}
+
 /** Parse RetrieveProperties response into [{type, ref, props:{path:value}}]. */
 export function parseObjectContent(xml) {
   const out = [];

@@ -10,6 +10,7 @@ import { store } from './../store.js';
 import { getMetricsDb } from './db.js';
 import { loadMetricsSettings } from './settings.js';
 import { getGuestGpuHost } from '../gpu/store.js';
+import { updateVmStats } from '../reports/vmStats.js';
 
 let timer = null;
 let lastRun = null;
@@ -66,6 +67,10 @@ async function sampleOnceInner() {
   for (const [k, arr] of gpuByVc) rows.push({ metric: 'gpu_vc', k, v: round1(avg(arr)) });
 
   if (rows.length) { try { db.insertMany(rows, ts); } catch (e) { console.warn('[metrics] insert 실패:', e.message); } }
+
+  // VM 사용률 누적(인메모리) — 라이트사이징 리포트용. 행을 쌓지 않으므로(O(VM수) 메모리)
+  // 5,850 VM 규모에서도 시계열 DB 폭증 없이 평균/피크를 관측한다.
+  try { updateVmStats(snap, ts); } catch { /* 통계 실패가 샘플링을 막지 않게 */ }
 
   // Retention prune (runtime-configurable). 매 샘플마다 DELETE 스캔하면 비용이 크므로
   // 약 20샘플(기본 60s면 ~20분)에 1회만 실행한다 — store의 전력 적재 prune과 동일한 절감 패턴.
