@@ -10,27 +10,19 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { Worker } from 'node:worker_threads';
 import { config } from '../config.js';
+import { COLUMNS, toRecord } from './record.js';
 
 const DB_PATH = config.ipam.dbPath;
 
 let impl = null;
 let ready = null;
 
-const COLUMNS = ['ip', 'ip_num', 'vcenter_id', 'vcenter_name', 'owner_type', 'server_type', 'owner_name',
-  'power_state', 'guest_os', 'os_name', 'os_version', 'host_name', 'cluster', 'scope', 'multi_homed', 'duplicate', 'updated_at',
-  // 출처 대조 + 수동 관리(override) + 대역정책 노출 — 외부 프로그램이 vCenter/스캔/수동/정책을 구분하고 관리상태를 읽을 수 있게.
-  'discovery', 'reconcile', 'mgmt_status', 'mgmt_owner', 'label', 'device_type', 'first_seen', 'last_seen', 'usage_status',
-  'applied_by', 'range_policy_spec'];
-
-function toRecord(r, updatedAt) {
-  return [r.ip, r.ipNum ?? null, r.vcenterId, r.vcenterName, r.ownerType, r.serverType || (r.ownerType === 'host' ? 'BareMetal' : 'VM'), r.ownerName,
-    r.powerState || '', r.guestOS || '', r.osName || '', r.osVersion || '', r.hostName || '', r.cluster || '', r.scope || '',
-    r.multiHomed ? 1 : 0, r.duplicate ? 1 : 0, updatedAt,
-    r.discovery || '', r.reconcile || '', r.mgmtStatus || '', r.owner_ || '', r.label || '', r.deviceType || '',
-    r.firstSeen ? new Date(r.firstSeen).toISOString() : '', r.lastSeen ? new Date(r.lastSeen).toISOString() : '', r.usageStatus || '',
-    r.appliedBy || '', r.rangePolicySpec || ''];
-}
+// 이 행 수 미만은 워커로 넘기지 않는다 — 전송 오버헤드가 인라인 적재보다 커서 역효과.
+const MIN_OFFLOAD_ROWS = Number(process.env.IPAM_WRITE_MIN_ROWS || 500);
+// 0 이면 오프로딩 완전 비활성(항상 인라인).
+const OFFLOAD_ENABLED = process.env.IPAM_WRITE_WORKER !== '0';
 
 function initSqlite() {
   // eslint-disable-next-line import/no-unresolved
@@ -76,24 +68,86 @@ function initSqlite() {
     const del = db.prepare('DELETE FROM ip_records');
     const ins = db.prepare(`INSERT INTO ip_records (${COLUMNS.join(', ')}) VALUES (${COLUMNS.map(() => '?').join(', ')})`);
     const countStmt = db.prepare('SELECT COUNT(*) AS n, MAX(updated_at) AS at FROM ip_records');
+    // One transaction → a single commit/fsync for the whole snapshot, instead
+    // of thousands of auto-committed inserts that would block the event loop.
+    const syncInline = (rows, updatedAt) => {
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        del.run();
+        for (const r of rows) ins.run(...toRecord(r, updatedAt));
+        db.exec('COMMIT');
+      } catch (err) {
+        try { db.exec('ROLLBACK'); } catch { /* ignore */ }
+        throw err;
+      }
+    };
     return {
       kind: 'sqlite',
-      // One transaction → a single commit/fsync for the whole snapshot, instead
-      // of thousands of auto-committed inserts that would block the event loop.
-      sync: (rows, updatedAt) => {
-        db.exec('BEGIN IMMEDIATE');
-        try {
-          del.run();
-          for (const r of rows) ins.run(...toRecord(r, updatedAt));
-          db.exec('COMMIT');
-        } catch (err) {
-          try { db.exec('ROLLBACK'); } catch { /* ignore */ }
-          throw err;
-        }
+      // 트랜잭션으로 fsync 는 1회지만 바인딩·INSERT 는 여전히 동기 CPU 작업이다.
+      // 대량 스냅샷은 쓰기 워커로 넘겨 메인 이벤트 루프를 비운다(워커 불가 시 인라인).
+      sync: async (rows, updatedAt) => {
+        if (await syncViaWorker(rows, updatedAt)) return;
+        syncInline(rows, updatedAt);
       },
+      syncInline,
       info: () => { const r = countStmt.get(); return { count: r?.n || 0, updatedAt: r?.at || null }; },
     };
   });
+}
+
+// ── 쓰기 워커 ────────────────────────────────────────────────────────────────
+// 워커는 지연 생성하고, 한 번 실패하면 이후엔 인라인만 쓴다(재시도 폭주 방지).
+let writeWorker = null;
+let writeWorkerBroken = false;
+let writeSeq = 0;
+const writePending = new Map();
+
+function spawnWriteWorker() {
+  const worker = new Worker(new URL('./writeWorker.js', import.meta.url), {
+    workerData: { dbPath: DB_PATH },
+  });
+  worker.on('message', (msg) => {
+    const task = writePending.get(msg.id);
+    if (!task) return;
+    writePending.delete(msg.id);
+    if (msg.ok) task.resolve(true);
+    else task.reject(new Error(msg.error || 'ipam write worker 실패'));
+    if (!writePending.size) worker.unref();      // 유휴 워커가 프로세스 종료를 막지 않게
+  });
+  const onDown = (err) => {
+    // 워커가 죽으면 대기 중이던 요청은 인라인으로 되돌린다(호출자가 폴백을 타게 false).
+    writeWorker = null;
+    writeWorkerBroken = true;
+    if (err) console.warn(`[ipam] 쓰기 워커 종료(${err.message || err}) — 인라인 적재로 폴백합니다.`);
+    for (const [, task] of writePending) task.resolve(false);
+    writePending.clear();
+  };
+  worker.on('error', onDown);
+  worker.on('exit', (code) => { if (code !== 0) onDown(new Error(`exit ${code}`)); });
+  return worker;
+}
+
+/** 워커로 적재를 시도한다. 오프로딩하지 않았거나 실패하면 false(호출자가 인라인 수행). */
+async function syncViaWorker(rows, updatedAt) {
+  if (!OFFLOAD_ENABLED || writeWorkerBroken || rows.length < MIN_OFFLOAD_ROWS) return false;
+  try {
+    if (!writeWorker) writeWorker = spawnWriteWorker();
+  } catch (err) {
+    writeWorkerBroken = true;
+    console.warn(`[ipam] 쓰기 워커 생성 실패(${err.message}) — 인라인 적재를 사용합니다.`);
+    return false;
+  }
+  const id = ++writeSeq;
+  const done = new Promise((resolve, reject) => writePending.set(id, { resolve, reject }));
+  writeWorker.ref();
+  try {
+    writeWorker.postMessage({ id, rows, updatedAt });
+    return await done;
+  } catch (err) {
+    writePending.delete(id);
+    console.warn(`[ipam] 워커 적재 실패(${err.message}) — 인라인으로 다시 시도합니다.`);
+    return false;
+  }
 }
 
 function initJsonFallback() {
@@ -133,7 +187,9 @@ async function getImpl() {
 export async function syncLedger(rows) {
   try {
     const i = await getImpl();
-    i.sync(rows, new Date().toISOString());
+    // sync 는 워커 오프로딩 시 Promise 를 돌려준다 — await 하지 않으면 실패가
+    // unhandled rejection 으로 새고 호출자는 성공했다고 믿는다.
+    await i.sync(rows, new Date().toISOString());
     return true;
   } catch (err) {
     console.warn(`[ipam] 레저 저장 실패: ${err.message}`);

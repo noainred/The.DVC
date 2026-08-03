@@ -190,6 +190,10 @@ export const config = {
     // Issuer label shown in Google Authenticator when enrolling TOTP.
     totpIssuer: process.env.TOTP_ISSUER || 'VMware Portal',
   },
+  // 서비스 허브(pyportal) 주소. 설정하면 특수 기능에 '서비스 허브' 바로가기가 나타난다.
+  // 별도 프로세스·별도 포트로 도는 포탈이라 하드코딩하지 않고 env 로 받는다.
+  // 인증된 응답(/auth/me·로그인)에서만 내려준다 — 미인증 응답에 내부 주소를 싣지 않는다.
+  serviceHubUrl: (process.env.SERVICE_HUB_URL || '').trim().replace(/\/+$/, ''),
   upgrade: {
     // Opt-in: the whole feature is OFF unless explicitly enabled.
     // EDGE_MODE=all + CENTRAL_URL 이면 중앙발 자동 업그레이드 기본 on(UPGRADE_ENABLED=false로 off).

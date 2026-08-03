@@ -28,7 +28,14 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
   - **전력 latest 인메모리 캐시**(`idrac/db.js withLatestCache`): latestAll(GROUP BY MAX)은 테이블 풀스캔이라(90일 수렴 시 수억 행) 매 30초 3회 호출이 초 단위 블로킹이었음. 기동 시 1회 시드 후 쓰기 경로에서 O(1) 갱신 — **getDb() 래퍼를 우회한 직접 쓰기 금지**(캐시가 낡음). 전력 대시보드 24h 집계는 60초 캐시(`idrac/service.js aggCache`).
   - **대량 export 청크 패턴**(`routes/api.js gpuSeriesExport`): 대량 시계열 조회는 5만 행 ts 윈도우 청크 + 청크 사이 `setImmediate` 양보 + 행 상한(`GPU_EXPORT_MAX_ROWS` 기본 30만). 1M행 동기 dump는 이벤트 루프 ~10초 정지 실측 — 새 export 추가 시 동일 패턴 필수.
   - **웹 폴링 뷰 오류 처리**: 데이터 보유 중 일시 폴링 오류 1회로 화면 전체를 ErrorBox로 갈아치우지 않는다 — `if (error && !data)`일 때만 전체 오류, 그 외엔 배너(고RTT에서 대시보드 깜빡임 방지). 스코프(파라미터) 변경 시 usePolling이 직전 데이터를 비워 이전 스코프 데이터 표시를 막는다.
-  - 미해결 후속: node worker_threads로 동기 SQLite 쓰기/SOAP 파싱 오프로딩, 전력 대시보드 시간당 롤업 테이블(캐시 미스 첫 요청의 윈도우 스캔 제거), 위임 잡 인출 2단계 확인응답(claim→ack), 업그레이드 적용 중 라이브 SQLite cpSync 정합성.
+  - **대량 SQLite 쓰기 오프로딩**(`ipam/writeWorker.js`, v2.215): 레저 동기화는 DELETE+수천 행
+    INSERT 다. 트랜잭션으로 fsync 는 1회지만 **바인딩·INSERT 자체가 동기 CPU** 라 5,850 VM 규모에서
+    그 시간 동안 메인 루프가 멈춘다(node:sqlite 는 동기 API 뿐 — 스레드를 옮기는 것 말고 방법이 없다).
+    쓰기는 워커만 하고 메인은 폴백일 때만 쓴다(두 연결이 동시에 쓰면 SQLITE_BUSY). 컬럼 정의는
+    `ipam/record.js` 하나를 공유할 것 — 복사해 두면 컬럼 추가한 날 워커 INSERT 만 밀린다.
+    워커 생성/실행 실패는 항상 인라인 폴백(`IPAM_WRITE_WORKER=0` 으로 완전 비활성).
+  - 미해결 후속: 전력 대시보드 시간당 롤업 테이블(캐시 미스 첫 요청의 윈도우 스캔 제거),
+    위임 잡 인출 2단계 확인응답(claim→ack).
 
 ## 보안 불변조건 (회귀 방지 — 유지할 것)
 
@@ -119,6 +126,26 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
   로만 렌더한다(innerHTML 조립 금지).
 - **백업은 자격증명 사본**: `users.json`(비밀번호 해시) 포함 → 목록·다운로드·복원은 admin 세션만,
   파일은 0600.
+
+### v2.215 추가분 (유지할 것)
+
+- **세션은 서명 토큰**(`auth.py SessionStore`): 재시작해도 로그인이 유지된다. 서명 키는
+  `data_dir/session-secret`(0600) — **키가 새면 임의 계정 토큰 위조**다. 무효화는 2중이다:
+  `users.json` 의 `tokenVersion`(재시작 후에도 유효) + 메모리 **발급시각 컷오프**. 토큰 payload 의
+  `i`(발급시각)를 없애면 계정 폐기가 '폐기 이후 재로그인'까지 막아 사용자가 영영 못 들어온다.
+- **웹훅 URL 도 사용자 입력**: 저장은 `http`/`https` 만(`settings.py _safe_webhook`), 전송 직전
+  `hub/ssrf.py` 가드를 다시 통과시킨다(`notify.py _post_webhook`). 저장 시점만 검사하면
+  DNS 가 나중에 루프백으로 바뀌는 경우를 놓친다.
+- **알림은 전환에만**: 장애 지속 중 매 주기 알림은 곧 무시된다(알림 피로). 첫 관측은 기준점만
+  잡고 알리지 않는다 — 이 규칙을 빼면 재시작마다 전 링크 알림이 폭발한다.
+- **감사 로그는 best-effort + 비밀값 필터**: 기록 실패가 요청을 막으면 안 되고(`audit.py` 는
+  예외를 삼킨다), `password/token/secret/hash` 류 키는 기록 단계에서 버린다. 조회 API 는
+  **admin 전용**(계정명·출발지가 드러난다).
+- **점검 이력 롤업은 적재 트랜잭션 안에서**: `checks_hourly` upsert 를 원본 insert 와 같은
+  BEGIN/commit 에 넣어야 둘이 어긋나지 않는다. 별도 커밋으로 분리하지 말 것. `prune()` 은
+  원본과 롤업을 함께 지운다(원본만 지우면 집계가 영원히 남는다).
+- **표시 순서는 배열 순서 자체**: 정렬용 `order` 필드를 따로 두면 가져오기·복원 때 그 필드만
+  어긋나 순서가 뒤섞인다. `move()` 는 리스트를 교환하고 그대로 저장한다.
 
 ## 프론트엔드 회귀 방지
 

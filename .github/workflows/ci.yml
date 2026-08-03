@@ -1,0 +1,74 @@
+name: ci
+
+# PR·push 마다 테스트를 돌린다.
+#
+# 왜 필요한가: 릴리스 워크플로는 '빌드해서 올리는' 일만 하므로, 테스트가 깨진 채로 머지돼도
+# 아무도 모른 채 릴리스까지 갈 수 있다. 특히 pyportal 의 파이썬 테스트는 지금까지 로컬에서만
+# 돌았다 — CI 에 넣어야 다른 사람이 고칠 때도 회귀가 자동으로 걸린다.
+
+on:
+  push:
+    branches: ['**']
+    paths-ignore: ['**/*.md', 'docs/**']
+  pull_request:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  # 같은 브랜치에 연속 push 하면 이전 실행은 취소한다(러너 낭비 방지).
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  server-and-web:
+    name: 서버 단위테스트 + 웹 빌드
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.20.0'
+
+      - name: 의존성 설치
+        run: |
+          npm --prefix server ci --no-audit --no-fund
+          npm --prefix web ci --no-audit --no-fund
+
+      - name: 서버 단위테스트 (node:test)
+        run: npm --prefix server test
+
+      - name: 웹 빌드 (vite)
+        run: npm --prefix web run build
+
+  pyportal:
+    name: 서비스 허브 테스트 (Python)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 운영 대상(Rocky 9 = 3.9)과 최신을 함께 돌려 문법·표준라이브러리 차이를 잡는다.
+        python-version: ['3.9', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: 외부 의존성이 없는지 확인
+        # 표준 라이브러리 전용이 이 앱의 배포 전제다(오프라인 서버에 pip 불가) — 깨지면 즉시 실패.
+        run: |
+          if ls pyportal/requirements*.txt pyportal/pyproject.toml 2>/dev/null | grep -q .; then
+            echo "::error::pyportal 은 표준 라이브러리 전용이어야 합니다(의존성 파일 발견)"; exit 1
+          fi
+          python3 -c "import sys; print('python', sys.version)"
+
+      - name: 구문 검사(전 파일 컴파일)
+        run: python3 -m compileall -q pyportal
+
+      - name: 단위·E2E 테스트
+        working-directory: pyportal
+        run: python3 -m unittest discover -s tests -v

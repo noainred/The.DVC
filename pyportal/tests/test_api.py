@@ -368,6 +368,109 @@ class SettingsApiTest(ServerCase):
         request(self.url + "/api/settings/users/temp1", "DELETE", None, self.auth())
 
 
+class OrderingTest(ServerCase):
+    """표시 순서 지정 — 대시보드·센터 현황은 저장된 배열 순서를 그대로 쓴다."""
+
+    def test_shortcut_move_swaps_neighbours(self):
+        code, payload, _ = request(self.url + "/api/shortcuts", headers=self.auth())
+        first, second = payload["shortcuts"][0]["id"], payload["shortcuts"][1]["id"]
+        code, payload, _ = request(self.url + "/api/shortcuts/" + second + "/move", "POST",
+                                   {"direction": "up"}, self.auth())
+        self.assertEqual(code, 200)
+        self.assertTrue(payload["moved"])
+        self.assertEqual([payload["shortcuts"][0]["id"], payload["shortcuts"][1]["id"]],
+                         [second, first])
+        # 되돌려 놓는다(다른 테스트의 기대 순서를 흔들지 않게).
+        request(self.url + "/api/shortcuts/" + second + "/move", "POST",
+                {"direction": "down"}, self.auth())
+
+    def test_move_at_edge_is_not_an_error(self):
+        code, payload, _ = request(self.url + "/api/shortcuts", headers=self.auth())
+        top = payload["shortcuts"][0]["id"]
+        code, payload, _ = request(self.url + "/api/shortcuts/" + top + "/move", "POST",
+                                   {"direction": "up"}, self.auth())
+        self.assertEqual(code, 200)
+        self.assertFalse(payload["moved"])
+
+    def test_move_requires_session(self):
+        code, payload, _ = request(self.url + "/api/shortcuts", headers=self.auth())
+        top = payload["shortcuts"][0]["id"]
+        self.assertEqual(request(self.url + "/api/shortcuts/" + top + "/move", "POST",
+                                 {"direction": "down"})[0], 401)
+
+    def test_datacenter_move_changes_visible_window(self):
+        # 표시 개수 1 이면 '맨 앞 1개' 만 공개된다 — 순서를 바꾸면 보이는 센터가 바뀐다.
+        request(self.url + "/api/settings/display", "PUT", {"datacenterLimit": 1}, self.auth())
+        try:
+            _, payload, _ = request(self.url + "/api/settings/datacenters", headers=self.auth())
+            second = payload["datacenters"][1]["id"]
+            request(self.url + "/api/settings/datacenters/" + second + "/move", "POST",
+                    {"direction": "up"}, self.auth())
+            _, public, _ = request(self.url + "/api/datacenters")
+            self.assertEqual(public["datacenters"][0]["id"], second)
+            request(self.url + "/api/settings/datacenters/" + second + "/move", "POST",
+                    {"direction": "down"}, self.auth())
+        finally:
+            request(self.url + "/api/settings/display", "PUT", {"datacenterLimit": 0}, self.auth())
+
+    def test_bad_direction_is_rejected(self):
+        code, payload, _ = request(self.url + "/api/shortcuts", headers=self.auth())
+        top = payload["shortcuts"][0]["id"]
+        self.assertEqual(request(self.url + "/api/shortcuts/" + top + "/move", "POST",
+                                 {"direction": "sideways"}, self.auth())[0], 400)
+
+
+class NotifyAndAuditTest(ServerCase):
+    def test_notify_section_round_trips(self):
+        code, payload, _ = request(self.url + "/api/settings/notify", "PUT", {
+            "enabled": True, "webhookUrl": "https://hooks.internal/x",
+            "failThreshold": 3, "minIntervalMinutes": 20,
+        }, self.auth())
+        self.assertEqual(code, 200)
+        self.assertEqual(payload["value"]["failThreshold"], 3)
+        self.assertEqual(payload["value"]["webhookUrl"], "https://hooks.internal/x")
+
+    def test_non_http_webhook_is_dropped(self):
+        # 저장 URL 을 서버가 그대로 요청하므로 스킴을 좁혀 둔다.
+        _, payload, _ = request(self.url + "/api/settings/notify", "PUT",
+                                {"webhookUrl": "javascript:alert(1)"}, self.auth())
+        self.assertEqual(payload["value"]["webhookUrl"], "")
+
+    def test_notify_test_without_url_is_rejected(self):
+        request(self.url + "/api/settings/notify", "PUT", {"webhookUrl": ""}, self.auth())
+        self.assertEqual(request(self.url + "/api/settings/notify/test", "POST",
+                                 {}, self.auth())[0], 400)
+
+    def test_audit_records_login_and_settings_change(self):
+        request(self.url + "/api/settings/display", "PUT", {"datacenterLimit": 0}, self.auth())
+        code, payload, _ = request(self.url + "/api/settings/audit", headers=self.auth())
+        self.assertEqual(code, 200)
+        actions = [entry["action"] for entry in payload["entries"]]
+        self.assertIn("settings.update", actions)
+        self.assertIn("login", actions)
+
+    def test_audit_never_stores_secrets(self):
+        request(self.url + "/api/settings/users", "POST",
+                {"username": "audituser", "role": "viewer", "password": "audit-password-1"},
+                self.auth())
+        _, payload, _ = request(self.url + "/api/settings/audit", headers=self.auth())
+        raw = json.dumps(payload, ensure_ascii=False)
+        self.assertNotIn("audit-password-1", raw)
+        request(self.url + "/api/settings/users/audituser", "DELETE", None, self.auth())
+
+    def test_audit_requires_admin(self):
+        request(self.url + "/api/settings/users", "POST",
+                {"username": "auditviewer", "role": "viewer", "password": "viewer-password-1"},
+                self.auth())
+        token = self._login("viewer-password-1")
+        self.assertEqual(request(self.url + "/api/settings/audit",
+                                 headers={"X-Settings-Token": token})[0], 403)
+        request(self.url + "/api/settings/users/auditviewer", "DELETE", None, self.auth())
+
+    def test_audit_is_anonymous_denied(self):
+        self.assertEqual(request(self.url + "/api/settings/audit")[0], 401)
+
+
 class KeepAliveTest(ServerCase):
     """본문을 쓰지 않는 핸들러 뒤의 요청이 깨지지 않아야 한다(과거 501 desync)."""
 

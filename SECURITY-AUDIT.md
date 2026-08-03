@@ -108,6 +108,22 @@ v2.211~2.213 에서 새로 추가된 **별도 페이지 `pyportal`(Python 표준
 
 취약점은 아니지만 **다음에 손대면 가치가 큰 순서**로 정리했다. 난이도는 구현 규모 기준.
 
+> **반영 현황 (v2.215.0)** — 사용자 지시로 **5·7 을 제외한 8건(1·2·3·4·6·8·9·10)을 구현**했다.
+> 남은 2건은 아래 표에서 `⏳ 보류` 로 표시한다.
+>
+> | # | 상태 | 구현 위치 |
+> |---|---|---|
+> | 1 | ✅ 반영 | `pyportal/hub/history.py` — `checks_hourly` 롤업(적재 트랜잭션 내 upsert) + 기존 DB 1회 백필, 버킷 ≥1h(7d·30d)는 롤업만 조회 |
+> | 2 | ✅ 반영 | `pyportal/hub/notify.py` + 설정 `notify` 섹션 · `POST /api/settings/notify/test` · 설정 화면 '알림 & 감사 로그' |
+> | 3 | ✅ 반영 | `store.move()` / `dcstore.move()` + `POST /api/{shortcuts,settings/datacenters}/<id>/move` + 표의 ↑↓ 버튼 |
+> | 4 | ✅ 반영 | `auth.py SessionStore` — HMAC 서명 토큰(만료·발급시각) + `tokenVersion` 무효화, 키는 `data_dir/session-secret`(0600) |
+> | 5 | ⏳ 보류 | 사용자 지시로 제외(백업 아카이브 암호화) |
+> | 6 | ✅ 반영 | `pyportal/hub/audit.py` — JSON Lines·회전·비밀값 필터, `GET /api/settings/audit`(admin) |
+> | 7 | ⏳ 보류 | 사용자 지시로 제외(허브 자체 TLS) |
+> | 8 | ✅ 반영 | `.github/workflows/ci.yml` — 서버 node:test + 웹 빌드 + pyportal 파이썬 테스트(3.9·3.12, stdlib 전용 검증) |
+> | 9 | ✅ 반영 | 포탈 특수 기능 '서비스 허브'(`SERVICE_HUB_URL`, 인증 후에만 노출) ↔ 허브 헤더 '모니터링 포탈'(`HUB_PORTAL_URL`) |
+> | 10 | ✅ 반영 | ① `server/src/ipam/writeWorker.js` — 레저 대량 적재 worker_threads 오프로딩(실패 시 인라인 폴백) ② `upgrade/dbCheckpoint.js` 는 이미 배선돼 있었음(`upgrade/manager.js`·`routes/collector.js`) |
+
 | # | 개선 포인트 | 왜 필요한가 | 난이도 |
 |---|---|---|---|
 | 1 | **점검 이력 시간당 롤업 테이블** | 한 달 차트는 매번 원본 수십만 행을 스캔해 집계한다. 링크가 늘고 주기가 짧아지면(1분) 첫 조회가 눈에 띄게 느려진다. Node 포탈이 전력 시계열에서 쓴 `power_hourly` 패턴(적재 트랜잭션 내 증분 upsert)을 그대로 적용하면 수억 행 → 수백 행 스캔이 된다 | 보통 |

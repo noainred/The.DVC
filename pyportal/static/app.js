@@ -11,13 +11,14 @@
   var HUB_TOKEN_KEY = "hub_token";
   var SETTINGS_TOKEN_KEY = "hub_settings_token";
   var TABS = ["dashboard", "datacenters", "health", "settings"];
-  var SETTINGS_PANES = ["shortcuts", "datacenters", "users", "backup"];
+  var SETTINGS_PANES = ["shortcuts", "datacenters", "users", "backup", "alerts"];
 
   var SETTINGS_META = {
     shortcuts: { title: "바로가기 관리", desc: "이름과 URL만 입력하면 대시보드에 바로가기가 생성됩니다." },
     datacenters: { title: "데이터센터 구성", desc: "사이트 목록·좌표·랙 수·상태를 직접 관리합니다. 지도와 통계에 즉시 반영됩니다." },
     users: { title: "사용자 구성 및 설정", desc: "설정 화면에 들어올 수 있는 계정과 역할을 관리합니다." },
-    backup: { title: "현재 설정 백업", desc: "설정 파일 스냅샷을 만들고, 주기와 보관 수량을 정합니다." }
+    backup: { title: "현재 설정 백업", desc: "설정 파일 스냅샷을 만들고, 주기와 보관 수량을 정합니다." },
+    alerts: { title: "알림 & 감사 로그", desc: "링크가 정상↔장애로 바뀔 때만 웹훅으로 알리고, 설정 변경 이력을 확인합니다." }
   };
 
   var CATEGORY_CLASS = {
@@ -60,6 +61,8 @@
     settings: null,
     users: [],
     backups: [],
+    audit: [],            // 감사 로그(최근순, admin 만 조회 가능)
+    auditDenied: false,
     editingId: null,
     editingDcId: null,
     busy: false,
@@ -852,6 +855,7 @@
       state.dcLimit = data.displayLimit || 0;
       fillFormSelects();
       renderSettings();
+      return loadAudit();          // admin 이 아니면 조용히 '권한 없음'으로 표시된다
     }).catch(function (err) {
       if (err.message.indexOf("로그인") === -1) toast(err.message, "err");
     });
@@ -863,6 +867,7 @@
     renderDcSettings();
     renderUserSettings();
     renderBackupSettings();
+    renderAlertSettings();
   }
 
   /* ---------------- 설정 1: 바로가기 ---------------- */
@@ -943,6 +948,13 @@
         el("td", {}, [el("span", { className: "badge " + (CATEGORY_CLASS[sc.category] || "cat-custom"),
                                    text: categoryLabel(sc.category) })]),
         el("td", {}, [el("div", { className: "row-actions" }, [
+          // 대시보드는 이 표의 순서 그대로 그린다 — 자주 쓰는 링크를 위로 올릴 수 있게.
+          el("button", { className: "btn btn-ghost btn-sm", type: "button", text: "↑",
+                         attrs: { title: "위로" },
+                         on: { click: function () { moveShortcut(sc, "up"); } } }),
+          el("button", { className: "btn btn-ghost btn-sm", type: "button", text: "↓",
+                         attrs: { title: "아래로" },
+                         on: { click: function () { moveShortcut(sc, "down"); } } }),
           el("button", { className: "btn btn-ghost btn-sm", type: "button", text: "수정",
                          on: { click: function () { startEdit(sc.id); } } }),
           el("button", { className: "btn btn-danger btn-sm", type: "button", text: "삭제",
@@ -1005,6 +1017,13 @@
         el("td", {}, [el("span", { className: "badge badge-dc",
                                    text: STATUS_LABEL[dc.status] || dc.status })]),
         el("td", {}, [el("div", { className: "row-actions" }, [
+          // '표시 개수 N' 은 앞에서 N개를 자르므로, 어떤 센터를 띄울지는 이 순서로 정해진다.
+          el("button", { className: "btn btn-ghost btn-sm", type: "button", text: "↑",
+                         attrs: { title: "위로" },
+                         on: { click: function () { moveDc(dc, "up"); } } }),
+          el("button", { className: "btn btn-ghost btn-sm", type: "button", text: "↓",
+                         attrs: { title: "아래로" },
+                         on: { click: function () { moveDc(dc, "down"); } } }),
           el("button", { className: "btn btn-ghost btn-sm", type: "button", text: "수정",
                          on: { click: function () { startDcEdit(dc); } } }),
           el("button", { className: "btn btn-danger btn-sm", type: "button", text: "삭제",
@@ -1040,6 +1059,18 @@
       toast("데이터센터를 저장했습니다.", "ok");
       return refreshDatacenters();
     }).catch(function (err) { setMsg("dc-form-msg", err.message, "err"); });
+  }
+
+  function moveDc(dc, direction) {
+    api("/api/settings/datacenters/" + encodeURIComponent(dc.id) + "/move",
+        { method: "POST", body: { direction: direction } })
+      .then(function (data) {
+        if (!data.moved) { toast(direction === "up" ? "이미 맨 위입니다." : "이미 맨 아래입니다."); return; }
+        state.dcAll = data.datacenters;
+        fillFormSelects();
+        return refreshDatacenters();     // 표시 개수 컷이 순서에 따라 달라진다
+      })
+      .catch(function (err) { toast(err.message, "err"); });
   }
 
   function deleteDc(dc) {
@@ -1245,6 +1276,100 @@
     }).catch(function (err) { setMsg("backup-msg", err.message, "err"); });
   }
 
+  /* ---------------- 메인 포탈 상호 링크 ---------------- */
+
+  function renderPortalLink(url) {
+    var link = $("portal-link");
+    if (!link) return;
+    // 서버가 스킴을 검증한 값만 내려주지만, 화면에서도 한 번 더 확인한다
+    // (javascript: 같은 값이 href 로 들어가면 클릭이 스크립트 실행이 된다).
+    var safe = typeof url === "string" && /^https?:\/\//i.test(url) ? url : "";
+    link.hidden = !safe;
+    if (safe) {
+      link.href = safe;
+      link.title = "메인 모니터링 포탈로 이동: " + safe;
+    }
+  }
+
+  /* ---------------- 설정 5: 알림 & 감사 ---------------- */
+
+  function renderAlertSettings() {
+    if (!state.settings || !state.settings.notify) return;
+    var cfg = state.settings.notify;
+    $("n-enabled").checked = !!cfg.enabled;
+    $("n-url").value = cfg.webhookUrl || "";
+    $("n-threshold").value = cfg.failThreshold;
+    $("n-interval").value = cfg.minIntervalMinutes;
+    renderAuditTable();
+  }
+
+  function renderAuditTable() {
+    var body = $("audit-tbody");
+    if (!body) return;
+    clear(body);
+    var rows = state.audit || [];
+    $("audit-count").textContent = rows.length ? "(최근 " + rows.length + "건)" : "";
+    if (!rows.length) {
+      body.appendChild(el("tr", {}, [el("td", {
+        className: "muted", attrs: { colspan: "5" },
+        text: state.auditDenied ? "감사 로그는 admin 계정만 볼 수 있습니다." : "기록이 없습니다."
+      })]));
+      return;
+    }
+    rows.forEach(function (entry) {
+      var detail = entry.detail ? JSON.stringify(entry.detail) : "";
+      body.appendChild(el("tr", {}, [
+        el("td", { className: "muted", text: (entry.ts || "").replace("T", " ").replace("Z", "") }),
+        el("td", {}, [el("strong", { text: entry.action || "-" }),
+                      detail ? el("div", { className: "muted", text: detail }) : null]),
+        el("td", { text: entry.actor || "-" }),
+        el("td", { className: "muted", text: entry.client || "-" }),
+        el("td", {}, [el("span", {
+          className: "badge " + (entry.result === "ok" ? "cat-monitoring" : "cat-security"),
+          text: entry.result || "-"
+        })])
+      ]));
+    });
+  }
+
+  function loadAudit() {
+    // admin 전용이라 viewer 로 로그인하면 403 이 온다 — 오류 토스트 대신 안내 문구로 바꾼다.
+    return api("/api/settings/audit").then(function (data) {
+      state.audit = data.entries || [];
+      state.auditDenied = false;
+      $("audit-file").textContent = data.file ? "파일: " + data.file : "";
+      renderAuditTable();
+    }).catch(function () {
+      state.audit = [];
+      state.auditDenied = true;
+      renderAuditTable();
+    });
+  }
+
+  function saveNotifySettings() {
+    api("/api/settings/notify", { method: "PUT", body: {
+      enabled: $("n-enabled").checked,
+      webhookUrl: $("n-url").value,
+      failThreshold: Number($("n-threshold").value),
+      minIntervalMinutes: Number($("n-interval").value)
+    } }).then(function (data) {
+      state.settings = data.settings;
+      renderAlertSettings();
+      // 서버가 http/https 가 아닌 값을 버리므로, 그 사실을 사용자에게 알린다.
+      var kept = data.settings.notify.webhookUrl;
+      setMsg("notify-msg", (!kept && $("n-url").value.trim())
+        ? "저장했지만 URL 은 http:// 또는 https:// 로 시작해야 합니다."
+        : "저장했습니다.", kept || !$("n-url").value.trim() ? "ok" : "err");
+    }).catch(function (err) { setMsg("notify-msg", err.message, "err"); });
+  }
+
+  function testNotify() {
+    setMsg("notify-msg", "전송 중…");
+    api("/api/settings/notify/test", { method: "POST", body: { webhookUrl: $("n-url").value } })
+      .then(function () { setMsg("notify-msg", "테스트 알림을 보냈습니다.", "ok"); })
+      .catch(function (err) { setMsg("notify-msg", err.message, "err"); });
+  }
+
   function saveHealthSettings() {
     api("/api/settings/health", { method: "PUT", body: {
       autoEnabled: $("h-enabled").checked,
@@ -1330,6 +1455,16 @@
     api("/api/shortcuts/" + encodeURIComponent(sc.id),
         { method: "PUT", body: { isFavorite: !sc.isFavorite } })
       .then(function (data) { applyShortcuts(data.shortcuts); })
+      .catch(function (err) { toast(err.message, "err"); });
+  }
+
+  function moveShortcut(sc, direction) {
+    api("/api/shortcuts/" + encodeURIComponent(sc.id) + "/move",
+        { method: "POST", body: { direction: direction } })
+      .then(function (data) {
+        if (!data.moved) { toast(direction === "up" ? "이미 맨 위입니다." : "이미 맨 아래입니다."); return; }
+        applyShortcuts(data.shortcuts);
+      })
       .catch(function (err) { toast(err.message, "err"); });
   }
 
@@ -1537,6 +1672,11 @@
     $("b-save").addEventListener("click", saveBackupSettings);
     $("b-now").addEventListener("click", backupNow);
     $("h-save").addEventListener("click", saveHealthSettings);
+    $("n-save").addEventListener("click", saveNotifySettings);
+    $("n-test").addEventListener("click", testNotify);
+    $("audit-refresh").addEventListener("click", function () {
+      loadAudit().then(function () { toast("감사 로그를 새로 읽었습니다.", "ok"); });
+    });
 
     $("token-save").addEventListener("click", function () {
       var value = $("token-input").value.trim();
@@ -1566,6 +1706,7 @@
         }
         updateCounts();
         fillFormSelects();
+        renderPortalLink(results[0].portalUrl);
         renderSessionUi();
         applyShortcuts(results[2].shortcuts || []);
         return loadLatest();

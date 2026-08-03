@@ -1,5 +1,7 @@
 """설정 접근 인증 — 초기 비밀번호 파일 · 계정 · 세션 · 잠금."""
 
+import base64
+import json
 import sys
 import tempfile
 import time
@@ -144,6 +146,41 @@ class SessionTest(unittest.TestCase):
         sessions.destroy_user("admin")
         self.assertIsNone(sessions.resolve(a["token"]))
         self.assertIsNotNone(sessions.resolve(b["token"]))
+
+    def test_relogin_after_destroy_user_works(self):
+        # 계정 단위 폐기가 '폐기 이후 발급분'까지 막으면 비밀번호를 바꾼 사용자가
+        # 재로그인해도 곧바로 튕긴다.
+        sessions = SessionStore(60, 3, 60)
+        sessions.destroy_user("admin")
+        fresh = sessions.create({"username": "admin", "role": "admin"})
+        self.assertIsNotNone(sessions.resolve(fresh["token"]))
+
+    def test_token_survives_restart_when_secret_is_persisted(self):
+        # 무상태 서명 세션(v2.215) — 서버를 재시작해도 전원 로그아웃되지 않아야 한다.
+        with tempfile.TemporaryDirectory() as tmp:
+            secret = Path(tmp) / "session-secret"
+            first = SessionStore(60, 3, 60, secret_path=secret)
+            token = first.create({"username": "admin", "role": "admin"})["token"]
+            second = SessionStore(60, 3, 60, secret_path=secret)      # 재기동 재현
+            self.assertEqual(second.resolve(token)["username"], "admin")
+
+    def test_token_is_rejected_by_a_different_secret(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            token = SessionStore(60, 3, 60, secret_path=Path(tmp) / "a") \
+                .create({"username": "admin", "role": "admin"})["token"]
+            other = SessionStore(60, 3, 60, secret_path=Path(tmp) / "b")
+            self.assertIsNone(other.resolve(token))
+
+    def test_tampered_payload_is_rejected(self):
+        sessions = SessionStore(60, 3, 60)
+        token = sessions.create({"username": "viewer1", "role": "viewer"})["token"]
+        encoded, _, signature = token.rpartition(".")
+        forged = base64.urlsafe_b64encode(
+            json.dumps({"u": "admin", "r": "admin", "v": 1, "e": time.time() + 60, "i": 1},
+                       separators=(",", ":"), sort_keys=True).encode("utf-8")
+        ).decode("ascii").rstrip("=")
+        self.assertIsNone(sessions.resolve(forged + "." + signature),
+                          "서명 없이 role 을 admin 으로 바꿔 넣을 수 있으면 안 된다.")
 
 
 if __name__ == "__main__":

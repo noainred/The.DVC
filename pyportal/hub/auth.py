@@ -13,11 +13,14 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
+import json
 import secrets
 import threading
 import time
+from pathlib import Path
 
 from .config import config
 from .jsonfile import now_iso, read_json, write_json, write_text
@@ -95,11 +98,18 @@ class UserStore:
         if not username:
             return None
         role = entry.get("role")
+        try:
+            version = int(entry.get("tokenVersion", 1))
+        except (TypeError, ValueError):
+            version = 1
         return {
             "username": username,
             "role": role if role in ROLES else "viewer",
             "enabled": bool(entry.get("enabled", True)),
             "password": entry.get("password") if isinstance(entry.get("password"), dict) else None,
+            # 서명 토큰(무상태 세션)을 한 번에 무효화하는 카운터. 비밀번호 변경·계정 중지·
+            # 삭제 시 올리면 그 계정으로 발급된 기존 토큰이 전부 못 쓰게 된다.
+            "tokenVersion": max(1, version),
             "createdAt": entry.get("createdAt") or now_iso(),
             "updatedAt": entry.get("updatedAt") or now_iso(),
         }
@@ -122,6 +132,7 @@ class UserStore:
                 "role": "admin",
                 "enabled": True,
                 "password": hash_password(password),
+                "tokenVersion": 1,
                 "createdAt": now_iso(),
                 "updatedAt": now_iso(),
             })
@@ -172,8 +183,28 @@ class UserStore:
                 if not user["enabled"] or not user["password"]:
                     continue
                 if verify_password(user["password"], password):
-                    return {"username": user["username"], "role": user["role"]}
+                    return {"username": user["username"], "role": user["role"],
+                            "tokenVersion": user["tokenVersion"]}
         return None
+
+    def token_version(self, username: str):
+        """서명 토큰 검증용 현재 카운터. 계정이 없거나 중지면 None(=무효)."""
+        with self._lock:
+            for user in self._load():
+                if user["username"] == username:
+                    return user["tokenVersion"] if user["enabled"] else None
+        return None
+
+    def bump_token_version(self, username: str) -> None:
+        """그 계정으로 발급된 모든 토큰을 즉시 무효화한다."""
+        with self._lock:
+            users = self._load()
+            for user in users:
+                if user["username"] == username:
+                    user["tokenVersion"] = int(user["tokenVersion"]) + 1
+                    user["updatedAt"] = now_iso()
+                    self._save()
+                    return
 
     def _password_in_use(self, password: str, *, exclude=None) -> bool:
         for user in self._load():
@@ -201,7 +232,8 @@ class UserStore:
                 raise AuthError("다른 계정이 이미 쓰는 비밀번호입니다. 다른 값을 사용하세요.")
             users.append({
                 "username": username, "role": role, "enabled": True,
-                "password": record, "createdAt": now_iso(), "updatedAt": now_iso(),
+                "password": record, "tokenVersion": 1,
+                "createdAt": now_iso(), "updatedAt": now_iso(),
             })
             self._save()
             return self.public_list()
@@ -221,6 +253,8 @@ class UserStore:
                     raise AuthError("역할은 admin 또는 viewer 여야 합니다.")
                 target["role"] = role
             if enabled is not None:
+                if bool(enabled) is False and target["enabled"]:
+                    target["tokenVersion"] = int(target["tokenVersion"]) + 1
                 target["enabled"] = bool(enabled)
             self._assert_admin_remains(users)
             target["updatedAt"] = now_iso()
@@ -237,6 +271,7 @@ class UserStore:
             if self._password_in_use(password, exclude=username):
                 raise AuthError("다른 계정이 이미 쓰는 비밀번호입니다. 다른 값을 사용하세요.")
             target["password"] = record
+            target["tokenVersion"] = int(target["tokenVersion"]) + 1   # 기존 토큰 즉시 무효
             target["updatedAt"] = now_iso()
             self._save()
             # 비밀번호가 바뀌었으면 초기 비밀번호 파일은 더 이상 유효하지 않다.
@@ -265,25 +300,61 @@ class UserStore:
 
 
 class SessionStore:
-    """메모리 세션. 재시작하면 전부 만료된다(설정 화면 전용이라 그 편이 안전).
+    """**무상태 서명 세션**(v2.215) + 출발지별 실패 잠금.
 
-    실패 잠금은 **출발지(IP)별**로 건다(6차 감사 수정). 전역 카운터 하나만 두면
-    아무나 8번 틀리는 것만으로 **정상 관리자까지 5분간 설정 화면에 못 들어가고**,
-    이를 반복하면 사실상 영구 차단이 된다(가용성 공격). 전역 상한은 분산 시도를
-    막기 위한 2차 방어로만 남기고 임계값을 훨씬 높게 잡는다.
+    이전에는 세션을 메모리 dict 에 들고 있어서 **서버를 재시작하면 전원 로그아웃**됐다.
+    설정 변경·업그레이드로 재기동이 잦은 운영에서는 그 자체가 불편이다. 이제 토큰은
+    `payload.signature` 형태로 **서명해서 발급**하고 서버는 검증만 한다.
+
+    무효화는 어떻게 하나(무상태의 약점 보완):
+    - **계정 단위**: `users.json` 의 `tokenVersion` 을 올리면 그 계정 토큰이 전부 죽는다
+      (비밀번호 변경·계정 중지·삭제 시 자동). 서명 안에 발급 시점 버전이 들어 있다.
+    - **개별 로그아웃**: 만료 전까지만 유지되는 메모리 폐기 목록에 담는다(재시작하면
+      사라지지만, 그때는 어차피 서명 검증이 아니라 tokenVersion 으로 통제된다).
+
+    서명 키는 데이터 폴더에 0600 으로 보관한다 — 키가 새면 임의 계정 토큰을 위조할 수 있다.
     """
 
     GLOBAL_FACTOR = 10          # 전역 임계값 = max_fails × 이 배수
 
-    def __init__(self, ttl_seconds: int, max_fails: int, lockout_seconds: int):
+    def __init__(self, ttl_seconds: int, max_fails: int, lockout_seconds: int,
+                 secret_path=None, users=None):
         self._ttl = ttl_seconds
         self._max_fails = max_fails
         self._lockout = lockout_seconds
-        self._sessions = {}
+        self._users = users
+        self._secret = self._load_secret(secret_path)
+        self._revoked = {}       # token -> 만료시각(개별 로그아웃)
+        self._user_revoked = {}  # username -> 이 시각 이전 발급 토큰 거부(계정 단위 폐기)
         self._fails = {}         # client -> [실패수, 잠금해제시각]
         self._global_fails = 0
         self._global_until = 0.0
         self._lock = threading.RLock()
+
+    # ---------- 서명 키 ----------
+
+    @staticmethod
+    def _load_secret(secret_path):
+        """키 파일을 읽고 없으면 만든다. 파일이 없으면 재시작마다 세션이 끊긴다."""
+        if not secret_path:
+            return secrets.token_bytes(32)
+        path = Path(secret_path)
+        try:
+            if path.exists():
+                raw = path.read_text(encoding="utf-8").strip()
+                if len(raw) >= 32:
+                    return bytes.fromhex(raw) if all(c in "0123456789abcdef" for c in raw) \
+                        else raw.encode("utf-8")
+        except (OSError, ValueError):
+            pass
+        secret = secrets.token_bytes(32)
+        try:
+            write_text(path, secret.hex() + "\n")
+        except OSError as exc:
+            print(f"[auth] 세션 서명 키 저장 실패({exc}) — 재시작 시 로그아웃됩니다.", flush=True)
+        return secret
+
+    # ---------- 잠금 ----------
 
     def lock_remaining(self, client: str = "-") -> int:
         with self._lock:
@@ -315,46 +386,98 @@ class SessionStore:
             if entry[0] == 0 and entry[1] < now:
                 self._fails.pop(client, None)
 
+    # ---------- 토큰 ----------
+
+    def _sign(self, payload: bytes) -> str:
+        digest = hmac.new(self._secret, payload, hashlib.sha256).digest()
+        return base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
+
     def create(self, user) -> dict:
-        token = secrets.token_urlsafe(32)
-        expires = time.time() + self._ttl
-        with self._lock:
-            self._purge()
-            self._sessions[token] = {"user": user, "expires": expires}
-        return {"token": token, "user": user, "expiresAt": int(expires)}
+        expires = int(time.time() + self._ttl)
+        body = {
+            "u": user["username"],
+            "r": user.get("role", "viewer"),
+            "v": int(user.get("tokenVersion", 1)),
+            "e": expires,
+            # 발급 시각 — 계정 단위 폐기가 '폐기 이전 발급분'만 정확히 자르기 위해 필요하다.
+            # 이게 없으면 폐기 후의 재로그인까지 막힌다. 반올림하면 폐기 직후 발급된
+            # 토큰이 컷오프보다 작아질 수 있으므로 그대로 싣는다.
+            "i": time.time(),
+        }
+        raw = json.dumps(body, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        encoded = base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+        token = encoded + "." + self._sign(encoded.encode("ascii"))
+        return {"token": token,
+                "user": {"username": body["u"], "role": body["r"]},
+                "expiresAt": expires}
 
     def resolve(self, token):
-        if not token:
+        if not token or "." not in token:
             return None
+        encoded, _, signature = token.rpartition(".")
+        if not encoded or not signature:
+            return None
+        if not hmac.compare_digest(self._sign(encoded.encode("ascii")), signature):
+            return None
+        try:
+            padding = "=" * (-len(encoded) % 4)
+            body = json.loads(base64.urlsafe_b64decode(encoded + padding).decode("utf-8"))
+        except (ValueError, TypeError):
+            return None
+        if not isinstance(body, dict) or float(body.get("e", 0)) < time.time():
+            return None
+
+        username = str(body.get("u", ""))
         with self._lock:
-            entry = self._sessions.get(token)
-            if not entry:
+            self._purge_revoked()
+            if token in self._revoked:
                 return None
-            if entry["expires"] < time.time():
-                self._sessions.pop(token, None)
+            cutoff = self._user_revoked.get(username)
+            if cutoff is not None and float(body.get("i", 0)) <= cutoff:
                 return None
-            return entry["user"]
+
+        if self._users is not None:
+            current = self._users.token_version(username)
+            # 계정이 사라졌거나 중지됐거나, 비밀번호가 바뀐 뒤 발급된 토큰이 아니면 거부.
+            if current is None or int(body.get("v", 0)) != int(current):
+                return None
+        return {"username": username, "role": str(body.get("r", "viewer"))}
 
     def destroy(self, token) -> None:
+        if not token:
+            return
         with self._lock:
-            self._sessions.pop(token, None)
+            self._revoked[token] = time.time() + self._ttl
+            self._purge_revoked()
 
     def destroy_user(self, username) -> None:
-        """비밀번호 변경·계정 비활성화 시 그 계정의 기존 세션을 끊는다."""
-        with self._lock:
-            for token, entry in list(self._sessions.items()):
-                if entry["user"].get("username") == username:
-                    self._sessions.pop(token, None)
+        """그 계정의 모든 토큰을 무효화한다.
 
-    def _purge(self) -> None:
+        1차 수단은 `tokenVersion` 인상(재시작해도 유지). 여기에 더해 **발급시각 컷오프**를
+        메모리에도 남긴다 — 사용자 저장소 없이 만든 SessionStore(테스트·임베드)에서도
+        폐기가 실제로 동작해야 하고, 저장소 쓰기가 실패해도 현재 프로세스에서는 즉시 끊긴다.
+        """
+        if not username:
+            return
+        if self._users is not None:
+            self._users.bump_token_version(username)
+        with self._lock:
+            self._user_revoked[username] = time.time()
+
+    def _purge_revoked(self) -> None:
         now = time.time()
-        for token, entry in list(self._sessions.items()):
-            if entry["expires"] < now:
-                self._sessions.pop(token, None)
+        for token, expires in list(self._revoked.items()):
+            if expires < now:
+                self._revoked.pop(token, None)
+        # 컷오프는 TTL 이 지나면 의미가 없다(그 이전 토큰은 어차피 만료).
+        for username, cutoff in list(self._user_revoked.items()):
+            if cutoff + self._ttl < now:
+                self._user_revoked.pop(username, None)
 
 
 def build_auth():
     users = UserStore(config.users_file, config.initial_password_file)
     sessions = SessionStore(config.session_ttl_min * 60, config.login_max_fails,
-                            config.login_lockout_sec)
+                            config.login_lockout_sec,
+                            secret_path=config.session_secret_file, users=users)
     return users, sessions

@@ -204,9 +204,24 @@ class HubHandler(BaseHTTPRequestHandler):
         if not user:
             return None
         if user.get("role") != "admin":
+            self._audit("denied", actor=user.get("username", "-"), result="forbidden",
+                        detail={"path": urlsplit(self.path).path})
             self._error(HTTPStatus.FORBIDDEN, "admin 계정만 변경할 수 있습니다.")
             return None
         return user
+
+    # ---------- 감사 로그 ----------
+
+    def _audit(self, action, *, actor=None, result="ok", detail=None):
+        """보안상 되짚어야 하는 사건만 남긴다(조회는 남기지 않는다 — 잡음).
+
+        기록 실패가 요청을 막지 않도록 AuditLog 쪽이 best-effort 로 처리한다.
+        """
+        if actor is None:
+            user = self._session_user()
+            actor = user.get("username", "-") if user else "-"
+        client = self.client_address[0] if self.client_address else "-"
+        self.ctx.audit.write(action, actor=actor, client=client, result=result, detail=detail)
 
     # ---------- 디스패치 ----------
 
@@ -272,6 +287,9 @@ class HubHandler(BaseHTTPRequestHandler):
             "datacenterRegistered": len(self.ctx.datacenters.all()),
             "shortcutCount": len(self.ctx.shortcuts.all()),
             "healthTlsVerify": config.health_tls_verify,
+            # 메인 모니터링 포탈로 돌아가는 링크(설정된 경우에만). 등록된 바로가기 URL 이
+            # 이미 공개 조회로 나가므로 이 주소만 따로 감출 이유는 없다.
+            "portalUrl": config.portal_url,
             "historyRanges": [{"key": key, "label": RANGE_LABELS[key], "seconds": RANGES[key]}
                               for key in RANGES],
             "session": user,
@@ -373,15 +391,20 @@ class HubHandler(BaseHTTPRequestHandler):
         if not user:
             self.ctx.sessions.note_failure(client)
             print(f"[auth] 설정 로그인 실패 (from {client})", flush=True)
+            self._audit("login", actor="-", result="fail")
             return self._error(HTTPStatus.UNAUTHORIZED, "비밀번호가 올바르지 않습니다.")
         self.ctx.sessions.note_success(client)
         session = self.ctx.sessions.create(user)
         print(f"[auth] 설정 로그인: {user['username']}", flush=True)
+        self._audit("login", actor=user["username"], detail={"role": user.get("role")})
         return self._json({"success": True, **session})
 
     def api_session_logout(self):
         token = self.headers.get("X-Settings-Token", "") or self._cookie("hub_settings")
+        user = self.ctx.sessions.resolve(token)
         self.ctx.sessions.destroy(token)
+        if user:
+            self._audit("logout", actor=user.get("username", "-"))
         return self._json({"success": True})
 
     # ================= 설정 =================
@@ -405,11 +428,44 @@ class HubHandler(BaseHTTPRequestHandler):
         })
 
     def api_settings_section(self, section):
-        if not self._require_admin():
+        actor = self._require_admin()
+        if not actor:
             return None
         updated = self.ctx.settings.update_section(section, self._body_dict())
+        self._audit("settings.update", actor=actor["username"], detail={"section": section})
         return self._json({"success": True, "settings": self.ctx.settings.all(),
                            "section": section, "value": updated})
+
+    def api_audit_list(self):
+        """감사 로그 조회 — 계정·클라이언트가 드러나므로 admin 만."""
+        if not self._require_admin():
+            return None
+        query = self._query()
+        try:
+            limit = int((query.get("limit") or ["200"])[0])
+        except ValueError:
+            limit = 200
+        return self._json({"success": True, "entries": self.ctx.audit.tail(limit),
+                           "file": str(self.ctx.data_dir / "audit.log")})
+
+    def api_notify_test(self):
+        """[테스트 전송] — 저장된(또는 입력한) 웹훅으로 예시 알림을 한 번 보낸다."""
+        actor = self._require_admin()
+        if not actor:
+            return None
+        payload = self._body_dict()
+        url = payload.get("webhookUrl")
+        if not isinstance(url, str) or not url.strip():
+            url = self.ctx.settings.section("notify").get("webhookUrl", "")
+        if not url:
+            return self._error(HTTPStatus.BAD_REQUEST, "웹훅 URL 을 먼저 저장하거나 입력하세요.")
+        result = self.ctx.notifier.test(url)
+        self._audit("notify.test", actor=actor["username"],
+                    result="ok" if result.get("ok") else "fail")
+        if not result.get("ok"):
+            return self._error(HTTPStatus.BAD_GATEWAY,
+                               "웹훅 전송에 실패했습니다(URL·네트워크·차단 여부를 확인하세요).")
+        return self._json({"success": True, **result})
 
     # ---- 사용자 ----
 
@@ -419,21 +475,29 @@ class HubHandler(BaseHTTPRequestHandler):
         return self._json({"success": True, "users": self.ctx.users.public_list()})
 
     def api_users_create(self):
-        if not self._require_admin():
+        actor = self._require_admin()
+        if not actor:
             return None
         payload = self._body_dict()
         users = self.ctx.users.add(payload.get("username"), payload.get("role", "viewer"),
                                    payload.get("password", ""))
+        self._audit("user.create", actor=actor["username"],
+                    detail={"target": str(payload.get("username", ""))[:64],
+                            "role": str(payload.get("role", "viewer"))[:16]})
         return self._json({"success": True, "users": users}, status=HTTPStatus.CREATED)
 
     def api_users_update(self, username):
-        if not self._require_admin():
+        actor = self._require_admin()
+        if not actor:
             return None
         payload = self._body_dict()
         users = self.ctx.users.update(username, role=payload.get("role"),
                                       enabled=payload.get("enabled"))
         if payload.get("enabled") is False:
             self.ctx.sessions.destroy_user(username)
+        self._audit("user.update", actor=actor["username"],
+                    detail={"target": username, "role": payload.get("role"),
+                            "enabled": payload.get("enabled")})
         return self._json({"success": True, "users": users})
 
     def api_users_password(self, username):
@@ -447,6 +511,7 @@ class HubHandler(BaseHTTPRequestHandler):
         self.ctx.users.set_password(username, payload.get("password", ""))
         # 비밀번호가 바뀐 계정의 기존 세션은 끊는다.
         self.ctx.sessions.destroy_user(username)
+        self._audit("user.password", actor=actor["username"], detail={"target": username})
         return self._json({"success": True, "users": self.ctx.users.public_list()})
 
     def api_users_delete(self, username):
@@ -457,6 +522,7 @@ class HubHandler(BaseHTTPRequestHandler):
             return self._error(HTTPStatus.BAD_REQUEST, "로그인 중인 계정은 삭제할 수 없습니다.")
         users = self.ctx.users.delete(username)
         self.ctx.sessions.destroy_user(username)
+        self._audit("user.delete", actor=actor["username"], detail={"target": username})
         return self._json({"success": True, "users": users})
 
     # ---- 데이터센터 ----
@@ -493,9 +559,27 @@ class HubHandler(BaseHTTPRequestHandler):
         return self._json({"success": True, "datacenters": self.ctx.datacenters.all()})
 
     def api_dc_reset(self):
+        actor = self._require_admin()
+        if not actor:
+            return None
+        self._audit("datacenter.reset", actor=actor["username"])
+        return self._json({"success": True, "datacenters": self.ctx.datacenters.reset()})
+
+    def api_dc_move(self, dc_id):
         if not self._require_admin():
             return None
-        return self._json({"success": True, "datacenters": self.ctx.datacenters.reset()})
+        items = self.ctx.datacenters.move(dc_id, self._move_delta())
+        if items is None:
+            # 이미 맨 위/맨 아래 — 오류가 아니라 '변경 없음' 이다.
+            return self._json({"success": True, "moved": False,
+                               "datacenters": self.ctx.datacenters.all()})
+        return self._json({"success": True, "moved": True, "datacenters": items})
+
+    def _move_delta(self) -> int:
+        direction = str(self._body_dict().get("direction", "up")).lower()
+        if direction not in ("up", "down"):
+            raise ValidationError("direction 은 up 또는 down 이어야 합니다.")
+        return 1 if direction == "down" else -1
 
     # ---- 백업 ----
 
@@ -510,6 +594,7 @@ class HubHandler(BaseHTTPRequestHandler):
             return None
         result = self.ctx.backups.create(reason="manual")
         print(f"[backup] 수동 백업 생성: {result['name']}", flush=True)
+        self._audit("backup.create", detail={"name": result["name"]})
         return self._json({"success": True, "backup": result,
                            "backups": self.ctx.backups.list(),
                            "status": self.ctx.backups.status()}, status=HTTPStatus.CREATED)
@@ -523,16 +608,19 @@ class HubHandler(BaseHTTPRequestHandler):
             return self._error(HTTPStatus.NOT_FOUND, "백업을 찾을 수 없습니다.")
         # 백업에는 계정 비밀번호 해시가 들어 있다 — 누가 꺼냈는지 로그로 남긴다.
         print(f"[backup] 다운로드: {name} (by {user['username']})", flush=True)
+        self._audit("backup.download", actor=user["username"], detail={"name": str(name)[:80]})
         body = json.dumps(snapshot, ensure_ascii=False, indent=2).encode("utf-8")
         return self._send(HTTPStatus.OK, body, "application/json; charset=utf-8", {
             "Content-Disposition": f'attachment; filename="{Path(str(name)).name}"',
         })
 
     def api_backup_delete(self, name):
-        if not self._require_admin():
+        actor = self._require_admin()
+        if not actor:
             return None
         if not self.ctx.backups.delete(name):
             return self._error(HTTPStatus.NOT_FOUND, "백업을 찾을 수 없습니다.")
+        self._audit("backup.delete", actor=actor["username"], detail={"name": str(name)[:80]})
         return self._json({"success": True, "backups": self.ctx.backups.list(),
                            "status": self.ctx.backups.status()})
 
@@ -542,6 +630,7 @@ class HubHandler(BaseHTTPRequestHandler):
             return None
         result = self.ctx.backups.restore(name)
         print(f"[backup] 복원: {name} (by {user['username']})", flush=True)
+        self._audit("backup.restore", actor=user["username"], detail={"name": str(name)[:80]})
         # 복원된 파일을 다시 읽도록 메모리 캐시를 비운다.
         self.ctx.reload_stores()
         return self._json({"success": True, **result,
@@ -567,6 +656,15 @@ class HubHandler(BaseHTTPRequestHandler):
             return self._error(HTTPStatus.NOT_FOUND, "바로가기를 찾을 수 없습니다.")
         return self._json({"success": True, "shortcut": updated,
                            "shortcuts": self.ctx.shortcuts.all()})
+
+    def api_shortcut_move(self, shortcut_id):
+        if not self._require_session():
+            return None
+        items = self.ctx.shortcuts.move(shortcut_id, self._move_delta())
+        if items is None:
+            return self._json({"success": True, "moved": False,
+                               "shortcuts": self.ctx.shortcuts.all()})
+        return self._json({"success": True, "moved": True, "shortcuts": items})
 
     def api_shortcut_delete(self, shortcut_id):
         if not self._require_session():
@@ -656,7 +754,10 @@ ROUTES = [
     ("DELETE", _route(r"/api/settings/session"), HubHandler.api_session_logout),
 
     ("GET", _route(r"/api/settings"), HubHandler.api_settings_state),
-    ("PUT", _route(r"/api/settings/(backup|health|display)"), HubHandler.api_settings_section),
+    ("GET", _route(r"/api/settings/audit"), HubHandler.api_audit_list),
+    ("POST", _route(r"/api/settings/notify/test"), HubHandler.api_notify_test),
+    ("PUT", _route(r"/api/settings/(backup|health|display|notify)"),
+     HubHandler.api_settings_section),
 
     ("GET", _route(r"/api/settings/users"), HubHandler.api_users_list),
     ("POST", _route(r"/api/settings/users"), HubHandler.api_users_create),
@@ -667,6 +768,8 @@ ROUTES = [
 
     ("GET", _route(r"/api/settings/datacenters"), HubHandler.api_dc_list),
     ("POST", _route(r"/api/settings/datacenters/reset"), HubHandler.api_dc_reset),
+    ("POST", _route(r"/api/settings/datacenters/" + ID_PATTERN + r"/move"),
+     HubHandler.api_dc_move),
     ("POST", _route(r"/api/settings/datacenters"), HubHandler.api_dc_create),
     ("PUT", _route(r"/api/settings/datacenters/" + ID_PATTERN), HubHandler.api_dc_update),
     ("DELETE", _route(r"/api/settings/datacenters/" + ID_PATTERN), HubHandler.api_dc_delete),
@@ -679,6 +782,7 @@ ROUTES = [
     ("DELETE", _route(r"/api/settings/backups/" + NAME_PATTERN), HubHandler.api_backup_delete),
 
     ("POST", _route(r"/api/shortcuts/reset"), HubHandler.api_shortcut_reset),
+    ("POST", _route(r"/api/shortcuts/" + ID_PATTERN + r"/move"), HubHandler.api_shortcut_move),
     ("POST", _route(r"/api/shortcuts"), HubHandler.api_shortcut_create),
     ("PUT", _route(r"/api/shortcuts/" + ID_PATTERN), HubHandler.api_shortcut_update),
     ("DELETE", _route(r"/api/shortcuts/" + ID_PATTERN), HubHandler.api_shortcut_delete),
