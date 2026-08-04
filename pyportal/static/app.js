@@ -1685,6 +1685,19 @@
     }).catch(function (err) { toast(err.message, "err"); });
   }
 
+  /* 가져오기 결과 로그(v2.221) — 제외된 행이 있으면 사유를 알림창 + 브라우저 콘솔에 남긴다.
+     조용히 사라지면 사용자는 "29개 중 왜 27개만 들어왔는지" 알 방법이 없다. */
+  function reportImportErrors(kind, errors) {
+    if (!errors || !errors.length) return;
+    console.warn("[" + kind + " 가져오기] 제외된 행 " + errors.length + "건:", errors);
+    var lines = errors.slice(0, 15).map(function (e) {
+      return "· #" + e.row + (e.name ? " [" + e.name + "]" : "") + " — " + e.reason;
+    });
+    if (errors.length > 15) lines.push("… 외 " + (errors.length - 15) + "건 (브라우저 콘솔 참고)");
+    window.alert(kind + " 가져오기에서 제외된 행 " + errors.length + "건:\n\n" + lines.join("\n")
+      + "\n\n전체 상세는 브라우저 개발자 도구 콘솔(F12)에 기록했습니다.");
+  }
+
   /* 가져오기 일괄 카테고리(v2.219) — 비우면 파일의 값 유지. 이름/ID 로 지정하며,
      없는 카테고리는 서버가 admin 에 한해 즉석 생성한다. */
   function askImportCategory() {
@@ -1699,7 +1712,12 @@
     reader.onload = function () {
       var parsed;
       try { parsed = JSON.parse(String(reader.result)); }
-      catch (e) { toast("JSON 파일을 해석할 수 없습니다.", "err"); return; }
+      catch (e) {
+        // 파싱 실패 위치까지 알려준다(어느 줄이 깨졌는지) — 콘솔에 원문 오류 기록.
+        console.error("[JSON 가져오기] 파싱 실패:", e);
+        toast("JSON 파일을 해석할 수 없습니다 — " + e.message, "err");
+        return;
+      }
       // CSV 가져오기와 동일한 선택(v2.219) — 덮어쓰기는 되돌릴 수 없으므로 기본은 '추가'.
       var replace = window.confirm(
         "JSON 가져오기 방식을 선택하세요.\n\n" +
@@ -1714,8 +1732,12 @@
           toast(replace
             ? data.shortcuts.length + "개로 교체했습니다."
             : data.added + "개 추가" + (data.skipped ? " · " + data.skipped + "개 건너뜀" : ""), "ok");
+          reportImportErrors("JSON", data.errors);
         })
-        .catch(function (err) { toast(err.message, "err"); });
+        .catch(function (err) {
+          console.error("[JSON 가져오기] 실패:", err);
+          toast(err.message, "err");
+        });
     };
     reader.readAsText(file);
   }
@@ -1757,8 +1779,12 @@
           toast(replace
             ? data.shortcuts.length + "개로 교체했습니다."
             : data.added + "개 추가" + (data.skipped ? " · " + data.skipped + "개 건너뜀" : ""), "ok");
+          reportImportErrors("CSV", data.errors);
         })
-        .catch(function (err) { toast(err.message, "err"); });
+        .catch(function (err) {
+          console.error("[CSV 가져오기] 실패:", err);
+          toast(err.message, "err");
+        });
     };
     reader.readAsText(file);
   }

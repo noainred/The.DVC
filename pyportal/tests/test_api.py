@@ -617,6 +617,33 @@ class CsvApiTest(ServerCase):
         self.assertEqual(imported[0]["category"], "sbp")  # 라벨 SBP → 슬러그 id
         request(self.url + "/api/shortcuts/" + imported[0]["id"], "DELETE", None, self.auth())
 
+    def test_json_import_reports_row_errors(self):
+        """가져오기 실패 로그(v2.221) — 무효 행의 번호·사유가 errors 로 내려온다."""
+        entries = [
+            {"name": "정상", "url": "https://ok.internal.dc/", "category": "custom"},
+            {"name": "", "url": "https://noname.internal.dc/"},              # 이름 없음
+            {"name": "나쁜스킴", "url": "javascript:alert(1)"},               # URL 스킴 차단
+        ]
+        code, payload, _ = request(self.url + "/api/import", "POST",
+                                   {"shortcuts": entries, "mode": "append"}, self.auth())
+        self.assertEqual(code, 200)
+        self.assertEqual(payload["added"], 1)
+        self.assertEqual(len(payload["errors"]), 2)
+        rows = {e["row"] for e in payload["errors"]}
+        self.assertEqual(rows, {2, 3})
+        self.assertTrue(any("이름" in e["reason"] for e in payload["errors"]))
+        for shortcut in payload["shortcuts"]:
+            if shortcut["url"].startswith("https://ok.internal"):
+                request(self.url + "/api/shortcuts/" + shortcut["id"], "DELETE", None, self.auth())
+
+    def test_json_import_all_invalid_returns_reasons(self):
+        """전부 무효면 400 + 사유가 메시지에 담긴다(조용한 실패 금지)."""
+        code, payload, _ = request(self.url + "/api/import", "POST",
+                                   {"shortcuts": [{"name": "", "url": ""}], "mode": "append"},
+                                   self.auth())
+        self.assertEqual(code, 400)
+        self.assertIn("유효한 항목이 없습니다", payload.get("error", ""))
+
     def test_json_import_default_is_replace(self):
         """mode 없는 옛 요청은 기존 동작(통째 교체) 유지 — 하위호환."""
         entries = [{"name": "교체 링크", "url": "https://json-replace.internal.dc/", "category": "custom"}]

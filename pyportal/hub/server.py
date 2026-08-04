@@ -763,6 +763,24 @@ class HubHandler(BaseHTTPRequestHandler):
                     detail={"id": created["id"], "via": "import"})
         return created["id"], None
 
+    def _diagnose_import_rows(self, entries):
+        """가져오기 행별 실패 사유(v2.221) — [{row, name, reason}] (최대 50건).
+        잘못된 행이 사유 없이 조용히 폐기되면 사용자는 몇 개가 왜 빠졌는지 알 수 없다."""
+        errors = []
+        if not isinstance(entries, list):
+            return errors
+        for idx, entry in enumerate(entries):
+            reason = self.ctx.shortcuts.diagnose(entry)
+            if not reason:
+                continue
+            label = ""
+            if isinstance(entry, dict):
+                label = str(entry.get("name") or entry.get("url") or "")[:80]
+            errors.append({"row": idx + 1, "name": label, "reason": reason})
+            if len(errors) >= 50:
+                break
+        return errors
+
     def api_shortcut_import(self):
         """JSON 가져오기. mode=replace 면 통째로 교체, append 면 뒤에 덧붙인다(같은 URL 건너뜀).
         category 를 주면 전 항목을 그 분류로 일괄 지정(없으면 admin 에 한해 즉석 생성).
@@ -779,6 +797,13 @@ class HubHandler(BaseHTTPRequestHandler):
             return err
         if cat_id and isinstance(entries, list):
             entries = [dict(e, category=cat_id) if isinstance(e, dict) else e for e in entries]
+        # 행별 진단(v2.221) — 전부 무효면 사유를 담아 400, 일부 무효면 응답에 errors 로 동봉.
+        errors = self._diagnose_import_rows(entries)
+        if isinstance(entries, list) and entries and len(errors) >= len(entries):
+            detail = " · ".join(f"#{e['row']} {e['reason']}" for e in errors[:5])
+            return self._error(HTTPStatus.BAD_REQUEST,
+                               f"가져올 수 있는 유효한 항목이 없습니다 — {detail}"
+                               + (" …" if len(errors) > 5 else ""))
         if mode == "append":
             shortcuts, added, skipped = self.ctx.shortcuts.append_many(entries)
         else:
@@ -786,9 +811,9 @@ class HubHandler(BaseHTTPRequestHandler):
             added, skipped = len(shortcuts), 0
         self._audit("shortcuts.import", actor=user["username"],
                     detail={"format": "json", "mode": mode if mode == "append" else "replace",
-                            "added": added, "skipped": skipped})
+                            "added": added, "skipped": skipped, "invalid": len(errors)})
         return self._json({"success": True, "shortcuts": shortcuts,
-                           "added": added, "skipped": skipped})
+                           "added": added, "skipped": skipped, "errors": errors})
 
     def api_export(self):
         if not self._require_session():
@@ -822,6 +847,7 @@ class HubHandler(BaseHTTPRequestHandler):
             return err
         if cat_id:
             entries = [dict(e, category=cat_id) for e in entries]
+        errors = self._diagnose_import_rows(entries)  # 행별 실패 사유(v2.221)
         replace = str(payload.get("mode", "append")).lower() == "replace"
         if replace:
             shortcuts = self.ctx.shortcuts.replace_all(entries)
@@ -830,9 +856,11 @@ class HubHandler(BaseHTTPRequestHandler):
             shortcuts, added, skipped = self.ctx.shortcuts.append_many(entries)
         self._audit("shortcuts.import", actor=user["username"],
                     detail={"mode": "replace" if replace else "append",
-                            "rows": len(entries), "added": added, "skipped": skipped})
+                            "rows": len(entries), "added": added, "skipped": skipped,
+                            "invalid": len(errors)})
         return self._json({"success": True, "shortcuts": shortcuts,
-                           "added": added, "skipped": skipped, "rows": len(entries)})
+                           "added": added, "skipped": skipped, "rows": len(entries),
+                           "errors": errors})
 
     # ---------- 정적 파일 ----------
 

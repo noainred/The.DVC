@@ -310,6 +310,19 @@ class ShortcutStore:
                 self._write(self._items)
             return [dict(item) for item in self._items], added, skipped
 
+    def diagnose(self, entry) -> str | None:
+        """가져오기 행이 폐기되는 이유(v2.221) — _sanitize(keep_id=True)는 잘못된 행을 조용히
+        None 으로 버리므로, 사용자에게 보여줄 사유를 같은 규칙으로 진단한다. 정상이면 None."""
+        if not isinstance(entry, dict):
+            return "JSON 객체({...})가 아닙니다."
+        if not _clean_text(entry.get("name", ""), limit=120):
+            return "이름(name)이 비어 있습니다."
+        try:
+            normalize_url(entry.get("url", ""))
+        except ValidationError as exc:
+            return f"URL 오류: {exc}"
+        return None
+
     def replace_all(self, entries) -> list:
         """JSON 가져오기 — 유효한 항목만 남기고 통째로 교체한다."""
         if not isinstance(entries, list):
