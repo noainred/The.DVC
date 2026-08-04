@@ -79,17 +79,30 @@ class UserStore:
         self._initial_file = initial_password_file
         self._lock = threading.RLock()
         self._users = None
+        self._mtime = None   # 파일 변경 감지(아래 _load) — 외부 프로세스의 수정을 재시작 없이 반영
 
     # ---------- 로드/저장 ----------
 
     def _load(self):
-        if self._users is None:
+        # 콘솔 복구(app.py --reset-password)는 별도 프로세스에서 users.json 을 고쳐 쓴다.
+        # 메모리 캐시만 믿으면 실행 중인 서버가 재시작 전까지 새 비밀번호를 모른다 —
+        # mtime 이 바뀌면 다시 읽는다(호출당 stat 1회, 로그인 경로라 비용 무시 가능).
+        try:
+            mtime = self._path.stat().st_mtime_ns
+        except OSError:
+            mtime = None
+        if self._users is None or mtime != self._mtime:
             raw = read_json(self._path, [], expect=list)
             self._users = [u for u in (self._clean(entry) for entry in raw) if u]
+            self._mtime = mtime
         return self._users
 
     def _save(self):
         write_json(self._path, self._users)
+        try:
+            self._mtime = self._path.stat().st_mtime_ns
+        except OSError:
+            self._mtime = None
 
     @staticmethod
     def _clean(entry):
@@ -275,6 +288,25 @@ class UserStore:
             if username == BOOTSTRAP_USERNAME:
                 self.drop_initial_password_file()
             return True
+
+    def recover(self, username: str) -> dict:
+        """콘솔 복구(v2.225) — 비밀번호를 잊어 아무도 설정에 못 들어가는 잠금의 복구 경로.
+
+        서버 파일시스템 접근 권한이 있는 운영자만 실행할 수 있다(app.py --reset-password).
+        · 계정이 있으면: 새 임의 비밀번호로 초기화 + 활성화 + tokenVersion 인상(기존 세션 전부 무효)
+        · 계정이 없으면: 그 이름의 admin 계정을 새로 만든다(전원 삭제/중지 사고 대비)
+        반환: { username, role, password(새 값), created(신규 생성 여부) }
+        """
+        password = generate_password()
+        existing = self.get(username)
+        if existing:
+            self.set_password(username, password)      # tokenVersion 인상 포함
+            if not existing.get("enabled", True):
+                self.update(username, enabled=True)    # 중지된 계정도 복구 대상
+            return {"username": username, "role": existing.get("role", "viewer"),
+                    "password": password, "created": False}
+        self.add(username, "admin", password)
+        return {"username": username, "role": "admin", "password": password, "created": True}
 
     def delete(self, username: str):
         with self._lock:

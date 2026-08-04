@@ -113,6 +113,26 @@ admin에 한해 즉석 생성됩니다(슬러그 충돌 시 자동 고유화, v2
 
 ---
 
+## 로그인이 안 될 때 (복구 절차, v2.225)
+
+증상별 복구 경로 — 위에서부터 순서대로 확인하세요.
+
+1. **초기 비밀번호를 모른다(설치 직후)** — 계정은 `admin`, 비밀번호는
+   `sudo cat /etc/dc-service-hub/initial-settings-password.txt` (비밀번호 변경 전까지만 존재).
+2. **로그인 실패 잠금에 걸렸다** — 같은 IP에서 8회 실패 시 5분 잠금(기본). 5분 기다리거나
+   `sudo systemctl restart dc-service-hub`(잠금 카운터는 메모리라 재시작으로 초기화).
+3. **비밀번호를 잊었다 / 관리자 전원이 잠겼다** — 서버 콘솔에서 비밀번호 초기화:
+   ```bash
+   sudo -u dchub python3 /opt/dc-service-hub/app.py --data-dir /etc/dc-service-hub --reset-password admin
+   # → 새 임의 비밀번호가 출력됩니다. 기존 세션은 전부 무효화되고, 서비스 재시작은 필요 없습니다.
+   sudo -u dchub python3 /opt/dc-service-hub/app.py --data-dir /etc/dc-service-hub --list-users   # 계정 확인
+   ```
+   계정이 아예 없거나 전부 삭제된 경우에도 같은 명령이 그 이름의 **admin 계정을 새로 만들어** 줍니다.
+   파일시스템 접근 권한(=서버 운영자)이 곧 인증이며, 실행 내역은 감사 로그에 `console` 주체로 남습니다.
+   ⚠️ root 로 실행하면 users.json 소유권이 root 가 되어 허브가 쓰지 못할 수 있으니 `sudo -u dchub` 를 유지하세요.
+4. **`HUB_TOKEN`을 잊었다(포탈 전체 비공개 모드)** — systemd 유닛의 `Environment=HUB_TOKEN=` 값을
+   확인/교체 후 재시작: `sudo systemctl cat dc-service-hub | grep HUB_TOKEN`.
+
 ## 운영
 
 - **상시 구동** — `pyportal/systemd/dc-service-hub.service`(전용 계정 `dchub`,

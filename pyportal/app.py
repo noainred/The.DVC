@@ -27,10 +27,38 @@ def main(argv=None) -> int:
     parser.add_argument("--host", default=None, help="바인드 주소(기본 HUB_HOST 또는 0.0.0.0)")
     parser.add_argument("--port", type=int, default=None, help="포트(기본 HUB_PORT 또는 8095)")
     parser.add_argument("--data-dir", default=None, help="설정·데이터 저장 디렉터리")
+    parser.add_argument("--reset-password", metavar="USERNAME", default=None,
+                        help="로그인 불능 복구: 계정 비밀번호를 새 임의 값으로 초기화해 출력하고 종료"
+                             "(계정이 없으면 admin 으로 생성). 서버는 기동하지 않음")
+    parser.add_argument("--list-users", action="store_true",
+                        help="계정 목록(이름/역할/활성)을 출력하고 종료")
     args = parser.parse_args(argv)
 
     if args.data_dir:
         config.data_dir = Path(args.data_dir)
+
+    # ── 콘솔 복구 모드(v2.225) — 비밀번호 분실로 설정에 아무도 못 들어갈 때의 유일한 경로.
+    # 파일시스템 접근 권한(=서버 운영자)이 곧 인증이다. 서비스가 켜져 있어도 안전하다:
+    # users.json 은 원자적 쓰기이고, 실행 중 프로세스는 다음 로그인 때 파일을 다시 읽는다.
+    if args.list_users or args.reset_password:
+        ctx = AppContext(start_workers=False)
+        if args.list_users:
+            print(f"데이터 폴더: {config.data_dir}")
+            for u in ctx.users.public_list():
+                print(f"  {u['username']:<20} role={u['role']:<7} enabled={u['enabled']}")
+            return 0
+        result = ctx.users.recover(args.reset_password)
+        try:
+            ctx.audit.write("user.password_reset", actor="console",
+                            detail={"username": result["username"], "created": result["created"]})
+        except Exception:  # noqa: BLE001 — 감사 기록 실패가 복구를 막으면 안 된다
+            pass
+        print("★ 비밀번호를 초기화했습니다. 이 값은 다시 표시되지 않습니다 — 로그인 후 바로 변경하세요.")
+        print(f"  계정   : {result['username']} (role={result['role']}"
+              + (", 신규 생성" if result["created"] else "") + ")")
+        print(f"  비밀번호: {result['password']}")
+        print("  기존 로그인 세션은 전부 무효화됐습니다. 서비스 재시작은 필요 없습니다.")
+        return 0
 
     # 기동 시 1회 로드해 저장 파일 손상 여부를 즉시 로그로 알린다(첫 요청까지 미루지 않는다).
     ctx = AppContext()
