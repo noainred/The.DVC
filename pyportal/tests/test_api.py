@@ -587,6 +587,33 @@ class CsvApiTest(ServerCase):
                              {"csv": "name,url\n,\n"}, self.auth())
         self.assertEqual(code, 400)
 
+    def test_json_import_append_mode_skips_duplicates(self):
+        """JSON 가져오기 mode=append(v2.219) — 덧붙이고 같은 URL 은 건너뛴다."""
+        entries = [{"name": "JSON 링크 A", "url": "https://json-a.internal.dc/", "category": "custom"}]
+        _, before, _ = request(self.url + "/api/shortcuts")
+        code, payload, _ = request(self.url + "/api/import", "POST",
+                                   {"shortcuts": entries, "mode": "append"}, self.auth())
+        self.assertEqual(code, 200)
+        self.assertEqual(payload["added"], 1)
+        self.assertEqual(len(payload["shortcuts"]), len(before["shortcuts"]) + 1)
+        # 같은 파일을 다시 append 해도 목록이 늘지 않는다.
+        _, again, _ = request(self.url + "/api/import", "POST",
+                              {"shortcuts": entries, "mode": "append"}, self.auth())
+        self.assertEqual(again["added"], 0)
+        self.assertEqual(again["skipped"], 1)
+        for shortcut in again["shortcuts"]:
+            if shortcut["url"].startswith("https://json-a"):
+                request(self.url + "/api/shortcuts/" + shortcut["id"], "DELETE", None, self.auth())
+
+    def test_json_import_default_is_replace(self):
+        """mode 없는 옛 요청은 기존 동작(통째 교체) 유지 — 하위호환."""
+        entries = [{"name": "교체 링크", "url": "https://json-replace.internal.dc/", "category": "custom"}]
+        code, payload, _ = request(self.url + "/api/import", "POST",
+                                   {"shortcuts": entries}, self.auth())
+        self.assertEqual(code, 200)
+        self.assertEqual(len(payload["shortcuts"]), 1)
+        self.assertEqual(payload["shortcuts"][0]["url"], "https://json-replace.internal.dc/")
+
     def test_import_requires_session(self):
         self.assertEqual(request(self.url + "/api/import/csv", "POST",
                                  {"csv": "name,url\nA,https://a.internal/\n"})[0], 401)

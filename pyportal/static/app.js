@@ -1673,10 +1673,18 @@
       var parsed;
       try { parsed = JSON.parse(String(reader.result)); }
       catch (e) { toast("JSON 파일을 해석할 수 없습니다.", "err"); return; }
-      api("/api/import", { method: "POST", body: { shortcuts: parsed } })
+      // CSV 가져오기와 동일한 선택(v2.219) — 덮어쓰기는 되돌릴 수 없으므로 기본은 '추가'.
+      var replace = window.confirm(
+        "JSON 가져오기 방식을 선택하세요.\n\n" +
+        "[확인] 기존 목록을 파일 내용으로 통째로 교체(덮어쓰기)\n" +
+        "[취소] 기존 목록 뒤에 추가 (같은 URL 은 건너뜀)");
+      api("/api/import", { method: "POST",
+                           body: { shortcuts: parsed, mode: replace ? "replace" : "append" } })
         .then(function (data) {
           applyShortcuts(data.shortcuts);
-          toast(data.shortcuts.length + "개를 가져왔습니다.", "ok");
+          toast(replace
+            ? data.shortcuts.length + "개로 교체했습니다."
+            : data.added + "개 추가" + (data.skipped ? " · " + data.skipped + "개 건너뜀" : ""), "ok");
         })
         .catch(function (err) { toast(err.message, "err"); });
     };
@@ -1933,6 +1941,12 @@
         updateCounts();
         fillFormSelects();
         renderPortalLink(results[0].portalUrl);
+        // 헤더 버전 칩(v2.219) — 포탈 릴리스와 동기화된 버전을 항상 표시.
+        if (results[0].version) {
+          var vchip = $("hub-version-chip");
+          vchip.textContent = "v" + results[0].version;
+          vchip.hidden = false;
+        }
         renderSessionUi();
         applyShortcuts(results[2].shortcuts || []);
         return loadLatest();
