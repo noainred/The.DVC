@@ -35,7 +35,9 @@ from .settings import BACKUP_INTERVAL_CHOICES, HEALTH_INTERVAL_CHOICES
 from .ssrf import ValidationError
 
 # 정적 자산은 이 확장자만 서빙한다(데이터 파일이 실수로 노출되지 않게).
-STATIC_SUFFIXES = {".html", ".css", ".js", ".svg", ".png", ".ico", ".webmanifest"}
+STATIC_SUFFIXES = {".html", ".css", ".js", ".svg", ".png", ".ico", ".webmanifest",
+                   ".woff2",  # 번들 폰트(v2.224) — static/fonts/
+                   ".txt"}    # 폰트 라이선스 고지(LICENSE-Pretendard.txt)
 
 SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
@@ -962,7 +964,10 @@ class HubHandler(BaseHTTPRequestHandler):
         if content_type.startswith("text/") or content_type in (
                 "application/javascript", "application/json"):
             content_type += "; charset=utf-8"
-        return self._send(HTTPStatus.OK, body, content_type, {"Cache-Control": "no-cache"})
+        # 번들 폰트(v2.224)는 ~2MB 라 no-cache 로 두면 페이지마다 재전송된다 — 내용이 바뀌면
+        # 파일명을 바꾸는 전제로 장기 캐시. 나머지 정적 파일은 업그레이드 즉시 반영이 우선.
+        cache = "public, max-age=31536000, immutable" if file_path.suffix == ".woff2" else "no-cache"
+        return self._send(HTTPStatus.OK, body, content_type, {"Cache-Control": cache})
 
     # ---------- 로깅 ----------
 
@@ -1073,6 +1078,7 @@ class HubServer(ThreadingHTTPServer):
 def create_server(host: str = None, port: int = None, ctx=None) -> HubServer:
     mimetypes.add_type("application/javascript", ".js")
     mimetypes.add_type("text/css", ".css")
+    mimetypes.add_type("font/woff2", ".woff2")
     if ctx is None:
         from .app import AppContext
         ctx = AppContext()

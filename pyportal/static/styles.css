@@ -27,6 +27,16 @@
   --serif: ui-serif, "Palatino", Georgia, Cambria, "Times New Roman", serif;
 }
 
+/* 번들 폰트(v2.224) — Pretendard Variable(OFL, static/fonts/). 클라이언트 설치 여부와 무관하게
+   모든 PC 에서 동일하게 선명한 한글/라틴을 보장한다(오프라인 동작, CSP 'self' 허용). */
+@font-face {
+  font-family: "Pretendard Variable";
+  src: url("/fonts/PretendardVariable.woff2") format("woff2-variations");
+  font-weight: 45 920;
+  font-style: normal;
+  font-display: swap;
+}
+
 * { box-sizing: border-box; }
 
 /* display 를 지정한 요소(.modal 등)는 hidden 속성만으로 숨겨지지 않는다 —
@@ -38,11 +48,15 @@ html, body {
   padding: 0;
   background: var(--bg);
   color: var(--text);
-  font-family: "Pretendard", "Noto Sans KR", -apple-system, BlinkMacSystemFont, "Segoe UI",
-               Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-family: "Pretendard Variable", "Pretendard", "Noto Sans KR", -apple-system,
+               BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   font-size: 14px;
-  line-height: 1.5;
+  line-height: 1.55;
+  letter-spacing: -0.011em;              /* Pretendard 권장 자간 — 한글이 덜 벌어져 또렷하다 */
   min-height: 100%;
+  -webkit-font-smoothing: antialiased;   /* 다크 배경 위 밝은 글자의 번짐(굵어 보임) 제거 */
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
 body {
