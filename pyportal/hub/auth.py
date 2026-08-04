@@ -323,6 +323,10 @@ class SessionStore:
         self._secret = self._load_secret(secret_path)
         self._revoked = {}       # token -> 만료시각(개별 로그아웃)
         self._user_revoked = {}  # username -> 이 시각 이전 발급 토큰 거부(계정 단위 폐기)
+        # 마지막 발급시각 — time.time() 이 같은 마이크로초에 같은 값을 돌려주면 '폐기 직후
+        # 재로그인' 토큰의 i 가 컷오프와 같아져(i <= cutoff) 튕긴다. 발급시각을 단조 증가로
+        # 보정해 폐기(cutoff=마지막 발급시각 이상) / 재발급(i > cutoff)을 결정적으로 만든다.
+        self._last_issued = 0.0
         self._fails = {}         # client -> [실패수, 잠금해제시각]
         self._global_fails = 0
         self._global_until = 0.0
@@ -397,9 +401,9 @@ class SessionStore:
             "v": int(user.get("tokenVersion", 1)),
             "e": expires,
             # 발급 시각 — 계정 단위 폐기가 '폐기 이전 발급분'만 정확히 자르기 위해 필요하다.
-            # 이게 없으면 폐기 후의 재로그인까지 막힌다. 반올림하면 폐기 직후 발급된
-            # 토큰이 컷오프보다 작아질 수 있으므로 그대로 싣는다.
-            "i": time.time(),
+            # 이게 없으면 폐기 후의 재로그인까지 막힌다. 단조 증가 보정(_next_issued)으로
+            # 같은 마이크로초 내 '폐기 → 재로그인'에서도 i > cutoff 가 보장된다.
+            "i": self._next_issued(),
         }
         raw = json.dumps(body, separators=(",", ":"), sort_keys=True).encode("utf-8")
         encoded = base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
@@ -440,6 +444,13 @@ class SessionStore:
                 return None
         return {"username": username, "role": str(body.get("r", "viewer"))}
 
+    def _next_issued(self) -> float:
+        """단조 증가 발급시각 — 같은 마이크로초 충돌로 폐기/재발급 경계가 무너지지 않게."""
+        with self._lock:
+            issued = max(time.time(), self._last_issued + 1e-6)
+            self._last_issued = issued
+            return issued
+
     def destroy(self, token) -> None:
         if not token:
             return
@@ -459,7 +470,9 @@ class SessionStore:
         if self._users is not None:
             self._users.bump_token_version(username)
         with self._lock:
-            self._user_revoked[username] = time.time()
+            # 컷오프는 '지금'과 '마지막 발급시각' 중 큰 값 — 폐기 이전 발급분은 전부 걸리고,
+            # 이후 재로그인(단조 증가 i)은 항상 컷오프보다 커서 통과한다.
+            self._user_revoked[username] = max(time.time(), self._last_issued)
 
     def _purge_revoked(self) -> None:
         now = time.time()

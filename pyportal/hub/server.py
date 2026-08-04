@@ -18,6 +18,7 @@ import json
 import mimetypes
 import posixpath
 import re
+import time
 from http import HTTPStatus
 from http.cookies import SimpleCookie
 import threading
@@ -26,7 +27,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from .auth import AuthError
-from .catstore import COLORS as CATEGORY_COLORS, DEFAULT_CATEGORY_ID
+from .catstore import COLORS as CATEGORY_COLORS, DEFAULT_CATEGORY_ID, slugify as cat_slugify
 from . import csvio
 from .config import APP_NAME, STATIC_DIR, VERSION, config
 from .history import RANGE_LABELS, RANGES
@@ -758,7 +759,20 @@ class HubHandler(BaseHTTPRequestHandler):
         if user.get("role") != "admin":
             return None, self._error(HTTPStatus.BAD_REQUEST,
                                      f"카테고리가 없습니다: {text} (생성은 admin 만 가능)")
-        created = self.ctx.categories.add({"label": text})
+        try:
+            created = self.ctx.categories.add({"label": text})
+        except ValidationError:
+            # 슬러그 충돌(예: 'SBP'가 이미 있는데 'SBP서버' → 둘 다 'sbp') — 접미로 유니크화.
+            base_slug = cat_slugify(text) or "cat"
+            created = None
+            for n in range(2, 100):
+                try:
+                    created = self.ctx.categories.add({"label": text, "id": f"{base_slug}-{n}"[:32]})
+                    break
+                except ValidationError:
+                    continue
+            if not created:
+                return None, self._error(HTTPStatus.BAD_REQUEST, f"카테고리를 만들 수 없습니다: {text}")
         self._audit("category.create", actor=user["username"],
                     detail={"id": created["id"], "via": "import"})
         return created["id"], None
@@ -781,6 +795,30 @@ class HubHandler(BaseHTTPRequestHandler):
                 break
         return errors
 
+    def _finish_import(self, user, entries, mode_value, fmt, extra_detail=None):
+        """가져오기 공통 마무리(v2.223 공용화) — 행별 진단(v2.221) → 저장 → 감사 → 응답.
+        JSON 업로드/CSV 업로드/서버 파일 가져오기 세 경로가 같은 규칙을 공유한다."""
+        errors = self._diagnose_import_rows(entries)
+        if isinstance(entries, list) and entries and len(errors) >= len(entries):
+            detail = " · ".join(f"#{e['row']} {e['reason']}" for e in errors[:5])
+            return self._error(HTTPStatus.BAD_REQUEST,
+                               f"가져올 수 있는 유효한 항목이 없습니다 — {detail}"
+                               + (" …" if len(errors) > 5 else ""))
+        append = str(mode_value).lower() == "append"
+        if append:
+            shortcuts, added, skipped = self.ctx.shortcuts.append_many(entries)
+        else:
+            shortcuts = self.ctx.shortcuts.replace_all(entries)
+            added, skipped = len(shortcuts), 0
+        detail = {"format": fmt, "mode": "append" if append else "replace",
+                  "added": added, "skipped": skipped, "invalid": len(errors)}
+        if extra_detail:
+            detail.update(extra_detail)
+        self._audit("shortcuts.import", actor=user["username"], detail=detail)
+        return self._json({"success": True, "shortcuts": shortcuts, "added": added,
+                           "skipped": skipped, "rows": len(entries) if isinstance(entries, list) else 0,
+                           "errors": errors})
+
     def api_shortcut_import(self):
         """JSON 가져오기. mode=replace 면 통째로 교체, append 면 뒤에 덧붙인다(같은 URL 건너뜀).
         category 를 주면 전 항목을 그 분류로 일괄 지정(없으면 admin 에 한해 즉석 생성).
@@ -797,23 +835,7 @@ class HubHandler(BaseHTTPRequestHandler):
             return err
         if cat_id and isinstance(entries, list):
             entries = [dict(e, category=cat_id) if isinstance(e, dict) else e for e in entries]
-        # 행별 진단(v2.221) — 전부 무효면 사유를 담아 400, 일부 무효면 응답에 errors 로 동봉.
-        errors = self._diagnose_import_rows(entries)
-        if isinstance(entries, list) and entries and len(errors) >= len(entries):
-            detail = " · ".join(f"#{e['row']} {e['reason']}" for e in errors[:5])
-            return self._error(HTTPStatus.BAD_REQUEST,
-                               f"가져올 수 있는 유효한 항목이 없습니다 — {detail}"
-                               + (" …" if len(errors) > 5 else ""))
-        if mode == "append":
-            shortcuts, added, skipped = self.ctx.shortcuts.append_many(entries)
-        else:
-            shortcuts = self.ctx.shortcuts.replace_all(entries)
-            added, skipped = len(shortcuts), 0
-        self._audit("shortcuts.import", actor=user["username"],
-                    detail={"format": "json", "mode": mode if mode == "append" else "replace",
-                            "added": added, "skipped": skipped, "invalid": len(errors)})
-        return self._json({"success": True, "shortcuts": shortcuts,
-                           "added": added, "skipped": skipped, "errors": errors})
+        return self._finish_import(user, entries, mode, "json")
 
     def api_export(self):
         if not self._require_session():
@@ -847,20 +869,70 @@ class HubHandler(BaseHTTPRequestHandler):
             return err
         if cat_id:
             entries = [dict(e, category=cat_id) for e in entries]
-        errors = self._diagnose_import_rows(entries)  # 행별 실패 사유(v2.221)
-        replace = str(payload.get("mode", "append")).lower() == "replace"
-        if replace:
-            shortcuts = self.ctx.shortcuts.replace_all(entries)
-            added, skipped = len(shortcuts), 0
+        return self._finish_import(user, entries, payload.get("mode", "append"), "csv")
+
+    # ---------- 서버 파일 직접 가져오기 (v2.223) ----------
+    # 브라우저 업로드 없이 운영자가 서버에 올려 둔 파일을 바로 반영한다(폐쇄망/자동화 배포용).
+    # 대상 디렉터리는 data_dir/import 하나로 고정 — 이름 화이트리스트 + resolve 재확인으로
+    # 경로 탈출(../, 절대경로, 심볼릭 링크로 밖을 가리키기)을 차단한다. 파일시스템 접근이라 admin 전용.
+
+    IMPORT_NAME_RE = re.compile(r"^[A-Za-z0-9가-힣][A-Za-z0-9가-힣 ._-]{0,120}\.(json|csv)$")
+    IMPORT_MAX_BYTES = 2 * 1024 * 1024
+
+    def _import_dir(self) -> Path:
+        # 전역 config 가 아니라 컨텍스트의 data_dir 기준 — 테스트/다중 인스턴스에서 경로가 갈린다.
+        path = Path(self.ctx.data_dir) / "import"
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def api_import_server_list(self):
+        actor = self._require_admin()
+        if not actor:
+            return None
+        files = []
+        for p in sorted(self._import_dir().iterdir()):
+            if not p.is_file() or not self.IMPORT_NAME_RE.match(p.name):
+                continue
+            st = p.stat()
+            files.append({"name": p.name, "sizeBytes": st.st_size,
+                          "modifiedAt": time.strftime("%Y-%m-%d %H:%M", time.localtime(st.st_mtime))})
+        return self._json({"success": True, "dir": str(self._import_dir()), "files": files})
+
+    def api_import_server_run(self):
+        actor = self._require_admin()
+        if not actor:
+            return None
+        payload = self._body_dict()
+        name = str(payload.get("name", "")).strip()
+        if not self.IMPORT_NAME_RE.match(name):
+            return self._error(HTTPStatus.BAD_REQUEST,
+                               "파일 이름이 올바르지 않습니다 — import 폴더의 .json/.csv 만 지정할 수 있습니다.")
+        base = self._import_dir().resolve()
+        path = (base / name).resolve()
+        if path.parent != base or not path.is_file():
+            return self._error(HTTPStatus.NOT_FOUND, f"파일이 없습니다: {name}")
+        if path.stat().st_size > self.IMPORT_MAX_BYTES:
+            return self._error(HTTPStatus.BAD_REQUEST, "파일이 너무 큽니다(최대 2MB).")
+        text = path.read_text(encoding="utf-8-sig")  # 엑셀 BOM 허용
+        if name.lower().endswith(".csv"):
+            entries = csvio.parse_csv(text)
         else:
-            shortcuts, added, skipped = self.ctx.shortcuts.append_many(entries)
-        self._audit("shortcuts.import", actor=user["username"],
-                    detail={"mode": "replace" if replace else "append",
-                            "rows": len(entries), "added": added, "skipped": skipped,
-                            "invalid": len(errors)})
-        return self._json({"success": True, "shortcuts": shortcuts,
-                           "added": added, "skipped": skipped, "rows": len(entries),
-                           "errors": errors})
+            try:
+                parsed = json.loads(text)
+            except ValueError as exc:
+                return self._error(HTTPStatus.BAD_REQUEST, f"JSON 해석 실패: {exc}")
+            entries = parsed.get("shortcuts") if isinstance(parsed, dict) else parsed
+        if not isinstance(entries, list) or not entries:
+            return self._error(HTTPStatus.BAD_REQUEST,
+                               "가져올 항목이 없습니다(JSON 배열/shortcuts 키 또는 name·url 열 확인).")
+        cat_id, err = self._resolve_import_category(actor, payload.get("category"))
+        if err:
+            return err
+        if cat_id:
+            entries = [dict(e, category=cat_id) if isinstance(e, dict) else e for e in entries]
+        return self._finish_import(actor, entries, payload.get("mode", "append"),
+                                   "csv" if name.lower().endswith(".csv") else "json",
+                                   extra_detail={"source": f"server:{name}"})
 
     # ---------- 정적 파일 ----------
 
@@ -964,6 +1036,8 @@ ROUTES = [
     ("DELETE", _route(r"/api/shortcuts/" + ID_PATTERN), HubHandler.api_shortcut_delete),
     ("POST", _route(r"/api/import"), HubHandler.api_shortcut_import),
     ("POST", _route(r"/api/import/csv"), HubHandler.api_import_csv),
+    ("GET", _route(r"/api/settings/import-files"), HubHandler.api_import_server_list),
+    ("POST", _route(r"/api/settings/import-files/run"), HubHandler.api_import_server_run),
     ("GET", _route(r"/api/export"), HubHandler.api_export),
     ("GET", _route(r"/api/export/csv"), HubHandler.api_export_csv),
 ]

@@ -1707,6 +1707,46 @@
     return (input || "").trim();
   }
 
+  /* 서버 파일 직접 가져오기(v2.223) — 업로드 없이 서버 import 폴더의 .json/.csv 를 반영.
+     폐쇄망에서 scp 로 올려 둔 파일이나 자동화 산출물을 바로 등록할 때 쓴다(admin 전용). */
+  function importFromServer() {
+    api("/api/settings/import-files")
+      .then(function (data) {
+        var files = data.files || [];
+        if (!files.length) {
+          window.alert("서버 import 폴더가 비어 있습니다.\n\n" + data.dir
+            + "\n\n위 경로에 .json 또는 .csv 파일을 올려 두고 다시 눌러 주세요.");
+          return;
+        }
+        var lines = files.map(function (f, i) {
+          return (i + 1) + ") " + f.name + "  (" + Math.round(f.sizeBytes / 1024) + "KB · " + f.modifiedAt + ")";
+        });
+        var pick = window.prompt("가져올 서버 파일 번호를 입력하세요:\n\n" + lines.join("\n"), "1");
+        var idx = parseInt(pick, 10);
+        if (!idx || idx < 1 || idx > files.length) return;
+        var name = files[idx - 1].name;
+        var replace = window.confirm(
+          "'" + name + "' 가져오기 방식을 선택하세요.\n\n" +
+          "[확인] 기존 목록을 통째로 교체(덮어쓰기)\n" +
+          "[취소] 기존 목록 뒤에 추가 (같은 URL 은 건너뜀)");
+        var category = askImportCategory();
+        api("/api/settings/import-files/run", { method: "POST",
+            body: { name: name, mode: replace ? "replace" : "append", category: category } })
+          .then(function (res) {
+            applyShortcuts(res.shortcuts);
+            toast(replace
+              ? res.shortcuts.length + "개로 교체했습니다."
+              : res.added + "개 추가" + (res.skipped ? " · " + res.skipped + "개 건너뜀" : ""), "ok");
+            reportImportErrors("서버 파일", res.errors);
+          })
+          .catch(function (err) {
+            console.error("[서버 파일 가져오기] 실패:", err);
+            toast(err.message, "err");
+          });
+      })
+      .catch(function (err) { toast(err.message, "err"); });
+  }
+
   function importJson(file) {
     var reader = new FileReader();
     reader.onload = function () {
@@ -1918,6 +1958,7 @@
     $("btn-import").addEventListener("click", function () { $("import-file").click(); });
     $("btn-export-csv").addEventListener("click", exportCsv);
     $("btn-import-csv").addEventListener("click", function () { $("import-csv-file").click(); });
+    $("btn-import-server").addEventListener("click", importFromServer);
     $("import-csv-file").addEventListener("change", function (event) {
       var file = event.target.files && event.target.files[0];
       if (file) importCsv(file);
