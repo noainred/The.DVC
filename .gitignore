@@ -109,3 +109,4 @@ server/config/*.db-shm
 server/config/horizon.json
 sbp-shortcuts.json
 sbp-shortcuts.csv
+sbp-proxy-shortcuts.json
