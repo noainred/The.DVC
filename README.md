@@ -18,6 +18,10 @@
 > 📦 **설치는 [docs/INSTALL.md — 설치 가이드(중앙/엣지/수집기 + 토큰·방화벽)](docs/INSTALL.md)** 참고.
 > 오프라인 패키지/업그레이드 상세는 [packaging/offline/OFFLINE-INSTALL.md](packaging/offline/OFFLINE-INSTALL.md).
 
+> 📖 **사용자 수준별 가이드(화면 캡처 포함)** —
+> [처음 사용자](docs/GUIDE-BEGINNER.md) · [중급 사용자(운영 실무)](docs/GUIDE-INTERMEDIATE.md) ·
+> [관리자(설치·구성·보안)](docs/GUIDE-ADMIN.md)
+
 ---
 
 ## 목차
