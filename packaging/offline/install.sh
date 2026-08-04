@@ -32,8 +32,33 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ $EUID -eq 0 ]] || { echo "이 스크립트는 root 권한으로 실행해야 합니다 (sudo)." >&2; exit 1; }
-[[ -d "$SCRIPT_DIR/runtime/node" && -d "$SCRIPT_DIR/app" ]] || {
-  echo "패키지 구조가 올바르지 않습니다 (runtime/ 또는 app/ 누락)." >&2; exit 1; }
+
+# 패키지 구조 확인 — 실패 시 '무엇이 없는지'와 '가장 흔한 원인'까지 알려준다.
+# 이 오류의 대부분은 (1) 설치 패키지가 아닌 업그레이드 번들/소스를 받았거나
+# (2) 압축을 푼 폴더가 아닌 곳(설치 대상 /opt/vmware-portal 등)에서 실행한 경우다.
+if [[ ! -d "$SCRIPT_DIR/runtime/node" || ! -d "$SCRIPT_DIR/app" ]]; then
+  {
+    echo "패키지 구조가 올바르지 않습니다 — 이 스크립트와 같은 폴더에 runtime/node 와 app/ 이 있어야 합니다."
+    echo ""
+    echo "  실행 위치 : $SCRIPT_DIR"
+    echo "  runtime/node : $([[ -d "$SCRIPT_DIR/runtime/node" ]] && echo '있음' || echo '없음  ← 누락')"
+    echo "  app/         : $([[ -d "$SCRIPT_DIR/app" ]] && echo '있음' || echo '없음  ← 누락')"
+    echo "  같은 폴더 내용: $(ls -A "$SCRIPT_DIR" 2>/dev/null | head -8 | tr '\n' ' ')"
+    echo ""
+    echo "흔한 원인과 해결:"
+    echo " 1) 받은 파일이 '설치 패키지'가 아닙니다."
+    echo "    설치 패키지 : vmware-portal-offline-<버전>-el9-x64.tar.gz  (약 70MB, Node 런타임 포함) ← 이것이 필요"
+    echo "    업그레이드 번들: vmware-portal-<버전>.tar.gz               (약 13MB, 앱만 — 설치용 아님)"
+    echo "    git 소스      : 설치 스크립트만 있고 런타임/빌드 결과가 없음 — packaging/offline/build-package.sh 로 먼저 빌드"
+    echo " 2) 압축을 푼 폴더가 아닌 곳에서 실행했습니다. 아래처럼 풀린 폴더로 이동해 실행하세요:"
+    echo "      tar -xzf vmware-portal-offline-<버전>-el9-x64.tar.gz"
+    echo "      cd vmware-portal-offline-<버전>-el9-x64"
+    echo "      sudo ./install.sh --port ${PORT}"
+    echo ""
+    echo "설치 대상 폴더($PREFIX)에서 실행하는 것이 아닙니다 — 그 폴더는 설치가 만들어 줍니다."
+  } >&2
+  exit 1
+fi
 
 VERSION="$(cat "$SCRIPT_DIR/VERSION" 2>/dev/null || echo unknown)"
 echo "==> VMware Global Monitoring Portal 오프라인 설치 (v${VERSION}) — Rocky Linux 9"
