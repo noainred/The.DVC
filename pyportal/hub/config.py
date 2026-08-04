@@ -15,7 +15,7 @@ STATIC_DIR = BASE_DIR / "static"
 
 # 폴백 버전 — pyportal 을 저장소 밖으로 단독 복사(/opt/dc-service-hub)한 배포에서 쓰인다.
 # pyportal 을 변경하는 릴리스마다 package.json 과 함께 올릴 것(방치하면 화면 버전이 낡는다).
-_FALLBACK_VERSION = "2.220.0"
+_FALLBACK_VERSION = "2.221.0"
 
 
 def _resolve_version() -> str:
