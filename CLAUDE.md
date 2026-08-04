@@ -206,6 +206,8 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
   GitHub 릴리스까지 게시**한다. 바이너리는 git에 커밋하지 않고 GitHub Actions(`.github/
   workflows/release.yml`)가 롤링 `downloads` 릴리스에 게시한다. 절차:
   1. `package.json`(루트/서버/웹 3개) 버전 semver 인상 + `server/src/release-notes.json` 추가.
+     **pyportal 을 변경한 릴리스면 `pyportal/ver.txt` 맨 위에 `버전 (날짜) 한줄요약` 추가**
+     (단독 복사 배포의 버전 표시 소스 — 코드 상수가 아니라 이 파일이 진실의 원천).
   2. 변경을 개발 브랜치에 커밋·push 하고 PR 생성/갱신.
   3. **릴리스 게시(필수)**: PR 을 main 에 머지한 뒤, release 워크플로를 돌린다.
      - 권장: main 에 `v<버전>` 태그 push → CI 가 main(=새 버전) 기준으로 빌드·게시.

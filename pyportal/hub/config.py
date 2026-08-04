@@ -13,16 +13,26 @@ PACKAGE_DIR = Path(__file__).resolve().parent
 BASE_DIR = PACKAGE_DIR.parent
 STATIC_DIR = BASE_DIR / "static"
 
-# 폴백 버전 — pyportal 을 저장소 밖으로 단독 복사(/opt/dc-service-hub)한 배포에서 쓰인다.
-# pyportal 을 변경하는 릴리스마다 package.json 과 함께 올릴 것(방치하면 화면 버전이 낡는다).
-_FALLBACK_VERSION = "2.221.0"
+# 버전 기록 파일 — pyportal/ver.txt (맨 윗줄 = 현재 버전, 아래로 변경 이력).
+# 릴리스마다 맨 위에 한 줄을 추가한다(CLAUDE.md 릴리스 절차). 코드와 함께 복사되므로
+# 단독 배포(/opt/dc-service-hub)에서도 버전이 정확하다 — 코드 내 상수 유지보수 불필요.
+VER_FILE = BASE_DIR / "ver.txt"
+
+
+def parse_ver_line(text: str) -> str:
+    """ver.txt 첫 유효 줄에서 버전 토큰만 추출. 예: '2.222.0 (2026-08-04) 설명' → '2.222.0'."""
+    for line in (text or "").splitlines():
+        token = line.strip().split(" ", 1)[0].strip()
+        if token:
+            return token[:32]
+    return ""
 
 
 def _resolve_version() -> str:
-    """허브 표시 버전 결정: env HUB_VERSION → 저장소 루트 package.json → 폴백 상수.
+    """허브 표시 버전 결정: env HUB_VERSION → 저장소 루트 package.json → ver.txt.
 
     저장소째 배포(설치 패키지의 app/pyportal)에서는 옆의 package.json 을 읽어 포탈과
-    같은 버전이 표시되고, 단독 복사본은 폴백 상수(또는 env)를 쓴다.
+    같은 버전이 표시되고, 단독 복사본은 코드와 함께 복사된 ver.txt 를 쓴다.
     """
     env = os.environ.get("HUB_VERSION", "").strip()
     if env:
@@ -36,7 +46,14 @@ def _resolve_version() -> str:
                 return value[:32]
     except (OSError, ValueError):
         pass
-    return _FALLBACK_VERSION
+    try:
+        if VER_FILE.is_file():
+            value = parse_ver_line(VER_FILE.read_text(encoding="utf-8"))
+            if value:
+                return value
+    except OSError:
+        pass
+    return "unknown"
 
 
 VERSION = _resolve_version()
