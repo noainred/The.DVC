@@ -1,13 +1,15 @@
-# 릴리스/다운로드 — GitHub Releases 이전 가이드
+# 릴리스/다운로드 — GitHub Releases 가이드
 
 기존에는 설치/업그레이드 바이너리를 git의 `download/`에 커밋했다. 이 때문에 `.git`이
 릴리스마다 ~190MB씩 커져 29GB까지 부풀었고, 오프라인 패키지 빌드가 디스크 부족으로
-실패하기 시작했다. 이를 **GitHub Releases(롤링 `downloads` 태그)** 로 옮긴다.
+실패하기 시작했다. 현재는 **GitHub Releases(롤링 `downloads` 태그)** 로 게시한다(이전 완료).
 
 ## 구조
 
 - 빌드는 **GitHub Actions**(`.github/workflows/release.yml`)가 수행한다(로컬/컨테이너 디스크 무관).
-- 트리거: **`v*` 태그 push** 또는 수동 실행(workflow_dispatch — 워크플로가 기본 브랜치에 올라간 뒤 사용 가능).
+- 트리거: **`v*` 태그 push** 또는 수동 실행(workflow_dispatch, `ref=main`).
+- 릴리스와 별개로 **PR CI**(`.github/workflows/ci.yml`)가 서버 단위테스트·웹 빌드·서비스 허브
+  파이썬 테스트를 돌린다(v2.215+) — **릴리스 태그를 밀기 전에 PR CI 통과를 먼저 확인**한다.
 - 산출물(el9/cent9 설치 패키지, Windows 수집기, 업그레이드 번들)과 `versions.json`을
   단일 **롤링 릴리스 `downloads`** 에 자산으로 업로드(`--clobber`)한다.
 - 따라서 다운로드 base URL은 버전과 무관하게 고정:
@@ -19,10 +21,13 @@
 ## 새 릴리스 내는 법
 
 ```bash
-# 1) package.json 3곳 버전 올리고 release-notes.json 갱신, 소스 커밋/푸시
-# 2) 태그를 만들어 push → Actions가 빌드+업로드
-git tag v2.18.0
-git push origin v2.18.0
+# 1) package.json 3곳(루트/server/web) 버전 올리고 server/src/release-notes.json 갱신, 소스 커밋/푸시
+# 2) PR을 main에 머지하고 CI 통과 확인
+# 3) main 기준 태그를 만들어 push → Actions가 빌드+업로드
+git tag v2.218.0 origin/main
+git push origin v2.218.0
+# 4) 게시 확인: versions.json의 latest가 새 버전인지
+curl -sL https://github.com/noainred/The.DVC/releases/download/downloads/versions.json | head -5
 ```
 
 `versions.json`은 워크플로가 이전 자산을 받아 새 버전 항목을 prepend하고 latest를 갱신한다
@@ -41,14 +46,16 @@ GitHub는 **릴리스 1개당 자산 1000개** 상한이 있다. 롤링 `downloa
 - 최초 정리 실행은 삭제 대상이 많아(수백 개) prune 단계가 수 분 걸릴 수 있으나 **일회성**이며,
   이후에는 한두 개만 정리해 빠르다.
 
-## 컷오버(이전 절차)
+## 컷오버(이전 절차) — ✅ 완료된 이력
 
-1. 워크플로/스크립트 커밋·push (이 커밋).
+아래 1~4단계는 **이미 완료**됐다(포탈 기본 base URL이 Releases 경로, `download/`는 `.gitignore`).
+이력 참고용으로만 남긴다.
+
+1. 워크플로/스크립트 커밋·push.
 2. **태그 push로 첫 CI 빌드** → `downloads` 릴리스가 채워지는지 확인.
-3. 확인되면 포탈 기본 base URL을 위 Releases 경로로 전환(`server/src/config.js` `packages.baseUrl`).
-4. `git rm --cached download/*.tar.gz download/*.zip download/*.sha256` 로 추적 해제(작업트리 파일은
-   `.gitignore` 처리됨). 신규 설치 가이드의 링크도 Releases로 갱신.
-5. (선택, 파괴적) 이미 쌓인 29GB를 회수하려면 `git filter-repo --path download/ --invert-paths`
+3. 포탈 기본 base URL을 Releases 경로로 전환(`server/src/config.js` `packages.baseUrl`). — 완료
+4. `git rm --cached download/*` 로 추적 해제 + `.gitignore` 처리. — 완료
+5. (선택, 파괴적·미실행) 이미 쌓인 29GB를 회수하려면 `git filter-repo --path download/ --invert-paths`
    로 히스토리에서 바이너리를 제거 후 force-push. 백업 필수, 기존 clone/PR 참조가 깨진다.
 
 ## 폐쇄망/오프라인 사이트
