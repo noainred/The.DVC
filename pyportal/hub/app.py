@@ -88,6 +88,7 @@ class AppContext:
     def _run_health_check(self, targets=None, *, persist: bool = True):
         items = targets if targets is not None else [
             {"id": item["id"], "url": item["url"]} for item in self.shortcuts.all()
+            if item.get("enabled", True)  # 중지된 바로가기(v2.227)는 점검하지 않는다(대상 부하·이력 오염 방지)
         ]
         if not items:
             return []

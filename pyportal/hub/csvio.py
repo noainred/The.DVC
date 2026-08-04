@@ -21,7 +21,7 @@ import io
 # 내보내기 열 순서 = 가져오기가 기대하는 헤더. 사용자가 열을 지우거나 순서를 바꿔도
 # 헤더 이름으로 찾으므로 동작한다(헤더가 아예 없으면 이 순서로 간주).
 COLUMNS = ["name", "url", "category", "icon", "description", "tags",
-           "datacenterId", "isFavorite"]
+           "datacenterId", "isFavorite", "enabled"]
 
 # 엑셀이 수식으로 해석하는 선두 문자.
 _FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
@@ -61,6 +61,7 @@ def export_csv(shortcuts) -> str:
             _guard(", ".join(item.get("tags") or [])),
             _guard(item.get("datacenterId")),
             "true" if item.get("isFavorite") else "false",
+            "true" if item.get("enabled", True) else "false",
         ])
     return "﻿" + buffer.getvalue()
 
@@ -113,5 +114,7 @@ def parse_csv(text) -> list:
             "tags": cell("tags"),
             "datacenterId": cell("datacenterId"),
             "isFavorite": _truthy(cell("isFavorite")),
+            # enabled 열이 없는 옛 CSV 는 '사용'(True) — 왕복/업그레이드 시 링크가 꺼지지 않게.
+            "enabled": _truthy(cell("enabled")) if str(cell("enabled") or "").strip() else True,
         })
     return entries

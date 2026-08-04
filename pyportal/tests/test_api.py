@@ -680,6 +680,22 @@ class CsvApiTest(ServerCase):
         self.assertEqual(len(payload["shortcuts"]), 1)
         self.assertEqual(payload["shortcuts"][0]["url"], "https://json-replace.internal.dc/")
 
+    def test_shortcut_enable_toggle_and_csv_roundtrip(self):
+        """사용/중지(v2.227) — 토글 저장 + CSV 왕복에 enabled 열 보존, 기본값은 사용."""
+        code, payload, _ = request(self.url + "/api/shortcuts", "POST",
+                                   {"name": "토글 링크", "url": "https://toggle.internal.dc/"},
+                                   self.auth())
+        self.assertEqual(code, 201)
+        sc = payload["shortcut"]
+        self.assertTrue(sc["enabled"])  # 기본값 = 사용
+        code, payload, _ = request(self.url + "/api/shortcuts/" + sc["id"], "PUT",
+                                   {"enabled": False}, self.auth())
+        self.assertEqual(code, 200)
+        self.assertFalse(payload["shortcut"]["enabled"])
+        _, csv_payload, _ = request(self.url + "/api/export/csv", headers=self.auth())
+        self.assertIn("enabled", csv_payload["raw"].splitlines()[0])  # 헤더에 열 존재
+        request(self.url + "/api/shortcuts/" + sc["id"], "DELETE", None, self.auth())
+
     def test_import_requires_session(self):
         self.assertEqual(request(self.url + "/api/import/csv", "POST",
                                  {"csv": "name,url\nA,https://a.internal/\n"})[0], 401)

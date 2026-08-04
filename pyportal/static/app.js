@@ -304,8 +304,11 @@
 
   function visibleShortcuts() {
     return state.shortcuts.filter(function (sc) {
+      if (sc.enabled === false) return false;   // 중지(v2.227) — 설정에서만 보인다
       var byCategory = state.category === "ALL" || sc.category === state.category;
-      return byCategory && matchesSearch(sc, state.search);
+      var byStatus = (state.statusFilter || "ALL") === "ALL"
+        || healthStatusOf(sc) === state.statusFilter;
+      return byCategory && byStatus && matchesSearch(sc, state.search);
     });
   }
 
@@ -375,9 +378,29 @@
 
   /* ---------------- 대시보드 ---------------- */
 
+  /* 사용 중(enabled) 바로가기만 — 중지(v2.227)는 대시보드·즐겨찾기·필터 집계에서 제외. */
+  function activeShortcuts() {
+    return state.shortcuts.filter(function (sc) { return sc.enabled !== false; });
+  }
+
+  /* 마지막 점검 상태(v2.227 상태 필터) — 점검 기록이 없으면 'unchecked'. */
+  function healthStatusOf(sc) {
+    var r = state.health && state.health[sc.id];
+    return r && r.status ? r.status : "unchecked";
+  }
+  var STATUS_FILTERS = [
+    { id: "ALL", label: "전체 상태" },
+    { id: "healthy", label: "🟢 정상" },
+    { id: "warning", label: "🟠 주의" },
+    { id: "unreachable", label: "🔴 응답 없음" },
+    { id: "unchecked", label: "⚪ 미점검" },
+  ];
+
   function renderDashboard() {
-    var favorites = state.shortcuts.filter(function (sc) { return sc.isFavorite; });
-    var showFavorites = favorites.length > 0 && !state.search && state.category === "ALL";
+    var active = activeShortcuts();
+    var favorites = active.filter(function (sc) { return sc.isFavorite; });
+    var showFavorites = favorites.length > 0 && !state.search && state.category === "ALL"
+      && (state.statusFilter || "ALL") === "ALL";
     $("favorites-section").hidden = !showFavorites;
     if (showFavorites) {
       $("favorites-count").textContent = favorites.length + "개";
@@ -389,13 +412,28 @@
     var pills = $("category-pills");
     clear(pills);
     [{ id: "ALL", label: "전체 서비스" }].concat(state.categories).forEach(function (entry) {
-      var count = entry.id === "ALL" ? state.shortcuts.length
-        : state.shortcuts.filter(function (sc) { return sc.category === entry.id; }).length;
+      var count = entry.id === "ALL" ? active.length
+        : active.filter(function (sc) { return sc.category === entry.id; }).length;
       pills.appendChild(el("button", {
         className: "pill" + (state.category === entry.id ? " active" : ""), type: "button",
         on: { click: function () { state.category = entry.id; renderDashboard(); } }
       }, [el("span", { text: entry.label }), el("span", { className: "pill-count", text: String(count) })]));
     });
+
+    // 상태 필터 칩(v2.227) — 마지막 점검 결과(정상/주의/응답 없음/미점검)로 좁혀 본다.
+    var spills = $("status-pills");
+    if (spills) {
+      clear(spills);
+      STATUS_FILTERS.forEach(function (entry) {
+        var count = entry.id === "ALL" ? active.length
+          : active.filter(function (sc) { return healthStatusOf(sc) === entry.id; }).length;
+        if (entry.id !== "ALL" && count === 0) return; // 해당 상태가 없으면 칩을 숨겨 시각 소음 제거
+        spills.appendChild(el("button", {
+          className: "pill" + ((state.statusFilter || "ALL") === entry.id ? " active" : ""), type: "button",
+          on: { click: function () { state.statusFilter = entry.id; renderDashboard(); } }
+        }, [el("span", { text: entry.label }), el("span", { className: "pill-count", text: String(count) })]));
+      });
+    }
 
     var list = visibleShortcuts();
     $("result-summary").textContent = "조회 결과 " + list.length + "개 / 전체 " + state.shortcuts.length + "개";
@@ -478,8 +516,8 @@
       box.appendChild(el("p", { className: "muted", text: "좌측 목록이나 지도에서 데이터센터를 선택하세요." }));
       return;
     }
-    var linked = state.shortcuts.filter(function (sc) { return sc.datacenterId === dc.id; });
-    var global = state.shortcuts.filter(function (sc) {
+    var linked = activeShortcuts().filter(function (sc) { return sc.datacenterId === dc.id; });
+    var global = activeShortcuts().filter(function (sc) {
       return !sc.datacenterId || sc.datacenterId === "all";
     });
 
@@ -969,10 +1007,12 @@
       return;
     }
     state.shortcuts.forEach(function (sc) {
-      body.appendChild(el("tr", {}, [
+      var disabled = sc.enabled === false;
+      body.appendChild(el("tr", { className: disabled ? "row-muted" : "" }, [
         el("td", {}, [
           el("span", { text: (sc.icon || "🔗") + " " }), el("strong", { text: sc.name }),
-          sc.isFavorite ? el("span", { className: "badge badge-user", text: "★" }) : null
+          sc.isFavorite ? el("span", { className: "badge badge-user", text: "★" }) : null,
+          disabled ? el("span", { className: "badge badge-dc", text: "중지됨" }) : null
         ]),
         el("td", { className: "url", text: sc.url, title: sc.url }),
         // 카테고리 인라인 변경(v2.219) — 수정 폼까지 안 가고 표에서 바로 분류를 바꾼다.
@@ -1005,6 +1045,12 @@
                          on: { click: function () { moveShortcut(sc, "down"); } } }),
           el("button", { className: "btn btn-ghost btn-sm", type: "button", text: "수정",
                          on: { click: function () { startEdit(sc.id); } } }),
+          // 사용/중지(v2.227) — 등록은 유지한 채 대시보드·상태점검에서만 제외/복귀.
+          el("button", { className: "btn btn-ghost btn-sm", type: "button",
+                         text: disabled ? "▶ 사용" : "⏸ 중지",
+                         attrs: { title: disabled ? "대시보드와 상태 점검에 다시 포함합니다"
+                                                  : "등록은 유지하고 대시보드·상태 점검에서 제외합니다" },
+                         on: { click: function () { toggleShortcutEnabled(sc); } } }),
           el("button", { className: "btn btn-danger btn-sm", type: "button", text: "삭제",
                          on: { click: function () { removeShortcut(sc); } } })
         ])])
@@ -1168,8 +1214,10 @@
     var shown = state.datacenters.length;
     if (state.shortcuts.length) {
       var registered = state.dcRegistered || shown;
-      $("footer-meta").textContent = "바로가기 " + state.shortcuts.length + "개 · 데이터센터 "
-        + shown + "개" + (registered > shown ? " / " + registered : "")
+      var activeCount = activeShortcuts().length;
+      $("footer-meta").textContent = "바로가기 " + activeCount + "개"
+        + (state.shortcuts.length > activeCount ? " / " + state.shortcuts.length : "")
+        + " · 데이터센터 " + shown + "개" + (registered > shown ? " / " + registered : "")
         + (state.meta ? " · v" + state.meta.version : "");
     }
     var registered = state.dcRegistered || shown;
@@ -1600,13 +1648,27 @@
 
   function applyShortcuts(list) {
     state.shortcuts = list || [];
-    $("tab-count").textContent = String(state.shortcuts.length);
+    // 대시보드 탭 카운트는 '사용 중'만 — 중지(v2.227) 포함 전체는 설정 화면에서 보인다.
+    var activeCount = activeShortcuts().length;
+    $("tab-count").textContent = String(activeCount);
     var registered = state.dcRegistered || state.datacenters.length;
-    $("footer-meta").textContent = "바로가기 " + state.shortcuts.length + "개 · 데이터센터 "
-      + state.datacenters.length + "개"
+    $("footer-meta").textContent = "바로가기 " + activeCount + "개"
+      + (state.shortcuts.length > activeCount ? " / " + state.shortcuts.length : "")
+      + " · 데이터센터 " + state.datacenters.length + "개"
       + (registered > state.datacenters.length ? " / " + registered : "")
       + (state.meta ? " · v" + state.meta.version : "");
     renderAll();
+  }
+
+  /* 사용/중지 토글(v2.227) — 저장 성공 시 목록 전체를 서버 응답으로 교체(정합 유지). */
+  function toggleShortcutEnabled(sc) {
+    var next = sc.enabled === false;
+    api("/api/shortcuts/" + encodeURIComponent(sc.id), { method: "PUT", body: { enabled: next } })
+      .then(function (data) {
+        applyShortcuts(data.shortcuts || state.shortcuts);
+        toast("'" + sc.name + "' " + (next ? "사용으로 전환했습니다." : "중지했습니다(대시보드·점검 제외)."), "ok");
+      })
+      .catch(function (err) { toast(err.message, "err"); });
   }
 
   function toggleFavorite(sc) {
