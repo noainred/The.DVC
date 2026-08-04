@@ -644,6 +644,33 @@ class CsvApiTest(ServerCase):
         self.assertEqual(code, 400)
         self.assertIn("유효한 항목이 없습니다", payload.get("error", ""))
 
+    def test_server_file_import(self):
+        """서버 파일 직접 가져오기(v2.223) — import 폴더의 JSON 을 업로드 없이 반영."""
+        import json as jsonlib
+        import_dir = Path(self.base) / "import"
+        import_dir.mkdir(parents=True, exist_ok=True)
+        (import_dir / "sbp.json").write_text(jsonlib.dumps(
+            [{"name": "서버파일 링크", "url": "https://server-file.internal.dc/"}]), encoding="utf-8")
+        code, listing, _ = request(self.url + "/api/settings/import-files", headers=self.auth())
+        self.assertEqual(code, 200)
+        self.assertIn("sbp.json", [f["name"] for f in listing["files"]])
+        code, payload, _ = request(self.url + "/api/settings/import-files/run", "POST",
+                                   {"name": "sbp.json", "mode": "append", "category": "SBP서버"},
+                                   self.auth())
+        self.assertEqual(code, 200)
+        self.assertEqual(payload["added"], 1)
+        hit = [s for s in payload["shortcuts"] if s["url"].startswith("https://server-file")]
+        self.assertEqual(len(hit), 1)
+        self.assertTrue(hit[0]["category"])  # 일괄 카테고리 즉석 생성 적용
+        request(self.url + "/api/shortcuts/" + hit[0]["id"], "DELETE", None, self.auth())
+
+    def test_server_file_import_rejects_traversal(self):
+        """경로 탈출 차단 — ../ 나 허용 외 확장자는 400."""
+        for bad in ("../users.json", "a/../../x.json", "hack.txt"):
+            code, _, _ = request(self.url + "/api/settings/import-files/run", "POST",
+                                 {"name": bad}, self.auth())
+            self.assertEqual(code, 400, f"차단 실패: {bad}")
+
     def test_json_import_default_is_replace(self):
         """mode 없는 옛 요청은 기존 동작(통째 교체) 유지 — 하위호환."""
         entries = [{"name": "교체 링크", "url": "https://json-replace.internal.dc/", "category": "custom"}]
