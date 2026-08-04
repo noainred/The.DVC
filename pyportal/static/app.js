@@ -975,8 +975,26 @@
           sc.isFavorite ? el("span", { className: "badge badge-user", text: "★" }) : null
         ]),
         el("td", { className: "url", text: sc.url, title: sc.url }),
-        el("td", {}, [el("span", { className: "badge " + categoryClass(sc.category),
-                                   text: categoryLabel(sc.category) })]),
+        // 카테고리 인라인 변경(v2.219) — 수정 폼까지 안 가고 표에서 바로 분류를 바꾼다.
+        el("td", {}, [(function () {
+          var sel = el("select", { className: "select-inline",
+                                   attrs: { title: "카테고리 즉시 변경" } });
+          state.categories.forEach(function (cat) {
+            sel.appendChild(el("option", { value: cat.id, text: cat.label }));
+          });
+          sel.value = sc.category;
+          sel.addEventListener("change", function () {
+            var next = sel.value;
+            api("/api/shortcuts/" + encodeURIComponent(sc.id),
+                { method: "PUT", body: { category: next } })
+              .then(function (data) {
+                applyShortcuts(data.shortcuts || state.shortcuts);
+                toast("'" + sc.name + "' 카테고리를 변경했습니다.", "ok");
+              })
+              .catch(function (err) { sel.value = sc.category; toast(err.message, "err"); });
+          });
+          return sel;
+        })()]),
         el("td", {}, [el("div", { className: "row-actions" }, [
           // 대시보드는 이 표의 순서 그대로 그린다 — 자주 쓰는 링크를 위로 올릴 수 있게.
           el("button", { className: "btn btn-ghost btn-sm", type: "button", text: "↑",
@@ -1667,6 +1685,15 @@
     }).catch(function (err) { toast(err.message, "err"); });
   }
 
+  /* 가져오기 일괄 카테고리(v2.219) — 비우면 파일의 값 유지. 이름/ID 로 지정하며,
+     없는 카테고리는 서버가 admin 에 한해 즉석 생성한다. */
+  function askImportCategory() {
+    var names = state.categories.map(function (c) { return c.label; }).join(", ");
+    var input = window.prompt(
+      "가져오는 항목 전체에 지정할 카테고리 (비우면 파일의 값 유지)\n현재: " + names, "");
+    return (input || "").trim();
+  }
+
   function importJson(file) {
     var reader = new FileReader();
     reader.onload = function () {
@@ -1678,8 +1705,10 @@
         "JSON 가져오기 방식을 선택하세요.\n\n" +
         "[확인] 기존 목록을 파일 내용으로 통째로 교체(덮어쓰기)\n" +
         "[취소] 기존 목록 뒤에 추가 (같은 URL 은 건너뜀)");
+      var category = askImportCategory();
       api("/api/import", { method: "POST",
-                           body: { shortcuts: parsed, mode: replace ? "replace" : "append" } })
+                           body: { shortcuts: parsed, mode: replace ? "replace" : "append",
+                                   category: category } })
         .then(function (data) {
           applyShortcuts(data.shortcuts);
           toast(replace
@@ -1719,8 +1748,10 @@
         "CSV 가져오기 방식을 선택하세요.\n\n" +
         "[확인] 기존 목록을 CSV 내용으로 통째로 교체\n" +
         "[취소] 기존 목록 뒤에 추가 (같은 URL 은 건너뜀)");
+      var category = askImportCategory();
       api("/api/import/csv", { method: "POST",
-                               body: { csv: text, mode: replace ? "replace" : "append" } })
+                               body: { csv: text, mode: replace ? "replace" : "append",
+                                       category: category } })
         .then(function (data) {
           applyShortcuts(data.shortcuts);
           toast(replace

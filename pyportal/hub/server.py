@@ -743,8 +743,29 @@ class HubHandler(BaseHTTPRequestHandler):
             return None
         return self._json({"success": True, "shortcuts": self.ctx.shortcuts.reset()})
 
+    def _resolve_import_category(self, user, value):
+        """가져오기 일괄 카테고리(v2.219) — id/라벨로 찾고, 없으면 admin 에 한해 즉석 생성.
+
+        반환: (category_id | None, 오류응답 | None). value 가 비면 (None, None) — 파일 값 유지.
+        """
+        text = str(value or "").strip()
+        if not text:
+            return None, None
+        lowered = text.lower()
+        for cat in self.ctx.categories.all():
+            if cat["id"].lower() == lowered or cat["label"].lower() == lowered:
+                return cat["id"], None
+        if user.get("role") != "admin":
+            return None, self._error(HTTPStatus.BAD_REQUEST,
+                                     f"카테고리가 없습니다: {text} (생성은 admin 만 가능)")
+        created = self.ctx.categories.add({"label": text})
+        self._audit("category.create", actor=user["username"],
+                    detail={"id": created["id"], "via": "import"})
+        return created["id"], None
+
     def api_shortcut_import(self):
         """JSON 가져오기. mode=replace 면 통째로 교체, append 면 뒤에 덧붙인다(같은 URL 건너뜀).
+        category 를 주면 전 항목을 그 분류로 일괄 지정(없으면 admin 에 한해 즉석 생성).
         하위호환: 옛 클라이언트/스크립트가 mode 없이(또는 배열 그대로) 보내면 기존 동작(교체)."""
         user = self._require_session()
         if not user:
@@ -752,6 +773,12 @@ class HubHandler(BaseHTTPRequestHandler):
         payload = self._read_json()
         entries = payload.get("shortcuts") if isinstance(payload, dict) else payload
         mode = str(payload.get("mode", "replace")).lower() if isinstance(payload, dict) else "replace"
+        cat_id, err = self._resolve_import_category(
+            user, payload.get("category") if isinstance(payload, dict) else "")
+        if err:
+            return err
+        if cat_id and isinstance(entries, list):
+            entries = [dict(e, category=cat_id) if isinstance(e, dict) else e for e in entries]
         if mode == "append":
             shortcuts, added, skipped = self.ctx.shortcuts.append_many(entries)
         else:
@@ -790,6 +817,11 @@ class HubHandler(BaseHTTPRequestHandler):
         if not entries:
             return self._error(HTTPStatus.BAD_REQUEST,
                                "가져올 수 있는 행이 없습니다(name·url 열을 확인하세요).")
+        cat_id, err = self._resolve_import_category(user, payload.get("category"))
+        if err:
+            return err
+        if cat_id:
+            entries = [dict(e, category=cat_id) for e in entries]
         replace = str(payload.get("mode", "append")).lower() == "replace"
         if replace:
             shortcuts = self.ctx.shortcuts.replace_all(entries)
