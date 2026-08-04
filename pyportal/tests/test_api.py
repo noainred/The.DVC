@@ -605,6 +605,18 @@ class CsvApiTest(ServerCase):
             if shortcut["url"].startswith("https://json-a"):
                 request(self.url + "/api/shortcuts/" + shortcut["id"], "DELETE", None, self.auth())
 
+    def test_json_import_with_category_override_creates_missing(self):
+        """가져오기 일괄 카테고리(v2.219) — 전 항목 지정 + 없는 분류는 admin 이 즉석 생성."""
+        entries = [{"name": "카테고리 링크", "url": "https://json-cat.internal.dc/", "category": "custom"}]
+        code, payload, _ = request(self.url + "/api/import", "POST",
+                                   {"shortcuts": entries, "mode": "append", "category": "SBP"},
+                                   self.auth())
+        self.assertEqual(code, 200)
+        imported = [s for s in payload["shortcuts"] if s["url"].startswith("https://json-cat")]
+        self.assertEqual(len(imported), 1)
+        self.assertEqual(imported[0]["category"], "sbp")  # 라벨 SBP → 슬러그 id
+        request(self.url + "/api/shortcuts/" + imported[0]["id"], "DELETE", None, self.auth())
+
     def test_json_import_default_is_replace(self):
         """mode 없는 옛 요청은 기존 동작(통째 교체) 유지 — 하위호환."""
         entries = [{"name": "교체 링크", "url": "https://json-replace.internal.dc/", "category": "custom"}]

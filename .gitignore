@@ -107,3 +107,4 @@ server/config/os-scan.json
 server/config/*.db-wal
 server/config/*.db-shm
 server/config/horizon.json
+sbp-shortcuts.json
