@@ -744,11 +744,24 @@ class HubHandler(BaseHTTPRequestHandler):
         return self._json({"success": True, "shortcuts": self.ctx.shortcuts.reset()})
 
     def api_shortcut_import(self):
-        if not self._require_session():
+        """JSON 가져오기. mode=replace 면 통째로 교체, append 면 뒤에 덧붙인다(같은 URL 건너뜀).
+        하위호환: 옛 클라이언트/스크립트가 mode 없이(또는 배열 그대로) 보내면 기존 동작(교체)."""
+        user = self._require_session()
+        if not user:
             return None
         payload = self._read_json()
         entries = payload.get("shortcuts") if isinstance(payload, dict) else payload
-        return self._json({"success": True, "shortcuts": self.ctx.shortcuts.replace_all(entries)})
+        mode = str(payload.get("mode", "replace")).lower() if isinstance(payload, dict) else "replace"
+        if mode == "append":
+            shortcuts, added, skipped = self.ctx.shortcuts.append_many(entries)
+        else:
+            shortcuts = self.ctx.shortcuts.replace_all(entries)
+            added, skipped = len(shortcuts), 0
+        self._audit("shortcuts.import", actor=user["username"],
+                    detail={"format": "json", "mode": mode if mode == "append" else "replace",
+                            "added": added, "skipped": skipped})
+        return self._json({"success": True, "shortcuts": shortcuts,
+                           "added": added, "skipped": skipped})
 
     def api_export(self):
         if not self._require_session():

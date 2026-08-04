@@ -13,7 +13,33 @@ PACKAGE_DIR = Path(__file__).resolve().parent
 BASE_DIR = PACKAGE_DIR.parent
 STATIC_DIR = BASE_DIR / "static"
 
-VERSION = "1.0.0"
+# 폴백 버전 — pyportal 을 저장소 밖으로 단독 복사(/opt/dc-service-hub)한 배포에서 쓰인다.
+# pyportal 을 변경하는 릴리스마다 package.json 과 함께 올릴 것(방치하면 화면 버전이 낡는다).
+_FALLBACK_VERSION = "2.219.0"
+
+
+def _resolve_version() -> str:
+    """허브 표시 버전 결정: env HUB_VERSION → 저장소 루트 package.json → 폴백 상수.
+
+    저장소째 배포(설치 패키지의 app/pyportal)에서는 옆의 package.json 을 읽어 포탈과
+    같은 버전이 표시되고, 단독 복사본은 폴백 상수(또는 env)를 쓴다.
+    """
+    env = os.environ.get("HUB_VERSION", "").strip()
+    if env:
+        return env[:32]
+    try:
+        pkg = BASE_DIR.parent / "package.json"  # <repo>/package.json (pyportal/ 의 부모)
+        if pkg.is_file():
+            import json
+            value = str(json.loads(pkg.read_text(encoding="utf-8")).get("version", "")).strip()
+            if value:
+                return value[:32]
+    except (OSError, ValueError):
+        pass
+    return _FALLBACK_VERSION
+
+
+VERSION = _resolve_version()
 APP_NAME = "Global DC Service Hub"
 
 
