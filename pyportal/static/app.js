@@ -287,11 +287,19 @@
     return null;
   }
 
-  function matchesSearch(sc, query) {
+  /* 공백으로 구분한 모든 키워드가 포함될 때 매칭(AND) — "grafana 서울"처럼 두 단어 이상으로
+     좁혀 찾을 수 있다(v2.218). 한 단어일 때의 동작은 이전과 동일. */
+  function matchesKeywords(haystack, query) {
     if (!query) return true;
-    var haystack = [sc.name, sc.url, sc.description, (sc.tags || []).join(" "),
-      categoryLabel(sc.category)].join(" ").toLowerCase();
-    return haystack.indexOf(query.toLowerCase()) !== -1;
+    var hay = haystack.toLowerCase();
+    return query.toLowerCase().split(/\s+/).filter(Boolean).every(function (kw) {
+      return hay.indexOf(kw) !== -1;
+    });
+  }
+
+  function matchesSearch(sc, query) {
+    return matchesKeywords([sc.name, sc.url, sc.description, (sc.tags || []).join(" "),
+      categoryLabel(sc.category)].join(" "), query);
   }
 
   function visibleShortcuts() {
@@ -540,11 +548,10 @@
           el("span", { className: "pill-count", text: String(count) })]));
     });
 
-    var query = state.dcSearch.toLowerCase();
     var list = state.datacenters.filter(function (dc) {
       var byRegion = state.region === "ALL" || dc.region === state.region;
-      var bySearch = !query ||
-        [dc.name, dc.city, dc.country, dc.code].join(" ").toLowerCase().indexOf(query) !== -1;
+      // 다중 키워드 AND 검색(matchesKeywords) — 바로가기 검색과 동일 규칙.
+      var bySearch = matchesKeywords([dc.name, dc.city, dc.country, dc.code].join(" "), state.dcSearch);
       return byRegion && bySearch;
     });
 
@@ -897,7 +904,10 @@
     state.categories.forEach(function (cat) {
       categorySelect.appendChild(el("option", { value: cat.id, text: cat.label }));
     });
-    categorySelect.value = keepCategory || DEFAULT_CATEGORY_ID;
+    // 즉석 카테고리 생성(v2.218) — 목록에 없는 분류는 등록/수정 중에 그 자리에서 만든다.
+    // '카테고리 구성' 화면까지 갔다 오는 왕복을 없앤다(생성 권한은 서버가 검사).
+    categorySelect.appendChild(el("option", { value: "__new__", text: "＋ 새 카테고리 만들기…" }));
+    categorySelect.value = (keepCategory && keepCategory !== "__new__" ? keepCategory : "") || DEFAULT_CATEGORY_ID;
 
     var dcSelect = $("f-datacenter");
     var keepDc = dcSelect.value;
@@ -920,6 +930,7 @@
     state.editingId = null;
     $("shortcut-form").reset();
     $("f-category").value = DEFAULT_CATEGORY_ID;
+    state.lastCategoryPick = DEFAULT_CATEGORY_ID;
     $("f-datacenter").value = "all";
     $("form-title").textContent = "새 바로가기 등록";
     $("form-submit").textContent = "바로가기 생성";
@@ -934,6 +945,7 @@
     $("f-name").value = sc.name;
     $("f-url").value = sc.url;
     $("f-category").value = sc.category;
+    state.lastCategoryPick = sc.category;
     $("f-icon").value = sc.icon || "";
     $("f-description").value = sc.description || "";
     $("f-tags").value = (sc.tags || []).join(", ");
@@ -1812,6 +1824,29 @@
 
     // 설정 폼
     $("shortcut-form").addEventListener("submit", submitForm);
+    // 즉석 카테고리 생성 — '＋ 새 카테고리 만들기…'를 고르면 이름을 물어 만들고 바로 선택한다.
+    // 실패/취소 시에는 직전 선택으로 되돌린다(폼 값이 "__new__"로 저장되는 것 방지).
+    $("f-category").addEventListener("change", function () {
+      var sel = $("f-category");
+      if (sel.value !== "__new__") { state.lastCategoryPick = sel.value; return; }
+      var name = window.prompt("새 카테고리 이름을 입력하세요 (최대 60자)");
+      var label = (name || "").trim();
+      if (!label) { sel.value = state.lastCategoryPick || DEFAULT_CATEGORY_ID; return; }
+      api("/api/settings/categories", { method: "POST", body: { label: label } })
+        .then(function (res) {
+          if (res.categories) state.categories = res.categories;
+          fillFormSelects();
+          sel.value = (res.category && res.category.id) || DEFAULT_CATEGORY_ID;
+          state.lastCategoryPick = sel.value;
+          renderCategorySettings();
+          if (state.tab === "dashboard") renderDashboard();
+          toast("카테고리 '" + label + "' 를 만들어 선택했습니다.", "ok");
+        })
+        .catch(function (err) {
+          sel.value = state.lastCategoryPick || DEFAULT_CATEGORY_ID;
+          toast(err && err.message ? err.message : "카테고리 생성에 실패했습니다.", "err");
+        });
+    });
     $("form-cancel").addEventListener("click", resetForm);
     $("btn-reset").addEventListener("click", resetShortcuts);
     $("btn-export").addEventListener("click", exportJson);
