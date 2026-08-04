@@ -26,7 +26,7 @@ MAX_TAGS = 8
 # (클라이언트가 임의 필드를 밀어 넣어 파일을 부풀리지 못하게).
 FIELDS = (
     "id", "name", "url", "category", "icon", "description", "tags",
-    "datacenterId", "isFavorite", "createdViaSettings", "createdAt", "updatedAt",
+    "datacenterId", "isFavorite", "enabled", "createdViaSettings", "createdAt", "updatedAt",
 )
 
 
@@ -150,6 +150,9 @@ class ShortcutStore:
             "datacenterId": self._clean_datacenter_id(
                 data.get("datacenterId", base.get("datacenterId"))),
             "isFavorite": bool(data.get("isFavorite", base.get("isFavorite", False))),
+            # 사용/중지(v2.227) — 등록만 해 두고 화면·상태점검에서 빼는 상태. 기존 데이터/가져오기
+            # 파일에 필드가 없으면 '사용'(True) — 업그레이드 직후 전 링크가 사라지는 사고 방지.
+            "enabled": bool(data.get("enabled", base.get("enabled", True))),
             "createdViaSettings": bool(
                 data.get("createdViaSettings", base.get("createdViaSettings", False))),
             "createdAt": base.get("createdAt") or _clean_text(data.get("createdAt", ""), limit=32)
