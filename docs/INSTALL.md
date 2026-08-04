@@ -49,6 +49,54 @@
 
 ## 2. 중앙(central) 포탈 설치
 
+### 2.0 설치 파일 받기 (GitHub)
+
+설치 파일은 GitHub에서 받습니다. 두 가지 방법이 있습니다:
+
+**방법 A — 릴리스 설치 패키지 (운영 배포, 권장)**
+
+Node 런타임까지 포함된 오프라인 패키지를 받습니다. 폐쇄망이면 인터넷 되는 PC에서 받아
+서버로 전송(scp)하면 됩니다.
+
+```bash
+# 1) 최신 버전 확인 (versions.json 의 "latest")
+curl -sL https://github.com/noainred/The.DVC/releases/download/downloads/versions.json | head -5
+
+# 2) 설치 패키지 + 체크섬 다운로드 (<버전>을 위에서 확인한 값으로)
+BASE=https://github.com/noainred/The.DVC/releases/download/downloads
+curl -L -O $BASE/vmware-portal-offline-<버전>-el9-x64.tar.gz
+curl -L -O $BASE/vmware-portal-offline-<버전>-el9-x64.tar.gz.sha256
+
+# 3) 무결성 검증(필수) — 통과해야 §2.1 로 진행
+sha256sum -c vmware-portal-offline-<버전>-el9-x64.tar.gz.sha256
+
+# (폐쇄망) 서버로 전송
+scp vmware-portal-offline-<버전>-el9-x64.tar.gz <서버>:/tmp/
+```
+
+**방법 B — git 소스 받기 (개발/검증·직접 빌드)**
+
+```bash
+# git 으로 받기 (또는 ZIP: https://github.com/noainred/The.DVC/archive/refs/heads/main.zip)
+git clone https://github.com/noainred/The.DVC.git
+cd The.DVC
+
+# 의존성 설치 + 웹 빌드 (Node 20+ 필요 — 소스 실행은 런타임을 직접 준비해야 함)
+npm install
+npm run build
+
+# 개발 실행 — http://localhost:4000 (vCenter 없이 보려면 DATA_SOURCE=mock)
+node server/src/index.js
+DATA_SOURCE=mock node server/src/index.js   # 데모 데이터로 즉시 실행
+
+# 서비스 허브(선택, 별도 포트 8095)
+cd pyportal && python3 app.py
+```
+
+소스에서 **운영용 오프라인 패키지를 직접 빌드**하려면 Rocky Linux 9에서
+`packaging/offline/build-package.sh` 를 실행합니다(상세: [OFFLINE-INSTALL.md](../packaging/offline/OFFLINE-INSTALL.md)).
+운영 서버에는 방법 A 패키지 설치를 권장합니다 — systemd 서비스·전용 계정·자동 업그레이드가 함께 구성됩니다.
+
 ### 2.1 패키지 설치 (오프라인)
 
 ```bash
