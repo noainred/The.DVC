@@ -120,6 +120,49 @@ python3 app.py                  # http://<서버>:8095
   (표시 개수를 줄였다고 등록된 사이트를 수정할 수 없게 되면 안 되기 때문입니다).
 - 상단 배지는 `표시개수 DC / 등록수` 형태로 함께 알려줍니다(예: `13개 DC / 28`).
 
+### 비밀번호를 분실했을 때 (복구, v2.225)
+
+증상별로 위에서부터 확인하세요. 어떤 경우든 **데이터가 지워지지 않고** 복구됩니다.
+
+**① 초기 비밀번호를 모른다 (설치 직후, 아직 변경 전)**
+
+```bash
+sudo cat /etc/dc-service-hub/initial-settings-password.txt   # 계정: admin
+```
+이 파일은 비밀번호를 한 번이라도 바꾸면 자동 삭제됩니다 — 없으면 ③으로.
+
+**② 로그인 실패 잠금에 걸렸다** — 같은 IP에서 기본 8회 실패 시 5분 잠금
+(`HUB_LOGIN_MAX_FAILS`/`HUB_LOGIN_LOCKOUT_SEC`). 5분 기다리거나, 잠금 카운터는 메모리에만
+있으므로 `sudo systemctl restart dc-service-hub` 로 즉시 초기화됩니다.
+
+**③ 비밀번호를 잊었다 / 관리자 전원이 잠겼다 / 계정이 삭제됐다** — 콘솔 초기화:
+
+```bash
+# 계정 목록 확인
+sudo -u dchub python3 /opt/dc-service-hub/app.py --data-dir /etc/dc-service-hub --list-users
+
+# 비밀번호 초기화 — 새 임의 비밀번호가 출력된다(재표시 안 됨, 로그인 후 즉시 변경 권장)
+sudo -u dchub python3 /opt/dc-service-hub/app.py --data-dir /etc/dc-service-hub --reset-password admin
+```
+
+- 대상 계정이 **없으면 그 이름의 admin 계정을 새로 만들고**, 중지된 계정이면 활성화합니다.
+- 기존 로그인 세션은 전부 무효화되며, **서비스 재시작은 필요 없습니다**
+  (실행 중인 서버가 `users.json` 변경을 mtime 으로 감지해 즉시 반영).
+- 파일시스템 접근 권한(=서버 운영자)이 곧 인증입니다. 실행 내역은 감사 로그에
+  `console` 주체로 남습니다.
+- ⚠️ `sudo -u dchub` 를 빼고 root 로 실행하면 `users.json` 소유권이 root 가 되어
+  허브 프로세스가 파일을 쓰지 못하게 될 수 있습니다.
+
+**④ `HUB_TOKEN` 을 잊었다 (포탈 전체 비공개 모드)** — 토큰은 해시가 아니라 env 값이므로
+유닛 파일에서 바로 확인/교체합니다:
+
+```bash
+sudo systemctl cat dc-service-hub | grep HUB_TOKEN
+# 바꾸려면: /etc/systemd/system/dc-service-hub.service 수정 → daemon-reload → restart
+```
+
+> 운영자용 전체 절차 문서: [docs/SERVICE-HUB.md — 로그인이 안 될 때](../docs/SERVICE-HUB.md)
+
 ---
 
 ## 4. 링크 상태 점검 + 추이 차트
