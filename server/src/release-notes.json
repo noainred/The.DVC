@@ -1,6 +1,15 @@
 {
   "notes": [
     {
+      "version": "2.230.0",
+      "date": "2026-08-06",
+      "title": "설치 — SELinux 라벨 자동 복원 (어디서 압축을 풀어도 안전)",
+      "notes": [
+        "[수정] 설치 패키지를 /tmp나 /root 아래에서 풀어 설치하면 SELinux enforcing 환경에서 서비스가 무한 재시작(203/EXEC Permission denied)하던 문제를 고쳤습니다. 복사 시 임시 디렉터리의 SELinux 라벨(user_tmp_t)이 /opt까지 따라와 systemd가 실행을 거부하는 것이 원인으로, install.sh가 설치 마지막에 라벨을 경로 기본값으로 자동 복원합니다(restorecon, SELinux 미사용 환경은 영향 없음).",
+        "이미 이 증상을 겪는 서버는 sudo restorecon -Rv /opt/vmware-portal /etc/vmware-portal 후 재시작하면 됩니다 — 설치 가이드 §11 점검 표에 추가했습니다."
+      ]
+    },
+    {
       "version": "2.229.0",
       "date": "2026-08-05",
       "title": "설치 오류 메시지 개선 — 잘못된 패키지/실행 위치를 바로 알려줌",
