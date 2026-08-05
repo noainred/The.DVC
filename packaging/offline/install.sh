@@ -135,6 +135,15 @@ chown -R "$SERVICE_USER:$SERVICE_USER" "$PREFIX"
 chown -R "$SERVICE_USER:$SERVICE_USER" "$CONFIG_DIR"
 chmod 0750 "$CONFIG_DIR"
 
+# SELinux 라벨 복원(best-effort) — 패키지를 /tmp 나 /root 아래에서 풀면 cp -a 가
+# user_tmp_t/admin_home_t 라벨을 /opt 까지 그대로 가져오고, enforcing 환경의 systemd 는
+# 그 라벨의 바이너리 실행을 거부한다(기동 무한 재시작: 203/EXEC Permission denied —
+# root 쉘 직접 실행은 되므로 설치 중에는 안 드러난다). 경로 기본 라벨(usr_t/etc_t)로
+# 복원해 어디서 풀어도 안전하게 만든다. SELinux 미사용/permissive 면 조용히 지나간다.
+if command -v restorecon >/dev/null 2>&1; then
+  restorecon -R "$PREFIX" "$CONFIG_DIR" 2>/dev/null || true
+fi
+
 # 6) systemd service ---------------------------------------------------------
 echo "==> systemd 서비스 설치: $SERVICE_NAME"
 sed -e "s|@PREFIX@|$PREFIX|g" \
