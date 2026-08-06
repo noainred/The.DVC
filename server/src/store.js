@@ -444,6 +444,12 @@ function withRollups(snap) {
         memUsagePct: pct(memU, memT),
         storageUsagePct: pct(stU, stC),
         storageTotalTB: round(stC / 1024, 1),
+        // 사용량/전체 병기용(v2.232) — %만으로는 규모가 안 보인다(카드에서 "63% · 69/110 TB" 표기).
+        cpuUsedGhz: round(cpuU / 1000, 1),
+        cpuTotalGhz: round(cpuT / 1000, 1),
+        memUsedGB: Math.round(memU / 1024),
+        memTotalGB: Math.round(memT / 1024),
+        storageUsedTB: round(stU / 1024, 1),
         alarmsCritical: a.filter((x) => x.severity === 'critical').length,
         alarmsWarning: a.filter((x) => x.severity === 'warning').length,
         // 측정 전력을 vCenter 귀속 기준으로 합산(명시 지정·이름·태그). 호스트 미매핑 서버도 그 vCenter에 포함.

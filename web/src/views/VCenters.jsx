@@ -3,6 +3,13 @@ import { usePolling } from '../api.js';
 import { Loading, ErrorBox, StateBadge, usageColor, SearchBox } from '../components/ui.jsx';
 import VCenterDetail from './VCenterDetail.jsx';
 
+/* 메모리 사용/전체 병기 — 1TB 이상이면 TB로, 아니면 GB로(자릿수 폭주 방지). 값 없으면 미표기. */
+function fmtMem(usedGB, totalGB) {
+  if (usedGB == null || !totalGB) return undefined;
+  if (totalGB >= 1024) return `${(usedGB / 1024).toFixed(1)}/${(totalGB / 1024).toFixed(1)} TB`;
+  return `${usedGB}/${totalGB} GB`;
+}
+
 function Bar({ label, pct, detail }) {
   return (
     <div className="vc-metric">
@@ -61,13 +68,6 @@ export default function VCenters({ onSelectSite, resetSignal }) {
       </div>
 
       {sites.length > 0 && (
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
-          <SearchBox className="input" style={{ maxWidth: 280 }} value={query} onChange={setQuery}
-            placeholder="vCenter 빠른 찾기 (예: eu, seoul, 8.0)" />
-        </div>
-      )}
-
-      {shown.length > 0 && (
         <div className="vc-quicknav">
           <span className="qn-label">⚡ 바로가기</span>
           {shown.map((s) => {
@@ -81,6 +81,9 @@ export default function VCenters({ onSelectSite, resetSignal }) {
               </button>
             );
           })}
+          {/* 빠른 찾기 — 바로가기 박스 우측에 배치. 무결과여도 박스가 남아야 입력을 지울 수 있다. */}
+          <SearchBox className="input" style={{ marginLeft: 'auto', maxWidth: 240, minWidth: 170 }}
+            value={query} onChange={setQuery} placeholder="vCenter 빠른 찾기" />
         </div>
       )}
 
@@ -117,9 +120,9 @@ export default function VCenters({ onSelectSite, resetSignal }) {
                     <div className="vc-count"><b>{m.vms}</b><span>VM ({m.vmsPoweredOn} on)</span></div>
                     <div className="vc-count"><b style={{ color: m.alarmsCritical ? 'var(--red)' : m.alarmsWarning ? 'var(--amber)' : 'var(--green)' }}>{(m.alarmsCritical || 0) + (m.alarmsWarning || 0)}</b><span>알람</span></div>
                   </div>
-                  <Bar label="CPU" pct={m.cpuUsagePct || 0} />
-                  <Bar label="메모리" pct={m.memUsagePct || 0} />
-                  <Bar label="스토리지" pct={m.storageUsagePct || 0} detail={`${m.storageTotalTB || 0} TB`} />
+                  <Bar label="CPU" pct={m.cpuUsagePct || 0} detail={m.cpuTotalGhz ? `${m.cpuUsedGhz}/${m.cpuTotalGhz} GHz` : undefined} />
+                  <Bar label="메모리" pct={m.memUsagePct || 0} detail={fmtMem(m.memUsedGB, m.memTotalGB)} />
+                  <Bar label="스토리지" pct={m.storageUsagePct || 0} detail={m.storageUsedTB != null ? `${m.storageUsedTB}/${m.storageTotalTB} TB` : `${m.storageTotalTB || 0} TB`} />
                 </>
               )}
 
