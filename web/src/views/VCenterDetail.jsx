@@ -174,7 +174,7 @@ export default function VCenterDetail({ site, onBack }) {
 
         {view === 'hosts' && !query && (() => { const dc = virtSum(hosts); return (
           <Node label={`🗄️ ${site.name}`} defaultOpen
-            sub={<UsageBars lead={<span className="muted">{hosts.length} 호스트</span>} cpu={m.cpuUsagePct} mem={m.memUsagePct}
+            sub={<UsageBars lead={<span className="muted">{hosts.length} 호스트 · VM {dc.vmc}</span>} cpu={m.cpuUsagePct} mem={m.memUsagePct}
               tail={<VirtBadge alloc={dc.alloc} cores={dc.cores} />} />}>
             {clusters.map(([cl, chosts]) => {
               const n = chosts.length || 1;
@@ -183,7 +183,7 @@ export default function VCenterDetail({ site, onBack }) {
               const cv = virtSum(chosts);
               return (
               <Tree key={cl} k={`cl:${cl}`} open={open} toggle={toggle} icon="🧩" label={cl}
-                sub={<UsageBars lead={<span className="muted">{chosts.length} 호스트</span>} cpu={avgCpu} mem={avgMem}
+                sub={<UsageBars lead={<span className="muted">{chosts.length} 호스트 · VM {cv.vmc}</span>} cpu={avgCpu} mem={avgMem}
                   tail={<VirtBadge alloc={cv.alloc} cores={cv.cores} />} />}>
                 {chosts.map((h) => (
                   <Tree key={h.id} k={`h:${h.id}`} open={open} toggle={toggle} icon="🖥️"
