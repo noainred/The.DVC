@@ -268,6 +268,9 @@ AGENT_AUTO_REGISTER=true               # 발견 iDRAC 로컬 자동 등록
 
 ## 4. 수집기(collector) — iDRAC/OME 전력
 
+> 이미 엣지 노드가 있는 DC에서 **별도 수집서버를 엣지에 통합·폐기**하려면
+> [EDGE-COLLECTOR-MERGE.md — 수집서버→엣지 통합 이전 절차서](EDGE-COLLECTOR-MERGE.md) 참고.
+
 현장 서버가 자기 DC의 **iDRAC/OME 전력**을 모으고, **중앙이 pull**합니다.
 
 ### 4.1 에이전트(192.168.x.x) 측 설정
