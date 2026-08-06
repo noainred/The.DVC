@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { usePolling } from '../api.js';
-import { Loading, ErrorBox, StateBadge, usageColor } from '../components/ui.jsx';
+import { Loading, ErrorBox, StateBadge, usageColor, SearchBox } from '../components/ui.jsx';
 import VCenterDetail from './VCenterDetail.jsx';
 
 function Bar({ label, pct, detail }) {
@@ -15,6 +15,8 @@ function Bar({ label, pct, detail }) {
 export default function VCenters({ onSelectSite, resetSignal }) {
   const { data, error, loading } = usePolling('/vcenters', {}, 15_000);
   const [openId, setOpenId] = useState(null);
+  // 빠른 찾기(특수 기능의 '메뉴 빠른 찾기'와 동일 UX) — 훅은 조기 return 위에 선언(React #310).
+  const [query, setQuery] = useState('');
   // 상단메뉴 Platform 재클릭(resetSignal 증가) 시 vCenter 상세 드릴다운을 닫고 전체 목록으로 복귀.
   useEffect(() => { setOpenId(null); }, [resetSignal]);
   const cardRefs = useRef({}); // vCenter id → 카드 DOM(바로가기 스크롤/반짝용)
@@ -36,6 +38,13 @@ export default function VCenters({ onSelectSite, resetSignal }) {
   const sites = data || [];
   const openSite = sites.find((s) => s.id === openId);
   if (openSite) return <VCenterDetail site={openSite} onBack={() => setOpenId(null)} />;
+  // 공백 구분 다중 키워드 AND — 이름·id·도시·국가·리전·버전에서 검색(허브 검색과 같은 규칙).
+  const keywords = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const shown = keywords.length === 0 ? sites : sites.filter((s) => {
+    const hay = [s.name, s.id, s.location?.city, s.location?.country, s.location?.region, s.version]
+      .filter(Boolean).join(' ').toLowerCase();
+    return keywords.every((kw) => hay.includes(kw));
+  });
   const connected = sites.filter((s) => s.status === 'connected').length;
   const totalHosts = sites.reduce((a, s) => a + (s.metrics?.hosts || 0), 0);
   const totalVms = sites.reduce((a, s) => a + (s.metrics?.vms || 0), 0);
@@ -52,9 +61,16 @@ export default function VCenters({ onSelectSite, resetSignal }) {
       </div>
 
       {sites.length > 0 && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+          <SearchBox className="input" style={{ maxWidth: 280 }} value={query} onChange={setQuery}
+            placeholder="vCenter 빠른 찾기 (예: eu, seoul, 8.0)" />
+        </div>
+      )}
+
+      {shown.length > 0 && (
         <div className="vc-quicknav">
           <span className="qn-label">⚡ 바로가기</span>
-          {sites.map((s) => {
+          {shown.map((s) => {
             const m = s.metrics || {};
             const down = s.status !== 'connected';
             const alarms = (m.alarmsCritical || 0) + (m.alarmsWarning || 0);
@@ -68,8 +84,14 @@ export default function VCenters({ onSelectSite, resetSignal }) {
         </div>
       )}
 
+      {keywords.length > 0 && shown.length === 0 && (
+        <div className="card" style={{ padding: '18px 16px', color: 'var(--text-dim)' }}>
+          "{query}" 와 일치하는 vCenter가 없습니다 — 이름·id·도시·국가·리전·버전에서 검색합니다.
+        </div>
+      )}
+
       <div className="vc-grid">
-        {sites.map((s) => {
+        {shown.map((s) => {
           const m = s.metrics || {};
           const down = s.status !== 'connected';
           return (
