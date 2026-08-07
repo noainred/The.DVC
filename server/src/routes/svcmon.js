@@ -16,7 +16,7 @@ import {
   listTargetsCopy, listFolders, getSort, setSort, totalTests,
   addTarget, updateTarget, deleteTarget, addTest, updateTest, deleteTest,
   addFolder, renameFolder, deleteFolder, bulkAddTargets, flushStore,
-  TEST_TYPES, KINDS,
+  TEST_TYPES, KINDS, LIMITS,
 } from '../svcmon/store.js';
 import { getResults, getLastSweep, runNow, pollerStats } from '../svcmon/poller.js';
 import { getLogSettings, setLogSettings, ROTATE_UNITS, ROTATE_LABEL } from '../svcmon/logsettings.js';
@@ -127,8 +127,19 @@ svcmonRouter.post('/targets', canEdit, (req, res) => {
 
 svcmonRouter.post('/targets/bulk', canEdit, (req, res) => {
   try {
-    const r = bulkAddTargets(Array.isArray(req.body?.targets) ? req.body.targets : []);
-    logAudit({ user: req.user?.username, action: 'svcmon.target.bulk', detail: `추가 ${r.added} · 오류 ${r.errors.length}` });
+    const rows = Array.isArray(req.body?.targets) ? req.body.targets : [];
+    if (rows.length > LIMITS.maxBulkRows) {
+      return res.status(400).json({ error: `한 번에 최대 ${LIMITS.maxBulkRows}개까지 등록할 수 있습니다(요청 ${rows.length}개).` });
+    }
+    const r = bulkAddTargets(rows);
+    // 검증 실패는 커밋 0건이다 — 201 로 응답하면 화면이 등록됐다고 표시한다.
+    if (!r.committed) return res.status(400).json({ ...r, error: '검증에 실패해 등록하지 않았습니다.' });
+    if (!r.saved) return res.status(500).json({ ...r, error: '파일 저장에 실패했습니다(디스크·권한 확인).' });
+    logAudit({
+      user: req.user?.username,
+      action: 'svcmon.target.bulk',
+      detail: `추가 ${r.added} · 건너뜀 ${r.skipped.length} · 점검 ${r.newTests} · 신규폴더 ${r.newFolders}`,
+    });
     res.status(201).json(r);
   } catch (e) { res.status(400).json({ error: e.message }); }
 });

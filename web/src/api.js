@@ -142,6 +142,35 @@ export const putJson = (path, body) => sendJson(path, 'PUT', body);
 export const patchJson = (path, body) => sendJson(path, 'PATCH', body);
 export const delJson = (path) => sendJson(path, 'DELETE');
 
+/**
+ * 인증이 필요한 파일 다운로드 — `<a href="/api/...">` 는 Authorization 헤더를 붙이지 못해
+ * 서버가 401 을 돌려준다(authMiddleware 는 Bearer 헤더만 인정한다). 반드시 fetch 로 받아
+ * blob 로 저장한다. 응답이 커도 브라우저가 스트림을 받아 blob 로 조립한다.
+ *
+ * @param {string} path  `/api` 이후 경로 (예: `/svcmon/log/files/results-20260807.csv`)
+ * @param {string} [filename] 저장 이름. 생략하면 Content-Disposition → 경로 마지막 조각.
+ */
+export async function downloadFile(path, filename = '') {
+  const res = await fetch(`${BASE}${path}`, { headers: authHeaders() });
+  if (res.status === 401) { setToken(null); onUnauthorized(); throw new Error('세션이 만료되었습니다.'); }
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.reason || data.error || `다운로드 실패 (${res.status})`);
+  }
+  const cd = res.headers.get('content-disposition') || '';
+  const m = /filename="?([^";]+)"?/i.exec(cd);
+  const name = filename || (m && decodeURIComponent(m[1])) || path.split('/').pop() || 'download';
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return name;
+}
+
 export async function login(username, password, { keep = true } = {}) {
   const res = await fetch(`${BASE}/auth/login`, {
     method: 'POST',
