@@ -24,8 +24,8 @@
 # 1) package.json 3곳(루트/server/web) 버전 올리고 server/src/release-notes.json 갱신, 소스 커밋/푸시
 # 2) PR을 main에 머지하고 CI 통과 확인
 # 3) main 기준 태그를 만들어 push → Actions가 빌드+업로드
-git tag v2.218.0 origin/main
-git push origin v2.218.0
+git tag v2.246.0 origin/main   # 현재 최신(버전별 변경 내역은 server/src/release-notes.json 및 포탈 내 릴리스 노트 화면 참조)
+git push origin v2.246.0
 # 4) 게시 확인: versions.json의 latest가 새 버전인지
 curl -sL https://github.com/noainred/The.DVC/releases/download/downloads/versions.json | head -5
 ```

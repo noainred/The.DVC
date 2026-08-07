@@ -50,6 +50,13 @@
 - **리소스 탐색 & 랭킹** — 호스트/VM/스토리지/네트워크/알람 정렬·검색·필터, Top N 랭킹, VM 사양·사용률 검색.
 - **호스트/VM 성능** — CPU/메모리/디스크/네트워크 **실시간 + 일·주·월·년 + 날짜 기간** 시계열(vim25 PerformanceManager).
 - **알람 + 음소거** — vCenter 알람 집계, 음소거 규칙.
+- **성능점검(svcmon, v2.230+)** — vCenter 인벤토리와 **독립**된 임의 호스트/서비스 감시 모듈(별도 `svcmon.json`·전용 워커풀·CSV 로그). 15종 점검(ping·trace·tcp·udp·http·soap·dns·cert·ntp·smtp·pop3·imap·ssh·ldap·domain), 인프라/서비스 트리, 3단계 추가 마법사. 1만 대·일 2GB 로그를 전제로 만기 인덱싱·원형 커서 선정(과부하 시 뒤쪽 굶음 방지)·틱당 상한·스트림 CSV 로 설계. **특수 기능 → 성능점검 설정**에 6개 서브탭:
+  - **점검 템플릿(v2.244)** — 서버 유형별 점검 묶음(빌트인 6종: Linux·Windows·웹/TLS·DNS·메일·디렉터리) 정의→대상 일괄 적용. 치환 변수(`{host}{name}{path}{kind}`), 재적용 멱등(test.id 승계), CSV 가져오기/내보내기(v2.246).
+  - **대량 자동등록(v2.244)** — 이름 규칙(`{n}`)+IP 범위/CIDR 로 대상 생성+템플릿 자동 할당. 개수 불일치·차단 주소는 전체 거부(부분 등록 금지), 배치 이력·롤백.
+  - **가져오기·내보내기(v2.243)** — 대상·점검 CSV(샘플 제공, 용량 판정, 미리보기→커밋 all-or-nothing).
+  - **엣지 배정(v2.245, RMA)** — 중앙은 실행 안 하고(`SVCMON_ROLE=central`) 정의를 엣지에 배포, 엣지가 실행·결과 push. 목록 선택형 배정 + **통신 진단**(ping/TCP RTT) + 무보고 감시·알림.
+  - **로그 설정(v2.246)** — 저장 경로(대용량 볼륨)·분할 단위·보관 기간·용량 상한(경로는 쓰기 시험 통과 필수).
+  - **로그 분석(v2.246)** — 시간/일/주/월/분기/반기/연간 집계(가용률·평균·p95). CSV 로그 스트리밍+예산, 조회 범위 표시.
 
 ### 인프라 운영
 - **NSX** — NSX-T/4.x 매니저별 게이트웨이(T0/T1)·세그먼트(Overlay/VLAN, 연결 VM 포트 수)·분산방화벽(DFW, 허용/차단·로깅)·보안그룹(**라이브 멤버 조회**).
@@ -236,6 +243,20 @@ git 소스로 실행하면 `CONFIG_DIR` 기본값이 `server/config` 라 이 파
 | `CENTRAL_FLEET_TTL_MS` / `CENTRAL_FLEET_MAX_AGENTS` | `1800000` / `500` | 중앙의 엣지 베어메탈 만료시간 · 에이전트 상한 |
 | `AGENT_PING_POLL_MS` / `AGENT_LOGQ_POLL_MS` / `AGENT_CAPTURE_POLL_MS` | `4000` | 위임 ping·로그조회·캡처 워커 폴링 주기 |
 | `AGENT_CONFIG_PUSH_MS` | `1800000` | 엣지 설정 → 중앙 push 주기(백업 통합) |
+
+### 성능점검(svcmon)
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `SVCMON_ENABLED` | `true` | `false`면 폴러 미기동(전체 킬스위치) |
+| `SVCMON_ROLE` | `both` | `central`=점검 실행 안 함(정의 배포·결과 수신만) · `edge`=실행+중앙 보고 · `both`=단독(기존 동작) |
+| `SVCMON_WORKERS` / `SVCMON_CONCURRENCY` / `SVCMON_PROC_CONCURRENCY` | `min(4,cpu-1)` / `256` / `64` | 워커 수 · 소켓형/프로세스형(ping·trace) 동시 실행 |
+| `SVCMON_TICK_MS` / `SVCMON_MAX_PER_TICK` | `5000` / `4000` | 폴러 틱 간격 · 틱당 실행 상한(만기 폭주 방지) |
+| `SVCMON_PUSH_INTERVAL_MS` / `SVCMON_PUSH_CHUNK` | `60000` / `2000` | (엣지) 결과 push 주기 · 청크당 행 수(413 시 자동 절반) |
+| `SVCMON_CONFIG_PULL_MS` | `300000` | (엣지) 정의 pull 주기 |
+| `SVCMON_EDGE_SILENCE_MIN_MS` / `SVCMON_EDGE_MAX_AGENTS` / `SVCMON_EDGE_MAX_ROWS` | `300000` / `64` / `20000` | (중앙) 무보고 판정 하한 · 수신 엣지/행 상한 |
+
+상한(저장소): 대상 20,000 · 대상당 점검 200 · 전체 점검 200,000 · 폴더 5,000 · 트리 깊이 10.
+1회 요청(라우트): 대량 등록/CSV 2,000행. 자세한 설계·용량 산정은 [docs/SVCMON-ARCHITECTURE.md](docs/SVCMON-ARCHITECTURE.md), 유형 상세 [docs/SVCMON-TESTS.md](docs/SVCMON-TESTS.md), 대량/CSV [docs/SVCMON-BULK.md](docs/SVCMON-BULK.md).
 
 ### 원격접속 · LLM · 기타
 | 변수 | 기본값 | 설명 |

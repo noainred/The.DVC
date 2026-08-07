@@ -274,3 +274,54 @@ curl -s -H "Authorization: Bearer <token>" http://localhost:4000/api/svcmon/diag
 - 배정 삭제는 엣지의 기존 정의를 지우지 않습니다(원격에서 감시를 임의로 끊지 않음).
   엣지 정리는 그 엣지에서 배치 태그로 직접 합니다.
 - streak(연속 횟수)은 엣지 재시작 시 1 로 리셋됩니다(엣지 results 가 인메모리).
+
+---
+
+## 9. 로그 분석 · 템플릿 CSV · 로그 경로 · 엣지 통신 진단 (v2.246)
+
+### 9.1 로그 분석 (`svcmon/loganalyze.js` · 설정 → 로그 분석)
+CSV 로그를 **시간/일/주/월/분기/반기/연간** 버킷으로 집계한다. 원천은 화면 결과(인메모리
+최신 1건)가 아니라 **CSV 로그 파일**이다 — 과거 기록은 로그에만 있다.
+
+- **스트리밍**: `readline` 으로 줄 단위 처리 — GB 파일을 메모리에 올리지 않는다.
+- **사전 선별**: 조회 기간과 무관한 파일은 파일명(`results-<periodKey>.csv`)으로 건너뛴다.
+- **예산**: 행 200만·10초. 초과 시 `truncated:true` + `scannedRows` 로 **어디까지 봤는지**
+  보고한다(조용한 절단 금지). 화면도 그 사실을 배너로 띄운다.
+- **p95**: 고정 경계 히스토그램 근사(`approx:true`) — 버킷당 전 ms 값을 보관하면 메모리가
+  터지므로. 정확값이 아님을 화면에 명시한다.
+- ⚠ **미종결 인용부호 방어**(v2.246 검증에서 수정): 닫히지 않은 따옴표가 든 손상 로그가
+  과거 O(L²) 재파싱으로 7.5MB 파일에서 18초 이벤트 루프를 멈췄다. O(L) 로 바꾸고
+  예산·양보를 적용해 122ms 로 줄였다. 대용량·양보 회귀 테스트로 고정.
+- `listLogWindows()` 가 보유 파일·기간을 돌려줘 화면이 조회 가능 범위를 먼저 보여준다.
+- API: `GET /api/svcmon/log/analyze?from&to&bucket&path&target&test&type` · `GET /log/windows`
+  (둘 다 `canEdit` — 로그와 같은 데이터 접근).
+
+### 9.2 점검 템플릿 CSV (`svcmon/templatesCsv.js`)
+대상 CSV(`csvio.js`)와 **같은 규약**: 항목 1건=1행, `template_name` 그룹핑, UTF-8 BOM+CRLF,
+수식가드/역가드 쌍. 컬럼은 `testSchema.TEST_FIELDS` 에서 파생(name→item_name, enabled→
+item_enabled 로 개명해 대상 CSV 헤더와 혼동 방지).
+- **item.key 는 내보내지 않는다** — 가져온 템플릿이 원본의 적용분을 덮어쓰는 사고를 막는다
+  (`duplicateTemplate` 과 같은 이유. 가져오기가 새 key 를 발급).
+- 이미 있는 **이름**의 템플릿은 skip(조용한 덮어쓰기 금지). `desc`/`kind` 불일치 그룹은 오류.
+- 등록은 `templates.addTemplate` 를 호출 — 치환 변수·상한 검증을 재구현하지 않는다. 그래서
+  preview 는 파싱 수준 검증까지만이고 등록 시점에 실패할 수 있음을 응답 `notice` 로 명시한다.
+- API: `GET /templates/export.csv` · `GET /templates/sample.csv` · `POST /templates/import`.
+
+### 9.3 로그 저장 경로 (`logsettings.js dirPath`)
+일 2GB 로그를 시스템 디스크가 아닌 대용량 볼륨에 두기 위한 **절대 경로** 설정. 상대 경로는
+받지 않는다(cwd·서비스/수동 실행에 따라 위치가 흔들린다). 저장 시 **실제 쓰기 시험**(mkdir+
+write+unlink)을 통과해야 저장된다 — 오타 경로에서 라이터가 조용히 실패해 로그가 통째로
+유실되는 것을 막는다(라이터는 best-effort). `pruneOld` 는 `results-*.csv` 패턴만 지우므로
+임의 디렉터리를 지정해도 다른 파일을 지우지 않는다. 경로 변경은 admin 전용.
+
+### 9.4 엣지 통신 진단 (`central/svcmonEdge.js probeAgent`)
+마지막 보고의 **소켓 관측 소스 IP** 로 ping(ICMP RTT)·TCP 연결(RTT, 엣지가 caps 로 보고한
+자기 포탈 포트)을 찍는다. 진단 결과에는 항상 **보고 수신 상태**를 함께 싣는다 — Active push
+방식에서 살아있음의 진실은 '보고가 오는가'이고, 인바운드가 막힌 폐쇄망 엣지는 진단이 실패해도
+위임이 정상이다. 소스 IP 는 `validateEndpoint`(SSRF 가드) 통과 후에만 찍고, 프록시/NAT 뒤면
+그 장비 주소일 수 있음을 화면에 명시한다. API: `POST /api/svcmon/edges/:agent/probe`(canEdit).
+
+### 9.5 배정 화면 — 목록 선택형
+엣지 배정은 자유 입력이 아니라 **등록된 엣지 목록에서 선택**한다(토큰 발급분 ∪ 보고 중인
+엣지). 근거: 토큰의 agent 이름과 대소문자 하나만 달라도 엣지 pull 이 영원히 '배정 없음'을
+받아 무음 감시 공백이 된다. `GET /api/svcmon/assign` 이 `candidates[]` 로 후보를 내려준다.
