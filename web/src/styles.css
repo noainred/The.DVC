@@ -606,7 +606,10 @@ tbody tr:last-child td { border-bottom: none; }
 .pc-ctx-cap { font-family: var(--pc-mono, ui-monospace); font-size: 10px; letter-spacing: .1em;
   color: var(--pc-t5, #5f7fa3); padding: 5px 10px 3px; }
 .pc-ctx-sub-wrap { position: relative; }
-.pc-ctx-sub { position: absolute; left: calc(100% - 4px); top: -5px; }
+.pc-ctx-sub-wrap > .pc-ctx-item { width: 100%; }
+/* 서브메뉴는 부모와 8px 겹치게 둔다 — 사이에 1px 틈이라도 있으면 커서가 그 틈을 지나며
+   부모의 mouseleave 가 먼저 발생해 메뉴가 닫힌다(호버 경로 확보). */
+.pc-ctx-sub { position: absolute; left: calc(100% - 8px); top: -5px; }
 .pc-lrow { display: grid; grid-template-columns: 170px 1fr; align-items: center; gap: 10px; }
 .pc-lrow > span { color: var(--pc-t4, #7b93ae); }
 .pc-seg { display: flex; gap: 4px; flex-wrap: wrap; }
