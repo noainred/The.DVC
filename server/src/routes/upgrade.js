@@ -86,6 +86,47 @@ export function validateUpgradeSettings(body = {}) {
   return null;
 }
 
+// ── 설치 경로 자동 감지 ───────────────────────────────────────────────────────
+// 실행 중인 프로세스가 로드한 앱 루트(config.appRoot = server/..)가 곧 업그레이드 스왑
+// 대상이다. 추측이 아니라 실제 실행 경로에서 도출하고, applyPackage의 renameSync 스왑이
+// 성립하는 조건(부모 디렉터리 쓰기 권한 — 백업/스테이징이 형제 경로로 생성됨)과 저장 시
+// 통과해야 하는 경로 정책까지 함께 점검해 근거를 응답에 싣는다. 저장은 하지 않는다 —
+// 클라이언트가 폼에 채운 뒤 기존 PUT /settings 검증 경로로 저장한다.
+export function detectInstallState(dir) {
+  const abs = path.resolve(String(dir));
+  const parent = path.dirname(abs);
+  const checks = [];
+
+  let version = null;
+  try {
+    version = String(JSON.parse(fs.readFileSync(path.join(abs, 'package.json'), 'utf8')).version || '') || null;
+  } catch { /* 아래에서 실패로 보고 */ }
+  checks.push({
+    key: 'package', ok: Boolean(version),
+    label: version ? `package.json 확인 (v${version})` : 'package.json을 읽지 못했습니다 — 앱 루트가 아닐 수 있습니다',
+  });
+
+  const hasServer = fs.existsSync(path.join(abs, 'server', 'src'));
+  checks.push({
+    key: 'layout', ok: hasServer,
+    label: hasServer ? 'server/src 디렉터리 확인' : 'server/src 디렉터리가 없습니다',
+  });
+
+  let parentWritable = false;
+  try { fs.accessSync(parent, fs.constants.W_OK); parentWritable = true; } catch { /* 권한 없음 */ }
+  checks.push({
+    key: 'writable', ok: parentWritable,
+    label: parentWritable
+      ? `부모 디렉터리 쓰기 가능 (${parent}) — 백업/스왑 가능`
+      : `부모 디렉터리(${parent}) 쓰기 권한이 없어 업그레이드 스왑(rename)이 실패합니다 — 서비스 계정 권한을 확인하세요`,
+  });
+
+  const policy = validateUpgradeSettings({ installDir: abs });
+  checks.push({ key: 'policy', ok: !policy, label: policy || '경로 정책(허용 베이스) 통과' });
+
+  return { installDir: abs, version, ok: checks.every((c) => c.ok), checks };
+}
+
 // All control endpoints require the admin role.
 const adminOnly = requireRole('admin');
 
@@ -117,6 +158,16 @@ upgradeRouter.post('/restart', adminOnly, (_req, res) => {
 // Read the editable upgrade settings (token redacted).
 upgradeRouter.get('/settings', adminOnly, (_req, res) => {
   res.json(upgradeManager.status());
+});
+
+// 현재 서버 상태를 분석해 설치 경로(installDir) 자동 감지값과 점검 근거를 돌려준다(읽기 전용).
+upgradeRouter.get('/detect-install', adminOnly, (_req, res) => {
+  const out = detectInstallState(config.appRoot);
+  out.source = '실행 중인 프로세스의 앱 루트';
+  // 환경변수로 다른 경로가 강제돼 있으면 참고로 함께 알린다(감지값과 다를 때만).
+  const envDir = String(process.env.UPGRADE_INSTALL_DIR || '').trim();
+  if (envDir && path.resolve(envDir) !== out.installDir) out.envInstallDir = path.resolve(envDir);
+  res.json(out);
 });
 
 // Update upgrade settings from the portal (internet/remote + manual/watch).
