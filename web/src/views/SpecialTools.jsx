@@ -11,6 +11,7 @@ import DeepSearch from './DeepSearch.jsx';
 import { IdracDetailModal } from './IdracAdmin.jsx';
 import VmProvision from './VmProvision.jsx';
 import AgentScans from './AgentScans.jsx';
+import SvcMonConfig from './SvcMonConfig.jsx';
 import LoginFails from './LoginFails.jsx';
 import NetIssues from './NetIssues.jsx';
 import { DailyHealth, SnapshotAge, ZombieVms, CertExpiry, Rightsizing, CapacityForecast, AlertChannels, ComplianceReport, ChangeHistory, UnprotectedVms } from './ToolsReports.jsx';
@@ -298,6 +299,8 @@ function ToolPanel({ tool, onBack, isAdmin }) {
       {tool === 'rightsizing' && <Rightsizing scope={scope} />}
       {tool === 'capacity-forecast' && <CapacityForecast scope={scope} />}
       {tool === 'alert-channels' && <AlertChannels isAdmin={isAdmin} />}
+      {/* scope(vCenter 필터)를 넘기지 않는다 — 성능점검 대상은 vCenter 인벤토리와 무관하다(cleanTarget 에 vcenterId 가 없다). */}
+      {tool === 'svcmon-config' && <SvcMonConfig />}
       {tool === 'compliance-report' && <ComplianceReport scope={scope} />}
       {tool === 'change-history' && <ChangeHistory scope={scope} />}
       {tool === 'unprotected-vms' && <UnprotectedVms scope={scope} />}
