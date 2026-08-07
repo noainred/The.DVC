@@ -1,6 +1,16 @@
 {
   "notes": [
     {
+      "version": "2.247.0",
+      "date": "2026-08-08",
+      "title": "신규 — Horizon UAG 모니터 (서버 웹/Windows/macOS 3종 배포)",
+      "notes": [
+        "Horizon UAG(Unified Access Gateway) 상태·세션 모니터 'UAG Monitor'가 추가되었습니다. UAG 관리 API(9443, /rest/v1/monitor/stats)로 버전·종합상태·총/인증 세션·HWM·CPU/메모리·엣지 서비스별(VIEW/BLAST/TUNNEL 등) 상태와 세션을 수집해 요약 타일·어플라이언스 표·상세(서비스 표+세션 추이 차트)로 보여줍니다. JSON(신형)/XML(구형) 응답을 모두 관용 파싱하며, 세션 추이는 인메모리(재시작 시 초기화)입니다.",
+        "세 가지로 배포됩니다: ① 서버(웹) uag-monitor-<v>.tar.gz — 서버에서 실행 후 브라우저 접속(systemd 유닛 예시 동봉, 비로컬 바인딩은 접속 비밀번호 필수·IP별 실패 잠금), ② Windows uag-monitor-<v>-win-x64.zip — Node 런타임 동봉, UAG-Monitor.bat 더블클릭 실행, ③ macOS uag-monitor-<v>-macos-{arm64,x64}.tar.gz — 'UAG Monitor.command' 더블클릭 실행. 포탈 오프라인 패키지에도 app/uagmon 으로 동봉됩니다.",
+        "보안: 등록 주소 SSRF 가드(루프백·링크로컬·10진/16진/8진·IPv4-mapped 우회표기 차단, RFC1918 허용), TLS 완화는 대상별 옵션만(전역 완화 없음), 자격증명 0600+원자적 쓰기+손상 보존, API 는 Bearer 헤더 인증(쿠키 미사용 → CSRF 표면 없음). 외부 의존성 0(Node 내장 모듈만)."
+      ]
+    },
+    {
       "version": "2.246.0",
       "date": "2026-08-08",
       "title": "성능점검 — 로그 분석 · 템플릿 CSV · 엣지 선택형 배정+통신 진단 · 로그 경로 설정",
