@@ -123,6 +123,11 @@ body {
 .usage-bar > span { display: block; height: 100%; border-radius: 4px; transition: width .6s ease; }
 
 .flex { display: flex; }
+/* 세로 스택 — `flex col` 은 성능점검 설정(svcmon) 화면에서만 쓰이며 '탭 위·내용 아래',
+   '라벨 위·입력창 아래'를 의도한다. 이 클래스가 없으면 display:flex 기본값(가로)으로 렌더돼
+   탭과 내용이 좌우로 쪼개졌다(사용자 보고). 복합 선택자(.flex.col)라 두 클래스가 함께일
+   때만 적용되어 다른 화면에는 영향이 없다. */
+.flex.col { flex-direction: column; }
 .between { justify-content: space-between; align-items: center; }
 .gap { gap: 12px; }
 .wrap { flex-wrap: wrap; }

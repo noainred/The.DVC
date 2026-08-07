@@ -164,9 +164,12 @@ test('SVCMON_ROLE=central 이면 폴러가 실행하지 않는다(자식 프로�
   const { execFile } = await import('node:child_process');
   const { promisify } = await import('node:util');
   const run = promisify(execFile);
+  // 이 테스트 파일 기준 상대경로로 poller 를 찾는다 — cwd 에 의존하면(과거 path.resolve('src/...'))
+  // 리포지토리 루트에서 `node --test` 를 돌릴 때 경로가 어긋난다(server/ 안에서만 통과했었다).
+  const pollerUrl = new URL('../src/svcmon/poller.js', import.meta.url).href;
   const script = `
     process.env.SVCMON_ROLE='central';
-    const m = await import('${path.resolve('src/svcmon/poller.js').replace(/\\/g, '/')}');
+    const m = await import(${JSON.stringify(pollerUrl)});
     m.startSvcmonPoller();
     const r = m.pollerRole();
     console.log(JSON.stringify(r));
