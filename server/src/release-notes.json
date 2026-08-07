@@ -1,6 +1,16 @@
 {
   "notes": [
     {
+      "version": "2.249.0",
+      "date": "2026-08-08",
+      "title": "UAG 모니터 — Windows/macOS 데스크톱 앱으로 전환 (자체 창, 브라우저 불필요)",
+      "notes": [
+        "UAG Monitor 의 Windows/macOS 배포가 '브라우저를 여는 방식'에서 자체 창을 가진 데스크톱 앱(Electron)으로 바뀌었습니다: uag-monitor-app-<v>-win-x64.zip('UAG Monitor.exe'), uag-monitor-app-<v>-macos-{arm64,x64}.tar.gz('UAG Monitor.app'). 앱이 내장 서버를 127.0.0.1 임의 포트에 띄우고 자체 창으로 표시하며, 창을 모두 닫으면 내장 서버도 함께 종료됩니다. 고정 포트를 쓰지 않으므로 다른 프로그램과 포트가 충돌하지 않습니다.",
+        "등록한 UAG 목록·자격증명은 OS 사용자 데이터 폴더(macOS ~/Library/Application Support/uag-monitor, Windows %APPDATA%/uag-monitor)에 저장되어 앱을 새 버전으로 교체해도 유지됩니다. 렌더러는 nodeIntegration 없이 격리되며 외부 링크는 기본 브라우저로 엽니다.",
+        "서버(웹) 버전(uag-monitor-<v>.tar.gz)은 그대로 유지됩니다. 기존 bat/command 방식(Node 동봉·브라우저 오픈형) 번들은 데스크톱 앱으로 대체되어 더 이상 게시되지 않습니다. 미서명 앱이므로 첫 실행 시 macOS 는 우클릭→열기, Windows 는 SmartScreen '추가 정보→실행' 승인이 한 번 필요합니다."
+      ]
+    },
+    {
       "version": "2.248.0",
       "date": "2026-08-08",
       "title": "성능점검 설정 — 탭 세로 배치 수정(입력창 넓게) + 문서·보안 점검 갱신",

@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 import { parseStats } from '../../uagmon/lib/uag.js';
 import { hostBlockReason, parseIpv4 } from '../../uagmon/lib/guard.js';
@@ -165,4 +167,48 @@ test('normalizeTarget: 포트 범위 클램프 + 이름 기본값(host)', () => 
   assert.equal(t.port, 65535);
   assert.equal(t.name, '10.0.0.9');
   assert.equal(t.insecureTls, false);
+});
+
+/* --------------------- 데스크톱 앱(Electron)이 의존하는 계약 --------------------- */
+// desktop/main.js 는 서버를 '--port 0'(임의 포트)으로 띄우고 stdout 의
+// 'UAGMON_LISTENING port=<n>' 한 줄에서 포트를 읽어 창을 연다. 이 두 가지(임의 포트
+// 지원·통지 라인 형식)가 깨지면 앱은 빈 창이나 시작 실패로만 드러나므로 여기서 고정한다.
+test('서버 --port 0: 임의 포트로 열고 UAGMON_LISTENING 으로 실제 포트를 통지한다', async () => {
+  const serverPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../uagmon/server.js');
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'uagmon-port0-'));
+  const child = spawn(process.execPath, [serverPath, '--host', '127.0.0.1', '--port', '0', '--data', dataDir],
+    { stdio: ['ignore', 'pipe', 'pipe'] });
+  try {
+    const port = await new Promise((resolve, reject) => {
+      let out = '';
+      const onData = (d) => {
+        out += String(d);
+        const m = /UAGMON_LISTENING port=(\d+)/.exec(out);
+        if (m) resolve(Number(m[1]));
+      };
+      child.stdout.on('data', onData);
+      child.stderr.on('data', onData);
+      child.on('exit', (c) => reject(new Error(`서버가 조기 종료(code ${c}): ${out}`)));
+      setTimeout(() => reject(new Error(`통지 라인 없음: ${out}`)), 8000);
+    });
+    assert.ok(port > 0 && port <= 65535, `유효한 포트여야 함: ${port}`);
+    // 통지된 포트로 실제 응답하는지 확인(앱 창이 여는 주소와 동일 경로).
+    const res = await fetch(`http://127.0.0.1:${port}/api/meta`);
+    assert.equal(res.status, 200);
+    const meta = await res.json();
+    assert.equal(meta.ok, true);
+    assert.equal(meta.authRequired, false, '로컬 바인딩은 인증 없음(데스크톱 앱 모드)');
+  } finally {
+    child.kill();
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('desktop/main.js: 서버 경로·임의 포트·userData 데이터 경로 인자를 유지한다', () => {
+  const src = fs.readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../uagmon/desktop/main.js'), 'utf8');
+  assert.match(src, /ELECTRON_RUN_AS_NODE/, '서버를 node 모드 자식으로 띄워야 함');
+  assert.match(src, /'--port',\s*'0'/, '임의 포트 사용(고정 포트 충돌 회피)');
+  assert.match(src, /UAGMON_LISTENING port=/, '포트 통지 라인을 파싱해야 함');
+  assert.match(src, /getPath\('userData'\)/, '데이터는 OS 사용자 폴더에 저장(앱 교체 후 유지)');
+  assert.match(src, /nodeIntegration:\s*false/, '렌더러 격리 유지');
 });

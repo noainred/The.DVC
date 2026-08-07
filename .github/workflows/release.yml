@@ -66,25 +66,14 @@ jobs:
       - name: Build Windows collector package
         run: bash packaging/windows/build-collector-win.sh --node-zip node-win.zip --out dist-offline
 
-      # UAG Monitor 클라이언트용 macOS 런타임 — Windows 스텝이 받은 같은 버전 디렉터리의
-      # SHASUMS256.txt 로 동일하게 무결성 대조한다(공급망 방어).
-      - name: Fetch macOS Node runtimes (UAG Monitor)
-        run: |
-          set -euo pipefail
-          for a in darwin-arm64 darwin-x64; do
-            t="node-v${NODE_VERSION}-${a}.tar.gz"
-            curl -fSL -o "$t" "https://nodejs.org/dist/v${NODE_VERSION}/${t}"
-            grep -F "  ${t}" SHASUMS256.txt > "${t}.sha256"
-            sha256sum -c "${t}.sha256"
-          done
+      - name: Build UAG Monitor server(web) package
+        run: bash packaging/uagmon/build-clients.sh --out dist-offline
 
-      - name: Build UAG Monitor packages (server/web + Windows + macOS)
-        run: |
-          bash packaging/uagmon/build-clients.sh \
-            --node-zip node-win.zip \
-            --node-tgz-arm64 "node-v${NODE_VERSION}-darwin-arm64.tar.gz" \
-            --node-tgz-x64 "node-v${NODE_VERSION}-darwin-x64.tar.gz" \
-            --out dist-offline
+      # 데스크톱 앱(Electron, 자체 창) — Windows 만 여기서(교차빌드 가능·서명 불필요).
+      # macOS 앱은 Apple Silicon 이 서명 없는 실행 파일을 거부하므로 별도 macOS 러너 잡에서
+      # 빌드해 ad-hoc 서명이 붙게 한다(uagmon-macos-app).
+      - name: Build UAG Monitor desktop app (Windows)
+        run: bash packaging/uagmon/build-desktop.sh --platforms "win32-x64" --out dist-offline
 
       - name: Generate sha256 sidecars
         run: |
@@ -132,3 +121,53 @@ jobs:
                  --notes "포탈 설치/업그레이드 자산. release 워크플로가 자동 갱신합니다." --latest=false
           gh release upload "$RELEASE_TAG" dist-offline/* --clobber
           echo "업로드 완료: $(ls dist-offline | tr '\n' ' ')"
+
+  # UAG Monitor macOS 데스크톱 앱 — macOS 러너에서 빌드해야 한다. Apple Silicon 은
+  # 서명 없는 실행 파일의 실행을 거부하므로(리눅스 교차빌드 산출물은 서명이 없어 열리지
+  # 않는다), macOS 에서 패키징해 ad-hoc 서명이 유지되게 한다. 배포 서명/공증은 하지 않으므로
+  # 첫 실행은 우클릭→열기 승인이 필요하다(uagmon/README.md 안내).
+  # 메인 잡의 prune 이 끝난 뒤 업로드해야 방금 올린 자산이 지워지지 않는다.
+  uagmon-macos-app:
+    needs: build-and-publish
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Build macOS desktop apps (arm64 + x64)
+        run: bash packaging/uagmon/build-desktop.sh --platforms "darwin-arm64 darwin-x64" --out dist-mac
+
+      - name: Verify the packaged app launches (ad-hoc signature + embedded server)
+        run: |
+          set -euo pipefail
+          mkdir -p check && tar -xzf dist-mac/uag-monitor-app-*-macos-arm64.tar.gz -C check
+          APP="$(find check -maxdepth 2 -name '*.app' | head -1)"
+          BIN="$APP/Contents/MacOS/UAG Monitor"
+          codesign -dv "$APP" 2>&1 | grep -E 'Signature|flags' || true
+          # GUI 창은 헤드리스 러너에서 띄울 수 없으므로, 앱에 동봉된 Electron 바이너리가
+          # 내장 서버를 실제로 기동하는지(앱이 창에 붙이는 바로 그 경로)를 확인한다.
+          ELECTRON_RUN_AS_NODE=1 "$BIN" "$APP/Contents/Resources/app/app/server.js" \
+            --host 127.0.0.1 --port 0 --data "$PWD/check/data" > srv.log 2>&1 &
+          for i in $(seq 1 20); do grep -q 'UAGMON_LISTENING port=' srv.log && break; sleep 0.5; done
+          grep 'UAGMON_LISTENING port=' srv.log
+          PORT="$(sed -n 's/.*UAGMON_LISTENING port=\([0-9]*\).*/\1/p' srv.log | head -1)"
+          curl -fsS "http://127.0.0.1:${PORT}/api/meta" | grep '"ok":true'
+          echo "✓ 동봉 앱에서 내장 서버 기동·응답 확인"
+
+      - name: Generate sha256 sidecars
+        run: |
+          cd dist-mac
+          for f in *.tar.gz; do shasum -a 256 "$f" > "$f.sha256"; done
+          ls -la
+
+      - name: Upload macOS app assets to rolling '${{ env.RELEASE_TAG }}' release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$RELEASE_TAG" dist-mac/* --clobber
+          echo "업로드 완료: $(ls dist-mac | tr '\n' ' ')"

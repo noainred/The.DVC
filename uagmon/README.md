@@ -6,8 +6,12 @@ Horizon UAG 어플라이언스의 상태·세션을 모아 보는 경량 모니�
 | 배포 | 파일 | 실행 |
 |---|---|---|
 | 서버(웹) | `uag-monitor-<v>.tar.gz` | 서버에서 `./run-server.sh --host 0.0.0.0 --port 8123` → 브라우저 접속 (동봉 `uag-monitor.service` 참고) |
-| Windows | `uag-monitor-<v>-win-x64.zip` | 압축 해제 후 `UAG-Monitor.bat` 더블클릭 (Node 동봉, 브라우저 자동 오픈) |
-| macOS | `uag-monitor-<v>-macos-arm64.tar.gz` (Apple Silicon) / `-macos-x64` (Intel) | `UAG Monitor.command` 더블클릭 |
+| Windows 앱 | `uag-monitor-app-<v>-win-x64.zip` | 압축 해제 후 `UAG Monitor.exe` 실행 — **자체 창**(브라우저 불필요) |
+| macOS 앱 | `uag-monitor-app-<v>-macos-arm64.tar.gz` (Apple Silicon) / `-macos-x64` (Intel) | `UAG Monitor.app` 실행 — **자체 창**(브라우저 불필요) |
+
+데스크톱 앱은 내장 서버를 127.0.0.1 임의 포트에 띄우고 자체 창(Electron)으로 엽니다.
+데이터는 OS 사용자 폴더(`~/Library/Application Support/uag-monitor` · `%APPDATA%/uag-monitor`)에
+저장되어 앱을 교체해도 유지됩니다. 창을 모두 닫으면 내장 서버도 함께 종료됩니다.
 
 ## 데이터 소스
 
@@ -38,11 +42,12 @@ UAG 버전에 따라 필드 구성이 다를 수 있으니 첫 도입 시 실제
 - UAG 자격증명은 `data/uag-config.json`(0600, 원자적 쓰기)에만 저장되며, 파일이 손상되면
   `.corrupt.<ts>` 로 보존 후 빈 설정으로 시작합니다(원본 덮어쓰기 방지).
 
-## macOS 안내
+## 데스크톱 앱 첫 실행 안내 (미서명 앱)
 
-브라우저로 내려받은 압축은 격리(quarantine) 속성 때문에 첫 실행이 차단될 수 있습니다.
-`UAG Monitor.command` 를 **우클릭 → 열기**로 1회 승인하거나, 터미널에서
-`xattr -dr com.apple.quarantine <풀린 폴더>` 후 실행하세요.
+- **macOS**: 내려받은 앱은 격리(quarantine) 속성 때문에 첫 실행이 차단될 수 있습니다.
+  `UAG Monitor.app` 을 **우클릭 → 열기**로 1회 승인하거나, 터미널에서
+  `xattr -dr com.apple.quarantine "UAG Monitor.app"` 후 실행하세요.
+- **Windows**: SmartScreen 경고가 뜨면 **추가 정보 → 실행**으로 1회 승인하세요.
 
 ## 개발/직접 실행
 

@@ -34,7 +34,7 @@ const opt = { host: '127.0.0.1', port: 8123, data: '', open: false, poll: 0, set
 for (let i = 0; i < args.length; i++) {
   const a = args[i];
   if (a === '--host') opt.host = args[++i];
-  else if (a === '--port') opt.port = Number(args[++i]) || 8123;
+  else if (a === '--port') { const v = Number(args[++i]); opt.port = Number.isFinite(v) && v >= 0 ? v : 8123; } // 0 = 임의 포트(데스크톱 앱용)
   else if (a === '--data') opt.data = args[++i];
   else if (a === '--open') opt.open = true;
   else if (a === '--poll') opt.poll = Number(args[++i]) || 0;
@@ -243,9 +243,12 @@ server.headersTimeout = 20_000;
 server.requestTimeout = 30_000;
 
 server.listen(opt.port, opt.host, () => {
+  const actualPort = server.address().port; // --port 0(임의 포트) 대응
   const shown = opt.host === '0.0.0.0' ? '<이 서버 IP>' : opt.host;
-  console.log(`UAG Monitor v${VERSION} — http://${shown}:${opt.port} (인증 ${auth.required ? 'ON' : 'OFF·로컬 전용'}, 폴링 ${store.settings.pollSeconds}s, 데이터 ${DATA_DIR})`);
-  if (opt.open) openBrowser(`http://127.0.0.1:${opt.port}`);
+  // 기계판독용 한 줄 — 데스크톱 앱(Electron 래퍼)이 이 라인으로 포트를 받아 창을 연다.
+  console.log(`UAGMON_LISTENING port=${actualPort}`);
+  console.log(`UAG Monitor v${VERSION} — http://${shown}:${actualPort} (인증 ${auth.required ? 'ON' : 'OFF·로컬 전용'}, 폴링 ${store.settings.pollSeconds}s, 데이터 ${DATA_DIR})`);
+  if (opt.open) openBrowser(`http://127.0.0.1:${actualPort}`);
 });
 server.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
