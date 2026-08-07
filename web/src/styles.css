@@ -662,3 +662,32 @@ tbody tr:last-child td { border-bottom: none; }
   border-top: 1px solid var(--pc-line, #1c2c42); background: var(--pc-bar, #111e30); }
 .pc-wiz-crumb { flex: 1; text-align: center; font-family: var(--pc-mono, ui-monospace);
   font-size: 11px; color: var(--pc-t5, #5f7fa3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── 성능점검 설정(특수 기능) — CSV/템플릿/대량등록 공용 ────────────────────────────
+   CSP 가 인라인 style 을 막으므로 색·상태는 반드시 클래스로 표현한다. */
+.svc-lims { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px; margin: 10px 0; }
+.svc-lim-top { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-dim); }
+.svc-lim-top b { color: var(--text); font-weight: 600; }
+.svc-lim-bar { height: 6px; margin-top: 4px; border-radius: 4px; background: var(--panel-2); overflow: hidden; }
+.svc-lim-bar i { display: block; height: 100%; border-radius: 4px; }
+.svc-lim-bar i.green { background: var(--green); }
+.svc-lim-bar i.amber { background: var(--amber); }
+.svc-lim-bar i.red { background: var(--red); }
+
+.svc-cap { margin: 10px 0; padding: 10px 12px; border-radius: 8px; font-size: 12px;
+  border: 1px solid var(--border); background: var(--bg-soft); }
+.svc-cap.ok { border-color: rgba(34, 197, 94, .35); }
+.svc-cap.warn { border-color: rgba(245, 158, 11, .45); background: rgba(245, 158, 11, .06); }
+.svc-cap.reject { border-color: rgba(239, 68, 68, .5); background: rgba(239, 68, 68, .07); }
+.svc-cap-why { margin-top: 5px; color: var(--text-dim); line-height: 1.6; }
+.svc-cap-src { margin-top: 6px; font-size: 10px; color: var(--text-faint); }
+
+.svc-warn { margin: 8px 0; padding: 8px 11px; border-radius: 8px; font-size: 12px; line-height: 1.6;
+  border: 1px solid rgba(245, 158, 11, .4); background: rgba(245, 158, 11, .07); color: var(--text); }
+.svc-err { margin: 8px 0; padding: 8px 11px; border-radius: 8px; font-size: 12px; line-height: 1.6;
+  border: 1px solid rgba(239, 68, 68, .45); background: rgba(239, 68, 68, .07); color: var(--text); }
+.svc-err ul { margin: 6px 0 0; padding-left: 18px; color: var(--text-dim); }
+.svc-err li { margin: 2px 0; }
+.svc-ok { margin: 8px 0; padding: 8px 11px; border-radius: 8px; font-size: 12px;
+  border: 1px solid rgba(34, 197, 94, .4); background: rgba(34, 197, 94, .07); color: var(--text); }
