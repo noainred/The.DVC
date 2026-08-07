@@ -1,6 +1,15 @@
 {
   "notes": [
     {
+      "version": "2.250.0",
+      "date": "2026-08-08",
+      "title": "UAG 모니터 — 미서명 앱 첫 실행 안내 정정 (macOS 15+ 절차)",
+      "notes": [
+        "UAG Monitor 데스크톱 앱의 첫 실행 안내를 최신 macOS 기준으로 정정했습니다. '우클릭 → 열기' 우회는 macOS 14까지만 동작하고 15(Sequoia)부터 제거되었으므로, ① 터미널에서 xattr -dr com.apple.quarantine <풀린 폴더> 실행, 또는 ② 실행 차단 후 시스템 설정 → 개인정보 보호 및 보안 → '그래도 열기' 승인 절차를 안내합니다. 터미널로 압축을 풀면(tar -xzf) 격리 속성이 붙지 않아 승인 없이 바로 실행됩니다.",
+        "경고 자체를 없애려면 Developer ID 서명+공증(macOS)·Authenticode 서명(Windows)이 필요합니다 — 인증서 확보 시 CI에 서명 단계를 추가할 수 있습니다(README 명시)."
+      ]
+    },
+    {
       "version": "2.249.0",
       "date": "2026-08-08",
       "title": "UAG 모니터 — Windows/macOS 데스크톱 앱으로 전환 (자체 창, 브라우저 불필요)",
