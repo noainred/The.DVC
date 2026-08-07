@@ -1,0 +1,23 @@
+# UAG Monitor 서버(웹) 모드 systemd 유닛 예시. 설치 절차:
+#   1) 압축을 /opt/uag-monitor 에 푼다.
+#   2) sudo /opt/uag-monitor/run-server.sh --set-password '<8자 이상>'   # 접속 비밀번호(필수)
+#   3) sudo useradd --system --no-create-home --shell /sbin/nologin uagmon
+#      sudo chown -R uagmon:uagmon /opt/uag-monitor                      # 데이터(app/data) 포함
+#   4) 이 파일을 /etc/systemd/system/uag-monitor.service 로 복사 후
+#      sudo systemctl daemon-reload && sudo systemctl enable --now uag-monitor
+# Node(>=20) 경로가 다르면 ExecStart 를 수정하세요(포탈 서버라면 /opt/vmware-portal/runtime/node/bin/node).
+[Unit]
+Description=UAG Monitor (Horizon Unified Access Gateway)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=uagmon
+WorkingDirectory=/opt/uag-monitor
+ExecStart=/usr/bin/node /opt/uag-monitor/app/server.js --host 0.0.0.0 --port 8123
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

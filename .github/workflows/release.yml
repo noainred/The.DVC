@@ -66,6 +66,26 @@ jobs:
       - name: Build Windows collector package
         run: bash packaging/windows/build-collector-win.sh --node-zip node-win.zip --out dist-offline
 
+      # UAG Monitor 클라이언트용 macOS 런타임 — Windows 스텝이 받은 같은 버전 디렉터리의
+      # SHASUMS256.txt 로 동일하게 무결성 대조한다(공급망 방어).
+      - name: Fetch macOS Node runtimes (UAG Monitor)
+        run: |
+          set -euo pipefail
+          for a in darwin-arm64 darwin-x64; do
+            t="node-v${NODE_VERSION}-${a}.tar.gz"
+            curl -fSL -o "$t" "https://nodejs.org/dist/v${NODE_VERSION}/${t}"
+            grep -F "  ${t}" SHASUMS256.txt > "${t}.sha256"
+            sha256sum -c "${t}.sha256"
+          done
+
+      - name: Build UAG Monitor packages (server/web + Windows + macOS)
+        run: |
+          bash packaging/uagmon/build-clients.sh \
+            --node-zip node-win.zip \
+            --node-tgz-arm64 "node-v${NODE_VERSION}-darwin-arm64.tar.gz" \
+            --node-tgz-x64 "node-v${NODE_VERSION}-darwin-x64.tar.gz" \
+            --out dist-offline
+
       - name: Generate sha256 sidecars
         run: |
           cd dist-offline

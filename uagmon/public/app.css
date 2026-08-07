@@ -1,0 +1,77 @@
+/* UAG Monitor — 다크 단일 테마. 상태는 색+아이콘+텍스트로 함께 표기(색 단독 금지). */
+:root {
+  --bg: #0f1420; --card: #151c2c; --card-2: #1a2338; --line: rgba(148,163,184,.16);
+  --ink: #e2e8f0; --ink-2: #94a3b8; --ink-3: #64748b;
+  --accent: #60a5fa; --good: #34d399; --warn: #fbbf24; --bad: #f87171;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 -apple-system, 'Segoe UI', 'Malgun Gothic', sans-serif; }
+#app { max-width: 1100px; margin: 0 auto; padding: 20px 16px 48px; }
+
+.topbar { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+.topbar h1 { font-size: 18px; margin: 0; }
+.topbar .meta { color: var(--ink-3); font-size: 12px; }
+.topbar .spacer { flex: 1; }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 16px; }
+.tile { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+.tile .label { color: var(--ink-2); font-size: 12px; }
+.tile .value { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 2px; }
+.tile .sub { color: var(--ink-3); font-size: 11px; margin-top: 2px; }
+
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin-bottom: 16px; }
+.card h2 { font-size: 14px; margin: 0 0 10px; }
+
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; color: var(--ink-3); font-weight: 600; font-size: 12px; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+tr.row { cursor: pointer; }
+tr.row:hover td { background: rgba(96,165,250,.06); }
+tr.selected td { background: rgba(96,165,250,.1); }
+.num { font-variant-numeric: tabular-nums; }
+.muted { color: var(--ink-3); }
+
+.state { font-weight: 600; white-space: nowrap; }
+.state.up { color: var(--good); }
+.state.warn { color: var(--warn); }
+.state.down { color: var(--bad); }
+.state.unknown { color: var(--ink-3); }
+
+.chips { display: flex; gap: 4px; flex-wrap: wrap; }
+.chip { border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; font-size: 11px; color: var(--ink-2); white-space: nowrap; }
+.chip.up { border-color: rgba(52,211,153,.4); }
+.chip.bad { border-color: rgba(248,113,113,.5); color: var(--warn); }
+
+button { background: var(--card-2); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 7px 14px; font-size: 13px; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button.primary { background: #1d4ed8; border-color: #1d4ed8; }
+button.danger:hover { border-color: var(--bad); color: var(--bad); }
+button.small { padding: 3px 8px; font-size: 12px; }
+button:disabled { opacity: .5; cursor: default; }
+
+input, label.check { font-size: 13px; }
+input[type=text], input[type=password], input[type=number] {
+  width: 100%; background: #0d1320; color: var(--ink); border: 1px solid var(--line);
+  border-radius: 8px; padding: 8px 10px;
+}
+input:focus { outline: none; border-color: var(--accent); }
+.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+.form-grid .full { grid-column: 1 / -1; }
+.field .cap { display: block; color: var(--ink-2); font-size: 12px; margin-bottom: 4px; }
+
+.banner { border-radius: 8px; padding: 9px 12px; margin-bottom: 12px; font-size: 13px; }
+.banner.error { background: rgba(248,113,113,.12); color: #fca5a5; }
+.banner.ok { background: rgba(52,211,153,.12); color: #6ee7b7; }
+.banner.warn { background: rgba(251,191,36,.12); color: #fcd34d; }
+
+.login { max-width: 360px; margin: 12vh auto 0; }
+.login h1 { font-size: 18px; }
+
+.chart-wrap { position: relative; }
+.chart-tip { position: absolute; pointer-events: none; background: #0d1320; border: 1px solid var(--line);
+  border-radius: 6px; padding: 4px 8px; font-size: 12px; white-space: nowrap; display: none; }
+svg text { fill: var(--ink-3); font-size: 10px; }
+svg .grid { stroke: rgba(148,163,184,.12); }
+svg .series { stroke: var(--accent); fill: none; stroke-width: 2; }
+svg .dot { fill: var(--accent); stroke: var(--bg); stroke-width: 2; }
+.detail-services td, .detail-services th { padding: 5px 8px; }

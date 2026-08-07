@@ -112,6 +112,12 @@ if [[ -d "$REPO_ROOT/pyportal" ]]; then
   tar -C "$REPO_ROOT/pyportal" --exclude='data' --exclude='__pycache__' -cf - . \
     | tar -C "$APP/pyportal" -xf -
 fi
+# UAG 모니터(별도 실행 프로그램, Node 내장 모듈 전용) — 소스만 동봉, 기동은 운영자 선택.
+# 실행: <PREFIX>/runtime/node/bin/node <PREFIX>/app/uagmon/server.js (uagmon/README.md 참고)
+if [[ -d "$REPO_ROOT/uagmon" ]]; then
+  mkdir -p "$APP/uagmon"
+  tar -C "$REPO_ROOT/uagmon" --exclude='data' -cf - . | tar -C "$APP/uagmon" -xf -
+fi
 [[ -f "$REPO_ROOT/README.md" ]] && cp "$REPO_ROOT/README.md" "$APP/"
 
 if [[ "$OFFLINE" == "1" ]]; then
