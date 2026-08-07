@@ -1,81 +1,126 @@
 /**
- * 성능점검 실행기 — 표준 라이브러리만으로 6종 점검(ping/tcp/http/dns/cert/ntp).
- * 모든 실패는 격리되어 { status:'bad', reply } 로 떨어진다(폴러가 개별 오류로 죽지 않게).
+ * 성능점검 실행기 — 표준 라이브러리만으로 15종 점검을 수행한다.
  *
- * 보안: 대상 host/url 은 저장 시 ssrfBlockReason 을 통과했지만, DNS 가 나중에 바뀌는 경우가
- * 있어 http 는 실행 직전에도 재검증한다(허브 웹훅과 같은 규칙). TLS 검증 해제(insecure)는
- * 그 요청의 로컬 디스패처에만 적용 — 전역 디스패처 오염 금지(CLAUDE.md 불변조건).
+ * 유형: ping · trace · tcp · udp · http · soap · dns · cert · ntp · smtp · pop3 · imap
+ *       · ssh · ldap · domain
+ * 모든 실패는 격리되어 { status:'bad', reply } 로 떨어진다(폴러/워커가 개별 오류로 죽지 않게).
+ *
+ * 보안
+ * - 대상 host/url 은 저장 시 SSRF 가드를 통과했지만 DNS 가 나중에 바뀔 수 있어 http/soap 은
+ *   실행 직전에도 재검증한다(허브 웹훅과 같은 규칙).
+ * - TLS 검증 해제(insecure)는 그 요청의 로컬 디스패처에만 적용 — 전역 디스패처 오염 금지.
+ * - 외부 CLI(traceroute)는 인자 화이트리스트를 통과한 값만 넘긴다(선행 '-' 차단).
+ * - 배너류 점검은 연결 후 최소 바이트만 읽고 끊는다(대상 로그 오염·세션 점유 최소화).
  */
 
 import net from 'node:net';
 import tls from 'node:tls';
 import dgram from 'node:dgram';
+import { execFile } from 'node:child_process';
 import { Resolver } from 'node:dns/promises';
 import { Agent } from 'undici';
 import { pingOne } from '../util/ping.js';
 import { ssrfBlockReason } from '../collector/registry.js';
 
-const insecureAgent = new Agent({ connect: { rejectUnauthorized: false } }); // http insecure 전용(로컬 주입)
+const insecureAgent = new Agent({ connect: { rejectUnauthorized: false } });
+const SAFE_HOST = /^[a-zA-Z0-9._:-]+$/;
+const shortErr = (e) => String(e?.cause?.code || e?.code || e?.message || e).slice(0, 140);
+
+/** 유형별 기본 포트 — 폼에서 비워두면 이 값을 쓴다. */
+export const DEFAULT_PORTS = {
+  smtp: 25, pop3: 110, imap: 143, ssh: 22, ldap: 389, cert: 443, domain: 43, ntp: 123, dns: 53,
+};
 
 /** 단일 점검 실행 → { status:'ok'|'warn'|'bad', reply, ms }. */
 export async function runCheck(test, host) {
   const started = Date.now();
+  const port = Number(test.port) || DEFAULT_PORTS[test.type] || 0;
   try {
     switch (test.type) {
       case 'ping': {
         const r = await pingOne(host, { timeoutMs: 4000 });
-        return r.alive
-          ? { status: 'ok', reply: `${r.rttMs ?? 0} ms`, ms: r.rttMs ?? 0 }
-          : { status: 'bad', reply: '응답 없음', ms: Date.now() - started };
+        return r.alive ? ok(`${r.rttMs ?? 0} ms`, r.rttMs ?? 0) : bad('응답 없음', started);
+      }
+      case 'trace': {
+        const r = await traceroute(host, test.maxHops || 15);
+        if (!r.reached) return warn(`${r.hops} hop 까지 도달(미완료)`, started);
+        if (test.maxHops && r.hops > test.maxHops) return warn(`${r.hops} hops (임계 ${test.maxHops})`, started);
+        return ok(`${r.hops} hops`, Date.now() - started);
       }
       case 'tcp': {
-        const ok = await tcpPort(host, test.port, 4000);
-        return ok
-          ? { status: 'ok', reply: `포트 ${test.port} 열림`, ms: Date.now() - started }
-          : { status: 'bad', reply: `포트 ${test.port} 연결 실패`, ms: Date.now() - started };
+        const alive = await tcpPort(host, port, 4000);
+        return alive ? ok(`포트 ${port} 열림`, Date.now() - started) : bad(`포트 ${port} 연결 실패`, started);
       }
-      case 'http': {
+      case 'udp': {
+        const bytes = await udpProbe(host, port, test.payload || '', 4000);
+        return bytes > 0 ? ok(`응답 ${bytes} bytes`, Date.now() - started) : bad('UDP 응답 없음', started);
+      }
+      case 'http': case 'soap': {
         const reason = ssrfBlockReason(test.url);
-        if (reason) return { status: 'bad', reply: `차단: ${reason}`, ms: 0 };
+        if (reason) return bad(`차단: ${reason}`, started);
+        const isSoap = test.type === 'soap';
         const res = await fetch(test.url, {
+          method: isSoap ? 'POST' : 'GET',
           redirect: 'manual',
-          signal: AbortSignal.timeout(6000),
+          signal: AbortSignal.timeout(8000),
+          ...(isSoap ? {
+            headers: { 'Content-Type': 'text/xml; charset=utf-8', SOAPAction: test.soapAction || '' },
+            body: test.body || '<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body/></s:Envelope>',
+          } : {}),
           ...(test.insecure ? { dispatcher: insecureAgent } : {}),
         });
         const ms = Date.now() - started;
         const okStatus = test.expectStatus ? res.status === test.expectStatus : res.status < 500;
         if (!okStatus) return { status: 'bad', reply: `HTTP ${res.status}`, ms };
         if (test.keyword) {
-          const body = (await res.text()).slice(0, 262144); // 256KB 상한 — 대용량 응답 방어
+          const body = (await res.text()).slice(0, 262144);   // 256KB 상한 — 대용량 응답 방어
           if (!body.includes(test.keyword)) return { status: 'warn', reply: `HTTP ${res.status} · 키워드 없음`, ms };
         }
+        if (test.warnMs && ms > test.warnMs) return { status: 'warn', reply: `HTTP ${res.status} · ${ms}ms(느림)`, ms };
         return { status: 'ok', reply: `HTTP ${res.status} · ${ms}ms`, ms };
       }
       case 'dns': {
         const resolver = new Resolver({ timeout: 4000, tries: 1 });
-        if (test.server) resolver.setServers([test.server]);
-        else resolver.setServers([host]);           // 대상 host = 검사할 DNS 서버
+        resolver.setServers([test.server || host]);
         const name = test.record || 'localhost';
         const addrs = await resolver.resolve4(name).catch(() => resolver.resolve6(name));
         const ms = Date.now() - started;
-        return addrs?.length
-          ? { status: 'ok', reply: `${name} → ${addrs[0]} · ${ms}ms`, ms }
-          : { status: 'bad', reply: '결과 없음', ms };
+        if (!addrs?.length) return bad('결과 없음', started);
+        if (test.expect && !addrs.includes(test.expect)) return { status: 'warn', reply: `${addrs[0]} (기대 ${test.expect})`, ms };
+        return { status: 'ok', reply: `${name} → ${addrs[0]} · ${ms}ms`, ms };
       }
       case 'cert': {
-        const days = await certDaysLeft(host, test.port || 443, 6000);
+        const days = await certDaysLeft(host, port, 6000);
         const ms = Date.now() - started;
         if (days < 0) return { status: 'bad', reply: `만료됨 (${-days}일 경과)`, ms };
         if (days <= (test.warnDays || 30)) return { status: 'warn', reply: `D-${days}`, ms };
         return { status: 'ok', reply: `D-${days}`, ms };
       }
       case 'ntp': {
-        const offsetMs = await ntpOffset(test.server || host, 4000);
+        const offset = await ntpOffset(test.server || host, 4000);
+        const abs = Math.abs(offset);
         const ms = Date.now() - started;
-        const abs = Math.abs(offsetMs);
-        if (abs > 5000) return { status: 'bad', reply: `오프셋 ${Math.round(offsetMs)}ms`, ms };
-        if (abs > 1000) return { status: 'warn', reply: `오프셋 ${Math.round(offsetMs)}ms`, ms };
-        return { status: 'ok', reply: `오프셋 ${Math.round(offsetMs)}ms`, ms };
+        if (abs > (test.badMs || 5000)) return { status: 'bad', reply: `오프셋 ${Math.round(offset)}ms`, ms };
+        if (abs > (test.warnMs || 1000)) return { status: 'warn', reply: `오프셋 ${Math.round(offset)}ms`, ms };
+        return { status: 'ok', reply: `오프셋 ${Math.round(offset)}ms`, ms };
+      }
+      // 배너류 — 연결 후 인사말 1줄을 읽어 프로토콜 정상 응답인지 확인한다.
+      case 'smtp': return banner(host, port, /^220[ -]/, 'SMTP', started, test);
+      case 'pop3': return banner(host, port, /^\+OK/, 'POP3', started, test);
+      case 'imap': return banner(host, port, /^\* OK/, 'IMAP', started, test);
+      case 'ssh': return banner(host, port, /^SSH-2\.0-|^SSH-1\.99-/, 'SSH', started, test);
+      case 'ldap': {
+        const r = await ldapBind(host, port, 5000);
+        return r.ok ? ok(`bind 성공 (resultCode ${r.code})`, Date.now() - started)
+          : bad(`bind 실패 (resultCode ${r.code})`, started);
+      }
+      case 'domain': {
+        const days = await domainDaysLeft(test.record || host, 8000);
+        const ms = Date.now() - started;
+        if (days == null) return { status: 'warn', reply: '만료일 파싱 실패', ms };
+        if (days < 0) return { status: 'bad', reply: `만료됨 (${-days}일 경과)`, ms };
+        if (days <= (test.warnDays || 60)) return { status: 'warn', reply: `D-${days}`, ms };
+        return { status: 'ok', reply: `D-${days}`, ms };
       }
       default:
         return { status: 'bad', reply: `알 수 없는 점검 유형: ${test.type}`, ms: 0 };
@@ -85,15 +130,73 @@ export async function runCheck(test, host) {
   }
 }
 
-const shortErr = (e) => String(e?.cause?.code || e?.code || e?.message || e).slice(0, 120);
+const ok = (reply, ms) => ({ status: 'ok', reply, ms });
+const warn = (reply, started) => ({ status: 'warn', reply, ms: Date.now() - started });
+const bad = (reply, started) => ({ status: 'bad', reply, ms: Date.now() - started });
 
 function tcpPort(host, port, timeoutMs) {
   return new Promise((resolve) => {
     const sock = net.connect({ host, port, timeout: timeoutMs });
     const done = (v) => { try { sock.destroy(); } catch { /* noop */ } resolve(v); };
-    sock.once('connect', () => done(true));   // 연결 후 바이트를 보내지 않는다(대상 로그 오염 방지)
+    sock.once('connect', () => done(true));   // 바이트를 보내지 않는다(대상 로그 오염 방지)
     sock.once('timeout', () => done(false));
     sock.once('error', () => done(false));
+  });
+}
+
+/** 배너 검사 공통 — 연결 후 첫 응답 1줄이 기대 패턴인지 본다. */
+function banner(host, port, pattern, label, started, test) {
+  return new Promise((resolve) => {
+    const sock = net.connect({ host, port, timeout: 5000 });
+    let buf = '';
+    const finish = (r) => { try { sock.destroy(); } catch { /* noop */ } resolve(r); };
+    sock.once('connect', () => { if (test?.send) sock.write(`${test.send}\r\n`); });
+    sock.on('data', (chunk) => {
+      buf += chunk.toString('latin1');
+      if (buf.length > 2048 || buf.includes('\n')) {
+        const line = buf.split(/\r?\n/)[0].slice(0, 120);
+        if (!pattern.test(line)) return finish({ status: 'warn', reply: `예상외 응답: ${line}`, ms: Date.now() - started });
+        if (test?.keyword && !buf.includes(test.keyword)) {
+          return finish({ status: 'warn', reply: `${label} 응답 · 키워드 없음`, ms: Date.now() - started });
+        }
+        finish({ status: 'ok', reply: line, ms: Date.now() - started });
+      }
+    });
+    sock.once('timeout', () => finish(bad(`${label} 응답 타임아웃`, started)));
+    sock.once('error', (e) => finish(bad(shortErr(e), started)));
+    sock.once('close', () => { if (!buf) finish(bad(`${label} 무응답(연결 종료)`, started)); });
+  });
+}
+
+function udpProbe(host, port, payload, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const sock = dgram.createSocket('udp4');
+    const timer = setTimeout(() => { try { sock.close(); } catch { /* noop */ } resolve(0); }, timeoutMs);
+    sock.once('message', (msg) => { clearTimeout(timer); try { sock.close(); } catch { /* noop */ } resolve(msg.length); });
+    sock.once('error', (e) => { clearTimeout(timer); try { sock.close(); } catch { /* noop */ } reject(e); });
+    sock.send(Buffer.from(payload || '\r\n'), port, host, (e) => {
+      if (e) { clearTimeout(timer); try { sock.close(); } catch { /* noop */ } reject(e); }
+    });
+  });
+}
+
+/** traceroute — CLI 호출. host 는 화이트리스트를 통과한 값만(명령 인젝션 방지). */
+function traceroute(host, maxHops) {
+  return new Promise((resolve, reject) => {
+    if (!SAFE_HOST.test(host) || host.startsWith('-')) return reject(new Error('호스트 형식 위반'));
+    const isWin = process.platform === 'win32';
+    const cmd = isWin ? 'tracert' : 'traceroute';
+    const args = isWin
+      ? ['-d', '-h', String(Math.min(64, maxHops)), '-w', '1000', host]
+      : ['-n', '-m', String(Math.min(64, maxHops)), '-w', '1', '-q', '1', host];
+    execFile(cmd, args, { timeout: 25_000, maxBuffer: 256 * 1024 }, (err, stdout) => {
+      const out = String(stdout || '');
+      if (!out) return reject(err || new Error('traceroute 출력 없음'));
+      const lines = out.split('\n').filter((l) => /^\s*\d+/.test(l));
+      const hops = lines.length;
+      const last = lines[lines.length - 1] || '';
+      resolve({ hops, reached: hops > 0 && !/\*\s*\*\s*\*/.test(last) });
+    });
   });
 }
 
@@ -112,12 +215,12 @@ function certDaysLeft(host, port, timeoutMs) {
   });
 }
 
-/** SNTP 1회 질의 — 서버시각-로컬시각 오프셋(ms). RFC 4330 48바이트 패킷. */
+/** SNTP 1회 질의 — 서버시각 − 로컬시각(ms). RFC 4330 48바이트. */
 function ntpOffset(server, timeoutMs) {
   return new Promise((resolve, reject) => {
     const sock = dgram.createSocket('udp4');
     const pkt = Buffer.alloc(48);
-    pkt[0] = 0x1b; // LI=0, VN=3, Mode=3(client)
+    pkt[0] = 0x1b;                       // LI=0, VN=3, Mode=3(client)
     const t1 = Date.now();
     const timer = setTimeout(() => { sock.close(); reject(new Error('NTP 타임아웃')); }, timeoutMs);
     sock.once('message', (msg) => {
@@ -125,13 +228,67 @@ function ntpOffset(server, timeoutMs) {
       const t4 = Date.now();
       sock.close();
       if (msg.length < 48) return reject(new Error('NTP 응답 형식 오류'));
-      // Transmit Timestamp(40..47): NTP epoch(1900) 초 + 분수
       const secs = msg.readUInt32BE(40) - 2208988800;
       const frac = msg.readUInt32BE(44) / 2 ** 32;
-      const serverMs = (secs + frac) * 1000;
-      resolve(serverMs - (t1 + t4) / 2);
+      resolve((secs + frac) * 1000 - (t1 + t4) / 2);
     });
     sock.once('error', (e) => { clearTimeout(timer); sock.close(); reject(e); });
     sock.send(pkt, 123, server, (e) => { if (e) { clearTimeout(timer); sock.close(); reject(e); } });
+  });
+}
+
+/**
+ * LDAP 익명 simple bind — BER 최소 인코딩.
+ * SEQ{ msgID INT 1, [APP 0] BindRequest{ version INT 3, name "", [CTX 0] "" } }
+ * 응답의 resultCode 0(success) 또는 49(invalidCredentials)/48(inappropriateAuth)면 서버가
+ * 정상 응답한 것으로 본다(익명 bind 금지 서버도 '살아있음'으로 판정).
+ */
+function ldapBind(host, port, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const body = Buffer.concat([
+      Buffer.from([0x02, 0x01, 0x03]),           // version 3
+      Buffer.from([0x04, 0x00]),                 // name ""
+      Buffer.from([0x80, 0x00]),                 // simple password ""
+    ]);
+    const bindReq = Buffer.concat([Buffer.from([0x60, body.length]), body]);
+    const msg = Buffer.concat([Buffer.from([0x02, 0x01, 0x01]), bindReq]);
+    const pdu = Buffer.concat([Buffer.from([0x30, msg.length]), msg]);
+    const sock = net.connect({ host, port, timeout: timeoutMs });
+    const fail = (e) => { try { sock.destroy(); } catch { /* noop */ } reject(e); };
+    sock.once('connect', () => sock.write(pdu));
+    sock.once('data', (res) => {
+      try { sock.destroy(); } catch { /* noop */ }
+      // 0x30(SEQ) … 0x61(BindResponse) 0xLL 0x0a 0x01 <resultCode>
+      const i = res.indexOf(0x61);
+      const code = (i >= 0 && res.length > i + 4) ? res[i + 4] : -1;
+      resolve({ ok: [0, 48, 49].includes(code), code });
+    });
+    sock.once('timeout', () => fail(new Error('LDAP 타임아웃')));
+    sock.once('error', fail);
+  });
+}
+
+/** 도메인 만료 — whois(TCP 43) 조회 후 Expiry Date 파싱. IANA 참조 서버 1회 추적. */
+async function domainDaysLeft(domain, timeoutMs) {
+  if (!SAFE_HOST.test(domain)) throw new Error('도메인 형식 위반');
+  const first = await whois('whois.iana.org', domain, timeoutMs);
+  const refer = /refer:\s*(\S+)/i.exec(first)?.[1];
+  const text = refer && SAFE_HOST.test(refer) ? await whois(refer, domain, timeoutMs) : first;
+  const m = /(?:Registry Expiry Date|Expiration Date|paid-till|expires?(?: on)?)\s*:\s*(\S+)/i.exec(text);
+  if (!m) return null;
+  const t = new Date(m[1]).getTime();
+  if (!Number.isFinite(t)) return null;
+  return Math.floor((t - Date.now()) / 86400000);
+}
+
+function whois(server, query, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const sock = net.connect({ host: server, port: 43, timeout: timeoutMs });
+    let buf = '';
+    sock.once('connect', () => sock.write(`${query}\r\n`));
+    sock.on('data', (c) => { buf += c.toString('utf8'); if (buf.length > 65536) sock.destroy(); });
+    sock.once('close', () => resolve(buf));
+    sock.once('timeout', () => { try { sock.destroy(); } catch { /* noop */ } reject(new Error('whois 타임아웃')); });
+    sock.once('error', reject);
   });
 }

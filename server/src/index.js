@@ -64,6 +64,9 @@ import { startCaptureMonitor } from './net/monitor.js';
 import { pingRouter } from './routes/ping.js';
 import { svcmonRouter } from './routes/svcmon.js';
 import { startSvcmonPoller } from './svcmon/poller.js';
+import { closeCsvLog } from './svcmon/csvlog.js';
+import { flushStore as flushSvcmonStore } from './svcmon/store.js';
+import { closePool as closeSvcmonPool } from './svcmon/pool.js';
 import { startPingMonitor } from './ping/monitor.js';
 import { startLoginMonitor } from './security/loginMonitor.js';
 import { startGuestScanScheduler } from './security/guestScanScheduler.js';
@@ -207,3 +210,14 @@ server.on('error', (err) => {
 attachSshGateway(server);
 attachRdpGateway(server);
 startMappingExpiry(); // remove ephemeral quick-connect mappings 1 day after last use
+
+// 성능점검 종료 정리 — CSV 배치 버퍼와 저장소 디바운스를 flush 한 뒤 워커를 정리한다.
+// 이걸 빼면 마지막 배치(최대 200ms 분량 로그·설정 변경)가 재시작에서 유실된다.
+const svcmonShutdown = () => {
+  try { closeCsvLog(); } catch { /* noop */ }
+  try { flushSvcmonStore(); } catch { /* noop */ }
+  try { closeSvcmonPool(); } catch { /* noop */ }
+};
+process.on('SIGTERM', () => { svcmonShutdown(); process.exit(0); });
+process.on('SIGINT', () => { svcmonShutdown(); process.exit(0); });
+process.on('exit', svcmonShutdown);

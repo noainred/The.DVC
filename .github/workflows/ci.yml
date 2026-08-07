@@ -69,6 +69,29 @@ jobs:
       - name: 구문 검사(전 파일 컴파일)
         run: python3 -m compileall -q pyportal
 
+      - name: pyportal 변경 PR 의 ver.txt 갱신 확인
+        # ver.txt 는 pyportal 을 변경한 릴리스에서만 갱신하는 게 절차다(CLAUDE.md). 단위테스트로
+        # '항상 일치'를 검사하면 pyportal 을 안 건드린 릴리스마다 오탐이라(v2.230~2.235 CI 상시 실패),
+        # 진짜 불변조건 — pyportal 을 고친 PR 은 ver.txt 첫 줄 = package.json 버전 — 을
+        # PR 변경 파일 목록으로만 검사한다. push 이벤트는 diff 기준점이 불확실해 검사하지 않는다
+        # (모든 릴리스는 PR 을 거치므로 PR 게이트로 충분).
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          files=$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" --paginate --jq '.[].filename')
+          if echo "$files" | grep '^pyportal/' | grep -v '^pyportal/ver.txt$' | grep -q .; then
+            top=$(head -n1 pyportal/ver.txt | awk '{print $1}')
+            pkg=$(python3 -c "import json; print(json.load(open('package.json'))['version'])")
+            if [ "$top" != "$pkg" ]; then
+              echo "::error::pyportal 변경 PR 인데 ver.txt 갱신 누락 — ver.txt 첫 줄($top) ≠ package.json($pkg). pyportal/ver.txt 맨 위에 '$pkg (날짜) 한줄요약' 줄을 추가하세요."
+              exit 1
+            fi
+            echo "ver.txt 동기화 확인: $top"
+          else
+            echo "pyportal 변경 없음 — ver.txt 검사 생략"
+          fi
+
       - name: 단위·E2E 테스트
         working-directory: pyportal
         run: python3 -m unittest discover -s tests -v
