@@ -30,6 +30,13 @@ const DEFAULTS = {
   // 디스크 상한 — 파일 수 정책만으로는 시간당 회전 시 용량이 폭주할 수 있다. 0=미사용.
   maxTotalMB: 51200,    // 50GB
   dirName: 'svcmon-logs',
+  /**
+   * 절대 경로 지정(선택) — 일 2GB 규모 로그를 시스템 디스크가 아닌 대용량 볼륨에 두려는 용도.
+   * 비우면 기존과 동일하게 CONFIG_DIR/<dirName>. 저장 시 실제 쓰기 시험을 통과해야 한다.
+   * 이 디렉터리에서 지워질 수 있는 것은 `results-*.csv` 뿐이다(pruneOld 의 패턴 필터) —
+   * 그래도 기존 파일이 있는 공용 디렉터리보다 전용 디렉터리를 권장한다.
+   */
+  dirPath: '',
 };
 
 let cache = null;
@@ -48,6 +55,21 @@ export function getLogSettings() {
 
 export function setLogSettings(patch) {
   const next = normalize({ ...getLogSettings(), ...(patch || {}) });
+  // 절대 경로를 바꾸는 저장은 **실제 쓰기 시험**을 통과해야 한다. 검증 없이 저장하면
+  // 오타 경로에서 라이터가 조용히 실패해 로그가 통째로 유실된다(라이터는 best-effort).
+  if (next.dirPath) {
+    let st = null;
+    try {
+      fs.mkdirSync(next.dirPath, { recursive: true });
+      const probe = path.join(next.dirPath, `.svcmon-write-test-${process.pid}`);
+      fs.writeFileSync(probe, 'ok');
+      fs.unlinkSync(probe);
+      st = fs.statSync(next.dirPath);
+    } catch (e) {
+      throw new Error(`로그 경로에 쓸 수 없습니다: ${next.dirPath} — ${e?.message || e}`);
+    }
+    if (!st.isDirectory()) throw new Error(`디렉터리가 아닙니다: ${next.dirPath}`);
+  }
   cache = next;
   atomicWriteFileSync(FILE(), JSON.stringify(next, null, 2));
   return { ...next };
@@ -70,12 +92,20 @@ function normalize(v) {
     maxTotalMB: o.maxTotalMB === 0 ? 0 : clamp(o.maxTotalMB, 100, 2_000_000, DEFAULTS.maxTotalMB),
     // 디렉터리는 이름만 받는다(경로 구분자 금지 — CONFIG_DIR 밖으로 나가지 못하게).
     dirName: String(o.dirName || DEFAULTS.dirName).replace(/[^A-Za-z0-9._-]/g, '') || DEFAULTS.dirName,
+    // 절대 경로는 그대로 두되 정규화한다. 상대 경로는 받지 않는다 — 프로세스 cwd 에 따라
+    // 위치가 흔들리고, 서비스로 돌 때와 수동 실행 때 다른 곳에 쓰게 된다.
+    dirPath: (() => {
+      const raw = String(o.dirPath || '').trim();
+      if (!raw) return '';
+      return path.isAbsolute(raw) ? path.normalize(raw) : '';
+    })(),
   };
 }
 
-/** 로그 디렉터리 절대경로(없으면 생성). */
+/** 로그 디렉터리 절대경로(없으면 생성). 절대 경로 설정이 있으면 그것을 우선한다. */
 export function logDir() {
-  const dir = path.join(config.configDir, getLogSettings().dirName);
+  const cfg = getLogSettings();
+  const dir = cfg.dirPath || path.join(config.configDir, cfg.dirName);
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 }

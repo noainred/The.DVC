@@ -89,6 +89,8 @@ function capabilities(p) {
     // ping 은 CLI 가 없으면 TCP 연결 폴백으로 **판정 의미가 바뀐 채** 계속 동작한다.
     pingMode: p?.pool?.pingMode || 'unknown',
     svcmonEnabled: !!p?.enabled,
+    // 중앙의 통신 진단(probe)이 이 포트로 TCP RTT 를 잰다.
+    portalPort: Number(config.port) || 0,
     workers: p?.pool?.workers ?? null,
     inlineFallbacks: p?.pool?.inlineFallbacks ?? 0,
     version: config.version || '',

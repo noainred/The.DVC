@@ -22,7 +22,8 @@ import { TARGET_FIELDS, TEST_FIELDS, CSV_COLUMNS } from '../svcmon/testSchema.js
 import { csvLines, parseTargetsCsv, sampleCsv, REQUIRED_COLUMNS } from '../svcmon/csvio.js';
 import { judgeCapacity, suggestIntervalSec } from '../svcmon/capacity.js';
 import { testState, emptySummary } from '../svcmon/status.js';
-import { edgeSummary, edgeState, edgeTotals, forgetAgent, MAX_AGENTS, MAX_ROWS_PER_AGENT } from '../central/svcmonEdge.js';
+import { edgeSummary, edgeState, edgeTotals, forgetAgent, probeAgent, MAX_AGENTS, MAX_ROWS_PER_AGENT } from '../central/svcmonEdge.js';
+import { listAgentTokens } from '../central/agentTokens.js';
 import { silenceStatus, checkSilenceOnce } from '../central/svcmonSilence.js';
 import { svcmonPushStatus, pushSvcmonNow } from '../agent/svcmonPush.js';
 import {
@@ -30,6 +31,8 @@ import {
   MAX_TARGETS_PER_AGENT, batchTag,
 } from '../central/svcmonAssign.js';
 import { svcmonConfigPullStatus, pullSvcmonConfigNow } from '../agent/svcmonConfigPull.js';
+import { analyzeLog, listLogWindows, ANALYZE_BUCKETS } from '../svcmon/loganalyze.js';
+import { templatesToCsv, sampleTemplatesCsv, parseTemplatesCsv, importTemplates, PREVIEW_NOTICE } from '../svcmon/templatesCsv.js';
 import { pollerRole } from '../svcmon/poller.js';
 import {
   listTemplates, getTemplate, addTemplate, updateTemplate, duplicateTemplate,
@@ -434,6 +437,51 @@ svcmonRouter.delete('/templates/:id', canEdit, (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
+/** 템플릿 내보내기 — 항목 1건=1행(대상 CSV 와 같은 규약). item.key 는 싣지 않는다. */
+svcmonRouter.get('/templates/export.csv', canEdit, (req, res) => {
+  const all = listTemplates();
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="svcmon-templates-${new Date().toISOString().slice(0, 10)}.csv"`);
+  logAudit({ user: req.user?.username, action: 'svcmon.template.export', detail: `템플릿 ${all.length}개` });
+  res.send(templatesToCsv(all));
+});
+
+svcmonRouter.get('/templates/sample.csv', canEdit, (req, res) => {
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="svcmon-templates-sample.csv"');
+  res.send(sampleTemplatesCsv());
+});
+
+/**
+ * 템플릿 가져오기 — 이미 있는 **이름**은 건너뛴다(조용한 덮어쓰기 금지).
+ * preview 는 파싱 수준 검증만이다 — 치환 변수·상한 검증은 addTemplate 안에 있어 등록
+ * 시점에 실패할 수 있다(그 한계를 응답 notice 로 명시한다. 과장 금지).
+ */
+svcmonRouter.post('/templates/import', canEdit, (req, res) => {
+  const csv = typeof req.body?.csv === 'string' ? req.body.csv : '';
+  if (!csv.trim()) return res.status(400).json({ error: 'CSV 내용이 비어 있습니다.' });
+  // 내보내기 상한(템플릿 100 × 항목 50 = 5,000행)을 자기 가져오기가 못 받는 비대칭을 없앤다.
+  const parsed = parseTemplatesCsv(csv, { maxRows: 5001 });
+  const mode = req.body?.mode === 'add' ? 'add' : 'preview';
+  const r = importTemplates(parsed, { mode, user: req.user?.username });
+  const payload = {
+    mode,
+    // '파싱 수준 검증만' 안내는 미리보기에만 — 등록 성공 응답에 실으면 화면이 혼란스럽다.
+    ...(mode === 'preview' ? { notice: PREVIEW_NOTICE } : {}),
+    summary: { rows: parsed.rowCount, create: r.create, skip: r.skip, error: (r.errors || []).length },
+    errors: (r.errors || []).slice(0, 200),
+    unknownColumns: parsed.unknownColumns,
+    results: r.results || [],
+  };
+  if (mode === 'preview') return res.json(payload);
+  if ((r.errors || []).length && !r.create) return res.status(400).json({ ...payload, error: '오류가 있어 등록하지 못했습니다.' });
+  logAudit({
+    user: req.user?.username, action: 'svcmon.template.import',
+    detail: `생성 ${r.create} · 건너뜀 ${r.skip} · 오류 ${(r.errors || []).length}`,
+  });
+  res.status(201).json(payload);
+});
+
 svcmonRouter.get('/templates/:id/usage', canEdit, (req, res) => {
   if (!getTemplate(req.params.id)) return res.status(404).json({ error: '템플릿을 찾을 수 없습니다.' });
   res.json(templateUsage(req.params.id));
@@ -583,8 +631,22 @@ svcmonRouter.get('/assign', canEdit, (req, res) => {
     assignments: listAssignments(),
     defaultExceptTypes: DEFAULT_EXCEPT_TYPES,
     maxTargetsPerAgent: MAX_TARGETS_PER_AGENT,
-    // 배정 후보 엣지 = 개별 토큰이 발급된 엣지 + 이미 보고 중인 엣지
+    // 배정 후보 엣지 = **개별 토큰이 발급된 엣지 + 이미 보고 중인 엣지** 의 합집합.
+    // 자유 입력을 없애는 근거: 토큰의 agent 이름과 대소문자 하나만 달라도 엣지 pull 이
+    // 영원히 '배정 없음'을 받는다(조회 키 불일치) — 오타가 무음 공백이 된다.
     reporting: edgeSummary().map((e) => e.agent),
+    candidates: (() => {
+      const seen = new Map();
+      for (const t of listAgentTokens()) seen.set(t.agent, { agent: t.agent, hasToken: true, lastUsedAt: t.lastUsedAt, note: t.note, reporting: false });
+      for (const e of edgeSummary()) {
+        const cur = seen.get(e.agent) || { agent: e.agent, hasToken: false, lastUsedAt: null, note: '', reporting: false };
+        cur.reporting = !e.silent;
+        cur.lastReportAt = e.lastAt;
+        cur.sourceIp = e.sourceIp;
+        seen.set(e.agent, cur);
+      }
+      return [...seen.values()].sort((a, b) => a.agent.localeCompare(b.agent));
+    })(),
     pull: svcmonConfigPullStatus(),
   });
 });
@@ -667,6 +729,20 @@ svcmonRouter.get('/edge-state', (req, res) => {
   res.json(r);
 });
 
+/**
+ * 엣지 통신 진단 — 마지막 보고의 소스 IP 로 ping(ICMP RTT)·TCP 연결(RTT)을 찍는다.
+ * 진실의 원천은 '보고가 오는가'다(Active push 는 인바운드를 요구하지 않는다) — 응답에
+ * 보고 상태를 함께 싣고, 화면도 그 순서로 보여준다.
+ */
+svcmonRouter.post('/edges/:agent/probe', canEdit, async (req, res) => {
+  const r = await probeAgent(req.params.agent);
+  logAudit({
+    user: req.user?.username, action: 'svcmon.edge.probe', target: req.params.agent,
+    detail: r.ok ? `${r.sourceIp} · ping ${r.ping?.status}/${r.ping?.ms}ms${r.tcp ? ` · tcp:${r.portalPort} ${r.tcp.status}/${r.tcp.ms}ms` : ''}` : (r.reason || '실패'),
+  });
+  res.status(r.ok ? 200 : 400).json(r);
+});
+
 /** 유령 엣지 정리(이름 변경·오타로 남은 항목). 대상 정의는 엣지가 갖고 있으므로 영향 없음. */
 svcmonRouter.delete('/edges/:agent', canEdit, (req, res) => {
   if (!forgetAgent(req.params.agent, req.user?.username)) {
@@ -713,6 +789,44 @@ svcmonRouter.get('/log/files/:name', canEdit, (req, res) => {
   res.setHeader('Content-Disposition', `attachment; filename="${req.params.name}"`);
   logAudit({ user: req.user?.username, action: 'svcmon.log.download', target: req.params.name });
   fs.createReadStream(p).on('error', () => res.end()).pipe(res);
+});
+
+/** 로그 보유 범위 — 분석 화면이 조회 가능 기간을 먼저 보여줄 때 쓴다. */
+svcmonRouter.get('/log/windows', (req, res) => {
+  const files = listLogWindows();
+  const froms = files.map((f) => f.from).filter(Boolean);
+  const tos = files.map((f) => f.to).filter(Boolean);
+  res.json({
+    files,
+    from: froms.length ? Math.min(...froms) : null,
+    to: tos.length ? Math.max(...tos) : null,
+  });
+});
+
+/**
+ * 로그 분석 — CSV 로그를 기간·버킷으로 집계한다. 일 2GB 규모이므로 스트리밍 + 행/시간
+ * 예산으로 돌고, 예산에 걸리면 truncated 로 알린다(조용한 절단 금지).
+ * canEdit 인 이유: 로그와 같은 데이터(전 대상 호스트·결과)를 읽는 조회다 — /log/files 와 동일.
+ */
+svcmonRouter.get('/log/analyze', canEdit, async (req, res) => {
+  try {
+    // `|| 기본값` 은 0 을 삼킨다(from=0 이 '최근 7일'로 둔갑해 전 파일이 기간 밖 처리됨 —
+    // 스모크에서 실제 발생). 유한성 검사로만 폴백한다.
+    const toRaw = Number(req.query.to);
+    const to = Number.isFinite(toRaw) && toRaw > 0 ? toRaw : Date.now();
+    const fromRaw = Number(req.query.from);
+    const from = Number.isFinite(fromRaw) && fromRaw >= 0 && String(req.query.from ?? '') !== ''
+      ? fromRaw : (to - 7 * 86400e3);
+    const bucket = ANALYZE_BUCKETS.includes(req.query.bucket) ? req.query.bucket : 'day';
+    const r = await analyzeLog({
+      from, to, bucket,
+      path: typeof req.query.path === 'string' ? req.query.path : '',
+      target: typeof req.query.target === 'string' ? req.query.target : '',
+      test: typeof req.query.test === 'string' ? req.query.test : '',
+      type: typeof req.query.type === 'string' ? req.query.type : '',
+    });
+    res.json(r);
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 svcmonRouter.post('/log/prune', adminOnly, (req, res) => {

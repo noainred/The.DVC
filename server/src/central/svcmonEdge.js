@@ -64,6 +64,11 @@ function blank(agent) {
     caps: null,
     log: null,
     metaSig: '',
+    // 보고가 도착한 소스 IP(소켓 관측값)와 엣지가 알려준 자기 포탈 포트 — 통신 진단(probe)의
+    // 목적지가 된다. 프록시 뒤에서는 X-Forwarded-For 가 아니라 소켓 주소이므로 프록시 IP 일
+    // 수 있다(진단 화면에 그 한계를 표기한다).
+    sourceIp: '',
+    portalPort: 0,
     rows: new Map(),      // edgeTestId -> { s, r, m, k, measuredAt, snapId }
     meta: new Map(),      // edgeTestId -> { p, n, h, t, y, iv }
     counters: { accepted: 0, dropped: 0, overflow: 0, badRow: 0, chunks: 0, snapshots: 0 },
@@ -77,9 +82,10 @@ function blank(agent) {
  * @param {string} agent  **반드시 토큰에서 해석한 이름**(본문 값이 아니다). 라우트가 보장한다.
  * @param {object} body
  * @param {number} recvAt 중앙 시계 수신 시각
+ * @param {{sourceIp?:string}} [net] 소켓 관측 정보(라우트가 req 에서 뽑아 넘긴다)
  * @returns {{ok:boolean, needMeta:boolean, accepted:number, dropped:number, reason?:string}}
  */
-export function ingestReport(agent, body, recvAt = Date.now()) {
+export function ingestReport(agent, body, recvAt = Date.now(), net = {}) {
   const name = String(agent || '').trim();
   if (!name) return { ok: false, needMeta: false, accepted: 0, dropped: 0, reason: 'agent 를 해석할 수 없습니다.' };
   if (!agents[name] && Object.keys(agents).length >= MAX_AGENTS) {
@@ -108,8 +114,13 @@ export function ingestReport(agent, body, recvAt = Date.now()) {
   if (Number.isFinite(Number(body?.items))) a.items = num(body.items);
   if (Number.isFinite(Number(body?.reported))) a.reported = num(body.reported);
   if (body?.poller && typeof body.poller === 'object') a.poller = body.poller;
-  if (body?.caps && typeof body.caps === 'object') a.caps = body.caps;
+  if (body?.caps && typeof body.caps === 'object') {
+    a.caps = body.caps;
+    const p = Number(body.caps.portalPort);
+    if (Number.isFinite(p) && p >= 1 && p <= 65535) a.portalPort = Math.round(p);
+  }
   if (body?.log && typeof body.log === 'object') a.log = body.log;
+  if (net?.sourceIp) a.sourceIp = text(net.sourceIp, 64);
 
   let accepted = 0;
   let dropped = 0;
@@ -209,6 +220,8 @@ export function edgeSummary(now = Date.now()) {
     const notRun = Math.max(0, (a.items || 0) - (a.reported || 0));
     out.push({
       agent: name,
+      sourceIp: a.sourceIp || '',
+      portalPort: a.portalPort || 0,
       silent,
       unknown: silent,                       // 무보고면 그 엣지 전 항목의 현재 상태를 알 수 없다
       lastAt: a.lastAt,
@@ -300,6 +313,50 @@ export function forgetAgent(agent, user = '') {
   delete agents[name];
   logAudit({ user, action: 'svcmon.edge.forget', target: name, detail: `행 ${rows}개 폐기` });
   return true;
+}
+
+/**
+ * 엣지 통신 진단 — 마지막 보고의 **관측된 소스 IP** 로 ping(ICMP)·TCP 연결(RTT)을 찍는다.
+ *
+ * 한계를 그대로 적는다:
+ *  - Active push 구조는 원래 중앙→엣지 인바운드를 요구하지 않는다. 이 진단이 실패해도
+ *    보고가 정상이면 위임은 동작한다(반대로 진단이 성공해도 엣지 프로세스가 죽어 있을 수
+ *    있다 — 살아있음의 진실은 '보고가 오는가'다). 그래서 응답에 보고 상태를 함께 싣는다.
+ *  - 소스 IP 는 소켓 관측값이라 엣지가 프록시/NAT 뒤면 그 장비의 주소다.
+ *  - TCP 포트는 엣지가 caps 로 알려준 자기 포탈 포트다(미보고 시 포트 검사 생략).
+ */
+export async function probeAgent(agent, { timeoutMs = 4000 } = {}) {
+  const a = agents[String(agent || '').trim()];
+  if (!a) return { ok: false, reason: '그 엣지의 보고가 없습니다(진단할 주소를 모릅니다).' };
+  if (!a.sourceIp) return { ok: false, reason: '보고는 있었지만 소스 IP 가 기록되지 않았습니다.' };
+
+  // 관측값이라도 목적지가 되는 순간 검증을 통과시킨다(루프백·링크로컬 차단, 사내망 허용).
+  const { validateEndpoint } = await import('../svcmon/store.js');
+  const bad = validateEndpoint({ host: a.sourceIp });
+  if (bad) return { ok: false, reason: `기록된 주소를 진단할 수 없습니다 — ${bad}`, sourceIp: a.sourceIp };
+
+  const { runCheck } = await import('../svcmon/checker.js');
+  const out = {
+    ok: true,
+    agent: a.agent,
+    sourceIp: a.sourceIp,
+    portalPort: a.portalPort || null,
+    // 진실의 원천은 보고다 — 진단과 함께 항상 보여준다.
+    reporting: { silent: isSilent(a), lastAt: a.lastAt, ageMs: a.lastAt ? Date.now() - a.lastAt : null, skewMs: a.skewMs },
+    at: Date.now(),
+  };
+  // ping(ICMP RTT) — CLI 부재 환경에서는 checker 가 TCP 폴백으로 판정 의미가 바뀐다(reply 에 표시됨).
+  try { out.ping = await runCheck({ type: 'ping', intervalSec: 60 }, a.sourceIp); }
+  catch (e) { out.ping = { status: 'bad', reply: String(e?.message || e).slice(0, 120), ms: 0 }; }
+  // TCP 연결(RTT) — 엣지 포탈 포트가 보고된 경우만.
+  if (a.portalPort) {
+    try { out.tcp = await runCheck({ type: 'tcp', port: a.portalPort, intervalSec: 60 }, a.sourceIp); }
+    catch (e) { out.tcp = { status: 'bad', reply: String(e?.message || e).slice(0, 120), ms: 0 }; }
+  } else {
+    out.tcp = null;
+    out.tcpNote = '엣지가 자기 포탈 포트를 아직 보고하지 않았습니다(v2.246 이상 엣지에서 보고).';
+  }
+  return out;
 }
 
 export function _resetEdgeCache() { agents = Object.create(null); }

@@ -202,7 +202,9 @@ centralRouter.post('/svcmon-report', (req, res) => {
     });
   }
   const agent = req.centralAuth.agent;
-  const r = ingestReport(agent, req.body || {}, Date.now());
+  // 소켓 관측 주소 — 통신 진단(probe)의 목적지. 프록시 뒤면 프록시 주소일 수 있다.
+  const sourceIp = String(req.socket?.remoteAddress || '').replace(/^::ffff:/, '');
+  const r = ingestReport(agent, req.body || {}, Date.now(), { sourceIp });
   recordIngest(agent, 'svcmon-report', {
     wireBytes: Number(req.get('content-length')) || 0,
     summary: { accepted: r.accepted, dropped: r.dropped, rows: Array.isArray(req.body?.rows) ? req.body.rows.length : 0 },
