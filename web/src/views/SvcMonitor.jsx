@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { usePolling, postJson, putJson, delJson, getCurrentUser } from '../api.js';
+import { usePolling, postJson, putJson, delJson, fetchJson, getCurrentUser } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 
 /**
@@ -22,9 +22,45 @@ const STATUS = {
   none: { label: '—', cls: 'pc-off' },
 };
 const METHOD = {
-  ping: 'ping (timeout - 4000 ms)', tcp: 'TCP port', http: 'HTTP/URL',
-  dns: 'DNS query', cert: 'SSL certificate expiry', ntp: 'NTP offset',
+  ping: 'ping (timeout - 4000 ms)', trace: 'traceroute', tcp: 'TCP port', udp: 'UDP probe',
+  http: 'HTTP/URL', soap: 'SOAP/XML', dns: 'DNS query', cert: 'SSL certificate expiry',
+  ntp: 'NTP offset', smtp: 'SMTP banner', pop3: 'POP3 banner', imap: 'IMAP banner',
+  ssh: 'SSH banner', ldap: 'LDAP bind', domain: 'Domain expiry (whois)',
 };
+
+/** 계단식 추가 메뉴 — HostMonitor 의 Test→Add 계층을 우리 구현 가능 범위로 정리. */
+const ADD_MENU = [
+  { label: '📡 Ping / Trace', items: [
+    { type: 'ping', label: 'Ping (ICMP RTT)' },
+    { type: 'trace', label: 'Trace (경로·홉 수)' },
+  ] },
+  { label: '🔌 TCP / UDP / 포트', items: [
+    { type: 'tcp', label: 'TCP 포트 열림' },
+    { type: 'udp', label: 'UDP 응답' },
+    { type: 'ssh', label: 'SSH 배너 (22)' },
+  ] },
+  { label: '🌐 Web / 인증서', items: [
+    { type: 'http', label: 'HTTP / URL (코드·키워드)' },
+    { type: 'soap', label: 'SOAP / XML (POST)' },
+    { type: 'cert', label: 'SSL 인증서 만료' },
+    { type: 'domain', label: '도메인 만료 (whois)' },
+  ] },
+  { label: '✉️ E-Mail', items: [
+    { type: 'smtp', label: 'SMTP 배너 (25/587)' },
+    { type: 'pop3', label: 'POP3 배너 (110/995)' },
+    { type: 'imap', label: 'IMAP 배너 (143/993)' },
+  ] },
+  { label: '🧭 이름·시간·디렉터리', items: [
+    { type: 'dns', label: 'DNS 질의' },
+    { type: 'ntp', label: 'NTP 오프셋' },
+    { type: 'ldap', label: 'LDAP bind (389/636)' },
+  ] },
+];
+/** 다음 단계 예정(엔진 미구현) — 메뉴에 회색으로 노출해 어떤 기능이 올지 보이게 한다. */
+const ADD_MENU_PLANNED = [
+  'SNMP Get / Table / Trap', 'IPMI / Redfish 센서', 'Cisco·Juniper·F5·Netscaler',
+  'NetApp·QNAP·Synology (NAS)', 'UPS·프린터', 'Database 세션(ODBC/MSSQL/Oracle)',
+];
 const statusOf = (t, x) => (t.enabled === false || x.enabled === false) ? 'disabled' : (x.result?.status || 'none');
 const methodText = (t, x) => {
   const base = METHOD[x.type] || x.type;
@@ -34,16 +70,26 @@ const methodText = (t, x) => {
   return `${base} (${t.host})`;
 };
 
-/* ── 트리: path 세그먼트 누적 ── */
-function buildTree(targets) {
+/* ── 트리: 명시적 폴더 + 대상 경로를 합쳐 만든다(빈 폴더도 유지) ── */
+function buildTree(targets, folders = [], sortMode = 'manual') {
   const root = { id: '', name: 'Root', children: new Map(), targets: [] };
-  for (const t of targets) {
+  const ensure = (p) => {
     let node = root;
-    for (const seg of (t.path || '').split('\\').filter(Boolean)) {
+    for (const seg of (p || '').split('\\').filter(Boolean)) {
       if (!node.children.has(seg)) node.children.set(seg, { id: node.id ? `${node.id}\\${seg}` : seg, name: seg, children: new Map(), targets: [] });
       node = node.children.get(seg);
     }
-    node.targets.push(t);
+    return node;
+  };
+  for (const f of folders) ensure(f.path);          // 대상이 없어도 보이는 폴더
+  for (const t of targets) ensure(t.path).targets.push(t);
+  if (sortMode === 'name') {                        // 이름순 정렬(폴더·대상 모두)
+    const sortNode = (n) => {
+      n.children = new Map([...n.children.entries()].sort((a, b) => a[0].localeCompare(b[0], 'ko')));
+      n.targets.sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+      for (const c of n.children.values()) sortNode(c);
+    };
+    sortNode(root);
   }
   return root;
 }
@@ -65,7 +111,7 @@ const matchNode = (node, q) => !q || node.name.toLowerCase().includes(q)
   || node.targets.some((t) => t.name.toLowerCase().includes(q) || (t.host || '').toLowerCase().includes(q))
   || [...node.children.values()].some((c) => matchNode(c, q));
 
-function TreeRows({ node, depth, sel, setSel, expanded, toggle, q }) {
+function TreeRows({ node, depth, sel, setSel, expanded, toggle, q, onCtx }) {
   if (depth > 0 && !matchNode(node, q)) return null;
   const open = q ? true : (expanded[node.id] !== false);   // 검색 중 강제 확장(README)
   const { alarms, worst } = statsOf(node);
@@ -74,7 +120,8 @@ function TreeRows({ node, depth, sel, setSel, expanded, toggle, q }) {
     <>
       {depth > 0 && (
         <div className={`pc-tree-row${sel === node.id ? ' sel' : ''}`} style={{ paddingLeft: 8 + depth * 16 }}
-          onClick={() => setSel(node.id)}>
+          onClick={() => setSel(node.id)}
+          onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setSel(node.id); onCtx({ x: e.clientX, y: e.clientY, node: node.id }); }}>
           <span className="pc-tog" onClick={(e) => { e.stopPropagation(); toggle(node.id); }}>{hasKids ? (open ? '−' : '+') : '·'}</span>
           <span className={`pc-dot ${STATUS[worst]?.cls || 'pc-off'}`} />
           <span className={`pc-tree-label${alarms ? ' alarm' : ''}${sel === node.id ? ' on' : ''}`}>{node.name}</span>
@@ -84,14 +131,15 @@ function TreeRows({ node, depth, sel, setSel, expanded, toggle, q }) {
       {open && (
         <>
           {[...node.children.values()].map((c) => (
-            <TreeRows key={c.id} node={c} depth={depth + 1} sel={sel} setSel={setSel} expanded={expanded} toggle={toggle} q={q} />
+            <TreeRows key={c.id} node={c} depth={depth + 1} sel={sel} setSel={setSel} expanded={expanded} toggle={toggle} q={q} onCtx={onCtx} />
           ))}
           {node.targets.filter((t) => !q || t.name.toLowerCase().includes(q) || (t.host || '').toLowerCase().includes(q)).map((t) => {
             const st = statsOf({ children: new Map(), targets: [t] });
             const id = `target:${t.id}`;
             return (
               <div key={t.id} className={`pc-tree-row${sel === id ? ' sel' : ''}`} style={{ paddingLeft: 8 + (depth + 1) * 16 }}
-                onClick={() => setSel(id)}>
+                onClick={() => setSel(id)}
+                onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setSel(id); onCtx({ x: e.clientX, y: e.clientY, node: t.path, targetId: t.id }); }}>
                 <span className="pc-tog">·</span>
                 <span className={`pc-dot ${STATUS[st.worst]?.cls || 'pc-off'}`} />
                 <span className={`pc-tree-label leaf${st.alarms ? ' alarm' : ''}${sel === id ? ' on' : ''}`}>{t.name}</span>
@@ -130,6 +178,25 @@ export default function SvcMonitor() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const dragRef = useRef(false);
+  // 우클릭 컨텍스트 메뉴 — { x, y, node:'root'|path, targetId? } · 계단식 서브메뉴 인덱스
+  const [ctx, setCtx] = useState(null);
+  const [subOpen, setSubOpen] = useState(-1);
+  const [logCfg, setLogCfg] = useState(null);   // 로그 설정 모달 데이터
+
+  // 컨텍스트 메뉴는 바깥 클릭·ESC·스크롤로 닫는다.
+  useEffect(() => {
+    if (!ctx) return undefined;
+    const close = () => { setCtx(null); setSubOpen(-1); };
+    const onKey = (e) => { if (e.key === 'Escape') close(); };
+    window.addEventListener('click', close);
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('resize', close);
+    return () => {
+      window.removeEventListener('click', close);
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('resize', close);
+    };
+  }, [ctx]);
 
   // 스플리터 드래그(README: min 220, max = max(320, innerWidth-480), 더블클릭 340 초기화)
   useEffect(() => {
@@ -151,7 +218,9 @@ export default function SvcMonitor() {
 
   const allTargets = data?.targets || [];
   const targets = useMemo(() => allTargets.filter((t) => (t.kind || 'infra') === mode), [allTargets, mode]);
-  const tree = useMemo(() => buildTree(targets), [targets]);
+  const folders = useMemo(() => (data?.folders || []).filter((f) => (f.kind || 'infra') === mode), [data, mode]);
+  const sortMode = data?.sort?.[mode] || 'manual';
+  const tree = useMemo(() => buildTree(targets, folders, sortMode), [targets, folders, sortMode]);
 
   if (loading && !data) return <Loading />;
   if (error && !data) return <ErrorBox message={error} />;
@@ -214,6 +283,58 @@ export default function SvcMonitor() {
   };
   const selTarget = targets.find((t) => `target:${t.id}` === sel) || null;
   const doRefresh = async () => { try { await postJson('/svcmon/refresh', {}); setTimeout(refresh, 1500); } catch (e) { window.alert(e.message); } };
+
+  /* ── 폴더 / 정렬 / 로그 설정 ── */
+  const folderPath = ctx && ctx.node !== 'root' && !ctx.targetId ? ctx.node : '';
+  const newFolder = async () => {
+    const name = window.prompt(folderPath ? `'${folderPath}' 하위에 만들 폴더 이름` : '최상위 폴더 이름');
+    const n = (name || '').trim();
+    if (!n) return;
+    try {
+      await postJson('/svcmon/folders', { kind: mode, path: folderPath ? `${folderPath}\\${n}` : n });
+      setExpanded((e) => ({ ...e, [folderPath]: true }));
+      refresh();
+    } catch (e) { window.alert(e.message); }
+  };
+  const renameFolderAt = async (p) => {
+    const cur = p.split('\\').pop();
+    const name = window.prompt('새 폴더 이름', cur);
+    const n = (name || '').trim();
+    if (!n || n === cur) return;
+    try { await putJson('/svcmon/folders/rename', { kind: mode, path: p, newName: n }); refresh(); }
+    catch (e) { window.alert(e.message); }
+  };
+  const deleteFolderAt = async (p) => {
+    try {
+      await postJson('/svcmon/folders/delete', { kind: mode, path: p });
+      if (sel === p || sel.startsWith(`${p}\\`)) setSel('');
+      refresh();
+    } catch (e) {
+      // 409 = 하위 대상 존재 → 강제 삭제 확인
+      if (/대상 \d+개/.test(e.message || '') && window.confirm(`${e.message}\n\n하위 대상까지 모두 삭제할까요?`)) {
+        try { await postJson('/svcmon/folders/delete', { kind: mode, path: p, force: true }); setSel(''); refresh(); }
+        catch (e2) { window.alert(e2.message); }
+      } else window.alert(e.message);
+    }
+  };
+  const setSortMode = async (m) => {
+    try { await putJson('/svcmon/sort', { kind: mode, mode: m }); refresh(); }
+    catch (e) { window.alert(e.message); }
+  };
+  const openLogSettings = async () => {
+    try { const r = await fetchJson('/svcmon/log'); setLogCfg(r); } catch (e) { window.alert(e.message); }
+  };
+  const saveLogSettings = async () => {
+    setBusy(true);
+    try {
+      const r = await putJson('/svcmon/log', {
+        enabled: logCfg.enabled, mode: logCfg.mode, rotate: logCfg.rotate,
+        keepFiles: Number(logCfg.keepFiles), maxFileMB: Number(logCfg.maxFileMB),
+        maxTotalMB: Number(logCfg.maxTotalMB),
+      });
+      setLogCfg(r);
+    } catch (e) { window.alert(e.message); } finally { setBusy(false); }
+  };
   const doReset = () => { setFilter('ALL'); setTestQ(''); setTreeQ(''); setSort('none'); setDetail(null); };
   const removeSel = async () => {
     if (!selTarget) return;
@@ -262,12 +383,14 @@ export default function SvcMonitor() {
             <input className="pc-input" placeholder="대상 검색" value={treeQ} onChange={(e) => setTreeQ(e.target.value)} />
           </div>
           <div className="pc-tree-body">
-            <div className={`pc-tree-row${sel === '' ? ' sel' : ''}`} onClick={() => setSel('')}>
+            <div className={`pc-tree-row${sel === '' ? ' sel' : ''}`} onClick={() => setSel('')}
+              onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setSel(''); setCtx({ x: e.clientX, y: e.clientY, node: 'root' }); setSubOpen(-1); }}>
               <span className="pc-tog">−</span><span className="pc-dot pc-off" />
               <span className={`pc-tree-label${sel === '' ? ' on' : ''}`}>Root</span>
             </div>
             <TreeRows node={tree} depth={0} sel={sel} setSel={setSel} expanded={expanded} q={treeQ.trim().toLowerCase()}
-              toggle={(id) => setExpanded((e) => ({ ...e, [id]: e[id] === false }))} />
+              toggle={(id) => setExpanded((e) => ({ ...e, [id]: e[id] === false }))}
+              onCtx={(c) => { setCtx(c); setSubOpen(-1); }} />
             {targets.length === 0 && <div className="pc-empty" style={{ padding: 24 }}>
               등록된 {mode === 'service' ? '서비스' : '대상'}이 없습니다.{canEdit ? ' ＋ Add 로 등록하세요.' : ' 관리자에게 요청하세요.'}</div>}
           </div>
@@ -287,6 +410,9 @@ export default function SvcMonitor() {
             <button className="pc-btn" disabled={!canEdit || !selTarget} onClick={removeSel}>✕ Remove</button>
             <button className="pc-btn accent" disabled={!canEdit} onClick={doRefresh}>⟳ Refresh</button>
             <button className="pc-btn" onClick={doReset}>⟲ Reset</button>
+            <button className="pc-btn" disabled={!canEdit} title="선택 위치에 폴더 만들기(트리 우클릭도 가능)"
+              onClick={() => { setCtx({ x: 0, y: 0, node: sel && !sel.startsWith('target:') ? sel : 'root' }); setTimeout(newFolder, 0); }}>📁 폴더</button>
+            <button className="pc-btn" title="점검 로그(CSV) 설정" onClick={openLogSettings}>⚙ 로그</button>
             <span className="pc-sep" />
             {['ALL', 'OK', 'WARN', 'FAIL', 'DISABLED'].map((f) => (
               <button key={f} className={`pc-chip${filter === f ? ' on' : ''}`} onClick={() => setFilter(f)}>{f}</button>
@@ -342,6 +468,112 @@ export default function SvcMonitor() {
           </div>
         </div>
       </div>
+
+      {ctx && ctx.x > 0 && (
+        <div className="pc-ctx" style={{ left: Math.min(ctx.x, window.innerWidth - 260), top: Math.min(ctx.y, window.innerHeight - 320) }}
+          onClick={(e) => e.stopPropagation()}>
+          <div className="pc-ctx-head">{ctx.node === 'root' ? 'Root' : ctx.node}{ctx.targetId ? ' (대상)' : ''}</div>
+          {canEdit && <>
+            <button className="pc-ctx-item" onClick={() => { setCtx(null); newFolder(); }}>📁 하위 폴더 만들기</button>
+            <button className="pc-ctx-item" onClick={() => {
+              setCtx(null);
+              setForm({ ...EMPTY_TARGET, kind: mode, path: ctx.node === 'root' ? 'B.Service' : ctx.node });
+              setErr(''); setModal({ kind: 'target' });
+            }}>🖥 이 폴더에 대상 추가</button>
+            {ctx.targetId && (
+              <div className="pc-ctx-sub-wrap" onMouseEnter={() => setSubOpen(999)} onMouseLeave={() => setSubOpen(-1)}>
+                <button className="pc-ctx-item">🧪 이 대상에 점검 추가<span className="pc-ctx-ar">▸</span></button>
+                {subOpen === 999 && (
+                  <div className="pc-ctx pc-ctx-sub">
+                    {ADD_MENU.map((g, gi) => (
+                      <div key={g.label} className="pc-ctx-sub-wrap"
+                        onMouseEnter={() => setSubOpen(1000 + gi)} onMouseLeave={() => setSubOpen(999)}>
+                        <button className="pc-ctx-item">{g.label}<span className="pc-ctx-ar">▸</span></button>
+                        {subOpen === 1000 + gi && (
+                          <div className="pc-ctx pc-ctx-sub">
+                            {g.items.map((it) => (
+                              <button key={it.type} className="pc-ctx-item" onClick={() => {
+                                setCtx(null); setSubOpen(-1);
+                                setForm({ ...EMPTY_TEST, type: it.type, name: it.label.split(' (')[0] });
+                                setErr(''); setModal({ kind: 'test', targetId: ctx.targetId });
+                              }}>{it.label}</button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                    <div className="pc-ctx-sep" />
+                    <div className="pc-ctx-cap">다음 단계 예정</div>
+                    {ADD_MENU_PLANNED.map((t) => <div key={t} className="pc-ctx-item dim">{t}<span className="pc-ctx-tag">2단계</span></div>)}
+                  </div>
+                )}
+              </div>
+            )}
+            <div className="pc-ctx-sep" />
+          </>}
+          <div className="pc-ctx-cap">하위 폴더 정렬</div>
+          <button className={`pc-ctx-item${sortMode === 'name' ? ' on' : ''}`} onClick={() => { setCtx(null); setSortMode('name'); }}>🔤 이름순</button>
+          <button className={`pc-ctx-item${sortMode !== 'name' ? ' on' : ''}`} onClick={() => { setCtx(null); setSortMode('manual'); }}>🕘 등록순</button>
+          {canEdit && ctx.node !== 'root' && !ctx.targetId && <>
+            <div className="pc-ctx-sep" />
+            <button className="pc-ctx-item" onClick={() => { const p = ctx.node; setCtx(null); renameFolderAt(p); }}>✎ 폴더 이름 변경</button>
+            <button className="pc-ctx-item danger" onClick={() => { const p = ctx.node; setCtx(null); deleteFolderAt(p); }}>🗑 폴더 삭제</button>
+          </>}
+        </div>
+      )}
+
+      {logCfg && (
+        <div className="pc-overlay" onClick={() => setLogCfg(null)}>
+          <div className="pc-modal" style={{ width: 'min(600px, 94vw)' }} onClick={(e) => e.stopPropagation()}>
+            <div className="pc-modal-head"><b>⚙ 점검 로그 설정 (CSV)</b><button className="pc-x" onClick={() => setLogCfg(null)}>✕</button></div>
+            <div className="pc-form">
+              <div className="pc-lrow"><span>로그 기록</span>
+                <div className="pc-seg">
+                  <button className={`pc-chip${logCfg.enabled ? ' on' : ''}`} onClick={() => setLogCfg({ ...logCfg, enabled: true })}>사용</button>
+                  <button className={`pc-chip${!logCfg.enabled ? ' on' : ''}`} onClick={() => setLogCfg({ ...logCfg, enabled: false })}>중지</button>
+                </div></div>
+              <div className="pc-lrow"><span>기록 대상</span>
+                <div className="pc-seg">
+                  <button className={`pc-chip${logCfg.mode === 'all' ? ' on' : ''}`} onClick={() => setLogCfg({ ...logCfg, mode: 'all' })}>모든 결과</button>
+                  <button className={`pc-chip${logCfg.mode === 'changes' ? ' on' : ''}`} onClick={() => setLogCfg({ ...logCfg, mode: 'changes' })}>상태 변화만</button>
+                </div></div>
+              <div className="pc-lrow"><span>파일 분할 단위</span>
+                <div className="pc-seg">
+                  {(data?.rotateUnits || ['hour', 'day', 'week', 'month', 'quarter']).map((u) => (
+                    <button key={u} className={`pc-chip${logCfg.rotate === u ? ' on' : ''}`} onClick={() => setLogCfg({ ...logCfg, rotate: u })}>
+                      {(data?.rotateLabels || {})[u] || u}</button>
+                  ))}
+                </div></div>
+              <div className="pc-lrow"><span>보관 파일 수</span><input className="pc-input" style={{ maxWidth: 110 }} value={logCfg.keepFiles}
+                onChange={(e) => setLogCfg({ ...logCfg, keepFiles: e.target.value })} /></div>
+              <div className="pc-lrow"><span>파일 최대 크기(MB)</span><input className="pc-input" style={{ maxWidth: 110 }} value={logCfg.maxFileMB}
+                onChange={(e) => setLogCfg({ ...logCfg, maxFileMB: e.target.value })} /></div>
+              <div className="pc-lrow"><span>전체 상한(MB, 0=무제한)</span><input className="pc-input" style={{ maxWidth: 130 }} value={logCfg.maxTotalMB}
+                onChange={(e) => setLogCfg({ ...logCfg, maxTotalMB: e.target.value })} /></div>
+              <div className="pc-note">분할 단위 × 보관 수 = 실질 보관 기간. 한 파일이 최대 크기를 넘으면 같은 구간에서 -p02 로 이어 씁니다.
+                CSV 는 UTF-8 BOM 이라 엑셀에서 바로 열립니다.</div>
+              <div className="pc-logfiles">
+                <div>저장 위치: <b>{logCfg.dir}</b></div>
+                <div>파일 {logCfg.fileCount}개 · 합계 {(logCfg.totalBytes / 1048576).toFixed(1)} MB
+                  {logCfg.stats && <> · 기록 {logCfg.stats.written?.toLocaleString?.() || 0}행
+                    {logCfg.stats.dropped ? ` · 폐기 ${logCfg.stats.dropped}행` : ''}
+                    {logCfg.stats.buffered ? ` · 대기 ${logCfg.stats.buffered}행` : ''}</>}</div>
+                {(logCfg.files || []).slice(0, 8).map((f) => (
+                  <div key={f.name}>
+                    <a href={`/api/svcmon/log/files/${encodeURIComponent(f.name)}`} className="pc-dl">⤓ {f.name}</a>
+                    <span> · {(f.sizeBytes / 1048576).toFixed(2)} MB</span>
+                  </div>
+                ))}
+                {(logCfg.files || []).length > 8 && <div>… 외 {logCfg.files.length - 8}개</div>}
+              </div>
+              <div className="pc-modal-actions">
+                <button className="pc-btn" onClick={() => setLogCfg(null)}>닫기</button>
+                <button className="pc-btn accent" disabled={busy} onClick={saveLogSettings}>{busy ? '저장 중…' : '저장'}</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {detail && (
         <div className="pc-overlay" onClick={() => setDetail(null)}>
