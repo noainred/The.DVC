@@ -62,6 +62,8 @@ import { startLogQueryWorker } from './agent/logQueryWorker.js';
 import { startCaptureWorker } from './agent/captureWorker.js';
 import { startCaptureMonitor } from './net/monitor.js';
 import { pingRouter } from './routes/ping.js';
+import { svcmonRouter } from './routes/svcmon.js';
+import { startSvcmonPoller } from './svcmon/poller.js';
 import { startPingMonitor } from './ping/monitor.js';
 import { startLoginMonitor } from './security/loginMonitor.js';
 import { startGuestScanScheduler } from './security/guestScanScheduler.js';
@@ -127,6 +129,7 @@ app.use('/api/upgrade', authMiddleware, requireEnrolled, upgradeRouter); // admi
 app.use('/api/admin', authMiddleware, requireEnrolled, auditMiddleware, adminRouter);     // admin-gated vCenter management
 app.use('/api/remote', authMiddleware, requireEnrolled, auditMiddleware, remoteRouter);   // remote access (HAProxy/SSH/RDP)
 app.use('/api/insights', authMiddleware, requireEnrolled, insightsRouter); // FinOps·이상탐지·예측·보안·토폴로지·인시던트·ChatOps
+app.use('/api/svcmon', authMiddleware, requireEnrolled, svcmonRouter);   // 성능점검(HostMonitor식 서비스 모니터링)
 app.use('/api/ping', authMiddleware, requireEnrolled, pingRouter);       // 네트워크 Ping 모니터링(조회=인증, 대상관리=관리자)
 app.use('/api', authMiddleware, requireEnrolled, api);                   // protected resource endpoints
 
@@ -169,7 +172,7 @@ const stagger = [
   startIdracPoller, startIdracScanPoller, startNsxPoller, startAlertEngine, startMetricsSampler, startGpuGuestPoller, startPhysicalGpuPoller,
   startIpScanPoller, startIpScanAgent, startCollectorPuller, startAgentScanner, startIdracScanWorker, startInventoryPush,
   startGpuGuestPush, startGpuGuestConfigPull, startUsersConfigPull, startPingWorker, startConfigPush, startFleetPush, startBackupScheduler, startLogPoller, startLogQueryWorker, startCaptureWorker, startCaptureMonitor, startLoginMonitor, startGuestScanScheduler, startOsScanner,
-  startDbSizeSampler, startPingMonitor, startCertMonitor, startDailyReport,
+  startDbSizeSampler, startPingMonitor, startCertMonitor, startDailyReport, startSvcmonPoller,
 ];
 stagger.forEach((start, i) => setTimeout(() => { try { start(); } catch (e) { console.error('[start] 폴러 기동 실패:', e?.message); } }, i * 1500).unref?.());
 
