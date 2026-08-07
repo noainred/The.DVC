@@ -180,13 +180,23 @@ export default function SvcMonitor() {
   const dragRef = useRef(false);
   // 우클릭 컨텍스트 메뉴 — { x, y, node:'root'|path, targetId? } · 계단식 서브메뉴 인덱스
   const [ctx, setCtx] = useState(null);
-  const [subOpen, setSubOpen] = useState(-1);
+  // 서브메뉴 상태는 단계별로 분리해야 한다 — 변수 하나로 관리하면 3단계에 진입하는 순간
+  // 2단계 조건이 거짓이 되어 부모 메뉴가 언마운트되고 커서 밑에서 메뉴가 사라진다(v2.238 수정).
+  const [subL2, setSubL2] = useState(false);   // '이 대상에 점검 추가' 열림
+  const [subL3, setSubL3] = useState(-1);      // 열린 카테고리 인덱스
+  const closeSubs = () => { setSubL2(false); setSubL3(-1); };
+  const subTimer = useRef(null);               // 메뉴 사이 이동 중 깜빡임 방지(닫기 지연)
+  const holdOpen = (fn) => { if (subTimer.current) { clearTimeout(subTimer.current); subTimer.current = null; } fn(); };
+  const delayClose = (fn) => {
+    if (subTimer.current) clearTimeout(subTimer.current);
+    subTimer.current = setTimeout(() => { fn(); subTimer.current = null; }, 160);
+  };
   const [logCfg, setLogCfg] = useState(null);   // 로그 설정 모달 데이터
 
   // 컨텍스트 메뉴는 바깥 클릭·ESC·스크롤로 닫는다.
   useEffect(() => {
     if (!ctx) return undefined;
-    const close = () => { setCtx(null); setSubOpen(-1); };
+    const close = () => { setCtx(null); closeSubs(); };
     const onKey = (e) => { if (e.key === 'Escape') close(); };
     window.addEventListener('click', close);
     window.addEventListener('keydown', onKey);
@@ -195,6 +205,7 @@ export default function SvcMonitor() {
       window.removeEventListener('click', close);
       window.removeEventListener('keydown', onKey);
       window.removeEventListener('resize', close);
+      if (subTimer.current) { clearTimeout(subTimer.current); subTimer.current = null; }
     };
   }, [ctx]);
 
@@ -384,13 +395,13 @@ export default function SvcMonitor() {
           </div>
           <div className="pc-tree-body">
             <div className={`pc-tree-row${sel === '' ? ' sel' : ''}`} onClick={() => setSel('')}
-              onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setSel(''); setCtx({ x: e.clientX, y: e.clientY, node: 'root' }); setSubOpen(-1); }}>
+              onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setSel(''); setCtx({ x: e.clientX, y: e.clientY, node: 'root' }); closeSubs(); }}>
               <span className="pc-tog">−</span><span className="pc-dot pc-off" />
               <span className={`pc-tree-label${sel === '' ? ' on' : ''}`}>Root</span>
             </div>
             <TreeRows node={tree} depth={0} sel={sel} setSel={setSel} expanded={expanded} q={treeQ.trim().toLowerCase()}
               toggle={(id) => setExpanded((e) => ({ ...e, [id]: e[id] === false }))}
-              onCtx={(c) => { setCtx(c); setSubOpen(-1); }} />
+              onCtx={(c) => { setCtx(c); closeSubs(); }} />
             {targets.length === 0 && <div className="pc-empty" style={{ padding: 24 }}>
               등록된 {mode === 'service' ? '서비스' : '대상'}이 없습니다.{canEdit ? ' ＋ Add 로 등록하세요.' : ' 관리자에게 요청하세요.'}</div>}
           </div>
@@ -481,19 +492,22 @@ export default function SvcMonitor() {
               setErr(''); setModal({ kind: 'target' });
             }}>🖥 이 폴더에 대상 추가</button>
             {ctx.targetId && (
-              <div className="pc-ctx-sub-wrap" onMouseEnter={() => setSubOpen(999)} onMouseLeave={() => setSubOpen(-1)}>
+              <div className="pc-ctx-sub-wrap"
+                onMouseEnter={() => holdOpen(() => setSubL2(true))}
+                onMouseLeave={() => delayClose(closeSubs)}>
                 <button className="pc-ctx-item">🧪 이 대상에 점검 추가<span className="pc-ctx-ar">▸</span></button>
-                {subOpen === 999 && (
+                {subL2 && (
                   <div className="pc-ctx pc-ctx-sub">
                     {ADD_MENU.map((g, gi) => (
                       <div key={g.label} className="pc-ctx-sub-wrap"
-                        onMouseEnter={() => setSubOpen(1000 + gi)} onMouseLeave={() => setSubOpen(999)}>
+                        onMouseEnter={() => holdOpen(() => { setSubL2(true); setSubL3(gi); })}
+                        onMouseLeave={() => delayClose(() => setSubL3(-1))}>
                         <button className="pc-ctx-item">{g.label}<span className="pc-ctx-ar">▸</span></button>
-                        {subOpen === 1000 + gi && (
+                        {subL3 === gi && (
                           <div className="pc-ctx pc-ctx-sub">
                             {g.items.map((it) => (
                               <button key={it.type} className="pc-ctx-item" onClick={() => {
-                                setCtx(null); setSubOpen(-1);
+                                setCtx(null); closeSubs();
                                 setForm({ ...EMPTY_TEST, type: it.type, name: it.label.split(' (')[0] });
                                 setErr(''); setModal({ kind: 'test', targetId: ctx.targetId });
                               }}>{it.label}</button>
