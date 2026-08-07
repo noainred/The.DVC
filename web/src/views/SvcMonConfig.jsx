@@ -3,6 +3,7 @@ import { getCurrentUser } from '../api.js';
 import CsvTab from './svcmon/CsvTab.jsx';
 import TemplateTab from './svcmon/TemplateTab.jsx';
 import BulkTab from './svcmon/BulkTab.jsx';
+import AssignTab from './svcmon/AssignTab.jsx';
 
 /**
  * 성능점검 설정 — 특수 기능 > '성능점검 설정' 카드로 들어온다.
@@ -20,6 +21,7 @@ const TABS = [
   { k: 'tpl', label: '점검 템플릿', desc: '서버 유형별 점검 묶음을 정의하고 대상에 한꺼번에 적용합니다.' },
   { k: 'bulk', label: '대량 자동등록', desc: '이름 규칙({n})과 IP 범위로 대상을 만들고 템플릿을 자동 할당합니다.' },
   { k: 'csv', label: '가져오기 · 내보내기', desc: 'CSV 로 대상·점검을 한꺼번에 등록하거나 현재 목록을 내려받습니다.' },
+  { k: 'assign', label: '엣지 배정', desc: '어느 엣지가 어느 대상을 점검할지 배정합니다. 엣지가 받아 적용하고 결과를 보고하면 활성이 됩니다.' },
 ];
 
 /** 트리 우클릭에서 넘어온 1회용 프리필(경로·구분). 읽고 바로 지운다. */
@@ -59,6 +61,7 @@ export default function SvcMonConfig() {
       {tab === 'tpl' && <TemplateTab canEdit={canEdit} />}
       {tab === 'bulk' && <BulkTab canEdit={canEdit} prefill={prefill?.spec || null} />}
       {tab === 'csv' && <CsvTab canEdit={canEdit} />}
+      {tab === 'assign' && <AssignTab canEdit={canEdit} />}
     </div>
   );
 }

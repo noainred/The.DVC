@@ -18,6 +18,7 @@
  */
 
 import { parentPort, workerData } from 'node:worker_threads';
+import { pingProbeMode } from '../util/ping.js';
 import { runCheck } from './checker.js';
 
 const SOCK_LIMIT = Math.max(1, Number(workerData?.sockLimit) || 256);
@@ -53,7 +54,10 @@ parentPort.on('message', async ({ id, tests }) => {
       }
     });
   }));
-  parentPort.postMessage({ id, results });
+  // ping 판정 방식은 **워커 안에서만** 관측된다(CLI 부재 플래그가 워커 모듈 스코프다).
+  // 메인 스레드에서 읽으면 항상 'unknown' 이므로 결과와 함께 올려 보낸다 — 엣지 위임에서
+  // 중앙이 '이 엣지의 ping 은 실제로는 TCP 연결 판정'임을 알아야 한다.
+  parentPort.postMessage({ id, results, pingMode: pingProbeMode() });
 });
 
 process.on('uncaughtException', (e) => console.error('[svcmon:worker] uncaught:', e?.message));
