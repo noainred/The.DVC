@@ -282,3 +282,94 @@ test('planBulkTargets: 저장하지 않고 커밋과 같은 판정을 낸다', (
   assert.equal(store.listTargets().length, before, '미리보기는 저장소를 바꾸지 않는다');
   assert.equal(store.storeRevision(), rev, '리비전도 그대로여야 폴러가 인덱스를 재구성하지 않는다');
 });
+
+/* ── 폴러 공평 선정 / 상태 구분 ── */
+test('capacity workerCount 는 pool.js 와 같은 식(os.cpus 기반)이어야 한다', async () => {
+  const prev = process.env.SVCMON_WORKERS;
+  delete process.env.SVCMON_WORKERS;
+  const os = await import('node:os');
+  const expected = Math.max(1, Math.min(4, Math.max(1, os.cpus().length - 1)));
+  assert.equal(capacity.workerCount(), expected,
+    'pool 은 os.cpus()-1(최대 4)로 워커를 만든다 — 다른 식을 쓰면 처리량을 과대/과소 평가한다');
+  process.env.SVCMON_WORKERS = prev ?? '0';
+});
+
+test('폴러 선정은 원형 커서 — 상한을 넘겨도 뒤쪽이 굶지 않는다(시뮬레이션)', () => {
+  // poller.js sweep 의 선정 로직과 같은 알고리즘. 0번부터만 훑으면 뒤쪽이 영구히 실행되지
+  // 않는다(실측: 15만 항목·주기 60초·천장 800/s → 1시간 동안 68%가 한 번도 안 돎).
+  const N = 6000;
+  const MAX_PER_TICK = 400;
+  const TICK = 5000;
+  const INTERVAL = 60;
+  const run = (circular) => {
+    const nextDue = new Array(N).fill(0);
+    const ran = new Array(N).fill(0);
+    let cursor = 0;
+    let now = 0;
+    for (let tick = 0; tick < 720; tick += 1) {
+      now += TICK;
+      const due = [];
+      if (circular) {
+        let i = cursor >= N ? 0 : cursor;
+        for (let s = 0; s < N && due.length < MAX_PER_TICK; s += 1) {
+          if (nextDue[i] <= now) due.push(i);
+          i = i + 1 === N ? 0 : i + 1;
+        }
+        cursor = i;
+      } else {
+        for (let i = 0; i < N && due.length < MAX_PER_TICK; i += 1) {
+          if (nextDue[i] <= now) due.push(i);
+        }
+      }
+      for (const i of due) { nextDue[i] = now + INTERVAL * 1000; ran[i] += 1; }
+    }
+    return ran.filter((x) => x === 0).length;
+  };
+  const starved = run(false);
+  const fair = run(true);
+  // 천장(400/틱 ÷ 5초 = 80/s) × 주기 60초 = 4,800개만 소화 가능 → 나머지 1,200개가 굶는다.
+  // 굶는 수가 '앞에서부터 소화 가능한 만큼'과 정확히 일치하는 것이 이 결함의 특징이다
+  // (모두의 주기가 늘어나는 게 아니라 뒤쪽만 0회).
+  assert.equal(starved, N - (MAX_PER_TICK / (TICK / 1000)) * INTERVAL,
+    `0번부터 훑으면 소화 못한 뒤쪽이 정확히 굶어야 한다(실제 ${starved}/${N})`);
+  assert.equal(fair, 0, `원형 커서는 모든 항목을 최소 1회 실행해야 한다(안 돈 항목 ${fair}개)`);
+});
+
+test('상태 판정: 중지 · 점검대기 · 갱신안됨 을 서로 구분한다', async () => {
+  const st = await import('../src/svcmon/status.js');
+  const now = 1_000_000_000;
+  const results = new Map();
+  const T = { enabled: true };
+  const X = { id: 'x1', enabled: true, intervalSec: 60 };
+
+  // 중지는 의도적 설정이다
+  assert.equal(st.testState({ enabled: false }, X, results, now), 'disabled');
+  assert.equal(st.testState(T, { ...X, enabled: false }, results, now), 'disabled');
+
+  // 사용 중인데 결과가 없으면 '중지'가 아니라 '점검 대기'다 — 이 둘을 합치면 감시 공백이
+  // 정상 설정으로 위장된다(폴러 과부하 시 실제로 그 상태가 대량 발생했다).
+  assert.equal(st.testState(T, X, results, now), 'pending');
+
+  // 방금 갱신된 결과는 그 상태 그대로
+  results.set('x1', { status: 'ok', ts: now - 5_000 });
+  assert.equal(st.testState(T, X, results, now), 'ok');
+
+  // 주기의 3배를 넘겨 갱신되지 않으면 stale — 'ok' 를 계속 보여주면 한 시간 전 상태가
+  // 현재 상태로 표시된다.
+  results.set('x1', { status: 'ok', ts: now - 60_000 * 3 - 1 });
+  assert.equal(st.testState(T, X, results, now), 'stale');
+
+  // 주기가 짧아도 하한(60초) 안에서는 stale 로 보지 않는다(정상 지터 오탐 방지)
+  const fast = { id: 'x2', enabled: true, intervalSec: 10 };
+  results.set('x2', { status: 'ok', ts: now - 45_000 });
+  assert.equal(st.testState(T, fast, results, now), 'ok');
+  results.set('x2', { status: 'ok', ts: now - 61_000 });
+  assert.equal(st.testState(T, fast, results, now), 'stale');
+
+  // 알 수 없는 status 는 ok 로 취급하지 않는다
+  results.set('x1', { status: '이상한값', ts: now });
+  assert.equal(st.testState(T, X, results, now), 'pending');
+
+  assert.deepEqual(Object.keys(st.emptySummary()).sort(),
+    ['bad', 'disabled', 'ok', 'pending', 'stale', 'total', 'warn']);
+});

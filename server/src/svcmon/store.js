@@ -170,7 +170,23 @@ export function validateEndpoint({ host, url }) {
   return reason ? `호스트 차단: ${reason}` : null;
 }
 
-function cleanTest(data, existing = null) {
+/**
+ * 점검 값 정제 — **이 함수가 유일한 정규화 경로다.** 템플릿·CSV·대량등록이 같은 규칙을
+ * 쓰도록 export 한다(과거 템플릿 모듈이 이 로직을 복사해 두었고, 그러면 bool 화이트리스트나
+ * 빈값 처리를 한쪽만 고친 날 조용히 갈라진다).
+ *
+ * @param {object} data
+ * @param {object|null} existing  있으면 미지정 필드를 승계한다(수정 경로).
+ * @param {{endpoints?:boolean}} opts
+ *   endpoints=false 면 url/server/record 의 SSRF·형식 검증을 건너뛴다. 템플릿 **항목 저장**
+ *   전용이다 — 항목은 `{host}` 같은 치환 변수를 담고 있어 아직 유효한 주소가 아니다.
+ *   치환 후 적용 단계에서는 반드시 endpoints=true 로 다시 통과시켜야 한다.
+ */
+export function normalizeTest(data, existing = null, opts = {}) {
+  return cleanTest(data, existing, opts);
+}
+
+function cleanTest(data, existing = null, { endpoints = true } = {}) {
   const base = existing || {};
   // 미지 유형을 ping 으로 폴백하면 'disk' 라고 적은 템플릿·CSV 가 전 대상에 ping 점검을
   // 만들면서 오류를 0건으로 보고한다. 목록 밖 값은 거부한다.
@@ -207,17 +223,19 @@ function cleanTest(data, existing = null) {
       throw new Error(`${type} 점검은 ${f.label} 값이 필요합니다.`);
     }
   }
-  if (t.url) {
-    const err = validateEndpoint({ url: t.url });
-    if (err) throw new Error(err);
-  }
-  // server/record 도 목적지가 된다(dns 는 server 를 네임서버로, ntp 는 server 로 질의).
-  // 대상 host 만 SSRF 가드를 태우면 이 두 필드로 루프백·메타데이터 주소를 그대로 찍을 수 있다.
-  for (const [k, v] of [['server', t.server], ['record', t.record]]) {
-    if (!v) continue;
-    if (!SAFE_HOST.test(v) || v.startsWith('-')) throw new Error(`${k} 형식이 올바르지 않습니다.`);
-    const err = validateEndpoint({ host: v });
-    if (err) throw new Error(`${k}: ${err}`);
+  if (endpoints) {
+    if (t.url) {
+      const err = validateEndpoint({ url: t.url });
+      if (err) throw new Error(err);
+    }
+    // server/record 도 목적지가 된다(dns 는 server 를 네임서버로, ntp 는 server 로 질의).
+    // 대상 host 만 SSRF 가드를 태우면 이 두 필드로 루프백·메타데이터 주소를 그대로 찍을 수 있다.
+    for (const [k, v] of [['server', t.server], ['record', t.record]]) {
+      if (!v) continue;
+      if (!SAFE_HOST.test(v) || v.startsWith('-')) throw new Error(`${k} 형식이 올바르지 않습니다.`);
+      const err = validateEndpoint({ host: v });
+      if (err) throw new Error(`${k}: ${err}`);
+    }
   }
   return compact(t);
 }
