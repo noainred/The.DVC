@@ -20,6 +20,9 @@ const STATUS = {
   warn: { label: 'Warning', cls: 'pc-warn' },
   bad: { label: 'No answer', cls: 'pc-bad' },
   disabled: { label: 'Disabled', cls: 'pc-off' },
+  // '중지'와 구분해야 하는 두 상태 — 감시 공백을 의도적 중지로 보이게 하면 안 된다.
+  pending: { label: '점검 대기', cls: 'pc-pending' },
+  stale: { label: '갱신 안 됨', cls: 'pc-stale' },
   none: { label: '—', cls: 'pc-off' },
 };
 const METHOD = {
@@ -103,7 +106,10 @@ const TYPE_META = {
     fields: [F('port', '포트', { ph: '389' })] },
 };
 
-const statusOf = (t, x) => (t.enabled === false || x.enabled === false) ? 'disabled' : (x.result?.status || 'none');
+// 서버가 계산한 state 를 그대로 쓴다 — 낡음 판정 기준(주기×3)을 화면에 또 두면 갈라지고,
+// 브라우저 시계가 틀린 경우 판정이 달라진다. state 가 없는 응답(구버전)만 폴백한다.
+const statusOf = (t, x) => x.state
+  || ((t.enabled === false || x.enabled === false) ? 'disabled' : (x.result?.status || 'pending'));
 const methodText = (t, x) => {
   const base = METHOD[x.type] || x.type;
   if (x.type === 'tcp') return `${base} ${x.port || ''}`.trim();
@@ -137,11 +143,12 @@ function buildTree(targets, folders = [], sortMode = 'manual') {
 }
 function statsOf(node) {
   let alarms = 0, worst = 'none';
-  const rank = { bad: 3, warn: 2, ok: 1, none: 0, disabled: 0 };
+  // stale(갱신 안 됨)도 조치가 필요한 상태다 — 알람 수에 포함하고 최악 상태 순위에도 넣는다.
+  const rank = { bad: 4, stale: 3, warn: 2, ok: 1, pending: 0, none: 0, disabled: 0 };
   const visit = (n) => {
     for (const t of n.targets) for (const x of t.tests) {
       const st = statusOf(t, x);
-      if (st === 'bad' || st === 'warn') alarms += 1;
+      if (st === 'bad' || st === 'warn' || st === 'stale') alarms += 1;
       if (rank[st] > rank[worst]) worst = st;
     }
     for (const c of n.children.values()) visit(c);
@@ -313,12 +320,14 @@ export default function SvcMonitor() {
       if (filter === 'OK' && st !== 'ok') return false;
       if (filter === 'WARN' && st !== 'warn') return false;
       if (filter === 'FAIL' && st !== 'bad') return false;
-      if (filter === 'DISABLED' && !['disabled', 'none'].includes(st)) return false;
+      if (filter === 'DISABLED' && st !== 'disabled') return false;
+      if (filter === 'PENDING' && st !== 'pending') return false;
+      if (filter === 'STALE' && st !== 'stale') return false;
       return !q || x.name.toLowerCase().includes(q) || methodText(t, x).toLowerCase().includes(q);
     });
     if (sort === 'name') tests = [...tests].sort((a, b) => a.name.localeCompare(b.name));
     if (sort === 'status') {
-      const rank = { bad: 0, warn: 1, ok: 2, disabled: 3, none: 3 };
+      const rank = { bad: 0, stale: 1, warn: 2, pending: 3, ok: 4, disabled: 5, none: 5 };
       tests = [...tests].sort((a, b) => rank[statusOf(t, a)] - rank[statusOf(t, b)]);
     }
     return { target: t, tests };
@@ -428,6 +437,25 @@ export default function SvcMonitor() {
     try { await downloadFile(`/svcmon/log/files/${encodeURIComponent(name)}`, name); }
     catch (e) { window.alert(e.message); }
   };
+  const exportFolderCsv = async (p) => {
+    const qs = new URLSearchParams({ kind: mode });
+    if (p) qs.set('path', p);
+    try { await downloadFile(`/svcmon/targets/export.csv?${qs}`); }
+    catch (e) { window.alert(e.message); }
+  };
+  /**
+   * 성능점검 설정 화면으로 이동 — 경로·구분을 1회용 프리필로 넘긴다.
+   * 딥링크 URL 로 넘기지 않는 이유: 도구 해시 파서가 `#/tools/<key>` 까지만 읽고
+   * openTool 이 해시를 통째로 덮어써, 전 도구 공용 경로를 건드려야 한다.
+   */
+  const goToConfig = (tab, spec) => {
+    try {
+      sessionStorage.setItem('svcmon.prefill', JSON.stringify({
+        tab, spec: { kind: spec.kind, path: spec.path },
+      }));
+    } catch { /* 프리필 실패는 무시 — 화면은 열린다 */ }
+    window.location.hash = '#/tools/svcmon-config';
+  };
   const doReset = () => { setFilter('ALL'); setTestQ(''); setTreeQ(''); setSort('none'); setDetail(null); };
   const removeSel = async () => {
     if (!selTarget) return;
@@ -457,6 +485,9 @@ export default function SvcMonitor() {
           { k: 'warn', label: '경고', v: summary.warn, note: '임계치 근접', cls: 'a' },
           { k: 'bad', label: '실패', v: summary.bad, note: 'No answer · Error', cls: 'r' },
           { k: 'off', label: '중지', v: summary.disabled, note: 'Disabled', cls: 'o' },
+          // 아래 둘은 '중지'와 합치면 감시 공백이 정상 설정으로 보인다(폴러 과부하 시 뒤쪽 항목이 굶는다).
+          { k: 'stale', label: '갱신 안 됨', v: summary.stale ?? 0, note: '주기 초과', cls: 'w' },
+          { k: 'pending', label: '점검 대기', v: summary.pending ?? 0, note: '아직 실행 안 됨', cls: 'o' },
         ].map((c) => (
           <div key={c.k} className={`pc-card ${c.cls}`}>
             <div className="pc-card-label">{c.label}</div>
@@ -507,7 +538,7 @@ export default function SvcMonitor() {
               onClick={() => { setCtx({ x: 0, y: 0, node: sel && !sel.startsWith('target:') ? sel : 'root' }); setTimeout(newFolder, 0); }}>📁 폴더</button>
             <button className="pc-btn" title="점검 로그(CSV) 설정" onClick={openLogSettings}>⚙ 로그</button>
             <span className="pc-sep" />
-            {['ALL', 'OK', 'WARN', 'FAIL', 'DISABLED'].map((f) => (
+            {['ALL', 'OK', 'WARN', 'FAIL', 'STALE', 'PENDING', 'DISABLED'].map((f) => (
               <button key={f} className={`pc-chip${filter === f ? ' on' : ''}`} onClick={() => setFilter(f)}>{f}</button>
             ))}
             <input className="pc-input pc-search-right" placeholder="Test name 검색" value={testQ} onChange={(e) => setTestQ(e.target.value)} />
@@ -593,6 +624,22 @@ export default function SvcMonitor() {
                 openWizard(ctx.targetId, t?.name || '', null);
               }}>🧪 이 대상에 점검 추가<span className="pc-ctx-ar">▸</span></button>
             )}
+            {!ctx.targetId && <>
+              {/* 대량 등록의 최대 실수 원인은 경로 오타다(오타 경로가 조용히 새 폴더가 된다).
+                  우클릭한 폴더를 프리필해 그 실수를 구조적으로 없앤다. 프리필은 1회용. */}
+              <button className="pc-ctx-item" onClick={() => {
+                setCtx(null); closeSubs();
+                goToConfig('bulk', { kind: mode, path: ctx.node === 'root' ? '' : ctx.node });
+              }}>📦 이 폴더에 대량 등록…</button>
+              <button className="pc-ctx-item" onClick={() => {
+                setCtx(null); closeSubs();
+                exportFolderCsv(ctx.node === 'root' ? '' : ctx.node);
+              }}>⤓ 이 폴더 CSV 내보내기</button>
+              <button className="pc-ctx-item" onClick={() => {
+                setCtx(null); closeSubs();
+                goToConfig('tpl', { kind: mode, path: ctx.node === 'root' ? '' : ctx.node });
+              }}>🧩 이 폴더에 템플릿 적용…</button>
+            </>}
             <div className="pc-ctx-sep" />
           </>}
           <div className="pc-ctx-cap">하위 폴더 정렬</div>

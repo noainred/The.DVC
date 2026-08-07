@@ -21,6 +21,14 @@ import {
 import { TARGET_FIELDS, TEST_FIELDS, CSV_COLUMNS } from '../svcmon/testSchema.js';
 import { csvLines, parseTargetsCsv, sampleCsv, REQUIRED_COLUMNS } from '../svcmon/csvio.js';
 import { judgeCapacity, suggestIntervalSec } from '../svcmon/capacity.js';
+import { testState, emptySummary } from '../svcmon/status.js';
+import {
+  listTemplates, getTemplate, addTemplate, updateTemplate, duplicateTemplate,
+  deleteTemplate, applyTemplate, templateUsage, materializeForTarget,
+  MAX_TEMPLATES, MAX_ITEMS, SUBST_VARS,
+} from '../svcmon/templates.js';
+import { expandGenSpec } from '../svcmon/genspec.js';
+import { recordBatch, listBatches, rollbackBatch, deleteBatchRecord } from '../svcmon/batches.js';
 import { getResults, getLastSweep, runNow, pollerStats } from '../svcmon/poller.js';
 import { getLogSettings, setLogSettings, ROTATE_UNITS, ROTATE_LABEL } from '../svcmon/logsettings.js';
 import { logStatus, logFilePath, pruneOld, logStats } from '../svcmon/csvlog.js';
@@ -30,8 +38,8 @@ export const svcmonRouter = express.Router();
 const canEdit = requireRole('admin', 'operator');
 const adminOnly = requireRole('admin');
 
-const statusOf = (t, x, results) => (t.enabled === false || x.enabled === false)
-  ? 'disabled' : (results.get(x.id)?.status || 'none');
+// 상태 판정·요약 키는 svcmon/status.js 하나에서만 정의한다(라우트·화면·테스트 공용).
+const statusOf = (t, x, results, now) => testState(t, x, results, now);
 
 /** 트리 + 대상 + 점검 + 최근 결과 + 요약. path/limit 으로 범위를 좁힐 수 있다. */
 svcmonRouter.get('/state', (req, res) => {
@@ -41,17 +49,17 @@ svcmonRouter.get('/state', (req, res) => {
   const limit = Math.min(2000, Math.max(1, Number(req.query.limit) || 300));
 
   const all = listTargetsCopy();
+  const now = Date.now();
   // 요약은 항상 전체(또는 kind 전체) 기준 — 화면 상단 KPI 가 페이징에 흔들리지 않게.
-  const summary = { total: 0, ok: 0, warn: 0, bad: 0, disabled: 0 };
+  // pending/stale 을 disabled 와 **합치지 않는다**(감시 공백이 의도적 중지로 위장된다).
+  const summary = emptySummary();
   for (const t of all) {
     if (kind && t.kind !== kind) continue;
     for (const x of t.tests) {
       summary.total += 1;
-      const st = statusOf(t, x, results);
-      if (st === 'ok') summary.ok += 1;
-      else if (st === 'warn') summary.warn += 1;
-      else if (st === 'bad') summary.bad += 1;
-      else summary.disabled += 1;
+      const st = statusOf(t, x, results, now);
+      if (summary[st] !== undefined) summary[st] += 1;
+      else summary.pending += 1;
     }
   }
 
@@ -59,7 +67,12 @@ svcmonRouter.get('/state', (req, res) => {
     && (!scope || t.path === scope || t.path.startsWith(`${scope}\\`)));
   const targets = inScope.slice(0, limit).map((t) => ({
     ...t,
-    tests: t.tests.map((x) => ({ ...x, result: results.get(x.id) || null })),
+    tests: t.tests.map((x) => {
+      const r = results.get(x.id) || null;
+      // 화면이 나이를 직접 계산하지 않게 서버가 실어 보낸다(클라이언트 시계는 틀릴 수 있다).
+      const ageMs = r?.ts ? now - r.ts : null;
+      return { ...x, result: r ? { ...r, ageMs } : null, state: statusOf(t, x, results, now) };
+    }),
   }));
 
   res.json({
@@ -78,7 +91,7 @@ svcmonRouter.get('/state', (req, res) => {
 });
 
 /** 운영 진단 — 워커/폴러/로그 라이터 상태(부하 점검용). */
-svcmonRouter.get('/diag', (req, res) => {
+svcmonRouter.get('/diag', canEdit, (req, res) => {
   res.json({ poller: pollerStats(), log: logStats(), targets: listTargetsCopy().length, tests: totalTests() });
 });
 
@@ -352,6 +365,198 @@ svcmonRouter.post('/targets/import', canEdit, (req, res) => {
   res.status(201).json({ ...payload, ...r, batch });
 });
 
+/* ── 점검 템플릿 ── */
+
+svcmonRouter.get('/templates', (req, res) => {
+  const items = listTemplates().map((t) => ({ ...t, usage: templateUsage(t.id) }));
+  res.json({ templates: items, limits: { maxTemplates: MAX_TEMPLATES, maxItems: MAX_ITEMS }, substVars: SUBST_VARS });
+});
+
+svcmonRouter.post('/templates', canEdit, (req, res) => {
+  try {
+    const t = addTemplate(req.body || {}, { user: req.user?.username });
+    logAudit({
+      user: req.user?.username, action: 'svcmon.template.add', target: t.name,
+      detail: `항목 ${t.items.length}${t.items.some((x) => x.insecure) ? ' · insecure=true' : ''}`,
+    });
+    res.status(201).json({ template: t });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+svcmonRouter.put('/templates/:id', canEdit, (req, res) => {
+  try {
+    const t = updateTemplate(req.params.id, req.body || {}, { user: req.user?.username });
+    if (!t) return res.status(404).json({ error: '템플릿을 찾을 수 없습니다.' });
+    logAudit({
+      user: req.user?.username, action: 'svcmon.template.update', target: t.name,
+      detail: `항목 ${t.items.length} · rev ${t.rev}${t.items.some((x) => x.insecure) ? ' · insecure=true' : ''}`,
+    });
+    res.json({ template: t });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+svcmonRouter.post('/templates/:id/duplicate', canEdit, (req, res) => {
+  try {
+    const t = duplicateTemplate(req.params.id, { user: req.user?.username });
+    if (!t) return res.status(404).json({ error: '템플릿을 찾을 수 없습니다.' });
+    logAudit({ user: req.user?.username, action: 'svcmon.template.add', target: t.name, detail: `복제 ← ${req.params.id}` });
+    res.status(201).json({ template: t });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+/** 삭제 — 이미 적용된 점검은 **남긴다**(태그도 유지). 감시를 끊지 않는 쪽이 안전하다. */
+svcmonRouter.delete('/templates/:id', canEdit, (req, res) => {
+  try {
+    const r = deleteTemplate(req.params.id);
+    if (!r.removed) return res.status(404).json({ error: '템플릿을 찾을 수 없습니다.' });
+    logAudit({
+      user: req.user?.username, action: 'svcmon.template.delete', target: req.params.id,
+      detail: `남은 점검 ${r.orphanTests} · 대상 ${r.orphanTargets}`,
+    });
+    res.json(r);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+svcmonRouter.get('/templates/:id/usage', canEdit, (req, res) => {
+  if (!getTemplate(req.params.id)) return res.status(404).json({ error: '템플릿을 찾을 수 없습니다.' });
+  res.json(templateUsage(req.params.id));
+});
+
+/** 적용 — `mode:'preview'` 는 저장하지 않는다. 커밋은 all-or-nothing. */
+svcmonRouter.post('/templates/:id/apply', canEdit, async (req, res) => {
+  const dryRun = req.body?.mode !== 'apply';
+  try {
+    const r = await applyTemplate(req.params.id, {
+      scope: req.body?.scope || {}, overwrite: !!req.body?.overwrite, dryRun,
+      user: req.user?.username,
+    });
+    if (!r) return res.status(404).json({ error: '템플릿을 찾을 수 없습니다.' });
+
+    // 적용 후 규모가 폴러 처리량을 넘는지 — 대량 적용은 CSV 가져오기와 같은 판정을 받는다.
+    const cur = [];
+    for (const t of listTargets()) { if (t.enabled !== false) for (const x of t.tests) cur.push(x); }
+    const capacity = judgeCapacity({ tests: cur, addedTests: [] });
+    const payload = {
+      mode: dryRun ? 'preview' : 'apply',
+      summary: { create: r.create, update: r.update, skip: r.skip, error: r.errorCount, rows: r.tests },
+      errors: (r.errors || []).slice(0, 300),
+      truncated: { errors: (r.errors || []).length > 300 },
+      sample: r.sample || [],
+      warnings: r.warnings || [],
+      kindMismatch: r.kindMismatch,
+      capacity,
+      committed: r.committed,
+      expectedCount: r.create + r.update,
+    };
+    if (dryRun) return res.json(payload);
+    if (!r.committed) return res.status(400).json({ ...payload, error: `오류 ${r.errorCount}건이 있어 적용하지 않았습니다.` });
+    if (r.saved === false) return res.status(500).json({ ...payload, error: '파일 저장에 실패했습니다(디스크·권한 확인).' });
+    const tpl = getTemplate(req.params.id);
+    logAudit({
+      user: req.user?.username, action: 'svcmon.template.apply', target: req.params.id,
+      detail: `${tpl?.name || ''} rev${tpl?.rev} · 추가 ${r.create} · 갱신 ${r.update} · 건너뜀 ${r.skip}${req.body?.overwrite ? ' · overwrite' : ''}`,
+    });
+    res.json(payload);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+/* ── 대량 자동등록 ── */
+
+/**
+ * 이름 규칙 + IP 범위로 대상을 생성한다. `mode:'preview'` 는 저장하지 않는다.
+ * 개수 불일치·IP 파싱 오류·차단 주소는 **전체 거부**한다 — 중간 오류 1건이 그 뒤 전 이름↔IP
+ * 매핑을 한 칸 밀어 전 대상이 엉뚱한 주소를 감시하게 된다.
+ */
+svcmonRouter.post('/targets/generate', canEdit, (req, res) => {
+  const spec = req.body?.spec || {};
+  const commit = req.body?.mode === 'apply';
+  const tplId = typeof spec.templateId === 'string' ? spec.templateId.trim() : '';
+  let tpl = null;
+  if (tplId) {
+    tpl = getTemplate(tplId);
+    if (!tpl) return res.status(400).json({ error: `템플릿을 찾을 수 없습니다: ${tplId}` });
+  }
+
+  // 템플릿 항목을 대상별로 실체화(치환 → 정제)한다. genspec 은 templates 를 import 하지 않고
+  // 이 콜백만 호출한다 — 순환 의존을 피하고 치환 책임을 한 곳(templates.js)에 둔다.
+  // 미치환 변수가 남거나 치환 결과가 SSRF 가드에 걸리면 여기서 throw 되어 그 행이 오류가 된다.
+  const genErrors = [];
+  const materialize = tpl
+    ? (target) => {
+      const r = materializeForTarget(tplId, target);
+      if (r.errors.length) genErrors.push(...r.errors.map((e) => `${target.name}: ${e}`));
+      return r.tests;
+    }
+    : null;
+
+  const ex = expandGenSpec(spec, materialize ? { materialize } : {});
+  if (genErrors.length) ex.errors.push(...genErrors);
+  if (ex.errors.length || ex.blocked.length) {
+    return res.status(400).json({
+      summary: { rows: ex.stats?.names || 0, create: 0, skip: 0, error: ex.errors.length },
+      errors: ex.errors.map((reason) => ({ row: 0, name: '', reason })),
+      blocked: ex.blocked, warnings: ex.warnings, stats: ex.stats, suggest: ex.suggest,
+      limits: LIMITS,
+      error: ex.errors[0] || `차단된 주소 ${ex.blocked.length}개가 있어 생성하지 않았습니다.`,
+    });
+  }
+
+  const dry = dryRunTargets(ex.rows);
+  const errors = dry.errors;
+  const payload = {
+    mode: commit ? 'apply' : 'preview',
+    summary: { rows: ex.rows.length, create: dry.create, skip: dry.skip, error: errors.length, newFolders: dry.newFolders, newTests: dry.newTests },
+    errors: errors.slice(0, 300),
+    truncated: { errors: errors.length > 300 },
+    warnings: ex.warnings, stats: ex.stats, blocked: [],
+    sample: dry.sample, after: dry.after, limits: LIMITS, capacity: dry.capacity,
+    expectedCount: dry.create,
+  };
+  if (!commit) return res.json(payload);
+
+  if (errors.length) return res.status(400).json({ ...payload, error: `오류 ${errors.length}건이 있어 등록하지 않았습니다.` });
+  if (dry.capacity.verdict === 'reject') return res.status(400).json({ ...payload, error: dry.capacity.reasons[0] });
+  if (typeof req.body?.expectedCount === 'number' && req.body.expectedCount !== dry.create) {
+    return res.status(409).json({ ...payload, error: '미리보기 이후 목록이 바뀌었습니다. 미리보기를 다시 확인하세요.' });
+  }
+  const batch = 'b-' + Math.random().toString(36).slice(2, 10);
+  const r = bulkAddTargets(ex.rows, { batch });
+  if (!r.committed) return res.status(400).json({ ...payload, ...r, error: '검증에 실패해 등록하지 않았습니다.' });
+  if (!r.saved) return res.status(500).json({ ...payload, ...r, error: '파일 저장에 실패했습니다(디스크·권한 확인).' });
+  recordBatch({
+    id: batch, createdBy: req.user?.username || '', source: 'generate',
+    kind: spec.kind || 'infra', path: spec.path || '', targets: r.added, tests: r.newTests, templateId: tplId,
+  });
+  logAudit({
+    user: req.user?.username, action: 'svcmon.target.generate',
+    detail: `batch=${batch} · 대상 ${r.added} · 점검 ${r.newTests}${tplId ? ` · ${tplId}` : ''} · 필요 ${dry.capacity.requiredPerSec}/s`,
+  });
+  res.status(201).json({ ...payload, ...r, batch });
+});
+
+/* ── 배치 이력 / 롤백 ── */
+
+svcmonRouter.get('/batches', canEdit, (req, res) => res.json({ batches: listBatches() }));
+
+svcmonRouter.post('/batches/:id/rollback', canEdit, (req, res) => {
+  const r = rollbackBatch(req.params.id, {
+    expectedCount: typeof req.body?.expectedCount === 'number' ? req.body.expectedCount : null,
+    user: req.user?.username,
+  });
+  if (r.error) return res.status(400).json(r);
+  logAudit({
+    user: req.user?.username, action: 'svcmon.target.batch.delete', target: req.params.id,
+    detail: `대상 ${r.removed} · 점검 ${r.tests}`,
+  });
+  res.json({ ...r, batches: listBatches() });
+});
+
+svcmonRouter.delete('/batches/:id', canEdit, (req, res) => {
+  if (!deleteBatchRecord(req.params.id)) return res.status(404).json({ error: '배치 기록을 찾을 수 없습니다.' });
+  logAudit({ user: req.user?.username, action: 'svcmon.batch.record.delete', target: req.params.id, detail: '이력만 삭제(대상 유지)' });
+  res.json({ ok: true, batches: listBatches() });
+});
+
 /* ── 로그 설정/파일 ── */
 svcmonRouter.get('/log', (req, res) => res.json(logStatus()));
 
@@ -368,12 +573,17 @@ svcmonRouter.put('/log', adminOnly, (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-/** CSV 다운로드 — 스트리밍(GB 파일을 메모리에 올리지 않는다). */
-svcmonRouter.get('/log/files/:name', (req, res) => {
+/**
+ * CSV 다운로드 — 스트리밍(GB 파일을 메모리에 올리지 않는다).
+ * 로그에는 전 대상의 호스트명·점검 결과가 들어 있어 사실상 인벤토리 내보내기다 —
+ * 조회 권한만으로 열어 두지 않고 편집 권한을 요구하고 감사에 남긴다.
+ */
+svcmonRouter.get('/log/files/:name', canEdit, (req, res) => {
   const p = logFilePath(req.params.name);
   if (!p) return res.status(404).json({ error: '로그 파일을 찾을 수 없습니다.' });
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="${req.params.name}"`);
+  logAudit({ user: req.user?.username, action: 'svcmon.log.download', target: req.params.name });
   fs.createReadStream(p).on('error', () => res.end()).pipe(res);
 });
 

@@ -24,6 +24,14 @@ const results = new Map();     // testId -> { status, reply, ms, ts, streak }
 const nextDue = new Map();     // testId -> 다음 실행 시각(ms)
 let index = [];                // [{ test, host, target }] — 평탄화된 실행 단위
 let indexRev = -1;
+/**
+ * 선정 커서 — 매 틱 index 0번부터 훑으면 만기가 틱 상한을 넘는 순간 **뒤쪽이 영구히 굶는다.**
+ * 시뮬레이션(720틱=1시간, 15만 항목·주기 60초·천장 800/s): 앞쪽 48,000개는 정확히 60초로 돌고
+ * **나머지 102,000개(68%)는 한 번도 실행되지 않았다.** '주기가 늘어난다'가 아니라 '뒤쪽은 안
+ * 돈다'였고, 실행되지 않은 항목은 결과가 없어 화면에서 '중지'로 집계됐다(= 감시 공백을
+ * 의도적 중지로 표시). 원형으로 이어 훑어 지연을 전체에 고르게 분산한다.
+ */
+let cursor = 0;
 let running = false;
 let lastSweepTs = 0;
 let lastSweepMs = 0;
@@ -74,12 +82,19 @@ async function sweep(force = false) {
   try {
     rebuildIndex();
     const now = Date.now();
+    // 커서에서 시작해 **원형으로** 훑는다 — 0번부터 훑으면 상한을 넘는 순간 뒤쪽이 굶는다.
     const due = [];
-    for (const item of index) {
-      if (force || (nextDue.get(item.test.id) ?? 0) <= now) {
-        due.push(item);
-        if (due.length >= MAX_PER_TICK) break;    // 상한 — 초과분은 다음 틱
+    const n = index.length;
+    if (n) {
+      if (cursor >= n) cursor = 0;
+      let i = cursor;
+      for (let scanned = 0; scanned < n && due.length < MAX_PER_TICK; scanned += 1) {
+        const item = index[i];
+        if (force || (nextDue.get(item.test.id) ?? 0) <= now) due.push(item);
+        i = i + 1 === n ? 0 : i + 1;
       }
+      // 다음 틱은 멈춘 위치에서 이어 간다(상한에 걸리지 않았으면 한 바퀴 돌아 제자리).
+      cursor = i;
     }
     if (!due.length) { lastSweepTs = now; return true; }
 
