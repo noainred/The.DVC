@@ -88,17 +88,166 @@ test('저장 파일 왕복 — 디바운스 flush 후 캐시를 비워도 유지
   assert.equal(store.listFolders().length, folders);
 });
 
-test('bulkAddTargets: 대량 등록 1회 저장 + 행별 오류 리포트', () => {
-  const rows = Array.from({ length: 300 }, (_, i) => ({
-    kind: 'infra', path: 'B.Service\\Bulk', name: `srv-${i}`, host: `10.20.${Math.floor(i / 254)}.${(i % 254) + 1}`,
-    tests: [{ name: 'Ping', type: 'ping', intervalSec: 60 }],
-  }));
+const bulkRows = (n, prefix = 'srv') => Array.from({ length: n }, (_, i) => ({
+  kind: 'infra', path: 'B.Service\\Bulk', name: `${prefix}-${i}`, host: `10.20.${Math.floor(i / 254)}.${(i % 254) + 1}`,
+  tests: [{ name: 'Ping', type: 'ping', intervalSec: 60 }],
+}));
+
+test('bulkAddTargets: 오류 1건이면 전체 커밋 없음(all-or-nothing)', () => {
+  const before = store.listTargets().length;
+  const rows = bulkRows(300);
   rows.push({ kind: 'infra', path: 'B.Service\\Bulk', name: 'bad', host: '127.0.0.1' }); // 루프백 → 거부
   const r = store.bulkAddTargets(rows);
-  assert.equal(r.added, 300);
+  assert.equal(r.committed, false);
+  assert.equal(r.added, 0);
   assert.equal(r.errors.length, 1);
   assert.match(r.errors[0].reason, /차단/);
+  assert.equal(store.listTargets().length, before, '실패한 배치는 한 건도 남기지 않는다');
+});
+
+test('bulkAddTargets: 정상 배치는 1회 저장 + atomic:false 는 오류 행만 건너뛴다', () => {
+  const r = store.bulkAddTargets(bulkRows(300));
+  assert.equal(r.committed, true);
+  assert.equal(r.added, 300);
+  assert.equal(r.newTests, 300);
   assert.ok(store.totalTests() >= 300);
+
+  const rows = bulkRows(2, 'partial');
+  rows.push({ kind: 'infra', path: 'B.Service\\Bulk', name: 'bad2', host: '127.0.0.1' });
+  const r2 = store.bulkAddTargets(rows, { atomic: false });
+  assert.equal(r2.committed, true);
+  assert.equal(r2.added, 2);
+  assert.equal(r2.errors.length, 1);
+});
+
+test('D6 bulkAddTargets: 같은 CSV 를 2회 가져와도 대상이 늘지 않는다(중복 검사)', () => {
+  const rows = bulkRows(5, 'dup');
+  const first = store.bulkAddTargets(rows);
+  assert.equal(first.added, 5);
+  const n = store.listTargets().length;
+  const second = store.bulkAddTargets(rows);
+  assert.equal(second.added, 0);
+  assert.equal(second.skipped.length, 5);
+  assert.match(second.skipped[0].reason, /중복/);
+  assert.equal(store.listTargets().length, n);
+  // 배치 안의 중복도 잡는다(같은 파일에 같은 행이 두 번)
+  const self = store.bulkAddTargets([...bulkRows(1, 'selfdup'), ...bulkRows(1, 'selfdup')]);
+  assert.equal(self.added, 1);
+  assert.equal(self.skipped.length, 1);
+});
+
+test('D1 빈 값은 기본값 — 하한으로 클램프되지 않는다(CSV 빈 셀 왕복)', () => {
+  const t = store.addTarget({ kind: 'infra', path: 'Z.Empty', name: 'empty-cells', host: '10.9.9.9' });
+  const x = store.addTest(t.id, {
+    name: '빈 셀', type: 'http', url: 'https://10.9.9.9/health',
+    intervalSec: '', expectStatus: '', warnMs: '', badMs: '', maxHops: '', warnDays: '', insecure: '',
+  });
+  assert.equal(x.intervalSec, 60, "빈 문자열이 하한 10 이 되면 부하가 6배가 된다");
+  assert.equal(x.expectStatus, undefined, '빈 셀이 100 이 되면 정상 200 응답이 영구 실패로 뒤집힌다');
+  assert.equal(x.warnMs, undefined);
+  assert.equal(x.badMs, undefined);
+  assert.equal(x.maxHops, undefined);
+  assert.equal(x.warnDays, 30);
+  assert.equal(x.insecure, false);
+  // 공백만 있는 셀도 같다
+  const y = store.addTest(t.id, { name: '공백 셀', type: 'trace', maxHops: '   ', intervalSec: ' ' });
+  assert.equal(y.maxHops, undefined);
+  assert.equal(y.intervalSec, 60);
+});
+
+test('D2 불리언은 화이트리스트 — 문자열 "false" 가 true 로 뒤집히지 않는다', () => {
+  const t = store.listTargets().find((x) => x.name === 'empty-cells');
+  const a = store.addTest(t.id, { name: 'tls-false', type: 'http', url: 'https://10.9.9.9/a', insecure: 'false', enabled: 'false' });
+  assert.equal(a.insecure, false, '"false" 를 참으로 보면 TLS 검증이 꺼진다');
+  assert.equal(a.enabled, false);
+  const b = store.addTest(t.id, { name: 'tls-true', type: 'http', url: 'https://10.9.9.9/b', insecure: '1', enabled: 'yes' });
+  assert.equal(b.insecure, true);
+  assert.equal(b.enabled, true);
+  const c = store.addTest(t.id, { name: 'tls-keep', type: 'http', url: 'https://10.9.9.9/c', insecure: '알수없음' });
+  assert.equal(c.insecure, false, '알 수 없는 값은 기본값 유지(조용한 반전 금지)');
+  // 대상 enabled 도 같은 규칙
+  const g = store.addTarget({ kind: 'infra', path: 'Z.Empty', name: 'off-target', host: '10.9.9.8', enabled: 'false' });
+  assert.equal(g.enabled, false);
+});
+
+test('D3 미지 유형/구분은 조용한 폴백이 아니라 오류', () => {
+  const t = store.listTargets().find((x) => x.name === 'empty-cells');
+  assert.throws(() => store.addTest(t.id, { name: 'x', type: 'disk' }), /알 수 없는 점검 유형/);
+  assert.throws(() => store.addTest(t.id, { name: 'x', type: 'diskfree' }), /알 수 없는 점검 유형/);
+  assert.throws(() => store.addTarget({ kind: 'Servicee', path: 'Z.Empty', name: 'k', host: '10.9.9.7' }), /알 수 없는 구분/);
+  // 대소문자만 다른 값은 정규화(엑셀 자동 대문자화 흡수) — 폴백이 아니라 같은 값이다
+  const up = store.addTest(t.id, { name: 'UPPER', type: 'TCP', port: 8080 });
+  assert.equal(up.type, 'tcp');
+  const g = store.addTarget({ kind: 'Service', path: 'Z.Empty', name: 'svc-kind', host: '10.9.9.6' });
+  assert.equal(g.kind, 'service');
+});
+
+test('D4 server/record 도 SSRF 가드를 탄다(대상 host 만 검사하면 우회된다)', () => {
+  const t = store.listTargets().find((x) => x.name === 'empty-cells');
+  assert.throws(() => store.addTest(t.id, { name: 'dns', type: 'dns', server: '127.0.0.1' }), /server.*차단/);
+  assert.throws(() => store.addTest(t.id, { name: 'dns2', type: 'dns', server: '169.254.169.254' }), /server.*차단/);
+  assert.throws(() => store.addTest(t.id, { name: 'ntp', type: 'ntp', server: '127.0.0.1' }), /server.*차단/);
+  assert.throws(() => store.addTest(t.id, { name: 'dom', type: 'domain', record: '127.0.0.1' }), /record.*차단/);
+  // 사내망(RFC1918)·도메인명은 통과
+  const ok = store.addTest(t.id, { name: 'dns-ok', type: 'dns', server: '10.1.1.53', record: 'corp.local' });
+  assert.equal(ok.server, '10.1.1.53');
+});
+
+test('D5 bulk 도 전체 점검/폴더 상한을 강제한다(사전 1건 오류)', () => {
+  const many = Array.from({ length: 60 }, (_, i) => ({
+    kind: 'infra', path: 'Z.Limit', name: `lim-${i}`, host: `10.30.0.${i + 1}`,
+    tests: Array.from({ length: 201 }, (_, j) => ({ name: `t${j}`, type: 'ping' })),
+  }));
+  const r = store.bulkAddTargets(many);
+  assert.equal(r.committed, false);
+  assert.ok(r.errors.some((e) => /대상당 최대/.test(e.reason)), '대상당 점검 상한을 조용히 잘라내지 않는다');
+
+  const deep = Array.from({ length: 30 }, (_, i) => ({
+    kind: 'infra', path: `Z.Folders\\a${i}\\b${i}\\c${i}`, name: `f-${i}`, host: `10.31.0.${i + 1}`,
+  }));
+  const r2 = store.bulkAddTargets(deep);
+  assert.equal(r2.committed, true);
+  assert.equal(r2.newFolders, 91, '신규 폴더 수를 정확히 세어 상한 판단에 쓴다(Z.Folders + 30×3)');
+});
+
+test('D5 폴더 상한 초과는 커밋 없이 오류 1건', () => {
+  const folders = store.listFolders().length;
+  const targets = store.listTargets().length;
+  const rows = Array.from({ length: 1200 }, (_, i) => ({
+    kind: 'infra', path: `P${i}\\Q${i}\\R${i}\\S${i}\\T${i}`, name: `n-${i}`, host: `10.40.${Math.floor(i / 254)}.${(i % 254) + 1}`,
+  }));
+  const r = store.bulkAddTargets(rows);   // 1200×5 = 6,000 신규 폴더 > 상한 5,000
+  assert.equal(r.committed, false);
+  assert.equal(r.added, 0);
+  assert.equal(r.errors.length, 1, '행마다 오류를 넣으면 응답이 수백 KB 가 된다');
+  assert.match(r.errors[0].reason, /폴더 상한 초과/);
+  assert.equal(store.listFolders().length, folders, '거부된 배치는 폴더도 만들지 않는다');
+  assert.equal(store.listTargets().length, targets);
+});
+
+test('D6/D1 왕복 고정 — 저장→캐시비움→재로드 후 점검 필드가 동일', () => {
+  store.flushStore();
+  const before = store.listTargetsCopy().find((x) => x.name === 'empty-cells');
+  store._resetCache();
+  const after = store.listTargetsCopy().find((x) => x.name === 'empty-cells');
+  assert.deepEqual(after, before);
+});
+
+test('D5 대상 이름 120자 초과는 조용히 자르지 않고 거부', () => {
+  assert.throws(() => store.addTarget({
+    kind: 'infra', path: 'Z.Empty', name: 'x'.repeat(121), host: '10.9.9.5',
+  }), /120자/);
+});
+
+test('템플릿 태그(tpl/tplKey)는 저장 시 보존된다(재적용 멱등성의 매칭 키)', () => {
+  const t = store.listTargets().find((x) => x.name === 'empty-cells');
+  const x = store.addTest(t.id, { name: 'tagged', type: 'ping', tpl: 'tpl-linux-basic', tplKey: 'k-abcd1234' });
+  assert.equal(x.tpl, 'tpl-linux-basic');
+  assert.equal(x.tplKey, 'k-abcd1234');
+  store.flushStore();
+  store._resetCache();
+  const again = store.findTest(x.id);
+  assert.equal(again.test.tpl, 'tpl-linux-basic', '화이트리스트에서 빠지면 재적용이 매번 중복 생성한다');
 });
 
 /* ── 체커 ── */

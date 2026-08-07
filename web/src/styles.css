@@ -618,7 +618,9 @@ tbody tr:last-child td { border-bottom: none; }
   padding: 10px 12px; font-family: var(--pc-mono, ui-monospace); font-size: 11px;
   color: var(--pc-t3, #8ea4bd); line-height: 1.8; max-height: 190px; overflow: auto; }
 .pc-logfiles b { color: var(--pc-pt, #9fcaff); font-weight: 400; }
-.pc-dl { color: var(--pc-pt, #9fcaff); }
+/* 로그 다운로드는 <a href> 로는 Bearer 헤더를 실을 수 없어 <button> 이다 — 링크처럼 보이게 초기화 */
+.pc-dl { color: var(--pc-pt, #9fcaff); background: none; border: 0; padding: 0;
+  font: inherit; cursor: pointer; text-align: left; }
 .pc-dl:hover { text-decoration: underline; }
 
 /* 성능점검 — 점검 추가 마법사(1 카테고리 → 2 유형 → 3 설정). 핸드오프 pc-* 토큰 계승 */

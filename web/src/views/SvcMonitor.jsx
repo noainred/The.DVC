@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { usePolling, postJson, putJson, delJson, fetchJson, getCurrentUser } from '../api.js';
+import { usePolling, postJson, putJson, delJson, fetchJson, getCurrentUser, downloadFile } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 
 /**
@@ -12,6 +12,7 @@ import { Loading, ErrorBox } from '../components/ui.jsx';
 
 const LEFT_W_KEY = 'perfcheck.leftW';
 const DEFAULT_LEFT_W = 340;
+const TARGET_PAGE = 50;          // 폴더당 한 번에 표시할 대상 수('더 보기'로 늘린다)
 
 /** 상태 매핑(README): Ok/Host is alive → ok, Warning → warn, Disabled → off, 그 외 → bad. */
 const STATUS = {
@@ -233,9 +234,15 @@ export default function SvcMonitor() {
     subTimer.current = setTimeout(() => { fn(); subTimer.current = null; }, 160);
   };
   const [logCfg, setLogCfg] = useState(null);   // 로그 설정 모달 데이터
+  // 폴더 안 대상 표시 개수 — 대량 등록으로 한 폴더에 수백~수천 대상이 들어가므로
+  // 고정 상한(과거 8개)으로 자르면 나머지가 화면에서 조용히 사라진다.
+  const [pageN, setPageN] = useState(TARGET_PAGE);
   // 점검 추가 마법사 — { targetId, targetName, step:1|2|3, cat, type, form, editId }
   // 호버 계단식 메뉴를 단계형으로 바꿨다: 커서가 메뉴 사이를 지나다 닫히는 문제가 원천적으로 없다.
   const [wiz, setWiz] = useState(null);
+
+  // 선택 노드나 모드가 바뀌면 표시 개수를 처음으로 되돌린다(이전 폴더에서 늘려 둔 값 승계 금지).
+  useEffect(() => { setPageN(TARGET_PAGE); }, [sel, mode]);
 
   // 컨텍스트 메뉴는 바깥 클릭·ESC·스크롤로 닫는다.
   useEffect(() => {
@@ -290,12 +297,14 @@ export default function SvcMonitor() {
     return s;
   })();
 
-  // 선택 노드 이하 대상(README: 최대 8개)
-  const selected = (() => {
-    if (!sel) return targets.slice(0, 8);
+  // 선택 노드 이하 대상 — 전체를 구한 뒤 표시분만 자르고, 남은 수를 화면에 알린다.
+  const scoped = (() => {
+    if (!sel) return targets;
     if (sel.startsWith('target:')) return targets.filter((t) => t.id === sel.slice(7));
-    return targets.filter((t) => t.path === sel || t.path.startsWith(`${sel}\\`)).slice(0, 8);
+    return targets.filter((t) => t.path === sel || t.path.startsWith(`${sel}\\`));
   })();
+  const selected = scoped.slice(0, pageN);
+  const hiddenTargets = scoped.length - selected.length;
 
   const q = testQ.trim().toLowerCase();
   const groups = selected.map((t) => {
@@ -414,6 +423,10 @@ export default function SvcMonitor() {
       });
       setLogCfg(r);
     } catch (e) { window.alert(e.message); } finally { setBusy(false); }
+  };
+  const downloadLog = async (name) => {
+    try { await downloadFile(`/svcmon/log/files/${encodeURIComponent(name)}`, name); }
+    catch (e) { window.alert(e.message); }
   };
   const doReset = () => { setFilter('ALL'); setTestQ(''); setTreeQ(''); setSort('none'); setDetail(null); };
   const removeSel = async () => {
@@ -537,6 +550,19 @@ export default function SvcMonitor() {
                 );
               })}
               {groups.length === 0 && <div className="pc-empty">조건에 맞는 점검 항목이 없습니다.</div>}
+              {hiddenTargets > 0 && (
+                <div className="pc-empty">
+                  대상 {selected.length} / {scoped.length} 표시 중 · {hiddenTargets}개 더 있음{' '}
+                  <button type="button" className="tab" onClick={() => setPageN((n) => n + TARGET_PAGE)}>
+                    {Math.min(TARGET_PAGE, hiddenTargets)}개 더 보기
+                  </button>
+                  {hiddenTargets > TARGET_PAGE && (
+                    <button type="button" className="tab" onClick={() => setPageN(scoped.length)} style={{ marginLeft: 6 }}>
+                      전체 {scoped.length}개
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
@@ -616,13 +642,15 @@ export default function SvcMonitor() {
                   {logCfg.stats && <> · 기록 {logCfg.stats.written?.toLocaleString?.() || 0}행
                     {logCfg.stats.dropped ? ` · 폐기 ${logCfg.stats.dropped}행` : ''}
                     {logCfg.stats.buffered ? ` · 대기 ${logCfg.stats.buffered}행` : ''}</>}</div>
-                {(logCfg.files || []).slice(0, 8).map((f) => (
+                {/* 목록 상자가 스크롤되므로 8개로 자르지 않는다 — 자르면 오래된 로그를 내려받을 방법이 없다. */}
+                {(logCfg.files || []).slice(0, 200).map((f) => (
                   <div key={f.name}>
-                    <a href={`/api/svcmon/log/files/${encodeURIComponent(f.name)}`} className="pc-dl">⤓ {f.name}</a>
+                    {/* 링크(<a href>)는 Authorization 헤더를 못 실어 401 이 된다 — fetch+blob 으로 받는다. */}
+                    <button type="button" className="pc-dl" onClick={() => downloadLog(f.name)}>⤓ {f.name}</button>
                     <span> · {(f.sizeBytes / 1048576).toFixed(2)} MB</span>
                   </div>
                 ))}
-                {(logCfg.files || []).length > 8 && <div>… 외 {logCfg.files.length - 8}개</div>}
+                {(logCfg.files || []).length > 200 && <div>… 외 {logCfg.files.length - 200}개</div>}
               </div>
               <div className="pc-modal-actions">
                 <button className="pc-btn" onClick={() => setLogCfg(null)}>닫기</button>

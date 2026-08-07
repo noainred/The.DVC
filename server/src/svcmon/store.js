@@ -34,6 +34,19 @@ const MAX_TARGETS = 20000;              // 1만 대 × 여유
 const MAX_TESTS_PER_TARGET = 200;
 const MAX_TOTAL_TESTS = 200000;
 const MAX_FOLDERS = 5000;
+/**
+ * 1회 요청 상한(라우트에서 강제) — 저장소 상한과 별개다.
+ * 근거: 다양한 경로 5,000행 등록이 116ms(측정) → 2,000행 ≈ 50ms. 본문 한도 1MB 에서
+ * 점검 행 약 150B 면 약 6,500행이 물리 한계다. 초과는 **클램프하지 않고 오류**로 돌린다.
+ */
+export const LIMITS = {
+  maxTargets: MAX_TARGETS,
+  maxTestsPerTarget: MAX_TESTS_PER_TARGET,
+  maxTotalTests: MAX_TOTAL_TESTS,
+  maxFolders: MAX_FOLDERS,
+  maxBulkRows: 2000,
+  maxBulkTests: 10000,
+};
 const SAFE_HOST = /^[a-zA-Z0-9._:-]+$/;
 const SAFE_SEG = /^[^\\/:*?"<>|]{1,60}$/;                 // 폴더 세그먼트
 const SAFE_PATH = /^[^\\]{1,60}(\\[^\\]{1,60}){0,9}$/;    // 트리 깊이 최대 10
@@ -71,19 +84,22 @@ function save({ immediate = false } = {}) {
   saveTimer.unref?.();
 }
 
+/** @returns {boolean} 파일에 실제로 썼는지. 호출부가 실패를 201 로 감추지 않게 반환한다. */
 function flushSave() {
   if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
-  if (!dirty || !db) return;
+  if (!dirty || !db) return true;
   dirty = false;
   try {
     atomicWriteFileSync(FILE(), JSON.stringify(db));
+    return true;
   } catch (e) {
     dirty = true;
     console.error('[svcmon] 저장 실패:', e?.message);
+    return false;
   }
 }
 
-export function flushStore() { flushSave(); }
+export function flushStore() { return flushSave(); }
 export function storeRevision() { return rev; }
 
 const text = (v, limit, dflt = '') => {
@@ -91,9 +107,50 @@ const text = (v, limit, dflt = '') => {
   const t = v.trim().slice(0, limit);
   return t || dflt;
 };
+/**
+ * 숫자 파싱 — **빈 값은 기본값**이다. `Number('')===0` 이라 이 가드가 없으면 빈 셀이 `low` 로
+ * 클램프된다(CSV 가져오기에서 expectStatus 100·intervalSec 10·warnMs 1 이 되어 오류 없이
+ * 전 점검이 오설정됨). 같은 저장소의 다른 num 헬퍼도 `v === ''` 를 가드한다.
+ */
 const num = (v, low, high, dflt) => {
+  if (v === null || v === undefined) return dflt;
+  if (typeof v === 'string' && v.trim() === '') return dflt;
   const n = Number(v);
   return Number.isFinite(n) ? Math.min(high, Math.max(low, Math.round(n))) : dflt;
+};
+const TRUTHY = new Set(['1', 'true', 'yes', 'y', 'on', 't', '예', 'o']);
+const FALSY = new Set(['0', 'false', 'no', 'n', 'off', 'f', '아니오', 'x']);
+/**
+ * 불리언 파싱 — `!!'false'` 는 **true** 다. CSV 의 `insecure="false"` 가 TLS 검증 해제로
+ * 뒤집히던 원인이므로 화이트리스트로만 판정하고, 알 수 없는 값은 기본값을 유지한다
+ * (조용한 반전 금지).
+ */
+const bool = (v, dflt) => {
+  if (v === null || v === undefined) return dflt;
+  if (typeof v === 'boolean') return v;
+  if (typeof v === 'number') return Number.isFinite(v) ? v !== 0 : dflt;
+  const s = String(v).trim().toLowerCase();
+  if (!s) return dflt;
+  if (TRUTHY.has(s)) return true;
+  if (FALSY.has(s)) return false;
+  return dflt;
+};
+/**
+ * undefined 키 제거 — `JSON.stringify` 는 undefined 키를 버리므로, 남겨 두면 **메모리 객체와
+ * 저장 후 재로드한 객체의 키 집합이 달라진다**. 템플릿 재적용 diff 가 그 차이를 '변경'으로
+ * 오판하고, 20만 점검에서 빈 키 15개는 메모리 낭비이기도 하다.
+ */
+const compact = (o) => {
+  for (const k of Object.keys(o)) if (o[k] === undefined) delete o[k];
+  return o;
+};
+/** 열거형 파싱 — 대소문자만 정규화하고, 목록 밖 값은 **조용히 폴백하지 않고 예외**. */
+const pickEnum = (v, allowed, dflt, label) => {
+  if (v === null || v === undefined || v === '') return dflt;
+  const s = String(v).trim().toLowerCase();
+  if (!s) return dflt;
+  if (allowed.includes(s)) return s;
+  throw new Error(`알 수 없는 ${label}: ${String(v).slice(0, 40)} (가능: ${allowed.join(', ')})`);
 };
 /** 포트 파싱 — 1~65535 정수만 인정하고 그 외는 undefined(미지정). */
 const portOf = (v) => {
@@ -115,20 +172,22 @@ export function validateEndpoint({ host, url }) {
 
 function cleanTest(data, existing = null) {
   const base = existing || {};
-  const type = TEST_TYPES.includes(data.type) ? data.type : (base.type || 'ping');
+  // 미지 유형을 ping 으로 폴백하면 'disk' 라고 적은 템플릿·CSV 가 전 대상에 ping 점검을
+  // 만들면서 오류를 0건으로 보고한다. 목록 밖 값은 거부한다.
+  const type = pickEnum(data.type, TEST_TYPES, base.type || 'ping', '점검 유형');
   const t = {
     id: base.id || ('t-' + crypto.randomUUID().slice(0, 8)),
     name: text(data.name, 80, base.name || ''),
     type,
     intervalSec: num(data.intervalSec, 10, 86400, base.intervalSec || 60),
-    enabled: data.enabled === undefined ? (base.enabled !== false) : !!data.enabled,
+    enabled: bool(data.enabled, base.enabled !== false),
     // 포트는 '무효값을 클램프하지 않는다' — 0/음수/문자를 1로 바꾸면 엉뚱한 포트를 찍는다.
     // 유효 범위 밖이면 미지정으로 보고 기존값 → 유형 기본 포트 순으로 채운다.
     port: portOf(data.port) || base.port || DEFAULT_PORTS[type] || undefined,
     url: text(data.url, 500, base.url || '') || undefined,
     keyword: text(data.keyword, 200, base.keyword || '') || undefined,
     expectStatus: num(data.expectStatus, 100, 599, base.expectStatus || 0) || undefined,
-    insecure: data.insecure === undefined ? !!base.insecure : !!data.insecure,
+    insecure: bool(data.insecure, !!base.insecure),
     record: text(data.record, 253, base.record || '') || undefined,
     server: text(data.server, 253, base.server || '') || undefined,
     expect: text(data.expect, 64, base.expect || '') || undefined,
@@ -140,6 +199,10 @@ function cleanTest(data, existing = null) {
     warnMs: num(data.warnMs, 1, 600000, base.warnMs || 0) || undefined,
     badMs: num(data.badMs, 1, 600000, base.badMs || 0) || undefined,
     maxHops: num(data.maxHops, 1, 64, base.maxHops || 0) || undefined,
+    // 템플릿 귀속 태그 — 재적용 멱등성의 매칭 키다. 이 화이트리스트에서 빠지면 저장 시
+    // 조용히 사라져 재적용이 매번 점검을 중복 생성한다.
+    tpl: text(data.tpl, 40, base.tpl || '') || undefined,
+    tplKey: text(data.tplKey, 40, base.tplKey || '') || undefined,
   };
   if (!t.name) throw new Error('점검 이름을 입력하세요.');
   if (['tcp', 'udp'].includes(t.type) && !t.port) throw new Error(`${t.type} 점검은 포트가 필요합니다.`);
@@ -148,29 +211,40 @@ function cleanTest(data, existing = null) {
     const err = validateEndpoint({ url: t.url });
     if (err) throw new Error(err);
   }
+  // server/record 도 목적지가 된다(dns 는 server 를 네임서버로, ntp 는 server 로 질의).
+  // 대상 host 만 SSRF 가드를 태우면 이 두 필드로 루프백·메타데이터 주소를 그대로 찍을 수 있다.
   for (const [k, v] of [['server', t.server], ['record', t.record]]) {
-    if (v && !SAFE_HOST.test(v)) throw new Error(`${k} 형식이 올바르지 않습니다.`);
+    if (!v) continue;
+    if (!SAFE_HOST.test(v) || v.startsWith('-')) throw new Error(`${k} 형식이 올바르지 않습니다.`);
+    const err = validateEndpoint({ host: v });
+    if (err) throw new Error(`${k}: ${err}`);
   }
-  return t;
+  return compact(t);
 }
 
 function cleanTarget(data, existing = null) {
   const base = existing || {};
   const target = {
     id: base.id || ('g-' + crypto.randomUUID().slice(0, 8)),
-    kind: KINDS.includes(data.kind) ? data.kind : (base.kind || 'infra'),
+    kind: pickEnum(data.kind, KINDS, base.kind || 'infra', '구분'),
     path: text(data.path, 620, base.path || ''),
     name: text(data.name, 120, base.name || ''),
     host: text(data.host, 253, base.host || ''),
-    enabled: data.enabled === undefined ? (base.enabled !== false) : !!data.enabled,
-    order: num(data.order, 0, 1e9, base.order ?? Date.now()),
+    enabled: bool(data.enabled, base.enabled !== false),
+    // 밀리초 타임스탬프이므로 상한을 1e9(=1970-01-12)로 두면 값이 들어올 때 뭉개진다.
+    order: num(data.order, 0, Number.MAX_SAFE_INTEGER, base.order ?? Date.now()),
+    // 대량 등록 배치 태그 — 롤백이 '정확히 그 배치만' 지우는 근거.
+    batch: text(data.batch, 40, base.batch || '') || undefined,
     tests: base.tests || [],
   };
   if (!target.name) throw new Error('대상 이름을 입력하세요.');
+  // text() 는 초과분을 조용히 자른다 — 대량 생성에서 접두사가 같으면 서로 다른 번호가
+  // 같은 이름으로 잘려 중복이 된다. 넘치면 거부한다.
+  if (typeof data.name === 'string' && data.name.trim().length > 120) throw new Error('대상 이름은 120자를 넘을 수 없습니다.');
   if (!SAFE_PATH.test(target.path)) throw new Error("경로 형식이 올바르지 않습니다(구분자 '\\', 최대 10단계).");
   const err = validateEndpoint({ host: target.host });
   if (err) throw new Error(err);
-  return target;
+  return compact(target);
 }
 
 /* ── 조회 ── */
@@ -260,30 +334,56 @@ export function addTarget(data) {
   const dbx = load();
   if (dbx.targets.length >= MAX_TARGETS) throw new Error(`대상은 최대 ${MAX_TARGETS}개까지입니다.`);
   const t = cleanTarget(data);
-  dbx.targets.push(t);
-  // 경로가 폴더 목록에 없으면 자동 등록(트리에서 즉시 보이게)
+  // 경로가 폴더 목록에 없으면 자동 등록(트리에서 즉시 보이게).
+  // 폴더 상한 초과로 던질 수 있으므로 대상 push 보다 **먼저** — 순서를 바꾸면 실패한 등록의
+  // 대상이 메모리에 남는다.
   ensureFolderPath(dbx, t.kind, t.path);
+  dbx.targets.push(t);
   save();
   return t;
 }
 
-function ensureFolderPath(dbx, kind, p) {
-  if (!p) return;
+const folderKey = (kind, p) => `${kind} ${p}`;
+/** 폴더 경로 인덱스 — 대량 등록에서 행마다 folders.some() 을 돌면 O(행×폴더)가 된다. */
+function folderKeySet(dbx) {
+  const s = new Set();
+  for (const f of dbx.folders) s.add(folderKey(f.kind, f.path));
+  return s;
+}
+/** 아직 없는 상위 경로 목록(생성 순서대로). 인덱스를 주면 그 인덱스로만 판단한다. */
+function missingFolderPaths(dbx, kind, p, idx = null) {
+  if (!p) return [];
   const segs = p.split('\\');
+  const out = [];
   for (let i = 1; i <= segs.length; i += 1) {
     const sub = segs.slice(0, i).join('\\');
-    if (!dbx.folders.some((f) => f.kind === kind && f.path === sub)) {
-      dbx.folders.push({ id: 'f-' + crypto.randomUUID().slice(0, 8), kind, path: sub, createdAt: Date.now() });
-    }
+    const has = idx ? idx.has(folderKey(kind, sub))
+      : dbx.folders.some((f) => f.kind === kind && f.path === sub);
+    if (!has) { out.push(sub); idx?.add(folderKey(kind, sub)); }
   }
+  return out;
+}
+function pushFolders(dbx, kind, paths) {
+  for (const sub of paths) {
+    dbx.folders.push({ id: 'f-' + crypto.randomUUID().slice(0, 8), kind, path: sub, createdAt: Date.now() });
+  }
+}
+/** 상한을 **먼저** 확인한 뒤 한 번에 만든다 — 중간에 던지면 대상만 남고 폴더가 빠진다. */
+function ensureFolderPath(dbx, kind, p) {
+  const missing = missingFolderPaths(dbx, kind, p);
+  if (!missing.length) return 0;
+  if (dbx.folders.length + missing.length > MAX_FOLDERS) throw new Error(`폴더는 최대 ${MAX_FOLDERS}개까지입니다.`);
+  pushFolders(dbx, kind, missing);
+  return missing.length;
 }
 
 export function updateTarget(id, data) {
   const dbx = load();
   const i = dbx.targets.findIndex((t) => t.id === id);
   if (i < 0) return null;
-  dbx.targets[i] = cleanTarget(data, dbx.targets[i]);
-  ensureFolderPath(dbx, dbx.targets[i].kind, dbx.targets[i].path);
+  const next = cleanTarget(data, dbx.targets[i]);
+  ensureFolderPath(dbx, next.kind, next.path);   // 실패 시 기존 대상을 덮어쓰지 않는다
+  dbx.targets[i] = next;
   save();
   return dbx.targets[i];
 }
@@ -331,24 +431,88 @@ export function deleteTest(targetId, testId) {
   return true;
 }
 
-/** 대량 등록(가져오기·자동 생성) — 한 번의 저장으로 묶는다. */
-export function bulkAddTargets(list = []) {
+/** 대상 동일성 — 한 폴더 안에서는 이름이 식별자다(CSV 행 그룹핑과 같은 키). */
+const dupKey = (t) => `${t.kind} ${t.path} ${t.name.toLowerCase()}`;
+
+/**
+ * 대량 등록(가져오기·자동 생성) — 검증을 **전량 끝낸 뒤** 한 번의 저장으로 커밋한다.
+ *
+ * 이전 구현의 문제 3가지를 함께 고친다.
+ *  - 트랜잭션이 아니었다: 중간 행이 실패해도 앞 행은 커밋돼 부분 등록이 남았다.
+ *  - 중복 검사가 없었다: 같은 (구분·경로·이름) 을 몇 번 가져와도 대상이 계속 늘었다.
+ *  - 상한을 대상 수만 봤다: 전체 점검·폴더 상한을 넘겨도 오류 없이 통과했다
+ *    (5,000행×50점검 = 25만 점검, 폴더 5,420개가 오류 0건으로 등록됨).
+ *
+ * @param {object[]} list
+ * @param {{atomic?:boolean, dedup?:boolean, batch?:string}} opts
+ *   atomic=false 는 오류 행을 건너뛰고 나머지를 커밋한다(가져오기 미리보기에서 쓰지 않는다).
+ * @returns {{added:number, errors:object[], skipped:object[], newFolders:number, newTests:number,
+ *            committed:boolean, saved:boolean}}
+ */
+export function bulkAddTargets(list = [], { atomic = true, dedup = true, batch = '' } = {}) {
   const dbx = load();
-  const added = [];
   const errors = [];
+  const skipped = [];
+  const prepared = [];      // { target, folders: string[] }
+  const folderIdx = folderKeySet(dbx);
+  const nameIdx = new Set();
+  if (dedup) for (const t of dbx.targets) nameIdx.add(dupKey(t));
+  let newFolders = 0;
+  let newTests = 0;
+  const startTests = totalTests();   // 커밋당 1회(전수 순회를 행마다 돌리지 않는다)
+
   list.forEach((row, i) => {
     try {
-      if (dbx.targets.length >= MAX_TARGETS) throw new Error('대상 상한 초과');
-      const t = cleanTarget(row);
-      const tests = Array.isArray(row.tests) ? row.tests : [];
-      t.tests = tests.slice(0, MAX_TESTS_PER_TARGET).map((x) => cleanTest(x));
-      dbx.targets.push(t);
-      ensureFolderPath(dbx, t.kind, t.path);
-      added.push(t.id);
+      const t = cleanTarget({ ...row, batch: row?.batch || batch });
+      const key = dupKey(t);
+      if (dedup && nameIdx.has(key)) {
+        skipped.push({ row: i + 1, name: t.name, reason: '이미 있는 대상(구분+경로+이름 중복)' });
+        return;
+      }
+      const tests = Array.isArray(row?.tests) ? row.tests : [];
+      if (tests.length > MAX_TESTS_PER_TARGET) throw new Error(`점검은 대상당 최대 ${MAX_TESTS_PER_TARGET}개까지입니다.`);
+      t.tests = tests.map((x) => cleanTest(x));
+      const folders = missingFolderPaths(dbx, t.kind, t.path, folderIdx);
+      nameIdx.add(key);
+      newFolders += folders.length;
+      newTests += t.tests.length;
+      prepared.push({ target: t, folders });
     } catch (e) { errors.push({ row: i + 1, name: row?.name || '', reason: e.message }); }
   });
-  save({ immediate: true });
-  return { added: added.length, errors };
+
+  // 상한은 행마다 오류를 넣지 않고 **1건으로** 보고한다(2,000행이면 응답이 수백 KB 가 된다).
+  const over = [];
+  if (dbx.targets.length + prepared.length > MAX_TARGETS) over.push(`대상 상한 초과: 기존 ${dbx.targets.length} + 신규 ${prepared.length} > ${MAX_TARGETS}`);
+  if (startTests + newTests > MAX_TOTAL_TESTS) over.push(`전체 점검 상한 초과: 기존 ${startTests} + 신규 ${newTests} > ${MAX_TOTAL_TESTS}`);
+  if (dbx.folders.length + newFolders > MAX_FOLDERS) over.push(`폴더 상한 초과: 기존 ${dbx.folders.length} + 신규 ${newFolders} > ${MAX_FOLDERS}`);
+
+  const fail = over.length > 0 || (atomic && errors.length > 0);
+  if (fail) {
+    return {
+      added: 0,
+      errors: [...errors, ...over.map((reason) => ({ row: 0, name: '', reason }))],
+      skipped,
+      newFolders: 0,
+      newTests: 0,
+      committed: false,
+      saved: true,
+    };
+  }
+
+  for (const { target, folders } of prepared) {
+    pushFolders(dbx, target.kind, folders);
+    dbx.targets.push(target);
+  }
+  const saved = prepared.length ? save({ immediate: true }) : true;
+  return {
+    added: prepared.length,
+    errors,
+    skipped,
+    newFolders,
+    newTests,
+    committed: true,
+    saved: saved !== false,
+  };
 }
 
 export function _resetCache() { db = null; byTestId = null; rev += 1; dirty = false; }
