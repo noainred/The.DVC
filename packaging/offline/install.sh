@@ -135,13 +135,38 @@ chown -R "$SERVICE_USER:$SERVICE_USER" "$PREFIX"
 chown -R "$SERVICE_USER:$SERVICE_USER" "$CONFIG_DIR"
 chmod 0750 "$CONFIG_DIR"
 
-# SELinux 라벨 복원(best-effort) — 패키지를 /tmp 나 /root 아래에서 풀면 cp -a 가
-# user_tmp_t/admin_home_t 라벨을 /opt 까지 그대로 가져오고, enforcing 환경의 systemd 는
-# 그 라벨의 바이너리 실행을 거부한다(기동 무한 재시작: 203/EXEC Permission denied —
-# root 쉘 직접 실행은 되므로 설치 중에는 안 드러난다). 경로 기본 라벨(usr_t/etc_t)로
-# 복원해 어디서 풀어도 안전하게 만든다. SELinux 미사용/permissive 면 조용히 지나간다.
-if command -v restorecon >/dev/null 2>&1; then
-  restorecon -R "$PREFIX" "$CONFIG_DIR" 2>/dev/null || true
+# SELinux 라벨 처리(best-effort — 어떤 실패도 설치를 막지 않는다)
+# ① 영구 규칙: 사용자 지정 --prefix 가 /opt·/usr 밖이면(/data·/srv·/home 등) 그 경로의
+#    정책 기본 라벨 자체가 default_t/var_t 라 restorecon 을 해도 systemd 가 실행을 거부한다
+#    (기동 무한 재시작: 203/EXEC Permission denied). /opt 와 같은 usr_t 를 semanage 로
+#    영구 등록해 restorecon·전체 재라벨(autorelabel) 후에도 유지되게 한다.
+# ② 복원: 패키지를 /tmp 나 /root 아래에서 풀면 cp -a 가 user_tmp_t/admin_home_t 라벨을
+#    /opt 까지 그대로 가져온다(root 쉘 직접 실행은 되므로 설치 중에는 안 드러남). 경로
+#    기본 라벨(usr_t/etc_t)로 복원해 어디서 풀어도 안전하게 만든다.
+# ③ 검증: 실제 남은 라벨을 확인해 실행 불가 타입이면 chcon 으로 임시 보정하고, 영구
+#    반영 방법(semanage 설치)을 안내한다. SELinux 미사용이면 전체를 조용히 건너뛴다.
+SEL_MODE="$(getenforce 2>/dev/null || echo Disabled)"
+if [[ "$SEL_MODE" == "Enforcing" || "$SEL_MODE" == "Permissive" ]]; then
+  echo "==> SELinux(${SEL_MODE}) 라벨 처리"
+  if [[ "$PREFIX" != /opt/* && "$PREFIX" != /usr/* ]] && command -v semanage >/dev/null 2>&1; then
+    semanage fcontext -a -t usr_t "${PREFIX}(/.*)?" 2>/dev/null \
+      || semanage fcontext -m -t usr_t "${PREFIX}(/.*)?" 2>/dev/null || true
+  fi
+  if command -v restorecon >/dev/null 2>&1; then
+    restorecon -R "$PREFIX" "$CONFIG_DIR" 2>/dev/null || true
+  fi
+  NODE_TYPE="$(stat -c %C "$PREFIX/runtime/node/bin/node" 2>/dev/null | awk -F: '{print $3}' || true)"
+  case "$NODE_TYPE" in
+    default_t|var_t|tmp_t|user_tmp_t|user_home_t|admin_home_t|home_root_t|mnt_t)
+      echo "⚠ SELinux: ${PREFIX} 라벨(${NODE_TYPE})은 systemd 가 실행을 거부하는 타입입니다."
+      chcon -R -t usr_t "$PREFIX" 2>/dev/null \
+        && echo "   chcon 으로 usr_t 임시 보정했습니다(전체 재라벨 시 원복될 수 있음)." || true
+      if ! command -v semanage >/dev/null 2>&1; then
+        echo "   영구 반영(권장): dnf install policycoreutils-python-utils 후"
+        echo "     semanage fcontext -a -t usr_t '${PREFIX}(/.*)?' && restorecon -R '${PREFIX}'"
+      fi
+      ;;
+  esac
 fi
 
 # 6) systemd service ---------------------------------------------------------

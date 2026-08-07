@@ -1,6 +1,15 @@
 {
   "notes": [
     {
+      "version": "2.234.0",
+      "date": "2026-08-07",
+      "title": "설치 — SELinux 라벨 처리 강화 (사용자 지정 경로 영구 규칙 + 검증/폴백)",
+      "notes": [
+        "install.sh 의 SELinux 처리가 3단계로 강화되었습니다: ① --prefix 를 /opt·/usr 밖(예: /data)으로 지정하면 semanage fcontext 로 usr_t 영구 규칙을 등록해 restorecon·전체 재라벨 후에도 systemd 실행이 유지됩니다(기존에는 restorecon 만으로는 default_t 라벨이 남아 203/EXEC 무한 재시작). ② 기존 restorecon 복원 유지. ③ 적용 결과 라벨을 실제 검증해 실행 불가 타입이 남으면 chcon 임시 보정 후 영구 반영 명령을 안내합니다. SELinux 미사용 서버는 조용히 건너뜁니다.",
+        "uninstall.sh 는 설치가 등록한 SELinux 영구 라벨 규칙을 함께 정리합니다. INSTALL.md §11 트러블슈팅에 사용자 지정 경로 안내가 추가되었습니다."
+      ]
+    },
+    {
       "version": "2.233.0",
       "date": "2026-08-06",
       "title": "업그레이드 — 설치 경로(installDir) 서버 자동 감지",
