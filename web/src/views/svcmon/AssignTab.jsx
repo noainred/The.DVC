@@ -28,6 +28,7 @@ export default function AssignTab({ canEdit }) {
   const [done, setDone] = useState('');
   const [form, setForm] = useState({ agent: '', kind: 'infra', path: '', includeSub: true, exceptTrace: true, exceptDomain: true, note: '' });
   const [preview, setPreview] = useState(null);
+  const [probe, setProbe] = useState(null);        // { agent, ...결과 } — 통신 진단
 
   const load = async () => {
     setErr('');
@@ -47,7 +48,7 @@ export default function AssignTab({ canEdit }) {
   ];
 
   const doPreview = async () => {
-    if (!form.agent.trim()) { setErr('엣지 이름을 입력하세요(개별 토큰의 agent 이름과 같아야 합니다).'); return; }
+    if (!form.agent.trim()) { setErr('엣지를 선택하세요. 목록이 비어 있으면 먼저 설정 > 엣지 토큰에서 개별 토큰을 발급하세요.'); return; }
     setBusy('preview'); setErr(''); setDone('');
     try {
       const r = await putJson(`/svcmon/assign/${encodeURIComponent(form.agent.trim())}`, {
@@ -68,6 +69,15 @@ export default function AssignTab({ canEdit }) {
       setDone(`배정 저장 — ${form.agent} 에 대상 ${r.assignment?.counts?.targets}개 · 점검 ${r.assignment?.counts?.tests}개 (엣지가 다음 주기에 받아 적용하면 '활성'이 됩니다).`);
       setPreview(null);
       await load();
+    } catch (e) { setErr(e.message); } finally { setBusy(''); }
+  };
+
+  const doProbe = async (agent) => {
+    setBusy(`probe:${agent}`); setErr(''); setProbe(null);
+    try {
+      const r = await postJson(`/svcmon/edges/${encodeURIComponent(agent)}/probe`, {});
+      setProbe({ agent, ...r });
+      if (r.error || (r.ok === false)) setErr(r.error || r.reason || '진단 실패');
     } catch (e) { setErr(e.message); } finally { setBusy(''); }
   };
 
@@ -105,12 +115,18 @@ export default function AssignTab({ canEdit }) {
           </div>
           <div className="flex gap wrap" style={{ alignItems: 'flex-end' }}>
             <label className="flex col" style={{ gap: 4 }}>
-              <span className="muted" style={{ fontSize: 11 }}>엣지 이름 (개별 토큰의 agent 와 동일)</span>
-              <input className="input" list="svc-edge-names" style={{ minWidth: 180 }} value={form.agent}
-                onChange={(e) => { setForm({ ...form, agent: e.target.value }); setPreview(null); }} placeholder="예: KR-Edge-01" />
-              <datalist id="svc-edge-names">
-                {reporting.map((n) => <option key={n} value={n} />)}
-              </datalist>
+              <span className="muted" style={{ fontSize: 11 }}>엣지 선택 — 토큰이 발급된 엣지만</span>
+              {/* 자유 입력을 없앤 이유: 토큰의 agent 이름과 대소문자 하나만 달라도 엣지 pull 이
+                  영원히 '배정 없음'을 받는다(조회 키 불일치). 오타가 곧 무음 감시 공백이다. */}
+              <select className="select" style={{ minWidth: 220 }} value={form.agent}
+                onChange={(e) => { setForm({ ...form, agent: e.target.value }); setPreview(null); }}>
+                <option value="">엣지를 선택하세요</option>
+                {(data?.candidates || []).map((c) => (
+                  <option key={c.agent} value={c.agent}>
+                    {c.agent}{c.reporting ? ' · 보고 중' : c.hasToken ? ' · 토큰만 발급됨' : ' · 토큰 없음'}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="flex col" style={{ gap: 4 }}>
               <span className="muted" style={{ fontSize: 11 }}>구분</span>
@@ -159,6 +175,52 @@ export default function AssignTab({ canEdit }) {
         </div>
       )}
 
+      {probe && probe.ok && (
+        <div className="card" style={{ padding: 14 }}>
+          <div className="flex between wrap gap" style={{ alignItems: 'center' }}>
+            <b>통신 진단 — {probe.agent}</b>
+            <button className="tab" onClick={() => setProbe(null)}>닫기</button>
+          </div>
+          <div className="muted" style={{ fontSize: 11, margin: '4px 0 8px' }}>
+            대상 주소는 <b>마지막 보고가 도착한 소스 IP</b> 입니다(엣지가 프록시/NAT 뒤면 그 장비의
+            주소). 이 진단이 실패해도 <b>보고가 정상이면 위임은 동작합니다</b> — Active 방식은
+            중앙→엣지 접속을 요구하지 않습니다. 살아있음의 진실은 '보고가 오는가'입니다.
+          </div>
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>검사</th><th style={{ width: 90 }}>결과</th><th style={{ width: 100, textAlign: 'right' }}>RTT</th><th>비고</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td>보고 수신 (진실의 원천)</td>
+                  <td><span className={`badge ${probe.reporting?.silent ? 'red' : 'green'}`}>{probe.reporting?.silent ? '무보고' : '정상'}</span></td>
+                  <td style={{ textAlign: 'right' }}>—</td>
+                  <td className="muted">마지막 보고 {probe.reporting?.ageMs != null ? `${Math.round(probe.reporting.ageMs / 1000)}초 전` : '—'}
+                    {probe.reporting?.skewMs ? ` · 시계 오차 추정 ≤${Math.round(Math.abs(probe.reporting.skewMs) / 1000)}초` : ''}</td>
+                </tr>
+                <tr>
+                  <td>ping — {probe.sourceIp}</td>
+                  <td><span className={`badge ${probe.ping?.status === 'ok' ? 'green' : 'red'}`}>{probe.ping?.status === 'ok' ? '응답' : '무응답'}</span></td>
+                  <td style={{ textAlign: 'right' }}>{probe.ping?.ms != null ? `${probe.ping.ms} ms` : '—'}</td>
+                  <td className="muted">{probe.ping?.reply || ''}</td>
+                </tr>
+                <tr>
+                  <td>TCP 포트 {probe.portalPort || '—'}</td>
+                  {probe.tcp ? (<>
+                    <td><span className={`badge ${probe.tcp.status === 'ok' ? 'green' : 'red'}`}>{probe.tcp.status === 'ok' ? '열림' : '닫힘'}</span></td>
+                    <td style={{ textAlign: 'right' }}>{probe.tcp?.ms != null ? `${probe.tcp.ms} ms` : '—'}</td>
+                    <td className="muted">{probe.tcp?.reply || ''}</td>
+                  </>) : (<>
+                    <td><span className="badge gray">생략</span></td>
+                    <td style={{ textAlign: 'right' }}>—</td>
+                    <td className="muted">{probe.tcpNote || ''}</td>
+                  </>)}
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       <div className="card" style={{ padding: 14 }}>
         <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 8 }}>
           <b>배정 목록 ({assignments.length})</b>
@@ -195,7 +257,18 @@ export default function AssignTab({ canEdit }) {
                       {a.updatedAt ? new Date(a.updatedAt).toLocaleString('ko-KR', { hour12: false }) : '—'}
                       {a.updatedBy && <div>{a.updatedBy}</div>}
                     </td>
-                    <td>{canEdit && <button className="tab" disabled={busy === 'del'} onClick={() => remove(a.agent)}>삭제</button>}</td>
+                    <td>
+                      {canEdit && (
+                        <div className="flex gap">
+                          <button className="tab" disabled={busy === `probe:${a.agent}`}
+                            onClick={() => doProbe(a.agent)}
+                            title="마지막 보고의 소스 IP 로 ping·TCP 연결(RTT)을 찍습니다">
+                            {busy === `probe:${a.agent}` ? '진단 중…' : '통신 진단'}
+                          </button>
+                          <button className="tab" disabled={busy === 'del'} onClick={() => remove(a.agent)}>삭제</button>
+                        </div>
+                      )}
+                    </td>
                   </tr>
                 );
               })}

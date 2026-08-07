@@ -710,3 +710,16 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 .svc-edge-counts { display: flex; gap: 10px; margin-top: 5px; font-variant-numeric: tabular-nums; }
 .svc-edge-warn { margin-top: 5px; color: var(--red); line-height: 1.5; }
 .svc-edge-meta { margin-top: 5px; font-size: 11px; }
+
+/* 성능점검 설정 — 탭을 한 줄 가로 배열(세로로 접히면 하위 작업 창이 좁아진다) */
+.svc-tabbar { display: flex; gap: 6px; width: 100%; overflow-x: auto; }
+.svc-tab { flex: 1 1 0; min-width: 120px; padding: 9px 12px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--panel-2); color: var(--text-dim);
+  font-weight: 600; font-size: 13px; white-space: nowrap; }
+.svc-tab:hover { color: var(--text); }
+.svc-tab.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+/* 성능점검 로그 분석 — 구간 분포 막대(정상=초록·실패=빨강, 폭 = 행수 비중 × 비율) */
+.svc-anal-bar { display: flex; height: 12px; border-radius: 3px; background: var(--panel-2); overflow: hidden; }
+.svc-anal-bar i { display: block; height: 100%; }
+.svc-anal-bar i.ok { background: var(--green); opacity: .75; }
+.svc-anal-bar i.bad { background: var(--red); opacity: .9; }

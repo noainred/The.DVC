@@ -17,7 +17,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { getLogSettings, logDir } from './logsettings.js';
+import { getLogSettings, logDir, ROTATE_UNITS, ROTATE_LABEL } from './logsettings.js';
 
 const HEADER = ['시각', '경로', '대상', '호스트', '점검명', '유형', '상태', '응답', 'ms', '연속횟수'];
 const BOM = '﻿';
@@ -198,6 +198,8 @@ export function logStatus() {
   } catch { /* 접근 실패 → 빈 목록 */ }
   return {
     ...cfg, dir,
+    rotateUnits: ROTATE_UNITS,
+    rotateLabels: ROTATE_LABEL,
     files: files.slice(0, 100),
     fileCount: files.length,
     totalBytes: files.reduce((a, f) => a + f.sizeBytes, 0),

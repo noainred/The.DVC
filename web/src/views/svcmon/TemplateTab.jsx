@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { fetchJson, postJson, putJson, delJson } from '../../api.js';
+import { fetchJson, postJson, putJson, delJson, downloadFile } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import EscClose from '../../components/EscClose.jsx';
 import PreviewTable from './PreviewTable.jsx';
@@ -53,6 +53,9 @@ export default function TemplateTab({ canEdit }) {
   const [draft, setDraft] = useState(null);          // 편집 중 템플릿(null = 미편집)
   const [itemEdit, setItemEdit] = useState(null);    // { idx, item } · idx<0 = 신규
   const [applyCfg, setApplyCfg] = useState(null);    // { kind, path, includeSub, overwrite }
+  const [csvOpen, setCsvOpen] = useState(false);      // CSV 가져오기 패널
+  const [csvText, setCsvText] = useState('');
+  const [csvPreview, setCsvPreview] = useState(null);
   const [preview, setPreview] = useState(null);
   const [done, setDone] = useState('');
 
@@ -124,6 +127,37 @@ export default function TemplateTab({ canEdit }) {
     } catch (e) { setErr(e.message); } finally { setBusy(''); }
   };
 
+  /* ── CSV ── */
+  const csvExport = async () => {
+    setErr('');
+    try { await downloadFile('/svcmon/templates/export.csv'); }
+    catch (e) { setErr(e.message); }
+  };
+  const csvSample = async () => {
+    setErr('');
+    try { await downloadFile('/svcmon/templates/sample.csv'); }
+    catch (e) { setErr(e.message); }
+  };
+  const onCsvFile = (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = () => { setCsvText(String(r.result || '')); setCsvPreview(null); };
+    r.onerror = () => setErr('파일을 읽지 못했습니다.');
+    r.readAsText(f, 'utf-8');
+  };
+  const csvDo = async (mode) => {
+    setBusy(`csv-${mode}`); setErr(''); setDone('');
+    try {
+      const r = await postJson('/svcmon/templates/import', { csv: csvText, mode });
+      if (r.error) { setErr(r.error); setCsvPreview(r); return; }
+      if (mode === 'preview') { setCsvPreview(r); return; }
+      setDone(`템플릿 ${r.summary.create}개 생성 · ${r.summary.skip}개 건너뜀(이미 있는 이름).`);
+      setCsvOpen(false); setCsvText(''); setCsvPreview(null);
+      await load();
+    } catch (e) { setErr(e.message); } finally { setBusy(''); }
+  };
+
   /* ── 항목 편집 ── */
   const saveItem = () => {
     const it = itemEdit.item;
@@ -189,7 +223,12 @@ export default function TemplateTab({ canEdit }) {
       <div className="card" style={{ padding: 14 }}>
         <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 8 }}>
           <b>점검 템플릿 ({templates.length} / {limits.maxTemplates})</b>
-          {canEdit && !editing && <button className="login-btn" onClick={startNew}>+ 새 템플릿</button>}
+          <div className="flex gap">
+            <button className="tab" onClick={csvExport}>⤓ CSV 내보내기</button>
+            <button className="tab" onClick={csvSample}>⤓ 샘플 CSV</button>
+            {canEdit && <button className="tab" onClick={() => { setCsvOpen((v) => !v); setCsvPreview(null); }}>⤒ CSV 가져오기</button>}
+            {canEdit && !editing && <button className="login-btn" onClick={startNew}>+ 새 템플릿</button>}
+          </div>
         </div>
         <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
           서버 유형별로 점검 묶음을 정해 두고 대상에 한꺼번에 적용합니다. 기본 제공 6종은 IANA
@@ -240,6 +279,48 @@ export default function TemplateTab({ canEdit }) {
           </table>
         </div>
       </div>
+
+      {csvOpen && (
+        <div className="card" style={{ padding: 14 }}>
+          <b>템플릿 CSV 가져오기</b>
+          <div className="muted" style={{ fontSize: 12, margin: '4px 0 8px' }}>
+            항목 1건이 1행이며 같은 template_name 행들이 한 템플릿으로 묶입니다. <b>이미 있는
+            이름의 템플릿은 건너뜁니다</b>(덮어쓰지 않습니다). 미리보기는 파싱 수준 검증이라
+            치환 변수·상한 검증은 등록 시점에 실패할 수 있습니다.
+          </div>
+          <div className="flex gap wrap" style={{ alignItems: 'center' }}>
+            <input type="file" accept=".csv,text/csv" onChange={onCsvFile} />
+            <button className="login-btn" disabled={!csvText.trim() || busy === 'csv-preview'} onClick={() => csvDo('preview')}>
+              {busy === 'csv-preview' ? '검사 중…' : '미리보기'}
+            </button>
+            {csvPreview && !csvPreview.error && (csvPreview.summary?.create || 0) > 0 && (
+              <button className="login-btn" disabled={busy === 'csv-add'} onClick={() => csvDo('add')}>
+                {busy === 'csv-add' ? '등록 중…' : `${csvPreview.summary.create}개 등록`}
+              </button>
+            )}
+            <button className="tab" onClick={() => { setCsvOpen(false); setCsvText(''); setCsvPreview(null); }}>닫기</button>
+          </div>
+          {csvPreview && (
+            <div style={{ marginTop: 8 }}>
+              <div className="flex gap wrap" style={{ fontSize: 12 }}>
+                <span className="badge green">생성 {csvPreview.summary?.create || 0}</span>
+                <span className="badge gray">건너뜀 {csvPreview.summary?.skip || 0}</span>
+                {(csvPreview.summary?.error || 0) > 0 && <span className="badge red">오류 {csvPreview.summary.error}</span>}
+                {(csvPreview.unknownColumns || []).length > 0 && (
+                  <span className="muted">무시된 컬럼: {csvPreview.unknownColumns.join(', ')}</span>
+                )}
+              </div>
+              {(csvPreview.errors || []).length > 0 && (
+                <div className="svc-err" style={{ marginTop: 6 }}>
+                  <ul>{csvPreview.errors.slice(0, 30).map((e, i) => (
+                    <li key={i}>{e.row ? `${e.row}행` : ''}{e.name ? ` · ${e.name}` : ''} — {e.reason}</li>
+                  ))}</ul>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── 템플릿 편집 ── */}
       {editing && (
