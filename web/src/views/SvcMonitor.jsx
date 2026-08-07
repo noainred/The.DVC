@@ -61,6 +61,47 @@ const ADD_MENU_PLANNED = [
   'SNMP Get / Table / Trap', 'IPMI / Redfish 센서', 'Cisco·Juniper·F5·Netscaler',
   'NetApp·QNAP·Synology (NAS)', 'UPS·프린터', 'Database 세션(ODBC/MSSQL/Oracle)',
 ];
+
+/** 유형별 설명·파라미터 정의 — 마법사 3단계 폼을 이 표에서 생성한다(한 곳만 고치면 됨). */
+const F = (key, label, opts = {}) => ({ key, label, ...opts });
+const TYPE_META = {
+  ping: { desc: 'ICMP 로 도달성·왕복시간(RTT)을 봅니다. CLI 프로세스를 쓰므로 대량 등록 시 TCP 병용 권장.', fields: [] },
+  trace: { desc: '경로(홉)를 추적해 홉 수와 완주 여부를 봅니다. 경로 변화 감시용 — 주기를 길게 두세요.',
+    fields: [F('maxHops', '최대 홉', { ph: '15', hint: '이 값을 넘으면 주의' })] },
+  tcp: { desc: '포트에 TCP 연결만 시도하고 바이트를 보내지 않습니다. 사내 서비스 가동 판정에 가장 안전.',
+    fields: [F('port', '포트', { ph: '8080', req: true })] },
+  udp: { desc: '패킷을 보내고 응답이 오는지 봅니다. 무응답이 정상인 서비스(단방향 syslog 등)는 부적합.',
+    fields: [F('port', '포트', { ph: '161', req: true }), F('payload', '보낼 문자열', { ph: '(비우면 CRLF)' })] },
+  http: { desc: '상태코드와 본문 키워드로 판정합니다. 리다이렉트는 추적하지 않습니다(302·401 = 살아있음).',
+    fields: [F('url', 'URL', { ph: 'http://10.0.0.5:8080/health', req: true }),
+      F('keyword', '본문 키워드', { ph: 'ok — 없으면 주의' }),
+      F('expectStatus', '기대 상태코드', { ph: '200 (비우면 500 미만 정상)' }),
+      F('warnMs', '느림 임계(ms)', { ph: '3000' })] },
+  soap: { desc: 'POST + text/xml 로 SOAP 요청을 보내고 응답 XML 을 키워드로 확인합니다.',
+    fields: [F('url', 'URL', { ph: 'https://host/svc', req: true }), F('soapAction', 'SOAPAction'),
+      F('body', '요청 본문(XML)', { area: true }), F('keyword', '응답 키워드')] },
+  dns: { desc: '대상(또는 지정 서버)을 네임서버로 보고 A/AAAA 질의를 합니다. 기대 IP 와 다르면 주의.',
+    fields: [F('record', '조회할 이름', { ph: 'portal.example.com', req: true }),
+      F('server', 'DNS 서버', { ph: '(비우면 대상 호스트)' }), F('expect', '기대 IP', { ph: '10.0.0.9' })] },
+  cert: { desc: 'TLS 핸드셰이크로 인증서 만료일을 읽습니다. 만료 임박은 주의, 만료는 실패.',
+    fields: [F('port', '포트', { ph: '443' }), F('warnDays', '경고 임계(일)', { ph: '30' })] },
+  domain: { desc: 'whois(TCP 43) 로 도메인 만료일을 확인합니다. TLD 별 형식 차이로 파싱 실패가 있을 수 있어 주기는 1일 권장.',
+    fields: [F('record', '도메인', { ph: 'example.com — 비우면 대상 호스트' }), F('warnDays', '경고 임계(일)', { ph: '60' })] },
+  ntp: { desc: 'SNTP 로 서버 시각과의 오프셋을 봅니다. 시간 오차는 인증·OTP 실패의 흔한 원인입니다.',
+    fields: [F('server', 'NTP 서버', { ph: '(비우면 대상 호스트)' }),
+      F('warnMs', '주의 임계(ms)', { ph: '1000' }), F('badMs', '실패 임계(ms)', { ph: '5000' })] },
+  smtp: { desc: '연결 후 220 인사말을 확인합니다. 포트만 열린 좀비 프로세스를 걸러냅니다.',
+    fields: [F('port', '포트', { ph: '25' }), F('send', '보낼 명령', { ph: 'EHLO test' }), F('keyword', '응답 키워드')] },
+  pop3: { desc: '연결 후 +OK 인사말을 확인합니다. 995(TLS) 는 배너가 암호화되어 TCP 점검을 권장.',
+    fields: [F('port', '포트', { ph: '110' }), F('keyword', '응답 키워드')] },
+  imap: { desc: '연결 후 * OK 인사말을 확인합니다. 993(TLS) 는 TCP 점검을 권장.',
+    fields: [F('port', '포트', { ph: '143' }), F('keyword', '응답 키워드')] },
+  ssh: { desc: 'SSH-2.0 배너를 확인합니다. 응답값에 버전 문자열이 남아 패치 추적에도 쓸 수 있습니다.',
+    fields: [F('port', '포트', { ph: '22' }), F('keyword', '응답 키워드')] },
+  ldap: { desc: '익명 simple bind 로 디렉터리 서버 응답을 확인합니다(익명 금지 서버도 응답하면 정상 판정).',
+    fields: [F('port', '포트', { ph: '389' })] },
+};
+
 const statusOf = (t, x) => (t.enabled === false || x.enabled === false) ? 'disabled' : (x.result?.status || 'none');
 const methodText = (t, x) => {
   const base = METHOD[x.type] || x.type;
@@ -192,6 +233,9 @@ export default function SvcMonitor() {
     subTimer.current = setTimeout(() => { fn(); subTimer.current = null; }, 160);
   };
   const [logCfg, setLogCfg] = useState(null);   // 로그 설정 모달 데이터
+  // 점검 추가 마법사 — { targetId, targetName, step:1|2|3, cat, type, form, editId }
+  // 호버 계단식 메뉴를 단계형으로 바꿨다: 커서가 메뉴 사이를 지나다 닫히는 문제가 원천적으로 없다.
+  const [wiz, setWiz] = useState(null);
 
   // 컨텍스트 메뉴는 바깥 클릭·ESC·스크롤로 닫는다.
   useEffect(() => {
@@ -277,6 +321,31 @@ export default function SvcMonitor() {
     return v.length ? Math.round(v.reduce((a, b) => a + b, 0) / v.length) : 0;
   })();
   const selPath = sel ? `Root\\${sel.replace(/^target:/, '')}` : 'Root';
+
+
+  /* ── 점검 추가/수정 마법사 (1 카테고리 → 2 유형 → 3 파라미터) ── */
+  const openWizard = (targetId, targetName, test = null) => {
+    if (test) {
+      const cat = ADD_MENU.findIndex((g) => g.items.some((i) => i.type === test.type));
+      setWiz({ targetId, targetName, step: 3, cat: cat < 0 ? 0 : cat, type: test.type, editId: test.id,
+        form: { ...EMPTY_TEST, ...test } });
+    } else {
+      setWiz({ targetId, targetName, step: 1, cat: -1, type: '', editId: null, form: { ...EMPTY_TEST } });
+    }
+    setErr('');
+  };
+  const wizSave = async () => {
+    setBusy(true); setErr('');
+    try {
+      const f = wiz.form;
+      const body = { ...f, type: wiz.type, intervalSec: Number(f.intervalSec) || 60 };
+      // 빈 문자열은 서버가 '미지정'으로 보게 제거한다(포트 0 → 1 클램프 같은 사고 방지).
+      for (const k of Object.keys(body)) if (body[k] === '') delete body[k];
+      if (wiz.editId) await putJson(`/svcmon/targets/${wiz.targetId}/tests/${wiz.editId}`, body);
+      else await postJson(`/svcmon/targets/${wiz.targetId}/tests`, body);
+      setWiz(null); refresh();
+    } catch (e) { setErr(e.message || String(e)); } finally { setBusy(false); }
+  };
 
   const submit = async () => {
     setBusy(true); setErr('');
@@ -417,7 +486,7 @@ export default function SvcMonitor() {
           <div className="pc-toolbar">
             <button className="pc-btn" disabled={!canEdit} onClick={() => { setForm({ ...EMPTY_TARGET, path: sel && !sel.startsWith('target:') ? sel : EMPTY_TARGET.path }); setErr(''); setModal({ kind: 'target' }); }}>＋ Add</button>
             <button className="pc-btn" disabled={!canEdit || !selTarget} title={selTarget ? '' : '트리에서 대상을 선택'}
-              onClick={() => { setForm({ ...EMPTY_TEST }); setErr(''); setModal({ kind: 'test', targetId: selTarget.id }); }}>✎ 점검 추가</button>
+              onClick={() => openWizard(selTarget.id, selTarget.name, null)}>✎ 점검 추가</button>
             <button className="pc-btn" disabled={!canEdit || !selTarget} onClick={removeSel}>✕ Remove</button>
             <button className="pc-btn accent" disabled={!canEdit} onClick={doRefresh}>⟳ Refresh</button>
             <button className="pc-btn" onClick={doReset}>⟲ Reset</button>
@@ -492,36 +561,11 @@ export default function SvcMonitor() {
               setErr(''); setModal({ kind: 'target' });
             }}>🖥 이 폴더에 대상 추가</button>
             {ctx.targetId && (
-              <div className="pc-ctx-sub-wrap"
-                onMouseEnter={() => holdOpen(() => setSubL2(true))}
-                onMouseLeave={() => delayClose(closeSubs)}>
-                <button className="pc-ctx-item">🧪 이 대상에 점검 추가<span className="pc-ctx-ar">▸</span></button>
-                {subL2 && (
-                  <div className="pc-ctx pc-ctx-sub">
-                    {ADD_MENU.map((g, gi) => (
-                      <div key={g.label} className="pc-ctx-sub-wrap"
-                        onMouseEnter={() => holdOpen(() => { setSubL2(true); setSubL3(gi); })}
-                        onMouseLeave={() => delayClose(() => setSubL3(-1))}>
-                        <button className="pc-ctx-item">{g.label}<span className="pc-ctx-ar">▸</span></button>
-                        {subL3 === gi && (
-                          <div className="pc-ctx pc-ctx-sub">
-                            {g.items.map((it) => (
-                              <button key={it.type} className="pc-ctx-item" onClick={() => {
-                                setCtx(null); closeSubs();
-                                setForm({ ...EMPTY_TEST, type: it.type, name: it.label.split(' (')[0] });
-                                setErr(''); setModal({ kind: 'test', targetId: ctx.targetId });
-                              }}>{it.label}</button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                    <div className="pc-ctx-sep" />
-                    <div className="pc-ctx-cap">다음 단계 예정</div>
-                    {ADD_MENU_PLANNED.map((t) => <div key={t} className="pc-ctx-item dim">{t}<span className="pc-ctx-tag">2단계</span></div>)}
-                  </div>
-                )}
-              </div>
+              <button className="pc-ctx-item" onClick={() => {
+                const t = targets.find((x) => x.id === ctx.targetId);
+                setCtx(null); closeSubs();
+                openWizard(ctx.targetId, t?.name || '', null);
+              }}>🧪 이 대상에 점검 추가<span className="pc-ctx-ar">▸</span></button>
             )}
             <div className="pc-ctx-sep" />
           </>}
@@ -607,13 +651,128 @@ export default function SvcMonitor() {
             </div>
             {canEdit && (
               <div className="pc-modal-actions">
-                <button className="pc-btn" onClick={() => { setForm({ ...EMPTY_TEST, ...detail.test }); setErr(''); setModal({ kind: 'test', targetId: detail.target.id, edit: detail.test.id }); setDetail(null); }}>✎ 수정</button>
+                <button className="pc-btn" onClick={() => { const d = detail; setDetail(null); openWizard(d.target.id, d.target.name, d.test); }}>✎ 수정</button>
                 <button className="pc-btn" onClick={async () => {
                   if (!window.confirm(`점검 '${detail.test.name}' 을 삭제할까요?`)) return;
                   try { await delJson(`/svcmon/targets/${detail.target.id}/tests/${detail.test.id}`); setDetail(null); refresh(); } catch (e) { window.alert(e.message); }
                 }}>✕ 삭제</button>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {wiz && (
+        <div className="pc-overlay" onClick={() => setWiz(null)}>
+          <div className="pc-modal pc-wiz" onClick={(e) => e.stopPropagation()}>
+            <div className="pc-modal-head">
+              <b>{wiz.editId ? '점검 수정' : '점검 추가'}</b>
+              <span className="pc-wiz-target">{wiz.targetName}</span>
+              <button className="pc-x" onClick={() => setWiz(null)}>✕</button>
+            </div>
+
+            {/* 진행 표시 — 완료 단계는 클릭해 되돌아갈 수 있다 */}
+            <div className="pc-steps">
+              {['카테고리', '점검 유형', '설정'].map((label, i) => {
+                const n = i + 1;
+                const state = wiz.step === n ? 'on' : (wiz.step > n ? 'done' : '');
+                return (
+                  <button key={label} className={`pc-step ${state}`} disabled={wiz.step <= n}
+                    onClick={() => setWiz({ ...wiz, step: n })}>
+                    <span className="pc-step-no">{wiz.step > n ? '✓' : n}</span>{label}
+                  </button>
+                );
+              })}
+              <span className="pc-step-count">{wiz.step} / 3</span>
+            </div>
+
+            <div className="pc-wiz-body">
+              {wiz.step === 1 && (
+                <>
+                  <div className="pc-wiz-lead">무엇을 점검할지 분류를 고르세요.</div>
+                  <div className="pc-wiz-grid">
+                    {ADD_MENU.map((g, gi) => (
+                      <button key={g.label} className={`pc-wiz-card${wiz.cat === gi ? ' sel' : ''}`}
+                        onClick={() => setWiz({ ...wiz, cat: gi, step: 2 })}>
+                        <b>{g.label}</b>
+                        <span>{g.items.map((i) => i.label.split(' (')[0]).join(' · ')}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <div className="pc-wiz-planned">
+                    <div className="pc-ctx-cap">다음 단계 예정 (엔진 개발 후 선택 가능)</div>
+                    {ADD_MENU_PLANNED.map((t) => <span key={t} className="pc-plan-tag">{t}</span>)}
+                  </div>
+                </>
+              )}
+
+              {wiz.step === 2 && (
+                <>
+                  <div className="pc-wiz-lead">{ADD_MENU[wiz.cat]?.label} — 점검 유형을 고르세요.</div>
+                  <div className="pc-wiz-grid">
+                    {(ADD_MENU[wiz.cat]?.items || []).map((it) => (
+                      <button key={it.type} className={`pc-wiz-card${wiz.type === it.type ? ' sel' : ''}`}
+                        onClick={() => setWiz({
+                          ...wiz, type: it.type, step: 3,
+                          form: { ...wiz.form, name: wiz.form.name || it.label.split(' (')[0] },
+                        })}>
+                        <b>{it.label}</b>
+                        <span>{TYPE_META[it.type]?.desc || METHOD[it.type]}</span>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {wiz.step === 3 && (
+                <>
+                  <div className="pc-wiz-lead">
+                    <b>{METHOD[wiz.type] || wiz.type}</b> — {TYPE_META[wiz.type]?.desc}
+                  </div>
+                  <div className="pc-wiz-form">
+                    <label>점검 이름<input className="pc-input" value={wiz.form.name || ''} autoFocus
+                      onChange={(e) => setWiz({ ...wiz, form: { ...wiz.form, name: e.target.value } })}
+                      placeholder="2. Ping: 192.168.10.55" /></label>
+                    {(TYPE_META[wiz.type]?.fields || []).map((f) => (
+                      <label key={f.key}>{f.label}{f.req && <em> *</em>}
+                        {f.area
+                          ? <textarea className="pc-input" rows={3} value={wiz.form[f.key] || ''}
+                              onChange={(e) => setWiz({ ...wiz, form: { ...wiz.form, [f.key]: e.target.value } })}
+                              placeholder={f.ph || ''} />
+                          : <input className="pc-input" value={wiz.form[f.key] || ''}
+                              onChange={(e) => setWiz({ ...wiz, form: { ...wiz.form, [f.key]: e.target.value } })}
+                              placeholder={f.ph || ''} />}
+                        {f.hint && <span className="pc-fhint">{f.hint}</span>}
+                      </label>
+                    ))}
+                    <label>점검 주기(초)<input className="pc-input" value={wiz.form.intervalSec}
+                      onChange={(e) => setWiz({ ...wiz, form: { ...wiz.form, intervalSec: e.target.value } })} />
+                      <span className="pc-fhint">최소 10초. 항목이 많으면 주기를 늘리는 것이 서버 부하에 직접 영향.</span></label>
+                    {wiz.type === 'http' && (
+                      <label className="pc-check">
+                        <input type="checkbox" checked={!!wiz.form.insecure}
+                          onChange={(e) => setWiz({ ...wiz, form: { ...wiz.form, insecure: e.target.checked } })} />
+                        자체서명 인증서 허용(이 점검에만 적용)
+                      </label>
+                    )}
+                  </div>
+                  {err && <div className="pc-err">{err}</div>}
+                </>
+              )}
+            </div>
+
+            <div className="pc-wiz-foot">
+              <button className="pc-btn" disabled={wiz.step === 1}
+                onClick={() => setWiz({ ...wiz, step: wiz.step - 1 })}>← 뒤로</button>
+              <span className="pc-wiz-crumb">
+                {wiz.cat >= 0 && ADD_MENU[wiz.cat]?.label}{wiz.type && ` › ${wiz.type}`}
+              </span>
+              {wiz.step < 3
+                ? <button className="pc-btn accent" disabled={wiz.step === 1 ? wiz.cat < 0 : !wiz.type}
+                    onClick={() => setWiz({ ...wiz, step: wiz.step + 1 })}>다음 →</button>
+                : <button className="pc-btn accent" disabled={busy || !wiz.form.name}
+                    onClick={wizSave}>{busy ? '저장 중…' : (wiz.editId ? '수정 저장' : '점검 추가')}</button>}
+            </div>
           </div>
         </div>
       )}
