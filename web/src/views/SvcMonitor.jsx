@@ -597,10 +597,60 @@ export default function SvcMonitor() {
             </div>
           </div>
 
+          {/* ── 엣지 위임 카드 — 원격 법인 엣지가 실행하고 보고한 현황 ──
+              이 포탈이 직접 실행한 것(위 트리)과 별도로 표시한다. 무보고 엣지는 그 엣지
+              담당 점검의 현재 상태를 **알 수 없는 것**이므로 정상으로도 장애로도 세지 않는다. */}
+          {(data?.edges?.length > 0) && (
+            <div className="svc-edges">
+              <div className="svc-edges-head">
+                <b>🛰 엣지 위임 ({data.edges.length})</b>
+                {data.edgeTotals && (
+                  <span className="muted" style={{ fontSize: 11 }}>
+                    합계 — 정상 {data.edgeTotals.ok} · 주의 {data.edgeTotals.warn} · 실패 {data.edgeTotals.bad}
+                    · 갱신 안 됨 {data.edgeTotals.stale}
+                    {data.edgeTotals.unknown ? ` · 알 수 없음 ${data.edgeTotals.unknown}` : ''}
+                    {data.edgeTotals.notRun ? ` · 미점검 ${data.edgeTotals.notRun}` : ''}
+                  </span>
+                )}
+              </div>
+              <div className="svc-edge-cards">
+                {data.edges.map((e) => (
+                  <div key={e.agent} className={`svc-edge-card${e.silent ? ' silent' : ''}`}>
+                    <div className="svc-edge-name">
+                      {e.silent ? '🔴' : '🟢'} {e.agent}
+                      {e.skewWarn && <span className="badge amber" title={`시계 오차 추정 ${Math.round(e.skewMs / 1000)}초(전송 지연 포함)`}>시계 오차</span>}
+                      {e.caps?.pingMode === 'tcp-fallback' && (
+                        <span className="badge amber" title="이 엣지는 ping CLI 가 없어 TCP 연결로 판정합니다 — ICMP 와 의미가 다릅니다">ping=TCP 폴백</span>
+                      )}
+                    </div>
+                    {e.silent ? (
+                      <div className="svc-edge-warn">
+                        무보고 {Math.round((e.ageMs || 0) / 1000)}초 — 담당 점검 {e.rows}개의 현재 상태를 알 수 없습니다.
+                      </div>
+                    ) : (
+                      <div className="svc-edge-counts">
+                        <span className="pc-ok">OK {e.counts.ok}</span>
+                        <span className="pc-warn">WARN {e.counts.warn}</span>
+                        <span className="pc-bad">FAIL {e.counts.bad}</span>
+                        {e.counts.stale > 0 && <span className="pc-stale">낡음 {e.counts.stale}</span>}
+                        {e.notRun > 0 && <span className="pc-pending">미점검 {e.notRun}</span>}
+                      </div>
+                    )}
+                    <div className="svc-edge-meta muted">
+                      항목 {e.items} · 보고 {e.rows}행 · {e.lastAt ? `${Math.round((e.ageMs || 0) / 1000)}초 전` : '—'}
+                      {e.poller?.overdueSkipped > 0 && ` · 밀림 ${e.poller.overdueSkipped}`}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="pc-footer">
             <span>SHOWN {shown} / {summary.total}</span>
             <span>AVG REPLY {avgMs} ms</span>
-            <span>LAST REFRESH {data?.lastSweep ? new Date(data.lastSweep).toLocaleTimeString('ko-KR', { hour12: false }) : '—'}</span>
+            {/* 다중 노드에서는 전역 sweep 시각이 의미가 없다 — 이 포탈 로컬 실행 기준임을 명시 */}
+            <span>LOCAL SWEEP {data?.lastSweep ? new Date(data.lastSweep).toLocaleTimeString('ko-KR', { hour12: false }) : '—'}</span>
             <span className="pc-live">● LIVE POLLING</span>
           </div>
         </div>

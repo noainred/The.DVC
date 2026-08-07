@@ -22,6 +22,15 @@ import { TARGET_FIELDS, TEST_FIELDS, CSV_COLUMNS } from '../svcmon/testSchema.js
 import { csvLines, parseTargetsCsv, sampleCsv, REQUIRED_COLUMNS } from '../svcmon/csvio.js';
 import { judgeCapacity, suggestIntervalSec } from '../svcmon/capacity.js';
 import { testState, emptySummary } from '../svcmon/status.js';
+import { edgeSummary, edgeState, edgeTotals, forgetAgent, MAX_AGENTS, MAX_ROWS_PER_AGENT } from '../central/svcmonEdge.js';
+import { silenceStatus, checkSilenceOnce } from '../central/svcmonSilence.js';
+import { svcmonPushStatus, pushSvcmonNow } from '../agent/svcmonPush.js';
+import {
+  listAssignments, setAssignment, deleteAssignment, DEFAULT_EXCEPT_TYPES,
+  MAX_TARGETS_PER_AGENT, batchTag,
+} from '../central/svcmonAssign.js';
+import { svcmonConfigPullStatus, pullSvcmonConfigNow } from '../agent/svcmonConfigPull.js';
+import { pollerRole } from '../svcmon/poller.js';
 import {
   listTemplates, getTemplate, addTemplate, updateTemplate, duplicateTemplate,
   deleteTemplate, applyTemplate, templateUsage, materializeForTarget,
@@ -83,6 +92,9 @@ svcmonRouter.get('/state', (req, res) => {
     truncated: inScope.length > targets.length,
     scopeCount: inScope.length,
     targetCount: all.length,
+    // 엣지 위임 요약 — 이 포탈이 직접 실행한 것 외에, 원격 법인 엣지가 보고한 현황.
+    edges: edgeSummary(now),
+    edgeTotals: edgeTotals(now),
     testTypes: TEST_TYPES,
     rotateUnits: ROTATE_UNITS,
     rotateLabels: ROTATE_LABEL,
@@ -92,7 +104,12 @@ svcmonRouter.get('/state', (req, res) => {
 
 /** 운영 진단 — 워커/폴러/로그 라이터 상태(부하 점검용). */
 svcmonRouter.get('/diag', canEdit, (req, res) => {
-  res.json({ poller: pollerStats(), log: logStats(), targets: listTargetsCopy().length, tests: totalTests() });
+  res.json({
+    poller: pollerStats(), log: logStats(),
+    targets: listTargetsCopy().length, tests: totalTests(),
+    // 엣지 위임 진단 — 이 서버가 받는 쪽(edges)인지 보내는 쪽(push)인지 함께 보인다.
+    edges: edgeSummary(), push: svcmonPushStatus(), silence: silenceStatus(),
+  });
 });
 
 svcmonRouter.post('/refresh', canEdit, async (req, res) => {
@@ -556,6 +573,117 @@ svcmonRouter.delete('/batches/:id', canEdit, (req, res) => {
   logAudit({ user: req.user?.username, action: 'svcmon.batch.record.delete', target: req.params.id, detail: '이력만 삭제(대상 유지)' });
   res.json({ ok: true, batches: listBatches() });
 });
+
+/* ── 엣지 배정(중앙 → 엣지 정의 배포) ── */
+
+/** 배정 목록 + 이 인스턴스의 역할. 화면이 '중앙은 실행하지 않는다'를 명확히 표시해야 한다. */
+svcmonRouter.get('/assign', canEdit, (req, res) => {
+  res.json({
+    role: pollerRole(),
+    assignments: listAssignments(),
+    defaultExceptTypes: DEFAULT_EXCEPT_TYPES,
+    maxTargetsPerAgent: MAX_TARGETS_PER_AGENT,
+    // 배정 후보 엣지 = 개별 토큰이 발급된 엣지 + 이미 보고 중인 엣지
+    reporting: edgeSummary().map((e) => e.agent),
+    pull: svcmonConfigPullStatus(),
+  });
+});
+
+/**
+ * 배정 저장 — 중앙 트리에서 범위를 잘라 그 엣지 몫으로 굳힌다(스냅샷).
+ * `mode:'preview'` 면 저장하지 않고 무엇이 배포될지만 돌려준다.
+ */
+svcmonRouter.put('/assign/:agent', canEdit, (req, res) => {
+  try {
+    const kind = KINDS.includes(req.body?.kind) ? req.body.kind : '';
+    const scopePath = typeof req.body?.path === 'string' ? req.body.path.trim() : '';
+    const includeSub = req.body?.includeSub !== false;
+    const exceptTypes = Array.isArray(req.body?.exceptTypes) ? req.body.exceptTypes : DEFAULT_EXCEPT_TYPES;
+    const picked = listTargetsCopy().filter((t) => {
+      if (kind && (t.kind || 'infra') !== kind) return false;
+      if (!scopePath) return true;
+      return includeSub ? (t.path === scopePath || t.path.startsWith(`${scopePath}\\`)) : t.path === scopePath;
+    });
+    let tests = 0;
+    const skip = new Set(exceptTypes);
+    for (const t of picked) for (const x of t.tests) if (!skip.has(x.type)) tests += 1;
+
+    if (req.body?.mode === 'preview') {
+      return res.json({
+        preview: true, agent: req.params.agent,
+        counts: { targets: picked.length, tests },
+        exceptTypes,
+        sample: picked.slice(0, 25).map((t) => ({
+          kind: t.kind, path: t.path, name: t.name, host: t.host,
+          tests: t.tests.filter((x) => !skip.has(x.type)).length,
+          excluded: t.tests.filter((x) => skip.has(x.type)).length,
+        })),
+        truncated: picked.length > 25,
+      });
+    }
+    const a = setAssignment(req.params.agent, { kind, path: scopePath, includeSub, exceptTypes, note: req.body?.note },
+      picked, { user: req.user?.username });
+    res.json({ assignment: { ...a, targets: undefined }, tag: batchTag(a.sig), assignments: listAssignments() });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+svcmonRouter.delete('/assign/:agent', canEdit, (req, res) => {
+  if (!deleteAssignment(req.params.agent, { user: req.user?.username })) {
+    return res.status(404).json({ error: '그 엣지의 배정이 없습니다.' });
+  }
+  res.json({ ok: true, assignments: listAssignments() });
+});
+
+/** 이 서버가 엣지일 때 — 정의를 즉시 1회 받아 적용(진단용). */
+svcmonRouter.post('/config-pull-now', canEdit, async (req, res) => {
+  const r = await pullSvcmonConfigNow();
+  logAudit({ user: req.user?.username, action: 'svcmon.config.pull', detail: r.ok ? `대상 ${r.added ?? '-'} · sig ${r.sig ?? '-'}` : (r.reason || '실패') });
+  res.status(r.ok ? 200 : 202).json(r);
+});
+
+/* ── 엣지 위임(RMA) ── */
+
+/** 엣지 카드 목록 — 무보고·시계 오차·ping 판정 방식·미점검 수까지 한 화면에서 본다. */
+svcmonRouter.get('/edges', (req, res) => {
+  const now = Date.now();
+  res.json({
+    edges: edgeSummary(now),
+    totals: edgeTotals(now),
+    limits: { maxAgents: MAX_AGENTS, maxRowsPerAgent: MAX_ROWS_PER_AGENT },
+    silence: silenceStatus(),
+    // 이 서버가 **엣지로서** 중앙에 보고 중인지도 함께(한 포탈이 양쪽 역할을 겸할 수 있다).
+    push: svcmonPushStatus(),
+  });
+});
+
+/** 엣지 1개의 항목 목록. 메타(경로·대상·호스트)는 엣지가 보내 준 범위만 있다. */
+svcmonRouter.get('/edge-state', (req, res) => {
+  const r = edgeState(req.query.agent, {
+    path: typeof req.query.path === 'string' ? req.query.path.trim() : '',
+    limit: Math.min(2000, Math.max(1, Number(req.query.limit) || 500)),
+    only: typeof req.query.only === 'string' ? req.query.only.trim() : '',
+  });
+  if (!r) return res.status(404).json({ error: '그 엣지의 보고가 없습니다.' });
+  res.json(r);
+});
+
+/** 유령 엣지 정리(이름 변경·오타로 남은 항목). 대상 정의는 엣지가 갖고 있으므로 영향 없음. */
+svcmonRouter.delete('/edges/:agent', canEdit, (req, res) => {
+  if (!forgetAgent(req.params.agent, req.user?.username)) {
+    return res.status(404).json({ error: '그 엣지를 찾을 수 없습니다.' });
+  }
+  res.json({ ok: true, edges: edgeSummary() });
+});
+
+/** 이 서버가 엣지일 때 — 즉시 1회 보고(진단용). 재진입 가드는 push 모듈이 공유한다. */
+svcmonRouter.post('/push-now', canEdit, async (req, res) => {
+  const r = await pushSvcmonNow();
+  logAudit({ user: req.user?.username, action: 'svcmon.push.now', detail: r.ok ? `행 ${r.rows} · 청크 ${r.chunks}` : (r.reason || '실패') });
+  res.status(r.ok ? 200 : 202).json(r);
+});
+
+/** 무보고 감시 즉시 1회(진단용). */
+svcmonRouter.post('/silence-check', canEdit, async (req, res) => res.json(await checkSilenceOnce()));
 
 /* ── 로그 설정/파일 ── */
 svcmonRouter.get('/log', (req, res) => res.json(logStatus()));

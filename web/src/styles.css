@@ -696,3 +696,17 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 /* 성능점검 — '중지'와 구분해야 하는 두 상태. 감시 공백을 의도적 중지로 보이게 하면 안 된다. */
 .pc-stale { color: var(--amber, #f59e0b); }
 .pc-pending { color: var(--text-faint, #5d6b85); }
+
+/* ── 성능점검 엣지 위임 카드 ── */
+.svc-edges { margin: 10px 14px 0; padding: 10px 12px; border: 1px solid var(--border);
+  border-radius: 8px; background: var(--bg-soft); }
+.svc-edges-head { display: flex; justify-content: space-between; align-items: center;
+  flex-wrap: wrap; gap: 8px; margin-bottom: 8px; font-size: 13px; }
+.svc-edge-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 8px; }
+.svc-edge-card { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px;
+  background: var(--panel); font-size: 12px; }
+.svc-edge-card.silent { border-color: rgba(239, 68, 68, .55); background: rgba(239, 68, 68, .06); }
+.svc-edge-name { display: flex; align-items: center; gap: 6px; font-weight: 600; flex-wrap: wrap; }
+.svc-edge-counts { display: flex; gap: 10px; margin-top: 5px; font-variant-numeric: tabular-nums; }
+.svc-edge-warn { margin-top: 5px; color: var(--red); line-height: 1.5; }
+.svc-edge-meta { margin-top: 5px; font-size: 11px; }

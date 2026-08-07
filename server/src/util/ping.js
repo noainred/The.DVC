@@ -8,6 +8,7 @@ import net from 'node:net';
 
 const isWin = process.platform === 'win32';
 let pingMissing = false; // ping CLI가 없는 환경(컨테이너 등)에서 TCP 폴백으로 전환
+let pingAttempts = 0;    // 시도 횟수 — 0회면 아직 '알 수 없음'이다(아래 pingProbeMode 참고)
 
 // IP/호스트 형식 화이트리스트(명령 인젝션 방지). 실패 시 ping 건너뜀.
 const SAFE = /^[a-zA-Z0-9._:-]+$/;
@@ -32,10 +33,26 @@ function tcpReachable(host, timeoutMs) {
 }
 
 /** 단일 IP ping → { ip, alive, rttMs }. ping CLI 없으면 TCP 폴백. */
+/**
+ * 이 프로세스가 ping 을 어떤 방식으로 판정하는지 — `'icmp' | 'tcp-fallback' | 'unknown'`.
+ *
+ * `pingMissing` 은 **ENOENT 를 한 번 겪은 뒤에만** true 가 된다. 따라서 아직 ping 을 한 번도
+ * 실행하지 않은 프로세스에서 이 값을 그대로 믿으면 "ICMP 정상"이라고 잘못 보고한다.
+ * 그래서 시도 횟수를 함께 보고 0회면 `'unknown'` 을 돌려준다 — 엣지 위임에서 중앙이
+ * '이 엣지의 ping 은 실제로는 TCP 연결 판정'이라는 사실을 알아야 하기 때문이다
+ * (TCP 폴백은 방화벽 정책이 다르면 결과 의미가 달라진다).
+ */
+export function pingProbeMode() {
+  if (!pingAttempts) return 'unknown';
+  return pingMissing ? 'tcp-fallback' : 'icmp';
+}
+export function pingProbeStats() { return { mode: pingProbeMode(), attempts: pingAttempts, cliMissing: pingMissing }; }
+
 export function pingOne(ip, { timeoutMs = 1500 } = {}) {
   return new Promise((resolve) => {
     const target = String(ip || '').trim();
     if (!target || !SAFE.test(target)) return resolve({ ip: target, alive: false, rttMs: null });
+    pingAttempts += 1;
     if (pingMissing) return tcpReachable(target, timeoutMs).then((r) => resolve({ ip: target, ...r }));
     const sec = Math.max(1, Math.round(timeoutMs / 1000));
     const args = isWin

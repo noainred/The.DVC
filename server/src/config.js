@@ -158,6 +158,23 @@ export const config = {
     // Empty = those endpoints are disabled (this instance is not a central).
     token: process.env.CENTRAL_TOKEN || '',
   },
+  /**
+   * 성능점검(svcmon) 역할 — 이 인스턴스가 점검을 **직접 실행하는지** 결정한다.
+   *
+   *  'central' : 점검을 실행하지 않는다. 대상·점검 정의를 여기서 관리해 엣지에 배포하고
+   *              결과만 수신·표시한다. 고RTT 사이트를 중앙에서 찌르지 않으므로 응답시간
+   *              판정이 RTT 에 오염되지 않는다(폴란드·미국동부 800ms+).
+   *  'edge'    : 점검을 실행한다. 정의는 중앙에서 받아 적용하고 결과를 중앙에 push 한다.
+   *  'both'    : 직접 실행 + (중앙이면) 수신. 엣지가 없는 단일 사이트 설치용 **기존 동작**.
+   *
+   * 기본값을 'both' 로 두는 이유: 업그레이드로 기존 단일 사이트 설치의 감시가 조용히
+   * 멈추면 안 된다. 중앙·엣지 분리 배포에서는 각 인스턴스에 명시적으로 지정한다.
+   * `SVCMON_ENABLED=false` 는 여전히 전체 킬스위치다(역할과 무관하게 폴러 미기동).
+   */
+  svcmonRole: (() => {
+    const raw = String(process.env.SVCMON_ROLE || '').trim().toLowerCase();
+    return ['central', 'edge', 'both'].includes(raw) ? raw : 'both';
+  })(),
   agent: {
     // This agent's name — matched against central IP assignments.
     name: process.env.AGENT_NAME || process.env.COLLECTOR_DATACENTER || os.hostname(),

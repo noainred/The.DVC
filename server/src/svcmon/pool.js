@@ -14,6 +14,7 @@
  */
 
 import os from 'node:os';
+import { pingProbeMode as inlinePingMode } from '../util/ping.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
@@ -27,6 +28,11 @@ const envNum = (k, dflt) => { const n = Number(process.env[k]); return Number.is
 const WORKER_COUNT = Math.max(0, envNum('SVCMON_WORKERS', Math.min(4, Math.max(1, os.cpus().length - 1))));
 // 소켓 대기형 동시성 — 처리량을 직접 결정한다(죽은 호스트가 많을수록 중요).
 const SOCK_LIMIT = Math.max(1, envNum('SVCMON_CONCURRENCY', 256));
+/**
+ * 워커가 보고한 ping 판정 방식 — 'icmp' | 'tcp-fallback' | 'unknown'.
+ * 워커 스레드 안에서만 관측되는 값이라 결과 메시지에 실려 온다(메인에서 읽으면 항상 unknown).
+ */
+let lastPingMode = 'unknown';
 // CLI 프로세스를 띄우는 ping/trace 전용 — 너무 크면 프로세스 폭주로 시스템이 먼저 죽는다.
 const PROC_LIMIT = Math.max(1, envNum('SVCMON_PROC_CONCURRENCY', 64));
 const BATCH = Math.max(50, envNum('SVCMON_BATCH', 250));
@@ -39,7 +45,8 @@ function spawn(index) {
   try {
     const w = new Worker(WORKER_FILE, { workerData: { sockLimit: SOCK_LIMIT, procLimit: PROC_LIMIT } });
     const slot = { w, pending: new Map(), alive: true, index };
-    w.on('message', ({ id, results }) => {
+    w.on('message', ({ id, results, pingMode }) => {
+      if (pingMode && pingMode !== 'unknown') lastPingMode = pingMode;
       const resolve = slot.pending.get(id);
       if (resolve) { slot.pending.delete(id); resolve(results); }
     });
@@ -131,6 +138,9 @@ export function poolStats() {
     procLimit: PROC_LIMIT,
     batch: BATCH,
     inlineFallbacks,
+    // ping 판정 방식 — CLI 가 없으면 TCP 연결 폴백으로 **판정 의미가 바뀐 채** 계속 동작한다.
+    // 아직 ping 을 한 번도 안 돌린 프로세스는 'unknown'(모른다고 말하는 것이 정확하다).
+    pingMode: WORKER_COUNT > 0 ? lastPingMode : inlinePingMode(),
     // 이론 처리량(참고) — 평균 응답 4초 가정. 실측은 /api/svcmon/diag 의 lastSweepMs 로 본다.
     estPerSecAt4s: Math.round((WORKER_COUNT || 1) * SOCK_LIMIT / 4),
   };

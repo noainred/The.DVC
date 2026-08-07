@@ -2,6 +2,18 @@
  * Central orchestration endpoints used by agents (agent -> central). Mounted
  * outside user auth and gated by CENTRAL_TOKEN. Agents pull their IP assignment
  * by name and post scan results back.
+ *
+ * ## 신규 라우트 규약 (반드시 따를 것)
+ * 이 라우터는 사용자 인증 밖에 있으므로 자격증명 횡탈 방어가 **라우트 작성자 책임**이다.
+ * 새 엔드포인트를 만들 때:
+ *  1. **`req.centralAuth.mode !== 'agent'` 면 거부한다.** 공유 CENTRAL_TOKEN 은 어떤 엣지의
+ *     것인지 구별할 수 없어(config 기본값에서 COLLECTOR_TOKEN 과 같은 값이 된다) 엣지별
+ *     데이터를 그 토큰으로 쓰게 하면 한 토큰 유출로 전 엣지 데이터가 위조된다.
+ *  2. **저장 키는 `req.centralAuth.agent` 만 쓴다.** `body.agent`/`query.agent` 를 저장 키로
+ *     읽으면 위 미들웨어의 바인딩 검사를 우회한다(이름 필드를 생략하면 검사가 아예 안 걸린다).
+ *  3. 계측·바인딩 이중 방어를 위해 엣지가 `X-Agent-Name` 헤더를 붙이게 한다.
+ * 기존 라우트 중 이 3가지를 모두 지키는 것은 `/svcmon-report` 뿐이므로, 다른 라우트를
+ * 복사해 시작하면 이 방어가 빠진다.
  */
 
 import { Router } from 'express';
@@ -18,6 +30,8 @@ import { takeIdracScanJobs, setIdracScanResult, setIdracScanProgress } from '../
 import { pullNow as pullCollectorsNow } from '../collector/puller.js';
 import { upsertCollectorFromAgent } from '../collector/registry.js';
 import { recordIngest } from '../central/ingestStats.js';
+import { ingestReport } from '../central/svcmonEdge.js';
+import { getAssignmentForAgent, markPulled, ackAssignment } from '../central/svcmonAssign.js';
 import { setAgentConfig } from '../central/agentConfig.js';
 import { getAssignedGpuGuest } from '../central/agentGpuGuestConfig.js';
 import { getEffectiveUsers } from '../central/agentUsers.js';
@@ -172,6 +186,65 @@ centralRouter.post('/result', (req, res) => {
 
 // 사이트 위임 수집: 현장 서버가 로컬 vCenter 인벤토리 조각을 push.
 // Body: { agent, vcenterId, vcenter, hosts[], vms[], datastores[], networks[], alarms[], generatedAt }
+/**
+ * 성능점검 엣지 보고 수신 (RMA Active). 엣지가 자기 대역을 로컬에서 점검하고 결과를 밀어 올린다.
+ *
+ * **개별 토큰 전용**이다. 저장 키는 토큰에서 해석한 `req.centralAuth.agent` 뿐이며 본문의
+ * agent 필드는 읽지 않는다 — 그래야 한 엣지가 남의 이름으로 결과를 위조할 수 없다.
+ */
+centralRouter.post('/svcmon-report', (req, res) => {
+  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+  if (req.centralAuth.mode !== 'agent') {
+    return res.status(403).json({
+      ok: false,
+      reason: '이 엔드포인트는 엣지별 개별 토큰만 허용합니다(공유 CENTRAL_TOKEN 으로는 어느 엣지의 결과인지 신뢰할 수 없습니다). 설정 > 엣지 토큰에서 이 엣지의 토큰을 발급해 주세요.',
+    });
+  }
+  const agent = req.centralAuth.agent;
+  const r = ingestReport(agent, req.body || {}, Date.now());
+  recordIngest(agent, 'svcmon-report', {
+    wireBytes: Number(req.get('content-length')) || 0,
+    summary: { accepted: r.accepted, dropped: r.dropped, rows: Array.isArray(req.body?.rows) ? req.body.rows.length : 0 },
+  });
+  if (!r.ok) return res.status(400).json(r);
+  res.json(r);
+});
+
+/**
+ * 성능점검 정의 배포 — 엣지가 자기 배정을 받아 간다. **개별 토큰 전용.**
+ * `query.agent` 는 미들웨어 바인딩 검사를 걸기 위한 것이고, 실제 조회 키는 토큰에서 해석한
+ * 이름만 쓴다(쿼리 값을 신뢰하지 않는다).
+ */
+centralRouter.get('/svcmon-config', (req, res) => {
+  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+  if (req.centralAuth.mode !== 'agent') {
+    return res.status(403).json({ ok: false, reason: '이 엔드포인트는 엣지별 개별 토큰만 허용합니다.' });
+  }
+  const agent = req.centralAuth.agent;
+  const r = getAssignmentForAgent(agent, String(req.query.sig || ''));
+  if (r.assigned && !r.unchanged) markPulled(agent, r.sig);
+  res.json({ ok: true, ...r });
+});
+
+/**
+ * 엣지 적용 결과 회신 — **이것이 배포 성공 판정의 근거다.**
+ * 적용 수가 배포 수와 다르면 중앙이 `mismatch` 로 남기고 그대로 노출한다.
+ */
+centralRouter.post('/svcmon-config-ack', (req, res) => {
+  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+  if (req.centralAuth.mode !== 'agent') {
+    return res.status(403).json({ ok: false, reason: '이 엔드포인트는 엣지별 개별 토큰만 허용합니다.' });
+  }
+  const b = req.body || {};
+  const r = ackAssignment(req.centralAuth.agent, {
+    sig: String(b.sig || ''), applied: b.applied || {}, removed: b.removed, errors: b.errors,
+  });
+  res.status(r.ok ? 200 : 409).json(r);
+});
+
 centralRouter.post('/inventory', (req, res) => {
   if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
   if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });

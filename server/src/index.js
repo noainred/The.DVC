@@ -64,6 +64,9 @@ import { startCaptureMonitor } from './net/monitor.js';
 import { pingRouter } from './routes/ping.js';
 import { svcmonRouter } from './routes/svcmon.js';
 import { startSvcmonPoller } from './svcmon/poller.js';
+import { startSvcmonPush } from './agent/svcmonPush.js';
+import { startSvcmonConfigPull } from './agent/svcmonConfigPull.js';
+import { startSvcmonSilenceWatch } from './central/svcmonSilence.js';
 import { closeCsvLog } from './svcmon/csvlog.js';
 import { flushStore as flushSvcmonStore } from './svcmon/store.js';
 import { closePool as closeSvcmonPool } from './svcmon/pool.js';
@@ -176,6 +179,9 @@ const stagger = [
   startIpScanPoller, startIpScanAgent, startCollectorPuller, startAgentScanner, startIdracScanWorker, startInventoryPush,
   startGpuGuestPush, startGpuGuestConfigPull, startUsersConfigPull, startPingWorker, startConfigPush, startFleetPush, startBackupScheduler, startLogPoller, startLogQueryWorker, startCaptureWorker, startCaptureMonitor, startLoginMonitor, startGuestScanScheduler, startOsScanner,
   startDbSizeSampler, startPingMonitor, startCertMonitor, startDailyReport, startSvcmonPoller,
+  // 엣지 위임(RMA): 엣지는 결과를 밀어 올리고(push), 중앙은 무보고를 감시한다.
+  // 둘 다 재진입 가드가 있고, 조건(CENTRAL_URL·토큰) 미충족이면 스스로 기동하지 않는다.
+  startSvcmonPush, startSvcmonConfigPull, startSvcmonSilenceWatch,
 ];
 stagger.forEach((start, i) => setTimeout(() => { try { start(); } catch (e) { console.error('[start] 폴러 기동 실패:', e?.message); } }, i * 1500).unref?.());
 
