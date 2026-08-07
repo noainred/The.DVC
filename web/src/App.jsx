@@ -20,6 +20,7 @@ const Summary = lazy(() => import('./views/Summary.jsx'));
 const Upgrade = lazy(() => import('./views/Upgrade.jsx'));
 const Settings = lazy(() => import('./views/Settings.jsx'));
 const SpecialTools = lazy(() => import('./views/SpecialTools.jsx'));
+const SvcMonitor = lazy(() => import('./views/SvcMonitor.jsx'));
 const Insights = lazy(() => import('./views/Insights.jsx'));
 const ReleaseNotes = lazy(() => import('./views/ReleaseNotes.jsx'));
 
@@ -27,6 +28,7 @@ const TABS = [
   { id: 'overview', label: 'Overview' }, // 랜딩(항상 노출)
   { id: 'summary', label: 'Summary', perm: 'dashboard' },
   { id: 'vcenters', label: 'Platform', perm: 'dashboard' },
+  { id: 'svcmon', label: '성능점검', perm: 'dashboard' },
   { id: 'explore', label: '탐색·랭킹', perm: 'dashboard' },
   { id: 'hosts', label: '호스트', perm: 'inv.hosts' },
   { id: 'vms', label: '가상머신', perm: 'inv.vms' },
@@ -375,6 +377,7 @@ function Portal({ user, onLogout }) {
           {tab === 'overview' && <Overview onSelectSite={selectSite} onGotoTab={setTab} />}
           {tab === 'summary' && <Summary scope={scope} onGotoTab={setTab} />}
           {tab === 'vcenters' && <VCenters onSelectSite={selectSite} resetSignal={platformResetSeq} />}
+          {tab === 'svcmon' && <SvcMonitor />}
           {tab === 'explore' && <Explore scope={scope} />}
           {tab === 'hosts' && <Hosts filters={filters} />}
           {tab === 'vms' && <Vms filters={filters} />}
