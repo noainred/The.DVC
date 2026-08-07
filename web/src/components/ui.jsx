@@ -3,8 +3,21 @@ import HostPowerPanel from './HostPowerPanel.jsx';
 import { VmMetricButton, HostMetricButton } from './VmMetrics.jsx';
 import { VmConsoleButton } from './VmConsole.jsx';
 import { VmRemoteButton } from './VmRemote.jsx';
+import { VmReconfigButton } from './VmReconfig.jsx';
 import EscClose from './EscClose.jsx';
 import { fetchJson, postJson } from '../api.js';
+
+/** VM GPU 배지 — vGPU/패스쓰루/혼합. Vms.jsx 에 있던 것을 공용으로 옮겼다(상세 화면 단일화). */
+const GPU_TYPE = { vgpu: ['vGPU', 'green'], passthrough: ['패스쓰루', 'amber'], mixed: ['혼합', 'purple'] };
+export function GpuBadge({ gpu }) {
+  if (!gpu) return <span className="muted">—</span>;
+  const [label, cls] = GPU_TYPE[gpu.type] || ['GPU', 'gray'];
+  return (
+    <span className={`badge ${cls}`} title={gpu.profile || gpu.model || ''}>
+      {label}{gpu.count > 1 ? ` ×${gpu.count}` : ''}{gpu.profile ? ` · ${gpu.profile}` : ''}
+    </span>
+  );
+}
 
 export function usageColor(pct) {
   if (pct >= 90) return 'var(--red)';
@@ -347,12 +360,14 @@ export function EntityDetail({ type, item, onClose }) {
             </DRow>
             <DRow label="VMware Tools"><StateBadge state={item.toolsStatus} /></DRow>
             <DRow label="vCPU">{item.cpuCount != null ? `${item.cpuCount} 코어` : '—'}</DRow>
-            <DRow label="RAM">{item.memMB != null ? gb(item.memMB) : '—'}</DRow>
+            <DRow label="RAM">{item.memMB != null ? <>{gb(item.memMB)} ({item.memMB.toLocaleString()} MB)</> : '—'}</DRow>
             <DRow label="디스크">{item.storageGB != null ? `${item.storageGB} GB` : '—'}</DRow>
             <DRow label="CPU 사용률"><UsageCell pct={item.cpuUsagePct} /></DRow>
             <DRow label="메모리 사용률"><UsageCell pct={item.memUsagePct} /></DRow>
             <DRow label="Tools 버전">{item.toolsVersion || '—'}</DRow>
             <DRow label="스냅샷">{item.snapshotCount ? `${item.snapshotCount}개 · ${item.snapshotSizeGB || 0} GB` : '없음'}</DRow>
+            <DRow label="GPU">{item.gpu ? <GpuBadge gpu={item.gpu} /> : <span className="muted">없음</span>}</DRow>
+            <DRow label="vCenter ID">{item.id}</DRow>
             <DRow label="태그">{item.tags?.length ? item.tags.map((t) => <span key={t} className="badge blue" style={{ marginLeft: 4 }}>{t}</span>) : '—'}</DRow>
             <DRow label="메모">{item.notes || '—'}</DRow>
           </>
@@ -437,6 +452,9 @@ export function EntityDetail({ type, item, onClose }) {
       )}
       {type === 'vm' && (
         <div className="flex gap" style={{ marginTop: 14, justifyContent: 'flex-end' }}>
+          {/* 사양 변경은 4개 VM 상세 화면 중 '가상머신' 탭에만 있어 화면마다 기능이 달랐다(v2.240 통일).
+              권한(vm.reconfig)이 없으면 버튼이 스스로 렌더되지 않는다 — 서버도 requirePerm 으로 강제. */}
+          <VmReconfigButton vm={item} />
           <VmConsoleButton vmId={item.id} vmName={item.name} />
           <VmRemoteButton item={item} />
           <VmMetricButton vmId={item.id} vmName={item.name} />
