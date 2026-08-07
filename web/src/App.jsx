@@ -260,7 +260,10 @@ function Portal({ user, onLogout }) {
   }, [vcenterId, region]);
 
 
-  const noFilterTabs = ['overview', 'vcenters', 'summary', 'upgrade', 'tools', 'insights', 'settings', 'nsx'];
+  // 상단 필터바(리전·vCenter·이름 검색)를 쓰지 않는 탭 — 화면이 자체 필터를 갖거나 필터 대상이
+  // 아닌 경우. 성능점검(svcmon)은 트리 검색·상태 칩·Test name 검색을 자체로 갖고 상단 필터값을
+  // 받지도 않아(<SvcMonitor /> 는 filters 미전달) 상단 검색이 눌러도 아무 일이 없는 죽은 UI 였다.
+  const noFilterTabs = ['overview', 'vcenters', 'summary', 'upgrade', 'tools', 'insights', 'settings', 'nsx', 'svcmon'];
   const showFilters = !noFilterTabs.includes(tab);
   const showTextSearch = tab !== 'explore';
 
