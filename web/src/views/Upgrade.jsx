@@ -27,6 +27,7 @@ export default function Upgrade() {
   const [busy, setBusy] = useState(null);
   const [msg, setMsg] = useState(null);
   const [form, setForm] = useState(null);
+  const [detect, setDetect] = useState(null);
 
   const load = async () => {
     try {
@@ -42,6 +43,18 @@ export default function Upgrade() {
     setBusy(action); setMsg(null);
     try { const r = await fn(); setMsg({ action, r }); await load(); }
     catch (e) { setMsg({ action, r: { ok: false, reason: e.message } }); }
+    finally { setBusy(null); }
+  };
+
+  // 서버가 자신의 실행 경로를 분석해 installDir 후보와 점검 근거(패키지 확인·쓰기 권한 등)를
+  // 돌려준다. 값은 폼에만 채우고 저장은 사용자가 '설정 저장'으로 확정한다.
+  const detectInstallDir = async () => {
+    setBusy('detect'); setDetect(null);
+    try {
+      const d = await fetchJson('/upgrade/detect-install');
+      setDetect(d);
+      if (d.installDir) setForm((f) => ({ ...f, installDir: d.installDir }));
+    } catch (e) { setDetect({ error: e.message }); }
     finally { setBusy(null); }
   };
 
@@ -127,7 +140,27 @@ export default function Upgrade() {
 
         <div className="spec-grid">
           <label style={{ gridColumn: '1 / -1' }}>설치 경로 (installDir) *
-            <input className="input" value={form.installDir} onChange={setF('installDir')} placeholder="/opt/vmware-portal/app" />
+            <div className="flex gap">
+              <input className="input" style={{ flex: 1 }} value={form.installDir} onChange={setF('installDir')} placeholder="/opt/vmware-portal/app" />
+              <button type="button" className="logout-btn" style={{ flex: 'none', whiteSpace: 'nowrap', padding: '0 14px' }}
+                disabled={busy} onClick={detectInstallDir} title="서버가 자신의 실행 경로를 분석해 설치 경로를 채웁니다">
+                {busy === 'detect' ? '감지 중…' : '서버에서 자동 감지'}
+              </button>
+            </div>
+            {detect && (detect.error
+              ? <div style={{ marginTop: 6, fontSize: 12, color: '#fbbf24' }}>감지 실패: {detect.error}</div>
+              : (
+                <div style={{ marginTop: 6, fontSize: 12, lineHeight: 1.7 }}>
+                  <div className="muted">{detect.source} 기준: <b style={{ color: 'var(--text)' }}>{detect.installDir}</b>
+                    {detect.ok ? '' : ' — 일부 점검 미통과(아래 확인)'}</div>
+                  {(detect.checks || []).map((c) => (
+                    <div key={c.key} style={{ color: c.ok ? 'var(--green)' : '#fbbf24' }}>{c.ok ? '✓' : '⚠'} {c.label}</div>
+                  ))}
+                  {detect.envInstallDir && (
+                    <div className="muted">참고: 환경변수 UPGRADE_INSTALL_DIR={detect.envInstallDir} (감지값과 다름)</div>
+                  )}
+                </div>
+              ))}
           </label>
         </div>
 
