@@ -29,6 +29,11 @@ systemctl daemon-reload
 echo "==> 앱/런타임 제거: $PREFIX"
 rm -rf "$PREFIX" "$PREFIX".bak.* 2>/dev/null || true
 
+# 설치가 /opt·/usr 밖 prefix 에 등록한 SELinux 영구 라벨 규칙 정리(best-effort).
+if [[ "$PREFIX" != /opt/* && "$PREFIX" != /usr/* ]] && command -v semanage >/dev/null 2>&1; then
+  semanage fcontext -d "${PREFIX}(/.*)?" 2>/dev/null || true
+fi
+
 if [[ "$PURGE" -eq 1 ]]; then
   echo "==> 설정 및 사용자 제거(purge)"
   rm -rf "$CONFIG_DIR"

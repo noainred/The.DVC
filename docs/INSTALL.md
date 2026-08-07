@@ -449,7 +449,7 @@ sudo cat /etc/dc-service-hub/initial-settings-password.txt
 
 | 증상 | 확인 |
 |---|---|
-| **설치 직후 서비스 무한 재시작** — `status=203/EXEC`, `Failed to locate executable .../node: Permission denied` | **SELinux 라벨 문제**(패키지를 `/tmp`·`/root`에서 풀면 `cp -a`가 `user_tmp_t` 라벨을 `/opt`까지 복사 — enforcing에서 systemd가 실행 거부, root 직접 실행은 되므로 설치 중엔 안 드러남). 복구: `sudo restorecon -Rv /opt/vmware-portal /etc/vmware-portal && sudo systemctl restart vmware-portal`. v2.230.0+ `install.sh`는 자동으로 복원함 |
+| **설치 직후 서비스 무한 재시작** — `status=203/EXEC`, `Failed to locate executable .../node: Permission denied` | **SELinux 라벨 문제**(패키지를 `/tmp`·`/root`에서 풀면 `cp -a`가 `user_tmp_t` 라벨을 `/opt`까지 복사 — enforcing에서 systemd가 실행 거부, root 직접 실행은 되므로 설치 중엔 안 드러남). 복구: `sudo restorecon -Rv /opt/vmware-portal /etc/vmware-portal && sudo systemctl restart vmware-portal`. v2.230.0+ `install.sh`는 자동으로 복원함. **`--prefix`를 `/opt`·`/usr` 밖**(예: `/data`)으로 지정한 경우 기본 라벨 자체가 실행 불가 타입(`default_t` 등)이라 restorecon으로 부족 — v2.234.0+ `install.sh`가 `semanage fcontext`로 `usr_t` 영구 규칙을 등록·검증하고, `semanage`가 없으면 `chcon` 임시 보정 후 영구 반영 명령(`dnf install policycoreutils-python-utils` → `semanage fcontext -a -t usr_t '<prefix>(/.*)?'` → `restorecon -R <prefix>`)을 안내함 |
 | 로그인 비번을 모름 | `sudo cat /etc/vmware-portal/initial-admin-password.txt` (없으면 `DEFAULT_ADMIN_PASSWORD` 설정값) |
 | 수집기 '연결 테스트' 실패(403) | 에이전트 `COLLECTOR_TOKEN`과 **저장된** 폼 토큰 일치? 앞뒤 공백/CRLF? 4000 방화벽? URL `http://IP:포트` |
 | 저장한 수집 서버 값이 원복됨 | v2.150.0+ 필요 — 관리자 저장 시 **🔒 고정**됨. 구버전이면 업그레이드 |
