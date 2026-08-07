@@ -1,7 +1,7 @@
 {
   "name": "uag-monitor-desktop",
   "productName": "UAG Monitor",
-  "version": "2.249.0",
+  "version": "2.250.0",
   "description": "Horizon UAG 모니터 데스크톱 앱 — 내장 서버 + 자체 창(Electron)",
   "main": "main.js",
   "license": "UNLICENSED",
