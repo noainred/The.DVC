@@ -24,10 +24,13 @@ const median = (arr) => { if (!arr.length) return 0; const s = [...arr].sort((a,
  */
 async function detectFamily(db, fam, { z = 3.5, windowHours = 24, bucketMin = 10, minSamples = 12 }) {
   const since = Date.now() - windowHours * 3600_000;
-  const latest = db.latestAll(fam.metric); // Map<k,{v,ts}>
+  const latest = db.latestAll(fam.metric); // Map<k,{v,ts}> (인메모리 캐시 — 풀스캔 아님)
+  // 키별 history() N+1(키 수천 × 쿼리 1회 = 요청당 동기 쿼리 수천 회로 이벤트 루프 블로킹)을
+  // 패밀리당 일괄 쿼리 1회로 대체. 결과는 키별 [{ts,avg,min,max}] 동일.
+  const histAll = db.historyAll(fam.metric, since, bucketMin * 60_000, 5000);
   const out = [];
   for (const [k, last] of latest) {
-    const hist = db.history(fam.metric, k, since, bucketMin * 60_000, 5000); // [{ts,avg,min,max}]
+    const hist = histAll.get(k) || [];
     if (hist.length < minSamples) continue;
     const vals = hist.map((h) => h.avg);
     const med = median(vals);
