@@ -56,15 +56,15 @@ function stateAt(hist, t) {
 }
 
 /** vCenter(또는 전체) 대역에서 사용할 수 있는 /24 base 목록. */
-export function netmapBases(snap, vcenterId = '') {
+export function netmapBases(snap, vcenterId = '', allowed = null) {
   const bases = new Set();
-  // 1) vCenter 등록 대역에서
-  const specs = vcenterId ? rangesForVcenter(vcenterId) : [];
+  // 1) vCenter 등록 대역에서 — 범위 밖 vCenter 의 대역은 조회하지 않는다(대역 열거 유출 차단).
+  const specs = (vcenterId && (!allowed || allowed.has(vcenterId))) ? rangesForVcenter(vcenterId) : [];
   for (const spec of specs) {
     for (const ip of expandRange(spec)) { const p = ip.split('.'); bases.add(`${p[0]}.${p[1]}.${p[2]}`); }
   }
-  // 2) 대장 rows(해당 vCenter 스코프)에서도 보강
-  const { rows } = buildIpamRows(snap, vcenterId || undefined);
+  // 2) 대장 rows(사용자 scope + 해당 vCenter 스코프)에서도 보강
+  const { rows } = buildIpamRows(snap, vcenterId || undefined, allowed);
   for (const r of rows) {
     if (r.ipNum == null) continue;
     const p = String(r.ip).split('.'); if (p.length === 4) bases.add(`${p[0]}.${p[1]}.${p[2]}`);
@@ -77,7 +77,7 @@ export function netmapBases(snap, vcenterId = '') {
  * 한 /24 base의 격자 데이터를 만든다. days/buckets로 시간축 분해.
  * 반환: { base, cidr, days, bucketMs, buckets:[ts], cells:[{...,states:[...]}], osLegend, summary }
  */
-export function buildNetmap(snap, { vcenterId = '', base = '', days = 30, buckets = 24 } = {}) {
+export function buildNetmap(snap, { vcenterId = '', base = '', days = 30, buckets = 24, allowed = null } = {}) {
   // generatedAt은 운영에서 ISO 문자열(store.js)이라 숫자 산술 시 NaN이 되어 시간축이 통째로
   // 깨진다 — epoch(ms)로 정규화한다.
   const now = (() => {
@@ -86,7 +86,7 @@ export function buildNetmap(snap, { vcenterId = '', base = '', days = 30, bucket
     const p = g != null ? Date.parse(g) : NaN;
     return Number.isFinite(p) ? p : Date.now();
   })();
-  const bases = netmapBases(snap, vcenterId);
+  const bases = netmapBases(snap, vcenterId, allowed);
   const b = base && /^\d+\.\d+\.\d+$/.test(base) ? base : bases[0] || '';
   const D = Math.max(1, Math.min(365, Number(days) || 30));
   const N = Math.max(6, Math.min(96, Number(buckets) || 24));
@@ -98,7 +98,7 @@ export function buildNetmap(snap, { vcenterId = '', base = '', days = 30, bucket
   if (!b) return { base: '', cidr: '', days: D, buckets: bucketTs, bucketMs, bases, cells: [], osLegend: [], summary: { total: 0 } };
 
   // OS/소유자 맵(대장) — 해당 vCenter 스코프 우선, 비면 전체.
-  const ledger = buildIpamRows(snap, vcenterId || undefined).rows;
+  const ledger = buildIpamRows(snap, vcenterId || undefined, allowed).rows;
   const byIp = new Map();
   for (const r of ledger) if (!byIp.has(r.ip)) byIp.set(r.ip, r);
 

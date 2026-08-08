@@ -1,5 +1,18 @@
 # 보안 점검 — 2026-08-08 (전역)
 
+> **조치 경과 (v2.256.0 후속)** — M1·M2 후속을 완료했습니다.
+> - **M1 IPAM 7종(해소)**: `buildIpamRows`·`buildSubnetSheets`·`listSubnets`·`buildIpamInsights`·`buildNetmap`
+>   에 `allowed`(scope) 인자를 추가 — 캐시 키에 scope 서명, known/conflict 유니버스를 허용 vCenter 로
+>   축소(conflictVcenters 유출 차단), 스캔·미귀속 수동 행은 범위 제한 계정에 미노출. `syncLedger`(외부 공유
+>   `ipam.db`)는 무스코프 유지. **적대적 검증이 추가로 잡은 형제 2종**(`/tools/ipam/scan-report.csv`·
+>   `/tools/ipam/history`)도 범위 제한 계정에 스캔 데이터를 노출하지 않게 게이트했습니다(ledger 차단과 일관).
+> - **M2 gpu-guest-data(해소)**: 엣지 간 쓰기 소유권 — hostId/vmId 의 vCenter 를 `listInventory` **최장
+>   프리픽스 매칭**으로 판정(콜론 포함 vc.id 오파싱 우회 방지), 소유 엣지가 아니면 그 항목 드롭. 조회(READ)
+>   격리는 v2.255 에서 이미 완료(buildGpuInventory scopedVms) — 회귀 테스트만 보강. ⚠️ direct-mode
+>   (중앙 직접 수집) vCenter 는 inventory owner 가 없어 TOFU 통과 — 완전 봉인은 `CENTRAL_REQUIRE_AGENT_TOKEN=true`(문서화된 잔여 한계).
+> - **M3(핸드오프)**: `M3_UAGMON_HANDOFF.md` 로 소유 세션에 전달(이 세션은 `uagmon/` 미편집).
+> - 회귀 테스트: `server/test/ipamScope.test.js`(8케이스). 2회 적대적 검증(각 라운드에서 형제 누락 추가 발견→보강).
+>
 > **조치 경과 (v2.255.0)** — M1·M2 를 수정했습니다(이 세션 코드). 1차 수정 후 적대적 검증
 > 워크플로가 **부분 롤아웃 갭(형제 라우트 다수 미적용)** 을 찾아 2차로 전수 보강했습니다.
 > - **M1 (해소·전수)**: 아래 조회 라우트에 `scopedVcenterIds` 교집합을 **요청 필터보다 먼저** 강제

@@ -64,8 +64,8 @@ function buildSubnets(rows) {
 }
 
 /** 30개 추천 기능 카탈로그를 계산해 반환. */
-export function buildIpamInsights(snap, vcenterId = '') {
-  const { rows } = buildIpamRows(snap, vcenterId);
+export function buildIpamInsights(snap, vcenterId = '', allowed = null) {
+  const { rows } = buildIpamRows(snap, vcenterId, allowed);
   const now = Date.now();
   const ipv4 = rows.filter((r) => r.ipNum != null && octets(r.ip).length === 4);
   const ipv6 = rows.filter((r) => /:/.test(String(r.ip)));
