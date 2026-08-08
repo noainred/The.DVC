@@ -56,7 +56,10 @@ const ENABLED_DFLT = field('enabled').dflt;
 const SAFE_SEG = /^[^\\/:*?"<>|]{1,60}$/;
 const SAFE_PATH = /^[^\\]{1,60}(\\[^\\]{1,60}){0,9}$/;
 
-const HOST_MODES = ['ips', 'name'];
+// ips=순차 IP 목록 · name=hostname(이름+도메인, 감시 시 DNS 해석) · manual=이름↔IP 직접 매핑.
+// 'dns'(이름을 지금 DNS 로 해석해 IP 고정)는 비동기라 라우트가 해석해 manual 맵으로 넘긴다
+// (genspec 는 동기 유지 — DNS I/O 를 이 순수 함수에 넣지 않는다).
+const HOST_MODES = ['ips', 'name', 'manual'];
 const DUP_MODES = ['skip', 'error'];
 /** 도메인 형식 — 라벨 사이 '.' 만 허용(SAFE_HOST 부분집합). */
 const SAFE_DOMAIN = /^\.[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)*$/;
@@ -150,6 +153,87 @@ function cidrNormalizeNote(token) {
 }
 
 /**
+ * 정수 읽기 — 표기법 우회(1e3·0x64·true·[3])를 막고 **정수 리터럴만** 인정한다.
+ * 오류는 넘겨받은 `errors` 배열에 담는다(모듈 내 두 곳 — parseNameCount·과거 expandGenSpec —
+ * 이 같은 규칙을 쓰도록 한 곳에 둔다).
+ */
+function readIntInto(errors, v, { dflt = null, min, max, label }) {
+  if (v === null || v === undefined || v === '') return dflt;
+  let n = null;
+  if (typeof v === 'number') n = Number.isInteger(v) ? v : null;
+  else if (typeof v === 'string' && /^[+-]?\d+$/.test(v.trim())) n = Number(v.trim());
+  if (n === null || !Number.isSafeInteger(n)) {
+    let shown; try { shown = String(v).slice(0, 20); } catch { shown = typeof v; }
+    errors.push(`${label}은 정수여야 합니다: ${shown}`);
+    return null;
+  }
+  if (n < min || n > max) { errors.push(`${label}은 ${min}~${max} 범위여야 합니다: ${n}`); return null; }
+  return n;
+}
+
+/**
+ * 이름 규칙(pattern·start·end·pad·count)을 파싱해 **생성 개수를 확정**한다.
+ * `expandGenSpec` 와 `expandNames`(DNS 모드용) 가 **같은 함수로 개수를 도출**하게 하려고 분리했다 —
+ * end↔count 우선순위 규칙을 두 곳에 복사하면 한쪽만 고친 날 이름 개수가 어긋난다.
+ *
+ * @returns {{pattern:string, start:number|null, pad:number|null, count:number|null,
+ *            countFixed:boolean, errors:string[]}}
+ *   `countFixed` = count 또는 end 로 개수가 확정됐는지(ips 모드의 IP 개수 교차검증 조건).
+ */
+export function parseNameCount(nameSpec = {}) {
+  const errors = [];
+  const ns = nameSpec && typeof nameSpec === 'object' ? nameSpec : {};
+  const pattern = typeof ns.pattern === 'string' ? ns.pattern.trim() : '';
+  if (!pattern) errors.push("이름 규칙을 입력하세요(예: 'lesasbpdp{n}').");
+  const start = readIntInto(errors, ns.start, { dflt: 1, min: 0, max: 1_000_000_000, label: '시작 번호' });
+  const pad = readIntInto(errors, ns.pad, { dflt: 0, min: 0, max: 12, label: '자리수(pad)' });
+  // 끝번호(end)가 주어지면 개수를 도출한다 — 사용자는 '몇 번부터 몇 번까지'로 생각하는 게 자연스럽다.
+  // end 와 count 를 동시에 주면 서로 어긋날 수 있으므로 end 를 우선하고 불일치는 오류로 알린다.
+  const endGiven = !(ns.end === null || ns.end === undefined || ns.end === '');
+  const end = readIntInto(errors, ns.end, { dflt: null, min: 0, max: 1_000_000_000, label: '끝 번호' });
+  const countGiven = !(ns.count === null || ns.count === undefined || ns.count === '');
+  let count = readIntInto(errors, ns.count, { dflt: null, min: 1, max: 1_000_000, label: '개수' });
+  if (endGiven && end !== null && start !== null) {
+    if (end < start) errors.push(`끝 번호(${end})가 시작 번호(${start})보다 작습니다.`);
+    else {
+      const derived = end - start + 1;
+      if (countGiven && count !== null && count !== derived) {
+        errors.push(`개수(${count})와 시작~끝(${start}~${end} = ${derived}개)이 어긋납니다. 하나만 지정하세요.`);
+      }
+      count = derived;   // end 우선 — '끝번호' UI 를 쓰는 경로가 표준이다
+    }
+  }
+  // end 로 개수를 도출한 경우도 '개수가 주어진 것'처럼 다뤄 IP 개수와 교차검증되게 한다.
+  const countFixed = countGiven || (endGiven && end !== null && start !== null && end >= start);
+  return { pattern, start, pad, count, countFixed, errors };
+}
+
+/**
+ * 이름 규칙만으로 **생성될 이름 목록**을 낸다(DNS 모드 라우트가 이름→DNS→IP 해석에 쓴다).
+ * expandGenSpec 가 뒤이어 manual 모드로 재생성하는 이름과 **정확히 같아야** 하므로 개수 도출은
+ * parseNameCount, 치환은 applyPattern 을 그대로 쓴다(문자열을 두 규칙으로 만들면 매핑이 밀린다).
+ *
+ * @returns {{names:string[], count:number, errors:string[]}}
+ */
+export function expandNames(nameSpec = {}) {
+  const { pattern, start, pad, count, countFixed, errors } = parseNameCount(nameSpec);
+  if (!countFixed) errors.push('개수 또는 끝번호를 입력하세요(이름을 DNS 로 해석하려면 개수가 먼저 정해져야 합니다).');
+  if (count !== null && count > MAX_GEN_ROWS) {
+    errors.push(`1회 생성 상한 초과: 대상 ${count}개 > ${MAX_GEN_ROWS}개 — 범위를 나눠 여러 번 등록하세요.`);
+  }
+  if (errors.length || start === null || pad === null || count === null || !pattern) {
+    return { names: [], count: 0, errors };
+  }
+  if (count > 1 && !pattern.includes('{n}')) {
+    errors.push(`이름 규칙에 {n} 을 넣으세요 — ${count}개를 만들려면 번호 자리가 필요합니다(예: 'lesasbpdp{n}').`);
+    return { names: [], count: 0, errors };
+  }
+  const names = [];
+  for (let i = 0; i < count; i += 1) names.push(applyPattern(pattern, start + i, pad));
+  return { names, count, errors };
+}
+
+/**
  * 이름 규칙 + IP 범위를 대상 행으로 펼친다.
  *
  * @param {object} spec
@@ -202,27 +286,6 @@ export function expandGenSpec(spec = {}, opts = {}) {
   const nameSpec = s.name && typeof s.name === 'object' ? s.name : {};
   const hostSpec = s.host && typeof s.host === 'object' ? s.host : {};
 
-  /**
-   * 정수 읽기 — `Number.isInteger(Number(v))` 만 보면 표기법 우회를 막지 못한다(실측:
-   * count '1e3'→1000, '0x64'→100, true→1, [3]→3, pad true→1). count 는 이 모듈의 중심
-   * 안전장치이고 mode:'name' 에는 IP 개수 교차검증이 없어 그 값이 곧 생성 대상 수가 된다 —
-   * '2.5 는 정수가 아니라고 거부하면서 "1e3" 은 1000개로 통과' 는 검증하지 않는 것과 같다.
-   * 그래서 **정수 리터럴만** 인정한다(숫자형 정수 또는 /^[+-]?\d+$/ 문자열).
-   */
-  const readInt = (v, { dflt = null, min, max, label }) => {
-    if (v === null || v === undefined || v === '') return dflt;
-    let n = null;
-    if (typeof v === 'number') n = Number.isInteger(v) ? v : null;
-    else if (typeof v === 'string' && /^[+-]?\d+$/.test(v.trim())) n = Number(v.trim());
-    if (n === null || !Number.isSafeInteger(n)) {
-      // String() 이 던지는 값(Object.create(null) 등)도 있으므로 라벨 만들기에서 500 을 내지 않는다.
-      let shown; try { shown = String(v).slice(0, 20); } catch { shown = typeof v; }
-      errors.push(`${label}은 정수여야 합니다: ${shown}`);
-      return null;
-    }
-    if (n < min || n > max) { errors.push(`${label}은 ${min}~${max} 범위여야 합니다: ${n}`); return null; }
-    return n;
-  };
   const pushCapped = (msgs, tail = '') => {
     for (const m of msgs.slice(0, ERR_CAP)) errors.push(m);
     if (msgs.length > ERR_CAP) errors.push(`… 외 ${msgs.length - ERR_CAP}건${tail}`);
@@ -251,13 +314,11 @@ export function expandGenSpec(spec = {}, opts = {}) {
 
   const enabled = boolOf(s.enabled, ENABLED_DFLT);
 
-  /* ── 이름 규칙 ── */
-  const pattern = typeof nameSpec.pattern === 'string' ? nameSpec.pattern.trim() : '';
-  if (!pattern) errors.push("이름 규칙을 입력하세요(예: 'lesasbpdp{n}').");
-  const start = readInt(nameSpec.start, { dflt: 1, min: 0, max: 1_000_000_000, label: '시작 번호' });
-  const pad = readInt(nameSpec.pad, { dflt: 0, min: 0, max: 12, label: '자리수(pad)' });
-  const countGiven = !(nameSpec.count === null || nameSpec.count === undefined || nameSpec.count === '');
-  let count = readInt(nameSpec.count, { dflt: null, min: 1, max: 1_000_000, label: '개수' });
+  /* ── 이름 규칙 ── (개수 도출은 parseNameCount 하나로 — expandNames 와 규칙을 공유) */
+  const nc = parseNameCount(nameSpec);
+  for (const e of nc.errors) errors.push(e);
+  const { pattern, start, pad, countFixed } = nc;
+  let count = nc.count;
 
   /* ── 호스트 ── */
   const rawMode = hostSpec.mode === null || hostSpec.mode === undefined || hostSpec.mode === '' ? HOST_MODES[0] : String(hostSpec.mode).trim().toLowerCase();
@@ -267,6 +328,8 @@ export function expandGenSpec(spec = {}, opts = {}) {
   let ips = [];
   let ipFatal = false;
   let domain = '';
+  // manual 모드: 이름 → IP 직접 매핑. 순서가 아니라 **이름 키**로 붙인다(행 순서가 밀려도 안전).
+  const hostMap = new Map();
   // 중복 개수 스캔이 작업량 상한에서 끊겼는지 — 끊긴 값(stats.dedupRemoved)은 부분 합계라
   // 정확한 건수가 아니다. 그 경우 메시지에 숫자를 적지 않는다(틀린 수를 단정하지 않는다).
   let dedupScanCapped = false;
@@ -327,7 +390,7 @@ export function expandGenSpec(spec = {}, opts = {}) {
         if (!ipFatal && stats.dedupRemoved > 0) {
           pushWarn(dedupScanCapped
             ? `중복 IP 가 제거되어 대상이 줄었습니다(정확한 건수는 계산 상한으로 생략) — 실제 대상은 ${ips.length}개입니다.`
-            : `중복 IP ${stats.dedupRemoved}건이 제거되어 대상이 ${ips.length}개가 되었습니다${countGiven ? '' : '(개수를 비워 두면 이 IP 개수를 그대로 씁니다)'}.`);
+            : `중복 IP ${stats.dedupRemoved}건이 제거되어 대상이 ${ips.length}개가 되었습니다${countFixed ? '' : '(개수를 비워 두면 이 IP 개수를 그대로 씁니다)'}.`);
         }
 
         for (const t of tokens) {
@@ -361,9 +424,9 @@ export function expandGenSpec(spec = {}, opts = {}) {
     }
 
     // count 미입력이면 IP 개수를 그대로 쓴다(가장 흔한 사용 방식).
-    if (!countGiven && !ipFatal) count = ips.length;
+    if (!countFixed && !ipFatal) count = ips.length;
     // 개수 불일치는 오류·전체 거부. 절단·IP 재사용·빈 host 생성 전부 하지 않는다.
-    if (countGiven && count !== null && !ipFatal && count !== ips.length) {
+    if (countFixed && count !== null && !ipFatal && count !== ips.length) {
       const dupNote = stats.dedupRemoved > 0
         ? (dedupScanCapped ? ' (중복 IP 가 제거되어 IP 가 줄었습니다)' : ` (중복 ${stats.dedupRemoved}건 제거되어 IP 가 줄었습니다)`)
         : '';
@@ -375,12 +438,36 @@ export function expandGenSpec(spec = {}, opts = {}) {
         errors.push(`IP ${ips.length}개는 1회 생성 상한(${MAX_GEN_ROWS}개)보다 많습니다 — 개수를 맞추는 것으로는 해결되지 않으니 범위를 ${MAX_GEN_ROWS}개 이하로 나눠 여러 번 등록하세요.`);
       }
     }
+  } else if (mode === 'manual') {
+    // 이름↔IP 직접 매핑. hostSpec.hosts = [{name, ip}] 또는 hostSpec.hostMap = {name: ip}.
+    // 이름 키로 붙이므로 개수는 이름 규칙(start/end/pad)으로 정해져야 한다(IP 개수로 추론 안 함).
+    if (!countFixed) errors.push('개수 또는 끝번호를 입력하세요(수동 IP 는 이름마다 지정하므로 개수가 먼저 정해져야 합니다).');
+    const pairs = Array.isArray(hostSpec.hosts) ? hostSpec.hosts
+      : (hostSpec.hostMap && typeof hostSpec.hostMap === 'object'
+        ? Object.entries(hostSpec.hostMap).map(([name, ip]) => ({ name, ip })) : []);
+    if (!pairs.length) errors.push('수동 IP 매핑이 비어 있습니다 — 각 호스트 이름에 IP 를 지정하거나 CSV 로 가져오세요.');
+    const badRows = [];
+    for (const p of pairs) {
+      const nm = typeof p?.name === 'string' ? p.name.trim() : '';
+      const ip = typeof p?.ip === 'string' ? p.ip.trim() : '';
+      if (!nm) continue;                            // 이름 없는 행은 무시(빈 표 행)
+      if (!ip) { badRows.push(`${nm}: IP 가 비어 있습니다`); continue; }
+      if (ip.includes(':')) { badRows.push(`${nm}: IPv6(콜론) 미지원 — IPv4 만`); continue; }
+      if (nonCanonicalIp(ip)) { badRows.push(`${nm}: 옥텟 선행 0 금지(8진수 오해석): ${ip.slice(0, 40)}`); continue; }
+      const reason = validateEndpoint({ host: ip });
+      if (reason) { pushBlocked(ip, `${nm}: ${reason}`); continue; }
+      if (hostMap.has(nm) && hostMap.get(nm) !== ip) badRows.push(`${nm}: 같은 이름에 서로 다른 IP(${hostMap.get(nm)} vs ${ip})`);
+      hostMap.set(nm, ip);
+    }
+    if (badRows.length) pushCapped(badRows);
+    if (blockedTotal) errors.push(`수동 IP 중 사용할 수 없는 주소 ${blockedTotal}건(자세한 사유는 blocked 목록) — 전체를 거부했습니다.`);
+    stats.ips = hostMap.size;
   } else {
     domain = typeof hostSpec.domain === 'string' ? hostSpec.domain.trim() : '';
     if (!domain) errors.push("도메인을 입력하세요(예: '.sbp.local') — 이름만으로는 호스트가 되지 않습니다.");
     else if (!domain.startsWith('.')) errors.push(`도메인은 '.' 으로 시작해야 합니다(예: '.sbp.local'): ${domain.slice(0, 40)}`);
     else if (!SAFE_DOMAIN.test(domain) || domain.length > HOST_MAX) errors.push(`도메인 형식이 올바르지 않습니다: ${domain.slice(0, 40)}`);
-    if (!countGiven) errors.push('개수를 입력하세요(호스트를 이름으로 만들 때는 IP 개수로 추론할 수 없습니다).');
+    if (!countFixed) errors.push('개수 또는 끝번호를 입력하세요(호스트를 이름으로 만들 때는 IP 개수로 추론할 수 없습니다).');
   }
 
   /* ── 이름 길이 · 자리수 전이 (마지막 번호 기준) ── */
@@ -415,10 +502,20 @@ export function expandGenSpec(spec = {}, opts = {}) {
   /* ── 행 생성 ── */
   const rows = [];
   const hostErrs = [];
+  const missingNames = [];         // manual: 생성된 이름 중 IP 매핑이 없는 것
+  const usedNames = new Set();      // manual: 실제로 쓰인 이름(남는 매핑 경고용)
   for (let i = 0; i < count; i += 1) {
     const n = start + i;
     const name = applyPattern(pattern, n, pad);
-    const host = mode === 'ips' ? ips[i] : `${name}${domain}`;
+    let host;
+    if (mode === 'ips') host = ips[i];
+    else if (mode === 'manual') {
+      // 이름 키로 붙인다 — 없는 이름은 조용히 건너뛰지 않고 모아서 전체 거부한다
+      // (한 칸이라도 비면 그 대상은 감시되지 않는데 화면엔 안 보인다).
+      host = hostMap.get(name);
+      usedNames.add(name);
+      if (host === undefined) { missingNames.push(name); host = ''; }
+    } else host = `${name}${domain}`;
     if (mode === 'name') {
       if (host.length > HOST_MAX) hostErrs.push(`호스트가 ${HOST_MAX}자를 넘습니다: ${host.slice(0, 60)}…`);
       // 이름+도메인이 '숫자 4옥텟' 이 되는 경우도 있다('010.0.0'+'.1'). ips 경로와 같은 규칙으로 막는다.
@@ -431,6 +528,15 @@ export function expandGenSpec(spec = {}, opts = {}) {
       }
     }
     rows.push({ kind, path: treePath, name, host, enabled, tests: [] });
+  }
+  if (mode === 'manual') {
+    if (missingNames.length) {
+      pushCapped(missingNames.map((nm) => `${nm}: IP 매핑이 없습니다`));
+      errors.push(`IP 가 지정되지 않은 호스트 ${missingNames.length}개 — 이름마다 IP 를 넣거나 CSV 로 채우세요(빈 채로 등록하면 그 대상은 감시되지 않습니다).`);
+    }
+    // 생성 이름에 없는 매핑이 남았으면 경고(오타·범위 축소로 붕 뜬 IP).
+    const extra = [...hostMap.keys()].filter((nm) => !usedNames.has(nm));
+    if (extra.length) pushWarn(`매핑에 있으나 생성 이름에 없는 항목 ${extra.length}개(무시됨): ${extra.slice(0, 5).join(', ')}${extra.length > 5 ? ' …' : ''}`);
   }
   if (hostErrs.length) pushCapped(hostErrs);
   if (blockedTotal) errors.push(`사용할 수 없는 호스트 ${blockedTotal}건(자세한 사유는 blocked 목록 — 상위 ${BLOCKED_CAP}건만) — 전체를 거부했습니다.`);

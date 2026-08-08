@@ -23,6 +23,20 @@ export const REQUIRED_COLUMNS = ['kind', 'path', 'target_name', 'host'];
 
 const BOOL_TEXT = (v) => (v ? 'true' : 'false');
 
+/**
+ * 대상 목록을 셀 배열 행으로 펼친다(헤더 1행 + 점검 1건=1행). CSV·XLSX·JSON 내보내기가
+ * **같은 컬럼·같은 순서**를 쓰도록 한 곳에서 낸다(포맷마다 컬럼이 갈리면 왕복이 깨진다).
+ * 첫 행은 헤더(CSV_COLUMNS).
+ */
+export function* targetRows(targets, { includeTests = true } = {}) {
+  yield CSV_COLUMNS.slice();
+  for (const t of targets) {
+    const tests = includeTests ? (t.tests || []) : [];
+    if (!tests.length) { yield rowCells(t, null); continue; }
+    for (const x of tests) yield rowCells(t, x);
+  }
+}
+
 /** 대상 1건 + 점검 1건 → 셀 배열(유형과 무관한 컬럼은 빈 칸). */
 function rowCells(target, test) {
   const out = [];

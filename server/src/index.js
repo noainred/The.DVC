@@ -112,6 +112,9 @@ app.use(rateLimit({ skip: (req) => {
 const BIG_JSON = express.json({ limit: process.env.JSON_BODY_LIMIT || '16mb' });
 app.use('/api/central/inventory', BIG_JSON);
 app.use('/api/central/agent-config', BIG_JSON); // 엣지 설정 통합 push(다수 파일)
+// 대상 가져오기는 XLSX 를 base64 로 실을 수 있어(2,000행 규모 ~1MB 초과 가능) 큰 한도를 준다.
+app.use('/api/svcmon/targets/import', BIG_JSON);
+app.use('/api/svcmon/targets/hostmap/parse', BIG_JSON);
 app.use(express.json({ limit: '1mb' }));
 
 // Lightweight request logging for the log viewer (skip the log endpoint itself).

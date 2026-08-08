@@ -2,9 +2,10 @@ import React, { useState } from 'react';
 import { fetchJson, postJson, downloadFile } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import PreviewTable from './PreviewTable.jsx';
+import { IMPORT_ACCEPT, readImportFile } from './fileFormat.js';
 
 /**
- * 성능점검 CSV 가져오기 / 내보내기.
+ * 성능점검 대상 가져오기 / 내보내기 — CSV · JSON · XLSX(엑셀) 세 포맷을 모두 지원한다.
  *
  * 가져오기는 **미리보기 → 확인 → 등록** 2단계다. 미리보기 없이 바로 등록하는 버튼을 두지 않는다
  * — 2,000행 등록은 되돌리기가 비싸고(배치 롤백이 있지만 그사이 폴러가 이미 점검을 시작한다),
@@ -12,10 +13,19 @@ import PreviewTable from './PreviewTable.jsx';
  *
  * 등록은 서버에서 all-or-nothing 이다. 오류가 1건이라도 있으면 아무것도 저장되지 않으므로
  * '오류 무시하고 나머지만 등록' 버튼도 두지 않는다(부분 등록 상태가 가장 추적하기 어렵다).
+ *
+ * 포맷은 확장자로 자동 판별한다(.xlsx=엑셀, .json=JSON, 그 외 CSV). XLSX 는 바이너리라 base64 로
+ * 실어 보낸다(서버가 exceljs 로 읽는다). 세 포맷 모두 같은 파서로 흘러 검증 규칙이 하나다.
  */
+
+const EXP_FMT = [
+  { v: 'csv', label: 'CSV', ext: 'csv' },
+  { v: 'xlsx', label: '엑셀(XLSX)', ext: 'xlsx' },
+  { v: 'json', label: 'JSON', ext: 'json' },
+];
+
 export default function CsvTab({ canEdit }) {
-  const [csv, setCsv] = useState('');
-  const [fileName, setFileName] = useState('');
+  const [imp, setImp] = useState({ format: 'csv', content: '', fileName: '' });
   const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
@@ -23,7 +33,7 @@ export default function CsvTab({ canEdit }) {
   const [schema, setSchema] = useState(null);
   const [showCols, setShowCols] = useState(false);
 
-  const [exp, setExp] = useState({ kind: '', path: '', tests: true });
+  const [exp, setExp] = useState({ kind: '', path: '', tests: true, format: 'csv' });
 
   const doExport = async () => {
     setErr(''); setBusy('export');
@@ -32,7 +42,8 @@ export default function CsvTab({ canEdit }) {
       if (exp.kind) qs.set('kind', exp.kind);
       if (exp.path.trim()) qs.set('path', exp.path.trim());
       if (!exp.tests) qs.set('tests', '0');
-      const name = await downloadFile(`/svcmon/targets/export.csv?${qs}`);
+      const path = exp.format === 'csv' ? `/svcmon/targets/export.csv?${qs}` : `/svcmon/targets/export.${exp.format}?${qs}`;
+      const name = await downloadFile(path);
       setDone({ kind: 'export', text: `${name} 을 내려받았습니다.` });
     } catch (e) { setErr(e.message); } finally { setBusy(''); }
   };
@@ -51,25 +62,21 @@ export default function CsvTab({ canEdit }) {
     catch (e) { setErr(e.message); }
   };
 
-  const onFile = (e) => {
+  const onFile = async (e) => {
     const f = e.target.files?.[0];
+    e.target.value = '';   // 같은 파일 재선택 허용
     if (!f) return;
-    // 브라우저에서 읽어 텍스트로 보낸다 — 서버가 multipart 를 다루지 않고, 미리보기 단계에서
-    // 같은 본문을 두 번(미리보기·등록) 보내야 하므로 클라이언트가 원문을 들고 있는 게 맞다.
-    const r = new FileReader();
-    r.onload = () => {
-      setCsv(String(r.result || ''));
-      setFileName(f.name);
-      setPreview(null); setDone(null); setErr('');
-    };
-    r.onerror = () => setErr('파일을 읽지 못했습니다.');
-    r.readAsText(f, 'utf-8');
+    setErr(''); setDone(null); setPreview(null);
+    try {
+      const { format, content, fileName } = await readImportFile(f);
+      setImp({ format, content, fileName });
+    } catch (e2) { setErr(e2.message); }
   };
 
   const doPreview = async () => {
     setErr(''); setDone(null); setBusy('preview');
     try {
-      const r = await postJson('/svcmon/targets/import', { csv, mode: 'preview' });
+      const r = await postJson('/svcmon/targets/import', { format: imp.format, content: imp.content, mode: 'preview' });
       if (r.error) setErr(r.error);
       setPreview(r);
     } catch (e) { setErr(e.message); setPreview(null); } finally { setBusy(''); }
@@ -79,17 +86,19 @@ export default function CsvTab({ canEdit }) {
     setErr(''); setBusy('import');
     try {
       const r = await postJson('/svcmon/targets/import', {
-        csv, mode: 'add', expectedCount: preview?.expectedCount,
+        format: imp.format, content: imp.content, mode: 'add', expectedCount: preview?.expectedCount,
       });
       if (r.error) { setErr(r.error); setPreview(r); return; }
       setDone({ kind: 'import', text: `대상 ${r.added}개 · 점검 ${r.newTests}개를 등록했습니다. 배치 ${r.batch}` });
-      setPreview(null); setCsv(''); setFileName('');
+      setPreview(null); setImp({ format: 'csv', content: '', fileName: '' });
     } catch (e) { setErr(e.message); } finally { setBusy(''); }
   };
 
-  const rows = csv ? csv.split(/\r?\n/).filter((l) => l.trim()).length - 1 : 0;
+  const isCsvText = imp.format === 'csv';
+  const rows = (isCsvText && imp.content) ? imp.content.split(/\r?\n/).filter((l) => l.trim()).length - 1 : 0;
   const canCommit = preview && !preview.error && (preview.summary?.error || 0) === 0
     && (preview.summary?.create || 0) > 0 && preview.capacity?.verdict !== 'reject';
+  const fmtLabel = EXP_FMT.find((f) => f.v === imp.format)?.label || imp.format.toUpperCase();
 
   return (
     <div className="flex col gap">
@@ -97,7 +106,7 @@ export default function CsvTab({ canEdit }) {
       <div className="card" style={{ padding: 14 }}>
         <b>내보내기</b>
         <div className="muted" style={{ fontSize: 12, margin: '4px 0 10px' }}>
-          점검 1건이 1행입니다(한 대상에 점검이 여러 개면 앞 5열이 반복). UTF-8 BOM 이라 엑셀에서 바로 열립니다.
+          점검 1건이 1행입니다(한 대상에 점검이 여러 개면 앞 5열이 반복). CSV·XLSX 는 UTF-8/엑셀에서 바로 열립니다.
         </div>
         <div className="flex gap wrap" style={{ alignItems: 'center' }}>
           <select className="select" value={exp.kind} onChange={(e) => setExp({ ...exp, kind: e.target.value })}>
@@ -107,12 +116,16 @@ export default function CsvTab({ canEdit }) {
           </select>
           <input className="input" style={{ minWidth: 260 }} placeholder="경로로 범위 좁히기 (예: A.Infra\OC2)"
             value={exp.path} onChange={(e) => setExp({ ...exp, path: e.target.value })} />
+          <select className="select" value={exp.format} onChange={(e) => setExp({ ...exp, format: e.target.value })}
+            title="내보낼 파일 형식">
+            {EXP_FMT.map((f) => <option key={f.v} value={f.v}>{f.label}</option>)}
+          </select>
           <label className="flex gap" style={{ alignItems: 'center', fontSize: 12 }}>
             <input type="checkbox" checked={exp.tests} onChange={(e) => setExp({ ...exp, tests: e.target.checked })} />
             점검 항목 포함
           </label>
           <button className="login-btn" disabled={busy === 'export'} onClick={doExport}>
-            {busy === 'export' ? '내보내는 중…' : '⤓ CSV 내보내기'}
+            {busy === 'export' ? '내보내는 중…' : `⤓ ${EXP_FMT.find((f) => f.v === exp.format)?.label || ''} 내보내기`}
           </button>
           <button className="tab" disabled={busy === 'sample'} onClick={doSample}>⤓ 샘플 CSV</button>
           <button className="tab" onClick={loadSchema}>{showCols ? '컬럼 설명 닫기' : '컬럼 설명 보기'}</button>
@@ -153,7 +166,7 @@ export default function CsvTab({ canEdit }) {
       <div className="card" style={{ padding: 14 }}>
         <b>가져오기</b>
         <div className="muted" style={{ fontSize: 12, margin: '4px 0 10px' }}>
-          ① 파일 선택 → ② 미리보기 → ③ 등록. 이미 있는 대상(구분+경로+이름)은 건너뜁니다.
+          ① 파일 선택(CSV·JSON·XLSX) → ② 미리보기 → ③ 등록. 이미 있는 대상(구분+경로+이름)은 건너뜁니다.
           오류가 1건이라도 있으면 <b>아무것도 등록하지 않습니다</b>(부분 등록 없음).
         </div>
 
@@ -162,9 +175,14 @@ export default function CsvTab({ canEdit }) {
         )}
 
         <div className="flex gap wrap" style={{ alignItems: 'center' }}>
-          <input type="file" accept=".csv,text/csv" onChange={onFile} disabled={!canEdit} />
-          {fileName && <span className="muted" style={{ fontSize: 12 }}>{fileName} · 약 {rows.toLocaleString()}행</span>}
-          <button className="login-btn" disabled={!canEdit || !csv.trim() || busy === 'preview'} onClick={doPreview}>
+          <input type="file" accept={IMPORT_ACCEPT} onChange={onFile} disabled={!canEdit} />
+          {imp.fileName && (
+            <span className="muted" style={{ fontSize: 12 }}>
+              {imp.fileName} · <span className="badge gray">{fmtLabel}</span>
+              {isCsvText ? ` · 약 ${rows.toLocaleString()}행` : ''}
+            </span>
+          )}
+          <button className="login-btn" disabled={!canEdit || !imp.content.trim() || busy === 'preview'} onClick={doPreview}>
             {busy === 'preview' ? '검사 중…' : '미리보기'}
           </button>
           {preview && (
@@ -173,18 +191,19 @@ export default function CsvTab({ canEdit }) {
               {busy === 'import' ? '등록 중…' : `${(preview.summary?.create || 0).toLocaleString()}개 등록`}
             </button>
           )}
-          {(preview || csv) && (
-            <button className="tab" onClick={() => { setCsv(''); setFileName(''); setPreview(null); setDone(null); setErr(''); }}>
+          {(preview || imp.content) && (
+            <button className="tab" onClick={() => { setImp({ format: 'csv', content: '', fileName: '' }); setPreview(null); setDone(null); setErr(''); }}>
               초기화
             </button>
           )}
         </div>
 
         <details style={{ marginTop: 8 }}>
-          <summary className="muted" style={{ fontSize: 12, cursor: 'pointer' }}>파일 대신 붙여넣기</summary>
+          <summary className="muted" style={{ fontSize: 12, cursor: 'pointer' }}>파일 대신 CSV 붙여넣기</summary>
           <textarea className="input" rows={6} style={{ width: '100%', marginTop: 6, fontFamily: 'ui-monospace, monospace', fontSize: 11 }}
             placeholder={'kind,path,target_name,host,...\ninfra,A.Infra\\OC2,srv01,10.20.30.41,...'}
-            value={csv} onChange={(e) => { setCsv(e.target.value); setFileName(''); setPreview(null); }} disabled={!canEdit} />
+            value={isCsvText ? imp.content : ''}
+            onChange={(e) => { setImp({ format: 'csv', content: e.target.value, fileName: '' }); setPreview(null); }} disabled={!canEdit} />
         </details>
 
         {err && <ErrorBox message={err} />}
