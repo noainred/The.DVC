@@ -769,8 +769,18 @@ function IpHistoryModal({ row, scope, onClose }) {
   const hostname = row.hostname;
   const [h, setH] = useState(undefined);
   const [showDetail, setShowDetail] = useState(false);
+  // 목록(/tools/ipam) 응답 다이어트로 VM 행의 owner 는 목록에 실리지 않는다(hasOwner 플래그만).
+  // 모달을 연 시점에 /vms/lookup 으로 1건만 지연 조회 — 목록이 수십 MB로 커지던 것의 짝 수정.
+  const [owner, setOwner] = useState(row.owner || null);
+  useEffect(() => {
+    if (!row.owner && row.hasOwner && row.ownerType === 'vm') {
+      fetchJson(`/vms/lookup?ip=${encodeURIComponent(ip)}${row.vcenterId ? `&vcenterId=${encodeURIComponent(row.vcenterId)}` : ''}`)
+        .then((r) => { if (r?.vm) setOwner(r.vm); })
+        .catch(() => { /* 실패 시 상세 버튼만 미표시 — 원격 접속은 IP 폴백으로 동작 */ });
+    }
+  }, [ip]); // eslint-disable-line react-hooks/exhaustive-deps
   // VM/호스트 소유 IP면 그 자원으로, 스캔 IP면 IP만으로 원격 접속 대상 구성.
-  const remoteItem = row.owner || { name: hostname || ip, ipAddresses: [ip], vcenterId: row.vcenterId || scope || '' };
+  const remoteItem = owner || { name: hostname || ip, ipAddresses: [ip], vcenterId: row.vcenterId || scope || '' };
   useEffect(() => { fetchJson(`/tools/ipam/history?ip=${encodeURIComponent(ip)}`).then((r) => setH(r.history || null)).catch(() => setH(null)); }, [ip]);
   const fmt = (t) => (t ? new Date(t).toLocaleString() : '—');
   const dur = (ms) => { if (ms < 0) ms = 0; const d = Math.floor(ms / 86400000), hh = Math.floor((ms % 86400000) / 3600000), mm = Math.floor((ms % 3600000) / 60000); return d ? `${d}일 ${hh}시간` : (hh ? `${hh}시간 ${mm}분` : `${mm}분`); };
@@ -845,11 +855,11 @@ function IpHistoryModal({ row, scope, onClose }) {
       )}
       {/* 하단: VM 정보 보기(소유 자원이 있을 때) + 원격 접속(SSH/RDP) — 기존 기능 재사용 */}
       <div className="flex gap" style={{ marginTop: 14, borderTop: '1px solid rgba(255,255,255,.08)', paddingTop: 12, alignItems: 'center' }}>
-        {row.owner && <button className="logout-btn" style={{ padding: '8px 14px' }} onClick={() => setShowDetail(true)}>🖥 VM 정보 보기</button>}
+        {owner && <button className="logout-btn" style={{ padding: '8px 14px' }} onClick={() => setShowDetail(true)}>🖥 VM 정보 보기</button>}
         <VmRemoteButton item={remoteItem} />
-        {!row.owner && <span className="muted" style={{ fontSize: 12 }}>스캔으로 확인된 IP — 원격 접속은 IP로 직접 연결합니다.</span>}
+        {!owner && !row.hasOwner && <span className="muted" style={{ fontSize: 12 }}>스캔으로 확인된 IP — 원격 접속은 IP로 직접 연결합니다.</span>}
       </div>
-      {showDetail && row.owner && <EntityDetail type={row.ownerType} item={row.owner} onClose={() => setShowDetail(false)} />}
+      {showDetail && owner && <EntityDetail type={row.ownerType} item={owner} onClose={() => setShowDetail(false)} />}
     </Modal>
   );
 }

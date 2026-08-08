@@ -1,6 +1,6 @@
 {
   "name": "uag-monitor",
-  "version": "2.252.0",
+  "version": "2.253.0",
   "description": "Horizon UAG(Unified Access Gateway) 상태/세션 모니터 — Node 내장 모듈 전용, 서버(웹)/Windows/macOS 공용",
   "type": "module",
   "main": "server.js",

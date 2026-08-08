@@ -652,8 +652,13 @@ api.get('/release-notes', (_req, res) => {
 // Per-center IP ledger (IP 관리대장): every IPv4 collected from vCenter (VM
 // guest IPs, multi-homed NICs, and hosts registered by management IP), grouped
 // by center, with the owning entity embedded so the UI can show details on click.
+// 응답 다이어트(v2.253): VM 행의 owner(스냅샷 VM 객체 통째 — 행당 수 KB)가 응답을 수십 MB 로
+// 만들어 JSON.stringify + SHA-1(ETag)이 요청마다 이벤트 루프를 세웠다. 목록에선 hasOwner
+// 플래그만 내리고, 상세 팝업은 /vms/lookup?ip= 로 클릭 시 1건만 가져온다(프론트 지연 조회).
+// 호스트/스캔 행은 원래 작아 유지. buildIpamRows 결과는 캐시 공유 객체라 여기서 변형하지 않는다.
 api.get('/tools/ipam', (req, res) => {
-  res.json(buildIpamRows(store.get(), req.query.vcenterId));
+  const data = buildIpamRows(store.get(), req.query.vcenterId);
+  res.json({ ...data, rows: data.rows.map((r) => (r.ownerType === 'vm' && r.owner ? { ...r, owner: undefined, hasOwner: true } : r)) });
 });
 
 // IPAM 추천 기능 30선 — 유명 IPAM 솔루션 대표 기능을 수집 데이터로 계산.
