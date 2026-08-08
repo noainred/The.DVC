@@ -171,6 +171,36 @@ export async function downloadFile(path, filename = '') {
   return name;
 }
 
+/**
+ * POST 로 파일을 내려받는다(서버가 본문을 받아 파일을 만들어 응답하는 경우 — 예: 현재 화면의
+ * 표를 CSV 로 내보내기). GET downloadFile 과 동작은 같고 method/body 만 다르다.
+ */
+export async function postDownload(path, body = {}, filename = '') {
+  const res = await fetch(`${BASE}${path}`, {
+    method: 'POST',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(body),
+    signal: timeoutSignal(MUT_TIMEOUT_MS),
+  });
+  if (res.status === 401) { setToken(null); onUnauthorized(); throw new Error('세션이 만료되었습니다.'); }
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.reason || data.error || `다운로드 실패 (${res.status})`);
+  }
+  const cd = res.headers.get('content-disposition') || '';
+  const m = /filename="?([^";]+)"?/i.exec(cd);
+  const name = filename || (m && decodeURIComponent(m[1])) || path.split('/').pop() || 'download';
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return name;
+}
+
 export async function login(username, password, { keep = true } = {}) {
   const res = await fetch(`${BASE}/auth/login`, {
     method: 'POST',

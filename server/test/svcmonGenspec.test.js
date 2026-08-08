@@ -15,7 +15,7 @@ import path from 'node:path';
 process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'svcmon-gen-'));
 delete process.env.SSRF_ALLOW_LOOPBACK;      // 루프백 차단이 켜진 기본 상태로 검증
 
-const { expandGenSpec, MAX_GEN_ROWS, LIST_CAPS } = await import('../src/svcmon/genspec.js');
+const { expandGenSpec, expandNames, parseNameCount, MAX_GEN_ROWS, LIST_CAPS } = await import('../src/svcmon/genspec.js');
 const { LIMITS, planBulkTargets } = await import('../src/svcmon/store.js');
 
 const joined = (arr) => arr.join(' | ');
@@ -597,4 +597,87 @@ test('빈 스펙·비객체 입력에도 던지지 않고 오류로 보고한다
     assert.ok(r.errors.length >= 1);
     assert.deepEqual(r.blocked, []);
   }
+});
+
+/* ── 끝번호(end) · parseNameCount · expandNames · manual 모드 (v2.249) ── */
+
+test('E1 끝번호(end): start~end 로 개수를 도출한다(count 미입력)', () => {
+  const nc = parseNameCount({ pattern: 'srv{n}', start: 1, end: 5, pad: 2 });
+  assert.equal(nc.count, 5);
+  assert.equal(nc.countFixed, true);
+  assert.deepEqual(nc.errors, []);
+});
+
+test('E2 끝번호 < 시작번호는 오류', () => {
+  const nc = parseNameCount({ pattern: 'a{n}', start: 5, end: 2 });
+  assert.match(joined(nc.errors), /끝 번호.*작습니다/);
+});
+
+test('E3 개수와 끝번호가 어긋나면 오류(둘 중 하나만 지정)', () => {
+  const nc = parseNameCount({ pattern: 'a{n}', start: 1, end: 3, count: 10 });
+  assert.match(joined(nc.errors), /어긋납니다/);
+});
+
+test('E4 개수·끝번호가 일치하면 통과', () => {
+  const nc = parseNameCount({ pattern: 'a{n}', start: 1, end: 3, count: 3 });
+  assert.equal(nc.count, 3);
+  assert.deepEqual(nc.errors, []);
+});
+
+test('E5 expandNames: 이름 목록을 시작~끝·pad 로 만든다', () => {
+  const r = expandNames({ pattern: 'srv{n}', start: 1, end: 3, pad: 2 });
+  assert.deepEqual(r.names, ['srv01', 'srv02', 'srv03']);
+  assert.equal(r.count, 3);
+});
+
+test('E6 expandNames: 개수/끝번호 미입력이면 오류(DNS 모드는 개수가 먼저 정해져야)', () => {
+  const r = expandNames({ pattern: 'a{n}' });
+  assert.equal(r.names.length, 0);
+  assert.match(joined(r.errors), /개수 또는 끝번호/);
+});
+
+test('E7 expandGenSpec: 끝번호로 ips 모드 개수 교차검증 — 이름 5 vs IP 3 은 거부', () => {
+  const r = expandGenSpec(base({
+    name: { pattern: 's{n}', start: 1, end: 5, pad: 1 },
+    host: { mode: 'ips', ips: '10.20.30.41-10.20.30.43' },
+  }));
+  assert.equal(r.rows.length, 0);
+  assert.match(joined(r.errors), /개수 불일치/);
+});
+
+test('M1 manual 정상: 이름 키로 IP 를 붙인다(행 순서 무관)', () => {
+  const r = expandGenSpec(base({
+    name: { pattern: 'n{n}', start: 1, end: 3, pad: 1 },
+    host: { mode: 'manual', hostMap: { n2: '10.9.0.2', n1: '10.9.0.1', n3: '10.9.0.3' } },
+  }));
+  assert.deepEqual(r.errors, []);
+  assert.equal(r.rows.length, 3);
+  assert.equal(r.rows.find((x) => x.name === 'n2').host, '10.9.0.2');
+});
+
+test('M2 manual 누락: IP 가 빠진 이름이 있으면 전체 거부', () => {
+  const r = expandGenSpec(base({
+    name: { pattern: 'n{n}', start: 1, end: 3, pad: 1 },
+    host: { mode: 'manual', hostMap: { n1: '10.9.0.1' } },
+  }));
+  assert.equal(r.rows.length, 0);
+  assert.match(joined(r.errors), /IP 매핑이 없습니다|IP 가 지정되지 않은/);
+});
+
+test('M3 manual 차단 IP: SSRF 가드에 걸리면 blocked + 전체 거부', () => {
+  const r = expandGenSpec(base({
+    name: { pattern: 'n{n}', start: 1, end: 1, pad: 1 },
+    host: { mode: 'manual', hostMap: { n1: '127.0.0.1' } },
+  }));
+  assert.equal(r.rows.length, 0);
+  assert.ok(r.blocked.length >= 1 || /사용할 수 없는/.test(joined(r.errors)));
+});
+
+test('M4 manual 개수 미확정: 끝번호/개수 없으면 오류', () => {
+  const r = expandGenSpec(base({
+    name: { pattern: 'n{n}', start: 1, pad: 1 },
+    host: { mode: 'manual', hostMap: { n1: '10.9.0.1' } },
+  }));
+  assert.equal(r.rows.length, 0);
+  assert.match(joined(r.errors), /개수 또는 끝번호/);
 });

@@ -20,6 +20,13 @@ import {
 } from '../svcmon/store.js';
 import { TARGET_FIELDS, TEST_FIELDS, CSV_COLUMNS } from '../svcmon/testSchema.js';
 import { csvLines, parseTargetsCsv, sampleCsv, REQUIRED_COLUMNS } from '../svcmon/csvio.js';
+import {
+  FORMATS, FORMAT_META, serializeTargets, parseTargetsAny,
+  hostMapTemplateCsv, hostMapToCsv, parseHostMapAny,
+} from '../svcmon/formats.js';
+import dns from 'node:dns';
+import { promisify } from 'node:util';
+const dnsResolve4 = promisify(dns.resolve4);
 import { judgeCapacity, suggestIntervalSec } from '../svcmon/capacity.js';
 import { testState, emptySummary } from '../svcmon/status.js';
 import { edgeSummary, edgeState, edgeTotals, forgetAgent, probeAgent, MAX_AGENTS, MAX_ROWS_PER_AGENT } from '../central/svcmonEdge.js';
@@ -39,7 +46,7 @@ import {
   deleteTemplate, applyTemplate, templateUsage, materializeForTarget,
   MAX_TEMPLATES, MAX_ITEMS, SUBST_VARS,
 } from '../svcmon/templates.js';
-import { expandGenSpec } from '../svcmon/genspec.js';
+import { expandGenSpec, expandNames } from '../svcmon/genspec.js';
 import { recordBatch, listBatches, rollbackBatch, deleteBatchRecord } from '../svcmon/batches.js';
 import { getResults, getLastSweep, runNow, pollerStats } from '../svcmon/poller.js';
 import { getLogSettings, setLogSettings, ROTATE_UNITS, ROTATE_LABEL } from '../svcmon/logsettings.js';
@@ -307,10 +314,74 @@ svcmonRouter.get('/targets/export.csv', canEdit, (req, res) => {
 });
 
 /** 샘플 CSV — 스키마에서 생성한다(하드코딩 상수면 컬럼 추가한 날 샘플만 낡는다). */
+/**
+ * 대상 내보내기 — 다중 포맷(json·xlsx). CSV 는 위 스트리밍 라우트가 담당(대용량 청크).
+ * json/xlsx 는 전량을 메모리에 만들되 1회 요청 상한(대상 20,000) 규모에서 수 MB 수준이다.
+ */
+svcmonRouter.get('/targets/export.:format', canEdit, async (req, res) => {
+  const format = FORMATS.includes(req.params.format) ? req.params.format : null;
+  if (!format || format === 'csv') return res.status(404).json({ error: 'csv 는 /targets/export.csv 를 쓰세요.' });
+  const kind = KINDS.includes(req.query.kind) ? req.query.kind : null;
+  const scope = typeof req.query.path === 'string' ? req.query.path.trim() : '';
+  const withTests = req.query.tests !== '0';
+  const all = listTargetsCopy().filter((t) => {
+    if (kind && (t.kind || 'infra') !== kind) return false;
+    if (scope && !(t.path === scope || t.path.startsWith(`${scope}\\`))) return false;
+    return true;
+  });
+  try {
+    const body = await serializeTargets(all, format, { includeTests: withTests });
+    const meta = FORMAT_META[format];
+    const stamp = new Date().toISOString().slice(0, 10);
+    res.setHeader('Content-Type', meta.mime);
+    res.setHeader('Content-Disposition', `attachment; filename="svcmon-targets-${stamp}.${meta.ext}"`);
+    logAudit({ user: req.user?.username, action: 'svcmon.target.export', detail: `대상 ${all.length} · ${format}${scope ? ` · 경로 ${scope}` : ''}` });
+    res.send(Buffer.isBuffer(body) ? body : Buffer.from(body));
+  } catch (e) { res.status(500).json({ error: `내보내기 실패: ${e.message}` }); }
+});
+
 svcmonRouter.get('/targets/sample.csv', canEdit, (req, res) => {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="svcmon-sample.csv"');
   res.send(sampleCsv());
+});
+
+/* ── 수동 IP 매핑(이름↔IP) 템플릿·가져오기·내보내기 ── */
+
+/** 수동 매핑 CSV 템플릿 다운로드. `?names=a,b,c` 를 주면 그 이름들을 미리 채워 IP 만 적게 한다. */
+svcmonRouter.get('/targets/hostmap-template.csv', canEdit, (req, res) => {
+  const raw = typeof req.query.names === 'string' ? req.query.names : '';
+  const names = raw.split(',').map((s) => s.trim()).filter(Boolean).slice(0, LIMITS.maxBulkRows);
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="svcmon-hostmap-template.csv"');
+  res.send(hostMapTemplateCsv(names));
+});
+
+/** 수동 매핑 파일(csv/json/xlsx) → `{pairs:[{name,ip}], rowCount, errors}`(화면 표 채우기용). */
+svcmonRouter.post('/targets/hostmap/parse', canEdit, async (req, res) => {
+  const format = FORMATS.includes(req.body?.format) ? req.body.format : 'csv';
+  const rawContent = typeof req.body?.content === 'string' ? req.body.content
+    : (typeof req.body?.csv === 'string' ? req.body.csv : '');
+  if (!rawContent.trim()) return res.status(400).json({ error: '내용이 비어 있습니다.' });
+  let input = rawContent;
+  if (format === 'xlsx') {
+    try { input = Buffer.from(rawContent, 'base64'); } catch { return res.status(400).json({ error: 'XLSX(base64) 디코딩 실패.' }); }
+  }
+  try {
+    const r = await parseHostMapAny(input, format);
+    if (r.pairs.length > LIMITS.maxBulkRows) {
+      return res.status(400).json({ error: `한 번에 최대 ${LIMITS.maxBulkRows}개까지 가져올 수 있습니다(파싱 ${r.pairs.length}개).` });
+    }
+    res.json({ pairs: r.pairs.slice(0, LIMITS.maxBulkRows), rowCount: r.rowCount, errors: r.errors || [] });
+  } catch (e) { res.status(400).json({ error: `파싱 실패: ${e.message}` }); }
+});
+
+/** 현재 매핑 표를 CSV 로 내보내기(수식 인젝션 가드는 hostMapToCsv 가 적용). */
+svcmonRouter.post('/targets/hostmap/export.csv', canEdit, (req, res) => {
+  const pairs = Array.isArray(req.body?.pairs) ? req.body.pairs.slice(0, LIMITS.maxBulkRows) : [];
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="svcmon-hostmap.csv"');
+  res.send(hostMapToCsv(pairs.map((p) => ({ name: String(p?.name ?? ''), ip: String(p?.ip ?? '') }))));
 });
 
 /** 컬럼 설명 — 화면이 표를 그릴 때 쓴다(스키마와 화면이 어긋나지 않게). */
@@ -335,12 +406,26 @@ svcmonRouter.get('/targets/csv-schema', canEdit, (req, res) => {
  * 가져오기 — `mode:'preview'` 는 저장하지 않고 판정만, `'add'` 는 커밋한다.
  * 커밋은 all-or-nothing 이며 이미 있는 대상(구분+경로+이름)은 건너뛴다.
  */
-svcmonRouter.post('/targets/import', canEdit, (req, res) => {
+svcmonRouter.post('/targets/import', canEdit, async (req, res) => {
   const mode = req.body?.mode === 'add' ? 'add' : 'preview';
-  const csv = typeof req.body?.csv === 'string' ? req.body.csv : '';
-  if (!csv.trim()) return res.status(400).json({ error: 'CSV 내용이 비어 있습니다.' });
+  // 포맷 결정: format 이 명시되면 그것을, 없고 csv 필드만 오면 csv(구버전 호환).
+  const format = FORMATS.includes(req.body?.format) ? req.body.format : 'csv';
+  // content = csv/json 은 텍스트, xlsx 는 base64. 구버전은 csv 필드로 텍스트를 보냈다.
+  const rawContent = typeof req.body?.content === 'string' ? req.body.content
+    : (typeof req.body?.csv === 'string' ? req.body.csv : '');
+  if (!rawContent.trim()) return res.status(400).json({ error: `${format.toUpperCase()} 내용이 비어 있습니다.` });
+  let input;
+  if (format === 'xlsx') {
+    try { input = Buffer.from(rawContent, 'base64'); }
+    catch { return res.status(400).json({ error: 'XLSX(base64) 디코딩에 실패했습니다.' }); }
+    if (!input.length) return res.status(400).json({ error: 'XLSX 내용이 비어 있습니다.' });
+  } else {
+    input = rawContent;
+  }
 
-  const parsed = parseTargetsCsv(csv, { maxRows: LIMITS.maxBulkRows });
+  let parsed;
+  try { parsed = await parseTargetsAny(input, format, { maxRows: LIMITS.maxBulkRows }); }
+  catch (e) { return res.status(400).json({ error: `${format.toUpperCase()} 파싱 실패: ${e.message}` }); }
   if (parsed.targets.length > LIMITS.maxBulkRows) {
     return res.status(400).json({ error: `한 번에 최대 ${LIMITS.maxBulkRows}개 대상까지 가져올 수 있습니다(파싱 ${parsed.targets.length}개).` });
   }
@@ -532,9 +617,87 @@ svcmonRouter.post('/templates/:id/apply', canEdit, async (req, res) => {
  * 개수 불일치·IP 파싱 오류·차단 주소는 **전체 거부**한다 — 중간 오류 1건이 그 뒤 전 이름↔IP
  * 매핑을 한 칸 밀어 전 대상이 엉뚱한 주소를 감시하게 된다.
  */
-svcmonRouter.post('/targets/generate', canEdit, (req, res) => {
-  const spec = req.body?.spec || {};
+/** 도메인 형식 — genspec 'name' 모드와 같은 규칙(라벨 사이 '.' 만). */
+const SAFE_DOMAIN = /^\.[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)*$/;
+
+/** DNS resolve4 를 타임아웃으로 감싼다(느린 1건이 전체 생성을 막지 않게). */
+function resolve4Timed(fqdn, timeoutMs) {
+  return new Promise((resolve) => {
+    let done = false;
+    const timer = setTimeout(() => { if (!done) { done = true; resolve({ ips: [], err: '시간초과' }); } }, timeoutMs);
+    dnsResolve4(fqdn).then((ips) => {
+      if (done) return; done = true; clearTimeout(timer); resolve({ ips, err: null });
+    }).catch((e) => {
+      if (done) return; done = true; clearTimeout(timer); resolve({ ips: [], err: e.code || e.message || '해석 실패' });
+    });
+  });
+}
+
+/**
+ * DNS 모드 — 이름 규칙으로 만든 이름들을 지금 DNS(A 레코드)로 해석해 **IP 로 고정**한다.
+ * genspec 는 동기 순수 함수라 DNS I/O 를 넣지 않는다(CLAUDE.md). 라우트가 여기서 이름→IP 를
+ * 만들어 manual 맵으로 넘기면, SSRF·중복·개수 검증은 genspec manual 모드가 그대로 수행한다.
+ *
+ * 부분 성공을 인정하지 않는다 — 한 이름이라도 해석되지 않으면 그 대상은 감시 공백이 되는데
+ * 화면엔 안 보인다. 미해석 이름을 모아 전체 거부하고 사용자가 DNS 를 고치거나 수동 입력으로
+ * 전환하게 한다(genspec 의 '전체 거부' 철학과 동일).
+ *
+ * @returns {Promise<{ok:boolean, hostMap?:object, resolved?:number, errors:string[]}>}
+ */
+async function resolveDnsHostMap(spec) {
+  const hostSpec = spec?.host && typeof spec.host === 'object' ? spec.host : {};
+  const domain = typeof hostSpec.domain === 'string' ? hostSpec.domain.trim() : '';
+  const errors = [];
+  if (!domain) errors.push("도메인을 입력하세요(예: '.sbp.local') — 이름을 DNS 로 해석하려면 도메인이 필요합니다.");
+  else if (!domain.startsWith('.')) errors.push(`도메인은 '.' 으로 시작해야 합니다(예: '.sbp.local'): ${domain.slice(0, 40)}`);
+  else if (!SAFE_DOMAIN.test(domain) || domain.length > 253) errors.push(`도메인 형식이 올바르지 않습니다: ${domain.slice(0, 40)}`);
+
+  const { names, errors: nameErrors } = expandNames(spec?.name || {});
+  errors.push(...nameErrors);
+  if (errors.length) return { ok: false, errors };
+
+  const timeoutMs = 3000;
+  const concurrency = 24;
+  const hostMap = {};
+  const unresolved = [];
+  let idx = 0;
+  const worker = async () => {
+    while (idx < names.length) {
+      const i = idx; idx += 1;
+      const name = names[i];
+      const fqdn = `${name}${domain}`;
+      const r = await resolve4Timed(fqdn, timeoutMs);
+      if (r.ips.length) hostMap[name] = r.ips.slice().sort()[0];  // 다IP 면 정렬 후 첫 주소로 고정(결정적)
+      else unresolved.push(`${fqdn}: ${r.err}`);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, names.length) }, worker));
+
+  if (unresolved.length) {
+    const head = unresolved.slice(0, 5);
+    errors.push(`DNS 로 해석되지 않은 호스트 ${unresolved.length}개 — 전체를 거부했습니다(빈 채로 등록하면 그 대상은 감시되지 않습니다): ${head.join(', ')}${unresolved.length > 5 ? ' …' : ''}`);
+    return { ok: false, errors };
+  }
+  return { ok: true, hostMap, resolved: Object.keys(hostMap).length, errors: [] };
+}
+
+svcmonRouter.post('/targets/generate', canEdit, async (req, res) => {
+  let spec = req.body?.spec || {};
   const commit = req.body?.mode === 'apply';
+
+  // DNS 모드는 라우트가 이름→IP 로 해석해 manual 로 변환한다(genspec 는 동기 유지).
+  if (spec?.host && typeof spec.host === 'object' && String(spec.host.mode || '').toLowerCase() === 'dns') {
+    const dns = await resolveDnsHostMap(spec);
+    if (!dns.ok) {
+      return res.status(400).json({
+        summary: { rows: 0, create: 0, skip: 0, error: dns.errors.length },
+        errors: dns.errors.map((reason) => ({ row: 0, name: '', reason })),
+        blocked: [], warnings: [], limits: LIMITS,
+        error: dns.errors[0] || 'DNS 해석에 실패했습니다.',
+      });
+    }
+    spec = { ...spec, host: { mode: 'manual', hostMap: dns.hostMap } };
+  }
   const tplId = typeof spec.templateId === 'string' ? spec.templateId.trim() : '';
   let tpl = null;
   if (tplId) {
