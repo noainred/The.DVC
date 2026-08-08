@@ -6,6 +6,7 @@
 import { Router } from 'express';
 import { requireRole } from '../auth/auth.js';
 import { store } from '../store.js';
+import { scopedVcenterIds } from '../auth/scope.js';
 import { allMeasuredPower } from '../idrac/service.js';
 import { filterMeasuredByMapping, loadPowerSettings } from '../idrac/powerSettings.js';
 import { snapMemo, sendCached } from '../util/snapCache.js';
@@ -218,6 +219,6 @@ insightsRouter.get('/incidents', (req, res) => res.json(getIncidents({ limit: Nu
 
 // --- ChatOps(자연어 운영 질의) ---
 insightsRouter.post('/chatops', async (req, res) => {
-  try { res.json(await chatOps(req.body?.question || req.body?.q || '')); }
+  try { res.json(await chatOps(req.body?.question || req.body?.q || '', scopedVcenterIds(req.user, store.get()))); }
   catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });

@@ -1,5 +1,32 @@
 # 보안 점검 — 2026-08-08 (전역)
 
+> **조치 경과 (v2.255.0)** — M1·M2 를 수정했습니다(이 세션 코드). 1차 수정 후 적대적 검증
+> 워크플로가 **부분 롤아웃 갭(형제 라우트 다수 미적용)** 을 찾아 2차로 전수 보강했습니다.
+> - **M1 (해소·전수)**: 아래 조회 라우트에 `scopedVcenterIds` 교집합을 **요청 필터보다 먼저** 강제
+>   (allowed=null=무제한 계정·인증OFF 는 기존 동작 보존): `/search/nl`·`/insights/chatops`(buildContext+
+>   search 관통)·`/tools/deep-search`(요청 vcenterIds∩allowed, 공집합=빈결과, 스캔발견물 미노출)·
+>   `/tools/vm-finder`(facets=scopeVms 파생)·`/tools/insights`·`/tools/capacity`·`/tools/waste`·
+>   `/tools/threats`(scan/NSX-IDS 는 범위제한 계정 미노출)·`/tools/guest-os`(+`/vms`)는 scopeSlice+
+>   **scopeKey(캐시 교차 차단)**; `/tools/vmtools`·`/tools/snapshots`·`/tools/duplicate-ips`·
+>   `/tools/thin-vms`·`/tools/hardware`·`/tools/esxi`·`/tools/hba`·`/tools/licenses`·
+>   `/tools/license-expiry`·`/tools/solutions`·`/tools/capacity-forecast`·`/tools/gpu`(+`.json`/`.csv`,
+>   buildGpuInventory 가 hosts·vms 선필터)·`/tools/gpu/vms`·`/tools/ipam/vc-ranges` 는 선필터;
+>   `/tools/esxi-temp/history`·`/tools/gpu/history` 는 key 의 vCenter 귀속 검사; `/summary`·`/overview`
+>   는 memoJson 에 **extraKey(scopeKey) 추가**(1차 감사가 못 잡은 **캐시 교차로 타 사용자 요약 유출**
+>   — 적대적 검증이 발견); 쓰기 라우트 `POST /vms/upgrade-tools` 는 범위 밖 VM 거부.
+> - **M1 후속(문서화·미적용)**: `/tools/ipam`·`/ipam/insights`·`/ipam/subnets`·`/ipam/sheet`·
+>   `/ipam/netmap`·`/ipam.xlsx`·`/ipam.csv` 7종은 빌더(`ipam/*.js`)가 `ipam.db` 원장(스냅샷 밖·
+>   행별 vcenterId)을 읽어 스코프하려면 빌더 시그니처 변경이 필요 — 회귀 부담으로 분리(별도 커밋).
+>   `ipam.db` 외부 리더 공유 불변조건 때문에 스키마는 불변, 조회 결과 필터만 추가할 것.
+>   `/health`(집계 liveness)·`/tools/gpu/series-meta`(시계열 메타, 개별 vCenter 데이터 없음)는 의도적 비대상.
+> - **M2 (agent 모드 위조 봉인)**: `/result`·`/fleet`·`/ip-scan-result`·`/inventory`·`/gpu-guest-data`·
+>   **`/agent-config`**(적대적 검증이 추가 발견) 저장 키를 `req.centralAuth.agent`(개별 토큰 해석값)로
+>   강제 — `?agent=자기 + body.agent=남` 우회 봉인. `/inventory` 는 **TOFU 소유권**(다른 엣지가 기존
+>   vCenter 스냅샷 덮어쓰기 403). 공유 토큰은 하위호환 유지(완전 봉인은 `CENTRAL_REQUIRE_AGENT_TOKEN=true`).
+>   **부분(후속)**: `/gpu-guest-data` 는 출처 agent 태깅(provenance)만 — 조회 경로의 엣지 간 hostId/vmId
+>   격리는 store 리팩터 필요. 회귀 테스트: `server/test/securityScopeM1M2.test.js`(18케이스).
+> - **M3 (미조치)**: UAGMon 코드로 **다른 세션 소유** — 그 세션에 전달 필요.
+
 VMware Global Monitoring Portal(The Davinci Virtual Platform) **전역 보안 점검** 결과입니다.
 직전 릴리스 **v2.248.0** 기준(브랜치 `claude/vmware-global-monitoring-portal-nrnpnt`).
 직전 점검(성능점검 모듈 중심)을 대체·확장해 **인증·중앙/엣지·수집기·pyportal 허브·원격접속·

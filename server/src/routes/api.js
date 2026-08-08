@@ -287,11 +287,25 @@ api.get('/health', (_req, res) => {
 // High-level KPIs + regional / per-site rollups for the dashboard landing view.
 // 랜딩 화면이라 전 사용자가 15초마다 폴링 → single-flight로 동시요청을 1회 계산에 합류.
 api.get('/overview', (req, res) => memoJson(req, res, 'overview', (snap) => {
+  // 사용자 scope: 범위 제한 계정에는 per-vCenter 식별정보(rollups.sites/byRegion)를 허용 vCenter 로
+  // 좁힌다(전 사이트 id·name·메트릭 열거 차단). GPU 집계도 허용 호스트만 대상으로 한다.
+  const allowed = scopedVcenterIds(req.user, snap);
+  const hostInScope = (h) => !allowed || allowed.has(h.vcenterId);
+  let rollups = snap.rollups;
+  if (allowed && rollups) {
+    const regions = new Set((snap.vcenters || []).filter((v) => allowed.has(v.id)).map((v) => v.location?.region));
+    rollups = {
+      ...rollups,
+      sites: (rollups.sites || []).filter((s) => allowed.has(s.id)),
+      byRegion: (rollups.byRegion || []).filter((r) => regions.has(r.region)),
+    };
+  }
   // GPU 집계: 설치된 GPU 카드 총 장수 + GPU 평균 사용률(글로벌 현황 KPI용).
   // 사용률은 GPU 보유 호스트의 util(ESXi 보고 + 게스트 오버레이)을 평균.
   let gpuCards = 0, gpuVms = 0;
   let utilSum = 0, utilN = 0;
   for (const h of snap.hosts) {
+    if (!hostInScope(h)) continue;
     const gn = (h.gpus || []).length;
     gpuCards += gn;
     if (gn) {
@@ -299,10 +313,10 @@ api.get('/overview', (req, res) => memoJson(req, res, 'overview', (snap) => {
       if (u != null && Number.isFinite(u)) { utilSum += u; utilN++; }
     }
   }
-  for (const v of snap.vms) if (v.gpu) gpuVms++;
+  for (const v of snap.vms) if (v.gpu && (!allowed || allowed.has(v.vcenterId))) gpuVms++;
   const gpuUtilPct = utilN ? Math.round(utilSum / utilN) : 0;
-  return { generatedAt: snap.generatedAt, source: snap.source, ...snap.rollups, gpuCards, gpuVms, gpuUtilPct, gpuUtilHosts: utilN };
-}));
+  return { generatedAt: snap.generatedAt, source: snap.source, ...rollups, gpuCards, gpuVms, gpuUtilPct, gpuUtilHosts: utilN };
+}, { extraKey: scopeKey(req.user, store.get()) }));
 
 // NSX overview — aggregated snapshot from the NSX Manager poller (separate from
 // vCenter). Optional ?managerId= / ?region= scoping for the detail tables.
@@ -400,6 +414,9 @@ api.get('/vcenters', (req, res) => {
 api.get('/tools/duplicate-ips', (req, res) => {
   const snap = store.get();
   let vms = snap.vms;
+  // scope 는 요청 필터보다 먼저 — 범위 제한 계정이 ?vcenterId 로 우회해 전 사이트 VM 을 못 보게.
+  const allowed = scopedVcenterIds(req.user, snap);
+  if (allowed) vms = vms.filter((v) => allowed.has(v.vcenterId));
   if (req.query.vcenterId) vms = vms.filter((v) => v.vcenterId === req.query.vcenterId);
   const map = new Map();
   for (const v of vms) {
@@ -426,9 +443,10 @@ api.get('/tools/duplicate-ips', (req, res) => {
 });
 
 // Installed VMware solutions (vCenter extensions) per vCenter, NSX highlighted.
-api.get('/tools/solutions', (_req, res) => {
+api.get('/tools/solutions', (req, res) => {
   const snap = store.get();
-  const items = (snap.vcenters || []).map((vc) => {
+  const allowed = scopedVcenterIds(req.user, snap);
+  const items = (snap.vcenters || []).filter((vc) => !allowed || allowed.has(vc.id)).map((vc) => {
     const sols = vc.solutions || [];
     return {
       vcenterId: vc.id, name: vc.name, status: vc.status,
@@ -452,6 +470,8 @@ api.get('/tools/solutions', (_req, res) => {
 api.get('/tools/vmtools', (req, res) => {
   const snap = store.get();
   let vms = snap.vms;
+  const allowed = scopedVcenterIds(req.user, snap);
+  if (allowed) vms = vms.filter((v) => allowed.has(v.vcenterId));
   if (req.query.vcenterId) vms = vms.filter((v) => v.vcenterId === req.query.vcenterId);
   const map = new Map();
   for (const v of vms) {
@@ -473,6 +493,8 @@ api.get('/tools/vmtools', (req, res) => {
 api.get('/tools/snapshots', (req, res) => {
   const snap = store.get();
   let vms = snap.vms.filter((v) => (v.snapshotCount || 0) > 0);
+  const allowed = scopedVcenterIds(req.user, snap);
+  if (allowed) vms = vms.filter((v) => allowed.has(v.vcenterId));
   if (req.query.vcenterId) vms = vms.filter((v) => v.vcenterId === req.query.vcenterId);
   const items = vms.map((v) => ({
     id: v.id, name: v.name, vcenterId: v.vcenterId, host: v.host, cluster: v.cluster,
@@ -640,7 +662,7 @@ api.get('/tools/report/unprotected', async (req, res) => {
 api.post('/search/nl', async (req, res) => {
   const query = String((req.body || {}).query || '').trim();
   if (!query) return res.status(400).json({ error: 'query is required' });
-  try { res.json(await nlSearch(query)); }
+  try { res.json(await nlSearch(query, scopedVcenterIds(req.user, store.get()))); }
   catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -683,14 +705,15 @@ api.get('/tools/ipam/history', (req, res) => {
 // vCenter별 등록 스캔 대역 목록(+vCenter 이름·IP 수 추정).
 api.get('/tools/ipam/vc-ranges', (req, res) => {
   const snap = store.get();
+  const allowed = scopedVcenterIds(req.user, snap);   // 범위 밖 vCenter id·name 열거 차단
   const vcName = {};
   for (const vc of snap.vcenters || []) vcName[vc.id] = vc.name;
-  const list = listVcRanges().map((e) => ({
+  const list = listVcRanges().filter((e) => !allowed || allowed.has(e.vcenterId)).map((e) => ({
     ...e, vcenterName: vcName[e.vcenterId] || e.vcenterId,
     ipCount: e.ranges.reduce((a, s) => a + rangeSize(s), 0),
   }));
-  // 등록 안 된 vCenter도 선택할 수 있게 전체 vCenter 목록을 함께 내려준다.
-  res.json({ ranges: list, vcenters: (snap.vcenters || []).map((v) => ({ id: v.id, name: v.name })) });
+  // 등록 안 된 vCenter도 선택할 수 있게 (허용 범위 내) vCenter 목록을 함께 내려준다.
+  res.json({ ranges: list, vcenters: (snap.vcenters || []).filter((v) => !allowed || allowed.has(v.id)).map((v) => ({ id: v.id, name: v.name })) });
 });
 
 // 네트워크 맵 — 대역(/24) 선택 시 OS별·시간대별 사용/미사용 격자.
@@ -833,6 +856,8 @@ api.get('/tools/ipam.csv', (req, res) => {
 api.get('/tools/hardware', (req, res) => {
   const snap = store.get();
   let hosts = snap.hosts;
+  const allowed = scopedVcenterIds(req.user, snap);
+  if (allowed) hosts = hosts.filter((h) => allowed.has(h.vcenterId));
   if (req.query.vcenterId) hosts = hosts.filter((h) => h.vcenterId === req.query.vcenterId);
   const vcName = {};
   for (const vc of snap.vcenters || []) vcName[vc.id] = vc.name;
@@ -863,6 +888,8 @@ api.get('/tools/hardware', (req, res) => {
 api.get('/tools/esxi', (req, res) => {
   const snap = store.get();
   let hosts = snap.hosts;
+  const allowed = scopedVcenterIds(req.user, snap);
+  if (allowed) hosts = hosts.filter((h) => allowed.has(h.vcenterId));
   if (req.query.vcenterId) hosts = hosts.filter((h) => h.vcenterId === req.query.vcenterId);
   const map = new Map();
   for (const h of hosts) {
@@ -879,9 +906,12 @@ api.get('/tools/esxi', (req, res) => {
 
 // GPU inventory per host + aggregate counts by model and vCenter.
 // GPU 인벤토리 집계(호스트별 GPU 장수·모드·사용률·할당 VM) — /tools/gpu 와 CSV/JSON export 공용.
-function buildGpuInventory(snap, vcenterId) {
+function buildGpuInventory(snap, vcenterId, allowed = null) {
   let hosts = snap.hosts;
+  if (allowed) hosts = hosts.filter((h) => allowed.has(h.vcenterId));  // 사용자 scope 선강제
   if (vcenterId) hosts = hosts.filter((h) => h.vcenterId === vcenterId);
+  // 스코프 밖 VM(할당 VM 이름·게스트 오버레이·GPU VM 수)이 새지 않게 vms 도 allowed 로 거른다.
+  const scopedVms = allowed ? (snap.vms || []).filter((v) => allowed.has(v.vcenterId)) : (snap.vms || []);
   const hostsWithGpu = [];
   const byModel = {};
   const byVcenter = {};
@@ -889,7 +919,7 @@ function buildGpuInventory(snap, vcenterId) {
   let totalGpus = 0;
   // GPU가 할당된 VM을 호스트(이름)별로 집계 — 각 GPU 호스트에 몇 개 VM이 GPU를 쓰는지.
   const gpuVmByHost = {};
-  for (const v of (snap.vms || [])) {
+  for (const v of scopedVms) {
     if (!v.gpu || !v.host) continue;
     const e = gpuVmByHost[v.host] || { vms: 0, on: 0, off: 0, vgpu: 0, passthrough: 0, names: [] };
     e.vms++; e.vgpu += v.gpu.vgpu || 0; e.passthrough += v.gpu.passthrough || 0;
@@ -898,7 +928,7 @@ function buildGpuInventory(snap, vcenterId) {
     gpuVmByHost[v.host] = e;
   }
   // 게스트 수집 사용률은 '전원 ON GPU VM'만 집계(전원 OFF VM의 stale 값 제외) → 호스트(이름)별 평균.
-  const onGpuVmIds = new Set((snap.vms || []).filter((v) => v.gpu && v.powerState === 'POWERED_ON').map((v) => v.id));
+  const onGpuVmIds = new Set(scopedVms.filter((v) => v.gpu && v.powerState === 'POWERED_ON').map((v) => v.id));
   const guestUtilByHost = new Map(); // hostName -> [utilPct...]
   for (const g of getGuestGpuVms()) {
     if (!onGpuVmIds.has(g.vmId) || g.utilPct == null) continue;
@@ -930,7 +960,7 @@ function buildGpuInventory(snap, vcenterId) {
   }
   const utils = hostsWithGpu.map((x) => x.utilPct).filter((x) => x != null);
   // GPU를 사용하는 VM 수(스코프 내, 템플릿 제외) — 상단 요약용.
-  const gpuVmCount = (snap.vms || []).filter((v) => v.gpu && !v.template && (!vcenterId || v.vcenterId === vcenterId)).length;
+  const gpuVmCount = scopedVms.filter((v) => v.gpu && !v.template && (!vcenterId || v.vcenterId === vcenterId)).length;
   return {
     totalGpus,
     hostsWithGpu: hostsWithGpu.length,
@@ -945,19 +975,22 @@ function buildGpuInventory(snap, vcenterId) {
 }
 
 api.get('/tools/gpu', (req, res) => {
-  res.json(buildGpuInventory(store.get(), req.query.vcenterId));
+  const snap = store.get();
+  res.json(buildGpuInventory(snap, req.query.vcenterId, scopedVcenterIds(req.user, snap)));
 });
 
 // GPU 사용량/인벤토리 JSON export — 집계 결과 그대로 파일로 내려받기.
 api.get('/tools/gpu.json', (req, res) => {
-  const data = buildGpuInventory(store.get(), req.query.vcenterId);
+  const snap = store.get();
+  const data = buildGpuInventory(snap, req.query.vcenterId, scopedVcenterIds(req.user, snap));
   const body = JSON.stringify({ generatedAt: new Date().toISOString(), vcenterId: req.query.vcenterId || null, ...data }, null, 2);
   sendMaybeZip(res, `gpu-${new Date().toISOString().slice(0, 10)}.json`, body, 'application/json; charset=utf-8');
 });
 
 // GPU 사용량/인벤토리 CSV export — 호스트별 한 행(모델·장수·모드·사용률·할당 VM).
 api.get('/tools/gpu.csv', (req, res) => {
-  const data = buildGpuInventory(store.get(), req.query.vcenterId);
+  const snap = store.get();
+  const data = buildGpuInventory(snap, req.query.vcenterId, scopedVcenterIds(req.user, snap));
   const head = ['host', 'vcenter_id', 'cluster', 'gpu_model', 'gpu_count', 'mem_gb', 'mode', 'mode_breakdown', 'util_pct', 'util_source', 'assigned_vms'];
   const esc = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   const lines = [head.join(',')];
@@ -1081,6 +1114,8 @@ api.get('/tools/gpu/vms', (req, res) => {
   const hostModel = {};
   for (const h of snap.hosts) if ((h.gpus || []).length) hostModel[h.name] = h.gpus[0].model;
   let vms = (snap.vms || []).filter((v) => v.gpu);
+  const allowed = scopedVcenterIds(req.user, snap);
+  if (allowed) vms = vms.filter((v) => allowed.has(v.vcenterId));
   if (req.query.vcenterId) vms = vms.filter((v) => v.vcenterId === req.query.vcenterId);
   if (req.query.host) vms = vms.filter((v) => v.host === req.query.host);
   if (req.query.model) vms = vms.filter((v) => hostModel[v.host] === req.query.model);
@@ -1107,10 +1142,19 @@ api.get('/tools/gpu/vms', (req, res) => {
 api.post('/tools/deep-search', (req, res) => {
   const b = req.body || {};
   const f = b.filters || {};
-  const vms = snapshotFilter(store.get(), { vcenterIds: b.vcenterIds || [], f });
+  const snap = store.get();
+  // 사용자 scope 를 요청 vcenterIds 와 교집합 강제 — 빈배열=전체 우회를 막는다.
+  //  · 무제한(allowed=null): 요청값 그대로(빈=전체, 기존 동작).
+  //  · 제한: 요청이 있으면 allowed 와 교집합, 없으면 allowed 전체. 교집합이 공집합이면 즉시 빈 결과.
+  const allowed = scopedVcenterIds(req.user, snap);
+  const reqIds = Array.isArray(b.vcenterIds) ? b.vcenterIds : [];
+  const effIds = allowed ? (reqIds.length ? reqIds.filter((id) => allowed.has(id)) : [...allowed]) : reqIds;
+  if (allowed && effIds.length === 0) return res.json({ total: 0, items: [], scanTotal: 0, scanItems: [] });
+  const vms = snapshotFilter(snap, { vcenterIds: effIds, f });
   // 옵션: IP 스캔으로 발견된(=vCenter가 모르는) 항목도 함께 검색. IP/서브넷/검색어 조건이 있을 때만.
+  // 스캔 발견물은 vCenter 귀속(vcenterId)이 없어 scope 로 거를 수 없다 → 범위 제한 계정에는 노출하지 않는다.
   let scanItems = [];
-  if (f.includeScan || b.includeScan) {
+  if (!allowed && (f.includeScan || b.includeScan)) {
     try { scanItems = filterScanResults(scanResultList(), f, getIpHistoryMap()).slice(0, 2000); } catch { scanItems = []; }
   }
   res.json({ total: vms.length, items: vms.slice(0, 2000).map(slimVm), scanTotal: scanItems.length, scanItems });
@@ -1197,10 +1241,11 @@ api.get('/tools/vclogs/export.csv', async (req, res) => {
 //  ② VM 라이트사이징(유휴/과대/과소)  ④ 클러스터 N+1(호스트 1대 장애 여력)
 //  ⑧ 알람 핫스팟(심각도/엔티티/센터)   ⑩ GPU 유휴/낭비
 api.get('/tools/insights', (req, res) => memoJson(req, res, 'tools-insights', (snap) => {
-  const vc = req.query.vcenterId;
-  const hosts = vc ? snap.hosts.filter((h) => h.vcenterId === vc) : snap.hosts;
-  const vms = vc ? snap.vms.filter((v) => v.vcenterId === vc) : snap.vms;
-  const alarms = vc ? (snap.alarms || []).filter((a) => a.vcenterId === vc) : (snap.alarms || []);
+  // scopeSlice 가 사용자 scope + ?vcenterId 를 함께 적용(hosts/vms/alarms 스코프). extraKey 로 캐시도 분리.
+  const scoped = scopeSlice(snap, req.user, req.query.vcenterId);
+  const hosts = scoped.hosts;
+  const vms = scoped.vms;
+  const alarms = scoped.alarms || [];
   const on = vms.filter((v) => v.powerState === 'POWERED_ON');
   const r0 = (n, d = 0) => Number((n || 0).toFixed(d));
   const gb = (mb) => Math.round((mb || 0) / 1024);
@@ -1263,7 +1308,7 @@ api.get('/tools/insights', (req, res) => memoJson(req, res, 'tools-insights', (s
   };
 
   return { generatedAt: snap.generatedAt, rightsizing, clusters, alarmHotspot, gpuWaste };
-}));
+}, { extraKey: scopeKey(req.user, store.get()) }));
 
 // 위협 탐지 — (A) 텔레메트리 기반 + (B) NSX 분산 IDS 이벤트. 자사 인프라 방어 목적.
 const RISKY_PORTS = { 21: 'FTP', 23: 'Telnet', 135: 'RPC', 139: 'NetBIOS', 445: 'SMB', 1433: 'MSSQL', 3306: 'MySQL', 3389: 'RDP', 5432: 'PostgreSQL', 5900: 'VNC', 6379: 'Redis', 9200: 'Elasticsearch', 27017: 'MongoDB', 11211: 'Memcached' };
@@ -1276,7 +1321,10 @@ const EOL_OS = [
 ];
 api.get('/tools/threats', (req, res) => memoJson(req, res, 'tools-threats', (snap) => {
   const vc = req.query.vcenterId;
-  const vms = vc ? snap.vms.filter((v) => v.vcenterId === vc) : snap.vms;
+  const allowed = scopedVcenterIds(req.user, snap);
+  // VM 기반(mining/eol)은 사용자 scope 로 거른다. 스캔/NSX-IDS 는 vCenter 귀속이 없는 조직 전역
+  // 네트워크 관측이라 범위 제한 계정에는 노출하지 않는다(deep-search 의 scanItems 정책과 동일).
+  const vms = scopeSlice(snap, req.user, vc).vms;
   const on = vms.filter((v) => v.powerState === 'POWERED_ON');
   const classify = getClassifier();
   const slim = (v) => ({ name: v.name, vcenterId: v.vcenterId, host: v.host || '', cpuPct: v.cpuUsagePct ?? null, memPct: v.memUsagePct ?? null });
@@ -1287,8 +1335,8 @@ api.get('/tools/threats', (req, res) => memoJson(req, res, 'tools-threats', (sna
   // A2) EOL/취약 OS
   const eol = vms.map((v) => { const m = EOL_OS.find(([re]) => re.test(v.guestOS || '')); return m ? { ...slim(v), os: v.guestOS, reason: m[1] } : null; }).filter(Boolean);
 
-  // A3) 위험 포트 노출(스캔 결과) — 공인 노출이면 high
-  const scan = scanResultList();
+  // A3) 위험 포트 노출(스캔 결과) — 공인 노출이면 high. 범위 제한 계정에는 스캔 결과를 노출하지 않는다.
+  const scan = allowed ? [] : scanResultList();
   const risky = scan.map((s) => {
     const hits = (s.openPorts || []).filter((p) => RISKY_PORTS[p]);
     if (!hits.length) return null;
@@ -1306,10 +1354,10 @@ api.get('/tools/threats', (req, res) => memoJson(req, res, 'tools-threats', (sna
     .map((s) => ({ ip: s.ip, hostname: s.hostname || '', firstSeen: hist[s.ip]?.firstSeen || null, ports: (s.openPorts || []), services: s.services || [] }))
     .sort((a, b) => (b.firstSeen || 0) - (a.firstSeen || 0));
 
-  // B) NSX 분산 IDS 이벤트(있으면)
+  // B) NSX 분산 IDS 이벤트(있으면) — 조직 전역이라 범위 제한 계정에는 노출하지 않는다.
   const nsx = nsxStore.get();
-  let idsEvents = nsx.idsEvents || [];
-  const idsManagers = (nsx.managers || []).map((m) => ({ name: m.name, enabled: m.idsEnabled ?? null, profiles: m.idsProfiles || 0, events: m.idsEventCount || 0 }));
+  let idsEvents = allowed ? [] : (nsx.idsEvents || []);
+  const idsManagers = allowed ? [] : (nsx.managers || []).map((m) => ({ name: m.name, enabled: m.idsEnabled ?? null, profiles: m.idsProfiles || 0, events: m.idsEventCount || 0 }));
   const sev = (e) => e.severity;
   idsEvents = idsEvents.slice(0, 500);
 
@@ -1322,7 +1370,7 @@ api.get('/tools/threats', (req, res) => memoJson(req, res, 'tools-threats', (sna
     mining: mining.slice(0, 200), eol: eol.slice(0, 300), risky: risky.slice(0, 300), rogue: rogue.slice(0, 300),
     ids: { managers: idsManagers, events: idsEvents },
   };
-}));
+}, { extraKey: scopeKey(req.user, store.get()) }));
 
 // GPU 사용률 히스토리(5년까지). level=host|cluster|vc, key=대상키, days=기간.
 api.get('/tools/gpu/history', async (req, res) => {
@@ -1330,6 +1378,15 @@ api.get('/tools/gpu/history', async (req, res) => {
   const metric = { host: 'gpu_util', cluster: 'gpu_cluster', vc: 'gpu_vc' }[level];
   const key = String(req.query.key || '');
   const days = Math.max(1, Math.min(1830, Number(req.query.days) || 7));
+  // key 의 vCenter 귀속을 scope 로 검사(범위 밖 호스트/클러스터/vc GPU 히스토리 조회 차단).
+  const allowedG = scopedVcenterIds(req.user, store.get());
+  if (allowedG) {
+    const snapG = store.get();
+    const owns = level === 'vc' ? allowedG.has(key)
+      : level === 'cluster' ? allowedG.has(key.split('|')[0])
+        : allowedG.has((snapG.hosts || []).find((h) => h.id === key)?.vcenterId);
+    if (!owns) return res.json({ level, key, days, bucketMs: 0, unit: '%', synthesized: false, points: [] });
+  }
   const since = Date.now() - days * 86_400_000;
   const bucketMs = days <= 2 ? 3_600_000 : days <= 14 ? 6 * 3_600_000 : days <= 120 ? 86_400_000 : days <= 800 ? 7 * 86_400_000 : 30 * 86_400_000;
   let points = [];
@@ -1352,8 +1409,9 @@ api.get('/tools/gpu/history', async (req, res) => {
 // Capacity report — per-cluster compute capacity, allocation, overcommit, headroom.
 api.get('/tools/capacity', (req, res) => memoJson(req, res, 'tools-capacity', (snap) => {
   const vcId = req.query.vcenterId;
-  const hosts = snap.hosts.filter((h) => !vcId || h.vcenterId === vcId);
-  const vms = snap.vms.filter((v) => (!vcId || v.vcenterId === vcId) && !v.template);
+  const scoped = scopeSlice(snap, req.user, vcId);   // 사용자 scope + ?vcenterId
+  const hosts = scoped.hosts;
+  const vms = scoped.vms.filter((v) => !v.template);
   const r1 = (x) => Number((x || 0).toFixed(1));
   const byCluster = new Map();
   const key = (h) => `${h.vcenterId} ${h.cluster || 'standalone'}`;
@@ -1392,13 +1450,13 @@ api.get('/tools/capacity', (req, res) => memoJson(req, res, 'tools-capacity', (s
       ramHeadroomGB: sum((c) => c.ramHeadroomGB),
     },
   };
-}));
+}, { extraKey: scopeKey(req.user, store.get()) }));
 
 // Waste report — 자원 낭비 후보 모음(스냅샷 기반): 전원 꺼진 VM, 스냅샷 보유 VM,
 // thin 회수가능, Tools 미설치. (고아 VMDK는 데이터스토어 파일 스캔이 필요해 미포함)
 api.get('/tools/waste', (req, res) => memoJson(req, res, 'tools-waste', (snap) => {
   const vcId = req.query.vcenterId;
-  const vms = snap.vms.filter((v) => (!vcId || v.vcenterId === vcId) && !v.template);
+  const vms = scopeSlice(snap, req.user, vcId).vms.filter((v) => !v.template);
   const r1 = (x) => Number((x || 0).toFixed(1));
   const off = vms.filter((v) => v.powerState !== 'POWERED_ON');
   const snaps = vms.filter((v) => (v.snapshotCount || 0) > 0);
@@ -1414,12 +1472,14 @@ api.get('/tools/waste', (req, res) => memoJson(req, res, 'tools-waste', (snap) =
     thinReclaim: { count: thin.length, reclaimableGB: thin.reduce((a, v) => a + (v.uncommittedGB || 0), 0) },
     noTools: { count: noTools.length, vms: noTools.slice(0, 50).map((v) => ({ id: v.id, name: v.name, vcenterId: v.vcenterId, toolsStatus: v.toolsStatus })) },
   };
-}));
+}, { extraKey: scopeKey(req.user, store.get()) }));
 
 // Thin-provisioned VM finder. thin = uncommitted(여유)이 큰 VM(추정). committed=실사용,
 // provisioned=committed+uncommitted. 회수 가능 추정 = uncommitted 합계.
 api.get('/tools/thin-vms', (req, res) => memoJson(req, res, 'tools-thin-vms', (snap) => {
   let vms = snap.vms;
+  const allowed = scopedVcenterIds(req.user, snap);
+  if (allowed) vms = vms.filter((v) => allowed.has(v.vcenterId));
   if (req.query.vcenterId) vms = vms.filter((v) => v.vcenterId === req.query.vcenterId);
   const round = (v, d = 1) => Number((v || 0).toFixed(d));
   const items = vms.filter((v) => v.thin).map((v) => ({
@@ -1439,7 +1499,7 @@ api.get('/tools/thin-vms', (req, res) => memoJson(req, res, 'tools-thin-vms', (s
     reclaimableTB: round(items.reduce((a, x) => a + x.uncommittedGB, 0) / 1024, 1),
     items,
   };
-}));
+}, { extraKey: scopeKey(req.user, store.get()) }));
 
 // Advanced VM finder: scope by 다수 vCenter + folder/cluster/resourcePool +
 // conditions. Optional withAvg → 1일/1주 평균 CPU(유휴 판정). 평균은 live는
@@ -1448,10 +1508,12 @@ api.post('/tools/vm-finder', async (req, res) => {
   const b = req.body || {};
   const snap = store.get();
   const inList = (v, arr) => !arr || !arr.length || arr.includes(v);
-  // Facets reflect the chosen vCenter scope (so 폴더/클러스터/풀 목록이 좁혀짐).
-  const scopeVms = snap.vms.filter((v) => inList(v.vcenterId, b.vcenterIds));
+  // 사용자 scope 를 요청 vcenterIds 보다 먼저 강제 — facets·items·avg 계산 전 선필터라
+  // 폴더/클러스터/풀/vcenters facet 과 결과가 전부 허용 vCenter 로만 파생된다(범위 밖 id 누출 차단).
+  const allowed = scopedVcenterIds(req.user, snap);
+  const scopeVms = snap.vms.filter((v) => (!allowed || allowed.has(v.vcenterId)) && inList(v.vcenterId, b.vcenterIds));
   const facets = {
-    vcenters: [...new Set(snap.vms.map((v) => v.vcenterId))].sort(),
+    vcenters: [...new Set(scopeVms.map((v) => v.vcenterId))].sort(),
     folders: [...new Set(scopeVms.map((v) => v.folder).filter(Boolean))].sort(),
     clusters: [...new Set(scopeVms.map((v) => v.cluster).filter(Boolean))].sort(),
     resourcePools: [...new Set(scopeVms.map((v) => v.resourcePool).filter(Boolean))].sort(),
@@ -1516,7 +1578,8 @@ api.post('/tools/vm-finder', async (req, res) => {
 api.get('/tools/esxi-temp', async (req, res) => {
   const snap = store.get();
   const vcId = req.query.vcenterId;
-  const hosts = (snap.hosts || []).filter((h) => (!vcId || h.vcenterId === vcId) && h.tempC != null);
+  const allowed = scopedVcenterIds(req.user, snap);
+  const hosts = (snap.hosts || []).filter((h) => (!allowed || allowed.has(h.vcenterId)) && (!vcId || h.vcenterId === vcId) && h.tempC != null);
   const r1 = (x) => (x == null ? null : Number(x.toFixed(1)));
   // 최근 5분 평균/최대(시계열). 표시 컬럼: 현재온도 / 5분 평균 / 최대 온도.
   let avg5Host = new Map(); let avg5Cluster = new Map(); let avg5Vc = new Map();
@@ -1538,7 +1601,7 @@ api.get('/tools/esxi-temp', async (req, res) => {
   res.json({
     scope: vcId || 'all',
     reportingHosts: hosts.length,
-    totalHosts: (snap.hosts || []).filter((h) => !vcId || h.vcenterId === vcId).length,
+    totalHosts: (snap.hosts || []).filter((h) => (!allowed || allowed.has(h.vcenterId)) && (!vcId || h.vcenterId === vcId)).length,
     hosts: hosts.map((h) => {
       const a5 = avg5Host.get(h.id);
       return { id: h.id, name: h.name, vcenterId: h.vcenterId, cluster: h.cluster, curC: h.tempC, avg5C: a5 ? a5.avg : null, tempMaxC: r1(Math.max(h.tempMaxC ?? h.tempC, a5?.max ?? -Infinity)), temps: h.temps || [] };
@@ -1554,6 +1617,16 @@ api.get('/tools/esxi-temp/history', async (req, res) => {
   const metric = { host: 'temp_host', cluster: 'temp_cluster', vc: 'temp_vc' }[level];
   const key = String(req.query.key || '');
   const days = Math.max(1, Math.min(1830, Number(req.query.days) || 7));
+  // key(호스트/클러스터/vc)의 vCenter 귀속을 scope 로 검사 — 범위 밖 대상 히스토리 조회 차단.
+  // cluster key 는 `${vcenterId}|${cluster}`(grp keyFn), host key 는 host.id → snap 역참조.
+  const allowedH = scopedVcenterIds(req.user, store.get());
+  if (allowedH) {
+    const snapH = store.get();
+    const owns = level === 'vc' ? allowedH.has(key)
+      : level === 'cluster' ? allowedH.has(key.split('|')[0])
+        : allowedH.has((snapH.hosts || []).find((h) => h.id === key)?.vcenterId);
+    if (!owns) return res.json({ level, key, days, bucket: req.query.bucket || 'auto', bucketMs: 0, synthesized: false, points: [] });
+  }
   const since = Date.now() - days * 86_400_000;
   // 집계 단위(기준): 분/시간/일 명시 선택, 미지정 시 기간에 따라 자동.
   const BUCKET = { minute: 60_000, hour: 3_600_000, day: 86_400_000 };
@@ -1585,7 +1658,8 @@ api.get('/tools/esxi-temp/history', async (req, res) => {
 api.get('/tools/capacity-forecast', async (req, res) => {
   const snap = store.get();
   const vcId = req.query.vcenterId;
-  const dss = (snap.datastores || []).filter((d) => !vcId || d.vcenterId === vcId);
+  const allowed = scopedVcenterIds(req.user, snap);
+  const dss = (snap.datastores || []).filter((d) => (!allowed || allowed.has(d.vcenterId)) && (!vcId || d.vcenterId === vcId));
   let db = null; try { db = await getMetricsDb(); } catch { /* */ }
   const mock = snap.source === 'mock';
   const items = [];
@@ -1610,6 +1684,8 @@ api.get('/tools/capacity-forecast', async (req, res) => {
 // per vCenter. Family rollup + full-name detail; power(on/off) split.
 api.get('/tools/guest-os', (req, res) => memoJson(req, res, 'tools-guest-os', (snap) => {
   let vms = snap.vms;
+  const allowed = scopedVcenterIds(req.user, snap);
+  if (allowed) vms = vms.filter((v) => allowed.has(v.vcenterId));
   if (req.query.vcenterId) vms = vms.filter((v) => v.vcenterId === req.query.vcenterId);
   // 전원(on/off) · 종류(vm/template) 필터
   if (req.query.power === 'on') vms = vms.filter((v) => v.powerState === 'POWERED_ON');
@@ -1635,13 +1711,15 @@ api.get('/tools/guest-os', (req, res) => memoJson(req, res, 'tools-guest-os', (s
     families: [...byFamily.values()].sort((a, b) => b.total - a.total),
     items: [...byName.values()].sort((a, b) => b.total - a.total),
   };
-}));
+}, { extraKey: scopeKey(req.user, store.get()) }));
 
 // 특정 Guest OS(종류·버전) 또는 계열에 해당하는 VM 목록 — VM 수 클릭 시 대상 VM/CSV용.
 // 쿼리: vcenterId·power(on/off)·kind(vm/template) + os(정확 일치) 또는 family(계열).
 api.get('/tools/guest-os/vms', (req, res) => {
   const snap = store.get();
   let vms = snap.vms;
+  const allowed = scopedVcenterIds(req.user, snap);
+  if (allowed) vms = vms.filter((v) => allowed.has(v.vcenterId));
   if (req.query.vcenterId) vms = vms.filter((v) => v.vcenterId === req.query.vcenterId);
   if (req.query.power === 'on') vms = vms.filter((v) => v.powerState === 'POWERED_ON');
   else if (req.query.power === 'off') vms = vms.filter((v) => v.powerState !== 'POWERED_ON');
@@ -1664,6 +1742,8 @@ api.get('/tools/guest-os/vms', (req, res) => {
 api.get('/tools/hba', (req, res) => {
   const snap = store.get();
   let hosts = snap.hosts;
+  const allowed = scopedVcenterIds(req.user, snap);
+  if (allowed) hosts = hosts.filter((h) => allowed.has(h.vcenterId));
   if (req.query.vcenterId) hosts = hosts.filter((h) => h.vcenterId === req.query.vcenterId);
   const items = [];
   const speedDist = {};
@@ -1686,6 +1766,8 @@ api.get('/tools/hba', (req, res) => {
 api.get('/tools/licenses', (req, res) => {
   const snap = store.get();
   let vcs = snap.vcenters || [];
+  const allowed = scopedVcenterIds(req.user, snap);
+  if (allowed) vcs = vcs.filter((v) => allowed.has(v.id));
   if (req.query.vcenterId) vcs = vcs.filter((v) => v.id === req.query.vcenterId);
   const items = [];
   for (const vc of vcs) for (const l of vc.licenses || []) items.push({ vcenterId: vc.id, vcenterName: vc.name, ...l });
@@ -1710,6 +1792,8 @@ api.get('/tools/licenses', (req, res) => {
 api.get('/tools/license-expiry', async (req, res) => {
   const snap = store.get();
   let vcs = snap.vcenters || [];
+  const allowed = scopedVcenterIds(req.user, snap);
+  if (allowed) vcs = vcs.filter((v) => allowed.has(v.id));
   const scoped = Boolean(req.query.vcenterId);
   if (scoped) vcs = vcs.filter((v) => v.id === req.query.vcenterId);
   const items = [];
@@ -1772,9 +1856,19 @@ api.get('/tools/license-expiry', async (req, res) => {
 
 // Trigger VMware Tools upgrade on one or more VMs. Body: { ids:[vmId,...] }.
 api.post('/vms/upgrade-tools', requirePerm('tools'), async (req, res) => {
-  const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+  let ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
   if (!ids.length) return res.status(400).json({ ok: false, reason: '대상 VM이 없습니다.' });
   const snap = store.get();
+  // 사용자 scope 강제(쓰기 경로) — id 는 `vcId:moref`. 범위 밖 vCenter 의 VM 에는 Tools 업그레이드를
+  // 실행할 수 없다(범위 제한 계정이 타 사이트 VM 을 건드리는 것 차단).
+  const allowed = scopedVcenterIds(req.user, snap);
+  if (allowed) {
+    const vcOf = (id) => (id.indexOf(':') >= 0 ? id.slice(0, id.indexOf(':')) : id);
+    const dropped = ids.filter((id) => !allowed.has(vcOf(id))).length;
+    ids = ids.filter((id) => allowed.has(vcOf(id)));
+    if (!ids.length) return res.status(403).json({ ok: false, reason: '요청한 VM 이 모두 접근 범위 밖입니다.' });
+    if (dropped) res.setHeader('X-Scope-Dropped', String(dropped));
+  }
   if (snap.source === 'mock') {
     return res.json({ ok: true, mock: true, requested: ids.length, results: ids.map((id) => ({ id, ok: true })) });
   }
@@ -1962,7 +2056,9 @@ api.get('/summary', (req, res) => memoJson(req, res, 'summary', (snap) => {
     })).sort((a, b) => b.vcpu - a.vcpu),
     byVcenter,
   };
-}));
+  // 본문은 applyFilters(req.user)로 스코프되지만 memoJson 캐시 키에 scope 서명이 없으면 무제한
+  // 계정의 전체 요약이 범위 제한 계정에 캐시로 새어 나간다(상시 폴링 경로 — 실제 유출). extraKey 필수.
+}, { extraKey: scopeKey(req.user, store.get()) }));
 
 api.get('/hosts', (req, res) => {
   const snap = store.get();
