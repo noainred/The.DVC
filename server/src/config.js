@@ -124,6 +124,24 @@ export const config = {
     dbPath: process.env.IPAM_DB_PATH ||
       path.join(process.env.CONFIG_DIR || path.resolve(ROOT, 'config'), 'ipam.db'),
   },
+  capacity: {
+    // 리소스 적정성 진단(Capacity Advisor) — 포탈 서버 '호스트 자신'의 CPU/메모리/네트워크/
+    // 디스크/이벤트루프를 상시 in-process 로 실측해 시계열(capacity.db)에 적재하고, 1일/1주/1달
+    // 창별 통계로 증설·감축을 권고한다. 엣지는 자기 샘플을 중앙으로 push(k=agent명), 중앙은
+    // 자기 것을 k='local' 로 적재해 한 DB 에서 함께 본다. CONFIG_DIR 에 두어 업그레이드에 보존.
+    enabled: process.env.CAPACITY_MON_ENABLED !== 'false',
+    dbPath: process.env.CAPACITY_DB_PATH ||
+      path.join(process.env.CONFIG_DIR || path.resolve(ROOT, 'config'), 'capacity.db'),
+    // 30초 샘플: 이벤트루프 지연·짧은 CPU 스파이크를 놓치지 않으면서 한 달 원본이 과하지 않게.
+    sampleIntervalMs: Math.max(10_000, numEnv(process.env.CAPACITY_SAMPLE_INTERVAL_MS, 30_000)),
+    // 원본은 3일만(1일 창의 정확한 p95 계산용). 그 이상 창(1주/1달)은 시간당 롤업으로 본다.
+    rawRetentionHours: Math.max(24, numEnv(process.env.CAPACITY_RAW_RETENTION_HOURS, 72)),
+    // 시간당 롤업은 ~13개월 보존(1달 창 + 여유). 롤업 1행/시간이라 호스트당 연 ~8,760행으로 작다.
+    rollupRetentionDays: Math.max(35, numEnv(process.env.CAPACITY_ROLLUP_RETENTION_DAYS, 400)),
+    // 엣지 → 중앙 push. 엣지가 CENTRAL_URL·토큰을 갖췄을 때만 실제 기동(그 외 자기 것만 로컬 적재).
+    push: process.env.CAPACITY_PUSH !== 'false',
+    pushIntervalMs: Math.max(15_000, numEnv(process.env.CAPACITY_PUSH_INTERVAL_MS, 60_000)),
+  },
   packages: {
     // Where to fetch upgrade/install packages from (GitHub Releases 롤링 'downloads'
     // 태그 기본; 폐쇄망은 PACKAGE_BASE_URL로 LAN 미러 지정), and where to store the
