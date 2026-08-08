@@ -476,6 +476,12 @@ export default function SvcMonitor() {
         <span className="pc-sectitle">{mode === 'service' ? 'SERVICE HEALTH & SLA TESTS' : 'INFRASTRUCTURE PERFORMANCE TESTS'}</span>
         <span className="pc-secline" />
         <span className="pc-secpath">{selPath} · {selected.length} {mode === 'service' ? 'service(s)' : 'host(s)'}</span>
+        {/* 설정 바로가기 — 특수기능을 거치지 않고 이 화면에서 바로 성능점검 설정으로.
+            현재 모드/선택 경로를 프리필로 넘겨 그 컨텍스트에서 열린다(대량 등록·템플릿 등). */}
+        <button type="button" className="pc-secbtn" title="성능점검 설정 열기"
+          onClick={() => goToConfig('tpl', { kind: mode, path: sel && sel !== '' ? sel.replace(/^target:/, '') : '' })}>
+          ⚙ 설정
+        </button>
       </div>
 
       <div className="pc-cards">

@@ -490,6 +490,14 @@ tbody tr:last-child td { border-bottom: none; }
 .pc-sectitle { font-family: var(--pc-mono); font-size: 12px; letter-spacing: .18em; color: var(--pc-t5); }
 .pc-secline { flex: 1; height: 1px; background: linear-gradient(90deg, var(--pc-line2), transparent); }
 .pc-secpath { font-family: var(--pc-mono); font-size: 11.5px; color: var(--pc-t2); }
+/* 성능점검 화면에서 설정으로 바로 가는 버튼(섹션바 우측 끝). 모노 톤에 맞춘 절제된 pill. */
+.pc-secbtn {
+  font-family: var(--pc-mono); font-size: 11.5px; color: var(--pc-t2);
+  background: var(--pc-line2, rgba(148,163,184,.12)); border: 1px solid var(--pc-line2, rgba(148,163,184,.28));
+  border-radius: 999px; padding: 3px 12px; cursor: pointer; white-space: nowrap;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.pc-secbtn:hover { background: var(--accent, #3b82f6); border-color: var(--accent, #3b82f6); color: #fff; }
 
 .pc-cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; padding: 4px 0 14px; }
 .pc-card { background: var(--pc-panel); border: 1px solid var(--pc-line); border-radius: 8px; padding: 12px 14px; border-top: 2px solid var(--pc-line2); }

@@ -12,7 +12,9 @@ import { findPolicy, policiesRev, getPolicies } from './rangePolicies.js';
 // buildIpamRows 결과 메모이즈 — 같은 스냅샷·스코프·설정/주석/스캔/override/정책 리비전이면 재계산하지 않는다.
 // (API·서브넷대장·xlsx·CSV·syncLedger가 같은 입력으로 여러 번 호출 → 중복 계산 제거)
 const _ipamCache = new Map(); // key -> rows결과
-const _ipamKey = (snap, vcenterId) => `${snap?.generatedAt || ''}|${vcenterId || ''}|s${settingsRev()}|a${annotationsRev()}|n${scanRev()}|o${overridesRev()}|p${policiesRev()}`;
+// 캐시 키에 사용자 scope 서명(sc:)을 반드시 포함한다 — 빠지면 무제한 계정의 전체 원장이
+// 범위 제한 계정에 캐시 히트로 새어 나간다(M1 캐시 교차 유출과 동형). allowed=null='all'.
+const _ipamKey = (snap, vcenterId, allowed = null) => `${snap?.generatedAt || ''}|${vcenterId || ''}|sc${allowed ? [...allowed].sort().join(',') : 'all'}|s${settingsRev()}|a${annotationsRev()}|n${scanRev()}|o${overridesRev()}|p${policiesRev()}`;
 
 // 자동 발견 출처(discovery)를 사용자 친화 reconcile 상태로 매핑.
 // vcenter=vCenter만 인식 · scan=스캔만 발견(수동) · both=양쪽 · manual=운영자 등록(자동발견 없음)
@@ -36,17 +38,26 @@ export function parseOs(guestOS) {
 }
 
 /** Build IP rows + summary from a snapshot, optionally scoped to one vCenter. */
-export function buildIpamRows(snap, vcenterId) {
+export function buildIpamRows(snap, vcenterId, allowed = null) {
   vcenterId = vcenterId || ''; // undefined/null → '' 정규화(스코프·정책 매칭·캐시키 일관)
-  const _ck = _ipamKey(snap, vcenterId);
+  const _ck = _ipamKey(snap, vcenterId, allowed);
   const _hit = _ipamCache.get(_ck);
   if (_hit) return _hit;
   let vms = snap.vms || [];
   let hosts = snap.hosts || [];
+  // 사용자 scope(보안 경계)를 요청 vcenterId(뷰 필터)보다 먼저 강제. allowed=null 이면 무제한(기존).
+  if (allowed) {
+    vms = vms.filter((v) => allowed.has(v.vcenterId));
+    hosts = hosts.filter((h) => allowed.has(h.vcenterId));
+  }
   if (vcenterId) {
     vms = vms.filter((v) => v.vcenterId === vcenterId);
     hosts = hosts.filter((h) => h.vcenterId === vcenterId);
   }
+  // known/충돌 판정의 '유니버스' — 무제한은 전체 스냅샷, 범위 제한은 허용 vCenter 로 축소한다
+  // (축소하지 않으면 conflictVcenters 로 범위 밖 vCenter id 가 새고, 스캔 판정도 전체 기준이 된다).
+  const uniVms = allowed ? (snap.vms || []).filter((v) => allowed.has(v.vcenterId)) : (snap.vms || []);
+  const uniHosts = allowed ? (snap.hosts || []).filter((h) => allowed.has(h.vcenterId)) : (snap.hosts || []);
   const vcName = {};
   for (const vc of snap.vcenters || []) vcName[vc.id] = vc.name;
 
@@ -89,13 +100,15 @@ export function buildIpamRows(snap, vcenterId) {
   // '이미 vCenter가 아는 IP' 판정은 스코프된 rows가 아니라 '전체' vCenter IP 기준으로 한다
   // (스코프를 걸면 다른 vCenter의 IP가 known에서 빠져 스캔으로 오인되는 문제 방지).
   const histMap = getIpHistoryMap();
-  {
+  // 스캔 발견물은 vCenter 귀속(vcenterId)이 없어 scope 로 판정할 수 없다 → 범위 제한 계정에는
+  // 병합하지 않는다(전 사이트 네트워크 스캔 노출 차단). 무제한 계정만 스캔 행을 합친다.
+  if (!allowed) {
     const known = new Set();
-    for (const vm of (snap.vms || [])) {
+    for (const vm of uniVms) {
       const ips = vm.ipAddresses?.length ? vm.ipAddresses : (vm.ipAddress ? [vm.ipAddress] : []);
       for (const ip of ips) known.add(ip);
     }
-    for (const h of (snap.hosts || [])) if (ipToNum(h.name) != null) known.add(h.name);
+    for (const h of uniHosts) if (ipToNum(h.name) != null) known.add(h.name);
     const seen = new Set(rows.map((r) => r.ip));
     for (const sc of scanList) {
       if (ignored(sc.ip, '') || known.has(sc.ip) || seen.has(sc.ip) || ipToNum(sc.ip) == null) continue;
@@ -127,6 +140,10 @@ export function buildIpamRows(snap, vcenterId) {
   const seenAll = new Set(rows.map((r) => r.ip));
   for (const [ip, ov] of Object.entries(overrides)) {
     if (seenAll.has(ip) || ipToNum(ip) == null) continue;
+    if (allowed && ov.claimedVcenterId && !allowed.has(ov.claimedVcenterId)) continue; // 범위 밖 vCenter 귀속 예약 제외
+    // 범위 제한 계정에는 vCenter 미귀속(claimedVcenterId 없는) 수동 예약 IP 를 노출하지 않는다
+    // (어느 사이트 소속인지 판정 불가 — 스캔 행과 같은 정책).
+    if (allowed && !ov.claimedVcenterId) continue;
     if (vcenterId && ov.claimedVcenterId && ov.claimedVcenterId !== vcenterId) continue; // 특정 vCenter에 귀속 예약이면 스코프 존중
     count.set(ip, (count.get(ip) || 0) + 1);
     rows.push({
@@ -140,11 +157,11 @@ export function buildIpamRows(snap, vcenterId) {
   // 교차 vCenter 충돌 탐지 — '전체' 스냅샷 기준(스코프와 무관)으로 한 IP를 둘 이상 vCenter가
   // 주장하면 conflict. (스코프 뷰에서도 충돌을 놓치지 않게 full snapshot으로 계산)
   const vcByIp = new Map();
-  for (const vm of (snap.vms || [])) {
+  for (const vm of uniVms) {   // 유니버스: 무제한=전체, 범위제한=허용 vCenter(범위 밖 conflict 유출 차단)
     const ips = vm.ipAddresses?.length ? vm.ipAddresses : (vm.ipAddress ? [vm.ipAddress] : []);
     for (const ip of ips) { if (!vcByIp.has(ip)) vcByIp.set(ip, new Set()); if (vm.vcenterId) vcByIp.get(ip).add(vm.vcenterId); }
   }
-  for (const h of (snap.hosts || [])) { if (ipToNum(h.name) == null) continue; if (!vcByIp.has(h.name)) vcByIp.set(h.name, new Set()); if (h.vcenterId) vcByIp.get(h.name).add(h.vcenterId); }
+  for (const h of uniHosts) { if (ipToNum(h.name) == null) continue; if (!vcByIp.has(h.name)) vcByIp.set(h.name, new Set()); if (h.vcenterId) vcByIp.get(h.name).add(h.vcenterId); }
   const now = Date.now();
 
   // 모든 행에 관리 정보를 입힌다 — 필드별 폭포식: IP override(개별 예외) > 대역 정책(대역 기본값) > 자동발견.
@@ -248,19 +265,19 @@ export function buildIpamRows(snap, vcenterId) {
 // 반복되던 것을 리비전 키로 1회화. 키는 rows 메모와 동일한 _ipamKey(스냅샷·설정·주석·스캔·
 // override·정책 rev 포함) + onlyBase — 시트가 직접 읽는 annotations/policies 변경도 rev 로 무효화된다.
 const _sheetCache = new Map();
-export function buildSubnetSheets(snap, { vcenterId, onlyBase } = {}) {
-  const ck = `${_ipamKey(snap, vcenterId)}|b:${onlyBase || ''}`;
+export function buildSubnetSheets(snap, { vcenterId, onlyBase, allowed = null } = {}) {
+  const ck = `${_ipamKey(snap, vcenterId, allowed)}|b:${onlyBase || ''}`;
   const hit = _sheetCache.get(ck);
   if (hit) return hit;
-  const sheets = buildSubnetSheetsUncached(snap, { vcenterId, onlyBase });
+  const sheets = buildSubnetSheetsUncached(snap, { vcenterId, onlyBase, allowed });
   _sheetCache.set(ck, sheets);
   if (_sheetCache.size > 32) _sheetCache.delete(_sheetCache.keys().next().value);
   return sheets;
 }
 
-function buildSubnetSheetsUncached(snap, { vcenterId, onlyBase } = {}) {
+function buildSubnetSheetsUncached(snap, { vcenterId, onlyBase, allowed = null } = {}) {
   const scopeVc = vcenterId || ''; // 아래 셀 루프에서 vcenterId가 가려지므로(shadow) 정책 매칭용으로 보존(정규화)
-  const { rows } = buildIpamRows(snap, vcenterId);
+  const { rows } = buildIpamRows(snap, vcenterId, allowed);
   const byIp = new Map();
   const bases = new Set();
   const basePrefix = onlyBase ? `${onlyBase}.` : null; // 단일 시트 요청은 그 /24만 인덱싱
@@ -337,6 +354,6 @@ function buildSubnetSheetsUncached(snap, { vcenterId, onlyBase } = {}) {
   return sheets;
 }
 
-export function listSubnets(snap, vcenterId) {
-  return buildSubnetSheets(snap, { vcenterId }).map((s) => ({ subnet: s.subnet, base: s.base, used: s.used }));
+export function listSubnets(snap, vcenterId, allowed = null) {
+  return buildSubnetSheets(snap, { vcenterId, allowed }).map((s) => ({ subnet: s.subnet, base: s.base, used: s.used }));
 }

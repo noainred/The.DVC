@@ -21,7 +21,7 @@ import { config } from '../config.js';
 import { getAssignment, setResult } from '../central/assignments.js';
 import { tokenMatches } from '../util/secureCompare.js';
 import { resolveAgentByToken, hasAnyAgentToken, listAgentTokens } from '../central/agentTokens.js';
-import { setInventory, getInventory } from '../central/inventory.js';
+import { setInventory, getInventory, listInventory } from '../central/inventory.js';
 import { setEdgeFleet } from '../central/fleet.js';
 import { setGuestGpu } from '../gpu/store.js';
 import { setGpuGuestDiag } from '../central/gpuGuestDiag.js';
@@ -384,10 +384,35 @@ centralRouter.post('/gpu-guest-data', (req, res) => {
   const b = req.body || {};
   const agent = req.centralAuth.agent || String(b.agent || '').trim();
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
-  const hosts = Array.isArray(b.hosts) ? b.hosts.slice(0, 50_000) : [];
-  const vms = Array.isArray(b.vms) ? b.vms.slice(0, 500_000) : [];
-  // 출처 agent 를 오버레이 항목에 태깅(provenance). ⚠️ 완전한 사이트 경계(엣지 간 hostId/vmId
-  // 덮어쓰기 격리)는 조회 경로의 agent/vcenterId scope 적용이 필요 — 후속 과제(부분 하드닝).
+  let hosts = Array.isArray(b.hosts) ? b.hosts.slice(0, 50_000) : [];
+  let vms = Array.isArray(b.vms) ? b.vms.slice(0, 500_000) : [];
+  // 엣지 간 쓰기 격리: hostId/vmId 는 `${vc.id}:${moRef}` 네임스페이스다. 개별 토큰(agent 모드)일 때,
+  // 그 vCenter 를 소유(최초 등록)한 엣지가 아니면 그 항목을 버린다 — 한 엣지가 남의 vCenter GPU
+  // 오버레이를 덮어쓰는 것을 차단(/inventory TOFU 소유권과 동일 모델). 미등록 vCenter(owner='')는
+  // TOFU 로 통과. 공유 토큰은 어느 엣지인지 알 수 없어 검사 생략(완전 봉인=CENTRAL_REQUIRE_AGENT_TOKEN).
+  if (req.centralAuth.mode === 'agent') {
+    // hostId/vmId 는 `${vc.id}:${moRef}`. vc.id 자체가 콜론을 포함할 수 있어(registry 가 콜론 허용)
+    // 첫 콜론 기준 단순 분리로는 vcId 를 잘못 뽑아 소유권 검사가 우회된다. 등록된 vcenterId 중 이 id 의
+    // 프리픽스인 것(가장 긴 것)으로 소유 vCenter 를 판정한다(최장 프리픽스 매칭).
+    const invOwners = listInventory().map((e) => ({ vc: String(e.vcenterId || ''), agent: String(e.agent || '') }));
+    const ownerOf = (id) => {
+      const s = String(id || '');
+      let owner = ''; let best = -1;
+      for (const e of invOwners) {
+        if (e.vc && (s === e.vc || s.startsWith(`${e.vc}:`)) && e.vc.length > best) { best = e.vc.length; owner = e.agent; }
+      }
+      return owner;   // 매칭 없음(미등록/direct-mode) = '' → TOFU 통과(주석의 문서화된 한계)
+    };
+    const ownsVc = (id) => {
+      const owner = ownerOf(id);
+      return !owner || owner.toLowerCase() === agent.toLowerCase();
+    };
+    const hBefore = hosts.length; const vBefore = vms.length;
+    hosts = hosts.filter((h) => ownsVc(h.hostId));
+    vms = vms.filter((v) => ownsVc(v.vmId));
+    const dropped = (hBefore - hosts.length) + (vBefore - vms.length);
+    if (dropped) console.warn(`[central] gpu-guest-data: ${agent} 가 소유하지 않은 vCenter 항목 ${dropped}개 드롭(위조 방지)`);
+  }
   setGuestGpu({ hosts, vms, agent });
   if (b.diag) setGpuGuestDiag(agent, b.diag, { hosts: hosts.length, vms: vms.length }); // 수집 진단 보관
   console.log(`[central] gpu-guest-data 수신: agent=${agent} hosts=${hosts.length} vms=${vms.length}`);

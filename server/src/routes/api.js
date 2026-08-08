@@ -679,26 +679,33 @@ api.get('/release-notes', (_req, res) => {
 // 플래그만 내리고, 상세 팝업은 /vms/lookup?ip= 로 클릭 시 1건만 가져온다(프론트 지연 조회).
 // 호스트/스캔 행은 원래 작아 유지. buildIpamRows 결과는 캐시 공유 객체라 여기서 변형하지 않는다.
 api.get('/tools/ipam', (req, res) => {
-  const data = buildIpamRows(store.get(), req.query.vcenterId);
+  const snap = store.get();
+  const data = buildIpamRows(snap, req.query.vcenterId, scopedVcenterIds(req.user, snap));
   res.json({ ...data, rows: data.rows.map((r) => (r.ownerType === 'vm' && r.owner ? { ...r, owner: undefined, hasOwner: true } : r)) });
 });
 
 // IPAM 추천 기능 30선 — 유명 IPAM 솔루션 대표 기능을 수집 데이터로 계산.
 api.get('/tools/ipam/insights', (req, res) => {
-  res.json(buildIpamInsights(store.get(), req.query.vcenterId || ''));
+  const snap = store.get();
+  res.json(buildIpamInsights(snap, req.query.vcenterId || '', scopedVcenterIds(req.user, snap)));
 });
 
 // Per-/24 subnet ledger (Excel-style): subnet list, one subnet's rows, or full .xlsx.
 api.get('/tools/ipam/subnets', (req, res) => {
-  res.json({ subnets: listSubnets(store.get(), req.query.vcenterId) });
+  const snap = store.get();
+  res.json({ subnets: listSubnets(snap, req.query.vcenterId, scopedVcenterIds(req.user, snap)) });
 });
 api.get('/tools/ipam/sheet', (req, res) => {
-  const sheets = buildSubnetSheets(store.get(), { vcenterId: req.query.vcenterId, onlyBase: req.query.base });
+  const snap = store.get();
+  const sheets = buildSubnetSheets(snap, { vcenterId: req.query.vcenterId, onlyBase: req.query.base, allowed: scopedVcenterIds(req.user, snap) });
   res.json(sheets[0] || { subnet: '', rows: [] });
 });
 
 // Per-IP usage history (scan-derived online/offline transitions over time).
 api.get('/tools/ipam/history', (req, res) => {
+  // 스캔 이력은 vCenter 귀속이 없어 scope 판정 불가 → 범위 제한 계정에는 노출하지 않는다
+  // (ledger.js 스캔 행 차단·deep-search scanItems 미노출과 같은 정책. 임의 IP 프로빙 차단).
+  if (scopedVcenterIds(req.user, store.get())) return res.json({ ip: req.query.ip, history: null });
   res.json({ ip: req.query.ip, history: getIpHistory(String(req.query.ip || '')) });
 });
 
@@ -718,19 +725,27 @@ api.get('/tools/ipam/vc-ranges', (req, res) => {
 
 // 네트워크 맵 — 대역(/24) 선택 시 OS별·시간대별 사용/미사용 격자.
 api.get('/tools/ipam/netmap', (req, res) => {
-  res.json(buildNetmap(store.get(), {
+  const snap = store.get();
+  res.json(buildNetmap(snap, {
     vcenterId: req.query.vcenterId || '', base: req.query.base || '',
-    days: req.query.days, buckets: req.query.buckets,
+    days: req.query.days, buckets: req.query.buckets, allowed: scopedVcenterIds(req.user, snap),
   }));
 });
 
 // 스캔 결과를 '첨부파일'처럼 내려받기(CSV). 현재 결과 + 이력(상태/최초관측) 조인.
 api.get('/tools/ipam/scan-report.csv', (req, res) => {
+  const head = 'ip,hostname,status,open_ports,services,first_seen,last_seen,agent';
+  // 스캔 결과 전량(전 사이트 IP/포트/서비스/수집엣지)은 vCenter 귀속이 없어 scope 판정 불가 →
+  // 범위 제한 계정에는 헤더만 반환한다(ledger.js 스캔 행 차단과 일관 — 이 경로로 새면 하드닝 무의미).
+  if (scopedVcenterIds(req.user, store.get())) {
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="ip-scan-report-${new Date().toISOString().slice(0, 10)}.csv"`);
+    return res.send(`${head}\n`);
+  }
   const histMap = getIpHistoryMap();
   const rows = scanResultList();
   const esc = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   const iso = (t) => (t ? new Date(t).toISOString() : '');
-  const head = 'ip,hostname,status,open_ports,services,first_seen,last_seen,agent';
   const lines = rows.map((r) => {
     const h = histMap[r.ip] || {};
     return [r.ip, r.hostname || '', h.status || '', (r.openPorts || []).join(' '), (r.services || []).join(' '),
@@ -827,7 +842,8 @@ api.delete('/tools/ipam/policies/:id', requirePerm('tools'), (req, res) => {
 });
 api.get('/tools/ipam.xlsx', async (req, res) => {
   try {
-    const sheets = buildSubnetSheets(store.get(), { vcenterId: req.query.vcenterId });
+    const snap = store.get();
+    const sheets = buildSubnetSheets(snap, { vcenterId: req.query.vcenterId, allowed: scopedVcenterIds(req.user, snap) });
     const wb = await buildWorkbook(sheets);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="ip-ledger-${new Date().toISOString().slice(0, 10)}.xlsx"`);
@@ -838,7 +854,8 @@ api.get('/tools/ipam.xlsx', async (req, res) => {
 
 // CSV export of the IP ledger for sharing with other tools/spreadsheets.
 api.get('/tools/ipam.csv', (req, res) => {
-  const { rows } = buildIpamRows(store.get(), req.query.vcenterId);
+  const snap = store.get();
+  const { rows } = buildIpamRows(snap, req.query.vcenterId, scopedVcenterIds(req.user, snap));
   const head = ['ip', 'vcenter_id', 'vcenter_name', 'owner_type', 'owner_name', 'power_state', 'guest_os', 'host_name', 'cluster', 'scope', 'multi_homed', 'duplicate',
     'discovery', 'reconcile', 'mgmt_status', 'mgmt_owner', 'label', 'device_type', 'applied_by', 'range_policy_spec', 'reserved_until', 'first_seen', 'last_seen', 'usage_status'];
   const esc = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
