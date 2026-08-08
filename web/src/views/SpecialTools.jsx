@@ -12,6 +12,7 @@ import { IdracDetailModal } from './IdracAdmin.jsx';
 import VmProvision from './VmProvision.jsx';
 import AgentScans from './AgentScans.jsx';
 import SvcMonConfig from './SvcMonConfig.jsx';
+import CapacityAdvisor from './CapacityAdvisor.jsx';
 import LoginFails from './LoginFails.jsx';
 import NetIssues from './NetIssues.jsx';
 import { DailyHealth, SnapshotAge, ZombieVms, CertExpiry, Rightsizing, CapacityForecast, AlertChannels, ComplianceReport, ChangeHistory, UnprotectedVms } from './ToolsReports.jsx';
@@ -320,6 +321,7 @@ function ToolPanel({ tool, onBack, isAdmin }) {
       {tool === 'nsx' && <Nsx />}
       {tool === 'topo3d' && <Topology3D />}
       {tool === 'davinci-svc' && <ServiceCheck />}
+      {tool === 'capacity-advisor' && (isAdmin ? <CapacityAdvisor /> : <div className="card"><span className="muted">관리자 전용 기능입니다.</span></div>)}
       {tool === 'net-check' && <NetworkCheck />}
       {tool === 'net-traffic' && <NetTrafficAnalysis />}
       {tool === 'deepsearch' && <DeepSearch />}

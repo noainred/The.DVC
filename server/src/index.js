@@ -63,6 +63,9 @@ import { startCaptureWorker } from './agent/captureWorker.js';
 import { startCaptureMonitor } from './net/monitor.js';
 import { pingRouter } from './routes/ping.js';
 import { svcmonRouter } from './routes/svcmon.js';
+import { capacityRouter } from './routes/capacity.js';
+import { startCapacitySampler } from './capacity/sampler.js';
+import { startCapacityPush } from './agent/capacityPush.js';
 import { startSvcmonPoller } from './svcmon/poller.js';
 import { startSvcmonPush } from './agent/svcmonPush.js';
 import { startSvcmonConfigPull } from './agent/svcmonConfigPull.js';
@@ -139,6 +142,7 @@ app.use('/api/admin', authMiddleware, requireEnrolled, auditMiddleware, adminRou
 app.use('/api/remote', authMiddleware, requireEnrolled, auditMiddleware, remoteRouter);   // remote access (HAProxy/SSH/RDP)
 app.use('/api/insights', authMiddleware, requireEnrolled, insightsRouter); // FinOps·이상탐지·예측·보안·토폴로지·인시던트·ChatOps
 app.use('/api/svcmon', authMiddleware, requireEnrolled, svcmonRouter);   // 성능점검(HostMonitor식 서비스 모니터링)
+app.use('/api/capacity', authMiddleware, requireEnrolled, capacityRouter); // 리소스 적정성 진단(라우터 내부 admin 강제)
 app.use('/api/ping', authMiddleware, requireEnrolled, pingRouter);       // 네트워크 Ping 모니터링(조회=인증, 대상관리=관리자)
 app.use('/api', authMiddleware, requireEnrolled, api);                   // protected resource endpoints
 
@@ -182,6 +186,7 @@ const stagger = [
   startIpScanPoller, startIpScanAgent, startCollectorPuller, startAgentScanner, startIdracScanWorker, startInventoryPush,
   startGpuGuestPush, startGpuGuestConfigPull, startUsersConfigPull, startPingWorker, startConfigPush, startFleetPush, startBackupScheduler, startLogPoller, startLogQueryWorker, startCaptureWorker, startCaptureMonitor, startLoginMonitor, startGuestScanScheduler, startOsScanner,
   startDbSizeSampler, startPingMonitor, startCertMonitor, startDailyReport, startSvcmonPoller,
+  startCapacitySampler, startCapacityPush,   // 리소스 적정성 진단 — 로컬 상시 샘플 + (엣지면) 중앙 push
   // 엣지 위임(RMA): 엣지는 결과를 밀어 올리고(push), 중앙은 무보고를 감시한다.
   // 둘 다 재진입 가드가 있고, 조건(CENTRAL_URL·토큰) 미충족이면 스스로 기동하지 않는다.
   startSvcmonPush, startSvcmonConfigPull, startSvcmonSilenceWatch,

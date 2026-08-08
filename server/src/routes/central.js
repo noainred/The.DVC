@@ -214,6 +214,53 @@ centralRouter.post('/svcmon-report', (req, res) => {
 });
 
 /**
+ * Capacity Advisor 엣지 보고 — 엣지가 자기 호스트 리소스 스냅샷({metric,v} 행 + 메타)을
+ * 밀어 올린다. **개별 토큰 전용**(svcmon-report 와 같은 3규약: agent 모드 필수 · 저장 키는
+ * req.centralAuth.agent 만 · X-Agent-Name 이중 방어). 시각은 중앙 수신 시각이 진실이다.
+ */
+centralRouter.post('/capacity-report', async (req, res) => {
+  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+  if (req.centralAuth.mode !== 'agent') {
+    return res.status(403).json({ ok: false, reason: '이 엔드포인트는 엣지별 개별 토큰만 허용합니다(어느 엣지의 리소스인지 신뢰할 수 없습니다).' });
+  }
+  const agent = req.centralAuth.agent;
+  try {
+    const b = req.body || {};
+    const rawRows = Array.isArray(b.rows) ? b.rows.slice(0, 64) : [];   // 수집기 수 상한(폭주 방어)
+    const rows = [];
+    for (const r of rawRows) {
+      const metric = typeof r?.metric === 'string' ? r.metric.slice(0, 40) : '';
+      const v = Number(r?.v);
+      if (metric && /^[a-z0-9_]+$/.test(metric) && Number.isFinite(v)) rows.push({ metric, v });
+    }
+    const meta = b.meta && typeof b.meta === 'object'
+      ? {
+        hostname: String(b.meta.hostname || '').slice(0, 100),
+        platform: String(b.meta.platform || '').slice(0, 20),
+        cores: Number(b.meta.cores) || 0,
+        totalMemMB: Number(b.meta.totalMemMB) || 0,
+        nodeVersion: String(b.meta.nodeVersion || '').slice(0, 20),
+        portalVersion: String(b.meta.portalVersion || '').slice(0, 20),
+        role: String(b.meta.role || '').slice(0, 10),
+        intervalMs: Number(b.meta.intervalMs) || 0,
+      }
+      : {};
+    const { getCapacityDb } = await import('../capacity/db.js');
+    const db = await getCapacityDb();
+    // 빈 rows 도 hosts.lastTs 는 갱신한다 — '살아 있으나 첫 델타 기준선 중'과 '죽음'을 구별(하트비트).
+    db.insertSnapshot(agent, rows, Date.now(), meta);
+    recordIngest(agent, 'capacity-report', {
+      wireBytes: Number(req.get('content-length')) || 0,
+      summary: { rows: rows.length },
+    });
+    res.json({ ok: true, accepted: rows.length });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: `저장 실패: ${e.message}` });
+  }
+});
+
+/**
  * 성능점검 정의 배포 — 엣지가 자기 배정을 받아 간다. **개별 토큰 전용.**
  * `query.agent` 는 미들웨어 바인딩 검사를 걸기 위한 것이고, 실제 조회 키는 토큰에서 해석한
  * 이름만 쓴다(쿼리 값을 신뢰하지 않는다).
