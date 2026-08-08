@@ -33,11 +33,20 @@ function dropDerivedCaches(ids) {
 
 const FILE = path.join(config.configDir, 'idrac.json');
 
+// copy-on-read 캐시 — 분석 라우트들이 요청 하나에서 loadRegistry()를 여러 번 부르며 매번
+// readFileSync+JSON.parse(수백~수천 엔트리)를 반복했다. mtime/size 가 같으면 파싱을 건너뛰고
+// '구조 복사본'을 돌려준다(호출부는 지금처럼 자유롭게 수정→save 가능 — 공유 객체 아님).
+let _regCache = null; // { mtimeMs, size, servers }
+
 export function loadRegistry() {
-  if (!fs.existsSync(FILE)) return [];
+  if (!fs.existsSync(FILE)) { _regCache = null; return []; }
   try {
-    const parsed = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-    return Array.isArray(parsed?.servers) ? parsed.servers : [];
+    const st = fs.statSync(FILE);
+    if (!_regCache || _regCache.mtimeMs !== st.mtimeMs || _regCache.size !== st.size) {
+      const parsed = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+      _regCache = { mtimeMs: st.mtimeMs, size: st.size, servers: Array.isArray(parsed?.servers) ? parsed.servers : [] };
+    }
+    return structuredClone(_regCache.servers);
   } catch {
     return [];
   }
@@ -45,6 +54,11 @@ export function loadRegistry() {
 
 function saveRegistry(list) {
   atomicWriteFileSync(FILE, JSON.stringify({ servers: list }, null, 2), { mode: 0o600 });
+  // 방금 쓴 내용으로 캐시 즉시 동기화(다음 읽기의 재파싱 회피). 실패 시 캐시 무효화가 안전.
+  try {
+    const st = fs.statSync(FILE);
+    _regCache = { mtimeMs: st.mtimeMs, size: st.size, servers: structuredClone(list) };
+  } catch { _regCache = null; }
   // 레지스트리(서버 vcenterId·멤버십) 변경은 통합 인벤토리/전력 집계에 영향 → 플릿 캐시 무효화.
   bumpFleetRev();
 }

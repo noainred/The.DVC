@@ -244,13 +244,29 @@ export function buildIpamRows(snap, vcenterId) {
  * .0–.255 rows; collected IPs are filled with Purpose(VM/호스트 · 법인 / 클러스터)
  * + Hostname + Notes + power + status. `onlyBase` returns a single subnet.
  */
+// 시트 결과 캐시 — 시트 합성(서브넷당 256행 × 수백 시트)이 /subnets·/sheet·xlsx 요청마다
+// 반복되던 것을 리비전 키로 1회화. 키는 rows 메모와 동일한 _ipamKey(스냅샷·설정·주석·스캔·
+// override·정책 rev 포함) + onlyBase — 시트가 직접 읽는 annotations/policies 변경도 rev 로 무효화된다.
+const _sheetCache = new Map();
 export function buildSubnetSheets(snap, { vcenterId, onlyBase } = {}) {
+  const ck = `${_ipamKey(snap, vcenterId)}|b:${onlyBase || ''}`;
+  const hit = _sheetCache.get(ck);
+  if (hit) return hit;
+  const sheets = buildSubnetSheetsUncached(snap, { vcenterId, onlyBase });
+  _sheetCache.set(ck, sheets);
+  if (_sheetCache.size > 32) _sheetCache.delete(_sheetCache.keys().next().value);
+  return sheets;
+}
+
+function buildSubnetSheetsUncached(snap, { vcenterId, onlyBase } = {}) {
   const scopeVc = vcenterId || ''; // 아래 셀 루프에서 vcenterId가 가려지므로(shadow) 정책 매칭용으로 보존(정규화)
   const { rows } = buildIpamRows(snap, vcenterId);
   const byIp = new Map();
   const bases = new Set();
+  const basePrefix = onlyBase ? `${onlyBase}.` : null; // 단일 시트 요청은 그 /24만 인덱싱
   for (const r of rows) {
     if (r.ipNum == null) continue;
+    if (basePrefix && !r.ip.startsWith(basePrefix)) continue;
     const p = r.ip.split('.');
     const base = `${p[0]}.${p[1]}.${p[2]}`;
     bases.add(base);
