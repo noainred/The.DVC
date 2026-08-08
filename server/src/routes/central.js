@@ -21,7 +21,7 @@ import { config } from '../config.js';
 import { getAssignment, setResult } from '../central/assignments.js';
 import { tokenMatches } from '../util/secureCompare.js';
 import { resolveAgentByToken, hasAnyAgentToken, listAgentTokens } from '../central/agentTokens.js';
-import { setInventory } from '../central/inventory.js';
+import { setInventory, getInventory } from '../central/inventory.js';
 import { setEdgeFleet } from '../central/fleet.js';
 import { setGuestGpu } from '../gpu/store.js';
 import { setGpuGuestDiag } from '../central/gpuGuestDiag.js';
@@ -171,8 +171,12 @@ centralRouter.post('/result', (req, res) => {
   if (!centralEnabled()) return res.status(404).json({ ok: false });
   if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
   const b = req.body || {};
-  if (!b.agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
-  setResult(b.agent, {
+  // 저장 키는 개별 토큰이면 토큰에서 해석한 agent 를 강제한다(body.agent 위조 차단 —
+  // ?agent=자기 + body.agent=남 우회 봉인). 공유 토큰(shared)은 어느 엣지인지 알 수 없어
+  // 하위호환으로 body.agent 를 쓴다(완전 봉인은 CENTRAL_REQUIRE_AGENT_TOKEN=true).
+  const agent = req.centralAuth.agent || String(b.agent || '').trim();
+  if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
+  setResult(agent, {
     scanned: b.scanned || 0,
     foundCount: b.foundCount ?? (b.found?.length || 0),
     found: Array.isArray(b.found) ? b.found.slice(0, 5000) : [],
@@ -299,6 +303,17 @@ centralRouter.post('/inventory', (req, res) => {
   if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
   const b = req.body || {};
   if (!b.vcenterId || !b.vcenter) return res.status(400).json({ ok: false, reason: 'vcenterId/vcenter가 필요합니다.' });
+  // 출처 agent 는 개별 토큰이면 토큰에서 해석한 값을 강제(body.agent 위조 무효화).
+  const agent = req.centralAuth.agent || String(b.agent || '').trim();
+  // 소유권 경계(TOFU): 이 vcenterId 를 이미 다른 엣지가 등록했다면 개별 토큰은 덮어쓸 수 없다.
+  // (엣지 A 가 남의 vCenter 스냅샷을 위조·블랭킹하는 것을 차단. 공유 토큰은 agent 가 없어 검사 생략 —
+  //  완전 봉인은 CENTRAL_REQUIRE_AGENT_TOKEN=true.)
+  if (req.centralAuth.mode === 'agent') {
+    const owner = getInventory(String(b.vcenterId))?.agent || '';
+    if (owner && owner.toLowerCase() !== agent.toLowerCase()) {
+      return res.status(403).json({ ok: false, reason: `vcenterId '${b.vcenterId}'는 '${owner}' 소유입니다(다른 엣지가 덮어쓸 수 없습니다).` });
+    }
+  }
   const arr = (x, n) => (Array.isArray(x) ? x.slice(0, n) : []);
   const slice = {
     vcenter: b.vcenter,
@@ -308,7 +323,7 @@ centralRouter.post('/inventory', (req, res) => {
     networks: arr(b.networks, 50_000),
     alarms: arr(b.alarms, 50_000),
   };
-  setInventory(String(b.vcenterId), slice, String(b.agent || ''), b.generatedAt || null);
+  setInventory(String(b.vcenterId), slice, agent, b.generatedAt || null);
   res.json({ ok: true, vcenterId: b.vcenterId, hosts: slice.hosts.length, vms: slice.vms.length });
 });
 
@@ -318,10 +333,11 @@ centralRouter.post('/fleet', (req, res) => {
   if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
   if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
   const b = req.body || {};
-  if (!b.agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
+  const agent = req.centralAuth.agent || String(b.agent || '').trim();
+  if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
   const list = Array.isArray(b.baremetal) ? b.baremetal : [];
-  setEdgeFleet(String(b.agent), list, b.generatedAt || null);
-  res.json({ ok: true, agent: b.agent, baremetal: list.length });
+  setEdgeFleet(agent, list, b.generatedAt || null);
+  res.json({ ok: true, agent, baremetal: list.length });
 });
 
 // 위임 iDRAC 스캔: 에이전트가 자기 이름의 온디맨드 스캔 잡을 인출.
@@ -366,13 +382,16 @@ centralRouter.post('/gpu-guest-data', (req, res) => {
   if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
   if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
   const b = req.body || {};
-  if (!b.agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
+  const agent = req.centralAuth.agent || String(b.agent || '').trim();
+  if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
   const hosts = Array.isArray(b.hosts) ? b.hosts.slice(0, 50_000) : [];
   const vms = Array.isArray(b.vms) ? b.vms.slice(0, 500_000) : [];
-  setGuestGpu({ hosts, vms }); // 로컬 폴러와 동일한 게스트 오버레이에 기록 → /tools/gpu·샘플러가 그대로 사용
-  if (b.diag) setGpuGuestDiag(b.agent, b.diag, { hosts: hosts.length, vms: vms.length }); // 수집 진단 보관
-  console.log(`[central] gpu-guest-data 수신: agent=${b.agent} hosts=${hosts.length} vms=${vms.length}`);
-  res.json({ ok: true, agent: b.agent, hosts: hosts.length, vms: vms.length });
+  // 출처 agent 를 오버레이 항목에 태깅(provenance). ⚠️ 완전한 사이트 경계(엣지 간 hostId/vmId
+  // 덮어쓰기 격리)는 조회 경로의 agent/vcenterId scope 적용이 필요 — 후속 과제(부분 하드닝).
+  setGuestGpu({ hosts, vms, agent });
+  if (b.diag) setGpuGuestDiag(agent, b.diag, { hosts: hosts.length, vms: vms.length }); // 수집 진단 보관
+  console.log(`[central] gpu-guest-data 수신: agent=${agent} hosts=${hosts.length} vms=${vms.length}`);
+  res.json({ ok: true, agent, hosts: hosts.length, vms: vms.length });
 });
 
 // 중앙→엣지 GPU 게스트 설정 배포(pull): 엣지가 자기 이름으로 배포 설정을 가져가 로컬 적용.
@@ -426,14 +445,16 @@ centralRouter.post('/agent-config', (req, res) => {
   if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
   if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
   const b = req.body || {};
-  if (!b.agent || !b.files || typeof b.files !== 'object') return res.status(400).json({ ok: false, reason: 'agent·files가 필요합니다.' });
+  // 저장 키는 개별 토큰이면 토큰 해석 agent 강제(body.agent 로 남의 통합백업 config 위조 차단).
+  const agent = req.centralAuth.agent || String(b.agent || '').trim();
+  if (!agent || !b.files || typeof b.files !== 'object') return res.status(400).json({ ok: false, reason: 'agent·files가 필요합니다.' });
   // 파일 수/크기 상한(남용 방지).
   const files = {};
   let n = 0;
   for (const [k, v] of Object.entries(b.files)) { if (n++ >= 200) break; if (typeof v === 'string' && v.length <= 8_000_000) files[require_basename(k)] = v; }
-  setAgentConfig(String(b.agent).slice(0, 120), files);
-  console.log(`[central] agent-config 수신: agent=${b.agent} (${Object.keys(files).length}개)`);
-  res.json({ ok: true, agent: b.agent, files: Object.keys(files).length });
+  setAgentConfig(agent.slice(0, 120), files);
+  console.log(`[central] agent-config 수신: agent=${agent} (${Object.keys(files).length}개)`);
+  res.json({ ok: true, agent, files: Object.keys(files).length });
 });
 function require_basename(p) { return String(p).split(/[\\/]/).pop().slice(0, 200); }
 
@@ -485,8 +506,9 @@ centralRouter.post('/ip-scan-result', (req, res) => {
   if (!centralEnabled()) return res.status(404).json({ ok: false });
   if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
   const b = req.body || {};
-  if (!b.agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
-  if (Array.isArray(b.alive)) mergeScanResults(b.alive.slice(0, 8000), Date.now(), String(b.agent));
-  recordAgentReport(String(b.agent), { scanned: b.scanned || 0, alive: Array.isArray(b.alive) ? b.alive.length : 0, durationMs: b.durationMs || null });
+  const agent = req.centralAuth.agent || String(b.agent || '').trim();
+  if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
+  if (Array.isArray(b.alive)) mergeScanResults(b.alive.slice(0, 8000), Date.now(), agent);
+  recordAgentReport(agent, { scanned: b.scanned || 0, alive: Array.isArray(b.alive) ? b.alive.length : 0, durationMs: b.durationMs || null });
   res.json({ ok: true, merged: Array.isArray(b.alive) ? b.alive.length : 0 });
 });

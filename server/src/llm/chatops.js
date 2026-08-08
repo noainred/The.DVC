@@ -12,28 +12,34 @@ import { alertStatus } from '../alerts.js';
 
 const pct = (n) => (Number.isFinite(n) ? Math.round(n) : 0);
 
-/** 스냅샷 → LLM에 줄 컴팩트 컨텍스트(수MB가 아니라 핵심 수치만). */
-function buildContext() {
+/** 스냅샷 → LLM에 줄 컴팩트 컨텍스트(수MB가 아니라 핵심 수치만). allowed 로 사용자 scope 강제. */
+function buildContext(allowed = null) {
   const snap = store.get();
-  const hosts = snap.hosts || [], vms = snap.vms || [], ds = snap.datastores || [];
+  const inScope = (x) => !allowed || allowed.has(x.vcenterId);
+  const hosts = (snap.hosts || []).filter(inScope);
+  const vms = (snap.vms || []).filter(inScope);
+  const ds = (snap.datastores || []).filter(inScope);
   const onVms = vms.filter((v) => v.powerState === 'POWERED_ON' && !v.template);
   const topCpu = [...hosts].sort((a, b) => (b.cpuUsagePct || 0) - (a.cpuUsagePct || 0)).slice(0, 5)
     .map((h) => `${h.name}(CPU ${pct(h.cpuUsagePct)}%/MEM ${pct(h.memUsagePct)}%)`);
   const fullDs = ds.filter((d) => (d.usagePct || 0) >= 85).sort((a, b) => b.usagePct - a.usagePct).slice(0, 5)
     .map((d) => `${d.name}(${pct(d.usagePct)}%, 여유 ${Math.round(d.freeGB)}GB)`);
   const st = alertStatus();
-  const firing = (st.firing || []).slice(0, 8).map((f) => `${f.severity}:${f.title}`);
-  const vcLines = (snap.vcenters || []).map((v) => `${v.id}(${v.status},v${v.version || '?'},호스트 ${hosts.filter((h) => h.vcenterId === v.id).length})`);
+  // 경보도 scope 로 거른다(경보 항목에 vcenterId 가 있을 때만 — 없으면 범위 판단 불가라 제외).
+  const firingAll = (st.firing || []).filter((f) => !allowed || (f.vcenterId ? allowed.has(f.vcenterId) : false));
+  const firing = firingAll.slice(0, 8).map((f) => `${f.severity}:${f.title}`);
+  const vcenters = (snap.vcenters || []).filter((v) => !allowed || allowed.has(v.id));
+  const vcLines = vcenters.map((v) => `${v.id}(${v.status},v${v.version || '?'},호스트 ${hosts.filter((h) => h.vcenterId === v.id).length})`);
   return {
     text: [
       `생성시각: ${snap.generatedAt}`,
-      `vCenter ${(snap.vcenters || []).length}개: ${vcLines.join(', ')}`,
+      `vCenter ${vcenters.length}개: ${vcLines.join(', ')}`,
       `호스트 ${hosts.length}개, VM ${vms.length}개(가동 ${onVms.length}), 데이터스토어 ${ds.length}개`,
       `CPU 상위: ${topCpu.join(', ') || '없음'}`,
       `포화 임박 데이터스토어: ${fullDs.join(', ') || '없음'}`,
-      `진행중 경보 ${(st.firing || []).length}건: ${firing.join('; ') || '없음'}`,
+      `진행중 경보 ${firingAll.length}건: ${firing.join('; ') || '없음'}`,
     ].join('\n'),
-    counts: { vcenters: (snap.vcenters || []).length, hosts: hosts.length, vms: vms.length, onVms: onVms.length, firing: (st.firing || []).length },
+    counts: { vcenters: vcenters.length, hosts: hosts.length, vms: vms.length, onVms: onVms.length, firing: firingAll.length },
   };
 }
 
@@ -42,15 +48,15 @@ function buildContext() {
  * - LLM 켜져 있으면 컨텍스트+질문으로 답변 생성.
  * - "조회/목록/몇 개" 류 질문은 nlSearch로 실제 데이터도 함께 첨부.
  */
-export async function chatOps(question) {
+export async function chatOps(question, allowed = null) {
   const q = String(question || '').trim();
   if (!q) return { answer: '질문을 입력하세요.', source: 'none' };
-  const ctx = buildContext();
+  const ctx = buildContext(allowed);
 
-  // 데이터 조회 의도가 있으면 nlSearch 결과를 근거로 첨부.
+  // 데이터 조회 의도가 있으면 nlSearch 결과를 근거로 첨부(사용자 scope 관통).
   let search = null;
   if (/(몇|개수|목록|리스트|보여|찾아|조회|이상|초과|넘는|top|상위)/i.test(q)) {
-    try { const r = await nlSearch(q); if (r && r.total != null) search = { entity: r.entity, total: r.total, summary: r.summary, sample: (r.results || []).slice(0, 10) }; } catch { /* 무시 */ }
+    try { const r = await nlSearch(q, allowed); if (r && r.total != null) search = { entity: r.entity, total: r.total, summary: r.summary, sample: (r.results || []).slice(0, 10) }; } catch { /* 무시 */ }
   }
 
   const cfg = loadLlmConfig();

@@ -103,10 +103,13 @@ function testFilter(item, f, regionIds) {
   }
 }
 
-function runQuery(q) {
+function runQuery(q, allowed = null) {
   const snap = store.get();
   const entity = SCHEMA[q.entity] ? q.entity : 'vm';
   let items = snap[PLURAL[entity]] || [];
+  // 사용자 scope 를 필터·total 산정보다 먼저 강제 — 범위 밖 vCenter 항목이 결과·집계에 새지 않게.
+  // vm/host/datastore/network 모두 vcenterId 를 가진다. allowed=null(무제한)이면 통과.
+  if (allowed) items = items.filter((it) => allowed.has(it.vcenterId));
   const regionIds = (region) => new Set((snap.vcenters || []).filter((v) => (v.location?.region || '').toLowerCase() === String(region).toLowerCase()).map((v) => v.id));
   const filters = Array.isArray(q.filters) ? q.filters : [];
   const matchFn = q.match === 'any' ? 'some' : 'every';
@@ -144,7 +147,7 @@ function fallbackParse(query) {
 }
 
 /** Main entry: translate `query` and run it. Returns the interpreted query + results. */
-export async function nlSearch(query) {
+export async function nlSearch(query, allowed = null) {
   const cfg = loadLlmConfig();
   let q, source;
   if (cfg.enabled) {
@@ -158,7 +161,7 @@ export async function nlSearch(query) {
   } else {
     q = fallbackParse(query); source = 'fallback';
   }
-  const out = runQuery(q);
+  const out = runQuery(q, allowed);
   return {
     source, query: { entity: out.entity, filters: q.filters || [], match: q.match || 'all', sort: q.sort || null },
     llmError: q._llmError,
