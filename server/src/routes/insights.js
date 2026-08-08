@@ -170,15 +170,25 @@ insightsRouter.post('/fleet/prune', adminOnly, (req, res) => {
 });
 
 // --- AI 이상탐지 ---
+// 요청마다 전 시계열 재집계라 가장 비싼 조회였다 — 동일 파라미터의 동시/반복 요청을
+// single-flight + 60s TTL 로 1회 계산에 합류시킨다(N 사용자 폴링 → 계산 1회).
+// 스냅샷 파생이 아니라 metrics DB 파생이므로 key 는 TTL 이 회전시킨다.
 insightsRouter.get('/anomalies', async (req, res) => {
-  try { res.json(await detectAnomalies(req.query)); }
-  catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+  try {
+    const key = `anomalies|${req.originalUrl}`;
+    const payload = await snapMemo('anomalies', key, 60_000, () => detectAnomalies(req.query));
+    sendCached(req, res, `${payload.generatedAt}|${key}`, payload);
+  } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 
-// --- 용량/수명 예측 ---
+// --- 용량/수명 예측 --- (동일 스냅샷 + 동일 파라미터 = 계산 1회)
 insightsRouter.get('/forecast', async (req, res) => {
-  try { res.json(await forecastCapacity(store.get(), req.query)); }
-  catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+  try {
+    const snap = store.get();
+    const key = `${snap.generatedAt}|${req.originalUrl}`;
+    const payload = await snapMemo('forecast', key, 60_000, () => forecastCapacity(snap, req.query));
+    sendCached(req, res, key, payload);
+  } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 
 // --- 보안 자세(CVE/EOL) ---
