@@ -72,13 +72,16 @@ function handle(ws, params) {
 
   const host = proxy.proxyHost || m.targetHost;
   const port = proxy.proxyHost ? m.publicPort : m.targetPort;
-  // 자격증명은 1회용 티켓(consumeRdpTicket)에서 조회 — 쿼리스트링에 비번을 싣지 않는다(감사 H18).
-  // 구버전 클라이언트 호환을 위해 티켓이 없으면 기존 쿼리 파라미터로 폴백(가용성 무회귀).
-  const tk = consumeRdpTicket(params.get('ticket')) || {};
-  const cred = (k) => (tk[k] != null && tk[k] !== '' ? tk[k] : (params.get(k) || ''));
+  // 자격증명은 **1회용 티켓(consumeRdpTicket)에서만** 조회한다(감사 H18·CLAUDE.md 'RDP 자격증명은
+  // 티켓으로'). 쿼리스트링 폴백을 제거해 fail-closed — 비번이 URL 로 상위 프록시 로그·브라우저
+  // 히스토리에 남는 경로를 봉인한다. 티켓이 없으면 접속을 거부(클라이언트가 티켓 발급을 재시도).
+  const tk = consumeRdpTicket(params.get('ticket'));
+  if (!tk) { ws.close(1011, 'RDP 접속 티켓이 필요합니다 — 자격증명은 티켓으로만 전달됩니다(POST /api/remote/rdp-ticket).'); return; }
+  const cred = (k) => (tk[k] != null ? String(tk[k]) : '');
   const settings = {
     hostname: host, port: String(port),
     username: cred('username'), password: cred('password'), domain: cred('domain'),
+    // width/height 는 비민감 렌더 파라미터라 쿼리에서 받는다(자격증명 아님).
     width: params.get('width') || '1024', height: params.get('height') || '768', dpi: '96',
     security: cred('security') || 'any', 'ignore-cert': 'true', 'resize-method': 'display-update',
   };

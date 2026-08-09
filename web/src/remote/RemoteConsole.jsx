@@ -149,10 +149,14 @@ export function RdpConsole({ mapping, active, initialCreds, onCreds }) {
   const connect = async () => {
     onCreds?.(creds);
     // 자격증명을 URL 쿼리스트링에 싣지 않기 위해(감사 H18) 접속 직전 1회용 티켓을 발급받아
-    // 쿼리엔 티켓 ID만 싣는다. 티켓 발급 실패 시에만 구경로(쿼리에 자격증명)로 폴백해 가용성 유지.
+    // 쿼리엔 티켓 ID만 싣는다. 게이트웨이가 티켓으로만 자격증명을 조회하므로(쿼리 폴백 제거),
+    // 티켓 발급이 실패하면 **접속을 중단**한다 — 쿼리에 비번을 싣던 폴백은 상위 프록시 로그·
+    // 브라우저 히스토리에 자격증명을 남기는 경로라 제거했다(감사 M16).
     let ticket = '';
     try { const r = await postJson('/remote/rdp-ticket', { username: creds.username, password: creds.password, domain: creds.domain }); ticket = r?.ticket || ''; }
-    catch { /* 폴백: 아래에서 쿼리에 자격증명 포함 */ }
+    catch (e) { setStatus(`티켓 발급 실패: ${e?.message || e} — 다시 시도하세요.`); return; }
+    if (!ticket) { setStatus('접속 티켓을 발급받지 못했습니다 — 다시 시도하세요.'); return; }
+    setStatus('');
     setConnected(true);
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     const tunnel = new Guacamole.WebSocketTunnel(`${proto}://${location.host}/api/remote/rdp`);
@@ -164,11 +168,8 @@ export function RdpConsole({ mapping, active, initialCreds, onCreds }) {
       client.onerror = (e) => setStatus(`오류: ${e.message || e}`);
       const w = Math.max(800, elRef.current.clientWidth || 1024);
       const h = Math.max(600, elRef.current.clientHeight || 768);
-      const base = { token: getToken() || '', mappingId: mapping.id, width: String(w), height: String(h) };
-      // 티켓이 있으면 자격증명은 쿼리에서 제외(서버가 티켓으로 조회). 없으면 구경로 폴백.
-      const q = new URLSearchParams(ticket
-        ? { ...base, ticket }
-        : { ...base, username: creds.username, password: creds.password, domain: creds.domain }).toString();
+      // 자격증명은 쿼리에서 제외 — 게이트웨이가 티켓으로 조회한다(쿼리 폴백 제거, 감사 M16).
+      const q = new URLSearchParams({ token: getToken() || '', mappingId: mapping.id, width: String(w), height: String(h), ticket }).toString();
       client.connect(q);
       const display = client.getDisplay().getElement();
       const mouse = new Guacamole.Mouse(display);
@@ -190,6 +191,7 @@ export function RdpConsole({ mapping, active, initialCreds, onCreds }) {
           <div style={{ gridColumn: '1 / -1' }}>
             <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} onClick={connect}>접속</button>
             <span className="muted" style={{ fontSize: 12, marginLeft: 10 }}>guacd 게이트웨이 경유로 RDP에 연결합니다.</span>
+            {status && <div style={{ fontSize: 12, marginTop: 8, color: 'var(--red,#ef4444)' }}>⚠ {status}</div>}
           </div>
         </div>
       </div>

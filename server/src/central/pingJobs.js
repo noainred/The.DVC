@@ -16,6 +16,10 @@ const results = new Map();  // vcenterId -> Map<ip, { alive, rttMs, at }>
 const RESULT_TTL = 5 * 60_000; // 결과 보존 5분
 const UP_STICKY_MS = 2 * 60_000; // 최근 'up'은 이 시간 동안 down 보고로 덮어쓰지 않음(멀티홈/멀티에이전트 깜빡임 방지)
 const MAX_IPS = 64;            // 한 vCenter당 동시 대기 IP 상한(남용 방지)
+// 한 vCenter당 결과 맵 상한. pending 은 MAX_IPS 로 묶이지만 결과 보고엔 상한이 없어, 탈취/오작동
+// 에이전트가 '요청한 적 없는' IP 를 대량 보고하면 TTL(5분) 만료 전까지 맵이 무한 증식한다(메모리 남용).
+// 상한 초과 시 가장 오래된 항목부터 축출한다(감사 L17).
+const MAX_RESULT_IPS = 512;
 
 /** UI가 ping을 요청 — 대기열에 추가(중복 IP는 갱신). */
 export function enqueuePing(vcenterId, ips = []) {
@@ -56,6 +60,11 @@ export function setPingResults(vcenterId, rows = []) {
   }
   // TTL 만료 정리
   for (const [ip, v] of m) if (now - v.at > RESULT_TTL) m.delete(ip);
+  // 상한 초과 시 가장 오래된 항목부터 축출(대량 보고로 인한 메모리 남용 방지).
+  if (m.size > MAX_RESULT_IPS) {
+    const oldest = [...m.entries()].sort((a, b) => a[1].at - b[1].at);
+    for (let i = 0; i < oldest.length && m.size > MAX_RESULT_IPS; i++) m.delete(oldest[i][0]);
+  }
   results.set(vcenterId, m);
 }
 

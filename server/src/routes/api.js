@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { requireRole, requirePerm } from '../auth/auth.js';
 import { scopedVcenterIds, inUserScope } from '../auth/scope.js';
+import { guardCell } from '../util/csv.js';
 import { store } from '../store.js';
 import { currentVersion, config, loadVcenterConfig } from '../config.js';
 import { loadUiSettings, saveUiSettings } from '../ui-settings.js';
@@ -744,7 +745,7 @@ api.get('/tools/ipam/scan-report.csv', (req, res) => {
   }
   const histMap = getIpHistoryMap();
   const rows = scanResultList();
-  const esc = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const esc = (v) => { const s = guardCell(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }; // guardCell: 수식 인젝션 방어(= + - @)
   const iso = (t) => (t ? new Date(t).toISOString() : '');
   const lines = rows.map((r) => {
     const h = histMap[r.ip] || {};
@@ -825,8 +826,17 @@ api.put('/tools/ipam/ip/:ip', requirePerm('tools'), (req, res) => {
   if (req.body?.claimedVcenterId && !isKnownVcenter(req.body.claimedVcenterId)) return res.status(400).json({ ok: false, reason: '알 수 없는 vCenter입니다.' });
   const snap = store.get();
   const allowed = scopedVcenterIds(req.user, snap);
-  const claimed = req.body?.claimedVcenterId || getOverride(req.params.ip)?.claimedVcenterId || '';
-  if (allowed && !ipInWriteScope(allowed, ipVcenterOwners(snap), req.params.ip, claimed)) {
+  const owners = ipVcenterOwners(snap);
+  const existing = getOverride(req.params.ip);
+  // ① 기존 레코드가 있으면 그 **기존 소유권**(owners 또는 기존 claimedVcenterId)으로 접근 가능 여부를 먼저 판정.
+  //    body.claimedVcenterId 를 앞세우면 범위 밖 vCenter 가 claim 한 예약을 scope 계정이 자기 vCenter 로
+  //    덮어써 탈취할 수 있다(감사 지적) — 볼 수 없는 레코드는 만질 수도 없게 404.
+  if (allowed && existing && !ipInWriteScope(allowed, owners, req.params.ip, existing.claimedVcenterId || '')) {
+    return res.status(404).json({ ok: false, reason: '범위 밖 IP 입니다.' });
+  }
+  // ② 새로 지정하려는 claim(또는 신규 생성)도 scope 안이어야 한다.
+  const claimed = req.body?.claimedVcenterId || existing?.claimedVcenterId || '';
+  if (allowed && !ipInWriteScope(allowed, owners, req.params.ip, claimed)) {
     return res.status(404).json({ ok: false, reason: '범위 밖 IP 입니다.' });
   }
   const r = setOverride(req.params.ip, req.body || {}, req.user);
@@ -950,7 +960,7 @@ api.get('/tools/ipam.csv', (req, res) => {
   const { rows } = buildIpamRows(snap, req.query.vcenterId, scopedVcenterIds(req.user, snap));
   const head = ['ip', 'vcenter_id', 'vcenter_name', 'owner_type', 'owner_name', 'power_state', 'guest_os', 'host_name', 'cluster', 'scope', 'multi_homed', 'duplicate',
     'discovery', 'reconcile', 'mgmt_status', 'mgmt_owner', 'label', 'device_type', 'applied_by', 'range_policy_spec', 'reserved_until', 'first_seen', 'last_seen', 'usage_status'];
-  const esc = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const esc = (v) => { const s = guardCell(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }; // guardCell: 수식 인젝션 방어(= + - @)
   const iso = (t) => (t ? new Date(t).toISOString() : '');
   const lines = [head.join(',')];
   for (const r of rows) lines.push([r.ip, r.vcenterId, r.vcenterName, r.ownerType, r.ownerName, r.powerState, r.guestOS, r.hostName, r.cluster, r.scope, r.multiHomed ? 1 : 0, r.duplicate ? 1 : 0,
@@ -1101,7 +1111,7 @@ api.get('/tools/gpu.csv', (req, res) => {
   const snap = store.get();
   const data = buildGpuInventory(snap, req.query.vcenterId, scopedVcenterIds(req.user, snap));
   const head = ['host', 'vcenter_id', 'cluster', 'gpu_model', 'gpu_count', 'mem_gb', 'mode', 'mode_breakdown', 'util_pct', 'util_source', 'assigned_vms'];
-  const esc = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const esc = (v) => { const s = guardCell(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }; // guardCell: 수식 인젝션 방어(= + - @)
   const lines = [head.join(',')];
   for (const r of data.items) {
     const breakdown = Object.entries(r.modes || {}).map(([m, n]) => `${m}:${n}`).join(' ');
@@ -1128,6 +1138,7 @@ async function gpuSeriesExport(req, res, fmt) {
   const days = Math.max(1, Math.min(1830, Number(req.query.days) || 30));
   const vcId = req.query.vcenterId || null;
   const snap = store.get();
+  const allowed = scopedVcenterIds(req.user, snap); // null=무제한. 범위 밖 vCenter 의 GPU 시계열 유출 차단.
   const hostMap = new Map(); // host.id -> {name,vcenterId,cluster}
   for (const h of snap.hosts || []) hostMap.set(h.id, h);
   const db = await getMetricsDb();
@@ -1157,6 +1168,7 @@ async function gpuSeriesExport(req, res, fmt) {
     }
     for (const r of rows) {
       const h = hostMap.get(r.k);
+      if (allowed && !allowed.has(h?.vcenterId || '')) continue; // scope 밖(미상 호스트 포함) 제외
       if (vcId && (!h || h.vcenterId !== vcId)) continue;
       out.push({ ts: r.ts, host: h?.name || r.k, vcenterId: h?.vcenterId || '', cluster: h?.cluster || '', utilPct: normPct(r.v) });
       if (out.length >= MAX_ROWS) { truncated = true; break; }
@@ -1175,7 +1187,7 @@ async function gpuSeriesExport(req, res, fmt) {
     sendMaybeZip(res, `gpu-history-${range}-${stamp}.json`, body, 'application/json; charset=utf-8');
     return;
   }
-  const esc = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const esc = (v) => { const s = guardCell(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }; // guardCell: 수식 인젝션 방어(= + - @)
   const head = ['timestamp_iso', 'epoch_ms', 'host', 'vcenter_id', 'cluster', 'gpu_util_pct'];
   const lines = [
     `# GPU 사용률 수집 데이터 — 수집 시작: ${sinceIso} (그날부터 누적) | 범위: ${range === 'all' ? '전체' : `최근 ${days}일`} | 생성: ${new Date().toISOString()} | 샘플 ${out.length}${truncated ? ' (상한 도달 — 기간을 좁혀 다시 내보내세요)' : ''}`,
@@ -1311,6 +1323,8 @@ api.post('/tools/vclogs/federate', (req, res) => {
   const b = req.body || {};
   const vcenterId = String(b.vcenterId || '').trim();
   if (!vcenterId) return res.status(400).json({ ok: false, reason: 'vcenterId가 필요합니다.' });
+  // scope 강제: 범위 밖 vCenter 의 엣지 로그 연합 조회를 큐잉할 수 없다(범위 밖은 존재도 숨겨 404).
+  if (!inUserScope(req.user, store.get(), vcenterId)) return res.status(404).json({ ok: false, reason: 'vCenter를 찾을 수 없습니다.' });
   const filter = { vcenterId, severity: b.severity || '', q: b.q || '', since: Number(b.since) || 0, until: Number(b.until) || 0, limit: Math.min(500, Number(b.limit) || 200) };
   res.json({ ok: true, reqId: enqueueLogQuery(vcenterId, filter) });
 });
@@ -1320,15 +1334,31 @@ api.get('/tools/vclogs/federate', (req, res) => {
   res.json({ ok: true, ...getLogQueryResult(reqId) });
 });
 
+// vClogs scope: 사용자 scope 를 f.vcenterIds 화이트리스트로 강제하고, meta 도 범위 내 vCenter 만 남긴다.
+// null(무제한)이면 그대로. 반환값=allowed(Set|null) — meta 필터에 재사용.
+function scopeLogFilter(req, f) {
+  const allowed = scopedVcenterIds(req.user, store.get());
+  if (!allowed) return null; // 무제한
+  const req1 = f.vcenterId ? String(f.vcenterId) : '';
+  f.vcenterIds = req1 ? (allowed.has(req1) ? [req1] : []) : [...allowed];
+  return allowed;
+}
+function scopeLogMeta(meta, allowed) {
+  if (!allowed || !meta) return meta;
+  const vcs = (meta.vcenters || []).filter((v) => allowed.has(v.vcenterId));
+  const count = vcs.reduce((a, v) => a + (v.count || 0), 0);
+  return { ...meta, count, vcenters: vcs }; // 범위 밖 vCenter 존재/건수 미노출
+}
 // vCenter 장기 보관 로그 조회 — 필터: vcenterId·severity·q·since·until + 페이징.
 api.get('/tools/vclogs', async (req, res) => {
   try {
     const db = await getLogsDb();
     const f = { vcenterId: req.query.vcenterId || '', severity: req.query.severity || '', q: req.query.q || '',
       since: req.query.since ? Number(req.query.since) : 0, until: req.query.until ? Number(req.query.until) : 0 };
+    const allowed = scopeLogFilter(req, f); // 사용자 scope 화이트리스트를 f.vcenterIds 로 강제(범위 밖 로그 열람 차단)
     const limit = Math.min(1000, Number(req.query.limit) || 200);
     const offset = Math.max(0, Number(req.query.offset) || 0);
-    res.json({ total: db.count(f), rows: db.query(f, limit, offset), meta: db.meta(), dbKind: db.kind });
+    res.json({ total: db.count(f), rows: db.query(f, limit, offset), meta: scopeLogMeta(db.meta(), allowed), dbKind: db.kind });
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 api.get('/tools/vclogs/export.csv', async (req, res) => {
@@ -1336,8 +1366,9 @@ api.get('/tools/vclogs/export.csv', async (req, res) => {
     const db = await getLogsDb();
     const f = { vcenterId: req.query.vcenterId || '', severity: req.query.severity || '', q: req.query.q || '',
       since: req.query.since ? Number(req.query.since) : 0, until: req.query.until ? Number(req.query.until) : 0 };
+    scopeLogFilter(req, f); // scope 화이트리스트 강제(범위 밖 로그 CSV 유출 차단)
     const rows = db.query(f, 100_000, 0);
-    const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const esc = (v) => `"${guardCell(v).replace(/"/g, '""')}"`; // guardCell: 수식 인젝션 방어(로그 user/entity/message 는 외부 입력)
     const csv = ['time,vcenter,severity,type,user,entity,message',
       ...rows.map((r) => [new Date(r.ts).toISOString(), r.vcenterId, r.severity, r.type, r.user, r.entity, r.message].map(esc).join(','))].join('\n');
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');

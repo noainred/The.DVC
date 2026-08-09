@@ -6,11 +6,12 @@
 
 const pending = new Map(); // agent -> [{ reqId, spec, at }]
 const results = new Map();  // reqId -> { at, result }
+const reqAgent = new Map(); // reqId -> agent (소유권 판정용 — reqId 는 예측가능해 결과 위조 주입을 막아야 함)
 const TTL = 5 * 60_000;
 let seq = 0;
 
 function newReqId() { return `cap_${Date.now().toString(36)}_${(seq++).toString(36)}`; }
-function prune() { const now = Date.now(); for (const [k, v] of results) if (now - v.at > TTL) results.delete(k); }
+function prune() { const now = Date.now(); for (const [k, v] of results) if (now - v.at > TTL) { results.delete(k); reqAgent.delete(k); } }
 
 export function enqueueCapture(agent, spec = {}) {
   const reqId = newReqId();
@@ -19,8 +20,12 @@ export function enqueueCapture(agent, spec = {}) {
   if (arr.length > 20) arr.splice(0, arr.length - 20);
   pending.set(agent, arr);
   results.set(reqId, { at: Date.now(), result: null }); // pending 표식
+  reqAgent.set(reqId, String(agent || ''));
   return reqId;
 }
+
+/** reqId 의 배정 agent(소유권 판정용). 없으면 빈 문자열. */
+export function captureAgentOfReq(reqId) { return String(reqAgent.get(String(reqId || '')) || ''); }
 
 export function takeCaptureJobs(agent) {
   const arr = pending.get(agent);

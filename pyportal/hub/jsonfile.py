@@ -50,11 +50,24 @@ def read_json(path: Path, default, *, expect=None):
     return data
 
 
+def _open_private(tmp: Path):
+    """임시파일을 **처음부터 0o600** 으로 연다. 기본 open() 은 umask 에 따라 0o644(월드 리더블)로
+    만들어, os.replace 후 os.chmod 까지의 창에서 users.json(비밀번호 해시)·session-secret 같은
+    민감 파일이 잠깐 다른 로컬 사용자에게 읽힌다(감사 L6). O_EXCL 로 예측가능한 tmp 이름에 대한
+    심볼릭링크 선점(symlink race)도 막는다. 같은 pid 재사용으로 남은 스테일 tmp 는 먼저 정리한다."""
+    try:
+        os.unlink(tmp)
+    except FileNotFoundError:
+        pass
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, FILE_MODE)
+    return os.fdopen(fd, "w", encoding="utf-8")
+
+
 def write_json(path: Path, data) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + f".tmp.{os.getpid()}")
-    with open(tmp, "w", encoding="utf-8") as handle:
+    with _open_private(tmp) as handle:
         handle.write(json.dumps(data, ensure_ascii=False, indent=2))
         handle.flush()
         os.fsync(handle.fileno())
@@ -70,7 +83,7 @@ def write_text(path: Path, text: str) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + f".tmp.{os.getpid()}")
-    with open(tmp, "w", encoding="utf-8") as handle:
+    with _open_private(tmp) as handle:
         handle.write(text)
         handle.flush()
         os.fsync(handle.fileno())

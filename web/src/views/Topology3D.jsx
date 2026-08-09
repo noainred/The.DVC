@@ -2,6 +2,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 
+// 3D 툴팁(nodeLabel)은 innerHTML 로 렌더되므로, 인벤토리 이름을 넣기 전 HTML 이스케이프한다(저장형 XSS 방지).
+const escHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
 // 노드 종류별 색.
 const COLOR = {
   central: '#3b82f6',
@@ -40,7 +43,11 @@ export default function Topology3D() {
         if (destroyed || !wrapRef.current) return;
         Graph = ForceGraph3D()(wrapRef.current)
           .backgroundColor('#0b1220')
-          .nodeLabel((n) => `<div style="font:12px system-ui;color:#e2e8f0;background:#1e293b;padding:4px 8px;border-radius:6px;border:1px solid #334155">${n.label}${n.region ? ` · ${n.region}` : ''}${n.cpu != null ? ` · CPU ${n.cpu}%` : ''}${n.gpus ? ` · GPU ${n.gpus}` : ''}</div>`)
+          // ⚠️ 이 문자열은 3d-force-graph(float-tooltip)가 innerHTML 로 렌더한다. n.label·n.region 은
+          // vCenter 인벤토리의 VM/호스트/vCenter **이름**(외부 입력)이므로 반드시 HTML 이스케이프한다 —
+          // 안 하면 한 리전 vCenter 의 VM 이름에 심은 <img onerror=…> 가 글로벌 admin 세션에서 실행되는
+          // 저장형 XSS 가 된다(교차테넌트 상향). cpu/gpus 는 숫자라 안전하지만 label/region 은 필수.
+          .nodeLabel((n) => `<div style="font:12px system-ui;color:#e2e8f0;background:#1e293b;padding:4px 8px;border-radius:6px;border:1px solid #334155">${escHtml(n.label)}${n.region ? ` · ${escHtml(n.region)}` : ''}${n.cpu != null ? ` · CPU ${Number(n.cpu)}%` : ''}${n.gpus ? ` · GPU ${Number(n.gpus)}` : ''}</div>`)
           .nodeColor(nodeColor)
           .nodeVal((n) => n.val || 4)
           .nodeOpacity(0.95)
