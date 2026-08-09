@@ -76,6 +76,11 @@ function jsonToCsv(text) {
 }
 
 /** XLSX 버퍼 → CSV 텍스트(첫 워크시트). exceljs 로 읽어 셀을 문자열화한 뒤 CSV 로 재조립. */
+/** XLSX 재조립 시 폭주 방어 — 행 수 상한. maxBulkRows(2000) 의 넉넉한 배수로 두어 정상 파일엔
+ *  영향 없고, 압축폭탄(수백만 행)은 CSV 재조립 단계에서 즉시 끊는다. */
+const XLSX_MAX_ROWS = 50_000;
+const XLSX_MAX_COLS = 200;
+
 async function xlsxToCsv(buffer) {
   const ExcelJS = (await import('exceljs')).default;
   const wb = new ExcelJS.Workbook();
@@ -83,10 +88,14 @@ async function xlsxToCsv(buffer) {
   const ws = wb.worksheets[0];
   if (!ws) throw new Error('XLSX 에 시트가 없습니다.');
   const lines = [];
+  let rowN = 0;
+  let stop = null;
   ws.eachRow({ includeEmpty: false }, (row) => {
+    if (stop) return;
+    if (++rowN > XLSX_MAX_ROWS) { stop = new Error(`XLSX 행이 너무 많습니다(${XLSX_MAX_ROWS} 초과) — 파일을 나눠 올리세요.`); return; }
     // exceljs 는 1-based·values[0] 은 비어 있다. 셀 값을 문자열로(수식/객체는 text 우선).
     const cells = [];
-    const last = row.cellCount;
+    const last = Math.min(row.cellCount, XLSX_MAX_COLS);
     for (let c = 1; c <= last; c += 1) {
       const v = row.getCell(c).value;
       let s;
@@ -97,6 +106,7 @@ async function xlsxToCsv(buffer) {
     }
     lines.push(csvLine(cells));
   });
+  if (stop) throw stop;
   return `﻿${lines.join('\r\n')}\r\n`;
 }
 
