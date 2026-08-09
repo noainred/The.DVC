@@ -336,6 +336,12 @@ export function setIdracScanResult(reqId, data = {}) {
   return true;
 }
 
+/** reqId 의 배정 agent(소유권 판정용). 없으면 빈 문자열 — reqId 는 예측가능해 결과/진행 위조 주입 방지에 쓴다. */
+export function agentOfReq(reqId) {
+  const j = jobs.get(String(reqId || ''));
+  return j ? String(j.agent || '') : '';
+}
+
 /** UI가 결과 폴링 — { state: pending|running|done|error|unknown, agent, ...result }. */
 export function getIdracScanResult(reqId) {
   gc();

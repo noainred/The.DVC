@@ -49,6 +49,11 @@ function initSqlite() {
     function filterSql(f) {
       const w = []; const p = [];
       if (f.vcenterId) { w.push('vcenterId=?'); p.push(f.vcenterId); }
+      // vcenterIds: 사용자 scope 강제용 화이트리스트. 빈 배열=허용 vCenter 없음 → 결과 없음(1=0).
+      if (Array.isArray(f.vcenterIds)) {
+        if (f.vcenterIds.length) { w.push(`vcenterId IN (${f.vcenterIds.map(() => '?').join(',')})`); p.push(...f.vcenterIds); }
+        else { w.push('1=0'); }
+      }
       if (f.severity) { w.push('severity=?'); p.push(f.severity); }
       if (f.since) { w.push('ts>=?'); p.push(f.since); }
       if (f.until) { w.push('ts<=?'); p.push(f.until); }
@@ -79,6 +84,7 @@ function initJson() {
   const seen = new Set();
   try { for (const l of fs.readFileSync(file, 'utf8').split('\n')) { if (l.trim()) { const r = JSON.parse(l); rows.push(r); seen.add(`${r.vcenterId}|${r.k}`); } } } catch { /* */ }
   const match = (r, f) => (!f.vcenterId || r.vcenterId === f.vcenterId) && (!f.severity || r.severity === f.severity)
+    && (!Array.isArray(f.vcenterIds) || f.vcenterIds.includes(r.vcenterId)) // scope 화이트리스트(빈 배열=결과 없음)
     && (!f.since || r.ts >= f.since) && (!f.until || r.ts <= f.until)
     && (!f.q || `${r.message} ${r.entity} ${r.user} ${r.type}`.toLowerCase().includes(String(f.q).toLowerCase()));
   return {

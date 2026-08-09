@@ -15,6 +15,7 @@ import { atomicWriteFileSync } from './util/atomicWrite.js';
 import { store } from './store.js';
 import { logAudit } from './audit.js';
 import { resilientFetch } from './util/resilientFetch.js';
+import { ssrfBlockReasonResolved } from './collector/registry.js';
 import { Agent as UndiciAgent } from 'undici';
 
 const FILE = path.join(config.configDir, 'alerts.json');
@@ -209,8 +210,15 @@ function updatePrevPower(prev, snap) {
 // 웹훅 URL(시크릿 포함)이 무검증 TLS로 나간다. 검증 켠 전용 디스패처를 사용한다.
 const webhookAgent = new UndiciAgent({ connect: { rejectUnauthorized: true }, connections: 4 });
 async function post(url, payload) {
+  // 웹훅 URL 은 사용자 입력 — 전송 **직전**에 해석형 SSRF 가드를 다시 통과시킨다. 저장 시점에만
+  // 검사하면 그 뒤 DNS 가 루프백/메타데이터로 바뀌는 경우(TOCTOU/DNS rebinding)를 놓친다. RFC1918
+  // 사내 웹훅은 허용, 루프백/링크로컬/우회표기만 차단(pyportal notify._post_webhook 와 동형).
+  const ssrf = await ssrfBlockReasonResolved(String(url || ''));
+  if (ssrf) throw new Error(`웹훅 대상이 차단됐습니다: ${ssrf}`);
   // 일시적 네트워크 오류로 알림이 조용히 유실되지 않도록 1회 재시도(고RTT 외부 웹훅 대응).
-  return resilientFetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), timeoutMs: 15000, retries: 1, dispatcher: webhookAgent });
+  // redirect:'manual' — 웹훅 응답의 3xx 리다이렉트를 따라가지 않는다(공격자가 302 로 사내
+  // 호스트로 되돌리는 우회 SSRF 차단; 정상 Slack/Teams 는 200 직응답이라 영향 없음).
+  return resilientFetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), timeoutMs: 15000, retries: 1, dispatcher: webhookAgent, redirect: 'manual' });
 }
 /** Teams incoming webhook용 MessageCard 페이로드 — 순수 함수(테스트 대상). */
 export function buildTeamsPayload(alert, text) {

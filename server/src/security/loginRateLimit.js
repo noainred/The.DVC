@@ -26,6 +26,16 @@ const attempts = new Map(); // key -> { count, first, lockUntil }
 
 const keyOf = (ip, username) => `${String(ip || '?')}|${String(username || '?').toLowerCase()}`;
 
+// 계정 전역(모든 IP 합산) 분산 브루트포스 방어 레이어. per-IP 키(<ip>|<user>)는 IP 로테이션으로
+// 우회되므로, 계정 단위로도 실패를 합산한다 — 특히 OTP 전용 계정은 로그인 credential 이 6자리
+// TOTP(100만 조합)라 시도 제한이 계정 단위여야 온라인 무차별을 막을 수 있다(감사 L5).
+// 단, 임계값을 낮게 잡으면 '아무나 몇 번 틀려 정상 관리자 로그인을 봉쇄'하는 가용성 공격이 되므로
+// per-IP 의 GLOBAL_FACTOR 배(기본 10×)로 높여, 단일 출발지 그리핑은 per-IP 잠금이 먼저 막고
+// 계정 전역 잠금은 진짜 분산 공격(다수 IP)에서만 발동하게 한다(pyportal SessionStore 와 동형).
+const GLOBAL_FACTOR = Number(process.env.LOGIN_GLOBAL_FACTOR) || 10;
+const ACCT_MAX_FAILS = MAX_FAILS * GLOBAL_FACTOR;
+const acctKeyOf = (username) => `acct:${String(username || '?').toLowerCase()}`; // ':' 라 per-IP('|') 키와 불충돌
+
 function prune(now) {
   if (attempts.size < 5000) return;            // 메모리 상한 방어
   // 1차: 창 만료 + 잠금 해제된 항목 정리.
@@ -42,36 +52,45 @@ function prune(now) {
 /** 로그인 시도 전 호출. 잠금 중이면 { blocked:true, retryAfterSec } 반환. */
 export function checkLoginAllowed(ip, username, now = Date.now()) {
   if (DISABLED) return { blocked: false };
-  const rec = attempts.get(keyOf(ip, username));
-  if (rec?.lockUntil && rec.lockUntil > now) {
-    return { blocked: true, retryAfterSec: Math.ceil((rec.lockUntil - now) / 1000) };
+  for (const k of [keyOf(ip, username), acctKeyOf(username)]) { // per-IP + 계정 전역 둘 중 하나라도 잠기면 차단
+    const rec = attempts.get(k);
+    if (rec?.lockUntil && rec.lockUntil > now) {
+      return { blocked: true, retryAfterSec: Math.ceil((rec.lockUntil - now) / 1000) };
+    }
   }
   return { blocked: false };
 }
 
 /** 실패 시 호출. 임계 도달하면 잠금. 반환: { locked, retryAfterSec, remaining }. */
-export function recordLoginFailure(ip, username, now = Date.now()) {
-  if (DISABLED) return { locked: false };
-  prune(now);
-  const key = keyOf(ip, username);
+// 한 키(per-IP 또는 계정 전역)의 실패를 집계하고 임계 도달 시 잠근다. 반환: { locked, retryAfterSec, remaining }.
+function bump(key, max, now) {
   let rec = attempts.get(key);
-  // 창이 지났으면 카운터 리셋
-  if (!rec || (now - (rec.first || 0)) > WINDOW_MS) rec = { count: 0, first: now, lockUntil: 0 };
+  if (!rec || (now - (rec.first || 0)) > WINDOW_MS) rec = { count: 0, first: now, lockUntil: 0 }; // 창 만료 시 리셋
   rec.count += 1;
-  if (rec.count >= MAX_FAILS) {
+  if (rec.count >= max) {
     rec.lockUntil = now + LOCKOUT_MS;
     rec.count = 0; rec.first = now;
     attempts.set(key, rec);
     return { locked: true, retryAfterSec: Math.ceil(LOCKOUT_MS / 1000) };
   }
   attempts.set(key, rec);
-  return { locked: false, remaining: MAX_FAILS - rec.count };
+  return { locked: false, remaining: max - rec.count };
 }
 
-/** 로그인 성공 시 호출 — 해당 키 카운터/잠금 해제. */
+export function recordLoginFailure(ip, username, now = Date.now()) {
+  if (DISABLED) return { locked: false };
+  prune(now);
+  const perIp = bump(keyOf(ip, username), MAX_FAILS, now);            // 단일 출발지(빠른 잠금)
+  const acct = bump(acctKeyOf(username), ACCT_MAX_FAILS, now);        // 분산 합산(느린 계정 전역 잠금)
+  const locked = perIp.locked || acct.locked;
+  return { locked, retryAfterSec: Math.max(perIp.retryAfterSec || 0, acct.retryAfterSec || 0) || undefined, remaining: perIp.remaining };
+}
+
+/** 로그인 성공 시 호출 — per-IP + 계정 전역 카운터/잠금 모두 해제(정상 로그인이 앞선 실패를 리셋). */
 export function recordLoginSuccess(ip, username) {
   if (DISABLED) return;
   attempts.delete(keyOf(ip, username));
+  attempts.delete(acctKeyOf(username));
 }
 
 /* --------------------- OTP 재인증 잠금(별도 키 공간, 감사 M1) --------------------- */

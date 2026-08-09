@@ -52,10 +52,17 @@ export async function downloadPackage({ kind = 'installer', version, baseUrl, di
   const fname = v[k.file];
   const sha = v[k.sha];
   if (!fname) return { ok: false, reason: `버전 ${v.version}에 ${kind} 파일이 없습니다.` };
+  // fname 은 원격 versions.json 값 — path.join(dir, fname) 에 그대로 쓰면 '../' 로 packages.dir 밖에
+  // 임의 파일을 쓸 수 있다(TLS 로 GitHub 는 신뢰하지만 사내 미러·수기 versions.json 대비 심층 방어).
+  // basename 으로 경로 성분을 제거하고 확장자를 화이트리스트(.tar.gz/.zip = listLocalPackages 와 동일)로 강제.
+  const safeName = path.basename(String(fname));
+  if (safeName !== String(fname) || !/\.(tar\.gz|zip)$/.test(safeName)) {
+    return { ok: false, reason: `잘못된 패키지 파일명입니다: ${fname}` };
+  }
 
   fs.mkdirSync(dir, { recursive: true });
   // 대용량 다운로드(수십~수백MB)도 고RTT/일시 끊김 시 재시도(체크섬으로 무결성 검증되므로 안전).
-  const res = await resilientFetch(`${trim(baseUrl)}/${fname}`, { dispatcher: upgradeAgent, timeoutMs: 600000, retries: 2, retryBackoffMs: 2000 });
+  const res = await resilientFetch(`${trim(baseUrl)}/${safeName}`, { dispatcher: upgradeAgent, timeoutMs: 600000, retries: 2, retryBackoffMs: 2000 });
   if (!res.ok) return { ok: false, reason: `다운로드 실패 HTTP ${res.status}` };
   const buf = Buffer.from(await res.arrayBuffer());
   const got = crypto.createHash('sha256').update(buf).digest('hex');
@@ -75,7 +82,7 @@ export async function downloadPackage({ kind = 'installer', version, baseUrl, di
     return { ok: false, reason: '체크섬 불일치 — 파일 손상/변조 가능' };
   }
 
-  const dest = path.join(dir, fname);
+  const dest = path.join(dir, safeName);
   fs.writeFileSync(dest, buf);
-  return { ok: true, kind, version: v.version, file: fname, path: dest, sizeBytes: buf.length, sha256: got, verified: Boolean(sha) };
+  return { ok: true, kind, version: v.version, file: safeName, path: dest, sizeBytes: buf.length, sha256: got, verified: Boolean(sha) };
 }

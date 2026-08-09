@@ -144,3 +144,89 @@
 
 > 검증: 회귀 테스트 `server/test/centralJobScope.test.js`(6케이스) 추가, 전체 778 통과.
 > 이 감사·조치는 정적 분석 + 부분 재현 기반이다.
+
+---
+
+## 재점검 (2026-08-09 후속 — "최대 에이전트·레퍼런스 체크") — 21건 확정 + 조치 (v2.260.0)
+
+> 방식: 이전보다 **넓은 다중 에이전트**(파인더 ~다차원 × 파일군 병렬 → 후보별 **독립 스켑틱 2~3인
+> 적대적 반증** → 살아남은 것만 CLAUDE.md 불변조건·직전 감사보고·CWE 와 **교차대조**)로 재점검했다.
+> 확정 **21건**(HIGH 3 · MEDIUM 5 · LOW 10 · INFO 3). HIGH 2건은 아래 근본원인(XSS·scope)의 **결합
+> 상향**이라 근본 수정으로 함께 해소된다. 신뢰경계는 이전과 동일(포탈 권한 계정 · 침해 엣지 토큰 ·
+> **저신뢰 리전의 vCenter 명명 권한**).
+>
+> ⚠️ **직전 감사 판정 정정(정직)**: v2.259.0 조치 경과에서 `idrac-scan-result·capture-result` 를
+> "인출이 `?agent=` 키라 이미 바인딩 → reqId 학습 경로 없음"으로 real=false 처리했다. **재점검에서
+> 이는 틀린 판정**으로 확인됐다 — reqId 는 `idscan_<time36>_<seq36>`/`cap_<time36>_<seq36>` 로
+> **예측가능**하고, 결과 POST 는 인출과 별개 요청이라 개별 토큰 엣지가 **남의 reqId 로 결과를 위조
+> 주입**할 수 있었다(L-R4). 이번에 소유권 검증을 추가해 해소했다.
+
+### HIGH
+
+- **H-R1 [CWE-79] 3D 토폴로지 nodeLabel 저장형 XSS** (`web/src/views/Topology3D.jsx`) — **[해소]**
+  `nodeLabel` 문자열은 3d-force-graph(float-tooltip)가 `innerHTML` 로 렌더한다. `n.label`/`n.region`
+  은 vCenter 인벤토리의 VM/호스트/vCenter **이름**(외부 입력)이라, 저신뢰 리전의 VM 을
+  `<img src=x onerror=…>` 로 명명하면 글로벌 admin 세션에서 실행되는 저장형 XSS 였다.
+  → `escHtml()` 로 label/region 을 HTML 이스케이프, cpu/gpus 는 `Number()` 강제. (프론트 유일 XSS 싱크
+  — `grep dangerouslySetInnerHTML|innerHTML|.html(` 전수로 형제 싱크 없음 확인.)
+- **H-R2 [CWE-79] 체인A(상향): 저신뢰 vCenter 명명권 → XSS → 글로벌 admin 세션 탈취(교차테넌트 상향)**
+  — **[해소]** H-R1 수정으로 상향 경로 차단.
+- **H-R3 [CWE-200] 체인B(상향): scope 미강제 3종(vclogs·GPU export·IPAM override) 결합 → 범위제한
+  계정의 전 함대 정찰·표적화** — **[해소]** 아래 M-R1·L-R1·M-R3 수정으로 세 조회면 모두 scope 강제.
+
+### MEDIUM
+
+- **M-R1 [CWE-639] `/tools/vclogs`·`/export.csv`·`/federate` 사용자 scope 미강제** — **[해소]**
+  `scopeLogFilter()` 로 로그 DB 조회에 `f.vcenterIds` 화이트리스트를 강제(빈 배열=결과 없음), `meta`
+  도 범위 내 vCenter 만 남겨 타 사이트 존재/건수 미노출. `/federate` POST 는 `inUserScope` 로 404.
+  (`server/src/logs/db.js` 필터에 `vcenterIds` IN 절 추가.)
+- **M-R2 [CWE-598/522] RDP 자격증명 쿼리스트링 폴백 잔존** (`guacdTunnel.js`·`RemoteConsole.jsx`)
+  — **[해소]** 서버는 자격증명을 **티켓에서만** 읽고 `params.get()` 폴백 제거(티켓 없으면 접속 거부),
+  클라이언트는 티켓 발급 실패 시 **폴백 없이 중단**(오류 표시). CLAUDE.md 'RDP 자격증명은 티켓으로'
+  불변조건 완전 강제.
+- **M-R3 [CWE-639] `PUT /tools/ipam/ip/:ip` 가 body.claimedVcenterId 신뢰** — **[해소]** 기존
+  레코드가 있으면 **기존 소유권**으로 접근 가부를 먼저 판정(body 값으로 위장한 타 scope 예약 탈취
+  차단) 후, 새 claim 도 scope 안일 때만 허용.
+- **M-R4 [CWE-918] 엣지 자기등록 수집서버 URL 이 동기 SSRF 가드만 통과** — **[해소]**
+  `/register-collector` 핸들러(async)가 저장 전 `ssrfBlockReasonResolved`(DNS 해석 IP 검증)를
+  통과시킨다(registry API 는 동기 유지 — 기존 호출부 무회귀). 침해 엣지가 `urlHint` 로 중앙을
+  루프백/메타데이터로 SSRF 하는 경로 차단(RFC1918 사내는 허용).
+
+### LOW
+
+- **L-R1 [CWE-639] GPU 시계열 export(`/tools/gpu/export.csv|json`) scope 미강제** — **[해소]**
+  `scopedVcenterIds` 로 범위 밖(미상 호스트 포함) 행 제외.
+- **L-R2 [CWE-1236] IPAM/스캔/GPU/로그 CSV export 수식 인젝션 가드 미적용** — **[해소]**
+  5개 export 의 인라인 `esc` 를 `util/csv.js guardCell`(= + - @ 셀에 `'` 접두)로 통일.
+- **L-R3 [CWE-307] 로그인 시점 TOTP 계정 단위 잠금 부재(IP 로테이션 우회)** — **[해소]**
+  `loginRateLimit.js` 에 계정 전역(모든 IP 합산) 레이어를 추가(per-IP × `LOGIN_GLOBAL_FACTOR`=10 임계).
+  단일 출발지 그리핑은 per-IP 잠금이 먼저 막고, 계정 전역 잠금은 진짜 분산 브루트포스에서만 발동
+  (pyportal `GLOBAL_FACTOR` 동형 — 낮은 임계 계정잠금이 부르는 가용성 공격을 피함).
+- **L-R4 [CWE-639] idrac-scan-result/progress·capture-result reqId 소유권 미검증** — **[해소]**
+  (위 정정 참조) `agentOfReq`/`captureAgentOfReq` 로 배정 agent 를 조회, agent 모드면 보고 agent 와
+  일치 강제(`reqAgentDenied`). 공유 토큰·미상 잡은 TOFU 통과.
+- **L-R5 [CWE-770] ping-result 결과 맵 distinct-IP 총량 상한 부재** — **[해소]**
+  vCenter 당 `MAX_RESULT_IPS`=512, 초과 시 오래된 항목부터 축출(pending 은 이미 MAX_IPS=64).
+- **L-R6 [CWE-918] 웹훅 전송 직전 SSRF 재검증·리다이렉트 추적** — **[해소]** `alerts.js post()` 가
+  전송 직전 `ssrfBlockReasonResolved` 재검증 + `redirect:'manual'`(3xx 미추적, 우회 SSRF 차단).
+- **L-R7 [CWE-22] `downloadPackage` fname 경로 이탈 임의 쓰기** — **[해소]** 원격 versions.json 의
+  fname 을 `path.basename` + 확장자 화이트리스트(.tar.gz/.zip)로 강제(fetch·write 양쪽).
+- **L-R8 [CWE-377/367] pyportal 원자적 쓰기 임시파일 월드리더블 창** — **[해소]**
+  `_open_private()` 로 tmp 를 처음부터 `0o600`(+`O_EXCL` symlink race 차단)으로 생성.
+- **L-R9 [uagmon] loopback 모드 CSRF(Origin/Sec-Fetch-Site 미검사)** — **[문서화·후속]** 데스크톱
+  단독 도구(loopback 바인드)라 노출면이 좁아 이번 배치에서 제외. pyportal `_cross_site` 이식 예정.
+- **L-R10 [uagmon] 접속 비밀번호 무솔트 단일 SHA-256(KDF 부재)** — **[문서화·후속]** 단일 비번
+  소도구. scrypt/argon2id 전환은 저장형식 마이그레이션이 필요해 별도 처리.
+
+### INFO
+
+- **I-R1 [CWE-916] scrypt 작업계수 Node 기본(N=16384) < 현행 권고(N=2¹⁷)** (`auth.js:18-22`)
+  — **[문서화·후속]** N 상향은 **기존 저장 해시와 비호환**(고정 N 검증이라 상향 시 기존 비밀번호
+  로그인 불가)이라, 버전드 해시 포맷 + 로그인 시 재해시(rehash-on-verify)가 선행돼야 안전하다.
+  admin/operator 는 이미 OTP 전용(비번 없음)이라 실효 위험은 viewer/demo 로 한정.
+- **I-R2 패키지 소스 baseUrl SSRF 가드 비대칭(admin 전용)** — **[문서화·후속]** admin 만 설정 가능,
+  타 세션 소유 파일(admin.js) 경계라 그 세션과 협의.
+- **I-R3 [uagmon] 클릭재킹 방어(frame-ancestors/X-Frame-Options) 부재** — **[문서화·후속]**
+
+> 기각/양호로 판정돼 확정에서 제외된 후보는 반증 로그에 근거를 남겼다(적대적 검증 기본값 real=false).
+> 이번 조치도 정적 분석 + 부분 재현 기반이며, DNS 리바인딩 TOCTOU 등 best-effort 한계는 유지된다.

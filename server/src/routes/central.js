@@ -26,9 +26,9 @@ import { setEdgeFleet } from '../central/fleet.js';
 import { setGuestGpu } from '../gpu/store.js';
 import { setGpuGuestDiag } from '../central/gpuGuestDiag.js';
 import { takePingJobs, setPingResults } from '../central/pingJobs.js';
-import { takeIdracScanJobs, setIdracScanResult, setIdracScanProgress } from '../central/idracScanJobs.js';
+import { takeIdracScanJobs, setIdracScanResult, setIdracScanProgress, agentOfReq } from '../central/idracScanJobs.js';
 import { pullNow as pullCollectorsNow } from '../collector/puller.js';
-import { upsertCollectorFromAgent } from '../collector/registry.js';
+import { upsertCollectorFromAgent, ssrfBlockReasonResolved } from '../collector/registry.js';
 import { recordIngest } from '../central/ingestStats.js';
 import { ingestReport } from '../central/svcmonEdge.js';
 import { getAssignmentForAgent, markPulled, ackAssignment } from '../central/svcmonAssign.js';
@@ -38,7 +38,7 @@ import { getEffectiveUsers } from '../central/agentUsers.js';
 import { takeLogQueries, setLogQueryResult, vcenterOfReq } from '../central/logQueries.js';
 import { specToRange } from '../ipam/rangePolicies.js';
 import { ipToNum } from '../ipam/ledger.js';
-import { takeCaptureJobs, setCaptureResult } from '../central/captureJobs.js';
+import { takeCaptureJobs, setCaptureResult, captureAgentOfReq } from '../central/captureJobs.js';
 import { recordCapture } from '../net/captureHistory.js';
 import { loadScanSettings, mergeScanResults, recordAgentReport } from '../ipam/scanStore.js';
 
@@ -141,6 +141,15 @@ function agentOwnsVcenter(agent, vcenterId) {
   return !owner || owner.toLowerCase() === String(agent).toLowerCase();
 }
 
+// 위임 잡(iDRAC 스캔·캡처) reqId 소유권 판정. reqId 는 예측가능(idscan_<time>_<seq>·cap_<time>_<seq>)
+// 하므로, 개별 토큰 agent 가 남의 reqId 로 진행/결과를 위조 주입하지 못하게 막는다. 공유 CENTRAL_TOKEN
+// (레거시)과 미상 잡(assignedAgent='')은 기존 신뢰를 유지(TOFU) — 정상 엣지 흐름 무회귀.
+function reqAgentDenied(req, assignedAgent) {
+  if (req.centralAuth?.mode !== 'agent') return false; // 공유 토큰: 기존 신뢰
+  if (!assignedAgent) return false;                    // 미상 잡: TOFU 통과
+  return String(req.centralAuth.agent || '').trim().toLowerCase() !== String(assignedAgent).trim().toLowerCase();
+}
+
 // Agent pulls the IP assignment for its name (incl. iDRAC credentials).
 centralRouter.get('/assignment', (req, res) => {
   if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화 (CENTRAL_TOKEN 미설정)' });
@@ -153,7 +162,7 @@ centralRouter.get('/assignment', (req, res) => {
 // 엣지 자기등록(EDGE_MODE=all): 부팅한 엣지가 자기 이름/포트/수집토큰을 알리면 수집 서버
 // 목록에 자동 upsert — 관리자의 '수집 서버 추가' 수동 절차가 필요 없어진다.
 // Body: { name, port, collectorToken, datacenter?, urlHint?, version? }
-centralRouter.post('/register-collector', (req, res) => {
+centralRouter.post('/register-collector', async (req, res) => {
   if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화 (CENTRAL_TOKEN 미설정)' });
   if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
   const b = req.body || {};
@@ -177,6 +186,11 @@ centralRouter.post('/register-collector', (req, res) => {
     if (ip.includes(':')) ip = `[${ip}]`; // IPv6
     url = `http://${ip}:${port}`;
   }
+  // 엣지 자기등록 URL(특히 urlHint)은 신뢰 경계 밖 입력 — 저장 전 **해석형** SSRF 가드로 DNS 우회까지
+  // 차단한다. 중앙이 이 URL 로 주기적 수집 요청을 보내므로(SSRF), 저장 경로 sync 검사만으로는 차단
+  // 대역으로 '해석되는 이름'을 놓친다(감사 M-R4). RFC1918 사내 대역은 허용, 루프백/메타데이터만 차단.
+  const ssrfReason = await ssrfBlockReasonResolved(String(url));
+  if (ssrfReason) return res.status(400).json({ ok: false, reason: `수집 서버 URL: ${ssrfReason}` });
   const r = upsertCollectorFromAgent({ name, url, token: String(b.collectorToken), datacenter: String(b.datacenter || '') });
   if (r.ok) console.log(`[central] 엣지 자기등록: ${name} → ${url}${b.version ? ` (v${b.version})` : ''}`);
   res.status(r.ok ? 200 : 400).json(r);
@@ -369,6 +383,7 @@ centralRouter.post('/idrac-scan-progress', (req, res) => {
   if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
   const b = req.body || {};
   if (!b.reqId) return res.status(400).json({ ok: false, reason: 'reqId가 필요합니다.' });
+  if (reqAgentDenied(req, agentOfReq(String(b.reqId)))) return res.status(403).json({ ok: false, reason: '이 reqId 는 요청 에이전트의 잡이 아닙니다.' });
   setIdracScanProgress(String(b.reqId), b);
   res.json({ ok: true });
 });
@@ -380,6 +395,7 @@ centralRouter.post('/idrac-scan-result', (req, res) => {
   if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
   const b = req.body || {};
   if (!b.reqId) return res.status(400).json({ ok: false, reason: 'reqId가 필요합니다.' });
+  if (reqAgentDenied(req, agentOfReq(String(b.reqId)))) return res.status(403).json({ ok: false, reason: '이 reqId 는 요청 에이전트의 잡이 아닙니다.' });
   setIdracScanResult(String(b.reqId), b);
   // 위임 스캔이 에이전트 현지에 서버를 등록했으면, 그 전력은 '원격 수집(collector pull)'로 중앙에
   // 반영된다. 다음 정기 풀(최대 60s)을 기다리지 않고 즉시 + 지연(에이전트 전력 수집 시간 고려)으로
@@ -552,6 +568,7 @@ centralRouter.post('/capture-result', (req, res) => {
   if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
   const b = req.body || {};
   if (!b.reqId) return res.status(400).json({ ok: false, reason: 'reqId가 필요합니다.' });
+  if (reqAgentDenied(req, captureAgentOfReq(String(b.reqId)))) return res.status(403).json({ ok: false, reason: '이 reqId 는 요청 에이전트의 잡이 아닙니다.' });
   setCaptureResult(String(b.reqId), b.result || { ok: false, reason: '빈 결과' });
   try { if (b.result?.ok) recordCapture(b.result, { source: 'manual', via: 'agent' }); } catch { /* */ }
   res.json({ ok: true });
