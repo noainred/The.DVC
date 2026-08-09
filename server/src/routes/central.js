@@ -35,7 +35,9 @@ import { getAssignmentForAgent, markPulled, ackAssignment } from '../central/svc
 import { setAgentConfig } from '../central/agentConfig.js';
 import { getAssignedGpuGuest } from '../central/agentGpuGuestConfig.js';
 import { getEffectiveUsers } from '../central/agentUsers.js';
-import { takeLogQueries, setLogQueryResult } from '../central/logQueries.js';
+import { takeLogQueries, setLogQueryResult, vcenterOfReq } from '../central/logQueries.js';
+import { specToRange } from '../ipam/rangePolicies.js';
+import { ipToNum } from '../ipam/ledger.js';
 import { takeCaptureJobs, setCaptureResult } from '../central/captureJobs.js';
 import { recordCapture } from '../net/captureHistory.js';
 import { loadScanSettings, mergeScanResults, recordAgentReport } from '../ipam/scanStore.js';
@@ -124,6 +126,20 @@ centralRouter.use((req, res, next) => {
 function authed(req) { return Boolean(req.centralAuth?.ok); }
 // 인증 실패 사유(토큰 불일치 / 공유 토큰 금지)를 그대로 전달해 운영자가 원인을 알 수 있게.
 const denyReason = (req) => req.centralAuth?.reason || '토큰 불일치';
+
+/**
+ * agent 가 이 vCenter 를 소유(inventory 등록)했나 — 조회/보고 select 키가 vcenters 인 라우트의
+ * 소유권 검증. `?vcenters=` 로 데이터를 고르는 라우트는 미들웨어 바인딩(want 이 비면 단락)을
+ * 우회하므로, 개별 토큰(agent 모드)이 남이 소유한 vCenter 의 잡/결과를 가로채/위조하지 못하게 한다.
+ * 소유주가 없는 vCenter(미등록/direct-mode)는 TOFU 로 통과 — 정상 엣지 작업 분배를 깨지 않는다.
+ * (공유 토큰 모드는 '구별 불가한 전체 신뢰'라 여기서 검사하지 않는다 — 완전 봉인은
+ *  CENTRAL_REQUIRE_AGENT_TOKEN=true. gpu-guest-data 의 agent-모드-한정 검사와 동일 정책.)
+ */
+function agentOwnsVcenter(agent, vcenterId) {
+  if (!agent || !vcenterId) return true;
+  const owner = listInventory().find((e) => String(e.vcenterId) === String(vcenterId))?.agent || '';
+  return !owner || owner.toLowerCase() === String(agent).toLowerCase();
+}
 
 // Agent pulls the IP assignment for its name (incl. iDRAC credentials).
 centralRouter.get('/assignment', (req, res) => {
@@ -458,7 +474,9 @@ centralRouter.get('/users-config', (req, res) => {
 centralRouter.get('/ping-jobs', (req, res) => {
   if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
   if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
-  const vcs = String(req.query.vcenters || '').split(',').map((s) => s.trim()).filter(Boolean);
+  let vcs = String(req.query.vcenters || '').split(',').map((s) => s.trim()).filter(Boolean);
+  // 개별 토큰은 자기가 소유한 vCenter 의 대기 ping 작업만 인출(남의 사이트 대상 IP 목록 가로채기 차단).
+  if (req.centralAuth.mode === 'agent') vcs = vcs.filter((vc) => agentOwnsVcenter(req.centralAuth.agent, vc));
   res.json({ ok: true, jobs: takePingJobs(vcs) });
 });
 
@@ -468,6 +486,10 @@ centralRouter.post('/ping-result', (req, res) => {
   if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
   const b = req.body || {};
   if (!b.vcenterId) return res.status(400).json({ ok: false, reason: 'vcenterId가 필요합니다.' });
+  // 개별 토큰은 자기 소유 vCenter 의 도달성만 보고(남의 사이트 상태 위조 차단).
+  if (req.centralAuth.mode === 'agent' && !agentOwnsVcenter(req.centralAuth.agent, b.vcenterId)) {
+    return res.status(403).json({ ok: false, reason: `vcenterId '${b.vcenterId}'는 '${req.centralAuth.agent}' 소유가 아닙니다.` });
+  }
   setPingResults(String(b.vcenterId), Array.isArray(b.results) ? b.results.slice(0, 200) : []);
   res.json({ ok: true, count: Array.isArray(b.results) ? b.results.length : 0 });
 });
@@ -495,7 +517,9 @@ function require_basename(p) { return String(p).split(/[\\/]/).pop().slice(0, 20
 centralRouter.get('/log-queries', (req, res) => {
   if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
   if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
-  const vcs = String(req.query.vcenters || '').split(',').map((s) => s.trim()).filter(Boolean);
+  let vcs = String(req.query.vcenters || '').split(',').map((s) => s.trim()).filter(Boolean);
+  // 개별 토큰은 자기 소유 vCenter 의 대기 조회만 인출(운영자 검색 필터·계정명 유출 차단).
+  if (req.centralAuth.mode === 'agent') vcs = vcs.filter((vc) => agentOwnsVcenter(req.centralAuth.agent, vc));
   res.json({ ok: true, queries: takeLogQueries(vcs) });
 });
 // Body: { reqId, vcenterId, total, rows, dbKind }
@@ -504,6 +528,14 @@ centralRouter.post('/log-query-result', (req, res) => {
   if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
   const b = req.body || {};
   if (!b.reqId) return res.status(400).json({ ok: false, reason: 'reqId가 필요합니다.' });
+  // 개별 토큰은 자기 소유 vCenter 의 reqId 결과만 보고(위조 로그 주입 차단). reqId 의 진짜 vCenter 는
+  // 발급 시각에 기록해 둔 값(vcenterOfReq)으로 판정 — body 값(위조 가능)이 아니다. 미상 reqId 는 무시.
+  if (req.centralAuth.mode === 'agent') {
+    const vc = vcenterOfReq(b.reqId);
+    if (!vc || !agentOwnsVcenter(req.centralAuth.agent, vc)) {
+      return res.status(403).json({ ok: false, reason: '이 reqId 는 소유하지 않은(또는 만료된) 조회입니다.' });
+    }
+  }
   setLogQueryResult(String(b.reqId), b);
   res.json({ ok: true });
 });
@@ -541,7 +573,20 @@ centralRouter.post('/ip-scan-result', (req, res) => {
   const b = req.body || {};
   const agent = req.centralAuth.agent || String(b.agent || '').trim();
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
-  if (Array.isArray(b.alive)) mergeScanResults(b.alive.slice(0, 8000), Date.now(), agent);
-  recordAgentReport(agent, { scanned: b.scanned || 0, alive: Array.isArray(b.alive) ? b.alive.length : 0, durationMs: b.durationMs || null });
-  res.json({ ok: true, merged: Array.isArray(b.alive) ? b.alive.length : 0 });
+  let alive = Array.isArray(b.alive) ? b.alive.slice(0, 8000) : [];
+  // 개별 토큰은 자기 배정 스캔 ranges 안의 IP 만 보고할 수 있다(범위 밖 임의 IP 의 열린포트·소유
+  // agent 위조 차단 — gpu-guest-data 소유권 필터와 동일 모델). ranges 미설정 agent 는 통과(TOFU).
+  // ⚠️ ranges 는 **필터 진입 전 1회 로드·컴파일**한다 — IP 마다 loadScanSettings(무캐시 파일 읽기)를
+  // 부르면 8,000개 보고에 동기 read 8,000회로 이벤트 루프가 막힌다(CLAUDE.md 논블로킹 불변조건).
+  if (req.centralAuth.mode === 'agent') {
+    const bounds = ((loadScanSettings(agent)?.ranges) || []).map(specToRange).filter(Boolean);
+    if (bounds.length) {   // ranges 미설정이면 전량 통과(TOFU) — 기존 동작 유지
+      const before = alive.length;
+      alive = alive.filter((h) => { const n = h && ipToNum(h.ip); return n != null && bounds.some((r) => n >= r.lo && n <= r.hi); });
+      if (before !== alive.length) console.warn(`[central] ip-scan-result: ${agent} 배정 범위 밖 IP ${before - alive.length}개 드롭(위조 방지)`);
+    }
+  }
+  if (alive.length) mergeScanResults(alive, Date.now(), agent);
+  recordAgentReport(agent, { scanned: b.scanned || 0, alive: alive.length, durationMs: b.durationMs || null });
+  res.json({ ok: true, merged: alive.length });
 });

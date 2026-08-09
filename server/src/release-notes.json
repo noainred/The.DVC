@@ -1,6 +1,17 @@
 {
   "notes": [
     {
+      "version": "2.259.0",
+      "date": "2026-08-09",
+      "title": "보안 점검 후속 조치 — 중앙 조회/보고 잡 소유권·svcmon SSRF 해석검증·XLSX 압축폭탄 가드",
+      "notes": [
+        "2026-08-09 보안 점검(security_check_20260809.MD)이 찾은 5건을 모두 수정했습니다. (M) 중앙 연합 로그 조회(/central/log-queries)·IP 스캔 결과(/central/ip-scan-result)가 agent↔vCenter 소유권을 강제하지 않던 문제 — 개별 토큰 엣지는 이제 자기가 소유(등록)한 vCenter의 대기 조회만 인출하고, 결과 보고는 reqId의 진짜 vCenter로 소유권을 검사하며(위조 로그 주입 차단), IP 스캔은 배정된 ranges 안의 IP만 병합합니다. (L) ping 작업 인출/보고도 동일 소유권 모델로 봉인했습니다.",
+        "소유권은 개별 토큰(agent 모드)에서만 강제하고 공유 CENTRAL_TOKEN 경로는 기존 신뢰 모델을 유지합니다(하위호환 — 완전 봉인은 CENTRAL_REQUIRE_AGENT_TOKEN=true). 소유주가 없는(미등록/중앙 직접 수집) vCenter는 TOFU로 통과해 정상 엣지 작업 분배를 깨지 않습니다. 형제 라우트(idrac-scan·capture)는 이미 ?agent= 키로 바인딩돼 있어 영향 없습니다.",
+        "svcmon 점검기의 http/soap 점검이 연결 전 해석형 SSRF 재검증(ssrfBlockReasonResolved)으로 전환되어, DNS 이름이 루프백/메타데이터로 해석되는 우회를 차단합니다(수집기·웹훅과 동일한 async 가드). XLSX 가져오기는 디코딩 크기 상한(기본 8MB, SVCMON_XLSX_MAX_BYTES)과 재조립 행 상한으로 압축폭탄 DoS를 완화합니다.",
+        "조치 후 적대적 검증을 한 번 더 돌려 수정이 도입한 성능 회귀 1건(IP 스캔 범위 검사가 IP마다 설정 파일을 읽어 대량 보고 시 이벤트 루프 블로킹)을 발견해, 범위를 필터 진입 전 1회만 컴파일하도록 바로잡았습니다(논블로킹 불변조건 준수). 회귀 테스트 추가, 전체 단위 테스트 778개 통과. 심각/높음 취약점은 없었습니다."
+      ]
+    },
+    {
       "version": "2.258.0",
       "date": "2026-08-09",
       "title": "전체 보안 취약점 점검(v2.257 기준) + 문서 전면 갱신",

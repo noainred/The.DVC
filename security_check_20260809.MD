@@ -115,14 +115,32 @@
 
 ---
 
-## 조치 계획
+## 조치 경과 (v2.259.0 — 5건 전부 수정 완료)
 
-- M-1·L-1(log/ping 조회·보고 바인딩)·M-2(ip-scan 범위 소유권): 이번 세션 gpu-guest-data/inventory의
-  **소유권(TOFU/배정 범위) 모델**을 그대로 확장해 봉인 예정. 형제 라우트(idrac-scan-jobs·capture-jobs)도
-  같은 클래스이므로 함께 점검.
-- L-2(svcmon SSRF): 실행 직전 해석 IP 재검증 도입 검토(운영 정상 대상 무영향 확인 필요).
-- L-3(XLSX zip bomb): 압축해제/행 수 상한 가드 추가.
+> 조치 후 **적대적 검증을 1회 더** 돌려 8개 후보를 재점검했고, 그중 **내가 도입한 성능 회귀 1건**
+> (ip-scan 범위 검사가 IP마다 `loadScanSettings` 무캐시 파일 읽기 → 8,000 IP에 동기 read 8,000회로
+> 이벤트 루프 블로킹)을 잡아 **ranges를 필터 진입 전 1회 로드·컴파일**로 고쳤다. 나머지 7건은 의도된
+> 한계(아래)로 real=false.
 
-> 주의: 이 감사는 정적 분석 + 부분 재현이다. 조회/보고 바인딩 수정은 **엣지 작업 분배의 정상 흐름을
-> 깨지 않도록**(소유권 미등록 vCenter는 TOFU 통과) 적용하고, ip-scan 범위 검사는 배정 ranges가
-> 설정된 agent에만 강제한다.
+- **M-1 (해소)** — `/log-queries` GET은 agent 모드에서 요청 vcenters를 `agentOwnsVcenter`(listInventory
+  owner, TOFU)로 필터, `/log-query-result`는 reqId의 진짜 vCenter(`logQueries.vcenterOfReq`, 발급 시각에
+  기록·TTL 유지)로 소유권 검사(body 값 위조 무시).
+- **M-2 (해소)** — `/ip-scan-result`는 agent 모드에서 배정 ranges(`loadScanSettings(agent).ranges`를
+  `specToRange` 숫자 경계로 **1회 컴파일**) 안의 IP만 병합, 범위 밖 드롭. ranges 미설정 agent는 TOFU 통과.
+- **L-1 (해소)** — `/ping-jobs`·`/ping-result`도 M-1과 동일 소유권 모델.
+- **L-2 (해소)** — svcmon 점검기 http/soap가 `ssrfBlockReasonResolved`(해석 IP 검증)로 전환 —
+  DNS 이름 우회 차단. (소켓형 tcp/cert/… 은 오라클 없는 저위험 잔여로 문서화, 후속.)
+- **L-3 (완화)** — XLSX 가져오기: 디코딩 크기 상한 8MB(413) + 재조립 행 상한(`XLSX_MAX_ROWS` 5만).
+  exceljs `load()` 자체의 팽창은 Node 문자열 상한에서 catchable(500 정리)로 확인.
+
+### 의도된 잔여 한계 (real=false — 수정 대상 아님)
+
+- **agentOwnsVcenter TOFU**: 소유주 없는(미등록/direct-mode) vCenter는 통과 — 정상 엣지 작업 분배를
+  깨지 않기 위한 의도. 완전 봉인은 `CENTRAL_REQUIRE_AGENT_TOKEN=true`(공유 토큰 차단).
+- **공유 CENTRAL_TOKEN 경로**: '구별 불가한 전체 신뢰'라 소유권 검사 안 함(설계). 위 env로 봉인.
+- **idrac-scan-result·capture-result**: 인출이 `?agent=` 키라 이미 바인딩 → reqId 학습 경로 없음.
+- **소켓형 점검(tcp/cert/udp/…) SSRF**: 오라클(본문) 없고 operator 전제, 저장 시 동기 가드 통과.
+- **http/soap DNS 리바인딩 TOCTOU**: `registry.js`에 best-effort로 문서화된 한계.
+
+> 검증: 회귀 테스트 `server/test/centralJobScope.test.js`(6케이스) 추가, 전체 778 통과.
+> 이 감사·조치는 정적 분석 + 부분 재현 기반이다.

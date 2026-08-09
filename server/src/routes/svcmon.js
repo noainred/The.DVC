@@ -56,6 +56,8 @@ import { logDir } from '../svcmon/logsettings.js';
 export const svcmonRouter = express.Router();
 const canEdit = requireRole('admin', 'operator');
 const adminOnly = requireRole('admin');
+// XLSX 가져오기 디코딩 크기 상한(압축폭탄 완화). 정상 2,000행 xlsx 는 1MB 미만.
+const XLSX_MAX_BYTES = Number(process.env.SVCMON_XLSX_MAX_BYTES) || 8_000_000;
 
 // 상태 판정·요약 키는 svcmon/status.js 하나에서만 정의한다(라우트·화면·테스트 공용).
 const statusOf = (t, x, results, now) => testState(t, x, results, now);
@@ -366,6 +368,7 @@ svcmonRouter.post('/targets/hostmap/parse', canEdit, async (req, res) => {
   let input = rawContent;
   if (format === 'xlsx') {
     try { input = Buffer.from(rawContent, 'base64'); } catch { return res.status(400).json({ error: 'XLSX(base64) 디코딩 실패.' }); }
+    if (input.length > XLSX_MAX_BYTES) return res.status(413).json({ error: `XLSX 파일이 너무 큽니다(${Math.round(input.length / 1e6)}MB > ${XLSX_MAX_BYTES / 1e6}MB). 나눠 올리세요.` });
   }
   try {
     const r = await parseHostMapAny(input, format);
@@ -419,6 +422,9 @@ svcmonRouter.post('/targets/import', canEdit, async (req, res) => {
     try { input = Buffer.from(rawContent, 'base64'); }
     catch { return res.status(400).json({ error: 'XLSX(base64) 디코딩에 실패했습니다.' }); }
     if (!input.length) return res.status(400).json({ error: 'XLSX 내용이 비어 있습니다.' });
+    // 압축폭탄(decompression bomb) 완화 — 디코딩 크기 상한. 정상 2,000행 xlsx 는 1MB 미만이므로
+    // 8MB 상한은 여유 있고, 고압축 폭탄의 입력 크기를 제한해 exceljs 로드 시 팽창을 억제한다.
+    if (input.length > XLSX_MAX_BYTES) return res.status(413).json({ error: `XLSX 파일이 너무 큽니다(${Math.round(input.length / 1e6)}MB > ${XLSX_MAX_BYTES / 1e6}MB). 나눠 올리세요.` });
   } else {
     input = rawContent;
   }

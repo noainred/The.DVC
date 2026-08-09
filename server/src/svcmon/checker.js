@@ -20,7 +20,7 @@ import { execFile } from 'node:child_process';
 import { Resolver } from 'node:dns/promises';
 import { Agent } from 'undici';
 import { pingOne } from '../util/ping.js';
-import { ssrfBlockReason } from '../collector/registry.js';
+import { ssrfBlockReasonResolved } from '../collector/registry.js';
 
 const insecureAgent = new Agent({ connect: { rejectUnauthorized: false } });
 const SAFE_HOST = /^[a-zA-Z0-9._:-]+$/;
@@ -56,7 +56,9 @@ export async function runCheck(test, host) {
         return bytes > 0 ? ok(`응답 ${bytes} bytes`, Date.now() - started) : bad('UDP 응답 없음', started);
       }
       case 'http': case 'soap': {
-        const reason = ssrfBlockReason(test.url);
+        // 해석형 SSRF 재검증 — DNS 이름이 169.254/127.x 등으로 해석되는 우회를 막는다(동기
+        // ssrfBlockReason 은 IP 리터럴만 판정해 이름을 통과시킴). collector/웹훅과 같은 async 가드.
+        const reason = await ssrfBlockReasonResolved(test.url);
         if (reason) return bad(`차단: ${reason}`, started);
         const isSoap = test.type === 'soap';
         const res = await fetch(test.url, {
