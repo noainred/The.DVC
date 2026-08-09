@@ -1,5 +1,20 @@
 # 보안 점검 — 2026-08-08 (전역)
 
+> **조치 경과 (v2.257.0 후속 마무리)** — v2.256 에서 '후속'으로 남겼던 항목을 완료했습니다.
+> - **M1 IPAM 쓰기 scope(해소)**: override/annotation/정책 생성·수정·삭제·일괄 7종에 `scopedVcenterIds`
+>   교차(`ipInWriteScope`: 소유 vCenter ∩ allowed, 미귀속은 claimed 필수). 정책은 claimedVcenterId
+>   귀속 강제(전역 정책은 범위 계정 불가). 남은 IPAM **조회** 형제(GET /ip/:ip·/policies(summary)·
+>   /policies/ip·annotation·manage-meta)도 소유권 기반으로 일관 차단 — byVcenter·override 요약의
+>   함대 전체 열거 봉인. `syncLedger`(외부 공유 ipam.db)는 무스코프 유지.
+> - **M2 direct-mode GPU 봉인(해소)**: `/gpu-guest-data` 가 collectMode!=='site'(중앙 직접 수집) vCenter
+>   항목을 엣지 쓰기에서 거부(로컬 수집기만 기록). site 미등록은 TOFU 부트스트랩 유지.
+> - **M3 UAGMon(적용 완료)**: host 변경 시 비번 이월 금지 + 연결 직전 해석 IP SSRF 재검증(리바인딩
+>   차단, TLS/Host 원호스트 핀) + 공개 IP 기본 차단(IPv4·IPv6 대칭, UAGMON_ALLOW_PUBLIC/
+>   UAGMON_ALLOWED_DOMAINS 옵트인). 저장·연결 이중 검사.
+> - **api.js NUL 바이트 2개 제거**(→`|`): grep 바이너리 오판(감사 도구 신뢰성) 해소.
+> - 검증: 3회 적대적 검증으로 각 라운드 형제 누락(스캔 엔드포인트·콜론 오파싱·공개 IPv6·미귀속
+>   override·요약 비대칭) 추가 발견→보강. 회귀 테스트(ipamScope 15·uagmon 9) 추가, 전체 772 통과.
+>
 > **조치 경과 (v2.256.0 후속)** — M1·M2 후속을 완료했습니다.
 > - **M1 IPAM 7종(해소)**: `buildIpamRows`·`buildSubnetSheets`·`listSubnets`·`buildIpamInsights`·`buildNetmap`
 >   에 `allowed`(scope) 인자를 추가 — 캐시 키에 scope 서명, known/conflict 유니버스를 허용 vCenter 로

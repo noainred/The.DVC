@@ -13,10 +13,9 @@ import path from 'node:path';
 
 process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'ipam-scope-'));
 
-const { buildIpamRows, buildIpamInsights } = await import('../src/ipam/ledger.js').then(async (m) => ({
-  buildIpamRows: m.buildIpamRows,
-  buildIpamInsights: (await import('../src/ipam/insights.js')).buildIpamInsights,
-}));
+const ledger = await import('../src/ipam/ledger.js');
+const { buildIpamRows, ipVcenterOwners } = ledger;
+const { buildIpamInsights } = await import('../src/ipam/insights.js');
 
 const SNAP = {
   generatedAt: 'T0',
@@ -93,4 +92,91 @@ test('M1-scan 정적: scan-report.csv·ipam/history 가 범위 제한 계정에 
   const hist = src.slice(src.indexOf("api.get('/tools/ipam/history'"), src.indexOf("api.get('/tools/ipam/history'") + 500);
   assert.match(hist, /scopedVcenterIds\(req\.user/);
   assert.match(hist, /history: null/);
+});
+
+/* ── ① IPAM 쓰기 scope (v2.257 후속) ── */
+
+test('WR1 ipVcenterOwners: IP → 소유 vCenter Set(전체, unscoped)', () => {
+  const owners = ipVcenterOwners(SNAP);
+  assert.deepEqual([...(owners.get('10.1.0.1') || [])], ['vc-a']);
+  assert.deepEqual([...(owners.get('10.2.0.1') || [])], ['vc-b']);
+  // 충돌 IP 는 두 vCenter 모두(쓰기 판정은 전체 소유를 본 뒤 allowed 와 교집합해야 하므로)
+  assert.deepEqual([...(owners.get('10.9.9.9') || [])].sort(), ['vc-a', 'vc-b']);
+});
+
+test('WR2 쓰기 scope 모델: 범위 밖 IP 차단·미귀속은 claimed 필수', () => {
+  // 라우트 로컬 헬퍼 ipInWriteScope 와 동일 로직(회귀 기준). allowed=null 은 항상 통과.
+  const owners = ipVcenterOwners(SNAP);
+  const inScope = (allowed, ip, claimed) => {
+    if (!allowed) return true;
+    const own = owners.get(ip);
+    if (own && own.size) return [...own].some((v) => allowed.has(v));
+    return claimed ? allowed.has(claimed) : false;
+  };
+  const A = new Set(['vc-a']);
+  assert.equal(inScope(null, '10.2.0.1', ''), true, '무제한은 항상 통과');
+  assert.equal(inScope(A, '10.1.0.1', ''), true, 'vc-a IP 허용');
+  assert.equal(inScope(A, '10.2.0.1', ''), false, 'vc-b IP 차단');
+  assert.equal(inScope(A, '10.9.9.9', ''), true, '충돌 IP 는 vc-a 포함이라 허용');
+  assert.equal(inScope(A, '10.55.0.1', ''), false, '미귀속 IP + claimed 없음 → 차단');
+  assert.equal(inScope(A, '10.55.0.1', 'vc-a'), true, '미귀속 IP + claimed=vc-a → 허용');
+  assert.equal(inScope(A, '10.55.0.1', 'vc-b'), false, '미귀속 IP + claimed=vc-b → 차단');
+});
+
+test('WR3 정적: IPAM 쓰기 7라우트가 scope 가드를 건다', async () => {
+  const src = fs.readFileSync(new URL('../src/routes/api.js', import.meta.url), 'utf8');
+  for (const anchor of [
+    "api.put('/tools/ipam/annotation'", "api.put('/tools/ipam/ip/:ip'", "api.delete('/tools/ipam/ip/:ip'",
+    "api.post('/tools/ipam/bulk'", "api.post('/tools/ipam/policies'", "api.put('/tools/ipam/policies/:id'", "api.delete('/tools/ipam/policies/:id'",
+  ]) {
+    const i = src.indexOf(anchor);
+    assert.ok(i >= 0, `${anchor} 존재`);
+    const body = src.slice(i, i + 600);
+    assert.match(body, /scopedVcenterIds\(req\.user/, `${anchor} 에 scope 가드 필요`);
+  }
+});
+
+test('WR5 정적: IPAM 읽기 형제(GET /ip/:ip·/policies summary·manage-meta)도 scope', () => {
+  const src = fs.readFileSync(new URL('../src/routes/api.js', import.meta.url), 'utf8');
+  // GET /ip/:ip — override 읽기 scope 가드(적대적 검증 wf_23fac1ba 확정 결함)
+  const ipGet = src.slice(src.indexOf("api.get('/tools/ipam/ip/:ip'"), src.indexOf("api.get('/tools/ipam/ip/:ip'") + 500);
+  assert.match(ipGet, /scopedVcenterIds\(req\.user/);
+  assert.match(ipGet, /ipInWriteScope/);
+  // GET /policies — summary 도 스코프된 목록으로 재계산(byVcenter 열거 차단)
+  const polGet = src.slice(src.indexOf("api.get('/tools/ipam/policies'"), src.indexOf("api.get('/tools/ipam/policies'") + 500);
+  assert.match(polGet, /policiesSummary\(allowed \? policies : null\)/);
+  // manage-meta — policiesSummary·overridesSummary 둘 다 스코프
+  const mm = src.slice(src.indexOf("api.get('/tools/ipam/manage-meta'"), src.indexOf("api.get('/tools/ipam/manage-meta'") + 800);
+  assert.match(mm, /policiesSummary\(polList\)/);
+  assert.match(mm, /overridesSummary\(ovInclude\)/);
+});
+
+test('WR6 policiesSummary(list) 오버로드: 주어진 목록만 집계(byVcenter 열거 차단)', async () => {
+  const { policiesSummary } = await import('../src/ipam/rangePolicies.js');
+  const scoped = policiesSummary([{ status: 'reserved', claimedVcenterId: 'vc-a', enabled: true, specSize: 4 }]);
+  assert.deepEqual(Object.keys(scoped.byVcenter), ['vc-a'], '주어진 목록의 vCenter 만');
+  assert.equal(scoped.total, 1);
+});
+
+test('WR7 overridesSummary(includeFn): 필터 통과분만 집계(범위 밖 override 총계 차단 — 3차 검증 확정)', async () => {
+  const ov = await import('../src/ipam/overrides.js');
+  // includeFn 미지정 = 전체(admin 보존), includeFn 지정 = 통과분만. 저장소 부작용 없이 콜백 계약만 검증.
+  assert.equal(typeof ov.overridesSummary, 'function');
+  const full = ov.overridesSummary();
+  const none = ov.overridesSummary(() => false);
+  assert.equal(none.total, 0, 'includeFn 이 전부 false 면 집계 0');
+  assert.ok(full.total >= none.total, '무필터 총계 ≥ 필터 총계');
+  const src = fs.readFileSync(new URL('../src/routes/api.js', import.meta.url), 'utf8');
+  const mm = src.slice(src.indexOf("api.get('/tools/ipam/manage-meta'"), src.indexOf("api.get('/tools/ipam/manage-meta'") + 700);
+  assert.match(mm, /overridesSummary\(ovInclude\)/, 'manage-meta 가 스코프된 override 집계를 넘겨야 함');
+});
+
+test('WR4 정적: direct-mode vCenter GPU 쓰기 봉인(central)', () => {
+  const src = fs.readFileSync(new URL('../src/routes/central.js', import.meta.url), 'utf8');
+  const i = src.indexOf("centralRouter.post('/gpu-guest-data'");
+  const body = src.slice(i, src.indexOf('centralRouter.get', i));
+  assert.match(body, /loadVcenterConfig\(\)/);
+  assert.match(body, /collectMode/);
+  assert.match(body, /directIds/);
+  assert.match(body, /if \(direct\) return false/);
 });

@@ -357,3 +357,19 @@ function buildSubnetSheetsUncached(snap, { vcenterId, onlyBase, allowed = null }
 export function listSubnets(snap, vcenterId, allowed = null) {
   return buildSubnetSheets(snap, { vcenterId, allowed }).map((s) => ({ subnet: s.subnet, base: s.base, used: s.used }));
 }
+
+/**
+ * IP → 그 IP 를 주장하는 vCenter id Set(전체 스냅샷, scope 미적용). IPAM **쓰기** 경로의 범위
+ * 판정용이다. buildIpamRows 의 vcByIp(159-)는 uniVms(allowed 로 축소)를 쓰지만, 쓰기 판정은
+ * '이 IP 가 실제로 어느 vCenter 소속인가'를 전체 기준으로 안 뒤 그것을 사용자 allowed 와 교집합해야
+ * 하므로 반드시 unscoped 전체를 순회한다(축소본으로 판정하면 범위 밖 IP 가 '미귀속'으로 보여 우회).
+ */
+export function ipVcenterOwners(snap) {
+  const m = new Map();
+  for (const vm of snap.vms || []) {
+    const ips = vm.ipAddresses?.length ? vm.ipAddresses : (vm.ipAddress ? [vm.ipAddress] : []);
+    for (const ip of ips) { if (!m.has(ip)) m.set(ip, new Set()); if (vm.vcenterId) m.get(ip).add(vm.vcenterId); }
+  }
+  for (const h of snap.hosts || []) { if (ipToNum(h.name) == null) continue; if (!m.has(h.name)) m.set(h.name, new Set()); if (h.vcenterId) m.get(h.name).add(h.vcenterId); }
+  return m;
+}

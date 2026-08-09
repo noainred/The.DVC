@@ -8,7 +8,7 @@ import { hostPower } from '../idrac/service.js';
 import { fetchVmMetric, fetchHostMetric, PERF_INTERVALS, upgradeVmTools, getVmConsole } from '../vcenter/soapClient.js';
 import { listMutes, addMute, removeMute } from '../alarm-mutes.js';
 import { recordToolUse, getTopTools } from '../tool-usage.js';
-import { buildIpamRows, buildSubnetSheets, listSubnets } from '../ipam/ledger.js';
+import { buildIpamRows, buildSubnetSheets, listSubnets, ipVcenterOwners } from '../ipam/ledger.js';
 import { buildIpamInsights } from '../ipam/insights.js';
 import { buildNetmap } from '../ipam/netmap.js';
 import { listVcRanges } from '../ipam/rangeStore.js';
@@ -759,36 +759,87 @@ api.get('/tools/ipam/scan-report.csv', (req, res) => {
 
 // Per-IP user annotation (custom memo + tags), separate from vCenter notes.
 api.get('/tools/ipam/annotation', (req, res) => {
-  res.json({ ip: req.query.ip, annotation: getAnnotation(req.query.ip) });
+  const ip = req.query.ip;
+  const snap = store.get();
+  const allowed = scopedVcenterIds(req.user, snap);
+  // annotation(메모/태그)은 vCenter 귀속이 없지만, 범위 제한 계정이 IP 프로빙으로 전 함대 운영자
+  // 메모를 수집하지 못하게 쓰기 경로와 같은 소유권 게이트를 건다(GET /ip/:ip 와 동일 정책).
+  if (allowed && !ipInWriteScope(allowed, ipVcenterOwners(snap), ip, getOverride(ip)?.claimedVcenterId || '')) {
+    return res.json({ ip, annotation: null });
+  }
+  res.json({ ip, annotation: getAnnotation(ip) });
 });
 api.put('/tools/ipam/annotation', requirePerm('tools'), (req, res) => {
   const { ip, memo, tags } = req.body || {};
+  const snap = store.get();
+  const allowed = scopedVcenterIds(req.user, snap);
+  if (allowed && !ipInWriteScope(allowed, ipVcenterOwners(snap), ip, getOverride(ip)?.claimedVcenterId || '')) {
+    return res.status(404).json({ ok: false, reason: '범위 밖 IP 입니다.' });
+  }
   const r = setAnnotation(ip, { memo, tags }, req.user);
   res.status(r.ok ? 200 : 400).json(r);
 });
 
 // ---- IP 수동 관리(override) — vCenter/스캔 자동발견과 별개의 운영자 관리상태 -------------
 // 선택지(상태/디바이스종류)와 현재 관리 요약을 함께 내려준다(프론트 폼 구성용).
-api.get('/tools/ipam/manage-meta', (_req, res) => {
-  res.json({ statuses: STATUSES, deviceTypes: DEVICE_TYPES, summary: overridesSummary(),
-    policyStatuses: POLICY_STATUSES, policiesSummary: policiesSummary() });
+api.get('/tools/ipam/manage-meta', (req, res) => {
+  // 요약(정책·override)을 범위 제한 계정에는 스코프해 집계 — policiesSummary 는 byVcenter 로 타
+  // vCenter id 를, overridesSummary 는 함대 전체 override 규모를 흘리므로 둘 다 스코프(대칭).
+  const snap = store.get();
+  const allowed = scopedVcenterIds(req.user, snap);
+  const polList = allowed ? getPolicies().filter((p) => p.claimedVcenterId && allowed.has(p.claimedVcenterId)) : null;
+  const owners = allowed ? ipVcenterOwners(snap) : null;
+  const ovInclude = allowed ? (ip, rec) => ipInWriteScope(allowed, owners, ip, rec?.claimedVcenterId || '') : null;
+  res.json({ statuses: STATUSES, deviceTypes: DEVICE_TYPES, summary: overridesSummary(ovInclude),
+    policyStatuses: POLICY_STATUSES, policiesSummary: policiesSummary(polList) });
 });
 // vCenter 귀속 값 검증 — 알 수 없는 vCenter id를 붙이면 거부(오타·고아 참조 방지). 빈값=전역=허용.
 // 설정 읽기 실패 시엔 막지 않는다(fail-open).
 const isKnownVcenter = (id) => { if (!id) return true; try { return (loadVcenterConfig().vcenters || []).some((v) => v.id === id); } catch { return true; } };
+/**
+ * IPAM 쓰기(override/정책)의 사용자 scope 판정 — 범위 제한 계정이 범위 밖 IP·vCenter 에 쓰지 못하게.
+ *  · allowed=null(무제한/admin): 항상 허용(기존 동작 완전 보존).
+ *  · IP 가 vCenter 에 귀속(owners): 그 vCenter 중 하나라도 allowed 면 허용.
+ *  · 미귀속 IP(스캔/예약): claimedVcenterId 가 있고 allowed 에 있을 때만 허용(전역 예약은 범위 계정이 못 만듦).
+ */
+const ipInWriteScope = (allowed, owners, ip, claimed) => {
+  if (!allowed) return true;
+  const own = owners.get(ip);
+  if (own && own.size) return [...own].some((v) => allowed.has(v));
+  return claimed ? allowed.has(claimed) : false;
+};
 // 한 IP의 override 조회.
 api.get('/tools/ipam/ip/:ip', (req, res) => {
-  res.json({ ip: req.params.ip, override: getOverride(req.params.ip) });
+  const snap = store.get();
+  const allowed = scopedVcenterIds(req.user, snap);
+  const ov = getOverride(req.params.ip);
+  // 범위 밖 IP 의 override(담당자·라벨·예약·claimedVcenterId 등)를 범위 제한 계정에 노출하지 않는다
+  // (쓰기 경로·policies/ip GET 과 동일 경계 — 형제 read 로 우회되던 갭).
+  if (allowed && !ipInWriteScope(allowed, ipVcenterOwners(snap), req.params.ip, ov?.claimedVcenterId || '')) {
+    return res.status(404).json({ ip: req.params.ip, override: null });
+  }
+  res.json({ ip: req.params.ip, override: ov });
 });
 // 한 IP의 override 생성/수정(부분). 변경은 운영자/관리자만.
 api.put('/tools/ipam/ip/:ip', requirePerm('tools'), (req, res) => {
   if (req.body?.claimedVcenterId && !isKnownVcenter(req.body.claimedVcenterId)) return res.status(400).json({ ok: false, reason: '알 수 없는 vCenter입니다.' });
+  const snap = store.get();
+  const allowed = scopedVcenterIds(req.user, snap);
+  const claimed = req.body?.claimedVcenterId || getOverride(req.params.ip)?.claimedVcenterId || '';
+  if (allowed && !ipInWriteScope(allowed, ipVcenterOwners(snap), req.params.ip, claimed)) {
+    return res.status(404).json({ ok: false, reason: '범위 밖 IP 입니다.' });
+  }
   const r = setOverride(req.params.ip, req.body || {}, req.user);
   if (r.ok) logAudit({ user: req.user?.username, action: 'IP 관리상태 저장', target: `IP ${req.params.ip}`, detail: JSON.stringify(r.override || {}).slice(0, 500) });
   res.status(r.ok ? 200 : 400).json(r);
 });
 // 한 IP의 override 삭제(자동발견 상태로 되돌림).
 api.delete('/tools/ipam/ip/:ip', requirePerm('tools'), (req, res) => {
+  const snap = store.get();
+  const allowed = scopedVcenterIds(req.user, snap);
+  if (allowed && !ipInWriteScope(allowed, ipVcenterOwners(snap), req.params.ip, getOverride(req.params.ip)?.claimedVcenterId || '')) {
+    return res.status(404).json({ ok: false, reason: '범위 밖 IP 입니다.' });
+  }
   const r = clearOverride(req.params.ip);
   logAudit({ user: req.user?.username, action: 'IP 관리상태 삭제', target: `IP ${req.params.ip}` });
   res.json(r);
@@ -797,6 +848,14 @@ api.delete('/tools/ipam/ip/:ip', requirePerm('tools'), (req, res) => {
 api.post('/tools/ipam/bulk', requirePerm('tools'), (req, res) => {
   const { ips, ...fields } = req.body || {};
   if (fields.claimedVcenterId && !isKnownVcenter(fields.claimedVcenterId)) return res.status(400).json({ ok: false, reason: '알 수 없는 vCenter입니다.' });
+  const snap = store.get();
+  const allowed = scopedVcenterIds(req.user, snap);
+  if (allowed) {
+    const owners = ipVcenterOwners(snap);   // 라우트당 1회(O(N_vm)) — IP별 재스캔 금지(CLAUDE.md O(N))
+    const claimed = fields.claimedVcenterId || '';
+    const bad = (Array.isArray(ips) ? ips : []).find((ip) => !ipInWriteScope(allowed, owners, String(ip), claimed));
+    if (bad !== undefined) return res.status(403).json({ ok: false, reason: `범위 밖 IP 가 포함됐습니다(${bad}). 전체를 적용하지 않았습니다.` });
+  }
   const r = setOverrideBatch(ips, fields, req.user);
   if (r.ok) logAudit({ user: req.user?.username, action: 'IP 관리상태 일괄 적용', target: `${r.changed}개 IP`, detail: JSON.stringify(fields).slice(0, 500) });
   res.status(r.ok ? 200 : 400).json(r);
@@ -804,15 +863,30 @@ api.post('/tools/ipam/bulk', requirePerm('tools'), (req, res) => {
 
 // ---- 대역(subnet/range) 단위 정책 — IP override와 평행. 대역 기본 관리상태를 한 항목으로. -------
 // 정책 목록 + 요약 + 상태 enum.
-api.get('/tools/ipam/policies', (_req, res) => {
-  res.json({ policies: getPolicies(), summary: policiesSummary(), statuses: POLICY_STATUSES });
+api.get('/tools/ipam/policies', (req, res) => {
+  // 범위 제한 계정에는 자기 vCenter 에 귀속된 정책만(전역 정책·타 vCenter 정책 id·claimedVcenterId 미노출).
+  const allowed = scopedVcenterIds(req.user, store.get());
+  let policies = getPolicies();
+  if (allowed) policies = policies.filter((p) => p.claimedVcenterId && allowed.has(p.claimedVcenterId));
+  // summary 도 스코프된 목록으로 재계산 — 전체로 계산하면 byVcenter 로 타 vCenter id·전역 정책 수가 샌다.
+  res.json({ policies, summary: policiesSummary(allowed ? policies : null), statuses: POLICY_STATUSES });
 });
 // 특정 IP에 무엇이 적용되는지 미리보기(정책 + override). 대역 입력 시 size 미리보기 겸용.
 api.get('/tools/ipam/policies/ip/:ip', (req, res) => {
   const ip = req.params.ip;
   const n = ipToNum(ip);
-  const applied = n == null ? null : findPolicy(n, req.query.vcenterId || '');
-  res.json({ ip, vcenterId: req.query.vcenterId || '', applied: applied || null, override: getOverride(ip), size: specToRange(ip)?.size ?? null });
+  const snap = store.get();
+  const allowed = scopedVcenterIds(req.user, snap);
+  let applied = n == null ? null : findPolicy(n, req.query.vcenterId || '');
+  let override = getOverride(ip);
+  // 범위 밖 vCenter 에 귀속된 정책/override 는 범위 제한 계정에 노출하지 않는다.
+  // override 는 형제 GET /ip/:ip 와 동일한 소유권 기반 검사 — claimedVcenterId 만 보면 빈 claimed 의
+  // owner/label/note 가 새므로 ipInWriteScope(소유 vCenter + claimed)로 판정한다.
+  if (allowed) {
+    if (applied && !(applied.claimedVcenterId && allowed.has(applied.claimedVcenterId))) applied = null;
+    if (override && !ipInWriteScope(allowed, ipVcenterOwners(snap), ip, override.claimedVcenterId || '')) override = null;
+  }
+  res.json({ ip, vcenterId: req.query.vcenterId || '', applied: applied || null, override, size: specToRange(ip)?.size ?? null });
 });
 // 대역 spec 미리보기(IP 개수) — 폼 입력 검증용(조회).
 api.get('/tools/ipam/policies/preview', (req, res) => {
@@ -822,6 +896,11 @@ api.get('/tools/ipam/policies/preview', (req, res) => {
 // 정책 생성. body: { spec, status?, priority?, claimedVcenterId?, owner?, label?, deviceType?, note?, enabled? }.
 api.post('/tools/ipam/policies', requirePerm('tools'), (req, res) => {
   if (req.body?.claimedVcenterId && !isKnownVcenter(req.body.claimedVcenterId)) return res.status(400).json({ ok: false, reason: '알 수 없는 vCenter입니다.' });
+  // 범위 제한 계정은 자기 vCenter 에 귀속된 정책만 만들 수 있다(전역 정책은 전 vCenter 뷰에 영향).
+  const allowedP = scopedVcenterIds(req.user, store.get());
+  if (allowedP && !(req.body?.claimedVcenterId && allowedP.has(req.body.claimedVcenterId))) {
+    return res.status(403).json({ ok: false, reason: '범위 제한 계정은 자신의 vCenter 에 귀속된 정책만 만들 수 있습니다(전역 정책 불가).' });
+  }
   const r = setPolicy(req.body || {}, req.user);
   if (r.ok) { logAudit({ user: req.user?.username, action: '대역정책 저장', target: `정책 ${r.policy.spec}`, detail: JSON.stringify(r.policy).slice(0, 800) }); try { store.syncLedger(); } catch { /* */ } }
   res.status(r.ok ? 200 : 400).json(r);
@@ -829,6 +908,15 @@ api.post('/tools/ipam/policies', requirePerm('tools'), (req, res) => {
 // 정책 수정(부분). :id.
 api.put('/tools/ipam/policies/:id', requirePerm('tools'), (req, res) => {
   if (req.body?.claimedVcenterId && !isKnownVcenter(req.body.claimedVcenterId)) return res.status(400).json({ ok: false, reason: '알 수 없는 vCenter입니다.' });
+  // 범위 제한 계정: 기존 정책·변경 후 귀속 모두 자기 범위여야 한다(범위 밖 정책 탈취·전역화 차단).
+  const allowedP = scopedVcenterIds(req.user, store.get());
+  if (allowedP) {
+    const ex = getPolicy(req.params.id);
+    const eff = req.body?.claimedVcenterId ?? ex?.claimedVcenterId ?? '';
+    if (!ex || !allowedP.has(ex.claimedVcenterId) || !allowedP.has(eff)) {
+      return res.status(404).json({ ok: false, reason: '범위 밖 정책입니다.' });
+    }
+  }
   const r = setPolicy({ ...(req.body || {}), id: req.params.id }, req.user);
   if (r.ok) { logAudit({ user: req.user?.username, action: '대역정책 수정', target: `정책 ${r.policy.spec}`, detail: JSON.stringify(r.policy).slice(0, 800) }); try { store.syncLedger(); } catch { /* */ } }
   res.status(r.ok ? 200 : 400).json(r);
@@ -836,6 +924,10 @@ api.put('/tools/ipam/policies/:id', requirePerm('tools'), (req, res) => {
 // 정책 삭제. :id. (적용 IP는 자동발견 상태로 복귀)
 api.delete('/tools/ipam/policies/:id', requirePerm('tools'), (req, res) => {
   const pol = getPolicy(req.params.id);
+  const allowedP = scopedVcenterIds(req.user, store.get());
+  if (allowedP && !(pol && allowedP.has(pol.claimedVcenterId))) {
+    return res.status(404).json({ ok: false, reason: '범위 밖 정책입니다.' });
+  }
   const r = deletePolicy(req.params.id);
   if (r.ok) { logAudit({ user: req.user?.username, action: '대역정책 삭제', target: `정책 ${pol?.spec || req.params.id}`, detail: pol ? JSON.stringify(pol).slice(0, 800) : '' }); try { store.syncLedger(); } catch { /* */ } }
   res.status(r.ok ? 200 : 400).json(r);
@@ -1431,7 +1523,7 @@ api.get('/tools/capacity', (req, res) => memoJson(req, res, 'tools-capacity', (s
   const vms = scoped.vms.filter((v) => !v.template);
   const r1 = (x) => Number((x || 0).toFixed(1));
   const byCluster = new Map();
-  const key = (h) => `${h.vcenterId} ${h.cluster || 'standalone'}`;
+  const key = (h) => `${h.vcenterId}|${h.cluster || 'standalone'}`;
   for (const h of hosts) {
     const k = key(h);
     const c = byCluster.get(k) || { vcenterId: h.vcenterId, cluster: h.cluster || 'standalone', hosts: 0, cores: 0, cpuTotalMhz: 0, cpuUsedMhz: 0, memTotalGB: 0, memUsedGB: 0, vcpuOn: 0, vcpuAll: 0, ramOnGB: 0, vmsOn: 0, vms: 0 };
@@ -1440,7 +1532,7 @@ api.get('/tools/capacity', (req, res) => memoJson(req, res, 'tools-capacity', (s
     byCluster.set(k, c);
   }
   for (const v of vms) {
-    const k = `${v.vcenterId} ${v.cluster || 'standalone'}`;
+    const k = `${v.vcenterId}|${v.cluster || 'standalone'}`;
     const c = byCluster.get(k); if (!c) continue;
     c.vms++; const on = v.powerState === 'POWERED_ON';
     c.vcpuAll += v.cpuCount || 0;
