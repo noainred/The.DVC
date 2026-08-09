@@ -1,6 +1,16 @@
 {
   "notes": [
     {
+      "version": "2.258.0",
+      "date": "2026-08-09",
+      "title": "전체 보안 취약점 점검(v2.257 기준) + 문서 전면 갱신",
+      "notes": [
+        "전체 소스를 6개 보안 차원(인증/인가/scope·SSRF/TLS·인젝션·시크릿/로깅·중앙↔엣지 무결성·신규 코드)으로 다중 에이전트 읽기전용 감사하고 각 후보를 적대적으로 반증해 확정했습니다. 결과 리포트: security_check_20260809.MD. 심각(critical)·높음(high) 취약점은 없고, medium 2건·low 3건을 후속 과제로 기록했습니다 — 모두 침해된 엣지 토큰 또는 admin/operator 권한을 전제로 하며 영향은 데이터 무결성/가용성에 국한됩니다(자격증명 유출·RCE·영구 상태 파괴 경로 없음).",
+        "확정 findings: (M) 연합 로그 조회(/central/log-queries)와 IPAM 스캔 결과 병합(/central/ip-scan-result)이 agent↔vCenter 소유권을 강제하지 않아 침해 엣지가 타 사이트 조회 필터를 탈취하거나 임의 IP 스캔 레코드를 위조 가능. (L) ping 작업 인출/보고 동일 패턴, svcmon 점검기 SSRF 가드가 동기 전용이라 DNS 이름 경유로 메타데이터/루프백 차단 우회(operator 전제·자격증명 미첨부), XLSX 가져오기 압축폭탄 미방어(DoS). 저장 경로(6종)는 이번 세션 M2 하드닝으로 이미 봉인돼 있으며, 이번 findings 는 조회/보고 형제 라우트의 누락입니다.",
+        "문서 전면 갱신: README(Capacity Advisor·대량등록 v2.251·전 포맷·scope 전면 강제 반영), docs/SVCMON-BULK.md(끝번호·자동/수동 IP·호스트↔IP CSV·폴더 트리·CSV/JSON/XLSX), 신규 docs/CAPACITY-ADVISOR.md, uagmon/README.md(공개 IP 차단·연결직전 SSRF 재검증·host 변경 비번무효화·UAGMON_ALLOW_PUBLIC/ALLOWED_DOMAINS), SECURITY-AUDIT.md(v2.255~2.257 조치 요약 포인터), CLAUDE.md 보안 불변조건에 scope 전면 강제·GPU direct-mode 봉인·uagmon M3 규칙 추가."
+      ]
+    },
+    {
       "version": "2.257.0",
       "date": "2026-08-09",
       "title": "보안 후속 마무리 — IPAM 쓰기/조회 범위 강제 · direct-mode GPU 쓰기 봉인 · UAG 모니터 자격증명 유출(M3) 수정 · api.js NUL 제거",

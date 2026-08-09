@@ -1,0 +1,128 @@
+# 보안 취약점 점검 — The.DVC v2.257.0 (2026-08-09)
+
+> 방식: 전체 소스 6개 보안 차원(인증/인가/scope · SSRF/TLS · 인젝션 · 시크릿/로깅 · 중앙↔엣지
+> 무결성 · 이번 세션 신규 코드)을 다중 에이전트로 **읽기 전용** 병렬 감사한 뒤, 각 후보를 독립
+> 스켑틱이 **적대적으로 반증**하고(기본값 real=false), 살아남은 것만 코드로 재확인해 확정했다.
+> 대상 커밋: `2638913`(v2.257.0). 성격: 사내 단일테넌트 운영 포탈. 신뢰경계는 "포탈 권한 계정 ·
+> 침해된 엣지 토큰 → 중앙 데이터/원격 인프라"이다.
+>
+> 직전 감사·조치: [security_check_20260808.MD](security_check_20260808.MD)(M1/M2/M3), [SECURITY-AUDIT.md](SECURITY-AUDIT.md)(1차).
+
+## 요약
+
+| 심각도 | 건수 |
+|---|---|
+| Critical | **0** |
+| High | **0** |
+| Medium | 2 |
+| Low | 3 |
+
+**critical/high 없음.** 확정된 5건은 모두 (a) 침해된 개별 엣지 토큰 또는 (b) admin/operator 권한을
+전제로 하며, 영향은 **데이터 무결성/가용성**에 국한된다. 자격증명 유출·RCE·영구 상태 파괴 경로는
+발견되지 않았다. 확정 5건 중 4건은 이번 세션 M2 하드닝의 **형제 라우트 누락**(중앙 조회/보고 경로가
+저장 경로와 달리 agent 바인딩·소유권 검사를 안 함) — 동일 클래스이므로 같은 모델로 봉인 가능하다.
+
+핵심 원인 요약: `requestedAgent()`(central.js:101-104)는 `query.agent`/`X-Agent-Name`/`body.agent`만
+읽으므로, 데이터를 **`?vcenters=`** 로 고르는 라우트는 `want`가 비어 바인딩 미들웨어(central.js:112,
+`want` falsy면 단락)를 트리거하지 않는다. 저장 경로(6종)는 이번 세션에 `centralAuth.agent`로 봉인했으나
+**조회/보고(select-by-vcenters·IP 전역 키) 경로**는 남았다.
+
+---
+
+## 확정 취약점 (심각도순)
+
+### M-1 [MEDIUM · CWE-639] 연합 로그 조회가 agent↔vCenter 바인딩 미강제 — 타 사이트 조회 필터 탈취·위조 로그 주입
+- **위치:** `server/src/routes/central.js:493-509` (`takeLogQueries`/`setLogQueryResult` = `central/logQueries.js:30-42`)
+- **시나리오:** 침해된 엣지 1대의 유효 개별 토큰으로 `GET /api/central/log-queries?vcenters=<타사이트-vcId>`
+  호출 → `agent` 파라미터가 없어 바인딩 미들웨어를 우회, `authed(req)`만 통과하면 그 vCenter의 대기
+  조회(reqId + filter)를 그대로 반환하고 pending에서 삭제한다. filter에는 운영자 자유검색 `q`(계정명·
+  IP·조사 키워드)가 포함돼 유출되고, 정상 엣지는 조회를 못 받는다. 이어 `POST /api/central/log-query-result`
+  에 획득한 reqId로 최대 2000행 위조 로그를 주입하면 중앙 UI가 해당 사이트 로그로 표시(증거 위조).
+- **수정안:** log-queries GET을 `mode==='agent'` 필수 + 요청 `vcenters`를 `req.centralAuth.agent` 소유분
+  (listInventory owner)만 반환. log-query-result POST는 reqId의 vcenterId 소유 agent와 일치할 때만 수용.
+
+### M-2 [MEDIUM · CWE-639] IPAM 스캔 결과 병합이 IP 전역 키 — 배정 범위 밖 임의 IP의 열린포트·소유 agent 덮어쓰기
+- **위치:** `server/src/routes/central.js:538-547` (`mergeScanResults` = `ipam/scanStore.js:148-161`)
+- **시나리오:** `POST /api/central/ip-scan-result`는 저장 attribution만 `centralAuth.agent`로 강제하고,
+  보고된 IP가 그 agent의 배정 ranges(`loadScanSettings(agent).ranges`) 안인지 검사하지 않는다. 침해 엣지
+  A가 `alive:[{ip:'<사이트B IP>',openPorts:[22,3389],services,hostname}]`를 보내면 lastSeen=중앙
+  Date.now()로 항상 최신이 되어(stale 가드 strict `>`) 기존 정상 레코드를 위조값으로 덮어쓰고 소유
+  agent를 A로 바꾼다. up/down 이력(recordSeen)까지 오염 → 공유 IPAM 기반 방화벽/자산 판단 왜곡.
+- **대조:** 같은 파일·같은 세션(v2.256) 추가된 `gpu-guest-data`는 `ownsVc` 소유권 필터로 정확히 이
+  엣지 간 쓰기 격리를 강제한다. ip-scan-result만 누락.
+- **수정안:** 수용 전 각 `h.ip`가 `loadScanSettings(agent).ranges` 안인지 검사, 범위 밖은 드롭
+  (gpu-guest-data `ownsVc`와 동일 모델).
+
+### L-1 [LOW · CWE-639] Ping 작업 인출/보고가 vCenter 전역 키 — 타 사이트 대상 IP 탈취·도달성 위조
+- **위치:** `server/src/routes/central.js:457-473` (`takePingJobs`/`setPingResults` = `central/pingJobs.js:34-59`)
+- **시나리오:** M-1과 동일 패턴. `GET /api/central/ping-jobs?vcenters=<타사이트>`가 바인딩 우회 →
+  타 사이트 대기 ping 대상(내부망 IP 목록) 반환·가로채기. `POST /api/central/ping-result`로 임의
+  vcenterId에 `alive/rttMs` 주입 → UI 녹/적 상태 위조(가짜 'up'이 2분간 유지되어 실제 장애 은폐).
+- **심각도:** ping 상태(전이적·인메모리·2분 TTL, 재시작/다음 폴로 정정)에 국한.
+- **수정안:** M-1과 동일 — agent 모드에서 요청 vcenterId 소유 검사 후 인출/기록.
+
+### L-2 [LOW · CWE-918] svcmon 점검기 SSRF 가드가 sync 전용 — DNS 이름 경유로 메타데이터·루프백 차단 우회
+- **위치:** `server/src/svcmon/checker.js:59`, `server/src/svcmon/store.js:169` (`validateEndpoint`)
+- **시나리오:** operator 권한(canEdit) 전제. 저장·실행 직전 재검증이 모두 동기 `ssrfBlockReason`이라
+  IP 리터럴/localhost 이름만 차단하고 일반 DNS 이름은 통과시킨다. operator가 host/url을 A레코드=
+  169.254.169.254 또는 127.0.0.1인 도메인으로 등록하면 서버가 그 IP로 연결 → http/soap는 keyword 유무의
+  불리언 오라클, tcp/banner/cert는 루프백 관리 서비스 프로빙. 주석(checker.js:84)이 막겠다 선언한
+  메타데이터·루프백이 DNS 경유로 뚫린다.
+- **심각도(및 과장 배제):** 형제 egress(collector·웹훅)는 async `ssrfBlockReasonResolved`, uagmon M3는
+  연결 직전 해석 IP 재검증을 쓰는데 svcmon만 sync에 머문 실재 격차. 다만 operator(신뢰 역할) 필요,
+  자격증명 미첨부, RFC1918은 정상 기능이라 순증분은 169.254·127.x, **클라우드 메타데이터 자격증명
+  탈취는 불가**(IMDSv2/GCP/Azure 필수 헤더를 못 싣고 본문도 미반환 — 불리언 오라클뿐). CLAUDE.md가
+  동기 가드를 명시 허용(DNS rebinding은 best-effort 한계로 문서화).
+- **수정안:** 실행 직전(특히 http/soap) `ssrfBlockReasonResolved`(해석 IP 검증) 또는 uagmon식 연결
+  직전 dns.lookup 결과 IP 재검증 + 그 IP로 연결(호스트네임은 SNI/Host 핀).
+
+### L-3 [LOW · CWE-409] XLSX 가져오기 경로의 압축 폭탄(zip bomb) 미방어 — 메모리/이벤트루프 DoS
+- **위치:** `server/src/svcmon/formats.js:79-101` (`xlsxToCsv`), `server/src/routes/svcmon.js:409-431`, 본문 상한 `index.js:119-120`
+- **시나리오:** admin/operator가 `POST /api/svcmon/targets/import`(또는 hostmap/parse)에 format='xlsx'로
+  base64 XLSX 전송(디코딩 후 length만 검사, 압축해제 크기 가드 없음). `wb.xlsx.load(buffer)`가 워크북
+  전체를 동기 로드하고 `ws.eachRow`로 행 상한 없이 적재한다. `LIMITS.maxBulkRows`(2000) 검사는 exceljs
+  팽창 이후(parseTargetsCsv)라 무력. ~12MB 고압축 XLSX(반복 XML ~1000:1)면 수 GB 할당으로 힙 고갈/
+  이벤트 루프 정지 → '이벤트 루프 블로킹 금지' 불변조건 위반.
+- **심각도:** 미인증 아님(준신뢰 권한), 영향은 가용성 DoS 한정.
+- **수정안:** exceljs load 전 디코딩 버퍼 상한 별도(예 2~4MB) + `xlsxToCsv` `ws.eachRow`에 행 수 상한
+  throw(팽창 CSV 재조립 차단). 가능하면 스트리밍 리더로 maxBulkRows 초과 시 즉시 중단.
+
+---
+
+## 확인된 양호한 방어 (불변조건 준수 — 코드로 확인)
+
+1. **중앙 저장 경로 agent 바인딩 정상** — `/svcmon-report`·`/result`·`/agent-config`·`/gpu-guest-data`·
+   `/ip-scan-result`가 저장 키로 `centralAuth.agent`만 사용(body.agent 위조 봉인). 결함은 *조회/보고
+   select 키가 vcenters/IP 전역인 라우트*에 국한.
+2. **gpu-guest-data 엣지 간 쓰기 격리** — `ownsVc` 최장 프리픽스 + direct-mode 거부(central.js:393-423).
+3. **공유 CENTRAL_TOKEN 완전 봉인 옵션** — `CENTRAL_REQUIRE_AGENT_TOKEN=true`(central.js:91).
+4. **collector/웹훅 egress는 async 해석형 SSRF 가드**(`ssrfBlockReasonResolved`, admin.js:1029).
+5. **uagmon M3 연결 직전 해석 IP 재검증**(SSRF 심층 방어 모범).
+6. **사용자 scope 전면 강제(v2.255~2.257)** — 검색·도구 집계·IPAM 조회/쓰기 + `/summary`·`/overview`
+   캐시 키 scope 서명. 외부 공유 `ipam.db` 원장은 무스코프 유지.
+7. **svcmon RBAC** — canEdit=admin/operator로 상태변경 보호(viewer 등록 불가).
+
+---
+
+## 거짓양성으로 기각 (근거)
+
+1. **whois refer SSRF (checker.js:276)** — 반증. 두 번째 whois 접속 대상은 하드코딩 whois.iana.org가
+   TLD에 반환하는 권위 서버 값이라 공격자가 지정 불가, 1단계 비재귀, 포트 43 고정 → SSRF 필수요건
+   (대상 임의 지정) 미충족. (검증 6건 중 유일한 real=false.)
+2. **svcmon SSRF의 '클라우드 자격증명 탈취'** — L-2는 real이나 IMDSv2/GCP/Azure 필수 헤더 미탑재 +
+   본문 미반환으로 자격증명 추출 불가 → severity low로 하향.
+3. **ping-result '영구 상태 오염'** — L-1은 real이나 인메모리·2분 TTL로 자연 정정 → low.
+
+---
+
+## 조치 계획
+
+- M-1·L-1(log/ping 조회·보고 바인딩)·M-2(ip-scan 범위 소유권): 이번 세션 gpu-guest-data/inventory의
+  **소유권(TOFU/배정 범위) 모델**을 그대로 확장해 봉인 예정. 형제 라우트(idrac-scan-jobs·capture-jobs)도
+  같은 클래스이므로 함께 점검.
+- L-2(svcmon SSRF): 실행 직전 해석 IP 재검증 도입 검토(운영 정상 대상 무영향 확인 필요).
+- L-3(XLSX zip bomb): 압축해제/행 수 상한 가드 추가.
+
+> 주의: 이 감사는 정적 분석 + 부분 재현이다. 조회/보고 바인딩 수정은 **엣지 작업 분배의 정상 흐름을
+> 깨지 않도록**(소유권 미등록 vCenter는 TOFU 통과) 적용하고, ip-scan 범위 검사는 배정 ranges가
+> 설정된 agent에만 강제한다.

@@ -87,6 +87,26 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     `/vms/:id/console`·`/vms/:id/metrics`·`/hosts/:id/metrics`가 그 예이며, 범위 밖은 403이 아니라
     **404**로 응답해 존재 여부도 흘리지 않는다. 누락 시 범위 제한 계정이 전 사이트 VM의 콘솔
     티켓을 발급받을 수 있다(v2.207 실제 수정 사례 — `vm.console`은 viewer 기본 권한).
+  - **scope 는 검색·도구 집계·IPAM 조회/쓰기까지 전면 적용(v2.255~2.257)**: 감사 M1 이 명시했듯
+    `/search/nl`·`/tools/deep-search`·`/tools/vm-finder`·`/tools/{gpu,gpu/vms,threats,capacity,waste,thin-vms,`
+    `capacity-forecast,guest-os,guest-os/vms,hardware,esxi,hba,licenses,insights}`·`/insights/chatops`·
+    `esxi-temp`/`gpu` **history(key 소유권 검사)**·IPAM 조회 전수·IPAM **쓰기**(override/annotation/정책 —
+    `ipInWriteScope`: 소유 vCenter∩allowed, 미귀속은 claimed 필수)에 scope 를 건다. **새 조회/집계/쓰기
+    라우트를 추가하면 반드시 같은 패턴**(요청 필터보다 먼저 scope 교집합)을 적용하고, **memoJson 캐시
+    라우트는 `extraKey: scopeKey(...)` 필수**(빠지면 무제한 계정 결과가 범위 계정에 캐시로 샌다 —
+    `/summary`·`/overview` 실제 사례). **vCenter 귀속 없는 데이터(스캔 발견물·미귀속 override·byVcenter
+    요약)는 범위 계정에 노출하지 않는다.** 단, 외부 프로그램이 공유하는 `ipam.db` 원장 자체(`syncLedger`)는
+    무스코프 유지(외부 리더가 절단본을 받으면 안 됨 — 라우트에서만 scope 주입).
+  - **중앙 GPU 오버레이 direct-mode 봉인(v2.257)**: `/api/central/gpu-guest-data` 는 저장 키를
+    `centralAuth.agent` 로 강제하고, hostId/vmId 의 소유 vCenter 를 **`listInventory` 최장 프리픽스
+    매칭**으로 판정한다(vc.id 에 콜론이 있어 단순 `split(':')` 로는 오파싱). `collectMode!=='site'`
+    (중앙 직접 수집) vCenter 는 어떤 엣지도 GPU 오버레이를 못 쓴다(로컬 수집기만 기록). 최장 프리픽스로
+    풀어야 하는 이 규칙을 되돌려 콜론 split 로 바꾸면 봉인이 무력화된다.
+  - **UAG 모니터(uagmon) 자격증명 유출 방어(v2.257, M3)**: `guard.js hostBlockReason` 는 공개
+    IP(IPv4·IPv6 대칭)를 기본 차단(사내 RFC1918·IPv6 ULA 만 허용, `UAGMON_ALLOW_PUBLIC` 옵트인),
+    `uag.js fetchUagStats` 는 **연결 직전 해석 IP 를 재검증**하고 접속은 그 IP·TLS/Host 는 원호스트로
+    핀(리바인딩 차단), `store.js normalizeTarget` 은 **host 변경 시 저장 비번을 이월하지 않는다**.
+    저장·연결 이중검사를 한쪽만 남기면 host 바꿔치기로 Basic 자격증명이 공격자 서버로 선제 전송된다.
 - **WS 게이트웨이는 미들웨어를 타지 않는다**: SSH/RDP upgrade 핸들러는 `requireEnrolled`·
   `requirePerm`이 자동 적용되지 않으므로, 인증·권한·**`mustEnrollOtp`**를 모두 핸들러 안에서
   직접 검사해야 한다(v2.207: 등록 전 세션이 터널을 열 수 있던 결함 수정).
