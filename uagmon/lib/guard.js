@@ -51,6 +51,13 @@ function ipv4Reason(v4) {
   if (a === 0) return '미지정 대역(0.x)은 등록할 수 없습니다.';
   if (a === 169 && b === 254) return '링크로컬(169.254.x — 클라우드 메타데이터 포함)은 등록할 수 없습니다.';
   if (a >= 224) return '멀티캐스트/예약 대역은 등록할 수 없습니다.';
+  // 공개 IP 는 기본 차단(사내 사설망 대상 모니터). 저장·연결 직전 SSRF 재검증이 이 함수를
+  // 재사용하므로, 여기서 막으면 '공개 서버로 host 바꿔치기 → 자격증명 유출'(M3) 경로가 봉인된다.
+  // 공개 대상이 실제 필요하면 UAGMON_ALLOW_PUBLIC=true 로 옵트인.
+  const isPrivate = a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+  if (!isPrivate && String(process.env.UAGMON_ALLOW_PUBLIC).toLowerCase() !== 'true') {
+    return '공개 IP 는 등록할 수 없습니다(사내 사설망만 허용 — UAGMON_ALLOW_PUBLIC=true 로 해제).';
+  }
   return null; // RFC1918 포함 나머지는 허용(사내 장비 대상)
 }
 
@@ -76,14 +83,26 @@ export function hostBlockReason(raw) {
     }
     m = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(host);
     if (m) return ipv4Reason(((parseInt(m[1], 16) << 16) | parseInt(m[2], 16)) >>> 0);
-    return null; // 그 외 IPv6(사내 GUA/ULA)는 허용
+    // 남은 IPv6: 사설 ULA(fc00::/7)만 허용하고 공개 GUA(2000::/3 등)는 IPv4 와 대칭으로 차단한다
+    // (IPv4 만 공개 차단하면 AAAA 가 공개 IPv6 로 해석될 때 자격증명이 그대로 유출된다 — M3).
+    const h0 = parseInt(host.split(':')[0] || '0', 16) || 0;
+    const isUla = (h0 & 0xfe00) === 0xfc00;   // fc00::/7 (fc/fd 접두)
+    if (!isUla && String(process.env.UAGMON_ALLOW_PUBLIC).toLowerCase() !== 'true') {
+      return '공개 IPv6 주소는 등록할 수 없습니다(사내 ULA fc00::/7 만 허용 — UAGMON_ALLOW_PUBLIC=true 로 해제).';
+    }
+    return null;
   }
 
   // IPv4 (우회 표기 포함)
   const v4 = parseIpv4(host);
   if (v4 != null) return ipv4Reason(v4);
 
-  // 호스트네임 — 사내 DNS 허용. 표기 검증만.
+  // 호스트네임 — 사내 DNS 허용. 표기 검증.
   if (!/^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$/.test(host)) return '주소에 사용할 수 없는 문자가 있습니다.';
+  // 도메인 화이트리스트(옵트인) — 설정 시 그 접미사만 허용. 미설정이면 종전대로 전 호스트명 허용.
+  const allow = String(process.env.UAGMON_ALLOWED_DOMAINS || '').split(',').map((d) => d.trim().toLowerCase()).filter(Boolean);
+  if (allow.length && !allow.some((d) => host === d || host.endsWith(`.${d}`))) {
+    return '허용된 도메인이 아닙니다(UAGMON_ALLOWED_DOMAINS).';
+  }
   return null;
 }

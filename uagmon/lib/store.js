@@ -19,8 +19,11 @@ export function normalizeTarget(body = {}, existing = {}) {
   const name = String(body.name ?? existing.name ?? '').trim() || host;
   const port = Math.min(65535, Math.max(1, Number(body.port ?? existing.port) || 9443));
   const username = String(body.username ?? existing.username ?? '').trim();
-  // 비밀번호는 빈 값이면 기존 유지(수정 폼에서 미입력 = 변경 안 함).
-  const password = body.password ? String(body.password) : (existing.password || '');
+  // 비밀번호는 빈 값이면 기존 유지(수정 폼에서 미입력 = 변경 안 함). 단, **host 가 바뀌면 기존
+  // 비밀번호를 이월하지 않는다**(M3): host 만 공격자 서버로 바꿔치기하고 비번을 비워 저장하면
+  // 그 저장 비번이 새 host 로 선제 전송돼 유출된다 → host 변경 시엔 비번 재입력을 강제한다.
+  const hostChanged = existing.host != null && host !== String(existing.host).trim();
+  const password = body.password ? String(body.password) : (hostChanged ? '' : (existing.password || ''));
   const insecureTls = body.insecureTls != null ? Boolean(body.insecureTls) : Boolean(existing.insecureTls);
   return { id: existing.id || crypto.randomBytes(6).toString('hex'), name, host, port, username, password, insecureTls };
 }

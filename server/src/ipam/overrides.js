@@ -136,11 +136,17 @@ export function setOverrideBatch(ips, partial = {}, user) {
 }
 
 /** 관리 상태 요약(상태별·디바이스별 개수) — 대시보드용. */
-export function overridesSummary() {
+/**
+ * override 요약(총계·상태/디바이스 분포). `includeFn(ip, rec)` 를 주면 그 조건을 통과한 override
+ * 만 집계한다 — 범위 제한 계정에 자기 범위 밖 override 의 집계(총계/분포)까지 흘리지 않기 위함
+ * (policiesSummary 의 스코프 목록 전달과 대칭). 미지정=전체(admin/기존 동작).
+ */
+export function overridesSummary(includeFn = null) {
   const data = load();
   const byStatus = {}; const byDevice = {};
   let total = 0;
-  for (const rec of Object.values(data)) {
+  for (const [ip, rec] of Object.entries(data)) {
+    if (includeFn && !includeFn(ip, rec)) continue;
     total++;
     if (rec.status) byStatus[rec.status] = (byStatus[rec.status] || 0) + 1;
     if (rec.deviceType) byDevice[rec.deviceType] = (byDevice[rec.deviceType] || 0) + 1;

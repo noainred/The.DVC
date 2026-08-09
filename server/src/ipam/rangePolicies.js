@@ -184,9 +184,13 @@ export function findPolicy(ipNum, vcenterId) {
   return best;
 }
 
-/** 정책 요약(상태별·vCenter별·커버 IP 수) — 대시보드/관리 UI용. */
-export function policiesSummary() {
-  const list = load().policies;
+/**
+ * 정책 요약(상태별·vCenter별·커버 IP 수) — 대시보드/관리 UI용.
+ * `list` 를 주면 그 목록으로 집계한다(범위 제한 계정에 스코프된 정책만 요약해 byVcenter 로 타
+ * vCenter id·전역 정책 수가 열거되지 않게 — 라우트가 필터한 목록을 넘긴다). 미지정=전체(기존).
+ */
+export function policiesSummary(list = null) {
+  if (!list) list = load().policies;
   const byStatus = {}; const byVcenter = {};
   let coverageIps = 0; let enabledN = 0;
   for (const p of list) {

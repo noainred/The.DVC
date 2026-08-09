@@ -12,11 +12,33 @@
  */
 
 import https from 'node:https';
+import dns from 'node:dns';
+import { hostBlockReason, parseIpv4 } from './guard.js';
 
 const MAX_BODY = 2 * 1024 * 1024; // 통계 응답 상한(비정상 대량 응답 방어)
 
-/** 대상 UAG 의 모니터링 통계를 가져와 정규화해 반환. 실패해도 reject 하지 않는다. */
-export function fetchUagStats(target, { timeoutMs = 10_000 } = {}) {
+/**
+ * 대상 UAG 의 모니터링 통계를 가져와 정규화해 반환. 실패해도 reject 하지 않는다.
+ *
+ * ## 연결 직전 SSRF 재검증 (M3)
+ * host 가 호스트네임이면 **연결 직전 DNS 해석 결과를 hostBlockReason 으로 재검증**하고, 접속은
+ * 해석된 IP 로 하되 TLS SNI·Host 헤더는 원래 호스트로 핀한다. 저장 시점 검증만으로는 DNS 가
+ * 나중에 루프백/링크로컬/공개서버로 바뀌는 경우(또는 host 만 바꿔치기)를 놓쳐 UAG 관리자
+ * 자격증명(Basic 헤더)이 공격자 서버로 선제 전송될 수 있다 — 그 경로를 여기서 봉인한다.
+ */
+export async function fetchUagStats(target, { timeoutMs = 10_000 } = {}) {
+  const host = String(target.host || '');
+  let connectHost = host;
+  // 8진·16진 등 우회 표기까지 IP 로 인식(guard 규칙 재사용). IP 리터럴은 저장 검증이 이미 봤다.
+  const looksIp = parseIpv4(host) != null || host.includes(':');
+  if (!looksIp) {
+    let resolved;
+    try { resolved = await dns.promises.lookup(host, { verbatim: true }); }
+    catch (e) { return { ok: false, error: `주소 해석 실패: ${e.message}` }; }
+    const blocked = hostBlockReason(resolved.address);
+    if (blocked) return { ok: false, error: `차단된 주소로 해석됨(${resolved.address}): ${blocked}` };
+    connectHost = resolved.address;
+  }
   return new Promise((resolve) => {
     let settled = false;
     const done = (r) => { if (!settled) { settled = true; resolve(r); } };
@@ -24,11 +46,12 @@ export function fetchUagStats(target, { timeoutMs = 10_000 } = {}) {
     try {
       const auth = Buffer.from(`${target.username || ''}:${target.password || ''}`).toString('base64');
       req = https.request({
-        host: target.host,
+        host: connectHost,          // 접속은 해석된 IP(재검증 통과분)
+        servername: host,           // TLS SNI 는 원래 호스트(인증서 검증 유지)
         port: Number(target.port) || 9443,
         path: '/rest/v1/monitor/stats',
         method: 'GET',
-        headers: { Authorization: `Basic ${auth}`, Accept: 'application/json' },
+        headers: { Host: host, Authorization: `Basic ${auth}`, Accept: 'application/json' },
         // 자체서명 UAG 대응 — 이 요청에만 적용(전역 완화 금지).
         rejectUnauthorized: !target.insecureTls,
         timeout: timeoutMs,

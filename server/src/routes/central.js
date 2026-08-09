@@ -17,7 +17,7 @@
  */
 
 import { Router } from 'express';
-import { config } from '../config.js';
+import { config, loadVcenterConfig } from '../config.js';
 import { getAssignment, setResult } from '../central/assignments.js';
 import { tokenMatches } from '../util/secureCompare.js';
 import { resolveAgentByToken, hasAnyAgentToken, listAgentTokens } from '../central/agentTokens.js';
@@ -395,17 +395,25 @@ centralRouter.post('/gpu-guest-data', (req, res) => {
     // 첫 콜론 기준 단순 분리로는 vcId 를 잘못 뽑아 소유권 검사가 우회된다. 등록된 vcenterId 중 이 id 의
     // 프리픽스인 것(가장 긴 것)으로 소유 vCenter 를 판정한다(최장 프리픽스 매칭).
     const invOwners = listInventory().map((e) => ({ vc: String(e.vcenterId || ''), agent: String(e.agent || '') }));
-    const ownerOf = (id) => {
+    // direct-mode(중앙 직접 수집) vCenter 의 GPU 는 로컬 폴러(agent='')만 기록해야 한다 — 엣지는
+    // 그 vCenter 를 수집하지 않으므로 어떤 엣지의 쓰기도 위조다. collectMode!=='site' = direct.
+    const directIds = (() => {
+      try { return (loadVcenterConfig().vcenters || []).filter((v) => (v.collectMode || 'direct') !== 'site').map((v) => String(v.id)); }
+      catch { return []; }
+    })();
+    const ownsVc = (id) => {
       const s = String(id || '');
-      let owner = ''; let best = -1;
+      let owner = ''; let best = -1; let direct = false;
+      // 등록된 vcenterId 중 이 id 의 프리픽스(가장 긴 것)로 소유 vCenter 판정 — vc.id 에 콜론이
+      // 있어도(registry 가 콜론 허용) 안전하게 매칭(단순 split(':') 오파싱 방지).
       for (const e of invOwners) {
         if (e.vc && (s === e.vc || s.startsWith(`${e.vc}:`)) && e.vc.length > best) { best = e.vc.length; owner = e.agent; }
       }
-      return owner;   // 매칭 없음(미등록/direct-mode) = '' → TOFU 통과(주석의 문서화된 한계)
-    };
-    const ownsVc = (id) => {
-      const owner = ownerOf(id);
-      return !owner || owner.toLowerCase() === agent.toLowerCase();
+      for (const vc of directIds) {   // direct-mode 도 최장 프리픽스로 — site 와 동률이면 direct 우선(안전측 거부)
+        if ((s === vc || s.startsWith(`${vc}:`)) && vc.length >= best) { best = vc.length; direct = true; }
+      }
+      if (direct) return false;       // direct-mode = 중앙 소유, 엣지 쓰기 금지(잔여 위조 봉인)
+      return !owner || owner.toLowerCase() === agent.toLowerCase();  // 미등록 site = TOFU 통과(부트스트랩)
     };
     const hBefore = hosts.length; const vBefore = vms.length;
     hosts = hosts.filter((h) => ownsVc(h.hostId));
