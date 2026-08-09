@@ -8,6 +8,19 @@
 > 조치 이력은 v2.190.0(1차 하드닝) · v2.191.0(2차) · v2.195.0(3차 재감사)에서 진행되었고,
 > 아래 "인증·권한 후속 강화(v2.196~2.204)"에 이후 변경이 정리되어 있습니다.
 > 항목별 최신 상태·잔여 백로그는 [docs/AUDIT-2026-06-27.md](docs/AUDIT-2026-06-27.md)를 기준으로 보세요.
+>
+> 📌 **최신 감사·조치(2026-08)**: 전역 재감사와 후속 하드닝은 [security_check_20260808.MD](security_check_20260808.MD)
+> · [security_check_20260809.MD](security_check_20260809.MD) 에 있습니다. 이 기간의 조치 요약:
+> - **M1 사용자 scope 전면 강제(v2.255~2.257)** — 자연어/심층/VM 검색·ChatOps·운영 리포트·특수기능
+>   집계(GPU·위협·용량·낭비·GuestOS·하드웨어·라이선스 등)·IPAM 조회 및 쓰기(override·정책)에
+>   `scopedVcenterIds`/`inUserScope` 교차. `/summary`·`/overview` 캐시 키에 scope 서명(교차 노출 차단).
+>   외부 공유 `ipam.db` 원장은 무스코프 유지.
+> - **M2 중앙 적재 무결성(v2.255~2.257)** — `/result`·`/fleet`·`/inventory`·`/gpu-guest-data`·
+>   `/ip-scan-result` 저장 키를 `centralAuth.agent` 로 강제(body.agent 위조 봉인), `/inventory` TOFU
+>   소유권, GPU 오버레이 direct-mode(중앙 직접 수집) 엣지 쓰기 봉인(최장 프리픽스 매칭).
+> - **M3 UAG 모니터(v2.257)** — host 변경 시 비번 무효화 + 연결 직전 해석 IP SSRF 재검증(리바인딩
+>   차단) + 공개 IP 기본 차단(IPv4·IPv6 대칭, 옵트인).
+> - 각 라운드 다중 에이전트 적대적 검증으로 형제 라우트 누락을 반복 발견·보강.
 
 ## 인증·권한 후속 강화 (v2.196 ~ v2.204)
 
