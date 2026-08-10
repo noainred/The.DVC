@@ -263,6 +263,11 @@ function cleanTarget(data, existing = null) {
 
   if (!target.name) throw new Error('대상 이름을 입력하세요.');
   if (!SAFE_PATH.test(target.path)) throw new Error("경로 형식이 올바르지 않습니다(구분자 '\\', 최대 10단계).");
+  // 엣지 이름은 감시 배정 키가 된다 — 형식을 강제해 오타/이상값이 무음 공백을 만들지 않게 한다
+  // (존재 여부는 배정 시 candidates 로 검증). 비우면 경로 스코프 배정을 따른다.
+  if (target.agent && !/^[A-Za-z0-9._-]{1,64}$/.test(target.agent)) {
+    throw new Error('엣지 이름 형식이 올바르지 않습니다(영문·숫자·. _ - 만, 최대 64자).');
+  }
   const err = validateEndpoint({ host: target.host });
   if (err) throw new Error(err);
   return compact(target);

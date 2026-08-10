@@ -435,6 +435,18 @@ svcmonRouter.post('/targets/import', canEdit, async (req, res) => {
   if (parsed.targets.length > LIMITS.maxBulkRows) {
     return res.status(400).json({ error: `한 번에 최대 ${LIMITS.maxBulkRows}개 대상까지 가져올 수 있습니다(파싱 ${parsed.targets.length}개).` });
   }
+  // 대량 자동등록(줄별 {엣지·호스트명·IP}) 경로: templateId 가 오면 각 대상에 그 템플릿의 점검을
+  // 서버에서 실체화(치환·정제)해 붙인다. /targets/generate 와 같은 materializeForTarget 을 재사용해
+  // 치환/정제/오류 판정을 한 곳(templates.js)에 둔다. 미치환 변수·SSRF 위반은 그 대상의 오류가 된다.
+  const tplId = typeof req.body?.templateId === 'string' ? req.body.templateId.trim() : '';
+  if (tplId) {
+    if (!getTemplate(tplId)) return res.status(400).json({ error: `템플릿을 찾을 수 없습니다: ${tplId}` });
+    parsed.targets.forEach((t, idx) => {
+      const r = materializeForTarget(tplId, t);
+      for (const e of r.errors) parsed.errors.push({ row: idx + 1, name: t.name || '', reason: e });
+      t.tests = [...(t.tests || []), ...r.tests];
+    });
+  }
   const dry = dryRunTargets(parsed.targets);
   const errors = [...parsed.errors, ...dry.errors];
   const summary = {
@@ -826,11 +838,19 @@ svcmonRouter.get('/assign', canEdit, (req, res) => {
  */
 svcmonRouter.put('/assign/:agent', canEdit, (req, res) => {
   try {
+    const agentName = String(req.params.agent || '').trim();
     const kind = KINDS.includes(req.body?.kind) ? req.body.kind : '';
     const scopePath = typeof req.body?.path === 'string' ? req.body.path.trim() : '';
     const includeSub = req.body?.includeSub !== false;
+    const byAgent = req.body?.byAgent === true;   // 대상별 엣지 태그로 배정(대량등록 흐름의 원클릭 동기화)
     const exceptTypes = Array.isArray(req.body?.exceptTypes) ? req.body.exceptTypes : DEFAULT_EXCEPT_TYPES;
+    // 대상별 agent 규칙: 대상에 엣지가 박혀 있으면 '그 엣지 전용'이다.
+    //  - byAgent 모드: 이 엣지에 태그된 대상만 스냅샷(경로 무시).
+    //  - 경로 스코프 모드: 경로로 고르되, **다른 엣지 소유** 대상은 제외한다(한 대상을 둘이 점검 = 이중).
     const picked = listTargetsCopy().filter((t) => {
+      const owner = (t.agent || '').trim();
+      if (byAgent) return owner === agentName;
+      if (owner && owner !== agentName) return false;
       if (kind && (t.kind || 'infra') !== kind) return false;
       if (!scopePath) return true;
       return includeSub ? (t.path === scopePath || t.path.startsWith(`${scopePath}\\`)) : t.path === scopePath;
@@ -852,7 +872,7 @@ svcmonRouter.put('/assign/:agent', canEdit, (req, res) => {
         truncated: picked.length > 25,
       });
     }
-    const a = setAssignment(req.params.agent, { kind, path: scopePath, includeSub, exceptTypes, note: req.body?.note },
+    const a = setAssignment(req.params.agent, { kind, path: scopePath, includeSub, byAgent, exceptTypes, note: req.body?.note },
       picked, { user: req.user?.username });
     res.json({ assignment: { ...a, targets: undefined }, tag: batchTag(a.sig), assignments: listAssignments() });
   } catch (e) { res.status(400).json({ error: e.message }); }
