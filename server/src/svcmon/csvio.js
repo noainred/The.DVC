@@ -140,6 +140,13 @@ export function parseTargetsCsv(input, { maxRows = 2000 } = {}) {
       // cleanTarget 은 화이트리스트 방식이라 이 키는 저장되지 않는다.
       g = { target: { _row: rowNo, kind: kind || 'infra', path, name, host, tests: [] }, rows: [], host, enabled: cell('target_enabled') };
       if (g.enabled !== '') g.target.enabled = g.enabled;
+      // 하드코딩 5열(kind·path·name·host·enabled) 외의 선택 대상 필드(agent 등)를 제네릭하게 읽는다
+      // — testSchema 단일 소스. 안 하면 새 대상 필드가 CSV/JSON 가져오기에서 조용히 유실된다.
+      for (const f of TARGET_FIELDS) {
+        if (['kind', 'path', 'name', 'host', 'enabled'].includes(f.key)) continue;
+        const v = cell(f.col);
+        if (v !== '') g.target[f.key] = v;
+      }
       groups.set(key, g);
       order.push(key);
     } else if (g.host !== host) {

@@ -115,7 +115,8 @@ export function setAssignment(agent, scope = {}, targets = [], { user = '' } = {
     prevSig: prev && prev.sig !== sig ? prev.sig : (prev?.prevSig || ''),
     scope: {
       kind: scope.kind || '', path: scope.path || '',
-      includeSub: scope.includeSub !== false, note: String(scope.note || '').slice(0, 200),
+      includeSub: scope.includeSub !== false, byAgent: scope.byAgent === true,
+      note: String(scope.note || '').slice(0, 200),
     },
     exceptTypes,
     targets: list,

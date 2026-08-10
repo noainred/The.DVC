@@ -66,6 +66,10 @@ export const TARGET_FIELDS = [
   { key: 'name', col: 'target_name', kind: 'text', max: 120, label: '대상 이름' },
   { key: 'host', col: 'host', kind: 'text', max: 253, host: true, label: '호스트/IP' },
   { key: 'enabled', col: 'target_enabled', kind: 'bool', dflt: true, label: '사용' },
+  // 이 대상을 점검할 엣지(에이전트) 이름. 비우면 경로 스코프 배정을 따르고, 값이 있으면
+  // '그 엣지 전용'이 된다(다른 엣지의 경로 스코프에서 제외 — assignTargetsForAgent). 선택 필드라
+  // 기존 CSV(agent 열 없음)와 호환된다. 존재 검증은 배정 후보 목록(candidates)으로 라우트가 한다.
+  { key: 'agent', col: 'agent', kind: 'text', max: 64, optional: true, label: '엣지' },
 ];
 
 /** CSV 컬럼 순서 = 대상 5열 + 점검 20열. */
