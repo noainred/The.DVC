@@ -44,7 +44,7 @@ const COL_TO_KEY = {
 const EMPTY_TPL = { name: '', desc: '', kind: '', items: [] };
 const EMPTY_ITEM = { name: '', type: 'tcp', intervalSec: 300, enabled: true };
 
-export default function TemplateTab({ canEdit }) {
+export default function TemplateTab({ canEdit, initialApply = null }) {
   const [data, setData] = useState(null);
   const [schema, setSchema] = useState(null);
   const [err, setErr] = useState('');
@@ -219,6 +219,12 @@ export default function TemplateTab({ canEdit }) {
     <div className="flex col gap">
       {err && <ErrorBox message={err} />}
       {done && <div className="svc-ok">{done}</div>}
+      {initialApply && !done && (
+        <div className="svc-warn">
+          <b>이 폴더에 적용:</b> <code>{initialApply.path || 'Root(전체)'}</code> — 아래 템플릿에서 <b>적용…</b> 을 누르면 경로가 이 폴더로 채워집니다.
+          하위 폴더 포함 여부를 정하고 미리보기 후 적용하세요.
+        </div>
+      )}
 
       <div className="card" style={{ padding: 14 }}>
         <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 8 }}>
@@ -266,7 +272,7 @@ export default function TemplateTab({ canEdit }) {
                   <td>
                     {canEdit && (
                       <div className="flex gap" onClick={(e) => e.stopPropagation()}>
-                        <button className="tab" onClick={() => { setSel(t.id); setApplyCfg({ kind: t.kind || 'infra', path: '', includeSub: true, overwrite: false }); setPreview(null); }}>적용…</button>
+                        <button className="tab" onClick={() => { setSel(t.id); setApplyCfg({ kind: initialApply?.kind || t.kind || 'infra', path: initialApply?.path || '', includeSub: initialApply?.includeSub ?? true, overwrite: false }); setPreview(null); }}>적용…</button>
                         <button className="tab" onClick={() => { setSel(t.id); startEdit(t); }}>편집</button>
                         <button className="tab" disabled={busy === 'dup'} onClick={() => duplicate(t)}>복제</button>
                         <button className="tab" disabled={busy === 'del'} onClick={() => remove(t)}>삭제</button>
