@@ -17,7 +17,7 @@ export default function PortalBackup() {
 
   const load = () => fetchJson('/admin/backup/status').then((r) => { setD(r); setS((cur) => cur || r.settings); setError(null); }).catch((e) => setError(e.message));
   useEffect(() => { load(); const t = setInterval(load, 20_000); return () => clearInterval(t); }, []);
-  if (error) return <ErrorBox message={error} />;
+  if (error && !d && !s) return <ErrorBox message={error} />; // 데이터 보유 중 일시 폴링 오류로 화면 전체를 갈아치우지 않음(CLAUDE.md)
   if (!d || !s) return <Loading />;
 
   const saveSettings = async () => {

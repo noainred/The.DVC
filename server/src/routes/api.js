@@ -629,9 +629,12 @@ api.get('/tools/report/changes', async (req, res) => {
     if (vcParam && allowed && !allowed.has(vcParam)) return res.json({ total: 0, rows: [], categories: CHANGE_CATEGORIES });
     const days = Math.min(90, Math.max(1, Number(req.query.days) || 7));
     const f = { vcenterId: vcParam, q: req.query.q || '', since: Date.now() - days * 86_400_000 };
+    // scope 는 SQL 로 밀어넣는다(post-filter 금지) — 그래야 scanned/truncated 가 in-scope 스캔 기준으로
+    // 정확해진다. 과거엔 post-filter라 raw가 20k에 걸려도 필터 후 truncated=false 로 조용히 오보됐고,
+    // 범위 밖 vCenter가 최신 20k 창을 채우면 scope 계정이 빈 보고를 받았다(감사 지적).
+    if (allowed) f.vcenterIds = vcParam ? [vcParam] : [...allowed];
     const SCAN_MAX = 20_000;
-    let rows = db.query(f, SCAN_MAX, 0);
-    if (allowed) rows = rows.filter((r) => allowed.has(r.vcenterId));
+    const rows = db.query(f, SCAN_MAX, 0);
     const changes = filterChangeEvents(rows, { category: req.query.category || '', user: req.query.user || '', entity: req.query.entity || '' });
     const limit = Math.min(1000, Number(req.query.limit) || 300);
     const offset = Math.max(0, Number(req.query.offset) || 0);
@@ -651,11 +654,14 @@ api.get('/tools/report/unprotected', async (req, res) => {
     const scoped = scopeSlice(snap, req.user, req.query.vcenterId);
     const lookbackDays = Math.min(90, Math.max(1, Number(req.query.lookbackDays) || 7));
     const patterns = String(req.query.patterns || '').split(',').map((s) => s.trim()).filter(Boolean);
-    // 'Snapshot' 선필터(type LIKE)로 창 내 스냅샷 이벤트만 가져온다.
-    const rows = db.query({ vcenterId: req.query.vcenterId || '', q: 'Snapshot', since: Date.now() - lookbackDays * 86_400_000 }, 20_000, 0);
+    // 'Snapshot' 선필터(type LIKE)로 창 내 스냅샷 이벤트만 가져온다. scope 는 post-filter 대신 SQL 로
+    // 밀어넣어, 범위 밖 vCenter 스냅샷이 20k 창을 밀어내 in-scope VM 이 '미보호'로 오탐되지 않게 한다.
+    const vcParam = req.query.vcenterId || '';
     const allowed = scopedVcenterIds(req.user, snap);
-    const scopedRows = allowed ? rows.filter((r) => allowed.has(r.vcenterId)) : rows;
-    res.json(computeUnprotected(scoped.vms, scopedRows, { patterns: patterns.length ? patterns : DEFAULT_BACKUP_PATTERNS, lookbackDays }));
+    const lf = { vcenterId: vcParam, q: 'Snapshot', since: Date.now() - lookbackDays * 86_400_000 };
+    if (allowed) lf.vcenterIds = vcParam ? (allowed.has(vcParam) ? [vcParam] : []) : [...allowed];
+    const rows = db.query(lf, 20_000, 0);
+    res.json(computeUnprotected(scoped.vms, rows, { patterns: patterns.length ? patterns : DEFAULT_BACKUP_PATTERNS, lookbackDays }));
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 
@@ -2207,9 +2213,11 @@ api.get('/hosts', (req, res) => {
 
   // Global host summary for the top of the 호스트 screen.
   const sm = (fn) => hosts.reduce((a, h) => a + (fn(h) || 0), 0);
-  const hostNames = new Set(hosts.map((h) => h.name));
-  // vCore = vCPU allocated to VMs running on the in-scope hosts.
-  const vcoreAllocated = snap.vms.filter((v) => hostNames.has(v.host)).reduce((a, v) => a + (v.cpuCount || 0), 0);
+  // vCore = vCPU allocated to VMs running on the in-scope hosts. 호스트는 (vcenterId, name) 로 키잉한다 —
+  // 이름만으로 매칭하면 여러 사이트의 동명 호스트(esxi-01 등)가 섞여, 범위/사이트 필터한 호스트 화면에
+  // 타 사이트 VM 의 vCPU 가 합산돼 vcoreAllocated 가 부풀려진다(28개 vCenter 환경 실제 발생 가능).
+  const hostKeys = new Set(hosts.map((h) => `${h.vcenterId}\t${h.name}`));
+  const vcoreAllocated = snap.vms.filter((v) => hostKeys.has(`${v.vcenterId}\t${v.host}`)).reduce((a, v) => a + (v.cpuCount || 0), 0);
   const verMap = {};
   for (const h of hosts) { const v = h.version || 'unknown'; verMap[v] = (verMap[v] || 0) + 1; }
   const physicalCores = sm((h) => h.cpuCores);
@@ -2266,7 +2274,7 @@ api.get('/vms', (req, res) => {
   if (q.gpuType) vms = vms.filter((v) => gpuType(v) === q.gpuType);
 
   if (q.sortBy) vms = sortBy(vms, q.sortBy, q.order);
-  const limit = Math.min(Number(q.limit) || 500, 5000);
+  const limit = Math.max(1, Math.min(Number(q.limit) || 500, 5000)); // Math.max(1,…): 음수 limit 이 slice(0,-n)로 뒤에서 잘리는 것 방지
 
   // Aggregate over ALL matched VMs (not just the page) so the UI can show the
   // sum of the searched resources: vCPU/RAM/disk allocation + avg usage.
@@ -2327,7 +2335,7 @@ api.get('/networks', (req, res) => {
 // ?vcenterId= / ?region= scope it; ?limit= controls list length (default 10).
 api.get('/top', (req, res) => {
   const snap = store.get();
-  const limit = Math.min(Number(req.query.limit) || 10, 100);
+  const limit = Math.max(1, Math.min(Number(req.query.limit) || 10, 100)); // Math.max(1,…): 음수 limit slice(0,-n) 방지
   const vms = applyFilters(snap.vms, req.query, snap, ['name'], req.user);
   const hosts = applyFilters(snap.hosts, req.query, snap, ['name'], req.user);
   const datastores = applyFilters(snap.datastores, req.query, snap, ['name'], req.user);

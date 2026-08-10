@@ -11,7 +11,7 @@ const fmtBytes = (n) => { if (!n) return '0 B'; const u = ['B', 'KB', 'MB', 'GB'
 /* ───────── 다빈치 서비스 점검 ───────── */
 export function ServiceCheck() {
   const { data, error, loading } = usePolling('/tools/service-check', {}, 15_000);
-  if (error) return <ErrorBox message={error} />;
+  if (error && !data) return <ErrorBox message={error} />; // 데이터 보유 중 일시 폴링 오류로 화면 전체를 갈아치우지 않음(CLAUDE.md)
   if (loading && !data) return <Loading />;
   const sm = data.summary || {};
   return (

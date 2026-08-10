@@ -23,10 +23,12 @@ class BackupTest(unittest.TestCase):
         self.files = {
             "shortcuts": self.base / "shortcuts.json",
             "datacenters": self.base / "datacenters.json",
+            "categories": self.base / "categories.json",
             "users": self.base / "users.json",
             "settings": self.base / "settings.json",
         }
         write_json(self.files["shortcuts"], [{"id": "sc-1", "name": "원본"}])
+        write_json(self.files["categories"], [{"id": "cat-1", "name": "원본 분류"}])
         write_json(self.files["users"], [{"username": "admin"}])
         self.settings = SettingsStore(self.files["settings"])
         self.service = BackupService(self.base / "backups", self.files, self.settings)
@@ -42,6 +44,20 @@ class BackupTest(unittest.TestCase):
         self.assertEqual(snapshot["data"]["shortcuts"][0]["name"], "원본")
         self.assertEqual((self.base / "backups" / info["name"]).stat().st_mode & 0o777, 0o600,
                          "백업에는 비밀번호 해시가 들어가므로 0600 이어야 한다.")
+
+    def test_categories_are_included_in_backup_and_restore(self):
+        # 회귀 방지: MEMBERS 가 categories 를 빠뜨려 카테고리가 스냅샷/복원에서 누락되던 버그.
+        info = self.service.create("manual")
+        snapshot = self.service.read(info["name"])
+        self.assertIn("categories", snapshot["data"], "categories 가 스냅샷에 포함돼야 한다.")
+        self.assertEqual(snapshot["data"]["categories"][0]["name"], "원본 분류")
+        # 카테고리를 바꾼 뒤 복원하면 원래 분류로 되돌아와야 한다.
+        write_json(self.files["categories"], [{"id": "cat-1", "name": "바뀐 분류"}])
+        time.sleep(1.05)
+        result = self.service.restore(info["name"])
+        self.assertIn("categories", result["restored"])
+        restored = json.loads(self.files["categories"].read_text(encoding="utf-8"))
+        self.assertEqual(restored[0]["name"], "원본 분류", "복원 시 categories 도 되돌아와야 한다.")
 
     def test_keep_setting_prunes_old_backups(self):
         self.settings.update_section("backup", {"keep": 2})

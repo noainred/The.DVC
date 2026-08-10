@@ -60,7 +60,7 @@ function FinOps() {
   const [msg, setMsg] = useState(null);
   const load = () => fetchJson('/insights/finops').then(setD).catch((e) => setErr(e.message));
   useEffect(() => { load(); fetchJson('/insights/finops/config').then(setCfg).catch(() => {}); const t = setInterval(load, 30_000); return () => clearInterval(t); }, []);
-  if (err) return <ErrorBox message={err} />;
+  if (err && !d) return <ErrorBox message={err} />; // 데이터 보유 중 일시 폴링 오류로 화면 전체를 갈아치우지 않음(CLAUDE.md)
   if (!d || !cfg) return <Loading />;
   const cur = d.config.currency;
   const c = (v) => `${cur}${num(v)}`;

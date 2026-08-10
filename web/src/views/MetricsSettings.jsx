@@ -53,7 +53,7 @@ export default function MetricsSettings() {
     return () => clearInterval(t);
   }, []);
 
-  if (error) return <ErrorBox message={error} />;
+  if (error && !data) return <ErrorBox message={error} />; // 데이터 보유 중 일시 폴링 오류로 화면 전체를 갈아치우지 않음(CLAUDE.md)
   if (!data) return <Loading />;
 
   const limits = data.limits || { minIntervalMs: 10000, maxIntervalMs: 86400000 };

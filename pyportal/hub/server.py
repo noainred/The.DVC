@@ -95,6 +95,15 @@ class HubHandler(BaseHTTPRequestHandler):
         request line 앞에 붙어 `501 Unsupported method ('{}PUT')` 같은 오류가 난다.
         본문을 쓰지 않는 핸들러(리셋·백업 생성 등)가 있으므로 라우팅 전에 비운다.
         """
+        # chunked 전송(Transfer-Encoding)은 Content-Length 가 없어 여기서 길이를 못 구한다.
+        # 그대로 두면 인코딩된 본문이 소켓에 남아 다음 요청 파싱과 섞인다(keep-alive desync,
+        # 501 오류). 청크 디코딩을 직접 구현하는 대신 연결을 재사용하지 않는다(브라우저 프론트는
+        # 항상 Content-Length 를 보내므로 영향 없음 — 서드파티/자동화 클라이언트만 해당).
+        if self.headers.get("Transfer-Encoding"):
+            self.close_connection = True
+            self._body_raw = b""
+            self._body_error = "chunked 전송은 지원하지 않습니다(Content-Length 필요)."
+            return
         raw = self.headers.get("Content-Length", "0")
         try:
             length = int(raw)

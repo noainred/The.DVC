@@ -62,7 +62,7 @@ export default function AgentScans() {
     return () => clearInterval(t);
   }, []);
 
-  if (error) return <ErrorBox message={error} />;
+  if (error && !data) return <ErrorBox message={error} />; // 데이터 보유 중 일시 폴링 오류로 화면 전체를 갈아치우지 않음(CLAUDE.md)
   if (!data) return <Loading />;
 
   // 등록된 에이전트가 없으면 처음부터 직접 입력, 있으면 목록 선택을 기본값으로.

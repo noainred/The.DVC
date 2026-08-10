@@ -24,7 +24,7 @@ export default function LoginFails() {
     } catch (e) { setErr(e.message); }
   };
   useEffect(() => { loadAll(); const t = setInterval(loadAll, 30_000); return () => clearInterval(t); }, []);
-  if (err) return <ErrorBox message={err} />;
+  if (err && !s && !d) return <ErrorBox message={err} />; // 데이터 보유 중 일시 폴링 오류로 화면 전체를 갈아치우지 않음(CLAUDE.md)
   if (!s || !d) return <Loading />;
 
   const save = async () => { setBusy('save'); setMsg(null); try { const r = await putJson('/admin/security/login-fails/settings', s); setS(r); setMsg('저장됨'); } catch (e) { setMsg(e.message); } finally { setBusy(''); } };

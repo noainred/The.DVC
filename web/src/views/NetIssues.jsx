@@ -16,7 +16,7 @@ export default function NetIssues() {
     try { const an = await fetchJson('/admin/security/net-issues'); setD(an); setErr(null); } catch (e) { setErr(e.message); }
   };
   useEffect(() => { load(); const t = setInterval(load, 30_000); return () => clearInterval(t); }, []);
-  if (err) return <ErrorBox message={err} />;
+  if (err && !d) return <ErrorBox message={err} />; // 데이터 보유 중 일시 폴링 오류로 화면 전체를 갈아치우지 않음(CLAUDE.md)
   if (!d) return <Loading />;
 
   const sm = d.summary;

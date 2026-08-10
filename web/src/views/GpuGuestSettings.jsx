@@ -55,7 +55,7 @@ export default function GpuGuestSettings() {
     // eslint-disable-next-line
   }, [deployAgent]);
 
-  if (error) return <ErrorBox message={error} />;
+  if (error && !data) return <ErrorBox message={error} />; // 데이터 보유 중 일시 폴링 오류로 화면 전체를 갈아치우지 않음(CLAUDE.md)
   if (!data || !form) return <Loading />;
 
   const setVc = (id, patch) => setForm((f) => ({ ...f, vcenters: { ...f.vcenters, [id]: { ...f.vcenters[id], ...patch } } }));
@@ -607,7 +607,7 @@ function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared, deployAgen
             <button className="login-btn" style={{ flex: 'none', padding: '8px 18px' }} disabled={busy} onClick={saveCreds}>{busy ? '저장 중…' : 'VM별 계정 저장'}</button>
             {testProg && (
               <span className="badge teal" style={{ fontSize: 12 }}>
-                테스트 중 {testProg.done}/{testProg.total} ({Math.round((testProg.done / testProg.total) * 100)}%) — 끝나는 대로 표시됩니다
+                테스트 중 {testProg.done}/{testProg.total} ({testProg.total ? Math.round((testProg.done / testProg.total) * 100) : 0}%) — 끝나는 대로 표시됩니다
               </span>
             )}
             {msg && <span className="muted" style={{ fontSize: 13 }}>{msg}</span>}

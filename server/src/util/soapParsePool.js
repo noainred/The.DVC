@@ -50,8 +50,14 @@ function spawnWorker() {
     drain();
   });
   const onDown = () => {
+    // 워커 크래시는 'error' 와 'exit(code!=0)' 를 **둘 다** 발생시킨다 → onDown 이 두 번 불린다.
+    // 멱등 가드가 없으면 두 번째 호출의 filter 는 no-op 이고 재생성만 한 번 더 일어나, 크래시마다
+    // 워커가 +1 누수된다(유휴 스레드·메모리 증가). 한 번만 처리한다.
+    if (slot.down) return;
+    slot.down = true;
     // 워커가 죽으면 이 워커가 물고 있던 작업을 인라인으로 재처리하고 워커를 재생성.
     const wasId = slot.taskId;
+    slot.taskId = null;
     slot.busy = false;
     if (wasId != null) {
       const task = pool?.pending.get(wasId);
