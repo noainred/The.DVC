@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { usePolling, postJson, putJson, delJson, fetchJson, getCurrentUser, downloadFile } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import TemplateTab from './svcmon/TemplateTab.jsx';   // 템플릿 화면은 하나만 — 폴더 적용 모달에서도 이 화면을 불러 쓴다
+import BulkTab from './svcmon/BulkTab.jsx';           // 통합 등록 마법사 — 트리에서 모달로 불러 쓴다(설정 탭과 같은 하나의 화면)
 import EscClose from '../components/EscClose.jsx';
 
 /**
@@ -239,8 +240,6 @@ function TreeRows({ node, depth, sel, setSel, expanded, toggle, q, onCtx, dnd })
     </>
   );
 }
-
-const EMPTY_TARGET = { kind: 'infra', path: 'B.Service', name: '', host: '' };
 const EMPTY_TEST = { name: '', type: 'ping', intervalSec: 60, port: '', url: '', keyword: '', record: '', server: '' };
 
 export default function SvcMonitor() {
@@ -292,6 +291,8 @@ export default function SvcMonitor() {
   const [wizTpls, setWizTpls] = useState([]);   // 점검 추가 마법사의 '템플릿으로 추가'용 템플릿 목록
   // 폴더에 템플릿 적용 모달 — 별도 창을 만들지 않고 '하나뿐인 템플릿 화면(TemplateTab)'을 불러 쓴다. { path } | null
   const [tplApply, setTplApply] = useState(null);
+  // 통합 등록 마법사 모달 — 트리 '＋ 등록'/우클릭 '이 폴더에 등록…'. { path } | null
+  const [register, setRegister] = useState(null);
 
   // 선택 노드나 모드가 바뀌면 표시 개수를 처음으로 되돌린다(이전 폴더에서 늘려 둔 값 승계 금지).
   useEffect(() => { setPageN(TARGET_PAGE); }, [sel, mode]);
@@ -721,7 +722,8 @@ export default function SvcMonitor() {
 
         <div className="pc-panel">
           <div className="pc-toolbar">
-            <button className="pc-btn" disabled={!canEdit} onClick={() => { setForm({ ...EMPTY_TARGET, path: sel && !sel.startsWith('target:') ? sel : EMPTY_TARGET.path }); setErr(''); setModal({ kind: 'target' }); }}>＋ Add</button>
+            <button className="pc-btn" disabled={!canEdit} title="대상·점검 통합 등록(소량 직접입력~대량·파일·템플릿)"
+              onClick={() => setRegister({ path: sel && !sel.startsWith('target:') ? sel : '' })}>＋ 등록</button>
             <button className="pc-btn" disabled={!canEdit || !selTarget} title={selTarget ? '' : '트리에서 대상을 선택'}
               onClick={() => openWizard(selTarget.id, selTarget.name, null)}>✎ 점검 추가</button>
             <button className="pc-btn" disabled={!canEdit || !selTarget} title={selTarget ? '이름·호스트·위치 수정' : '트리에서 대상을 선택'}
@@ -858,10 +860,10 @@ export default function SvcMonitor() {
           {canEdit && <>
             <button className="pc-ctx-item" onClick={() => { setCtx(null); newFolder(); }}>📁 하위 폴더 만들기</button>
             <button className="pc-ctx-item" onClick={() => {
-              setCtx(null);
-              setForm({ ...EMPTY_TARGET, kind: mode, path: ctx.node === 'root' ? 'B.Service' : ctx.node });
-              setErr(''); setModal({ kind: 'target' });
-            }}>🖥 이 폴더에 대상 추가</button>
+              const p = ctx.node === 'root' ? '' : ctx.node;
+              setCtx(null); closeSubs();
+              setRegister({ path: p });   // 통합 등록 마법사(소량 직접입력~대량·파일·템플릿)
+            }}>🖥 이 폴더에 등록…(대상·점검)</button>
             {ctx.targetId && (
               <button className="pc-ctx-item" onClick={() => {
                 const t = targets.find((x) => x.id === ctx.targetId);
@@ -876,12 +878,7 @@ export default function SvcMonitor() {
               <button className="pc-ctx-item" onClick={() => { const id = ctx.targetId; setCtx(null); closeSubs(); editTargetAt(id); }}>🖉 대상 수정(이름·호스트·위치)</button>
             )}
             {!ctx.targetId && <>
-              {/* 대량 등록의 최대 실수 원인은 경로 오타다(오타 경로가 조용히 새 폴더가 된다).
-                  우클릭한 폴더를 프리필해 그 실수를 구조적으로 없앤다. 프리필은 1회용. */}
-              <button className="pc-ctx-item" onClick={() => {
-                setCtx(null); closeSubs();
-                goToConfig('bulk', { kind: mode, path: ctx.node === 'root' ? '' : ctx.node });
-              }}>📦 이 폴더에 대량 등록…</button>
+              {/* 등록은 위 '이 폴더에 등록…' 하나로 통합(소량 직접입력·대량 붙여넣기·파일·템플릿). */}
               <button className="pc-ctx-item" onClick={() => {
                 setCtx(null); closeSubs();
                 exportFolderCsv(ctx.node === 'root' ? '' : ctx.node);
@@ -1139,6 +1136,25 @@ export default function SvcMonitor() {
                         onClick={wizSave}>{busy ? '저장 중…' : (wiz.editId ? '수정 저장' : '점검 추가')}</button>}
                 </>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 통합 등록 마법사 — 트리에서 '하나의 등록 화면(BulkTab)'을 모달로 불러 쓴다(설정 탭과 동일 컴포넌트).
+          위치 프리필. 소량 직접입력~대량 붙여넣기~파일(CSV/XLSX)~템플릿 적용~엣지 배정을 한 흐름으로.
+          닫으면 트리 새로고침(등록분 반영). */}
+      {register && (
+        <div className="pc-overlay" onClick={() => { setRegister(null); refresh(); }}>
+          <EscClose onClose={() => { setRegister(null); refresh(); }} />
+          <div className="pc-modal" style={{ width: 'min(1200px, 97vw)', maxHeight: '92vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
+            <div className="pc-modal-head">
+              <b>＋ 등록</b>
+              <span className="pc-wiz-target">{(register.path || 'Root') + ' · ' + (mode === 'service' ? '서비스' : '인프라')}</span>
+              <button className="pc-x" onClick={() => { setRegister(null); refresh(); }}>✕</button>
+            </div>
+            <div style={{ padding: 12 }}>
+              <BulkTab canEdit={canEdit} prefill={{ kind: mode, path: register.path }} />
             </div>
           </div>
         </div>
