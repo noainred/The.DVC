@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { fetchJson, postJson, putJson } from '../../api.js';
 import { ErrorBox } from '../../components/ui.jsx';
 import PreviewTable from './PreviewTable.jsx';
+import TemplateTab from './TemplateTab.jsx';
 
 /**
  * 대량 자동등록 — 줄마다 {엣지·호스트네임·IP} 를 직접 입력해 대상을 한꺼번에 만든다.
@@ -64,6 +65,7 @@ export default function BulkTab({ canEdit, prefill }) {
   const [enabled, setEnabled] = useState(false);
 
   const [templates, setTemplates] = useState([]);
+  const [showTplMgr, setShowTplMgr] = useState(false);   // ③ 인라인 템플릿 관리 패널(탭 전환 없이 정의·수정)
   const [edges, setEdges] = useState([]);           // 배정 후보 엣지 [{agent,...}]
   const [folders, setFolders] = useState([]);
   const [showFolders, setShowFolders] = useState(false);
@@ -75,13 +77,13 @@ export default function BulkTab({ canEdit, prefill }) {
   const [err, setErr] = useState('');
   const [done, setDone] = useState('');
 
+  const loadTemplates = async () => { try { const r = await fetchJson('/svcmon/templates'); setTemplates(r.templates || []); } catch { setTemplates([]); } };
   const loadBatches = async () => { try { const r = await fetchJson('/svcmon/batches'); setBatches(r.batches || []); } catch { /* 비치명 */ } };
   const loadFolders = async () => { try { const r = await fetchJson('/svcmon/state?limit=1'); setFolders(r.folders || []); } catch { setFolders([]); } };
   const loadEdges = async () => { try { const r = await fetchJson('/svcmon/assign'); setEdges(r.candidates || []); } catch { setEdges([]); } };
-  useEffect(() => {
-    fetchJson('/svcmon/templates').then((r) => setTemplates(r.templates || [])).catch(() => setTemplates([]));
-    loadBatches(); loadFolders(); loadEdges();
-  }, []);
+  useEffect(() => { loadTemplates(); loadBatches(); loadFolders(); loadEdges(); }, []);
+  // 인라인 관리 패널을 열고 닫을 때 목록을 새로 읽어 드롭다운을 최신 상태로 유지한다.
+  const toggleTplMgr = () => { setShowTplMgr((v) => { if (v) loadTemplates(); return !v; }); };
 
   const edgeSet = useMemo(() => new Set(edges.map((e) => e.agent)), [edges]);
   const tpl = templates.find((t) => t.id === templateId) || null;
@@ -384,12 +386,14 @@ export default function BulkTab({ canEdit, prefill }) {
         <b>③ 어떤 점검을 넣을까요</b>
         <div className="flex gap wrap" style={{ alignItems: 'flex-end', marginTop: 10 }}>
           <label className="flex col" style={{ gap: 4, minWidth: 260 }}>
-            <span className="muted" style={{ fontSize: 11 }}>점검 템플릿 — 위에서 입력한 대상들에 적용</span>
+            <span className="muted" style={{ fontSize: 11 }}>적용할 템플릿 — 위에서 입력한 대상들에 적용</span>
             <select className="select" value={templateId} onChange={(e) => { setTemplateId(e.target.value); setPreview(null); }}>
               <option value="">(점검 없이 대상만 등록)</option>
               {templates.map((t) => <option key={t.id} value={t.id}>{t.name} — 항목 {(t.items || []).length}개</option>)}
             </select>
           </label>
+          <button type="button" className={`tab ${showTplMgr ? 'active' : ''}`} onClick={toggleTplMgr}
+            title="탭 전환 없이 여기서 템플릿을 만들고 수정합니다">🛠 템플릿 관리 {showTplMgr ? '▲' : '▾'}</button>
           <label className="flex col" style={{ gap: 4 }}>
             <span className="muted" style={{ fontSize: 11 }}>등록 직후 상태</span>
             <select className="select" value={enabled ? '1' : '0'} onChange={(e) => { setEnabled(e.target.value === '1'); setPreview(null); }}>
@@ -398,6 +402,15 @@ export default function BulkTab({ canEdit, prefill }) {
           </label>
           <span className="muted" style={{ fontSize: 11, alignSelf: 'center' }}>이미 있는 이름은 건너뜁니다(미리보기에 '건너뜀'으로 표시).</span>
         </div>
+        {showTplMgr && (
+          <div style={{ marginTop: 12, borderTop: '1px solid var(--border, #2a2a2a)', paddingTop: 12 }}>
+            <div className="muted" style={{ fontSize: 11, marginBottom: 8 }}>
+              템플릿을 만들거나 수정한 뒤 이 패널을 닫으면 위 '적용할 템플릿' 목록이 갱신됩니다.
+              (상단 '점검 템플릿' 탭과 같은 화면 — 기존 대상에 일괄 적용은 그 탭에서)
+            </div>
+            <TemplateTab canEdit={canEdit} />
+          </div>
+        )}
         {tpl && (
           <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
             {tpl.name}: {(tpl.items || []).map((x) => `${x.type}${x.port ? `:${x.port}` : ''}`).join(', ')} · 대상당 점검 {itemCount}개

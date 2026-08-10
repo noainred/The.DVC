@@ -287,6 +287,7 @@ export default function SvcMonitor() {
   // 점검 추가 마법사 — { targetId, targetName, step:1|2|3, cat, type, form, editId }
   // 호버 계단식 메뉴를 단계형으로 바꿨다: 커서가 메뉴 사이를 지나다 닫히는 문제가 원천적으로 없다.
   const [wiz, setWiz] = useState(null);
+  const [wizTpls, setWizTpls] = useState([]);   // 점검 추가 마법사의 '템플릿으로 추가'용 템플릿 목록
 
   // 선택 노드나 모드가 바뀌면 표시 개수를 처음으로 되돌린다(이전 폴더에서 늘려 둔 값 승계 금지).
   useEffect(() => { setPageN(TARGET_PAGE); }, [sel, mode]);
@@ -386,11 +387,24 @@ export default function SvcMonitor() {
     if (test) {
       const cat = ADD_MENU.findIndex((g) => g.items.some((i) => i.type === test.type));
       setWiz({ targetId, targetName, step: 3, cat: cat < 0 ? 0 : cat, type: test.type, editId: test.id,
-        form: { ...EMPTY_TEST, ...test } });
+        form: { ...EMPTY_TEST, ...test }, mode: 'single', tplId: '' });
     } else {
-      setWiz({ targetId, targetName, step: 1, cat: -1, type: '', editId: null, form: { ...EMPTY_TEST } });
+      setWiz({ targetId, targetName, step: 1, cat: -1, type: '', editId: null, form: { ...EMPTY_TEST }, mode: 'single', tplId: '' });
+      // '템플릿으로 추가'용 목록 — 마법사를 열 때 최신으로 읽는다.
+      fetchJson('/svcmon/templates').then((r) => setWizTpls(r.templates || [])).catch(() => setWizTpls([]));
     }
     setErr('');
+  };
+  // 선택한 템플릿을 이 대상 하나에 적용(scope.targetIds). 여러 점검을 한 번에 추가한다.
+  const applyTplToTarget = async () => {
+    if (!wiz?.tplId) return;
+    setBusy(true); setErr('');
+    try {
+      const r = await postJson(`/svcmon/templates/${wiz.tplId}/apply`, { scope: { targetIds: [wiz.targetId] }, mode: 'apply' });
+      if (r?.error) { setErr(r.error); return; }
+      if ((r?.summary?.error || 0) > 0) { setErr(`오류 ${r.summary.error}건으로 적용하지 않았습니다.`); return; }
+      setWiz(null); refresh();
+    } catch (e) { setErr(e.message || String(e)); } finally { setBusy(false); }
   };
   const wizSave = async () => {
     setBusy(true); setErr('');
@@ -979,7 +993,17 @@ export default function SvcMonitor() {
               <button className="pc-x" onClick={() => setWiz(null)}>✕</button>
             </div>
 
-            {/* 진행 표시 — 완료 단계는 클릭해 되돌아갈 수 있다 */}
+            {/* 추가 방식 선택 — 템플릿(여러 점검 한 번에) vs 개별 점검(3단계). 수정 모드엔 없음. */}
+            {!wiz.editId && (
+              <div className="pc-steps" style={{ gap: 8 }}>
+                {[['single', '＋ 개별 점검 추가'], ['template', '📋 템플릿으로 추가']].map(([m, label]) => (
+                  <button key={m} className={`pc-step ${wiz.mode === m ? 'on' : ''}`} onClick={() => { setWiz({ ...wiz, mode: m }); setErr(''); }}>{label}</button>
+                ))}
+              </div>
+            )}
+
+            {/* 진행 표시 — 완료 단계는 클릭해 되돌아갈 수 있다 (개별 점검 모드에서만) */}
+            {wiz.mode !== 'template' && (
             <div className="pc-steps">
               {['카테고리', '점검 유형', '설정'].map((label, i) => {
                 const n = i + 1;
@@ -993,9 +1017,29 @@ export default function SvcMonitor() {
               })}
               <span className="pc-step-count">{wiz.step} / 3</span>
             </div>
+            )}
 
             <div className="pc-wiz-body">
-              {wiz.step === 1 && (
+              {wiz.mode === 'template' && !wiz.editId && (
+                <>
+                  <div className="pc-wiz-lead">이 대상에 적용할 점검 템플릿을 고르세요 — 템플릿의 점검들이 한 번에 추가됩니다.</div>
+                  <div className="pc-wiz-form">
+                    <label>점검 템플릿
+                      <select className="pc-input" value={wiz.tplId} autoFocus onChange={(e) => setWiz({ ...wiz, tplId: e.target.value })}>
+                        <option value="">(템플릿 선택)</option>
+                        {wizTpls.map((t) => <option key={t.id} value={t.id}>{t.name} — 항목 {(t.items || []).length}개</option>)}
+                      </select>
+                    </label>
+                    {(() => {
+                      const t = wizTpls.find((x) => x.id === wiz.tplId);
+                      if (!t) return <span className="pc-fhint">템플릿을 고르면 포함된 점검이 여기 표시됩니다. (템플릿 정의·수정은 ‘성능점검 설정 › 점검 템플릿’)</span>;
+                      return <span className="pc-fhint">{(t.items || []).map((x) => `${x.type}${x.port ? `:${x.port}` : ''}`).join(', ') || '항목 없음'} · 점검 {(t.items || []).length}개가 이 대상에 추가됩니다.</span>;
+                    })()}
+                  </div>
+                  {err && <div className="pc-err">{err}</div>}
+                </>
+              )}
+              {wiz.mode !== 'template' && wiz.step === 1 && (
                 <>
                   <div className="pc-wiz-lead">무엇을 점검할지 분류를 고르세요.</div>
                   <div className="pc-wiz-grid">
@@ -1070,16 +1114,26 @@ export default function SvcMonitor() {
             </div>
 
             <div className="pc-wiz-foot">
-              <button className="pc-btn" disabled={wiz.step === 1}
-                onClick={() => setWiz({ ...wiz, step: wiz.step - 1 })}>← 뒤로</button>
-              <span className="pc-wiz-crumb">
-                {wiz.cat >= 0 && ADD_MENU[wiz.cat]?.label}{wiz.type && ` › ${wiz.type}`}
-              </span>
-              {wiz.step < 3
-                ? <button className="pc-btn accent" disabled={wiz.step === 1 ? wiz.cat < 0 : !wiz.type}
-                    onClick={() => setWiz({ ...wiz, step: wiz.step + 1 })}>다음 →</button>
-                : <button className="pc-btn accent" disabled={busy || !wiz.form.name}
-                    onClick={wizSave}>{busy ? '저장 중…' : (wiz.editId ? '수정 저장' : '점검 추가')}</button>}
+              {wiz.mode === 'template' && !wiz.editId ? (
+                <>
+                  <span className="pc-wiz-crumb">템플릿의 점검들을 이 대상에 한 번에 추가</span>
+                  <button className="pc-btn accent" disabled={busy || !wiz.tplId}
+                    onClick={applyTplToTarget}>{busy ? '적용 중…' : '템플릿 적용'}</button>
+                </>
+              ) : (
+                <>
+                  <button className="pc-btn" disabled={wiz.step === 1}
+                    onClick={() => setWiz({ ...wiz, step: wiz.step - 1 })}>← 뒤로</button>
+                  <span className="pc-wiz-crumb">
+                    {wiz.cat >= 0 && ADD_MENU[wiz.cat]?.label}{wiz.type && ` › ${wiz.type}`}
+                  </span>
+                  {wiz.step < 3
+                    ? <button className="pc-btn accent" disabled={wiz.step === 1 ? wiz.cat < 0 : !wiz.type}
+                        onClick={() => setWiz({ ...wiz, step: wiz.step + 1 })}>다음 →</button>
+                    : <button className="pc-btn accent" disabled={busy || !wiz.form.name}
+                        onClick={wizSave}>{busy ? '저장 중…' : (wiz.editId ? '수정 저장' : '점검 추가')}</button>}
+                </>
+              )}
             </div>
           </div>
         </div>
