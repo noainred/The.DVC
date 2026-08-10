@@ -138,6 +138,19 @@ function buildTree(targets, folders = [], sortMode = 'manual') {
       for (const c of n.children.values()) sortNode(c);
     };
     sortNode(root);
+  } else {
+    // 수동 정렬 — order 필드로 정렬한다. 대상 order 는 생성 시 Date.now() 라 기본은 생성순(=기존 동작)
+    // 이고, 재정렬하면 그 폴더 대상에 0..n 이 부여된다. 폴더는 order 가 있으면 그 값, 없으면 folders
+    // 배열 인덱스(=기존 표시 순서)로 정렬해 재정렬 전 순서를 그대로 보존한다.
+    const fOrder = new Map();
+    folders.forEach((f, i) => fOrder.set(f.path, f.order != null ? f.order : i));
+    const ord = (id) => (fOrder.has(id) ? fOrder.get(id) : Number.MAX_SAFE_INTEGER);
+    const sortNode = (n) => {
+      n.children = new Map([...n.children.entries()].sort((a, b) => (ord(a[1].id) - ord(b[1].id)) || a[0].localeCompare(b[0], 'ko')));
+      n.targets.sort((a, b) => ((a.order ?? 0) - (b.order ?? 0)) || a.name.localeCompare(b.name, 'ko'));
+      for (const c of n.children.values()) sortNode(c);
+    };
+    sortNode(root);
   }
   return root;
 }
@@ -160,25 +173,32 @@ const matchNode = (node, q) => !q || node.name.toLowerCase().includes(q)
   || node.targets.some((t) => t.name.toLowerCase().includes(q) || (t.host || '').toLowerCase().includes(q))
   || [...node.children.values()].some((c) => matchNode(c, q));
 
-// 드롭 하이라이트 — 인라인 outline(별도 CSS 불필요). 드롭 가능한 폴더 위에서만 표시.
-const DROP_STYLE = { outline: '2px dashed var(--accent, #3b82f6)', outlineOffset: '-2px', borderRadius: 4, background: 'rgba(59,130,246,.08)' };
+// 드롭 하이라이트(인라인 — 별도 CSS 불필요). inside=폴더 안, before/after=형제 사이 선(boxShadow).
+const DROP_INSIDE = { outline: '2px dashed var(--accent, #3b82f6)', outlineOffset: '-2px', borderRadius: 4, background: 'rgba(59,130,246,.10)' };
+const DROP_BEFORE = { boxShadow: 'inset 0 3px 0 0 var(--accent, #3b82f6)' };
+const DROP_AFTER = { boxShadow: 'inset 0 -3px 0 0 var(--accent, #3b82f6)' };
+// dnd.over({id,zone}) 에 맞는 드롭 표시 스타일.
+function dropStyle(dnd, id) {
+  const o = dnd.over;
+  if (!o || o.id !== id) return null;
+  return o.zone === 'inside' ? DROP_INSIDE : o.zone === 'before' ? DROP_BEFORE : DROP_AFTER;
+}
 
 function TreeRows({ node, depth, sel, setSel, expanded, toggle, q, onCtx, dnd }) {
   if (depth > 0 && !matchNode(node, q)) return null;
   const open = q ? true : (expanded[node.id] !== false);   // 검색 중 강제 확장(README)
   const { alarms, worst } = statsOf(node);
   const hasKids = node.children.size > 0 || node.targets.length > 0;
-  const dropHere = dnd.overId === node.id;
   return (
     <>
       {depth > 0 && (
-        <div className={`pc-tree-row${sel === node.id ? ' sel' : ''}`} style={{ paddingLeft: 8 + depth * 16, ...(dropHere ? DROP_STYLE : {}) }}
+        <div className={`pc-tree-row${sel === node.id ? ' sel' : ''}`} style={{ paddingLeft: 8 + depth * 16, ...(dropStyle(dnd, node.id) || {}) }}
           draggable={dnd.canEdit}
           onDragStart={(e) => { e.stopPropagation(); dnd.start(e, { type: 'folder', path: node.id, name: node.name }); }}
           onDragEnd={dnd.end}
-          onDragOver={(e) => dnd.over(e, node.id)}
-          onDragLeave={() => dnd.leave(node.id)}
-          onDrop={(e) => dnd.drop(e, node.id)}
+          onDragOver={(e) => dnd.onOver(e, node.id, true)}
+          onDragLeave={() => dnd.onLeave(node.id)}
+          onDrop={(e) => dnd.onDrop(e, node.id, true)}
           onClick={() => setSel(node.id)}
           onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setSel(node.id); onCtx({ x: e.clientX, y: e.clientY, node: node.id }); }}>
           <span className="pc-tog" onClick={(e) => { e.stopPropagation(); toggle(node.id); }}>{hasKids ? (open ? '−' : '+') : '·'}</span>
@@ -196,10 +216,13 @@ function TreeRows({ node, depth, sel, setSel, expanded, toggle, q, onCtx, dnd })
             const st = statsOf({ children: new Map(), targets: [t] });
             const id = `target:${t.id}`;
             return (
-              <div key={t.id} className={`pc-tree-row${sel === id ? ' sel' : ''}`} style={{ paddingLeft: 8 + (depth + 1) * 16 }}
+              <div key={t.id} className={`pc-tree-row${sel === id ? ' sel' : ''}`} style={{ paddingLeft: 8 + (depth + 1) * 16, ...(dropStyle(dnd, t.id) || {}) }}
                 draggable={dnd.canEdit}
                 onDragStart={(e) => { e.stopPropagation(); dnd.start(e, { type: 'target', id: t.id, path: t.path, name: t.name }); }}
                 onDragEnd={dnd.end}
+                onDragOver={(e) => dnd.onOver(e, t.id, false)}
+                onDragLeave={() => dnd.onLeave(t.id)}
+                onDrop={(e) => dnd.onDrop(e, t.id, false)}
                 onClick={() => setSel(id)}
                 onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setSel(id); onCtx({ x: e.clientX, y: e.clientY, node: t.path, targetId: t.id }); }}>
                 <span className="pc-tog">·</span>
@@ -242,7 +265,7 @@ export default function SvcMonitor() {
   const dragRef = useRef(false);
   // 트리 드래그&드롭 이동(스플리터 dragging 과 별개) — { type:'folder'|'target', path, id?, name }
   const [dragItem, setDragItem] = useState(null);
-  const [dragOverId, setDragOverId] = useState(null);   // 현재 하이라이트된 드롭 대상 폴더 id('' = Root)
+  const [dragOver, setDragOver] = useState(null);       // { id, zone:'before'|'inside'|'after' } · id='' = Root
   const [moveErr, setMoveErr] = useState('');
   // 우클릭 컨텍스트 메뉴 — { x, y, node:'root'|path, targetId? } · 계단식 서브메뉴 인덱스
   const [ctx, setCtx] = useState(null);
@@ -432,51 +455,111 @@ export default function SvcMonitor() {
       } else window.alert(e.message);
     }
   };
-  /* ── 드래그&드롭 이동(폴더 reparent / 대상 → 폴더) ── */
-  // destId: 폴더 경로('' = Root). 드롭 가능 여부(순환·제자리·루트-대상 금지)를 판정한다.
-  const canDrop = (destId) => {
+  /* ── 드래그&드롭: 폴더 reparent(안으로) · 대상→폴더 이동 · 형제 순서 재정렬(위/아래) ── */
+  const parentOf = (p) => (p.includes('\\') ? p.slice(0, p.lastIndexOf('\\')) : '');
+  // 어떤 (대상 id/폴더 경로, zone) 조합이 드롭 가능한지. isFolder=드롭 대상이 폴더 행인가.
+  const canDropZone = (id, zone, isFolder) => {
     if (!dragItem || !canEdit) return false;
     if (dragItem.type === 'folder') {
+      if (!isFolder) return false;                                  // 폴더는 대상 사이에 못 낀다
       const src = dragItem.path;
-      if (destId === src || String(destId).startsWith(`${src}\\`)) return false;   // 자기 자신/하위 금지(순환)
-      const curParent = src.includes('\\') ? src.slice(0, src.lastIndexOf('\\')) : '';
-      if (destId === curParent) return false;                                       // 이미 그 부모 → no-op
+      if (zone === 'inside') {
+        if (id === '') return src.includes('\\');                   // Root 안으로 = 최상위로(이미 최상위면 no-op)
+        if (id === src || String(id).startsWith(`${src}\\`)) return false;   // 자기/하위 금지
+        return parentOf(src) !== id;                                // 이미 그 부모면 no-op
+      }
+      // before/after = id 폴더의 형제로 재정렬. Root 행은 형제 개념 없음.
+      if (id === '') return false;
+      const dp = parentOf(id);
+      if (id === src || String(id).startsWith(`${src}\\`)) return false;     // 기준이 자기/하위면 불가
+      if (dp === src || String(dp).startsWith(`${src}\\`)) return false;     // 목적 부모가 자기/하위면 순환
       return true;
     }
-    // 대상: 폴더로만(루트 불가 — 대상은 경로가 필요), 현재 폴더면 no-op.
-    if (!destId) return false;
-    return destId !== dragItem.path;
+    // 대상 드래그
+    if (isFolder) return zone === 'inside' && id !== '' && id !== dragItem.path;   // 폴더 안으로 이동
+    // 대상 행 위/아래 = 그 대상의 폴더에서 순서 재정렬(다른 폴더면 이동+재정렬)
+    return id !== dragItem.id;
   };
-  const doMove = async (destId) => {
+  const clearDrag = () => { setDragItem(null); setDragOver(null); };
+
+  // 대상 X 를 refTargetId 기준 앞/뒤로 그 폴더에 놓는다(다른 폴더면 경로 이동 후 재정렬).
+  const reorderTargetTo = async (dragId, refTargetId, after) => {
+    const ref = targets.find((t) => t.id === refTargetId);
+    const drag = targets.find((t) => t.id === dragId);
+    if (!ref || !drag) return;
+    const destPath = ref.path;
+    if (drag.path !== destPath) await putJson(`/svcmon/targets/${dragId}`, { path: destPath });
+    let ids = targets.filter((t) => t.path === destPath)
+      .sort((a, b) => ((a.order ?? 0) - (b.order ?? 0)) || a.name.localeCompare(b.name, 'ko'))
+      .map((t) => t.id).filter((id) => id !== dragId);
+    const idx = ids.indexOf(refTargetId);
+    ids.splice(after ? idx + 1 : idx, 0, dragId);
+    await putJson('/svcmon/reorder/targets', { kind: mode, path: destPath, ids });
+    refresh();
+  };
+  // 폴더 X 를 refPath 형제 기준 앞/뒤로. 부모가 다르면 그 부모로 옮기고(reparent) 위치는 기본(끝).
+  const reorderFolderTo = async (dragPath, refPath, after) => {
+    if (refPath === dragPath) return;
+    const destParent = parentOf(refPath);
+    if (parentOf(dragPath) !== destParent) {
+      await postJson('/svcmon/folders/move', { kind: mode, path: dragPath, newParent: destParent });
+      refresh();
+      return;
+    }
+    const fidx = new Map(); folders.forEach((f, i) => fidx.set(f.path, f.order != null ? f.order : i));
+    let paths = folders.filter((f) => parentOf(f.path) === destParent).map((f) => f.path)
+      .sort((a, b) => fidx.get(a) - fidx.get(b)).filter((p) => p !== dragPath);
+    const idx = paths.indexOf(refPath);
+    paths.splice(after ? idx + 1 : idx, 0, dragPath);
+    await putJson('/svcmon/reorder/folders', { kind: mode, parent: destParent, paths });
+    refresh();
+  };
+
+  const doDrop = async (id, zone, isFolder) => {
     const item = dragItem;
-    setDragItem(null); setDragOverId(null); setMoveErr('');
-    if (!item || !canDrop(destId)) return;
+    clearDrag(); setMoveErr('');
+    if (!item || !canDropZone(id, zone, isFolder)) return;
     try {
       if (item.type === 'folder') {
-        await postJson('/svcmon/folders/move', { kind: mode, path: item.path, newParent: destId });
+        if (zone === 'inside') {
+          await postJson('/svcmon/folders/move', { kind: mode, path: item.path, newParent: id });   // id='' → 최상위
+          if (id) setExpanded((ex) => ({ ...ex, [id]: true }));
+          refresh();
+        } else {
+          await reorderFolderTo(item.path, id, zone === 'after');
+        }
+      } else if (isFolder) {
+        await putJson(`/svcmon/targets/${item.id}`, { path: id });                                    // 대상 → 폴더 안으로
+        setExpanded((ex) => ({ ...ex, [id]: true }));
+        refresh();
       } else {
-        await putJson(`/svcmon/targets/${item.id}`, { path: destId });
+        await reorderTargetTo(item.id, id, zone === 'after');                                          // 대상 순서 재정렬
       }
-      if (destId) setExpanded((ex) => ({ ...ex, [destId]: true }));   // 드롭한 폴더를 펼쳐 결과를 보인다
-      refresh();
     } catch (e) { setMoveErr(e.message || '이동 실패'); }
   };
   const dnd = {
-    canEdit, overId: dragOverId, active: !!dragItem, canDrop,
+    canEdit, over: dragOver, active: !!dragItem,
     start: (e, item) => {
       setDragItem(item); setMoveErr('');
       try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', item.path || item.id || ''); } catch { /* noop */ }
     },
-    end: () => { setDragItem(null); setDragOverId(null); },
-    over: (e, destId) => {
-      if (!canDrop(destId)) return;
+    end: clearDrag,
+    onOver: (e, id, isFolder, forceZone) => {
+      const zone = forceZone || zone2(e, id, isFolder);
+      if (!canDropZone(id, zone, isFolder)) return;
       e.preventDefault();
       try { e.dataTransfer.dropEffect = 'move'; } catch { /* noop */ }
-      if (dragOverId !== destId) setDragOverId(destId);
+      if (dragOver?.id !== id || dragOver?.zone !== zone) setDragOver({ id, zone });
     },
-    leave: (destId) => setDragOverId((cur) => (cur === destId ? null : cur)),
-    drop: (e, destId) => { e.preventDefault(); e.stopPropagation(); doMove(destId); },
+    onLeave: (id) => setDragOver((cur) => (cur && cur.id === id ? null : cur)),
+    onDrop: (e, id, isFolder, forceZone) => { e.preventDefault(); e.stopPropagation(); doDrop(id, forceZone || zone2(e, id, isFolder), isFolder); },
   };
+  // 커서 Y 위치로 zone 판정(폴더: 상 30%/중 40%/하 30% = before/inside/after · 대상: 상/하 = before/after).
+  function zone2(e, id, isFolder) {
+    const r = e.currentTarget.getBoundingClientRect();
+    const y = e.clientY - r.top; const h = r.height || 1;
+    return isFolder ? (y < h * 0.3 ? 'before' : y > h * 0.7 ? 'after' : 'inside') : (y < h * 0.5 ? 'before' : 'after');
+  }
 
   const setSortMode = async (m) => {
     try { await putJson('/svcmon/sort', { kind: mode, mode: m }); refresh(); }
@@ -576,13 +659,13 @@ export default function SvcMonitor() {
             <input className="pc-input" placeholder="대상 검색" value={treeQ} onChange={(e) => setTreeQ(e.target.value)} />
           </div>
           {moveErr && <div className="svc-warn" style={{ margin: '6px 8px', fontSize: 12 }}>이동 실패: {moveErr}</div>}
-          {canEdit && <div className="muted" style={{ fontSize: 11, padding: '2px 10px' }}>드래그&드롭으로 폴더·대상을 옮길 수 있습니다.</div>}
+          {canEdit && <div className="muted" style={{ fontSize: 11, padding: '2px 10px' }}>드래그&드롭 — 폴더/대상 가운데에 놓으면 안으로 이동, 위/아래 가장자리에 놓으면 순서 재정렬.</div>}
           <div className="pc-tree-body">
-            <div className={`pc-tree-row${sel === '' ? ' sel' : ''}`} style={dnd.overId === '' ? DROP_STYLE : undefined}
+            <div className={`pc-tree-row${sel === '' ? ' sel' : ''}`} style={{ ...(dropStyle(dnd, '') || {}) }}
               onClick={() => setSel('')}
-              onDragOver={(e) => dnd.over(e, '')}
-              onDragLeave={() => dnd.leave('')}
-              onDrop={(e) => dnd.drop(e, '')}
+              onDragOver={(e) => dnd.onOver(e, '', true, 'inside')}
+              onDragLeave={() => dnd.onLeave('')}
+              onDrop={(e) => dnd.onDrop(e, '', true, 'inside')}
               onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setSel(''); setCtx({ x: e.clientX, y: e.clientY, node: 'root' }); closeSubs(); }}>
               <span className="pc-tog">−</span><span className="pc-dot pc-off" />
               <span className={`pc-tree-label${sel === '' ? ' on' : ''}`}>Root</span>

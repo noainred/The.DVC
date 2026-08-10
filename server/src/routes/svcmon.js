@@ -15,7 +15,7 @@ import { logAudit } from '../audit.js';
 import {
   listTargets, listTargetsCopy, listFolders, getSort, setSort, totalTests,
   addTarget, updateTarget, deleteTarget, addTest, updateTest, deleteTest,
-  addFolder, renameFolder, moveFolder, deleteFolder, bulkAddTargets, planBulkTargets, flushStore,
+  addFolder, renameFolder, moveFolder, reorderTargets, reorderFolders, deleteFolder, bulkAddTargets, planBulkTargets, flushStore,
   TEST_TYPES, KINDS, LIMITS,
 } from '../svcmon/store.js';
 import { TARGET_FIELDS, TEST_FIELDS, CSV_COLUMNS } from '../svcmon/testSchema.js';
@@ -152,6 +152,16 @@ svcmonRouter.post('/folders/move', canEdit, (req, res) => {
     logAudit({ user: req.user?.username, action: 'svcmon.folder.move', target: r.path, detail: `이동 ${r.moved}건 (from ${req.body?.path})` });
     res.json({ ...r, folders: listFolders() });
   } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+svcmonRouter.put('/reorder/targets', canEdit, (req, res) => {
+  try { res.json(reorderTargets(req.body || {})); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+svcmonRouter.put('/reorder/folders', canEdit, (req, res) => {
+  try { res.json(reorderFolders(req.body || {})); }
+  catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 svcmonRouter.post('/folders/delete', canEdit, (req, res) => {
