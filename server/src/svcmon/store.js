@@ -359,6 +359,36 @@ export function moveFolder({ kind, path: p, newParent = '' }) {
   return { path: to, moved: affected.length };
 }
 
+/**
+ * 대상 순서 재정렬 — 한 폴더(kind, path) 안 대상들의 표시 순서를 ids 순서로 굳힌다.
+ * 그 폴더에 실제로 있는 대상만 order=0..n 으로 부여한다(다른 폴더 대상은 건드리지 않음).
+ * order 는 buildTree 수동 정렬이 읽는다(기본값은 생성 시각이라 재정렬 전엔 생성순).
+ */
+export function reorderTargets({ kind, path: p, ids = [] }) {
+  const dbx = load();
+  const k = KINDS.includes(kind) ? kind : 'infra';
+  const inFolder = new Map(dbx.targets.filter((t) => (t.kind || 'infra') === k && t.path === p).map((t) => [t.id, t]));
+  let n = 0;
+  (Array.isArray(ids) ? ids : []).forEach((id, i) => { const t = inFolder.get(id); if (t) { t.order = i; n += 1; } });
+  if (n) save();
+  return { reordered: n };
+}
+
+/**
+ * 폴더 순서 재정렬 — 같은 부모(parent, '' = 최상위) 아래 형제 폴더들의 표시 순서를 paths 순서로 굳힌다.
+ * order 필드를 그 형제들에만 0..n 으로 부여한다(다른 폴더는 배열 인덱스 기본을 유지 → 순서 무변).
+ */
+export function reorderFolders({ kind, parent = '', paths = [] }) {
+  const dbx = load();
+  const k = KINDS.includes(kind) ? kind : 'infra';
+  const parentOf = (pp) => (pp.includes('\\') ? pp.slice(0, pp.lastIndexOf('\\')) : '');
+  const byPath = new Map(dbx.folders.filter((f) => (f.kind || 'infra') === k && parentOf(f.path) === parent).map((f) => [f.path, f]));
+  let n = 0;
+  (Array.isArray(paths) ? paths : []).forEach((pp, i) => { const f = byPath.get(pp); if (f) { f.order = i; n += 1; } });
+  if (n) save();
+  return { reordered: n };
+}
+
 /** 폴더 삭제 — 기본은 비어 있을 때만. force 면 하위 대상까지 함께 삭제한다. */
 export function deleteFolder({ kind, path: p, force = false }) {
   const dbx = load();
