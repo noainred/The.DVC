@@ -160,15 +160,25 @@ const matchNode = (node, q) => !q || node.name.toLowerCase().includes(q)
   || node.targets.some((t) => t.name.toLowerCase().includes(q) || (t.host || '').toLowerCase().includes(q))
   || [...node.children.values()].some((c) => matchNode(c, q));
 
-function TreeRows({ node, depth, sel, setSel, expanded, toggle, q, onCtx }) {
+// 드롭 하이라이트 — 인라인 outline(별도 CSS 불필요). 드롭 가능한 폴더 위에서만 표시.
+const DROP_STYLE = { outline: '2px dashed var(--accent, #3b82f6)', outlineOffset: '-2px', borderRadius: 4, background: 'rgba(59,130,246,.08)' };
+
+function TreeRows({ node, depth, sel, setSel, expanded, toggle, q, onCtx, dnd }) {
   if (depth > 0 && !matchNode(node, q)) return null;
   const open = q ? true : (expanded[node.id] !== false);   // 검색 중 강제 확장(README)
   const { alarms, worst } = statsOf(node);
   const hasKids = node.children.size > 0 || node.targets.length > 0;
+  const dropHere = dnd.overId === node.id;
   return (
     <>
       {depth > 0 && (
-        <div className={`pc-tree-row${sel === node.id ? ' sel' : ''}`} style={{ paddingLeft: 8 + depth * 16 }}
+        <div className={`pc-tree-row${sel === node.id ? ' sel' : ''}`} style={{ paddingLeft: 8 + depth * 16, ...(dropHere ? DROP_STYLE : {}) }}
+          draggable={dnd.canEdit}
+          onDragStart={(e) => { e.stopPropagation(); dnd.start(e, { type: 'folder', path: node.id, name: node.name }); }}
+          onDragEnd={dnd.end}
+          onDragOver={(e) => dnd.over(e, node.id)}
+          onDragLeave={() => dnd.leave(node.id)}
+          onDrop={(e) => dnd.drop(e, node.id)}
           onClick={() => setSel(node.id)}
           onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setSel(node.id); onCtx({ x: e.clientX, y: e.clientY, node: node.id }); }}>
           <span className="pc-tog" onClick={(e) => { e.stopPropagation(); toggle(node.id); }}>{hasKids ? (open ? '−' : '+') : '·'}</span>
@@ -180,13 +190,16 @@ function TreeRows({ node, depth, sel, setSel, expanded, toggle, q, onCtx }) {
       {open && (
         <>
           {[...node.children.values()].map((c) => (
-            <TreeRows key={c.id} node={c} depth={depth + 1} sel={sel} setSel={setSel} expanded={expanded} toggle={toggle} q={q} onCtx={onCtx} />
+            <TreeRows key={c.id} node={c} depth={depth + 1} sel={sel} setSel={setSel} expanded={expanded} toggle={toggle} q={q} onCtx={onCtx} dnd={dnd} />
           ))}
           {node.targets.filter((t) => !q || t.name.toLowerCase().includes(q) || (t.host || '').toLowerCase().includes(q)).map((t) => {
             const st = statsOf({ children: new Map(), targets: [t] });
             const id = `target:${t.id}`;
             return (
               <div key={t.id} className={`pc-tree-row${sel === id ? ' sel' : ''}`} style={{ paddingLeft: 8 + (depth + 1) * 16 }}
+                draggable={dnd.canEdit}
+                onDragStart={(e) => { e.stopPropagation(); dnd.start(e, { type: 'target', id: t.id, path: t.path, name: t.name }); }}
+                onDragEnd={dnd.end}
                 onClick={() => setSel(id)}
                 onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setSel(id); onCtx({ x: e.clientX, y: e.clientY, node: t.path, targetId: t.id }); }}>
                 <span className="pc-tog">·</span>
@@ -227,6 +240,10 @@ export default function SvcMonitor() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const dragRef = useRef(false);
+  // 트리 드래그&드롭 이동(스플리터 dragging 과 별개) — { type:'folder'|'target', path, id?, name }
+  const [dragItem, setDragItem] = useState(null);
+  const [dragOverId, setDragOverId] = useState(null);   // 현재 하이라이트된 드롭 대상 폴더 id('' = Root)
+  const [moveErr, setMoveErr] = useState('');
   // 우클릭 컨텍스트 메뉴 — { x, y, node:'root'|path, targetId? } · 계단식 서브메뉴 인덱스
   const [ctx, setCtx] = useState(null);
   // 서브메뉴 상태는 단계별로 분리해야 한다 — 변수 하나로 관리하면 3단계에 진입하는 순간
@@ -415,6 +432,52 @@ export default function SvcMonitor() {
       } else window.alert(e.message);
     }
   };
+  /* ── 드래그&드롭 이동(폴더 reparent / 대상 → 폴더) ── */
+  // destId: 폴더 경로('' = Root). 드롭 가능 여부(순환·제자리·루트-대상 금지)를 판정한다.
+  const canDrop = (destId) => {
+    if (!dragItem || !canEdit) return false;
+    if (dragItem.type === 'folder') {
+      const src = dragItem.path;
+      if (destId === src || String(destId).startsWith(`${src}\\`)) return false;   // 자기 자신/하위 금지(순환)
+      const curParent = src.includes('\\') ? src.slice(0, src.lastIndexOf('\\')) : '';
+      if (destId === curParent) return false;                                       // 이미 그 부모 → no-op
+      return true;
+    }
+    // 대상: 폴더로만(루트 불가 — 대상은 경로가 필요), 현재 폴더면 no-op.
+    if (!destId) return false;
+    return destId !== dragItem.path;
+  };
+  const doMove = async (destId) => {
+    const item = dragItem;
+    setDragItem(null); setDragOverId(null); setMoveErr('');
+    if (!item || !canDrop(destId)) return;
+    try {
+      if (item.type === 'folder') {
+        await postJson('/svcmon/folders/move', { kind: mode, path: item.path, newParent: destId });
+      } else {
+        await putJson(`/svcmon/targets/${item.id}`, { path: destId });
+      }
+      if (destId) setExpanded((ex) => ({ ...ex, [destId]: true }));   // 드롭한 폴더를 펼쳐 결과를 보인다
+      refresh();
+    } catch (e) { setMoveErr(e.message || '이동 실패'); }
+  };
+  const dnd = {
+    canEdit, overId: dragOverId, active: !!dragItem, canDrop,
+    start: (e, item) => {
+      setDragItem(item); setMoveErr('');
+      try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', item.path || item.id || ''); } catch { /* noop */ }
+    },
+    end: () => { setDragItem(null); setDragOverId(null); },
+    over: (e, destId) => {
+      if (!canDrop(destId)) return;
+      e.preventDefault();
+      try { e.dataTransfer.dropEffect = 'move'; } catch { /* noop */ }
+      if (dragOverId !== destId) setDragOverId(destId);
+    },
+    leave: (destId) => setDragOverId((cur) => (cur === destId ? null : cur)),
+    drop: (e, destId) => { e.preventDefault(); e.stopPropagation(); doMove(destId); },
+  };
+
   const setSortMode = async (m) => {
     try { await putJson('/svcmon/sort', { kind: mode, mode: m }); refresh(); }
     catch (e) { window.alert(e.message); }
@@ -512,15 +575,21 @@ export default function SvcMonitor() {
           <div className="pc-tree-search">
             <input className="pc-input" placeholder="대상 검색" value={treeQ} onChange={(e) => setTreeQ(e.target.value)} />
           </div>
+          {moveErr && <div className="svc-warn" style={{ margin: '6px 8px', fontSize: 12 }}>이동 실패: {moveErr}</div>}
+          {canEdit && <div className="muted" style={{ fontSize: 11, padding: '2px 10px' }}>드래그&드롭으로 폴더·대상을 옮길 수 있습니다.</div>}
           <div className="pc-tree-body">
-            <div className={`pc-tree-row${sel === '' ? ' sel' : ''}`} onClick={() => setSel('')}
+            <div className={`pc-tree-row${sel === '' ? ' sel' : ''}`} style={dnd.overId === '' ? DROP_STYLE : undefined}
+              onClick={() => setSel('')}
+              onDragOver={(e) => dnd.over(e, '')}
+              onDragLeave={() => dnd.leave('')}
+              onDrop={(e) => dnd.drop(e, '')}
               onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setSel(''); setCtx({ x: e.clientX, y: e.clientY, node: 'root' }); closeSubs(); }}>
               <span className="pc-tog">−</span><span className="pc-dot pc-off" />
               <span className={`pc-tree-label${sel === '' ? ' on' : ''}`}>Root</span>
             </div>
             <TreeRows node={tree} depth={0} sel={sel} setSel={setSel} expanded={expanded} q={treeQ.trim().toLowerCase()}
               toggle={(id) => setExpanded((e) => ({ ...e, [id]: e[id] === false }))}
-              onCtx={(c) => { setCtx(c); closeSubs(); }} />
+              onCtx={(c) => { setCtx(c); closeSubs(); }} dnd={dnd} />
             {targets.length === 0 && <div className="pc-empty" style={{ padding: 24 }}>
               등록된 {mode === 'service' ? '서비스' : '대상'}이 없습니다.{canEdit ? ' ＋ Add 로 등록하세요.' : ' 관리자에게 요청하세요.'}</div>}
           </div>

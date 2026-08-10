@@ -327,6 +327,38 @@ export function renameFolder({ kind, path: p, newName }) {
   return { path: to, moved };
 }
 
+/**
+ * 폴더 이동(reparent) — 폴더 p 를 newParent 하위로 옮긴다(newParent='' 면 최상위).
+ * renameFolder 와 같은 '프리픽스 스왑'으로 하위 폴더·대상의 경로를 함께 바꾼다.
+ * 불변조건: 자기 자신/하위로 이동 금지(순환), 대상 위치 동명 폴더 충돌 거부, 이동 후 경로가
+ * 10단계를 넘으면 **전부 거부**(부분 이동 금지 — 트리가 어긋나면 배정·롤백 키가 깨진다).
+ */
+export function moveFolder({ kind, path: p, newParent = '' }) {
+  const dbx = load();
+  const k = KINDS.includes(kind) ? kind : 'infra';
+  const src = text(p, 620);
+  if (!src) throw new Error('이동할 폴더 경로가 없습니다.');
+  const parent = text(newParent, 620);
+  const leaf = src.split('\\').pop();
+  const to = parent ? `${parent}\\${leaf}` : leaf;
+  if (to === src) return { path: src, moved: 0 };                    // 제자리(현재 부모) — no-op
+  // 순환 방지: 자기 자신 또는 자기 하위로 옮길 수 없다.
+  if (parent === src || parent.startsWith(`${src}\\`)) throw new Error('폴더를 자기 자신의 하위로 옮길 수 없습니다.');
+  if (parent && !SAFE_PATH.test(parent)) throw new Error('대상 위치 경로 형식이 올바르지 않습니다.');
+  // 대상 위치에 같은 이름의 폴더가 이미 있으면 병합하지 않고 거부.
+  if (dbx.folders.some((f) => f.kind === k && f.path === to)) throw new Error('대상 위치에 같은 이름의 폴더가 이미 있습니다.');
+  const swap = (v) => (v === src ? to : (v.startsWith(`${src}\\`) ? to + v.slice(src.length) : v));
+  const affected = [];
+  for (const f of dbx.folders) if (f.kind === k && (f.path === src || f.path.startsWith(`${src}\\`))) affected.push(f);
+  for (const t of dbx.targets) if (t.kind === k && (t.path === src || t.path.startsWith(`${src}\\`))) affected.push(t);
+  if (!affected.length) throw new Error('폴더를 찾을 수 없습니다.');
+  // 이동 후 경로가 전부 유효(≤10단계)한지 먼저 검사 — 하나라도 넘치면 아무 것도 바꾸지 않는다.
+  for (const o of affected) { const np = swap(o.path); if (!SAFE_PATH.test(np)) throw new Error(`이동하면 경로가 최대 10단계를 넘습니다: ${np}`); }
+  for (const o of affected) o.path = swap(o.path);
+  save();
+  return { path: to, moved: affected.length };
+}
+
 /** 폴더 삭제 — 기본은 비어 있을 때만. force 면 하위 대상까지 함께 삭제한다. */
 export function deleteFolder({ kind, path: p, force = false }) {
   const dbx = load();
