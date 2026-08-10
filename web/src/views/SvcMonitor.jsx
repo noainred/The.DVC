@@ -442,6 +442,23 @@ export default function SvcMonitor() {
     try { await putJson('/svcmon/folders/rename', { kind: mode, path: p, newName: n }); refresh(); }
     catch (e) { window.alert(e.message); }
   };
+  // 대상(등록 노드) 이름 빠른 변경 — 폴더 rename 과 같은 프롬프트 방식. name 만 부분 업데이트(호스트·점검 보존).
+  const renameTargetAt = async (id) => {
+    const t = targets.find((x) => x.id === id);
+    if (!t) return;
+    const name = window.prompt('새 대상 이름', t.name);
+    const n = (name || '').trim();
+    if (!n || n === t.name) return;
+    try { await putJson(`/svcmon/targets/${id}`, { name: n }); refresh(); }
+    catch (e) { window.alert(e.message); }
+  };
+  // 대상 수정 모달(이름·호스트·위치) 열기 — 현재 값으로 프리필. (기존 '대상 수정' 모달을 활성화)
+  const editTargetAt = (id) => {
+    const t = targets.find((x) => x.id === id);
+    if (!t) return;
+    setForm({ kind: mode, path: t.path, name: t.name, host: t.host });
+    setErr(''); setModal({ kind: 'target', edit: t.id });
+  };
   const deleteFolderAt = async (p) => {
     try {
       await postJson('/svcmon/folders/delete', { kind: mode, path: p });
@@ -689,6 +706,8 @@ export default function SvcMonitor() {
             <button className="pc-btn" disabled={!canEdit} onClick={() => { setForm({ ...EMPTY_TARGET, path: sel && !sel.startsWith('target:') ? sel : EMPTY_TARGET.path }); setErr(''); setModal({ kind: 'target' }); }}>＋ Add</button>
             <button className="pc-btn" disabled={!canEdit || !selTarget} title={selTarget ? '' : '트리에서 대상을 선택'}
               onClick={() => openWizard(selTarget.id, selTarget.name, null)}>✎ 점검 추가</button>
+            <button className="pc-btn" disabled={!canEdit || !selTarget} title={selTarget ? '이름·호스트·위치 수정' : '트리에서 대상을 선택'}
+              onClick={() => editTargetAt(selTarget.id)}>🖉 수정</button>
             <button className="pc-btn" disabled={!canEdit || !selTarget} onClick={removeSel}>✕ Remove</button>
             <button className="pc-btn accent" disabled={!canEdit} onClick={doRefresh}>⟳ Refresh</button>
             <button className="pc-btn" onClick={doReset}>⟲ Reset</button>
@@ -831,6 +850,12 @@ export default function SvcMonitor() {
                 setCtx(null); closeSubs();
                 openWizard(ctx.targetId, t?.name || '', null);
               }}>🧪 이 대상에 점검 추가<span className="pc-ctx-ar">▸</span></button>
+            )}
+            {ctx.targetId && canEdit && (
+              <button className="pc-ctx-item" onClick={() => { const id = ctx.targetId; setCtx(null); closeSubs(); renameTargetAt(id); }}>✎ 이름 변경</button>
+            )}
+            {ctx.targetId && canEdit && (
+              <button className="pc-ctx-item" onClick={() => { const id = ctx.targetId; setCtx(null); closeSubs(); editTargetAt(id); }}>🖉 대상 수정(이름·호스트·위치)</button>
             )}
             {!ctx.targetId && <>
               {/* 대량 등록의 최대 실수 원인은 경로 오타다(오타 경로가 조용히 새 폴더가 된다).
