@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { usePolling, postJson, putJson, delJson, fetchJson, getCurrentUser, downloadFile } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
+import TemplateTab from './svcmon/TemplateTab.jsx';   // 템플릿 화면은 하나만 — 폴더 적용 모달에서도 이 화면을 불러 쓴다
+import EscClose from '../components/EscClose.jsx';
 
 /**
  * 성능점검 — Claude Design 핸드오프(design_handoff_perf_check) 기준 구현.
@@ -288,6 +290,8 @@ export default function SvcMonitor() {
   // 호버 계단식 메뉴를 단계형으로 바꿨다: 커서가 메뉴 사이를 지나다 닫히는 문제가 원천적으로 없다.
   const [wiz, setWiz] = useState(null);
   const [wizTpls, setWizTpls] = useState([]);   // 점검 추가 마법사의 '템플릿으로 추가'용 템플릿 목록
+  // 폴더에 템플릿 적용 모달 — 별도 창을 만들지 않고 '하나뿐인 템플릿 화면(TemplateTab)'을 불러 쓴다. { path } | null
+  const [tplApply, setTplApply] = useState(null);
 
   // 선택 노드나 모드가 바뀌면 표시 개수를 처음으로 되돌린다(이전 폴더에서 늘려 둔 값 승계 금지).
   useEffect(() => { setPageN(TARGET_PAGE); }, [sel, mode]);
@@ -883,8 +887,9 @@ export default function SvcMonitor() {
                 exportFolderCsv(ctx.node === 'root' ? '' : ctx.node);
               }}>⤓ 이 폴더 CSV 내보내기</button>
               <button className="pc-ctx-item" onClick={() => {
+                const p = ctx.node === 'root' ? '' : ctx.node;
                 setCtx(null); closeSubs();
-                goToConfig('tpl', { kind: mode, path: ctx.node === 'root' ? '' : ctx.node });
+                setTplApply({ path: p });   // 별도 창 없이 '하나뿐인 템플릿 화면'을 모달로 불러 이 폴더에 적용
               }}>🧩 이 폴더에 템플릿 적용…</button>
             </>}
             <div className="pc-ctx-sep" />
@@ -1134,6 +1139,25 @@ export default function SvcMonitor() {
                         onClick={wizSave}>{busy ? '저장 중…' : (wiz.editId ? '수정 저장' : '점검 추가')}</button>}
                 </>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 폴더에 템플릿 적용 — 별도 창을 만들지 않고 '하나뿐인 템플릿 화면(TemplateTab)'을 모달로 불러
+          이 폴더 경로를 프리필한다. 선택→하위포함→미리보기→적용→'적용 완료' 배너가 이 안에서 진행된다.
+          닫으면 트리를 새로고침(추가된 점검 반영). */}
+      {tplApply && (
+        <div className="pc-overlay" onClick={() => { setTplApply(null); refresh(); }}>
+          <EscClose onClose={() => { setTplApply(null); refresh(); }} />
+          <div className="pc-modal" style={{ width: 'min(1100px, 96vw)', maxHeight: '90vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
+            <div className="pc-modal-head">
+              <b>🧩 이 폴더에 템플릿 적용</b>
+              <span className="pc-wiz-target">{tplApply.path || 'Root(전체)'}</span>
+              <button className="pc-x" onClick={() => { setTplApply(null); refresh(); }}>✕</button>
+            </div>
+            <div style={{ padding: 12 }}>
+              <TemplateTab canEdit={canEdit} initialApply={{ kind: mode, path: tplApply.path, includeSub: true }} />
             </div>
           </div>
         </div>
