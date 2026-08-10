@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { fetchJson, postJson, putJson } from '../../api.js';
+import { fetchJson, postJson, putJson, downloadFile } from '../../api.js';
 import { ErrorBox } from '../../components/ui.jsx';
 import PreviewTable from './PreviewTable.jsx';
 import TemplateTab from './TemplateTab.jsx';
+import { IMPORT_ACCEPT, readImportFile } from './fileFormat.js';
 
 /**
  * 대량 자동등록 — 줄마다 {엣지·호스트네임·IP} 를 직접 입력해 대상을 한꺼번에 만든다.
@@ -56,11 +57,13 @@ function parseFree(text) {
 export default function BulkTab({ canEdit, prefill }) {
   const [kind, setKind] = useState(prefill?.kind === 'service' ? 'service' : 'infra');
   const [path, setPath] = useState(prefill?.path || '');
-  const [count, setCount] = useState(3);            // 줄 수 진실값
-  const [countText, setCountText] = useState('3');  // 입력 필드 원문 — 빈칸·중간 타이핑을 허용하려면 숫자와 분리해야 한다
-  const [inputMode, setInputMode] = useState('table');   // 'table' | 'free'
-  const [rows, setRows] = useState(() => [EMPTY_ROW(), EMPTY_ROW(), EMPTY_ROW()]);
+  const [count, setCount] = useState(1);            // 줄 수 진실값 — 소량(1개) 직접 입력이 주 사용
+  const [countText, setCountText] = useState('1');  // 입력 필드 원문 — 빈칸·중간 타이핑을 허용하려면 숫자와 분리해야 한다
+  const [inputMode, setInputMode] = useState('table');   // 'table' | 'free' | 'file'
+  const [rows, setRows] = useState(() => [EMPTY_ROW()]);
   const [freeText, setFreeText] = useState('');
+  const [fileImp, setFileImp] = useState({ format: 'csv', content: '', fileName: '' });   // 파일(CSV/JSON/XLSX) 가져오기
+  const fileRef = useRef(null);
   const [templateId, setTemplateId] = useState('');
   const [enabled, setEnabled] = useState(false);
 
@@ -154,24 +157,42 @@ export default function BulkTab({ canEdit, prefill }) {
   const call = async (mode) => {
     setBusy(mode); setErr(''); setDone('');
     try {
-      const targets = buildTargets();
-      if (!targets.length) { setErr('등록할 줄이 없습니다 — 호스트네임/IP 를 입력하세요.'); return; }
-      const body = {
-        format: 'json', mode: mode === 'apply' ? 'add' : 'preview',
-        content: JSON.stringify({ targets }),
-        templateId: templateId || undefined,
-        ...(mode === 'apply' ? { expectedCount: preview?.expectedCount } : {}),
-      };
+      let body; let targets = null;
+      if (inputMode === 'file') {
+        // 파일(CSV/JSON/XLSX)은 경로·호스트·점검을 모두 담는다 — 위 위치·아래 템플릿은 쓰지 않는다.
+        if (!fileImp.content.trim()) { setErr('가져올 파일을 선택하세요(CSV/JSON/XLSX).'); return; }
+        body = { format: fileImp.format, content: fileImp.content, mode: mode === 'apply' ? 'add' : 'preview',
+          ...(mode === 'apply' ? { expectedCount: preview?.expectedCount } : {}) };
+      } else {
+        targets = buildTargets();
+        if (!targets.length) { setErr('등록할 줄이 없습니다 — 호스트네임/IP 를 입력하세요.'); return; }
+        body = { format: 'json', mode: mode === 'apply' ? 'add' : 'preview',
+          content: JSON.stringify({ targets }), templateId: templateId || undefined,
+          ...(mode === 'apply' ? { expectedCount: preview?.expectedCount } : {}) };
+      }
       const r = await postJson('/svcmon/targets/import', body);
       if (r.error) { setErr(r.error); setPreview(r); return; }
       if (mode === 'preview') { setPreview(r); return; }
-      // 등록 성공 — 대상별 엣지 목록을 배정 동기화 후보로 노출.
-      const distinct = [...new Set(targets.map((t) => t.agent).filter(Boolean))];
-      setSyncedEdges(distinct.map((agent) => ({ agent, state: 'pending' })));
+      // 등록 성공 — 표/붙여넣기 모드는 대상별 엣지를 배정 동기화 후보로 노출(파일 모드는 대상별 엣지 미지원).
+      if (targets) {
+        const distinct = [...new Set(targets.map((t) => t.agent).filter(Boolean))];
+        setSyncedEdges(distinct.map((agent) => ({ agent, state: 'pending' })));
+      }
       setDone(`대상 ${r.added}개 · 점검 ${r.newTests}개를 등록했습니다(배치 ${r.batch}). 확인 후 '사용'으로 바꾸세요.`);
       setPreview(null); setValidation(null);
+      if (inputMode === 'file') setFileImp({ format: 'csv', content: '', fileName: '' });
       await loadBatches(); await loadFolders();
     } catch (e) { setErr(e.message); } finally { setBusy(''); }
+  };
+  const downloadSample = async () => { try { await downloadFile('/svcmon/targets/sample.csv'); } catch (e) { setErr(e.message); } };
+  // 파일 선택 → readImportFile 로 {format, content} 준비(제출은 미리보기/등록 버튼에서).
+  const onFile = async (e) => {
+    const f = e.target.files?.[0];
+    if (fileRef.current) fileRef.current.value = '';
+    if (!f) return;
+    setErr(''); setDone(''); setPreview(null);
+    try { const { format, content, fileName } = await readImportFile(f); setFileImp({ format, content, fileName }); }
+    catch (e2) { setErr(e2.message); }
   };
 
   // 등록한 대상별 엣지로 배정 동기화 — PUT /assign/:agent {byAgent:true} 가 그 엣지에 태그된
@@ -207,8 +228,9 @@ export default function BulkTab({ canEdit, prefill }) {
     && (preview.summary?.create || 0) > 0 && preview.capacity?.verdict !== 'reject';
 
   const reset = () => {
-    setCount(3); setCountText('3'); setInputMode('table'); setRows([EMPTY_ROW(), EMPTY_ROW(), EMPTY_ROW()]); setFreeText('');
-    setTemplateId(''); setEnabled(false); setOnDuplicate('skip');
+    setCount(1); setCountText('1'); setInputMode('table'); setRows([EMPTY_ROW()]); setFreeText('');
+    setFileImp({ format: 'csv', content: '', fileName: '' });
+    setTemplateId(''); setEnabled(false);
     setValidation(null); setPreview(null); setSyncedEdges([]); setErr(''); setDone('');
   };
 
@@ -240,7 +262,7 @@ export default function BulkTab({ canEdit, prefill }) {
       {templates.length === 0 && (
         <div className="svc-warn">
           점검 템플릿이 없습니다. 대상만 만들면 점검이 하나도 없는 대상이 생깁니다 —
-          먼저 '템플릿' 탭에서 템플릿을 고르거나 만드세요(기본 제공 6종이 있습니다).
+          아래 <b>③ 점검</b>의 '🛠 템플릿 관리'로 템플릿을 만들거나 고르세요(기본 제공 6종이 있습니다).
         </div>
       )}
 
@@ -291,10 +313,10 @@ export default function BulkTab({ canEdit, prefill }) {
           <label className="flex col" style={{ gap: 4, width: 110 }}>
             <span className="muted" style={{ fontSize: 11 }}>몇 개 등록?</span>
             <input className="input" type="number" min={1} max={MAX_COUNT} value={countText}
-              onChange={(e) => onCountChange(e.target.value)} onBlur={onCountBlur} disabled={inputMode === 'free'} />
+              onChange={(e) => onCountChange(e.target.value)} onBlur={onCountBlur} disabled={inputMode !== 'table'} />
           </label>
           <div className="flex gap" style={{ alignItems: 'center' }}>
-            {[['table', '표로 입력'], ['free', '자유형식 붙여넣기']].map(([v, t]) => (
+            {[['table', '표로 입력'], ['free', '자유형식 붙여넣기'], ['file', '파일(CSV/XLSX)']].map(([v, t]) => (
               <label key={v} className={`tab ${inputMode === v ? 'active' : ''}`} style={{ cursor: 'pointer' }}>
                 <input type="radio" name="inputMode" checked={inputMode === v} onChange={() => { setInputMode(v); setValidation(null); setPreview(null); }} style={{ marginRight: 6 }} />
                 {t}
@@ -357,6 +379,20 @@ export default function BulkTab({ canEdit, prefill }) {
           </label>
         )}
 
+        {/* 파일 모드 — CSV/JSON/XLSX. 파일이 경로·호스트·점검을 모두 담는다(①위치·③템플릿 미사용). */}
+        {inputMode === 'file' && (
+          <div style={{ marginTop: 12 }}>
+            <div className="flex gap wrap" style={{ alignItems: 'center' }}>
+              <input ref={fileRef} type="file" accept={IMPORT_ACCEPT} onChange={onFile} disabled={!canEdit} />
+              {fileImp.fileName && <span className="muted" style={{ fontSize: 12 }}>{fileImp.fileName} · <span className="badge gray">{fileImp.format.toUpperCase()}</span></span>}
+              <button type="button" className="tab" onClick={() => downloadSample()}>⤓ 샘플 CSV</button>
+            </div>
+            <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
+              파일이 경로·호스트·점검을 모두 담습니다 — 위 <b>① 위치</b>·아래 <b>③ 점검 템플릿</b>은 파일 모드에서 사용하지 않습니다. 미리보기로 확인 후 등록하세요.
+            </div>
+          </div>
+        )}
+
         {/* 엣지 datalist(표/자유형식 공용 자동완성) */}
         <datalist id="svc-edge-list">{edges.map((e) => <option key={e.agent} value={e.agent} />)}</datalist>
 
@@ -367,7 +403,7 @@ export default function BulkTab({ canEdit, prefill }) {
               <button type="button" className="tab" onClick={removeEmpty}>－ 빈 줄 삭제</button>
             </>
           )}
-          <button type="button" className="login-btn" onClick={validate}>✓ 검증</button>
+          {inputMode !== 'file' && <button type="button" className="login-btn" onClick={validate}>✓ 검증</button>}
           {validation && (
             <span className={`badge ${validation.edgeBad || validation.ipBad || validation.dupNames ? 'red' : validation.edgeMissing ? 'amber' : 'green'}`}>
               유효 {validation.okCount}/{validation.total}
