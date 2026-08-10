@@ -55,7 +55,8 @@ function parseFree(text) {
 export default function BulkTab({ canEdit, prefill }) {
   const [kind, setKind] = useState(prefill?.kind === 'service' ? 'service' : 'infra');
   const [path, setPath] = useState(prefill?.path || '');
-  const [count, setCount] = useState(3);
+  const [count, setCount] = useState(3);            // 줄 수 진실값
+  const [countText, setCountText] = useState('3');  // 입력 필드 원문 — 빈칸·중간 타이핑을 허용하려면 숫자와 분리해야 한다
   const [inputMode, setInputMode] = useState('table');   // 'table' | 'free'
   const [rows, setRows] = useState(() => [EMPTY_ROW(), EMPTY_ROW(), EMPTY_ROW()]);
   const [freeText, setFreeText] = useState('');
@@ -86,23 +87,30 @@ export default function BulkTab({ canEdit, prefill }) {
   const tpl = templates.find((t) => t.id === templateId) || null;
   const itemCount = tpl ? (tpl.items || []).length : 0;
 
-  // 표 모드: 개수 변경 시 줄 수를 맞춘다(기존 입력 보존, 늘리면 빈 줄 추가·줄이면 뒤에서 자름).
-  const setCountAndRows = (n) => {
-    const c = Math.max(1, Math.min(MAX_COUNT, Number(n) || 0));
-    setCount(c);
-    if (c <= TABLE_CAP) {
-      setRows((cur) => {
-        const next = cur.slice(0, c);
-        while (next.length < c) next.push(EMPTY_ROW());
-        return next;
-      });
-    }
-    setValidation(null); setPreview(null);
+  // 표 모드: 개수 c 에 맞게 줄 수를 조정(기존 입력 보존, 늘리면 빈 줄 추가·줄이면 뒤에서 자름).
+  const resizeRows = (c) => {
+    if (c > TABLE_CAP) return;
+    setRows((cur) => { const next = cur.slice(0, c); while (next.length < c) next.push(EMPTY_ROW()); return next; });
   };
+  // 타이핑 중(onChange): 원문은 그대로 두고, 유효한 숫자일 때만 줄 수에 반영한다. 빈칸/중간
+  // 상태(예: 지웠다가 다시 입력)에서 강제로 1 로 튀지 않게 해 자유 편집을 막지 않는다.
+  const onCountChange = (raw) => {
+    setCountText(raw);
+    const n = Math.floor(Number(raw));
+    if (raw.trim() === '' || !Number.isFinite(n) || n < 1) { setValidation(null); setPreview(null); return; }
+    const c = Math.min(MAX_COUNT, n);
+    setCount(c); resizeRows(c); setValidation(null); setPreview(null);
+  };
+  // 포커스 아웃(onBlur): 원문을 최종 정규화(빈칸/비수치/범위 밖 → 마지막 유효값 또는 1~MAX_COUNT).
+  const onCountBlur = () => {
+    const c = Math.max(1, Math.min(MAX_COUNT, Math.floor(Number(countText)) || count));
+    setCount(c); setCountText(String(c)); resizeRows(c);
+  };
+  const syncCount = (c) => { setCount(c); setCountText(String(c)); };  // 줄 추가/삭제로 개수가 바뀌면 필드도 맞춘다
   const setRow = (i, patch) => { setRows((cur) => cur.map((r, j) => (j === i ? { ...r, ...patch } : r))); setValidation(null); setPreview(null); };
-  const addRow = () => { setRows((cur) => [...cur, EMPTY_ROW()]); setCount((c) => c + 1); setValidation(null); setPreview(null); };
+  const addRow = () => { setRows((cur) => { syncCount(cur.length + 1); return [...cur, EMPTY_ROW()]; }); setValidation(null); setPreview(null); };
   const removeEmpty = () => {
-    setRows((cur) => { const kept = cur.filter((r) => r.edge || r.hostname || r.ip); const next = kept.length ? kept : [EMPTY_ROW()]; setCount(next.length); return next; });
+    setRows((cur) => { const kept = cur.filter((r) => r.edge || r.hostname || r.ip); const next = kept.length ? kept : [EMPTY_ROW()]; syncCount(next.length); return next; });
     setValidation(null); setPreview(null);
   };
 
@@ -197,7 +205,7 @@ export default function BulkTab({ canEdit, prefill }) {
     && (preview.summary?.create || 0) > 0 && preview.capacity?.verdict !== 'reject';
 
   const reset = () => {
-    setCount(3); setInputMode('table'); setRows([EMPTY_ROW(), EMPTY_ROW(), EMPTY_ROW()]); setFreeText('');
+    setCount(3); setCountText('3'); setInputMode('table'); setRows([EMPTY_ROW(), EMPTY_ROW(), EMPTY_ROW()]); setFreeText('');
     setTemplateId(''); setEnabled(false); setOnDuplicate('skip');
     setValidation(null); setPreview(null); setSyncedEdges([]); setErr(''); setDone('');
   };
@@ -280,8 +288,8 @@ export default function BulkTab({ canEdit, prefill }) {
         <div className="flex gap wrap" style={{ alignItems: 'flex-end', marginTop: 10 }}>
           <label className="flex col" style={{ gap: 4, width: 110 }}>
             <span className="muted" style={{ fontSize: 11 }}>몇 개 등록?</span>
-            <input className="input" type="number" min={1} max={MAX_COUNT} value={count}
-              onChange={(e) => setCountAndRows(e.target.value)} disabled={inputMode === 'free'} />
+            <input className="input" type="number" min={1} max={MAX_COUNT} value={countText}
+              onChange={(e) => onCountChange(e.target.value)} onBlur={onCountBlur} disabled={inputMode === 'free'} />
           </label>
           <div className="flex gap" style={{ alignItems: 'center' }}>
             {[['table', '표로 입력'], ['free', '자유형식 붙여넣기']].map(([v, t]) => (
