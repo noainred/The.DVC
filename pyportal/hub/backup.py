@@ -1,7 +1,7 @@
 """설정 백업 — 즉시 백업 · 정기 자동 백업 · 보관 수량 유지 · 복원.
 
-백업 대상은 설정 파일 4종(바로가기 · 데이터센터 · 사용자 · 포탈 설정)이며 한 개의 JSON
-스냅샷으로 묶는다. 점검 이력 DB(수십만 행)는 대상이 아니다 — 설정 복구가 목적이지
+백업 대상은 설정 파일 5종(바로가기 · 데이터센터 · 카테고리 · 사용자 · 포탈 설정)이며 한 개의
+JSON 스냅샷으로 묶는다. 점검 이력 DB(수십만 행)는 대상이 아니다 — 설정 복구가 목적이지
 시계열 아카이브가 아니다.
 
 ⚠ 백업 파일에는 **users.json(비밀번호 해시)** 이 들어간다. 곧 자격증명 사본이므로
@@ -20,8 +20,9 @@ from .jsonfile import read_json, write_json
 NAME_RE = re.compile(r"^backup-[0-9]{8}-[0-9]{6}(-[a-z]+)?\.json$")
 MAX_KEEP = 200
 
-# 백업에 담는 파일과 그 안에서 쓰는 키.
-MEMBERS = ("shortcuts", "datacenters", "users", "settings")
+# 백업에 담는 파일과 그 안에서 쓰는 키. app.py 가 넘기는 files dict 와 반드시 일치해야 한다 —
+# 여기 빠진 키(과거 categories 누락)는 스냅샷에 담기지도, 복원되지도 않아 시점 복원이 불완전해진다.
+MEMBERS = ("shortcuts", "datacenters", "categories", "users", "settings")
 
 
 class BackupService:

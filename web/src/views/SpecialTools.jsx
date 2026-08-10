@@ -1768,7 +1768,7 @@ function IpScanSettings({ onClose }) {
 /** 진행 중 스캔 진행률 막대(스캔한 IP 수 / 전체 + %). progress 없으면 렌더 안 함. */
 function ScanProgressBar({ progress }) {
   if (!progress || !progress.total) return null;
-  const pct = progress.pct ?? Math.round((progress.done / progress.total) * 100);
+  const pct = progress.pct ?? (progress.total ? Math.round((progress.done / progress.total) * 100) : 0); // total=0 시 NaN% 방지
   const elapsed = progress.startedAt ? Math.round((Date.now() - progress.startedAt) / 1000) : 0;
   return (
     <div style={{ marginTop: 10 }}>

@@ -69,6 +69,23 @@ class NotifyTest(unittest.TestCase):
         self.notifier.notify_transitions([row("a")])                  # 억제됨
         self.assertEqual(len(self.sent), 1)
 
+    def test_throttled_recovery_is_not_lost(self):
+        # 회귀 방지: 복구 전환이 minInterval 로 억제되면, 예전엔 status 만 UP 로 바뀌고 알림은
+        # 영영 안 나갔다(운영자는 DOWN 만 보고 복구 못 받음). 억제되면 status 를 진전시키지 말고,
+        # 억제 창이 지나면 (링크가 계속 UP 이어도) 복구가 재시도돼 결국 전송돼야 한다.
+        self.settings.values["minIntervalMinutes"] = 10       # quiet = 600초
+        self.notifier.notify_transitions([row("a")])          # 기준점(healthy)
+        self.notifier.notify_transitions([row("a", "unreachable")])  # DOWN 전송
+        self.assertEqual([p["event"] for _, p in self.sent], ["down"])
+        # 억제 창 안에서 복구 → 전송 안 됨. 하지만 상태를 UP 로 굳혀 버리면 안 된다.
+        self.notifier.notify_transitions([row("a")])
+        self.assertEqual(len(self.sent), 1, "억제 창 안이라 복구는 아직 전송 안 됨")
+        # 억제 창이 지났다고 가정(last_sent 를 과거로) — 링크는 계속 UP.
+        self.notifier._state["a"]["last_sent"] = 0            # noqa: SLF001
+        self.notifier.notify_transitions([row("a")])
+        self.assertEqual([p["event"] for _, p in self.sent], ["down", "recovered"],
+                         "억제 창이 지나면 복구가 재시도돼 전송돼야 한다(유실 금지).")
+
     def test_disabled_returns_events_without_sending(self):
         self.settings.values["enabled"] = False
         self.notifier.notify_transitions([row("a")])

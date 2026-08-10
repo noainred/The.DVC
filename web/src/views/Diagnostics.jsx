@@ -75,7 +75,7 @@ export default function Diagnostics() {
     if (autoscroll && consoleRef.current) consoleRef.current.scrollTop = consoleRef.current.scrollHeight;
   }, [logs, autoscroll]);
 
-  if (error) return <ErrorBox message={error} />;
+  if (error && !status) return <ErrorBox message={error} />; // 데이터 보유 중 일시 폴링 오류로 라이브 로그 콘솔까지 갈아치우지 않음(CLAUDE.md)
   if (!status) return <Loading />;
 
   const errs = status.collectionErrors || [];

@@ -71,7 +71,10 @@ class Notifier:
                 if entry["status"] == new_status:
                     continue
 
-                entry["status"] = new_status
+                # ⚠ 여기서 entry["status"] 를 바로 진전시키면 안 된다 — 아래 플래핑 억제(quiet)로
+                # 이 전환이 '전송 스킵'되면, 상태만 바뀌고 알림은 영영 나가지 않는다(복구 알림 유실).
+                # entry["status"] 는 '마지막으로 통지(또는 baseline 반영)한 상태'로 두고, 실제 전송
+                # 시점(또는 비활성 baseline 반영 시점)에만 진전시켜 스킵된 전환이 다음 틱에 재시도되게 한다.
                 events.append({
                     "id": shortcut_id,
                     "name": names.get(shortcut_id, shortcut_id),
@@ -82,10 +85,13 @@ class Notifier:
                     "message": row.get("message", ""),
                     "direction": "recovered" if new_status == UP else "down",
                     "entry": entry,
+                    "_target": new_status,
                 })
 
         if not cfg.get("enabled") or not cfg.get("webhookUrl"):
+            # 비활성/웹훅 미설정: 알리지 않지만 baseline 은 조용히 갱신한다(기존 동작 보존).
             for event in events:
+                event["entry"]["status"] = event.pop("_target")
                 event.pop("entry", None)
             return events
 
@@ -93,8 +99,10 @@ class Notifier:
         sent = []
         for event in events:
             entry = event.pop("entry")
+            target = event.pop("_target")
             if quiet and (time.time() - entry["last_sent"]) < quiet:
-                continue         # 플래핑 억제
+                continue         # 플래핑 억제 — status 를 진전시키지 않아 다음 틱에 재시도(전환 유실 방지)
+            entry["status"] = target       # 실제 전송(시도) 시점에만 통지 상태 갱신
             entry["last_sent"] = time.time()
             if self._deliver(cfg["webhookUrl"], event):
                 sent.append(event)

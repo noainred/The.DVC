@@ -141,7 +141,7 @@ export default function GpuGuestDiag() {
     fetchJson('/vcenters').then((d) => setVcs(Array.isArray(d) ? d : (d?.vcenters || []))).catch(() => {});
     const t = setInterval(load, 15_000); return () => clearInterval(t);
   }, []);
-  if (error) return <ErrorBox message={error} />;
+  if (error && !data) return <ErrorBox message={error} />; // 데이터 보유 중 일시 폴링 오류로 전체 화면을 갈아치우지 않음(CLAUDE.md)
   if (!data) return <Loading />;
 
   const rawBlocks = [];
@@ -194,7 +194,7 @@ export default function GpuGuestDiag() {
             </div>
             {(b.vcenters || []).length === 0
               ? <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>수집 대상 vCenter 없음(설정 확인).</div>
-              : b.vcenters.map((d, i) => <VcDiag key={i} d={d} failOnly={failOnly} />)}
+              : b.vcenters.map((d, i) => <VcDiag key={d.vcId || i} d={d} failOnly={failOnly} />)}
           </div>
         ))}
 
