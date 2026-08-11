@@ -59,7 +59,7 @@ export default function CsvTab({ canEdit }) {
         <b>내보내기</b>
         <div className="muted" style={{ fontSize: 12, margin: '4px 0 10px' }}>
           점검 1건이 1행입니다(한 대상에 점검이 여러 개면 앞 5열이 반복). CSV·XLSX 는 UTF-8/엑셀에서 바로 열립니다.
-          <br />등록·가져오기는 성능점검 트리의 <b>＋ 등록</b>(파일 모드에서 CSV/XLSX 가져오기)으로 통합됐습니다.
+          <br />등록·가져오기는 Monitoring 트리의 <b>＋ 등록</b>(파일 모드에서 CSV/XLSX 가져오기)으로 통합됐습니다.
         </div>
         <div className="flex gap wrap" style={{ alignItems: 'center' }}>
           <select className="select" value={exp.kind} onChange={(e) => setExp({ ...exp, kind: e.target.value })}>

@@ -7,7 +7,7 @@ import LogSettingsTab from './svcmon/LogSettingsTab.jsx';
 import AnalyzeTab from './svcmon/AnalyzeTab.jsx';
 
 /**
- * 성능점검 설정 — 특수 기능 > '성능점검 설정' 카드로 들어온다.
+ * Monitoring 설정 — 특수 기능 > 'Monitoring 설정' 카드로 들어온다.
  *
  * 서브탭을 처음부터 **별 파일**로 쪼갠 이유: 한 파일에 세 화면의 상태를 모으면 조기 return
  * 뒤에 useState 를 추가하기 쉬워지고, 그러면 렌더 간 훅 개수가 달라져 React #310 으로
@@ -20,7 +20,7 @@ import AnalyzeTab from './svcmon/AnalyzeTab.jsx';
 
 const TABS = [
   { k: 'tpl', label: '점검 템플릿', desc: '서버 유형별 점검 묶음을 정의하고 대상에 한꺼번에 적용합니다.' },
-  { k: 'csv', label: '내보내기', desc: '현재 대상·점검 목록을 CSV/XLSX/JSON 으로 내려받습니다. (등록·가져오기는 성능점검 트리의 “＋ 등록”으로 통합됐습니다.)' },
+  { k: 'csv', label: '내보내기', desc: '현재 대상·점검 목록을 CSV/XLSX/JSON 으로 내려받습니다. (등록·가져오기는 Monitoring 트리의 “＋ 등록”으로 통합됐습니다.)' },
   { k: 'assign', label: '엣지 배정', desc: '어느 엣지가 어느 대상을 점검할지 배정합니다. 엣지가 받아 적용하고 결과를 보고하면 활성이 됩니다.' },
   { k: 'log', label: '로그 설정', desc: '점검 결과 CSV 의 저장 경로·분할 단위·보관 기간·용량 상한을 정합니다.' },
   { k: 'analyze', label: '로그 분석', desc: '지난 기록을 시간/일/주/월/분기/반기/연간 단위로 집계해 봅니다(원천: CSV 로그).' },

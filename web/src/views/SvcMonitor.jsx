@@ -660,7 +660,7 @@ export default function SvcMonitor() {
         <span className="pc-secpath">{selPath} · {selected.length} {mode === 'service' ? 'service(s)' : 'host(s)'}</span>
         {/* 설정 바로가기 — 특수기능을 거치지 않고 이 화면에서 바로 성능점검 설정으로.
             현재 모드/선택 경로를 프리필로 넘겨 그 컨텍스트에서 열린다(대량 등록·템플릿 등). */}
-        <button type="button" className="pc-secbtn" title="성능점검 설정 열기"
+        <button type="button" className="pc-secbtn" title="Monitoring 설정 열기"
           onClick={() => goToConfig('tpl', { kind: mode, path: sel && sel !== '' ? sel.replace(/^target:/, '') : '' })}>
           ⚙ 설정
         </button>
@@ -1034,7 +1034,7 @@ export default function SvcMonitor() {
                     </label>
                     {(() => {
                       const t = wizTpls.find((x) => x.id === wiz.tplId);
-                      if (!t) return <span className="pc-fhint">템플릿을 고르면 포함된 점검이 여기 표시됩니다. (템플릿 정의·수정은 ‘성능점검 설정 › 점검 템플릿’)</span>;
+                      if (!t) return <span className="pc-fhint">템플릿을 고르면 포함된 점검이 여기 표시됩니다. (템플릿 정의·수정은 ‘Monitoring 설정 › 점검 템플릿’)</span>;
                       return <span className="pc-fhint">{(t.items || []).map((x) => `${x.type}${x.port ? `:${x.port}` : ''}`).join(', ') || '항목 없음'} · 점검 {(t.items || []).length}개가 이 대상에 추가됩니다.</span>;
                     })()}
                   </div>
