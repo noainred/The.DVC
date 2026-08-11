@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
-import { fetchJson, postJson, putJson, delJson, usePolling, getToken, toolAllowed } from '../api.js';
+import { fetchJson, postJson, putJson, delJson, usePolling, getToken, toolAllowed, can } from '../api.js';
 import { DataTable, Loading, ErrorBox, StateBadge, UsageCell, EntityDetail, Modal, ResultCount, SearchBox, VmLink } from '../components/ui.jsx';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Brush } from 'recharts';
 import { VmRemoteButton } from '../components/VmRemote.jsx';
@@ -12,6 +12,7 @@ import { IdracDetailModal } from './IdracAdmin.jsx';
 import VmProvision from './VmProvision.jsx';
 import AgentScans from './AgentScans.jsx';
 import SvcMonConfig from './SvcMonConfig.jsx';
+import NsxAdmin from './Nsx.jsx'; // 상단 메뉴에서 이동한 전체 NSX 관리 화면(게이트웨이·세그먼트·DFW·보안그룹)
 import CapacityAdvisor from './CapacityAdvisor.jsx';
 import LoginFails from './LoginFails.jsx';
 import NetIssues from './NetIssues.jsx';
@@ -139,6 +140,8 @@ export default function SpecialTools() {
   const lockReasonOf = (t) => {
     if (!t) return '알 수 없는 기능입니다.';
     if (t.adminOnly && !isAdmin) return '관리자(admin) 전용 기능입니다.';
+    // 기능별 권한(예: NSX=inv.nsx) — 상단 메뉴에서 이동한 도구의 접근 경계를 그대로 보존한다.
+    if (t.perm && !can(t.perm)) return '이 기능에 대한 접근 권한이 없습니다 — 관리자에게 요청하세요(설정 › 사용자 관리 › 권한).';
     if (!toolAllowed(t.k)) return '이 기능에 대한 접근 권한이 없습니다 — 관리자에게 요청하세요(설정 › 사용자 관리 › 특수 기능 도구별 접근).';
     return null;
   };
@@ -318,7 +321,7 @@ function ToolPanel({ tool, onBack, isAdmin }) {
       {tool === 'powermap' && <PowerMap scope={scope} />}
       {tool === 'esxi' && <Esxi scope={scope} />}
       {tool === 'vcversion' && <VcVersion />}
-      {tool === 'nsx' && <Nsx />}
+      {tool === 'nsx' && <NsxAdmin />}
       {tool === 'topo3d' && <Topology3D />}
       {tool === 'davinci-svc' && <ServiceCheck />}
       {tool === 'capacity-advisor' && (isAdmin ? <CapacityAdvisor /> : <div className="card"><span className="muted">관리자 전용 기능입니다.</span></div>)}
@@ -2068,37 +2071,6 @@ function VcVersion() {
         {data.vcenterVersions.map((v) => <span key={v.version} className="badge blue" style={{ alignSelf: 'center', fontSize: 13, padding: '4px 10px' }}>v{v.version} · {v.count}</span>)}
       </div>
       <DataTable columns={cols} rows={data.items} initialSort={{ key: 'version', dir: 'desc' }} />
-    </>
-  );
-}
-
-function Nsx() {
-  const { loading, data, error } = useTool('/tools/solutions', {});
-  if (loading) return <Loading />;
-  if (error) return <ErrorBox message={error} />;
-  const withNsx = data.items.filter((it) => it.nsx.length > 0);
-  const cols = [
-    { key: 'name', label: 'vCenter', render: (it) => <b>{it.name}</b> },
-    { key: 'nsxVersion', label: 'NSX 버전', sortValue: (it) => it.nsx[0]?.version || '', render: (it) => it.nsx.map((s) => <span key={s.key} className="badge green" style={{ marginRight: 4 }}>{s.label} {s.version}</span>) },
-    { key: 'status', label: 'vCenter 상태', render: (it) => <StateBadge state={it.status} /> },
-  ];
-  return (
-    <>
-      <div className="flex gap wrap" style={{ marginBottom: 14 }}>
-        <Card label="NSX 적용 vCenter" value={withNsx.length} meta={`전체 ${data.items.length}`} accent="var(--green)" />
-        {data.nsxVersions.map((n) => <span key={n.version} className="badge green" style={{ alignSelf: 'center', fontSize: 13, padding: '4px 10px' }}>NSX {n.version} · {n.count}</span>)}
-        {data.nsxVersions.length === 0 && <span className="muted" style={{ alignSelf: 'center' }}>NSX 정보 없음</span>}
-      </div>
-      {withNsx.length > 0
-        ? <DataTable columns={cols} rows={withNsx} initialSort={{ key: 'name', dir: 'asc' }} />
-        : <div className="card"><span className="muted">NSX가 설치된 vCenter가 없습니다.</span></div>}
-      <div className="card" style={{ marginTop: 14, borderColor: 'var(--border)' }}>
-        <b>NSX 정책 관리</b>
-        <div className="muted" style={{ fontSize: 13, marginTop: 6, lineHeight: 1.7 }}>
-          세그먼트/방화벽 등 NSX 정책 관리는 NSX Manager API 연동이 필요합니다. 현재는 vCenter 등록 정보 기준
-          <b> 배포 현황·버전</b>을 보여줍니다. NSX Manager 연동(주소·계정)을 추가하면 정책 조회/관리를 확장할 수 있습니다.
-        </div>
-      </div>
     </>
   );
 }

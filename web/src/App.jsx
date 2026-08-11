@@ -12,7 +12,6 @@ const Hosts = lazy(() => import('./views/Hosts.jsx'));
 const Vms = lazy(() => import('./views/Vms.jsx'));
 const Datastores = lazy(() => import('./views/Datastores.jsx'));
 const Networks = lazy(() => import('./views/Networks.jsx'));
-const Nsx = lazy(() => import('./views/Nsx.jsx'));
 const Alarms = lazy(() => import('./views/Alarms.jsx'));
 const Explore = lazy(() => import('./views/Explore.jsx'));
 const VCenters = lazy(() => import('./views/VCenters.jsx'));
@@ -28,13 +27,13 @@ const TABS = [
   { id: 'overview', label: 'Overview' }, // 랜딩(항상 노출)
   { id: 'summary', label: 'Summary', perm: 'dashboard' },
   { id: 'vcenters', label: 'Platform', perm: 'dashboard' },
-  { id: 'svcmon', label: '성능점검', perm: 'dashboard' },
+  { id: 'svcmon', label: 'Monitoring', perm: 'dashboard' },
   { id: 'explore', label: '탐색·랭킹', perm: 'dashboard' },
   { id: 'hosts', label: '호스트', perm: 'inv.hosts' },
   { id: 'vms', label: '가상머신', perm: 'inv.vms' },
   { id: 'datastores', label: '스토리지', perm: 'inv.datastores' },
   { id: 'networks', label: '네트워크', perm: 'inv.networks' },
-  { id: 'nsx', label: 'NSX', perm: 'inv.nsx' },
+  // NSX는 '특수 기능' 하위로 이동(specialToolsList의 'nsx' 카드 → 전체 NSX 관리 화면).
   { id: 'alarms', label: '알람', perm: 'inv.alarms' },
   // '특수 기능'은 항목이 많아 탭 자체는 항상 노출한다(권한 없는 도구는 화면 안에서 회색·클릭불가).
   { id: 'tools', label: '특수 기능' },
@@ -263,7 +262,7 @@ function Portal({ user, onLogout }) {
   // 상단 필터바(리전·vCenter·이름 검색)를 쓰지 않는 탭 — 화면이 자체 필터를 갖거나 필터 대상이
   // 아닌 경우. 성능점검(svcmon)은 트리 검색·상태 칩·Test name 검색을 자체로 갖고 상단 필터값을
   // 받지도 않아(<SvcMonitor /> 는 filters 미전달) 상단 검색이 눌러도 아무 일이 없는 죽은 UI 였다.
-  const noFilterTabs = ['overview', 'vcenters', 'summary', 'upgrade', 'tools', 'insights', 'settings', 'nsx', 'svcmon'];
+  const noFilterTabs = ['overview', 'vcenters', 'summary', 'upgrade', 'tools', 'insights', 'settings', 'svcmon'];
   const showFilters = !noFilterTabs.includes(tab);
   const showTextSearch = tab !== 'explore';
 
@@ -386,7 +385,6 @@ function Portal({ user, onLogout }) {
           {tab === 'vms' && <Vms filters={filters} />}
           {tab === 'datastores' && <Datastores filters={filters} />}
           {tab === 'networks' && <Networks filters={filters} />}
-          {tab === 'nsx' && <Nsx />}
           {tab === 'alarms' && <Alarms filters={filters} />}
           {tab === 'tools' && <SpecialTools />}
           {tab === 'insights' && <Insights onGotoTab={setTab} />}
