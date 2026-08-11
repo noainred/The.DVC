@@ -58,6 +58,74 @@ export function effectiveLoginPolicy() {
 }
 
 /**
+ * 사용자별 로그인 방식 재정의 — **설정 UI 에 노출하지 않는 서버 구성 파일 전용 경로**(요구사항).
+ * 운영자가 서버에서 직접 편집한다(settings-owners.txt 와 같은 패턴):
+ *   ① CONFIG_DIR/login-policy-users.txt : 한 줄에 하나 — `<사용자명>=<방식>`
+ *      (`#` 주석 허용, 구분자는 `=`/`:`/공백). 방식은 별칭 `otp`/`password`/`both`
+ *      또는 정식 값 `otp_only`/`password_only`/`otp_or_password`.
+ *   ② portal.env 의 LOGIN_POLICY_USERS : 콤마 구분(예: `LOGIN_POLICY_USERS=jdoe=password,svc=otp`)
+ * 같은 사용자가 양쪽에 있으면 **파일이 이긴다**. auth.js 가 '사용자별 재정의 > 전역 정책 >
+ * 레거시 기본' 순으로 적용한다(긴급 env OTP_ROLE_ENFORCE=false 는 그보다 우선).
+ */
+const USER_POLICY_FILE = path.join(config.configDir, 'login-policy-users.txt');
+const POLICY_ALIASES = {
+  otp: 'otp_only', otp_only: 'otp_only',
+  password: 'password_only', password_only: 'password_only', pw: 'password_only',
+  both: 'otp_or_password', otp_or_password: 'otp_or_password',
+  'otp+password': 'otp_or_password', 'password+otp': 'otp_or_password',
+};
+
+let _upolAt = 0, _upolCache = new Map(), _upolWarned = '';
+export function fileUserLoginPolicies() {
+  const now = Date.now();
+  if (_upolAt && now - _upolAt < 3000) return _upolCache;
+  const map = new Map();
+  const bad = [];
+  const addEntry = (src, rawUser, rawPol) => {
+    const user = String(rawUser || '').trim();
+    const pol = POLICY_ALIASES[String(rawPol || '').trim().toLowerCase()];
+    if (!/^[A-Za-z0-9._@-]{2,64}$/.test(user) || !pol) { bad.push(`${src}:${rawUser}=${rawPol}`); return; }
+    map.set(user, pol);
+  };
+  const parseLine = (src, s) => {
+    const m = s.match(/^([^=:\s]+)\s*[=:\s]\s*(\S+)$/);
+    if (m) addEntry(src, m[1], m[2]); else bad.push(`${src}:${s}`);
+  };
+  // env 를 먼저 넣고 파일이 나중에 덮어쓴다(파일 우선).
+  for (const ent of String(process.env.LOGIN_POLICY_USERS || '').split(',')) {
+    const s = ent.trim();
+    if (s) parseLine('env', s);
+  }
+  try {
+    if (fs.existsSync(USER_POLICY_FILE)) {
+      for (const line of fs.readFileSync(USER_POLICY_FILE, 'utf8').split(/\r?\n/)) {
+        const s = line.split('#')[0].trim();
+        if (s) parseLine('file', s);
+      }
+    }
+  } catch (e) {
+    // 읽기 실패(권한/IO)는 빈 재정의로 계속(전역 정책만 적용 — fail-closed). 형식 오류와 달리
+    // 완전 무증상이면 운영자가 진단할 단서가 없으므로 같은 1회 경고 경로에 태운다.
+    bad.push(`file:읽기 실패(${e?.code || e?.message || 'error'})`);
+  }
+  // 형식 오류는 무시하되 내용이 바뀔 때 1회만 경고(3초 캐시 주기마다 로그 도배 방지).
+  const sig = bad.join('|');
+  if (sig && sig !== _upolWarned) console.warn(`[auth] login-policy-users 형식 오류 무시: ${bad.join(' · ')}`);
+  _upolWarned = sig;
+  _upolCache = map;
+  _upolAt = now;
+  return map;
+}
+
+/** 이 사용자의 로그인 방식 재정의(정식 값) 또는 null(재정의 없음 → 전역 정책 적용). */
+export function userLoginPolicy(username) {
+  return fileUserLoginPolicies().get(String(username || '')) || null;
+}
+
+/** 테스트·핫리로드용 — 전역/사용자별 로그인 정책 캐시를 즉시 무효화. */
+export function invalidateLoginPolicyCache() { _polAt = 0; _upolAt = 0; }
+
+/**
  * 파일/환경변수로 지정한 설정 소유 계정 — 운영자가 서버에서 직접 편집하는 경로.
  *   ① CONFIG_DIR/settings-owners.txt : 한 줄에 계정 하나(빈 줄·`#` 주석 무시)
  *   ② portal.env 의 SETTINGS_OWNERS  : 콤마 구분(예: SETTINGS_OWNERS=noainred,junho)

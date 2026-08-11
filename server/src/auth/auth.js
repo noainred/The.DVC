@@ -7,7 +7,7 @@ import { authenticateAD } from './ad.js';
 import * as totp from './totp.js';
 import { checkOtpAllowed, recordOtpFailure, recordOtpSuccess } from '../security/loginRateLimit.js';
 import { rolePermissionSet } from './permissions.js';
-import { effectiveLoginPolicy } from '../security/securitySettings.js';
+import { effectiveLoginPolicy, userLoginPolicy } from '../security/securitySettings.js';
 
 // users.json lives in CONFIG_DIR (default app/server/config; set to e.g.
 // /etc/vmware-portal to keep it outside the app dir across upgrades).
@@ -199,6 +199,25 @@ export function isOtpOnlyRole(role) {
   return role === 'admin' || role === 'operator'; // 미설정(레거시): 고권한만
 }
 
+/** 이 사용자에게 적용되는 로그인 정책 — 사용자별 재정의(파일/ENV) > 전역 정책 > null(레거시). */
+function loginPolicyFor(username) {
+  return userLoginPolicy(username) ?? effectiveLoginPolicy();
+}
+
+/**
+ * 이 '사용자'가 OTP 전용 강제 대상인지 — isOtpOnlyRole 과 같은 규칙이되, 서버 구성 파일의
+ * 사용자별 재정의(`CONFIG_DIR/login-policy-users.txt` · env `LOGIN_POLICY_USERS`, UI 미노출)를
+ * 먼저 본다. 로그인 판정·토큰 해석(mustEnrollOtp)·OTP 등록 시 비번 폐기는 모두 이 함수를 쓴다
+ * (isOtpOnlyRole 은 특정 사용자가 없는 역할 단위 판단 전용 — 예: warnIfNoOtpAdmin).
+ */
+export function isOtpOnlyUser(username, role) {
+  if (!OTP_ROLE_ENFORCE) return false;
+  const p = loginPolicyFor(username);
+  if (p === 'otp_or_password' || p === 'password_only') return false;
+  if (p === 'otp_only') return true;
+  return role === 'admin' || role === 'operator'; // 미설정(레거시): 고권한만
+}
+
 /**
  * 기동 시 점검 — OTP 를 등록한 admin 이 하나도 없으면 웹으로 로그인할 수 있는 관리자가 없다.
  * 유예가 폐지됐으므로 콘솔 등록 도구를 안내한다(조용히 잠기는 상황 방지).
@@ -243,7 +262,7 @@ export function authenticateLocal(username, credential) {
     return null;
   }
   const role = user.role || 'viewer';
-  const enforced = isOtpOnlyRole(role); // OTP 전용 강제 대상이면 비밀번호 로그인 금지
+  const enforced = isOtpOnlyUser(user.username, role); // OTP 전용 강제 대상이면 비밀번호 로그인 금지
   // OTP 코드 검증 + 재사용(replay) 방지 — 성공하면 성공 카운터를 기록하고 true.
   const tryOtp = () => {
     if (!user.totpEnabled || !user.totpSecret) return false;
@@ -260,8 +279,8 @@ export function authenticateLocal(username, credential) {
     if (user.totpEnabled && user.totpSecret) { if (!tryOtp()) return null; }
     else if (!tryPassword()) return null;
   } else {
-    // 강제 아님 — 전역 로그인 정책에 따라 허용 자격을 정한다.
-    const p = effectiveLoginPolicy();
+    // 강제 아님 — 이 사용자에게 적용되는 정책(사용자별 재정의 > 전역)에 따라 허용 자격을 정한다.
+    const p = loginPolicyFor(user.username);
     if (p === 'password_only' && user.passwordHash) {
       // 비밀번호 전용 — 비번 보유 계정은 비번만(OTP 거부). 비번 없는 레거시(OTP 전용이었던)
       // 계정은 아래 분기의 OTP 폴백으로 로그인해 잠기지 않는다.
@@ -524,9 +543,9 @@ export function confirmTotpEnroll(username, code) {
   u.totpSecret = pending;
   delete u.totpPendingSecret;
   u.totpEnabled = true;
-  // OTP 전용 강제 대상만 비밀번호를 폐기(이후 OTP 로만 로그인). 혼용/비번전용 정책에서는
-  // 비밀번호를 유지해 둘 다 로그인할 수 있게 한다 — 정책이 결정하는 지점이다.
-  if (isOtpOnlyRole(u.role || 'viewer')) delete u.passwordHash;
+  // OTP 전용 강제 대상만 비밀번호를 폐기(이후 OTP 로만 로그인). 혼용/비번전용 정책·사용자별
+  // 재정의에서는 비밀번호를 유지해 둘 다 로그인할 수 있게 한다 — 정책이 결정하는 지점이다.
+  if (isOtpOnlyUser(u.username, u.role || 'viewer')) delete u.passwordHash;
   bumpTokenVersion(u); // 인증수단 변경 → 기존 토큰 폐기
   persistUsers();
   // 부트스트랩용 임의 비밀번호 파일(평문)은 관리자가 OTP 를 등록하는 순간 역할이 끝난다 → 자동 삭제
@@ -592,7 +611,7 @@ export function resolveTokenUser(token) {
     const role = u.role || 'viewer';
     return {
       username: payload.sub, role, name: payload.name, scope: normalizedScope(u),
-      mustEnrollOtp: isOtpOnlyRole(role) && !u.totpEnabled,
+      mustEnrollOtp: isOtpOnlyUser(u.username, role) && !u.totpEnabled,
     };
   }
   // AD 계정 등 로컬 레코드가 없는 토큰은 scope 를 적용하지 않는다(전체 열람).

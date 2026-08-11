@@ -1,6 +1,17 @@
 {
   "notes": [
     {
+      "version": "2.273.0",
+      "date": "2026-08-12",
+      "title": "사용자별 로그인 방식 재정의 — 서버 구성 파일로 특정 사용자만 OTP/비밀번호/혼용 지정 (UI 미노출)",
+      "notes": [
+        "서버 구성 파일 <CONFIG_DIR>/login-policy-users.txt 로 특정 사용자의 로그인 방식을 재정의할 수 있습니다. 한 줄에 하나씩 '사용자명=방식' — 방식은 otp(OTP 전용) / password(비밀번호 전용) / both(둘 중 하나 허용), 정식 값 otp_only / password_only / otp_or_password 도 됩니다. '#' 주석과 =, :, 공백 구분자를 지원합니다.",
+        "portal.env 의 LOGIN_POLICY_USERS 환경변수(콤마 구분, 예: LOGIN_POLICY_USERS=jdoe=password,svc=otp)로도 지정할 수 있으며, 같은 사용자가 양쪽에 있으면 파일이 우선합니다. 적용 순서: 사용자별 재정의 > 전역 정책(설정 › 세션 보안) > 기본(admin·operator OTP 전용). 긴급 해제 OTP_ROLE_ENFORCE=false 는 항상 최우선입니다.",
+        "요구사항대로 이 목록은 설정 UI 에 노출되지 않습니다(서버 파일 직접 편집 전용 — settings-owners.txt 와 같은 패턴). 재정의는 로그인 판정·OTP 등록 강제·등록 시 비밀번호 폐기 여부에 모두 일관 적용되며, 형식이 잘못된 줄은 무시하고 서버 로그에 1회 경고합니다.",
+        "안전장치: password 재정의여도 비밀번호가 없는(과거 OTP 전용) 계정은 OTP 로 로그인돼 잠기지 않습니다. 변경 반영은 파일 저장 후 최대 3초(캐시)입니다. 회귀 방지 단위테스트 8종(server/test/loginPolicyUsers.test.js)을 추가했습니다."
+      ]
+    },
+    {
       "version": "2.272.0",
       "date": "2026-08-11",
       "title": "로그인 방식 선택 — 설정 › 세션 보안에서 OTP 전용 / OTP+비밀번호(혼용) / 비밀번호 전용 지정",
