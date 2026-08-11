@@ -94,6 +94,15 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - AD 계정은 정책 대상이 아니다. `password_only`는 비번 보유 계정의 OTP 를 거부하되(전용),
       비번이 없는(과거 OTP 전용으로 폐기됨) 계정은 OTP 폴백을 허용해 **잠금 사고를 막는다** —
       이 폴백을 없애면 정책 전환만으로 계정이 벽돌이 된다. 회귀 방지 테스트: `server/test/loginPolicy.test.js`.
+    - **사용자별 재정의(v2.273, UI 미노출이 요구사항)**: `CONFIG_DIR/login-policy-users.txt`
+      (`user=policy` 한 줄씩, 별칭 `otp`/`password`/`both`) + env `LOGIN_POLICY_USERS`(파일 우선)로
+      특정 사용자의 정책을 재정의한다. 판정은 `auth.js isOtpOnlyUser(username, role)` —
+      재정의 > 전역 > 레거시 순이며 로그인·`mustEnrollOtp`(resolveTokenUser·WS 게이트웨이)·
+      enroll 시 비번 폐기가 전부 이 함수를 탄다. `isOtpOnlyRole(role)`은 사용자 특정이 없는
+      역할 단위 판단 전용으로 남겨둔 것(warnIfNoOtpAdmin)이니 새 사용자 단위 판정에 쓰지 말 것.
+      이 목록은 **설정 UI·미인증 응답 어디에도 싣지 않는다**(계정 열거 단서). 형식 오류 줄은
+      무시+1회 경고이며 파일 읽기 실패는 빈 재정의(전역 정책)로 폴백한다.
+      테스트: `server/test/loginPolicyUsers.test.js`.
 - **기능 권한은 서버가 진실의 원천**: `auth/permissions.js` 매트릭스 + `requirePerm(key)`로 라우트를
   보호한다. 프론트 `can()/toolAllowed()`는 UX 게이팅일 뿐이므로, 새 상태변경 라우트에 `requirePerm`을
   빠뜨리면 메뉴만 숨겨진 채 API가 열린다. WS SSH/RDP 게이트웨이도 `userHasPermission('remote.access')`로
