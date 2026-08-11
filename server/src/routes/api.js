@@ -2217,10 +2217,15 @@ api.get('/hosts', (req, res) => {
   // 이름만으로 매칭하면 여러 사이트의 동명 호스트(esxi-01 등)가 섞여, 범위/사이트 필터한 호스트 화면에
   // 타 사이트 VM 의 vCPU 가 합산돼 vcoreAllocated 가 부풀려진다(28개 vCenter 환경 실제 발생 가능).
   const hostKeys = new Set(hosts.map((h) => `${h.vcenterId}\t${h.name}`));
-  const vcoreAllocated = snap.vms.filter((v) => hostKeys.has(`${v.vcenterId}\t${v.host}`)).reduce((a, v) => a + (v.cpuCount || 0), 0);
+  // in-scope 호스트에 올라간 VM 만 한 번에 골라 vCPU·메모리 할당을 합산한다((vcenterId, host) 키 —
+  // 동명 호스트가 여러 사이트에 있어도 섞이지 않게).
+  const hostVms = snap.vms.filter((v) => hostKeys.has(`${v.vcenterId}\t${v.host}`));
+  const vcoreAllocated = hostVms.reduce((a, v) => a + (v.cpuCount || 0), 0);
+  const vmemAllocatedMB = hostVms.reduce((a, v) => a + (v.memMB || 0), 0);
   const verMap = {};
   for (const h of hosts) { const v = h.version || 'unknown'; verMap[v] = (verMap[v] || 0) + 1; }
   const physicalCores = sm((h) => h.cpuCores);
+  const physicalMemMB = sm((h) => h.memTotalMB);
   const summary = {
     total: hosts.length,
     connected: hosts.filter((h) => h.connectionState === 'CONNECTED').length,
@@ -2232,7 +2237,10 @@ api.get('/hosts', (req, res) => {
     logicalCores: sm((h) => h.cpuThreads || h.cpuCores),
     vcoreAllocated,
     vcorePerCore: physicalCores > 0 ? Math.round((vcoreAllocated / physicalCores) * 100) / 100 : 0,
-    memTotalGB: Math.round(sm((h) => h.memTotalMB) / 1024),
+    memTotalGB: Math.round(physicalMemMB / 1024),
+    // 메모리 가상화율(오버커밋) = 할당된 VM 메모리 합 / 물리 호스트 메모리 합. 1.0 초과면 오버커밋.
+    vmemAllocatedGB: Math.round(vmemAllocatedMB / 1024),
+    memOvercommit: physicalMemMB > 0 ? Math.round((vmemAllocatedMB / physicalMemMB) * 100) / 100 : 0,
     powerKw: Math.round(sm((h) => h.powerWatts) / 100) / 10,
     esxiVersions: Object.entries(verMap).map(([version, count]) => ({ version, count })).sort((a, b) => b.count - a.count),
   };

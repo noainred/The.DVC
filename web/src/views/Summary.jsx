@@ -26,30 +26,37 @@ function Big({ label, value, unit, sub, accent, onClick }) {
   );
 }
 
-/** vCenter(법인)별 가상화율(vCPU : 물리코어) 상세 모달. byVcenter 데이터로 클라이언트 계산. 제목 클릭 정렬. */
-function VcpuRatioModal({ rows, onClose }) {
+/**
+ * vCenter(법인)별 가상화율 상세 모달 — CPU(vCPU:물리코어)·메모리(할당RAM:물리RAM) 공용.
+ * byVcenter 데이터로 클라이언트 계산. 제목 클릭 정렬. kind='cpu'|'mem'.
+ */
+function RatioModal({ rows, kind = 'cpu', onClose }) {
+  const isMem = kind === 'mem';
   const r2 = (v) => Number((v || 0).toFixed(2));
   const [sort, setSort] = useState({ key: 'ratio', dir: 'desc' });
-  const base = (rows || []).map((vc) => ({ ...vc, ratio: vc.cpuCores > 0 ? r2(vc.vcpuAllocated / vc.cpuCores) : 0 }));
+  const ratioOf = isMem
+    ? (vc) => (vc.memTotalGB > 0 ? r2((vc.ramAllocatedGB || 0) / vc.memTotalGB) : 0)
+    : (vc) => (vc.cpuCores > 0 ? r2((vc.vcpuAllocated || 0) / vc.cpuCores) : 0);
+  const base = (rows || []).map((vc) => ({ ...vc, ratio: ratioOf(vc) }));
   const list = [...base].sort((a, b) => {
     const va = a[sort.key], vb = b[sort.key];
     const cmp = typeof va === 'string' ? String(va).localeCompare(String(vb)) : (va || 0) - (vb || 0);
     return sort.dir === 'asc' ? cmp : -cmp;
   });
-  const ratioColor = (r) => (r > 4 ? 'var(--amber)' : r > 0 ? 'var(--green)' : 'var(--text-dim)');
+  const HI = isMem ? 1.5 : 4;   // 높은 오버커밋 임계(메모리는 1.5:1, CPU는 4:1)
+  const ratioColor = (r) => (r > HI ? 'var(--amber)' : r > 0 ? 'var(--green)' : 'var(--text-dim)');
   const toggle = (key) => setSort((s) => ({ key, dir: s.key === key ? (s.dir === 'asc' ? 'desc' : 'asc') : (key === 'name' ? 'asc' : 'desc') }));
   const arrow = (key) => (sort.key === key ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : '');
-  const COLS = [
-    ['name', 'vCenter(법인)', 'left'], ['vms', 'VM', 'right'], ['vcpuAllocated', '할당 vCPU', 'right'],
-    ['cpuCores', '물리 코어', 'right'], ['ratio', '가상화율', 'right'],
-  ];
+  const COLS = isMem
+    ? [['name', 'vCenter(법인)', 'left'], ['vms', 'VM', 'right'], ['ramAllocatedGB', '할당 RAM(GB)', 'right'], ['memTotalGB', '물리 RAM(GB)', 'right'], ['ratio', '가상화율', 'right']]
+    : [['name', 'vCenter(법인)', 'left'], ['vms', 'VM', 'right'], ['vcpuAllocated', '할당 vCPU', 'right'], ['cpuCores', '물리 코어', 'right'], ['ratio', '가상화율', 'right']];
+  const title = isMem ? 'vCenter별 메모리 가상화율 (할당 RAM : 물리 RAM)' : 'vCenter별 가상화율 (vCPU : 물리코어)';
+  const desc = isMem
+    ? <>할당된 VM 메모리 ÷ 물리 RAM. <b style={{ color: 'var(--amber)' }}>1.5:1 초과</b>는 높은 오버커밋입니다(1.0 초과 = 물리 초과 할당).</>
+    : <>할당된 vCPU ÷ 물리 코어 수. <b style={{ color: 'var(--amber)' }}>4:1 초과</b>는 높은 오버커밋입니다.</>;
   return (
-    <Modal title="vCenter별 가상화율 (vCPU : 물리코어)" onClose={onClose} width={720} resizable minWidth={480} minHeight={360}>
-      <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>할당된 vCPU ÷ 물리 코어 수. <b style={{ color: 'var(--amber)' }}>4:1 초과</b>는 높은 오버커밋입니다. <span style={{ opacity: .8 }}>제목을 클릭하면 정렬됩니다.</span></div>
-      {/* 모달 본문(overflowY:auto)이 이미 세로 스크롤을 담당하므로, 표 자체는 별도 스크롤
-          컨테이너를 두지 않는다(overflow:visible). 안쪽 maxHeight 캡이 모달 높이를 초과해
-          스크롤바가 이중으로 생기던 문제 해결. thead의 position:sticky는 모달 본문 기준으로
-          그대로 고정된다. */}
+    <Modal title={title} onClose={onClose} width={720} resizable minWidth={480} minHeight={360}>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>{desc} <span style={{ opacity: .8 }}>제목을 클릭하면 정렬됩니다.</span></div>
       <div className="table-wrap" style={{ overflow: 'visible' }}>
         <table>
           <thead><tr>
@@ -62,12 +69,12 @@ function VcpuRatioModal({ rows, onClose }) {
             {list.length === 0 && <tr><td colSpan={6} className="center muted" style={{ padding: 20 }}>데이터가 없습니다.</td></tr>}
             {list.map((vc) => (
               <tr key={vc.id}>
-                <td><b>{vc.name}</b></td>
-                <td style={{ textAlign: 'right' }} className="tabular">{(vc.vms || 0).toLocaleString()}</td>
-                <td style={{ textAlign: 'right' }} className="tabular">{(vc.vcpuAllocated || 0).toLocaleString()}</td>
-                <td style={{ textAlign: 'right' }} className="tabular">{(vc.cpuCores || 0).toLocaleString()}</td>
-                <td style={{ textAlign: 'right', fontWeight: 700, color: ratioColor(vc.ratio) }} className="tabular">{vc.ratio} : 1</td>
-                <td><span className={`badge ${vc.ratio > 4 ? 'amber' : 'green'}`}>{vc.ratio > 4 ? '높음' : '정상'}</span></td>
+                {COLS.map(([key, , align]) => {
+                  if (key === 'name') return <td key={key}><b>{vc.name}</b></td>;
+                  if (key === 'ratio') return <td key={key} style={{ textAlign: 'right', fontWeight: 700, color: ratioColor(vc.ratio) }} className="tabular">{vc.ratio} : 1</td>;
+                  return <td key={key} style={{ textAlign: align }} className="tabular">{(vc[key] || 0).toLocaleString()}</td>;
+                })}
+                <td><span className={`badge ${vc.ratio > HI ? 'amber' : 'green'}`}>{vc.ratio > HI ? '높음' : '정상'}</span></td>
               </tr>
             ))}
           </tbody>
@@ -97,7 +104,8 @@ export default function Summary({ scope, onGotoTab }) {
   const [corp, setCorp] = useState(''); // '' = all 법인(vCenter)
   const [osPower, setOsPower] = useState('all'); // all | on | off
   const [osKind, setOsKind] = useState('all');   // all | vm | template
-  const [showRatio, setShowRatio] = useState(false); // vCenter별 가상화율 모달
+  const [showRatio, setShowRatio] = useState(false); // vCenter별 vCPU 가상화율 모달
+  const [showMemRatio, setShowMemRatio] = useState(false); // vCenter별 메모리 가상화율 모달
   const [osDrill, setOsDrill] = useState(null); // Guest OS 계열 클릭 → 대상 VM 모달(계열명)
   const params = {
     ...scope, ...(corp ? { vcenterId: corp } : {}),
@@ -180,6 +188,11 @@ export default function Summary({ scope, onGotoTab }) {
         <Big label="할당된 vCPU 합계" value={fmt(al.vcpuAllocated)} sub={`물리 코어 ${fmt(comp.cpuCores)}개`} accent="var(--accent)" />
         <Big label="vCPU : 물리코어 비율" value={`${al.vcpuPerCore} : 1`} sub={al.vcpuPerCore > 4 ? '높은 오버커밋' : '정상 범위'} accent={al.vcpuPerCore > 4 ? 'var(--amber)' : 'var(--green)'} onClick={() => setShowRatio(true)} />
         <Big label="할당된 RAM 합계" value={fmt(al.ramAllocatedGB)} unit="GB" sub={`물리 RAM의 ${al.ramOvercommitPct}%`} accent="var(--purple)" />
+        {(() => { const mr = Number(((al.ramOvercommitPct || 0) / 100).toFixed(2)); return (
+          <Big label="메모리 : 물리RAM 비율" value={`${mr} : 1`}
+            sub={mr > 1.5 ? '높은 오버커밋' : mr > 1 ? '물리 초과 할당' : '정상 범위'}
+            accent={mr > 1.5 ? 'var(--amber)' : 'var(--green)'} onClick={() => setShowMemRatio(true)} />
+        ); })()}
         <Big label="프로비저닝 스토리지" value={fmt(al.provisionedStorageTB)} unit="TB" sub="VM 디스크 할당 총량" accent="var(--accent-2)" />
         <Big label="호스트당 평균 VM" value={al.avgVmPerHost} sub={`전체 ${fmt(c.vms)} VM / ${fmt(c.hosts)} 호스트`} />
       </div>
@@ -314,7 +327,8 @@ export default function Summary({ scope, onGotoTab }) {
           </tbody>
         </table>
       </div>
-      {showRatio && <VcpuRatioModal rows={s.byVcenter} onClose={() => setShowRatio(false)} />}
+      {showRatio && <RatioModal kind="cpu" rows={s.byVcenter} onClose={() => setShowRatio(false)} />}
+      {showMemRatio && <RatioModal kind="mem" rows={s.byVcenter} onClose={() => setShowMemRatio(false)} />}
       {osDrill && (
         <GuestOsVmsModal
           label={`${osDrill}${corp ? ` — ${corpName}` : ''}`}
