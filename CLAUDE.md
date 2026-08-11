@@ -70,6 +70,10 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
   3. `confirmTotpEnroll`이 **passwordHash 삭제 + tokenVersion 인상**을 수행한다 — 이 삭제를
      제거하면 비밀번호 로그인 경로가 영구히 남아 정책이 무의미해진다. admin이면
      `initial-admin-password.txt`도 함께 지운다.
+     - ⚠️ v2.272: 이 passwordHash 삭제는 **OTP 전용 정책일 때만**(`isOtpOnlyRole(role)`) 수행한다 —
+       혼용/비번전용 정책에서는 등록 후에도 비번을 **의도적으로 유지**해 둘 다 로그인하게 한다.
+       조건(`isOtpOnlyRole`)을 없애 무조건 삭제로 되돌리면 혼용/비번전용 계정이 등록 즉시 비번을
+       잃는다. `initial-admin-password.txt`(임의 생성 평문)는 정책과 무관하게 항상 지운다.
   - `mustEnrollOtp`는 토큰이 아니라 `resolveTokenUser`에서 **매 요청 사용자 레코드 기준**으로
     계산한다(등록 즉시 반영·우회 불가).
   - ⚠️ **콘솔 등록 도구(`server/src/tools/otp-enroll.js` + 래퍼 `otp-enroll.sh`)를 없애지 말 것** —
@@ -77,6 +81,19 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     서비스 계정 강등을 처리하므로 문서에서 `node`를 직접 안내하지 말 것(root 실행 시 users.json이
     root 소유가 되어 포탈이 쓰기 불가). 기동 시 `warnIfNoOtpAdmin()`이 부재를 경고한다.
     긴급 해제는 `OTP_ROLE_ENFORCE=false`. viewer·데모는 강제 대상이 아니다.
+  - **전역 로그인 정책(v2.272)**: OTP 강제 여부는 이제 설정 소유자가 '설정 › 세션 보안'에서 고르는
+    전역 정책(`security-session.json` `loginPolicy`)이 결정한다 — `isOtpOnlyRole`이 이 값을 읽는다
+    (핫패스라 `securitySettings.effectiveLoginPolicy`가 3초 캐시·저장 시 즉시 무효화). 값:
+    `null`(미설정=**기본**·레거시: 고권한만 OTP 전용, 그 외 혼용) · `otp_only`(전 계정 OTP 전용) ·
+    `otp_or_password`(혼용: 비번 또는 OTP) · `password_only`(비번 전용, 비번 없는 레거시 계정만 OTP 폴백).
+    - **기본값은 엄격(레거시)을 유지**하고, 약화(`otp_or_password`/`password_only`)는 **owner + 본인
+      OTP 재인증 + 감사로그**를 거친 명시적 저장으로만 일어난다(PUT `/security/session` 경로 재사용).
+      사용자가 이 3-way 정책을 명시 요청해 도입했으므로, `password_only`가 admin/operator 의 비번
+      로그인을 허용하는 것은 **의도된 동작**이다 — 감사 재발을 이유로 정책 자체를 제거하지 말 것
+      (대신 기본값·owner 게이트·경고·`OTP_ROLE_ENFORCE=false` 긴급 해제 경로를 유지).
+    - AD 계정은 정책 대상이 아니다. `password_only`는 비번 보유 계정의 OTP 를 거부하되(전용),
+      비번이 없는(과거 OTP 전용으로 폐기됨) 계정은 OTP 폴백을 허용해 **잠금 사고를 막는다** —
+      이 폴백을 없애면 정책 전환만으로 계정이 벽돌이 된다. 회귀 방지 테스트: `server/test/loginPolicy.test.js`.
 - **기능 권한은 서버가 진실의 원천**: `auth/permissions.js` 매트릭스 + `requirePerm(key)`로 라우트를
   보호한다. 프론트 `can()/toolAllowed()`는 UX 게이팅일 뿐이므로, 새 상태변경 라우트에 `requirePerm`을
   빠뜨리면 메뉴만 숨겨진 채 API가 열린다. WS SSH/RDP 게이트웨이도 `userHasPermission('remote.access')`로

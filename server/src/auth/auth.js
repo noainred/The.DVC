@@ -7,6 +7,7 @@ import { authenticateAD } from './ad.js';
 import * as totp from './totp.js';
 import { checkOtpAllowed, recordOtpFailure, recordOtpSuccess } from '../security/loginRateLimit.js';
 import { rolePermissionSet } from './permissions.js';
+import { effectiveLoginPolicy } from '../security/securitySettings.js';
 
 // users.json lives in CONFIG_DIR (default app/server/config; set to e.g.
 // /etc/vmware-portal to keep it outside the app dir across upgrades).
@@ -181,9 +182,21 @@ const _dummySalt = crypto.randomBytes(16);
 // 헤드리스 등록·잠금 복구는 콘솔 도구(server/src/tools/otp-enroll.js, otp-enroll.sh)를 쓴다.
 const OTP_ROLE_ENFORCE = process.env.OTP_ROLE_ENFORCE !== 'false';
 
-/** 고권한 역할(비밀번호 로그인 금지 대상) 여부. */
+/**
+ * 이 역할이 'OTP 전용 강제'(비밀번호 로그인 금지·미등록이면 강제 등록) 대상인지.
+ * 설정 소유자가 지정한 전역 로그인 정책(`security-session.json` loginPolicy)이 이를 결정한다:
+ *   null(미설정·기본) : 레거시 — 고권한(admin/operator)만 OTP 전용, 그 외(viewer)는 혼용.
+ *   'otp_only'        : 전 로컬 계정 OTP 전용.
+ *   'otp_or_password' : 강제 없음(비번 또는 OTP 아무거나 로그인).
+ *   'password_only'   : 강제 없음(비번 로그인).
+ * 긴급 env `OTP_ROLE_ENFORCE=false` 는 정책과 무관하게 강제를 전면 해제한다(잠금 복구용).
+ */
 export function isOtpOnlyRole(role) {
-  return OTP_ROLE_ENFORCE && (role === 'admin' || role === 'operator');
+  if (!OTP_ROLE_ENFORCE) return false;
+  const p = effectiveLoginPolicy();
+  if (p === 'otp_or_password' || p === 'password_only') return false;
+  if (p === 'otp_only') return true; // 전 계정 강제
+  return role === 'admin' || role === 'operator'; // 미설정(레거시): 고권한만
 }
 
 /**
@@ -210,7 +223,8 @@ export function setupState() {
 }
 
 export function warnIfNoOtpAdmin() {
-  if (!OTP_ROLE_ENFORCE || !config.auth.enabled) return false;
+  // 정책상 admin 이 OTP 전용일 때만 의미 있는 경고(혼용/비번전용이면 admin 은 비번으로 들어올 수 있다).
+  if (!isOtpOnlyRole('admin') || !config.auth.enabled) return false;
   const list = loadUsers();
   if (list.some((u) => u.role === 'admin' && u.totpEnabled)) return false;
   console.warn('[auth] ⚠ OTP 가 등록된 admin 계정이 없습니다 — admin/operator 는 비밀번호로 로그인할 수 없습니다(OTP 전용).');
@@ -228,25 +242,43 @@ export function authenticateLocal(username, credential) {
     try { crypto.scryptSync(String(credential || ''), _dummySalt, 64); } catch { /* */ }
     return null;
   }
-  if (user.totpEnabled && user.totpSecret) {
-    const ctr = totp.verifyToken(credential, user.totpSecret, { minCounter: Number.isInteger(user.totpLastCounter) ? user.totpLastCounter : -1 });
-    if (ctr == null) return null;
-    // TOTP 재사용(replay) 방지 — 이미 쓴 카운터 이하 코드는 거부하고, 성공 카운터를 기록.
-    if (ctr !== user.totpLastCounter) { user.totpLastCounter = ctr; try { persistUsers(); } catch { /* */ } }
-  } else {
-    // OTP 미등록 계정 — 비밀번호로 인증한다. 고권한 계정이면 아래에서 mustEnrollOtp 가 붙어
-    // 이 세션은 OTP 등록 외 아무 것도 할 수 없다(등록을 마치면 비밀번호는 삭제된다).
-    if (!user.passwordHash || !verifyPassword(credential, user.passwordHash)) return null;
-  }
   const role = user.role || 'viewer';
+  const enforced = isOtpOnlyRole(role); // OTP 전용 강제 대상이면 비밀번호 로그인 금지
+  // OTP 코드 검증 + 재사용(replay) 방지 — 성공하면 성공 카운터를 기록하고 true.
+  const tryOtp = () => {
+    if (!user.totpEnabled || !user.totpSecret) return false;
+    const ctr = totp.verifyToken(credential, user.totpSecret, { minCounter: Number.isInteger(user.totpLastCounter) ? user.totpLastCounter : -1 });
+    if (ctr == null) return false;
+    if (ctr !== user.totpLastCounter) { user.totpLastCounter = ctr; try { persistUsers(); } catch { /* */ } }
+    return true;
+  };
+  const tryPassword = () => !!user.passwordHash && verifyPassword(credential, user.passwordHash);
+
+  if (enforced) {
+    // OTP 전용 강제 — 등록됐으면 OTP 로만, 미등록이면 비밀번호(부트스트랩)로 로그인하되 이 세션은
+    // mustEnrollOtp 가 붙어 등록 외 아무 것도 못 한다(등록을 마치면 비밀번호는 삭제된다).
+    if (user.totpEnabled && user.totpSecret) { if (!tryOtp()) return null; }
+    else if (!tryPassword()) return null;
+  } else {
+    // 강제 아님 — 전역 로그인 정책에 따라 허용 자격을 정한다.
+    const p = effectiveLoginPolicy();
+    if (p === 'password_only' && user.passwordHash) {
+      // 비밀번호 전용 — 비번 보유 계정은 비번만(OTP 거부). 비번 없는 레거시(OTP 전용이었던)
+      // 계정은 아래 분기의 OTP 폴백으로 로그인해 잠기지 않는다.
+      if (!tryPassword()) return null;
+    } else {
+      // 혼용(otp_or_password)·레거시 viewer·비번 없는 password_only 계정 — 비번 또는 OTP 아무거나.
+      if (!tryPassword() && !tryOtp()) return null;
+    }
+  }
   return {
     username: user.username,
     name: user.name || user.username,
     role,
     source: 'local',
     totpEnabled: !!user.totpEnabled,
-    // 고권한 계정이 OTP 미등록 상태 → 이번 세션은 'OTP 등록 전용'.
-    mustEnrollOtp: isOtpOnlyRole(role) && !user.totpEnabled,
+    // OTP 전용 강제 대상이 아직 OTP 미등록 → 이번 세션은 'OTP 등록 전용'.
+    mustEnrollOtp: enforced && !user.totpEnabled,
   };
 }
 
@@ -492,11 +524,13 @@ export function confirmTotpEnroll(username, code) {
   u.totpSecret = pending;
   delete u.totpPendingSecret;
   u.totpEnabled = true;
-  delete u.passwordHash; // OTP-only from now on — 등록 즉시 비밀번호 폐기
+  // OTP 전용 강제 대상만 비밀번호를 폐기(이후 OTP 로만 로그인). 혼용/비번전용 정책에서는
+  // 비밀번호를 유지해 둘 다 로그인할 수 있게 한다 — 정책이 결정하는 지점이다.
+  if (isOtpOnlyRole(u.role || 'viewer')) delete u.passwordHash;
   bumpTokenVersion(u); // 인증수단 변경 → 기존 토큰 폐기
   persistUsers();
-  // 부트스트랩용 임의 비밀번호 파일은 관리자가 OTP 를 등록하는 순간 역할이 끝난다 → 자동 삭제
-  // (문서상 '로그인 후 수동 삭제' 안내를 잊어 평문 파일이 남는 사고를 막는다).
+  // 부트스트랩용 임의 비밀번호 파일(평문)은 관리자가 OTP 를 등록하는 순간 역할이 끝난다 → 자동 삭제
+  // (정책과 무관하게 항상 지운다 — 임의 생성 초기 비번 평문이 서버에 남는 사고를 막는다).
   if ((u.role || '') === 'admin') {
     try { fs.rmSync(path.join(CONFIG_DIR, 'initial-admin-password.txt'), { force: true }); } catch { /* 없으면 무시 */ }
   }
