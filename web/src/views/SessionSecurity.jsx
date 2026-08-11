@@ -22,7 +22,7 @@ export default function SessionSecurity() {
     setBusy(true); setMsg(null);
     try {
       const owners = String(s.settingsOwners || '').split(/[\s,]+/).map((x) => x.trim()).filter(Boolean);
-      const r = await putJson('/admin/security/session', { idleLogoutEnabled: s.idleLogoutEnabled, idleLogoutMin: Number(s.idleLogoutMin) || 30, settingsOwners: owners, otp: otp.trim() });
+      const r = await putJson('/admin/security/session', { idleLogoutEnabled: s.idleLogoutEnabled, idleLogoutMin: Number(s.idleLogoutMin) || 30, settingsOwners: owners, loginPolicy: s.loginPolicy || undefined, otp: otp.trim() });
       if (r && r.ok === false) { setMsg(`오류: ${r.reason || '저장 실패'}`); }
       else { const ns = r.settings || s; setS({ ...ns, settingsOwners: (ns.settingsOwners || []).join(', ') }); setOtp(''); setMsg('저장되었습니다. 변경 내역은 감사 로그에 기록됩니다.'); }
     } catch (e) { setMsg(`오류: ${e.message}`); }
@@ -58,6 +58,36 @@ export default function SessionSecurity() {
               ＋ 자동 포함(중앙 배포 admin): <b>{(s.autoOwners || []).join(', ')}</b> — 중앙에서 이 엣지로 배포한 관리자 계정은 설정에 접근할 수 있습니다(여기서 지우지 않아도 됨. 중앙에서 제거하면 자동 해제).
             </div>
           )}
+        </div>
+
+        <div style={{ borderTop: '1px solid rgba(255,255,255,.08)', marginTop: 16, paddingTop: 14 }}>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}><b>로그인 방식</b> — 로컬 계정(비밀번호/OTP)에 적용됩니다. AD 계정은 AD 인증을 따르며 이 설정의 영향을 받지 않습니다.</div>
+          {(() => {
+            const OPTS = [
+              { v: 'otp_only', label: 'OTP 전용', desc: '모든 로컬 계정이 OTP 6자리로만 로그인합니다(미등록 계정은 최초 로그인 후 OTP 등록을 강제하고, 등록을 마치면 비밀번호는 삭제됩니다). 가장 안전합니다.' },
+              { v: 'otp_or_password', label: 'OTP + 비밀번호 (혼용)', desc: '계정마다 비밀번호 또는 OTP 중 하나로 로그인합니다. admin·operator 도 비밀번호 로그인이 허용됩니다(OTP 강제 없음).' },
+              { v: 'password_only', label: '비밀번호 전용', desc: '비밀번호로만 로그인합니다. admin·operator 를 포함한 전 계정에서 OTP 2차 방어가 사라집니다.', warn: true },
+            ];
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {OPTS.map((o) => (
+                  <label key={o.v} className="card" style={{ display: 'flex', gap: 10, alignItems: 'flex-start', padding: '10px 12px', cursor: 'pointer', borderColor: s.loginPolicy === o.v ? (o.warn ? 'var(--red,#ef4444)' : 'var(--accent,#3b82f6)') : undefined }}>
+                    <input type="radio" name="loginPolicy" style={{ marginTop: 3 }} checked={s.loginPolicy === o.v} onChange={() => setS({ ...s, loginPolicy: o.v })} />
+                    <span>
+                      <b>{o.label}</b>{o.warn && <span style={{ color: 'var(--red,#ef4444)', marginLeft: 6, fontSize: 12 }}>⚠ 권장하지 않음</span>}
+                      <div className="muted" style={{ fontSize: 12, marginTop: 3, lineHeight: 1.6 }}>{o.desc}</div>
+                    </span>
+                  </label>
+                ))}
+                {!s.loginPolicy && <div className="muted" style={{ fontSize: 11 }}>현재: <b>기본</b> — admin·operator 는 OTP 전용, 그 외(viewer)는 혼용입니다. 위에서 하나를 골라 저장하면 전 계정에 그 정책이 적용됩니다.</div>}
+                {(s.loginPolicy === 'password_only' || s.loginPolicy === 'otp_or_password') && (
+                  <div className="muted" style={{ fontSize: 11, color: 'var(--red,#ef4444)', lineHeight: 1.6 }}>
+                    ⚠ 이 선택은 admin·operator 의 <b>OTP 전용 강제</b>(감사 하드닝)를 해제합니다 — 고권한 계정도 비밀번호로 로그인하게 되어 계정 탈취 위험이 커집니다. 꼭 필요한 경우에만 사용하고, 가능하면 <b>OTP 전용</b>을 유지하세요.
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </div>
 
         <div style={{ borderTop: '1px solid rgba(255,255,255,.08)', marginTop: 16, paddingTop: 14 }}>

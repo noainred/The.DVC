@@ -15,6 +15,11 @@ const FILE = path.join(config.configDir, 'security-session.json');
 const OWNERS_FILE = path.join(config.configDir, 'settings-owners.txt');
 const DEFAULTS = { idleLogoutEnabled: true, idleLogoutMin: 30, settingsOwners: ['noainred'] };
 
+// 로그인 자격 정책(전역) — 설정 소유자가 '설정 › 세션 보안'에서 지정. null(미설정)=레거시
+// (고권한 OTP 전용, 그 외 혼용). auth.js 가 이 값으로 OTP 강제 여부를 판정한다.
+const LOGIN_POLICIES = ['otp_only', 'otp_or_password', 'password_only'];
+function normPolicy(v) { return LOGIN_POLICIES.includes(v) ? v : null; }
+
 function clamp(v, min, max, dflt) { const n = Number(v); return Number.isFinite(n) ? Math.max(min, Math.min(max, Math.round(n))) : dflt; }
 
 /** 사용자명 목록 정규화 — 공백 제거·중복 제거·형식 검증·최대 20개. 비면 null(호출부에서 거부). */
@@ -37,7 +42,19 @@ export function loadConfiguredSecurity() {
     idleLogoutEnabled: p.idleLogoutEnabled !== undefined ? !!p.idleLogoutEnabled : DEFAULTS.idleLogoutEnabled,
     idleLogoutMin: clamp(p.idleLogoutMin, 1, 1440, DEFAULTS.idleLogoutMin), // 1분~24시간
     settingsOwners: owners && owners.length ? owners : DEFAULTS.settingsOwners.slice(),
+    loginPolicy: normPolicy(p.loginPolicy), // null = 미설정(레거시)
   };
+}
+
+// 로그인 정책 캐시 — resolveTokenUser(매 /api 요청)가 읽는 핫패스라 파일 read 를 매 요청 하지
+// 않도록 3초 캐시한다. 저장(saveSessionSecurity)·외부 편집은 최대 3초 안에 반영된다(save 는 즉시 무효화).
+let _polAt = 0, _polCache = null;
+export function effectiveLoginPolicy() {
+  const now = Date.now();
+  if (_polAt && now - _polAt < 3000) return _polCache;
+  _polCache = loadConfiguredSecurity().loginPolicy;
+  _polAt = now;
+  return _polCache;
 }
 
 /**
@@ -99,13 +116,19 @@ export function saveSessionSecurity(partial = {}) {
     if (!n || !n.length) throw new Error('설정 소유 계정은 최소 1개 이상이어야 합니다.');
     owners = n;
   }
+  // 로그인 정책 — 잘못된 값은 무시하고 기존 값을 유지(무관한 저장이 정책을 바꾸지 않게, UI 는
+  // 사용자가 라디오를 실제로 바꿨을 때만 loginPolicy 를 전송한다).
+  let loginPolicy = cur.loginPolicy;
+  if (partial.loginPolicy !== undefined) { const n = normPolicy(partial.loginPolicy); if (n) loginPolicy = n; }
   const next = {
     idleLogoutEnabled: partial.idleLogoutEnabled !== undefined ? !!partial.idleLogoutEnabled : cur.idleLogoutEnabled,
     idleLogoutMin: partial.idleLogoutMin !== undefined ? clamp(partial.idleLogoutMin, 1, 1440, cur.idleLogoutMin) : cur.idleLogoutMin,
     settingsOwners: owners,
+    loginPolicy, // null = 미설정(레거시)
   };
   // 원자적 쓰기 — settingsOwners(설정 편집 권한)를 담는 권한 config. 부분기록으로 손상되면
   // 로드가 DEFAULTS로 조용히 리셋돼 소유자 경계가 무너진다.
   atomicWriteFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
+  _polAt = 0; // 로그인 정책 캐시 즉시 무효화
   return next;
 }
