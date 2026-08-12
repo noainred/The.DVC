@@ -487,6 +487,9 @@ export function EntityDetail({ type, item, onClose }) {
             <DRow label="클러스터">{item.cluster || '—'}</DRow>
             <DRow label="전원">{item.powerState === 'POWERED_ON' ? 'On' : (item.powerState ? 'Off' : '—')}</DRow>
             <DRow label="제조사 / 모델">{[item.vendor, item.model].filter(Boolean).join(' / ') || '—'}</DRow>
+            {/* 장비 서비스 태그(Dell Service Tag 등) — vCenter 가 수집한 하드웨어 식별자
+                (summary.hardware.otherIdentifyingInfo). 서버 교체·A/S·자산 대조용. 없으면 '—'. */}
+            <DRow label="서비스 태그">{item.serviceTag ? <b style={{ letterSpacing: 0.5 }}>{item.serviceTag}</b> : '—'}</DRow>
             <DRow label="ESXi 버전">{item.version ? `${item.version}${item.build ? ` (build ${item.build})` : ''}` : '—'}</DRow>
             <DRow label="CPU">{item.cpuCores}코어{item.cpuThreads ? ` / ${item.cpuThreads}스레드` : ''}{item.cpuTotalMhz ? ` · ${(item.cpuTotalMhz / 1000).toFixed(1)}GHz` : ''}</DRow>
             <DRow label="CPU 사용률"><UsageCell pct={item.cpuUsagePct} /></DRow>
