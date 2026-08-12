@@ -8,6 +8,7 @@ import { loadUiSettings, saveUiSettings } from '../ui-settings.js';
 import { hostPower } from '../idrac/service.js';
 import { fetchVmMetric, fetchHostMetric, PERF_INTERVALS, upgradeVmTools, getVmConsole } from '../vcenter/soapClient.js';
 import { buildVmExport, vmExportCsv } from '../vcenter/vmExport.js';
+import { browseDatastore } from '../vcenter/dsBrowse.js';
 import { listMutes, addMute, removeMute } from '../alarm-mutes.js';
 import { recordToolUse, getTopTools } from '../tool-usage.js';
 import { buildIpamRows, buildSubnetSheets, listSubnets, ipVcenterOwners } from '../ipam/ledger.js';
@@ -2362,6 +2363,18 @@ api.get('/datastores', (req, res) => {
   let ds = applyFilters(snap.datastores, req.query, snap, ['name', 'type'], req.user);
   if (req.query.type) ds = ds.filter((d) => String(d.type || '').toLowerCase().includes(String(req.query.type).toLowerCase()));
   res.json({ total: ds.length, items: ds });
+});
+
+// 데이터스토어 브라우즈 — 할당 VM + 실제 파일 목록(라이브, 60초 캐시). id 를 직접 받는
+// 단건 라우트이므로 vCenter 단위 scope 를 별도 검사하고 범위 밖은 404(존재 여부 미노출).
+api.get('/datastores/:id/browse', async (req, res) => {
+  const id = req.params.id;
+  const snap = store.get();
+  const ds = (snap.datastores || []).find((d) => d.id === id);
+  if (!ds || !inUserScope(req.user, snap, ds.vcenterId)) return res.status(404).json({ error: '데이터스토어를 찾을 수 없습니다.' });
+  try {
+    res.json(await browseDatastore(id));
+  } catch (e) { res.status(e.status === 404 ? 404 : 502).json({ error: e.message }); }
 });
 
 api.get('/networks', (req, res) => {

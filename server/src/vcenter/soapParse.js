@@ -150,3 +150,44 @@ export function parseGuestDisks(guestDiskXml) {
   }
   return out;
 }
+
+/* --------------- 데이터스토어 브라우즈(파일·할당 VM) 용 파서 (v2.276) --------------- */
+
+/** ArrayOfManagedObjectReference XML → 지정 타입의 ref 문자열 목록. */
+export function parseMorefs(xml, type) {
+  const out = [];
+  if (!xml) return out;
+  const re = new RegExp(`<ManagedObjectReference[^>]*type="${type}"[^>]*>([^<]+)<`, 'g');
+  let m;
+  while ((m = re.exec(xml))) out.push(m[1]);
+  return out;
+}
+
+/**
+ * SearchDatastoreSubFolders 태스크의 info.result
+ * (ArrayOfHostDatastoreBrowserSearchResults) XML → 평탄화된 파일 목록.
+ * 반환: [{ folder, name, type, sizeBytes, modified }] — type 은 xsi:type 에서
+ * 'FileInfo' 접미사를 뗀 값(VmDisk/VmConfig/VmLog/Folder/IsoImage/…, 미상은 'File').
+ */
+export function parseDsSearchResults(xml, cap = Infinity) {
+  const out = [];
+  if (!xml) return { files: out, truncated: false };
+  let truncated = false;
+  for (const blk of xml.split(/<HostDatastoreBrowserSearchResults(?=[ >])/).slice(1)) {
+    const folder = xmlUnescape(/<folderPath>([^<]*)<\/folderPath>/.exec(blk)?.[1] || '');
+    for (const fb of blk.split(/<file(?=[ >])/).slice(1)) {
+      if (out.length >= cap) { truncated = true; return { files: out, truncated }; }
+      const xsiType = /^[^>]*xsi:type="([^"]+)"/.exec(fb)?.[1] || 'FileInfo';
+      const name = xmlUnescape(/<path>([^<]*)<\/path>/.exec(fb)?.[1] || '');
+      if (!name) continue;
+      out.push({
+        folder,
+        name,
+        type: xsiType.replace(/FileInfo$/, '') || 'File',
+        sizeBytes: Number(/<fileSize>(\d+)<\/fileSize>/.exec(fb)?.[1] || 0),
+        modified: /<modification>([^<]+)<\/modification>/.exec(fb)?.[1] || '',
+      });
+    }
+  }
+  return { files: out, truncated };
+}
