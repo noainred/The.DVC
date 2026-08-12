@@ -9,11 +9,13 @@
  * 검증하지 않으므로, SSRF 가드·유형별 필수값을 통과하지 않은 host 가 그대로 실행 인덱스에
  * 올라간다. 반드시 공개 함수(`bulkAddTargets`)를 통해 넣는다.
  *
- * ## 교체 순서와 반환값 검사
- * `deleteTargetsByBatch(이전 태그)` → `bulkAddTargets(새 목록, {batch: 새 태그})` 순서다.
- * **두 반환값을 모두 검사해야 한다**:
- *  - 삭제를 건너뛰면 이름이 겹쳐 dedup 으로 전부 `skip` 되고 **정의가 갱신되지 않는다**
- *    (갱신이 아니라 skip 이다 — 실측 확인).
+ * ## 교체 순서와 반환값 검사(멱등 교체 — v2.279)
+ * `central:` 접두 배치를 **전부 삭제** → `bulkAddTargets(새 목록, {batch: 새 태그})` 순서다.
+ * 직전 태그 하나만 지우던 과거 방식은 엣지 재시작(appliedSig 인메모리 유실 → 전문 재수신)이나
+ * 세대 2개 이상 누락 시, 현/구 세대 대상이 저장에 남아 dedup 으로 전부 `skip` 되고(added=0)
+ * 중앙이 수 불일치로 `active` 전이에 실패해 배정이 `mismatch` 로 영구 고착했다. central 관리
+ * 대상을 통째로 교체하면 저장분이 수신 목록과 정확히 일치(added=전체 수)해 멱등해진다.
+ * **반환값을 모두 검사한다**:
  *  - `bulkAddTargets` 는 상한·검증 실패에 예외를 던지지 않고 `{committed:false, added:0}` 을
  *    돌려준다. 확인하지 않으면 '적용했다'고 중앙에 회신하면서 실제로는 아무것도 없다.
  * 그래서 결과를 중앙에 ack 로 회신하고, 중앙은 수가 일치할 때만 `active` 로 전이한다.
@@ -21,7 +23,11 @@
 
 import { config } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
-import { bulkAddTargets, deleteTargetsByBatch, LIMITS } from '../svcmon/store.js';
+import { bulkAddTargets, deleteTargetsByBatch, batchCounts, LIMITS } from '../svcmon/store.js';
+
+// 중앙 배포 배치 태그 접두사 — central/svcmonAssign.js TAG_PREFIX 와 같은 프로토콜 계약이다.
+// (엣지가 central 모듈을 import 하지 않도록 상수만 복제. 값이 바뀌면 양쪽을 함께 고칠 것.)
+const CENTRAL_BATCH_PREFIX = 'central:';
 
 const envNum = (k, d) => { const n = Number(process.env[k]); return Number.isFinite(n) && n > 0 ? Math.round(n) : d; };
 
@@ -85,14 +91,20 @@ export async function pullSvcmonConfigNow() {
       return { ok: false, reason };
     }
 
-    // ① 이전 배포분 삭제 — 건너뛰면 이름 중복으로 전부 skip 되어 정의가 갱신되지 않는다.
+    // ① 이전 배포분 삭제 — 멱등 교체(v2.279 회귀 수정). 과거에는 d.prevTag(직전 세대) 하나만
+    //    지웠는데, appliedSig 가 인메모리라 **엣지 재시작 시 전문을 다시 받고**(unchanged 아님)
+    //    현 세대(d.tag) 대상이 이미 저장돼 있어 bulkAddTargets 가 전부 dedup skip → added=0 →
+    //    중앙이 수 불일치로 'active' 전이 실패, 배정이 'mismatch' 로 영구 고착했다(세대 2개 이상
+    //    누락 시엔 오래된 세대가 계속 남았다). 저장된 **central: 접두 배치를 전부 지우고** 새로
+    //    등록해, 저장분이 수신 목록과 정확히 일치(added=전체 수)하도록 멱등하게 만든다.
+    //    사용자가 직접 만든 배치(import/generate — 다른 접두)는 건드리지 않는다.
     let removed = 0;
     const errors = [];
-    if (d.prevTag) {
-      const del = deleteTargetsByBatch(d.prevTag);
-      removed = del.removed || 0;
-      // '없음'은 정상이다(첫 배포·이미 정리됨). 그 외 오류는 그대로 보고한다.
-      if (del.error && !/대상이 없습니다/.test(del.error)) errors.push(`이전 배포분 삭제: ${del.error}`);
+    const centralTags = [...batchCounts().keys()].filter((b) => b.startsWith(CENTRAL_BATCH_PREFIX));
+    for (const tag of centralTags) {
+      const del = deleteTargetsByBatch(tag);
+      removed += del.removed || 0;
+      if (del.error && !/없습니다/.test(del.error)) errors.push(`이전 배포분(${tag}) 삭제: ${del.error}`);
       if (del.saved === false) errors.push('이전 배포분 삭제 후 저장 실패(디스크·권한 확인)');
     }
 

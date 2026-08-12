@@ -87,7 +87,12 @@ export function buildNetmap(snap, { vcenterId = '', base = '', days = 30, bucket
     return Number.isFinite(p) ? p : Date.now();
   })();
   const bases = netmapBases(snap, vcenterId, allowed);
-  const b = base && /^\d+\.\d+\.\d+$/.test(base) ? base : bases[0] || '';
+  // ⚠ scope 유출 방지(v2.279): 범위 제한 계정(allowed!=null)은 임의 /24 base 로 범위 밖 스캔이력을
+  // 캐낼 수 없다 — 요청 base 가 스코프된 bases 목록에 있을 때만 허용하고, 아니면 스코프 첫 base 로
+  // 강등한다. 무제한 계정은 임의 base 허용(전체 열람). (bases 는 이미 사용자 scope 로 걸러진 목록.)
+  const scoped = allowed != null;
+  const requested = base && /^\d+\.\d+\.\d+$/.test(base) ? base : '';
+  const b = (requested && (!scoped || bases.includes(requested))) ? requested : (bases[0] || '');
   const D = Math.max(1, Math.min(365, Number(days) || 30));
   const N = Math.max(6, Math.min(96, Number(buckets) || 24));
   const span = D * DAY;
@@ -108,7 +113,10 @@ export function buildNetmap(snap, { vcenterId = '', base = '', days = 30, bucket
   for (let i = 1; i <= 254; i++) {
     const ip = `${b}.${i}`;
     const row = byIp.get(ip);
-    const hist = getIpHistory(ip);
+    // ⚠ scope 유출 방지(v2.279): 범위 제한 계정은 스코프 대장(byIp)에 있는 IP 의 스캔이력만 본다.
+    // vCenter 귀속이 없는 스캔 발견물(byIp 에 없음)은 무스코프 getIpHistory 로 새면 안 되므로
+    // (CLAUDE.md: 미귀속 스캔 데이터는 범위 계정에 노출 금지) 그런 IP 는 이력을 붙이지 않는다.
+    const hist = (!scoped || byIp.has(ip)) ? getIpHistory(ip) : null;
     // events는 append-only(시간 오름차순)이므로 IP당 1회만 정렬해 stateAt 재사용(버킷 루프 내 정렬 제거).
     const evs = hist?.events ? hist.events.slice().sort((a, c) => (a.ts || 0) - (c.ts || 0)) : [];
     const histS = hist ? { firstSeen: hist.firstSeen, lastSeen: hist.lastSeen, status: hist.status, events: evs } : null;
