@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react';
-import { usePolling, getToken, setToken, setUnauthorizedHandler, fetchAuthConfig, fetchMe, broadcastLogout, LOGOUT_BROADCAST_KEY, setCurrentUser } from './api.js';
+import { usePolling, getToken, setToken, setUnauthorizedHandler, fetchAuthConfig, fetchMe, broadcastLogout, LOGOUT_BROADCAST_KEY, setCurrentUser, toolAllowed } from './api.js';
 import { SearchBox } from './components/ui.jsx';
 import { RemoteConsoleWindow } from './remote/RemoteConsoleWindow.jsx';
 import Login from './views/Login.jsx';
@@ -13,7 +13,9 @@ const Vms = lazy(() => import('./views/Vms.jsx'));
 const Datastores = lazy(() => import('./views/Datastores.jsx'));
 const Networks = lazy(() => import('./views/Networks.jsx'));
 const Alarms = lazy(() => import('./views/Alarms.jsx'));
-const Explore = lazy(() => import('./views/Explore.jsx'));
+// IP관리(구 '센터별 IP 관리대장', v2.274 특수 기능에서 승격) — 화면 코드는 SpecialTools.jsx 안에
+// 있어(Ipam 본체가 그 파일의 헬퍼들과 얽힘) 단독 래퍼(IpamStandalone)만 named import 한다.
+const Ipam = lazy(() => import('./views/SpecialTools.jsx').then((m) => ({ default: m.IpamStandalone })));
 const VCenters = lazy(() => import('./views/VCenters.jsx'));
 const Summary = lazy(() => import('./views/Summary.jsx'));
 const Upgrade = lazy(() => import('./views/Upgrade.jsx'));
@@ -28,12 +30,14 @@ const TABS = [
   { id: 'summary', label: 'Summary', perm: 'dashboard' },
   { id: 'vcenters', label: 'Platform', perm: 'dashboard' },
   { id: 'svcmon', label: 'Monitoring', perm: 'dashboard' },
-  { id: 'explore', label: '탐색·랭킹', perm: 'dashboard' },
-  { id: 'hosts', label: '호스트', perm: 'inv.hosts' },
+  // 탐색·랭킹은 '특수 기능' 하위로 이동(v2.274, specialToolsList 'explore' 카드).
+  { id: 'hosts', label: 'VM호스트', perm: 'inv.hosts' },
   { id: 'vms', label: '가상머신', perm: 'inv.vms' },
   { id: 'datastores', label: '스토리지', perm: 'inv.datastores' },
   { id: 'networks', label: '네트워크', perm: 'inv.networks' },
   // NSX는 '특수 기능' 하위로 이동(specialToolsList의 'nsx' 카드 → 전체 NSX 관리 화면).
+  // IP관리는 반대로 특수 기능 카드에서 승격(v2.274) — toolKey 로 도구별 접근(toolsDenied 'ipam') 경계를 그대로 유지.
+  { id: 'ipam', label: 'IP관리', perm: 'tools', toolKey: 'ipam' },
   { id: 'alarms', label: '알람', perm: 'inv.alarms' },
   // '특수 기능'은 항목이 많아 탭 자체는 항상 노출한다(권한 없는 도구는 화면 안에서 회색·클릭불가).
   { id: 'tools', label: '특수 기능' },
@@ -154,7 +158,8 @@ function Portal({ user, onLogout }) {
   const isOwner = isSettingsOwner(user);
   const isAllowed = (id) => {
     const t = TABS.find((x) => x.id === id);
-    return Boolean(t && (!t.adminOnly || user.role === 'admin') && (!t.ownerOnly || isOwner) && hasPerm(user, t.perm));
+    return Boolean(t && (!t.adminOnly || user.role === 'admin') && (!t.ownerOnly || isOwner) && hasPerm(user, t.perm)
+      && (!t.toolKey || toolAllowed(t.toolKey))); // 특수 기능에서 승격한 탭은 도구별 접근(toolsDenied)도 유지
   };
   const tabFromHash = () => {
     // 첫 세그먼트만 탭으로 사용(예: #/tools/esxitemp → tools). 나머지는 각 뷰가 처리.
@@ -230,6 +235,7 @@ function Portal({ user, onLogout }) {
     if (t.ownerOnly && !isOwner) return false; // '설정'은 소유 계정만(설정 › 세션 보안에서 지정)
     if (t.feature && !health?.features?.[t.feature]) return false;
     if (!hasPerm(user, t.perm)) return false;   // 기능 권한 매트릭스로 탭 노출 제어
+    if (t.toolKey && !toolAllowed(t.toolKey)) return false; // 승격 탭의 도구별 접근(toolsDenied) 보존
     return true;
   });
 
@@ -249,7 +255,7 @@ function Portal({ user, onLogout }) {
     return f;
   }, [vcenterId, region, q, qNotes, qIpms, tab, menuFilter]);
 
-  // Scope (region/vCenter) without the free-text query, used by Explore.
+  // Scope (region/vCenter) without the free-text query, used by Summary.
   const scope = useMemo(() => {
     const s = {};
     if (vcenterId) s.vcenterId = vcenterId;
@@ -262,9 +268,9 @@ function Portal({ user, onLogout }) {
   // 상단 필터바(리전·vCenter·이름 검색)를 쓰지 않는 탭 — 화면이 자체 필터를 갖거나 필터 대상이
   // 아닌 경우. 성능점검(svcmon)은 트리 검색·상태 칩·Test name 검색을 자체로 갖고 상단 필터값을
   // 받지도 않아(<SvcMonitor /> 는 filters 미전달) 상단 검색이 눌러도 아무 일이 없는 죽은 UI 였다.
-  const noFilterTabs = ['overview', 'vcenters', 'summary', 'upgrade', 'tools', 'insights', 'settings', 'svcmon'];
+  // IP관리(ipam)는 화면 안에 자체 vCenter 범위 선택자가 있어 상단 필터바를 쓰지 않는다.
+  const noFilterTabs = ['overview', 'vcenters', 'summary', 'upgrade', 'tools', 'insights', 'settings', 'svcmon', 'ipam'];
   const showFilters = !noFilterTabs.includes(tab);
-  const showTextSearch = tab !== 'explore';
 
   // Drill into a site → set the HOSTS tab's own vCenter filter, then go there.
   const selectSite = (id) => { patchFilter({ vcenterId: id, region: '' }, 'hosts'); setTab('hosts'); };
@@ -353,16 +359,12 @@ function Portal({ user, onLogout }) {
                 {MENU_FILTERS[tab].options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
               </select>
             )}
-            {showTextSearch && (
-              <SearchBox placeholder="이름 / IP / OS 검색…" value={q} onChange={setQ} />
-            )}
-            {showTextSearch && (
-              <label className="flex gap" style={{ alignItems: 'center', fontSize: 12, whiteSpace: 'nowrap', cursor: 'pointer' }}
-                title="체크하면 검색에 메모(Notes) 내용도 포함합니다. (기본: 미포함)">
-                <input type="checkbox" checked={qNotes} onChange={(e) => setQNotes(e.target.checked)} /> 메모 포함
-              </label>
-            )}
-            {showTextSearch && ['vms', 'networks', 'hosts', 'datastores'].includes(tab) && (
+            <SearchBox placeholder="이름 / IP / OS 검색…" value={q} onChange={setQ} />
+            <label className="flex gap" style={{ alignItems: 'center', fontSize: 12, whiteSpace: 'nowrap', cursor: 'pointer' }}
+              title="체크하면 검색에 메모(Notes) 내용도 포함합니다. (기본: 미포함)">
+              <input type="checkbox" checked={qNotes} onChange={(e) => setQNotes(e.target.checked)} /> 메모 포함
+            </label>
+            {['vms', 'networks', 'hosts', 'datastores'].includes(tab) && (
               <label className="flex gap" style={{ alignItems: 'center', fontSize: 12, whiteSpace: 'nowrap', cursor: 'pointer' }}
                 title="체크하면 IP로 검색할 때 IPMS(IP 스캔) 자료의 해당 대역 IP도 함께 보여줍니다. (vCenter가 모르는 스캔 IP 포함)">
                 <input type="checkbox" checked={qIpms} onChange={(e) => setQIpms(e.target.checked)} /> IPMS 포함
@@ -380,7 +382,7 @@ function Portal({ user, onLogout }) {
           {tab === 'summary' && <Summary scope={scope} onGotoTab={setTab} />}
           {tab === 'vcenters' && <VCenters onSelectSite={selectSite} resetSignal={platformResetSeq} />}
           {tab === 'svcmon' && <SvcMonitor />}
-          {tab === 'explore' && <Explore scope={scope} />}
+          {tab === 'ipam' && <Ipam />}
           {tab === 'hosts' && <Hosts filters={filters} />}
           {tab === 'vms' && <Vms filters={filters} />}
           {tab === 'datastores' && <Datastores filters={filters} />}

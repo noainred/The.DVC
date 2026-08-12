@@ -13,6 +13,7 @@ import VmProvision from './VmProvision.jsx';
 import AgentScans from './AgentScans.jsx';
 import SvcMonConfig from './SvcMonConfig.jsx';
 import NsxAdmin from './Nsx.jsx'; // 상단 메뉴에서 이동한 전체 NSX 관리 화면(게이트웨이·세그먼트·DFW·보안그룹)
+import Explore from './Explore.jsx'; // 상단 메뉴에서 이동한 탐색·랭킹(자체 리전/vCenter 선택자 내장)
 import CapacityAdvisor from './CapacityAdvisor.jsx';
 import LoginFails from './LoginFails.jsx';
 import NetIssues from './NetIssues.jsx';
@@ -62,7 +63,8 @@ const toolFromHash = () => {
   const parts = window.location.hash.replace(/^#\/?/, '').split('/');
   const k = parts[0] === 'tools' ? parts[1] : '';
   // 외부 포탈 항목은 이 앱에 패널이 없다 — 딥링크로 들어와도 목록을 보여준다.
-  return TOOLS.some((t) => t.k === k && !t.external) ? k : null;
+  // topTab(상단 메뉴로 승격된 항목)도 여기에는 패널이 없다(권한 매트릭스용으로만 목록에 남음).
+  return TOOLS.some((t) => t.k === k && !t.external && !t.topTab) ? k : null;
 };
 
 // 최근 검색어(브라우저 로컬) — 특수 기능 '메뉴 빠른 찾기'에서 Enter 또는 검색 중 메뉴 클릭 시 기록.
@@ -160,7 +162,8 @@ export default function SpecialTools() {
   if (tool) return <ToolPanel tool={tool} isAdmin={isAdmin} onBack={() => openTool(null)} />;
   // 전 도구를 노출하되, 권한이 없으면 disabled(회색·클릭불가)로 표시한다(숨기지 않음).
   // 외부 포탈 항목은 주소가 설정된 경우에만 노출한다(미설치 환경에 죽은 카드를 남기지 않음).
-  const base = TOOLS.filter((t) => !t.external || externalUrls[t.external]).map((t) => {
+  // topTab(상단 메뉴로 승격) 항목은 카드로 노출하지 않는다(권한 매트릭스 편집용으로만 목록에 존재).
+  const base = TOOLS.filter((t) => !t.topTab).filter((t) => !t.external || externalUrls[t.external]).map((t) => {
     const lock = lockReasonOf(t);
     return lock ? { ...t, disabled: true, comingSoon: false, lockReason: lock } : t;
   });
@@ -262,7 +265,7 @@ function ToolPanel({ tool, onBack, isAdmin }) {
   const meta = TOOLS.find((t) => t.k === tool);
   const [scope, setScope] = useState('');
   const { data: vcList } = usePolling('/vcenters', {}, 60_000);
-  const scoped = ['ipam', 'dupip', 'vmtools', 'snapshots', 'hba', 'gpu', 'licenses', 'license-expiry', 'esxi', 'hardware', 'powermap', 'guestos', 'real-os', 'thinvms', 'capacity', 'waste', 'esxitemp', 'forecast', 'dsusage',
+  const scoped = ['dupip', 'vmtools', 'snapshots', 'hba', 'gpu', 'licenses', 'license-expiry', 'esxi', 'hardware', 'powermap', 'guestos', 'real-os', 'thinvms', 'capacity', 'waste', 'esxitemp', 'forecast', 'dsusage',
     'daily-health', 'snapshot-age', 'zombie-vms', 'rightsizing', 'capacity-forecast', 'compliance-report', 'change-history', 'unprotected-vms'].includes(tool);
 
   return (
@@ -281,6 +284,7 @@ function ToolPanel({ tool, onBack, isAdmin }) {
         )}
       </div>
       {tool === 'aisearch' && <AiSearch />}
+      {tool === 'explore' && <Explore />}
       {tool === 'insights' && <Insights scope={scope} />}
       {tool === 'threats' && <Threats scope={scope} />}
       {tool === 'vmfinder' && <VmFinder />}
@@ -292,7 +296,6 @@ function ToolPanel({ tool, onBack, isAdmin }) {
       {tool === 'guestos' && <GuestOs scope={scope} />}
       {tool === 'real-os' && <RealOs scope={scope} />}
       {tool === 'thinvms' && <ThinVms scope={scope} />}
-      {tool === 'ipam' && <Ipam scope={scope} onScope={setScope} />}
       {tool === 'dupip' && <DupIp scope={scope} />}
       {tool === 'vmtools' && <VmTools scope={scope} />}
       {tool === 'snapshots' && <Snapshots scope={scope} />}
@@ -429,6 +432,31 @@ function AiSearch() {
         로컬 LLM(Ollama)이 질문을 검색조건으로 해석하고, 실제 검색은 포탈 내부 데이터에서 수행됩니다(데이터 외부 유출 없음).
         LLM 미설정 시 규칙기반으로 동작합니다. 설정 → AI 검색에서 Ollama 주소/모델을 지정하세요.
       </div>
+    </>
+  );
+}
+
+/**
+ * 상단 'IP관리' 탭 진입용 단독 래퍼(v2.274 — 특수 기능 카드에서 승격). ToolPanel 밖이라
+ * vCenter 범위 선택자를 자체 제공한다. App.jsx 가 lazy named import 로 가져간다
+ * (Ipam 본체·하위 컴포넌트가 이 파일의 헬퍼들에 얽혀 있어 코드 이동 대신 래퍼 export).
+ */
+export function IpamStandalone() {
+  const [scope, setScope] = useState('');
+  const { data: vcList } = usePolling('/vcenters', {}, 60_000);
+  return (
+    <>
+      <div className="flex wrap" style={{ marginBottom: 12, alignItems: 'center', gap: 12 }}>
+        <div className="section-title" style={{ margin: 0 }}>📒 센터별 IP 관리대장</div>
+        <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }}>
+          <span className="muted">범위</span>
+          <select className="select" value={scope} onChange={(e) => setScope(e.target.value)}>
+            <option value="">전체 vCenter</option>
+            {(vcList || []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+          </select>
+        </label>
+      </div>
+      <Ipam scope={scope} onScope={setScope} />
     </>
   );
 }
