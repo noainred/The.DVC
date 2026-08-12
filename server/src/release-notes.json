@@ -1,6 +1,17 @@
 {
   "notes": [
     {
+      "version": "2.275.0",
+      "date": "2026-08-12",
+      "title": "특수 기능: VM 전체 정보 CSV Export — 선택 vCenter 모든 VM 을 55+ 컬럼으로",
+      "notes": [
+        "특수 기능 › 'VM 전체 정보 CSV': vCenter 를 선택하면 그 vCenter 의 모든 VM 을 획득 가능한 최대 필드로 미리보고(100행) CSV 로 내려받습니다. RVTools 의 탭 체계(vInfo·vCPU·vMemory·vDisk·vPartition·vNetwork·vSnapshot·vTools)를 기준 체크리스트로 설계했습니다.",
+        "포함 컬럼(55+): vCenter/클러스터/호스트(ESXi)/폴더/리소스풀 · 전원/연결상태/템플릿 · Guest OS(구성/Guest ID/게스트 호스트명) · Tools 상태/버전 · HW 버전/펌웨어/UUID/Instance UUID/CBT/생성일/최근 부팅 · vCPU/소켓당 코어/소켓 수/핫애드/사용률/예약/제한 · 메모리(GB)/핫애드/사용률/예약/제한 · NIC 수/상세(어댑터 타입·MAC·네트워크·연결)/MAC·네트워크 목록/대표 IP/IP 전체/게이트웨이 · 디스크 수/상세(용량·thin/thick/RDM·모드·데이터스토어)/프로비저닝 합계/데이터스토어 목록/Thin·RDM 수 · 스토리지 사용/미할당/프로비저닝(GB) · 게스트 파티션 수/총량/사용/여유/상세(마운트별) · 스냅샷 수/크기/생성일/이름 · GPU(vGPU/패스쓰루) · 메모.",
+        "동작: 수집 스냅샷 필드에 더해 내보내기 시점에 해당 vCenter 로 라이브 조회 1회(250대씩 페이지)로 NIC·디스크·게스트 파티션 등 상세를 보강합니다(60초 캐시). 라이브 조회가 안 되는 환경(데모 모드·엣지 수집 vCenter 등)에서는 스냅샷 필드만으로 export 되고 화면에 사유를 표시합니다.",
+        "보안: vCenter 단위 사용자 scope 를 서버에서 강제(범위 밖 404), CSV 는 UTF-8 BOM(엑셀 한글)과 수식 인젝션 가드(= + - @ 접두 무력화)를 적용합니다. 파서 단위테스트 4종 추가(server/test/vmExportParse.test.js)."
+      ]
+    },
+    {
       "version": "2.274.0",
       "date": "2026-08-12",
       "title": "메뉴 정리 2차 — 탐색·랭킹을 특수 기능으로, IP 관리대장을 상단 'IP관리' 탭으로, '호스트'는 'VM호스트'로",

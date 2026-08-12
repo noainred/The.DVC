@@ -265,7 +265,7 @@ function ToolPanel({ tool, onBack, isAdmin }) {
   const meta = TOOLS.find((t) => t.k === tool);
   const [scope, setScope] = useState('');
   const { data: vcList } = usePolling('/vcenters', {}, 60_000);
-  const scoped = ['dupip', 'vmtools', 'snapshots', 'hba', 'gpu', 'licenses', 'license-expiry', 'esxi', 'hardware', 'powermap', 'guestos', 'real-os', 'thinvms', 'capacity', 'waste', 'esxitemp', 'forecast', 'dsusage',
+  const scoped = ['vm-export', 'dupip', 'vmtools', 'snapshots', 'hba', 'gpu', 'licenses', 'license-expiry', 'esxi', 'hardware', 'powermap', 'guestos', 'real-os', 'thinvms', 'capacity', 'waste', 'esxitemp', 'forecast', 'dsusage',
     'daily-health', 'snapshot-age', 'zombie-vms', 'rightsizing', 'capacity-forecast', 'compliance-report', 'change-history', 'unprotected-vms'].includes(tool);
 
   return (
@@ -296,6 +296,7 @@ function ToolPanel({ tool, onBack, isAdmin }) {
       {tool === 'guestos' && <GuestOs scope={scope} />}
       {tool === 'real-os' && <RealOs scope={scope} />}
       {tool === 'thinvms' && <ThinVms scope={scope} />}
+      {tool === 'vm-export' && <VmExport scope={scope} />}
       {tool === 'dupip' && <DupIp scope={scope} />}
       {tool === 'vmtools' && <VmTools scope={scope} />}
       {tool === 'snapshots' && <Snapshots scope={scope} />}
@@ -432,6 +433,69 @@ function AiSearch() {
         로컬 LLM(Ollama)이 질문을 검색조건으로 해석하고, 실제 검색은 포탈 내부 데이터에서 수행됩니다(데이터 외부 유출 없음).
         LLM 미설정 시 규칙기반으로 동작합니다. 설정 → AI 검색에서 Ollama 주소/모델을 지정하세요.
       </div>
+    </>
+  );
+}
+
+/**
+ * VM 전체 정보 CSV export (v2.275) — 선택 vCenter 의 모든 VM 을 서버가 '획득 가능한 최대
+ * 필드'(스냅샷 + 내보내기 시점 라이브 SOAP 보강: NIC·MAC·디스크별 데이터스토어/용량·게스트
+ * 파티션 사용량·UUID 등 55+ 컬럼)로 만들어 준다. 여기서는 미리보기(100행) + CSV 다운로드.
+ */
+function VmExport({ scope }) {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    setData(null); setErr(null);
+    if (!scope) return undefined;
+    let dead = false;
+    setBusy(true);
+    fetchJson(`/tools/vm-export?vcenterId=${encodeURIComponent(scope)}`)
+      .then((r) => { if (!dead) { setData(r); setErr(null); } })
+      .catch((e) => { if (!dead) setErr(e.message); })
+      .finally(() => { if (!dead) setBusy(false); });
+    return () => { dead = true; };
+  }, [scope]);
+  const download = async () => {
+    const res = await fetch(`/api/tools/vm-export.csv?vcenterId=${encodeURIComponent(scope)}`, { headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {} });
+    const blob = await res.blob(); const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = `vm-export-${scope}-${new Date().toISOString().slice(0, 10)}.csv`; a.click(); URL.revokeObjectURL(url);
+  };
+
+  if (!scope) return <div className="card"><span className="muted">위 <b>범위</b>에서 vCenter 를 선택하세요 — 그 vCenter 의 모든 VM 상세(호스트·클러스터·NIC·디스크·데이터스토어·게스트 파티션 등)를 미리보고 CSV 로 내려받습니다.</span></div>;
+  if (busy && !data) return <Loading />;
+  if (err && !data) return <ErrorBox message={err} />;
+  if (!data) return <Loading />;
+
+  const preview = [
+    { key: 'name', label: 'VM', render: (r) => <b>{r.name}</b> },
+    { key: 'powerState', label: '전원', render: (r) => <StateBadge state={r.powerState} /> },
+    { key: 'cluster', label: '클러스터' },
+    { key: 'host', label: '호스트' },
+    { key: 'guestOS', label: 'Guest OS' },
+    { key: 'cpuCount', label: 'vCPU', align: 'right' },
+    { key: 'memGB', label: 'RAM(GB)', align: 'right' },
+    { key: 'nicCount', label: 'NIC', align: 'right' },
+    { key: 'ipAddress', label: '대표 IP' },
+    { key: 'diskCount', label: '디스크', align: 'right' },
+    { key: 'datastores', label: '데이터스토어' },
+    { key: 'storageProvisionedGB', label: '프로비저닝(GB)', align: 'right' },
+  ];
+  return (
+    <>
+      <div className="flex gap wrap" style={{ marginBottom: 12, alignItems: 'center' }}>
+        <Card label="VM 수" value={data.total} meta={data.vcenterName} accent="var(--accent)" />
+        <Card label="컬럼 수" value={(data.columns || []).length} meta="CSV 로 전체 내보내기" />
+        <button className="login-btn" style={{ flex: 'none', padding: '10px 20px' }} onClick={download}>⬇ CSV 다운로드 (전체 {data.total}대 · {(data.columns || []).length}컬럼)</button>
+      </div>
+      {!data.enriched && (
+        <div className="card" style={{ borderColor: 'var(--amber,#f59e0b)', marginBottom: 12 }}>
+          <span style={{ fontSize: 13 }}>⚠ 라이브 상세 보강 없이 스냅샷 필드만 포함됩니다 — {data.enrichError || '사유 미상'}. NIC/디스크별 상세·게스트 파티션 컬럼은 비어 있을 수 있습니다.</span>
+        </div>
+      )}
+      <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>미리보기 {Math.min(100, data.total)}행(대표 컬럼만) — 전체 {data.total}행 × {(data.columns || []).length}컬럼은 CSV 로 내려받으세요. NIC·디스크·게스트 파티션 상세, MAC/IP 전체, UUID, 예약/제한, 스냅샷, CBT 등이 모두 포함됩니다.</div>
+      <DataTable columns={preview} rows={data.rows || []} initialSort={{ key: 'name', dir: 'asc' }} />
     </>
   );
 }

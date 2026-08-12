@@ -83,3 +83,70 @@ export function parseObjectContent(xml) {
   }
   return out;
 }
+
+/* ------------------- VM 전체 정보 CSV export 용 파서 (v2.275) ------------------- */
+
+// NIC 로 취급하는 VirtualDevice 구체 타입(xsi:type) — VirtualEthernetCard 하위 전부.
+const NIC_TYPE_RE = /^Virtual(E1000e?|Vmxnet\d?|Vmxnet3Vrdma|PCNet32|SriovEthernetCard)$/i;
+
+/**
+ * VM 'config.hardware.device'(ArrayOfVirtualDevice) XML → NIC/디스크 상세.
+ * RetrieveProperties 직렬화에서 배열 원소는 <VirtualDevice xsi:type="구체타입">…
+ * (HostGraphicsInfo 파서와 동일 규칙). 반환:
+ *   nics:  [{ label, type, mac, network, connected }]
+ *   disks: [{ label, capacityGB, thin, rdm, mode, datastore, fileName }]
+ */
+export function parseVmDevices(deviceXml) {
+  const nics = [];
+  const disks = [];
+  if (!deviceXml) return { nics, disks };
+  for (const blk of deviceXml.split(/<VirtualDevice(?=[ >])/).slice(1)) {
+    const xsiType = /^[^>]*xsi:type="([^"]+)"/.exec(blk)?.[1] || '';
+    const label = xmlUnescape(/<label>([^<]*)<\/label>/.exec(blk)?.[1] || '');
+    if (NIC_TYPE_RE.test(xsiType)) {
+      // 네트워크 이름: 표준 백킹은 <backing><deviceName>, DVS 포트 백킹은 이름이 없어
+      // deviceInfo.summary(예: "DVSwitch: …")를 폴백으로 쓴다(추가 왕복 없이 최선).
+      const deviceName = xmlUnescape(/<backing[^>]*>[\s\S]*?<deviceName>([^<]*)<\/deviceName>/.exec(blk)?.[1] || '');
+      const summary = xmlUnescape(/<summary>([^<]*)<\/summary>/.exec(blk)?.[1] || '');
+      nics.push({
+        label,
+        type: xsiType.replace(/^Virtual/, ''),
+        mac: /<macAddress>([^<]*)<\/macAddress>/.exec(blk)?.[1] || '',
+        network: deviceName || summary,
+        connected: /<connectable>[\s\S]*?<connected>true<\/connected>/.test(blk),
+      });
+    } else if (xsiType === 'VirtualDisk') {
+      const fileName = xmlUnescape(/<fileName>([^<]*)<\/fileName>/.exec(blk)?.[1] || '');
+      const capKB = Number(/<capacityInKB>(\d+)<\/capacityInKB>/.exec(blk)?.[1] || 0);
+      const backingType = /<backing xsi:type="([^"]+)"/.exec(blk)?.[1] || '';
+      disks.push({
+        label,
+        capacityGB: Math.round((capKB / 1024 / 1024) * 10) / 10,
+        thin: /<thinProvisioned>true<\/thinProvisioned>/.test(blk),
+        rdm: /RawDiskMapping/i.test(backingType),
+        mode: /<diskMode>([^<]*)<\/diskMode>/.exec(blk)?.[1] || '',
+        datastore: /^\[([^\]]+)\]/.exec(fileName)?.[1] || '',
+        fileName,
+      });
+    }
+  }
+  return { nics, disks };
+}
+
+/**
+ * VM 'guest.disk'(ArrayOfGuestDiskInfo) XML → 게스트 내부 파티션 사용량.
+ * 반환: [{ path, capacityGB, freeGB, usedGB }] (VMware Tools 실행 중일 때만 값이 온다).
+ */
+export function parseGuestDisks(guestDiskXml) {
+  const out = [];
+  if (!guestDiskXml) return out;
+  for (const blk of guestDiskXml.split(/<GuestDiskInfo(?=[ >])/).slice(1)) {
+    const path = xmlUnescape(/<diskPath>([^<]*)<\/diskPath>/.exec(blk)?.[1] || '');
+    const cap = Number(/<capacity>(\d+)<\/capacity>/.exec(blk)?.[1] || 0);
+    const free = Number(/<freeSpace>(\d+)<\/freeSpace>/.exec(blk)?.[1] || 0);
+    if (!path && !cap) continue;
+    const gb = (n) => Math.round((n / 1024 ** 3) * 10) / 10;
+    out.push({ path, capacityGB: gb(cap), freeGB: gb(free), usedGB: gb(Math.max(0, cap - free)) });
+  }
+  return out;
+}

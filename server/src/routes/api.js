@@ -7,6 +7,7 @@ import { currentVersion, config, loadVcenterConfig } from '../config.js';
 import { loadUiSettings, saveUiSettings } from '../ui-settings.js';
 import { hostPower } from '../idrac/service.js';
 import { fetchVmMetric, fetchHostMetric, PERF_INTERVALS, upgradeVmTools, getVmConsole } from '../vcenter/soapClient.js';
+import { buildVmExport, vmExportCsv } from '../vcenter/vmExport.js';
 import { listMutes, addMute, removeMute } from '../alarm-mutes.js';
 import { recordToolUse, getTopTools } from '../tool-usage.js';
 import { buildIpamRows, buildSubnetSheets, listSubnets, ipVcenterOwners } from '../ipam/ledger.js';
@@ -689,6 +690,37 @@ api.get('/tools/ipam', (req, res) => {
   const snap = store.get();
   const data = buildIpamRows(snap, req.query.vcenterId, scopedVcenterIds(req.user, snap));
   res.json({ ...data, rows: data.rows.map((r) => (r.ownerType === 'vm' && r.owner ? { ...r, owner: undefined, hasOwner: true } : r)) });
+});
+
+// VM 전체 정보 export (특수 기능) — 선택 vCenter 의 모든 VM 을 '획득 가능한 최대 필드'로.
+// vCenter 단위 사용자 scope 를 먼저 강제하고, 범위 밖은 404(존재 여부 미노출 — v2.207 규칙).
+function vmExportGuard(req, res) {
+  const vcenterId = String(req.query.vcenterId || '');
+  const snap = store.get();
+  if (!vcenterId || !(snap.vcenters || []).some((v) => v.id === vcenterId) || !inUserScope(req.user, snap, vcenterId)) {
+    res.status(404).json({ error: 'vCenter를 찾을 수 없습니다.' });
+    return null;
+  }
+  return vcenterId;
+}
+api.get('/tools/vm-export', async (req, res) => {
+  const vcenterId = vmExportGuard(req, res);
+  if (!vcenterId) return;
+  try {
+    const r = await buildVmExport(vcenterId);
+    // 미리보기는 100행까지 — 전체는 CSV 다운로드로(total 로 전체 행 수 표시).
+    res.json({ ...r, rows: r.rows.slice(0, 100) });
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+api.get('/tools/vm-export.csv', async (req, res) => {
+  const vcenterId = vmExportGuard(req, res);
+  if (!vcenterId) return;
+  try {
+    const r = await buildVmExport(vcenterId);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="vm-export-${encodeURIComponent(vcenterId)}-${new Date().toISOString().slice(0, 10)}.csv"`);
+    res.send(vmExportCsv(r));
+  } catch (e) { res.status(502).json({ error: e.message }); }
 });
 
 // IPAM 추천 기능 30선 — 유명 IPAM 솔루션 대표 기능을 수집 데이터로 계산.
