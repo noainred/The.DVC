@@ -352,14 +352,19 @@ function DsBrowseSection({ item }) {
   useEffect(() => {
     let dead = false;
     setD(null); setErr(null); setQ('');
-    fetchJson(`/datastores/${encodeURIComponent(item.id)}/browse`)
+    // 서버는 vCenter 탐색 태스크를 최대 90초 기다린다(dsBrowse.js TASK_TIMEOUT_MS=90s).
+    // 기본 fetchJson(20초 타임아웃×3회)으로는 61초 이상 걸리는 대형 데이터스토어가 '항상'
+    // 실패했고, 재시도는 서버 60초 캐시의 같은 진행중 프라미스에 합류만 해 결과를 영영 못
+    // 받았다(v2.277 확정 버그 — 그 사이 vCenter 에는 고비용 탐색 태스크만 반복 생성).
+    // 브라우즈만 150초(서버 90초 + 로그인/조회 오버헤드 여유) 단일 호출로 기다린다.
+    fetchJson(`/datastores/${encodeURIComponent(item.id)}/browse`, {}, undefined, { timeoutMs: 150_000, retries: 0 })
       .then((r) => { if (!dead) setD(r); })
       .catch((e) => { if (!dead) setErr(e.message); });
     return () => { dead = true; };
   }, [item.id]);
   const fmtSize = (b) => (b >= 1024 ** 3 ? `${(b / 1024 ** 3).toFixed(1)} GB` : b >= 1024 ** 2 ? `${(b / 1024 ** 2).toFixed(1)} MB` : `${Math.ceil((b || 0) / 1024)} KB`);
   if (err) return <div className="card" style={{ marginTop: 14, borderColor: 'var(--amber,#f59e0b)' }}><span style={{ fontSize: 13 }}>⚠ 파일/할당 VM 조회 실패 — {err}</span></div>;
-  if (!d) return <div className="muted" style={{ marginTop: 14, fontSize: 13 }}>⏳ 파일·할당 VM 조회 중… (파일이 많은 데이터스토어는 수십 초 걸릴 수 있습니다)</div>;
+  if (!d) return <div className="muted" style={{ marginTop: 14, fontSize: 13 }}>⏳ 파일·할당 VM 조회 중… (파일이 많은 데이터스토어는 최대 2분까지 걸릴 수 있습니다)</div>;
   if (d.mock) return <div className="muted" style={{ marginTop: 14, fontSize: 13 }}>{d.reason}</div>;
   const files = q ? d.files.filter((f) => (`${f.folder}${f.name}`).toLowerCase().includes(q.toLowerCase())) : d.files;
   return (
@@ -399,7 +404,7 @@ function DsBrowseSection({ item }) {
       {view === 'files' && (
         <>
           {d.filesError && <div className="card" style={{ borderColor: 'var(--amber,#f59e0b)', marginBottom: 8 }}><span style={{ fontSize: 13 }}>⚠ 파일 목록 조회 실패 — {d.filesError}</span></div>}
-          {d.truncated && <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>⚠ 파일이 많아 최대 10,000개까지만 표시합니다(크기순).</div>}
+          {d.truncated && <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>⚠ 파일이 많아 <b>크기순 상위 10,000개</b>만 표시합니다(서버가 전체를 정렬한 뒤 자름 — v2.277).</div>}
           {files.length === 0 && !d.filesError && <div className="muted" style={{ fontSize: 13 }}>{q ? '검색 결과 없음' : '파일 없음'}</div>}
           {files.length > 0 && (
             <div className="table-wrap" style={{ maxHeight: '32vh' }}>

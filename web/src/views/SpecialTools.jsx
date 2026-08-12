@@ -654,7 +654,9 @@ function Ipam({ scope, onScope }) {
         {canManage && <button className="tab" style={{ padding: '1px 7px', fontSize: 11 }} title="IP 관리상태 편집(담당자·예약·디바이스 종류 등)" onClick={() => setEditOv(r)}>{r.managed ? '✎' : '+'}</button>}
       </span>
     ) },
-    { key: 'ownerName', label: '소유 자원', sortValue: (r) => r.displayName || r.ownerName || '', render: (r) => (r.owner ? <button className="cell-link" onClick={() => setSel({ ownerType: r.ownerType, owner: r.owner })}>{r.label || r.ownerName}</button> : <span>{r.label || r.ownerName}{r.owner_ ? <span className="muted" style={{ fontSize: 11 }}> · 👤{r.owner_}</span> : ''}{(r.services || []).length ? <span className="muted" style={{ fontSize: 11 }}> · {(r.services || []).join(',')}</span> : ''}</span>) },
+    // 소유 자원 — v2.253 응답 다이어트로 VM 행은 owner 본문 대신 hasOwner 플래그만 온다.
+    // owner 가 있거나(hasOwner VM 행이면 IpOwnerDetail 이 지연 조회) 클릭 가능하게 한다(v2.277).
+    { key: 'ownerName', label: '소유 자원', sortValue: (r) => r.displayName || r.ownerName || '', render: (r) => ((r.owner || (r.hasOwner && r.ownerType === 'vm')) ? <button className="cell-link" onClick={() => setSel(r)}>{r.label || r.ownerName}</button> : <span>{r.label || r.ownerName}{r.owner_ ? <span className="muted" style={{ fontSize: 11 }}> · 👤{r.owner_}</span> : ''}{(r.services || []).length ? <span className="muted" style={{ fontSize: 11 }}> · {(r.services || []).join(',')}</span> : ''}</span>) },
     { key: 'powerState', label: '전원', render: (r) => <StateBadge state={r.powerState} /> },
     { key: 'osName', label: 'OS 종류', sortValue: (r) => r.osName || '', render: (r) => r.osName || <span className="muted">—</span> },
     { key: 'osVersion', label: 'OS 버전', sortValue: (r) => r.osVersion || '', render: (r) => r.osVersion || <span className="muted">—</span> },
@@ -849,7 +851,7 @@ function Ipam({ scope, onScope }) {
           {' · '}갱신 {db.updatedAt ? new Date(db.updatedAt).toLocaleString() : '—'} · 수집 주기마다 자동 갱신됩니다.
         </div>
       )}
-      {sel && <EntityDetail type={sel.ownerType} item={sel.owner} onClose={() => setSel(null)} />}
+      {sel && <IpOwnerDetail row={sel} onClose={() => setSel(null)} />}
       {ipms && <IpmsSettings onClose={() => setIpms(false)} />}
       {scanOpen && <IpScanSettings onClose={() => setScanOpen(false)} />}
       {editMemo && <MemoEditor init={editMemo} onClose={() => setEditMemo(null)} onSaved={() => { setEditMemo(null); pickBase(base); }} />}
@@ -861,6 +863,41 @@ function Ipam({ scope, onScope }) {
 }
 
 /** IP 사용 이력 — 스캔으로 관측된 사용 시작(up)/해제(down) 전이 + 사용/미사용 구간. */
+/**
+ * IPAM 목록에서 IP/소유 자원 클릭 시 여는 상세 래퍼(v2.277 확정 버그 수정).
+ * 배경: v2.253 목록 응답 다이어트로 /tools/ipam 의 VM 행은 owner 본문 없이 hasOwner 플래그만
+ * 온다. 종전 코드는 <EntityDetail item={sel.owner}> 를 곧장 렌더해 item=undefined 로
+ * ui.jsx `${item.name}` 에서 TypeError → ErrorBoundary 가 IP관리 탭 전체를 오류 화면으로
+ * 갈아치웠다(스캔/수동 행의 owner=null 도 동일 크래시). IpHistoryModal 의 짝 수정과 같은
+ * 패턴으로 — 모달을 연 시점에 /vms/lookup 으로 1건만 지연 조회한다(목록 비대화 방지 유지).
+ */
+function IpOwnerDetail({ row, onClose }) {
+  const [owner, setOwner] = useState(row.owner || null);
+  // ready=상세 표시 가능 · loading=지연 조회 중 · none=연결 자원 없음/조회 실패(크래시 대신 안내)
+  const [state, setState] = useState(row.owner ? 'ready' : (row.hasOwner && row.ownerType === 'vm' ? 'loading' : 'none'));
+  useEffect(() => {
+    if (row.owner || !(row.hasOwner && row.ownerType === 'vm')) return undefined;
+    let dead = false;
+    fetchJson(`/vms/lookup?ip=${encodeURIComponent(row.ip || '')}${row.vcenterId ? `&vcenterId=${encodeURIComponent(row.vcenterId)}` : ''}`)
+      .then((r) => { if (!dead) { if (r?.vm) { setOwner(r.vm); setState('ready'); } else setState('none'); } })
+      .catch(() => { if (!dead) setState('none'); });
+    return () => { dead = true; };
+  }, [row]);
+  if (state === 'ready' && owner) return <EntityDetail type={row.ownerType || 'vm'} item={owner} onClose={onClose} />;
+  return (
+    <Modal title={`IP ${row.ip || ''} — 소유 자원`} onClose={onClose} width={440}>
+      <div className="muted" style={{ fontSize: 13, lineHeight: 1.9 }}>
+        {state === 'loading' ? '소유 자원 정보를 조회 중…' : '이 IP에 연결된 자원 상세를 열 수 없습니다(미귀속 IP이거나 조회 실패).'}
+        <div style={{ marginTop: 8 }}>
+          {row.ownerName && <div>소유 자원: <b>{row.label || row.ownerName}</b></div>}
+          {row.vcenterName && <div>센터: {row.vcenterName}</div>}
+          {row.hostname && <div>호스트명: {row.hostname}</div>}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 function IpHistoryModal({ row, scope, onClose }) {
   const ip = row.ip;
   const hostname = row.hostname;

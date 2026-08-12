@@ -84,17 +84,26 @@ function withTimeout(signal, ms) {
   return c.signal;
 }
 
-export async function fetchJson(path, params = {}, signal) {
+/**
+ * GET JSON 조회 — 기본은 20초 타임아웃 + 일시 오류 2회 재시도(고RTT 폴링용).
+ * opts(v2.277 추가): 오래 걸리는 단건 조회를 위한 호출별 재정의.
+ *   { timeoutMs, retries } — 예: 데이터스토어 브라우즈(/datastores/:id/browse)는 서버가
+ *   vCenter 탐색 태스크를 최대 90초 기다리므로 기본 20초×3회로는 항상 타임아웃했고,
+ *   재시도는 서버 60초 캐시의 '같은 진행중 프라미스'에 합류만 해 무의미했다(확정 버그 v2.277).
+ *   그런 호출은 { timeoutMs: 150_000, retries: 0 } 처럼 길게 1회만 기다린다.
+ */
+export async function fetchJson(path, params = {}, signal, opts = {}) {
   const qs = new URLSearchParams(
     Object.entries(params).filter(([, v]) => v !== undefined && v !== '' && v !== null)
   ).toString();
   const url = `${BASE}${path}${qs ? `?${qs}` : ''}`;
-  const retries = 2;
+  const timeoutMs = opts.timeoutMs > 0 ? opts.timeoutMs : GET_TIMEOUT_MS;
+  const retries = Number.isInteger(opts.retries) && opts.retries >= 0 ? opts.retries : 2;
   let lastErr;
   for (let attempt = 0; attempt <= retries; attempt++) {
     let res;
     try {
-      res = await fetch(url, { headers: authHeaders(), signal: withTimeout(signal, GET_TIMEOUT_MS) });
+      res = await fetch(url, { headers: authHeaders(), signal: withTimeout(signal, timeoutMs) });
     } catch (err) {
       lastErr = err;
       if (signal?.aborted) throw err;                 // 사용자가 취소(언마운트) → 재시도 안 함

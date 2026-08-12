@@ -42,20 +42,36 @@ async function searchAllFiles(c, browserRef, dsName) {
     const state = p['info.state'] || '';
     if (state === 'success') return p['info.result'] || '';
     if (state === 'error') throw new Error(p['info.error.localizedMessage'] || '데이터스토어 탐색 실패(권한/접근성 확인)');
-    if (Date.now() > deadline) throw new Error('데이터스토어 탐색 시간 초과(90초) — 파일이 매우 많은 데이터스토어일 수 있습니다');
+    if (Date.now() > deadline) {
+      // 시한 초과 시 vCenter 쪽 탐색 태스크를 취소(best-effort) — 취소 없이 throw 만 하면
+      // 재클릭마다 고비용 재귀 탐색 태스크가 vCenter/ESXi 에 계속 누적된다(v2.277 확정 버그).
+      // CancelTask 자체가 실패해도(권한·이미 종료) 시한 초과 처리는 계속한다.
+      await c.callRaw(`<CancelTask xmlns="urn:vim25"><_this type="Task">${escXml(taskRef)}</_this></CancelTask>`).catch(() => {});
+      throw new Error('데이터스토어 탐색 시간 초과(90초) — 파일이 매우 많은 데이터스토어일 수 있습니다');
+    }
   }
 }
 
-// 60초 캐시 — 진행 중 프라미스를 캐시해 동시 클릭도 태스크 1개로 합류.
-const _cache = new Map(); // dsId -> { at, promise }
+/**
+ * 60초 캐시 — 의미론(v2.277 수정):
+ *  - **진행 중** 프라미스는 만료 없이 항상 합류시킨다. 이전에는 at(시작 시각) 기준 60초라
+ *    탐색이 60초를 넘기면 진행 중인데도 '만료'로 판정 → 재클릭이 같은 데이터스토어에
+ *    새 탐색 태스크를 또 만들고(vCenter 태스크 누적), 첫 태스크의 결과는 캐시 교체로 폐기됐다.
+ *  - **완료된** 결과는 완료 시점부터 60초 유지 — 미리보기 확인 후 천천히 눌러도 재조회 없음.
+ *  - 실패는 즉시 삭제(다음 클릭이 새로 시도).
+ */
+const _cache = new Map(); // dsId -> { at(완료 시각, 진행 중엔 0), promise, settled }
 const CACHE_MS = 60_000;
 
 export function browseDatastore(dsId) {
   const hit = _cache.get(dsId);
-  if (hit && Date.now() - hit.at < CACHE_MS) return hit.promise;
-  const promise = browseFresh(dsId).catch((e) => { _cache.delete(dsId); throw e; });
-  _cache.set(dsId, { at: Date.now(), promise });
-  return promise;
+  if (hit && (!hit.settled || Date.now() - hit.at < CACHE_MS)) return hit.promise;
+  const entry = { at: 0, settled: false, promise: null };
+  entry.promise = browseFresh(dsId)
+    .then((r) => { entry.settled = true; entry.at = Date.now(); return r; })
+    .catch((e) => { _cache.delete(dsId); throw e; });
+  _cache.set(dsId, entry);
+  return entry.promise;
 }
 
 async function browseFresh(dsId) {
@@ -94,8 +110,13 @@ async function browseFresh(dsId) {
     if (p.browser) {
       try {
         const resultXml = await searchAllFiles(c, p.browser, ds.name);
-        ({ files, truncated } = parseDsSearchResults(resultXml, FILE_CAP));
+        // 파싱은 안전상한(20만)까지 전부 → 크기순 정렬 → FILE_CAP(1만) 절단(v2.277 수정).
+        // 이전에는 파싱 단계에서 '발견순 앞쪽 1만'을 자른 뒤 정렬해, 가장 큰 파일이 뒤쪽
+        // 폴더에 있으면 누락된 채 UI 가 '크기순'이라고 안내했다(용량 회수 용도에서 오판 유발).
+        // 20만 파일 파싱은 16ms/힙 +4MB 실측(검증 에이전트) — 이벤트 루프에 무해하다.
+        ({ files, truncated } = parseDsSearchResults(resultXml, 200_000));
         files.sort((a, b) => b.sizeBytes - a.sizeBytes);
+        if (files.length > FILE_CAP) { files = files.slice(0, FILE_CAP); truncated = true; }
       } catch (e) { filesError = e.message; }
     } else {
       filesError = '이 데이터스토어에 브라우저 객체가 없습니다.';

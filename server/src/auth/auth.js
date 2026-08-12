@@ -556,10 +556,32 @@ export function confirmTotpEnroll(username, code) {
   return { ok: true };
 }
 
-/** Remove TOTP from a user (admin reset). */
+/**
+ * Remove TOTP from a user (admin reset) — v2.277 잠금 방지 가드 추가.
+ * 배경(확정 버그): OTP 전용 계정은 등록 시 passwordHash 가 삭제돼 비밀번호가 없다. 그 상태에서
+ * 임시 비밀번호 없이 OTP 까지 해제하면 비번도 OTP 도 없는 '웹 로그인 완전 불가' 계정이 되고
+ * (authenticateLocal 이 어떤 입력에도 null), bumpTokenVersion 으로 라이브 세션까지 즉시 끊겨
+ * 복구는 콘솔 도구(otp-enroll.sh)뿐이었다. 마지막 admin 이 본인 OTP 를 해제하면(폰 교체 시
+ * 자연스러운 조작) 웹 관리자 접근이 전면 잠겼다. 아래 가드가 그 경로를 서버에서 차단한다.
+ */
 export function disableTotp(username, { password } = {}) {
   const u = getUser(username);
   if (!u) return { ok: false, reason: '사용자를 찾을 수 없습니다.' };
+  // 수퍼관리자 보호 — clearLoginCredentials 와 같은 경계. OTP 전용(비번 없는) 수퍼관리자의
+  // OTP 를 다른 admin 이 해제하면 '로그인차단 거부' 경계가 우회된다. 재등록(폰 교체)은 해제
+  // 없이 'OTP 등록'(beginTotpEnroll — pending 교체 후 confirm)으로 가능하므로 이 거부가
+  // 정상 재등록을 막지 않는다.
+  if (u.superuser) return { ok: false, reason: '수퍼관리자 계정의 OTP는 해제할 수 없습니다(재등록은 해제 없이 OTP 등록으로 가능합니다).' };
+  // 임시 비밀번호 검증 — setLocalPassword 와 같은 규칙(문자열·8~128자). 검증 없이 hash 하면
+  // "[object Object]" 같은 값이 비밀번호가 되는 사고를 만든다.
+  if (password !== undefined && password !== '' && (typeof password !== 'string' || password.length < 8 || password.length > 128)) {
+    return { ok: false, reason: '임시 비밀번호는 8~128자 문자열이어야 합니다.' };
+  }
+  // 잠금 방지 — 비밀번호가 없는(OTP 전용으로 폐기된) 계정은 임시 비밀번호 없이 해제 불가.
+  // 해제 후 로그인 수단이 0개가 되는 유일한 조합을 서버에서 거부한다(UI 도 재시도 안내).
+  if (!password && !u.passwordHash) {
+    return { ok: false, reason: '비밀번호가 없는 OTP 전용 계정입니다 — 해제하려면 임시 비밀번호(8자 이상)를 함께 설정하세요.' };
+  }
   u.totpEnabled = false;
   delete u.totpSecret;
   delete u.totpPendingSecret;

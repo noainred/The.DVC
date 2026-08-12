@@ -1047,7 +1047,12 @@ adminRouter.put('/security/session', adminOnly, requireSettingsOwner, (req, res)
   // 인증이 켜져 있으면 변경 시 본인 OTP 재인증을 강제(누가 바꿨는지 신원 확정 + 무단변경 방지).
   if (config.auth.enabled) {
     const v = verifyUserOtp(username, req.body?.otp);
-    if (!v.ok) return res.status(401).json({ ok: false, reason: v.reason, needEnroll: !!v.needEnroll });
+    // 재인증 실패는 401 이 아니라 403(v2.277 확정 버그 수정) — 세션 토큰은 유효한데 재인증
+    // OTP 만 틀린 상태다. 401 로 응답하면 프론트 공통 처리(api.js sendJson)가 '세션 만료'로
+    // 판단해 setToken(null)+강제 로그아웃(다른 탭까지 연쇄)하고 실제 사유('OTP 코드가 일치하지
+    // 않습니다')도 사라졌다. 로그인에 쓴 코드를 30초 안에 재사용하면 replay 방지로 흔히 발생.
+    // 같은 파일의 다른 verifyUserOtp 재인증(중앙 배포 확인)도 403 컨벤션이다.
+    if (!v.ok) return res.status(403).json({ ok: false, reason: v.reason, needEnroll: !!v.needEnroll });
   }
   const before = loadConfiguredSecurity();
   let after;
