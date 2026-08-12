@@ -10,7 +10,9 @@ import path from 'node:path';
 // AUTH_SECRET 이 새면 임의 계정(수퍼관리자 포함) 토큰을 위조해 OTP 전용 정책과 소유자 경계가
 // 동시에 무너지므로, 백업·보안설정 라우트에는 requireSettingsOwner 가 반드시 붙어 있어야 한다.
 
-const SRC = fs.readFileSync(new URL('../src/routes/admin.js', import.meta.url), 'utf8');
+// v2.285.0 분할 — admin.js + routes/admin/* 를 등록 순서대로 결합해 전 모듈을 계속 검사한다.
+import { readAdminSource } from './lib/apiSource.js';
+const SRC = readAdminSource();
 
 /** 라우트 선언 한 줄을 찾아 반환(없으면 null). */
 function routeLine(re) {
@@ -54,10 +56,11 @@ test('백업 아카이브 화이트리스트: .json/.env 만, 데이터 파일�
 });
 
 test('업로드 아카이브 복원 라우트는 노출되어 있지 않다(도달 불가 확인)', () => {
+  // v2.283/2.285 분할로 routes/ 아래에 api/·admin/ 하위 폴더가 생겨 재귀로 훑는다(검사 범위 유지·강화).
   const routesDir = new URL('../src/routes/', import.meta.url);
-  const files = fs.readdirSync(routesDir).filter((f) => f.endsWith('.js'));
+  const files = fs.readdirSync(routesDir, { recursive: true }).filter((f) => String(f).endsWith('.js'));
   for (const f of files) {
-    const src = fs.readFileSync(path.join(routesDir.pathname, f), 'utf8');
+    const src = fs.readFileSync(path.join(routesDir.pathname, String(f)), 'utf8');
     assert.ok(!/parseUploadedArchive/.test(src),
       `${f}: 업로드 아카이브 복원을 노출하려면 소유자 가드 + 아카이브 검증을 먼저 설계하세요(임의 설정 주입 위험).`);
   }

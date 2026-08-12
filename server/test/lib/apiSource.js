@@ -12,13 +12,22 @@
 import fs from 'node:fs';
 
 export function readApiSource() {
+  return readSplitSource('api');
+}
+
+/** admin.js(v2.285.0 분할)용 — 동일 규칙으로 admin/ 모듈을 결합한다. */
+export function readAdminSource() {
+  return readSplitSource('admin');
+}
+
+function readSplitSource(name) {
   const base = new URL('../../src/routes/', import.meta.url);
-  const main = fs.readFileSync(new URL('api.js', base), 'utf8');
+  const main = fs.readFileSync(new URL(`${name}.js`, base), 'utf8');
   const parts = [main];
-  try { parts.push(fs.readFileSync(new URL('api/shared.js', base), 'utf8')); } catch { /* 분할 전 호환 */ }
-  for (const m of main.matchAll(/from '\.\/api\/(\w+\.js)'/g)) {
+  try { parts.push(fs.readFileSync(new URL(`${name}/shared.js`, base), 'utf8')); } catch { /* 분할 전 호환 */ }
+  for (const m of main.matchAll(new RegExp(`from '\\./${name}/(\\w+\\.js)'`, 'g'))) {
     if (m[1] === 'shared.js') continue;
-    parts.push(fs.readFileSync(new URL(`api/${m[1]}`, base), 'utf8'));
+    parts.push(fs.readFileSync(new URL(`${name}/${m[1]}`, base), 'utf8'));
   }
   return parts.join('\n');
 }
