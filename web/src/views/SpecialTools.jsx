@@ -494,7 +494,7 @@ function VmExport({ scope }) {
           <span style={{ fontSize: 13 }}>⚠ 라이브 상세 보강 없이 스냅샷 필드만 포함됩니다 — {data.enrichError || '사유 미상'}. NIC/디스크별 상세·게스트 파티션 컬럼은 비어 있을 수 있습니다.</span>
         </div>
       )}
-      <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>미리보기 {Math.min(100, data.total)}행(대표 컬럼만) — 전체 {data.total}행 × {(data.columns || []).length}컬럼은 CSV 로 내려받으세요. NIC·디스크·게스트 파티션 상세, MAC/IP 전체, UUID, 예약/제한, 스냅샷, CBT 등이 모두 포함됩니다.</div>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>미리보기 {Math.min(100, data.total)}행(대표 컬럼만) — 전체 {data.total}행 × {(data.columns || []).length}컬럼은 CSV 로 내려받으세요. NIC·게스트 파티션 상세, MAC/IP 전체, UUID, 예약/제한, 스냅샷, CBT 에 더해 <b>디스크는 1~7번 슬롯 컬럼</b>(슬롯당 용량·타입·모드·데이터스토어·파일, 미할당은 빈칸)으로 펼쳐지고 8개 이상은 '디스크8+ 요약'에 담깁니다(v2.278).</div>
       <DataTable columns={preview} rows={data.rows || []} initialSort={{ key: 'name', dir: 'asc' }} />
     </>
   );

@@ -18,7 +18,7 @@ export const TOOLS = [
   { k: 'guestos', icon: '🐧', label: 'Guest OS 종류/버전', desc: 'OS·버전별 VM 수 · 전체/법인별 · 검색' },
   { k: 'real-os', icon: '🔎', label: '실제 OS 확인(게스트)', desc: '게스트 OS에서 실제 설치 OS(/etc/os-release 등) 읽기 · ESXi 보고와 불일치 탐지 · 주기 스캔 · CSV' },
   { k: 'thinvms', icon: '💧', label: 'Thin VM 찾기', desc: 'Thin 프로비저닝 VM · 회수 가능 용량(추정)' },
-  { k: 'vm-export', icon: '📤', label: 'VM 전체 정보 CSV', desc: '선택 vCenter 모든 VM 의 최대 상세(호스트·클러스터/CPU·코어/메모리/NIC·MAC·IP/디스크·데이터스토어·용량/게스트 파티션 사용량/스냅샷/Tools/UUID 등 55+ 컬럼)를 CSV 로 내보내기' },
+  { k: 'vm-export', icon: '📤', label: 'VM 전체 정보 CSV', desc: '선택 vCenter 모든 VM 의 최대 상세(호스트·클러스터/CPU·코어/메모리/NIC·MAC·IP/디스크 1~7 슬롯별 용량·타입·데이터스토어·파일/게스트 파티션 사용량/스냅샷/Tools/UUID 등 85+ 컬럼)를 CSV 로 내보내기' },
   // ipam 은 상단 'IP관리' 탭으로 승격(v2.274, 화면은 SpecialTools.jsx IpamStandalone). topTab:
   // 특수 기능 카드 그리드에는 안 보이지만 항목은 유지 — 권한 매트릭스(사용자 관리 › 도구별 접근)의
   // toolsDenied 'ipam' 키 편집 UI 가 이 목록에서 나오고, 그 값이 상단 탭 노출(App.jsx toolKey)을 결정한다.
