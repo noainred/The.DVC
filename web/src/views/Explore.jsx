@@ -42,7 +42,18 @@ function TopList({ title, items, valueOf, label, accent, type, onSelect }) {
   );
 }
 
-export default function Explore({ scope }) {
+/**
+ * 탐색·랭킹 — 특수 기능 하위에서 렌더된다(v2.274 상단 탭에서 이동). 상단 필터바가 없는
+ * 환경이므로 리전/vCenter 범위 선택자를 자체 내장한다(UX 필터일 뿐 — 서버는 사용자
+ * scope 를 항상 별도로 강제하고, /vcenters 목록도 scope 로 잘려 내려온다).
+ */
+export default function Explore() {
+  const [pick, setPick] = useState({ region: '', vcenterId: '' });
+  const { data: vcList } = usePolling('/vcenters', {}, 60_000);
+  // 상단 필터바와 같은 의미론: vCenter 선택이 리전보다 우선, 리전 변경 시 vCenter 초기화.
+  const scope = pick.vcenterId ? { vcenterId: pick.vcenterId } : (pick.region ? { region: pick.region } : {});
+  const regions = [...new Set((vcList || []).map((v) => v.location?.region).filter(Boolean))];
+  const vcOptions = (vcList || []).filter((v) => !pick.region || v.location?.region === pick.region);
   const [limit, setLimit] = useState(10);
   const [detail, setDetail] = useState(null); // { type, item }
   const { data: top, error, loading } = usePolling('/top', { ...scope, limit }, 15_000);
@@ -78,9 +89,19 @@ export default function Explore({ scope }) {
     <>
       <div className="flex between wrap" style={{ marginBottom: 4 }}>
         <div className="section-title" style={{ margin: '6px 0' }}>자원 최다 사용 Top 랭킹</div>
-        <select className="select" value={limit} onChange={(e) => setLimit(Number(e.target.value))}>
-          {[5, 10, 20, 50].map((n) => <option key={n} value={n}>Top {n}</option>)}
-        </select>
+        <div className="flex gap wrap" style={{ alignItems: 'center' }}>
+          <select className="select" value={pick.region} onChange={(e) => setPick({ region: e.target.value, vcenterId: '' })}>
+            <option value="">전체 리전</option>
+            {regions.map((r) => <option key={r} value={r}>{r}</option>)}
+          </select>
+          <select className="select" value={pick.vcenterId} onChange={(e) => setPick((p) => ({ ...p, vcenterId: e.target.value }))}>
+            <option value="">전체 vCenter</option>
+            {vcOptions.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+          </select>
+          <select className="select" value={limit} onChange={(e) => setLimit(Number(e.target.value))}>
+            {[5, 10, 20, 50].map((n) => <option key={n} value={n}>Top {n}</option>)}
+          </select>
+        </div>
       </div>
 
       <div className="grid cols-3">

@@ -6,6 +6,7 @@ export const TOOLS = [
   { k: 'service-hub', icon: '🧰', label: '서비스 허브 (별도 포탈)', desc: '운영 서비스 바로가기 모음 · 링크 상태 점검/추이 · 데이터센터 구성 (새 탭)', external: 'serviceHubUrl' },
   { k: 'aisearch', icon: '🔎', label: 'AI 검색 (자연어)', desc: '자연어로 VM/호스트/IP 검색 · 로컬 LLM' },
   { k: 'insights', icon: '🧠', label: '운영 인사이트', desc: 'VM 라이트사이징 · 클러스터 N+1 여력 · 알람 핫스팟 · GPU 유휴' },
+  { k: 'explore', icon: '🏆', label: '탐색·랭킹', desc: '자원 최다 사용 Top 랭킹(CPU·메모리·디스크·전력) + 상세 스펙 VM 검색 — 리전/vCenter 범위 선택', perm: 'dashboard' },
   { k: 'threats', icon: '🛡️', label: '위협 탐지', desc: '마이닝 의심 · 위험 포트 노출 · EOL OS · 신규 rogue IP · NSX IDS' },
   { k: 'vmfinder', icon: '🧭', label: 'VM 정밀 검색 / 유휴 VM', desc: '다수 vCenter·폴더·클러스터·풀 + 조건 · 1일/1주 평균 CPU로 미사용 VM' },
   { k: 'deepsearch', icon: '🔭', label: '심층 검색', desc: '게이트웨이·서브넷·GPU·OS 등 다조건 + 게스트 탐침(GPU드라이버·프로세스) · 전체/복수 vCenter' },
@@ -17,7 +18,10 @@ export const TOOLS = [
   { k: 'guestos', icon: '🐧', label: 'Guest OS 종류/버전', desc: 'OS·버전별 VM 수 · 전체/법인별 · 검색' },
   { k: 'real-os', icon: '🔎', label: '실제 OS 확인(게스트)', desc: '게스트 OS에서 실제 설치 OS(/etc/os-release 등) 읽기 · ESXi 보고와 불일치 탐지 · 주기 스캔 · CSV' },
   { k: 'thinvms', icon: '💧', label: 'Thin VM 찾기', desc: 'Thin 프로비저닝 VM · 회수 가능 용량(추정)' },
-  { k: 'ipam', icon: '📒', label: '센터별 IP 관리대장', desc: 'vCenter 수집 IP 전체 · 클릭 시 상세 · DB/CSV' },
+  // ipam 은 상단 'IP관리' 탭으로 승격(v2.274, 화면은 SpecialTools.jsx IpamStandalone). topTab:
+  // 특수 기능 카드 그리드에는 안 보이지만 항목은 유지 — 권한 매트릭스(사용자 관리 › 도구별 접근)의
+  // toolsDenied 'ipam' 키 편집 UI 가 이 목록에서 나오고, 그 값이 상단 탭 노출(App.jsx toolKey)을 결정한다.
+  { k: 'ipam', icon: '📒', label: 'IP관리 (상단 메뉴)', desc: '상단 IP관리 탭으로 이동 — 여기서의 접근 차단이 상단 탭 노출에 그대로 적용됩니다.', topTab: true },
   { k: 'dupip', icon: '🔁', label: '중복 IP 찾기', desc: '둘 이상 VM이 같은 IPv4를 쓰는 경우' },
   { k: 'vmtools', icon: '🧩', label: 'VMware Tools 버전', desc: '버전별 집계 + 업그레이드' },
   { k: 'snapshots', icon: '📸', label: '스냅샷 있는 VM', desc: 'vCenter/용량/개수별 정렬' },
