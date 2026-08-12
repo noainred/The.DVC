@@ -7,7 +7,8 @@ import { authenticateAD } from './ad.js';
 import * as totp from './totp.js';
 import { checkOtpAllowed, recordOtpFailure, recordOtpSuccess } from '../security/loginRateLimit.js';
 import { rolePermissionSet } from './permissions.js';
-import { effectiveLoginPolicy, userLoginPolicy } from '../security/securitySettings.js';
+import { effectiveLoginPolicy, userLoginPolicy, singleSessionEnabled } from '../security/securitySettings.js';
+import { isActiveSession } from './sessions.js';
 
 // users.json lives in CONFIG_DIR (default app/server/config; set to e.g.
 // /etc/vmware-portal to keep it outside the app dir across upgrades).
@@ -625,6 +626,12 @@ if (!config.auth.enabled) {
 export function resolveTokenUser(token) {
   const payload = token && verifyToken(token);
   if (!payload) return null;
+  // 단일 세션 강제(ID 공유 금지, v2.280) — 켜져 있으면 이 계정의 '현재 활성 세션' sid 와 일치하는
+  // 토큰만 유효하다. 다른 기기/사람이 새로 로그인하면 그 로그인이 활성 sid 를 덮어써(최신 로그인
+  // 우선) 이전 세션의 토큰은 여기서 무효가 된다. sid 없는(기능 도입/활성화 전 발급) 토큰도 무효 →
+  // 재로그인으로 세션을 확립한다. 로컬·AD 모두 username 키로 동일하게 강제하며, HTTP authMiddleware
+  // 와 WS SSH/RDP 게이트웨이가 전부 이 함수를 타므로 여기 한 곳에서 전 경로가 커버된다.
+  if (singleSessionEnabled() && !isActiveSession(payload.sub, payload.sid)) return null;
   if (payload.src === 'local') {
     const u = getUser(payload.sub);
     if (!u) return null; // 삭제된 계정

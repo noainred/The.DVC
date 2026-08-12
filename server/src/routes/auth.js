@@ -5,7 +5,8 @@ import { rolePermissions, roleToolsDenied } from '../auth/permissions.js';
 import { loadAdConfig, saveAdConfig, testAd } from '../auth/ad.js';
 import { logAudit } from '../audit.js';
 import { recordPortalLoginFail } from '../security/loginStore.js';
-import { loadSessionSecurity } from '../security/securitySettings.js';
+import { loadSessionSecurity, singleSessionEnabled } from '../security/securitySettings.js';
+import { newSessionId, setActiveSession } from '../auth/sessions.js';
 import { checkLoginAllowed, recordLoginFailure, recordLoginSuccess } from '../security/loginRateLimit.js';
 
 export const authRouter = Router();
@@ -59,8 +60,13 @@ authRouter.post('/login', async (req, res) => {
   // 로컬 계정 토큰에는 src/tv(tokenVersion)를 실어 서버측 폐기(비번/역할 변경 시 즉시 무효)를
   // 가능하게 한다(감사 M5). AD 계정은 로컬 레코드가 없어 다음 로그인 시점에 역할이 반영된다.
   const local = user.source === 'local' ? getUser(user.username) : null;
-  const token = signToken({ sub: user.username, role: user.role, name: user.name, ...(local ? { src: 'local', tv: local.tokenVersion || 0 } : {}) });
-  logAudit({ user: user.username, action: '로그인', detail: `${user.role}${user.mustEnrollOtp ? ' · OTP 등록 필요(등록 전용 세션)' : ''}`, ip });
+  // 단일 세션 강제(ID 공유 금지, v2.280) — 켜져 있으면 이 로그인에 새 세션 ID(sid)를 발급해 토큰에
+  // 싣고 계정의 활성 세션으로 등록한다. 이 등록이 같은 계정의 이전 세션 sid 를 덮어써(최신 로그인
+  // 우선) 이전 토큰이 resolveTokenUser 에서 무효가 된다. 꺼져 있으면 sid 를 싣지 않는다(다중 세션 허용).
+  const sid = singleSessionEnabled() ? newSessionId() : null;
+  const token = signToken({ sub: user.username, role: user.role, name: user.name, ...(local ? { src: 'local', tv: local.tokenVersion || 0 } : {}), ...(sid ? { sid } : {}) });
+  if (sid) setActiveSession(user.username, sid, { at: Date.now(), ip });
+  logAudit({ user: user.username, action: '로그인', detail: `${user.role}${sid ? ' · 단일세션' : ''}${user.mustEnrollOtp ? ' · OTP 등록 필요(등록 전용 세션)' : ''}`, ip });
   // 로그인 직후에도 프론트가 메뉴를 바로 게이팅할 수 있게 권한/scope 를 함께 내려준다.
   // mustEnrollOtp 이면 프론트는 OTP 등록 화면에 고정된다(서버도 requireEnrolled 로 차단).
   const owners = (() => { try { return loadSessionSecurity().settingsOwners || []; } catch { return []; } })();

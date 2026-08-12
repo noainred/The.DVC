@@ -43,11 +43,12 @@ export function loadConfiguredSecurity() {
     idleLogoutMin: clamp(p.idleLogoutMin, 1, 1440, DEFAULTS.idleLogoutMin), // 1분~24시간
     settingsOwners: owners && owners.length ? owners : DEFAULTS.settingsOwners.slice(),
     loginPolicy: normPolicy(p.loginPolicy), // null = 미설정(레거시)
+    singleSession: !!p.singleSession,       // 단일 세션 강제(ID 공유 금지). 기본 false(옵트인).
   };
 }
 
-// 로그인 정책 캐시 — resolveTokenUser(매 /api 요청)가 읽는 핫패스라 파일 read 를 매 요청 하지
-// 않도록 3초 캐시한다. 저장(saveSessionSecurity)·외부 편집은 최대 3초 안에 반영된다(save 는 즉시 무효화).
+// 로그인 정책·단일세션 캐시 — resolveTokenUser(매 /api 요청)가 읽는 핫패스라 파일 read 를 매
+// 요청 하지 않도록 3초 캐시한다. 저장(saveSessionSecurity)·외부 편집은 최대 3초 안에 반영된다.
 let _polAt = 0, _polCache = null;
 export function effectiveLoginPolicy() {
   const now = Date.now();
@@ -55,6 +56,16 @@ export function effectiveLoginPolicy() {
   _polCache = loadConfiguredSecurity().loginPolicy;
   _polAt = now;
   return _polCache;
+}
+
+// 단일 세션 강제 여부(핫패스 캐시) — resolveTokenUser 가 매 요청 참조한다.
+let _ssAt = 0, _ssCache = false;
+export function singleSessionEnabled() {
+  const now = Date.now();
+  if (_ssAt && now - _ssAt < 3000) return _ssCache;
+  _ssCache = !!loadConfiguredSecurity().singleSession;
+  _ssAt = now;
+  return _ssCache;
 }
 
 /**
@@ -123,7 +134,7 @@ export function userLoginPolicy(username) {
 }
 
 /** 테스트·핫리로드용 — 전역/사용자별 로그인 정책 캐시를 즉시 무효화. */
-export function invalidateLoginPolicyCache() { _polAt = 0; _upolAt = 0; }
+export function invalidateLoginPolicyCache() { _polAt = 0; _upolAt = 0; _ssAt = 0; }
 
 /**
  * 파일/환경변수로 지정한 설정 소유 계정 — 운영자가 서버에서 직접 편집하는 경로.
@@ -193,10 +204,11 @@ export function saveSessionSecurity(partial = {}) {
     idleLogoutMin: partial.idleLogoutMin !== undefined ? clamp(partial.idleLogoutMin, 1, 1440, cur.idleLogoutMin) : cur.idleLogoutMin,
     settingsOwners: owners,
     loginPolicy, // null = 미설정(레거시)
+    singleSession: partial.singleSession !== undefined ? !!partial.singleSession : cur.singleSession,
   };
   // 원자적 쓰기 — settingsOwners(설정 편집 권한)를 담는 권한 config. 부분기록으로 손상되면
   // 로드가 DEFAULTS로 조용히 리셋돼 소유자 경계가 무너진다.
   atomicWriteFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
-  _polAt = 0; // 로그인 정책 캐시 즉시 무효화
+  _polAt = 0; _ssAt = 0; // 로그인 정책·단일세션 캐시 즉시 무효화
   return next;
 }

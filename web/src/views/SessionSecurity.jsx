@@ -22,7 +22,7 @@ export default function SessionSecurity() {
     setBusy(true); setMsg(null);
     try {
       const owners = String(s.settingsOwners || '').split(/[\s,]+/).map((x) => x.trim()).filter(Boolean);
-      const r = await putJson('/admin/security/session', { idleLogoutEnabled: s.idleLogoutEnabled, idleLogoutMin: Number(s.idleLogoutMin) || 30, settingsOwners: owners, loginPolicy: s.loginPolicy || undefined, otp: otp.trim() });
+      const r = await putJson('/admin/security/session', { idleLogoutEnabled: s.idleLogoutEnabled, idleLogoutMin: Number(s.idleLogoutMin) || 30, settingsOwners: owners, loginPolicy: s.loginPolicy || undefined, singleSession: !!s.singleSession, otp: otp.trim() });
       if (r && r.ok === false) { setMsg(`오류: ${r.reason || '저장 실패'}`); }
       else { const ns = r.settings || s; setS({ ...ns, settingsOwners: (ns.settingsOwners || []).join(', ') }); setOtp(''); setMsg('저장되었습니다. 변경 내역은 감사 로그에 기록됩니다.'); }
     } catch (e) { setMsg(`오류: ${e.message}`); }
@@ -58,6 +58,18 @@ export default function SessionSecurity() {
               ＋ 자동 포함(중앙 배포 admin): <b>{(s.autoOwners || []).join(', ')}</b> — 중앙에서 이 엣지로 배포한 관리자 계정은 설정에 접근할 수 있습니다(여기서 지우지 않아도 됨. 중앙에서 제거하면 자동 해제).
             </div>
           )}
+        </div>
+
+        <div style={{ borderTop: '1px solid rgba(255,255,255,.08)', marginTop: 16, paddingTop: 14 }}>
+          <label className="flex gap" style={{ alignItems: 'center', cursor: 'pointer', marginBottom: 6 }}>
+            <input type="checkbox" checked={!!s.singleSession} onChange={(e) => setS({ ...s, singleSession: e.target.checked })} />
+            <b>단일 세션만 허용 (ID 공유 방지)</b>
+          </label>
+          <div className="muted" style={{ fontSize: 12, lineHeight: 1.7 }}>
+            켜면 한 계정으로 <b>동시에 한 곳에서만</b> 로그인할 수 있습니다. 같은 계정으로 다른 기기에서
+            새로 로그인하면 <b>이전 로그인은 자동으로 로그아웃</b>됩니다(최신 로그인 우선). 로컬·AD 계정 모두 적용됩니다.
+            <div style={{ marginTop: 4 }}>⚠ 이 옵션을 <b>처음 켜는 순간</b> 현재 접속 중인 모든 세션은 한 번 재로그인이 필요합니다(세션 확립).</div>
+          </div>
         </div>
 
         <div style={{ borderTop: '1px solid rgba(255,255,255,.08)', marginTop: 16, paddingTop: 14 }}>
