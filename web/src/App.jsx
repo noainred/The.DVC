@@ -24,6 +24,7 @@ const SpecialTools = lazy(() => import('./views/SpecialTools.jsx'));
 const SvcMonitor = lazy(() => import('./views/SvcMonitor.jsx'));
 const Insights = lazy(() => import('./views/Insights.jsx'));
 const ReleaseNotes = lazy(() => import('./views/ReleaseNotes.jsx'));
+const CodexCheck = lazy(() => import('./views/CodexCheck.jsx'));
 
 const TABS = [
   { id: 'overview', label: 'Overview' }, // 랜딩(항상 노출)
@@ -44,6 +45,7 @@ const TABS = [
   { id: 'insights', label: '인사이트', perm: 'insights' },
   { id: 'settings', label: '설정', adminOnly: true, ownerOnly: true, perm: 'settings' },
   { id: 'upgrade', label: '업그레이드', adminOnly: true, feature: 'upgradeTab', perm: 'upgrade' },
+  { id: 'codex-check', label: '보안점검', adminOnly: true, perm: 'settings' },
 ];
 
 // 기능 권한 보유 여부 — admin 은 항상 전체. permissions 배열이 없으면(구버전/인증 비활성) 통과.
@@ -269,7 +271,7 @@ function Portal({ user, onLogout }) {
   // 아닌 경우. 성능점검(svcmon)은 트리 검색·상태 칩·Test name 검색을 자체로 갖고 상단 필터값을
   // 받지도 않아(<SvcMonitor /> 는 filters 미전달) 상단 검색이 눌러도 아무 일이 없는 죽은 UI 였다.
   // IP관리(ipam)는 화면 안에 자체 vCenter 범위 선택자가 있어 상단 필터바를 쓰지 않는다.
-  const noFilterTabs = ['overview', 'vcenters', 'summary', 'upgrade', 'tools', 'insights', 'settings', 'svcmon', 'ipam'];
+  const noFilterTabs = ['overview', 'vcenters', 'summary', 'upgrade', 'tools', 'insights', 'settings', 'svcmon', 'codex-check', 'ipam'];
   const showFilters = !noFilterTabs.includes(tab);
 
   // Drill into a site → set the HOSTS tab's own vCenter filter, then go there.
@@ -392,6 +394,7 @@ function Portal({ user, onLogout }) {
           {tab === 'insights' && <Insights onGotoTab={setTab} />}
           {tab === 'settings' && user.role === 'admin' && isOwner && <Settings />}
           {tab === 'upgrade' && user.role === 'admin' && health?.features?.upgradeTab && <Upgrade />}
+          {tab === 'codex-check' && user.role === 'admin' && <CodexCheck />}
          </Suspense>
         </ErrorBoundary>
       </main>
