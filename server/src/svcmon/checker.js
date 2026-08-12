@@ -31,8 +31,34 @@ export const DEFAULT_PORTS = {
   smtp: 25, pop3: 110, imap: 143, ssh: 22, ldap: 389, cert: 443, domain: 43, ntp: 123, dns: 53,
 };
 
-/** 단일 점검 실행 → { status:'ok'|'warn'|'bad', reply, ms }. */
+// 점검 1건의 하드 데드라인(방어선) — 개별 소켓 타임아웃(대개 5초, cert/ntp 등도 수 초)보다 넉넉히
+// 두어 정상 점검은 건드리지 않되, 어떤 이유로든 내부 Promise 가 결말나지 않으면 여기서 끊는다.
+// traceroute(execFile 25초)·domain(whois 다단) 이 가장 길어 45초로 잡았다.
+const RUNCHECK_HARD_TIMEOUT_MS = 45_000;
+
+/**
+ * 단일 점검 실행 → { status:'ok'|'warn'|'bad', reply, ms }.
+ * ⚠ CRITICAL 회귀 방지(v2.279): 개별 점검이 소켓/Promise 를 결말짓지 못하면(과거 banner/ldapBind 의
+ * 부분응답·무응답 종료가 그랬다) 그 점검을 await 하던 워커/풀의 드레인 루프가 영영 끝나지 않아
+ * 폴러 전체가 멈췄다. 소스(banner/ldapBind)는 각각 고쳤고, 여기서 한 번 더 하드 데드라인으로 감싸
+ * 미래의 어떤 미결말도 폴러를 멈추지 못하게 한다(초과 시 bad 로 격리 — 실패 격리 원칙과 동일).
+ */
 export async function runCheck(test, host) {
+  const startedAt = Date.now();
+  let timer;
+  const guard = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(bad('점검 시간 초과(내부 데드라인 45s)', startedAt)), RUNCHECK_HARD_TIMEOUT_MS);
+    if (timer && typeof timer.unref === 'function') timer.unref(); // 데드라인 타이머가 프로세스 종료를 막지 않게
+  });
+  try {
+    return await Promise.race([runCheckInner(test, host), guard]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** 실제 점검 로직 — runCheck 하드 데드라인 래퍼 안에서 실행된다. */
+async function runCheckInner(test, host) {
   const started = Date.now();
   const port = Number(test.port) || DEFAULT_PORTS[test.type] || 0;
   try {
@@ -151,22 +177,29 @@ function banner(host, port, pattern, label, started, test) {
   return new Promise((resolve) => {
     const sock = net.connect({ host, port, timeout: 5000 });
     let buf = '';
-    const finish = (r) => { try { sock.destroy(); } catch { /* noop */ } resolve(r); };
+    let done = false;
+    const finish = (r) => { if (done) return; done = true; try { sock.destroy(); } catch { /* noop */ } resolve(r); };
+    // 수집한 배너를 판정한다. 한 바이트도 못 받았으면(buf 빈 문자열) 무응답으로 떨어뜨린다.
+    const evaluate = () => {
+      if (!buf) return finish(bad(`${label} 무응답(연결 종료)`, started));
+      const line = buf.split(/\r?\n/)[0].slice(0, 120);
+      if (!pattern.test(line)) return finish({ status: 'warn', reply: `예상외 응답: ${line}`, ms: Date.now() - started });
+      if (test?.keyword && !buf.includes(test.keyword)) return finish({ status: 'warn', reply: `${label} 응답 · 키워드 없음`, ms: Date.now() - started });
+      finish({ status: 'ok', reply: line, ms: Date.now() - started });
+    };
     sock.once('connect', () => { if (test?.send) sock.write(`${test.send}\r\n`); });
     sock.on('data', (chunk) => {
       buf += chunk.toString('latin1');
-      if (buf.length > 2048 || buf.includes('\n')) {
-        const line = buf.split(/\r?\n/)[0].slice(0, 120);
-        if (!pattern.test(line)) return finish({ status: 'warn', reply: `예상외 응답: ${line}`, ms: Date.now() - started });
-        if (test?.keyword && !buf.includes(test.keyword)) {
-          return finish({ status: 'warn', reply: `${label} 응답 · 키워드 없음`, ms: Date.now() - started });
-        }
-        finish({ status: 'ok', reply: line, ms: Date.now() - started });
-      }
+      // 완결 신호(개행 도착 또는 배너 상한 2048B 도달)면 즉시 판정. 그 외엔 close 에서 판정한다.
+      if (buf.length > 2048 || buf.includes('\n')) evaluate();
     });
     sock.once('timeout', () => finish(bad(`${label} 응답 타임아웃`, started)));
     sock.once('error', (e) => finish(bad(shortErr(e), started)));
-    sock.once('close', () => { if (!buf) finish(bad(`${label} 무응답(연결 종료)`, started)); });
+    // ⚠ CRITICAL 회귀 방지(v2.279): 서버가 '개행 없는 부분 배너'를 보낸 뒤 정상 종료(FIN)하면
+    // data 핸들러는 개행이 없어 판정하지 않고, 과거 close 핸들러는 `if (!buf)` 라 buf 가 비어있지
+    // 않으면 아무 것도 안 해 Promise 가 영구 미해결 → 폴러 전체가 멈췄다(소켓 inactivity 타임아웃은
+    // FIN·destroy 시 해제돼 발화하지 않음). close 에서 받은 부분 배너로 반드시 판정한다.
+    sock.once('close', () => evaluate());
   });
 }
 
@@ -256,17 +289,23 @@ function ldapBind(host, port, timeoutMs) {
     const msg = Buffer.concat([Buffer.from([0x02, 0x01, 0x01]), bindReq]);
     const pdu = Buffer.concat([Buffer.from([0x30, msg.length]), msg]);
     const sock = net.connect({ host, port, timeout: timeoutMs });
-    const fail = (e) => { try { sock.destroy(); } catch { /* noop */ } reject(e); };
+    // done 가드 — data 로 resolve 하면 destroy→close 가 뒤따르므로 close 핸들러가 재차 reject 하지
+    // 않게 막는다.
+    let done = false;
+    const settle = (fn, v) => { if (done) return; done = true; try { sock.destroy(); } catch { /* noop */ } fn(v); };
+    const fail = (e) => settle(reject, e);
     sock.once('connect', () => sock.write(pdu));
     sock.once('data', (res) => {
-      try { sock.destroy(); } catch { /* noop */ }
       // 0x30(SEQ) … 0x61(BindResponse) 0xLL 0x0a 0x01 <resultCode>
       const i = res.indexOf(0x61);
       const code = (i >= 0 && res.length > i + 4) ? res[i + 4] : -1;
-      resolve({ ok: [0, 48, 49].includes(code), code });
+      settle(resolve, { ok: [0, 48, 49].includes(code), code });
     });
     sock.once('timeout', () => fail(new Error('LDAP 타임아웃')));
     sock.once('error', fail);
+    // ⚠ CRITICAL 회귀 방지(v2.279): 서버가 데이터 없이 정상 종료(FIN)하면 과거엔 close 핸들러가
+    // 없어(data/timeout/error 만 존재) Promise 가 영구 미해결 → 폴러 전체가 멈췄다. FIN 도 결말짓는다.
+    sock.once('close', () => fail(new Error('LDAP 무응답(연결 종료)')));
   });
 }
 

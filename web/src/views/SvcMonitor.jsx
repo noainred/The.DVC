@@ -245,7 +245,10 @@ const EMPTY_TEST = { name: '', type: 'ping', intervalSec: 60, port: '', url: '',
 export default function SvcMonitor() {
   const [seq, setSeq] = useState(0);
   const refresh = () => setSeq((n) => n + 1);
-  const { data, error, loading } = usePolling('/svcmon/state', { seq }, 15_000);
+  // limit=2000 을 명시 전달한다(v2.279). 과거 미전달로 서버 기본 300 에 잘려, 대상이 300 개를
+  // 넘으면 301 번째부터 목록·집계에서 무표시로 사라졌다(truncated 플래그도 무시됐다). 서버 상한이
+  // 2000 이므로 그 이상은 data.truncated 배너로 알린다(모드 토글은 클라이언트 필터라 즉시 유지).
+  const { data, error, loading } = usePolling('/svcmon/state', { seq, limit: 2000 }, 15_000);
   const me = getCurrentUser();
   const canEdit = me?.role === 'admin' || me?.role === 'operator';
 
@@ -340,12 +343,16 @@ export default function SvcMonitor() {
   if (loading && !data) return <Loading />;
   if (error && !data) return <ErrorBox message={error} />;
 
+  // KPI 요약(현재 모드 기준). ⚠ 회귀 방지(v2.279): 과거엔 ok/warn/bad 만 세고 나머지(stale·pending)를
+  // 전부 disabled 에 합산해, '갱신 안 됨'·'점검 대기' 카드가 항상 0 이고 폴러 기아로 인한 감시
+  // 공백이 '중지(정상 설정)'로 위장됐다(status.js 에 기록된 실제 사고). 서버 status 와 동일한 6개
+  // 상태 키로 정확히 집계한다(알 수 없는 상태는 disabled 가 아니라 pending 으로 — 공백 은폐 방지).
   const summary = (() => {
-    const s = { total: 0, ok: 0, warn: 0, bad: 0, disabled: 0 };
+    const s = { total: 0, ok: 0, warn: 0, bad: 0, stale: 0, pending: 0, disabled: 0 };
     for (const t of targets) for (const x of t.tests) {
       s.total += 1;
       const st = statusOf(t, x);
-      if (st === 'ok') s.ok += 1; else if (st === 'warn') s.warn += 1; else if (st === 'bad') s.bad += 1; else s.disabled += 1;
+      if (st !== 'total' && s[st] !== undefined) s[st] += 1; else s.pending += 1;
     }
     return s;
   })();
@@ -665,6 +672,14 @@ export default function SvcMonitor() {
           ⚙ 설정
         </button>
       </div>
+
+      {/* 서버가 상한(2000)까지만 대상을 내려줬을 때 경고 — 나머지 대상은 목록·집계에서 빠진다. */}
+      {data?.truncated && (
+        <div className="badge red" style={{ display: 'block', margin: '0 0 10px', padding: '8px 12px', lineHeight: 1.6 }}>
+          ⚠ 등록 대상이 많아 상위 <b>{data.targets?.length ?? 2000}</b>개만 불러왔습니다(전체 <b>{data.targetCount ?? '?'}</b>개).
+          나머지 대상은 목록·요약에서 빠집니다 — 폴더로 범위를 좁히거나 대상 수를 줄여 주세요.
+        </div>
+      )}
 
       <div className="pc-cards">
         {[

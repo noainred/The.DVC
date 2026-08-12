@@ -51,6 +51,26 @@ test('netmapBases: 대장 IP에서 /24 추출', () => {
   assert.ok(bases.includes('10.55.55'));
 });
 
+test('buildNetmap: 범위 제한 계정은 임의 base 로 범위 밖 /24 를 조회할 수 없다(v2.279 scope 유출 방지)', () => {
+  const s = {
+    generatedAt: Date.now(),
+    vcenters: [{ id: 'vc1', name: 'SEOUL' }, { id: 'vc2', name: 'TOKYO' }],
+    vms: [],
+    hosts: [
+      { name: '10.55.55.10', vcenterId: 'vc1', version: '8.0' },   // 스코프 내(vc1)
+      { name: '10.99.99.10', vcenterId: 'vc2', version: '8.0' },   // 스코프 밖(vc2)
+    ],
+  };
+  const allowed = new Set(['vc1']); // vc1 만 볼 수 있는 계정
+  const bases = netmapBases(s, '', allowed);
+  assert.ok(bases.includes('10.55.55'), '스코프 내 /24 는 목록에 있다');
+  assert.ok(!bases.includes('10.99.99'), '스코프 밖 /24 는 base 목록에서 제외된다');
+  // 스코프 밖 base 를 강제 요청해도 스코프 내 첫 base 로 강등된다(임의 /24 로 스캔이력 캐내기 차단).
+  assert.equal(buildNetmap(s, { base: '10.99.99', allowed }).base, '10.55.55');
+  // 무제한 계정(allowed=null)은 임의 base 를 그대로 허용(전체 열람).
+  assert.equal(buildNetmap(s, { base: '10.99.99', allowed: null }).base, '10.99.99');
+});
+
 test('rangeSize: 배열 생성 없이 정확한 IP 수(4096 상한 미적용) — 대형 대역 표시 정확', () => {
   assert.equal(rangeSize('10.0.0.0/24'), 254);
   assert.equal(rangeSize('10.0.0.0/19'), 8190);   // 4096 상한에 잘리지 않음

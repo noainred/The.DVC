@@ -17,6 +17,11 @@ import { isStopped } from './security/emergencyStop.js';
 
 // 사이트 위임 vCenter가 이 시간 이상 push가 없으면 'stale'로 표시(데이터는 계속 서빙).
 const SITE_STALE_MS = Number(process.env.SITE_INVENTORY_STALE_MS) || 300_000;
+// 수집 실패 시 마지막 정상 수집(lastGood)을 이월해 서빙하는 최대 시간(v2.279). 이 창 안에서는
+// 일시 실패(고RTT 타임아웃 등)로 vCenter 인벤토리가 스냅샷에서 사라지지 않는다(호스트/VM 소실·
+// ipam.db 대량 재기록·알람 전원 해소→재발송 방지). 이 창을 넘겨 계속 실패하면 진짜 장기 장애로
+// 보고 unreachable 엔트리로 떨어뜨린다(낡은 데이터를 영원히 정상처럼 보여주지 않기 위함).
+const LASTGOOD_HOLD_MS = Number(process.env.LASTGOOD_HOLD_MS) || 6 * 3_600_000; // 기본 6시간
 
 // 매 폴링 주기의 동시 vCenter 수집 개수 상한(고RTT·다수 vCenter에서 CPU 스파이크 완화).
 const COLLECT_CONCURRENCY = Math.max(1, Number(process.env.COLLECT_CONCURRENCY) || 8);
@@ -221,11 +226,19 @@ class Store {
         const vc = due[i];
         this.vcLast.set(vc.id, Date.now());
         if (r.status === 'fulfilled') {
-          this.vcCache.set(vc.id, { ok: true, data: r.value });
+          this.vcCache.set(vc.id, { ok: true, data: r.value, at: Date.now() });
         } else {
           const d = describeError(r.reason);
           console.error(`[collect] ${vc.id} (${vc.name}) 연결 실패: ${d.message}${d.hint ? ` — ${d.hint}` : ''}`);
-          this.vcCache.set(vc.id, { ok: false, vc, err: d, at: Date.now() });
+          // ⚠ 회귀 방지(v2.279): 실패 시 마지막 정상 데이터를 폐기하지 말고 lastGood 으로 이월한다.
+          // 과거에는 {ok:false} 로 덮어써 그 vCenter 인벤토리가 스냅샷에서 통째로 사라졌고(호스트/VM
+          // 수백 개 소실 플랩), 외부 공유 ipam.db 가 DELETE+INSERT 로 대량 재기록되며, 파생 알람이
+          // 전부 '해소' 처리됐다가 복구 시 쿨다운을 무시하고 재발송됐다. restClient.js 주석의
+          // '상위(store)가 마지막 정상 캐시를 유지한다'는 계약을 여기서 실제로 이행한다.
+          const prev = this.vcCache.get(vc.id);
+          const lastGood = prev?.ok ? prev.data : prev?.lastGood;
+          const lastGoodAt = prev?.ok ? prev.at : prev?.lastGoodAt;
+          this.vcCache.set(vc.id, { ok: false, vc, err: d, at: Date.now(), lastGood, lastGoodAt });
         }
       });
       // Drop cache entries for vCenters that were removed from the registry.
@@ -291,10 +304,22 @@ class Store {
           merged.alarms.push(...s.alarms);
         } else if (c && !c.ok) {
           merged.collectionErrors.push({ vcenterId: vc.id, name: vc.name, ...c.err, at: c.at, fallback: isAuto });
-          // auto 폴백: 목 데이터에 이 vc.id가 있으면 그걸로 채우고, 없으면(목 id가 실제 config와
-          // 불일치) 최소한 unreachable 엔트리라도 넣어 vCenter가 스냅샷에서 사라지지 않게 한다.
-          if (isAuto && pushSite(merged, getMock(), vc.id)) { /* pushed mock site */ }
-          else merged.vcenters.push({ id: vc.id, name: vc.name, location: vc.location, status: 'unreachable', error: c.err.message, hint: c.err.hint, code: c.err.code });
+          if (c.lastGood?.vcenter && (Date.now() - (c.lastGoodAt || 0)) <= LASTGOOD_HOLD_MS) {
+            // 마지막 정상 수집을 이월(보존 창 안) — 상태는 unreachable + stale 로 표시해 낡은
+            // 데이터임을 알리되, 인벤토리·알람은 유지해 소실 플랩·ipam.db 재기록·알람 재발송을 막는다.
+            const s = c.lastGood;
+            merged.vcenters.push({ ...s.vcenter, status: 'unreachable', stale: true, staleSince: c.lastGoodAt, error: c.err.message, hint: c.err.hint, code: c.err.code });
+            merged.hosts.push(...s.hosts);
+            merged.vms.push(...s.vms);
+            merged.datastores.push(...s.datastores);
+            merged.networks.push(...s.networks);
+            merged.alarms.push(...s.alarms);
+          } else if (isAuto && pushSite(merged, getMock(), vc.id)) {
+            // auto 폴백: 목 데이터에 이 vc.id가 있으면 그걸로 채운다.
+          } else {
+            // 보존 창을 넘긴 장기 장애(또는 lastGood 없음) → 최소 unreachable 엔트리(인벤토리는 비움).
+            merged.vcenters.push({ id: vc.id, name: vc.name, location: vc.location, status: 'unreachable', error: c.err.message, hint: c.err.hint, code: c.err.code });
+          }
         } else {
           merged.vcenters.push({ id: vc.id, name: vc.name, location: vc.location, status: 'pending' });
         }
