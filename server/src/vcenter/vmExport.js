@@ -40,6 +40,33 @@ const yn = (v) => (v === true || v === 'true' ? 'Y' : v === false || v === 'fals
 const join = (arr) => (arr && arr.length ? arr.join('; ') : '');
 
 /**
+ * 디스크 슬롯 컬럼(v2.278, 사용자 확정 템플릿) — VM 당 1행을 유지한 채 '디스크1~7'을
+ * 가로로 펼친다. 각 슬롯은 5필드(용량GB·타입·모드·데이터스토어·파일)이고, 디스크가 없는
+ * 슬롯은 빈칸이다. 8개 이상 연결된 VM 은 마지막 '디스크8+ 요약' 컬럼에 나머지를 묶어 넣어
+ * 정보 손실이 없다(운영 환경 최대 디스크 수를 7로 가정한 요구 — 초과분은 요약으로 보전).
+ * 슬롯 번호는 디바이스 정의 순서를 라벨 자연순(Hard disk 1, 2, …)으로 정렬한 순번이다.
+ */
+const DISK_SLOTS = 7;
+const diskTypeOf = (x) => (x.rdm ? 'RDM' : x.thin ? 'thin' : 'thick');
+const DISK_SLOT_COLUMNS = [];
+for (let i = 0; i < DISK_SLOTS; i++) {
+  const n = i + 1;
+  DISK_SLOT_COLUMNS.push(
+    { key: `disk${n}CapacityGB`, label: `디스크${n} 용량(GB)`, get: (vm, d) => (d.disks[i] ? d.disks[i].capacityGB : '') },
+    { key: `disk${n}Type`, label: `디스크${n} 타입`, get: (vm, d) => (d.disks[i] ? diskTypeOf(d.disks[i]) : '') },
+    { key: `disk${n}Mode`, label: `디스크${n} 모드`, get: (vm, d) => (d.disks[i] ? d.disks[i].mode : '') },
+    { key: `disk${n}Datastore`, label: `디스크${n} 데이터스토어`, get: (vm, d) => (d.disks[i] ? d.disks[i].datastore : '') },
+    { key: `disk${n}File`, label: `디스크${n} 파일`, get: (vm, d) => (d.disks[i] ? d.disks[i].fileName : '') },
+  );
+}
+// 8개 이상 초과분 — 슬롯과 같은 정보를 '라벨 용량 타입 모드 [데이터스토어]' 형식으로 이어붙인다.
+const DISK_OVERFLOW_COLUMN = {
+  key: 'disksOverflow',
+  label: '디스크8+ 요약',
+  get: (vm, d) => join(d.disks.slice(DISK_SLOTS).map((x) => `${x.label} ${x.capacityGB}GB ${diskTypeOf(x)} ${x.mode} [${x.datastore || '?'}]`)),
+};
+
+/**
  * 컬럼 정의 — JSON 미리보기와 CSV 가 같은 정의를 공유한다(어긋남 방지).
  * get(vm, d): vm=스냅샷 VM, d={ props, nics, disks, guest } (라이브 보강, 없으면 빈 값).
  */
@@ -101,11 +128,11 @@ export const VM_EXPORT_COLUMNS = [
     get: (vm, d) => (d.disks.length ? Math.round(d.disks.reduce((s, x) => s + x.capacityGB, 0) * 10) / 10 : ''),
   },
   { key: 'datastores', label: '데이터스토어 목록', get: (vm, d) => join([...new Set(d.disks.map((x) => x.datastore).filter(Boolean))]) },
-  {
-    key: 'disks',
-    label: '디스크 상세',
-    get: (vm, d) => join(d.disks.map((x) => `${x.label} ${x.capacityGB}GB ${x.rdm ? 'RDM' : x.thin ? 'thin' : 'thick'} ${x.mode} [${x.datastore || '?'}]`)),
-  },
+  // '디스크 상세'(한 칸 병합, ~v2.277)는 디스크1~7 슬롯 컬럼으로 대체됐다(v2.278 사용자 요청 —
+  // "최대 7개 디스크 템플릿을 만들고 할당된 디스크 정보를 해당 칸에, 없으면 빈칸"). 초과분은
+  // '디스크8+ 요약'이 보전한다.
+  ...DISK_SLOT_COLUMNS,
+  DISK_OVERFLOW_COLUMN,
   { key: 'thinDiskCount', label: 'Thin 디스크 수', get: (vm, d) => (d.disks.length ? d.disks.filter((x) => x.thin).length : '') },
   { key: 'rdmCount', label: 'RDM 수', get: (vm, d) => (d.disks.length ? d.disks.filter((x) => x.rdm).length : '') },
   { key: 'storageUsedGB', label: '스토리지 사용(GB, committed)', get: (vm) => vm.storageGB ?? '' },
@@ -197,6 +224,9 @@ async function buildVmExportFresh(vcenterId) {
   const rows = vms.map((vm) => {
     const props = details.get(vm.id.slice(vcenterId.length + 1)) || {};
     const { nics, disks } = parseVmDevices(props['config.hardware.device']);
+    // 슬롯 배치는 라벨 자연순(Hard disk 1, 2, … 10) — 디바이스 XML 순서가 라벨 순과 다른
+    // 드문 구성에서도 '디스크1' 슬롯이 Hard disk 1 을 가리키게 한다(numeric 비교로 10>2 오정렬 방지).
+    disks.sort((a, b) => String(a.label).localeCompare(String(b.label), undefined, { numeric: true }));
     const guest = parseGuestDisks(props['guest.disk']);
     const d = { props, nics, disks, guest, enriched };
     const row = {};
