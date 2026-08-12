@@ -117,6 +117,7 @@ import { pushUpgradeToCollectors } from '../collector/upgradePush.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { resolveBundleBytes, lastBundleReject } from '../upgrade/bundleSource.js';
 import { upgradeManager } from '../upgrade/manager.js';
+import { getCodexCheckReport, renderCodexCheckMarkdown, writeCodexCheckReport } from '../security/codexCheck.js';
 import {
   listAssignments, addAssignment, updateAssignment, removeAssignment, getResults,
   parseCsv as parseAssignmentsCsv, importAssignments, mergeKnownAgents,
@@ -125,6 +126,24 @@ import {
 export const adminRouter = Router();
 
 const adminOnly = requireRole('admin');
+
+// Codex 정적 보안·완성도 점검 보고서 — 관리자 화면과 날짜별 Markdown 기록을 동일한
+// 서버 모듈에서 생성해 화면과 파일 내용이 어긋나지 않게 한다.
+adminRouter.get('/codex-check', adminOnly, (_req, res) => {
+  res.json(getCodexCheckReport());
+});
+adminRouter.get('/codex-check/file', adminOnly, (_req, res) => {
+  res.type('text/markdown; charset=utf-8').send(renderCodexCheckMarkdown());
+});
+adminRouter.post('/codex-check/write', adminOnly, (req, res) => {
+  try {
+    const result = writeCodexCheckReport();
+    logAudit({ user: req.user?.username, action: 'codex.check.write', target: result.fileName, detail: `${result.bytes} bytes` });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: `점검 파일 기록 실패: ${err.message}` });
+  }
+});
 
 // '설정 소유 계정(settingsOwners)' 서버측 강제 — 지금까지 소유자 경계는 UI(App.jsx)에서만
 // 걸려, 소유자가 아닌 admin이 엔드포인트를 직접 호출하면 소유자 목록을 갈아치우고 소유 계층을
