@@ -76,7 +76,16 @@ export default function UserAdmin() {
 
   const disableTotp = async (u) => {
     if (!window.confirm(`'${u.username}'의 OTP를 해제할까요? (다시 비밀번호/재등록 필요)`)) return;
-    const r = await postJson(`/admin/users/${encodeURIComponent(u.username)}/totp/disable`, {}).catch((e) => ({ ok: false, reason: e.message }));
+    const call = (body) => postJson(`/admin/users/${encodeURIComponent(u.username)}/totp/disable`, body).catch((e) => ({ ok: false, reason: e.message }));
+    let r = await call({});
+    // v2.277 잠금 방지: 비밀번호 없는 OTP 전용 계정은 서버가 임시 비밀번호를 요구한다 —
+    // 없이 해제하면 비번도 OTP 도 없는 '로그인 완전 불가' 계정이 되기 때문(확정 버그 수정).
+    // 서버 거부 사유를 보고 즉석에서 임시 비밀번호를 받아 1회 재시도한다.
+    if (!r.ok && /임시 비밀번호/.test(r.reason || '')) {
+      const pw = window.prompt(`'${u.username}'은(는) 비밀번호가 없는 OTP 전용 계정입니다.\n해제하려면 임시 비밀번호(8자 이상)를 입력하세요 — 이 비밀번호로 로그인해 재등록합니다:`, '');
+      if (!pw) { flash(false, 'OTP 해제를 취소했습니다(임시 비밀번호 미입력).'); return; }
+      r = await call({ password: pw });
+    }
     if (r.ok) { await load(); flash(true, 'OTP를 해제했습니다.'); } else flash(false, r.reason);
   };
 
