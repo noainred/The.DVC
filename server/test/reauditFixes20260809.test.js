@@ -11,6 +11,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { readApiSource } from './lib/apiSource.js';
 
 const read = (p) => fs.readFileSync(new URL(p, import.meta.url), 'utf8');
 
@@ -65,7 +66,7 @@ test('L-R5: ping-result 결과 맵 상한 초과 시 가장 오래된 IP 축출'
 /* ----------------------------- 정적 소스 ----------------------------- */
 
 test('M-R1: /tools/vclogs·export.csv 가 scopeLogFilter 로 사용자 scope 강제', () => {
-  const src = read('../src/routes/api.js');
+  const src = readApiSource(); // v2.283.0 분할 — api.js + routes/api/* 결합 소스 검사
   assert.match(src, /function scopeLogFilter\(req, f\)/);
   // 두 라우트 모두 scopeLogFilter 호출.
   const vclogs = src.slice(src.indexOf("api.get('/tools/vclogs'"), src.indexOf("api.get('/tools/vclogs'") + 700);
@@ -85,14 +86,14 @@ test('logs/db.js: vcenterIds 화이트리스트 IN 절 + 빈 배열=결과 없�
 });
 
 test('L-R1: GPU 시계열 export 가 scopedVcenterIds 로 범위 밖 제외', () => {
-  const src = read('../src/routes/api.js');
+  const src = readApiSource(); // v2.283.0 분할 — api.js + routes/api/* 결합 소스 검사
   // gpuSeriesExport 내부의 scope 필터(유니크 문자열).
   assert.match(src, /const allowed = scopedVcenterIds\(req\.user, snap\); \/\/ null=무제한/);
   assert.match(src, /if \(allowed && !allowed\.has\(h\?\.vcenterId \|\| ''\)\) continue;/);
 });
 
 test('M-R3: PUT /tools/ipam/ip/:ip 가 기존 레코드 소유권을 body 값보다 먼저 판정', () => {
-  const src = read('../src/routes/api.js');
+  const src = readApiSource(); // v2.283.0 분할 — api.js + routes/api/* 결합 소스 검사
   const put = src.slice(src.indexOf("api.put('/tools/ipam/ip/:ip'"), src.indexOf("api.put('/tools/ipam/ip/:ip'") + 900);
   assert.match(put, /const existing = getOverride\(req\.params\.ip\)/);
   // 기존 레코드의 claimedVcenterId 로 접근 가부를 먼저 검사(body 값 아님).
@@ -100,8 +101,9 @@ test('M-R3: PUT /tools/ipam/ip/:ip 가 기존 레코드 소유권을 body 값보
 });
 
 test('L-R2: CSV export 가 guardCell(수식 인젝션 방어)을 적용', () => {
-  const src = read('../src/routes/api.js');
-  assert.match(src, /import \{ guardCell \} from '\.\.\/util\/csv\.js'/);
+  const src = readApiSource(); // v2.283.0 분할 — api.js + routes/api/* 결합 소스 검사
+  // v2.283.0 분할: routes/api/*.js 에서는 상대 경로가 ../../util/csv.js — 두 깊이 모두 허용
+  assert.match(src, /import \{ guardCell \} from '\.\.(?:\/\.\.)?\/util\/csv\.js'/);
   // 인라인 esc 들이 guardCell 을 통과.
   assert.ok(!/const esc = \(v\) => \{ const s = String\(v \?\? ''\)/.test(src), '가드 없는 esc(String 직접)가 남아있으면 안 됨');
   assert.match(src, /const esc = \(v\) => \{ const s = guardCell\(v\)/);

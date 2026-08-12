@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { readApiSource } from './lib/apiSource.js';
 
 process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'ipam-scope-'));
 
@@ -86,7 +87,7 @@ test('M2-B 정적: /gpu-guest-data 가 최장 프리픽스 매칭으로 소유�
 
 /* 적대적 검증(wf_e76670be)이 찾은 스캔 데이터 형제 누락 회귀 방지 */
 test('M1-scan 정적: scan-report.csv·ipam/history 가 범위 제한 계정에 스캔을 노출하지 않음', () => {
-  const src = fs.readFileSync(new URL('../src/routes/api.js', import.meta.url), 'utf8');
+  const src = readApiSource(); // v2.283.0 분할 — api.js + routes/api/* 결합 소스 검사
   const csv = src.slice(src.indexOf("api.get('/tools/ipam/scan-report.csv'"), src.indexOf("api.get('/tools/ipam/scan-report.csv'") + 900);
   assert.match(csv, /scopedVcenterIds\(req\.user/);
   const hist = src.slice(src.indexOf("api.get('/tools/ipam/history'"), src.indexOf("api.get('/tools/ipam/history'") + 500);
@@ -124,7 +125,7 @@ test('WR2 쓰기 scope 모델: 범위 밖 IP 차단·미귀속은 claimed 필수
 });
 
 test('WR3 정적: IPAM 쓰기 7라우트가 scope 가드를 건다', async () => {
-  const src = fs.readFileSync(new URL('../src/routes/api.js', import.meta.url), 'utf8');
+  const src = readApiSource(); // v2.283.0 분할 — api.js + routes/api/* 결합 소스 검사
   for (const anchor of [
     "api.put('/tools/ipam/annotation'", "api.put('/tools/ipam/ip/:ip'", "api.delete('/tools/ipam/ip/:ip'",
     "api.post('/tools/ipam/bulk'", "api.post('/tools/ipam/policies'", "api.put('/tools/ipam/policies/:id'", "api.delete('/tools/ipam/policies/:id'",
@@ -137,7 +138,7 @@ test('WR3 정적: IPAM 쓰기 7라우트가 scope 가드를 건다', async () =>
 });
 
 test('WR5 정적: IPAM 읽기 형제(GET /ip/:ip·/policies summary·manage-meta)도 scope', () => {
-  const src = fs.readFileSync(new URL('../src/routes/api.js', import.meta.url), 'utf8');
+  const src = readApiSource(); // v2.283.0 분할 — api.js + routes/api/* 결합 소스 검사
   // GET /ip/:ip — override 읽기 scope 가드(적대적 검증 wf_23fac1ba 확정 결함)
   const ipGet = src.slice(src.indexOf("api.get('/tools/ipam/ip/:ip'"), src.indexOf("api.get('/tools/ipam/ip/:ip'") + 500);
   assert.match(ipGet, /scopedVcenterIds\(req\.user/);
@@ -166,7 +167,7 @@ test('WR7 overridesSummary(includeFn): 필터 통과분만 집계(범위 밖 ove
   const none = ov.overridesSummary(() => false);
   assert.equal(none.total, 0, 'includeFn 이 전부 false 면 집계 0');
   assert.ok(full.total >= none.total, '무필터 총계 ≥ 필터 총계');
-  const src = fs.readFileSync(new URL('../src/routes/api.js', import.meta.url), 'utf8');
+  const src = readApiSource(); // v2.283.0 분할 — api.js + routes/api/* 결합 소스 검사
   const mm = src.slice(src.indexOf("api.get('/tools/ipam/manage-meta'"), src.indexOf("api.get('/tools/ipam/manage-meta'") + 700);
   assert.match(mm, /overridesSummary\(ovInclude\)/, 'manage-meta 가 스코프된 override 집계를 넘겨야 함');
 });
