@@ -15,6 +15,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { readApiSource } from './lib/apiSource.js';
 
 process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'sec-m1m2-'));
 
@@ -67,7 +68,7 @@ test('M1: chatOps(allowed) 컨텍스트 카운트가 스코프 반영', async ()
 test('cleanup: store.get 원복', () => { store.get = origGet; assert.ok(true); });
 
 /* ── 정적 검증: 도구 라우트 scope 강제 ── */
-const apiSrc = fs.readFileSync(new URL('../src/routes/api.js', import.meta.url), 'utf8');
+const apiSrc = readApiSource(); // v2.283.0 분할 — api.js + routes/api/* 를 등록 순서대로 결합(마커 순서 보존)
 const routeBody = (marker, next) => {
   const i = apiSrc.indexOf(marker);
   const j = next ? apiSrc.indexOf(next, i + marker.length) : apiSrc.length;
@@ -78,7 +79,8 @@ const routeBody = (marker, next) => {
 test('M1 정적: /tools/duplicate-ips·vmtools·snapshots 가 scopedVcenterIds 로 선필터', () => {
   assert.match(routeBody("api.get('/tools/duplicate-ips'", "api.get('/tools/solutions'"), /scopedVcenterIds\(req\.user/);
   assert.match(routeBody("api.get('/tools/vmtools'", "api.get('/tools/snapshots'"), /scopedVcenterIds\(req\.user/);
-  assert.match(routeBody("api.get('/tools/snapshots'", '// ── 특수기능'), /scopedVcenterIds\(req\.user/);
+  // v2.283.0 분할: '// ── 특수기능' 주석이 헬퍼와 함께 이동해 다음 라우트 마커로 교체(의도 동일)
+  assert.match(routeBody("api.get('/tools/snapshots'", "api.get('/tools/report/health'"), /scopedVcenterIds\(req\.user/);
 });
 
 test('M1 정적: /search/nl 이 nlSearch 에 scopedVcenterIds 를 전달', () => {
@@ -99,7 +101,8 @@ test('M1 정적: /tools/vm-finder facets.vcenters 가 scopeVms 에서 파생(전
 });
 
 test('M1 정적: /tools/insights 가 scopeSlice + extraKey(scopeKey) 캐시 분리', () => {
-  const b = routeBody("api.get('/tools/insights'", "// 위협 탐지");
+  // v2.283.0 분할: RISKY_PORTS 헬퍼(주석 포함)가 모듈 상단으로 이동 — 다음 라우트 마커로 교체(의도 동일)
+  const b = routeBody("api.get('/tools/insights'", "api.get('/tools/threats'");
   assert.match(b, /scopeSlice\(snap, req\.user/);
   assert.match(b, /extraKey: scopeKey\(req\.user/);
 });
@@ -107,7 +110,8 @@ test('M1 정적: /tools/insights 가 scopeSlice + extraKey(scopeKey) 캐시 분�
 test('M1 정적: /tools/esxi-temp 와 history 가 scope 로 호스트·key 귀속 검사', () => {
   const b = routeBody("api.get('/tools/esxi-temp'", "api.get('/tools/esxi-temp/history'");
   assert.match(b, /scopedVcenterIds\(req\.user/);
-  const h = routeBody("api.get('/tools/esxi-temp/history'", 'function hash');
+  // v2.283.0 분할: hash 헬퍼가 shared.js 로 이동 — 다음 라우트 마커로 교체(의도 동일)
+  const h = routeBody("api.get('/tools/esxi-temp/history'", "api.get('/tools/capacity-forecast'");
   assert.match(h, /allowedH/);
   assert.match(h, /owns/);
 });
@@ -125,7 +129,7 @@ test('M1 정적(2차): /summary·/overview memoJson 에 extraKey(scopeKey) — �
 test('M1 정적(2차): 형제 /tools 집계 라우트가 모두 scope 강제', () => {
   const cases = [
     ["api.get('/tools/hardware'", "api.get('/tools/esxi'", /scopedVcenterIds\(req\.user/],
-    ["api.get('/tools/esxi'", 'buildGpuInventory', /scopedVcenterIds\(req\.user/],
+    ["api.get('/tools/esxi'", "api.get('/tools/gpu'", /scopedVcenterIds\(req\.user/], // 분할로 buildGpuInventory 가 모듈 상단으로 이동
     ["api.get('/tools/gpu/vms'", 'ip-ping', /scopedVcenterIds\(req\.user/],
     ["api.get('/tools/capacity'", "api.get('/tools/waste'", /scopeSlice\(snap, req\.user/],
     ["api.get('/tools/waste'", "api.get('/tools/thin-vms'", /scopeSlice\(snap, req\.user/],
