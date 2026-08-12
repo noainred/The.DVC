@@ -337,6 +337,98 @@ export function HostVmsModal({ host, vcenterId, onClose }) {
   );
 }
 
+/**
+ * 데이터스토어 상세의 브라우즈 섹션(v2.276) — 이 데이터스토어에 ① 할당된 VM 과 ② 실제
+ * 파일 목록(크기·유형·수정시각)을 라이브로 조회해 보여준다. 서버가 60초 캐시하므로
+ * 재클릭 연타가 vCenter 태스크를 쌓지 않는다. 조회 실패(권한·엣지 수집 vCenter 등)는
+ * 사유 배너로 표시(추측 데이터 없음).
+ */
+const DS_FILE_TYPE = { VmDisk: ['디스크(vmdk)', 'blue'], VmConfig: ['구성(vmx)', 'green'], VmLog: ['로그', 'gray'], VmSnapshot: ['스냅샷', 'purple'], IsoImage: ['ISO', 'amber'], Folder: ['폴더', 'gray'], VmNvram: ['NVRAM', 'gray'], File: ['파일', 'gray'] };
+function DsBrowseSection({ item }) {
+  const [d, setD] = useState(null);
+  const [err, setErr] = useState(null);
+  const [q, setQ] = useState('');
+  const [view, setView] = useState('vms'); // vms | files
+  useEffect(() => {
+    let dead = false;
+    setD(null); setErr(null); setQ('');
+    fetchJson(`/datastores/${encodeURIComponent(item.id)}/browse`)
+      .then((r) => { if (!dead) setD(r); })
+      .catch((e) => { if (!dead) setErr(e.message); });
+    return () => { dead = true; };
+  }, [item.id]);
+  const fmtSize = (b) => (b >= 1024 ** 3 ? `${(b / 1024 ** 3).toFixed(1)} GB` : b >= 1024 ** 2 ? `${(b / 1024 ** 2).toFixed(1)} MB` : `${Math.ceil((b || 0) / 1024)} KB`);
+  if (err) return <div className="card" style={{ marginTop: 14, borderColor: 'var(--amber,#f59e0b)' }}><span style={{ fontSize: 13 }}>⚠ 파일/할당 VM 조회 실패 — {err}</span></div>;
+  if (!d) return <div className="muted" style={{ marginTop: 14, fontSize: 13 }}>⏳ 파일·할당 VM 조회 중… (파일이 많은 데이터스토어는 수십 초 걸릴 수 있습니다)</div>;
+  if (d.mock) return <div className="muted" style={{ marginTop: 14, fontSize: 13 }}>{d.reason}</div>;
+  const files = q ? d.files.filter((f) => (`${f.folder}${f.name}`).toLowerCase().includes(q.toLowerCase())) : d.files;
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 8 }}>
+        <button className={`tab ${view === 'vms' ? 'active' : ''}`} onClick={() => setView('vms')}>
+          할당 VM {d.vms.length}{d.unknownVmCount ? ` (+미수집 ${d.unknownVmCount})` : ''}
+        </button>
+        <button className={`tab ${view === 'files' ? 'active' : ''}`} onClick={() => setView('files')}>
+          파일 {d.files.length.toLocaleString()}{d.truncated ? '+' : ''}
+        </button>
+        {view === 'files' && d.files.length > 0 && (
+          <input className="input" placeholder="파일/폴더 검색…" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 180 }} />
+        )}
+      </div>
+      {view === 'vms' && (d.vms.length === 0
+        ? <div className="muted" style={{ fontSize: 13 }}>이 데이터스토어에 할당된 VM 이 없습니다.{d.unknownVmCount ? ` (수집 스냅샷에 아직 없는 VM ${d.unknownVmCount}대 별도)` : ''}</div>
+        : (
+          <div className="table-wrap" style={{ maxHeight: '32vh' }}>
+            <table>
+              <thead><tr><th>VM</th><th>전원</th><th>호스트</th><th>클러스터</th><th>Guest OS</th><th style={{ textAlign: 'right' }}>사용(GB)</th></tr></thead>
+              <tbody>
+                {d.vms.map((v) => (
+                  <tr key={v.id}>
+                    <td><b>{v.name}</b></td>
+                    <td><StateBadge state={v.powerState} /></td>
+                    <td className="muted" style={{ fontSize: 12 }}>{v.host || '—'}</td>
+                    <td className="muted" style={{ fontSize: 12 }}>{v.cluster || '—'}</td>
+                    <td className="muted" style={{ fontSize: 12 }}>{v.guestOS || '—'}</td>
+                    <td style={{ textAlign: 'right' }}>{v.storageGB ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ))}
+      {view === 'files' && (
+        <>
+          {d.filesError && <div className="card" style={{ borderColor: 'var(--amber,#f59e0b)', marginBottom: 8 }}><span style={{ fontSize: 13 }}>⚠ 파일 목록 조회 실패 — {d.filesError}</span></div>}
+          {d.truncated && <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>⚠ 파일이 많아 최대 10,000개까지만 표시합니다(크기순).</div>}
+          {files.length === 0 && !d.filesError && <div className="muted" style={{ fontSize: 13 }}>{q ? '검색 결과 없음' : '파일 없음'}</div>}
+          {files.length > 0 && (
+            <div className="table-wrap" style={{ maxHeight: '32vh' }}>
+              <table>
+                <thead><tr><th>폴더</th><th>파일</th><th>유형</th><th style={{ textAlign: 'right' }}>크기</th><th>수정</th></tr></thead>
+                <tbody>
+                  {files.slice(0, 2000).map((f, i) => {
+                    const [tl, tc] = DS_FILE_TYPE[f.type] || [f.type, 'gray'];
+                    return (
+                      <tr key={i}>
+                        <td className="muted" style={{ fontSize: 11, wordBreak: 'break-all' }}>{f.folder}</td>
+                        <td style={{ wordBreak: 'break-all' }}><b>{f.name}</b></td>
+                        <td><span className={`badge ${tc}`}>{tl}</span></td>
+                        <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{fmtSize(f.sizeBytes)}</td>
+                        <td className="muted" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{f.modified ? f.modified.slice(0, 16).replace('T', ' ') : '—'}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {files.length > 2000 && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>화면에는 2,000개까지 표시 — 검색으로 좁혀 보세요.</div>}
+        </>
+      )}
+    </div>
+  );
+}
+
 export function EntityDetail({ type, item, onClose }) {
   const titles = { vm: 'VM', host: '호스트', datastore: '데이터스토어' };
   const [showHostVms, setShowHostVms] = useState(false);
@@ -415,6 +507,7 @@ export function EntityDetail({ type, item, onClose }) {
           </>
         )}
       </div>
+      {type === 'datastore' && <DsBrowseSection item={item} />}
       {type === 'host' && item.hbas?.length > 0 && (
         <div style={{ marginTop: 14 }}>
           <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>스토리지 어댑터 (HBA) — {item.hbas.length}</div>

@@ -1,9 +1,11 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { usePolling } from '../api.js';
-import { DataTable, UsageCell, Kpi, Loading, ErrorBox, ResultCount } from '../components/ui.jsx';
+import { DataTable, UsageCell, Kpi, Loading, ErrorBox, ResultCount, EntityDetail } from '../components/ui.jsx';
 import IpmsMatches from '../components/IpmsMatches.jsx';
 
 export default function Datastores({ filters }) {
+  // 이름 클릭 → 상세 모달(할당 VM·파일 브라우즈 포함, v2.276). 훅은 조기 return 위에 선언.
+  const [sel, setSel] = useState(null);
   const { data, error, loading } = usePolling('/datastores', filters, 15_000);
   if (loading && !data) return <Loading />;
   if (error && !data) return <ErrorBox message={error} />; // 데이터 보유 중 일시 폴링 오류는 화면 유지
@@ -19,7 +21,7 @@ export default function Datastores({ filters }) {
   const filtered = Object.keys(filters || {}).length > 0;
 
   const columns = [
-    { key: 'name', label: '데이터스토어', render: (d) => <b>{d.name}</b> },
+    { key: 'name', label: '데이터스토어', render: (d) => <button className="cell-link" title="클릭 — 할당 VM·파일 목록 보기" onClick={() => setSel(d)}><b>💾 {d.name}</b></button> },
     { key: 'vcenterId', label: 'vCenter', render: (d) => <span className="muted">{d.vcenterId}</span> },
     { key: 'type', label: '유형', render: (d) => <span className={`badge ${typeBadge[d.type] || 'gray'}`}>{d.type}</span> },
     { key: 'capacityGB', label: '총 용량', align: 'right', render: (d) => tb(d.capacityGB) },
@@ -40,6 +42,7 @@ export default function Datastores({ filters }) {
       <ResultCount total={data.total} label="데이터스토어" filtered={filtered} />
       <DataTable columns={columns} rows={rows} initialSort={{ key: 'usagePct', dir: 'desc' }} />
       <IpmsMatches filters={filters} />
+      {sel && <EntityDetail type="datastore" item={sel} onClose={() => setSel(null)} />}
     </>
   );
 }
