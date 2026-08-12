@@ -441,14 +441,20 @@ export async function hostPower(hostName, { hours = 24, limit = 1000, serviceTag
   if (tag) {
     for (const m of await allMeasuredPower()) {
       if (norm(m.serviceTag) !== tag) continue;
-      const latest = db.latest(m.serverId) || (m.watts != null ? { watts: m.watts, ts: m.ts } : null);
+      // ⚠ 회귀 방지(v2.286, 확정 버그 #12): 원격(remote/edge) 전력은 DB에 'rmt:<host>' 키로
+      // 적재되는데(collector/puller.js), measured.serverId 는 'remote:<collectorId>:...' 형식이라
+      // 그대로 조회하면 항상 miss → 추이 그래프가 빈 점선이 됐다(현재값은 m.watts 인메모리 폴백으로
+      // 떠서 '현재만 있고 이력 없음'이 됐음). 이름 매칭 분기(432행)·전력 대시보드(340행)와 동일하게
+      // 원격이면 rmt: 키로 조회한다.
+      const powerKey = (m.source === 'remote' && m.host) ? `rmt:${norm(m.host)}` : m.serverId;
+      const latest = db.latest(powerKey) || (m.watts != null ? { watts: m.watts, ts: m.ts } : null);
       return {
         matched: true,
         source: m.source || 'idrac',
         matchedBy: 'serviceTag',
         server: { id: m.serverId, name: m.serverName || hostName, host: m.host ? String(m.host) : '', serviceTag: m.serviceTag || '', model: m.model || '', enabled: true },
         current: latest ? { watts: latest.watts, ts: latest.ts } : null,
-        history: db.history(m.serverId, since, limit),
+        history: db.history(powerKey, since, limit),
         info: getInventory(m.serverId),
       };
     }
