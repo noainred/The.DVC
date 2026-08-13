@@ -3,7 +3,9 @@ import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { fetchJson } from '../../api.js';
 import { DataTable, Loading, ErrorBox, StateBadge, Modal, SearchBox } from '../../components/ui.jsx';
 import EscClose from '../../components/EscClose.jsx';
-import { IdracDetailModal } from '../IdracAdmin.jsx';
+// v2.292: IdracDetailModal 이 IdracAdmin.jsx(1,309줄 뷰)에서 views/idrac/ 로 분리됨 — 모달 하나
+// 때문에 뷰 전체가 결합되고 Settings·SpecialTools 청크가 IdracAdmin 을 공유 의존하던 문제 해소.
+import { IdracDetailModal } from '../idrac/IdracDetailModal.jsx';
 import { Card, tempColor, useTool } from './shared.jsx';
 
 
