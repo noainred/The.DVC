@@ -75,6 +75,14 @@ insightsRouter.put('/finops/config', adminOnly, (req, res) => res.json(saveFinop
 insightsRouter.get('/fleet', async (req, res) => {
   try {
     const snap = store.get();
+    // scope(v2.289 #2): 통합 서버 인벤토리는 전 vCenter 호스트 + 미귀속 베어메탈 하드웨어를 전수
+    // 노출한다. 범위 제한 계정에는 이를 부분 필터로 안전히 좁히기 어렵고(베어메탈=vCenter 귀속
+    // 없음, CLAUDE.md '미귀속 데이터는 범위 계정 노출 금지'), 하드웨어 인벤토리는 본래 전체 범위
+    // 운영자용(모든 변경 라우트가 adminOnly)이므로 범위 제한 계정에는 접근을 막는다(누수 차단).
+    // (범위별 하드웨어 뷰가 필요하면 별도 설계로 확장.)
+    if (scopedVcenterIds(req.user, snap)) {
+      return res.status(403).json({ ok: false, reason: '통합 서버 인벤토리는 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다.' });
+    }
     // 캐시 키: 스냅샷 생성시각 + 플릿 리비전(태그/소속/레지스트리 변경 시 즉시 +1). 매 요청 파일 읽기 없음.
     const key = `${snap.generatedAt}|${fleetRev()}`;
     const full = await snapMemo('fleet', key, 60_000, async () => getFleetInventory(snap));
@@ -182,8 +190,19 @@ insightsRouter.post('/fleet/prune', adminOnly, (req, res) => {
 // 스냅샷 파생이 아니라 metrics DB 파생이므로 key 는 TTL 이 회전시킨다.
 insightsRouter.get('/anomalies', async (req, res) => {
   try {
-    const key = `anomalies|${req.originalUrl}`;
-    const payload = await snapMemo('anomalies', key, 60_000, () => detectAnomalies(req.query));
+    // scope(v2.289 #2): 범위 제한 계정은 자기 vCenter 의 엔티티 이상치만. 스냅샷에서 허용 엔티티
+    // 키(호스트 id·데이터스토어 id·vCenter id)를 모아 detectAnomalies 에 넘긴다(무제한이면 null).
+    const snap = store.get();
+    const allow = scopedVcenterIds(req.user, snap);
+    let allowedKeys = null;
+    if (allow) {
+      allowedKeys = new Set();
+      for (const v of snap.vcenters || []) if (allow.has(v.id)) allowedKeys.add(v.id);           // gpu_vc·temp_vc
+      for (const h of snap.hosts || []) if (allow.has(h.vcenterId)) allowedKeys.add(h.id);        // temp_host·gpu_util
+      for (const d of snap.datastores || []) if (allow.has(d.vcenterId)) allowedKeys.add(d.id);   // ds_usedgb
+    }
+    const key = `anomalies|${req.originalUrl}|${scopeKey(req.user, snap)}`;
+    const payload = await snapMemo('anomalies', key, 60_000, () => detectAnomalies({ ...req.query, allowedKeys }));
     sendCached(req, res, `${payload.generatedAt}|${key}`, payload);
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });

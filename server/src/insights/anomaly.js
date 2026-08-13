@@ -22,7 +22,7 @@ const median = (arr) => { if (!arr.length) return 0; const s = [...arr].sort((a,
  * 한 패밀리의 이상치 목록.
  * baseline은 history(버킷 평균)로 구해 단발 스파이크에 과민하지 않게 한다.
  */
-async function detectFamily(db, fam, { z = 3.5, windowHours = 24, bucketMin = 10, minSamples = 12 }) {
+async function detectFamily(db, fam, { z = 3.5, windowHours = 24, bucketMin = 10, minSamples = 12, allowedKeys = null }) {
   const since = Date.now() - windowHours * 3600_000;
   const latest = db.latestAll(fam.metric); // Map<k,{v,ts}> (인메모리 캐시 — 풀스캔 아님)
   // 키별 history() N+1(키 수천 × 쿼리 1회 = 요청당 동기 쿼리 수천 회로 이벤트 루프 블로킹)을
@@ -30,6 +30,10 @@ async function detectFamily(db, fam, { z = 3.5, windowHours = 24, bucketMin = 10
   const histAll = db.historyAll(fam.metric, since, bucketMin * 60_000, 5000);
   const out = [];
   for (const [k, last] of latest) {
+    // scope(v2.289 #2): 범위 제한 계정은 허용 엔티티 키(호스트 id·데이터스토어 id·vCenter id)만.
+    // allowedKeys=null(무제한)이면 전체. 키 포맷은 sampler.js 와 동일(temp_host/gpu_util=host id,
+    // ds_usedgb=datastore id, gpu_vc=vCenter id) — 범위 밖 vCenter 의 이상치가 새지 않게 한다.
+    if (allowedKeys && !allowedKeys.has(k)) continue;
     const hist = histAll.get(k) || [];
     if (hist.length < minSamples) continue;
     const vals = hist.map((h) => h.avg);
@@ -65,7 +69,7 @@ export async function detectAnomalies(opts = {}) {
   // 행에서 실측). clamp(windowHours 1~168h·7일, bucketMin 1~1440분)로 스캔 범위를 유계로 만든다
   // (/tools/esxi-temp/history 의 days 1~1830 클램프와 같은 방어 패턴).
   const clamp = (v, lo, hi, dflt) => { const n = Number(v); return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : dflt; };
-  const cfg = { z, windowHours: clamp(opts.windowHours, 1, 168, 24), bucketMin: clamp(opts.bucketMin, 1, 1440, 10), minSamples: 12 };
+  const cfg = { z, windowHours: clamp(opts.windowHours, 1, 168, 24), bucketMin: clamp(opts.bucketMin, 1, 1440, 10), minSamples: 12, allowedKeys: opts.allowedKeys instanceof Set ? opts.allowedKeys : null };
   const families = [];
   let total = 0;
   for (const fam of FAMILIES) {

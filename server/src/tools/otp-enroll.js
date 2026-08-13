@@ -62,7 +62,9 @@ const user = getUser(username);
 if (!user) die(`사용자 '${username}' 를 찾을 수 없습니다. --list 로 확인하세요.`);
 
 if (has('--disable')) {
-  const r = disableTotp(username);
+  // force: 콘솔 복구 도구는 신뢰된 로컬 실행이라 '비번 없는 OTP 전용 계정'·수퍼관리자도 해제한다
+  // (해제 → 인자 없이 재실행으로 재등록하는 헤드리스 복구 흐름). 웹 admin 경로의 잠금 방지 가드는 유지.
+  const r = disableTotp(username, { force: true });
   if (!r.ok) die(r.reason);
   console.log(`\n✔ '${username}' 의 OTP 를 해제했습니다. 다시 등록하려면 인자 없이 실행하세요.\n`);
   process.exit(0);
