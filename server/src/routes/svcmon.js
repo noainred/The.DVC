@@ -498,6 +498,13 @@ svcmonRouter.post('/targets/import', canEdit, async (req, res) => {
   const r = bulkAddTargets(parsed.targets, { batch });
   if (!r.committed) return res.status(400).json({ ...payload, ...r, error: '검증에 실패해 등록하지 않았습니다.' });
   if (!r.saved) return res.status(500).json({ ...payload, ...r, error: '파일 저장에 실패했습니다(디스크·권한 확인).' });
+  // ⚠ 회귀 방지(v2.287, 확정 버그 #19): generate 와 달리 import add 는 recordBatch 를 호출하지 않아
+  // 배치 원장에 안 남았고, BulkTab 의 '등록 이력'·되돌리기 UI 가 원장 기반이라 가져오기로 등록한
+  // 건은 이력/롤백이 전혀 안 됐다(현재 UI 의 모든 등록이 /targets/import 경로). generate 와 동일하게 기록.
+  recordBatch({
+    id: batch, createdBy: req.user?.username || '', source: 'import',
+    kind: (parsed.targets[0]?.kind) || 'infra', path: (parsed.targets[0]?.path) || '', targets: r.added, tests: r.newTests, templateId: tplId,
+  });
   logAudit({
     user: req.user?.username,
     action: 'svcmon.target.import',

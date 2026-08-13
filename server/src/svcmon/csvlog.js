@@ -61,6 +61,7 @@ function cell(v) {
 
 /* ── 라이터 상태 ── */
 let stream = null;
+let curFile = '';       // 현재 열려 있는 파일 경로(pruneOld 가 삭제 대상에서 제외)
 let curKey = '';        // 현재 시간 구간
 let curPart = 1;
 let curBytes = 0;       // 현재 파일에 쓴 바이트(크기 회전 판단)
@@ -76,10 +77,15 @@ function openFile(ts, cfg) {
   const dir = logDir();
   const name = fileNameFor(ts, cfg.rotate, curPart);
   const file = path.join(dir, name);
+  curFile = file; // pruneOld 삭제 대상에서 제외(쓰기 중 파일 보호)
   const isNew = !fs.existsSync(file);
   curBytes = isNew ? 0 : fs.statSync(file).size;
   stream = fs.createWriteStream(file, { flags: 'a', mode: 0o600, highWaterMark: 1024 * 1024 });
-  stream.on('error', (e) => { stats.lastError = e?.message || String(e); stream = null; });
+  // ⚠ 회귀 방지(v2.287, 확정 버그 #21): 백프레셔(draining=true) 중 스트림 오류가 나면 'drain'
+  // 이벤트가 영원히 안 와 draining 이 true 로 고착 → flush/schedule 이 조기 반환해 라이터가 무음
+  // 정지(버퍼만 쌓이다 상한 초과분 drop)했다. 오류 시 draining 을 풀고 재무장해 다음 flush 가
+  // 새 스트림을 연다.
+  stream.on('error', (e) => { stats.lastError = e?.message || String(e); stream = null; draining = false; schedule(); });
   if (isNew) {
     const head = BOM + HEADER.join(',') + '\n';
     stream.write(head);
@@ -155,23 +161,37 @@ export function appendResult({ ts, target, test, result, changed }) {
   if (bufBytes >= FLUSH_BYTES) flush(); else schedule();
 }
 
-/** 보관 정책 — 파일 수 + 총량(MB) 초과분을 오래된 것부터 삭제. */
+/**
+ * 보관 정책 — 파일 수 + 총량(MB) 초과분을 오래된 것부터 삭제.
+ * ⚠ 회귀 방지(v2.287, 확정 버그 #17): 과거엔 파일명 사전식 정렬로 앞에서부터 지웠는데,
+ * 회전 단위 혼재(주별 'results-2026-W33' vs 일별 'results-20260812')·파트 파일('-pNN')에서
+ * '-'(0x2D)가 '.'/'0'보다 앞서 최신(쓰기 중) 파일을 오래된 것으로 오판해 먼저 삭제했다.
+ * mtime(수정시각) 오름차순으로 '진짜 오래된 것부터' 지우고, 현재 열려 있는 파일(curFile)은 제외한다.
+ */
 export function pruneOld(dir, cfg = getLogSettings()) {
   try {
-    const names = fs.readdirSync(dir).filter((f) => /^results-.*\.csv$/.test(f)).sort();
+    const rd = () => fs.readdirSync(dir).filter((f) => /^results-.*\.csv$/.test(f))
+      .map((f) => { let st; try { st = fs.statSync(path.join(dir, f)); } catch { return null; } return { f, size: st.size, mtime: st.mtimeMs, cur: path.join(dir, f) === curFile }; })
+      .filter(Boolean)
+      .sort((a, b) => a.mtime - b.mtime); // 오래된 것 먼저
+    const keep = Math.max(1, cfg.keepFiles || 1);
     let removed = 0;
-    // ① 파일 수
-    for (let i = 0; i < names.length - cfg.keepFiles; i += 1) {
-      fs.unlinkSync(path.join(dir, names[i])); removed += 1;
+    // ① 파일 수 — 전체에서 keep 개를 남기고 오래된 것부터 삭제. 쓰기 중 파일은 절대 지우지 않는다.
+    let list = rd();
+    let toDelete = Math.max(0, list.length - keep);
+    for (const x of list) {
+      if (toDelete <= 0) break;
+      if (x.cur) continue;
+      fs.unlinkSync(path.join(dir, x.f)); removed += 1; toDelete -= 1;
     }
-    // ② 총량
+    // ② 총량 — 오래된 것부터 상한 이하가 될 때까지(쓰기 중 파일 제외).
     const maxTotal = (cfg.maxTotalMB || 0) * 1024 * 1024;
     if (maxTotal > 0) {
-      const left = fs.readdirSync(dir).filter((f) => /^results-.*\.csv$/.test(f)).sort()
-        .map((f) => ({ f, size: fs.statSync(path.join(dir, f)).size }));
-      let total = left.reduce((a, x) => a + x.size, 0);
-      for (const x of left) {
+      list = rd();
+      let total = list.reduce((a, x) => a + x.size, 0);
+      for (const x of list) {
         if (total <= maxTotal) break;
+        if (x.cur) continue;
         fs.unlinkSync(path.join(dir, x.f)); total -= x.size; removed += 1;
       }
     }

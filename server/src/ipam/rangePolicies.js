@@ -164,6 +164,22 @@ function compileIndex() {
 }
 
 /**
+ * 이 IP 가 **어떤 활성 정책이든** 덮는지(vCenter 귀속 무관, v2.287 확정 버그 #11).
+ * findPolicy(ip, '') 는 claimedVcenterId 가 붙은(특정 법인 귀속) 정책을 스코프 불일치로 건너뛰므로,
+ * '이 IP 가 운영자 관리 대상인가'(스캔 결과/이력 보존 판단)를 물을 때 쓰면 귀속 정책으로만
+ * 관리되는 IP 가 '미관리'로 오판돼 보존기간 후 스캔 결과·이력이 삭제된다. 관리 여부 판단에는
+ * 이 함수(귀속 무시)를 쓴다.
+ */
+export function isCoveredByAnyPolicy(ipNum) {
+  if (ipNum == null) return false;
+  for (const it of compileIndex()) {
+    if (it.lo > ipNum) break;          // lo asc 정렬 → 이후 전부 불일치
+    if (ipNum <= it.hi) return true;   // 귀속(claimedVcenterId) 여부와 무관하게 커버되면 관리 대상
+  }
+  return false;
+}
+
+/**
  * 한 IP(ipNum)에 적용할 '단일 승자' 정책을 반환(없으면 null).
  * 겹치는 정책은 '좁은 대역 우선 → priority 높은 것' tiebreak로 결정적 단일 승자.
  * vcenterId 스코프: 전역('') 정책은 항상, 귀속 정책은 그 vCenter 뷰에서만.

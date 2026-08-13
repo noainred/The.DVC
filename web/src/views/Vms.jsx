@@ -45,6 +45,9 @@ export default function Vms({ filters }) {
 
   return (
     <>
+      {/* 데이터 보유 중 폴링이 지속 실패하면 낡은 데이터를 무경고로 계속 보여주지 않고 배너로 알린다
+          (v2.287, 확정 버그 #20 — 죽은 VM 을 '구동중'으로 오인 방지). 여기선 data 가 있는 상태다. */}
+      {error && <div className="badge red" style={{ display: 'block', marginBottom: 10, padding: '6px 10px' }}>⚠ 갱신 실패 — 직전 데이터를 표시 중입니다({error}).</div>}
       {t && (
         <>
           <div className="section-title" style={{ marginTop: 0 }}>글로벌 가상머신 요약</div>

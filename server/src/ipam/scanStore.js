@@ -13,7 +13,7 @@ import { config } from '../config.js';
 import { DEFAULT_PORTS, isIpv4 } from './scan.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { getOverrides } from './overrides.js';
-import { getPolicies, findPolicy } from './rangePolicies.js';
+import { getPolicies, isCoveredByAnyPolicy } from './rangePolicies.js';
 
 const MAX_MERGE = 20_000; // 한 보고당 병합 상한(악의/오작동 에이전트의 대량 주입 방지)
 
@@ -24,7 +24,11 @@ const _ipNum = (s) => { const p = String(s).split('.').map(Number); return p.len
 function managedChecker() {
   const ovMap = getOverrides();
   const hasPolicies = getPolicies().some((p) => p.enabled !== false);
-  return (ip) => (Object.prototype.hasOwnProperty.call(ovMap, ip)) || (hasPolicies && findPolicy(_ipNum(ip), '') != null);
+  // ⚠ 회귀 방지(v2.287, 확정 버그 #11): 여기서 findPolicy(ip, '') 를 쓰면 claimedVcenterId 가
+  // 붙은(특정 법인 귀속) 대역정책이 스코프 불일치로 제외돼, 귀속 정책으로만 관리되는 IP 가
+  // '미관리'로 오판되고 스캔 결과·이력이 보존기간 후 삭제됐다. 관리 여부는 귀속 무관(어떤 활성
+  // 정책이든 덮으면 관리)으로 판단한다.
+  return (ip) => (Object.prototype.hasOwnProperty.call(ovMap, ip)) || (hasPolicies && isCoveredByAnyPolicy(_ipNum(ip)));
 }
 
 const CFG = path.join(config.configDir, 'ipam-scan.json');

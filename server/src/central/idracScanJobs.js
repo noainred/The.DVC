@@ -28,6 +28,14 @@ function credFingerprint(username, password) {
 
 const jobs = new Map();    // reqId -> { reqId, agent, ips, username, password, state, createdAt, takenAt, result, doneAt, progress, events }
 const byAgent = new Map(); // agentLower -> Set<reqId> (대기 중)
+
+// 재인출 대기셋에서 reqId 제거(v2.287, #15). ack(진행/결과) 시 호출해, reap 로 대기셋에 되돌아온
+// reqId 가 running/done 이 된 뒤에도 셋에 남아 중복 재인출되거나 MAX_PENDING 을 유령 점유하는 것을 막는다.
+function dropWaiting(j, reqId) {
+  const key = String(j?.agent || '').trim().toLowerCase();
+  const pend = byAgent.get(key);
+  if (pend) { pend.delete(reqId); if (!pend.size) byAgent.delete(key); }
+}
 const agentPolls = new Map(); // agentLower -> 마지막 잡 인출 폴링 시각(ms) — '에이전트가 살아있나' 진단용
 
 const TTL = 10 * 60_000;   // 완료/오류 잡 보존 10분
@@ -197,7 +205,12 @@ export function takeIdracScanJobs(agentName) {
   const out = [];
   for (const reqId of pend) {
     const j = jobs.get(reqId);
-    if (!j) continue;
+    // ⚠ 회귀 방지(v2.287, 확정 버그 #15): 'pending' 상태만 claim 한다. reapClaims 가 만료 claim 을
+    // pending 으로 되돌려 대기셋에 다시 넣은 뒤 늦은 ack(setIdracScanProgress/Result)가 도착하면
+    // 그 잡은 running/done 인데도 대기셋에 남아 있어(ack 가 셋에서 안 뺐음), 상태 검사가 없으면
+    // 여기서 재인출돼 같은 대역을 중복 스캔하고 진행 상태가 역행했다. 진행/완료된 잡은 건너뛴다
+    // (아래 byAgent.delete 로 셋에서도 함께 정리된다).
+    if (!j || j.state !== 'pending') continue;
     // claim: running으로 전환하되 첫 보고(ack) 전까지는 claim 기한을 둔다. 기한 내 보고 없으면 재수확.
     j.state = 'running'; j.takenAt = Date.now(); j.acked = false;
     j.claims = (j.claims || 0) + 1;
@@ -269,6 +282,7 @@ export function setIdracScanProgress(reqId, { scanned, total, found } = {}) {
   const j = jobs.get(reqId);
   if (!j) return false;
   j.acked = true; j.claimDeadline = null; // 첫 진행 보고 = ack(claim 확정) → 재수확 대상 아님
+  dropWaiting(j, reqId); // reap 로 되돌아온 reqId 를 대기셋에서 제거(중복 재인출 방지)
   const prevFound = j.progress?.found || 0;
   j.progress = {
     scanned: Number(scanned) || 0,
@@ -291,6 +305,7 @@ export function setIdracScanResult(reqId, data = {}) {
   const j = jobs.get(reqId);
   if (!j) return false;
   j.acked = true; j.claimDeadline = null; // 결과 회신 = ack
+  dropWaiting(j, reqId); // 완료된 reqId 를 대기셋에서 제거(중복 재인출·MAX_PENDING 유령 점유 방지)
   j.state = data.error ? 'error' : 'done';
   j.doneAt = Date.now();
   const af = data.authFailed || 0;

@@ -69,6 +69,12 @@ function spawnWorker() {
     if (pool) {
       pool.workers = pool.workers.filter((s) => s !== slot);
       try { pool.workers.push(spawnWorker()); } catch { /* 재생성 실패 시 남은 워커로 지속 */ }
+      // ⚠ 회귀 방지(v2.287, 확정 버그 #8): 죽은 워커가 물고 있던 1건만 재처리하고 drain 을
+      // 부르지 않으면, 큐에 대기 중이던 나머지 파싱 작업의 Promise 가 영원히 pending 으로 남는다
+      // (drain 은 push·다른 워커 message 에서만 돌고, parseObjectContentAsync 엔 타임아웃이 없다).
+      // 2vCPU 서버는 워커가 1개뿐이라 그 워커가 크래시하면 수집 파이프라인이 통째로 멈췄다.
+      // 재생성한 유휴 워커에 큐 잔여 작업을 즉시 배정한다.
+      drain();
     }
   };
   w.on('error', onDown);
