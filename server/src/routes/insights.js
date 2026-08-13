@@ -7,6 +7,10 @@ import { Router } from 'express';
 import { requireRole } from '../auth/auth.js';
 import { store } from '../store.js';
 import { scopedVcenterIds } from '../auth/scope.js';
+// scope 강제 헬퍼(v2.288, 확정 버그 재발 방지): 조회 라우트는 사용자 scope 로 좁힌 스냅샷을 빌더에
+// 넘기고, 캐시 키에 scope 서명을 섞어 스코프가 다른 계정이 같은 캐시를 공유하지 못하게 한다.
+// (routes/api/reports.js 와 동일 패턴 — 그쪽은 memoJson, 여기선 snapMemo 캐시.)
+import { scopeSlice, scopeKey } from './api/shared.js';
 import { allMeasuredPower } from '../idrac/service.js';
 import { filterMeasuredByMapping, loadPowerSettings } from '../idrac/powerSettings.js';
 import { snapMemo, sendCached } from '../util/snapCache.js';
@@ -34,11 +38,12 @@ const adminOnly = requireRole('admin');
 insightsRouter.get('/finops', async (req, res) => {
   try {
     const snap = store.get();
-    const key = `${snap.generatedAt}|${JSON.stringify(loadPowerSettings())}|${JSON.stringify(loadFinopsConfig())}|${fleetRev()}`;
-    const validIds = new Set((snap.vcenters || []).map((v) => v.id));
+    const scoped = scopeSlice(snap, req.user, req.query.vcenterId); // 범위 제한 계정은 자기 vCenter 만
+    const key = `${snap.generatedAt}|${JSON.stringify(loadPowerSettings())}|${JSON.stringify(loadFinopsConfig())}|${fleetRev()}|${scopeKey(req.user, snap)}`;
+    const validIds = new Set((scoped.vcenters || []).map((v) => v.id));
     const payload = await snapMemo('finops', key, 60_000, async () => {
-      const measured = filterMeasuredByMapping(applyFleetExclude(applyFleetAssign(await allMeasuredPower({ hosts: snap.hosts, vcenterFirst: true }), validIds)), snap);
-      return computeFinOps(snap, measured);
+      const measured = filterMeasuredByMapping(applyFleetExclude(applyFleetAssign(await allMeasuredPower({ hosts: scoped.hosts, vcenterFirst: true }), validIds)), scoped);
+      return computeFinOps(scoped, measured);
     });
     sendCached(req, res, key, payload);
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
@@ -54,11 +59,12 @@ insightsRouter.get('/power-breakdown', async (req, res) => {
     const datacenters = listDatacenters();
     // DataCenter 할당/목록이 바뀌면 캐시 무효화되도록 키에 포함.
     const dcKey = `${JSON.stringify(assign)}|${datacenters.map((d) => `${d.id}:${d.name}`).join(',')}`;
-    const key = `${snap.generatedAt}|${vc}|${JSON.stringify(loadPowerSettings())}|${fleetRev()}|${dcKey}`;
-    const validIds = new Set((snap.vcenters || []).map((v) => v.id));
+    const scoped = scopeSlice(snap, req.user, vc); // 범위 제한 계정은 자기 vCenter 전력만
+    const key = `${snap.generatedAt}|${vc}|${JSON.stringify(loadPowerSettings())}|${fleetRev()}|${dcKey}|${scopeKey(req.user, snap)}`;
+    const validIds = new Set((scoped.vcenters || []).map((v) => v.id));
     const payload = await snapMemo('power-breakdown', key, 60_000, async () => {
-      const measured = filterMeasuredByMapping(applyFleetExclude(applyFleetAssign(await allMeasuredPower({ hosts: snap.hosts, vcenterFirst: true }), validIds)), snap);
-      return computePowerBreakdown(snap, measured, { vcenterId: vc, assign, datacenters });
+      const measured = filterMeasuredByMapping(applyFleetExclude(applyFleetAssign(await allMeasuredPower({ hosts: scoped.hosts, vcenterFirst: true }), validIds)), scoped);
+      return computePowerBreakdown(scoped, measured, { vcenterId: vc, assign, datacenters });
     });
     sendCached(req, res, key, payload);
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
@@ -186,21 +192,24 @@ insightsRouter.get('/anomalies', async (req, res) => {
 insightsRouter.get('/forecast', async (req, res) => {
   try {
     const snap = store.get();
-    const key = `${snap.generatedAt}|${req.originalUrl}`;
-    const payload = await snapMemo('forecast', key, 60_000, () => forecastCapacity(snap, req.query));
+    const scoped = scopeSlice(snap, req.user, req.query.vcenterId); // 데이터스토어 예측 scope
+    const allowed = scopedVcenterIds(req.user, snap);               // GPU 예측 scope(스냅샷 밖 metrics DB 키)
+    const key = `${snap.generatedAt}|${req.originalUrl}|${scopeKey(req.user, snap)}`;
+    const payload = await snapMemo('forecast', key, 60_000, () => forecastCapacity(scoped, { ...req.query, allowed }));
     sendCached(req, res, key, payload);
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 
-// --- 보안 자세(CVE/EOL) ---
-insightsRouter.get('/security', (_req, res) => res.json(computeSecurityPosture(store.get())));
+// --- 보안 자세(CVE/EOL) --- 범위 제한 계정은 자기 vCenter 호스트만(전 사이트 ESXi/CVE 노출 방지).
+insightsRouter.get('/security', (req, res) => res.json(computeSecurityPosture(scopeSlice(store.get(), req.user, req.query.vcenterId))));
 
 // --- 토폴로지·의존성 ---
 insightsRouter.get('/topology', async (req, res) => {
   const snap = store.get();
   const vc = req.query.vcenterId || null; const host = req.query.host || null;
-  const key = `${snap.generatedAt}|${vc || ''}|${host || ''}`;
-  const payload = await snapMemo('topology', key, 60_000, async () => buildTopology(snap, { vcenterId: vc, host }));
+  const scoped = scopeSlice(snap, req.user, vc); // 범위 제한 계정은 자기 vCenter 구성만
+  const key = `${snap.generatedAt}|${vc || ''}|${host || ''}|${scopeKey(req.user, snap)}`;
+  const payload = await snapMemo('topology', key, 60_000, async () => buildTopology(scoped, { vcenterId: vc, host }));
   sendCached(req, res, key, payload);
 });
 
@@ -209,8 +218,9 @@ insightsRouter.get('/graph', async (req, res) => {
   const snap = store.get();
   const vms = req.query.vms === '1' || req.query.vms === 'true';
   const vc = req.query.vcenterId || null; const host = req.query.host || null;
-  const key = `${snap.generatedAt}|${vms ? 1 : 0}|${vc || ''}|${host || ''}`;
-  const payload = await snapMemo('graph', key, 60_000, async () => buildGraph(snap, { vms, vcenterId: vc, host }));
+  const scoped = scopeSlice(snap, req.user, vc); // 범위 제한 계정은 자기 vCenter 그래프만
+  const key = `${snap.generatedAt}|${vms ? 1 : 0}|${vc || ''}|${host || ''}|${scopeKey(req.user, snap)}`;
+  const payload = await snapMemo('graph', key, 60_000, async () => buildGraph(scoped, { vms, vcenterId: vc, host }));
   sendCached(req, res, key, payload);
 });
 

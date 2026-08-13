@@ -85,7 +85,8 @@ api.get('/tools/report/capacity', async (req, res) => {
   try {
     const snap = store.get();
     const scoped = scopeSlice(snap, req.user, req.query.vcenterId);
-    res.json(await forecastCapacity(scoped, { days: Number(req.query.days) || 14, vcenterId: req.query.vcenterId || '' }));
+    // allowed 를 함께 넘겨 GPU 예측(스냅샷 밖 metrics DB gpu_vc 키)도 범위로 제한(v2.288 확정 버그).
+    res.json(await forecastCapacity(scoped, { days: Number(req.query.days) || 14, vcenterId: req.query.vcenterId || '', allowed: scopedVcenterIds(req.user, snap) }));
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 
