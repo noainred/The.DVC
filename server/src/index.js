@@ -22,7 +22,7 @@ import { rateLimit } from './util/rateLimit.js';
 import { store } from './store.js';
 import { api } from './routes/api.js';
 import { authRouter } from './routes/auth.js';
-import { authMiddleware, requireEnrolled, warnIfNoOtpAdmin } from './auth/auth.js';
+import { authMiddleware, requireEnrolled, requirePerm, warnIfNoOtpAdmin } from './auth/auth.js';
 import { auditMiddleware } from './audit.js';
 import { upgradeRouter } from './routes/upgrade.js';
 import { upgradeManager } from './upgrade/manager.js';
@@ -140,7 +140,10 @@ app.use('/api/auth', authRouter);                      // public: login / config
 app.use('/api/upgrade', authMiddleware, requireEnrolled, upgradeRouter); // admin-gated auto-upgrade control
 app.use('/api/admin', authMiddleware, requireEnrolled, auditMiddleware, adminRouter);     // admin-gated vCenter management
 app.use('/api/remote', authMiddleware, requireEnrolled, auditMiddleware, remoteRouter);   // remote access (HAProxy/SSH/RDP)
-app.use('/api/insights', authMiddleware, requireEnrolled, insightsRouter); // FinOps·이상탐지·예측·보안·토폴로지·인시던트·ChatOps
+// requirePerm('insights'): 기능 권한을 서버에서 강제(v2.289 #7). 과거엔 authMiddleware+requireEnrolled
+// 만이라 'insights' 권한 없는 계정도 API 직접 호출이 가능했다(프론트 메뉴만 숨김). CLAUDE.md
+// '기능 권한은 서버가 진실의 원천' 규칙 적용. admin 은 항상 전 권한.
+app.use('/api/insights', authMiddleware, requireEnrolled, requirePerm('insights'), insightsRouter); // FinOps·이상탐지·예측·보안·토폴로지·인시던트·ChatOps
 app.use('/api/svcmon', authMiddleware, requireEnrolled, svcmonRouter);   // 성능점검(HostMonitor식 서비스 모니터링)
 app.use('/api/capacity', authMiddleware, requireEnrolled, capacityRouter); // 리소스 적정성 진단(라우터 내부 admin 강제)
 app.use('/api/ping', authMiddleware, requireEnrolled, pingRouter);       // 네트워크 Ping 모니터링(조회=인증, 대상관리=관리자)

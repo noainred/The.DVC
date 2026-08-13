@@ -53,6 +53,23 @@ test('비밀번호 없는 OTP 전용 계정: 임시 비밀번호 없이 해제 �
   assert.equal(who.mustEnrollOtp, true, 'OTP 전용 admin 은 재등록 강제 세션');
 });
 
+test('force 옵션(콘솔 복구 도구 전용): 수퍼관리자·비번없는 OTP전용 계정의 잠금 가드를 우회 해제', () => {
+  // v2.289 확정 #1 회귀 방지 — 콘솔 도구(otp-enroll.js --disable)는 신뢰 경로라 force:true 로
+  // 두 잠금 가드(수퍼관리자 보호 · 비번없는 OTP전용 임시비번 요구)를 모두 우회해야 한다.
+  // 과거 이 가드가 --disable 을 깨뜨려 '모든 admin OTP 분실' 잠금 복구 경로가 막혔다.
+  // (1) 수퍼관리자: force 면 '수퍼관리자' 거부 사유가 뜨지 않아야 한다(가드 우회 = 복구 가능).
+  const rs = auth.disableTotp(auth.SUPER_USERNAME, { force: true });
+  assert.doesNotMatch(rs.reason || '', /수퍼관리자/, 'force 면 수퍼관리자 OTP 해제 가드 우회');
+
+  // (2) 비번 없는 OTP 전용 계정을 임시 비밀번호 없이 force 해제 → 성공(콘솔이 이후 재등록/비번설정 담당).
+  auth.createUser({ username: 'dtg-force', name: 'dtg force', role: 'admin', password: 'pw-force-12345' });
+  enroll('dtg-force'); // 레거시 기본 admin = OTP 전용 → 등록 즉시 비번 폐기
+  assert.ok(!auth.getUser('dtg-force').passwordHash, '등록 후 비번 폐기 전제');
+  const rf = auth.disableTotp('dtg-force', { force: true });
+  assert.ok(rf.ok, rf.reason);
+  assert.equal(auth.getUser('dtg-force').totpEnabled, false, 'force 해제 후 OTP 비활성');
+});
+
 test('비밀번호가 있는 계정(혼용 등)은 종전처럼 임시 비밀번호 없이 해제 가능', async () => {
   const sec = await import('../src/security/securitySettings.js');
   sec.saveSessionSecurity({ loginPolicy: 'otp_or_password' }); // 혼용 — 등록해도 비번 유지

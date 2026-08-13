@@ -18,6 +18,8 @@ server/config/idrac-inventory.json
 server/config/collectors.json
 server/config/datacenters.json
 server/config/idrac-scan-ranges.json
+# iDRAC 스캔 진단 로그(런타임 생성 — 발견물/IP 목록을 담아 커밋 금지, v2.289 #9)
+server/config/idrac-scan-log.json
 server/config/agent-assignments.json
 server/config/agent-results.json
 server/.upgrade-cache/
@@ -34,6 +36,9 @@ server/config/tool-usage.json
 server/config/fleet-tags.json
 server/config/fleet-assign.json
 server/config/auth.json
+# JWT 서명 비밀(v2.289 #3) — AUTH_SECRET 미설정 시 CONFIG_DIR 에 영속(0600). 유출 시 임의
+# 계정 토큰 위조가 가능하므로 절대 커밋 금지. 확장자 없는 단일 파일이라 개별 차단이 필수.
+server/config/auth-secret
 # 최초 기동 시 임의 생성되는 관리자 '평문' 비밀번호 파일(0600). CONFIG_DIR 미설정이면
 # 기본값이 server/config 이라 개발/최초 기동 시 저장소 안에 떨어져 커밋될 수 있었다.
 # *.txt 와일드카드도 함께 차단 — 이 경로에 추적 중인 .txt 는 없다(git ls-files 로 확인).

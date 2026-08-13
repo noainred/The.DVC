@@ -37,10 +37,34 @@ export function verifyPassword(password, stored) {
 
 /* --------------------------------- JWT (HS256) ----------------------------- */
 
-const SECRET = config.auth.secret || crypto.randomBytes(32).toString('hex');
-if (!config.auth.secret && config.auth.enabled) {
-  console.warn('[auth] AUTH_SECRET not set — using a random secret; tokens reset on restart.');
+/**
+ * 토큰 서명 시크릿. 우선순위: AUTH_SECRET(env) → CONFIG_DIR/auth-secret(자동 생성·영속) → 마지막
+ * 폴백으로 프로세스 랜덤. v2.289 개선(#3): 과거엔 env 미설정 시 '매 프로세스 랜덤'이라 재시작마다
+ * 모든 토큰이 무효가 돼 전 사용자가 강제 로그아웃되고 tokenVersion/단일세션 상태까지 리셋됐다.
+ * 이제 CONFIG_DIR 에 시크릿을 1회 생성해 원자적으로(0600) 저장·재사용하므로 재시작에도 세션이
+ * 유지된다. env(AUTH_SECRET)가 있으면 그대로 우선(멀티노드 공유 등 명시 운영). 파일 쓰기까지
+ * 실패한 극단 상황에서만 랜덤 폴백 + 경고.
+ */
+function resolveAuthSecret() {
+  if (config.auth.secret) return config.auth.secret;                  // env 우선(명시 운영)
+  const file = path.join(config.configDir, 'auth-secret');
+  try {
+    if (fs.existsSync(file)) {
+      const s = fs.readFileSync(file, 'utf8').trim();
+      if (s.length >= 32) return s;                                   // 기존 영속 시크릿 재사용
+    }
+  } catch { /* 읽기 실패 → 아래에서 재생성 시도 */ }
+  const gen = crypto.randomBytes(32).toString('hex');
+  try {
+    atomicWriteFileSync(file, gen, { mode: 0o600 });                  // 재시작에도 세션 유지되도록 영속
+    if (config.auth.enabled) console.warn(`[auth] AUTH_SECRET 미설정 — ${file} 에 시크릿을 생성·영속했습니다(재시작 시 세션 유지). 멀티노드/명시 운영이면 AUTH_SECRET env 를 설정하세요.`);
+    return gen;
+  } catch (e) {
+    if (config.auth.enabled) console.warn(`[auth] ⚠ AUTH_SECRET 미설정 + 시크릿 파일 쓰기 실패(${e.message}) — 프로세스 랜덤 시크릿 사용(재시작 시 전원 재로그인). CONFIG_DIR 쓰기 권한 또는 AUTH_SECRET env 를 확인하세요.`);
+    return gen;
+  }
 }
+const SECRET = resolveAuthSecret();
 
 const b64url = (input) => Buffer.from(input).toString('base64url');
 
@@ -565,22 +589,27 @@ export function confirmTotpEnroll(username, code) {
  * 복구는 콘솔 도구(otp-enroll.sh)뿐이었다. 마지막 admin 이 본인 OTP 를 해제하면(폰 교체 시
  * 자연스러운 조작) 웹 관리자 접근이 전면 잠겼다. 아래 가드가 그 경로를 서버에서 차단한다.
  */
-export function disableTotp(username, { password } = {}) {
+// force: 서버에서 직접 실행하는 신뢰된 콘솔 복구 도구(tools/otp-enroll.js) 전용 우회. 콘솔 도구는
+// '해제 → 곧바로 재등록'을 헤드리스로 수행하므로 중간에 로그인 수단이 0개여도 문제없고, 수퍼관리자가
+// 폰을 분실한 잠금도 이 도구로만 푼다. 웹 admin 경로(force 미지정)에는 아래 가드가 그대로 걸린다.
+export function disableTotp(username, { password, force = false } = {}) {
   const u = getUser(username);
   if (!u) return { ok: false, reason: '사용자를 찾을 수 없습니다.' };
   // 수퍼관리자 보호 — clearLoginCredentials 와 같은 경계. OTP 전용(비번 없는) 수퍼관리자의
   // OTP 를 다른 admin 이 해제하면 '로그인차단 거부' 경계가 우회된다. 재등록(폰 교체)은 해제
   // 없이 'OTP 등록'(beginTotpEnroll — pending 교체 후 confirm)으로 가능하므로 이 거부가
-  // 정상 재등록을 막지 않는다.
-  if (u.superuser) return { ok: false, reason: '수퍼관리자 계정의 OTP는 해제할 수 없습니다(재등록은 해제 없이 OTP 등록으로 가능합니다).' };
+  // 정상 재등록을 막지 않는다. (콘솔 복구 도구 force 는 예외 — 수퍼관리자 폰 분실 복구 경로.)
+  if (u.superuser && !force) return { ok: false, reason: '수퍼관리자 계정의 OTP는 해제할 수 없습니다(재등록은 해제 없이 OTP 등록으로 가능합니다).' };
   // 임시 비밀번호 검증 — setLocalPassword 와 같은 규칙(문자열·8~128자). 검증 없이 hash 하면
   // "[object Object]" 같은 값이 비밀번호가 되는 사고를 만든다.
   if (password !== undefined && password !== '' && (typeof password !== 'string' || password.length < 8 || password.length > 128)) {
     return { ok: false, reason: '임시 비밀번호는 8~128자 문자열이어야 합니다.' };
   }
-  // 잠금 방지 — 비밀번호가 없는(OTP 전용으로 폐기된) 계정은 임시 비밀번호 없이 해제 불가.
-  // 해제 후 로그인 수단이 0개가 되는 유일한 조합을 서버에서 거부한다(UI 도 재시도 안내).
-  if (!password && !u.passwordHash) {
+  // 잠금 방지(웹 admin 경로) — 비밀번호가 없는(OTP 전용으로 폐기된) 계정은 임시 비밀번호 없이 해제
+  // 불가(해제 후 로그인 수단 0개 방지). ⚠ 회귀 수정(v2.289, 확정 #1): 콘솔 복구 도구(force)는
+  // 이 가드를 우회해야 한다 — 과거 이 가드가 otp-enroll.js --disable(비번 없이 호출)을 깨뜨려
+  // '모든 admin OTP 분실' 잠금 복구 경로가 막혔다(CLAUDE.md 필수 경로).
+  if (!password && !u.passwordHash && !force) {
     return { ok: false, reason: '비밀번호가 없는 OTP 전용 계정입니다 — 해제하려면 임시 비밀번호(8자 이상)를 함께 설정하세요.' };
   }
   u.totpEnabled = false;
