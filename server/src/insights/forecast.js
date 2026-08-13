@@ -26,9 +26,13 @@ const DAY = 86_400_000;
 /** opts: { days (관측 기간), bucketMin, minR2 }. */
 export async function forecastCapacity(snap, opts = {}) {
   const db = await getMetricsDb();
-  const days = Math.max(3, Number(opts.days) || 14);
+  // ⚠ 블로킹 방지(v2.287, 확정 버그 #14): days 에 상한이 없고 bucketMin 이 60 미만이면 metrics
+  // history 의 시간당 롤업 경로(bucketMs>=1h)를 못 타고 원본 samples 를 풀레인지로 데이터스토어
+  // 키마다 GROUP BY 스캔해 이벤트 루프가 멈춘다. days 3~1830 · bucketMin 60~1440 으로 클램프해
+  // 항상 시간당 롤업 경로를 타게 한다(/tools/capacity-forecast 가 120일·일버킷으로 안전히 쓰는 패턴).
+  const days = Math.max(3, Math.min(1830, Number(opts.days) || 14));
   const since = Date.now() - days * DAY;
-  const bucketMs = (Number(opts.bucketMin) || 60) * 60_000;
+  const bucketMs = Math.max(60, Math.min(1440, Number(opts.bucketMin) || 60)) * 60_000;
   const minR2 = opts.minR2 != null ? Number(opts.minR2) : 0.3;
   const now = Date.now();
 

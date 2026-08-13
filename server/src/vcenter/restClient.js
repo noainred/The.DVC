@@ -124,12 +124,29 @@ export class VCenterClient {
  * REST list endpoints (limited: no host CPU/mem usage) if SOAP is unavailable.
  * Returns the same shape the mock generator produces.
  */
+// SOAP 실패를 'REST 로 폴백할 능력 부재(SOAP 미지원 vCenter)'와 '일시 오류(타임아웃·연결 끊김·
+// 서버 5xx)'로 구분한다(v2.287, 확정 버그 #10). 일시 오류인데도 REST 로 폴백하면, REST 스냅샷은
+// 호스트 CPU/메모리/전력/온도·VM IP/Tools/스냅샷·파생 알람이 전부 비어 있어(그리고 status:
+// 'connected') 그 저품질 스냅샷이 직전 정상 SOAP 스냅샷을 ok:true 로 교체 → IPAM 대량 재기록·
+// 알람 해소→재발송·용량 총합 급감이 조용히 일어난다. 일시 오류는 던져서 store 가 lastGood 을
+// 유지하게 하고(#2), 능력 부재로 보이는 오류일 때만 REST 로 폴백한다.
+function isTransientSoapError(err) {
+  const m = `${err?.name || ''} ${err?.cause?.code || ''} ${err?.code || ''} ${err?.message || ''}`;
+  return /Abort|Timeout|timeout|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EHOSTUNREACH|ENETUNREACH|socket hang up|network|fetch failed|EPIPE|502|503|504/i.test(m);
+}
+
 export async function collectFromVCenter(vc) {
   if (config.vcSoapMetrics) {
     try {
       const { collectFromVCenterSoap } = await import('./soapClient.js');
       return await collectFromVCenterSoap(vc);
     } catch (err) {
+      if (isTransientSoapError(err)) {
+        // 일시 오류 → 폴백 금지. 던지면 store 가 실패로 처리하되 마지막 정상 스냅샷을 유지한다.
+        throw err;
+      }
+      // 능력 부재로 추정(SOAP 응답 형식 오류·미지원 등) → REST 목록 API 로 폴백(저품질이지만
+      // SOAP 자체가 안 되는 환경에서는 그거라도 있는 게 낫다).
       console.warn(`[collect] SOAP metrics failed for ${vc.id} (${err.message}); falling back to REST list API`);
     }
   }

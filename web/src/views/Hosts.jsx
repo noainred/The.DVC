@@ -28,6 +28,8 @@ export default function Hosts({ filters }) {
 
   return (
     <>
+      {/* 폴링 지속 실패 시 낡은 데이터를 무경고로 표시하지 않고 배너로 알린다(v2.287, #20). */}
+      {error && <div className="badge red" style={{ display: 'block', marginBottom: 10, padding: '6px 10px' }}>⚠ 갱신 실패 — 직전 데이터를 표시 중입니다({error}).</div>}
       {s && (
         <>
           <div className="section-title" style={{ marginTop: 0 }}>글로벌 호스트 요약</div>

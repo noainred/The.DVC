@@ -387,7 +387,11 @@ function IpOwnerDetail({ row, onClose }) {
   useEffect(() => {
     if (row.owner || !(row.hasOwner && row.ownerType === 'vm')) return undefined;
     let dead = false;
-    fetchJson(`/vms/lookup?ip=${encodeURIComponent(row.ip || '')}${row.vcenterId ? `&vcenterId=${encodeURIComponent(row.vcenterId)}` : ''}`)
+    // VM 이름(ownerName)도 함께 넘긴다(v2.287, 확정 버그 #16). 같은 vCenter 안에서 같은 IP 를
+    // 여러 VM 이 주장하는 '중복 IP' 행은 ip 만으로 조회하면 스냅샷 순서상 첫 VM 이 와서, 클릭한
+    // 행과 다른 VM 상세가 뜬다. 서버가 ip+name 을 함께 받으면 그 이름의 VM 을 우선 반환한다.
+    const nm = row.ownerName || row.label || '';
+    fetchJson(`/vms/lookup?ip=${encodeURIComponent(row.ip || '')}${nm ? `&name=${encodeURIComponent(nm)}` : ''}${row.vcenterId ? `&vcenterId=${encodeURIComponent(row.vcenterId)}` : ''}`)
       .then((r) => { if (!dead) { if (r?.vm) { setOwner(r.vm); setState('ready'); } else setState('none'); } })
       .catch(() => { if (!dead) setState('none'); });
     return () => { dead = true; };

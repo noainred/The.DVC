@@ -113,3 +113,21 @@ test('policiesSummary: 합계·상태·커버 IP', () => {
   assert.ok(s.byStatus.dhcp >= 1 && s.byStatus.reserved >= 1);
   [a, b].forEach((x) => rp.deletePolicy(x.policy.id));
 });
+
+// v2.287 회귀 방지(확정 버그 #11): isCoveredByAnyPolicy 는 claimedVcenterId(귀속) 무관하게 커버 판정.
+// findPolicy(ip,'') 는 귀속 정책을 스코프 불일치로 건너뛰므로 '관리 여부' 판단에 쓰면 귀속 정책으로만
+// 관리되는 IP 가 미관리로 오판돼 스캔 이력이 삭제됐다.
+test('isCoveredByAnyPolicy: 귀속(claimedVcenterId) 정책도 커버로 인정', () => {
+  const jp = rp.setPolicy({ spec: '10.9.0.0/24', status: 'reserved', claimedVcenterId: 'vc-jp' }, {});
+  // findPolicy(ip,'') 는 귀속 정책을 건너뛰어 null(관리 판단에 부적합).
+  assert.equal(rp.findPolicy(ipNum('10.9.0.10'), ''), null);
+  // isCoveredByAnyPolicy 는 귀속 무관하게 true → '관리 대상'으로 올바로 판정.
+  assert.equal(rp.isCoveredByAnyPolicy(ipNum('10.9.0.10')), true);
+  assert.equal(rp.isCoveredByAnyPolicy(ipNum('10.9.9.10')), false); // 범위 밖
+  assert.equal(rp.isCoveredByAnyPolicy(null), false);
+  rp.deletePolicy(jp.policy.id);
+  // 비활성 정책은 커버로 치지 않는다.
+  const off = rp.setPolicy({ spec: '10.9.5.0/24', status: 'reserved', enabled: false }, {});
+  assert.equal(rp.isCoveredByAnyPolicy(ipNum('10.9.5.10')), false);
+  rp.deletePolicy(off.policy.id);
+});

@@ -221,7 +221,22 @@ class Store {
       // 성능: 28개 vCenter를 한꺼번에 수집하면 매 주기 SOAP 파싱이 몰려 CPU가 순간 100%를
       // 찍고 UI가 끊긴다. 동시 수집을 제한(기본 8)해 같은 작업을 평탄하게 흘려보낸다.
       // 느린 1곳은 per-vCenter 타임아웃으로 격리되고, 나머지는 빈 슬롯이 나는 대로 진행.
-      const results = await collectPool(due, COLLECT_CONCURRENCY, (vc) => collectFromVCenter(vc));
+      // per-vCenter '전체' 데드라인(v2.287, 확정 버그 #9). SOAP 타임아웃은 '건별'(soapClient.js)이라
+      // 한 vCenter 수집이 login→view→retrieve→GPU 청크 N회→ext/lic→logout 로 9회+ 직렬 왕복하면
+      // 그 합이 데드라인 없이 수 분까지 늘어난다. collectPool 은 전부 끝나야 스냅샷을 재구성하므로,
+      // 느린 1곳이 이미 끝난 27곳의 신규 데이터 게시까지 막고 재진입 가드로 폴 주기가 늘어졌다.
+      // vCenter 하나를 max(건별타임아웃×3, 90초)로 감싸 초과 시 실패로 떨어뜨린다(#2 lastGood 이월로
+      // 인벤토리는 유지). '느린 1개가 전체 폴링을 막지 않게' 라는 CLAUDE.md 불변조건을 합산 경로에 적용.
+      const vcDeadlineMs = (vc) => Math.max(90_000, (vc?.timeoutMs > 0 ? vc.timeoutMs : 30_000) * 3);
+      const withDeadline = (vc) => {
+        let timer;
+        const guard = new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error(`vCenter 수집 데드라인 초과(${Math.round(vcDeadlineMs(vc) / 1000)}초) — 응답이 느립니다`)), vcDeadlineMs(vc));
+          timer.unref?.();
+        });
+        return Promise.race([collectFromVCenter(vc), guard]).finally(() => clearTimeout(timer));
+      };
+      const results = await collectPool(due, COLLECT_CONCURRENCY, (vc) => withDeadline(vc));
       results.forEach((r, i) => {
         const vc = due[i];
         this.vcLast.set(vc.id, Date.now());

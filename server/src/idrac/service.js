@@ -126,12 +126,20 @@ export async function allMeasuredPower({ hosts = [], vcenterFirst = false } = {}
     keys.forEach((k) => seenIdent.add(k));
   };
 
+  // '현재 전력'으로 인정할 샘플의 신선도 컷오프(v2.287, 확정 버그 #13). 폴러(poller.js)는
+  // enabled!==false 만 폴링하므로 비활성 서버의 마지막 샘플은 retention prune(기본 90일)까지
+  // latest 에 남아 '현재값'으로 계속 합산됐다. 비활성 서버를 제외하고, 활성이라도 오래된(예: 폴
+  // 주기 수십 배) 샘플은 '현재'가 아니므로 뺀다. 기본 2시간(POWER_CURRENT_STALE_MS 로 조정).
+  const POWER_STALE_MS = Number(process.env.POWER_CURRENT_STALE_MS) || 2 * 3_600_000;
+  const nowTs = Date.now();
   // 물리 실측 소스(iDRAC 직접 + OME 장비 + 원격 수집기).
   const addPhysical = () => {
     for (const s of loadRegistry()) {
       if (s.type === 'ome') continue;
+      if (s.enabled === false) continue; // 비활성 서버는 폴링 대상이 아니라 '현재 전력'에서 제외
       const sample = latest.get(s.id);
       if (!sample || sample.watts == null || !Number.isFinite(sample.watts)) continue;
+      if (sample.ts && (nowTs - sample.ts) > POWER_STALE_MS) continue; // 오래된 샘플은 '현재'가 아님(무응답/장기 정지)
       const { model, serviceTag } = serverIdentity(s.id, s);
       const hostNames = matchKeys(s);                  // 출력/귀속용(표시이름·태그 별칭 포함)
       // dedup 식별은 '실제 호스트명/IP'만 사용(표시 이름은 사용자가 임의 지정 가능 → 충돌로 오드롭 방지).

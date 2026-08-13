@@ -267,7 +267,18 @@ api.get('/vms/lookup', (req, res) => {
     .filter((v) => !allowed || allowed.has(v.vcenterId))   // scope 강제(요청 필터로 우회 불가)
     .filter((v) => !vcenterId || v.vcenterId === vcenterId);
   let vm = null;
-  if (ip) vm = vms.find((v) => (v.ipAddresses || []).includes(ip) || v.ipAddress === ip);
+  if (ip) {
+    // 같은 vCenter 안에서 같은 IP 를 여러 VM 이 주장하는 '중복 IP'가 있으므로, ip 매칭이 여럿이면
+    // name 으로 정확히 지목한다(v2.287, 확정 버그 #16). name 이 있으면 ip+name 일치 VM 을 우선,
+    // 없거나 불일치면 첫 ip 매칭(기존 동작 유지).
+    const ipMatches = vms.filter((v) => (v.ipAddresses || []).includes(ip) || v.ipAddress === ip);
+    if (name && ipMatches.length > 1) {
+      const n = String(name).toLowerCase();
+      vm = ipMatches.find((v) => (v.name || '').toLowerCase() === n) || ipMatches[0] || null;
+    } else {
+      vm = ipMatches[0] || null;
+    }
+  }
   if (!vm && name) {
     const n = String(name).toLowerCase();
     vm = vms.find((v) => (v.name || '').toLowerCase() === n) || vms.find((v) => (v.name || '').toLowerCase().includes(n));
