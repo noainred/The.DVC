@@ -197,37 +197,9 @@ export async function allMeasuredPower({ hosts = [], vcenterFirst = false } = {}
   return out;
 }
 
-/**
- * vCenter 전력 수집 점검 — 스냅샷의 호스트별 vCenter 원본 전력(host.vcPowerWatts)을 vCenter별로
- * 집계해 '수집되고 있는지' 진단한다. host.vcPowerWatts는 하드웨어 상태 IPMI 'Pwr Consumption'
- * 센서(또는 power.power.average 폴백)에서 채워진다(null=미수집).
- * 행 state: collecting(수집됨) | zero(센서 0W) | nodata(전력 센서/카운터 없음) | empty(호스트 없음).
- */
-export function vcenterPowerCheck(snap) {
-  const byVc = new Map();
-  for (const v of (snap?.vcenters || [])) {
-    byVc.set(v.id, {
-      vcenterId: v.id, name: v.name || v.id, region: v.location?.region || v.region || '',
-      status: v.status || '', collectSource: v.collectSource || (v.collectMode === 'site' ? 'site' : 'direct'),
-      hosts: 0, reporting: 0, zeroW: 0, noData: 0, watts: 0,
-    });
-  }
-  for (const h of (snap?.hosts || [])) {
-    const e = byVc.get(h.vcenterId);
-    if (!e) continue;
-    e.hosts++;
-    const w = h.vcPowerWatts;
-    if (w == null) e.noData++;
-    else if (w > 0) { e.reporting++; e.watts += w; }
-    else e.zeroW++;
-  }
-  const rows = [...byVc.values()].map((e) => ({
-    ...e, watts: Math.round(e.watts),
-    state: e.hosts === 0 ? 'empty' : (e.reporting > 0 ? 'collecting' : (e.zeroW > 0 ? 'zero' : 'nodata')),
-  })).sort((a, z) => z.watts - a.watts || z.reporting - a.reporting);
-  const totals = rows.reduce((a, r) => ({ hosts: a.hosts + r.hosts, reporting: a.reporting + r.reporting, watts: a.watts + r.watts }), { hosts: 0, reporting: 0, watts: 0 });
-  return { rows, totals };
-}
+// (v2.292 죽은 코드 정리) vcenterPowerCheck 제거 — 'vCenter 전력 수집 점검' UI(IdracAdmin vcCheck
+// 모달)가 화면 단순화(v2.69.1) 때 사라진 뒤 라우트/화면 소비자 없이 단위테스트만 남아 있었다
+// (2차 모듈화 감사에서 확인, 저장소 전체 grep 소비자 0). 필요하면 git 이력에서 복원할 것.
 
 /**
  * '전력 보고' 수가 등록 서버 수보다 많은 이유를 소스별로 정확히 분해한다.
@@ -309,78 +281,18 @@ export async function purgeStalePower(opts = {}) {
       // active 집합에 없더라도 stale 모드에서는 삭제하지 않는다(대시보드 24h 통계 소실 방지).
       const orphans = db.serverIds().filter((id) => !active.has(id) && (mode === 'all' || !String(id).startsWith('vc:')));
       dbRemoved = db.deleteServers(orphans);
-      if (dbRemoved) aggCache.clear(); // 삭제된 서버가 60초 캐시에 남아 대시보드에 유령 표시되는 것 방지
+      // (v2.292) aggCache.clear() 제거 — 캐시 자체가 buildPowerDashboard(죽은 코드)와 함께 삭제됨.
     }
   } catch { /* best effort */ }
   return { mode, dbRemoved, omeCleared, remoteCleared, activeKept: active.size };
 }
 
-/**
- * 전력 대시보드용 집계 — 플릿 현재/피크/평균(지정 시간), 시간대별 추세(시간 버킷), 서버별
- * 24h 피크/평균/최소·마지막관측·유휴 플래그, vCenter별 현재 전력 롤업. measured=allMeasuredPower() 결과.
- */
-// 집계 캐시(윈도우별 60초) — 주석 사실화(v2.290): statsSince/bucketsSince 는 v2.143 부터
-// power_hourly 시간당 롤업 테이블을 읽는다(24h ≈ 서버당 24 시간버킷 행 — 원시 190만 행
-// 스캔으로 요청당 수 초 블로킹이던 문제는 롤업으로 이미 해소됨. idrac/db.js 참고).
-// 그래도 캐시를 유지하는 이유: 대시보드는 다사용자가 15~30초 간격 반복 폴링하고 서버 수백 대
-// × 윈도우 버킷의 GROUP BY 도 공짜는 아니므로, 60초 캐시로 동일 윈도우 집계를 분당 1회 이하로
-// 묶는다(샘플 주기 30~60초라 신선도 손실 없음). ⚠ 이 캐시를 없애면 폴링 사용자 수만큼 집계가
-// 반복 실행된다 — 제거 금지.
-const aggCache = new Map(); // win(hours) -> { at, stats, buckets }
-const AGG_TTL_MS = 60_000;
-
-export async function buildPowerDashboard(measured, { hours = 24 } = {}) {
-  const db = await getDb();
-  const IDLE_W = Number(process.env.IDLE_WATT_THRESHOLD) || 100; // 평균<이 값 → '유휴 의심'
-  const win = Math.max(1, Math.min(720, Number(hours) || 24));
-  let agg = aggCache.get(win);
-  if (!agg || Date.now() - agg.at > AGG_TTL_MS) {
-    const since = Date.now() - win * 3_600_000;
-    agg = {
-      at: Date.now(),
-      stats: db.statsSince ? db.statsSince(since) : new Map(),
-      buckets: db.bucketsSince ? db.bucketsSince(since, 3_600_000) : [],
-    };
-    aggCache.set(win, agg);
-    if (aggCache.size > 8) aggCache.delete(aggCache.keys().next().value); // 윈도우 종류 상한
-  }
-  const { stats, buckets } = agg;
-
-  const perServer = measured.map((m) => {
-    // 원격(remote) 전력은 DB에 'rmt:<host>' 키로 적재되지만(puller.js), measured.serverId는
-    // 'remote:<collectorId>:...' 형식이라 그대로 조회하면 항상 miss → 24h 통계가 null이 된다.
-    const statKey = (m.source === 'remote' && m.host) ? `rmt:${m.host}` : m.serverId;
-    const st = stats.get(statKey) || {};
-    const avg = st.avg ?? null;
-    return {
-      serverId: m.serverId, name: m.serverName, source: m.source, vcenterId: m.vcenterId || '',
-      model: m.model || '', currentW: m.watts, ts: m.ts,
-      peakW: st.peak ?? null, avgW: avg, minW: st.min ?? null, lastSeen: st.last ?? m.ts,
-      idle: avg != null && avg < IDLE_W,
-    };
-  });
-
-  // 플릿 시간 추세 — 버킷별로 각 서버 평균을 합산(누락 버킷은 직전값 forward-fill). O(서버×버킷).
-  const bMap = new Map(); const bucketTimes = new Set();
-  for (const b of buckets) {
-    bucketTimes.add(b.bucket);
-    if (!bMap.has(b.serverId)) bMap.set(b.serverId, new Map());
-    bMap.get(b.serverId).set(b.bucket, b.avg);
-  }
-  const times = [...bucketTimes].sort((a, z) => a - z);
-  const arrs = [];
-  for (const [, m] of bMap) { let last = null; const arr = new Array(times.length); for (let i = 0; i < times.length; i++) { const v = m.get(times[i]); if (v != null) last = v; arr[i] = last; } arrs.push(arr); }
-  const timeline = times.map((t, i) => { let tot = 0; for (const arr of arrs) { if (arr[i] != null) tot += arr[i]; } return { t, totalW: Math.round(tot) }; });
-  const peakW = timeline.length ? timeline.reduce((mx, p) => Math.max(mx, p.totalW), 0) : null;
-  const avgW = timeline.length ? Math.round(timeline.reduce((a, p) => a + p.totalW, 0) / timeline.length) : null;
-  const currentW = measured.reduce((a, m) => a + (m.watts || 0), 0);
-
-  const byVc = new Map();
-  for (const m of measured) { const k = m.vcenterId || ''; const e = byVc.get(k) || { vcenterId: k, watts: 0, servers: 0 }; e.watts += (m.watts || 0); e.servers++; byVc.set(k, e); }
-  const byVcenter = [...byVc.values()].sort((a, z) => z.watts - a.watts);
-
-  return { windowHours: win, currentW, peakW, avgW, measured: measured.length, idleCount: perServer.filter((p) => p.idle).length, perServer, timeline, byVcenter };
-}
+// (v2.292 죽은 코드 정리) buildPowerDashboard + aggCache(60초 집계 캐시) 제거 — 소비 라우트
+// (/admin/idrac/power-dashboard)가 v2.73 에서 삭제된 뒤 저장소 전체에 소비자가 없었다(2차
+// 모듈화 감사 발견 → grep 재검증 완료). DB 읽기 경로(db.statsSince/bucketsSince — power_hourly
+// 시간당 롤업)는 단위테스트(idracPowerStats·vcenterPower)가 소비하는 검증된 인프라라 유지한다 —
+// 전력 대시보드를 재도입하면 그 API 위에 다시 조립할 것(git 이력의 이 함수 참조).
+// ⚠ 루트 CLAUDE.md '전력 대시보드 24h 집계는 60초 캐시(aggCache)' 항목은 이제 낡은 서술이다.
 
 /**
  * 서비스태그(정규화) → 최신 전력 샘플. ESXi 호스트의 서비스태그와 대조해, 호스트명이 달라도
