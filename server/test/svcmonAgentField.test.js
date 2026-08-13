@@ -62,7 +62,8 @@ test('JSON 왕복: {targets:[{...,agent}]} 가 parseTargetsAny 로 agent 를 보
 });
 
 test('정적: /import 가 templateId 를 materializeForTarget 로 서버 실체화한다', () => {
-  const src = fs.readFileSync(new URL('../src/routes/svcmon.js', import.meta.url), 'utf8');
+  // v2.291: routes/svcmon.js 분할로 /targets/import 는 routes/svcmon/transfer.js 로 이동.
+  const src = fs.readFileSync(new URL('../src/routes/svcmon/transfer.js', import.meta.url), 'utf8');
   const body = src.slice(src.indexOf("post('/targets/import'"), src.indexOf("post('/targets/import'") + 3500);
   assert.match(body, /req\.body\?\.templateId/);
   assert.match(body, /materializeForTarget\(tplId, t\)/);
@@ -70,7 +71,8 @@ test('정적: /import 가 templateId 를 materializeForTarget 로 서버 실체�
 });
 
 test('정적: PUT /assign/:agent 가 byAgent 모드 + 다른 엣지 소유 제외 규칙을 쓴다', () => {
-  const src = fs.readFileSync(new URL('../src/routes/svcmon.js', import.meta.url), 'utf8');
+  // v2.291: routes/svcmon.js 분할로 /assign/:agent 는 routes/svcmon/edge.js 로 이동.
+  const src = fs.readFileSync(new URL('../src/routes/svcmon/edge.js', import.meta.url), 'utf8');
   const i = src.indexOf("put('/assign/:agent'");
   const body = src.slice(i, i + 1200);
   assert.match(body, /const byAgent = req\.body\?\.byAgent === true/);
