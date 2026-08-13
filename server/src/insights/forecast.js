@@ -37,9 +37,15 @@ export async function forecastCapacity(snap, opts = {}) {
   const now = Date.now();
 
   const vcFilter = opts.vcenterId ? String(opts.vcenterId) : '';
+  // 사용자 scope 허용 vCenter 집합(v2.288, 확정 버그: GPU 예측 scope 우회). null=무제한.
+  // 데이터스토어 예측은 호출자가 scopeSlice 로 좁힌 snap.datastores 를 넘겨 이미 제한되지만,
+  // GPU 예측(아래)은 스냅샷이 아니라 metrics DB 의 gpu_vc 키 전체를 직접 훑으므로 여기서 교집합
+  // 필터를 별도로 적용해야 범위 밖 vCenter GPU 가 새지 않는다.
+  const allowed = opts.allowed instanceof Set ? opts.allowed : null;
   const dsCap = new Map(); // dsId -> capacityGB
   for (const d of snap.datastores || []) {
     if (vcFilter && d.vcenterId !== vcFilter) continue; // vCenter 범위 지정 시 그 법인만(대규모 환경 hang 방지)
+    if (allowed && !allowed.has(d.vcenterId)) continue; // scope 방어(호출자가 scoped snap 을 안 넘겨도 이중 차단)
     dsCap.set(d.id, { cap: d.capacityGB, name: d.name, vc: d.vcenterId, used: d.usedGB, pct: d.usagePct });
   }
 
@@ -73,6 +79,7 @@ export async function forecastCapacity(snap, opts = {}) {
   const gpuLatest = db.latestAll('gpu_vc');
   for (const [k] of gpuLatest) {
     if (vcFilter && k !== vcFilter) continue;
+    if (allowed && !allowed.has(k)) continue; // scope: 범위 밖 vCenter GPU 예측 유출 차단(확정 버그)
     const f = fit('gpu_vc', k, 100);
     if (!f) continue;
     gpu.push({ vcenterId: k, metric: 'gpu_vc', limit: 100, ...f });
