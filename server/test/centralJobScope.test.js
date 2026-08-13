@@ -57,7 +57,9 @@ test('정적: svcmon 점검기 http/soap 가 해석형 SSRF 재검증 사용(DNS
 });
 
 test('정적: XLSX 가져오기 디코딩 크기 상한 + 행 상한 가드', () => {
-  const routes = fs.readFileSync(new URL('../src/routes/svcmon.js', import.meta.url), 'utf8');
+  // v2.291: routes/svcmon.js 분할 — XLSX 상한(XLSX_MAX_BYTES 정의는 svcmon/shared.js)을
+  // 실제로 검사·413 응답하는 가져오기 경로는 routes/svcmon/transfer.js 로 이동.
+  const routes = fs.readFileSync(new URL('../src/routes/svcmon/transfer.js', import.meta.url), 'utf8');
   assert.match(routes, /XLSX_MAX_BYTES/);
   assert.match(routes, /413/);
   const fmt = fs.readFileSync(new URL('../src/svcmon/formats.js', import.meta.url), 'utf8');
