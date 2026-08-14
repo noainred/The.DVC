@@ -5,7 +5,7 @@ import { rolePermissions, roleToolsDenied } from '../auth/permissions.js';
 import { loadAdConfig, saveAdConfig, testAd } from '../auth/ad.js';
 import { logAudit } from '../audit.js';
 import { recordPortalLoginFail } from '../security/loginStore.js';
-import { loadSessionSecurity, singleSessionEnabled } from '../security/securitySettings.js';
+import { loadSessionSecurity, singleSessionRequired } from '../security/securitySettings.js';
 import { newSessionId, setActiveSession } from '../auth/sessions.js';
 import { checkLoginAllowed, recordLoginFailure, recordLoginSuccess } from '../security/loginRateLimit.js';
 
@@ -60,10 +60,13 @@ authRouter.post('/login', async (req, res) => {
   // 로컬 계정 토큰에는 src/tv(tokenVersion)를 실어 서버측 폐기(비번/역할 변경 시 즉시 무효)를
   // 가능하게 한다(감사 M5). AD 계정은 로컬 레코드가 없어 다음 로그인 시점에 역할이 반영된다.
   const local = user.source === 'local' ? getUser(user.username) : null;
-  // 단일 세션 강제(ID 공유 금지, v2.280) — 켜져 있으면 이 로그인에 새 세션 ID(sid)를 발급해 토큰에
+  // 단일 세션 강제(ID 공유 금지, v2.280) — 강제 대상이면 이 로그인에 새 세션 ID(sid)를 발급해 토큰에
   // 싣고 계정의 활성 세션으로 등록한다. 이 등록이 같은 계정의 이전 세션 sid 를 덮어써(최신 로그인
-  // 우선) 이전 토큰이 resolveTokenUser 에서 무효가 된다. 꺼져 있으면 sid 를 싣지 않는다(다중 세션 허용).
-  const sid = singleSessionEnabled() ? newSessionId() : null;
+  // 우선) 이전 토큰이 resolveTokenUser 에서 무효가 된다. 아니면 sid 를 싣지 않는다(다중 세션 허용).
+  // v2.294: 판정은 singleSessionRequired 하나로(resolveTokenUser 와 동일 함수 — 발급/검사 쌍 유지).
+  // 내장 데모 계정(local.demo)은 '설정 › 세션 보안'의 Demo 중복 접속 모드에 따라 전역과 독립 판정:
+  // 'allow'=중복 허용(전역 단일세션이어도 sid 미발급·미검사), 'single'=데모만 단일 세션, 미설정=전역 따름.
+  const sid = singleSessionRequired(!!local?.demo) ? newSessionId() : null;
   const token = signToken({ sub: user.username, role: user.role, name: user.name, ...(local ? { src: 'local', tv: local.tokenVersion || 0 } : {}), ...(sid ? { sid } : {}) });
   if (sid) setActiveSession(user.username, sid, { at: Date.now(), ip });
   logAudit({ user: user.username, action: '로그인', detail: `${user.role}${sid ? ' · 단일세션' : ''}${user.mustEnrollOtp ? ' · OTP 등록 필요(등록 전용 세션)' : ''}`, ip });

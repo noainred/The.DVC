@@ -20,6 +20,16 @@ const DEFAULTS = { idleLogoutEnabled: true, idleLogoutMin: 30, settingsOwners: [
 const LOGIN_POLICIES = ['otp_only', 'otp_or_password', 'password_only'];
 function normPolicy(v) { return LOGIN_POLICIES.includes(v) ? v : null; }
 
+// Demo/Guest(내장 데모 계정 thedvcdemp) 중복 접속 모드(v2.294) — 설정 소유자가
+// '설정 › 세션 보안'에서 지정. 데모는 여러 사람이 공유하는 계정이라 전역 단일 세션과
+// 요구가 자주 어긋난다(전역 ON 이면 데모 사용자끼리 서로 로그아웃, 전역 OFF 면 데모만
+// 잠그고 싶은 경우). 값:
+//   null(미설정=기본)  : 전역 singleSession 설정을 그대로 따름(v2.293 이전과 동일 — 하위호환)
+//   'allow'            : 중복 접속 허용 — 전역 단일 세션이 켜져 있어도 데모는 예외
+//   'single'           : 중복 접속 차단 — 전역이 꺼져 있어도 데모만 단일 세션 강제
+const DEMO_SESSION_MODES = ['allow', 'single'];
+function normDemoSession(v) { return DEMO_SESSION_MODES.includes(v) ? v : null; }
+
 function clamp(v, min, max, dflt) { const n = Number(v); return Number.isFinite(n) ? Math.max(min, Math.min(max, Math.round(n))) : dflt; }
 
 /** 사용자명 목록 정규화 — 공백 제거·중복 제거·형식 검증·최대 20개. 비면 null(호출부에서 거부). */
@@ -44,6 +54,7 @@ export function loadConfiguredSecurity() {
     settingsOwners: owners && owners.length ? owners : DEFAULTS.settingsOwners.slice(),
     loginPolicy: normPolicy(p.loginPolicy), // null = 미설정(레거시)
     singleSession: !!p.singleSession,       // 단일 세션 강제(ID 공유 금지). 기본 false(옵트인).
+    demoSession: normDemoSession(p.demoSession), // null=전역 따름 | 'allow' 중복 허용 | 'single' 중복 차단(v2.294)
   };
 }
 
@@ -66,6 +77,31 @@ export function singleSessionEnabled() {
   _ssCache = !!loadConfiguredSecurity().singleSession;
   _ssAt = now;
   return _ssCache;
+}
+
+// Demo/Guest 중복 접속 모드(핫패스 캐시, v2.294) — resolveTokenUser 가 데모 토큰마다 참조.
+let _dsAt = 0, _dsCache = null;
+export function demoSessionMode() {
+  const now = Date.now();
+  if (_dsAt && now - _dsAt < 3000) return _dsCache;
+  _dsCache = loadConfiguredSecurity().demoSession;
+  _dsAt = now;
+  return _dsCache;
+}
+
+/**
+ * '이 사용자에게 단일 세션을 강제해야 하는가' 단일 판정점(v2.294).
+ * 로그인 라우트(sid 발급 여부)와 resolveTokenUser(sid 대조 여부)가 **둘 다 이 함수 하나**를
+ * 타야 한다 — 두 곳이 각자 판정하면 한쪽만 고친 날 'sid 없는 토큰 발급 + 검사는 강제'로
+ * 데모 계정이 로그인 즉시 벽돌이 되는 비대칭이 생긴다(발급·검사 규칙은 항상 쌍).
+ * @param {boolean} isDemo 사용자 레코드의 demo 플래그(내장 데모 계정)
+ */
+export function singleSessionRequired(isDemo) {
+  if (!isDemo) return singleSessionEnabled();
+  const m = demoSessionMode();
+  if (m === 'allow') return false;  // 데모는 중복 허용 — 전역 단일 세션이어도 예외
+  if (m === 'single') return true;  // 데모만 단일 세션 — 전역이 꺼져 있어도 강제
+  return singleSessionEnabled();    // 미설정 = 전역 따름(하위호환)
 }
 
 /**
@@ -205,10 +241,13 @@ export function saveSessionSecurity(partial = {}) {
     settingsOwners: owners,
     loginPolicy, // null = 미설정(레거시)
     singleSession: partial.singleSession !== undefined ? !!partial.singleSession : cur.singleSession,
+    // Demo 중복 접속(v2.294) — undefined 면 기존 유지, 제공되면 정규화(무효값·null = '전역 따름'으로
+    // 명시 리셋). loginPolicy 와 달리 null 리셋을 허용하는 이유: '전역 따름'이 정식 상태값이다.
+    demoSession: partial.demoSession !== undefined ? normDemoSession(partial.demoSession) : cur.demoSession,
   };
   // 원자적 쓰기 — settingsOwners(설정 편집 권한)를 담는 권한 config. 부분기록으로 손상되면
   // 로드가 DEFAULTS로 조용히 리셋돼 소유자 경계가 무너진다.
   atomicWriteFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
-  _polAt = 0; _ssAt = 0; // 로그인 정책·단일세션 캐시 즉시 무효화
+  _polAt = 0; _ssAt = 0; _dsAt = 0; // 로그인 정책·단일세션·데모모드 캐시 즉시 무효화
   return next;
 }

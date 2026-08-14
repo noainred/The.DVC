@@ -22,7 +22,8 @@ export default function SessionSecurity() {
     setBusy(true); setMsg(null);
     try {
       const owners = String(s.settingsOwners || '').split(/[\s,]+/).map((x) => x.trim()).filter(Boolean);
-      const r = await putJson('/admin/security/session', { idleLogoutEnabled: s.idleLogoutEnabled, idleLogoutMin: Number(s.idleLogoutMin) || 30, settingsOwners: owners, loginPolicy: s.loginPolicy || undefined, singleSession: !!s.singleSession, otp: otp.trim() });
+      // demoSession(v2.294): null 도 유효한 상태값('전역 따름')이라 항상 전송한다(서버가 정규화).
+      const r = await putJson('/admin/security/session', { idleLogoutEnabled: s.idleLogoutEnabled, idleLogoutMin: Number(s.idleLogoutMin) || 30, settingsOwners: owners, loginPolicy: s.loginPolicy || undefined, singleSession: !!s.singleSession, demoSession: s.demoSession || null, otp: otp.trim() });
       if (r && r.ok === false) { setMsg(`오류: ${r.reason || '저장 실패'}`); }
       else { const ns = r.settings || s; setS({ ...ns, settingsOwners: (ns.settingsOwners || []).join(', ') }); setOtp(''); setMsg('저장되었습니다. 변경 내역은 감사 로그에 기록됩니다.'); }
     } catch (e) { setMsg(`오류: ${e.message}`); }
@@ -69,6 +70,28 @@ export default function SessionSecurity() {
             켜면 한 계정으로 <b>동시에 한 곳에서만</b> 로그인할 수 있습니다. 같은 계정으로 다른 기기에서
             새로 로그인하면 <b>이전 로그인은 자동으로 로그아웃</b>됩니다(최신 로그인 우선). 로컬·AD 계정 모두 적용됩니다.
             <div style={{ marginTop: 4 }}>⚠ 이 옵션을 <b>처음 켜는 순간</b> 현재 접속 중인 모든 세션은 한 번 재로그인이 필요합니다(세션 확립).</div>
+          </div>
+
+          {/* Demo/Guest 중복 접속(v2.294) — 데모 계정은 여러 사람이 공유하므로 전역 단일 세션과
+              요구가 어긋나기 쉽다(전역 ON 이면 데모 사용자끼리 서로 로그아웃). 전역과 독립 3-상태. */}
+          <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px dashed rgba(255,255,255,.08)' }}>
+            <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>
+              <b>Demo/Guest 계정 중복 접속</b> — 내장 데모 계정(<code>thedvcdemp</code>)에만 적용됩니다. 다른 계정은 위 '단일 세션' 설정을 따릅니다.
+            </div>
+            {[
+              { v: '', label: '전역 설정 따름 (기본)', desc: '위 "단일 세션만 허용" 설정을 데모 계정에도 동일하게 적용합니다.' },
+              { v: 'allow', label: '중복 접속 허용', desc: '전역 단일 세션이 켜져 있어도 데모 계정은 여러 곳에서 동시에 로그인할 수 있습니다(공유 데모 시연용).' },
+              { v: 'single', label: '중복 접속 차단 (단일 세션)', desc: '전역 설정과 무관하게 데모 계정은 항상 한 곳에서만 로그인됩니다 — 새 로그인이 이전 데모 세션을 자동 로그아웃합니다. 전환 직후 기존 데모 세션은 한 번 재로그인이 필요합니다.' },
+            ].map((o) => (
+              <label key={o.v || 'inherit'} className="flex gap" style={{ alignItems: 'flex-start', cursor: 'pointer', marginBottom: 6 }}>
+                <input type="radio" name="demoSession" style={{ marginTop: 3 }} checked={(s.demoSession || '') === o.v}
+                  onChange={() => setS({ ...s, demoSession: o.v || null })} />
+                <span style={{ fontSize: 12.5 }}>
+                  <b>{o.label}</b>
+                  <div className="muted" style={{ fontSize: 11.5, marginTop: 2, lineHeight: 1.6 }}>{o.desc}</div>
+                </span>
+              </label>
+            ))}
           </div>
         </div>
 
