@@ -7,7 +7,7 @@ import { authenticateAD } from './ad.js';
 import * as totp from './totp.js';
 import { checkOtpAllowed, recordOtpFailure, recordOtpSuccess } from '../security/loginRateLimit.js';
 import { rolePermissionSet } from './permissions.js';
-import { effectiveLoginPolicy, userLoginPolicy, singleSessionEnabled } from '../security/securitySettings.js';
+import { effectiveLoginPolicy, userLoginPolicy, singleSessionRequired } from '../security/securitySettings.js';
 import { isActiveSession } from './sessions.js';
 
 // users.json lives in CONFIG_DIR (default app/server/config; set to e.g.
@@ -655,15 +655,19 @@ if (!config.auth.enabled) {
 export function resolveTokenUser(token) {
   const payload = token && verifyToken(token);
   if (!payload) return null;
-  // 단일 세션 강제(ID 공유 금지, v2.280) — 켜져 있으면 이 계정의 '현재 활성 세션' sid 와 일치하는
+  // 단일 세션 강제(ID 공유 금지, v2.280) — 강제 대상이면 이 계정의 '현재 활성 세션' sid 와 일치하는
   // 토큰만 유효하다. 다른 기기/사람이 새로 로그인하면 그 로그인이 활성 sid 를 덮어써(최신 로그인
   // 우선) 이전 세션의 토큰은 여기서 무효가 된다. sid 없는(기능 도입/활성화 전 발급) 토큰도 무효 →
   // 재로그인으로 세션을 확립한다. 로컬·AD 모두 username 키로 동일하게 강제하며, HTTP authMiddleware
   // 와 WS SSH/RDP 게이트웨이가 전부 이 함수를 타므로 여기 한 곳에서 전 경로가 커버된다.
-  if (singleSessionEnabled() && !isActiveSession(payload.sub, payload.sid)) return null;
+  // v2.294: 강제 여부 판정은 singleSessionRequired 하나로 — 내장 데모 계정(u.demo)은 설정에 따라
+  // 전역과 독립적으로 중복 접속을 허용('allow')하거나 데모만 단일 세션('single')으로 잠글 수 있다.
+  // 판정을 여기·로그인 라우트에서 각자 만들면 sid 발급/검사 비대칭으로 데모가 벽돌이 된다(주석 참조).
+  const localU = payload.src === 'local' ? getUser(payload.sub) : null;
+  if (payload.src === 'local' && !localU) return null; // 삭제된 계정
+  if (singleSessionRequired(!!localU?.demo) && !isActiveSession(payload.sub, payload.sid)) return null;
   if (payload.src === 'local') {
-    const u = getUser(payload.sub);
-    if (!u) return null; // 삭제된 계정
+    const u = localU;
     if ((u.tokenVersion || 0) !== (payload.tv || 0)) return null; // 폐기된 토큰
     // role·scope·등록강제 여부는 토큰이 아니라 현재 레코드에서 읽어 변경을 즉시 반영한다.
     const role = u.role || 'viewer';

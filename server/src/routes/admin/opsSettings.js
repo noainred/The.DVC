@@ -78,15 +78,18 @@ adminRouter.put('/security/session', adminOnly, requireSettingsOwner, (req, res)
   const before = loadConfiguredSecurity();
   let after;
   try {
-    after = saveSessionSecurity({ idleLogoutEnabled: req.body?.idleLogoutEnabled, idleLogoutMin: req.body?.idleLogoutMin, settingsOwners: req.body?.settingsOwners, loginPolicy: req.body?.loginPolicy, singleSession: req.body?.singleSession });
+    after = saveSessionSecurity({ idleLogoutEnabled: req.body?.idleLogoutEnabled, idleLogoutMin: req.body?.idleLogoutMin, settingsOwners: req.body?.settingsOwners, loginPolicy: req.body?.loginPolicy, singleSession: req.body?.singleSession, demoSession: req.body?.demoSession });
   } catch (e) { return res.status(400).json({ ok: false, reason: e.message }); }
   const fmt = (s) => (s.idleLogoutEnabled ? `${s.idleLogoutMin}분` : '비활성');
   const polLabel = (p) => ({ otp_only: 'OTP 전용', otp_or_password: 'OTP+비밀번호(혼용)', password_only: '비밀번호 전용' }[p] || '기본(고권한 OTP 전용)');
+  // Demo/Guest 중복 접속 모드 라벨(v2.294) — 감사 로그에 사람이 읽는 형태로 남긴다.
+  const demoLabel = (m) => ({ allow: '중복 허용', single: '중복 차단(단일 세션)' }[m] || '전역 따름(기본)');
   const parts = [];
   if (fmt(before) !== fmt(after)) parts.push(`유휴 로그아웃 ${fmt(before)} → ${fmt(after)}`);
   if (before.settingsOwners.join(',') !== after.settingsOwners.join(',')) parts.push(`설정 소유 계정 [${before.settingsOwners.join(', ')}] → [${after.settingsOwners.join(', ')}]`);
   if ((before.loginPolicy || '') !== (after.loginPolicy || '')) parts.push(`로그인 방식 ${polLabel(before.loginPolicy)} → ${polLabel(after.loginPolicy)}`);
   if (!!before.singleSession !== !!after.singleSession) parts.push(`단일 세션 강제 ${before.singleSession ? 'ON' : 'OFF'} → ${after.singleSession ? 'ON' : 'OFF'}`);
+  if ((before.demoSession || '') !== (after.demoSession || '')) parts.push(`Demo 중복 접속 ${demoLabel(before.demoSession)} → ${demoLabel(after.demoSession)}`);
   logAudit({ user: username, action: '세션 보안/설정 접근 변경', target: 'security/session', detail: parts.join(' · ') || '변경 없음', ip: req.ip || '' });
   res.json({ ok: true, settings: after });
 });
