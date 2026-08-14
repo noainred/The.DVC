@@ -4,6 +4,10 @@ import { Loading, ErrorBox } from '../components/ui.jsx';
 import TemplateTab from './svcmon/TemplateTab.jsx';   // 템플릿 화면은 하나만 — 폴더 적용 모달에서도 이 화면을 불러 쓴다
 import BulkTab from './svcmon/BulkTab.jsx';           // 통합 등록 마법사 — 트리에서 모달로 불러 쓴다(설정 탭과 같은 하나의 화면)
 import EscClose from '../components/EscClose.jsx';
+// v2.295 분리 모듈(1차 모듈화 감사 확정 #1·#5): 상수 카탈로그 · 트리/집계 순수 함수 · 점검 마법사.
+import { STATUS, METHOD, statusOf, methodText } from './svcmon/constants.js';
+import { buildTree, statsOf, matchNode, summarize } from './svcmon/tree.js';
+import { TestWizard } from './svcmon/TestWizard.jsx';
 
 /**
  * 성능점검 — Claude Design 핸드오프(design_handoff_perf_check) 기준 구현.
@@ -17,165 +21,10 @@ const LEFT_W_KEY = 'perfcheck.leftW';
 const DEFAULT_LEFT_W = 340;
 const TARGET_PAGE = 50;          // 폴더당 한 번에 표시할 대상 수('더 보기'로 늘린다)
 
-/** 상태 매핑(README): Ok/Host is alive → ok, Warning → warn, Disabled → off, 그 외 → bad. */
-const STATUS = {
-  ok: { label: 'Ok', cls: 'pc-ok' },
-  warn: { label: 'Warning', cls: 'pc-warn' },
-  bad: { label: 'No answer', cls: 'pc-bad' },
-  disabled: { label: 'Disabled', cls: 'pc-off' },
-  // '중지'와 구분해야 하는 두 상태 — 감시 공백을 의도적 중지로 보이게 하면 안 된다.
-  pending: { label: '점검 대기', cls: 'pc-pending' },
-  stale: { label: '갱신 안 됨', cls: 'pc-stale' },
-  none: { label: '—', cls: 'pc-off' },
-};
-const METHOD = {
-  ping: 'ping (timeout - 4000 ms)', trace: 'traceroute', tcp: 'TCP port', udp: 'UDP probe',
-  http: 'HTTP/URL', soap: 'SOAP/XML', dns: 'DNS query', cert: 'SSL certificate expiry',
-  ntp: 'NTP offset', smtp: 'SMTP banner', pop3: 'POP3 banner', imap: 'IMAP banner',
-  ssh: 'SSH banner', ldap: 'LDAP bind', domain: 'Domain expiry (whois)',
-};
-
-/** 계단식 추가 메뉴 — HostMonitor 의 Test→Add 계층을 우리 구현 가능 범위로 정리. */
-const ADD_MENU = [
-  { label: '📡 Ping / Trace', items: [
-    { type: 'ping', label: 'Ping (ICMP RTT)' },
-    { type: 'trace', label: 'Trace (경로·홉 수)' },
-  ] },
-  { label: '🔌 TCP / UDP / 포트', items: [
-    { type: 'tcp', label: 'TCP 포트 열림' },
-    { type: 'udp', label: 'UDP 응답' },
-    { type: 'ssh', label: 'SSH 배너 (22)' },
-  ] },
-  { label: '🌐 Web / 인증서', items: [
-    { type: 'http', label: 'HTTP / URL (코드·키워드)' },
-    { type: 'soap', label: 'SOAP / XML (POST)' },
-    { type: 'cert', label: 'SSL 인증서 만료' },
-    { type: 'domain', label: '도메인 만료 (whois)' },
-  ] },
-  { label: '✉️ E-Mail', items: [
-    { type: 'smtp', label: 'SMTP 배너 (25/587)' },
-    { type: 'pop3', label: 'POP3 배너 (110/995)' },
-    { type: 'imap', label: 'IMAP 배너 (143/993)' },
-  ] },
-  { label: '🧭 이름·시간·디렉터리', items: [
-    { type: 'dns', label: 'DNS 질의' },
-    { type: 'ntp', label: 'NTP 오프셋' },
-    { type: 'ldap', label: 'LDAP bind (389/636)' },
-  ] },
-];
-/** 다음 단계 예정(엔진 미구현) — 메뉴에 회색으로 노출해 어떤 기능이 올지 보이게 한다. */
-const ADD_MENU_PLANNED = [
-  'SNMP Get / Table / Trap', 'IPMI / Redfish 센서', 'Cisco·Juniper·F5·Netscaler',
-  'NetApp·QNAP·Synology (NAS)', 'UPS·프린터', 'Database 세션(ODBC/MSSQL/Oracle)',
-];
-
-/** 유형별 설명·파라미터 정의 — 마법사 3단계 폼을 이 표에서 생성한다(한 곳만 고치면 됨). */
-const F = (key, label, opts = {}) => ({ key, label, ...opts });
-const TYPE_META = {
-  ping: { desc: 'ICMP 로 도달성·왕복시간(RTT)을 봅니다. CLI 프로세스를 쓰므로 대량 등록 시 TCP 병용 권장.', fields: [] },
-  trace: { desc: '경로(홉)를 추적해 홉 수와 완주 여부를 봅니다. 경로 변화 감시용 — 주기를 길게 두세요.',
-    fields: [F('maxHops', '최대 홉', { ph: '15', hint: '이 값을 넘으면 주의' })] },
-  tcp: { desc: '포트에 TCP 연결만 시도하고 바이트를 보내지 않습니다. 사내 서비스 가동 판정에 가장 안전.',
-    fields: [F('port', '포트', { ph: '8080', req: true })] },
-  udp: { desc: '패킷을 보내고 응답이 오는지 봅니다. 무응답이 정상인 서비스(단방향 syslog 등)는 부적합.',
-    fields: [F('port', '포트', { ph: '161', req: true }), F('payload', '보낼 문자열', { ph: '(비우면 CRLF)' })] },
-  http: { desc: '상태코드와 본문 키워드로 판정합니다. 리다이렉트는 추적하지 않습니다(302·401 = 살아있음).',
-    fields: [F('url', 'URL', { ph: 'http://10.0.0.5:8080/health', req: true }),
-      F('keyword', '본문 키워드', { ph: 'ok — 없으면 주의' }),
-      F('expectStatus', '기대 상태코드', { ph: '200 (비우면 500 미만 정상)' }),
-      F('warnMs', '느림 임계(ms)', { ph: '3000' })] },
-  soap: { desc: 'POST + text/xml 로 SOAP 요청을 보내고 응답 XML 을 키워드로 확인합니다.',
-    fields: [F('url', 'URL', { ph: 'https://host/svc', req: true }), F('soapAction', 'SOAPAction'),
-      F('body', '요청 본문(XML)', { area: true }), F('keyword', '응답 키워드')] },
-  dns: { desc: '대상(또는 지정 서버)을 네임서버로 보고 A/AAAA 질의를 합니다. 기대 IP 와 다르면 주의.',
-    fields: [F('record', '조회할 이름', { ph: 'portal.example.com', req: true }),
-      F('server', 'DNS 서버', { ph: '(비우면 대상 호스트)' }), F('expect', '기대 IP', { ph: '10.0.0.9' })] },
-  cert: { desc: 'TLS 핸드셰이크로 인증서 만료일을 읽습니다. 만료 임박은 주의, 만료는 실패.',
-    fields: [F('port', '포트', { ph: '443' }), F('warnDays', '경고 임계(일)', { ph: '30' })] },
-  domain: { desc: 'whois(TCP 43) 로 도메인 만료일을 확인합니다. TLD 별 형식 차이로 파싱 실패가 있을 수 있어 주기는 1일 권장.',
-    fields: [F('record', '도메인', { ph: 'example.com — 비우면 대상 호스트' }), F('warnDays', '경고 임계(일)', { ph: '60' })] },
-  ntp: { desc: 'SNTP 로 서버 시각과의 오프셋을 봅니다. 시간 오차는 인증·OTP 실패의 흔한 원인입니다.',
-    fields: [F('server', 'NTP 서버', { ph: '(비우면 대상 호스트)' }),
-      F('warnMs', '주의 임계(ms)', { ph: '1000' }), F('badMs', '실패 임계(ms)', { ph: '5000' })] },
-  smtp: { desc: '연결 후 220 인사말을 확인합니다. 포트만 열린 좀비 프로세스를 걸러냅니다.',
-    fields: [F('port', '포트', { ph: '25' }), F('send', '보낼 명령', { ph: 'EHLO test' }), F('keyword', '응답 키워드')] },
-  pop3: { desc: '연결 후 +OK 인사말을 확인합니다. 995(TLS) 는 배너가 암호화되어 TCP 점검을 권장.',
-    fields: [F('port', '포트', { ph: '110' }), F('keyword', '응답 키워드')] },
-  imap: { desc: '연결 후 * OK 인사말을 확인합니다. 993(TLS) 는 TCP 점검을 권장.',
-    fields: [F('port', '포트', { ph: '143' }), F('keyword', '응답 키워드')] },
-  ssh: { desc: 'SSH-2.0 배너를 확인합니다. 응답값에 버전 문자열이 남아 패치 추적에도 쓸 수 있습니다.',
-    fields: [F('port', '포트', { ph: '22' }), F('keyword', '응답 키워드')] },
-  ldap: { desc: '익명 simple bind 로 디렉터리 서버 응답을 확인합니다(익명 금지 서버도 응답하면 정상 판정).',
-    fields: [F('port', '포트', { ph: '389' })] },
-};
-
-// 서버가 계산한 state 를 그대로 쓴다 — 낡음 판정 기준(주기×3)을 화면에 또 두면 갈라지고,
-// 브라우저 시계가 틀린 경우 판정이 달라진다. state 가 없는 응답(구버전)만 폴백한다.
-const statusOf = (t, x) => x.state
-  || ((t.enabled === false || x.enabled === false) ? 'disabled' : (x.result?.status || 'pending'));
-const methodText = (t, x) => {
-  const base = METHOD[x.type] || x.type;
-  if (x.type === 'tcp') return `${base} ${x.port || ''}`.trim();
-  if (x.type === 'http') return `${base} (${x.url})`;
-  if (x.type === 'dns') return `${base} (${x.record || ''} @ ${x.server || t.host})`;
-  return `${base} (${t.host})`;
-};
-
-/* ── 트리: 명시적 폴더 + 대상 경로를 합쳐 만든다(빈 폴더도 유지) ── */
-function buildTree(targets, folders = [], sortMode = 'manual') {
-  const root = { id: '', name: 'Root', children: new Map(), targets: [] };
-  const ensure = (p) => {
-    let node = root;
-    for (const seg of (p || '').split('\\').filter(Boolean)) {
-      if (!node.children.has(seg)) node.children.set(seg, { id: node.id ? `${node.id}\\${seg}` : seg, name: seg, children: new Map(), targets: [] });
-      node = node.children.get(seg);
-    }
-    return node;
-  };
-  for (const f of folders) ensure(f.path);          // 대상이 없어도 보이는 폴더
-  for (const t of targets) ensure(t.path).targets.push(t);
-  if (sortMode === 'name') {                        // 이름순 정렬(폴더·대상 모두)
-    const sortNode = (n) => {
-      n.children = new Map([...n.children.entries()].sort((a, b) => a[0].localeCompare(b[0], 'ko')));
-      n.targets.sort((a, b) => a.name.localeCompare(b.name, 'ko'));
-      for (const c of n.children.values()) sortNode(c);
-    };
-    sortNode(root);
-  } else {
-    // 수동 정렬 — order 필드로 정렬한다. 대상 order 는 생성 시 Date.now() 라 기본은 생성순(=기존 동작)
-    // 이고, 재정렬하면 그 폴더 대상에 0..n 이 부여된다. 폴더는 order 가 있으면 그 값, 없으면 folders
-    // 배열 인덱스(=기존 표시 순서)로 정렬해 재정렬 전 순서를 그대로 보존한다.
-    const fOrder = new Map();
-    folders.forEach((f, i) => fOrder.set(f.path, f.order != null ? f.order : i));
-    const ord = (id) => (fOrder.has(id) ? fOrder.get(id) : Number.MAX_SAFE_INTEGER);
-    const sortNode = (n) => {
-      n.children = new Map([...n.children.entries()].sort((a, b) => (ord(a[1].id) - ord(b[1].id)) || a[0].localeCompare(b[0], 'ko')));
-      n.targets.sort((a, b) => ((a.order ?? 0) - (b.order ?? 0)) || a.name.localeCompare(b.name, 'ko'));
-      for (const c of n.children.values()) sortNode(c);
-    };
-    sortNode(root);
-  }
-  return root;
-}
-function statsOf(node) {
-  let alarms = 0, worst = 'none';
-  // stale(갱신 안 됨)도 조치가 필요한 상태다 — 알람 수에 포함하고 최악 상태 순위에도 넣는다.
-  const rank = { bad: 4, stale: 3, warn: 2, ok: 1, pending: 0, none: 0, disabled: 0 };
-  const visit = (n) => {
-    for (const t of n.targets) for (const x of t.tests) {
-      const st = statusOf(t, x);
-      if (st === 'bad' || st === 'warn' || st === 'stale') alarms += 1;
-      if (rank[st] > rank[worst]) worst = st;
-    }
-    for (const c of n.children.values()) visit(c);
-  };
-  visit(node);
-  return { alarms, worst };
-}
-const matchNode = (node, q) => !q || node.name.toLowerCase().includes(q)
-  || node.targets.some((t) => t.name.toLowerCase().includes(q) || (t.host || '').toLowerCase().includes(q))
-  || [...node.children.values()].some((c) => matchNode(c, q));
-
+// 상태/유형 카탈로그(STATUS·METHOD·ADD_MENU·TYPE_META·statusOf·methodText·EMPTY_TEST)는
+// svcmon/constants.js 로 분리(v2.295) — TestWizard(분리 모듈)와 셸이 단방향으로 공유한다.
+/* 트리(buildTree·statsOf·matchNode)·KPI 집계(summarize)는 svcmon/tree.js 로 분리(v2.295) —
+   v2.279 실버그(집계 위장) 지점이라 vitest(tree.test.js)가 의미론을 고정한다. */
 // 드롭 하이라이트(인라인 — 별도 CSS 불필요). inside=폴더 안, before/after=형제 사이 선(boxShadow).
 const DROP_INSIDE = { outline: '2px dashed var(--accent, #3b82f6)', outlineOffset: '-2px', borderRadius: 4, background: 'rgba(59,130,246,.10)' };
 const DROP_BEFORE = { boxShadow: 'inset 0 3px 0 0 var(--accent, #3b82f6)' };
@@ -240,7 +89,6 @@ function TreeRows({ node, depth, sel, setSel, expanded, toggle, q, onCtx, dnd })
     </>
   );
 }
-const EMPTY_TEST = { name: '', type: 'ping', intervalSec: 60, port: '', url: '', keyword: '', record: '', server: '' };
 
 export default function SvcMonitor() {
   const [seq, setSeq] = useState(0);
@@ -290,8 +138,7 @@ export default function SvcMonitor() {
   const [pageN, setPageN] = useState(TARGET_PAGE);
   // 점검 추가 마법사 — { targetId, targetName, step:1|2|3, cat, type, form, editId }
   // 호버 계단식 메뉴를 단계형으로 바꿨다: 커서가 메뉴 사이를 지나다 닫히는 문제가 원천적으로 없다.
-  const [wiz, setWiz] = useState(null);
-  const [wizTpls, setWizTpls] = useState([]);   // 점검 추가 마법사의 '템플릿으로 추가'용 템플릿 목록
+  const [wizFor, setWizFor] = useState(null); // { targetId, targetName, test } — TestWizard(분리 모듈) 표시 대상(v2.295)
   // 폴더에 템플릿 적용 모달 — 별도 창을 만들지 않고 '하나뿐인 템플릿 화면(TemplateTab)'을 불러 쓴다. { path } | null
   const [tplApply, setTplApply] = useState(null);
   // 통합 등록 마법사 모달 — 트리 '＋ 등록'/우클릭 '이 폴더에 등록…'. { path } | null
@@ -343,19 +190,9 @@ export default function SvcMonitor() {
   if (loading && !data) return <Loading />;
   if (error && !data) return <ErrorBox message={error} />;
 
-  // KPI 요약(현재 모드 기준). ⚠ 회귀 방지(v2.279): 과거엔 ok/warn/bad 만 세고 나머지(stale·pending)를
-  // 전부 disabled 에 합산해, '갱신 안 됨'·'점검 대기' 카드가 항상 0 이고 폴러 기아로 인한 감시
-  // 공백이 '중지(정상 설정)'로 위장됐다(status.js 에 기록된 실제 사고). 서버 status 와 동일한 6개
-  // 상태 키로 정확히 집계한다(알 수 없는 상태는 disabled 가 아니라 pending 으로 — 공백 은폐 방지).
-  const summary = (() => {
-    const s = { total: 0, ok: 0, warn: 0, bad: 0, stale: 0, pending: 0, disabled: 0 };
-    for (const t of targets) for (const x of t.tests) {
-      s.total += 1;
-      const st = statusOf(t, x);
-      if (st !== 'total' && s[st] !== undefined) s[st] += 1; else s.pending += 1;
-    }
-    return s;
-  })();
+  // KPI 요약(현재 모드 기준) — 집계는 svcmon/tree.js summarize(v2.295 추출·vitest 고정).
+  // ⚠ v2.279 회귀 방지 의미론(stale/pending 을 disabled 로 합산 금지)은 그 모듈이 소유한다.
+  const summary = summarize(targets);
 
   // 선택 노드 이하 대상 — 전체를 구한 뒤 표시분만 자르고, 남은 수를 화면에 알린다.
   const scoped = (() => {
@@ -395,41 +232,9 @@ export default function SvcMonitor() {
 
 
   /* ── 점검 추가/수정 마법사 (1 카테고리 → 2 유형 → 3 파라미터) ── */
-  const openWizard = (targetId, targetName, test = null) => {
-    if (test) {
-      const cat = ADD_MENU.findIndex((g) => g.items.some((i) => i.type === test.type));
-      setWiz({ targetId, targetName, step: 3, cat: cat < 0 ? 0 : cat, type: test.type, editId: test.id,
-        form: { ...EMPTY_TEST, ...test }, mode: 'single', tplId: '' });
-    } else {
-      setWiz({ targetId, targetName, step: 1, cat: -1, type: '', editId: null, form: { ...EMPTY_TEST }, mode: 'single', tplId: '' });
-      // '템플릿으로 추가'용 목록 — 마법사를 열 때 최신으로 읽는다.
-      fetchJson('/svcmon/templates').then((r) => setWizTpls(r.templates || [])).catch(() => setWizTpls([]));
-    }
-    setErr('');
-  };
-  // 선택한 템플릿을 이 대상 하나에 적용(scope.targetIds). 여러 점검을 한 번에 추가한다.
-  const applyTplToTarget = async () => {
-    if (!wiz?.tplId) return;
-    setBusy(true); setErr('');
-    try {
-      const r = await postJson(`/svcmon/templates/${wiz.tplId}/apply`, { scope: { targetIds: [wiz.targetId] }, mode: 'apply' });
-      if (r?.error) { setErr(r.error); return; }
-      if ((r?.summary?.error || 0) > 0) { setErr(`오류 ${r.summary.error}건으로 적용하지 않았습니다.`); return; }
-      setWiz(null); refresh();
-    } catch (e) { setErr(e.message || String(e)); } finally { setBusy(false); }
-  };
-  const wizSave = async () => {
-    setBusy(true); setErr('');
-    try {
-      const f = wiz.form;
-      const body = { ...f, type: wiz.type, intervalSec: Number(f.intervalSec) || 60 };
-      // 빈 문자열은 서버가 '미지정'으로 보게 제거한다(포트 0 → 1 클램프 같은 사고 방지).
-      for (const k of Object.keys(body)) if (body[k] === '') delete body[k];
-      if (wiz.editId) await putJson(`/svcmon/targets/${wiz.targetId}/tests/${wiz.editId}`, body);
-      else await postJson(`/svcmon/targets/${wiz.targetId}/tests`, body);
-      setWiz(null); refresh();
-    } catch (e) { setErr(e.message || String(e)); } finally { setBusy(false); }
-  };
+  /* ── 점검 추가/수정 마법사 — 구현은 svcmon/TestWizard.jsx(v2.295 분리). 여기는 열기만. ── */
+  // 이름(openWizard)을 유지해 호출부(도구줄·컨텍스트 메뉴·상세 모달) 3곳이 무변경이다.
+  const openWizard = (targetId, targetName, test = null) => setWizFor({ targetId, targetName, test });
 
   const submit = async () => {
     setBusy(true); setErr('');
@@ -1001,159 +806,11 @@ export default function SvcMonitor() {
         </div>
       )}
 
-      {wiz && (
-        <div className="pc-overlay" onClick={() => setWiz(null)}>
-          <div className="pc-modal pc-wiz" onClick={(e) => e.stopPropagation()}>
-            <div className="pc-modal-head">
-              <b>{wiz.editId ? '점검 수정' : '점검 추가'}</b>
-              <span className="pc-wiz-target">{wiz.targetName}</span>
-              <button className="pc-x" onClick={() => setWiz(null)}>✕</button>
-            </div>
-
-            {/* 추가 방식 선택 — 템플릿(여러 점검 한 번에) vs 개별 점검(3단계). 수정 모드엔 없음. */}
-            {!wiz.editId && (
-              <div className="pc-steps" style={{ gap: 8 }}>
-                {[['single', '＋ 개별 점검 추가'], ['template', '📋 템플릿으로 추가']].map(([m, label]) => (
-                  <button key={m} className={`pc-step ${wiz.mode === m ? 'on' : ''}`} onClick={() => { setWiz({ ...wiz, mode: m }); setErr(''); }}>{label}</button>
-                ))}
-              </div>
-            )}
-
-            {/* 진행 표시 — 완료 단계는 클릭해 되돌아갈 수 있다 (개별 점검 모드에서만) */}
-            {wiz.mode !== 'template' && (
-            <div className="pc-steps">
-              {['카테고리', '점검 유형', '설정'].map((label, i) => {
-                const n = i + 1;
-                const state = wiz.step === n ? 'on' : (wiz.step > n ? 'done' : '');
-                return (
-                  <button key={label} className={`pc-step ${state}`} disabled={wiz.step <= n}
-                    onClick={() => setWiz({ ...wiz, step: n })}>
-                    <span className="pc-step-no">{wiz.step > n ? '✓' : n}</span>{label}
-                  </button>
-                );
-              })}
-              <span className="pc-step-count">{wiz.step} / 3</span>
-            </div>
-            )}
-
-            <div className="pc-wiz-body">
-              {wiz.mode === 'template' && !wiz.editId && (
-                <>
-                  <div className="pc-wiz-lead">이 대상에 적용할 점검 템플릿을 고르세요 — 템플릿의 점검들이 한 번에 추가됩니다.</div>
-                  <div className="pc-wiz-form">
-                    <label>점검 템플릿
-                      <select className="pc-input" value={wiz.tplId} autoFocus onChange={(e) => setWiz({ ...wiz, tplId: e.target.value })}>
-                        <option value="">(템플릿 선택)</option>
-                        {wizTpls.map((t) => <option key={t.id} value={t.id}>{t.name} — 항목 {(t.items || []).length}개</option>)}
-                      </select>
-                    </label>
-                    {(() => {
-                      const t = wizTpls.find((x) => x.id === wiz.tplId);
-                      if (!t) return <span className="pc-fhint">템플릿을 고르면 포함된 점검이 여기 표시됩니다. (템플릿 정의·수정은 ‘Monitoring 설정 › 점검 템플릿’)</span>;
-                      return <span className="pc-fhint">{(t.items || []).map((x) => `${x.type}${x.port ? `:${x.port}` : ''}`).join(', ') || '항목 없음'} · 점검 {(t.items || []).length}개가 이 대상에 추가됩니다.</span>;
-                    })()}
-                  </div>
-                  {err && <div className="pc-err">{err}</div>}
-                </>
-              )}
-              {wiz.mode !== 'template' && wiz.step === 1 && (
-                <>
-                  <div className="pc-wiz-lead">무엇을 점검할지 분류를 고르세요.</div>
-                  <div className="pc-wiz-grid">
-                    {ADD_MENU.map((g, gi) => (
-                      <button key={g.label} className={`pc-wiz-card${wiz.cat === gi ? ' sel' : ''}`}
-                        onClick={() => setWiz({ ...wiz, cat: gi, step: 2 })}>
-                        <b>{g.label}</b>
-                        <span>{g.items.map((i) => i.label.split(' (')[0]).join(' · ')}</span>
-                      </button>
-                    ))}
-                  </div>
-                  <div className="pc-wiz-planned">
-                    <div className="pc-ctx-cap">다음 단계 예정 (엔진 개발 후 선택 가능)</div>
-                    {ADD_MENU_PLANNED.map((t) => <span key={t} className="pc-plan-tag">{t}</span>)}
-                  </div>
-                </>
-              )}
-
-              {wiz.step === 2 && (
-                <>
-                  <div className="pc-wiz-lead">{ADD_MENU[wiz.cat]?.label} — 점검 유형을 고르세요.</div>
-                  <div className="pc-wiz-grid">
-                    {(ADD_MENU[wiz.cat]?.items || []).map((it) => (
-                      <button key={it.type} className={`pc-wiz-card${wiz.type === it.type ? ' sel' : ''}`}
-                        onClick={() => setWiz({
-                          ...wiz, type: it.type, step: 3,
-                          form: { ...wiz.form, name: wiz.form.name || it.label.split(' (')[0] },
-                        })}>
-                        <b>{it.label}</b>
-                        <span>{TYPE_META[it.type]?.desc || METHOD[it.type]}</span>
-                      </button>
-                    ))}
-                  </div>
-                </>
-              )}
-
-              {wiz.step === 3 && (
-                <>
-                  <div className="pc-wiz-lead">
-                    <b>{METHOD[wiz.type] || wiz.type}</b> — {TYPE_META[wiz.type]?.desc}
-                  </div>
-                  <div className="pc-wiz-form">
-                    <label>점검 이름<input className="pc-input" value={wiz.form.name || ''} autoFocus
-                      onChange={(e) => setWiz({ ...wiz, form: { ...wiz.form, name: e.target.value } })}
-                      placeholder="2. Ping: 192.168.10.55" /></label>
-                    {(TYPE_META[wiz.type]?.fields || []).map((f) => (
-                      <label key={f.key}>{f.label}{f.req && <em> *</em>}
-                        {f.area
-                          ? <textarea className="pc-input" rows={3} value={wiz.form[f.key] || ''}
-                              onChange={(e) => setWiz({ ...wiz, form: { ...wiz.form, [f.key]: e.target.value } })}
-                              placeholder={f.ph || ''} />
-                          : <input className="pc-input" value={wiz.form[f.key] || ''}
-                              onChange={(e) => setWiz({ ...wiz, form: { ...wiz.form, [f.key]: e.target.value } })}
-                              placeholder={f.ph || ''} />}
-                        {f.hint && <span className="pc-fhint">{f.hint}</span>}
-                      </label>
-                    ))}
-                    <label>점검 주기(초)<input className="pc-input" value={wiz.form.intervalSec}
-                      onChange={(e) => setWiz({ ...wiz, form: { ...wiz.form, intervalSec: e.target.value } })} />
-                      <span className="pc-fhint">최소 10초. 항목이 많으면 주기를 늘리는 것이 서버 부하에 직접 영향.</span></label>
-                    {wiz.type === 'http' && (
-                      <label className="pc-check">
-                        <input type="checkbox" checked={!!wiz.form.insecure}
-                          onChange={(e) => setWiz({ ...wiz, form: { ...wiz.form, insecure: e.target.checked } })} />
-                        자체서명 인증서 허용(이 점검에만 적용)
-                      </label>
-                    )}
-                  </div>
-                  {err && <div className="pc-err">{err}</div>}
-                </>
-              )}
-            </div>
-
-            <div className="pc-wiz-foot">
-              {wiz.mode === 'template' && !wiz.editId ? (
-                <>
-                  <span className="pc-wiz-crumb">템플릿의 점검들을 이 대상에 한 번에 추가</span>
-                  <button className="pc-btn accent" disabled={busy || !wiz.tplId}
-                    onClick={applyTplToTarget}>{busy ? '적용 중…' : '템플릿 적용'}</button>
-                </>
-              ) : (
-                <>
-                  <button className="pc-btn" disabled={wiz.step === 1}
-                    onClick={() => setWiz({ ...wiz, step: wiz.step - 1 })}>← 뒤로</button>
-                  <span className="pc-wiz-crumb">
-                    {wiz.cat >= 0 && ADD_MENU[wiz.cat]?.label}{wiz.type && ` › ${wiz.type}`}
-                  </span>
-                  {wiz.step < 3
-                    ? <button className="pc-btn accent" disabled={wiz.step === 1 ? wiz.cat < 0 : !wiz.type}
-                        onClick={() => setWiz({ ...wiz, step: wiz.step + 1 })}>다음 →</button>
-                    : <button className="pc-btn accent" disabled={busy || !wiz.form.name}
-                        onClick={wizSave}>{busy ? '저장 중…' : (wiz.editId ? '수정 저장' : '점검 추가')}</button>}
-                </>
-              )}
-            </div>
-          </div>
-        </div>
+      {/* 점검 추가/수정 마법사 — svcmon/TestWizard.jsx 로 분리(v2.295, 1차 감사 확정 #5).
+          마운트=열림(조건 렌더) · 자체 busy/err 소유(셸과 교차 누수 없음 — 분리 전 공유 상태였음). */}
+      {wizFor && (
+        <TestWizard targetId={wizFor.targetId} targetName={wizFor.targetName} test={wizFor.test}
+          onClose={() => setWizFor(null)} onSaved={() => { setWizFor(null); refresh(); }} />
       )}
 
       {/* 통합 등록 마법사 — 트리에서 '하나의 등록 화면(BulkTab)'을 모달로 불러 쓴다(설정 탭과 동일 컴포넌트).

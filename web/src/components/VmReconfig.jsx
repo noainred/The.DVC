@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { fetchJson, postJson, can } from '../api.js';
-import { Modal } from './ui.jsx';
+import { Modal } from './Modal.jsx'; // v2.295: ui.jsx(셸) 역참조 순환 절단 — 구현 파일 직접 import
 
 /**
  * VM 사양 변경 버튼/모달 — vCPU·RAM 증설, 디스크 증설/추가, NIC 추가/삭제.

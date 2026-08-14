@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ComposableMap, Geographies, Geography, Marker } from 'react-simple-maps';
 import geoData from 'world-atlas/countries-110m.json';
-import { Modal } from './ui.jsx';
+import { Modal } from './Modal.jsx'; // v2.295: ui.jsx(셸) 역참조 순환 절단 — 구현 파일 직접 import
 
 // 지도 높이 clamp — 대시보드에 과도하게 커지지 않도록 상한을 둔다(이전 상한 1200은 너무 커
 // 화면을 다 차지했다). 저장값이 상한을 넘으면 로드 시 이 값으로 줄어든다.
