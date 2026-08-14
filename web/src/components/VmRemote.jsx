@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { postJson, getToken, can } from '../api.js';
-import { Modal } from './ui.jsx';
+import { Modal } from './Modal.jsx'; // v2.295: ui.jsx(셸) 역참조 순환 절단 — 구현 파일 직접 import
 import { openRemoteSession } from '../remote/sessions.js';
 
 const FLD = { display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, minWidth: 0 };

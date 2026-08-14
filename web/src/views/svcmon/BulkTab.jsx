@@ -4,6 +4,9 @@ import { ErrorBox } from '../../components/ui.jsx';
 import PreviewTable from './PreviewTable.jsx';
 import TemplateTab from './TemplateTab.jsx';
 import { IMPORT_ACCEPT, readImportFile } from './fileFormat.js';
+// 순수 로직(상수·IP/호스트 검사·자유형식 파서·검증 코어·페이로드 생성)은 bulkRows.js 로 추출
+// (v2.295, 3차 감사 확정 #3) — vitest(bulkRows.test.js)가 서버 검증과의 드리프트를 고정한다.
+import { TABLE_CAP, MAX_COUNT, ipMsg, EMPTY_ROW, parseFree, validateRows, buildTargetRows } from './bulkRows.js';
 
 /**
  * 대량 자동등록 — 줄마다 {엣지·호스트네임·IP} 를 직접 입력해 대상을 한꺼번에 만든다.
@@ -20,39 +23,6 @@ import { IMPORT_ACCEPT, readImportFile } from './fileFormat.js';
  * 3) **엣지는 후보 목록(candidates)에서만** — 대소문자 1글자 오타가 영구 무음 감시 공백이 된다.
  * 4) 대상에 엣지가 박히면 '그 엣지 전용'이다(배정 동기화 = PUT /assign/:agent {byAgent:true}).
  */
-
-// 표로 그리는 최대 줄 수 — 이보다 많으면 자유형식/CSV 를 안내한다(수천 input 은 무겁다).
-const TABLE_CAP = 500;
-const MAX_COUNT = 2000;   // 서버 maxBulkRows 와 정렬.
-
-/** IPv4/IPv6/호스트명 형식 검사 — 서버(nonCanonicalIp·SAFE_HOST)와 같은 취지. 빈값/오류면 메시지, OK 면 ''. */
-function ipMsg(v) {
-  const s = String(v || '').trim();
-  if (!s) return 'IP를 입력하세요';
-  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(s)) {           // IPv4 모양
-    const parts = s.split('.');
-    if (parts.some((p) => p.length > 1 && p[0] === '0')) return 'IPv4 형식 오류(선행 0)';
-    if (parts.some((p) => Number(p) > 255)) return 'IPv4 형식 오류(0~255)';
-    return '';
-  }
-  if (s.includes(':')) return /^[0-9a-fA-F:]+$/.test(s) ? '' : 'IPv6 형식 오류';
-  if (!/^[a-zA-Z0-9._-]+$/.test(s)) return '호스트/IP 형식 오류';   // 그 외는 호스트명 허용(서버 host 필드)
-  return '';
-}
-
-const EMPTY_ROW = () => ({ edge: '', hostname: '', ip: '' });
-
-/** 자유형식 텍스트 → 줄 배열. 한 줄에 "엣지, 호스트네임, IP"(쉼표/공백/탭 구분). '#' 은 주석. */
-function parseFree(text) {
-  const out = [];
-  for (const raw of String(text || '').split('\n')) {
-    const line = raw.trim();
-    if (!line || line.startsWith('#')) continue;
-    const parts = line.split(/[\s,]+/).map((x) => x.trim()).filter(Boolean);
-    out.push({ edge: parts[0] || '', hostname: parts[1] || '', ip: parts[2] || '' });
-  }
-  return out;
-}
 
 export default function BulkTab({ canEdit, prefill }) {
   const [kind, setKind] = useState(prefill?.kind === 'service' ? 'service' : 'infra');
@@ -123,36 +93,19 @@ export default function BulkTab({ canEdit, prefill }) {
   const effectiveRows = () => (inputMode === 'free' ? parseFree(freeText) : rows);
 
   // ── 검증: 엣지 존재(candidates) + IP 형식 + 호스트명 + 이름 중복 ──
+  // 순수 코어는 bulkRows.validateRows(v2.295 추출·vitest 고정). 이 얇은 래퍼는 상태 반영만:
+  // ⚠ setPreview(null) 제거 금지 — 입력 변경 후 낡은 미리보기가 남으면 canCommit 이 오래된
+  //   expectedCount 로 '등록'을 활성 상태로 두는 함정(3차 감사 MEDIUM — 서버 expectedCount
+  //   가드가 최후 방어선이긴 하나 화면부터 막는 게 정상 동작).
   const validate = () => {
-    const rs = effectiveRows().map((r) => ({ edge: (r.edge || '').trim(), hostname: (r.hostname || '').trim(), ip: (r.ip || '').trim() }));
-    const seen = new Map();     // hostname(lower) → 첫 등장 행
-    const detail = rs.map((r, i) => {
-      const msgs = [];
-      let edgeLevel = 'ok';
-      if (!r.hostname) msgs.push('호스트네임 없음');
-      if (!r.edge) { edgeLevel = 'warn'; msgs.push('엣지 미선택(경로 배정 따름)'); }
-      else if (!edgeSet.has(r.edge)) { edgeLevel = 'error'; msgs.push(`없는 엣지: ${r.edge}`); }
-      const ie = ipMsg(r.ip); if (ie) msgs.push(ie);
-      const key = r.hostname.toLowerCase();
-      if (r.hostname) { if (seen.has(key)) msgs.push(`이름 중복(${seen.get(key) + 1}행과 같음)`); else seen.set(key, i); }
-      const hardBad = !r.hostname || (edgeLevel === 'error') || !!ie || (seen.get(key) !== i && !!r.hostname);
-      return { i, ...r, msgs, edgeLevel, ok: !hardBad };
-    });
-    const edgeBad = detail.filter((d) => d.edgeLevel === 'error').length;
-    const edgeMissing = detail.filter((d) => d.edgeLevel === 'warn').length;
-    const ipBad = detail.filter((d) => ipMsg(d.ip)).length;
-    const dupNames = detail.filter((d) => d.msgs.some((m) => m.startsWith('이름 중복'))).length;
-    const okCount = detail.filter((d) => d.ok).length;
-    setValidation({ detail, okCount, total: detail.length, edgeBad, edgeMissing, ipBad, dupNames });
+    const v = validateRows(effectiveRows(), edgeSet);
+    setValidation(v);
     setPreview(null);
-    return { detail, okCount, edgeBad, ipBad };
+    return v;
   };
 
-  // JSON import payload — 줄 → {kind, path, name:hostname, host:ip, enabled, agent}.
-  const buildTargets = () => effectiveRows()
-    .map((r) => ({ edge: (r.edge || '').trim(), hostname: (r.hostname || '').trim(), ip: (r.ip || '').trim() }))
-    .filter((r) => r.hostname || r.ip)
-    .map((r) => ({ kind, path, name: r.hostname, host: r.ip, enabled, ...(r.edge ? { agent: r.edge } : {}) }));
+  // JSON import payload — 순수 코어는 bulkRows.buildTargetRows(로직 무변, 이름만 구분).
+  const buildTargets = () => buildTargetRows(effectiveRows(), { kind, path, enabled });
 
   const call = async (mode) => {
     setBusy(mode); setErr(''); setDone('');

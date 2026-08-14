@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { fetchJson } from '../api.js';
-import { DataTable, StateBadge } from './ui.jsx';
+import { DataTable, StateBadge } from './primitives.jsx'; // v2.295: components/ 는 셸 대신 구현 파일 직접 import(순환 예방 규칙)
 
 /**
  * IP 검색 시 IPMS(센터별 IP 관리대장 = vCenter 인식 + 능동 스캔) 자료에서 검색어와 일치하는

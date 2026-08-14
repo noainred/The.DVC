@@ -3,6 +3,9 @@ import QRCode from 'qrcode';
 import { fetchJson, postJson, patchJson, delJson, putJson } from '../api.js';
 import { Loading, ErrorBox, Modal } from '../components/ui.jsx';
 import { TOOLS as SPECIAL_TOOLS } from './specialToolsList.js';
+// 권한 매트릭스 순수 연산(v2.295, 3차 감사 확정 #6) — toolsDenied '거부목록 반전' 의미론을
+// vitest 로 고정(userAdmin/permMatrixOps.test.js). 이 파일은 setState 래퍼만 유지.
+import { hasMatrixKey, toggleMatrixKey, isToolAllowed, toggleToolDenied, setAllToolsDenied } from './userAdmin/permMatrixOps.js';
 
 const ROLES = ['viewer', 'operator', 'admin'];
 const REGIONS = ['아시아', '중국', '유럽', '북미'];
@@ -90,13 +93,10 @@ export default function UserAdmin() {
   };
 
   // ── 기능 권한 매트릭스(operator/viewer 편집; admin 은 항상 전체) ──────────────
-  const hasMx = (role, key) => (perms?.matrix?.[role] || []).includes(key);
+  // 데이터 변환은 permMatrixOps 순수 함수(vitest 고정) — 여기는 setState 래퍼만(로직 무변, v2.295).
+  const hasMx = (role, key) => hasMatrixKey(perms?.matrix, role, key);
   const togglePerm = (role, key) => {
-    setPerms((p) => {
-      const cur = new Set(p.matrix[role] || []);
-      cur.has(key) ? cur.delete(key) : cur.add(key);
-      return { ...p, matrix: { ...p.matrix, [role]: [...cur] } };
-    });
+    setPerms((p) => ({ ...p, matrix: toggleMatrixKey(p.matrix, role, key) }));
     setPermDirty(true);
   };
   const savePerms = async () => {
@@ -108,23 +108,15 @@ export default function UserAdmin() {
   };
 
   // 특수 기능 도구별 접근(거부목록 모델) — 체크 = 허용, 해제 = 거부. admin 은 항상 허용.
-  const toolAllowedMx = (role, k) => !((perms?.matrix?.toolsDenied?.[role]) || []).includes(k);
+  // ⚠ '목록에 있으면 거부' 반전 의미론은 permMatrixOps 가 소유·테스트 고정(여기서 재구현 금지).
+  const toolAllowedMx = (role, k) => isToolAllowed(perms?.matrix, role, k);
   const toggleTool = (role, k) => {
-    setPerms((p) => {
-      const td = { operator: [...(p.matrix.toolsDenied?.operator || [])], viewer: [...(p.matrix.toolsDenied?.viewer || [])] };
-      const cur = new Set(td[role]);
-      cur.has(k) ? cur.delete(k) : cur.add(k); // 목록에 있으면 거부 → 제거하면 허용
-      td[role] = [...cur];
-      return { ...p, matrix: { ...p.matrix, toolsDenied: td } };
-    });
+    setPerms((p) => ({ ...p, matrix: toggleToolDenied(p.matrix, role, k) }));
     setPermDirty(true);
   };
   const setAllTools = (role, allow) => {
-    setPerms((p) => {
-      const td = { operator: [...(p.matrix.toolsDenied?.operator || [])], viewer: [...(p.matrix.toolsDenied?.viewer || [])] };
-      td[role] = allow ? [] : SPECIAL_TOOLS.filter((t) => !t.adminOnly).map((t) => t.k); // 허용=거부목록 비움 / 차단=전부 거부
-      return { ...p, matrix: { ...p.matrix, toolsDenied: td } };
-    });
+    // 차단 대상 키는 카탈로그(SPECIAL_TOOLS)에서 adminOnly 제외 — 순수 모듈은 카탈로그를 모른다.
+    setPerms((p) => ({ ...p, matrix: setAllToolsDenied(p.matrix, role, allow, SPECIAL_TOOLS.filter((t) => !t.adminOnly).map((t) => t.k)) }));
     setPermDirty(true);
   };
   const resetPerms = async () => {
