@@ -28,7 +28,12 @@
  *     list: [{ id, ip, health,       // 노드별 상세(≤64 — isi status 노드 표와 동일 의미,
  *       inBps, outBps,               //   2026-08-15 사용자 요구): 외부망 처리량(bps)
  *       hdd:{usedBytes,totalBytes,pct}|null,   // 노드별 HDD 풀(무디스크 노드는 null — 'No Storage HDDs')
- *       ssd:{usedBytes,totalBytes,pct}|null }] },
+ *       ssd:{usedBytes,totalBytes,pct}|null,
+ *       name?,                       // 노드/컨트롤러 이름(v2.310 — XtremIO SC·Unity SP·PowerStore
+ *                                    //   slot 처럼 id 가 합성 순번인 타입의 유일 식별자. 있으면 뷰가
+ *                                    //   '이름' 열을 추가한다. isilon 은 LNN=id 라 없음)
+ *       ext?, l3Bytes? }] },         // isilon SSH 전용(v2.304~307): Ext 연결상태('C'/'N'),
+ *                                    //   L3 캐시 바이트(SSD 풀 없는 노드의 SSD 셀 표기)
  *   pools: [{ name, totalBytes, usedBytes, pct }],   // ≤32(뷰 상한 — 초과분은 절단 표기)
  *   accounts: [{ name, enabled, role? }],            // ≤200(관리 계정 감사용)
  *   alerts: { unresolved },          // 미해결 경보 수(없으면 0)
@@ -43,10 +48,10 @@ export const STORAGE_TYPES = [
   { type: 'isilon', label: 'Isilon / PowerScale', vendor: 'Dell EMC', api: 'OneFS Platform API(REST)', implemented: true },
   // 아래는 사용자 로드맵(2026-08-15 요구) — 카탈로그에 먼저 올려 등록 UI 가 '예정'으로 보여주고,
   // 수집기가 생기면 implemented 만 뒤집는다(아키텍처가 이미 수용).
-  { type: 'xtremio', label: 'XtremIO', vendor: 'Dell EMC', api: 'XMS REST', implemented: false },
+  { type: 'xtremio', label: 'XtremIO', vendor: 'Dell EMC', api: 'XMS REST', implemented: true }, // v2.310
   { type: 'powerstore', label: 'PowerStore', vendor: 'Dell EMC', api: 'PowerStore REST', implemented: true }, // v2.309
-  { type: 'vmax', label: 'VMAX', vendor: 'Dell EMC', api: 'Unisphere REST', implemented: false },
-  { type: 'powermax', label: 'PowerMax', vendor: 'Dell EMC', api: 'Unisphere REST', implemented: false },
+  { type: 'vmax', label: 'VMAX', vendor: 'Dell EMC', api: 'Unisphere REST', implemented: true }, // v2.310(powermax.js 공용)
+  { type: 'powermax', label: 'PowerMax', vendor: 'Dell EMC', api: 'Unisphere REST', implemented: true }, // v2.310
   { type: 'vplex', label: 'VPLEX', vendor: 'Dell EMC', api: 'VPLEX REST', implemented: false },
   { type: 'unity480', label: 'Unity 480', vendor: 'Dell EMC', api: 'Unisphere REST', implemented: true }, // v2.309
   { type: 'metronode', label: 'Metro Node', vendor: 'Dell EMC', api: 'REST', implemented: false },

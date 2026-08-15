@@ -181,8 +181,11 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
     } catch (e) { setMsg(`오류: ${e.message}`); }
     finally { setBusy(false); }
   };
+  // 폭 900(v2.310, 사용자 요구 — 실화면 덤프 기준 열 간 공백 과다): v2.306 에서 가로 스크롤
+  // 제거를 위해 1100 으로 넓혔으나 실제 렌더 결과 노드 표 열 사이 빈 공간이 커서 압축.
+  // 노드 표 실제 콘텐츠 폭(모노스페이스 수치 포함)은 ~700px 이라 900 에서도 가로 스크롤 없음.
   return (
-    <Modal title={`${typeLabel(r.type)} — ${s?.name || r.name}`} onClose={onClose} width={1100}>
+    <Modal title={`${typeLabel(r.type)} — ${s?.name || r.name}`} onClose={onClose} width={900}>
       {/* 새로고침(v2.306, 사용자 요구) — 중앙 수집 장비는 즉시 재수집, 엣지 장비는 주기 안내(202 사유) */}
       <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 10 }}>
         <button className="login-btn" style={{ flex: 'none', padding: '6px 14px', fontSize: 12.5 }} disabled={busy} onClick={refresh}>
@@ -215,7 +218,7 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
           {s.media && (
             <div className="flex gap wrap" style={{ marginBottom: 12 }}>
               {[['HDD 풀', s.media.hdd], ['SSD 풀', s.media.ssd]].map(([lb, m]) => (
-                <div key={lb} className="card" style={{ padding: '10px 14px', minWidth: 220 }}>
+                <div key={lb} className="card" style={{ padding: '8px 12px', minWidth: 170 }}>
                   <div className="muted" style={{ fontSize: 12 }}>{lb}</div>
                   {m ? <>
                     <div style={{ fontSize: 15, fontWeight: 700 }}>{tbFmt(m.usedBytes)} <span className="muted" style={{ fontSize: 12, fontWeight: 400 }}>/ {tbFmt(m.totalBytes)}</span></div>
@@ -226,23 +229,30 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
             </div>
           )}
 
-          {/* 노드별 상세(v2.303, 사용자 요구 — isi status 노드 표): ID·IP·상태·외부망 처리량·노드별 HDD/SSD */}
-          {(s.nodes?.list || []).length > 0 && (
+          {/* 노드별 상세(v2.303, 사용자 요구 — isi status 노드 표): ID·IP·상태·외부망 처리량·노드별 HDD/SSD
+              v2.310 검증 반영: XtremIO 컨트롤러/Unity SP/PowerStore 노드는 name 이 유일 식별자인데
+              (id 는 수집기 합성 순번, ip 는 비어 있을 수 있음) 표가 name 을 안 그려 사장됐다 —
+              하나라도 name 이 있으면 '이름' 열을 추가한다(isilon 은 name 없음 → 열 미표시로 기존 유지). */}
+          {(s.nodes?.list || []).length > 0 && (() => { const hasName = s.nodes.list.some((n) => n.name); return (
             <>
               <div className="section-title" style={{ fontSize: 13 }}>노드 {s.nodes.list.length}{s.nodes.count > s.nodes.list.length ? ` (표시 상한 — 전체 ${s.nodes.count})` : ''}</div>
               <div className="table-wrap" style={{ maxHeight: '32vh', marginBottom: 12 }}>
                 <table>
-                  <thead><tr><th style={{ textAlign: 'right' }}>ID</th><th>IP</th><th>상태</th><th>Ext</th><th style={{ textAlign: 'right' }}>In(bps)</th><th style={{ textAlign: 'right' }}>Out(bps)</th><th>HDD Used/Size</th><th>SSD Used/Size</th></tr></thead>
+                  {/* 고정폭 열 명시(v2.310 공백 압축) — width:100% 표의 잉여 공간이 수치 열 사이에
+                      균등 분산돼 열 간 공백이 커지는 것을 방지(잉여는 IP·HDD/SSD 텍스트 열이 흡수). */}
+                  <thead><tr><th style={{ textAlign: 'right', width: 40 }}>ID</th>{hasName && <th>이름</th>}<th>IP</th><th style={{ width: 56 }}>상태</th><th style={{ width: 44 }}>Ext</th><th style={{ textAlign: 'right', width: 84 }}>In(bps)</th><th style={{ textAlign: 'right', width: 84 }}>Out(bps)</th><th>HDD Used/Size</th><th>SSD Used/Size</th></tr></thead>
                   <tbody>
                     {s.nodes.list.map((n) => (
                       <tr key={n.id}>
                         <td style={{ textAlign: 'right' }}>{n.id}</td>
+                        {hasName && <td style={{ whiteSpace: 'nowrap' }}>{n.name || '—'}</td>}
                         <td style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{n.ip || '—'}</td>
                         <td><span className={`badge ${/ok|healthy|up|green/.test(n.health) ? 'green' : n.health === 'unknown' ? 'gray' : 'red'}`}>{n.health === 'unknown' ? '?' : n.health.toUpperCase()}</span></td>
                         <td>{n.ext ? <span className={`badge ${n.ext === 'C' ? 'green' : 'red'}`} title="C=Connected · N=Not Connected">{n.ext}</span> : <span className="muted">—</span>}</td>
                         <td style={{ textAlign: 'right', fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{bps(n.inBps)}</td>
                         <td style={{ textAlign: 'right', fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{bps(n.outBps)}</td>
-                        <td style={{ whiteSpace: 'nowrap' }}>{n.hdd ? `${tbFmt(n.hdd.usedBytes)}/${tbFmt(n.hdd.totalBytes)} (${n.hdd.pct}%)` : <span className="muted">No Storage HDDs</span>}</td>
+                        {/* 'No Storage HDDs' 는 isilon(isi status) 전용 문구 — 타 타입의 hdd null 은 '—' */}
+                        <td style={{ whiteSpace: 'nowrap' }}>{n.hdd ? `${tbFmt(n.hdd.usedBytes)}/${tbFmt(n.hdd.totalBytes)} (${n.hdd.pct}%)` : <span className="muted">{r.type === 'isilon' ? 'No Storage HDDs' : '—'}</span>}</td>
                         <td style={{ whiteSpace: 'nowrap' }}>{n.ssd ? `${tbFmt(n.ssd.usedBytes)}/${tbFmt(n.ssd.totalBytes)} (${n.ssd.pct}%)` : n.l3Bytes > 0 ? <span className="muted">L3: {tbFmt(n.l3Bytes)}</span> : <span className="muted">—</span>}</td>
                       </tr>
                     ))}
@@ -250,7 +260,7 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
                 </table>
               </div>
             </>
-          )}
+          ); })()}
 
           {(s.pools || []).length > 0 && (
             <>
