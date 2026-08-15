@@ -74,7 +74,8 @@ export default function StorageMonTool() {
         <td><button className="cell-link" onClick={() => setDetail(r)}><b>{s?.name || r.name}</b></button><div className="muted" style={{ fontSize: 11 }}>{r.host}</div></td>
         <td><span className="badge blue">{typeLabel(r.type)}</span></td>
         <td className="muted">{dcName(r.datacenterId)}</td>
-        <td>{r.agent ? <span className="badge" style={{ background: 'rgba(167,139,250,.2)', color: '#a78bfa' }}>{r.agent}</span> : <span className="muted">중앙</span>}</td>
+        <td>{r.agent ? <span className="badge" style={{ background: 'rgba(167,139,250,.2)', color: '#a78bfa' }}>{r.agent}</span> : <span className="muted">중앙</span>}
+          {r.type === 'isilon' && <span className={`badge ${r.collectMethod === 'api' ? 'blue' : 'gray'}`} style={{ marginLeft: 4, fontSize: 10 }} title="이 장비의 수집 방식(등록에서 변경)">{r.collectMethod === 'api' ? 'API' : 'SSH'}</span>}</td>
         <td className="muted" style={{ fontSize: 12 }}>{s?.version || '—'}</td>
         <td style={{ minWidth: 140 }}>{s?.capacity?.pct != null ? <UsageCell pct={s.capacity.pct} /> : <span className="muted">—</span>}
           {s?.capacity?.totalBytes ? <div className="muted" style={{ fontSize: 10.5 }}>{tbFmt(s.capacity.usedBytes)} / {tbFmt(s.capacity.totalBytes)}</div> : null}</td>
@@ -282,13 +283,16 @@ function DeviceForm({ d, form, setForm, onSaved }) {
         </label>
         <label style={{ fontSize: 12 }}>표시명<br /><input className="input" style={{ width: 160 }} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="WA-Isilon-01" /></label>
         <label style={{ fontSize: 12 }}>host(IP/FQDN)<br /><input className="input" style={{ width: 180 }} value={form.host} onChange={(e) => setForm({ ...form, host: e.target.value })} placeholder="10.20.0.50" /></label>
-        <label style={{ fontSize: 12 }} title="SSH: 장비에 접속해 isi status 출력을 파싱(운영자 화면과 동일 소스 — 권장) · API: OneFS REST">수집 방식<br />
-          <select className="select" value={form.collectMethod || 'ssh'} onChange={(e) => setForm({ ...form, collectMethod: e.target.value })}>
-            <option value="ssh">SSH (isi status 파싱 — 권장)</option>
-            <option value="api">REST API (OneFS Platform)</option>
-          </select>
-        </label>
-        {(form.collectMethod || 'ssh') === 'ssh' && (
+        {/* 수집 방식 선택은 PowerScale(Isilon) 전용(v2.305 사용자 요구) — 다른 타입 수집기는 API 전용이라 숨김(서버도 api 고정). */}
+        {form.type === 'isilon' && (
+          <label style={{ fontSize: 12 }} title="SSH: 장비에 접속해 isi status 출력을 파싱(운영자 화면과 동일 소스 — 권장) · API: OneFS REST">수집 방식(PowerScale)<br />
+            <select className="select" value={form.collectMethod || 'ssh'} onChange={(e) => setForm({ ...form, collectMethod: e.target.value })}>
+              <option value="ssh">SSH (isi status 파싱 — 권장)</option>
+              <option value="api">REST API (OneFS Platform)</option>
+            </select>
+          </label>
+        )}
+        {form.type === 'isilon' && (form.collectMethod || 'ssh') === 'ssh' && (
           <label style={{ fontSize: 12 }}>SSH 포트<br /><input className="input" type="number" min={1} max={65535} style={{ width: 80 }} value={form.sshPort || 22} onChange={(e) => setForm({ ...form, sshPort: Number(e.target.value) || 22 })} /></label>
         )}
         <label style={{ fontSize: 12 }}>계정<br /><input className="input" style={{ width: 110 }} value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} /></label>

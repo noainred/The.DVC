@@ -77,9 +77,12 @@ export function saveDevice(input = {}) {
   const password = String(input.password ?? '');
   if (password) dev.password = password;
   else if (hostChanged) delete dev.password;
-  // 수집 방식(v2.304): 'ssh'(isi status 파싱 — 운영자 화면과 동일 소스, 기본) | 'api'(OneFS REST).
-  // 기본을 ssh 로 두는 근거: 사용자가 실측 화면(isi status)과의 일치를 정확성 기준으로 지정(2026-08-15).
-  const collectMethod = input.collectMethod === 'api' ? 'api' : 'ssh';
+  // 수집 방식(v2.304, v2.305 타입별 스코프): PowerScale(isilon)만 사용자가 'ssh'(isi status
+  // 파싱 — 운영자 화면과 동일 소스, 기본)/'api'(OneFS REST)를 선택한다(사용자 요구 2026-08-15).
+  // 그 외 타입은 수집기가 API 전용이라 'api' 고정 — SSH 를 저장해 두면 미래 수집기가 오동작한다.
+  const collectMethod = type === 'isilon'
+    ? (input.collectMethod === 'api' ? 'api' : 'ssh')
+    : 'api';
   const sshPort = Math.max(1, Math.min(65535, Math.floor(Number(input.sshPort)) || 22));
   Object.assign(dev, { type, name, host, username, agent, datacenterId, collectMethod, sshPort, enabled: input.enabled !== false, note: String(input.note || '').slice(0, 200) });
   if (!existing) {

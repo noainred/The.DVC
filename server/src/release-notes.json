@@ -1,6 +1,15 @@
 {
   "notes": [
     {
+      "version": "2.305.0",
+      "date": "2026-08-15",
+      "title": "스토리지 모니터링 — PowerScale 수집 방식(API/SSH) 선택을 타입 전용으로 정리",
+      "notes": [
+        "PowerScale(Isilon) 장비 등록/수정에서 수집 방식을 사용자가 선택합니다 — SSH(isi status 파싱, 권장·기본) 또는 REST API(OneFS Platform). 선택 UI와 SSH 포트 입력은 PowerScale 타입에서만 표시되고(다른 타입 수집기는 API 전용이라 혼동 방지), 서버도 타입별 기본값을 강제합니다(PowerScale=ssh, 그 외=api 고정).",
+        "장비 목록의 수집 컬럼에 방식 배지(SSH/API)를 추가해 장비별 수집 모드를 한눈에 확인할 수 있습니다."
+      ]
+    },
+    {
       "version": "2.304.0",
       "date": "2026-08-15",
       "title": "스토리지 모니터링 — SSH 수집 모드(isi status 파싱, 기본) 추가",
