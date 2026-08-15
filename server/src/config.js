@@ -287,6 +287,11 @@ export function currentVersion() {
  * Load the list of vCenters to monitor.
  * Falls back to vcenters.example.json so the portal works out of the box.
  */
+// secretVault 지연 로드(순환 import 회피) — 로드 완료 전 호출되면 평문 그대로 반환한다.
+// 기동 시퀀스상 첫 수집은 항상 이 import 완료 후이므로(비동기 폴러) 실질 공백은 없다.
+let openSecretsDeepRef = null;
+import('./security/secretVault.js').then((m) => { openSecretsDeepRef = m.openSecretsDeep; }).catch(() => {});
+
 export function loadVcenterConfig() {
   const candidates = [
     path.join(process.env.CONFIG_DIR || path.resolve(ROOT, 'config'), 'vcenters.json'),
@@ -301,7 +306,11 @@ export function loadVcenterConfig() {
           // host에 스킴(http/https)이 없으면 https:// 보강 — fetch 'unknown scheme' 방지.
           const vcenters = parsed.vcenters.map((v) => (v && v.host && !/^https?:\/\//i.test(String(v.host))
             ? { ...v, host: `https://${String(v.host).trim()}` } : v));
-          return { file, vcenters };
+          // 자격증명 저장 방식(평문/암호화, v2.296): 이 함수는 vcenter/registry.js 를 우회해
+          // vcenters.json 을 직접 읽는 수집 핵심 경로다 — 암호화 모드에서 복호를 빠뜨리면
+          // 모든 vCenter 로그인이 암호문 비번으로 실패한다. 지연 import 로 순환을 피한다
+          // (secretVault 도 config 를 import — 상단 정적 import 시 TDZ 기동 실패).
+          return { file, vcenters: openSecretsDeepRef ? openSecretsDeepRef(vcenters) : vcenters };
         }
       } catch (err) {
         console.error(`[config] Failed to parse ${file}: ${err.message}`);

@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 import { NsxClient } from './client.js';
 import { ensureNsxDial } from './proxy.js';
 import { describeError } from '../util/errors.js';
@@ -20,7 +21,7 @@ export function loadRegistry() {
   if (!fs.existsSync(FILE)) return [];
   try {
     const parsed = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-    return Array.isArray(parsed?.managers) ? parsed.managers : [];
+    return openSecretsDeep(Array.isArray(parsed?.managers) ? parsed.managers : []); // v2.296 자격증명 복호(메모리 평문)
   } catch (e) {
     // save() 주석대로 손상 시 다음 저장이 빈 목록으로 덮어써 전 NSX 매니저가 유실된다 →
     // 손상본을 .corrupt로 보존해 로드/저장 비대칭(쓰기만 원자적, 로드는 무보존)을 해소.
@@ -33,7 +34,7 @@ function saveRegistry(list) {
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
   // 원자적 쓰기 — 자격증명(NSX 매니저 계정/비번) 파일이 부분기록으로 손상되면 로드가 []를
   // 반환하고 다음 저장이 빈 목록으로 덮어써 전 매니저가 영구 유실된다.
-  atomicWriteFileSync(FILE, JSON.stringify({ managers: list }, null, 2), { mode: 0o600 });
+  atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep({ managers: list }), null, 2), { mode: 0o600 }); // 암호화 모드면 password 봉인
 }
 
 export function redact(m) {

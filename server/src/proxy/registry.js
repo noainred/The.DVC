@@ -12,6 +12,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 
 const FILE = path.join(config.configDir, 'remote-access.json');
 
@@ -52,7 +53,7 @@ let cache = null;
 function load() {
   if (cache) return cache;
   let saved = {};
-  try { if (fs.existsSync(FILE)) saved = JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}; } catch { saved = {}; }
+  try { if (fs.existsSync(FILE)) saved = openSecretsDeep(JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}); } catch { saved = {}; } // v2.296 dataplane/SSH 자격증명 복호
   cache = {
     ...DEFAULTS, ...saved,
     dataplane: { ...DEFAULTS.dataplane, ...(saved.dataplane || {}) },
@@ -65,7 +66,7 @@ function load() {
 
 function persist() {
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
-  atomicWriteFileSync(FILE, JSON.stringify(cache, null, 2), { mode: 0o600 });
+  atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep(cache), null, 2), { mode: 0o600 }); // 암호화 모드면 password/privateKey 봉인(복제 — cache 평문 유지)
   try { fs.chmodSync(FILE, 0o600); } catch { /* mode는 신규생성 시에만 적용 — 덮어쓰기에도 0600 보장 */ }
 }
 

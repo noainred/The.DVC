@@ -14,6 +14,7 @@ import path from 'node:path';
 import { Agent } from 'undici';
 import { config } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 import { describeError } from '../util/errors.js';
 import { ssrfBlockReason, ssrfBlockReasonResolved } from '../collector/registry.js';
 
@@ -25,13 +26,13 @@ export function loadHorizon() {
   if (!fs.existsSync(FILE)) return [];
   try {
     const parsed = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-    return Array.isArray(parsed?.servers) ? parsed.servers : [];
+    return openSecretsDeep(Array.isArray(parsed?.servers) ? parsed.servers : []); // v2.296 자격증명 복호
   } catch { return []; }
 }
 
 function saveHorizon(list) {
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
-  atomicWriteFileSync(FILE, JSON.stringify({ servers: list }, null, 2), { mode: 0o600 });
+  atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep({ servers: list }), null, 2), { mode: 0o600 }); // 암호화 모드면 password 봉인
 }
 
 export function redactHorizon(s) { const { password, ...rest } = s; return { ...rest, hasPassword: Boolean(password) }; }

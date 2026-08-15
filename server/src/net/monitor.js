@@ -11,6 +11,7 @@ import { runTrafficCapture, runDualCapture } from './tcpdump.js';
 import { recordCapture } from './captureHistory.js';
 import { notify } from '../alerts.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 
 const FILE = path.join(config.configDir, 'capture-monitors.json');
 
@@ -35,14 +36,14 @@ function load() {
     if (fs.existsSync(FILE)) {
       const p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
       if (!Array.isArray(p)) throw new Error('배열이 아님'); // 형식 불일치도 손상으로 취급
-      cache = p;
+      cache = openSecretsDeep(p); // v2.296 캡처 호스트 SSH 자격증명 복호(메모리 평문)
     }
   } catch (e) { cache = []; backupCorrupt(e); }
   return cache;
 }
 // 원자적 쓰기 — 크래시/정전 중 부분기록으로 파일이 깨지면 load가 []를 반환하고 다음 persist가
 // 빈 목록으로 덮어써 전 모니터 정의(자격증명 포함)가 사라진다. tmp+fsync+rename으로 방지.
-function persist() { try { atomicWriteFileSync(FILE, JSON.stringify(cache, null, 2), { mode: 0o600 }); } catch { /* */ } }
+function persist() { try { atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep(cache), null, 2), { mode: 0o600 }); } catch { /* */ } } // 암호화 모드면 password/privateKey 봉인
 
 const redact = (m) => ({
   id: m.id, name: m.name, enabled: m.enabled, mode: m.mode, intervalMin: m.intervalMin,

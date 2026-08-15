@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 import { describeError } from '../util/errors.js';
 import { retryTransient } from '../util/resilientFetch.js';
 import { fetchPower, fetchInventory } from './redfish.js';
@@ -44,7 +45,7 @@ export function loadRegistry() {
     const st = fs.statSync(FILE);
     if (!_regCache || _regCache.mtimeMs !== st.mtimeMs || _regCache.size !== st.size) {
       const parsed = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-      _regCache = { mtimeMs: st.mtimeMs, size: st.size, servers: Array.isArray(parsed?.servers) ? parsed.servers : [] };
+      _regCache = { mtimeMs: st.mtimeMs, size: st.size, servers: openSecretsDeep(Array.isArray(parsed?.servers) ? parsed.servers : []) }; // 캐시는 평문 보관(v2.296) — 소비 코드 무변경
     }
     return structuredClone(_regCache.servers);
   } catch {
@@ -53,7 +54,7 @@ export function loadRegistry() {
 }
 
 function saveRegistry(list) {
-  atomicWriteFileSync(FILE, JSON.stringify({ servers: list }, null, 2), { mode: 0o600 });
+  atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep({ servers: list }), null, 2), { mode: 0o600 }); // 암호화 모드면 password 봉인
   // 방금 쓴 내용으로 캐시 즉시 동기화(다음 읽기의 재파싱 회피). 실패 시 캐시 무효화가 안전.
   try {
     const st = fs.statSync(FILE);

@@ -25,6 +25,7 @@ import VcenterLogs from './VcenterLogs.jsx';
 import GuestAccount from './GuestAccount.jsx';
 import AnomalyDetection from './AnomalyDetection.jsx';
 import SessionSecurity from './SessionSecurity.jsx';
+import SecretsSettings from './SecretsSettings.jsx'; // 자격증명 저장 방식(평문/암호화, v2.296)
 import Upgrade from './Upgrade.jsx';
 import About from './About.jsx';
 
@@ -55,6 +56,7 @@ const SUB = [
   { k: 'auth-ad', label: '인증(AD)', C: AdSettings, group: 'usercontrol' },
   // --- Security 그룹 ---
   { k: 'session-security', label: '세션 보안', C: SessionSecurity, group: 'security' },
+  { k: 'secrets', label: '자격증명 저장 방식', C: SecretsSettings, group: 'security' },
   { k: 'anomaly', label: '이상동작 탐지', C: AnomalyDetection, group: 'security' },
   { k: 'ai-search', label: 'AI 검색', C: LlmSettings },
   { k: 'alerts', label: '알림', C: Alerts2 },

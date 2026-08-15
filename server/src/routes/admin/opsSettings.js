@@ -2,6 +2,7 @@
 import { config } from '../../config.js';
 import { verifyUserOtp } from '../../auth/auth.js';
 import { saveSessionSecurity, loadConfiguredSecurity, managedAdminOwners } from '../../security/securitySettings.js';
+import { loadSecretsPolicy, saveSecretsPolicy, migrateSecretFiles, SECRET_FILES } from '../../security/secretVault.js';
 import { saveOsScanSettings, runOsScanNow, osScanStatus } from '../../inventory/osScanner.js';
 import { getOsResults } from '../../inventory/osStore.js';
 import { listAudit, logAudit } from '../../audit.js';
@@ -62,6 +63,36 @@ adminRouter.put('/anomaly', adminOnly, (req, res) => res.json({ ok: true, settin
 
 // 세션 보안(유휴 자동 로그아웃) — 조회는 자유, 변경은 OTP 재인증 + 감사 기록.
 // 편집 UI에는 '설정된' 소유 계정만(자동 포함된 중앙 배포 admin은 별도 autoOwners로 읽기전용 안내).
+// ── 자격증명 저장 방식(평문/암호화, v2.296) ─────────────────────────────────
+// 설정 소유자 전용 + 변경 시 본인 OTP 재인증(세션 보안과 동일 게이트). GET 은 현재 정책과
+// 마이그레이션 대상 파일 목록(커버리지 투명성)을 내려준다.
+adminRouter.get('/secrets/policy', adminOnly, requireSettingsOwner, (_req, res) => {
+  res.json({ ok: true, policy: loadSecretsPolicy(), files: SECRET_FILES, keySource: process.env.SECRETS_KEY ? 'env' : 'file' });
+});
+adminRouter.put('/secrets/policy', adminOnly, requireSettingsOwner, (req, res) => {
+  const username = req.user?.username || 'unknown';
+  if (config.auth.enabled) {
+    // 재인증 실패는 403(401 이면 프론트 공통 처리가 '세션 만료'로 오인해 강제 로그아웃 — v2.277 컨벤션).
+    const v = verifyUserOtp(username, req.body?.otp);
+    if (!v.ok) return res.status(403).json({ ok: false, reason: v.reason, needEnroll: !!v.needEnroll });
+  }
+  const before = loadSecretsPolicy();
+  let after;
+  try {
+    after = saveSecretsPolicy({ mode: req.body?.mode, level: req.body?.level, algorithm: req.body?.algorithm ?? '' });
+  } catch (e) { return res.status(400).json({ ok: false, reason: e.message }); }
+  // 정책 저장 직후 기존 저장분 일괄 전환(평문→암호화/암호화→평문/레벨·알고리즘 변경 재봉인).
+  // 자기서술 암호문이라 부분 실패해도 혼재 상태로 정상 동작 — 실패 파일은 응답으로 보고.
+  const mig = migrateSecretFiles(after);
+  const lbl = (p) => (p.mode === 'encrypted' ? `암호화(L${p.level}${p.algorithm ? `·${p.algorithm}` : ''})` : '평문');
+  logAudit({
+    user: username, action: '자격증명 저장 방식 변경', target: 'secrets/policy',
+    detail: `${lbl(before)} → ${lbl(after)} · 전환 파일 ${mig.files.filter((f) => f.changed).length}/${mig.files.length}${mig.errors.length ? ` · 실패 ${mig.errors.length}` : ''}`,
+    ip: req.ip || '',
+  });
+  res.json({ ok: true, policy: after, migration: mig });
+});
+
 adminRouter.get('/security/session', adminOnly, requireSettingsOwner, (_req, res) => res.json({ ...loadConfiguredSecurity(), autoOwners: managedAdminOwners() }));
 adminRouter.put('/security/session', adminOnly, requireSettingsOwner, (req, res) => {
   const username = req.user?.username || 'unknown';

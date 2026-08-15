@@ -14,17 +14,18 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 import { mergeGpuGuestSettings, redactGpuGuestSettings } from '../gpu/settings.js';
 
 const FILE = path.join(config.configDir, 'central-agent-gpu-guest.json');
 
 // null-proto: agent 이름을 키로 쓰므로 '__proto__' 등 프로토타입 오염 방지.
 let byAgent = Object.create(null); // agent -> gpuGuestSettings(전체 병합 객체) + { _updatedAt }
-try { if (fs.existsSync(FILE)) byAgent = Object.assign(Object.create(null), JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}); } catch { byAgent = Object.create(null); }
+try { if (fs.existsSync(FILE)) byAgent = Object.assign(Object.create(null), openSecretsDeep(JSON.parse(fs.readFileSync(FILE, 'utf8')) || {})); } catch { byAgent = Object.create(null); } // v2.296 배포 사본 계정 복호
 
 function persist() {
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
-  atomicWriteFileSync(FILE, JSON.stringify(byAgent), { mode: 0o600 });
+  atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep(byAgent)), { mode: 0o600 }); // 암호화 모드면 password 봉인(복제 — byAgent 평문 유지)
 }
 
 const cleanAgent = (a) => String(a || '').trim();
