@@ -9,6 +9,7 @@ import path from 'node:path';
 import dns from 'node:dns';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 import { bumpFleetRev } from '../insights/fleetRev.js';
 
 const FILE = path.join(config.configDir, 'collectors.json');
@@ -49,7 +50,7 @@ export function loadCollectors() {
   if (!fs.existsSync(FILE)) return [];
   try {
     const parsed = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-    const arr = Array.isArray(parsed?.collectors) ? parsed.collectors : [];
+    const arr = openSecretsDeep(Array.isArray(parsed?.collectors) ? parsed.collectors : []); // v2.296 토큰 복호(메모리 평문)
     // 대소문자 중복을 로드 시 자동 정리(최초 1회 병합·영속화, 이후엔 중복이 없어 재저장 안 함).
     const { list, changed } = dedupeByIdCase(arr);
     if (changed) { try { save(list); } catch { /* best effort — 다음 로드에서 재시도 */ } }
@@ -67,7 +68,7 @@ function save(list) {
   // 원자적 쓰기 — 크래시/정전 시 부분기록으로 collectors.json이 손상되면 loadCollectors가
   // []를 반환하고 다음 저장이 빈 목록으로 덮어써 전 수집서버·토큰이 영구 유실된다(자기등록으로
   // 쓰기 빈도가 늘어 노출 창이 커짐). atomicWrite(임시파일+rename)로 방지.
-  atomicWriteFileSync(FILE, JSON.stringify({ collectors: list }, null, 2), { mode: 0o600 });
+  atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep({ collectors: list }), null, 2), { mode: 0o600 }); // 암호화 모드면 token 봉인
   bumpFleetRev(); // 수집서버 vcenterId 매핑 변경 → fleet/finops 캐시 즉시 무효화
 }
 

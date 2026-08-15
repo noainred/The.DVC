@@ -9,6 +9,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 
 const FILE = path.join(config.configDir, 'agent-deploy-targets.json');
 const SECRET_KEYS = ['password', 'privateKey'];
@@ -19,14 +20,14 @@ let cache = null;
 
 function load() {
   if (cache) return cache;
-  try { if (fs.existsSync(FILE)) cache = JSON.parse(fs.readFileSync(FILE, 'utf8'))?.targets || []; } catch { cache = []; }
+  try { if (fs.existsSync(FILE)) cache = openSecretsDeep(JSON.parse(fs.readFileSync(FILE, 'utf8'))?.targets || []); } catch { cache = []; } // v2.296 배포 SSH/토큰 복호
   if (!Array.isArray(cache)) cache = [];
   return cache;
 }
 
 function persist() {
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
-  atomicWriteFileSync(FILE, JSON.stringify({ targets: cache }, null, 2), { mode: 0o600 });
+  atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep({ targets: cache }), null, 2), { mode: 0o600 }); // 암호화 모드면 password/privateKey/토큰 봉인
   try { fs.chmodSync(FILE, 0o600); } catch { /* mode는 신규생성 시에만 적용 — 덮어쓰기에도 0600 보장 */ }
 }
 

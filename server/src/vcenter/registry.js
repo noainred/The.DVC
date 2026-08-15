@@ -11,6 +11,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 import { VCenterClient } from './restClient.js';
 import { describeError } from '../util/errors.js';
 import { geocode } from './geocode.js';
@@ -26,7 +27,7 @@ export function loadRegistry() {
   if (!fs.existsSync(FILE)) return [];
   try {
     const parsed = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-    return Array.isArray(parsed?.vcenters) ? parsed.vcenters : [];
+    return openSecretsDeep(Array.isArray(parsed?.vcenters) ? parsed.vcenters : []); // 메모리는 항상 평문(소비 코드 무변경)
   } catch (e) {
     // 손상본을 조용히 []로 반환하면 다음 addVcenter/saveRegistry가 빈 목록으로 덮어써
     // 등록된 모든 vCenter와 자격증명이 영구 유실된다 → 손상본을 .corrupt로 보존 후 시작.
@@ -36,7 +37,7 @@ export function loadRegistry() {
 }
 
 function saveRegistry(list) {
-  atomicWriteFileSync(FILE, JSON.stringify({ vcenters: list }, null, 2), { mode: 0o600 });
+  atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep({ vcenters: list }), null, 2), { mode: 0o600 }); // 암호화 모드면 password 봉인(깊은 복제 — 메모리 불변)
 }
 
 /** Strip secrets before sending an entry to the client. */

@@ -11,6 +11,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 
 const FILE = path.join(config.configDir, 'gpu-physical.json');
 
@@ -18,14 +19,14 @@ let cache = null;
 
 export function loadPhysical() {
   if (cache) return cache;
-  try { if (fs.existsSync(FILE)) cache = JSON.parse(fs.readFileSync(FILE, 'utf8'))?.servers || []; } catch { cache = []; }
+  try { if (fs.existsSync(FILE)) cache = openSecretsDeep(JSON.parse(fs.readFileSync(FILE, 'utf8'))?.servers || []); } catch { cache = []; } // v2.296 SSH 계정 복호
   if (!Array.isArray(cache)) cache = [];
   return cache;
 }
 
 function persist() {
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
-  atomicWriteFileSync(FILE, JSON.stringify({ servers: cache }, null, 2), { mode: 0o600 });
+  atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep({ servers: cache }), null, 2), { mode: 0o600 }); // 암호화 모드면 password 봉인
   try { fs.chmodSync(FILE, 0o600); } catch { /* best effort */ }
 }
 

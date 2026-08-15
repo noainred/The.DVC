@@ -8,6 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 
 const FILE = path.join(config.configDir, 'gpu-guest.json');
 
@@ -30,7 +31,7 @@ const DEFAULTS = {
 
 function readFile() {
   if (!fs.existsSync(FILE)) return {};
-  try { return JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}; } catch { return {}; }
+  try { return openSecretsDeep(JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}); } catch { return {}; } // v2.296 게스트 OS 계정 복호(메모리 평문)
 }
 
 export function loadGpuGuestSettings() {
@@ -113,7 +114,7 @@ export function saveGpuGuestSettings(partial) {
   const cur = readFile();
   const next = mergeGpuGuestSettings(cur, partial);
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
-  fs.writeFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
+  fs.writeFileSync(FILE, JSON.stringify(sealSecretsDeep(next), null, 2), { mode: 0o600 }); // 암호화 모드면 공용/VM별 password 봉인
   try { fs.chmodSync(FILE, 0o600); } catch { /* best effort */ }
   return loadGpuGuestSettings();
 }
