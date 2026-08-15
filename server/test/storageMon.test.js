@@ -15,12 +15,12 @@ const { STORAGE_TYPES, emptySnapshot, isImplementedType } = await import('../src
 const { saveEdgeStorage, edgeStorageSnapshots } = await import('../src/central/storageEdge.js');
 const { parseIsiStatus, parseSize, parseBps, normalizeIsiStatus } = await import('../src/storage/collectors/isilonSsh.js');
 
-test('타입 카탈로그 — isilon·powerstore·unity480 구현(v2.309), 로드맵 5종 예정(등록은 구현 타입만)', () => {
-  for (const t of ['isilon', 'powerstore', 'unity480']) assert.ok(isImplementedType(t), `${t} 구현 플립`);
-  for (const t of ['xtremio', 'vmax', 'powermax', 'vplex', 'metronode']) {
+test('타입 카탈로그 — 6종 구현(v2.310: +xtremio·vmax·powermax), 예정 2종(등록은 구현 타입만)', () => {
+  for (const t of ['isilon', 'powerstore', 'unity480', 'xtremio', 'vmax', 'powermax']) assert.ok(isImplementedType(t), `${t} 구현 플립`);
+  for (const t of ['vplex', 'metronode']) {
     assert.ok(STORAGE_TYPES.some((x) => x.type === t && !x.implemented), `${t} 카탈로그 예정 항목`);
   }
-  assert.throws(() => reg.saveDevice({ type: 'powermax', name: 'X', host: '10.0.0.1', username: 'a' }), /미구현/);
+  assert.throws(() => reg.saveDevice({ type: 'vplex', name: 'X', host: '10.0.0.1', username: 'a' }), /미구현/);
   assert.throws(() => reg.saveDevice({ type: 'netapp', name: 'X', host: '10.0.0.1', username: 'a' }), /알 수 없는/);
 });
 
@@ -379,9 +379,121 @@ test('normalizeUnity: 빈 응답이면 ok=false, extra.model 없음', async () =
   assert.equal(snap.ok, false);
 });
 
-test('types: powerstore/unity480 구현 플립 — 등록 가능(v2.309)', async () => {
+test('types: powerstore/unity480(v2.309)·xtremio/vmax/powermax(v2.310) 구현 플립 — 등록 가능', async () => {
   const { isImplementedType } = await import('../src/storage/types.js');
-  assert.equal(isImplementedType('powerstore'), true);
-  assert.equal(isImplementedType('unity480'), true);
-  assert.equal(isImplementedType('vmax'), false); // 나머지는 여전히 예정
+  for (const t of ['powerstore', 'unity480', 'xtremio', 'vmax', 'powermax']) assert.equal(isImplementedType(t), true, t);
+  assert.equal(isImplementedType('vplex'), false); // 나머지는 여전히 예정
+});
+
+/* ─── v2.310: XtremIO / VMAX·PowerMax 정규화(순수 — 실장비 검증 전이므로 픽스처로 계약 고정) ─── */
+
+test('normalizeXtremio: KB→바이트 환산·전체 플래시 media.ssd·다중 클러스터 합산·컨트롤러 헬스', async () => {
+  const { normalizeXtremio } = await import('../src/storage/collectors/xtremio.js');
+  const dev = { id: 'xt-1', type: 'xtremio', name: 'XMS-KR', host: '10.0.0.7' };
+  const snap = normalizeXtremio(dev, {
+    clusters: [
+      { name: 'XIO-C1', 'sys-psnt-part-number': 'XIO00161700123', 'sys-sw-version': '6.3.0-22',
+        'sys-health-state': 'healthy', 'data-reduction-ratio': 3.1, 'num-of-bricks': 2,
+        'ud-ssd-space': 100e9, 'ud-ssd-space-in-use': 40e9 },          // KB 단위(×1024 환산 검증)
+      { name: 'XIO-C2', 'ud-ssd-space': 50e9, 'ud-ssd-space-in-use': 10e9 },
+    ],
+    controllers: [
+      { name: 'X1-SC1', 'health-state': 'healthy', 'mgmt-addr': '10.0.0.11' },
+      { name: 'X1-SC2', 'health-state': 'failed', 'mgmt-addr': '10.0.0.12' },
+    ],
+    users: [{ name: 'admin', role: 'admin' }],
+    alertCount: 4,
+  });
+  assert.equal(snap.ok, true);
+  assert.equal(snap.name, 'XIO-C1 외 1');                       // 다중 클러스터 표기
+  assert.equal(snap.version, '6.3.0-22');
+  assert.equal(snap.capacity.totalBytes, 150e9 * 1024);          // KB 합산 → 바이트
+  assert.equal(snap.capacity.usedBytes, 50e9 * 1024);
+  assert.equal(snap.media.hdd, null);                            // 전체 플래시 — HDD 풀 없음
+  assert.equal(snap.media.ssd.totalBytes, 150e9 * 1024);
+  assert.equal(snap.pools.length, 2);
+  assert.equal(snap.pools[0].pct, 40);
+  assert.equal(snap.nodes.count, 2);
+  assert.equal(snap.nodes.unhealthy, 1);                         // failed 컨트롤러 집계
+  assert.equal(snap.nodes.list[1].health, 'failed');             // 모르는 상태 그대로(정직 표기)
+  assert.equal(snap.alerts.unresolved, 4);
+  assert.equal(snap.extra.numBricks, 2);
+});
+
+test('normalizeXtremio: 빈 응답이면 ok=false', async () => {
+  const { normalizeXtremio } = await import('../src/storage/collectors/xtremio.js');
+  assert.equal(normalizeXtremio({ id: 'xt-2', type: 'xtremio', name: 'x' }, {}).ok, false);
+});
+
+test('normalizePowermax: TB→바이트 환산·다중 어레이 합산·용량 없는 어레이는 pools 제외', async () => {
+  const { normalizePowermax } = await import('../src/storage/collectors/powermax.js');
+  const dev = { id: 'pm-1', type: 'powermax', name: 'UNI-KR', host: '10.0.0.6' };
+  const snap = normalizePowermax(dev, {
+    version: { version: 'V9.2.1.6' },
+    arrays: [
+      { symmetrixId: '000297600123', model: 'PowerMax_2000', ucode: '5978.711.711', local: true },
+      { symmetrixId: '000297600456', model: 'VMAX250F', local: true },
+      { symmetrixId: '000297600789', model: 'PowerMax_8000', local: true }, // caps 없음 → pools 제외
+    ],
+    caps: {
+      '000297600123': { usable_total_tb: 100, usable_used_tb: 60 },
+      '000297600456': { usable_total_tb: 50, usable_used_tb: 20 },
+    },
+    alertCount: 7,
+  });
+  assert.equal(snap.ok, true);
+  assert.equal(snap.version, '9.2.1.6');                         // 선행 V 제거
+  assert.equal(snap.name, '000297600123 외 2');
+  assert.equal(snap.serial, '000297600123');
+  assert.equal(snap.extra.model, 'PowerMax_2000');
+  assert.equal(snap.capacity.totalBytes, 150e12);                // TB(1e12) 합산
+  assert.equal(snap.capacity.usedBytes, 80e12);
+  assert.equal(snap.pools.length, 2);                            // 용량 미확인 어레이는 0 오표시 대신 제외
+  assert.equal(snap.pools[0].pct, 60);
+  assert.equal(snap.alerts.unresolved, 7);
+  assert.equal(snap.sections.accounts, 'skip');                  // 이번 범위 밖 — 정직 표기
+});
+
+test('normalizePowermax: 어레이 없음이면 ok=false', async () => {
+  const { normalizePowermax } = await import('../src/storage/collectors/powermax.js');
+  assert.equal(normalizePowermax({ id: 'pm-2', type: 'vmax', name: 'x' }, { caps: {} }).ok, false);
+});
+
+/* ─── v2.310 검증 반영: tryAny 계약(401 즉시 중단 = 장비 계정 잠금 예방 안전 불변조건) ─── */
+
+test('tryAny: 401 즉시 재전파(후속 후보 미시도)·전 후보 실패 시 마지막 오류·폴백 성공 반환', async () => {
+  const { tryAny } = await import('../src/storage/collectors/restCommon.js');
+  // ① 401 이면 다음 후보를 시도하지 않고 즉시 던진다 — 잘못된 자격증명으로 후보 수만큼
+  //    연속 401 을 유발해 장비 계정이 잠기는 사고를 막는 규칙(restCommon.js 머리말).
+  let calls = 0;
+  await assert.rejects(
+    () => tryAny(async () => { calls++; throw new Error('인증 실패(401) — 계정/비밀번호 확인'); }, ['/a', '/b', '/c']),
+    /401/,
+  );
+  assert.equal(calls, 1, '401 후 후속 후보를 시도하지 않는다');
+  // ② 전 후보가 비-401 실패면 마지막 오류를 던진다.
+  await assert.rejects(
+    () => tryAny(async (p) => { throw new Error(`HTTP 404 (${p})`); }, ['/v3', '/v2']),
+    /HTTP 404 \(\/v2\)/,
+  );
+  // ③ 첫 후보 실패 → 둘째 성공이면 성공값 반환(버전차 폴백의 본래 목적).
+  const r = await tryAny(async (p) => { if (p === '/v3') throw new Error('HTTP 404'); return { ok: p }; }, ['/v3', '/v2']);
+  assert.deepEqual(r, { ok: '/v2' });
+});
+
+/* ─── v2.310 검증 반영: putSnapshot 회귀(v2.308) 재발 방지 — 수집 결과가 스토어에 저장된다 ─── */
+
+test('collectDeviceNow(mock): 수집 스냅샷이 localSnapshots 에 저장된다(UI/push 경로 회귀 방지)', async () => {
+  // mock 판별은 config.dataSource(env DATA_SOURCE) — 이 테스트 프로세스는 DATA_SOURCE 미설정이라
+  // 기본 'mock'(EDGE_ALL 아님)으로 동작한다. 명시해 두면 환경 변화에도 안전.
+  process.env.DATA_SOURCE = process.env.DATA_SOURCE || 'mock';
+  const { collectDeviceNow } = await import('../src/storage/poller.js');
+  const { localSnapshots } = await import('../src/storage/store.js');
+  const d = reg.saveDevice({ type: 'isilon', name: 'MOCK-ISI', host: '10.99.0.10', username: 'root', password: 'x' });
+  try {
+    await collectDeviceNow(d.id);
+    const snap = localSnapshots().find((x) => x.deviceId === d.id);
+    assert.ok(snap, 'v2.308 회귀: putSnapshot 이 collectOne 정규 경로에서 빠지면 여기서 실패한다');
+    assert.equal(snap.ok, true);
+  } finally { reg.deleteDevice(d.id); }
 });

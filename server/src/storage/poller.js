@@ -12,10 +12,13 @@ import { emptySnapshot } from './types.js';
 import * as isilon from './collectors/isilon.js';
 import * as powerstore from './collectors/powerstore.js'; // v2.309
 import * as unity from './collectors/unity.js';           // v2.309
+import * as xtremio from './collectors/xtremio.js';       // v2.310
+import * as powermax from './collectors/powermax.js';     // v2.310(vmax·powermax 공용 — 같은 Unisphere REST)
 import { collectAreasOnce } from './areasCollector.js';
 import { saveCapacityPoint } from './db.js';
 
-const COLLECTORS = { isilon: isilon.collect, powerstore: powerstore.collect, unity480: unity.collect };
+const COLLECTORS = { isilon: isilon.collect, powerstore: powerstore.collect, unity480: unity.collect,
+  xtremio: xtremio.collect, vmax: powermax.collect, powermax: powermax.collect };
 const INTERVAL_MS = Math.max(60_000, Number(process.env.STORAGE_POLL_MS) || 10 * 60_000); // 기본 10분
 const AREAS_EVERY_MS = Math.max(10 * 60_000, Number(process.env.STORAGE_AREAS_MS) || 60 * 60_000); // 영역 전수 수집 기본 60분
 const _areasAt = new Map(); // deviceId → 마지막 영역 수집 시각(메모리 — 재시작 시 첫 주기에 재수집)
@@ -28,7 +31,7 @@ async function collectOne(dev) {
   const full = getDeviceWithSecret(dev.id) || dev;
   let snap;
   if (!fn) { snap = emptySnapshot(full); snap.error = `수집기 미구현: ${dev.type}`; }
-  else if (config.mode === 'mock') {
+  else if (config.dataSource === 'mock') { // v2.310 수정: config.mode 는 미존재 키(항상 undefined)라 mock 분기가 죽어 있었음 — 확립 패턴(dataSource)으로 교정
     // mock 모드(개발): 결정적 가짜 스냅샷 — UI/집계/push 흐름 검증용.
     snap = emptySnapshot(full);
     snap.ok = true; snap.version = 'OneFS 9.4.0(mock)'; snap.serial = `MOCK-${dev.id}`;
@@ -47,6 +50,12 @@ async function collectOne(dev) {
     try { snap = await fn(full); }
     catch (e) { snap = emptySnapshot(full); snap.error = e.message; }
   }
+  // ⚠ 스냅샷 저장(회귀 수정 — v2.310 적대적 검증에서 확정): v2.308 리팩터가 이 무조건
+  // putSnapshot 을 saveCapacityPoint 로 '교체'하면서 삭제해 버려, 정규/수동 수집 결과가
+  // 스토어(localSnapshots)에 안 들어가 UI 조회·엣지 push 가 전부 빈손이 되는 회귀가 있었다
+  // (isilon 만 아래 60분 areas 분기의 재저장으로 우연히 살아 있었음). 성공/실패 모두 저장한다 —
+  // 실패 스냅샷(error·섹션 상태)도 화면에 정직하게 보여야 한다(types.js sections 계약).
+  putSnapshot(snap);
   // 용량 시계열(v2.308) — 성공 수집마다 1점 적재(추이 그래프/DB 저장 요구).
   try { await saveCapacityPoint(snap); } catch { /* DB 비활성 환경 — 스냅샷 경로는 계속 */ }
   // OneFS API 전 영역 수집(v2.308, 40개 표) — 스냅샷보다 무거워 별도 주기(기본 60분)로.
@@ -56,7 +65,7 @@ async function collectOne(dev) {
     if (Date.now() - last >= AREAS_EVERY_MS) {
       _areasAt.set(dev.id, Date.now());
       try {
-        const r = config.mode === 'mock'
+        const r = config.dataSource === 'mock'
           ? { summary: [{ area: 'cluster', ok: 3, failed: 0 }, { area: 'node', ok: 1, failed: 0 }], endpoints: 4 }
           : await collectAreasOnce(full);
         snap.extra = { ...snap.extra, areas: r.summary, areasAt: Date.now(), areasEndpoints: r.endpoints };
