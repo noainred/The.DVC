@@ -12,6 +12,18 @@ import { memoJson, scopeKey, osFamily } from './shared.js';
 
 export function registerToolsInfo(api) {
 
+// 평문 자격증명 점검(특수기능, v2.297) — 설정 파일·portal.env·로그·소스에서 평문으로 남은
+// 계정정보를 탐지한다(값은 항상 마스킹 — secretScan.js 헤더 참조). adminOnly 인 이유:
+// 결과가 '어디에 비밀이 있고 어떤 상태인가'라는 보안 태세 지도라 열람 자체가 민감하다
+// (viewer/operator 에게는 도구 카드도 안 보임 — specialToolsList adminOnly 플래그와 쌍).
+// ?fresh=1 이면 30초 캐시를 무시하고 재스캔(스캔 자체는 single-flight 로 중복 방지).
+api.get('/tools/secret-scan', requireRole('admin'), async (req, res) => {
+  try {
+    const { runSecretScan } = await import('../../security/secretScan.js');
+    res.json(await runSecretScan({ fresh: req.query.fresh === '1' }));
+  } catch (e) { res.status(500).json({ error: `점검 실패: ${e.message}` }); }
+});
+
 // Guest OS distribution — VM counts grouped by Guest OS (종류·버전), optionally
 // per vCenter. Family rollup + full-name detail; power(on/off) split.
 api.get('/tools/guest-os', (req, res) => memoJson(req, res, 'tools-guest-os', (snap) => {

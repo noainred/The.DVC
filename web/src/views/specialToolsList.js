@@ -8,6 +8,7 @@ export const TOOLS = [
   { k: 'insights', icon: '🧠', label: '운영 인사이트', desc: 'VM 라이트사이징 · 클러스터 N+1 여력 · 알람 핫스팟 · GPU 유휴' },
   { k: 'explore', icon: '🏆', label: '탐색·랭킹', desc: '자원 최다 사용 Top 랭킹(CPU·메모리·디스크·전력) + 상세 스펙 VM 검색 — 리전/vCenter 범위 선택', perm: 'dashboard' },
   { k: 'threats', icon: '🛡️', label: '위협 탐지', desc: '마이닝 의심 · 위험 포트 노출 · EOL OS · 신규 rogue IP · NSX IDS' },
+  { k: 'secret-scan', icon: '🔐', label: '평문 자격증명 점검', desc: '설정 파일·portal.env·로그·소스에 평문으로 남은 계정정보/토큰/키 탐지(값은 마스킹) · 암호화 저장 전환 안내', adminOnly: true },
   { k: 'vmfinder', icon: '🧭', label: 'VM 정밀 검색 / 유휴 VM', desc: '다수 vCenter·폴더·클러스터·풀 + 조건 · 1일/1주 평균 CPU로 미사용 VM' },
   { k: 'deepsearch', icon: '🔭', label: '심층 검색', desc: '게이트웨이·서브넷·GPU·OS 등 다조건 + 게스트 탐침(GPU드라이버·프로세스) · 전체/복수 vCenter' },
   { k: 'capacity', icon: '📈', label: '용량 리포트', desc: '클러스터별 여유·오버커밋·수용여력 · 전체/법인별' },
