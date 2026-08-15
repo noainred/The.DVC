@@ -75,6 +75,11 @@ export function saveDevice(input = {}) {
   // host 변경 시 비번 이월 금지(uagmon M3) — 새 비번을 명시해야 저장된다.
   const hostChanged = existing && existing.host !== host;
   const password = String(input.password ?? '');
+  // 제어문자 차단(v2.311 적대적 검증 확정 결함 수정): 개행 등 제어문자가 든 비밀번호(여러 줄
+  // 붙여넣기 사고)는 vplex v1 처럼 값을 헤더로 싣는 수집기에서 undici TypeError 메시지에
+  // **값 전문이 포함**되어 스냅샷/UI/중앙 push 로 유출된다. 저장 시점에 값 미포함 오류로 거부
+  // (SSH 등 헤더 미사용 경로도 제어문자 비밀번호는 실사용 사례가 없어 전 타입 일괄 적용).
+  if (/[\x00-\x1f\x7f]/.test(password)) throw new Error('비밀번호에 제어문자(개행·탭 등)가 포함되어 있습니다 — 붙여넣기 내용을 확인하세요.'); // eslint-disable-line no-control-regex
   if (password) dev.password = password;
   else if (hostChanged) delete dev.password;
   // 수집 방식(v2.304, v2.305 타입별 스코프): PowerScale(isilon)만 사용자가 'ssh'(isi status
