@@ -10,6 +10,7 @@ export const TOOLS = [
   { k: 'threats', icon: '🛡️', label: '위협 탐지', desc: '마이닝 의심 · 위험 포트 노출 · EOL OS · 신규 rogue IP · NSX IDS' },
   { k: 'secret-scan', icon: '🔐', label: '평문 자격증명 점검', desc: '설정 파일·portal.env·로그·소스에 평문으로 남은 계정정보/토큰/키 탐지(값은 마스킹) · 암호화 저장 전환 안내', adminOnly: true },
   { k: 'codex-check', icon: '🛡️', label: '보안점검', desc: '프로그램 보안·완성도 점검 리포트 — 외부 전수 점검 결과 + 실시간 지표 · Markdown 저장/다운로드', adminOnly: true },
+  { k: 'vm-clone', icon: '🧬', label: 'VM 복제(백업)', desc: 'vCenter별 VM 지정 → 스냅샷 시점 복제(무중단) · 스케줄 정기 실행 · 대상 데이터스토어/NFS 선택 · 최근 N개 보존 · 트리에 Clone 배지', adminOnly: true },
   { k: 'vmfinder', icon: '🧭', label: 'VM 정밀 검색 / 유휴 VM', desc: '다수 vCenter·폴더·클러스터·풀 + 조건 · 1일/1주 평균 CPU로 미사용 VM' },
   { k: 'deepsearch', icon: '🔭', label: '심층 검색', desc: '게이트웨이·서브넷·GPU·OS 등 다조건 + 게스트 탐침(GPU드라이버·프로세스) · 전체/복수 vCenter' },
   { k: 'capacity', icon: '📈', label: '용량 리포트', desc: '클러스터별 여유·오버커밋·수용여력 · 전체/법인별' },
