@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react';
-import { usePolling, getToken, setToken, setUnauthorizedHandler, fetchAuthConfig, fetchMe, broadcastLogout, LOGOUT_BROADCAST_KEY, setCurrentUser, toolAllowed } from './api.js';
-import { SearchBox } from './components/ui.jsx';
+import { usePolling, fetchJson, getToken, setToken, setUnauthorizedHandler, fetchAuthConfig, fetchMe, broadcastLogout, LOGOUT_BROADCAST_KEY, setCurrentUser, toolAllowed } from './api.js';
+import { SearchBox, Modal, StateBadge, Loading, ErrorBox } from './components/ui.jsx';
 import { RemoteConsoleWindow } from './remote/RemoteConsoleWindow.jsx';
 import Login from './views/Login.jsx';
 import ForceOtpEnroll from './views/ForceOtpEnroll.jsx';
@@ -176,6 +176,7 @@ function Portal({ user, onLogout }) {
   const [tabFilters, setTabFilters] = useState({}); // { [tabId]: { region, vcenterId, q } }
   const [menuFilter, setMenuFilter] = useState({}); // { [tabId]: value }
   const [showNotes, setShowNotes] = useState(false);
+  const [showVcDown, setShowVcDown] = useState(false); // 헤더 상태 칩의 '(N 불가)' 클릭 → 연결 안 되는 vCenter 목록 모달(v2.300)
 
   const cur = tabFilters[tab] || {};
   const region = cur.region || '';
@@ -314,9 +315,13 @@ function Portal({ user, onLogout }) {
             // 상태 문구: 실제 불가만 빨간 '불가', 수집 전/중은 노란 '수집 중'.
             let tail = null;
             if (health && !allOk) {
-              if (unreach > 0) tail = <span style={{ color: '#f87171', fontWeight: 700 }}> ({unreach} 불가{pending ? ` · ${pending} 수집중` : ''})</span>;
-              else if (pending > 0) tail = <span style={{ color: '#fbbf24', fontWeight: 700 }}> ({pending} 수집중)</span>;
-              else tail = <span style={{ color: '#fbbf24', fontWeight: 700 }}> ({total - conn - maint} 확인중)</span>;
+              // v2.300: 꼬리 문구를 클릭하면 어떤 vCenter 가 비정상인지 목록 모달을 연다(사용자 요구
+              // — "불가 글자 클릭"). 수집중/확인중 꼬리도 동일하게 열어 준다(같은 궁금증).
+              const openList = { cursor: 'pointer', textDecoration: 'underline dotted', textUnderlineOffset: 3 };
+              const click = (e) => { e.stopPropagation(); setShowVcDown(true); };
+              if (unreach > 0) tail = <span role="button" title="클릭하면 연결 안 되는 vCenter 목록" onClick={click} style={{ color: '#f87171', fontWeight: 700, ...openList }}> ({unreach} 불가{pending ? ` · ${pending} 수집중` : ''})</span>;
+              else if (pending > 0) tail = <span role="button" title="클릭하면 수집 중인 vCenter 목록" onClick={click} style={{ color: '#fbbf24', fontWeight: 700, ...openList }}> ({pending} 수집중)</span>;
+              else tail = <span role="button" title="클릭하면 해당 vCenter 목록" onClick={click} style={{ color: '#fbbf24', fontWeight: 700, ...openList }}> ({total - conn - maint} 확인중)</span>;
             }
             return (
               <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.3 }}>
@@ -431,7 +436,52 @@ function Portal({ user, onLogout }) {
       )}
 
       {showNotes && <Suspense fallback={null}><ReleaseNotes isAdmin={user.role === 'admin'} onClose={() => setShowNotes(false)} /></Suspense>}
+      {showVcDown && <VcDownList onClose={() => setShowVcDown(false)} />}
       <RemoteConsoleWindow />
     </div>
+  );
+}
+
+/**
+ * 연결 안 되는 vCenter 목록 모달(v2.300) — 헤더 상태 칩의 '(N 불가)' 클릭으로 열린다.
+ * 데이터는 /vcenters(사용자 scope 적용)를 열 때 1회 조회 — 헤더 /health 는 카운트만 주므로
+ * 이름·위치는 여기서 읽는다. scope 제한 계정은 자기 범위의 비정상 vCenter 만 보인다
+ * (헤더 카운트는 전체 기준이라 수가 다를 수 있음 — 모달 하단에 그 사실을 명시해 혼동 방지).
+ * connected 외 전부(불가·수집중·점검중)를 보여줘 '왜 N/M 인가'를 한 화면에서 설명한다.
+ */
+function VcDownList({ onClose }) {
+  const [list, setList] = useState(null);
+  const [err, setErr] = useState(null);
+  useEffect(() => {
+    fetchJson('/vcenters').then((r) => setList((r || []).filter((v) => v.status !== 'connected')))
+      .catch((e) => setErr(e.message));
+  }, []);
+  return (
+    <Modal title="연결 안 되는 vCenter" onClose={onClose} width={640}>
+      {err ? <ErrorBox message={err} /> : !list ? <Loading /> : list.length === 0 ? (
+        <div className="muted" style={{ padding: 8, fontSize: 13 }}>지금은 전부 연결되어 있습니다(마지막 수집 이후 복구됐을 수 있음 — 헤더 카운트는 최대 30초 지연).</div>
+      ) : (
+        <>
+          <table className="data-table" style={{ width: '100%', fontSize: 13 }}>
+            <thead><tr><th style={{ textAlign: 'left' }}>상태</th><th style={{ textAlign: 'left' }}>vCenter</th><th style={{ textAlign: 'left' }}>위치</th><th style={{ textAlign: 'left' }}>버전</th><th style={{ textAlign: 'right' }}>호스트/VM</th></tr></thead>
+            <tbody>
+              {list.map((v) => (
+                <tr key={v.id}>
+                  <td><StateBadge state={v.status} /></td>
+                  <td><b>{v.name}</b><div className="muted" style={{ fontSize: 11 }}>{v.id}</div></td>
+                  <td className="muted">{[v.location?.city, v.location?.country].filter(Boolean).join(', ') || '—'}</td>
+                  <td className="muted">{v.version ? `v${v.version}` : '—'}</td>
+                  <td style={{ textAlign: 'right' }} className="muted">{v.metrics?.hosts ?? '—'} / {v.metrics?.vms ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="muted" style={{ fontSize: 11.5, marginTop: 10, lineHeight: 1.6 }}>
+            · <b>불가(unreachable)</b>: 마지막 수집에서 로그인/응답 실패 — 네트워크·자격증명·vCenter 서비스 상태를 확인하세요(설정 › vCenter 연결 테스트).<br />
+            · 계정에 vCenter 범위 제한이 있으면 이 목록은 내 범위만 보여줘 헤더 숫자와 다를 수 있습니다.
+          </div>
+        </>
+      )}
+    </Modal>
   );
 }
