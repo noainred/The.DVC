@@ -60,16 +60,50 @@ export function normalizeIsilon(device, raw) {
     const total = byKey['ifs.bytes.total'] || 0;
     const used = byKey['ifs.bytes.used'] || (total && byKey['ifs.bytes.avail'] ? total - byKey['ifs.bytes.avail'] : 0);
     snap.capacity = { totalBytes: total, usedBytes: used, pct: total ? Math.round((used / total) * 1000) / 10 : null };
+    // 미디어(디스크 풀) 분리(v2.303, 사용자 요구 — isi status 의 HDD/SSD 컬럼): OneFS 통계 키
+    // ifs.ssd.bytes.* 가 SSD 풀 전용 카운터이고, ifs.bytes.* 는 클러스터 전체(HDD+SSD 스토리지)
+    // 합이다 — HDD = 전체 − SSD 로 산출한다. ⚠ SSD 가 메타데이터 전용(L3/VHS)인 구성에서는
+    // ifs.ssd.bytes.* 가 0 또는 부재일 수 있어 그 경우 media.ssd 는 0 으로, HDD=전체가 된다
+    // (실장비 검증 전 가정 — 값이 이상하면 섹션 상태/실측으로 보정할 것, 은폐하지 않음).
+    const ssdTotal = byKey['ifs.ssd.bytes.total'] || 0;
+    const ssdUsed = byKey['ifs.ssd.bytes.used'] || (ssdTotal && byKey['ifs.ssd.bytes.avail'] ? ssdTotal - byKey['ifs.ssd.bytes.avail'] : 0);
+    // total 0 인 미디어는 null — '풀 없음'(SSD 메타 전용/무SSD 구성)을 0TB 로 오표시하지 않는다.
+    const mk = (t, u) => (t > 0 ? { totalBytes: t, usedBytes: u, pct: Math.round((u / t) * 1000) / 10 } : null);
+    snap.media = {
+      hdd: mk(Math.max(0, total - ssdTotal), Math.max(0, used - ssdUsed)),
+      ssd: mk(ssdTotal, ssdUsed),
+    };
     snap.sections.capacity = 'ok';
   }
   if (raw.nodes) {
     const list = raw.nodes.nodes || [];
     snap.nodes.count = list.length;
     // OneFS 노드 상태 필드는 버전별 상이(status/health) — 명시적으로 정상 아닌 것만 센다(모르면 0).
-    snap.nodes.unhealthy = list.filter((n) => {
-      const st = String(n.status || n.health || '').toLowerCase();
-      return st && !/ok|healthy|up|green/.test(st);
-    }).length;
+    const healthOf = (n) => String(n.status?.health ?? n.status ?? n.health ?? '').toLowerCase() || 'unknown';
+    snap.nodes.unhealthy = list.filter((n) => { const st = healthOf(n); return st !== 'unknown' && !/ok|healthy|up|green/.test(st); }).length;
+    // 노드별 상세(v2.303) — devid(lnn) 기준으로 노드별 통계를 조인. IP 필드는 버전별 상이라
+    // 흔한 후보(ip/ip_address/ip_addresses[0]/ext_ip)를 순서대로 취하고 없으면 ''(정직 표기 — 위조 금지).
+    const perNode = new Map(); // devid → { key → value }
+    for (const r of (raw.nodeStats?.stats || [])) {
+      if (r.devid == null) continue;
+      if (!perNode.has(r.devid)) perNode.set(r.devid, {});
+      perNode.get(r.devid)[r.key] = Number(r.value) || 0;
+    }
+    const mkPool = (t, u) => (t > 0 ? { totalBytes: t, usedBytes: u, pct: Math.round((u / t) * 1000) / 10 } : null); // total 0 = 무디스크(No Storage HDDs)
+    snap.nodes.list = list.slice(0, 64).map((n) => {
+      const lnn = n.lnn ?? n.id;
+      const st = perNode.get(lnn) || {};
+      return {
+        id: lnn,
+        ip: String(n.ip || n.ip_address || (Array.isArray(n.ip_addresses) ? n.ip_addresses[0] : '') || n.ext_ip || ''),
+        health: healthOf(n),
+        inBps: st['node.net.ext.bytes.in.rate'] ?? null,
+        outBps: st['node.net.ext.bytes.out.rate'] ?? null,
+        hdd: mkPool(Math.max(0, (st['node.ifs.bytes.total'] || 0) - (st['node.ifs.ssd.bytes.total'] || 0)),
+                    Math.max(0, (st['node.ifs.bytes.used'] || 0) - (st['node.ifs.ssd.bytes.used'] || 0))),
+        ssd: mkPool(st['node.ifs.ssd.bytes.total'] || 0, st['node.ifs.ssd.bytes.used'] || 0),
+      };
+    });
     snap.sections.nodes = 'ok';
   }
   if (raw.users) {
@@ -96,11 +130,11 @@ export function normalizeIsilon(device, raw) {
 }
 
 export async function collect(device) {
-  const raw = { config: null, stats: null, nodes: null, users: null, pools: null, events: null };
+  const raw = { config: null, stats: null, nodes: null, nodeStats: null, users: null, pools: null, events: null };
   const snap = emptySnapshot(device);
   const trySection = async (key, fn) => {
     try { raw[key] = await fn(); }
-    catch (e) { snap.sections[key === 'stats' ? 'capacity' : key === 'events' ? 'alerts' : key === 'users' ? 'accounts' : key] = `오류: ${e.message}`; }
+    catch (e) { if (key === 'nodeStats') { snap.sections.nodeStats = `오류: ${e.message}`; return; } snap.sections[key === 'stats' ? 'capacity' : key === 'events' ? 'alerts' : key === 'users' ? 'accounts' : key] = `오류: ${e.message}`; }
   };
   // config 를 먼저 — 인증 실패(401)면 나머지를 시도하지 않고 즉시 실패로 끝낸다(계정 잠금 방지:
   // 잘못된 비번으로 엔드포인트 6개 × 폴링마다 두드리면 장비 쪽 실패 잠금을 유발한다).
@@ -113,8 +147,14 @@ export async function collect(device) {
     }
     snap.sections.config = `오류: ${e.message}`;
   }
-  await trySection('stats', () => get(device, '/platform/1/statistics/current?key=ifs.bytes.total&key=ifs.bytes.used&key=ifs.bytes.avail&devid=0'));
+  await trySection('stats', () => get(device, '/platform/1/statistics/current?key=ifs.bytes.total&key=ifs.bytes.used&key=ifs.bytes.avail&key=ifs.ssd.bytes.total&key=ifs.ssd.bytes.used&key=ifs.ssd.bytes.avail&devid=0'));
   await trySection('nodes', () => getAny(device, ['/platform/3/cluster/nodes', '/platform/1/cluster/nodes']));
+  // 노드별 통계(v2.303, 사용자 요구 — isi status 노드 표): devid=all 이면 stats[] 각 행에
+  // devid(=노드 lnn)가 붙어 노드 단위 값이 온다. node.ifs.bytes.* = 노드 로컬 디스크 풀,
+  // node.net.ext.bytes.{in,out}.rate = 외부망 처리량(B/s). 실패해도 노드 수/상태(nodes 섹션)는 유지.
+  await trySection('nodeStats', () => get(device, '/platform/1/statistics/current?devid=all'
+    + '&key=node.ifs.bytes.total&key=node.ifs.bytes.used&key=node.ifs.ssd.bytes.total&key=node.ifs.ssd.bytes.used'
+    + '&key=node.net.ext.bytes.in.rate&key=node.net.ext.bytes.out.rate'));
   await trySection('users', () => get(device, '/platform/1/auth/users?limit=200'));
   await trySection('pools', () => getAny(device, ['/platform/1/storagepool/storagepools', '/platform/1/storagepool/nodepools']));
   await trySection('events', () => getAny(device, ['/platform/3/event/eventgroup-occurrences?resolved=false&limit=1', '/platform/1/event/events?resolved=false&limit=1']));

@@ -20,7 +20,15 @@
  *   version,                         // 펌웨어/OS 버전 문자열(OneFS 9.4.0 등)
  *   serial,                          // GUID/시리얼(자산 대조)
  *   capacity: { totalBytes, usedBytes, pct },
- *   nodes: { count, unhealthy },     // 노드형이 아니면 count=컨트롤러 수 등 타입 재량(0 허용)
+ *   media: { hdd:{totalBytes,usedBytes,pct}, ssd:{totalBytes,usedBytes,pct} } | null,
+ *                                    // 미디어(디스크 풀)별 분리 — isi status 의 HDD/SSD 컬럼과
+ *                                    // 동일 의미(2026-08-15 사용자 요구). 타입이 미디어 구분이
+ *                                    // 없으면 null(뷰가 컬럼을 '—' 처리).
+ *   nodes: { count, unhealthy,       // 노드형이 아니면 count=컨트롤러 수 등 타입 재량(0 허용)
+ *     list: [{ id, ip, health,       // 노드별 상세(≤64 — isi status 노드 표와 동일 의미,
+ *       inBps, outBps,               //   2026-08-15 사용자 요구): 외부망 처리량(bps)
+ *       hdd:{usedBytes,totalBytes,pct}|null,   // 노드별 HDD 풀(무디스크 노드는 null — 'No Storage HDDs')
+ *       ssd:{usedBytes,totalBytes,pct}|null }] },
  *   pools: [{ name, totalBytes, usedBytes, pct }],   // ≤32(뷰 상한 — 초과분은 절단 표기)
  *   accounts: [{ name, enabled, role? }],            // ≤200(관리 계정 감사용)
  *   alerts: { unresolved },          // 미해결 경보 수(없으면 0)
@@ -54,7 +62,8 @@ export function emptySnapshot(device) {
     deviceId: device.id, type: device.type, name: device.name, collectedAt: Date.now(),
     ok: false, error: '', version: '', serial: '',
     capacity: { totalBytes: 0, usedBytes: 0, pct: null },
-    nodes: { count: 0, unhealthy: 0 },
+    media: null,
+    nodes: { count: 0, unhealthy: 0, list: [] },
     pools: [], accounts: [], alerts: { unresolved: 0 },
     sections: { config: 'skip', capacity: 'skip', nodes: 'skip', accounts: 'skip', alerts: 'skip' },
     extra: {},

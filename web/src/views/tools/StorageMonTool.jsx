@@ -15,6 +15,10 @@ const tbFmt = (bytes) => {
   const tb = (Number(bytes) || 0) / 1024 ** 4;
   return tb >= 1024 ? `${(tb / 1024).toFixed(2)} PB` : `${tb.toFixed(1)} TB`;
 };
+// bps 표기(isi status 스타일 — k/M/G). null 은 '—'(수집 실패를 0 으로 위장하지 않음).
+const bps = (v) => (v == null ? '—' : v >= 1e9 ? `${(v / 1e9).toFixed(1)}G` : v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(1)}k` : String(Math.round(v)));
+// 미디어 풀 셀(HDD/SSD 공용) — 사용/전체(%). null = 해당 미디어 없음(무디스크 노드 등).
+const MediaCell = ({ m }) => (m ? <span title={`${tbFmt(m.usedBytes)} / ${tbFmt(m.totalBytes)}`}><UsageCell pct={m.pct ?? 0} /><span className="muted" style={{ fontSize: 10.5, display: 'block' }}>{tbFmt(m.usedBytes)}/{tbFmt(m.totalBytes)}</span></span> : <span className="muted">—</span>);
 const ago = (ts) => {
   if (!ts) return '—';
   const s = Math.round((Date.now() - ts) / 1000);
@@ -74,6 +78,9 @@ export default function StorageMonTool() {
         <td className="muted" style={{ fontSize: 12 }}>{s?.version || '—'}</td>
         <td style={{ minWidth: 140 }}>{s?.capacity?.pct != null ? <UsageCell pct={s.capacity.pct} /> : <span className="muted">—</span>}
           {s?.capacity?.totalBytes ? <div className="muted" style={{ fontSize: 10.5 }}>{tbFmt(s.capacity.usedBytes)} / {tbFmt(s.capacity.totalBytes)}</div> : null}</td>
+        {/* HDD/SSD 풀 분리(v2.303, 사용자 요구 — isi status 의 Cluster Storage HDD/SSD 컬럼) */}
+        <td style={{ minWidth: 120 }}><MediaCell m={s?.media?.hdd} /></td>
+        <td style={{ minWidth: 120 }}><MediaCell m={s?.media?.ssd} /></td>
         <td style={{ textAlign: 'right' }}>{s ? `${s.nodes?.count ?? 0}${s.nodes?.unhealthy ? ` (⚠${s.nodes.unhealthy})` : ''}` : '—'}</td>
         <td style={{ textAlign: 'right' }}>{s?.accounts?.length ?? '—'}</td>
         <td>{!s ? <span className="badge gray">수집 전</span> : s.ok ? <span className="badge green">정상</span> : <span className="badge red" title={s.error}>실패</span>}
@@ -89,9 +96,9 @@ export default function StorageMonTool() {
   const DeviceTable = ({ list }) => (
     <div className="table-wrap" style={{ maxHeight: '52vh' }}>
       <table>
-        <thead><tr><th>장비</th><th>타입</th><th>법인</th><th>수집</th><th>버전</th><th>사용률</th><th style={{ textAlign: 'right' }}>노드</th><th style={{ textAlign: 'right' }}>계정</th><th>상태</th><th className="right">작업</th></tr></thead>
+        <thead><tr><th>장비</th><th>타입</th><th>법인</th><th>수집</th><th>버전</th><th>사용률(전체)</th><th>HDD 풀</th><th>SSD 풀</th><th style={{ textAlign: 'right' }}>노드</th><th style={{ textAlign: 'right' }}>계정</th><th>상태</th><th className="right">작업</th></tr></thead>
         <tbody>
-          {list.length === 0 && <tr><td colSpan={10} className="center muted" style={{ padding: 20 }}>등록된 장비가 없습니다 — "+ 장비 등록"으로 시작하세요.</td></tr>}
+          {list.length === 0 && <tr><td colSpan={12} className="center muted" style={{ padding: 20 }}>등록된 장비가 없습니다 — "+ 장비 등록"으로 시작하세요.</td></tr>}
           {list.map((r) => <DeviceRow key={r.id} r={r} />)}
         </tbody>
       </table>
@@ -169,6 +176,46 @@ function DeviceDetail({ r, typeLabel, dcName, onClose }) {
             <span className="muted">수집 {new Date(s.collectedAt).toLocaleString('ko-KR')}{s.agent ? ` · 엣지 ${s.agent}` : ' · 중앙'}</span>
           </div>
           {s.error && <div className="card" style={{ borderColor: 'var(--red)', padding: '8px 12px', marginBottom: 10, fontSize: 12.5, color: 'var(--red)' }}>⛔ {s.error}</div>}
+
+          {/* HDD/SSD 풀 요약(v2.303) — isi status Cluster Storage 와 동일 의미 */}
+          {s.media && (
+            <div className="flex gap wrap" style={{ marginBottom: 12 }}>
+              {[['HDD 풀', s.media.hdd], ['SSD 풀', s.media.ssd]].map(([lb, m]) => (
+                <div key={lb} className="card" style={{ padding: '10px 14px', minWidth: 220 }}>
+                  <div className="muted" style={{ fontSize: 12 }}>{lb}</div>
+                  {m ? <>
+                    <div style={{ fontSize: 15, fontWeight: 700 }}>{tbFmt(m.usedBytes)} <span className="muted" style={{ fontSize: 12, fontWeight: 400 }}>/ {tbFmt(m.totalBytes)}</span></div>
+                    <UsageCell pct={m.pct ?? 0} />
+                  </> : <div className="muted">없음</div>}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* 노드별 상세(v2.303, 사용자 요구 — isi status 노드 표): ID·IP·상태·외부망 처리량·노드별 HDD/SSD */}
+          {(s.nodes?.list || []).length > 0 && (
+            <>
+              <div className="section-title" style={{ fontSize: 13 }}>노드 {s.nodes.list.length}{s.nodes.count > s.nodes.list.length ? ` (표시 상한 — 전체 ${s.nodes.count})` : ''}</div>
+              <div className="table-wrap" style={{ maxHeight: '32vh', marginBottom: 12 }}>
+                <table>
+                  <thead><tr><th style={{ textAlign: 'right' }}>ID</th><th>IP</th><th>상태</th><th style={{ textAlign: 'right' }}>In(bps)</th><th style={{ textAlign: 'right' }}>Out(bps)</th><th>HDD Used/Size</th><th>SSD Used/Size</th></tr></thead>
+                  <tbody>
+                    {s.nodes.list.map((n) => (
+                      <tr key={n.id}>
+                        <td style={{ textAlign: 'right' }}>{n.id}</td>
+                        <td style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{n.ip || '—'}</td>
+                        <td><span className={`badge ${/ok|healthy|up|green/.test(n.health) ? 'green' : n.health === 'unknown' ? 'gray' : 'red'}`}>{n.health === 'unknown' ? '?' : n.health.toUpperCase()}</span></td>
+                        <td style={{ textAlign: 'right', fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{bps(n.inBps)}</td>
+                        <td style={{ textAlign: 'right', fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{bps(n.outBps)}</td>
+                        <td>{n.hdd ? `${tbFmt(n.hdd.usedBytes)}/${tbFmt(n.hdd.totalBytes)} (${n.hdd.pct}%)` : <span className="muted">No Storage HDDs</span>}</td>
+                        <td>{n.ssd ? `${tbFmt(n.ssd.usedBytes)}/${tbFmt(n.ssd.totalBytes)} (${n.ssd.pct}%)` : <span className="muted">—</span>}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
 
           {(s.pools || []).length > 0 && (
             <>
