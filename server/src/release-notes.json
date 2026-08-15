@@ -1,6 +1,16 @@
 {
   "notes": [
     {
+      "version": "2.311.0",
+      "date": "2026-08-16",
+      "title": "스토리지 모니터링 — VPLEX·Metro Node 수집기 추가(카탈로그 8종 전체 구현 완성)",
+      "notes": [
+        "VPLEX와 Metro Node 수집기를 추가했습니다(사용자 요구). Metro Node는 VPLEX의 후속 제품(PowerStore/Unity 메트로 구성용)으로 같은 계열 Element Manager REST를 쓰므로 수집기 1개를 공유합니다(VMAX/PowerMax와 동일 구조). 등록 host는 장비가 아니라 VPLEX 관리 서버/Metro Node 관리 IP입니다. 이로써 2026-08-15 로드맵 8종(PowerScale·XtremIO·PowerStore·VMAX·PowerMax·VPLEX·Unity 480·Metro Node)이 전부 구현되었습니다.",
+        "수집 항목: 클러스터(헬스/운영 상태 — 메트로 2클러스터 지원)·디렉터별 상태(노드 표에 이름/헬스 표시, degraded/critical-failure 집계)·버전. API는 v2(/vplex/v2, Basic 인증) 우선, 구세대 v1(/vplex, Username/Password 헤더 인증·컨텍스트 구조) 폴백. 조회(GET) 전용.",
+        "정직 표기: ① VPLEX/Metro Node는 스토리지 가상화 계층이라 자체 디스크 용량이 없습니다 — 용량 섹션은 의도적 '건너뜀'이며 상세 모달에 사유를 함께 표시합니다(백엔드 어레이 용량은 각 어레이 수집기 소관) ② 엔드포인트·필드는 REST 문서 지식 기반으로 실장비 검증 전(섹션별 오류가 모달에 그대로 표시 — 첫 연결에서 확인·보정) ③ 401 즉시 중단(장비 계정 잠금 예방) ④ 릴리스 전 다중 에이전트 적대적 검증 수행(v2.310에서 High 회귀를 잡은 절차)."
+      ]
+    },
+    {
       "version": "2.310.0",
       "date": "2026-08-16",
       "title": "스토리지 모니터링 — XtremIO·VMAX·PowerMax 수집기 + 스냅샷 저장 회귀 수정 + 상세 모달 압축",

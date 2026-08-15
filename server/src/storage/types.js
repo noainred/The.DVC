@@ -52,9 +52,9 @@ export const STORAGE_TYPES = [
   { type: 'powerstore', label: 'PowerStore', vendor: 'Dell EMC', api: 'PowerStore REST', implemented: true }, // v2.309
   { type: 'vmax', label: 'VMAX', vendor: 'Dell EMC', api: 'Unisphere REST', implemented: true }, // v2.310(powermax.js 공용)
   { type: 'powermax', label: 'PowerMax', vendor: 'Dell EMC', api: 'Unisphere REST', implemented: true }, // v2.310
-  { type: 'vplex', label: 'VPLEX', vendor: 'Dell EMC', api: 'VPLEX REST', implemented: false },
+  { type: 'vplex', label: 'VPLEX', vendor: 'Dell EMC', api: 'VPLEX REST', implemented: true }, // v2.311(vplex.js — metronode 공용)
   { type: 'unity480', label: 'Unity 480', vendor: 'Dell EMC', api: 'Unisphere REST', implemented: true }, // v2.309
-  { type: 'metronode', label: 'Metro Node', vendor: 'Dell EMC', api: 'REST', implemented: false },
+  { type: 'metronode', label: 'Metro Node', vendor: 'Dell EMC', api: 'REST(VPLEX v2 계열)', implemented: true }, // v2.311
 ];
 
 export const TYPE_LABEL = Object.fromEntries(STORAGE_TYPES.map((t) => [t.type, t.label]));

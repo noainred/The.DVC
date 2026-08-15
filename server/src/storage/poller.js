@@ -14,11 +14,13 @@ import * as powerstore from './collectors/powerstore.js'; // v2.309
 import * as unity from './collectors/unity.js';           // v2.309
 import * as xtremio from './collectors/xtremio.js';       // v2.310
 import * as powermax from './collectors/powermax.js';     // v2.310(vmax·powermax 공용 — 같은 Unisphere REST)
+import * as vplex from './collectors/vplex.js';           // v2.311(vplex·metronode 공용 — 같은 Element Manager REST 계열)
 import { collectAreasOnce } from './areasCollector.js';
 import { saveCapacityPoint } from './db.js';
 
 const COLLECTORS = { isilon: isilon.collect, powerstore: powerstore.collect, unity480: unity.collect,
-  xtremio: xtremio.collect, vmax: powermax.collect, powermax: powermax.collect };
+  xtremio: xtremio.collect, vmax: powermax.collect, powermax: powermax.collect,
+  vplex: vplex.collect, metronode: vplex.collect };
 const INTERVAL_MS = Math.max(60_000, Number(process.env.STORAGE_POLL_MS) || 10 * 60_000); // 기본 10분
 const AREAS_EVERY_MS = Math.max(10 * 60_000, Number(process.env.STORAGE_AREAS_MS) || 60 * 60_000); // 영역 전수 수집 기본 60분
 const _areasAt = new Map(); // deviceId → 마지막 영역 수집 시각(메모리 — 재시작 시 첫 주기에 재수집)

@@ -15,12 +15,10 @@ const { STORAGE_TYPES, emptySnapshot, isImplementedType } = await import('../src
 const { saveEdgeStorage, edgeStorageSnapshots } = await import('../src/central/storageEdge.js');
 const { parseIsiStatus, parseSize, parseBps, normalizeIsiStatus } = await import('../src/storage/collectors/isilonSsh.js');
 
-test('타입 카탈로그 — 6종 구현(v2.310: +xtremio·vmax·powermax), 예정 2종(등록은 구현 타입만)', () => {
-  for (const t of ['isilon', 'powerstore', 'unity480', 'xtremio', 'vmax', 'powermax']) assert.ok(isImplementedType(t), `${t} 구현 플립`);
-  for (const t of ['vplex', 'metronode']) {
-    assert.ok(STORAGE_TYPES.some((x) => x.type === t && !x.implemented), `${t} 카탈로그 예정 항목`);
-  }
-  assert.throws(() => reg.saveDevice({ type: 'vplex', name: 'X', host: '10.0.0.1', username: 'a' }), /미구현/);
+test('타입 카탈로그 — 8종 전체 구현(v2.311: +vplex·metronode 로 완성)·미지 타입 거부', () => {
+  // 사용자 로드맵(2026-08-15) 8종이 모두 구현됨 — 카탈로그에 미구현이 남아 있으면 실패.
+  for (const t of STORAGE_TYPES) assert.ok(t.implemented, `${t.type} 구현 플립(v2.311 완성)`);
+  assert.equal(STORAGE_TYPES.length, 8, '카탈로그 8종(추가 시 이 단언과 수집기 배선을 함께 갱신)');
   assert.throws(() => reg.saveDevice({ type: 'netapp', name: 'X', host: '10.0.0.1', username: 'a' }), /알 수 없는/);
 });
 
@@ -379,10 +377,10 @@ test('normalizeUnity: 빈 응답이면 ok=false, extra.model 없음', async () =
   assert.equal(snap.ok, false);
 });
 
-test('types: powerstore/unity480(v2.309)·xtremio/vmax/powermax(v2.310) 구현 플립 — 등록 가능', async () => {
+test('types: 구현 플립 이력(v2.309~311) — 8종 전부 등록 가능·미지 타입은 불가', async () => {
   const { isImplementedType } = await import('../src/storage/types.js');
-  for (const t of ['powerstore', 'unity480', 'xtremio', 'vmax', 'powermax']) assert.equal(isImplementedType(t), true, t);
-  assert.equal(isImplementedType('vplex'), false); // 나머지는 여전히 예정
+  for (const t of ['powerstore', 'unity480', 'xtremio', 'vmax', 'powermax', 'vplex', 'metronode']) assert.equal(isImplementedType(t), true, t);
+  assert.equal(isImplementedType('netapp'), false); // 카탈로그 밖 타입
 });
 
 /* ─── v2.310: XtremIO / VMAX·PowerMax 정규화(순수 — 실장비 검증 전이므로 픽스처로 계약 고정) ─── */
@@ -496,4 +494,90 @@ test('collectDeviceNow(mock): 수집 스냅샷이 localSnapshots 에 저장된�
     assert.ok(snap, 'v2.308 회귀: putSnapshot 이 collectOne 정규 경로에서 빠지면 여기서 실패한다');
     assert.equal(snap.ok, true);
   } finally { reg.deleteDevice(d.id); }
+});
+
+/* ─── v2.311: VPLEX / Metro Node 정규화(순수 — 실장비 검증 전이므로 픽스처로 계약 고정) ─── */
+
+test('normalizeVplex: 가상화 계층 — capacity skip(사유 노출)·클러스터/디렉터 헬스·ok=config 기준', async () => {
+  const { normalizeVplex } = await import('../src/storage/collectors/vplex.js');
+  const dev = { id: 'vp-1', type: 'vplex', name: 'VPLEX-KR', host: '10.0.0.5' };
+  const snap = normalizeVplex(dev, {
+    version: '6.2.0.01.00.10',
+    clusters: [
+      { name: 'cluster-1', health: 'ok', operational: 'ok' },
+      { name: 'cluster-2', health: 'degraded', operational: 'degraded' },
+    ],
+    directors: [
+      { name: 'director-1-1-A', health: 'ok' },
+      { name: 'director-1-1-B', health: 'critical-failure' },
+    ],
+  });
+  assert.equal(snap.ok, true);
+  assert.equal(snap.name, 'cluster-1 외 1');                    // 메트로 2클러스터 표기
+  assert.equal(snap.version, '6.2.0.01.00.10');
+  assert.equal(snap.sections.capacity, 'skip');                 // 가상화 계층 — 자체 용량 없음(의도)
+  assert.ok(snap.extra.capacityNote.includes('가상화 계층'));   // skip 사유를 UI 로 노출
+  assert.equal(snap.capacity.totalBytes, 0);
+  assert.equal(snap.nodes.count, 2);
+  assert.equal(snap.nodes.unhealthy, 1);                        // critical-failure 디렉터 집계
+  assert.equal(snap.nodes.list[1].health, 'critical-failure');  // 모르는 상태 그대로(정직 표기)
+  assert.equal(snap.nodes.list[0].name, 'director-1-1-A');      // 디렉터 이름 = 유일 식별자(뷰 '이름' 열)
+  assert.equal(snap.extra.clusters[1].health, 'degraded');
+});
+
+test('normalizeVplex: 클러스터 없음이면 ok=false(디렉터만으로 ok 판정 금지)', async () => {
+  const { normalizeVplex } = await import('../src/storage/collectors/vplex.js');
+  const snap = normalizeVplex({ id: 'vp-2', type: 'metronode', name: 'x' }, { directors: [{ name: 'd', health: 'ok' }] });
+  assert.equal(snap.ok, false);
+  assert.equal(snap.sections.nodes, 'ok'); // 수집된 섹션은 그대로 보존(부분 수집 정직 표기)
+});
+
+test('vplex v1 컨텍스트 헬퍼: attrsToObj 평탄화·childNames type 필터', async () => {
+  const { attrsToObj, childNames } = await import('../src/storage/collectors/vplex.js');
+  assert.deepEqual(
+    attrsToObj({ attributes: [{ name: 'name', value: 'cluster-1' }, { name: 'health-state', value: 'ok' }] }),
+    { name: 'cluster-1', 'health-state': 'ok' },
+  );
+  const resp = { response: { context: [{ children: [
+    { name: 'cluster-1', type: 'cluster' }, { name: 'cluster-2', type: 'cluster' }, { name: 'etc', type: 'other' },
+  ] }] } };
+  assert.deepEqual(childNames(resp, 'cluster'), ['cluster-1', 'cluster-2']);
+  assert.deepEqual(childNames({}, 'cluster'), []); // 방어: 형태 밖 응답
+});
+
+/* ─── v2.311 검증 반영: 자격증명 유출 차단 + '미구현 등록 거부' 가드 커버리지 복원 ─── */
+
+test('makeGetter: 헤더 값 제어문자 사전 차단 — 오류 메시지에 값을 되울리지 않는다(유출 방지)', async () => {
+  const { makeGetter } = await import('../src/storage/collectors/restCommon.js');
+  // undici 는 제어문자 헤더 값에 값 전문이 포함된 TypeError 를 던진다(Node v24 실측) —
+  // vplex v1 처럼 password 를 헤더로 싣는 경로에서 스냅샷/UI/중앙 push 유출로 이어지므로
+  // 생성 시점에 일반화 메시지로 차단한다. 값('sec\nret')이 메시지에 절대 없어야 한다.
+  let threw = null;
+  try { makeGetter({ host: 'h', username: 'u', password: 'x' }, { headers: { Password: 'sec\nret' } }); }
+  catch (e) { threw = e; }
+  assert.ok(threw, '제어문자 헤더 값은 생성 시점에 거부');
+  assert.ok(!threw.message.includes('sec\nret') && !threw.message.includes('ret'), '오류 메시지에 값 미포함');
+  assert.match(threw.message, /사용 불가 문자/);
+  // 정상 값(Latin-1 프린터블)은 통과.
+  assert.ok(makeGetter({ host: 'h', username: 'u', password: 'x' }, { headers: { Password: 'normal-pw!' } }));
+});
+
+test('레지스트리: 제어문자 비밀번호 저장 거부(여러 줄 붙여넣기 사고 → 헤더 유출면 원천 차단)', () => {
+  assert.throws(
+    () => reg.saveDevice({ type: 'vplex', name: 'VP', host: '10.40.0.10', username: 'service', password: 'pw\nleak' }),
+    /제어문자/,
+  );
+  // 정상 비밀번호는 저장된다(회귀 방지 — 검증이 과차단하지 않는지).
+  const d = reg.saveDevice({ type: 'vplex', name: 'VP', host: '10.40.0.10', username: 'service', password: 'ok-pw-1' });
+  assert.equal(d.hasPassword, true);
+  reg.deleteDevice(d.id);
+});
+
+test('레지스트리: 미구현 타입 등록 거부 가드(registry isImplementedType 분기 — v2.311 커버리지 복원)', () => {
+  // 8종 전체 구현으로 실 카탈로그엔 미구현 타입이 없어졌지만, 9번째 타입을 '예정'으로 올리는
+  // 순간 이 가드가 유일한 등록 차단선이다 — 가짜 예정 타입을 주입해 분기를 고정한다.
+  STORAGE_TYPES.push({ type: 'planned-x', label: 'Planned-X', vendor: 'T', api: 'REST', implemented: false });
+  try {
+    assert.throws(() => reg.saveDevice({ type: 'planned-x', name: 'X', host: '10.0.0.2', username: 'a' }), /미구현/);
+  } finally { STORAGE_TYPES.pop(); }
 });

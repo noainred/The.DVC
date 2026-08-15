@@ -202,8 +202,26 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
             <span className="muted">시리얼/GUID <b style={{ color: 'var(--text)' }}>{s.serial || '—'}</b></span>
             <span className="muted">수집 {new Date(s.collectedAt).toLocaleString('ko-KR')}{s.agent ? ` · 엣지 ${s.agent}` : ' · 중앙'}{s.extra?.collectMethod ? ` · ${s.extra.collectMethod.toUpperCase()}` : ''}</span>
           </div>
+          {/* 타입 고유 헬스 노출(v2.311 적대적 검증 반영 — 수집·테스트까지 된 장애 신호가 UI 에서
+              사장되던 결함 수정): VPLEX/Metro Node 클러스터별 헬스(degraded/critical-failure 가
+              디렉터 정상일 때도 보이게), XtremIO 시스템 헬스. */}
+          {Array.isArray(s.extra?.clusters) && s.extra.clusters.length > 0 && (
+            <div className="flex gap wrap" style={{ fontSize: 12.5, marginBottom: 10 }}>
+              {s.extra.clusters.map((c, i) => (
+                <span key={i} className={`badge ${c.health === 'ok' ? 'green' : c.health === 'unknown' ? 'gray' : 'red'}`} title={c.operational ? `operational: ${c.operational}` : undefined}>
+                  {c.name}: {String(c.health || '?').toUpperCase()}
+                </span>
+              ))}
+            </div>
+          )}
+          {s.extra?.healthState && !s.extra?.clusterHealth && (
+            <div className="flex gap wrap" style={{ fontSize: 12.5, marginBottom: 10 }}>
+              <span className={`badge ${String(s.extra.healthState).toLowerCase() === 'healthy' ? 'green' : 'red'}`}>Health: {s.extra.healthState}</span>
+              {s.extra.dataReduction && <span className="muted">Data Reduction <b style={{ color: 'var(--text)' }}>{s.extra.dataReduction}</b></span>}
+            </div>
+          )}
           {/* SSH(isi status) 모드 부가 정보(v2.304) — 사용자 화면 상단 블록과 동일 항목 */}
-          {(s.extra?.clusterHealth || s.extra?.dataReduction || s.extra?.vhsBytes > 0) && (
+          {(s.extra?.clusterHealth || s.extra?.dataReduction || s.extra?.vhsBytes > 0) && !s.extra?.healthState && (
             <div className="flex gap wrap" style={{ fontSize: 12.5, marginBottom: 10 }}>
               {s.extra.clusterHealth && <span className={`badge ${s.extra.clusterHealth === 'OK' ? 'green' : 'red'}`}>Cluster Health: {s.extra.clusterHealth}</span>}
               {s.extra.dataReduction && <span className="muted">Data Reduction <b style={{ color: 'var(--text)' }}>{s.extra.dataReduction}</b></span>}
@@ -369,6 +387,9 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
               <span key={k} className={`badge ${v === 'ok' ? 'green' : v === 'skip' ? 'gray' : 'red'}`} title={String(v)}>{k}: {v === 'ok' ? 'OK' : v === 'skip' ? '건너뜀' : '오류'}</span>
             ))}
           </div>
+          {/* skip 사유 노출(v2.311) — VPLEX/Metro Node 의 capacity skip 은 오류가 아니라 제품 특성
+              (가상화 계층 — 자체 용량 없음). 사유 없이 '건너뜀'만 보이면 수집 실패로 오해한다. */}
+          {s.extra?.capacityNote && <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>ℹ {s.extra.capacityNote}</div>}
         </>
       )}
     </Modal>
