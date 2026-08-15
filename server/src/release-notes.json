@@ -1,6 +1,16 @@
 {
   "notes": [
     {
+      "version": "2.303.0",
+      "date": "2026-08-15",
+      "title": "스토리지 모니터링 — HDD/SSD 풀 분리 용량 + 노드별 상세(IP·상태·처리량·노드별 풀)",
+      "notes": [
+        "Isilon 수집에 HDD/SSD 디스크 풀 분리를 추가했습니다(isi status의 Cluster Storage HDD/SSD 컬럼과 동일 의미) — 장비 목록에 'HDD 풀'/'SSD 풀' 컬럼(사용률 bar + 사용/전체), 상세 모달에 풀 요약 카드. OneFS 통계 키(ifs.ssd.bytes.*)로 SSD를 분리하고 HDD=전체−SSD로 산출하며, SSD가 메타데이터 전용/부재인 구성은 0TB로 오표시하지 않고 '없음'으로 표기합니다.",
+        "노드별 상세를 추가했습니다(isi status 노드 표와 동일 의미) — 장비 상세 모달에 노드 ID·IP·상태(Health)·외부망 처리량 In/Out(bps)·노드별 HDD/SSD 사용량 표. 무디스크(액셀러레이터) 노드는 'No Storage HDDs'로 표기합니다. 노드별 값은 OneFS 노드 통계 키(node.ifs.bytes.*, node.net.ext.bytes.*.rate)를 devid(노드 번호)로 조인해 얻습니다.",
+        "정직 표기: HDD=전체−SSD 산출과 노드 IP 필드는 OneFS 버전별 차이 가능성이 있는 가정 기반이며(실장비 검증 전), 수집 실패·필드 부재는 0으로 위장하지 않고 '—'/섹션 오류로 드러납니다. 회귀 테스트 2건 추가(미디어 분리·노드 조인/무디스크/IP 폴백)."
+      ]
+    },
+    {
       "version": "2.302.0",
       "date": "2026-08-15",
       "title": "스토리지 모니터링 — Isilon 통합 조회(엣지 현지 수집→중앙 집계) + 확장형 아키텍처",
