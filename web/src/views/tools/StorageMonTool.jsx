@@ -270,6 +270,65 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
               </div>
             </>
           )}
+          {/* Critical Events + Cluster Job Status(v2.307, 사용자 요구 — isi status 꼬리 섹션) */}
+          {s.extra?.criticalEvents && (
+            <>
+              <div className="section-title" style={{ fontSize: 13 }}>Critical Events {s.extra.criticalEvents.length}</div>
+              {s.extra.criticalEvents.length === 0
+                ? <div className="muted" style={{ fontSize: 12.5, marginBottom: 12 }}>✅ 미해결 Critical 이벤트 없음</div>
+                : (
+                  <div className="table-wrap" style={{ maxHeight: '20vh', marginBottom: 12 }}>
+                    <table>
+                      <thead><tr><th>시각</th><th style={{ textAlign: 'right' }}>LNN</th><th>이벤트</th></tr></thead>
+                      <tbody>{s.extra.criticalEvents.map((e, i) => (
+                        <tr key={i}><td style={{ whiteSpace: 'nowrap', fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{e.time}</td><td style={{ textAlign: 'right' }}>{e.lnn}</td><td style={{ fontSize: 12.5, color: 'var(--red)' }}>{e.event}</td></tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
+                )}
+            </>
+          )}
+          {s.extra?.jobs && (
+            <>
+              <div className="section-title" style={{ fontSize: 13 }}>Cluster Job Status
+                <span className="muted" style={{ fontSize: 11.5, fontWeight: 400 }}> — 실행 {s.extra.jobs.running.length} · 대기 {s.extra.jobs.paused.length} · 실패 {s.extra.jobs.failed.length}</span>
+              </div>
+              {(s.extra.jobs.running.length + s.extra.jobs.paused.length + s.extra.jobs.failed.length) === 0
+                ? <div className="muted" style={{ fontSize: 12.5, marginBottom: 8 }}>실행/대기/실패 잡 없음</div>
+                : (
+                  <div className="table-wrap" style={{ maxHeight: '22vh', marginBottom: 8 }}>
+                    <table>
+                      <thead><tr><th>잡</th><th>구분</th><th>Impact</th><th style={{ textAlign: 'right' }}>Pri</th><th>Policy</th><th>Phase</th><th>Run Time</th></tr></thead>
+                      <tbody>
+                        {s.extra.jobs.running.map((j, i) => (
+                          <tr key={`r${i}`}><td style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{j.job}</td><td><span className="badge amber">실행 중</span></td><td>{j.impact}</td><td style={{ textAlign: 'right' }}>{j.pri}</td><td>{j.policy}</td><td>{j.phase}</td><td style={{ whiteSpace: 'nowrap' }}>{j.runTime}</td></tr>
+                        ))}
+                        {s.extra.jobs.paused.map((j, i) => (
+                          <tr key={`p${i}`}><td style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{j.job}</td><td><span className="badge gray">{j.state || '대기'}</span></td><td>{j.impact}</td><td style={{ textAlign: 'right' }}>{j.pri}</td><td>{j.policy}</td><td>{j.phase}</td><td style={{ whiteSpace: 'nowrap' }}>{j.runTime}</td></tr>
+                        ))}
+                        {s.extra.jobs.failed.map((j, i) => (
+                          <tr key={`f${i}`}><td style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{j.job}</td><td><span className="badge red">실패</span></td><td colSpan={5} style={{ fontSize: 12 }}>{j.detail}</td></tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              {s.extra.jobs.recent.length > 0 && (
+                <>
+                  <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>최근 잡 결과 {s.extra.jobs.recent.length}건</div>
+                  <div className="table-wrap" style={{ maxHeight: '18vh', marginBottom: 12 }}>
+                    <table>
+                      <thead><tr><th>시각</th><th>잡</th><th>결과</th></tr></thead>
+                      <tbody>{s.extra.jobs.recent.map((j, i) => (
+                        <tr key={i}><td style={{ whiteSpace: 'nowrap', fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{j.time}</td><td style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{j.job}</td><td><span className={`badge ${/succeeded/i.test(j.event) ? 'green' : 'red'}`}>{j.event}</span></td></tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+            </>
+          )}
+
           <div className="section-title" style={{ fontSize: 13 }}>섹션별 수집 상태 <span className="muted" style={{ fontSize: 11, fontWeight: 400 }}>— 부분 실패를 숨기지 않습니다(버전별 API 차이 진단용)</span></div>
           <div className="flex gap wrap">
             {Object.entries(s.sections || {}).map(([k, v]) => (

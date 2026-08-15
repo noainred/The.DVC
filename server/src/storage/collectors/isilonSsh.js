@@ -53,7 +53,8 @@ function parsePoolCell(s) {
  */
 export function parseIsiStatus(text) {
   const lines = String(text || '').split('\n');
-  const out = { name: '', health: '', dataReduction: '', storageEfficiency: '', hdd: null, ssd: null, vhsBytes: 0, l3TotalBytes: 0, nodes: [] };
+  const out = { name: '', health: '', dataReduction: '', storageEfficiency: '', hdd: null, ssd: null, vhsBytes: 0, l3TotalBytes: 0, nodes: [],
+    criticalEvents: [], jobs: { running: [], paused: [], failed: [], recent: [] } };
   const grab = (re) => { for (const l of lines) { const m = re.exec(l); if (m) return m; } return null; };
   out.name = grab(/Cluster Name:\s*(\S+)/)?.[1] || '';
   out.health = grab(/Cluster Health:\s*\[\s*([A-Z]+)/i)?.[1]?.toUpperCase() || '';
@@ -105,6 +106,46 @@ export function parseIsiStatus(text) {
       l3Bytes: (hddCell?.l3Bytes ?? ssdCell?.l3Bytes) || 0,          // SSD 가 L3 캐시로만 쓰이는 노드
     });
   }
+  // ── isi status 꼬리 섹션(v2.307, 사용자 요구): Critical Events + Cluster Job Status ──
+  // 섹션 헤더로 모드를 전환하며 행을 파싱한다. 각 표의 컬럼 수·형식은 실물 샘플 기준
+  // (storageMon.test.js 픽스처 고정 — 버전별 차이는 테스트가 위치를 알려줌).
+  let mode = '';
+  for (const l of lines) {
+    const t = l.trim();
+    if (/^Critical Events:/.test(t)) { mode = 'events'; continue; }
+    if (/^Running jobs:/.test(t)) { mode = 'running'; continue; }
+    if (/^Paused and waiting jobs:/.test(t)) { mode = 'paused'; continue; }
+    if (/^Failed jobs:/.test(t)) { mode = 'failed'; continue; }
+    if (/^No failed jobs\./.test(t)) { mode = ''; continue; }
+    if (/^Recent job results:/.test(t)) { mode = 'recent'; continue; }
+    if (/^Cluster Job Status:/.test(t)) { mode = ''; continue; }
+    if (!t || /^[-+\s|]+$/.test(t) || /^(Time|Job)\s/.test(t)) continue; // 빈 줄·구분선·헤더행
+    if (mode === 'events') {
+      // "08/15 22:10:03   3   <이벤트 문구...>" — 시간(2토큰) + LNN + 나머지 전부 이벤트.
+      const m = /^(\d{2}\/\d{2}\s+\d{2}:\d{2}:\d{2})\s+(\d+)\s+(.+)$/.exec(t);
+      if (m && out.criticalEvents.length < 50) out.criticalEvents.push({ time: m[1], lnn: Number(m[2]), event: m[3].trim() });
+      continue;
+    }
+    if (mode === 'running' || mode === 'paused') {
+      // "SmartPools[118838]  Low  6  LOW  1/2  12:18:39 [State]" — 잡명은 공백 없음(Name[id]).
+      // ⚠ Run Time 은 "12:18:39" 또는 "17d 8:46"(일수 포함 2토큰) — 후자를 못 잡으면 대기 잡이
+      //   통째로 누락된다(실물 샘플의 MediaScan 17d 8:46 로 테스트 고정).
+      const m = /^(\S+\[\d+\])\s+(\S+)\s+(\d+)\s+(\S+)\s+(\S+)\s+((?:\d+d\s+)?[\d:]+)(?:\s+(\S+))?$/.exec(t);
+      if (m) out.jobs[mode].push({ job: m[1], impact: m[2], pri: Number(m[3]), policy: m[4], phase: m[5], runTime: m[6], ...(m[7] ? { state: m[7] } : {}) });
+      continue;
+    }
+    if (mode === 'failed') {
+      const m = /^(\S+\[\d+\])\s+(.+)$/.exec(t);
+      if (m) out.jobs.failed.push({ job: m[1], detail: m[2].trim() });
+      continue;
+    }
+    if (mode === 'recent') {
+      // "08/15 22:10:03   SnapshotDelete[118873]   Succeeded"
+      const m = /^(\d{2}\/\d{2}\s+\d{2}:\d{2}:\d{2})\s+(\S+\[\d+\])\s+(.+)$/.exec(t);
+      if (m && out.jobs.recent.length < 20) out.jobs.recent.push({ time: m[1], job: m[2], event: m[3].trim() });
+      continue;
+    }
+  }
   return out;
 }
 
@@ -139,11 +180,16 @@ export function normalizeIsiStatus(device, parsed, { version = '', users = null 
     snap.accounts = users.slice(0, 200).map((u) => ({ name: u.name || u.id || '', enabled: u.enabled !== false }));
     snap.sections.accounts = 'ok';
   }
+  // Critical Events(v2.307) — SSH 모드의 경보 소스(그동안 alerts 섹션이 '건너뜀'이던 갭 해소).
+  snap.alerts.unresolved = (parsed.criticalEvents || []).length;
+  snap.sections.alerts = 'ok';
   // isi status 에 없는 부가 정보(사용자 화면의 상단 블록) — extra 로 그대로 노출.
   snap.extra = {
     collectMethod: 'ssh', clusterHealth: parsed.health,
     dataReduction: parsed.dataReduction, storageEfficiency: parsed.storageEfficiency,
     vhsBytes: parsed.vhsBytes, l3TotalBytes: parsed.l3TotalBytes,
+    criticalEvents: parsed.criticalEvents || [],
+    jobs: parsed.jobs || { running: [], paused: [], failed: [], recent: [] },
   };
   snap.ok = snap.sections.config === 'ok' || snap.sections.capacity === 'ok';
   if (!snap.ok) snap.error = 'isi status 파싱 실패 — 출력 형식이 예상과 다릅니다(버전 확인 필요)';

@@ -226,3 +226,54 @@ test('레지스트리 — collectMethod 기본 ssh·api 선택·sshPort 클램�
   assert.equal(d2.collectMethod, 'api');
   assert.equal(d2.sshPort, 65535, '포트 상한 클램프');
 });
+
+test('parseIsiStatus — Critical Events·Cluster Job Status(v2.307, 실물 샘플): 대기 잡 17d 런타임 포함', () => {
+  const TAIL = `Cluster Name: T
+Critical Events:
+Time            LNN  Event
+--------------- ---- ------------------------------------------
+08/15 09:12:33    5  One or more drives (bay(s) 7) are smartfailed
+
+Cluster Job Status:
+
+Running jobs:
+Job                        Impact Pri Policy   Phase Run Time
+-------------------------- ------ --- -------- ----- ----------
+SmartPools[118838]         Low    6   LOW      1/2   12:18:39
+
+Paused and waiting jobs:
+Job                        Impact Pri Policy   Phase Run Time   State
+-------------------------- ------ --- -------- ----- ---------- --------
+MediaScan[87933]           Low    8   LOW      6/8   17d 8:46   Waiting
+ShadowStoreProtect[118867] Low    6   LOW      1/1   0:00:00    Waiting
+
+No failed jobs.
+
+Recent job results:
+Time            Job                          Event
+--------------- ---------------------------- ------------
+08/15 22:10:03  SnapshotDelete[118873]       Succeeded
+08/15 21:39:53  SnapshotDelete[118872]       Succeeded
+`;
+  const p2 = parseIsiStatus(TAIL);
+  assert.equal(p2.criticalEvents.length, 1);
+  assert.deepEqual(p2.criticalEvents[0], { time: '08/15 09:12:33', lnn: 5, event: 'One or more drives (bay(s) 7) are smartfailed' });
+  assert.equal(p2.jobs.running.length, 1);
+  assert.deepEqual(p2.jobs.running[0], { job: 'SmartPools[118838]', impact: 'Low', pri: 6, policy: 'LOW', phase: '1/2', runTime: '12:18:39' });
+  assert.equal(p2.jobs.paused.length, 2, "17d 8:46 런타임(2토큰) 행이 누락되면 1이 된다 — 회귀 방지");
+  assert.deepEqual(p2.jobs.paused[0], { job: 'MediaScan[87933]', impact: 'Low', pri: 8, policy: 'LOW', phase: '6/8', runTime: '17d 8:46', state: 'Waiting' });
+  assert.equal(p2.jobs.failed.length, 0, "'No failed jobs.' → 빈 배열");
+  assert.equal(p2.jobs.recent.length, 2);
+  assert.equal(p2.jobs.recent[0].event, 'Succeeded');
+  // normalize: Critical Events 가 alerts 로 집계(SSH 모드 alerts '건너뜀' 갭 해소)
+  const snap = normalizeIsiStatus({ id: 'st-t', type: 'isilon', name: 'T' }, p2, {});
+  assert.equal(snap.alerts.unresolved, 1);
+  assert.equal(snap.sections.alerts, 'ok');
+  assert.equal(snap.extra.jobs.paused.length, 2);
+});
+
+test('parseIsiStatus — 이벤트/잡 섹션이 없는 출력(빈 배열, 기존 파싱 무영향)', () => {
+  const p3 = parseIsiStatus('Cluster Name: X\nCluster Health: [ OK ]\n');
+  assert.deepEqual(p3.criticalEvents, []);
+  assert.deepEqual(p3.jobs, { running: [], paused: [], failed: [], recent: [] });
+});
