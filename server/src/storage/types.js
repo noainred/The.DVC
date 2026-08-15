@@ -44,11 +44,11 @@ export const STORAGE_TYPES = [
   // 아래는 사용자 로드맵(2026-08-15 요구) — 카탈로그에 먼저 올려 등록 UI 가 '예정'으로 보여주고,
   // 수집기가 생기면 implemented 만 뒤집는다(아키텍처가 이미 수용).
   { type: 'xtremio', label: 'XtremIO', vendor: 'Dell EMC', api: 'XMS REST', implemented: false },
-  { type: 'powerstore', label: 'PowerStore', vendor: 'Dell EMC', api: 'PowerStore REST', implemented: false },
+  { type: 'powerstore', label: 'PowerStore', vendor: 'Dell EMC', api: 'PowerStore REST', implemented: true }, // v2.309
   { type: 'vmax', label: 'VMAX', vendor: 'Dell EMC', api: 'Unisphere REST', implemented: false },
   { type: 'powermax', label: 'PowerMax', vendor: 'Dell EMC', api: 'Unisphere REST', implemented: false },
   { type: 'vplex', label: 'VPLEX', vendor: 'Dell EMC', api: 'VPLEX REST', implemented: false },
-  { type: 'unity480', label: 'Unity 480', vendor: 'Dell EMC', api: 'Unisphere REST', implemented: false },
+  { type: 'unity480', label: 'Unity 480', vendor: 'Dell EMC', api: 'Unisphere REST', implemented: true }, // v2.309
   { type: 'metronode', label: 'Metro Node', vendor: 'Dell EMC', api: 'REST', implemented: false },
 ];
 
