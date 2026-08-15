@@ -59,14 +59,17 @@ adminRouter.get('/idrac/:id/vcenter-host', adminOnly, (req, res) => {
   const s = loadIdracRegistry().find((x) => x.id === id) || findRemoteServer(id);
   if (!s) return res.status(404).json({ ok: false, reason: '서버를 찾을 수 없습니다.' });
   const norm = (t) => String(t || '').trim().toLowerCase();
+  // iDRAC 접속 IP/호스트(v2.301) — 상세 모달이 'iDRAC 바로가기' 링크로 표시(사용자 요구).
+  // 등록 레코드의 host 그대로(간혹 프로토콜이 붙은 레거시 값은 표시부에서 정리).
+  const idracHost = String(s.host || '').trim();
   const tag = norm(s.serviceTag || getIdracInventory(id)?.system?.serviceTag || s.inv?.system?.serviceTag || '');
-  if (!tag) return res.json({ ok: true, matched: false, serviceTag: '', reason: '서비스태그 없음' });
+  if (!tag) return res.json({ ok: true, matched: false, serviceTag: '', reason: '서비스태그 없음', idracHost });
   const snap = store.get();
   const assign = getDatacenterAssign();
   const host = findHostByServiceTag(tag, snap.hosts || []);
-  if (!host) return res.json({ ok: true, matched: false, serviceTag: s.serviceTag || tag });
+  if (!host) return res.json({ ok: true, matched: false, serviceTag: s.serviceTag || tag, idracHost });
   res.json({
-    ok: true, matched: true, serviceTag: host.serviceTag || tag,
+    ok: true, matched: true, serviceTag: host.serviceTag || tag, idracHost,
     host: {
       name: host.name,
       vcenterId: host.vcenterId || '',
