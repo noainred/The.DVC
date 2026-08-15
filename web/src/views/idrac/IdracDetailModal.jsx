@@ -52,8 +52,23 @@ export function IdracDetailModal({ server, onClose }) {
     <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <EscClose onClose={onClose} />
       <div className="modal card" style={{ maxWidth: 980, width: '94vw' }}>
-        <div className="flex between" style={{ marginBottom: 10 }}>
-          <b style={{ fontSize: 15 }}>🖥 {server.name} — iDRAC 상세 / 센서</b>
+        <div className="flex between" style={{ marginBottom: 10, alignItems: 'center' }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <b style={{ fontSize: 15 }}>🖥 {server.name} — iDRAC 상세 / 센서</b>
+            {/* iDRAC 접속 IP(v2.301, 사용자 요구) — vcenter-host 응답의 idracHost(등록 레코드 host).
+                클릭 시 iDRAC 웹 UI(https)를 새 탭으로. 레거시 값에 프로토콜이 붙어 있어도 정리해 링크. */}
+            {(() => {
+              const h = String(vh?.idracHost || '').replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+              if (!h) return null;
+              return (
+                <a className="badge blue" href={`https://${h}`} target="_blank" rel="noreferrer"
+                  style={{ fontSize: 12, fontFamily: 'ui-monospace, monospace', textDecoration: 'none' }}
+                  title="iDRAC 웹 화면을 새 탭으로 엽니다 (자체서명 인증서 경고가 나올 수 있음)">
+                  🔗 iDRAC 접속: {h}
+                </a>
+              );
+            })()}
+          </span>
           <button className="logout-btn" onClick={onClose}>닫기</button>
         </div>
 
@@ -162,6 +177,11 @@ export function IdracDetailModal({ server, onClose }) {
                 <div><span className="muted">BIOS 버전</span><div><b>{inv.bios?.version || inv.system?.biosVersion || '—'}</b></div></div>
                 <div><span className="muted">모델</span><div>{[inv.system?.manufacturer, inv.system?.model].filter(Boolean).join(' ') || '—'}</div></div>
                 <div><span className="muted">서비스태그</span><div>{inv.system?.serviceTag || '—'}</div></div>
+                {/* iDRAC 접속 IP(v2.301) — 헤더 배지와 동일 소스(vh.idracHost). 스펙 그리드에도 표기(사용자 요구 화면 위치). */}
+                <div><span className="muted">iDRAC 접속(IP)</span><div>{(() => {
+                  const h = String(vh?.idracHost || '').replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+                  return h ? <a href={`https://${h}`} target="_blank" rel="noreferrer" style={{ fontFamily: 'ui-monospace, monospace' }} title="iDRAC 웹 화면 새 탭">{h}</a> : '—';
+                })()}</div></div>
                 <div><span className="muted">CPU</span><div>{inv.cpu?.model || '—'} {inv.cpu?.count ? <span className="muted">×{inv.cpu.count} · {inv.cpu.cores}C/{inv.cpu.threads}T</span> : ''}</div></div>
                 <div><span className="muted">메모리</span><div>{inv.memory?.totalGiB ? `${inv.memory.totalGiB} GiB` : '—'}{inv.memoryDimms?.length ? <span className="muted"> · DIMM {inv.memoryDimms.length}</span> : ''}</div></div>
                 {inv.powerCap?.limitWatts != null && <div><span className="muted">전력 한도</span><div>{inv.powerCap.limitWatts} W</div></div>}
