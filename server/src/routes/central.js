@@ -475,6 +475,34 @@ centralRouter.get('/gpu-guest-config', (req, res) => {
 
 // 중앙→엣지 배포 사용자(pull): 엣지가 자기 이름으로 '중앙이 지정한 사용자 목록'을 가져가 로컬
 // users.json에 managed로 반영. 비밀번호 해시 포함(엣지가 로그인 검증에 사용) → 토큰 필수.
+// ── 스토리지 모니터링 위임(v2.302) ────────────────────────────────────────────
+// GET /api/central/storage-config?agent=<이름> — 이 엣지 몫 스토리지 장비 목록(자격증명 포함:
+// 엣지가 장비에 로그인해야 한다 — gpu-guest-config 의 계정 배포와 같은 신뢰 경계·WAN TLS 검증 ON).
+// 개별 토큰이면 바인딩된 agent 와 요청 agent 불일치를 거부(자격증명 횡탈 차단 — 헤더 규약 2).
+centralRouter.get('/storage-config', async (req, res) => {
+  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+  const agent = String(req.query.agent || req.get('X-Agent-Name') || '').trim();
+  if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
+  if (req.centralAuth?.mode === 'agent' && String(req.centralAuth.agent).toLowerCase() !== agent.toLowerCase()) {
+    return res.status(403).json({ ok: false, reason: '토큰의 agent 와 요청 agent 불일치' });
+  }
+  const { devicesForAgent } = await import('../storage/registry.js');
+  res.json({ ok: true, agent, devices: devicesForAgent(agent) });
+});
+
+// POST /api/central/storage-data — 엣지 수집 스냅샷 수신. 저장 키는 body.agent 가 아니라
+// **인증된 agent**(개별 토큰 바인딩)만 쓴다. 공유 토큰(레거시)은 body.agent 신뢰(TOFU — 기존 축과 동일).
+centralRouter.post('/storage-data', async (req, res) => {
+  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+  const agent = req.centralAuth?.mode === 'agent' ? req.centralAuth.agent : String(req.body?.agent || '').trim();
+  if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
+  const { saveEdgeStorage } = await import('../central/storageEdge.js');
+  const saved = saveEdgeStorage(agent, req.body?.devices || []);
+  res.json({ ok: true, saved });
+});
+
 // GET /api/central/users-config?agent=<이름>
 centralRouter.get('/users-config', (req, res) => {
   if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });

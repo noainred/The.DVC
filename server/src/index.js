@@ -81,6 +81,9 @@ import { startDbSizeSampler } from './insights/portalDb.js';
 import { startCertMonitor } from './security/certMonitor.js';
 import { startDailyReport } from './reports/dailyReport.js';
 import { startVmCloneScheduler } from './vmclone/scheduler.js'; // VM 복제(백업식) 스케줄러(v2.299)
+import { startStoragePoller } from './storage/poller.js';        // 스토리지 수집(v2.302)
+import { startStoragePush } from './storage/push.js';            // 엣지→중앙 스냅샷 push(v2.302)
+import { startStorageConfigPull } from './agent/storageConfigPull.js'; // 중앙→엣지 장비 배포 pull(v2.302)
 
 const app = express();
 
@@ -195,6 +198,7 @@ const stagger = [
   // 둘 다 재진입 가드가 있고, 조건(CENTRAL_URL·토큰) 미충족이면 스스로 기동하지 않는다.
   startSvcmonPush, startSvcmonConfigPull, startSvcmonSilenceWatch,
   startVmCloneScheduler, // VM 복제(백업식) — 60초 틱, 재진입 가드 + 전역 직렬 실행 큐(runner)
+  startStoragePoller, startStoragePush, startStorageConfigPull, // 스토리지 모니터링(v2.302) — 전부 재진입 가드, push/pull 은 CENTRAL_URL 미설정 시 자기기동 안 함
 ];
 stagger.forEach((start, i) => setTimeout(() => { try { start(); } catch (e) { console.error('[start] 폴러 기동 실패:', e?.message); } }, i * 1500).unref?.());
 

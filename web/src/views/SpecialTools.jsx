@@ -26,6 +26,7 @@ import { Esxi, Hardware, Hba, ServerAnalysis, VcVersion } from './tools/Hardware
 import SecretScanTool from './tools/SecretScanTool.jsx'; // 평문 자격증명 점검(v2.297, admin 전용)
 import CodexCheck from './CodexCheck.jsx'; // 보안점검 — 상단 메뉴에서 특수기능으로 이동(v2.298)
 import VmCloneTool from './tools/VmCloneTool.jsx'; // VM 복제(백업식, v2.299 — admin 전용)
+import StorageMonTool from './tools/StorageMonTool.jsx'; // 스토리지 모니터링(Isilon 등, v2.302 — admin 전용)
 import { PortalDb } from './tools/PortalDb.jsx';
 import { NicModels, NicSpeed } from './tools/NicTools.jsx';
 import { Shutdown } from './tools/ShutdownTool.jsx';
@@ -272,6 +273,7 @@ function ToolPanel({ tool, onBack, isAdmin }) {
       {tool === 'secret-scan' && <SecretScanTool />}
       {tool === 'codex-check' && <CodexCheck />}
       {tool === 'vm-clone' && <VmCloneTool />}
+      {tool === 'storage-mon' && <StorageMonTool />}
       {tool === 'vmfinder' && <VmFinder />}
       {tool === 'capacity' && <Capacity scope={scope} />}
       {tool === 'waste' && <Waste scope={scope} />}
