@@ -1,0 +1,251 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import { fetchJson, postJson, delJson } from '../../api.js';
+import { Loading, ErrorBox, Kpi, UsageCell, Modal } from '../../components/ui.jsx';
+
+/**
+ * 특수기능 › 스토리지 모니터링(v2.302) — 글로벌 법인 스토리지(Isilon 우선, XtremIO·PowerStore·
+ * PowerMax 등 확장 예정)의 사용량·버전·계정·노드 상태를 중앙에서 통합 조회.
+ *
+ * 데이터 흐름(사용자 설계 요구): 중앙에서 장비+수집 주체(엣지) 등록 → 엣지가 자기 몫을 pull →
+ * 현지에서 OneFS API 수집 → 정규화 스냅샷을 중앙으로 push → 이 화면이 법인별/타입별/장비별로
+ * 그룹핑해 표시(그룹핑은 프론트 — 뷰 추가에 서버 변경 불필요).
+ * 조회는 전체 범위 계정 전용(서버 403 — 스토리지는 vCenter 범위 개념 밖), 등록/삭제는 admin.
+ */
+const tbFmt = (bytes) => {
+  const tb = (Number(bytes) || 0) / 1024 ** 4;
+  return tb >= 1024 ? `${(tb / 1024).toFixed(2)} PB` : `${tb.toFixed(1)} TB`;
+};
+const ago = (ts) => {
+  if (!ts) return '—';
+  const s = Math.round((Date.now() - ts) / 1000);
+  return s < 60 ? `${s}초 전` : s < 3600 ? `${Math.round(s / 60)}분 전` : `${Math.round(s / 3600)}시간 전`;
+};
+
+export default function StorageMonTool() {
+  const [d, setD] = useState(null);
+  const [err, setErr] = useState(null);
+  const [msg, setMsg] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [view, setView] = useState('devices');   // devices | dc | type
+  const [detail, setDetail] = useState(null);    // 장비 상세 모달
+  const [form, setForm] = useState(null);        // 등록/수정 폼
+
+  const load = () => fetchJson('/tools/storage').then((r) => { setD(r); setErr(null); }).catch((e) => setErr(e.message));
+  useEffect(() => { load(); const t = setInterval(load, 30_000); return () => clearInterval(t); }, []);
+  if (err && !d) return <ErrorBox message={err} />;
+  if (!d) return <Loading />;
+
+  const rows = d.devices || [];
+  const dcName = (id) => ((d.datacenters || []).find((x) => x.id === id)?.name || id || '미지정');
+  const typeLabel = (t) => ((d.types || []).find((x) => x.type === t)?.label || t);
+  const sum = (list, f) => list.reduce((a, x) => a + (f(x) || 0), 0);
+  const withSnap = rows.filter((r) => r.snap);
+  const totals = {
+    total: sum(withSnap, (r) => r.snap.capacity?.totalBytes),
+    used: sum(withSnap, (r) => r.snap.capacity?.usedBytes),
+    fail: rows.filter((r) => r.snap && !r.snap.ok).length + rows.filter((r) => !r.snap).length,
+    alerts: sum(withSnap, (r) => r.snap.alerts?.unresolved),
+  };
+  // 그룹핑(법인별/타입별) — 서버 평탄 목록을 프론트에서 묶는다(뷰 확장 자유).
+  const groupBy = (keyFn) => {
+    const m = new Map();
+    for (const r of rows) { const k = keyFn(r); if (!m.has(k)) m.set(k, []); m.get(k).push(r); }
+    return [...m.entries()].sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+  };
+
+  const collectNow = async (id) => {
+    setBusy(true); setMsg(null);
+    try { const r = await postJson(`/tools/storage/devices/${encodeURIComponent(id)}/collect`, {}); setMsg(r.ok ? '수집 완료 — 갱신됨' : r.reason); await load(); }
+    catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(false); }
+  };
+  const remove = async (r) => {
+    if (!window.confirm(`'${r.name}' (${r.host}) 장비를 삭제할까요? (수집 이력 스냅샷도 화면에서 제거)`)) return;
+    setBusy(true); try { await delJson(`/tools/storage/devices/${encodeURIComponent(r.id)}`); await load(); } catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(false); }
+  };
+
+  const DeviceRow = ({ r }) => {
+    const s = r.snap;
+    return (
+      <tr key={r.id} style={{ opacity: r.enabled === false ? 0.5 : 1 }}>
+        <td><button className="cell-link" onClick={() => setDetail(r)}><b>{s?.name || r.name}</b></button><div className="muted" style={{ fontSize: 11 }}>{r.host}</div></td>
+        <td><span className="badge blue">{typeLabel(r.type)}</span></td>
+        <td className="muted">{dcName(r.datacenterId)}</td>
+        <td>{r.agent ? <span className="badge" style={{ background: 'rgba(167,139,250,.2)', color: '#a78bfa' }}>{r.agent}</span> : <span className="muted">중앙</span>}</td>
+        <td className="muted" style={{ fontSize: 12 }}>{s?.version || '—'}</td>
+        <td style={{ minWidth: 140 }}>{s?.capacity?.pct != null ? <UsageCell pct={s.capacity.pct} /> : <span className="muted">—</span>}
+          {s?.capacity?.totalBytes ? <div className="muted" style={{ fontSize: 10.5 }}>{tbFmt(s.capacity.usedBytes)} / {tbFmt(s.capacity.totalBytes)}</div> : null}</td>
+        <td style={{ textAlign: 'right' }}>{s ? `${s.nodes?.count ?? 0}${s.nodes?.unhealthy ? ` (⚠${s.nodes.unhealthy})` : ''}` : '—'}</td>
+        <td style={{ textAlign: 'right' }}>{s?.accounts?.length ?? '—'}</td>
+        <td>{!s ? <span className="badge gray">수집 전</span> : s.ok ? <span className="badge green">정상</span> : <span className="badge red" title={s.error}>실패</span>}
+          <div className="muted" style={{ fontSize: 10.5 }}>{ago(s?.collectedAt)}{s?.agent ? ` · ${s.agent}` : ''}</div></td>
+        <td className="right" style={{ whiteSpace: 'nowrap' }}>
+          <button className="logout-btn" style={{ padding: '3px 8px', fontSize: 11.5 }} disabled={busy} onClick={() => collectNow(r.id)} title={r.agent ? '엣지 수집 장비 — 주기 반영 안내' : '지금 수집(연결 테스트)'}>수집</button>
+          {' '}<button className="logout-btn" style={{ padding: '3px 8px', fontSize: 11.5 }} disabled={busy} onClick={() => setForm({ ...r, password: '' })}>수정</button>
+          {' '}<button className="logout-btn" style={{ padding: '3px 8px', fontSize: 11.5, color: 'var(--red)' }} disabled={busy} onClick={() => remove(r)}>삭제</button>
+        </td>
+      </tr>
+    );
+  };
+  const DeviceTable = ({ list }) => (
+    <div className="table-wrap" style={{ maxHeight: '52vh' }}>
+      <table>
+        <thead><tr><th>장비</th><th>타입</th><th>법인</th><th>수집</th><th>버전</th><th>사용률</th><th style={{ textAlign: 'right' }}>노드</th><th style={{ textAlign: 'right' }}>계정</th><th>상태</th><th className="right">작업</th></tr></thead>
+        <tbody>
+          {list.length === 0 && <tr><td colSpan={10} className="center muted" style={{ padding: 20 }}>등록된 장비가 없습니다 — "+ 장비 등록"으로 시작하세요.</td></tr>}
+          {list.map((r) => <DeviceRow key={r.id} r={r} />)}
+        </tbody>
+      </table>
+    </div>
+  );
+
+  return (
+    <div>
+      <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 12 }}>
+        <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={() => setForm({ type: 'isilon', name: '', host: '', username: 'root', password: '', agent: '', datacenterId: '', enabled: true })}>+ 장비 등록</button>
+        {['devices', 'dc', 'type'].map((v) => (
+          <button key={v} className={view === v ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 13px' }} onClick={() => setView(v)}>
+            {v === 'devices' ? '🗄 장비별' : v === 'dc' ? '🏢 법인별' : '📦 타입별'}
+          </button>
+        ))}
+        {msg && <span className="muted" style={{ fontSize: 12.5 }}>{msg}</span>}
+      </div>
+
+      {/* 요약 KPI — 전 법인 합산 */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, marginBottom: 14 }}>
+        <Kpi label="장비" value={rows.length} meta={`수집됨 ${withSnap.length}`} />
+        <Kpi label="총 용량" value={tbFmt(totals.total)} />
+        <Kpi label="사용" value={tbFmt(totals.used)} pct={totals.total ? Math.round((totals.used / totals.total) * 100) : 0} />
+        <Kpi label="수집 실패/대기" value={totals.fail} accent={totals.fail ? 'var(--red)' : 'var(--green)'} />
+        <Kpi label="미해결 경보" value={totals.alerts} accent={totals.alerts ? 'var(--amber)' : undefined} />
+      </div>
+
+      {form && <DeviceForm d={d} form={form} setForm={setForm} onSaved={() => { setForm(null); load(); }} />}
+
+      {view === 'devices' && <DeviceTable list={rows} />}
+      {view === 'dc' && groupBy((r) => dcName(r.datacenterId)).map(([dc, list]) => {
+        const t = sum(list.filter((r) => r.snap), (r) => r.snap.capacity?.totalBytes);
+        const u = sum(list.filter((r) => r.snap), (r) => r.snap.capacity?.usedBytes);
+        return (
+          <div key={dc} style={{ marginBottom: 14 }}>
+            <div className="section-title" style={{ fontSize: 14 }}>🏢 {dc} <span className="muted" style={{ fontSize: 12, fontWeight: 400 }}>— 장비 {list.length} · {tbFmt(u)} / {tbFmt(t)}{t ? ` (${Math.round((u / t) * 100)}%)` : ''}</span></div>
+            <DeviceTable list={list} />
+          </div>
+        );
+      })}
+      {view === 'type' && groupBy((r) => typeLabel(r.type)).map(([ty, list]) => (
+        <div key={ty} style={{ marginBottom: 14 }}>
+          <div className="section-title" style={{ fontSize: 14 }}>📦 {ty} <span className="muted" style={{ fontSize: 12, fontWeight: 400 }}>— 장비 {list.length}</span></div>
+          <DeviceTable list={list} />
+        </div>
+      ))}
+
+      {(d.orphans || []).length > 0 && (
+        <div className="card" style={{ padding: '9px 13px', marginTop: 8, borderColor: 'var(--amber)', fontSize: 12 }}>
+          ⚠ 등록부에 없는 스냅샷 {d.orphans.length}건(삭제된 장비의 엣지 잔존 push) — 다음 엣지 push 주기에 자연 소멸합니다.
+        </div>
+      )}
+      <div className="muted" style={{ fontSize: 11.5, marginTop: 8 }}>
+        수집 주기 {Math.round((d.poller?.intervalMs || 0) / 60000)}분 · 엣지 장비는 config pull(≤5분) 후 현지 수집 → 중앙 push(≤5분).
+        확장 로드맵(카탈로그): {(d.types || []).filter((t) => !t.implemented).map((t) => t.label).join(' · ')} — 수집기 구현 시 이 화면 변경 없이 표시됩니다.
+      </div>
+
+      {detail && <DeviceDetail r={detail} typeLabel={typeLabel} dcName={dcName} onClose={() => setDetail(null)} />}
+    </div>
+  );
+}
+
+/** 장비 상세 모달 — 정규화 스냅샷 전부(풀·계정·섹션별 수집 상태·경보). */
+function DeviceDetail({ r, typeLabel, dcName, onClose }) {
+  const s = r.snap;
+  return (
+    <Modal title={`${typeLabel(r.type)} — ${s?.name || r.name}`} onClose={onClose} width={720}>
+      {!s ? <div className="muted" style={{ padding: 8 }}>아직 수집된 스냅샷이 없습니다(첫 수집 주기 대기).</div> : (
+        <>
+          <div className="flex gap wrap" style={{ fontSize: 12.5, marginBottom: 10 }}>
+            <span className="muted">호스트 <b style={{ color: 'var(--text)' }}>{r.host}</b></span>
+            <span className="muted">법인 <b style={{ color: 'var(--text)' }}>{dcName(r.datacenterId)}</b></span>
+            <span className="muted">버전 <b style={{ color: 'var(--text)' }}>{s.version || '—'}</b></span>
+            <span className="muted">시리얼/GUID <b style={{ color: 'var(--text)' }}>{s.serial || '—'}</b></span>
+            <span className="muted">수집 {new Date(s.collectedAt).toLocaleString('ko-KR')}{s.agent ? ` · 엣지 ${s.agent}` : ' · 중앙'}</span>
+          </div>
+          {s.error && <div className="card" style={{ borderColor: 'var(--red)', padding: '8px 12px', marginBottom: 10, fontSize: 12.5, color: 'var(--red)' }}>⛔ {s.error}</div>}
+
+          {(s.pools || []).length > 0 && (
+            <>
+              <div className="section-title" style={{ fontSize: 13 }}>스토리지 풀 {s.pools.length}</div>
+              <table className="data-table" style={{ width: '100%', fontSize: 12.5, marginBottom: 12 }}>
+                <thead><tr><th style={{ textAlign: 'left' }}>풀</th><th style={{ textAlign: 'right' }}>사용</th><th style={{ textAlign: 'right' }}>전체</th><th>사용률</th></tr></thead>
+                <tbody>{s.pools.map((p, i) => (
+                  <tr key={i}><td>{p.name}</td><td style={{ textAlign: 'right' }}>{tbFmt(p.usedBytes)}</td><td style={{ textAlign: 'right' }}>{tbFmt(p.totalBytes)}</td><td>{p.pct != null ? <UsageCell pct={p.pct} /> : '—'}</td></tr>
+                ))}</tbody>
+              </table>
+            </>
+          )}
+          {(s.accounts || []).length > 0 && (
+            <>
+              <div className="section-title" style={{ fontSize: 13 }}>계정 {s.accounts.length}{s.accounts.length >= 200 ? '+(상한 절단)' : ''}</div>
+              <div className="flex gap wrap" style={{ marginBottom: 12 }}>
+                {s.accounts.map((a, i) => <span key={i} className={`badge ${a.enabled ? 'gray' : 'red'}`}>{a.name}{a.enabled ? '' : ' (비활성)'}</span>)}
+              </div>
+            </>
+          )}
+          <div className="section-title" style={{ fontSize: 13 }}>섹션별 수집 상태 <span className="muted" style={{ fontSize: 11, fontWeight: 400 }}>— 부분 실패를 숨기지 않습니다(버전별 API 차이 진단용)</span></div>
+          <div className="flex gap wrap">
+            {Object.entries(s.sections || {}).map(([k, v]) => (
+              <span key={k} className={`badge ${v === 'ok' ? 'green' : v === 'skip' ? 'gray' : 'red'}`} title={String(v)}>{k}: {v === 'ok' ? 'OK' : v === 'skip' ? '건너뜀' : '오류'}</span>
+            ))}
+          </div>
+        </>
+      )}
+    </Modal>
+  );
+}
+
+/** 등록/수정 폼 — 타입(구현/예정 구분)·법인·수집 주체(중앙/엣지)·자격증명. */
+function DeviceForm({ d, form, setForm, onSaved }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const save = async () => {
+    setBusy(true); setErr(null);
+    try { const r = await postJson('/tools/storage/devices', form); if (r.ok === false) setErr(r.reason); else onSaved(); }
+    catch (e) { setErr(e.message); } finally { setBusy(false); }
+  };
+  return (
+    <div className="card" style={{ padding: 14, marginBottom: 12, background: 'rgba(96,165,250,.05)' }}>
+      <div className="flex between" style={{ marginBottom: 8 }}>
+        <b style={{ fontSize: 13 }}>{form.id ? `장비 수정 — ${form.name}` : '장비 등록'}</b>
+        <button className="logout-btn" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => setForm(null)}>닫기</button>
+      </div>
+      <div className="flex gap wrap" style={{ alignItems: 'flex-end' }}>
+        <label style={{ fontSize: 12 }}>타입<br />
+          <select className="select" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
+            {(d.types || []).map((t) => <option key={t.type} value={t.type} disabled={!t.implemented}>{t.label}{t.implemented ? '' : ' (예정)'}</option>)}
+          </select>
+        </label>
+        <label style={{ fontSize: 12 }}>표시명<br /><input className="input" style={{ width: 160 }} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="WA-Isilon-01" /></label>
+        <label style={{ fontSize: 12 }}>host(IP/FQDN)<br /><input className="input" style={{ width: 180 }} value={form.host} onChange={(e) => setForm({ ...form, host: e.target.value })} placeholder="10.20.0.50" /></label>
+        <label style={{ fontSize: 12 }}>계정<br /><input className="input" style={{ width: 110 }} value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} /></label>
+        <label style={{ fontSize: 12 }}>비밀번호{form.id ? '(변경 시만)' : ''}<br /><input className="input" type="password" style={{ width: 140 }} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder={form.hasPassword ? '•••• (유지)' : ''} /></label>
+        <label style={{ fontSize: 12 }}>법인(DataCenter)<br />
+          <select className="select" value={form.datacenterId || ''} onChange={(e) => setForm({ ...form, datacenterId: e.target.value })}>
+            <option value="">(미지정)</option>
+            {(d.datacenters || []).map((x) => <option key={x.id} value={x.id}>{x.name || x.id}</option>)}
+          </select>
+        </label>
+        <label style={{ fontSize: 12 }} title="중앙이 직접 못 닿는 폐쇄망 장비는 그 법인의 엣지 포탈이 현지에서 수집합니다(iDRAC 위임과 동일)">수집 주체<br />
+          <select className="select" value={form.agent || ''} onChange={(e) => setForm({ ...form, agent: e.target.value })}>
+            <option value="">🖥️ 중앙에서 직접</option>
+            {(d.agents || []).map((a) => <option key={a} value={a}>📡 엣지 {a}</option>)}
+          </select>
+        </label>
+        <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12, padding: '6px 0' }}>
+          <input type="checkbox" checked={form.enabled !== false} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} /> 활성
+        </label>
+        <button className="login-btn" style={{ flex: 'none', padding: '8px 18px' }} disabled={busy || !form.name || !form.host} onClick={save}>{busy ? '저장 중…' : '저장'}</button>
+      </div>
+      {err && <div style={{ color: 'var(--red)', fontSize: 12.5, marginTop: 8 }}>⚠ {err}</div>}
+      <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>비밀번호는 '설정 › 자격증명 저장 방식'의 정책(평문/암호화)에 따라 저장됩니다. host 변경 시 기존 비밀번호는 이월되지 않습니다(재입력 필요 — 보안 규칙).</div>
+    </div>
+  );
+}
+

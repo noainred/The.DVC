@@ -39,6 +39,9 @@ server/config/auth.json
 # JWT 서명 비밀(v2.289 #3) — AUTH_SECRET 미설정 시 CONFIG_DIR 에 영속(0600). 유출 시 임의
 # 계정 토큰 위조가 가능하므로 절대 커밋 금지. 확장자 없는 단일 파일이라 개별 차단이 필수.
 server/config/auth-secret
+# 스토리지 모니터링(v2.302) — 장비 자격증명·수집 스냅샷(계정 목록 포함) 커밋 금지
+server/config/storage-devices.json
+server/config/storage-latest.json
 # 자격증명 암호화 키·정책(v2.296) — 키 유출 = 전 계정 비번 복호 가능. 절대 커밋 금지.
 server/config/secrets-key
 server/config/secrets-policy.json
