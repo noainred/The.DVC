@@ -80,6 +80,7 @@ import { startOsScanner } from './inventory/osScanner.js';
 import { startDbSizeSampler } from './insights/portalDb.js';
 import { startCertMonitor } from './security/certMonitor.js';
 import { startDailyReport } from './reports/dailyReport.js';
+import { startVmCloneScheduler } from './vmclone/scheduler.js'; // VM 복제(백업식) 스케줄러(v2.299)
 
 const app = express();
 
@@ -193,6 +194,7 @@ const stagger = [
   // 엣지 위임(RMA): 엣지는 결과를 밀어 올리고(push), 중앙은 무보고를 감시한다.
   // 둘 다 재진입 가드가 있고, 조건(CENTRAL_URL·토큰) 미충족이면 스스로 기동하지 않는다.
   startSvcmonPush, startSvcmonConfigPull, startSvcmonSilenceWatch,
+  startVmCloneScheduler, // VM 복제(백업식) — 60초 틱, 재진입 가드 + 전역 직렬 실행 큐(runner)
 ];
 stagger.forEach((start, i) => setTimeout(() => { try { start(); } catch (e) { console.error('[start] 폴러 기동 실패:', e?.message); } }, i * 1500).unref?.());
 

@@ -38,6 +38,10 @@ export default function VCenterDetail({ site, onBack }) {
   const toggle = (k) => setOpen((o) => ({ ...o, [k]: !o[k] }));
 
   const { data: hostsD } = usePolling('/hosts', { vcenterId }, 20_000);
+  // VM 복제(백업) 잡 대상 vmId 집합(v2.299) — 트리 VM 행에 'Clone' 배지 표시(사용자 요구).
+  // 60초 폴링(잡 등록은 드묾), scope 제한 계정은 서버가 빈 목록을 준다.
+  const { data: cloneBadgeD } = usePolling('/tools/vm-clone/badges', { vcenterId }, 60_000);
+  const cloneSet = useMemo(() => new Set(cloneBadgeD?.vmIds || []), [cloneBadgeD]);
   const { data: vmsD } = usePolling('/vms', { vcenterId, limit: 5000 }, 20_000);
   const { data: dsD } = usePolling('/datastores', { vcenterId }, 30_000);
   const { data: netD } = usePolling('/networks', { vcenterId }, 30_000);
@@ -216,6 +220,7 @@ export default function VCenterDetail({ site, onBack }) {
                     {`🧩 ${vm.cluster || '—'} · 🖥️ ${vm.host || '—'} · 📁 ${vm.folder || 'vm'} · ${vm.cpuCount || 0}vCPU · ${Math.round((vm.memMB || 0) / 1024)}GB · 💾 ${fmtGb(vm.storageGB || 0)}`}
                     {/* 메모로만 걸린 결과 — 어떤 메모 문구에 걸렸는지 스니펫으로 표시(하이라이트 포함) */}
                     {viaNotes && <span style={{ color: 'var(--amber)' }}> · 📝 <Highlight text={notesSnippet(vm.notes, token)} tokens={tokens} /></span>}
+                    <VmBadges vm={vm} cloneSet={cloneSet} />
                   </>} />
               ))}
             </Node>
@@ -242,7 +247,7 @@ export default function VCenterDetail({ site, onBack }) {
                     {(vmsByHost.get(h.name) || []).map((vm) => (
                       <Leaf key={vm.id} icon="🧊" onClick={() => setSel({ type: 'vm', item: vm })}
                         label={vm.name} badge={<StateBadge state={vm.powerState} />}
-                        sub={`${vm.guestOS} · ${vm.cpuCount}vCPU · ${Math.round(vm.memMB / 1024)}GB`} />
+                        sub={<>{`${vm.guestOS} · ${vm.cpuCount}vCPU · ${Math.round(vm.memMB / 1024)}GB`}<VmBadges vm={vm} cloneSet={cloneSet} /></>} />
                     ))}
                   </Tree>
                 ))}
@@ -254,7 +259,7 @@ export default function VCenterDetail({ site, onBack }) {
 
         {view === 'vms' && !query && (
           <Node label={`📁 ${site.name} / vm`} defaultOpen sub={`${vms.length} VM`}>
-            <FolderNodes node={folderTree} path="" open={open} toggle={toggle} onSelect={(vm) => setSel({ type: 'vm', item: vm })} />
+            <FolderNodes node={folderTree} path="" open={open} toggle={toggle} cloneSet={cloneSet} onSelect={(vm) => setSel({ type: 'vm', item: vm })} />
           </Node>
         )}
 
@@ -395,7 +400,7 @@ function Highlight({ text, tokens }) {
   );
 }
 
-function FolderNodes({ node, path, open, toggle, onSelect }) {
+function FolderNodes({ node, path, open, toggle, onSelect, cloneSet }) {
   const childFolders = Object.keys(node.folders).sort();
   return (
     <>
@@ -404,10 +409,10 @@ function FolderNodes({ node, path, open, toggle, onSelect }) {
         const f = node.folders[name];
         return (
           <Tree key={key} k={key} open={open} toggle={toggle} icon="📁" label={name} sub={`${f.count} VM`}>
-            <FolderNodes node={f} path={`${path}/${name}`} open={open} toggle={toggle} onSelect={onSelect} />
+            <FolderNodes node={f} path={`${path}/${name}`} open={open} toggle={toggle} cloneSet={cloneSet} onSelect={onSelect} />
             {f.vms.map((vm) => (
               <Leaf key={vm.id} icon="🧊" onClick={() => onSelect(vm)} label={vm.name} badge={<StateBadge state={vm.powerState} />}
-                sub={`${vm.guestOS} · ${vm.cpuCount}vCPU · ${Math.round(vm.memMB / 1024)}GB`} />
+                sub={<>{`${vm.guestOS} · ${vm.cpuCount}vCPU · ${Math.round(vm.memMB / 1024)}GB`}<VmBadges vm={vm} cloneSet={cloneSet} /></>} />
             ))}
           </Tree>
         );
@@ -432,6 +437,24 @@ function buildFolderTree(vms) {
 }
 
 const tb = (gb) => (gb >= 1024 ? `${(gb / 1024).toFixed(1)} TB` : `${gb} GB`);
+
+/**
+ * VM 행 배지(v2.299): Clone = 이 포탈의 복제(백업) 잡 대상 · veeamed = Veeam 백업 흔적.
+ * veeamed 는 **휴리스틱**이다 — Veeam 이 기본 설정에서 백업 시각을 VM 메모(vSphere notes)에
+ * 기록하는 동작을 근거로 vm.notes 의 'veeam' 문자열을 탐지한다. Veeam 쪽에서 메모 기록을
+ * 꺼둔 환경에서는 표시되지 않는다(정직 표기 — 툴팁에 명시).
+ */
+function VmBadges({ vm, cloneSet }) {
+  const cloned = cloneSet?.has(vm.id);
+  const veeamed = /veeam/i.test(vm.notes || '');
+  if (!cloned && !veeamed) return null;
+  return (
+    <>
+      {cloned && <span className="badge blue" style={{ fontSize: 10, marginLeft: 4 }} title="이 포탈의 VM 복제(백업) 잡 대상 — 특수기능 › VM 복제(백업)">Clone</span>}
+      {veeamed && <span className="badge green" style={{ fontSize: 10, marginLeft: 4 }} title="VM 메모에 Veeam 백업 기록이 있습니다(휴리스틱 — Veeam 이 메모 기록을 끈 환경에선 표시되지 않음)">veeamed</span>}
+    </>
+  );
+}
 
 /* ---- vCenter 2개 비교 ---- */
 // 비교 지표 정의. higher: 'bad'=높을수록 나쁨(사용률), 'neutral'=단순 규모, 'good'=높을수록 좋음.

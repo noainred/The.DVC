@@ -12,6 +12,7 @@ import { registerToolsAnalytics } from './api/toolsAnalytics.js';
 import { registerToolsCapacity } from './api/toolsCapacity.js';
 import { registerToolsInfo } from './api/toolsInfo.js';
 import { registerInventory } from './api/inventory.js';
+import { registerVmClone } from './api/vmClone.js'; // VM 복제(백업식, v2.299)
 
 // 특수기능/인벤토리 API 집계 라우터 — v2.283.0 대형 파일 분할.
 // 도메인 구현은 ./api/*.js 로 이동. ⚠️ register 호출 순서 = 라우트 등록 순서(Express 매칭 순서)이므로
@@ -31,3 +32,4 @@ registerToolsAnalytics(api);
 registerToolsCapacity(api);
 registerToolsInfo(api);
 registerInventory(api);
+registerVmClone(api);
