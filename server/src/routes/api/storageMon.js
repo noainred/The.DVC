@@ -10,6 +10,8 @@ import { listDevices, saveDevice, deleteDevice } from '../../storage/registry.js
 import { localSnapshots, dropSnapshot } from '../../storage/store.js';
 import { collectDeviceNow, storagePollerStatus } from '../../storage/poller.js';
 import { edgeStorageSnapshots } from '../../central/storageEdge.js';
+import { areaSummary, areaJson, capacityHistory, dbAvailable } from '../../storage/db.js';
+import { AREA_LABEL } from '../../storage/onefsCatalog.js';
 import { listDatacenters } from '../../datacenter/store.js';
 import { listAgentTokens } from '../../central/agentTokens.js';
 
@@ -74,4 +76,22 @@ api.post('/tools/storage/devices/:id/collect', adminOnly, async (req, res) => {
   } catch (e) { res.status(502).json({ ok: false, reason: e.message }); }
 });
 
+
+/** 영역별 수집 현황 + 원문(이 노드 DB — 중앙 수집 장비 전용. 엣지 장비 원문은 엣지 DB 에 있음). */
+api.get('/tools/storage/devices/:id/areas', adminOnly, async (req, res) => {
+  res.json({ db: await dbAvailable(), labels: AREA_LABEL, rows: await areaSummary(req.params.id) });
+});
+
+/** 영역 원문 JSON 1건 — ?endpoint= (DB api_latest 최신본, 512KB 절단 표기). */
+api.get('/tools/storage/devices/:id/areas/json', adminOnly, async (req, res) => {
+  const row = await areaJson(req.params.id, String(req.query.endpoint || ''));
+  if (!row) return res.status(404).json({ ok: false, reason: '해당 엔드포인트의 저장된 원문이 없습니다(엣지 수집 장비면 원문은 엣지 DB 에 있습니다).' });
+  res.json({ ok: true, ...row });
+});
+
+/** 용량 시계열(추이) — ?days=N (기본 30, 1~400). */
+api.get('/tools/storage/devices/:id/history', fullScopeOnly, async (req, res) => {
+  const days = Math.max(1, Math.min(400, Number(req.query.days) || 30));
+  res.json({ db: await dbAvailable(), points: await capacityHistory(req.params.id, Date.now() - days * 86400e3) });
+});
 }

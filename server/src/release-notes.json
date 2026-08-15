@@ -1,6 +1,17 @@
 {
   "notes": [
     {
+      "version": "2.308.0",
+      "date": "2026-08-15",
+      "title": "스토리지 모니터링 — OneFS API 전 영역(39개) 수집 + SQLite DB 저장 + 용량 시계열",
+      "notes": [
+        "사용자 지정 39개 영역 표(Cluster·Node·Hardware·Quota·Snapshot·SMB/NFS/HDFS/S3·Network·SmartConnect·인증/RBAC/Zone·Audit·Events·HealthCheck·Job·SyncIQ·Dedupe·SmartPools·CloudPools·WORM·Antivirus·License·인증서·KeyManager·Upgrade·Hardening·IPMI 등)를 OneFS Platform API 엔드포인트 카탈로그로 매핑해 전 영역을 주기 수집합니다(기본 60분, 조회 전용 GET만 — 수집기는 장비를 변경하지 않음). 영역별 성공/실패가 상세 모달에 배지로 표시되고, 배지를 클릭하면 저장된 원문(JSON)을 봅니다.",
+        "수집한 모든 원문은 SQLite DB(storage-history.db, WAL)에 저장됩니다(사용자 요구): api_latest(엔드포인트별 최신 원문 — 512KB 초과는 절단 표기), api_history(수집 성공/실패 이력 메타), capacity_history(전체/HDD/SSD 용량 시계열 — 매 수집 1점, 400일 보존·스로틀 prune). 용량 추이 조회 API(/tools/storage/devices/:id/history)도 제공합니다(그래프 화면은 후속).",
+        "정직 표기: ① 원문 DB는 수집 노드에 저장 — 엣지 수집 장비의 원문은 엣지 포탈 DB에 있고 중앙에는 영역 요약이 push됩니다(39영역 원문의 WAN 전송은 대역폭상 제외 — 원문 중앙 동기화는 후속) ② Directory/File(경로 인자 필요)·Configuration Backup·MetadataIQ(버전 의존) 3개 영역은 사유와 함께 기본 비활성으로 표시 ③ 엔드포인트 경로는 OneFS 8.x~9.x 문서 지식 기반(버전 폴백 포함)으로 실장비 첫 수집에서 영역별 오류 문구로 검증됩니다 ④ 401 시 즉시 중단(장비 계정 잠금 예방).",
+        "예정: PowerStore·Unity 수집기(파워스케일과 동일 구조 — 다음 릴리스), 용량 추이 그래프."
+      ]
+    },
+    {
       "version": "2.307.0",
       "date": "2026-08-15",
       "title": "스토리지 모니터링 — isi status의 Critical Events·Cluster Job Status 파싱/표시",

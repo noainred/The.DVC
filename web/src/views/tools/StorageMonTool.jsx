@@ -172,6 +172,7 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
   const s = r.snap;
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
+  const [areaView, setAreaView] = useState(null); // OneFS API 영역 원문 뷰(v2.308) — 배지 클릭
   const refresh = async () => {
     setBusy(true); setMsg(null);
     try {
@@ -329,6 +330,29 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
             </>
           )}
 
+          {/* OneFS API 전 영역 수집(v2.308, 사용자 40개 표) — 요약은 push 로 전 장비, 원문은
+              수집 노드 DB(중앙 수집 장비만 이 화면에서 열람 — 엣지 원문은 엣지 DB, 안내 표시). */}
+          {s.extra?.areas && (
+            <>
+              <div className="section-title" style={{ fontSize: 13 }}>OneFS API 영역 수집 {s.extra.areas.filter((a) => !a.skipped).length}
+                <span className="muted" style={{ fontSize: 11, fontWeight: 400 }}> — 엔드포인트 {s.extra.areasEndpoints ?? '—'}개 · {s.extra.areasAt ? new Date(s.extra.areasAt).toLocaleString('ko-KR') : ''} · 원문은 수집 노드 DB 저장</span>
+              </div>
+              <div className="flex gap wrap" style={{ marginBottom: 8 }}>
+                {s.extra.areas.map((a) => (
+                  <span key={a.area} className={`badge ${a.skipped ? 'gray' : a.failed === 0 ? 'green' : a.ok > 0 ? 'amber' : 'red'}`}
+                    title={a.error || `성공 ${a.ok} · 실패 ${a.failed}`} style={{ fontSize: 10.5, cursor: !a.skipped && !r.agent ? 'pointer' : 'default' }}
+                    onClick={() => { if (!a.skipped && !r.agent) setAreaView(a.area); }}>
+                    {a.area}{a.skipped ? ' (비활성)' : a.failed ? ` ${a.ok}/${a.ok + a.failed}` : ''}
+                  </span>
+                ))}
+              </div>
+              {r.agent
+                ? <div className="muted" style={{ fontSize: 11, marginBottom: 12 }}>이 장비는 엣지 '{r.agent}' 가 수집 — API 원문은 엣지 포탈의 DB 에 저장됩니다(여기는 요약만).</div>
+                : <div className="muted" style={{ fontSize: 11, marginBottom: 12 }}>배지를 클릭하면 저장된 원문(JSON)을 봅니다.</div>}
+              {areaView && !r.agent && <AreaJsonViewer deviceId={r.id} area={areaView} onClose={() => setAreaView(null)} />}
+            </>
+          )}
+
           <div className="section-title" style={{ fontSize: 13 }}>섹션별 수집 상태 <span className="muted" style={{ fontSize: 11, fontWeight: 400 }}>— 부분 실패를 숨기지 않습니다(버전별 API 차이 진단용)</span></div>
           <div className="flex gap wrap">
             {Object.entries(s.sections || {}).map(([k, v]) => (
@@ -401,3 +425,43 @@ function DeviceForm({ d, form, setForm, onSaved }) {
   );
 }
 
+/** OneFS API 영역 원문 뷰어(v2.308) — 이 노드 DB(api_latest)의 엔드포인트별 최신 JSON. */
+function AreaJsonViewer({ deviceId, area, onClose }) {
+  const [rows, setRows] = useState(null);   // 영역의 엔드포인트 목록
+  const [sel, setSel] = useState(null);     // 선택한 엔드포인트 원문
+  const [err, setErr] = useState(null);
+  useEffect(() => {
+    fetchJson(`/tools/storage/devices/${encodeURIComponent(deviceId)}/areas`)
+      .then((r) => setRows((r.rows || []).filter((x) => x.area === area)))
+      .catch((e) => setErr(e.message));
+  }, [deviceId, area]);
+  const open = (ep) => fetchJson(`/tools/storage/devices/${encodeURIComponent(deviceId)}/areas/json`, { endpoint: ep })
+    .then((r) => setSel({ ep, ...r })).catch((e) => setSel({ ep, error: e.message }));
+  return (
+    <div className="card" style={{ padding: 12, marginBottom: 12, background: 'rgba(96,165,250,.05)' }}>
+      <div className="flex between" style={{ marginBottom: 6 }}>
+        <b style={{ fontSize: 12.5 }}>영역 원문 — {area}</b>
+        <button className="logout-btn" style={{ padding: '3px 9px', fontSize: 11.5 }} onClick={onClose}>닫기</button>
+      </div>
+      {err ? <ErrorBox message={err} /> : !rows ? <Loading /> : rows.length === 0 ? <div className="muted" style={{ fontSize: 12 }}>저장된 원문 없음(다음 영역 수집 주기 대기 — 기본 60분)</div> : (
+        <>
+          <div className="flex gap wrap" style={{ marginBottom: 6 }}>
+            {rows.map((x) => (
+              <button key={x.endpoint} className="tab" style={{ padding: '3px 9px', fontSize: 11, color: x.ok ? undefined : 'var(--red)' }}
+                title={x.error || `${Math.round(x.bytes / 1024)}KB · ${new Date(x.ts).toLocaleString('ko-KR')}${x.truncated ? ' · 512KB 절단' : ''}`}
+                onClick={() => open(x.endpoint)}>{x.endpoint.split('?')[0]}{x.ok ? '' : ' ⛔'}</button>
+            ))}
+          </div>
+          {sel && (
+            sel.error ? <div style={{ color: 'var(--red)', fontSize: 12 }}>⛔ {sel.error}</div> : (
+              <>
+                {sel.truncated ? <div className="muted" style={{ fontSize: 11, color: 'var(--amber)' }}>⚠ 원문이 512KB 를 넘어 절단 저장됨(뒷부분 생략)</div> : null}
+                <pre style={{ maxHeight: '30vh', overflow: 'auto', fontSize: 11, background: 'rgba(0,0,0,.25)', padding: 8, borderRadius: 6, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{(() => { try { return JSON.stringify(JSON.parse(sel.json), null, 2); } catch { return sel.json; } })()}</pre>
+              </>
+            )
+          )}
+        </>
+      )}
+    </div>
+  );
+}
