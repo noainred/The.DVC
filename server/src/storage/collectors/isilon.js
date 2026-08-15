@@ -20,7 +20,7 @@ const isilonDispatcher = new Agent({ connect: { rejectUnauthorized: false } });
 const PORT = Number(process.env.STORAGE_ISILON_PORT) || 8080;
 const TIMEOUT_MS = Number(process.env.STORAGE_HTTP_TIMEOUT_MS) || 15_000;
 
-async function get(device, apiPath) {
+export async function get(device, apiPath) { // v2.308: 영역 수집기(areasCollector)가 재사용
   const url = `https://${device.host}:${PORT}${apiPath}`;
   const auth = Buffer.from(`${device.username}:${device.password || ''}`).toString('base64');
   const res = await fetch(url, {
@@ -34,7 +34,7 @@ async function get(device, apiPath) {
 }
 
 /** 주 경로 실패 시 대체 경로 순차 시도(버전별 경로 차이 흡수). 전부 실패면 마지막 오류 throw. */
-async function getAny(device, paths) {
+export async function getAny(device, paths) {
   let err;
   for (const p of paths) {
     try { return await get(device, p); } catch (e) { err = e; }

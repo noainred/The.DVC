@@ -10,9 +10,13 @@ import { devicesForThisNode, getDeviceWithSecret } from './registry.js';
 import { putSnapshot } from './store.js';
 import { emptySnapshot } from './types.js';
 import * as isilon from './collectors/isilon.js';
+import { collectAreasOnce } from './areasCollector.js';
+import { saveCapacityPoint } from './db.js';
 
 const COLLECTORS = { isilon: isilon.collect };
 const INTERVAL_MS = Math.max(60_000, Number(process.env.STORAGE_POLL_MS) || 10 * 60_000); // 기본 10분
+const AREAS_EVERY_MS = Math.max(10 * 60_000, Number(process.env.STORAGE_AREAS_MS) || 60 * 60_000); // 영역 전수 수집 기본 60분
+const _areasAt = new Map(); // deviceId → 마지막 영역 수집 시각(메모리 — 재시작 시 첫 주기에 재수집)
 let _timer = null;
 let _busy = false;
 let _last = { at: 0, collected: 0, failed: 0 };
@@ -41,7 +45,23 @@ async function collectOne(dev) {
     try { snap = await fn(full); }
     catch (e) { snap = emptySnapshot(full); snap.error = e.message; }
   }
-  putSnapshot(snap);
+  // 용량 시계열(v2.308) — 성공 수집마다 1점 적재(추이 그래프/DB 저장 요구).
+  try { await saveCapacityPoint(snap); } catch { /* DB 비활성 환경 — 스냅샷 경로는 계속 */ }
+  // OneFS API 전 영역 수집(v2.308, 40개 표) — 스냅샷보다 무거워 별도 주기(기본 60분)로.
+  // mock 모드는 요약만 시뮬레이션. 실패는 영역별 요약에 그대로 남는다(은폐 금지).
+  if (snap.ok && dev.type === 'isilon') {
+    const last = _areasAt.get(dev.id) || 0;
+    if (Date.now() - last >= AREAS_EVERY_MS) {
+      _areasAt.set(dev.id, Date.now());
+      try {
+        const r = config.mode === 'mock'
+          ? { summary: [{ area: 'cluster', ok: 3, failed: 0 }, { area: 'node', ok: 1, failed: 0 }], endpoints: 4 }
+          : await collectAreasOnce(full);
+        snap.extra = { ...snap.extra, areas: r.summary, areasAt: Date.now(), areasEndpoints: r.endpoints };
+        putSnapshot(snap); // 요약 갱신분 재저장(push 가 최신 요약을 실어가게)
+      } catch (e) { snap.extra = { ...snap.extra, areasError: e.message }; putSnapshot(snap); }
+    }
+  }
   return snap.ok;
 }
 

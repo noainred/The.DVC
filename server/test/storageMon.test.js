@@ -277,3 +277,37 @@ test('parseIsiStatus — 이벤트/잡 섹션이 없는 출력(빈 배열, 기�
   assert.deepEqual(p3.criticalEvents, []);
   assert.deepEqual(p3.jobs, { running: [], paused: [], failed: [], recent: [] });
 });
+
+/* ── OneFS API 전 영역 수집 + DB(v2.308) ─────────────────────────────────── */
+
+test('onefsCatalog — 사용자 영역 표(39개) 전수 등재(활성은 GET 엔드포인트 보유, 비활성은 사유 명시)', async () => {
+  const { ONEFS_AREAS, enabledAreas } = await import('../src/storage/onefsCatalog.js');
+  assert.equal(ONEFS_AREAS.length, 39, '사용자 표의 영역 전수(재검수 결과 39행 — Cluster~MetadataIQ)');
+  for (const a of enabledAreas()) assert.ok(a.endpoints.length > 0, `${a.key}: 엔드포인트 필요`);
+  for (const a of ONEFS_AREAS.filter((x) => x.enabled === false)) assert.ok(a.reason, `${a.key}: 비활성 사유 필수(은폐 금지)`);
+  // 전부 조회 전용 — 쿼리스트링 외에 쓰기 동사/경로가 없어야 한다(수집기가 장비를 변경 금지).
+  for (const a of enabledAreas()) for (const ep of a.endpoints) assert.ok(ep.startsWith('/platform/'), ep);
+});
+
+test('storage/db — 원문 저장(절단 포함)·요약·시계열·미지원 환경 no-op 안전', async () => {
+  const db = await import('../src/storage/db.js');
+  if (!(await db.dbAvailable())) { assert.deepEqual(await db.areaSummary('x'), [], 'DB 미지원 환경 — no-op 폴백'); return; }
+  const big = { data: 'x'.repeat(600 * 1024) }; // 512KB 초과 → 절단 표기
+  await db.saveAreaResults('dev-1', [
+    { area: 'cluster', endpoint: '/platform/1/cluster/config', ok: true, data: { name: 'c1' } },
+    { area: 'quota', endpoint: '/platform/1/quota/quotas', ok: false, error: 'HTTP 404' },
+    { area: 'snapshot', endpoint: '/platform/1/snapshot/snapshots', ok: true, data: big },
+  ]);
+  const rows = await db.areaSummary('dev-1');
+  assert.equal(rows.length, 3);
+  assert.equal(rows.find((r) => r.area === 'quota').ok, 0);
+  assert.equal(rows.find((r) => r.area === 'snapshot').truncated, 1, '512KB 초과 원문은 절단 플래그');
+  const one = await db.areaJson('dev-1', '/platform/1/cluster/config');
+  assert.ok(one.json.includes('"name":"c1"'), '원문 JSON 저장');
+  // 용량 시계열 — 성공 스냅샷만 적재
+  await db.saveCapacityPoint({ deviceId: 'dev-1', ok: true, collectedAt: Date.now(), capacity: { totalBytes: 100, usedBytes: 40 }, media: { hdd: { totalBytes: 80, usedBytes: 30 }, ssd: { totalBytes: 20, usedBytes: 10 } } });
+  await db.saveCapacityPoint({ deviceId: 'dev-1', ok: false }); // 실패는 미적재(그래프 오염 방지)
+  const pts = await db.capacityHistory('dev-1', Date.now() - 60_000);
+  assert.equal(pts.length, 1);
+  assert.equal(pts[0].hdd_total, 80);
+});
