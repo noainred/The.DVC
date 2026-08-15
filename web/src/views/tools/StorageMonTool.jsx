@@ -31,7 +31,7 @@ export default function StorageMonTool() {
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
   const [view, setView] = useState('devices');   // devices | dc | type
-  const [detail, setDetail] = useState(null);    // 장비 상세 모달
+  const [detail, setDetail] = useState(null);    // 장비 상세 모달 — id 로 보관(v2.306: load() 후 최신 스냅샷 자동 반영)
   const [form, setForm] = useState(null);        // 등록/수정 폼
 
   const load = () => fetchJson('/tools/storage').then((r) => { setD(r); setErr(null); }).catch((e) => setErr(e.message));
@@ -71,7 +71,7 @@ export default function StorageMonTool() {
     const s = r.snap;
     return (
       <tr key={r.id} style={{ opacity: r.enabled === false ? 0.5 : 1 }}>
-        <td><button className="cell-link" onClick={() => setDetail(r)}><b>{s?.name || r.name}</b></button><div className="muted" style={{ fontSize: 11 }}>{r.host}</div></td>
+        <td><button className="cell-link" onClick={() => setDetail(r.id)}><b>{s?.name || r.name}</b></button><div className="muted" style={{ fontSize: 11 }}>{r.host}</div></td>
         <td><span className="badge blue">{typeLabel(r.type)}</span></td>
         <td className="muted">{dcName(r.datacenterId)}</td>
         <td>{r.agent ? <span className="badge" style={{ background: 'rgba(167,139,250,.2)', color: '#a78bfa' }}>{r.agent}</span> : <span className="muted">중앙</span>}
@@ -157,16 +157,38 @@ export default function StorageMonTool() {
         확장 로드맵(카탈로그): {(d.types || []).filter((t) => !t.implemented).map((t) => t.label).join(' · ')} — 수집기 구현 시 이 화면 변경 없이 표시됩니다.
       </div>
 
-      {detail && <DeviceDetail r={detail} typeLabel={typeLabel} dcName={dcName} onClose={() => setDetail(null)} />}
+      {detail && (() => {
+        const row = rows.find((x) => x.id === detail);
+        if (!row) return null; // 새로고침 사이에 삭제된 장비 — 모달 조용히 닫힘 방지 위해 null
+        return <DeviceDetail r={row} typeLabel={typeLabel} dcName={dcName} onClose={() => setDetail(null)}
+          onRefresh={async () => { const res = await postJson(`/tools/storage/devices/${encodeURIComponent(row.id)}/collect`, {}); await load(); return res; }} />;
+      })()}
     </div>
   );
 }
 
 /** 장비 상세 모달 — 정규화 스냅샷 전부(풀·계정·섹션별 수집 상태·경보). */
-function DeviceDetail({ r, typeLabel, dcName, onClose }) {
+function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
   const s = r.snap;
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const refresh = async () => {
+    setBusy(true); setMsg(null);
+    try {
+      const res = await onRefresh();
+      setMsg(res?.ok ? '수집 완료 — 최신 상태로 갱신됨' : (res?.reason || '수집 실패'));
+    } catch (e) { setMsg(`오류: ${e.message}`); }
+    finally { setBusy(false); }
+  };
   return (
-    <Modal title={`${typeLabel(r.type)} — ${s?.name || r.name}`} onClose={onClose} width={720}>
+    <Modal title={`${typeLabel(r.type)} — ${s?.name || r.name}`} onClose={onClose} width={1100}>
+      {/* 새로고침(v2.306, 사용자 요구) — 중앙 수집 장비는 즉시 재수집, 엣지 장비는 주기 안내(202 사유) */}
+      <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 10 }}>
+        <button className="login-btn" style={{ flex: 'none', padding: '6px 14px', fontSize: 12.5 }} disabled={busy} onClick={refresh}>
+          {busy ? '수집 중…' : '↻ 새로고침(지금 수집)'}
+        </button>
+        {msg && <span className="muted" style={{ fontSize: 12 }}>{msg}</span>}
+      </div>
       {!s ? <div className="muted" style={{ padding: 8 }}>아직 수집된 스냅샷이 없습니다(첫 수집 주기 대기).</div> : (
         <>
           <div className="flex gap wrap" style={{ fontSize: 12.5, marginBottom: 10 }}>
@@ -219,8 +241,8 @@ function DeviceDetail({ r, typeLabel, dcName, onClose }) {
                         <td>{n.ext ? <span className={`badge ${n.ext === 'C' ? 'green' : 'red'}`} title="C=Connected · N=Not Connected">{n.ext}</span> : <span className="muted">—</span>}</td>
                         <td style={{ textAlign: 'right', fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{bps(n.inBps)}</td>
                         <td style={{ textAlign: 'right', fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{bps(n.outBps)}</td>
-                        <td>{n.hdd ? `${tbFmt(n.hdd.usedBytes)}/${tbFmt(n.hdd.totalBytes)} (${n.hdd.pct}%)` : <span className="muted">No Storage HDDs</span>}</td>
-                        <td>{n.ssd ? `${tbFmt(n.ssd.usedBytes)}/${tbFmt(n.ssd.totalBytes)} (${n.ssd.pct}%)` : n.l3Bytes > 0 ? <span className="muted">L3: {tbFmt(n.l3Bytes)}</span> : <span className="muted">—</span>}</td>
+                        <td style={{ whiteSpace: 'nowrap' }}>{n.hdd ? `${tbFmt(n.hdd.usedBytes)}/${tbFmt(n.hdd.totalBytes)} (${n.hdd.pct}%)` : <span className="muted">No Storage HDDs</span>}</td>
+                        <td style={{ whiteSpace: 'nowrap' }}>{n.ssd ? `${tbFmt(n.ssd.usedBytes)}/${tbFmt(n.ssd.totalBytes)} (${n.ssd.pct}%)` : n.l3Bytes > 0 ? <span className="muted">L3: {tbFmt(n.l3Bytes)}</span> : <span className="muted">—</span>}</td>
                       </tr>
                     ))}
                   </tbody>
