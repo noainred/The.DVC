@@ -108,7 +108,7 @@ export default function StorageMonTool() {
   return (
     <div>
       <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 12 }}>
-        <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={() => setForm({ type: 'isilon', name: '', host: '', username: 'root', password: '', agent: '', datacenterId: '', enabled: true })}>+ 장비 등록</button>
+        <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={() => setForm({ type: 'isilon', name: '', host: '', username: 'root', password: '', agent: '', datacenterId: '', collectMethod: 'ssh', sshPort: 22, enabled: true })}>+ 장비 등록</button>
         {['devices', 'dc', 'type'].map((v) => (
           <button key={v} className={view === v ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 13px' }} onClick={() => setView(v)}>
             {v === 'devices' ? '🗄 장비별' : v === 'dc' ? '🏢 법인별' : '📦 타입별'}
@@ -173,8 +173,18 @@ function DeviceDetail({ r, typeLabel, dcName, onClose }) {
             <span className="muted">법인 <b style={{ color: 'var(--text)' }}>{dcName(r.datacenterId)}</b></span>
             <span className="muted">버전 <b style={{ color: 'var(--text)' }}>{s.version || '—'}</b></span>
             <span className="muted">시리얼/GUID <b style={{ color: 'var(--text)' }}>{s.serial || '—'}</b></span>
-            <span className="muted">수집 {new Date(s.collectedAt).toLocaleString('ko-KR')}{s.agent ? ` · 엣지 ${s.agent}` : ' · 중앙'}</span>
+            <span className="muted">수집 {new Date(s.collectedAt).toLocaleString('ko-KR')}{s.agent ? ` · 엣지 ${s.agent}` : ' · 중앙'}{s.extra?.collectMethod ? ` · ${s.extra.collectMethod.toUpperCase()}` : ''}</span>
           </div>
+          {/* SSH(isi status) 모드 부가 정보(v2.304) — 사용자 화면 상단 블록과 동일 항목 */}
+          {(s.extra?.clusterHealth || s.extra?.dataReduction || s.extra?.vhsBytes > 0) && (
+            <div className="flex gap wrap" style={{ fontSize: 12.5, marginBottom: 10 }}>
+              {s.extra.clusterHealth && <span className={`badge ${s.extra.clusterHealth === 'OK' ? 'green' : 'red'}`}>Cluster Health: {s.extra.clusterHealth}</span>}
+              {s.extra.dataReduction && <span className="muted">Data Reduction <b style={{ color: 'var(--text)' }}>{s.extra.dataReduction}</b></span>}
+              {s.extra.storageEfficiency && <span className="muted">Storage Efficiency <b style={{ color: 'var(--text)' }}>{s.extra.storageEfficiency}</b></span>}
+              {s.extra.vhsBytes > 0 && <span className="muted">VHS <b style={{ color: 'var(--text)' }}>{tbFmt(s.extra.vhsBytes)}</b></span>}
+              {s.extra.l3TotalBytes > 0 && <span className="muted">L3 캐시 합계 <b style={{ color: 'var(--text)' }}>{tbFmt(s.extra.l3TotalBytes)}</b></span>}
+            </div>
+          )}
           {s.error && <div className="card" style={{ borderColor: 'var(--red)', padding: '8px 12px', marginBottom: 10, fontSize: 12.5, color: 'var(--red)' }}>⛔ {s.error}</div>}
 
           {/* HDD/SSD 풀 요약(v2.303) — isi status Cluster Storage 와 동일 의미 */}
@@ -198,17 +208,18 @@ function DeviceDetail({ r, typeLabel, dcName, onClose }) {
               <div className="section-title" style={{ fontSize: 13 }}>노드 {s.nodes.list.length}{s.nodes.count > s.nodes.list.length ? ` (표시 상한 — 전체 ${s.nodes.count})` : ''}</div>
               <div className="table-wrap" style={{ maxHeight: '32vh', marginBottom: 12 }}>
                 <table>
-                  <thead><tr><th style={{ textAlign: 'right' }}>ID</th><th>IP</th><th>상태</th><th style={{ textAlign: 'right' }}>In(bps)</th><th style={{ textAlign: 'right' }}>Out(bps)</th><th>HDD Used/Size</th><th>SSD Used/Size</th></tr></thead>
+                  <thead><tr><th style={{ textAlign: 'right' }}>ID</th><th>IP</th><th>상태</th><th>Ext</th><th style={{ textAlign: 'right' }}>In(bps)</th><th style={{ textAlign: 'right' }}>Out(bps)</th><th>HDD Used/Size</th><th>SSD Used/Size</th></tr></thead>
                   <tbody>
                     {s.nodes.list.map((n) => (
                       <tr key={n.id}>
                         <td style={{ textAlign: 'right' }}>{n.id}</td>
                         <td style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{n.ip || '—'}</td>
                         <td><span className={`badge ${/ok|healthy|up|green/.test(n.health) ? 'green' : n.health === 'unknown' ? 'gray' : 'red'}`}>{n.health === 'unknown' ? '?' : n.health.toUpperCase()}</span></td>
+                        <td>{n.ext ? <span className={`badge ${n.ext === 'C' ? 'green' : 'red'}`} title="C=Connected · N=Not Connected">{n.ext}</span> : <span className="muted">—</span>}</td>
                         <td style={{ textAlign: 'right', fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{bps(n.inBps)}</td>
                         <td style={{ textAlign: 'right', fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{bps(n.outBps)}</td>
                         <td>{n.hdd ? `${tbFmt(n.hdd.usedBytes)}/${tbFmt(n.hdd.totalBytes)} (${n.hdd.pct}%)` : <span className="muted">No Storage HDDs</span>}</td>
-                        <td>{n.ssd ? `${tbFmt(n.ssd.usedBytes)}/${tbFmt(n.ssd.totalBytes)} (${n.ssd.pct}%)` : <span className="muted">—</span>}</td>
+                        <td>{n.ssd ? `${tbFmt(n.ssd.usedBytes)}/${tbFmt(n.ssd.totalBytes)} (${n.ssd.pct}%)` : n.l3Bytes > 0 ? <span className="muted">L3: {tbFmt(n.l3Bytes)}</span> : <span className="muted">—</span>}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -271,6 +282,15 @@ function DeviceForm({ d, form, setForm, onSaved }) {
         </label>
         <label style={{ fontSize: 12 }}>표시명<br /><input className="input" style={{ width: 160 }} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="WA-Isilon-01" /></label>
         <label style={{ fontSize: 12 }}>host(IP/FQDN)<br /><input className="input" style={{ width: 180 }} value={form.host} onChange={(e) => setForm({ ...form, host: e.target.value })} placeholder="10.20.0.50" /></label>
+        <label style={{ fontSize: 12 }} title="SSH: 장비에 접속해 isi status 출력을 파싱(운영자 화면과 동일 소스 — 권장) · API: OneFS REST">수집 방식<br />
+          <select className="select" value={form.collectMethod || 'ssh'} onChange={(e) => setForm({ ...form, collectMethod: e.target.value })}>
+            <option value="ssh">SSH (isi status 파싱 — 권장)</option>
+            <option value="api">REST API (OneFS Platform)</option>
+          </select>
+        </label>
+        {(form.collectMethod || 'ssh') === 'ssh' && (
+          <label style={{ fontSize: 12 }}>SSH 포트<br /><input className="input" type="number" min={1} max={65535} style={{ width: 80 }} value={form.sshPort || 22} onChange={(e) => setForm({ ...form, sshPort: Number(e.target.value) || 22 })} /></label>
+        )}
         <label style={{ fontSize: 12 }}>계정<br /><input className="input" style={{ width: 110 }} value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} /></label>
         <label style={{ fontSize: 12 }}>비밀번호{form.id ? '(변경 시만)' : ''}<br /><input className="input" type="password" style={{ width: 140 }} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder={form.hasPassword ? '•••• (유지)' : ''} /></label>
         <label style={{ fontSize: 12 }}>법인(DataCenter)<br />

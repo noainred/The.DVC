@@ -77,7 +77,11 @@ export function saveDevice(input = {}) {
   const password = String(input.password ?? '');
   if (password) dev.password = password;
   else if (hostChanged) delete dev.password;
-  Object.assign(dev, { type, name, host, username, agent, datacenterId, enabled: input.enabled !== false, note: String(input.note || '').slice(0, 200) });
+  // 수집 방식(v2.304): 'ssh'(isi status 파싱 — 운영자 화면과 동일 소스, 기본) | 'api'(OneFS REST).
+  // 기본을 ssh 로 두는 근거: 사용자가 실측 화면(isi status)과의 일치를 정확성 기준으로 지정(2026-08-15).
+  const collectMethod = input.collectMethod === 'api' ? 'api' : 'ssh';
+  const sshPort = Math.max(1, Math.min(65535, Math.floor(Number(input.sshPort)) || 22));
+  Object.assign(dev, { type, name, host, username, agent, datacenterId, collectMethod, sshPort, enabled: input.enabled !== false, note: String(input.note || '').slice(0, 200) });
   if (!existing) {
     if (db.devices.length >= MAX_DEVICES) throw new Error(`장비는 최대 ${MAX_DEVICES}개까지 등록할 수 있습니다.`);
     if (db.devices.some((d) => d.host === host && d.type === type)) throw new Error('같은 host 의 같은 타입 장비가 이미 있습니다.');

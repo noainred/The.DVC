@@ -36,6 +36,7 @@ async function collectOne(dev) {
     snap.pools = [{ name: 'h500_30tb', totalBytes: 500e12, usedBytes: 312e12, pct: 62.4 }];
     snap.accounts = [{ name: 'root', enabled: true }, { name: 'admin', enabled: true }];
     snap.sections = { config: 'ok', capacity: 'ok', nodes: 'ok', accounts: 'ok', alerts: 'ok' };
+    snap.extra = { collectMethod: full.collectMethod || 'ssh', clusterHealth: 'OK', dataReduction: '1.00:1', storageEfficiency: '0.83:1', vhsBytes: 15.4 * 1024 ** 4, l3TotalBytes: 8.7 * 1024 ** 4 };
   } else {
     try { snap = await fn(full); }
     catch (e) { snap = emptySnapshot(full); snap.error = e.message; }
