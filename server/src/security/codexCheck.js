@@ -49,11 +49,11 @@ const AUDIT_DATE = '20260808';
 
 function today() { return AUDIT_DATE; }
 
-function fileName() { return `codex_check_${today()}.MD`; }
+function fileName() { return `security_check_${today()}.MD`; } // v2.298: 사용자 노출 파일명에서 'codex' 제거(요구사항)
 
 export function renderCodexCheckMarkdown() {
   const lines = [
-    '# Codex 프로그램 보안·완성도 점검 보고서',
+    '# 프로그램 보안·완성도 점검 보고서',
     '',
     `- 점검일: ${today().replace(/^(\d{4})(\d{2})(\d{2})$/, '$1-$2-$3')} (Asia/Seoul)`,
     `- 버전: ${currentVersion()}`,
