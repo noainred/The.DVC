@@ -10,10 +10,12 @@ import { devicesForThisNode, getDeviceWithSecret } from './registry.js';
 import { putSnapshot } from './store.js';
 import { emptySnapshot } from './types.js';
 import * as isilon from './collectors/isilon.js';
+import * as powerstore from './collectors/powerstore.js'; // v2.309
+import * as unity from './collectors/unity.js';           // v2.309
 import { collectAreasOnce } from './areasCollector.js';
 import { saveCapacityPoint } from './db.js';
 
-const COLLECTORS = { isilon: isilon.collect };
+const COLLECTORS = { isilon: isilon.collect, powerstore: powerstore.collect, unity480: unity.collect };
 const INTERVAL_MS = Math.max(60_000, Number(process.env.STORAGE_POLL_MS) || 10 * 60_000); // 기본 10분
 const AREAS_EVERY_MS = Math.max(10 * 60_000, Number(process.env.STORAGE_AREAS_MS) || 60 * 60_000); // 영역 전수 수집 기본 60분
 const _areasAt = new Map(); // deviceId → 마지막 영역 수집 시각(메모리 — 재시작 시 첫 주기에 재수집)

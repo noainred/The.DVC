@@ -15,9 +15,9 @@ const { STORAGE_TYPES, emptySnapshot, isImplementedType } = await import('../src
 const { saveEdgeStorage, edgeStorageSnapshots } = await import('../src/central/storageEdge.js');
 const { parseIsiStatus, parseSize, parseBps, normalizeIsiStatus } = await import('../src/storage/collectors/isilonSsh.js');
 
-test('타입 카탈로그 — isilon 구현·로드맵 7종 예정(등록은 구현 타입만)', () => {
-  assert.ok(isImplementedType('isilon'));
-  for (const t of ['xtremio', 'powerstore', 'vmax', 'powermax', 'vplex', 'unity480', 'metronode']) {
+test('타입 카탈로그 — isilon·powerstore·unity480 구현(v2.309), 로드맵 5종 예정(등록은 구현 타입만)', () => {
+  for (const t of ['isilon', 'powerstore', 'unity480']) assert.ok(isImplementedType(t), `${t} 구현 플립`);
+  for (const t of ['xtremio', 'vmax', 'powermax', 'vplex', 'metronode']) {
     assert.ok(STORAGE_TYPES.some((x) => x.type === t && !x.implemented), `${t} 카탈로그 예정 항목`);
   }
   assert.throws(() => reg.saveDevice({ type: 'powermax', name: 'X', host: '10.0.0.1', username: 'a' }), /미구현/);
@@ -310,4 +310,78 @@ test('storage/db — 원문 저장(절단 포함)·요약·시계열·미지원 
   const pts = await db.capacityHistory('dev-1', Date.now() - 60_000);
   assert.equal(pts.length, 1);
   assert.equal(pts[0].hdd_total, 80);
+});
+
+/* ─── v2.309: PowerStore / Unity 정규화(순수 — 실장비 검증 전이므로 픽스처로 계약 고정) ─── */
+
+test('normalizePowerstore: 클러스터/용량/노드/계정/알람 정규화 + 어플라이언스는 extra 로만', async () => {
+  const { normalizePowerstore } = await import('../src/storage/collectors/powerstore.js');
+  const dev = { id: 'ps-1', type: 'powerstore', name: 'PS-500T', host: '10.0.0.9' };
+  const snap = normalizePowerstore(dev, {
+    cluster: [{ name: 'PS-Cluster', global_id: 'PS4XXXX', state: 'Configured' }],
+    sw: [{ release_version: '3.6.1.0' }],
+    appliances: [{ id: 'A1', name: 'appliance-1', model: 'PowerStore 500T', service_tag: 'ABC1234' }],
+    metrics: [{ physical_total: 100e12, physical_used: 42e12 }],
+    nodes: [{ id: 'N1', slot: 0 }, { id: 'N2', slot: 1 }],
+    users: [{ id: 'u1', name: 'admin', is_locked: false }, { id: 'u2', name: 'svc', is_locked: true }],
+    alerts: [{ id: 'al1' }, { id: 'al2' }, { id: 'al3' }],
+  });
+  assert.equal(snap.ok, true);
+  assert.equal(snap.name, 'PS-Cluster');
+  assert.equal(snap.serial, 'PS4XXXX');
+  assert.equal(snap.version, '3.6.1.0');
+  assert.equal(snap.capacity.totalBytes, 100e12);
+  assert.equal(snap.capacity.pct, 42);
+  assert.equal(snap.nodes.count, 2);
+  assert.equal(snap.accounts.length, 2);
+  assert.equal(snap.accounts[1].enabled, false); // is_locked → 비활성 표기
+  assert.equal(snap.alerts.unresolved, 3);
+  assert.equal(snap.pools.length, 0);            // 용량 0 오표시 방지 — pools 로 넣지 않음
+  assert.equal(snap.extra.appliances[0].model, 'PowerStore 500T');
+  assert.equal(snap.sections.capacity, 'ok');
+});
+
+test('normalizePowerstore: 전 섹션 부재면 ok=false(부분 실패 은폐 금지)', async () => {
+  const { normalizePowerstore } = await import('../src/storage/collectors/powerstore.js');
+  const snap = normalizePowerstore({ id: 'ps-2', type: 'powerstore', name: 'x' }, {});
+  assert.equal(snap.ok, false);
+  assert.ok(snap.error);
+});
+
+test('normalizeUnity: entries 포장 해제 + 풀/SP 헬스/용량 정규화', async () => {
+  const { normalizeUnity } = await import('../src/storage/collectors/unity.js');
+  const wrap = (list) => ({ entries: list.map((content) => ({ content })) });
+  const dev = { id: 'un-1', type: 'unity480', name: 'Unity-480', host: '10.0.0.8' };
+  const snap = normalizeUnity(dev, {
+    system: wrap([{ name: 'UN480-A', model: 'Unity 480', serialNumber: 'FNM0012345' }]),
+    sw: wrap([{ version: '5.3.0.0.5.120' }]),
+    cap: wrap([{ sizeTotal: 200e12, sizeUsed: 150e12, sizeFree: 50e12 }]),
+    pools: wrap([{ name: 'Pool-1', sizeTotal: 120e12, sizeUsed: 90e12 }, { name: 'Pool-2', sizeTotal: 80e12, sizeUsed: 60e12 }]),
+    sps: wrap([{ name: 'SP A', health: { value: 5 } }, { name: 'SP B', health: { value: 20 } }]),
+    users: wrap([{ name: 'admin' }]),
+    alerts: wrap([{ id: 'a1' }]),
+  });
+  assert.equal(snap.ok, true);
+  assert.equal(snap.serial, 'FNM0012345');
+  assert.equal(snap.version, '5.3.0.0.5.120');
+  assert.equal(snap.capacity.pct, 75);
+  assert.equal(snap.pools.length, 2);
+  assert.equal(snap.pools[0].pct, 75);
+  assert.equal(snap.nodes.count, 2);
+  assert.equal(snap.nodes.unhealthy, 1);          // health.value 20 → 비정상 집계
+  assert.equal(snap.nodes.list[1].health, 'health:20'); // 모르는 값은 그대로 노출(정직 표기)
+  assert.equal(snap.alerts.unresolved, 1);
+});
+
+test('normalizeUnity: 빈 응답이면 ok=false, extra.model 없음', async () => {
+  const { normalizeUnity } = await import('../src/storage/collectors/unity.js');
+  const snap = normalizeUnity({ id: 'un-2', type: 'unity480', name: 'x' }, {});
+  assert.equal(snap.ok, false);
+});
+
+test('types: powerstore/unity480 구현 플립 — 등록 가능(v2.309)', async () => {
+  const { isImplementedType } = await import('../src/storage/types.js');
+  assert.equal(isImplementedType('powerstore'), true);
+  assert.equal(isImplementedType('unity480'), true);
+  assert.equal(isImplementedType('vmax'), false); // 나머지는 여전히 예정
 });
