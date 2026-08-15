@@ -130,6 +130,11 @@ export function normalizeIsilon(device, raw) {
 }
 
 export async function collect(device) {
+  // 수집 방식 분기(v2.304): 기본 ssh(isi status 파싱 — isilonSsh.js), 'api' 선택 시 아래 REST 경로.
+  if (device.collectMethod !== 'api') {
+    const { collectViaSsh } = await import('./isilonSsh.js');
+    return collectViaSsh(device);
+  }
   const raw = { config: null, stats: null, nodes: null, nodeStats: null, users: null, pools: null, events: null };
   const snap = emptySnapshot(device);
   const trySection = async (key, fn) => {

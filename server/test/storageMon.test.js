@@ -13,6 +13,7 @@ const reg = await import('../src/storage/registry.js');
 const { normalizeIsilon } = await import('../src/storage/collectors/isilon.js');
 const { STORAGE_TYPES, emptySnapshot, isImplementedType } = await import('../src/storage/types.js');
 const { saveEdgeStorage, edgeStorageSnapshots } = await import('../src/central/storageEdge.js');
+const { parseIsiStatus, parseSize, parseBps, normalizeIsiStatus } = await import('../src/storage/collectors/isilonSsh.js');
 
 test('타입 카탈로그 — isilon 구현·로드맵 7종 예정(등록은 구현 타입만)', () => {
   assert.ok(isImplementedType('isilon'));
@@ -131,4 +132,97 @@ test('중앙 엣지 저장소 — 인증된 agent 로 출처 각인 + 평탄화�
   assert.equal(flat.length, 1);
   assert.equal(flat[0].agent, 'wa-edge', 'body 의 agent 가 아니라 저장 키(인증 agent)로 덮임');
   assert.ok(flat[0].reportedAt > 0 && flat[0].staleMs >= 0);
+});
+
+/* ── SSH 모드(isi status 파싱, v2.304) — 사용자 실물 샘플 2종 고정 ─────────────── */
+
+// 샘플 A(2026-08-15 스크린샷 #2): SSD 스토리지 0(n/a)·L3 캐시 노드·VHS·효율 지표. 노드 2행 발췌.
+const SAMPLE_A = `LGES-bigdata-archive-2# isi status
+Cluster Name: LGES-bigdata-archive
+Cluster Health:     [  OK ]
+Data Reduction:     1.00 : 1
+Storage Efficiency: 0.83 : 1
+Cluster Storage:  HDD                 SSD Storage
+Size:             2.5P (2.5P Raw)     0 (0 Raw)
+VHS Size:         15.4T
+Used:             55.1T (2%)          0 (n/a)
+Avail:            2.5P (98%)          0 (n/a)
+
+                  Health Ext  Throughput (bps)  HDD Storage      SSD Storage
+ID |IP Address    |DASR |C/N|  In   Out  Total| Used / Size     |Used / Size
+---+--------------+-----+---+-----+-----+-----+-----------------+-----------------
+  1|10.94.42.184  | OK  | C |    0| 260k| 260k| 2.0T/ 107T( 2%)|      L3:  373G
+  2|10.94.42.185  | OK  | C |    0|56.1k|56.1k| 2.6T/ 107T( 2%)|      L3:  373G
+---+--------------+-----+---+-----+-----+-----+-----------------+-----------------
+Cluster Totals:                 |    0| 2.2M| 2.2M|55.1T/ 2.5P( 2%)|   L3:  8.7T
+`;
+
+// 샘플 B(스크린샷 #1 계열): SSD 스토리지 풀 보유 + 무디스크(No Storage HDDs) 노드 혼재.
+const SAMPLE_B = `Cluster Name: WA-ISI
+Cluster Health:     [  OK ]
+Cluster Storage:  HDD                 SSD Storage
+Size:             6.1P (6.1P Raw)     282.8T (293.5T Raw)
+VHS Size:         26.6T
+Used:             5.0P (81%)          239.8T (85%)
+Avail:            1.1P (19%)          43.0T (15%)
+
+  1|10.94.41.202  | OK  | C |    0| 463M| 463M|(No Storage HDDs)|17.6T/20.7T( 85%)
+  5|10.94.41.206  | OK  | C | 4.5M| 139k| 4.7M|87.9T/ 108T( 81%)|      L3:  1.5T
+ 20|10.94.41.191  | -A- | N |48.4k|78.1M|78.2M|86.8T/ 108T( 80%)|      L3:  1.5T
+`;
+
+test('parseSize/parseBps — isi 표기 단위(저장=1024·네트워크=1000)', () => {
+  assert.equal(parseSize('2.5P'), Math.round(2.5 * 1024 ** 5));
+  assert.equal(parseSize('373G'), Math.round(373 * 1024 ** 3));
+  assert.equal(parseSize('0'), 0);
+  assert.equal(parseBps('260k'), 260000);
+  assert.equal(parseBps('2.2M'), 2200000);
+  assert.equal(parseBps('0'), 0);
+});
+
+test('parseIsiStatus 샘플A — SSD 0(n/a)·VHS·효율·L3 노드·클러스터 L3 합계', () => {
+  const p = parseIsiStatus(SAMPLE_A);
+  assert.equal(p.name, 'LGES-bigdata-archive');
+  assert.equal(p.health, 'OK');
+  assert.equal(p.dataReduction, '1.00:1');
+  assert.equal(p.storageEfficiency, '0.83:1');
+  assert.equal(p.hdd.sizeBytes, Math.round(2.5 * 1024 ** 5));
+  assert.equal(p.hdd.usedPct, 2);
+  assert.equal(p.ssd, null, 'SSD 스토리지 0 → 풀 없음(0TB 오표시 금지)');
+  assert.equal(p.vhsBytes, Math.round(15.4 * 1024 ** 4));
+  assert.equal(p.l3TotalBytes, Math.round(8.7 * 1024 ** 4));
+  assert.equal(p.nodes.length, 2, '노드 수 가변 — 행 수만큼');
+  assert.equal(p.nodes[0].ip, '10.94.42.184');
+  assert.equal(p.nodes[0].outBps, 260000);
+  assert.equal(p.nodes[0].hdd.pct, 2);
+  assert.equal(p.nodes[0].ssd, null);
+  assert.equal(p.nodes[0].l3Bytes, Math.round(373 * 1024 ** 3), 'L3 캐시 노드 표기');
+});
+
+test('parseIsiStatus 샘플B — 무디스크 노드·SSD 풀·비정상 헬스(-A-)·N(미연결)', () => {
+  const p = parseIsiStatus(SAMPLE_B);
+  assert.equal(p.ssd.sizeBytes, Math.round(282.8 * 1024 ** 4));
+  assert.equal(p.ssd.usedPct, 85);
+  assert.equal(p.nodes.length, 3);
+  assert.equal(p.nodes[0].hdd, null, '(No Storage HDDs) → HDD 없음');
+  assert.equal(p.nodes[0].ssd.pct, 85);
+  assert.equal(p.nodes[1].l3Bytes, Math.round(1.5 * 1024 ** 4));
+  assert.equal(p.nodes[2].health, '-A-', 'DASR 플래그 원문 보존(Attention)');
+  assert.equal(p.nodes[2].ext, 'N');
+  const snap = normalizeIsiStatus({ id: 'st-s', type: 'isilon', name: '등록명' }, p, { version: '9.4.0.0' });
+  assert.equal(snap.ok, true);
+  assert.equal(snap.name, 'WA-ISI');
+  assert.equal(snap.nodes.unhealthy, 1, '-A- 노드는 비정상 집계');
+  assert.equal(snap.media.ssd.pct, 85);
+  assert.equal(snap.capacity.totalBytes, p.hdd.sizeBytes + p.ssd.sizeBytes, '전체=HDD+SSD 합');
+  assert.equal(snap.extra.collectMethod, 'ssh');
+});
+
+test('레지스트리 — collectMethod 기본 ssh·api 선택·sshPort 클램프(v2.304)', () => {
+  const d = reg.saveDevice({ type: 'isilon', name: 'SSH-DEV', host: '10.40.0.5', username: 'root', password: 'x' });
+  assert.equal(d.collectMethod, 'ssh', '기본 ssh(사용자 정확성 기준)');
+  assert.equal(d.sshPort, 22);
+  const d2 = reg.saveDevice({ id: d.id, type: 'isilon', name: 'SSH-DEV', host: '10.40.0.5', username: 'root', collectMethod: 'api', sshPort: 99999 });
+  assert.equal(d2.collectMethod, 'api');
+  assert.equal(d2.sshPort, 65535, '포트 상한 클램프');
 });

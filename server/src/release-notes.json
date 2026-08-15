@@ -1,6 +1,17 @@
 {
   "notes": [
     {
+      "version": "2.304.0",
+      "date": "2026-08-15",
+      "title": "스토리지 모니터링 — SSH 수집 모드(isi status 파싱, 기본) 추가",
+      "notes": [
+        "Isilon 수집에 SSH 모드를 추가하고 기본값으로 했습니다 — 장비에 SSH로 접속해 운영자가 실제로 보는 'isi status' 출력을 파싱합니다(사용자 지정: REST 통계 파생보다 화면 일치가 정확 기준). 장비 등록에서 수집 방식(SSH/REST API)과 SSH 포트를 선택할 수 있으며, 기존 REST API 모드도 그대로 유지됩니다.",
+        "isi status에서 얻는 항목: Cluster Health · Data Reduction · Storage Efficiency · VHS Size · HDD/SSD 풀(Size/Used/%) · 노드별 표(ID·IP·Health DASR·Ext C/N·처리량 In/Out·노드별 HDD/SSD·L3 캐시) · 클러스터 L3 합계. 노드 수는 가변 처리(행 수만큼 파싱 — 요구사항). 무디스크 노드(No Storage HDDs)·SSD 0(n/a)·L3 표기 전부 지원. 부가로 isi version(버전)·isi auth users list(계정 목록)도 함께 수집합니다(실패 시 해당 섹션만 생략 표기).",
+        "화면 추가: 상세 모달 상단에 Cluster Health/Data Reduction/Storage Efficiency/VHS/L3 합계, 노드 표에 Ext(C/N) 컬럼과 L3 캐시 표기. SSH 실행은 GPU 게스트 수집과 같은 기존 SSH 인프라를 재사용합니다.",
+        "파서는 순수 함수로 분리해 사용자 제공 실물 샘플 2종(SSD 0 클러스터·SSD 풀+무디스크 노드 혼재)을 회귀 테스트로 고정했습니다(신규 4건 — isi status 형식이 버전에 따라 달라지면 테스트가 즉시 위치를 알려줌). 서버 915·웹 38 통과."
+      ]
+    },
+    {
       "version": "2.303.0",
       "date": "2026-08-15",
       "title": "스토리지 모니터링 — HDD/SSD 풀 분리 용량 + 노드별 상세(IP·상태·처리량·노드별 풀)",
