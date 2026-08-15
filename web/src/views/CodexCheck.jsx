@@ -42,7 +42,7 @@ export default function CodexCheck() {
 
   return (
     <>
-      <div className="section-title">🛡️ Codex 보안·완성도 점검</div>
+      <div className="section-title">🛡️ 보안·완성도 점검</div>
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="flex between wrap gap">
           <div>
