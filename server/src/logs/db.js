@@ -64,7 +64,9 @@ function initSqlite() {
       kind: 'sqlite',
       insertMany: (rows) => { db.exec('BEGIN'); try { for (const r of rows) ins.run(r.vcenterId, r.key || `${r.ts}:${(r.message || '').slice(0, 40)}`, r.ts, r.severity, r.type, r.user, r.entity, r.message); db.exec('COMMIT'); } catch (e) { try { db.exec('ROLLBACK'); } catch { /* */ } throw e; } },
       lastTs: (vc) => Number(lastTsStmt.get(vc)?.mx || 0),
-      query: (f = {}, limit = 200, offset = 0) => { const { where, params } = filterSql(f); return db.prepare(`SELECT vcenterId,ts,severity,type,user,entity,message FROM events ${where} ORDER BY ts DESC LIMIT ? OFFSET ?`).all(...params, limit, offset); },
+      // rowid 타이브레이커: ts 동률 행이 많은 로그 특성상 ORDER BY ts 만으로는 OFFSET 페이징이
+      // 청크 간 중복/누락될 수 있다(정렬이 비결정적) — CSV 청크 내보내기·UI 페이징 안정성용.
+      query: (f = {}, limit = 200, offset = 0) => { const { where, params } = filterSql(f); return db.prepare(`SELECT vcenterId,ts,severity,type,user,entity,message FROM events ${where} ORDER BY ts DESC, rowid DESC LIMIT ? OFFSET ?`).all(...params, limit, offset); },
       count: (f = {}) => { const { where, params } = filterSql(f); return Number(db.prepare(`SELECT COUNT(*) n FROM events ${where}`).get(...params)?.n || 0); },
       meta: () => { const r = metaStmt.get(); const vcs = vcStmt.all().map((x) => ({ vcenterId: x.vcenterId, count: Number(x.n), lastTs: Number(x.mx) })); return { count: Number(r?.n || 0), firstTs: r?.mn || null, lastTs: r?.mx || null, vcenters: vcs }; },
       prune: (beforeTs) => { const r = prune.run(beforeTs); return Number(r?.changes || 0); },

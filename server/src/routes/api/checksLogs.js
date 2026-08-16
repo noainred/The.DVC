@@ -125,13 +125,33 @@ api.get('/tools/vclogs/export.csv', async (req, res) => {
     const f = { vcenterId: req.query.vcenterId || '', severity: req.query.severity || '', q: req.query.q || '',
       since: req.query.since ? Number(req.query.since) : 0, until: req.query.until ? Number(req.query.until) : 0 };
     scopeLogFilter(req, f); // scope 화이트리스트 강제(범위 밖 로그 CSV 유출 차단)
-    const rows = db.query(f, 100_000, 0);
     const esc = (v) => `"${guardCell(v).replace(/"/g, '""')}"`; // guardCell: 수식 인젝션 방어(로그 user/entity/message 는 외부 입력)
-    const csv = ['time,vcenter,severity,type,user,entity,message',
-      ...rows.map((r) => [new Date(r.ts).toISOString(), r.vcenterId, r.severity, r.type, r.user, r.entity, r.message].map(esc).join(','))].join('\n');
+    // 과거: 10만 행 1회 조회 + 전체 join → 수십 MB 문자열을 만드는 동안 이벤트 루프 정지.
+    // gpuSeriesExport 패턴: 청크 조회 + res.write 스트리밍 + 청크 사이 setImmediate 양보 +
+    // 행 상한(초과 시 잘림을 CSV 안에 명시 — 잘린 결과를 완전한 것처럼 주지 않는다).
+    const MAX = Math.max(1000, Number(process.env.VCLOGS_EXPORT_MAX_ROWS) || 100_000);
+    const CHUNK = 20_000;
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="vcenter-logs-${new Date().toISOString().slice(0, 10)}.csv"`);
-    res.send('﻿' + csv); // BOM(엑셀 한글)
-  } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+    res.write('﻿time,vcenter,severity,type,user,entity,message\n'); // BOM(엑셀 한글)
+    let offset = 0;
+    for (;;) {
+      if (res.destroyed) return; // 클라이언트 중단 시 즉시 종료(불필요한 조회 방지)
+      const take = Math.min(CHUNK, MAX - offset);
+      if (take <= 0) { res.write(`"(행 상한 ${MAX.toLocaleString()}건에서 잘렸습니다 — 기간을 좁혀 다시 내보내세요)"\n`); break; }
+      const rows = db.query(f, take, offset);
+      if (rows.length) {
+        const ok = res.write(rows.map((r) => [new Date(r.ts).toISOString(), r.vcenterId, r.severity, r.type, r.user, r.entity, r.message].map(esc).join(',')).join('\n') + '\n');
+        if (!ok) await new Promise((resolve) => res.once('drain', resolve)); // 소켓 백프레셔(느린 클라이언트에 수십 MB 버퍼링 방지)
+      }
+      offset += rows.length;
+      if (rows.length < take) break;
+      await new Promise((resolve) => setImmediate(resolve)); // 이벤트 루프 양보(다른 사용자 요청 처리)
+    }
+    res.end();
+  } catch (e) {
+    if (!res.headersSent) res.status(500).json({ ok: false, reason: e.message });
+    else try { res.destroy(e); } catch { /* 이미 종료 */ }
+  }
 });
 }
