@@ -49,11 +49,39 @@ remoteRouter.get('/mappings', (req, res) => {
 // TCP port. Used to colour the VM "원격 접속" button (blue=open, red=closed).
 // 선행 '-'를 막아 ping/포트체크에 플래그(인자) 주입을 차단(첫 글자는 영숫자/IP만).
 const SAFE_HOST = /^[A-Za-z0-9._:][A-Za-z0-9._:-]*$/;
+
+/**
+ * targetHost 의 사용자 scope 검사(v2.320, 2026-08-13 감사 보류 갭 적용 — 순수, 테스트 고정).
+ * 범위 계정은 **허용 vCenter 인벤토리에 실재하는 대상**(VM 의 IP/이름 또는 호스트 이름)만
+ * 프로브/터널 생성 가능 — 임의 사내 IP 도달성 스캔(정찰)·범위 밖 피벗 준비를 차단한다.
+ * 인벤토리에 없는 대상은 범위 계정에겐 거부('vCenter 귀속 없는 데이터 미노출' 규칙과 동일 취지).
+ * 전체 범위 계정(allowed=null)은 기존 신뢰 모델 유지(임의 대상 허용 — 변화 없음).
+ * @returns {string|null} 거부 사유(존재 여부를 흘리지 않는 일반 문구) 또는 null(허용)
+ */
+export function targetHostScopeIssue(snap, allowedSet, targetHost) {
+  if (!allowedSet) return null;
+  const t = String(targetHost || '').toLowerCase();
+  for (const vm of snap.vms || []) {
+    if (!allowedSet.has(vm.vcenterId)) continue;
+    const ips = vm.ipAddresses?.length ? vm.ipAddresses : (vm.ipAddress ? [vm.ipAddress] : []);
+    if (ips.some((ip) => String(ip).toLowerCase() === t) || String(vm.name || '').toLowerCase() === t) return null;
+  }
+  for (const h of snap.hosts || []) {
+    if (!allowedSet.has(h.vcenterId)) continue;
+    if (String(h.name || '').toLowerCase() === t) return null; // 호스트 name 은 통상 FQDN/IP
+  }
+  return '범위 내 vCenter 의 VM/호스트(IP·이름)만 대상으로 할 수 있습니다.';
+}
 // 프록시에서 SSH로 ping/포트체크를 대행 — 내부망 도달성 탐침이므로 admin/operator만(감사 H3/H7).
 remoteRouter.post('/probe', requirePerm('remote.access'), async (req, res) => {
   const { vcenterId, targetHost } = req.body || {};
   const targetPort = Math.min(65535, Math.max(1, Number((req.body || {}).targetPort) || 22));
   if (!targetHost || !SAFE_HOST.test(targetHost)) return res.status(400).json({ ok: false, reason: '대상 호스트가 올바르지 않습니다.' });
+  {
+    // v2.320 scope: 범위 계정의 내부망 도달성 스캔 차단(형식 검증만으로는 임의 IP 프로브 가능했음).
+    const issue = targetHostScopeIssue(store.get(), scopedVcenterIds(req.user, store.get()), targetHost);
+    if (issue) return res.status(403).json({ ok: false, reason: issue });
+  }
   const proxy = resolveProxy(vcenterId);
   if (!proxy.deploy?.host || !proxy.deploy?.username) {
     return res.json({ ok: false, method: 'none', proxyName: proxy.name, reason: `프록시 '${proxy.name}'에 SSH(자동배포) 설정이 없어 사전 점검을 할 수 없습니다.` });
@@ -181,6 +209,11 @@ remoteRouter.post('/quick-connect', requirePerm('remote.access'), async (req, re
   const proto = protocol === 'rdp' ? 'rdp' : 'ssh';
   const targetPort = Number((req.body || {}).targetPort) || (proto === 'rdp' ? 3389 : 22);
   if (!targetHost) return res.status(400).json({ ok: false, reason: '대상 IP가 필요합니다.' });
+  {
+    // v2.320 scope: 범위 계정은 범위 내 인벤토리 대상에만 터널 매핑 생성(범위 밖 피벗 준비 차단).
+    const issue = targetHostScopeIssue(store.get(), scopedVcenterIds(req.user, store.get()), targetHost);
+    if (issue) return res.status(403).json({ ok: false, reason: issue });
+  }
 
   // Reuse this user's existing mapping for the same target, else create an
   // ephemeral one owned by them (auto-removed 1 day after last use).

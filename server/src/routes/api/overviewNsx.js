@@ -7,6 +7,7 @@ import { nsxStore } from '../../nsx/store.js';
 import { loadRegistry as loadNsxRegistry } from '../../nsx/registry.js';
 import { fetchGroupMembers } from '../../nsx/client.js';
 import { memoJson, hash, scopeKey } from './shared.js';
+import { visibleNsxManagers, managerInScope, scopedNsxRollup } from '../../nsx/scope.js';
 
 export function registerOverviewNsx(api) {
 
@@ -74,26 +75,39 @@ api.get('/overview', (req, res) => memoJson(req, res, 'overview', (snap) => {
 
 // NSX overview — aggregated snapshot from the NSX Manager poller (separate from
 // vCenter). Optional ?managerId= / ?region= scoping for the detail tables.
+// v2.320(2026-08-13 감사 보류 갭 적용): 범위 계정에는 귀속 매니저(vcenterId∈허용 ∪
+// region∈허용 vCenter region)만 노출 — 하위 리소스(게이트웨이/세그먼트/DFW/보안그룹)·
+// rollup·collectionErrors 도 보이는 매니저 기준으로 절단(nsx/scope.js — 순수 판정 테스트 고정).
 api.get('/nsx', (req, res) => {
   const snap = nsxStore.get();
   const { managerId, region } = req.query;
+  const allowed = scopedVcenterIds(req.user, store.get());
+  const base = visibleNsxManagers(snap.managers, store.get().vcenters, allowed);
   const mIds = new Set(
-    snap.managers
+    base
       .filter((m) => (!managerId || m.id === managerId) && (!region || m.region === region))
       .map((m) => m.id),
   );
-  const scoped = managerId || region;
+  // 범위 계정은 쿼리 유무와 무관하게 항상 mIds 필터를 강제한다(요청 필터보다 scope 가 먼저 —
+  // CLAUDE.md 규칙). 전체 범위 + 쿼리 없음일 때만 기존처럼 전량 반환.
+  const scoped = !!allowed || managerId || region;
+  const managers = base.filter((m) => mIds.has(m.id));
+  const gateways = scoped ? snap.gateways.filter((g) => mIds.has(g.managerId)) : snap.gateways;
+  const segments = scoped ? snap.segments.filter((s) => mIds.has(s.managerId)) : snap.segments;
+  const transportNodes = scoped ? snap.transportNodes.filter((t) => mIds.has(t.managerId)) : snap.transportNodes;
   res.json({
     generatedAt: snap.generatedAt,
     source: snap.source,
-    rollup: snap.rollup,
-    managers: snap.managers.filter((m) => mIds.has(m.id)),
-    gateways: scoped ? snap.gateways.filter((g) => mIds.has(g.managerId)) : snap.gateways,
-    segments: scoped ? snap.segments.filter((s) => mIds.has(s.managerId)) : snap.segments,
-    transportNodes: scoped ? snap.transportNodes.filter((t) => mIds.has(t.managerId)) : snap.transportNodes,
+    // rollup 은 전 함대 집계 — 범위 계정에는 보이는 리소스로 재계산해 총계 유출을 막는다.
+    rollup: allowed ? scopedNsxRollup({ managers, gateways, segments, transportNodes }) : snap.rollup,
+    managers,
+    gateways,
+    segments,
+    transportNodes,
     dfw: scoped ? (snap.dfw || []).filter((p) => mIds.has(p.managerId)) : (snap.dfw || []),
     securityGroups: scoped ? (snap.securityGroups || []).filter((g) => mIds.has(g.managerId)) : (snap.securityGroups || []),
-    collectionErrors: snap.collectionErrors,
+    // 수집 오류에는 매니저 이름/호스트가 실린다 — 범위 계정에는 보이는 매니저 것만.
+    collectionErrors: allowed ? (snap.collectionErrors || []).filter((e) => mIds.has(e.managerId)) : snap.collectionErrors,
   });
 });
 
@@ -112,6 +126,11 @@ api.get('/nsx/group-members', async (req, res) => {
   }
   const mgr = loadNsxRegistry().find((m) => m.id === managerId);
   if (!mgr) return res.status(404).json({ error: `NSX Manager를 찾을 수 없습니다: ${managerId}` });
+  // v2.320 scope: 범위 계정은 귀속(vcenterId/region) 범위 안 매니저의 그룹만 조회 — 범위 밖은
+  // 403 이 아니라 **404**(존재 은닉 — 단건 라우트 규칙). 라이브 VM 멤버 IP 유출 차단.
+  if (!managerInScope(mgr, store.get().vcenters, scopedVcenterIds(req.user, store.get()))) {
+    return res.status(404).json({ error: `NSX Manager를 찾을 수 없습니다: ${managerId}` });
+  }
   try {
     const data = await fetchGroupMembers(mgr, rawId);
     res.json({ mock: false, ...data });
