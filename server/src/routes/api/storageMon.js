@@ -6,7 +6,8 @@ import { scopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { STORAGE_TYPES } from '../../storage/types.js';
-import { listDevices, saveDevice, deleteDevice } from '../../storage/registry.js';
+import { listDevices, listDevicesWithSecrets, saveDevice, deleteDevice, deviceInputIssue } from '../../storage/registry.js';
+import { requireSettingsOwner } from '../admin/shared.js';
 import { localSnapshots, dropSnapshot } from '../../storage/store.js';
 import { collectDeviceNow, storagePollerStatus, pollStorageOnce } from '../../storage/poller.js';
 import { edgeStorageSnapshots } from '../../central/storageEdge.js';
@@ -15,7 +16,7 @@ import { areaSummary, areaJson, capacityHistory, dbAvailable } from '../../stora
 import { AREA_LABEL } from '../../storage/onefsCatalog.js';
 import { listDatacenters } from '../../datacenter/store.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
-import { devicesToCsv, sampleCsv, parseDevicesCsv, rowIssue } from '../../storage/csv.js';
+import { devicesToCsv, sampleCsv, parseDevicesCsv, analyzeImport } from '../../storage/csv.js';
 import { requestCollect, hasPendingRequest } from '../../storage/collectRequests.js';
 
 const adminOnly = requireRole('admin');
@@ -124,12 +125,24 @@ api.post('/tools/storage/devices/:id/collect', adminOnly, async (req, res) => {
 
 const dcNameMap = () => { try { const m = new Map(listDatacenters().map((x) => [x.id, x.name || x.id])); return (id) => m.get(id) || id || ''; } catch { return (id) => id || ''; } };
 
-/** 현재 등록 장비를 CSV 로 내보내기(비밀번호 제외 — listDevices 계약과 동일). */
-api.get('/tools/storage/devices/export.csv', adminOnly, (_req, res) => {
-  const csv = devicesToCsv(listDevices(), dcNameMap());
-  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', 'attachment; filename="storage-devices.csv"');
-  res.send(csv);
+/**
+ * 현재 등록 장비를 CSV 로 내보내기. 기본은 비밀번호 제외(listDevices 계약).
+ * ?passwords=1(v2.317, 사용자 요구 '포함 여부 선택'): 평문 비밀번호 포함 — 자격증명 일괄
+ * 덤프이므로 **requireSettingsOwner**(백업 라우트와 동일 게이트 — server/CLAUDE.md 규칙)를
+ * 추가로 통과해야 하고 감사로그를 남긴다. admin 이어도 소유자가 아니면 403.
+ */
+api.get('/tools/storage/devices/export.csv', adminOnly, (req, res) => {
+  const withPw = String(req.query.passwords || '') === '1';
+  const send = () => {
+    const devices = withPw ? listDevicesWithSecrets() : listDevices();
+    const csv = devicesToCsv(devices, dcNameMap(), { includePasswords: withPw });
+    logAudit({ user: req.user?.username, action: withPw ? '스토리지 CSV 내보내기(비밀번호 포함)' : '스토리지 CSV 내보내기', detail: `${devices.length}대` });
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="storage-devices${withPw ? '-with-passwords' : ''}.csv"`);
+    res.send(csv);
+  };
+  if (withPw) return requireSettingsOwner(req, res, send);
+  send();
 });
 
 /** 샘플 CSV 템플릿 다운로드 — 헤더 + 컬럼 설명 주석 + 예시 2행. */
@@ -143,6 +156,10 @@ api.get('/tools/storage/devices/sample.csv', adminOnly, (_req, res) => {
  * CSV 일괄 가져오기 — body.csv 텍스트를 파싱해 행마다 saveDevice.
  * (host+type) 동일 장비는 수정(update), 없으면 추가. datacenter 는 이름/ID 모두 해석.
  * 행별 성공/실패를 정직하게 반환(부분 성공 허용 — 한 행 오류가 전체를 막지 않음).
+ *
+ * body.dryRun=true(v2.317, 사용자 요구 '무결성 검사'): **저장하지 않고** 행별 판정만 반환.
+ * 검증 규칙은 실제 저장과 동일(registry.deviceInputIssue 단일 소스 — analyzeImport 주석) +
+ * 파일 내 중복(host+type) 검출. UI 는 검증 통과 후에만 실행 버튼을 활성화한다.
  */
 api.post('/tools/storage/devices/import', adminOnly, (req, res) => {
   const { rows, error } = parseDevicesCsv(String(req.body?.csv || ''));
@@ -164,10 +181,20 @@ api.post('/tools/storage/devices/import', adminOnly, (req, res) => {
   const key = (h, t) => `${h}|${t}`;
   const existing = new Map(listDevices().map((d) => [key(d.host, d.type), d.id]));
 
+  // 무결성 분석(드라이런·실제 가져오기 공용) — 실제 저장과 같은 검증 규칙을 탄다.
+  const { report, summary } = analyzeImport(rows, {
+    existingKey: (h, t) => existing.get(key(h, t)),
+    resolveDc,
+    validate: deviceInputIssue,
+  });
+  if (req.body?.dryRun) {
+    return res.json({ ok: true, dryRun: true, report, summary, total: rows.length });
+  }
+
   let added = 0, updated = 0; const failed = [];
   for (const row of rows) {
-    const issue = rowIssue(row);
-    if (issue) { failed.push({ line: row._line, name: row.name || row.host, reason: issue }); continue; }
+    const verdict = report.find((r) => r.line === row._line);
+    if (verdict?.action === 'error') { failed.push({ line: verdict.line, name: verdict.name, reason: verdict.reason }); continue; }
     const id = existing.get(key(row.host, row.type));
     const input = {
       id, type: row.type, name: row.name, host: row.host, username: row.username,

@@ -29,11 +29,14 @@ const bool = (v, dflt = true) => {
 };
 
 /**
- * 등록 장비 목록 → CSV 문자열(BOM + 헤더 + 행). password 는 값 없이 컬럼만 유지.
- * @param {Array} devices listDevices() 결과(비밀번호 미포함) + datacenter 이름 해석용 맵
+ * 등록 장비 목록 → CSV 문자열(BOM + 헤더 + 행).
+ * @param {Array} devices 기본은 listDevices() 결과(비밀번호 미포함). includePasswords 를 쓰려면
+ *   registry.listDevicesWithSecrets() 결과를 넘겨야 하며 **호출부가 소유자 게이트+감사로그를
+ *   책임진다**(v2.317 사용자 요구 '패스워드 포함 여부 선택' — 평문 자격증명 덤프이므로).
  * @param {(id:string)=>string} dcName datacenterId → 표시명(없으면 id 그대로)
+ * @param {{includePasswords?:boolean}} [opts] 기본 false — password 컬럼을 빈 값으로 유지.
  */
-export function devicesToCsv(devices, dcName = (x) => x) {
+export function devicesToCsv(devices, dcName = (x) => x, { includePasswords = false } = {}) {
   const lines = [csvLine(CSV_COLUMNS)];
   for (const d of devices) {
     lines.push(csvLine([
@@ -44,10 +47,48 @@ export function devicesToCsv(devices, dcName = (x) => x) {
       d.agent || '',                                            // 빈 값 = 중앙 직접
       d.enabled === false ? 'false' : 'true',
       d.note || '',
-      '',                                                       // password — 절대 내보내지 않음
+      includePasswords ? (d.password || '') : '',               // 기본: 절대 내보내지 않음(선택 시만)
     ]));
   }
   return CSV_BOM + lines.join('\r\n') + '\r\n';
+}
+
+/**
+ * 가져오기 무결성 검사(v2.317, 사용자 요구 — 저장 전 드라이런). 순수 함수(저장 없음).
+ * 행마다 실제 저장과 **같은 검증**(validate = registry.deviceInputIssue 주입)을 돌려
+ * 동작(add/update/error)을 판정한다 — 드라이런 통과 = 실제 가져오기 성공 보장(같은 규칙).
+ * 추가 검사: 파일 내부 중복(같은 host+type 이 두 번 나오면 뒤 행을 오류로 — 어느 행이
+ * 이기는지 모호한 채 덮어쓰는 사고 방지).
+ *
+ * @param {Array} rows parseDevicesCsv().rows
+ * @param {{existingKey:(h:string,t:string)=>string|undefined, resolveDc:(v:string)=>string,
+ *          validate:(input:object)=>string|null}} deps
+ * @returns {{report:Array, summary:{add:number,update:number,error:number,withPassword:number}}}
+ */
+export function analyzeImport(rows, { existingKey, resolveDc, validate }) {
+  const seenInFile = new Map(); // host|type → 첫 등장 행 번호(파일 내 중복 검출)
+  const report = [];
+  const summary = { add: 0, update: 0, error: 0, withPassword: 0 };
+  for (const row of rows) {
+    const base = { line: row._line, name: row.name || row.host, host: row.host, type: row.type, hasPassword: !!row._hasPassword };
+    const quick = rowIssue(row);
+    const k = `${row.host}|${row.type}`;
+    const dupLine = seenInFile.get(k);
+    let action = 'error'; let reason = null;
+    if (quick) reason = quick;
+    else if (dupLine) reason = `파일 내 중복 — ${dupLine}행과 같은 host+type(어느 행이 저장될지 모호)`;
+    else {
+      // 실제 저장과 동일한 입력 형태로 검증(datacenter 해석 포함) — 규칙 단일 소스.
+      reason = validate({ type: row.type, name: row.name, host: row.host, username: row.username,
+        password: row._hasPassword ? row.password : '', datacenterId: resolveDc(row.datacenter) });
+      if (!reason) action = existingKey(row.host, row.type) ? 'update' : 'add';
+    }
+    if (!dupLine) seenInFile.set(k, row._line);
+    if (row._hasPassword && action !== 'error') summary.withPassword++;
+    summary[action === 'error' ? 'error' : action]++;
+    report.push({ ...base, action, reason });
+  }
+  return { report, summary };
 }
 
 /** 샘플 CSV — 헤더 + 주석(설명) + 예시 2행. 관리자가 받아서 채워 넣는 템플릿. */
