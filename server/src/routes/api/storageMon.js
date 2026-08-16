@@ -13,7 +13,7 @@ import { edgeStorageSnapshots } from '../../central/storageEdge.js';
 import { areaSummary, areaJson, capacityHistory, dbAvailable } from '../../storage/db.js';
 import { AREA_LABEL } from '../../storage/onefsCatalog.js';
 import { listDatacenters } from '../../datacenter/store.js';
-import { listAgentTokens } from '../../central/agentTokens.js';
+import { knownAgentNames } from '../../central/knownAgents.js';
 
 const adminOnly = requireRole('admin');
 const fullScopeOnly = (req, res, next) => {
@@ -44,7 +44,9 @@ api.get('/tools/storage', fullScopeOnly, (_req, res) => {
     devices, orphans,
     types: STORAGE_TYPES,
     datacenters: (() => { try { return listDatacenters(); } catch { return []; } })(),
-    agents: (() => { try { return listAgentTokens().map((t) => t.agent); } catch { return []; } })(),
+    // 엣지 목록: per-agent 토큰뿐 아니라 중앙과 통신 중인 모든 알려진 엣지를 병합(v2.312 —
+    // iDRAC 위임과 동일 소스). 토큰 미발급(공유 CENTRAL_TOKEN) 환경에서도 엣지를 고를 수 있다.
+    agents: knownAgentNames(),
     poller: storagePollerStatus(),
   });
 });
