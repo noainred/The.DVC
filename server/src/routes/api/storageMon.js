@@ -14,6 +14,7 @@ import { areaSummary, areaJson, capacityHistory, dbAvailable } from '../../stora
 import { AREA_LABEL } from '../../storage/onefsCatalog.js';
 import { listDatacenters } from '../../datacenter/store.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
+import { devicesToCsv, sampleCsv, parseDevicesCsv, rowIssue } from '../../storage/csv.js';
 
 const adminOnly = requireRole('admin');
 const fullScopeOnly = (req, res, next) => {
@@ -78,6 +79,70 @@ api.post('/tools/storage/devices/:id/collect', adminOnly, async (req, res) => {
   } catch (e) { res.status(502).json({ ok: false, reason: e.message }); }
 });
 
+
+/* ── CSV 일괄 관리(v2.313, 사용자 요구) — 내보내기·샘플·가져오기. 전부 adminOnly(장비 구성). ── */
+
+const dcNameMap = () => { try { const m = new Map(listDatacenters().map((x) => [x.id, x.name || x.id])); return (id) => m.get(id) || id || ''; } catch { return (id) => id || ''; } };
+
+/** 현재 등록 장비를 CSV 로 내보내기(비밀번호 제외 — listDevices 계약과 동일). */
+api.get('/tools/storage/devices/export.csv', adminOnly, (_req, res) => {
+  const csv = devicesToCsv(listDevices(), dcNameMap());
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="storage-devices.csv"');
+  res.send(csv);
+});
+
+/** 샘플 CSV 템플릿 다운로드 — 헤더 + 컬럼 설명 주석 + 예시 2행. */
+api.get('/tools/storage/devices/sample.csv', adminOnly, (_req, res) => {
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="storage-devices-sample.csv"');
+  res.send(sampleCsv());
+});
+
+/**
+ * CSV 일괄 가져오기 — body.csv 텍스트를 파싱해 행마다 saveDevice.
+ * (host+type) 동일 장비는 수정(update), 없으면 추가. datacenter 는 이름/ID 모두 해석.
+ * 행별 성공/실패를 정직하게 반환(부분 성공 허용 — 한 행 오류가 전체를 막지 않음).
+ */
+api.post('/tools/storage/devices/import', adminOnly, (req, res) => {
+  const { rows, error } = parseDevicesCsv(String(req.body?.csv || ''));
+  if (error) return res.status(400).json({ ok: false, reason: error });
+  if (!rows.length) return res.status(400).json({ ok: false, reason: '가져올 데이터 행이 없습니다.' });
+
+  // datacenter 이름/ID → ID 해석 준비(이름 매칭은 대소문자 무시).
+  let dcs = [];
+  try { dcs = listDatacenters(); } catch { /* 목록 실패 시 원문 그대로 저장 */ }
+  const resolveDc = (v) => {
+    const s = String(v || '').trim();
+    if (!s) return '';
+    if (dcs.some((d) => d.id === s)) return s;
+    const byName = dcs.find((d) => String(d.name || '').toLowerCase() === s.toLowerCase());
+    return byName ? byName.id : s; // 못 찾으면 원문 유지(유효 ID 일 수 있음)
+  };
+  // (host+type) → 기존 장비 id 맵(멱등 update). 구분자 '|' — host 정규식(RE_HOST)이 배제하는
+  // 문자라 host/type 경계가 모호해지지 않는다(과거 NUL 구분자는 소스 NUL 금지 규칙 위반).
+  const key = (h, t) => `${h}|${t}`;
+  const existing = new Map(listDevices().map((d) => [key(d.host, d.type), d.id]));
+
+  let added = 0, updated = 0; const failed = [];
+  for (const row of rows) {
+    const issue = rowIssue(row);
+    if (issue) { failed.push({ line: row._line, name: row.name || row.host, reason: issue }); continue; }
+    const id = existing.get(key(row.host, row.type));
+    const input = {
+      id, type: row.type, name: row.name, host: row.host, username: row.username,
+      collectMethod: row.collectMethod, sshPort: row.sshPort, datacenterId: resolveDc(row.datacenter),
+      agent: row.agent, enabled: row.enabled, note: row.note,
+    };
+    if (row._hasPassword) input.password = row.password; // 비우면 기존 유지(saveDevice 규칙)
+    try {
+      saveDevice(input);
+      if (id) updated++; else added++;
+    } catch (e) { failed.push({ line: row._line, name: row.name || row.host, reason: e.message }); }
+  }
+  logAudit({ user: req.user?.username, action: '스토리지 장비 CSV 가져오기', detail: `추가 ${added}·수정 ${updated}·실패 ${failed.length}` });
+  res.json({ ok: true, added, updated, failed, total: rows.length });
+});
 
 /** 영역별 수집 현황 + 원문(이 노드 DB — 중앙 수집 장비 전용. 엣지 장비 원문은 엣지 DB 에 있음). */
 api.get('/tools/storage/devices/:id/areas', adminOnly, async (req, res) => {
