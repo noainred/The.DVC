@@ -223,9 +223,14 @@ api.get('/tools/storage/devices/:id/areas/json', adminOnly, async (req, res) => 
   res.json({ ok: true, ...row });
 });
 
-/** 용량 시계열(추이) — ?days=N (기본 30, 1~400). */
+/**
+ * 용량 시계열(추이) — ?days=N (기본 30, 1~400).
+ * v2.318(추이 그래프): 7일 초과 구간은 ~800점 목표로 시간 버킷 평균 다운샘플 — raw 는
+ * LIMIT 5000 에 앞부분만 잘려 장기 구간에서 최근 데이터가 안 보였다(db.js selCapBucket 주석).
+ */
 api.get('/tools/storage/devices/:id/history', fullScopeOnly, async (req, res) => {
   const days = Math.max(1, Math.min(400, Number(req.query.days) || 30));
-  res.json({ db: await dbAvailable(), points: await capacityHistory(req.params.id, Date.now() - days * 86400e3) });
+  const bucketMs = days <= 7 ? 0 : Math.ceil((days * 86400e3) / 800);
+  res.json({ db: await dbAvailable(), bucketMs, points: await capacityHistory(req.params.id, Date.now() - days * 86400e3, bucketMs) });
 });
 }

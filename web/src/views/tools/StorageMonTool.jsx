@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
 import { fetchJson, postJson, delJson, downloadFile } from '../../api.js';
 import { Loading, ErrorBox, Kpi, UsageCell, Modal } from '../../components/ui.jsx';
 
@@ -359,6 +360,9 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
             </div>
           )}
 
+          {/* 용량 추이 그래프(v2.318, 사용자 백로그 — history API 는 v2.308 완성) */}
+          <CapacityTrend deviceId={r.id} isEdge={!!r.agent} />
+
           {/* 노드별 상세(v2.303, 사용자 요구 — isi status 노드 표): ID·IP·상태·외부망 처리량·노드별 HDD/SSD
               v2.310 검증 반영: XtremIO 컨트롤러/Unity SP/PowerStore 노드는 name 이 유일 식별자인데
               (id 는 수집기 합성 순번, ip 는 비어 있을 수 있음) 표가 name 을 안 그려 사장됐다 —
@@ -570,6 +574,81 @@ function DeviceForm({ d, form, setForm, onSaved }) {
       {err && <div style={{ color: 'var(--red)', fontSize: 12.5, marginTop: 8 }}>⚠ {err}</div>}
       <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>비밀번호는 '설정 › 자격증명 저장 방식'의 정책(평문/암호화)에 따라 저장됩니다. host 변경 시 기존 비밀번호는 이월되지 않습니다(재입력 필요 — 보안 규칙).</div>
     </div>
+  );
+}
+
+/**
+ * 용량 추이 그래프(v2.318, 사용자 백로그) — 장비 상세 모달의 시계열 라인 차트.
+ *
+ * 데이터: GET /tools/storage/devices/:id/history (v2.308 capacity_history — 중앙 직접 수집분 +
+ * v2.318 부터 엣지 push 수신분도 중앙 DB 에 적재). 7일 초과 구간은 서버가 버킷 평균으로
+ * 다운샘플(~800점) — 원시 그대로면 장기 구간에서 최근이 잘려 나갔다.
+ *
+ * 색(dataviz 검증기 통과 — 다크 서피스 #0b1220 기준 전 체크 PASS):
+ *   사용 #3987e5(파랑) · HDD 사용 #d95926(오렌지) · SSD 사용 #199e70(아쿠아).
+ *   '전체'는 정체성 시리즈가 아니라 한계선(컨텍스트)이라 중립 회색 **점선**(점선=보조 인코딩 —
+ *   회색은 계열 색으로는 검증 FAIL 이지만 참조선으로는 의도된 중립). 시리즈 ≥2 라 범례 표시.
+ */
+function CapacityTrend({ deviceId, isEdge }) {
+  const [days, setDays] = useState(30);
+  const [d, setD] = useState(null);      // { db, points } — null = 로딩 전
+  const [err, setErr] = useState(null);
+  useEffect(() => {
+    let live = true;
+    setD(null); setErr(null);
+    fetchJson(`/tools/storage/devices/${encodeURIComponent(deviceId)}/history?days=${days}`)
+      .then((r) => { if (live) setD(r); })
+      .catch((e) => { if (live) setErr(e.message); });
+    return () => { live = false; };
+  }, [deviceId, days]);
+
+  const fmtT = (ts) => {
+    const dt = new Date(ts);
+    const p = (n) => String(n).padStart(2, '0');
+    if (days <= 1) return `${p(dt.getHours())}:${p(dt.getMinutes())}`;
+    if (days <= 7) return `${p(dt.getMonth() + 1)}.${p(dt.getDate())} ${p(dt.getHours())}시`;
+    if (days <= 90) return `${p(dt.getMonth() + 1)}.${p(dt.getDate())}`;
+    return `${String(dt.getFullYear()).slice(2)}.${p(dt.getMonth() + 1)}.${p(dt.getDate())}`;
+  };
+  const pts = (d?.points || []).map((p) => ({
+    t: fmtT(p.ts),
+    used: p.used_bytes, total: p.total_bytes,
+    hddUsed: p.hdd_used, ssdUsed: p.ssd_used,
+  }));
+  const hasHdd = pts.some((p) => p.hddUsed != null && p.hddUsed > 0);
+  const hasSsd = pts.some((p) => p.ssdUsed != null && p.ssdUsed > 0);
+  return (
+    <>
+      <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 6 }}>
+        <div className="section-title" style={{ fontSize: 13, margin: 0 }}>용량 추이</div>
+        {[[1, '1일'], [7, '1주'], [30, '1달'], [90, '3달'], [400, '400일']].map(([v, l]) => (
+          <button key={v} className={days === v ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '4px 10px', fontSize: 11.5 }} onClick={() => setDays(v)}>{l}</button>
+        ))}
+      </div>
+      {err ? <div className="muted" style={{ fontSize: 12, marginBottom: 12 }}>추이 조회 오류: {err}</div>
+        : !d ? <div className="muted" style={{ fontSize: 12, marginBottom: 12 }}>불러오는 중…</div>
+          : pts.length === 0 ? (
+            <div className="muted" style={{ fontSize: 12, marginBottom: 12 }}>
+              해당 기간 시계열 데이터가 없습니다(수집 누적 후 표시{isEdge ? ' — 엣지 장비는 v2.318 이후 push 수신분부터 중앙에 적재' : ''}).
+            </div>
+          ) : (
+            <div style={{ marginBottom: 12 }}>
+              <ResponsiveContainer width="100%" height={230}>
+                <LineChart data={pts} margin={{ top: 6, right: 12, left: 4, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.08)" />
+                  <XAxis dataKey="t" tick={{ fontSize: 11 }} minTickGap={44} />
+                  <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => tbFmt(v)} width={74} />
+                  <Tooltip contentStyle={{ background: '#0b1220', border: '1px solid #243049', fontSize: 12 }} formatter={(v) => tbFmt(v)} />
+                  <Legend wrapperStyle={{ fontSize: 11.5 }} />
+                  <Line type="monotone" dataKey="total" stroke="#8b93a7" strokeDasharray="5 4" dot={false} name="전체(한계)" isAnimationActive={false} />
+                  <Line type="monotone" dataKey="used" stroke="#3987e5" strokeWidth={2} dot={false} name="사용" isAnimationActive={false} />
+                  {hasHdd && <Line type="monotone" dataKey="hddUsed" stroke="#d95926" dot={false} name="HDD 사용" isAnimationActive={false} />}
+                  {hasSsd && <Line type="monotone" dataKey="ssdUsed" stroke="#199e70" dot={false} name="SSD 사용" isAnimationActive={false} />}
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+    </>
   );
 }
 
