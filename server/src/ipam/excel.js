@@ -15,7 +15,11 @@ export async function buildWorkbook(sheets) {
   wb.creator = 'VMware Global Monitoring Portal';
   wb.created = new Date();
 
+  let sheetNo = 0;
   for (const s of sheets) {
+    // 서브넷 수백 개 × 256행 × 9열(수십만 셀) 동기 생성이 이벤트 루프를 세우던 것 완화 —
+    // 4시트마다 한 번 양보해 다른 사용자 요청이 사이사이 처리되게 한다(결과물 동일).
+    if ((sheetNo++ & 3) === 3) await new Promise((resolve) => setImmediate(resolve));
     const name = s.subnet.replace(/[\\/?*[\]:]/g, '_').slice(0, 31);
     const ws = wb.addWorksheet(name, { views: [{ state: 'frozen', ySplit: 2 }] });
     ws.columns = [
