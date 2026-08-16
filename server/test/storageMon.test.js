@@ -663,3 +663,42 @@ test('collectRequests — 등록·agent 별 one-shot 인출·멱등·타 엣지 
   assert.deepEqual(cr.takeRequestsForAgent('other'), ['dev-3']);
   cr._resetForTest();
 });
+
+/* ─── v2.317: CSV 비밀번호 포함 내보내기(선택) + 가져오기 무결성 검사(드라이런) ─── */
+
+test('devicesToCsv includePasswords — 기본 제외, 옵션 시에만 포함(호출부 게이트 책임)', async () => {
+  const { devicesToCsv } = await import('../src/storage/csv.js');
+  const devs = [{ type: 'isilon', name: 'A', host: '10.0.0.1', username: 'root', password: 'Pw-Secret-1', collectMethod: 'ssh', sshPort: 22, enabled: true }];
+  assert.ok(!devicesToCsv(devs, (x) => x).includes('Pw-Secret-1'), '기본: 비밀번호 미포함');
+  assert.ok(devicesToCsv(devs, (x) => x, { includePasswords: true }).includes('Pw-Secret-1'), '옵션: 포함');
+});
+
+test('analyzeImport — 추가/수정/오류 판정 + 파일 내 중복 + 실제 저장과 같은 검증 규칙', async () => {
+  const { analyzeImport, parseDevicesCsv } = await import('../src/storage/csv.js');
+  const { deviceInputIssue } = await import('../src/storage/registry.js');
+  const csv = [
+    'type,name,host,username,password',
+    'isilon,NEW-1,10.50.0.1,root,pw1',        // 신규
+    'isilon,UPD-1,10.50.0.2,root,',           // 기존 존재 → 수정
+    'isilon,DUP,10.50.0.1,root,',             // 파일 내 중복(1행과 같은 host+type)
+    'netapp,BAD,10.50.0.3,root,',             // 미지 타입
+    'isilon,SSRF,127.0.0.1,root,',            // SSRF 차단(실제 저장과 같은 규칙 확인)
+    'isilon,NOPW-CTRL,10.50.0.4,root,"a\nb"', // 제어문자 비밀번호(따옴표 안 개행)
+  ].join('\n');
+  const { rows } = parseDevicesCsv(csv);
+  const { report, summary } = analyzeImport(rows, {
+    existingKey: (h, t) => (h === '10.50.0.2' && t === 'isilon' ? 'st-exist' : undefined),
+    resolveDc: (v) => v,
+    validate: deviceInputIssue,
+  });
+  const by = (name) => report.find((r) => r.name === name);
+  assert.equal(by('NEW-1').action, 'add');
+  assert.equal(by('NEW-1').hasPassword, true);
+  assert.equal(by('UPD-1').action, 'update');
+  assert.equal(by('DUP').action, 'error');
+  assert.match(by('DUP').reason, /파일 내 중복/);
+  assert.match(by('BAD').reason, /알 수 없는/);
+  assert.match(by('SSRF').reason, /차단/);
+  assert.match(by('NOPW-CTRL').reason, /제어문자/);
+  assert.deepEqual(summary, { add: 1, update: 1, error: 4, withPassword: 1 });
+});

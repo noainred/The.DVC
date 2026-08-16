@@ -53,20 +53,45 @@ export function listDevices() {
   return load().devices.map(({ password, ...d }) => ({ ...d, hasPassword: !!password }));
 }
 export function getDeviceWithSecret(id) { return load().devices.find((d) => d.id === id) || null; } // 수집기 전용
+/**
+ * 평문 비밀번호 포함 전체 목록(v2.317) — **CSV '비밀번호 포함 내보내기' 전용**.
+ * 자격증명 일괄 덤프이므로 호출부는 반드시 requireSettingsOwner(백업 라우트와 동일 게이트 —
+ * server/CLAUDE.md '백업 라우트도 소유자 경계에 포함' 규칙) + 감사로그를 거쳐야 한다.
+ * 다른 용도(UI 목록·집계)에 쓰지 말 것 — 그쪽은 listDevices(비밀번호 미반환)가 계약.
+ */
+export function listDevicesWithSecrets() { return load().devices.map((d) => ({ ...d })); }
+
+/**
+ * 장비 입력 검증(순수 — 저장하지 않음). 오류면 사유 문자열, 정상이면 null.
+ * saveDevice 와 CSV 가져오기 '무결성 검증(드라이런)'(v2.317)이 **같은 함수**를 쓴다 —
+ * 검증 규칙이 두 곳에 복사되면 드라이런은 통과했는데 실제 저장은 실패하는 어긋남이 생긴다.
+ */
+export function deviceInputIssue(input = {}) {
+  const type = String(input.type || '').trim();
+  if (!isKnownType(type)) return `알 수 없는 스토리지 타입: ${type}`;
+  if (!isImplementedType(type)) return `'${type}' 수집기는 아직 미구현입니다(카탈로그의 '예정' 타입 — 등록은 구현 후에).`;
+  if (!RE_NAME.test(String(input.name || '').trim())) return '표시명 형식 오류(1~64자, <>"\' 금지)';
+  const host = String(input.host || '').trim();
+  if (!RE_HOST.test(host)) return 'host 형식 오류 — IP/호스트명만(공백·특수문자·선행 - 불가)';
+  const ssrf = ssrfBlockReason(`https://${host}`);
+  if (ssrf) return `host 차단: ${ssrf}`;
+  if (!String(input.username || '').trim()) return '접속 계정을 입력하세요.';
+  // 제어문자 차단(v2.311 적대적 검증 확정 결함 수정): 개행 등 제어문자가 든 비밀번호(여러 줄
+  // 붙여넣기 사고)는 vplex v1 처럼 값을 헤더로 싣는 수집기에서 undici TypeError 메시지에
+  // **값 전문이 포함**되어 스냅샷/UI/중앙 push 로 유출된다. 저장 시점에 값 미포함 오류로 거부
+  // (SSH 등 헤더 미사용 경로도 제어문자 비밀번호는 실사용 사례가 없어 전 타입 일괄 적용).
+  if (/[\x00-\x1f\x7f]/.test(String(input.password ?? ''))) return '비밀번호에 제어문자(개행·탭 등)가 포함되어 있습니다 — 붙여넣기 내용을 확인하세요.'; // eslint-disable-line no-control-regex
+  return null;
+}
 
 export function saveDevice(input = {}) {
   const db = load();
+  const issue = deviceInputIssue(input);
+  if (issue) throw new Error(issue); // 검증 규칙은 deviceInputIssue 단일 소스(위 주석)
   const type = String(input.type || '').trim();
-  if (!isKnownType(type)) throw new Error(`알 수 없는 스토리지 타입: ${type}`);
-  if (!isImplementedType(type)) throw new Error(`'${type}' 수집기는 아직 미구현입니다(카탈로그의 '예정' 타입 — 등록은 구현 후에).`);
   const name = String(input.name || '').trim();
   const host = String(input.host || '').trim();
-  if (!RE_NAME.test(name)) throw new Error('표시명 형식 오류(1~64자, <>"\' 금지)');
-  if (!RE_HOST.test(host)) throw new Error('host 형식 오류 — IP/호스트명만(공백·특수문자·선행 - 불가)');
-  const ssrf = ssrfBlockReason(`https://${host}`);
-  if (ssrf) throw new Error(`host 차단: ${ssrf}`);
   const username = String(input.username || '').trim();
-  if (!username) throw new Error('접속 계정을 입력하세요.');
   const agent = String(input.agent || '').trim();
   const datacenterId = String(input.datacenterId || '').trim();
 
@@ -75,11 +100,6 @@ export function saveDevice(input = {}) {
   // host 변경 시 비번 이월 금지(uagmon M3) — 새 비번을 명시해야 저장된다.
   const hostChanged = existing && existing.host !== host;
   const password = String(input.password ?? '');
-  // 제어문자 차단(v2.311 적대적 검증 확정 결함 수정): 개행 등 제어문자가 든 비밀번호(여러 줄
-  // 붙여넣기 사고)는 vplex v1 처럼 값을 헤더로 싣는 수집기에서 undici TypeError 메시지에
-  // **값 전문이 포함**되어 스냅샷/UI/중앙 push 로 유출된다. 저장 시점에 값 미포함 오류로 거부
-  // (SSH 등 헤더 미사용 경로도 제어문자 비밀번호는 실사용 사례가 없어 전 타입 일괄 적용).
-  if (/[\x00-\x1f\x7f]/.test(password)) throw new Error('비밀번호에 제어문자(개행·탭 등)가 포함되어 있습니다 — 붙여넣기 내용을 확인하세요.'); // eslint-disable-line no-control-regex
   if (password) dev.password = password;
   else if (hostChanged) delete dev.password;
   // 수집 방식(v2.304, v2.305 타입별 스코프): PowerScale(isilon)만 사용자가 'ssh'(isi status
