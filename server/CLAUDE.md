@@ -4,6 +4,40 @@
 
 2026-06-27 전수 감사와 2회 후속 하드닝(v2.190.0·v2.191.0)으로 확립된 규칙. 되돌리면 감사 지적이 재발한다.
 
+## v2.322 전수 감사(2026-08-17) 조치 — 되돌리지 말 것
+
+전 도메인 7차원 적대적 감사(`docs/AUDIT-2026-08-17.md`) 확정 11건 조치. 회귀 방지 테스트:
+`test/securityAudit2026-08-17.test.js`.
+
+- **조회 라우트 scope 는 예외 없이** — 새 tools/백업/점검 라우트도 `scopedVcenterIds` 교집합을 반드시:
+  `/tools/vmware-config`(`buildVmwareConfigExport({allowed})` — 사이트·귀속 NSX 매니저 교집합, 범위 밖
+  vcenterId 404)·`/tools/network-check`(`getNetworkCheck(allowed)`)·`/tools/ip-ping`(POST·GET 모두
+  `inUserScope` 404, GET 도 `requirePerm('tools')`)·`/idrac/host-power`(범위 계정은 요청 `serviceTag`
+  무시하고 스냅샷 host.serviceTag 로만 폴백 — 클라이언트 태그로 scope 우회 금지). "이 라우트만 백업/
+  점검이라 예외"는 없다.
+- **`/api/auth` 하위 admin 라우트에도 `requireEnrolled`**: authRouter 는 로그인/공개용이라 index.js 에서
+  `requireEnrolled` 없이 mount 된다. 그 안의 admin 라우트(ad-config·ad-test)는 `adminOnly=[authMiddleware,
+  requireEnrolled, requireRole('admin')]` 로 게이트해야 한다 — 빠지면 부트스트랩(OTP 미등록) admin 세션이
+  AD 를 자기 LDAP 로 바꿔 OTP 강제등록을 우회하는 admin 경로를 만든다.
+- **WS 게이트웨이 매핑 접근 재검사**: SSH/RDP 게이트웨이(proxy/sshGateway·guacdTunnel)는 upgrade 에서
+  얻은 user 를 handleConnection 에 넘기고 `mappingAccessIssue(user, m)` 로 **소유(소유자 없으면 admin
+  전용) + targetHost scope** 를 재검사한다(HTTP 미들웨어를 안 타므로). mappingId 추측으로 타인/범위 밖
+  매핑에 붙는 것을 막는다.
+- **미일치 WebSocket upgrade 소켓 파기**: index.js 는 게이트웨이 attach 뒤 catch-all `upgrade` 리스너로
+  자기 경로가 아닌 소켓을 `socket.destroy()` 한다 — 'upgrade' 리스너가 있으면 Node 가 미처리 소켓을
+  자동으로 닫지 않아 무인증 FD 누수 DoS 가 된다. 이 catch-all 을 지우지 말 것.
+- **자격증명 파일은 원자적 쓰기 + 로드 손상 preserveCorrupt(전 파일)**: 크라운주얼 4종뿐 아니라 비밀을
+  담는 모든 스토어 — idrac/registry·idrac/scanRanges·gpu/settings(gpu-guest)·gpu/physicalRegistry·
+  horizon·proxy/registry·agent/deployRegistry — 는 `atomicWriteFileSync` 로 쓰고 로드 catch 에서
+  `preserveCorrupt(FILE)` 후 빈 값을 반환한다. `fs.writeFileSync` 직접 쓰기나 catch 의 조용한 빈값 반환
+  금지(다음 저장이 온전한 원본을 소거).
+- **secretVault 정책 fail-safe(보안 다운그레이드 금지)**: `secrets-policy.json` 손상 시 plain 으로 조용히
+  폴백하지 않는다 — 직전 유효 정책(`_lastGoodPolicy`)을 유지하고 암호화였다면 보안 경고를 출력한다.
+  손상→plain 폴백은 이후 자격증명 저장을 무음 평문화한다.
+- **SSRF 재검증에 타임아웃 없는 DNS 조회를 핫패스에 넣지 말 것**: `ssrfBlockReasonResolved` 는 타임아웃이
+  없어 폴러 루프에서 매 점검마다 부르면 DNS 지연이 이벤트 루프를 막는다(svcmon 비-HTTP 재검증 보류 사유).
+  실행시점 재검증이 필요하면 `dns.lookup`(타임아웃)+`ipBlockReason` 후 그 IP 로 직접 접속(uagmon 핀 패턴).
+
 - **전역 TLS 디스패처 금지**: `setGlobalDispatcher`로 프로세스 전체 fetch의 인증서 검증을 끄지 않는다(과거 vCenter용 설정이 업그레이드 번들·NSX까지 오염). 자체서명이 필요한 곳만 로컬 디스패처를 `dispatcher:` 옵션으로 주입한다(`vcenter/restClient.js vcDispatcher`, `nsx/client.js`, `util/resilientFetch.js wanAgent`).
 - **WAN(중앙↔엣지) TLS 기본 검증 ON**: `WAN_TLS_INSECURE`는 `=== 'true'`일 때만 검증 해제. 의미를 반전시키지 말 것(과거 '미설정=검증 off'였고 그 구간으로 토큰·자격증명이 흐른다).
 - **상태변경 라우트 RBAC**: `/api` 의 POST/PUT/PATCH/DELETE에는 `requireRole('admin','operator')`를 붙인다(읽기성 POST 제외). WS SSH/RDP 게이트웨이도 역할을 검사한다.

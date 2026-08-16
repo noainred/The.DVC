@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
-import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 
 const FILE = path.join(config.configDir, 'agent-deploy-targets.json');
@@ -20,7 +20,7 @@ let cache = null;
 
 function load() {
   if (cache) return cache;
-  try { if (fs.existsSync(FILE)) cache = openSecretsDeep(JSON.parse(fs.readFileSync(FILE, 'utf8'))?.targets || []); } catch { cache = []; } // v2.296 배포 SSH/토큰 복호
+  try { if (fs.existsSync(FILE)) cache = openSecretsDeep(JSON.parse(fs.readFileSync(FILE, 'utf8'))?.targets || []); } catch { preserveCorrupt(FILE); cache = []; } // v2.296 배포 SSH/토큰 복호 · v2.322 손상본 보존
   if (!Array.isArray(cache)) cache = [];
   return cache;
 }

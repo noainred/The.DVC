@@ -232,6 +232,15 @@ server.on('error', (err) => {
 // Browser SSH/RDP consoles (WebSocket upgrades on /api/remote/ssh and /rdp).
 attachSshGateway(server);
 attachRdpGateway(server);
+// 미일치 경로 upgrade 는 소켓을 파기한다(v2.322 보안 감사): Node http 서버는 'upgrade' 리스너가
+// 하나라도 있으면 미처리 소켓을 자동으로 닫지 않고 리스너에 위임한다. 위 두 게이트웨이는 자기
+// 경로가 아니면 return 만 하므로, catch-all 이 없으면 임의 경로 + Upgrade 헤더로 소켓/FD 를 무한
+// 점유하는 무인증 DoS 가 가능했다. 마지막에 등록해 앞선 핸들러가 처리하지 못한 소켓만 파기한다.
+server.on('upgrade', (req, socket) => {
+  let p = '';
+  try { p = new URL(req.url, 'http://localhost').pathname; } catch { /* 파싱 실패 = 미일치 */ }
+  if (p !== '/api/remote/ssh' && p !== '/api/remote/rdp') { try { socket.destroy(); } catch { /* already gone */ } }
+});
 startMappingExpiry(); // remove ephemeral quick-connect mappings 1 day after last use
 
 // 성능점검 종료 정리 — CSV 배치 버퍼와 저장소 디바운스를 flush 한 뒤 워커를 정리한다.

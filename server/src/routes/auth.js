@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { config } from '../config.js';
-import { authenticate, signToken, authMiddleware, requireRole, getUser, beginTotpEnroll, confirmTotpEnroll, setupState } from '../auth/auth.js';
+import { authenticate, signToken, authMiddleware, requireEnrolled, requireRole, getUser, beginTotpEnroll, confirmTotpEnroll, setupState } from '../auth/auth.js';
 import { rolePermissions, roleToolsDenied } from '../auth/permissions.js';
 import { loadAdConfig, saveAdConfig, testAd } from '../auth/ad.js';
 import { logAudit } from '../audit.js';
@@ -107,7 +107,11 @@ authRouter.post('/totp/confirm', authMiddleware, (req, res) => {
 });
 
 // --- Active Directory configuration, admin only ---
-const adminOnly = [authMiddleware, requireRole('admin')];
+// requireEnrolled 필수(v2.322 보안 감사): authRouter 는 index.js 에서 requireEnrolled 없이
+// mount 되므로(로그인/공개용), 이 admin 라우트들이 게이트 밖에 있으면 OTP 미등록(부트스트랩)
+// admin 세션이 AD 설정을 바꿔 자기 LDAP 를 admin 그룹으로 응답시켜 OTP 우회 admin 경로를 만들 수
+// 있다. requireEnrolled 를 넣어 등록 전 세션은 /auth/{me,totp/*} 외 이 라우트에 못 오게 한다.
+const adminOnly = [authMiddleware, requireEnrolled, requireRole('admin')];
 
 authRouter.get('/ad-config', ...adminOnly, (_req, res) => {
   res.json({ ad: loadAdConfig() });

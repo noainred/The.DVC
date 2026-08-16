@@ -11,7 +11,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 import { describeError } from '../util/errors.js';
 import { retryTransient } from '../util/resilientFetch.js';
@@ -49,6 +49,7 @@ export function loadRegistry() {
     }
     return structuredClone(_regCache.servers);
   } catch {
+    preserveCorrupt(FILE); // v2.322: 파싱 실패 시 손상본 보존(빈 목록 반환이 다음 저장으로 전 자격증명 소거 방지)
     return [];
   }
 }

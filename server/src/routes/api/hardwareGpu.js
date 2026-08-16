@@ -1,6 +1,6 @@
 // 하드웨어/ESXi/GPU 인벤토리·시계열 export·IP핑 — api.js(구 2,445줄) 분할(v2.283.0). 본문은 원본 그대로, 등록 순서는 api.js 호출 순서가 보존한다.
 import { requirePerm } from '../../auth/auth.js';
-import { scopedVcenterIds } from '../../auth/scope.js';
+import { scopedVcenterIds, inUserScope } from '../../auth/scope.js';
 import { guardCell } from '../../util/csv.js';
 import { store } from '../../store.js';
 import { config } from '../../config.js';
@@ -258,15 +258,19 @@ api.post('/tools/ip-ping', requirePerm('tools'), async (req, res) => {
   const vcenterId = String(req.body?.vcenterId || '').trim();
   const ips = Array.isArray(req.body?.ips) ? req.body.ips.map((s) => String(s).trim()).filter(Boolean).slice(0, 16) : [];
   if (!vcenterId || !ips.length) return res.status(400).json({ ok: false, reason: 'vcenterId·ips가 필요합니다.' });
+  // v2.322 보안 감사: 범위 밖 vCenter 로 위임 ping(범위 밖 에이전트가 임의 IP 도달성 프로빙)
+  // 차단 — 단건 라우트 규칙대로 범위 밖은 404(존재 은닉). 전체 범위 계정은 무영향.
+  if (!inUserScope(req.user, store.get(), vcenterId)) return res.status(404).json({ ok: false, reason: 'not found' });
   enqueuePing(vcenterId, ips);
   // 에이전트가 없는(중앙 직접 수집) vCenter는 중앙에서 직접 ping 시도(같은 망일 때 즉시 결과).
   if (config.dataSource !== 'mock') pingLocallyAndStore(vcenterId, ips).catch(() => {});
   res.json({ ok: true, queued: ips.length });
 });
-api.get('/tools/ip-ping', (req, res) => {
+api.get('/tools/ip-ping', requirePerm('tools'), (req, res) => {
   const vcenterId = String(req.query.vcenterId || '').trim();
   const ips = String(req.query.ips || '').split(',').map((s) => s.trim()).filter(Boolean);
   if (!vcenterId || !ips.length) return res.status(400).json({ ok: false, reason: 'vcenterId·ips가 필요합니다.' });
+  if (!inUserScope(req.user, store.get(), vcenterId)) return res.status(404).json({ ok: false, reason: 'not found' });
   res.json({ ok: true, results: getPingResults(vcenterId, ips) });
 });
 

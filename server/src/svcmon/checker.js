@@ -62,6 +62,13 @@ async function runCheckInner(test, host) {
   const started = Date.now();
   const port = Number(test.port) || DEFAULT_PORTS[test.type] || 0;
   try {
+    // ⚠ 보류(v2.322 보안 감사 LOW — svcmon 비-HTTP 실행시점 SSRF 재검증): tcp/udp/cert/banner/
+    // ldap/ntp/dns 는 저장 시점 ssrfBlockReason 만 통과하고 실행 시점 해석 재검증이 없어 DNS
+    // 리바인딩으로 루프백/링크로컬 도달성 오라클이 될 수 있다(LOW — 저장 시 loopback/link-local
+    // 은 이미 차단됨, RFC1918 만 허용). 여기서 ssrfBlockReasonResolved 를 부르면 타임아웃 없는
+    // DNS 조회가 매 점검마다 추가돼 폴러가 지연/정지될 수 있어 되돌렸다(docs/AUDIT-2026-08-17.md).
+    // 올바른 조치는 dns.lookup(타임아웃)+ipBlockReason 후 그 IP 로 직접 접속(uagmon 핀 패턴) — 각
+    // 케이스 접속부를 IP 핀으로 리팩터해야 하므로 별도 작업으로 뺀다.
     switch (test.type) {
       case 'ping': {
         const r = await pingOne(host, { timeoutMs: 4000 });

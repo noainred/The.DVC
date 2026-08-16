@@ -92,10 +92,22 @@ function normPolicy(p = {}) {
   };
 }
 
+// 마지막으로 성공 로드한 정책(v2.322 보안 감사): 정책 파일이 손상되면 normPolicy()=plain 으로
+// 조용히 폴백하던 것을, 직전 유효 정책으로 유지한다. mode='encrypted' 운영 중 파일이 손상되면
+// plain 폴백은 이후 자격증명 저장을 **조용히 평문으로 다운그레이드**(at-rest 암호화 무음 해제)한다.
+let _lastGoodPolicy = null;
 export function loadSecretsPolicy() {
   try {
-    if (fs.existsSync(policyFile())) return normPolicy(JSON.parse(fs.readFileSync(policyFile(), 'utf8')));
-  } catch (e) { preserveCorrupt(policyFile(), e.message); }
+    if (fs.existsSync(policyFile())) { _lastGoodPolicy = normPolicy(JSON.parse(fs.readFileSync(policyFile(), 'utf8'))); return _lastGoodPolicy; }
+  } catch (e) {
+    preserveCorrupt(policyFile(), e.message);
+    // 손상 시 plain 으로 내려가지 않고 직전 유효 정책 유지 — 암호화였다면 보안 경고를 명시 출력
+    // (preserveCorrupt 의 '데이터 유실' 메시지만으론 보안 다운그레이드를 운영자가 인지 못 함).
+    if (_lastGoodPolicy) {
+      if (_lastGoodPolicy.mode === 'encrypted') console.error('[secrets] ⚠ 정책 파일 손상 — 암호화가 조용히 해제되지 않도록 직전 유효 정책(encrypted) 유지. 정책 파일을 복구하세요.');
+      return _lastGoodPolicy;
+    }
+  }
   return normPolicy();
 }
 

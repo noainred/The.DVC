@@ -139,7 +139,12 @@ api.get('/idrac/host-power', async (req, res) => {
   }
   try {
     const hours = Math.min(720, Math.max(1, Number(req.query.hours) || 24));
-    const serviceTag = req.query.serviceTag ? String(req.query.serviceTag) : '';
+    // v2.322 보안 감사(scope 우회): hostPower 의 serviceTag 폴백(step4)은 태그 일치 장비를 scope
+    // 재검사 없이 반환한다. 범위 제한 계정은 클라이언트가 준 임의 serviceTag 를 신뢰하지 않고
+    // 위 게이트에서 매칭된 자기 범위 내 호스트의 스냅샷 태그로만 폴백한다(임의 태그로 범위 밖
+    // 전력·하드웨어 인벤토리 조회 차단). 전체 범위 계정은 기존 동작(요청 태그 허용) 유지.
+    const scoped = !!scopedVcenterIds(req.user, snap);
+    const serviceTag = scoped ? (host?.serviceTag ? String(host.serviceTag) : '') : (req.query.serviceTag ? String(req.query.serviceTag) : '');
     res.json(await hostPower(String(name), { hours, serviceTag }));
   } catch (err) {
     res.status(500).json({ matched: false, reason: err.message });

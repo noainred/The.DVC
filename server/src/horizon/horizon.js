@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Agent } from 'undici';
 import { config } from '../config.js';
-import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 import { describeError } from '../util/errors.js';
 import { ssrfBlockReason, ssrfBlockReasonResolved } from '../collector/registry.js';
@@ -27,7 +27,7 @@ export function loadHorizon() {
   try {
     const parsed = JSON.parse(fs.readFileSync(FILE, 'utf8'));
     return openSecretsDeep(Array.isArray(parsed?.servers) ? parsed.servers : []); // v2.296 자격증명 복호
-  } catch { return []; }
+  } catch { preserveCorrupt(FILE); return []; } // v2.322: 손상본 보존(Horizon 자격증명 유실 방지)
 }
 
 function saveHorizon(list) {

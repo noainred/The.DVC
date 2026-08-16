@@ -21,6 +21,8 @@ import urllib.error
 import urllib.request
 
 from .ssrf import ValidationError, normalize_url, resolve_and_check
+from .pinned import build_pinned_opener  # v2.322: 검증 IP 핀(웹훅 리바인딩 TOCTOU 차단)
+import ssl as _ssl
 
 TIMEOUT = 6.0
 USER_AGENT = "GlobalDCServiceHub-Notify/1.0"
@@ -145,7 +147,7 @@ class Notifier:
     def _post_webhook(url, payload) -> None:
         """웹훅 POST. 대상도 사용자 입력이므로 SSRF 가드를 통과시킨다."""
         target = normalize_url(url)
-        _, reason, _ = resolve_and_check(target)
+        addresses, reason, _ = resolve_and_check(target)
         if reason:
             raise ValidationError(reason)
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -153,7 +155,10 @@ class Notifier:
             "Content-Type": "application/json; charset=utf-8",
             "User-Agent": USER_AGENT,
         })
-        with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
+        # v2.322 보안 감사: urlopen 은 host 를 재해석한다(리바인딩 TOCTOU) — 검증된 addresses[0]
+        # 로 핀한 opener 로 전송(Host/TLS SNI 는 원 호스트명 유지). 웹훅 TLS 는 기본 검증 사용.
+        opener = build_pinned_opener(addresses[0], tls_context=_ssl.create_default_context())
+        with opener.open(request, timeout=TIMEOUT) as response:
             response.read(512)
 
     # ---------- 진단 ----------

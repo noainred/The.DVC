@@ -27,6 +27,7 @@ from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlsplit
 
 from .ssrf import ValidationError, normalize_url, resolve_and_check
+from .pinned import connect_pinned, build_pinned_opener  # v2.322: 검증 IP 핀(리바인딩 TOCTOU 차단)
 
 USER_AGENT = "GlobalDCServiceHub-HealthCheck/1.0"
 
@@ -70,13 +71,11 @@ def check_port(url: str, *, timeout: float = 4.0, allow_private: bool = True) ->
         return {"url": target, "status": status, "statusCode": 0, "latencyMs": elapsed_ms(),
                 "message": reason, "addresses": addresses, "method": METHOD_PORT}
 
-    host = urlsplit(target).hostname or ""
     port = target_port(target)
     try:
-        # 가드가 확인한 그 이름으로 연결한다. create_connection 이 주소군(IPv4/IPv6)을
-        # 알아서 고르고, 실패 시 다음 주소로 넘어간다.
-        with socket.create_connection((host, port), timeout=timeout):
-            pass                                # 연결 확인 즉시 종료 — 바이트를 보내지 않는다
+        # v2.322 보안 감사: 호스트명 재해석(create_connection((host,port)))은 리바인딩 TOCTOU 를
+        # 연다 — resolve_and_check 가 검증한 addresses 로만 직접 연결한다(host 재해석 제거).
+        connect_pinned(addresses, port, timeout).close()  # 연결 확인 즉시 종료 — 바이트 미전송
         return {"url": target, "status": STATUS_HEALTHY, "statusCode": 0,
                 "latencyMs": elapsed_ms(), "message": f"포트 {port} 응답",
                 "addresses": addresses, "port": port, "method": METHOD_PORT}
@@ -139,8 +138,9 @@ def check_url(url: str, *, timeout: float = 4.0, tls_verify: bool = True,
                 "latencyMs": elapsed_ms(), "message": reason,
                 "addresses": addresses}
 
-    opener = urllib.request.build_opener(_NoRedirect,
-                                         urllib.request.HTTPSHandler(context=_tls_context(tls_verify)))
+    # v2.322 보안 감사: urllib 은 target URL 의 host 를 재해석한다(리바인딩 TOCTOU). 검증된
+    # addresses[0] 로 핀한 opener 를 쓰되 Host/TLS SNI 는 원 호스트명 유지(_NoRedirect 정책 보존).
+    opener = build_pinned_opener(addresses[0], tls_context=_tls_context(tls_verify), extra_handlers=(_NoRedirect,))
     request = urllib.request.Request(target, method="GET", headers={
         "User-Agent": USER_AGENT,
         # 본문 전체를 받을 이유가 없다 — 서버가 지원하면 첫 바이트만.
