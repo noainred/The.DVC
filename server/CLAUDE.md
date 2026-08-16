@@ -10,10 +10,11 @@
   - ✅ **수정됨(v2.313)**: `DELETE /remote/mappings/:id`(`routes/remote.js:208`)에 `requirePerm('remote.access')`
     추가 + 소유자 없는 매핑은 admin 전용으로 보정(과거 `m.owner && …` 단락으로 소유자 없는 레거시 매핑을
     임의 인증 사용자가 삭제 가능했음).
-  - ⚠️ **미적용 갭(보류 — 설계 확정 필요)**: `/remote/{probe,quick-connect}`(`:53,179`)는 `requirePerm('remote.access')`는
-    붙어 admin/operator 제한이지만 `targetHost`에 vCenter scope 교집합이 없다(형식 검증만) — scoped operator 의
-    내부망 도달성 프로브·범위 밖 터널 매핑 생성이 가능(자격증명 별도 필요 → 정찰·피벗 준비 한정). host↔vCenter
-    소유 매핑 설계 확정 후 적용 예정. 상세는 `docs/AUDIT-2026-08-13.md`.
+  - ✅ **수정됨(v2.320)**: `/remote/{probe,quick-connect}` 의 `targetHost` 에 scope 적용 —
+    범위 계정은 **허용 vCenter 인벤토리에 실재하는 대상**(VM IP/이름·호스트 이름)만 프로브/터널
+    생성 가능(`remote.js targetHostScopeIssue`, 순수 — `test/nsxRemoteScope.test.js` 고정).
+    인벤토리에 없는 임의 IP 는 범위 계정에 403(내부망 정찰·범위 밖 피벗 준비 차단). 전체 범위
+    계정은 기존 신뢰 모델 유지(임의 대상 허용). 이 검사를 형식 검증(SAFE_HOST)만으로 되돌리지 말 것.
 - **토큰 검증은 `resolveTokenUser` 하나로**: `verifyToken`을 직접 호출해 `payload.role`을 신뢰하지 말 것 — tokenVersion 폐기·최신 역할 반영이 우회된다(WS 게이트웨이에서 실제로 뚫렸던 경로).
 - **central 엔드포인트의 agent 바인딩**: `routes/central.js` 미들웨어가 '개별 토큰 ↔ agent' 일치를 강제한다. 새 엔드포인트가 `?agent=`/`body.agent`로 데이터를 고르면 그 미들웨어를 우회하지 않게 할 것(자격증명 횡탈 차단).
 - **자격증명 파일은 원자적 쓰기 + 로드 손상 보존**: `util/atomicWrite.js`의 `atomicWriteFileSync`로 쓰고(직접 `fs.writeFileSync` 금지), **로드 catch에서 파싱 실패 시 `preserveCorrupt(FILE)`로 `<file>.corrupt.<ts>` 보존** 후 빈 값 반환. 쓰기만 원자적이고 로드가 손상을 조용히 `[]`로 넘기면, 다음 저장이 온전했던 원본을 빈 목록으로 덮어써 전 자격증명이 영구 유실된다(3차 감사 지적 — vcenters/nsx/collectors/users 4종이 이 비대칭이었음). portal.env(CENTRAL_TOKEN)도 원자적으로 쓴다.
@@ -99,10 +100,13 @@
       범위 내 vCenter 를 명시하지 않으면 403(범위 밖 라이브 SOAP 차단). 귀속 없는 저장 작업은 범위 계정 미노출.
       테스트: `server/test/provisionScope.test.js`.
     - `/idrac/host-power`(`routes/api/vmMetrics.js`): 스냅샷에서 `name`→호스트 조회 후 `inUserScope` 위반 시 404(존재 은닉).
-  - ⚠️ **미적용 갭(보류 — 설계 확인 필요)**: `/nsx`·`/nsx/group-members`(`routes/api/overviewNsx.js:77,101`)는 NSX 가
-    scope 대상인지 **설계 확인 후** 적용(전 함대 NSX 매니저·DFW 규칙·보안그룹·VM 멤버 IP). NSX 매니저는 vc.id 가
-    아니라 region/vcenterId 속성만 가져 scope 모델 확장(매니저↔region↔vCenter 매핑)이 선행돼야 한다. 같은 파일
-    `/overview` 는 이미 scope 적용. 상세는 `docs/AUDIT-2026-08-13.md`.
+  - ✅ **수정됨(v2.320)**: `/nsx`·`/nsx/group-members` 에 scope 적용 — 범위 계정에는
+    **귀속 매니저만**(매니저.vcenterId∈허용 vCenter ∪ 매니저.region∈허용 vCenter 의 region)
+    노출하고, 하위 리소스(게이트웨이/세그먼트/DFW/보안그룹)·rollup(재계산)·collectionErrors 도
+    보이는 매니저 기준으로 절단한다(`nsx/scope.js` 순수 판정 — `test/nsxRemoteScope.test.js` 고정).
+    **무귀속 매니저는 범위 계정에 숨긴다**('귀속 없는 데이터 미노출' 불변조건). group-members 는
+    범위 밖 매니저에 404(존재 은닉). 전체 범위 계정은 기존 전량 반환 유지. 이 필터를 요청 쿼리
+    (?managerId/?region) 뒤로 옮기지 말 것(scope 가 요청 필터보다 먼저 — 상위 규칙).
   - **중앙 GPU 오버레이 direct-mode 봉인(v2.257)**: `/api/central/gpu-guest-data` 는 저장 키를
     `centralAuth.agent` 로 강제하고, hostId/vmId 의 소유 vCenter 를 **`listInventory` 최장 프리픽스
     매칭**으로 판정한다(vc.id 에 콜론이 있어 단순 `split(':')` 로는 오파싱). `collectMode!=='site'`
