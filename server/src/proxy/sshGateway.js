@@ -16,6 +16,9 @@ import { Client as SSHClient } from 'ssh2';
 import { resolveTokenUser } from '../auth/auth.js';
 import { userHasPermission } from '../auth/permissions.js';
 import { getMapping, getProxyById, touchMapping } from './registry.js';
+import { scopedVcenterIds } from '../auth/scope.js';
+import { store } from '../store.js';
+import { targetHostScopeIssue } from '../routes/remote.js'; // 순수 함수(런타임 호출 — 순환 import 안전)
 import { config } from '../config.js';
 
 export function attachSshGateway(server) {
@@ -39,8 +42,24 @@ export function attachSshGateway(server) {
       // 기능 권한 매트릭스로 검사 — admin 은 항상 통과, 그 외는 'remote.access' 보유 시만.
       if (!userHasPermission(user, 'remote.access')) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); return socket.destroy(); }
     }
-    wss.handleUpgrade(req, socket, head, (ws) => handleConnection(ws));
+    wss.handleUpgrade(req, socket, head, (ws) => handleConnection(ws, user));
   });
+}
+
+/**
+ * WS 게이트웨이의 매핑 접근 재검사(v2.322 보안 감사) — WS 는 HTTP 미들웨어를 안 타므로
+ * probe/quick-connect(v2.320 scope 적용) 이후에도 여기서 소유·scope 를 다시 본다.
+ * admin 은 전부, 그 외에는 자기 소유(소유자 없는 매핑은 admin 전용 — v2.313 DELETE 규칙)이고
+ * targetHost 가 사용자 scope 안이어야 한다. 위반 사유(사용자 표시용) 또는 null(허용).
+ */
+export function mappingAccessIssue(user, m) {
+  if (!user || !m) return '매핑을 찾을 수 없습니다.';
+  if (user.role !== 'admin') {
+    if (m.owner !== user.username) return '이 접속 매핑에 대한 권한이 없습니다.'; // 소유자 없는 매핑도 admin 전용
+    const scopeIssue = targetHostScopeIssue(store.get(), scopedVcenterIds(user, store.get()), m.targetHost);
+    if (scopeIssue) return scopeIssue;
+  }
+  return null;
 }
 
 // 동시 원격 SSH 세션 상한 + 유휴 타임아웃 — 무제한 세션이 포탈 서버 메모리/FD를 고갈시켜
@@ -49,7 +68,7 @@ const MAX_SESSIONS = Number(process.env.REMOTE_MAX_SESSIONS) || 80;
 const IDLE_MS = Number(process.env.REMOTE_IDLE_TIMEOUT_MS) || 30 * 60_000;
 let activeSessions = 0;
 
-function handleConnection(ws) {
+function handleConnection(ws, user) {
   let ssh = null;
   let stream = null;
   let counted = false;
@@ -68,6 +87,9 @@ function handleConnection(ws) {
       if (ssh || counted) return send({ type: 'status', text: '이미 인증된 세션입니다.' });
       const m = getMapping(msg.mappingId);
       if (!m || m.protocol !== 'ssh') return send({ type: 'status', text: 'SSH 매핑을 찾을 수 없습니다.' }) || ws.close();
+      // v2.322: 소유·scope 재검사(범위 밖/타인 매핑을 mappingId 추측으로 여는 것 차단).
+      const issue = mappingAccessIssue(user, m);
+      if (issue) return send({ type: 'status', text: issue }) || ws.close();
       if (!counted && activeSessions >= MAX_SESSIONS) {
         send({ type: 'status', text: `동시 원격 세션 한도(${MAX_SESSIONS})를 초과했습니다. 사용하지 않는 세션을 닫고 잠시 후 다시 시도하세요.` });
         return ws.close();

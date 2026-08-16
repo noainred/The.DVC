@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
-import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 
 const FILE = path.join(config.configDir, 'gpu-physical.json');
@@ -19,7 +19,7 @@ let cache = null;
 
 export function loadPhysical() {
   if (cache) return cache;
-  try { if (fs.existsSync(FILE)) cache = openSecretsDeep(JSON.parse(fs.readFileSync(FILE, 'utf8'))?.servers || []); } catch { cache = []; } // v2.296 SSH 계정 복호
+  try { if (fs.existsSync(FILE)) cache = openSecretsDeep(JSON.parse(fs.readFileSync(FILE, 'utf8'))?.servers || []); } catch { preserveCorrupt(FILE); cache = []; } // v2.296 SSH 계정 복호 · v2.322 손상본 보존
   if (!Array.isArray(cache)) cache = [];
   return cache;
 }

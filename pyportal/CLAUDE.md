@@ -41,6 +41,16 @@
 - **웹훅 URL 도 사용자 입력**: 저장은 `http`/`https` 만(`settings.py _safe_webhook`), 전송 직전
   `hub/ssrf.py` 가드를 다시 통과시킨다(`notify.py _post_webhook`). 저장 시점만 검사하면
   DNS 가 나중에 루프백으로 바뀌는 경우를 놓친다.
+
+### v2.322 추가분 (2026-08-17 전수 감사 — 유지할 것)
+
+- **SSRF 검증·접속 IP 를 핀한다(DNS 리바인딩 TOCTOU 차단)**: `resolve_and_check` 가 검사한 것은
+  '검사 시점 해석 IP' 인데, 접속을 호스트명으로 다시 하면(`create_connection((host,port))`·
+  `urllib.open`) 공격자 TTL=0 DNS 가 검사 후 루프백/메타데이터로 바꿔치기할 수 있다. `hub/pinned.py`
+  로 **검사한 그 IP 에 직접 연결**하되 Host 헤더·TLS SNI·인증서 검증 이름은 원 호스트명을 유지한다.
+  포트 점검(`health.check_port`)·HTTP 점검(`health.check_url`)·웹훅(`notify._post_webhook`) 세 경로
+  전부 이 핀을 거친다. 접속부를 다시 호스트명 재해석으로 되돌리지 말 것(`resolve_and_check` 통과만으론
+  부족 — 그건 검사일 뿐 접속 핀이 아니다).
 - **알림은 전환에만**: 장애 지속 중 매 주기 알림은 곧 무시된다(알림 피로). 첫 관측은 기준점만
   잡고 알리지 않는다 — 이 규칙을 빼면 재시작마다 전 링크 알림이 폭발한다.
 - **감사 로그는 best-effort + 비밀값 필터**: 기록 실패가 요청을 막으면 안 되고(`audit.py` 는

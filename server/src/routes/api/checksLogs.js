@@ -61,14 +61,21 @@ api.get('/tools/service-check', (_req, res) => {
 });
 
 // 글로벌 네트워크 점검 — 제어플레인(vCenter/NSX) 도달성·RTT + 네트워크 객체 요약.
-api.get('/tools/network-check', async (_req, res) => {
-  try { res.json(await getNetworkCheck()); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+// v2.322 보안 감사: 범위 제한 계정은 허용 vCenter·귀속 NSX 매니저만(범위 밖 host/이름/region/RTT 차단).
+api.get('/tools/network-check', async (req, res) => {
+  try { res.json(await getNetworkCheck(scopedVcenterIds(req.user, store.get()))); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 
 // 사이트 VMware 솔루션 구성 백업 — 수집 구성 스냅샷. ?vcenterId=로 사이트 한정, ?download=1로 gzip 파일.
+// v2.322 보안 감사(HIGH): 범위 제한 계정은 허용 vCenter(및 귀속 NSX 매니저)로만 — 과거 이 라우트만
+// scope 를 안 걸어 범위 밖 전 함대 ESXi 관리 IP·전 VM IP/메모·NSX DFW 규칙이 gzip 으로 새었다.
 api.get('/tools/vmware-config', (req, res) => {
   try {
-    const data = buildVmwareConfigExport({ vcenterId: req.query.vcenterId || null });
+    const allowed = scopedVcenterIds(req.user, store.get());
+    const reqVc = req.query.vcenterId ? String(req.query.vcenterId) : null;
+    // 범위 밖 vCenter 를 명시 요청하면 존재를 흘리지 않게 404(형제 vclogs/federate 패턴).
+    if (reqVc && allowed && !allowed.has(reqVc)) return res.status(404).json({ error: 'not found' });
+    const data = buildVmwareConfigExport({ vcenterId: reqVc, allowed });
     if (req.query.download === '1') {
       const gz = zlib.gzipSync(Buffer.from(JSON.stringify(data, null, 2)));
       const stamp = new Date().toISOString().replace(/[:.]/g, '-');

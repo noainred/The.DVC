@@ -18,6 +18,7 @@ import { userHasPermission } from '../auth/permissions.js';
 import { getMapping, getProxyById, touchMapping } from './registry.js';
 import { consumeRdpTicket } from './rdpTicket.js';
 import { config } from '../config.js';
+import { mappingAccessIssue } from './sshGateway.js'; // WS 매핑 소유·scope 재검사 공용(v2.322)
 
 // Encode a Guacamole instruction: each element is "<charLen>.<value>", comma
 // separated, terminated by ';'.
@@ -59,13 +60,16 @@ export function attachRdpGateway(server) {
       // 기능 권한 매트릭스로 검사 — admin 은 항상 통과, 그 외는 'remote.access' 보유 시만.
       if (!userHasPermission(user, 'remote.access')) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); return socket.destroy(); }
     }
-    wss.handleUpgrade(req, socket, head, (ws) => handle(ws, url.searchParams));
+    wss.handleUpgrade(req, socket, head, (ws) => handle(ws, url.searchParams, user));
   });
 }
 
-function handle(ws, params) {
+function handle(ws, params, user) {
   const m = getMapping(params.get('mappingId'));
   if (!m || m.protocol !== 'rdp') { ws.close(1011, 'rdp mapping not found'); return; }
+  // v2.322: 소유·scope 재검사(SSH 게이트웨이와 동일 — 범위 밖/타인 매핑 차단).
+  const issue = mappingAccessIssue(user, m);
+  if (issue) { ws.close(1011, 'forbidden'); return; }
   touchMapping(m.id); // reset the 1-day ephemeral expiry clock on use
   const proxy = getProxyById(m.proxyId);
   if (!proxy.guacd?.host) { ws.close(1011, 'guacd not configured'); return; }

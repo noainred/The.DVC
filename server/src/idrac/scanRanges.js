@@ -21,7 +21,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
-import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 
 const FILE = path.join(config.configDir, 'idrac-scan-ranges.json');
@@ -63,7 +63,7 @@ function read() {
     else if (j && typeof j.vcenters === 'object' && j.vcenters) entries = migrateLegacyMap(j.vcenters); // 구: vCenter 키
     else entries = {};
     cache = { entries: openSecretsDeep(entries) }; // v2.296 스캔 계정 복호(메모리 평문)
-  } catch { cache = { entries: {} }; }
+  } catch { preserveCorrupt(FILE); cache = { entries: {} }; } // v2.322: 손상본 보존(스캔 계정 유실 방지)
   cacheMtime = mtime;
   return cache;
 }

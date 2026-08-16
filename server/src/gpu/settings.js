@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
+import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js'; // 자격증명 파일 규칙(v2.322): 원자적 쓰기 + 로드 손상 보존
 
 const FILE = path.join(config.configDir, 'gpu-guest.json');
 
@@ -31,7 +32,10 @@ const DEFAULTS = {
 
 function readFile() {
   if (!fs.existsSync(FILE)) return {};
-  try { return openSecretsDeep(JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}); } catch { return {}; } // v2.296 게스트 OS 계정 복호(메모리 평문)
+  // v2.322 보안 감사(자격증명 파일 규칙): 파싱 실패 시 손상본을 보존한 뒤 빈 값 반환 —
+  // 그냥 {} 를 넘기면 다음 저장이 온전했던 원본을 빈 목록으로 덮어써 게스트 OS 계정이 영구 유실된다.
+  try { return openSecretsDeep(JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}); }
+  catch (e) { preserveCorrupt(FILE, e.message); return {}; } // v2.296 게스트 OS 계정 복호(메모리 평문)
 }
 
 export function loadGpuGuestSettings() {
@@ -114,8 +118,9 @@ export function saveGpuGuestSettings(partial) {
   const cur = readFile();
   const next = mergeGpuGuestSettings(cur, partial);
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
-  fs.writeFileSync(FILE, JSON.stringify(sealSecretsDeep(next), null, 2), { mode: 0o600 }); // 암호화 모드면 공용/VM별 password 봉인
-  try { fs.chmodSync(FILE, 0o600); } catch { /* best effort */ }
+  // 원자적 쓰기(v2.322): writeFileSync 는 'w'(선-truncate)라 쓰기 도중 종료 시 0바이트/부분 파일이
+  // 남아 자격증명이 유실된다 — atomicWriteFileSync(임시파일+fsync+rename)로 교체.
+  atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep(next), null, 2), { mode: 0o600 }); // 암호화 모드면 공용/VM별 password 봉인
   return loadGpuGuestSettings();
 }
 
