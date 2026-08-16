@@ -702,3 +702,38 @@ test('analyzeImport — 추가/수정/오류 판정 + 파일 내 중복 + 실제
   assert.match(by('NOPW-CTRL').reason, /제어문자/);
   assert.deepEqual(summary, { add: 1, update: 1, error: 4, withPassword: 1 });
 });
+
+/* ─── v2.318: 용량 추이 — 버킷 다운샘플 + 엣지 push 시계열 중앙 적재 ─── */
+
+test('capacityHistory 버킷 다운샘플 — 장기 구간 평균 축약(LIMIT 절단으로 최근이 잘리던 문제)', async () => {
+  const db = await import('../src/storage/db.js');
+  db._resetForTest();
+  // 버킷 경계 정렬(결정성): 임의 base 면 +1000/+2000 이 경계에 걸려 다른 버킷이 될 수 있다.
+  const base = Math.floor((Date.now() - 60_000) / 10_000) * 10_000;
+  // 같은 버킷(10초) 안 2점 + 다음 버킷 1점 — 버킷 평균이 되는지 확인.
+  const mk = (ts, used) => ({ deviceId: 'trend-1', ok: true, collectedAt: ts, capacity: { totalBytes: 100, usedBytes: used }, media: null });
+  await db.saveCapacityPoint(mk(base + 1000, 40));
+  await db.saveCapacityPoint(mk(base + 2000, 60));   // 같은 10초 버킷 → 평균 50
+  await db.saveCapacityPoint(mk(base + 11_000, 80)); // 다음 버킷
+  const raw = await db.capacityHistory('trend-1', base);
+  assert.equal(raw.length, 3, 'raw(bucketMs=0)는 전 점 반환 — 기존 호출부 호환');
+  const bucketed = await db.capacityHistory('trend-1', base, 10_000);
+  assert.equal(bucketed.length, 2, '10초 버킷 2개로 축약');
+  assert.equal(bucketed[0].used_bytes, 50, '버킷 내 AVG');
+  assert.equal(bucketed[1].used_bytes, 80);
+  assert.ok(bucketed[0].ts % 10_000 === 0, '버킷 정렬 ts');
+});
+
+test('엣지 push 수신 시 중앙 용량 시계열 적재 — 같은 collectedAt 재push 는 중복 점 없음', async () => {
+  const db = await import('../src/storage/db.js');
+  const { saveEdgeStorage } = await import('../src/central/storageEdge.js');
+  const ca = Date.now() - 5000;
+  const snap = { ...emptySnapshot({ id: 'edge-tr-1', type: 'isilon', name: 'E' }), ok: true, collectedAt: ca,
+    capacity: { totalBytes: 200, usedBytes: 90, pct: 45 } };
+  saveEdgeStorage('tr-edge', [snap]);
+  saveEdgeStorage('tr-edge', [snap]); // 5분 push 주기 × 10분 수집 = 같은 스냅샷 재전송 시뮬레이션
+  await new Promise((r) => setTimeout(r, 50)); // saveCapacityPoint 는 fire-and-forget(async)
+  const pts = await db.capacityHistory('edge-tr-1', ca - 1000);
+  assert.equal(pts.length, 1, 'collectedAt dedup — 재push 가 중복 점을 만들지 않음');
+  assert.equal(pts[0].used_bytes, 90);
+});

@@ -9,6 +9,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { recordActivity } from '../storage/activityLog.js';
+import { saveCapacityPoint } from '../storage/db.js';
 
 const FILE = path.join(config.configDir, 'central-agent-storage.json');
 const MAX_DEVICES_PER_AGENT = 500;
@@ -37,6 +38,12 @@ export function saveEdgeStorage(agent, devices) {
     const ca = Number(dv.collectedAt) || 0;
     if (_lastRec.get(key) === ca) continue;
     _lastRec.set(key, ca);
+    // 용량 시계열 적재(v2.318, 사용자 요구 '용량 추이 그래프') — 엣지 수집 장비의 추이를
+    // **중앙에서도** 보려면 push 수신 시 중앙 DB(capacity_history)에 1점을 적재해야 한다
+    // (수집 노드 로컬 DB 원칙의 예외 — 용량 4~8필드뿐이라 WAN/저장 부담 없음. 원문 API 응답은
+    // 여전히 엣지 DB). 같은 collectedAt 재push 는 위 dedup 이 걸러 중복 점이 쌓이지 않는다.
+    // 실패 스냅샷은 saveCapacityPoint 가 자체 스킵(ok 만 적재 — 그래프 0값 오염 방지).
+    saveCapacityPoint(dv).catch(() => { /* DB 비활성 — 스냅샷 보관·로그는 계속 */ });
     try {
       recordActivity({
         deviceId: key, name: dv.name || key, host: dv.host || '', source: agent,

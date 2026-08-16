@@ -59,6 +59,16 @@ async function open() {
       selAreas: conn.prepare('SELECT area, endpoint, ts, ok, bytes, truncated, error FROM api_latest WHERE device_id = ? ORDER BY area, endpoint'),
       selOne: conn.prepare('SELECT json, ts, ok, truncated, error FROM api_latest WHERE device_id = ? AND endpoint = ?'),
       selCap: conn.prepare('SELECT ts, total_bytes, used_bytes, hdd_total, hdd_used, ssd_total, ssd_used FROM capacity_history WHERE device_id = ? AND ts >= ? ORDER BY ts LIMIT 5000'),
+      // 버킷 다운샘플(v2.318, 추이 그래프): 장기 구간(90일=1.3만 점, 400일=5.7만 점)은 raw 가
+      // LIMIT 5000 에 앞부분만 잘려 "최근이 안 보이는" 그래프가 된다 — 시간 버킷 평균으로 축약.
+      // AVG 사용: 용량은 완만히 변하는 값이라 버킷 내 평균이 추세를 정직하게 대표(스파이크
+      // 관측이 목적이면 raw 를 쓰면 됨 — 단기 구간은 라우트가 raw 경로를 태운다).
+      // CAST 필수: node:sqlite 는 JS 숫자를 REAL 로 바인딩해 ts/? 가 실수 나눗셈이 된다 —
+      // CAST 없이는 행마다 고유한 몫이 되어 GROUP BY 가 아무것도 묶지 못한다(테스트로 실측).
+      selCapBucket: conn.prepare(`SELECT CAST(CAST(ts/? AS INTEGER)*? AS INTEGER) AS ts,
+        AVG(total_bytes) AS total_bytes, AVG(used_bytes) AS used_bytes,
+        AVG(hdd_total) AS hdd_total, AVG(hdd_used) AS hdd_used, AVG(ssd_total) AS ssd_total, AVG(ssd_used) AS ssd_used
+        FROM capacity_history WHERE device_id = ? AND ts >= ? GROUP BY CAST(ts/? AS INTEGER) ORDER BY ts LIMIT 2000`),
       prune1: conn.prepare('DELETE FROM api_history WHERE ts < ?'),
       prune2: conn.prepare('DELETE FROM capacity_history WHERE ts < ?'),
     };
@@ -115,8 +125,15 @@ export async function areaJson(deviceId, endpoint) {
   const db = await open();
   return db ? (db.selOne.get(deviceId, endpoint) || null) : null;
 }
-export async function capacityHistory(deviceId, sinceMs) {
+/**
+ * 용량 시계열 조회. bucketMs>0 이면 시간 버킷 평균으로 다운샘플(장기 구간 — 위 selCapBucket
+ * 주석), 0/미지정이면 raw(단기 구간·기존 호출부 호환).
+ */
+export async function capacityHistory(deviceId, sinceMs, bucketMs = 0) {
   const db = await open();
-  return db ? db.selCap.all(deviceId, sinceMs) : [];
+  if (!db) return [];
+  const b = Math.floor(Number(bucketMs) || 0);
+  if (b > 0) return db.selCapBucket.all(b, b, deviceId, sinceMs, b);
+  return db.selCap.all(deviceId, sinceMs);
 }
 export function _resetForTest() { try { _db?.conn?.close?.(); } catch { /* */ } _db = null; _pruneTick = 0; }
