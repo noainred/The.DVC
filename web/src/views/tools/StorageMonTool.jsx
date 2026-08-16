@@ -439,11 +439,16 @@ function DeviceForm({ d, form, setForm, onSaved }) {
             {(d.datacenters || []).map((x) => <option key={x.id} value={x.id}>{x.name || x.id}</option>)}
           </select>
         </label>
-        <label style={{ fontSize: 12 }} title="중앙이 직접 못 닿는 폐쇄망 장비는 그 법인의 엣지 포탈이 현지에서 수집합니다(iDRAC 위임과 동일)">수집 주체<br />
-          <select className="select" value={form.agent || ''} onChange={(e) => setForm({ ...form, agent: e.target.value })}>
-            <option value="">🖥️ 중앙에서 직접</option>
-            {(d.agents || []).map((a) => <option key={a} value={a}>📡 엣지 {a}</option>)}
-          </select>
+        {/* 수집 주체(v2.312 개선): 알려진 엣지 목록을 제안하되 **직접 입력도 허용**(datalist).
+            엣지가 아직 중앙에 한 번도 보고하지 않은 부트스트랩(토큰 미발급·최초 구성) 상황에서도
+            위임을 걸 수 있어야 한다(select 만이면 목록이 비어 위임 자체가 불가능했던 것이 원인).
+            빈 값 = 중앙에서 직접 수집. */}
+        <label style={{ fontSize: 12 }} title="중앙이 직접 못 닿는 폐쇄망 장비는 그 법인의 엣지 포탈이 현지에서 수집합니다(iDRAC 위임과 동일). 목록에 없으면 엣지 이름(AGENT_NAME)을 직접 입력하세요.">수집 주체(비우면 중앙 직접)<br />
+          <input className="input" list="storage-agent-list" style={{ width: 200 }} value={form.agent || ''}
+            onChange={(e) => setForm({ ...form, agent: e.target.value })} placeholder="🖥️ 중앙에서 직접 (또는 엣지 이름)" />
+          <datalist id="storage-agent-list">
+            {(d.agents || []).map((a) => <option key={a} value={a}>엣지 {a}</option>)}
+          </datalist>
         </label>
         <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12, padding: '6px 0' }}>
           <input type="checkbox" checked={form.enabled !== false} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} /> 활성
