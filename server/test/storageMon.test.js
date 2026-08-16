@@ -643,3 +643,23 @@ test('CSV sample — 구현 타입만 안내, 헤더 정합, 수식 인젝션 �
   const { csvLine } = await import('../src/util/csv.js');
   assert.equal(csvLine(['=cmd']), "'=cmd", '수식 인젝션 방어(guardCell)');
 });
+
+/* ─── v2.316: 엣지 재수집 요청 큐(사용자 버그 신고 — '수집' 버튼 무동작) ─── */
+
+test('collectRequests — 등록·agent 별 one-shot 인출·멱등·타 엣지 격리', async () => {
+  const cr = await import('../src/storage/collectRequests.js');
+  cr._resetForTest();
+  cr.requestCollect('dev-1', 'WA-Edge');
+  cr.requestCollect('dev-2', 'wa-edge');   // 대소문자 무시 — 같은 엣지
+  cr.requestCollect('dev-3', 'other');
+  cr.requestCollect('dev-1', 'WA-Edge');   // 재클릭 — 중복 항목 없이 갱신(멱등)
+  assert.equal(cr.hasPendingRequest('dev-1'), true);
+  const mine = cr.takeRequestsForAgent('WA-EDGE').sort();
+  assert.deepEqual(mine, ['dev-1', 'dev-2'], '내 몫만, 대소문자 무시');
+  // one-shot: 인출 즉시 큐에서 제거 — 다음 pull 에 중복 수집되지 않는다.
+  assert.deepEqual(cr.takeRequestsForAgent('WA-Edge'), []);
+  assert.equal(cr.hasPendingRequest('dev-1'), false);
+  // 타 엣지 몫은 그대로 남아 있다.
+  assert.deepEqual(cr.takeRequestsForAgent('other'), ['dev-3']);
+  cr._resetForTest();
+});

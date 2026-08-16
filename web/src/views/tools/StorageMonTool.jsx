@@ -101,7 +101,13 @@ export default function StorageMonTool() {
         <td style={{ textAlign: 'right' }}>{s ? `${s.nodes?.count ?? 0}${s.nodes?.unhealthy ? ` (⚠${s.nodes.unhealthy})` : ''}` : '—'}</td>
         <td style={{ textAlign: 'right' }}>{s?.accounts?.length ?? '—'}</td>
         <td>{!s ? <span className="badge gray">수집 전</span> : s.ok ? <span className="badge green">정상</span> : <span className="badge red" title={s.error}>실패</span>}
-          <div className="muted" style={{ fontSize: 10.5 }}>{ago(s?.collectedAt)}{s?.agent ? ` · ${s.agent}` : ''}</div></td>
+          <div className="muted" style={{ fontSize: 10.5 }}>{ago(s?.collectedAt)}{s?.agent ? ` · ${s.agent}` : ''}</div>
+          {/* 실패 사유를 눈에 보이게(v2.316, 사용자 버그 신고 — 툴팁만으론 사유를 알 수 없었음).
+              error 가 비면 섹션별 오류 문자열로 폴백(부분 실패도 사유가 반드시 드러나게). */}
+          {s && !s.ok && (() => {
+            const t = s.error || Object.entries(s.sections || {}).filter(([, v]) => /오류/.test(String(v))).map(([k, v]) => `${k} ${v}`).join(' · ');
+            return t ? <div style={{ fontSize: 10.5, color: 'var(--red)', maxWidth: 230, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={t}>{t}</div> : null;
+          })()}</td>
         <td className="right" style={{ whiteSpace: 'nowrap' }}>
           <button className="logout-btn" style={{ padding: '3px 8px', fontSize: 11.5 }} disabled={busy} onClick={() => collectNow(r.id)} title={r.agent ? '엣지 수집 장비 — 주기 반영 안내' : '지금 수집(연결 테스트)'}>수집</button>
           {' '}<button className="logout-btn" style={{ padding: '3px 8px', fontSize: 11.5 }} disabled={busy} onClick={() => setForm({ ...r, password: '' })}>수정</button>
