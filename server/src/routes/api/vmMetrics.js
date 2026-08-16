@@ -1,6 +1,6 @@
 // VM/호스트 메트릭·콘솔 티켓·iDRAC 전력 — api.js(구 2,445줄) 분할(v2.283.0). 본문은 원본 그대로, 등록 순서는 api.js 호출 순서가 보존한다.
 import { requirePerm } from '../../auth/auth.js';
-import { inUserScope } from '../../auth/scope.js';
+import { inUserScope, scopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { loadVcenterConfig } from '../../config.js';
 import { hostPower } from '../../idrac/service.js';
@@ -124,9 +124,19 @@ api.get('/vms/:id/console', requirePerm('vm.console'), async (req, res) => {
 
 // Real iDRAC power for one host (current + history). Used by the host detail
 // popup. ?name=<esxi host name>&hours=24
+// v2.313 보안 감사 반영: 형제 단건 라우트(/hosts/:id/metrics·/vms/:id/console)는 inUserScope
+// 위반 시 404 를 반환하는데 이 라우트만 name→hostPower 직행이라, scope 제한 계정이 범위 밖
+// ESXi 호스트명을 알면 전력·하드웨어 메타를 조회할 수 있었다. 스냅샷에서 name 으로 호스트를
+// 찾아 소유 vCenter 가 범위 밖이면 존재를 숨기고 404(server/CLAUDE.md id 단건 scope 규칙).
 api.get('/idrac/host-power', async (req, res) => {
   const name = req.query.name;
   if (!name) return res.status(400).json({ matched: false, reason: 'name이 필요합니다.' });
+  const snap = store.get();
+  const host = (snap.hosts || []).find((h) => h.name === String(name));
+  // 범위 제한 계정: 매칭 호스트가 없거나(그 이름이 스냅샷에 없음) 범위 밖이면 404(존재 은닉).
+  if (scopedVcenterIds(req.user, snap) && !(host && inUserScope(req.user, snap, host.vcenterId))) {
+    return res.status(404).json({ matched: false, reason: '호스트를 찾을 수 없습니다.' });
+  }
   try {
     const hours = Math.min(720, Math.max(1, Number(req.query.hours) || 24));
     const serviceTag = req.query.serviceTag ? String(req.query.serviceTag) : '';

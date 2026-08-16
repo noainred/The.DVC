@@ -108,9 +108,27 @@ const LOG_PATTERNS = [
   { name: 'basic-auth', re: /(authorization\s*[:=]\s*["']?basic\s+)([A-Za-z0-9+/=]{8,})/i, g: 2 },
 ];
 
-function maskLine(line, m, gIdx) {
-  const secret = m[gIdx];
-  const masked = line.split(secret).join(MASK);       // 같은 값 반복도 전부 치환
+// 프리뷰 마스킹용 패턴(v2.313 보안 감사 수정) — 탐지용 LOG_PATTERNS 와 별개로, 값 경계를
+// **공백까지**로 넓혀(콤마·특수문자 포함 비밀번호가 통째로 가려지게) 전역(g)으로 마스킹한다.
+// 과거: 탐지 그룹(`[^"'\s&,}]`)이 콤마·& 에서 끊겨 `password=***,w0rd,2026` 처럼 비밀번호
+// 뒷부분이 프리뷰에 원문 노출됐고, 한 줄에 자격증명이 둘이면 두 번째가 안 가려졌다. 과다
+// 마스킹은 안전(부분 노출이 유출) — 점검 도구가 유출 통로가 되지 않게 값을 통째로 가린다.
+const MASK_PATTERNS = [
+  /((?:password|passwd|pwd)["']?\s*[:=]\s*["']?)([^\s"']{3,})/ig,                       // password=... (공백/따옴표 전까지)
+  /((?:password|passwd|secret|token|api[_-]?key)\s*[:=]\s*['"`])([^'"`]{3,})(['"`])/ig,  // 소스 따옴표 값(SRC_RE 탐지 대응 — secret/token/api_key 포함)
+  /(:\/\/[^/\s:@]+:)([^@\s]{3,})(@)/ig,                                                  // scheme://user:PASS@
+  /((?:authorization\s*[:=]\s*["']?basic\s+))([A-Za-z0-9+/=]{8,})/ig,                    // Authorization: Basic <b64>
+];
+
+/**
+ * 한 줄 전체를 모든 패턴으로 마스킹한 뒤, 첫 마스킹 지점 주변 160자만 프리뷰로 돌려준다.
+ * 안전 폴백: 어떤 패턴도 마스킹하지 못하면(탐지 정규식과 마스킹 정규식이 어긋난 경우) 원문을
+ * 절대 돌려주지 않고 전체를 숨긴다 — 점검 도구가 유출 통로가 되지 않게(v2.313 감사 반영).
+ */
+function maskLine(line) {
+  let masked = String(line);
+  for (const re of MASK_PATTERNS) masked = masked.replace(re, (_full, pre, _val, post = '') => `${pre}${MASK}${post}`);
+  if (!masked.includes(MASK)) return `${MASK} (마스킹 패턴 불일치 — 값 전체 숨김)`;
   const at = Math.max(0, masked.indexOf(MASK) - 60);
   return masked.slice(at, at + 160);
 }
@@ -146,7 +164,7 @@ async function scanLogFiles() {
           const m = p.re.exec(lines[i]);
           // 마스킹 흔적(***)·해시 필드 등 명백한 비값은 제외 — 오탐 소음 억제.
           if (m && !m[p.g].startsWith(MASK) && !/passwordhash/i.test(lines[i])) {
-            hits.push({ pattern: p.name, preview: maskLine(lines[i], m, p.g) });
+            hits.push({ pattern: p.name, preview: maskLine(lines[i]) });
             break;
           }
         }
@@ -191,7 +209,7 @@ async function scanSourceDirs(dirs) {
         for (let i = 0; i < lines.length; i++) {
           const m = SRC_RE.exec(lines[i]);
           if (!m || SRC_FALSE.test(lines[i])) continue;
-          out.push({ file: fp, line: i + 1, preview: maskLine(lines[i].trim(), m, 2).slice(0, 160) });
+          out.push({ file: fp, line: i + 1, preview: maskLine(lines[i].trim()).slice(0, 160) });
           if (out.length >= SRC_MAX_HITS) break;
         }
       } catch { /* 개별 파일 실패 무시 */ }

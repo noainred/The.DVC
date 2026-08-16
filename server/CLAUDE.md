@@ -7,11 +7,13 @@
 - **전역 TLS 디스패처 금지**: `setGlobalDispatcher`로 프로세스 전체 fetch의 인증서 검증을 끄지 않는다(과거 vCenter용 설정이 업그레이드 번들·NSX까지 오염). 자체서명이 필요한 곳만 로컬 디스패처를 `dispatcher:` 옵션으로 주입한다(`vcenter/restClient.js vcDispatcher`, `nsx/client.js`, `util/resilientFetch.js wanAgent`).
 - **WAN(중앙↔엣지) TLS 기본 검증 ON**: `WAN_TLS_INSECURE`는 `=== 'true'`일 때만 검증 해제. 의미를 반전시키지 말 것(과거 '미설정=검증 off'였고 그 구간으로 토큰·자격증명이 흐른다).
 - **상태변경 라우트 RBAC**: `/api` 의 POST/PUT/PATCH/DELETE에는 `requireRole('admin','operator')`를 붙인다(읽기성 POST 제외). WS SSH/RDP 게이트웨이도 역할을 검사한다.
-  - ⚠️ **미적용 갭(2026-08-13 감사)**: `DELETE /remote/mappings/:id`(`routes/remote.js:208`)만 형제 라우트와 달리
-    `adminOnly`/`requirePerm('remote.access')`가 없다(인라인 소유권 검사만 — 소유자 없는 레거시 매핑은 임의
-    인증 사용자가 삭제 가능). 또 `/remote/{probe,quick-connect}`(`:53,179`)는 `targetHost`에 vCenter scope 를
-    적용하지 않아 scoped 계정의 내부망 정찰·범위 밖 터널 생성이 가능. 수정 시 이 항목 삭제. 상세는
-    `docs/AUDIT-2026-08-13.md`.
+  - ✅ **수정됨(v2.313)**: `DELETE /remote/mappings/:id`(`routes/remote.js:208`)에 `requirePerm('remote.access')`
+    추가 + 소유자 없는 매핑은 admin 전용으로 보정(과거 `m.owner && …` 단락으로 소유자 없는 레거시 매핑을
+    임의 인증 사용자가 삭제 가능했음).
+  - ⚠️ **미적용 갭(보류 — 설계 확정 필요)**: `/remote/{probe,quick-connect}`(`:53,179`)는 `requirePerm('remote.access')`는
+    붙어 admin/operator 제한이지만 `targetHost`에 vCenter scope 교집합이 없다(형식 검증만) — scoped operator 의
+    내부망 도달성 프로브·범위 밖 터널 매핑 생성이 가능(자격증명 별도 필요 → 정찰·피벗 준비 한정). host↔vCenter
+    소유 매핑 설계 확정 후 적용 예정. 상세는 `docs/AUDIT-2026-08-13.md`.
 - **토큰 검증은 `resolveTokenUser` 하나로**: `verifyToken`을 직접 호출해 `payload.role`을 신뢰하지 말 것 — tokenVersion 폐기·최신 역할 반영이 우회된다(WS 게이트웨이에서 실제로 뚫렸던 경로).
 - **central 엔드포인트의 agent 바인딩**: `routes/central.js` 미들웨어가 '개별 토큰 ↔ agent' 일치를 강제한다. 새 엔드포인트가 `?agent=`/`body.agent`로 데이터를 고르면 그 미들웨어를 우회하지 않게 할 것(자격증명 횡탈 차단).
 - **자격증명 파일은 원자적 쓰기 + 로드 손상 보존**: `util/atomicWrite.js`의 `atomicWriteFileSync`로 쓰고(직접 `fs.writeFileSync` 금지), **로드 catch에서 파싱 실패 시 `preserveCorrupt(FILE)`로 `<file>.corrupt.<ts>` 보존** 후 빈 값 반환. 쓰기만 원자적이고 로드가 손상을 조용히 `[]`로 넘기면, 다음 저장이 온전했던 원본을 빈 목록으로 덮어써 전 자격증명이 영구 유실된다(3차 감사 지적 — vcenters/nsx/collectors/users 4종이 이 비대칭이었음). portal.env(CENTRAL_TOKEN)도 원자적으로 쓴다.
@@ -91,15 +93,16 @@
     `/summary`·`/overview` 실제 사례). **vCenter 귀속 없는 데이터(스캔 발견물·미귀속 override·byVcenter
     요약)는 범위 계정에 노출하지 않는다.** 단, 외부 프로그램이 공유하는 `ipam.db` 원장 자체(`syncLedger`)는
     무스코프 유지(외부 리더가 절단본을 받으면 안 됨 — 라우트에서만 scope 주입).
-  - ⚠️ **미적용 갭(2026-08-13 감사 발견 — 수정 시 이 목록에서 지울 것)**: 아래 조회 라우트는 위 패턴이
-    빠져 있어 scope 제한 계정이 범위 밖 데이터를 조회한다. 상세는 `docs/AUDIT-2026-08-13.md`.
+  - ✅ **수정됨(v2.313 보안 감사)**: 아래 조회 갭 2건을 `scopedVcenterIds` 교집합(요청 필터보다 먼저) + `requirePerm` 로 닫음.
     - `provision/{sources,placement,saved,saved/:id}`(`routes/api/provision.js`·`provision/jobs.js listSources`·
-      `provision/placement.js getPlacement`): **Medium** — 범위 밖 전 vCenter VM/템플릿·토폴로지 노출,
-      `/placement`는 임의 vCenter로 라이브 SOAP 질의 유발. `scopedVcenterIds` 교집합 + `requirePerm` 필요.
-    - `/nsx`·`/nsx/group-members`(`routes/api/overviewNsx.js:77,101`): NSX 가 scope 대상인지 **설계 확인 후**
-      전 함대 NSX 매니저·DFW 규칙·보안그룹·VM 멤버 IP 노출 여부 판단(같은 파일 `/overview` 는 이미 scope 적용).
-    - `/idrac/host-power`(`routes/api/vmMetrics.js:127`): 단건 `inUserScope` 검사 없음(형제 `/hosts/:id/metrics`
-      는 404 처리). 범위 밖 호스트 전력 텔레메트리 노출.
+      `provision/saved.js listSaved`): `requirePerm('vm.provision')` + scope 교집합. `/placement`는 scope 계정이
+      범위 내 vCenter 를 명시하지 않으면 403(범위 밖 라이브 SOAP 차단). 귀속 없는 저장 작업은 범위 계정 미노출.
+      테스트: `server/test/provisionScope.test.js`.
+    - `/idrac/host-power`(`routes/api/vmMetrics.js`): 스냅샷에서 `name`→호스트 조회 후 `inUserScope` 위반 시 404(존재 은닉).
+  - ⚠️ **미적용 갭(보류 — 설계 확인 필요)**: `/nsx`·`/nsx/group-members`(`routes/api/overviewNsx.js:77,101`)는 NSX 가
+    scope 대상인지 **설계 확인 후** 적용(전 함대 NSX 매니저·DFW 규칙·보안그룹·VM 멤버 IP). NSX 매니저는 vc.id 가
+    아니라 region/vcenterId 속성만 가져 scope 모델 확장(매니저↔region↔vCenter 매핑)이 선행돼야 한다. 같은 파일
+    `/overview` 는 이미 scope 적용. 상세는 `docs/AUDIT-2026-08-13.md`.
   - **중앙 GPU 오버레이 direct-mode 봉인(v2.257)**: `/api/central/gpu-guest-data` 는 저장 키를
     `centralAuth.agent` 로 강제하고, hostId/vmId 의 소유 vCenter 를 **`listInventory` 최장 프리픽스
     매칭**으로 판정한다(vc.id 에 콜론이 있어 단순 `split(':')` 로는 오파싱). `collectMode!=='site'`
