@@ -5,39 +5,8 @@ import { enableNotifications } from '../pwa.js';
 import {
   ResponsiveContainer, BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid,
 } from 'recharts';
-
-const fmtAgo = (ts) => {
-  if (!ts) return '—';
-  const s = Math.max(0, Math.round((Date.now() - ts) / 1000)); // 서버-브라우저 시계 오차로 음수("-12초 전") 방지
-  if (s < 60) return `${s}초 전`;
-  if (s < 3600) return `${Math.round(s / 60)}분 전`;
-  return `${Math.round(s / 3600)}시간 전`;
-};
-const num = (n) => (n == null ? '—' : Number(n).toLocaleString());
-const fmtDate = (ts) => (ts ? new Date(ts).toLocaleDateString('ko-KR') : '—');
-const dec1 = (n) => Number(n).toLocaleString(undefined, { maximumFractionDigits: 1 });
-// 전력(W): 1,000 넘으면 상위 단위(kW→MW→GW). 예: 131,133 W → 131.1 kW.
-const fmtW = (w) => {
-  if (w == null || !Number.isFinite(Number(w))) return '—';
-  const a = Math.abs(w);
-  if (a >= 1e9) return `${dec1(w / 1e9)} GW`;
-  if (a >= 1e6) return `${dec1(w / 1e6)} MW`;
-  if (a >= 1e3) return `${dec1(w / 1e3)} kW`;
-  return `${Math.round(w).toLocaleString()} W`;
-};
-// 에너지(입력 kWh): 1,000 넘으면 MWh→GWh. 예: 141,623.6 kWh → 141.6 MWh.
-const fmtWh = (kwh) => {
-  if (kwh == null || !Number.isFinite(Number(kwh))) return '—';
-  const a = Math.abs(kwh);
-  if (a >= 1e6) return `${dec1(kwh / 1e6)} GWh`;
-  if (a >= 1e3) return `${dec1(kwh / 1e3)} MWh`;
-  return `${dec1(kwh)} kWh`;
-};
-// CO2(입력 kg): 1,000 넘으면 t(톤).
-const fmtKg = (kg) => {
-  if (kg == null || !Number.isFinite(Number(kg))) return '—';
-  return Math.abs(kg) >= 1e3 ? `${dec1(kg / 1e3)} t` : `${Math.round(kg).toLocaleString()} kg`;
-};
+// 표시 포맷터는 util/fmt.js 로 통합(v2.319 모듈화 #9 — 본문 동일 이동, 기능 무변)
+import { fmtAgo, num, fmtDate, dec1, fmtW, fmtWh, fmtKg } from '../util/fmt.js';
 
 function Kpi({ label, value, sub, color }) {
   return (

@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson, postJson, putJson, delJson, getToken } from '../api.js';
 import { Loading, ErrorBox, Modal } from '../components/ui.jsx';
+import { fmtBytes, fmtTime } from '../util/fmt.js';
 
-const fmtBytes = (n) => { if (!n) return '0 B'; const u = ['B', 'KB', 'MB', 'GB']; let i = 0; let v = n; while (v >= 1024 && i < 3) { v /= 1024; i++; } return `${v.toFixed(i ? 1 : 0)} ${u[i]}`; };
-const fmtTime = (ts) => (ts ? new Date(ts).toLocaleString('ko-KR') : '—');
+// fmtBytes/fmtTime 은 util/fmt.js 로 통합(v2.319 — 동일 구현 복붙 제거)
 const REASON = { manual: '수동', schedule: '정기', change: '변경감지', startup: '시작', 'pre-restore': '복원전' };
 
 /** 설정 → 포탈 백업 — 중앙+엣지 통합 설정 백업, 정기/변경 자동 + 다운로드/복원. */

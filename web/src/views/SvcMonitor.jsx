@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { usePolling, postJson, putJson, delJson, fetchJson, getCurrentUser, downloadFile } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
+import { useTreeDnd } from '../hooks/useTreeDnd.js';
 import TemplateTab from './svcmon/TemplateTab.jsx';   // 템플릿 화면은 하나만 — 폴더 적용 모달에서도 이 화면을 불러 쓴다
 import BulkTab from './svcmon/BulkTab.jsx';           // 통합 등록 마법사 — 트리에서 모달로 불러 쓴다(설정 탭과 같은 하나의 화면)
 import EscClose from '../components/EscClose.jsx';
@@ -116,8 +117,13 @@ export default function SvcMonitor() {
   const [err, setErr] = useState('');
   const dragRef = useRef(false);
   // 트리 드래그&드롭 이동(스플리터 dragging 과 별개) — { type:'folder'|'target', path, id?, name }
-  const [dragItem, setDragItem] = useState(null);
-  const [dragOver, setDragOver] = useState(null);       // { id, zone:'before'|'inside'|'after' } · id='' = Root
+  // DnD 상태 기계는 useTreeDnd 훅으로 추출(v2.319, 모듈화 #10) — 아래 canDropZone(규칙)과
+  // doDrop(서버 호출)만 이 뷰 소유. 훅 콜백은 이벤트 시점에 호출되므로 뒤에 선언된 const 를
+  // 참조해도 안전하다(클로저가 바인딩을 캡처).
+  const treeDnd = useTreeDnd({
+    canDrop: (item, id, zone, isFolder) => canDropZone(item, id, zone, isFolder),
+    onPerformDrop: (item, id, zone, isFolder) => doDrop(item, id, zone, isFolder),
+  });
   const [moveErr, setMoveErr] = useState('');
   // 우클릭 컨텍스트 메뉴 — { x, y, node:'root'|path, targetId? } · 계단식 서브메뉴 인덱스
   const [ctx, setCtx] = useState(null);
@@ -306,11 +312,12 @@ export default function SvcMonitor() {
   /* ── 드래그&드롭: 폴더 reparent(안으로) · 대상→폴더 이동 · 형제 순서 재정렬(위/아래) ── */
   const parentOf = (p) => (p.includes('\\') ? p.slice(0, p.lastIndexOf('\\')) : '');
   // 어떤 (대상 id/폴더 경로, zone) 조합이 드롭 가능한지. isFolder=드롭 대상이 폴더 행인가.
-  const canDropZone = (id, zone, isFolder) => {
-    if (!dragItem || !canEdit) return false;
-    if (dragItem.type === 'folder') {
+  // item = 드래그 중 항목(useTreeDnd 가 인자로 전달 — v2.319 전에는 클로저 dragItem 참조).
+  const canDropZone = (item, id, zone, isFolder) => {
+    if (!item || !canEdit) return false;
+    if (item.type === 'folder') {
       if (!isFolder) return false;                                  // 폴더는 대상 사이에 못 낀다
-      const src = dragItem.path;
+      const src = item.path;
       if (zone === 'inside') {
         if (id === '') return src.includes('\\');                   // Root 안으로 = 최상위로(이미 최상위면 no-op)
         if (id === src || String(id).startsWith(`${src}\\`)) return false;   // 자기/하위 금지
@@ -324,11 +331,10 @@ export default function SvcMonitor() {
       return true;
     }
     // 대상 드래그
-    if (isFolder) return zone === 'inside' && id !== '' && id !== dragItem.path;   // 폴더 안으로 이동
+    if (isFolder) return zone === 'inside' && id !== '' && id !== item.path;   // 폴더 안으로 이동
     // 대상 행 위/아래 = 그 대상의 폴더에서 순서 재정렬(다른 폴더면 이동+재정렬)
-    return id !== dragItem.id;
+    return id !== item.id;
   };
-  const clearDrag = () => { setDragItem(null); setDragOver(null); };
 
   // 대상 X 를 refTargetId 기준 앞/뒤로 그 폴더에 놓는다(다른 폴더면 경로 이동 후 재정렬).
   const reorderTargetTo = async (dragId, refTargetId, after) => {
@@ -363,10 +369,9 @@ export default function SvcMonitor() {
     refresh();
   };
 
-  const doDrop = async (id, zone, isFolder) => {
-    const item = dragItem;
-    clearDrag(); setMoveErr('');
-    if (!item || !canDropZone(id, zone, isFolder)) return;
+  // 훅이 canDrop 통과·상태 clear 후 호출한다(item 인자 전달) — 여기서는 수행만.
+  const doDrop = async (item, id, zone, isFolder) => {
+    setMoveErr('');
     try {
       if (item.type === 'folder') {
         if (zone === 'inside') {
@@ -385,29 +390,12 @@ export default function SvcMonitor() {
       }
     } catch (e) { setMoveErr(e.message || '이동 실패'); }
   };
+  // 소비부(TreeRows 등)가 쓰는 dnd 객체 형태는 v2.319 이전과 동일 — 기계 부분만 훅에서 온다.
+  // start 시 setMoveErr('') 는 기존 동작 보존(새 드래그 시작 시 이전 오류 배너 제거).
   const dnd = {
-    canEdit, over: dragOver, active: !!dragItem,
-    start: (e, item) => {
-      setDragItem(item); setMoveErr('');
-      try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', item.path || item.id || ''); } catch { /* noop */ }
-    },
-    end: clearDrag,
-    onOver: (e, id, isFolder, forceZone) => {
-      const zone = forceZone || zone2(e, id, isFolder);
-      if (!canDropZone(id, zone, isFolder)) return;
-      e.preventDefault();
-      try { e.dataTransfer.dropEffect = 'move'; } catch { /* noop */ }
-      if (dragOver?.id !== id || dragOver?.zone !== zone) setDragOver({ id, zone });
-    },
-    onLeave: (id) => setDragOver((cur) => (cur && cur.id === id ? null : cur)),
-    onDrop: (e, id, isFolder, forceZone) => { e.preventDefault(); e.stopPropagation(); doDrop(id, forceZone || zone2(e, id, isFolder), isFolder); },
+    canEdit, ...treeDnd,
+    start: (e, item) => { setMoveErr(''); treeDnd.start(e, item); },
   };
-  // 커서 Y 위치로 zone 판정(폴더: 상 30%/중 40%/하 30% = before/inside/after · 대상: 상/하 = before/after).
-  function zone2(e, id, isFolder) {
-    const r = e.currentTarget.getBoundingClientRect();
-    const y = e.clientY - r.top; const h = r.height || 1;
-    return isFolder ? (y < h * 0.3 ? 'before' : y > h * 0.7 ? 'after' : 'inside') : (y < h * 0.5 ? 'before' : 'after');
-  }
 
   const setSortMode = async (m) => {
     try { await putJson('/svcmon/sort', { kind: mode, mode: m }); refresh(); }
