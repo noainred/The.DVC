@@ -9,6 +9,8 @@ import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { applyPulledDevices } from '../storage/registry.js';
+import { collectDeviceNow } from '../storage/poller.js';
+import { pushStorageNow } from '../storage/push.js';
 
 const INTERVAL_MS = Math.max(60_000, Number(process.env.STORAGE_CONFIG_PULL_MS) || 5 * 60_000);
 let _timer = null;
@@ -24,12 +26,30 @@ export async function pullStorageConfigNow() {
     const body = await res.json();
     const devices = body?.devices || [];
     const sig = crypto.createHash('sha1').update(JSON.stringify(devices)).digest('hex');
-    if (sig === _lastSig) { _last = { at: Date.now(), applied: false, reason: '변경 없음' }; return { ok: true, unchanged: true }; }
-    applyPulledDevices(devices);
-    _lastSig = sig;
-    _last = { at: Date.now(), applied: true, count: devices.length };
-    console.log(`[storage-config] 중앙 배포 장비 적용: agent=${config.agent.name} 장비 ${devices.length}대`);
-    return { ok: true, applied: true, count: devices.length };
+    let applied = false;
+    if (sig !== _lastSig) {
+      applyPulledDevices(devices);
+      _lastSig = sig;
+      applied = true;
+      console.log(`[storage-config] 중앙 배포 장비 적용: agent=${config.agent.name} 장비 ${devices.length}대`);
+    }
+    // '지금 수집' 요청(v2.316, 사용자 버그 신고 — 엣지 장비의 수집 버튼이 무동작이던 문제):
+    // 중앙이 collectRequests 큐에 남긴 요청을 collectNow 로 받는다. ⚠ 위의 '변경 없음' 판정과
+    // 무관하게 **매 pull 마다** 처리해야 한다(구성은 안 바뀌어도 재수집 요청은 흔함) — 그래서
+    // 조기 return 이던 unchanged 분기를 없앴다. 요청 장비를 즉시 수집하고 바로 push 해
+    // 결과가 push 주기(≤5분)를 기다리지 않고 중앙 화면에 반영되게 한다.
+    const wants = Array.isArray(body?.collectNow) ? body.collectNow.slice(0, 20) : [];
+    let collected = 0;
+    if (wants.length) {
+      console.log(`[storage-config] 중앙 재수집 요청 ${wants.length}건 수신 — 즉시 수집`);
+      for (const id of wants) {
+        try { await collectDeviceNow(String(id)); collected++; }
+        catch (e) { console.warn(`[storage-config] 재수집 실패(${id}): ${e.message}`); } // 실패 스냅샷도 push 로 전달됨
+      }
+      try { await pushStorageNow(); } catch (e) { console.warn(`[storage-config] 재수집 push 실패: ${e.message}`); }
+    }
+    _last = { at: Date.now(), applied, count: devices.length, collectRequested: wants.length, collected };
+    return { ok: true, applied, unchanged: !applied, count: devices.length, collectRequested: wants.length, collected };
   } catch (e) { _last = { at: Date.now(), error: e.message }; return { ok: false, reason: e.message }; }
 }
 

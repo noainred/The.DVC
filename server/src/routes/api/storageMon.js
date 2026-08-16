@@ -16,6 +16,7 @@ import { AREA_LABEL } from '../../storage/onefsCatalog.js';
 import { listDatacenters } from '../../datacenter/store.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
 import { devicesToCsv, sampleCsv, parseDevicesCsv, rowIssue } from '../../storage/csv.js';
+import { requestCollect, hasPendingRequest } from '../../storage/collectRequests.js';
 
 const adminOnly = requireRole('admin');
 const fullScopeOnly = (req, res, next) => {
@@ -94,12 +95,24 @@ api.post('/tools/storage/collect-all', adminOnly, async (req, res) => {
   } catch (e) { res.status(502).json({ ok: false, reason: e.message }); }
 });
 
-/** 지금 수집(연결 테스트 겸) — 중앙 수집 장비만 즉시 가능. 엣지 몫은 다음 pull/폴링 주기 안내. */
+/**
+ * 지금 수집(연결 테스트 겸) — 중앙 수집 장비는 즉시, 엣지 위임 장비는 **재수집 요청 등록**.
+ * v2.316(사용자 버그 신고): 과거엔 엣지 장비에 안내 메시지만 반환하고 아무것도 하지 않았다 —
+ * collectRequests 큐에 요청을 남기면 엣지가 다음 config pull(≤5분) 때 즉시 수집 + 즉시 push 한다.
+ */
 api.post('/tools/storage/devices/:id/collect', adminOnly, async (req, res) => {
   try {
     const dev = listDevices().find((d) => d.id === req.params.id);
     if (!dev) return res.status(404).json({ ok: false, reason: '장비를 찾을 수 없습니다.' });
-    if ((dev.agent || '').trim()) return res.status(202).json({ ok: false, reason: `이 장비는 엣지 '${dev.agent}' 가 수집합니다 — 엣지 pull(≤5분)·수집(≤10분) 주기 후 반영됩니다.` });
+    if ((dev.agent || '').trim()) {
+      const dup = hasPendingRequest(dev.id);
+      requestCollect(dev.id, dev.agent);
+      logAudit({ user: req.user?.username, action: '스토리지 재수집 요청(엣지)', target: `${dev.name}(${dev.id})`, detail: `엣지 ${dev.agent}` });
+      return res.status(202).json({ ok: true, requested: true,
+        reason: dup
+          ? `이미 재수집 요청이 대기 중입니다 — 엣지 '${dev.agent}' 의 다음 pull(≤5분) 시 즉시 수집·push 됩니다.`
+          : `재수집 요청 등록 — 엣지 '${dev.agent}' 가 다음 pull(≤5분) 시 즉시 수집하고 바로 push 합니다.` });
+    }
     await collectDeviceNow(req.params.id);
     logAudit({ user: req.user?.username, action: '스토리지 즉시 수집', target: req.params.id });
     res.json({ ok: true });

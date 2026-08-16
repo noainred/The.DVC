@@ -488,7 +488,10 @@ centralRouter.get('/storage-config', async (req, res) => {
     return res.status(403).json({ ok: false, reason: '토큰의 agent 와 요청 agent 불일치' });
   }
   const { devicesForAgent } = await import('../storage/registry.js');
-  res.json({ ok: true, agent, devices: devicesForAgent(agent) });
+  // collectNow(v2.316): 중앙 UI 의 '수집' 클릭이 남긴 재수집 요청을 one-shot 으로 서빙 —
+  // 엣지는 이 목록을 즉시 수집 + 즉시 push 한다(agent/storageConfigPull.js 참조).
+  const { takeRequestsForAgent } = await import('../storage/collectRequests.js');
+  res.json({ ok: true, agent, devices: devicesForAgent(agent), collectNow: takeRequestsForAgent(agent) });
 });
 
 // POST /api/central/storage-data — 엣지 수집 스냅샷 수신. 저장 키는 body.agent 가 아니라
