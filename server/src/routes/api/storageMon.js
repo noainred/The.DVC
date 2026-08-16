@@ -8,8 +8,9 @@ import { logAudit } from '../../audit.js';
 import { STORAGE_TYPES } from '../../storage/types.js';
 import { listDevices, saveDevice, deleteDevice } from '../../storage/registry.js';
 import { localSnapshots, dropSnapshot } from '../../storage/store.js';
-import { collectDeviceNow, storagePollerStatus } from '../../storage/poller.js';
+import { collectDeviceNow, storagePollerStatus, pollStorageOnce } from '../../storage/poller.js';
 import { edgeStorageSnapshots } from '../../central/storageEdge.js';
+import { listActivity } from '../../storage/activityLog.js';
 import { areaSummary, areaJson, capacityHistory, dbAvailable } from '../../storage/db.js';
 import { AREA_LABEL } from '../../storage/onefsCatalog.js';
 import { listDatacenters } from '../../datacenter/store.js';
@@ -65,6 +66,32 @@ api.delete('/tools/storage/devices/:id', adminOnly, (req, res) => {
   dropSnapshot(req.params.id); // 지운 장비의 낡은 스냅샷이 화면에 유령으로 남지 않게
   logAudit({ user: req.user?.username, action: '스토리지 장비 삭제', target: req.params.id });
   res.json({ ok: true });
+});
+
+/**
+ * 수집 작업 로그(v2.315, 사용자 요구 '진행중/완료 창').
+ * poller.inFlight = 지금 수집 중인 장비('진행중'), events = 최근 완료 이벤트('완료', newest-first).
+ * 조회 전용이라 fullScopeOnly(스토리지는 vCenter 범위 밖 — 다른 스토리지 조회와 동일 게이트).
+ */
+api.get('/tools/storage/activity', fullScopeOnly, (req, res) => {
+  res.json({ poller: storagePollerStatus(), events: listActivity(Number(req.query.limit) || 100) });
+});
+
+/**
+ * 전체 새로고침(v2.315, 사용자 요구) — 중앙 직접(agent 빈) 장비를 즉시 재수집한다.
+ * pollStorageOnce 를 재사용해 폴러의 재진입 가드·병렬 3개 제한을 그대로 탄다(부하 평탄화).
+ * 엣지 위임 장비는 원격에서 강제할 수 없어 수를 세어 '다음 주기 반영'으로 안내만 한다(정직).
+ */
+api.post('/tools/storage/collect-all', adminOnly, async (req, res) => {
+  try {
+    const all = listDevices().filter((d) => d.enabled !== false);
+    const edge = all.filter((d) => (d.agent || '').trim()).length;
+    const central = all.length - edge;
+    const result = await pollStorageOnce(); // { ok, fail } 또는 { skipped:true }(이미 진행 중)
+    logAudit({ user: req.user?.username, action: '스토리지 전체 새로고침',
+      detail: `중앙 ${central}대 재수집(${result.skipped ? '이미 진행중' : `성공 ${result.ok}·실패 ${result.fail}`})·엣지 ${edge}대 다음주기` });
+    res.json({ ok: true, central, edge, result });
+  } catch (e) { res.status(502).json({ ok: false, reason: e.message }); }
 });
 
 /** 지금 수집(연결 테스트 겸) — 중앙 수집 장비만 즉시 가능. 엣지 몫은 다음 pull/폴링 주기 안내. */

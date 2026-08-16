@@ -67,6 +67,21 @@ export default function StorageMonTool() {
     if (!window.confirm(`'${r.name}' (${r.host}) 장비를 삭제할까요? (수집 이력 스냅샷도 화면에서 제거)`)) return;
     setBusy(true); try { await delJson(`/tools/storage/devices/${encodeURIComponent(r.id)}`); await load(); } catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(false); }
   };
+  // 전체 새로고침(v2.315) — 중앙 직접 장비 즉시 재수집 + 화면 갱신. 엣지 장비는 원격 강제 불가라
+  // '다음 주기 반영'으로 안내만 한다(서버 collect-all 이 수를 세어 돌려줌 — 과장 없이 정직하게).
+  const refreshAll = async () => {
+    setBusy(true); setMsg('전체 새로고침 중…');
+    try {
+      const r = await postJson('/tools/storage/collect-all', {});
+      if (r.ok) {
+        const res = r.result || {};
+        setMsg(res.skipped
+          ? `이미 수집이 진행 중입니다 — 잠시 후 반영됩니다 (엣지 ${r.edge}대는 다음 주기)`
+          : `중앙 ${r.central}대 재수집 완료(성공 ${res.ok || 0}·실패 ${res.fail || 0}) · 엣지 ${r.edge}대는 다음 주기 반영`);
+      } else setMsg(r.reason || '새로고침 실패');
+      await load();
+    } catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(false); }
+  };
 
   const DeviceRow = ({ r }) => {
     const s = r.snap;
@@ -123,6 +138,11 @@ export default function StorageMonTool() {
         <button className="tab" style={{ flex: 'none', padding: '7px 13px' }} title="CSV 파일로 장비를 일괄 등록/수정" onClick={() => setImportOpen(true)}>⬆ CSV 가져오기</button>
         <button className="tab" style={{ flex: 'none', padding: '7px 13px' }} title="양식·예시가 담긴 샘플 CSV 내려받기"
           onClick={() => downloadFile('/tools/storage/devices/sample.csv').catch((e) => setMsg(`샘플 오류: ${e.message}`))}>📄 샘플 CSV</button>
+        {/* 전체 새로고침(v2.315, 사용자 요구) — 중앙 직접 장비 즉시 재수집 + 화면 갱신(엣지는 다음 주기). */}
+        <span style={{ width: 1, height: 22, background: 'var(--border)', margin: '0 2px' }} />
+        <button className="tab" style={{ flex: 'none', padding: '7px 13px' }} disabled={busy}
+          title="중앙 직접 수집 장비를 지금 다시 수집하고 화면을 갱신합니다(엣지 위임 장비는 다음 주기에 반영)"
+          onClick={refreshAll}>🔄 전체 새로고침</button>
         {msg && <span className="muted" style={{ fontSize: 12.5 }}>{msg}</span>}
       </div>
 
@@ -166,12 +186,86 @@ export default function StorageMonTool() {
         확장 로드맵(카탈로그): {(d.types || []).filter((t) => !t.implemented).map((t) => t.label).join(' · ')} — 수집기 구현 시 이 화면 변경 없이 표시됩니다.
       </div>
 
+      {/* 수집 작업 로그(v2.315, 사용자 요구) — 진행중 + 완료. 자체 폴링(5초)이라 별도 컴포넌트. */}
+      <ActivityPanel />
+
       {detail && (() => {
         const row = rows.find((x) => x.id === detail);
         if (!row) return null; // 새로고침 사이에 삭제된 장비 — 모달 조용히 닫힘 방지 위해 null
         return <DeviceDetail r={row} typeLabel={typeLabel} dcName={dcName} onClose={() => setDetail(null)}
           onRefresh={async () => { const res = await postJson(`/tools/storage/devices/${encodeURIComponent(row.id)}/collect`, {}); await load(); return res; }} />;
       })()}
+    </div>
+  );
+}
+
+/**
+ * 수집 작업 로그 패널(v2.315, 사용자 요구 '진행중/완료 창').
+ * '진행중' = poller.inFlight(지금 수집 중인 장비), '완료' = 최근 완료 이벤트(newest-first).
+ * 표(장비 목록)와 독립적으로 5초마다 폴링한다(수집은 초 단위라 빠른 갱신이 유용).
+ * ⚠ 훅은 이 컴포넌트 최상단에만 — 조기 return 은 훅 선언 뒤(#310 회귀 방지, CLAUDE.md).
+ */
+function ActivityPanel() {
+  const [a, setA] = useState(null);
+  useEffect(() => {
+    let live = true;
+    const load = () => fetchJson('/tools/storage/activity').then((r) => { if (live) setA(r); }).catch(() => {});
+    load();
+    const t = setInterval(load, 5000);
+    return () => { live = false; clearInterval(t); };
+  }, []);
+  if (!a) return null;
+  const inFlight = a.poller?.inFlight || [];
+  const events = a.events || [];
+  const hms = (ts) => { try { return new Date(ts).toLocaleTimeString('ko-KR', { hour12: false }); } catch { return '—'; } };
+  return (
+    <div className="card" style={{ padding: 14, marginTop: 14 }}>
+      <div className="flex between" style={{ alignItems: 'center', marginBottom: 10 }}>
+        <b style={{ fontSize: 14 }}>📋 수집 작업</b>
+        <span className="muted" style={{ fontSize: 11 }}>⟳ 5초 자동갱신 · 주기 {a.poller?.intervalMs ? `${Math.round(a.poller.intervalMs / 60000)}분` : '—'}</span>
+      </div>
+
+      {/* 진행중 */}
+      <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-dim)', marginBottom: inFlight.length ? 6 : 10 }}>
+        ▸ 진행중{' '}
+        {inFlight.length
+          ? <span className="badge" style={{ background: 'rgba(245,158,11,.2)', color: 'var(--amber)' }}>수집 중 {inFlight.length}건</span>
+          : <span className="muted" style={{ fontWeight: 400 }}>— 진행 중인 수집 없음</span>}
+      </div>
+      {inFlight.length > 0 && (
+        <div style={{ marginBottom: 12, fontSize: 12 }}>
+          {inFlight.map((f) => (
+            <div key={f.id} className="muted" style={{ padding: '2px 0' }}>
+              <span style={{ color: 'var(--text)' }}>{f.name}</span> — 수집 중… <span style={{ fontSize: 11 }}>({ago(f.at)})</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 완료(최근) */}
+      <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-dim)', margin: '4px 0 6px' }}>▸ 완료 <span className="muted" style={{ fontWeight: 400 }}>(최근 {events.length}건)</span></div>
+      <div className="table-wrap" style={{ maxHeight: '32vh' }}>
+        <table>
+          <thead><tr><th>시각</th><th>장비</th><th>출처</th><th>결과</th><th style={{ textAlign: 'right' }}>노드</th><th>용량</th><th style={{ textAlign: 'right' }}>소요</th><th>비고</th></tr></thead>
+          <tbody>
+            {events.length === 0 && <tr><td colSpan={8} className="center muted" style={{ padding: 16 }}>아직 수집 기록이 없습니다.</td></tr>}
+            {events.map((e, i) => (
+              <tr key={`${e.deviceId}-${e.at}-${i}`}>
+                <td className="muted" style={{ fontSize: 11.5, whiteSpace: 'nowrap' }}>{hms(e.at)}</td>
+                <td><b>{e.name}</b>{e.host ? <div className="muted" style={{ fontSize: 10.5 }}>{e.host}</div> : null}</td>
+                <td>{e.source === 'central'
+                  ? <span className="muted">중앙</span>
+                  : <span className="badge" style={{ background: 'rgba(167,139,250,.2)', color: '#a78bfa' }}>{e.source}</span>}</td>
+                <td>{e.ok ? <span className="badge green">정상</span> : <span className="badge red" title={e.error || ''}>실패</span>}</td>
+                <td style={{ textAlign: 'right' }}>{e.nodes ?? '—'}</td>
+                <td className="muted" style={{ fontSize: 11.5 }}>{e.totalBytes ? `${tbFmt(e.usedBytes)}/${tbFmt(e.totalBytes)}` : '—'}</td>
+                <td style={{ textAlign: 'right' }} className="muted">{e.durationMs != null ? `${(e.durationMs / 1000).toFixed(1)}s` : '—'}</td>
+                <td className="muted" style={{ fontSize: 11, maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={e.error || ''}>{e.error || ''}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

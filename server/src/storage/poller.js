@@ -17,6 +17,7 @@ import * as powermax from './collectors/powermax.js';     // v2.310(vmax·powerm
 import * as vplex from './collectors/vplex.js';           // v2.311(vplex·metronode 공용 — 같은 Element Manager REST 계열)
 import { collectAreasOnce } from './areasCollector.js';
 import { saveCapacityPoint } from './db.js';
+import { recordActivity } from './activityLog.js';
 
 const COLLECTORS = { isilon: isilon.collect, powerstore: powerstore.collect, unity480: unity.collect,
   xtremio: xtremio.collect, vmax: powermax.collect, powermax: powermax.collect,
@@ -27,8 +28,19 @@ const _areasAt = new Map(); // deviceId → 마지막 영역 수집 시각(메�
 let _timer = null;
 let _busy = false;
 let _last = { at: 0, collected: 0, failed: 0 };
+// 진행중(in-flight) 장비 — 화면 '작업 로그'의 '진행중' 구획이 이걸 읽는다(deviceId → {id,name,at}).
+// collectOne 시작에 추가하고 finally 에서 제거해, 수집이 죽어도 유령으로 남지 않게 한다.
+const _inFlight = new Map();
 
 async function collectOne(dev) {
+  const startedAt = Date.now();
+  _inFlight.set(dev.id, { id: dev.id, name: dev.name || dev.id, at: startedAt });
+  try {
+    return await collectOneInner(dev, startedAt);
+  } finally { _inFlight.delete(dev.id); }
+}
+
+async function collectOneInner(dev, startedAt) {
   const fn = COLLECTORS[dev.type];
   const full = getDeviceWithSecret(dev.id) || dev;
   let snap;
@@ -75,6 +87,17 @@ async function collectOne(dev) {
       } catch (e) { snap.extra = { ...snap.extra, areasError: e.message }; putSnapshot(snap); }
     }
   }
+  // 작업 로그 기록(v2.315) — 성공/실패 모두 1건. 출처는 이 노드 성격: 중앙(centralUrl 없음)이면
+  // 'central', 엣지면 자기 이름(엣지 로컬 로그용 — 중앙 화면엔 엣지 push 를 storageEdge 가 별도 기록).
+  const source = config.agent.centralUrl ? (config.agent.name || 'edge') : 'central';
+  try {
+    recordActivity({
+      deviceId: dev.id, name: snap.name || dev.name || dev.id, host: dev.host || '', source,
+      ok: !!snap.ok, nodes: snap.nodes?.count ?? null,
+      usedBytes: snap.capacity?.usedBytes ?? null, totalBytes: snap.capacity?.totalBytes ?? null,
+      durationMs: Date.now() - startedAt, error: snap.ok ? null : (snap.error || null), at: startedAt,
+    });
+  } catch { /* 로그 기록 실패가 수집 결과를 가리지 않게 */ }
   return snap.ok;
 }
 
@@ -107,4 +130,6 @@ export function startStoragePoller() {
   _timer = setInterval(() => pollStorageOnce().catch(() => {}), INTERVAL_MS);
   _timer.unref?.();
 }
-export function storagePollerStatus() { return { ..._last, intervalMs: INTERVAL_MS, busy: _busy }; }
+export function storagePollerStatus() {
+  return { ..._last, intervalMs: INTERVAL_MS, busy: _busy, inFlight: [..._inFlight.values()] };
+}
