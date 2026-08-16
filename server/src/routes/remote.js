@@ -205,12 +205,16 @@ remoteRouter.post('/mappings/:id/apply', adminOnly, async (req, res) => {
   catch (err) { setMappingStatus(m.id, 'error', err.message); res.status(400).json({ ok: false, reason: err.message }); }
 });
 
-remoteRouter.delete('/mappings/:id', async (req, res) => {
+// v2.313 보안 감사 반영: 형제 라우트(apply=adminOnly, probe/quick-connect=requirePerm)와 달리
+// RBAC 게이트가 없어 아무 인증 사용자나 도달했고, 소유자 검사도 `m.owner && ...` 단락 때문에
+// **소유자 없는(레거시/시스템) 매핑**은 누구나 삭제(HAProxy 터널 강제 철거 — 가용성)할 수 있었다.
+// (1) requirePerm('remote.access') 게이트 추가, (2) 소유자 없는 매핑은 admin 전용으로 보정.
+remoteRouter.delete('/mappings/:id', requirePerm('remote.access'), async (req, res) => {
   const m = getMapping(req.params.id);
   if (!m) return res.status(404).json({ ok: false, reason: '매핑을 찾을 수 없습니다.' });
-  // Owners can delete their own mapping; admins can delete any.
-  if (req.user.role !== 'admin' && m.owner && m.owner !== req.user.username) {
-    return res.status(403).json({ ok: false, reason: '본인 접속 기록만 삭제할 수 있습니다.' });
+  // admin 은 전부, 그 외에는 **자기 소유** 매핑만. 소유자가 없는 매핑은 admin 만(단락 제거).
+  if (req.user.role !== 'admin' && m.owner !== req.user.username) {
+    return res.status(403).json({ ok: false, reason: '본인 접속 기록만 삭제할 수 있습니다(소유자 없는 매핑은 관리자만).' });
   }
   await deprovision(m);
   res.json(removeMapping(req.params.id));

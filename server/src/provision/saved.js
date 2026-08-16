@@ -48,19 +48,26 @@ export function addSaved({ spec, source, user, memo = '', tags = [] } = {}) {
   return entry;
 }
 
-/** Distinct vCenters present in saved jobs (for the filter tabs). */
-export function savedVcenters() {
-  return [...new Set(load().map((e) => e.vcenterId).filter(Boolean))].sort();
+/** Distinct vCenters present in saved jobs (for the filter tabs). allowed=scope 제한(null=전체). */
+export function savedVcenters(allowed = null) {
+  return [...new Set(load().map((e) => e.vcenterId).filter(Boolean))]
+    .filter((id) => !allowed || allowed.has(id)).sort();
 }
 
-/** Paginated list. { vcenterId?, limit=10, offset=0 } → { total, items, vcenters }. */
-export function listSaved({ vcenterId = '', limit = 10, offset = 0 } = {}) {
+/**
+ * Paginated list. { vcenterId?, limit=10, offset=0, allowed? } → { total, items, vcenters }.
+ * allowed(Set|null): 사용자 scope 로 허용된 vCenter id 집합. 요청 vcenterId 필터보다 먼저
+ * 적용해 범위 밖 저장 작업(spec 에 자격증명·토폴로지 포함)이 새지 않게 한다(v2.313 감사 반영).
+ * vcenterId 가 없는 레거시 저장 작업은 범위 계정에 노출하지 않는다(vCenter 귀속 없는 데이터 규칙).
+ */
+export function listSaved({ vcenterId = '', limit = 10, offset = 0, allowed = null } = {}) {
   let items = load();
+  if (allowed) items = items.filter((e) => e.vcenterId && allowed.has(e.vcenterId));
   if (vcenterId) items = items.filter((e) => e.vcenterId === vcenterId);
   const total = items.length;
   const lim = Math.max(1, Math.min(200, Number(limit) || 10));
   const off = Math.max(0, Number(offset) || 0);
-  return { total, offset: off, limit: lim, items: items.slice(off, off + lim), vcenters: savedVcenters() };
+  return { total, offset: off, limit: lim, items: items.slice(off, off + lim), vcenters: savedVcenters(allowed) };
 }
 
 export function getSaved(id) { return load().find((e) => e.id === id) || null; }

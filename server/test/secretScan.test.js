@@ -86,3 +86,28 @@ test('30초 캐시 + fresh 재스캔 — 같은 객체 반환 후 fresh 로 갱�
   const fresh = await runSecretScan({ fresh: true, sourceDirs: [SRCDIR] });
   assert.ok(fresh.generatedAt >= result.generatedAt, 'fresh 는 재스캔');
 });
+
+test('v2.313 마스킹 회귀 — 콤마/특수문자 비밀번호·동일 라인 복수 자격증명·소스 token 도 원문 미노출', async () => {
+  // 과거 결함: 값 캡처가 콤마·공백에서 끊겨 `password=***,w0rd,2026` 처럼 뒷부분이 프리뷰에
+  // 원문 노출되고, 한 줄에 자격증명이 둘이면 두 번째가 안 가려졌다. secret/token 소스 리터럴은
+  // 마스킹 패턴 불일치로 통째 노출될 수 있었다. 세 경우 모두 원문이 응답에 없어야 한다.
+  // (캐시 테스트 뒤에 둔다 — fresh 재스캔이 30초 캐시를 교체하므로 순서 의존을 깨지 않게.)
+  const COMMA_PW = 'P@ss,w0rd,2026-CommaLeak';
+  const SECOND_PW = 'Second-Cred-8888';
+  const SRC_TOKEN = 'Tok,en-with-comma-999';
+  fs.writeFileSync(path.join(TMP, 'app.log'),
+    `login user=root password=${COMMA_PW} then pwd=${SECOND_PW} done\n`);
+  const SRCDIR2 = fs.mkdtempSync(path.join(os.tmpdir(), 'secret-scan-src2-'));
+  fs.writeFileSync(path.join(SRCDIR2, 'cfg.js'), `const token = '${SRC_TOKEN}';\n`);
+
+  const r = await runSecretScan({ fresh: true, sourceDirs: [SRCDIR2] });
+  const s = JSON.stringify(r);
+  for (const secret of [COMMA_PW, SECOND_PW, SRC_TOKEN, 'w0rd,2026-CommaLeak', ',w0rd']) {
+    assert.ok(!s.includes(secret), `원문/부분 노출: ${secret}`);
+  }
+  const log = r.logs.find((f) => f.file === 'app.log');
+  assert.ok(log && log.hits.length >= 1 && log.hits[0].preview.includes('***'), '로그 프리뷰 마스킹');
+  // 소스 token 리터럴도 탐지되면 반드시 마스킹된 프리뷰(원문 미포함)로만 노출.
+  const src = (r.source?.hits || []).find((h) => h.file.endsWith('cfg.js'));
+  if (src) assert.ok(src.preview.includes('***') && !src.preview.includes(SRC_TOKEN), '소스 token 마스킹');
+});

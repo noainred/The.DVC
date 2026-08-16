@@ -26,10 +26,16 @@ const jobs = []; // newest first
 
 /** Source VMs/templates that can be cloned, from the current snapshot.
  *  `q` does a case-insensitive prefix match on the name (A → all starting "A"). */
-export function listSources(vcenterId, q = '') {
+/**
+ * @param {Set<string>|null} allowed 사용자 scope 로 허용된 vCenter id 집합(null=제한 없음).
+ *   scope 는 요청 필터(vcenterId)보다 **먼저** 적용한다 — 범위 밖 vCenter 의 VM/템플릿이
+ *   목록에 새지 않게(server/CLAUDE.md scope 규칙, v2.313 감사 반영).
+ */
+export function listSources(vcenterId, q = '', allowed = null) {
   const snap = store.get();
   const prefix = String(q || '').trim().toLowerCase();
   const all = snap.vms
+    .filter((v) => !allowed || allowed.has(v.vcenterId))
     .filter((v) => !vcenterId || v.vcenterId === vcenterId)
     .filter((v) => !prefix || String(v.name || '').toLowerCase().startsWith(prefix));
   const sources = all
