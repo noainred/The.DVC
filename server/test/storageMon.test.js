@@ -581,3 +581,65 @@ test('레지스트리: 미구현 타입 등록 거부 가드(registry isImplemen
     assert.throws(() => reg.saveDevice({ type: 'planned-x', name: 'X', host: '10.0.0.2', username: 'a' }), /미구현/);
   } finally { STORAGE_TYPES.pop(); }
 });
+
+/* ─── v2.313: 스토리지 장비 CSV 내보내기/가져오기/샘플(사용자 요구) ─── */
+
+test('CSV export — 비밀번호 절대 미포함, BOM+헤더, 법인 이름 해석', async () => {
+  const { devicesToCsv, CSV_COLUMNS } = await import('../src/storage/csv.js');
+  const devices = [
+    { type: 'isilon', name: 'WA-ISI', host: '10.20.0.50', username: 'root', collectMethod: 'ssh', sshPort: 22, datacenterId: 'WA', agent: 'wa-edge', enabled: true, note: '메모', hasPassword: true },
+    { type: 'powerstore', name: 'KR-PS', host: '10.10.0.9', username: 'admin', datacenterId: 'KR', agent: '', enabled: false, note: '' },
+  ];
+  const csv = devicesToCsv(devices, (id) => ({ WA: '법인WA', KR: '한국' }[id] || id));
+  assert.ok(csv.charCodeAt(0) === 0xFEFF, 'BOM 선두');
+  const lines = csv.trim().split('\r\n');
+  assert.equal(lines[0], CSV_COLUMNS.join(','));
+  assert.ok(/WA-ISI/.test(lines[1]) && /법인WA/.test(lines[1]) && /wa-edge/.test(lines[1]));
+  assert.ok(lines[1].endsWith(',') , 'password 컬럼은 빈 값으로 끝남(내보내기 금지)');
+  assert.ok(!/ChangeMe|password123|pw-secret/.test(csv), '어떤 비밀번호도 CSV 에 없음');
+  assert.ok(/,false,?/.test(lines[2].split(',').slice(-3).join(',')) || lines[2].includes('false'), 'enabled=false 표기');
+});
+
+test('CSV parse — 헤더 별칭·주석행 스킵·password trim 안 함·enabled 파싱', async () => {
+  const { parseDevicesCsv } = await import('../src/storage/csv.js');
+  const csv = [
+    'type,name,host,username,password,collectMethod,sshPort,datacenter,agent,enabled,note',
+    '# type: 주석행,,,,,,,,,,',
+    'isilon,WA-ISI,10.20.0.50,root, p@ss w,ssh,22,WA,wa-edge,true,아카이브',
+    'powerstore,KR-PS,10.10.0.9,admin,,,,한국,,false,',
+    ',,,,,,,,,,',
+  ].join('\n');
+  const { rows, error } = parseDevicesCsv(csv);
+  assert.equal(error, undefined);
+  assert.equal(rows.length, 2, '주석행·빈행 제외');
+  assert.equal(rows[0].name, 'WA-ISI');
+  assert.equal(rows[0].password, ' p@ss w', 'password 는 앞뒤 공백 유지(trim 안 함)');
+  assert.equal(rows[0]._hasPassword, true);
+  assert.equal(rows[0].enabled, true);
+  assert.equal(rows[1].enabled, false);
+  assert.equal(rows[1]._hasPassword, false, 'password 빈칸 → 기존 유지 신호');
+  assert.equal(rows[0]._line, 3, '사람용 행번호(헤더=1, 주석=2)');
+});
+
+test('CSV parse — 필수 헤더 누락·행 없음 오류', async () => {
+  const { parseDevicesCsv } = await import('../src/storage/csv.js');
+  assert.match(parseDevicesCsv('type,username\nisilon,root').error, /name|host/);
+  assert.match(parseDevicesCsv('name,host').error, /데이터 행/);
+});
+
+test('CSV rowIssue — 미지/미구현 타입·host 누락 거부', async () => {
+  const { rowIssue } = await import('../src/storage/csv.js');
+  assert.match(rowIssue({ type: 'netapp', host: 'h' }), /알 수 없는/);
+  assert.equal(rowIssue({ type: 'isilon', host: '10.0.0.1' }), null);
+  assert.match(rowIssue({ type: 'isilon', host: '' }), /host/);
+});
+
+test('CSV sample — 구현 타입만 안내, 헤더 정합, 수식 인젝션 방어', async () => {
+  const { sampleCsv, CSV_COLUMNS } = await import('../src/storage/csv.js');
+  const csv = sampleCsv();
+  assert.ok(csv.includes(CSV_COLUMNS.join(',')));
+  assert.ok(/isilon/.test(csv) && /powerstore/.test(csv));
+  // guardCell: '='·'+'·'@' 로 시작하는 셀이 있다면 작은따옴표 접두(여기선 예시에 없으나 계약 확인)
+  const { csvLine } = await import('../src/util/csv.js');
+  assert.equal(csvLine(['=cmd']), "'=cmd", '수식 인젝션 방어(guardCell)');
+});
