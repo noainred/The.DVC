@@ -55,6 +55,10 @@ export default function VCenters({ onSelectSite, resetSignal }) {
   const connected = sites.filter((s) => s.status === 'connected').length;
   const totalHosts = sites.reduce((a, s) => a + (s.metrics?.hosts || 0), 0);
   const totalVms = sites.reduce((a, s) => a + (s.metrics?.vms || 0), 0);
+  // 전체 VM 분류(사용자 요구): vCenter 이름에 'IRS'(단어, 대소문자 무시 — 예: AZ-IRS·GM1-IRS)가
+  // 들어가면 IRS, 나머지(AZ·GM1 등)는 다빈치. 하이픈은 단어 경계라 '-IRS' 접미가 매칭된다.
+  const irsVms = sites.reduce((a, s) => a + (/\birs\b/i.test(s.name || '') ? (s.metrics?.vms || 0) : 0), 0);
+  const davinciVms = totalVms - irsVms;
   const totalAlarms = sites.reduce((a, s) => a + (s.metrics?.alarmsCritical || 0) + (s.metrics?.alarmsWarning || 0), 0);
 
   return (
@@ -63,7 +67,7 @@ export default function VCenters({ onSelectSite, resetSignal }) {
       <div className="kpis" style={{ marginBottom: 18 }}>
         <div className="card kpi"><div className="label">전체 vCenter</div><div className="value">{sites.length}</div><div className="meta">연결됨 {connected} · 불가 {sites.length - connected}</div></div>
         <div className="card kpi"><div className="label">전체 호스트</div><div className="value">{totalHosts.toLocaleString()}</div></div>
-        <div className="card kpi"><div className="label">전체 VM</div><div className="value">{totalVms.toLocaleString()}</div></div>
+        <div className="card kpi"><div className="label">전체 VM</div><div className="value">{totalVms.toLocaleString()}</div><div className="meta">다빈치 {davinciVms.toLocaleString()}개 · IRS {irsVms.toLocaleString()}개</div></div>
         <div className="card kpi"><div className="label">활성 알람</div><div className="value" style={{ color: totalAlarms ? 'var(--amber)' : undefined }}>{totalAlarms}</div></div>
       </div>
 
