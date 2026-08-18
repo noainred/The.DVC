@@ -92,8 +92,15 @@ export default function StorageMonTool() {
         <td><button className="cell-link" onClick={() => setDetail(r.id)}><b>{s?.name || r.name}</b></button><div className="muted" style={{ fontSize: 11 }}>{r.host}</div></td>
         <td><span className="badge blue">{typeLabel(r.type)}</span></td>
         <td className="muted">{dcName(r.datacenterId)}</td>
+        {/* 수집 주체(중앙/엣지) + 모니터링 방식 배지(v2.326, 사용자 요구 — 조회창에서 방식 표시).
+            실제 수집된 스냅샷의 방식(extra.collectMethod) 우선, 없으면 설정값(isilon 은 ssh/api
+            선택, 그 외 타입은 API 전용). 전 타입에 표시(과거엔 isilon 만 배지). SSH=파랑·API=회색
+            — 상세 모달 헤더 배지와 통일. */}
         <td>{r.agent ? <span className="badge" style={{ background: 'rgba(167,139,250,.2)', color: '#a78bfa' }}>{r.agent}</span> : <span className="muted">중앙</span>}
-          {r.type === 'isilon' && <span className={`badge ${r.collectMethod === 'api' ? 'blue' : 'gray'}`} style={{ marginLeft: 4, fontSize: 10 }} title="이 장비의 수집 방식(등록에서 변경)">{r.collectMethod === 'api' ? 'API' : 'SSH'}</span>}</td>
+          {(() => {
+            const m = s?.extra?.collectMethod || (r.type === 'isilon' ? (r.collectMethod || 'ssh') : 'api');
+            return <span className={`badge ${m === 'ssh' ? 'blue' : 'gray'}`} style={{ marginLeft: 4, fontSize: 10 }} title={`모니터링(수집) 방식: ${m.toUpperCase()}${r.type === 'isilon' ? ' — 등록에서 변경' : ' (이 타입은 API 전용)'}`}>{m.toUpperCase()}</span>;
+          })()}</td>
         <td className="muted" style={{ fontSize: 12 }}>{s?.version || '—'}</td>
         <td style={{ minWidth: 140 }}>{s?.capacity?.pct != null ? <UsageCell pct={s.capacity.pct} /> : <span className="muted">—</span>}
           {s?.capacity?.totalBytes ? <div className="muted" style={{ fontSize: 10.5 }}>{tbFmt(s.capacity.usedBytes)} / {tbFmt(s.capacity.totalBytes)}</div> : null}</td>
