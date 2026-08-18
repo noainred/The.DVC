@@ -9,29 +9,66 @@ export function Solutions() {
   const { loading, data, error } = useTool('/tools/solutions', {});
   if (loading) return <Loading />;
   if (error) return <ErrorBox message={error} />;
+  // 버전 드리프트 강조(v2.327): 같은 제품인데 버전이 2개 이상이면 노랑(사이트 간 불일치 = 패치 필요 신호).
+  const drift = (arr) => (arr || []).length > 1;
+  const VerBadges = ({ arr, unit }) => (
+    <div className="flex gap wrap" style={{ marginBottom: 14 }}>
+      {(arr || []).length === 0 && <span className="muted">정보 없음</span>}
+      {(arr || []).map((n) => <span key={n.version} className={`badge ${drift(arr) ? 'amber' : 'blue'}`} style={{ fontSize: 13, padding: '4px 10px' }} title={drift(arr) ? '사이트 간 버전 불일치 — 패치 수준 확인' : '전 사이트 동일 버전'}>{n.version} · {n.count}{unit}</span>)}
+    </div>
+  );
   return (
     <>
-      <div className="section-title" style={{ marginTop: 0 }}>NSX 버전 분포</div>
+      {/* 전 함대 버전 요약(v2.327, 사용자 요구 — 모든 vCenter 의 NSX 포함 솔루션 버전 한눈에).
+          버전이 2개 이상이면(드리프트) 노란 배지로 사이트 간 불일치를 강조한다. */}
+      <div className="section-title" style={{ marginTop: 0 }}>vCenter 버전 분포 <span className="muted" style={{ fontSize: 12, fontWeight: 400 }}>({data.items.length} 사이트)</span></div>
+      <VerBadges arr={data.vcenterVersions} unit=" 사이트" />
+      <div className="section-title">ESXi 버전 분포 <span className="muted" style={{ fontSize: 12, fontWeight: 400 }}>(호스트 수)</span></div>
+      <VerBadges arr={data.esxiVersions} unit=" 호스트" />
+      {/* NSX 버전 분포 — 각 버전이 설치된 법인(datacenter)까지 표시(v2.327 사용자 요구) */}
+      <div className="section-title">NSX Manager 버전 분포 <span className="muted" style={{ fontSize: 12, fontWeight: 400 }}>(실수집 {data.nsxManagerCount ?? 0} 매니저 · 설치 법인 표시)</span></div>
       <div className="flex gap wrap" style={{ marginBottom: 14 }}>
-        {data.nsxVersions.length === 0 && <span className="muted">NSX 정보 없음</span>}
-        {data.nsxVersions.map((n) => <span key={n.version} className="badge blue" style={{ fontSize: 13, padding: '4px 10px' }}>NSX {n.version} · {n.count} vCenter</span>)}
+        {(data.nsxVersions || []).length === 0 && <span className="muted">NSX 정보 없음</span>}
+        {(data.nsxVersions || []).map((n) => (
+          <div key={n.version} className="card" style={{ padding: '8px 12px', minWidth: 180 }}>
+            <div><span className={`badge ${drift(data.nsxVersions) ? 'amber' : 'blue'}`} style={{ fontSize: 13, padding: '3px 9px' }} title={drift(data.nsxVersions) ? '법인 간 NSX 버전 불일치' : '전 법인 동일 버전'}>NSX {n.version}</span> <span className="muted" style={{ fontSize: 12 }}>· {n.count} 매니저</span></div>
+            <div className="flex gap wrap" style={{ marginTop: 6 }}>
+              {(n.corps || []).map((c) => <span key={c.corp} className="badge gray" style={{ fontSize: 11 }} title={`${c.corp} — NSX Manager ${c.count}`}>{c.corp}{c.count > 1 ? ` ×${c.count}` : ''}</span>)}
+            </div>
+          </div>
+        ))}
       </div>
-      <div className="section-title">vCenter별 설치 솔루션</div>
+
+      <div className="section-title">vCenter별 설치 버전 (vCenter · ESXi · NSX · 확장 솔루션)</div>
       <div className="grid cols-2">
         {data.items.map((it) => (
           <div className="card" key={it.vcenterId}>
             <div className="flex between" style={{ marginBottom: 8 }}>
-              <b>{it.name}</b><span className="muted" style={{ fontSize: 12 }}>vCenter v{it.version || '—'}</span>
+              <b>{it.name}{it.corp ? <span className="muted" style={{ fontSize: 11, fontWeight: 400 }}> · 법인 {it.corp}</span> : it.region ? <span className="muted" style={{ fontSize: 11, fontWeight: 400 }}> · {it.region}</span> : ''}</b>
+              <span className="muted" style={{ fontSize: 12 }}>vCenter v{it.version || '—'}{it.build ? ` (b${it.build})` : ''}</span>
             </div>
-            {it.nsx.length > 0 && <div style={{ marginBottom: 8 }}>{it.nsx.map((s) => <span key={s.key} className="badge green" style={{ marginRight: 6 }}>{s.label} {s.version}</span>)}</div>}
+            {/* ESXi 버전(사이트 내 호스트) — 여러 버전이면 드리프트 */}
+            {(it.esxi || []).length > 0 && (
+              <div style={{ marginBottom: 8 }}>
+                <span className="muted" style={{ fontSize: 11, marginRight: 4 }}>ESXi</span>
+                {it.esxi.map((e) => <span key={e.version} className={`badge ${it.esxi.length > 1 ? 'amber' : 'gray'}`} style={{ marginRight: 4, fontSize: 11 }}>{e.version} × {e.count}</span>)}
+              </div>
+            )}
+            {/* 실제 NSX Manager(nsxStore) — vCenter 확장 항목보다 권위 있음 */}
+            {(it.nsxManagers || []).length > 0 && (
+              <div style={{ marginBottom: 8 }}>
+                <span className="muted" style={{ fontSize: 11, marginRight: 4 }}>🛡️ NSX</span>
+                {it.nsxManagers.map((m, i) => <span key={i} className={`badge ${m.status === 'connected' ? 'green' : 'red'}`} style={{ marginRight: 4, fontSize: 11 }} title={`${m.host || ''} · ${m.status}`}>{m.name} {m.version || '?'}</span>)}
+              </div>
+            )}
             <div className="table-wrap">
               <table>
-                <thead><tr><th>솔루션</th><th>버전</th><th>공급사</th></tr></thead>
+                <thead><tr><th>확장 솔루션</th><th>버전</th><th>공급사</th></tr></thead>
                 <tbody>
                   {(it.solutions || []).slice(0, 30).map((s) => (
                     <tr key={s.key}><td>{/nsx/i.test(s.key + s.label) ? '🛡️ ' : ''}{s.label}</td><td className="tabular">{s.version || '—'}</td><td className="muted">{s.company || '—'}</td></tr>
                   ))}
-                  {(it.solutions || []).length === 0 && <tr><td colSpan={3} className="muted center" style={{ padding: 14 }}>정보 없음</td></tr>}
+                  {(it.solutions || []).length === 0 && <tr><td colSpan={3} className="muted center" style={{ padding: 14 }}>vCenter 확장 솔루션 정보 없음</td></tr>}
                 </tbody>
               </table>
             </div>

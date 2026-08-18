@@ -1,6 +1,16 @@
 {
   "notes": [
     {
+      "version": "2.327.0",
+      "date": "2026-08-18",
+      "title": "특수기능 'VMware 솔루션 / NSX' — 전 vCenter의 NSX 포함 솔루션 버전 확인 강화",
+      "notes": [
+        "특수기능 'VMware 솔루션 / NSX' 화면을 강화해 모든 vCenter의 설치 버전을 한눈에 확인합니다(사용자 요구). vCenter 버전뿐 아니라 사이트별 ESXi 버전 분포와 실제 NSX Manager 버전(NSX 수집기가 직접 읽은 값 — vCenter 확장 항목보다 권위 있음)을 함께 보여줍니다.",
+        "상단에 vCenter/ESXi/NSX 버전 분포 요약을 두고, 한 제품에 버전이 2개 이상이면(사이트 간 불일치=패치 필요 신호) 노란 배지로 강조합니다(버전 드리프트 탐지). NSX 버전 분포에는 각 버전이 설치된 법인(datacenter) 목록과 법인별 매니저 수를 함께 표시합니다(사용자 요구). vCenter별 카드에는 법인·vCenter 버전·빌드, ESXi 버전×호스트수, 연결된 NSX Manager(이름·버전·상태), vCenter 확장 솔루션 목록을 표시합니다.",
+        "NSX Manager 는 사용자 범위(scope) 계정에게는 귀속(vCenter/region) 매니저만 노출합니다(v2.322 보안 규칙과 동일 — 전 함대 NSX 유출 방지)."
+      ]
+    },
+    {
       "version": "2.326.0",
       "date": "2026-08-18",
       "title": "스토리지 모니터링 — 목록(조회창)에 수집 방식(SSH/API) 표시",
