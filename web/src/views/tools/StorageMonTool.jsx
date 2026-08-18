@@ -283,6 +283,23 @@ function ActivityPanel() {
 /** 장비 상세 모달 — 정규화 스냅샷 전부(풀·계정·섹션별 수집 상태·경보). */
 function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
   const s = r.snap;
+  // 수집 방식/타입별 UI 분기(v2.325, 사용자 요구 '가져오는 정보에 맞는 최적 UI·최대한 많은 정보').
+  // SSH(isi status): 시리얼 없음 · 클러스터 헬스/감축비/효율/VHS/L3/Critical Events/Job Status +
+  //   노드 표에 Ext·처리량·HDD/SSD·L3. API: 시리얼/GUID·스토리지 풀·OneFS 영역수집. 타입별 extra
+  //   (PowerStore appliances/state · PowerMax model/ucode/arrays · XtremIO numBricks/healthState ·
+  //   VPLEX clusters/용량없음)를 각각 최대치로 노출한다.
+  const ex = (s && s.extra) || {};
+  const method = ex.collectMethod === 'ssh' ? 'ssh' : 'api';
+  const nodeList = (s && s.nodes && s.nodes.list) || [];
+  // 노드 표 적응형 열 — 이 스냅샷의 노드들이 실제 값을 가진 열만 그린다(항상 빈 '—' 열 제거로 압축).
+  const ncol = {
+    name: nodeList.some((n) => n.name),
+    ext: nodeList.some((n) => n.ext),
+    io: nodeList.some((n) => n.inBps != null || n.outBps != null),
+    hdd: nodeList.some((n) => n.hdd),
+    ssd: nodeList.some((n) => n.ssd || n.l3Bytes > 0),
+  };
+  const isVirt = !!ex.capacityNote; // VPLEX/Metro Node — 자체 용량 없음(가상화 계층 — 풀/미디어/추이 숨김)
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
   const [areaView, setAreaView] = useState(null); // OneFS API 영역 원문 뷰(v2.308) — 배지 클릭
@@ -308,12 +325,19 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
       </div>
       {!s ? <div className="muted" style={{ padding: 8 }}>아직 수집된 스냅샷이 없습니다(첫 수집 주기 대기).</div> : (
         <>
-          <div className="flex gap wrap" style={{ fontSize: 12.5, marginBottom: 10 }}>
+          {/* 헤더 — 수집 방식/타입이 제공하는 항목만(v2.325). 빈 값은 '—' 대신 칩 자체를 숨긴다
+              (예: SSH 는 시리얼/GUID 미제공 → 칩 없음). 수집 방식 배지로 어떤 UI 인지 명확히. */}
+          <div className="flex gap wrap" style={{ fontSize: 12.5, marginBottom: 10, alignItems: 'center' }}>
+            <span className={`badge ${method === 'ssh' ? 'blue' : 'gray'}`} title={method === 'ssh' ? 'SSH(isi status 파싱) 수집 — 시리얼/GUID 미제공, 클러스터 헬스·감축비·이벤트·잡 제공' : 'REST API 수집'}>{method.toUpperCase()} 수집</span>
             <span className="muted">호스트 <b style={{ color: 'var(--text)' }}>{r.host}</b></span>
             <span className="muted">법인 <b style={{ color: 'var(--text)' }}>{dcName(r.datacenterId)}</b></span>
-            <span className="muted">버전 <b style={{ color: 'var(--text)' }}>{s.version || '—'}</b></span>
-            <span className="muted">시리얼/GUID <b style={{ color: 'var(--text)' }}>{s.serial || '—'}</b></span>
-            <span className="muted">수집 {new Date(s.collectedAt).toLocaleString('ko-KR')}{s.agent ? ` · 엣지 ${s.agent}` : ' · 중앙'}{s.extra?.collectMethod ? ` · ${s.extra.collectMethod.toUpperCase()}` : ''}</span>
+            {s.version && <span className="muted">버전 <b style={{ color: 'var(--text)' }}>{s.version}</b></span>}
+            {s.serial && <span className="muted">시리얼/GUID <b style={{ color: 'var(--text)' }}>{s.serial}</b></span>}
+            {ex.model && <span className="muted">모델 <b style={{ color: 'var(--text)' }}>{ex.model}</b></span>}
+            {ex.ucode && <span className="muted">ucode <b style={{ color: 'var(--text)' }}>{ex.ucode}</b></span>}
+            {ex.state && <span className="muted">상태 <b style={{ color: 'var(--text)' }}>{ex.state}</b></span>}
+            {ex.numBricks > 0 && <span className="muted">X-Brick <b style={{ color: 'var(--text)' }}>{ex.numBricks}</b></span>}
+            <span className="muted">수집 {new Date(s.collectedAt).toLocaleString('ko-KR')}{s.agent ? ` · 엣지 ${s.agent}` : ' · 중앙'}</span>
           </div>
           {/* 타입 고유 헬스 노출(v2.311 적대적 검증 반영 — 수집·테스트까지 된 장애 신호가 UI 에서
               사장되던 결함 수정): VPLEX/Metro Node 클러스터별 헬스(degraded/critical-failure 가
@@ -345,6 +369,13 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
           )}
           {s.error && <div className="card" style={{ borderColor: 'var(--red)', padding: '8px 12px', marginBottom: 10, fontSize: 12.5, color: 'var(--red)' }}>⛔ {s.error}</div>}
 
+          {/* 가상화 계층(VPLEX/Metro Node) — 자체 용량이 없다는 사유를 명시(용량/미디어/추이 숨김) */}
+          {isVirt && (
+            <div className="card" style={{ padding: '8px 12px', marginBottom: 10, fontSize: 12, borderColor: 'var(--border)' }}>
+              ℹ {ex.capacityNote}
+            </div>
+          )}
+
           {/* HDD/SSD 풀 요약(v2.303) — isi status Cluster Storage 와 동일 의미 */}
           {s.media && (
             <div className="flex gap wrap" style={{ marginBottom: 12 }}>
@@ -360,47 +391,83 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
             </div>
           )}
 
-          {/* 용량 추이 그래프(v2.318, 사용자 백로그 — history API 는 v2.308 완성) */}
-          <CapacityTrend deviceId={r.id} isEdge={!!r.agent} />
+          {/* 용량 추이 그래프(v2.318) — 가상화 계층(VPLEX 등 자체 용량 없음)은 추이가 무의미해 숨김 */}
+          {!isVirt && <CapacityTrend deviceId={r.id} isEdge={!!r.agent} />}
 
           {/* 노드별 상세(v2.303, 사용자 요구 — isi status 노드 표): ID·IP·상태·외부망 처리량·노드별 HDD/SSD
               v2.310 검증 반영: XtremIO 컨트롤러/Unity SP/PowerStore 노드는 name 이 유일 식별자인데
               (id 는 수집기 합성 순번, ip 는 비어 있을 수 있음) 표가 name 을 안 그려 사장됐다 —
               하나라도 name 이 있으면 '이름' 열을 추가한다(isilon 은 name 없음 → 열 미표시로 기존 유지). */}
-          {(s.nodes?.list || []).length > 0 && (() => { const hasName = s.nodes.list.some((n) => n.name); return (
+          {/* 노드/컨트롤러/SP/디렉터 표(v2.303) — v2.325: 이 스냅샷이 실제 값을 가진 열만 그린다.
+              SSH isilon 은 Ext·처리량·HDD/SSD·L3 전부, API 타입(PowerStore/Unity/PowerMax/VPLEX)은
+              대부분 id·이름·상태만 채워 나머지 열이 항상 '—' 였다 → 빈 열을 숨겨 정보 밀도를 높인다.
+              노드 표제도 타입에 맞춘다(컨트롤러/SP/디렉터). */}
+          {nodeList.length > 0 && (
             <>
-              <div className="section-title" style={{ fontSize: 13 }}>노드 {s.nodes.list.length}{s.nodes.count > s.nodes.list.length ? ` (표시 상한 — 전체 ${s.nodes.count})` : ''}</div>
+              <div className="section-title" style={{ fontSize: 13 }}>{r.type === 'xtremio' ? '스토리지 컨트롤러' : r.type === 'unity480' ? '스토리지 프로세서(SP)' : (r.type === 'vplex' || r.type === 'metronode') ? '디렉터' : '노드'} {nodeList.length}{s.nodes.count > nodeList.length ? ` (표시 상한 — 전체 ${s.nodes.count})` : ''}</div>
               <div className="table-wrap" style={{ maxHeight: '32vh', marginBottom: 12 }}>
                 <table>
-                  {/* 고정폭 열 명시(v2.310 공백 압축) — width:100% 표의 잉여 공간이 수치 열 사이에
-                      균등 분산돼 열 간 공백이 커지는 것을 방지(잉여는 IP·HDD/SSD 텍스트 열이 흡수). */}
-                  <thead><tr><th style={{ textAlign: 'right', width: 40 }}>ID</th>{hasName && <th>이름</th>}<th>IP</th><th style={{ width: 56 }}>상태</th><th style={{ width: 44 }}>Ext</th><th style={{ textAlign: 'right', width: 84 }}>In(bps)</th><th style={{ textAlign: 'right', width: 84 }}>Out(bps)</th><th>HDD Used/Size</th><th>SSD Used/Size</th></tr></thead>
+                  <thead><tr>
+                    <th style={{ textAlign: 'right', width: 40 }}>ID</th>
+                    {ncol.name && <th>이름</th>}
+                    <th>IP</th>
+                    <th style={{ width: 56 }}>상태</th>
+                    {ncol.ext && <th style={{ width: 44 }}>Ext</th>}
+                    {ncol.io && <th style={{ textAlign: 'right', width: 84 }}>In(bps)</th>}
+                    {ncol.io && <th style={{ textAlign: 'right', width: 84 }}>Out(bps)</th>}
+                    {ncol.hdd && <th>HDD Used/Size</th>}
+                    {ncol.ssd && <th>SSD Used/Size</th>}
+                  </tr></thead>
                   <tbody>
-                    {s.nodes.list.map((n) => (
+                    {nodeList.map((n) => (
                       <tr key={n.id}>
                         <td style={{ textAlign: 'right' }}>{n.id}</td>
-                        {hasName && <td style={{ whiteSpace: 'nowrap' }}>{n.name || '—'}</td>}
+                        {ncol.name && <td style={{ whiteSpace: 'nowrap' }}>{n.name || '—'}</td>}
                         <td style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{n.ip || '—'}</td>
                         <td><span className={`badge ${/ok|healthy|up|green/.test(n.health) ? 'green' : n.health === 'unknown' ? 'gray' : 'red'}`}>{n.health === 'unknown' ? '?' : n.health.toUpperCase()}</span></td>
-                        <td>{n.ext ? <span className={`badge ${n.ext === 'C' ? 'green' : 'red'}`} title="C=Connected · N=Not Connected">{n.ext}</span> : <span className="muted">—</span>}</td>
-                        <td style={{ textAlign: 'right', fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{bps(n.inBps)}</td>
-                        <td style={{ textAlign: 'right', fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{bps(n.outBps)}</td>
+                        {ncol.ext && <td>{n.ext ? <span className={`badge ${n.ext === 'C' ? 'green' : 'red'}`} title="C=Connected · N=Not Connected">{n.ext}</span> : <span className="muted">—</span>}</td>}
+                        {ncol.io && <td style={{ textAlign: 'right', fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{bps(n.inBps)}</td>}
+                        {ncol.io && <td style={{ textAlign: 'right', fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{bps(n.outBps)}</td>}
                         {/* 'No Storage HDDs' 는 isilon(isi status) 전용 문구 — 타 타입의 hdd null 은 '—' */}
-                        <td style={{ whiteSpace: 'nowrap' }}>{n.hdd ? `${tbFmt(n.hdd.usedBytes)}/${tbFmt(n.hdd.totalBytes)} (${n.hdd.pct}%)` : <span className="muted">{r.type === 'isilon' ? 'No Storage HDDs' : '—'}</span>}</td>
-                        <td style={{ whiteSpace: 'nowrap' }}>{n.ssd ? `${tbFmt(n.ssd.usedBytes)}/${tbFmt(n.ssd.totalBytes)} (${n.ssd.pct}%)` : n.l3Bytes > 0 ? <span className="muted">L3: {tbFmt(n.l3Bytes)}</span> : <span className="muted">—</span>}</td>
+                        {ncol.hdd && <td style={{ whiteSpace: 'nowrap' }}>{n.hdd ? `${tbFmt(n.hdd.usedBytes)}/${tbFmt(n.hdd.totalBytes)} (${n.hdd.pct}%)` : <span className="muted">{r.type === 'isilon' ? 'No Storage HDDs' : '—'}</span>}</td>}
+                        {ncol.ssd && <td style={{ whiteSpace: 'nowrap' }}>{n.ssd ? `${tbFmt(n.ssd.usedBytes)}/${tbFmt(n.ssd.totalBytes)} (${n.ssd.pct}%)` : n.l3Bytes > 0 ? <span className="muted">L3: {tbFmt(n.l3Bytes)}</span> : <span className="muted">—</span>}</td>}
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
             </>
-          ); })()}
+          )}
 
+          {/* PowerStore 어플라이언스(extra.appliances) — 용량 상세가 없어 풀이 아니라 별도 표로(v2.325) */}
+          {Array.isArray(ex.appliances) && ex.appliances.length > 0 && (
+            <>
+              <div className="section-title" style={{ fontSize: 13 }}>어플라이언스 {ex.appliances.length}</div>
+              <table className="data-table" style={{ width: '100%', fontSize: 12.5, marginBottom: 12 }}>
+                <thead><tr><th style={{ textAlign: 'left' }}>이름</th><th>모델</th><th>서비스 태그</th></tr></thead>
+                <tbody>{ex.appliances.map((a, i) => (
+                  <tr key={i}><td>{a.name || '—'}</td><td className="muted">{a.model || '—'}</td><td className="muted" style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{a.serviceTag || '—'}</td></tr>
+                ))}</tbody>
+              </table>
+            </>
+          )}
+
+          {/* PowerMax/VMAX Unisphere 관리 어레이(extra.arrays) — 로컬 어레이 목록(v2.325) */}
+          {Array.isArray(ex.arrays) && ex.arrays.length > 0 && (
+            <>
+              <div className="section-title" style={{ fontSize: 13 }}>관리 어레이 {ex.arrays.length}</div>
+              <div className="flex gap wrap" style={{ marginBottom: 12 }}>
+                {ex.arrays.map((a, i) => <span key={i} className="badge gray" title={a.model || ''}>{a.id}{a.model ? ` · ${a.model}` : ''}</span>)}
+              </div>
+            </>
+          )}
+
+          {/* 풀 표제는 타입에 맞춘다(v2.325): XtremIO=클러스터(전체 플래시), PowerMax=어레이별 용량. */}
           {(s.pools || []).length > 0 && (
             <>
-              <div className="section-title" style={{ fontSize: 13 }}>스토리지 풀 {s.pools.length}</div>
+              <div className="section-title" style={{ fontSize: 13 }}>{r.type === 'xtremio' ? '클러스터 용량' : (r.type === 'vmax' || r.type === 'powermax') ? '어레이별 용량' : '스토리지 풀'} {s.pools.length}</div>
               <table className="data-table" style={{ width: '100%', fontSize: 12.5, marginBottom: 12 }}>
-                <thead><tr><th style={{ textAlign: 'left' }}>풀</th><th style={{ textAlign: 'right' }}>사용</th><th style={{ textAlign: 'right' }}>전체</th><th>사용률</th></tr></thead>
+                <thead><tr><th style={{ textAlign: 'left' }}>{r.type === 'xtremio' ? '클러스터' : (r.type === 'vmax' || r.type === 'powermax') ? '어레이' : '풀'}</th><th style={{ textAlign: 'right' }}>사용</th><th style={{ textAlign: 'right' }}>전체</th><th>사용률</th></tr></thead>
                 <tbody>{s.pools.map((p, i) => (
                   <tr key={i}><td>{p.name}</td><td style={{ textAlign: 'right' }}>{tbFmt(p.usedBytes)}</td><td style={{ textAlign: 'right' }}>{tbFmt(p.totalBytes)}</td><td>{p.pct != null ? <UsageCell pct={p.pct} /> : '—'}</td></tr>
                 ))}</tbody>
