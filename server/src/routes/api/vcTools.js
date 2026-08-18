@@ -2,6 +2,9 @@
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { sortByOrder } from '../../vcenter/order.js';
+import { nsxStore } from '../../nsx/store.js';
+import { visibleNsxManagers } from '../../nsx/scope.js';
+import { listDatacenters, datacenterOfVcenter } from '../../datacenter/store.js';
 
 export function registerVcTools(api) {
 
@@ -47,27 +50,71 @@ api.get('/tools/duplicate-ips', (req, res) => {
   });
 });
 
-// Installed VMware solutions (vCenter extensions) per vCenter, NSX highlighted.
+// 전 vCenter의 VMware 솔루션 버전(vCenter·ESXi·NSX 포함) — 특수기능 'VMware 솔루션 / NSX'.
+// v2.327(사용자 요구 '모든 vCenter 설치된 NSX 포함 솔루션 버전'): vCenter 확장(vc.solutions)뿐
+// 아니라 ① 사이트별 ESXi 버전 분포(hosts) ② 실제 NSX Manager 버전(nsxStore — vCenter 확장 항목
+// 보다 권위 있음)을 함께 반환하고, 전 함대 버전 드리프트(vCenter/ESXi/NSX 분포)를 요약한다.
+// scope: 조회 라우트 규칙(v2.322) — vCenter 는 scopedVcenterIds, NSX 는 nsx/scope.js 귀속 판정.
 api.get('/tools/solutions', (req, res) => {
   const snap = store.get();
   const allowed = scopedVcenterIds(req.user, snap);
-  const items = (snap.vcenters || []).filter((vc) => !allowed || allowed.has(vc.id)).map((vc) => {
+  const vcs = (snap.vcenters || []).filter((vc) => !allowed || allowed.has(vc.id));
+  // NSX Manager(실수집 버전) — scope 안 매니저만. vCenter 귀속(vcenterId)·region 매핑으로 사이트에 붙인다.
+  const nsxSnap = nsxStore.get();
+  const mgrs = visibleNsxManagers(nsxSnap.managers || [], snap.vcenters, allowed);
+  // 법인(datacenter) 라벨 맵(v2.327 사용자 요구 — NSX 버전이 어느 법인에 설치됐는지 표시).
+  // vCenter → 배정된 datacenter 이름, 없으면 region, 그것도 없으면 vCenter 이름.
+  let dcById = new Map();
+  try { dcById = new Map(listDatacenters().map((d) => [d.id, d.name || d.id])); } catch { /* 목록 실패 시 region 폴백 */ }
+  const corpOfVc = (vc) => {
+    let dcName = '';
+    try { dcName = dcById.get(datacenterOfVcenter(vc.id)) || ''; } catch { dcName = ''; }
+    return dcName || vc.location?.region || vc.region || vc.name || vc.id;
+  };
+  const corpByVcId = new Map(vcs.map((vc) => [vc.id, corpOfVc(vc)]));
+  const corpOfMgr = (m) => (m.vcenterId && corpByVcId.get(m.vcenterId)) || m.region || m.location?.region || '(법인 미지정)';
+
+  const items = vcs.map((vc) => {
     const sols = vc.solutions || [];
+    const hosts = (snap.hosts || []).filter((h) => h.vcenterId === vc.id);
+    const esxiMap = new Map();
+    for (const h of hosts) {
+      const key = `${h.version || 'unknown'}${h.build ? ` (b${h.build})` : ''}`;
+      esxiMap.set(key, (esxiMap.get(key) || 0) + 1);
+    }
+    const region = vc.location?.region || vc.region || '';
+    // 사이트에 붙는 NSX 매니저: vcenterId 정확 매칭 우선, 없으면 같은 region 의 무귀속 매니저.
+    const siteNsx = mgrs.filter((m) => (m.vcenterId && m.vcenterId === vc.id) || (!m.vcenterId && region && (m.region || m.location?.region) === region));
     return {
-      vcenterId: vc.id, name: vc.name, status: vc.status,
+      vcenterId: vc.id, name: vc.name, status: vc.status, region, corp: corpByVcId.get(vc.id),
       version: vc.version, build: vc.build, fullName: vc.fullName,
+      esxi: [...esxiMap.entries()].map(([version, count]) => ({ version, count })).sort((a, b) => b.count - a.count),
+      nsxManagers: siteNsx.map((m) => ({ name: m.name, version: m.version || '', status: m.status, host: m.host, region: m.region || m.location?.region || '' })),
       solutions: sols,
-      nsx: sols.filter((s) => /nsx/i.test(s.key) || /nsx/i.test(s.label)),
+      nsx: sols.filter((s) => /nsx/i.test(s.key) || /nsx/i.test(s.label)), // vCenter 확장에 등록된 NSX(참고)
     };
   });
-  const nsxVer = {};
-  for (const it of items) for (const s of it.nsx) { const v = s.version || '?'; nsxVer[v] = (nsxVer[v] || 0) + 1; }
-  const vcVer = {};
-  for (const it of items) { const v = it.version || '?'; vcVer[v] = (vcVer[v] || 0) + 1; }
+
+  // 전 함대 버전 드리프트 요약(같은 솔루션의 버전이 사이트마다 다른지 한눈에).
+  const dist = (pairs) => { const m = {}; for (const v of pairs) { const k = v || '?'; m[k] = (m[k] || 0) + 1; } return Object.entries(m).map(([version, count]) => ({ version, count })).sort((a, b) => b.count - a.count); };
+  // NSX 버전 분포 + 각 버전이 설치된 법인 목록(v2.327 사용자 요구). 법인별 매니저 수까지.
+  const nsxByVer = new Map();
+  for (const m of mgrs) {
+    const v = m.version || '?';
+    const corp = corpOfMgr(m);
+    if (!nsxByVer.has(v)) nsxByVer.set(v, { version: v, count: 0, corps: new Map() });
+    const e = nsxByVer.get(v); e.count++; e.corps.set(corp, (e.corps.get(corp) || 0) + 1);
+  }
+  const nsxVersions = [...nsxByVer.values()]
+    .map((e) => ({ version: e.version, count: e.count, corps: [...e.corps.entries()].map(([corp, count]) => ({ corp, count })).sort((a, b) => b.count - a.count) }))
+    .sort((a, b) => b.count - a.count);
   res.json({
+    generatedAt: snap.generatedAt,
     items,
-    nsxVersions: Object.entries(nsxVer).map(([version, count]) => ({ version, count })).sort((a, b) => b.count - a.count),
-    vcenterVersions: Object.entries(vcVer).map(([version, count]) => ({ version, count })).sort((a, b) => b.count - a.count),
+    vcenterVersions: dist(items.map((it) => it.version)),                                  // vCenter 버전 분포(사이트 수)
+    esxiVersions: dist((snap.hosts || []).filter((h) => !allowed || allowed.has(h.vcenterId)).map((h) => `${h.version || 'unknown'}${h.build ? ` (b${h.build})` : ''}`)), // ESXi 버전 분포(호스트 수)
+    nsxVersions,                                                                            // NSX Manager 버전 분포(매니저 수·설치 법인) — 실수집
+    nsxManagerCount: mgrs.length,
   });
 });
 
