@@ -78,6 +78,13 @@ test('serversWithPart: 드릴다운 — 서버당 수량, 잘못된 key 는 null
   assert.equal(list[0].id, 'a');
   assert.equal(list[0].count, 2, '한 서버에 2소켓');
   assert.equal(list[0].host, '10.0.0.1', 'https:// 접두 제거');
+  // 호스트네임: ① inv.system.hostName 우선 ② 없으면 IP 가 아닌 표시명 폴백.
+  const withHn = serversWithPart(SERVERS, (s) => (s.id === 'a' ? { ...INV_A, system: { ...INV_A.system, hostName: 'esxi-a.corp.local' } } : invFor(s)), key);
+  assert.equal(withHn[0].hostname, 'esxi-a.corp.local');
+  const diskList = serversWithPart(SERVERS, invFor, 'disk|ST2000NX 2000GB HDD');
+  assert.equal(diskList[0].id, 'b');
+  assert.equal(diskList[0].hostname, 'srv-b', '표시명이 IP 가 아니면 호스트네임 폴백');
+  assert.equal(list[0].hostname, 'srv-a', 'INV_A 는 hostName 미보고 → 표시명 폴백');
   assert.equal(serversWithPart(SERVERS, invFor, 'nope|x'), null, '알 수 없는 카테고리');
   assert.equal(serversWithPart(SERVERS, invFor, 'cpu'), null, '라벨 없는 key');
   // 라벨에 | 가 들어가도 복원된다(라벨 = split 후 재결합).

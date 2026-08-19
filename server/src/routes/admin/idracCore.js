@@ -12,7 +12,7 @@ import { hardwareDimMatch } from '../../idrac/hwMatch.js';
 import { partBuckets, serversWithPart, isPartCat } from '../../idrac/partsInventory.js';
 import { snapMemo } from '../../util/snapCache.js';
 import { listDatacenters, getDatacenterAssign } from '../../datacenter/store.js';
-import { adminOnly, hostVcByTag, hostNicsByTag, withMappedVc, remoteServersResolved, analysisServersWithRemote, invForServer } from './shared.js';
+import { adminOnly, hostVcByTag, hostNameByTag, hostNicsByTag, withMappedVc, remoteServersResolved, analysisServersWithRemote, invForServer } from './shared.js';
 
 export function registerIdracCore(adminRouter) {
 
@@ -427,6 +427,12 @@ adminRouter.get('/idrac/parts-servers', adminOnly, (req, res) => {
     const servers = analysisServersWithRemote(req);
     const list = serversWithPart(servers, invForServer, String(req.query.key || ''));
     if (list == null) return res.status(400).json({ ok: false, reason: 'key 형식은 <카테고리>|<라벨> 입니다.' });
+    // 호스트네임 폴백 — iDRAC 인벤토리에 아직 없으면(30분 주기·구버전 엣지) vCenter 스냅샷의
+    // ESXi 호스트명을 서비스태그로 매칭해 즉시 표시.
+    const tagName = hostNameByTag();
+    for (const r of list) {
+      if (!r.hostname) r.hostname = tagName.get(String(r.serviceTag || '').trim().toLowerCase()) || '';
+    }
     res.json({ servers: list, total: list.length });
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
