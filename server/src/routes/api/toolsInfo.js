@@ -9,6 +9,7 @@ import { nsxStore } from '../../nsx/store.js';
 import { licenseFamilyOf, licenseExpiryStatus } from '../../util/licenseExpiry.js';
 import { collectHorizonLicenses, listHorizon } from '../../horizon/horizon.js';
 import { memoJson, scopeKey, osFamily } from './shared.js';
+import { aggregateGuestOs } from '../../inventory/guestOsAgg.js';
 
 export function registerToolsInfo(api) {
 
@@ -36,25 +37,10 @@ api.get('/tools/guest-os', (req, res) => memoJson(req, res, 'tools-guest-os', (s
   else if (req.query.power === 'off') vms = vms.filter((v) => v.powerState !== 'POWERED_ON');
   if (req.query.kind === 'vm') vms = vms.filter((v) => !v.template);
   else if (req.query.kind === 'template') vms = vms.filter((v) => v.template);
-  const byName = new Map();
-  const byFamily = new Map();
-  for (const v of vms) {
-    const name = (v.guestOS || '미상').trim() || '미상';
-    const on = v.powerState === 'POWERED_ON';
-    const n = byName.get(name) || { os: name, family: osFamily(v.guestOS), total: 0, on: 0, off: 0 };
-    n.total++; if (on) n.on++; else n.off++;
-    byName.set(name, n);
-    const fam = osFamily(v.guestOS);
-    const f = byFamily.get(fam) || { family: fam, total: 0, on: 0 };
-    f.total++; if (on) f.on++;
-    byFamily.set(fam, f);
-  }
-  return {
-    total: vms.length,
-    distinctOs: byName.size,
-    families: [...byFamily.values()].sort((a, b) => b.total - a.total),
-    items: [...byName.values()].sort((a, b) => b.total - a.total),
-  };
+  // v2.328(사용자 요구): OS별 VM 수에 더해 할당 코어(vCPU)와 vCenter별 분해를 함께 낸다.
+  // 순수 집계 함수(inventory/guestOsAgg.js)로 O(N) 1회 순회 — 테스트로 산술 고정.
+  const vcMeta = new Map((snap.vcenters || []).map((vc) => [vc.id, { name: vc.name, region: vc.location?.region || '' }]));
+  return aggregateGuestOs(vms, osFamily, vcMeta);
 }, { extraKey: scopeKey(req.user, store.get()) }));
 
 // 특정 Guest OS(종류·버전) 또는 계열에 해당하는 VM 목록 — VM 수 클릭 시 대상 VM/CSV용.

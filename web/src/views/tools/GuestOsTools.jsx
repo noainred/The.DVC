@@ -7,40 +7,49 @@ import { Card, useTool } from './shared.jsx';
 
 export function GuestOs({ scope }) {
   const [q, setQ] = useState('');
-  const [view, setView] = useState('os'); // os | family
+  const [view, setView] = useState('os'); // os | family | vcenter (v2.328: vCenter별 분해)
   const [power, setPower] = useState('all'); // all | on | off
   const [kind, setKind] = useState('all');   // all | vm | template
   const [vmList, setVmList] = useState(null); // { label, q:{os|family} }
+  const [openVc, setOpenVc] = useState(null); // vCenter별 뷰에서 펼친 행(OS 분해)
   const params = { ...(scope ? { vcenterId: scope } : {}), ...(power !== 'all' ? { power } : {}), ...(kind !== 'all' ? { kind } : {}) };
   const { loading, data, error } = useTool('/tools/guest-os', params);
   if (loading) return <Loading />;
   if (error) return <ErrorBox message={error} />;
   const term = q.trim().toLowerCase();
-  const rows = (view === 'os' ? data.items : data.families).filter((r) => !term || (r.os || r.family).toLowerCase().includes(term));
+  const num = (n) => (n || 0).toLocaleString();
   const countCell = (r, label, qq) => <button className="cell-link" title="대상 VM 보기 / CSV" onClick={() => setVmList({ label, q: qq })}>{r.total}</button>;
+  // v2.328: 할당 코어(vCPU) 열 추가 — 사용자 요구('몇 개의 core 가 할당되어 있는지').
   const osCols = [
     { key: 'os', label: 'Guest OS (종류·버전)', render: (r) => <b>{r.os}</b> },
     { key: 'family', label: '계열', render: (r) => <span className="badge gray">{r.family}</span> },
     { key: 'total', label: 'VM 수', align: 'right', render: (r) => countCell(r, r.os, { os: r.os }) },
+    { key: 'vcpu', label: '할당 vCPU', align: 'right', render: (r) => <span className="tabular">{num(r.vcpu)}</span> },
     { key: 'on', label: 'On', align: 'right', render: (r) => <span className="badge green">{r.on}</span> },
     { key: 'off', label: 'Off', align: 'right', render: (r) => <span className="badge gray">{r.off}</span> },
   ];
   const famCols = [
     { key: 'family', label: 'OS 계열', render: (r) => <b>{r.family}</b> },
     { key: 'total', label: 'VM 수', align: 'right', render: (r) => countCell(r, r.family, { family: r.family }) },
+    { key: 'vcpu', label: '할당 vCPU', align: 'right', render: (r) => <span className="tabular">{num(r.vcpu)}</span> },
     { key: 'on', label: 'On', align: 'right', render: (r) => <span className="badge green">{r.on}</span> },
   ];
+  const rows = view === 'vcenter'
+    ? (data.byVcenter || []).filter((r) => !term || (r.name || r.id).toLowerCase().includes(term))
+    : (view === 'os' ? data.items : data.families).filter((r) => !term || (r.os || r.family).toLowerCase().includes(term));
   return (
     <>
       <div className="kpis" style={{ marginBottom: 14 }}>
         <Card label="총 VM" value={data.total.toLocaleString()} meta={scope ? '선택 법인' : '전체 법인'} />
+        <Card label="총 할당 vCPU" value={num(data.totalVcpu)} meta="Guest 합계" />
         <Card label="OS 종류(버전 포함)" value={data.distinctOs} />
         <Card label="OS 계열" value={data.families.length} meta={data.families.slice(0, 3).map((f) => f.family).join(' · ')} />
       </div>
       <div className="flex gap wrap" style={{ marginBottom: 8, alignItems: 'center' }}>
         <button className={view === 'os' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setView('os')}>OS·버전별 ({data.items.length})</button>
         <button className={view === 'family' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setView('family')}>계열별 ({data.families.length})</button>
-        <SearchBox className="input" style={{ maxWidth: 260 }} placeholder="OS 이름 검색 (예: Windows, Ubuntu 22)" value={q} onChange={setQ} />
+        <button className={view === 'vcenter' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setView('vcenter')}>vCenter별 ({(data.byVcenter || []).length})</button>
+        <SearchBox className="input" style={{ maxWidth: 260 }} placeholder={view === 'vcenter' ? 'vCenter 이름 검색' : 'OS 이름 검색 (예: Windows, Ubuntu 22)'} value={q} onChange={setQ} />
         <span style={{ width: 8 }} />
         <span className="muted" style={{ fontSize: 12 }}>전원</span>
         {[['all', '전체'], ['on', '켜짐'], ['off', '꺼짐']].map(([k, l]) => (
@@ -51,7 +60,48 @@ export function GuestOs({ scope }) {
           <button key={k} className={kind === k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 11px', fontSize: 12 }} onClick={() => setKind(k)}>{l}</button>
         ))}
       </div>
-      <DataTable columns={view === 'os' ? osCols : famCols} rows={rows} initialSort={{ key: 'total', dir: 'desc' }} />
+      {view === 'vcenter' ? (
+        // vCenter별 — 각 행 클릭 시 그 vCenter의 OS별 VM 수·할당 vCPU 분해를 펼친다(사용자 요구).
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>vCenter (법인)</th><th style={{ textAlign: 'right' }}>VM 수</th><th style={{ textAlign: 'right' }}>할당 vCPU</th><th style={{ textAlign: 'right' }}>OS 종류</th></tr></thead>
+            <tbody>
+              {rows.length === 0 && <tr><td colSpan={4} className="center muted" style={{ padding: 16 }}>표시할 vCenter가 없습니다.</td></tr>}
+              {rows.map((vc) => (
+                <React.Fragment key={vc.id}>
+                  <tr style={{ cursor: 'pointer' }} onClick={() => setOpenVc(openVc === vc.id ? null : vc.id)}>
+                    <td><b>{openVc === vc.id ? '▾ ' : '▸ '}{vc.name}</b>{vc.region ? <span className="muted" style={{ fontSize: 11 }}> · {vc.region}</span> : ''}</td>
+                    <td style={{ textAlign: 'right' }} className="tabular">{num(vc.total)}</td>
+                    <td style={{ textAlign: 'right' }} className="tabular">{num(vc.vcpu)}</td>
+                    <td style={{ textAlign: 'right' }} className="muted">{(vc.os || []).length}</td>
+                  </tr>
+                  {openVc === vc.id && (
+                    <tr><td colSpan={4} style={{ padding: 0 }}>
+                      <table style={{ width: '100%', background: 'rgba(255,255,255,.02)' }}>
+                        <thead><tr><th style={{ paddingLeft: 24 }}>Guest OS</th><th>계열</th><th style={{ textAlign: 'right' }}>VM 수</th><th style={{ textAlign: 'right' }}>할당 vCPU</th></tr></thead>
+                        <tbody>
+                          {(vc.os || []).map((o) => (
+                            <tr key={o.os}>
+                              <td style={{ paddingLeft: 24 }}>{o.os}</td>
+                              <td><span className="badge gray">{o.family}</span></td>
+                              <td style={{ textAlign: 'right' }} className="tabular">
+                                <button className="cell-link" title="대상 VM 보기 / CSV" onClick={(e) => { e.stopPropagation(); setVmList({ label: `${vc.name} · ${o.os}`, q: { vcenterId: vc.id, os: o.os } }); }}>{num(o.count)}</button>
+                              </td>
+                              <td style={{ textAlign: 'right' }} className="tabular">{num(o.vcpu)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </td></tr>
+                  )}
+                </React.Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <DataTable columns={view === 'os' ? osCols : famCols} rows={rows} initialSort={{ key: 'total', dir: 'desc' }} />
+      )}
       {vmList && <GuestOsVmsModal label={vmList.label} params={{ ...params, ...vmList.q }} onClose={() => setVmList(null)} />}
     </>
   );
