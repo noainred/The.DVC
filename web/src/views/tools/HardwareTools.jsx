@@ -458,28 +458,39 @@ function PartsInventory({ vc, onServer }) {
         </tbody>
       </table>
       {drill && (
-        <Modal title={`${drill.catName} — ${drill.label}`} onClose={() => setDrill(null)}>
-          <EscClose onClose={() => setDrill(null)} />
+        // 창 폭 자동 계산 — 행별 컬럼 문자수 합의 최댓값으로 필요한 폭을 근사(13px 폰트 ≈ 자당
+        // 8px + 패딩/뱃지 여유)하고 뷰포트 95% 로 상한. 기본폭(560) 모달에서 호스트네임이
+        // 잘리던 문제 해결. 상한을 넘으면 가로 스크롤 폴백 + 수동 리사이즈(resizable)도 허용.
+        <Modal
+          title={`${drill.catName} — ${drill.label}`} onClose={() => setDrill(null)} resizable minWidth={560}
+          width={Math.min(
+            Math.max(680, 140 + 8 * Math.max(0, ...(drill.servers || []).map((s) =>
+              `${s.name}${s.remote ? '위임' : ''}${s.host}${s.hostname || '—'}${s.model}${s.vcenterId || '—'}`.length + 8))),
+            Math.floor(window.innerWidth * 0.95),
+          )}
+        >
           {drill.error && <ErrorBox message={drill.error} />}
           {!drill.servers && !drill.error && <Loading />}
           {drill.servers && (
             <>
               <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>{drill.servers.length}대 장착 — 서버를 클릭하면 iDRAC 상세가 열립니다.</div>
-              <table className="data-table" style={{ width: '100%', fontSize: 13 }}>
-                <thead><tr><th>서버</th><th>호스트 IP</th><th>호스트네임</th><th>모델</th><th>법인(vCenter)</th><th style={{ textAlign: 'right' }}>수량</th></tr></thead>
-                <tbody>
-                  {drill.servers.map((s) => (
-                    <tr key={s.id} style={{ cursor: 'pointer' }} onClick={() => onServer && onServer(s)}>
-                      <td><b>{s.name}</b>{s.remote && <span className="badge gray" style={{ marginLeft: 6 }}>위임</span>}</td>
-                      <td className="muted">{s.host}</td>
-                      <td className="muted">{s.hostname || '—'}</td>
-                      <td className="muted">{s.model}</td>
-                      <td className="muted">{s.vcenterId || '—'}</td>
-                      <td style={{ textAlign: 'right' }}><b>{s.count}</b></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <div style={{ overflowX: 'auto' }}>
+                <table className="data-table" style={{ width: '100%', fontSize: 13, whiteSpace: 'nowrap' }}>
+                  <thead><tr><th>서버</th><th>호스트 IP</th><th>호스트네임</th><th>모델</th><th>법인(vCenter)</th><th style={{ textAlign: 'right' }}>수량</th></tr></thead>
+                  <tbody>
+                    {drill.servers.map((s) => (
+                      <tr key={s.id} style={{ cursor: 'pointer' }} onClick={() => onServer && onServer(s)}>
+                        <td><b>{s.name}</b>{s.remote && <span className="badge gray" style={{ marginLeft: 6 }}>위임</span>}</td>
+                        <td className="muted">{s.host}</td>
+                        <td className="muted">{s.hostname || '—'}</td>
+                        <td className="muted">{s.model}</td>
+                        <td className="muted">{s.vcenterId || '—'}</td>
+                        <td style={{ textAlign: 'right' }}><b>{s.count}</b></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </>
           )}
         </Modal>
