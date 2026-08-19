@@ -219,7 +219,9 @@ function Ipam({ scope, onScope }) {
           <button className={view === 'ranges' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setView('ranges')} title="vCenter별 IP 대역을 저장하고 주기적으로 스캔 + 결과 다운로드">🗂️ 대역·스캔</button>
           <button className={view === 'netmap' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setView('netmap')} title="대역 선택 → OS별·시간대별 사용/미사용 네트워크 맵">🗺️ 네트워크 맵</button>
           <button className={view === 'policies' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setView('policies')} title="대역(/24 등) 단위로 관리상태(예약·DHCP풀·폐기 등)를 일괄 지정 — IP override보다 낮은 우선순위의 '기본값'">🧩 대역 정책</button>
-          {view === 'list' && <SearchBox className="input" style={{ maxWidth: 260 }} placeholder="IP / VM / 호스트 검색" value={q} onChange={setQ} />}
+          {/* 검색창 강조 — 사용자 요청: 대장에서 가장 많이 쓰는 입력인데 다른 버튼들 사이에 묻혀
+              눈에 안 띔. 빨간 테두리 + 은은한 글로우로 시선 유도(값 입력과 무관한 정적 스타일). */}
+          {view === 'list' && <SearchBox className="input" style={{ maxWidth: 260, border: '2px solid #ef4444', boxShadow: '0 0 6px rgba(239,68,68,.45)', borderRadius: 8 }} placeholder="🔍 IP / VM / 호스트 검색" value={q} onChange={setQ} />}
         </div>
         <div className="flex gap">
           {canIpms && <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={() => setScanStatusOpen(true)} title="진행 중인 IP 스캔 + 완료된 스캔 이력 보기">📊 스캔 상태</button>}
