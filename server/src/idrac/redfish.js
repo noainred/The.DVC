@@ -385,6 +385,10 @@ export async function fetchInventory(entry) {
         inv.psus.push({
           name: p.Name || p.MemberId || 'PSU',
           model: p.Model || '',
+          // 파트 인벤토리용 식별 필드 — 같은 응답에 이미 있어 추가 HTTP 0회.
+          manufacturer: p.Manufacturer || '',
+          serial: p.SerialNumber || '',
+          partNumber: p.PartNumber || '',
           capacityWatts: num(p.PowerCapacityWatts),
           inputWatts: num(p.PowerInputWatts),
           outputWatts: num(p.PowerOutputWatts ?? p.LastPowerOutputWatts),
@@ -404,12 +408,26 @@ export async function fetchInventory(entry) {
   } catch { /* psu optional */ }
 
   // --- 물리 디스크 상태(스토리지): 모델·용량·미디어·SMART 예측 실패·상태 ---
+  // + 스토리지 컨트롤러(PERC/HBA) — 이미 GET 하는 컨트롤러 응답의 StorageControllers[] 를
+  //   버리고 있었다(파트 인벤토리용, 추가 HTTP 0회).
   inv.disks = [];
+  inv.storageControllers = [];
   try {
     if (sysId) {
       const stRoot = await G(`${sysId}/Storage`);
       for (const c of (stRoot.Members || []).slice(0, 8)) {
         let ctrl; try { ctrl = await G(c['@odata.id']); } catch { continue; }
+        for (const sc of (ctrl.StorageControllers || []).slice(0, 4)) {
+          inv.storageControllers.push({
+            name: sc.Name || ctrl.Name || ctrl.Id || '',
+            model: (sc.Model || '').trim(),
+            manufacturer: sc.Manufacturer || '',
+            firmware: sc.FirmwareVersion || '',
+            speedGbps: num(sc.SpeedGbps),
+            protocols: (sc.SupportedDeviceProtocols || []).join('/'),
+            health: sc.Status?.Health || '',
+          });
+        }
         for (const d of (ctrl.Drives || []).slice(0, 32)) {
           try {
             const drive = await G(d['@odata.id']);
@@ -447,6 +465,10 @@ export async function fetchInventory(entry) {
             speedMHz: num(d.OperatingSpeedMhz),
             type: d.MemoryDeviceType || '',
             manufacturer: d.Manufacturer || '',
+            // 파트 인벤토리용 — 같은 응답에 이미 있음(추가 HTTP 0회).
+            partNumber: (d.PartNumber || '').trim(),
+            serial: d.SerialNumber || '',
+            rank: num(d.RankCount),
             health: d.Status?.Health || '',
             state: d.Status?.State || '',
           });
@@ -473,15 +495,26 @@ export async function fetchInventory(entry) {
     }
   } catch { /* events optional */ }
 
-  // --- GPU(Accelerator) 목록: 모델·상태 (iDRAC가 OOB로 인식한 GPU) ---
+  // --- GPU(Accelerator) + 개별 CPU 소켓 목록 (Processors 멤버를 이미 전부 GET — 추가 HTTP 0회) ---
+  // 과거에는 GPU 가 아니면 응답을 버렸다. 파트 인벤토리용으로 CPU 소켓별 모델/코어/클럭도 보관.
   inv.gpus = [];
+  inv.cpus = [];
   try {
     if (sysId) {
       const procRoot = await G(`${sysId}/Processors`);
       for (const m of (procRoot.Members || []).slice(0, 24)) {
         let p; try { p = await G(m['@odata.id']); } catch { continue; }
         const isGpu = /gpu|accelerator/i.test(p.ProcessorType || '') || /gpu|nvidia|tesla|a100|h100|h200|l40|l4\b/i.test(`${p.Model || ''} ${p.Name || ''}`);
-        if (!isGpu) continue;
+        if (!isGpu) {
+          if (/cpu/i.test(p.ProcessorType || '') || num(p.TotalCores) != null) {
+            inv.cpus.push({
+              socket: p.Socket || p.Id || '', model: (p.Model || '').trim(), manufacturer: p.Manufacturer || '',
+              cores: num(p.TotalCores), threads: num(p.TotalThreads), maxSpeedMHz: num(p.MaxSpeedMHz),
+              health: p.Status?.Health || '', state: p.Status?.State || '',
+            });
+          }
+          continue;
+        }
         inv.gpus.push({ name: p.Name || p.Id || '', model: (p.Model || '').trim(), manufacturer: p.Manufacturer || '', health: p.Status?.Health || '', state: p.Status?.State || '' });
       }
       if (inv.gpus.length) inv.health.gpu = inv.gpus.some((g) => g.health && g.health !== 'OK') ? 'Warning' : 'OK';
@@ -517,10 +550,21 @@ export async function fetchInventory(entry) {
         }
         const ports = [];
         for (const pref of [...new Set(portRefs)].slice(0, 16)) {
-          try { const p = await G(pref); ports.push({ id: p.Id || p.Name || '', link: p.LinkStatus || p.Status?.State || '', speedMbps: portSpeedMbps(p) }); }
-          catch { /* skip port */ }
+          try {
+            const p = await G(pref);
+            ports.push({
+              id: p.Id || p.Name || '', link: p.LinkStatus || p.Status?.State || '', speedMbps: portSpeedMbps(p),
+              // MAC — 파트/자산 추적용(같은 응답, 추가 HTTP 0회). 표기가 세대별로 갈린다.
+              mac: (p.AssociatedNetworkAddresses || [])[0] || (p.Ethernet?.AssociatedMACAddresses || [])[0] || '',
+            });
+          } catch { /* skip port */ }
         }
-        inv.nics.push({ name: a.Id || a.Model || '', model: a.Model || a.Manufacturer || '', ports });
+        inv.nics.push({
+          name: a.Id || a.Model || '', model: a.Model || a.Manufacturer || '', ports,
+          // 파트 인벤토리용 식별 필드(어댑터 응답에 이미 있음).
+          partNumber: a.PartNumber || '', serial: a.SerialNumber || '',
+          firmware: (a.Controllers || [])[0]?.FirmwarePackageVersion || '',
+        });
       }
     }
   } catch { /* nics optional */ }
@@ -537,6 +581,29 @@ export async function fetchInventory(entry) {
       if (eports.length) inv.nics.push({ name: 'EthernetInterfaces', model: '(EthernetInterfaces)', ports: eports });
     } catch { /* optional */ }
   }
+
+  // --- PCIe 디바이스 목록(파트 인벤토리) — 이 인벤토리에서 유일한 '신규' 컬렉션 호출(+1+N GET,
+  //     N≤16). RAID/NIC/GPU 외의 애드인 카드(HBA·DPU·가속기 등)까지 슬롯 단위로 확보한다.
+  //     구세대 iDRAC 은 미지원(404) — 조용히 빈 배열 유지. ---
+  inv.pcie = [];
+  try {
+    if (sysId) {
+      const pcRoot = await G(`${sysId}/PCIeDevices`);
+      for (const m of (pcRoot.Members || []).slice(0, 16)) {
+        try {
+          const d = await G(m['@odata.id']);
+          inv.pcie.push({
+            name: d.Name || d.Id || '',
+            model: (d.Model || '').trim(),
+            manufacturer: d.Manufacturer || '',
+            deviceType: d.DeviceType || '',
+            firmware: d.FirmwareVersion || '',
+            health: d.Status?.Health || '',
+          });
+        } catch { /* skip device */ }
+      }
+    }
+  } catch { /* pcie optional(구세대 미지원) */ }
 
   // --- iDRAC 라이선스(Enterprise/DataCenter — GPU 텔레메트리 가용성과 직결) ---
   inv.licenses = [];
@@ -718,7 +785,13 @@ export async function fetchSensors(entry) {
       for (const f of thermal.Fans || []) {
         const rpm = num(f.Reading ?? f.ReadingRPM);
         if (rpm == null) continue;
-        fans.push({ name: f.Name || f.FanName || f.MemberId || 'Fan', rpm });
+        fans.push({
+          name: f.Name || f.FanName || f.MemberId || 'Fan', rpm,
+          // 파트 인벤토리용 식별 필드(같은 응답, 추가 HTTP 0회). 시계열(sensorStore)에는
+          // 싣지 않고 폴러가 인벤토리 갱신 시에만 invCache 로 옮긴다(시계열 비대화 방지).
+          model: f.Model || '', partNumber: f.PartNumber || '', manufacturer: f.Manufacturer || '',
+          health: f.Status?.Health || '', redundant: Array.isArray(f.Redundancy) && f.Redundancy.length > 0,
+        });
       }
     }
   } catch { /* thermal optional */ }

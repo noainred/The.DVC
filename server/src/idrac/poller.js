@@ -65,10 +65,22 @@ async function pollOnceInner() {
         const r = await fetchPower(s);
         samples.push({ serverId: s.id, watts: r.watts, ts });
         // 온도센서 + CPU 사용량을 매 주기(1분) 수집해 시계열에 적재(차트용, 격리).
-        try { const sn = await fetchSensors(s); pushSensorSample(s.id, { t: ts, cpuUsagePct: sn.cpuUsagePct, temps: sn.temps, fans: sn.fans }); } catch { /* 센서 실패는 전력 수집과 무관 */ }
+        // 시계열에는 팬을 {name,rpm}만 싣는다 — 파트 필드(model/partNumber)는 정적 정보라
+        // 1440샘플 시계열에 반복 저장하면 메모리만 낭비(인벤토리 갱신 시에만 보관).
+        let sensorFans = null;
+        try {
+          const sn = await fetchSensors(s);
+          sensorFans = sn.fans;
+          pushSensorSample(s.id, { t: ts, cpuUsagePct: sn.cpuUsagePct, temps: sn.temps, fans: (sn.fans || []).map((f) => ({ name: f.name, rpm: f.rpm })) });
+        } catch { /* 센서 실패는 전력 수집과 무관 */ }
         // Refresh rich inventory on a slow cadence (best-effort, non-blocking).
         if (inventoryStale(s.id, INVENTORY_MAX_AGE_MS)) {
-          try { setInventory(s.id, await fetchInventory(s)); } catch { /* keep last */ }
+          try {
+            const inv = await fetchInventory(s);
+            // 팬 파트 정보 — Thermal 은 fetchSensors 가 방금 받았으므로 재호출 없이 이관(추가 HTTP 0회).
+            if (sensorFans?.length) inv.fans = sensorFans.map(({ name, model, partNumber, manufacturer, health, redundant }) => ({ name, model, partNumber, manufacturer, health, redundant }));
+            setInventory(s.id, inv);
+          } catch { /* keep last */ }
         }
         results.push({ id: s.id, name: s.name, type: 'idrac', watts: r.watts });
       }

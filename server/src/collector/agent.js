@@ -41,6 +41,16 @@ export function compactInv(inv) {
       name: n.name, model: n.model,
       ports: Array.isArray(n.ports) ? n.ports.map((p) => ({ id: p.id, link: p.link, speedMbps: p.speedMbps })) : [],
     })) : [],
+    // 파트 인벤토리 탭용 — 집계에 필요한 식별 필드만(시리얼 등 자산정보 제외, 페이로드 절약).
+    // 이 필드들을 빼면 위임(엣지) 법인의 서버가 파트 탭에서 전부 공백이 된다(과거 nics 누락과
+    // 동일한 회귀 패턴 — test/compactInv.test.js 가 고정).
+    cpus: Array.isArray(inv.cpus) ? inv.cpus.map((c) => ({ socket: c.socket, model: c.model, cores: c.cores })) : [],
+    disks: Array.isArray(inv.disks) ? inv.disks.map((d) => ({ model: d.model, capacityGB: d.capacityGB, media: d.media, protocol: d.protocol })) : [],
+    psus: Array.isArray(inv.psus) ? inv.psus.map((p) => ({ model: p.model, manufacturer: p.manufacturer, capacityWatts: p.capacityWatts })) : [],
+    memoryDimms: Array.isArray(inv.memoryDimms) ? inv.memoryDimms.map((m) => ({ sizeGB: m.sizeGB, type: m.type, speedMHz: m.speedMHz, manufacturer: m.manufacturer, partNumber: m.partNumber })) : [],
+    storageControllers: Array.isArray(inv.storageControllers) ? inv.storageControllers.map((c) => ({ model: c.model, firmware: c.firmware, protocols: c.protocols })) : [],
+    pcie: Array.isArray(inv.pcie) ? inv.pcie.map((d) => ({ model: d.model, manufacturer: d.manufacturer, deviceType: d.deviceType })) : [],
+    fans: Array.isArray(inv.fans) ? inv.fans.map((f) => ({ name: f.name, model: f.model, partNumber: f.partNumber })) : [],
     collectedAt: inv.collectedAt,
   };
 }

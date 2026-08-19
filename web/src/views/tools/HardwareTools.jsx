@@ -381,6 +381,112 @@ function ModelServersModal({ corpName, model, servers, onRow, onClose }) {
 }
 
 /** 서버 분석 — iDRAC가 수집한 하드웨어 정보 분석. vCenter(법인)별 필터 + 서버 클릭 상세 공용. */
+/** 파트 인벤토리 — 물리 서버에 설치된 모든 하드웨어 파트(CPU·GPU·DIMM·디스크·컨트롤러·
+ *  NIC·PSU·PCIe·팬)를 모델별 수량으로 집계하고, 클릭하면 장착 서버 목록으로 드릴다운.
+ *  집계는 스코프당 1회만 조회하고 카테고리 칩·검색은 클라이언트에서 거른다(키 입력마다
+ *  1,069대 재집계 요청을 만들지 않기 위함 — 서버측 15s single-flight 와 이중 방어). */
+const PART_CAT_CHIPS = [['', '전체'], ['cpu', 'CPU'], ['gpu', 'GPU'], ['dimm', '메모리'], ['disk', '디스크'], ['controller', '컨트롤러'], ['nic', 'NIC'], ['psu', 'PSU'], ['pcie', 'PCIe'], ['fan', '팬']];
+function PartsInventory({ vc, onServer }) {
+  const [cat, setCat] = useState('');
+  const [q, setQ] = useState('');
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState(null);
+  const [sortKey, setSortKey] = useState('count'); // count | serverCount | label
+  const [drill, setDrill] = useState(null);        // { key, label, catName, servers?, error? }
+  const genRef = useRef(0);
+  const vcKey = JSON.stringify(vc || {});
+  useEffect(() => {
+    const gen = ++genRef.current; // 느린 이전 응답이 최신 스코프 결과를 덮는 경쟁 방지
+    fetchJson(`/admin/idrac/parts-inventory${vcQS(vc)}`)
+      .then((d) => { if (genRef.current === gen) { setData(d); setErr(null); } })
+      .catch((e) => { if (genRef.current === gen) setErr(e.message); });
+  }, [vcKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const openDrill = (b) => {
+    setDrill({ key: b.key, label: b.label, catName: b.catName });
+    fetchJson(`/admin/idrac/parts-servers${vcQS(vc)}${vcQS(vc) ? '&' : '?'}key=${encodeURIComponent(b.key)}`)
+      .then((d) => setDrill((cur) => (cur && cur.key === b.key ? { ...cur, servers: d.servers } : cur)))
+      .catch((e) => setDrill((cur) => (cur && cur.key === b.key ? { ...cur, error: e.message } : cur)));
+  };
+  if (err) return <ErrorBox message={err} />;
+  if (!data) return <Loading />;
+  const needle = q.trim().toLowerCase();
+  const rows = (data.buckets || [])
+    .filter((b) => (!cat || b.cat === cat) && (!needle || `${b.label} ${b.detail} ${b.catName}`.toLowerCase().includes(needle)))
+    .sort((a, b) => (sortKey === 'label' ? a.label.localeCompare(b.label) : (b[sortKey] || 0) - (a[sortKey] || 0)));
+  const exportCsv = () => {
+    const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const csv = ['분류,파트,상세,수량,서버수', ...rows.map((b) => [b.catName, b.label, b.detail, b.count, b.serverCount].map(esc).join(','))].join('\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv' }));
+    a.download = `hardware-parts-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click(); URL.revokeObjectURL(a.href);
+  };
+  const th = (key, label) => (
+    <th style={{ cursor: 'pointer', whiteSpace: 'nowrap' }} onClick={() => setSortKey(key)}>{label}{sortKey === key ? ' ▾' : ''}</th>
+  );
+  return (
+    <div>
+      <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 10 }}>
+        <div className="flex gap wrap" style={{ alignItems: 'center' }}>
+          {PART_CAT_CHIPS.map(([k, label]) => (
+            <button key={k} className={cat === k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '4px 12px', fontSize: 12 }} onClick={() => setCat(k)}>{label}</button>
+          ))}
+        </div>
+        <div className="flex gap" style={{ alignItems: 'center' }}>
+          <SearchBox value={q} onChange={setQ} placeholder="파트/모델 검색…" />
+          <button className="tab" style={{ flex: 'none', padding: '5px 12px', fontSize: 12 }} onClick={exportCsv}>⬇ CSV</button>
+        </div>
+      </div>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
+        대상 서버 <b>{data.total}</b>대 · 수집 {data.collected} · 미수집 {(data.missing || []).length}
+        {(data.missing || []).length > 0 && <span title={(data.missing || []).slice(0, 30).map((m) => m.name).join(', ')}> (목록은 마우스 오버)</span>}
+        {' '}— 파트 {rows.length}종 · 행을 클릭하면 장착 서버가 보입니다. 인벤토리는 30분 주기 수집이며 세대/라이선스에 따라 일부 항목이 비어 있을 수 있습니다.
+      </div>
+      <table className="data-table" style={{ width: '100%', fontSize: 13 }}>
+        <thead><tr><th>분류</th>{th('label', '파트(모델)')}<th>상세</th>{th('count', '수량')}{th('serverCount', '서버 수')}</tr></thead>
+        <tbody>
+          {rows.map((b) => (
+            <tr key={b.key} style={{ cursor: 'pointer' }} onClick={() => openDrill(b)}>
+              <td><span className="badge blue">{b.catName}</span></td>
+              <td><b>{b.label}</b></td>
+              <td className="muted">{b.detail}</td>
+              <td style={{ textAlign: 'right' }}><b>{b.count}</b></td>
+              <td style={{ textAlign: 'right' }}>{b.serverCount}</td>
+            </tr>
+          ))}
+          {!rows.length && <tr><td colSpan={5} className="muted">조건에 맞는 파트가 없습니다.</td></tr>}
+        </tbody>
+      </table>
+      {drill && (
+        <Modal title={`${drill.catName} — ${drill.label}`} onClose={() => setDrill(null)}>
+          <EscClose onClose={() => setDrill(null)} />
+          {drill.error && <ErrorBox message={drill.error} />}
+          {!drill.servers && !drill.error && <Loading />}
+          {drill.servers && (
+            <>
+              <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>{drill.servers.length}대 장착 — 서버를 클릭하면 iDRAC 상세가 열립니다.</div>
+              <table className="data-table" style={{ width: '100%', fontSize: 13 }}>
+                <thead><tr><th>서버</th><th>호스트</th><th>모델</th><th>법인(vCenter)</th><th style={{ textAlign: 'right' }}>수량</th></tr></thead>
+                <tbody>
+                  {drill.servers.map((s) => (
+                    <tr key={s.id} style={{ cursor: 'pointer' }} onClick={() => onServer && onServer(s)}>
+                      <td><b>{s.name}</b>{s.remote && <span className="badge gray" style={{ marginLeft: 6 }}>위임</span>}</td>
+                      <td className="muted">{s.host}</td>
+                      <td className="muted">{s.model}</td>
+                      <td className="muted">{s.vcenterId || '—'}</td>
+                      <td style={{ textAlign: 'right' }}><b>{s.count}</b></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
+        </Modal>
+      )}
+    </div>
+  );
+}
+
 export function ServerAnalysis() {
   const [sub, setSub] = useState('info'); // 법인별 서버 정보가 기본
   const [dc, setDc] = useState('');   // 1차 박스: '' 전체 | DataCenter id
@@ -408,6 +514,7 @@ export function ServerAnalysis() {
         <div className="flex gap wrap">
           <button className={sub === 'info' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('info')}>🗄 법인별 서버 정보</button>
           <button className={sub === 'hw' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('hw')}>🔩 하드웨어 집계</button>
+          <button className={sub === 'parts' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('parts')}>🧩 파트 인벤토리</button>
           <button className={sub === 'temp' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('temp')}>🌡 법인별 온도</button>
           <button className={sub === 'gpu' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('gpu')}>🎮 GPU 정보</button>
           <button className={sub === 'fw' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('fw')}>🏷 BIOS/iDRAC 버전 정보</button>
@@ -438,6 +545,7 @@ export function ServerAnalysis() {
       </div>
       {sub === 'info' && <ServerInfoByVcenter {...sp} vcs={vcs} />}
       {sub === 'hw' && <HardwareSummary />}
+      {sub === 'parts' && <PartsInventory {...sp} />}
       {sub === 'gpu' && <ServerGpuFinder {...sp} />}
       {sub === 'fw' && <ServerFirmwareFinder {...sp} />}
       {sub === 'temp' && <ServerTempFinder {...sp} />}
