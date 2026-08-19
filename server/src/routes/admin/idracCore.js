@@ -9,6 +9,8 @@ import { loadPowerSettings, savePowerSettings } from '../../idrac/powerSettings.
 import { getInventory as getIdracInventory } from '../../idrac/invCache.js';
 import { getSensorSeries } from '../../idrac/sensorStore.js';
 import { hardwareDimMatch } from '../../idrac/hwMatch.js';
+import { partBuckets, serversWithPart, isPartCat } from '../../idrac/partsInventory.js';
+import { snapMemo } from '../../util/snapCache.js';
 import { listDatacenters, getDatacenterAssign } from '../../datacenter/store.js';
 import { adminOnly, hostVcByTag, hostNicsByTag, withMappedVc, remoteServersResolved, analysisServersWithRemote, invForServer } from './shared.js';
 
@@ -397,5 +399,35 @@ adminRouter.get('/idrac/gpu-inventory', adminOnly, (req, res) => {
     physicalServers: physCount,
     missing,
   });
+});
+
+// 서버 분석 — 하드웨어 파트 인벤토리 집계: 어떤 장비(모델)가 몇 개, 몇 대의 서버에 있는지.
+// 카테고리: cpu/gpu/dimm/disk/controller/nic/psu/pcie/fan (idrac/partsInventory.js).
+// 1,069대 × 서버당 수십~수백 유닛 순회라 admin 폴링 하에서도 재계산이 겹치지 않게
+// single-flight + 15s TTL(snapMemo)로 묶는다(admin 전용이라 scope 캐시 누수 없음).
+adminRouter.get('/idrac/parts-inventory', adminOnly, async (req, res) => {
+  try {
+    const cat = String(req.query.cat || '').trim();
+    if (cat && !isPartCat(cat)) return res.status(400).json({ ok: false, reason: `알 수 없는 카테고리: ${cat}` });
+    const key = `parts|${req.originalUrl}`;
+    const payload = await snapMemo('idrac-parts', key, 15_000, () => {
+      const servers = analysisServersWithRemote(req);
+      return partBuckets(servers, invForServer, { cat, q: String(req.query.q || '') });
+    });
+    // ETag/304 는 전역 res.json 래퍼(util/compress.js, 본문 SHA-1)가 처리 — 여기서 키 기반
+    // ETag 를 따로 만들면 재계산 후 내용이 바뀌어도 304 가 나가는 오탐이 생긴다.
+    res.json(payload);
+  } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+});
+
+// 파트 드릴다운 — key(`cat|라벨`)의 파트를 가진 서버 목록(서버당 수량). 집계와 분리해
+// 버킷×서버 목록이 응답을 MB 단위로 키우는 것을 막는다(gpu-inventory 와 달리 버킷 수가 많음).
+adminRouter.get('/idrac/parts-servers', adminOnly, (req, res) => {
+  try {
+    const servers = analysisServersWithRemote(req);
+    const list = serversWithPart(servers, invForServer, String(req.query.key || ''));
+    if (list == null) return res.status(400).json({ ok: false, reason: 'key 형식은 <카테고리>|<라벨> 입니다.' });
+    res.json({ servers: list, total: list.length });
+  } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 }
