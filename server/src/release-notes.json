@@ -1,6 +1,16 @@
 {
   "notes": [
     {
+      "version": "2.328.0",
+      "date": "2026-08-19",
+      "title": "특수기능 Guest OS — OS별 VM 수에 할당 코어(vCPU) + vCenter별 분해 추가",
+      "notes": [
+        "특수기능 'Guest OS 종류/버전' 을 확장해, 전체·vCenter별로 Guest OS별 VM 수와 함께 할당 코어(vCPU) 수를 보여줍니다(사용자 요구). 상단에 '총 할당 vCPU' KPI 를 두고, OS·버전별/계열별 표에 '할당 vCPU' 열을 추가했습니다.",
+        "'vCenter별' 탭 신설: vCenter(법인)마다 VM 수·할당 vCPU 를 보여주고, 행을 펼치면 그 vCenter의 OS별 VM 수·할당 vCPU 분해를 표로 봅니다(OS 수 클릭 시 해당 VM 목록·CSV). 전원(켜짐/꺼짐)·종류(VM/템플릿) 필터와 함께 동작하며, 범위 제한 계정은 허용 vCenter 만 집계합니다(기존 scope 규칙 유지).",
+        "집계는 순수 함수(inventory/guestOsAgg.js)로 O(N) 1회 순회 — VM 수·vCPU·on/off·vCenter별 분해 산술을 단위 테스트로 고정했습니다."
+      ]
+    },
+    {
       "version": "2.331.0",
       "date": "2026-08-19",
       "title": "IP관리 — 검색창 강조 표시",
