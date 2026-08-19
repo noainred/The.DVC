@@ -106,8 +106,14 @@ export function serversWithPart(servers, invFor, key) {
     if (!inv) continue;
     const units = partsOfInv(inv, cat).filter((u) => u.label === wantLabel);
     if (!units.length) continue;
+    const host = t(s.host).replace(/^https?:\/\//, '');
+    const isIp = (v) => /^\d{1,3}(\.\d{1,3}){3}$/.test(t(v));
     out.push({
-      id: s.id, name: s.name, host: t(s.host).replace(/^https?:\/\//, ''),
+      id: s.id, name: s.name, host,
+      // 호스트네임 — ① iDRAC 이 보고한 OS 호스트명(inv.system.hostName) ② 표시명이 IP 가
+      // 아니면 그것(엣지가 hostname 을 이름으로 내보내는 경우). vCenter 스냅샷 폴백(서비스태그
+      // 매칭)은 스냅샷 접근이 필요해 라우트에서 보충한다.
+      hostname: t(inv.system?.hostName) || (!isIp(s.name) && t(s.name) !== host ? t(s.name) : ''),
       serviceTag: s.serviceTag || inv.system?.serviceTag || '', vcenterId: s.vcenterId || '',
       model: inv.system?.model || s.model || '', remote: !!s.remote, count: units.length,
     });

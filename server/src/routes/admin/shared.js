@@ -58,6 +58,17 @@ export function hostVcByTag() {
   }
   return m;
 }
+
+// 서비스태그(정규화) → ESXi 호스트명(vCenter 스냅샷). iDRAC 인벤토리에 hostName 이 없거나
+// 아직 갱신 전(30분 주기·구버전 엣지)인 서버도 vCenter 쪽 이름으로 즉시 표시하기 위한 폴백.
+export function hostNameByTag() {
+  const m = new Map();
+  for (const h of (store.get().hosts || [])) {
+    const t = String(h.serviceTag || '').trim().toLowerCase();
+    if (t && h.name && !m.has(t)) m.set(t, h.name);
+  }
+  return m;
+}
 // 서비스태그(정규화) → vCenter 호스트 물리 NIC(config.network.pnic 수집분). NIC 속도/모델
 // 화면의 'vCenter 수집' 별도 컬럼용 — iDRAC 인벤토리와 독립된 교차 검증 소스. 엣지 위임
 // vCenter도 인벤토리 push에 호스트 객체 전체가 실리므로 중앙에서 동일하게 조회된다.

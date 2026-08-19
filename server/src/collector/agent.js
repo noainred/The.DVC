@@ -28,7 +28,9 @@ function compactSensors(serverId) {
 export function compactInv(inv) {
   if (!inv) return null;
   return {
-    system: inv.system ? { model: inv.system.model, serviceTag: inv.system.serviceTag, biosVersion: inv.system.biosVersion } : undefined,
+    // hostName: 파트/분석 화면에서 IP와 나란히 표시(iDRAC 이 보고하는 OS 호스트네임) — 누락 시
+    // 위임(엣지) 서버는 hostname 컬럼이 영구 공백이 된다.
+    system: inv.system ? { model: inv.system.model, serviceTag: inv.system.serviceTag, biosVersion: inv.system.biosVersion, hostName: inv.system.hostName } : undefined,
     cpu: inv.cpu ? { model: inv.cpu.model, count: inv.cpu.count, cores: inv.cpu.cores } : undefined,
     memory: inv.memory ? { totalGiB: inv.memory.totalGiB } : undefined,
     gpus: Array.isArray(inv.gpus) ? inv.gpus.map((g) => ({ model: g.model, name: g.name, memoryMiB: g.memoryMiB })) : [],
