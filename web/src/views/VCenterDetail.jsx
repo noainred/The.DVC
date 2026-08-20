@@ -6,6 +6,8 @@ import EscClose from '../components/EscClose.jsx';
 import { parseTokens, entityMatches, notesSnippet, sumVmResources, fmtGb } from './vcdSearch.js';
 // 가상화율(할당 vCPU/RAM ÷ 물리) 집계도 순수 모듈 — 'Off VM 포함' 필터가 그대로 반영된다(v2.334).
 import { allocByHost, virtSum as virtSumOf } from './vcdVirt.js';
+// '전체 현황' 평면 표/CSV — 트리를 펼치지 않고 모든 클러스터·호스트를 한 번에(v2.335).
+import { buildOverviewRows, overviewCsv, OVERVIEW_COLUMNS } from './vcdOverview.js';
 
 const VIEWS = [
   { k: 'hosts', label: '호스트 및 클러스터', icon: '🖥️' },
@@ -36,6 +38,7 @@ export default function VCenterDetail({ site, onBack }) {
   const [q, setQ] = useState('');            // VM name search (hosts/vms views)
   const [inclNotes, setInclNotes] = useState(false); // 검색 시 VM 메모(vSphere annotation) 포함 여부(v2.293)
   const [inclPoweredOff, setInclPoweredOff] = useState(true); // 트리·검색에 Off VM 포함 여부(기본 포함=기존 동작 유지)
+  const [overview, setOverview] = useState(false); // '전체 현황' 평면 표(모든 클러스터·호스트) 표시 여부
   const [dsKind, setDsKind] = useState('');  // datastore storage filter
   const [comparing, setComparing] = useState(false); // vCenter 2개 비교 모드
   const toggle = (k) => setOpen((o) => ({ ...o, [k]: !o[k] }));
@@ -83,6 +86,24 @@ export default function VCenterDetail({ site, onBack }) {
   const { vcpu: vcpuByHost, vmem: vmemByHost } = useMemo(() => allocByHost(visibleVms), [visibleVms]);
   // 호스트 묶음(클러스터·DC)의 할당 vCPU·물리 코어 + 할당 메모리·물리 메모리(MB) 합계.
   const virtSum = (list) => virtSumOf(list, vcpuByHost, vmemByHost);
+  // '전체 현황' 행 — 표를 열었을 때만 만든다(수천 VM × 20초 폴링에서 불필요한 재계산 방지).
+  // CSV 는 클릭 시 같은 함수로 다시 만들어, 표를 열지 않아도 전체 행을 받을 수 있게 한다.
+  const overviewRows = useMemo(
+    () => (overview ? buildOverviewRows({ site, hosts, vms: visibleVms, metrics: m }) : []),
+    [overview, site, hosts, visibleVms, m]
+  );
+  const exportOverviewCsv = () => {
+    const rows = overview ? overviewRows : buildOverviewRows({ site, hosts, vms: visibleVms, metrics: m });
+    // BOM 을 붙여야 Excel 이 UTF-8 한글을 깨지 않는다(다른 CSV export 와 동일 관례).
+    const blob = new Blob(['﻿' + overviewCsv(rows)], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    // 파일명에 Off VM 포함 여부를 남긴다 — 가상화율 기준이 다른 두 파일을 나중에 구분하려면 필요.
+    a.download = `vcenter-overview-${String(vcenterId).replace(/[^a-zA-Z0-9._-]+/g, '_')}-${inclPoweredOff ? 'all' : 'poweredon'}-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   // folder path -> vms (vSphere "VMs and Templates")
   const folderTree = useMemo(() => buildFolderTree(visibleVms), [visibleVms]);
@@ -173,7 +194,31 @@ export default function VCenterDetail({ site, onBack }) {
             </label>
             {query && <span className="muted" style={{ fontSize: 12 }}>{view === 'hosts' && hostMatches.length ? `호스트 ${hostMatches.length} · ` : ''}{matches.length} VM 일치{matches.length > SEARCH_CAP ? ` (처음 ${SEARCH_CAP}개 표시)` : ''}</span>}
             {q && <button className="tab" style={{ flex: 'none', padding: '6px 10px' }} onClick={() => setQ('')}>지우기</button>}
+            {/* 전체 현황 / CSV — 트리를 하나하나 펼치지 않고 모든 클러스터·호스트를 한 번에 본다(v2.335).
+                표와 CSV 는 같은 행을 쓰고, 'Off VM 포함' 설정이 가상화율에 그대로 반영된다. */}
+            {view === 'hosts' && (
+              <span className="flex gap" style={{ marginLeft: 'auto', flex: 'none', alignItems: 'center' }}>
+                <button className={overview ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 12px' }}
+                  onClick={() => setOverview((v) => !v)}
+                  title="모든 클러스터·호스트를 트리 펼침 없이 한 표로 봅니다(현재 'Off VM 포함' 설정이 가상화율에 반영됩니다)">
+                  📋 전체 현황
+                </button>
+                <button className="tab" style={{ flex: 'none', padding: '6px 12px' }} onClick={exportOverviewCsv}
+                  title="모든 클러스터·호스트의 현황(VM 수·CPU/MEM 사용률·가상화율·할당/물리 자원·ESXi 버전·모델·전력·온도)을 CSV 로 내려받습니다">
+                  ⤓ CSV
+                </button>
+              </span>
+            )}
           </div>
+          {view === 'hosts' && overview && (
+            <>
+              <div className="muted" style={{ fontSize: 12, margin: '0 0 8px' }}>
+                모든 클러스터·호스트 <b style={{ color: 'var(--text)' }}>{overviewRows.length.toLocaleString()}</b>행
+                {' · '}가상화율 기준: <b style={{ color: 'var(--text)' }}>{inclPoweredOff ? '전체 VM(꺼진 VM 포함)' : '켜진 VM 만'}</b>
+              </div>
+              <OverviewTable rows={overviewRows} />
+            </>
+          )}
           {/* 일치 VM 자원 총합(v2.293) — 표시 상한(500)과 무관하게 전체 일치 기준. 디스크는
               사용(committed)과 할당(+thin 미기록분)을 구분해 보여준다(합쳐 보이면 씬 환경에서 오해). */}
           {query && matches.length > 0 && (
@@ -229,7 +274,7 @@ export default function VCenterDetail({ site, onBack }) {
           );
         })()}
 
-        {view === 'hosts' && !query && (() => { const dc = virtSum(hosts); return (
+        {view === 'hosts' && !query && !overview && (() => { const dc = virtSum(hosts); return (
           <Node label={`🗄️ ${site.name}`} defaultOpen
             sub={<UsageBars lead={<span className="muted">{hosts.length} 호스트 · VM {dc.vmc}</span>} cpu={m.cpuUsagePct} mem={m.memUsagePct}
               tail={<span style={{ display: 'inline-flex', gap: 10, alignItems: 'center' }}><VirtBadge alloc={dc.alloc} base={dc.cores} kind="cpu" /><VirtBadge alloc={dc.memAlloc} base={dc.memPhys} kind="mem" /></span>} />}>
@@ -350,15 +395,58 @@ function MiniBar({ label, pct }) {
   );
 }
 
+// 가상화율 색상 임계값 — CPU: 2.5 주의/4 위험, MEM: 1.0 주의(오버커밋)/1.5 위험.
+// 트리 배지(VirtBadge)와 '전체 현황' 표가 같은 기준으로 색을 쓰도록 한 곳에 둔다.
+const ratioColor = (r, isMem) => {
+  const [warn, danger] = isMem ? [1.0, 1.5] : [2.5, 4];
+  return r >= danger ? '#ef4444' : r >= warn ? '#f59e0b' : '#22c55e';
+};
+
+// '전체 현황' 표 — 모든 클러스터·호스트를 트리 펼침 없이 한 화면에서 본다(v2.335).
+// 계층 순서(vCenter→클러스터→호스트)가 읽기의 핵심이라, 클릭 정렬로 순서가 흐트러지는 DataTable
+// 대신 직접 렌더한다. 컬럼 정의는 CSV 와 공유(vcdOverview.OVERVIEW_COLUMNS) — 본 그대로 내려간다.
+function OverviewTable({ rows }) {
+  const cell = (r, c) => {
+    const v = r[c.key];
+    if (v === null || v === undefined || v === '') return <span className="muted">—</span>;
+    if (c.key === 'cpuRatio' || c.key === 'memRatio') {
+      return <b style={{ color: ratioColor(Number(v), c.key === 'memRatio'), fontVariantNumeric: 'tabular-nums' }}>{v}:1</b>;
+    }
+    if (c.key === 'cpuPct' || c.key === 'memPct') {
+      return <b style={{ color: usageColor(Number(v)), fontVariantNumeric: 'tabular-nums' }}>{v}%</b>;
+    }
+    return typeof v === 'number' ? v.toLocaleString() : v;
+  };
+  return (
+    <div className="table-wrap card" style={{ maxHeight: '66vh', padding: 0 }}>
+      <table>
+        <thead>
+          <tr>{OVERVIEW_COLUMNS.map((c) => <th key={c.key} style={{ textAlign: c.num ? 'right' : 'left', whiteSpace: 'nowrap' }}>{c.label}</th>)}</tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={`${r.level}:${r.cluster}:${r.host}:${i}`}
+              style={r.level === 'vCenter' ? { fontWeight: 700, background: 'rgba(148,163,184,.12)' }
+                : r.level === '클러스터' ? { background: 'rgba(148,163,184,.06)' } : undefined}>
+              {OVERVIEW_COLUMNS.map((c) => (
+                <td key={c.key} style={{ textAlign: c.num ? 'right' : 'left', whiteSpace: 'nowrap' }}>{cell(r, c)}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 // 가상화율 배지 — CPU(할당 vCPU:물리코어)·MEM(할당 VM RAM:물리 RAM) 공용. 과커밋 수준에 따라 색상.
 // base/alloc 이 없으면 미표시. kind='cpu'|'mem'. 메모리는 MB 로 받아 툴팁에서 GB 로 표기(비율은 동일).
 function VirtBadge({ alloc, base, kind = 'cpu' }) {
   if (!base || !alloc) return null;
   const isMem = kind === 'mem';
   const r = alloc / base;
-  // CPU: >4:1 위험·2.5~4 주의 / MEM: >1.5:1 위험(물리 크게 초과)·1.0~1.5 주의(초과 할당)·이하 정상
-  const [warn, danger] = isMem ? [1.0, 1.5] : [2.5, 4];
-  const color = r >= danger ? '#ef4444' : r >= warn ? '#f59e0b' : '#22c55e';
+  // 색 기준은 ratioColor 한 곳에서 관리(전체 현황 표와 동일해야 한다).
+  const color = ratioColor(r, isMem);
   const txt = (Math.round(r * 10) / 10).toFixed(1);
   const label = isMem ? 'MEM 가상화' : 'CPU 가상화';
   const title = isMem
