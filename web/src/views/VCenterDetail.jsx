@@ -33,6 +33,7 @@ export default function VCenterDetail({ site, onBack }) {
   const [open, setOpen] = useState({});      // expanded tree nodes
   const [q, setQ] = useState('');            // VM name search (hosts/vms views)
   const [inclNotes, setInclNotes] = useState(false); // 검색 시 VM 메모(vSphere annotation) 포함 여부(v2.293)
+  const [inclPoweredOff, setInclPoweredOff] = useState(true); // 트리·검색에 Off VM 포함 여부(기본 포함=기존 동작 유지)
   const [dsKind, setDsKind] = useState('');  // datastore storage filter
   const [comparing, setComparing] = useState(false); // vCenter 2개 비교 모드
   const toggle = (k) => setOpen((o) => ({ ...o, [k]: !o[k] }));
@@ -48,6 +49,12 @@ export default function VCenterDetail({ site, onBack }) {
 
   const hosts = hostsD?.items || [];
   const vms = vmsD?.items || [];
+  // 표시용 VM 목록 — 'Off VM 포함' 해제 시 POWERED_OFF 를 숨긴다. 가상화율(할당 vCPU/RAM)
+  // 합계는 전원 상태와 무관하게 전체 VM 기준을 유지한다(꺼진 VM도 할당은 점유 — 기존 의미 보존).
+  const visibleVms = useMemo(
+    () => (inclPoweredOff ? vms : vms.filter((v) => v.powerState !== 'POWERED_OFF')),
+    [vms, inclPoweredOff]
+  );
   const datastores = dsD?.items || [];
   const networks = netD?.items || [];
   const m = site.metrics || {};
@@ -64,9 +71,9 @@ export default function VCenterDetail({ site, onBack }) {
   }, [hosts]);
   const vmsByHost = useMemo(() => {
     const map = new Map();
-    for (const v of vms) { const k = v.host || ''; if (!map.has(k)) map.set(k, []); map.get(k).push(v); }
+    for (const v of visibleVms) { const k = v.host || ''; if (!map.has(k)) map.set(k, []); map.get(k).push(v); }
     return map;
-  }, [vms]);
+  }, [visibleVms]);
   // 호스트별 할당 vCPU·메모리(MB) 합계. CPU 가상화율=할당 vCPU÷물리코어, MEM 가상화율=할당 VM RAM÷물리 RAM.
   // VM은 host=호스트명으로 매핑.
   const vcpuByHost = useMemo(() => {
@@ -90,7 +97,7 @@ export default function VCenterDetail({ site, onBack }) {
   };
 
   // folder path -> vms (vSphere "VMs and Templates")
-  const folderTree = useMemo(() => buildFolderTree(vms), [vms]);
+  const folderTree = useMemo(() => buildFolderTree(visibleVms), [visibleVms]);
 
   // VM 검색(v2.293 확장) — 다단어 OR: 공백으로 나눈 각 토큰이 **하나라도** 포함되면 일치
   // (예: "NTP WA" → 'NTP' 포함 VM + 'WA' 포함 VM 전부). '메모 포함' 체크 시 vm.notes
@@ -105,12 +112,12 @@ export default function VCenterDetail({ site, onBack }) {
   const matches = useMemo(() => {
     if (!tokens.length) return [];
     const out = [];
-    for (const v of vms) {
+    for (const v of visibleVms) {
       const r = entityMatches(v.name, v.notes, tokens, inclNotes);
       if (r.hit) out.push({ v, viaNotes: r.viaNotes, token: r.token });
     }
     return out;
-  }, [vms, tokens, inclNotes]);
+  }, [visibleVms, tokens, inclNotes]);
   // 일치 VM 자원 총합 — vCPU·메모리·디스크(사용=committed / 할당=+uncommitted).
   const matchSum = useMemo(() => sumVmResources(matches.map((m) => m.v)), [matches]);
   // '호스트 및 클러스터' 탭 검색은 호스트 이름도 매칭한다(예: '26' → leshesxpma26). VM만 되던 버그 수정.
@@ -168,6 +175,12 @@ export default function VCenterDetail({ site, onBack }) {
             <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12, flex: 'none', cursor: 'pointer' }}
               title="체크하면 VM 메모(vSphere 노트)에 검색어가 포함된 VM도 함께 찾습니다">
               <input type="checkbox" checked={inclNotes} onChange={(e) => setInclNotes(e.target.checked)} /> 메모 포함
+            </label>
+            {/* Off VM 포함 — 해제하면 트리·검색 결과에서 전원 꺼진(POWERED_OFF) VM 을 숨긴다.
+                가상화율·호스트 VM 수 집계는 할당 기준이라 전원 상태와 무관하게 유지. */}
+            <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12, flex: 'none', cursor: 'pointer' }}
+              title="해제하면 전원이 꺼진(Power Off) VM을 트리·검색 결과에서 숨깁니다">
+              <input type="checkbox" checked={inclPoweredOff} onChange={(e) => setInclPoweredOff(e.target.checked)} /> Off VM 포함
             </label>
             {query && <span className="muted" style={{ fontSize: 12 }}>{view === 'hosts' && hostMatches.length ? `호스트 ${hostMatches.length} · ` : ''}{matches.length} VM 일치{matches.length > SEARCH_CAP ? ` (처음 ${SEARCH_CAP}개 표시)` : ''}</span>}
             {q && <button className="tab" style={{ flex: 'none', padding: '6px 10px' }} onClick={() => setQ('')}>지우기</button>}
@@ -258,7 +271,7 @@ export default function VCenterDetail({ site, onBack }) {
           ); })()}
 
         {view === 'vms' && !query && (
-          <Node label={`📁 ${site.name} / vm`} defaultOpen sub={`${vms.length} VM`}>
+          <Node label={`📁 ${site.name} / vm`} defaultOpen sub={`${visibleVms.length} VM`}>
             <FolderNodes node={folderTree} path="" open={open} toggle={toggle} cloneSet={cloneSet} onSelect={(vm) => setSel({ type: 'vm', item: vm })} />
           </Node>
         )}
