@@ -4,6 +4,8 @@ import { Loading, ErrorBox, StateBadge, UsageCell, EntityDetail, DataTable, Sear
 import EscClose from '../components/EscClose.jsx';
 // 검색 로직(다단어 OR·메모 매칭·자원 합계)은 순수 모듈로 분리 — vitest 단위테스트 대상(v2.293).
 import { parseTokens, entityMatches, notesSnippet, sumVmResources, fmtGb } from './vcdSearch.js';
+// 가상화율(할당 vCPU/RAM ÷ 물리) 집계도 순수 모듈 — 'Off VM 포함' 필터가 그대로 반영된다(v2.334).
+import { allocByHost, virtSum as virtSumOf } from './vcdVirt.js';
 
 const VIEWS = [
   { k: 'hosts', label: '호스트 및 클러스터', icon: '🖥️' },
@@ -49,8 +51,9 @@ export default function VCenterDetail({ site, onBack }) {
 
   const hosts = hostsD?.items || [];
   const vms = vmsD?.items || [];
-  // 표시용 VM 목록 — 'Off VM 포함' 해제 시 POWERED_OFF 를 숨긴다. 가상화율(할당 vCPU/RAM)
-  // 합계는 전원 상태와 무관하게 전체 VM 기준을 유지한다(꺼진 VM도 할당은 점유 — 기존 의미 보존).
+  // 표시용 VM 목록 — 'Off VM 포함' 해제 시 POWERED_OFF 를 숨긴다. 트리·검색뿐 아니라
+  // CPU·MEM 가상화율(할당 vCPU/RAM 합계)도 이 목록을 기준으로 계산한다(v2.334, 사용자 요구 —
+  // '꺼진 VM 제외하고 실제로 켜진 부하만 보는' 용도. 전체 기준으로 보려면 체크박스를 켠다).
   const visibleVms = useMemo(
     () => (inclPoweredOff ? vms : vms.filter((v) => v.powerState !== 'POWERED_OFF')),
     [vms, inclPoweredOff]
@@ -75,26 +78,11 @@ export default function VCenterDetail({ site, onBack }) {
     return map;
   }, [visibleVms]);
   // 호스트별 할당 vCPU·메모리(MB) 합계. CPU 가상화율=할당 vCPU÷물리코어, MEM 가상화율=할당 VM RAM÷물리 RAM.
-  // VM은 host=호스트명으로 매핑.
-  const vcpuByHost = useMemo(() => {
-    const map = new Map();
-    for (const v of vms) { const k = v.host || ''; map.set(k, (map.get(k) || 0) + (Number(v.cpuCount) || 0)); }
-    return map;
-  }, [vms]);
-  const vmemByHost = useMemo(() => {
-    const map = new Map();
-    for (const v of vms) { const k = v.host || ''; map.set(k, (map.get(k) || 0) + (Number(v.memMB) || 0)); }
-    return map;
-  }, [vms]);
+  // VM은 host=호스트명으로 매핑. 합산 대상은 visibleVms — 'Off VM 포함' 해제 시 꺼진 VM 의 할당이
+  // 빠져 가상화율도 함께 내려간다(v2.334). 산술은 vcdVirt.js 순수 함수(vitest 단위테스트 대상).
+  const { vcpu: vcpuByHost, vmem: vmemByHost } = useMemo(() => allocByHost(visibleVms), [visibleVms]);
   // 호스트 묶음(클러스터·DC)의 할당 vCPU·물리 코어 + 할당 메모리·물리 메모리(MB) 합계.
-  const virtSum = (list) => {
-    let alloc = 0, cores = 0, vmc = 0, memAlloc = 0, memPhys = 0;
-    for (const h of list) {
-      alloc += vcpuByHost.get(h.name) || 0; cores += Number(h.cpuCores) || 0; vmc += Number(h.vmCount) || 0;
-      memAlloc += vmemByHost.get(h.name) || 0; memPhys += Number(h.memTotalMB) || 0;
-    }
-    return { alloc, cores, vmc, memAlloc, memPhys };
-  };
+  const virtSum = (list) => virtSumOf(list, vcpuByHost, vmemByHost);
 
   // folder path -> vms (vSphere "VMs and Templates")
   const folderTree = useMemo(() => buildFolderTree(visibleVms), [visibleVms]);
@@ -176,10 +164,11 @@ export default function VCenterDetail({ site, onBack }) {
               title="체크하면 VM 메모(vSphere 노트)에 검색어가 포함된 VM도 함께 찾습니다">
               <input type="checkbox" checked={inclNotes} onChange={(e) => setInclNotes(e.target.checked)} /> 메모 포함
             </label>
-            {/* Off VM 포함 — 해제하면 트리·검색 결과에서 전원 꺼진(POWERED_OFF) VM 을 숨긴다.
-                가상화율·호스트 VM 수 집계는 할당 기준이라 전원 상태와 무관하게 유지. */}
+            {/* Off VM 포함 — 해제하면 트리·검색 결과에서 전원 꺼진(POWERED_OFF) VM 을 숨기고,
+                CPU·MEM 가상화율도 켜진 VM 의 할당만으로 다시 계산한다(v2.334). 호스트 VM 수는
+                서버(vCenter) 집계값이라 전원 상태와 무관하게 전체 기준으로 남는다. */}
             <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12, flex: 'none', cursor: 'pointer' }}
-              title="해제하면 전원이 꺼진(Power Off) VM을 트리·검색 결과에서 숨깁니다">
+              title="해제하면 전원이 꺼진(Power Off) VM을 트리·검색에서 숨기고, CPU·MEM 가상화율도 켜진 VM 기준으로 계산합니다">
               <input type="checkbox" checked={inclPoweredOff} onChange={(e) => setInclPoweredOff(e.target.checked)} /> Off VM 포함
             </label>
             {query && <span className="muted" style={{ fontSize: 12 }}>{view === 'hosts' && hostMatches.length ? `호스트 ${hostMatches.length} · ` : ''}{matches.length} VM 일치{matches.length > SEARCH_CAP ? ` (처음 ${SEARCH_CAP}개 표시)` : ''}</span>}
