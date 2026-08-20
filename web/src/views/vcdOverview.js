@@ -37,14 +37,15 @@ const toGb = (mb) => Math.round((Number(mb) || 0) / 1024);
 /**
  * 평면 행 생성: vCenter 1행 → (클러스터 1행 → 그 클러스터 호스트 n행) 반복.
  * hosts 는 클러스터 안에서 이름순 정렬한다(89 호스트 CSV 를 사람이 읽으려면 순서가 필요).
- * vmCount 는 vCenter 가 보고한 호스트별 VM 수 합계 — 전원 상태와 무관(v2.334 주석과 동일 의미).
+ * vmCountByHost(countByHost 결과)를 주면 VM 수를 그 맵으로 센다 — 'Off VM 포함' 해제 시
+ * 켜진 VM 만 세기 위한 경로(v2.336). 주지 않으면 호스트가 보고한 h.vmCount(전체, 서버 집계).
  */
-export function buildOverviewRows({ site = {}, hosts = [], vms = [], metrics = {} } = {}) {
+export function buildOverviewRows({ site = {}, hosts = [], vms = [], metrics = {}, vmCountByHost = null } = {}) {
   const { vcpu, vmem } = allocByHost(vms);
   const vcName = site.name || site.id || '';
   const rows = [];
 
-  const dc = virtSum(hosts, vcpu, vmem);
+  const dc = virtSum(hosts, vcpu, vmem, vmCountByHost);
   rows.push({
     level: 'vCenter', vcenter: vcName, cluster: '', host: '', state: '',
     hostCount: hosts.length, vmCount: dc.vmc,
@@ -56,7 +57,7 @@ export function buildOverviewRows({ site = {}, hosts = [], vms = [], metrics = {
   });
 
   for (const [cl, chosts] of groupClusters(hosts)) {
-    const cv = virtSum(chosts, vcpu, vmem);
+    const cv = virtSum(chosts, vcpu, vmem, vmCountByHost);
     rows.push({
       level: '클러스터', vcenter: vcName, cluster: cl, host: '', state: '',
       hostCount: chosts.length, vmCount: cv.vmc,
@@ -71,7 +72,7 @@ export function buildOverviewRows({ site = {}, hosts = [], vms = [], metrics = {
       const memAlloc = vmem.get(h.name) || 0;
       rows.push({
         level: '호스트', vcenter: vcName, cluster: cl, host: h.name || '', state: stateKo(h.connectionState),
-        hostCount: 1, vmCount: Number(h.vmCount) || 0,
+        hostCount: 1, vmCount: vmCountByHost ? vmCountByHost.get(h.name) || 0 : Number(h.vmCount) || 0,
         cpuPct: num(h.cpuUsagePct), memPct: num(h.memUsagePct),
         cpuRatio: ratioText(alloc, h.cpuCores), vcpuAlloc: alloc, cpuCores: Number(h.cpuCores) || 0,
         cpuThreads: Number(h.cpuThreads) || 0,

@@ -4,6 +4,7 @@
 // 그대로 들어간다. 'Off VM 포함' 해제 시 가상화율이 트리 배지와 같은 값으로 내려가야 한다.
 import { describe, it, expect } from 'vitest';
 import { buildOverviewRows, overviewCsv, ratioText, groupClusters, stateKo, OVERVIEW_COLUMNS } from './vcdOverview.js';
+import { countByHost } from './vcdVirt.js';
 
 const SITE = { id: 'oc2', name: 'OC2' };
 const METRICS = { cpuUsagePct: 29, memUsagePct: 63 };
@@ -100,7 +101,18 @@ describe('buildOverviewRows — 모든 클러스터·호스트가 한 번에', (
     expect(on.cpuCores).toBe(all.cpuCores);  // 물리 코어(분모) 불변
     expect(on.memAllocGB).toBe(64);
     expect(on.memRatio).toBe('0.5');
-    expect(on.vmCount).toBe(all.vmCount);    // 호스트 보고 VM 수는 전원 무관
+    expect(on.vmCount).toBe(all.vmCount);    // vmCountByHost 미전달 시 호스트 보고값 유지(기존 계약)
+  });
+
+  it('vmCountByHost 전달 시(Off VM 포함 해제) VM 수도 켜진 VM 기준 — 헤더/트리/CSV 공통(v2.336)', () => {
+    const on = onlyOn(VMS);
+    const rows = buildOverviewRows({ site: SITE, hosts: HOSTS, vms: on, metrics: METRICS, vmCountByHost: countByHost(on) });
+    expect(rows[0].vmCount).toBe(3);                                     // vCenter 행: 켜진 VM 3(호스트 보고 176 아님)
+    expect(rows.find((r) => r.level === '클러스터' && r.cluster === 'HQ-Admin').vmCount).toBe(2);
+    expect(rows.find((r) => r.host === 'esx01').vmCount).toBe(1);        // 켜진 1대(꺼진 1대 제외, 보고값 76 아님)
+    expect(rows.find((r) => r.host === 'esx99').vmCount).toBe(1);
+    // CSV 에도 같은 값이 나간다(표 = CSV 동일 행).
+    expect(overviewCsv(rows).split('\r\n')[1]).toContain(',3,');
   });
 
   it('빈 입력에도 vCenter 행 1개는 유지(크래시 없음)', () => {

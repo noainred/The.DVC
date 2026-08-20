@@ -5,7 +5,7 @@ import EscClose from '../components/EscClose.jsx';
 // 검색 로직(다단어 OR·메모 매칭·자원 합계)은 순수 모듈로 분리 — vitest 단위테스트 대상(v2.293).
 import { parseTokens, entityMatches, notesSnippet, sumVmResources, fmtGb } from './vcdSearch.js';
 // 가상화율(할당 vCPU/RAM ÷ 물리) 집계도 순수 모듈 — 'Off VM 포함' 필터가 그대로 반영된다(v2.334).
-import { allocByHost, virtSum as virtSumOf } from './vcdVirt.js';
+import { allocByHost, countByHost, virtSum as virtSumOf } from './vcdVirt.js';
 // '전체 현황' 평면 표/CSV — 트리를 펼치지 않고 모든 클러스터·호스트를 한 번에(v2.335).
 import { buildOverviewRows, overviewCsv, OVERVIEW_COLUMNS } from './vcdOverview.js';
 
@@ -84,16 +84,24 @@ export default function VCenterDetail({ site, onBack }) {
   // VM은 host=호스트명으로 매핑. 합산 대상은 visibleVms — 'Off VM 포함' 해제 시 꺼진 VM 의 할당이
   // 빠져 가상화율도 함께 내려간다(v2.334). 산술은 vcdVirt.js 순수 함수(vitest 단위테스트 대상).
   const { vcpu: vcpuByHost, vmem: vmemByHost } = useMemo(() => allocByHost(visibleVms), [visibleVms]);
+  // VM 수 집계(v2.336): 'Off VM 포함' 해제 시 켜진 VM 만 센다(헤더·트리·현황 표·CSV 공통).
+  // 체크 시(null)는 호스트가 보고한 vmCount(서버 집계)를 쓴다 — /vms 응답 상한(limit)과 무관하게
+  // 전체 수가 정확한 소스이기 때문. 해제 시엔 클라이언트가 받은 목록으로 셀 수밖에 없다.
+  const vmCountByHost = useMemo(
+    () => (inclPoweredOff ? null : countByHost(visibleVms)),
+    [inclPoweredOff, visibleVms]
+  );
+  const hostVmCount = (h) => (vmCountByHost ? vmCountByHost.get(h.name) || 0 : h.vmCount);
   // 호스트 묶음(클러스터·DC)의 할당 vCPU·물리 코어 + 할당 메모리·물리 메모리(MB) 합계.
-  const virtSum = (list) => virtSumOf(list, vcpuByHost, vmemByHost);
+  const virtSum = (list) => virtSumOf(list, vcpuByHost, vmemByHost, vmCountByHost);
   // '전체 현황' 행 — 표를 열었을 때만 만든다(수천 VM × 20초 폴링에서 불필요한 재계산 방지).
   // CSV 는 클릭 시 같은 함수로 다시 만들어, 표를 열지 않아도 전체 행을 받을 수 있게 한다.
   const overviewRows = useMemo(
-    () => (overview ? buildOverviewRows({ site, hosts, vms: visibleVms, metrics: m }) : []),
-    [overview, site, hosts, visibleVms, m]
+    () => (overview ? buildOverviewRows({ site, hosts, vms: visibleVms, metrics: m, vmCountByHost }) : []),
+    [overview, site, hosts, visibleVms, m, vmCountByHost]
   );
   const exportOverviewCsv = () => {
-    const rows = overview ? overviewRows : buildOverviewRows({ site, hosts, vms: visibleVms, metrics: m });
+    const rows = overview ? overviewRows : buildOverviewRows({ site, hosts, vms: visibleVms, metrics: m, vmCountByHost });
     // BOM 을 붙여야 Excel 이 UTF-8 한글을 깨지 않는다(다른 CSV export 와 동일 관례).
     const blob = new Blob(['﻿' + overviewCsv(rows)], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
@@ -157,7 +165,12 @@ export default function VCenterDetail({ site, onBack }) {
         </div>
         <div className="flex gap" style={{ fontSize: 12, alignItems: 'center' }}>
           <span className="muted">호스트 <b style={{ color: 'var(--text)' }}>{m.hosts ?? hosts.length}</b></span>
-          <span className="muted">VM <b style={{ color: 'var(--text)' }}>{m.vms ?? vms.length}</b></span>
+          {/* VM 수(v2.336): 'Off VM 포함' 해제 시 켜진 VM 만 센다. 체크 시엔 서버 집계(m.vms)가
+              정확한 소스(응답 상한 무관). CPU/메모리 %는 호스트 실사용률이라 전원 필터와 무관. */}
+          <span className="muted" title={inclPoweredOff ? 'VM 전체(꺼진 VM 포함)' : '켜진(Power On) VM 만 — Off VM 포함 해제 상태'}>
+            VM <b style={{ color: 'var(--text)' }}>{inclPoweredOff ? (m.vms ?? vms.length) : visibleVms.length}</b>
+            {!inclPoweredOff && <span style={{ color: 'var(--green)', fontSize: 11 }}> On</span>}
+          </span>
           <span className="muted">CPU <b style={{ color: 'var(--text)' }}>{m.cpuUsagePct ?? 0}%</b></span>
           <span className="muted">메모리 <b style={{ color: 'var(--text)' }}>{m.memUsagePct ?? 0}%</b></span>
           <button className="login-btn" style={{ flex: 'none', padding: '6px 14px', marginLeft: 6 }} onClick={() => setComparing(true)}>⇄ 비교하기</button>
@@ -185,11 +198,11 @@ export default function VCenterDetail({ site, onBack }) {
               title="체크하면 VM 메모(vSphere 노트)에 검색어가 포함된 VM도 함께 찾습니다">
               <input type="checkbox" checked={inclNotes} onChange={(e) => setInclNotes(e.target.checked)} /> 메모 포함
             </label>
-            {/* Off VM 포함 — 해제하면 트리·검색 결과에서 전원 꺼진(POWERED_OFF) VM 을 숨기고,
-                CPU·MEM 가상화율도 켜진 VM 의 할당만으로 다시 계산한다(v2.334). 호스트 VM 수는
-                서버(vCenter) 집계값이라 전원 상태와 무관하게 전체 기준으로 남는다. */}
+            {/* Off VM 포함 — 해제하면 트리·검색에서 POWERED_OFF VM 을 숨기고, CPU·MEM 가상화율(v2.334)과
+                헤더·트리·전체 현황·CSV 의 VM 수(v2.336)도 켜진 VM 기준으로 다시 계산한다.
+                CPU/MEM 사용률(%)은 호스트 실사용률(꺼진 VM 기여 0)이라 필터와 무관하게 그대로다. */}
             <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12, flex: 'none', cursor: 'pointer' }}
-              title="해제하면 전원이 꺼진(Power Off) VM을 트리·검색에서 숨기고, CPU·MEM 가상화율도 켜진 VM 기준으로 계산합니다">
+              title="해제하면 전원이 꺼진(Power Off) VM을 트리·검색에서 숨기고, VM 수와 CPU·MEM 가상화율을 켜진 VM 기준으로 계산합니다">
               <input type="checkbox" checked={inclPoweredOff} onChange={(e) => setInclPoweredOff(e.target.checked)} /> Off VM 포함
             </label>
             {query && <span className="muted" style={{ fontSize: 12 }}>{view === 'hosts' && hostMatches.length ? `호스트 ${hostMatches.length} · ` : ''}{matches.length} VM 일치{matches.length > SEARCH_CAP ? ` (처음 ${SEARCH_CAP}개 표시)` : ''}</span>}
@@ -214,7 +227,7 @@ export default function VCenterDetail({ site, onBack }) {
             <>
               <div className="muted" style={{ fontSize: 12, margin: '0 0 8px' }}>
                 모든 클러스터·호스트 <b style={{ color: 'var(--text)' }}>{overviewRows.length.toLocaleString()}</b>행
-                {' · '}가상화율 기준: <b style={{ color: 'var(--text)' }}>{inclPoweredOff ? '전체 VM(꺼진 VM 포함)' : '켜진 VM 만'}</b>
+                {' · '}VM 수·가상화율 기준: <b style={{ color: 'var(--text)' }}>{inclPoweredOff ? '전체 VM(꺼진 VM 포함)' : '켜진 VM 만'}</b>
               </div>
               <OverviewTable rows={overviewRows} />
             </>
@@ -258,7 +271,7 @@ export default function VCenterDetail({ site, onBack }) {
               {hm.slice(0, SEARCH_CAP).map((h) => (
                 <Leaf key={`h:${h.id}`} icon="🖥️" onClick={() => setSel({ type: 'host', item: h })}
                   label={<Highlight text={h.name} tokens={tokens} />} badge={<StateBadge state={h.connectionState} />}
-                  sub={`🧩 ${h.cluster || 'standalone'} · CPU ${h.cpuUsagePct ?? '-'}% · MEM ${h.memUsagePct ?? '-'}% · VM ${h.vmCount ?? '-'}`} />
+                  sub={`🧩 ${h.cluster || 'standalone'} · CPU ${h.cpuUsagePct ?? '-'}% · MEM ${h.memUsagePct ?? '-'}% · VM ${hostVmCount(h) ?? '-'}`} />
               ))}
               {matches.slice(0, SEARCH_CAP).map(({ v: vm, viaNotes, token }) => (
                 <Leaf key={vm.id} icon="🧊" onClick={() => setSel({ type: 'vm', item: vm })}
@@ -290,7 +303,7 @@ export default function VCenterDetail({ site, onBack }) {
                 {chosts.map((h) => (
                   <Tree key={h.id} k={`h:${h.id}`} open={open} toggle={toggle} icon="🖥️"
                     label={<span className="vcd-link" onClick={(e) => { e.stopPropagation(); setSel({ type: 'host', item: h }); }}>{h.name}</span>}
-                    sub={<UsageBars lead={<StateBadge state={h.connectionState} />} cpu={h.cpuUsagePct} mem={h.memUsagePct} tail={<span className="muted" style={{ fontSize: 12, display: 'inline-flex', gap: 10, alignItems: 'center' }}><span>VM {h.vmCount}</span><VirtBadge alloc={vcpuByHost.get(h.name) || 0} base={h.cpuCores} kind="cpu" /><VirtBadge alloc={vmemByHost.get(h.name) || 0} base={h.memTotalMB} kind="mem" /></span>} />}>
+                    sub={<UsageBars lead={<StateBadge state={h.connectionState} />} cpu={h.cpuUsagePct} mem={h.memUsagePct} tail={<span className="muted" style={{ fontSize: 12, display: 'inline-flex', gap: 10, alignItems: 'center' }}><span>VM {hostVmCount(h)}</span><VirtBadge alloc={vcpuByHost.get(h.name) || 0} base={h.cpuCores} kind="cpu" /><VirtBadge alloc={vmemByHost.get(h.name) || 0} base={h.memTotalMB} kind="mem" /></span>} />}>
                     {(vmsByHost.get(h.name) || []).map((vm) => (
                       <Leaf key={vm.id} icon="🧊" onClick={() => setSel({ type: 'vm', item: vm })}
                         label={vm.name} badge={<StateBadge state={vm.powerState} />}
