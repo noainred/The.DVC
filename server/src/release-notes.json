@@ -1,6 +1,17 @@
 {
   "notes": [
     {
+      "version": "2.337.0",
+      "date": "2026-08-21",
+      "title": "문서 — 전체 소스 대조 갱신 (README·CLAUDE·RELEASES, v2.258 이후 기능 반영)",
+      "notes": [
+        "README.md 를 실제 소스와 대조해 v2.258 이후 미반영 기능을 문서화했습니다: 스토리지 어레이 모니터링(수집기 8종·용량 시계열·CSV·수집 작업 로그), VM 복제(백업식 스케줄), VM 전체 정보 CSV(85+ 컬럼), 데이터스토어 브라우즈, 파트 인벤토리, 상단 메뉴 개편(v2.271·2.274 — Monitoring/IP관리 승격·NSX/탐색 이동), Platform 트리 CPU/MEM 가상화율·'Off VM 포함'·'전체 현황' CSV(v2.333~2.336), 로그인 방식 선택·단일 세션 강제·자격증명 암호화 저장·평문 자격증명 점검, 보안 감사 이력(~7차원 전수 감사 v2.322).",
+        "특수 기능 표에 신규 도구 8종(storage-mon·vm-clone·vm-export·secret-scan·codex-check·explore·capacity-advisor·svcmon-config)을 추가하고 도구 수(64종)·API 경로(/tools/storage·/tools/vm-clone)·서버 모듈 목록(storage/·vmclone/·svcmon/ 등)·UAG 모니터(uagmon/) 소개를 갱신했습니다.",
+        "CLAUDE.md 의 '미해결 후속' 2건이 이미 해결된 상태임을 반영했습니다(전력 시간당 롤업 power_hourly · 위임 잡 claim→ack v2.290) — 새 위임 잡 큐는 같은 패턴을 따르라는 지침으로 대체. docs/RELEASES.md 의 낡은 버전 예시(v2.246 '현재 최신')를 중립 표기로 수정.",
+        "특수 기능 '스토리지 모니터링' 카드 설명이 '확장 예정'으로 남아 있던 것을 실제 구현 상태(8종 완성, v2.311)로 정정했습니다(코드 문자열 1건 — 기능 변화 없음)."
+      ]
+    },
+    {
       "version": "2.336.0",
       "date": "2026-08-21",
       "title": "vCenter 상세 — 'Off VM 포함' 해제 시 VM 수도 켜진 VM 기준 (헤더·트리·전체 현황·CSV)",

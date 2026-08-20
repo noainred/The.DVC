@@ -4,8 +4,10 @@
 통합 모니터링·운영하는 대시보드입니다. VM · ESXi 호스트 · 스토리지 · 네트워크 · 알람뿐 아니라
 **전력(iDRAC/OME) · 온도 · GPU · IP 관리대장 · 용량 예측 · 원격접속 · VM 생성**, 그리고
 **인사이트(FinOps·AI 이상탐지·보안·토폴로지) · 운영 리포트 10종(일일 헬스체크·스냅샷 나이·좀비
-리소스·인증서 만료·라이트사이징 등, v2.217) · 포탈/구성 백업 · vCenter 로그 장기보관 ·
-네트워크 트래픽 분석(tcpdump) · 게스트 계정 관리 · 심층 검색**까지 한 화면에서 다룹니다.
+리소스·인증서 만료·라이트사이징 등, v2.217) · 스토리지 어레이 모니터링(PowerScale·PowerStore·
+Unity·XtremIO·VMAX/PowerMax·VPLEX/Metro Node, v2.302+) · VM 복제(백업식 스케줄, v2.299) ·
+포탈/구성 백업 · vCenter 로그 장기보관 · 네트워크 트래픽 분석(tcpdump) · 게스트 계정 관리 ·
+심층 검색**까지 한 화면에서 다룹니다.
 
 > 실제 vCenter 자격증명이 없어도 **현실적인 목(mock) 데이터로 즉시 실행**됩니다.
 > 실 환경에서는 포탈 UI(또는 `server/config/vcenters.json`)에 vCenter만 등록하면 됩니다.
@@ -46,7 +48,8 @@
 ### 모니터링 / 대시보드
 - **글로벌 개요** — 전세계 KPI(vCenter/호스트/VM/CPU/메모리/스토리지/알람), 세계지도 위 사이트 마커(정상/경고/위험), 리전(Americas/EMEA/APAC) 롤업, 차트.
 - **통합 서머리** — 모든 vCenter 자원을 SUM(개수·물리용량·할당·오버커밋·전력·Guest OS 분포·vCenter별 기여도). 리전/vCenter 스코프.
-- **vCenter 카드 & 드릴다운** — 등록된 vCenter를 카드로 표시, 클릭 시 호스트·클러스터/VM·폴더/데이터스토어/네트워크 트리. **VM 이름 검색**(부분일치).
+- **vCenter 카드 & 드릴다운(Platform 탭)** — 등록된 vCenter를 카드로 표시, 클릭 시 호스트·클러스터/VM·폴더/데이터스토어/네트워크 트리. **VM 검색**(다단어 OR·메모 포함, v2.293) + 일치 VM 자원 합계. 트리의 vCenter·클러스터·호스트 행에 **CPU/MEM 가상화율**(할당÷물리, v2.270) 표시, **'Off VM 포함' 체크박스**(v2.333~2.336)로 꺼진 VM 을 트리·검색·VM 수·가상화율에서 제외 가능. **'전체 현황' 평면 표 + CSV**(v2.335) — 트리를 펼치지 않고 모든 클러스터·호스트의 상태·VM수·사용률·가상화율·할당/물리 자원·ESXi 버전·모델·전력·온도를 한 표로 보고 그대로 내려받음. 전체 VM/호스트의 **다빈치/IRS 분류** 표시(v2.323~2.324).
+- **상단 메뉴(v2.271·2.274 개편)** — `Overview · Summary · Platform · Monitoring(성능점검) · VM호스트 · 가상머신 · 스토리지 · 네트워크 · IP관리 · 알람 · 특수 기능 · 인사이트 · 설정`. 탐색·랭킹과 NSX 는 특수 기능 하위 카드로 이동, IP 관리대장은 상단 탭으로 승격.
 - **리소스 탐색 & 랭킹** — 호스트/VM/스토리지/네트워크/알람 정렬·검색·필터, Top N 랭킹, VM 사양·사용률 검색.
 - **호스트/VM 성능** — CPU/메모리/디스크/네트워크 **실시간 + 일·주·월·년 + 날짜 기간** 시계열(vim25 PerformanceManager).
 - **알람 + 음소거** — vCenter 알람 집계, 음소거 규칙.
@@ -60,6 +63,11 @@
 
 ### 인프라 운영
 - **NSX** — NSX-T/4.x 매니저별 게이트웨이(T0/T1)·세그먼트(Overlay/VLAN, 연결 VM 포트 수)·분산방화벽(DFW, 허용/차단·로깅)·보안그룹(**라이브 멤버 조회**).
+- **스토리지 어레이 모니터링 (v2.302~2.326)** — 글로벌 법인의 물리 스토리지를 **엣지 현지 수집 → 중앙 집계**로 통합 조회. 수집기 카탈로그 8종 전체 구현: **PowerScale/Isilon**(SSH `isi status` 파싱이 기본 + OneFS API 39개 영역 선택) · **PowerStore · Unity · XtremIO · VMAX/PowerMax · VPLEX/Metro Node**(REST). 용량(HDD/SSD 풀 분리)·노드별 상세(IP·상태·처리량)·Critical Events·버전을 수집해 SQLite 시계열로 저장, 장비 상세에 **용량 추이 그래프**(v2.318). 장비 CSV 가져오기/내보내기(비밀번호 포함 내보내기 선택 + 가져오기 드라이런 검증, v2.317), 수집 방식(SSH/API) 표시, 전체 새로고침 + **수집 작업 로그 패널**(진행중/완료, v2.315), 실패 사유 표시.
+- **VM 복제(백업식) (v2.299)** — vCenter별 VM 지정 → 스냅샷 시점 무중단 클론. **스케줄 정기 복제**·대상 데이터스토어/NFS 선택·**최근 N개 보존**(오래된 사본 자동 정리)·Platform 트리에 Clone/veeamed 배지.
+- **VM 전체 정보 CSV (v2.275·2.278)** — 선택 vCenter 모든 VM 을 **85+ 컬럼**(호스트·클러스터/CPU·코어/메모리/NIC·MAC·IP/디스크 1~7 슬롯별 용량·타입·데이터스토어·파일/게스트 파티션/스냅샷/Tools/UUID 등)으로 내보내기.
+- **데이터스토어 브라우즈 (v2.276)** — 데이터스토어 클릭 시 할당된 VM 과 실제 파일 목록(크기·유형·수정시각).
+- **파트 인벤토리 (v2.328~2.330, 서버 분석 내)** — iDRAC Redfish 로 물리 서버의 전체 하드웨어 파트(CPU·DIMM·디스크·NIC·PSU 등)를 수집·필터·드릴다운. 장착 서버 목록에 호스트 IP·호스트네임 병기.
 - **전력(iDRAC/OME)** — Dell Redfish/OpenManage로 호스트 전력(W) 수집·시계열, ESXi 전력은 vim25에서도 수집. IP 대역 스캔으로 iDRAC 대량 등록.
 - **온도 / GPU / 용량** — ESXi 온도(현재/5분평균/최대 + 5년 추이, 분/시간/일 단위), GPU 인벤토리(**vGPU/패스쓰루 구분**, 사용률 5년 추이, 게스트 OS 수집), 데이터스토어 용량 추세·포화 예측.
 - **NIC 분석 (v2.179+)** — iDRAC Redfish 인벤토리로 서버 물리 NIC의 **속도별 분류**(10G/25G/100G — 미링크 포트도 카드 정격으로 판별)와 **모델별 분류**(Intel·Broadcom·Mellanox…). DataCenter·가상화(ESXi)/베어메탈 필터, vCenter 수집(pnic+PCI) 결과를 **별도 컬럼**으로 교차 확인, CSV.
@@ -97,8 +105,11 @@
 
 ### 관리 / 운영 편의
 - **인증/RBAC** — scrypt 해시 + HS256 JWT, 역할(admin/operator/viewer), **TOTP 2FA**, **Active Directory(LDAP)** 연동. **admin·operator는 OTP 전용 로그인**(v2.204+, 아래 참조).
+- **로그인 방식 선택 (v2.272~2.273)** — 설정 › 세션 보안에서 전역 정책을 **OTP 전용 / OTP+비밀번호(혼용) / 비밀번호 전용** 중 선택. 서버 구성 파일로 **특정 사용자만** 다른 방식을 지정하는 사용자별 재정의도 지원(UI 미노출).
+- **단일 세션 강제 (v2.280)** — 설정 › 세션 보안에서 켜면 계정당 동시 1세션(ID 공유 방지 — 새 로그인 시 기존 세션 종료).
+- **자격증명 저장 방식 선택 (v2.296~2.297)** — vCenter 등 저장 자격증명을 **평문/암호화**(보안 레벨 1·2·3 또는 알고리즘 선택)로 저장, 양방향 일괄 전환. 특수 기능 **'평문 자격증명 점검'** 이 설정 파일·portal.env·로그·소스에 남은 평문 계정정보/토큰을 탐지(값은 마스킹)해 전환을 안내.
 - **기능별 권한 매트릭스 (v2.196+)** — 역할은 3개로 두되 **기능 단위 권한 키 17종**(대시보드·인벤토리 6종·특수기능·인사이트·원격접속·원격콘솔·VM 사양변경/프로비저닝·게스트계정 배포·설정·업그레이드·사용자관리)을 **설정 › 사용자 관리에서 체크박스로 켜고 끕니다**. 서버(`requirePerm`)와 WS SSH/RDP 게이트웨이가 실제로 강제하므로 메뉴를 숨겨도 API 직접 호출은 차단됩니다. admin은 항상 전체(잠김 방지). 기본값은 기존 role 동작과 동일해 도입만으로 권한이 바뀌지 않습니다.
-- **특수 기능 도구별 접근 (v2.197+, 표시 v2.209.0)** — 56개 특수기능 도구를 역할별로 **개별 차단**(deny-list). '전체허용/전체차단' 일괄 설정 지원. 상단 '특수 기능' 탭은 항상 노출되고, 권한 없는 도구는 숨기지 않고 **회색·클릭 불가(🔒 권한 없음)** 로 표시해 어떤 기능이 있는지 확인하고 관리자에게 요청할 수 있습니다(딥링크로도 열리지 않으며 서버 API 도 별도 강제).
+- **특수 기능 도구별 접근 (v2.197+, 표시 v2.209.0)** — 특수기능 도구(현재 64종, `web/src/views/specialToolsList.js` 단일 소스)를 역할별로 **개별 차단**(deny-list). '전체허용/전체차단' 일괄 설정 지원. 상단 '특수 기능' 탭은 항상 노출되고, 권한 없는 도구는 숨기지 않고 **회색·클릭 불가(🔒 권한 없음)** 로 표시해 어떤 기능이 있는지 확인하고 관리자에게 요청할 수 있습니다(딥링크로도 열리지 않으며 서버 API 도 별도 강제).
 - **사용자별 데이터 범위(scope) (v2.196+, v2.255~2.257 전면 강제)** — 계정마다 **볼 수 있는 vCenter/리전**을 지정(예: 폴란드 법인 계정은 유럽 리전만). 호스트·VM·스토리지·네트워크·알람 목록과 vCenter 필터가 서버에서 제한됩니다(미지정 시 전체). v2.255~2.257 에서 범위 강제를 **자연어/심층/VM 정밀 검색·운영 리포트·특수기능 집계(GPU·위협·용량·낭비·GuestOS·하드웨어·라이선스 등)·IPAM 조회 및 쓰기(override·정책)** 전반으로 확대했고, `/summary`·`/overview` 의 캐시 교차 노출도 캐시 키에 범위 서명을 넣어 차단했습니다. 외부 프로그램이 공유하는 `ipam.db` 원장 자체는 범위를 적용하지 않습니다(전체 유지).
 - **특수 계정 (v2.202~2.204)** — **`noainred` 수퍼관리자**(항상 admin 보장·강등/삭제/로그인차단 불가·설정 소유자 자동 포함), **`thedvcdemp` 데모 계정**(viewer 고정·삭제 불가, **비밀번호가 설정된 동안만 로그인** — 설정 › 사용자 관리에서 [비번 설정]/[로그인 차단]으로 열고 잠금).
 - **감사 로그 / 진단·로그** — 쓰기 작업 감사(JSONL), 연결 실패 원인(한국어 힌트) + 실시간 서버 로그 뷰어.
@@ -108,7 +119,10 @@
 - **중앙 → 엣지 배포 (v2.170+)** — 중앙 UI에서 원격 엣지의 **GPU 게스트 수집 설정**과 **접속 사용자 계정**을 만들어 내려보낸다(엣지가 주기적으로 pull — NAT/폐쇄망 안전). 복수 엣지·전체 엣지 동시 배포, 배포된 계정 수정/제거, 중앙 배포 admin은 엣지 설정 메뉴 자동 허용.
 - **엣지 운영 도구** — 수집 서버 **토큰 강제 동기화**(403 토큰 불일치를 SSH로 즉시 교정 — 리슨 포트로 실제 인스턴스 역추적), Edge 노드 SSH 배포·상태 확인, 엣지 인증 거부 카운터 표시.
 - **보안** — scrypt+HS256 JWT·TOTP(1회용)·AD 외에, **고권한 OTP 전용 로그인 + 강제 등록**(admin·operator는 등록 후 비밀번호 삭제, v2.206.0)·기능 권한 매트릭스 서버측 강제(WS SSH/RDP 포함)·**사용자별 데이터 범위**(단건 라우트 포함, v2.207.0)·**백업 인출을 설정 소유자로 제한 + 감사 로그**(v2.210.0)·**서버측 토큰 폐기**(비번/역할 변경 시 즉시 무효)·보안 응답 헤더·CORS 기본 차단·임의 초기 관리자 비번·SSRF/명령주입 방어·번들 sha256 필수·**엣지별 개별 central 토큰**(공유 토큰 스코프 축소, v2.191.0)·**자격증명 파일 손상 보존**(로드 실패 시 `.corrupt` 백업 — 전량 유실 방지)·**RDP 자격증명 1회용 티켓**(URL 미노출)·**설정 소유자 서버측 강제**(v2.195.0). 별도 페이지 서비스 허브는 **6차 감사(v2.214.0)** 로
-CSRF·SSRF 스캐너·정보노출·잠금 DoS 를 차단했습니다. 상세 [설치 가이드 §7](docs/INSTALL.md)·[감사 이력](SECURITY-AUDIT.md).
+CSRF·SSRF 스캐너·정보노출·잠금 DoS 를 차단했습니다. 이후에도 전수 보안 감사를 반복해 조치를 누적하고
+있습니다 — v2.258~2.261(전 소스 재점검 + 3D 토폴로지 XSS·RDP 티켓·SSRF 재검증 등 21건),
+v2.288~2.290(인사이트 scope 누수·위임 잡 소유권), v2.314·2.321~2.322(**7차원 전수 감사** 확정 11건 +
+NSX/원격접속 scope 갭). 상세 [설치 가이드 §7](docs/INSTALL.md)·[감사 이력](SECURITY-AUDIT.md).
 - **로그인 화면 20종 랜덤 (v2.199~2.201)** — 접속할 때마다 20가지 디자인(Davinci Map·Aurora Glass·Retro Terminal·Blueprint·Minimal Light·Neon City·Orbital·Matrix Rain·Sunset·Brutalist·Terminal Boot·Split Panel·Radar Ops·Light Console·Region Tiles·Ultra Minimal·NOC Preview·Left Rail·Amber Watch·Data Wall) 중 하나가 자동 표시됩니다. 우하단 🎲 버튼으로 즉시 교체 가능. 인증 로직(OTP·세션유지·3회 실패 경고)은 전 테마 공통.
 - **데모(mock) 모드** — vCenter 없이 `DATA_SOURCE=mock`으로 전세계 11개 가상 vCenter + iDRAC 전력·핑/네트워크·지표·온도·GPU 게스트·로그까지 채워진 화면을 즉시 시연(v2.154.0 목업 완비).
 - **장애 내성 & 성능** — 한 vCenter/매니저가 죽어도 포탈은 정상(해당만 `unreachable`). 고RTT·다수 vCenter(현재 28, 향후 30+) 대비 **동시 수집 개수 제한(`COLLECT_CONCURRENCY`, 기본 8) + per-vCenter 타임아웃 + 폴러 재진입 가드(주기 초과 시 중첩 실행 방지) + O(N) 롤업 집계 + 논블로킹 DB write(트랜잭션·prune 스로틀)**로 매 주기 CPU 스파이크를 평탄화.
@@ -132,7 +146,7 @@ CSRF·SSRF 스캐너·정보노출·잠금 DoS 를 차단했습니다. 상세 [�
 - **server/** — `store.js`가 `POLL_INTERVAL_MS`마다 전 vCenter를 **동시성 제한(`COLLECT_CONCURRENCY`) 병렬** 폴링해 정규화 스냅샷 유지. 느린/장애 vCenter가 전체를 막지 않음. 이전 주기가 아직 진행 중이면 이번 틱은 건너뛰어(재진입 가드) 수집이 겹치지 않음. 롤업은 vCenter별 1회 그룹핑(O(N)).
   - `vcenter/soapClient.js` — vim25 SOAP(PropertyCollector/PerformanceManager): 호스트/VM 실측 메트릭, 온도/GPU/HBA, VM GPU 할당(vGPU/패스쓰루), 성능 시계열, VM 클론.
   - `vcenter/restClient.js` — vSphere Automation REST(7.0/8.0) 폴백(핵심 목록 실패는 vCenter 수집 실패로 처리해 빈 스냅샷 유통을 막음).
-  - `nsx/`, `idrac/`, `ipam/`, `gpu/`, `metrics/`, `provision/`, `proxy/`, `llm/`, `collector/`, `central/`, `agent/`, `upgrade/`, `auth/` — 각 하위 시스템.
+  - `nsx/`, `idrac/`, `ipam/`, `gpu/`, `metrics/`, `provision/`, `proxy/`, `llm/`, `collector/`, `central/`, `agent/`, `upgrade/`, `auth/`, `storage/`(스토리지 어레이 수집기 8종), `vmclone/`(백업식 복제), `svcmon/`(성능점검), `capacity/`(Capacity Advisor), `reports/`(운영 리포트), `horizon/` — 각 하위 시스템.
 - **web/** — React + Vite. 해시 라우팅 `#/<탭>`, 특수기능 딥링크 `#/tools/<기능>`. 전 뷰 lazy 청크 분할, 3D 토폴로지(1.3MB)는 클릭 시 동적 로드.
 
 ### 성능 설계 (28 vCenter · 고RTT 최적화, v2.106+)
@@ -144,7 +158,7 @@ CSRF·SSRF 스캐너·정보노출·잠금 DoS 를 차단했습니다. 상세 [�
 | SQLite | 전 시계열 DB **WAL + synchronous=NORMAL + busy_timeout**(커밋 fsync 대폭 절감 — 단건 insert 5ms→0.01ms 실측). 외부 프로그램이 읽는 `ipam.db`만 기본 저널 + busy_timeout 유지 |
 | 전력 시계열 | 서버별 최신값 **인메모리 캐시**(기동 시 1회 시드, 쓰기 시 O(1) 갱신) — 매 30초 GROUP BY 풀스캔 제거. 24h 집계는 **시간당 롤업 테이블**(`power_hourly`, 적재 트랜잭션 내 증분 upsert)로 수억 행 대신 ~24행 스캔 + 60초 캐시. 적재는 단일 트랜잭션 배치(insertMany), prune은 10틱 스로틀 + `ts` 인덱스 |
 | 대량 export | GPU 시계열 등은 5만 행 청크 + `setImmediate` 양보로 조회(이벤트 루프 10초 정지 방지), 기본 상한 30만 행(`GPU_EXPORT_MAX_ROWS`) |
-| 수집 | vCenter 병렬+동시성 제한, 모든 폴러 재진입 가드, 수집서버 풀러 배치 적재, 위임 잡 활동 기준 GC |
+| 수집 | vCenter 병렬+동시성 제한, 모든 폴러 재진입 가드, 수집서버 풀러 배치 적재, 위임 잡 활동 기준 GC. 위임 잡(iDRAC 스캔·캡처·Ping)은 **2단계 확인응답(claim→ack)** — 엣지 재시작으로 인출된 잡이 유실되면 기한 후 자동 재수확(v2.290) |
 
 ---
 
@@ -296,7 +310,7 @@ git 소스로 실행하면 `CONFIG_DIR` 기본값이 `server/config` 라 이 파
 | `GET/POST/DELETE /alarm-mutes` `GET/PUT /ui-settings` `POST /search/nl` | 음소거 · UI설정 · 자연어검색 |
 
 ### 특수기능 `/api/tools/*`
-`gpu`(+`/history`,`/vms`), `esxi-temp`(+`/history`), `capacity`, `capacity-forecast`, `waste`, `thin-vms`, `guest-os`, `hba`, `licenses`, **`license-expiry`**(vCenter+NSX+Horizon 만료일), `esxi`, `solutions`, `hardware`, `vmtools`, `snapshots`, `duplicate-ips`, `vm-finder`(POST), `ipam`(+`/subnets`,`/sheet`,`/annotation`,`.xlsx`,`.csv`), `deep-search`(POST), `ip-ping`, `service-check`, `network-check`, `vmware-config`, `vclogs`(+`/export.csv`,`/federate`,`/sources`)
+`gpu`(+`/history`,`/vms`), `esxi-temp`(+`/history`), `capacity`, `capacity-forecast`, `waste`, `thin-vms`, `guest-os`, `hba`, `licenses`, **`license-expiry`**(vCenter+NSX+Horizon 만료일), `esxi`, `solutions`, `hardware`, `vmtools`, `snapshots`, `duplicate-ips`, `vm-finder`(POST), `ipam`(+`/subnets`,`/sheet`,`/annotation`,`.xlsx`,`.csv`), `deep-search`(POST), `ip-ping`, `service-check`, `network-check`, `vmware-config`, `vclogs`(+`/export.csv`,`/federate`,`/sources`), **`storage`**(+`/devices`,`/devices/import`,`/collect-all`,`/activity` — 스토리지 어레이 모니터링), **`vm-clone`**(+`/jobs`,`/jobs/:id/run`,`/badges` — 백업식 복제)
 
 > 상태변경(POST/PUT/DELETE) 라우트는 **기능 권한(`requirePerm`)** 으로 보호됩니다(v2.196+) — IPAM 편집·ip-ping·Tools 업그레이드는 `tools`, 알람 음소거는 `inv.alarms`, VM 사양변경은 `vm.reconfig`, 원격 콘솔은 `vm.console`, SSH/RDP 터널·probe·rdp-ticket은 `remote.access`. 기본 매트릭스는 기존 `requireRole('admin','operator')` 동작과 동일(viewer는 조회 전용)이며, 설정 › 사용자 관리에서 역할별로 조정할 수 있습니다.
 
@@ -327,7 +341,7 @@ git 소스로 실행하면 `CONFIG_DIR` 기본값이 `server/config` 라 이 파
 
 | 키 | 기능 | 키 | 기능 |
 |---|---|---|---|
-| `aisearch` | AI 자연어 검색 | `ipam` | 센터별 IP 관리대장(+IP 능동 스캔) |
+| `aisearch` | AI 자연어 검색 | `ipam` | IP 관리대장(+IP 능동 스캔) — **상단 'IP관리' 탭으로 승격**(v2.274) |
 | `vmfinder` | VM 정밀검색 / 유휴 VM | `dupip` | 중복 IP 찾기 |
 | `capacity` | 용량 리포트(오버커밋) | `vmtools` | VMware Tools 버전 |
 | `forecast` | 용량 추세/예측 | `snapshots` | 스냅샷 있는 VM |
@@ -352,7 +366,11 @@ git 소스로 실행하면 `CONFIG_DIR` 기본값이 `server/config` 라 이 파
 | `rightsizing` | **VM 라이트사이징**(관측 통계 기반, v2.217) | `capacity-forecast` | **용량 고갈 예측**(선형회귀 ETA, v2.217) |
 | `alert-channels` | **알림 채널·이력**(Slack/Teams/웹훅, v2.217) | `compliance-report` | **버전/패치 준수**(Tools·HW·ESXi EOL, v2.217) |
 | `change-history` | **구성 변경 이력**(이벤트 타임라인, v2.217) | `unprotected-vms` | **미보호 VM**(백업 공백 탐지, v2.217) |
-| `service-hub` | 서비스 허브(별도 포탈, 새 탭 — `SERVICE_HUB_URL` 설정 시 표시) | | |
+| `service-hub` | 서비스 허브(별도 포탈, 새 탭 — `SERVICE_HUB_URL` 설정 시 표시) | `explore` | **탐색·랭킹**(Top N·상세 스펙 검색 — 상단 탭에서 이동, v2.274) |
+| `storage-mon` | **스토리지 모니터링**(PowerScale·PowerStore·Unity·XtremIO·VMAX/PowerMax·VPLEX 8종, v2.302+) | `vm-clone` | **VM 복제(백업식)** — 스케줄·데이터스토어/NFS·보존 N개(v2.299) |
+| `vm-export` | **VM 전체 정보 CSV**(85+ 컬럼·디스크 1~7 슬롯별, v2.275·2.278) | `secret-scan` | **평문 자격증명 점검**(설정·env·로그·소스, 값 마스킹, v2.297) |
+| `codex-check` | **보안점검 리포트**(외부 전수 점검 + 실시간 지표, 관리자, v2.284) | `capacity-advisor` | **리소스 적정성 진단**(포탈 중앙/엣지 서버 자체 실측, v2.254+) |
+| `svcmon-config` | 성능점검 설정(템플릿·대량등록·가져오기/내보내기·엣지 배정·로그) | | |
 | `diskadd` | 디스크 추가 자동화 | `massdeploy` | 대용량 배포 |
 | `backup` | 백업 | | |
 
@@ -411,6 +429,15 @@ cd pyportal && python3 app.py        # http://<서버>:8095  (pip 설치 불필�
 알림·감사 로그·재시작에도 유지되는 세션(v2.215) · 6차 보안 감사 반영(v2.214). 포탈에 `SERVICE_HUB_URL`을
 주면 특수 기능에 '서비스 허브' 카드가, 허브에 `HUB_PORTAL_URL`을 주면 헤더에 [모니터링 포탈 ↗]이
 나타납니다. 오프라인 설치 패키지에도 `pyportal/`이 함께 포함됩니다.
+
+---
+
+## UAG 모니터 (별도 배포물 · `uagmon/`)
+
+Horizon **UAG(Unified Access Gateway)** 어플라이언스의 상태·세션을 모아 보는 경량 모니터입니다.
+포탈과 별개로 배포·실행되며 **Node 내장 모듈만** 사용합니다(외부 의존성 0). 하나의 코드로
+**서버(웹) · Windows 앱 · macOS 앱(Electron 자체 창)** 세 가지 배포를 지원하고, 데스크톱 앱
+데이터는 OS 사용자 폴더에 저장되어 앱 교체 후에도 유지됩니다. 상세: [`uagmon/README.md`](uagmon/README.md).
 
 ---
 

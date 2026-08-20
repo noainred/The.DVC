@@ -34,8 +34,10 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     쓰기는 워커만 하고 메인은 폴백일 때만 쓴다(두 연결이 동시에 쓰면 SQLITE_BUSY). 컬럼 정의는
     `ipam/record.js` 하나를 공유할 것 — 복사해 두면 컬럼 추가한 날 워커 INSERT 만 밀린다.
     워커 생성/실행 실패는 항상 인라인 폴백(`IPAM_WRITE_WORKER=0` 으로 완전 비활성).
-  - 미해결 후속: 전력 대시보드 시간당 롤업 테이블(캐시 미스 첫 요청의 윈도우 스캔 제거),
-    위임 잡 인출 2단계 확인응답(claim→ack).
+  - (구 '미해결 후속' 2건 — 적용 완료) 전력 대시보드 시간당 롤업 테이블은 `power_hourly`
+    (idrac/db.js, 적재 트랜잭션 내 증분 upsert)로, 위임 잡 인출 2단계 확인응답(claim→ack)은
+    v2.290(central/captureJobs.js — claim 기한 + 재수확 reap + 재시도 상한, idracScanJobs 패턴
+    이식)으로 해결됨. **새 위임 잡 큐를 추가할 때 같은 claim→ack 패턴을 따를 것.**
 
 ## 보안 불변조건 (회귀 방지 — 유지할 것)
 
