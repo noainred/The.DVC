@@ -20,18 +20,31 @@ export function allocByHost(vms) {
   return { vcpu, vmem };
 }
 
+/** 호스트명 -> VM 대수. 'Off VM 포함' 해제 시 켜진 VM 만 세기 위해 호출부가 필터된 목록을 넘긴다. */
+export function countByHost(vms) {
+  const map = new Map();
+  for (const v of vms || []) {
+    const k = v.host || '';
+    map.set(k, (map.get(k) || 0) + 1);
+  }
+  return map;
+}
+
 /**
  * 호스트 묶음(클러스터·데이터센터)의 합계.
  *   alloc / cores    = CPU 가상화율의 분자(할당 vCPU) · 분모(물리 코어)
  *   memAlloc/memPhys = MEM 가상화율의 분자(할당 VM RAM, MB) · 분모(물리 RAM, MB)
- *   vmc              = 호스트가 보고한 VM 수 합계(서버 집계값 — 전원 상태와 무관)
+ *   vmc              = VM 수 합계. vmCount 맵(countByHost 결과)을 주면 그 값으로 세고,
+ *                      주지 않으면 호스트가 보고한 h.vmCount(서버 집계값)를 쓴다.
+ *                      전자는 'Off VM 포함' 해제 시(켜진 VM 만), 후자는 체크 시 사용한다 —
+ *                      /vms 응답 상한에 걸릴 수 있는 대형 vCenter 에서도 전체 수는 서버 값이 정확하다.
  */
-export function virtSum(hosts, vcpu, vmem) {
+export function virtSum(hosts, vcpu, vmem, vmCount) {
   let alloc = 0, cores = 0, vmc = 0, memAlloc = 0, memPhys = 0;
   for (const h of hosts || []) {
     alloc += (vcpu && vcpu.get(h.name)) || 0;
     cores += Number(h.cpuCores) || 0;
-    vmc += Number(h.vmCount) || 0;
+    vmc += vmCount ? vmCount.get(h.name) || 0 : Number(h.vmCount) || 0;
     memAlloc += (vmem && vmem.get(h.name)) || 0;
     memPhys += Number(h.memTotalMB) || 0;
   }

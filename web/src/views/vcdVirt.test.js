@@ -3,7 +3,7 @@
 // 가상화율이 함께 내려간다. 필터는 호출부(VCenterDetail 의 visibleVms) 책임이므로,
 // 여기서는 "넘긴 목록만 합산한다"는 계약과 호스트 묶음 합계 산술을 검증한다.
 import { describe, it, expect } from 'vitest';
-import { allocByHost, virtSum } from './vcdVirt.js';
+import { allocByHost, countByHost, virtSum } from './vcdVirt.js';
 
 // esx1: 켜진 VM 2대(4+2 vCPU, 8192+4096MB) + 꺼진 VM 1대(8 vCPU, 16384MB)
 // esx2: 켜진 VM 1대(2 vCPU, 2048MB)
@@ -66,6 +66,22 @@ describe('virtSum — 클러스터·DC 합계', () => {
     expect(sOn.memPhys).toBe(sAll.memPhys);
     expect(sOn.alloc / sOn.cores).toBeLessThan(sAll.alloc / sAll.cores);
     expect(sOn.memAlloc / sOn.memPhys).toBeLessThan(sAll.memAlloc / sAll.memPhys);
+  });
+
+  it('vmCount 맵을 주면 VM 수를 그 맵으로 센다 — Off VM 포함 해제 시 켜진 VM 만(v2.336)', () => {
+    const on = onlyOn(VMS);
+    const s = virtSum(HOSTS, allocByHost(on).vcpu, allocByHost(on).vmem, countByHost(on));
+    expect(s.vmc).toBe(3);                    // esx1 켜진 2 + esx2 켜진 1 (h.vmCount 4 가 아님)
+    // 맵을 주지 않으면 기존대로 호스트 보고값(h.vmCount) 합계.
+    expect(virtSum(HOSTS, undefined, undefined).vmc).toBe(4);
+  });
+
+  it('countByHost — 호스트별 VM 대수, host 미지정은 빈 키', () => {
+    const m = countByHost(VMS);
+    expect(m.get('esx1')).toBe(3);
+    expect(m.get('esx2')).toBe(1);
+    expect(countByHost([{ name: 'x' }]).get('')).toBe(1);
+    expect(countByHost(undefined).size).toBe(0);
   });
 
   it('맵이 없거나 VM 없는 호스트도 0으로 안전하게 합산', () => {
