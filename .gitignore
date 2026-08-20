@@ -127,3 +127,8 @@ sbp-proxy-shortcuts.json
 design-preview.html
 design-preview-monitor.html
 design-preview-svcmon2.html
+
+# Claude Code worktree 격리(여러 창 동시작업 시 `claude --worktree <이름>` 이 만드는
+# 임시 작업트리) — 커밋 대상이 아니므로 무시. `.claude/agents`·`.claude/skills` 등
+# 공유 설정은 체크인해야 하므로 `.claude/` 전체가 아니라 worktrees 만 무시한다.
+.claude/worktrees/
