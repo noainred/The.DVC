@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson, postJson, putJson, delJson } from '../api.js';
 import { Loading } from '../components/ui.jsx';
+// CSV 일괄 관리(v2.339) — 검증 드라이런 → 덮어쓰기 확인 → 실행. 공용 모달(수집 서버 CSV UX).
+import { CsvExportModal, CsvImportModal } from '../components/CsvBulkModals.jsx';
 
 const EMPTY = {
   host: '', port: 22, username: 'root', password: '', privateKey: '',
@@ -21,6 +23,7 @@ export default function AgentDeploy() {
   const [pkgCfg, setPkgCfg] = useState(null); // { baseUrl, dir } editable
   const [subtab, setSubtab] = useState('status'); // status(에이전트 현황·기본) | add(에이전트 추가) | packages(설치 패키지 자동 다운로드)
   const [sort, setSort] = useState({ key: 'agentName', dir: 'asc' }); // 에이전트 현황 표 헤더 정렬
+  const [csvModal, setCsvModal] = useState(null); // 'export' | 'import' | null — 대상 CSV 일괄 관리(v2.339)
 
   const loadInstaller = () => fetchJson('/admin/agent-deploy/installer').then(setInstaller).catch(() => setInstaller({ available: false }));
   const loadPkg = () => fetchJson('/admin/packages').then((p) => { setPkg(p); setPkgCfg({ baseUrl: p.baseUrl || '', dir: p.dir || '' }); }).catch(() => setPkg(null));
@@ -337,8 +340,32 @@ export default function AgentDeploy() {
         <div className="card" style={{ marginBottom: 14 }}>
           <div className="flex between wrap" style={{ alignItems: 'center', marginBottom: 8 }}>
             <b style={{ fontSize: 14 }}>저장된 대상 ({targets.length})</b>
-            {targets.length > 0 && <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={busy || !installer.available} onClick={deployAll}>전체 배포</button>}
+            <span className="flex gap" style={{ alignItems: 'center' }}>
+              <button className="logout-btn" style={{ flex: 'none', padding: '8px 14px' }} title="저장된 배포 대상을 CSV 로 내려받기(기본 비밀값 제외)" onClick={() => setCsvModal('export')}>⤓ CSV</button>
+              <button className="logout-btn" style={{ flex: 'none', padding: '8px 14px' }} title="CSV 로 배포 대상 일괄 등록/수정 — 검증(드라이런) 후 덮어쓰기 확인" onClick={() => setCsvModal('import')}>⤒ CSV 가져오기</button>
+              {targets.length > 0 && <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={busy || !installer.available} onClick={deployAll}>전체 배포</button>}
+            </span>
           </div>
+          {csvModal === 'export' && (
+            <CsvExportModal title="배포 대상 CSV 내보내기" exportPath="/admin/agent-deploy/targets/export.csv"
+              secretsLabel="비밀값 포함(SSH 비번·central/collector 토큰)"
+              description={<>저장된 Edge 배포 대상(호스트·포트·계정·에이전트·중앙 URL·법인·옵션)을 CSV 로 내려받습니다. 기본은 <b>비밀값 제외</b>(빈 컬럼)이며, 가져오기에서 비우면 기존 값이 유지되므로 왕복 편집에 비밀값이 필요 없습니다. SSH 개인키·GPU 게스트 설정은 CSV 미지원(가져오기가 건드리지 않음).</>}
+              onClose={() => setCsvModal(null)} />
+          )}
+          {csvModal === 'import' && (
+            <CsvImportModal title="배포 대상 CSV 가져오기" importPath="/admin/agent-deploy/targets/import"
+              samplePath="/admin/agent-deploy/targets/sample.csv"
+              description={<>헤더 행 필수(<code>host</code>는 필수, port 기본 22·username 기본 root). <b>host+port+계정</b>이 같은 대상은 <b>덮어쓰기</b>로 판정되며 아래에서 명시적으로 허용해야 적용됩니다. 비밀값 열은 값이 있으면 교체, 비우면 기존 유지. 양식은 <b>📄 샘플 CSV</b>로 받으세요.</>}
+              columns={[
+                { key: 'host', label: 'host', render: (r) => <b style={{ color: 'var(--text)' }}>{r.host}</b> },
+                { key: 'port', label: '포트', align: 'right' },
+                { key: 'username', label: '계정' },
+                { key: 'agentName', label: '에이전트' },
+                { key: 'hasSecret', label: '비밀값', render: (r) => (r.hasSecret ? '교체' : '유지') },
+              ]}
+              overwriteLabel={(n) => <>기존 배포 대상 <b>{n}건 덮어쓰기 허용</b> — 체크하지 않으면 해당 행은 건너뜁니다(URL·옵션이 CSV 값으로 교체됨)</>}
+              onClose={() => setCsvModal(null)} onDone={() => { setCsvModal(null); loadTargets(); }} />
+          )}
           {targets.length === 0
             ? <span className="muted" style={{ fontSize: 13 }}>저장된 대상이 없습니다. '➕ 에이전트 추가' 탭에서 대상을 저장한 뒤 여기서 배포·상태확인·관리하세요.</span>
             : <div className="table-wrap">

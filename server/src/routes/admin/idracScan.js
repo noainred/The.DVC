@@ -11,7 +11,9 @@ import { scanForIdracs } from '../../idrac/scan.js';
 import { enqueueIdracScan, enqueueIdracRegister, getIdracScanResult, listIdracScanJobs, getIdracScanJobLog, cancelIdracScanJob, recentPollingAgents } from '../../central/idracScanJobs.js';
 import { pushIdracScan } from '../../central/idracScanPush.js';
 import { getPollerStatus, pollNow } from '../../idrac/poller.js';
-import { listScanRanges, saveScanRanges, removeScanRanges } from '../../idrac/scanRanges.js';
+import { listScanRanges, saveScanRanges, removeScanRanges, getScanRangeRaw } from '../../idrac/scanRanges.js';
+import { scanRangesToCsv, sampleCsv as scanRangesSampleCsv, parseScanRangesCsv, analyzeScanRangesImport } from '../../idrac/scanRangesCsv.js';
+import { listDatacenters } from '../../datacenter/store.js';
 import { startIdracScanNow, idracScanStatus, stopIdracScanNow, setIdracScanIntervalMs } from '../../idrac/scanPoller.js';
 import { listIdracScanLog, idracScanLogDatacenters } from '../../idrac/scanLog.js';
 import { getInventory as getIdracInventory } from '../../idrac/invCache.js';
@@ -23,7 +25,7 @@ import { findHostByServiceTag } from '../../idrac/hostMatch.js';
 import { getDatacenterAssign } from '../../datacenter/store.js';
 import { allCollectorStatus } from '../../collector/state.js';
 import { listAssignments, getResults } from '../../central/assignments.js';
-import { adminOnly } from './shared.js';
+import { adminOnly, requireSettingsOwner } from './shared.js';
 
 
 // Register iDRACs found by a scan, applying the shared credentials, then poll.
@@ -234,6 +236,74 @@ adminRouter.delete('/idrac/scan-ranges/:id', adminOnly, (req, res) => {
   if (r.ok) logAudit({ user: req.user?.username, action: 'iDRAC 스캔 대역 삭제', target: req.params.id });
   res.status(r.ok ? 200 : 404).json(r);
 });
+/* ── 스캔 대역 CSV 일괄 관리(v2.339, 사용자 요구) — 수집 서버 CSV(v2.338)와 동일 골격. ──────
+ * 내보내기 기본은 비밀번호 제외, ?secrets=1 은 requireSettingsOwner + 감사로그.
+ * 가져오기는 dryRun(법인 해석·대역 문법(expandIpList)·중복 검증) → 커밋 2단계이고,
+ * (법인,서비스)가 겹치는 행은 body.overwrite=true 명시 시에만 갱신한다.
+ */
+adminRouter.get('/idrac/scan-ranges/export.csv', adminOnly, (req, res) => {
+  const withPw = String(req.query.secrets || '') === '1';
+  const dcName = (() => { try { const m = new Map(listDatacenters().map((d) => [d.id, d.name || d.id])); return (id) => m.get(id) || id || ''; } catch { return (id) => id || ''; } })();
+  const send = () => {
+    const list = withPw ? listScanRanges().map((e) => getScanRangeRaw(e.id) || e) : listScanRanges();
+    const csv = scanRangesToCsv(list, dcName, { includeSecrets: withPw });
+    logAudit({ user: req.user?.username, action: withPw ? 'iDRAC 스캔 대역 CSV 내보내기(비밀번호 포함)' : 'iDRAC 스캔 대역 CSV 내보내기', detail: `${list.length}건`, ip: req.ip || '' });
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="idrac-scan-ranges${withPw ? '-with-passwords' : ''}.csv"`);
+    res.send(csv);
+  };
+  if (withPw) return requireSettingsOwner(req, res, send);
+  send();
+});
+
+adminRouter.get('/idrac/scan-ranges/sample.csv', adminOnly, (_req, res) => {
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="idrac-scan-ranges-sample.csv"');
+  res.send(scanRangesSampleCsv());
+});
+
+adminRouter.post('/idrac/scan-ranges/import', adminOnly, (req, res) => {
+  const { rows, error } = parseScanRangesCsv(String(req.body?.csv || ''));
+  if (error) return res.status(400).json({ ok: false, reason: error });
+  if (!rows.length) return res.status(400).json({ ok: false, reason: '가져올 데이터 행이 없습니다.' });
+
+  // 법인 이름/ID → ID(대소문자 무시). 못 찾으면 null → 오류 판정(오타로 유령 법인 생성 방지).
+  let dcs = [];
+  try { dcs = listDatacenters(); } catch { /* 목록 실패 시 아래 resolve 가 전부 null → 전 행 오류 */ }
+  const resolveDc = (v) => {
+    const s = String(v || '').trim();
+    if (!s) return null;
+    if (dcs.some((d) => d.id === s)) return s;
+    const byName = dcs.find((d) => String(d.name || '').toLowerCase() === s.toLowerCase());
+    return byName ? byName.id : null;
+  };
+  // (법인,서비스) → 기존 엔트리 id 목록(2개 이상이면 모호 → 행 오류).
+  const all = listScanRanges();
+  const existingIds = (dcId, service) => all
+    .filter((e) => e.datacenterId === dcId && String(e.service || '').toLowerCase() === String(service || '').toLowerCase())
+    .map((e) => e.id);
+
+  const { report, summary } = analyzeScanRangesImport(rows, { resolveDc, existingIds });
+  if (req.body?.dryRun) return res.json({ ok: true, dryRun: true, report, summary, total: rows.length });
+
+  const allowOverwrite = req.body?.overwrite === true;
+  let added = 0, overwritten = 0; const failed = []; const skipped = [];
+  for (const row of rows) {
+    const verdict = report.find((r) => r.line === row._line);
+    if (verdict?.action === 'error') { failed.push({ line: verdict.line, datacenter: row.datacenter, reason: verdict.reason }); continue; }
+    const ids = existingIds(verdict.dcId, row.service);
+    if (ids.length === 1 && !allowOverwrite) { skipped.push({ line: row._line, datacenter: row.datacenter, reason: '기존 항목 — 덮어쓰기 미허용(overwrite 확인 필요)' }); continue; }
+    const input = { id: ids[0], datacenterId: verdict.dcId, service: row.service, ranges: row.ranges,
+      username: row.username, agent: row.agent, dispatch: row.dispatch, enabled: row.enabled, mode: row.mode };
+    if (row._hasPassword) input.password = row.password; // 비우면 기존 유지(saveScanRanges 규칙)
+    const r = saveScanRanges(input);
+    if (r.ok) { if (ids.length === 1) overwritten++; else added++; }
+    else failed.push({ line: row._line, datacenter: row.datacenter, reason: r.reason });
+  }
+  logAudit({ user: req.user?.username, action: 'iDRAC 스캔 대역 CSV 가져오기', detail: `추가 ${added}·덮어쓰기 ${overwritten}·건너뜀 ${skipped.length}·실패 ${failed.length}`, ip: req.ip || '' });
+  res.json({ ok: true, added, overwritten, skipped, failed, total: rows.length });
+});
+
 // 지금 스캔(비동기). Body: { id? }(엔트리 하나) | { datacenterId? }(그 법인의 모든 서비스) | {}(전체 enabled).
 adminRouter.post('/idrac/scan-ranges/scan', adminOnly, (req, res) => {
   const id = String(req.body?.id || '').trim();

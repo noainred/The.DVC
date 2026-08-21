@@ -48,6 +48,8 @@ const redact = (t) => {
 
 export function listTargets() { return load().map(redact); }
 export function getTargetRaw(id) { return load().find((t) => t.id === id) || null; }
+// CSV 내보내기(비밀 포함, v2.339) 전용 원본 목록 — 호출부가 requireSettingsOwner + 감사로그 책임.
+export function listTargetsRaw() { return structuredClone(load()); }
 // 같은 호스트(+SSH포트/계정)로 저장된 대상 — 배포 시 중복 생성 없이 기존 대상을 upsert 하기 위함.
 export function findTargetByHost(host, port, username) {
   const h = String(host || '').trim();
