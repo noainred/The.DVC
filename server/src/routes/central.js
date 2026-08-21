@@ -39,6 +39,8 @@ import { takeLogQueries, setLogQueryResult, vcenterOfReq } from '../central/logQ
 import { specToRange } from '../ipam/rangePolicies.js';
 import { ipToNum } from '../ipam/ledger.js';
 import { takeCaptureJobs, setCaptureResult, captureAgentOfReq } from '../central/captureJobs.js';
+import { takeBmstorJobs, ackBmstorJob, bmstorAgentOfReq } from '../bmstor/jobs.js';
+import { applyBmstorResults } from '../bmstor/poller.js';
 import { recordCapture } from '../net/captureHistory.js';
 import { loadScanSettings, mergeScanResults, recordAgentReport } from '../ipam/scanStore.js';
 
@@ -602,6 +604,26 @@ centralRouter.post('/capture-result', (req, res) => {
   if (reqAgentDenied(req, captureAgentOfReq(String(b.reqId)))) return res.status(403).json({ ok: false, reason: '이 reqId 는 요청 에이전트의 잡이 아닙니다.' });
   setCaptureResult(String(b.reqId), b.result || { ok: false, reason: '빈 결과' });
   try { if (b.result?.ok) recordCapture(b.result, { source: 'manual', via: 'agent' }); } catch { /* */ }
+  res.json({ ok: true });
+});
+
+// 베어메탈 스토리지 폴링 위임(v2.341): 엣지가 자기 이름의 df 수집 잡을 인출(claim) →
+// 현지 SSH 수집 → 결과 회신(ack). 캡처/iDRAC 스캔과 동일한 claim→ack + 소유권 검증.
+centralRouter.get('/bmstor-jobs', (req, res) => {
+  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+  res.json({ ok: true, jobs: takeBmstorJobs(String(req.query.agent || '')) });
+});
+// Body: { reqId, results: [{ id, ok, mounts, missing?, error? }] } — 비밀번호 없음(용량 수치만).
+centralRouter.post('/bmstor-result', (req, res) => {
+  if (!centralEnabled()) return res.status(404).json({ ok: false });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+  const b = req.body || {};
+  if (!b.reqId) return res.status(400).json({ ok: false, reason: 'reqId가 필요합니다.' });
+  if (reqAgentDenied(req, bmstorAgentOfReq(String(b.reqId)))) return res.status(403).json({ ok: false, reason: '이 reqId 는 요청 에이전트의 잡이 아닙니다.' });
+  const ackd = ackBmstorJob(String(b.reqId));
+  if (!ackd) return res.json({ ok: true, stale: true }); // TTL 정리/중복 회신 — 무해하게 무시
+  applyBmstorResults(ackd.agent, b.results);
   res.json({ ok: true });
 });
 

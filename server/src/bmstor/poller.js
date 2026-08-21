@@ -14,6 +14,7 @@
 
 import { listBmServersRaw, getBmSettings } from './registry.js';
 import { collectMany } from './collect.js';
+import { enqueueBmstorJob, setBmstorExpireHandler } from './jobs.js';
 import { findCollectorForAgent } from '../central/idracScanPush.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 
@@ -27,6 +28,33 @@ let lastRunSummary = null;
 
 export function getBmLatest() { return latest; }
 export function bmPollerStatus() { return { running, lastRunAt, lastRunSummary, intervalMinutes: getBmSettings().intervalMinutes }; }
+
+/**
+ * 폴링 위임 결과 반영(v2.341) — 엣지가 POST /api/central/bmstor-result 로 회신한 결과를
+ * latest 에 쓴다(라우트가 reqId 소유권 검증 후 호출). 비밀번호는 결과에 없음(용량 수치만).
+ */
+export function applyBmstorResults(agent, results) {
+  const at = Date.now();
+  let applied = 0;
+  for (const r of Array.isArray(results) ? results : []) {
+    if (!r || !r.id) continue;
+    latest.set(String(r.id), {
+      ok: !!r.ok,
+      mounts: Array.isArray(r.mounts) ? r.mounts : [],
+      missing: Array.isArray(r.missing) ? r.missing : [],
+      error: r.error ? String(r.error) : null,
+      at, agent: String(agent || ''),
+    });
+    applied++;
+  }
+  return applied;
+}
+
+// 폴링 잡이 재시도 소진으로 만료되면 그 서버들에 실패 사유를 남긴다(무한 '수집 대기' 방지).
+setBmstorExpireHandler((agent, serverIds, reason) => {
+  const at = Date.now();
+  for (const id of serverIds || []) latest.set(id, { ok: false, mounts: [], error: reason, at, agent });
+});
 
 /** 엣지 1대에 위임 수집 PUSH — 실패 시 그 엣지 소속 서버 전부에 오류 사유를 채운다. */
 async function collectViaEdge(agent, servers) {
@@ -57,16 +85,24 @@ export async function bmCollectNow(trigger = 'manual') {
   try {
     const servers = listBmServersRaw().filter((s) => s.enabled !== false);
     const central = servers.filter((s) => !String(s.agent || '').trim());
-    const byAgent = new Map();
+    const pushByAgent = new Map(); // 중앙→엣지 직접(PUSH) — 중앙이 엣지 URL 에 닿을 때
+    const pollByAgent = new Map(); // 에이전트 폴링 — NAT 뒤 엣지(iDRAC/IP스캔과 동일, v2.341)
     for (const s of servers) {
       const a = String(s.agent || '').trim();
       if (!a) continue;
-      if (!byAgent.has(a)) byAgent.set(a, []);
-      byAgent.get(a).push(s);
+      const map = s.dispatch === 'push' ? pushByAgent : pollByAgent; // 기본 poll(엣지 표준 경로)
+      if (!map.has(a)) map.set(a, []);
+      map.get(a).push(s);
+    }
+    // 폴링 위임은 잡만 걸고 즉시 반환 — 결과는 엣지 회신(applyBmstorResults)이 채운다.
+    let queued = 0;
+    for (const [agent, list] of pollByAgent) {
+      enqueueBmstorJob(agent, list.map((s) => ({ id: s.id, host: s.host, port: s.port, username: s.username, password: s.password, mounts: s.mounts })));
+      queued += list.length;
     }
     const [centralResults, ...edgeResults] = await Promise.all([
       collectMany(central),
-      ...[...byAgent.entries()].map(([agent, list]) => collectViaEdge(agent, list)),
+      ...[...pushByAgent.entries()].map(([agent, list]) => collectViaEdge(agent, list)),
     ]);
     const at = Date.now();
     let ok = 0, errors = 0;
@@ -80,7 +116,7 @@ export async function bmCollectNow(trigger = 'manual') {
     for (const id of [...latest.keys()]) if (!ids.has(id)) latest.delete(id);
     lastRunAt = at;
     // 필드명 okCount — { ok:true, ...summary } 스프레드에서 성공 여부(boolean)를 덮지 않게.
-    lastRunSummary = { at, trigger, servers: servers.length, okCount: ok, errors, ms: at - started };
+    lastRunSummary = { at, trigger, servers: servers.length, okCount: ok, errors, queued, ms: at - started };
     return { ok: true, ...lastRunSummary };
   } finally {
     running = false;
