@@ -50,8 +50,9 @@ export function applyFilters(items, query, snap, searchFields = ['name'], user =
   if (allowed) out = out.filter((x) => allowed.has(x.vcenterId));
   if (query.vcenterId) out = out.filter((x) => x.vcenterId === query.vcenterId);
   if (query.region) {
-    const ids = snap.vcenters.filter((v) => v.location?.region === query.region).map((v) => v.id);
-    out = out.filter((x) => ids.includes(x.vcenterId));
+    // Set 조회(v2.343 #8) — 배열 includes 는 항목마다 vCenter 목록 재스캔(O(N×vC), 28개면 항목당 28회).
+    const ids = new Set(snap.vcenters.filter((v) => v.location?.region === query.region).map((v) => v.id));
+    out = out.filter((x) => ids.has(x.vcenterId));
   }
   if (query.q) {
     const q = String(query.q).toLowerCase();

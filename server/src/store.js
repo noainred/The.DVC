@@ -404,25 +404,42 @@ function withRollups(snap) {
   if (!snap.collectionErrors) snap.collectionErrors = [];
   const sum = (arr, fn) => arr.reduce((a, x) => a + (fn(x) || 0), 0);
 
-  const cpuTotalMhz = sum(snap.hosts, (h) => h.cpuTotalMhz);
-  const cpuUsedMhz = sum(snap.hosts, (h) => h.cpuUsageMhz);
-  const memTotalMB = sum(snap.hosts, (h) => h.memTotalMB);
-  const memUsedMB = sum(snap.hosts, (h) => h.memUsageMB);
-  const storCapGB = sum(snap.datastores, (d) => d.capacityGB);
-  const storUsedGB = sum(snap.datastores, (d) => d.usedGB);
+  // 전역 카운터 단일 루프(v2.343 #10): 종전엔 filter/sum 으로 호스트 8회·VM 2회·알람 2회·DS 2회
+  // 전체 재순회했다(6.5천 객체 × ~12패스, 매 30초). 값은 종전과 동일 — 패스 수만 통합.
+  const hc = { connected: 0, maintenance: 0, disconnected: 0, cores: 0, cpuT: 0, cpuU: 0, memT: 0, memU: 0, powerW: 0, powerReporting: 0 };
+  for (const h of snap.hosts) {
+    if (h.connectionState === 'CONNECTED') hc.connected++;
+    else if (h.connectionState === 'MAINTENANCE') hc.maintenance++;
+    else if (h.connectionState === 'DISCONNECTED') hc.disconnected++;
+    hc.cores += h.cpuCores || 0;
+    hc.cpuT += h.cpuTotalMhz || 0; hc.cpuU += h.cpuUsageMhz || 0;
+    hc.memT += h.memTotalMB || 0; hc.memU += h.memUsageMB || 0;
+    hc.powerW += h.powerWatts || 0;
+    if (h.powerWatts > 0) hc.powerReporting++;
+  }
+  let vmsOn = 0;
+  for (const v of snap.vms) if (v.powerState === 'POWERED_ON') vmsOn++;
+  let alCrit = 0, alWarn = 0;
+  for (const a of snap.alarms) {
+    if (a.severity === 'critical') alCrit++;
+    else if (a.severity === 'warning') alWarn++;
+  }
+  let storCapGB = 0, storUsedGB = 0;
+  for (const d of snap.datastores) { storCapGB += d.capacityGB || 0; storUsedGB += d.usedGB || 0; }
+  const cpuTotalMhz = hc.cpuT, cpuUsedMhz = hc.cpuU, memTotalMB = hc.memT, memUsedMB = hc.memU;
 
   const global = {
     vcenters: snap.vcenters.length,
     vcentersConnected: snap.vcenters.filter((v) => v.status === 'connected').length,
     vcentersMaintenance: snap.vcenters.filter((v) => v.status === 'maintenance').length,
     hosts: snap.hosts.length,
-    hostsConnected: snap.hosts.filter((h) => h.connectionState === 'CONNECTED').length,
-    hostsMaintenance: snap.hosts.filter((h) => h.connectionState === 'MAINTENANCE').length,
-    hostsDisconnected: snap.hosts.filter((h) => h.connectionState === 'DISCONNECTED').length,
+    hostsConnected: hc.connected,
+    hostsMaintenance: hc.maintenance,
+    hostsDisconnected: hc.disconnected,
     vms: snap.vms.length,
-    vmsPoweredOn: snap.vms.filter((v) => v.powerState === 'POWERED_ON').length,
-    vmsPoweredOff: snap.vms.filter((v) => v.powerState !== 'POWERED_ON').length,
-    cpuCores: sum(snap.hosts, (h) => h.cpuCores),
+    vmsPoweredOn: vmsOn,
+    vmsPoweredOff: snap.vms.length - vmsOn,
+    cpuCores: hc.cores,
     cpuTotalGhz: round(cpuTotalMhz / 1000, 1),
     cpuUsedGhz: round(cpuUsedMhz / 1000, 1),
     cpuUsagePct: pct(cpuUsedMhz, cpuTotalMhz),
@@ -435,12 +452,12 @@ function withRollups(snap) {
     datastores: snap.datastores.length,
     networks: snap.networks.length,
     alarms: snap.alarms.length,
-    alarmsCritical: snap.alarms.filter((a) => a.severity === 'critical').length,
-    alarmsWarning: snap.alarms.filter((a) => a.severity === 'warning').length,
+    alarmsCritical: alCrit,
+    alarmsWarning: alWarn,
     // 총 소비전력: 측정된 '모든' 서버(iDRAC/OME/원격) 합계 — ESXi 호스트로 매핑 안 된 서버도 포함.
-    powerWatts: snap.measuredPower ? snap.measuredPower.totalWatts : sum(snap.hosts, (h) => h.powerWatts),
-    powerKw: round((snap.measuredPower ? snap.measuredPower.totalWatts : sum(snap.hosts, (h) => h.powerWatts)) / 1000, 1),
-    powerReporting: snap.measuredPower ? snap.measuredPower.servers : snap.hosts.filter((h) => h.powerWatts > 0).length,
+    powerWatts: snap.measuredPower ? snap.measuredPower.totalWatts : hc.powerW,
+    powerKw: round((snap.measuredPower ? snap.measuredPower.totalWatts : hc.powerW) / 1000, 1),
+    powerReporting: snap.measuredPower ? snap.measuredPower.servers : hc.powerReporting,
     // 등록된 Dell iDRAC 서버 수(OME 자동발견 엔트리 제외) — '전력 보고 중' 수량과 비교용.
     powerRegistered: idracRegisteredCount(),
     powerUnmappedKw: round((snap.measuredPower?.byVc?.['(미매핑)'] || 0) / 1000, 1),
