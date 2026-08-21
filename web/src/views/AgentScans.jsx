@@ -94,7 +94,7 @@ export default function AgentScans() {
       <div className="flex between wrap gap" style={{ marginBottom: 6 }}>
         <div className="section-title" style={{ margin: '6px 0' }}>에이전트 작업 — IP 할당 스캔 (관리자)</div>
         <div className="flex gap" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
-          <input ref={fileRef} type="file" accept=".csv,text/csv" style={{ display: 'none' }} onChange={onFile} />
+          <input ref={fileRef} type="file" accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain" style={{ display: 'none' }} onChange={onFile} />
           <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={() => { setCsvText(''); setImportMsg(null); setCsvOpen(true); }}>CSV 가져오기</button>
           <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={downloadSample}>샘플 CSV 다운로드</button>
           <button className="login-btn" style={{ flex: 'none', padding: '9px 16px' }} onClick={openAdd}>+ 작업 추가</button>

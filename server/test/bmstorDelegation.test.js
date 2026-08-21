@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { enqueueBmstorJob, takeBmstorJobs, ackBmstorJob, bmstorAgentOfReq, reapBmstorClaims, setBmstorExpireHandler } from '../src/bmstor/jobs.js';
 import { bmServersToCsv, sampleCsv, parseBmServersCsv, analyzeBmServersImport } from '../src/bmstor/csv.js';
+import { parseCsvRows } from '../src/util/csv.js';
 
 const SRV = [{ id: 's1', host: '10.0.0.1', port: 22, username: 'root', password: 'pw', mounts: ['/'] }];
 
@@ -46,6 +47,25 @@ test('CSV: 비밀번호 기본 제외·마운트 ; 직렬화, 샘플 왕복', ()
   assert.deepEqual(s.rows.map((r) => r.host), ['10.20.0.31', '10.10.0.44']);
   assert.deepEqual(s.rows[0].mounts, ['/', '/data']);
   assert.ok(parseBmServersCsv('name,port\nx,22').error, 'host/mounts 헤더 없으면 오류');
+});
+
+test('CSV: 탭 구분(TSV) 자동 인식 — 엑셀 붙여넣기/텍스트(탭 분리) 저장본 가져오기(v2.345)', () => {
+  // 실사용 문의 재현: 탭 구분 파일이 "필수 헤더 없음"으로만 실패했다 — 이제 자동 인식된다.
+  const tsv = ['name\thost\tport\tusername\tgroup\tagent\tdispatch\tmounts\tenabled\tpassword',
+    '192.168.88.201\t192.168.88.201\t22\tsbpadmin\tAZ-Synx\tAZ\tpoll\t/data\tTRUE\tpw!#'].join('\r\n');
+  const t = parseBmServersCsv(tsv);
+  assert.equal(t.error, undefined);
+  assert.equal(t.rows.length, 1);
+  assert.equal(t.rows[0].host, '192.168.88.201');
+  assert.equal(t.rows[0].username, 'sbpadmin');
+  assert.deepEqual(t.rows[0].mounts, ['/data']);
+  assert.equal(t.rows[0].password, 'pw!#');
+  // 선행 빈 줄이 있어도 첫 유효 줄로 판정한다.
+  assert.equal(parseBmServersCsv('\r\n' + tsv).error, undefined);
+  // 쉼표가 하나라도 있으면 쉼표 CSV(기존 호환) — 탭은 셀 내용으로 보존.
+  assert.deepEqual(parseCsvRows('a,b\tc'), [['a', 'b\tc']]);
+  // 공백 정렬 텍스트(구분자 없음) — 필수 헤더 오류에 원인 힌트를 덧붙인다.
+  assert.match(parseBmServersCsv('name  host  mounts\nx  h1  /data').error, /열이 하나로 읽혔습니다/);
 });
 
 test('CSV 드라이런: 저장 규칙 위반·미등록 엣지·덮어쓰기·파일 내 중복 판정', () => {
