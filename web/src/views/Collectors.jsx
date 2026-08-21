@@ -565,7 +565,15 @@ function IngestStats({ data, onReset }) {
   return (
     <div className="card" style={{ marginBottom: 12, padding: '12px 16px', borderLeft: '3px solid var(--accent, #60a5fa)' }}>
       <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 8 }}>
-        <b style={{ fontSize: 13 }}>에이전트 수신 트래픽 진단 {data?.since ? <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>(집계 시작 {ago(data.since)})</span> : null}</b>
+        <b style={{ fontSize: 13 }}>에이전트 수신 트래픽 진단 {data?.since ? <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>(집계 시작 {ago(data.since)})</span> : null}
+          {/* 무압축 대형 push 요약 배지(v2.344, #12) — 진단 표를 안 열어도 보이게. 서버 경고 임계(512KB)와 동일 기준. */}
+          {(() => {
+            const plain = rows.filter((r) => r.last && r.last.endpoint === '/inventory' && !r.last.gzip && (r.last.wireBytes || 0) >= 512 * 1024);
+            return plain.length
+              ? <span className="badge red" style={{ marginLeft: 8, fontWeight: 600 }} title={`무압축 대형 push 엣지: ${plain.map((r) => r.agent).join(', ')} — 구버전 추정, '모두 업그레이드' 권장(알림 채널에도 경고 발송됨)`}>⚠ 무압축 {plain.length}대</span>
+              : null;
+          })()}
+        </b>
         <button className="logout-btn" style={{ padding: '6px 12px', fontSize: 12 }} onClick={onReset}>통계 초기화</button>
       </div>
       <div className="muted" style={{ fontSize: 12, lineHeight: 1.7, marginBottom: 8 }}>

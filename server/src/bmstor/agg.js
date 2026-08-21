@@ -7,6 +7,29 @@
 const pct = (used, total) => (total > 0 ? Math.round((used / total) * 1000) / 10 : 0);
 const zero = () => ({ totalBytes: 0, usedBytes: 0, availBytes: 0 });
 
+// 서버당 그룹 상한(v2.344, 사용자 요구 — 한 서버가 여러 합산 그룹에 속할 수 있게).
+export const MAX_GROUPS_PER_SERVER = 3;
+
+/**
+ * 그룹 입력 정규화(순수 — registry 저장·CSV 가져오기 공용 단일 소스).
+ * 배열 또는 문자열(쉼표/세미콜론/줄바꿈 구분)을 받아 trim·중복 제거하고 상한을 검증한다.
+ * @returns {{groups:string[], error:string|null}}
+ */
+export function normalizeBmGroups(input) {
+  const raw = Array.isArray(input) ? input : String(input || '').split(/[,;\n]/);
+  const groups = []; const seen = new Set();
+  for (const g of raw.map((s) => String(s).trim()).filter(Boolean)) {
+    if (g.length > 64 || [...g].some((c) => c.charCodeAt(0) < 32)) return { groups: [], error: `그룹 이름이 올바르지 않습니다: ${g.slice(0, 40)}` };
+    const k = g.toLowerCase();
+    if (!seen.has(k)) { seen.add(k); groups.push(g); }
+  }
+  if (groups.length > MAX_GROUPS_PER_SERVER) return { groups: [], error: `그룹은 서버당 최대 ${MAX_GROUPS_PER_SERVER}개입니다(입력 ${groups.length}개).` };
+  return { groups, error: null };
+}
+
+/** 서버 레코드의 그룹 배열 — 신형 groups 배열 우선, 구형 단일 group 문자열 하위호환. */
+export const groupsOf = (s) => (Array.isArray(s?.groups) && s.groups.length ? s.groups : (s?.group ? [s.group] : []));
+
 /**
  * @param {Array} servers listServers() 결과(redact — id·name·group·agent·mounts·enabled)
  * @param {Map<string,object>} latest id → collectServer 결과(+at). 없으면 '미수집'.
@@ -25,8 +48,11 @@ export function aggregate(servers, latest) {
       sums.usedBytes += m.usedBytes || 0;
       sums.availBytes += m.availBytes || 0;
     }
+    const groups = groupsOf(s);
     const row = {
-      id: s.id, name: s.name || s.host, host: s.host, group: s.group || '', agent: s.agent || '',
+      id: s.id, name: s.name || s.host, host: s.host,
+      groups, group: groups.join(', '), // group(문자열)은 표시/하위호환용 — 진실은 groups 배열
+      agent: s.agent || '',
       enabled: s.enabled !== false, mountCount: (s.mounts || []).length,
       ...sums, usedPct: pct(sums.usedBytes, sums.totalBytes),
       ok: !!r?.ok, error: r?.error || null, missing: r?.missing || [], at: r?.at || null,
@@ -41,13 +67,16 @@ export function aggregate(servers, latest) {
       total.totalBytes += sums.totalBytes; total.usedBytes += sums.usedBytes; total.availBytes += sums.availBytes;
     } else total.errors++;
 
-    const g = s.group || '';
-    if (!groupMap.has(g)) groupMap.set(g, { name: g || '(그룹 없음)', servers: 0, ok: 0, errors: 0, pending: 0, ...zero() });
-    const gm = groupMap.get(g);
-    gm.servers++;
-    if (!r) gm.pending++;
-    else if (r.ok) { gm.ok++; gm.totalBytes += sums.totalBytes; gm.usedBytes += sums.usedBytes; gm.availBytes += sums.availBytes; }
-    else gm.errors++;
+    // 멀티 그룹(v2.344): 서버가 속한 '모든' 그룹에 합산된다 — 그룹 표의 합이 전체 KPI 보다
+    // 클 수 있음(의도: 그룹은 관점별 묶음이지 분할이 아님). 전체 KPI 는 서버당 1회만 집계.
+    for (const g of groups.length ? groups : ['']) {
+      if (!groupMap.has(g)) groupMap.set(g, { name: g || '(그룹 없음)', servers: 0, ok: 0, errors: 0, pending: 0, ...zero() });
+      const gm = groupMap.get(g);
+      gm.servers++;
+      if (!r) gm.pending++;
+      else if (r.ok) { gm.ok++; gm.totalBytes += sums.totalBytes; gm.usedBytes += sums.usedBytes; gm.availBytes += sums.availBytes; }
+      else gm.errors++;
+    }
   }
 
   const groups = [...groupMap.values()]

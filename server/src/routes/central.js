@@ -29,7 +29,8 @@ import { takePingJobs, setPingResults } from '../central/pingJobs.js';
 import { takeIdracScanJobs, setIdracScanResult, setIdracScanProgress, agentOfReq } from '../central/idracScanJobs.js';
 import { pullNow as pullCollectorsNow } from '../collector/puller.js';
 import { upsertCollectorFromAgent, ssrfBlockReasonResolved } from '../collector/registry.js';
-import { recordIngest } from '../central/ingestStats.js';
+import { recordIngest, noteInventoryCompression } from '../central/ingestStats.js';
+import { notify } from '../alerts.js';
 import { ingestReport } from '../central/svcmonEdge.js';
 import { getAssignmentForAgent, markPulled, ackAssignment } from '../central/svcmonAssign.js';
 import { setAgentConfig } from '../central/agentConfig.js';
@@ -64,6 +65,25 @@ centralRouter.use((req, res, next) => {
               gzip: (req.get('content-encoding') || '').includes('gzip') }
           : null;
         recordIngest(agent, req.path, { wireBytes, summary });
+        // 무압축 대형 인벤토리 push 경고 승격(v2.344, #12) — 진단 표에만 보이던 '무압축(구버전
+        // 엣지 추정)'을 알림 채널로. 연속 임계는 추적기가, 재발화 억제는 warned 래치+notify
+        // 전역 억제 창이 담당. 알림 실패가 수신 경로를 막지 않게 catch.
+        if (summary) {
+          const ev = noteInventoryCompression(agent, { gzip: summary.gzip, wireBytes });
+          if (ev?.type === 'warned') {
+            notify({
+              key: `ingest-plain:${ev.agent}`, severity: 'warning',
+              title: `엣지 '${ev.agent}' 무압축 인벤토리 push 감지`,
+              detail: `push당 ${(ev.wireBytes / 1048576).toFixed(1)}MB(무압축, 연속 ${ev.streak}회) — 구버전 엣지 또는 AGENT_PUSH_GZIP=false 추정. gzip 적용 시 ~1/5~1/10. 설정 › 수집 서버(원격) → 모두 업그레이드 권장.`,
+            }).catch(() => {});
+          } else if (ev?.type === 'resolved') {
+            notify({
+              key: `ingest-plain-ok:${ev.agent}`, severity: 'warning',
+              title: `엣지 '${ev.agent}' 무압축 push 해소`,
+              detail: 'gzip 압축 push 가 다시 관측되었습니다(업그레이드/설정 정상화).',
+            }).catch(() => {});
+          }
+        }
       } catch { /* 진단은 best-effort */ }
     });
   }

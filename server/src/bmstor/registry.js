@@ -4,7 +4,7 @@
  * 수집 서버/배포 대상 레지스트리와 동일 계약.
  *
  * 서버: { id, name, host, port, username, password, agent(엣지 이름 — 빈 값=중앙 직접),
- *         group(합산 그룹 라벨), mounts:[절대경로...], enabled }
+ *         groups(합산 그룹 배열 — 최대 3개, v2.344), mounts:[절대경로...], enabled }
  * 설정: { intervalMinutes } — 사용자가 정하는 수집 주기(기본 10분, 1~1440 클램프).
  */
 
@@ -15,6 +15,7 @@ import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js';
 import { sanitizeMounts } from './collect.js';
+import { normalizeBmGroups, groupsOf } from './agg.js';
 
 const FILE = path.join(config.configDir, 'bm-storage.json');
 const DEFAULT_INTERVAL_MIN = 10;
@@ -26,7 +27,10 @@ function load() {
   try {
     if (fs.existsSync(FILE)) {
       const j = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-      cache = { servers: openSecretsDeep(Array.isArray(j?.servers) ? j.servers : []), settings: j?.settings || {} };
+      const servers = openSecretsDeep(Array.isArray(j?.servers) ? j.servers : []);
+      // v2.340 저장분(단일 group 문자열) → groups 배열 마이그레이션(로드 시 정규화 — 다음 저장에 영속).
+      for (const s of servers) { if (!Array.isArray(s.groups)) s.groups = groupsOf(s); delete s.group; }
+      cache = { servers, settings: j?.settings || {} };
     }
   } catch { preserveCorrupt(FILE); cache = null; }
   if (!cache) cache = { servers: [], settings: {} };
@@ -75,6 +79,9 @@ export function bmServerInputIssue(body = {}) {
   if (errors.length) return errors[0];
   if (!mounts.length) return '측정할 마운트 포인트를 1개 이상 입력하세요(예: / 또는 /data).';
   if (mounts.length > 64) return '마운트 포인트는 서버당 최대 64개입니다.';
+  // 멀티 그룹(v2.344): 최대 3개 — 배열/문자열(쉼표·세미콜론 구분) 모두 허용, 구형 group 하위호환.
+  const { error: gErr } = normalizeBmGroups(body.groups !== undefined ? body.groups : body.group);
+  if (gErr) return gErr;
   return null;
 }
 
@@ -98,7 +105,15 @@ export function saveBmServer(body = {}) {
   server.agent = String(body.agent || '').trim();
   // 위임 전달 방식(v2.341): poll(에이전트 폴링 — NAT 뒤 엣지 표준, iDRAC/IP스캔과 동일) | push(중앙→엣지 직접).
   server.dispatch = body.dispatch === 'push' ? 'push' : 'poll';
-  server.group = String(body.group || '').trim();
+  // 멀티 그룹(v2.344): groups 배열이 진실의 원천(최대 3개 — bmServerInputIssue 가 선검증).
+  // 구형 클라이언트가 group(단일 문자열)만 보내도 수용. 미전달이면 기존 그룹 유지(무관 편집이
+  // 그룹을 지우지 않게). 저장은 groups 만 쓰고 legacy group 필드는 제거(v2.340 저장분 마이그레이션).
+  if (body.groups !== undefined || body.group !== undefined) {
+    server.groups = normalizeBmGroups(body.groups !== undefined ? body.groups : body.group).groups;
+  } else if (!Array.isArray(server.groups)) {
+    server.groups = groupsOf(server);
+  }
+  delete server.group;
   server.mounts = mounts;
   server.enabled = body.enabled !== false;
   // 빈/마스킹 비밀번호는 기존 유지(편집 시 재입력 강요 안 함) — 신규인데 비었으면 빈 값 저장(무비번 SSH 허용 안 하는 서버는 수집 실패로 표시됨).

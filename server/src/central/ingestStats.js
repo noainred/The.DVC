@@ -61,4 +61,44 @@ export function getIngestStats() {
 }
 
 /** 통계 초기화(진단 리셋용). */
-export function resetIngestStats() { byAgent.clear(); }
+export function resetIngestStats() { byAgent.clear(); plainState.clear(); }
+
+// ── 무압축 대형 push 경고 승격(v2.344, 성능 점검 #12) ─────────────────────────────
+// 구버전 엣지(gzip push 미지원)나 AGENT_PUSH_GZIP=false 엣지는 인벤토리를 push당 5~10배
+// 크기로 보낸다(WAN·중앙 파싱 5~10배). 종전엔 진단 표의 '무압축' 표기뿐이라 관리자가 그
+// 화면을 열어야만 알 수 있었다 → 알림 채널(Slack/Teams/웹훅)로 승격한다.
+// 판정은 상태전이 방식: 임계 크기 이상 무압축 push 가 '연속 N회(기본 3)'면 경고 1회(일시
+// gzip 폴백 오탐 방지), 이후 gzip push 관측 시 해소 1회. 소형 push(빈 엣지 등)는 무압축이어도
+// 실해가 없어 무시한다. 상태는 인메모리(재시작 시 초기화 — 무압축이 지속되면 재경고돼 무해).
+const PLAIN_WARN_BYTES = Number(process.env.INGEST_PLAIN_WARN_BYTES) || 512 * 1024; // 판정 최소 크기(와이어)
+const PLAIN_WARN_STREAK = Math.max(1, Number(process.env.INGEST_PLAIN_WARN_STREAK) || 3);
+const plainState = new Map(); // agent -> { streak, warned, lastBytes }
+
+export function ingestPlainThresholds() { return { bytes: PLAIN_WARN_BYTES, streak: PLAIN_WARN_STREAK }; }
+
+/**
+ * 인벤토리 push 1건의 압축 상태를 추적하고, 알릴 전이가 생기면 이벤트를 반환한다(없으면 null).
+ * 경고는 에이전트당 1회(warned 래치) — 재발화 억제는 notify 의 전역 억제 창과 별개로 여기서 보장.
+ * @returns {null | {type:'warned'|'resolved', agent, wireBytes, streak}}
+ */
+export function noteInventoryCompression(agent, { gzip, wireBytes = 0 } = {}) {
+  const key = String(agent || '(unknown)');
+  let s = plainState.get(key);
+  if (!s) {
+    if (plainState.size >= MAX_AGENTS) plainState.clear(); // 백스톱(위조 agent 이름 폭주 대비)
+    s = { streak: 0, warned: false, lastBytes: 0 };
+    plainState.set(key, s);
+  }
+  if (gzip) {
+    const wasWarned = s.warned;
+    s.streak = 0; s.warned = false; s.lastBytes = wireBytes;
+    return wasWarned ? { type: 'resolved', agent: key, wireBytes, streak: 0 } : null;
+  }
+  if (wireBytes < PLAIN_WARN_BYTES) return null; // 소형 무압축은 무해 — streak 유지(대형 지속에만 경고)
+  s.streak++; s.lastBytes = wireBytes;
+  if (!s.warned && s.streak >= PLAIN_WARN_STREAK) {
+    s.warned = true;
+    return { type: 'warned', agent: key, wireBytes, streak: s.streak };
+  }
+  return null;
+}

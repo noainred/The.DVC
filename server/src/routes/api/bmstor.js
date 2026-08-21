@@ -24,7 +24,7 @@ export function registerBmStorage(api) {
     });
   });
 
-  // ìë² ì¶ê°/ìì  â body { id?, name, host, port, username, password?, agent, group, mounts, enabled }
+  // ìë² ì¶ê°/ìì  â body { id?, name, host, port, username, password?, agent, groups(최대 3개), mounts, enabled }
   api.post('/tools/bm-storage/servers', adminOnly, (req, res) => {
     const r = saveBmServer(req.body || {});
     if (r.ok) logAudit({ user: req.user?.username, action: 'ë² ì´ë©í ì¤í ë¦¬ì§ ìë² ì ì¥', target: r.server?.host || '', detail: `mounts ${(r.server?.mounts || []).length}ê°${r.server?.agent ? ` Â· ì£ì§ ${r.server.agent}` : ''}`, ip: req.ip || '' });
@@ -92,7 +92,7 @@ export function registerBmStorage(api) {
       const id = existingId(row.host, row.port, row.username);
       if (id && !allowOverwrite) { skipped.push({ line: row._line, host: row.host, reason: 'ê¸°ì¡´ í­ëª© â ë®ì´ì°ê¸° ë¯¸íì©(overwrite íì¸ íì)' }); continue; }
       const input = { id, name: row.name, host: row.host, port: row.port, username: row.username,
-        group: row.group, agent: row.agent, dispatch: row.dispatch, mounts: row.mounts, enabled: row.enabled };
+        groups: row.groups, agent: row.agent, dispatch: row.dispatch, mounts: row.mounts, enabled: row.enabled };
       if (row._hasPassword) input.password = row.password; // ë¹ì°ë©´ ê¸°ì¡´ ì ì§(saveBmServer ê·ì¹)
       const r = saveBmServer(input);
       if (r.ok) { if (id) overwritten++; else added++; }
