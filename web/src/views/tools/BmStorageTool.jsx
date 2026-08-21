@@ -19,7 +19,7 @@ const fmtBytes = (b) => {
 };
 const pctColor = (p) => (p >= 90 ? 'var(--red)' : p >= 75 ? 'var(--amber)' : 'var(--green)');
 
-const EMPTY = { id: '', name: '', host: '', port: 22, username: 'root', password: '', agent: '', dispatch: 'poll', group: '', mounts: '/', enabled: true };
+const EMPTY = { id: '', name: '', host: '', port: 22, username: 'root', password: '', agent: '', dispatch: 'poll', groups: '', mounts: '/', enabled: true };
 
 export default function BmStorageTool() {
   const [data, setData] = useState(null);
@@ -69,7 +69,7 @@ export default function BmStorageTool() {
   };
   const edit = (s) => {
     const c = cfgOf(s.id);
-    setForm({ ...EMPTY, ...c, password: '', mounts: (c?.mounts || []).join('\n') });
+    setForm({ ...EMPTY, ...c, password: '', mounts: (c?.mounts || []).join('\n'), groups: (c?.groups || []).join(', ') });
   };
   const bar = (p) => (
     <span style={{ display: 'inline-block', position: 'relative', width: 90, height: 7, borderRadius: 5, background: 'rgba(148,163,184,.15)', overflow: 'hidden', verticalAlign: 'middle' }}>
@@ -141,6 +141,7 @@ export default function BmStorageTool() {
       {groups.length > 0 && servers.length > 0 && (
         <div className="card" style={{ marginBottom: 12, padding: 12 }}>
           <b style={{ fontSize: 13 }}>그룹별 합산</b>
+          <span className="muted" style={{ fontSize: 11.5, marginLeft: 8 }}>서버가 여러 그룹(최대 3개)에 속하면 각 그룹에 모두 합산됩니다 — 그룹 합의 총계는 전체 KPI 보다 클 수 있음</span>
           <div className="table-wrap" style={{ marginTop: 8 }}>
             <table>
               <thead><tr><th>그룹</th><th style={{ textAlign: 'right' }}>서버</th><th style={{ textAlign: 'right' }}>총 용량</th><th style={{ textAlign: 'right' }}>사용량</th><th style={{ textAlign: 'right' }}>사용 가능</th><th>사용률</th></tr></thead>
@@ -174,7 +175,7 @@ export default function BmStorageTool() {
                   <tr key={s.id} style={s.enabled ? undefined : { opacity: 0.5 }}>
                     <td><b>{s.name}</b>{!s.enabled && <span className="badge gray" style={{ marginLeft: 6 }}>비활성</span>}</td>
                     <td className="muted" style={{ fontSize: 12 }}>{s.host}</td>
-                    <td className="muted" style={{ fontSize: 12 }}>{s.group || '—'}</td>
+                    <td className="muted" style={{ fontSize: 12 }}>{(s.groups || []).length ? (s.groups || []).map((g) => <span key={g} className="badge gray" style={{ marginRight: 4 }}>{g}</span>) : '—'}</td>
                     <td className="muted" style={{ fontSize: 12 }}>{s.agent
                       ? <><span className="badge blue">{s.agent}</span> <span className={`badge ${cfgOf(s.id)?.dispatch === 'push' ? 'green' : 'purple'}`} style={{ fontSize: 10 }}>{cfgOf(s.id)?.dispatch === 'push' ? 'PUSH' : '폴링'}</span></>
                       : '중앙 직접'}</td>
@@ -209,8 +210,9 @@ export default function BmStorageTool() {
             <h3 style={{ marginTop: 0 }}>{form.id ? `서버 수정 — ${form.name || form.host}` : '서버 추가'}</h3>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, fontSize: 13 }}>
               <label>이름<input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="표시 이름(비우면 host)" /></label>
-              <label>그룹<input className="input" value={form.group} onChange={(e) => setForm({ ...form, group: e.target.value })} placeholder="합산 그룹(예: WA-백업)" list="bm-groups" />
-                <datalist id="bm-groups">{groups.filter((g) => g.name !== '(그룹 없음)').map((g) => <option key={g.name} value={g.name} />)}</datalist></label>
+              <label>그룹 <span className="muted" style={{ fontSize: 11 }}>(최대 3개 — 쉼표/세미콜론 구분)</span>
+                <input className="input" value={form.groups} onChange={(e) => setForm({ ...form, groups: e.target.value })}
+                  placeholder="예: WA-백업, 전사-아카이브" title={`기존 그룹: ${groups.filter((g) => g.name !== '(그룹 없음)').map((g) => g.name).join(', ') || '(없음)'}`} /></label>
               <label>호스트(IP/FQDN) *<input className="input" value={form.host} onChange={(e) => setForm({ ...form, host: e.target.value })} placeholder="192.168.10.5" /></label>
               <label>SSH 포트<input className="input" type="number" min={1} max={65535} value={form.port} onChange={(e) => setForm({ ...form, port: e.target.value })} /></label>
               <label>계정<input className="input" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} /></label>

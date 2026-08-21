@@ -14,7 +14,9 @@
 
 import { parseCsvRows, csvLine, unguardCell, CSV_BOM } from '../util/csv.js';
 
-export const CSV_COLUMNS = ['name', 'host', 'port', 'username', 'group', 'agent', 'dispatch', 'mounts', 'enabled', 'password'];
+// v2.344: group(단일) → groups(세미콜론/쉼표 구분, 서버당 최대 3개 — 멀티 그룹). 가져오기는
+// 구형 'group' 헤더도 별칭으로 수용한다(왕복 호환).
+export const CSV_COLUMNS = ['name', 'host', 'port', 'username', 'groups', 'agent', 'dispatch', 'mounts', 'enabled', 'password'];
 
 const bool = (v, dflt = true) => {
   const s = String(v ?? '').trim().toLowerCase();
@@ -27,7 +29,9 @@ export function bmServersToCsv(servers, { includeSecrets = false } = {}) {
   const lines = [csvLine(CSV_COLUMNS)];
   for (const s of servers || []) {
     lines.push(csvLine([
-      s.name || '', s.host || '', s.port || 22, s.username || 'root', s.group || '', s.agent || '',
+      s.name || '', s.host || '', s.port || 22, s.username || 'root',
+      (Array.isArray(s.groups) && s.groups.length ? s.groups : (s.group ? [s.group] : [])).join('; '),
+      s.agent || '',
       s.agent ? (s.dispatch === 'push' ? 'push' : 'poll') : '',
       (s.mounts || []).join('; '),
       s.enabled === false ? 'false' : 'true',
@@ -42,10 +46,10 @@ export function sampleCsv() {
   const lines = [
     csvLine(CSV_COLUMNS),
     csvLine(['# name: 표시 이름(비우면 host)', '# host: SSH IP/FQDN(필수)', '# port: SSH 포트(기본 22)',
-      '# username: 계정(기본 root)', '# group: 합산 그룹 라벨(선택)', '# agent: 위임 엣지 이름(비우면 중앙 직접 — 등록된 수집 서버만 허용)',
+      '# username: 계정(기본 root)', '# groups: 합산 그룹 — 세미콜론(;) 구분 최대 3개(선택)', '# agent: 위임 엣지 이름(비우면 중앙 직접 — 등록된 수집 서버만 허용)',
       '# dispatch: poll(에이전트 폴링, 기본)|push(중앙→엣지 직접)', '# mounts: 세미콜론(;) 구분 절대경로(필수)',
       '# enabled: true|false', '# password: 비우면 기존 유지(신규는 없음)']),
-    csvLine(['백업서버-01', '10.20.0.31', '22', 'root', 'WA-백업', 'WA-Edge', 'poll', '/; /data', 'true', 'ChangeMe!1']),
+    csvLine(['백업서버-01', '10.20.0.31', '22', 'root', 'WA-백업; 전사-아카이브', 'WA-Edge', 'poll', '/; /data', 'true', 'ChangeMe!1']),
     csvLine(['미디어서버-01', '10.10.0.44', '22', 'root', '', '', '', '/srv/media', 'true', '']),
   ];
   return CSV_BOM + lines.join('\r\n') + '\r\n';
@@ -62,7 +66,7 @@ export function parseBmServersCsv(text) {
   const idx = (...names) => { for (const n of names) { const i = header.indexOf(n); if (i >= 0) return i; } return -1; };
   const col = {
     name: idx('name', '표시명', '이름'), host: idx('host', 'ip', '호스트'), port: idx('port', '포트'),
-    username: idx('username', 'user', '계정'), group: idx('group', '그룹'),
+    username: idx('username', 'user', '계정'), groups: idx('groups', 'group', '그룹'),
     agent: idx('agent', '엣지', '수집주체'), dispatch: idx('dispatch', '방식'),
     mounts: idx('mounts', '마운트'), enabled: idx('enabled', '활성'),
     password: idx('password', '비밀번호', 'pw'),
@@ -86,7 +90,7 @@ export function parseBmServersCsv(text) {
       host,
       port: cell(cells, col.port) || '22',
       username: cell(cells, col.username) || 'root',
-      group: cell(cells, col.group),
+      groups: cell(cells, col.groups), // 세미콜론/쉼표 구분 문자열 — 정규화·상한(3개)은 저장 검증(bmServerInputIssue) 단일 소스
       agent: cell(cells, col.agent),
       dispatch: cell(cells, col.dispatch).toLowerCase() === 'push' ? 'push' : 'poll',
       mounts: cell(cells, col.mounts).split(/[;\n]/).map((s) => s.trim()).filter(Boolean),
@@ -113,7 +117,7 @@ export function analyzeBmServersImport(rows, { existingId, validate, validAgent 
     let action = 'error'; let reason = null;
     if (dupLine) reason = `파일 내 중복 — ${dupLine}행과 같은 host+port+계정(어느 행이 저장될지 모호)`;
     else {
-      reason = validate({ host: row.host, port: row.port, username: row.username, mounts: row.mounts });
+      reason = validate({ host: row.host, port: row.port, username: row.username, mounts: row.mounts, groups: row.groups });
       if (!reason && row.agent && !validAgent(row.agent)) reason = `미등록 엣지: '${row.agent}' — 설정 › 수집 서버(원격)에 등록된 이름만 사용할 수 있습니다.`;
       if (!reason) action = existingId(row.host, row.port, row.username) ? 'overwrite' : 'add';
     }

@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { sanitizeMounts, parseDfOutput, MOUNT_RE } from '../src/bmstor/collect.js';
-import { aggregate } from '../src/bmstor/agg.js';
+import { aggregate, normalizeBmGroups, groupsOf } from '../src/bmstor/agg.js';
 
 test('sanitizeMounts: 절대경로+안전문자만 허용 — 셸 메타문자는 명령 주입 방어로 거부', () => {
   const { mounts, errors } = sanitizeMounts('/\n/data, /var/log; /mnt/backup-01');
@@ -75,6 +75,36 @@ test('aggregate: 서버=자기 마운트 합, 그룹=그룹 서버 합, 전체=�
   assert.equal(total.availBytes, 170 * GB);
   // 오류 서버는 사유가 그대로 노출(축소 보고 금지)
   assert.equal(perServer.find((s) => s.id === 'c').error, 'SSH 접속 실패');
+});
+
+test('normalizeBmGroups(v2.344): 문자열 분리·중복 제거·최대 3개, 구형 group 하위호환', () => {
+  assert.deepEqual(normalizeBmGroups('A, B; C').groups, ['A', 'B', 'C']);
+  assert.deepEqual(normalizeBmGroups(['A', 'a', ' A ']).groups, ['A'], '대소문자 무시 중복 제거');
+  assert.match(normalizeBmGroups('a,b,c,d').error, /최대 3개/);
+  assert.deepEqual(normalizeBmGroups('').groups, []);
+  assert.deepEqual(groupsOf({ groups: ['X'] }), ['X']);
+  assert.deepEqual(groupsOf({ group: 'legacy' }), ['legacy'], 'v2.340 단일 group 저장분 호환');
+  assert.deepEqual(groupsOf({}), []);
+});
+
+test('aggregate(v2.344 멀티 그룹): 서버가 속한 모든 그룹에 합산, 전체 KPI 는 서버당 1회', () => {
+  const servers = [
+    { id: 'a', name: 'a', host: 'h1', groups: ['G1', 'G2'], mounts: ['/'], enabled: true },
+    { id: 'b', name: 'b', host: 'h2', groups: ['G2'], mounts: ['/'], enabled: true },
+  ];
+  const latest = new Map([
+    ['a', { ok: true, at: 1, mounts: [{ mount: '/', totalBytes: 100 * GB, usedBytes: 50 * GB, availBytes: 50 * GB }] }],
+    ['b', { ok: true, at: 1, mounts: [{ mount: '/', totalBytes: 100 * GB, usedBytes: 10 * GB, availBytes: 90 * GB }] }],
+  ]);
+  const { total, groups, perServer } = aggregate(servers, latest);
+  assert.equal(total.totalBytes, 200 * GB, '전체는 서버당 1회(중복 합산 없음)');
+  const g1 = groups.find((g) => g.name === 'G1');
+  const g2 = groups.find((g) => g.name === 'G2');
+  assert.equal(g1.servers, 1);
+  assert.equal(g1.totalBytes, 100 * GB);
+  assert.equal(g2.servers, 2, 'a 는 G1·G2 양쪽에 집계');
+  assert.equal(g2.totalBytes, 200 * GB);
+  assert.deepEqual(perServer.find((s) => s.id === 'a').groups, ['G1', 'G2']);
 });
 
 test('aggregate: 미수집(latest 없음)은 pending, 빈 입력 안전', () => {
