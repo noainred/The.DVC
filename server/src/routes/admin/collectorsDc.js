@@ -7,7 +7,8 @@ import { listTargets, getTargetRaw } from '../../agent/deployRegistry.js';
 import { logAudit } from '../../audit.js';
 import { loadVcenterConfig } from '../../config.js';
 import { getVmHardware, reconfigVm } from '../../provision/reconfig.js';
-import { listCollectors, addCollector, updateCollector, removeCollector, loadCollectors, ssrfBlockReason } from '../../collector/registry.js';
+import { listCollectors, addCollector, updateCollector, removeCollector, loadCollectors, ssrfBlockReason, collectorInputIssue } from '../../collector/registry.js';
+import { collectorsToCsv, sampleCsv as collectorsSampleCsv, parseCollectorsCsv, analyzeCollectorsImport } from '../../collector/csv.js';
 import { clearCollectorServers } from '../../collector/remoteInventory.js';
 import { listDatacenters, getDatacenterAssign, addDatacenter, updateDatacenter, removeDatacenter, setVcenterDatacenterMany, getDatacenterOrder, saveDatacenterOrder } from '../../datacenter/store.js';
 import { allCollectorStatus, clearCollectorHosts } from '../../collector/state.js';
@@ -16,7 +17,7 @@ import { pushUpgradeToCollectors } from '../../collector/upgradePush.js';
 import { resilientFetch } from '../../util/resilientFetch.js';
 import { resolveBundleBytes, lastBundleReject } from '../../upgrade/bundleSource.js';
 import { upgradeManager } from '../../upgrade/manager.js';
-import { adminOnly, ensureCollectorDatacenter } from './shared.js';
+import { adminOnly, ensureCollectorDatacenter, requireSettingsOwner } from './shared.js';
 
 
 // ── VM 사양 변경(ReconfigVM) — vCPU/RAM/디스크 증설·추가, NIC 추가/삭제 (관리자) ──────────
@@ -73,6 +74,82 @@ adminRouter.delete('/collectors/:id', adminOnly, (req, res) => {
     logAudit({ user: req.user?.username, action: '수집 서버 삭제', target: req.params.id, ip: req.ip || '' });
   }
   res.status(result.ok ? 200 : 404).json(result);
+});
+
+/* ── 수집 서버 CSV 일괄 관리(v2.338, 사용자 요구) — 내보내기·샘플·가져오기. ───────────────
+ * 스토리지 장비 CSV(v2.313·2.317)와 동일 골격: 기본 export 는 토큰 제외, ?tokens=1 은
+ * requireSettingsOwner 게이트(자격증명 덤프 — 백업 라우트와 같은 규칙) + 감사로그.
+ * 가져오기는 dryRun(문법·중복·SSRF 검증, 저장 없음) → 커밋 2단계이고, 기존 id 와 겹치는
+ * 행(덮어쓰기)은 body.overwrite=true 를 명시해야만 적용된다(사용자 요구 'overwrite 여부 확인').
+ */
+
+// 현재 등록 수집 서버를 CSV 로 내보내기. 기본은 토큰 제외(listCollectors redact 계약).
+adminRouter.get('/collectors/export.csv', adminOnly, (req, res) => {
+  const withTok = String(req.query.tokens || '') === '1';
+  const send = () => {
+    const list = loadCollectors();
+    const csv = collectorsToCsv(list, { includeTokens: withTok });
+    logAudit({ user: req.user?.username, action: withTok ? '수집 서버 CSV 내보내기(토큰 포함)' : '수집 서버 CSV 내보내기', detail: `${list.length}대`, ip: req.ip || '' });
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="collectors${withTok ? '-with-tokens' : ''}.csv"`);
+    res.send(csv);
+  };
+  if (withTok) return requireSettingsOwner(req, res, send);
+  send();
+});
+
+/** 샘플 CSV 템플릿 다운로드 — 헤더 + 컬럼 설명 주석 + 예시 2행. */
+adminRouter.get('/collectors/sample.csv', adminOnly, (_req, res) => {
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="collectors-sample.csv"');
+  res.send(collectorsSampleCsv());
+});
+
+/**
+ * CSV 일괄 가져오기 — body { csv, dryRun?, overwrite? }.
+ *  - dryRun=true: 저장하지 않고 행별 판정(add/overwrite/error + 사유)만 반환. 검증 규칙은
+ *    실제 저장과 동일(registry.collectorInputIssue — normalize 단일 소스, SSRF/URL 포함).
+ *  - 커밋: add 행은 등록, overwrite 행은 **overwrite=true 일 때만** 갱신(아니면 skipped 로
+ *    보고 — 기존 URL/토큰/매핑을 실수로 갈아엎는 사고 방지). 행별 성공/실패 정직 반환.
+ *  - 가져온 항목은 관리자 수동 등록과 동일하게 managed=true(자기등록이 못 덮어씀).
+ */
+adminRouter.post('/collectors/import', adminOnly, (req, res) => {
+  const { rows, error } = parseCollectorsCsv(String(req.body?.csv || ''));
+  if (error) return res.status(400).json({ ok: false, reason: error });
+  if (!rows.length) return res.status(400).json({ ok: false, reason: '가져올 데이터 행이 없습니다.' });
+
+  // 대소문자 무시 id 조회 → 기존 항목의 실제 id(registry dedupe 규칙과 동일 키).
+  const existing = new Map(loadCollectors().map((c) => [String(c.id).toLowerCase(), c.id]));
+  const existingId = (id) => existing.get(String(id).toLowerCase());
+
+  const { report, summary } = analyzeCollectorsImport(rows, { existingId, validate: collectorInputIssue });
+  if (req.body?.dryRun) {
+    return res.json({ ok: true, dryRun: true, report, summary, total: rows.length });
+  }
+
+  const allowOverwrite = req.body?.overwrite === true;
+  let added = 0, overwritten = 0; const failed = []; const skipped = [];
+  for (const row of rows) {
+    const verdict = report.find((r) => r.line === row._line);
+    if (verdict?.action === 'error') { failed.push({ line: verdict.line, id: verdict.id, reason: verdict.reason }); continue; }
+    const input = { id: row.id, name: row.name, url: row.url, datacenter: row.datacenter,
+      vcenterId: row.vcenterId, enabled: row.enabled };
+    if (row._hasToken) input.token = row.token; // 비우면 기존 유지(normalize 규칙)
+    const curId = existingId(row.id);
+    if (curId) {
+      if (!allowOverwrite) { skipped.push({ line: row._line, id: row.id, reason: '기존 항목 — 덮어쓰기 미허용(overwrite 확인 필요)' }); continue; }
+      const r = updateCollector(curId, input, { managed: true });
+      if (r.ok) { overwritten++; ensureCollectorDatacenter(r.collector); }
+      else failed.push({ line: row._line, id: row.id, reason: r.reason });
+    } else {
+      const r = addCollector(input, { managed: true });
+      if (r.ok) { added++; ensureCollectorDatacenter(r.collector); existing.set(row.id.toLowerCase(), row.id); }
+      else failed.push({ line: row._line, id: row.id, reason: r.reason });
+    }
+  }
+  if (added || overwritten) pullNow().catch(() => {});
+  logAudit({ user: req.user?.username, action: '수집 서버 CSV 가져오기', detail: `추가 ${added}·덮어쓰기 ${overwritten}·건너뜀 ${skipped.length}·실패 ${failed.length}`, ip: req.ip || '' });
+  res.json({ ok: true, added, overwritten, skipped, failed, total: rows.length });
 });
 
 // 엣지 포탈 로컬 계정 비밀번호 일괄 변경 — 기본(admin) 비번을 중앙에서 한 번에 교체.
