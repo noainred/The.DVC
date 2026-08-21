@@ -14,7 +14,7 @@
  * 드라이런 통과 = 스캐너가 실제로 해석 가능함을 보장한다.
  */
 
-import { parseCsvRows, csvLine, unguardCell, CSV_BOM } from '../util/csv.js';
+import { parseCsvRows, csvLine, unguardCell, delimiterHint, CSV_BOM } from '../util/csv.js';
 import { expandIpList } from './iprange.js';
 
 export const CSV_COLUMNS = ['datacenter', 'service', 'ranges', 'username', 'agent', 'dispatch', 'enabled', 'mode', 'password'];
@@ -78,7 +78,7 @@ export function parseScanRangesCsv(text) {
     enabled: idx('enabled', '활성', '주기'), mode: idx('mode', '등록모드'),
     password: idx('password', '비밀번호', 'pw'),
   };
-  if (col.datacenter < 0 || col.ranges < 0) return { rows: [], error: "필수 헤더 'datacenter' 와 'ranges' 가 없습니다." };
+  if (col.datacenter < 0 || col.ranges < 0) return { rows: [], error: "필수 헤더 'datacenter' 와 'ranges' 가 없습니다." + delimiterHint(rows[0]) };
 
   const cell = (cells, i, { trim = true } = {}) => {
     if (i < 0) return '';

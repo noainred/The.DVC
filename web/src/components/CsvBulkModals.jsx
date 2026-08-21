@@ -88,7 +88,8 @@ export function CsvImportModal({ title, description, importPath, samplePath, col
         <h3 style={{ marginTop: 0 }}>{title}</h3>
         <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>{description}</div>
         <div className="flex gap wrap" style={{ marginBottom: 8 }}>
-          <input ref={fileRef} type="file" accept=".csv,text/csv" style={{ display: 'none' }} onChange={onFile} />
+          {/* 탭 구분(TSV·엑셀 "텍스트(탭으로 분리)" 저장본)도 서버 파서가 자동 인식(v2.345) — .txt/.tsv 허용 */}
+          <input ref={fileRef} type="file" accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain" style={{ display: 'none' }} onChange={onFile} />
           <button className="tab" style={{ padding: '6px 12px', fontSize: 12 }} onClick={() => fileRef.current?.click()}>📁 CSV 파일 선택</button>
           <button className="tab" style={{ padding: '6px 12px', fontSize: 12 }}
             onClick={() => downloadFile(samplePath).catch((e) => setErr(e.message))}>📄 샘플 CSV</button>

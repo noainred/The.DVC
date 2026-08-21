@@ -13,7 +13,7 @@
  * 건드리지 않으므로 기존 저장값이 그대로 유지된다.
  */
 
-import { parseCsvRows, csvLine, unguardCell, CSV_BOM } from '../util/csv.js';
+import { parseCsvRows, csvLine, unguardCell, delimiterHint, CSV_BOM } from '../util/csv.js';
 
 export const CSV_COLUMNS = ['host', 'port', 'username', 'agentName', 'centralUrl', 'collectorDatacenter',
   'portalPort', 'installerPath', 'autoUpgrade', 'pushInventory', 'enabled', 'password', 'centralToken', 'collectorToken'];
@@ -77,7 +77,7 @@ export function parseTargetsCsv(text) {
     enabled: idx('enabled', '활성'),
     password: idx('password', '비밀번호', 'pw'), centralToken: idx('centraltoken'), collectorToken: idx('collectortoken'),
   };
-  if (col.host < 0) return { rows: [], error: "필수 헤더 'host' 가 없습니다." };
+  if (col.host < 0) return { rows: [], error: "필수 헤더 'host' 가 없습니다." + delimiterHint(rows[0]) };
 
   const cell = (cells, i, { trim = true } = {}) => {
     if (i < 0) return '';

@@ -295,7 +295,7 @@ export default function TemplateTab({ canEdit, initialApply = null }) {
             치환 변수·상한 검증은 등록 시점에 실패할 수 있습니다.
           </div>
           <div className="flex gap wrap" style={{ alignItems: 'center' }}>
-            <input type="file" accept=".csv,text/csv" onChange={onCsvFile} />
+            <input type="file" accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain" onChange={onCsvFile} />
             <button className="login-btn" disabled={!csvText.trim() || busy === 'csv-preview'} onClick={() => csvDo('preview')}>
               {busy === 'csv-preview' ? '검사 중…' : '미리보기'}
             </button>

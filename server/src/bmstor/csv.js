@@ -12,7 +12,7 @@
  *   비밀이 아니므로 한 셀에 세미콜론(;) 구분으로 그대로 나간다.
  */
 
-import { parseCsvRows, csvLine, unguardCell, CSV_BOM } from '../util/csv.js';
+import { parseCsvRows, csvLine, unguardCell, delimiterHint, CSV_BOM } from '../util/csv.js';
 
 // v2.344: group(단일) → groups(세미콜론/쉼표 구분, 서버당 최대 3개 — 멀티 그룹). 가져오기는
 // 구형 'group' 헤더도 별칭으로 수용한다(왕복 호환).
@@ -71,7 +71,7 @@ export function parseBmServersCsv(text) {
     mounts: idx('mounts', '마운트'), enabled: idx('enabled', '활성'),
     password: idx('password', '비밀번호', 'pw'),
   };
-  if (col.host < 0 || col.mounts < 0) return { rows: [], error: "필수 헤더 'host' 와 'mounts' 가 없습니다." };
+  if (col.host < 0 || col.mounts < 0) return { rows: [], error: "필수 헤더 'host' 와 'mounts' 가 없습니다." + delimiterHint(rows[0]) };
 
   const cell = (cells, i, { trim = true } = {}) => {
     if (i < 0) return '';

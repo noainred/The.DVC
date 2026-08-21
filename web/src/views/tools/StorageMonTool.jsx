@@ -807,7 +807,7 @@ function CsvImport({ onClose, onDone }) {
         비밀번호 열은 값이 있으면 저장하고, 비우면 기존 값을 유지합니다. 양식은 <b>📄 샘플 CSV</b>로 받으세요.
       </div>
       <div className="flex gap wrap" style={{ marginBottom: 8 }}>
-        <input ref={fileRef} type="file" accept=".csv,text/csv" style={{ display: 'none' }} onChange={onFile} />
+        <input ref={fileRef} type="file" accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain" style={{ display: 'none' }} onChange={onFile} />
         <button className="tab" style={{ padding: '6px 12px', fontSize: 12 }} onClick={() => fileRef.current?.click()}>📁 CSV 파일 선택</button>
         <button className="tab" style={{ padding: '6px 12px', fontSize: 12 }}
           onClick={() => downloadFile('/tools/storage/devices/sample.csv').catch((e) => setErr(e.message))}>📄 샘플 CSV</button>

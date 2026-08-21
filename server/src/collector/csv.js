@@ -17,7 +17,7 @@
  * 해당 행은 건너뛰고 skipped 로 보고 — 실수로 기존 URL/매핑을 갈아엎는 사고 방지).
  */
 
-import { parseCsvRows, csvLine, unguardCell, CSV_BOM } from '../util/csv.js';
+import { parseCsvRows, csvLine, unguardCell, delimiterHint, CSV_BOM } from '../util/csv.js';
 
 // 내보내기/샘플 공통 컬럼 순서(token 은 가져오기 전용이라 맨 끝 — export 는 기본 빈 값).
 export const CSV_COLUMNS = ['id', 'name', 'url', 'datacenter', 'vcenterId', 'enabled', 'token'];
@@ -78,7 +78,7 @@ export function parseCollectorsCsv(text) {
     datacenter: idx('datacenter', 'datacenterid', '법인', 'dc'), vcenterId: idx('vcenterid', 'vcenter'),
     enabled: idx('enabled', '활성'), token: idx('token', '토큰'),
   };
-  if (col.id < 0 || col.url < 0) return { rows: [], error: "필수 헤더 'id' 와 'url' 이 없습니다." };
+  if (col.id < 0 || col.url < 0) return { rows: [], error: "필수 헤더 'id' 와 'url' 이 없습니다." + delimiterHint(rows[0]) };
 
   const cell = (cells, i, { trim = true } = {}) => {
     if (i < 0) return '';

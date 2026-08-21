@@ -16,7 +16,7 @@
  *   그 id 로 **수정**(update), 없으면 신규 추가. 그래서 export→편집→import 왕복이 안전하다.
  */
 
-import { parseCsvRows, csvLine, unguardCell, CSV_BOM } from '../util/csv.js';
+import { parseCsvRows, csvLine, unguardCell, delimiterHint, CSV_BOM } from '../util/csv.js';
 import { isKnownType, isImplementedType, STORAGE_TYPES } from './types.js';
 
 // 내보내기/샘플 공통 컬럼 순서(password 는 가져오기 전용이라 맨 끝 — export 는 값 비움).
@@ -128,7 +128,7 @@ export function parseDevicesCsv(text) {
     datacenter: idx('datacenter', 'datacenterid', '법인', 'dc'), agent: idx('agent', '엣지', '수집주체'),
     enabled: idx('enabled', '활성'), note: idx('note', '메모', 'comment'),
   };
-  if (col.name < 0 || col.host < 0) return { rows: [], error: "필수 헤더 'name' 과 'host' 가 없습니다." };
+  if (col.name < 0 || col.host < 0) return { rows: [], error: "필수 헤더 'name' 과 'host' 가 없습니다." + delimiterHint(rows[0]) };
 
   const cell = (cells, i, { trim = true } = {}) => {
     if (i < 0) return '';
