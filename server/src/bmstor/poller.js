@@ -106,8 +106,9 @@ export async function bmCollectNow(trigger = 'manual') {
     ]);
     const at = Date.now();
     let ok = 0, errors = 0;
+    const srvById = new Map(servers.map((s) => [s.id, s])); // O(N²) 방지 — 1,000대 상한에서 find 는 백만 비교(v2.342)
     for (const r of [...centralResults, ...edgeResults.flat()]) {
-      const srv = servers.find((s) => s.id === r.id);
+      const srv = srvById.get(r.id);
       latest.set(r.id, { ...r, at, agent: srv?.agent || '' });
       if (r.ok) ok++; else errors++;
     }

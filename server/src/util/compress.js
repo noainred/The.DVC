@@ -34,11 +34,18 @@ export function compression() {
 
       // ETag/304 — GET 200 응답에만. 해시는 압축 전 본문 기준(Content-Encoding과 무관하게 동일).
       if (req.method === 'GET' && !res.headersSent && (res.statusCode || 200) === 200) {
-        const tag = `W/"${crypto.createHash('sha1').update(buf).digest('base64url')}"`;
-        res.setHeader('ETag', tag);
-        if (req.headers['if-none-match'] === tag) {
-          res.statusCode = 304;
-          return res.end();
+        // 라우트(sendCached 등 snapCache 경로)가 이미 키 기반 ETag 를 설정했으면 존중한다(v2.342).
+        // 종전엔 여기서 SHA-1 태그로 무조건 덮어써서 클라이언트가 항상 SHA-1 태그를 저장했고,
+        // 다음 요청의 If-None-Match 가 라우트의 weakEtag 와 영영 불일치 → '직렬화 전에 판정하는'
+        // 조기 304 경로(snapCache.sendCached)가 한 번도 타지지 않았다. 라우트가 태그를 설정했다면
+        // 사전 비교는 라우트 책임(불일치라 본문 전송 중)이므로 여기서는 해시 계산도 생략한다.
+        if (res.getHeader('ETag') === undefined) {
+          const tag = `W/"${crypto.createHash('sha1').update(buf).digest('base64url')}"`;
+          res.setHeader('ETag', tag);
+          if (req.headers['if-none-match'] === tag) {
+            res.statusCode = 304;
+            return res.end();
+          }
         }
       }
 

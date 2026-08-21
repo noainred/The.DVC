@@ -156,8 +156,12 @@ api.get('/summary', (req, res) => memoJson(req, res, 'summary', (snap) => {
   // 계정의 전체 요약이 범위 제한 계정에 캐시로 새어 나간다(상시 폴링 경로 — 실제 유출). extraKey 필수.
 }, { extraKey: scopeKey(req.user, store.get()) }));
 
-api.get('/hosts', (req, res) => {
-  const snap = store.get();
+// 인벤토리 목록 5종(/hosts /vms /datastores /networks /alarms)은 상시 폴링 경로라 memoJson 으로
+// 감싼다(v2.342 성능 1차): ① 같은 스냅샷+같은 쿼리는 계산 1회(single-flight — N명이 같은 화면을
+// 폴링해도 필터·정렬·합계가 1번만 돈다) ② sendCached 의 키 기반 ETag 로 무변동 폴은 본문
+// 직렬화(JSON.stringify 수 MB) 자체를 건너뛰고 304. 키는 generatedAt|originalUrl(쿼리 포함)이고
+// scope 서명을 extraKey 로 넣는다 — /summary 와 동일한 캐시 교차 노출 방지 규칙(회귀 금지).
+api.get('/hosts', (req, res) => memoJson(req, res, 'inv:hosts', (snap) => {
   let hosts = applyFilters(snap.hosts, req.query, snap, ['name', 'cluster'], req.user);
   if (req.query.state) hosts = hosts.filter((h) => h.connectionState === req.query.state);
 
@@ -194,11 +198,10 @@ api.get('/hosts', (req, res) => {
     powerKw: Math.round(sm((h) => h.powerWatts) / 100) / 10,
     esxiVersions: Object.entries(verMap).map(([version, count]) => ({ version, count })).sort((a, b) => b.count - a.count),
   };
-  res.json({ total: hosts.length, items: hosts, summary });
-});
+  return { total: hosts.length, items: hosts, summary };
+}, { extraKey: scopeKey(req.user, store.get()) }));
 
-api.get('/vms', (req, res) => {
-  const snap = store.get();
+api.get('/vms', (req, res) => memoJson(req, res, 'inv:vms', (snap) => {
   const q = req.query;
   let vms = applyFilters(snap.vms, q, snap, ['name', 'guestOS', 'ipAddress', 'host'], req.user);
   if (q.powerState) vms = vms.filter((v) => v.powerState === q.powerState);
@@ -255,8 +258,8 @@ api.get('/vms', (req, res) => {
       (v) => ((v.storageGB || 0) / ((v.storageGB || 0) + (v.uncommittedGB || 0))) * 100),
     gpu: gpuCounts,
   };
-  res.json({ total: vms.length, items: vms.slice(0, limit), totals });
-});
+  return { total: vms.length, items: vms.slice(0, limit), totals };
+}, { extraKey: scopeKey(req.user, store.get()) }));
 
 // VM 단건 조회 — 이름/IP/호스트명으로 스냅샷에서 찾아 상세 팝업에 쓴다(모든 화면 공용).
 api.get('/vms/lookup', (req, res) => {
@@ -286,12 +289,11 @@ api.get('/vms/lookup', (req, res) => {
   res.json({ vm: vm || null });
 });
 
-api.get('/datastores', (req, res) => {
-  const snap = store.get();
+api.get('/datastores', (req, res) => memoJson(req, res, 'inv:datastores', (snap) => {
   let ds = applyFilters(snap.datastores, req.query, snap, ['name', 'type'], req.user);
   if (req.query.type) ds = ds.filter((d) => String(d.type || '').toLowerCase().includes(String(req.query.type).toLowerCase()));
-  res.json({ total: ds.length, items: ds });
-});
+  return { total: ds.length, items: ds };
+}, { extraKey: scopeKey(req.user, store.get()) }));
 
 // 데이터스토어 브라우즈 — 할당 VM + 실제 파일 목록(라이브, 60초 캐시). id 를 직접 받는
 // 단건 라우트이므로 vCenter 단위 scope 를 별도 검사하고 범위 밖은 404(존재 여부 미노출).
@@ -305,12 +307,11 @@ api.get('/datastores/:id/browse', async (req, res) => {
   } catch (e) { res.status(e.status === 404 ? 404 : 502).json({ error: e.message }); }
 });
 
-api.get('/networks', (req, res) => {
-  const snap = store.get();
+api.get('/networks', (req, res) => memoJson(req, res, 'inv:networks', (snap) => {
   let nets = applyFilters(snap.networks, req.query, snap, ['name', 'type'], req.user);
   if (req.query.type) nets = nets.filter((n) => n.type === req.query.type);
-  res.json({ total: nets.length, items: nets });
-});
+  return { total: nets.length, items: nets };
+}, { extraKey: scopeKey(req.user, store.get()) }));
 
 // Top resource consumers across the whole estate (or a filtered scope).
 // ?vcenterId= / ?region= scope it; ?limit= controls list length (default 10).
@@ -341,12 +342,11 @@ api.get('/top', (req, res) => {
   });
 });
 
-api.get('/alarms', (req, res) => {
-  const snap = store.get();
+api.get('/alarms', (req, res) => memoJson(req, res, 'inv:alarms', (snap) => {
   let alarms = applyFilters(snap.alarms, req.query, snap, ['message', 'entity'], req.user);
   if (req.query.severity) alarms = alarms.filter((a) => a.severity === req.query.severity);
-  res.json({ total: alarms.length, items: alarms });
-});
+  return { total: alarms.length, items: alarms };
+}, { extraKey: scopeKey(req.user, store.get()) }));
 
 // Alarm mute rules — "이 알람 앞으로 무시". Muted alarms are filtered globally.
 api.get('/alarm-mutes', (_req, res) => res.json({ mutes: listMutes() }));
