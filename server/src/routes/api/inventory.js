@@ -204,10 +204,10 @@ api.get('/hosts', (req, res) => memoJson(req, res, 'inv:hosts', (snap) => {
 api.get('/vms', (req, res) => memoJson(req, res, 'inv:vms', (snap) => {
   const q = req.query;
   let vms = applyFilters(snap.vms, q, snap, ['name', 'guestOS', 'ipAddress', 'host'], req.user);
-  if (q.powerState) vms = vms.filter((v) => v.powerState === q.powerState);
-  if (q.host) vms = vms.filter((v) => v.host === q.host); // 특정 ESXi 호스트의 VM만(호스트 상세 → VM 목록)
 
-  // Spec-based search: numeric range filters on VM sizing & live usage.
+  // 필터 단일 패스(v2.343 #7): 종전엔 조건마다 .filter 로 최대 14회 전체 재순회+중간 배열을
+  // 만들었다(5,000행 × 14패스/요청). 조건 판정과 GPU 집계를 한 루프에 합친다 — 의미는 동일
+  // (gpuCounts 는 GPU 필터 '이전' 집합 기준, gpu/gpuType 필터는 그 뒤 적용 — 기존 순서 보존).
   const num = (v) => (v === undefined || v === '' ? undefined : Number(v));
   const ranges = [
     ['cpuCount', num(q.vcpuMin), num(q.vcpuMax)],
@@ -215,24 +215,36 @@ api.get('/vms', (req, res) => memoJson(req, res, 'inv:vms', (snap) => {
     ['storageGB', num(q.diskMinGB), num(q.diskMaxGB)],
     ['cpuUsagePct', num(q.cpuUsageMin), num(q.cpuUsageMax)],
     ['memUsagePct', num(q.memUsageMin), num(q.memUsageMax)],
-  ];
-  for (const [field, min, max] of ranges) {
-    if (min != null && !Number.isNaN(min)) vms = vms.filter((v) => v[field] >= min);
-    if (max != null && !Number.isNaN(max)) vms = vms.filter((v) => v[field] <= max);
-  }
-  if (q.os) vms = vms.filter((v) => String(v.guestOS).toLowerCase().includes(String(q.os).toLowerCase()));
-  if (q.toolsStatus) vms = vms.filter((v) => v.toolsStatus === q.toolsStatus);
-
-  // GPU 할당 VM 집계(현재 필터 범위) + GPU 전용/종류 필터.
+  ].filter(([, min, max]) => (min != null && !Number.isNaN(min)) || (max != null && !Number.isNaN(max)));
+  const osq = q.os ? String(q.os).toLowerCase() : null;
+  const wantGpu = q.gpu === '1' || q.gpu === 'true';
   const gpuType = (v) => v.gpu?.type || null;
-  const gpuCounts = {
-    total: vms.filter((v) => v.gpu).length,
-    vgpu: vms.filter((v) => gpuType(v) === 'vgpu').length,
-    passthrough: vms.filter((v) => gpuType(v) === 'passthrough').length,
-    mixed: vms.filter((v) => gpuType(v) === 'mixed').length,
-  };
-  if (q.gpu === '1' || q.gpu === 'true') vms = vms.filter((v) => v.gpu);
-  if (q.gpuType) vms = vms.filter((v) => gpuType(v) === q.gpuType);
+  const gpuCounts = { total: 0, vgpu: 0, passthrough: 0, mixed: 0 };
+  const out = [];
+  for (const v of vms) {
+    if (q.powerState && v.powerState !== q.powerState) continue;
+    if (q.host && v.host !== q.host) continue; // 특정 ESXi 호스트의 VM만(호스트 상세 → VM 목록)
+    let hit = true;
+    for (const [field, min, max] of ranges) {
+      if (min != null && !Number.isNaN(min) && !(v[field] >= min)) { hit = false; break; }
+      if (max != null && !Number.isNaN(max) && !(v[field] <= max)) { hit = false; break; }
+    }
+    if (!hit) continue;
+    if (osq && !String(v.guestOS).toLowerCase().includes(osq)) continue;
+    if (q.toolsStatus && v.toolsStatus !== q.toolsStatus) continue;
+    // GPU 집계는 GPU 필터 이전 집합 기준(현재 필터 범위의 GPU 분포 표시용).
+    if (v.gpu) {
+      gpuCounts.total++;
+      const t = gpuType(v);
+      if (t === 'vgpu') gpuCounts.vgpu++;
+      else if (t === 'passthrough') gpuCounts.passthrough++;
+      else if (t === 'mixed') gpuCounts.mixed++;
+    }
+    if (wantGpu && !v.gpu) continue;
+    if (q.gpuType && gpuType(v) !== q.gpuType) continue;
+    out.push(v);
+  }
+  vms = out;
 
   if (q.sortBy) vms = sortBy(vms, q.sortBy, q.order);
   const limit = Math.max(1, Math.min(Number(q.limit) || 500, 5000)); // Math.max(1,…): 음수 limit 이 slice(0,-n)로 뒤에서 잘리는 것 방지
