@@ -4,6 +4,8 @@
 // 주기 저장(saveInterval)·스캔 중지(stopScan)는 이 컴포넌트가 자체 소유(원본과 동일) — putJson/postJson 직접 사용.
 import React, { useState } from 'react';
 import { putJson, postJson } from '../../api.js';
+// CSV 일괄 관리(v2.339) — 검증 드라이런 → 덮어쓰기 확인 → 실행. 공용 모달(수집 서버 CSV UX).
+import { CsvExportModal, CsvImportModal } from '../../components/CsvBulkModals.jsx';
 
 // ---- vCenter별 iDRAC 스캔 대역(주기 자동 발견) ------------------------------
 // 각 vCenter에 iDRAC IP 대역 + 계정을 저장하면, 주기 스캐너가 그 대역을 돌며 Dell iDRAC을
@@ -13,6 +15,7 @@ export function IdracScanRanges({ data, vcenters, datacenters = [], agents, busy
   const prog = st.progress;
   const dcName = (id) => (datacenters.find((d) => d.id === id)?.name || id);
   const [showPw, setShowPw] = useState(false); // 비밀번호 표시 토글 — 특수문자 입력을 눈으로 확인
+  const [csvModal, setCsvModal] = useState(null); // 'export' | 'import' | null — CSV 일괄 관리(v2.339)
   // 컬럼 정렬 — 헤더 클릭으로 asc/desc 토글. 기본은 법인명 오름차순.
   const [sort, setSort] = useState({ key: 'name', dir: 'asc' });
   const SORT_VAL = {
@@ -96,9 +99,31 @@ export function IdracScanRanges({ data, vcenters, datacenters = [], agents, busy
           <button className="logout-btn" style={{ padding: '8px 12px' }} disabled={busy || st.running} onClick={() => onScan()} title="활성화된 모든 법인 대역을 지금 스캔(백그라운드)">⚡ 지금 스캔(전체)</button>
           <button className="logout-btn" style={{ padding: '8px 12px', color: 'var(--red)' }} disabled={busy} onClick={stopScan}
             title="진행 중인 중앙 스캔을 중단하고, 대기 중인 위임 잡을 취소합니다(진행 중 위임 잡은 원격 중지 불가)">⏹ 스캔 중지</button>
+          <button className="logout-btn" style={{ padding: '8px 12px' }} title="스캔 대역 목록을 CSV 로 내려받기(기본 비밀번호 제외)" onClick={() => setCsvModal('export')}>⤓ CSV</button>
+          <button className="logout-btn" style={{ padding: '8px 12px' }} title="CSV 로 스캔 대역 일괄 등록/수정 — 검증(드라이런) 후 덮어쓰기 확인" onClick={() => setCsvModal('import')}>⤒ CSV 가져오기</button>
           <button className="login-btn" style={{ flex: 'none', padding: '8px 14px' }} disabled={busy} onClick={onNew}>+ 대역 추가</button>
         </div>
       </div>
+      {csvModal === 'export' && (
+        <CsvExportModal title="iDRAC 스캔 대역 CSV 내보내기" exportPath="/admin/idrac/scan-ranges/export.csv"
+          secretsLabel="비밀번호 포함(iDRAC 계정)"
+          description={<>법인별 스캔 대역(법인·서비스·대역·계정·스캔 주체·방식·활성·등록 모드)을 CSV 로 내려받습니다. 대역 여러 개는 한 셀에 세미콜론(;)으로 들어갑니다. 기본은 <b>비밀번호 제외</b>이며, 가져오기에서 비우면 기존 값이 유지됩니다.</>}
+          onClose={() => setCsvModal(null)} />
+      )}
+      {csvModal === 'import' && (
+        <CsvImportModal title="iDRAC 스캔 대역 CSV 가져오기" importPath="/admin/idrac/scan-ranges/import"
+          samplePath="/admin/idrac/scan-ranges/sample.csv"
+          description={<>헤더 행 필수(<code>datacenter</code>·<code>ranges</code>는 필수 — 법인은 등록된 이름/ID, 대역은 세미콜론(;) 구분 CIDR·범위·IP). <b>법인+서비스</b>가 같은 항목은 <b>덮어쓰기</b>로 판정되며 아래에서 명시적으로 허용해야 적용됩니다. 대역 문법은 실제 스캐너와 같은 파서로 검증됩니다. 양식은 <b>📄 샘플 CSV</b>로 받으세요.</>}
+          columns={[
+            { key: 'datacenter', label: '법인', render: (r) => <b style={{ color: 'var(--text)' }}>{r.datacenter}</b> },
+            { key: 'service', label: '서비스' },
+            { key: 'rangeCount', label: '대역 수', align: 'right' },
+            { key: 'hasPassword', label: '비밀번호', render: (r) => (r.hasPassword ? '교체' : '유지') },
+          ]}
+          overwriteLabel={(n) => <>기존 스캔 대역 <b>{n}건 덮어쓰기 허용</b> — 체크하지 않으면 해당 행은 건너뜁니다(대역·계정·방식이 CSV 값으로 교체됨)</>}
+          nameOf={(f) => f.datacenter || ''}
+          onClose={() => setCsvModal(null)} onDone={() => { setCsvModal(null); onReload?.(); }} />
+      )}
       {ivMsg && <div className="muted" style={{ fontSize: 12, marginBottom: 6, color: '#93c5fd' }}>{ivMsg}</div>}
 
       <div className="muted" style={{ fontSize: 12, lineHeight: 1.7, marginBottom: 8 }}>
