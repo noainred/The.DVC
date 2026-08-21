@@ -6,6 +6,7 @@ import React, { useEffect, useState } from 'react';
 import { fetchJson, postJson, putJson, delJson } from '../../api.js';
 import { Loading, ErrorBox, Kpi } from '../../components/ui.jsx';
 import EscClose from '../../components/EscClose.jsx';
+import { CsvExportModal, CsvImportModal } from '../../components/CsvBulkModals.jsx'; // CSV 일괄 관리(v2.341)
 import { fmtAgo } from '../../util/fmt.js';
 
 // 바이트 → 사람이 읽는 용량(TB/GB). 합산값이 크므로 TB 우선.
@@ -18,7 +19,7 @@ const fmtBytes = (b) => {
 };
 const pctColor = (p) => (p >= 90 ? 'var(--red)' : p >= 75 ? 'var(--amber)' : 'var(--green)');
 
-const EMPTY = { id: '', name: '', host: '', port: 22, username: 'root', password: '', agent: '', group: '', mounts: '/', enabled: true };
+const EMPTY = { id: '', name: '', host: '', port: 22, username: 'root', password: '', agent: '', dispatch: 'poll', group: '', mounts: '/', enabled: true };
 
 export default function BmStorageTool() {
   const [data, setData] = useState(null);
@@ -27,6 +28,7 @@ export default function BmStorageTool() {
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
   const [ivEdit, setIvEdit] = useState(null); // 주기 편집값(분) | null
+  const [csvModal, setCsvModal] = useState(null); // 'export' | 'import' | null — CSV 일괄 관리(v2.341)
 
   // 수동 로드 + 15초 재조회(저장/수집 직후 즉시 refresh 가 필요해 usePolling 대신 직접 관리).
   const refresh = () => fetchJson('/tools/bm-storage').then((d) => { setData(d); setError(null); }).catch((e) => setError(e.message));
@@ -55,7 +57,7 @@ export default function BmStorageTool() {
     try {
       const r = await postJson('/tools/bm-storage/collect', {});
       if (!r.ok) setMsg(r.reason || '수집이 이미 진행 중입니다.');
-      else setMsg(`수집 완료 — 성공 ${r.okCount} · 오류 ${r.errors} (${Math.round(r.ms / 1000)}초)`);
+      else setMsg(`수집 완료 — 성공 ${r.okCount} · 오류 ${r.errors}${r.queued ? ` · 폴링 위임 대기 ${r.queued}(엣지 회신 후 반영)` : ''} (${Math.round(r.ms / 1000)}초)`);
       refresh();
     } catch (e) { setMsg(e.message); } finally { setBusy(false); }
   };
@@ -97,9 +99,33 @@ export default function BmStorageTool() {
             {status.lastRunAt ? <> · 최근 수집 {fmtAgo(status.lastRunAt)}</> : ' · 아직 수집 전'}
           </span>
           <button className="logout-btn" style={{ padding: '8px 14px' }} disabled={busy || status.running} onClick={collectNow}>{status.running ? '수집 중…' : '⚡ 지금 수집'}</button>
+          <button className="logout-btn" style={{ padding: '8px 14px' }} title="서버 목록을 CSV 로 내려받기(기본 비밀번호 제외)" onClick={() => setCsvModal('export')}>⤓ CSV</button>
+          <button className="logout-btn" style={{ padding: '8px 14px' }} title="CSV 로 다수 서버 일괄 등록/수정 — 검증(드라이런) 후 덮어쓰기 확인" onClick={() => setCsvModal('import')}>⤒ CSV 가져오기</button>
           <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={() => setForm({ ...EMPTY })}>+ 서버 추가</button>
         </div>
       </div>
+      {csvModal === 'export' && (
+        <CsvExportModal title="베어메탈 스토리지 서버 CSV 내보내기" exportPath="/tools/bm-storage/export.csv"
+          secretsLabel="비밀번호 포함(SSH 계정)"
+          description={<>등록 서버(이름·호스트·포트·계정·그룹·엣지·방식·마운트·활성)를 CSV 로 내려받습니다. 마운트 여러 개는 한 셀에 세미콜론(;) 구분. 기본은 <b>비밀번호 제외</b>이며, 가져오기에서 비우면 기존 값이 유지됩니다.</>}
+          onClose={() => setCsvModal(null)} />
+      )}
+      {csvModal === 'import' && (
+        <CsvImportModal title="베어메탈 스토리지 서버 CSV 가져오기" importPath="/tools/bm-storage/import"
+          samplePath="/tools/bm-storage/sample.csv"
+          description={<>헤더 행 필수(<code>host</code>·<code>mounts</code>는 필수 — 마운트는 세미콜론(;) 구분 절대경로). <b>host+포트+계정</b>이 같은 서버는 <b>덮어쓰기</b>로 판정되며 아래에서 명시적으로 허용해야 적용됩니다. <b>agent 는 등록된 수집 서버(원격) 이름만</b> 허용됩니다(오타 시 오류). 양식은 <b>📄 샘플 CSV</b>로 받으세요.</>}
+          columns={[
+            { key: 'name', label: '이름', render: (r) => <b style={{ color: 'var(--text)' }}>{r.name}</b> },
+            { key: 'host', label: 'host' },
+            { key: 'username', label: '계정' },
+            { key: 'agent', label: '엣지', render: (r) => r.agent || '중앙' },
+            { key: 'mountCount', label: '마운트', align: 'right' },
+            { key: 'hasPassword', label: '비밀번호', render: (r) => (r.hasPassword ? '교체' : '유지') },
+          ]}
+          overwriteLabel={(n) => <>기존 서버 <b>{n}건 덮어쓰기 허용</b> — 체크하지 않으면 해당 행은 건너뜁니다(그룹·마운트·방식이 CSV 값으로 교체됨)</>}
+          nameOf={(f) => f.host || ''}
+          onClose={() => setCsvModal(null)} onDone={() => { setCsvModal(null); refresh(); }} />
+      )}
       {msg && <div className="muted" style={{ fontSize: 12.5, marginBottom: 8, color: '#93c5fd' }}>{msg}</div>}
       {error && <div className="muted" style={{ fontSize: 12, marginBottom: 8, color: 'var(--amber)' }}>⚠ 일시 조회 오류: {error}</div>}
 
@@ -149,7 +175,9 @@ export default function BmStorageTool() {
                     <td><b>{s.name}</b>{!s.enabled && <span className="badge gray" style={{ marginLeft: 6 }}>비활성</span>}</td>
                     <td className="muted" style={{ fontSize: 12 }}>{s.host}</td>
                     <td className="muted" style={{ fontSize: 12 }}>{s.group || '—'}</td>
-                    <td className="muted" style={{ fontSize: 12 }}>{s.agent ? <span className="badge blue">{s.agent}</span> : '중앙 직접'}</td>
+                    <td className="muted" style={{ fontSize: 12 }}>{s.agent
+                      ? <><span className="badge blue">{s.agent}</span> <span className={`badge ${cfgOf(s.id)?.dispatch === 'push' ? 'green' : 'purple'}`} style={{ fontSize: 10 }}>{cfgOf(s.id)?.dispatch === 'push' ? 'PUSH' : '폴링'}</span></>
+                      : '중앙 직접'}</td>
                     <td style={{ textAlign: 'right' }} title={(s.mounts || []).map((m) => `${m.mount}: ${fmtBytes(m.usedBytes)}/${fmtBytes(m.totalBytes)}`).join('\n') || '아직 수집 전'}>
                       {s.mountCount}{s.missing?.length ? <span style={{ color: 'var(--amber)', fontSize: 11 }} title={`미발견 마운트: ${s.missing.join(', ')}`}> (미발견 {s.missing.length})</span> : ''}
                     </td>
@@ -187,12 +215,21 @@ export default function BmStorageTool() {
               <label>SSH 포트<input className="input" type="number" min={1} max={65535} value={form.port} onChange={(e) => setForm({ ...form, port: e.target.value })} /></label>
               <label>계정<input className="input" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} /></label>
               <label>비밀번호<input className="input" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder={form.id ? '비우면 기존 유지' : ''} autoComplete="new-password" /></label>
-              <label>수집 주체
+              <label>수집 주체 <span className="muted" style={{ fontSize: 11 }}>(등록된 수집 서버(원격)에서 선택)</span>
                 <select className="input" value={form.agent} onChange={(e) => setForm({ ...form, agent: e.target.value })}>
                   <option value="">중앙 직접(SSH)</option>
                   {(agents || []).map((a) => <option key={a} value={a}>엣지 위임 — {a}</option>)}
                 </select>
               </label>
+              {form.agent
+                ? <label>전달 방식 <span className="muted" style={{ fontSize: 11 }}>(iDRAC 스캔과 동일)</span>
+                  <select className="input" value={form.dispatch === 'push' ? 'push' : 'poll'} onChange={(e) => setForm({ ...form, dispatch: e.target.value })}
+                    title="폴링: 엣지가 중앙으로 폴링해 잡 인출(NAT 뒤 엣지 표준 — CENTRAL_URL 필요) · PUSH: 중앙이 수집 서버 URL 로 직접 전송">
+                    <option value="poll">에이전트 폴링(기본)</option>
+                    <option value="push">중앙→엣지 직접(PUSH)</option>
+                  </select>
+                </label>
+                : <span />}
               <label className="flex gap" style={{ alignItems: 'center', marginTop: 18, cursor: 'pointer' }}>
                 <input type="checkbox" checked={form.enabled !== false} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} /> 수집 활성
               </label>

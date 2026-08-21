@@ -59,19 +59,33 @@ export function saveBmSettings(body = {}) {
   return { ok: true, settings: getBmSettings() };
 }
 
+/**
+ * 저장과 동일 규칙의 입력 검증(단일 소스) — CSV 드라이런(v2.341)도 이 함수를 쓴다.
+ * 통과 시 null, 실패 시 사유 문자열. (정규화 값은 saveBmServer 가 다시 계산 — 검증은 순수하게)
+ */
+export function bmServerInputIssue(body = {}) {
+  const host = String(body.host || '').trim();
+  if (!host) return 'host는 필수입니다.';
+  if (host.length > 253 || /[\s'"`;|&<>$\\]/.test(host)) return 'host에 사용할 수 없는 문자가 있습니다.';
+  const port = body.port === undefined || body.port === '' ? 22 : Number(body.port);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return 'SSH 포트가 올바르지 않습니다.';
+  const username = String(body.username ?? 'root').trim() || 'root';
+  if (/[\s'"`;|&<>$\\]/.test(username)) return '계정에 사용할 수 없는 문자가 있습니다.';
+  const { mounts, errors } = sanitizeMounts(body.mounts);
+  if (errors.length) return errors[0];
+  if (!mounts.length) return '측정할 마운트 포인트를 1개 이상 입력하세요(예: / 또는 /data).';
+  if (mounts.length > 64) return '마운트 포인트는 서버당 최대 64개입니다.';
+  return null;
+}
+
 /** 추가/수정 — id 있으면 수정(빈 비밀번호는 기존 유지), 없으면 신규. 검증은 저장과 단일 소스. */
 export function saveBmServer(body = {}) {
+  const issue = bmServerInputIssue(body);
+  if (issue) return { ok: false, reason: issue };
   const host = String(body.host || '').trim();
-  if (!host) return { ok: false, reason: 'host는 필수입니다.' };
-  if (host.length > 253 || /[\s'"`;|&<>$\\]/.test(host)) return { ok: false, reason: 'host에 사용할 수 없는 문자가 있습니다.' };
   const port = body.port === undefined || body.port === '' ? 22 : Number(body.port);
-  if (!Number.isInteger(port) || port < 1 || port > 65535) return { ok: false, reason: 'SSH 포트가 올바르지 않습니다.' };
   const username = String(body.username ?? 'root').trim() || 'root';
-  if (/[\s'"`;|&<>$\\]/.test(username)) return { ok: false, reason: '계정에 사용할 수 없는 문자가 있습니다.' };
-  const { mounts, errors } = sanitizeMounts(body.mounts);
-  if (errors.length) return { ok: false, reason: errors[0] };
-  if (!mounts.length) return { ok: false, reason: '측정할 마운트 포인트를 1개 이상 입력하세요(예: / 또는 /data).' };
-  if (mounts.length > 64) return { ok: false, reason: '마운트 포인트는 서버당 최대 64개입니다.' };
+  const { mounts } = sanitizeMounts(body.mounts);
 
   const data = load();
   const existing = body.id ? data.servers.find((s) => s.id === body.id) : null;
@@ -82,6 +96,8 @@ export function saveBmServer(body = {}) {
   server.username = username;
   server.name = String(body.name || '').trim() || host;
   server.agent = String(body.agent || '').trim();
+  // 위임 전달 방식(v2.341): poll(에이전트 폴링 — NAT 뒤 엣지 표준, iDRAC/IP스캔과 동일) | push(중앙→엣지 직접).
+  server.dispatch = body.dispatch === 'push' ? 'push' : 'poll';
   server.group = String(body.group || '').trim();
   server.mounts = mounts;
   server.enabled = body.enabled !== false;
