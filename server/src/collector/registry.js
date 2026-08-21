@@ -272,6 +272,16 @@ function normalize(body, existing = null) {
   return [entry, null];
 }
 
+/**
+ * CSV 가져오기 드라이런용 검증(v2.338) — 실제 저장(add/update)과 **같은 normalize 규칙**을
+ * 저장 없이 돌려 오류 문구만 돌려준다(null=통과). 규칙을 복제하지 않아 드라이런 통과 =
+ * 실제 저장 성공이 보장된다(SSRF/URL/필수값 검증 포함).
+ */
+export function collectorInputIssue(body, existing = null) {
+  const [, err] = normalize(body, existing);
+  return err || null;
+}
+
 // managed=true: 관리자가 UI에서 직접 등록/수정한 항목(=수동 고정). 엣지 자기등록이 URL/토큰을
 // 덮어쓰지 않는다(NAT/포트포워딩으로 관리자가 URL·토큰을 실제 값과 다르게 지정하는 경우 보존).
 export function addCollector(body, { managed = false } = {}) {

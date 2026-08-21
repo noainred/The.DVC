@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { fetchJson, postJson, putJson, delJson } from '../api.js';
+import { fetchJson, postJson, putJson, delJson, downloadFile } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import EscClose from '../components/EscClose.jsx';
 
@@ -22,6 +22,7 @@ export default function Collectors() {
   const [pwResult, setPwResult] = useState(null); // 일괄 변경 결과 { total, succeeded, results, central }
   const [pwBusy, setPwBusy] = useState(false);
   const [dcs, setDcs] = useState([]); // 데이터센터(법인) 목록 — 등록 폼 콤보박스용
+  const [csvModal, setCsvModal] = useState(null); // 'export' | 'import' | null — CSV 일괄 관리(v2.338)
 
   const load = async () => {
     try { setData(await fetchJson('/admin/collectors')); setError(null); }
@@ -251,9 +252,14 @@ export default function Collectors() {
           <button className="logout-btn" style={{ padding: '9px 14px' }} disabled={busy} onClick={() => upgrade(null)}>모두 업그레이드</button>
           <button className="logout-btn" style={{ padding: '9px 14px' }} disabled={busy || !enabledCount} title="모든(또는 선택한) 엣지 포탈의 로컬 계정 비밀번호를 한 번에 변경" onClick={() => { setPwForm({ username: 'admin', password: '', confirm: '', includeCentral: false }); setPwResult(null); }}>🔑 엣지 비번 일괄 변경</button>
           <button className="logout-btn" style={{ padding: '9px 14px', color: 'var(--red)', borderColor: erroredCount ? 'var(--red)' : undefined }} disabled={busy || !erroredCount} title="상태가 '오류'인 수집 서버를 일괄 삭제" onClick={removeErrored}>오류 서버 일괄 삭제{erroredCount ? ` (${erroredCount})` : ''}</button>
+          <button className="logout-btn" style={{ padding: '9px 14px' }} title="등록 수집 서버 목록을 CSV 로 내려받기(기본 토큰 제외)" onClick={() => setCsvModal('export')}>⤓ CSV</button>
+          <button className="logout-btn" style={{ padding: '9px 14px' }} title="CSV 로 수집 서버 일괄 등록/수정 — 검증(드라이런) 후 덮어쓰기 확인" onClick={() => setCsvModal('import')}>⤒ CSV 가져오기</button>
           <button className="login-btn" style={{ flex: 'none', padding: '9px 16px' }} onClick={openAdd}>+ 수집 서버 추가</button>
         </div>
       </div>
+
+      {csvModal === 'export' && <CollectorsCsvExportModal onClose={() => setCsvModal(null)} />}
+      {csvModal === 'import' && <CollectorsCsvImportModal onClose={() => setCsvModal(null)} onDone={() => { setCsvModal(null); load(); }} />}
 
       {banner && (
         <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 8, fontSize: 13,
@@ -601,6 +607,173 @@ function IngestStats({ data, onReset }) {
         <b>해석</b> — <b>평균 크기</b>가 크면 그 사이트 인벤토리(특히 VM 수)가 많은 것 ·
         <b>평균 간격</b>이 짧으면(예: 수초) push 주기가 과도(<code>AGENT_INVENTORY_INTERVAL_MS</code> 확인) ·
         <b>무압축</b>이면 에이전트가 구버전(gzip 미적용 → 업그레이드 시 ~1/10). ⚠는 평균 대비 3배↑.
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 수집 서버 CSV 내보내기 모달(v2.338) — 기본은 토큰 제외. '토큰 포함'은 자격증명 일괄 덤프라
+ * 설정 소유자(settingsOwners)만 서버가 허용하고 감사로그가 남는다(스토리지 비밀번호 포함과 동일 규칙).
+ */
+function CollectorsCsvExportModal({ onClose }) {
+  const [withTok, setWithTok] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const run = async () => {
+    setBusy(true); setErr(null);
+    try { await downloadFile(`/admin/collectors/export.csv${withTok ? '?tokens=1' : ''}`); onClose(); }
+    catch (e) { setErr(e.message); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <EscClose onClose={onClose} />
+      <div className="modal card" style={{ maxWidth: 520 }}>
+        <h3 style={{ marginTop: 0 }}>수집 서버 CSV 내보내기</h3>
+        <div className="muted" style={{ fontSize: 12.5, lineHeight: 1.7 }}>
+          등록된 수집 서버(id·표시명·URL·법인·vCenter 매핑·활성)를 CSV 로 내려받습니다.
+          기본은 <b>토큰 제외</b>(빈 컬럼)이며, 가져오기에서 토큰을 비우면 기존 값이 유지되므로
+          왕복 편집에 토큰이 필요 없습니다.
+        </div>
+        <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12.5, margin: '12px 0', cursor: 'pointer' }}>
+          <input type="checkbox" checked={withTok} onChange={(e) => setWithTok(e.target.checked)} />
+          토큰 포함 — <b style={{ color: 'var(--amber)' }}>자격증명 평문 덤프</b>(설정 소유자만 가능 · 감사로그 기록 · 파일을 자격증명과 동급으로 보관)
+        </label>
+        {err && <div style={{ color: 'var(--red)', fontSize: 12.5, marginBottom: 8 }}>⚠ {err}</div>}
+        <div className="flex gap" style={{ justifyContent: 'flex-end' }}>
+          <button className="tab" style={{ padding: '8px 16px' }} onClick={onClose}>닫기</button>
+          <button className="login-btn" style={{ padding: '8px 18px' }} disabled={busy} onClick={run}>{busy ? '내려받는 중…' : '⤓ 내려받기'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 수집 서버 CSV 가져오기 모달(v2.338) — 2단계: ① 검증(드라이런 — 문법·필수값·URL/SSRF·파일 내
+ * 중복을 실제 저장과 같은 규칙으로 판정) ② 실행. 기존 id 와 겹치는 행은 '덮어쓰기'로 표시되고,
+ * 아래 체크박스로 명시 허용해야만 적용된다(미허용 시 해당 행은 건너뜀 — 사용자 요구).
+ */
+function CollectorsCsvImportModal({ onClose, onDone }) {
+  const fileRef = useRef(null);
+  const [text, setText] = useState('');
+  const [check, setCheck] = useState(null);        // 드라이런 결과 { report, summary, total }
+  const [checkedText, setCheckedText] = useState(null); // 검증 시점 본문(변경 감지)
+  const [allowOverwrite, setAllowOverwrite] = useState(false);
+  const [result, setResult] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const onFile = (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = () => { setText(String(r.result || '')); setCheck(null); setCheckedText(null); setResult(null); };
+    r.readAsText(f);
+  };
+  const verify = async () => {
+    setBusy(true); setErr(null); setResult(null); setCheck(null); setAllowOverwrite(false);
+    try {
+      const r = await postJson('/admin/collectors/import', { csv: text, dryRun: true });
+      if (r.ok === false) setErr(r.reason);
+      else { setCheck(r); setCheckedText(text); }
+    } catch (e) { setErr(e.message); } finally { setBusy(false); }
+  };
+  const run = async () => {
+    setBusy(true); setErr(null); setResult(null);
+    try {
+      const r = await postJson('/admin/collectors/import', { csv: text, overwrite: allowOverwrite });
+      if (r.ok === false) setErr(r.reason);
+      else setResult(r);
+    } catch (e) { setErr(e.message); } finally { setBusy(false); }
+  };
+  const verified = check && checkedText === text; // 검증 후 내용이 바뀌면 재검증 요구
+  const actLabel = { add: '추가', overwrite: '덮어쓰기', error: '오류' };
+  return (
+    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}>
+      <EscClose onClose={() => { if (!busy) onClose(); }} />
+      <div className="modal card" style={{ maxWidth: 780 }}>
+        <h3 style={{ marginTop: 0 }}>수집 서버 CSV 가져오기</h3>
+        <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
+          헤더 행 필수(<code>id</code>·<code>url</code>은 필수, name 비우면 id 사용). <b>id</b>(대소문자 무시)가
+          같은 수집 서버는 <b>덮어쓰기</b>로 판정되며 아래에서 명시적으로 허용해야 적용됩니다.
+          token 열은 값이 있으면 교체, 비우면 기존 값을 유지합니다. 양식은 <b>📄 샘플 CSV</b>로 받으세요.
+        </div>
+        <div className="flex gap wrap" style={{ marginBottom: 8 }}>
+          <input ref={fileRef} type="file" accept=".csv,text/csv" style={{ display: 'none' }} onChange={onFile} />
+          <button className="tab" style={{ padding: '6px 12px', fontSize: 12 }} onClick={() => fileRef.current?.click()}>📁 CSV 파일 선택</button>
+          <button className="tab" style={{ padding: '6px 12px', fontSize: 12 }}
+            onClick={() => downloadFile('/admin/collectors/sample.csv').catch((e) => setErr(e.message))}>📄 샘플 CSV</button>
+        </div>
+        <textarea className="input" style={{ width: '100%', minHeight: 130, fontFamily: 'ui-monospace, monospace', fontSize: 12 }}
+          value={text} onChange={(e) => { setText(e.target.value); setResult(null); }} placeholder="여기에 CSV 를 붙여넣거나 위에서 파일을 선택하세요." />
+        {err && <div style={{ color: 'var(--red)', fontSize: 12.5, marginTop: 8 }}>⚠ {err}</div>}
+
+        {/* 검증(드라이런) 결과 — 행별 추가/덮어쓰기/오류 판정 표 */}
+        {check && (
+          <div className="card" style={{ padding: 10, marginTop: 10, fontSize: 12.5 }}>
+            <div style={{ marginBottom: 6 }}>
+              검증 결과: 총 {check.total}행 — <span style={{ color: 'var(--green)' }}>추가 {check.summary.add}</span>
+              {' · '}<span style={{ color: 'var(--amber)' }}>덮어쓰기 {check.summary.overwrite}</span>
+              {' · '}<span style={{ color: check.summary.error ? 'var(--red)' : 'var(--text-dim)' }}>오류 {check.summary.error}</span>
+              {' · '}토큰 교체 {check.summary.withToken}건
+              {!verified && <b style={{ color: 'var(--amber)', marginLeft: 8 }}>⚠ 내용이 변경됨 — 재검증 필요</b>}
+            </div>
+            <div className="table-wrap" style={{ maxHeight: '26vh' }}>
+              <table>
+                <thead><tr><th style={{ textAlign: 'right' }}>행</th><th>id</th><th>URL</th><th>동작</th><th>토큰</th><th>문제</th></tr></thead>
+                <tbody>
+                  {check.report.map((r, i) => (
+                    <tr key={i}>
+                      <td style={{ textAlign: 'right' }} className="muted">{r.line}</td>
+                      <td><b>{r.id}</b></td>
+                      <td className="muted" style={{ fontSize: 11.5 }}>{r.url}</td>
+                      <td><span className={`badge ${r.action === 'add' ? 'green' : r.action === 'overwrite' ? 'amber' : 'red'}`}>{actLabel[r.action] || r.action}</span></td>
+                      <td className="muted" style={{ fontSize: 11.5 }}>{r.hasToken ? '교체' : '유지'}</td>
+                      <td style={{ color: 'var(--red)', fontSize: 11.5 }}>{r.reason || ''}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {/* 덮어쓰기 확인(사용자 요구) — 명시 체크 없이는 기존 항목을 건드리지 않는다. */}
+            {verified && check.summary.overwrite > 0 && !result && (
+              <label className="flex gap" style={{ alignItems: 'center', fontSize: 12.5, marginTop: 8, cursor: 'pointer', color: 'var(--amber)' }}>
+                <input type="checkbox" checked={allowOverwrite} onChange={(e) => setAllowOverwrite(e.target.checked)} />
+                기존 수집 서버 <b>{check.summary.overwrite}건 덮어쓰기 허용</b> — 체크하지 않으면 해당 행은 건너뜁니다(URL·법인·매핑이 CSV 값으로 교체됨)
+              </label>
+            )}
+          </div>
+        )}
+
+        {result && (
+          <div className="card" style={{ padding: 10, marginTop: 10, fontSize: 12.5 }}>
+            <div>총 {result.total}행 — <span style={{ color: 'var(--green)' }}>추가 {result.added}</span>
+              {' · '}<span style={{ color: 'var(--amber)' }}>덮어쓰기 {result.overwritten}</span>
+              {result.skipped?.length ? <> · <span className="muted">건너뜀 {result.skipped.length}</span></> : ''}
+              {result.failed?.length ? <> · <span style={{ color: 'var(--red)' }}>실패 {result.failed.length}</span></> : ''}</div>
+            {result.skipped?.length > 0 && (
+              <ul style={{ margin: '6px 0 0', paddingLeft: 18 }} className="muted">
+                {result.skipped.map((f, i) => <li key={i}>행 {f.line} ({f.id}): {f.reason}</li>)}
+              </ul>
+            )}
+            {result.failed?.length > 0 && (
+              <ul style={{ margin: '6px 0 0', paddingLeft: 18, color: 'var(--red)' }}>
+                {result.failed.map((f, i) => <li key={i}>행 {f.line} ({f.id}): {f.reason}</li>)}
+              </ul>
+            )}
+          </div>
+        )}
+        <div className="flex gap" style={{ marginTop: 12, justifyContent: 'flex-end' }}>
+          {result
+            ? <button className="login-btn" style={{ padding: '8px 18px' }} onClick={onDone}>완료(목록 새로고침)</button>
+            : <>
+              <button className="tab" style={{ padding: '8px 16px' }} disabled={busy || !text.trim()} onClick={verify}>{busy ? '검사 중…' : '1) 검증(드라이런)'}</button>
+              <button className="login-btn" style={{ padding: '8px 18px' }} disabled={busy || !verified}
+                title={verified ? (check.summary.error ? '오류 행은 건너뛰고 정상 행만 처리됩니다' : '') : '먼저 검증을 통과하세요'}
+                onClick={run}>{busy ? '가져오는 중…' : '2) 가져오기 실행'}</button>
+            </>}
+        </div>
       </div>
     </div>
   );
