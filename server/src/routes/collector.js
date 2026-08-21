@@ -14,6 +14,7 @@ import { upgradeFromBundleBytes, restartProcess } from '../upgrade/upgrade.js';
 import { setLocalPassword } from '../auth/auth.js';
 import { logAudit } from '../audit.js';
 import { runLocalIdracScan } from '../idrac/localScan.js';
+import { collectMany as bmstorCollectMany } from '../bmstor/collect.js';
 import { checkpointConfigDbs } from '../upgrade/dbCheckpoint.js';
 
 export const collectorRouter = Router();
@@ -104,6 +105,24 @@ collectorRouter.post('/idrac-scan', express.json({ limit: '256kb' }), async (req
     });
     logAudit({ user: 'central-portal', action: '중앙 PUSH iDRAC 스캔', target: String(b.datacenterId || '') || '(대역)', detail: `발견 ${r.foundCount || 0} · 등록 ${r.registered || 0}`, ip: req.ip || '' });
     res.json({ ok: true, ...r });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: e.message });
+  }
+});
+
+// 베어메탈 스토리지 위임 수집(v2.340) — 중앙이 엣지에 서버 목록(SSH 자격증명+마운트)을 보내면
+// 엣지가 현지에서 df 수집 후 동기 반환한다(idrac-scan PUSH 와 같은 토큰 게이트/흐름).
+// 자격증명은 저장하지 않고 이 요청 처리에만 사용, 응답·로그에 비밀번호를 남기지 않는다.
+collectorRouter.post('/bmstor-collect', express.json({ limit: '512kb' }), async (req, res) => {
+  if (!config.collector.token) { logCollectorDeny(req, 'bmstor-collect'); return res.status(404).json({ ok: false, reason: 'collector 비활성화(COLLECTOR_TOKEN 미설정)' }); }
+  if (!checkToken(req)) { logCollectorDeny(req, 'bmstor-collect'); return res.status(403).json({ ok: false, reason: '토큰 불일치' }); }
+  const servers = Array.isArray(req.body?.servers) ? req.body.servers : [];
+  if (!servers.length) return res.status(400).json({ ok: false, reason: 'servers 배열이 필요합니다.' });
+  if (servers.length > 200) return res.status(400).json({ ok: false, reason: '한 번에 최대 200대까지입니다.' });
+  try {
+    const results = await bmstorCollectMany(servers);
+    logAudit({ user: 'central-portal', action: '중앙 PUSH 베어메탈 스토리지 수집', detail: `서버 ${servers.length} · 성공 ${results.filter((r) => r.ok).length}`, ip: req.ip || '' });
+    res.json({ ok: true, results });
   } catch (e) {
     res.status(500).json({ ok: false, reason: e.message });
   }
