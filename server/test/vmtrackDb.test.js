@@ -113,3 +113,60 @@ test('DB 왕복(v2.347): 전원 전환 카운터·changes kind 저장/조회', {
   assert.equal(onRow.host, 'esx1', '전환 VM 도 위치 정보 포함(클릭 상세)');
   assert.equal(onRow.datastore, 'ds1');
 });
+
+test('DB 왕복(v2.348): 데이터스토어 집계 열 + ds_changes/ds_roster', { skip: !sqliteOk ? 'node:sqlite 미지원 런타임' : false }, async () => {
+  const dsLive = [
+    { dsId: 'vc3:d1', name: 'd1', type: 'vsan', capGB: 1000, usedGB: 450, freeGB: 550, usagePct: 45 },
+    { dsId: 'vc3:d2', name: 'd2', type: 'NFS', capGB: 2000, usedGB: 100, freeGB: 1900, usagePct: 5 },
+  ];
+  // 1차: 기준선(변경 없음)
+  let r = await db.commitSnapshot({
+    slot: '2026-08-24T12', ts: 20_000,
+    perVc: [{
+      vcenterId: 'vc3', total: 0, onCount: 0, added: [], removed: [], poweredOn: [], poweredOff: [], live: [],
+      ds: { count: 2, capGB: 3000, usedGB: 550, added: [], removed: [], changed: [], live: dsLive },
+      baseline: true,
+    }],
+    totalRow: { total: 0, onCount: 0, added: 0, removed: 0, poweredOn: 0, poweredOff: 0, dsCount: 2, dsCapGB: 3000, dsUsedGB: 550, baseline: true },
+  });
+  assert.equal(r.ok, true);
+  let rows = await db.readSeries({ vcenterId: 'vc3', sinceTs: 0 });
+  assert.equal(rows[0].ds_count, 2);
+  assert.equal(rows[0].ds_cap_gb, 3000);
+  assert.equal(rows[0].ds_used_gb, 550);
+
+  const dsRoster = await db.loadDsRoster('vc3');
+  assert.equal(dsRoster.size, 2, 'DS 로스터가 다음 diff 기준으로 저장');
+  assert.equal(dsRoster.get('vc3:d1').used_gb, 450);
+
+  // 2차: d1 사용량 +50GB, d2 연결 해제
+  r = await db.commitSnapshot({
+    slot: '2026-08-25T00', ts: 21_000,
+    perVc: [{
+      vcenterId: 'vc3', total: 0, onCount: 0, added: [], removed: [], poweredOn: [], poweredOff: [], live: [],
+      ds: {
+        count: 1, capGB: 1000, usedGB: 500,
+        added: [], removed: [dsLive[1]],
+        changed: [{ ...dsLive[0], usedGB: 500, prevUsedGB: 450, deltaGB: 50 }],
+        live: [{ ...dsLive[0], usedGB: 500 }],
+      },
+      baseline: false,
+    }],
+    totalRow: { total: 0, onCount: 0, added: 0, removed: 0, poweredOn: 0, poweredOff: 0, dsCount: 1, dsCapGB: 1000, dsUsedGB: 500, baseline: false },
+  });
+  assert.equal(r.ok, true);
+
+  const dsChanges = await db.readDsChanges({ slot: '2026-08-25T00' });
+  assert.equal(dsChanges.length, 2);
+  const changed = dsChanges.find((c) => c.kind === 'ds_changed');
+  assert.equal(changed.name, 'd1');
+  assert.equal(changed.delta_gb, 50);
+  assert.equal(changed.prev_used_gb, 450, '상세에서 이전→현재 표시용');
+  const removed = dsChanges.find((c) => c.kind === 'ds_removed');
+  assert.equal(removed.name, 'd2');
+  assert.equal(removed.used_gb, 100, '해제된 DS 는 마지막 관측치');
+
+  const roster2 = await db.loadDsRoster('vc3');
+  assert.deepEqual([...roster2.keys()], ['vc3:d1'], '해제된 DS 는 로스터에서 제거');
+  assert.equal(roster2.get('vc3:d1').used_gb, 500, '변경분 반영');
+});

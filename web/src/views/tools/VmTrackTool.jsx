@@ -24,6 +24,7 @@ export default function VmTrackTool() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
   const [detail, setDetail] = useState(null); // { title, snapId?, slot? } — 증감 클릭 상세 모달
+  const [dsDetail, setDsDetail] = useState(null); // 데이터스토어 사용량 변경 상세(v2.348)
 
   const load = () => fetchJson('/tools/vm-track', { days, vcenterId })
     .then((d) => { setData(d); setError(null); })
@@ -36,12 +37,17 @@ export default function VmTrackTool() {
   if (!data) return <Loading />;
 
   const points = data.points || [];
-  const chart = points.map((p) => ({
+  const chart = points.map((p, i, arr) => ({
     ...p,
     label: slotLabel(p.slot),
     delta: (p.added || 0) - (p.removed || 0),
     // 꺼짐 수 — 서버가 offCount 를 주지만 구버전 응답 호환으로 total-on 폴백.
     offCount: p.offCount ?? (p.total - p.onCount),
+    // 데이터스토어(v2.348): 차트는 TB 로 그린다(수백 TB 규모라 GB 축은 읽기 어렵다).
+    dsCapTB: Math.round(((p.dsCapGB || 0) / 1024) * 10) / 10,
+    dsUsedTB: Math.round(((p.dsUsedGB || 0) / 1024) * 10) / 10,
+    // 슬롯 간 사용량 증감(GB) — 첫 점은 기준이 없어 0.
+    dsDeltaGB: i > 0 ? Math.round(((p.dsUsedGB || 0) - (arr[i - 1].dsUsedGB || 0)) * 10) / 10 : 0,
   }));
   const last = points[points.length - 1] || null;
   const first = points[0] || null;
@@ -50,6 +56,9 @@ export default function VmTrackTool() {
   const sumRemoved = points.reduce((a, p) => a + (p.removed || 0), 0);
   const sumOn = points.reduce((a, p) => a + (p.poweredOn || 0), 0);
   const sumOff = points.reduce((a, p) => a + (p.poweredOff || 0), 0);
+  // 데이터스토어(v2.348): TB 환산은 화면에서만(저장은 GB REAL). 기간 사용량 증감 = 마지막 - 처음.
+  const tb = (gb) => Math.round(((Number(gb) || 0) / 1024) * 10) / 10;
+  const dsNet = last && first ? Math.round(((last.dsUsedGB || 0) - (first.dsUsedGB || 0)) * 10) / 10 : 0;
   const bySlotVc = data.bySlotVc || {};
 
   const snapshotNow = async () => {
@@ -104,6 +113,13 @@ export default function VmTrackTool() {
           meta={last ? `켜짐 ${last.total ? Math.round((last.onCount / last.total) * 100) : 0}%` : ''} />
         <Kpi label={`${days}일 전원 On/Off 전환`} value={`↑${sumOn.toLocaleString()} / ↓${sumOff.toLocaleString()}`}
           meta={data.poller?.lastResult ? `최근 스냅샷 ${fmtAgo(data.poller.lastResult.at)}` : `스냅샷 ${(data.meta?.n || 0).toLocaleString()}건`} />
+        {/* 데이터스토어 사용량(v2.348) */}
+        <Kpi label="데이터스토어 사용량" value={last ? `${tb(last.dsUsedGB)} / ${tb(last.dsCapGB)} TB` : '—'}
+          pct={last ? Math.round(last.dsUsagePct || 0) : undefined}
+          meta={last ? `${(last.dsCount || 0).toLocaleString()}개 · 가용 ${tb((last.dsCapGB || 0) - (last.dsUsedGB || 0))} TB` : ''} />
+        <Kpi label={`${days}일 사용량 증감`} value={`${dsNet >= 0 ? '+' : ''}${tb(dsNet)} TB`}
+          accent={dsNet > 0 ? 'var(--amber)' : dsNet < 0 ? 'var(--green)' : undefined}
+          meta={`${dsNet >= 0 ? '+' : ''}${dsNet.toLocaleString()} GB`} />
       </div>
 
       {points.length === 0 ? (
@@ -175,6 +191,48 @@ export default function VmTrackTool() {
             </div>
           </div>
 
+          {/* 데이터스토어 용량/사용량 추이(v2.348, 사용자 요구) — vCenter 에 연결된 DS 합계 */}
+          <div className="card" style={{ padding: 12, marginBottom: 12 }}>
+            <b style={{ fontSize: 13 }}>데이터스토어 용량/사용량 추이 {vcenterId ? `— ${vcenterId}` : '— 전체 vCenter 합계'}</b>
+            <span className="muted" style={{ fontSize: 11.5, marginLeft: 8 }}>vCenter 에 연결된 데이터스토어 기준(TB) · 오른쪽 축은 사용률(%)</span>
+            <div style={{ width: '100%', height: 250, marginTop: 8 }}>
+              <ResponsiveContainer>
+                <LineChart data={chart} margin={{ top: 6, right: 16, bottom: 4, left: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,.18)" />
+                  <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+                  <YAxis yAxisId="tb" tick={{ fontSize: 11 }} domain={['auto', 'auto']} />
+                  <YAxis yAxisId="pct" orientation="right" tick={{ fontSize: 11 }} domain={[0, 100]} unit="%" />
+                  <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid rgba(148,163,184,.3)', fontSize: 12 }}
+                    formatter={(v, n) => [n === 'dsUsagePct' ? `${v}%` : `${Number(v).toLocaleString()} TB`,
+                      n === 'dsCapTB' ? '총 용량' : n === 'dsUsedTB' ? '사용량' : '사용률']} />
+                  <Legend wrapperStyle={{ fontSize: 12 }} formatter={(v) => (v === 'dsCapTB' ? '총 용량(TB)' : v === 'dsUsedTB' ? '사용량(TB)' : '사용률(%)')} />
+                  <Line yAxisId="tb" type="monotone" dataKey="dsCapTB" stroke="#60a5fa" strokeWidth={1.5} dot={false} />
+                  <Line yAxisId="tb" type="monotone" dataKey="dsUsedTB" stroke="#f59e0b" strokeWidth={2} dot={{ r: 2 }} />
+                  <Line yAxisId="pct" type="monotone" dataKey="dsUsagePct" stroke="#a78bfa" strokeWidth={1.5} strokeDasharray="4 3" dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          {/* 슬롯별 데이터스토어 사용량 증감(GB) */}
+          <div className="card" style={{ padding: 12, marginBottom: 12 }}>
+            <b style={{ fontSize: 13 }}>슬롯별 데이터스토어 사용량 증감(GB)</b>
+            <span className="muted" style={{ fontSize: 11.5, marginLeft: 8 }}>표에서 증감을 누르면 어떤 데이터스토어가 늘거나 줄었는지 봅니다</span>
+            <div style={{ width: '100%', height: 190, marginTop: 8 }}>
+              <ResponsiveContainer>
+                <BarChart data={chart} margin={{ top: 6, right: 16, bottom: 4, left: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,.18)" />
+                  <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+                  <YAxis tick={{ fontSize: 11 }} />
+                  <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid rgba(148,163,184,.3)', fontSize: 12 }}
+                    formatter={(v) => [`${Number(v).toLocaleString()} GB`, '사용량 증감']} />
+                  <ReferenceLine y={0} stroke="rgba(148,163,184,.4)" />
+                  <Bar dataKey="dsDeltaGB" fill="#f59e0b" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
           {/* 슬롯별 증감 — 막대(생성 +, 삭제 −) */}
           <div className="card" style={{ padding: 12, marginBottom: 12 }}>
             <b style={{ fontSize: 13 }}>슬롯별 증감(생성/삭제)</b>
@@ -207,6 +265,9 @@ export default function VmTrackTool() {
                     <th style={{ textAlign: 'right' }}>생성</th><th style={{ textAlign: 'right' }}>삭제</th>
                     <th style={{ textAlign: 'right' }}>전원↑</th><th style={{ textAlign: 'right' }}>전원↓</th>
                     <th style={{ textAlign: 'right' }}>순증감</th>
+                    <th style={{ textAlign: 'right' }}>DS 사용/용량</th>
+                    <th style={{ textAlign: 'right' }}>DS 사용률</th>
+                    <th style={{ textAlign: 'right' }}>DS 증감</th>
                     {!vcenterId && <th>vCenter별 증감</th>}
                     <th>수집</th>
                   </tr>
@@ -239,6 +300,30 @@ export default function VmTrackTool() {
                           {p.poweredOff ? <button className="tab" style={{ padding: '2px 8px', fontSize: 12, color: 'var(--amber)' }} onClick={() => open('powered_off')} title="전원이 꺼진(On→Off) VM 보기">↓{p.poweredOff}</button> : <span className="muted">0</span>}
                         </td>
                         <td style={{ textAlign: 'right', color: net > 0 ? 'var(--green)' : net < 0 ? 'var(--red)' : undefined }}>{net > 0 ? `+${net}` : net}</td>
+                        {/* 데이터스토어(v2.348) — 사용/용량(TB), 사용률, 직전 슬롯 대비 사용량 증감(GB, 클릭 시 상세) */}
+                        <td style={{ textAlign: 'right', fontSize: 12 }}>
+                          {p.dsCount ? <>{tb(p.dsUsedGB)} / {tb(p.dsCapGB)} TB <span className="muted" style={{ fontSize: 11 }}>({p.dsCount})</span></> : <span className="muted">—</span>}
+                        </td>
+                        <td style={{ textAlign: 'right', fontSize: 12, color: (p.dsUsagePct || 0) >= 90 ? 'var(--red)' : (p.dsUsagePct || 0) >= 75 ? 'var(--amber)' : undefined }}>
+                          {p.dsCount ? `${p.dsUsagePct ?? 0}%` : '—'}
+                        </td>
+                        <td style={{ textAlign: 'right' }}>
+                          {(() => {
+                            const row = chart.find((c) => c.slot === p.slot);
+                            const d = row?.dsDeltaGB || 0;
+                            if (!d) return <span className="muted">0</span>;
+                            return (
+                              <button className="tab" style={{ padding: '2px 8px', fontSize: 12, color: d > 0 ? 'var(--amber)' : 'var(--green)' }}
+                                title="사용량이 늘거나 줄어든 데이터스토어 보기"
+                                onClick={() => setDsDetail({
+                                  title: `${slotLabel(p.slot)} 데이터스토어 사용량 변화${vcenterId ? ` — ${vcenterId}` : ' — 전체 vCenter'}`,
+                                  slot: vcenterId ? null : p.slot, snapId: vcenterId ? p.snapId : null,
+                                })}>
+                                {d > 0 ? `+${d.toLocaleString()}` : d.toLocaleString()} GB
+                              </button>
+                            );
+                          })()}
+                        </td>
                         {!vcenterId && (
                           <td style={{ fontSize: 11.5 }}>
                             {(bySlotVc[p.slot] || []).filter((v) => v.added || v.removed || v.poweredOn || v.poweredOff).map((v) => (
@@ -267,6 +352,100 @@ export default function VmTrackTool() {
       )}
 
       {detail && <ChangeDetail {...detail} onClose={() => setDetail(null)} />}
+      {dsDetail && <DsChangeDetail {...dsDetail} onClose={() => setDsDetail(null)} />}
+    </div>
+  );
+}
+
+const DS_KIND_META = {
+  ds_changed: { label: '사용량 변화', badge: 'amber' },
+  ds_added: { label: '연결 추가', badge: 'green' },
+  ds_removed: { label: '연결 해제', badge: 'red' },
+};
+
+/**
+ * 데이터스토어 사용량 변화 상세(v2.348) — 어떤 DS 가 얼마나 늘거나 줄었는지 + 연결/해제.
+ * 사용량 변화는 임계(기본 1GB) 이상만 기록되므로, 미세 변동은 목록에 나오지 않는다(화면에 명시).
+ */
+function DsChangeDetail({ title, snapId = null, slot = null, onClose }) {
+  const [items, setItems] = useState(null);
+  const [err, setErr] = useState(null);
+  const [kind, setKind] = useState('all');
+  useEffect(() => {
+    fetchJson('/tools/vm-track/ds-changes', { ...(snapId != null ? { snapId } : {}), ...(slot ? { slot } : {}) })
+      .then((d) => setItems(d.items || []))
+      .catch((e) => setErr(e.message));
+  }, [snapId, slot]);
+
+  const shown = useMemo(() => (items || []).filter((r) => kind === 'all' || r.kind === kind), [items, kind]);
+  const countOf = (k) => (items || []).filter((r) => r.kind === k).length;
+  const gbTb = (gb) => (gb == null ? '—' : (Math.abs(gb) >= 1024 ? `${(gb / 1024).toLocaleString(undefined, { maximumFractionDigits: 1 })} TB` : `${Math.round(gb).toLocaleString()} GB`));
+  const sumDelta = (items || []).reduce((a, r) => a + (r.deltaGB || 0), 0);
+
+  return (
+    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <EscClose onClose={onClose} />
+      <div className="modal card" style={{ maxWidth: 1000 }}>
+        <h3 style={{ marginTop: 0 }}>{title}</h3>
+        {err && <div style={{ color: 'var(--red)', fontSize: 12.5 }}>⚠ {err}</div>}
+        {!items && !err && <Loading />}
+        {items && (
+          <>
+            <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 8, fontSize: 12.5 }}>
+              <button className={kind === 'all' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '5px 11px', fontSize: 12 }} onClick={() => setKind('all')}>전체 {items.length}</button>
+              {Object.entries(DS_KIND_META).map(([k, m]) => (
+                <button key={k} className={kind === k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '5px 11px', fontSize: 12 }} onClick={() => setKind(k)}>
+                  {m.label} {countOf(k)}
+                </button>
+              ))}
+              <span className="muted" style={{ marginLeft: 'auto', fontSize: 12 }}>합계 증감 <b style={{ color: sumDelta > 0 ? 'var(--amber)' : sumDelta < 0 ? 'var(--green)' : 'var(--text)' }}>{sumDelta > 0 ? '+' : ''}{gbTb(sumDelta)}</b></span>
+            </div>
+            {shown.length === 0 ? <div className="muted" style={{ fontSize: 13 }}>해당 항목이 없습니다.</div> : (
+              <div className="table-wrap" style={{ maxHeight: '56vh' }}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>구분</th><th>데이터스토어</th>{items.some((r) => r.vcenterId) && <th>vCenter</th>}
+                      <th>유형</th>
+                      <th style={{ textAlign: 'right' }}>증감</th>
+                      <th style={{ textAlign: 'right' }}>이전 사용</th><th style={{ textAlign: 'right' }}>현재 사용</th>
+                      <th style={{ textAlign: 'right' }}>총 용량</th><th style={{ textAlign: 'right' }}>가용</th>
+                      <th style={{ textAlign: 'right' }}>사용률</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {shown.map((r, i) => (
+                      <tr key={`${r.dsId}:${i}`}>
+                        <td><span className={`badge ${(DS_KIND_META[r.kind] || {}).badge || 'gray'}`}>{(DS_KIND_META[r.kind] || {}).label || r.kind}</span></td>
+                        <td><b>{r.name || r.dsId}</b></td>
+                        {items.some((x) => x.vcenterId) && <td className="muted" style={{ fontSize: 11.5 }}>{r.vcenterId || '—'}</td>}
+                        <td className="muted" style={{ fontSize: 11.5 }}>{r.type || '—'}</td>
+                        <td style={{ textAlign: 'right', color: (r.deltaGB || 0) > 0 ? 'var(--amber)' : (r.deltaGB || 0) < 0 ? 'var(--green)' : undefined }}>
+                          {r.deltaGB == null ? '—' : `${r.deltaGB > 0 ? '+' : ''}${gbTb(r.deltaGB)}`}
+                        </td>
+                        <td style={{ textAlign: 'right' }} className="muted">{gbTb(r.prevUsedGB)}</td>
+                        <td style={{ textAlign: 'right' }}>{gbTb(r.usedGB)}</td>
+                        <td style={{ textAlign: 'right' }} className="muted">{gbTb(r.capGB)}</td>
+                        <td style={{ textAlign: 'right' }} className="muted">{gbTb(r.freeGB)}</td>
+                        <td style={{ textAlign: 'right', color: (r.usagePct || 0) >= 90 ? 'var(--red)' : (r.usagePct || 0) >= 75 ? 'var(--amber)' : undefined }}>
+                          {r.usagePct == null ? '—' : `${r.usagePct}%`}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <div className="muted" style={{ fontSize: 11.5, marginTop: 8, lineHeight: 1.7 }}>
+              사용량 변화는 <b>1GB 이상 바뀐 데이터스토어</b>만 기록합니다(미세 변동은 목록에 없지만 상단 차트의 합계 추이에는 정확히 반영됩니다 — 임계는 <code>VMTRACK_DS_DELTA_MIN_GB</code>).
+              '연결 해제'된 DS 의 수치는 사라지기 직전 관측치입니다.
+            </div>
+          </>
+        )}
+        <div className="flex gap" style={{ marginTop: 12, justifyContent: 'flex-end' }}>
+          <button className="login-btn" style={{ padding: '8px 18px' }} onClick={onClose}>닫기</button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -4,8 +4,8 @@
  * 조회는 차트용 시계열과 '증감 클릭' 상세(생성/삭제 VM + 클러스터·호스트·데이터스토어)를 제공.
  */
 
-import { diffVcenter, totalsOf, slotKey, slotStartMs } from './diff.js';
-import { commitSnapshot, loadRoster, readSeries, readChanges, rosterVcenters, dropRoster, vmtrackMeta, vmtrackStatus } from './db.js';
+import { diffVcenter, diffDatastores, totalsOf, slotKey, slotStartMs } from './diff.js';
+import { commitSnapshot, loadRoster, loadDsRoster, readSeries, readChanges, readDsChanges, rosterVcenters, dropRoster, vmtrackMeta, vmtrackStatus } from './db.js';
 
 /**
  * 스냅샷 1회 — 현재 store 스냅샷 기준.
@@ -37,11 +37,22 @@ export async function takeVmSnapshot(snap, { trigger = 'manual', now = new Date(
     .filter((vc) => vc.id && !(vc.status === 'unreachable' && !(byVc.get(vc.id) || []).length)
       && !(vc.status === 'pending' && !(byVc.get(vc.id) || []).length));
 
+  // 데이터스토어도 같은 방식으로 vCenter별 1회 그룹핑(v2.348).
+  const dsByVc = new Map();
+  for (const d of snap.datastores || []) {
+    const k = String(d.vcenterId || '');
+    let arr = dsByVc.get(k);
+    if (!arr) dsByVc.set(k, arr = []);
+    arr.push(d);
+  }
+
   const perVc = [];
   for (const vc of targets) {
     const prev = await loadRoster(vc.id);
     const d = diffVcenter(byVc.get(vc.id) || [], prev);
-    perVc.push({ vcenterId: vc.id, ...d });
+    const dsPrev = await loadDsRoster(vc.id);
+    const ds = diffDatastores(dsByVc.get(vc.id) || [], dsPrev);
+    perVc.push({ vcenterId: vc.id, ...d, ds });
   }
   if (!perVc.length) return { ok: false, reason: '추적할 vCenter 가 없습니다(수집 대기 또는 전부 unreachable).' };
 
@@ -58,6 +69,7 @@ export async function takeVmSnapshot(snap, { trigger = 'manual', now = new Date(
     onCount: totalRow.onCount, offCount: totalRow.offCount,
     added: totalRow.added, removed: totalRow.removed,
     poweredOn: totalRow.poweredOn, poweredOff: totalRow.poweredOff,
+    dsCount: totalRow.dsCount, dsCapGB: totalRow.dsCapGB, dsUsedGB: totalRow.dsUsedGB,
     baseline: totalRow.baseline,
   };
 }
@@ -77,7 +89,10 @@ export async function vmtrackSeries({ days = 30, vcenterId = '', scopeIds = null
     return {
       points: rows.map((r) => ({ snapId: r.id, slot: r.slot, ts: slotStartMs(r.slot) ?? r.ts, collectedAt: r.ts,
         total: r.total, onCount: r.on_count, offCount: r.total - r.on_count,
-        added: r.added, removed: r.removed, poweredOn: r.powered_on, poweredOff: r.powered_off, baseline: !!r.baseline })),
+        added: r.added, removed: r.removed, poweredOn: r.powered_on, poweredOff: r.powered_off,
+        dsCount: r.ds_count || 0, dsCapGB: r.ds_cap_gb || 0, dsUsedGB: r.ds_used_gb || 0,
+        dsUsagePct: r.ds_cap_gb ? Math.round((r.ds_used_gb / r.ds_cap_gb) * 1000) / 10 : 0,
+        baseline: !!r.baseline })),
       vcenters: [vcenterId],
     };
   }
@@ -90,7 +105,10 @@ export async function vmtrackSeries({ days = 30, vcenterId = '', scopeIds = null
     return {
       points: rows.map((r) => ({ slot: r.slot, ts: slotStartMs(r.slot) ?? r.ts, collectedAt: r.ts,
         total: r.total, onCount: r.on_count, offCount: r.total - r.on_count,
-        added: r.added, removed: r.removed, poweredOn: r.powered_on, poweredOff: r.powered_off, baseline: !!r.baseline })),
+        added: r.added, removed: r.removed, poweredOn: r.powered_on, poweredOff: r.powered_off,
+        dsCount: r.ds_count || 0, dsCapGB: r.ds_cap_gb || 0, dsUsedGB: r.ds_used_gb || 0,
+        dsUsagePct: r.ds_cap_gb ? Math.round((r.ds_used_gb / r.ds_cap_gb) * 1000) / 10 : 0,
+        baseline: !!r.baseline })),
       vcenters: vcs,
       bySlotVc: groupBySlot(perVcRows),
     };
@@ -99,11 +117,18 @@ export async function vmtrackSeries({ days = 30, vcenterId = '', scopeIds = null
   const bySlot = new Map();
   for (const r of perVcRows) {
     let a = bySlot.get(r.slot);
-    if (!a) bySlot.set(r.slot, a = { slot: r.slot, ts: slotStartMs(r.slot) ?? r.ts, collectedAt: r.ts, total: 0, onCount: 0, offCount: 0, added: 0, removed: 0, poweredOn: 0, poweredOff: 0, baseline: true });
+    if (!a) bySlot.set(r.slot, a = { slot: r.slot, ts: slotStartMs(r.slot) ?? r.ts, collectedAt: r.ts, total: 0, onCount: 0, offCount: 0, added: 0, removed: 0, poweredOn: 0, poweredOff: 0, dsCount: 0, dsCapGB: 0, dsUsedGB: 0, dsUsagePct: 0, baseline: true });
     a.total += r.total; a.onCount += r.on_count; a.offCount += (r.total - r.on_count);
     a.added += r.added; a.removed += r.removed;
     a.poweredOn += (r.powered_on || 0); a.poweredOff += (r.powered_off || 0);
+    a.dsCount += (r.ds_count || 0); a.dsCapGB += (r.ds_cap_gb || 0); a.dsUsedGB += (r.ds_used_gb || 0);
     if (!r.baseline) a.baseline = false;
+  }
+  // 사용률은 합산 후 1회 계산 — '전체 사용량 ÷ 전체 용량'(vCenter별 사용률의 평균이 아니다).
+  for (const a of bySlot.values()) {
+    a.dsCapGB = Math.round(a.dsCapGB * 10) / 10;
+    a.dsUsedGB = Math.round(a.dsUsedGB * 10) / 10;
+    a.dsUsagePct = a.dsCapGB > 0 ? Math.round((a.dsUsedGB / a.dsCapGB) * 1000) / 10 : 0;
   }
   return {
     points: [...bySlot.values()].sort((x, y) => x.ts - y.ts),
@@ -119,7 +144,10 @@ function groupBySlot(rows) {
   for (const r of rows) {
     (m[r.slot] ||= []).push({ snapId: r.id, vcenterId: r.vcenter_id, total: r.total, onCount: r.on_count,
       offCount: r.total - r.on_count, added: r.added, removed: r.removed,
-      poweredOn: r.powered_on || 0, poweredOff: r.powered_off || 0, baseline: !!r.baseline });
+      poweredOn: r.powered_on || 0, poweredOff: r.powered_off || 0,
+      dsCount: r.ds_count || 0, dsCapGB: r.ds_cap_gb || 0, dsUsedGB: r.ds_used_gb || 0,
+      dsUsagePct: r.ds_cap_gb ? Math.round((r.ds_used_gb / r.ds_cap_gb) * 1000) / 10 : 0,
+      baseline: !!r.baseline });
   }
   return m;
 }
@@ -134,6 +162,21 @@ export async function vmtrackChanges({ snapId = null, slot = null, scopeIds = nu
   return filtered.map((r) => ({
     kind: r.kind, vmId: r.vm_id, name: r.name, cluster: r.cluster, host: r.host, datastore: r.datastore,
     powerState: r.power_state, cpu: r.cpu, memMB: r.mem_mb, storageGB: r.storage_gb, guestOS: r.guest_os,
+    vcenterId: r.vcenter_id || undefined,
+  }));
+}
+
+/**
+ * 데이터스토어 사용량 변경 상세(v2.348) — 연결/해제된 DS 와 사용량이 임계 이상 바뀐 DS.
+ * snapId(특정 vCenter 스냅샷) 또는 slot(그 시각 전 vCenter). scope 강제.
+ */
+export async function vmtrackDsChanges({ snapId = null, slot = null, scopeIds = null } = {}) {
+  const rows = await readDsChanges({ snapId, slot });
+  const filtered = scopeIds ? rows.filter((r) => !r.vcenter_id || scopeIds.has(r.vcenter_id)) : rows;
+  return filtered.map((r) => ({
+    kind: r.kind, dsId: r.ds_id, name: r.name, type: r.type,
+    capGB: r.cap_gb, usedGB: r.used_gb, freeGB: r.free_gb, usagePct: r.usage_pct,
+    prevUsedGB: r.prev_used_gb, deltaGB: r.delta_gb,
     vcenterId: r.vcenter_id || undefined,
   }));
 }

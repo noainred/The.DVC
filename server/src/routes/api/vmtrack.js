@@ -8,7 +8,7 @@ import { requirePerm, requireRole } from '../../auth/auth.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
-import { vmtrackSeries, vmtrackChanges, vmtrackInfo } from '../../vmtrack/service.js';
+import { vmtrackSeries, vmtrackChanges, vmtrackDsChanges, vmtrackInfo } from '../../vmtrack/service.js';
 import { runVmtrackNow, vmtrackPollerStatus } from '../../vmtrack/poller.js';
 import { getDb } from '../../vmtrack/db.js';
 
@@ -43,6 +43,20 @@ export function registerVmTrack(api) {
       const slot = req.query.slot ? String(req.query.slot) : null;
       if (snapId == null && !slot) return res.status(400).json({ ok: false, reason: 'snapId 또는 slot 이 필요합니다.' });
       const items = await vmtrackChanges({ snapId, slot, scopeIds: allowed });
+      res.json({ ok: true, items, total: items.length });
+    } catch (e) {
+      res.status(500).json({ ok: false, reason: e.message });
+    }
+  });
+
+  // 데이터스토어 사용량 변경 상세(v2.348) — ?snapId= 또는 ?slot=
+  api.get('/tools/vm-track/ds-changes', requirePerm('tools'), async (req, res) => {
+    try {
+      const allowed = scopedVcenterIds(req.user, store.get());
+      const snapId = req.query.snapId ? Number(req.query.snapId) : null;
+      const slot = req.query.slot ? String(req.query.slot) : null;
+      if (snapId == null && !slot) return res.status(400).json({ ok: false, reason: 'snapId 또는 slot 이 필요합니다.' });
+      const items = await vmtrackDsChanges({ snapId, slot, scopeIds: allowed });
       res.json({ ok: true, items, total: items.length });
     } catch (e) {
       res.status(500).json({ ok: false, reason: e.message });

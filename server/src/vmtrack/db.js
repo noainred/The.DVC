@@ -46,6 +46,11 @@ function initSqlite() {
         -- 신규 생성·삭제는 전환이 아니라 added/removed 로만 센다(중복 집계 방지).
         powered_on INTEGER NOT NULL DEFAULT 0,
         powered_off INTEGER NOT NULL DEFAULT 0,
+        -- 데이터스토어 사용량(v2.348): 그 vCenter 에 연결된 DS 의 개수·총용량·사용량(GB) 합.
+        -- 사용률·증감은 이 값들로 계산해 저장을 늘리지 않는다(GB 는 REAL — TB 환산 시 반올림 오차 방지).
+        ds_count INTEGER NOT NULL DEFAULT 0,
+        ds_cap_gb REAL NOT NULL DEFAULT 0,
+        ds_used_gb REAL NOT NULL DEFAULT 0,
         baseline INTEGER NOT NULL DEFAULT 0, -- 1 = 최초 기준선(직전 스냅샷 없음 → 증감 0)
         UNIQUE (slot, vcenter_id)
       );
@@ -64,6 +69,26 @@ function initSqlite() {
       CREATE INDEX IF NOT EXISTS idx_changes_snap ON changes (snap_id);
       CREATE INDEX IF NOT EXISTS idx_changes_ts ON changes (ts);
 
+      -- 데이터스토어 변경분(v2.348) — 슬롯별로 '의미 있게 바뀐' DS 만 1행씩(임계 미만 변화는 저장 안 함).
+      -- 전 DS 를 매 슬롯 저장하면 28 vCenter × 수백 DS × 2회/일 = 연 수백만 행이 되므로 diff 만 남긴다.
+      CREATE TABLE IF NOT EXISTS ds_changes (
+        snap_id INTEGER NOT NULL, ts INTEGER NOT NULL, vcenter_id TEXT NOT NULL,
+        kind TEXT NOT NULL,            -- 'ds_added' | 'ds_removed' | 'ds_changed'
+        ds_id TEXT NOT NULL, name TEXT, type TEXT,
+        cap_gb REAL, used_gb REAL, free_gb REAL, usage_pct REAL,
+        prev_used_gb REAL, delta_gb REAL
+      );
+      CREATE INDEX IF NOT EXISTS idx_dschanges_snap ON ds_changes (snap_id);
+      CREATE INDEX IF NOT EXISTS idx_dschanges_ts ON ds_changes (ts);
+
+      -- 현재 DS 집합(vCenter별) — 다음 슬롯 diff 기준(steady-state 수백~수천 행).
+      CREATE TABLE IF NOT EXISTS ds_roster (
+        vcenter_id TEXT NOT NULL, ds_id TEXT NOT NULL,
+        name TEXT, type TEXT, cap_gb REAL, used_gb REAL, free_gb REAL,
+        first_seen INTEGER NOT NULL,
+        PRIMARY KEY (vcenter_id, ds_id)
+      );
+
       CREATE TABLE IF NOT EXISTS roster (
         vcenter_id TEXT NOT NULL, vm_id TEXT NOT NULL,
         name TEXT, cluster TEXT, host TEXT, datastore TEXT,
@@ -74,19 +99,43 @@ function initSqlite() {
     `);
     // v2.346 에서 만들어진 기존 DB 에는 전원 전환 열이 없다 — 있으면 무해하게 실패하는 ALTER 로
     // 1회 마이그레이션(SQLite 는 IF NOT EXISTS 를 컬럼 추가에 지원하지 않아 try/catch 가 정석).
-    for (const col of ['powered_on', 'powered_off']) {
+    for (const col of ['powered_on', 'powered_off', 'ds_count']) {
       try { db.exec(`ALTER TABLE snaps ADD COLUMN ${col} INTEGER NOT NULL DEFAULT 0`); } catch { /* 이미 존재 */ }
+    }
+    for (const col of ['ds_cap_gb', 'ds_used_gb']) { // v2.348 — 용량은 REAL
+      try { db.exec(`ALTER TABLE snaps ADD COLUMN ${col} REAL NOT NULL DEFAULT 0`); } catch { /* 이미 존재 */ }
     }
     try { fs.chmodSync(DB_PATH, 0o600); } catch { /* best effort */ }
 
     const st = {
-      insSnap: db.prepare(`INSERT INTO snaps (slot, ts, vcenter_id, total, on_count, added, removed, powered_on, powered_off, baseline)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      insSnap: db.prepare(`INSERT INTO snaps (slot, ts, vcenter_id, total, on_count, added, removed, powered_on, powered_off,
+          ds_count, ds_cap_gb, ds_used_gb, baseline)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(slot, vcenter_id) DO UPDATE SET
           ts=excluded.ts, total=excluded.total, on_count=excluded.on_count,
           added=excluded.added, removed=excluded.removed,
           powered_on=excluded.powered_on, powered_off=excluded.powered_off,
+          ds_count=excluded.ds_count, ds_cap_gb=excluded.ds_cap_gb, ds_used_gb=excluded.ds_used_gb,
           baseline=excluded.baseline`),
+      delDsChangesOfSnap: db.prepare('DELETE FROM ds_changes WHERE snap_id=?'),
+      insDsChange: db.prepare(`INSERT INTO ds_changes
+        (snap_id, ts, vcenter_id, kind, ds_id, name, type, cap_gb, used_gb, free_gb, usage_pct, prev_used_gb, delta_gb)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+      dsRosterOf: db.prepare('SELECT ds_id, name, type, cap_gb, used_gb, free_gb FROM ds_roster WHERE vcenter_id=?'),
+      upsertDsRoster: db.prepare(`INSERT INTO ds_roster (vcenter_id, ds_id, name, type, cap_gb, used_gb, free_gb, first_seen)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(vcenter_id, ds_id) DO UPDATE SET
+          name=excluded.name, type=excluded.type, cap_gb=excluded.cap_gb,
+          used_gb=excluded.used_gb, free_gb=excluded.free_gb`),
+      delDsRoster: db.prepare('DELETE FROM ds_roster WHERE vcenter_id=? AND ds_id=?'),
+      delDsRosterVc: db.prepare('DELETE FROM ds_roster WHERE vcenter_id=?'),
+      dsChangesOf: db.prepare(`SELECT kind, ds_id, name, type, cap_gb, used_gb, free_gb, usage_pct, prev_used_gb, delta_gb
+        FROM ds_changes WHERE snap_id=? ORDER BY ABS(COALESCE(delta_gb,0)) DESC, name`),
+      dsChangesOfSlot: db.prepare(`SELECT d.kind, d.ds_id, d.name, d.type, d.cap_gb, d.used_gb, d.free_gb,
+          d.usage_pct, d.prev_used_gb, d.delta_gb, d.vcenter_id
+        FROM ds_changes d JOIN snaps s ON s.id=d.snap_id
+        WHERE s.slot=? ORDER BY ABS(COALESCE(d.delta_gb,0)) DESC, d.name`),
+      pruneDsChanges: db.prepare('DELETE FROM ds_changes WHERE ts < ?'),
       snapId: db.prepare('SELECT id FROM snaps WHERE slot=? AND vcenter_id=?'),
       delChangesOfSnap: db.prepare('DELETE FROM changes WHERE snap_id=?'),
       insChange: db.prepare(`INSERT INTO changes
@@ -103,9 +152,9 @@ function initSqlite() {
           storage_gb=excluded.storage_gb, guest_os=excluded.guest_os`),
       delRoster: db.prepare('DELETE FROM roster WHERE vcenter_id=? AND vm_id=?'),
       delRosterVc: db.prepare('DELETE FROM roster WHERE vcenter_id=?'),
-      series: db.prepare(`SELECT id, slot, ts, vcenter_id, total, on_count, added, removed, powered_on, powered_off, baseline
+      series: db.prepare(`SELECT id, slot, ts, vcenter_id, total, on_count, added, removed, powered_on, powered_off, ds_count, ds_cap_gb, ds_used_gb, baseline
         FROM snaps WHERE vcenter_id=? AND ts>=? ORDER BY ts`),
-      seriesAllVc: db.prepare(`SELECT id, slot, ts, vcenter_id, total, on_count, added, removed, powered_on, powered_off, baseline
+      seriesAllVc: db.prepare(`SELECT id, slot, ts, vcenter_id, total, on_count, added, removed, powered_on, powered_off, ds_count, ds_cap_gb, ds_used_gb, baseline
         FROM snaps WHERE vcenter_id<>'' AND ts>=? ORDER BY ts`),
       changesOf: db.prepare(`SELECT kind, vm_id, name, cluster, host, datastore, power_state, cpu, mem_mb, storage_gb, guest_os
         FROM changes WHERE snap_id=? ORDER BY kind, name`),
@@ -155,14 +204,33 @@ export async function commitSnapshot({ slot, ts, perVc, totalRow }) {
   try {
     // 전체 합계 행(vcenter_id='') — 차트 상단 라인.
     st.insSnap.run(slot, ts, '', totalRow.total, totalRow.onCount, totalRow.added, totalRow.removed,
-      totalRow.poweredOn || 0, totalRow.poweredOff || 0, totalRow.baseline ? 1 : 0);
+      totalRow.poweredOn || 0, totalRow.poweredOff || 0,
+      totalRow.dsCount || 0, totalRow.dsCapGB || 0, totalRow.dsUsedGB || 0, totalRow.baseline ? 1 : 0);
     for (const vc of perVc) {
+      const ds = vc.ds || null; // { count, capGB, usedGB, added:[], removed:[], changed:[] }
       st.insSnap.run(slot, ts, vc.vcenterId, vc.total, vc.onCount, vc.added.length, vc.removed.length,
-        (vc.poweredOn || []).length, (vc.poweredOff || []).length, vc.baseline ? 1 : 0);
+        (vc.poweredOn || []).length, (vc.poweredOff || []).length,
+        ds?.count || 0, ds?.capGB || 0, ds?.usedGB || 0, vc.baseline ? 1 : 0);
       const row = st.snapId.get(slot, vc.vcenterId);
       const snapId = row?.id;
       if (snapId == null) continue;
       st.delChangesOfSnap.run(snapId); // 같은 슬롯 재실행(수동 스냅샷) 시 중복 방지
+      st.delDsChangesOfSnap.run(snapId);
+      // 데이터스토어 변경분 + 로스터 동기화(v2.348).
+      if (ds) {
+        for (const [kind, field] of [['ds_added', 'added'], ['ds_removed', 'removed'], ['ds_changed', 'changed']]) {
+          for (const d of ds[field] || []) {
+            st.insDsChange.run(snapId, ts, vc.vcenterId, kind, d.dsId, d.name || '', d.type || '',
+              d.capGB ?? null, d.usedGB ?? null, d.freeGB ?? null, d.usagePct ?? null,
+              d.prevUsedGB ?? null, d.deltaGB ?? null);
+          }
+        }
+        for (const d of ds.live || []) {
+          st.upsertDsRoster.run(vc.vcenterId, d.dsId, d.name || '', d.type || '',
+            d.capGB ?? null, d.usedGB ?? null, d.freeGB ?? null, ts);
+        }
+        for (const d of ds.removed || []) st.delDsRoster.run(vc.vcenterId, d.dsId);
+      }
       // kind 별 변경 항목 적재 — 'powered_on'/'powered_off'(v2.347)는 생성·삭제와 같은 표에
       // 담아(kind 로 구분) 클릭 상세가 한 조회로 끝나게 한다.
       for (const [kind, field] of [['added', 'added'], ['removed', 'removed'], ['powered_on', 'poweredOn'], ['powered_off', 'poweredOff']]) {
@@ -208,6 +276,23 @@ export async function dropRoster(vcenterId) {
   const x = await getDb();
   if (!x) return;
   x.st.delRosterVc.run(String(vcenterId));
+  x.st.delDsRosterVc.run(String(vcenterId)); // 데이터스토어 로스터도 함께(v2.348)
+}
+
+/** vCenter 별 직전 데이터스토어 로스터(diff 기준, v2.348). Map<dsId, row>. */
+export async function loadDsRoster(vcenterId) {
+  const x = await getDb();
+  if (!x) return new Map();
+  return new Map(x.st.dsRosterOf.all(String(vcenterId)).map((r) => [r.ds_id, r]));
+}
+
+/** 데이터스토어 사용량 변경 상세(v2.348). snapId 또는 slot 기준. */
+export async function readDsChanges({ snapId = null, slot = null } = {}) {
+  const x = await getDb();
+  if (!x) return [];
+  if (snapId != null) return x.st.dsChangesOf.all(Number(snapId));
+  if (slot) return x.st.dsChangesOfSlot.all(String(slot));
+  return [];
 }
 
 /** 차트용 시계열. vcenterId='' → 전체 합계, 'ALL' → vCenter별 전부. */
@@ -248,6 +333,7 @@ export async function pruneVmtrack(retentionDays = Number(process.env.VMTRACK_RE
   db.exec('BEGIN');
   try {
     st.pruneChanges.run(cut);
+    st.pruneDsChanges.run(cut); // v2.348
     st.pruneSnaps.run(cut);
     db.exec('COMMIT');
     return { ok: true, cut };
