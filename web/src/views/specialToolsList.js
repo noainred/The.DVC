@@ -14,6 +14,7 @@ export const TOOLS = [
   { k: 'storage-mon', icon: '🗄️', label: '스토리지 모니터링', desc: '글로벌 법인 스토리지 8종(PowerScale/Isilon·PowerStore·Unity·XtremIO·VMAX/PowerMax·VPLEX/Metro Node) 사용량·버전·노드 통합 조회 · 용량 시계열/추이 · 엣지 현지 수집→중앙 집계 · 법인별/타입별 뷰', adminOnly: true },
   { k: 'bm-storage', icon: '💽', label: '베어메탈 스토리지', desc: '서버 SSH(df)로 로컬 디스크 마운트 포인트 용량 수집 · 서버/그룹/전체 합산(총·사용·가용) · 사용자 지정 주기 · 엣지 위임(중앙→엣지 PUSH)', adminOnly: true },
   { k: 'vm-track', icon: '📈', label: 'VM 수량 추이', desc: 'vCenter별 매일 00시·12시 VM 수 스냅샷(전용 DB) · 전체·단위 vCenter 추이 차트 · 증감 클릭 시 생성·삭제 VM 과 클러스터·호스트·데이터스토어 확인' },
+  { k: 'storage-track', icon: '💾', label: '스토리지 사용량 추이', desc: 'vCenter 데이터스토어 용량·사용량·사용률 매일 00시·12시 추이(VM 수량 추이와 같은 스냅샷) · vCenter별 현재/증감 표 · 일평균 증가량과 가용 소진 예상(선형 추정) · 증감 클릭 시 변화 데이터스토어 상세' },
   { k: 'vmfinder', icon: '🧭', label: 'VM 정밀 검색 / 유휴 VM', desc: '다수 vCenter·폴더·클러스터·풀 + 조건 · 1일/1주 평균 CPU로 미사용 VM' },
   { k: 'deepsearch', icon: '🔭', label: '심층 검색', desc: '게이트웨이·서브넷·GPU·OS 등 다조건 + 게스트 탐침(GPU드라이버·프로세스) · 전체/복수 vCenter' },
   { k: 'capacity', icon: '📈', label: '용량 리포트', desc: '클러스터별 여유·오버커밋·수용여력 · 전체/법인별' },

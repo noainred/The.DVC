@@ -33,7 +33,7 @@ export default function VmTrackTool() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { load(); }, [days, vcenterId]);
 
-  if (error && !data) return <ErrorBox error={error} />;
+  if (error && !data) return <ErrorBox message={error} />;
   if (!data) return <Loading />;
 
   const points = data.points || [];

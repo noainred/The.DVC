@@ -34,7 +34,7 @@ export default function BmStorageTool() {
   const refresh = () => fetchJson('/tools/bm-storage').then((d) => { setData(d); setError(null); }).catch((e) => setError(e.message));
   useEffect(() => { refresh(); const t = setInterval(refresh, 15_000); return () => clearInterval(t); }, []);
 
-  if (error && !data) return <ErrorBox error={error} />;
+  if (error && !data) return <ErrorBox message={error} />;
   if (!data) return <Loading />;
   const { total, groups, servers, config: cfgs, settings, status, agents } = data;
   const cfgOf = (id) => (cfgs || []).find((c) => c.id === id);
