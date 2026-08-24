@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson, usePolling } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
-import { Card } from './shared.jsx';
+import { Card, itemsOf } from './shared.jsx';
 
 
 // vCenter별/DataCenter별 데이터스토어(스토리지) 용량 현황. 각 vCenter에 어떤 스토리지가
@@ -79,7 +79,11 @@ export function DatastoreUsage({ scope }) {
   const assign = dc.assign || {};
   const dcOfVc = (vcId) => assign[String(vcId || '')] || '';
   const ql = q.trim().toLowerCase();
-  let list = (data || []).filter((d) => !scope || d.vcenterId === scope);
+  // /datastores 응답은 배열이 아니라 { total, items } 객체다 — 다른 소비 뷰(Datastores.jsx,
+  // VCenterDetail.jsx)는 모두 ?.items 로 언랩하는데 이 화면만 배열로 오인해
+  // '(data||[]).filter is not a function' 으로 화면 전체가 오류 박스로 떨어졌다(v2.349 수정).
+  // 공용 itemsOf 로 통일 — 배열/객체/null 어느 형태든 안전하게 배열을 얻는다.
+  let list = itemsOf(data).filter((d) => !scope || d.vcenterId === scope);
   if (ql) list = list.filter((d) => [d.name, d.type, d.vcenterId].some((x) => String(x || '').toLowerCase().includes(ql)));
 
   const totCap = dsSum(list, 'capacityGB'), totFree = dsSum(list, 'freeGB'), totUsed = Math.max(0, totCap - totFree);

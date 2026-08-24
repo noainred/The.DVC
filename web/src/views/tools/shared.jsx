@@ -6,6 +6,20 @@ import { fetchJson } from '../../api.js';
 
 export const tb = (gb) => (gb >= 1024 ? `${(gb / 1024).toFixed(1)} TB` : `${gb} GB`);
 
+/**
+ * 목록 응답 언랩(v2.349) — 인벤토리 엔드포인트는 두 형태가 섞여 있다:
+ *   { total, items }  : /hosts /vms /datastores /networks /alarms
+ *   [ ... ] (배열)     : /vcenters
+ * 뷰가 이를 혼동해 객체에 .filter 를 호출하면 'filter is not a function' 으로 화면 전체가
+ * ErrorBox 로 떨어진다(vCenter별 스토리지 화면에서 실제 발생 — 이 헬퍼로 재발 방지).
+ * 로딩 전(null)·오류(undefined)·예상 밖 형태도 항상 빈 배열로 흘려 렌더가 죽지 않게 한다.
+ */
+export function itemsOf(data) {
+  if (Array.isArray(data)) return data;
+  if (data && Array.isArray(data.items)) return data.items;
+  return [];
+}
+
 // 응답을 파일로 저장. 서버가 Content-Disposition으로 준 파일명을 우선 사용(>1MB면 .zip).
 export async function saveResponseAsFile(res, fallbackName) {
   const cd = res.headers.get('content-disposition') || '';
