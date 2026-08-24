@@ -8,7 +8,7 @@ import { requirePerm, requireRole } from '../../auth/auth.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
-import { vmtrackSeries, vmtrackChanges, vmtrackDsChanges, vmtrackInfo, vmtrackDsList, vmtrackDsSeries, vmtrackDsTop } from '../../vmtrack/service.js';
+import { vmtrackSeries, vmtrackChanges, vmtrackDsChanges, vmtrackInfo, vmtrackDsList, vmtrackDsSeries, vmtrackDsSeriesAll, vmtrackDsTop } from '../../vmtrack/service.js';
 import { runVmtrackNow, vmtrackPollerStatus } from '../../vmtrack/poller.js';
 import { getDb } from '../../vmtrack/db.js';
 
@@ -83,6 +83,29 @@ export function registerVmTrack(api) {
       if (!dsId) return res.status(400).json({ ok: false, reason: 'dsId 가 필요합니다.' });
       const allowed = scopedVcenterIds(req.user, store.get());
       const r = await vmtrackDsSeries({ dsId, days: Number(req.query.days) || 30, scopeIds: allowed });
+      res.json({ ok: true, ...r });
+    } catch (e) {
+      res.status(500).json({ ok: false, reason: e.message });
+    }
+  });
+
+  // 선택 vCenter 의 전체 DS 일괄 시계열(v2.354) — ?vcenterId=(필수)&days=&q=&sort=&offset=&limit=.
+  // 전체 vCenter 일괄은 응답이 수 MB 라 지원하지 않는다(vCenter 선택 필수) — 화면도 동일 규칙.
+  api.get('/tools/vm-track/ds-series-all', requirePerm('tools'), async (req, res) => {
+    try {
+      await getDb();
+      const vcenterId = String(req.query.vcenterId || '').trim();
+      if (!vcenterId) return res.status(400).json({ ok: false, reason: 'vcenterId 가 필요합니다(전체 vCenter 일괄은 지원하지 않음).' });
+      const allowed = scopedVcenterIds(req.user, store.get());
+      const r = await vmtrackDsSeriesAll({
+        days: Number(req.query.days) || 30,
+        vcenterId,
+        scopeIds: allowed,
+        q: String(req.query.q || ''),
+        sort: String(req.query.sort || 'used'),
+        offset: Number(req.query.offset) || 0,
+        limit: Number(req.query.limit) || 12,
+      });
       res.json({ ok: true, ...r });
     } catch (e) {
       res.status(500).json({ ok: false, reason: e.message });

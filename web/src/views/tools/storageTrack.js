@@ -12,6 +12,12 @@ export function hasDsData(p) {
   return (p.dsCapGB || 0) > 0 || (p.dsUsedGB || 0) > 0 || (p.dsCount || 0) > 0;
 }
 
+/** 슬롯 키 → '8/24 00시' 라벨(하루 2점이라 날짜만으로는 구분이 안 된다). */
+export function slotLabel(slot) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(00|12)$/.exec(String(slot || ''));
+  return m ? `${Number(m[2])}/${Number(m[3])} ${m[4]}시` : String(slot || '');
+}
+
 /** GB → TB(소수 1자리). 저장은 GB(REAL), 표시는 TB — 수백 TB 규모라 GB 축은 읽기 어렵다. */
 export function tb(gb) {
   return Math.round(((Number(gb) || 0) / 1024) * 10) / 10;

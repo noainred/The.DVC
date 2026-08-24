@@ -203,22 +203,12 @@ export async function vmtrackDsList({ scopeIds = null, vcenterId = '' } = {}) {
     .sort((a, b) => b.usedGB - a.usedGB);
 }
 
-/**
- * 개별 DS 시계열 — diff-압축 저장(ds_series)을 그 vCenter 의 스냅샷 슬롯 축 위에
- * '마지막 관측값 유지(step)'로 펼친다. 첫 관측 이전 슬롯은 null(값을 지어내지 않는다).
- * scope: 해당 DS 의 vCenter 가 사용자 범위 밖이면 빈 결과.
- */
-export async function vmtrackDsSeries({ dsId, days = 30, scopeIds = null } = {}) {
-  const sinceTs = Date.now() - clampDays(days) * 86_400_000;
-  const { carryIn, rows } = await readDsSeries({ dsId, sinceTs });
-  const vcId = rows[0]?.vcenter_id || carryIn?.vcenter_id || null;
-  if (!vcId) return { points: [], vcenterId: null };
-  if (scopeIds && !scopeIds.has(vcId)) return { points: [], vcenterId: null, scoped: true };
-  const slots = await readSeries({ vcenterId: vcId, sinceTs });
+/** diff-압축 관측(carry-in + 윈도우 행)을 스냅샷 슬롯 축 위에 '마지막 관측값 유지(step)'로 펼친다. */
+function stepFill(slots, carryIn, rows) {
   const obs = [...(carryIn ? [carryIn] : []), ...rows];
   let i = -1;
   let cur = null;
-  const points = slots.map((s) => {
+  return slots.map((s) => {
     while (i + 1 < obs.length && obs[i + 1].ts <= s.ts) { i += 1; cur = obs[i]; }
     if (!cur) return { slot: s.slot, ts: slotStartMs(s.slot) ?? s.ts, collectedAt: s.ts, capGB: null, usedGB: null, usagePct: null };
     const capGB = cur.cap_gb ?? null;
@@ -229,7 +219,72 @@ export async function vmtrackDsSeries({ dsId, days = 30, scopeIds = null } = {})
       observed: cur.slot === s.slot, // 이 슬롯에 실제 관측(변화) 기록이 있었는가
     };
   });
-  return { points, vcenterId: vcId };
+}
+
+/**
+ * 개별 DS 시계열 — 첫 관측 이전 슬롯은 null(값을 지어내지 않는다).
+ * scope: 해당 DS 의 vCenter 가 사용자 범위 밖이면 빈 결과.
+ */
+export async function vmtrackDsSeries({ dsId, days = 30, scopeIds = null } = {}) {
+  const sinceTs = Date.now() - clampDays(days) * 86_400_000;
+  const { carryIn, rows } = await readDsSeries({ dsId, sinceTs });
+  const vcId = rows[0]?.vcenter_id || carryIn?.vcenter_id || null;
+  if (!vcId) return { points: [], vcenterId: null };
+  if (scopeIds && !scopeIds.has(vcId)) return { points: [], vcenterId: null, scoped: true };
+  const slots = await readSeries({ vcenterId: vcId, sinceTs });
+  return { points: stepFill(slots, carryIn, rows), vcenterId: vcId };
+}
+
+/**
+ * 선택한 vCenter 의 전체 DS 일괄 시계열(v2.354, 사용자 요구: "모든 데이터스토어별로 각각").
+ * 전체 vCenter(1,100 DS)를 한 번에 내리면 응답이 수 MB 라(고RTT 환경), vCenter 지정을
+ * 필수로 하고 페이지(기본 12, 최대 24)로 자른다 — 화면도 vCenter 선택 시에만 그리드를 그린다.
+ * 슬롯 축 조회는 vCenter 당 1회, DS 별 관측 조회는 페이지 항목만(인덱스 2회/DS).
+ */
+export async function vmtrackDsSeriesAll({ days = 30, vcenterId = '', scopeIds = null, q = '', sort = 'used', offset = 0, limit = 12 } = {}) {
+  const vcId = String(vcenterId || '').trim();
+  if (!vcId) return { items: [], total: 0, offset: 0, limit: 0, reason: 'vcenterId 필요' };
+  if (scopeIds && !scopeIds.has(vcId)) return { items: [], total: 0, offset: 0, limit: 0, scoped: true };
+  const sinceTs = Date.now() - clampDays(days) * 86_400_000;
+
+  // 대상 DS: 로스터(현재 연결 중) 중 그 vCenter + 검색어.
+  const ql = String(q || '').trim().toLowerCase();
+  let roster = (await listDsRoster()).filter((r) => r.vcenter_id === vcId
+    && (!ql || String(r.name || '').toLowerCase().includes(ql) || String(r.type || '').toLowerCase().includes(ql)));
+
+  // 기간 증감(시작값 = 윈도우 직전 마지막 관측, 없으면 윈도우 내 첫 관측 — v2.351 기준선 원칙).
+  const [windowRows, carryRows] = await Promise.all([dsSeriesWindow(sinceTs), dsSeriesCarry(sinceTs)]);
+  const carry = new Map(carryRows.map((r) => [r.ds_id, r.used_gb]));
+  const firstIn = new Map();
+  for (const r of windowRows) if (!firstIn.has(r.ds_id)) firstIn.set(r.ds_id, r.used_gb);
+  const deltaOf = (r) => {
+    const start = carry.has(r.ds_id) ? carry.get(r.ds_id) : firstIn.get(r.ds_id);
+    return (start == null || r.used_gb == null) ? 0 : Math.round((r.used_gb - start) * 10) / 10;
+  };
+
+  roster = roster.map((r) => ({ r, deltaGB: deltaOf(r) }));
+  if (sort === 'delta') roster.sort((a, b) => Math.abs(b.deltaGB) - Math.abs(a.deltaGB) || (b.r.used_gb || 0) - (a.r.used_gb || 0));
+  else if (sort === 'name') roster.sort((a, b) => String(a.r.name || '').localeCompare(String(b.r.name || ''), undefined, { numeric: true }));
+  else roster.sort((a, b) => (b.r.used_gb || 0) - (a.r.used_gb || 0));
+
+  const total = roster.length;
+  const off = Math.max(0, Number(offset) || 0);
+  const lim = Math.max(1, Math.min(24, Number(limit) || 12));
+  const page = roster.slice(off, off + lim);
+
+  const slots = await readSeries({ vcenterId: vcId, sinceTs }); // 슬롯 축은 vCenter 당 1회
+  const items = [];
+  for (const { r, deltaGB } of page) {
+    const { carryIn, rows } = await readDsSeries({ dsId: r.ds_id, sinceTs });
+    items.push({
+      dsId: r.ds_id, vcenterId: r.vcenter_id, name: r.name || r.ds_id, type: r.type || '',
+      capGB: r.cap_gb || 0, usedGB: r.used_gb || 0,
+      usagePct: r.cap_gb ? Math.round(((r.used_gb || 0) / r.cap_gb) * 1000) / 10 : 0,
+      deltaGB,
+      points: stepFill(slots, carryIn, rows),
+    });
+  }
+  return { items, total, offset: off, limit: lim };
 }
 
 /**
