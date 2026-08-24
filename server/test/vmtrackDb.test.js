@@ -170,3 +170,63 @@ test('DB 왕복(v2.348): 데이터스토어 집계 열 + ds_changes/ds_roster', 
   assert.deepEqual([...roster2.keys()], ['vc3:d1'], '해제된 DS 는 로스터에서 제거');
   assert.equal(roster2.get('vc3:d1').used_gb, 500, '변경분 반영');
 });
+
+test('DB 왕복(v2.353): ds_series — 첫 관측/변화 기록, carry-in, 같은 슬롯 재실행 무중복', { skip: !sqliteOk ? 'node:sqlite 미지원 런타임' : false }, async () => {
+  const mk = (dsId, capGB, usedGB) => ({ dsId, name: dsId.split(':')[1], type: 'VMFS', capGB, usedGB, freeGB: capGB - usedGB, usagePct: Math.round((usedGB / capGB) * 1000) / 10 });
+  // 1차(기준선): 두 DS 모두 series 에 기록.
+  let r = await db.commitSnapshot({
+    slot: '2026-08-21T00', ts: 10_000,
+    perVc: [{ vcenterId: 'vcds', total: 0, onCount: 0, added: [], removed: [], live: [], baseline: true,
+      ds: { count: 2, capGB: 3000, usedGB: 600, added: [], removed: [], changed: [],
+        live: [mk('vcds:a', 1000, 500), mk('vcds:b', 2000, 100)],
+        series: [mk('vcds:a', 1000, 500), mk('vcds:b', 2000, 100)], baseline: true } }],
+    totalRow: { total: 0, onCount: 0, added: 0, removed: 0, dsCount: 2, dsCapGB: 3000, dsUsedGB: 600, baseline: true },
+  });
+  assert.equal(r.ok, true);
+
+  // 2차: a 만 +10GB 변화 → a 만 기록.
+  r = await db.commitSnapshot({
+    slot: '2026-08-21T12', ts: 20_000,
+    perVc: [{ vcenterId: 'vcds', total: 0, onCount: 0, added: [], removed: [], live: [], baseline: false,
+      ds: { count: 2, capGB: 3000, usedGB: 610, added: [], removed: [],
+        changed: [{ ...mk('vcds:a', 1000, 510), prevUsedGB: 500, deltaGB: 10 }],
+        live: [mk('vcds:a', 1000, 510), mk('vcds:b', 2000, 100)],
+        series: [mk('vcds:a', 1000, 510)], baseline: false } }],
+    totalRow: { total: 0, onCount: 0, added: 0, removed: 0, dsCount: 2, dsCapGB: 3000, dsUsedGB: 610, baseline: false },
+  });
+  assert.equal(r.ok, true);
+
+  // a: 관측 2행(500 → 510). b: 첫 관측 1행뿐(변화 없음 — diff-압축).
+  let sa = await db.readDsSeries({ dsId: 'vcds:a', sinceTs: 0 });
+  assert.equal(sa.rows.length, 2);
+  assert.deepEqual(sa.rows.map((x) => x.used_gb), [500, 510]);
+  const sb = await db.readDsSeries({ dsId: 'vcds:b', sinceTs: 0 });
+  assert.equal(sb.rows.length, 1);
+
+  // carry-in: 윈도우가 2차 이후부터면 a 의 시작값은 직전 관측(510).
+  sa = await db.readDsSeries({ dsId: 'vcds:a', sinceTs: 15_000 });
+  assert.equal(sa.carryIn.used_gb, 500, '윈도우 직전 마지막 관측');
+  assert.equal(sa.rows.length, 1);
+
+  // 같은 슬롯 재실행(수동 스냅샷): UNIQUE(slot, ds_id) upsert — 행이 늘지 않고 값만 갱신.
+  r = await db.commitSnapshot({
+    slot: '2026-08-21T12', ts: 21_000,
+    perVc: [{ vcenterId: 'vcds', total: 0, onCount: 0, added: [], removed: [], live: [], baseline: false,
+      ds: { count: 2, capGB: 3000, usedGB: 612, added: [], removed: [], changed: [],
+        live: [mk('vcds:a', 1000, 512), mk('vcds:b', 2000, 100)],
+        series: [mk('vcds:a', 1000, 512)], baseline: false } }],
+    totalRow: { total: 0, onCount: 0, added: 0, removed: 0, dsCount: 2, dsCapGB: 3000, dsUsedGB: 612, baseline: false },
+  });
+  assert.equal(r.ok, true);
+  sa = await db.readDsSeries({ dsId: 'vcds:a', sinceTs: 0 });
+  assert.equal(sa.rows.length, 2, '같은 슬롯은 중복 행이 아니라 갱신');
+  assert.deepEqual(sa.rows.map((x) => x.used_gb), [500, 512]);
+
+  // 기간 증감 상위 재료: 로스터 + 윈도우/carry 조회가 값을 돌려준다.
+  const roster = await db.listDsRoster();
+  assert.ok(roster.some((x) => x.ds_id === 'vcds:a'));
+  const win = await db.dsSeriesWindow(15_000);
+  assert.ok(win.some((x) => x.ds_id === 'vcds:a'));
+  const carry = await db.dsSeriesCarry(15_000);
+  assert.ok(carry.some((x) => x.ds_id === 'vcds:a' && x.used_gb === 500));
+});

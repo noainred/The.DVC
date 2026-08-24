@@ -8,7 +8,7 @@ import { requirePerm, requireRole } from '../../auth/auth.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
-import { vmtrackSeries, vmtrackChanges, vmtrackDsChanges, vmtrackInfo } from '../../vmtrack/service.js';
+import { vmtrackSeries, vmtrackChanges, vmtrackDsChanges, vmtrackInfo, vmtrackDsList, vmtrackDsSeries, vmtrackDsTop } from '../../vmtrack/service.js';
 import { runVmtrackNow, vmtrackPollerStatus } from '../../vmtrack/poller.js';
 import { getDb } from '../../vmtrack/db.js';
 
@@ -58,6 +58,49 @@ export function registerVmTrack(api) {
       if (snapId == null && !slot) return res.status(400).json({ ok: false, reason: 'snapId 또는 slot 이 필요합니다.' });
       const items = await vmtrackDsChanges({ snapId, slot, scopeIds: allowed });
       res.json({ ok: true, items, total: items.length });
+    } catch (e) {
+      res.status(500).json({ ok: false, reason: e.message });
+    }
+  });
+
+  // 데이터스토어 선택 목록(v2.353) — 현재 연결 중인 DS(로스터). scope 강제.
+  api.get('/tools/vm-track/ds-list', requirePerm('tools'), async (req, res) => {
+    try {
+      await getDb();
+      const allowed = scopedVcenterIds(req.user, store.get());
+      const items = await vmtrackDsList({ scopeIds: allowed, vcenterId: String(req.query.vcenterId || '').trim() });
+      res.json({ ok: true, items, total: items.length });
+    } catch (e) {
+      res.status(500).json({ ok: false, reason: e.message });
+    }
+  });
+
+  // 개별 DS 시계열(v2.353) — ?dsId=&days=. scope 강제(그 DS 의 vCenter 기준).
+  api.get('/tools/vm-track/ds-series', requirePerm('tools'), async (req, res) => {
+    try {
+      await getDb();
+      const dsId = String(req.query.dsId || '').trim();
+      if (!dsId) return res.status(400).json({ ok: false, reason: 'dsId 가 필요합니다.' });
+      const allowed = scopedVcenterIds(req.user, store.get());
+      const r = await vmtrackDsSeries({ dsId, days: Number(req.query.days) || 30, scopeIds: allowed });
+      res.json({ ok: true, ...r });
+    } catch (e) {
+      res.status(500).json({ ok: false, reason: e.message });
+    }
+  });
+
+  // 기간 증감 상위 DS(v2.353) — ?days=&vcenterId=&limit=. scope 강제.
+  api.get('/tools/vm-track/ds-top', requirePerm('tools'), async (req, res) => {
+    try {
+      await getDb();
+      const allowed = scopedVcenterIds(req.user, store.get());
+      const r = await vmtrackDsTop({
+        days: Number(req.query.days) || 30,
+        vcenterId: String(req.query.vcenterId || '').trim(),
+        scopeIds: allowed,
+        limit: Number(req.query.limit) || 15,
+      });
+      res.json({ ok: true, ...r });
     } catch (e) {
       res.status(500).json({ ok: false, reason: e.message });
     }

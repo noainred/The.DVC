@@ -133,7 +133,22 @@ export function diffDatastores(datastores, prevRoster) {
     live,
   };
   const baseline = !prevRoster || prevRoster.size === 0;
-  if (baseline) return { ...agg, added: [], removed: [], changed: [], baseline: true };
+  // 데이터스토어별 시계열 기록 대상(v2.353, 사용자 요구: "연결된 데이터스토어별 증감 추이") —
+  // 첫 관측(신규/기준선) 또는 사용량·용량이 임계 이상 바뀐 DS 만 남긴다. 전 DS 를 매 슬롯
+  // 적재하면 1,100 DS × 2회/일 = 연 80만 행이지만, 대부분의 VMFS 는 사용량이 안 변하므로
+  // '값이 바뀐 순간'만 기록하고 조회 시 마지막 관측값을 이어붙인다(step) — 합계와 같은 diff-압축.
+  const series = [];
+  for (const d of live) {
+    const prev = baseline ? null : prevRoster.get(d.dsId);
+    if (!prev) { series.push(d); continue; } // 첫 관측(기준선 포함) — 시계열의 시작점
+    const prevUsed = num(prev.used_gb);
+    const prevCap = num(prev.cap_gb);
+    // 직전 값이 없다가 생긴 것도 '변화'로 기록(Infinity ≥ 임계). 양쪽 다 없으면 판단 불가 → 스킵.
+    const dU = (d.usedGB != null && prevUsed != null) ? Math.abs(d.usedGB - prevUsed) : (d.usedGB != null ? Infinity : 0);
+    const dC = (d.capGB != null && prevCap != null) ? Math.abs(d.capGB - prevCap) : (d.capGB != null ? Infinity : 0);
+    if (dU >= DS_DELTA_MIN_GB || dC >= DS_DELTA_MIN_GB) series.push(d);
+  }
+  if (baseline) return { ...agg, added: [], removed: [], changed: [], series, baseline: true };
 
   const nowIds = new Set(live.map((d) => d.dsId));
   const added = [];
@@ -156,7 +171,7 @@ export function diffDatastores(datastores, prevRoster) {
       usagePct: (num(r.cap_gb) && num(r.used_gb) != null) ? Math.round((num(r.used_gb) / num(r.cap_gb)) * 1000) / 10 : null,
     });
   }
-  return { ...agg, added, removed, changed, baseline: false };
+  return { ...agg, added, removed, changed, series, baseline: false };
 }
 
 /** 전체 합계 행 — vCenter별 결과를 더한다(증감·전원 전환·데이터스토어도 합산). */

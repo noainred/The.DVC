@@ -5,7 +5,7 @@
  */
 
 import { diffVcenter, diffDatastores, totalsOf, slotKey, slotStartMs } from './diff.js';
-import { commitSnapshot, loadRoster, loadDsRoster, readSeries, readChanges, readDsChanges, rosterVcenters, dropRoster, vmtrackMeta, vmtrackStatus } from './db.js';
+import { commitSnapshot, loadRoster, loadDsRoster, readSeries, readChanges, readDsChanges, rosterVcenters, dropRoster, vmtrackMeta, vmtrackStatus, readDsSeries, listDsRoster, dsSeriesWindow, dsSeriesCarry } from './db.js';
 
 /**
  * 스냅샷 1회 — 현재 store 스냅샷 기준.
@@ -183,4 +183,85 @@ export async function vmtrackDsChanges({ snapId = null, slot = null, scopeIds = 
 
 export async function vmtrackInfo() {
   return { status: vmtrackStatus(), meta: await vmtrackMeta() };
+}
+
+// ── 데이터스토어별 증감 추이(v2.353, 사용자 요구) ──
+
+const clampDays = (days) => Math.max(1, Math.min(1095, Number(days) || 30));
+
+/** 데이터스토어 선택 목록 — 현재 로스터(연결 중인 DS). scope 강제, 사용량 내림차순. */
+export async function vmtrackDsList({ scopeIds = null, vcenterId = '' } = {}) {
+  const rows = await listDsRoster();
+  return rows
+    .filter((r) => (!vcenterId || r.vcenter_id === vcenterId) && (!scopeIds || scopeIds.has(r.vcenter_id)))
+    .map((r) => ({
+      dsId: r.ds_id, vcenterId: r.vcenter_id, name: r.name || r.ds_id, type: r.type || '',
+      capGB: r.cap_gb || 0, usedGB: r.used_gb || 0,
+      usagePct: r.cap_gb ? Math.round(((r.used_gb || 0) / r.cap_gb) * 1000) / 10 : 0,
+      firstSeen: r.first_seen,
+    }))
+    .sort((a, b) => b.usedGB - a.usedGB);
+}
+
+/**
+ * 개별 DS 시계열 — diff-압축 저장(ds_series)을 그 vCenter 의 스냅샷 슬롯 축 위에
+ * '마지막 관측값 유지(step)'로 펼친다. 첫 관측 이전 슬롯은 null(값을 지어내지 않는다).
+ * scope: 해당 DS 의 vCenter 가 사용자 범위 밖이면 빈 결과.
+ */
+export async function vmtrackDsSeries({ dsId, days = 30, scopeIds = null } = {}) {
+  const sinceTs = Date.now() - clampDays(days) * 86_400_000;
+  const { carryIn, rows } = await readDsSeries({ dsId, sinceTs });
+  const vcId = rows[0]?.vcenter_id || carryIn?.vcenter_id || null;
+  if (!vcId) return { points: [], vcenterId: null };
+  if (scopeIds && !scopeIds.has(vcId)) return { points: [], vcenterId: null, scoped: true };
+  const slots = await readSeries({ vcenterId: vcId, sinceTs });
+  const obs = [...(carryIn ? [carryIn] : []), ...rows];
+  let i = -1;
+  let cur = null;
+  const points = slots.map((s) => {
+    while (i + 1 < obs.length && obs[i + 1].ts <= s.ts) { i += 1; cur = obs[i]; }
+    if (!cur) return { slot: s.slot, ts: slotStartMs(s.slot) ?? s.ts, collectedAt: s.ts, capGB: null, usedGB: null, usagePct: null };
+    const capGB = cur.cap_gb ?? null;
+    const usedGB = cur.used_gb ?? null;
+    return {
+      slot: s.slot, ts: slotStartMs(s.slot) ?? s.ts, collectedAt: s.ts, capGB, usedGB,
+      usagePct: (capGB && usedGB != null) ? Math.round((usedGB / capGB) * 1000) / 10 : null,
+      observed: cur.slot === s.slot, // 이 슬롯에 실제 관측(변화) 기록이 있었는가
+    };
+  });
+  return { points, vcenterId: vcId };
+}
+
+/**
+ * 기간 증감 상위 DS — 현재값(로스터) − 윈도우 시작값. 시작값은 윈도우 직전 마지막 관측
+ * (carry-in), 없으면 윈도우 내 첫 관측(그 DS 는 첫 관측 이후 변화만 — v2.351 기준선 원칙).
+ */
+export async function vmtrackDsTop({ days = 30, vcenterId = '', scopeIds = null, limit = 15 } = {}) {
+  const sinceTs = Date.now() - clampDays(days) * 86_400_000;
+  const [roster, windowRows, carryRows] = await Promise.all([
+    listDsRoster(), dsSeriesWindow(sinceTs), dsSeriesCarry(sinceTs),
+  ]);
+  const carry = new Map(carryRows.map((r) => [r.ds_id, r.used_gb]));
+  const firstIn = new Map();
+  for (const r of windowRows) if (!firstIn.has(r.ds_id)) firstIn.set(r.ds_id, r.used_gb);
+  const items = [];
+  for (const r of roster) {
+    if (vcenterId && r.vcenter_id !== vcenterId) continue;
+    if (scopeIds && !scopeIds.has(r.vcenter_id)) continue;
+    const startVal = carry.has(r.ds_id) ? carry.get(r.ds_id) : firstIn.get(r.ds_id);
+    if (startVal == null || r.used_gb == null) continue;
+    const deltaGB = Math.round((r.used_gb - startVal) * 10) / 10;
+    items.push({
+      dsId: r.ds_id, vcenterId: r.vcenter_id, name: r.name || r.ds_id, type: r.type || '',
+      capGB: r.cap_gb || 0, usedGB: r.used_gb || 0,
+      usagePct: r.cap_gb ? Math.round(((r.used_gb || 0) / r.cap_gb) * 1000) / 10 : 0,
+      deltaGB,
+    });
+  }
+  items.sort((a, b) => Math.abs(b.deltaGB) - Math.abs(a.deltaGB) || b.usedGB - a.usedGB);
+  return {
+    items: items.slice(0, Math.max(1, Math.min(100, Number(limit) || 15))),
+    total: items.length,
+    changedCount: items.filter((x) => x.deltaGB !== 0).length,
+  };
 }
