@@ -4,7 +4,7 @@
 //     과대 계상된다 → vCenter 단위 첫/마지막.
 //  2) 일평균을 '슬롯 수 ÷ 2'로 나누면 폴러가 멈춘 구간에서 왜곡된다 → 수집 시각 차이.
 import { describe, it, expect } from 'vitest';
-import { tb, gbTb, perVcSummary, growth } from './storageTrack.js';
+import { tb, gbTb, perVcSummary, growth, hasDsData } from './storageTrack.js';
 
 const DAY = 86_400_000;
 
@@ -87,9 +87,49 @@ describe('perVcSummary', () => {
     expect(perVcSummary({})).toEqual([]);
     expect(perVcSummary(null)).toEqual([]);
   });
+
+  it('구버전(ds 열 0) 행은 기준선이 아니다 — 첫 DS 행 기준으로 증감', () => {
+    const rows = perVcSummary({
+      s1: [{ snapId: 1, vcenterId: 'vc-a', dsCount: 0, dsCapGB: 0, dsUsedGB: 0 }],   // v2.348 이전
+      s2: [{ snapId: 2, vcenterId: 'vc-a', dsCount: 10, dsCapGB: 20000, dsUsedGB: 15000, dsUsagePct: 75 }],
+      s3: [{ snapId: 3, vcenterId: 'vc-a', dsCount: 10, dsCapGB: 20000, dsUsedGB: 15100, dsUsagePct: 75.5 }],
+    });
+    expect(rows[0].deltaGB).toBe(100); // 15100 - 15000, 15100 전체가 아니다
+  });
+});
+
+describe('hasDsData', () => {
+  it('ds 열이 전부 0(v2.348 이전 행)이면 false, 하나라도 있으면 true', () => {
+    expect(hasDsData({ dsCapGB: 0, dsUsedGB: 0, dsCount: 0 })).toBe(false);
+    expect(hasDsData({})).toBe(false);
+    expect(hasDsData(null)).toBe(false);
+    expect(hasDsData({ dsCapGB: 100 })).toBe(true);
+    expect(hasDsData({ dsCount: 1 })).toBe(true);
+  });
 });
 
 describe('growth', () => {
+  it('v2.348 이전(ds 열 0) 스냅샷은 기준선에서 제외 — 전체 사용량이 증가로 잡히던 회귀(실제 발생)', () => {
+    const t0 = 1_760_000_000_000;
+    const g = growth([
+      { collectedAt: t0, dsUsedGB: 0, dsCapGB: 0, dsCount: 0 },                    // 구버전 행
+      { collectedAt: t0 + 0.5 * DAY, dsUsedGB: 21_239_086, dsCapGB: 29_485_772, dsCount: 1091 }, // 첫 DS 스냅샷
+      { collectedAt: t0 + 1.5 * DAY, dsUsedGB: 21_240_110, dsCapGB: 29_485_772, dsCount: 1091 },
+    ]);
+    expect(g.netGB).toBe(1024); // +1TB — 2만 TB 전체가 아니다
+    expect(g.spanDays).toBe(1); // 기간도 DS 스냅샷 사이만
+    expect(g.perDayGB).toBe(1024);
+  });
+
+  it('DS 스냅샷이 1건뿐이면(직전 전부 구버전) 증감 0·추정 없음', () => {
+    const g = growth([
+      { collectedAt: 1_760_000_000_000, dsUsedGB: 0, dsCapGB: 0, dsCount: 0 },
+      { collectedAt: 1_760_000_000_000 + DAY, dsUsedGB: 5000, dsCapGB: 10000, dsCount: 5 },
+    ]);
+    expect(g.netGB).toBe(0);
+    expect(g.fullDays).toBeNull();
+  });
+
   it('실측 경과일 기준 일평균과 소진 예상', () => {
     const t0 = 1_760_000_000_000;
     const g = growth([

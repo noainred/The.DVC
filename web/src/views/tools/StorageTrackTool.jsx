@@ -15,7 +15,7 @@ import { fetchJson, postJson } from '../../api.js';
 import { Loading, ErrorBox, Kpi } from '../../components/ui.jsx';
 import EscClose from '../../components/EscClose.jsx';
 import { fmtAgo } from '../../util/fmt.js';
-import { tb, gbTb, perVcSummary, growth } from './storageTrack.js';
+import { tb, gbTb, perVcSummary, growth, hasDsData } from './storageTrack.js';
 
 const DAY_OPTS = [7, 30, 90, 365];
 const slotLabel = (slot) => {
@@ -41,21 +41,29 @@ export default function StorageTrackTool() {
   useEffect(() => { refresh(); const t = setInterval(refresh, 30_000); return () => clearInterval(t); }, [days, vcenterId]);
 
   // points 를 밖에서 만들면 매 렌더 새 배열이라 useMemo 가 무의미해진다 — 콜백 안에서 언팩한다.
-  const chart = useMemo(() => (data?.points || []).map((p, i, arr) => ({
-    label: slotLabel(p.slot),
-    slot: p.slot,
-    snapId: p.snapId,
-    dsCount: p.dsCount || 0,
-    dsCapTB: tb(p.dsCapGB),
-    dsUsedTB: tb(p.dsUsedGB),
-    dsFreeTB: tb((p.dsCapGB || 0) - (p.dsUsedGB || 0)),
-    dsUsagePct: p.dsUsagePct ?? 0,
-    dsUsedGB: p.dsUsedGB || 0,
-    dsCapGB: p.dsCapGB || 0,
-    deltaGB: i > 0 ? Math.round(((p.dsUsedGB || 0) - (arr[i - 1].dsUsedGB || 0)) * 10) / 10 : 0,
-    collectedAt: p.collectedAt,
-    baseline: p.baseline,
-  })), [data]);
+  // v2.348 이전 버전에서 만들어진 스냅샷 행은 ds 열이 0 — 0 으로 그리면 라인이 바닥으로 꺼지고
+  // 다음 슬롯과의 증감이 '전체 사용량'으로 잡힌다(실제 발생). 데이터 없는 슬롯은 null(차트 공백),
+  // 그 직후 슬롯은 기준선(증감 0)으로 둔다 — VM 수량 추이의 baseline 처리와 같은 원칙.
+  const chart = useMemo(() => (data?.points || []).map((p, i, arr) => {
+    const has = hasDsData(p);
+    const prevHas = i > 0 && hasDsData(arr[i - 1]);
+    return {
+      label: slotLabel(p.slot),
+      slot: p.slot,
+      snapId: p.snapId,
+      hasDs: has,
+      dsCount: p.dsCount || 0,
+      dsCapTB: has ? tb(p.dsCapGB) : null,
+      dsUsedTB: has ? tb(p.dsUsedGB) : null,
+      dsFreeTB: has ? tb((p.dsCapGB || 0) - (p.dsUsedGB || 0)) : null,
+      dsUsagePct: has ? (p.dsUsagePct ?? 0) : null,
+      dsUsedGB: p.dsUsedGB || 0,
+      dsCapGB: p.dsCapGB || 0,
+      deltaGB: has && prevHas ? Math.round(((p.dsUsedGB || 0) - (arr[i - 1].dsUsedGB || 0)) * 10) / 10 : 0,
+      collectedAt: p.collectedAt,
+      baseline: p.baseline,
+    };
+  }), [data]);
 
   // vCenter별 현재/증감 — 순수 계산은 storageTrack.js(테스트 대상).
   const perVc = useMemo(() => perVcSummary(data?.bySlotVc || {}), [data]);
@@ -71,8 +79,9 @@ export default function StorageTrackTool() {
   if (error && !data) return <ErrorBox message={error} />;
   if (!data) return <Loading />;
 
-  const last = chart[chart.length - 1] || null;
-  // 기간 증감·일평균·소진 예상(선형) — 순수 계산은 storageTrack.js.
+  // KPI 는 DS 데이터가 있는 마지막 스냅샷 기준(전부 구버전 행이면 null → '—').
+  const last = [...chart].reverse().find((p) => p.hasDs) || null;
+  // 기간 증감·일평균·소진 예상(선형) — 순수 계산은 storageTrack.js(구버전 행은 내부에서 제외).
   const { spanDays, netGB, perDayGB, freeGB, fullDays } = growth(chart);
 
   const snapshotNow = async () => {
@@ -250,11 +259,11 @@ export default function StorageTrackTool() {
                   {[...chart].reverse().map((r) => (
                     <tr key={r.slot}>
                       <td><b>{slotLabel(r.slot)}</b>{r.baseline && <span className="badge gray" style={{ marginLeft: 6, fontSize: 10 }}>기준선</span>}</td>
-                      <td style={{ textAlign: 'right' }} className="muted">{r.dsCount.toLocaleString()}</td>
-                      <td style={{ textAlign: 'right' }}>{r.dsUsedTB.toLocaleString()} TB</td>
-                      <td style={{ textAlign: 'right' }} className="muted">{r.dsCapTB.toLocaleString()} TB</td>
-                      <td style={{ textAlign: 'right' }} className="muted">{r.dsFreeTB.toLocaleString()} TB</td>
-                      <td style={{ textAlign: 'right', color: pctColor(r.dsUsagePct) }}>{r.dsUsagePct}%</td>
+                      <td style={{ textAlign: 'right' }} className="muted">{r.hasDs ? r.dsCount.toLocaleString() : '—'}</td>
+                      <td style={{ textAlign: 'right' }}>{r.hasDs ? `${r.dsUsedTB.toLocaleString()} TB` : '—'}</td>
+                      <td style={{ textAlign: 'right' }} className="muted">{r.hasDs ? `${r.dsCapTB.toLocaleString()} TB` : '—'}</td>
+                      <td style={{ textAlign: 'right' }} className="muted">{r.hasDs ? `${r.dsFreeTB.toLocaleString()} TB` : '—'}</td>
+                      <td style={{ textAlign: 'right', color: pctColor(r.dsUsagePct || 0) }}>{r.hasDs ? `${r.dsUsagePct}%` : '—'}</td>
                       <td style={{ textAlign: 'right' }}>
                         {r.deltaGB ? (
                           <button className="tab" style={{ padding: '2px 8px', fontSize: 12, color: r.deltaGB > 0 ? 'var(--amber)' : 'var(--green)' }}
