@@ -28,6 +28,7 @@ import CodexCheck from './CodexCheck.jsx'; // 보안점검 — 상단 메뉴에�
 import VmCloneTool from './tools/VmCloneTool.jsx'; // VM 복제(백업식, v2.299 — admin 전용)
 import StorageMonTool from './tools/StorageMonTool.jsx'; // 스토리지 모니터링(Isilon 등, v2.302 — admin 전용)
 import BmStorageTool from './tools/BmStorageTool.jsx'; // 베어메탈 스토리지(SSH df 합산, v2.340 — admin 전용)
+import VmTrackTool from './tools/VmTrackTool.jsx'; // VM 수량 추이(00/12시 스냅샷 + 증감 상세, v2.345)
 import { PortalDb } from './tools/PortalDb.jsx';
 import { NicModels, NicSpeed } from './tools/NicTools.jsx';
 import { Shutdown } from './tools/ShutdownTool.jsx';
@@ -276,6 +277,7 @@ function ToolPanel({ tool, onBack, isAdmin }) {
       {tool === 'vm-clone' && <VmCloneTool />}
       {tool === 'storage-mon' && <StorageMonTool />}
       {tool === 'bm-storage' && <BmStorageTool />}
+      {tool === 'vm-track' && <VmTrackTool />}
       {tool === 'vmfinder' && <VmFinder />}
       {tool === 'capacity' && <Capacity scope={scope} />}
       {tool === 'waste' && <Waste scope={scope} />}
