@@ -8,7 +8,7 @@ import { requirePerm, requireRole } from '../../auth/auth.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
-import { vmtrackSeries, vmtrackChanges, vmtrackDsChanges, vmtrackInfo, vmtrackDsList, vmtrackDsSeries, vmtrackDsSeriesAll, vmtrackDsTop } from '../../vmtrack/service.js';
+import { vmtrackSeries, vmtrackChanges, vmtrackDsChanges, vmtrackInfo, vmtrackDsList, vmtrackDsSeries, vmtrackDsSeriesAll, vmtrackDsTop, vmtrackDsChangeLog, vmtrackDsPivot } from '../../vmtrack/service.js';
 import { runVmtrackNow, vmtrackPollerStatus } from '../../vmtrack/poller.js';
 import { getDb } from '../../vmtrack/db.js';
 
@@ -105,6 +105,44 @@ export function registerVmTrack(api) {
         sort: String(req.query.sort || 'used'),
         offset: Number(req.query.offset) || 0,
         limit: Number(req.query.limit) || 12,
+      });
+      res.json({ ok: true, ...r });
+    } catch (e) {
+      res.status(500).json({ ok: false, reason: e.message });
+    }
+  });
+
+  // 스토리지 변경 이력 — 시각별(v2.355 목업 A): 슬롯 행 + 그 슬롯에 변화한 DS 칩. scope 강제.
+  api.get('/tools/vm-track/ds-change-log', requirePerm('tools'), async (req, res) => {
+    try {
+      await getDb();
+      const allowed = scopedVcenterIds(req.user, store.get());
+      const r = await vmtrackDsChangeLog({
+        days: Number(req.query.days) || 30,
+        vcenterId: String(req.query.vcenterId || '').trim(),
+        scopeIds: allowed,
+        chipLimit: Number(req.query.chipLimit) || 24,
+      });
+      res.json({ ok: true, ...r });
+    } catch (e) {
+      res.status(500).json({ ok: false, reason: e.message });
+    }
+  });
+
+  // 스토리지 변경 이력 — DS별 피벗(v2.355 목업 B): 행=DS, 열=최근 슬롯 증감. scope 강제.
+  api.get('/tools/vm-track/ds-pivot', requirePerm('tools'), async (req, res) => {
+    try {
+      await getDb();
+      const allowed = scopedVcenterIds(req.user, store.get());
+      const r = await vmtrackDsPivot({
+        days: Number(req.query.days) || 30,
+        vcenterId: String(req.query.vcenterId || '').trim(),
+        scopeIds: allowed,
+        q: String(req.query.q || ''),
+        changedOnly: String(req.query.changedOnly ?? '1') !== '0',
+        sort: String(req.query.sort || 'cum'),
+        offset: Number(req.query.offset) || 0,
+        limit: Number(req.query.limit) || 20,
       });
       res.json({ ok: true, ...r });
     } catch (e) {

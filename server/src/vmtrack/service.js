@@ -5,7 +5,7 @@
  */
 
 import { diffVcenter, diffDatastores, totalsOf, slotKey, slotStartMs } from './diff.js';
-import { commitSnapshot, loadRoster, loadDsRoster, readSeries, readChanges, readDsChanges, rosterVcenters, dropRoster, vmtrackMeta, vmtrackStatus, readDsSeries, listDsRoster, dsSeriesWindow, dsSeriesCarry } from './db.js';
+import { commitSnapshot, loadRoster, loadDsRoster, readSeries, readChanges, readDsChanges, readDsChangesWindow, rosterVcenters, dropRoster, vmtrackMeta, vmtrackStatus, readDsSeries, listDsRoster, dsSeriesWindow, dsSeriesCarry } from './db.js';
 
 /**
  * 스냅샷 1회 — 현재 store 스냅샷 기준.
@@ -253,10 +253,7 @@ export async function vmtrackDsSeriesAll({ days = 30, vcenterId = '', scopeIds =
     && (!ql || String(r.name || '').toLowerCase().includes(ql) || String(r.type || '').toLowerCase().includes(ql)));
 
   // 기간 증감(시작값 = 윈도우 직전 마지막 관측, 없으면 윈도우 내 첫 관측 — v2.351 기준선 원칙).
-  const [windowRows, carryRows] = await Promise.all([dsSeriesWindow(sinceTs), dsSeriesCarry(sinceTs)]);
-  const carry = new Map(carryRows.map((r) => [r.ds_id, r.used_gb]));
-  const firstIn = new Map();
-  for (const r of windowRows) if (!firstIn.has(r.ds_id)) firstIn.set(r.ds_id, r.used_gb);
+  const { carry, firstIn } = await dsStartValues(sinceTs);
   const deltaOf = (r) => {
     const start = carry.has(r.ds_id) ? carry.get(r.ds_id) : firstIn.get(r.ds_id);
     return (start == null || r.used_gb == null) ? 0 : Math.round((r.used_gb - start) * 10) / 10;
@@ -287,18 +284,106 @@ export async function vmtrackDsSeriesAll({ days = 30, vcenterId = '', scopeIds =
   return { items, total, offset: off, limit: lim };
 }
 
+/** DS 별 '윈도우 시작값' 맵 — carry-in(직전 마지막 관측) 우선, 없으면 윈도우 내 첫 관측. */
+async function dsStartValues(sinceTs) {
+  const [windowRows, carryRows] = await Promise.all([dsSeriesWindow(sinceTs), dsSeriesCarry(sinceTs)]);
+  const carry = new Map(carryRows.map((r) => [r.ds_id, r.used_gb]));
+  const firstIn = new Map();
+  for (const r of windowRows) if (!firstIn.has(r.ds_id)) firstIn.set(r.ds_id, r.used_gb);
+  return { carry, firstIn };
+}
+
+/**
+ * 스토리지 변경 이력 — 시각별(v2.355, 목업 A): 슬롯 행마다 그 슬롯에 변화한 DS 칩 목록.
+ * ds_changes(변경분만 저장)를 슬롯으로 그룹핑 — 무변화 DS 는 애초에 행이 없어 응답이 작다.
+ * 칩은 |증감| 큰 순, 슬롯당 chipLimit 개 + 나머지는 more(개수)로 접는다(상세는 기존 슬롯
+ * 클릭 모달이 전량을 보여준다).
+ */
+export async function vmtrackDsChangeLog({ days = 30, vcenterId = '', scopeIds = null, chipLimit = 24 } = {}) {
+  const sinceTs = Date.now() - clampDays(days) * 86_400_000;
+  const rows = (await readDsChangesWindow(sinceTs))
+    .filter((r) => (!vcenterId || r.vcenter_id === vcenterId) && (!scopeIds || scopeIds.has(r.vcenter_id)));
+  const bySlot = new Map();
+  for (const r of rows) {
+    let g = bySlot.get(r.slot);
+    if (!g) bySlot.set(r.slot, g = { slot: r.slot, ts: slotStartMs(r.slot) ?? r.slot_ts, items: [], more: 0, sumDeltaGB: 0 });
+    g.sumDeltaGB = Math.round((g.sumDeltaGB + (r.delta_gb || 0)) * 10) / 10;
+    if (g.items.length >= Math.max(1, Math.min(100, chipLimit))) { g.more += 1; continue; }
+    g.items.push({
+      dsId: r.ds_id, name: r.name || r.ds_id, vcenterId: r.vcenter_id, type: r.type || '',
+      kind: r.kind, deltaGB: r.delta_gb ?? null, usedGB: r.used_gb ?? null, capGB: r.cap_gb ?? null,
+      usagePct: r.usage_pct ?? null,
+    });
+  }
+  return { slots: [...bySlot.values()].sort((a, b) => b.ts - a.ts) };
+}
+
+/**
+ * 스토리지 변경 이력 — DS별 피벗(v2.355, 목업 B): 행 = 데이터스토어, 열 = 최근 슬롯들의 증감.
+ * 슬롯 열은 최근 slotCount(기본 6)개만(가로 폭), 누적은 days 윈도우 전체(현재값 − 시작값).
+ * changedOnly(기본 true)면 열/누적에 변화가 있는 DS 만 — 1,091개 중 실제로 움직인 것만 보인다.
+ */
+export async function vmtrackDsPivot({ days = 30, vcenterId = '', scopeIds = null, q = '', changedOnly = true, sort = 'cum', offset = 0, limit = 20, slotCount = 6 } = {}) {
+  const sinceTs = Date.now() - clampDays(days) * 86_400_000;
+  const [roster, changeRows, startVals] = await Promise.all([
+    listDsRoster(), readDsChangesWindow(sinceTs), dsStartValues(sinceTs),
+  ]);
+  const scoped = (vc) => (!vcenterId || vc === vcenterId) && (!scopeIds || scopeIds.has(vc));
+
+  // 슬롯 열: 윈도우 내 스냅샷 슬롯 최근 N 개(전체 합계 행 기준 — 변화가 0 인 슬롯도 열로 나와야
+  // '변화 없음'이 보인다). vCenter 지정 시 그 vCenter 의 스냅샷 슬롯.
+  const snapRows = await readSeries({ vcenterId: vcenterId || '', sinceTs });
+  const slotCols = snapRows.map((r) => ({ slot: r.slot, ts: slotStartMs(r.slot) ?? r.ts }))
+    .sort((a, b) => b.ts - a.ts).slice(0, Math.max(1, Math.min(14, slotCount)));
+  const colSet = new Set(slotCols.map((c) => c.slot));
+
+  // DS별 슬롯 증감 맵(변경분만 존재 — 없는 칸은 0 또는 관측 전).
+  const perDs = new Map();
+  for (const r of changeRows) {
+    if (!scoped(r.vcenter_id) || !colSet.has(r.slot)) continue;
+    let m = perDs.get(r.ds_id);
+    if (!m) perDs.set(r.ds_id, m = {});
+    m[r.slot] = { kind: r.kind, deltaGB: r.delta_gb ?? null, usedGB: r.used_gb ?? null };
+  }
+
+  const ql = String(q || '').trim().toLowerCase();
+  const items = [];
+  for (const r of roster) {
+    if (!scoped(r.vcenter_id)) continue;
+    if (ql && !String(r.name || '').toLowerCase().includes(ql) && !String(r.type || '').toLowerCase().includes(ql)) continue;
+    const start = startVals.carry.has(r.ds_id) ? startVals.carry.get(r.ds_id) : startVals.firstIn.get(r.ds_id);
+    const cumGB = (start == null || r.used_gb == null) ? 0 : Math.round((r.used_gb - start) * 10) / 10;
+    const slots = {};
+    let any = false;
+    for (const c of slotCols) {
+      const hit = perDs.get(r.ds_id)?.[c.slot];
+      if (hit) { slots[c.slot] = hit; if (hit.deltaGB || hit.kind !== 'ds_changed') any = true; continue; }
+      // 변경 행이 없는 칸: 관측 전(first_seen 이후 슬롯이 아니면)이면 null(—), 아니면 0.
+      slots[c.slot] = (r.first_seen != null && c.ts < r.first_seen) ? null : { kind: 'none', deltaGB: 0 };
+    }
+    if (changedOnly && !any && !cumGB) continue;
+    items.push({
+      dsId: r.ds_id, name: r.name || r.ds_id, vcenterId: r.vcenter_id, type: r.type || '',
+      capGB: r.cap_gb || 0, usedGB: r.used_gb || 0,
+      usagePct: r.cap_gb ? Math.round(((r.used_gb || 0) / r.cap_gb) * 1000) / 10 : 0,
+      cumGB, slots,
+    });
+  }
+  if (sort === 'name') items.sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { numeric: true }));
+  else if (sort === 'used') items.sort((a, b) => b.usedGB - a.usedGB);
+  else items.sort((a, b) => Math.abs(b.cumGB) - Math.abs(a.cumGB) || b.usedGB - a.usedGB);
+  const off = Math.max(0, Number(offset) || 0);
+  const lim = Math.max(1, Math.min(50, Number(limit) || 20));
+  return { slotCols, items: items.slice(off, off + lim), total: items.length, offset: off, limit: lim };
+}
+
 /**
  * 기간 증감 상위 DS — 현재값(로스터) − 윈도우 시작값. 시작값은 윈도우 직전 마지막 관측
  * (carry-in), 없으면 윈도우 내 첫 관측(그 DS 는 첫 관측 이후 변화만 — v2.351 기준선 원칙).
  */
 export async function vmtrackDsTop({ days = 30, vcenterId = '', scopeIds = null, limit = 15 } = {}) {
   const sinceTs = Date.now() - clampDays(days) * 86_400_000;
-  const [roster, windowRows, carryRows] = await Promise.all([
-    listDsRoster(), dsSeriesWindow(sinceTs), dsSeriesCarry(sinceTs),
-  ]);
-  const carry = new Map(carryRows.map((r) => [r.ds_id, r.used_gb]));
-  const firstIn = new Map();
-  for (const r of windowRows) if (!firstIn.has(r.ds_id)) firstIn.set(r.ds_id, r.used_gb);
+  const [roster, { carry, firstIn }] = await Promise.all([listDsRoster(), dsStartValues(sinceTs)]);
   const items = [];
   for (const r of roster) {
     if (vcenterId && r.vcenter_id !== vcenterId) continue;
