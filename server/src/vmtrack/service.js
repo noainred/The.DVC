@@ -55,7 +55,10 @@ export async function takeVmSnapshot(snap, { trigger = 'manual', now = new Date(
   return {
     ok: true, slot, ts, trigger,
     vcenters: perVc.length, total: totalRow.total,
-    added: totalRow.added, removed: totalRow.removed, baseline: totalRow.baseline,
+    onCount: totalRow.onCount, offCount: totalRow.offCount,
+    added: totalRow.added, removed: totalRow.removed,
+    poweredOn: totalRow.poweredOn, poweredOff: totalRow.poweredOff,
+    baseline: totalRow.baseline,
   };
 }
 
@@ -73,7 +76,8 @@ export async function vmtrackSeries({ days = 30, vcenterId = '', scopeIds = null
     const rows = await readSeries({ vcenterId, sinceTs });
     return {
       points: rows.map((r) => ({ snapId: r.id, slot: r.slot, ts: slotStartMs(r.slot) ?? r.ts, collectedAt: r.ts,
-        total: r.total, onCount: r.on_count, added: r.added, removed: r.removed, baseline: !!r.baseline })),
+        total: r.total, onCount: r.on_count, offCount: r.total - r.on_count,
+        added: r.added, removed: r.removed, poweredOn: r.powered_on, poweredOff: r.powered_off, baseline: !!r.baseline })),
       vcenters: [vcenterId],
     };
   }
@@ -85,7 +89,8 @@ export async function vmtrackSeries({ days = 30, vcenterId = '', scopeIds = null
     const vcs = [...new Set(perVcRows.map((r) => r.vcenter_id))].sort();
     return {
       points: rows.map((r) => ({ slot: r.slot, ts: slotStartMs(r.slot) ?? r.ts, collectedAt: r.ts,
-        total: r.total, onCount: r.on_count, added: r.added, removed: r.removed, baseline: !!r.baseline })),
+        total: r.total, onCount: r.on_count, offCount: r.total - r.on_count,
+        added: r.added, removed: r.removed, poweredOn: r.powered_on, poweredOff: r.powered_off, baseline: !!r.baseline })),
       vcenters: vcs,
       bySlotVc: groupBySlot(perVcRows),
     };
@@ -94,8 +99,10 @@ export async function vmtrackSeries({ days = 30, vcenterId = '', scopeIds = null
   const bySlot = new Map();
   for (const r of perVcRows) {
     let a = bySlot.get(r.slot);
-    if (!a) bySlot.set(r.slot, a = { slot: r.slot, ts: slotStartMs(r.slot) ?? r.ts, collectedAt: r.ts, total: 0, onCount: 0, added: 0, removed: 0, baseline: true });
-    a.total += r.total; a.onCount += r.on_count; a.added += r.added; a.removed += r.removed;
+    if (!a) bySlot.set(r.slot, a = { slot: r.slot, ts: slotStartMs(r.slot) ?? r.ts, collectedAt: r.ts, total: 0, onCount: 0, offCount: 0, added: 0, removed: 0, poweredOn: 0, poweredOff: 0, baseline: true });
+    a.total += r.total; a.onCount += r.on_count; a.offCount += (r.total - r.on_count);
+    a.added += r.added; a.removed += r.removed;
+    a.poweredOn += (r.powered_on || 0); a.poweredOff += (r.powered_off || 0);
     if (!r.baseline) a.baseline = false;
   }
   return {
@@ -111,7 +118,8 @@ function groupBySlot(rows) {
   const m = {};
   for (const r of rows) {
     (m[r.slot] ||= []).push({ snapId: r.id, vcenterId: r.vcenter_id, total: r.total, onCount: r.on_count,
-      added: r.added, removed: r.removed, baseline: !!r.baseline });
+      offCount: r.total - r.on_count, added: r.added, removed: r.removed,
+      poweredOn: r.powered_on || 0, poweredOff: r.powered_off || 0, baseline: !!r.baseline });
   }
   return m;
 }

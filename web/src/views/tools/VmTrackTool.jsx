@@ -36,12 +36,20 @@ export default function VmTrackTool() {
   if (!data) return <Loading />;
 
   const points = data.points || [];
-  const chart = points.map((p) => ({ ...p, label: slotLabel(p.slot), delta: (p.added || 0) - (p.removed || 0) }));
+  const chart = points.map((p) => ({
+    ...p,
+    label: slotLabel(p.slot),
+    delta: (p.added || 0) - (p.removed || 0),
+    // 꺼짐 수 — 서버가 offCount 를 주지만 구버전 응답 호환으로 total-on 폴백.
+    offCount: p.offCount ?? (p.total - p.onCount),
+  }));
   const last = points[points.length - 1] || null;
   const first = points[0] || null;
   const netRange = last && first ? last.total - first.total : 0;
   const sumAdded = points.reduce((a, p) => a + (p.added || 0), 0);
   const sumRemoved = points.reduce((a, p) => a + (p.removed || 0), 0);
+  const sumOn = points.reduce((a, p) => a + (p.poweredOn || 0), 0);
+  const sumOff = points.reduce((a, p) => a + (p.poweredOff || 0), 0);
   const bySlotVc = data.bySlotVc || {};
 
   const snapshotNow = async () => {
@@ -91,9 +99,11 @@ export default function VmTrackTool() {
           meta={last ? `켜짐 ${last.onCount.toLocaleString()} · ${fmtAgo(last.collectedAt)}` : '스냅샷 없음'} />
         <Kpi label={`${days}일 순증감`} value={`${netRange >= 0 ? '+' : ''}${netRange.toLocaleString()}`}
           accent={netRange > 0 ? 'var(--green)' : netRange < 0 ? 'var(--red)' : undefined} />
-        <Kpi label={`${days}일 생성`} value={`+${sumAdded.toLocaleString()}`} accent="var(--green)" />
-        <Kpi label={`${days}일 삭제`} value={`-${sumRemoved.toLocaleString()}`} accent={sumRemoved ? 'var(--red)' : undefined} />
-        <Kpi label="스냅샷" value={(data.meta?.n || 0).toLocaleString()} meta={data.poller?.lastResult ? `최근 ${fmtAgo(data.poller.lastResult.at)}` : '대기'} />
+        <Kpi label={`${days}일 생성/삭제`} value={`+${sumAdded.toLocaleString()} / -${sumRemoved.toLocaleString()}`} />
+        <Kpi label="현재 켜짐/꺼짐" value={last ? `${last.onCount.toLocaleString()} / ${(last.offCount ?? (last.total - last.onCount)).toLocaleString()}` : '—'}
+          meta={last ? `켜짐 ${last.total ? Math.round((last.onCount / last.total) * 100) : 0}%` : ''} />
+        <Kpi label={`${days}일 전원 On/Off 전환`} value={`↑${sumOn.toLocaleString()} / ↓${sumOff.toLocaleString()}`}
+          meta={data.poller?.lastResult ? `최근 스냅샷 ${fmtAgo(data.poller.lastResult.at)}` : `스냅샷 ${(data.meta?.n || 0).toLocaleString()}건`} />
       </div>
 
       {points.length === 0 ? (
@@ -125,6 +135,46 @@ export default function VmTrackTool() {
             </div>
           </div>
 
+          {/* 켜짐/꺼짐 수량 추이(v2.347, 사용자 요구) — 총량과 별개로 전원 상태별 규모 변화 */}
+          <div className="card" style={{ padding: 12, marginBottom: 12 }}>
+            <b style={{ fontSize: 13 }}>켜진 VM / 꺼진 VM 수량 추이</b>
+            <div style={{ width: '100%', height: 240, marginTop: 8 }}>
+              <ResponsiveContainer>
+                <LineChart data={chart} margin={{ top: 6, right: 16, bottom: 4, left: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,.18)" />
+                  <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+                  <YAxis tick={{ fontSize: 11 }} domain={['auto', 'auto']} />
+                  <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid rgba(148,163,184,.3)', fontSize: 12 }}
+                    formatter={(v, n) => [Number(v).toLocaleString(), n === 'onCount' ? '켜짐' : '꺼짐']} />
+                  <Legend wrapperStyle={{ fontSize: 12 }} formatter={(v) => (v === 'onCount' ? '켜짐(Powered On)' : '꺼짐(Powered Off)')} />
+                  <Line type="monotone" dataKey="onCount" stroke="#22c55e" strokeWidth={2} dot={{ r: 2 }} />
+                  <Line type="monotone" dataKey="offCount" stroke="#f59e0b" strokeWidth={2} dot={{ r: 2 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          {/* 슬롯별 전원 전환 — 어떤 VM 이 켜졌/꺼졌는지는 표에서 클릭 */}
+          <div className="card" style={{ padding: 12, marginBottom: 12 }}>
+            <b style={{ fontSize: 13 }}>슬롯별 전원 전환(Off→On / On→Off)</b>
+            <span className="muted" style={{ fontSize: 11.5, marginLeft: 8 }}>신규 생성·삭제는 여기 포함되지 않습니다(아래 생성/삭제 차트에 집계)</span>
+            <div style={{ width: '100%', height: 190, marginTop: 8 }}>
+              <ResponsiveContainer>
+                <BarChart data={chart} margin={{ top: 6, right: 16, bottom: 4, left: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,.18)" />
+                  <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+                  <YAxis tick={{ fontSize: 11 }} />
+                  <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid rgba(148,163,184,.3)', fontSize: 12 }}
+                    formatter={(v, n) => [Number(v).toLocaleString(), n === 'poweredOn' ? '전원 켜짐' : '전원 꺼짐']} />
+                  <Legend wrapperStyle={{ fontSize: 12 }} formatter={(v) => (v === 'poweredOn' ? '전원 켜짐(Off→On)' : '전원 꺼짐(On→Off)')} />
+                  <ReferenceLine y={0} stroke="rgba(148,163,184,.4)" />
+                  <Bar dataKey="poweredOn" fill="#22c55e" />
+                  <Bar dataKey="poweredOff" fill="#f59e0b" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
           {/* 슬롯별 증감 — 막대(생성 +, 삭제 −) */}
           <div className="card" style={{ padding: 12, marginBottom: 12 }}>
             <b style={{ fontSize: 13 }}>슬롯별 증감(생성/삭제)</b>
@@ -152,8 +202,10 @@ export default function VmTrackTool() {
               <table>
                 <thead>
                   <tr>
-                    <th>시각</th><th style={{ textAlign: 'right' }}>총 VM</th><th style={{ textAlign: 'right' }}>켜짐</th>
+                    <th>시각</th><th style={{ textAlign: 'right' }}>총 VM</th>
+                    <th style={{ textAlign: 'right' }}>켜짐</th><th style={{ textAlign: 'right' }}>꺼짐</th>
                     <th style={{ textAlign: 'right' }}>생성</th><th style={{ textAlign: 'right' }}>삭제</th>
+                    <th style={{ textAlign: 'right' }}>전원↑</th><th style={{ textAlign: 'right' }}>전원↓</th>
                     <th style={{ textAlign: 'right' }}>순증감</th>
                     {!vcenterId && <th>vCenter별 증감</th>}
                     <th>수집</th>
@@ -162,29 +214,45 @@ export default function VmTrackTool() {
                 <tbody>
                   {[...points].reverse().map((p) => {
                     const net = (p.added || 0) - (p.removed || 0);
-                    const openAll = () => setDetail({ title: `${slotLabel(p.slot)} 변경 내역${vcenterId ? ` — ${vcenterId}` : ' — 전체 vCenter'}`, slot: vcenterId ? null : p.slot, snapId: vcenterId ? p.snapId : null });
+                    const off = p.offCount ?? (p.total - p.onCount);
+                    // 상세 모달은 같은 슬롯 데이터를 열고 kind 로 초기 필터만 다르게 준다.
+                    const open = (focus) => setDetail({
+                      title: `${slotLabel(p.slot)} 변경 내역${vcenterId ? ` — ${vcenterId}` : ' — 전체 vCenter'}`,
+                      slot: vcenterId ? null : p.slot, snapId: vcenterId ? p.snapId : null, focus,
+                    });
                     return (
                       <tr key={p.slot}>
                         <td><b>{slotLabel(p.slot)}</b>{p.baseline && <span className="badge gray" style={{ marginLeft: 6, fontSize: 10 }}>기준선</span>}</td>
                         <td style={{ textAlign: 'right' }}>{p.total.toLocaleString()}</td>
-                        <td style={{ textAlign: 'right' }} className="muted">{p.onCount.toLocaleString()}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--green)' }}>{p.onCount.toLocaleString()}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--amber)' }}>{off.toLocaleString()}</td>
                         <td style={{ textAlign: 'right' }}>
-                          {p.added ? <button className="tab" style={{ padding: '2px 8px', fontSize: 12, color: 'var(--green)' }} onClick={openAll} title="생성된 VM 보기">+{p.added}</button> : <span className="muted">0</span>}
+                          {p.added ? <button className="tab" style={{ padding: '2px 8px', fontSize: 12, color: 'var(--green)' }} onClick={() => open('added')} title="생성된 VM 보기">+{p.added}</button> : <span className="muted">0</span>}
                         </td>
                         <td style={{ textAlign: 'right' }}>
-                          {p.removed ? <button className="tab" style={{ padding: '2px 8px', fontSize: 12, color: 'var(--red)' }} onClick={openAll} title="삭제된 VM 보기">-{p.removed}</button> : <span className="muted">0</span>}
+                          {p.removed ? <button className="tab" style={{ padding: '2px 8px', fontSize: 12, color: 'var(--red)' }} onClick={() => open('removed')} title="삭제된 VM 보기">-{p.removed}</button> : <span className="muted">0</span>}
+                        </td>
+                        <td style={{ textAlign: 'right' }}>
+                          {p.poweredOn ? <button className="tab" style={{ padding: '2px 8px', fontSize: 12, color: 'var(--green)' }} onClick={() => open('powered_on')} title="전원이 켜진(Off→On) VM 보기">↑{p.poweredOn}</button> : <span className="muted">0</span>}
+                        </td>
+                        <td style={{ textAlign: 'right' }}>
+                          {p.poweredOff ? <button className="tab" style={{ padding: '2px 8px', fontSize: 12, color: 'var(--amber)' }} onClick={() => open('powered_off')} title="전원이 꺼진(On→Off) VM 보기">↓{p.poweredOff}</button> : <span className="muted">0</span>}
                         </td>
                         <td style={{ textAlign: 'right', color: net > 0 ? 'var(--green)' : net < 0 ? 'var(--red)' : undefined }}>{net > 0 ? `+${net}` : net}</td>
                         {!vcenterId && (
                           <td style={{ fontSize: 11.5 }}>
-                            {(bySlotVc[p.slot] || []).filter((v) => v.added || v.removed).map((v) => (
+                            {(bySlotVc[p.slot] || []).filter((v) => v.added || v.removed || v.poweredOn || v.poweredOff).map((v) => (
                               <button key={v.vcenterId} className="tab" style={{ padding: '1px 7px', fontSize: 11, marginRight: 4, marginBottom: 2 }}
-                                title={`${v.vcenterId} — 생성 ${v.added} · 삭제 ${v.removed} (누르면 상세)`}
+                                title={`${v.vcenterId} — 생성 ${v.added} · 삭제 ${v.removed} · 전원↑ ${v.poweredOn || 0} · 전원↓ ${v.poweredOff || 0} (누르면 상세)`}
                                 onClick={() => setDetail({ title: `${slotLabel(p.slot)} — ${v.vcenterId}`, snapId: v.snapId })}>
-                                {v.vcenterId} <b style={{ color: 'var(--green)' }}>+{v.added}</b>{v.removed ? <b style={{ color: 'var(--red)' }}> -{v.removed}</b> : null}
+                                {v.vcenterId}
+                                {v.added ? <b style={{ color: 'var(--green)' }}> +{v.added}</b> : null}
+                                {v.removed ? <b style={{ color: 'var(--red)' }}> -{v.removed}</b> : null}
+                                {v.poweredOn ? <b style={{ color: 'var(--green)' }}> ↑{v.poweredOn}</b> : null}
+                                {v.poweredOff ? <b style={{ color: 'var(--amber)' }}> ↓{v.poweredOff}</b> : null}
                               </button>
                             )) }
-                            {!(bySlotVc[p.slot] || []).some((v) => v.added || v.removed) && <span className="muted">변화 없음</span>}
+                            {!(bySlotVc[p.slot] || []).some((v) => v.added || v.removed || v.poweredOn || v.poweredOff) && <span className="muted">변화 없음</span>}
                           </td>
                         )}
                         <td className="muted" style={{ fontSize: 11.5 }}>{fmtAgo(p.collectedAt)}</td>
@@ -203,11 +271,19 @@ export default function VmTrackTool() {
   );
 }
 
-/** 증감 상세 — 생성/삭제된 VM + 클러스터·호스트·데이터스토어(사용자 요구). */
-function ChangeDetail({ title, snapId = null, slot = null, onClose }) {
+// 변경 종류 메타 — 라벨·배지색을 한 곳에서 관리(표·필터·모달 공용).
+const KIND_META = {
+  added: { label: '생성', badge: 'green' },
+  removed: { label: '삭제', badge: 'red' },
+  powered_on: { label: '전원 켜짐', badge: 'green' },
+  powered_off: { label: '전원 꺼짐', badge: 'amber' },
+};
+
+/** 변경 상세 — 생성/삭제/전원 전환 VM + 클러스터·호스트·데이터스토어(사용자 요구). */
+function ChangeDetail({ title, snapId = null, slot = null, focus = 'all', onClose }) {
   const [items, setItems] = useState(null);
   const [err, setErr] = useState(null);
-  const [kind, setKind] = useState('all');
+  const [kind, setKind] = useState(focus || 'all');
   useEffect(() => {
     fetchJson('/tools/vm-track/changes', { ...(snapId != null ? { snapId } : {}), ...(slot ? { slot } : {}) })
       .then((d) => setItems(d.items || []))
@@ -215,8 +291,7 @@ function ChangeDetail({ title, snapId = null, slot = null, onClose }) {
   }, [snapId, slot]);
 
   const shown = useMemo(() => (items || []).filter((r) => kind === 'all' || r.kind === kind), [items, kind]);
-  const added = (items || []).filter((r) => r.kind === 'added').length;
-  const removed = (items || []).filter((r) => r.kind === 'removed').length;
+  const countOf = (k) => (items || []).filter((r) => r.kind === k).length;
   const gb = (mb) => (mb == null ? '—' : `${Math.round(mb / 1024)}GB`);
 
   return (
@@ -228,10 +303,13 @@ function ChangeDetail({ title, snapId = null, slot = null, onClose }) {
         {!items && !err && <Loading />}
         {items && (
           <>
-            <div className="flex gap" style={{ alignItems: 'center', marginBottom: 8, fontSize: 12.5 }}>
+            <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 8, fontSize: 12.5 }}>
               <button className={kind === 'all' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '5px 11px', fontSize: 12 }} onClick={() => setKind('all')}>전체 {items.length}</button>
-              <button className={kind === 'added' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '5px 11px', fontSize: 12 }} onClick={() => setKind('added')}>생성 {added}</button>
-              <button className={kind === 'removed' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '5px 11px', fontSize: 12 }} onClick={() => setKind('removed')}>삭제 {removed}</button>
+              {Object.entries(KIND_META).map(([k, m]) => (
+                <button key={k} className={kind === k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '5px 11px', fontSize: 12 }} onClick={() => setKind(k)}>
+                  {m.label} {countOf(k)}
+                </button>
+              ))}
             </div>
             {shown.length === 0 ? <div className="muted" style={{ fontSize: 13 }}>해당 항목이 없습니다.</div> : (
               <div className="table-wrap" style={{ maxHeight: '56vh' }}>
@@ -247,7 +325,7 @@ function ChangeDetail({ title, snapId = null, slot = null, onClose }) {
                   <tbody>
                     {shown.map((r, i) => (
                       <tr key={`${r.vmId}:${i}`}>
-                        <td><span className={`badge ${r.kind === 'added' ? 'green' : 'red'}`}>{r.kind === 'added' ? '생성' : '삭제'}</span></td>
+                        <td><span className={`badge ${(KIND_META[r.kind] || {}).badge || 'gray'}`}>{(KIND_META[r.kind] || {}).label || r.kind}</span></td>
                         <td><b>{r.name || r.vmId}</b></td>
                         {items.some((x) => x.vcenterId) && <td className="muted" style={{ fontSize: 11.5 }}>{r.vcenterId || '—'}</td>}
                         <td className="muted" style={{ fontSize: 12 }}>{r.cluster || '—'}</td>
@@ -266,7 +344,8 @@ function ChangeDetail({ title, snapId = null, slot = null, onClose }) {
             )}
             <div className="muted" style={{ fontSize: 11.5, marginTop: 8, lineHeight: 1.7 }}>
               삭제된 VM 의 위치 정보는 <b>사라지기 직전 스냅샷에 기록된 값</b>입니다(현재 조회 불가하므로 추적 DB 의 마지막 관측치).
-              생성된 VM 은 그 슬롯 수집 시점의 클러스터·호스트·데이터스토어입니다.
+              생성·전원 전환 VM 은 그 슬롯 수집 시점의 클러스터·호스트·데이터스토어입니다.
+              전원 전환은 <b>두 스냅샷에 모두 있던 VM</b>만 집계하므로, 새로 만들어져 켜진 VM 은 '생성'에만 잡힙니다(중복 없음).
             </div>
           </>
         )}

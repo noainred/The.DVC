@@ -44,23 +44,41 @@ export function normalizeVm(v) {
   };
 }
 
+const isOn = (s) => s === 'POWERED_ON';
+
 /**
  * 한 vCenter 의 diff 계산.
  * @param {Array} vms       현재 스냅샷의 그 vCenter VM 목록(원본 객체)
  * @param {Map}   prevRoster 직전 로스터 Map<vmId, row>(DB roster). 빈 Map 이면 baseline.
- * @returns {{ total, onCount, added:Array, removed:Array, live:Array, baseline:boolean }}
- *   baseline=true(직전 로스터 없음)면 added/removed 를 비운다 — 최초 1회가 전량 '신규'로
+ * @returns {{ total, onCount, offCount, added:Array, removed:Array,
+ *            poweredOn:Array, poweredOff:Array, live:Array, baseline:boolean }}
+ *   baseline=true(직전 로스터 없음)면 added/removed/전환을 비운다 — 최초 1회가 전량 '신규'로
  *   잡혀 차트·목록이 왜곡되는 것을 막는다(기준선만 세우고 증감은 다음 슬롯부터).
+ *   전원 전환(v2.347)은 **양쪽 스냅샷에 모두 존재하는 VM** 만 센다 — 새로 생성된 켜진 VM 은
+ *   added 로만, 삭제된 켜진 VM 은 removed 로만 집계해 중복(생성=전원켜짐)을 만들지 않는다.
  */
 export function diffVcenter(vms, prevRoster) {
   const live = (vms || []).map(normalizeVm).filter((v) => v.vmId);
   const total = live.length;
-  const onCount = live.filter((v) => v.powerState === 'POWERED_ON').length;
+  const onCount = live.filter((v) => isOn(v.powerState)).length;
+  const offCount = total - onCount;
   const baseline = !prevRoster || prevRoster.size === 0;
-  if (baseline) return { total, onCount, added: [], removed: [], live, baseline: true };
+  if (baseline) return { total, onCount, offCount, added: [], removed: [], poweredOn: [], poweredOff: [], live, baseline: true };
 
   const nowIds = new Set(live.map((v) => v.vmId));
-  const added = live.filter((v) => !prevRoster.has(v.vmId));
+  const added = [];
+  const poweredOn = [];
+  const poweredOff = [];
+  for (const v of live) {
+    const prev = prevRoster.get(v.vmId);
+    if (!prev) { added.push(v); continue; } // 신규 — 전환 집계 대상 아님
+    const was = isOn(prev.power_state);
+    const now = isOn(v.powerState);
+    if (was === now) continue;
+    // 전환 항목은 '현재 위치 + 이전 상태'를 함께 담아 상세 화면이 'Off → On' 을 보여줄 수 있게.
+    const item = { ...v, prevPowerState: prev.power_state || '' };
+    if (now) poweredOn.push(item); else poweredOff.push(item);
+  }
   const removed = [];
   for (const [vmId, r] of prevRoster) {
     if (nowIds.has(vmId)) continue;
@@ -70,16 +88,17 @@ export function diffVcenter(vms, prevRoster) {
       cpu: r.cpu ?? null, memMB: r.mem_mb ?? null, storageGB: r.storage_gb ?? null, guestOS: r.guest_os || '',
     });
   }
-  return { total, onCount, added, removed, live, baseline: false };
+  return { total, onCount, offCount, added, removed, poweredOn, poweredOff, live, baseline: false };
 }
 
-/** 전체 합계 행 — vCenter별 결과를 더한다(증감도 합산). */
+/** 전체 합계 행 — vCenter별 결과를 더한다(증감·전원 전환도 합산). */
 export function totalsOf(perVc) {
-  const t = { total: 0, onCount: 0, added: 0, removed: 0, baseline: false };
+  const t = { total: 0, onCount: 0, offCount: 0, added: 0, removed: 0, poweredOn: 0, poweredOff: 0, baseline: false };
   let allBaseline = perVc.length > 0;
   for (const vc of perVc) {
-    t.total += vc.total; t.onCount += vc.onCount;
+    t.total += vc.total; t.onCount += vc.onCount; t.offCount += (vc.offCount ?? (vc.total - vc.onCount));
     t.added += vc.added.length; t.removed += vc.removed.length;
+    t.poweredOn += (vc.poweredOn || []).length; t.poweredOff += (vc.poweredOff || []).length;
     if (!vc.baseline) allBaseline = false;
   }
   t.baseline = allBaseline; // 전 vCenter 가 기준선일 때만 전체도 기준선 표기
