@@ -246,6 +246,9 @@ export default function StorageTrackTool() {
           {/* 데이터스토어별 증감 추이(v2.353, 사용자 요구) */}
           <DsPerStore days={days} vcenterId={vcenterId} />
 
+          {/* 선택 vCenter 의 전체 DS 각각의 추이 차트(v2.354, 사용자 요구) */}
+          <DsAllGrid days={days} vcenterId={vcenterId} />
+
           {/* 슬롯 이력 */}
           <div className="card" style={{ padding: 12 }}>
             <b style={{ fontSize: 13 }}>스냅샷 이력 <span className="muted" style={{ fontWeight: 400, fontSize: 11.5 }}>(증감을 누르면 변화한 데이터스토어 목록)</span></b>
@@ -291,6 +294,121 @@ export default function StorageTrackTool() {
       )}
 
       {detail && <DsDetail {...detail} onClose={() => setDetail(null)} />}
+    </div>
+  );
+}
+
+/**
+ * 선택 vCenter 의 전체 데이터스토어 각각의 추이 그리드(v2.354, 사용자 요구:
+ * "모든 데이터스토어별로 각각" + "선택한 vCenter 의 데이터스토어만"). 카드마다 합계 차트와
+ * 같은 형식(총 용량 한도선 + 슬롯별 사용량 막대). 전체 vCenter(1,000개+ DS)를 한 번에
+ * 그리면 응답 수 MB·렌더 폭주라 vCenter 선택 시에만 표시하고 12개씩 페이지로 넘긴다.
+ */
+function DsAllGrid({ days, vcenterId }) {
+  const LIMIT = 12;
+  const [q, setQ] = useState('');
+  const [sort, setSort] = useState('used');
+  const [page, setPage] = useState(0);
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState(null);
+  useEffect(() => { setPage(0); }, [vcenterId, q, sort, days]);
+  useEffect(() => {
+    if (!vcenterId) { setData(null); return; }
+    fetchJson('/tools/vm-track/ds-series-all', { vcenterId, days, q, sort, offset: page * LIMIT, limit: LIMIT })
+      .then((d) => { setData(d); setErr(null); })
+      .catch((e) => setErr(e.message));
+  }, [vcenterId, days, q, sort, page]);
+
+  if (!vcenterId) {
+    return (
+      <div className="card" style={{ padding: 12, marginBottom: 12 }}>
+        <b style={{ fontSize: 13 }}>데이터스토어별 추이(전체)</b>
+        <div className="muted" style={{ fontSize: 12.5, marginTop: 6 }}>
+          상단에서 <b>vCenter 를 선택</b>하면 그 vCenter 에 연결된 데이터스토어 <b>각각의 추이 차트</b>가 여기에 표시됩니다.
+          (전체 vCenter 일괄 표시는 데이터스토어가 1,000개를 넘어 지원하지 않습니다 — vCenter 단위로 보세요.)
+        </div>
+      </div>
+    );
+  }
+  const items = data?.items || [];
+  const total = data?.total || 0;
+  const pages = Math.max(1, Math.ceil(total / LIMIT));
+  return (
+    <div className="card" style={{ padding: 12, marginBottom: 12 }}>
+      <div className="flex between wrap" style={{ alignItems: 'center' }}>
+        <div>
+          <b style={{ fontSize: 13 }}>데이터스토어별 추이 — {vcenterId}</b>
+          <span className="muted" style={{ fontSize: 11.5, marginLeft: 8 }}>
+            {total.toLocaleString()}개 중 {total ? page * LIMIT + 1 : 0}–{Math.min(total, (page + 1) * LIMIT)} · 카드마다 총 용량 한도선 + 사용량 막대
+          </span>
+        </div>
+        <div className="flex gap" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+          <input className="input" placeholder="데이터스토어/유형 검색" value={q} onChange={(e) => setQ(e.target.value)}
+            style={{ maxWidth: 190, padding: '6px 10px', fontSize: 12.5 }} />
+          <select className="input" value={sort} onChange={(e) => setSort(e.target.value)} style={{ padding: '6px 10px', fontSize: 12.5 }}>
+            <option value="used">사용량 큰 순</option>
+            <option value="delta">{days}일 증감 큰 순</option>
+            <option value="name">이름 순</option>
+          </select>
+          <span className="flex gap" style={{ alignItems: 'center' }}>
+            <button className="tab" style={{ flex: 'none', padding: '5px 10px', fontSize: 12 }} disabled={page <= 0} onClick={() => setPage((x) => Math.max(0, x - 1))}>◀ 이전</button>
+            <span className="muted" style={{ fontSize: 12 }}>{page + 1}/{pages}</span>
+            <button className="tab" style={{ flex: 'none', padding: '5px 10px', fontSize: 12 }} disabled={page + 1 >= pages} onClick={() => setPage((x) => x + 1)}>다음 ▶</button>
+          </span>
+        </div>
+      </div>
+      {err && <div className="muted" style={{ fontSize: 12, marginTop: 6, color: 'var(--amber)' }}>⚠ {err}</div>}
+      {!data && !err && <div className="muted" style={{ fontSize: 12.5, marginTop: 8 }}>불러오는 중…</div>}
+      {data && items.length === 0 && <div className="muted" style={{ fontSize: 12.5, marginTop: 8 }}>표시할 데이터스토어가 없습니다.</div>}
+      {items.length > 0 && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 10, marginTop: 10 }}>
+          {items.map((it) => <DsMiniChart key={it.dsId} item={it} days={days} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 그리드 셀 1개 — 미니 추이 차트(합계 차트와 같은 형식, 축 단위는 DS 규모에 따라 GB/TB 자동). */
+function DsMiniChart({ item, days }) {
+  const pts = item.points || [];
+  const maxCap = pts.reduce((m, p) => Math.max(m, p.capGB || 0), 0);
+  const useTb = maxCap >= 10_240;
+  const unit = useTb ? 'TB' : 'GB';
+  const u = (gb) => (gb == null ? null : (useTb ? tb(gb) : Math.round(gb * 10) / 10));
+  const chart = pts.map((p) => ({ label: slotLabel(p.slot), cap: u(p.capGB), used: u(p.usedGB) }));
+  const observed = pts.some((p) => p.usedGB != null);
+  return (
+    <div style={{ border: '1px solid rgba(148,163,184,.15)', borderRadius: 8, padding: 10 }}>
+      <div className="flex between" style={{ alignItems: 'baseline' }}>
+        <b style={{ fontSize: 12.5 }}>💾 {item.name}</b>
+        <span className="muted" style={{ fontSize: 11 }}>{item.type || '—'}</span>
+      </div>
+      <div className="muted" style={{ fontSize: 11.5, marginTop: 2 }}>
+        사용 {gbTb(item.usedGB)} / {gbTb(item.capGB)} · <b style={{ color: pctColor(item.usagePct || 0) }}>{item.usagePct}%</b>
+        {' · '}{days}일 증감 {item.deltaGB
+          ? <b style={{ color: item.deltaGB > 0 ? 'var(--amber)' : 'var(--green)' }}>{item.deltaGB > 0 ? '+' : ''}{gbTb(item.deltaGB)}</b>
+          : <span>0</span>}
+      </div>
+      {!observed ? (
+        <div className="muted" style={{ fontSize: 11.5, height: 140, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          관측 스냅샷 없음 — 다음 00시·12시 스냅샷부터 쌓입니다
+        </div>
+      ) : (
+        <div style={{ width: '100%', height: 140, marginTop: 6 }}>
+          <ResponsiveContainer>
+            <ComposedChart data={chart} margin={{ top: 4, right: 8, bottom: 0, left: -14 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,.12)" />
+              <XAxis dataKey="label" tick={{ fontSize: 9.5 }} />
+              <YAxis tick={{ fontSize: 9.5 }} domain={[0, 'auto']} />
+              <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid rgba(148,163,184,.3)', fontSize: 12 }}
+                formatter={(v, n) => [`${Number(v).toLocaleString()} ${unit}`, n === 'cap' ? '총 용량' : '사용량']} />
+              <Bar dataKey="used" fill="#f59e0b" fillOpacity={0.85} maxBarSize={18} />
+              <Line type="monotone" dataKey="cap" stroke="#60a5fa" strokeWidth={1.5} dot={false} />
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
+      )}
     </div>
   );
 }

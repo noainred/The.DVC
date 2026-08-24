@@ -230,3 +230,62 @@ test('DB 왕복(v2.353): ds_series — 첫 관측/변화 기록, carry-in, 같�
   const carry = await db.dsSeriesCarry(15_000);
   assert.ok(carry.some((x) => x.ds_id === 'vcds:a' && x.used_gb === 500));
 });
+
+test('service(v2.354): vmtrackDsSeriesAll — 선택 vCenter 의 전체 DS 를 슬롯 축에 step 으로', { skip: !sqliteOk ? 'node:sqlite 미지원 런타임' : false }, async () => {
+  const svc = await import('../src/vmtrack/service.js');
+  // 서비스는 Date.now() 기준 윈도우라 실제 최근 ts 로 커밋한다.
+  const now = Date.now();
+  const t1 = now - 3_600_000;
+  const t2 = now;
+  const mk = (dsId, capGB, usedGB) => ({ dsId, name: dsId.split(':')[1], type: 'NFS', capGB, usedGB, freeGB: capGB - usedGB, usagePct: Math.round((usedGB / capGB) * 1000) / 10 });
+  let r = await db.commitSnapshot({
+    slot: '2026-08-24T00', ts: t1,
+    perVc: [{ vcenterId: 'vcsvc', total: 0, onCount: 0, added: [], removed: [], live: [], baseline: true,
+      ds: { count: 2, capGB: 3000, usedGB: 700, added: [], removed: [], changed: [],
+        live: [mk('vcsvc:big', 2000, 600), mk('vcsvc:small', 1000, 100)],
+        series: [mk('vcsvc:big', 2000, 600), mk('vcsvc:small', 1000, 100)], baseline: true } }],
+    totalRow: { total: 0, onCount: 0, added: 0, removed: 0, dsCount: 2, dsCapGB: 3000, dsUsedGB: 700, baseline: true },
+  });
+  assert.equal(r.ok, true);
+  r = await db.commitSnapshot({
+    slot: '2026-08-24T12', ts: t2,
+    perVc: [{ vcenterId: 'vcsvc', total: 0, onCount: 0, added: [], removed: [], live: [], baseline: false,
+      ds: { count: 2, capGB: 3000, usedGB: 750, added: [], removed: [],
+        changed: [{ ...mk('vcsvc:big', 2000, 650), prevUsedGB: 600, deltaGB: 50 }],
+        live: [mk('vcsvc:big', 2000, 650), mk('vcsvc:small', 1000, 100)],
+        series: [mk('vcsvc:big', 2000, 650)], baseline: false } }],
+    totalRow: { total: 0, onCount: 0, added: 0, removed: 0, dsCount: 2, dsCapGB: 3000, dsUsedGB: 750, baseline: false },
+  });
+  assert.equal(r.ok, true);
+
+  // vCenter 미지정은 거부(전체 일괄은 응답이 수 MB — 지원하지 않음).
+  const none = await svc.vmtrackDsSeriesAll({ days: 30, vcenterId: '' });
+  assert.equal(none.total, 0);
+  assert.ok(none.reason);
+
+  const all = await svc.vmtrackDsSeriesAll({ days: 30, vcenterId: 'vcsvc' });
+  assert.equal(all.total, 2);
+  const big = all.items.find((x) => x.dsId === 'vcsvc:big');
+  const small = all.items.find((x) => x.dsId === 'vcsvc:small');
+  // 슬롯 2개 축 위에 step: big 은 600→650, small 은 관측 1회지만 두 슬롯 모두 100 유지.
+  assert.deepEqual(big.points.map((p) => p.usedGB), [600, 650]);
+  assert.deepEqual(small.points.map((p) => p.usedGB), [100, 100]);
+  assert.equal(big.deltaGB, 50);
+  assert.equal(small.deltaGB, 0);
+  // 기본 정렬은 사용량 큰 순.
+  assert.equal(all.items[0].dsId, 'vcsvc:big');
+
+  // 페이지: limit 1 → 1개씩, offset 이동.
+  const p1 = await svc.vmtrackDsSeriesAll({ days: 30, vcenterId: 'vcsvc', limit: 1, offset: 1 });
+  assert.equal(p1.total, 2);
+  assert.equal(p1.items.length, 1);
+  assert.equal(p1.items[0].dsId, 'vcsvc:small');
+
+  // 검색어 필터.
+  const qq = await svc.vmtrackDsSeriesAll({ days: 30, vcenterId: 'vcsvc', q: 'big' });
+  assert.equal(qq.total, 1);
+
+  // scope 밖 vCenter 는 빈 결과(사용자 데이터 범위 강제).
+  const scoped = await svc.vmtrackDsSeriesAll({ days: 30, vcenterId: 'vcsvc', scopeIds: new Set(['other']) });
+  assert.equal(scoped.total, 0);
+});

@@ -2,10 +2,12 @@ import React, { useState } from 'react';
 import { usePolling } from '../api.js';
 import { DataTable, UsageCell, Kpi, Loading, ErrorBox, ResultCount, EntityDetail } from '../components/ui.jsx';
 import IpmsMatches from '../components/IpmsMatches.jsx';
+import DsTrendModal from './tools/DsTrendModal.jsx'; // 개별 DS 사용량 추이 모달(v2.354)
 
 export default function Datastores({ filters }) {
   // 이름 클릭 → 상세 모달(할당 VM·파일 브라우즈 포함, v2.276). 훅은 조기 return 위에 선언.
   const [sel, setSel] = useState(null);
+  const [trend, setTrend] = useState(null); // 📈 추이 모달(v2.354) — 훅은 조기 return 위에
   const { data, error, loading } = usePolling('/datastores', filters, 15_000);
   if (loading && !data) return <Loading />;
   if (error && !data) return <ErrorBox message={error} />; // 데이터 보유 중 일시 폴링 오류는 화면 유지
@@ -28,6 +30,10 @@ export default function Datastores({ filters }) {
     { key: 'usedGB', label: '사용', align: 'right', render: (d) => tb(d.usedGB) },
     { key: 'freeGB', label: '여유', align: 'right', render: (d) => tb(d.freeGB) },
     { key: 'usagePct', label: '사용률', render: (d) => <UsageCell pct={d.usagePct} /> },
+    // 사용량 추이(v2.354) — 이름 클릭(상세)과 별개 버튼. vm-track 의 00/12시 스냅샷 차트.
+    { key: 'trend', label: '추이', render: (d) => (
+      <button className="tab" style={{ padding: '2px 9px', fontSize: 12 }} title="00시·12시 스냅샷 기준 사용량 추이 차트" onClick={() => setTrend(d)}>📈</button>
+    ) },
   ];
 
   return (
@@ -43,6 +49,8 @@ export default function Datastores({ filters }) {
       <DataTable columns={columns} rows={rows} initialSort={{ key: 'usagePct', dir: 'desc' }} />
       <IpmsMatches filters={filters} />
       {sel && <EntityDetail type="datastore" item={sel} onClose={() => setSel(null)} />}
+      {trend && <DsTrendModal dsId={trend.id || `${trend.vcenterId}:${trend.name}`} name={trend.name}
+        vcenterId={trend.vcenterId} type={trend.type} onClose={() => setTrend(null)} />}
     </>
   );
 }
