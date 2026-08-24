@@ -29,6 +29,7 @@ import VmCloneTool from './tools/VmCloneTool.jsx'; // VM 복제(백업식, v2.29
 import StorageMonTool from './tools/StorageMonTool.jsx'; // 스토리지 모니터링(Isilon 등, v2.302 — admin 전용)
 import BmStorageTool from './tools/BmStorageTool.jsx'; // 베어메탈 스토리지(SSH df 합산, v2.340 — admin 전용)
 import VmTrackTool from './tools/VmTrackTool.jsx'; // VM 수량 추이(00/12시 스냅샷 + 증감 상세, v2.345)
+import StorageTrackTool from './tools/StorageTrackTool.jsx'; // 스토리지 사용량 추이(같은 스냅샷의 DS 관점 뷰, v2.350)
 import { PortalDb } from './tools/PortalDb.jsx';
 import { NicModels, NicSpeed } from './tools/NicTools.jsx';
 import { Shutdown } from './tools/ShutdownTool.jsx';
@@ -278,6 +279,7 @@ function ToolPanel({ tool, onBack, isAdmin }) {
       {tool === 'storage-mon' && <StorageMonTool />}
       {tool === 'bm-storage' && <BmStorageTool />}
       {tool === 'vm-track' && <VmTrackTool />}
+      {tool === 'storage-track' && <StorageTrackTool />}
       {tool === 'vmfinder' && <VmFinder />}
       {tool === 'capacity' && <Capacity scope={scope} />}
       {tool === 'waste' && <Waste scope={scope} />}
