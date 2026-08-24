@@ -83,3 +83,62 @@ test('totalsOf: vCenter별 합산 · 전 vCenter 기준선일 때만 전체도 �
   assert.equal(totalsOf([b]).baseline, true);
   assert.equal(totalsOf([]).baseline, false, '빈 입력은 기준선 표기 안 함');
 });
+
+// ── v2.347: 켜진/꺼진 VM 수량 변화 + 전원 전환 ──────────────────────────────────
+
+test('diffVcenter(v2.347): 켜짐/꺼짐 수량 + 전원 전환(Off→On / On→Off) 판정', () => {
+  const prev = new Map([
+    ['vc1:a', { vm_id: 'vc1:a', name: 'a', power_state: 'POWERED_OFF', cluster: 'C1', host: 'esx1', datastore: 'ds1' }],
+    ['vc1:b', { vm_id: 'vc1:b', name: 'b', power_state: 'POWERED_ON' }],
+    ['vc1:c', { vm_id: 'vc1:c', name: 'c', power_state: 'POWERED_ON' }],
+  ]);
+  const now = [
+    { id: 'vc1:a', name: 'a', powerState: 'POWERED_ON', cluster: 'C1', host: 'esx1', datastores: ['ds1'] }, // Off→On
+    { id: 'vc1:b', name: 'b', powerState: 'POWERED_OFF' },                                                  // On→Off
+    { id: 'vc1:c', name: 'c', powerState: 'POWERED_ON' },                                                   // 유지
+  ];
+  const d = diffVcenter(now, prev);
+  assert.equal(d.total, 3);
+  assert.equal(d.onCount, 2);
+  assert.equal(d.offCount, 1, 'offCount = total - onCount');
+  assert.equal(d.poweredOn.length, 1);
+  assert.equal(d.poweredOn[0].name, 'a');
+  assert.equal(d.poweredOn[0].prevPowerState, 'POWERED_OFF', '상세에서 Off→On 을 보여주려면 이전 상태 필요');
+  assert.equal(d.poweredOn[0].cluster, 'C1', '전환 항목도 현재 위치(클러스터·호스트·DS) 포함');
+  assert.equal(d.poweredOn[0].datastore, 'ds1');
+  assert.equal(d.poweredOff.length, 1);
+  assert.equal(d.poweredOff[0].name, 'b');
+  assert.deepEqual(d.added, []);
+  assert.deepEqual(d.removed, []);
+});
+
+test('diffVcenter(v2.347): 신규 생성/삭제는 전원 전환으로 중복 집계하지 않는다', () => {
+  const prev = new Map([['vc1:gone', { vm_id: 'vc1:gone', name: 'gone', power_state: 'POWERED_ON' }]]);
+  const d = diffVcenter([{ id: 'vc1:new', name: 'new', powerState: 'POWERED_ON' }], prev);
+  assert.equal(d.added.length, 1, '새로 만들어져 켜진 VM 은 생성으로만');
+  assert.equal(d.poweredOn.length, 0);
+  assert.equal(d.removed.length, 1, '삭제된 켜진 VM 은 삭제로만');
+  assert.equal(d.poweredOff.length, 0);
+  assert.equal(d.onCount, 1);
+  assert.equal(d.offCount, 0);
+});
+
+test('diffVcenter(v2.347): 기준선은 전원 전환도 비운다', () => {
+  const d = diffVcenter([{ id: 'v1', powerState: 'POWERED_ON' }, { id: 'v2', powerState: 'POWERED_OFF' }], new Map());
+  assert.equal(d.baseline, true);
+  assert.equal(d.onCount, 1);
+  assert.equal(d.offCount, 1);
+  assert.deepEqual(d.poweredOn, []);
+  assert.deepEqual(d.poweredOff, []);
+});
+
+test('totalsOf(v2.347): 꺼짐·전원 전환도 합산 · offCount 없는 입력은 total-on 폴백', () => {
+  const t = totalsOf([
+    { total: 10, onCount: 7, offCount: 3, added: [], removed: [], poweredOn: [{}, {}], poweredOff: [{}], baseline: false },
+    { total: 4, onCount: 1, added: [], removed: [], poweredOn: [], poweredOff: [{}], baseline: false }, // offCount 미제공
+  ]);
+  assert.equal(t.onCount, 8);
+  assert.equal(t.offCount, 6, '3 + (4-1)');
+  assert.equal(t.poweredOn, 2);
+  assert.equal(t.poweredOff, 2);
+});

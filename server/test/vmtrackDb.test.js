@@ -86,3 +86,30 @@ test('DB 왕복: 커밋 → 시계열/변경 조회 → 로스터 diff 기준', 
   await db.dropRoster('vc1');
   assert.equal((await db.loadRoster('vc1')).size, 0);
 });
+
+test('DB 왕복(v2.347): 전원 전환 카운터·changes kind 저장/조회', { skip: !sqliteOk ? 'node:sqlite 미지원 런타임' : false }, async () => {
+  const live = [{ vmId: 'vc2:a', name: 'a', cluster: 'C1', host: 'esx1', datastore: 'ds1', powerState: 'POWERED_ON', cpu: 2, memMB: 2048, storageGB: 20, guestOS: 'Ubuntu' }];
+  const r = await db.commitSnapshot({
+    slot: '2026-08-24T00', ts: 9_000,
+    perVc: [{
+      vcenterId: 'vc2', total: 1, onCount: 1, added: [], removed: [],
+      poweredOn: [{ ...live[0], prevPowerState: 'POWERED_OFF' }],
+      poweredOff: [],
+      live, baseline: false,
+    }],
+    totalRow: { total: 1, onCount: 1, added: 0, removed: 0, poweredOn: 1, poweredOff: 0, baseline: false },
+  });
+  assert.equal(r.ok, true);
+
+  const rows = await db.readSeries({ vcenterId: 'vc2', sinceTs: 0 });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].powered_on, 1, '전환 카운터가 시계열에 저장됨(차트 원천)');
+  assert.equal(rows[0].powered_off, 0);
+
+  const changes = await db.readChanges({ slot: '2026-08-24T00' });
+  const onRow = changes.find((c) => c.kind === 'powered_on');
+  assert.ok(onRow, 'kind=powered_on 행 저장');
+  assert.equal(onRow.name, 'a');
+  assert.equal(onRow.host, 'esx1', '전환 VM 도 위치 정보 포함(클릭 상세)');
+  assert.equal(onRow.datastore, 'ds1');
+});
