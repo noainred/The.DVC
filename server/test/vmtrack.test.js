@@ -3,7 +3,7 @@
 // 데이터스토어가 담겨야 클릭 상세가 성립한다.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { slotKey, slotStartMs, normalizeVm, diffVcenter, totalsOf } from '../src/vmtrack/diff.js';
+import { slotKey, slotStartMs, normalizeVm, diffVcenter, totalsOf, normalizeDs, diffDatastores } from '../src/vmtrack/diff.js';
 
 test('slotKey: 00~11시 → T00, 12~23시 → T12(로컬 기준)', () => {
   assert.equal(slotKey(new Date(2026, 7, 21, 0, 0)), '2026-08-21T00');
@@ -141,4 +141,76 @@ test('totalsOf(v2.347): 꺼짐·전원 전환도 합산 · offCount 없는 입�
   assert.equal(t.offCount, 6, '3 + (4-1)');
   assert.equal(t.poweredOn, 2);
   assert.equal(t.poweredOff, 2);
+});
+
+// ── v2.348: vCenter 에 연결된 데이터스토어 사용량 추적 ─────────────────────────────
+
+test('normalizeDs: 용량 필드 추출 · freeGB 미제공 시 cap-used 로 보완 · 사용률 계산', () => {
+  const a = normalizeDs({ id: 'vc1:ds1', name: 'ds1', storageType: 'vsan', capacityGB: 1000, usedGB: 250, freeGB: 750 });
+  assert.equal(a.dsId, 'vc1:ds1');
+  assert.equal(a.type, 'vsan');
+  assert.equal(a.usagePct, 25);
+  const b = normalizeDs({ id: 'vc1:ds2', name: 'ds2', type: 'NFS', capacityGB: 200, usedGB: 50 });
+  assert.equal(b.freeGB, 150, 'freeGB 없으면 cap-used');
+  assert.equal(b.type, 'NFS', 'storageType 없으면 type 폴백');
+});
+
+test('diffDatastores: 최초는 기준선 — 집계는 하되 변경 목록은 비운다', () => {
+  const d = diffDatastores([
+    { id: 'vc1:a', name: 'a', capacityGB: 1000, usedGB: 400 },
+    { id: 'vc1:b', name: 'b', capacityGB: 1000, usedGB: 100 },
+  ], new Map());
+  assert.equal(d.baseline, true);
+  assert.equal(d.count, 2);
+  assert.equal(d.capGB, 2000);
+  assert.equal(d.usedGB, 500);
+  assert.equal(d.freeGB, 1500);
+  assert.equal(d.usagePct, 25);
+  assert.deepEqual(d.changed, []);
+  assert.deepEqual(d.added, []);
+  assert.deepEqual(d.removed, []);
+});
+
+test('diffDatastores: 임계 이상 사용량 변화만 기록(합계는 항상 정확) + 연결/해제', () => {
+  const prev = new Map([
+    ['vc1:a', { ds_id: 'vc1:a', name: 'a', type: 'vsan', cap_gb: 1000, used_gb: 400, free_gb: 600 }],
+    ['vc1:tiny', { ds_id: 'vc1:tiny', name: 'tiny', cap_gb: 100, used_gb: 50, free_gb: 50 }],
+    ['vc1:gone', { ds_id: 'vc1:gone', name: 'gone', type: 'NFS', cap_gb: 500, used_gb: 300, free_gb: 200 }],
+  ]);
+  const now = [
+    { id: 'vc1:a', name: 'a', storageType: 'vsan', capacityGB: 1000, usedGB: 450 },  // +50GB → 기록
+    { id: 'vc1:tiny', name: 'tiny', capacityGB: 100, usedGB: 50.5 },                  // +0.5GB → 임계 미만, 기록 안 함
+    { id: 'vc1:new', name: 'new', capacityGB: 2000, usedGB: 10 },                     // 신규 연결
+  ];
+  const d = diffDatastores(now, prev);
+  assert.equal(d.count, 3);
+  assert.equal(d.usedGB, 510.5, '합계는 임계와 무관하게 정확(차트 원천)');
+  assert.equal(d.changed.length, 1);
+  assert.equal(d.changed[0].name, 'a');
+  assert.equal(d.changed[0].deltaGB, 50);
+  assert.equal(d.changed[0].prevUsedGB, 400, '상세에서 이전→현재를 보여주려면 필요');
+  assert.equal(d.added.length, 1);
+  assert.equal(d.added[0].name, 'new');
+  assert.equal(d.removed.length, 1);
+  assert.equal(d.removed[0].name, 'gone');
+  assert.equal(d.removed[0].usedGB, 300, '해제된 DS 는 마지막 관측치 보존');
+});
+
+test('diffDatastores: 사용량 감소도 기록(정리·삭제 추적)', () => {
+  const prev = new Map([['vc1:a', { ds_id: 'vc1:a', name: 'a', cap_gb: 1000, used_gb: 900, free_gb: 100 }]]);
+  const d = diffDatastores([{ id: 'vc1:a', name: 'a', capacityGB: 1000, usedGB: 700 }], prev);
+  assert.equal(d.changed.length, 1);
+  assert.equal(d.changed[0].deltaGB, -200);
+  assert.equal(d.usagePct, 70);
+});
+
+test('totalsOf(v2.348): 데이터스토어 개수·용량·사용량 합산', () => {
+  const t = totalsOf([
+    { total: 1, onCount: 1, added: [], removed: [], ds: { count: 2, capGB: 1000, usedGB: 400 }, baseline: false },
+    { total: 1, onCount: 0, added: [], removed: [], ds: { count: 3, capGB: 2000, usedGB: 600 }, baseline: false },
+    { total: 1, onCount: 0, added: [], removed: [], baseline: false }, // ds 없음(수집 전) — 0 취급
+  ]);
+  assert.equal(t.dsCount, 5);
+  assert.equal(t.dsCapGB, 3000);
+  assert.equal(t.dsUsedGB, 1000);
 });

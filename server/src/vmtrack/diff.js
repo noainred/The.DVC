@@ -91,16 +91,90 @@ export function diffVcenter(vms, prevRoster) {
   return { total, onCount, offCount, added, removed, poweredOn, poweredOff, live, baseline: false };
 }
 
-/** 전체 합계 행 — vCenter별 결과를 더한다(증감·전원 전환도 합산). */
+// ── 데이터스토어 사용량 추적(v2.348, 사용자 요구: "vCenter 와 연결된 데이터스토어 사용량") ──
+
+// '의미 있는 사용량 변화' 임계(GB). 이보다 작은 흔들림은 ds_changes 에 남기지 않는다 —
+// 수백 DS × 2회/일 × 28 vCenter 를 전부 적재하면 연 수백만 행이 되고, 목록도 노이즈가 된다.
+// 합계 시계열(ds_used_gb)은 임계와 무관하게 항상 정확하다(차트는 그 값을 쓴다).
+const DS_DELTA_MIN_GB = Number(process.env.VMTRACK_DS_DELTA_MIN_GB) || 1;
+
+const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
+
+/** 스냅샷 데이터스토어 → 추적 필드. id 는 스냅샷 id('<vcId>:<name>')를 그대로 쓴다. */
+export function normalizeDs(d) {
+  const capGB = num(d.capacityGB);
+  const usedGB = num(d.usedGB);
+  const freeGB = num(d.freeGB) ?? (capGB != null && usedGB != null ? capGB - usedGB : null);
+  return {
+    dsId: String(d.id || d.name || ''),
+    name: d.name || '',
+    type: d.storageType || d.type || '',
+    capGB, usedGB, freeGB,
+    usagePct: (capGB && usedGB != null) ? Math.round((usedGB / capGB) * 1000) / 10 : null,
+  };
+}
+
+/**
+ * 한 vCenter 의 데이터스토어 집계 + 변경 계산.
+ * @returns {{count, capGB, usedGB, freeGB, usagePct, added, removed, changed, live, baseline}}
+ *   changed: 직전 슬롯 대비 사용량이 임계(기본 1GB) 이상 바뀐 DS(prevUsedGB·deltaGB 포함).
+ *   added/removed: 연결/해제된 DS(사용량 증감과 별개로 항상 기록 — 규모 변화 원인 추적).
+ */
+export function diffDatastores(datastores, prevRoster) {
+  const live = (datastores || []).map(normalizeDs).filter((d) => d.dsId);
+  let capGB = 0, usedGB = 0;
+  for (const d of live) { capGB += d.capGB || 0; usedGB += d.usedGB || 0; }
+  const agg = {
+    count: live.length,
+    capGB: Math.round(capGB * 10) / 10,
+    usedGB: Math.round(usedGB * 10) / 10,
+    freeGB: Math.round((capGB - usedGB) * 10) / 10,
+    usagePct: capGB > 0 ? Math.round((usedGB / capGB) * 1000) / 10 : 0,
+    live,
+  };
+  const baseline = !prevRoster || prevRoster.size === 0;
+  if (baseline) return { ...agg, added: [], removed: [], changed: [], baseline: true };
+
+  const nowIds = new Set(live.map((d) => d.dsId));
+  const added = [];
+  const changed = [];
+  for (const d of live) {
+    const prev = prevRoster.get(d.dsId);
+    if (!prev) { added.push(d); continue; } // 신규 연결 — 사용량 변화가 아니라 '추가'로
+    const prevUsed = num(prev.used_gb);
+    if (prevUsed == null || d.usedGB == null) continue;
+    const deltaGB = Math.round((d.usedGB - prevUsed) * 10) / 10;
+    if (Math.abs(deltaGB) < DS_DELTA_MIN_GB) continue;
+    changed.push({ ...d, prevUsedGB: prevUsed, deltaGB });
+  }
+  const removed = [];
+  for (const [dsId, r] of prevRoster) {
+    if (nowIds.has(dsId)) continue;
+    removed.push({
+      dsId, name: r.name || '', type: r.type || '',
+      capGB: num(r.cap_gb), usedGB: num(r.used_gb), freeGB: num(r.free_gb),
+      usagePct: (num(r.cap_gb) && num(r.used_gb) != null) ? Math.round((num(r.used_gb) / num(r.cap_gb)) * 1000) / 10 : null,
+    });
+  }
+  return { ...agg, added, removed, changed, baseline: false };
+}
+
+/** 전체 합계 행 — vCenter별 결과를 더한다(증감·전원 전환·데이터스토어도 합산). */
 export function totalsOf(perVc) {
-  const t = { total: 0, onCount: 0, offCount: 0, added: 0, removed: 0, poweredOn: 0, poweredOff: 0, baseline: false };
+  const t = { total: 0, onCount: 0, offCount: 0, added: 0, removed: 0, poweredOn: 0, poweredOff: 0,
+    dsCount: 0, dsCapGB: 0, dsUsedGB: 0, baseline: false };
   let allBaseline = perVc.length > 0;
   for (const vc of perVc) {
     t.total += vc.total; t.onCount += vc.onCount; t.offCount += (vc.offCount ?? (vc.total - vc.onCount));
     t.added += vc.added.length; t.removed += vc.removed.length;
     t.poweredOn += (vc.poweredOn || []).length; t.poweredOff += (vc.poweredOff || []).length;
+    t.dsCount += vc.ds?.count || 0;
+    t.dsCapGB += vc.ds?.capGB || 0;
+    t.dsUsedGB += vc.ds?.usedGB || 0;
     if (!vc.baseline) allBaseline = false;
   }
+  t.dsCapGB = Math.round(t.dsCapGB * 10) / 10;
+  t.dsUsedGB = Math.round(t.dsUsedGB * 10) / 10;
   t.baseline = allBaseline; // 전 vCenter 가 기준선일 때만 전체도 기준선 표기
   return t;
 }
