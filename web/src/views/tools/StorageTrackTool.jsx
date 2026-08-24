@@ -10,7 +10,7 @@
 //   · vCenter별 현재 사용량/용량/사용률 + 기간 증감 표(정렬)  · 일평균 증가량(GB/일)
 //   · 선형 추정 '용량 소진 예상' — 추정임을 화면에 명시(가정: 최근 기간 증가 속도 유지)
 import React, { useEffect, useMemo, useState } from 'react';
-import { ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend, ReferenceLine } from 'recharts';
+import { ResponsiveContainer, ComposedChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend, ReferenceLine } from 'recharts';
 import { fetchJson, postJson } from '../../api.js';
 import { Loading, ErrorBox, Kpi } from '../../components/ui.jsx';
 import EscClose from '../../components/EscClose.jsx';
@@ -160,22 +160,23 @@ export default function StorageTrackTool() {
         <>
           <div className="card" style={{ padding: 12, marginBottom: 12 }}>
             <b style={{ fontSize: 13 }}>용량 / 사용량 / 사용률 {vcenterId ? `— ${vcenterId}` : '— 전체 vCenter 합계'}</b>
+            {/* 사용자 요구 형태(v2.352): 총 용량은 상단 한도선(라인), 슬롯별 사용량은 바닥에서
+                올라오는 막대 — 사용량이 용량선에 다가가는 정도가 한눈에 보인다. 막대라 축은 0부터. */}
             <div style={{ width: '100%', height: 270, marginTop: 8 }}>
               <ResponsiveContainer>
-                <LineChart data={chart} margin={{ top: 6, right: 16, bottom: 4, left: 0 }}>
+                <ComposedChart data={chart} margin={{ top: 6, right: 16, bottom: 4, left: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,.18)" />
                   <XAxis dataKey="label" tick={{ fontSize: 11 }} />
-                  <YAxis yAxisId="tb" tick={{ fontSize: 11 }} domain={['auto', 'auto']} />
+                  <YAxis yAxisId="tb" tick={{ fontSize: 11 }} domain={[0, 'auto']} />
                   <YAxis yAxisId="pct" orientation="right" tick={{ fontSize: 11 }} domain={[0, 100]} unit="%" />
                   <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid rgba(148,163,184,.3)', fontSize: 12 }}
                     formatter={(v, n) => [n === 'dsUsagePct' ? `${v}%` : `${Number(v).toLocaleString()} TB`,
-                      n === 'dsCapTB' ? '총 용량' : n === 'dsUsedTB' ? '사용량' : n === 'dsFreeTB' ? '가용' : '사용률']} />
-                  <Legend wrapperStyle={{ fontSize: 12 }} formatter={(v) => (v === 'dsCapTB' ? '총 용량(TB)' : v === 'dsUsedTB' ? '사용량(TB)' : v === 'dsFreeTB' ? '가용(TB)' : '사용률(%)')} />
-                  <Line yAxisId="tb" type="monotone" dataKey="dsCapTB" stroke="#60a5fa" strokeWidth={1.5} dot={false} />
-                  <Line yAxisId="tb" type="monotone" dataKey="dsUsedTB" stroke="#f59e0b" strokeWidth={2} dot={{ r: 2 }} />
-                  <Line yAxisId="tb" type="monotone" dataKey="dsFreeTB" stroke="#22c55e" strokeWidth={1.2} strokeDasharray="4 3" dot={false} />
-                  <Line yAxisId="pct" type="monotone" dataKey="dsUsagePct" stroke="#a78bfa" strokeWidth={1.5} strokeDasharray="2 2" dot={false} />
-                </LineChart>
+                      n === 'dsCapTB' ? '총 용량' : n === 'dsUsedTB' ? '사용량' : '사용률']} />
+                  <Legend wrapperStyle={{ fontSize: 12 }} formatter={(v) => (v === 'dsCapTB' ? '총 용량(TB)' : v === 'dsUsedTB' ? '사용량(TB)' : '사용률(%)')} />
+                  <Bar yAxisId="tb" dataKey="dsUsedTB" fill="#f59e0b" fillOpacity={0.85} maxBarSize={26} />
+                  <Line yAxisId="tb" type="monotone" dataKey="dsCapTB" stroke="#60a5fa" strokeWidth={2} dot={false} />
+                  <Line yAxisId="pct" type="monotone" dataKey="dsUsagePct" stroke="#a78bfa" strokeWidth={1.2} strokeDasharray="2 2" dot={false} />
+                </ComposedChart>
               </ResponsiveContainer>
             </div>
           </div>
