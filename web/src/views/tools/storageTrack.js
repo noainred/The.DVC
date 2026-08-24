@@ -1,6 +1,17 @@
 // storageTrack.js — '스토리지 사용량 추이'(v2.350) 화면의 순수 계산부.
 // 컴포넌트 안에 두면 테스트할 수 없어(렌더 필요) 파생 계산만 따로 뺐다. 셋 다 부수효과 없음.
 
+/**
+ * DS 데이터가 실제로 있는 포인트인가 — v2.348 이전 버전에서 만들어진 스냅샷 행은 ds 열이
+ * 전부 0 이다(열 자체가 없다가 ALTER 로 추가됨). 이런 행을 기준선으로 쓰면 '0 → 현재 사용량'
+ * 전체가 증가로 잡혀 기간 증감이 +2만 TB 처럼 나온다(실제 발생) — 반드시 걸러야 한다.
+ * DS 가 진짜 0개인 vCenter 도 여기서 false 지만, 그 경우 증감도 0 이므로 결과는 동일하다.
+ */
+export function hasDsData(p) {
+  if (!p) return false;
+  return (p.dsCapGB || 0) > 0 || (p.dsUsedGB || 0) > 0 || (p.dsCount || 0) > 0;
+}
+
 /** GB → TB(소수 1자리). 저장은 GB(REAL), 표시는 TB — 수백 TB 규모라 GB 축은 읽기 어렵다. */
 export function tb(gb) {
   return Math.round(((Number(gb) || 0) / 1024) * 10) / 10;
@@ -28,7 +39,8 @@ export function perVcSummary(bySlotVc) {
   const lastOf = new Map();
   for (const s of slots) {
     for (const v of bySlotVc[s] || []) {
-      if (!firstOf.has(v.vcenterId)) firstOf.set(v.vcenterId, v);
+      // 기준선은 DS 데이터가 있는 첫 행 — 구버전(ds 열 0) 행을 기준으로 잡으면 전량 신규로 과대 계상.
+      if (!firstOf.has(v.vcenterId) && hasDsData(v)) firstOf.set(v.vcenterId, v);
       lastOf.set(v.vcenterId, v);
     }
   }
@@ -57,7 +69,7 @@ export function perVcSummary(bySlotVc) {
  * @param {Array<{collectedAt:number,dsUsedGB:number,dsCapGB:number}>} points 시간 오름차순
  */
 export function growth(points) {
-  const arr = points || [];
+  const arr = (points || []).filter(hasDsData); // 구버전(ds 열 0) 행은 기준·기간에서 제외
   const first = arr[0] || null;
   const last = arr[arr.length - 1] || null;
   if (!first || !last) return { spanDays: 0, netGB: 0, perDayGB: 0, freeGB: 0, fullDays: null };

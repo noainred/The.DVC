@@ -8,6 +8,7 @@ import { fetchJson, postJson } from '../../api.js';
 import { Loading, ErrorBox, Kpi } from '../../components/ui.jsx';
 import EscClose from '../../components/EscClose.jsx';
 import { fmtAgo } from '../../util/fmt.js';
+import { hasDsData } from './storageTrack.js';
 
 const DAY_OPTS = [7, 30, 90, 365];
 // 슬롯 라벨: '8/21 00시' — 하루 2점이라 날짜만으로는 구분이 안 된다.
@@ -44,10 +45,14 @@ export default function VmTrackTool() {
     // 꺼짐 수 — 서버가 offCount 를 주지만 구버전 응답 호환으로 total-on 폴백.
     offCount: p.offCount ?? (p.total - p.onCount),
     // 데이터스토어(v2.348): 차트는 TB 로 그린다(수백 TB 규모라 GB 축은 읽기 어렵다).
-    dsCapTB: Math.round(((p.dsCapGB || 0) / 1024) * 10) / 10,
-    dsUsedTB: Math.round(((p.dsUsedGB || 0) / 1024) * 10) / 10,
-    // 슬롯 간 사용량 증감(GB) — 첫 점은 기준이 없어 0.
-    dsDeltaGB: i > 0 ? Math.round(((p.dsUsedGB || 0) - (arr[i - 1].dsUsedGB || 0)) * 10) / 10 : 0,
+    // v2.348 이전 버전에서 만들어진 행은 ds 열이 0 — 0 으로 그리면 라인이 바닥으로 꺼지고
+    // 다음 슬롯 증감이 '전체 사용량'으로 잡힌다(실제 발생). null(차트 공백) + 증감 0 처리.
+    dsCapTB: hasDsData(p) ? Math.round(((p.dsCapGB || 0) / 1024) * 10) / 10 : null,
+    dsUsedTB: hasDsData(p) ? Math.round(((p.dsUsedGB || 0) / 1024) * 10) / 10 : null,
+    dsUsagePct: hasDsData(p) ? (p.dsUsagePct ?? 0) : null,
+    // 슬롯 간 사용량 증감(GB) — 첫 점(또는 직전이 구버전 행)은 기준이 없어 0.
+    dsDeltaGB: hasDsData(p) && i > 0 && hasDsData(arr[i - 1])
+      ? Math.round(((p.dsUsedGB || 0) - (arr[i - 1].dsUsedGB || 0)) * 10) / 10 : 0,
   }));
   const last = points[points.length - 1] || null;
   const first = points[0] || null;
@@ -58,7 +63,11 @@ export default function VmTrackTool() {
   const sumOff = points.reduce((a, p) => a + (p.poweredOff || 0), 0);
   // 데이터스토어(v2.348): TB 환산은 화면에서만(저장은 GB REAL). 기간 사용량 증감 = 마지막 - 처음.
   const tb = (gb) => Math.round(((Number(gb) || 0) / 1024) * 10) / 10;
-  const dsNet = last && first ? Math.round(((last.dsUsedGB || 0) - (first.dsUsedGB || 0)) * 10) / 10 : 0;
+  // 기간 증감의 기준은 DS 데이터가 있는 첫 스냅샷 — 구버전(ds 열 0) 행을 기준으로 잡으면
+  // '0 → 현재 사용량' 전체가 증가로 계산돼 +2만 TB 로 표시됐다(v2.351 수정).
+  const dsFirst = points.find(hasDsData) || null;
+  const dsLast = [...points].reverse().find(hasDsData) || null;
+  const dsNet = dsLast && dsFirst ? Math.round(((dsLast.dsUsedGB || 0) - (dsFirst.dsUsedGB || 0)) * 10) / 10 : 0;
   const bySlotVc = data.bySlotVc || {};
 
   const snapshotNow = async () => {
@@ -113,10 +122,10 @@ export default function VmTrackTool() {
           meta={last ? `켜짐 ${last.total ? Math.round((last.onCount / last.total) * 100) : 0}%` : ''} />
         <Kpi label={`${days}일 전원 On/Off 전환`} value={`↑${sumOn.toLocaleString()} / ↓${sumOff.toLocaleString()}`}
           meta={data.poller?.lastResult ? `최근 스냅샷 ${fmtAgo(data.poller.lastResult.at)}` : `스냅샷 ${(data.meta?.n || 0).toLocaleString()}건`} />
-        {/* 데이터스토어 사용량(v2.348) */}
-        <Kpi label="데이터스토어 사용량" value={last ? `${tb(last.dsUsedGB)} / ${tb(last.dsCapGB)} TB` : '—'}
-          pct={last ? Math.round(last.dsUsagePct || 0) : undefined}
-          meta={last ? `${(last.dsCount || 0).toLocaleString()}개 · 가용 ${tb((last.dsCapGB || 0) - (last.dsUsedGB || 0))} TB` : ''} />
+        {/* 데이터스토어 사용량(v2.348) — DS 데이터가 있는 마지막 스냅샷 기준(구버전 행 제외) */}
+        <Kpi label="데이터스토어 사용량" value={dsLast ? `${tb(dsLast.dsUsedGB)} / ${tb(dsLast.dsCapGB)} TB` : '—'}
+          pct={dsLast ? Math.round(dsLast.dsUsagePct || 0) : undefined}
+          meta={dsLast ? `${(dsLast.dsCount || 0).toLocaleString()}개 · 가용 ${tb((dsLast.dsCapGB || 0) - (dsLast.dsUsedGB || 0))} TB` : '스냅샷 없음'} />
         <Kpi label={`${days}일 사용량 증감`} value={`${dsNet >= 0 ? '+' : ''}${tb(dsNet)} TB`}
           accent={dsNet > 0 ? 'var(--amber)' : dsNet < 0 ? 'var(--green)' : undefined}
           meta={`${dsNet >= 0 ? '+' : ''}${dsNet.toLocaleString()} GB`} />
