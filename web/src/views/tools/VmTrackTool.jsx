@@ -3,7 +3,7 @@
 // · 증감(+N/-N) 숫자를 누르면 그 슬롯에 생성/삭제된 VM 과 위치(클러스터·호스트·데이터스토어)
 // 데이터는 서버 전용 DB(vm-track.db)에서 오고, 사용자 데이터 범위(scope)는 서버가 강제한다.
 import React, { useEffect, useMemo, useState } from 'react';
-import { ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend, ReferenceLine } from 'recharts';
+import { ResponsiveContainer, ComposedChart, LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend, ReferenceLine } from 'recharts';
 import { fetchJson, postJson } from '../../api.js';
 import { Loading, ErrorBox, Kpi } from '../../components/ui.jsx';
 import EscClose from '../../components/EscClose.jsx';
@@ -204,21 +204,22 @@ export default function VmTrackTool() {
           <div className="card" style={{ padding: 12, marginBottom: 12 }}>
             <b style={{ fontSize: 13 }}>데이터스토어 용량/사용량 추이 {vcenterId ? `— ${vcenterId}` : '— 전체 vCenter 합계'}</b>
             <span className="muted" style={{ fontSize: 11.5, marginLeft: 8 }}>vCenter 에 연결된 데이터스토어 기준(TB) · 오른쪽 축은 사용률(%)</span>
+            {/* 사용자 요구 형태(v2.352): 총 용량 = 상단 한도선(라인), 슬롯별 사용량 = 막대(축 0부터). */}
             <div style={{ width: '100%', height: 250, marginTop: 8 }}>
               <ResponsiveContainer>
-                <LineChart data={chart} margin={{ top: 6, right: 16, bottom: 4, left: 0 }}>
+                <ComposedChart data={chart} margin={{ top: 6, right: 16, bottom: 4, left: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,.18)" />
                   <XAxis dataKey="label" tick={{ fontSize: 11 }} />
-                  <YAxis yAxisId="tb" tick={{ fontSize: 11 }} domain={['auto', 'auto']} />
+                  <YAxis yAxisId="tb" tick={{ fontSize: 11 }} domain={[0, 'auto']} />
                   <YAxis yAxisId="pct" orientation="right" tick={{ fontSize: 11 }} domain={[0, 100]} unit="%" />
                   <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid rgba(148,163,184,.3)', fontSize: 12 }}
                     formatter={(v, n) => [n === 'dsUsagePct' ? `${v}%` : `${Number(v).toLocaleString()} TB`,
                       n === 'dsCapTB' ? '총 용량' : n === 'dsUsedTB' ? '사용량' : '사용률']} />
                   <Legend wrapperStyle={{ fontSize: 12 }} formatter={(v) => (v === 'dsCapTB' ? '총 용량(TB)' : v === 'dsUsedTB' ? '사용량(TB)' : '사용률(%)')} />
-                  <Line yAxisId="tb" type="monotone" dataKey="dsCapTB" stroke="#60a5fa" strokeWidth={1.5} dot={false} />
-                  <Line yAxisId="tb" type="monotone" dataKey="dsUsedTB" stroke="#f59e0b" strokeWidth={2} dot={{ r: 2 }} />
-                  <Line yAxisId="pct" type="monotone" dataKey="dsUsagePct" stroke="#a78bfa" strokeWidth={1.5} strokeDasharray="4 3" dot={false} />
-                </LineChart>
+                  <Bar yAxisId="tb" dataKey="dsUsedTB" fill="#f59e0b" fillOpacity={0.85} maxBarSize={26} />
+                  <Line yAxisId="tb" type="monotone" dataKey="dsCapTB" stroke="#60a5fa" strokeWidth={2} dot={false} />
+                  <Line yAxisId="pct" type="monotone" dataKey="dsUsagePct" stroke="#a78bfa" strokeWidth={1.2} strokeDasharray="4 3" dot={false} />
+                </ComposedChart>
               </ResponsiveContainer>
             </div>
           </div>
