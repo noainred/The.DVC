@@ -81,6 +81,17 @@ function initSqlite() {
       CREATE INDEX IF NOT EXISTS idx_dschanges_snap ON ds_changes (snap_id);
       CREATE INDEX IF NOT EXISTS idx_dschanges_ts ON ds_changes (ts);
 
+      -- 데이터스토어별 시계열(v2.353) — diff-압축: 첫 관측과 사용량/용량이 임계(기본 1GB) 이상
+      -- 바뀐 슬롯만 1행. 조회는 '마지막 관측값 유지(step)'로 이어붙인다. UNIQUE(slot, ds_id) 로
+      -- 같은 슬롯 재실행(수동 스냅샷)은 중복 없이 갱신된다. name/type 은 ds_roster 가 진실.
+      CREATE TABLE IF NOT EXISTS ds_series (
+        slot TEXT NOT NULL, ts INTEGER NOT NULL, vcenter_id TEXT NOT NULL,
+        ds_id TEXT NOT NULL, cap_gb REAL, used_gb REAL,
+        UNIQUE (slot, ds_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_dsseries_ds ON ds_series (ds_id, ts);
+      CREATE INDEX IF NOT EXISTS idx_dsseries_ts ON ds_series (ts); -- prune(ts<?) 풀스캔 방지
+
       -- 현재 DS 집합(vCenter별) — 다음 슬롯 diff 기준(steady-state 수백~수천 행).
       CREATE TABLE IF NOT EXISTS ds_roster (
         vcenter_id TEXT NOT NULL, ds_id TEXT NOT NULL,
@@ -136,6 +147,18 @@ function initSqlite() {
         FROM ds_changes d JOIN snaps s ON s.id=d.snap_id
         WHERE s.slot=? ORDER BY ABS(COALESCE(d.delta_gb,0)) DESC, d.name`),
       pruneDsChanges: db.prepare('DELETE FROM ds_changes WHERE ts < ?'),
+      // 데이터스토어별 시계열(v2.353)
+      insDsSeries: db.prepare(`INSERT INTO ds_series (slot, ts, vcenter_id, ds_id, cap_gb, used_gb)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(slot, ds_id) DO UPDATE SET ts=excluded.ts, cap_gb=excluded.cap_gb, used_gb=excluded.used_gb`),
+      dsSeriesOf: db.prepare('SELECT slot, ts, vcenter_id, cap_gb, used_gb FROM ds_series WHERE ds_id=? AND ts>=? ORDER BY ts'),
+      dsSeriesPrev: db.prepare('SELECT slot, ts, vcenter_id, cap_gb, used_gb FROM ds_series WHERE ds_id=? AND ts<? ORDER BY ts DESC LIMIT 1'),
+      dsSeriesWindow: db.prepare('SELECT ds_id, ts, used_gb, cap_gb FROM ds_series WHERE ts>=? ORDER BY ts'),
+      dsSeriesCarry: db.prepare(`SELECT s.ds_id, s.used_gb, s.cap_gb FROM ds_series s
+        JOIN (SELECT ds_id, MAX(ts) AS mts FROM ds_series WHERE ts<? GROUP BY ds_id) m
+          ON m.ds_id=s.ds_id AND m.mts=s.ts`),
+      dsRosterAll: db.prepare('SELECT vcenter_id, ds_id, name, type, cap_gb, used_gb, free_gb, first_seen FROM ds_roster'),
+      pruneDsSeries: db.prepare('DELETE FROM ds_series WHERE ts < ?'),
       snapId: db.prepare('SELECT id FROM snaps WHERE slot=? AND vcenter_id=?'),
       delChangesOfSnap: db.prepare('DELETE FROM changes WHERE snap_id=?'),
       insChange: db.prepare(`INSERT INTO changes
@@ -229,6 +252,10 @@ export async function commitSnapshot({ slot, ts, perVc, totalRow }) {
           st.upsertDsRoster.run(vc.vcenterId, d.dsId, d.name || '', d.type || '',
             d.capGB ?? null, d.usedGB ?? null, d.freeGB ?? null, ts);
         }
+        // 데이터스토어별 시계열(v2.353) — diff 가 골라준 '값이 바뀐' DS 만 기록.
+        for (const d of ds.series || []) {
+          st.insDsSeries.run(slot, ts, vc.vcenterId, d.dsId, d.capGB ?? null, d.usedGB ?? null);
+        }
         for (const d of ds.removed || []) st.delDsRoster.run(vc.vcenterId, d.dsId);
       }
       // kind 별 변경 항목 적재 — 'powered_on'/'powered_off'(v2.347)는 생성·삭제와 같은 표에
@@ -286,6 +313,37 @@ export async function loadDsRoster(vcenterId) {
   return new Map(x.st.dsRosterOf.all(String(vcenterId)).map((r) => [r.ds_id, r]));
 }
 
+/** 데이터스토어별 시계열(v2.353) — 윈도우 내 관측 행 + 윈도우 직전 마지막 관측(carry-in). */
+export async function readDsSeries({ dsId, sinceTs = 0 } = {}) {
+  const x = await getDb();
+  if (!x) return { carryIn: null, rows: [] };
+  return {
+    carryIn: x.st.dsSeriesPrev.get(String(dsId), sinceTs) || null,
+    rows: x.st.dsSeriesOf.all(String(dsId), sinceTs),
+  };
+}
+
+/** 전체 DS 로스터(선택 목록·기간 증감 계산용, v2.353). 현재 ~1,100행 — 작다. */
+export async function listDsRoster() {
+  const x = await getDb();
+  if (!x) return [];
+  return x.st.dsRosterAll.all();
+}
+
+/** 윈도우 내 전 DS 관측 행(기간 증감 상위 계산용, v2.353). ts 오름차순. */
+export async function dsSeriesWindow(sinceTs) {
+  const x = await getDb();
+  if (!x) return [];
+  return x.st.dsSeriesWindow.all(sinceTs);
+}
+
+/** 윈도우 시작 직전의 DS 별 마지막 관측값(기간 증감의 시작값, v2.353). */
+export async function dsSeriesCarry(beforeTs) {
+  const x = await getDb();
+  if (!x) return [];
+  return x.st.dsSeriesCarry.all(beforeTs);
+}
+
 /** 데이터스토어 사용량 변경 상세(v2.348). snapId 또는 slot 기준. */
 export async function readDsChanges({ snapId = null, slot = null } = {}) {
   const x = await getDb();
@@ -334,6 +392,7 @@ export async function pruneVmtrack(retentionDays = Number(process.env.VMTRACK_RE
   try {
     st.pruneChanges.run(cut);
     st.pruneDsChanges.run(cut); // v2.348
+    st.pruneDsSeries.run(cut); // v2.353
     st.pruneSnaps.run(cut);
     db.exec('COMMIT');
     return { ok: true, cut };

@@ -214,3 +214,33 @@ test('totalsOf(v2.348): 데이터스토어 개수·용량·사용량 합산', ()
   assert.equal(t.dsCapGB, 3000);
   assert.equal(t.dsUsedGB, 1000);
 });
+
+test('diffDatastores(v2.353): 개별 DS 시계열(series) — 기준선은 전량, 이후엔 변한 것만', () => {
+  // 기준선: 모든 live 가 첫 관측으로 기록된다(시계열의 시작점).
+  const base = diffDatastores([
+    { id: 'vc1:a', name: 'a', capacityGB: 1000, usedGB: 500 },
+    { id: 'vc1:b', name: 'b', capacityGB: 2000, usedGB: 100 },
+  ], new Map());
+  assert.equal(base.baseline, true);
+  assert.deepEqual(base.series.map((d) => d.dsId).sort(), ['vc1:a', 'vc1:b']);
+
+  // 이후: 임계 이상 변한 것 + 신규만. 임계 미만 흔들림·무변화는 기록하지 않는다.
+  const prev = new Map([
+    ['vc1:a', { used_gb: 500, cap_gb: 1000 }],
+    ['vc1:b', { used_gb: 100, cap_gb: 2000 }],
+    ['vc1:c', { used_gb: 50, cap_gb: 100 }],
+  ]);
+  const d = diffDatastores([
+    { id: 'vc1:a', name: 'a', capacityGB: 1000, usedGB: 510 },   // +10GB → 기록
+    { id: 'vc1:b', name: 'b', capacityGB: 2000, usedGB: 100.4 }, // +0.4GB(임계 미만) → 미기록
+    { id: 'vc1:d', name: 'd', capacityGB: 300, usedGB: 10 },     // 신규 → 기록
+  ], prev);
+  assert.deepEqual(d.series.map((x) => x.dsId).sort(), ['vc1:a', 'vc1:d']);
+});
+
+test('diffDatastores(v2.353): 사용량 무변화라도 용량 확장(cap 변화)은 시계열에 기록', () => {
+  const prev = new Map([['vc1:a', { used_gb: 500, cap_gb: 1000 }]]);
+  const d = diffDatastores([{ id: 'vc1:a', name: 'a', capacityGB: 1500, usedGB: 500 }], prev);
+  assert.deepEqual(d.series.map((x) => x.dsId), ['vc1:a']); // 한도선이 움직인 순간을 놓치지 않는다
+  assert.equal(d.changed.length, 0); // 사용량 변화 목록에는 안 들어간다(별개 개념)
+});

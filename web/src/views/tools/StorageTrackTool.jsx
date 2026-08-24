@@ -243,6 +243,9 @@ export default function StorageTrackTool() {
             </div>
           )}
 
+          {/* 데이터스토어별 증감 추이(v2.353, 사용자 요구) */}
+          <DsPerStore days={days} vcenterId={vcenterId} />
+
           {/* 슬롯 이력 */}
           <div className="card" style={{ padding: 12 }}>
             <b style={{ fontSize: 13 }}>스냅샷 이력 <span className="muted" style={{ fontWeight: 400, fontSize: 11.5 }}>(증감을 누르면 변화한 데이터스토어 목록)</span></b>
@@ -288,6 +291,158 @@ export default function StorageTrackTool() {
       )}
 
       {detail && <DsDetail {...detail} onClose={() => setDetail(null)} />}
+    </div>
+  );
+}
+
+/**
+ * 데이터스토어별 증감 추이(v2.353) — 개별 DS 를 골라 총 용량 한도선 + 슬롯별 사용량 막대
+ * (상단 합계 차트와 같은 형식)로 본다. '기간 증감 상위' 표에서 행을 눌러도 선택된다.
+ * 서버가 diff-압축 시계열(ds_series)을 슬롯 축 위에 step 으로 펼쳐 주므로(첫 관측 전 null)
+ * 화면은 받은 points 를 그대로 그린다.
+ */
+function DsPerStore({ days, vcenterId }) {
+  const [list, setList] = useState(null);   // 선택 목록(로스터)
+  const [top, setTop] = useState(null);     // 기간 증감 상위
+  const [sel, setSel] = useState('');       // 선택된 dsId
+  const [q, setQ] = useState('');
+  const [series, setSeries] = useState(null);
+  const [err, setErr] = useState(null);
+
+  useEffect(() => { setSel(''); }, [vcenterId]); // 범위가 바뀌면 선택 해제(다른 vCenter 의 DS 잔류 방지)
+  useEffect(() => {
+    fetchJson('/tools/vm-track/ds-list', { vcenterId })
+      .then((d) => { setList(d.items || []); setErr(null); })
+      .catch((e) => setErr(e.message));
+  }, [vcenterId]);
+  useEffect(() => {
+    fetchJson('/tools/vm-track/ds-top', { days, vcenterId, limit: 15 })
+      .then((d) => { setTop(d); setErr(null); })
+      .catch((e) => setErr(e.message));
+  }, [days, vcenterId]);
+  useEffect(() => {
+    if (!sel) { setSeries(null); return; }
+    fetchJson('/tools/vm-track/ds-series', { dsId: sel, days })
+      .then((d) => { setSeries(d); setErr(null); })
+      .catch((e) => setErr(e.message));
+  }, [sel, days]);
+
+  const ql = q.trim().toLowerCase();
+  const filtered = (list || []).filter((d) => !ql
+    || d.name.toLowerCase().includes(ql) || d.vcenterId.toLowerCase().includes(ql) || (d.type || '').toLowerCase().includes(ql));
+  const selMeta = (list || []).find((d) => d.dsId === sel) || null;
+
+  // 개별 DS 는 용량이 수백 GB~수천 TB 로 편차가 커 축 단위를 자동 선택(10TB 이상이면 TB).
+  const pts = series?.points || [];
+  const maxCap = pts.reduce((m, p) => Math.max(m, p.capGB || 0), 0);
+  const useTb = maxCap >= 10_240;
+  const u = (gb) => (gb == null ? null : (useTb ? tb(gb) : Math.round(gb * 10) / 10));
+  const unit = useTb ? 'TB' : 'GB';
+  const dsChart = pts.map((p) => ({
+    label: slotLabel(p.slot), cap: u(p.capGB), used: u(p.usedGB), pct: p.usagePct,
+  }));
+  const dsFirst = pts.find((p) => p.usedGB != null) || null;
+  const dsLast = [...pts].reverse().find((p) => p.usedGB != null) || null;
+  const dsDelta = dsFirst && dsLast ? Math.round(((dsLast.usedGB || 0) - (dsFirst.usedGB || 0)) * 10) / 10 : 0;
+
+  return (
+    <div className="card" style={{ padding: 12, marginBottom: 12 }}>
+      <div className="flex between wrap" style={{ alignItems: 'center' }}>
+        <div>
+          <b style={{ fontSize: 13 }}>데이터스토어별 증감 추이</b>
+          <span className="muted" style={{ fontSize: 11.5, marginLeft: 8 }}>
+            개별 데이터스토어의 용량 한도선·사용량 막대 · 아래 표(기간 증감 상위)에서 행을 눌러도 선택됩니다
+          </span>
+        </div>
+        <div className="flex gap" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+          <input className="input" placeholder="데이터스토어/유형/vCenter 검색" value={q} onChange={(e) => setQ(e.target.value)}
+            style={{ maxWidth: 210, padding: '6px 10px', fontSize: 12.5 }} />
+          <select className="input" value={sel} onChange={(e) => setSel(e.target.value)} style={{ padding: '6px 10px', fontSize: 12.5, maxWidth: 340 }}>
+            <option value="">데이터스토어 선택{list ? ` (${filtered.length}개)` : ''}</option>
+            {filtered.map((d) => (
+              <option key={d.dsId} value={d.dsId}>
+                {d.name} · {d.vcenterId} · {gbTb(d.usedGB)}/{gbTb(d.capGB)} ({d.usagePct}%)
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+      {err && <div className="muted" style={{ fontSize: 12, marginTop: 6, color: 'var(--amber)' }}>⚠ {err}</div>}
+
+      {sel && series && (
+        <div style={{ marginTop: 10 }}>
+          <div style={{ fontSize: 12.5 }}>
+            <b>{selMeta?.name || sel}</b>
+            <span className="muted"> · {series.vcenterId || selMeta?.vcenterId} · {selMeta?.type || '—'}</span>
+            {dsLast && (
+              <span style={{ marginLeft: 10 }}>
+                현재 {gbTb(dsLast.usedGB)} / {gbTb(dsLast.capGB)}
+                <span className="muted"> · {days}일 증감 </span>
+                <b style={{ color: dsDelta > 0 ? 'var(--amber)' : dsDelta < 0 ? 'var(--green)' : undefined }}>
+                  {dsDelta > 0 ? '+' : ''}{gbTb(dsDelta)}
+                </b>
+              </span>
+            )}
+          </div>
+          {dsChart.length === 0 ? (
+            <div className="muted" style={{ fontSize: 12.5, marginTop: 8 }}>이 기간에 관측된 스냅샷이 없습니다.</div>
+          ) : (
+            <div style={{ width: '100%', height: 230, marginTop: 8 }}>
+              <ResponsiveContainer>
+                <ComposedChart data={dsChart} margin={{ top: 6, right: 16, bottom: 4, left: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,.18)" />
+                  <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+                  <YAxis yAxisId="v" tick={{ fontSize: 11 }} domain={[0, 'auto']} />
+                  <YAxis yAxisId="pct" orientation="right" tick={{ fontSize: 11 }} domain={[0, 100]} unit="%" />
+                  <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid rgba(148,163,184,.3)', fontSize: 12 }}
+                    formatter={(v, n) => [n === 'pct' ? `${v}%` : `${Number(v).toLocaleString()} ${unit}`,
+                      n === 'cap' ? '총 용량' : n === 'used' ? '사용량' : '사용률']} />
+                  <Legend wrapperStyle={{ fontSize: 12 }} formatter={(v) => (v === 'cap' ? `총 용량(${unit})` : v === 'used' ? `사용량(${unit})` : '사용률(%)')} />
+                  <Bar yAxisId="v" dataKey="used" fill="#f59e0b" fillOpacity={0.85} maxBarSize={26} />
+                  <Line yAxisId="v" type="monotone" dataKey="cap" stroke="#60a5fa" strokeWidth={2} dot={false} />
+                  <Line yAxisId="pct" type="monotone" dataKey="pct" stroke="#a78bfa" strokeWidth={1.2} strokeDasharray="2 2" dot={false} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div style={{ marginTop: 10 }}>
+        <b style={{ fontSize: 12.5 }}>기간 증감 상위 {top ? `(변화 ${top.changedCount ?? 0}/${top.total ?? 0}개)` : ''}</b>
+        {!top ? <div className="muted" style={{ fontSize: 12.5, marginTop: 6 }}>불러오는 중…</div> : (top.items || []).length === 0 ? (
+          <div className="muted" style={{ fontSize: 12.5, marginTop: 6 }}>표시할 데이터스토어가 없습니다(첫 스냅샷 이후부터 집계).</div>
+        ) : (
+          <div className="table-wrap" style={{ maxHeight: '36vh', marginTop: 6 }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>데이터스토어</th><th>vCenter</th><th>유형</th>
+                  <th style={{ textAlign: 'right' }}>현재 사용</th><th style={{ textAlign: 'right' }}>총 용량</th>
+                  <th style={{ textAlign: 'right' }}>사용률</th><th style={{ textAlign: 'right' }}>{days}일 증감</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(top.items || []).map((d) => (
+                  <tr key={d.dsId} onClick={() => setSel(d.dsId)}
+                    style={{ cursor: 'pointer', ...(sel === d.dsId ? { background: 'rgba(96,165,250,.08)' } : {}) }}
+                    title="클릭하면 위 차트에 이 데이터스토어의 추이를 표시">
+                    <td><b>{d.name}</b></td>
+                    <td className="muted" style={{ fontSize: 11.5 }}>{d.vcenterId}</td>
+                    <td className="muted" style={{ fontSize: 11.5 }}>{d.type || '—'}</td>
+                    <td style={{ textAlign: 'right' }}>{gbTb(d.usedGB)}</td>
+                    <td style={{ textAlign: 'right' }} className="muted">{gbTb(d.capGB)}</td>
+                    <td style={{ textAlign: 'right', color: pctColor(d.usagePct || 0) }}>{d.usagePct}%</td>
+                    <td style={{ textAlign: 'right', color: d.deltaGB > 0 ? 'var(--amber)' : d.deltaGB < 0 ? 'var(--green)' : undefined }}>
+                      <b>{d.deltaGB > 0 ? '+' : ''}{gbTb(d.deltaGB)}</b>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
