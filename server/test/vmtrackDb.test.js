@@ -289,3 +289,30 @@ test('service(v2.354): vmtrackDsSeriesAll — 선택 vCenter 의 전체 DS 를 �
   const scoped = await svc.vmtrackDsSeriesAll({ days: 30, vcenterId: 'vcsvc', scopeIds: new Set(['other']) });
   assert.equal(scoped.total, 0);
 });
+
+test('service(v2.355): ds-change-log / ds-pivot — 슬롯 칩 로그와 DS별 피벗', { skip: !sqliteOk ? 'node:sqlite 미지원 런타임' : false }, async () => {
+  const svc = await import('../src/vmtrack/service.js');
+  // 앞 테스트(vcsvc)에서 2026-08-24T12 슬롯에 big +50GB 변경이 기록돼 있다.
+  const log = await svc.vmtrackDsChangeLog({ days: 30, vcenterId: 'vcsvc' });
+  const slot12 = log.slots.find((g) => g.slot === '2026-08-24T12');
+  assert.ok(slot12, '변경이 있던 슬롯이 로그에 나온다');
+  assert.equal(slot12.items.length, 1);
+  assert.equal(slot12.items[0].dsId, 'vcsvc:big');
+  assert.equal(slot12.items[0].deltaGB, 50);
+  assert.equal(slot12.sumDeltaGB, 50);
+  // 기준선 슬롯(변경 0)은 행 자체가 없다(변경분만 저장 — 정직한 로그).
+  assert.ok(!log.slots.find((g) => g.slot === '2026-08-24T00'));
+
+  // 피벗: changedOnly 기본 — 움직인 big 만. 슬롯 칸은 변경 없으면 0, 관측 전이면 null.
+  const piv = await svc.vmtrackDsPivot({ days: 30, vcenterId: 'vcsvc' });
+  assert.ok(piv.slotCols.length >= 1);
+  const big = piv.items.find((x) => x.dsId === 'vcsvc:big');
+  assert.ok(big, '변화한 DS 는 나온다');
+  assert.equal(big.slots['2026-08-24T12']?.deltaGB, 50);
+  assert.ok(!piv.items.find((x) => x.dsId === 'vcsvc:small'), 'changedOnly 기본 — 무변화 DS 숨김');
+  const all = await svc.vmtrackDsPivot({ days: 30, vcenterId: 'vcsvc', changedOnly: false });
+  assert.ok(all.items.find((x) => x.dsId === 'vcsvc:small'), 'changedOnly=false 면 전체');
+  // scope 강제.
+  const scoped = await svc.vmtrackDsPivot({ days: 30, vcenterId: 'vcsvc', scopeIds: new Set(['other']) });
+  assert.equal(scoped.total, 0);
+});

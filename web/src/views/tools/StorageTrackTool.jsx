@@ -16,6 +16,7 @@ import { Loading, ErrorBox, Kpi } from '../../components/ui.jsx';
 import EscClose from '../../components/EscClose.jsx';
 import { fmtAgo } from '../../util/fmt.js';
 import { tb, gbTb, perVcSummary, growth, hasDsData } from './storageTrack.js';
+import DsTrendModal from './DsTrendModal.jsx'; // 개별 DS 추이 모달(v2.354) — 변경 이력 칩/행 클릭용
 
 const DAY_OPTS = [7, 30, 90, 365];
 const slotLabel = (slot) => {
@@ -32,6 +33,7 @@ export default function StorageTrackTool() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
   const [detail, setDetail] = useState(null); // 사용량 변화 DS 상세
+  const [dsTrend, setDsTrend] = useState(null); // 변경 이력 칩/행 클릭 → 개별 DS 추이 모달(v2.355)
   const [sort, setSort] = useState({ key: 'usedGB', dir: 'desc' }); // vCenter 표 정렬
 
   const refresh = () => fetchJson('/tools/vm-track', { days, vcenterId })
@@ -249,6 +251,12 @@ export default function StorageTrackTool() {
           {/* 선택 vCenter 의 전체 DS 각각의 추이 차트(v2.354, 사용자 요구) */}
           <DsAllGrid days={days} vcenterId={vcenterId} />
 
+          {/* 스토리지 변경 이력(v2.355, 목업 확정 C) — A 시각별 / B DS별 전환 */}
+          <DsChangeHistory days={days} vcenterId={vcenterId} onPick={(it) => setDsTrend(it)} onSlot={(g) => setDetail({
+            title: `${slotLabel(g.slot)} 데이터스토어 사용량 변화${vcenterId ? ` — ${vcenterId}` : ' — 전체 vCenter'}`,
+            slot: g.slot, snapId: null,
+          })} />
+
           {/* 슬롯 이력 */}
           <div className="card" style={{ padding: 12 }}>
             <b style={{ fontSize: 13 }}>스냅샷 이력 <span className="muted" style={{ fontWeight: 400, fontSize: 11.5 }}>(증감을 누르면 변화한 데이터스토어 목록)</span></b>
@@ -294,6 +302,167 @@ export default function StorageTrackTool() {
       )}
 
       {detail && <DsDetail {...detail} onClose={() => setDetail(null)} />}
+      {dsTrend && <DsTrendModal dsId={dsTrend.dsId} name={dsTrend.name} vcenterId={dsTrend.vcenterId}
+        type={dsTrend.type} onClose={() => setDsTrend(null)} />}
+    </div>
+  );
+}
+
+/** 증감 값 배지 색 — 증가 주황(용량 소모) / 감소 초록(회수). */
+const deltaColor = (gb) => (gb > 0 ? 'var(--amber)' : gb < 0 ? 'var(--green)' : undefined);
+
+/**
+ * 스토리지 변경 이력(v2.355, 목업 확정 C) — 두 보기를 전환한다:
+ *  · 시각별(A): 행 = 00/12시 슬롯, 그 슬롯에 사용량이 변한 DS 를 칩으로 나열(첨부 표의
+ *    'VCENTER별 증감' 칩과 같은 문법). 칩 클릭 → 그 DS 추이 모달, 시각 클릭 → 슬롯 전체 상세.
+ *  · DS별(B): 행 = 데이터스토어, 열 = 최근 6개 슬롯의 증감 + 기간 누적(피벗).
+ * 데이터는 diff-압축 저장(ds_changes/ds_series) — 무변화 DS 는 행이 없어 전체 vCenter 도 가볍다.
+ */
+function DsChangeHistory({ days, vcenterId, onPick, onSlot }) {
+  const [view, setView] = useState('slots'); // 'slots'(A 시각별) | 'ds'(B DS별)
+  const [log, setLog] = useState(null);
+  const [pivot, setPivot] = useState(null);
+  const [q, setQ] = useState('');
+  const [changedOnly, setChangedOnly] = useState(true);
+  const [page, setPage] = useState(0);
+  const [err, setErr] = useState(null);
+  const LIMIT = 20;
+
+  useEffect(() => { setPage(0); }, [vcenterId, days, q, changedOnly, view]);
+  useEffect(() => {
+    if (view !== 'slots') return;
+    fetchJson('/tools/vm-track/ds-change-log', { days, vcenterId })
+      .then((d) => { setLog(d); setErr(null); })
+      .catch((e) => setErr(e.message));
+  }, [view, days, vcenterId]);
+  useEffect(() => {
+    if (view !== 'ds') return;
+    fetchJson('/tools/vm-track/ds-pivot', { days, vcenterId, q, changedOnly: changedOnly ? 1 : 0, offset: page * LIMIT, limit: LIMIT })
+      .then((d) => { setPivot(d); setErr(null); })
+      .catch((e) => setErr(e.message));
+  }, [view, days, vcenterId, q, changedOnly, page]);
+
+  const chip = (it) => (
+    <button key={`${it.dsId}`} className="tab" onClick={() => onPick(it)}
+      title={`${it.name} · ${it.vcenterId} · 클릭하면 추이 차트`}
+      style={{ flex: 'none', padding: '2px 8px', fontSize: 11.5, color: it.kind === 'ds_added' ? 'var(--green)' : it.kind === 'ds_removed' ? 'var(--red)' : deltaColor(it.deltaGB || 0) }}>
+      {it.name} {it.kind === 'ds_added' ? `신규 ${gbTb(it.usedGB)}` : it.kind === 'ds_removed' ? '해제' : `${(it.deltaGB || 0) > 0 ? '+' : ''}${gbTb(it.deltaGB)}`}
+    </button>
+  );
+
+  const total = pivot?.total || 0;
+  const pages = Math.max(1, Math.ceil(total / LIMIT));
+
+  return (
+    <div className="card" style={{ padding: 12, marginBottom: 12 }}>
+      <div className="flex between wrap" style={{ alignItems: 'center' }}>
+        <div>
+          <b style={{ fontSize: 13 }}>스토리지 변경 이력 {vcenterId ? `— ${vcenterId}` : '— 전체 vCenter'}</b>
+          <span className="muted" style={{ fontSize: 11.5, marginLeft: 8 }}>
+            {view === 'slots' ? '시각별 — 그 슬롯에 변화한 데이터스토어(칩 클릭 → 추이 차트)' : 'DS별 — 최근 슬롯 증감 피벗(행 클릭 → 추이 차트)'}
+          </span>
+        </div>
+        <div className="flex gap" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+          {view === 'ds' && (
+            <>
+              <input className="input" placeholder="데이터스토어/유형 검색" value={q} onChange={(e) => setQ(e.target.value)}
+                style={{ maxWidth: 180, padding: '5px 10px', fontSize: 12.5 }} />
+              <label className="muted" style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                <input type="checkbox" checked={changedOnly} onChange={(e) => setChangedOnly(e.target.checked)} />변화 있는 DS 만
+              </label>
+              <span className="flex gap" style={{ alignItems: 'center' }}>
+                <button className="tab" style={{ flex: 'none', padding: '4px 9px', fontSize: 12 }} disabled={page <= 0} onClick={() => setPage((x) => Math.max(0, x - 1))}>◀</button>
+                <span className="muted" style={{ fontSize: 12 }}>{page + 1}/{pages}</span>
+                <button className="tab" style={{ flex: 'none', padding: '4px 9px', fontSize: 12 }} disabled={page + 1 >= pages} onClick={() => setPage((x) => x + 1)}>▶</button>
+              </span>
+            </>
+          )}
+          <span className="flex gap">
+            <button className={view === 'slots' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '5px 11px', fontSize: 12 }} onClick={() => setView('slots')}>시각별</button>
+            <button className={view === 'ds' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '5px 11px', fontSize: 12 }} onClick={() => setView('ds')}>DS별</button>
+          </span>
+        </div>
+      </div>
+      {err && <div className="muted" style={{ fontSize: 12, marginTop: 6, color: 'var(--amber)' }}>⚠ {err}</div>}
+
+      {view === 'slots' && (
+        !log ? <div className="muted" style={{ fontSize: 12.5, marginTop: 8 }}>불러오는 중…</div>
+        : (log.slots || []).length === 0 ? (
+          <div className="muted" style={{ fontSize: 12.5, marginTop: 8 }}>
+            이 기간에 사용량이 변한 데이터스토어가 없습니다(1GB 미만 변화는 기록하지 않음 · 개별 추적은 v2.353 이후).
+          </div>
+        ) : (
+          <div className="table-wrap" style={{ maxHeight: '46vh', marginTop: 8 }}>
+            <table>
+              <thead>
+                <tr><th>시각</th><th style={{ textAlign: 'right' }}>변화 DS</th><th style={{ textAlign: 'right' }}>합계 증감</th><th>DS별 증감(|증감| 큰 순)</th></tr>
+              </thead>
+              <tbody>
+                {(log.slots || []).map((g) => (
+                  <tr key={g.slot}>
+                    <td style={{ whiteSpace: 'nowrap' }}>
+                      <button className="cell-link" title="이 슬롯의 변화 전체 상세" onClick={() => onSlot(g)}><b>{slotLabel(g.slot)}</b></button>
+                    </td>
+                    <td style={{ textAlign: 'right' }} className="muted">{(g.items.length + (g.more || 0)).toLocaleString()}</td>
+                    <td style={{ textAlign: 'right', color: deltaColor(g.sumDeltaGB) }}><b>{g.sumDeltaGB > 0 ? '+' : ''}{gbTb(g.sumDeltaGB)}</b></td>
+                    <td>
+                      <span className="flex wrap" style={{ gap: 4 }}>
+                        {g.items.map(chip)}
+                        {g.more > 0 && (
+                          <button className="tab" style={{ flex: 'none', padding: '2px 8px', fontSize: 11.5 }} onClick={() => onSlot(g)}>…외 {g.more}개 더보기</button>
+                        )}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )
+      )}
+
+      {view === 'ds' && (
+        !pivot ? <div className="muted" style={{ fontSize: 12.5, marginTop: 8 }}>불러오는 중…</div>
+        : (pivot.items || []).length === 0 ? (
+          <div className="muted" style={{ fontSize: 12.5, marginTop: 8 }}>표시할 데이터스토어가 없습니다{changedOnly ? " — '변화 있는 DS 만' 을 해제하면 전체가 보입니다." : '.'}</div>
+        ) : (
+          <div className="table-wrap" style={{ maxHeight: '52vh', marginTop: 8 }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>데이터스토어</th>{!vcenterId && <th>vCenter</th>}<th>유형</th>
+                  <th style={{ textAlign: 'right' }}>사용/용량</th><th style={{ textAlign: 'right' }}>사용률</th>
+                  {(pivot.slotCols || []).map((c) => <th key={c.slot} style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{slotLabel(c.slot)}</th>)}
+                  <th style={{ textAlign: 'right' }}>{days}일 누적</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(pivot.items || []).map((d) => (
+                  <tr key={d.dsId} onClick={() => onPick(d)} style={{ cursor: 'pointer' }} title="클릭하면 추이 차트">
+                    <td><b>💾 {d.name}</b></td>
+                    {!vcenterId && <td className="muted" style={{ fontSize: 11.5 }}>{d.vcenterId}</td>}
+                    <td className="muted" style={{ fontSize: 11.5 }}>{d.type || '—'}</td>
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{gbTb(d.usedGB)} / {gbTb(d.capGB)}</td>
+                    <td style={{ textAlign: 'right', color: pctColor(d.usagePct || 0) }}>{d.usagePct}%</td>
+                    {(pivot.slotCols || []).map((c) => {
+                      const cell = d.slots?.[c.slot];
+                      if (cell == null) return <td key={c.slot} style={{ textAlign: 'right' }} className="muted">—</td>;
+                      if (cell.kind === 'ds_added') return <td key={c.slot} style={{ textAlign: 'right', color: 'var(--green)', fontSize: 12 }}>신규</td>;
+                      if (cell.kind === 'ds_removed') return <td key={c.slot} style={{ textAlign: 'right', color: 'var(--red)', fontSize: 12 }}>해제</td>;
+                      const v = cell.deltaGB || 0;
+                      return <td key={c.slot} style={{ textAlign: 'right', color: deltaColor(v) }}>{v ? `${v > 0 ? '+' : ''}${gbTb(v)}` : <span className="muted">0</span>}</td>;
+                    })}
+                    <td style={{ textAlign: 'right', color: deltaColor(d.cumGB) }}><b>{d.cumGB ? `${d.cumGB > 0 ? '+' : ''}${gbTb(d.cumGB)}` : 0}</b></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )
+      )}
+      <div className="muted" style={{ fontSize: 11.5, marginTop: 8 }}>
+        1GB 미만의 변화는 기록하지 않습니다(합계 차트는 임계와 무관하게 정확). '—' = 그 DS 관측 이전 슬롯.
+      </div>
     </div>
   );
 }

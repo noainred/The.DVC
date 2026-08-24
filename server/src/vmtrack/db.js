@@ -159,6 +159,11 @@ function initSqlite() {
           ON m.ds_id=s.ds_id AND m.mts=s.ts`),
       dsRosterAll: db.prepare('SELECT vcenter_id, ds_id, name, type, cap_gb, used_gb, free_gb, first_seen FROM ds_roster'),
       pruneDsSeries: db.prepare('DELETE FROM ds_series WHERE ts < ?'),
+      // 스토리지 변경 이력(v2.355) — 윈도우 내 변경분 전부를 슬롯과 함께(그룹핑은 서비스에서 1회).
+      dsChangesWindow: db.prepare(`SELECT d.kind, d.ds_id, d.name, d.type, d.cap_gb, d.used_gb,
+          d.usage_pct, d.prev_used_gb, d.delta_gb, d.vcenter_id, s.slot, s.ts AS slot_ts
+        FROM ds_changes d JOIN snaps s ON s.id=d.snap_id
+        WHERE d.ts>=? ORDER BY s.ts DESC, ABS(COALESCE(d.delta_gb,0)) DESC, d.name`),
       snapId: db.prepare('SELECT id FROM snaps WHERE slot=? AND vcenter_id=?'),
       delChangesOfSnap: db.prepare('DELETE FROM changes WHERE snap_id=?'),
       insChange: db.prepare(`INSERT INTO changes
@@ -342,6 +347,13 @@ export async function dsSeriesCarry(beforeTs) {
   const x = await getDb();
   if (!x) return [];
   return x.st.dsSeriesCarry.all(beforeTs);
+}
+
+/** 윈도우 내 DS 변경분 전체(슬롯 포함, v2.355 스토리지 변경 이력). */
+export async function readDsChangesWindow(sinceTs) {
+  const x = await getDb();
+  if (!x) return [];
+  return x.st.dsChangesWindow.all(sinceTs);
 }
 
 /** 데이터스토어 사용량 변경 상세(v2.348). snapId 또는 slot 기준. */
