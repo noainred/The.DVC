@@ -311,11 +311,17 @@ function Ipam({ scope, onScope }) {
                             {r.mgmtStatus && <MgmtBadge s={r.mgmtStatus} />}
                             {r.appliedBy === 'range-policy' && <span className="badge purple" style={{ fontSize: 9, marginLeft: 3 }} title={`대역 정책: ${r.rangePolicySpec || ''}`}>정책</span>}
                           </td>
-                          <td style={{ fontSize: 11 }}>
+                          <td style={{ fontSize: 11, whiteSpace: 'nowrap' }}>
+                            {/* 상시 배지(v2.359, 사용자 요구): 열만 봐도 '지금 사용중 / 과거 사용' 이 보이게.
+                                클릭하면 기존 이력 모달(사용·미사용 구간 타임라인). */}
                             {r.usageStatus
-                              ? <button className="tab" style={{ padding: '2px 8px', fontSize: 11 }} title={`최초 발견: ${r.firstSeen ? new Date(r.firstSeen).toLocaleString() : '—'}\n마지막 확인: ${r.lastSeen ? new Date(r.lastSeen).toLocaleString() : '—'}\n현재: ${r.usageStatus === 'up' ? '사용 중' : '해제됨'}`}
-                                  onClick={() => setHistIp(r)}>🕒 이력</button>
-                              : <span className="muted">—</span>}
+                              ? <button className="tab" style={{ padding: '2px 8px', fontSize: 11 }} title={`최초 발견: ${r.firstSeen ? new Date(r.firstSeen).toLocaleString() : '—'}\n마지막 확인: ${r.lastSeen ? new Date(r.lastSeen).toLocaleString() : '—'}\n클릭: 사용/미사용 구간 이력`}
+                                  onClick={() => setHistIp(r)}>
+                                  {r.usageStatus === 'up'
+                                    ? <span style={{ color: 'var(--green)' }}>🟢 사용중</span>
+                                    : <span style={{ color: 'var(--amber)' }}>🟡 과거 사용{r.lastSeen ? ` · ${Math.max(1, Math.round((Date.now() - r.lastSeen) / 86_400_000))}일 전까지` : ''}</span>}
+                                </button>
+                              : <span className="muted" title="이 IP 는 스캔에서 한 번도 응답한 기록이 없습니다">—</span>}
                           </td>
                           <td style={{ fontSize: 12 }}>
                             {r.memo && <div style={{ marginBottom: 3 }}>{r.memo}</div>}

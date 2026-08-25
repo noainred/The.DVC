@@ -78,7 +78,7 @@ Unity·XtremIO·VMAX/PowerMax·VPLEX/Metro Node, v2.302+) · VM 복제(백업식
 - **NIC 분석 (v2.179+)** — iDRAC Redfish 인벤토리로 서버 물리 NIC의 **속도별 분류**(10G/25G/100G — 미링크 포트도 카드 정격으로 판별)와 **모델별 분류**(Intel·Broadcom·Mellanox…). DataCenter·가상화(ESXi)/베어메탈 필터, vCenter 수집(pnic+PCI) 결과를 **별도 컬럼**으로 교차 확인, CSV.
 - **라이선스 만료일 (v2.189+)** — vCenter LicenseManager 전 제품 키(ESXi/vSphere·vCenter·vSAN·VCF/VVF 등) + NSX Manager + **Horizon Connection Server**(REST 직수집, 10분 캐시)를 한 화면에. 만료·90일 임박·정상·영구 분류, 제품군 필터, 남은 기간(D-일수) 정렬, CSV.
 - **핑/네트워크 모니터링** — 네트워크 탭의 ① Ping 모니터링(등록 대상 ICMP/TCP 도달성·RTT 시계열) ② 서버 Ping 체크(엣지/수집 노드 TCP 지연을 DC별 산점도) ③ vCenter 포트 응답속도(사용자 지정 포트를 vCenter별 측정). 별도 시계열 DB(`ping-monitor.db`, 1년 보존)·baseline 대비 색상 추세.
-- **IP 관리대장(IPAM)** — vCenter 수집 IP(서버종류 VM/베어메탈, OS 종류·버전) + **능동 스캔(TCP 커넥트)** 으로 물리/기타 장비 IP 보강. 서브넷 엑셀형 대장, 중복 IP, CSV/XLSX, 외부 공유 SQLite(`ipam.db`).
+- **IP 관리대장(IPAM)** — vCenter 수집 IP(서버종류 VM/베어메탈, OS 종류·버전) + **능동 스캔(TCP 커넥트 + ICMP ping, v2.359)** 으로 물리/기타 장비 IP 보강 · IP별 사용 이력(사용중/과거 사용, 사용·미사용 구간). 서브넷 엑셀형 대장, 중복 IP, CSV/XLSX, 외부 공유 SQLite(`ipam.db`).
 - **통합 서버 인벤토리** — iDRAC/OME 수집 물리 서버 + vCenter ESXi 호스트를 Dell 서비스태그로 조합해 **가상화 호스트 / 베어메탈**을 자동 분류. 베어메탈 **총전력 집계**, 소속 **법인(vCenter) 등록**(자동 추론·일괄 등록·수동 예외), **엣지→중앙 집계**(전력 없는 발견분까지 DC별 검색).
 - **VM 생성(프로비저닝)** — 단건/대량 클론 + 게스트 커스터마이징(이름/IP 규칙), 동시성 제한 작업 큐, 작업 이력·메모/태그.
 - **VM 사양 변경(관리자)** — `ReconfigVM_Task`로 vCPU·RAM 증설, 코어/소켓, 디스크 증설/추가(컨트롤러 선택), NIC 추가/삭제·연결 토글. **증설만**(감소·축소 차단) + hot-add 판정 + 확인창 + 감사로그.
@@ -411,7 +411,7 @@ git 소스로 실행하면 `CONFIG_DIR` 기본값이 `server/config` 라 이 파
 
 - **전력/데이터 pull**: 원격 인스턴스를 `COLLECTOR_TOKEN`으로 노출 → 중앙이 `/api/collector/export`를 주기적으로 pull.
 - **중앙 할당(iDRAC/IP 스캔)**: 중앙이 에이전트별 대역/포트를 할당 → 에이전트가 `/api/central/*`로 풀 → 로컬 스캔 → 결과 보고 → 중앙이 IP 대장에 병합.
-- **IP 능동 스캔(TCP 커넥트)**: vCenter가 모르는 물리/타가상화/네트워크 장비 IP를 공통 포트(22/80/443/445/3389/623/8006/902/5985…)로 탐지 → 서버종류 "스캔"으로 대장에 채움. **설정 › IP 스캔**에서 할당 에이전트 선택·대역/포트/주기 설정, 에이전트별 보고 현황 표시.
+- **IP 능동 스캔(TCP 커넥트 + ICMP ping)**: vCenter가 모르는 물리/타가상화/네트워크 장비 IP를 공통 포트(22/80/443/445/3389/623/8006/902/5985…)로 탐지하고, 포트가 전부 닫힌 서버는 ICMP ping 으로 생존 감지(v2.359 — 설정에서 끌 수 있음) → 서버종류 "스캔"으로 대장에 채움. **설정 › IP 스캔**에서 할당 에이전트 선택·대역/포트/주기 설정, 에이전트별 보고 현황 표시.
   - 에이전트 측: `AGENT_NAME=<이름>`, `CENTRAL_URL=<중앙주소>`, `CENTRAL_TOKEN=<동일토큰>` / 중앙 측: `CENTRAL_TOKEN` 설정 필수.
   - ⚠️ 포트 스캔은 침투성 — **승인된 대역만**, 레이트리밋, 보안팀 공지 후 사용.
 

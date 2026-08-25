@@ -30,6 +30,7 @@ export async function runIpScanAgentOnce() {
     if (!a?.assigned) { last = { at: Date.now(), assigned: false }; return last; }
     const { alive, scanned } = await scanRanges(a.ranges, {
       ports: a.ports, concurrency: a.concurrency, timeoutMs: a.timeoutMs, reverseDns: a.reverseDns,
+      ping: a.ping, // 중앙 배정 설정(v2.359) — 구버전 중앙이면 undefined → 기본 켜짐
     });
     await resilientFetch(`${config.agent.centralUrl}/api/central/ip-scan-result`, {
       method: 'POST', headers: headers(), body: JSON.stringify({ agent: config.agent.name, alive, scanned }), timeoutMs: 30_000, retries: 2,
