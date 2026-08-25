@@ -103,19 +103,49 @@ export function pingArgs(ip, timeoutMs, platform = process.platform) {
 }
 
 /**
- * ICMP ping 1회(v2.359, 사용자 요구: "ping 으로 IP 체크") — 시스템 ping 바이너리 사용
- * (raw socket 권한 불필요). 응답=true. 바이너리 없음/타임아웃/무응답은 조용히 false —
- * 판정 보강용이지 실패해도 스캔 전체를 막으면 안 된다.
+ * ping 전용 동시성 상한(v2.360, 장애 수습) — ⚠ 회귀 방지(치명):
+ * ping 은 IP마다 `ping` **자식 프로세스**를 띄운다(execFile = 파이프 3개/프로세스). v2.359 는
+ * 이를 스캔 동시성(기본 128, 최대 1024)만큼 동시에 뿌려서, 죽은 IP가 많은 큰 대역을 스캔하면
+ * 프로세스·FD 가 폭주해 **메인 HTTP 서버가 새 연결을 accept 하지 못하고 포탈 전체가 먹통**이
+ * 됐다(운영 장애 실제 발생 — accept 큐 포화 + 메모리 폭증). TCP 소켓 스캔과 달리 프로세스
+ * 생성은 훨씬 무겁고 FD 를 잠식하므로, **스캔 동시성과 완전히 분리된 낮은 상한**으로 ping 을
+ * 게이팅한다. 이 상한을 없애거나 크게 올리면 같은 장애가 재발한다.
  */
-export function pingHost(ip, timeoutMs = 700) {
-  return new Promise((resolve) => {
-    if (!isIpv4(ip)) return resolve(false); // execFile(셸 미사용)이지만 인자 오염도 차단
-    try {
-      const child = execFile('ping', pingArgs(ip, timeoutMs), { timeout: timeoutMs + 2_000, windowsHide: true }, (err) => resolve(!err));
-      child.on('error', () => resolve(false)); // spawn 자체 실패(ping 미설치 등)
-    } catch { resolve(false); }
-  });
+const PING_MAX = Math.max(1, Math.min(32, Number(process.env.IPAM_PING_CONCURRENCY) || 8));
+let _pingActive = 0;
+const _pingWaiters = [];
+function _pingAcquire() {
+  if (_pingActive < PING_MAX) { _pingActive++; return Promise.resolve(); }
+  return new Promise((res) => _pingWaiters.push(res));
 }
+function _pingRelease() {
+  _pingActive--;
+  const next = _pingWaiters.shift();
+  if (next) { _pingActive++; next(); }
+}
+
+/**
+ * ICMP ping 1회(v2.359, 사용자 요구: "ping 으로 IP 체크") — 시스템 ping 바이너리 사용
+ * (raw socket 권한 불필요). 응답=true. 바이너리 없음/타임아웃/무응답은 조용히 false.
+ * 동시 실행은 PING_MAX(기본 8)로 제한된다(v2.360) — 프로세스/FD 폭주 방지.
+ */
+export async function pingHost(ip, timeoutMs = 700) {
+  if (!isIpv4(ip)) return false; // execFile(셸 미사용)이지만 인자 오염도 차단
+  await _pingAcquire();
+  try {
+    return await new Promise((resolve) => {
+      let settled = false;
+      const done = (v) => { if (!settled) { settled = true; resolve(v); } };
+      try {
+        const child = execFile('ping', pingArgs(ip, timeoutMs), { timeout: timeoutMs + 2_000, windowsHide: true }, (err) => done(!err));
+        child.on('error', () => done(false)); // spawn 자체 실패(ping 미설치/EMFILE 등)
+      } catch { done(false); }
+    });
+  } finally { _pingRelease(); }
+}
+
+/** 테스트용 — 현재 ping 동시성 상한(설정 확인). */
+export function pingConcurrencyLimit() { return PING_MAX; }
 
 async function scanOneHost(ip, ports, timeoutMs, reverseDns, ping) {
   const open = [];
