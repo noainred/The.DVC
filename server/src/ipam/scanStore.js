@@ -42,7 +42,7 @@ const HISTORY_RETENTION_MS = 365 * 86_400_000; // 1년 넘게 안 보인 IP는 �
 
 const DEFAULTS = {
   enabled: false, ranges: [], ports: DEFAULT_PORTS,
-  intervalMs: 3_600_000, concurrency: 128, timeoutMs: 700, reverseDns: true, ping: true, retentionDays: 30,
+  intervalMs: 3_600_000, concurrency: 128, timeoutMs: 700, reverseDns: true, ping: false, retentionDays: 30,
 };
 
 const clamp = (v, lo, hi, d) => { const n = Number(v); return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : d; };
@@ -92,7 +92,10 @@ function normalizeCfg(p = {}) {
     concurrency: clamp(p.concurrency, 1, 1024, DEFAULTS.concurrency),
     timeoutMs: clamp(p.timeoutMs, 100, 10_000, DEFAULTS.timeoutMs),
     reverseDns: p.reverseDns !== false,
-    ping: p.ping !== false, // ICMP ping 병행(v2.359) — 포트가 전부 닫힌 서버도 생존 감지
+    // ICMP ping 병행(v2.359) — 포트가 전부 닫힌 서버도 생존 감지. v2.360: 기본 OFF(opt-in).
+    // 프로세스/FD 폭주로 포탈이 먹통이 된 장애(v2.359) 이후, 명시적으로 켤 때만 동작하고
+    // 켜더라도 ping 전용 동시성 상한(scan.js PING_MAX)으로 소수만 동시에 실행된다.
+    ping: p.ping === true,
     retentionDays: clamp(p.retentionDays, 0, 3650, DEFAULTS.retentionDays),
   };
 }

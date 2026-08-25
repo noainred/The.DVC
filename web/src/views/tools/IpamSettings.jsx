@@ -370,7 +370,7 @@ export function IpScanSettings({ onClose }) {
         <label style={{ fontWeight: 600, paddingTop: 9 }}>역DNS / 보존</label>
         <div className="flex gap wrap" style={{ alignItems: 'center' }}>
           <label className="flex gap" style={{ alignItems: 'center' }}><input type="checkbox" checked={s.reverseDns} onChange={(e) => setS({ ...s, reverseDns: e.target.checked })} /> 역DNS 호스트명</label>
-          <label className="flex gap" style={{ alignItems: 'center' }} title="TCP 포트가 전부 닫힌 서버도 ICMP 응답으로 '사용 중' 감지(사용 이력에 기록)"><input type="checkbox" checked={s.ping !== false} onChange={(e) => setS({ ...s, ping: e.target.checked })} /> ICMP ping 병행</label>
+          <label className="flex gap" style={{ alignItems: 'center' }} title="TCP 포트가 전부 닫힌 서버도 ICMP 응답으로 '사용 중' 감지. 기본 꺼짐 — 큰 대역에서는 ping 프로세스 부하가 있으니 필요한 대역에만 켜세요(동시 실행은 소수로 제한됨)."><input type="checkbox" checked={s.ping === true} onChange={(e) => setS({ ...s, ping: e.target.checked })} /> ICMP ping 병행 <span className="muted" style={{ fontSize: 11 }}>(기본 꺼짐)</span></label>
           <input className="input" type="number" min={0} style={{ width: 80 }} value={s.retentionDays} onChange={(e) => setS({ ...s, retentionDays: Number(e.target.value) || 0 })} /><span className="muted">일 보존</span>
         </div>
       </div>
