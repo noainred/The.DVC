@@ -42,7 +42,7 @@ const HISTORY_RETENTION_MS = 365 * 86_400_000; // 1년 넘게 안 보인 IP는 �
 
 const DEFAULTS = {
   enabled: false, ranges: [], ports: DEFAULT_PORTS,
-  intervalMs: 3_600_000, concurrency: 128, timeoutMs: 700, reverseDns: true, retentionDays: 30,
+  intervalMs: 3_600_000, concurrency: 128, timeoutMs: 700, reverseDns: true, ping: true, retentionDays: 30,
 };
 
 const clamp = (v, lo, hi, d) => { const n = Number(v); return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : d; };
@@ -92,6 +92,7 @@ function normalizeCfg(p = {}) {
     concurrency: clamp(p.concurrency, 1, 1024, DEFAULTS.concurrency),
     timeoutMs: clamp(p.timeoutMs, 100, 10_000, DEFAULTS.timeoutMs),
     reverseDns: p.reverseDns !== false,
+    ping: p.ping !== false, // ICMP ping 병행(v2.359) — 포트가 전부 닫힌 서버도 생존 감지
     retentionDays: clamp(p.retentionDays, 0, 3650, DEFAULTS.retentionDays),
   };
 }
@@ -126,6 +127,7 @@ export function saveScanSettings(agent, partial = {}) {
   if (partial.concurrency !== undefined) next.concurrency = clamp(partial.concurrency, 1, 1024, DEFAULTS.concurrency);
   if (partial.timeoutMs !== undefined) next.timeoutMs = clamp(partial.timeoutMs, 100, 10_000, DEFAULTS.timeoutMs);
   if (partial.reverseDns !== undefined) next.reverseDns = !!partial.reverseDns;
+  if (partial.ping !== undefined) next.ping = !!partial.ping; // v2.359 — 누락 시 저장이 조용히 무시됨
   if (partial.retentionDays !== undefined) next.retentionDays = clamp(partial.retentionDays, 0, 3650, DEFAULTS.retentionDays);
   all.agents[agent] = next;
   saveAll(all);

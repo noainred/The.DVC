@@ -34,7 +34,7 @@ export async function runScanOnce({ manual = false } = {}) {
   progress = { total: 0, done: 0, alive: 0, startedAt: started };
   try {
     const { scanned, alive } = await scanRanges(ranges, {
-      ports: s.ports, concurrency: s.concurrency, timeoutMs: s.timeoutMs, reverseDns: s.reverseDns,
+      ports: s.ports, concurrency: s.concurrency, timeoutMs: s.timeoutMs, reverseDns: s.reverseDns, ping: s.ping,
       onProgress: (done, total, aliveCount) => { progress = { total, done, alive: aliveCount, startedAt: started }; },
     });
     mergeScanResults(alive, Date.now(), LOCAL);

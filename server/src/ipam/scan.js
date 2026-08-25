@@ -8,6 +8,7 @@
 
 import net from 'node:net';
 import dnsp from 'node:dns/promises';
+import { execFile } from 'node:child_process';
 
 export const DEFAULT_PORTS = [22, 80, 443, 445, 3389, 623, 8006, 902, 5985, 5986];
 const SERVICE = {
@@ -94,18 +95,46 @@ function tcpProbe(ip, port, timeoutMs) {
   });
 }
 
-async function scanOneHost(ip, ports, timeoutMs, reverseDns) {
+/** 플랫폼별 ping 인자(1회 송신 + 타임아웃) — 테스트를 위해 분리. */
+export function pingArgs(ip, timeoutMs, platform = process.platform) {
+  if (platform === 'win32') return ['-n', '1', '-w', String(Math.max(100, Math.round(timeoutMs))), ip];
+  // linux/mac ping -W 는 초 단위(정수만 받는 배포판이 있어 올림) — 최소 1초.
+  return ['-c', '1', '-W', String(Math.max(1, Math.ceil(timeoutMs / 1000))), ip];
+}
+
+/**
+ * ICMP ping 1회(v2.359, 사용자 요구: "ping 으로 IP 체크") — 시스템 ping 바이너리 사용
+ * (raw socket 권한 불필요). 응답=true. 바이너리 없음/타임아웃/무응답은 조용히 false —
+ * 판정 보강용이지 실패해도 스캔 전체를 막으면 안 된다.
+ */
+export function pingHost(ip, timeoutMs = 700) {
+  return new Promise((resolve) => {
+    if (!isIpv4(ip)) return resolve(false); // execFile(셸 미사용)이지만 인자 오염도 차단
+    try {
+      const child = execFile('ping', pingArgs(ip, timeoutMs), { timeout: timeoutMs + 2_000, windowsHide: true }, (err) => resolve(!err));
+      child.on('error', () => resolve(false)); // spawn 자체 실패(ping 미설치 등)
+    } catch { resolve(false); }
+  });
+}
+
+async function scanOneHost(ip, ports, timeoutMs, reverseDns, ping) {
   const open = [];
   // 포트는 순차(호스트당 부하 제한). 첫 포트만 빠르게 죽으면 나머지도 대개 닫힘.
   for (const p of ports) { if (await tcpProbe(ip, p, timeoutMs)) open.push(p); }
-  if (!open.length) return null;
+  // 포트가 전부 닫혀도 ICMP ping 이 응답하면 '사용 중'(v2.359) — 방화벽으로 포트를 다 막은
+  // 서버가 미사용으로 오판되는 갭을 메운다. ping 은 포트 무응답일 때만 1회(스캔 시간 최소화).
+  let icmpOnly = false;
+  if (!open.length) {
+    if (!ping || !(await pingHost(ip, timeoutMs))) return null;
+    icmpOnly = true;
+  }
   let hostname = '';
   if (reverseDns) { try { const names = await dnsp.reverse(ip); hostname = names?.[0] || ''; } catch { /* no PTR */ } }
-  return { ip, openPorts: open, services: open.map(portService), hostname };
+  return { ip, openPorts: open, services: icmpOnly ? ['ICMP(ping)'] : open.map(portService), hostname };
 }
 
 /** 대역(여러 spec) 스캔. 진행 콜백 onAlive(host)/onProgress(done,total,alive) 가능. 생존 호스트 배열 반환. */
-export async function scanRanges(specs, { ports = DEFAULT_PORTS, concurrency = 128, timeoutMs = 700, reverseDns = true, onAlive, onProgress } = {}) {
+export async function scanRanges(specs, { ports = DEFAULT_PORTS, concurrency = 128, timeoutMs = 700, reverseDns = true, ping = true, onAlive, onProgress } = {}) {
   const seen = new Set();
   const ips = [];
   for (const spec of (Array.isArray(specs) ? specs : [specs])) for (const ip of expandRange(spec)) if (!seen.has(ip)) { seen.add(ip); ips.push(ip); }
@@ -117,7 +146,7 @@ export async function scanRanges(specs, { ports = DEFAULT_PORTS, concurrency = 1
   const worker = async () => {
     while (idx < ips.length) {
       const ip = ips[idx++];
-      const r = await scanOneHost(ip, ports, timeoutMs, reverseDns).catch(() => null);
+      const r = await scanOneHost(ip, ports, timeoutMs, reverseDns, ping).catch(() => null);
       done++;
       if (r) { alive.push(r); onAlive?.(r); }
       onProgress?.(done, total, alive.length);
