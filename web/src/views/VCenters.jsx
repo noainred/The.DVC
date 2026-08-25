@@ -1,7 +1,74 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { usePolling } from '../api.js';
+import { usePolling, fetchJson } from '../api.js';
+import { growth, hasDsData, tb, gbTb } from './tools/storageTrack.js'; // 추이 KPI(v2.358) 계산 재사용
 import { Loading, ErrorBox, StateBadge, usageColor, SearchBox } from '../components/ui.jsx';
 import VCenterDetail from './VCenterDetail.jsx';
+
+/** 미니 스파크라인(v2.358) — recharts 를 끌어오지 않는 순수 SVG(Platform 은 차트 벤더 청크 미로드). */
+function Spark({ points, color }) {
+  const vals = (points || []).filter((v) => v != null && Number.isFinite(Number(v)));
+  if (vals.length < 2) return null;
+  const min = Math.min(...vals);
+  const max = Math.max(...vals);
+  const span = max - min || 1;
+  const W = 130;
+  const H = 28;
+  const pts = vals.map((v, i) => `${((i / (vals.length - 1)) * W).toFixed(1)},${(H - ((v - min) / span) * (H - 4) - 2).toFixed(1)}`).join(' ');
+  return (
+    <svg width={W} height={H} style={{ display: 'block', marginTop: 6, opacity: 0.9 }} aria-hidden="true">
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" />
+    </svg>
+  );
+}
+
+/**
+ * Platform 상단 추이 KPI 2장(v2.358, 사용자 요구) — VM 수·스토리지 사용량의 30일 증가 추이.
+ * 데이터는 vm-track 의 00/12시 스냅샷(GET /tools/vm-track, scope 서버 강제)을 5분 주기로 읽는다.
+ * tools 권한이 없거나 추적 DB 불가면 카드 자체를 숨긴다(대시보드 소음 방지). 클릭 → 해당 추이 화면.
+ */
+function TrendKpis() {
+  const [d, setD] = useState(null);
+  const [dead, setDead] = useState(false);
+  useEffect(() => {
+    let on = true;
+    const load = () => fetchJson('/tools/vm-track', { days: 30 })
+      .then((r) => { if (on) { setD(r); setDead(false); } })
+      .catch(() => { if (on) setDead(true); });
+    load();
+    const t = setInterval(load, 300_000);
+    return () => { on = false; clearInterval(t); };
+  }, []);
+  if (dead || !d) return null;
+  const pts = d.points || [];
+  const vmFirst = pts[0] || null;
+  const vmLast = pts[pts.length - 1] || null;
+  const vmNet = vmFirst && vmLast ? vmLast.total - vmFirst.total : 0;
+  const sumAdded = pts.reduce((a, p) => a + (p.added || 0), 0);
+  const sumRemoved = pts.reduce((a, p) => a + (p.removed || 0), 0);
+  const g = growth(pts); // 스토리지 순증감 — 구버전(ds 열 0) 행은 내부에서 기준 제외(v2.351 원칙)
+  const dsLast = [...pts].reverse().find(hasDsData) || null;
+  const go = (h) => { window.location.hash = h; };
+  return (
+    <>
+      <div className="card kpi" onClick={() => go('#/tools/vm-track')} style={{ cursor: 'pointer' }} title="클릭 — VM 수량 추이 화면">
+        <div className="label">VM 증가 추이(30일)</div>
+        <div className="value" style={{ color: vmNet > 0 ? 'var(--green)' : vmNet < 0 ? 'var(--red)' : undefined }}>
+          {vmLast ? `${vmNet > 0 ? '+' : ''}${vmNet.toLocaleString()}` : '—'}
+        </div>
+        <div className="meta">{vmLast ? `생성 +${sumAdded.toLocaleString()} · 삭제 −${sumRemoved.toLocaleString()}` : '스냅샷 없음(매일 00·12시 자동)'}</div>
+        <Spark points={pts.map((p) => p.total)} color="#60a5fa" />
+      </div>
+      <div className="card kpi" onClick={() => go('#/tools/storage-track')} style={{ cursor: 'pointer' }} title="클릭 — 스토리지 사용량 추이 화면">
+        <div className="label">스토리지 증가 추이(30일)</div>
+        <div className="value" style={{ color: g.netGB > 0 ? 'var(--amber)' : g.netGB < 0 ? 'var(--green)' : undefined }}>
+          {dsLast ? `${g.netGB > 0 ? '+' : ''}${gbTb(g.netGB)}` : '—'}
+        </div>
+        <div className="meta">{dsLast ? `사용 ${tb(dsLast.dsUsedGB).toLocaleString()} / ${tb(dsLast.dsCapGB).toLocaleString()} TB (${Math.round(dsLast.dsUsagePct || 0)}%)` : '관측 전(다음 00·12시부터)'}</div>
+        <Spark points={pts.map((p) => (hasDsData(p) ? p.dsUsedGB : null))} color="#f59e0b" />
+      </div>
+    </>
+  );
+}
 
 /* 메모리 사용/전체 병기 — 1TB 이상이면 TB로, 아니면 GB로(자릿수 폭주 방지). 값 없으면 미표기. */
 function fmtMem(usedGB, totalGB) {
@@ -74,6 +141,7 @@ export default function VCenters({ onSelectSite, resetSignal }) {
         <div className="card kpi"><div className="label">전체 호스트</div><div className="value">{totalHosts.toLocaleString()}</div><div className="meta">다빈치 {davinciHosts.toLocaleString()}개 · IRS {irsHosts.toLocaleString()}개</div></div>
         <div className="card kpi"><div className="label">전체 VM</div><div className="value">{totalVms.toLocaleString()}</div><div className="meta">다빈치 {davinciVms.toLocaleString()}개 · IRS {irsVms.toLocaleString()}개</div></div>
         <div className="card kpi"><div className="label">활성 알람</div><div className="value" style={{ color: totalAlarms ? 'var(--amber)' : undefined }}>{totalAlarms}</div></div>
+        <TrendKpis />
       </div>
 
       {sites.length > 0 && (
