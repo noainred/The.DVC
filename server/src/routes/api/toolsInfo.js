@@ -1,6 +1,6 @@
 // GuestOS/HBA/라이선스/Tools업그레이드/UI설정 — api.js(구 2,445줄) 분할(v2.283.0). 본문은 원본 그대로, 등록 순서는 api.js 호출 순서가 보존한다.
 import { requireRole, requirePerm } from '../../auth/auth.js';
-import { scopedVcenterIds } from '../../auth/scope.js';
+import { scopedVcenterIds, writeScopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { loadVcenterConfig } from '../../config.js';
 import { loadUiSettings, saveUiSettings } from '../../ui-settings.js';
@@ -191,7 +191,9 @@ api.post('/vms/upgrade-tools', requirePerm('tools'), async (req, res) => {
   const snap = store.get();
   // 사용자 scope 강제(쓰기 경로) — id 는 `vcId:moref`. 범위 밖 vCenter 의 VM 에는 Tools 업그레이드를
   // 실행할 수 없다(범위 제한 계정이 타 사이트 VM 을 건드리는 것 차단).
-  const allowed = scopedVcenterIds(req.user, snap);
+  // v2.369: 쓰기 라우트이므로 조회 범위가 아니라 **쓰기 범위**(writeVcenters ∩ 조회)를 쓴다 —
+  // writeVcenters 미설정이면 조회 범위와 동일해 기존 동작 불변.
+  const allowed = writeScopedVcenterIds(req.user, snap);
   if (allowed) {
     const vcOf = (id) => (id.indexOf(':') >= 0 ? id.slice(0, id.indexOf(':')) : id);
     const dropped = ids.filter((id) => !allowed.has(vcOf(id))).length;

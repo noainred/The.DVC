@@ -1,6 +1,6 @@
 // VM/호스트 메트릭·콘솔 티켓·iDRAC 전력 — api.js(구 2,445줄) 분할(v2.283.0). 본문은 원본 그대로, 등록 순서는 api.js 호출 순서가 보존한다.
 import { requirePerm } from '../../auth/auth.js';
-import { inUserScope, scopedVcenterIds } from '../../auth/scope.js';
+import { inUserScope, inUserWriteScope, scopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { loadVcenterConfig } from '../../config.js';
 import { hostPower } from '../../idrac/service.js';
@@ -106,6 +106,9 @@ api.get('/vms/:id/console', requirePerm('vm.console'), async (req, res) => {
   const vm = snap.vms.find((v) => v.id === id);
   if (!vm) return res.status(404).json({ ok: false, reason: 'VM을 찾을 수 없습니다.' });
   if (!inUserScope(req.user, snap, vm.vcenterId)) return res.status(404).json({ ok: false, reason: 'VM을 찾을 수 없습니다.' });
+  // 콘솔은 게스트 OS 조작(키 입력) 능력 — 조회 범위 안이라도 쓰기 범위(writeVcenters, v2.369) 밖이면
+  // 403(존재는 이미 보이므로 은닉 불필요). writeVcenters 미설정이면 조회 범위와 동일(기존 동작).
+  if (!inUserWriteScope(req.user, snap, vm.vcenterId)) return res.status(403).json({ ok: false, reason: '조회 전용 범위 — 이 vCenter 의 VM 콘솔을 열 수 없습니다.' });
   if (snap.source === 'mock') {
     return res.json({ ok: true, mock: true, vmName: vm.name, reason: '데모 모드입니다. 실제 vCenter(live) 연결 시 VMRC/웹 콘솔 링크가 생성됩니다.' });
   }

@@ -31,6 +31,7 @@
 | 문서 | 용도 |
 |---|---|
 | [EDGE-SETUP.md](EDGE-SETUP.md) | 엣지(원격 DC) 포탈 설정 — 중앙↔엣지 구조·토큰·수집 모드 |
+| [AIRGAP-LLM-SETUP-GUIDE.md](AIRGAP-LLM-SETUP-GUIDE.md) | 에어갭 LLM 서버 구축 — Rocky9 + A40 vGPU + Ollama + Qwen(자연어 검색 백엔드) |
 | [EDGE-COLLECTOR-MERGE.md](EDGE-COLLECTOR-MERGE.md) | 이전 절차서 — 별도 수집서버(전력 전용 VM)를 엣지 노드로 통합·폐기 |
 | [NETWORK-COMMS-FIREWALL.md](NETWORK-COMMS-FIREWALL.md) | 전 프로세스 통신 경로 82종 — 방화벽(ACL) 오픈 가이드(포트·방향·근거 코드) |
 | [CAPACITY-ADVISOR.md](CAPACITY-ADVISOR.md) | 리소스 적정성 진단 — 중앙/엣지 서버 자체의 증설·감축 판단 기능 설명 |

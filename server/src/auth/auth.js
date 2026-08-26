@@ -331,21 +331,31 @@ export function authenticateLocal(username, credential) {
 const VALID_ROLES = ['admin', 'operator', 'viewer'];
 
 // 사용자별 데이터 범위(scope) — 볼 수 있는 vCenter/리전을 제한한다(권한 키와는 직교: 무엇을
-// '할' 수 있나 ≠ 무엇을 '볼' 수 있나). 둘 다 비면 제한 없음(전체). 형식/타입만 정규화한다.
+// '할' 수 있나 ≠ 무엇을 '볼' 수 있나). 형식/타입만 정규화한다.
+// writeVcenters(v2.369): '수정/변경 가능' vCenter 의 별도 축 — 비우면 쓰기 범위 = 조회 범위
+// (기존 동작 보존). 판정은 auth/scope.js writeScopedVcenterIds(항상 조회 범위와의 교집합).
+// 셋 다 비면 제한 없음(전체).
 function sanitizeScope(scope) {
   if (scope == null) return undefined;
   const arr = (v) => [...new Set((Array.isArray(v) ? v : []).map((x) => String(x || '').trim()).filter(Boolean))];
   const vcenters = arr(scope.vcenters);
   const regions = arr(scope.regions);
-  if (!vcenters.length && !regions.length) return null; // 명시적 '전체'
-  return { vcenters, regions };
+  const writeVcenters = arr(scope.writeVcenters);
+  if (!vcenters.length && !regions.length && !writeVcenters.length) return null; // 명시적 '전체'
+  return { vcenters, regions, writeVcenters };
 }
 
 /** 사용자 레코드의 scope 를 공개형(항상 배열)으로 반환. null/undefined → 전체. */
 export function normalizedScope(u) {
   const s = u && u.scope;
-  if (!s || (!Array.isArray(s.vcenters) && !Array.isArray(s.regions))) return { vcenters: [], regions: [] };
-  return { vcenters: Array.isArray(s.vcenters) ? s.vcenters : [], regions: Array.isArray(s.regions) ? s.regions : [] };
+  if (!s || (!Array.isArray(s.vcenters) && !Array.isArray(s.regions) && !Array.isArray(s.writeVcenters))) {
+    return { vcenters: [], regions: [], writeVcenters: [] };
+  }
+  return {
+    vcenters: Array.isArray(s.vcenters) ? s.vcenters : [],
+    regions: Array.isArray(s.regions) ? s.regions : [],
+    writeVcenters: Array.isArray(s.writeVcenters) ? s.writeVcenters : [],
+  };
 }
 
 // 서버측 토큰 폐기(감사 M5) — 자격증명/역할이 바뀌면 버전을 올려 그 전에 발급된 토큰을
@@ -677,7 +687,7 @@ export function resolveTokenUser(token) {
     };
   }
   // AD 계정 등 로컬 레코드가 없는 토큰은 scope 를 적용하지 않는다(전체 열람).
-  return { username: payload.sub, role: payload.role, name: payload.name, scope: { vcenters: [], regions: [] } };
+  return { username: payload.sub, role: payload.role, name: payload.name, scope: { vcenters: [], regions: [], writeVcenters: [] } };
 }
 
 export function authMiddleware(req, res, next) {

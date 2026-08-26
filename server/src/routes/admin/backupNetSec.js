@@ -16,6 +16,7 @@ import { getAllAgentConfigs } from '../../central/agentConfig.js';
 import { recordCapture, listCaptures, getCapture, deleteCapture } from '../../net/captureHistory.js';
 import { listMonitors, saveMonitor, removeMonitor, runMonitorNow } from '../../net/monitor.js';
 import { addUsersToVms } from '../../guest/accountService.js';
+import { inUserWriteScope } from '../../auth/scope.js';
 import { snapshotFilter, slimVm, guestProbe } from '../../search/deepSearch.js';
 import { analyzeLoginFails } from '../../security/loginFails.js';
 import { loadLoginMonitor, saveLoginMonitor, loginMonitorStatus, runLoginAnalysisNow } from '../../security/loginMonitor.js';
@@ -150,6 +151,10 @@ adminRouter.get('/net/log-issues', adminOnly, async (req, res) => {
 // Body: { vcenterId, vmIds[], username, password, sudo, nopasswd, guestUser, guestPass }
 adminRouter.post('/guest/add-user', adminOnly, async (req, res) => {
   const b = req.body || {};
+  // 게스트 OS 계정 추가는 VM 상태변경 — 쓰기 범위(writeVcenters, v2.369) 강제. 미설정=조회 범위.
+  if (!inUserWriteScope(req.user, store.get(), String(b.vcenterId || ''))) {
+    return res.status(403).json({ ok: false, reason: '조회 전용 범위 — 이 vCenter 는 수정 권한이 없습니다.' });
+  }
   try { res.json(await addUsersToVms(b)); }
   catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
 });

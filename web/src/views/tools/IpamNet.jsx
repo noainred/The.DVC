@@ -1,7 +1,8 @@
 // IpamNet.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
 import React, { useEffect, useState } from 'react';
-import { fetchJson, postJson, putJson, getToken } from '../../api.js';
+import { fetchJson, postJson, putJson, getToken, downloadFile } from '../../api.js';
 import { Loading, ErrorBox, Modal } from '../../components/ui.jsx';
+import { CsvImportModal } from '../../components/CsvBulkModals.jsx';
 import { DEVTYPE_LABEL, MGMT, MgmtBadge } from './ipamShared.jsx';
 import { ScanProgressBar } from './IpamSettings.jsx';
 import { Card } from './shared.jsx';
@@ -17,6 +18,7 @@ export function IpamRanges() {
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState(null);
+  const [csvImport, setCsvImport] = useState(false); // 대역 CSV 가져오기 모달(공용 CsvImportModal)
   const authHdr = () => (getToken() ? { Authorization: `Bearer ${getToken()}` } : {});
   const load = async () => { try { setData(await fetchJson('/tools/ipam/vc-ranges')); setError(null); } catch (e) { setError(e.message); } };
   const loadStatus = () => fetchJson('/admin/ipam/scan/status').then(setStatus).catch(() => setStatus(null));
@@ -78,7 +80,15 @@ export function IpamRanges() {
       </div>
 
       <div className="card" style={{ marginBottom: 12 }}>
-        <b style={{ fontSize: 14 }}>저장된 대역 ({list.length})</b>
+        <div className="flex between wrap" style={{ alignItems: 'center' }}>
+          <b style={{ fontSize: 14 }}>저장된 대역 ({list.length})</b>
+          <span className="flex gap">
+            <button className="logout-btn" style={{ padding: '6px 12px', fontSize: 12 }} title="저장된 대역 목록을 CSV 로 내려받기(가져오기 양식과 동일)"
+              onClick={() => downloadFile('/tools/ipam/vc-ranges.csv').catch((e) => setMsg({ ok: false, text: e.message }))}>⤓ 대역 CSV</button>
+            <button className="logout-btn" style={{ padding: '6px 12px', fontSize: 12 }} title="CSV 로 대역 일괄 등록/수정 — 검증(드라이런) 후 덮어쓰기 확인"
+              onClick={() => setCsvImport(true)}>⤒ CSV 가져오기</button>
+          </span>
+        </div>
         <div className="table-wrap" style={{ marginTop: 8 }}>
           <table><thead><tr><th>vCenter</th><th>대역</th><th className="right">IP 수</th><th>주기</th><th>수정시각</th><th className="right">작업</th></tr></thead>
             <tbody>
@@ -121,6 +131,20 @@ export function IpamRanges() {
         </div>
         <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>스캔 결과는 ‘⬇ 스캔 결과(CSV)’로 첨부파일처럼 내려받을 수 있습니다(IP·호스트명·상태·포트·서비스·최초/최근 관측).</div>
       </div>
+
+      {csvImport && (
+        <CsvImportModal title="스캔 대역 CSV 가져오기" importPath="/admin/ipam/vc-ranges/import"
+          samplePath="/admin/ipam/vc-ranges/sample.csv"
+          description={<>헤더 행 필수(<code>vcenter</code>·<code>ranges</code> — vCenter 는 등록된 이름/ID, 대역은 세미콜론(;) 구분 CIDR·범위·IP, <code>enabled</code> 는 주기 스캔 포함 여부). vCenter 당 1행이며, <b>기존 vCenter 와 겹치는 행은 대역 전체가 CSV 값으로 교체</b>되므로 아래에서 덮어쓰기를 명시적으로 허용해야 적용됩니다. 대역 문법은 실제 스캐너와 같은 파서로 검증됩니다. 양식은 <b>📄 샘플 CSV</b>로 받으세요.</>}
+          columns={[
+            { key: 'vcenter', label: 'vCenter', render: (r) => <b style={{ color: 'var(--text)' }}>{r.vcenter}</b> },
+            { key: 'rangeCount', label: '대역 수', align: 'right' },
+            { key: 'enabled', label: '주기 스캔', render: (r) => (r.enabled ? '포함' : '제외') },
+          ]}
+          overwriteLabel={(n) => <>기존 대역 <b>{n}건 덮어쓰기 허용</b> — 체크하지 않으면 해당 행은 건너뜁니다(그 vCenter 의 대역 전체가 CSV 값으로 교체됨)</>}
+          nameOf={(f) => f.vcenter || ''}
+          onClose={() => setCsvImport(false)} onDone={() => { setCsvImport(false); load(); loadStatus(); }} />
+      )}
     </>
   );
 }
