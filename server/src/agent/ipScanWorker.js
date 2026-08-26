@@ -8,7 +8,7 @@
 
 import { config } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
-import { scanRanges } from '../ipam/scan.js';
+import { runScan } from '../ipam/scanRunner.js';
 
 let timer = null;
 let last = null;
@@ -28,9 +28,10 @@ export async function runIpScanAgentOnce() {
     if (!aRes.ok) throw new Error(`assignment ${aRes.status}`);
     const a = await aRes.json();
     if (!a?.assigned) { last = { at: Date.now(), assigned: false }; return last; }
-    const { alive, scanned } = await scanRanges(a.ranges, {
-      ports: a.ports, concurrency: a.concurrency, timeoutMs: a.timeoutMs, reverseDns: a.reverseDns,
-      ping: a.ping, // 중앙 배정 설정(v2.359) — 구버전 중앙이면 undefined → 기본 켜짐
+    // 엣지도 스캔을 별도 프로세스에서(v2.363) — 원격지 포탈/에이전트 부하 격리.
+    const { alive, scanned } = await runScan({
+      ranges: a.ranges, ports: a.ports, concurrency: a.concurrency, timeoutMs: a.timeoutMs, reverseDns: a.reverseDns,
+      ping: a.ping, // 중앙 배정 설정(v2.359) — 구버전 중앙이면 undefined → 기본 OFF(v2.360)
     });
     await resilientFetch(`${config.agent.centralUrl}/api/central/ip-scan-result`, {
       method: 'POST', headers: headers(), body: JSON.stringify({ agent: config.agent.name, alive, scanned }), timeoutMs: 30_000, retries: 2,

@@ -44,3 +44,17 @@ test('ping 동시성 상한(v2.360): 스캔 동시성과 무관하게 1..32 로 
   const n = pingConcurrencyLimit();
   assert.ok(Number.isInteger(n) && n >= 1 && n <= 32, `PING_MAX 범위: ${n}`);
 });
+
+test('ping 동시성 게이트(v2.362): 100개를 한꺼번에 던져도 동시 실행은 상한 이하 — 폭주 불가 증명', async () => {
+  const { withPingSlot, pingStats, pingConcurrencyLimit } = await import('../src/ipam/scan.js');
+  const cap = pingConcurrencyLimit();
+  let cur = 0, observedMax = 0;
+  // 실제 ping 대신 '슬롯 안에서 잠깐 머무는' 가짜 작업 100개를 동시에 던진다.
+  // withPingSlot 이 동시 실행을 cap 으로 막으면 observedMax 는 절대 cap 을 못 넘는다.
+  const task = () => new Promise((res) => { cur++; if (cur > observedMax) observedMax = cur; setTimeout(() => { cur--; res(true); }, 5); });
+  await Promise.all(Array.from({ length: 100 }, () => withPingSlot(task)));
+  assert.ok(observedMax <= cap, `동시 실행(${observedMax})이 상한(${cap})을 넘지 않아야 한다`);
+  assert.equal(observedMax, cap, `100개를 던졌으니 상한(${cap})까지는 채워야 한다(게이트가 살아있음 확인)`);
+  assert.equal(pingStats().active, 0, '모든 슬롯이 반납되어야 한다(누수 없음)');
+  assert.ok(pingStats().peak <= cap, 'peak 계측도 상한 이하');
+});

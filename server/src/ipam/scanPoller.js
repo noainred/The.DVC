@@ -4,7 +4,7 @@
  * 한 번에 한 스캔만 실행(중복 방지), 실패는 격리, 이벤트 루프 비차단.
  */
 
-import { scanRanges } from './scan.js';
+import { runScan } from './scanRunner.js';
 import { loadScanSettings, mergeScanResults, pruneScanResults, recordAgentReport, sweepReleases, listScanAgents, LOCAL } from './scanStore.js';
 import { enabledVcRanges } from './rangeStore.js';
 
@@ -33,10 +33,11 @@ export async function runScanOnce({ manual = false } = {}) {
   const started = Date.now();
   progress = { total: 0, done: 0, alive: 0, startedAt: started };
   try {
-    const { scanned, alive } = await scanRanges(ranges, {
-      ports: s.ports, concurrency: s.concurrency, timeoutMs: s.timeoutMs, reverseDns: s.reverseDns, ping: s.ping,
-      onProgress: (done, total, aliveCount) => { progress = { total, done, alive: aliveCount, startedAt: started }; },
-    });
+    // 스캔은 별도 프로세스에서(v2.363) — TCP/ping/역DNS 부하·FD 를 포탈에서 격리.
+    const { scanned, alive } = await runScan(
+      { ranges, ports: s.ports, concurrency: s.concurrency, timeoutMs: s.timeoutMs, reverseDns: s.reverseDns, ping: s.ping },
+      { onProgress: (done, total, aliveCount) => { progress = { total, done, alive: aliveCount, startedAt: started }; } },
+    );
     mergeScanResults(alive, Date.now(), LOCAL);
     recordAgentReport(LOCAL, { scanned, alive: alive.length, durationMs: Date.now() - started });
     // 중앙 직접 스캔이 끝난 직후의 해제 마킹은 '중앙(LOCAL)이 소유한 IP'에만 적용한다.
