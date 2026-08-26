@@ -56,9 +56,12 @@ export async function takeVmSnapshot(snap, { trigger = 'manual', now = new Date(
   }
   if (!perVc.length) return { ok: false, reason: '추적할 vCenter 가 없습니다(수집 대기 또는 전부 unreachable).' };
 
-  // 스냅샷에서 사라진 vCenter(등록 해제) 로스터 정리.
-  const liveIds = new Set(perVc.map((v) => v.vcenterId));
-  for (const id of await rosterVcenters()) if (!liveIds.has(id)) await dropRoster(id);
+  // 등록 해제(스냅샷 vcenters 목록에서 아예 사라진) vCenter 만 로스터를 정리한다.
+  // liveIds(이번에 실제 처리한 vc)로 판단하면, 일시 unreachable(+인벤토리 0)로 targets 에서
+  // 빠진 vc 의 로스터까지 지워져, 복구 시 그 vc 의 전 VM 이 '신규(+N)'로 잡히는 오탐이 난다.
+  // 그래서 '이번에 처리했는가'가 아니라 '스냅샷에 등록돼 있는가(status 무관)'로만 판단한다.
+  const knownIds = new Set((snap.vcenters || []).map((vc) => String(vc.id || '')).filter(Boolean));
+  for (const id of await rosterVcenters()) if (!knownIds.has(id)) await dropRoster(id);
 
   const totalRow = totalsOf(perVc);
   const r = await commitSnapshot({ slot, ts, perVc, totalRow });
