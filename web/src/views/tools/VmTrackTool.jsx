@@ -5,7 +5,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ResponsiveContainer, ComposedChart, LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend, ReferenceLine } from 'recharts';
 import { fetchJson, postJson } from '../../api.js';
-import { Loading, ErrorBox, Kpi } from '../../components/ui.jsx';
+import { Loading, ErrorBox, Kpi, VmLink } from '../../components/ui.jsx';
 import EscClose from '../../components/EscClose.jsx';
 import { fmtAgo } from '../../util/fmt.js';
 import { hasDsData } from './storageTrack.js';
@@ -515,7 +515,7 @@ function ChangeDetail({ title, snapId = null, slot = null, focus = 'all', onClos
                     {shown.map((r, i) => (
                       <tr key={`${r.vmId}:${i}`}>
                         <td><span className={`badge ${(KIND_META[r.kind] || {}).badge || 'gray'}`}>{(KIND_META[r.kind] || {}).label || r.kind}</span></td>
-                        <td><b>{r.name || r.vmId}</b></td>
+                        <td><VmLink name={r.name} vcenterId={r.vcenterId} label={r.name || r.vmId} className="cell-link" /></td>
                         {items.some((x) => x.vcenterId) && <td className="muted" style={{ fontSize: 11.5 }}>{r.vcenterId || '—'}</td>}
                         <td className="muted" style={{ fontSize: 12 }}>{r.cluster || '—'}</td>
                         <td className="muted" style={{ fontSize: 12 }}>{r.host || '—'}</td>
