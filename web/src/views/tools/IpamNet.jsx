@@ -125,6 +125,32 @@ export function IpamRanges() {
   );
 }
 
+// 기간별 버킷 수/단위(v2.361, 사용자 요구) — '최근에 언제 사용했는지'를 직관적으로:
+//  1일→24칸(1시간) · 7일→7칸(1일) · 30일→30칸(1일) · 90일→9칸(10일) · 365일→12칸(1개월).
+// 서버 netmap 은 buckets 파라미터를 그대로 받아 span/N 로 균등 분할한다(추가 서버 변경 없음).
+const BUCKETS_FOR = { 1: 24, 7: 7, 30: 30, 90: 9, 365: 12 };
+const UNIT_FOR = { 1: '1시간', 7: '1일', 30: '1일', 90: '10일', 365: '1개월' };
+const bucketsFor = (d) => BUCKETS_FOR[d] || 30;
+const unitFor = (d) => UNIT_FOR[d] || '구간';
+
+// 버킷 중앙시각 → 기간 granularity 에 맞춘 짧은 라벨.
+function fmtBucketTick(ts, days) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  if (days <= 1) return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });      // 시:분
+  if (days <= 90) return d.toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' });         // 월/일
+  return d.toLocaleDateString('ko-KR', { year: '2-digit', month: 'short' });                          // 년-월
+}
+// '오늘 기준 며칠 전' — 마지막 사용을 한눈에.
+function agoLabel(ts) {
+  if (!ts) return '';
+  const diff = Date.now() - ts;
+  const day = 86_400_000;
+  if (diff < day) { const h = Math.floor(diff / 3_600_000); return h <= 0 ? '방금' : `${h}시간 전`; }
+  return `${Math.floor(diff / day)}일 전`;
+}
+const fmtDate = (t) => (t ? new Date(t).toLocaleDateString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit' }) : '—');
+
 /** 네트워크 맵 — 대역(/24) 선택 시 OS별(색) × 시간대별(타임 슬라이더) 사용/미사용 격자. */
 export function IpamNetMap() {
   const [vcs, setVcs] = useState([]);
@@ -139,7 +165,7 @@ export function IpamNetMap() {
   useEffect(() => {
     let active = true; // 필터 연타 시 늦은 응답이 최신 선택을 덮어쓰거나 stale base로 되돌리는 것 방지
     const qs = new URLSearchParams();
-    if (vc) qs.set('vcenterId', vc); if (base) qs.set('base', base); qs.set('days', String(days)); qs.set('buckets', '32');
+    if (vc) qs.set('vcenterId', vc); if (base) qs.set('base', base); qs.set('days', String(days)); qs.set('buckets', String(bucketsFor(days)));
     fetchJson(`/tools/ipam/netmap?${qs.toString()}`).then((d) => { if (!active) return; setData(d); setError(null); setSel(null); if (!base && d.base) setBase(d.base); }).catch((e) => { if (active) setError(e.message); });
     return () => { active = false; };
     // eslint-disable-next-line
@@ -175,7 +201,7 @@ export function IpamNetMap() {
         </label>
         <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }}><span className="muted">기간</span>
           <select className="select" value={days} onChange={(e) => { setDays(Number(e.target.value)); setBucket(null); }}>
-            {[7, 30, 90, 180, 365].map((d) => <option key={d} value={d}>최근 {d}일</option>)}
+            {[1, 7, 30, 90, 365].map((d) => <option key={d} value={d}>최근 {d}일</option>)}
           </select>
         </label>
       </div>
@@ -213,6 +239,10 @@ export function IpamNetMap() {
             <span className="flex gap" style={{ alignItems: 'center' }}><span style={{ width: 12, height: 12, borderRadius: 3, background: '#16a34a44', display: 'inline-block' }} /> 미사용</span>
             <span className="flex gap" style={{ alignItems: 'center' }}><span style={{ width: 12, height: 12, borderRadius: 3, border: '1px dashed #16a34a66', display: 'inline-block' }} /> 미관측</span>
           </div>
+          {/* 색 의미 설명(v2.361) */}
+          <div className="muted" style={{ fontSize: 11.5, marginBottom: 8, lineHeight: 1.6 }}>
+            칸 색: <b style={{ color: '#16a34a' }}>진한 색 = 그 시각에 사용(스캔 응답)</b> · <span style={{ color: '#16a34a' }}>연한 색 = 미사용(응답 없음)</span> · 회색·점선 = 미관측(그 시각에 스캔이 안 돎). 색상은 OS 종류를 나타냅니다(위 OS 범례).
+          </div>
 
           {/* 격자 (.1 ~ .254) */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(22px, 1fr))', gap: 3, marginBottom: 12 }}>
@@ -235,12 +265,32 @@ export function IpamNetMap() {
                 <div><span className="muted">최초 관측</span><div>{fmtDt(sel.firstSeen)}</div></div>
                 <div><span className="muted">최근 관측</span><div>{fmtDt(sel.lastSeen)}</div></div>
               </div>
-              {/* 미니 타임라인(전체 버킷 사용/미사용 스트립) */}
-              <div style={{ marginTop: 10 }}>
-                <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>사용 추이(왼쪽=과거 → 오른쪽=현재)</div>
+              {/* 처음/마지막 사용 강조(v2.361) */}
+              <div className="flex gap wrap" style={{ marginTop: 10, fontSize: 12.5 }}>
+                <span>🟢 <span className="muted">마지막 사용</span> <b>{fmtDate(sel.lastSeen)}</b>{sel.lastSeen && <span className="muted"> ({agoLabel(sel.lastSeen)})</span>}</span>
+                <span style={{ marginLeft: 10 }}><span className="muted">처음 사용</span> <b>{fmtDate(sel.firstSeen)}</b></span>
+              </div>
+              {/* 미니 타임라인(v2.361 — 한 칸 = 선택 기간 단위, 왼쪽 과거 → 오른쪽 현재) */}
+              <div style={{ marginTop: 8 }}>
+                <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>사용 추이 · 한 칸 = <b>{unitFor(days)}</b> (왼쪽=과거 → 오른쪽=현재)</div>
                 <div style={{ display: 'flex', gap: 2 }}>
-                  {sel.states.map((st, i) => <div key={i} title={fmtDt(data.buckets[i])} style={{ flex: 1, height: 18, borderRadius: 2, background: st === 1 ? (sel.color || '#16a34a') : st === 0 ? `${sel.color || '#16a34a'}44` : 'rgba(148,163,184,.12)', outline: i === bi ? '1px solid var(--text)' : 'none' }} />)}
+                  {sel.states.map((st, i) => (
+                    <div key={i} title={`${fmtDt(data.buckets[i])} · ${st === 1 ? '사용' : st === 0 ? '미사용' : '미관측'}`}
+                      style={{ flex: 1, height: 18, borderRadius: 2, background: st === 1 ? (sel.color || '#16a34a') : st === 0 ? `${sel.color || '#16a34a'}44` : 'rgba(148,163,184,.12)', outline: i === bi ? '2px solid var(--text)' : 'none' }} />
+                  ))}
                 </div>
+                {/* 축 라벨: 칸이 적으면(≤12) 칸마다, 많으면 시작·중간·현재만 */}
+                {N <= 12 ? (
+                  <div style={{ display: 'flex', gap: 2, marginTop: 3 }}>
+                    {sel.states.map((_, i) => <div key={i} className="muted" style={{ flex: 1, fontSize: 9, textAlign: 'center', whiteSpace: 'nowrap', overflow: 'hidden' }}>{fmtBucketTick(data.buckets[i], days)}</div>)}
+                  </div>
+                ) : (
+                  <div className="flex between" style={{ marginTop: 3, fontSize: 10 }}>
+                    <span className="muted">{fmtBucketTick(data.buckets[0], days)}</span>
+                    <span className="muted">{fmtBucketTick(data.buckets[Math.floor(N / 2)], days)}</span>
+                    <span className="muted">현재</span>
+                  </div>
+                )}
               </div>
             </div>
           )}
