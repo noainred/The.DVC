@@ -19,6 +19,7 @@ import { config } from './config.js';
 import { writeReleaseFile } from './util/releaseFile.js';
 import { compression } from './util/compress.js';
 import { rateLimit } from './util/rateLimit.js';
+import { startLoopLagMonitor } from './util/loopLag.js';
 import { store } from './store.js';
 import { api } from './routes/api.js';
 import { authRouter } from './routes/auth.js';
@@ -189,6 +190,7 @@ if (fs.existsSync(config.webDist)) {
 // CONFIG_DIR/vmware-portal-release 에 현재 버전을 명시(redhat-release 방식). 기동 시마다 갱신.
 try { const rf = writeReleaseFile(); if (rf) console.log(`[release] ${rf} 기록`); } catch { /* best effort */ }
 store.start();
+startLoopLagMonitor(); // 이벤트 루프 지연 계측(additive·no-op-on-fail) — docs/ARCH-HEAVY-JOB-ISOLATION.md §10-0
 upgradeManager.start();
 const stagger = [
   startSelfRegister, // 엣지 자기등록(EDGE_MODE=all) — 중앙 수집 서버 목록에 자동 등록
