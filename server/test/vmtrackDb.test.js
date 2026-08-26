@@ -290,6 +290,48 @@ test('service(v2.354): vmtrackDsSeriesAll — 선택 vCenter 의 전체 DS 를 �
   assert.equal(scoped.total, 0);
 });
 
+test('보안(v2.364): snapId 로 조회해도 scope 밖 vCenter 변경은 새지 않는다', { skip: !sqliteOk ? 'node:sqlite 미지원 런타임' : false }, async () => {
+  const svc = await import('../src/vmtrack/service.js');
+  const slot = '2026-08-26T00';
+  const vmA = { vmId: 'vcA:1', name: 'a1', cluster: 'C', host: 'h', datastore: 'd', powerState: 'POWERED_ON', cpu: 1, memMB: 1024, storageGB: 10, guestOS: 'L' };
+  const vmB = { vmId: 'vcB:1', name: 'b1', cluster: 'C', host: 'h', datastore: 'd', powerState: 'POWERED_ON', cpu: 1, memMB: 1024, storageGB: 10, guestOS: 'L' };
+  const r = await db.commitSnapshot({
+    slot, ts: 30_000,
+    perVc: [
+      { vcenterId: 'vcscopeA', total: 1, onCount: 1, added: [vmA], removed: [], live: [vmA], baseline: false,
+        ds: { count: 1, capGB: 100, usedGB: 10, added: [{ dsId: 'vcA:ds', name: 'dsA', type: 'NFS', capGB: 100, usedGB: 10, freeGB: 90, usagePct: 10 }], removed: [], changed: [], live: [], series: [] } },
+      { vcenterId: 'vcscopeB', total: 1, onCount: 1, added: [vmB], removed: [], live: [vmB], baseline: false,
+        ds: { count: 1, capGB: 100, usedGB: 20, added: [{ dsId: 'vcB:ds', name: 'dsB', type: 'NFS', capGB: 100, usedGB: 20, freeGB: 80, usagePct: 20 }], removed: [], changed: [], live: [], series: [] } },
+    ],
+    totalRow: { total: 2, onCount: 2, added: 2, removed: 0, baseline: false, dsCount: 2, dsCapGB: 200, dsUsedGB: 30 },
+  });
+  assert.equal(r.ok, true);
+
+  // vcscopeB 의 snapId 확보(공격자가 순차 정수 snapId 를 열거하는 상황을 모사).
+  const allRows = await db.readSeries({ vcenterId: 'ALL', sinceTs: 0 });
+  const snapB = allRows.find((x) => x.slot === slot && x.vcenter_id === 'vcscopeB');
+  assert.ok(snapB?.id, 'vcscopeB 스냅샷 id');
+
+  // 범위가 vcscopeA 뿐인 계정이 vcscopeB 의 snapId 로 조회 → 반드시 빈 결과(누출 차단).
+  const leak = await svc.vmtrackChanges({ snapId: snapB.id, scopeIds: new Set(['vcscopeA']) });
+  assert.equal(leak.length, 0, 'scope 밖 snapId 는 VM 변경이 새지 않아야 한다');
+  const dsLeak = await svc.vmtrackDsChanges({ snapId: snapB.id, scopeIds: new Set(['vcscopeA']) });
+  assert.equal(dsLeak.length, 0, 'scope 밖 snapId 는 DS 변경도 새지 않아야 한다');
+
+  // 자기 범위(vcscopeB)면 정상 조회 + vcenterId 가 실려 온다(필터가 동작할 수 있는 근거).
+  const own = await svc.vmtrackChanges({ snapId: snapB.id, scopeIds: new Set(['vcscopeB']) });
+  assert.equal(own.length, 1);
+  assert.equal(own[0].vmId, 'vcB:1');
+  assert.equal(own[0].vcenterId, 'vcscopeB', 'SELECT 에 vcenter_id 가 실려야 scope 필터가 동작');
+  const ownDs = await svc.vmtrackDsChanges({ snapId: snapB.id, scopeIds: new Set(['vcscopeB']) });
+  assert.equal(ownDs.length, 1);
+  assert.equal(ownDs[0].vcenterId, 'vcscopeB');
+
+  // 범위 무제한(scopeIds=null)은 전부 조회(관리자).
+  const admin = await svc.vmtrackChanges({ snapId: snapB.id, scopeIds: null });
+  assert.equal(admin.length, 1);
+});
+
 test('service(v2.355): ds-change-log / ds-pivot — 슬롯 칩 로그와 DS별 피벗', { skip: !sqliteOk ? 'node:sqlite 미지원 런타임' : false }, async () => {
   const svc = await import('../src/vmtrack/service.js');
   // 앞 테스트(vcsvc)에서 2026-08-24T12 슬롯에 big +50GB 변경이 기록돼 있다.

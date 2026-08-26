@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { fetchJson, postJson, delJson } from '../../api.js';
 import { Loading, ErrorBox, SearchBox } from '../../components/ui.jsx';
 
@@ -102,10 +102,16 @@ function JobForm({ d, form, setForm, onSaved }) {
   const [err, setErr] = useState(null);
   useEffect(() => { fetchJson('/vcenters').then((r) => setVcs(r || [])).catch(() => {}); }, []);
   // vCenter 를 고르면 그 vCenter 의 VM(선택용)·데이터스토어(대상용) 로드.
+  // 세대(genRef) 가드 — 고RTT 에서 이전 vCenter 응답이 늦게 와 지금 고른 vCenter 의 VM/DS 를
+  // 덮어쓰면, 복제 잡이 엉뚱한 VM/데이터스토어를 대상으로 만들어질 수 있다. 늦은 응답은 버린다.
+  const loadGen = useRef(0);
   useEffect(() => {
     if (!form.vcenterId) { setVms([]); setDss([]); return; }
-    fetchJson('/vms', { vcenterId: form.vcenterId, limit: 5000, sortBy: 'name', order: 'asc' }).then((r) => setVms(r.items || [])).catch(() => setVms([]));
-    fetchJson('/datastores', { vcenterId: form.vcenterId }).then((r) => setDss(r.items || [])).catch(() => setDss([]));
+    const gen = ++loadGen.current;
+    fetchJson('/vms', { vcenterId: form.vcenterId, limit: 5000, sortBy: 'name', order: 'asc' })
+      .then((r) => { if (gen === loadGen.current) setVms(r.items || []); }).catch(() => { if (gen === loadGen.current) setVms([]); });
+    fetchJson('/datastores', { vcenterId: form.vcenterId })
+      .then((r) => { if (gen === loadGen.current) setDss(r.items || []); }).catch(() => { if (gen === loadGen.current) setDss([]); });
   }, [form.vcenterId]);
 
   const ql = q.trim().toLowerCase();

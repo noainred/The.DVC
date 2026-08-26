@@ -33,9 +33,12 @@ export async function runIpScanAgentOnce() {
       ranges: a.ranges, ports: a.ports, concurrency: a.concurrency, timeoutMs: a.timeoutMs, reverseDns: a.reverseDns,
       ping: a.ping, // 중앙 배정 설정(v2.359) — 구버전 중앙이면 undefined → 기본 OFF(v2.360)
     });
-    await resilientFetch(`${config.agent.centralUrl}/api/central/ip-scan-result`, {
+    const rRes = await resilientFetch(`${config.agent.centralUrl}/api/central/ip-scan-result`, {
       method: 'POST', headers: headers(), body: JSON.stringify({ agent: config.agent.name, alive, scanned }), timeoutMs: 30_000, retries: 2,
     });
+    // 결과 POST 응답을 검사한다 — 검사하지 않으면 403/거부(토큰 만료·에이전트명 불일치)도
+    // '성공 보고'로 기록돼, 실제로는 중앙에 병합되지 않은 스캔을 정상으로 오인한다.
+    if (!rRes.ok) throw new Error(`result ${rRes.status}`);
     last = { at: Date.now(), assigned: true, scanned, alive: alive.length };
     return last;
   } catch (e) { last = { at: Date.now(), error: e.message }; return last; }

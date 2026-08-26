@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { usePolling } from '../../api.js';
 import { Loading, ErrorBox, ResultCount, SearchBox } from '../../components/ui.jsx';
 import { Card, fmtKwh, fmtWatts, useTool } from './shared.jsx';
+import { csvCell } from '../../util/csv.js'; // 수식 인젝션 가드 포함 공통 셀 이스케이프
 
 
 /** 가로 막대(비중 표시) — recharts 없이 CSS만으로. */
@@ -30,7 +31,7 @@ export function PowerMap({ scope }) {
   const csv = () => {
     const head = ['서버', '모델', '서비스태그', 'vCenter', '지역', '수집원', 'W', '매핑'];
     const rows = (data.servers || []).map((s) => [s.name, s.model, s.serviceTag, s.vcenterId, s.region, s.source, s.watts, s.mapped ? 'O' : 'X']);
-    const body = [head, ...rows].map((r) => r.map((c) => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\r\n');
+    const body = [head, ...rows].map((r) => r.map(csvCell).join(',')).join('\r\n');
     const blob = new Blob(['﻿' + body], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');

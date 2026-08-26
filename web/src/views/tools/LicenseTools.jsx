@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { fetchJson, postJson, delJson } from '../../api.js';
 import { DataTable, Loading, ErrorBox, UsageCell } from '../../components/ui.jsx';
 import { Card, useTool } from './shared.jsx';
+import { csvCell } from '../../util/csv.js'; // 수식 인젝션 가드 포함 공통 셀 이스케이프
 
 
 export function Solutions() {
@@ -152,7 +153,7 @@ export function LicenseExpiry({ scope, isAdmin }) {
   const exportCsv = () => {
     const head = ['family', 'name', 'source', 'where', 'edition', 'productVersion', 'key', 'used', 'total', 'expires', 'daysLeft', 'status'];
     const lines = rows.map((i) => [i.family, i.name, i.source, i.where, i.edition, i.productVersion, i.key, i.used ?? '', i.total ?? '', i.expires || 'perpetual', i.daysLeft ?? '', statusLabel[i.status]]);
-    const csv = [head, ...lines].map((r) => r.map((x) => `"${String(x ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
+    const csv = [head, ...lines].map((r) => r.map(csvCell).join(',')).join('\n');
     const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }));
     const a = document.createElement('a'); a.href = url; a.download = 'license-expiry.csv'; a.click(); URL.revokeObjectURL(url);
   };
