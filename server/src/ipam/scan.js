@@ -113,15 +113,26 @@ export function pingArgs(ip, timeoutMs, platform = process.platform) {
  */
 const PING_MAX = Math.max(1, Math.min(32, Number(process.env.IPAM_PING_CONCURRENCY) || 8));
 let _pingActive = 0;
+let _pingPeak = 0; // 관측된 최대 동시 실행 수(검증/모니터링용) — 상한을 넘지 않음을 테스트로 박제.
 const _pingWaiters = [];
+// grant() 가 active 증가·peak 갱신을 전담한다(즉시 취득/대기 후 취득 두 경로가 동일하게 계수되도록).
+function _pingGrant(res) { _pingActive++; if (_pingActive > _pingPeak) _pingPeak = _pingActive; res(); }
 function _pingAcquire() {
-  if (_pingActive < PING_MAX) { _pingActive++; return Promise.resolve(); }
-  return new Promise((res) => _pingWaiters.push(res));
+  return new Promise((res) => { if (_pingActive < PING_MAX) _pingGrant(res); else _pingWaiters.push(() => _pingGrant(res)); });
 }
 function _pingRelease() {
   _pingActive--;
   const next = _pingWaiters.shift();
-  if (next) { _pingActive++; next(); }
+  if (next) next(); // 다음 대기자에게 슬롯 양도(active 증가는 grant 가)
+}
+
+/**
+ * ping 슬롯 게이트 — 동시 실행을 PING_MAX 로 제한하는 공용 래퍼. pingHost 가 이걸 통해서만
+ * 프로세스를 띄운다(⚠ 우회 금지 — 우회하면 v2.359 폭주 재발). task 는 실제 ping 프라미스.
+ */
+export async function withPingSlot(task) {
+  await _pingAcquire();
+  try { return await task(); } finally { _pingRelease(); }
 }
 
 /**
@@ -130,58 +141,135 @@ function _pingRelease() {
  * 동시 실행은 PING_MAX(기본 8)로 제한된다(v2.360) — 프로세스/FD 폭주 방지.
  */
 export async function pingHost(ip, timeoutMs = 700) {
-  if (!isIpv4(ip)) return false; // execFile(셸 미사용)이지만 인자 오염도 차단
-  await _pingAcquire();
-  try {
-    return await new Promise((resolve) => {
-      let settled = false;
-      const done = (v) => { if (!settled) { settled = true; resolve(v); } };
-      try {
-        const child = execFile('ping', pingArgs(ip, timeoutMs), { timeout: timeoutMs + 2_000, windowsHide: true }, (err) => done(!err));
-        child.on('error', () => done(false)); // spawn 자체 실패(ping 미설치/EMFILE 등)
-      } catch { done(false); }
-    });
-  } finally { _pingRelease(); }
+  if (!isIpv4(ip)) return false; // execFile(셸 미사용)이지만 인자 오염도 차단 (슬롯 취득 전 조기 반환)
+  return withPingSlot(() => new Promise((resolve) => {
+    let settled = false;
+    const done = (v) => { if (!settled) { settled = true; resolve(v); } };
+    try {
+      const child = execFile('ping', pingArgs(ip, timeoutMs), { timeout: timeoutMs + 2_000, windowsHide: true }, (err) => done(!err));
+      child.on('error', () => done(false)); // spawn 자체 실패(ping 미설치/EMFILE 등)
+    } catch { done(false); }
+  }));
 }
 
 /** 테스트용 — 현재 ping 동시성 상한(설정 확인). */
 export function pingConcurrencyLimit() { return PING_MAX; }
+/** 테스트/모니터링용 — 현재 동시 실행 수와 관측된 최대치. */
+export function pingStats() { return { limit: PING_MAX, active: _pingActive, peak: _pingPeak }; }
 
-async function scanOneHost(ip, ports, timeoutMs, reverseDns, ping) {
+/** 한 IP TCP 프로브 — 열린 포트 배열(없으면 []). ping/역DNS 는 2단계에서 일괄 처리. */
+async function tcpPortsOf(ip, ports, timeoutMs) {
   const open = [];
-  // 포트는 순차(호스트당 부하 제한). 첫 포트만 빠르게 죽으면 나머지도 대개 닫힘.
-  for (const p of ports) { if (await tcpProbe(ip, p, timeoutMs)) open.push(p); }
-  // 포트가 전부 닫혀도 ICMP ping 이 응답하면 '사용 중'(v2.359) — 방화벽으로 포트를 다 막은
-  // 서버가 미사용으로 오판되는 갭을 메운다. ping 은 포트 무응답일 때만 1회(스캔 시간 최소화).
-  let icmpOnly = false;
-  if (!open.length) {
-    if (!ping || !(await pingHost(ip, timeoutMs))) return null;
-    icmpOnly = true;
-  }
-  let hostname = '';
-  if (reverseDns) { try { const names = await dnsp.reverse(ip); hostname = names?.[0] || ''; } catch { /* no PTR */ } }
-  return { ip, openPorts: open, services: icmpOnly ? ['ICMP(ping)'] : open.map(portService), hostname };
+  for (const p of ports) { if (await tcpProbe(ip, p, timeoutMs)) open.push(p); } // 순차(호스트당 부하 제한)
+  return open;
 }
 
-/** 대역(여러 spec) 스캔. 진행 콜백 onAlive(host)/onProgress(done,total,alive) 가능. 생존 호스트 배열 반환. */
+// ── fping 배치 ping(v2.363) — IP마다 프로세스를 띄우는 대신 '한 프로세스로 다수 IP' 를
+// 병렬 ping(내부 레이트리밋). 프로세스/FD 폭주가 구조적으로 불가능해 대량 스캔에 안전·고속.
+// 미설치(에어갭 등)면 자동으로 per-IP capped ping 으로 폴백한다. IPAM_FPING=0 으로 강제 비활성.
+let _fpingProbe = null;
+export function fpingAvailable() {
+  if (process.env.IPAM_FPING === '0') return Promise.resolve(false);
+  if (!_fpingProbe) {
+    _fpingProbe = new Promise((res) => {
+      try { const c = execFile('fping', ['-v'], { timeout: 3_000, windowsHide: true }, (err) => res(!err)); c.on('error', () => res(false)); }
+      catch { res(false); }
+    });
+  }
+  return _fpingProbe;
+}
+/** fping 인자 — -a(생존만 출력) -q(호스트별 오류 억제) -r 0(재시도 없음) -t(대상별 타임아웃 ms). */
+export function fpingArgs(ips, timeoutMs) {
+  return ['-a', '-q', '-r', '0', '-t', String(Math.max(50, Math.round(timeoutMs))), ...ips];
+}
+/** 한 청크를 fping — 생존 IP Set. exit 1(일부 down)은 정상이므로 stdout 을 그대로 파싱한다. */
+function fpingChunk(ips, timeoutMs) {
+  return new Promise((resolve) => {
+    const valid = ips.filter(isIpv4);
+    if (!valid.length) return resolve(new Set());
+    try {
+      execFile('fping', fpingArgs(valid, timeoutMs), { timeout: timeoutMs * 2 + 15_000, maxBuffer: 16 * 1024 * 1024, windowsHide: true }, (_err, stdout) => {
+        const set = new Set();
+        String(stdout || '').split(/\r?\n/).forEach((l) => { const ip = l.trim(); if (isIpv4(ip)) set.add(ip); });
+        resolve(set); // _err(exit 1=일부 미응답)는 무시 — 생존 목록은 stdout 이 진실
+      });
+    } catch { resolve(new Set()); }
+  });
+}
+const FPING_CHUNK = 1000; // 한 fping 호출당 IP 수 상한(argv 폭주 방지)
+
+/** 죽은(포트 무응답) IP 들 중 ICMP 응답이 있는 집합. fping 우선, 없으면 per-IP capped ping. */
+async function pingAliveSet(deadIps, timeoutMs, ping) {
+  const set = new Set();
+  if (!ping || !deadIps.length) return set;
+  if (await fpingAvailable()) {
+    for (let i = 0; i < deadIps.length; i += FPING_CHUNK) {
+      const got = await fpingChunk(deadIps.slice(i, i + FPING_CHUNK), timeoutMs);
+      got.forEach((ip) => set.add(ip));
+    }
+  } else {
+    // 폴백: per-IP `ping` — withPingSlot 이 동시 실행을 PING_MAX 로 제한(프로세스 폭주 방지).
+    await Promise.all(deadIps.map((ip) => pingHost(ip, timeoutMs).then((ok) => { if (ok) set.add(ip); })));
+  }
+  return set;
+}
+
+/** 역DNS 일괄(동시성 제한) — 생존 IP 만 대상. */
+async function reverseMany(ips, limit = 16) {
+  const m = new Map();
+  let i = 0;
+  const worker = async () => {
+    while (i < ips.length) {
+      const ip = ips[i++];
+      try { const names = await dnsp.reverse(ip); if (names?.[0]) m.set(ip, names[0]); } catch { /* no PTR */ }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, ips.length || 1) }, worker));
+  return m;
+}
+
+/**
+ * 대역(여러 spec) 스캔 — 2단계(v2.363):
+ *   1) 전 IP TCP 프로브(동시성 제한) → 열린 포트로 생존 판정.
+ *   2) 포트가 전부 닫힌 IP만 ping(fping 배치 우선 / 폴백 capped per-IP) — 방화벽 서버 갭 보강.
+ * 마지막에 생존 IP만 역DNS. onProgress(done,total,alive) 는 1단계(TCP) 기준으로 보고.
+ * 반환·항목 형태는 이전과 동일: { scanned, alive:[{ip,openPorts,services,hostname}] }.
+ */
 export async function scanRanges(specs, { ports = DEFAULT_PORTS, concurrency = 128, timeoutMs = 700, reverseDns = true, ping = true, onAlive, onProgress } = {}) {
   const seen = new Set();
   const ips = [];
   for (const spec of (Array.isArray(specs) ? specs : [specs])) for (const ip of expandRange(spec)) if (!seen.has(ip)) { seen.add(ip); ips.push(ip); }
-  const alive = [];
   const total = ips.length;
+  onProgress?.(0, total, 0);
+
+  // 1단계: TCP 전수.
+  const tcp = new Map(); // ip -> openPorts[]
   let idx = 0;
   let done = 0;
-  onProgress?.(0, total, 0);
   const worker = async () => {
     while (idx < ips.length) {
       const ip = ips[idx++];
-      const r = await scanOneHost(ip, ports, timeoutMs, reverseDns, ping).catch(() => null);
+      const open = await tcpPortsOf(ip, ports, timeoutMs).catch(() => []);
+      if (open.length) tcp.set(ip, open);
       done++;
-      if (r) { alive.push(r); onAlive?.(r); }
-      onProgress?.(done, total, alive.length);
+      onProgress?.(done, total, tcp.size);
     }
   };
   await Promise.all(Array.from({ length: Math.min(concurrency, ips.length || 1) }, worker));
+
+  // 2단계: 포트 무응답 IP만 ping.
+  const dead = ips.filter((ip) => !tcp.has(ip));
+  const pinged = await pingAliveSet(dead, timeoutMs, ping);
+
+  // 생존 IP = TCP 생존 ∪ ping 생존. 역DNS 일괄.
+  const aliveIps = [...tcp.keys(), ...[...pinged]];
+  const hostByIp = reverseDns ? await reverseMany(aliveIps) : new Map();
+  const alive = aliveIps.map((ip) => {
+    const open = tcp.get(ip);
+    const row = { ip, openPorts: open || [], services: open ? open.map(portService) : ['ICMP(ping)'], hostname: hostByIp.get(ip) || '' };
+    onAlive?.(row);
+    return row;
+  });
+  onProgress?.(total, total, alive.length);
   return { scanned: ips.length, alive };
 }
