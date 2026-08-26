@@ -6,6 +6,7 @@
 // (vcdVirt.js 와 동일한 계약). 체크 해제 시 호출부가 켜진 VM 만 넘기므로 표·CSV 의 가상화율도
 // 트리 배지와 정확히 같은 값이 된다.
 import { allocByHost, virtSum } from './vcdVirt.js';
+import { csvCell as esc } from '../util/csv.js'; // 수식 인젝션 가드 포함 공통 셀 이스케이프
 
 const HOST_STATE_KO = { CONNECTED: '정상', MAINTENANCE: '점검', DISCONNECTED: '끊김', NOT_RESPONDING: '무응답' };
 /** 호스트 연결 상태 한글 표기(트리의 StateBadge 와 같은 어휘). 모르는 값은 원문 그대로. */
@@ -109,11 +110,6 @@ export const OVERVIEW_COLUMNS = [
   { key: 'powerW', label: '전력(W)', num: true },
   { key: 'tempC', label: '흡기온도(℃)', num: true },
 ];
-
-const esc = (v) => {
-  const s = v === null || v === undefined ? '' : String(v);
-  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-};
 
 /** CSV 본문(헤더 포함, CRLF). 호출부가 UTF-8 BOM 을 붙여 Excel 한글 깨짐을 막는다. */
 export function overviewCsv(rows, columns = OVERVIEW_COLUMNS) {

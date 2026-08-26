@@ -31,7 +31,10 @@ export function registerVmTrack(api) {
         .map((vc) => ({ id: vc.id, name: vc.name || vc.id }))
         // 콤보 정렬(v2.356, 사용자 요구) — 스냅샷의 등록 순서가 아니라 이름순(숫자 인지).
         .sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { numeric: true, sensitivity: 'base' }));
-      res.json({ ok: true, ...series, vcenterList: vcenters, ...info, poller: vmtrackPollerStatus() });
+      // 폴러 상태의 lastResult 는 전 vCenter 합계(total/added/removed)라 범위 제한 계정에 노출하면
+      // scope 우회다 — 범위 제한 계정에는 running 플래그만 준다(합계는 allowed=null=전체 권한일 때만).
+      const pstat = vmtrackPollerStatus();
+      res.json({ ok: true, ...series, vcenterList: vcenters, ...info, poller: allowed ? { running: pstat.running } : pstat });
     } catch (e) {
       res.status(500).json({ ok: false, reason: e.message });
     }

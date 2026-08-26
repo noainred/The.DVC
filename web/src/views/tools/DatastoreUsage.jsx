@@ -73,7 +73,9 @@ export function DatastoreUsage({ scope }) {
   const [q, setQ] = useState('');
   useEffect(() => { fetchJson('/admin/datacenters').then((r) => setDc({ datacenters: r.datacenters || [], assign: r.assign || {} })).catch(() => {}); }, []);
   if (loading && !data) return <Loading />;
-  if (error) return <ErrorBox message={error} />;
+  // 데이터 보유 중 일시 폴링 오류로 화면 전체를 오류 박스로 갈아치우지 않는다(CLAUDE.md 회귀
+  // 방지, 고RTT 깜빡임) — 데이터가 없을 때만 전체 오류, 있으면 아래 배너로만 알린다.
+  if (error && !data) return <ErrorBox message={error} />;
   const vcName = new Map((vcList || []).map((v) => [v.id, v.name || v.id]));
   const dcName = new Map((dc.datacenters || []).map((x) => [x.id, x.name || x.id]));
   const assign = dc.assign || {};
@@ -100,6 +102,7 @@ export function DatastoreUsage({ scope }) {
 
   return (
     <div>
+      {error && <div className="badge amber" style={{ marginBottom: 10, display: 'inline-block' }}>업데이트 실패(이전 데이터 표시 중): {String(error)}</div>}
       <div className="kpis" style={{ marginBottom: 14 }}>
         <Card label="전체 용량" value={dsFmtGB(totCap)} accent="var(--accent)" />
         <Card label="사용" value={`${dsFmtGB(totUsed)} (${totPct}%)`} accent={dsUsageColor(totPct)} />

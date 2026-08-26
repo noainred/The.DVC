@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { fetchJson, postJson, putJson, getToken } from '../../api.js';
 import { DataTable, Loading, ErrorBox, Modal, SearchBox, VmLink } from '../../components/ui.jsx';
 import { Card, useTool } from './shared.jsx';
+import { csvCell as esc } from '../../util/csv.js'; // 수식 인젝션 가드 포함 공통 셀 이스케이프
 
 
 export function GuestOs({ scope }) {
@@ -119,7 +120,6 @@ export function GuestOsVmsModal({ label, params, onClose }) {
   const vcenters = [...new Set(allItems.map((r) => r.vcenterId).filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b)));
   const items = vcf ? allItems.filter((r) => r.vcenterId === vcf) : allItems;
   const exportCsv = () => {
-    const esc = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
     const head = ['vm', 'vcenter', 'cluster', 'host', 'cpu', 'memory_gb', 'disk_gb', 'ip', 'power'];
     const lines = [head.join(',')];
     for (const r of items) lines.push([r.name, r.vcenterId, r.cluster, r.host, r.cpu, r.memGB, r.diskGB, r.ip, r.powerState === 'POWERED_ON' ? 'On' : 'Off'].map(esc).join(','));

@@ -6,6 +6,7 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson, postJson, putJson, usePolling } from '../api.js';
 import { DataTable, Loading, ErrorBox, StateBadge, ResultCount, Kpi, SearchBox, VmLink } from '../components/ui.jsx';
+import { csvCell } from '../util/csv.js'; // 수식 인젝션 가드 포함 공통 셀 이스케이프
 
 const fmtDate = (ts) => (ts ? new Date(ts).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' }) : '—');
 const fmtDay = (ts) => (ts ? new Date(ts).toLocaleDateString('ko-KR') : '—');
@@ -13,8 +14,7 @@ const tb = (gb) => (gb >= 1024 ? `${(gb / 1024).toFixed(1)} TB` : `${Math.round(
 
 // CSV 내보내기 — BOM 필수(엑셀 한글 깨짐 방지).
 function exportCsv(name, head, rows) {
-  const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  const csv = [head.map(esc).join(','), ...rows.map((r) => r.map(esc).join(','))].join('\n');
+  const csv = [head.map(csvCell).join(','), ...rows.map((r) => r.map(csvCell).join(','))].join('\n');
   const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a'); a.href = url; a.download = `${name}-${new Date().toISOString().slice(0, 10)}.csv`; a.click();

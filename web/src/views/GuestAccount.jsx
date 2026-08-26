@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, usePolling } from '../api.js';
 import { Loading } from '../components/ui.jsx';
 
@@ -13,11 +13,17 @@ export default function GuestAccount() {
   const [res, setRes] = useState(null);
   const [msg, setMsg] = useState(null);
 
+  // vCenter 전환 시 세대(genRef) 가드 — 고RTT 에서 이전 vCenter 응답이 늦게 도착해 지금 고른
+  // vCenter 의 VM 목록을 덮어쓰면, 사용자가 엉뚱한 VM 을 선택해 계정 추가가 잘못된 대상에 나갈 수
+  // 있다(변조 대상 오지정). 세대가 바뀌면 늦은 응답은 버린다.
+  const vmGen = useRef(0);
   useEffect(() => {
     if (!vc) { setVms(null); setSel(new Set()); return; }
-    setVms(null);
-    fetchJson('/vms', { vcenterId: vc, powerState: 'POWERED_ON', limit: 1000 }).then((d) => setVms(d.items || [])).catch(() => setVms([]));
-    setSel(new Set());
+    const gen = ++vmGen.current;
+    setVms(null); setSel(new Set());
+    fetchJson('/vms', { vcenterId: vc, powerState: 'POWERED_ON', limit: 1000 })
+      .then((d) => { if (gen === vmGen.current) setVms(d.items || []); })
+      .catch(() => { if (gen === vmGen.current) setVms([]); });
   }, [vc]);
 
   const toggle = (id) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });

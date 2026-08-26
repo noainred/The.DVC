@@ -2,6 +2,7 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { fetchJson } from '../../api.js';
 import { DataTable, Loading, ErrorBox, StateBadge, Modal, SearchBox } from '../../components/ui.jsx';
+import { csvCell as esc } from '../../util/csv.js'; // 수식 인젝션 가드 포함 공통 셀 이스케이프
 import EscClose from '../../components/EscClose.jsx';
 // v2.292: IdracDetailModal 이 IdracAdmin.jsx(1,309줄 뷰)에서 views/idrac/ 로 분리됨 — 모달 하나
 // 때문에 뷰 전체가 결합되고 Settings·SpecialTools 청크가 IdracAdmin 을 공유 의존하던 문제 해소.
@@ -329,7 +330,6 @@ function ServerListBody({ corpName, model, servers, onRow }) {
     .filter((s) => !ql || [s.name, s.serviceTag, s.host, s.model].some((x) => String(x || '').toLowerCase().includes(ql)))
     .sort((a, b) => (allMode ? String(a.model || '').localeCompare(String(b.model || '')) : 0) || String(a.name || a.id).localeCompare(String(b.name || b.id), undefined, { numeric: true }));
   const exportCsv = () => {
-    const esc = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
     const head = ['name', 'model', 'type', 'host', 'service_tag', 'vcenter', 'status'];
     const lines = [head.join(',')];
     for (const s of rows) lines.push([s.name || s.id, s.model || model || '', s.type === 'ome' ? 'OME' : 'iDRAC', String(s.host || '').replace(/^https?:\/\//, ''), s.serviceTag || '', s._vc || '', s.enabled === false ? '중지' : '수집'].map(esc).join(','));
@@ -414,7 +414,6 @@ function PartsInventory({ vc, onServer }) {
     .filter((b) => (!cat || b.cat === cat) && (!needle || `${b.label} ${b.detail} ${b.catName}`.toLowerCase().includes(needle)))
     .sort((a, b) => (sortKey === 'label' ? a.label.localeCompare(b.label) : (b[sortKey] || 0) - (a[sortKey] || 0)));
   const exportCsv = () => {
-    const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
     const csv = ['분류,파트,상세,수량,서버수', ...rows.map((b) => [b.catName, b.label, b.detail, b.count, b.serverCount].map(esc).join(','))].join('\n');
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv' }));

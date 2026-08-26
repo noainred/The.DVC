@@ -38,7 +38,9 @@ function Sparkline({ samples, w = 110, h = 26 }) {
 /** 포탈 DB — 포탈이 사용하는 모든 데이터 파일(SQLite·JSON·ndjson)의 경로·용도·크기·증가 추이. */
 export function PortalDb() {
   const { data, error } = usePolling('/admin/portal-db', {}, 30_000);
-  if (error) return <ErrorBox message={error} />;
+  // 데이터 보유 중 일시 폴링 오류 1회로 화면 전체를 오류 박스로 갈아치우지 않는다(CLAUDE.md
+  // 회귀 방지) — 데이터가 없을 때만 전체 오류, 있으면 아래 배너로만 알린다.
+  if (error && !data) return <ErrorBox message={error} />;
   if (!data) return <Loading />;
   const files = data.files || [];
   const existing = files.filter((f) => f.exists);
@@ -59,6 +61,7 @@ export function PortalDb() {
   ];
   return (
     <>
+      {error && <div className="badge amber" style={{ marginBottom: 10, display: 'inline-block' }}>업데이트 실패(이전 데이터 표시 중): {String(error)}</div>}
       <div className="flex gap wrap" style={{ marginBottom: 14 }}>
         <Card label="데이터 파일" value={existing.length} meta={`정의 ${files.length}개`} />
         <Card label="SQLite DB" value={sqliteN} accent="var(--blue,#2563eb)" />

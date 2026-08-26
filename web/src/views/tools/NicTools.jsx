@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
+import { csvCell } from '../../util/csv.js'; // 수식 인젝션 가드 포함 공통 셀 이스케이프
 
 
 /**
@@ -35,7 +36,7 @@ export function NicSpeed() {
   const exportCsv = () => {
     const head = ['server', 'serviceTag', 'model', 'datacenter', 'type', 'maxSpeed', 'allSpeeds', 'nicPorts', 'nicModels', 'vcMaxSpeed', 'vcSpeeds', 'vcPorts'];
     const rows = servers.map((s) => [s.name, s.serviceTag, s.model, s.datacenter, typeLabel(s.type), s.maxSpeed, (s.speeds || []).join(' '), s.nicPorts, (s.nicModels || []).join(' | '), s.vcMaxSpeed || '', (s.vcSpeeds || []).join(' '), s.vcPorts || 0]);
-    const csv = [head, ...rows].map((r) => r.map((x) => `"${String(x ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
+    const csv = [head, ...rows].map((r) => r.map(csvCell).join(',')).join('\n');
     const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }));
     const a = document.createElement('a'); a.href = url; a.download = `nic-speed${dc ? `-${dc}` : ''}${type ? `-${type}` : ''}.csv`; a.click(); URL.revokeObjectURL(url);
   };
@@ -157,7 +158,7 @@ export function NicModels() {
       for (const a of (s.adapters || [])) lines.push([s.name, s.serviceTag, s.model, s.datacenter, typeLabel(s.type), 'iDRAC', a.model, a.name, (a.speeds || []).join(' '), a.ports]);
       for (const a of (s.vcAdapters || [])) lines.push([s.name, s.serviceTag, s.model, s.datacenter, typeLabel(s.type), 'vCenter', a.model, '', (a.speeds || []).join(' '), a.ports]);
     }
-    const csv = [head, ...lines].map((r) => r.map((x) => `"${String(x ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
+    const csv = [head, ...lines].map((r) => r.map(csvCell).join(',')).join('\n');
     const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }));
     const a = document.createElement('a'); a.href = url; a.download = `nic-models${dc ? `-${dc}` : ''}${type ? `-${type}` : ''}.csv`; a.click(); URL.revokeObjectURL(url);
   };

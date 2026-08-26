@@ -643,7 +643,11 @@ centralRouter.post('/bmstor-result', (req, res) => {
   if (reqAgentDenied(req, bmstorAgentOfReq(String(b.reqId)))) return res.status(403).json({ ok: false, reason: '이 reqId 는 요청 에이전트의 잡이 아닙니다.' });
   const ackd = ackBmstorJob(String(b.reqId));
   if (!ackd) return res.json({ ok: true, stale: true }); // TTL 정리/중복 회신 — 무해하게 무시
-  applyBmstorResults(ackd.agent, b.results);
+  // 결과는 **그 잡에 실제로 할당된 서버 id 로만** 반영한다 — 인증된 엣지가 b.results 에 남의
+  // 서버 id 를 끼워 넣어 그 서버의 latest 용량 수치를 위조하는 것을 차단(잡 소유권 = 서버 소유권).
+  const owned = new Set((ackd.serverIds || []).map(String));
+  const results = (Array.isArray(b.results) ? b.results : []).filter((r) => r && owned.has(String(r.id)));
+  applyBmstorResults(ackd.agent, results);
   res.json({ ok: true });
 });
 

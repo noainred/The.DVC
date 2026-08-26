@@ -140,7 +140,7 @@ function initSqlite() {
           used_gb=excluded.used_gb, free_gb=excluded.free_gb`),
       delDsRoster: db.prepare('DELETE FROM ds_roster WHERE vcenter_id=? AND ds_id=?'),
       delDsRosterVc: db.prepare('DELETE FROM ds_roster WHERE vcenter_id=?'),
-      dsChangesOf: db.prepare(`SELECT kind, ds_id, name, type, cap_gb, used_gb, free_gb, usage_pct, prev_used_gb, delta_gb
+      dsChangesOf: db.prepare(`SELECT kind, ds_id, name, type, cap_gb, used_gb, free_gb, usage_pct, prev_used_gb, delta_gb, vcenter_id
         FROM ds_changes WHERE snap_id=? ORDER BY ABS(COALESCE(delta_gb,0)) DESC, name`),
       dsChangesOfSlot: db.prepare(`SELECT d.kind, d.ds_id, d.name, d.type, d.cap_gb, d.used_gb, d.free_gb,
           d.usage_pct, d.prev_used_gb, d.delta_gb, d.vcenter_id
@@ -184,7 +184,9 @@ function initSqlite() {
         FROM snaps WHERE vcenter_id=? AND ts>=? ORDER BY ts`),
       seriesAllVc: db.prepare(`SELECT id, slot, ts, vcenter_id, total, on_count, added, removed, powered_on, powered_off, ds_count, ds_cap_gb, ds_used_gb, baseline
         FROM snaps WHERE vcenter_id<>'' AND ts>=? ORDER BY ts`),
-      changesOf: db.prepare(`SELECT kind, vm_id, name, cluster, host, datastore, power_state, cpu, mem_mb, storage_gb, guest_os
+      // vcenter_id 를 반드시 SELECT 한다 — service 의 scope 필터(!r.vcenter_id||scopeIds.has)가
+      // 이 값 없이는 undefined 로 흘러 '전부 통과'가 돼 snapId 로 범위 밖 vCenter 열람이 가능했다.
+      changesOf: db.prepare(`SELECT kind, vm_id, name, cluster, host, datastore, power_state, cpu, mem_mb, storage_gb, guest_os, vcenter_id
         FROM changes WHERE snap_id=? ORDER BY kind, name`),
       changesOfSlot: db.prepare(`SELECT c.kind, c.vm_id, c.name, c.cluster, c.host, c.datastore, c.power_state,
           c.cpu, c.mem_mb, c.storage_gb, c.guest_os, c.vcenter_id

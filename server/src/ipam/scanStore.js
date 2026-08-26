@@ -180,7 +180,12 @@ export function mergeScanResults(alive, ts = Date.now(), agent = LOCAL) {
 // up 전이: 스캔에서 새로 보이거나, down 이후 다시 보일 때 기록.
 // down 전이: sweepReleases()가 일정 시간 미응답 IP를 '해제'로 마킹할 때 기록.
 let history = readJson(HIST, {}) || {};
+// 두 관심사를 분리한다:
+//  histDirty      = 대장(ledger)에 영향 있는 이력 변화(신규 IP / up·down 전이) → scanRev 증가 유발.
+//  histPersistDirty = 디스크 기록만 필요한 변화(안정 IP 의 lastSeen 전진) → scanRev 는 올리지 않는다.
+// 겸용(과거)이면 lastSeen 전진마다 scanRev 가 올라 매 스캔 전 대장이 재계산된다(불필요한 부하 회귀).
 let histDirty = false;
+let histPersistDirty = false;
 registerStore(HIST, () => history);
 
 function pushEvent(entry, ev) {
@@ -198,7 +203,11 @@ function recordSeen(h, ts, agent) {
     return;
   }
   // 최신 관측만 반영 — stale(오래된) 보고가 lastSeen을 뒤로 돌려 IP가 조기 down 처리되지 않게 한다.
-  if (ts > (e.lastSeen || 0)) { e.lastSeen = ts; e.agent = agent; }
+  // lastSeen 전진은 **디스크 기록만** 필요(histPersistDirty) — 안 켜면 안정(status='up') IP 의
+  // 갱신된 lastSeen 이 디스크에 안 써져(persistHist 는 dirty 일 때만 기록), 재시작 후 오래된
+  // lastSeen 으로 sweep 이 그 IP 를 가짜 down 처리한다. 단 내용 변화가 아니므로 histDirty(=scanRev)
+  // 는 올리지 않는다(안 그러면 매 스캔 대장 재계산 — CLAUDE.md 불필요 재계산 방지 위반).
+  if (ts > (e.lastSeen || 0)) { e.lastSeen = ts; e.agent = agent; histPersistDirty = true; }
   if (e.status !== 'up') {
     e.status = 'up';
     pushEvent(e, { ts, type: 'up', hostname: h.hostname || '', ports: h.openPorts || [], agent });
@@ -237,8 +246,9 @@ export function sweepReleases(idleMs, opts = {}) {
 }
 
 function persistHist() {
-  if (!histDirty) return;
+  if (!histDirty && !histPersistDirty) return; // ledger 변화 또는 lastSeen 전진 중 하나라도 있으면 기록
   histDirty = false;
+  histPersistDirty = false;
   scheduleWrite(HIST); // 디바운스 원자 기록
 }
 

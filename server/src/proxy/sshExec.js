@@ -23,14 +23,27 @@ function connect({ host, port = 22, username, password, privateKey, readyTimeout
   });
 }
 
-function exec(conn, command) {
+// exec 는 **반드시 타임아웃 + stream error 처리**가 있어야 한다. 멈춘 mount 위의 df 처럼
+// 원격 명령이 hang 하면 'close' 이벤트가 오지 않아 이 Promise 가 영원히 미결로 남고,
+// 이를 await 하는 폴러(bmstor 수집 등)가 running=true 로 영구 고착된다(실측 장애). Promise.race
+// 대신 인라인 타이머로 stream 을 닫고 reject 해, 매달린 채널도 정리한다.
+function exec(conn, command, timeoutMs = Number(process.env.SSH_EXEC_TIMEOUT_MS) || 60000) {
   return new Promise((resolve, reject) => {
     conn.exec(command, (err, stream) => {
       if (err) return reject(err);
-      let stdout = '', stderr = '';
+      let stdout = '', stderr = '', done = false;
+      const finish = (fn, arg) => { if (done) return; done = true; clearTimeout(timer); fn(arg); };
+      const timer = setTimeout(() => {
+        try { stream.close?.(); } catch { /* */ }
+        try { stream.destroy?.(); } catch { /* */ }
+        finish(reject, new Error(`SSH exec 타임아웃(${Math.round(timeoutMs / 1000)}s): ${command}`));
+      }, Math.max(1000, timeoutMs));
+      timer.unref?.();
       stream.on('data', (d) => { stdout += d.toString(); });
       stream.stderr.on('data', (d) => { stderr += d.toString(); });
-      stream.on('close', (code) => resolve({ command, code, stdout, stderr }));
+      stream.on('error', (e) => finish(reject, e));          // 채널/연결 오류로도 반드시 결말 짓는다
+      stream.stderr.on('error', () => { /* stderr 스트림 오류는 비치명 — 무시 */ });
+      stream.on('close', (code) => finish(resolve, { command, code, stdout, stderr }));
     });
   });
 }
