@@ -358,3 +358,36 @@ test('service(v2.355): ds-change-log / ds-pivot — 슬롯 칩 로그와 DS별 �
   const scoped = await svc.vmtrackDsPivot({ days: 30, vcenterId: 'vcsvc', scopeIds: new Set(['other']) });
   assert.equal(scoped.total, 0);
 });
+
+// 이 테스트는 dropRoster 로 다른 vc 로스터를 지울 수 있어 **파일 맨 끝**에 둔다(뒤 테스트 오염 방지).
+test('정합(v2.366): 일시 unreachable vCenter 의 로스터는 보존(복구 시 +N 오탐 방지)', { skip: !sqliteOk ? 'node:sqlite 미지원 런타임' : false }, async () => {
+  const svc = await import('../src/vmtrack/service.js');
+  // 1) vcU 로스터 확립(연결·VM 1대).
+  await svc.takeVmSnapshot({
+    vcenters: [{ id: 'vcU', status: 'connected' }],
+    vms: [{ vcenterId: 'vcU', vmId: 'vcU:1', name: 'x', powerState: 'POWERED_ON', cpu: 1, memMB: 1024, storageGB: 10 }],
+    datastores: [],
+  }, { trigger: 'test', now: new Date('2026-08-27T00:30:00') });
+  assert.equal((await db.loadRoster('vcU')).size, 1, 'vcU 로스터 확립');
+
+  // 2) 이번 스냅샷: 기존 로스터의 vc 는 전부 unreachable+VM0(처리에서 제외)로 두고, 새 healthy vc
+  //    하나에만 VM 을 준다. 기존 vc 들을 모두 snap.vcenters 에 등재(status 무관)해 등록해제로 오인
+  //    되지 않게 한다 — vcU 로스터가 삭제되면 안 된다.
+  const existing = await db.rosterVcenters();
+  const vcenters = existing.map((id) => ({ id, status: 'unreachable' }))
+    .concat([{ id: 'vcHealthy366', status: 'connected' }]);
+  await svc.takeVmSnapshot({
+    vcenters,
+    vms: [{ vcenterId: 'vcHealthy366', vmId: 'vcHealthy366:1', name: 'h', powerState: 'POWERED_ON', cpu: 1, memMB: 1024, storageGB: 10 }],
+    datastores: [],
+  }, { trigger: 'test', now: new Date('2026-08-27T12:30:00') });
+  assert.equal((await db.loadRoster('vcU')).size, 1, '일시 unreachable vc 의 로스터는 삭제되지 않는다');
+
+  // 3) 등록 해제(스냅샷에서 아예 빠진) vc 는 여전히 정리된다: vcU 를 뺀 목록으로 스냅샷.
+  await svc.takeVmSnapshot({
+    vcenters: [{ id: 'vcHealthy366', status: 'connected' }],
+    vms: [{ vcenterId: 'vcHealthy366', vmId: 'vcHealthy366:1', name: 'h', powerState: 'POWERED_ON', cpu: 1, memMB: 1024, storageGB: 10 }],
+    datastores: [],
+  }, { trigger: 'test', now: new Date('2026-08-28T00:30:00') });
+  assert.equal((await db.loadRoster('vcU')).size, 0, '스냅샷에서 사라진 vc 는 로스터 정리');
+});
