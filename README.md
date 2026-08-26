@@ -24,6 +24,9 @@ Unity·XtremIO·VMAX/PowerMax·VPLEX/Metro Node, v2.302+) · VM 복제(백업식
 > 📖 **사용자 수준별 가이드(화면 캡처 포함)** —
 > [처음 사용자](docs/GUIDE-BEGINNER.md) · [중급 사용자(운영 실무)](docs/GUIDE-INTERMEDIATE.md) ·
 > [관리자(설치·구성·보안)](docs/GUIDE-ADMIN.md)
+>
+> 🗂️ **전체 문서 목차: [docs/INDEX.md](docs/INDEX.md)** — 저장소의 모든 문서(가이드·설치·아키텍처·
+> 보안 감사·작업 기록·서브 프로젝트)를 파일명 + 한 줄 용도로 정리.
 
 ---
 
