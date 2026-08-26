@@ -1,6 +1,14 @@
 {
   "notes": [
+
     {
+      "version": "2.367.0",
+      "date": "2026-08-26",
+      "title": "IP관리 — 저장된 대역 목록 줄바꿈(가로 스크롤바 제거)",
+      "notes": [
+        "IP관리 → 대역·스캔의 '저장된 대역' 표에서 vCenter 에 대역이 많으면 한 줄로 뻗어 가로 스크롤바가 생기던 것을, 셀 안에서 여러 줄로 줄바꿈되도록 수정했습니다. 전역 tbody td { white-space:nowrap } 을 대역 셀에서만 white-space:normal·word-break:break-word 로 override 했고, 다른 열(날짜·숫자·버튼) 정렬은 그대로 유지합니다."
+      ]
+    },    {
       "version": "2.366.0",
       "date": "2026-08-26",
       "title": "VM 수량 추이 — 일시 unreachable vCenter 로스터 보존(복구 시 +N 오탐 방지)",

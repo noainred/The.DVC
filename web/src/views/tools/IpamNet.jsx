@@ -86,7 +86,7 @@ export function IpamRanges() {
               {list.map((e) => (
                 <tr key={e.vcenterId}>
                   <td><b>{e.vcenterName}</b></td>
-                  <td className="muted" style={{ fontFamily: 'monospace', fontSize: 12 }}>{(e.ranges || []).join(', ')}</td>
+                  <td className="muted" style={{ fontFamily: 'monospace', fontSize: 12, whiteSpace: 'normal', wordBreak: 'break-word' }}>{(e.ranges || []).join(', ')}</td>
                   <td className="right">{(e.ipCount || 0).toLocaleString()}</td>
                   <td>{e.enabled ? <span className="badge green">포함</span> : <span className="badge gray">제외</span>}</td>
                   <td className="muted">{fmtDt(e.updatedAt)}</td>
