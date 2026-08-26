@@ -11,6 +11,7 @@ import { getMetricsDb } from './db.js';
 import { loadMetricsSettings } from './settings.js';
 import { getGuestGpuHost } from '../gpu/store.js';
 import { updateVmStats } from '../reports/vmStats.js';
+import { memSampleRows, maybeLogMem } from '../system/memtrack.js';
 
 let timer = null;
 let lastRun = null;
@@ -65,6 +66,10 @@ async function sampleOnceInner() {
   }
   for (const [k, arr] of gpuByCluster) rows.push({ metric: 'gpu_cluster', k, v: round1(avg(arr)) });
   for (const [k, arr] of gpuByVc) rows.push({ metric: 'gpu_vc', k, v: round1(avg(arr)) });
+
+  // 포탈 자신의 프로세스 메모리(누수 추적) — 인벤토리 유무와 무관하게 항상 샘플하고,
+  // 시간당 1줄 상태 로그(링 버퍼·journal)도 여기서 남긴다. 실패가 본 샘플링을 막지 않게 격리.
+  try { rows.push(...memSampleRows()); maybeLogMem(ts); } catch { /* */ }
 
   if (rows.length) { try { db.insertMany(rows, ts); } catch (e) { console.warn('[metrics] insert 실패:', e.message); } }
 

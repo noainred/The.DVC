@@ -9,6 +9,8 @@ import { loadVcenterConfig } from '../../config.js';
 import { probeRelayPath } from '../../vcenter/relayProbe.js';
 import { portalDbReport } from '../../insights/portalDb.js';
 import { getCodexCheckReport, renderCodexCheckMarkdown, writeCodexCheckReport } from '../../security/codexCheck.js';
+import { getMetricsDb } from '../../metrics/db.js';
+import { memtrackReport } from '../../system/memtrack.js';
 import { adminOnly } from './shared.js';
 
 export function registerStatusTools(adminRouter) {
@@ -79,6 +81,13 @@ adminRouter.get('/vcenter/relay-test', adminOnly, async (req, res) => {
 
 // 포탈 DB 인벤토리 — 사용 중 모든 데이터 파일의 경로·파일명·용도·크기·증가 추이.
 adminRouter.get('/portal-db', adminOnly, (_req, res) => res.json(portalDbReport()));
+
+// 포탈 프로세스 메모리 추적(누수 관찰) — metrics DB 의 mem_* 시계열 + 현재값 + 기동 이후
+// 추세 판정. ?window=6h|24h|7d|30d. 서버 전역 자기진단 데이터라 vCenter scope 비대상(admin 전용).
+adminRouter.get('/memtrack', adminOnly, async (req, res) => {
+  try { res.json(memtrackReport(await getMetricsDb(), String(req.query.window || '24h'))); }
+  catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
 
 adminRouter.get('/status', adminOnly, (_req, res) => {
   const snap = store.get();
