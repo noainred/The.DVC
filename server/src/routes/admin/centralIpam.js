@@ -6,7 +6,9 @@ import { listTargets } from '../../agent/deployRegistry.js';
 import { logAudit } from '../../audit.js';
 import { loadScanSettings, saveScanSettings, scanResultList, scanInfo, listScanAgents, getAgentReports, getScanRuns, LOCAL } from '../../ipam/scanStore.js';
 import { startScan, scanStatus, rescheduleScanPoller } from '../../ipam/scanPoller.js';
-import { saveVcRanges, removeVcRanges } from '../../ipam/rangeStore.js';
+import { saveVcRanges, removeVcRanges, listVcRanges } from '../../ipam/rangeStore.js';
+import { sampleCsv as vcRangesSampleCsv, parseVcRangesCsv, analyzeVcRangesImport } from '../../ipam/vcRangesCsv.js';
+import { loadVcenterConfig } from '../../config.js';
 import { listAssignments as listIdracAssignments, getResults as getAgentResults } from '../../central/assignments.js';
 import { centralTokenInfo, generateCentralToken, setCentralToken } from '../../central/token.js';
 import { listAgentTokens, issueAgentToken, revokeAgentToken } from '../../central/agentTokens.js';
@@ -116,5 +118,50 @@ adminRouter.delete('/ipam/vc-ranges/:vcenterId', adminOnly, (req, res) => {
 adminRouter.post('/ipam/vc-ranges/scan', adminOnly, (_req, res) => {
   const r = startScan({ manual: true });
   res.json({ ...r, status: scanStatus() });
+});
+
+/* ── 스캔 대역 CSV 일괄 관리 — iDRAC 스캔 대역 CSV(v2.339)와 동일 골격·공용 모달 계약.
+ * 가져오기는 dryRun(vCenter 해석·대역 문법(rangeSize)·중복 검증) → 커밋 2단계이고,
+ * 기존 vCenter 와 겹치는 행은 body.overwrite=true 명시 시에만 교체한다(대역 전체 교체 —
+ * saveVcRanges 계약). 자격증명이 없는 데이터라 secrets 경로는 없다. */
+adminRouter.get('/ipam/vc-ranges/sample.csv', adminOnly, (_req, res) => {
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="ipam-vc-ranges-sample.csv"');
+  res.send(vcRangesSampleCsv());
+});
+
+adminRouter.post('/ipam/vc-ranges/import', adminOnly, (req, res) => {
+  const { rows, error } = parseVcRangesCsv(String(req.body?.csv || ''));
+  if (error) return res.status(400).json({ ok: false, reason: error });
+  if (!rows.length) return res.status(400).json({ ok: false, reason: '가져올 데이터 행이 없습니다.' });
+
+  // vCenter 이름/ID → ID(대소문자 무시). 못 찾으면 null → 오류 행(오타로 유령 vCenter 생성 방지).
+  let vcs = [];
+  try { vcs = loadVcenterConfig().vcenters || []; } catch { /* 목록 실패 시 resolve 전부 null → 전 행 오류 */ }
+  const resolveVc = (v) => {
+    const s = String(v || '').trim();
+    if (!s) return null;
+    if (vcs.some((x) => x.id === s)) return s;
+    const byName = vcs.find((x) => String(x.name || '').toLowerCase() === s.toLowerCase());
+    return byName ? byName.id : null;
+  };
+  const existing = new Set(listVcRanges().map((e) => e.vcenterId));
+  const { report, summary } = analyzeVcRangesImport(rows, { resolveVc, hasExisting: (id) => existing.has(id) });
+  if (req.body?.dryRun) return res.json({ ok: true, dryRun: true, report, summary, total: rows.length });
+
+  const allowOverwrite = req.body?.overwrite === true;
+  let added = 0, overwritten = 0; const failed = []; const skipped = [];
+  const verdictByLine = new Map(report.map((r) => [r.line, r]));
+  for (const row of rows) {
+    const verdict = verdictByLine.get(row._line);
+    if (verdict?.action === 'error') { failed.push({ line: verdict.line, vcenter: row.vcenter, reason: verdict.reason }); continue; }
+    if (verdict.action === 'overwrite' && !allowOverwrite) { skipped.push({ line: row._line, vcenter: row.vcenter, reason: '기존 항목 — 덮어쓰기 미허용(overwrite 확인 필요)' }); continue; }
+    const r = saveVcRanges(verdict.vcId, { ranges: row.ranges, enabled: row.enabled });
+    if (r.ok) { if (verdict.action === 'overwrite') overwritten++; else added++; }
+    else failed.push({ line: row._line, vcenter: row.vcenter, reason: r.reason });
+  }
+  if (added || overwritten) { try { rescheduleScanPoller(); } catch { /* */ } }
+  logAudit({ user: req.user?.username, action: 'IPAM 스캔 대역 CSV 가져오기', detail: `추가 ${added}·덮어쓰기 ${overwritten}·건너뜀 ${skipped.length}·실패 ${failed.length}`, ip: req.ip || '' });
+  res.json({ ok: true, added, overwritten, skipped, failed, total: rows.length });
 });
 }

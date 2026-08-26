@@ -8,7 +8,9 @@ import { getOsResults } from '../../inventory/osStore.js';
 import { listAudit, logAudit } from '../../audit.js';
 import { alertStatus, saveAlertConfig, testAlert, getAnomalySettings, saveAnomalySettings } from '../../alerts.js';
 import { createJob as createProvisionJob } from '../../provision/jobs.js';
-import { updateSaved, removeSaved } from '../../provision/saved.js';
+import { updateSaved, removeSaved, getSaved } from '../../provision/saved.js';
+import { store } from '../../store.js';
+import { inUserWriteScope } from '../../auth/scope.js';
 import { ssrfBlockReasonResolved } from '../../collector/registry.js';
 import { dailyReportStatus, saveDailyReportSettings, runDailyReportNow } from '../../reports/dailyReport.js';
 import { refreshCerts } from '../../security/certMonitor.js';
@@ -150,15 +152,27 @@ adminRouter.get('/os-scan/results.csv', adminOnly, (req, res) => {
 
 // --- VM 프로비저닝: 대량 생성 작업 시작 (관리자) ---
 adminRouter.post('/provision/jobs', adminOnly, (req, res) => {
+  // VM 생성은 vCenter 상태변경 — 쓰기 범위(writeVcenters, v2.369) 강제. 미설정이면 조회 범위와 동일.
+  if (!inUserWriteScope(req.user, store.get(), String(req.body?.vcenterId || ''))) {
+    return res.status(403).json({ ok: false, reason: '조회 전용 범위 — 이 vCenter 는 수정 권한이 없습니다.' });
+  }
   const result = createProvisionJob(req.body || {}, { user: req.user });
   res.status(result.ok ? 201 : 400).json(result);
 });
-// 저장된 작업 메모/태그 수정·삭제 (관리자)
+// 저장된 작업 메모/태그 수정·삭제 (관리자) — 대상 작업이 귀속된 vCenter 의 쓰기 범위 강제.
 adminRouter.put('/provision/saved/:id', adminOnly, (req, res) => {
+  const item = getSaved(req.params.id);
+  if (item && !inUserWriteScope(req.user, store.get(), item.vcenterId || '')) {
+    return res.status(403).json({ ok: false, reason: '조회 전용 범위 — 이 vCenter 는 수정 권한이 없습니다.' });
+  }
   const r = updateSaved(req.params.id, req.body || {});
   res.status(r.ok ? 200 : 404).json(r);
 });
 adminRouter.delete('/provision/saved/:id', adminOnly, (req, res) => {
+  const item = getSaved(req.params.id);
+  if (item && !inUserWriteScope(req.user, store.get(), item.vcenterId || '')) {
+    return res.status(403).json({ ok: false, reason: '조회 전용 범위 — 이 vCenter 는 수정 권한이 없습니다.' });
+  }
   const r = removeSaved(req.params.id);
   res.status(r.ok ? 200 : 404).json(r);
 });

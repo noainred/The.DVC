@@ -1,6 +1,6 @@
 // IPAM 조회/쓰기 + VM 전체 export — api.js(구 2,445줄) 분할(v2.283.0). 본문은 원본 그대로, 등록 순서는 api.js 호출 순서가 보존한다.
 import { requirePerm } from '../../auth/auth.js';
-import { scopedVcenterIds, inUserScope } from '../../auth/scope.js';
+import { scopedVcenterIds, writeScopedVcenterIds, inUserScope } from '../../auth/scope.js';
 import { guardCell } from '../../util/csv.js';
 import { store } from '../../store.js';
 import { loadVcenterConfig } from '../../config.js';
@@ -9,6 +9,7 @@ import { buildIpamRows, buildSubnetSheets, listSubnets, ipVcenterOwners } from '
 import { buildIpamInsights } from '../../ipam/insights.js';
 import { buildNetmap } from '../../ipam/netmap.js';
 import { listVcRanges } from '../../ipam/rangeStore.js';
+import { vcRangesToCsv } from '../../ipam/vcRangesCsv.js';
 import { rangeSize } from '../../ipam/scan.js';
 import { getAnnotation, setAnnotation } from '../../ipam/annotations.js';
 import { getOverride, setOverride, clearOverride, setOverrideBatch, overridesSummary, STATUSES, DEVICE_TYPES } from '../../ipam/overrides.js';
@@ -45,6 +46,16 @@ const ipInWriteScope = (allowed, owners, ip, claimed) => {
   if (own && own.size) return [...own].some((v) => allowed.has(v));
   return claimed ? allowed.has(claimed) : false;
 };
+/**
+ * 쓰기 라우트 전용 2차 검사(v2.369) — 조회 범위(기존 404 은닉 검사) 통과 후, 쓰기 범위
+ * (writeVcenters ∩ 조회)로 다시 판정한다. 조회는 되지만 수정이 막힌 vCenter 는 존재가 이미
+ * 보이므로 404 가 아니라 403. writeVcenters 미설정이면 쓰기=조회 범위라 이 검사는 무변화.
+ */
+const writeScopeDenied = (req, snap, owners, ip, claimed) => {
+  const w = writeScopedVcenterIds(req.user, snap);
+  return !!w && !ipInWriteScope(w, owners, ip, claimed);
+};
+const WRITE_DENIED_MSG = '조회 전용 범위 — 이 vCenter 는 수정 권한이 없습니다.';
 
 export function registerIpamExport(api) {
 
@@ -119,6 +130,19 @@ api.get('/tools/ipam/vc-ranges', (req, res) => {
   res.json({ ranges: list, vcenters: (snap.vcenters || []).filter((v) => !allowed || allowed.has(v.id)).map((v) => ({ id: v.id, name: v.name })) });
 });
 
+// 스캔 대역 목록 CSV 내보내기 — JSON 라우트(/tools/ipam/vc-ranges)와 같은 scope 교집합.
+// vCenter 는 표시명으로 내보낸다(가져오기가 이름/ID 둘 다 해석). 재가져오기 가능한 형식.
+api.get('/tools/ipam/vc-ranges.csv', (req, res) => {
+  const snap = store.get();
+  const allowed = scopedVcenterIds(req.user, snap);
+  const vcName = {};
+  for (const vc of snap.vcenters || []) vcName[vc.id] = vc.name;
+  const list = listVcRanges().filter((e) => !allowed || allowed.has(e.vcenterId));
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="ipam-vc-ranges-${new Date().toISOString().slice(0, 10)}.csv"`);
+  res.send(vcRangesToCsv(list, (id) => vcName[id] || id));
+});
+
 // 네트워크 맵 — 대역(/24) 선택 시 OS별·시간대별 사용/미사용 격자.
 api.get('/tools/ipam/netmap', (req, res) => {
   const snap = store.get();
@@ -169,9 +193,12 @@ api.put('/tools/ipam/annotation', requirePerm('tools'), (req, res) => {
   const { ip, memo, tags } = req.body || {};
   const snap = store.get();
   const allowed = scopedVcenterIds(req.user, snap);
-  if (allowed && !ipInWriteScope(allowed, ipVcenterOwners(snap), ip, getOverride(ip)?.claimedVcenterId || '')) {
+  const owners = ipVcenterOwners(snap);
+  const claimed = getOverride(ip)?.claimedVcenterId || '';
+  if (allowed && !ipInWriteScope(allowed, owners, ip, claimed)) {
     return res.status(404).json({ ok: false, reason: '범위 밖 IP 입니다.' });
   }
+  if (writeScopeDenied(req, snap, owners, ip, claimed)) return res.status(403).json({ ok: false, reason: WRITE_DENIED_MSG });
   const r = setAnnotation(ip, { memo, tags }, req.user);
   res.status(r.ok ? 200 : 400).json(r);
 });
@@ -219,6 +246,11 @@ api.put('/tools/ipam/ip/:ip', requirePerm('tools'), (req, res) => {
   if (allowed && !ipInWriteScope(allowed, owners, req.params.ip, claimed)) {
     return res.status(404).json({ ok: false, reason: '범위 밖 IP 입니다.' });
   }
+  // ③ 쓰기 범위(writeVcenters) — 기존·신규 claim 모두 수정 가능 범위여야 한다.
+  if (writeScopeDenied(req, snap, owners, req.params.ip, existing?.claimedVcenterId || '') ||
+      writeScopeDenied(req, snap, owners, req.params.ip, claimed)) {
+    return res.status(403).json({ ok: false, reason: WRITE_DENIED_MSG });
+  }
   const r = setOverride(req.params.ip, req.body || {}, req.user);
   if (r.ok) logAudit({ user: req.user?.username, action: 'IP 관리상태 저장', target: `IP ${req.params.ip}`, detail: JSON.stringify(r.override || {}).slice(0, 500) });
   res.status(r.ok ? 200 : 400).json(r);
@@ -227,9 +259,12 @@ api.put('/tools/ipam/ip/:ip', requirePerm('tools'), (req, res) => {
 api.delete('/tools/ipam/ip/:ip', requirePerm('tools'), (req, res) => {
   const snap = store.get();
   const allowed = scopedVcenterIds(req.user, snap);
-  if (allowed && !ipInWriteScope(allowed, ipVcenterOwners(snap), req.params.ip, getOverride(req.params.ip)?.claimedVcenterId || '')) {
+  const owners = ipVcenterOwners(snap);
+  const claimed = getOverride(req.params.ip)?.claimedVcenterId || '';
+  if (allowed && !ipInWriteScope(allowed, owners, req.params.ip, claimed)) {
     return res.status(404).json({ ok: false, reason: '범위 밖 IP 입니다.' });
   }
+  if (writeScopeDenied(req, snap, owners, req.params.ip, claimed)) return res.status(403).json({ ok: false, reason: WRITE_DENIED_MSG });
   const r = clearOverride(req.params.ip);
   logAudit({ user: req.user?.username, action: 'IP 관리상태 삭제', target: `IP ${req.params.ip}` });
   res.json(r);
@@ -240,11 +275,15 @@ api.post('/tools/ipam/bulk', requirePerm('tools'), (req, res) => {
   if (fields.claimedVcenterId && !isKnownVcenter(fields.claimedVcenterId)) return res.status(400).json({ ok: false, reason: '알 수 없는 vCenter입니다.' });
   const snap = store.get();
   const allowed = scopedVcenterIds(req.user, snap);
-  if (allowed) {
+  const allowedW = writeScopedVcenterIds(req.user, snap);
+  if (allowed || allowedW) {
     const owners = ipVcenterOwners(snap);   // 라우트당 1회(O(N_vm)) — IP별 재스캔 금지(CLAUDE.md O(N))
     const claimed = fields.claimedVcenterId || '';
     const bad = (Array.isArray(ips) ? ips : []).find((ip) => !ipInWriteScope(allowed, owners, String(ip), claimed));
     if (bad !== undefined) return res.status(403).json({ ok: false, reason: `범위 밖 IP 가 포함됐습니다(${bad}). 전체를 적용하지 않았습니다.` });
+    // 쓰기 범위(writeVcenters) — 조회는 되지만 수정이 막힌 vCenter 의 IP 가 섞이면 전체 거부.
+    const badW = (Array.isArray(ips) ? ips : []).find((ip) => !ipInWriteScope(allowedW, owners, String(ip), claimed));
+    if (badW !== undefined) return res.status(403).json({ ok: false, reason: `수정 권한이 없는 vCenter 의 IP 가 포함됐습니다(${badW}). 전체를 적용하지 않았습니다.` });
   }
   const r = setOverrideBatch(ips, fields, req.user);
   if (r.ok) logAudit({ user: req.user?.username, action: 'IP 관리상태 일괄 적용', target: `${r.changed}개 IP`, detail: JSON.stringify(fields).slice(0, 500) });
@@ -291,6 +330,11 @@ api.post('/tools/ipam/policies', requirePerm('tools'), (req, res) => {
   if (allowedP && !(req.body?.claimedVcenterId && allowedP.has(req.body.claimedVcenterId))) {
     return res.status(403).json({ ok: false, reason: '범위 제한 계정은 자신의 vCenter 에 귀속된 정책만 만들 수 있습니다(전역 정책 불가).' });
   }
+  // 쓰기 범위(writeVcenters, v2.369) — 수정 가능 vCenter 에 귀속된 정책만 생성 가능(전역 정책 불가).
+  const allowedWc = writeScopedVcenterIds(req.user, store.get());
+  if (allowedWc && !(req.body?.claimedVcenterId && allowedWc.has(req.body.claimedVcenterId))) {
+    return res.status(403).json({ ok: false, reason: WRITE_DENIED_MSG });
+  }
   const r = setPolicy(req.body || {}, req.user);
   if (r.ok) { logAudit({ user: req.user?.username, action: '대역정책 저장', target: `정책 ${r.policy.spec}`, detail: JSON.stringify(r.policy).slice(0, 800) }); try { store.syncLedger(); } catch { /* */ } }
   res.status(r.ok ? 200 : 400).json(r);
@@ -307,6 +351,17 @@ api.put('/tools/ipam/policies/:id', requirePerm('tools'), (req, res) => {
       return res.status(404).json({ ok: false, reason: '범위 밖 정책입니다.' });
     }
   }
+  // 쓰기 범위(writeVcenters) — 기존 귀속·변경 후 귀속 모두 수정 가능 vCenter 여야 한다.
+  {
+    const allowedWc = writeScopedVcenterIds(req.user, store.get());
+    if (allowedWc) {
+      const ex = getPolicy(req.params.id);
+      const eff = req.body?.claimedVcenterId ?? ex?.claimedVcenterId ?? '';
+      if (ex && (!allowedWc.has(ex.claimedVcenterId || '') || !allowedWc.has(eff))) {
+        return res.status(403).json({ ok: false, reason: WRITE_DENIED_MSG });
+      }
+    }
+  }
   const r = setPolicy({ ...(req.body || {}), id: req.params.id }, req.user);
   if (r.ok) { logAudit({ user: req.user?.username, action: '대역정책 수정', target: `정책 ${r.policy.spec}`, detail: JSON.stringify(r.policy).slice(0, 800) }); try { store.syncLedger(); } catch { /* */ } }
   res.status(r.ok ? 200 : 400).json(r);
@@ -317,6 +372,11 @@ api.delete('/tools/ipam/policies/:id', requirePerm('tools'), (req, res) => {
   const allowedP = scopedVcenterIds(req.user, store.get());
   if (allowedP && !(pol && allowedP.has(pol.claimedVcenterId))) {
     return res.status(404).json({ ok: false, reason: '범위 밖 정책입니다.' });
+  }
+  // 쓰기 범위(writeVcenters) — 수정 가능 vCenter 에 귀속된 정책만 삭제 가능.
+  const allowedWc = writeScopedVcenterIds(req.user, store.get());
+  if (allowedWc && pol && !allowedWc.has(pol.claimedVcenterId || '')) {
+    return res.status(403).json({ ok: false, reason: WRITE_DENIED_MSG });
   }
   const r = deletePolicy(req.params.id);
   if (r.ok) { logAudit({ user: req.user?.username, action: '대역정책 삭제', target: `정책 ${pol?.spec || req.params.id}`, detail: pol ? JSON.stringify(pol).slice(0, 800) : '' }); try { store.syncLedger(); } catch { /* */ } }

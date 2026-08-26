@@ -126,22 +126,25 @@ export default function UserAdmin() {
     else flash(false, r.reason);
   };
 
-  // ── 데이터 범위(scope) — 사용자가 볼 수 있는 vCenter/리전 제한 ──────────────
+  // ── 데이터 범위(scope) — 사용자가 볼 수 있는 vCenter/리전 + 수정 가능 vCenter(v2.369) ──
   const openScope = (u) => setScopeEdit({
     username: u.username,
     vcenters: [...(u.scope?.vcenters || [])],
     regions: [...(u.scope?.regions || [])],
+    writeVcenters: [...(u.scope?.writeVcenters || [])],
   });
   const toggleIn = (arr, v) => (arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
   const saveScope = async () => {
-    const body = { scope: { vcenters: scopeEdit.vcenters, regions: scopeEdit.regions } };
+    const body = { scope: { vcenters: scopeEdit.vcenters, regions: scopeEdit.regions, writeVcenters: scopeEdit.writeVcenters } };
     const r = await patchJson(`/admin/users/${encodeURIComponent(scopeEdit.username)}`, body).catch((e) => ({ ok: false, reason: e.message }));
     if (r.ok) { setScopeEdit(null); await load(); flash(true, '데이터 범위를 저장했습니다.'); }
     else flash(false, r.reason);
   };
   const scopeLabel = (u) => {
     const n = (u.scope?.vcenters?.length || 0) + (u.scope?.regions?.length || 0);
-    return n ? `제한(${n})` : '전체';
+    const w = u.scope?.writeVcenters?.length || 0;
+    if (!n && !w) return '전체';
+    return `${n ? `제한(${n})` : '전체'}${w ? ` · 수정(${w})` : ''}`;
   };
 
   // ── 비밀번호 설정/로그인 차단(데모 계정 활성·잠금용) ─────────────────────────
@@ -366,6 +369,7 @@ export default function UserAdmin() {
           <div className="muted" style={{ fontSize: 12, marginBottom: 12, lineHeight: 1.7 }}>
             선택한 <b>vCenter</b> 또는 <b>리전</b>의 데이터만 볼 수 있습니다. 아무것도 선택하지 않으면 <b>전체</b>를 봅니다.
             (리전을 고르면 그 리전의 모든 vCenter가 포함됩니다. 서버에서 강제됩니다.)
+            아래 <b>수정 가능 vCenter</b> 를 고르면 그 vCenter 에만 변경 작업이 허용되고 나머지는 조회 전용이 됩니다.
           </div>
           <div style={{ fontWeight: 700, fontSize: 13, margin: '6px 0' }}>리전</div>
           <div className="flex wrap gap" style={{ marginBottom: 14 }}>
@@ -387,8 +391,24 @@ export default function UserAdmin() {
               </label>
             ))}
           </div>
+          {/* 수정(변경) 가능 vCenter — 조회와 별개 축(v2.369). 비우면 조회 범위 전체 수정 가능(기존 동작). */}
+          <div style={{ fontWeight: 700, fontSize: 13, margin: '14px 0 6px' }}>수정 가능 vCenter <span className="muted" style={{ fontWeight: 400, fontSize: 11.5 }}>— 비우면 조회 범위 전체에서 수정 가능</span></div>
+          <div className="muted" style={{ fontSize: 11.5, marginBottom: 6, lineHeight: 1.6 }}>
+            선택 시 VM 생성/복제·Tools 업그레이드·게스트 계정 추가·VM 콘솔·IP 관리(수동지정/정책) 등
+            <b> 변경 작업이 선택한 vCenter 로 제한</b>됩니다(조회 범위와의 교집합만 유효 — 서버에서 강제).
+          </div>
+          <div style={{ maxHeight: 180, overflowY: 'auto', border: '1px solid rgba(148,163,184,.2)', borderRadius: 8, padding: 10 }}>
+            {vcx.length === 0 && <div className="muted" style={{ fontSize: 12 }}>표시할 vCenter가 없습니다.</div>}
+            {vcx.map((v) => (
+              <label key={v.id} className="flex gap" style={{ alignItems: 'center', fontSize: 13, cursor: 'pointer', padding: '3px 0' }}>
+                <input type="checkbox" checked={scopeEdit.writeVcenters.includes(v.id)}
+                  onChange={() => setScopeEdit((s) => ({ ...s, writeVcenters: toggleIn(s.writeVcenters, v.id) }))} />
+                {v.name || v.id} {v.region && <span className="muted" style={{ fontSize: 11 }}>· {v.region}</span>}
+              </label>
+            ))}
+          </div>
           <div className="flex gap" style={{ justifyContent: 'flex-end', marginTop: 16 }}>
-            <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={() => setScopeEdit({ ...scopeEdit, vcenters: [], regions: [] })}>전체(제한 해제)</button>
+            <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={() => setScopeEdit({ ...scopeEdit, vcenters: [], regions: [], writeVcenters: [] })}>전체(제한 해제)</button>
             <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} onClick={saveScope}>저장</button>
           </div>
         </Modal>

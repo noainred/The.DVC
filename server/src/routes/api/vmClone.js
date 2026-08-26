@@ -4,7 +4,7 @@
 // 예외: /badges 는 Platform 트리(전 사용자)가 'Clone' 아이콘 표시에 쓰는 조회라 로그인만 요구
 // 하되, scope 제한 계정에는 범위 밖 vCenter 를 비운다(존재 자체도 안 흘림 — scope 규칙).
 import { requireRole } from '../../auth/auth.js';
-import { scopedVcenterIds } from '../../auth/scope.js';
+import { scopedVcenterIds, inUserWriteScope } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { listJobs, saveJob, deleteJob, jobVmIds } from '../../vmclone/store.js';
@@ -27,6 +27,10 @@ api.get('/tools/vm-clone', adminOnly, (_req, res) => {
 
 /** 잡 생성/수정 — body: { id?, vcenterId, vmId, vmName, dest, schedule, keep, quiesce, enabled } */
 api.post('/tools/vm-clone/jobs', adminOnly, (req, res) => {
+  // 복제는 vCenter 상태변경 — 쓰기 범위(writeVcenters, v2.369) 강제. 미설정이면 조회 범위와 동일.
+  if (!inUserWriteScope(req.user, store.get(), String(req.body?.vcenterId || ''))) {
+    return res.status(403).json({ ok: false, reason: '조회 전용 범위 — 이 vCenter 는 수정 권한이 없습니다.' });
+  }
   try {
     const job = saveJob(req.body || {});
     logAudit({ user: req.user?.username, action: 'VM 복제 잡 저장', target: `${job.vcenterId}/${job.vmName}`, detail: `${job.dest.type}${job.dest.datastoreName ? `→${job.dest.datastoreName}` : ''} · ${job.schedule.mode} · 보존 ${job.keep}` });
@@ -35,6 +39,10 @@ api.post('/tools/vm-clone/jobs', adminOnly, (req, res) => {
 });
 
 api.delete('/tools/vm-clone/jobs/:id', adminOnly, (req, res) => {
+  const target = listJobs().find((j) => j.id === req.params.id);
+  if (target && !inUserWriteScope(req.user, store.get(), target.vcenterId)) {
+    return res.status(403).json({ ok: false, reason: '조회 전용 범위 — 이 vCenter 는 수정 권한이 없습니다.' });
+  }
   if (!deleteJob(req.params.id)) return res.status(404).json({ ok: false, reason: '잡을 찾을 수 없습니다.' });
   logAudit({ user: req.user?.username, action: 'VM 복제 잡 삭제', target: req.params.id, detail: '잡 정의만 삭제(만든 클론/사본은 유지)' });
   res.json({ ok: true });
@@ -42,6 +50,10 @@ api.delete('/tools/vm-clone/jobs/:id', adminOnly, (req, res) => {
 
 /** 지금 실행 — 스케줄과 같은 직렬 큐에 넣는다(중복이면 사유 반환). */
 api.post('/tools/vm-clone/jobs/:id/run', adminOnly, (req, res) => {
+  const target = listJobs().find((j) => j.id === req.params.id);
+  if (target && !inUserWriteScope(req.user, store.get(), target.vcenterId)) {
+    return res.status(403).json({ ok: false, reason: '조회 전용 범위 — 이 vCenter 는 수정 권한이 없습니다.' });
+  }
   const r = enqueueRun(req.params.id, 'manual');
   logAudit({ user: req.user?.username, action: 'VM 복제 수동 실행', target: req.params.id, detail: r.queued ? '큐 등록' : r.reason });
   res.status(r.queued ? 202 : 409).json({ ok: r.queued, reason: r.reason });
