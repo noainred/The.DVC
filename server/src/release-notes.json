@@ -2,6 +2,14 @@
   "notes": [
 
     {
+      "version": "2.370.0",
+      "date": "2026-08-27",
+      "title": "계측 — 이벤트 루프 지연(lag) 모니터 추가",
+      "notes": [
+        "대용량 동기 작업(vCenter 수집 SOAP 파싱·인사이트 집계·bulk write)이 메인 이벤트 루프를 몇 초 막는지 계측하는 모니터를 추가했습니다(perf_hooks.monitorEventLoopDelay 기반, 200ms 블록을 정확히 포착 실측). 임계(기본 500ms) 초과 구간만 로깅해 평소엔 조용하며, 실패/미지원 시 no-op 이라 서버 동작에 영향이 없습니다(LOOP_LAG_MONITOR=0 비활성). 목적: 포탈 hang 의 실제 주범(수집 재구성 vs 이상탐지 집계 vs 쓰기)을 숫자로 확정해 격리 아키텍처(docs/ARCH-HEAVY-JOB-ISOLATION.md) 착수 근거 확보."
+      ]
+    },
+    {
       "version": "2.369.0",
       "date": "2026-08-27",
       "title": "IP 스캔 대역 CSV 가져오기/내보내기 + 사용자별 vCenter 수정 권한",
