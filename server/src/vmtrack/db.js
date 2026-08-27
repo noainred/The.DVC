@@ -124,8 +124,11 @@ function initSqlite() {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(slot, vcenter_id) DO UPDATE SET
           ts=excluded.ts, total=excluded.total, on_count=excluded.on_count,
-          added=excluded.added, removed=excluded.removed,
-          powered_on=excluded.powered_on, powered_off=excluded.powered_off,
+          -- 같은 슬롯 재실행(수동 스냅샷)은 이미 갱신된 로스터를 기준으로 diff 하므로 증감이 0 으로
+          -- 재계산된다. 그 0 으로 최초 실행이 기록한 증감을 덮어쓰면 이력이 사라진다(확정 버그).
+          -- MAX 로 보존해 '재실행이 증감을 지우지 않는다'를 스키마 수준에서 보장한다.
+          added=MAX(added, excluded.added), removed=MAX(removed, excluded.removed),
+          powered_on=MAX(powered_on, excluded.powered_on), powered_off=MAX(powered_off, excluded.powered_off),
           ds_count=excluded.ds_count, ds_cap_gb=excluded.ds_cap_gb, ds_used_gb=excluded.ds_used_gb,
           baseline=excluded.baseline`),
       delDsChangesOfSnap: db.prepare('DELETE FROM ds_changes WHERE snap_id=?'),
@@ -244,8 +247,16 @@ export async function commitSnapshot({ slot, ts, perVc, totalRow }) {
       const row = st.snapId.get(slot, vc.vcenterId);
       const snapId = row?.id;
       if (snapId == null) continue;
-      st.delChangesOfSnap.run(snapId); // 같은 슬롯 재실행(수동 스냅샷) 시 중복 방지
-      st.delDsChangesOfSnap.run(snapId);
+      // 같은 슬롯 재실행(수동 스냅샷) 시 중복 방지 — 단 **빈손 재실행은 기존 이력을 지우지 않는다**.
+      // 재실행은 이미 갱신된 로스터로 diff 하므로 변경분이 0 건으로 나오는데, 무조건 DELETE 하면
+      // 최초 실행이 남긴 증감 상세(어떤 VM/DS 였는지)가 영구 소실된다(확정 버그). 적재할 항목이
+      // 1건 이상일 때만 교체하고, 0건이면 보존한다.
+      const vmChangeCount = ['added', 'removed', 'poweredOn', 'poweredOff']
+        .reduce((n, f) => n + (vc[f] || []).length, 0);
+      const dsChangeCount = ds ? ['added', 'removed', 'changed']
+        .reduce((n, f) => n + (ds[f] || []).length, 0) : 0;
+      if (vmChangeCount > 0) st.delChangesOfSnap.run(snapId);
+      if (dsChangeCount > 0) st.delDsChangesOfSnap.run(snapId);
       // 데이터스토어 변경분 + 로스터 동기화(v2.348).
       if (ds) {
         for (const [kind, field] of [['ds_added', 'added'], ['ds_removed', 'removed'], ['ds_changed', 'changed']]) {
