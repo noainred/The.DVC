@@ -81,9 +81,86 @@ function buildGpuInventory(snap, vcenterId, allowed = null) {
   };
 }
 
+/**
+ * GPU 사용률 시계열 CSV **스트리밍** export(v2.371).
+ * 기존 경로는 청크 조회로 이벤트 루프 양보까지 했지만 결과를 out[] 에 전량 누적한 뒤
+ * lines.join() 으로 수십 MB 문자열을 한 번에 만들어 전송했다 — 그 직렬화가 중간 양보 없는
+ * 동기 CPU 라 포탈 전체가 그 시간만큼 멈추고 메모리 피크도 컸다(30만 행 × 객체+라인+합친 문자열).
+ * 이제 vclogs export(`/tools/vclogs/export.csv`)와 **같은 패턴**으로 청크마다 즉시 흘려보낸다:
+ * 청크 조회 → 그 청크만 라인 변환 → res.write → 백프레셔(drain) → setImmediate 양보 → 반복.
+ * ⚠ 스트리밍이므로 zip 압축(sendMaybeZip, 1MB 초과 시)은 적용할 수 없다 — 전량 버퍼가 필요하기
+ *   때문이다. 대량 export 에서 '포탈이 멈추지 않는 것'이 압축 이득보다 중요하다는 판단.
+ *   (compress.js 의 ETag 래퍼는 res.json 만 감싸므로 이 경로는 ETag/304 에 영향을 주지 않는다.)
+ */
+async function gpuSeriesExportCsvStream(req, res) {
+  const range = req.query.range === 'days' ? 'days' : 'all';
+  const days = Math.max(1, Math.min(1830, Number(req.query.days) || 30));
+  const vcId = req.query.vcenterId || null;
+  const snap = store.get();
+  const allowed = scopedVcenterIds(req.user, snap); // null=무제한. 범위 밖 vCenter 유출 차단(기존과 동일).
+  const hostMap = new Map();
+  for (const h of snap.hosts || []) hostMap.set(h.id, h);
+  const db = await getMetricsDb();
+  const meta = db.meta('gpu_util');
+  const until = Date.now();
+  const since = range === 'days' ? until - days * 86_400_000 : (meta.firstTs ?? 0);
+  const MAX_ROWS = Math.max(1000, Number(process.env.GPU_EXPORT_MAX_ROWS) || 300_000);
+  const CHUNK = 50_000;
+  const normPct = (v) => { const n = Number(v); if (!Number.isFinite(n)) return 0; const p = n > 100 ? n / 100 : n; return Math.max(0, Math.min(100, Math.round(p))); };
+  const esc = (v) => { const t = guardCell(v); return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; }; // guardCell: 수식 인젝션 방어
+  const stamp = new Date().toISOString().slice(0, 10);
+  const sinceIso = meta.firstTs ? new Date(meta.firstTs).toISOString() : '없음';
+
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="gpu-history-${range}-${stamp}.csv"`);
+  // 헤더 주석 2줄 + 컬럼행. 총 샘플 수는 스트리밍이라 미리 알 수 없어 마지막에 요약 주석으로 적는다.
+  res.write('\uFEFF' + [
+    `# GPU 사용률 수집 데이터 — 수집 시작: ${sinceIso} (그날부터 누적) | 범위: ${range === 'all' ? '전체' : `최근 ${days}일`} | 생성: ${new Date().toISOString()}`,
+    '# 단위: gpu_util_pct = GPU 사용률 %(0~100) · epoch_ms = Unix epoch 밀리초(엑셀은 지수표기로 보일 수 있음) · timestamp_iso = ISO8601 시각',
+    'timestamp_iso,epoch_ms,host,vcenter_id,cluster,gpu_util_pct',
+  ].join('\r\n') + '\r\n');
+
+  let cursor = since;
+  let written = 0;
+  let truncated = false;
+  while (written < MAX_ROWS) {
+    if (res.destroyed) return; // 클라이언트 중단 시 즉시 종료(불필요한 조회 방지)
+    const chunk = db.dump('gpu_util', cursor, until, CHUNK);
+    if (!chunk.length) break;
+    let rows = chunk;
+    if (chunk.length === CHUNK) {
+      // 경계 ts 행이 잘리지 않게 마지막 ts 는 버리고 다음 청크에서 다시 읽는다(기존 로직과 동일).
+      const lastTs = chunk[chunk.length - 1].ts;
+      rows = chunk.filter((r) => r.ts < lastTs);
+      cursor = lastTs;
+    }
+    const lines = [];
+    for (const r of rows) {
+      const h = hostMap.get(r.k);
+      if (allowed && !allowed.has(h?.vcenterId || '')) continue; // scope 밖(미상 호스트 포함) 제외
+      if (vcId && (!h || h.vcenterId !== vcId)) continue;
+      lines.push([new Date(r.ts).toISOString(), r.ts, h?.name || r.k, h?.vcenterId || '', h?.cluster || '', normPct(r.v)].map(esc).join(','));
+      written += 1;
+      if (written >= MAX_ROWS) { truncated = true; break; }
+    }
+    if (lines.length) {
+      const ok = res.write(lines.join('\r\n') + '\r\n');
+      if (!ok) await new Promise((resolve) => res.once('drain', resolve)); // 소켓 백프레셔(느린 클라이언트에 수십 MB 버퍼링 방지)
+    }
+    if (truncated) break;
+    if (chunk.length < CHUNK) break;
+    await new Promise((resolve) => setImmediate(resolve)); // 이벤트 루프 양보(다른 사용자 요청 처리)
+  }
+  // 잘린 결과를 완전한 것처럼 주지 않는다 — CSV 안에 명시(vclogs 와 동일 원칙).
+  res.write(`# 샘플 ${written.toLocaleString()}건${truncated ? ` (행 상한 ${MAX_ROWS.toLocaleString()} 도달 — 기간을 좁혀 다시 내보내세요)` : ''}\r\n`);
+  res.end();
+}
+
 // GPU 사용률 '수집된 전체 데이터' export — 시계열(샘플마다 한 행). range=all(수집 시작~현재)
 // 또는 range=days(최근 N일). vcenterId로 법인 스코프. format은 .csv/.json.
 async function gpuSeriesExport(req, res, fmt) {
+  // CSV 는 스트리밍 경로로 분리(v2.371) — 아래 JSON 경로는 전량 누적이 필요해 기존 유지.
+  if (fmt === 'csv') return gpuSeriesExportCsvStream(req, res);
   const range = req.query.range === 'days' ? 'days' : 'all';
   const days = Math.max(1, Math.min(1830, Number(req.query.days) || 30));
   const vcId = req.query.vcenterId || null;
