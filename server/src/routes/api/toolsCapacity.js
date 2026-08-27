@@ -54,6 +54,93 @@ api.get('/tools/capacity', (req, res) => memoJson(req, res, 'tools-capacity', (s
   };
 }, { extraKey: scopeKey(req.user, store.get()) }));
 
+/**
+ * 과할당(rightsizing) 리포트 — "할당했지만 쓰지 않는" CPU clock·메모리를 집계한다(v2.373).
+ *
+ * 데이터 출처(스냅샷 필드만 사용 — 추가 vCenter 호출 없음):
+ *  - VM 할당: `cpuCount`(vCPU), `memMB`.
+ *  - VM 사용률: `cpuUsagePct` = overallCpuUsage(MHz)/(vCPU×호스트코어MHz),
+ *               `memUsagePct` = guestMemoryUsage/memMB  (soapClient.js 산출).
+ *  - vCPU → clock 환산: VM 이 올라간 **호스트의 코어당 MHz**(= host.cpuTotalMhz/host.cpuCores).
+ *    VM 객체에는 MHz 원값이 없어 호스트를 조인해 환산한다(호스트 정보가 없으면 그 VM 은
+ *    clock 집계에서 제외하고 excludedNoHostMhz 로 센다 — 임의값으로 추정하지 않는다).
+ *
+ * ⚠ 한계(정직): 이 수치는 **스냅샷 시점(현재)의 순간 사용률** 기준이다. vCenter quickStats 의
+ *   순간값이라 '평소 한가하지만 지금 바쁜' VM 은 절감 후보에서 빠지고 그 반대도 가능하다.
+ *   실제 리사이징 결정에는 기간 평균/피크(예: 1주 P95)가 필요하며, 그 데이터는 이 스냅샷에
+ *   없다 — 그래서 이 리포트는 '후보 탐색·규모 감각' 용도이고 화면에도 그렇게 표기한다.
+ *   전원이 꺼진 VM 은 사용률이 0 이라 여기서 제외한다(이미 poweredOff 항목이 다룬다).
+ */
+function overAllocatedReport(scoped, vms) {
+  const r1 = (x) => Number((x || 0).toFixed(1));
+  const pctOf = (used, alloc) => (alloc > 0 ? Math.round((used / alloc) * 100) : 0);
+  // 호스트 코어당 MHz — VM 의 vCPU 를 clock(MHz) 으로 환산하는 유일한 근거.
+  const hostMhz = new Map();
+  for (const h of scoped.hosts || []) {
+    const cores = Number(h.cpuCores) || 0;
+    const total = Number(h.cpuTotalMhz) || 0;
+    if (cores > 0 && total > 0) hostMhz.set(h.name, total / cores);
+  }
+  const on = vms.filter((v) => v.powerState === 'POWERED_ON');
+  let cpuAllocMhz = 0; let cpuUsedMhz = 0; let excludedNoHostMhz = 0;
+  let memAllocMB = 0; let memUsedMB = 0;
+  const items = [];
+  for (const v of on) {
+    const vcpu = Number(v.cpuCount) || 0;
+    const memMB = Number(v.memMB) || 0;
+    const cpuPct = Number(v.cpuUsagePct) || 0;
+    const memPct = Number(v.memUsagePct) || 0;
+    const mhzPerCore = hostMhz.get(v.host);
+    // 메모리는 호스트 정보 없이도 계산 가능(MB 단위 그대로).
+    const mUsed = memMB * (memPct / 100);
+    memAllocMB += memMB; memUsedMB += mUsed;
+    let cAlloc = null; let cUsed = null;
+    if (mhzPerCore && vcpu > 0) {
+      cAlloc = vcpu * mhzPerCore;
+      cUsed = cAlloc * (cpuPct / 100);
+      cpuAllocMhz += cAlloc; cpuUsedMhz += cUsed;
+    } else if (vcpu > 0) {
+      excludedNoHostMhz += 1; // 호스트 MHz 미상 — clock 합계에서 제외(추정 금지)
+    }
+    items.push({
+      id: v.id, name: v.name, vcenterId: v.vcenterId, host: v.host || '', cluster: v.cluster || '',
+      guestOS: v.guestOS || '', vcpu, cpuUsagePct: Math.round(cpuPct), memUsagePct: Math.round(memPct),
+      cpuAllocMhz: cAlloc == null ? null : Math.round(cAlloc),
+      cpuUsedMhz: cUsed == null ? null : Math.round(cUsed),
+      cpuIdleMhz: cAlloc == null ? null : Math.round(cAlloc - cUsed),
+      memAllocGB: r1(memMB / 1024), memUsedGB: r1(mUsed / 1024), memIdleGB: r1((memMB - mUsed) / 1024),
+      // 절감 가능(%) = 미사용 비율. 100 - 사용률 과 같지만 의미를 명시적으로 둔다.
+      cpuSavingPct: cAlloc == null ? null : Math.max(0, 100 - Math.round(cpuPct)),
+      memSavingPct: memMB > 0 ? Math.max(0, 100 - Math.round(memPct)) : null,
+    });
+  }
+  // 후보: 사용률이 낮아 줄일 여지가 큰 VM(임계는 화면에서 조정 가능하도록 값도 함께 반환).
+  const CPU_IDLE_PCT = 20;   // 이 이하면 CPU 과할당 후보
+  const MEM_IDLE_PCT = 40;   // 이 이하면 메모리 과할당 후보
+  const cpuCand = items.filter((x) => x.cpuAllocMhz != null && x.cpuUsagePct <= CPU_IDLE_PCT && x.vcpu > 1);
+  const memCand = items.filter((x) => x.memAllocGB > 0 && x.memUsagePct <= MEM_IDLE_PCT);
+  const byIdleMhz = (a, b) => (b.cpuIdleMhz || 0) - (a.cpuIdleMhz || 0);
+  const byIdleGB = (a, b) => (b.memIdleGB || 0) - (a.memIdleGB || 0);
+  return {
+    thresholds: { cpuIdlePct: CPU_IDLE_PCT, memIdlePct: MEM_IDLE_PCT },
+    poweredOnVms: on.length,
+    excludedNoHostMhz,     // 호스트 코어 MHz 를 몰라 clock 집계에서 빠진 VM 수(투명성)
+    cpu: {
+      allocGHz: r1(cpuAllocMhz / 1000), usedGHz: r1(cpuUsedMhz / 1000), idleGHz: r1((cpuAllocMhz - cpuUsedMhz) / 1000),
+      usedPct: pctOf(cpuUsedMhz, cpuAllocMhz), savingPct: Math.max(0, 100 - pctOf(cpuUsedMhz, cpuAllocMhz)),
+      candidates: cpuCand.length,
+    },
+    mem: {
+      allocGB: r1(memAllocMB / 1024), usedGB: r1(memUsedMB / 1024), idleGB: r1((memAllocMB - memUsedMB) / 1024),
+      usedPct: pctOf(memUsedMB, memAllocMB), savingPct: Math.max(0, 100 - pctOf(memUsedMB, memAllocMB)),
+      candidates: memCand.length,
+    },
+    // 상위 후보 목록(각 50개 상한 — 응답 크기 유계).
+    cpuTop: [...cpuCand].sort(byIdleMhz).slice(0, 50),
+    memTop: [...memCand].sort(byIdleGB).slice(0, 50),
+  };
+}
+
 // Waste report — 자원 낭비 후보 모음(스냅샷 기반): 전원 꺼진 VM, 스냅샷 보유 VM,
 // thin 회수가능, Tools 미설치. (고아 VMDK는 데이터스토어 파일 스캔이 필요해 미포함)
 api.get('/tools/waste', (req, res) => memoJson(req, res, 'tools-waste', (snap) => {
@@ -67,6 +154,8 @@ api.get('/tools/waste', (req, res) => memoJson(req, res, 'tools-waste', (snap) =
   const top = (arr, fn, n = 50) => [...arr].sort((a, b) => fn(b) - fn(a)).slice(0, n);
   return {
     scope: vcId || 'all',
+    // 할당했지만 쓰지 않는 CPU clock·메모리(v2.373). 아래 idle 헬퍼가 계산한다.
+    overAllocated: overAllocatedReport(scopeSlice(snap, req.user, vcId), vms),
     poweredOff: { count: off.length, storageGB: off.reduce((a, v) => a + (v.storageGB || 0), 0),
       vms: top(off, (v) => v.storageGB || 0).map((v) => ({ id: v.id, name: v.name, vcenterId: v.vcenterId, storageGB: v.storageGB, guestOS: v.guestOS })) },
     snapshots: { count: snaps.length, sizeGB: r1(snaps.reduce((a, v) => a + (v.snapshotSizeGB || 0), 0)),

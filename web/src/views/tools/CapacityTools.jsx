@@ -155,6 +155,7 @@ export function Waste({ scope }) {
   if (loading) return <Loading />;
   if (error) return <ErrorBox message={error} />;
   const tb2 = (g) => (g >= 1024 ? `${(g / 1024).toFixed(1)} TB` : `${g} GB`);
+  const oa = data.overAllocated || null; // 과할당(할당 vs 사용) — 구버전 서버 응답이면 없음
   return (
     <>
       <div className="kpis" style={{ marginBottom: 14 }}>
@@ -162,9 +163,16 @@ export function Waste({ scope }) {
         <Card label="스냅샷 보유 VM" value={data.snapshots.count} meta={`${tb2(data.snapshots.sizeGB)} 사용`} accent={data.snapshots.count ? 'var(--amber)' : undefined} />
         <Card label="Thin 회수가능(추정)" value={tb2(data.thinReclaim.reclaimableGB)} meta={`${data.thinReclaim.count} VM`} />
         <Card label="Tools 미실행(On)" value={data.noTools.count} accent={data.noTools.count ? 'var(--amber)' : undefined} />
+        {oa && <Card label="미사용 CPU clock" value={`${oa.cpu.idleGHz} GHz`}
+          meta={`할당 ${oa.cpu.allocGHz} · 사용 ${oa.cpu.usedGHz} GHz → 절감 가능 ${oa.cpu.savingPct}%`}
+          accent={oa.cpu.savingPct >= 50 ? 'var(--amber)' : undefined} />}
+        {oa && <Card label="미사용 메모리" value={tb2(oa.mem.idleGB)}
+          meta={`할당 ${tb2(oa.mem.allocGB)} · 사용 ${tb2(oa.mem.usedGB)} → 절감 가능 ${oa.mem.savingPct}%`}
+          accent={oa.mem.savingPct >= 50 ? 'var(--amber)' : undefined} />}
       </div>
       <div className="flex gap" style={{ marginBottom: 8 }}>
-        {[['off', `전원 꺼짐 (${data.poweredOff.count})`], ['snap', `스냅샷 (${data.snapshots.count})`], ['tools', `Tools 미실행 (${data.noTools.count})`]].map(([k, l]) => (
+        {[['off', `전원 꺼짐 (${data.poweredOff.count})`], ['snap', `스냅샷 (${data.snapshots.count})`], ['tools', `Tools 미실행 (${data.noTools.count})`],
+          ...(oa ? [['cpu', `CPU 과할당 (${oa.cpu.candidates})`], ['mem', `메모리 과할당 (${oa.mem.candidates})`]] : [])].map(([k, l]) => (
           <button key={k} className={tab === k ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setTab(k)}>{l}</button>
         ))}
       </div>
@@ -177,7 +185,43 @@ export function Waste({ scope }) {
       {tab === 'tools' && <DataTable rows={data.noTools.vms} columns={[
         { key: 'name', label: 'VM', render: (v) => <VmLink name={v.name} vcenterId={v.vcenterId} label={v.name} /> }, { key: 'vcenterId', label: 'vCenter', render: (v) => <span className="muted">{v.vcenterId}</span> },
         { key: 'toolsStatus', label: 'Tools 상태', render: (v) => <span className="badge amber">{v.toolsStatus}</span> }]} />}
+      {tab === 'cpu' && oa && <>
+        <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
+          할당 clock = vCPU × 호스트 코어당 MHz · 사용 clock = 할당 × 현재 사용률. 사용률 <b>{oa.thresholds.cpuIdlePct}% 이하</b>이고 vCPU 2개 이상인 VM만 후보로 봅니다(1 vCPU 는 줄일 수 없음).
+        </div>
+        <DataTable rows={oa.cpuTop} initialSort={{ key: 'cpuIdleMhz', dir: 'desc' }} columns={[
+          { key: 'name', label: 'VM', render: (v) => <VmLink name={v.name} vcenterId={v.vcenterId} label={v.name} /> },
+          { key: 'vcenterId', label: 'vCenter', render: (v) => <span className="muted">{v.vcenterId}</span> },
+          { key: 'vcpu', label: 'vCPU', align: 'right' },
+          { key: 'cpuAllocMhz', label: '할당 clock', align: 'right', render: (v) => (v.cpuAllocMhz == null ? '—' : `${(v.cpuAllocMhz / 1000).toFixed(1)} GHz`) },
+          { key: 'cpuUsedMhz', label: '사용 clock', align: 'right', render: (v) => (v.cpuUsedMhz == null ? '—' : `${(v.cpuUsedMhz / 1000).toFixed(1)} GHz`) },
+          { key: 'cpuIdleMhz', label: '미사용 clock', align: 'right', render: (v) => (v.cpuIdleMhz == null ? '—' : <b style={{ color: 'var(--amber)' }}>{(v.cpuIdleMhz / 1000).toFixed(1)} GHz</b>) },
+          { key: 'cpuUsagePct', label: '사용률', align: 'right', render: (v) => `${v.cpuUsagePct}%` },
+          { key: 'cpuSavingPct', label: '절감 가능', align: 'right', render: (v) => (v.cpuSavingPct == null ? '—' : <b>{v.cpuSavingPct}%</b>) },
+          { key: 'host', label: 'ESXi 호스트', render: (v) => <span className="muted">{v.host}</span> },
+        ]} />
+      </>}
+      {tab === 'mem' && oa && <>
+        <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
+          사용 메모리는 게스트가 실제로 쓰는 양(guest memory usage)입니다. 사용률 <b>{oa.thresholds.memIdlePct}% 이하</b>인 VM을 후보로 봅니다.
+        </div>
+        <DataTable rows={oa.memTop} initialSort={{ key: 'memIdleGB', dir: 'desc' }} columns={[
+          { key: 'name', label: 'VM', render: (v) => <VmLink name={v.name} vcenterId={v.vcenterId} label={v.name} /> },
+          { key: 'vcenterId', label: 'vCenter', render: (v) => <span className="muted">{v.vcenterId}</span> },
+          { key: 'memAllocGB', label: '할당', align: 'right', render: (v) => tb2(v.memAllocGB) },
+          { key: 'memUsedGB', label: '사용', align: 'right', render: (v) => tb2(v.memUsedGB) },
+          { key: 'memIdleGB', label: '미사용', align: 'right', render: (v) => <b style={{ color: 'var(--amber)' }}>{tb2(v.memIdleGB)}</b> },
+          { key: 'memUsagePct', label: '사용률', align: 'right', render: (v) => `${v.memUsagePct}%` },
+          { key: 'memSavingPct', label: '절감 가능', align: 'right', render: (v) => (v.memSavingPct == null ? '—' : <b>{v.memSavingPct}%</b>) },
+          { key: 'guestOS', label: 'Guest OS' },
+          { key: 'host', label: 'ESXi 호스트', render: (v) => <span className="muted">{v.host}</span> },
+        ]} />
+      </>}
       <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>※ 고아 디스크(orphaned VMDK)는 데이터스토어 파일 스캔이 필요해 현재 미포함입니다.</div>
+      {oa && <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+        ※ 과할당 수치는 <b>스냅샷 시점(현재)의 순간 사용률</b> 기준 추정입니다 — 리사이징 결정에는 기간 평균·피크(예: 1주 P95)를 함께 확인하세요. 전원이 꺼진 VM은 제외했고(위 ‘전원 꺼짐’ 참조),
+        {oa.excludedNoHostMhz > 0 ? <> 호스트 코어 clock을 알 수 없는 <b>{oa.excludedNoHostMhz}대</b>는 CPU clock 집계에서 제외했습니다(값을 추정하지 않음).</> : null}
+      </div>}
     </>
   );
 }
