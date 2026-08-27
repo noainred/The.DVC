@@ -117,15 +117,59 @@ export function HostVmsModal({ host, vcenterId, onClose }) {
   const [d, setD] = useState(null);
   const [err, setErr] = useState(null);
   const [q, setQ] = useState('');
+  // 열 헤더 클릭 정렬(v2.372). 훅은 조기 return 위에 선언 — 뒤에 추가하면 렌더 간 훅 개수가
+  // 달라져 React #310 으로 화면이 크래시한다(CLAUDE.md 프론트 회귀 방지).
+  const [sort, setSort] = useState({ key: 'name', dir: 'asc' });
   useEffect(() => {
     const qs = new URLSearchParams({ host, ...(vcenterId ? { vcenterId } : {}), limit: '5000', sortBy: 'name', order: 'asc' }).toString();
     fetchJson(`/vms?${qs}`).then(setD).catch((e) => setErr(e.message));
   }, [host, vcenterId]);
   const all = d?.items || [];
   const ql = q.trim().toLowerCase();
-  const rows = ql ? all.filter((v) => [v.name, v.guestOS, v.ipAddress].some((x) => String(x || '').toLowerCase().includes(ql))) : all;
+  const filtered = ql ? all.filter((v) => [v.name, v.guestOS, v.ipAddress].some((x) => String(x || '').toLowerCase().includes(ql))) : all;
   const onN = all.filter((v) => v.powerState === 'POWERED_ON').length;
   const gbv = (mb) => (mb != null ? `${Math.round(mb / 1024)}GB` : '—');
+  // 열별 정렬값 — 숫자 열은 숫자로(문자 비교하면 10 < 9), 없는 값(null)은 방향과 무관하게
+  // 항상 뒤로 보낸다('—' 가 위로 몰려 실제 데이터를 가리는 것 방지).
+  const firstIp = (v) => (v.ipAddresses?.length ? v.ipAddresses[0] : (v.ipAddress || ''));
+  // IP 는 문자열 비교하면 10.93.124.9 > 10.93.124.10 이 되므로 옥텟을 정수로 접어 비교한다.
+  const ipNum = (ip) => {
+    const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(String(ip || '').trim());
+    if (!m) return null;
+    return ((+m[1] * 256 + +m[2]) * 256 + +m[3]) * 256 + +m[4];
+  };
+  const SORT_VAL = {
+    name: (v) => String(v.name || '').toLowerCase(),
+    power: (v) => (v.powerState === 'POWERED_ON' ? 0 : 1),   // On 먼저
+    guestOS: (v) => String(v.guestOS || '').toLowerCase(),
+    cpu: (v) => (v.cpuCount != null ? Number(v.cpuCount) : null),
+    ram: (v) => (v.memMB != null ? Number(v.memMB) : null),
+    ip: (v) => ipNum(firstIp(v)),
+  };
+  const rows = React.useMemo(() => {
+    const get = SORT_VAL[sort.key] || SORT_VAL.name;
+    const sign = sort.dir === 'desc' ? -1 : 1;
+    return [...filtered].sort((a, b) => {
+      const x = get(a); const y = get(b);
+      const xe = x == null || x === ''; const ye = y == null || y === '';
+      if (xe && ye) return String(a.name || '').localeCompare(String(b.name || ''));
+      if (xe) return 1;                    // 값 없는 행은 항상 뒤
+      if (ye) return -1;
+      const c = typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y));
+      // 같은 값이면 이름으로 안정 정렬(행 순서가 렌더마다 흔들리지 않게).
+      return (c !== 0 ? c * sign : String(a.name || '').localeCompare(String(b.name || '')));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtered, sort.key, sort.dir]);
+  // 같은 열 재클릭 = 방향 토글, 다른 열 = 그 열 asc(숫자 열은 큰 값부터 보는 게 유용해 desc).
+  const clickSort = (key) => setSort((cur) => (cur.key === key
+    ? { key, dir: cur.dir === 'asc' ? 'desc' : 'asc' }
+    : { key, dir: ['cpu', 'ram'].includes(key) ? 'desc' : 'asc' }));
+  const arrow = (key) => (sort.key === key ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : '');
+  const sortTh = (key, label, align = 'left') => (
+    <th style={{ textAlign: align, cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }}
+      title={`${label} 기준 정렬`} onClick={() => clickSort(key)}>{label}{arrow(key)}</th>
+  );
   return (
     <Modal title={`호스트 VM — ${host}`} onClose={onClose} width={860} resizable minWidth={560} minHeight={360} bodyScroll={false}>
       {err ? <ErrorBox message={err} /> : !d ? <Loading /> : (
@@ -142,8 +186,8 @@ export function HostVmsModal({ host, vcenterId, onClose }) {
           <div className="table-wrap" style={{ flex: '0 1 auto', minHeight: 0 }}>
             <table>
               <thead><tr>
-                <th style={{ textAlign: 'left' }}>VM</th><th>전원</th><th style={{ textAlign: 'left' }}>Guest OS</th>
-                <th style={{ textAlign: 'right' }}>vCPU</th><th style={{ textAlign: 'right' }}>RAM</th><th style={{ textAlign: 'left' }}>IP</th>
+                {sortTh('name', 'VM')}{sortTh('power', '전원', 'center')}{sortTh('guestOS', 'Guest OS')}
+                {sortTh('cpu', 'vCPU', 'right')}{sortTh('ram', 'RAM', 'right')}{sortTh('ip', 'IP')}
               </tr></thead>
               <tbody>
                 {rows.length === 0 && <tr><td colSpan={6} className="muted" style={{ padding: 14 }}>표시할 VM이 없습니다.</td></tr>}
