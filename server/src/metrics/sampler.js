@@ -12,10 +12,13 @@ import { loadMetricsSettings } from './settings.js';
 import { getGuestGpuHost } from '../gpu/store.js';
 import { updateVmStats } from '../reports/vmStats.js';
 import { memSampleRows, maybeLogMem } from '../system/memtrack.js';
+import { insertVmperf, pruneVmperf } from './vmperfDb.js';
+import { loadVmperfSettings, vmperfTracks } from './vmperfSettings.js';
 
 let timer = null;
 let lastRun = null;
 let _pruneTicks = 0; // retention prune 주기 카운터(매 샘플 DELETE 스캔 방지)
+let _vmperfPruneTicks = 0; // vmperf(vCenter별 DB) prune 카운터 — DB 개수만큼 DELETE 라 더 드물게
 let sampling = false; // 재진입 방지
 
 const avg = (arr) => (arr.length ? arr.reduce((a, x) => a + x, 0) / arr.length : null);
@@ -37,7 +40,7 @@ async function sampleOnce() {
  * (임의값 추정 금지 — /tools/waste 의 overAllocatedReport 와 같은 규칙). 메모리는 호스트
  * 정보 없이 계산 가능하므로 전원 On 전량을 집계한다. 전원 OFF/템플릿은 제외(사용률 0 이라 왜곡).
  */
-function vmAllocRows(snap) {
+function vmAllocRows(snap, settings) {
   const hostMhz = new Map(); // host.name -> 코어당 MHz
   for (const h of snap.hosts || []) {
     const cores = Number(h.cpuCores) || 0;
@@ -58,7 +61,10 @@ function vmAllocRows(snap) {
     const vcpu = Number(v.cpuCount) || 0;
     const cpuPct = Number(v.cpuUsagePct) || 0;
     const mhzPerCore = hostMhz.get(v.host);
-    for (const id of [v.vcenterId, '']) {          // vCenter별 + 전체
+    // 설정(v2.376): 대상 vCenter 만 수집. vcenterIds 가 비어 있으면 전체가 대상이다.
+    if (!vmperfTracks(v.vcenterId, settings)) continue;
+    const targets = settings.trackTotal ? [v.vcenterId, ''] : [v.vcenterId];
+    for (const id of targets) {                    // vCenter별 (+ 선택 시 전체 합계)
       const e = bucket(id);
       e.memAlloc += memMB;
       e.memUsed += memMB * (memPct / 100);
@@ -69,18 +75,21 @@ function vmAllocRows(snap) {
       }
     }
   }
-  const out = [];
+  // v2.376: vCenter 별 독립 DB 로 적재하므로 **키별로 묶어서** 돌려준다(Map<vcenterId, rows[]>).
+  const out = new Map();
   for (const [k, e] of agg) {
+    const rows = [];
     // 값이 0 이면(해당 vCenter 에 전원 On VM 없음) 행을 만들지 않는다 — 빈 구간이 0 으로
     // 기록돼 '사용률 0%' 로 오해되는 것 방지(차트는 결측을 결측으로 보여야 한다).
     if (e.cpuAlloc > 0) {
-      out.push({ metric: 'vm_cpu_alloc_mhz', k, v: Math.round(e.cpuAlloc) });
-      out.push({ metric: 'vm_cpu_used_mhz', k, v: Math.round(e.cpuUsed) });
+      rows.push({ metric: 'vm_cpu_alloc_mhz', k, v: Math.round(e.cpuAlloc) });
+      rows.push({ metric: 'vm_cpu_used_mhz', k, v: Math.round(e.cpuUsed) });
     }
     if (e.memAlloc > 0) {
-      out.push({ metric: 'vm_mem_alloc_mb', k, v: Math.round(e.memAlloc) });
-      out.push({ metric: 'vm_mem_used_mb', k, v: Math.round(e.memUsed) });
+      rows.push({ metric: 'vm_mem_alloc_mb', k, v: Math.round(e.memAlloc) });
+      rows.push({ metric: 'vm_mem_used_mb', k, v: Math.round(e.memUsed) });
     }
+    if (rows.length) out.set(k, rows);
   }
   return out;
 }
@@ -132,7 +141,26 @@ async function sampleOnceInner() {
   //   vm_cpu_used_mhz / vm_cpu_alloc_mhz : 사용·할당 CPU clock 합계(MHz)
   //   vm_mem_used_mb  / vm_mem_alloc_mb  : 사용·할당 메모리 합계(MB)
   // 사용률(%)·절감 가능(%)은 이 4개에서 파생 계산한다(값을 중복 저장하지 않는다).
-  try { rows.push(...vmAllocRows(snap)); } catch { /* 집계 실패가 샘플링을 막지 않게 */ }
+  // VM 할당/사용 집계는 **vCenter 별 독립 DB**(metrics/vmperfDb.js)에 적재한다(v2.376).
+  // 공용 metrics.db 에 섞으면 제외/보존 변경 시 DELETE 로 행만 지워져 파일이 줄지 않는다 —
+  // 파일이 분리돼 있으면 대상에서 빼는 순간 파일을 지워 용량을 즉시 회수할 수 있다.
+  // 실패는 격리(한 vCenter 쓰기 오류가 다른 vCenter·본 샘플링을 막지 않게).
+  try {
+    const vmperfCfg = loadVmperfSettings();
+    if (vmperfCfg.enabled) {
+      // 이름 주의: 이 함수 위쪽 온도 집계에도 byVc 가 있어 혼동을 막으려 vmperfByVc 로 둔다.
+      const vmperfByVc = vmAllocRows(snap, vmperfCfg);
+      for (const [vcId, vcRows] of vmperfByVc) {
+        try { await insertVmperf(vcId, vcRows, ts); } catch (e) { console.warn(`[vmperf] ${vcId || '(전체)'} insert 실패: ${e.message}`); }
+      }
+      // 보존기간 prune — DB 개수만큼 DELETE 가 돌므로 공용(20틱)보다 더 드물게(120틱 ≈ 2시간@1분).
+      if (vmperfCfg.retentionDays > 0 && (++_vmperfPruneTicks % 120 === 1)) {
+        for (const vcId of vmperfByVc.keys()) {
+          try { await pruneVmperf(vcId, vmperfCfg.retentionDays); } catch { /* per-DB 격리 */ }
+        }
+      }
+    }
+  } catch { /* 집계·설정 로드 실패가 샘플링을 막지 않게 */ }
 
   // 포탈 자신의 프로세스 메모리(누수 추적) — 인벤토리 유무와 무관하게 항상 샘플하고,
   // 시간당 1줄 상태 로그(링 버퍼·journal)도 여기서 남긴다. 실패가 본 샘플링을 막지 않게 격리.

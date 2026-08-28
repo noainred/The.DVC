@@ -1,9 +1,13 @@
 // 용량/낭비/씬/VM파인더/온도/용량예측 — api.js(구 2,445줄) 분할(v2.283.0). 본문은 원본 그대로, 등록 순서는 api.js 호출 순서가 보존한다.
 import { scopedVcenterIds } from '../../auth/scope.js';
+import { requireRole } from '../../auth/auth.js';   // 설정 변경/데이터 삭제는 관리자 전용
+import { logAudit } from '../../audit.js';           // 수집 정책 변경·데이터 삭제는 감사 기록
 import { store } from '../../store.js';
 import { loadVcenterConfig } from '../../config.js';
 import { fetchVmMetric } from '../../vcenter/soapClient.js';
 import { getMetricsDb } from '../../metrics/db.js';
+import { vmperfHistory, vmperfMeta, vmperfDiskUsage, dropVmperfDb, VMPERF_METRICS } from '../../metrics/vmperfDb.js';
+import { loadVmperfSettings, saveVmperfSettings, VMPERF_LIMITS } from '../../metrics/vmperfSettings.js';
 import { memoJson, hash, linregSlope, eachLimited, scopeSlice, scopeKey } from './shared.js';
 
 export function registerToolsCapacity(api) {
@@ -193,10 +197,11 @@ api.get('/tools/waste/history', async (req, res) => {
   let points = [];
   let meta = null;
   try {
-    const db = await getMetricsDb();
-    const key = vcId; // 전체는 '' 로 적재됨(sampler vmAllocRows)
-    const [ca, cu, ma, mu] = ['vm_cpu_alloc_mhz', 'vm_cpu_used_mhz', 'vm_mem_alloc_mb', 'vm_mem_used_mb']
-      .map((m) => db.history(m, key, since, bucketMs, limit));
+    // v2.376: 이 계열은 **vCenter 별 독립 DB**(metrics/vmperfDb.js)에 있다. 요청한 vCenter 의
+    // DB 하나만 열어 조회하므로 28개 순회가 없다(전체 합계는 '' → _all.db).
+    const [ca, cu, ma, mu] = await Promise.all(
+      VMPERF_METRICS.map((m) => vmperfHistory(vcId, m, since, bucketMs, limit)),
+    );
     // ts 기준으로 4계열을 합친다(같은 버킷 경계라 ts 가 일치한다).
     const byTs = new Map();
     const put = (arr, field) => { for (const p of arr || []) { let e = byTs.get(p.ts); if (!e) { e = { ts: p.ts }; byTs.set(p.ts, e); } e[field] = p.avg; } };
@@ -212,11 +217,71 @@ api.get('/tools/waste/history', async (req, res) => {
       memUsedGB: r1(e.memUsedMB == null ? null : e.memUsedMB / 1024),
       memUsedPct: pct(e.memUsedMB, e.memAllocMB),
     }));
-    const m = db.meta('vm_cpu_alloc_mhz');
+    const m = await vmperfMeta(vcId, 'vm_cpu_alloc_mhz');
     meta = { firstTs: m.firstTs, lastTs: m.lastTs };
   } catch { points = []; }
   // 관측 시작 이전 구간은 데이터가 없다 — 프론트가 '수집 시작' 을 표기할 수 있게 meta 를 준다.
   res.json({ vcenterId: vcId || 'all', days, bucketMs, collectedSince: meta?.firstTs ?? null, points });
+});
+
+/**
+ * VM 성능 트래킹 설정(v2.376) — 보존기간 + 대상 vCenter 선택 + 디스크 사용 현황.
+ * 6,000 VM 규모에서 이 계열은 용량이 빠르게 늘어(실측 행당 ~308B) 운영자가 통제해야 한다.
+ * GET 은 로그인 사용자, 변경(PUT)·삭제(DELETE)는 관리자 전용(수집 정책·데이터 삭제라서).
+ */
+api.get('/tools/waste/settings', (req, res) => {
+  const snap = store.get();
+  const allowed = scopedVcenterIds(req.user, snap);
+  const s = loadVmperfSettings();
+  // 선택 가능한 vCenter 목록은 사용자 범위로 좁힌다(범위 밖 id 노출 금지).
+  const vcenters = (snap.vcenters || [])
+    .filter((v) => !allowed || allowed.has(v.id))
+    .map((v) => ({ id: v.id, name: v.name || v.id }));
+  // 디스크 사용량도 범위 밖은 감춘다(전체 합계 '' 는 전체 범위 계정에만).
+  const usage = vmperfDiskUsage().filter((u) => (!allowed ? true : (u.vcenterId !== '' && allowed.has(u.vcenterId))));
+  res.json({
+    settings: s, limits: VMPERF_LIMITS, vcenters, usage,
+    totalBytes: usage.reduce((a, u) => a + u.bytes, 0),
+  });
+});
+
+api.put('/tools/waste/settings', requireRole('admin'), (req, res) => {
+  const b = req.body || {};
+  const snap = store.get();
+  const validIds = new Set((snap.vcenters || []).map((v) => v.id));
+  // 유령 vCenter id 를 저장하지 않는다(설정 파일 오염 방지). 빈 배열 = 전체 대상.
+  if (b.vcenterIds !== undefined) {
+    if (!Array.isArray(b.vcenterIds)) return res.status(400).json({ ok: false, reason: 'vcenterIds 는 배열이어야 합니다.' });
+    const bad = b.vcenterIds.filter((x) => !validIds.has(String(x)));
+    if (bad.length) return res.status(400).json({ ok: false, reason: `존재하지 않는 vCenter id: ${bad.slice(0, 5).join(', ')}` });
+  }
+  const before = loadVmperfSettings();
+  const next = saveVmperfSettings(b);
+  // 대상에서 제외된 vCenter 의 DB 는 파일째 삭제해 **용량을 즉시 회수**한다(분리 아키텍처의 이점).
+  // 전체 대상(빈 배열)에서 특정 목록으로 좁힌 경우에도 빠진 vCenter 를 정리한다.
+  let dropped = [];
+  if (next.vcenterIds.length) {
+    const keep = new Set(next.vcenterIds);
+    for (const u of vmperfDiskUsage()) {
+      if (u.vcenterId === '') continue;              // 전체 합계는 trackTotal 로 따로 관리
+      if (!keep.has(u.vcenterId)) { dropVmperfDb(u.vcenterId); dropped.push(u.vcenterId); }
+    }
+  }
+  if (!next.trackTotal && before.trackTotal) { dropVmperfDb(''); dropped.push('(전체 합계)'); }
+  logAudit({
+    user: req.user?.username, action: 'VM 성능 트래킹 설정 변경',
+    target: next.enabled ? `보존 ${next.retentionDays}일 · 대상 ${next.vcenterIds.length || '전체'}` : '비활성',
+    detail: dropped.length ? `DB 삭제: ${dropped.join(', ')}` : '', ip: req.ip || '',
+  });
+  res.json({ ok: true, settings: next, dropped });
+});
+
+/** 특정 vCenter(또는 전체 합계)의 수집 데이터 삭제 — 용량 회수용. 관리자 전용. */
+api.delete('/tools/waste/settings/data', requireRole('admin'), (req, res) => {
+  const vcId = String(req.query.vcenterId ?? '');
+  const removed = dropVmperfDb(vcId);
+  logAudit({ user: req.user?.username, action: 'VM 성능 트래킹 데이터 삭제', target: vcId || '(전체 합계)', detail: `파일 ${removed}개`, ip: req.ip || '' });
+  res.json({ ok: true, vcenterId: vcId, filesRemoved: removed });
 });
 
 /**

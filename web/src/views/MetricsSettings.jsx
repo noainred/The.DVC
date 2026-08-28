@@ -134,6 +134,131 @@ export default function MetricsSettings() {
           {last && <span className="muted">온도 보고 호스트 <b style={{ color: 'var(--text)' }}>{last.hostsWithTemp}</b> · 행 <b style={{ color: 'var(--text)' }}>{last.rows}</b></span>}
         </div>
       </div>
+
+      {/* VM 성능 트래킹(낭비 리소스 원본) — vCenter별 독립 DB · 보존기간·대상 선택(v2.376) */}
+      <VmPerfTrackingSettings />
+    </div>
+  );
+}
+
+/**
+ * VM 성능 트래킹 설정(v2.376) — 낭비 리소스의 '할당 vs 사용' 시계열을 얼마나·어떤 vCenter 만
+ * 저장할지 고른다. 이 계열은 vCenter 별 **독립 DB**(CONFIG_DIR/vmperf/<id>.db)에 저장되므로
+ * 대상에서 빼면 파일이 삭제되어 **용량이 즉시 회수**된다(공용 DB 면 행만 지워지고 파일은 안 줄어듦).
+ *
+ * 용량 감각(실측 기준, 행당 ~308B): 6,000 VM · 1시간 간격 · 2계열 → 90일 ≈ 7.4GB / 1년 ≈ 30GB.
+ * 그래서 기본 보존은 90일이고, 필요한 vCenter 만 선택하는 것을 권한다.
+ */
+export function VmPerfTrackingSettings() {
+  // ⚠ 훅은 전부 조기 return 위에서 선언(CLAUDE.md — React #310 방지).
+  const [d, setD] = useState(null);
+  const [err, setErr] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const [enabled, setEnabled] = useState(true);
+  const [days, setDays] = useState(90);
+  const [ids, setIds] = useState([]);        // 빈 배열 = 전체
+  const [trackTotal, setTrackTotal] = useState(true);
+
+  const load = async () => {
+    try {
+      const r = await fetchJson('/tools/waste/settings');
+      setD(r); setErr(null);
+      setEnabled(r.settings.enabled);
+      setDays(r.settings.retentionDays);
+      setIds(r.settings.vcenterIds || []);
+      setTrackTotal(r.settings.trackTotal !== false);
+    } catch (e) { setErr(e.message); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const fmtBytes = (b) => {
+    if (!b) return '0';
+    const GB = 1024 ** 3; const MB = 1024 ** 2;
+    return b >= GB ? `${(b / GB).toFixed(2)} GB` : b >= MB ? `${(b / MB).toFixed(1)} MB` : `${(b / 1024).toFixed(0)} KB`;
+  };
+  const toggle = (id) => setIds((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
+
+  const save = async () => {
+    setBusy(true); setMsg(null);
+    try {
+      const r = await putJson('/tools/waste/settings', {
+        enabled, retentionDays: Number(days) || 0, vcenterIds: ids, trackTotal,
+      });
+      const dropped = (r.dropped || []).length;
+      setMsg(`저장되었습니다.${dropped ? ` 제외된 ${dropped}개 vCenter 의 데이터를 삭제해 용량을 회수했습니다.` : ''}`);
+      await load();
+    } catch (e) { setMsg(`오류: ${e.message}`); }
+    finally { setBusy(false); }
+  };
+
+  if (err) return <ErrorBox message={err} />;
+  if (!d) return <Loading />;
+  const usage = d.usage || [];
+
+  return (
+    <div className="card" style={{ padding: 16, marginTop: 14 }}>
+      <div className="flex between wrap" style={{ alignItems: 'center', marginBottom: 6 }}>
+        <b style={{ fontSize: 14 }}>VM 성능 트래킹 (낭비 리소스 · 할당 vs 사용)</b>
+        <span className="muted" style={{ fontSize: 12 }}>총 사용량 <b style={{ color: 'var(--text)' }}>{fmtBytes(d.totalBytes)}</b></span>
+      </div>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 12, lineHeight: 1.6 }}>
+        낭비 리소스 › 사용 추이 차트의 원본 데이터입니다. vCenter 별로 <b>독립 DB</b>에 저장되어, 대상에서 빼면 파일을 삭제해 <b>용량이 즉시 회수</b>됩니다.
+        <br />용량 감각(실측): 6,000 VM · 1시간 간격이면 <b>90일 ≈ 7.4GB</b> · <b>1년 ≈ 30GB</b>. 필요한 vCenter 만 선택하는 것을 권합니다.
+      </div>
+
+      <div className="flex gap wrap" style={{ alignItems: 'center', gap: 18, marginBottom: 12 }}>
+        <label className="flex gap" style={{ alignItems: 'center', cursor: 'pointer' }}>
+          <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} /> <b>수집 사용</b>
+        </label>
+        <span className="muted" style={{ fontSize: 13 }}>보존기간</span>
+        <input className="input" type="number" min={0} max={d.limits?.maxRetentionDays || 1830} style={{ width: 100 }}
+          value={days} onChange={(e) => setDays(e.target.value)} disabled={!enabled} />
+        <span className="muted" style={{ fontSize: 12 }}>일 (0 = 무제한)</span>
+        <label className="flex gap muted" style={{ alignItems: 'center', fontSize: 12, cursor: 'pointer' }}>
+          <input type="checkbox" checked={trackTotal} onChange={(e) => setTrackTotal(e.target.checked)} disabled={!enabled} /> 전체 합계 계열도 저장
+        </label>
+      </div>
+
+      <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>
+        수집 대상 vCenter — <b>아무것도 선택하지 않으면 전체</b>가 대상입니다. ({ids.length ? `${ids.length}개 선택` : '전체'})
+      </div>
+      <div className="flex gap wrap" style={{ gap: 8, marginBottom: 12 }}>
+        {(d.vcenters || []).map((v) => {
+          const on = ids.includes(v.id);
+          const u = usage.find((x) => x.vcenterId === v.id);
+          return (
+            <button key={v.id} className={on ? 'login-btn' : 'logout-btn'} disabled={!enabled}
+              style={{ flex: 'none', padding: '6px 12px', fontSize: 12 }}
+              title={u ? `저장된 데이터 ${fmtBytes(u.bytes)}` : '저장된 데이터 없음'}
+              onClick={() => toggle(v.id)}>
+              {v.name}{u ? <span className="muted" style={{ marginLeft: 6 }}>{fmtBytes(u.bytes)}</span> : null}
+            </button>
+          );
+        })}
+        {(d.vcenters || []).length === 0 && <span className="muted" style={{ fontSize: 12 }}>표시할 vCenter 가 없습니다.</span>}
+      </div>
+
+      {usage.length > 0 && (
+        <div className="table-wrap" style={{ marginBottom: 12, maxHeight: 220 }}>
+          <table>
+            <thead><tr><th>저장된 vCenter 데이터</th><th style={{ textAlign: 'right' }}>용량</th></tr></thead>
+            <tbody>
+              {usage.map((u) => (
+                <tr key={u.file}>
+                  <td>{u.vcenterId || <span className="muted">(전체 합계)</span>}</td>
+                  <td style={{ textAlign: 'right' }}>{fmtBytes(u.bytes)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div className="flex gap" style={{ alignItems: 'center' }}>
+        <button className="login-btn" style={{ padding: '8px 18px' }} disabled={busy} onClick={save}>{busy ? '저장 중…' : '저장'}</button>
+        {msg && <span className="muted" style={{ fontSize: 13 }}>{msg}</span>}
+      </div>
     </div>
   );
 }
