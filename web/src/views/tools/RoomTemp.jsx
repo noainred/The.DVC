@@ -70,10 +70,10 @@ function VcCard({ dc, expanded, onToggle }) {
           {st && <span className="badge" style={{ background: `${st.color}22`, color: st.color }} title={st.desc}>{st.label}</span>}
         </div>
         <span className="muted" style={{ fontSize: 11.5 }}>
-          호스트 {dc.hostCount}대
-          {dc.inlet.servers ? ` · 측정 ${dc.inlet.servers}` : ''}
-          {dc.noSensorCount ? ` · 센서없음 ${dc.noSensorCount}` : ''}
-          {dc.idracBoosted ? ` · iDRAC 보강 ${dc.idracBoosted}` : ''}
+          서버 {dc.hostCount}대
+          {dc.inlet.servers ? ` · 흡기측정 ${dc.inlet.servers}` : ''}
+          {dc.noSensorCount ? ` · 미수집 ${dc.noSensorCount}` : ''}
+          {dc.remoteCount ? ` · 위임 ${dc.remoteCount}` : ''}
         </span>
       </div>
 
@@ -89,7 +89,7 @@ function VcCard({ dc, expanded, onToggle }) {
         </span>
         {dc.hosts.length > 0 && (
           <button className="tab" style={{ padding: '4px 10px', fontSize: 11.5 }} onClick={() => onToggle(dc.id)}>
-            {expanded ? '호스트 접기' : `호스트별 보기 (${dc.hosts.length})`}
+            {expanded ? '서버 접기' : `서버별 보기 (${dc.hosts.length})`}
           </button>
         )}
       </div>
@@ -98,13 +98,13 @@ function VcCard({ dc, expanded, onToggle }) {
         <div className="table-wrap" style={{ marginTop: 8, maxHeight: 260 }}>
           <table>
             <thead><tr>
-              <th>ESXi 호스트</th><th style={{ textAlign: 'right' }}>흡기</th><th style={{ textAlign: 'right' }}>배기</th>
+              <th>서버</th><th style={{ textAlign: 'right' }}>흡기</th><th style={{ textAlign: 'right' }}>배기</th>
               <th style={{ textAlign: 'right' }}>CPU</th><th style={{ textAlign: 'right' }}>ΔT</th>
             </tr></thead>
             <tbody>
               {dc.hosts.map((s) => (
                 <tr key={s.id}>
-                  <td><b style={{ fontSize: 12.5 }}>{s.name}</b><div className="muted" style={{ fontSize: 11 }}>{s.cluster}{s.source === 'vcenter+idrac' ? ' · iDRAC 보강' : ''}</div></td>
+                  <td><b style={{ fontSize: 12.5 }}>{s.name}</b><div className="muted" style={{ fontSize: 11 }}>{s.serviceTag}{s.remote ? ' · 위임 수집' : ''}</div></td>
                   <td style={{ textAlign: 'right', color: s.inlet != null && s.inlet > 27 ? 'var(--amber)' : undefined }}>{C(s.inlet)}</td>
                   <td style={{ textAlign: 'right' }}>{C(s.exhaust)}</td>
                   <td style={{ textAlign: 'right' }}>{C(s.cpu)}</td>
@@ -135,14 +135,14 @@ export function RoomTemp() {
   if (error && !data) return <ErrorBox message={error} />;
   if (!data) return <Loading />;
   const t = data.totals || {};
-  const dcs = data.vcenters || [];
+  const dcs = data.groups || [];
 
   return (
     <>
       {error && <div className="badge amber" style={{ marginBottom: 10, display: 'inline-block' }}>업데이트 실패(이전 데이터 표시 중)</div>}
 
       <div className="kpis" style={{ marginBottom: 14 }}>
-        <Card label="법인(vCenter)" value={t.vcenters ?? 0} meta={`측정 호스트 ${t.withData ?? 0} / ${t.hosts ?? 0}대`} />
+        <Card label="법인" value={t.groups ?? 0} meta={`측정 서버 ${t.withData ?? 0} / ${t.servers ?? 0}대`} />
         <Card label="흡기 범위(전체)" value={t.inlet?.min == null ? '—' : `${t.inlet.min}~${t.inlet.max}℃`}
           meta={t.inlet?.avg != null ? `평균 ${t.inlet.avg}℃` : '흡기 센서 없음'}
           accent={t.inlet?.max != null && t.inlet.max > 27 ? 'var(--amber)' : 'var(--green)'} />
@@ -150,7 +150,7 @@ export function RoomTemp() {
           meta={t.exhaust?.avg != null ? `평균 ${t.exhaust.avg}℃` : '배기 센서 없음'} />
         <Card label="CPU 범위(전체)" value={t.cpu?.min == null ? '—' : `${t.cpu.min}~${t.cpu.max}℃`}
           meta={t.cpu?.avg != null ? `평균 ${t.cpu.avg}℃` : 'CPU 센서 없음'} />
-        {t.noSensor ? <Card label="센서 없는 호스트" value={t.noSensor} meta="온도 센서를 보고하지 않는 호스트 — 집계 제외" /> : null}
+        {t.noSensor ? <Card label="센서 미수집 서버" value={t.noSensor} meta="온도 센서를 아직 못 받은 서버 — 집계 제외" /> : null}
       </div>
 
       <div className="muted" style={{ fontSize: 12, marginBottom: 10, lineHeight: 1.7 }}>
@@ -162,8 +162,8 @@ export function RoomTemp() {
         <div className="card" style={{ padding: 24, textAlign: 'center' }}>
           <div className="muted" style={{ fontSize: 13, lineHeight: 1.8 }}>
             표시할 데이터가 없습니다.<br />
-            vCenter 수집이 1회 이상 완료되고, ESXi 호스트가 <b>하드웨어 온도 센서를 보고</b>해야 표시됩니다.<br />
-            (일부 구형·제한 환경은 numericSensorInfo 를 제공하지 않아 온도가 비어 있을 수 있습니다.)
+iDRAC 온도 수집이 1회 이상 완료되어야 표시됩니다.<br />
+            같은 데이터를 <b>특수 기능 › 서버 분석 › 법인별 온도</b>에서도 확인할 수 있습니다(동일 소스).
           </div>
         </div>
       ) : (
@@ -173,11 +173,11 @@ export function RoomTemp() {
       )}
 
       <div className="muted" style={{ fontSize: 11.5, marginTop: 12, lineHeight: 1.7 }}>
-        · 데이터 출처는 <b>vCenter 하드웨어 상태(numericSensorInfo) 온도 센서</b>이며, iDRAC 등록·수집이 있는 호스트는 Redfish 센서로 <b>보강</b>합니다(추가 조회 없음).<br />
+        · 데이터 출처는 <b>서버 분석 › 법인별 온도와 동일한 iDRAC 센서 수집</b>입니다(중앙 로컬 + 위임 엣지 병합, 추가 조회 없음).<br />
         · 센서 분류는 이름 기준입니다 — 흡기(Inlet/Intake/Ambient/Front) · 배기(Exhaust/Outlet/Exit/Rear) · CPU(CPU/CPU1/Proc/Package/Die).
         그 외 센서(메모리·PSU·보드 등)는 성격이 달라 집계에서 제외합니다.<br />
-        · 한 호스트에 같은 종류 센서가 여러 개면(CPU1·CPU2 등) <b>가장 높은 값</b>을 그 호스트의 대표값으로 씁니다.<br />
-        · 센서 목록이 없고 대표 온도만 있는 호스트는 그 값을 <b>흡기로만</b> 인정합니다(배기·CPU 는 추정하지 않습니다).
+        · 한 서버에 같은 종류 센서가 여러 개면(CPU1·CPU2 등) <b>가장 높은 값</b>을 그 서버의 대표값으로 씁니다.<br />
+        · 법인(DataCenter) 귀속이 1순위이고, 없으면 vCenter, 둘 다 없으면 <b>(미지정)</b> 으로 묶습니다 — 임의 배정하지 않습니다.
       </div>
     </>
   );

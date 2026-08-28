@@ -9,7 +9,6 @@ import { loadPowerSettings, savePowerSettings } from '../../idrac/powerSettings.
 import { getInventory as getIdracInventory } from '../../idrac/invCache.js';
 import { getSensorSeries } from '../../idrac/sensorStore.js';
 import { roomTempReport } from '../../idrac/roomTemp.js';
-import { scopedVcenterIds } from '../../auth/scope.js';
 import { hardwareDimMatch } from '../../idrac/hwMatch.js';
 import { partBuckets, serversWithPart, isPartCat } from '../../idrac/partsInventory.js';
 import { snapMemo } from '../../util/snapCache.js';
@@ -31,10 +30,11 @@ export function registerIdracCore(adminRouter) {
  */
 adminRouter.get('/room-temp', adminOnly, (req, res) => {
   try {
-    // v2.382: 데이터 소스를 **vCenter 스냅샷**으로 교정(iDRAC 등록이 없으면 빈 화면이었음).
-    // 스냅샷 호스트의 temps[]/tempC 를 vCenter 단위로 집계하고, iDRAC 수집이 있으면 보강한다.
-    const snap = store.get();
-    res.json(roomTempReport(snap, { allowedVcenterIds: scopedVcenterIds(req.user, snap) }));
+    // v2.383: 소스를 **서버 분석 › 법인별 온도(/admin/idrac/temps)와 동일**하게 맞춤.
+    // analysisServersWithRemote = 중앙 로컬 + 위임 엣지 병합(datacenterId 해석 포함) —
+    // 위임 환경에서 온도 데이터가 실제로 있는 곳이다(그 화면이 서버 864/965·센서 3,747개 표시).
+    // scope 는 analysisFilter(req) 가 내부에서 적용한다(그 화면과 같은 필터 규칙 공유).
+    res.json(roomTempReport(analysisServersWithRemote(req)));
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 
