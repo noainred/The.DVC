@@ -12,7 +12,7 @@ import { localSnapshots, dropSnapshot } from '../../storage/store.js';
 import { collectDeviceNow, storagePollerStatus, pollStorageOnce } from '../../storage/poller.js';
 import { edgeStorageSnapshots } from '../../central/storageEdge.js';
 import { listActivity } from '../../storage/activityLog.js';
-import { areaSummary, areaJson, capacityHistory, dbAvailable } from '../../storage/db.js';
+import { areaSummary, areaJson, capacityHistory, capacityHistoryAll, dbAvailable } from '../../storage/db.js';
 import { AREA_LABEL } from '../../storage/onefsCatalog.js';
 import { listDatacenters } from '../../datacenter/store.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
@@ -230,9 +230,45 @@ api.get('/tools/storage/devices/:id/areas/json', adminOnly, async (req, res) => 
  * v2.318(ì¶ì´ ê·¸ëí): 7ì¼ ì´ê³¼ êµ¬ê°ì ~800ì  ëª©íë¡ ìê° ë²í· íê·  ë¤ì´ìí â raw ë
  * LIMIT 5000 ì ìë¶ë¶ë§ ìë ¤ ì¥ê¸° êµ¬ê°ìì ìµê·¼ ë°ì´í°ê° ì ë³´ìë¤(db.js selCapBucket ì£¼ì).
  */
+
+/**
+ * 추이 기간 프리셋(v2.380) — 12시간·24시간·1주를 사용자 요구로 추가.
+ * 기존 days 파라미터도 계속 받는다(하위호환: 링크·북마크가 깨지지 않게).
+ *  - 24시간 이하: 원본(raw) 조회 — 10분 수집 주기라 12h=72점·24h=144점으로 충분히 가볍다.
+ *  - 1주 이상: 버킷 평균으로 ~800점 목표 다운샘플(raw 는 LIMIT 5000 에 앞부분만 남아
+ *    장기 구간에서 최근이 잘려 나갔다 — db.js selCapBucket 주석 참조).
+ */
+const USAGE_RANGES = {
+  '12h': { spanMs: 12 * 3_600_000, bucketMs: 0 },
+  '24h': { spanMs: 24 * 3_600_000, bucketMs: 0 },
+  '7d': { spanMs: 7 * 86_400_000, bucketMs: 3_600_000 },
+  '30d': { spanMs: 30 * 86_400_000, bucketMs: 6 * 3_600_000 },
+  '90d': { spanMs: 90 * 86_400_000, bucketMs: 12 * 3_600_000 },
+  '400d': { spanMs: 400 * 86_400_000, bucketMs: 86_400_000 },
+};
+function usageRange(query = {}) {
+  const key = String(query.range || '');
+  if (USAGE_RANGES[key]) return { range: key, ...USAGE_RANGES[key] };
+  // 하위호환: ?days=N (1~400). 기존 규칙(7일 초과면 ~800점 버킷)을 유지한다.
+  const days = Math.max(1, Math.min(400, Number(query.days) || 30));
+  return { range: `${days}d`, spanMs: days * 86400e3, bucketMs: days <= 7 ? 0 : Math.ceil((days * 86400e3) / 800) };
+}
+
 api.get('/tools/storage/devices/:id/history', fullScopeOnly, async (req, res) => {
-  const days = Math.max(1, Math.min(400, Number(req.query.days) || 30));
-  const bucketMs = days <= 7 ? 0 : Math.ceil((days * 86400e3) / 800);
-  res.json({ db: await dbAvailable(), bucketMs, points: await capacityHistory(req.params.id, Date.now() - days * 86400e3, bucketMs) });
+  const { spanMs, bucketMs, range } = usageRange(req.query);
+  res.json({ db: await dbAvailable(), range, spanMs, bucketMs, points: await capacityHistory(req.params.id, Date.now() - spanMs, bucketMs) });
+});
+
+/**
+ * 전체 장비 합산 용량 추이(v2.380) — 목록 화면의 통합 추이 탭.
+ * 장비별 수집 시각이 달라 항상 버킷 평균 후 장비 합산으로 계산한다(db.capacityHistoryAll).
+ * 각 점의 devices(그 버킷에 데이터가 있던 장비 수)를 함께 반환해, 일부 장비만 수집된 구간을
+ * '전체 용량 급감' 으로 오독하지 않게 화면이 표시한다.
+ */
+api.get('/tools/storage/history', fullScopeOnly, async (req, res) => {
+  const { spanMs, bucketMs, range } = usageRange(req.query);
+  // 전체 합산은 버킷이 필수 — 12시간 구간이라도 10분 버킷으로 시각을 정렬한다.
+  const b = bucketMs || 600_000;
+  res.json({ db: await dbAvailable(), range, spanMs, bucketMs: b, points: await capacityHistoryAll(Date.now() - spanMs, b) });
 });
 }

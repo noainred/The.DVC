@@ -69,6 +69,22 @@ async function open() {
         AVG(total_bytes) AS total_bytes, AVG(used_bytes) AS used_bytes,
         AVG(hdd_total) AS hdd_total, AVG(hdd_used) AS hdd_used, AVG(ssd_total) AS ssd_total, AVG(ssd_used) AS ssd_used
         FROM capacity_history WHERE device_id = ? AND ts >= ? GROUP BY CAST(ts/? AS INTEGER) ORDER BY ts LIMIT 2000`),
+      // 전체(모든 장비) 합산 시계열(v2.380) — 목록 화면의 통합 추이용.
+      // 장비마다 수집 시각이 조금씩 다르므로 **버킷으로 시각을 정렬한 뒤 장비 합계**를 낸다.
+      // 안쪽 쿼리에서 (버킷, 장비)별 평균을 구하고(같은 버킷에 여러 샘플이 있을 수 있음)
+      // 바깥에서 장비들을 SUM 한다 — 이 순서가 아니면 샘플 수가 많은 장비가 과대 반영된다.
+      // CAST 필수(node:sqlite 는 JS 숫자를 REAL 로 바인딩 — selCapBucket 주석과 같은 이유).
+      selCapAllBucket: conn.prepare(`SELECT ts, SUM(total_bytes) AS total_bytes, SUM(used_bytes) AS used_bytes,
+          SUM(hdd_total) AS hdd_total, SUM(hdd_used) AS hdd_used, SUM(ssd_total) AS ssd_total, SUM(ssd_used) AS ssd_used,
+          COUNT(*) AS devices
+        FROM (
+          SELECT CAST(CAST(ts/? AS INTEGER)*? AS INTEGER) AS ts, device_id,
+            AVG(total_bytes) AS total_bytes, AVG(used_bytes) AS used_bytes,
+            AVG(hdd_total) AS hdd_total, AVG(hdd_used) AS hdd_used,
+            AVG(ssd_total) AS ssd_total, AVG(ssd_used) AS ssd_used
+          FROM capacity_history WHERE ts >= ?
+          GROUP BY CAST(ts/? AS INTEGER), device_id
+        ) GROUP BY ts ORDER BY ts LIMIT 2000`),
       prune1: conn.prepare('DELETE FROM api_history WHERE ts < ?'),
       prune2: conn.prepare('DELETE FROM capacity_history WHERE ts < ?'),
     };
@@ -136,4 +152,18 @@ export async function capacityHistory(deviceId, sinceMs, bucketMs = 0) {
   if (b > 0) return db.selCapBucket.all(b, b, deviceId, sinceMs, b);
   return db.selCap.all(deviceId, sinceMs);
 }
+/**
+ * 전체 장비 합산 용량 시계열(v2.380) — 목록 화면 통합 추이.
+ * bucketMs 는 필수다(장비별 수집 시각이 달라 버킷 없이는 합산 시점을 맞출 수 없다).
+ * 반환 각 점의 devices 는 그 버킷에 데이터가 있던 장비 수 — 일부 장비만 수집된 구간을
+ * '전체 감소'로 오독하지 않게 화면에 함께 보여준다.
+ */
+export async function capacityHistoryAll(sinceMs, bucketMs) {
+  const db = await open();
+  if (!db) return [];
+  const b = Math.max(60_000, Number(bucketMs) || 3_600_000);
+  try { return db.st.selCapAllBucket.all(b, b, Number(sinceMs) || 0, b); }
+  catch { return []; }
+}
+
 export function _resetForTest() { try { _db?.conn?.close?.(); } catch { /* */ } _db = null; _pruneTick = 0; }

@@ -141,9 +141,9 @@ export default function StorageMonTool() {
     <div>
       <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 12 }}>
         <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={() => setForm({ type: 'isilon', name: '', host: '', username: 'root', password: '', agent: '', datacenterId: '', collectMethod: 'ssh', sshPort: 22, enabled: true })}>+ 장비 등록</button>
-        {['devices', 'dc', 'type'].map((v) => (
+        {['devices', 'dc', 'type', 'trend'].map((v) => (
           <button key={v} className={view === v ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 13px' }} onClick={() => setView(v)}>
-            {v === 'devices' ? '🗄 장비별' : v === 'dc' ? '🏢 법인별' : '📦 타입별'}
+            {v === 'devices' ? '🗄 장비별' : v === 'dc' ? '🏢 법인별' : v === 'type' ? '📦 타입별' : '📈 추이'}
           </button>
         ))}
         {/* CSV 일괄 관리(v2.313, 사용자 요구) — 내보내기·가져오기·샘플. v2.317: 내보내기는
@@ -176,6 +176,8 @@ export default function StorageMonTool() {
       {exportOpen && <CsvExport onClose={() => setExportOpen(false)} />}
 
       {view === 'devices' && <DeviceTable list={rows} />}
+      {/* 통합 추이(v2.380) — 전체 합산 + 장비별 선택. 기간 12시간/24시간/1주 등. */}
+      {view === 'trend' && <StorageTrendPanel devices={rows} />}
       {view === 'dc' && groupBy((r) => dcName(r.datacenterId)).map(([dc, list]) => {
         const t = sum(list.filter((r) => r.snap), (r) => r.snap.capacity?.totalBytes);
         const u = sum(list.filter((r) => r.snap), (r) => r.snap.capacity?.usedBytes);
@@ -651,6 +653,119 @@ function DeviceForm({ d, form, setForm, onSaved }) {
   );
 }
 
+
+/**
+ * 추이 기간 프리셋(v2.380) — 서버 storageMon.js USAGE_RANGES 와 키가 일치해야 한다.
+ * 12시간·24시간을 사용자 요구로 추가했다(수집 주기 10분이라 12h=72점·24h=144점으로 가볍다).
+ */
+const TREND_RANGES = [
+  ['12h', '12시간'], ['24h', '24시간'], ['7d', '1주'], ['30d', '1달'], ['90d', '3달'], ['400d', '400일'],
+];
+/** 기간에 맞춘 축 라벨 — 단기는 시:분, 장기는 날짜(과밀 방지). */
+function fmtTrendTs(ts, range) {
+  const dt = new Date(ts);
+  const p = (n) => String(n).padStart(2, '0');
+  if (range === '12h' || range === '24h') return `${p(dt.getHours())}:${p(dt.getMinutes())}`;
+  if (range === '7d') return `${p(dt.getMonth() + 1)}.${p(dt.getDate())} ${p(dt.getHours())}시`;
+  if (range === '400d') return `${String(dt.getFullYear()).slice(2)}.${p(dt.getMonth() + 1)}.${p(dt.getDate())}`;
+  return `${p(dt.getMonth() + 1)}.${p(dt.getDate())}`;
+}
+
+/**
+ * 통합 추이 패널(v2.380) — 목록 화면에서 모달을 열지 않고 바로 보는 용량 추이.
+ * '전체 합계'는 모든 장비를 버킷 평균 후 합산한다(서버 /tools/storage/history).
+ * 장비마다 수집 시각이 다르므로 각 점의 devices(그 시각에 데이터가 있던 장비 수)를 함께
+ * 보여준다 — 일부 장비만 수집된 구간을 '전체 용량 급감'으로 오독하지 않게 하기 위함이다.
+ * 데이터는 스토리지 전용 독립 DB(storage-history.db capacity_history)에서 온다.
+ */
+function StorageTrendPanel({ devices }) {
+  // ⚠ 훅은 조기 return 위에서 전부 선언(CLAUDE.md — React #310 방지).
+  const [range, setRange] = useState('24h');
+  const [target, setTarget] = useState('');      // '' = 전체 합계, 그 외 = deviceId
+  const [d, setD] = useState(null);
+  const [err, setErr] = useState(null);
+  useEffect(() => {
+    let live = true;
+    setD(null); setErr(null);
+    const url = target
+      ? `/tools/storage/devices/${encodeURIComponent(target)}/history?range=${range}`
+      : `/tools/storage/history?range=${range}`;
+    fetchJson(url).then((r) => { if (live) setD(r); }).catch((e) => { if (live) setErr(e.message); });
+    return () => { live = false; };
+  }, [target, range]);
+
+  const pts = (d?.points || []).map((p) => ({
+    t: fmtTrendTs(p.ts, range),
+    used: p.used_bytes, total: p.total_bytes,
+    hddUsed: p.hdd_used, ssdUsed: p.ssd_used, devices: p.devices,
+  }));
+  const hasHdd = pts.some((p) => p.hddUsed != null && p.hddUsed > 0);
+  const hasSsd = pts.some((p) => p.ssdUsed != null && p.ssdUsed > 0);
+  // 부분 수집 구간 경고 — 점마다 장비 수가 다르면 합산선이 계단처럼 보인다(데이터 특성).
+  const devCounts = [...new Set(pts.map((p) => p.devices).filter((x) => x != null))];
+  const partial = !target && devCounts.length > 1;
+  const last = pts.length ? pts[pts.length - 1] : null;
+
+  return (
+    <div className="card" style={{ padding: 14 }}>
+      <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 10 }}>
+        <div className="flex gap wrap" style={{ gap: 6, alignItems: 'center' }}>
+          <div className="section-title" style={{ fontSize: 13, margin: 0 }}>용량 추이</div>
+          {TREND_RANGES.map(([v, l]) => (
+            <button key={v} className={range === v ? 'login-btn' : 'logout-btn'}
+              style={{ flex: 'none', padding: '4px 10px', fontSize: 11.5 }} onClick={() => setRange(v)}>{l}</button>
+          ))}
+        </div>
+        <select className="select" value={target} onChange={(e) => setTarget(e.target.value)} style={{ minWidth: 200 }}>
+          <option value="">전체 합계({(devices || []).length}대)</option>
+          {(devices || []).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+        </select>
+      </div>
+
+      {last && (
+        <div className="flex gap wrap" style={{ fontSize: 12.5, marginBottom: 8 }}>
+          <span className="muted">최근 사용 <b style={{ color: 'var(--text)' }}>{tbFmt(last.used)}</b></span>
+          <span className="muted">전체 <b style={{ color: 'var(--text)' }}>{tbFmt(last.total)}</b></span>
+          {last.total > 0 && <span className="muted">사용률 <b style={{ color: 'var(--text)' }}>{Math.round((last.used / last.total) * 100)}%</b></span>}
+          {!target && last.devices != null && <span className="muted">수집 장비 <b style={{ color: 'var(--text)' }}>{last.devices}</b>대</span>}
+        </div>
+      )}
+
+      {err ? <div className="muted" style={{ fontSize: 12 }}>추이 조회 오류: {err}</div>
+        : !d ? <div className="muted" style={{ fontSize: 12 }}>불러오는 중…</div>
+          : pts.length === 0 ? (
+            <div className="muted" style={{ fontSize: 12.5, padding: 20, textAlign: 'center', lineHeight: 1.8 }}>
+              이 기간에 시계열 데이터가 없습니다.<br />
+              용량 추이는 <b>수집이 누적된 시점부터</b> 표시됩니다(수집 주기 10분).
+              {d.db === false ? <><br /><b>이 서버에서 시계열 DB(SQLite)를 사용할 수 없습니다</b> — 최신 스냅샷만 동작합니다.</> : null}
+            </div>
+          ) : (
+            <>
+              <ResponsiveContainer width="100%" height={280}>
+                <LineChart data={pts} margin={{ top: 6, right: 12, left: 4, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.08)" />
+                  <XAxis dataKey="t" tick={{ fontSize: 11 }} minTickGap={44} />
+                  <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => tbFmt(v)} width={74} />
+                  <Tooltip contentStyle={{ background: '#0b1220', border: '1px solid #243049', fontSize: 12 }} formatter={(v) => tbFmt(v)} />
+                  <Legend wrapperStyle={{ fontSize: 11.5 }} />
+                  {/* '전체'는 계열이 아니라 한계선(컨텍스트) — 중립 회색 점선(기존 모달 추이와 동일 규약) */}
+                  <Line type="monotone" dataKey="total" name="전체" stroke="#8b9bb4" strokeDasharray="4 3" dot={false} strokeWidth={1.4} connectNulls={false} />
+                  <Line type="monotone" dataKey="used" name="사용" stroke="#3987e5" dot={false} strokeWidth={1.8} connectNulls={false} />
+                  {hasHdd && <Line type="monotone" dataKey="hddUsed" name="HDD 사용" stroke="#d95926" dot={false} strokeWidth={1.5} connectNulls={false} />}
+                  {hasSsd && <Line type="monotone" dataKey="ssdUsed" name="SSD 사용" stroke="#199e70" dot={false} strokeWidth={1.5} connectNulls={false} />}
+                </LineChart>
+              </ResponsiveContainer>
+              <div className="muted" style={{ fontSize: 11.5, marginTop: 6, lineHeight: 1.7 }}>
+                점선(회색) = 전체 용량 · 실선 = 사용량. 데이터는 스토리지 전용 DB(storage-history.db)에 적재됩니다.
+                {(d.bucketMs || 0) > 0 ? ` 집계 단위 ${(d.bucketMs >= 86_400_000 ? `${Math.round(d.bucketMs / 86_400_000)}일` : `${Math.round(d.bucketMs / 60_000)}분`)} 평균 ·` : ' 원본 값 ·'} 표본 {pts.length}점
+                {partial ? <><br /><b style={{ color: 'var(--amber)' }}>주의</b> 구간에 따라 수집된 장비 수가 다릅니다({devCounts.sort((a, b) => a - b).join('·')}대) — 합계선의 급변이 실제 용량 변화가 아닐 수 있습니다. 장비를 선택해 개별 추이로 확인하세요.</> : null}
+              </div>
+            </>
+          )}
+    </div>
+  );
+}
+
 /**
  * 용량 추이 그래프(v2.318, 사용자 백로그) — 장비 상세 모달의 시계열 라인 차트.
  *
@@ -664,26 +779,21 @@ function DeviceForm({ d, form, setForm, onSaved }) {
  *   회색은 계열 색으로는 검증 FAIL 이지만 참조선으로는 의도된 중립). 시리즈 ≥2 라 범례 표시.
  */
 function CapacityTrend({ deviceId, isEdge }) {
-  const [days, setDays] = useState(30);
+  // 기간 프리셋(v2.380): 12시간·24시간을 사용자 요구로 추가. 서버 range 파라미터를 쓴다
+  // (days 도 계속 지원되지만 12시간은 정수 days 로 표현할 수 없다).
+  const [range, setRange] = useState('7d');
   const [d, setD] = useState(null);      // { db, points } — null = 로딩 전
   const [err, setErr] = useState(null);
   useEffect(() => {
     let live = true;
     setD(null); setErr(null);
-    fetchJson(`/tools/storage/devices/${encodeURIComponent(deviceId)}/history?days=${days}`)
+    fetchJson(`/tools/storage/devices/${encodeURIComponent(deviceId)}/history?range=${range}`)
       .then((r) => { if (live) setD(r); })
       .catch((e) => { if (live) setErr(e.message); });
     return () => { live = false; };
-  }, [deviceId, days]);
+  }, [deviceId, range]);
 
-  const fmtT = (ts) => {
-    const dt = new Date(ts);
-    const p = (n) => String(n).padStart(2, '0');
-    if (days <= 1) return `${p(dt.getHours())}:${p(dt.getMinutes())}`;
-    if (days <= 7) return `${p(dt.getMonth() + 1)}.${p(dt.getDate())} ${p(dt.getHours())}시`;
-    if (days <= 90) return `${p(dt.getMonth() + 1)}.${p(dt.getDate())}`;
-    return `${String(dt.getFullYear()).slice(2)}.${p(dt.getMonth() + 1)}.${p(dt.getDate())}`;
-  };
+  const fmtT = (ts) => fmtTrendTs(ts, range);
   const pts = (d?.points || []).map((p) => ({
     t: fmtT(p.ts),
     used: p.used_bytes, total: p.total_bytes,
@@ -695,8 +805,8 @@ function CapacityTrend({ deviceId, isEdge }) {
     <>
       <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 6 }}>
         <div className="section-title" style={{ fontSize: 13, margin: 0 }}>용량 추이</div>
-        {[[1, '1일'], [7, '1주'], [30, '1달'], [90, '3달'], [400, '400일']].map(([v, l]) => (
-          <button key={v} className={days === v ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '4px 10px', fontSize: 11.5 }} onClick={() => setDays(v)}>{l}</button>
+        {TREND_RANGES.map(([v, l]) => (
+          <button key={v} className={range === v ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '4px 10px', fontSize: 11.5 }} onClick={() => setRange(v)}>{l}</button>
         ))}
       </div>
       {err ? <div className="muted" style={{ fontSize: 12, marginBottom: 12 }}>추이 조회 오류: {err}</div>
