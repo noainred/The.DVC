@@ -165,6 +165,60 @@ api.get('/tools/waste', (req, res) => memoJson(req, res, 'tools-waste', (snap) =
   };
 }, { extraKey: scopeKey(req.user, store.get()) }));
 
+/**
+ * 할당 vs 실사용 트렌드(v2.374) — '주기적 실사용률을 보고 할당량을 조절' 하기 위한 시계열.
+ * 샘플러(기본 1분)가 적재한 vCenter별/전체 집계를 시간당 이상 버킷으로 집계해 돌려준다.
+ * metrics db.history 는 60분 정배수 버킷이면 samples_hourly 롤업을 자동으로 써서 원본
+ * 풀스캔을 피한다(이벤트 루프 보호 — ARCH-HEAVY-JOB-ISOLATION 참조).
+ *
+ * query: vcenterId(생략=전체 합계) · days(1~1830, 기본 30) · bucket(hour|day|week, 기본 auto)
+ * 응답 points: { ts, cpuAllocGHz, cpuUsedGHz, cpuUsedPct, memAllocGB, memUsedGB, memUsedPct }
+ *   — 사용률·절감 가능(%)은 할당/사용에서 파생 계산한다(중복 저장하지 않음).
+ */
+api.get('/tools/waste/history', async (req, res) => {
+  const vcId = String(req.query.vcenterId || '');
+  const days = Math.max(1, Math.min(1830, Number(req.query.days) || 30));
+  // scope: 특정 vCenter 요청은 소유 검사, 전체('')는 범위 제한 계정에 주지 않는다
+  // (전체 합계는 범위 밖 vCenter 를 포함하므로 — '귀속 없는 데이터 미노출' 불변조건).
+  const allowed = scopedVcenterIds(req.user, store.get());
+  if (allowed) {
+    if (!vcId) return res.status(403).json({ ok: false, reason: '전체 합계 트렌드는 전체 범위 계정만 조회할 수 있습니다. vCenter 를 선택하세요.' });
+    if (!allowed.has(vcId)) return res.json({ vcenterId: vcId, days, bucketMs: 0, points: [] }); // 존재 은닉
+  }
+  const since = Date.now() - days * 86_400_000;
+  const BUCKET = { hour: 3_600_000, day: 86_400_000, week: 7 * 86_400_000 };
+  const bucketMs = BUCKET[req.query.bucket]
+    || (days <= 3 ? 3_600_000 : days <= 60 ? 6 * 3_600_000 : days <= 400 ? 86_400_000 : 7 * 86_400_000);
+  const limit = bucketMs <= 3_600_000 ? 3000 : 1500;
+  let points = [];
+  let meta = null;
+  try {
+    const db = await getMetricsDb();
+    const key = vcId; // 전체는 '' 로 적재됨(sampler vmAllocRows)
+    const [ca, cu, ma, mu] = ['vm_cpu_alloc_mhz', 'vm_cpu_used_mhz', 'vm_mem_alloc_mb', 'vm_mem_used_mb']
+      .map((m) => db.history(m, key, since, bucketMs, limit));
+    // ts 기준으로 4계열을 합친다(같은 버킷 경계라 ts 가 일치한다).
+    const byTs = new Map();
+    const put = (arr, field) => { for (const p of arr || []) { let e = byTs.get(p.ts); if (!e) { e = { ts: p.ts }; byTs.set(p.ts, e); } e[field] = p.avg; } };
+    put(ca, 'cpuAllocMhz'); put(cu, 'cpuUsedMhz'); put(ma, 'memAllocMB'); put(mu, 'memUsedMB');
+    const r1 = (x) => (x == null ? null : Number(x.toFixed(1)));
+    const pct = (u, a) => (a > 0 && u != null ? Math.round((u / a) * 100) : null);
+    points = [...byTs.values()].sort((a, b) => a.ts - b.ts).map((e) => ({
+      ts: e.ts,
+      cpuAllocGHz: r1(e.cpuAllocMhz == null ? null : e.cpuAllocMhz / 1000),
+      cpuUsedGHz: r1(e.cpuUsedMhz == null ? null : e.cpuUsedMhz / 1000),
+      cpuUsedPct: pct(e.cpuUsedMhz, e.cpuAllocMhz),
+      memAllocGB: r1(e.memAllocMB == null ? null : e.memAllocMB / 1024),
+      memUsedGB: r1(e.memUsedMB == null ? null : e.memUsedMB / 1024),
+      memUsedPct: pct(e.memUsedMB, e.memAllocMB),
+    }));
+    const m = db.meta('vm_cpu_alloc_mhz');
+    meta = { firstTs: m.firstTs, lastTs: m.lastTs };
+  } catch { points = []; }
+  // 관측 시작 이전 구간은 데이터가 없다 — 프론트가 '수집 시작' 을 표기할 수 있게 meta 를 준다.
+  res.json({ vcenterId: vcId || 'all', days, bucketMs, collectedSince: meta?.firstTs ?? null, points });
+});
+
 // Thin-provisioned VM finder. thin = uncommitted(여유)이 큰 VM(추정). committed=실사용,
 // provisioned=committed+uncommitted. 회수 가능 추정 = uncommitted 합계.
 api.get('/tools/thin-vms', (req, res) => memoJson(req, res, 'tools-thin-vms', (snap) => {

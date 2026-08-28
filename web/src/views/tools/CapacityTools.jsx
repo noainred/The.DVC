@@ -149,6 +149,84 @@ export function Capacity({ scope }) {
   );
 }
 
+/**
+ * 할당 vs 실사용 추이(v2.374) — '주기적 실사용률 트렌드로 할당량을 조절' 하기 위한 차트.
+ * 샘플러(기본 1분)가 적재한 집계를 시간/일/주 버킷으로 보여준다(시간당 이상은 롤업 사용).
+ * 사용률(%) 축과 절대량(GHz/GB) 축을 탭으로 나눠 본다 — 한 차트에 섞으면 스케일이 무의미해진다.
+ */
+function WasteTrend({ scope }) {
+  const [days, setDays] = useState(30);
+  const [bucket, setBucket] = useState('auto');
+  const [mode, setMode] = useState('pct');   // pct | abs
+  const [d, setD] = useState(null);
+  const [err, setErr] = useState(null);
+  useEffect(() => {
+    let dead = false;
+    setD(null); setErr(null);
+    const p = { days: String(days), ...(scope ? { vcenterId: scope } : {}), ...(bucket !== 'auto' ? { bucket } : {}) };
+    fetchJson('/tools/waste/history', p).then((r) => { if (!dead) setD(r); }).catch((e) => { if (!dead) setErr(e.message); });
+    return () => { dead = true; };
+  }, [scope, days, bucket]);
+  const pts = d?.points || [];
+  const fmtTs = (t) => new Date(t).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit' });
+  return (
+    <>
+      <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 8 }}>
+        <span className="muted" style={{ fontSize: 12 }}>기간</span>
+        <select className="select" value={days} onChange={(e) => setDays(Number(e.target.value))} style={{ minWidth: 110 }}>
+          {[1, 7, 30, 90, 365].map((n) => <option key={n} value={n}>최근 {n}일</option>)}
+        </select>
+        <span className="muted" style={{ fontSize: 12 }}>집계</span>
+        <select className="select" value={bucket} onChange={(e) => setBucket(e.target.value)} style={{ minWidth: 110 }}>
+          <option value="auto">자동</option><option value="hour">1시간</option><option value="day">1일</option><option value="week">1주</option>
+        </select>
+        <div className="flex gap" style={{ marginLeft: 4 }}>
+          <button className={mode === 'pct' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '6px 12px' }} onClick={() => setMode('pct')}>사용률(%)</button>
+          <button className={mode === 'abs' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '6px 12px' }} onClick={() => setMode('abs')}>절대량</button>
+        </div>
+      </div>
+      {err ? <ErrorBox message={err} />
+        : !d ? <Loading />
+          : pts.length < 2 ? (
+            <div className="muted" style={{ fontSize: 13, padding: 20, textAlign: 'center' }}>
+              표시할 추이 데이터가 아직 없습니다. 사용량은 <b>샘플러가 수집하는 시점부터</b> 쌓입니다
+              {d.collectedSince ? <> (수집 시작: {new Date(d.collectedSince).toLocaleString('ko-KR')})</> : null}.
+              업그레이드 직후에는 몇 시간 뒤부터 그래프가 보입니다.
+            </div>
+          ) : (
+            <div style={{ width: '100%', height: 320 }}>
+              <ResponsiveContainer>
+                <LineChart data={pts} margin={{ top: 8, right: 16, bottom: 4, left: 0 }}>
+                  <CartesianGrid stroke="rgba(148,163,184,.15)" />
+                  <XAxis dataKey="ts" tickFormatter={fmtTs} tick={{ fontSize: 11 }} minTickGap={28} />
+                  <YAxis tick={{ fontSize: 11 }} domain={mode === 'pct' ? [0, 100] : ['auto', 'auto']}
+                    label={{ value: mode === 'pct' ? '%' : 'GHz / GB', angle: -90, position: 'insideLeft', fontSize: 11 }} />
+                  <Tooltip labelFormatter={(t) => new Date(t).toLocaleString('ko-KR')}
+                    contentStyle={{ background: 'var(--panel)', border: '1px solid var(--border)', fontSize: 12 }} />
+                  {mode === 'pct' ? <>
+                    <Line type="monotone" dataKey="cpuUsedPct" name="CPU 사용률" stroke="#60a5fa" dot={false} connectNulls={false} />
+                    <Line type="monotone" dataKey="memUsedPct" name="메모리 사용률" stroke="#4ade80" dot={false} connectNulls={false} />
+                  </> : <>
+                    <Line type="monotone" dataKey="cpuAllocGHz" name="CPU 할당(GHz)" stroke="#60a5fa" strokeDasharray="4 3" dot={false} connectNulls={false} />
+                    <Line type="monotone" dataKey="cpuUsedGHz" name="CPU 사용(GHz)" stroke="#60a5fa" dot={false} connectNulls={false} />
+                    <Line type="monotone" dataKey="memAllocGB" name="메모리 할당(GB)" stroke="#4ade80" strokeDasharray="4 3" dot={false} connectNulls={false} />
+                    <Line type="monotone" dataKey="memUsedGB" name="메모리 사용(GB)" stroke="#4ade80" dot={false} connectNulls={false} />
+                  </>}
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+      {pts.length >= 2 && (
+        <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+          점선 = 할당, 실선 = 실사용. 사용률이 장기간 낮게 유지되면 할당을 줄일 여지가 있습니다.
+          {' '}집계 단위 {d.bucketMs >= 86_400_000 ? `${Math.round(d.bucketMs / 86_400_000)}일` : `${Math.round(d.bucketMs / 3_600_000)}시간`} 평균 ·
+          {' '}표본 {pts.length}점{d.collectedSince ? ` · 수집 시작 ${new Date(d.collectedSince).toLocaleDateString('ko-KR')}` : ''}
+        </div>
+      )}
+    </>
+  );
+}
+
 export function Waste({ scope }) {
   const { loading, data, error } = useTool('/tools/waste', scope ? { vcenterId: scope } : {});
   const [tab, setTab] = useState('off');
@@ -172,7 +250,7 @@ export function Waste({ scope }) {
       </div>
       <div className="flex gap" style={{ marginBottom: 8 }}>
         {[['off', `전원 꺼짐 (${data.poweredOff.count})`], ['snap', `스냅샷 (${data.snapshots.count})`], ['tools', `Tools 미실행 (${data.noTools.count})`],
-          ...(oa ? [['cpu', `CPU 과할당 (${oa.cpu.candidates})`], ['mem', `메모리 과할당 (${oa.mem.candidates})`]] : [])].map(([k, l]) => (
+          ...(oa ? [['cpu', `CPU 과할당 (${oa.cpu.candidates})`], ['mem', `메모리 과할당 (${oa.mem.candidates})`], ['trend', '📈 사용 추이']] : [])].map(([k, l]) => (
           <button key={k} className={tab === k ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setTab(k)}>{l}</button>
         ))}
       </div>
@@ -217,6 +295,7 @@ export function Waste({ scope }) {
           { key: 'host', label: 'ESXi 호스트', render: (v) => <span className="muted">{v.host}</span> },
         ]} />
       </>}
+      {tab === 'trend' && <WasteTrend scope={scope} />}
       <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>※ 고아 디스크(orphaned VMDK)는 데이터스토어 파일 스캔이 필요해 현재 미포함입니다.</div>
       {oa && <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
         ※ 과할당 수치는 <b>스냅샷 시점(현재)의 순간 사용률</b> 기준 추정입니다 — 리사이징 결정에는 기간 평균·피크(예: 1주 P95)를 함께 확인하세요. 전원이 꺼진 VM은 제외했고(위 ‘전원 꺼짐’ 참조),

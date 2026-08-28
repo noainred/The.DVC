@@ -30,6 +30,61 @@ async function sampleOnce() {
   }
 }
 
+/**
+ * VM 할당 vs 실사용 집계 행 생성(v2.374) — vCenter 별 + 전체('').
+ * 할당 CPU clock 은 vCPU × 그 VM 이 올라간 호스트의 코어당 MHz 로 환산한다(VM 객체에 MHz
+ * 원값이 없어 호스트를 조인). 호스트 코어 MHz 를 모르는 VM 은 **CPU 집계에서 제외**한다
+ * (임의값 추정 금지 — /tools/waste 의 overAllocatedReport 와 같은 규칙). 메모리는 호스트
+ * 정보 없이 계산 가능하므로 전원 On 전량을 집계한다. 전원 OFF/템플릿은 제외(사용률 0 이라 왜곡).
+ */
+function vmAllocRows(snap) {
+  const hostMhz = new Map(); // host.name -> 코어당 MHz
+  for (const h of snap.hosts || []) {
+    const cores = Number(h.cpuCores) || 0;
+    const total = Number(h.cpuTotalMhz) || 0;
+    if (cores > 0 && total > 0) hostMhz.set(h.name, total / cores);
+  }
+  // vcenterId -> 누적
+  const agg = new Map();
+  const bucket = (id) => {
+    let e = agg.get(id);
+    if (!e) { e = { cpuUsed: 0, cpuAlloc: 0, memUsed: 0, memAlloc: 0 }; agg.set(id, e); }
+    return e;
+  };
+  for (const v of snap.vms || []) {
+    if (v.powerState !== 'POWERED_ON' || v.template) continue;
+    const memMB = Number(v.memMB) || 0;
+    const memPct = Number(v.memUsagePct) || 0;
+    const vcpu = Number(v.cpuCount) || 0;
+    const cpuPct = Number(v.cpuUsagePct) || 0;
+    const mhzPerCore = hostMhz.get(v.host);
+    for (const id of [v.vcenterId, '']) {          // vCenter별 + 전체
+      const e = bucket(id);
+      e.memAlloc += memMB;
+      e.memUsed += memMB * (memPct / 100);
+      if (mhzPerCore && vcpu > 0) {
+        const alloc = vcpu * mhzPerCore;
+        e.cpuAlloc += alloc;
+        e.cpuUsed += alloc * (cpuPct / 100);
+      }
+    }
+  }
+  const out = [];
+  for (const [k, e] of agg) {
+    // 값이 0 이면(해당 vCenter 에 전원 On VM 없음) 행을 만들지 않는다 — 빈 구간이 0 으로
+    // 기록돼 '사용률 0%' 로 오해되는 것 방지(차트는 결측을 결측으로 보여야 한다).
+    if (e.cpuAlloc > 0) {
+      out.push({ metric: 'vm_cpu_alloc_mhz', k, v: Math.round(e.cpuAlloc) });
+      out.push({ metric: 'vm_cpu_used_mhz', k, v: Math.round(e.cpuUsed) });
+    }
+    if (e.memAlloc > 0) {
+      out.push({ metric: 'vm_mem_alloc_mb', k, v: Math.round(e.memAlloc) });
+      out.push({ metric: 'vm_mem_used_mb', k, v: Math.round(e.memUsed) });
+    }
+  }
+  return out;
+}
+
 async function sampleOnceInner() {
   const snap = store.get();
   const db = await getMetricsDb();
@@ -66,6 +121,18 @@ async function sampleOnceInner() {
   }
   for (const [k, arr] of gpuByCluster) rows.push({ metric: 'gpu_cluster', k, v: round1(avg(arr)) });
   for (const [k, arr] of gpuByVc) rows.push({ metric: 'gpu_vc', k, v: round1(avg(arr)) });
+
+  // VM 실사용 vs 할당 집계(v2.374) — '주기적 실사용 트렌드로 할당량을 조절'하기 위한 시계열.
+  //
+  // ⚠ VM 별 시계열은 만들지 않는다: 5,850 VM × 시간당 1행 = 연 5,100만 행으로 감당이 안 된다
+  //   (vmStats.js 가 인메모리 누적을 택한 것과 같은 이유). 대신 **vCenter 단위 + 전체 합계**만
+  //   적재해 행 수를 (vCenter 수 × 메트릭 수)로 유계화한다 — 28 vCenter 면 시간당 ~116행.
+  //   VM 개별 트렌드는 rightsizing 리포트(vmStats 평균/피크)가 담당한다.
+  // 저장 메트릭(키 = vCenter id, 전체는 '')
+  //   vm_cpu_used_mhz / vm_cpu_alloc_mhz : 사용·할당 CPU clock 합계(MHz)
+  //   vm_mem_used_mb  / vm_mem_alloc_mb  : 사용·할당 메모리 합계(MB)
+  // 사용률(%)·절감 가능(%)은 이 4개에서 파생 계산한다(값을 중복 저장하지 않는다).
+  try { rows.push(...vmAllocRows(snap)); } catch { /* 집계 실패가 샘플링을 막지 않게 */ }
 
   // 포탈 자신의 프로세스 메모리(누수 추적) — 인벤토리 유무와 무관하게 항상 샘플하고,
   // 시간당 1줄 상태 로그(링 버퍼·journal)도 여기서 남긴다. 실패가 본 샘플링을 막지 않게 격리.
