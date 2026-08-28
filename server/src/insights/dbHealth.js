@@ -23,6 +23,10 @@ import path from 'node:path';
 
 // COUNT(*) 를 수행할 파일 크기 상한 — 초과 시 rowCount 는 null 이고 skipped 이유를 남긴다.
 const COUNT_MAX_BYTES = Number(process.env.DB_HEALTH_COUNT_MAX_BYTES) || 512 * 1024 * 1024;
+// full(integrity_check) 는 전 페이지를 동기로 읽어 **파일 크기에 비례해 이벤트 루프를 정지**시킨다
+// (node:sqlite 는 동기 API — GB 급 DB 면 수 초 이상 전체 API·폴러가 멈춘다). 상한 초과 시
+// quick_check 로 강등하고 그 사실을 skipped 로 알린다(추정치를 지어내지 않는다).
+const FULL_MAX_BYTES = Number(process.env.DB_HEALTH_FULL_MAX_BYTES) || 256 * 1024 * 1024;
 
 /** 이 저장소 규약: ipam.db 는 외부 프로그램이 직접 읽어 WAL 금지, 나머지 시계열 DB 는 WAL 권장. */
 const EXPECT_WAL = (file) => !/^ipam\.db$/i.test(file);
@@ -60,6 +64,9 @@ export async function inspectSqlite(absPath, { full = false } = {}) {
   try {
     // 읽기 전용 — 점검이 데이터를 수정하거나 스키마를 만들지 않게 한다.
     db = new mod.DatabaseSync(absPath, { readOnly: true });
+    // busy_timeout 없이는 쓰기와 겹치는 순간 SQLITE_BUSY 즉시 실패 → 'database is locked' 가
+    // 정합성 실패로 보고되어 **손상 오탐**이 된다(특히 DELETE 저널인 ipam.db).
+    try { db.exec('PRAGMA busy_timeout=3000'); } catch { /* 구버전 폴백 */ }
   } catch (e) {
     out.error = `열기 실패: ${e.message}`;
     return out;
@@ -68,14 +75,17 @@ export async function inspectSqlite(absPath, { full = false } = {}) {
 
   try {
     // ── 정합성 ────────────────────────────────────────────────────────
-    const chkSql = full ? 'PRAGMA integrity_check' : 'PRAGMA quick_check';
+    // 크기 상한 초과면 full 요청이라도 quick 으로 강등(이벤트 루프 보호).
+    const fullOk = full && sizeBytes <= FULL_MAX_BYTES;
+    if (full && !fullOk) out.skipped.push(`전체 점검 생략 — 파일이 ${Math.round(sizeBytes / 1048576)}MB(상한 ${Math.round(FULL_MAX_BYTES / 1048576)}MB) 로 동기 스캔이 이벤트 루프를 막음 → 빠른 점검으로 대체`);
+    const chkSql = fullOk ? 'PRAGMA integrity_check' : 'PRAGMA quick_check';
     const chk = q(chkSql);
-    if (chk?.__err) out.checks.integrity = { mode: full ? 'full' : 'quick', ok: false, detail: chk.__err };
+    if (chk?.__err) out.checks.integrity = { mode: fullOk ? 'full' : 'quick', ok: false, detail: chk.__err };
     else {
       const msgs = chk.map((r) => String(val(r))).filter(Boolean);
       const good = msgs.length === 1 && /^ok$/i.test(msgs[0]);
-      out.checks.integrity = { mode: full ? 'full' : 'quick', ok: good, detail: good ? 'ok' : msgs.slice(0, 20).join(' | ') };
-      if (!good) out.warnings.push(`정합성 점검 실패(${full ? 'integrity_check' : 'quick_check'}) — 백업 후 복구 필요`);
+      out.checks.integrity = { mode: fullOk ? 'full' : 'quick', ok: good, detail: good ? 'ok' : msgs.slice(0, 20).join(' | ') };
+      if (!good) out.warnings.push(`정합성 점검 실패(${fullOk ? 'integrity_check' : 'quick_check'}) — 백업 후 복구 필요`);
     }
 
     const fk = q('PRAGMA foreign_key_check');

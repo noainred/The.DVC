@@ -120,6 +120,12 @@ export function preflight(targetDir) {
   const target = String(targetDir || '').trim();
   if (!target) reasons.push('경로를 입력하세요.');
   if (target && !path.isAbsolute(target)) reasons.push('절대 경로를 입력하세요(예: /data/vmware-portal-db).');
+  // 제어문자·인용부호·백슬래시 금지(v2.388) — 생성되는 bash 스크립트/README 의 주석·코드블록에
+  // 경로가 삽입되므로, 개행이 들어가면 주석을 탈출한 실행 라인을 만들 수 있다(admin → root 상승).
+  // Linux 에서 개행은 합법 파일명이라 isAbsolute/mkdir/statfs 검사로는 걸러지지 않는다.
+  if (target && /[\x00-\x1f\x7f'"\\`$]/.test(target)) {
+    reasons.push('경로에 제어문자·인용부호·백슬래시·$·백틱은 쓸 수 없습니다(마이그레이션 스크립트 안전).');
+  }
   const src = dbDir() || CONFIG_DIR;
   if (target && path.resolve(target) === path.resolve(src)) reasons.push('현재 경로와 같습니다.');
   // 대상이 소스의 하위 디렉터리면 복사가 자기 자신을 파고들 수 있다.

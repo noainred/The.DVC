@@ -42,11 +42,13 @@ async function sampleOnce() {
  * 정보 없이 계산 가능하므로 전원 On 전량을 집계한다. 전원 OFF/템플릿은 제외(사용률 0 이라 왜곡).
  */
 function vmAllocRows(snap, settings) {
-  const hostMhz = new Map(); // host.name -> 코어당 MHz
+  // `${vcenterId}|${host.name}` -> 코어당 MHz. 이름 단독 키는 vCenter 간 동명 호스트가
+  // 덮어써 다른 사이트 MHz 로 환산되는 오염이 생긴다(v2.388 수정).
+  const hostMhz = new Map();
   for (const h of snap.hosts || []) {
     const cores = Number(h.cpuCores) || 0;
     const total = Number(h.cpuTotalMhz) || 0;
-    if (cores > 0 && total > 0) hostMhz.set(h.name, total / cores);
+    if (cores > 0 && total > 0) hostMhz.set(`${h.vcenterId}|${h.name}`, total / cores);
   }
   // vcenterId -> 누적
   const agg = new Map();
@@ -61,7 +63,7 @@ function vmAllocRows(snap, settings) {
     const memPct = Number(v.memUsagePct) || 0;
     const vcpu = Number(v.cpuCount) || 0;
     const cpuPct = Number(v.cpuUsagePct) || 0;
-    const mhzPerCore = hostMhz.get(v.host);
+    const mhzPerCore = hostMhz.get(`${v.vcenterId}|${v.host}`);
     // 설정(v2.376): 대상 vCenter 만 수집. vcenterIds 가 비어 있으면 전체가 대상이다.
     if (!vmperfTracks(v.vcenterId, settings)) continue;
     const targets = settings.trackTotal ? [v.vcenterId, ''] : [v.vcenterId];

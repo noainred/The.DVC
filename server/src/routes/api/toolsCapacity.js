@@ -6,7 +6,7 @@ import { store } from '../../store.js';
 import { loadVcenterConfig } from '../../config.js';
 import { fetchVmMetric } from '../../vcenter/soapClient.js';
 import { getMetricsDb } from '../../metrics/db.js';
-import { vmperfHistory, vmperfMeta, vmperfDiskUsage, dropVmperfDb, VMPERF_METRICS, VMPERF_DISK_METRICS } from '../../metrics/vmperfDb.js';
+import { vmperfHistory, vmperfMeta, vmperfDiskUsage, dropVmperfDb, dbFileName, VMPERF_METRICS, VMPERF_DISK_METRICS } from '../../metrics/vmperfDb.js';
 import { loadVmperfSettings, saveVmperfSettings, VMPERF_LIMITS } from '../../metrics/vmperfSettings.js';
 import { memoJson, hash, linregSlope, eachLimited, scopeSlice, scopeKey } from './shared.js';
 
@@ -79,6 +79,8 @@ function overAllocatedReport(scoped, vms) {
   const r1 = (x) => Number((x || 0).toFixed(1));
   const pctOf = (used, alloc) => (alloc > 0 ? Math.round((used / alloc) * 100) : 0);
   // 호스트 코어당 MHz — VM 의 vCPU 를 clock(MHz) 으로 환산하는 유일한 근거.
+  // 키를 `${vcenterId}|${name}` 로 — 이름만 쓰면 vCenter 간 동명 호스트(localhost.localdomain
+  // 등)가 서로 덮어써 다른 사이트의 코어당 MHz 로 환산된다.
   const hostMhz = new Map();
   for (const h of scoped.hosts || []) {
     const cores = Number(h.cpuCores) || 0;
@@ -188,6 +190,12 @@ api.get('/tools/waste/history', async (req, res) => {
   if (allowed) {
     if (!vcId) return res.status(403).json({ ok: false, reason: '전체 합계 트렌드는 전체 범위 계정만 조회할 수 있습니다. vCenter 를 선택하세요.' });
     if (!allowed.has(vcId)) return res.json({ vcenterId: vcId, days, bucketMs: 0, points: [] }); // 존재 은닉
+  }
+  // vcId 실재 검증(전체 범위 계정 포함) — getVmperfDb 는 없는 파일을 **생성**하므로,
+  // 임의 문자열을 바꿔가며 호출하면 vmperf/ 에 DB 파일이 무한 생성된다(inode·디스크 고갈).
+  // /vcenters/:id/usage-history 는 이미 실재 검사를 한다 — 이 라우트만 빠져 있었다.
+  if (vcId && !(store.get().vcenters || []).some((v) => v.id === vcId)) {
+    return res.json({ vcenterId: vcId, days, bucketMs: 0, points: [] });
   }
   const since = Date.now() - days * 86_400_000;
   const BUCKET = { hour: 3_600_000, day: 86_400_000, week: 7 * 86_400_000 };
@@ -314,9 +322,14 @@ api.get('/tools/waste/settings', (req, res) => {
     .filter((v) => !allowed || allowed.has(v.id))
     .map((v) => ({ id: v.id, name: v.name || v.id }));
   // 디스크 사용량도 범위 밖은 감춘다(전체 합계 '' 는 전체 범위 계정에만).
-  const usage = vmperfDiskUsage().filter((u) => (!allowed ? true : (u.vcenterId !== '' && allowed.has(u.vcenterId))));
+  // usage 도 파일명 축으로 비교한다(위와 같은 이유 — 특수문자 id 가 범위 내인데 숨는 문제 방지).
+  const allowedFiles = allowed ? new Set([...allowed].map((id) => dbFileName(id))) : null;
+  const usage = vmperfDiskUsage().filter((u) => (!allowedFiles ? true : (u.vcenterId !== '' && allowedFiles.has(dbFileName(u.vcenterId)))));
+  // 범위 제한 계정에는 settings.vcenterIds 를 교집합만 노출한다 — 원본을 그대로 주면
+  // 범위 밖 vCenter id 가 열거된다('범위 밖 id 노출 금지' 불변조건).
+  const safeSettings = allowed ? { ...s, vcenterIds: (s.vcenterIds || []).filter((id) => allowed.has(id)) } : s;
   res.json({
-    settings: s, limits: VMPERF_LIMITS, vcenters, usage,
+    settings: safeSettings, limits: VMPERF_LIMITS, vcenters, usage,
     totalBytes: usage.reduce((a, u) => a + u.bytes, 0),
   });
 });
@@ -337,10 +350,14 @@ api.put('/tools/waste/settings', requireRole('admin'), (req, res) => {
   // 전체 대상(빈 배열)에서 특정 목록으로 좁힌 경우에도 빠진 vCenter 를 정리한다.
   let dropped = [];
   if (next.vcenterIds.length) {
-    const keep = new Set(next.vcenterIds);
+    // ⚠ vmperfDiskUsage() 의 vcenterId 는 **sanitize 된 파일명에서 역산한 값**이다
+    //   (dbFileName 이 [^A-Za-z0-9._-] 를 '_' 로 치환). 원본 id 와 직접 비교하면 콜론 등
+    //   특수문자가 있는 vCenter(이 저장소는 vc.id 에 콜론이 있는 사례를 문서화)는 항상 불일치가
+    //   되어 **수집 대상으로 지정한 vCenter 의 DB 를 삭제**한다 → 비교축을 파일명으로 통일한다.
+    const keep = new Set(next.vcenterIds.map((id) => dbFileName(id)));
     for (const u of vmperfDiskUsage()) {
       if (u.vcenterId === '') continue;              // 전체 합계는 trackTotal 로 따로 관리
-      if (!keep.has(u.vcenterId)) { dropVmperfDb(u.vcenterId); dropped.push(u.vcenterId); }
+      if (!keep.has(dbFileName(u.vcenterId))) { dropVmperfDb(u.vcenterId); dropped.push(u.vcenterId); }
     }
   }
   if (!next.trackTotal && before.trackTotal) { dropVmperfDb(''); dropped.push('(전체 합계)'); }
@@ -354,6 +371,11 @@ api.put('/tools/waste/settings', requireRole('admin'), (req, res) => {
 
 /** 특정 vCenter(또는 전체 합계)의 수집 데이터 삭제 — 용량 회수용. 관리자 전용. */
 api.delete('/tools/waste/settings/data', requireRole('admin'), (req, res) => {
+  // ?vcenterId 를 아예 안 보내면 ''(전체 합계 DB)가 되어 무경고로 지워진다 → 명시 요구.
+  // 전체 합계를 지우려면 ?vcenterId= (빈 값 명시) 또는 ?all=1 을 보내야 한다.
+  if (req.query.vcenterId === undefined && req.query.all !== '1') {
+    return res.status(400).json({ ok: false, reason: 'vcenterId 를 명시하세요(전체 합계 삭제는 ?all=1).' });
+  }
   const vcId = String(req.query.vcenterId ?? '');
   const removed = dropVmperfDb(vcId);
   logAudit({ user: req.user?.username, action: 'VM 성능 트래킹 데이터 삭제', target: vcId || '(전체 합계)', detail: `파일 ${removed}개`, ip: req.ip || '' });
@@ -423,7 +445,10 @@ api.post('/tools/waste/spark', async (req, res) => {
       await eachLimited(need, 6, async (v) => {
         const vc = cfgs.find((x) => x.id === v.vcenterId);
         if (!vc) { series[v.id] = null; return; }
-        const moref = v.id.split(':').slice(1).join(':');
+        // vm.id = `${vc.id}:${moref}` 인데 vc.id 자체에 콜론이 있을 수 있다 → split 대신
+        // vcenterId 길이만큼 잘라낸다(dsBrowse.js 와 동일 패턴). split 이면 moref 가 깨져
+        // fetchVmMetric 이 조용히 실패해 그 vCenter 스파크라인이 전부 빈다.
+        const moref = v.id.slice(String(v.vcenterId || '').length + 1);
         try {
           // interval 'week' = 1800초(30분) 해상도. 7일 ≈ 336점 → 스파크라인에 충분.
           const m = await fetchVmMetric(vc, moref, type, 'week');
@@ -522,7 +547,7 @@ api.post('/tools/vm-finder', async (req, res) => {
       await eachLimited(targets, 6, async (it) => {
         const vc = cfgs.find((x) => x.id === it.vcenterId);
         if (!vc) return;
-        const moref = it.id.split(':').slice(1).join(':');
+        const moref = it.id.slice(String(it.vcenterId || '').length + 1);   // 콜론 포함 vc.id 안전
         try {
           const [day, week] = await Promise.all([
             fetchVmMetric(vc, moref, 'cpu', 'day').catch(() => null),
