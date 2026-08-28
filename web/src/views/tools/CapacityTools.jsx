@@ -192,7 +192,7 @@ function Sparkline({ points, color = '#fbbf24', width = 132, height = 26 }) {
 function useSparklines(rows, type, enabled) {
   const [map, setMap] = useState({});      // vmId -> points | null
   const [info, setInfo] = useState(null);  // { truncated, synthesized, maxVms }
-  const ids = (rows || []).map((r) => r.id).filter(Boolean);
+  const ids = Array.isArray(rows) ? rows.map((r) => r.id).filter(Boolean) : [];
   const key = ids.slice(0, 24).join(',');
   useEffect(() => {
     if (!enabled || !key) { setMap({}); setInfo(null); return undefined; }
@@ -286,13 +286,16 @@ function WasteTrend({ scope }) {
 export function Waste({ scope }) {
   const { loading, data, error } = useTool('/tools/waste', scope ? { vcenterId: scope } : {});
   const [tab, setTab] = useState('off');
+  // ⚠ 훅은 **조기 return 위**에서 전부 선언한다(CLAUDE.md 프론트 회귀 방지). useSparklines 는
+  // 내부에 useState/useEffect 를 가지므로 아래 `if (loading) return` 뒤에 두면 렌더 간 훅 개수가
+  // 달라져 React #310 으로 화면 전체가 크래시한다(v2.375 에서 실제 발생 → v2.376 수정).
+  // data 가 아직 없을 수 있으니 optional chaining 으로 접근하고, enabled 플래그로 조회를 막는다.
+  const oa = data?.overAllocated || null; // 과할당(할당 vs 사용) — 구버전 서버 응답이면 없음
+  const spark = useSparklines(tab === 'cpu' ? oa?.cpuTop : tab === 'mem' ? oa?.memTop : null,
+    tab === 'mem' ? 'mem' : 'cpu', !!oa && (tab === 'cpu' || tab === 'mem'));
   if (loading) return <Loading />;
   if (error) return <ErrorBox message={error} />;
   const tb2 = (g) => (g >= 1024 ? `${(g / 1024).toFixed(1)} TB` : `${g} GB`);
-  const oa = data.overAllocated || null; // 과할당(할당 vs 사용) — 구버전 서버 응답이면 없음
-  // 7일 사용량 스파크라인(v2.375) — 현재 보는 탭의 상위 행만 배치 조회(vCenter 성능 API).
-  const spark = useSparklines(tab === 'cpu' ? oa?.cpuTop : tab === 'mem' ? oa?.memTop : null,
-    tab === 'mem' ? 'mem' : 'cpu', !!oa && (tab === 'cpu' || tab === 'mem'));
   return (
     <>
       <div className="kpis" style={{ marginBottom: 14 }}>
