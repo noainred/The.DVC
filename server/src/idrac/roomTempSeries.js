@@ -16,7 +16,7 @@
  *   k = 법인 id, k='' = 전체 합계. 60분+ 조회는 samples_hourly 롤업이 자동 사용된다.
  */
 
-import { roomTempReport } from './roomTemp.js';
+import { roomTempReport, UNASSIGNED_KEY } from './roomTemp.js';
 import { analysisServersWithRemote } from '../routes/admin/shared.js';
 
 export const ROOMTEMP_METRICS = [
@@ -37,6 +37,8 @@ export function roomTempRows() {
   // 필터 없는 **전량**이 온다(확인함). scope 는 조회 라우트가 적용한다.
   const servers = analysisServersWithRemote();
   if (!servers.length) return [];
+  // stale 표본은 roomTempReport 기본값(15분)으로 이미 제외된다 — 적재 경로에서 특히 중요하다
+  // (죽은 서버의 동결 온도를 매 분 새 타임스탬프로 다시 쓰면 장기 차트가 평탄선이 된다).
   const rep = roomTempReport(servers);
   const rows = [];
   const push = (k, kind, agg) => {
@@ -45,6 +47,7 @@ export function roomTempRows() {
     if (agg.max != null) rows.push({ metric: roomTempMetric(kind, 'max'), k, v: agg.max });
   };
   for (const g of rep.groups || []) {
+    // 미지정 그룹은 예약키로 적재된다 — '' 는 전체 합계 전용이라 섞이면 두 계열이 오염된다(v2.387).
     push(g.id, 'inlet', g.inlet); push(g.id, 'exhaust', g.exhaust); push(g.id, 'cpu', g.cpu);
   }
   const t = rep.totals || {};
@@ -69,7 +72,10 @@ export const ROOMTEMP_RANGES = {
  */
 export async function roomTempHistory(db, { kind = 'inlet', group = '', range = '7d' } = {}) {
   const k = ['inlet', 'exhaust', 'cpu'].includes(kind) ? kind : 'inlet';
+  // group 은 법인 id | UNASSIGNED_KEY | ''(전체). 프론트가 빈 문자열 파라미터를 생략해도
+  // 여기서 ''(전체)로 해석되는 것이 의도다 — 미지정 그룹은 예약키를 명시해야 조회된다.
   const key = String(group || '');
+  void UNASSIGNED_KEY;   // 키 규약이 이 모듈에 있음을 명시(적재/조회가 같은 상수를 공유)
   const r = ROOMTEMP_RANGES[range] ? range : '7d';
   const { spanMs, bucketMs } = ROOMTEMP_RANGES[r];
   const since = Date.now() - spanMs;

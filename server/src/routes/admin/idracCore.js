@@ -53,7 +53,10 @@ adminRouter.get('/room-temp', adminOnly, (req, res) => {
     // v2.383: 소스를 **서버 분석 › 법인별 온도(/admin/idrac/temps)와 동일**하게 맞춤.
     // analysisServersWithRemote = 중앙 로컬 + 위임 엣지 병합(datacenterId 해석 포함) —
     // 위임 환경에서 온도 데이터가 실제로 있는 곳이다(그 화면이 서버 864/965·센서 3,747개 표시).
-    // scope 는 analysisFilter(req) 가 내부에서 적용한다(그 화면과 같은 필터 규칙 공유).
+    // ⚠ scope 주의(v2.387 주석 교정): analysisFilter(req) 는 **클라이언트가 보낸 query 필터**
+    //   (?vcenterId/?datacenterId)일 뿐 사용자 데이터 범위(scopedVcenterIds)가 아니다.
+    //   즉 이 라우트는 범위 제한을 걸지 않는다 — 기존 /admin/idrac/temps 등 '서버 분석' 계열과
+    //   동일한 정책(adminOnly)이다. 범위 제한을 도입하려면 그 계열 전체를 함께 바꿔야 한다.
     res.json(roomTempReport(analysisServersWithRemote(req)));
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });

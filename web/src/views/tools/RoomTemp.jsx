@@ -50,6 +50,17 @@ function sortGroups(groups, sort) {
   });
 }
 
+/**
+ * 버킷 크기 표기(v2.387) — 이전 인라인 식은 30분 버킷에서 Math.round(0.5)=1 이 truthy 가 되어
+ * "집계 단위 1 평균"(단위 없음)으로 표시됐다. 일→시간→분 순으로 분기한다.
+ */
+function fmtBucket(ms) {
+  const n = Number(ms) || 0;
+  if (n >= 86_400_000) return `${Math.round(n / 86_400_000)}일`;
+  if (n >= 3_600_000) return `${Math.round(n / 3_600_000)}시간`;
+  return `${Math.max(1, Math.round(n / 60_000))}분`;
+}
+
 const TREND_RANGES = [['1d', '최근 1일'], ['7d', '1주'], ['30d', '1달'], ['90d', '3개월'], ['180d', '6개월'], ['365d', '1년']];
 const KIND_LABEL = { inlet: '흡기(Inlet)', exhaust: '배기(Exhaust)', cpu: 'CPU' };
 const KIND_COLOR = { inlet: '#60a5fa', exhaust: '#fb923c', cpu: '#f87171' };
@@ -123,7 +134,7 @@ function TrendModal({ groupId, groupName, kind, onClose }) {
                 </ResponsiveContainer>
               </div>
               <div className="muted" style={{ fontSize: 11.5, marginTop: 6, lineHeight: 1.7 }}>
-                실선 = 법인 평균, 점선 = 법인 내 최고값. 집계 단위 {(d.bucketMs || 0) >= 86_400_000 ? `${Math.round(d.bucketMs / 86_400_000)}일` : `${Math.round((d.bucketMs || 0) / 3_600_000) || Math.round((d.bucketMs || 0) / 60_000) + '분'}${(d.bucketMs || 0) >= 3_600_000 ? '시간' : ''}`} 평균 · 표본 {pts.length}점
+                실선 = 법인 평균, 점선 = 법인 내 최고값. 집계 단위 {fmtBucket(d.bucketMs)} 평균 · 표본 {pts.length}점
                 {d.collectedSince ? ` · 수집 시작 ${new Date(d.collectedSince).toLocaleDateString('ko-KR')}` : ''}
               </div>
             </>
@@ -188,6 +199,7 @@ function VcCard({ dc, expanded, onToggle, onTrend }) {
           서버 {dc.hostCount}대
           {dc.inlet.servers ? ` · 흡기측정 ${dc.inlet.servers}` : ''}
           {dc.noSensorCount ? ` · 미수집 ${dc.noSensorCount}` : ''}
+          {dc.staleCount ? ` · 미갱신 ${dc.staleCount}` : ''}
           {dc.remoteCount ? ` · 위임 ${dc.remoteCount}` : ''}
         </span>
       </div>
@@ -236,9 +248,9 @@ function VcCard({ dc, expanded, onToggle, onTrend }) {
 
 /**
  * 법인 전산실 운영 온도 — 모든 법인의 흡기·배기·CPU 온도 범위를 카드로 종합(1페이지).
- * 데이터는 iDRAC Redfish Thermal 을 폴러가 수집한 값(추가 조회 없음)이며, 15분 이상 갱신되지
- * 않은 서버는 집계에서 제외하고 그 수를 카드에 표기한다(죽은 서버의 마지막 온도를 현재로
- * 보여주지 않기 위함).
+ * 데이터는 서버 분석 › 법인별 온도와 동일한 iDRAC 센서 수집값이다(추가 조회 없음).
+ * v2.387 부터 기본 15분 이상 갱신되지 않은 표본은 집계에서 제외하고 그 수를 표기한다
+ * (v2.383~2.386 에는 이 코드가 없었는데 주석만 남아 있었다 — 실제 구현과 일치시킴).
  */
 export function RoomTemp() {
   // ⚠ 훅은 조기 return 위에서 전부 선언(CLAUDE.md — React #310 방지).
@@ -269,6 +281,8 @@ export function RoomTemp() {
         <Card label="CPU 범위(전체)" value={t.cpu?.min == null ? '—' : `${t.cpu.min}~${t.cpu.max}℃`}
           meta={t.cpu?.avg != null ? `평균 ${t.cpu.avg}℃` : 'CPU 센서 없음'} />
         {t.noSensor ? <Card label="센서 미수집 서버" value={t.noSensor} meta="온도 센서를 아직 못 받은 서버 — 집계 제외" /> : null}
+        {t.stale ? <Card label="미갱신 서버" value={t.stale} accent="var(--amber)"
+          meta={`${Math.round((data.staleMs || 0) / 60000)}분 이상 갱신 없음 — 집계 제외(동결값 방지)`} /> : null}
       </div>
 
       <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 10, gap: 8 }}>

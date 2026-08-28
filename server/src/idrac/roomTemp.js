@@ -24,6 +24,23 @@
 import { getSensorSeries } from './sensorStore.js';
 import { listDatacenters } from '../datacenter/store.js';
 
+/**
+ * 법인 귀속이 없는 서버 그룹의 **예약 키**(v2.387).
+ * 이전에는 빈 문자열('')을 썼는데, 시계열 적재에서 '전체 합계' 키도 '' 라 두 계열이 같은
+ * (metric, k) 에 섞여 적재됐다(samples 는 무제약, samples_hourly upsert 는 n 누적 → 평균 왜곡).
+ * 전체 합계는 '' 를 유지하고 미지정 그룹만 이 예약키로 분리한다.
+ */
+export const UNASSIGNED_KEY = '__unassigned__';
+
+/**
+ * 센서 표본의 신선도 상한 기본값(v2.387) — 이보다 오래된 표본은 집계에서 제외한다.
+ * 이유: sensorStore 링버퍼는 개수(1440)로만 자르고 시간 만료가 없고, 원격(엣지) 인벤토리도
+ * "실패한 pull 은 마지막 스냅샷을 유지" 정책이라, 죽은 서버/수집기의 마지막 온도가 무기한
+ * latest 로 남는다. 그것을 '현재값'으로 집계하고 매 분 시계열에 새 타임스탬프로 재적재하면
+ * 차트가 동결값 평탄선이 되어 실제 급등을 은폐한다(전력의 POWER_CURRENT_STALE_MS 와 같은 취지).
+ */
+export const DEFAULT_MAX_AGE_MS = Number(process.env.ROOMTEMP_STALE_MS) || 15 * 60_000;
+
 export function classifySensor(name) {
   const s = String(name || '');
   if (/inlet|intake|ambient|front/i.test(s)) return 'inlet';
@@ -64,7 +81,7 @@ const finishAgg = (a) => ({
  * servers 를 **주입받는다**(라우트가 shared.js 헬퍼로 만들어 넘김) — 이 모듈이 req 를 몰라도
  * 되고, 테스트에서 실데이터 모양만 맞춰 검증할 수 있다.
  */
-export function roomTempReport(servers, { now = Date.now() } = {}) {
+export function roomTempReport(servers, { now = Date.now(), maxAgeMs = DEFAULT_MAX_AGE_MS } = {}) {
   let dcName = new Map();
   try { dcName = new Map(listDatacenters().map((d) => [String(d.id), d.name || d.id])); } catch { /* 목록 없음 */ }
 
@@ -76,14 +93,14 @@ export function roomTempReport(servers, { now = Date.now() } = {}) {
       g = {
         id: k, name: label || (k ? (dcName.get(k) || k) : '(미지정)'),
         inlet: emptyAgg(), exhaust: emptyAgg(), cpu: emptyAgg(),
-        hosts: [], hostCount: 0, noSensorCount: 0, otherSensorCount: 0, remoteCount: 0,
+        hosts: [], hostCount: 0, noSensorCount: 0, otherSensorCount: 0, remoteCount: 0, staleCount: 0,
       };
       groups.set(k, g);
     }
     return g;
   };
 
-  let totalServers = 0; let withData = 0; let noSensorTotal = 0;
+  let totalServers = 0; let withData = 0; let noSensorTotal = 0; let staleTotal = 0;
   const all = { inlet: emptyAgg(), exhaust: emptyAgg(), cpu: emptyAgg() };
 
   for (const s of servers || []) {
@@ -91,7 +108,7 @@ export function roomTempReport(servers, { now = Date.now() } = {}) {
     // 그룹 키: DataCenter 1순위 → vCenter → (미지정). 위임 환경은 vcenterId 가 빈 경우가 많다.
     const dcId = String(s.datacenterId || '').trim();
     const vcId = String(s.vcenterId || '').trim();
-    const g = dcId ? bucket(dcId) : (vcId ? bucket(vcId, vcId) : bucket(''));
+    const g = dcId ? bucket(dcId) : (vcId ? bucket(vcId, vcId) : bucket(UNASSIGNED_KEY, '(미지정)'));
     g.hostCount += 1;
     if (s.remote) g.remoteCount += 1;
 
@@ -100,6 +117,13 @@ export function roomTempReport(servers, { now = Date.now() } = {}) {
     const temps = latest?.temps || {};
     const names = Object.keys(temps);
     if (!names.length) { g.noSensorCount += 1; noSensorTotal += 1; continue; }
+    // 오래된 표본 제외(v2.387) — 죽은 서버의 마지막 온도를 '현재'로 쓰지 않는다.
+    // maxAgeMs<=0 이면 검사하지 않는다(호출부가 명시적으로 끈 경우).
+    // 타임스탬프가 아예 없는 표본은 나이를 알 수 없어 stale 로 취급한다(추정으로 통과시키지 않음).
+    if (maxAgeMs > 0) {
+      const at = Number(latest?.t);
+      if (!Number.isFinite(at) || now - at > maxAgeMs) { g.staleCount += 1; staleTotal += 1; continue; }
+    }
 
     const per = { inlet: null, exhaust: null, cpu: null };
     let other = 0;
@@ -134,7 +158,7 @@ export function roomTempReport(servers, { now = Date.now() } = {}) {
     return {
       id: g.id, name: g.name,
       hostCount: g.hostCount, noSensorCount: g.noSensorCount, otherSensorCount: g.otherSensorCount,
-      remoteCount: g.remoteCount,
+      remoteCount: g.remoteCount, staleCount: g.staleCount,
       inlet: finishAgg(g.inlet), exhaust: finishAgg(g.exhaust), cpu: finishAgg(g.cpu),
       deltaAvg: ds.length ? Math.round((ds.reduce((a, b) => a + b, 0) / ds.length) * 10) / 10 : null,
       status: inletStatus(finishAgg(g.inlet).max),
@@ -145,8 +169,9 @@ export function roomTempReport(servers, { now = Date.now() } = {}) {
   return {
     generatedAt: now,
     source: 'idrac-analysis',   // /admin/idrac/temps 와 같은 소스임을 화면이 밝힐 수 있게
+    staleMs: maxAgeMs,          // 화면이 '몇 분 이상 미갱신을 제외했는지' 정직하게 표기하도록
     totals: {
-      groups: list.length, servers: totalServers, withData, noSensor: noSensorTotal,
+      groups: list.length, servers: totalServers, withData, noSensor: noSensorTotal, stale: staleTotal,
       inlet: finishAgg(all.inlet), exhaust: finishAgg(all.exhaust), cpu: finishAgg(all.cpu),
     },
     thresholds: { recommendMin: 18, recommendMax: 27, warnMax: 32 },
