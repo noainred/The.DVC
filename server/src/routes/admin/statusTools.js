@@ -7,7 +7,8 @@ import { getLogs } from '../../logbuffer.js';
 import { logAudit } from '../../audit.js';
 import { loadVcenterConfig } from '../../config.js';
 import { probeRelayPath } from '../../vcenter/relayProbe.js';
-import { portalDbReport } from '../../insights/portalDb.js';
+import { portalDbReport, enumerateDbFiles } from '../../insights/portalDb.js';
+import { inspectMany } from '../../insights/dbHealth.js';
 import { getCodexCheckReport, renderCodexCheckMarkdown, writeCodexCheckReport } from '../../security/codexCheck.js';
 import { getMetricsDb } from '../../metrics/db.js';
 import { memtrackReport } from '../../system/memtrack.js';
@@ -79,8 +80,26 @@ adminRouter.get('/vcenter/relay-test', adminOnly, async (req, res) => {
   catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 
-// 포탈 DB 인벤토리 — 사용 중 모든 데이터 파일의 경로·파일명·용도·크기·증가 추이.
+// 포탈 DB 인벤토리 — 사용 중 모든 데이터 파일의 경로·파일명·용도·크기·증가 추이·용량 예측.
 adminRouter.get('/portal-db', adminOnly, (_req, res) => res.json(portalDbReport()));
+
+/**
+ * DB 정합성·일관성 점검(v2.378) — SQLite 파일을 **읽기 전용**으로 진단한다.
+ * ?mode=full 이면 integrity_check(전 페이지 스캔 — 큰 DB 는 수 초 이상), 기본은 quick_check.
+ * ?file=<파일명> 으로 한 개만 점검할 수 있다(전체 점검이 부담스러운 운영 시간대 대비).
+ * 쓰기·VACUUM 을 수행하지 않으므로 서비스 중단 없이 안전하다.
+ */
+adminRouter.get('/portal-db/health', adminOnly, async (req, res) => {
+  try {
+    const full = req.query.mode === 'full';
+    const only = String(req.query.file || '').trim();
+    let targets = enumerateDbFiles().filter((f) => f.type === 'sqlite' && f.exists);
+    if (only) targets = targets.filter((f) => f.file === only);
+    if (only && !targets.length) return res.status(404).json({ ok: false, reason: `SQLite 파일을 찾지 못했습니다: ${only}` });
+    const report = await inspectMany(targets.map((f) => f.path), { full });
+    res.json({ ok: true, ...report });
+  } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+});
 
 // 포탈 프로세스 메모리 추적(누수 관찰) — metrics DB 의 mem_* 시계열 + 현재값 + 기동 이후
 // 추세 판정. ?window=6h|24h|7d|30d. 서버 전역 자기진단 데이터라 vCenter scope 비대상(admin 전용).
