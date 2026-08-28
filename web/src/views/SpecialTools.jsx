@@ -31,6 +31,7 @@ import BmStorageTool from './tools/BmStorageTool.jsx'; // 베어메탈 스토리
 import VmTrackTool from './tools/VmTrackTool.jsx'; // VM 수량 추이(00/12시 스냅샷 + 증감 상세, v2.345)
 import StorageTrackTool from './tools/StorageTrackTool.jsx'; // 스토리지 사용량 추이(같은 스냅샷의 DS 관점 뷰, v2.350)
 import { PortalDb } from './tools/PortalDb.jsx';
+import { RoomTemp } from './tools/RoomTemp.jsx';
 import { NicModels, NicSpeed } from './tools/NicTools.jsx';
 import { Shutdown } from './tools/ShutdownTool.jsx';
 import { FleetInventory } from './tools/FleetInventory.jsx';
@@ -326,6 +327,7 @@ function ToolPanel({ tool, onBack, isAdmin }) {
       {tool === 'net-traffic' && <NetTrafficAnalysis />}
       {tool === 'deepsearch' && <DeepSearch />}
       {tool === 'vmware-backup' && <VmwareConfigBackup />}
+      {tool === 'roomtemp' && <RoomTemp />}
       {tool === 'portaldb' && <PortalDb />}
       {tool === 'shutdown' && <Shutdown />}
       {tool === 'vmprovision' && (isAdmin ? <VmProvision /> : <div className="card"><span className="muted">관리자 전용 기능입니다.</span></div>)}

@@ -8,6 +8,8 @@ import { purgeStalePower, measuredPowerBreakdown } from '../../idrac/service.js'
 import { loadPowerSettings, savePowerSettings } from '../../idrac/powerSettings.js';
 import { getInventory as getIdracInventory } from '../../idrac/invCache.js';
 import { getSensorSeries } from '../../idrac/sensorStore.js';
+import { roomTempReport } from '../../idrac/roomTemp.js';
+import { scopedVcenterIds } from '../../auth/scope.js';
 import { hardwareDimMatch } from '../../idrac/hwMatch.js';
 import { partBuckets, serversWithPart, isPartCat } from '../../idrac/partsInventory.js';
 import { snapMemo } from '../../util/snapCache.js';
@@ -21,6 +23,18 @@ export function registerIdracCore(adminRouter) {
 // List registered Dell servers (credentials redacted) + poller status.
 // 중앙 로컬 레지스트리 + 위임 법인의 원격 서버(엣지 수집분)를 병합해 반환한다(id 중복은 중앙 우선).
 // 원격 서버는 remote:true로 표시(프론트가 구분/상세 처리). 서버 자격증명은 애초에 실려오지 않는다.
+
+/**
+ * 법인 전산실 운영 온도(v2.381) — 모든 법인의 흡기·배기·CPU 온도 범위를 한 번에 반환.
+ * iDRAC 폴러가 이미 수집한 sensorStore 값을 재집계하므로 추가 Redfish 호출이 없다.
+ * scope: 범위 제한 계정은 허용 vCenter 에 귀속된 서버만 집계한다(범위 밖 시설 온도 유출 차단).
+ */
+adminRouter.get('/room-temp', adminOnly, (req, res) => {
+  try {
+    res.json(roomTempReport({ allowedVcenterIds: scopedVcenterIds(req.user, store.get()) }));
+  } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+});
+
 adminRouter.get('/idrac', adminOnly, (_req, res) => {
   const tagMap = hostVcByTag();
   const mapTag = (s) => (tagMap.get(String(s.serviceTag || s.inv?.system?.serviceTag || '').trim().toLowerCase()) || '');
