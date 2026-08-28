@@ -17,7 +17,10 @@
 import path from 'node:path';
 import { config } from '../config.js';
 
-const FILE = () => path.join(config.configDir, 'storage-history.db');
+// DB 저장 경로 설정(v2.379)을 따른다 — dbLocation 이 지정한 dbDir 아래, 없으면 configDir.
+// (vmperf/vmtrack 과 동일 규약. MIGRATABLE 에 이 파일이 있어 미적용 시 마이그레이션 후
+//  옛 경로에 계속 쓰다 원본 삭제 단계에서 이력이 소실된다 — v2.386 수정.)
+const FILE = () => path.join(config.dbDir || config.configDir, 'storage-history.db');
 const KEEP_MS = (Number(process.env.STORAGE_HISTORY_KEEP_DAYS) || 400) * 86400e3;
 const MAX_JSON_BYTES = 512 * 1024; // 엔드포인트당 원문 상한 — 512KB 초과는 절단 표기(폭주 방지)
 
@@ -162,8 +165,10 @@ export async function capacityHistoryAll(sinceMs, bucketMs) {
   const db = await open();
   if (!db) return [];
   const b = Math.max(60_000, Number(bucketMs) || 3_600_000);
-  try { return db.st.selCapAllBucket.all(b, b, Number(sinceMs) || 0, b); }
-  catch { return []; }
+  // ⚠ 다른 함수처럼 문(statement)은 db 의 평면 속성이다(db.selCapBucket 등). db.st 는
+  //   존재하지 않아 TypeError → catch 가 삼켜 전체 합산 추이가 항상 빈 배열이었다(v2.386 수정).
+  try { return db.selCapAllBucket.all(b, b, Number(sinceMs) || 0, b); }
+  catch (e) { console.warn(`[storage-db] capacityHistoryAll 실패: ${e.message}`); return []; }
 }
 
 export function _resetForTest() { try { _db?.conn?.close?.(); } catch { /* */ } _db = null; _pruneTick = 0; }
