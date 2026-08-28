@@ -211,5 +211,9 @@ export function vmperfDiskUsage() {
   }).sort((a, b) => b.bytes - a.bytes);
 }
 
+// 낭비 리소스 추이(할당 vs 사용) 4계열 + Platform 추이용 디스크 2계열(v2.377).
+// 디스크는 vCenter 데이터스토어의 사용/용량 합계 — CPU·MEM 의 '사용/할당' 과 같은 형태로 본다.
 export const VMPERF_METRICS = ['vm_cpu_alloc_mhz', 'vm_cpu_used_mhz', 'vm_mem_alloc_mb', 'vm_mem_used_mb'];
+export const VMPERF_DISK_METRICS = ['ds_cap_gb_vc', 'ds_used_gb_vc'];
+export const VMPERF_ALL_METRICS = [...VMPERF_METRICS, ...VMPERF_DISK_METRICS];
 export const vmperfDir = () => DIR;

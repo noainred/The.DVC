@@ -6,7 +6,7 @@ import { store } from '../../store.js';
 import { loadVcenterConfig } from '../../config.js';
 import { fetchVmMetric } from '../../vcenter/soapClient.js';
 import { getMetricsDb } from '../../metrics/db.js';
-import { vmperfHistory, vmperfMeta, vmperfDiskUsage, dropVmperfDb, VMPERF_METRICS } from '../../metrics/vmperfDb.js';
+import { vmperfHistory, vmperfMeta, vmperfDiskUsage, dropVmperfDb, VMPERF_METRICS, VMPERF_DISK_METRICS } from '../../metrics/vmperfDb.js';
 import { loadVmperfSettings, saveVmperfSettings, VMPERF_LIMITS } from '../../metrics/vmperfSettings.js';
 import { memoJson, hash, linregSlope, eachLimited, scopeSlice, scopeKey } from './shared.js';
 
@@ -222,6 +222,82 @@ api.get('/tools/waste/history', async (req, res) => {
   } catch { points = []; }
   // 관측 시작 이전 구간은 데이터가 없다 — 프론트가 '수집 시작' 을 표기할 수 있게 meta 를 준다.
   res.json({ vcenterId: vcId || 'all', days, bucketMs, collectedSince: meta?.firstTs ?? null, points });
+});
+
+/**
+ * vCenter 사용량/할당량 추이(v2.377) — Platform › vCenter 상세의 '📈 추이' 탭·상단 미니차트.
+ *
+ * 기간 프리셋 9종(1h/6h/12h/24h/7d/30d/60d/120d/365d)에 맞춰 버킷을 자동으로 고른다:
+ *  - 24시간 이하는 원본(분 단위 샘플)에서 5~30분 버킷 — '오늘 무슨 일이 있었나'를 본다.
+ *  - 7일 이상은 60분 정배수 버킷 → vmperfDb 가 **시간당 롤업(samples_hourly)** 을 자동 사용해
+ *    원본 풀스캔을 피한다(365일 × 분 단위 원본을 훑으면 이벤트 루프가 멈춘다).
+ *
+ * 계열: cpu(사용/할당 GHz) · mem(사용/할당 GB) · disk(사용/용량 GB, v2.377 신규 집계).
+ * 사용률(%)은 저장하지 않고 사용/할당에서 파생 계산한다(중복 저장 금지).
+ *
+ * ⚠ 데이터는 수집이 시작된 시점부터만 있다(vm_* 는 v2.374, disk 는 v2.377). 그 이전 구간은
+ *   결측이며 응답 collectedSince 로 알려 프론트가 '언제부터 쌓였는지' 표기한다.
+ */
+const USAGE_RANGES = {
+  '1h': { ms: 3_600_000, bucket: 5 * 60_000 },
+  '6h': { ms: 6 * 3_600_000, bucket: 10 * 60_000 },
+  '12h': { ms: 12 * 3_600_000, bucket: 15 * 60_000 },
+  '24h': { ms: 24 * 3_600_000, bucket: 30 * 60_000 },
+  '7d': { ms: 7 * 86_400_000, bucket: 3_600_000 },
+  '30d': { ms: 30 * 86_400_000, bucket: 6 * 3_600_000 },
+  '60d': { ms: 60 * 86_400_000, bucket: 12 * 3_600_000 },
+  '120d': { ms: 120 * 86_400_000, bucket: 86_400_000 },
+  '365d': { ms: 365 * 86_400_000, bucket: 86_400_000 },
+};
+
+api.get('/vcenters/:id/usage-history', async (req, res) => {
+  const vcId = String(req.params.id || '');
+  const snap = store.get();
+  const allowed = scopedVcenterIds(req.user, snap);
+  // scope: 범위 밖 vCenter 는 404(존재 은닉 — 단건 라우트 불변조건).
+  if (allowed && !allowed.has(vcId)) return res.status(404).json({ ok: false, reason: 'not found' });
+  if (!(snap.vcenters || []).some((v) => v.id === vcId)) return res.status(404).json({ ok: false, reason: 'not found' });
+
+  const rangeKey = USAGE_RANGES[req.query.range] ? req.query.range : '24h';
+  const { ms, bucket: bucketMs } = USAGE_RANGES[rangeKey];
+  const since = Date.now() - ms;
+  // 점 수 상한 — 버킷이 작은 구간(1h/5분=12점)엔 여유가 크고, 365일/1일=365점도 안전하다.
+  const limit = 2000;
+
+  let points = [];
+  let collectedSince = null;
+  try {
+    const metrics = [...VMPERF_METRICS, ...VMPERF_DISK_METRICS];
+    const series = await Promise.all(metrics.map((m) => vmperfHistory(vcId, m, since, bucketMs, limit)));
+    const byTs = new Map();
+    metrics.forEach((m, i) => {
+      for (const p of series[i] || []) {
+        let e = byTs.get(p.ts);
+        if (!e) { e = { ts: p.ts }; byTs.set(p.ts, e); }
+        e[m] = p.avg;
+      }
+    });
+    const r1 = (x) => (x == null ? null : Number(x.toFixed(1)));
+    const pct = (u, a) => (a > 0 && u != null ? Math.round((u / a) * 100) : null);
+    points = [...byTs.values()].sort((a, b) => a.ts - b.ts).map((e) => ({
+      ts: e.ts,
+      cpuAllocGHz: r1(e.vm_cpu_alloc_mhz == null ? null : e.vm_cpu_alloc_mhz / 1000),
+      cpuUsedGHz: r1(e.vm_cpu_used_mhz == null ? null : e.vm_cpu_used_mhz / 1000),
+      cpuPct: pct(e.vm_cpu_used_mhz, e.vm_cpu_alloc_mhz),
+      memAllocGB: r1(e.vm_mem_alloc_mb == null ? null : e.vm_mem_alloc_mb / 1024),
+      memUsedGB: r1(e.vm_mem_used_mb == null ? null : e.vm_mem_used_mb / 1024),
+      memPct: pct(e.vm_mem_used_mb, e.vm_mem_alloc_mb),
+      diskCapGB: r1(e.ds_cap_gb_vc),
+      diskUsedGB: r1(e.ds_used_gb_vc),
+      diskPct: pct(e.ds_used_gb_vc, e.ds_cap_gb_vc),
+    }));
+    const m1 = await vmperfMeta(vcId, 'vm_cpu_alloc_mhz');
+    const m2 = await vmperfMeta(vcId, 'ds_cap_gb_vc');
+    const firsts = [m1.firstTs, m2.firstTs].filter((x) => x != null);
+    collectedSince = firsts.length ? Math.min(...firsts) : null;
+  } catch { points = []; }
+
+  res.json({ vcenterId: vcId, range: rangeKey, bucketMs, ranges: Object.keys(USAGE_RANGES), collectedSince, points });
 });
 
 /**

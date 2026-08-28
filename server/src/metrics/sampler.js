@@ -51,7 +51,7 @@ function vmAllocRows(snap, settings) {
   const agg = new Map();
   const bucket = (id) => {
     let e = agg.get(id);
-    if (!e) { e = { cpuUsed: 0, cpuAlloc: 0, memUsed: 0, memAlloc: 0 }; agg.set(id, e); }
+    if (!e) { e = { cpuUsed: 0, cpuAlloc: 0, memUsed: 0, memAlloc: 0, dsUsed: 0, dsCap: 0 }; agg.set(id, e); }
     return e;
   };
   for (const v of snap.vms || []) {
@@ -75,6 +75,20 @@ function vmAllocRows(snap, settings) {
       }
     }
   }
+  // 디스크(데이터스토어) vCenter 합계(v2.377) — Platform 추이 차트의 'disk 사용 vs 용량'.
+  // ds_usedgb 는 데이터스토어 **개별 키**로만 쌓여 vCenter 단위 추이를 만들 수 없었다.
+  // 여기서 vCenter(+전체) 합계를 별도 계열로 적재한다. 용량(capacity)이 CPU/MEM 의 '할당'에 대응.
+  for (const d of snap.datastores || []) {
+    if (!vmperfTracks(d.vcenterId, settings)) continue;
+    const cap = Number(d.capacityGB) || 0;
+    const used = Number(d.usedGB) || 0;
+    if (cap <= 0) continue;                       // 용량 미상 데이터스토어는 집계 제외(추정 금지)
+    for (const id of (settings.trackTotal ? [d.vcenterId, ''] : [d.vcenterId])) {
+      const e = bucket(id);
+      e.dsCap += cap; e.dsUsed += used;
+    }
+  }
+
   // v2.376: vCenter 별 독립 DB 로 적재하므로 **키별로 묶어서** 돌려준다(Map<vcenterId, rows[]>).
   const out = new Map();
   for (const [k, e] of agg) {
@@ -88,6 +102,10 @@ function vmAllocRows(snap, settings) {
     if (e.memAlloc > 0) {
       rows.push({ metric: 'vm_mem_alloc_mb', k, v: Math.round(e.memAlloc) });
       rows.push({ metric: 'vm_mem_used_mb', k, v: Math.round(e.memUsed) });
+    }
+    if (e.dsCap > 0) {
+      rows.push({ metric: 'ds_cap_gb_vc', k, v: Math.round(e.dsCap) });
+      rows.push({ metric: 'ds_used_gb_vc', k, v: Math.round(e.dsUsed) });
     }
     if (rows.length) out.set(k, rows);
   }

@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from 'react';
-import { usePolling } from '../api.js';
+import React, { useEffect, useMemo, useState } from 'react';
+import { fetchJson, usePolling } from '../api.js';
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import { Loading, ErrorBox, StateBadge, UsageCell, EntityDetail, DataTable, SearchBox } from '../components/ui.jsx';
 import EscClose from '../components/EscClose.jsx';
 // 검색 로직(다단어 OR·메모 매칭·자원 합계)은 순수 모듈로 분리 — vitest 단위테스트 대상(v2.293).
@@ -14,6 +15,7 @@ const VIEWS = [
   { k: 'vms', label: 'VM 및 폴더', icon: '🧊' },
   { k: 'storage', label: '데이터스토어', icon: '💾' },
   { k: 'network', label: '네트워크', icon: '🌐' },
+  { k: 'trend', label: '추이', icon: '📈' },
 ];
 
 // Backing-storage categories for the datastore view filter.
@@ -30,8 +32,139 @@ const STORAGE_LABEL = Object.fromEntries(STORAGE_KINDS.map((s) => [s.k, s.label]
 const STORAGE_BADGE = { local: 'green', san: 'blue', nas: 'amber', vsan: 'purple', vvol: 'amber', other: 'gray' };
 
 /** vSphere-client-like inventory view for a single vCenter. */
+
+// 사용량/할당량 추이 기간 프리셋(서버 USAGE_RANGES 와 키가 일치해야 한다).
+const TREND_RANGES = [
+  ['1h', '1시간'], ['6h', '6시간'], ['12h', '12시간'], ['24h', '24시간'],
+  ['7d', '7일'], ['30d', '30일'], ['60d', '60일'], ['120d', '120일'], ['365d', '365일'],
+];
+const TREND_SERIES = {
+  cpu: { label: 'CPU', unit: 'GHz', used: 'cpuUsedGHz', alloc: 'cpuAllocGHz', pct: 'cpuPct', color: '#60a5fa' },
+  mem: { label: '메모리', unit: 'GB', used: 'memUsedGB', alloc: 'memAllocGB', pct: 'memPct', color: '#4ade80' },
+  disk: { label: '디스크', unit: 'GB', used: 'diskUsedGB', alloc: 'diskCapGB', pct: 'diskPct', color: '#fbbf24' },
+};
+
+/** 추이 데이터 로더 — 기간 변경 시 재조회. 훅 규칙(조기 return 위 선언)을 지킨다. */
+function useUsageHistory(vcenterId, range, enabled = true) {
+  const [d, setD] = useState(null);
+  const [err, setErr] = useState(null);
+  useEffect(() => {
+    if (!enabled || !vcenterId) { setD(null); return undefined; }
+    let dead = false;
+    setD(null); setErr(null);
+    fetchJson(`/vcenters/${encodeURIComponent(vcenterId)}/usage-history`, { range })
+      .then((r) => { if (!dead) setD(r); })
+      .catch((e) => { if (!dead) setErr(e.message); });
+    return () => { dead = true; };
+  }, [vcenterId, range, enabled]);
+  return { d, err };
+}
+
+/** 상단 KPI 옆 미니 스파크라인(24시간 사용률) — 순수 SVG(행/헤더에 recharts 는 과하다). */
+function MiniTrend({ points, field, color, label }) {
+  const vals = (points || []).map((p) => p[field]).filter((v) => v != null);
+  if (vals.length < 2) return null;
+  const w = 72, h = 18, pad = 2;
+  const xs = (i) => pad + (i * (w - pad * 2)) / (vals.length - 1);
+  const ys = (v) => h - pad - (Math.max(0, Math.min(100, v)) / 100) * (h - pad * 2);
+  const dpath = vals.map((v, i) => `${i === 0 ? 'M' : 'L'}${xs(i).toFixed(1)},${ys(v).toFixed(1)}`).join(' ');
+  const last = vals[vals.length - 1];
+  const max = Math.max(...vals);
+  return (
+    <span className="flex gap" style={{ alignItems: 'center', gap: 4 }}
+      title={`${label} 최근 24시간 사용률 — 현재 ${last}% · 최대 ${max}%`}>
+      <svg width={w} height={h} style={{ display: 'block' }} aria-hidden="true">
+        <path d={dpath} fill="none" stroke={color} strokeWidth="1.3" strokeLinejoin="round" />
+      </svg>
+    </span>
+  );
+}
+
+/** 📈 추이 탭 — 기간 9종 × CPU/메모리/디스크의 사용량 vs 할당량. */
+function TrendView({ vcenterId }) {
+  const [range, setRange] = useState('24h');
+  const [mode, setMode] = useState('pct');   // pct(사용률) | abs(절대량)
+  const { d, err } = useUsageHistory(vcenterId, range);
+  const pts = d?.points || [];
+  const fmtTs = (t) => {
+    const dt = new Date(t);
+    // 24시간 이하는 시:분, 그 이상은 월/일(+시)로 — 축 라벨이 과밀해지지 않게.
+    return (d?.bucketMs || 0) < 3_600_000
+      ? dt.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
+      : dt.toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' });
+  };
+  return (
+    <div className="card" style={{ padding: 14 }}>
+      <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 10 }}>
+        <div className="flex gap wrap" style={{ gap: 6 }}>
+          {TREND_RANGES.map(([k, label]) => (
+            <button key={k} className={range === k ? 'login-btn' : 'logout-btn'}
+              style={{ flex: 'none', padding: '5px 10px', fontSize: 12 }} onClick={() => setRange(k)}>{label}</button>
+          ))}
+        </div>
+        <div className="flex gap">
+          <button className={mode === 'pct' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '5px 12px', fontSize: 12 }} onClick={() => setMode('pct')}>사용률(%)</button>
+          <button className={mode === 'abs' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '5px 12px', fontSize: 12 }} onClick={() => setMode('abs')}>사용량/할당량</button>
+        </div>
+      </div>
+
+      {err ? <ErrorBox message={err} />
+        : !d ? <Loading />
+          : pts.length < 2 ? (
+            <div className="muted" style={{ fontSize: 13, padding: 24, textAlign: 'center', lineHeight: 1.7 }}>
+              이 기간에 표시할 추이 데이터가 없습니다.<br />
+              사용량 추이는 <b>수집이 시작된 시점부터</b> 쌓입니다
+              {d.collectedSince ? <> — 수집 시작: <b>{new Date(d.collectedSince).toLocaleString('ko-KR')}</b>. 더 긴 기간은 그만큼 시간이 지나야 채워집니다.</>
+                : <>. 업그레이드 직후에는 몇 시간 뒤부터 그래프가 보입니다.</>}
+            </div>
+          ) : (
+            <>
+              {Object.entries(TREND_SERIES).map(([key, sInfo]) => {
+                const has = pts.some((p) => p[mode === 'pct' ? sInfo.pct : sInfo.used] != null);
+                return (
+                  <div key={key} style={{ marginBottom: 18 }}>
+                    <div className="flex between" style={{ alignItems: 'baseline', marginBottom: 4 }}>
+                      <b style={{ fontSize: 13 }}>{sInfo.label}</b>
+                      {!has && <span className="muted" style={{ fontSize: 11.5 }}>데이터 없음(수집 대기)</span>}
+                    </div>
+                    <div style={{ width: '100%', height: 170 }}>
+                      <ResponsiveContainer>
+                        <LineChart data={pts} margin={{ top: 6, right: 14, bottom: 2, left: 0 }}>
+                          <CartesianGrid stroke="rgba(148,163,184,.14)" />
+                          <XAxis dataKey="ts" tickFormatter={fmtTs} tick={{ fontSize: 10.5 }} minTickGap={26} />
+                          <YAxis tick={{ fontSize: 10.5 }} domain={mode === 'pct' ? [0, 100] : ['auto', 'auto']}
+                            width={52} label={{ value: mode === 'pct' ? '%' : sInfo.unit, angle: -90, position: 'insideLeft', fontSize: 10.5 }} />
+                          <Tooltip labelFormatter={(t) => new Date(t).toLocaleString('ko-KR')}
+                            contentStyle={{ background: 'var(--panel)', border: '1px solid var(--border)', fontSize: 12 }} />
+                          {mode === 'pct'
+                            ? <Line type="monotone" dataKey={sInfo.pct} name={`${sInfo.label} 사용률(%)`} stroke={sInfo.color} dot={false} connectNulls={false} />
+                            : <>
+                              <Line type="monotone" dataKey={sInfo.alloc} name={`할당(${sInfo.unit})`} stroke={sInfo.color} strokeDasharray="4 3" dot={false} connectNulls={false} />
+                              <Line type="monotone" dataKey={sInfo.used} name={`사용(${sInfo.unit})`} stroke={sInfo.color} dot={false} connectNulls={false} />
+                            </>}
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                );
+              })}
+              <div className="muted" style={{ fontSize: 11.5, lineHeight: 1.7 }}>
+                점선 = 할당(디스크는 총 용량), 실선 = 실사용. 집계 단위 {(d.bucketMs || 0) >= 86_400_000 ? `${Math.round(d.bucketMs / 86_400_000)}일` : (d.bucketMs || 0) >= 3_600_000 ? `${Math.round(d.bucketMs / 3_600_000)}시간` : `${Math.round((d.bucketMs || 0) / 60_000)}분`} 평균 · 표본 {pts.length}점
+                {d.collectedSince ? ` · 수집 시작 ${new Date(d.collectedSince).toLocaleDateString('ko-KR')}` : ''}
+                <br />※ 선이 끊긴 구간은 그 시각에 수집이 없었다는 뜻입니다(0이 아니라 결측). 디스크는 데이터스토어 사용/총용량 합계입니다.
+              </div>
+            </>
+          )}
+    </div>
+  );
+}
+
 export default function VCenterDetail({ site, onBack }) {
   const vcenterId = site.id;
+  // 상단 KPI 미니 스파크라인용 24시간 추이(v2.377). ⚠ 훅은 컴포넌트 최상단에서 선언한다 —
+  // 조기 return 뒤에 두면 렌더 간 훅 개수가 달라져 React #310 으로 화면이 크래시한다
+  // (v2.375 에서 실제 발생 → v2.375.1 수정). 추이 탭은 자체적으로 다시 조회한다.
+  const { d: miniHist } = useUsageHistory(vcenterId, '24h');
   const [view, setView] = useState('hosts');
   const [sel, setSel] = useState(null);     // { type, item } for the detail popup
   const [open, setOpen] = useState({});      // expanded tree nodes
@@ -171,8 +304,20 @@ export default function VCenterDetail({ site, onBack }) {
             VM <b style={{ color: 'var(--text)' }}>{inclPoweredOff ? (m.vms ?? vms.length) : visibleVms.length}</b>
             {!inclPoweredOff && <span style={{ color: 'var(--green)', fontSize: 11 }}> On</span>}
           </span>
-          <span className="muted">CPU <b style={{ color: 'var(--text)' }}>{m.cpuUsagePct ?? 0}%</b></span>
-          <span className="muted">메모리 <b style={{ color: 'var(--text)' }}>{m.memUsagePct ?? 0}%</b></span>
+          <span className="muted flex gap" style={{ alignItems: 'center', gap: 5 }}>
+            CPU <b style={{ color: 'var(--text)' }}>{m.cpuUsagePct ?? 0}%</b>
+            <MiniTrend points={miniHist?.points} field="cpuPct" color="#60a5fa" label="CPU" />
+          </span>
+          <span className="muted flex gap" style={{ alignItems: 'center', gap: 5 }}>
+            메모리 <b style={{ color: 'var(--text)' }}>{m.memUsagePct ?? 0}%</b>
+            <MiniTrend points={miniHist?.points} field="memPct" color="#4ade80" label="메모리" />
+          </span>
+          {/* 디스크는 상단 KPI 에 숫자가 없어 스파크라인만 — 자세한 값은 📈 추이 탭. */}
+          {miniHist?.points?.some((p) => p.diskPct != null) && (
+            <span className="muted flex gap" style={{ alignItems: 'center', gap: 5 }}>
+              디스크 <MiniTrend points={miniHist?.points} field="diskPct" color="#fbbf24" label="디스크" />
+            </span>
+          )}
           <button className="login-btn" style={{ flex: 'none', padding: '6px 14px', marginLeft: 6 }} onClick={() => setComparing(true)}>⇄ 비교하기</button>
         </div>
       </div>
@@ -186,6 +331,9 @@ export default function VCenterDetail({ site, onBack }) {
           </button>
         ))}
       </div>
+
+      {/* 📈 추이(v2.377) — 기간 9종 × CPU/메모리/디스크 사용량 vs 할당량 */}
+      {view === 'trend' && <div style={{ marginTop: 10 }}><TrendView vcenterId={vcenterId} /></div>}
 
       {(view === 'hosts' || view === 'vms') && (
         <>
