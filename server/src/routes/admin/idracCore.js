@@ -9,6 +9,8 @@ import { loadPowerSettings, savePowerSettings } from '../../idrac/powerSettings.
 import { getInventory as getIdracInventory } from '../../idrac/invCache.js';
 import { getSensorSeries } from '../../idrac/sensorStore.js';
 import { roomTempReport } from '../../idrac/roomTemp.js';
+import { roomTempHistory } from '../../idrac/roomTempSeries.js';
+import { getMetricsDb } from '../../metrics/db.js';
 import { hardwareDimMatch } from '../../idrac/hwMatch.js';
 import { partBuckets, serversWithPart, isPartCat } from '../../idrac/partsInventory.js';
 import { snapMemo } from '../../util/snapCache.js';
@@ -28,6 +30,24 @@ export function registerIdracCore(adminRouter) {
  * iDRAC 폴러가 이미 수집한 sensorStore 값을 재집계하므로 추가 Redfish 호출이 없다.
  * scope: 범위 제한 계정은 허용 vCenter 에 귀속된 서버만 집계한다(범위 밖 시설 온도 유출 차단).
  */
+/**
+ * 법인 전산실 온도 추이(v2.384) — 흡기/배기/CPU 를 1일~1년 기간으로 조회.
+ * ?kind=inlet|exhaust|cpu · ?group=<법인id|빈값=전체> · ?range=1d|7d|30d|90d|180d|365d
+ * 데이터는 샘플러가 적재한 roomtemp_* 계열(법인 단위 집계)이며, 60분+ 버킷은 시간당 롤업을
+ * 자동 사용해 365일도 원본 풀스캔 없이 조회한다.
+ * ⚠ 적재는 v2.384 부터 시작되므로 그 이전 구간은 데이터가 없다(collectedSince 로 알린다).
+ */
+adminRouter.get('/room-temp/history', adminOnly, async (req, res) => {
+  try {
+    const db = await getMetricsDb();
+    res.json(await roomTempHistory(db, {
+      kind: String(req.query.kind || 'inlet'),
+      group: String(req.query.group || ''),
+      range: String(req.query.range || '7d'),
+    }));
+  } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+});
+
 adminRouter.get('/room-temp', adminOnly, (req, res) => {
   try {
     // v2.383: 소스를 **서버 분석 › 법인별 온도(/admin/idrac/temps)와 동일**하게 맞춤.

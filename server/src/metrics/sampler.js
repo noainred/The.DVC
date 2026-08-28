@@ -14,6 +14,7 @@ import { updateVmStats } from '../reports/vmStats.js';
 import { memSampleRows, maybeLogMem } from '../system/memtrack.js';
 import { insertVmperf, pruneVmperf } from './vmperfDb.js';
 import { loadVmperfSettings, vmperfTracks } from './vmperfSettings.js';
+import { roomTempRows } from '../idrac/roomTempSeries.js';
 
 let timer = null;
 let lastRun = null;
@@ -179,6 +180,16 @@ async function sampleOnceInner() {
       }
     }
   } catch { /* 집계·설정 로드 실패가 샘플링을 막지 않게 */ }
+
+  // 법인 전산실 온도(v2.384) — 흡기·배기·CPU 를 **법인 단위 집계**로만 적재한다.
+  //
+  // ⚠ 서버별 시계열은 만들지 않는다: 965 서버 × 3종 × 시간당 = 연 2,500만 행이 되고,
+  //   iDRAC 센서는 원래 sensorStore(인메모리 24시간)에만 있었다. 법인 단위면 (법인 수 × 6)
+  //   행/샘플로 유계다(법인 10곳이면 60행 — 온도/GPU 계열과 같은 규모).
+  // 메트릭: roomtemp_{inlet|exhaust|cpu}_{avg|max} (키 = 법인 id, ''=전체)
+  // 이 계열이 있어야 '흡기/배기/CPU 를 눌러 1일~1년 추이' 를 볼 수 있다(그 전에는 데이터 자체가
+  // 없어 24시간을 넘는 기간을 그릴 방법이 없었다 — 화면이 수집 시작 시각을 함께 표기한다).
+  try { rows.push(...roomTempRows()); } catch { /* 집계 실패가 샘플링을 막지 않게 */ }
 
   // 포탈 자신의 프로세스 메모리(누수 추적) — 인벤토리 유무와 무관하게 항상 샘플하고,
   // 시간당 1줄 상태 로그(링 버퍼·journal)도 여기서 남긴다. 실패가 본 샘플링을 막지 않게 격리.
