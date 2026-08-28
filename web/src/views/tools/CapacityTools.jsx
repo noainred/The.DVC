@@ -1,6 +1,6 @@
 // CapacityTools.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
 import React, { useEffect, useState, useRef } from 'react';
-import { fetchJson } from '../../api.js';
+import { fetchJson, postJson } from '../../api.js';
 import { DataTable, Loading, ErrorBox, StateBadge, UsageCell, Modal, ResultCount, SearchBox, VmLink } from '../../components/ui.jsx';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Brush } from 'recharts';
 import { Card, fmtTrendTick, tb, tempColor, useTool } from './shared.jsx';
@@ -149,6 +149,62 @@ export function Capacity({ scope }) {
   );
 }
 
+/** 스파크라인 정렬용 7일 평균(%) — DataTable 은 sortable:false 를 모르고 sortValue 를 쓴다.
+ *  데이터가 없으면 null 을 돌려 DataTable 의 'null 은 뒤로' 규칙에 맡긴다. */
+const sparkAvg = (pts) => (pts && pts.length ? Math.round((pts.reduce((a, p) => a + p.v, 0) / pts.length) * 10) / 10 : null);
+
+/**
+ * 인라인 스파크라인(SVG) — 의존성 없이 points([{t,v}])를 작은 꺾은선으로 그린다(v2.375).
+ * recharts 를 행마다 마운트하면 수십 개 차트로 렌더가 무거워지므로 순수 SVG path 를 쓴다.
+ * 값이 %(0~100) 라 y 축을 0~100 으로 고정해 행 간 높이를 비교 가능하게 한다.
+ */
+function Sparkline({ points, color = '#fbbf24', width = 132, height = 26 }) {
+  if (points === undefined) return <span className="muted" style={{ fontSize: 11 }}>…</span>;
+  if (!points || points.length < 2) return <span className="muted" style={{ fontSize: 11 }} title="vCenter 에 이 VM 의 성능 히스토리가 없습니다(전원 OFF·권한·수집 방식 등)">—</span>;
+  const pad = 2;
+  const n = points.length;
+  const xs = (i) => pad + (i * (width - pad * 2)) / (n - 1);
+  const ys = (v) => height - pad - (Math.max(0, Math.min(100, v)) / 100) * (height - pad * 2);
+  const d = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${xs(i).toFixed(1)},${ys(p.v).toFixed(1)}`).join(' ');
+  const last = points[n - 1]?.v;
+  const max = points.reduce((a, p) => (p.v > a ? p.v : a), 0);
+  const avg = points.reduce((a, p) => a + p.v, 0) / n;
+  return (
+    <span className="flex gap" style={{ alignItems: 'center', gap: 6 }}
+      title={`7일 추이 · 평균 ${avg.toFixed(1)}% · 최대 ${max.toFixed(1)}% · 최근 ${last?.toFixed(1)}% (${n}점, 30분 간격)`}>
+      <svg width={width} height={height} style={{ display: 'block', flex: 'none' }} aria-hidden="true">
+        {/* 기준선(50%) — 눈금이 없으면 낮은 사용률인지 가늠이 안 된다 */}
+        <line x1={pad} y1={ys(50)} x2={width - pad} y2={ys(50)} stroke="rgba(148,163,184,.25)" strokeDasharray="2 3" strokeWidth="1" />
+        <path d={d} fill="none" stroke={color} strokeWidth="1.4" strokeLinejoin="round" strokeLinecap="round" />
+      </svg>
+      <span className="muted" style={{ fontSize: 10.5, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+        μ{avg.toFixed(0)} / ↑{max.toFixed(0)}%
+      </span>
+    </span>
+  );
+}
+
+/**
+ * 표에 보이는 VM 들의 7일 스파크라인을 **배치로** 불러온다(v2.375).
+ * 행마다 개별 요청하면 수십 개 HTTP + vCenter SOAP 이 몰리므로, vmId 목록을 한 번에 POST 한다.
+ * 서버가 요청당 VM 수를 제한(기본 24)하고 5분 캐시하므로 여기서도 상한을 맞춰 보낸다.
+ */
+function useSparklines(rows, type, enabled) {
+  const [map, setMap] = useState({});      // vmId -> points | null
+  const [info, setInfo] = useState(null);  // { truncated, synthesized, maxVms }
+  const ids = (rows || []).map((r) => r.id).filter(Boolean);
+  const key = ids.slice(0, 24).join(',');
+  useEffect(() => {
+    if (!enabled || !key) { setMap({}); setInfo(null); return undefined; }
+    let dead = false;
+    postJson('/tools/waste/spark', { vmIds: key.split(','), type })
+      .then((r) => { if (!dead) { setMap(r.series || {}); setInfo({ truncated: r.truncated, synthesized: r.synthesized, maxVms: r.maxVms }); } })
+      .catch(() => { if (!dead) { setMap({}); setInfo(null); } });
+    return () => { dead = true; };
+  }, [key, type, enabled]);
+  return { map, info };
+}
+
 /**
  * 할당 vs 실사용 추이(v2.374) — '주기적 실사용률 트렌드로 할당량을 조절' 하기 위한 차트.
  * 샘플러(기본 1분)가 적재한 집계를 시간/일/주 버킷으로 보여준다(시간당 이상은 롤업 사용).
@@ -234,6 +290,9 @@ export function Waste({ scope }) {
   if (error) return <ErrorBox message={error} />;
   const tb2 = (g) => (g >= 1024 ? `${(g / 1024).toFixed(1)} TB` : `${g} GB`);
   const oa = data.overAllocated || null; // 과할당(할당 vs 사용) — 구버전 서버 응답이면 없음
+  // 7일 사용량 스파크라인(v2.375) — 현재 보는 탭의 상위 행만 배치 조회(vCenter 성능 API).
+  const spark = useSparklines(tab === 'cpu' ? oa?.cpuTop : tab === 'mem' ? oa?.memTop : null,
+    tab === 'mem' ? 'mem' : 'cpu', !!oa && (tab === 'cpu' || tab === 'mem'));
   return (
     <>
       <div className="kpis" style={{ marginBottom: 14 }}>
@@ -277,7 +336,10 @@ export function Waste({ scope }) {
           { key: 'cpuUsagePct', label: '사용률', align: 'right', render: (v) => `${v.cpuUsagePct}%` },
           { key: 'cpuSavingPct', label: '절감 가능', align: 'right', render: (v) => (v.cpuSavingPct == null ? '—' : <b>{v.cpuSavingPct}%</b>) },
           { key: 'host', label: 'ESXi 호스트', render: (v) => <span className="muted">{v.host}</span> },
+          { key: 'spark', label: '7일 사용률 추이', sortValue: (v) => sparkAvg(spark.map[v.id]), render: (v) => <Sparkline points={spark.map[v.id]} /> },
         ]} />
+        {spark.info?.truncated && <div className="muted" style={{ fontSize: 11.5, marginTop: 4 }}>※ 추이 차트는 vCenter 성능 조회 부담을 고려해 상위 {spark.info.maxVms}대만 표시합니다.</div>}
+        {spark.info?.synthesized && <div className="muted" style={{ fontSize: 11.5, marginTop: 4 }}>※ 데모(mock) 모드의 합성 데이터입니다.</div>}
       </>}
       {tab === 'mem' && oa && <>
         <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
@@ -293,7 +355,9 @@ export function Waste({ scope }) {
           { key: 'memSavingPct', label: '절감 가능', align: 'right', render: (v) => (v.memSavingPct == null ? '—' : <b>{v.memSavingPct}%</b>) },
           { key: 'guestOS', label: 'Guest OS' },
           { key: 'host', label: 'ESXi 호스트', render: (v) => <span className="muted">{v.host}</span> },
+          { key: 'spark', label: '7일 사용률 추이', sortValue: (v) => sparkAvg(spark.map[v.id]), render: (v) => <Sparkline points={spark.map[v.id]} color="#4ade80" /> },
         ]} />
+        {spark.info?.truncated && <div className="muted" style={{ fontSize: 11.5, marginTop: 4 }}>※ 추이 차트는 vCenter 성능 조회 부담을 고려해 상위 {spark.info.maxVms}대만 표시합니다.</div>}
       </>}
       {tab === 'trend' && <WasteTrend scope={scope} />}
       <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>※ 고아 디스크(orphaned VMDK)는 데이터스토어 파일 스캔이 필요해 현재 미포함입니다.</div>

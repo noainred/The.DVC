@@ -219,6 +219,89 @@ api.get('/tools/waste/history', async (req, res) => {
   res.json({ vcenterId: vcId || 'all', days, bucketMs, collectedSince: meta?.firstTs ?? null, points });
 });
 
+/**
+ * VM 7일 사용량 스파크라인 배치 조회(v2.375) — 과할당 표의 각 행에 '최근 추이' 미니차트를
+ * 그리기 위한 데이터. 낭비 리소스 표는 후보가 수천 개라 한 번에 다 조회하면 안 되므로
+ * **화면에 보이는 행만** 프론트가 vmId 배열로 요청한다(POST body).
+ *
+ * 데이터 출처: vCenter 가 자체 보관하는 성능 히스토리(fetchVmMetric, interval='week' =
+ * 30분 해상도). **우리 시계열 DB 에 VM 별 행을 쌓지 않는다** — 5,850 VM × 시간당 1행이면
+ * 연 5천만 행이라 감당이 안 되기 때문(sampler vmAllocRows 주석과 같은 이유). vCenter 에
+ * 이미 있는 데이터를 필요할 때만 빌려온다.
+ *
+ * 폭주 방지(28 vCenter·고RTT 환경 필수):
+ *  - 요청당 VM 상한 MAX_VMS(기본 24) — 초과분은 잘라내고 truncated 로 알린다.
+ *  - vCenter SOAP 동시성 6(eachLimited) — vm-finder 의 평균 조회와 같은 상한.
+ *  - 결과 5분 캐시(sparkCache) — 스크롤/재렌더로 같은 VM 을 반복 조회하지 않게.
+ *  - per-VM best effort: 한 VM 실패가 전체를 깨지 않고 그 행만 points=null.
+ */
+const sparkCache = new Map(); // `${vmId}|${type}` -> { at, points }
+const SPARK_TTL_MS = 5 * 60_000;
+const SPARK_MAX_VMS = Math.max(1, Math.min(64, Number(process.env.WASTE_SPARK_MAX_VMS) || 24));
+
+api.post('/tools/waste/spark', async (req, res) => {
+  const type = req.body?.type === 'mem' ? 'mem' : 'cpu';
+  const ids = Array.isArray(req.body?.vmIds) ? req.body.vmIds.map(String) : [];
+  if (!ids.length) return res.json({ type, series: {}, truncated: false });
+  const snap = store.get();
+  const allowed = scopedVcenterIds(req.user, snap);
+  // scope: 요청 vmId 중 '허용 vCenter 소속으로 실재하는' VM 만 남긴다(범위 밖 VM 성능 유출 차단).
+  const byId = new Map((snap.vms || []).map((v) => [v.id, v]));
+  const targets = [];
+  for (const id of ids) {
+    const v = byId.get(id);
+    if (!v) continue;
+    if (allowed && !allowed.has(v.vcenterId)) continue;
+    targets.push(v);
+    if (targets.length >= SPARK_MAX_VMS) break;
+  }
+  const truncated = ids.length > targets.length;
+  const now = Date.now();
+  const series = {};
+  const need = [];
+  for (const v of targets) {
+    const ck = `${v.id}|${type}`;
+    const hit = sparkCache.get(ck);
+    if (hit && now - hit.at < SPARK_TTL_MS) series[v.id] = hit.points;
+    else need.push(v);
+  }
+  if (need.length) {
+    if (snap.source === 'mock') {
+      // 데모: 현재 사용률 주변으로 7일 합성(실데이터가 아님을 응답에 synthesized 로 표기).
+      for (const v of need) {
+        const base = type === 'mem' ? (v.memUsagePct || 0) : (v.cpuUsagePct || 0);
+        const pts = Array.from({ length: 84 }, (_, i) => {
+          const wave = Math.sin(i / 6) * (base * 0.25) + Math.cos(i / 11) * (base * 0.12);
+          return { t: now - (84 - i) * 2 * 3_600_000, v: Math.max(0, Math.min(100, Math.round((base + wave) * 10) / 10)) };
+        });
+        series[v.id] = pts;
+        sparkCache.set(`${v.id}|${type}`, { at: now, points: pts });
+      }
+    } else {
+      const cfgs = loadVcenterConfig().vcenters;
+      await eachLimited(need, 6, async (v) => {
+        const vc = cfgs.find((x) => x.id === v.vcenterId);
+        if (!vc) { series[v.id] = null; return; }
+        const moref = v.id.split(':').slice(1).join(':');
+        try {
+          // interval 'week' = 1800초(30분) 해상도. 7일 ≈ 336점 → 스파크라인에 충분.
+          const m = await fetchVmMetric(vc, moref, type, 'week');
+          const pts = (m?.points || []).filter((p) => p && p.v != null).map((p) => ({ t: p.t, v: p.v }));
+          series[v.id] = pts.length ? pts : null;
+          sparkCache.set(`${v.id}|${type}`, { at: now, points: series[v.id] });
+        } catch {
+          series[v.id] = null; // 이 VM 만 실패(권한·엣지 수집·전원 OFF 등) — 표는 계속 그린다
+        }
+      });
+    }
+  }
+  // 캐시 크기 상한 — 오래된 항목 정리(무한 증가 방지).
+  if (sparkCache.size > 4000) {
+    for (const [k, e] of sparkCache) if (now - e.at > SPARK_TTL_MS) sparkCache.delete(k);
+  }
+  res.json({ type, interval: 'week', unit: '%', maxVms: SPARK_MAX_VMS, truncated, synthesized: snap.source === 'mock', series });
+});
+
 // Thin-provisioned VM finder. thin = uncommitted(여유)이 큰 VM(추정). committed=실사용,
 // provisioned=committed+uncommitted. 회수 가능 추정 = uncommitted 합계.
 api.get('/tools/thin-vms', (req, res) => memoJson(req, res, 'tools-thin-vms', (snap) => {
