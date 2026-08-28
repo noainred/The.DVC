@@ -1,5 +1,5 @@
 // PortalDb.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { fetchJson, postJson, usePolling } from '../../api.js';
 import { DataTable, Loading, ErrorBox, Modal } from '../../components/ui.jsx';
 import { Card } from './shared.jsx';
@@ -154,7 +154,7 @@ function DbLocationPanel() {
 
   const check = async () => {
     setBusy(true); setMade(null);
-    try { setPf(await fetchJson('/admin/portal-db/location/preflight', {}, undefined, { method: 'POST', body: { targetDir: target } })); }
+    try { setPf(await postJson('/admin/portal-db/location/preflight', { targetDir: target })); }
     catch (e) { setPf({ ok: false, reasons: [e.message] }); }
     finally { setBusy(false); }
   };

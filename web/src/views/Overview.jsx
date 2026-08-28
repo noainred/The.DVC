@@ -57,6 +57,10 @@ export default function Overview({ onSelectSite, onGotoTab }) {
   // (고RTT 환경에서 지도·KPI가 다음 주기까지 통째로 사라지던 문제) — 데이터 위 배너로 표시.
   if (error && !ov) return <ErrorBox message={error} />;
   if (!ov) return null;
+  // 서버 첫 수집 완료 전에는 rollups(=global)가 없다 — 방어 없이 g.vcentersConnected 접근 시
+  // TypeError 로 대시보드가 크래시한다(재시작 직후 실제 발생). /health 는 rollups?.global||{} 로
+  // 이미 방어하므로 여기서도 수집 완료 전이면 로딩으로 처리한다(v2.385).
+  if (!ov.global) return <div className="muted" style={{ padding: 40, textAlign: 'center' }}>수집 준비 중… (첫 vCenter 수집 완료 후 표시)</div>;
 
   const g = ov.global;
   const regions = ov.byRegion || [];
