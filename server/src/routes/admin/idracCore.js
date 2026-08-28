@@ -31,7 +31,10 @@ export function registerIdracCore(adminRouter) {
  */
 adminRouter.get('/room-temp', adminOnly, (req, res) => {
   try {
-    res.json(roomTempReport({ allowedVcenterIds: scopedVcenterIds(req.user, store.get()) }));
+    // v2.382: 데이터 소스를 **vCenter 스냅샷**으로 교정(iDRAC 등록이 없으면 빈 화면이었음).
+    // 스냅샷 호스트의 temps[]/tempC 를 vCenter 단위로 집계하고, iDRAC 수집이 있으면 보강한다.
+    const snap = store.get();
+    res.json(roomTempReport(snap, { allowedVcenterIds: scopedVcenterIds(req.user, snap) }));
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 

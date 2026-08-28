@@ -1,52 +1,51 @@
 /**
- * 법인 전산실 운영 온도(v2.381) — iDRAC 온도센서를 **법인(DataCenter)별로 종합**해
- * 한 페이지에서 흡기(inlet)·배기(exhaust)·CPU 세 가지의 범위(min~max)와 평균을 보여준다.
+ * 법인 전산실 운영 온도(v2.382) — **vCenter(법인) 단위**로 흡기·배기·CPU 온도 범위를 종합한다.
  *
- * 데이터 출처: iDRAC 폴러가 Redfish Thermal 에서 받아 sensorStore(인메모리 링버퍼, 최근 24시간)에
- * 넣는 서버별 센서맵. 추가 HTTP 호출을 하지 않는다(이미 수집된 값을 재사용).
+ * ⚠ v2.381 정정: 처음에는 iDRAC 레지스트리 + sensorStore(Redfish)를 소스로 썼는데, 운영에서는
+ *   iDRAC 등록이 없거나 인메모리 링버퍼가 비어 화면이 전부 0/'—' 로 나왔다(사용자 보고).
+ *   실제로 온도는 **vCenter 스냅샷의 호스트 필드**에 이미 들어 있다 —
+ *   `soapClient.parseTemps` 가 numericSensorInfo(sensorType=temperature)에서
+ *   `tempC`(ambient/inlet 우선), `tempMaxC`(최댓값), `temps:[{name,c}]`(최대 12개)를 만든다.
+ *   그래서 이 모듈은 **스냅샷을 1차 소스**로 쓰고(모든 vCenter·전 호스트가 대상),
+ *   iDRAC sensorStore 값이 있으면 같은 호스트에 **보강**한다(Redfish 는 센서 종류가 더 풍부).
  *
- * 센서 분류(이름 기반) — 벤더가 표준 이름을 주지 않아 정규식으로 판별한다:
- *  - inlet   : Inlet / Intake / Ambient  → 전산실 공급(급기) 온도. **가장 중요한 지표**
- *              (ASHRAE 권고 대역과 직접 비교 가능).
- *  - exhaust : Exhaust / Outlet / Exit   → 배기 온도. inlet 과의 차(ΔT)가 크면 부하·풍량 문제.
- *  - cpu     : CPU / Proc / Package / Die → 프로세서 다이 온도.
- *  이 셋 중 어디에도 안 맞는 센서(메모리·PSU·보드 등)는 **other 로 세기만 하고 집계에 넣지
- *  않는다** — 성격이 다른 센서를 섞으면 '전산실 온도' 의미가 무너진다.
+ * 집계 단위: vCenter(= 법인). 스냅샷 vcenters 목록의 name 을 그대로 쓴다.
  *
- * 정직성 규칙(허수 금지)
- *  - 값이 없는 종류는 null 로 두고 화면이 '—' 로 표시한다(0 이나 추정값을 만들지 않는다).
- *  - 표본이 오래된 서버(기본 15분 초과)는 stale 로 세고 집계에서 제외한다 — 죽은 서버의
- *    마지막 온도가 현재 범위처럼 보이면 안 된다.
- *  - 법인 귀속이 없는 서버는 '(미지정)' 그룹으로 따로 묶는다(임의 배정 금지).
+ * 센서 분류(이름 기반 — 벤더 표준 이름이 없어 정규식으로 판별)
+ *  - inlet   : Inlet / Intake / Ambient / Front   → 전산실 급기 온도(ASHRAE 대역과 직접 비교)
+ *  - exhaust : Exhaust / Outlet / Exit / Rear     → 배기 온도
+ *  - cpu     : CPU / CPU1 / Proc / Package / Die  → 프로세서 온도
+ *  그 외(메모리·PSU·보드 등)는 other 로 세기만 하고 집계에서 제외한다.
+ *
+ * 정직성 규칙
+ *  - 값이 없는 종류는 null(화면 '—'). 0 이나 추정값을 만들지 않는다.
+ *  - temps 배열이 없고 tempC 만 있는 호스트는 **tempC 를 흡기로만** 인정한다
+ *    (parseTemps 가 ambient/inlet 우선으로 고른 값이라 근거가 있다). 배기·CPU 는 미상.
+ *  - 센서가 전혀 없는 호스트는 집계에서 빼고 그 수를 표기한다.
  */
 
-import { loadRegistry } from './registry.js';
 import { getSensorSeries } from './sensorStore.js';
-import { listDatacenters } from '../datacenter/store.js';
+import { loadRegistry } from './registry.js';
 
-/** 센서 이름 → 종류. 우선순위 주의: 'CPU Inlet' 같은 이름은 inlet 으로 잡아야 한다. */
+/** 센서 이름 → 종류. 'CPU Inlet' 처럼 겹치면 inlet 이 우선(급기 판정이 더 중요). */
 export function classifySensor(name) {
   const s = String(name || '');
-  if (/inlet|intake|ambient/i.test(s)) return 'inlet';
-  if (/exhaust|outlet|exit/i.test(s)) return 'exhaust';
-  // ⚠ \bcpu\b 를 쓰면 실제 Dell 생서명 'CPU1 Temp'·'CPU2' 가 걸리지 않는다
-  // (1 이 단어문자라 경계가 성립하지 않음 — 검증에서 실제로 분류 실패를 잡았다).
-  // 'cpu' 뒤 숫자를 허용하고, die/core 는 단어 경계로 둔다('Diode'·'Corner' 오팡 방지).
+  if (/inlet|intake|ambient|front/i.test(s)) return 'inlet';
+  if (/exhaust|outlet|exit|rear/i.test(s)) return 'exhaust';
+  // \bcpu\b 는 'CPU1 Temp'(숫자가 붙은 실제 센서명)를 놓친다 — cpu 뒤 숫자를 허용한다.
   if (/cpu\s*\d*/i.test(s) || /proc|package|\bdie\b|\bcore\b/i.test(s)) return 'cpu';
   return 'other';
 }
 
-/** ASHRAE A1 권장 급기 온도(18~27℃) 기준 상태 판정 — inlet 에만 의미가 있다. */
+/** ASHRAE A1 권장 급기 18~27℃ 기준 상태(흡기에만 의미). */
 export function inletStatus(c) {
   if (c == null) return null;
-  if (c < 15) return 'cold';        // 과냉(에너지 낭비)
-  if (c <= 18) return 'lowok';      // 권장 하단 근접
-  if (c <= 27) return 'ok';         // ASHRAE A1 권장 대역
-  if (c <= 32) return 'warn';       // 허용 상단 — 개선 필요
-  return 'hot';                     // 위험
+  if (c < 15) return 'cold';
+  if (c <= 18) return 'lowok';
+  if (c <= 27) return 'ok';
+  if (c <= 32) return 'warn';
+  return 'hot';
 }
-
-const STALE_MS = Number(process.env.ROOMTEMP_STALE_MS) || 15 * 60_000;
 
 const emptyAgg = () => ({ min: null, max: null, sum: 0, n: 0, servers: 0 });
 function addAgg(a, c) {
@@ -62,103 +61,139 @@ const finishAgg = (a) => ({
   range: a.min != null && a.max != null ? Math.round((a.max - a.min) * 10) / 10 : null,
 });
 
-/**
- * 법인별 온도 종합.
- * @param {{ now?: number, allowedVcenterIds?: Set<string>|null }} opts
- *   allowedVcenterIds: 사용자 scope — 범위 밖 vCenter 귀속 서버는 제외(null=무제한).
- */
-export function roomTempReport({ now = Date.now(), allowedVcenterIds = null } = {}) {
-  const dcs = listDatacenters();
-  const dcName = new Map(dcs.map((d) => [String(d.id), d.name || d.id]));
+/** iDRAC sensorStore 에서 이 호스트에 해당하는 최신 센서맵(있으면). 이름·IP 로 매칭. */
+function idracSensorsFor(host, idracIndex) {
+  if (!idracIndex.size) return null;
+  const keys = [
+    String(host.name || '').toLowerCase(),
+    String(host.name || '').split('.')[0].toLowerCase(),   // FQDN → 짧은 이름
+    String(host.managementIp || host.ip || '').trim(),
+  ].filter(Boolean);
+  for (const k of keys) {
+    const id = idracIndex.get(k);
+    if (!id) continue;
+    const latest = getSensorSeries(id, { minutes: 60 })?.latest;
+    if (latest && latest.temps && Object.keys(latest.temps).length) return latest.temps;
+  }
+  return null;
+}
 
-  const groups = new Map(); // dcKey -> { id, name, inlet, exhaust, cpu, servers[], stale, noSensor, otherSensors }
+/** iDRAC 레지스트리 인덱스(이름/짧은이름/호스트 → serverId). 등록이 없으면 빈 Map. */
+function buildIdracIndex() {
+  const idx = new Map();
+  try {
+    for (const s of loadRegistry()) {
+      if (s.type === 'ome' || s.enabled === false) continue;
+      for (const k of [s.name, String(s.name || '').split('.')[0], s.host, s.serviceTag]) {
+        const key = String(k || '').trim().toLowerCase();
+        if (key && !idx.has(key)) idx.set(key, s.id);
+      }
+    }
+  } catch { /* 레지스트리 없음 — 스냅샷만 사용 */ }
+  return idx;
+}
+
+/**
+ * vCenter(법인)별 온도 종합.
+ * @param {object} snap store 스냅샷
+ * @param {{ allowedVcenterIds?: Set<string>|null }} opts scope(null=무제한)
+ */
+export function roomTempReport(snap, { allowedVcenterIds = null, now = Date.now() } = {}) {
+  const vcName = new Map((snap?.vcenters || []).map((v) => [String(v.id), v.name || v.id]));
+  const idracIndex = buildIdracIndex();
+
+  const groups = new Map();
   const bucket = (id) => {
     const key = String(id || '');
     let g = groups.get(key);
     if (!g) {
       g = {
-        id: key, name: key ? (dcName.get(key) || key) : '(미지정)',
+        id: key, name: key ? (vcName.get(key) || key) : '(미지정)',
         inlet: emptyAgg(), exhaust: emptyAgg(), cpu: emptyAgg(),
-        servers: [], serverCount: 0, staleCount: 0, noSensorCount: 0, otherSensorCount: 0,
+        hosts: [], hostCount: 0, noSensorCount: 0, otherSensorCount: 0, idracBoosted: 0,
       };
       groups.set(key, g);
     }
     return g;
   };
 
-  let totalServers = 0; let withData = 0; let staleTotal = 0;
+  let totalHosts = 0; let withData = 0; let idracBoostedTotal = 0;
   const all = { inlet: emptyAgg(), exhaust: emptyAgg(), cpu: emptyAgg() };
 
-  for (const s of loadRegistry()) {
-    if (s.type === 'ome') continue;                  // OME 는 관리 콘솔(자체 센서 아님)
-    if (s.enabled === false) continue;
-    // scope: 범위 제한 계정에는 허용 vCenter 에 귀속된 서버만.
-    if (allowedVcenterIds) {
-      const vc = String(s.vcenterId || '').trim();
-      if (!vc || !allowedVcenterIds.has(vc)) continue;
-    }
-    totalServers += 1;
-    const g = bucket(s.datacenterId);
-    g.serverCount += 1;
+  for (const h of snap?.hosts || []) {
+    if (allowedVcenterIds && !allowedVcenterIds.has(h.vcenterId)) continue;
+    totalHosts += 1;
+    const g = bucket(h.vcenterId);
+    g.hostCount += 1;
 
-    const series = getSensorSeries(s.id, { minutes: 0 });
-    const latest = series.latest;
-    if (!latest || !latest.temps || !Object.keys(latest.temps).length) { g.noSensorCount += 1; continue; }
-    // 오래된 표본은 제외 — 죽은 서버의 마지막 온도를 '현재'로 보여주지 않는다.
-    if (now - (latest.t || 0) > STALE_MS) { g.staleCount += 1; staleTotal += 1; continue; }
-
-    // 서버 1대 안에서도 같은 종류 센서가 여러 개일 수 있다(CPU1/CPU2 등) → 종류별 대표값:
-    // inlet/exhaust 는 최댓값(가장 더운 쪽이 운영 기준), cpu 도 최댓값(피크가 관심사).
+    // 1) 스냅샷 센서 배열(주 소스) — soapClient.parseTemps 가 채운다.
     const per = { inlet: null, exhaust: null, cpu: null };
-    let other = 0;
-    for (const [name, c] of Object.entries(latest.temps)) {
-      if (typeof c !== 'number') continue;
+    let other = 0; let sensorSeen = 0;
+    const take = (name, c) => {
+      if (typeof c !== 'number' || !Number.isFinite(c)) return;
+      sensorSeen += 1;
       const kind = classifySensor(name);
-      if (kind === 'other') { other += 1; continue; }
+      if (kind === 'other') { other += 1; return; }
+      // 같은 종류가 여럿이면(CPU1·CPU2 등) 가장 높은 값을 대표값으로.
       if (per[kind] == null || c > per[kind]) per[kind] = c;
-    }
-    g.otherSensorCount += other;
-    if (per.inlet == null && per.exhaust == null && per.cpu == null) { g.noSensorCount += 1; continue; }
+    };
+    for (const t of h.temps || []) take(t.name, t.c);
 
+    // 2) iDRAC Redfish 센서로 보강(등록·수집이 있는 호스트만) — 종류가 더 풍부하다.
+    const idracTemps = idracSensorsFor(h, idracIndex);
+    if (idracTemps) {
+      const before = { ...per };
+      for (const [name, c] of Object.entries(idracTemps)) take(name, c);
+      if (before.inlet !== per.inlet || before.exhaust !== per.exhaust || before.cpu !== per.cpu) {
+        g.idracBoosted += 1; idracBoostedTotal += 1;
+      }
+    }
+
+    // 3) 센서 배열이 없는 호스트: tempC 는 parseTemps 가 ambient/inlet 우선으로 고른 값이라
+    //    **흡기로만** 인정한다(배기·CPU 로 추정하지 않는다).
+    if (per.inlet == null && typeof h.tempC === 'number') { per.inlet = h.tempC; sensorSeen += 1; }
+
+    g.otherSensorCount += other;
+    if (per.inlet == null && per.exhaust == null && per.cpu == null) {
+      if (!sensorSeen) g.noSensorCount += 1;
+      continue;
+    }
     withData += 1;
     for (const k of ['inlet', 'exhaust', 'cpu']) {
       if (per[k] == null) continue;
       addAgg(g[k], per[k]); g[k].servers += 1;
       addAgg(all[k], per[k]); all[k].servers += 1;
     }
-    g.servers.push({
-      id: s.id, name: s.name || s.host || s.id, host: s.host || '',
-      vcenterId: s.vcenterId || '', model: s.model || '',
+    g.hosts.push({
+      id: h.id, name: h.name || h.id, cluster: h.cluster || '', model: h.model || '',
       inlet: per.inlet, exhaust: per.exhaust, cpu: per.cpu,
       deltaT: per.inlet != null && per.exhaust != null ? Math.round((per.exhaust - per.inlet) * 10) / 10 : null,
-      at: latest.t,
+      source: idracTemps ? 'vcenter+idrac' : 'vcenter',
     });
   }
 
-  const list = [...groups.values()].map((g) => ({
-    id: g.id, name: g.name,
-    serverCount: g.serverCount, staleCount: g.staleCount, noSensorCount: g.noSensorCount,
-    otherSensorCount: g.otherSensorCount,
-    inlet: finishAgg(g.inlet), exhaust: finishAgg(g.exhaust), cpu: finishAgg(g.cpu),
-    // ΔT(배기−흡기) 평균 — 냉각 효율의 실무 지표.
-    deltaAvg: (() => {
-      const ds = g.servers.map((x) => x.deltaT).filter((x) => x != null);
-      return ds.length ? Math.round((ds.reduce((a, b) => a + b, 0) / ds.length) * 10) / 10 : null;
-    })(),
-    status: inletStatus(finishAgg(g.inlet).max),   // 법인 상태는 **가장 더운 흡기**로 판정(보수적)
-    servers: g.servers.sort((a, b) => (b.inlet ?? -1) - (a.inlet ?? -1)),
-  }))
-    // 정렬: 흡기 최고가 높은 법인 먼저(문제 있는 곳이 위로), 데이터 없는 법인은 뒤로.
-    .sort((a, b) => (b.inlet.max ?? -999) - (a.inlet.max ?? -999) || a.name.localeCompare(b.name));
+  const list = [...groups.values()].map((g) => {
+    const ds = g.hosts.map((x) => x.deltaT).filter((x) => x != null);
+    return {
+      id: g.id, name: g.name,
+      hostCount: g.hostCount, noSensorCount: g.noSensorCount, otherSensorCount: g.otherSensorCount,
+      idracBoosted: g.idracBoosted,
+      inlet: finishAgg(g.inlet), exhaust: finishAgg(g.exhaust), cpu: finishAgg(g.cpu),
+      deltaAvg: ds.length ? Math.round((ds.reduce((a, b) => a + b, 0) / ds.length) * 10) / 10 : null,
+      status: inletStatus(finishAgg(g.inlet).max),   // 가장 더운 흡기로 보수적 판정
+      hosts: g.hosts.sort((a, b) => (b.inlet ?? -1) - (a.inlet ?? -1)).slice(0, 200),
+    };
+  }).sort((a, b) => (b.inlet.max ?? -999) - (a.inlet.max ?? -999) || a.name.localeCompare(b.name));
 
   return {
     generatedAt: now,
-    staleMs: STALE_MS,
+    source: 'vcenter-snapshot',      // 화면이 데이터 출처를 밝힐 수 있게
     totals: {
-      datacenters: list.length, servers: totalServers, withData, stale: staleTotal,
+      vcenters: list.length, hosts: totalHosts, withData,
+      noSensor: totalHosts - withData, idracBoosted: idracBoostedTotal,
       inlet: finishAgg(all.inlet), exhaust: finishAgg(all.exhaust), cpu: finishAgg(all.cpu),
     },
     thresholds: { recommendMin: 18, recommendMax: 27, warnMax: 32 },
-    datacenters: list,
+    vcenters: list,
   };
 }
