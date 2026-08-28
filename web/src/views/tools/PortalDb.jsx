@@ -1,6 +1,6 @@
 // PortalDb.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
 import React, { useState } from 'react';
-import { fetchJson, usePolling } from '../../api.js';
+import { fetchJson, postJson, usePolling } from '../../api.js';
 import { DataTable, Loading, ErrorBox, Modal } from '../../components/ui.jsx';
 import { Card } from './shared.jsx';
 
@@ -127,6 +127,178 @@ function DbDetailModal({ f, health, onClose, onCheck, checking }) {
         </div>
       )}
     </Modal>
+  );
+}
+
+
+/**
+ * DB 저장 경로 · 마이그레이션(v2.379).
+ * 포탈이 직접 파일을 옮기지 않는다 — 정지/복사/검증/경로기록을 담은 **스크립트와 설명서를 만들어**
+ * 관리자가 실행하게 한다(서비스 정지·기동은 systemd 관할이고, 열린 DB 를 옮기면 손상 위험).
+ */
+function DbLocationPanel() {
+  const [d, setD] = useState(null);
+  const [err, setErr] = useState(null);
+  const [target, setTarget] = useState('');
+  const [service, setService] = useState('vmware-portal');
+  const [pf, setPf] = useState(null);
+  const [made, setMade] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [confirm, setConfirm] = useState(false);   // 서비스 중단 고지 팝업
+
+  const load = async () => {
+    try { const r = await fetchJson('/admin/portal-db/location'); setD(r); setErr(null); }
+    catch (e) { setErr(e.message); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const check = async () => {
+    setBusy(true); setMade(null);
+    try { setPf(await fetchJson('/admin/portal-db/location/preflight', {}, undefined, { method: 'POST', body: { targetDir: target } })); }
+    catch (e) { setPf({ ok: false, reasons: [e.message] }); }
+    finally { setBusy(false); }
+  };
+  const makeScript = async () => {
+    setBusy(true); setConfirm(false);
+    try {
+      const r = await postJson('/admin/portal-db/location/script', { targetDir: target, service });
+      setMade(r); await load();
+    } catch (e) { setMade({ ok: false, reason: e.message }); }
+    finally { setBusy(false); }
+  };
+
+  if (err) return <div className="card" style={{ padding: 14, marginTop: 14 }}><ErrorBox message={err} /></div>;
+  if (!d) return null;
+  const inv = d.inventory || { files: [], totalBytes: 0 };
+
+  return (
+    <div className="card" style={{ padding: 14, marginTop: 14 }}>
+      <b style={{ fontSize: 14 }}>DB 저장 경로 · 마이그레이션</b>
+      <div className="muted" style={{ fontSize: 12, marginTop: 6, marginBottom: 12, lineHeight: 1.7 }}>
+        대용량 시계열 DB 를 별도 볼륨으로 옮길 수 있습니다. 포탈이 직접 옮기지 않고, <b>서비스 정지 → 복사 → SHA-256 검증 → 경로 기록</b>을
+        담은 <b>스크립트와 설명서를 생성</b>합니다(관리자가 root 로 실행). 원본은 지우지 않으므로 언제든 되돌릴 수 있습니다.
+      </div>
+
+      <div className="flex gap wrap" style={{ marginBottom: 12 }}>
+        <Card label="현재 DB 경로" value={<code style={{ fontSize: 12 }}>{d.currentDir}</code>} meta={d.isCustom ? '사용자 지정' : '기본(설정 디렉터리)'} />
+        <Card label="이전 대상 용량" value={fmtBytes(inv.totalBytes)} meta={`${inv.files.length}개 항목`} />
+      </div>
+
+      {inv.files.length > 0 && (
+        <div className="table-wrap" style={{ maxHeight: 200, marginBottom: 12 }}>
+          <table>
+            <thead><tr><th>대상</th><th>내용</th><th style={{ textAlign: 'right' }}>용량</th></tr></thead>
+            <tbody>
+              {inv.files.map((f) => (
+                <tr key={f.file || f.dir}>
+                  <td><b>{f.file || `${f.dir}/`}</b></td>
+                  <td className="muted" style={{ fontSize: 12 }}>{f.label}</td>
+                  <td style={{ textAlign: 'right' }}>{fmtBytes(f.bytes)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <div className="muted" style={{ fontSize: 11.5, marginBottom: 12 }}>
+        ※ <code>ipam.db</code>(외부 프로그램이 경로를 고정해 읽음)와 <code>vcenter-logs.db</code>(설정 › 로그 수집에 자체 경로 있음),
+        JSON 설정·자격증명은 이전 대상이 아닙니다.
+      </div>
+
+      <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 10 }}>
+        <input className="input" style={{ flex: 1, minWidth: 280 }} placeholder="새 경로(절대) — 예: /data/vmware-portal-db"
+          value={target} onChange={(e) => setTarget(e.target.value)} />
+        <input className="input" style={{ width: 180 }} placeholder="systemd 서비스명" value={service} onChange={(e) => setService(e.target.value)} />
+        <button className="logout-btn" style={{ flex: 'none', padding: '7px 14px' }} disabled={busy || !target.trim()} onClick={check}>
+          {busy ? '확인 중…' : '사전 점검'}
+        </button>
+        <button className="login-btn" style={{ flex: 'none', padding: '7px 14px' }} disabled={busy || !pf?.ok} onClick={() => setConfirm(true)}>
+          스크립트 생성
+        </button>
+      </div>
+
+      {pf && (
+        <div className="card" style={{ padding: 12, marginBottom: 10, background: 'var(--panel-2)' }}>
+          <b style={{ fontSize: 13, color: pf.ok ? 'var(--green)' : 'var(--red)' }}>{pf.ok ? '사전 점검 통과' : '사전 점검 실패'}</b>
+          {(pf.reasons || []).length > 0 && <ul style={{ margin: '6px 0 0 18px', fontSize: 12.5, color: 'var(--red)' }}>{pf.reasons.map((r, i) => <li key={i}>{r}</li>)}</ul>}
+          {(pf.warnings || []).length > 0 && <ul style={{ margin: '6px 0 0 18px', fontSize: 12.5, color: 'var(--amber)' }}>{pf.warnings.map((r, i) => <li key={i}>{r}</li>)}</ul>}
+          {pf.ok && (
+            <div className="muted" style={{ fontSize: 12.5, marginTop: 6, lineHeight: 1.7 }}>
+              대상 여유 {fmtBytes(pf.targetFree)} · 복사 예상 약 {pf.estimatedSeconds}초(50MB/s 가정) · 원본은 그대로 남습니다.
+            </div>
+          )}
+        </div>
+      )}
+
+      {made && (made.ok ? (
+        <div className="card" style={{ padding: 12, marginBottom: 10, borderColor: 'var(--green)' }}>
+          <b style={{ fontSize: 13, color: 'var(--green)' }}>스크립트가 생성되었습니다 — 서버에서 아래 순서로 실행하세요</b>
+          <pre style={{ fontSize: 12, background: 'var(--panel-2)', padding: 10, borderRadius: 6, marginTop: 8, overflow: 'auto' }}>
+{`# 1) 설명서를 먼저 읽어보세요
+less ${made.readmePath}
+
+# 2) 스크립트 내용 확인
+less ${made.scriptPath}
+
+# 3) root 로 실행 (서비스 정지 → 복사 → 검증 → 경로 기록)
+sudo bash ${made.scriptPath}
+
+# 4) 스크립트 안내대로 서비스 시작
+sudo systemctl start ${service}`}
+          </pre>
+          <div className="muted" style={{ fontSize: 12, lineHeight: 1.7 }}>
+            · 스크립트는 <b>서비스를 정지</b>한 뒤 복사합니다 — 그 동안 포탈 접속·수집이 중단됩니다(유지보수 시간에 실행).<br />
+            · 실패하면 아무것도 바꾸지 않으므로 서비스만 다시 켜면 원상 복구됩니다.<br />
+            · 완료 후 이 화면에서 경로·용량·정합성을 확인하고, 며칠 뒤 원본을 직접 삭제하세요.
+          </div>
+        </div>
+      ) : <div className="badge red" style={{ display: 'inline-block', marginBottom: 10 }}>생성 실패: {made.reason}</div>)}
+
+      {(d.scripts || []).length > 0 && (
+        <details>
+          <summary className="muted" style={{ fontSize: 12, cursor: 'pointer' }}>생성된 스크립트 {d.scripts.length}개 · 저장 위치 <code>{d.migrationsDir}</code></summary>
+          <div className="table-wrap" style={{ maxHeight: 180, marginTop: 8 }}>
+            <table>
+              <thead><tr><th>파일</th><th>종류</th><th style={{ textAlign: 'right' }}>크기</th><th>생성</th></tr></thead>
+              <tbody>
+                {d.scripts.map((f) => (
+                  <tr key={f.name}>
+                    <td><code style={{ fontSize: 11.5 }}>{f.name}</code></td>
+                    <td><span className={`badge ${f.kind === 'script' ? 'blue' : 'gray'}`}>{f.kind === 'script' ? '실행 스크립트' : '설명서'}</span></td>
+                    <td style={{ textAlign: 'right' }}>{fmtBytes(f.sizeBytes)}</td>
+                    <td className="muted" style={{ fontSize: 12 }}>{fmtDate(f.mtime)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      )}
+
+      {/* 서비스 중단 고지 팝업 — 스크립트 생성 전에 반드시 확인시킨다 */}
+      {confirm && (
+        <Modal title="⚠ 서비스 중단 안내" onClose={() => setConfirm(false)} width={620}>
+          <div style={{ fontSize: 13.5, lineHeight: 1.9 }}>
+            생성되는 스크립트는 실행 시 <b style={{ color: 'var(--amber)' }}>포탈 서비스를 정지</b>합니다.
+            정지 시간 동안 <b>포탈 접속·vCenter 수집·알림이 모두 중단</b>됩니다.
+            <div className="card" style={{ padding: 12, marginTop: 10, background: 'var(--panel-2)' }}>
+              <div>· 이전 용량: <b>{fmtBytes(inv.totalBytes)}</b></div>
+              <div>· 예상 복사 시간: <b>약 {pf?.estimatedSeconds ?? '—'}초</b> (디스크 속도에 따라 달라집니다)</div>
+              <div>· 새 경로: <code>{target}</code></div>
+              <div>· 서비스: <code>{service}</code></div>
+            </div>
+            <div className="muted" style={{ fontSize: 12.5, marginTop: 10 }}>
+              지금은 <b>스크립트만 생성</b>하며 서비스는 중단되지 않습니다. 실제 중단은 관리자가 스크립트를 실행할 때 발생하므로
+              <b> 유지보수 시간대에 실행</b>하세요. 원본은 삭제되지 않아 실패 시 서비스만 다시 켜면 복구됩니다.
+            </div>
+          </div>
+          <div className="flex gap" style={{ marginTop: 14, justifyContent: 'flex-end' }}>
+            <button className="logout-btn" style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setConfirm(false)}>취소</button>
+            <button className="login-btn" style={{ flex: 'none', padding: '7px 14px' }} onClick={makeScript}>이해했습니다 — 스크립트 생성</button>
+          </div>
+        </Modal>
+      )}
+    </div>
   );
 }
 
@@ -270,6 +442,7 @@ export function PortalDb() {
 
       {/* DB 정합성·일관성 점검(v2.378) — 읽기 전용이라 서비스 중단 불필요 */}
       <HealthPanel report={health} busy={busy} onRun={runHealth} />
+      <DbLocationPanel />
       {health?._err && <div className="badge red" style={{ marginTop: 8, display: 'inline-block' }}>점검 실패: {health._err}</div>}
 
       {sel && (

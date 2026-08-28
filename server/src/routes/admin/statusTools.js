@@ -9,6 +9,8 @@ import { loadVcenterConfig } from '../../config.js';
 import { probeRelayPath } from '../../vcenter/relayProbe.js';
 import { portalDbReport, enumerateDbFiles } from '../../insights/portalDb.js';
 import { inspectMany } from '../../insights/dbHealth.js';
+import { dbDir, defaultDbDir, preflight, migrationInventory } from '../../insights/dbLocation.js';
+import { writeMigrationScript, listMigrationScripts, migrationsDir } from '../../insights/migrateScript.js';
 import { getCodexCheckReport, renderCodexCheckMarkdown, writeCodexCheckReport } from '../../security/codexCheck.js';
 import { getMetricsDb } from '../../metrics/db.js';
 import { memtrackReport } from '../../system/memtrack.js';
@@ -98,6 +100,55 @@ adminRouter.get('/portal-db/health', adminOnly, async (req, res) => {
     if (only && !targets.length) return res.status(404).json({ ok: false, reason: `SQLite 파일을 찾지 못했습니다: ${only}` });
     const report = await inspectMany(targets.map((f) => f.path), { full });
     res.json({ ok: true, ...report });
+  } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+});
+
+/**
+ * DB 저장 경로 현황(v2.379) — 현재 경로·이전 대상·용량·생성된 마이그레이션 스크립트 목록.
+ * 대용량 시계열 DB 를 CONFIG_DIR 밖의 큰 볼륨으로 옮길 때 쓴다.
+ */
+adminRouter.get('/portal-db/location', adminOnly, (_req, res) => {
+  try {
+    const cur = dbDir();
+    res.json({
+      ok: true,
+      currentDir: cur || defaultDbDir(),
+      isCustom: !!cur,
+      defaultDir: defaultDbDir(),
+      migrationsDir: migrationsDir(),
+      inventory: migrationInventory(),
+      scripts: listMigrationScripts(),
+    });
+  } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+});
+
+/** 사전 점검 — 실제로 디렉터리를 만들고 쓰기/여유공간을 실측한다(복사는 하지 않음). */
+adminRouter.post('/portal-db/location/preflight', adminOnly, (req, res) => {
+  try { res.json({ ok: true, ...preflight(String(req.body?.targetDir || '')) }); }
+  catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+});
+
+/**
+ * 마이그레이션 **스크립트 생성**(v2.379) — 포탈이 직접 복사하지 않는다.
+ * 서비스 정지·복사·검증·경로기록을 담은 bash 스크립트와 설명(README)을 만들고 경로를 알려준다.
+ * 실제 실행은 관리자가 root 로 수행한다(서비스 정지·기동은 systemd 관할).
+ */
+adminRouter.post('/portal-db/location/script', adminOnly, (req, res) => {
+  try {
+    const targetDir = String(req.body?.targetDir || '').trim();
+    const pf = preflight(targetDir);
+    if (!pf.ok) return res.status(400).json({ ok: false, reason: pf.reasons.join(' / '), preflight: pf });
+    const out = writeMigrationScript({
+      targetDir,
+      service: String(req.body?.service || 'vmware-portal'),
+      user: String(req.body?.user || 'vmware-portal'),
+    });
+    logAudit({
+      user: req.user?.username, action: 'DB 마이그레이션 스크립트 생성',
+      target: `${out.sourceDir} → ${targetDir}`,
+      detail: `${out.scriptName} (대상 ${(out.inventory.totalBytes / 1048576).toFixed(1)}MB)`, ip: req.ip || '',
+    });
+    res.json({ ok: true, ...out, preflight: pf });
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 

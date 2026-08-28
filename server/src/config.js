@@ -36,6 +36,24 @@ const EDGE_ALL = (process.env.EDGE_MODE || '').trim().toLowerCase() === 'all';
 const EDGE_TOKEN = process.env.EDGE_TOKEN || process.env.CENTRAL_TOKEN || '';
 const EDGE_CENTRAL_URL = (process.env.CENTRAL_URL || '').replace(/\/+$/, '');
 
+/**
+ * DB 저장 디렉터리(v2.379) — 대용량 시계열 DB 를 CONFIG_DIR 밖의 큰 볼륨에 둘 수 있게 한다.
+ * CONFIG_DIR/db-location.json 의 { dbDir } 를 읽는다(마이그레이션 스크립트가 기록).
+ * ⚠ 개별 *_DB_PATH env 가 있으면 **env 가 우선**한다 — 명시 설정을 덮지 않는다.
+ * dbLocation.js 를 import 하면 순환 참조가 되므로 여기서 파일을 직접 읽는다(기동 시 1회).
+ */
+function readDbDir() {
+  try {
+    const cfgDir = process.env.CONFIG_DIR || path.resolve(ROOT, 'config');
+    const j = JSON.parse(fs.readFileSync(path.join(cfgDir, 'db-location.json'), 'utf8'));
+    const v = j && j.dbDir ? String(j.dbDir).trim() : '';
+    return v || null;
+  } catch { return null; }
+}
+const DB_DIR = readDbDir();
+/** DB 파일 경로 — 설정된 dbDir 이 있으면 그 아래, 없으면 CONFIG_DIR. */
+const dbFile = (name) => path.join(DB_DIR || process.env.CONFIG_DIR || path.resolve(ROOT, 'config'), name);
+
 export const config = {
   port: Number(process.env.PORT) || 4000,
   dataSource: (process.env.DATA_SOURCE || (EDGE_ALL ? 'live' : 'mock')).toLowerCase(),
@@ -45,6 +63,8 @@ export const config = {
   // Defaults to the app's server/config; set CONFIG_DIR (e.g. /etc/vmware-portal)
   // to keep it OUTSIDE the app dir so upgrades never touch it.
   configDir: process.env.CONFIG_DIR || path.resolve(ROOT, 'config'),
+  // 설정된 DB 저장 디렉터리(null = configDir 사용). db-location.json 에서 읽는다(v2.379).
+  dbDir: DB_DIR,
   // How often (ms) the collector refreshes the aggregated snapshot.
   pollIntervalMs: Number(process.env.POLL_INTERVAL_MS) || 30_000,
   // Allow self-signed vCenter certificates (common in private DCs).
@@ -80,8 +100,7 @@ export const config = {
     scanIntervalMs: numEnv(process.env.IDRAC_SCAN_INTERVAL_MS, 6 * 3_600_000),
     // SQLite database file for power samples. Kept in CONFIG_DIR so upgrades
     // preserve history. Override with IDRAC_DB_PATH.
-    dbPath: process.env.IDRAC_DB_PATH ||
-      path.join(process.env.CONFIG_DIR || path.resolve(ROOT, 'config'), 'idrac-power.db'),
+    dbPath: process.env.IDRAC_DB_PATH || dbFile('idrac-power.db'),
     // How many days of samples to retain (older rows pruned). 0 = keep all.
     retentionDays: Number(process.env.IDRAC_RETENTION_DAYS) || 90,
     // Per-request timeout to the iDRAC Redfish API.
@@ -99,8 +118,7 @@ export const config = {
   temp: {
     // ESXi host temperature time-series (SQLite, like iDRAC power). In CONFIG_DIR
     // so it survives upgrades. 5-year retention by default; sampled on an interval.
-    dbPath: process.env.TEMP_DB_PATH ||
-      path.join(process.env.CONFIG_DIR || path.resolve(ROOT, 'config'), 'host-temp.db'),
+    dbPath: process.env.TEMP_DB_PATH || dbFile('host-temp.db'),
     sampleIntervalMs: Number(process.env.TEMP_SAMPLE_INTERVAL_MS) || 60_000,  // 1분 (설정에서 변경 가능)
     retentionDays: Number(process.env.TEMP_RETENTION_DAYS) || 1830,           // ~5년
   },
@@ -109,8 +127,7 @@ export const config = {
     // 별도 SQLite(ping-monitor.db)에 시계열로 저장한다. iDRAC/온도 DB와 동일 정책(WAL 등).
     // CONFIG_DIR에 두어 업그레이드에도 이력이 보존된다. 대상 정의는 CONFIG_DIR/ping-targets.json.
     enabled: process.env.PING_MON_ENABLED !== 'false',
-    dbPath: process.env.PING_DB_PATH ||
-      path.join(process.env.CONFIG_DIR || path.resolve(ROOT, 'config'), 'ping-monitor.db'),
+    dbPath: process.env.PING_DB_PATH || dbFile('ping-monitor.db'),
     pollIntervalMs: Math.max(5_000, numEnv(process.env.PING_MON_INTERVAL_MS, 60_000)), // 기본 1분
     timeoutMs: numEnv(process.env.PING_MON_TIMEOUT_MS, 2_500),
     // 동시에 프로브할 대상 수 상한(고RTT·다수 대상에서 이벤트 루프/소켓 폭주 방지).
@@ -130,8 +147,7 @@ export const config = {
     // 창별 통계로 증설·감축을 권고한다. 엣지는 자기 샘플을 중앙으로 push(k=agent명), 중앙은
     // 자기 것을 k='local' 로 적재해 한 DB 에서 함께 본다. CONFIG_DIR 에 두어 업그레이드에 보존.
     enabled: process.env.CAPACITY_MON_ENABLED !== 'false',
-    dbPath: process.env.CAPACITY_DB_PATH ||
-      path.join(process.env.CONFIG_DIR || path.resolve(ROOT, 'config'), 'capacity.db'),
+    dbPath: process.env.CAPACITY_DB_PATH || dbFile('capacity.db'),
     // 30초 샘플: 이벤트루프 지연·짧은 CPU 스파이크를 놓치지 않으면서 한 달 원본이 과하지 않게.
     sampleIntervalMs: Math.max(10_000, numEnv(process.env.CAPACITY_SAMPLE_INTERVAL_MS, 30_000)),
     // 원본은 3일만(1일 창의 정확한 p95 계산용). 그 이상 창(1주/1달)은 시간당 롤업으로 본다.

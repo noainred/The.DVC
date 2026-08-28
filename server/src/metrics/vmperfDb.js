@@ -21,7 +21,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 
-const DIR = process.env.VMPERF_DB_DIR || path.join(config.configDir, 'vmperf');
+// DB 저장 경로 설정(v2.379)을 따른다 — config.dbDir 이 있으면 그 아래 vmperf/.
+// VMPERF_DB_DIR env 가 있으면 그것이 최우선(명시 설정을 덮지 않는다).
+const DIR = process.env.VMPERF_DB_DIR || path.join(config.dbDir || config.configDir, 'vmperf');
 const MAX_OPEN = Math.max(2, Math.min(32, Number(process.env.VMPERF_MAX_OPEN_DB) || 8));
 const HOUR = 3_600_000;
 const TOTAL_KEY = '';           // 전체 합계 계열의 k

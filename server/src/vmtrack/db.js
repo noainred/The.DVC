@@ -19,8 +19,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 
+// DB 저장 경로 설정(v2.379)을 따른다 — config.dbDir 이 있으면 그 아래. env 가 최우선.
 const DB_PATH = process.env.VMTRACK_DB_PATH
-  || path.join(process.env.CONFIG_DIR || path.resolve(process.cwd(), 'config'), 'vm-track.db');
+  || path.join(config.dbDir || config.configDir, 'vm-track.db');
 
 let impl = null;
 let ready = null;
