@@ -9,19 +9,24 @@ export function registerUsers(adminRouter) {
 // --- User management (admin) ---
 adminRouter.get('/users', adminOnly, (_req, res) => res.json({ users: listUsers() }));
 
+// actor 전달: 소유자 '이름' 선점/삭제 차단(auth.js identityGuardDenied). 계정 생성·삭제는
+// 자격증명 변경과 같은 등급의 보안 작업이므로 감사로그를 남긴다(이전에는 기록이 없었다).
 adminRouter.post('/users', adminOnly, (req, res) => {
-  const r = createUser(req.body || {});
+  const r = createUser(req.body || {}, { actor: req.user?.username });
+  logAudit({ user: req.user?.username, action: r.ok ? '사용자 생성' : '사용자 생성 거부', target: String((req.body || {}).username || ''), detail: r.ok ? `role=${(req.body || {}).role || 'viewer'}` : (r.reason || ''), ip: req.ip || '' });
   res.status(r.ok ? 200 : 400).json(r);
 });
 
 adminRouter.patch('/users/:username', adminOnly, (req, res) => {
   const r = updateUser(req.params.username, req.body || {});
+  if (r.ok) logAudit({ user: req.user?.username, action: '사용자 수정', target: req.params.username, detail: `role=${(req.body || {}).role ?? '-'}`, ip: req.ip || '' });
   res.status(r.ok ? 200 : 400).json(r);
 });
 
 adminRouter.delete('/users/:username', adminOnly, (req, res) => {
   if (req.params.username === req.user.username) return res.status(400).json({ ok: false, reason: '자기 자신은 삭제할 수 없습니다.' });
-  const r = deleteUser(req.params.username);
+  const r = deleteUser(req.params.username, { actor: req.user?.username });
+  logAudit({ user: req.user?.username, action: r.ok ? '사용자 삭제' : '사용자 삭제 거부', target: req.params.username, detail: r.ok ? '' : (r.reason || ''), ip: req.ip || '' });
   res.status(r.ok ? 200 : 400).json(r);
 });
 

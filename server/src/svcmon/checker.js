@@ -75,9 +75,13 @@ async function runCheckInner(test, host) {
         return r.alive ? ok(`${r.rttMs ?? 0} ms`, r.rttMs ?? 0) : bad('응답 없음', started);
       }
       case 'trace': {
-        const r = await traceroute(host, test.maxHops || 15);
+        const hopLimit = test.maxHops || 15;
+        const r = await traceroute(host, hopLimit);
+        // overLimit: 임계 내에 목적지에 닿지 못했다(경로가 더 길거나 중간에서 끊김).
+        // 예전에는 아래 두 분기가 같은 값(maxHops)을 '명령 상한'과 '경고 임계'로 겸용해
+        // 뒤 분기가 구조적으로 도달 불가한 죽은 코드였다 — 문구를 정확히 갈라 준다.
+        if (r.overLimit) return warn(`${r.hops} hops — 임계(${hopLimit}) 내 목적지 미도달`, started);
         if (!r.reached) return warn(`${r.hops} hop 까지 도달(미완료)`, started);
-        if (test.maxHops && r.hops > test.maxHops) return warn(`${r.hops} hops (임계 ${test.maxHops})`, started);
         return ok(`${r.hops} hops`, Date.now() - started);
       }
       case 'tcp': {
@@ -237,14 +241,16 @@ function udpProbe(host, port, payload, timeoutMs) {
  *      `2  *  *  *  Request timed out.` 처럼 **영문 안내 문구**가 붙어 오탐한다(테스트로 고정).
  *   ② ICMP 도달불가 표식(`!H` 호스트·`!N` 네트워크·`!P` 프로토콜 등)이나 문구형 도달불가
  *      (`Destination net unreachable`)가 있으면 미도달 — 응답은 왔지만 목적지에 닿지 못한 것이다.
- *   ③ **홉 상한(-m/-h) 소진**이면 미도달. traceroute 는 목적지가 응답하면 그 자리에서 멈추므로,
- *      상한까지 줄이 찍혔다는 것은 목적지에 닿지 못한 채 끊긴 것이다. 이 검사가 없으면 마지막
- *      홉의 **중간 라우터**가 응답한 것을 목적지 도달로 오판한다(한국↔폴란드·미국동부처럼 홉이
- *      긴 경로에서 실제로 발현 — 재감사 실행 재현). 단 목적지 주소가 마지막 홉에 찍혀 있으면
- *      상한과 무관하게 도달로 본다(정확히 상한 홉에 목적지가 있는 경우의 오탐 방지).
+ *   ③ **홉 임계 초과**면 미도달. traceroute 는 목적지가 응답하면 그 자리에서 멈추므로, 임계보다
+ *      많은 줄이 찍혔다는 것은 목적지에 닿지 못한 채 끊긴 것이다. 이 검사가 없으면 마지막 홉의
+ *      **중간 라우터**가 응답한 것을 목적지 도달로 오판한다(한국↔폴란드·미국동부처럼 홉이 긴
+ *      경로에서 실제로 발현 — 재감사 실행 재현).
+ *      ⚠ 그래서 명령은 임계보다 **1 크게**(`-m maxHops+1`) 실행하고 여기서는 `hops > maxHops` 로
+ *      판정한다. 예전처럼 명령 상한과 임계를 같은 값으로 쓰고 `hops >= maxHops` 로 보면, 목적지가
+ *      **정확히 임계 홉에 있는 정상 경로**까지 미도달로 오판했다(3차 재감사 지적).
  *
- * @param opts.maxHops 실제 명령에 쓴 홉 상한(미지정 시 ③ 검사 생략).
- * @param opts.target  대상 주소. IP 리터럴이면 마지막 홉과 대조해 도달을 확정한다.
+ * @param opts.maxHops 홉 임계(명령 상한이 아니다 — 명령은 이보다 1 크게 실행한다). 0이면 ③ 생략.
+ * @param opts.target  대상 주소. IP 리터럴이면 마지막 홉과 대조해 도달을 확정한다(대소문자 무시).
  */
 export function parseTraceroute(out, { maxHops = 0, target = '' } = {}) {
   const lines = String(out || '').split('\n').filter((l) => /^\s*\d+/.test(l));
@@ -256,9 +262,10 @@ export function parseTraceroute(out, { maxHops = 0, target = '' } = {}) {
   const unreachable = /!(?:H|N|P|X|A|S|F|C|T|U|\d+)\b/.test(rest) || /unreachable/i.test(rest);
   // 목적지 주소가 마지막 홉에 그대로 찍혔는지(IP 리터럴 대상일 때만 신뢰할 수 있는 신호).
   const t = String(target || '').trim();
-  const targetHit = !!t && /^[0-9a-fA-F.:]+$/.test(t) && new RegExp(`(?:^|\\s)${t.replace(/[.]/g, '\\.')}(?:\\s|$)`).test(rest);
-  const exhausted = maxHops > 0 && hops >= maxHops && !targetHit;
-  return { hops, reached: hops > 0 && (hasAddr || hasRtt) && !unreachable && !exhausted };
+  const targetHit = !!t && /^[0-9a-fA-F.:]+$/.test(t)
+    && new RegExp(`(?:^|\\s)${t.replace(/[.]/g, '\\.')}(?:\\s|$)`, 'i').test(rest);
+  const overLimit = maxHops > 0 && hops > maxHops && !targetHit;
+  return { hops, overLimit, reached: hops > 0 && (hasAddr || hasRtt) && !unreachable && !overLimit };
 }
 
 /** traceroute — CLI 호출. host 는 화이트리스트를 통과한 값만(명령 인젝션 방지). */
@@ -267,7 +274,9 @@ function traceroute(host, maxHops) {
     if (!SAFE_HOST.test(host) || host.startsWith('-')) return reject(new Error('호스트 형식 위반'));
     const isWin = process.platform === 'win32';
     const cmd = isWin ? 'tracert' : 'traceroute';
-    const limit = Math.min(64, maxHops);
+    // 명령 상한은 임계보다 1 크게 — 목적지가 정확히 임계 홉에 있는 정상 경로를 '임계 초과'로
+    // 오판하지 않게 한다(parseTraceroute ③ 주석 참고).
+    const limit = Math.min(64, Math.max(1, maxHops) + 1);
     const args = isWin
       ? ['-d', '-h', String(limit), '-w', '1000', host]
       : ['-n', '-m', String(limit), '-w', '1', '-q', '1', host];

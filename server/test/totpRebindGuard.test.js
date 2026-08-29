@@ -135,3 +135,63 @@ test('일반 계정의 비밀번호·자격증명 변경은 종전대로 허용(
   assert.ok(auth.setLocalPassword('rb-plain2', 'new-pw-123456', { actor: 'rb-admin' }).ok);
   assert.ok(auth.clearLoginCredentials('rb-plain2', { actor: 'rb-admin' }).ok);
 });
+
+// --- 3차 재감사(2026-08-30)에서 재현된 '신원(이름) 우회' — 자격증명만 막아서는 부족했다 ---
+
+test('우회 차단: deleteUser + createUser 로 소유자 이름을 선점해 지위 승계 불가', () => {
+  // 소유자 지위는 settingsOwners 의 **이름 문자열**로 판정된다. 그래서 계정을 지우고 같은
+  // 이름으로 다시 만들면 소유자 지위가 그대로 승계됐다(실행 재현) → 부트스트랩 로그인 →
+  // 자력 OTP 등록 → 백업 다운로드로 AUTH_SECRET·전 계정 TOTP 시크릿 획득까지 이어졌다.
+  auth.createUser({ username: 'id-owner', name: 'id owner', role: 'admin', password: 'pw-ido-123456' });
+  auth.createUser({ username: 'id-attacker', name: 'id attacker', role: 'admin', password: 'pw-ida-123456' });
+  sec.saveSessionSecurity({ settingsOwners: [auth.SUPER_USERNAME, 'id-owner'] });
+
+  // 1단계: 비소유자 admin 이 소유자 계정을 삭제 → 거부돼야 한다.
+  const del = auth.deleteUser('id-owner', { actor: 'id-attacker' });
+  assert.equal(del.ok, false, '비소유자가 소유자 계정을 지울 수 있으면 이름 선점이 가능');
+  assert.ok(auth.getUser('id-owner'), '거부 시 계정이 남아 있어야 함');
+
+  // 2단계(1단계가 뚫렸을 때의 방어선): 소유자 이름으로 새 계정 생성도 거부돼야 한다.
+  //   normOwners 는 계정 존재 여부를 검사하지 않으므로, 아직 만들지 않은 소유자 이름을
+  //   미리 적어둔(사전 프로비저닝) 상태에서 아무 admin 이나 선점하는 경로도 함께 막는다.
+  sec.saveSessionSecurity({ settingsOwners: [auth.SUPER_USERNAME, 'id-owner', 'future-owner'] });
+  const mk = auth.createUser({ username: 'future-owner', role: 'admin', password: 'pw-fut-123456' }, { actor: 'id-attacker' });
+  assert.equal(mk.ok, false, '미생성 소유자 이름 선점이 가능하면 즉시 소유자가 된다');
+  assert.equal(auth.getUser('future-owner'), null);
+});
+
+test('소유자 본인·다른 소유자·신뢰 경로는 신원 관리 가능(운영성 보존)', () => {
+  sec.saveSessionSecurity({ settingsOwners: [auth.SUPER_USERNAME, 'id-owner', 'future-owner'] });
+
+  // 소유자는 사전 프로비저닝된 소유자 계정을 실제로 만들 수 있어야 한다.
+  const byOwner = auth.createUser({ username: 'future-owner', role: 'admin', password: 'pw-fut-123456' }, { actor: 'id-owner' });
+  assert.ok(byOwner.ok, `소유자의 소유자 계정 생성이 막히면 운영 불가 — ${byOwner.reason || ''}`);
+
+  // 소유자는 다른 소유자 계정을 정리할 수 있다.
+  assert.ok(auth.deleteUser('future-owner', { actor: 'id-owner' }).ok);
+
+  // 신뢰 경로(부트스트랩·시스템)도 통과.
+  assert.ok(auth.createUser({ username: 'future-owner', role: 'admin', password: 'pw-fut-123456' }, { trusted: true }).ok);
+});
+
+test('일반 계정의 생성·삭제는 종전대로 허용(과보호 회귀 방지)', () => {
+  sec.saveSessionSecurity({ settingsOwners: [auth.SUPER_USERNAME, 'id-owner'] });
+  assert.ok(auth.createUser({ username: 'id-normal', role: 'viewer', password: 'pw-idn-123456' }, { actor: 'id-attacker' }).ok);
+  assert.ok(auth.deleteUser('id-normal', { actor: 'id-attacker' }).ok);
+});
+
+test('보호 판정은 실제 소유자 판정과 같은 키(정확일치) — 과보호/미보호 둘 다 없다', () => {
+  // requireSettingsOwner 는 정확일치(username 또는 name)로 소유자 권한을 준다. 보호 범위도
+  // 정확히 그 집합이어야 한다. 이전 버전은 대소문자를 무시해 ① 대소문자만 다른 계정이
+  // 실제 소유자가 아닌데도 잠금 면역을 얻고 ② 표시이름이 우연히 겹친 무관한 계정의 정당한
+  // 비번 리셋이 막혔다(3차 재감사 지적).
+  sec.saveSessionSecurity({ settingsOwners: [auth.SUPER_USERNAME, 'id-owner'] });
+
+  // ① 대소문자 변형 계정은 보호 대상이 아니다 → 다른 admin 이 잠글 수 있어야 한다.
+  auth.createUser({ username: 'ID-OWNER', name: 'variant', role: 'viewer', password: 'pw-var-123456' });
+  assert.ok(auth.clearLoginCredentials('ID-OWNER', { actor: 'id-attacker' }).ok,
+    '실제 소유자가 아닌 변형 계정이 잠금 면역을 얻으면 안 된다');
+
+  // ② 실제 소유자는 정확일치로 보호된다.
+  assert.equal(auth.setLocalPassword('id-owner', 'atk-set-123456', { actor: 'id-attacker' }).ok, false);
+});
