@@ -184,7 +184,12 @@ adminRouter.post('/collectors/import', adminOnly, (req, res) => {
 // ì£ì§ í¬í ë¡ì»¬ ê³ì  ë¹ë°ë²í¸ ì¼ê´ ë³ê²½ â ê¸°ë³¸(admin) ë¹ë²ì ì¤ììì í ë²ì êµì²´.
 // Body: { username?='admin', password, ids?: string[](ë¯¸ì§ì =íì± ì ì²´), includeCentral?: boolean }
 // ì£ì§ì /api/collector/set-password(COLLECTOR_TOKEN ê°ë)ë¡ ë³ë ¬ í¸ì. ë¹ë°ë²í¸ë ì´ëìë ë¡ê¹íì§ ìëë¤.
-adminRouter.post('/collectors/set-password', adminOnly, async (req, res) => {
+// ⚠ requireSettingsOwner(6차 재감사): username 이 요청 본문으로 완전히 제어되고, 서버가 저장된
+// 엣지 토큰을 대신 붙여 푸시하므로 호출자는 COLLECTOR_TOKEN 을 몰라도 된다. 즉 이 라우트는
+// '전 엣지의 임의 계정 비밀번호를 심는 권능'이다 — /admin/edge-users* 를 소유자 전용으로 올린
+// 것과 정확히 같은 논리인데 그 승격에서 누락됐다. 엣지측에도 방어를 넣었지만(collector.js —
+// 보호 계정 거부) 중앙에서도 막아 다층으로 둔다.
+adminRouter.post('/collectors/set-password', adminOnly, requireSettingsOwner, async (req, res) => {
   const username = String(req.body?.username || 'admin').trim();
   const password = String(req.body?.password || '');
   if (password.length < 8) return res.status(400).json({ ok: false, reason: 'ë¹ë°ë²í¸ë 8ì ì´ìì´ì´ì¼ í©ëë¤.' });
