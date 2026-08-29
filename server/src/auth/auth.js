@@ -445,9 +445,18 @@ export function clearLoginCredentials(username, { actor = null, trusted = false 
   return { ok: true };
 }
 
-export function updateUser(username, { name, role, scope } = {}) {
+export function updateUser(username, { name, role, scope } = {}, { actor = null, trusted = false } = {}) {
   const u = getUser(username);
   if (!u) return { ok: false, reason: '사용자를 찾을 수 없습니다.' };
+  // 보호 계정(수퍼관리자·설정소유자)의 역할 강등·범위 축소는 소유자/본인만.
+  // 이 가드가 없으면 비소유자 admin 이 전 소유자를 viewer 로 강등해 **소유자 경계를 마비**시킬 수
+  // 있었다(4차 재감사). 신규 설치의 noainred 는 비번·OTP 가 없어 실질 복구가 콘솔 도구뿐이다.
+  // 표시이름(name)은 이제 권한 축이 아니지만(requireSettingsOwner 가 username 만 본다),
+  // 감사 추적에서 사람을 오인하게 만들 수 있어 보호 계정에 대해서는 함께 제한한다.
+  if (role !== undefined || scope !== undefined || name !== undefined) {
+    const denied = credentialGuardDenied(u, { actor, trusted, what: '계정 정보(역할·범위·표시이름)' });
+    if (denied && !actorIsOwner(actor)) return denied;   // 소유자는 다른 소유자를 관리할 수 있다
+  }
   if (role !== undefined) {
     if (!VALID_ROLES.includes(role)) return { ok: false, reason: '역할이 올바르지 않습니다.' };
     // 데모 계정은 viewer 고정 — 데모 자격증명이 유출돼도 권한 상승 경로가 없게 서버측에서 잠근다.
@@ -540,19 +549,19 @@ function settingsOwnerList() {
 }
 
 /**
- * 그 이름이 설정소유자인가 — **판정 키를 requireSettingsOwner 와 정확히 일치**시킨다
- * (routes/admin/shared.js: `owners.includes(u.username) || owners.includes(u.name)`, 정확일치).
+ * 그 계정이 설정소유자인가 — **판정 키를 requireSettingsOwner 와 정확히 일치**시킨다
+ * (routes/admin/shared.js: `owners.includes(u.username)`, username 정확일치).
  *
- * ⚠ 이전 버전은 여기서 대소문자를 무시했다. '보호는 넓게'가 안전하다고 봤지만 실제로는 두 가지
- * 부작용을 만들었다(재감사 지적): ① 대소문자만 다른 계정을 만들면 **실제 소유자가 아닌데도**
- * 잠금 면역(다른 admin 이 로그인 차단 불가)을 얻는다, ② 표시이름이 우연히 소유자 계정명과 같은
- * 무관한 계정의 정당한 비번 리셋이 막힌다. 실제 소유자 권한은 정확일치로만 부여되므로,
- * 보호 범위도 **정확히 그 집합**이어야 한다(넓히면 과보호, 좁히면 미보호).
+ * ⚠ 판정 키 이력(같은 실수를 되풀이하지 않기 위한 기록):
+ *  · v2.393: 대소문자 무시로 '넓게' 잡았다 → 대소문자 변형 계정이 실제 소유자가 아닌데도 잠금
+ *    면역을 얻고, 표시이름이 겹친 무관한 계정의 정당한 비번 리셋이 막혔다(과보호+미보호 동시).
+ *  · v2.394: 정확일치로 좁혔으나 `name`(표시이름)까지 봤다 → 표시이름은 admin 이 바꿀 수 있는
+ *    값이라 그 축으로 소유자 승계가 가능했다(4차 재감사 실행 재현).
+ *  · 현재: **username 만**. 보호 범위 = 권한이 실제로 부여되는 집합과 정확히 동일해야 한다
+ *    (넓히면 과보호, 좁히면 미보호). username 은 생성 후 변경 경로가 없어 안정적인 축이다.
  */
-function isOwnerName(username, name, owners) {
-  const u = String(username || '').trim();
-  const n = String(name || '').trim();
-  return owners.some((o) => o === u || (n && o === n));
+function isOwnerName(username, owners) {
+  return owners.includes(String(username || '').trim());
 }
 
 /**
@@ -563,7 +572,7 @@ function isProtectedAccount(u) {
   if (u.superuser) return true;
   const owners = settingsOwnerList();
   if (owners === null) return true;               // 목록 불명 → 보호 쪽
-  return isOwnerName(u.username, u.name, owners);
+  return isOwnerName(u.username, owners);
 }
 
 /** 요청자가 설정소유자인가 — '소유자만 다른 소유자를 만들거나 지울 수 있다' 규칙용. */
@@ -622,11 +631,11 @@ function credentialGuardDenied(u, { actor = null, trusted = false, what = 'OTP' 
  * 자격증명은 개인 것이지만 계정 목록 관리는 소유자의 운영 업무이고, 사전 프로비저닝된 소유자
  * 계정을 실제로 만들 수 있는 경로가 남아야 한다.
  */
-function identityGuardDenied({ username, name, actor, trusted, what }) {
+function identityGuardDenied({ username, actor, trusted, what }) {
   if (trusted) return null;
   const owners = settingsOwnerList();
   const superName = String(username || '').trim() === SUPER_USERNAME;
-  const protectedName = superName || (owners === null ? true : isOwnerName(username, name, owners));
+  const protectedName = superName || (owners === null ? true : isOwnerName(username, owners));
   if (!protectedName) return null;
   if (actorIsOwner(actor)) return null;                     // 소유자는 다른 소유자를 관리할 수 있다
   if (actor && actor === String(username || '').trim()) return null; // 본인

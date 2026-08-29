@@ -18,8 +18,8 @@ adminRouter.post('/users', adminOnly, (req, res) => {
 });
 
 adminRouter.patch('/users/:username', adminOnly, (req, res) => {
-  const r = updateUser(req.params.username, req.body || {});
-  if (r.ok) logAudit({ user: req.user?.username, action: '사용자 수정', target: req.params.username, detail: `role=${(req.body || {}).role ?? '-'}`, ip: req.ip || '' });
+  const r = updateUser(req.params.username, req.body || {}, { actor: req.user?.username });
+  logAudit({ user: req.user?.username, action: r.ok ? '사용자 수정' : '사용자 수정 거부', target: req.params.username, detail: r.ok ? `role=${(req.body || {}).role ?? '-'}·name=${(req.body || {}).name ?? '-'}` : (r.reason || ''), ip: req.ip || '' });
   res.status(r.ok ? 200 : 400).json(r);
 });
 

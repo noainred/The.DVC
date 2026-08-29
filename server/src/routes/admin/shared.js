@@ -20,12 +20,22 @@ export const adminOnly = requireRole('admin');
 // 걸려, 소유자가 아닌 admin이 엔드포인트를 직접 호출하면 소유자 목록을 갈아치우고 소유 계층을
 // 탈취할 수 있었다(감사 지적: 클라이언트 전용 접근제어). adminOnly 뒤에 붙여 유효 소유자
 // (설정된 소유자 + 중앙 배포 admin)만 통과시킨다. 인증 비활성 시엔 통과(단일 사용자 모드).
+// ⚠ 구조적 보안 수정(2026-08-30, 4차 재감사) — 판정은 **username 만**으로 한다.
+// 예전에는 `owners.includes(u.name)`(표시이름)도 소유자로 인정했다. 그런데 표시이름은
+// `PATCH /admin/users/:u {name}` 으로 **아무 admin 이나 바꿀 수 있는 값**이어서, 비소유자 admin 이
+// 자기 표시이름을 소유자 계정명으로 바꾸고 재로그인하면 그대로 소유자가 됐다(실행 재현).
+// AD 로그인의 `displayName` 도 같은 축으로 새어 들어왔다(ad.js: name = displayName).
+// 근본 원인은 '권한을 이름 문자열로 판정하면서 그 이름을 쓸 수 있는 지점을 하나씩만 막은 것'이라,
+// 이름 축을 권한 축에서 **분리**해 이 부류를 끝낸다 — username 은 createUser 시점에 고정되고
+// 이후 변경 경로가 없다(rename API 부재).
+// 운영 주의: settings-owners.txt·SETTINGS_OWNERS·UI 목록에 **표시이름**을 적어 두었다면 이제
+// 소유자로 인정되지 않는다 → 해당 계정의 **로그인 ID**로 바꿔 적어야 한다.
 export function requireSettingsOwner(req, res, next) {
   if (!config.auth.enabled) return next();
   let owners = [];
   try { owners = loadSessionSecurity().settingsOwners || []; } catch { owners = []; }
   const u = req.user || {};
-  if (owners.includes(u.username) || owners.includes(u.name)) return next();
+  if (owners.includes(u.username)) return next();
   return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '설정 소유 계정만 변경할 수 있습니다.' });
 }
 

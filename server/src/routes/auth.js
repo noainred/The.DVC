@@ -3,6 +3,7 @@ import { config } from '../config.js';
 import { authenticate, signToken, authMiddleware, requireEnrolled, requireRole, getUser, beginTotpEnroll, confirmTotpEnroll, setupState } from '../auth/auth.js';
 import { rolePermissions, roleToolsDenied } from '../auth/permissions.js';
 import { loadAdConfig, saveAdConfig, testAd } from '../auth/ad.js';
+import { requireSettingsOwner } from './admin/shared.js';
 import { logAudit } from '../audit.js';
 import { recordPortalLoginFail } from '../security/loginStore.js';
 import { loadSessionSecurity, singleSessionRequired } from '../security/securitySettings.js';
@@ -77,7 +78,9 @@ authRouter.post('/login', async (req, res) => {
     ...user,
     permissions: rolePermissions(user.role),
     toolsDenied: roleToolsDenied(user.role),
-    isSettingsOwner: !config.auth.enabled || owners.includes(user.username) || owners.includes(user.name),
+    // username 만으로 판정 — 표시이름(name)은 admin 이 변경 가능한 값이라 권한 축에서 제외한다
+    // (routes/admin/shared.js requireSettingsOwner 주석 참고: 4차 재감사에서 승계 우회 재현).
+    isSettingsOwner: !config.auth.enabled || owners.includes(user.username),
     // 서비스 허브 주소는 인증 후에만 — 미인증 응답에 내부 호스트를 노출하지 않는다.
     serviceHubUrl: config.serviceHubUrl || '',
     scope: (local && local.scope) ? { vcenters: local.scope.vcenters || [], regions: local.scope.regions || [] } : { vcenters: [], regions: [] },
@@ -92,7 +95,7 @@ authRouter.get('/me', authMiddleware, (req, res) => {
   // scope: 볼 수 있는 vCenter/리전 제한(빈 배열 = 전체).
   // isSettingsOwner: '설정' 탭 노출 여부(계정명 목록 대신 불리언만 — 열거 단서 제거).
   const owners = (() => { try { return loadSessionSecurity().settingsOwners || []; } catch { return []; } })();
-  const isSettingsOwner = !config.auth.enabled || owners.includes(req.user.username) || owners.includes(req.user.name);
+  const isSettingsOwner = !config.auth.enabled || owners.includes(req.user.username); // username 만(위 주석 참고)
   res.json({ user: { ...req.user, totpEnabled: !!u?.totpEnabled, local: !!u, permissions: rolePermissions(req.user.role), toolsDenied: roleToolsDenied(req.user.role), isSettingsOwner, serviceHubUrl: config.serviceHubUrl || '' } });
 });
 
@@ -118,7 +121,11 @@ authRouter.get('/ad-config', ...adminOnly, (_req, res) => {
   res.json({ ad: loadAdConfig() });
 });
 
-authRouter.put('/ad-config', ...adminOnly, (req, res) => {
+// ⚠ 변경은 requireSettingsOwner 다(4차 재감사). AD 설정을 바꿀 수 있으면 자기가 통제하는 LDAP 를
+// 지정해 응답 속성(그룹·displayName)을 임의로 만들 수 있다 — 그룹으로 admin 승격은 위 주석의
+// OTP 우회 벡터이고, displayName 으로는 소유자 이름 위장 경로였다(권한 축을 username 으로
+// 단일화해 후자는 닫혔지만, 인증 소스 자체를 바꾸는 권능은 소유자 등급이 맞다).
+authRouter.put('/ad-config', ...adminOnly, requireSettingsOwner, (req, res) => {
   res.json({ ok: true, ad: saveAdConfig(req.body || {}) });
 });
 
