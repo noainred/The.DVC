@@ -384,7 +384,7 @@ export function createUser({ username, name, role = 'viewer', password, scope } 
   if (!VALID_ROLES.includes(role)) return { ok: false, reason: '역할이 올바르지 않습니다.' };
   if (getUser(username)) return { ok: false, reason: '이미 존재하는 사용자입니다.' };
   // 소유자 이름 선점 차단(identityGuardDenied 주석 참고) — 이름만 차지해도 소유자 지위가 승계된다.
-  const denied = identityGuardDenied({ username, name, actor, trusted, what: '계정 생성' });
+  const denied = identityGuardDenied({ username, actor, trusted, what: '계정 생성' });
   if (denied) return denied;
   const u = { username, name: name || username, role };
   if (password) u.passwordHash = hashPassword(password);
@@ -456,6 +456,11 @@ export function updateUser(username, { name, role, scope } = {}, { actor = null,
   if (role !== undefined || scope !== undefined || name !== undefined) {
     const denied = credentialGuardDenied(u, { actor, trusted, what: '계정 정보(역할·범위·표시이름)' });
     if (denied && !actorIsOwner(actor)) return denied;   // 소유자는 다른 소유자를 관리할 수 있다
+    // 소유자 집합 '진입' 차단 — 위 가드는 '이미 보호 계정인가'만 보므로, 아직 소유자가 아닌 계정을
+    // 소유자로 밀어 올리는 방향(예: managed 계정을 admin 으로 승격 → managedAdminOwners 자동 소유자)
+    // 은 검사되지 않았다(5차 재감사 실행 재현). 변경 후 상태로 평가해 그 방향도 막는다.
+    const entry = ownerSetEntryDenied(u, { role, name }, { actor, trusted });
+    if (entry) return entry;
   }
   if (role !== undefined) {
     if (!VALID_ROLES.includes(role)) return { ok: false, reason: '역할이 올바르지 않습니다.' };
@@ -488,7 +493,7 @@ export function deleteUser(username, { actor = null, trusted = false } = {}) {
   if (u.superuser) return { ok: false, reason: '수퍼관리자 계정은 삭제할 수 없습니다.' };
   // 소유자 계정 삭제 차단 — 지운 뒤 같은 이름으로 다시 만들면 소유자 지위가 승계된다
   // (identityGuardDenied 주석 참고: 자격증명만 막으면 신원이 안 막혀 탈취가 성립했다).
-  const denied = identityGuardDenied({ username: u.username, name: u.name, actor, trusted, what: '계정 삭제' });
+  const denied = identityGuardDenied({ username: u.username, actor, trusted, what: '계정 삭제' });
   if (denied) return denied;
   if (u.role === 'admin' && list.filter((x) => x.role === 'admin').length <= 1) {
     return { ok: false, reason: '마지막 관리자는 삭제할 수 없습니다.' };
@@ -573,6 +578,49 @@ function isProtectedAccount(u) {
   const owners = settingsOwnerList();
   if (owners === null) return true;               // 목록 불명 → 보호 쪽
   return isOwnerName(u.username, owners);
+}
+
+/**
+ * **가상 레코드**가 설정소유자가 될지 판정 — '변경 후 상태' 평가용(ownerSetEntryDenied).
+ *
+ * ⚠ 왜 별도 함수인가(5차 재감사 지적, 이 부류의 마지막 조각):
+ * 소유자 집합은 username 하나로 정해지지 않는다. `loadSessionSecurity()` 가
+ * `managedAdminOwners()` 를 항상 합산하는데, 그 함수는 **`managedBy==='central' && role==='admin'`**
+ * 인 계정을 소유자로 만든다(문서화된 의도 — 중앙 배포 admin 은 엣지 소유자). 즉 실질 판정식은
+ * `username ∧ (managedBy==='central' ∧ role==='admin')` 이고, 그중 **`role` 은 admin 이
+ * `PATCH /admin/users/:u` 로 쓸 수 있는 값**이다. v2.392~2.395 가 이름 축을 하나씩 막는 동안
+ * 같은 패턴이 `name` → `role` 로 옮겨간 것이다(엣지에서 전체 체인 실행 재현됨).
+ * `managedAdminOwners()` 는 **현재 저장된 목록**을 읽으므로 가상 레코드를 반영하지 못한다 →
+ * 세 소스를 직접 평가한다.
+ */
+function wouldBeOwner(rec) {
+  const uname = String(rec?.username || '').trim();
+  if (uname === SUPER_USERNAME) return true;
+  // 중앙 배포 admin 은 자동 소유자 — 변경 후 role 로 직접 판정(managedAdminOwners 우회).
+  if (rec?.managedBy === 'central' && rec?.role === 'admin') return true;
+  const owners = settingsOwnerList();
+  if (owners === null) return true;               // 목록 불명 → 보호 쪽
+  return owners.includes(uname);
+}
+
+/**
+ * 소유자 집합 **진입** 차단 — "이 변경이 대상을 소유자로 만드는가?"를 변경 후 상태로 평가한다.
+ *
+ * 기존 가드들은 모두 "대상이 **이미** 보호 계정인가"만 봤기 때문에, 아직 소유자가 아닌 계정을
+ * 소유자 쪽으로 **밀어 올리는 방향**은 검사되지 않았다. 그래서 비소유자 admin 이
+ * managed operator 의 비번을 심고(그 시점엔 보호 대상 아님 → 허용) role 을 admin 으로 올리면
+ * (역시 그 시점엔 보호 대상 아님 → 허용) 그 계정이 소유자가 되고, 그 계정으로 로그인해
+ * 자력 OTP 등록 → 백업 다운로드 → AUTH_SECRET 으로 토큰 위조까지 이어졌다.
+ *
+ * 이 검사는 축(role·managedBy·향후 추가되는 어떤 파생 축이든)에 의존하지 않고 **결과**만 보므로,
+ * 같은 부류가 다른 필드로 옮겨가도 자동으로 막힌다 — 하나씩 쫓아가는 패턴을 끝내는 지점이다.
+ */
+function ownerSetEntryDenied(u, next, { actor = null, trusted = false } = {}) {
+  if (trusted) return null;
+  if (actorIsOwner(actor)) return null;                 // 소유자는 소유자를 만들 수 있다
+  if (wouldBeOwner(u)) return null;                     // 이미 소유자 → 별도 가드(credentialGuard)가 담당
+  if (!wouldBeOwner({ ...u, ...next })) return null;    // 변경 후에도 소유자 아님 → 무관
+  return { ok: false, reason: '이 변경은 대상 계정을 설정 소유 계정으로 만듭니다 — 설정 소유 계정만 할 수 있습니다.' };
 }
 
 /** 요청자가 설정소유자인가 — '소유자만 다른 소유자를 만들거나 지울 수 있다' 규칙용. */
