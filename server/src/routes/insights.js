@@ -13,6 +13,7 @@ import { scopedVcenterIds } from '../auth/scope.js';
 import { scopeSlice, scopeKey } from './api/shared.js';
 import { allMeasuredPower } from '../idrac/service.js';
 import { filterMeasuredByMapping, loadPowerSettings } from '../idrac/powerSettings.js';
+import { keepMappedMeasured } from '../idrac/attribution.js';
 import { snapMemo, sendCached } from '../util/snapCache.js';
 import { computeFinOps, loadFinopsConfig, saveFinopsConfig } from '../insights/finops.js';
 import { computePowerBreakdown } from '../insights/powerBreakdown.js';
@@ -39,10 +40,15 @@ insightsRouter.get('/finops', async (req, res) => {
   try {
     const snap = store.get();
     const scoped = scopeSlice(snap, req.user, req.query.vcenterId); // 범위 제한 계정은 자기 vCenter 만
+    // ⚠ scope 강제(확정 버그 수정): allMeasuredPower 는 hosts 인자와 무관하게 전 등록 서버를
+    // 반환하므로, 범위 제한 계정에는 '귀속되지 않는 서버'를 반드시 잘라내야 한다(안 하면 범위 밖
+    // 서버가 '(미매핑)' 으로 강등된 채 총량·topHosts 에 그대로 실려 전 함대가 노출됐다).
+    const scopeLimited = scopedVcenterIds(req.user, snap) != null;
     const key = `${snap.generatedAt}|${JSON.stringify(loadPowerSettings())}|${JSON.stringify(loadFinopsConfig())}|${fleetRev()}|${scopeKey(req.user, snap)}`;
     const validIds = new Set((scoped.vcenters || []).map((v) => v.id));
     const payload = await snapMemo('finops', key, 60_000, async () => {
-      const measured = filterMeasuredByMapping(applyFleetExclude(applyFleetAssign(await allMeasuredPower({ hosts: scoped.hosts, vcenterFirst: true }), validIds)), scoped);
+      let measured = filterMeasuredByMapping(applyFleetExclude(applyFleetAssign(await allMeasuredPower({ hosts: scoped.hosts, vcenterFirst: true }), validIds)), scoped);
+      if (scopeLimited) measured = keepMappedMeasured(measured, scoped);
       return computeFinOps(scoped, measured);
     });
     sendCached(req, res, key, payload);
@@ -60,10 +66,14 @@ insightsRouter.get('/power-breakdown', async (req, res) => {
     // DataCenter 할당/목록이 바뀌면 캐시 무효화되도록 키에 포함.
     const dcKey = `${JSON.stringify(assign)}|${datacenters.map((d) => `${d.id}:${d.name}`).join(',')}`;
     const scoped = scopeSlice(snap, req.user, vc); // 범위 제한 계정은 자기 vCenter 전력만
+    // ⚠ scope 강제(확정 버그 수정) — /finops 와 같은 이유. 이 라우트는 servers[] 로 서버 이름·
+    // 서비스태그·모델·와트를 그대로 내려주므로 누수 영향이 더 크다.
+    const scopeLimited = scopedVcenterIds(req.user, snap) != null;
     const key = `${snap.generatedAt}|${vc}|${JSON.stringify(loadPowerSettings())}|${fleetRev()}|${dcKey}|${scopeKey(req.user, snap)}`;
     const validIds = new Set((scoped.vcenters || []).map((v) => v.id));
     const payload = await snapMemo('power-breakdown', key, 60_000, async () => {
-      const measured = filterMeasuredByMapping(applyFleetExclude(applyFleetAssign(await allMeasuredPower({ hosts: scoped.hosts, vcenterFirst: true }), validIds)), scoped);
+      let measured = filterMeasuredByMapping(applyFleetExclude(applyFleetAssign(await allMeasuredPower({ hosts: scoped.hosts, vcenterFirst: true }), validIds)), scoped);
+      if (scopeLimited) measured = keepMappedMeasured(measured, scoped);
       return computePowerBreakdown(scoped, measured, { vcenterId: vc, assign, datacenters });
     });
     sendCached(req, res, key, payload);
@@ -238,13 +248,20 @@ insightsRouter.get('/graph', async (req, res) => {
   const vms = req.query.vms === '1' || req.query.vms === 'true';
   const vc = req.query.vcenterId || null; const host = req.query.host || null;
   const scoped = scopeSlice(snap, req.user, vc); // 범위 제한 계정은 자기 vCenter 그래프만
+  // NSX 노드는 스냅샷이 아니라 등록부에서 만들어지므로 scopeSlice 로는 안 좁혀진다 → 허용 집합을
+  // 명시 전달해야 한다(전 사이트 NSX 매니저 노출 차단 — graph.js allowedVcIds 주석 참고).
+  const allowedVcIds = scopedVcenterIds(req.user, snap);
   const key = `${snap.generatedAt}|${vms ? 1 : 0}|${vc || ''}|${host || ''}|${scopeKey(req.user, snap)}`;
-  const payload = await snapMemo('graph', key, 60_000, async () => buildGraph(scoped, { vms, vcenterId: vc, host }));
+  const payload = await snapMemo('graph', key, 60_000, async () => buildGraph(scoped, { vms, vcenterId: vc, host, allowedVcIds }));
   sendCached(req, res, key, payload);
 });
 
 // --- 인시던트 타임라인 ---
-insightsRouter.get('/incidents', (req, res) => res.json(getIncidents({ limit: Number(req.query.limit) || 200 })));
+// scope 필수: 알람 상세·vCenter 수집 실패에 타 사이트 엔티티명이 들어간다(incidents.js 주석).
+insightsRouter.get('/incidents', (req, res) => res.json(getIncidents({
+  limit: Number(req.query.limit) || 200,
+  allowed: scopedVcenterIds(req.user, store.get()),
+})));
 
 // --- ChatOps(자연어 운영 질의) ---
 insightsRouter.post('/chatops', async (req, res) => {

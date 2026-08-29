@@ -63,12 +63,17 @@ adminRouter.delete('/users/:username/password', adminOnly, (req, res) => {
 
 // TOTP (Google Authenticator) management for a user — admin enrolls and hands
 // the QR to the user (since OTP-only users have no password to self-enroll).
+// actor 전달 필수(권한 상승 차단, 2026-08-30): beginTotpEnroll 이 QR 발급용 평문 시크릿을
+// 반환하므로, 수퍼관리자·설정소유자 계정을 다른 admin 이 대리 등록하면 그 계정을 탈취할 수 있다
+// (auth.js totpRebindDenied). 대리 등록은 감사로그에 남긴다 — 강력한 권한 작업이다.
 adminRouter.post('/users/:username/totp/begin', adminOnly, (req, res) => {
-  const r = beginTotpEnroll(req.params.username, req.get('host') || '');
+  const r = beginTotpEnroll(req.params.username, req.get('host') || '', { actor: req.user?.username });
+  if (!r.ok) logAudit({ user: req.user?.username, action: 'OTP 대리 등록 거부', target: req.params.username, detail: r.reason || '', ip: req.ip || '' });
   res.status(r.ok ? 200 : 400).json(r);
 });
 adminRouter.post('/users/:username/totp/confirm', adminOnly, (req, res) => {
-  const r = confirmTotpEnroll(req.params.username, (req.body || {}).code);
+  const r = confirmTotpEnroll(req.params.username, (req.body || {}).code, { actor: req.user?.username });
+  if (r.ok) logAudit({ user: req.user?.username, action: 'OTP 대리 등록 확정', target: req.params.username, ip: req.ip || '' });
   res.status(r.ok ? 200 : 400).json(r);
 });
 adminRouter.post('/users/:username/totp/disable', adminOnly, (req, res) => {

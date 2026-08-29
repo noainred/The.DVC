@@ -37,6 +37,36 @@ class NormalizeTest(unittest.TestCase):
         with self.assertRaises(ValidationError):
             normalize_url("https://x.internal/" + ("a" * 2100))
 
+    def test_rejects_invalid_port(self):
+        """확정 버그 회귀 방지(2026-08-30) — 잘못된 포트가 헬스체크 전체를 죽였다.
+
+        urlsplit 의 `.port` 는 지연 평가라, 범위 밖(`:99999`)이나 숫자가 아닌(`:8o80`) 포트는
+        접근하는 순간 ValueError 를 던진다. 저장 시점에 막지 않아 오타 URL 하나가 저장되면
+        resolve_and_check 의 `parts.port` 에서 터져 check_many 의 future.result() 로 전파되고,
+        **그 주기의 모든 링크 점검·이력·알림이 중단**됐다(자동 점검은 traceback 만 남기고 조용히
+        멈춤 = 모니터링 정지). 사용자에게 보이는 검증 실패로 바꾼다.
+        """
+        for bad in ("https://grafana.internal.dc:99999/x",
+                    "https://grafana.internal.dc:8o80/x",
+                    "http://host.internal:-1/"):
+            with self.assertRaises(ValidationError, msg=bad):
+                normalize_url(bad)
+
+    def test_accepts_valid_explicit_port(self):
+        self.assertEqual(normalize_url("https://vc.internal.dc:8443/ui"),
+                         "https://vc.internal.dc:8443/ui")
+
+    def test_stored_invalid_port_does_not_raise_in_resolver(self):
+        """이미 저장된(구버전에서 통과한) 잘못된 포트도 예외 대신 사유를 돌려줘야 한다.
+
+        저장 시점 검증만 추가하면 **기존에 저장된** 오타 URL 이 업그레이드 후에도 계속 전체
+        점검을 죽인다. resolve_and_check 자체가 방어해야 자기 치유가 된다.
+        """
+        addresses, reason, kind = resolve_and_check("https://grafana.internal.dc:99999/x")
+        self.assertEqual(addresses, [])
+        self.assertIsNotNone(reason)
+        self.assertEqual(kind, "blocked")
+
 
 class GuardTest(unittest.TestCase):
     def check(self, url, allow_private=True):

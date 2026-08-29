@@ -9,13 +9,24 @@ import { store } from '../store.js';
 
 const sevRank = (s) => (s === 'critical' ? 3 : s === 'warning' ? 2 : s === 'resolved' ? 1 : 0);
 
-export function getIncidents({ limit = 200 } = {}) {
+/**
+ * @param allowed 범위 제한 계정의 허용 vCenter id Set(전체 범위 계정은 null).
+ *   ⚠ 보안 경계(확정 버그, 2026-08-30): insights 라우터의 다른 조회 라우트는 모두 scope 를
+ *   적용하는데 이 라우트만 빠져 있어, 범위 제한 계정이 전 사이트의 알람 제목·상세(데이터스토어명·
+ *   호스트명 포함)와 vCenter 수집 실패(이름·오류 메시지)를 전부 조회할 수 있었다.
+ *   알림 엔진 항목에는 vcenterId 필드가 없어 정밀한 범위 판정이 불가능하므로 chatops.js 와
+ *   **같은 보수적 규칙**을 적용한다: 귀속을 알 수 없는 항목은 범위 계정에 노출하지 않는다.
+ *   (범위 계정의 타임라인은 자기 vCenter 수집 실패 중심으로 축소된다. 알림 항목에 vcenterId 를
+ *   실어 정밀 필터링하는 것은 후속 개선 과제 — 지금은 '덜 보여주는' 쪽이 안전하다.)
+ */
+export function getIncidents({ limit = 200, allowed = null } = {}) {
   const st = alertStatus();
   const snap = store.get();
   const now = Date.now();
+  const alertInScope = (a) => !allowed || (a.vcenterId ? allowed.has(a.vcenterId) : false);
 
   // 1) 현재 진행중(firing) — 시작시각 기준 미해소 인시던트.
-  const open = (st.firing || []).map((f) => ({
+  const open = (st.firing || []).filter(alertInScope).map((f) => ({
     key: f.key, severity: f.severity, title: f.title, detail: f.detail || '',
     since: f.since, startTs: Date.parse(f.since) || now,
     ageMin: Math.round((now - (Date.parse(f.since) || now)) / 60_000),
@@ -23,14 +34,16 @@ export function getIncidents({ limit = 200 } = {}) {
   })).sort((a, b) => sevRank(b.severity) - sevRank(a.severity) || a.startTs - b.startTs);
 
   // 2) 최근 이벤트(발생/해소/알림) — 알림 엔진 in-memory 기록.
-  const events = (st.recent || []).map((r) => ({
+  const events = (st.recent || []).filter(alertInScope).map((r) => ({
     at: r.at, ts: Date.parse(r.at) || 0, key: r.key, severity: r.severity,
     title: r.title, detail: r.detail || '', channels: r.channels || null,
     kind: r.severity === 'resolved' ? 'resolved' : 'fired',
   }));
 
   // 3) vCenter 수집 실패도 인시던트로 표면화(알림 채널 미설정이어도 보이게).
+  // snap 은 store 전체이므로 여기서 직접 scope 를 적용한다(허용 vCenter 만).
   for (const v of snap.vcenters || []) {
+    if (allowed && !allowed.has(v.id)) continue;
     if (v.status === 'unreachable') {
       events.push({ at: new Date(v.receivedAt || now).toISOString(), ts: v.receivedAt || now, key: `vc:${v.id}`, severity: 'critical', title: `vCenter 수집 실패: ${v.name || v.id}`, detail: v.error || '연결 불가', kind: 'fired' });
     }

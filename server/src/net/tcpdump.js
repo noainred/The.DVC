@@ -70,6 +70,13 @@ export function analyzeCapture(pkts, peer) {
 }
 
 /**
+ * 원격 캡처용 SSH exec 타임아웃 — 캡처는 `timeout <sec>` 로 스스로 끝나므로, 전송 계층은 그보다
+ * 넉넉해야 한다. 과거 seconds 를 최대 120 까지 허용하면서 exec 는 기본 60초에 끊어, 60초를 넘는
+ * 캡처가 **항상** 'SSH exec 타임아웃'으로 실패했다(그때 원격 /tmp 의 pcap 도 회수·삭제되지 않음).
+ */
+const execBudgetMs = (sec) => Math.max(60_000, (sec + 30) * 1000);
+
+/**
  * 캡처 실행. opts: { hostA(creds: host,port,username,password,privateKey), peer, iface, seconds, maxPackets, useSudo }.
  * 반환 { ok, command, lines, parsed, analysis, raw, error }.
  */
@@ -83,7 +90,7 @@ export async function runTrafficCapture({ hostA, peer, iface = 'any', seconds = 
   // -n(no DNS) -tt(epoch) -l(line buffered) -q 미사용. host 필터. timeout으로 상한.
   const cmd = `${sudo}timeout ${sec} tcpdump -i ${iface} -n -tt -c ${max} host ${peer} 2>&1 || true`;
   return withSsh(hostA, async ({ exec }) => {
-    const r = await exec(cmd);
+    const r = await exec(cmd, execBudgetMs(sec));
     const raw = (r.stdout || '') + (r.stderr || '');
     const lines = raw.split('\n');
     // tcpdump 권한/오류 메시지 감지
@@ -148,20 +155,27 @@ export async function runPcapCapture({ hostA, peer, iface = 'any', seconds = 10,
   const isRoot = (hostA.username || '').trim() === 'root';
   const sudo = isRoot ? '' : (useSudo ? 'sudo -n ' : '');
   // 예측 불가 파일명(감사 M9) — Date.now()만으로는 원격 /tmp에서 심볼릭링크 선점(TOCTOU) 가능.
-  const file = `/tmp/portal-cap-${Date.now()}-${crypto.randomBytes(6).toString('hex')}.pcap`;
+  // ts 는 다운로드 파일명에도 쓴다 — v2.190 하드닝에서 `const ts` 선언만 지우고 아래 참조를
+  // 남겨 ReferenceError 로 pcap 다운로드가 전면 불능이었다(2026-08-30 수정).
+  const ts = Date.now();
+  const file = `/tmp/portal-cap-${ts}-${crypto.randomBytes(6).toString('hex')}.pcap`;
   return withSsh(hostA, async ({ exec }) => {
-    const cap = await exec(`${sudo}timeout ${sec} tcpdump -i ${iface} -n -w ${file} -c ${max} host ${peer} 2>&1; echo RC=$?`);
-    const capOut = (cap.stdout || '') + (cap.stderr || '');
-    const pktM = /(\d+) packets captured/.exec(capOut);
-    const sumR = await exec(`(command -v capinfos >/dev/null && ${sudo}capinfos ${file} 2>/dev/null) || (command -v tshark >/dev/null && ${sudo}tshark -r ${file} -q -z io,phs 2>/dev/null | head -60) || echo "(capinfos/tshark 미설치 — pcap만 제공)"`);
-    const b64 = await exec(`${sudo}base64 ${file} 2>/dev/null`);
-    await exec(`${sudo}rm -f ${file}`).catch(() => {});
-    const pcapBase64 = (b64.stdout || '').replace(/\s+/g, '');
-    const errLine = (/permission denied|sudo:|command not found|tcpdump: /i.test(capOut) && !/listening on/i.test(capOut)) ? (capOut.split('\n').find((l) => /permission|sudo:|not found|tcpdump:/i.test(l)) || '') : '';
-    return {
-      ok: true, fileName: `capture-${peer}-${ts}.pcap`, captured: pktM ? Number(pktM[1]) : null,
-      size: Math.floor((pcapBase64.length * 3) / 4), pcapBase64, summary: (sumR.stdout || '').slice(0, 4000),
-      warn: !pcapBase64 && errLine ? errLine.trim().slice(0, 200) : null,
-    };
+    // 캡처가 실패해도 원격 /tmp 에 pcap 을 남기지 않는다(반복 시 수십 MB 누적).
+    try {
+      const cap = await exec(`${sudo}timeout ${sec} tcpdump -i ${iface} -n -w ${file} -c ${max} host ${peer} 2>&1; echo RC=$?`, execBudgetMs(sec));
+      const capOut = (cap.stdout || '') + (cap.stderr || '');
+      const pktM = /(\d+) packets captured/.exec(capOut);
+      const sumR = await exec(`(command -v capinfos >/dev/null && ${sudo}capinfos ${file} 2>/dev/null) || (command -v tshark >/dev/null && ${sudo}tshark -r ${file} -q -z io,phs 2>/dev/null | head -60) || echo "(capinfos/tshark 미설치 — pcap만 제공)"`);
+      const b64 = await exec(`${sudo}base64 ${file} 2>/dev/null`);
+      const pcapBase64 = (b64.stdout || '').replace(/\s+/g, '');
+      const errLine = (/permission denied|sudo:|command not found|tcpdump: /i.test(capOut) && !/listening on/i.test(capOut)) ? (capOut.split('\n').find((l) => /permission|sudo:|not found|tcpdump:/i.test(l)) || '') : '';
+      return {
+        ok: true, fileName: `capture-${peer}-${ts}.pcap`, captured: pktM ? Number(pktM[1]) : null,
+        size: Math.floor((pcapBase64.length * 3) / 4), pcapBase64, summary: (sumR.stdout || '').slice(0, 4000),
+        warn: !pcapBase64 && errLine ? errLine.trim().slice(0, 200) : null,
+      };
+    } finally {
+      await exec(`${sudo}rm -f ${file}`).catch(() => {});
+    }
   });
 }

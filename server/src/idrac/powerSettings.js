@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
-import { buildHostIndex, resolveServerVcenter } from './attribution.js';
+import { keepMappedMeasured } from './attribution.js';
 
 const FILE = path.join(config.configDir, 'power-settings.json');
 // includeVcenterPower: vCenter PerformanceManager(power.power.average)로 수집한 ESXi 호스트
@@ -47,7 +47,6 @@ export function savePowerSettings(body = {}) {
 export function filterMeasuredByMapping(measured, snap) {
   const s = loadPowerSettings();
   if (!s.excludeUnmapped || !Array.isArray(measured)) return measured;
-  const idx = buildHostIndex(snap?.hosts || []);
-  const validVcIds = new Set((snap?.vcenters || []).map((v) => v.id));
-  return measured.filter((m) => resolveServerVcenter(m, idx, validVcIds) != null);
+  // 로직은 attribution.keepMappedMeasured 하나로 공유한다(범위 제한 계정 강제 필터와 동일 규칙).
+  return keepMappedMeasured(measured, snap);
 }
