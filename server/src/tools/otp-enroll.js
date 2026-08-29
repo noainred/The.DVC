@@ -72,14 +72,17 @@ if (has('--disable')) {
 
 const code = valueOf('--confirm');
 if (code) {
-  const r = confirmTotpEnroll(username, String(code).trim());
+  // trusted: 서버에서 직접 실행하는 신뢰된 콘솔 경로 — 수퍼관리자 폰 분실 복구의 유일한 수단이라
+  // 대리 등록 경계(auth.js credentialGuardDenied)를 명시적으로 우회한다.
+  const r = confirmTotpEnroll(username, String(code).trim(), { trusted: true });
   if (!r.ok) die(`${r.reason} (먼저 인자 없이 실행해 등록을 시작했는지, 코드가 유효한지 확인하세요)`);
   console.log(`\n✔ '${username}' OTP 등록 완료 — 이제 이 계정은 6자리 코드로만 로그인합니다.\n`);
   process.exit(0);
 }
 
 // 등록 시작 — 시크릿/otpauth URL 출력. 인증 앱의 '설정 키 직접 입력'에 시크릿을 넣으면 된다.
-const r = beginTotpEnroll(username, '');
+// trusted: 위 --confirm 과 같은 이유(신뢰된 콘솔 복구 경로).
+const r = beginTotpEnroll(username, '', { trusted: true });
 if (!r.ok) die(r.reason);
 console.log(`
 등록 시작: ${username} (${user.role})

@@ -235,18 +235,30 @@ function udpProbe(host, port, payload, timeoutMs) {
  *   ① 응답 증거가 있어야 한다 = 주소(IP)가 찍혔거나 RTT(`1 ms`·`0.512 ms`·`<1 ms`)가 있다.
  *      ⚠ '별표가 아닌 토큰이 있으면 응답'으로 보면 안 된다 — Windows tracert 의 무응답 줄은
  *      `2  *  *  *  Request timed out.` 처럼 **영문 안내 문구**가 붙어 오탐한다(테스트로 고정).
- *   ② ICMP 도달불가 표식(`!H` 호스트·`!N` 네트워크·`!P` 프로토콜 등)이 있으면 미도달로 본다
- *      — 응답은 왔지만 목적지에 닿지 못한 것이므로 'ok' 로 볼 수 없다.
+ *   ② ICMP 도달불가 표식(`!H` 호스트·`!N` 네트워크·`!P` 프로토콜 등)이나 문구형 도달불가
+ *      (`Destination net unreachable`)가 있으면 미도달 — 응답은 왔지만 목적지에 닿지 못한 것이다.
+ *   ③ **홉 상한(-m/-h) 소진**이면 미도달. traceroute 는 목적지가 응답하면 그 자리에서 멈추므로,
+ *      상한까지 줄이 찍혔다는 것은 목적지에 닿지 못한 채 끊긴 것이다. 이 검사가 없으면 마지막
+ *      홉의 **중간 라우터**가 응답한 것을 목적지 도달로 오판한다(한국↔폴란드·미국동부처럼 홉이
+ *      긴 경로에서 실제로 발현 — 재감사 실행 재현). 단 목적지 주소가 마지막 홉에 찍혀 있으면
+ *      상한과 무관하게 도달로 본다(정확히 상한 홉에 목적지가 있는 경우의 오탐 방지).
+ *
+ * @param opts.maxHops 실제 명령에 쓴 홉 상한(미지정 시 ③ 검사 생략).
+ * @param opts.target  대상 주소. IP 리터럴이면 마지막 홉과 대조해 도달을 확정한다.
  */
-export function parseTraceroute(out) {
+export function parseTraceroute(out, { maxHops = 0, target = '' } = {}) {
   const lines = String(out || '').split('\n').filter((l) => /^\s*\d+/.test(l));
   const hops = lines.length;
   const last = lines[lines.length - 1] || '';
   const rest = last.replace(/^\s*\d+\s*/, '').trim();
-  const hasAddr = /\d{1,3}(?:\.\d{1,3}){3}|[0-9a-f]{0,4}:[0-9a-f]{0,4}:/i.test(rest); // IPv4 또는 IPv6
+  const hasAddr = /\d{1,3}(?:\.\d{1,3}){3}|(?:[0-9a-f]{1,4}:){2,}[0-9a-f]{0,4}/i.test(rest); // IPv4 또는 IPv6
   const hasRtt = /\d+(?:\.\d+)?\s*ms/i.test(rest);
-  const unreachableMark = /!(?:H|N|P|X|A|S|F|C|T|U|\d+)\b/.test(rest);
-  return { hops, reached: hops > 0 && (hasAddr || hasRtt) && !unreachableMark };
+  const unreachable = /!(?:H|N|P|X|A|S|F|C|T|U|\d+)\b/.test(rest) || /unreachable/i.test(rest);
+  // 목적지 주소가 마지막 홉에 그대로 찍혔는지(IP 리터럴 대상일 때만 신뢰할 수 있는 신호).
+  const t = String(target || '').trim();
+  const targetHit = !!t && /^[0-9a-fA-F.:]+$/.test(t) && new RegExp(`(?:^|\\s)${t.replace(/[.]/g, '\\.')}(?:\\s|$)`).test(rest);
+  const exhausted = maxHops > 0 && hops >= maxHops && !targetHit;
+  return { hops, reached: hops > 0 && (hasAddr || hasRtt) && !unreachable && !exhausted };
 }
 
 /** traceroute — CLI 호출. host 는 화이트리스트를 통과한 값만(명령 인젝션 방지). */
@@ -255,13 +267,15 @@ function traceroute(host, maxHops) {
     if (!SAFE_HOST.test(host) || host.startsWith('-')) return reject(new Error('호스트 형식 위반'));
     const isWin = process.platform === 'win32';
     const cmd = isWin ? 'tracert' : 'traceroute';
+    const limit = Math.min(64, maxHops);
     const args = isWin
-      ? ['-d', '-h', String(Math.min(64, maxHops)), '-w', '1000', host]
-      : ['-n', '-m', String(Math.min(64, maxHops)), '-w', '1', '-q', '1', host];
+      ? ['-d', '-h', String(limit), '-w', '1000', host]
+      : ['-n', '-m', String(limit), '-w', '1', '-q', '1', host];
     execFile(cmd, args, { timeout: 25_000, maxBuffer: 256 * 1024 }, (err, stdout) => {
       const out = String(stdout || '');
       if (!out) return reject(err || new Error('traceroute 출력 없음'));
-      resolve(parseTraceroute(out));
+      // 명령에 쓴 실제 상한과 대상을 넘겨야 '상한 소진'을 도달로 오판하지 않는다.
+      resolve(parseTraceroute(out, { maxHops: limit, target: host }));
     });
   });
 }

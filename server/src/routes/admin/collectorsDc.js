@@ -213,7 +213,9 @@ adminRouter.post('/collectors/set-password', adminOnly, async (req, res) => {
   // ìµì: ì¤ì í¬í ìì ì ëì¼ ê³ì ë í¨ê» ë³ê²½(ì£ì§/ì¤ì ë¹ë² íµì¼ì©).
   let central = null;
   if (req.body?.includeCentral === true) {
-    const r = setLocalPassword(username, password);
+    // actor 전달: 관리자 세션 경로이므로 보호 계정(수퍼관리자·설정소유자) 대리 변경 경계를 적용한다
+    // (auth.js credentialGuardDenied — 일괄 변경으로 그 경계를 우회하지 못하게).
+    const r = setLocalPassword(username, password, { actor: req.user?.username });
     central = { ok: r.ok, reason: r.reason || null };
   }
 

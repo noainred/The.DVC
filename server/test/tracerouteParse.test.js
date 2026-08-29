@@ -73,3 +73,36 @@ test('홉 줄이 전혀 없으면 미도달(hops 0)', () => {
   assert.deepEqual(parseTraceroute('traceroute: unknown host foo'), { hops: 0, reached: false });
   assert.deepEqual(parseTraceroute(''), { hops: 0, reached: false });
 });
+
+// --- 재감사(2026-08-30)에서 재현된 잔여 '거짓 정상' — 홉 상한 소진 / 문구형 도달불가 ---
+
+test('홉 상한 소진: 마지막 홉이 응답해도 미도달(중간 라우터를 목적지로 오판 금지)', () => {
+  // traceroute 는 목적지가 응답하면 그 자리에서 멈춘다. 상한까지 줄이 찍혔다면 닿지 못한 것이다.
+  // 한국↔폴란드·미국동부처럼 홉이 긴 경로에서 실제로 발현하는 오판이었다.
+  const out = [
+    ' 1  10.0.0.1  0.512 ms',
+    ' 2  10.1.0.1  12.4 ms',
+    ' 3  213.155.130.1  260.1 ms',
+  ].join('\n');
+  assert.equal(parseTraceroute(out, { maxHops: 3 }).reached, false, '상한 소진은 미도달');
+  assert.equal(parseTraceroute(out, { maxHops: 15 }).reached, true, '상한 미달이면 종전대로 도달');
+  assert.equal(parseTraceroute(out).reached, true, 'maxHops 미지정 시 이 검사는 생략(하위호환)');
+});
+
+test('홉 상한 소진이지만 목적지 주소가 마지막 홉에 있으면 도달(오탐 방지)', () => {
+  const out = [
+    ' 1  10.0.0.1  0.512 ms',
+    ' 2  10.2.0.5  2.881 ms',
+  ].join('\n');
+  assert.equal(parseTraceroute(out, { maxHops: 2, target: '10.2.0.5' }).reached, true);
+  assert.equal(parseTraceroute(out, { maxHops: 2, target: '10.9.9.9' }).reached, false);
+});
+
+test('문구형 도달불가(Destination net unreachable)는 주소가 있어도 미도달', () => {
+  const out = '  2  10.0.0.1  reports: Destination net unreachable.';
+  assert.equal(parseTraceroute(out).reached, false);
+});
+
+test('IPv6 주소 응답도 도달로 인식(주소 정규식 오작동 방지)', () => {
+  assert.equal(parseTraceroute(' 3  2001:db8::1  4.2 ms').reached, true);
+});

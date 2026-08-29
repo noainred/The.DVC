@@ -165,8 +165,10 @@ export async function runPcapCapture({ hostA, peer, iface = 'any', seconds = 10,
       const cap = await exec(`${sudo}timeout ${sec} tcpdump -i ${iface} -n -w ${file} -c ${max} host ${peer} 2>&1; echo RC=$?`, execBudgetMs(sec));
       const capOut = (cap.stdout || '') + (cap.stderr || '');
       const pktM = /(\d+) packets captured/.exec(capOut);
-      const sumR = await exec(`(command -v capinfos >/dev/null && ${sudo}capinfos ${file} 2>/dev/null) || (command -v tshark >/dev/null && ${sudo}tshark -r ${file} -q -z io,phs 2>/dev/null | head -60) || echo "(capinfos/tshark 미설치 — pcap만 제공)"`);
-      const b64 = await exec(`${sudo}base64 ${file} 2>/dev/null`);
+      // 요약·회수(base64)에도 여유 타임아웃을 명시한다 — 최대 2만 패킷 pcap 의 base64 전송은
+      // 고RTT·저속 링크에서 캡처보다 오래 걸릴 수 있어, 기본 60초에 걸리면 다운로드가 실패한다.
+      const sumR = await exec(`(command -v capinfos >/dev/null && ${sudo}capinfos ${file} 2>/dev/null) || (command -v tshark >/dev/null && ${sudo}tshark -r ${file} -q -z io,phs 2>/dev/null | head -60) || echo "(capinfos/tshark 미설치 — pcap만 제공)"`, execBudgetMs(sec));
+      const b64 = await exec(`${sudo}base64 ${file} 2>/dev/null`, execBudgetMs(sec));
       const pcapBase64 = (b64.stdout || '').replace(/\s+/g, '');
       const errLine = (/permission denied|sudo:|command not found|tcpdump: /i.test(capOut) && !/listening on/i.test(capOut)) ? (capOut.split('\n').find((l) => /permission|sudo:|not found|tcpdump:/i.test(l)) || '') : '';
       return {

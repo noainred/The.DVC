@@ -81,7 +81,10 @@ collectorRouter.post('/set-password', express.json({ limit: '4kb' }), (req, res)
   if (!config.collector.token) { logCollectorDeny(req, 'set-password'); return res.status(404).json({ ok: false, reason: 'collector 비활성화(COLLECTOR_TOKEN 미설정)' }); }
   if (!checkToken(req)) { logCollectorDeny(req, 'set-password'); return res.status(403).json({ ok: false, reason: '토큰 불일치' }); }
   const username = String(req.body?.username || 'admin').trim();
-  const r = setLocalPassword(username, req.body?.password);
+  // trusted: COLLECTOR_TOKEN 으로 게이트된 중앙→엣지 **시스템** 경로(사용자 세션이 아님).
+  // 중앙이 엣지 계정 비번을 일괄 교체하는 정상 기능이라 대리 변경 경계를 명시적으로 통과시킨다
+  // (auth.js credentialGuardDenied — 기본은 fail-closed 이므로 이 명시가 없으면 보호 계정에서 막힌다).
+  const r = setLocalPassword(username, req.body?.password, { trusted: true });
   if (r.ok) logAudit({ user: 'central-portal', action: '엣지 비밀번호 원격 변경', target: username, ip: req.ip || '' });
   res.status(r.ok ? 200 : 400).json({ ...r, version: currentVersion() });
 });

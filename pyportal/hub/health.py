@@ -206,8 +206,18 @@ def check_many(targets, *, timeout: float = 4.0, concurrency: int = 8,
             for _, url in normalized
         ]
         results = []
-        for (shortcut_id, _), future in zip(normalized, futures):
-            result = future.result()
+        for (shortcut_id, url), future in zip(normalized, futures):
+            # 항목 격리(확정 버그 수정) — 예전에는 future.result() 를 무보호로 불러서, 대상 **1건**의
+            # 예상 외 예외가 이 루프를 뚫고 나가 그 주기의 **모든** 점검 결과·이력·전이 알림이
+            # 통째로 유실됐다(자동 점검은 traceback 만 남기고 조용히 멈춰 대시보드는 낡은 결과를
+            # 계속 표시 = 모니터링 정지). 실제 트리거는 잘못된 포트 URL 의 ValueError 였고 그건
+            # ssrf 쪽에서 막았지만, '1건이 전체를 죽이는' 구조 자체를 없애야 재발하지 않는다.
+            # 개별 실패는 unreachable 로 강등해 그 항목만 표시가 나빠지게 한다(실패 격리 원칙).
+            try:
+                result = future.result()
+            except Exception as exc:  # noqa: BLE001 - 어떤 예외든 그 항목만 격리한다
+                result = {"url": url, "status": STATUS_UNREACHABLE, "statusCode": 0,
+                          "latencyMs": 0, "message": f"점검 중 오류: {type(exc).__name__}: {exc}"}
             if shortcut_id:
                 result["id"] = shortcut_id
             results.append(result)
