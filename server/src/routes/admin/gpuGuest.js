@@ -17,7 +17,7 @@ import { upsertAgentUser, upsertAgentUsersBulk, removeAgentUser, listAgentUsers,
 import { loadVcenterConfig } from '../../config.js';
 import { expandIpList } from '../../idrac/iprange.js';
 import { listCollectors } from '../../collector/registry.js';
-import { adminOnly, maskPw } from './shared.js';
+import { adminOnly, maskPw, requireSettingsOwner } from './shared.js';
 
 export function registerGpuGuest(adminRouter) {
 
@@ -133,19 +133,24 @@ adminRouter.get('/edge-users/agents', adminOnly, (_req, res) => {
 adminRouter.get('/edge-users/:agent', adminOnly, (req, res) => {
   res.json({ agent: req.params.agent, users: listAgentUsers(req.params.agent) });
 });
+// ⚠ 아래 3개 변경 라우트는 requireSettingsOwner 다(4차 재감사). 중앙이 배포한 admin 계정은
+// 엣지에서 managedAdminOwners() 로 **자동 설정 소유자**가 되므로, 이 라우트는 사실상 '엣지의
+// 소유자를 만드는 권능'이다. adminOnly 로 열려 있으면 비소유자 중앙 admin 이 targets:['*'] 로
+// 전 엣지의 소유자가 되어(엣지 백업 다운로드 → 엣지 AUTH_SECRET·TOTP 시크릿) 로컬의 소유자
+// 경계를 우회한다 — 백업 라우트와 같은 등급으로 올린다. 조회(GET)는 종전대로 adminOnly.
 // 사용자 추가/수정(비밀번호 주면 해시로 변환 저장). Body { username, name, role, password }.
-adminRouter.post('/edge-users/:agent', adminOnly, (req, res) => {
+adminRouter.post('/edge-users/:agent', adminOnly, requireSettingsOwner, (req, res) => {
   const r = upsertAgentUser(req.params.agent, req.body || {});
   res.status(r.ok ? 200 : 400).json(r.ok ? { ok: true, users: listAgentUsers(req.params.agent) } : r);
 });
 // 여러 엣지(또는 '*'=모든 엣지)에 같은 사용자를 한 번에 배포. Body { targets:[...], username, name, role, password }.
-adminRouter.post('/edge-users-bulk', adminOnly, (req, res) => {
+adminRouter.post('/edge-users-bulk', adminOnly, requireSettingsOwner, (req, res) => {
   const { targets, ...spec } = req.body || {};
   const r = upsertAgentUsersBulk(targets, spec);
   res.status(r.ok ? 200 : 400).json(r);
 });
 // 사용자 제거(다음 pull에 엣지에서도 삭제).
-adminRouter.delete('/edge-users/:agent/:username', adminOnly, (req, res) => {
+adminRouter.delete('/edge-users/:agent/:username', adminOnly, requireSettingsOwner, (req, res) => {
   const r = removeAgentUser(req.params.agent, req.params.username);
   res.status(r.ok ? 200 : 400).json(r.ok ? { ok: true, users: listAgentUsers(req.params.agent) } : r);
 });

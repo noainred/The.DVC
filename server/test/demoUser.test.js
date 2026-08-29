@@ -47,9 +47,15 @@ test('수퍼관리자(noainred): 자동 시드 · admin 고정 · 강등/삭제/
   assert.ok(su, '수퍼관리자 계정이 시드되어야 함');
   assert.equal(su.role, 'admin');
   assert.ok(su.superuser);
-  assert.equal(auth.updateUser(auth.SUPER_USERNAME, { role: 'viewer' }).ok, false);
-  assert.equal(auth.updateUser(auth.SUPER_USERNAME, { role: 'operator' }).ok, false);
-  assert.equal(auth.updateUser(auth.SUPER_USERNAME, { role: 'admin' }).ok, true); // 동일 역할은 무해
+  // trusted:true — v2.395 부터 updateUser 는 보호 계정(수퍼관리자·설정소유자)에 대해 actor/trusted
+  // 없으면 거부한다(fail-closed). 이 테스트가 검증하려는 것은 **역할 고정 로직**이므로, 그 로직에
+  // 도달하도록 신뢰 경로를 명시한다. 그러지 않으면 아래 두 단정이 '역할 고정' 대신 '권한 가드'
+  // 때문에 통과해 테스트가 무의미해진다.
+  assert.equal(auth.updateUser(auth.SUPER_USERNAME, { role: 'viewer' }, { trusted: true }).ok, false);
+  assert.equal(auth.updateUser(auth.SUPER_USERNAME, { role: 'operator' }, { trusted: true }).ok, false);
+  assert.equal(auth.updateUser(auth.SUPER_USERNAME, { role: 'admin' }, { trusted: true }).ok, true); // 동일 역할은 무해
+  // 권한 가드도 함께 고정: actor/trusted 없이 호출하면 보호 계정은 거부된다.
+  assert.equal(auth.updateUser(auth.SUPER_USERNAME, { role: 'admin' }).ok, false, 'fail-closed');
   assert.equal(auth.deleteUser(auth.SUPER_USERNAME).ok, false);
   assert.equal(auth.clearLoginCredentials(auth.SUPER_USERNAME).ok, false);
 });

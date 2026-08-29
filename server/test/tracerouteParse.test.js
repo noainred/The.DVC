@@ -1,7 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { parseTraceroute } from '../src/svcmon/checker.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { parseTraceroute, traceLimits } from '../src/svcmon/checker.js';
 
 // 확정 버그 회귀 방지(2026-08-30) — trace 점검의 '거짓 정상'.
 //
@@ -124,4 +128,40 @@ test('문구형 도달불가(Destination net unreachable)는 주소가 있어도
 
 test('IPv6 주소 응답도 도달로 인식(주소 정규식 오작동 방지)', () => {
   assert.equal(parseTraceroute(' 3  2001:db8::1  4.2 ms').reached, true);
+});
+
+// --- 4차 재감사: 호출부가 '명령 상한'을 '임계'로 넘겨 위 판정이 전부 무효였다 ---
+
+test('traceLimits: 명령 상한은 임계보다 1 크고, 상한은 64 를 넘지 않는다', () => {
+  assert.deepEqual(traceLimits(15), { threshold: 15, limit: 16 });
+  assert.deepEqual(traceLimits(1), { threshold: 1, limit: 2 });
+  // 임계가 64 이상이면 상한이 64 에 막혀 limit === threshold 가 되고 판정이 영구 거짓이 된다
+  // → threshold 를 63 으로 클램프해 상한 64 안에서 판정이 살아 있게 한다.
+  assert.deepEqual(traceLimits(64), { threshold: 63, limit: 64 });
+  assert.deepEqual(traceLimits(999), { threshold: 63, limit: 64 });
+  assert.deepEqual(traceLimits(0), { threshold: 15, limit: 16 });   // 기본 15
+});
+
+test('명령 상한을 임계로 넘기면 판정이 영구 거짓이 된다(그 실수를 하지 않았음을 고정)', () => {
+  // traceroute 는 `-m limit` 이라 홉 줄이 limit 개를 넘을 수 없다. 따라서 임계 자리에 limit 를
+  // 넘기면 `hops > limit` 이 어떤 입력에서도 거짓 → 임계 초과 검사 전체가 죽는다(실제 발생).
+  const { threshold, limit } = traceLimits(15);
+  const lines = [];
+  for (let i = 1; i <= limit; i++) lines.push(` ${i}  10.0.${i}.1  ${i}.0 ms`);
+  const out = lines.join('\n');
+
+  assert.equal(parseTraceroute(out, { maxHops: limit }).overLimit, false,
+    '전제: limit 를 임계로 넘기면 초과 판정이 절대 참이 되지 않는다');
+  assert.equal(parseTraceroute(out, { maxHops: threshold }).overLimit, true,
+    '임계(threshold)를 넘겨야 초과가 잡힌다');
+
+  // 실제 호출부가 threshold 를 넘기는지 소스로 고정한다(저장소 관례: 정적 검사 테스트).
+  // 주석은 제거하고 검사한다 — 주석에 '과거엔 limit 를 넘겼다'는 설명이 있어 원문 검사는 오탐한다.
+  const raw = fs.readFileSync(
+    path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'svcmon', 'checker.js'), 'utf8');
+  const src = raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+  assert.match(src, /parseTraceroute\(out,\s*\{\s*maxHops:\s*threshold\b/,
+    'checker.js 의 traceroute() 는 parseTraceroute 에 threshold 를 넘겨야 한다(limit 아님)');
+  assert.doesNotMatch(src, /parseTraceroute\(out,\s*\{\s*maxHops:\s*limit\b/,
+    'limit 를 임계로 넘기면 판정이 죽는다 — 과거 실제 회귀');
 });

@@ -268,6 +268,22 @@ export function parseTraceroute(out, { maxHops = 0, target = '' } = {}) {
   return { hops, overLimit, reached: hops > 0 && (hasAddr || hasRtt) && !unreachable && !overLimit };
 }
 
+/**
+ * 홉 '판정 임계'와 '명령 상한'을 한 곳에서 계산한다 — 두 값을 헷갈리면 판정이 죽는다.
+ *
+ * ⚠ 실제로 그렇게 죽었다(4차 재감사): 호출부가 `parseTraceroute(out, { maxHops: limit })` 로
+ * **명령 상한**을 임계로 넘기는 바람에, 명령이 `-m limit` 이라 홉 줄이 limit 를 넘을 수 없어
+ * `hops > limit` 이 **어떤 입력에서도 거짓**이 됐다 → 임계 초과 검사 전체가 무력화(거짓 정상 재발).
+ * 그래서 두 값을 함께 반환하는 이 헬퍼로 묶고, 임계는 항상 `threshold` 를 쓰도록 강제한다.
+ *
+ * threshold 를 63 으로 클램프하는 이유: 상한은 64 가 하드 실링이라, 임계가 64 이상이면
+ * `limit === threshold` 가 되어 위와 같은 '판정 불가' 상태로 되돌아간다.
+ */
+export function traceLimits(maxHops) {
+  const threshold = Math.min(63, Math.max(1, Number(maxHops) || 15));
+  return { threshold, limit: threshold + 1 };   // limit ≤ 64
+}
+
 /** traceroute — CLI 호출. host 는 화이트리스트를 통과한 값만(명령 인젝션 방지). */
 function traceroute(host, maxHops) {
   return new Promise((resolve, reject) => {
@@ -276,15 +292,15 @@ function traceroute(host, maxHops) {
     const cmd = isWin ? 'tracert' : 'traceroute';
     // 명령 상한은 임계보다 1 크게 — 목적지가 정확히 임계 홉에 있는 정상 경로를 '임계 초과'로
     // 오판하지 않게 한다(parseTraceroute ③ 주석 참고).
-    const limit = Math.min(64, Math.max(1, maxHops) + 1);
+    const { threshold, limit } = traceLimits(maxHops);
     const args = isWin
       ? ['-d', '-h', String(limit), '-w', '1000', host]
       : ['-n', '-m', String(limit), '-w', '1', '-q', '1', host];
     execFile(cmd, args, { timeout: 25_000, maxBuffer: 256 * 1024 }, (err, stdout) => {
       const out = String(stdout || '');
       if (!out) return reject(err || new Error('traceroute 출력 없음'));
-      // 명령에 쓴 실제 상한과 대상을 넘겨야 '상한 소진'을 도달로 오판하지 않는다.
-      resolve(parseTraceroute(out, { maxHops: limit, target: host }));
+      // ⚠ 반드시 threshold(임계) — limit(명령 상한)을 넘기면 판정이 영구 거짓이 된다(위 주석).
+      resolve(parseTraceroute(out, { maxHops: threshold, target: host }));
     });
   });
 }

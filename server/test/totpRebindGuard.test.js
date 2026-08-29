@@ -180,6 +180,54 @@ test('일반 계정의 생성·삭제는 종전대로 허용(과보호 회귀 �
   assert.ok(auth.deleteUser('id-normal', { actor: 'id-attacker' }).ok);
 });
 
+// --- 4차 재감사(2026-08-30)에서 재현된 '표시이름 축' 우회 — 권한 축을 username 으로 단일화 ---
+
+test('우회 차단: updateUser 로 표시이름을 소유자 계정명으로 바꿔도 소유 권한이 생기지 않는다', () => {
+  // 근본 원인: 소유 권한을 '이름 문자열'로 판정하는데 그 이름을 쓸 수 있는 지점을 하나씩만 막았다.
+  // requireSettingsOwner 가 owners.includes(u.name) 도 인정했기 때문에, 비소유자 admin 이 자기
+  // 표시이름을 소유자 계정명으로 바꾸고 재로그인하면 그대로 소유자가 됐다(실행 재현).
+  // → 판정 축을 username 으로 단일화했다. 표시이름은 더 이상 권한과 무관하다.
+  auth.createUser({ username: 'nm-owner', name: 'nm owner', role: 'admin', password: 'pw-nmo-123456' });
+  auth.createUser({ username: 'nm-atk', name: 'nm atk', role: 'admin', password: 'pw-nma-123456' });
+  sec.saveSessionSecurity({ settingsOwners: [auth.SUPER_USERNAME, 'nm-owner'] });
+
+  // 표시이름 변경 자체는 일반 계정이면 허용된다(공격자 자기 계정은 보호 대상이 아님).
+  const rename = auth.updateUser('nm-atk', { name: 'nm-owner' }, { actor: 'nm-atk' });
+  assert.ok(rename.ok, `자기 표시이름 변경은 허용 — ${rename.reason || ''}`);
+
+  // 핵심: 그래도 소유자로 인정되지 않아야 한다. 소유자 판정 함수와 같은 키(username)를 쓴다.
+  const owners = sec.loadSessionSecurity().settingsOwners || [];
+  assert.ok(!owners.includes('nm-atk'), '전제: 공격자 username 은 소유자 목록에 없다');
+  assert.equal(auth.getUser('nm-atk').name, 'nm-owner', '전제: 표시이름은 소유자 계정명과 같아졌다');
+  // requireSettingsOwner 와 동일 판정(username 만) — 표시이름이 같아도 통과하면 안 된다.
+  assert.equal(owners.includes(auth.getUser('nm-atk').username), false,
+    '표시이름으로 소유 권한이 생기면 소유자 경계가 무의미해진다');
+
+  // 그리고 표시이름을 바꿨다고 보호 계정이 되어 잠금 면역을 얻지도 않아야 한다.
+  assert.ok(auth.clearLoginCredentials('nm-atk', { actor: 'nm-owner' }).ok,
+    '표시이름 위장 계정이 잠금 면역을 얻으면 지속성 확보 수단이 된다');
+});
+
+test('우회 차단: 보호 계정의 역할 강등·범위 축소는 소유자/본인만(소유자 경계 마비 방지)', () => {
+  auth.createUser({ username: 'dg-owner', name: 'dg owner', role: 'admin', password: 'pw-dgo-123456' });
+  auth.createUser({ username: 'dg-atk', name: 'dg atk', role: 'admin', password: 'pw-dga-123456' });
+  auth.createUser({ username: 'dg-keep', name: 'dg keep', role: 'admin', password: 'pw-dgk-123456' });
+  sec.saveSessionSecurity({ settingsOwners: [auth.SUPER_USERNAME, 'dg-owner'] });
+
+  // 비소유자가 소유자를 viewer 로 강등 → 거부(강등되면 설정 접근이 사라져 경계가 마비된다).
+  const demote = auth.updateUser('dg-owner', { role: 'viewer' }, { actor: 'dg-atk' });
+  assert.equal(demote.ok, false, '비소유자가 소유자를 강등할 수 있으면 경계 마비');
+  assert.equal(auth.getUser('dg-owner').role, 'admin', '거부 시 역할 불변');
+
+  // 범위 축소도 거부.
+  assert.equal(auth.updateUser('dg-owner', { scope: { vcenters: ['vc-x'] } }, { actor: 'dg-atk' }).ok, false);
+
+  // 소유자 본인·다른 소유자는 가능(운영성 보존).
+  assert.ok(auth.updateUser('dg-owner', { name: 'dg owner 2' }, { actor: 'dg-owner' }).ok);
+  // 일반 계정 수정은 종전대로 허용.
+  assert.ok(auth.updateUser('dg-keep', { role: 'operator' }, { actor: 'dg-atk' }).ok);
+});
+
 test('보호 판정은 실제 소유자 판정과 같은 키(정확일치) — 과보호/미보호 둘 다 없다', () => {
   // requireSettingsOwner 는 정확일치(username 또는 name)로 소유자 권한을 준다. 보호 범위도
   // 정확히 그 집합이어야 한다. 이전 버전은 대소문자를 무시해 ① 대소문자만 다른 계정이
