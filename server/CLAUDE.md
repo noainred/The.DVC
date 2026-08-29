@@ -165,7 +165,9 @@
   교집합** — 조회 못 하는 vCenter 는 수정도 불가) / `inUserWriteScope` 하나로만 한다.
   **미설정(빈 배열)=쓰기 범위=조회 범위**(기존 계정 동작 보존) — 이 기본값을 바꾸면 전 계정이
   잠긴다. 적용 지점: VM 프로비저닝 생성/저장작업 수정·삭제, VM 복제 잡 생성/실행/삭제,
-  `/vms/upgrade-tools`, `/guest/add-user`, `/vms/:id/console`(콘솔=조작 능력), IPAM 쓰기 전수
+  `/vms/upgrade-tools`, `/guest/add-user`, `/vms/:id/console`(콘솔=조작 능력),
+  `POST /vm/:id/reconfig`(VM 사양 변경 — v2.389 에서 누락 발견·추가. `collectorsDc.js`
+  `vmScopeDenied` 헬퍼. 같은 파일 `GET /vm/:id/hardware` 는 조회 범위만 검사), IPAM 쓰기 전수
   (annotation/override/bulk/정책 — `ipamExport.js writeScopeDenied`). 응답 규약: **조회 범위 밖은
   기존대로 404(존재 은닉), 조회는 되지만 쓰기 범위 밖은 403**(존재가 이미 보이므로 은닉 무의미).
   새 vCenter 대상 상태변경 라우트를 추가하면 반드시 같은 검사를 넣을 것(회귀 테스트:
