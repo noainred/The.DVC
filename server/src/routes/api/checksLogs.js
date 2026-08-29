@@ -69,7 +69,7 @@ api.get('/tools/network-check', async (req, res) => {
 // 사이트 VMware 솔루션 구성 백업 — 수집 구성 스냅샷. ?vcenterId=로 사이트 한정, ?download=1로 gzip 파일.
 // v2.322 보안 감사(HIGH): 범위 제한 계정은 허용 vCenter(및 귀속 NSX 매니저)로만 — 과거 이 라우트만
 // scope 를 안 걸어 범위 밖 전 함대 ESXi 관리 IP·전 VM IP/메모·NSX DFW 규칙이 gzip 으로 새었다.
-api.get('/tools/vmware-config', (req, res) => {
+api.get('/tools/vmware-config', async (req, res) => {
   try {
     const allowed = scopedVcenterIds(req.user, store.get());
     const reqVc = req.query.vcenterId ? String(req.query.vcenterId) : null;
@@ -77,15 +77,35 @@ api.get('/tools/vmware-config', (req, res) => {
     if (reqVc && allowed && !allowed.has(reqVc)) return res.status(404).json({ error: 'not found' });
     const data = buildVmwareConfigExport({ vcenterId: reqVc, allowed });
     if (req.query.download === '1') {
-      const gz = zlib.gzipSync(Buffer.from(JSON.stringify(data, null, 2)));
       const stamp = new Date().toISOString().replace(/[:.]/g, '-');
       const fn = `vmware-config-${data.meta.scope}-${stamp}.json.gz`;
       res.setHeader('Content-Type', 'application/gzip');
       res.setHeader('Content-Disposition', `attachment; filename="${fn}"`);
-      return res.end(gz);
+      // ⚠ gzipSync 는 수 MB 페이로드(전 함대 호스트·VM·NSX)에서 이벤트 루프를 수백 ms~초 단위로
+      //   멈춘다(2026-08-13 감사 '대량 export 동기 gzip' 잔여 항목). createGzip 스트림에 1MB 청크로
+      //   흘려 압축을 비동기화하고, 백프레셔 때 drain 을 기다린다(gpuSeriesExport 스트리밍과 같은 취지).
+      //   JSON.stringify 자체는 동기로 남는다 — 전체 객체를 문자열화하는 비용은 피할 수 없다.
+      const json = JSON.stringify(data, null, 2);
+      const gzip = zlib.createGzip();
+      gzip.on('error', () => { try { res.destroy(); } catch { /* 이미 종료 */ } });
+      gzip.pipe(res);
+      const CHUNK = 1 << 20;
+      for (let i = 0; i < json.length; i += CHUNK) {
+        if (res.destroyed) { gzip.destroy(); return undefined; }   // 클라이언트 중단 시 즉시 정지
+        if (!gzip.write(json.slice(i, i + CHUNK))) {
+          // drain 또는 연결 종료 중 먼저 오는 쪽을 기다린다(abort 시 영원히 기다리지 않도록).
+          await new Promise((r) => { gzip.once('drain', r); res.once('close', r); });
+        }
+      }
+      gzip.end();
+      return undefined;
     }
     res.json(data);
-  } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+  } catch (e) {
+    // 스트리밍 시작 후 실패하면 헤더가 이미 나갔으므로 JSON 오류를 보낼 수 없다.
+    if (res.headersSent) { try { res.destroy(e); } catch { /* 이미 종료 */ } return; }
+    res.status(500).json({ ok: false, reason: e.message });
+  }
 });
 
 // 로그 출처 — 이 포탈 로컬 보관(local) vs 엣지 보관(remote, 연합 조회 필요).

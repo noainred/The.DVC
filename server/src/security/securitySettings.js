@@ -6,7 +6,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { listManagedUsers } from '../auth/auth.js';
 
 const FILE = path.join(config.configDir, 'security-session.json');
@@ -46,7 +46,11 @@ function normOwners(arr) {
 /** 파일에 저장된 '설정된' 값만 로드(자동 포함분 미반영). 저장/편집 경로가 기준으로 삼는다. */
 export function loadConfiguredSecurity() {
   let p = {};
-  try { if (fs.existsSync(FILE)) p = JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}; } catch { p = {}; }
+  // 파싱 실패를 조용히 DEFAULTS 로 리셋하면 UI 로 저장한 설정 소유자·완화 정책이 소리 없이
+  // 사라지고, 다음 저장이 손상본을 덮어써 복구 기회도 없다 → 손상본을 보존하고 로그를 남긴다
+  // (auth.js·deployRegistry.js 와 같은 패턴. 2026-08-13 감사 잔여 항목).
+  try { if (fs.existsSync(FILE)) p = JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}; }
+  catch (e) { preserveCorrupt(FILE, e.message); p = {}; }
   const owners = normOwners(p.settingsOwners);
   return {
     idleLogoutEnabled: p.idleLogoutEnabled !== undefined ? !!p.idleLogoutEnabled : DEFAULTS.idleLogoutEnabled,

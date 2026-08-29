@@ -64,8 +64,18 @@ function initSqlite() {
       FROM samples_hourly WHERE metric=? AND k=? AND h>=? GROUP BY b ORDER BY b DESC LIMIT ?`);
     const hourlyMin = db.prepare('SELECT MIN(h) AS mn FROM samples_hourly WHERE metric=? AND k=?');
     const pruneHourly = db.prepare('DELETE FROM samples_hourly WHERE h < ?');
+    // ⚠ 키별 상한을 **SQL 에서** 적용한다(2026-08-13 감사 '성능 잔여 A'). 과거에는 창 전체를
+    //   전량 읽어 JS 에서 arr.slice(-limitPerKey) 로 잘랐다 — 창이 클램프(최대 7일)돼도
+    //   1분 버킷이면 키당 10,080 버킷 × 키 수천 개의 행 객체를 모두 할당한 뒤 대부분 버렸다.
+    //   ROW_NUMBER() 로 키별 최근 N 버킷만 가져오면 결과는 동일하고(JS 후절단과 동등함을 실측
+    //   확인) 할당이 상한 이내로 유계된다. limitPerKey 가 없으면 상한 없이 전량(기존 동작).
     const bucketAll = db.prepare(`SELECT k, CAST(ts/? AS INTEGER)*? AS b, AVG(v) avg, MIN(v) min, MAX(v) max FROM samples
       WHERE metric=? AND ts>=? GROUP BY k, b ORDER BY k, b`);
+    const bucketAllTop = db.prepare(`SELECT k, b, avg, min, max FROM (
+        SELECT k, CAST(ts/? AS INTEGER)*? AS b, AVG(v) avg, MIN(v) min, MAX(v) max,
+               ROW_NUMBER() OVER (PARTITION BY k ORDER BY CAST(ts/? AS INTEGER) DESC) rn
+        FROM samples WHERE metric=? AND ts>=? GROUP BY k, b
+      ) WHERE rn <= ? ORDER BY k, b`);
     // latestAll 인메모리 캐시 — 원본은 (k, MAX(ts)) 풀 인덱스 스캔이라 보존기간이 길수록
     // 비싸진다(iDRAC 전력 withLatestCache 와 같은 문제·같은 처방). 최초 호출에 1회 시드 후
     // 쓰기 경로에서 O(1) 갱신. 캐시 갱신은 반드시 '커밋 성공 후'(실패분 유령 데이터 방지).
@@ -108,11 +118,20 @@ function initSqlite() {
       // 패밀리 전 키 일괄 버킷 — 이상탐지의 키별 N+1(키 수천 × 쿼리 1회)을 쿼리 1회로 대체.
       historyAll: (metric, sinceTs, bucketMs, limitPerKey) => {
         const out = new Map();
-        for (const r of bucketAll.all(bucketMs, bucketMs, metric, sinceTs)) {
+        // 상한이 있으면 SQL 에서 키별 최근 N 버킷만 — 윈도 함수 미지원 등 실패 시 전량 경로로 폴백
+        // (정확도가 같으므로 결과는 동일하고, 폴백은 예전과 같은 비용).
+        let rows = null;
+        if (limitPerKey > 0) {
+          try { rows = bucketAllTop.all(bucketMs, bucketMs, bucketMs, metric, sinceTs, limitPerKey); }
+          catch { rows = null; }
+        }
+        if (!rows) rows = bucketAll.all(bucketMs, bucketMs, metric, sinceTs);
+        for (const r of rows) {
           let arr = out.get(r.k);
           if (!arr) { arr = []; out.set(r.k, arr); }
           arr.push({ ts: r.b, avg: round1(r.avg), min: round1(r.min), max: round1(r.max) });
         }
+        // 폴백 경로(또는 상한 초과 잔여)를 위해 JS 절단도 유지 — SQL 절단이 성공했으면 무동작.
         if (limitPerKey) for (const [k, arr] of out) if (arr.length > limitPerKey) out.set(k, arr.slice(-limitPerKey));
         return out;
       },

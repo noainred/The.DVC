@@ -11,7 +11,10 @@ let pingMissing = false; // ping CLI가 없는 환경(컨테이너 등)에서 TC
 let pingAttempts = 0;    // 시도 횟수 — 0회면 아직 '알 수 없음'이다(아래 pingProbeMode 참고)
 
 // IP/호스트 형식 화이트리스트(명령 인젝션 방지). 실패 시 ping 건너뜀.
-const SAFE = /^[a-zA-Z0-9._:-]+$/;
+// 선행 '-' 금지(첫 문자에서 '-' 를 제외) — 허용하면 ping/nc 인자로 해석될 수 있다.
+// execFile 이라 셸 인젝션은 불가하지만, 형제 구현(remote.js SAFE_HOST, svcmon checker)이
+// 모두 막는 항목이라 일관성을 맞춘다(2026-08-13 감사 #7 잔여).
+const SAFE = /^[A-Za-z0-9._:][A-Za-z0-9._:-]*$/;
 
 // ping CLI가 없을 때의 폴백: 흔한 관리 포트 TCP 연결로 도달성 추정.
 const FALLBACK_PORTS = [445, 3389, 22, 80, 443, 135];
