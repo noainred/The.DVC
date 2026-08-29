@@ -77,6 +77,14 @@ export function analyzeCapture(pkts, peer) {
 const execBudgetMs = (sec) => Math.max(60_000, (sec + 30) * 1000);
 
 /**
+ * pcap **회수(base64 전송)** 예산 — 캡처 시간이 아니라 **패킷 수**에 비례해야 한다.
+ * ⚠ 이전에는 여기에도 execBudgetMs(sec) 를 썼는데, 기본 seconds=10 이면 60초 = exec 기본값과
+ * 같아 아무것도 바뀌지 않는 no-op 이었다(3차 재감사 지적). 실제 병목은 maxPackets(최대 2만,
+ * seconds 와 독립)와 링크 속도다 — 10초 캡처로도 2만 패킷이 잡힌다.
+ */
+const xferBudgetMs = (maxPackets) => Math.max(120_000, Math.min(600_000, maxPackets * 10));
+
+/**
  * 캡처 실행. opts: { hostA(creds: host,port,username,password,privateKey), peer, iface, seconds, maxPackets, useSudo }.
  * 반환 { ok, command, lines, parsed, analysis, raw, error }.
  */
@@ -165,10 +173,11 @@ export async function runPcapCapture({ hostA, peer, iface = 'any', seconds = 10,
       const cap = await exec(`${sudo}timeout ${sec} tcpdump -i ${iface} -n -w ${file} -c ${max} host ${peer} 2>&1; echo RC=$?`, execBudgetMs(sec));
       const capOut = (cap.stdout || '') + (cap.stderr || '');
       const pktM = /(\d+) packets captured/.exec(capOut);
-      // 요약·회수(base64)에도 여유 타임아웃을 명시한다 — 최대 2만 패킷 pcap 의 base64 전송은
-      // 고RTT·저속 링크에서 캡처보다 오래 걸릴 수 있어, 기본 60초에 걸리면 다운로드가 실패한다.
-      const sumR = await exec(`(command -v capinfos >/dev/null && ${sudo}capinfos ${file} 2>/dev/null) || (command -v tshark >/dev/null && ${sudo}tshark -r ${file} -q -z io,phs 2>/dev/null | head -60) || echo "(capinfos/tshark 미설치 — pcap만 제공)"`, execBudgetMs(sec));
-      const b64 = await exec(`${sudo}base64 ${file} 2>/dev/null`, execBudgetMs(sec));
+      // 요약·회수(base64)는 **패킷 수** 기준 예산을 쓴다(xferBudgetMs 주석 참고) — 고RTT·저속
+      // 링크에서 대용량 pcap 전송이 기본 60초에 걸려 다운로드가 실패하는 것을 막는다.
+      const xfer = xferBudgetMs(max);
+      const sumR = await exec(`(command -v capinfos >/dev/null && ${sudo}capinfos ${file} 2>/dev/null) || (command -v tshark >/dev/null && ${sudo}tshark -r ${file} -q -z io,phs 2>/dev/null | head -60) || echo "(capinfos/tshark 미설치 — pcap만 제공)"`, xfer);
+      const b64 = await exec(`${sudo}base64 ${file} 2>/dev/null`, xfer);
       const pcapBase64 = (b64.stdout || '').replace(/\s+/g, '');
       const errLine = (/permission denied|sudo:|command not found|tcpdump: /i.test(capOut) && !/listening on/i.test(capOut)) ? (capOut.split('\n').find((l) => /permission|sudo:|not found|tcpdump:/i.test(l)) || '') : '';
       return {

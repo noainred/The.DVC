@@ -378,11 +378,14 @@ export function getUser(username) {
   return loadUsers().find((u) => u.username === username) || null;
 }
 
-export function createUser({ username, name, role = 'viewer', password, scope } = {}) {
+export function createUser({ username, name, role = 'viewer', password, scope } = {}, { actor = null, trusted = false } = {}) {
   username = String(username || '').trim();
   if (!/^[A-Za-z0-9._@-]{2,64}$/.test(username)) return { ok: false, reason: '사용자 ID 형식이 올바르지 않습니다.' };
   if (!VALID_ROLES.includes(role)) return { ok: false, reason: '역할이 올바르지 않습니다.' };
   if (getUser(username)) return { ok: false, reason: '이미 존재하는 사용자입니다.' };
+  // 소유자 이름 선점 차단(identityGuardDenied 주석 참고) — 이름만 차지해도 소유자 지위가 승계된다.
+  const denied = identityGuardDenied({ username, name, actor, trusted, what: '계정 생성' });
+  if (denied) return denied;
   const u = { username, name: name || username, role };
   if (password) u.passwordHash = hashPassword(password);
   const sc = sanitizeScope(scope);
@@ -468,12 +471,16 @@ export function updateUser(username, { name, role, scope } = {}) {
   return { ok: true };
 }
 
-export function deleteUser(username) {
+export function deleteUser(username, { actor = null, trusted = false } = {}) {
   const list = loadUsers();
   const u = list.find((x) => x.username === username);
   if (!u) return { ok: false, reason: '사용자를 찾을 수 없습니다.' };
   if (u.demo) return { ok: false, reason: '데모 계정은 삭제할 수 없습니다. 로그인을 막으려면 [로그인 차단]으로 비밀번호를 제거하세요.' };
   if (u.superuser) return { ok: false, reason: '수퍼관리자 계정은 삭제할 수 없습니다.' };
+  // 소유자 계정 삭제 차단 — 지운 뒤 같은 이름으로 다시 만들면 소유자 지위가 승계된다
+  // (identityGuardDenied 주석 참고: 자격증명만 막으면 신원이 안 막혀 탈취가 성립했다).
+  const denied = identityGuardDenied({ username: u.username, name: u.name, actor, trusted, what: '계정 삭제' });
+  if (denied) return denied;
   if (u.role === 'admin' && list.filter((x) => x.role === 'admin').length <= 1) {
     return { ok: false, reason: '마지막 관리자는 삭제할 수 없습니다.' };
   }
@@ -527,19 +534,44 @@ export function listManagedUsers() {
   return loadUsers().filter((u) => u.managedBy === 'central').map((u) => ({ username: u.username, name: u.name || u.username, role: u.role || 'viewer' }));
 }
 
+/** 현재 설정소유자 목록. 읽기 실패는 호출부가 보수적으로 처리한다(null 반환). */
+function settingsOwnerList() {
+  try { return loadSessionSecurity().settingsOwners || []; } catch { return null; }
+}
+
+/**
+ * 그 이름이 설정소유자인가 — **판정 키를 requireSettingsOwner 와 정확히 일치**시킨다
+ * (routes/admin/shared.js: `owners.includes(u.username) || owners.includes(u.name)`, 정확일치).
+ *
+ * ⚠ 이전 버전은 여기서 대소문자를 무시했다. '보호는 넓게'가 안전하다고 봤지만 실제로는 두 가지
+ * 부작용을 만들었다(재감사 지적): ① 대소문자만 다른 계정을 만들면 **실제 소유자가 아닌데도**
+ * 잠금 면역(다른 admin 이 로그인 차단 불가)을 얻는다, ② 표시이름이 우연히 소유자 계정명과 같은
+ * 무관한 계정의 정당한 비번 리셋이 막힌다. 실제 소유자 권한은 정확일치로만 부여되므로,
+ * 보호 범위도 **정확히 그 집합**이어야 한다(넓히면 과보호, 좁히면 미보호).
+ */
+function isOwnerName(username, name, owners) {
+  const u = String(username || '').trim();
+  const n = String(name || '').trim();
+  return owners.some((o) => o === u || (n && o === n));
+}
+
 /**
  * 보호 계정 판정 — 수퍼관리자 또는 설정소유자(설정 편집 권한 = admin 보다 상위 경계).
- *
- * 판정 방향이 중요하다: 이 함수는 '보호할지'를 결정하므로 **넓게(대소문자 무시)** 매칭한다.
- * 반대로 '본인인지'를 판정하는 쪽은 **좁게(정확일치)** 비교해야 한다 — credentialGuardDenied 주석 참고.
- * 소유자 목록을 못 읽으면 보호하는 쪽으로 판정한다(fail-closed — requireSettingsOwner 와 같은 방향).
+ * 소유자 목록을 못 읽으면 보호하는 쪽으로 판정한다(fail-closed).
  */
 function isProtectedAccount(u) {
   if (u.superuser) return true;
-  const norm = (s) => String(s || '').trim().toLowerCase();
-  let owners;
-  try { owners = loadSessionSecurity().settingsOwners || []; } catch { return true; }
-  return owners.some((o) => norm(o) === norm(u.username) || norm(o) === norm(u.name));
+  const owners = settingsOwnerList();
+  if (owners === null) return true;               // 목록 불명 → 보호 쪽
+  return isOwnerName(u.username, u.name, owners);
+}
+
+/** 요청자가 설정소유자인가 — '소유자만 다른 소유자를 만들거나 지울 수 있다' 규칙용. */
+function actorIsOwner(actor) {
+  if (!actor) return false;
+  const owners = settingsOwnerList();
+  if (owners === null) return false;              // 목록 불명 → 권한 없다고 본다
+  return owners.includes(String(actor).trim());
 }
 
 /**
@@ -573,6 +605,32 @@ function credentialGuardDenied(u, { actor = null, trusted = false, what = 'OTP' 
   if (actor && actor === u.username) return null; // 본인(정확일치)만 허용
   const kind = u.superuser ? '수퍼관리자' : '설정 소유';
   return { ok: false, reason: `${kind} 계정의 ${what}은 본인만 변경할 수 있습니다(대리 변경 시 계정이 탈취될 수 있습니다).` };
+}
+
+/**
+ * 신원(계정 이름) 경계 — 자격증명 함수만 막으면 **계정 레코드는 보호되지만 이름은 보호되지 않는다**.
+ *
+ * ⚠ 확정 버그(3차 재감사에서 실행 재현): 설정소유자 지위는 `settingsOwners` 의 **이름 문자열**로
+ * 판정되므로, 비소유자 admin 이 소유자 계정을 `deleteUser` 로 지우고 `createUser` 로 **같은 이름**을
+ * 자기가 아는 비밀번호로 다시 만들면 소유자 지위가 그대로 승계된다 → 부트스트랩 로그인 → 자력 OTP
+ * 등록 → 백업 다운로드로 AUTH_SECRET·전 계정 TOTP 시크릿 획득까지 이어졌다.
+ * 변형: `normOwners` 는 계정 **존재 여부를 검사하지 않으므로**, settings-owners.txt 에 미리 적어둔
+ * (아직 만들지 않은) 이름을 아무 admin 이나 `createUser` 로 **선점**해 즉시 소유자가 될 수도 있었다.
+ *
+ * 정책: 소유자 이름의 생성·삭제는 **기존 설정소유자**(또는 명시 신뢰 경로)만 할 수 있다. 자격증명
+ * 변경은 '본인만'(credentialGuardDenied)인데 신원 관리는 '소유자면 가능'으로 두는 이유 —
+ * 자격증명은 개인 것이지만 계정 목록 관리는 소유자의 운영 업무이고, 사전 프로비저닝된 소유자
+ * 계정을 실제로 만들 수 있는 경로가 남아야 한다.
+ */
+function identityGuardDenied({ username, name, actor, trusted, what }) {
+  if (trusted) return null;
+  const owners = settingsOwnerList();
+  const superName = String(username || '').trim() === SUPER_USERNAME;
+  const protectedName = superName || (owners === null ? true : isOwnerName(username, name, owners));
+  if (!protectedName) return null;
+  if (actorIsOwner(actor)) return null;                     // 소유자는 다른 소유자를 관리할 수 있다
+  if (actor && actor === String(username || '').trim()) return null; // 본인
+  return { ok: false, reason: `설정 소유 계정 이름(${username})의 ${what}은 설정 소유 계정만 할 수 있습니다(이름을 선점하면 소유자 지위가 승계됩니다).` };
 }
 
 /** OTP 등록(begin/confirm) 전용 래퍼 — 메시지만 다르고 경계는 동일하다. */
