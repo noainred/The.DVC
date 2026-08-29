@@ -48,6 +48,16 @@ def normalize_url(raw: str) -> str:
         raise ValidationError("http/https URL 만 등록할 수 있습니다.")
     if not parts.hostname:
         raise ValidationError("URL 에 호스트가 없습니다.")
+    # 포트도 **저장 시점에** 검증한다. urlsplit 의 `.port` 는 지연 평가 프로퍼티라, 범위 밖
+    # (`:99999`)이나 숫자가 아닌(`:8o80`) 포트는 접근하는 순간 ValueError 를 던진다. 이 검사가
+    # 없던 동안에는 오타 URL 하나가 저장된 뒤 resolve_and_check 의 `parts.port` 에서 터져
+    # check_many 의 future.result() 로 전파돼 **그 주기의 모든 링크 점검·이력·알림이 중단**됐다
+    # (자동 점검은 traceback 만 남기고 조용히 멈춤 = 모니터링 정지). 여기서 막으면 사용자가
+    # 저장 시점에 즉시 사유를 본다. (IP 리터럴 URL 은 원래 이 경로를 타지 않아 무사했다.)
+    try:
+        parts.port
+    except ValueError:
+        raise ValidationError("URL 의 포트 번호가 올바르지 않습니다(1~65535).") from None
     return url
 
 
@@ -95,9 +105,16 @@ def resolve_and_check(url: str, *, allow_private: bool = True):
         reason = _address_block_reason(target, allow_private)
         return [str(target)], reason, "blocked"
 
+    # `parts.port` 는 잘못된 포트에서 ValueError 를 던진다 — normalize_url 이 저장 시점에 막지만,
+    # **그 검사가 없던 버전에 이미 저장된** URL 이 남아 있을 수 있다. 여기서 잡지 않으면 예외가
+    # check_one → check_many 의 future.result() 로 전파돼 그 주기 전체가 유실된다(모니터링 정지).
     try:
-        infos = socket.getaddrinfo(host, parts.port or (443 if parts.scheme == "https" else 80),
-                                   proto=socket.IPPROTO_TCP)
+        port = parts.port or (443 if parts.scheme == "https" else 80)
+    except ValueError:
+        return [], "URL 의 포트 번호가 올바르지 않습니다(1~65535).", "blocked"
+
+    try:
+        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
     except socket.gaierror as exc:
         return [], f"호스트 이름을 확인할 수 없습니다({exc.strerror or exc}).", "unresolved"
 

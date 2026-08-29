@@ -7,7 +7,7 @@ import { authenticateAD } from './ad.js';
 import * as totp from './totp.js';
 import { checkOtpAllowed, recordOtpFailure, recordOtpSuccess } from '../security/loginRateLimit.js';
 import { rolePermissionSet } from './permissions.js';
-import { effectiveLoginPolicy, userLoginPolicy, singleSessionRequired } from '../security/securitySettings.js';
+import { effectiveLoginPolicy, userLoginPolicy, singleSessionRequired, loadSessionSecurity } from '../security/securitySettings.js';
 import { isActiveSession } from './sessions.js';
 
 // users.json lives in CONFIG_DIR (default app/server/config; set to e.g.
@@ -519,12 +519,47 @@ export function listManagedUsers() {
   return loadUsers().filter((u) => u.managedBy === 'central').map((u) => ({ username: u.username, name: u.name || u.username, role: u.role || 'viewer' }));
 }
 
+/**
+ * OTP 재바인딩 권한 경계(확정 버그, 2026-08-30) — '남의 계정' OTP 를 대신 등록할 수 있는지.
+ *
+ * beginTotpEnroll 은 QR 발급을 위해 **평문 시크릿을 응답으로 반환**한다. 즉 호출한 관리자는 그
+ * 계정의 OTP 를 그대로 손에 넣고, 이어서 confirmTotpEnroll 로 활성 시크릿을 교체할 수 있다.
+ * 대상이 OTP 전용 계정이면 confirm 이 passwordHash 까지 지우므로, 기존 소유자는 로그인 수단을
+ * 잃고 호출자만 그 계정으로 로그인할 수 있게 된다 → 일반 admin 이 **수퍼관리자·설정소유자**
+ * 계정을 탈취하는 권한 상승 경로였다(disableTotp 는 `u.superuser` 를 이미 막고 있는데 등록
+ * 경로만 열려 있어 그 보호가 우회됐다).
+ *
+ * 정책: 수퍼관리자·설정소유자 계정의 OTP 는 **본인만** (재)등록할 수 있다. 그 외 계정은 기존대로
+ * admin 이 대신 등록해 QR 을 전달할 수 있다(OTP 전용 계정은 비번이 없어 자력 등록이 불가능하므로
+ * 이 대행 경로 자체는 설계된 기능이다).
+ *
+ * @param actor 요청을 수행하는 계정명. **미지정(null)은 서버 내부 신뢰 경로**(콘솔 복구 도구
+ *              tools/otp-enroll.js — 수퍼관리자 폰 분실 시 유일한 복구 수단이므로 막으면 안 된다).
+ */
+function totpRebindDenied(u, actor) {
+  if (!actor) return null;                                        // 콘솔 복구 도구 등 신뢰 경로
+  const norm = (s) => String(s || '').trim().toLowerCase();
+  if (norm(actor) === norm(u.username)) return null;              // 본인 재등록(폰 교체)은 항상 허용
+  if (u.superuser) {
+    return { ok: false, reason: '수퍼관리자 계정의 OTP는 본인만 등록할 수 있습니다(대리 등록 시 계정이 탈취될 수 있습니다).' };
+  }
+  let owners = [];
+  try { owners = loadSessionSecurity().settingsOwners || []; } catch { owners = []; }
+  if (owners.some((o) => norm(o) === norm(u.username))) {
+    return { ok: false, reason: '설정 소유 계정의 OTP는 본인만 등록할 수 있습니다(대리 등록 시 계정이 탈취될 수 있습니다).' };
+  }
+  return null;
+}
+
 /** Start TOTP enrollment: generate a secret (pending until confirmed).
  *  host(접속한 포탈 IP:포트)를 주면 발급 라벨 issuer에 포함해 여러 포탈을 구분한다:
- *  'VMware Portal' → 'VMware(<host>) Portal'. */
-export function beginTotpEnroll(username, host = '') {
+ *  'VMware Portal' → 'VMware(<host>) Portal'.
+ *  actor: 요청 수행 계정(대리 등록 권한 검사용) — totpRebindDenied 참고. */
+export function beginTotpEnroll(username, host = '', { actor = null } = {}) {
   const u = getUser(username);
   if (!u) return { ok: false, reason: '사용자를 찾을 수 없습니다.' };
+  const denied = totpRebindDenied(u, actor);
+  if (denied) return denied;
   const secret = totp.generateSecret();
   // 확정(confirm) 전에는 기존 등록을 절대 건드리지 않는다 — 이전에는 여기서 totpSecret을
   // 교체하고 totpEnabled=false로 영속화해, OTP 전용 계정(passwordHash 삭제됨)이 '재등록 시작'
@@ -567,13 +602,17 @@ export function verifyUserOtp(username, code) {
   return { ok: true };
 }
 
-/** Confirm enrollment by verifying a code from the authenticator app. */
-export function confirmTotpEnroll(username, code) {
+/** Confirm enrollment by verifying a code from the authenticator app.
+ *  actor: 요청 수행 계정(대리 등록 권한 검사용). begin 과 **같은 경계를 반드시 다시 검사**한다 —
+ *  begin 만 막으면 이전에 남은 pending 시크릿으로 confirm 만 호출해 우회할 수 있다. */
+export function confirmTotpEnroll(username, code, { actor = null } = {}) {
   const u = getUser(username);
   // 신규 흐름은 pending 시크릿으로 확정, (하위호환) 구버전에서 begin만 하고 미확정이던
   // 계정(totpSecret 있고 enabled=false)은 기존 시크릿으로 확정을 이어간다.
   const pending = u?.totpPendingSecret || (u && !u.totpEnabled ? u.totpSecret : null);
   if (!u || !pending) return { ok: false, reason: '먼저 OTP 등록을 시작하세요.' };
+  const denied = totpRebindDenied(u, actor);
+  if (denied) return denied;
   if (!totp.verifyToken(code, pending)) return { ok: false, reason: 'OTP 코드가 일치하지 않습니다.' };
   u.totpSecret = pending;
   delete u.totpPendingSecret;

@@ -222,6 +222,33 @@ function udpProbe(host, port, payload, timeoutMs) {
   });
 }
 
+/**
+ * traceroute/tracert 출력 파서 — { hops, reached }. 순수 함수(테스트 대상).
+ *
+ * ⚠ 확정 버그 수정(2026-08-30): 이전 판정은 마지막 홉이 `* * *`(별표 3연속)일 때만 미도달로
+ * 봤다. 그런데 Linux 인자는 `-q 1`(홉당 프로브 1개)이라 무응답 홉 출력이 `" 15  *"`(별표
+ * 1개)뿐이어서 **별표 3연속이 구조적으로 나올 수 없었고**, 목적지까지 전 홉이 무응답이어도
+ * reached=true 가 됐다 → 죽은 경로가 'ok'(정상)로 표시되는 거짓 정상. Windows tracert 는 기본
+ * 3프로브라 `* * *` 가 나와 개발 환경에서는 드러나지 않고 운영(Rocky Linux 9)에서만 발현했다.
+ *
+ * 새 판정은 프로브 개수와 무관하다 — 마지막 홉이 '실제로 응답했는지'를 본다:
+ *   ① 응답 증거가 있어야 한다 = 주소(IP)가 찍혔거나 RTT(`1 ms`·`0.512 ms`·`<1 ms`)가 있다.
+ *      ⚠ '별표가 아닌 토큰이 있으면 응답'으로 보면 안 된다 — Windows tracert 의 무응답 줄은
+ *      `2  *  *  *  Request timed out.` 처럼 **영문 안내 문구**가 붙어 오탐한다(테스트로 고정).
+ *   ② ICMP 도달불가 표식(`!H` 호스트·`!N` 네트워크·`!P` 프로토콜 등)이 있으면 미도달로 본다
+ *      — 응답은 왔지만 목적지에 닿지 못한 것이므로 'ok' 로 볼 수 없다.
+ */
+export function parseTraceroute(out) {
+  const lines = String(out || '').split('\n').filter((l) => /^\s*\d+/.test(l));
+  const hops = lines.length;
+  const last = lines[lines.length - 1] || '';
+  const rest = last.replace(/^\s*\d+\s*/, '').trim();
+  const hasAddr = /\d{1,3}(?:\.\d{1,3}){3}|[0-9a-f]{0,4}:[0-9a-f]{0,4}:/i.test(rest); // IPv4 또는 IPv6
+  const hasRtt = /\d+(?:\.\d+)?\s*ms/i.test(rest);
+  const unreachableMark = /!(?:H|N|P|X|A|S|F|C|T|U|\d+)\b/.test(rest);
+  return { hops, reached: hops > 0 && (hasAddr || hasRtt) && !unreachableMark };
+}
+
 /** traceroute — CLI 호출. host 는 화이트리스트를 통과한 값만(명령 인젝션 방지). */
 function traceroute(host, maxHops) {
   return new Promise((resolve, reject) => {
@@ -234,10 +261,7 @@ function traceroute(host, maxHops) {
     execFile(cmd, args, { timeout: 25_000, maxBuffer: 256 * 1024 }, (err, stdout) => {
       const out = String(stdout || '');
       if (!out) return reject(err || new Error('traceroute 출력 없음'));
-      const lines = out.split('\n').filter((l) => /^\s*\d+/.test(l));
-      const hops = lines.length;
-      const last = lines[lines.length - 1] || '';
-      resolve({ hops, reached: hops > 0 && !/\*\s*\*\s*\*/.test(last) });
+      resolve(parseTraceroute(out));
     });
   });
 }

@@ -13,7 +13,16 @@ import { config, currentVersion } from '../config.js';
 
 const VM_CAP = 1500; // 3D 성능 위해 VM 노드 총량 상한
 
-export function buildGraph(snap, { vms = false, vcenterId = null, host = null } = {}) {
+/**
+ * @param opts.allowedVcIds 범위 제한 계정의 허용 vCenter id Set(전체 범위 계정은 null).
+ *   ⚠ 보안 경계(확정 버그, 2026-08-30): NSX 노드는 scope 로 좁힌 스냅샷이 아니라
+ *   listNsxRegistry()(전 등록 매니저)에서 직접 만든다. 예전에는 `vcenterId` **쿼리 파라미터**로만
+ *   걸렀기 때문에 범위 제한 계정이 파라미터 없이 호출하면 전 사이트 NSX 매니저(이름·host·버전·
+ *   상태·region)가 노드로 나갔다 — 같은 계정이 /api/nsx 에서는 차단되는 정보다(v2.320 NSX scope
+ *   불변조건 우회). scope 는 요청 필터보다 **먼저** 적용하고, 귀속 vCenter 가 없는(무귀속) 매니저는
+ *   범위 계정에 숨긴다('귀속 없는 데이터는 범위 계정 미노출' 원칙).
+ */
+export function buildGraph(snap, { vms = false, vcenterId = null, host = null, allowedVcIds = null } = {}) {
   const nodes = [];
   const links = [];
   const seen = new Set();
@@ -58,6 +67,8 @@ export function buildGraph(snap, { vms = false, vcenterId = null, host = null } 
 
   // 5) NSX 매니저(표시 vCenter에 속한 것만; 전체보기일 땐 모두)
   for (const m of listNsxRegistry()) {
+    // scope 먼저(요청 필터보다 우선) — 범위 계정에는 허용 vCenter 에 귀속된 매니저만.
+    if (allowedVcIds && !(m.vcenterId && allowedVcIds.has(m.vcenterId))) continue;
     if (vcFilter && m.vcenterId !== vcFilter) continue;
     const id = `nsx:${m.id}`;
     add({ id, type: 'nsx', label: `🛡 ${m.name || m.host}`, val: 11, status: m.status || (m.enabled === false ? 'disabled' : 'unknown'), region: m.region || '' });

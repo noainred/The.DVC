@@ -86,7 +86,10 @@ export async function withSsh(creds, fn) {
   const conn = await connect(creds);
   const log = [];
   const api = {
-    exec: async (cmd) => { const r = await exec(conn, cmd); log.push(r); return r; },
+    // timeoutMs 는 선택 — 생략하면 exec 의 기본값(SSH_EXEC_TIMEOUT_MS 또는 60s). 원격에서
+    // `timeout <N> tcpdump` 처럼 **의도적으로 오래 도는** 명령은 반드시 명시해야 한다(과거
+    // pcap/트래픽 캡처가 최대 120초를 허용하면서 전송 계층은 60초에 끊어 항상 실패했다).
+    exec: async (cmd, timeoutMs) => { const r = await exec(conn, cmd, timeoutMs); log.push(r); return r; },
     readFile: (p) => sftpReadFile(conn, p),
     writeFile: (p, c, m) => sftpWriteFile(conn, p, c, m),
     putFile: (local, remote) => sftpPutFile(conn, local, remote),
