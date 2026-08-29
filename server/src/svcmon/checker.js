@@ -75,7 +75,9 @@ async function runCheckInner(test, host) {
         return r.alive ? ok(`${r.rttMs ?? 0} ms`, r.rttMs ?? 0) : bad('응답 없음', started);
       }
       case 'trace': {
-        const hopLimit = test.maxHops || 15;
+        // 문구에도 **실제 적용된** 임계를 쓴다 — traceLimits 가 63 으로 클램프하므로(상한 64가
+        // 하드실링), 원값을 그대로 찍으면 "임계(64) 내 미도달" 같은 자기모순 문구가 나온다.
+        const hopLimit = traceLimits(test.maxHops).threshold;
         const r = await traceroute(host, hopLimit);
         // overLimit: 임계 내에 목적지에 닿지 못했다(경로가 더 길거나 중간에서 끊김).
         // 예전에는 아래 두 분기가 같은 값(maxHops)을 '명령 상한'과 '경고 임계'로 겸용해

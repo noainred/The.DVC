@@ -228,6 +228,54 @@ test('우회 차단: 보호 계정의 역할 강등·범위 축소는 소유자/
   assert.ok(auth.updateUser('dg-keep', { role: 'operator' }, { actor: 'dg-atk' }).ok);
 });
 
+// --- 5차 재감사(2026-08-30): 같은 패턴이 name → role 로 이동. '소유자 집합 진입'을 막는다 ---
+
+test('우회 차단: managed 계정을 admin 으로 승격해 자동 소유자로 만들 수 없다', async () => {
+  // 소유자 집합은 username 하나로 정해지지 않는다 — loadSessionSecurity 가 managedAdminOwners()
+  // 를 항상 합산하고, 그 함수는 (managedBy==='central' && role==='admin') 계정을 소유자로 만든다.
+  // 즉 실질 판정식에 **role** 이 들어 있고, role 은 PATCH /admin/users/:u 로 admin 이 쓸 수 있다.
+  // 기존 가드는 '대상이 이미 보호 계정인가'만 봐서, 아직 소유자가 아닌 managed operator 를
+  // admin 으로 밀어 올리는 방향이 통과했다(엣지에서 전체 탈취 체인 실행 재현).
+  sec.saveSessionSecurity({ settingsOwners: [auth.SUPER_USERNAME, 'os-owner'] });
+  auth.createUser({ username: 'os-owner', name: 'os owner', role: 'admin', password: 'pw-oso-123456' });
+  auth.createUser({ username: 'os-atk', name: 'os atk', role: 'admin', password: 'pw-osa-123456' });
+
+  // 중앙이 배포한 managed operator 를 만든다(applyManagedUsers 경로 = 중앙 pull).
+  const applied = auth.applyManagedUsers([{ username: 'os-edgeop', name: 'edge op', role: 'operator', passwordHash: null }]);
+  assert.ok(applied.created >= 1 || applied.updated >= 1, `전제: managed 계정 생성 — ${JSON.stringify(applied)}`);
+  assert.equal(auth.getUser('os-edgeop')?.managedBy, 'central', '전제: managedBy=central');
+
+  const ownersBefore = sec.loadSessionSecurity().settingsOwners || [];
+  assert.ok(!ownersBefore.includes('os-edgeop'), '전제: operator 는 아직 소유자가 아니다');
+
+  // 공격: 비소유자 admin 이 managed operator 를 admin 으로 승격 → 거부돼야 한다.
+  const promote = auth.updateUser('os-edgeop', { role: 'admin' }, { actor: 'os-atk' });
+  assert.equal(promote.ok, false, '승격이 통과하면 그 계정이 자동 소유자가 되어 탈취 체인이 열린다');
+  assert.match(promote.reason, /설정 소유/);
+  assert.equal(auth.getUser('os-edgeop').role, 'operator', '거부 시 역할 불변');
+
+  const ownersAfter = sec.loadSessionSecurity().settingsOwners || [];
+  assert.ok(!ownersAfter.includes('os-edgeop'), '소유자 목록이 오염되지 않아야 한다');
+});
+
+test('소유자·신뢰 경로는 managed 계정 승격 가능(운영성 보존)', () => {
+  sec.saveSessionSecurity({ settingsOwners: [auth.SUPER_USERNAME, 'os-owner'] });
+  // 소유자는 중앙 배포 admin 을 만들 수 있어야 한다(문서화된 엣지 소유자 배포 흐름).
+  assert.ok(auth.updateUser('os-edgeop', { role: 'admin' }, { actor: 'os-owner' }).ok);
+  // 되돌리기도 소유자면 가능.
+  assert.ok(auth.updateUser('os-edgeop', { role: 'operator' }, { actor: 'os-owner' }).ok);
+  // 중앙 pull(시스템 경로)은 종전대로 동작 — applyManagedUsers 는 가드를 타지 않는다.
+  assert.ok(auth.applyManagedUsers([{ username: 'os-edgeop', name: 'edge op', role: 'admin' }]).updated >= 1);
+});
+
+test('일반 계정의 역할 승격은 종전대로 허용(과보호 회귀 방지)', () => {
+  sec.saveSessionSecurity({ settingsOwners: [auth.SUPER_USERNAME, 'os-owner'] });
+  auth.createUser({ username: 'os-plain', name: 'os plain', role: 'viewer', password: 'pw-osp-123456' });
+  // managedBy 가 없으므로 admin 승격이 소유자로 이어지지 않는다 → 허용돼야 한다.
+  const r = auth.updateUser('os-plain', { role: 'admin' }, { actor: 'os-atk' });
+  assert.ok(r.ok, `일반 계정 승격이 막히면 운영 불가 — ${r.reason || ''}`);
+});
+
 test('보호 판정은 실제 소유자 판정과 같은 키(정확일치) — 과보호/미보호 둘 다 없다', () => {
   // requireSettingsOwner 는 정확일치(username 또는 name)로 소유자 권한을 준다. 보호 범위도
   // 정확히 그 집합이어야 한다. 이전 버전은 대소문자를 무시해 ① 대소문자만 다른 계정이
