@@ -68,11 +68,70 @@ test('일반 계정의 대리 등록은 계속 허용(OTP 전용 계정은 자�
   assert.ok(c.ok, c.reason);
 });
 
-test('actor 미지정(콘솔 복구 도구 tools/otp-enroll.js)은 신뢰 경로로 통과', () => {
-  // 수퍼관리자 폰 분실 시 유일한 복구 수단이므로 이 경로가 막히면 안 된다.
-  const b = auth.beginTotpEnroll(auth.SUPER_USERNAME, '');
+test('trusted:true(콘솔 복구 도구 tools/otp-enroll.js)만 신뢰 경로 — 인자 누락은 거부(fail-closed)', () => {
+  // 수퍼관리자 폰 분실 시 유일한 복구 수단이므로 명시된 신뢰 경로는 막히면 안 된다.
+  const b = auth.beginTotpEnroll(auth.SUPER_USERNAME, '', { trusted: true });
   assert.ok(b.ok, b.reason);
   assert.ok(b.secret);
-  const c = auth.confirmTotpEnroll(auth.SUPER_USERNAME, totp.generateToken(b.secret));
+  const c = auth.confirmTotpEnroll(auth.SUPER_USERNAME, totp.generateToken(b.secret), { trusted: true });
   assert.ok(c.ok, c.reason);
+
+  // 반대로 actor·trusted 를 **둘 다 빠뜨리면** 보호 계정은 거부돼야 한다 — 새 라우트가 인자
+  // 전달을 잊었을 때 조용히 보호가 사라지는(fail-open) 것을 막는다.
+  const bare = auth.beginTotpEnroll(auth.SUPER_USERNAME, '');
+  assert.equal(bare.ok, false, '인자 누락 시 보호 계정은 fail-closed 여야 함');
+  assert.equal(bare.secret, undefined);
+});
+
+// --- 재감사(2026-08-30)에서 실행 재현된 우회 경로들 — 전부 막혀 있어야 한다 ---
+
+test('우회 차단: 대소문자 변형 계정으로 본인 위장 불가(정확일치 비교)', () => {
+  // getUser/createUser 는 대소문자를 구분하므로 'NOAINRED' 는 'noainred' 와 **별개 계정**이다.
+  // 가드가 소문자 정규화로 '본인'을 판정하면 그 변형 계정을 만들어 위장할 수 있었다(실측 재현).
+  const mk = auth.createUser({ username: 'NOAINRED', name: 'fake super', role: 'admin', password: 'pw-fake-123456' });
+  assert.ok(mk.ok, `전제: 대소문자 변형 계정이 생성됨 — ${mk.reason || ''}`);
+
+  const b = auth.beginTotpEnroll(auth.SUPER_USERNAME, '', { actor: 'NOAINRED' });
+  assert.equal(b.ok, false, '변형 계정이 수퍼관리자 OTP 를 등록할 수 있으면 계정 탈취');
+  assert.equal(b.secret, undefined, '거부 시 평문 시크릿 유출 금지');
+});
+
+test('우회 차단: disableTotp 는 actor 만으로는 보호 계정을 해제하지 못한다(force 는 콘솔 전용)', () => {
+  // force 는 콘솔 도구 전용 신뢰 플래그다. 라우트가 req.body 를 통째로 넘기던 동안에는
+  // {"force":true} 주입으로 수퍼관리자 OTP 해제 → 임시비번 로그인 → 자력 등록 → 탈취가 됐다.
+  // 라우트는 이제 password 만 전달한다(routes/admin/users.js). 여기서는 함수 계약을 고정한다.
+  const denied = auth.disableTotp(auth.SUPER_USERNAME, { password: 'temp-pw-123456', actor: 'rb-admin' });
+  assert.equal(denied.ok, false);
+  assert.match(denied.reason, /수퍼관리자/);
+  assert.equal(auth.getUser(auth.SUPER_USERNAME).totpEnabled, true, '거부 시 OTP 등록 상태 불변');
+
+  // 설정소유자도 거부(수퍼관리자 플래그가 아니라 owners 경계로 막힌다).
+  sec.saveSessionSecurity({ settingsOwners: [auth.SUPER_USERNAME, 'rb-owner'] });
+  const d2 = auth.disableTotp('rb-owner', { password: 'temp-pw-123456', actor: 'rb-admin' });
+  assert.equal(d2.ok, false);
+  assert.match(d2.reason, /본인만/);
+});
+
+test('우회 차단: setLocalPassword·clearLoginCredentials 로 보호 계정 탈취 불가', () => {
+  sec.saveSessionSecurity({ settingsOwners: [auth.SUPER_USERNAME, 'rb-owner'] });
+
+  // 비밀번호를 호출자가 아는 값으로 심으면 그 계정으로 로그인할 수 있다 → OTP 경로와 같은 탈취.
+  const p = auth.setLocalPassword('rb-owner', 'atk-set-123456', { actor: 'rb-admin' });
+  assert.equal(p.ok, false);
+  assert.match(p.reason, /본인만/);
+
+  // OTP·비번을 모두 지운 뒤 비번을 심는 2단 우회도 첫 단계에서 막혀야 한다.
+  const c = auth.clearLoginCredentials('rb-owner', { actor: 'rb-admin' });
+  assert.equal(c.ok, false);
+  assert.match(c.reason, /본인만/);
+
+  // 본인·시스템 신뢰 경로는 정상 동작(중앙→엣지 비번 일괄 교체가 막히면 안 된다).
+  assert.ok(auth.setLocalPassword('rb-owner', 'own-set-123456', { actor: 'rb-owner' }).ok);
+  assert.ok(auth.setLocalPassword('rb-owner', 'sys-set-123456', { trusted: true }).ok);
+});
+
+test('일반 계정의 비밀번호·자격증명 변경은 종전대로 허용(동작 보존)', () => {
+  auth.createUser({ username: 'rb-plain2', name: 'rb plain2', role: 'viewer', password: 'pw-pl2-123456' });
+  assert.ok(auth.setLocalPassword('rb-plain2', 'new-pw-123456', { actor: 'rb-admin' }).ok);
+  assert.ok(auth.clearLoginCredentials('rb-plain2', { actor: 'rb-admin' }).ok);
 });

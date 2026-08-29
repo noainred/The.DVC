@@ -396,7 +396,7 @@ export function createUser({ username, name, role = 'viewer', password, scope } 
  * 로컬 사용자 비밀번호 설정(관리자 리셋/중앙 일괄 변경용). OTP 등록 계정은 로그인에 OTP가
  * 우선되므로 해시 갱신은 무해하며, OTP 해제 시 폴백 비밀번호가 된다.
  */
-export function setLocalPassword(username, password) {
+export function setLocalPassword(username, password, { actor = null, trusted = false } = {}) {
   // 문자열만 허용 — 객체가 String()으로 "[object Object]"가 되어 의도치 않은 비번이 설정되는 것 방지.
   // 특수문자·유니코드는 전부 그대로 허용(scrypt는 바이트 안전).
   if (password !== undefined && password !== null && typeof password !== 'string') {
@@ -407,6 +407,10 @@ export function setLocalPassword(username, password) {
   if (pw.length > 128) return { ok: false, reason: '비밀번호는 128자 이하여야 합니다.' };
   const u = getUser(String(username || '').trim());
   if (!u) return { ok: false, reason: '사용자를 찾을 수 없습니다.' };
+  // 보호 계정(수퍼관리자·설정소유자)의 비밀번호를 다른 admin 이 아는 값으로 설정하면 그 계정으로
+  // 로그인할 수 있다 — OTP 등록 경로와 같은 탈취 경로다(credentialGuardDenied).
+  const denied = credentialGuardDenied(u, { actor, trusted, what: '비밀번호' });
+  if (denied) return denied;
   u.passwordHash = hashPassword(pw);
   bumpTokenVersion(u); // 비번 변경 → 기존 세션 토큰 즉시 폐기
   persistUsers();
@@ -418,10 +422,14 @@ export function setLocalPassword(username, password) {
  * (데모 계정 잠금용). 기존 세션 토큰도 tokenVersion 인상으로 즉시 폐기된다.
  * 다시 로그인하게 하려면 setLocalPassword 로 비밀번호를 설정하면 된다.
  */
-export function clearLoginCredentials(username) {
+export function clearLoginCredentials(username, { actor = null, trusted = false } = {}) {
   const u = getUser(String(username || '').trim());
   if (!u) return { ok: false, reason: '사용자를 찾을 수 없습니다.' };
   if (u.superuser) return { ok: false, reason: '수퍼관리자 계정의 로그인은 차단할 수 없습니다.' };
+  // 설정소유자도 보호 — OTP·비번을 모두 지운 뒤 setLocalPassword 로 비번을 심으면 부트스트랩
+  // 로그인이 열려 계정 탈취로 이어진다(재감사에서 재현된 경로).
+  const denied = credentialGuardDenied(u, { actor, trusted, what: '로그인 자격증명' });
+  if (denied) return denied;
   if (u.role === 'admin' && loadUsers().filter((x) => x.role === 'admin').length <= 1) {
     return { ok: false, reason: '마지막 관리자의 로그인은 차단할 수 없습니다.' };
   }
@@ -520,45 +528,66 @@ export function listManagedUsers() {
 }
 
 /**
- * OTP 재바인딩 권한 경계(확정 버그, 2026-08-30) — '남의 계정' OTP 를 대신 등록할 수 있는지.
+ * 보호 계정 판정 — 수퍼관리자 또는 설정소유자(설정 편집 권한 = admin 보다 상위 경계).
  *
- * beginTotpEnroll 은 QR 발급을 위해 **평문 시크릿을 응답으로 반환**한다. 즉 호출한 관리자는 그
- * 계정의 OTP 를 그대로 손에 넣고, 이어서 confirmTotpEnroll 로 활성 시크릿을 교체할 수 있다.
- * 대상이 OTP 전용 계정이면 confirm 이 passwordHash 까지 지우므로, 기존 소유자는 로그인 수단을
- * 잃고 호출자만 그 계정으로 로그인할 수 있게 된다 → 일반 admin 이 **수퍼관리자·설정소유자**
- * 계정을 탈취하는 권한 상승 경로였다(disableTotp 는 `u.superuser` 를 이미 막고 있는데 등록
- * 경로만 열려 있어 그 보호가 우회됐다).
- *
- * 정책: 수퍼관리자·설정소유자 계정의 OTP 는 **본인만** (재)등록할 수 있다. 그 외 계정은 기존대로
- * admin 이 대신 등록해 QR 을 전달할 수 있다(OTP 전용 계정은 비번이 없어 자력 등록이 불가능하므로
- * 이 대행 경로 자체는 설계된 기능이다).
- *
- * @param actor 요청을 수행하는 계정명. **미지정(null)은 서버 내부 신뢰 경로**(콘솔 복구 도구
- *              tools/otp-enroll.js — 수퍼관리자 폰 분실 시 유일한 복구 수단이므로 막으면 안 된다).
+ * 판정 방향이 중요하다: 이 함수는 '보호할지'를 결정하므로 **넓게(대소문자 무시)** 매칭한다.
+ * 반대로 '본인인지'를 판정하는 쪽은 **좁게(정확일치)** 비교해야 한다 — credentialGuardDenied 주석 참고.
+ * 소유자 목록을 못 읽으면 보호하는 쪽으로 판정한다(fail-closed — requireSettingsOwner 와 같은 방향).
  */
-function totpRebindDenied(u, actor) {
-  if (!actor) return null;                                        // 콘솔 복구 도구 등 신뢰 경로
+function isProtectedAccount(u) {
+  if (u.superuser) return true;
   const norm = (s) => String(s || '').trim().toLowerCase();
-  if (norm(actor) === norm(u.username)) return null;              // 본인 재등록(폰 교체)은 항상 허용
-  if (u.superuser) {
-    return { ok: false, reason: '수퍼관리자 계정의 OTP는 본인만 등록할 수 있습니다(대리 등록 시 계정이 탈취될 수 있습니다).' };
-  }
-  let owners = [];
-  try { owners = loadSessionSecurity().settingsOwners || []; } catch { owners = []; }
-  if (owners.some((o) => norm(o) === norm(u.username))) {
-    return { ok: false, reason: '설정 소유 계정의 OTP는 본인만 등록할 수 있습니다(대리 등록 시 계정이 탈취될 수 있습니다).' };
-  }
-  return null;
+  let owners;
+  try { owners = loadSessionSecurity().settingsOwners || []; } catch { return true; }
+  return owners.some((o) => norm(o) === norm(u.username) || norm(o) === norm(u.name));
+}
+
+/**
+ * 자격증명 변경 권한 경계(확정 버그, 2026-08-30) — '남의 계정' 로그인 수단을 바꿀 수 있는지.
+ *
+ * 왜 필요한가: 아래 네 가지는 모두 **대상 계정으로 로그인할 수 있게 만드는** 작업이다.
+ *   · beginTotpEnroll  — QR 발급을 위해 **평문 시크릿을 응답으로 반환**한다(호출자가 OTP 를 손에 넣음)
+ *   · confirmTotpEnroll — 활성 시크릿을 교체(OTP 전용 계정이면 passwordHash 까지 삭제)
+ *   · disableTotp       — OTP 해제 + 임시 비밀번호 설정
+ *   · setLocalPassword / clearLoginCredentials — 비밀번호를 호출자가 아는 값으로 설정/초기화
+ * 어느 하나라도 열려 있으면 일반 admin 이 **수퍼관리자·설정소유자 계정을 탈취**할 수 있다
+ * (실제로 등록 경로만 막았을 때 `disableTotp{force}`·`clearLoginCredentials`+`setLocalPassword`
+ * 두 경로가 남아 재감사에서 재현됐다 — 그래서 경계를 한 함수로 모아 전부에 적용한다).
+ * 탈취 후에는 `/api/auth` 가 requireEnrolled 없이 마운트되므로 부트스트랩 로그인 → 자력 OTP 등록
+ * 으로 완전 장악까지 이어진다.
+ *
+ * 정책: **보호 계정(수퍼관리자·설정소유자)의 자격증명은 본인만 변경**할 수 있다. 일반 계정은 기존
+ * 동작 그대로(admin 대행 허용 — OTP 전용 계정은 비번이 없어 자력 등록이 불가능하므로 대행은 설계된
+ * 기능이다).
+ *
+ * @param actor   요청 수행 계정명. 보호 계정에 대해서는 **정확일치**로만 '본인'을 인정한다 —
+ *                getUser/createUser 가 대소문자를 구분하므로(`NOAINRED` 와 `noainred` 는 별개 계정)
+ *                느슨하게 비교하면 변형 계정을 만들어 본인으로 위장하는 우회가 생긴다(실측 재현됨).
+ * @param trusted 서버 내부 신뢰 경로임을 **명시**할 때만 true(콘솔 복구 도구 tools/otp-enroll.js,
+ *                중앙→엣지 시스템 경로). 인자 누락으로 조용히 열리지 않게 기본은 false 다 —
+ *                보호 계정 + actor 없음 + trusted 아님 → 거부(fail-closed).
+ */
+function credentialGuardDenied(u, { actor = null, trusted = false, what = 'OTP' } = {}) {
+  if (trusted) return null;                       // 명시된 신뢰 경로(콘솔 복구·시스템 배포)
+  if (!isProtectedAccount(u)) return null;        // 일반 계정 — 기존 동작 유지
+  if (actor && actor === u.username) return null; // 본인(정확일치)만 허용
+  const kind = u.superuser ? '수퍼관리자' : '설정 소유';
+  return { ok: false, reason: `${kind} 계정의 ${what}은 본인만 변경할 수 있습니다(대리 변경 시 계정이 탈취될 수 있습니다).` };
+}
+
+/** OTP 등록(begin/confirm) 전용 래퍼 — 메시지만 다르고 경계는 동일하다. */
+function totpRebindDenied(u, actor, trusted = false) {
+  return credentialGuardDenied(u, { actor, trusted, what: 'OTP 등록' });
 }
 
 /** Start TOTP enrollment: generate a secret (pending until confirmed).
  *  host(접속한 포탈 IP:포트)를 주면 발급 라벨 issuer에 포함해 여러 포탈을 구분한다:
  *  'VMware Portal' → 'VMware(<host>) Portal'.
- *  actor: 요청 수행 계정(대리 등록 권한 검사용) — totpRebindDenied 참고. */
-export function beginTotpEnroll(username, host = '', { actor = null } = {}) {
+ *  actor/trusted: 대리 등록 권한 검사용 — credentialGuardDenied 참고. */
+export function beginTotpEnroll(username, host = '', { actor = null, trusted = false } = {}) {
   const u = getUser(username);
   if (!u) return { ok: false, reason: '사용자를 찾을 수 없습니다.' };
-  const denied = totpRebindDenied(u, actor);
+  const denied = totpRebindDenied(u, actor, trusted);
   if (denied) return denied;
   const secret = totp.generateSecret();
   // 확정(confirm) 전에는 기존 등록을 절대 건드리지 않는다 — 이전에는 여기서 totpSecret을
@@ -605,13 +634,13 @@ export function verifyUserOtp(username, code) {
 /** Confirm enrollment by verifying a code from the authenticator app.
  *  actor: 요청 수행 계정(대리 등록 권한 검사용). begin 과 **같은 경계를 반드시 다시 검사**한다 —
  *  begin 만 막으면 이전에 남은 pending 시크릿으로 confirm 만 호출해 우회할 수 있다. */
-export function confirmTotpEnroll(username, code, { actor = null } = {}) {
+export function confirmTotpEnroll(username, code, { actor = null, trusted = false } = {}) {
   const u = getUser(username);
   // 신규 흐름은 pending 시크릿으로 확정, (하위호환) 구버전에서 begin만 하고 미확정이던
   // 계정(totpSecret 있고 enabled=false)은 기존 시크릿으로 확정을 이어간다.
   const pending = u?.totpPendingSecret || (u && !u.totpEnabled ? u.totpSecret : null);
   if (!u || !pending) return { ok: false, reason: '먼저 OTP 등록을 시작하세요.' };
-  const denied = totpRebindDenied(u, actor);
+  const denied = totpRebindDenied(u, actor, trusted);
   if (denied) return denied;
   if (!totp.verifyToken(code, pending)) return { ok: false, reason: 'OTP 코드가 일치하지 않습니다.' };
   u.totpSecret = pending;
@@ -641,14 +670,21 @@ export function confirmTotpEnroll(username, code, { actor = null } = {}) {
 // force: 서버에서 직접 실행하는 신뢰된 콘솔 복구 도구(tools/otp-enroll.js) 전용 우회. 콘솔 도구는
 // '해제 → 곧바로 재등록'을 헤드리스로 수행하므로 중간에 로그인 수단이 0개여도 문제없고, 수퍼관리자가
 // 폰을 분실한 잠금도 이 도구로만 푼다. 웹 admin 경로(force 미지정)에는 아래 가드가 그대로 걸린다.
-export function disableTotp(username, { password, force = false } = {}) {
+export function disableTotp(username, { password, force = false, actor = null } = {}) {
   const u = getUser(username);
   if (!u) return { ok: false, reason: '사용자를 찾을 수 없습니다.' };
   // 수퍼관리자 보호 — clearLoginCredentials 와 같은 경계. OTP 전용(비번 없는) 수퍼관리자의
   // OTP 를 다른 admin 이 해제하면 '로그인차단 거부' 경계가 우회된다. 재등록(폰 교체)은 해제
   // 없이 'OTP 등록'(beginTotpEnroll — pending 교체 후 confirm)으로 가능하므로 이 거부가
   // 정상 재등록을 막지 않는다. (콘솔 복구 도구 force 는 예외 — 수퍼관리자 폰 분실 복구 경로.)
+  //
+  // ⚠ force 는 **콘솔 도구 전용 신뢰 플래그**다. HTTP 라우트는 이 값을 절대 전달하지 않는다
+  // (routes/admin/users.js 에서 password 만 골라 넘긴다) — 과거 req.body 를 통째로 넘겨
+  // `{"force":true}` 주입으로 이 가드가 무력화되는 경로가 재감사에서 재현됐다.
   if (u.superuser && !force) return { ok: false, reason: '수퍼관리자 계정의 OTP는 해제할 수 없습니다(재등록은 해제 없이 OTP 등록으로 가능합니다).' };
+  // 설정소유자도 같은 경계 — 해제 + 임시 비밀번호는 그 계정으로 로그인할 수 있게 만드는 작업이다.
+  const denied = credentialGuardDenied(u, { actor, trusted: force, what: 'OTP 해제' });
+  if (denied) return denied;
   // 임시 비밀번호 검증 — setLocalPassword 와 같은 규칙(문자열·8~128자). 검증 없이 hash 하면
   // "[object Object]" 같은 값이 비밀번호가 되는 사고를 만든다.
   if (password !== undefined && password !== '' && (typeof password !== 'string' || password.length < 8 || password.length > 128)) {

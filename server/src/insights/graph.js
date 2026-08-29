@@ -9,6 +9,7 @@
 import { listInventory } from '../central/inventory.js';
 import { getAllGpuGuestDiag } from '../central/gpuGuestDiag.js';
 import { listRegistry as listNsxRegistry } from '../nsx/registry.js';
+import { managerInScope } from '../nsx/scope.js';
 import { config, currentVersion } from '../config.js';
 
 const VM_CAP = 1500; // 3D 성능 위해 VM 노드 총량 상한
@@ -67,11 +68,14 @@ export function buildGraph(snap, { vms = false, vcenterId = null, host = null, a
 
   // 5) NSX 매니저(표시 vCenter에 속한 것만; 전체보기일 땐 모두)
   for (const m of listNsxRegistry()) {
-    // scope 먼저(요청 필터보다 우선) — 범위 계정에는 허용 vCenter 에 귀속된 매니저만.
-    if (allowedVcIds && !(m.vcenterId && allowedVcIds.has(m.vcenterId))) continue;
+    // scope 먼저(요청 필터보다 우선). 판정은 /api/nsx 와 **같은 규칙**을 재사용한다 —
+    // managerInScope: (vcenterId ∈ 허용) ∪ (region ∈ 허용 vCenter 들의 리전), 무귀속은 숨김.
+    // 규칙을 여기서 다시 구현하면 region 으로만 귀속된 매니저가 구성도에서만 사라지는 불일치가 난다
+    // (레지스트리 항목은 region 을 location.region 에 담으므로 managerInScope 가 그 형태를 처리한다).
+    if (!managerInScope(m, snap.vcenters || [], allowedVcIds)) continue;
     if (vcFilter && m.vcenterId !== vcFilter) continue;
     const id = `nsx:${m.id}`;
-    add({ id, type: 'nsx', label: `🛡 ${m.name || m.host}`, val: 11, status: m.status || (m.enabled === false ? 'disabled' : 'unknown'), region: m.region || '' });
+    add({ id, type: 'nsx', label: `🛡 ${m.name || m.host}`, val: 11, status: m.status || (m.enabled === false ? 'disabled' : 'unknown'), region: m.region || m.location?.region || '' });
     const parent = m.vcenterId && seen.has(`vc:${m.vcenterId}`) ? `vc:${m.vcenterId}` : 'central';
     link(parent, id, 'nsx');
   }

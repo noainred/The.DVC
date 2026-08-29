@@ -58,6 +58,21 @@ test('그래프: scope 는 요청 필터보다 먼저 — 범위 밖 vcenterId �
   assert.deepEqual(labels, [], '범위 밖 vCenter 를 명시해도 매니저가 나오면 우회 가능');
 });
 
+test('그래프: region 으로만 귀속된 매니저도 /api/nsx 와 같은 규칙으로 보인다(판정 이중구현 방지)', () => {
+  // 재감사 지적: 그래프가 vcenterId 만 보면 region 으로 귀속된 매니저가 /api/nsx 에서는 보이는데
+  // 구성도에서만 사라진다(규칙 이중 구현). 판정은 nsx/scope.js managerInScope 하나로 공유해야 한다.
+  const r = nsxReg.addManager({
+    id: 'nsx-region', name: 'nsx-region', host: 'https://10.4.0.10',
+    username: 'u', password: 'p', location: { region: 'KR' },   // vcenterId 없음, region 만
+  });
+  assert.ok(r.ok, `테스트 셋업 실패: ${r.reason}`);
+
+  const labels = nsxLabels(buildGraph(scopedSnap, { allowedVcIds: new Set(['vc-a']) }));
+  assert.ok(labels.some((l) => l.includes('nsx-region')),
+    `허용 vCenter(vc-a)의 리전(KR) 매니저는 보여야 함: ${labels}`);
+  assert.ok(!labels.some((l) => l.includes('nsx-orphan')), '무귀속 매니저는 계속 숨김');
+});
+
 test('인시던트: 범위 계정에는 허용 vCenter 의 수집 실패만 노출', () => {
   store.setSnapshot?.({}); // 없으면 무시 — 아래에서 직접 주입
   const snap = store.get();
