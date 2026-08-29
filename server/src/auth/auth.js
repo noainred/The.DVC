@@ -386,6 +386,11 @@ export function createUser({ username, name, role = 'viewer', password, scope } 
   // 소유자 이름 선점 차단(identityGuardDenied 주석 참고) — 이름만 차지해도 소유자 지위가 승계된다.
   const denied = identityGuardDenied({ username, actor, trusted, what: '계정 생성' });
   if (denied) return denied;
+  // 결과 기반 검사도 함께(다층) — 오늘은 createUser 가 managedBy 를 받지 않아 이름 축 검사만으로
+  // 충분하지만, 훗날 누군가 소유자로 파생되는 필드(managedBy 등)를 이 함수에 추가하는 날
+  // 무방비가 된다. '축이 아니라 결과를 본다'는 원칙을 이 지점에도 적용해 둔다(6차 재감사 지적).
+  const entry = ownerSetEntryDenied({ username }, { role }, { actor, trusted });
+  if (entry) return entry;
   const u = { username, name: name || username, role };
   if (password) u.passwordHash = hashPassword(password);
   const sc = sanitizeScope(scope);
@@ -599,7 +604,12 @@ function wouldBeOwner(rec) {
   // 중앙 배포 admin 은 자동 소유자 — 변경 후 role 로 직접 판정(managedAdminOwners 우회).
   if (rec?.managedBy === 'central' && rec?.role === 'admin') return true;
   const owners = settingsOwnerList();
-  if (owners === null) return true;               // 목록 불명 → 보호 쪽
+  // ⚠ 목록 불명(null)에서 true 를 돌려주면 ownerSetEntryDenied 의 `wouldBeOwner(u)` 조기 return
+  // 때문에 **허용** 방향이 된다(fail-open) — isProtectedAccount 와 방향이 반대다.
+  // 이 함수는 '변경 후 소유자가 되는가'를 판정하므로, 불명일 때는 **된다고 보는 쪽**이 안전하지만
+  // 그 값이 '이미 소유자인가'에도 쓰이면 반대로 작용한다. 그래서 호출부가 두 질문을 구분하도록
+  // null 을 그대로 전파하지 않고, 여기서는 '알 수 없음'을 별도로 표현한다(호출부 주석 참고).
+  if (owners === null) return null;               // 알 수 없음 — 호출부가 보수적으로 처리
   return owners.includes(uname);
 }
 
@@ -618,8 +628,17 @@ function wouldBeOwner(rec) {
 function ownerSetEntryDenied(u, next, { actor = null, trusted = false } = {}) {
   if (trusted) return null;
   if (actorIsOwner(actor)) return null;                 // 소유자는 소유자를 만들 수 있다
-  if (wouldBeOwner(u)) return null;                     // 이미 소유자 → 별도 가드(credentialGuard)가 담당
-  if (!wouldBeOwner({ ...u, ...next })) return null;    // 변경 후에도 소유자 아님 → 무관
+  // undefined 값이 기존 필드를 지우지 않게 '정의된 키만' 병합한다 — `{...u, role: undefined}` 는
+  // role 을 실제로 지우므로, 그대로 두면 판정 기준이 틀어질 씨앗이 된다(6차 재감사 지적).
+  const patch = Object.fromEntries(Object.entries(next || {}).filter(([, v]) => v !== undefined));
+  const before = wouldBeOwner(u);
+  const after = wouldBeOwner({ ...u, ...patch });
+  // 목록 불명(null)은 보수적으로 거부한다 — '이미 소유자라 무관'으로 흘리면 fail-open 이 된다.
+  if (before === null || after === null) {
+    return { ok: false, reason: '설정 소유 계정 목록을 확인할 수 없어 계정 변경을 보류했습니다(서버 설정 확인 필요).' };
+  }
+  if (before) return null;                              // 이미 소유자 → credentialGuardDenied 가 담당
+  if (!after) return null;                              // 변경 후에도 소유자 아님 → 무관
   return { ok: false, reason: '이 변경은 대상 계정을 설정 소유 계정으로 만듭니다 — 설정 소유 계정만 할 수 있습니다.' };
 }
 

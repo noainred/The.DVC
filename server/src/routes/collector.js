@@ -81,10 +81,15 @@ collectorRouter.post('/set-password', express.json({ limit: '4kb' }), (req, res)
   if (!config.collector.token) { logCollectorDeny(req, 'set-password'); return res.status(404).json({ ok: false, reason: 'collector 비활성화(COLLECTOR_TOKEN 미설정)' }); }
   if (!checkToken(req)) { logCollectorDeny(req, 'set-password'); return res.status(403).json({ ok: false, reason: '토큰 불일치' }); }
   const username = String(req.body?.username || 'admin').trim();
-  // trusted: COLLECTOR_TOKEN 으로 게이트된 중앙→엣지 **시스템** 경로(사용자 세션이 아님).
-  // 중앙이 엣지 계정 비번을 일괄 교체하는 정상 기능이라 대리 변경 경계를 명시적으로 통과시킨다
-  // (auth.js credentialGuardDenied — 기본은 fail-closed 이므로 이 명시가 없으면 보호 계정에서 막힌다).
-  const r = setLocalPassword(username, req.body?.password, { trusted: true });
+  // ⚠ trusted 를 넘기지 않는다(6차 재감사). `trusted` 는 credentialGuardDenied 를 **첫 줄에서
+  // 무조건 통과**시키는 로컬 콘솔 전용 플래그다. 여기에 붙이면 원격(중앙)에서 임의 계정명을
+  // 지정해 **수퍼관리자·설정소유자의 비밀번호를 심을 수 있다** — 실제로 중앙의 비소유자 admin 이
+  // `POST /admin/collectors/set-password {username:'noainred'}` 로 전 엣지의 수퍼관리자 비번을
+  // 교체하고, 그 비번으로 로그인해 자력 OTP 등록 → 백업 다운로드까지 가는 체인이 재현됐다.
+  // actor·trusted 를 모두 생략하면 **일반 계정은 종전대로 허용, 보호 계정만 거부**된다
+  // (문서화된 용도 = 기본 admin 계정 비번 일괄 교체 → 기능 손실 없음).
+  // 보호 계정 비번 교체가 정말 필요하면 그 엣지의 콘솔 도구(로컬 실행 = 진짜 신뢰 경계)를 쓴다.
+  const r = setLocalPassword(username, req.body?.password);
   if (r.ok) logAudit({ user: 'central-portal', action: '엣지 비밀번호 원격 변경', target: username, ip: req.ip || '' });
   res.status(r.ok ? 200 : 400).json({ ...r, version: currentVersion() });
 });

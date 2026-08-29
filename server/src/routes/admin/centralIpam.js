@@ -16,7 +16,7 @@ import { getCentralAuthStats } from '../central.js';
 import { listInventory } from '../../central/inventory.js';
 import { getIngestStats, resetIngestStats } from '../../central/ingestStats.js';
 import { listCollectors } from '../../collector/registry.js';
-import { adminOnly } from './shared.js';
+import { adminOnly, requireSettingsOwner } from './shared.js';
 
 export function registerCentralIpam(adminRouter) {
 
@@ -30,20 +30,32 @@ adminRouter.get('/ipam/settings', adminOnly, (_req, res) => res.json({ settings:
 adminRouter.put('/ipam/settings', adminOnly, (req, res) => res.json({ ok: true, settings: saveIpamSettings(req.body || {}) }));
 
 // 중앙 토큰(CENTRAL_TOKEN) — 조회/생성/저장(실행중 서버 + portal.env 영속).
-adminRouter.get('/central-token', adminOnly, (_req, res) => res.json(centralTokenInfo()));
+// ⚠ requireSettingsOwner(6차 재감사): centralTokenInfo() 는 토큰을 **평문으로** 반환한다.
+// `EDGE_MODE=all` + CENTRAL_TOKEN 설정 + COLLECTOR_TOKEN 미설정 구성에서는
+// EDGE_TOKEN = CENTRAL_TOKEN = collector.token 이므로(config.js), 이 응답이 그 인스턴스의
+// COLLECTOR_TOKEN 노출과 같아져 /api/collector/* 시스템 경로를 직접 호출할 수 있다.
+// 비밀 '열람'은 소유자 등급이 맞다(collectors export.csv?tokens=1 와 같은 기준).
+// UI 는 설정 탭(App.jsx ownerOnly) 안의 AgentDeploy 에서만 쓰므로 화면 영향 없음.
+adminRouter.get('/central-token', adminOnly, requireSettingsOwner, (_req, res) => res.json(centralTokenInfo()));
 // 사이트 위임 수집 현황(어떤 vCenter를 어떤 에이전트가 언제 push했는지).
 adminRouter.get('/central/inventory', adminOnly, (_req, res) => res.json({ inventory: listInventory() }));
 // 에이전트별 수신 트래픽 진단 — 누가 무엇을 얼마나 보내는지(와이어 바이트·push 빈도·페이로드 규모).
 // iftop에서 특정 에이전트 트래픽이 비정상적으로 높을 때 원인(큰 페이로드 vs 잦은 push)을 짚어낸다.
 adminRouter.get('/central/ingest-stats', adminOnly, (_req, res) => res.json({ ok: true, ...getIngestStats() }));
 adminRouter.post('/central/ingest-stats/reset', adminOnly, (req, res) => { resetIngestStats(); logAudit({ user: req.user?.username, action: '수신 트래픽 통계 초기화', target: 'ingest-stats' }); res.json({ ok: true }); });
-adminRouter.post('/central-token/generate', adminOnly, (req, res) => {
+// 생성·저장도 소유자 전용 — 둘 다 응답에 토큰 평문을 실으므로 조회와 같은 노출이고,
+// 저장은 엣지 인증 비밀을 임의 값으로 바꾸는 권능이다.
+adminRouter.post('/central-token/generate', adminOnly, requireSettingsOwner, (req, res) => {
   const r = generateCentralToken({ force: !!(req.body && req.body.force) });
+  logAudit({ user: req.user?.username, action: '중앙 토큰 생성', target: 'central-token', ip: req.ip || '' });
   res.json({ ok: true, ...r });
 });
-adminRouter.put('/central-token', adminOnly, (req, res) => {
-  try { res.json({ ok: true, token: setCentralToken(req.body && req.body.token) }); }
-  catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
+adminRouter.put('/central-token', adminOnly, requireSettingsOwner, (req, res) => {
+  try {
+    const token = setCentralToken(req.body && req.body.token);
+    logAudit({ user: req.user?.username, action: '중앙 토큰 변경', target: 'central-token', ip: req.ip || '' });
+    res.json({ ok: true, token });
+  } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
 });
 
 // ── 엣지별 개별 central 토큰 (공유 토큰의 광역 스코프 축소) ──────────────────
