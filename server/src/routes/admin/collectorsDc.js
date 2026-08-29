@@ -1,6 +1,7 @@
 // ìì§ê¸° CRUD/ì´ìÂ·ë°ì´í°ì¼í°Â·VM ì¬êµ¬ì± â admin.js(êµ¬ 2,410ì¤) ë¶í (v2.285.0). ë³¸ë¬¸ì ìë³¸ ê·¸ëë¡, ë±ë¡ ììë admin.js í¸ì¶ ììê° ë³´ì¡´íë¤.
 import { config } from '../../config.js';
 import { requirePerm, setLocalPassword } from '../../auth/auth.js';
+import { inUserScope, inUserWriteScope } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { forceCollectorToken } from '../../agent/deploy.js';
 import { listTargets, getTargetRaw } from '../../agent/deployRegistry.js';
@@ -34,6 +35,33 @@ function resolveVmTarget(vmId) {
   // vCenterê° ì´ í¬íì ì§ì  ë±ë¡ë¼ ìì§ ìì¼ë©´(ìì/ì£ì§ ìì§ vCenter) ìê²©ì¦ëªì´ ìì´ ì¬ì ë³ê²½ ë¶ê°.
   if (!vc) return { error: `ì´ VMì vCenter('${vcId}')ê° ì´ í¬íì ë±ë¡ëì´ ìì§ ìì ì¬ì ë³ê²½ì í  ì ììµëë¤(ìì/ì£ì§ ìì§ vCenter). í´ë¹ vCenterê° ì§ì  ë±ë¡ë í¬íìì ë³ê²½íì¸ì.`, code: 400 };
   return { vm, vc, moref, snap };
+}
+
+/**
+ * VM 단건 라우트의 데이터 범위 가드(v2.389) — 형제 라우트(vms/:id/console, VM 복제,
+ * Tools 업그레이드, 프로비저닝)와 동일한 2단계 규약을 적용한다.
+ *
+ *  1) 조회 범위 밖  → 404 (존재 은닉. 범위 밖 VM 의 실재 여부를 알려주지 않는다)
+ *  2) 조회는 되지만 쓰기 범위 밖 → 403 (존재는 이미 보이므로 은닉 불필요)
+ *
+ * 배경: /vm/:id/reconfig 는 vCPU·메모리 증설과 디스크/NIC 추가·삭제를 실제로 수행하는
+ * 상태변경인데 requirePerm('vm.reconfig') 만 걸려 있었다. vm.reconfig 는 권한 카탈로그에
+ * 있어 operator/viewer 에게 위임할 수 있으므로(기본 매트릭스는 admin 전용), 위임한 배포에서는
+ * 범위 제한 계정이 범위 밖 vCenter 의 VM 을 재구성할 수 있었다. GET /vm/:id/hardware 도
+ * 같은 권한만 요구해 범위 밖 VM 의 하드웨어·네트워크·데이터스토어 구성이 노출됐다.
+ *
+ * @param {boolean} write true 면 쓰기 범위까지 검사(POST reconfig), false 면 조회 범위만(GET).
+ * @returns {null | { code, error }} null = 통과.
+ */
+function vmScopeDenied(req, vm, write) {
+  const snap = store.get();
+  if (!inUserScope(req.user, snap, vm.vcenterId)) {
+    return { code: 404, error: 'VM 을 찾을 수 없습니다.' };
+  }
+  if (write && !inUserWriteScope(req.user, snap, vm.vcenterId)) {
+    return { code: 403, error: '조회 전용 범위 — 이 vCenter 의 VM 사양을 변경할 수 없습니다.' };
+  }
+  return null;
 }
 
 export function registerCollectorsDc(adminRouter) {
@@ -237,6 +265,8 @@ adminRouter.put('/datacenter-order', adminOnly, (req, res) => {
 // íì¬ íëì¨ì´ + NIC ì¶ê°ì© ë¤í¸ìí¬ ëª©ë¡.
 adminRouter.get('/vm/:id/hardware', requirePerm('vm.reconfig'), async (req, res) => {
   const t = resolveVmTarget(req.params.id);
+  // 조회 범위 밖이면 404(존재 은닉) — 범위 밖 VM 의 하드웨어 구성 노출 차단(v2.389).
+  if (t.vm) { const d = vmScopeDenied(req, t.vm, false); if (d) return res.status(d.code).json({ ok: false, reason: d.error }); }
   if (t.error) return res.status(t.code).json({ ok: false, reason: t.error });
   try {
     const hw = await getVmHardware(t.vc, t.moref);
@@ -258,6 +288,8 @@ adminRouter.get('/vm/:id/hardware', requirePerm('vm.reconfig'), async (req, res)
 // ì¬ì ë³ê²½ ì¤í. body: { numCPUs?, memoryMB?, diskGrows?, diskAdds?, nicAdds?, nicRemoves? }
 adminRouter.post('/vm/:id/reconfig', requirePerm('vm.reconfig'), async (req, res) => {
   const t = resolveVmTarget(req.params.id);
+  // 상태변경 — 조회 범위 밖 404, 쓰기 범위 밖 403(v2.389). 형제 라우트와 동일 규약.
+  if (t.vm) { const d = vmScopeDenied(req, t.vm, true); if (d) return res.status(d.code).json({ ok: false, reason: d.error }); }
   if (t.error) return res.status(t.code).json({ ok: false, reason: t.error });
   const b = req.body || {};
   const plan = {
