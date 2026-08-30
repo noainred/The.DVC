@@ -42,6 +42,67 @@ export const toolAllowed = (k) => {
   return !denied.includes(k);
 };
 
+/**
+ * 권한(403) 응답 정보 — **'장애'가 아니라 '의도된 접근 제어'** 임을 화면에서 구분하기 위한 값.
+ *
+ * 서버는 권한 거부를 세 형태로 알려준다(server/src/auth/auth.js·routes/admin/shared.js):
+ *   · requireRole          → { error:'forbidden', requiredRole:[...] }
+ *   · requirePerm          → { error:'forbidden', requiredPerm:[...] }
+ *   · requireSettingsOwner → { error:'forbidden', requiredOwner:true, reason }
+ *   · 데이터 범위(scope)   → { ok:false, reason:'...범위...' }  (403, 메타데이터 없음)
+ * 이 정보가 사라지면 화면은 "오류: forbidden" 같은 문구만 남아 사용자가 시스템 장애로 오해한다.
+ */
+export class HttpError extends Error {
+  constructor(message, { status = 0, path = '', body = null } = {}) {
+    super(message);
+    this.name = 'HttpError';
+    this.status = status;
+    this.path = path;
+    this.requiredRole = Array.isArray(body?.requiredRole) ? body.requiredRole : null;
+    this.requiredPerm = Array.isArray(body?.requiredPerm) ? body.requiredPerm : null;
+    this.requiredOwner = !!body?.requiredOwner;
+    this.serverReason = body?.reason || '';
+  }
+}
+/** 권한 거부(=접근 제어)인가. 장애/버그가 아니라 정책에 따른 정상 거부다. */
+export const isPermissionError = (e) => !!e && e.status === 403;
+
+/**
+ * 메시지 → 권한 정보 사이드 채널.
+ *
+ * 왜 필요한가: 공용 `ErrorBox` 는 `message`(문자열)만 받고 86개 파일·132곳이 그 계약에 의존한다
+ * (`usePolling` 도 `error` 를 문자열로 보관). 그 계약을 깨지 않고 403 을 '접근 제어 안내'로
+ * 렌더하려면, 메시지에서 권한 정보를 되찾을 통로가 필요하다.
+ * 오탐 방지: 403 + 권한 메타데이터가 실제로 온 경우에만 등록하고, TTL·상한을 둔다. 서버의 권한
+ * 거부 문구는 고유한 문장이라 같은 문자열이 다른 원인으로 5분 내 재현될 여지는 사실상 없다.
+ */
+const permMemo = new Map();          // message -> { info, at }
+const PERM_MEMO_TTL_MS = 5 * 60_000;
+const PERM_MEMO_MAX = 50;
+export function notePermissionError(message, info) {
+  if (!message || !info) return;
+  permMemo.set(String(message), { info, at: Date.now() });
+  if (permMemo.size > PERM_MEMO_MAX) {
+    // 가장 오래된 항목부터 제거(삽입 순서 = Map 순회 순서).
+    for (const k of permMemo.keys()) { permMemo.delete(k); if (permMemo.size <= PERM_MEMO_MAX) break; }
+  }
+}
+/** 이 메시지가 권한 거부에서 온 것이면 그 정보를, 아니면 null. */
+export function permissionInfoFor(message) {
+  const hit = permMemo.get(String(message ?? ''));
+  if (!hit) return null;
+  if (Date.now() - hit.at > PERM_MEMO_TTL_MS) { permMemo.delete(String(message)); return null; }
+  return hit.info;
+}
+
+/** !res.ok 공통 처리 — 사유를 살리고 403 이면 권한 정보를 보존한다. */
+function httpFail(path, res, data) {
+  const msg = data?.reason || data?.error || `${path} -> ${res.status}`;
+  const err = new HttpError(msg, { status: res.status, path, body: data });
+  if (res.status === 403) notePermissionError(msg, err);
+  return err;
+}
+
 function authHeaders(extra = {}) {
   const token = getToken();
   return token ? { ...extra, Authorization: `Bearer ${token}` } : extra;
@@ -114,8 +175,9 @@ export async function fetchJson(path, params = {}, signal, opts = {}) {
     if (!res.ok) {
       if (attempt < retries && isTransientFront(null, res.status)) { await sleep(300 * 2 ** attempt); continue; }
       // 서버가 준 사유(reason/error)를 우선 노출 — 불투명한 'path -> 404' 대신 원인을 보여준다.
+      // 403 은 권한 정보를 함께 보존해 화면이 '접근 제어 안내'로 렌더할 수 있게 한다(HttpError).
       const data = await res.json().catch(() => null);
-      throw new Error(data?.reason || data?.error || `${path} -> ${res.status}`);
+      throw httpFail(path, res, data);
     }
     return res.json();
   }
@@ -131,7 +193,7 @@ export async function postJson(path, body = {}) {
   });
   if (res.status === 401) { setToken(null); onUnauthorized(); throw new Error('세션이 만료되었습니다.'); }
   const data = await res.json().catch(() => ({}));
-  if (!res.ok && res.status !== 409) throw new Error(data.reason || data.error || `${path} -> ${res.status}`);
+  if (!res.ok && res.status !== 409) throw httpFail(path, res, data);
   return data;
 }
 
@@ -144,7 +206,7 @@ export async function sendJson(path, method, body = {}) {
   });
   if (res.status === 401) { setToken(null); onUnauthorized(); throw new Error('세션이 만료되었습니다.'); }
   const data = await res.json().catch(() => ({}));
-  if (!res.ok && res.status !== 409 && res.status !== 400) throw new Error(data.reason || data.error || `${path} -> ${res.status}`);
+  if (!res.ok && res.status !== 409 && res.status !== 400) throw httpFail(path, res, data);
   return data;
 }
 export const putJson = (path, body) => sendJson(path, 'PUT', body);
@@ -164,7 +226,8 @@ export async function downloadFile(path, filename = '') {
   if (res.status === 401) { setToken(null); onUnauthorized(); throw new Error('세션이 만료되었습니다.'); }
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
-    throw new Error(data.reason || data.error || `다운로드 실패 (${res.status})`);
+    // 403 이면 권한 정보를 보존한다 — 다운로드 버튼도 '권한 없음' 안내로 이어져야 한다.
+    throw httpFail(path, res, data || {});
   }
   const cd = res.headers.get('content-disposition') || '';
   const m = /filename="?([^";]+)"?/i.exec(cd);
@@ -194,7 +257,8 @@ export async function postDownload(path, body = {}, filename = '') {
   if (res.status === 401) { setToken(null); onUnauthorized(); throw new Error('세션이 만료되었습니다.'); }
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
-    throw new Error(data.reason || data.error || `다운로드 실패 (${res.status})`);
+    // 403 이면 권한 정보를 보존한다 — 다운로드 버튼도 '권한 없음' 안내로 이어져야 한다.
+    throw httpFail(path, res, data || {});
   }
   const cd = res.headers.get('content-disposition') || '';
   const m = /filename="?([^";]+)"?/i.exec(cd);
@@ -278,6 +342,9 @@ async function pollFetch(path, params, signal, etag) {
 export function usePolling(path, params = {}, intervalMs = 15_000) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
+  // 권한 거부(403) 정보 — 있으면 뷰가 '접근 제어 안내'로 렌더할 수 있다(ErrorBox 가 자동 처리하므로
+  // 대개 쓸 필요는 없지만, 자체 오류 UI 를 가진 화면이 명시적으로 판정할 수 있게 노출한다).
+  const [errorInfo, setErrorInfo] = useState(null);
   const [loading, setLoading] = useState(true);
   const paramsKey = JSON.stringify(params);
   const savedParams = useRef(params);
@@ -287,25 +354,33 @@ export function usePolling(path, params = {}, intervalMs = 15_000) {
     if (!path) { setLoading(false); return undefined; }
     // 파라미터(스코프) 변경 시 직전 스코프의 데이터를 비운다 — 남겨두면 새 응답이 오기 전까지
     // (고RTT에서 수 초) 이전 스코프의 데이터가 새 선택의 화면처럼 표시된다.
-    setData(null); setError(null); setLoading(true);
+    setData(null); setError(null); setErrorInfo(null); setLoading(true);
     let active = true;
     let inFlight = false;
     let timer = null;
     let lastEtag = null; // 이 (path,params)에 대한 마지막 ETag(효과 재실행 시 리셋)
+    // 권한 거부(403)를 받으면 이 (path,params) 조합의 폴링을 중단한다 — 정책 거부는 재시도해도
+    // 결과가 같고, 15초마다 같은 403 을 만드는 것은 서버 로그·감사만 오염시킨다.
+    let forbidden = false;
     const controller = new AbortController();
 
     const tick = async () => {
-      if (inFlight || !active) return;
+      if (inFlight || !active || forbidden) return;
       inFlight = true;
       try {
         const r = await pollFetch(path, savedParams.current, controller.signal, lastEtag);
         if (active) {
           lastEtag = r.etag || lastEtag;
           if (!r.notModified) setData(r.data); // 304면 직전 데이터 유지(변동 없음)
-          setError(null);
+          setError(null); setErrorInfo(null);
         }
       } catch (err) {
-        if (active && !controller.signal.aborted) setError(err.message);
+        if (active && !controller.signal.aborted) {
+          setError(err.message);
+          // 403 은 일시 오류가 아니라 정책 거부다 — 폴링을 멈춰 같은 거부를 반복 요청하지 않는다
+          // (서버 로그·감사 오염 방지). 권한이 바뀌면 화면 재진입/새로고침으로 다시 시도된다.
+          if (err.status === 403) { forbidden = true; setErrorInfo(err); }
+        }
       } finally {
         inFlight = false;
         if (active) setLoading(false);
@@ -321,12 +396,12 @@ export function usePolling(path, params = {}, intervalMs = 15_000) {
     const loop = async () => {
       if (!active) return;
       if (typeof document === 'undefined' || !document.hidden) await tick();
-      if (active) schedule();
+      if (active && !forbidden) schedule();
     };
     // 탭이 다시 보이면 즉시 한 번 갱신(백그라운드 동안 멈춰 있던 데이터 최신화).
-    const onVisible = () => { if (active && typeof document !== 'undefined' && !document.hidden) tick(); };
+    const onVisible = () => { if (active && !forbidden && typeof document !== 'undefined' && !document.hidden) tick(); };
 
-    tick().then(() => { if (active) schedule(); });
+    tick().then(() => { if (active && !forbidden) schedule(); });
     if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVisible);
 
     return () => {
@@ -338,5 +413,7 @@ export function usePolling(path, params = {}, intervalMs = 15_000) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path, paramsKey, intervalMs]);
 
-  return { data, error, loading };
+  // errorInfo: 403(권한 거부)이면 HttpError, 그 외 null. 공용 ErrorBox 가 자동으로 안내 화면을
+  // 그리므로 대개 쓸 필요는 없고, 자체 오류 UI 를 가진 화면이 명시 판정할 때 쓴다.
+  return { data, error, errorInfo, loading };
 }

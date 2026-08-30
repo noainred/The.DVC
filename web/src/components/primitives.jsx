@@ -7,6 +7,10 @@
 // ⚠ components/ 아래 파일은 './ui.jsx'(셸)가 아니라 이 파일/Modal.jsx 를 직접 import 할 것 —
 // 셸 역참조는 순환의 씨앗이다(views/ 는 셸 사용 유지: 86개 소비자 import 무변경).
 import React, { useMemo, useState, useEffect, useRef } from 'react';
+// 권한 거부(403) 안내 — AccessDenied 는 api.js 만 참조하므로 이 import 로 순환이 생기지 않는다
+// (api.js 는 컴포넌트를 import 하지 않는다). 위 '순환의 씨앗' 주의사항과 배치되지 않음.
+import { permissionInfoFor } from '../api.js';
+import AccessDenied from './AccessDenied.jsx';
 
 /** VM GPU 배지 — vGPU/패스쓰루/혼합. Vms.jsx 에 있던 것을 공용으로 옮겼다(상세 화면 단일화). */
 const GPU_TYPE = { vgpu: ['vGPU', 'green'], passthrough: ['패스쓰루', 'amber'], mixed: ['혼합', 'purple'] };
@@ -186,4 +190,17 @@ export function SearchBox({ value = '', onChange, placeholder, className = 'inpu
 }
 
 export function Loading() { return <div className="loading">불러오는 중…</div>; }
-export function ErrorBox({ message }) { return <div className="error-box">오류: {message}</div>; }
+
+/**
+ * 공용 오류 표시. **권한 거부(403)는 '오류'가 아니라 접근 제어**이므로 안내 화면으로 바꿔 보여준다.
+ *
+ * 여기서 감지하는 이유: 이 컴포넌트가 오류 표시의 단일 지점(86개 파일·132곳)이라, 뷰를 하나하나
+ * 고치지 않고 전 화면에 같은 안내를 적용할 수 있다. 403 여부는 api.js 가 남긴 사이드 채널
+ * (permissionInfoFor)로 판정한다 — `message` 가 문자열이라는 기존 계약을 깨지 않기 위한 통로다.
+ * `info` 를 직접 넘기면(권장) 사이드 채널 없이도 동작한다.
+ */
+export function ErrorBox({ message, info = null }) {
+  const perm = info || permissionInfoFor(message);
+  if (perm) return <AccessDenied info={perm} message={message} />;
+  return <div className="error-box">오류: {message}</div>;
+}
