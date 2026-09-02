@@ -10,7 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { parseCsvRows } from '../util/csv.js';
 
 const FILE = path.join(config.configDir, 'agent-assignments.json');
@@ -23,7 +23,14 @@ export function loadAssignments() {
   try {
     const p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
     return Array.isArray(p?.assignments) ? p.assignments : [];
-  } catch { return []; }
+  } catch (err) {
+    // ⚠ 손상 파일을 조용히 []로 넘기면 다음 save()가 온전했던 원본(=iDRAC 자격증명 전량)을 빈
+    // 목록으로 영구히 덮어쓴다 — server/CLAUDE.md '자격증명 파일은 원자적 쓰기 + 로드 손상
+    // preserveCorrupt' 불변조건. 보존 후에만 빈 값을 반환한다.
+    preserveCorrupt(FILE, err.message);
+    console.error(`[central] agent-assignments.json 파싱 실패: ${err.message}`);
+    return [];
+  }
 }
 
 function save(list) {
@@ -148,7 +155,9 @@ export function importAssignments(incoming, mode = 'merge') {
 // Object.create(null): 에이전트가 보낸 이름이 '__proto__' 등 프로토타입 키여도 오염되지 않게
 // (inventory.js/fleet.js와 동일한 방어 — 일반 {}는 results['__proto__'] 대입이 조용히 유실된다).
 let results = Object.create(null);
-try { if (fs.existsSync(RESULT_FILE)) results = Object.assign(Object.create(null), JSON.parse(fs.readFileSync(RESULT_FILE, 'utf8')) || {}); } catch { results = Object.create(null); }
+// 결과 파일도 동일 규칙 — 손상 시 보존 후 빈 값(다음 저장이 원본을 소거하지 않게).
+try { if (fs.existsSync(RESULT_FILE)) results = Object.assign(Object.create(null), JSON.parse(fs.readFileSync(RESULT_FILE, 'utf8')) || {}); }
+catch (err) { preserveCorrupt(RESULT_FILE, err.message); console.error(`[central] agent-results.json 파싱 실패: ${err.message}`); results = Object.create(null); }
 
 let persistTimer = null;
 function persistResults() {
@@ -157,7 +166,9 @@ function persistResults() {
     persistTimer = null;
     try {
       fs.mkdirSync(path.dirname(RESULT_FILE), { recursive: true });
-      fs.writeFileSync(RESULT_FILE, JSON.stringify(results), { mode: 0o600 });
+      // 원자적 쓰기 — 직접 writeFileSync 는 쓰는 도중 크래시/정전 시 절단본을 남기고,
+      // 위의 로드 catch 가 그 절단본을 보고 빈 값으로 출발하게 만든다(같은 파일 왕복 손상).
+      atomicWriteFileSync(RESULT_FILE, JSON.stringify(results), { mode: 0o600 });
     } catch { /* best effort */ }
   }, 3_000);
   persistTimer.unref?.();

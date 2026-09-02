@@ -1,4 +1,4 @@
-// ìì§ê¸° CRUD/ì´ìÂ·ë°ì´í°ì¼í°Â·VM ì¬êµ¬ì± â admin.js(êµ¬ 2,410ì¤) ë¶í (v2.285.0). ë³¸ë¬¸ì ìë³¸ ê·¸ëë¡, ë±ë¡ ììë admin.js í¸ì¶ ììê° ë³´ì¡´íë¤.
+// 수집기 CRUD/운영·데이터센터·VM 재구성 — admin.js(구 2,410줄) 분할(v2.285.0). 본문은 원본 그대로, 등록 순서는 admin.js 호출 순서가 보존한다.
 import { config } from '../../config.js';
 import { requirePerm, setLocalPassword } from '../../auth/auth.js';
 import { inUserScope, inUserWriteScope } from '../../auth/scope.js';
@@ -21,19 +21,19 @@ import { upgradeManager } from '../../upgrade/manager.js';
 import { adminOnly, ensureCollectorDatacenter, requireSettingsOwner } from './shared.js';
 
 
-// ââ VM ì¬ì ë³ê²½(ReconfigVM) â vCPU/RAM/ëì¤í¬ ì¦ì¤Â·ì¶ê°, NIC ì¶ê°/ì­ì  (ê´ë¦¬ì) ââââââââââ
-// vmId íì '<vcId>:<moref>'. ì¤ëì·ì¼ë¡ VM ì¡´ì¬Â·vCenter ìê²©ì¦ëªì íì¸í ë¤ SOAP ì¤í.
+// ── VM 사양 변경(ReconfigVM) — vCPU/RAM/디스크 증설·추가, NIC 추가/삭제 (관리자) ──────────
+// vmId 형식 '<vcId>:<moref>'. 스냅샷으로 VM 존재·vCenter 자격증명을 확인한 뒤 SOAP 실행.
 function resolveVmTarget(vmId) {
   const snap = store.get();
   const vm = (snap.vms || []).find((v) => v.id === vmId);
-  if (!vm) return { error: 'VMì ì°¾ì ì ììµëë¤(íì¬ ì¤ëì·ì ìì â í´ë¹ vCenter ì°ê²°ì´ ëê²¼ê±°ë í´ë§ ì ì¼ ì ììµëë¤).', code: 404 };
-  if (snap.source === 'mock') return { error: 'ë°ëª¨(mock) ëª¨ëììë ì¬ì ë³ê²½ì ì¬ì©í  ì ììµëë¤.', code: 400 };
+  if (!vm) return { error: 'VM을 찾을 수 없습니다(현재 스냅샷에 없음 — 해당 vCenter 연결이 끊겼거나 폴링 전일 수 있습니다).', code: 404 };
+  if (snap.source === 'mock') return { error: '데모(mock) 모드에서는 사양 변경을 사용할 수 없습니다.', code: 400 };
   const sep = String(vmId).indexOf(':');
   const vcId = sep >= 0 ? vmId.slice(0, sep) : vmId;
   const moref = sep >= 0 ? vmId.slice(sep + 1) : '';
   const vc = (loadVcenterConfig().vcenters || []).find((v) => v.id === vcId);
-  // vCenterê° ì´ í¬íì ì§ì  ë±ë¡ë¼ ìì§ ìì¼ë©´(ìì/ì£ì§ ìì§ vCenter) ìê²©ì¦ëªì´ ìì´ ì¬ì ë³ê²½ ë¶ê°.
-  if (!vc) return { error: `ì´ VMì vCenter('${vcId}')ê° ì´ í¬íì ë±ë¡ëì´ ìì§ ìì ì¬ì ë³ê²½ì í  ì ììµëë¤(ìì/ì£ì§ ìì§ vCenter). í´ë¹ vCenterê° ì§ì  ë±ë¡ë í¬íìì ë³ê²½íì¸ì.`, code: 400 };
+  // vCenter가 이 포탈에 직접 등록돼 있지 않으면(위임/엣지 수집 vCenter) 자격증명이 없어 사양 변경 불가.
+  if (!vc) return { error: `이 VM의 vCenter('${vcId}')가 이 포탈에 등록되어 있지 않아 사양 변경을 할 수 없습니다(위임/엣지 수집 vCenter). 해당 vCenter가 직접 등록된 포탈에서 변경하세요.`, code: 400 };
   return { vm, vc, moref, snap };
 }
 
@@ -74,22 +74,22 @@ adminRouter.get('/collectors', adminOnly, (_req, res) => {
 });
 
 adminRouter.post('/collectors', adminOnly, (req, res) => {
-  // ê´ë¦¬ì UI ë±ë¡ = ìë ê³ ì (managed) â ì£ì§ ìê¸°ë±ë¡ì´ URL/í í°ì ë®ì´ì°ì§ ëª»íê².
+  // 관리자 UI 등록 = 수동 고정(managed) — 엣지 자기등록이 URL/토큰을 덮어쓰지 못하게.
   const result = addCollector(req.body || {}, { managed: true });
-  if (result.ok) { ensureCollectorDatacenter(result.collector); pullNow().catch(() => {}); logAudit({ user: req.user?.username, action: 'ìì§ ìë² ë±ë¡', target: result.collector?.id || '', detail: `url=${result.collector?.url || ''} vcenterId=${result.collector?.vcenterId || ''}`, ip: req.ip || '' }); }
+  if (result.ok) { ensureCollectorDatacenter(result.collector); pullNow().catch(() => {}); logAudit({ user: req.user?.username, action: '수집 서버 등록', target: result.collector?.id || '', detail: `url=${result.collector?.url || ''} vcenterId=${result.collector?.vcenterId || ''}`, ip: req.ip || '' }); }
   res.status(result.ok ? 201 : 400).json(result);
 });
 
 adminRouter.put('/collectors/:id', adminOnly, (req, res) => {
-  // ê´ë¦¬ì UI ìì  = ìë ê³ ì (managed) â ì ì¥í URL/í í°ì´ ìê¸°ë±ë¡ì¼ë¡ ìë³µëë ë²ê·¸ ë°©ì§.
+  // 관리자 UI 수정 = 수동 고정(managed) — 저장한 URL/토큰이 자기등록으로 원복되던 버그 방지.
   const result = updateCollector(req.params.id, req.body || {}, { managed: true });
   if (result.ok) {
     ensureCollectorDatacenter(result.collector);
-    // ë¹íì±í ì ê·¸ ìì§ê¸°ì ìê²© ë°ì´í°ë ì¦ì ê±·ì´ë¸ë¤ â íë¬ë disabledë¥¼ ê±´ëë°ë¯ë¡
-    // ë¨ê²¨ëë©´ ìë² ë¶ì/ì ë ¥ íë©´ì ì ë ¹ ìë²ê° ì¬ìì ì ê¹ì§ ê³ì íìëë¤.
+    // 비활성화 시 그 수집기의 원격 데이터도 즉시 걷어낸다 — 풀러는 disabled를 건너뛰므로
+    // 남겨두면 서버 분석/전력 화면에 유령 서버가 재시작 전까지 계속 표시된다.
     if (result.collector?.enabled === false) { clearCollectorHosts(req.params.id); clearCollectorServers(req.params.id); }
     pullNow().catch(() => {});
-    logAudit({ user: req.user?.username, action: 'ìì§ ìë² ìì ', target: req.params.id, detail: `url=${result.collector?.url || ''} vcenterId=${result.collector?.vcenterId || ''}`, ip: req.ip || '' });
+    logAudit({ user: req.user?.username, action: '수집 서버 수정', target: req.params.id, detail: `url=${result.collector?.url || ''} vcenterId=${result.collector?.vcenterId || ''}`, ip: req.ip || '' });
   }
   res.status(result.ok ? 200 : 400).json(result);
 });
@@ -97,27 +97,27 @@ adminRouter.put('/collectors/:id', adminOnly, (req, res) => {
 adminRouter.delete('/collectors/:id', adminOnly, (req, res) => {
   const result = removeCollector(req.params.id);
   if (result.ok) {
-    clearCollectorHosts(req.params.id);   // ìê²© ì ë ¥ ë³í© ìí ì ê±°
-    clearCollectorServers(req.params.id); // ìë² ë¶ìì© ìê²© ì¸ë²¤í ë¦¬ ì ê±°(ì ë ¹ ìë² ë°©ì§)
-    logAudit({ user: req.user?.username, action: 'ìì§ ìë² ì­ì ', target: req.params.id, ip: req.ip || '' });
+    clearCollectorHosts(req.params.id);   // 원격 전력 병합 상태 제거
+    clearCollectorServers(req.params.id); // 서버 분석용 원격 인벤토리 제거(유령 서버 방지)
+    logAudit({ user: req.user?.username, action: '수집 서버 삭제', target: req.params.id, ip: req.ip || '' });
   }
   res.status(result.ok ? 200 : 404).json(result);
 });
 
-/* ââ ìì§ ìë² CSV ì¼ê´ ê´ë¦¬(v2.338, ì¬ì©ì ìêµ¬) â ë´ë³´ë´ê¸°Â·ìíÂ·ê°ì ¸ì¤ê¸°. âââââââââââââââ
- * ì¤í ë¦¬ì§ ì¥ë¹ CSV(v2.313Â·2.317)ì ëì¼ ê³¨ê²©: ê¸°ë³¸ export ë í í° ì ì¸, ?tokens=1 ì
- * requireSettingsOwner ê²ì´í¸(ìê²©ì¦ëª ë¤í â ë°±ì ë¼ì°í¸ì ê°ì ê·ì¹) + ê°ì¬ë¡ê·¸.
- * ê°ì ¸ì¤ê¸°ë dryRun(ë¬¸ë²Â·ì¤ë³µÂ·SSRF ê²ì¦, ì ì¥ ìì) â ì»¤ë° 2ë¨ê³ì´ê³ , ê¸°ì¡´ id ì ê²¹ì¹ë
- * í(ë®ì´ì°ê¸°)ì body.overwrite=true ë¥¼ ëªìí´ì¼ë§ ì ì©ëë¤(ì¬ì©ì ìêµ¬ 'overwrite ì¬ë¶ íì¸').
+/* ── 수집 서버 CSV 일괄 관리(v2.338, 사용자 요구) — 내보내기·샘플·가져오기. ───────────────
+ * 스토리지 장비 CSV(v2.313·2.317)와 동일 골격: 기본 export 는 토큰 제외, ?tokens=1 은
+ * requireSettingsOwner 게이트(자격증명 덤프 — 백업 라우트와 같은 규칙) + 감사로그.
+ * 가져오기는 dryRun(문법·중복·SSRF 검증, 저장 없음) → 커밋 2단계이고, 기존 id 와 겹치는
+ * 행(덮어쓰기)은 body.overwrite=true 를 명시해야만 적용된다(사용자 요구 'overwrite 여부 확인').
  */
 
-// íì¬ ë±ë¡ ìì§ ìë²ë¥¼ CSV ë¡ ë´ë³´ë´ê¸°. ê¸°ë³¸ì í í° ì ì¸(listCollectors redact ê³ì½).
+// 현재 등록 수집 서버를 CSV 로 내보내기. 기본은 토큰 제외(listCollectors redact 계약).
 adminRouter.get('/collectors/export.csv', adminOnly, (req, res) => {
   const withTok = String(req.query.tokens || '') === '1';
   const send = () => {
     const list = loadCollectors();
     const csv = collectorsToCsv(list, { includeTokens: withTok });
-    logAudit({ user: req.user?.username, action: withTok ? 'ìì§ ìë² CSV ë´ë³´ë´ê¸°(í í° í¬í¨)' : 'ìì§ ìë² CSV ë´ë³´ë´ê¸°', detail: `${list.length}ë`, ip: req.ip || '' });
+    logAudit({ user: req.user?.username, action: withTok ? '수집 서버 CSV 내보내기(토큰 포함)' : '수집 서버 CSV 내보내기', detail: `${list.length}대`, ip: req.ip || '' });
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="collectors${withTok ? '-with-tokens' : ''}.csv"`);
     res.send(csv);
@@ -126,7 +126,7 @@ adminRouter.get('/collectors/export.csv', adminOnly, (req, res) => {
   send();
 });
 
-/** ìí CSV ííë¦¿ ë¤ì´ë¡ë â í¤ë + ì»¬ë¼ ì¤ëª ì£¼ì + ìì 2í. */
+/** 샘플 CSV 템플릿 다운로드 — 헤더 + 컬럼 설명 주석 + 예시 2행. */
 adminRouter.get('/collectors/sample.csv', adminOnly, (_req, res) => {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="collectors-sample.csv"');
@@ -134,19 +134,19 @@ adminRouter.get('/collectors/sample.csv', adminOnly, (_req, res) => {
 });
 
 /**
- * CSV ì¼ê´ ê°ì ¸ì¤ê¸° â body { csv, dryRun?, overwrite? }.
- *  - dryRun=true: ì ì¥íì§ ìê³  íë³ íì (add/overwrite/error + ì¬ì )ë§ ë°í. ê²ì¦ ê·ì¹ì
- *    ì¤ì  ì ì¥ê³¼ ëì¼(registry.collectorInputIssue â normalize ë¨ì¼ ìì¤, SSRF/URL í¬í¨).
- *  - ì»¤ë°: add íì ë±ë¡, overwrite íì **overwrite=true ì¼ ëë§** ê°±ì (ìëë©´ skipped ë¡
- *    ë³´ê³  â ê¸°ì¡´ URL/í í°/ë§¤íì ì¤ìë¡ ê°ììë ì¬ê³  ë°©ì§). íë³ ì±ê³µ/ì¤í¨ ì ì§ ë°í.
- *  - ê°ì ¸ì¨ í­ëª©ì ê´ë¦¬ì ìë ë±ë¡ê³¼ ëì¼íê² managed=true(ìê¸°ë±ë¡ì´ ëª» ë®ì´ì).
+ * CSV 일괄 가져오기 — body { csv, dryRun?, overwrite? }.
+ *  - dryRun=true: 저장하지 않고 행별 판정(add/overwrite/error + 사유)만 반환. 검증 규칙은
+ *    실제 저장과 동일(registry.collectorInputIssue — normalize 단일 소스, SSRF/URL 포함).
+ *  - 커밋: add 행은 등록, overwrite 행은 **overwrite=true 일 때만** 갱신(아니면 skipped 로
+ *    보고 — 기존 URL/토큰/매핑을 실수로 갈아엎는 사고 방지). 행별 성공/실패 정직 반환.
+ *  - 가져온 항목은 관리자 수동 등록과 동일하게 managed=true(자기등록이 못 덮어씀).
  */
 adminRouter.post('/collectors/import', adminOnly, (req, res) => {
   const { rows, error } = parseCollectorsCsv(String(req.body?.csv || ''));
   if (error) return res.status(400).json({ ok: false, reason: error });
-  if (!rows.length) return res.status(400).json({ ok: false, reason: 'ê°ì ¸ì¬ ë°ì´í° íì´ ììµëë¤.' });
+  if (!rows.length) return res.status(400).json({ ok: false, reason: '가져올 데이터 행이 없습니다.' });
 
-  // ëìë¬¸ì ë¬´ì id ì¡°í â ê¸°ì¡´ í­ëª©ì ì¤ì  id(registry dedupe ê·ì¹ê³¼ ëì¼ í¤).
+  // 대소문자 무시 id 조회 → 기존 항목의 실제 id(registry dedupe 규칙과 동일 키).
   const existing = new Map(loadCollectors().map((c) => [String(c.id).toLowerCase(), c.id]));
   const existingId = (id) => existing.get(String(id).toLowerCase());
 
@@ -163,10 +163,10 @@ adminRouter.post('/collectors/import', adminOnly, (req, res) => {
     if (verdict?.action === 'error') { failed.push({ line: verdict.line, id: verdict.id, reason: verdict.reason }); continue; }
     const input = { id: row.id, name: row.name, url: row.url, datacenter: row.datacenter,
       vcenterId: row.vcenterId, enabled: row.enabled };
-    if (row._hasToken) input.token = row.token; // ë¹ì°ë©´ ê¸°ì¡´ ì ì§(normalize ê·ì¹)
+    if (row._hasToken) input.token = row.token; // 비우면 기존 유지(normalize 규칙)
     const curId = existingId(row.id);
     if (curId) {
-      if (!allowOverwrite) { skipped.push({ line: row._line, id: row.id, reason: 'ê¸°ì¡´ í­ëª© â ë®ì´ì°ê¸° ë¯¸íì©(overwrite íì¸ íì)' }); continue; }
+      if (!allowOverwrite) { skipped.push({ line: row._line, id: row.id, reason: '기존 항목 — 덮어쓰기 미허용(overwrite 확인 필요)' }); continue; }
       const r = updateCollector(curId, input, { managed: true });
       if (r.ok) { overwritten++; ensureCollectorDatacenter(r.collector); }
       else failed.push({ line: row._line, id: row.id, reason: r.reason });
@@ -177,13 +177,13 @@ adminRouter.post('/collectors/import', adminOnly, (req, res) => {
     }
   }
   if (added || overwritten) pullNow().catch(() => {});
-  logAudit({ user: req.user?.username, action: 'ìì§ ìë² CSV ê°ì ¸ì¤ê¸°', detail: `ì¶ê° ${added}Â·ë®ì´ì°ê¸° ${overwritten}Â·ê±´ëë ${skipped.length}Â·ì¤í¨ ${failed.length}`, ip: req.ip || '' });
+  logAudit({ user: req.user?.username, action: '수집 서버 CSV 가져오기', detail: `추가 ${added}·덮어쓰기 ${overwritten}·건너뜀 ${skipped.length}·실패 ${failed.length}`, ip: req.ip || '' });
   res.json({ ok: true, added, overwritten, skipped, failed, total: rows.length });
 });
 
-// ì£ì§ í¬í ë¡ì»¬ ê³ì  ë¹ë°ë²í¸ ì¼ê´ ë³ê²½ â ê¸°ë³¸(admin) ë¹ë²ì ì¤ììì í ë²ì êµì²´.
-// Body: { username?='admin', password, ids?: string[](ë¯¸ì§ì =íì± ì ì²´), includeCentral?: boolean }
-// ì£ì§ì /api/collector/set-password(COLLECTOR_TOKEN ê°ë)ë¡ ë³ë ¬ í¸ì. ë¹ë°ë²í¸ë ì´ëìë ë¡ê¹íì§ ìëë¤.
+// 엣지 포탈 로컬 계정 비밀번호 일괄 변경 — 기본(admin) 비번을 중앙에서 한 번에 교체.
+// Body: { username?='admin', password, ids?: string[](미지정=활성 전체), includeCentral?: boolean }
+// 엣지의 /api/collector/set-password(COLLECTOR_TOKEN 가드)로 병렬 푸시. 비밀번호는 어디에도 로깅하지 않는다.
 // ⚠ requireSettingsOwner(6차 재감사): username 이 요청 본문으로 완전히 제어되고, 서버가 저장된
 // 엣지 토큰을 대신 붙여 푸시하므로 호출자는 COLLECTOR_TOKEN 을 몰라도 된다. 즉 이 라우트는
 // '전 엣지의 임의 계정 비밀번호를 심는 권능'이다 — /admin/edge-users* 를 소유자 전용으로 올린
@@ -192,13 +192,13 @@ adminRouter.post('/collectors/import', adminOnly, (req, res) => {
 adminRouter.post('/collectors/set-password', adminOnly, requireSettingsOwner, async (req, res) => {
   const username = String(req.body?.username || 'admin').trim();
   const password = String(req.body?.password || '');
-  if (password.length < 8) return res.status(400).json({ ok: false, reason: 'ë¹ë°ë²í¸ë 8ì ì´ìì´ì´ì¼ í©ëë¤.' });
-  if (password.length > 128) return res.status(400).json({ ok: false, reason: 'ë¹ë°ë²í¸ë 128ì ì´íì¬ì¼ í©ëë¤.' });
+  if (password.length < 8) return res.status(400).json({ ok: false, reason: '비밀번호는 8자 이상이어야 합니다.' });
+  if (password.length > 128) return res.status(400).json({ ok: false, reason: '비밀번호는 128자 이하여야 합니다.' });
   const idFilter = Array.isArray(req.body?.ids) && req.body.ids.length ? new Set(req.body.ids.map(String)) : null;
   const targets = loadCollectors().filter((c) => c.enabled !== false && c.url && (!idFilter || idFilter.has(String(c.id))));
 
   const results = await Promise.all(targets.map(async (c) => {
-    if (!c.token) return { id: c.id, name: c.name || c.id, ok: false, reason: 'ì´ ìì§ ìë²ì ì ì¥ë í í°ì´ ììµëë¤(ìì ìì í í° ìë ¥).' };
+    if (!c.token) return { id: c.id, name: c.name || c.id, ok: false, reason: '이 수집 서버에 저장된 토큰이 없습니다(수정에서 토큰 입력).' };
     try {
       const r = await resilientFetch(`${String(c.url).replace(/\/+$/, '')}/api/collector/set-password`, {
         method: 'POST',
@@ -207,15 +207,15 @@ adminRouter.post('/collectors/set-password', adminOnly, requireSettingsOwner, as
         timeoutMs: 15_000, retries: 1,
       });
       const body = await r.json().catch(() => ({}));
-      if (r.status === 404) return { id: c.id, name: c.name || c.id, ok: false, reason: 'ì£ì§ê° ì´ ê¸°ë¥ì ì§ìíì§ ììµëë¤(v2.107 ë¯¸ë§ â ë¨¼ì  ìê·¸ë ì´ëíì¸ì).' };
-      if (r.status === 403) return { id: c.id, name: c.name || c.id, ok: false, reason: 'í í° ë¶ì¼ì¹(ì£ì§ COLLECTOR_TOKEN íì¸).' };
+      if (r.status === 404) return { id: c.id, name: c.name || c.id, ok: false, reason: '엣지가 이 기능을 지원하지 않습니다(v2.107 미만 — 먼저 업그레이드하세요).' };
+      if (r.status === 403) return { id: c.id, name: c.name || c.id, ok: false, reason: '토큰 불일치(엣지 COLLECTOR_TOKEN 확인).' };
       return { id: c.id, name: c.name || c.id, ok: r.ok && body.ok !== false, reason: body.reason || (r.ok ? null : `HTTP ${r.status}`), edgeVersion: body.version || null, totpEnabled: body.totpEnabled || false };
     } catch (e) {
-      return { id: c.id, name: c.name || c.id, ok: false, reason: `ì°ê²° ì¤í¨: ${e.message}` };
+      return { id: c.id, name: c.name || c.id, ok: false, reason: `연결 실패: ${e.message}` };
     }
   }));
 
-  // ìµì: ì¤ì í¬í ìì ì ëì¼ ê³ì ë í¨ê» ë³ê²½(ì£ì§/ì¤ì ë¹ë² íµì¼ì©).
+  // 옵션: 중앙 포탈 자신의 동일 계정도 함께 변경(엣지/중앙 비번 통일용).
   let central = null;
   if (req.body?.includeCentral === true) {
     // actor 전달: 관리자 세션 경로이므로 보호 계정(수퍼관리자·설정소유자) 대리 변경 경계를 적용한다
@@ -225,51 +225,51 @@ adminRouter.post('/collectors/set-password', adminOnly, requireSettingsOwner, as
   }
 
   const okN = results.filter((r) => r.ok).length;
-  logAudit({ user: req.user?.username, action: 'ì£ì§ ë¹ë°ë²í¸ ì¼ê´ ë³ê²½', target: username, detail: `ì±ê³µ ${okN}/${results.length}${central ? ` Â· ì¤ì ${central.ok ? 'ë³ê²½' : 'ì¤í¨'}` : ''}`, ip: req.ip || '' });
+  logAudit({ user: req.user?.username, action: '엣지 비밀번호 일괄 변경', target: username, detail: `성공 ${okN}/${results.length}${central ? ` · 중앙 ${central.ok ? '변경' : '실패'}` : ''}`, ip: req.ip || '' });
   res.json({ ok: true, username, total: results.length, succeeded: okN, results, central });
 });
 
-// ââ DataCenter(ë²ì¸) â vCenterì ìì ê°ë. ì¤ì ìì ì¢ë¥ ì ì + vCenter í ë¹ (ê´ë¦¬ì) ââââââââ
+// ── DataCenter(법인) — vCenter의 상위 개념. 설정에서 종류 정의 + vCenter 할당 (관리자) ────────
 adminRouter.get('/datacenters', adminOnly, (_req, res) => {
-  // ë°±í: ë±ë¡ë ìì§ ìë²ì ë°ì´í°ì¼í°ë¥¼ DataCenter ëª©ë¡ì ìì¼ë©´ ìë ìì±(ì´ë¯¸ ë±ë¡ë OC1 ê°ì
-  // ìì§ê¸°ë ì¬ë±ë¡ ìì´ 'ì¤ìº ëì­ ì¶ê°' ë±ìì ë°ë¡ ë³´ì´ê² íë¤). idempotent.
+  // 백필: 등록된 수집 서버의 데이터센터를 DataCenter 목록에 없으면 자동 생성(이미 등록된 OC1 같은
+  // 수집기도 재등록 없이 '스캔 대역 추가' 등에서 바로 보이게 한다). idempotent.
   try { for (const c of loadCollectors()) ensureCollectorDatacenter(c); } catch { /* best effort */ }
   res.json({ datacenters: listDatacenters(), assign: getDatacenterAssign() });
 });
 adminRouter.post('/datacenters', adminOnly, (req, res) => {
   const r = addDatacenter(req.body || {});
-  if (r.ok) logAudit({ user: req.user?.username, action: 'DataCenter ë±ë¡', target: r.datacenter?.id || '', detail: r.datacenter?.name || '', ip: req.ip || '' });
+  if (r.ok) logAudit({ user: req.user?.username, action: 'DataCenter 등록', target: r.datacenter?.id || '', detail: r.datacenter?.name || '', ip: req.ip || '' });
   res.status(r.ok ? 201 : 400).json(r);
 });
-// '/datacenters/assign'ì '/:id'ë³´ë¤ ë¨¼ì  ë¬ì¼ ë¼ì°í¸ ì¶©ëì´ ìë¤.
+// '/datacenters/assign'을 '/:id'보다 먼저 둬야 라우트 충돌이 없다.
 adminRouter.put('/datacenters/assign', adminOnly, (req, res) => {
   const entries = Array.isArray(req.body?.entries) ? req.body.entries.slice(0, 5000) : [];
-  if (!entries.length) return res.status(400).json({ ok: false, reason: 'entriesê° ë¹ììµëë¤.' });
+  if (!entries.length) return res.status(400).json({ ok: false, reason: 'entries가 비었습니다.' });
   const r = setVcenterDatacenterMany(entries);
-  if (r.ok) logAudit({ user: req.user?.username, action: 'vCenterâDataCenter í ë¹', target: `${r.changed}ê±´`, ip: req.ip || '' });
+  if (r.ok) logAudit({ user: req.user?.username, action: 'vCenter→DataCenter 할당', target: `${r.changed}건`, ip: req.ip || '' });
   res.status(r.ok ? 200 : 400).json(r);
 });
 adminRouter.put('/datacenters/:id', adminOnly, (req, res) => {
   const r = updateDatacenter(req.params.id, req.body || {});
-  if (r.ok) logAudit({ user: req.user?.username, action: 'DataCenter ìì ', target: req.params.id, ip: req.ip || '' });
+  if (r.ok) logAudit({ user: req.user?.username, action: 'DataCenter 수정', target: req.params.id, ip: req.ip || '' });
   res.status(r.ok ? 200 : 400).json(r);
 });
 adminRouter.delete('/datacenters/:id', adminOnly, (req, res) => {
   const r = removeDatacenter(req.params.id);
-  if (r.ok) logAudit({ user: req.user?.username, action: 'DataCenter ì­ì ', target: req.params.id, ip: req.ip || '' });
+  if (r.ok) logAudit({ user: req.user?.username, action: 'DataCenter 삭제', target: req.params.id, ip: req.ip || '' });
   res.status(r.ok ? 200 : 404).json(r);
 });
-// DataCenter íì ìì(vCenter ììì ëì¼í ê°ë) â ëª¨ë  'DataCenter ì í' ëª©ë¡ì ì ì©.
+// DataCenter 표시 순서(vCenter 순서와 동일한 개념) — 모든 'DataCenter 선택' 목록에 적용.
 adminRouter.get('/datacenter-order', adminOnly, (_req, res) => {
   res.json({ order: getDatacenterOrder(), datacenters: listDatacenters().map((d) => ({ id: d.id, name: d.name, region: d.region || '' })) });
 });
 adminRouter.put('/datacenter-order', adminOnly, (req, res) => {
   const r = saveDatacenterOrder((req.body || {}).order);
-  if (r.ok) logAudit({ user: req.user?.username, action: 'DataCenter ìì ë³ê²½', detail: `${(r.order || []).length}ê°`, ip: req.ip || '' });
+  if (r.ok) logAudit({ user: req.user?.username, action: 'DataCenter 순서 변경', detail: `${(r.order || []).length}개`, ip: req.ip || '' });
   res.status(r.ok ? 200 : 400).json(r);
 });
 
-// íì¬ íëì¨ì´ + NIC ì¶ê°ì© ë¤í¸ìí¬ ëª©ë¡.
+// 현재 하드웨어 + NIC 추가용 네트워크 목록.
 adminRouter.get('/vm/:id/hardware', requirePerm('vm.reconfig'), async (req, res) => {
   const t = resolveVmTarget(req.params.id);
   // 조회 범위 밖이면 404(존재 은닉) — 범위 밖 VM 의 하드웨어 구성 노출 차단(v2.389).
@@ -277,13 +277,13 @@ adminRouter.get('/vm/:id/hardware', requirePerm('vm.reconfig'), async (req, res)
   if (t.error) return res.status(t.code).json({ ok: false, reason: t.error });
   try {
     const hw = await getVmHardware(t.vc, t.moref);
-    // ì´ë¦ ìì°ì ë ¬(ì«ì ì ë¯¸ì¬ ê³ ë ¤: uplink1 < uplink10, VMAX-2 < VMAX-10).
+    // 이름 자연정렬(숫자 접미사 고려: uplink1 < uplink10, VMAX-2 < VMAX-10).
     const byName = (a, b) => String(a.name).localeCompare(String(b.name), undefined, { numeric: true, sensitivity: 'base' });
     const networks = (t.snap.networks || [])
       .filter((n) => n.vcenterId === t.vc.id)
       .map((n) => ({ id: n.id, name: n.name, type: n.type, moref: String(n.id).split(':').slice(1).join(':') }))
       .sort(byName);
-    // ëì¤í¬ ì¶ê° ì ì íí  ë°ì´í°ì¤í ì´ íë³´(í´ë¹ vCenter). ì´ë¦ìì¼ë¡ ì ë ¬(ì¬ì /ì´ì©ëì ë¼ë²¨ì íì).
+    // 디스크 추가 시 선택할 데이터스토어 후보(해당 vCenter). 이름순으로 정렬(여유/총용량은 라벨에 표시).
     const datastores = (t.snap.datastores || [])
       .filter((d) => d.vcenterId === t.vc.id)
       .map((d) => ({ name: d.name, freeGB: d.freeGB, capacityGB: d.capacityGB }))
@@ -292,7 +292,7 @@ adminRouter.get('/vm/:id/hardware', requirePerm('vm.reconfig'), async (req, res)
   } catch (e) { res.status(502).json({ ok: false, reason: e.message }); }
 });
 
-// ì¬ì ë³ê²½ ì¤í. body: { numCPUs?, memoryMB?, diskGrows?, diskAdds?, nicAdds?, nicRemoves? }
+// 사양 변경 실행. body: { numCPUs?, memoryMB?, diskGrows?, diskAdds?, nicAdds?, nicRemoves? }
 adminRouter.post('/vm/:id/reconfig', requirePerm('vm.reconfig'), async (req, res) => {
   const t = resolveVmTarget(req.params.id);
   // 상태변경 — 조회 범위 밖 404, 쓰기 범위 밖 403(v2.389). 형제 라우트와 동일 규약.
@@ -312,23 +312,23 @@ adminRouter.post('/vm/:id/reconfig', requirePerm('vm.reconfig'), async (req, res
     nicRemoves: Array.isArray(b.nicRemoves) ? b.nicRemoves.slice(0, 10) : [],
     nicConnects: Array.isArray(b.nicConnects) ? b.nicConnects.slice(0, 20) : [],
   };
-  // ì íí ë°ì´í°ì¤í ì´ê° ì´ vCenterì ì¤ì  ë°ì´í°ì¤í ì´ì¸ì§ ê²ì¦(ì¤íÂ·í vCenter ì°¨ë¨).
+  // 선택한 데이터스토어가 이 vCenter의 실제 데이터스토어인지 검증(오타·타 vCenter 차단).
   const validDs = new Set((t.snap.datastores || []).filter((d) => d.vcenterId === t.vc.id).map((d) => d.name));
   for (const a of plan.diskAdds) {
-    if (a.datastore && !validDs.has(a.datastore)) return res.status(400).json({ ok: false, reason: `ë°ì´í°ì¤í ì´ '${a.datastore}'ë¥¼ ì°¾ì ì ììµëë¤(ì´ vCenterì ë°ì´í°ì¤í ì´ë¥¼ ì ííì¸ì).` });
+    if (a.datastore && !validDs.has(a.datastore)) return res.status(400).json({ ok: false, reason: `데이터스토어 '${a.datastore}'를 찾을 수 없습니다(이 vCenter의 데이터스토어를 선택하세요).` });
   }
   try {
     const r = await reconfigVm(t.vc, t.moref, plan);
     logAudit({
-      user: req.user?.username, action: 'VM ì¬ì ë³ê²½',
+      user: req.user?.username, action: 'VM 사양 변경',
       target: t.vm.name,
-      detail: r.ok ? (r.changes || []).join(', ') : `ì¤í¨: ${r.error}`,
+      detail: r.ok ? (r.changes || []).join(', ') : `실패: ${r.error}`,
       ip: req.ip || '',
     });
     if (r.ok) { store.refresh().catch(() => {}); return res.json({ ok: true, changes: r.changes }); }
     res.status(400).json({ ok: false, reason: r.error, changes: r.changes });
   } catch (e) {
-    logAudit({ user: req.user?.username, action: 'VM ì¬ì ë³ê²½', target: t.vm.name, detail: `ì¤ë¥: ${e.message}`, ip: req.ip || '' });
+    logAudit({ user: req.user?.username, action: 'VM 사양 변경', target: t.vm.name, detail: `오류: ${e.message}`, ip: req.ip || '' });
     res.status(502).json({ ok: false, reason: e.message });
   }
 });
@@ -345,9 +345,9 @@ adminRouter.post('/collectors/upgrade', adminOnly, async (req, res) => {
   const { id, force } = req.body || {};
   const bundle = await resolveBundleBytes(upgradeManager.settings);
   if (!bundle) {
-    // ë¬´ê²°ì± ê²ì¦ ì¤í¨(sha ë¶ì¼ì¹/ë¶ì¬)ì 'ë²ë¤ ìì²´ê° ìì'ì êµ¬ë¶í´ ìë¦°ë¤.
+    // 무결성 검증 실패(sha 불일치/부재)와 '번들 자체가 없음'을 구분해 알린다.
     const why = lastBundleReject();
-    return res.status(409).json({ ok: false, reason: why || 'ìê·¸ë ì´ë ë²ë¤ì ì°¾ì ì ììµëë¤ (ê°ì í´ë/ìê²© ìì¤ íì¸).' });
+    return res.status(409).json({ ok: false, reason: why || '업그레이드 번들을 찾을 수 없습니다 (감시 폴더/원격 소스 확인).' });
   }
   const results = await pushUpgradeToCollectors(bundle.bytes, { ids: id ? [id] : null, force: Boolean(force) });
   const ok = results.filter((r) => r.ok).length;
@@ -359,32 +359,32 @@ adminRouter.post('/collectors/test', adminOnly, async (req, res) => {
   const body = req.body || {};
   let { url, token } = body;
   if (body.id) { const saved = loadCollectors().find((c) => c.id === body.id); if (saved) { url = url || saved.url; token = token || saved.token; } }
-  if (!url) return res.status(400).json({ ok: false, reason: 'urlì´ íìí©ëë¤.' });
+  if (!url) return res.status(400).json({ ok: false, reason: 'url이 필요합니다.' });
   if (!/^https?:\/\//.test(url)) url = `http://${url}`;
-  // SSRF ë°©ì´: ë§í¬ë¡ì»¬/í´ë¼ì°ë ë©íë°ì´í° ì£¼ìë¡ë í í°ì ë¶ì¬ ìì²­íì§ ìëë¤(ë±ë¡ ê²½ë¡ì ëì¼ ê°ë).
+  // SSRF 방어: 링크로컬/클라우드 메타데이터 주소로는 토큰을 붙여 요청하지 않는다(등록 경로와 동일 가드).
   const ssrf = ssrfBlockReason(url);
   if (ssrf) return res.status(400).json({ ok: false, reason: ssrf });
   const started = Date.now();
   let retried = 0;
   try {
-    // ë¨ë° fetchë ê³ RTTÂ·ì¼ìì  ë¤í¸ìí¬ ë¸ë¦½ì 'ê°ë ì°ê²° ì ë¨'ì¼ë¡ ì¤íëë¤ â ì¬ìëë¡ í¡ì.
+    // 단발 fetch는 고RTT·일시적 네트워크 블립에 '가끔 연결 안 됨'으로 오판된다 → 재시도로 흡수.
     const r = await resilientFetch(`${url.replace(/\/+$/, '')}/api/collector/export`, {
       headers: { Accept: 'application/json', ...(token ? { 'X-Collector-Token': token } : {}) },
       timeoutMs: config.collector.timeoutMs, retries: 2,
       onRetry: () => { retried++; },
     });
     if (!r.ok) {
-      // ìë²ê° ì¤ ì¬ì (collector ë¼ì°í°ì error íë)ì ìíì½ëë³ í´ê²° íí¸ë¥¼ í¨ê» ìë´íë¤.
+      // 서버가 준 사유(collector 라우터의 error 필드)와 상태코드별 해결 힌트를 함께 안내한다.
       let serverMsg = '';
-      try { const j = await r.json(); serverMsg = j?.error || j?.reason || ''; } catch { /* ë³¸ë¬¸ ìì/ë¹JSON */ }
+      try { const j = await r.json(); serverMsg = j?.error || j?.reason || ''; } catch { /* 본문 없음/비JSON */ }
       const hint = r.status === 404
-        ? "ìì§ ìë²ì COLLECTOR_TOKENì´ ì¤ì ëì§ ìììµëë¤(export ë¹íì±). ê·¸ ìì´ì í¸ë¥¼ 'COLLECTOR_TOKEN=<í í°>' íê²½ë³ìì í¨ê» ì¤í/ì¬ììíì¸ì(ë¦¬ëì¤: /etc/vmware-portal/portal.env)."
+        ? "수집 서버에 COLLECTOR_TOKEN이 설정되지 않았습니다(export 비활성). 그 에이전트를 'COLLECTOR_TOKEN=<토큰>' 환경변수와 함께 실행/재시작하세요(리눅스: /etc/vmware-portal/portal.env)."
         : (r.status === 403 || r.status === 401)
-          ? 'í í° ë¶ì¼ì¹(ì¸ì¦ ì¤í¨). ì´ íë©´ì í í°ì ìì´ì í¸ì COLLECTOR_TOKENê³¼ ëì¼íê² ë§ì¶ì¸ì.'
+          ? '토큰 불일치(인증 실패). 이 화면의 토큰을 에이전트의 COLLECTOR_TOKEN과 동일하게 맞추세요.'
           : (r.status === 405 || r.status === 400)
-            ? 'ì´ ì£¼ìê° ìì§ ìì´ì í¸(í¬í)ê° ìë ì ììµëë¤. URL/í¬í¸ë¥¼ íì¸íì¸ì.'
+            ? '이 주소가 수집 에이전트(포탈)가 아닐 수 있습니다. URL/포트를 확인하세요.'
             : '';
-      return res.json({ ok: false, reason: `HTTP ${r.status}${serverMsg ? ` â ${serverMsg}` : ''}${hint ? ` Â· ${hint}` : ''}`, status: r.status, ms: Date.now() - started, retried });
+      return res.json({ ok: false, reason: `HTTP ${r.status}${serverMsg ? ` — ${serverMsg}` : ''}${hint ? ` · ${hint}` : ''}`, status: r.status, ms: Date.now() - started, retried });
     }
     const data = await r.json();
     res.json({ ok: true, ms: Date.now() - started, retried, hosts: data.hosts, version: data.version, datacenter: data.datacenter });
@@ -393,33 +393,33 @@ adminRouter.post('/collectors/test', adminOnly, async (req, res) => {
   }
 });
 
-// í í° ê°ì  ëê¸°í â ì°ê²° íì¤í¸ê° 403(í í° ë¶ì¼ì¹)ì¼ ë, ìì§ ìë² URLì í¸ì¤í¸ì ì¼ì¹íë
-// 'Edge ë¸ë í¬í ì¤ì¹' ì ì¥ ëì(SSH)ì ì°¾ì ì£ì§ portal.envì COLLECTOR_TOKENì ì´ íë©´ì
-// í í°ì¼ë¡ êµì²´Â·ì¬ììíê³ , ì¤ì ì ì¥ í í°ë ê°ì ê°ì¼ë¡ ê³ ì (managed)í ë¤ ì¬ê²ì¦íë¤.
+// 토큰 강제 동기화 — 연결 테스트가 403(토큰 불일치)일 때, 수집 서버 URL의 호스트와 일치하는
+// 'Edge 노드 포탈 설치' 저장 대상(SSH)을 찾아 엣지 portal.env의 COLLECTOR_TOKEN을 이 화면의
+// 토큰으로 교체·재시작하고, 중앙 저장 토큰도 같은 값으로 고정(managed)한 뒤 재검증한다.
 adminRouter.post('/collectors/:id/force-token', adminOnly, async (req, res) => {
   const saved = loadCollectors().find((c) => c.id === req.params.id);
-  if (!saved) return res.status(404).json({ ok: false, reason: `ìë ìì§ ìë²: ${req.params.id}` });
+  if (!saved) return res.status(404).json({ ok: false, reason: `없는 수집 서버: ${req.params.id}` });
   const token = String(req.body?.token || saved.token || '').trim();
-  if (!token) return res.status(400).json({ ok: false, reason: 'í í°ì´ ììµëë¤. ì´ íë©´ìì í í°ì ìë ¥(ëë ìë ìì±)í ë¤ ë¤ì ìëíì¸ì.' });
+  if (!token) return res.status(400).json({ ok: false, reason: '토큰이 없습니다. 이 화면에서 토큰을 입력(또는 자동 생성)한 뒤 다시 시도하세요.' });
   let url = String(req.body?.url || saved.url || '').trim();
   if (url && !/^https?:\/\//.test(url)) url = `http://${url}`;
-  const ssrf = url ? ssrfBlockReason(url) : 'URLì´ ììµëë¤.';
+  const ssrf = url ? ssrfBlockReason(url) : 'URL이 없습니다.';
   if (ssrf) return res.status(400).json({ ok: false, reason: ssrf });
   let host = ''; let urlPort = 0;
-  try { const u = new URL(url); host = u.hostname; urlPort = Number(u.port) || (u.protocol === 'https:' ? 443 : 80); } catch { /* ìëìì ì²ë¦¬ */ }
-  if (!host) return res.status(400).json({ ok: false, reason: 'ìì§ ìë² URLìì í¸ì¤í¸ë¥¼ íì¸í  ì ììµëë¤.' });
+  try { const u = new URL(url); host = u.hostname; urlPort = Number(u.port) || (u.protocol === 'https:' ? 443 : 80); } catch { /* 아래에서 처리 */ }
+  if (!host) return res.status(400).json({ ok: false, reason: '수집 서버 URL에서 호스트를 확인할 수 없습니다.' });
   const target = listTargets().map((t) => getTargetRaw(t.id)).find((t) => t && String(t.host || '').trim() === host);
   if (!target) {
-    return res.status(404).json({ ok: false, reason: `SSH ë°°í¬ ëìì ${host} ê° ììµëë¤. 'ìì§ ìë² â ìê²© ë²ì¸(DC)ì Edge ë¸ë í¬í ì¤ì¹'ìì ì´ í¸ì¤í¸ë¥¼ ë¨¼ì  ì ì¥(SSH ê³ì  í¬í¨)íì¸ì.` });
+    return res.status(404).json({ ok: false, reason: `SSH 배포 대상에 ${host} 가 없습니다. '수집 서버 → 원격 법인(DC)에 Edge 노드 포탈 설치'에서 이 호스트를 먼저 저장(SSH 계정 포함)하세요.` });
   }
-  // URL í¬í¸ë¥¼ ì¤ì  ìë¹ì¤ ì¤ì¸ ì¸ì¤í´ì¤ë¥¼ ì­ì¶ì í´ ì ì© â ê°ì í¸ì¤í¸ ë¤ì¤ ì¸ì¤í´ì¤(:4000/:4001)ë
-  // NAT í¬ìë©(ë¤ë¥¸ ì¥ë¹)ì¼ ë ê¸°ë³¸ ì¸ì¤í´ì¤ë§ ê³ ì¹ê³  'ì±ê³µ'ì¼ë¡ ì¤ííë ë²ê·¸ ë°©ì§.
+  // URL 포트를 실제 서비스 중인 인스턴스를 역추적해 적용 — 같은 호스트 다중 인스턴스(:4000/:4001)나
+  // NAT 포워딩(다른 장비)일 때 기본 인스턴스만 고치고 '성공'으로 오판하던 버그 방지.
   const r = await forceCollectorToken(target, token, { urlPort });
-  logAudit({ user: req.user?.username, action: 'ìì§ ìë² í í° ê°ì  ëê¸°í', target: `${saved.id} (${host})`, detail: r.ok ? `ì±ê³µ Â· ìë¹ì¤ ${r.active}` : `ì¤í¨ â ${r.reason}`, ip: req.ip || '' });
+  logAudit({ user: req.user?.username, action: '수집 서버 토큰 강제 동기화', target: `${saved.id} (${host})`, detail: r.ok ? `성공 · 서비스 ${r.active}` : `실패 — ${r.reason}`, ip: req.ip || '' });
   if (!r.ok) return res.status(400).json({ ok: false, reason: r.reason, host, sshTarget: target.id, log: r.log });
-  // ì¤ì ì ì¥ í í°ë ëì¼ ê°ì¼ë¡ ê³ ì (managed) â ì£ì§ ìê¸°ë±ë¡ì´ ì´ ê°ì ë®ì´ì°ì§ ìê².
+  // 중앙 저장 토큰도 동일 값으로 고정(managed) — 엣지 자기등록이 이 값을 덮어쓰지 않게.
   const upd = updateCollector(saved.id, { ...saved, token, url: saved.url }, { managed: true });
-  // ì¬ê²ì¦: ì í í°ì¼ë¡ exportê° 200ì¸ì§ íì¸(ìë¹ì¤ ê¸°ë ì§íë¼ ì¬ìë ì¬ì ).
+  // 재검증: 새 토큰으로 export가 200인지 확인(서비스 기동 직후라 재시도 여유).
   let verified = false; let verifyReason = '';
   try {
     const vr = await resilientFetch(`${String(saved.url || url).replace(/\/+$/, '')}/api/collector/export`, {

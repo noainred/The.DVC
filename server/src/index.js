@@ -145,7 +145,10 @@ app.use('/api/central', centralRouter);                // token-gated agent<->ce
 app.use('/dl', dlSourceRouter);                        // 중앙 업그레이드 소스(versions.json + 번들, 공개)
 app.use('/metrics', metricsExportRouter);              // Prometheus/OTel 익스포터(선택 토큰)
 app.use('/api/auth', authRouter);                      // public: login / config / me
-app.use('/api/upgrade', authMiddleware, requireEnrolled, upgradeRouter); // admin-gated auto-upgrade control
+// auditMiddleware 필수(감사): /api/upgrade 는 '함대 전체를 새 버전으로 교체'하는 권능이라
+// 감사 추적이 가장 필요한 라우터인데 v2.399 까지 빠져 있었다(admin·remote 만 걸려 있었음).
+// 미들웨어는 2xx 상태변경 요청만 기록하므로 조회 트래픽에는 영향이 없다.
+app.use('/api/upgrade', authMiddleware, requireEnrolled, auditMiddleware, upgradeRouter); // admin-gated auto-upgrade control
 app.use('/api/admin', authMiddleware, requireEnrolled, auditMiddleware, adminRouter);     // admin-gated vCenter management
 app.use('/api/remote', authMiddleware, requireEnrolled, auditMiddleware, remoteRouter);   // remote access (HAProxy/SSH/RDP)
 // requirePerm('insights'): 기능 권한을 서버에서 강제(v2.289 #7). 과거엔 authMiddleware+requireEnrolled
@@ -154,7 +157,8 @@ app.use('/api/remote', authMiddleware, requireEnrolled, auditMiddleware, remoteR
 app.use('/api/insights', authMiddleware, requireEnrolled, requirePerm('insights'), insightsRouter); // FinOps·이상탐지·예측·보안·토폴로지·인시던트·ChatOps
 app.use('/api/svcmon', authMiddleware, requireEnrolled, svcmonRouter);   // 성능점검(HostMonitor식 서비스 모니터링)
 app.use('/api/capacity', authMiddleware, requireEnrolled, capacityRouter); // 리소스 적정성 진단(라우터 내부 admin 강제)
-app.use('/api/ping', authMiddleware, requireEnrolled, pingRouter);       // 네트워크 Ping 모니터링(조회=인증, 대상관리=관리자)
+// auditMiddleware: 대상 추가/삭제·vCenter 시드·엣지 동기화가 전부 admin 전용 상태변경이다.
+app.use('/api/ping', authMiddleware, requireEnrolled, auditMiddleware, pingRouter);       // 네트워크 Ping 모니터링(조회=인증, 대상관리=관리자)
 app.use('/api', authMiddleware, requireEnrolled, api);                   // protected resource endpoints
 
 // 외부 공개용 소개 페이지 — 로그인 없이 접근 가능한 정적 데모(/intro, /intro/light.html).
@@ -184,6 +188,27 @@ if (fs.existsSync(config.webDist)) {
     res.sendFile(path.join(config.webDist, 'index.html'));
   });
 }
+
+// ── 전역 에러 핸들러(마지막 미들웨어) ────────────────────────────────────────
+// ⚠ 이 핸들러가 없으면 라우트에서 throw 된 예외를 express 기본 finalhandler 가 처리하는데,
+// finalhandler 는 `process.env.NODE_ENV || 'development'` 로 환경을 판정한다. 이 프로젝트는
+// systemd 유닛/portal.env 어디에도 NODE_ENV 를 설정하지 않으므로 항상 'development' 이 되어
+// **500 응답 본문에 스택 트레이스가 그대로 실린다**(절대경로·모듈 구조·내부 함수명 노출).
+// 4-인자 시그니처(err, req, res, next)를 유지해야 express 가 에러 핸들러로 인식한다 — next 를
+// 지우면 일반 미들웨어가 되어 이 방어가 통째로 사라진다.
+app.use((err, req, res, _next) => {
+  const status = Number(err?.status || err?.statusCode) || 500;
+  // 본문 파서(express.json)가 던지는 400/413 은 클라이언트 실수라 사유를 알려주는 편이 낫다.
+  const clientFault = status >= 400 && status < 500;
+  try {
+    pushLog(status >= 500 ? 'error' : 'warn', `unhandled ${req.method} ${(req.originalUrl || '').split('?')[0]} ${status}: ${err?.stack || err}`);
+  } catch { /* 로깅 실패가 응답을 막지 않게 */ }
+  if (res.headersSent) return res.destroy?.();
+  res.status(status).json({
+    ok: false,
+    error: clientFault ? (err?.type === 'entity.too.large' ? 'payload too large' : 'bad request') : 'internal error',
+  });
+});
 
 // 메인 수집(vCenter)만 즉시 기동하고, 보조 폴러들은 초기 기동을 스태거(분산)해
 // 부팅 직후 동시 폴링으로 인한 CPU 스파이크를 평탄화한다(이후 각자 주기 반복).

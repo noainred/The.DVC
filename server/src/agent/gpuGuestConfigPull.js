@@ -17,12 +17,22 @@ import { saveGpuGuestSettings } from '../gpu/settings.js';
 let timer = null;
 let last = null; // { at, applied, at:서버지정시각, error }
 let lastSig = '';
+// 재진입 가드(single-flight) — CLAUDE.md 성능 불변조건: setInterval(()=>asyncFn()) 폴러는
+// 이전 주기가 간격을 넘기면(고RTT·중앙 지연) 다음 틱이 겹쳐 돌아 연결·CPU 가 누적된다.
+// 수동 실행 API 도 같은 exported 함수를 부르므로 가드를 공유한다(inventoryPush 와 동일 패턴).
+let running = false;
 
 function headers() {
   return { ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
 }
 
-export async function pullGpuGuestConfigNow() {
+export async function pullGpuGuestConfigNow(...args) {
+  if (running) return { ok: false, reason: '이전 pull 진행 중(겹침 방지)' };
+  running = true;
+  try { return await _pullGpuGuestConfigNow(...args); } finally { running = false; }
+}
+
+async function _pullGpuGuestConfigNow() {
   if (!config.agent.centralUrl || !config.agent.centralToken) return { ok: false, reason: 'pull 비활성화(CENTRAL_URL/TOKEN 미설정)' };
   const url = `${config.agent.centralUrl}/api/central/gpu-guest-config?agent=${encodeURIComponent(config.agent.name || '')}`;
   try {

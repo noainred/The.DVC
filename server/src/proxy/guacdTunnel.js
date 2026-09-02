@@ -51,9 +51,11 @@ export function attachRdpGateway(server) {
     const url = new URL(req.url, 'http://localhost');
     if (url.pathname !== '/api/remote/rdp') return;
     // 역할 검사(감사/SECURITY-AUDIT H3): RDP 터널 개통은 admin/operator만(viewer 차단).
+    // ⚠ user 는 블록 '밖'에서 선언 — 아래 handleUpgrade 가 쓴다(sshGateway 와 동일 규칙·동일 결함).
+    let user = null;
     if (config.auth.enabled) {
       // resolveTokenUser = 서명/만료 + 토큰 폐기(tokenVersion) + 최신 역할 — HTTP와 동일 검증.
-      const user = resolveTokenUser(url.searchParams.get('token'));
+      user = resolveTokenUser(url.searchParams.get('token'));
       if (!user) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); return socket.destroy(); }
       // OTP 등록 전 세션은 차단 — WS 업그레이드는 requireEnrolled 미들웨어를 타지 않는다.
       if (user.mustEnrollOtp) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); return socket.destroy(); }

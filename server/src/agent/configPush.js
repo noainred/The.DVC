@@ -13,11 +13,22 @@ let timer = null;
 let changeTimer = null;
 const PUSH_MS = Number(process.env.AGENT_CONFIG_PUSH_MS) || 1_800_000; // 30분
 
+// 재진입 가드(single-flight) — CLAUDE.md 성능 불변조건: setInterval(()=>asyncFn()) 폴러는
+// 이전 주기가 간격을 넘기면(고RTT·중앙 지연) 다음 틱이 겹쳐 돌아 연결·CPU 가 누적된다.
+// 수동 실행 API 도 같은 exported 함수를 부르므로 가드를 공유한다(inventoryPush 와 동일 패턴).
+let running = false;
+
 function headers() {
   return { 'Content-Type': 'application/json', ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
 }
 
-export async function pushConfigNow() {
+export async function pushConfigNow(...args) {
+  if (running) return false;
+  running = true;
+  try { return await _pushConfigNow(...args); } finally { running = false; }
+}
+
+async function _pushConfigNow() {
   if (!config.agent.centralUrl) return null;
   try {
     const files = collectConfigDir(); // 자기 설정(*.json/*.env), 대용량 데이터 제외

@@ -1,4 +1,4 @@
-// ì¤íë¼ì¸ í¨í¤ì§Â·ìì´ì í¸ ë°°í¬Â·LLM/OllamaÂ·ë¦´ë¦¬ì¤ ë¸í¸ â admin.js(êµ¬ 2,410ì¤) ë¶í (v2.285.0). ë³¸ë¬¸ì ìë³¸ ê·¸ëë¡, ë±ë¡ ììë admin.js í¸ì¶ ììê° ë³´ì¡´íë¤.
+// 오프라인 패키지·에이전트 배포·LLM/Ollama·릴리스 노트 — admin.js(구 2,410줄) 분할(v2.285.0). 본문은 원본 그대로, 등록 순서는 admin.js 호출 순서가 보존한다.
 import { config } from '../../config.js';
 import { saveNote, deleteNote } from '../../release-notes.js';
 import { loadLlmConfig, saveLlmConfig } from '../../llm/config.js';
@@ -17,8 +17,8 @@ import { pullNow } from '../../collector/puller.js';
 import { adminOnly, ensureCollectorDatacenter, requireSettingsOwner } from './shared.js';
 
 
-// ë°°í¬ ì±ê³µ í, ê·¸ í¸ì¤í¸ë¥¼ ì¤ìì 'ìì§ ìë²'ë¡ ìë ë±ë¡(ì¤ì¹+ë±ë¡ ìí´ë¦­).
-// collectorTokenì´ ìê³  registerCollector!==false ì¼ ëë§. ê°ì idë©´ ê°±ì .
+// 배포 성공 후, 그 호스트를 중앙에 '수집 서버'로 자동 등록(설치+등록 원클릭).
+// collectorToken이 있고 registerCollector!==false 일 때만. 같은 id면 갱신.
 function autoRegisterCollector(target, portalPort) {
   if (!target?.collectorToken || target.registerCollector === false) return null;
   const port = Number(portalPort) || 4000;
@@ -34,7 +34,7 @@ function autoRegisterCollector(target, portalPort) {
 
 export function registerDeployLlm(adminRouter) {
 
-// --- Package auto-download (upgrade/install packages â packages dir) ---
+// --- Package auto-download (upgrade/install packages → packages dir) ---
 adminRouter.get('/packages', adminOnly, async (req, res) => {
   const s = getPackageSettings();
   let remote = null;
@@ -53,7 +53,7 @@ adminRouter.post('/packages/download', adminOnly, async (req, res) => {
 
 // --- iDRAC-scan agent auto-deploy (SSH push install) ---
 adminRouter.get('/agent-deploy/installer', adminOnly, (req, res) => res.json(installerInfo(req.query.path)));
-// ë°°í¬ í¼ ìë ì±ì°ê¸°ì© ê¸°ë³¸ê°: ì¤ì URL(ì ìí í¸ì¤í¸ ê¸°ì¤ ì¶ì ) + í¬í í¬í¸ + í í° ìí.
+// 배포 폼 자동 채우기용 기본값: 중앙 URL(접속한 호스트 기준 추정) + 포탈 포트 + 토큰 상태.
 adminRouter.get('/agent-deploy/defaults', adminOnly, (req, res) => {
   const host = (req.get('host') || `localhost:${config.port}`).replace(/\/+$/, '');
   const proto = (req.get('x-forwarded-proto') || req.protocol || 'http').split(',')[0];
@@ -69,13 +69,13 @@ adminRouter.post('/agent-deploy/test', adminOnly, async (req, res) => {
 });
 
 adminRouter.post('/agent-deploy', adminOnly, async (req, res) => {
-  // SSH í¬í¸(target.port)ì í¬í í¬í¸(portalPort)ë¥¼ í¼ëíì§ ìëë¡ ë¶ë¦¬.
-  // portalPortë§ install.sh --port ë¡ ì ë¬(ìì  ë²ê·¸: SSH 22ê° í¬í í¬í¸ë¡ ë¤ì´ê° EACCES).
+  // SSH 포트(target.port)와 포탈 포트(portalPort)를 혼동하지 않도록 분리.
+  // portalPort만 install.sh --port 로 전달(예전 버그: SSH 22가 포탈 포트로 들어가 EACCES).
   const { installerPath, portalPort, ...target } = req.body || {};
   const r = await deployAgent(target, { installerPath, port: Number(portalPort) || 4000 });
-  if (r.ok) r.collector = autoRegisterCollector(target, portalPort); // ì¤ì¹ ì±ê³µ ì ì¤ìì ìì§ ìë²ë¡ ìë ë±ë¡
-  // ë°°í¬ì ì¬ì©í ì¤ì (gpuGuestÂ·ìì´ì í¸ ì¤ì  í¬í¨)ì 'ì ì¥ë ëì'ì ë°ìí´ 'í¸ì§' ì ê·¸ëë¡ ë³´ì´ê² íë¤.
-  // idê° ìì¼ë©´ ê°ì í¸ì¤í¸ì ê¸°ì¡´ ëìì ì°¾ì ê°±ì (ì¤ë³µ ìì± ë°©ì§). 'ë°°í¬+ì¤ì¹'ë§ ëë¬ë ì¤ì ì´ ì ì¤ëì§ ìì.
+  if (r.ok) r.collector = autoRegisterCollector(target, portalPort); // 설치 성공 시 중앙에 수집 서버로 자동 등록
+  // 배포에 사용한 설정(gpuGuest·에이전트 설정 포함)을 '저장된 대상'에 반영해 '편집' 시 그대로 보이게 한다.
+  // id가 없으면 같은 호스트의 기존 대상을 찾아 갱신(중복 생성 방지). '배포+설치'만 눌러도 설정이 유실되지 않음.
   try {
     const b = req.body || {};
     if (b.host) {
@@ -83,7 +83,7 @@ adminRouter.post('/agent-deploy', adminOnly, async (req, res) => {
       saveTarget({ ...b, id });
       r.targetSaved = true;
     }
-  } catch { /* ì ì¥ ì¤í¨ë ë°°í¬ ê²°ê³¼ì ìí¥ ì£¼ì§ ìì */ }
+  } catch { /* 저장 실패는 배포 결과에 영향 주지 않음 */ }
   res.status(r.ok ? 200 : 400).json(r);
 });
 
@@ -100,18 +100,18 @@ adminRouter.delete('/agent-deploy/targets/:id', adminOnly, (req, res) => {
   res.status(r.ok ? 200 : 400).json(r);
 });
 
-/* ââ ë°°í¬ ëì CSV ì¼ê´ ê´ë¦¬(v2.339, ì¬ì©ì ìêµ¬) â ìì§ ìë² CSV(v2.338)ì ëì¼ ê³¨ê²©. ââââââ
- * ë´ë³´ë´ê¸° ê¸°ë³¸ì ë¹ë°ê°(password/centralToken/collectorToken) ì ì¸, ?secrets=1 ì
- * requireSettingsOwner + ê°ì¬ë¡ê·¸. ê°ì ¸ì¤ê¸°ë dryRun(ë¬¸ë² ê²ì¦) â ì»¤ë° 2ë¨ê³ì´ê³ ,
- * (host,port,username)ì´ ê²¹ì¹ë íì body.overwrite=true ëªì ììë§ ê°±ì íë¤.
- * privateKey(ë©í°ë¼ì¸)Â·gpuGuest(ì¤ì²©)ë CSV ë¯¸ì§ì â ê°ì ¸ì¤ê¸°ê° ê±´ëë¦¬ì§ ìì ê¸°ì¡´ê° ì ì§.
+/* ── 배포 대상 CSV 일괄 관리(v2.339, 사용자 요구) — 수집 서버 CSV(v2.338)와 동일 골격. ──────
+ * 내보내기 기본은 비밀값(password/centralToken/collectorToken) 제외, ?secrets=1 은
+ * requireSettingsOwner + 감사로그. 가져오기는 dryRun(문법 검증) → 커밋 2단계이고,
+ * (host,port,username)이 겹치는 행은 body.overwrite=true 명시 시에만 갱신한다.
+ * privateKey(멀티라인)·gpuGuest(중첩)는 CSV 미지원 — 가져오기가 건드리지 않아 기존값 유지.
  */
 adminRouter.get('/agent-deploy/targets/export.csv', adminOnly, (req, res) => {
   const withSecrets = String(req.query.secrets || '') === '1';
   const send = () => {
     const list = withSecrets ? listTargetsRaw() : listTargets();
     const csv = targetsToCsv(list, { includeSecrets: withSecrets });
-    logAudit({ user: req.user?.username, action: withSecrets ? 'ë°°í¬ ëì CSV ë´ë³´ë´ê¸°(ë¹ë° í¬í¨)' : 'ë°°í¬ ëì CSV ë´ë³´ë´ê¸°', detail: `${list.length}ë`, ip: req.ip || '' });
+    logAudit({ user: req.user?.username, action: withSecrets ? '배포 대상 CSV 내보내기(비밀 포함)' : '배포 대상 CSV 내보내기', detail: `${list.length}대`, ip: req.ip || '' });
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="agent-deploy-targets${withSecrets ? '-with-secrets' : ''}.csv"`);
     res.send(csv);
@@ -129,7 +129,7 @@ adminRouter.get('/agent-deploy/targets/sample.csv', adminOnly, (_req, res) => {
 adminRouter.post('/agent-deploy/targets/import', adminOnly, (req, res) => {
   const { rows, error } = parseTargetsCsv(String(req.body?.csv || ''));
   if (error) return res.status(400).json({ ok: false, reason: error });
-  if (!rows.length) return res.status(400).json({ ok: false, reason: 'ê°ì ¸ì¬ ë°ì´í° íì´ ììµëë¤.' });
+  if (!rows.length) return res.status(400).json({ ok: false, reason: '가져올 데이터 행이 없습니다.' });
 
   const existingId = (host, port, user) => findTargetByHost(host, port, user)?.id;
   const { report, summary } = analyzeTargetsImport(rows, { existingId });
@@ -142,11 +142,11 @@ adminRouter.post('/agent-deploy/targets/import', adminOnly, (req, res) => {
     const verdict = verdictByLine.get(row._line);
     if (verdict?.action === 'error') { failed.push({ line: verdict.line, host: row.host, reason: verdict.reason }); continue; }
     const id = existingId(row.host, row.port, row.username);
-    if (id && !allowOverwrite) { skipped.push({ line: row._line, host: row.host, reason: 'ê¸°ì¡´ í­ëª© â ë®ì´ì°ê¸° ë¯¸íì©(overwrite íì¸ íì)' }); continue; }
+    if (id && !allowOverwrite) { skipped.push({ line: row._line, host: row.host, reason: '기존 항목 — 덮어쓰기 미허용(overwrite 확인 필요)' }); continue; }
     const input = { id, host: row.host, port: row.port, username: row.username, agentName: row.agentName,
       centralUrl: row.centralUrl, collectorDatacenter: row.collectorDatacenter, portalPort: row.portalPort,
       installerPath: row.installerPath, autoUpgrade: row.autoUpgrade, pushInventory: row.pushInventory, enabled: row.enabled };
-    // ë¹ë°ê°ì ê°ì´ ìì ëë§ ì ë¬(ë¹ ê° â saveTarget ì´ ê¸°ì¡´ ì ì§).
+    // 비밀값은 값이 있을 때만 전달(빈 값 → saveTarget 이 기존 유지).
     if (row.password) input.password = row.password;
     if (row.centralToken) input.centralToken = row.centralToken;
     if (row.collectorToken) input.collectorToken = row.collectorToken;
@@ -154,23 +154,23 @@ adminRouter.post('/agent-deploy/targets/import', adminOnly, (req, res) => {
     if (r.ok) { if (id) overwritten++; else added++; }
     else failed.push({ line: row._line, host: row.host, reason: r.reason });
   }
-  logAudit({ user: req.user?.username, action: 'ë°°í¬ ëì CSV ê°ì ¸ì¤ê¸°', detail: `ì¶ê° ${added}Â·ë®ì´ì°ê¸° ${overwritten}Â·ê±´ëë ${skipped.length}Â·ì¤í¨ ${failed.length}`, ip: req.ip || '' });
+  logAudit({ user: req.user?.username, action: '배포 대상 CSV 가져오기', detail: `추가 ${added}·덮어쓰기 ${overwritten}·건너뜀 ${skipped.length}·실패 ${failed.length}`, ip: req.ip || '' });
   res.json({ ok: true, added, overwritten, skipped, failed, total: rows.length });
 });
 
 adminRouter.post('/agent-deploy/targets/:id/deploy', adminOnly, async (req, res) => {
   const t = getTargetRaw(req.params.id);
-  if (!t) return res.status(404).json({ ok: false, reason: 'ëìì ì°¾ì ì ììµëë¤.' });
+  if (!t) return res.status(404).json({ ok: false, reason: '대상을 찾을 수 없습니다.' });
   const r = await deployAgent(t, { installerPath: t.installerPath, port: t.portalPort });
-  if (r.ok) r.collector = autoRegisterCollector(t, t.portalPort); // ì¤ì¹ ì±ê³µ ì ì¤ìì ìì§ ìë²ë¡ ìë ë±ë¡
+  if (r.ok) r.collector = autoRegisterCollector(t, t.portalPort); // 설치 성공 시 중앙에 수집 서버로 자동 등록
   recordResult(t.id, r);
   res.status(r.ok ? 200 : 400).json(r);
 });
 
-// ì ì¥ë ëìì ìë¹ì¤ ìíë¥¼ ì¬íì¸(ì¬ë°°í¬ ìì´). ê²°ê³¼ë¥¼ 'ë§ì§ë§ ê²°ê³¼'ì ë°ì.
+// 저장된 대상의 서비스 상태를 재확인(재배포 없이). 결과를 '마지막 결과'에 반영.
 adminRouter.post('/agent-deploy/targets/:id/status', adminOnly, async (req, res) => {
   const t = getTargetRaw(req.params.id);
-  if (!t) return res.status(404).json({ ok: false, reason: 'ëìì ì°¾ì ì ììµëë¤.' });
+  if (!t) return res.status(404).json({ ok: false, reason: '대상을 찾을 수 없습니다.' });
   const r = await checkAgentStatus(t);
   recordResult(t.id, r);
   res.json(r);

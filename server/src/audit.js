@@ -33,6 +33,14 @@ function describe(method, urlPath) {
     [/^\/remote\/config$/, { PUT: '중계서버 설정 변경' }],
     [/^\/remote\/deploy$/, { POST: 'HAProxy 배포' }],
     [/^\/tools\/ipam\/annotation$/, { PUT: 'IP 메모/태그 저장' }],
+    [/^\/upgrade\/apply$/, { POST: '업그레이드 적용' }],
+    [/^\/upgrade\/restart$/, { POST: '서비스 재시작' }],
+    [/^\/upgrade\/settings$/, { PUT: '자동 업그레이드 설정 변경' }],
+    [/^\/upgrade\/bundle$/, { POST: '업그레이드 번들 업로드' }],
+    [/^\/upgrade\/check$/, { POST: '업그레이드 확인' }],
+    [/^\/ping\/targets/, { POST: 'Ping 대상 추가', PUT: 'Ping 대상 수정', DELETE: 'Ping 대상 삭제' }],
+    [/^\/ping\/seed-vcenters$/, { POST: 'Ping 대상 vCenter 시드' }],
+    [/^\/ping\/vcport\/ports$/, { PUT: 'vCenter 포트 점검 설정 변경' }],
   ];
   for (const [re, map] of rules) if (re.test(p) && map[method]) return map[method];
   return `${method} ${p}`;

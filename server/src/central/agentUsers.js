@@ -15,7 +15,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { hashPassword } from '../auth/auth.js';
 
 const FILE = path.join(config.configDir, 'central-agent-users.json');
@@ -26,7 +26,10 @@ const USER_RE = /^[A-Za-z0-9._@-]{2,64}$/;
 export const GLOBAL_AGENT = '*';
 
 let byAgent = Object.create(null); // agent -> { at, users: [...] }
-try { if (fs.existsSync(FILE)) byAgent = Object.assign(Object.create(null), JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}); } catch { byAgent = Object.create(null); }
+// ⚠ 손상 시 조용히 빈 객체로 시작하면 다음 persist()가 온전했던 배포 사용자(비밀번호 해시 포함)
+// 원본을 덮어써 영구 유실된다 — preserveCorrupt 로 보존한 뒤에만 빈 값으로 출발한다.
+try { if (fs.existsSync(FILE)) byAgent = Object.assign(Object.create(null), JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}); }
+catch (err) { preserveCorrupt(FILE, err.message); console.error(`[central] central-agent-users.json 파싱 실패: ${err.message}`); byAgent = Object.create(null); }
 
 function persist() {
   fs.mkdirSync(path.dirname(FILE), { recursive: true });

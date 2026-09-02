@@ -17,12 +17,22 @@ import { getGpuGuestDiag } from '../gpu/poller.js';
 
 let timer = null;
 let last = null; // { at, hosts, vms, error }
+// 재진입 가드(single-flight) — CLAUDE.md 성능 불변조건: setInterval(()=>asyncFn()) 폴러는
+// 이전 주기가 간격을 넘기면(고RTT·중앙 지연) 다음 틱이 겹쳐 돌아 연결·CPU 가 누적된다.
+// 수동 실행 API 도 같은 exported 함수를 부르므로 가드를 공유한다(inventoryPush 와 동일 패턴).
+let running = false;
 
 function headers() {
   return { 'Content-Type': 'application/json', ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
 }
 
-export async function pushGpuGuestNow() {
+export async function pushGpuGuestNow(...args) {
+  if (running) return { ok: false, reason: '이전 push 진행 중(겹침 방지)' };
+  running = true;
+  try { return await _pushGpuGuestNow(...args); } finally { running = false; }
+}
+
+async function _pushGpuGuestNow() {
   if (!config.agent.centralUrl || !config.agent.centralToken) return { ok: false, reason: 'push 비활성화(CENTRAL_URL/TOKEN 미설정)' };
   const hosts = [...getGuestGpuAllHosts().entries()].map(([hostId, v]) => ({ hostId, utilPct: v.utilPct }));
   const vms = getGuestGpuVms().map((v) => ({ vmId: v.vmId, utilPct: v.utilPct, memUsedPct: v.memUsedPct ?? null, host: v.host, vcenterId: v.vcenterId }));

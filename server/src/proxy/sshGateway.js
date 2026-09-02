@@ -30,10 +30,16 @@ export function attachSshGateway(server) {
     // Auth via token query param (browsers can't set WS headers).
     // 역할 검사(감사/SECURITY-AUDIT H3): 원격 SSH 터널 개통은 admin/operator만 — viewer 토큰으로
     // 내부 서버 SSH 접속이 열리던 문제 차단. (operator 역할의 실효 권한이기도 하다.)
+    // ⚠ user 는 반드시 블록 '밖'에서 선언한다 — 아래 handleUpgrade 가 이 값을 쓰므로 if 안에서
+    // const 로 선언하면 그 줄에서 ReferenceError 가 난다. 터지는 경우는 'handleUpgrade 에 도달하는
+    // 모든 경로' = 인증 off + 인증 on 이면서 검사를 전부 통과한 **정상 세션** — 즉 권한 있는
+    // 사용자의 원격 접속이 전부 실패한다(거부 경로는 그 전에 return 하므로 영향 없음).
+    // 회귀 테스트: test/securityFix2026-09-01.test.js.
+    let user = null;
     if (config.auth.enabled) {
       // resolveTokenUser = 서명/만료 + 토큰 폐기(tokenVersion) + 최신 역할 — HTTP와 동일 검증.
       // (payload.role 직접 신뢰 금지: 강등/삭제된 계정의 구토큰이 TTL까지 터널을 열 수 있었다.)
-      const user = resolveTokenUser(url.searchParams.get('token'));
+      user = resolveTokenUser(url.searchParams.get('token'));
       if (!user) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); return socket.destroy(); }
       // OTP 등록 전 세션(부트스트랩 비밀번호 로그인)은 등록 외 아무 것도 할 수 없다 — HTTP는
       // requireEnrolled 가 막지만 WS 업그레이드는 그 미들웨어를 타지 않으므로 여기서 직접 막는다

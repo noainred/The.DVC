@@ -13,7 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 import { mergeGpuGuestSettings, redactGpuGuestSettings } from '../gpu/settings.js';
 
@@ -21,7 +21,10 @@ const FILE = path.join(config.configDir, 'central-agent-gpu-guest.json');
 
 // null-proto: agent 이름을 키로 쓰므로 '__proto__' 등 프로토타입 오염 방지.
 let byAgent = Object.create(null); // agent -> gpuGuestSettings(전체 병합 객체) + { _updatedAt }
-try { if (fs.existsSync(FILE)) byAgent = Object.assign(Object.create(null), openSecretsDeep(JSON.parse(fs.readFileSync(FILE, 'utf8')) || {})); } catch { byAgent = Object.create(null); } // v2.296 배포 사본 계정 복호
+// v2.296 배포 사본 계정 복호. ⚠ 손상 시 조용히 빈 객체로 출발하면 다음 persist()가 온전했던
+// 원본(엣지 SSH/게스트 비밀번호 포함)을 덮어써 영구 유실된다 — preserveCorrupt 로 보존 후 빈 값.
+try { if (fs.existsSync(FILE)) byAgent = Object.assign(Object.create(null), openSecretsDeep(JSON.parse(fs.readFileSync(FILE, 'utf8')) || {})); }
+catch (err) { preserveCorrupt(FILE, err.message); console.error(`[central] central-agent-gpu-guest.json 파싱 실패: ${err.message}`); byAgent = Object.create(null); }
 
 function persist() {
   fs.mkdirSync(path.dirname(FILE), { recursive: true });

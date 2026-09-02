@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
 import { fetchJson, postJson, delJson, downloadFile } from '../../api.js';
-import { Loading, ErrorBox, Kpi, UsageCell, Modal } from '../../components/ui.jsx';
+import { Loading, ErrorBox, Kpi, UsageCell, Modal, SearchBox, usageColor } from '../../components/ui.jsx';
 
 /**
  * 특수기능 › 스토리지 모니터링(v2.302) — 글로벌 법인 스토리지(Isilon 우선, XtremIO·PowerStore·
@@ -36,9 +36,33 @@ export default function StorageMonTool() {
   const [form, setForm] = useState(null);        // 등록/수정 폼
   const [importOpen, setImportOpen] = useState(false); // CSV 가져오기 모달(v2.313)
   const [exportOpen, setExportOpen] = useState(false); // CSV 내보내기 모달(v2.317 — 비밀번호 포함 선택)
+  // 법인 바로가기(사용자 요구 2026-09-02) — Platform 화면의 vCenter 바로가기와 같은 UX.
+  // ⚠ 훅은 아래 조기 return(`if (!d) return <Loading/>`)보다 위에 선언해야 한다 — 렌더 간 훅
+  // 개수가 달라지면 React #310 으로 화면 전체가 크래시한다(CLAUDE.md 프론트엔드 회귀 방지).
+  const [dcQuery, setDcQuery] = useState('');
+  const dcRefs = useRef({});                      // 법인명 → 그룹 DOM(스크롤/반짝용)
+  const [jumpTo, setJumpTo] = useState(null);     // 다른 뷰에서 눌렀을 때 '법인별'로 전환 후 이동할 대상
+  // 대상 블록으로 스크롤 + 반짝임(VCenters.jsx gotoCard 와 동일 절차). dcRefs 만 쓰므로 조기
+  // return 위에 둘 수 있고, 아래 useEffect 에서도 쓴다. 타이머는 fire-and-forget —
+  // 언마운트 후 실행돼도 분리된 DOM 노드의 클래스를 지우는 것뿐이라 부작용이 없다.
+  const flashDc = (dc) => {
+    const el = dcRefs.current[dc];
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    el.classList.remove('qn-flash');
+    void el.offsetWidth;               // 리플로우로 애니메이션 재시작 보장(같은 칩 연타 대응)
+    el.classList.add('qn-flash');
+    setTimeout(() => el.classList.remove('qn-flash'), 3200); // CSS 3s 보다 살짝 길게
+  };
 
   const load = () => fetchJson('/tools/storage').then((r) => { setD(r); setErr(null); }).catch((e) => setErr(e.message));
   useEffect(() => { load(); const t = setInterval(load, 30_000); return () => clearInterval(t); }, []);
+  // 뷰 전환(→ 법인별) 후 실제로 DOM 이 생긴 다음 스크롤한다 — setView 직후에는 대상이 아직 없다.
+  useEffect(() => {
+    if (!jumpTo || view !== 'dc') return;
+    setJumpTo(null);
+    flashDc(jumpTo);
+  }, [jumpTo, view]);
   if (err && !d) return <ErrorBox message={err} />;
   if (!d) return <Loading />;
 
@@ -58,6 +82,32 @@ export default function StorageMonTool() {
     const m = new Map();
     for (const r of rows) { const k = keyFn(r); if (!m.has(k)) m.set(k, []); m.get(k).push(r); }
     return [...m.entries()].sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+  };
+  // 법인 그룹 1회 계산 — 바로가기 칩과 '법인별' 뷰가 같은 배열을 쓴다(그룹핑 중복 순회 방지).
+  const dcGroups = groupBy((r) => dcName(r.datacenterId));
+  /**
+   * 법인 그룹 요약(바로가기 칩의 점 색·툴팁). 색 규칙은 화면 다른 곳과 어긋나지 않게 맞춘다:
+   *   빨강 = 수집 실패/대기 장비 있음(= KPI '수집 실패/대기' 와 동일 판정)
+   *   노랑 = 미해결 경보 있음
+   *   그 외 = 사용률 기준 usageColor(75%↑ 노랑 · 90%↑ 빨강, primitives.jsx 공용 임계값)
+   * 사용률은 '수집된 장비'만으로 계산한다 — 실패 장비를 0 으로 섞으면 사용률이 낮게 위장된다.
+   */
+  const dcSummary = (list) => {
+    const ok = list.filter((r) => r.snap && r.snap.ok);
+    const fail = list.filter((r) => !r.snap || !r.snap.ok).length;
+    const total = sum(ok, (r) => r.snap.capacity?.totalBytes);
+    const used = sum(ok, (r) => r.snap.capacity?.usedBytes);
+    const pct = total ? Math.round((used / total) * 100) : 0;
+    const alerts = sum(ok, (r) => r.snap.alerts?.unresolved);
+    const dot = fail ? 'var(--red)' : alerts ? 'var(--amber)' : usageColor(pct);
+    return { fail, total, used, pct, alerts, dot };
+  };
+
+  // 바로가기 칩 클릭 — '법인별' 뷰가 아니면 전환을 예약하고(위 useEffect 가 렌더 후 이동),
+  // 이미 그 뷰면 대상이 이미 DOM 에 있으므로 즉시 이동한다.
+  const gotoDc = (dc) => {
+    if (view !== 'dc') { setView('dc'); setJumpTo(dc); return; }
+    flashDc(dc);
   };
 
   const collectNow = async (id) => {
@@ -171,6 +221,36 @@ export default function StorageMonTool() {
         <Kpi label="미해결 경보" value={totals.alerts} accent={totals.alerts ? 'var(--amber)' : undefined} />
       </div>
 
+      {/* 법인 바로가기(사용자 요구 2026-09-02) — Platform 화면의 vCenter 바로가기와 동일한 UX/스타일.
+          어느 뷰에서 눌러도 '법인별' 로 전환해 그 법인 블록으로 스크롤한다(칩 자체가 '법인별로
+          보기' 단축키). '추이' 뷰는 법인 블록이 없어 바를 감춘다. */}
+      {view !== 'trend' && dcGroups.length > 0 && (
+        <div className="vc-quicknav">
+          <span className="qn-label">⚡ 법인 바로가기</span>
+          {dcGroups
+            .filter(([dc, list]) => {
+              // 공백 구분 다중 키워드 AND — 법인명 + 그 법인의 장비명/호스트까지 검색(허브와 같은 규칙).
+              const kws = dcQuery.toLowerCase().split(/\s+/).filter(Boolean);
+              if (!kws.length) return true;
+              const hay = [dc, ...list.flatMap((r) => [r.name, r.host])].filter(Boolean).join(' ').toLowerCase();
+              return kws.every((kw) => hay.includes(kw));
+            })
+            .map(([dc, list]) => {
+              const g = dcSummary(list);
+              return (
+                <button key={dc} className={`qn-btn${g.fail ? ' down' : ''}`} onClick={() => gotoDc(dc)}
+                  title={`${dc} — 장비 ${list.length}대 · ${tbFmt(g.used)} / ${tbFmt(g.total)}${g.total ? ` (${g.pct}%)` : ''}`
+                    + `${g.fail ? ` · 수집 실패/대기 ${g.fail}` : ''}${g.alerts ? ` · 미해결 경보 ${g.alerts}` : ''}`}>
+                  <span className="qn-dot" style={{ background: g.dot }} />{dc}
+                </button>
+              );
+            })}
+          {/* 빠른 찾기 — 무결과여도 박스가 남아야 입력을 지울 수 있다(VCenters 와 동일 이유). */}
+          <SearchBox className="input" style={{ marginLeft: 'auto', maxWidth: 240, minWidth: 170 }}
+            value={dcQuery} onChange={setDcQuery} placeholder="법인·장비 빠른 찾기" />
+        </div>
+      )}
+
       {form && <DeviceForm d={d} form={form} setForm={setForm} onSaved={() => { setForm(null); load(); }} />}
       {importOpen && <CsvImport onClose={() => setImportOpen(false)} onDone={() => { setImportOpen(false); load(); }} />}
       {exportOpen && <CsvExport onClose={() => setExportOpen(false)} />}
@@ -178,11 +258,12 @@ export default function StorageMonTool() {
       {view === 'devices' && <DeviceTable list={rows} />}
       {/* 통합 추이(v2.380) — 전체 합산 + 장비별 선택. 기간 12시간/24시간/1주 등. */}
       {view === 'trend' && <StorageTrendPanel devices={rows} />}
-      {view === 'dc' && groupBy((r) => dcName(r.datacenterId)).map(([dc, list]) => {
+      {view === 'dc' && dcGroups.map(([dc, list]) => {
         const t = sum(list.filter((r) => r.snap), (r) => r.snap.capacity?.totalBytes);
         const u = sum(list.filter((r) => r.snap), (r) => r.snap.capacity?.usedBytes);
         return (
-          <div key={dc} style={{ marginBottom: 14 }}>
+          // ref/qn-anchor: 위 '법인 바로가기' 칩의 스크롤·반짝 대상.
+          <div key={dc} className="qn-anchor" ref={(el) => { dcRefs.current[dc] = el; }} style={{ marginBottom: 14 }}>
             <div className="section-title" style={{ fontSize: 14 }}>🏢 {dc} <span className="muted" style={{ fontSize: 12, fontWeight: 400 }}>— 장비 {list.length} · {tbFmt(u)} / {tbFmt(t)}{t ? ` (${Math.round((u / t) * 100)}%)` : ''}</span></div>
             <DeviceTable list={list} />
           </div>
