@@ -1,0 +1,152 @@
+/**
+ * v2.404 회귀 테스트 — PowerStore 물리 사용량/전량 수집 + Unity 라벨 + 연결 테스트 루틴.
+ *
+ * 고정하는 것:
+ *  1) pickLatestSpacePoint: PowerStore 공간/성능 응답은 '한 점'이 아니라 시계열 배열이고
+ *     정렬 방향이 경로마다 다르다. 예전 코드는 [0] 만 봐서 POST metrics/generate 응답(오래된
+ *     것부터)에서 빈 점을 집어 용량이 '—' 로 남았다(사용자 신고: 접속은 되는데 사용량 없음).
+ *  2) normalizePowerstore 가 물리 사용량 + 인벤토리/성능 요약을 채우는지, 그리고 요약이
+ *     '원본 객체'가 아니라 개수·합계인지(스냅샷은 중앙으로 push 되므로 크기가 계약이다).
+ *  3) Unity 카탈로그 라벨은 'Unity'(모델번호 제거)이되 type 키는 'unity480' 유지 —
+ *     키를 바꾸면 이미 등록된 장비가 '알 수 없는 타입'이 되어 수집이 멈춘다.
+ *  4) testDeviceConnection 이 스냅샷을 저장하지 않고(putSnapshot 미호출) 결과만 돌려주는지.
+ */
+
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-unity-'));
+
+// ─── 1) 시계열 점 선택 ─────────────────────────────────────────────────────────────
+test('pickLatestSpacePoint: 오름차순 응답에서 최신 점을 고른다(예전 [0] 버그 고정)', async () => {
+  const { pickLatestSpacePoint } = await import('../src/storage/collectors/powerstore.js');
+  const asc = [
+    { timestamp: '2026-09-01T00:00:00Z', physical_total: 100e12, physical_used: 10e12 },
+    { timestamp: '2026-09-02T00:00:00Z', physical_total: 100e12, physical_used: 42e12 },
+  ];
+  assert.equal(pickLatestSpacePoint(asc).physical_used, 42e12);
+  // 내림차순(구버전 GET order=timestamp.desc)도 같은 점을 골라야 한다.
+  assert.equal(pickLatestSpacePoint([...asc].reverse()).physical_used, 42e12);
+});
+
+test('pickLatestSpacePoint: 물리 총량이 빈 최신 점은 건너뛰고 값이 있는 점을 쓴다', async () => {
+  const { pickLatestSpacePoint } = await import('../src/storage/collectors/powerstore.js');
+  const pts = [
+    { timestamp: '2026-09-01T00:00:00Z', physical_total: 100e12, physical_used: 42e12 },
+    { timestamp: '2026-09-02T00:00:00Z', physical_total: 0, physical_used: 0 }, // 아직 집계 전
+  ];
+  assert.equal(pickLatestSpacePoint(pts).physical_used, 42e12);
+});
+
+test('pickLatestSpacePoint: 빈 입력은 null(0 으로 위장하지 않는다)', async () => {
+  const { pickLatestSpacePoint } = await import('../src/storage/collectors/powerstore.js');
+  assert.equal(pickLatestSpacePoint([]), null);
+  assert.equal(pickLatestSpacePoint(null), null);
+});
+
+// ─── 2) 정규화: 물리 사용량 + 인벤토리/성능 요약 ────────────────────────────────────
+test('normalizePowerstore: 물리 사용량 상세(extra.space)와 어플라이언스별 풀을 채운다', async () => {
+  const { normalizePowerstore } = await import('../src/storage/collectors/powerstore.js');
+  const snap = normalizePowerstore({ id: 'ps-1', type: 'powerstore', name: 'PS' }, {
+    cluster: [{ name: 'PS-Cluster', global_id: 'PS4XXXX' }],
+    metrics: [
+      { timestamp: '2026-09-01T00:00:00Z', physical_total: 100e12, physical_used: 10e12 },
+      { timestamp: '2026-09-02T00:00:00Z', physical_total: 100e12, physical_used: 42e12, logical_used: 130e12, data_reduction: 3.1 },
+    ],
+    appliancePools: [{ name: 'appliance-1', totalBytes: 100e12, usedBytes: 42e12, pct: 42 }],
+  });
+  assert.equal(snap.capacity.usedBytes, 42e12);
+  assert.equal(snap.capacity.pct, 42);
+  assert.equal(snap.sections.capacity, 'ok');
+  assert.equal(snap.extra.space.physicalUsed, 42e12);
+  assert.equal(snap.extra.space.logicalUsed, 130e12);
+  assert.equal(snap.extra.space.dataReduction, 3.1);
+  // 어플라이언스별 물리 사용량은 풀로 — 어디가 찼는지 봐야 하므로.
+  assert.equal(snap.pools.length, 1);
+  assert.equal(snap.pools[0].usedBytes, 42e12);
+});
+
+test('normalizePowerstore: 인벤토리는 원본이 아니라 개수·합계 요약으로만 싣는다', async () => {
+  const { normalizePowerstore } = await import('../src/storage/collectors/powerstore.js');
+  const volumes = Array.from({ length: 5 }, (_, i) => ({ id: `v${i}`, size: 1e12, state: i ? 'Ready' : 'Offline' }));
+  const snap = normalizePowerstore({ id: 'ps-1', type: 'powerstore', name: 'PS' }, {
+    cluster: [{ name: 'C' }],
+    volumes,
+    hosts: [{ id: 'h1' }, { id: 'h2' }],
+    fileSystems: [{ id: 'f1', size_total: 10e12, size_used: 4e12 }],
+    replication: [{ id: 'r1', state: 'OK' }, { id: 'r2', state: 'Paused' }],
+    hardware: [{ id: 'd1', type: 'Drive', lifecycle_state: 'Healthy' }, { id: 'd2', type: 'Drive', lifecycle_state: 'Failed' }],
+    alerts: [{ id: 'a1', severity: 'Critical' }, { id: 'a2', severity: 'Minor' }],
+  });
+  const inv = snap.extra.inventory;
+  assert.equal(inv.volumes.count, 5);
+  assert.equal(inv.volumes.provisionedBytes, 5e12);
+  assert.equal(inv.volumes.byState.Offline, 1);
+  assert.equal(inv.hosts.count, 2);
+  assert.equal(inv.fileSystems.usedBytes, 4e12);
+  assert.equal(inv.replicationSessions.byState.Paused, 1);
+  assert.equal(inv.hardware.unhealthy, 1);
+  assert.equal(snap.extra.alertsBySeverity.Critical, 1);
+  // 요약만 — 원본 배열을 그대로 싣지 않는다(중앙 push 크기 계약).
+  assert.equal(JSON.stringify(snap.extra).includes('"v0"'), false);
+  assert.equal(snap.sections.inventory, 'ok');
+});
+
+test('normalizePowerstore: 성능 요약(extra.perf)은 값이 있는 항목만 채운다', async () => {
+  const { normalizePowerstore } = await import('../src/storage/collectors/powerstore.js');
+  const snap = normalizePowerstore({ id: 'ps-1', type: 'powerstore', name: 'PS' }, {
+    cluster: [{ name: 'C' }],
+    perf: [{ timestamp: '2026-09-02T00:00:00Z', total_iops: 12345, read_iops: 10000, write_iops: 2345, avg_latency: 850 }],
+  });
+  assert.equal(snap.extra.perf.totalIops, 12345);
+  assert.equal(snap.extra.perf.latencyUs, 850);
+  assert.equal(snap.extra.perf.totalBandwidth, null); // 없는 값은 0 이 아니라 null(위장 금지)
+  assert.equal(snap.sections.performance, 'ok');
+});
+
+// ─── 3) Unity 카탈로그 라벨/키 ─────────────────────────────────────────────────────
+test("카탈로그: Unity 라벨은 'Unity', type 키는 'unity480' 유지(기존 등록 장비 호환)", async () => {
+  const { STORAGE_TYPES, TYPE_LABEL, isImplementedType } = await import('../src/storage/types.js');
+  const unity = STORAGE_TYPES.find((t) => t.type === 'unity480');
+  assert.ok(unity, "type 키 'unity480' 이 사라지면 기존 등록 장비가 '알 수 없는 타입'이 된다.");
+  assert.equal(unity.label, 'Unity');
+  assert.equal(TYPE_LABEL.unity480, 'Unity');
+  assert.equal(isImplementedType('unity480'), true);
+  assert.equal(STORAGE_TYPES.some((t) => /Unity\s*480/.test(t.label)), false);
+});
+
+// ─── 4) 연결 테스트 루틴 ───────────────────────────────────────────────────────────
+test('testDeviceConnection: 미구현 타입은 저장 없이 사유를 돌려준다', async () => {
+  const { testDeviceConnection } = await import('../src/storage/poller.js');
+  const r = await testDeviceConnection({ id: '__test__', type: 'nope', name: 'x', host: '10.0.0.1', username: 'u', password: 'p' });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /수집기 미구현/);
+});
+
+test('testDeviceConnection: 실패해도 스냅샷을 저장하지 않는다(스토어 오염 금지)', async () => {
+  const { testDeviceConnection } = await import('../src/storage/poller.js');
+  const { localSnapshots } = await import('../src/storage/store.js');
+  const before = localSnapshots().length;
+  // 라우팅 불가 주소 → 수집기가 실패한다. 테스트는 결과만 돌려주고 스토어를 건드리면 안 된다.
+  const r = await testDeviceConnection(
+    { id: '__test__', type: 'powerstore', name: 'x', host: '192.0.2.1', username: 'u', password: 'p' },
+    { timeoutMs: 3_000 },
+  );
+  assert.equal(r.ok, false);
+  assert.ok(r.ms >= 0);
+  assert.equal(localSnapshots().length, before, '테스트 결과가 스토어에 들어가면 등록 전 장비가 목록에 뜬다.');
+});
+
+test('testDeviceConnection: 상한 타임아웃이 걸린다(요청이 매달리지 않게)', async () => {
+  const { testDeviceConnection } = await import('../src/storage/poller.js');
+  const started = Date.now();
+  const r = await testDeviceConnection(
+    { id: '__test__', type: 'unity480', name: 'x', host: '192.0.2.2', username: 'u', password: 'p' },
+    { timeoutMs: 1_000 },
+  );
+  assert.equal(r.ok, false);
+  assert.ok(Date.now() - started < 30_000, '상한 타임아웃이 동작해야 한다.');
+});

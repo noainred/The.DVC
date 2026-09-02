@@ -2,7 +2,7 @@
  * storage/types.js — 스토리지 모니터링 타입 카탈로그 + 정규화 스키마(v2.302).
  *
  * ── 확장 아키텍처(사용자 요구: Isilon 먼저, 이후 XtremIO·PowerStore·VMAX/PowerMax·VPLEX·
- *    Unity 480·Metro Node 추가) ─────────────────────────────────────────────────
+ *    Unity·Metro Node 추가) ─────────────────────────────────────────────────
  * 새 스토리지 타입 추가 절차(이 3곳이 전부 — 다른 파일은 몰라도 됨):
  *   1) collectors/<type>.js 를 만들고 공통 계약을 구현한다:
  *        export async function collect(device) → NormalizedSnapshot (아래 스키마)
@@ -53,7 +53,10 @@ export const STORAGE_TYPES = [
   { type: 'vmax', label: 'VMAX', vendor: 'Dell EMC', api: 'Unisphere REST', implemented: true }, // v2.310(powermax.js 공용)
   { type: 'powermax', label: 'PowerMax', vendor: 'Dell EMC', api: 'Unisphere REST', implemented: true }, // v2.310
   { type: 'vplex', label: 'VPLEX', vendor: 'Dell EMC', api: 'VPLEX REST', implemented: true }, // v2.311(vplex.js — metronode 공용)
-  { type: 'unity480', label: 'Unity 480', vendor: 'Dell EMC', api: 'Unisphere REST', implemented: true }, // v2.309
+  // 라벨은 'Unity'(모델 번호 제거 — 사용자 요구 2026-09-02). ⚠ type 키 'unity480' 은 바꾸지 말 것:
+  // 이미 등록된 장비의 storage-devices.json 에 그 값이 들어 있어, 키를 바꾸면 기존 장비가
+  // '알 수 없는 타입'이 되어 수집이 멈춘다(라벨만 표시용).
+  { type: 'unity480', label: 'Unity', vendor: 'Dell EMC', api: 'Unisphere REST', implemented: true }, // v2.309
   { type: 'metronode', label: 'Metro Node', vendor: 'Dell EMC', api: 'REST(VPLEX v2 계열)', implemented: true }, // v2.311
 ];
 
