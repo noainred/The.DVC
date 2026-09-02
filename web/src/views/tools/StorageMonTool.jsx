@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
 import { fetchJson, postJson, delJson, downloadFile } from '../../api.js';
 import { Loading, ErrorBox, Kpi, UsageCell, Modal, SearchBox, usageColor } from '../../components/ui.jsx';
+import { columnsFor, cellValue } from './storageColumns.js';
+import { UNIT_OPTIONS, formatBytes, loadUnit, saveUnit } from './storageUnits.js';
 
 /**
  * 특수기능 › 스토리지 모니터링(v2.302) — 글로벌 법인 스토리지(Isilon 우선, XtremIO·PowerStore·
@@ -12,10 +14,16 @@ import { Loading, ErrorBox, Kpi, UsageCell, Modal, SearchBox, usageColor } from 
  * 그룹핑해 표시(그룹핑은 프론트 — 뷰 추가에 서버 변경 불필요).
  * 조회는 전체 범위 계정 전용(서버 403 — 스토리지는 vCenter 범위 개념 밖), 등록/삭제는 admin.
  */
-const tbFmt = (bytes) => {
-  const tb = (Number(bytes) || 0) / 1024 ** 4;
-  return tb >= 1024 ? `${(tb / 1024).toFixed(2)} PB` : `${tb.toFixed(1)} TB`;
-};
+/**
+ * 용량 표시(v2.406) — 화면 상단에서 고른 단위(자동/PB/TB/GB)를 따른다.
+ * ⚠ 이 파일 안에서 tbFmt 는 표·상세·차트 27곳이 쓴다. 각 호출부에 단위를 인자로 넘기려면
+ * 중첩 컴포넌트(표 셀·모달·차트) 전부에 prop 을 뚫어야 해서, 모듈 스코프 변수 하나를
+ * StorageMonTool 렌더 시작 시 갱신하는 방식을 택했다(부모 본문이 자식 렌더보다 먼저 돌아
+ * 항상 최신 값이 쓰인다). 단위 선택은 React state 라 바뀌면 전체가 다시 그려진다.
+ * 포맷 규칙 자체는 storageUnits.js(순수·테스트로 고정)에 있다.
+ */
+let ACTIVE_UNIT = 'auto';
+const tbFmt = (bytes) => formatBytes(bytes, ACTIVE_UNIT);
 // bps 표기(isi status 스타일 — k/M/G). null 은 '—'(수집 실패를 0 으로 위장하지 않음).
 const bps = (v) => (v == null ? '—' : v >= 1e9 ? `${(v / 1e9).toFixed(1)}G` : v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(1)}k` : String(Math.round(v)));
 // 미디어 풀 셀(HDD/SSD 공용) — 사용/전체(%). null = 해당 미디어 없음(무디스크 노드 등).
@@ -52,29 +60,24 @@ export default function StorageMonTool() {
   // ⚠ 훅은 아래 조기 return(`if (!d) return <Loading/>`)보다 위에 선언해야 한다 — 렌더 간 훅
   // 개수가 달라지면 React #310 으로 화면 전체가 크래시한다(CLAUDE.md 프론트엔드 회귀 방지).
   const [dcQuery, setDcQuery] = useState('');
-  const dcRefs = useRef({});                      // 법인명 → 그룹 DOM(스크롤/반짝용)
-  const [jumpTo, setJumpTo] = useState(null);     // 다른 뷰에서 눌렀을 때 '법인별'로 전환 후 이동할 대상
-  // 대상 블록으로 스크롤 + 반짝임(VCenters.jsx gotoCard 와 동일 절차). dcRefs 만 쓰므로 조기
-  // return 위에 둘 수 있고, 아래 useEffect 에서도 쓴다. 타이머는 fire-and-forget —
-  // 언마운트 후 실행돼도 분리된 DOM 노드의 클래스를 지우는 것뿐이라 부작용이 없다.
-  const flashDc = (dc) => {
-    const el = dcRefs.current[dc];
-    if (!el) return;
-    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    el.classList.remove('qn-flash');
-    void el.offsetWidth;               // 리플로우로 애니메이션 재시작 보장(같은 칩 연타 대응)
-    el.classList.add('qn-flash');
-    setTimeout(() => el.classList.remove('qn-flash'), 3200); // CSS 3s 보다 살짝 길게
-  };
+  // 용량 표시 단위(v2.406, 사용자 요구 — PowerScale 사용량 추적). 브라우저에 기억한다.
+  const [unit, setUnit] = useState(loadUnit);
+  ACTIVE_UNIT = unit; // 아래 자식(표 셀·상세 모달·차트)이 그리기 전에 반영된다(tbFmt 주석 참고)
+  // 법인·장비 종류 다중 선택 필터(v2.407, 사용자 요구). 빈 Set = 전체(필터 없음).
+  // 두 축은 AND 로 결합한다 — 'AZ,WA + PowerScale' 이면 AZ·WA 에 있는 PowerScale 만 보인다.
+  const [dcSel, setDcSel] = useState(() => new Set());
+  const [typeSel, setTypeSel] = useState(() => new Set());
+  const toggleIn = (setter) => (v) => setter((prev) => {
+    const next = new Set(prev);
+    if (next.has(v)) next.delete(v); else next.add(v);
+    return next;
+  });
+  const toggleDc = toggleIn(setDcSel);
+  const toggleType = toggleIn(setTypeSel);
+  const clearFacets = () => { setDcSel(new Set()); setTypeSel(new Set()); };
 
   const load = () => fetchJson('/tools/storage').then((r) => { setD(r); setErr(null); }).catch((e) => setErr(e.message));
   useEffect(() => { load(); const t = setInterval(load, 30_000); return () => clearInterval(t); }, []);
-  // 뷰 전환(→ 법인별) 후 실제로 DOM 이 생긴 다음 스크롤한다 — setView 직후에는 대상이 아직 없다.
-  useEffect(() => {
-    if (!jumpTo || view !== 'dc') return;
-    setJumpTo(null);
-    flashDc(jumpTo);
-  }, [jumpTo, view]);
   if (err && !d) return <ErrorBox message={err} />;
   if (!d) return <Loading />;
 
@@ -103,7 +106,20 @@ export default function StorageMonTool() {
       .filter(Boolean).join(' ').toLowerCase();
     return kws.every((kw) => hay.includes(kw));
   };
-  const shown = rows.filter(matchDevice);          // 하단 목록·그룹의 원천(검색 반영)
+  // 검색만 적용한 집합 — 칩 목록/개수의 기준이다. 칩을 '다른 축의 선택'으로 거르면
+  // 방금 고른 칩이 사라져 해제할 수 없게 되므로, 칩 자체는 검색 결과 기준으로 항상 보여준다.
+  const searched = rows.filter(matchDevice);
+  const inDc = (r) => dcSel.size === 0 || dcSel.has(dcName(r.datacenterId));
+  const inType = (r) => typeSel.size === 0 || typeSel.has(r.type);
+  const shown = searched.filter((r) => inDc(r) && inType(r)); // 하단 목록·그룹의 원천
+  const facetOn = dcSel.size > 0 || typeSel.size > 0;
+  // 칩에 표시할 개수는 '다른 축의 선택을 반영한' 수 — 고르면 몇 대가 남는지 미리 보인다.
+  const dcChips = [...new Map(searched.map((r) => [dcName(r.datacenterId), true])).keys()]
+    .sort((a, b) => String(a).localeCompare(String(b)))
+    .map((dc) => ({ dc, list: searched.filter((r) => dcName(r.datacenterId) === dc), count: searched.filter((r) => dcName(r.datacenterId) === dc && inType(r)).length }));
+  const typeChips = [...new Set(searched.map((r) => r.type))]
+    .sort((a, b) => String(typeLabel(a)).localeCompare(String(typeLabel(b))))
+    .map((t) => ({ type: t, count: searched.filter((r) => r.type === t && inDc(r)).length }));
   // 그룹핑(법인별/타입별) — 서버 평탄 목록을 프론트에서 묶는다(뷰 확장에 서버 변경 불필요).
   const groupShown = (keyFn) => {
     const m = new Map();
@@ -131,12 +147,6 @@ export default function StorageMonTool() {
     return { fail, total, used, pct, alerts, dot };
   };
 
-  // 바로가기 칩 클릭 — '법인별' 뷰가 아니면 전환을 예약하고(위 useEffect 가 렌더 후 이동),
-  // 이미 그 뷰면 대상이 이미 DOM 에 있으므로 즉시 이동한다.
-  const gotoDc = (dc) => {
-    if (view !== 'dc') { setView('dc'); setJumpTo(dc); return; }
-    flashDc(dc);
-  };
 
   const collectNow = async (id) => {
     setBusy(true); setMsg(null);
@@ -163,72 +173,125 @@ export default function StorageMonTool() {
     } catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(false); }
   };
 
-  const DeviceRow = ({ r }) => {
+  /**
+   * 한 칸 렌더(v2.406) — 값 계산은 storageColumns.cellValue(순수, 테스트로 고정)가 하고
+   * 여기서는 '어떻게 보일지'만 정한다. 값이 null 이면 '—'(0 으로 위장 금지).
+   */
+  const Cell = ({ col, r }) => {
     const s = r.snap;
+    const v = cellValue(col.key, r);
+    const dash = <span className="muted">—</span>;
+    switch (col.key) {
+      case 'device':
+        return <td><button className="cell-link" onClick={() => setDetail(r.id)}><b>{s?.name || r.name}</b></button><div className="muted" style={{ fontSize: 11 }}>{r.host}</div></td>;
+      case 'type':
+        return <td><span className="badge blue">{typeLabel(r.type)}</span></td>;
+      case 'dc':
+        return <td className="muted">{dcName(r.datacenterId)}</td>;
+      case 'collect': {
+        // 수집 주체(중앙/엣지) + 방식 배지. 실제 수집된 스냅샷의 방식이 진실이고, 없으면 등록값
+        // (saveDevice 가 타입별 허용 목록으로 보정해 저장한다 — types.js COLLECT_METHODS).
+        const m = s?.extra?.collectMethod || r.collectMethod || 'api';
+        return (
+          <td>{r.agent ? <span className="badge" style={{ background: 'rgba(167,139,250,.2)', color: '#a78bfa' }}>{r.agent}</span> : <span className="muted">중앙</span>}
+            <span className={`badge ${m === 'ssh' ? 'blue' : 'gray'}`} style={{ marginLeft: 4, fontSize: 10 }} title={`모니터링(수집) 방식: ${m.toUpperCase()} — 등록/수정에서 변경`}>{m.toUpperCase()}</span>
+          </td>
+        );
+      }
+      case 'version':
+        return <td className="muted" style={{ fontSize: 12 }}>{s?.version || '—'}</td>;
+      case 'usage':
+        return (
+          <td style={{ minWidth: col.minWidth }}>
+            {v != null ? <UsageCell pct={v} /> : dash}
+            {s?.capacity?.totalBytes ? <div className="muted" style={{ fontSize: 10.5 }}>{tbFmt(s.capacity.usedBytes)} / {tbFmt(s.capacity.totalBytes)}</div> : null}
+          </td>
+        );
+      case 'hdd': case 'ssd':
+        return <td style={{ minWidth: col.minWidth }}><MediaCell m={v} /></td>;
+      case 'capTotal': case 'capUsed': case 'capFree': case 'physical': case 'logical':
+        return <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{v != null ? tbFmt(v) : dash}</td>;
+      case 'dataReduction':
+        return <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }} title="논리 사용량 ÷ 물리 사용량(중복제거·압축 효과)">{v != null ? `${v.toFixed(2)}:1` : dash}</td>;
+      case 'nodes':
+        return <td style={{ textAlign: 'right' }}>{v == null ? dash : <>{v}{s?.nodes?.unhealthy ? <b style={{ color: 'var(--red)' }}> ⚠{s.nodes.unhealthy}</b> : null}</>}</td>;
+      case 'health':
+        return <td>{v ? <span className={`badge ${/ok|healthy|normal/i.test(String(v)) ? 'green' : 'red'}`}>{v}</span> : dash}</td>;
+      case 'status':
+        return (
+          <td>
+            {/* ⚠ 실패 사유를 이 칸에 '항상 보이는 한 줄'로 넣지 말 것 — 사유가 길면 상태 열이
+                넓어져 표가 컨테이너를 넘고 오른쪽 '작업' 열이 잘린다(v2.403 실측·수정).
+                사유는 자리를 차지하지 않는 경로로만: 호버=title, 클릭=상세 창. */}
+            {!s ? <span className="badge gray">수집 전</span> : s.ok ? <span className="badge green">정상</span> : (
+              <button type="button" className="badge red fail-badge" onClick={() => setDetail(r.id)}
+                title={`실패 사유: ${failReason(s)}\n\n(클릭하면 상세 창에서 전체 내용을 봅니다)`}>
+                실패 <span aria-hidden="true">ⓘ</span>
+              </button>
+            )}
+            <div className="muted" style={{ fontSize: 10.5 }}>{ago(s?.collectedAt)}{s?.agent ? ` · ${s.agent}` : ''}</div>
+          </td>
+        );
+      case 'actions':
+        return (
+          <td className="right" style={{ whiteSpace: 'nowrap' }}>
+            <button className="logout-btn" style={{ padding: '3px 8px', fontSize: 11.5 }} disabled={busy} onClick={() => collectNow(r.id)} title={r.agent ? '엣지 수집 장비 — 주기 반영 안내' : '지금 수집(연결 테스트)'}>수집</button>
+            {' '}<button className="logout-btn" style={{ padding: '3px 8px', fontSize: 11.5 }} disabled={busy} onClick={() => setForm({ ...r, password: '' })}>수정</button>
+            {' '}<button className="logout-btn" style={{ padding: '3px 8px', fontSize: 11.5, color: 'var(--red)' }} disabled={busy} onClick={() => remove(r)}>삭제</button>
+          </td>
+        );
+      default:
+        return <td style={{ textAlign: col.align === 'right' ? 'right' : undefined }}>{v == null || v === '' ? dash : v}</td>;
+    }
+  };
+
+  /** 한 타입만 담긴 표(컬럼이 그 타입 전용). */
+  const TypedTable = ({ list, type, caption }) => {
+    const cols = columnsFor(type);
     return (
-      <tr key={r.id} style={{ opacity: r.enabled === false ? 0.5 : 1 }}>
-        <td><button className="cell-link" onClick={() => setDetail(r.id)}><b>{s?.name || r.name}</b></button><div className="muted" style={{ fontSize: 11 }}>{r.host}</div></td>
-        <td><span className="badge blue">{typeLabel(r.type)}</span></td>
-        <td className="muted">{dcName(r.datacenterId)}</td>
-        {/* 수집 주체(중앙/엣지) + 모니터링 방식 배지(v2.326, 사용자 요구 — 조회창에서 방식 표시).
-            실제 수집된 스냅샷의 방식(extra.collectMethod) 우선, 없으면 설정값(isilon 은 ssh/api
-            선택, 그 외 타입은 API 전용). 전 타입에 표시(과거엔 isilon 만 배지). SSH=파랑·API=회색
-            — 상세 모달 헤더 배지와 통일. */}
-        <td>{r.agent ? <span className="badge" style={{ background: 'rgba(167,139,250,.2)', color: '#a78bfa' }}>{r.agent}</span> : <span className="muted">중앙</span>}
-          {(() => {
-            // 실제 수집된 스냅샷의 방식이 진실 — 없으면 등록값(saveDevice 가 타입별로 보정해 저장).
-            const m = s?.extra?.collectMethod || r.collectMethod || 'api';
-            return <span className={`badge ${m === 'ssh' ? 'blue' : 'gray'}`} style={{ marginLeft: 4, fontSize: 10 }} title={`모니터링(수집) 방식: ${m.toUpperCase()}${r.type === 'isilon' ? ' — 등록에서 변경' : ' (이 타입은 API 전용)'}`}>{m.toUpperCase()}</span>;
-          })()}</td>
-        <td className="muted" style={{ fontSize: 12 }}>{s?.version || '—'}</td>
-        <td style={{ minWidth: 140 }}>{s?.capacity?.pct != null ? <UsageCell pct={s.capacity.pct} /> : <span className="muted">—</span>}
-          {s?.capacity?.totalBytes ? <div className="muted" style={{ fontSize: 10.5 }}>{tbFmt(s.capacity.usedBytes)} / {tbFmt(s.capacity.totalBytes)}</div> : null}</td>
-        {/* HDD/SSD 풀 분리(v2.303, 사용자 요구 — isi status 의 Cluster Storage HDD/SSD 컬럼) */}
-        <td style={{ minWidth: 120 }}><MediaCell m={s?.media?.hdd} /></td>
-        <td style={{ minWidth: 120 }}><MediaCell m={s?.media?.ssd} /></td>
-        <td style={{ textAlign: 'right' }}>{s ? `${s.nodes?.count ?? 0}${s.nodes?.unhealthy ? ` (⚠${s.nodes.unhealthy})` : ''}` : '—'}</td>
-        <td style={{ textAlign: 'right' }}>{s?.accounts?.length ?? '—'}</td>
-        {/* 상태 칸.
-            ⚠ 실패 사유를 이 칸에 '항상 보이는 한 줄'로 넣지 말 것 — 예전에는 maxWidth 230px 의
-            빨간 줄을 깔았는데(v2.316), 사유가 길면 상태 칸이 그만큼 넓어져 표 전체가 컨테이너를
-            넘고 오른쪽 '작업' 열(삭제 버튼)이 잘렸다. 실측: 1500px 화면에서 표 내용 1548px >
-            상자 1450px → 가로 잘림. 그래서 사유는 자리를 차지하지 않는 경로로만 보여준다 —
-            **마우스 올리면 툴팁(title), 누르면 상세 창**(v2.403, 사용자 요구).
-            title 은 브라우저가 표 밖에 그리므로 .table-wrap 의 overflow 에 잘리지 않는다(팝오버를
-            직접 그리면 잘린다 — 그래서 커스텀 툴팁을 쓰지 않았다). */}
-        <td>{!s ? <span className="badge gray">수집 전</span> : s.ok ? <span className="badge green">정상</span> : (
-          <button type="button" className="badge red fail-badge" onClick={() => setDetail(r.id)}
-            title={`실패 사유: ${failReason(s)}\n\n(클릭하면 상세 창에서 전체 내용을 봅니다)`}>
-            실패 <span aria-hidden="true">ⓘ</span>
-          </button>
+      <div style={{ marginBottom: caption ? 10 : 0 }}>
+        {caption && (
+          <div className="muted" style={{ fontSize: 12, margin: '0 0 4px 2px' }}>
+            <span className="badge blue">{typeLabel(type)}</span> <span style={{ marginLeft: 4 }}>{list.length}대</span>
+          </div>
         )}
-          <div className="muted" style={{ fontSize: 10.5 }}>{ago(s?.collectedAt)}{s?.agent ? ` · ${s.agent}` : ''}</div></td>
-        <td className="right" style={{ whiteSpace: 'nowrap' }}>
-          <button className="logout-btn" style={{ padding: '3px 8px', fontSize: 11.5 }} disabled={busy} onClick={() => collectNow(r.id)} title={r.agent ? '엣지 수집 장비 — 주기 반영 안내' : '지금 수집(연결 테스트)'}>수집</button>
-          {' '}<button className="logout-btn" style={{ padding: '3px 8px', fontSize: 11.5 }} disabled={busy} onClick={() => setForm({ ...r, password: '' })}>수정</button>
-          {' '}<button className="logout-btn" style={{ padding: '3px 8px', fontSize: 11.5, color: 'var(--red)' }} disabled={busy} onClick={() => remove(r)}>삭제</button>
-        </td>
-      </tr>
+        {/* ⚠ 표에 자체 세로 스크롤(max-height)을 다시 넣지 말 것 — 장비가 20대만 넘어도 페이지
+            스크롤과 표 스크롤이 이중으로 겹쳐 목록을 훑기 불편하다(2026-09-02 사용자 지적). */}
+        <div className="table-wrap">
+          <table>
+            <thead><tr>{cols.map((c) => <th key={c.key} className={c.align === 'right' ? 'right' : undefined} style={c.align === 'right' ? { textAlign: 'right' } : undefined}>{c.label}</th>)}</tr></thead>
+            <tbody>
+              {list.length === 0 && <tr><td colSpan={cols.length} className="center muted" style={{ padding: 20 }}>등록된 장비가 없습니다 — "+ 장비 등록"으로 시작하세요.</td></tr>}
+              {list.map((r) => (
+                <tr key={r.id} style={{ opacity: r.enabled === false ? 0.5 : 1 }}>
+                  {cols.map((c) => <Cell key={c.key} col={c} r={r} />)}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
     );
   };
+
   /**
-   * 장비 표.
-   * ⚠ 표에 자체 세로 스크롤(max-height)을 다시 넣지 말 것 — 장비별 뷰는 전 법인 장비를 한 표에
-   * 넣으므로 20대만 넘어도 내용이 상자 높이의 2배를 넘어(실측 1293px vs 544px) 표 안쪽에만
-   * 스크롤바가 생긴다. 페이지 스크롤과 표 스크롤이 이중으로 겹쳐 목록을 훑기 불편하다는
-   * 사용자 지적으로 제거했다(2026-09-02). 표는 자연 높이로 두고 페이지가 스크롤한다.
+   * 장비 표(v2.406, 사용자 요구 '각각의 스토리지 전용 컬럼').
+   * 스토리지 타입마다 의미 있는 지표가 다르다 — PowerStore 는 Physical/Logical/Data Reduction,
+   * Isilon 은 HDD/SSD 풀, VPLEX 는 자체 용량이 없어 디렉터·헬스다. 하나의 고정 컬럼 집합으로는
+   * 어떤 타입엔 빈 칸이, 어떤 타입엔 필요한 열이 없다.
+   * 그래서 **목록에 여러 타입이 섞여 있으면 타입별로 표를 나눠** 각자의 전용 컬럼으로 그린다.
+   * 단일 타입이면 표 하나(제목 없이) — 법인별/타입별 뷰에서 불필요한 머리글이 늘지 않게.
    */
-  const DeviceTable = ({ list }) => (
-    <div className="table-wrap">
-      <table>
-        <thead><tr><th>장비</th><th>타입</th><th>법인</th><th>수집</th><th>버전</th><th>사용률(전체)</th><th>HDD 풀</th><th>SSD 풀</th><th style={{ textAlign: 'right' }}>노드</th><th style={{ textAlign: 'right' }}>계정</th><th>상태</th><th className="right">작업</th></tr></thead>
-        <tbody>
-          {list.length === 0 && <tr><td colSpan={12} className="center muted" style={{ padding: 20 }}>등록된 장비가 없습니다 — "+ 장비 등록"으로 시작하세요.</td></tr>}
-          {list.map((r) => <DeviceRow key={r.id} r={r} />)}
-        </tbody>
-      </table>
-    </div>
-  );
+  const DeviceTable = ({ list }) => {
+    const types = [...new Set(list.map((r) => r.type))];
+    if (list.length === 0) return <TypedTable list={list} type={null} />;
+    if (types.length === 1) return <TypedTable list={list} type={types[0]} />;
+    // 여러 타입 — 타입별 표로 나눈다(타입 이름 순서 고정: 화면이 갱신마다 흔들리지 않게).
+    const byType = types
+      .map((t) => [t, list.filter((r) => r.type === t)])
+      .sort((a, b) => String(typeLabel(a[0])).localeCompare(String(typeLabel(b[0]))));
+    return <>{byType.map(([t, rows]) => <TypedTable key={t} list={rows} type={t} caption />)}</>;
+  };
 
   return (
     <div>
@@ -252,6 +315,18 @@ export default function StorageMonTool() {
         <button className="tab" style={{ flex: 'none', padding: '7px 13px' }} disabled={busy}
           title="중앙 직접 수집 장비를 지금 다시 수집하고 화면을 갱신합니다(엣지 위임 장비는 다음 주기에 반영)"
           onClick={refreshAll}>🔄 전체 새로고침</button>
+        {/* 용량 단위(v2.406, 사용자 요구) — 자동(PB 접기)은 1.30→1.31 PB 처럼 소수 둘째 자리에서만
+            움직여 하루치 증가(수 TB)가 묻힌다. TB/GB 로 고정하면 증가가 그대로 드러난다.
+            표·상세·추이 차트가 모두 이 선택을 따른다. */}
+        <span style={{ width: 1, height: 22, background: 'var(--border)', margin: '0 2px' }} />
+        <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12, gap: 6 }}
+          title="용량 표시 단위입니다. 사용량 증가를 추적할 때는 TB 또는 GB 로 고정하면 변화가 잘 보입니다.">
+          단위
+          <select className="select" style={{ padding: '5px 8px', fontSize: 12 }} value={unit}
+            onChange={(e) => setUnit(saveUnit(e.target.value))}>
+            {UNIT_OPTIONS.map((u) => <option key={u.value} value={u.value} title={u.hint}>{u.label}</option>)}
+          </select>
+        </label>
         {msg && <span className="muted" style={{ fontSize: 12.5 }}>{msg}</span>}
       </div>
 
@@ -271,24 +346,66 @@ export default function StorageMonTool() {
           0건일 때 바가 통째로 사라지면 그 안의 검색창까지 없어져 사용자가 자기가 친 글자를
           지울 수 없다(무결과 = 영구 빈 화면). 실제로 그 상태를 만들었다가 잡은 결함이다. */}
       {view !== 'trend' && rows.length > 0 && (
-        <div className="vc-quicknav">
-          <span className="qn-label">⚡ 법인 바로가기</span>
-          {/* 칩에 별도 필터를 걸지 않는다 — dcGroups 가 이미 검색이 반영된 목록이라 칩과 하단
-              목록이 항상 같은 집합을 가리킨다(따로 거르면 둘이 어긋난다). */}
-          {dcGroups.map(([dc, list]) => {
+        <div className="vc-quicknav" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
+          {/* 1줄: 법인 필터(다중 선택). v2.406 까지는 누르면 그 법인으로 '이동'했지만, 사용자
+              요구로 **선택한 법인만 보여주는 필터**로 바꿨다. 아무것도 안 고르면 전체. */}
+          <div className="flex gap wrap" style={{ alignItems: 'center', gap: 8 }}>
+            <span className="qn-label" style={{ minWidth: 74 }}>🏢 법인</span>
+            {dcChips.map(({ dc, list, count }) => {
               const g = dcSummary(list);
+              const on = dcSel.has(dc);
               return (
-                <button key={dc} className={`qn-btn${g.fail ? ' down' : ''}`} onClick={() => gotoDc(dc)}
+                <button key={dc} className={`qn-btn${on ? ' on' : ''}${g.fail ? ' down' : ''}`}
+                  aria-pressed={on} onClick={() => toggleDc(dc)}
                   title={`${dc} — 장비 ${list.length}대 · ${tbFmt(g.used)} / ${tbFmt(g.total)}${g.total ? ` (${g.pct}%)` : ''}`
-                    + `${g.fail ? ` · 수집 실패/대기 ${g.fail}` : ''}${g.alerts ? ` · 미해결 경보 ${g.alerts}` : ''}`}>
+                    + `${g.fail ? ` · 수집 실패/대기 ${g.fail}` : ''}${g.alerts ? ` · 미해결 경보 ${g.alerts}` : ''}`
+                    + `\n${on ? '클릭하면 선택 해제' : '클릭하면 이 법인만 표시(여러 개 선택 가능)'}`}>
                   <span className="qn-dot" style={{ background: g.dot }} />{dc}
-              </button>
-            );
-          })}
-          {/* 빠른 찾기 — 아래 목록을 거른다. 무결과여도 박스가 남아야 입력을 지울 수 있다. */}
-          <SearchBox className="input" style={{ marginLeft: 'auto', maxWidth: 250, minWidth: 180 }}
-            value={dcQuery} onChange={setDcQuery} placeholder="법인·장비 찾기 (목록 필터)"
-            title="입력한 글자가 포함된 법인·장비만 아래 목록에 표시합니다(법인명·장비명·host·타입·엣지에서 검색)." />
+                  <span className="muted" style={{ fontWeight: 400, fontSize: 11 }}>{count}</span>
+                </button>
+              );
+            })}
+          </div>
+          {/* 2줄: 장비 종류 필터(다중 선택). 법인 선택과 AND 로 묶인다 —
+              'AZ,WA + PowerScale' 이면 AZ·WA 의 PowerScale 만 보인다(사용자 예시). */}
+          <div className="flex gap wrap" style={{ alignItems: 'center', gap: 8 }}>
+            <span className="qn-label" style={{ minWidth: 74 }}>🗄 장비 종류</span>
+            {typeChips.map(({ type, count }) => {
+              const on = typeSel.has(type);
+              return (
+                <button key={type} className={`qn-btn${on ? ' on' : ''}${count === 0 ? ' down' : ''}`}
+                  aria-pressed={on} onClick={() => toggleType(type)}
+                  title={`${typeLabel(type)} — 선택된 법인 기준 ${count}대`
+                    + `\n${on ? '클릭하면 선택 해제' : '클릭하면 이 종류만 표시(여러 개 선택 가능)'}`}>
+                  {typeLabel(type)}
+                  <span className="muted" style={{ fontWeight: 400, fontSize: 11 }}>{count}</span>
+                </button>
+              );
+            })}
+            {/* 오른쪽 묶음: 빠른 찾기 + 필터 해제. 1줄(법인 칩) 끝에 두면 칩이 많을 때 auto 마진이
+                검색창을 혼자 다음 줄로 밀어내 떠 보였다 — 2줄 끝으로 모아 항상 같은 자리에 둔다. */}
+            <span className="flex gap" style={{ marginLeft: 'auto', alignItems: 'center', gap: 8 }}>
+              {/* 무결과여도 박스가 남아야 입력을 지울 수 있다. */}
+              <SearchBox className="input" style={{ maxWidth: 250, minWidth: 180 }}
+                value={dcQuery} onChange={setDcQuery} placeholder="법인·장비 찾기 (목록 필터)"
+                title="입력한 글자가 포함된 법인·장비만 아래 목록에 표시합니다(법인명·장비명·host·타입·엣지에서 검색)." />
+              {facetOn && (
+                <button className="qn-btn" onClick={clearFacets}
+                  title="법인·장비 종류 선택을 모두 해제하고 전체를 봅니다.">✕ 필터 해제</button>
+              )}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* 선택 요약 — 지금 무엇으로 걸러진 목록인지 한 줄로(빈 화면·부분 목록 오해 방지). */}
+      {facetOn && (
+        <div className="muted" style={{ fontSize: 12, margin: '0 0 8px 2px' }}>
+          {dcSel.size > 0 && <>법인 <b style={{ color: 'var(--text)' }}>{[...dcSel].join(', ')}</b></>}
+          {dcSel.size > 0 && typeSel.size > 0 && ' · '}
+          {typeSel.size > 0 && <>종류 <b style={{ color: 'var(--text)' }}>{[...typeSel].map(typeLabel).join(', ')}</b></>}
+          {' — '}장비 {shown.length}대 (전체 {rows.length}대 중)
+          {shown.length === 0 && <span style={{ color: 'var(--amber)' }}> · 조건에 맞는 장비가 없습니다</span>}
         </div>
       )}
 
@@ -315,8 +432,7 @@ export default function StorageMonTool() {
         const t = sum(list.filter((r) => r.snap), (r) => r.snap.capacity?.totalBytes);
         const u = sum(list.filter((r) => r.snap), (r) => r.snap.capacity?.usedBytes);
         return (
-          // ref/qn-anchor: 위 '법인 바로가기' 칩의 스크롤·반짝 대상.
-          <div key={dc} className="qn-anchor" ref={(el) => { dcRefs.current[dc] = el; }} style={{ marginBottom: 14 }}>
+          <div key={dc} style={{ marginBottom: 14 }}>
             <div className="section-title" style={{ fontSize: 14 }}>🏢 {dc} <span className="muted" style={{ fontSize: 12, fontWeight: 400 }}>— 장비 {list.length} · {tbFmt(u)} / {tbFmt(t)}{t ? ` (${Math.round((u / t) * 100)}%)` : ''}</span></div>
             <DeviceTable list={list} />
           </div>

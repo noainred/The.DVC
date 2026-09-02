@@ -426,6 +426,11 @@ tbody tr:last-child td { border-bottom: none; }
 .qn-btn:active { transform: scale(.96); }
 .qn-btn .qn-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
 .qn-btn.down { opacity: .6; }
+/* 선택 상태(v2.407) — 법인·장비 종류 칩은 '이동'이 아니라 다중 선택 필터다.
+   눌린 것이 한눈에 보여야 지금 목록이 무엇으로 걸러졌는지 알 수 있다. */
+.qn-btn.on { background: rgba(59,130,246,.28); border-color: var(--accent); color: var(--text); }
+.qn-btn.on:hover { background: rgba(59,130,246,.36); }
+.qn-btn.on.down { opacity: 1; }   /* 선택된 칩은 흐리게 하지 않는다(선택이 더 중요한 정보) */
 
 /* 카드 반짝 하이라이트 */
 @keyframes vcFlash {
