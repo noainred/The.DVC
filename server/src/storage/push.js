@@ -6,8 +6,10 @@
 import { config } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { localSnapshots } from './store.js';
+import { runtimeIntervals, startAdaptiveTimer } from './intervals.js';
 
-const INTERVAL_MS = Math.max(60_000, Number(process.env.STORAGE_PUSH_MS) || 5 * 60_000);
+// v2.409: 주기는 중앙 배포값(storage/intervals.js)을 매번 조회 — 모듈 로드 시 상수로 굳히지 않는다.
+const pushMs = () => runtimeIntervals().pushMs;
 let _timer = null;
 let _busy = false;
 let _last = null;
@@ -34,8 +36,7 @@ export async function pushStorageNow() {
 
 export function startStoragePush() {
   if (_timer || !config.agent.centralUrl || !config.agent.centralToken) return;
-  setTimeout(() => pushStorageNow().catch(() => {}), 45_000); // 첫 수집(15s+α) 뒤에 첫 push
-  _timer = setInterval(() => pushStorageNow().catch(() => {}), INTERVAL_MS);
-  _timer.unref?.();
+  // 첫 수집(15s+α) 뒤에 첫 push, 이후 현재 주기로 재무장.
+  _timer = startAdaptiveTimer(pushMs, () => pushStorageNow(), { firstDelayMs: 45_000, name: '중앙 push' });
 }
-export function storagePushStatus() { return _last; }
+export function storagePushStatus() { return { ..._last, intervalMs: pushMs() }; }

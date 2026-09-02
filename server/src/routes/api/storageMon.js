@@ -18,6 +18,8 @@ import { listDatacenters } from '../../datacenter/store.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
 import { devicesToCsv, sampleCsv, parseDevicesCsv, analyzeImport } from '../../storage/csv.js';
 import { requestCollect, hasPendingRequest } from '../../storage/collectRequests.js';
+import { INTERVAL_SPEC, loadIntervalConfig, saveIntervalConfig, intervalsForAgent,
+  envIntervals, runtimeIntervalSource, applyOwnIntervals } from '../../storage/intervals.js';
 
 const adminOnly = requireRole('admin');
 const fullScopeOnly = (req, res, next) => {
@@ -190,6 +192,47 @@ api.post('/tools/storage/devices/:id/collect', adminOnly, async (req, res) => {
   } catch (e) { res.status(502).json({ ok: false, reason: e.message }); }
 });
 
+
+/* ── 수집 주기 설정(v2.409, 사용자 요구 '중앙에서 엣지의 스토리지 수집 주기를 설정') ─────────
+ * 중앙은 엣지에 명령을 밀어넣을 수 없다(엣지는 NAT/폐쇄망 뒤 — 아웃바운드 pull 만). 그래서
+ * 주기도 '설정 파일 → storage-config pull 응답 → 엣지 적용' 경로로 배포한다. 여기 저장은
+ * 장비 구성 변경과 같은 무게라 adminOnly + 감사로그.
+ */
+
+/** 현재 설정 + 이 노드(중앙)의 실효 주기 + 항목 사양(하한/기본/설명 — UI 폼의 단일 소스). */
+api.get('/tools/storage/intervals', adminOnly, (_req, res) => {
+  res.json({
+    ok: true,
+    spec: INTERVAL_SPEC,
+    config: loadIntervalConfig(),
+    // 중앙 자신(직접 수집 장비 = agent '')이 지금 쓰는 값과 그 출처(central/env/default).
+    central: { effective: runtimeIntervalSource(), env: envIntervals() },
+    agents: knownAgentNames(),
+    // 엣지별로 '지금 무엇이 배포될 예정인지'(전역+개별 병합 결과) — 저장 전에 결과를 볼 수 있게.
+    effectiveByAgent: Object.fromEntries(['', ...knownAgentNames()].map((a) => [a, intervalsForAgent(a)])),
+  });
+});
+
+/**
+ * 전체 교체 저장. Body: { global:{...}, agents:{ '<엣지명>':{...}, '':{중앙} } }
+ * 비어 있는 항목은 '미지정' 이고, 미지정 항목은 엣지가 자기 portal.env/기본값을 유지한다
+ * (전 키를 채워 배포하면 현장 설정을 통째로 덮어쓰기 때문 — intervals.js 계약).
+ */
+api.put('/tools/storage/intervals', adminOnly, (req, res) => {
+  try {
+    const r = saveIntervalConfig({ global: req.body?.global || {}, agents: req.body?.agents || {} });
+    // 중앙 자신은 pull 축이 없으므로 저장 즉시 반영(엣지는 다음 config pull 때 받는다).
+    let own = null;
+    try { own = applyOwnIntervals(); } catch (e) { own = { applied: false, reason: e.message }; }
+    logAudit({ user: req.user?.username, action: '스토리지 수집 주기 변경',
+      target: `전역 ${Object.keys(r.config.global).length}항목 · 엣지 ${Object.keys(r.config.agents).length}곳`,
+      detail: JSON.stringify(r.config).slice(0, 500) });
+    res.json({ ...r, own, central: { effective: runtimeIntervalSource(), env: envIntervals() },
+      effectiveByAgent: Object.fromEntries(['', ...knownAgentNames()].map((a) => [a, intervalsForAgent(a)])),
+      // 정직 표기: 엣지 반영은 즉시가 아니다 — 그 엣지의 '설정 pull 주기'만큼 걸릴 수 있다.
+      note: '엣지에는 다음 설정 pull 때 적용됩니다(엣지별 pull 주기만큼 지연될 수 있음).' });
+  } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
+});
 
 /* ── CSV 일괄 관리(v2.313, 사용자 요구) — 내보내기·샘플·가져오기. 전부 adminOnly(장비 구성). ── */
 

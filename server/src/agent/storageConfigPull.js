@@ -11,8 +11,12 @@ import { resilientFetch } from '../util/resilientFetch.js';
 import { applyPulledDevices } from '../storage/registry.js';
 import { collectDeviceNow } from '../storage/poller.js';
 import { pushStorageNow } from '../storage/push.js';
+import { runtimeIntervals, applyCentralIntervals, startAdaptiveTimer } from '../storage/intervals.js';
 
-const INTERVAL_MS = Math.max(60_000, Number(process.env.STORAGE_CONFIG_PULL_MS) || 5 * 60_000);
+// v2.409: 주기는 중앙 배포값(storage/intervals.js)을 매번 조회 — 모듈 로드 시 상수로 굳히지 않는다.
+// ⚠ 이 pull 주기 자체도 중앙이 지정할 수 있다. 길게 잡아 두면 '주기를 줄이라'는 지시도 그만큼
+//   늦게 도착한다(엣지가 물어보러 와야 아는 구조 — 중앙은 엣지에 밀어넣을 수 없다).
+const configPullMs = () => runtimeIntervals().configPullMs;
 let _timer = null;
 let _lastSig = '';
 let _last = null;
@@ -34,6 +38,10 @@ async function _pullStorageConfigNow() {
     const res = await resilientFetch(url, { method: 'GET', headers: { 'X-Central-Token': config.agent.centralToken }, timeoutMs: 20_000, retries: 2 });
     if (!res.ok) throw new Error(`storage-config <- ${res.status}`);
     const body = await res.json();
+    // 수집 주기 배포(v2.409) — 장비 목록보다 먼저 적용한다. 중앙이 값을 안 주면 빈 객체가 되어
+    // 엣지가 자기 portal.env 값으로 되돌아간다('중앙 미설정 = 로컬 유지' 계약, intervals.js).
+    // 이 호출이 타이머 재무장까지 트리거하므로, 새 주기는 다음 틱을 기다리지 않고 바로 먹는다.
+    const intervalsApplied = applyCentralIntervals(body?.intervals || {});
     const devices = body?.devices || [];
     const sig = crypto.createHash('sha1').update(JSON.stringify(devices)).digest('hex');
     let applied = false;
@@ -58,15 +66,15 @@ async function _pullStorageConfigNow() {
       }
       try { await pushStorageNow(); } catch (e) { console.warn(`[storage-config] 재수집 push 실패: ${e.message}`); }
     }
-    _last = { at: Date.now(), applied, count: devices.length, collectRequested: wants.length, collected };
-    return { ok: true, applied, unchanged: !applied, count: devices.length, collectRequested: wants.length, collected };
+    _last = { at: Date.now(), applied, count: devices.length, collectRequested: wants.length, collected,
+      intervals: runtimeIntervals(), intervalsApplied: !!intervalsApplied.applied };
+    return { ok: true, applied, unchanged: !applied, count: devices.length, collectRequested: wants.length, collected,
+      intervals: runtimeIntervals(), intervalsApplied: !!intervalsApplied.applied };
   } catch (e) { _last = { at: Date.now(), error: e.message }; return { ok: false, reason: e.message }; }
 }
 
 export function startStorageConfigPull() {
   if (_timer || !config.agent.centralUrl || !config.agent.centralToken) return;
-  setTimeout(() => pullStorageConfigNow().catch(() => {}), 10_000);
-  _timer = setInterval(() => pullStorageConfigNow().catch(() => {}), INTERVAL_MS);
-  _timer.unref?.();
+  _timer = startAdaptiveTimer(configPullMs, () => pullStorageConfigNow(), { firstDelayMs: 10_000, name: '설정 pull' });
 }
 export function storageConfigPullStatus() { return _last; }

@@ -513,7 +513,13 @@ centralRouter.get('/storage-config', async (req, res) => {
   // collectNow(v2.316): 중앙 UI 의 '수집' 클릭이 남긴 재수집 요청을 one-shot 으로 서빙 —
   // 엣지는 이 목록을 즉시 수집 + 즉시 push 한다(agent/storageConfigPull.js 참조).
   const { takeRequestsForAgent } = await import('../storage/collectRequests.js');
-  res.json({ ok: true, agent, devices: devicesForAgent(agent), collectNow: takeRequestsForAgent(agent) });
+  // intervals(v2.409): 중앙이 이 엣지에 지정한 수집 주기(전역 위에 엣지별 덮어쓰기). **지정한 키만**
+  // 내려간다 — 전 키를 채워 보내면 엣지 portal.env 의 현장 설정을 통째로 덮어쓴다(intervals.js 계약).
+  const { intervalsForAgent } = await import('../storage/intervals.js');
+  res.json({
+    ok: true, agent, devices: devicesForAgent(agent), collectNow: takeRequestsForAgent(agent),
+    intervals: intervalsForAgent(agent),
+  });
 });
 
 // POST /api/central/storage-data — 엣지 수집 스냅샷 수신. 저장 키는 body.agent 가 아니라

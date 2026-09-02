@@ -17,6 +17,7 @@ import Diagnostics from './Diagnostics.jsx';
 import Alerts2 from './Alerts2.jsx';
 import Audit from './Audit.jsx';
 import MetricsSettings from './MetricsSettings.jsx';
+import StorageIntervals from './StorageIntervals.jsx'; // 스토리지 수집 주기(중앙→엣지 배포, v2.409)
 import GpuGuestSettings from './GpuGuestSettings.jsx';
 import GpuGuestDiag from './GpuGuestDiag.jsx';
 import GpuSettings from './GpuSettings.jsx';
@@ -41,6 +42,7 @@ const SUB = [
   { k: 'idrac-admin', label: 'iDRAC 서버 등록', C: IdracAdmin, group: 'collect' },
   { k: 'idrac-scan-log', label: '스캔 로그', C: IdracScanLog, group: 'collect' },
   { k: 'metrics', label: '지표 수집', C: MetricsSettings, group: 'collect' },
+  { k: 'storage-intervals', label: '스토리지 수집 주기', C: StorageIntervals, group: 'collect' },
   // --- GPU 사용량 수집 그룹 ---
   { k: 'gpu-collect', label: 'GPU 수집', C: GpuSettings, group: 'gpu' },
   { k: 'gpu-guest', label: 'GPU 게스트 수집', C: GpuGuestSettings, group: 'gpu' },
