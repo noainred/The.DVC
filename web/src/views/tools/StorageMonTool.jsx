@@ -77,14 +77,30 @@ export default function StorageMonTool() {
     fail: rows.filter((r) => r.snap && !r.snap.ok).length + rows.filter((r) => !r.snap).length,
     alerts: sum(withSnap, (r) => r.snap.alerts?.unresolved),
   };
-  // 그룹핑(법인별/타입별) — 서버 평탄 목록을 프론트에서 묶는다(뷰 확장 자유).
-  const groupBy = (keyFn) => {
+  /**
+   * 빠른 찾기 판정(사용자 요구 2026-09-02) — 검색은 **칩 이름이 아니라 하단 스토리지 목록**을
+   * 거른다. 판정 단위는 장비 1대이고, 그 장비의 법인·표시명·host·타입·수집주체(엣지)를 모두
+   * 건초더미에 넣는다. 공백 구분 다중 키워드 AND(Platform 빠른 찾기와 같은 규칙).
+   * ⚠ 그룹핑은 반드시 '거른 뒤'에 한다 — 먼저 그룹핑하고 그룹명만 비교하면 장비명으로 찾을 수
+   * 없고, 매칭된 법인 안에 매칭되지 않은 장비까지 같이 나온다.
+   */
+  const kws = dcQuery.toLowerCase().split(/\s+/).filter(Boolean);
+  const matchDevice = (r) => {
+    if (!kws.length) return true;
+    const hay = [dcName(r.datacenterId), r.name, r.snap?.name, r.host, typeLabel(r.type), r.agent]
+      .filter(Boolean).join(' ').toLowerCase();
+    return kws.every((kw) => hay.includes(kw));
+  };
+  const shown = rows.filter(matchDevice);          // 하단 목록·그룹의 원천(검색 반영)
+  // 그룹핑(법인별/타입별) — 서버 평탄 목록을 프론트에서 묶는다(뷰 확장에 서버 변경 불필요).
+  const groupShown = (keyFn) => {
     const m = new Map();
-    for (const r of rows) { const k = keyFn(r); if (!m.has(k)) m.set(k, []); m.get(k).push(r); }
+    for (const r of shown) { const k = keyFn(r); if (!m.has(k)) m.set(k, []); m.get(k).push(r); }
     return [...m.entries()].sort((a, b) => String(a[0]).localeCompare(String(b[0])));
   };
   // 법인 그룹 1회 계산 — 바로가기 칩과 '법인별' 뷰가 같은 배열을 쓴다(그룹핑 중복 순회 방지).
-  const dcGroups = groupBy((r) => dcName(r.datacenterId));
+  // 검색 중이면 매칭 장비만 남은 그룹이므로 칩도 자동으로 같이 좁혀진다(칩/목록 불일치 방지).
+  const dcGroups = groupShown((r) => dcName(r.datacenterId));
   /**
    * 법인 그룹 요약(바로가기 칩의 점 색·툴팁). 색 규칙은 화면 다른 곳과 어긋나지 않게 맞춘다:
    *   빨강 = 수집 실패/대기 장비 있음(= KPI '수집 실패/대기' 와 동일 판정)
@@ -169,23 +185,48 @@ export default function StorageMonTool() {
           })()}</td>
         <td className="right" style={{ whiteSpace: 'nowrap' }}>
           <button className="logout-btn" style={{ padding: '3px 8px', fontSize: 11.5 }} disabled={busy} onClick={() => collectNow(r.id)} title={r.agent ? '엣지 수집 장비 — 주기 반영 안내' : '지금 수집(연결 테스트)'}>수집</button>
-          {' '}<button className="logout-btn" style={{ padding: '3px 8px', fontSize: 11.5 }} disabled={busy} onClick={() => setForm({ ...r, password: '' })}>수정</button>
+          {/* 토글 — 같은 장비의 '수정'을 다시 누르면 아래 폼이 닫힌다(닫기 버튼까지 안 가도 되게). */}
+          {' '}<button className="logout-btn" style={{ padding: '3px 8px', fontSize: 11.5, ...(form?.id === r.id ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : null) }}
+            disabled={busy} aria-expanded={form?.id === r.id}
+            onClick={() => setForm(form?.id === r.id ? null : { ...r, password: '' })}>수정</button>
           {' '}<button className="logout-btn" style={{ padding: '3px 8px', fontSize: 11.5, color: 'var(--red)' }} disabled={busy} onClick={() => remove(r)}>삭제</button>
         </td>
       </tr>
     );
   };
-  const DeviceTable = ({ list }) => (
-    <div className="table-wrap" style={{ maxHeight: '52vh' }}>
-      <table>
-        <thead><tr><th>장비</th><th>타입</th><th>법인</th><th>수집</th><th>버전</th><th>사용률(전체)</th><th>HDD 풀</th><th>SSD 풀</th><th style={{ textAlign: 'right' }}>노드</th><th style={{ textAlign: 'right' }}>계정</th><th>상태</th><th className="right">작업</th></tr></thead>
-        <tbody>
-          {list.length === 0 && <tr><td colSpan={12} className="center muted" style={{ padding: 20 }}>등록된 장비가 없습니다 — "+ 장비 등록"으로 시작하세요.</td></tr>}
-          {list.map((r) => <DeviceRow key={r.id} r={r} />)}
-        </tbody>
-      </table>
-    </div>
-  );
+  /**
+   * 장비 표. '수정'을 누르면 **그 행 바로 아래**에 편집 폼을 펼친다(사용자 요구 2026-09-02) —
+   * 예전에는 표 위쪽 한 곳에 떠서, 아래쪽 법인의 장비를 고치면 폼이 화면 밖에 생겨 무반응처럼
+   * 보였다. 폼 행은 편집 대상 장비가 이 목록에 있을 때만 렌더되므로, 법인별/타입별로 표가
+   * 여러 개여도 폼은 정확히 한 곳에만 나온다.
+   * ⚠ 폼이 열린 표는 maxHeight 를 풀어 페이지가 스크롤되게 한다 — 52vh 스크롤 상자 안에
+   * 세로로 긴 폼을 가두면 입력하는 동안 표 헤더/버튼이 계속 잘린다.
+   */
+  const DeviceTable = ({ list }) => {
+    const editingHere = form?.id && list.some((r) => r.id === form.id);
+    return (
+      <div className="table-wrap" style={editingHere ? undefined : { maxHeight: '52vh' }}>
+        <table>
+          <thead><tr><th>장비</th><th>타입</th><th>법인</th><th>수집</th><th>버전</th><th>사용률(전체)</th><th>HDD 풀</th><th>SSD 풀</th><th style={{ textAlign: 'right' }}>노드</th><th style={{ textAlign: 'right' }}>계정</th><th>상태</th><th className="right">작업</th></tr></thead>
+          <tbody>
+            {list.length === 0 && <tr><td colSpan={12} className="center muted" style={{ padding: 20 }}>등록된 장비가 없습니다 — "+ 장비 등록"으로 시작하세요.</td></tr>}
+            {list.map((r) => (
+              <React.Fragment key={r.id}>
+                <DeviceRow r={r} />
+                {form?.id === r.id && (
+                  <tr className="dev-edit-row">
+                    <td colSpan={12} style={{ padding: 0 }}>
+                      <DeviceForm d={d} form={form} setForm={setForm} onSaved={() => { setForm(null); load(); }} inline />
+                    </td>
+                  </tr>
+                )}
+              </React.Fragment>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  };
 
   return (
     <div>
@@ -224,39 +265,50 @@ export default function StorageMonTool() {
       {/* 법인 바로가기(사용자 요구 2026-09-02) — Platform 화면의 vCenter 바로가기와 동일한 UX/스타일.
           어느 뷰에서 눌러도 '법인별' 로 전환해 그 법인 블록으로 스크롤한다(칩 자체가 '법인별로
           보기' 단축키). '추이' 뷰는 법인 블록이 없어 바를 감춘다. */}
-      {view !== 'trend' && dcGroups.length > 0 && (
+      {/* ⚠ 표시 조건은 dcGroups(검색 반영)가 아니라 **전체 장비 수**로 판단한다 — 검색 결과가
+          0건일 때 바가 통째로 사라지면 그 안의 검색창까지 없어져 사용자가 자기가 친 글자를
+          지울 수 없다(무결과 = 영구 빈 화면). 실제로 그 상태를 만들었다가 잡은 결함이다. */}
+      {view !== 'trend' && rows.length > 0 && (
         <div className="vc-quicknav">
           <span className="qn-label">⚡ 법인 바로가기</span>
-          {dcGroups
-            .filter(([dc, list]) => {
-              // 공백 구분 다중 키워드 AND — 법인명 + 그 법인의 장비명/호스트까지 검색(허브와 같은 규칙).
-              const kws = dcQuery.toLowerCase().split(/\s+/).filter(Boolean);
-              if (!kws.length) return true;
-              const hay = [dc, ...list.flatMap((r) => [r.name, r.host])].filter(Boolean).join(' ').toLowerCase();
-              return kws.every((kw) => hay.includes(kw));
-            })
-            .map(([dc, list]) => {
+          {/* 칩에 별도 필터를 걸지 않는다 — dcGroups 가 이미 검색이 반영된 목록이라 칩과 하단
+              목록이 항상 같은 집합을 가리킨다(따로 거르면 둘이 어긋난다). */}
+          {dcGroups.map(([dc, list]) => {
               const g = dcSummary(list);
               return (
                 <button key={dc} className={`qn-btn${g.fail ? ' down' : ''}`} onClick={() => gotoDc(dc)}
                   title={`${dc} — 장비 ${list.length}대 · ${tbFmt(g.used)} / ${tbFmt(g.total)}${g.total ? ` (${g.pct}%)` : ''}`
                     + `${g.fail ? ` · 수집 실패/대기 ${g.fail}` : ''}${g.alerts ? ` · 미해결 경보 ${g.alerts}` : ''}`}>
                   <span className="qn-dot" style={{ background: g.dot }} />{dc}
-                </button>
-              );
-            })}
-          {/* 빠른 찾기 — 무결과여도 박스가 남아야 입력을 지울 수 있다(VCenters 와 동일 이유). */}
-          <SearchBox className="input" style={{ marginLeft: 'auto', maxWidth: 240, minWidth: 170 }}
-            value={dcQuery} onChange={setDcQuery} placeholder="법인·장비 빠른 찾기" />
+              </button>
+            );
+          })}
+          {/* 빠른 찾기 — 아래 목록을 거른다. 무결과여도 박스가 남아야 입력을 지울 수 있다. */}
+          <SearchBox className="input" style={{ marginLeft: 'auto', maxWidth: 250, minWidth: 180 }}
+            value={dcQuery} onChange={setDcQuery} placeholder="법인·장비 찾기 (목록 필터)"
+            title="입력한 글자가 포함된 법인·장비만 아래 목록에 표시합니다(법인명·장비명·host·타입·엣지에서 검색)." />
         </div>
       )}
 
-      {form && <DeviceForm d={d} form={form} setForm={setForm} onSaved={() => { setForm(null); load(); }} />}
+      {/* 검색 결과 안내 — 몇 대가 걸렸는지, 없으면 왜 비었는지 알려준다(빈 화면 오해 방지). */}
+      {kws.length > 0 && (
+        shown.length === 0
+          ? <div className="card" style={{ padding: '14px 16px', marginBottom: 12, color: 'var(--text-dim)', fontSize: 12.5 }}>
+              "{dcQuery}" 와 일치하는 장비가 없습니다 — 법인명·장비명·host·타입·엣지에서 검색합니다.
+            </div>
+          : <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
+              🔎 "{dcQuery}" — 법인 {dcGroups.length}곳 · 장비 {shown.length}대 (전체 {rows.length}대 중)
+            </div>
+      )}
+
+      {/* 상단 폼은 '신규 등록'(form.id 없음) 전용 — 수정은 위 DeviceTable 이 해당 행 아래에 편다. */}
+      {form && !form.id && <DeviceForm d={d} form={form} setForm={setForm} onSaved={() => { setForm(null); load(); }} />}
       {importOpen && <CsvImport onClose={() => setImportOpen(false)} onDone={() => { setImportOpen(false); load(); }} />}
       {exportOpen && <CsvExport onClose={() => setExportOpen(false)} />}
 
-      {view === 'devices' && <DeviceTable list={rows} />}
-      {/* 통합 추이(v2.380) — 전체 합산 + 장비별 선택. 기간 12시간/24시간/1주 등. */}
+      {view === 'devices' && <DeviceTable list={shown} />}
+      {/* 통합 추이(v2.380) — 전체 합산 + 장비별 선택. 기간 12시간/24시간/1주 등.
+          여기는 검색을 적용하지 않는다(전체 합산 차트라 부분집합이면 '전체'가 거짓이 된다). */}
       {view === 'trend' && <StorageTrendPanel devices={rows} />}
       {view === 'dc' && dcGroups.map(([dc, list]) => {
         const t = sum(list.filter((r) => r.snap), (r) => r.snap.capacity?.totalBytes);
@@ -269,7 +321,7 @@ export default function StorageMonTool() {
           </div>
         );
       })}
-      {view === 'type' && groupBy((r) => typeLabel(r.type)).map(([ty, list]) => (
+      {view === 'type' && groupShown((r) => typeLabel(r.type)).map(([ty, list]) => (
         <div key={ty} style={{ marginBottom: 14 }}>
           <div className="section-title" style={{ fontSize: 14 }}>📦 {ty} <span className="muted" style={{ fontSize: 12, fontWeight: 400 }}>— 장비 {list.length}</span></div>
           <DeviceTable list={list} />
@@ -670,7 +722,11 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
 }
 
 /** 등록/수정 폼 — 타입(구현/예정 구분)·법인·수집 주체(중앙/엣지)·자격증명. */
-function DeviceForm({ d, form, setForm, onSaved }) {
+/**
+ * 등록/수정 폼. `inline` 이면 장비 표의 확장 행(<td colSpan>) 안에서 쓰이므로 카드 테두리·
+ * 바깥 여백 대신 좌측 강조선만 두고 셀을 꽉 채운다(행과 폼이 한 덩어리로 보이게).
+ */
+function DeviceForm({ d, form, setForm, onSaved, inline = false }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const save = async () => {
@@ -679,7 +735,10 @@ function DeviceForm({ d, form, setForm, onSaved }) {
     catch (e) { setErr(e.message); } finally { setBusy(false); }
   };
   return (
-    <div className="card" style={{ padding: 14, marginBottom: 12, background: 'rgba(96,165,250,.05)' }}>
+    <div
+      className={inline ? 'dev-edit-panel' : 'card'}
+      style={inline ? undefined : { padding: 14, marginBottom: 12, background: 'rgba(96,165,250,.05)' }}
+    >
       <div className="flex between" style={{ marginBottom: 8 }}>
         <b style={{ fontSize: 13 }}>{form.id ? `장비 수정 — ${form.name}` : '장비 등록'}</b>
         <button className="logout-btn" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => setForm(null)}>닫기</button>
