@@ -13,6 +13,7 @@ import { registerCollectorsDc } from './admin/collectorsDc.js';
 import { registerHorizonAssign } from './admin/horizonAssign.js';
 import { registerBackupNetSec } from './admin/backupNetSec.js';
 import { registerNfsMounts } from './admin/nfsMounts.js'; // Edge NFS 마운트(v2.299)
+import { registerUnity } from './admin/unity.js'; // Unity 스토리지 등록 + 연결 테스트
 
 // 관리자 API 집계 라우터 — v2.285.0 대형 파일 분할.
 // 도메인 구현은 ./admin/*.js 로 이동. ⚠️ register 호출 순서 = 라우트 등록 순서(Express 매칭 순서).
@@ -33,3 +34,4 @@ registerCollectorsDc(adminRouter);
 registerHorizonAssign(adminRouter);
 registerBackupNetSec(adminRouter);
 registerNfsMounts(adminRouter);
+registerUnity(adminRouter);

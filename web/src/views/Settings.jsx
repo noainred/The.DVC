@@ -4,6 +4,7 @@ import DatacenterAdmin from './DatacenterAdmin.jsx';
 import VCenterConnTest from './VCenterConnTest.jsx';
 import NsxAdmin from './NsxAdmin.jsx';
 import IdracAdmin from './IdracAdmin.jsx';
+import UnityAdmin from './UnityAdmin.jsx'; // Unity 스토리지 등록 + 연결 테스트
 import IdracScanLog from './IdracScanLog.jsx';
 import Collectors from './Collectors.jsx';
 import AgentDeploy from './AgentDeploy.jsx';
@@ -46,6 +47,7 @@ const SUB = [
   { k: 'gpu-guest', label: 'GPU 게스트 수집', C: GpuGuestSettings, group: 'gpu' },
   { k: 'gpu-guest-diag', label: 'GPU 수집 진단', C: GpuGuestDiag, group: 'gpu' },
   { k: 'guest-account', label: '게스트 계정 추가', C: GuestAccount, group: 'collect' },
+  { k: 'unity-admin', label: 'Unity 스토리지', C: UnityAdmin, group: 'collect' },
   { k: 'collectors', label: '수집 서버(원격)', C: Collectors, group: 'collect' },
   { k: 'agent-deploy', label: '원격 법인(DC)에 Edge 노드 포탈 설치', C: AgentDeploy, group: 'collect' },
   // --- 원격 접속 서버 그룹 ---
