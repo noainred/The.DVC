@@ -150,3 +150,77 @@ test('testDeviceConnection: 상한 타임아웃이 걸린다(요청이 매달리
   assert.equal(r.ok, false);
   assert.ok(Date.now() - started < 30_000, '상한 타임아웃이 동작해야 한다.');
 });
+
+// ─── 5) 타입별 수집 방식 카탈로그(v2.405) ───────────────────────────────────────────
+test('COLLECT_METHODS: 모든 구현 타입이 수집 방식 목록을 갖는다(폼이 빈 메뉴를 그리지 않게)', async () => {
+  const { STORAGE_TYPES, collectMethodsFor } = await import('../src/storage/types.js');
+  for (const t of STORAGE_TYPES.filter((x) => x.implemented)) {
+    const list = collectMethodsFor(t.type);
+    assert.ok(Array.isArray(list) && list.length >= 1, `${t.type}: 수집 방식 목록이 비었습니다.`);
+    for (const m of list) {
+      assert.ok(m.value && m.label, `${t.type}: value/label 이 필요합니다(메뉴 표시용).`);
+    }
+  }
+});
+
+test('isilon 은 ssh 가 기본(과거 저장분 호환) · 그 외 구현 타입은 api 기본', async () => {
+  const { defaultCollectMethod, STORAGE_TYPES } = await import('../src/storage/types.js');
+  assert.equal(defaultCollectMethod('isilon'), 'ssh');
+  for (const t of STORAGE_TYPES.filter((x) => x.implemented && x.type !== 'isilon')) {
+    assert.equal(defaultCollectMethod(t.type), 'api', t.type);
+  }
+});
+
+test('normalizeCollectMethod: 허용되지 않는 값은 기본값으로 보정(유령 값 저장 방지)', async () => {
+  const { normalizeCollectMethod } = await import('../src/storage/types.js');
+  assert.equal(normalizeCollectMethod('isilon', 'api'), 'api');
+  assert.equal(normalizeCollectMethod('isilon', ''), 'ssh');
+  assert.equal(normalizeCollectMethod('powerstore', 'ssh'), 'ssh'); // v2.405: pstcli 수집기 추가
+  // PowerMax/VMAX 는 symcli 가 별도 SYMAPI 호스트를 요구해 장비 SSH 로는 불가 — api 로 보정.
+  assert.equal(normalizeCollectMethod('powermax', 'ssh'), 'api');
+  assert.equal(normalizeCollectMethod('vmax', 'ssh'), 'api');
+});
+
+test('수집 방식 목록의 모든 value 는 실제 수집기가 있는 것만(유령 선택지 금지)', async () => {
+  const { STORAGE_TYPES, collectMethodsFor } = await import('../src/storage/types.js');
+  // 'ssh' 를 목록에 올린 타입은 그 타입 파일이 실제로 ssh 분기를 갖고 있어야 한다.
+  // (목록에만 올리면 사용자가 고를 수 있는데 수집은 안 되는 유령 선택지가 된다.)
+  const fs = await import('node:fs');
+  const url = await import('node:url');
+  const pathMod = await import('node:path');
+  const dir = pathMod.join(pathMod.dirname(url.fileURLToPath(import.meta.url)), '..', 'src', 'storage', 'collectors');
+  const file = { isilon: 'isilon.js', powerstore: 'powerstore.js', unity480: 'unity.js', xtremio: 'xtremio.js', vplex: 'vplex.js', metronode: 'vplex.js', vmax: 'powermax.js', powermax: 'powermax.js' };
+  for (const t of STORAGE_TYPES.filter((x) => x.implemented)) {
+    const values = collectMethodsFor(t.type).map((m) => m.value);
+    assert.ok(values.includes('api') || values.includes('ssh'), t.type);
+    if (values.includes('ssh')) {
+      const src = fs.readFileSync(pathMod.join(dir, file[t.type]), 'utf8');
+      // isilon 은 `!== 'api'`(ssh 가 기본), 나머지는 `=== 'ssh'` 로 분기한다 — 둘 다 허용.
+      assert.match(src, /collectMethod (?:===\s*'ssh'|!==\s*'api')/, `${t.type}: 카탈로그에 ssh 가 있는데 수집기에 ssh 분기가 없습니다.`);
+    }
+  }
+});
+
+test('SSH CLI 수집기 4종이 정규화 함수를 내보낸다(테스트 가능 계약)', async () => {
+  for (const [mod, fn] of [
+    ['powerstoreSsh.js', 'normalizePowerstoreSsh'], ['unitySsh.js', 'normalizeUnitySsh'],
+    ['xtremioSsh.js', 'normalizeXtremioSsh'], ['vplexSsh.js', 'normalizeVplexSsh'],
+  ]) {
+    const m = await import(`../src/storage/collectors/${mod}`);
+    assert.equal(typeof m[fn], 'function', `${mod}: ${fn} 이 없습니다.`);
+    assert.equal(typeof m.collectViaSsh, 'function', `${mod}: collectViaSsh 가 없습니다.`);
+  }
+});
+
+test('saveDevice: 타입에 없는 수집 방식은 저장 시 보정된다', async () => {
+  const { saveDevice, listDevices } = await import('../src/storage/registry.js');
+  // PowerMax 는 SSH 수집기가 없다(symcli 는 별도 SYMAPI 호스트 필요) → api 로 보정되어야 한다.
+  const d = saveDevice({ type: 'powermax', name: 'pm-method', host: '10.20.0.77', username: 'admin', password: 'pw', collectMethod: 'ssh' });
+  assert.equal(d.collectMethod, 'api');
+  // PowerStore 는 v2.405 부터 ssh(pstcli)를 지원하므로 그대로 저장되어야 한다.
+  const ps = saveDevice({ type: 'powerstore', name: 'ps-method', host: '10.20.0.79', username: 'admin', password: 'pw', collectMethod: 'ssh' });
+  assert.equal(ps.collectMethod, 'ssh');
+  const iso = saveDevice({ type: 'isilon', name: 'iso-method', host: '10.20.0.78', username: 'root', password: 'pw' });
+  assert.equal(iso.collectMethod, 'ssh'); // 미지정이면 그 타입 기본값
+  assert.ok(listDevices().length >= 2);
+});

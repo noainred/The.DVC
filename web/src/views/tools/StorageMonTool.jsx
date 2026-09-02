@@ -176,7 +176,8 @@ export default function StorageMonTool() {
             — 상세 모달 헤더 배지와 통일. */}
         <td>{r.agent ? <span className="badge" style={{ background: 'rgba(167,139,250,.2)', color: '#a78bfa' }}>{r.agent}</span> : <span className="muted">중앙</span>}
           {(() => {
-            const m = s?.extra?.collectMethod || (r.type === 'isilon' ? (r.collectMethod || 'ssh') : 'api');
+            // 실제 수집된 스냅샷의 방식이 진실 — 없으면 등록값(saveDevice 가 타입별로 보정해 저장).
+            const m = s?.extra?.collectMethod || r.collectMethod || 'api';
             return <span className={`badge ${m === 'ssh' ? 'blue' : 'gray'}`} style={{ marginLeft: 4, fontSize: 10 }} title={`모니터링(수집) 방식: ${m.toUpperCase()}${r.type === 'isilon' ? ' — 등록에서 변경' : ' (이 타입은 API 전용)'}`}>{m.toUpperCase()}</span>;
           })()}</td>
         <td className="muted" style={{ fontSize: 12 }}>{s?.version || '—'}</td>
@@ -825,6 +826,26 @@ function TestResult({ r }) {
           ))}
         </div>
       )}
+      {/* SSH CLI 수집(pstcli·uemcli·xmcli·vplexcli)의 명령별 원문(v2.405).
+          이 CLI 들은 버전마다 출력 형식이 달라 파싱이 빗나갈 수 있다. 원문을 접어서 보여주면
+          '어떤 명령이 무엇을 돌려줬는지'를 바로 확인해 교정할 수 있다(추측 제거). */}
+      {Array.isArray(r.cliRaw) && r.cliRaw.length > 0 && (
+        <details style={{ marginTop: 8 }}>
+          <summary style={{ cursor: 'pointer', fontSize: 12 }}>
+            CLI 명령 원문 {r.cliRaw.length}건 — 성공 {r.cliRaw.filter((x) => x.ok).length} · 실패 {r.cliRaw.filter((x) => !x.ok).length}
+          </summary>
+          <div style={{ marginTop: 6, maxHeight: '40vh', overflow: 'auto' }}>
+            {r.cliRaw.map((x, i) => (
+              <div key={i} style={{ marginBottom: 8 }}>
+                <div style={{ fontFamily: 'ui-monospace, monospace', fontSize: 11.5, color: x.ok ? 'var(--green)' : 'var(--red)' }}>
+                  {x.ok ? '✓' : '✗'} [{x.key}] {x.cmd}
+                </div>
+                <pre style={{ margin: '2px 0 0', padding: '6px 8px', background: 'rgba(148,163,184,.08)', borderRadius: 6, fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{x.sample || '(빈 출력)'}</pre>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
       {r.ok && <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>테스트 결과는 저장되지 않습니다 — 목록/추이/작업 로그에 반영하려면 '저장' 후 수집하세요.</div>}
     </div>
   );
@@ -839,6 +860,14 @@ function DeviceForm({ d, form, setForm, onSaved }) {
   const [test, setTest] = useState(null);
   const [testing, setTesting] = useState(false);
   const edit = (patch) => { setTest(null); setForm({ ...form, ...patch }); };
+  // 현재 타입이 지원하는 수집 방식(서버 카탈로그). 알 수 없는 타입이면 API 단일로 본다.
+  const typeEntry = (d.types || []).find((t) => t.type === form.type);
+  const methods = (typeEntry?.methods?.length ? typeEntry.methods : [{ value: 'api', label: 'REST API' }]);
+  const typeLabel = typeEntry?.label || '';
+  // 저장값이 그 타입에서 허용되지 않으면(타입을 바꾼 직후 등) 첫 항목으로 보정 — 서버의
+  // normalizeCollectMethod 와 같은 규칙이라 화면과 저장 결과가 어긋나지 않는다.
+  const method = methods.some((m) => m.value === form.collectMethod) ? form.collectMethod : methods[0].value;
+  const methodHint = methods.find((m) => m.value === method)?.hint || '';
   const save = async () => {
     setBusy(true); setErr(null);
     try { const r = await postJson('/tools/storage/devices', form); if (r.ok === false) setErr(r.reason); else onSaved(); }
@@ -860,22 +889,36 @@ function DeviceForm({ d, form, setForm, onSaved }) {
       </div>
       <div className="flex gap wrap" style={{ alignItems: 'flex-end' }}>
         <label style={{ fontSize: 12 }}>타입<br />
-          <select className="select" value={form.type} onChange={(e) => edit({ type: e.target.value })}>
+          <select className="select" value={form.type}
+            onChange={(e) => {
+              // 타입을 바꾸면 그 타입의 기본 수집 방식으로 함께 맞춘다 — 이전 타입의 방식(예: ssh)이
+              // 남아 있으면 서버가 보정해 버려 화면에 보이던 값과 실제 저장값이 달라진다.
+              const nt = e.target.value;
+              const list = (d.types || []).find((t) => t.type === nt)?.methods || [{ value: 'api' }];
+              edit({ type: nt, collectMethod: list[0].value });
+            }}>
             {(d.types || []).map((t) => <option key={t.type} value={t.type} disabled={!t.implemented}>{t.label}{t.implemented ? '' : ' (예정)'}</option>)}
           </select>
         </label>
         <label style={{ fontSize: 12 }}>표시명<br /><input className="input" style={{ width: 160 }} value={form.name} onChange={(e) => edit({ name: e.target.value })} placeholder="WA-Isilon-01" /></label>
         <label style={{ fontSize: 12 }}>host(IP/FQDN)<br /><input className="input" style={{ width: 180 }} value={form.host} onChange={(e) => edit({ host: e.target.value })} placeholder="10.20.0.50" /></label>
-        {/* 수집 방식 선택은 PowerScale(Isilon) 전용(v2.305 사용자 요구) — 다른 타입 수집기는 API 전용이라 숨김(서버도 api 고정). */}
-        {form.type === 'isilon' && (
-          <label style={{ fontSize: 12 }} title="SSH: 장비에 접속해 isi status 출력을 파싱(운영자 화면과 동일 소스 — 권장) · API: OneFS REST">수집 방식(PowerScale)<br />
-            <select className="select" value={form.collectMethod || 'ssh'} onChange={(e) => edit({ collectMethod: e.target.value })}>
-              <option value="ssh">SSH (isi status 파싱 — 권장)</option>
-              <option value="api">REST API (OneFS Platform)</option>
-            </select>
-          </label>
+        {/* 수집 방식(v2.405, 사용자 요구 '장비별로 특화된 수집 방법을 메뉴에 표시').
+            예전에는 isilon 일 때만 메뉴를 띄우고 나머지는 서버가 조용히 api 로 고정해, 사용자가
+            PowerStore/Unity 가 무엇으로 수집되는지 화면에서 알 수 없었다. 이제 서버가 내려주는
+            타입별 methods 목록을 그대로 그린다 — 선택지가 하나뿐이면 고정임을 보이도록 비활성
+            표시한다('숨김'이 아니라 '고정'). 목록 자체는 서버(types.js COLLECT_METHODS)가 단일 소스. */}
+        <label style={{ fontSize: 12 }} title={methodHint || '이 장비 타입이 지원하는 수집 방식입니다.'}>
+          수집 방식{typeLabel ? ` (${typeLabel})` : ''}<br />
+          <select className="select" value={method} disabled={methods.length < 2}
+            onChange={(e) => edit({ collectMethod: e.target.value })}>
+            {methods.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+          </select>
+        </label>
+        {methods.length < 2 && (
+          <span className="muted" style={{ fontSize: 11, paddingBottom: 8 }}>이 타입은 이 방식만 지원합니다.</span>
         )}
-        {form.type === 'isilon' && (form.collectMethod || 'ssh') === 'ssh' && (
+        {/* SSH 포트는 SSH 방식일 때만(REST 는 443 을 쓰고 환경변수로 조정한다). */}
+        {method === 'ssh' && (
           <label style={{ fontSize: 12 }}>SSH 포트<br /><input className="input" type="number" min={1} max={65535} style={{ width: 80 }} value={form.sshPort || 22} onChange={(e) => edit({ sshPort: Number(e.target.value) || 22 })} /></label>
         )}
         <label style={{ fontSize: 12 }}>계정<br /><input className="input" style={{ width: 110 }} value={form.username} onChange={(e) => edit({ username: e.target.value })} /></label>

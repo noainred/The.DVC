@@ -67,6 +67,12 @@ export function normalizeVplex(device, raw) {
 }
 
 export async function collect(device) {
+  // 수집 방식 분기(v2.405) — 등록 시 고른 collectMethod 로 REST/SSH(vplexcli) 를 가른다.
+  // isilon.js 와 같은 패턴: 타입 파일이 자기 방식을 안다(poller 는 타입만 안다).
+  if (device.collectMethod === 'ssh') {
+    const { collectViaSsh } = await import('./vplexSsh.js');
+    return collectViaSsh(device);
+  }
   const port = Number(process.env.STORAGE_VPLEX_PORT) || 443;
   const getV2 = makeGetter(device, { port });
   // v1 인증은 Username/Password 커스텀 헤더(이 API 세대의 공식 방식 — Basic 은 무시된다).

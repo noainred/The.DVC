@@ -5,7 +5,7 @@ import { requireRole } from '../../auth/auth.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
-import { STORAGE_TYPES } from '../../storage/types.js';
+import { STORAGE_TYPES, collectMethodsFor, normalizeCollectMethod } from '../../storage/types.js';
 import { listDevices, listDevicesWithSecrets, saveDevice, deleteDevice, deviceInputIssue, getDeviceWithSecret } from '../../storage/registry.js';
 import { requireSettingsOwner } from '../admin/shared.js';
 import { localSnapshots, dropSnapshot } from '../../storage/store.js';
@@ -46,7 +46,9 @@ api.get('/tools/storage', fullScopeOnly, (_req, res) => {
   const orphans = [...byId.values()].filter((s) => !known.has(s.deviceId));
   res.json({
     devices, orphans,
-    types: STORAGE_TYPES,
+    // 타입 카탈로그에 '수집 방식 목록'을 붙여 내려준다(v2.405) — 등록 폼이 타입별 메뉴를
+    // 그 목록으로 그린다. 규칙이 프론트에 복사되지 않게 서버가 단일 소스다.
+    types: STORAGE_TYPES.map((t) => ({ ...t, methods: collectMethodsFor(t.type) })),
     datacenters: (() => { try { return listDatacenters(); } catch { return []; } })(),
     // 엣지 목록: per-agent 토큰뿐 아니라 중앙과 통신 중인 모든 알려진 엣지를 병합(v2.312 —
     // iDRAC 위임과 동일 소스). 토큰 미발급(공유 CENTRAL_TOKEN) 환경에서도 엣지를 고를 수 있다.
@@ -92,7 +94,9 @@ api.post('/tools/storage/test', adminOnly, async (req, res) => {
     id: body.id || '__test__', type: String(body.type || '').trim(), name: String(body.name || '').trim(),
     host, username: String(body.username || '').trim(), password,
     // isilon 만 ssh/api 선택(그 외 타입은 수집기가 API 전용) — saveDevice 와 같은 규칙.
-    collectMethod: String(body.type || '').trim() === 'isilon' ? (body.collectMethod === 'api' ? 'api' : 'ssh') : 'api',
+    // 저장 경로(saveDevice)와 같은 보정 규칙을 쓴다 — 테스트는 통과했는데 저장은 다른 방식으로
+    // 돌아가는 어긋남을 막는다(types.js COLLECT_METHODS 단일 소스).
+    collectMethod: normalizeCollectMethod(String(body.type || '').trim(), String(body.collectMethod || '')),
     sshPort: Number(body.sshPort) || 22,
   };
 
@@ -113,6 +117,11 @@ api.post('/tools/storage/test', adminOnly, async (req, res) => {
     capacity: snap.capacity || null,
     counts: { nodes: snap.nodes?.count ?? 0, pools: (snap.pools || []).length, accounts: (snap.accounts || []).length, alerts: snap.alerts?.unresolved ?? 0 },
     sections: snap.sections || {},
+    // SSH CLI 수집기(pstcli·uemcli·xmcli·vplexcli)는 각 명령의 원문 앞부분을 남긴다(v2.405).
+    // 이 CLI 들의 출력 형식은 버전마다 달라 파싱이 빗나갈 수 있는데, 원문을 못 보면 원격 장비의
+    // 문제를 추측으로만 다뤄야 한다. adminOnly 라우트이고 장비 소유자가 보는 값이며, 자격증명은
+    // 명령줄에 싣지 않으므로(그 계정으로 SSH 접속한 상태에서 실행) 원문에 비밀번호가 없다.
+    cliRaw: Array.isArray(snap.extra?.cliRaw) ? snap.extra.cliRaw : undefined,
   });
 });
 

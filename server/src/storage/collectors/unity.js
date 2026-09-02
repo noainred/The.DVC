@@ -53,6 +53,12 @@ export function normalizeUnity(device, raw) {
 }
 
 export async function collect(device) {
+  // 수집 방식 분기(v2.405) — 등록 시 고른 collectMethod 로 REST/SSH(uemcli) 를 가른다.
+  // isilon.js 와 같은 패턴: 타입 파일이 자기 방식을 안다(poller 는 타입만 안다).
+  if (device.collectMethod === 'ssh') {
+    const { collectViaSsh } = await import('./unitySsh.js');
+    return collectViaSsh(device);
+  }
   const get = makeGetter(device, { port: Number(process.env.STORAGE_UNITY_PORT) || 443, headers: { 'X-EMC-REST-CLIENT': 'true' } });
   const raw = {};
   const snap = emptySnapshot(device);
