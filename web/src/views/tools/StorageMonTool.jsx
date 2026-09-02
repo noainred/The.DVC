@@ -26,6 +26,18 @@ const ago = (ts) => {
   return s < 60 ? `${s}초 전` : s < 3600 ? `${Math.round(s / 60)}분 전` : `${Math.round(s / 3600)}시간 전`;
 };
 
+/**
+ * 수집 실패 사유 한 줄. snap.error 가 비면 섹션별 오류 문자열로 폴백한다 — 부분 실패(일부
+ * 섹션만 오류)일 때도 사유가 반드시 드러나야 하기 때문이다(v2.316 에서 확인된 요구사항).
+ * 목록의 '실패' 배지 툴팁과 상세 창이 같은 문자열을 쓰도록 여기 한 곳에 둔다.
+ */
+function failReason(s) {
+  if (!s) return '수집 기록 없음';
+  return s.error
+    || Object.entries(s.sections || {}).filter(([, v]) => /오류/.test(String(v))).map(([k, v]) => `${k} ${v}`).join(' · ')
+    || '사유 미상(장비 상세에서 섹션별 결과를 확인하세요)';
+}
+
 export default function StorageMonTool() {
   const [d, setD] = useState(null);
   const [err, setErr] = useState(null);
@@ -175,14 +187,21 @@ export default function StorageMonTool() {
         <td style={{ minWidth: 120 }}><MediaCell m={s?.media?.ssd} /></td>
         <td style={{ textAlign: 'right' }}>{s ? `${s.nodes?.count ?? 0}${s.nodes?.unhealthy ? ` (⚠${s.nodes.unhealthy})` : ''}` : '—'}</td>
         <td style={{ textAlign: 'right' }}>{s?.accounts?.length ?? '—'}</td>
-        <td>{!s ? <span className="badge gray">수집 전</span> : s.ok ? <span className="badge green">정상</span> : <span className="badge red" title={s.error}>실패</span>}
-          <div className="muted" style={{ fontSize: 10.5 }}>{ago(s?.collectedAt)}{s?.agent ? ` · ${s.agent}` : ''}</div>
-          {/* 실패 사유를 눈에 보이게(v2.316, 사용자 버그 신고 — 툴팁만으론 사유를 알 수 없었음).
-              error 가 비면 섹션별 오류 문자열로 폴백(부분 실패도 사유가 반드시 드러나게). */}
-          {s && !s.ok && (() => {
-            const t = s.error || Object.entries(s.sections || {}).filter(([, v]) => /오류/.test(String(v))).map(([k, v]) => `${k} ${v}`).join(' · ');
-            return t ? <div style={{ fontSize: 10.5, color: 'var(--red)', maxWidth: 230, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={t}>{t}</div> : null;
-          })()}</td>
+        {/* 상태 칸.
+            ⚠ 실패 사유를 이 칸에 '항상 보이는 한 줄'로 넣지 말 것 — 예전에는 maxWidth 230px 의
+            빨간 줄을 깔았는데(v2.316), 사유가 길면 상태 칸이 그만큼 넓어져 표 전체가 컨테이너를
+            넘고 오른쪽 '작업' 열(삭제 버튼)이 잘렸다. 실측: 1500px 화면에서 표 내용 1548px >
+            상자 1450px → 가로 잘림. 그래서 사유는 자리를 차지하지 않는 경로로만 보여준다 —
+            **마우스 올리면 툴팁(title), 누르면 상세 창**(v2.403, 사용자 요구).
+            title 은 브라우저가 표 밖에 그리므로 .table-wrap 의 overflow 에 잘리지 않는다(팝오버를
+            직접 그리면 잘린다 — 그래서 커스텀 툴팁을 쓰지 않았다). */}
+        <td>{!s ? <span className="badge gray">수집 전</span> : s.ok ? <span className="badge green">정상</span> : (
+          <button type="button" className="badge red fail-badge" onClick={() => setDetail(r.id)}
+            title={`실패 사유: ${failReason(s)}\n\n(클릭하면 상세 창에서 전체 내용을 봅니다)`}>
+            실패 <span aria-hidden="true">ⓘ</span>
+          </button>
+        )}
+          <div className="muted" style={{ fontSize: 10.5 }}>{ago(s?.collectedAt)}{s?.agent ? ` · ${s.agent}` : ''}</div></td>
         <td className="right" style={{ whiteSpace: 'nowrap' }}>
           <button className="logout-btn" style={{ padding: '3px 8px', fontSize: 11.5 }} disabled={busy} onClick={() => collectNow(r.id)} title={r.agent ? '엣지 수집 장비 — 주기 반영 안내' : '지금 수집(연결 테스트)'}>수집</button>
           {' '}<button className="logout-btn" style={{ padding: '3px 8px', fontSize: 11.5 }} disabled={busy} onClick={() => setForm({ ...r, password: '' })}>수정</button>
@@ -490,7 +509,12 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
               {s.extra.l3TotalBytes > 0 && <span className="muted">L3 캐시 합계 <b style={{ color: 'var(--text)' }}>{tbFmt(s.extra.l3TotalBytes)}</b></span>}
             </div>
           )}
-          {s.error && <div className="card" style={{ borderColor: 'var(--red)', padding: '8px 12px', marginBottom: 10, fontSize: 12.5, color: 'var(--red)' }}>⛔ {s.error}</div>}
+          {/* 실패 사유 — 목록의 '실패' 배지를 눌러 여기로 오므로, 배지 툴팁과 **같은 문자열**을
+              같은 헬퍼로 만든다(error 가 비어도 섹션 오류로 폴백). 여기서는 잘리지 않게 줄바꿈
+              허용(whiteSpace: pre-wrap) — 목록과 달리 폭 제약이 없다. */}
+          {!s.ok && (
+            <div className="card" style={{ borderColor: 'var(--red)', padding: '8px 12px', marginBottom: 10, fontSize: 12.5, color: 'var(--red)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>⛔ {failReason(s)}</div>
+          )}
 
           {/* 가상화 계층(VPLEX/Metro Node) — 자체 용량이 없다는 사유를 명시(용량/미디어/추이 숨김) */}
           {isVirt && (
