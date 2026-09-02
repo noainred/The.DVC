@@ -78,6 +78,12 @@ export function normalizeXtremio(device, raw) {
 }
 
 export async function collect(device) {
+  // 수집 방식 분기(v2.405) — 등록 시 고른 collectMethod 로 REST/SSH(xmcli) 를 가른다.
+  // isilon.js 와 같은 패턴: 타입 파일이 자기 방식을 안다(poller 는 타입만 안다).
+  if (device.collectMethod === 'ssh') {
+    const { collectViaSsh } = await import('./xtremioSsh.js');
+    return collectViaSsh(device);
+  }
   const get = makeGetter(device, { port: Number(process.env.STORAGE_XMS_PORT) || 443 });
   const raw = {};
   const snap = emptySnapshot(device); // 섹션 오류 임시 기록용(정규화 후 병합)

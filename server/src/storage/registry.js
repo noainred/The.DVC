@@ -21,7 +21,7 @@ import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js';
 import { ssrfBlockReason } from '../collector/registry.js';
-import { isKnownType, isImplementedType } from './types.js';
+import { isKnownType, isImplementedType, normalizeCollectMethod } from './types.js';
 
 const FILE = path.join(config.configDir, 'storage-devices.json');
 const MAX_DEVICES = 500;
@@ -102,12 +102,11 @@ export function saveDevice(input = {}) {
   const password = String(input.password ?? '');
   if (password) dev.password = password;
   else if (hostChanged) delete dev.password;
-  // 수집 방식(v2.304, v2.305 타입별 스코프): PowerScale(isilon)만 사용자가 'ssh'(isi status
-  // 파싱 — 운영자 화면과 동일 소스, 기본)/'api'(OneFS REST)를 선택한다(사용자 요구 2026-08-15).
-  // 그 외 타입은 수집기가 API 전용이라 'api' 고정 — SSH 를 저장해 두면 미래 수집기가 오동작한다.
-  const collectMethod = type === 'isilon'
-    ? (input.collectMethod === 'api' ? 'api' : 'ssh')
-    : 'api';
+  // 수집 방식(v2.405): 타입별 허용 목록은 types.js COLLECT_METHODS 단일 소스다. 예전에는
+  // 여기에 'isilon 이면 ssh/api, 아니면 api' 를 하드코딩해 두어 등록 폼(프론트)과 규칙이 두 곳에
+  // 흩어져 있었고, 새 방식을 추가할 때 한쪽만 고치면 조용히 어긋났다. 허용되지 않는 값은 그
+  // 타입의 기본값으로 보정한다(유령 값이 저장돼 수집기가 오동작하는 것을 막는다).
+  const collectMethod = normalizeCollectMethod(type, String(input.collectMethod || ''));
   const sshPort = Math.max(1, Math.min(65535, Math.floor(Number(input.sshPort)) || 22));
   Object.assign(dev, { type, name, host, username, agent, datacenterId, collectMethod, sshPort, enabled: input.enabled !== false, note: String(input.note || '').slice(0, 200) });
   if (!existing) {

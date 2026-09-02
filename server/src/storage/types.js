@@ -44,6 +44,60 @@
  * }
  */
 
+/**
+ * 타입별 수집 방식(v2.405, 사용자 요구 — '장비별로 특화된 수집 방법을 메뉴에 표시').
+ *
+ * 왜 카탈로그에 두나: 예전에는 등록 폼이 isilon 일 때만 선택 메뉴를 띄우고 나머지는 서버가
+ * 조용히 'api' 로 고정했다. 그래서 사용자는 **PowerStore/Unity 가 무엇으로 수집되는지 화면에서
+ * 알 수 없었다**. 이제 모든 타입이 자기 방식 목록을 갖고, 폼은 그 목록을 그대로 보여준다
+ * (선택지가 하나뿐이어도 무엇으로 수집되는지 보이게 — '숨김'이 아니라 '고정'으로 표시).
+ *
+ * value 는 저장되는 collectMethod 값이다. **첫 항목이 그 타입의 기본값**이며, 기존 데이터와
+ * 어긋나지 않게 isilon 은 'ssh' 가 첫 항목이어야 한다(과거 저장분이 전부 ssh 기본).
+ * ⚠ 여기에 방식을 추가하려면 반드시 그 방식의 수집기가 실제로 있어야 한다 — 목록에만 올리면
+ *   사용자가 고를 수 있는데 수집은 안 되는 유령 선택지가 된다(poller.js COLLECTORS 와 짝).
+ */
+export const COLLECT_METHODS = {
+  isilon: [
+    { value: 'ssh', label: 'SSH (isi status 파싱 — 권장)', hint: '장비에 SSH 로 접속해 isi status 출력을 파싱합니다(운영자 화면과 같은 소스).' },
+    { value: 'api', label: 'REST API (OneFS Platform)', hint: 'OneFS Platform API(/platform/*)를 호출합니다.' },
+  ],
+  powerstore: [
+    { value: 'api', label: 'REST API (PowerStore REST)', hint: '/api/rest/* + metrics/generate 로 용량·인벤토리·성능을 수집합니다.' },
+    { value: 'ssh', label: 'SSH (pstcli)', hint: '클러스터 관리 IP 에 SSH 로 접속해 pstcli 를 실행합니다(-output json 우선).' },
+  ],
+  unity480: [
+    { value: 'api', label: 'REST API (Unisphere REST)', hint: 'Unisphere REST(/api/*, X-EMC-REST-CLIENT 헤더)로 수집합니다.' },
+    { value: 'ssh', label: 'SSH (uemcli)', hint: 'SP 에 SSH 로 접속해 uemcli 를 실행합니다(-output csv 우선).' },
+  ],
+  xtremio: [
+    { value: 'api', label: 'REST API (XMS REST)', hint: 'XMS(XtremIO Management Server) REST 로 수집합니다.' },
+    { value: 'ssh', label: 'SSH (xmcli)', hint: 'XMS 에 SSH 로 접속해 xmcli(show-clusters 등)를 실행합니다.' },
+  ],
+  vmax: [{ value: 'api', label: 'REST API (Unisphere for PowerMax)', hint: 'Unisphere for PowerMax REST 로 수집합니다. (symcli 는 별도 SYMAPI 호스트가 필요해 장비 SSH 로는 불가)' }],
+  powermax: [{ value: 'api', label: 'REST API (Unisphere for PowerMax)', hint: 'Unisphere for PowerMax REST 로 수집합니다. (symcli 는 별도 SYMAPI 호스트가 필요해 장비 SSH 로는 불가)' }],
+  vplex: [
+    { value: 'api', label: 'REST API (VPLEX Element Manager)', hint: 'VPLEX Element Manager REST 로 수집합니다.' },
+    { value: 'ssh', label: 'SSH (vplexcli)', hint: '관리 서버에 SSH 로 접속해 vplexcli(health-check·ll /clusters 등)를 실행합니다.' },
+  ],
+  metronode: [
+    { value: 'api', label: 'REST API (Metro Node, VPLEX v2 계열)', hint: 'Metro Node REST(VPLEX v2 계열)로 수집합니다.' },
+    { value: 'ssh', label: 'SSH (vplexcli)', hint: '관리 서버에 SSH 로 접속해 vplexcli 를 실행합니다(VPLEX 와 동일 수집기).' },
+  ],
+};
+
+/** 타입이 지원하는 수집 방식 목록(미등록 타입은 API 단일로 간주 — 수집기 계약이 그렇다). */
+export function collectMethodsFor(type) {
+  return COLLECT_METHODS[String(type || '')] || [{ value: 'api', label: 'REST API', hint: '' }];
+}
+/** 그 타입의 기본 수집 방식(목록 첫 항목). */
+export const defaultCollectMethod = (type) => collectMethodsFor(type)[0].value;
+/** 입력값이 그 타입에서 허용되는 방식인지 — 아니면 기본값으로 보정한다(유령 값 저장 방지). */
+export function normalizeCollectMethod(type, value) {
+  const list = collectMethodsFor(type);
+  return list.some((m) => m.value === value) ? value : list[0].value;
+}
+
 export const STORAGE_TYPES = [
   { type: 'isilon', label: 'Isilon / PowerScale', vendor: 'Dell EMC', api: 'OneFS Platform API(REST)', implemented: true },
   // 아래는 사용자 로드맵(2026-08-15 요구) — 카탈로그에 먼저 올려 등록 UI 가 '예정'으로 보여주고,
