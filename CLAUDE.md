@@ -21,6 +21,15 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
 - 적용된 성능 메커니즘(회귀 방지 — 유지할 것):
   - **수집 동시성 제한**(`store.collectPool`, `COLLECT_CONCURRENCY` 기본 8): 28개를 한꺼번에 수집하면 매 주기 SOAP 파싱이 몰려 CPU 순간 100%. 동시 개수를 제한해 평탄화.
   - **폴러 재진입 가드**: `setInterval(()=>asyncFn())` 폴러는 이전 주기가 간격을 넘기면 중첩 실행돼 CPU 누적 악화. store.refresh/idrac.pollOnce/metrics.sampleOnce/nsx.refresh/gpu.pollOnce/collector.pullNow는 진행 중이면 이번 틱을 건너뛴다(새 폴러 추가 시 동일 가드 필수). 같은 작업의 수동 실행 API도 가드를 공유할 것(net/monitor.runMonitorNow 패턴).
+  - **스토리지 폴러 주기는 중앙 배포값**(`storage/intervals.js`, v2.409): 수집/push/설정 pull 주기를
+    모듈 로드 시 `const INTERVAL_MS = ...env...` 로 굳히지 말 것 — 그러면 중앙(설정 › 수집 서버 ›
+    스토리지 수집 주기)에서 아무리 바꿔도 **엣지를 재시작해야** 먹어 기능이 통째로 죽는다.
+    `runtimeIntervals()` 를 매 틱 조회하고 `startAdaptiveTimer` 로 재무장한다(setInterval 은 생성
+    시 간격에 묶인다). 값 변경 시 `onIntervalsChange` 리스너가 **무장된 타이머를 즉시 재무장**하는
+    것도 유지할 것(없으면 60분 주기에서 최대 1시간 뒤 적용). 재진입 가드는 그대로 둔다.
+    배포 계약: **중앙이 지정한 키만** 내려간다 — 전 키를 채워 보내면 각 법인이 portal.env 로 잡아
+    둔 현장 설정을 통째로 덮어쓴다. 하한(60초 / 영역수집 10분)은 서버가 강제하고, 빈 값·0 은
+    하한으로 승격하지 않고 '미지정'으로 버린다(미입력이 최소주기로 둔갑하는 사고 방지).
   - **롤업 O(N)**(`withRollups`): 호스트/VM/DS/알람을 vCenter별 1회 그룹핑 후 조회(`pick`). 그룹마다 전체 재순회(O(N×vCenter)) 금지.
   - **시계열 prune 스로틀 + ts 인덱스**: 매 샘플 DELETE 스캔 금지 — N틱마다 1회(store 10틱·metrics 20틱·idrac.poller 10틱). `DELETE WHERE ts<?`는 `ts` 단독 인덱스가 있어야 풀스캔을 피한다(복합 `(server_id,ts)`로는 못 탐).
   - **ETag/304**(`util/compress.js`): res.json 래퍼가 본문 SHA-1로 약한 ETag를 발급하고 If-None-Match 일치 시 304(본문 0바이트). 이 래퍼는 res.end로 직접 종료해 Express 기본 ETag가 동작하지 않으므로, 응답 경로 수정 시 ETag 발급을 없애면 프론트 `pollFetch`의 304 지원이 통째로 죽는다(과거 실제 그 상태였음 — 15초 폴 × 30초 스냅샷이면 절반이 무변동 재전송).

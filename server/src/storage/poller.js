@@ -18,12 +18,15 @@ import * as vplex from './collectors/vplex.js';           // v2.311(vplex·metro
 import { collectAreasOnce } from './areasCollector.js';
 import { saveCapacityPoint } from './db.js';
 import { recordActivity } from './activityLog.js';
+import { runtimeIntervals, runtimeIntervalSource, centralIntervalsInfo, startAdaptiveTimer, applyOwnIntervals } from './intervals.js';
 
 const COLLECTORS = { isilon: isilon.collect, powerstore: powerstore.collect, unity480: unity.collect,
   xtremio: xtremio.collect, vmax: powermax.collect, powermax: powermax.collect,
   vplex: vplex.collect, metronode: vplex.collect };
-const INTERVAL_MS = Math.max(60_000, Number(process.env.STORAGE_POLL_MS) || 10 * 60_000); // 기본 10분
-const AREAS_EVERY_MS = Math.max(10 * 60_000, Number(process.env.STORAGE_AREAS_MS) || 60 * 60_000); // 영역 전수 수집 기본 60분
+// 주기는 상수가 아니라 **매번 조회**한다(v2.409) — 중앙이 배포한 값(storage/intervals.js)이
+// 즉시 반영되게. 예전에는 모듈 로드 시 env 로 굳어 있어 주기를 바꾸려면 엣지 재시작이 필요했다.
+const pollMs = () => runtimeIntervals().pollMs;
+const areasEveryMs = () => runtimeIntervals().areasMs;
 const _areasAt = new Map(); // deviceId → 마지막 영역 수집 시각(메모리 — 재시작 시 첫 주기에 재수집)
 let _timer = null;
 let _busy = false;
@@ -82,7 +85,7 @@ async function collectOneInner(dev, startedAt) {
   // mock 모드는 요약만 시뮬레이션. 실패는 영역별 요약에 그대로 남는다(은폐 금지).
   if (snap.ok && dev.type === 'isilon') {
     const last = _areasAt.get(dev.id) || 0;
-    if (Date.now() - last >= AREAS_EVERY_MS) {
+    if (Date.now() - last >= areasEveryMs()) {
       _areasAt.set(dev.id, Date.now());
       try {
         const r = config.dataSource === 'mock'
@@ -169,10 +172,13 @@ export function startStoragePoller() {
     console.warn('[storage] ⚠ DATA_SOURCE=mock — 스토리지 수집이 가짜 데이터를 만듭니다.'
       + ' 실제 장비를 수집하려면 portal.env 에 DATA_SOURCE=live (또는 EDGE_MODE=all) 를 넣고 재시작하세요.');
   }
-  setTimeout(() => pollStorageOnce().catch(() => {}), 15_000); // 기동 15초 후 첫 수집
-  _timer = setInterval(() => pollStorageOnce().catch(() => {}), INTERVAL_MS);
-  _timer.unref?.();
+  // 중앙 노드는 자기 몫(agent '') 주기를 파일에서 바로 적용 — 엣지는 config pull 이 넣어준다.
+  try { applyOwnIntervals(); } catch (e) { console.warn(`[storage] 수집 주기 설정 로드 실패(기본값 사용): ${e.message}`); }
+  // 기동 15초 후 첫 수집, 이후 매 회 현재 주기로 재무장(setInterval 은 생성 시 간격에 묶여
+  // 중앙 배포를 못 받는다). 재진입 가드(_busy)는 그대로 — 수동 실행과 공유한다.
+  _timer = startAdaptiveTimer(pollMs, () => pollStorageOnce(), { firstDelayMs: 15_000, name: '장비 수집' });
 }
 export function storagePollerStatus() {
-  return { ..._last, intervalMs: INTERVAL_MS, busy: _busy, inFlight: [..._inFlight.values()] };
+  return { ..._last, intervalMs: pollMs(), areasMs: areasEveryMs(), busy: _busy, inFlight: [..._inFlight.values()],
+    intervals: runtimeIntervalSource(), intervalsCentral: centralIntervalsInfo() };
 }
