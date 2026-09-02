@@ -1,6 +1,18 @@
 {
   "notes": [
     {
+      "version": "2.406.0",
+      "date": "2026-09-02",
+      "title": "스토리지 — 타입별 전용 표 컬럼(PowerStore Physical/Logical/Data Reduction 등)",
+      "notes": [
+        "스토리지 타입마다 의미 있는 지표가 달라 고정 컬럼 한 벌로는 어떤 타입엔 빈 칸이, 어떤 타입엔 필요한 열이 없었다. 이제 타입별 전용 컬럼으로 그리고, 목록에 여러 타입이 섞이면 타입별로 표를 나눈다.",
+        "PowerStore: 사용률·전체 용량·사용 용량·가용 용량·Physical·Logical·Data Reduction·노드 (사용자 지정 열).",
+        "Isilon: 기존 사용률·HDD 풀·SSD 풀 유지(isi status 대조용). Unity: 용량 3종 + 풀·SP. XtremIO: 물리 용량 3종 + Data Reduction·Brick·SC. VMAX/PowerMax: 용량 3종 + 어레이. VPLEX/Metro Node: 자체 물리 용량이 없어 용량 열을 만들지 않고 클러스터·디렉터·스토리지 볼륨·Health 를 보여준다.",
+        "단일 타입 표는 '타입' 열을 생략한다(약 148px 절약 — 좁은 화면에서 오른쪽 '작업' 열이 잘리던 원인).",
+        "용량 표시 단위 선택(자동/PB/TB/GB) 추가 — **모든 스토리지 타입**에 적용된다(표·장비 상세·용량 추이 차트 공통). 자동(PB 접기)은 소수 2자리라 10.24TB 단위로만 움직여 하루치 증가가 묻힌다. TB/GB 로 고정하면 증가가 그대로 드러난다. 선택은 브라우저에 기억한다."
+      ]
+    },
+    {
       "version": "2.405.0",
       "date": "2026-09-02",
       "title": "스토리지 — 장비별 수집 방식 메뉴 + SSH CLI 수집기 4종(pstcli·uemcli·xmcli·vplexcli)",
