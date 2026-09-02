@@ -449,6 +449,13 @@ tbody tr:last-child td { border-bottom: none; }
   100% { outline: 2px solid rgba(96,165,250,0); background: rgba(96,165,250,0); }
 }
 .qn-anchor.qn-flash { animation: qnFlash 3s ease-out; outline-offset: 6px; }
+
+/* 스토리지 모니터링 '실패' 배지 — 버튼이지만 배지처럼 보이게. 사유는 title(호버)과 상세 창
+   (클릭)으로만 보여준다: 표 칸에 사유 텍스트를 깔면 상태 열이 넓어져 표가 가로로 잘린다. */
+.badge.fail-badge { border: 0; font: inherit; font-size: 11px; font-weight: 700; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 4px; }
+.badge.fail-badge:hover { filter: brightness(1.25); text-decoration: underline; }
+.badge.fail-badge:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .vc-card .vc-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .vc-card .vc-name { font-weight: 700; font-size: 15px; word-break: break-all; }
 .vc-card .vc-loc { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
