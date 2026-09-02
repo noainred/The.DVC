@@ -48,7 +48,11 @@ async function collectOneInner(dev, startedAt) {
   else if (config.dataSource === 'mock') { // v2.310 수정: config.mode 는 미존재 키(항상 undefined)라 mock 분기가 죽어 있었음 — 확립 패턴(dataSource)으로 교정
     // mock 모드(개발): 결정적 가짜 스냅샷 — UI/집계/push 흐름 검증용.
     snap = emptySnapshot(full);
-    snap.ok = true; snap.version = 'OneFS 9.4.0(mock)'; snap.serial = `MOCK-${dev.id}`;
+    // ⚠ 이 값들은 **가짜**다. 예전에는 그 사실이 version 문자열의 '(mock)' 괄호로만 드러나서,
+    //   PowerStore 장비에 'OneFS 9.4.0(mock)' 이 찍혀도 진짜 수집값처럼 보였다(실제 사용자 혼동).
+    //   extra.mock 플래그를 세워 UI 가 배지·배너로 분명히 표시하게 한다 — 스냅샷은 중앙으로
+    //   push 되므로 이 플래그가 엣지의 mock 을 중앙 화면에서도 드러낸다.
+    snap.ok = true; snap.version = 'MOCK(가짜 데이터)'; snap.serial = `MOCK-${dev.id}`;
     snap.capacity = { totalBytes: 500e12, usedBytes: 312e12, pct: 62.4 };
     snap.media = { hdd: { totalBytes: 450e12, usedBytes: 290e12, pct: 64.4 }, ssd: { totalBytes: 50e12, usedBytes: 22e12, pct: 44 } };
     snap.nodes = { count: 4, unhealthy: 0, list: Array.from({ length: 4 }, (_, i) => ({
@@ -59,7 +63,9 @@ async function collectOneInner(dev, startedAt) {
     snap.pools = [{ name: 'h500_30tb', totalBytes: 500e12, usedBytes: 312e12, pct: 62.4 }];
     snap.accounts = [{ name: 'root', enabled: true }, { name: 'admin', enabled: true }];
     snap.sections = { config: 'ok', capacity: 'ok', nodes: 'ok', accounts: 'ok', alerts: 'ok' };
-    snap.extra = { collectMethod: full.collectMethod || 'ssh', clusterHealth: 'OK', dataReduction: '1.00:1', storageEfficiency: '0.83:1', vhsBytes: 15.4 * 1024 ** 4, l3TotalBytes: 8.7 * 1024 ** 4 };
+    // ⚠ mock:true 를 여기(객체 리터럴)에 둔다 — 위에서 snap.extra.mock 만 세우면 이 줄의
+    //   재할당이 통째로 덮어써 플래그가 사라진다(실측으로 잡은 실수).
+    snap.extra = { mock: true, collectMethod: full.collectMethod || 'ssh', clusterHealth: 'OK', dataReduction: '1.00:1', storageEfficiency: '0.83:1', vhsBytes: 15.4 * 1024 ** 4, l3TotalBytes: 8.7 * 1024 ** 4 };
   } else {
     try { snap = await fn(full); }
     catch (e) { snap = emptySnapshot(full); snap.error = e.message; }
@@ -156,6 +162,13 @@ export async function testDeviceConnection(device, { timeoutMs = 60_000 } = {}) 
 
 export function startStoragePoller() {
   if (_timer) return;
+  // 조용한 mock 방지(v2.408): config.dataSource 기본값이 'mock' 이라(EDGE_MODE=all 이 아니고
+  // DATA_SOURCE 미설정이면) 엣지가 설정 누락만으로 가짜 스토리지 데이터를 중앙에 push 한다.
+  // 실제로 그 상태를 운영에서 발견해(PowerStore 에 'OneFS 9.4.0(mock)' 표시) 경고를 추가했다.
+  if (config.dataSource === 'mock') {
+    console.warn('[storage] ⚠ DATA_SOURCE=mock — 스토리지 수집이 가짜 데이터를 만듭니다.'
+      + ' 실제 장비를 수집하려면 portal.env 에 DATA_SOURCE=live (또는 EDGE_MODE=all) 를 넣고 재시작하세요.');
+  }
   setTimeout(() => pollStorageOnce().catch(() => {}), 15_000); // 기동 15초 후 첫 수집
   _timer = setInterval(() => pollStorageOnce().catch(() => {}), INTERVAL_MS);
   _timer.unref?.();

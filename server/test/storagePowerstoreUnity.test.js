@@ -224,3 +224,34 @@ test('saveDevice: 타입에 없는 수집 방식은 저장 시 보정된다', as
   assert.equal(iso.collectMethod, 'ssh'); // 미지정이면 그 타입 기본값
   assert.ok(listDevices().length >= 2);
 });
+
+// ─── 6) mock 데이터 표식(v2.408) ────────────────────────────────────────────────────
+// 사용자 신고: PowerStore 장비에 'OneFS 9.4.0(mock)' 이 찍혀 진짜 수집값처럼 보였다.
+// 원인은 엣지가 DATA_SOURCE 미설정(기본 mock)으로 돌면서 가짜 스냅샷을 중앙에 push 한 것.
+// 가짜임이 **데이터에** 남아야 중앙 화면이 배지·배너로 드러낼 수 있다.
+test('mock 스냅샷은 extra.mock=true 로 표시된다(괄호 문자열에만 기대지 않는다)', async () => {
+  const src = fs.readFileSync(new URL('../src/storage/poller.js', import.meta.url), 'utf8');
+  assert.ok(!/snap\.version = 'OneFS 9\.4\.0\(mock\)'/.test(src),
+    "타입과 무관한 'OneFS' 버전을 mock 에 쓰면 PowerStore 등에서 실제 수집값으로 오인된다.");
+  // ⚠ 플래그는 mock 블록의 **마지막 snap.extra 재할당 안**에 있어야 한다. 앞에서 snap.extra.mock
+  //   만 세우면 뒤의 `snap.extra = { ... }` 가 통째로 덮어써 플래그가 사라진다(실측으로 잡은 실수).
+  const block = /config\.dataSource === 'mock'\)\s*\{([\s\S]*?)\n  \} else \{/.exec(src);
+  assert.ok(block, 'mock 분기를 찾지 못했습니다.');
+  const lastAssign = [...block[1].matchAll(/snap\.extra = \{([^}]*)\}/g)].pop();
+  assert.ok(lastAssign, 'mock 분기에 snap.extra 할당이 있어야 합니다.');
+  assert.match(lastAssign[1], /mock:\s*true/,
+    'mock 분기의 마지막 snap.extra 할당에 mock:true 가 있어야 플래그가 살아남는다.');
+});
+
+test('mock 모드로 기동하면 콘솔 경고가 있다(조용한 가짜 수집 금지)', async () => {
+  const src = fs.readFileSync(new URL('../src/storage/poller.js', import.meta.url), 'utf8');
+  assert.match(src, /DATA_SOURCE=mock/, '기동 경고에 무엇이 문제인지 적혀 있어야 한다.');
+  assert.match(src, /DATA_SOURCE=live/, '경고에 조치 방법(live 전환)이 있어야 한다.');
+});
+
+test('config: DATA_SOURCE 미설정 + EDGE_MODE≠all 이면 기본이 mock 이다(이 함정을 문서로 고정)', async () => {
+  const src = fs.readFileSync(new URL('../src/config.js', import.meta.url), 'utf8');
+  // 기본값을 바꾸는 것은 개발 환경 영향이 커서 하지 않는다. 대신 '기본이 mock' 이라는 사실을
+  // 테스트로 고정해, 누군가 이 줄을 손볼 때 위 경고/표식과 함께 다뤄야 함을 알 수 있게 한다.
+  assert.match(src, /dataSource:\s*\(process\.env\.DATA_SOURCE \|\| \(EDGE_ALL \? 'live' : 'mock'\)\)/);
+});
