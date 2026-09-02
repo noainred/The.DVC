@@ -16,8 +16,18 @@ const INTERVAL_MS = Math.max(60_000, Number(process.env.STORAGE_CONFIG_PULL_MS) 
 let _timer = null;
 let _lastSig = '';
 let _last = null;
+// 재진입 가드(single-flight) — CLAUDE.md 성능 불변조건: setInterval(()=>asyncFn()) 폴러는
+// 이전 주기가 간격을 넘기면(고RTT·중앙 지연) 다음 틱이 겹쳐 돌아 연결·CPU 가 누적된다.
+// 수동 실행 API 도 같은 exported 함수를 부르므로 가드를 공유한다(inventoryPush 와 동일 패턴).
+let running = false;
 
-export async function pullStorageConfigNow() {
+export async function pullStorageConfigNow(...args) {
+  if (running) return { ok: false, reason: '이전 pull 진행 중(겹침 방지)' };
+  running = true;
+  try { return await _pullStorageConfigNow(...args); } finally { running = false; }
+}
+
+async function _pullStorageConfigNow() {
   if (!config.agent.centralUrl || !config.agent.centralToken) return { ok: false, reason: 'pull 비활성화(CENTRAL_URL/TOKEN 미설정)' };
   try {
     const url = `${config.agent.centralUrl}/api/central/storage-config?agent=${encodeURIComponent(config.agent.name || '')}`;

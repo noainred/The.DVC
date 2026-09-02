@@ -269,10 +269,18 @@ function SegmentVms({ subnets }) {
   const base = cidr ? cidr.split('/')[0].split('.').slice(0, 3).join('.') : null;
   const [rows, setRows] = useState(null);
   useEffect(() => {
-    if (!base) return;
-    fetchJson(`/tools/ipam/sheet?base=${base}`)
-      .then((r) => setRows((r.rows || []).filter((x) => x.status !== 'empty' && x.status !== 'network')))
-      .catch(() => setRows([]));
+    if (!base) return undefined;
+    // 경쟁 가드(dead) — 세그먼트를 빠르게 옮기면 요청이 겹치고, 먼저 보낸 느린 응답이 나중에
+    // 도착해 **다른 세그먼트의 IP 목록**을 현재 화면에 덮어쓴다(고RTT 에서 재현). 언마운트/
+    // base 변경 시 이전 이펙트의 결과를 버린다(VCenterDetail.jsx 와 동일 패턴).
+    // rows=null 로 먼저 비우는 것도 필수 — 안 그러면 로딩 동안 직전 세그먼트 목록이 새 세그먼트
+    // 것처럼 보인다(usePolling 의 스코프 변경 시 초기화와 같은 이유).
+    let dead = false;
+    setRows(null);
+    fetchJson(`/tools/ipam/sheet?base=${encodeURIComponent(base)}`)
+      .then((r) => { if (!dead) setRows((r.rows || []).filter((x) => x.status !== 'empty' && x.status !== 'network')); })
+      .catch(() => { if (!dead) setRows([]); });
+    return () => { dead = true; };
   }, [base]);
   if (!cidr) return <div className="muted" style={{ marginTop: 12, fontSize: 12 }}>이 세그먼트에는 서브넷이 없어 IP 대장을 연결할 수 없습니다 (VLAN 업링크 등).</div>;
   return (
