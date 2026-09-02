@@ -124,6 +124,36 @@ export async function collectDeviceNow(id) {
   return true;
 }
 
+/**
+ * 등록 전 연결/API 동작 테스트(v2.404, 사용자 요구 — Unity 등록 시 API 가 실제로 도는지 확인).
+ * 입력받은 장비 정보로 **수집기만 1회** 돌리고 결과를 그대로 돌려준다.
+ *
+ * ⚠ putSnapshot / recordActivity / saveCapacityPoint 를 부르지 않는다 — 아직 등록되지 않은
+ *   장비의 결과가 조회 목록·수집 작업 로그·용량 추이에 섞이면 안 된다(테스트가 실데이터 오염).
+ * ⚠ mock 모드에서도 가짜 스냅샷을 만들지 않는다(collectOneInner 와 다른 점). '실제 API 가
+ *   도는지' 확인이 목적이라 가짜 성공을 돌려주면 테스트 자체가 거짓말이 된다.
+ * 전체 상한 타임아웃을 둔다 — 수집기는 섹션마다 15초 HTTP 타임아웃이라 섹션이 많으면
+ *   1분을 넘길 수 있고, 그동안 요청이 매달려 있으면 사용자는 멈춘 줄 안다.
+ */
+export async function testDeviceConnection(device, { timeoutMs = 60_000 } = {}) {
+  const fn = COLLECTORS[device.type];
+  const startedAt = Date.now();
+  if (!fn) return { ok: false, error: `수집기 미구현: ${device.type}`, sections: {}, ms: 0 };
+  let timer = null;
+  try {
+    const snap = await Promise.race([
+      fn(device),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`테스트 시간 초과(${Math.round(timeoutMs / 1000)}초) — 방화벽/포트 또는 장비 응답 지연을 확인하세요.`)), timeoutMs);
+        timer.unref?.();
+      }),
+    ]);
+    return { ...snap, ms: Date.now() - startedAt };
+  } catch (e) {
+    return { ok: false, error: e.message, sections: {}, ms: Date.now() - startedAt };
+  } finally { if (timer) clearTimeout(timer); }
+}
+
 export function startStoragePoller() {
   if (_timer) return;
   setTimeout(() => pollStorageOnce().catch(() => {}), 15_000); // 기동 15초 후 첫 수집

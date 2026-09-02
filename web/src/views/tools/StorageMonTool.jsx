@@ -586,6 +586,70 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
             </>
           )}
 
+          {/* PowerStore 물리 사용량 상세(extra.space, v2.404 사용자 요구) — 위 '용량' 막대는
+              physical(실제 디스크) 기준이고, 여기서 논리 사용량·데이터 감축률까지 함께 본다.
+              감축률이 높으면 논리 > 물리 인 것이 정상이라, 둘을 나란히 보여야 오해가 없다. */}
+          {ex.space && (ex.space.physicalTotal > 0 || ex.space.logicalUsed > 0) && (
+            <>
+              <div className="section-title" style={{ fontSize: 13 }}>물리 사용량 상세</div>
+              <div className="flex gap wrap" style={{ marginBottom: 12, gap: 16, fontSize: 12.5 }}>
+                <span className="muted">물리 사용/전체 <b style={{ color: 'var(--text)' }}>{tbFmt(ex.space.physicalUsed)} / {tbFmt(ex.space.physicalTotal)}</b></span>
+                {ex.space.logicalUsed != null && <span className="muted">논리 사용 <b style={{ color: 'var(--text)' }}>{tbFmt(ex.space.logicalUsed)}</b></span>}
+                {ex.space.logicalProvisioned != null && <span className="muted">논리 할당 <b style={{ color: 'var(--text)' }}>{tbFmt(ex.space.logicalProvisioned)}</b></span>}
+                {ex.space.dataReduction != null && <span className="muted">데이터 감축 <b style={{ color: 'var(--text)' }}>{ex.space.dataReduction.toFixed(2)}:1</b></span>}
+                {ex.space.thinSavings != null && <span className="muted">Thin 절감 <b style={{ color: 'var(--text)' }}>{ex.space.thinSavings.toFixed(2)}:1</b></span>}
+                {ex.space.snapshotSavings != null && <span className="muted">스냅샷 절감 <b style={{ color: 'var(--text)' }}>{ex.space.snapshotSavings.toFixed(2)}:1</b></span>}
+                {ex.space.at && <span className="muted">기준 {String(ex.space.at).replace('T', ' ').slice(0, 19)}</span>}
+              </div>
+            </>
+          )}
+
+          {/* PowerStore 성능(extra.perf, v2.404) — 최신 1점. 값이 없는 항목은 생략(0 으로 위장 금지). */}
+          {ex.perf && (ex.perf.totalIops != null || ex.perf.totalBandwidth != null || ex.perf.latencyUs != null) && (
+            <>
+              <div className="section-title" style={{ fontSize: 13 }}>성능(최신)</div>
+              <div className="flex gap wrap" style={{ marginBottom: 12, gap: 16, fontSize: 12.5 }}>
+                {ex.perf.totalIops != null && <span className="muted">IOPS <b style={{ color: 'var(--text)' }}>{Math.round(ex.perf.totalIops).toLocaleString()}</b>{ex.perf.readIops != null ? ` (R ${Math.round(ex.perf.readIops).toLocaleString()} · W ${Math.round(ex.perf.writeIops || 0).toLocaleString()})` : ''}</span>}
+                {ex.perf.totalBandwidth != null && <span className="muted">대역폭 <b style={{ color: 'var(--text)' }}>{bps(ex.perf.totalBandwidth * 8)}bps</b></span>}
+                {ex.perf.latencyUs != null && <span className="muted">지연 <b style={{ color: 'var(--text)' }}>{(ex.perf.latencyUs / 1000).toFixed(2)} ms</b></span>}
+                {ex.perf.at && <span className="muted">기준 {String(ex.perf.at).replace('T', ' ').slice(0, 19)}</span>}
+              </div>
+            </>
+          )}
+
+          {/* PowerStore 인벤토리 요약(extra.inventory, v2.404 '수집할 수 있는 모든 데이터').
+              원본 객체가 아니라 개수·합계만 온다(스냅샷이 중앙으로 push 되므로 — 수집기 주석 참고). */}
+          {ex.inventory && Object.keys(ex.inventory).length > 0 && (
+            <>
+              <div className="section-title" style={{ fontSize: 13 }}>인벤토리 요약</div>
+              <div className="flex gap wrap" style={{ marginBottom: 12, gap: 16, fontSize: 12.5 }}>
+                {ex.inventory.appliances && <span className="muted">어플라이언스 <b style={{ color: 'var(--text)' }}>{ex.inventory.appliances.count}</b></span>}
+                {ex.inventory.volumes && (
+                  <span className="muted" title={Object.entries(ex.inventory.volumes.byState || {}).map(([k, v]) => `${k} ${v}`).join(' · ')}>
+                    볼륨 <b style={{ color: 'var(--text)' }}>{ex.inventory.volumes.count.toLocaleString()}{ex.inventory.volumes.truncated ? '+' : ''}</b>
+                    {ex.inventory.volumes.provisionedBytes > 0 ? ` · 할당 ${tbFmt(ex.inventory.volumes.provisionedBytes)}` : ''}
+                  </span>
+                )}
+                {ex.inventory.hosts && <span className="muted">호스트 <b style={{ color: 'var(--text)' }}>{ex.inventory.hosts.count}</b></span>}
+                {ex.inventory.hostGroups && <span className="muted">호스트 그룹 <b style={{ color: 'var(--text)' }}>{ex.inventory.hostGroups.count}</b></span>}
+                {ex.inventory.fileSystems && <span className="muted">파일시스템 <b style={{ color: 'var(--text)' }}>{ex.inventory.fileSystems.count}</b>{ex.inventory.fileSystems.totalBytes > 0 ? ` · ${tbFmt(ex.inventory.fileSystems.usedBytes)} / ${tbFmt(ex.inventory.fileSystems.totalBytes)}` : ''}</span>}
+                {ex.inventory.nasServers && <span className="muted">NAS 서버 <b style={{ color: 'var(--text)' }}>{ex.inventory.nasServers.count}</b></span>}
+                {ex.inventory.storageContainers && <span className="muted">스토리지 컨테이너 <b style={{ color: 'var(--text)' }}>{ex.inventory.storageContainers.count}</b></span>}
+                {ex.inventory.replicationSessions && (
+                  <span className="muted" title={Object.entries(ex.inventory.replicationSessions.byState || {}).map(([k, v]) => `${k} ${v}`).join(' · ')}>
+                    복제 세션 <b style={{ color: 'var(--text)' }}>{ex.inventory.replicationSessions.count}</b>
+                  </span>
+                )}
+                {ex.inventory.hardware && (
+                  <span className="muted" title={Object.entries(ex.inventory.hardware.byType || {}).map(([k, v]) => `${k} ${v}`).join(' · ')}>
+                    하드웨어 <b style={{ color: 'var(--text)' }}>{ex.inventory.hardware.total}</b>
+                    {ex.inventory.hardware.unhealthy > 0 ? <b style={{ color: 'var(--red)' }}> · 이상 {ex.inventory.hardware.unhealthy}</b> : ' · 이상 없음'}
+                  </span>
+                )}
+              </div>
+            </>
+          )}
+
           {/* PowerStore 어플라이언스(extra.appliances) — 용량 상세가 없어 풀이 아니라 별도 표로(v2.325) */}
           {Array.isArray(ex.appliances) && ex.appliances.length > 0 && (
             <>
@@ -727,13 +791,66 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
 }
 
 /** 등록/수정 폼 — 타입(구현/예정 구분)·법인·수집 주체(중앙/엣지)·자격증명. */
+/**
+ * 연결 테스트 결과 상자(v2.404). 성공/실패만 말하지 않고 **무엇이 되고 무엇이 안 됐는지**를
+ * 섹션별로 보여준다 — 부분 성공(예: 인증은 됐는데 용량 API 만 404)을 '성공'으로 뭉뚱그리면
+ * 등록 후에야 빈 값을 보게 된다(스토리지 수집기의 sections 규약이 정직 표기인 이유와 같다).
+ */
+function TestResult({ r }) {
+  const okColor = r.ok ? 'var(--green)' : 'var(--red)';
+  const sections = Object.entries(r.sections || {});
+  const cap = r.capacity && r.capacity.totalBytes ? `${tbFmt(r.capacity.usedBytes)} / ${tbFmt(r.capacity.totalBytes)}` : null;
+  return (
+    <div className="card" style={{ padding: '10px 12px', marginTop: 10, borderColor: okColor, fontSize: 12.5 }}>
+      <div style={{ color: okColor, fontWeight: 700, marginBottom: r.ok || r.error ? 6 : 0 }}>
+        {r.ok ? '✅ 연결 성공' : '⛔ 연결 실패'}{r.ms != null ? ` · ${r.ms}ms` : ''}
+      </div>
+      {!r.ok && r.error && <div style={{ color: 'var(--red)', whiteSpace: 'pre-wrap', wordBreak: 'break-word', marginBottom: 6 }}>{r.error}</div>}
+      {r.ok && (
+        <div className="flex gap wrap" style={{ gap: 14, marginBottom: sections.length ? 6 : 0 }}>
+          {r.name && <span className="muted">이름 <b style={{ color: 'var(--text)' }}>{r.name}</b></span>}
+          {r.version && <span className="muted">버전 <b style={{ color: 'var(--text)' }}>{r.version}</b></span>}
+          {r.serial && <span className="muted">시리얼 <b style={{ color: 'var(--text)' }}>{r.serial}</b></span>}
+          {cap && <span className="muted">용량 <b style={{ color: 'var(--text)' }}>{cap}</b></span>}
+          {r.counts && <span className="muted">노드 {r.counts.nodes} · 풀 {r.counts.pools} · 계정 {r.counts.accounts} · 경보 {r.counts.alerts}</span>}
+        </div>
+      )}
+      {sections.length > 0 && (
+        <div className="flex gap wrap" style={{ gap: 6 }}>
+          {sections.map(([k, v]) => (
+            <span key={k} className={`badge ${v === 'ok' ? 'green' : v === 'skip' ? 'gray' : 'red'}`}
+              title={v === 'ok' ? '수집됨' : v === 'skip' ? '이 타입은 해당 섹션이 없거나 건너뜀' : String(v)}>
+              {k} {v === 'ok' ? '✓' : v === 'skip' ? '–' : '✗'}
+            </span>
+          ))}
+        </div>
+      )}
+      {r.ok && <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>테스트 결과는 저장되지 않습니다 — 목록/추이/작업 로그에 반영하려면 '저장' 후 수집하세요.</div>}
+    </div>
+  );
+}
+
 function DeviceForm({ d, form, setForm, onSaved }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
+  // 연결 테스트 결과(v2.404, 사용자 요구 — Unity 등 API 장비를 등록하기 전에 실제로 도는지 확인).
+  // null=아직 안 함, {ok,...}=결과. 입력이 바뀌면 낡은 결과를 지운다(다른 설정의 성공을 새 설정의
+  // 성공으로 오해하는 것이 이런 UI 의 대표적 사고다).
+  const [test, setTest] = useState(null);
+  const [testing, setTesting] = useState(false);
+  const edit = (patch) => { setTest(null); setForm({ ...form, ...patch }); };
   const save = async () => {
     setBusy(true); setErr(null);
     try { const r = await postJson('/tools/storage/devices', form); if (r.ok === false) setErr(r.reason); else onSaved(); }
     catch (e) { setErr(e.message); } finally { setBusy(false); }
+  };
+  const runTest = async () => {
+    setTesting(true); setTest(null); setErr(null);
+    try {
+      const r = await postJson('/tools/storage/test', form);
+      // 400(검증 실패)은 reason 만 오고 ok:false — 그대로 결과 상자에 보여준다.
+      setTest({ ...r, ok: !!r.ok, error: r.error || r.reason || '' });
+    } catch (e) { setTest({ ok: false, error: e.message }); } finally { setTesting(false); }
   };
   return (
     <div className="card" style={{ padding: 14, marginBottom: 12, background: 'rgba(96,165,250,.05)' }}>
@@ -743,26 +860,26 @@ function DeviceForm({ d, form, setForm, onSaved }) {
       </div>
       <div className="flex gap wrap" style={{ alignItems: 'flex-end' }}>
         <label style={{ fontSize: 12 }}>타입<br />
-          <select className="select" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
+          <select className="select" value={form.type} onChange={(e) => edit({ type: e.target.value })}>
             {(d.types || []).map((t) => <option key={t.type} value={t.type} disabled={!t.implemented}>{t.label}{t.implemented ? '' : ' (예정)'}</option>)}
           </select>
         </label>
-        <label style={{ fontSize: 12 }}>표시명<br /><input className="input" style={{ width: 160 }} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="WA-Isilon-01" /></label>
-        <label style={{ fontSize: 12 }}>host(IP/FQDN)<br /><input className="input" style={{ width: 180 }} value={form.host} onChange={(e) => setForm({ ...form, host: e.target.value })} placeholder="10.20.0.50" /></label>
+        <label style={{ fontSize: 12 }}>표시명<br /><input className="input" style={{ width: 160 }} value={form.name} onChange={(e) => edit({ name: e.target.value })} placeholder="WA-Isilon-01" /></label>
+        <label style={{ fontSize: 12 }}>host(IP/FQDN)<br /><input className="input" style={{ width: 180 }} value={form.host} onChange={(e) => edit({ host: e.target.value })} placeholder="10.20.0.50" /></label>
         {/* 수집 방식 선택은 PowerScale(Isilon) 전용(v2.305 사용자 요구) — 다른 타입 수집기는 API 전용이라 숨김(서버도 api 고정). */}
         {form.type === 'isilon' && (
           <label style={{ fontSize: 12 }} title="SSH: 장비에 접속해 isi status 출력을 파싱(운영자 화면과 동일 소스 — 권장) · API: OneFS REST">수집 방식(PowerScale)<br />
-            <select className="select" value={form.collectMethod || 'ssh'} onChange={(e) => setForm({ ...form, collectMethod: e.target.value })}>
+            <select className="select" value={form.collectMethod || 'ssh'} onChange={(e) => edit({ collectMethod: e.target.value })}>
               <option value="ssh">SSH (isi status 파싱 — 권장)</option>
               <option value="api">REST API (OneFS Platform)</option>
             </select>
           </label>
         )}
         {form.type === 'isilon' && (form.collectMethod || 'ssh') === 'ssh' && (
-          <label style={{ fontSize: 12 }}>SSH 포트<br /><input className="input" type="number" min={1} max={65535} style={{ width: 80 }} value={form.sshPort || 22} onChange={(e) => setForm({ ...form, sshPort: Number(e.target.value) || 22 })} /></label>
+          <label style={{ fontSize: 12 }}>SSH 포트<br /><input className="input" type="number" min={1} max={65535} style={{ width: 80 }} value={form.sshPort || 22} onChange={(e) => edit({ sshPort: Number(e.target.value) || 22 })} /></label>
         )}
-        <label style={{ fontSize: 12 }}>계정<br /><input className="input" style={{ width: 110 }} value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} /></label>
-        <label style={{ fontSize: 12 }}>비밀번호{form.id ? '(변경 시만)' : ''}<br /><input className="input" type="password" style={{ width: 140 }} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder={form.hasPassword ? '•••• (유지)' : ''} /></label>
+        <label style={{ fontSize: 12 }}>계정<br /><input className="input" style={{ width: 110 }} value={form.username} onChange={(e) => edit({ username: e.target.value })} /></label>
+        <label style={{ fontSize: 12 }}>비밀번호{form.id ? '(변경 시만)' : ''}<br /><input className="input" type="password" style={{ width: 140 }} value={form.password} onChange={(e) => edit({ password: e.target.value })} placeholder={form.hasPassword ? '•••• (유지)' : ''} /></label>
         <label style={{ fontSize: 12 }}>법인(DataCenter)<br />
           <select className="select" value={form.datacenterId || ''} onChange={(e) => setForm({ ...form, datacenterId: e.target.value })}>
             <option value="">(미지정)</option>
@@ -783,8 +900,15 @@ function DeviceForm({ d, form, setForm, onSaved }) {
         <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12, padding: '6px 0' }}>
           <input type="checkbox" checked={form.enabled !== false} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} /> 활성
         </label>
+        {/* 연결 테스트 — 저장하지 않고 수집기를 1회 돌려 API 가 실제로 도는지 확인(v2.404).
+            서버가 ssrfBlockReason 을 그대로 태우므로 임의 host 프로브로 쓰이지 않는다. */}
+        <button className="tab" style={{ flex: 'none', padding: '8px 14px' }}
+          disabled={testing || busy || !form.name || !form.host || !form.username}
+          title="저장하지 않고 지금 입력한 값으로 장비 API 에 접속해 봅니다(수집 1회 실행)."
+          onClick={runTest}>{testing ? '테스트 중…' : '🔌 연결 테스트'}</button>
         <button className="login-btn" style={{ flex: 'none', padding: '8px 18px' }} disabled={busy || !form.name || !form.host} onClick={save}>{busy ? '저장 중…' : '저장'}</button>
       </div>
+      {test && <TestResult r={test} />}
       {err && <div style={{ color: 'var(--red)', fontSize: 12.5, marginTop: 8 }}>⚠ {err}</div>}
       <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>비밀번호는 '설정 › 자격증명 저장 방식'의 정책(평문/암호화)에 따라 저장됩니다. host 변경 시 기존 비밀번호는 이월되지 않습니다(재입력 필요 — 보안 규칙).</div>
     </div>

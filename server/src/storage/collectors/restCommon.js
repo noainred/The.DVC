@@ -40,6 +40,47 @@ export function makeGetter(device, { port = 443, headers = {} } = {}) {
   };
 }
 
+/**
+ * GET + 응답 헤더까지 필요한 경우(v2.404). PowerStore 는 POST 에 CSRF 토큰(DELL-EMC-TOKEN)을
+ * 요구하는데, 그 값을 앞선 GET 의 **응답 헤더**로 내려준다 — makeGetter 는 본문만 주므로 별도.
+ */
+export function makeRawGetter(device, { port = 443, headers = {} } = {}) {
+  assertHeaderSafe(headers);
+  const auth = Buffer.from(`${device.username}:${device.password || ''}`).toString('base64');
+  return async (apiPath) => {
+    const res = await fetch(`https://${device.host}:${port}${apiPath}`, {
+      headers: { Authorization: `Basic ${auth}`, Accept: 'application/json', ...headers },
+      dispatcher, signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (res.status === 401) throw new Error('인증 실패(401) — 계정/비밀번호 확인');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return { body: await res.json(), headers: res.headers };
+  };
+}
+
+/**
+ * POST(JSON) 헬퍼(v2.404) — **조회성 리소스 생성**에만 쓴다(PowerStore 의 metrics/generate 는
+ * 이름과 달리 통계를 '계산해 돌려주는' 읽기 동작이라 장비 상태를 바꾸지 않는다).
+ * ⚠ 실제 구성을 바꾸는 POST 를 이 헬퍼로 추가하지 말 것 — 스토리지 모니터링은 조회 전용이며,
+ *   쓰기 경로가 생기면 감사/권한 설계를 다시 해야 한다.
+ */
+export function makePoster(device, { port = 443, headers = {} } = {}) {
+  assertHeaderSafe(headers);
+  const auth = Buffer.from(`${device.username}:${device.password || ''}`).toString('base64');
+  return async (apiPath, body, extraHeaders = {}) => {
+    assertHeaderSafe(extraHeaders);
+    const res = await fetch(`https://${device.host}:${port}${apiPath}`, {
+      method: 'POST',
+      headers: { Authorization: `Basic ${auth}`, Accept: 'application/json', 'Content-Type': 'application/json', ...headers, ...extraHeaders },
+      body: JSON.stringify(body ?? {}),
+      dispatcher, signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (res.status === 401) throw new Error('인증 실패(401) — 계정/비밀번호 확인');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  };
+}
+
 /** 후보 경로 순차 시도(버전차 폴백) — 전부 실패 시 마지막 오류 throw. */
 export async function tryAny(get, paths) {
   let err;

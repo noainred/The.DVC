@@ -6,10 +6,10 @@ import { scopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { STORAGE_TYPES } from '../../storage/types.js';
-import { listDevices, listDevicesWithSecrets, saveDevice, deleteDevice, deviceInputIssue } from '../../storage/registry.js';
+import { listDevices, listDevicesWithSecrets, saveDevice, deleteDevice, deviceInputIssue, getDeviceWithSecret } from '../../storage/registry.js';
 import { requireSettingsOwner } from '../admin/shared.js';
 import { localSnapshots, dropSnapshot } from '../../storage/store.js';
-import { collectDeviceNow, storagePollerStatus, pollStorageOnce } from '../../storage/poller.js';
+import { collectDeviceNow, storagePollerStatus, pollStorageOnce, testDeviceConnection } from '../../storage/poller.js';
 import { edgeStorageSnapshots } from '../../central/storageEdge.js';
 import { listActivity } from '../../storage/activityLog.js';
 import { areaSummary, areaJson, capacityHistory, capacityHistoryAll, dbAvailable } from '../../storage/db.js';
@@ -52,6 +52,67 @@ api.get('/tools/storage', fullScopeOnly, (_req, res) => {
     // iDRAC 위임과 동일 소스). 토큰 미발급(공유 CENTRAL_TOKEN) 환경에서도 엣지를 고를 수 있다.
     agents: knownAgentNames(),
     poller: storagePollerStatus(),
+  });
+});
+
+/**
+ * 등록/수정 전 연결·API 동작 테스트(v2.404, 사용자 요구 — Unity 등록 시 API 가 실제로 도는지).
+ * 저장하지 않고 입력값 그대로 수집기를 1회 돌려 '무엇이 되고 무엇이 안 되는지'를 돌려준다.
+ *
+ * 보안:
+ *  - adminOnly (다른 스토리지 상태변경 라우트와 동일 게이트). 자격증명으로 외부 장비에
+ *    접속하는 동작이라 조회 권한으로 열면 안 된다.
+ *  - 검증은 deviceInputIssue 단일 소스 — 타입/표시명/host 형식 + **ssrfBlockReason** 을
+ *    그대로 탄다(임의 host 로 내부망을 찌르는 프로브가 되지 않게).
+ *  - ⚠ host 가 바뀌면 저장된 비밀번호를 절대 이월하지 않는다(registry.saveDevice 의
+ *    'host 변경 시 비번 이월 금지'와 같은 규칙 — uagmon M3). 이월하면 host 만 공격자
+ *    주소로 바꿔 테스트를 눌러 장비 비밀번호를 그 서버로 선제 전송시킬 수 있다.
+ *  - 응답에 비밀번호를 싣지 않는다(수집기 스냅샷에는 없음). 오류 문자열도 restCommon 의
+ *    헤더 사전검증으로 값이 되울려 나오지 않는다.
+ *  - 감사로그를 남긴다(자격증명 사용 + 외부 접속 시도).
+ */
+api.post('/tools/storage/test', adminOnly, async (req, res) => {
+  const body = req.body || {};
+  const issue = deviceInputIssue(body);
+  if (issue) return res.status(400).json({ ok: false, reason: issue });
+
+  const host = String(body.host || '').trim();
+  const existing = body.id ? getDeviceWithSecret(body.id) : null;
+  // 수정 화면은 비밀번호를 비워 보낸다(= '기존 유지'). host 가 그대로일 때만 저장분을 쓴다.
+  let password = String(body.password || '');
+  let pwSource = 'input';
+  if (!password && existing && existing.host === host) { password = existing.password || ''; pwSource = 'stored'; }
+  if (!password) {
+    return res.status(400).json({ ok: false, reason: existing && existing.host !== host
+      ? 'host 를 변경했으므로 비밀번호를 다시 입력해야 테스트할 수 있습니다(저장된 비밀번호는 새 주소로 보내지 않습니다).'
+      : '비밀번호를 입력하세요.' });
+  }
+
+  const device = {
+    id: body.id || '__test__', type: String(body.type || '').trim(), name: String(body.name || '').trim(),
+    host, username: String(body.username || '').trim(), password,
+    // isilon 만 ssh/api 선택(그 외 타입은 수집기가 API 전용) — saveDevice 와 같은 규칙.
+    collectMethod: String(body.type || '').trim() === 'isilon' ? (body.collectMethod === 'api' ? 'api' : 'ssh') : 'api',
+    sshPort: Number(body.sshPort) || 22,
+  };
+
+  const snap = await testDeviceConnection(device);
+  logAudit({
+    user: req.user?.username, action: '스토리지 연결 테스트', target: `${device.type}/${device.name}`,
+    detail: `${device.host} · ${snap.ok ? '성공' : `실패: ${snap.error || '사유 미상'}`} · ${snap.ms}ms · 비번=${pwSource === 'stored' ? '저장분' : '입력값'}`,
+  });
+
+  // 결과 요약만 — 원본 스냅샷 전체(노드 목록 등)는 테스트 화면에 불필요하고 응답만 커진다.
+  res.json({
+    ok: !!snap.ok,
+    ms: snap.ms,
+    error: snap.error || '',
+    name: snap.name || '',
+    version: snap.version || '',
+    serial: snap.serial || '',
+    capacity: snap.capacity || null,
+    counts: { nodes: snap.nodes?.count ?? 0, pools: (snap.pools || []).length, accounts: (snap.accounts || []).length, alerts: snap.alerts?.unresolved ?? 0 },
+    sections: snap.sections || {},
   });
 });
 
