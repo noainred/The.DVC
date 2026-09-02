@@ -223,6 +223,14 @@ export default function StorageMonTool() {
             {/* ⚠ 실패 사유를 이 칸에 '항상 보이는 한 줄'로 넣지 말 것 — 사유가 길면 상태 열이
                 넓어져 표가 컨테이너를 넘고 오른쪽 '작업' 열이 잘린다(v2.403 실측·수정).
                 사유는 자리를 차지하지 않는 경로로만: 호버=title, 클릭=상세 창. */}
+            {/* MOCK 배지(v2.408) — 수집 노드가 DATA_SOURCE=mock 이면 값이 전부 가짜다.
+                예전에는 version 의 '(mock)' 괄호로만 드러나 진짜 수집값처럼 보였다. */}
+            {s?.extra?.mock && (
+              <span className="badge red" style={{ marginRight: 4 }}
+                title={'이 장비의 값은 실제 수집이 아니라 개발용 가짜 데이터입니다.\n'
+                  + '수집 노드(중앙 또는 엣지)가 DATA_SOURCE=mock 으로 실행 중입니다.\n'
+                  + 'portal.env 에 DATA_SOURCE=live (또는 EDGE_MODE=all) 를 넣고 재시작하세요.'}>MOCK</span>
+            )}
             {!s ? <span className="badge gray">수집 전</span> : s.ok ? <span className="badge green">정상</span> : (
               <button type="button" className="badge red fail-badge" onClick={() => setDetail(r.id)}
                 title={`실패 사유: ${failReason(s)}\n\n(클릭하면 상세 창에서 전체 내용을 봅니다)`}>
@@ -444,6 +452,23 @@ export default function StorageMonTool() {
           <DeviceTable list={list} />
         </div>
       ))}
+
+      {/* mock 경고(v2.408, 사용자 신고 '왜 mock 이라고 나와?') — 설정 누락만으로 가짜 데이터가
+          중앙까지 흘러올 수 있어(config.js dataSource 기본값이 mock) 화면 상단에 분명히 알린다.
+          어느 수집 노드가 문제인지(중앙/엣지 이름)까지 적어야 바로 조치할 수 있다. */}
+      {(() => {
+        const mocks = rows.filter((r) => r.snap?.extra?.mock);
+        if (!mocks.length) return null;
+        const nodes = [...new Set(mocks.map((r) => r.snap?.agent || r.agent || '중앙'))];
+        return (
+          <div className="card" style={{ padding: '10px 13px', marginTop: 8, borderColor: 'var(--red)', fontSize: 12.5 }}>
+            <b style={{ color: 'var(--red)' }}>⚠ 가짜(mock) 데이터 {mocks.length}대</b> — 용량·노드·계정이 실제 수집값이 아닙니다.
+            {' '}수집 노드: <b>{nodes.join(', ')}</b>.
+            {' '}해당 노드의 <code>portal.env</code> 에 <code>DATA_SOURCE=live</code>(또는 <code>EDGE_MODE=all</code>)를 넣고 재시작하세요 —
+            {' '}설정이 없으면 기본값이 <code>mock</code> 이라 조용히 가짜 데이터가 수집됩니다.
+          </div>
+        );
+      })()}
 
       {(d.orphans || []).length > 0 && (
         <div className="card" style={{ padding: '9px 13px', marginTop: 8, borderColor: 'var(--amber)', fontSize: 12 }}>
