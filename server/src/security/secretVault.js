@@ -60,6 +60,7 @@ export const SECRET_FILES = [
   'nsx.json',                      // NSX 매니저 접속 계정
   'collectors.json',               // 엣지/수집 서버 접속 토큰
   'storage-devices.json',          // 스토리지 장비(Isilon 등) 접속 비밀번호(v2.302)
+  'sanswitch-devices.json',        // SAN 스위치(Brocade FOS) 접속 비밀번호(v2.410)
   'idrac.json',                    // iDRAC/OME 계정
   'idrac-scan-ranges.json',        // 법인별 iDRAC 스캔 계정
   'gpu-guest.json',                // GPU 게스트 OS 공용/VM별 계정

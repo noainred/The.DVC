@@ -30,6 +30,13 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     배포 계약: **중앙이 지정한 키만** 내려간다 — 전 키를 채워 보내면 각 법인이 portal.env 로 잡아
     둔 현장 설정을 통째로 덮어쓴다. 하한(60초 / 영역수집 10분)은 서버가 강제하고, 빈 값·0 은
     하한으로 승격하지 않고 '미지정'으로 버린다(미입력이 최소주기로 둔갑하는 사고 방지).
+  - **SAN 스위치 수집도 같은 규약**(`sanswitch/`, v2.410): 동시 수집 제한(`SANSW_CONCURRENCY`
+    기본 4) + 장비당 타임아웃 + 재진입 가드 + `startAdaptiveTimer`. 포트 목록이 크므로
+    (디렉터 최대 512~768포트) **중앙 push 는 문제 포트만 올린다**(`push.js slimSnapshot`) —
+    정상 포트까지 매 주기 밀면 고RTT 회선에서 수 MB 가 반복 전송된다. 요약 수치(total/
+    licensed/online/free)는 전체 기준을 유지하고 뺀 개수는 `portsOmitted` 로 표시할 것.
+    포트 처리량은 누적 카운터 델타로 계산하므로(`rates.js`) **첫 수집은 null** 이고 카운터
+    리셋(음수 델타)도 null 이다 — 0 으로 채우면 '트래픽 없음'으로 오해된다.
   - **롤업 O(N)**(`withRollups`): 호스트/VM/DS/알람을 vCenter별 1회 그룹핑 후 조회(`pick`). 그룹마다 전체 재순회(O(N×vCenter)) 금지.
   - **시계열 prune 스로틀 + ts 인덱스**: 매 샘플 DELETE 스캔 금지 — N틱마다 1회(store 10틱·metrics 20틱·idrac.poller 10틱). `DELETE WHERE ts<?`는 `ts` 단독 인덱스가 있어야 풀스캔을 피한다(복합 `(server_id,ts)`로는 못 탐).
   - **ETag/304**(`util/compress.js`): res.json 래퍼가 본문 SHA-1로 약한 ETag를 발급하고 If-None-Match 일치 시 304(본문 0바이트). 이 래퍼는 res.end로 직접 종료해 Express 기본 ETag가 동작하지 않으므로, 응답 경로 수정 시 ETag 발급을 없애면 프론트 `pollFetch`의 304 지원이 통째로 죽는다(과거 실제 그 상태였음 — 15초 폴 × 30초 스냅샷이면 절반이 무변동 재전송).

@@ -42,6 +42,9 @@ server/config/auth-secret
 # 스토리지 모니터링(v2.302) — 장비 자격증명·수집 스냅샷(계정 목록 포함) 커밋 금지
 server/config/storage-devices.json
 server/config/storage-latest.json
+server/config/storage-intervals.json
+server/config/sanswitch-devices.json
+server/config/sanswitch-latest.json
 server/config/storage-history.db
 server/config/storage-history.db-wal
 server/config/storage-history.db-shm
