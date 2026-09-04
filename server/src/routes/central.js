@@ -534,6 +534,34 @@ centralRouter.post('/storage-data', async (req, res) => {
   res.json({ ok: true, saved });
 });
 
+// ── SAN 스위치 모니터링 위임(v2.410) — 스토리지 위임과 완전히 같은 규약 ──────────
+// GET /api/central/sanswitch-config?agent=<이름> — 이 엣지 몫 스위치 목록(자격증명 포함:
+// 엣지가 스위치에 SSH/REST 로그인해야 한다). 개별 토큰이면 바인딩 agent 불일치를 거부.
+centralRouter.get('/sanswitch-config', async (req, res) => {
+  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+  const agent = String(req.query.agent || req.get('X-Agent-Name') || '').trim();
+  if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
+  if (req.centralAuth?.mode === 'agent' && String(req.centralAuth.agent).toLowerCase() !== agent.toLowerCase()) {
+    return res.status(403).json({ ok: false, reason: '토큰의 agent 와 요청 agent 불일치' });
+  }
+  const { devicesForAgent } = await import('../sanswitch/registry.js');
+  const { takeRequestsForAgent } = await import('../sanswitch/collectRequests.js');
+  res.json({ ok: true, agent, devices: devicesForAgent(agent), collectNow: takeRequestsForAgent(agent) });
+});
+
+// POST /api/central/sanswitch-data — 엣지 수집 스냅샷 수신. 저장 키는 body.agent 가 아니라
+// **인증된 agent**(개별 토큰 바인딩)만 쓴다. 공유 토큰(레거시)은 body.agent 신뢰(기존 축과 동일).
+centralRouter.post('/sanswitch-data', async (req, res) => {
+  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+  const agent = req.centralAuth?.mode === 'agent' ? req.centralAuth.agent : String(req.body?.agent || '').trim();
+  if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
+  const { saveEdgeSanSwitch } = await import('../central/sanSwitchEdge.js');
+  const saved = saveEdgeSanSwitch(agent, req.body?.devices || []);
+  res.json({ ok: true, saved });
+});
+
 // GET /api/central/users-config?agent=<이름>
 centralRouter.get('/users-config', (req, res) => {
   if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });

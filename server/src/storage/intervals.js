@@ -27,6 +27,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { startAdaptiveTimer as baseAdaptiveTimer } from '../util/adaptiveTimer.js';
 
 /** 조정 가능한 주기 항목. min/def 는 서버가 단일 소스 — UI 가 이 표를 받아 폼을 그린다. */
 export const INTERVAL_SPEC = [
@@ -121,37 +122,12 @@ export function onIntervalsChange(cb) { _listeners.add(cb); return () => _listen
 export function centralIntervalsInfo() { return { override: { ..._override }, at: _overrideAt, pinned: localPinned() }; }
 
 /**
- * 주기를 스스로 다시 잡는 타이머(setInterval 대체).
- *
- * setInterval 은 생성 시점의 상수 간격에 묶여 있어 주기를 바꾸려면 재시작이 필요하다.
- * 여기서는 매 회 `getMs()` 를 다시 읽어 재무장하므로 중앙 배포가 다음 틱부터(변경 알림이
- * 오면 즉시) 반영된다. 부수효과로 **간격이 '이전 실행 종료 기준'** 이 되어, 수집이 주기를
- * 넘겨도 틱이 겹쳐 쌓이지 않는다(CLAUDE.md 재진입 규칙과 같은 방향 — 가드는 그대로 둔다).
+ * 주기를 스스로 다시 잡는 타이머 — 구현은 `util/adaptiveTimer.js`(SAN 스위치 폴러와 공유).
+ * 여기서는 '주기 변경 알림(onIntervalsChange)' 을 엮어 준다: 중앙이 값을 바꾸면 이미 무장된
+ * 타이머가 **즉시 재무장**된다(없으면 60분 주기에서 최대 1시간 뒤에야 적용).
  */
-export function startAdaptiveTimer(getMs, fn, { firstDelayMs = 0, name = '' } = {}) {
-  let timer = null;
-  let stopped = false;
-  let lastRunAt = Date.now();
-  const arm = (ms) => {
-    clearTimeout(timer);
-    timer = setTimeout(tick, Math.max(1_000, ms));
-    timer.unref?.();
-  };
-  const tick = async () => {
-    lastRunAt = Date.now();
-    try { await fn(); } catch { /* 폴러는 자기 오류를 삼킨다(기존 .catch(()=>{}) 와 동일) */ }
-    if (!stopped) arm(getMs());
-  };
-  arm(firstDelayMs);
-  // 주기 변경 시 재무장 — 이미 흘린 시간을 빼고 다시 잡는다(주기를 늘렸다고 방금 돈 작업을
-  // 또 돌리지 않고, 줄였다면 남은 시간이 음수가 되어 바로 다음 틱으로 간다).
-  const off = onIntervalsChange(() => {
-    if (stopped) return;
-    const next = getMs() - (Date.now() - lastRunAt);
-    if (name) console.log(`[storage-intervals] ${name} 타이머 재무장: ${Math.round(Math.max(1_000, next) / 1000)}초 후`);
-    arm(next);
-  });
-  return { stop() { stopped = true; off(); clearTimeout(timer); } };
+export function startAdaptiveTimer(getMs, fn, opts = {}) {
+  return baseAdaptiveTimer(getMs, fn, { ...opts, subscribe: onIntervalsChange });
 }
 
 // ── 중앙 저장소(중앙 노드에서만 사용) ─────────────────────────────────────────
