@@ -18,6 +18,9 @@ import { edgeSanSwitchSnapshots } from '../../central/sanSwitchEdge.js';
 import { listDatacenters } from '../../datacenter/store.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
 import { requestCollect, hasPendingRequest } from '../../sanswitch/collectRequests.js';
+import { loadPerfSettings, savePerfSettings, LIMITS as PERF_LIMITS } from '../../sanswitch/perfSettings.js';
+import { pollPerfOnce, sanSwitchPerfStatus } from '../../sanswitch/perfPoller.js';
+import { portSeries, storageSeries, perfDbStats } from '../../sanswitch/perfDb.js';
 
 const adminOnly = requireRole('admin');
 const fullScopeOnly = (req, res, next) => {
@@ -69,9 +72,16 @@ api.get('/tools/sanswitch/devices/:id/ports', fullScopeOnly, (req, res) => {
   const edge = edgeSanSwitchSnapshots().find((s) => s.deviceId === req.params.id);
   const snap = (!local || (edge && (edge.collectedAt || 0) > (local.collectedAt || 0))) ? edge : local;
   if (!snap) return res.status(404).json({ ok: false, reason: '수집된 스냅샷이 없습니다.' });
+  // 장비 일반 정보(v2.411, 사용자 요구 '장비 일반 정보 표시')를 함께 내려준다 — 예전에는
+  // 모델/FOS/수집시각만 보내서, 이미 수집해 둔 WWN·Domain·시리얼·팹·존·FRU 상태가
+  // 화면에 전혀 쓰이지 않고 버려지고 있었다.
   res.json({
     ok: true, deviceId: snap.deviceId, name: snap.name, model: snap.model, fabricOs: snap.fabricOs,
     collectedAt: snap.collectedAt, source: snap === edge ? `엣지(${snap.agent || ''})` : '중앙 직접 수집',
+    host: snap.host || '', agent: snap.agent || '',
+    serial: snap.serial || '', wwn: snap.wwn || '', domainId: snap.domainId ?? null,
+    switchState: snap.switchState || '', health: snap.health || null,
+    fabric: snap.fabric || null, zoning: snap.zoning || null, licenses: snap.licenses || [],
     ports: snap.ports || { list: [] }, sections: snap.sections || {}, extra: snap.extra || {},
   });
 });
@@ -134,6 +144,52 @@ api.post('/tools/sanswitch/devices/:id/collect', adminOnly, async (req, res) => 
     logAudit({ user: req.user?.username, action: 'SAN 스위치 즉시 수집', target: req.params.id });
     res.json({ ok: true });
   } catch (e) { res.status(502).json({ ok: false, reason: e.message }); }
+});
+
+/* ── 포트 사용량(portperfshow) 수집·조회(v2.411, 사용자 요구) ──────────────────
+ * '설정에서 주기적으로 portperfshow 를 수행해 포트 사용량을 수집하는 DB' + '차트로 보면서
+ * 포트 사용량을 분석해 스토리지 사용량을 볼 수 있게'.
+ */
+
+/** 설정 조회 — 한계값·DB 현황·마지막 수집 결과를 함께(설정 화면이 서버를 단일 소스로 쓰게). */
+api.get('/tools/sanswitch/perf/settings', adminOnly, async (_req, res) => {
+  res.json({ ok: true, settings: loadPerfSettings(), limits: PERF_LIMITS,
+    status: sanSwitchPerfStatus(), db: await perfDbStats() });
+});
+
+api.put('/tools/sanswitch/perf/settings', adminOnly, async (req, res) => {
+  try {
+    const before = loadPerfSettings();
+    const saved = savePerfSettings(req.body || {});
+    logAudit({ user: req.user?.username, action: 'SAN 포트 사용량 수집 설정 변경',
+      target: saved.enabled ? '켜짐' : '꺼짐',
+      detail: `주기 ${Math.round(saved.intervalMs / 1000)}초 · 표본 ${saved.sampleSeconds}초 · 보관 ${saved.retentionDays}일 (이전: ${before.enabled ? '켜짐' : '꺼짐'})` });
+    res.json({ ok: true, settings: saved, limits: PERF_LIMITS, status: sanSwitchPerfStatus(), db: await perfDbStats() });
+  } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
+});
+
+/** 지금 1회 수집(설정이 꺼져 있어도 관리자가 눌러 시험할 수 있게 force). */
+api.post('/tools/sanswitch/perf/collect', adminOnly, async (req, res) => {
+  logAudit({ user: req.user?.username, action: 'SAN 포트 사용량 즉시 수집' });
+  res.json(await pollPerfOnce({ force: true }));
+});
+
+/**
+ * 포트별 사용량 시계열. 원시 점을 그대로 주지 않고 버킷 평균으로 내려준다(브라우저 보호).
+ * 단위는 **바이트/초**(portperfshow 원단위) — 화면이 ×8 해 bps 로 환산한다.
+ */
+api.get('/tools/sanswitch/devices/:id/perf', fullScopeOnly, async (req, res) => {
+  const hours = Math.max(1, Math.min(24 * 90, Number(req.query.hours) || 24));
+  const ports = String(req.query.ports || '').split(',').map((x) => Number(x)).filter(Number.isFinite).slice(0, 64);
+  const r = await portSeries(req.params.id, { hours, ports: ports.length ? ports : null });
+  res.json({ ok: true, unit: 'bytesPerSec', hours, ...r });
+});
+
+/** 연결 장비(스토리지 어레이)별 합산 시계열 — 포트가 아니라 '어느 스토리지가 얼마나 쓰이나'. */
+api.get('/tools/sanswitch/devices/:id/perf/storage', fullScopeOnly, async (req, res) => {
+  const hours = Math.max(1, Math.min(24 * 90, Number(req.query.hours) || 24));
+  const r = await storageSeries(req.params.id, { hours });
+  res.json({ ok: true, unit: 'bytesPerSec', hours, ...r });
 });
 
 /** 이 노드 몫 전체 재수집(관리자 수동 실행 — 폴러와 재진입 가드를 공유한다). */

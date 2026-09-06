@@ -120,6 +120,136 @@ export function bps(v) {
   return `${n} bps`;
 }
 
+/**
+ * 연결 장비 이름 축약(v2.411 — 사용자 신고 '1줄에 길게 나와서 읽을 수 없음').
+ *
+ * 네임서버 심볼릭 이름은 장비 종류에 따라 극단적으로 길다. 실제 관측 예:
+ *   SYMMETRIX::000497700230::SAF-1d 4::FC::5978_0714+::EMUL B90F0000 698529C0 EE8A28 03.18.24 09:33.
+ * 이걸 그대로 그리면 표의 옆 칸(CRC 열)을 덮어 읽을 수 없게 된다.
+ *
+ * 축약 규칙: `::` 로 나뉜 이름은 **앞 세그먼트가 식별 정보**다(제품군 → 시리얼 → 디렉터 포트).
+ * 뒤쪽은 펌웨어·에뮬레이션·타임스탬프라 포트 식별에 쓸모가 적다. 그래서 앞에서부터
+ * max 자를 넘지 않는 만큼만 이어 붙이고(최소 1개는 항상 유지), 잘렸으면 '…' 를 붙인다.
+ * `::` 가 없는 이름(예: HBA 의 'QLE2692 FW:v9.15.01 DVR:v5.4.84.0')은 단순 길이 절단.
+ *
+ * ⚠ 원문은 버리지 않는다 — 호출부가 title 툴팁으로 전문을 보여준다(잘린 뒤가 필요한 경우 대비).
+ */
+export function shortDeviceName(name, max = 44) {
+  const s = String(name || '').trim();
+  if (!s || s.length <= max) return s;
+  if (s.includes('::')) {
+    const seg = s.split('::');
+    let out = seg[0];
+    for (let i = 1; i < seg.length; i++) {
+      const next = `${out}::${seg[i]}`;
+      if (next.length > max) break;
+      out = next;
+    }
+    return `${out}…`;
+  }
+  return `${s.slice(0, max - 1)}…`;
+}
+
+/**
+ * 처리량 표기(바이트/초 → 사람이 읽는 값). portperfshow 원단위가 B/s 라 그대로 받는다.
+ * 네트워크 관례상 회선 속도는 bps 로 말하므로 **bps 로 환산해 보여준다**(×8).
+ */
+export function bytesPerSecText(bytesPerSec) {
+  const n = numOrNull(bytesPerSec);
+  if (n == null) return '—';
+  return bps(n * 8);
+}
+
+/**
+ * 포트 포화도(순수) — 협상 속도 대비 사용률(%).
+ * 왜 필요한가: '2 Gbps 사용'이 16G 포트에서는 여유롭고 4G 포트에서는 포화 직전이다. 절대값만
+ * 보면 증설 판단을 못 한다. 속도를 모르면 **판정하지 않는다**(null) — 0% 로 칠하면 '한가하다'는
+ * 반대 결론이 된다.
+ */
+export function saturationPct(bytesPerSec, speedLabel) {
+  const n = numOrNull(bytesPerSec);
+  const m = String(speedLabel || '').match(/^(\d+)G$/);
+  if (n == null || !m) return null;
+  const lineBps = Number(m[1]) * 1e9;
+  return Math.round(((n * 8) / lineBps) * 1000) / 10;
+}
+
+/** 포화도 등급 — 표/차트 강조용. */
+export function saturationLevel(pct) {
+  if (pct == null) return 'none';
+  if (pct >= 80) return 'bad';
+  if (pct >= 50) return 'warn';
+  return 'ok';
+}
+
+/**
+ * 시계열 배열들을 recharts 가 먹는 행 배열로 변환(순수).
+ * @param buckets  ts 배열
+ * @param series   [{ key, values[] }]  values[i] 는 buckets[i] 시점 값(없으면 null)
+ */
+export function toChartRows(buckets = [], series = []) {
+  return buckets.map((ts, i) => {
+    const row = { ts };
+    for (const s of series) row[s.key] = s.values[i] == null ? null : s.values[i];
+    return row;
+  });
+}
+
+/** 평균 사용량 상위 N개만 남긴다(포트 128개를 전부 그리면 차트가 읽히지 않는다). */
+export function topSeries(series = [], n = 8) {
+  const avg = (a) => { const v = a.filter((x) => x != null); return v.length ? v.reduce((x, y) => x + y, 0) / v.length : 0; };
+  return [...series].sort((a, b) => avg(b.values) - avg(a.values)).slice(0, n);
+}
+
+/**
+ * 포트 표 정렬(순수, v2.411 — 사용자 요구 '제목별로 소팅').
+ *
+ * 규칙: **값이 없는 행(null)은 방향과 무관하게 항상 뒤로 보낸다.** 내림차순 정렬에서 null 을
+ * 0 으로 취급하면 뒤로 가지만, 오름차순에서는 맨 앞에 몰려 '가장 좋은 포트'처럼 보인다 —
+ * 미수집을 최상위로 올리는 정렬은 이 화면에서 오독을 만든다.
+ */
+export const SORT_KEYS = {
+  index: (p) => p.index,
+  state: (p) => ['online', 'faulty', 'disabled', 'offline', 'noLicense'].indexOf(p.state),
+  speed: (p) => { const m = String(p.speed || '').match(/^(\d+)G$/); return m ? Number(m[1]) : null; },
+  portType: (p) => p.portType || null,
+  attached: (p) => p.attachedName || (p.attached || [])[0] || null,
+  err: (p) => {
+    const v = [p.errCrc, p.errLinkFail, p.errLossSync].map(numOrNull);
+    return v.every((x) => x == null) ? null : v.reduce((a, b) => a + (b || 0), 0);
+  },
+  optical: (p) => numOrNull(p.rxPowerDbm),
+  temp: (p) => numOrNull(p.sfpTempC),
+  throughput: (p) => {
+    const b = numOrNull(p.inBps), o = numOrNull(p.outBps);
+    if (b != null || o != null) return (b || 0) + (o || 0);
+    const fi = numOrNull(p.inFps), fo = numOrNull(p.outFps);
+    return fi == null && fo == null ? null : (fi || 0) + (fo || 0);
+  },
+};
+
+export function sortPorts(list = [], key = 'index', dir = 'asc') {
+  const get = SORT_KEYS[key] || SORT_KEYS.index;
+  const sign = dir === 'desc' ? -1 : 1;
+  return [...list].sort((a, b) => {
+    const va = get(a); const vb = get(b);
+    if (va == null && vb == null) return a.index - b.index;
+    if (va == null) return 1;   // 값 없음은 항상 뒤로(방향 무관)
+    if (vb == null) return -1;
+    if (typeof va === 'string' || typeof vb === 'string') {
+      const c = String(va).localeCompare(String(vb));
+      return c !== 0 ? c * sign : a.index - b.index;
+    }
+    return va === vb ? a.index - b.index : (va - vb) * sign;
+  });
+}
+
+/** 헤더 클릭 → 다음 정렬 상태(같은 열이면 방향 토글, 다른 열이면 그 열 오름차순). */
+export function nextSort(cur, key) {
+  if (cur.key !== key) return { key, dir: 'asc' };
+  return { key, dir: cur.dir === 'asc' ? 'desc' : 'asc' };
+}
+
 /** 포트 목록 필터(순수) — 화면의 '문제만 보기'가 무엇을 남기는지 한 곳에서 정의. */
 export function filterPorts(list = [], mode = 'all') {
   if (mode === 'online') return list.filter((p) => p.state === 'online');

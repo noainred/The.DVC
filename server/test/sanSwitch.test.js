@@ -146,7 +146,7 @@ TX Power:    -2.7  dBm
   assert.equal(r[1].rxPowerDbm, -11.8);
 });
 
-test('parseChassisShow: Chassis Family 가 모델이다(6603 이든 무엇이든 장비 보고값을 그대로)', async () => {
+test('parseChassisShow: Chassis Family 가 있는 변형 — 모델명과 (CHASSIS 블록이 없으면) 블레이드 시리얼 폴백', async () => {
   const { parseChassisShow } = await import('../src/sanswitch/collectors/fosParse.js');
   const r = parseChassisShow(`Chassis Family: 6510
 Chassis Backplane Revision: 1
@@ -330,4 +330,123 @@ test('폴러: 재진입 가드 — 이전 수집이 진행 중이면 이번 틱�
   const [a, b] = await Promise.all([pollSanSwitchOnce(), pollSanSwitchOnce()]);
   const skipped = [a, b].filter((r) => !r.ok && /진행 중/.test(r.reason || ''));
   assert.equal(skipped.length, 1, '동시에 두 번 호출하면 하나는 겹침 방지로 스킵되어야 한다');
+});
+
+// ── v2.411: 실장비 출력으로 교정한 파서 + 포트 사용량 수집 ──────────────────────
+const REAL_CHASSISSHOW = `FAN  Unit: 1
+Fan Direction:          Non-portside Intake
+Time Awake:             579 days
+
+FAN  Unit: 2
+Time Awake:             579 days
+
+FAN  Unit: 3
+Time Awake:             579 days
+
+POWER SUPPLY  Unit: 1
+Power Source:           AC
+PS Voltage input:       218.00 V
+Power Usage:            -240W
+Factory Part Num:       23-1000082-02
+Factory Serial Num:     34R0E7
+
+POWER SUPPLY  Unit: 2
+Power Source:           AC
+PS Voltage input:       219.00 V
+Power Usage:            -264W
+Factory Serial Num:     34R0DE
+
+CHASSIS/WWN  Unit: 1
+Header Version:         2
+Factory Part Num:       40-1001320-06
+Factory Serial Num:     FPL1944R00C
+Time Alive:             1363 days
+Time Awake:             579 days
+ID:                     EMC0000CA
+Part Num:               CONTRX0000663
+Serial Num:             BRCFPL1944R00C
+`;
+
+test('parseChassisShow: 실장비(FOS 9.0.1d) 출력 — Chassis Family 가 없어도 식별 정보를 읽는다', async () => {
+  const { parseChassisShow } = await import('../src/sanswitch/collectors/fosParse.js');
+  const r = parseChassisShow(REAL_CHASSISSHOW);
+  assert.equal(r.model, '');                       // 이 출력에는 모델명 줄이 없다(추측하지 않는다)
+  assert.equal(r.serial, 'BRCFPL1944R00C');        // CHASSIS 블록의 'Serial Num' 우선
+  assert.equal(r.partNumber, '40-1001320-06');     // PSU 의 부품번호(23-…)를 집으면 안 된다
+  assert.equal(r.chassisId, 'EMC0000CA');
+  assert.equal(r.fans, 3);
+  assert.equal(r.psus.length, 2);
+  assert.deepEqual(r.psus[0], { unit: 1, source: 'AC', voltageV: 218, powerW: 240, partNumber: '23-1000082-02', serial: '34R0E7' });
+  assert.equal(r.powerWatts, 504);                 // -240W + -264W → 절댓값 합
+  assert.equal(r.awakeDays, 579);
+  assert.equal(r.aliveDays, 1363);
+});
+
+test('parsePortPerfShow: 실장비 출력 형식(16열 블록 + Total)을 읽는다', async () => {
+  const { parsePortPerfShow } = await import('../src/sanswitch/collectors/fosParse.js');
+  const txt = [
+    '      16       17       18       19       20       21       22       23',
+    '========================================================================',
+    '  86.40k 130.63k   1.05m 836.85k       0   23.72k 505.31k  17.37m',
+    '     120     121     122     123     124     125     126     127    Total',
+    '========================================================================',
+    '   2.21m   1.17m   1.32m   1.11m 571.69k   2.38m 960.74k   2.01m 155.36m',
+  ].join('\n');
+  const r = parsePortPerfShow(txt);
+  assert.equal(r.ports[16], 86_400);
+  assert.equal(r.ports[20], 0);
+  assert.equal(r.ports[23], 17_370_000);
+  assert.equal(r.ports[127], 2_010_000);
+  assert.equal(r.total, 155_360_000);
+  assert.equal(Object.keys(r.ports).length, 16);
+});
+
+test('parsePortPerfShow: 갱신형 명령이라 여러 벌이 섞여 있으면 마지막 것만 쓴다', async () => {
+  const { parsePortPerfShow } = await import('../src/sanswitch/collectors/fosParse.js');
+  const block = (v) => ['       0        1', '=================', `   ${v}   ${v}`].join('\n');
+  const r = parsePortPerfShow(`${block('1.00m')}\n${block('2.00m')}\n${block('3.00m')}`);
+  assert.equal(r.samples, 3);
+  assert.equal(r.ports[0], 3_000_000, '여러 벌을 합치면 시점이 뒤섞인다 — 가장 최근 것만');
+});
+
+test('perfSettings: 하한/상한 clamp, 기본은 꺼짐', async () => {
+  const { normalizePerfSettings, LIMITS } = await import('../src/sanswitch/perfSettings.js');
+  assert.equal(normalizePerfSettings({}).enabled, false, '운영 스위치에 주기 접속을 임의로 만들지 않는다');
+  assert.equal(normalizePerfSettings({ intervalMs: 1 }).intervalMs, LIMITS.intervalMs.min);
+  assert.equal(normalizePerfSettings({ intervalMs: 9e9 }).intervalMs, LIMITS.intervalMs.max);
+  assert.equal(normalizePerfSettings({ sampleSeconds: 999 }).sampleSeconds, LIMITS.sampleSeconds.max);
+  assert.equal(normalizePerfSettings({ retentionDays: 0 }).retentionDays, LIMITS.retentionDays.def);
+  assert.equal(normalizePerfSettings({ enabled: 'yes' }).enabled, false, 'true 아닌 값으로 켜지지 않는다');
+});
+
+test('storageKey: 어레이 식별은 앞 두 세그먼트(디렉터 포트가 달라도 같은 장비로 묶여야 한다)', async () => {
+  const { storageKey } = await import('../src/sanswitch/perfDb.js');
+  const a = storageKey('SYMMETRIX::000497700230::SAF-1d 4::FC::5978_0714+::EMUL x');
+  const b = storageKey('SYMMETRIX::000497700230::SAF-3d 6::FC::5978_0714+::EMUL y');
+  assert.equal(a, 'SYMMETRIX::000497700230');
+  assert.equal(a, b, '같은 어레이의 다른 디렉터 포트는 하나로 합산되어야 한다');
+  assert.equal(storageKey(''), '(미확인)');
+});
+
+test('perfDb: 저장→조회 왕복과 스토리지 합산', async () => {
+  const { savePerfSample, portSeries, storageSeries, available, _resetForTest } = await import('../src/sanswitch/perfDb.js');
+  if (!(await available())) return; // node:sqlite 미지원 환경은 건너뛴다(폴백 설계대로)
+  _resetForTest();
+  const now = Date.now();
+  const meta = [
+    { port: 0, attachedName: 'SYMMETRIX::00049::SAF-1d 4', speed: '16G' },
+    { port: 1, attachedName: 'SYMMETRIX::00049::SAF-3d 6', speed: '16G' },
+    { port: 2, attachedName: 'Emulex PPN-10:00', speed: '16G' },
+  ];
+  await savePerfSample('dev-t', now - 60_000, { 0: 1000, 1: 2000, 2: 500 }, meta);
+  await savePerfSample('dev-t', now, { 0: 3000, 1: 4000, 2: 700 }, meta);
+  const ps = await portSeries('dev-t', { hours: 1 });
+  assert.equal(ps.series.length, 3);
+  assert.equal(ps.series[0].port, 0);
+  assert.equal(ps.series[0].speed, '16G');
+  const ss = await storageSeries('dev-t', { hours: 1 });
+  const sym = ss.series.find((s) => s.key.startsWith('SYMMETRIX'));
+  assert.ok(sym, '어레이 그룹이 있어야 한다');
+  assert.deepEqual(sym.ports, [0, 1], '같은 어레이의 두 포트가 하나로 묶여야 한다');
+  _resetForTest();
 });

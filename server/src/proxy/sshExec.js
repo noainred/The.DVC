@@ -48,6 +48,42 @@ function exec(conn, command, timeoutMs = Number(process.env.SSH_EXEC_TIMEOUT_MS)
   });
 }
 
+/**
+ * 계속 갱신되는(스스로 끝나지 않는) 명령을 정해진 시간만 캡처하고 채널을 닫는다(v2.411).
+ *
+ * 왜 필요한가: Brocade `portperfshow` 는 Ctrl-C 전까지 화면을 계속 다시 그린다. 일반 exec 은
+ * 타임아웃 시 **reject 하면서 그때까지 받은 stdout 을 버리므로** 이런 명령은 영원히 수집할 수
+ * 없다. 여기서는 같은 타임아웃을 '수집 종료 신호'로 쓰고 **모아 둔 출력을 resolve** 한다.
+ *
+ * ⚠ 일반 명령에는 쓰지 말 것 — 정상 종료를 기다리지 않고 잘라내므로, 끝이 있는 명령에 쓰면
+ *   출력이 중간에 끊긴 것을 성공으로 오인한다.
+ */
+function execCapture(conn, command, captureMs) {
+  return new Promise((resolve, reject) => {
+    conn.exec(command, { pty: false }, (err, stream) => {
+      if (err) return reject(err);
+      let stdout = ''; let stderr = ''; let done = false;
+      const finish = (fn, arg) => { if (done) return; done = true; clearTimeout(timer); fn(arg); };
+      const stop = () => {
+        try { stream.close?.(); } catch { /* */ }
+        try { stream.destroy?.(); } catch { /* */ }
+        finish(resolve, { command, code: null, stdout, stderr, captured: true });
+      };
+      const timer = setTimeout(stop, Math.max(1000, captureMs));
+      timer.unref?.();
+      stream.on('data', (d) => {
+        stdout += d.toString();
+        // 폭주 방어 — 갱신형 명령이 예상보다 빨리 그리면 메모리가 부풀 수 있다.
+        if (stdout.length > 2_000_000) stop();
+      });
+      stream.stderr.on('data', (d) => { stderr += d.toString(); });
+      stream.on('error', (e) => finish(reject, e));
+      stream.stderr.on('error', () => { /* 비치명 */ });
+      stream.on('close', (code) => finish(resolve, { command, code, stdout, stderr, captured: false }));
+    });
+  });
+}
+
 function sftpReadFile(conn, path) {
   return new Promise((resolve, reject) => {
     conn.sftp((err, sftp) => {
@@ -90,6 +126,8 @@ export async function withSsh(creds, fn) {
     // `timeout <N> tcpdump` 처럼 **의도적으로 오래 도는** 명령은 반드시 명시해야 한다(과거
     // pcap/트래픽 캡처가 최대 120초를 허용하면서 전송 계층은 60초에 끊어 항상 실패했다).
     exec: async (cmd, timeoutMs) => { const r = await exec(conn, cmd, timeoutMs); log.push(r); return r; },
+    // 스스로 끝나지 않는 갱신형 명령(portperfshow 등) 전용 — captureMs 만큼 모으고 채널을 닫는다.
+    execCapture: async (cmd, captureMs) => { const r = await execCapture(conn, cmd, captureMs); log.push(r); return r; },
     readFile: (p) => sftpReadFile(conn, p),
     writeFile: (p, c, m) => sftpWriteFile(conn, p, c, m),
     putFile: (local, remote) => sftpPutFile(conn, local, remote),
