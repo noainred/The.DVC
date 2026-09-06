@@ -178,6 +178,92 @@ export function storageKey(name) {
   return s.slice(0, 40);
 }
 
+/**
+ * 여러 스위치를 가로질러 **연결 스토리지별로 합산**한 시계열(v2.412, 사용자 요구
+ * '법인을 선택하면 그 법인의 모든 스토리지 사용량을 분석').
+ *
+ * 왜 스위치 하나로는 부족한가: 스토리지 어레이는 이중화를 위해 **팹 A/B 두 스위치에 나눠**
+ * 물린다(OC2-1/OC2-2, OC2-3/OC2-4 처럼). 스위치 한 대만 보면 그 어레이가 실제로 쓰는
+ * 트래픽의 절반만 보인다. 법인 안의 모든 스위치를 합쳐야 어레이의 진짜 사용량이 나온다.
+ *
+ * @param deviceIds 합산할 스위치 id 배열(법인 필터 결과)
+ * @returns { buckets, bucketMs, series:[{ key, ports:[{deviceId,port}], deviceIds[], sum[], avgTotal, maxTotal }] }
+ */
+export async function storageSeriesMulti(deviceIds = [], { hours = 24, points = 120 } = {}) {
+  const db = await open();
+  if (!db || !deviceIds.length) return { buckets: [], series: [], bucketMs: 0, unavailable: !db };
+  const since = Date.now() - Math.max(1, hours) * 3600e3;
+  const bucketMs = Math.max(60_000, Math.round((hours * 3600e3) / Math.max(10, points)));
+  const ph = deviceIds.map(() => '?').join(',');
+  const rows = db.conn.prepare(
+    `SELECT device_id, port, (ts / ${bucketMs}) AS b, AVG(bps) AS avg_bps
+       FROM port_perf WHERE device_id IN (${ph}) AND ts >= ?
+      GROUP BY device_id, port, b ORDER BY b ASC`,
+  ).all(...deviceIds.map(String), since);
+  const metaRows = db.conn.prepare(`SELECT device_id, port, attached_name FROM port_meta WHERE device_id IN (${ph})`)
+    .all(...deviceIds.map(String));
+  const groupOf = new Map(metaRows.map((m) => [`${m.device_id}|${m.port}`, storageKey(m.attached_name)]));
+
+  const bucketSet = [...new Set(rows.map((r) => Number(r.b)))].sort((a, b) => a - b);
+  const buckets = bucketSet.map((b) => b * bucketMs);
+  const idx = new Map(bucketSet.map((b, i) => [b, i]));
+  const byGroup = new Map();
+  for (const r of rows) {
+    const g = groupOf.get(`${r.device_id}|${Number(r.port)}`) || '(미확인)';
+    if (!byGroup.has(g)) byGroup.set(g, { key: g, ports: new Map(), sum: new Array(buckets.length).fill(0) });
+    const s = byGroup.get(g);
+    s.ports.set(`${r.device_id}|${Number(r.port)}`, { deviceId: String(r.device_id), port: Number(r.port) });
+    s.sum[idx.get(Number(r.b))] += Math.round(Number(r.avg_bps));
+  }
+  const series = [...byGroup.values()].map((s) => {
+    const vals = s.sum.filter((v) => v != null);
+    const ports = [...s.ports.values()];
+    return {
+      key: s.key, ports, deviceIds: [...new Set(ports.map((p) => p.deviceId))], sum: s.sum,
+      avgTotal: vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0,
+      maxTotal: vals.length ? Math.max(...vals) : 0,
+    };
+  }).sort((a, b) => b.avgTotal - a.avgTotal);
+  return { buckets, bucketMs, since, series };
+}
+
+/**
+ * 스토리지 식별 키에서 **어레이 시리얼로 보이는 조각**을 뽑는다(순수).
+ * 'SYMMETRIX::000497700230' → '000497700230'. 이 값으로 등록된 스토리지 장비의 시리얼과
+ * 대조해 용량 사용률을 함께 보여줄 수 있다.
+ * ⚠ 확신할 수 없으면 빈 문자열을 돌려준다 — 억지로 맞춘 매칭은 엉뚱한 어레이의 용량을
+ *   붙여 보여주게 되고, 그건 없느니만 못하다.
+ */
+export function arraySerialOf(key) {
+  const seg = String(key || '').split('::');
+  if (seg.length < 2) return '';
+  const s = seg[1].trim();
+  // 시리얼처럼 보이는 것만(영숫자 6자 이상, 공백 없음). 'SAF-1d 4' 같은 포트 표기는 배제.
+  return /^[A-Za-z0-9-]{6,}$/.test(s) ? s : '';
+}
+
+/**
+ * 연결 대상이 **스토리지 어레이인지 호스트(HBA)인지** 판정(순수, v2.412).
+ *
+ * 왜 필요한가: 법인 단위로 합산하면 서버 HBA 가 각각 하나의 '연결 대상'으로 잡혀 표를
+ * 뒤덮는다(실측: 어레이 2개에 HBA 64개). 사용자가 보려는 것은 **스토리지**이므로 기본은
+ * 어레이만 보여주고, 호스트는 따로 골라 볼 수 있게 한다.
+ *
+ * 판정 순서
+ *  1. 등록된 스토리지 장비의 시리얼과 일치 → **확실한 어레이**(matched)
+ *  2. 이름이 `::` 로 나뉜 벤더 심볼릭 이름(SYMMETRIX::…, PowerStore::…) → 어레이(추정)
+ *  3. 그 외(Emulex PPN-…, QLE2692 FW:… 같은 HBA 표기) → 호스트
+ *
+ * ⚠ 2번은 **추정**이다. 어레이가 평평한 이름으로 보고하면 호스트로 분류된다 — 그래서 화면에
+ *   '호스트' 필터를 남겨 두고, 어디에 속했는지 확인할 수 있게 한다(숨기지 않는다).
+ */
+export function endpointKind(key, { matched = false } = {}) {
+  if (matched) return 'array';
+  const s = String(key || '');
+  if (s === '(미확인)') return 'unknown';
+  return s.includes('::') ? 'array' : 'host';
+}
+
 /** 보관 현황(설정 화면 표시용). */
 export async function perfDbStats() {
   const db = await open();

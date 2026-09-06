@@ -51,6 +51,7 @@ export default function SanSwitchTool() {
   const [msg, setMsg] = useState(null);
   const [test, setTest] = useState(null);
   const [detail, setDetail] = useState(null);      // 포트 상세 모달 { device, ports, ... }
+  const [dcPerf, setDcPerf] = useState(null);      // 법인 단위 스토리지 사용량 분석 모달
   const [portFilter, setPortFilter] = useState('all');
   const [portQ, setPortQ] = useState('');
   const [infoOpen, setInfoOpen] = useState(false);   // 장비 일반 정보 펼침
@@ -70,6 +71,11 @@ export default function SanSwitchTool() {
   const dcName = useMemo(() => {
     const m = new Map((data?.datacenters || []).map((d) => [d.id, d.name || d.id]));
     return (id) => m.get(id) || id || '(법인 미지정)';
+  }, [data]);
+  // 칩은 법인 '이름'으로 고르는데 서버는 id 로 거른다 — 역방향 표를 하나 둔다.
+  const dcIdOfName = useMemo(() => {
+    const m = new Map((data?.datacenters || []).map((d) => [d.name || d.id, d.id]));
+    return (name) => m.get(name) || '';
   }, [data]);
 
   const rows = data?.devices || [];
@@ -150,6 +156,16 @@ export default function SanSwitchTool() {
               </button>
             );
           })}
+          {/* 법인 단위 스토리지 사용량 분석(v2.412, 사용자 요구) — 어레이는 팹 A/B 두 스위치에
+              나눠 물리므로 스위치 하나만 보면 트래픽의 절반만 보인다. 선택한 법인의 모든
+              스위치를 합산해야 어레이의 실제 사용량이 나온다. */}
+          <button className="tab" style={{ flex: 'none', padding: '6px 12px' }}
+            onClick={() => setDcPerf({ datacenterId: dcSel.size === 1 ? dcIdOfName([...dcSel][0]) : '', label: dcSel.size === 1 ? [...dcSel][0] : '전체' })}
+            title={dcSel.size === 1
+              ? `'${[...dcSel][0]}' 법인의 모든 스위치를 합산해 스토리지별 사용량을 분석합니다.`
+              : '법인 칩을 하나 고르면 그 법인만, 고르지 않으면 전체 스위치를 합산해 분석합니다.'}>
+            📊 스토리지 사용량 분석{dcSel.size === 1 ? ` — ${[...dcSel][0]}` : ' — 전체'}
+          </button>
           <SearchBox className="input" style={{ marginLeft: 'auto', maxWidth: 260, minWidth: 180 }}
             value={q} onChange={setQ} placeholder="스위치·host·모델·엣지 찾기" />
           <button className="login-btn" style={{ flex: 'none', padding: '6px 14px' }} onClick={() => openForm(null)}>+ 스위치 등록</button>
@@ -227,6 +243,7 @@ export default function SanSwitchTool() {
 
       {form && <DeviceForm {...{ form, setForm, data, save, busy, runTest, test, setTest }} />}
       {detail && <PortDetail {...{ detail, setDetail, portFilter, setPortFilter, portQ, setPortQ, infoOpen, setInfoOpen, tab, setTab, sort, setSort }} />}
+      {dcPerf && <DcStoragePerf dcPerf={dcPerf} onClose={() => setDcPerf(null)} />}
     </>
   );
 }
@@ -551,6 +568,149 @@ function PerfPanel({ deviceId, ports }) {
         </>
       )}
     </div>
+  );
+}
+
+/**
+ * 법인 단위 스토리지 사용량 분석(v2.412, 사용자 요구 '법인을 선택하면 그 법인에 포함된
+ * 모든 스토리지의 사용량을 다수개로 분석').
+ *
+ * 스위치 하나가 아니라 **법인 안의 모든 스위치를 합산**한다 — 어레이는 이중화를 위해
+ * 팹 A/B 두 스위치에 나눠 물리므로(OC2-1/OC2-2, OC2-3/OC2-4), 한 대만 보면 그 어레이가
+ * 실제로 쓰는 트래픽의 절반만 보인다.
+ *
+ * 표에는 대역폭(얼마나 바쁜가)과 **용량 사용률(얼마나 찼는가)** 을 나란히 둔다. 두 축은
+ * 다른 문제를 가리킨다 — 용량은 널널한데 대역폭이 포화면 경로/포트 증설이고, 반대면 디스크
+ * 증설이다. 용량은 등록된 스토리지의 시리얼이 어레이 시리얼과 **확실히 일치할 때만** 붙인다.
+ */
+function DcStoragePerf({ dcPerf, onClose }) {
+  const [hours, setHours] = useState(24);
+  const [data, setData] = useState(null);
+  const [error, setError] = useState(null);
+  // 기본은 스토리지 어레이만 — 법인 합산이면 서버 HBA 가 수십 개 잡혀 표를 덮는다(실측 64개).
+  const [kind, setKind] = useState('array');
+
+  useEffect(() => {
+    let alive = true;
+    setData(null); setError(null);
+    fetchJson('/tools/sanswitch/perf/storage-summary', { datacenterId: dcPerf.datacenterId, hours })
+      .then((d) => { if (alive) setData(d); })
+      .catch((e) => { if (alive) setError(e.message); });
+    return () => { alive = false; };
+  }, [dcPerf.datacenterId, hours]);
+
+  const series = (data?.series || []).filter((s) => kind === 'all' || s.endpointKind === kind);
+  const chartSeries = topSeries(series.map((s) => ({ key: s.key, label: `${s.key} (스위치 ${s.switches.length}·포트 ${s.portCount})`, values: s.sum })), 8);
+  const rows = toChartRows(data?.buckets || [], chartSeries);
+  const grand = series.reduce((a, s) => a + s.avgTotal, 0);
+
+  return (
+    <Modal title={`스토리지 사용량 분석 — ${dcPerf.label}`} onClose={onClose} width={1180}>
+      <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 8 }}>
+        {/* 연결 대상 구분 — 어레이/호스트를 섞으면 스토리지가 HBA 수십 개에 묻힌다. */}
+        {[['array', '스토리지'], ['host', '호스트(HBA)'], ['all', '전체']].map(([k, label]) => (
+          <button key={k} className={kind === k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '4px 12px' }}
+            onClick={() => setKind(k)}
+            title={k === 'array'
+              ? '벤더 심볼릭 이름이 어레이 형식이거나, 등록된 스토리지의 시리얼과 일치하는 연결 대상입니다.'
+              : k === 'host' ? '서버 HBA 등 스토리지가 아닌 연결 대상입니다.' : '구분 없이 모두 봅니다.'}>
+            {label}{data?.counts?.[k] != null ? ` ${data.counts[k]}` : (k === 'all' && data ? ` ${(data.series || []).length}` : '')}
+          </button>
+        ))}
+        <span className="muted" style={{ fontSize: 12, marginLeft: 6 }}>기간</span>
+        {HOURS.map(([h, label]) => (
+          <button key={h} className={hours === h ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '4px 10px' }}
+            onClick={() => setHours(h)}>{label}</button>
+        ))}
+        {data && (
+          <span className="muted" style={{ marginLeft: 'auto', fontSize: 12 }}>
+            스위치 {data.switches.length}대 합산 · {series.length}개 · 평균 합 {bytesPerSecText(grand)}
+          </span>
+        )}
+      </div>
+
+      {error && <ErrorBox message={error} />}
+      {!error && !data && <Loading />}
+      {data && !rows.length && (
+        <div className="card muted" style={{ fontSize: 13, lineHeight: 1.8 }}>
+          이 {dcPerf.label === '전체' ? '범위' : '법인'}에 아직 수집된 포트 사용량이 없습니다.
+          <div style={{ marginTop: 4 }}>
+            <b>설정 › 수집 서버 › SAN 스위치 포트 사용량</b> 에서 수집을 켜야 <code>portperfshow</code> 로 쌓기 시작합니다(기본 꺼짐).
+            {data.unavailable ? <div style={{ color: 'var(--amber)', marginTop: 4 }}>이 서버는 시계열 DB(node:sqlite)를 쓸 수 없어 이력이 저장되지 않습니다.</div> : null}
+            {!data.switches.length ? <div style={{ marginTop: 4 }}>이 법인에 등록된 스위치가 없습니다.</div> : null}
+            {data.series?.length && !series.length
+              ? <div style={{ marginTop: 4 }}>'{kind === 'array' ? '스토리지' : '호스트(HBA)'}' 로 분류된 연결 대상이 없습니다 — 위에서 '전체'를 눌러 보세요.</div>
+              : null}
+          </div>
+        </div>
+      )}
+
+      {!!rows.length && (
+        <>
+          <div className="card" style={{ padding: 8, marginBottom: 8 }}>
+            <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>
+              스토리지별 합산 처리량(법인 내 전 스위치) · 평균 사용량 상위 {chartSeries.length}개 ·
+              스위치가 여러 대인 항목은 팹 A/B 를 합친 값입니다.
+            </div>
+            <ResponsiveContainer width="100%" height={250}>
+              <LineChart data={rows} margin={{ top: 4, right: 12, bottom: 4, left: 4 }}>
+                <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
+                <XAxis dataKey="ts" tickFormatter={(t) => tsLabel(t, hours)} fontSize={11} minTickGap={28} />
+                <YAxis tickFormatter={(v) => bps(v * 8)} fontSize={11} width={78} />
+                <Tooltip labelFormatter={(t) => new Date(t).toLocaleString()} formatter={(v, name) => [bytesPerSecText(v), name]} />
+                <Legend wrapperStyle={{ fontSize: 11 }} />
+                {chartSeries.map((s, i) => (
+                  <Line key={s.key} type="monotone" dataKey={s.key} name={s.label} dot={false}
+                    stroke={LINE_COLORS[i % LINE_COLORS.length]} strokeWidth={1.6} connectNulls={false} isAnimationActive={false} />
+                ))}
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+
+          <div className="table-wrap" style={{ maxHeight: '40vh', overflow: 'auto' }}>
+            <table style={{ tableLayout: 'fixed', width: '100%' }}>
+              <colgroup>
+                <col /><col style={{ width: 150 }} /><col style={{ width: 70 }} />
+                <col style={{ width: 110 }} /><col style={{ width: 110 }} /><col style={{ width: 190 }} />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>스토리지</th><th>연결 스위치</th><th>포트</th><th>평균</th><th>최대</th>
+                  <th title="등록된 스토리지 장비의 시리얼이 이 어레이 시리얼과 일치할 때만 표시합니다. 대역폭(바쁨)과 용량(참)은 다른 축이라 나란히 봐야 합니다.">용량 사용률 ⓘ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {series.map((s) => (
+                  <tr key={s.key}>
+                    <td style={ELLIPSIS} title={s.key}>
+                      <b>{s.key}</b>
+                      <div className="muted" style={{ fontSize: 10.5 }}>
+                        {s.endpointKind === 'host' ? '호스트(HBA) · ' : ''}{s.arraySerial ? `S/N ${s.arraySerial}` : ''}
+                      </div>
+                    </td>
+                    <td style={ELLIPSIS} title={s.switches.join(', ')}>{s.switches.join(', ')}</td>
+                    <td>{s.portCount}</td>
+                    <td>{bytesPerSecText(s.avgTotal)}</td>
+                    <td>{bytesPerSecText(s.maxTotal)}</td>
+                    <td>
+                      {s.capacity
+                        ? <span title={`${s.capacity.name} (${s.capacity.type})`}>
+                            <UsageCell pct={s.capacity.pct ?? 0} />
+                            <span className="muted" style={{ fontSize: 10.5, display: 'block', ...ELLIPSIS }}>{s.capacity.name}</span>
+                          </span>
+                        : <span className="muted" title="등록된 스토리지와 시리얼이 일치하지 않아 용량을 붙이지 않았습니다(억지 매칭 금지).">—</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
+            합산 대상 스위치: {data.switches.map((s) => s.name).join(' · ')}
+          </div>
+        </>
+      )}
+    </Modal>
   );
 }
 
