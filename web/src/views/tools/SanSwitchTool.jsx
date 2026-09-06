@@ -1,8 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
 import { fetchJson, postJson, delJson } from '../../api.js';
 import { Loading, ErrorBox, Kpi, UsageCell, Modal, SearchBox } from '../../components/ui.jsx';
 import { stateLabel, stateTone, opticalHealth, errorLevel, capacityLevel, aggregate,
-  throughputText, filterPorts, RX_WARN_DBM, RX_BAD_DBM } from './sanSwitchPorts.js';
+  throughputText, filterPorts, shortDeviceName, saturationPct, saturationLevel, bytesPerSecText,
+  toChartRows, topSeries, bps, sortPorts, nextSort, RX_WARN_DBM, RX_BAD_DBM } from './sanSwitchPorts.js';
 
 /**
  * 특수기능 › SAN 스위치 모니터링(v2.410 — 사용자 요구 'Brocade SAN switch 포트 모니터링 및
@@ -24,6 +26,8 @@ const ago = (ts) => {
   return s < 60 ? `${s}초 전` : s < 3600 ? `${Math.round(s / 60)}분 전` : `${Math.round(s / 3600)}시간 전`;
 };
 const TONE = { ok: 'var(--green, #22c55e)', warn: 'var(--amber, #f59e0b)', bad: 'var(--red, #ef4444)', muted: 'var(--muted, #94a3b8)' };
+// 고정 폭 셀에서 긴 값이 옆 칸을 덮지 않게 하는 한 줄 말줄임(전문은 각 셀의 title 툴팁).
+const ELLIPSIS = { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
 
 /** 수집 실패 사유 한 줄 — 부분 실패(섹션만 오류)여도 사유가 반드시 드러나게. */
 function failReason(s) {
@@ -49,6 +53,9 @@ export default function SanSwitchTool() {
   const [detail, setDetail] = useState(null);      // 포트 상세 모달 { device, ports, ... }
   const [portFilter, setPortFilter] = useState('all');
   const [portQ, setPortQ] = useState('');
+  const [infoOpen, setInfoOpen] = useState(false);   // 장비 일반 정보 펼침
+  const [tab, setTab] = useState('ports');           // 포트 목록 / 사용량 분석
+  const [sort, setSort] = useState({ key: 'index', dir: 'asc' });  // 표 정렬(제목 클릭)
 
   const load = async () => {
     try { setData(await fetchJson('/tools/sanswitch')); setError(null); }
@@ -109,7 +116,7 @@ export default function SanSwitchTool() {
     finally { setBusy(false); }
   };
   const openDetail = async (r) => {
-    setDetail({ loading: true, device: r }); setPortFilter('all'); setPortQ('');
+    setDetail({ loading: true, device: r }); setPortFilter('all'); setPortQ(''); setInfoOpen(false); setTab('ports'); setSort({ key: 'index', dir: 'asc' });
     try { setDetail({ device: r, ...(await fetchJson(`/tools/sanswitch/devices/${r.id}/ports`)) }); }
     catch (e) { setDetail({ device: r, error: e.message }); }
   };
@@ -172,10 +179,18 @@ export default function SanSwitchTool() {
                 <tr key={r.id}>
                   <td>
                     <button className="tab" style={{ padding: '2px 8px', fontWeight: 600 }} onClick={() => openDetail(r)} title="클릭하면 포트 상세를 봅니다">{r.name}</button>
-                    <div className="muted" style={{ fontSize: 11 }}>{r.host}{r.vfId ? ` · VF ${r.vfId}` : ''}</div>
+                    {/* 스위치가 스스로 보고한 이름(switchshow 의 switchName)을 함께 보여준다 —
+                        등록 표시명은 사람이 정한 별칭이라, 현장에서 콘솔에 찍히는 실제 이름과
+                        다를 수 있고 그때 어느 장비인지 헷갈린다(사용자 요구). */}
+                    <div className="muted" style={{ fontSize: 11 }}>
+                      {s?.name && s.name !== r.name ? <><b style={{ fontWeight: 600 }}>{s.name}</b>{' · '}</> : null}
+                      {r.host}{r.vfId ? ` · VF ${r.vfId}` : ''}
+                    </div>
                   </td>
                   <td>{dcName(r.datacenterId)}</td>
-                  <td>{s?.model || <span className="muted">—</span>}</td>
+                  <td>{s?.model || (s?.extra?.switchType
+                    ? <span className="muted" title="chassisshow 에서 모델명을 읽지 못해 switchType 원값을 표시합니다.">type {s.extra.switchType}</span>
+                    : <span className="muted">—</span>)}</td>
                   <td>{s?.fabricOs || <span className="muted">—</span>}</td>
                   <td>{s?.domainId ?? <span className="muted">—</span>}</td>
                   <td>
@@ -211,7 +226,7 @@ export default function SanSwitchTool() {
       </div>
 
       {form && <DeviceForm {...{ form, setForm, data, save, busy, runTest, test, setTest }} />}
-      {detail && <PortDetail {...{ detail, setDetail, portFilter, setPortFilter, portQ, setPortQ }} />}
+      {detail && <PortDetail {...{ detail, setDetail, portFilter, setPortFilter, portQ, setPortQ, infoOpen, setInfoOpen, tab, setTab, sort, setSort }} />}
     </>
   );
 }
@@ -314,17 +329,242 @@ function TestResult({ test }) {
   );
 }
 
+/**
+ * 장비 일반 정보 한 줄 요약(v2.411, 사용자 요구) — 필터 줄 옆에 붙는다.
+ * 값이 없는 항목은 아예 넣지 않는다(빈 칸을 '—' 로 나열하면 요약이 아니라 잡음이 된다).
+ */
+function infoSummary(d) {
+  const h = d.health || {};
+  const bits = [];
+  if (d.domainId != null) bits.push(`Domain ${d.domainId}`);
+  if (d.extra?.switchRole) bits.push(d.extra.switchRole);
+  if (d.serial) bits.push(`S/N ${d.serial}`);
+  if (h.fans?.total) bits.push(`팬 ${h.fans.total}`);
+  if (h.psus?.total) bits.push(`PSU ${h.psus.total}${h.powerWatts ? ` · ${h.powerWatts}W` : ''}`);
+  if (d.extra?.awakeDays != null) bits.push(`가동 ${d.extra.awakeDays}일`);
+  return bits.join(' · ');
+}
+
+/** 장비 일반 정보 상세 — 수집된 값만 항목으로 만든다(없는 항목은 표시하지 않는다). */
+function DeviceInfo({ d }) {
+  const h = d.health || {};
+  const rows = [
+    ['스위치 이름', d.name],
+    ['host', d.host],
+    ['모델', d.model || (d.extra?.switchType ? `(모델명 미보고) switchType ${d.extra.switchType}` : '')],
+    ['Fabric OS', d.fabricOs],
+    ['섀시 시리얼', d.serial],
+    ['섀시 Part Num', d.extra?.chassisPartNumber],
+    ['섀시 ID', d.extra?.chassisId],
+    ['Switch WWN', d.wwn],
+    ['Domain ID', d.domainId],
+    ['스위치 역할', d.extra?.switchRole],
+    ['스위치 상태', d.switchState],
+    ['Fabric 이름', d.extra?.fabricName],
+    ['팹 스위치 수', d.fabric?.switches],
+    ['활성 Zone 설정', d.zoning?.effectiveConfig],
+    ['팬', h.fans ? (h.fans.ok == null ? `${h.fans.total}개` : `${h.fans.ok}/${h.fans.total} 정상`) : ''],
+    ['전원공급장치', h.psus ? (h.psus.ok == null ? `${h.psus.total}개` : `${h.psus.ok}/${h.psus.total} 정상`) : ''],
+    ['소비전력(PSU 합)', h.powerWatts ? `${h.powerWatts} W` : ''],
+    ['SFP 최고 온도', h.tempC != null ? `${h.tempC} ℃` : ''],
+    ['가동(Time Awake)', d.extra?.awakeDays != null ? `${d.extra.awakeDays}일` : ''],
+    ['총 수명(Time Alive)', d.extra?.aliveDays != null ? `${d.extra.aliveDays}일` : ''],
+    ['수집 방식', d.extra?.collectMethod === 'rest' ? 'REST API' : 'SSH CLI'],
+    ['수집 주체', d.source],
+  ].filter(([, v]) => v !== '' && v != null);
+
+  return (
+    <div className="card" style={{ marginBottom: 10, padding: 10 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '4px 14px', fontSize: 12 }}>
+        {rows.map(([k, v]) => (
+          <div key={k} style={{ display: 'flex', gap: 6, minWidth: 0 }}>
+            <span className="muted" style={{ flex: '0 0 108px' }}>{k}</span>
+            <b style={{ ...ELLIPSIS, minWidth: 0 }} title={String(v)}>{String(v)}</b>
+          </div>
+        ))}
+      </div>
+      {/* PSU 상세 — 입력 전압·소비전력은 전원 이상 징후를 바로 드러낸다(한쪽 0W = 계통 단선). */}
+      {!!(h.psuDetail || []).length && (
+        <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>
+          PSU 상세: {h.psuDetail.map((p) => `#${p.unit} ${p.source || ''} ${p.voltageV != null ? `${p.voltageV}V` : ''} ${p.powerW != null ? `${p.powerW}W` : ''}${p.serial ? ` (S/N ${p.serial})` : ''}`.replace(/\s+/g, ' ').trim()).join(' · ')}
+        </div>
+      )}
+      {!!(d.licenses || []).length && (
+        <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+          라이선스: {d.licenses.map((l) => l.name).join(' · ')}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const HOURS = [[1, '1시간'], [6, '6시간'], [24, '24시간'], [24 * 7, '7일'], [24 * 30, '30일']];
+const LINE_COLORS = ['#60a5fa', '#f59e0b', '#34d399', '#f472b6', '#a78bfa', '#fbbf24', '#22d3ee', '#fb7185'];
+const tsLabel = (ts, hours) => {
+  const d = new Date(ts);
+  const p = (n) => String(n).padStart(2, '0');
+  return hours <= 24 ? `${p(d.getHours())}:${p(d.getMinutes())}` : `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}시`;
+};
+
+/**
+ * 사용량 분석(v2.411, 사용자 요구 '수집한 포트 사용정보를 차트로 보면서 포트의 사용량을
+ * 분석해서 스토리지 사용량을 볼 수 있게').
+ *
+ * 두 관점을 나란히 둔다:
+ *  1) 포트별 — 어느 포트가 얼마나 쓰이나. 포화도(협상 속도 대비 %)까지 봐야 증설 판단이 된다.
+ *  2) 스토리지별 — 같은 어레이에 여러 포트가 물려 있으므로(SYMMETRIX 의 SAF-1d/3d/5d…)
+ *     포트 처리량을 어레이 단위로 합산해야 '그 스토리지가 실제로 얼마나 쓰이는지'가 보인다.
+ */
+function PerfPanel({ deviceId, ports }) {
+  const [hours, setHours] = useState(24);
+  const [view, setView] = useState('port');     // 'port' | 'storage'
+  const [data, setData] = useState(null);
+  const [error, setError] = useState(null);
+
+  /**
+   * ⚠ 응답에 **어느 뷰의 것인지**를 각인해 두고, 뷰가 일치할 때만 그린다.
+   * 처음에는 view 상태만 보고 그렸는데, `setView('storage')` 로 리렌더가 먼저 일어나고
+   * 데이터 초기화(useEffect)는 그 다음이라 **'뷰는 storage, 데이터는 포트'** 인 렌더가 한 번
+   * 끼어들었다. 그 렌더에서 포트 시리즈에 없는 `s.ports.length` 를 읽어 화면 전체가 크래시했다
+   * (Playwright 로 실제로 잡음). 뷰-데이터 짝을 강제하면 이 부류가 원천 차단된다.
+   */
+  useEffect(() => {
+    let alive = true;
+    setData(null); setError(null);
+    const v = view;
+    const path = v === 'storage' ? `/tools/sanswitch/devices/${deviceId}/perf/storage` : `/tools/sanswitch/devices/${deviceId}/perf`;
+    fetchJson(path, { hours })
+      .then((d) => { if (alive) setData({ ...d, view: v }); })
+      .catch((e) => { if (alive) setError(e.message); });
+    return () => { alive = false; };
+  }, [deviceId, hours, view]);
+
+  // 포트 현재 속도(포화도 계산용) — 목록 스냅샷에서 가져온다.
+  const speedOf = useMemo(() => {
+    const m = new Map((ports || []).map((p) => [p.index, p.speed]));
+    return (port) => m.get(port) || '';
+  }, [ports]);
+
+  // 뷰가 일치하는 응답만 사용(위 주석 참조). 필드도 방어적으로 읽는다.
+  const shown = data && data.view === view ? data : null;
+  const raw = shown?.series || [];
+  const seriesAll = view === 'storage'
+    ? raw.map((s) => ({ key: s.key, label: `${s.key} (포트 ${(s.ports || []).length})`, values: s.sum || [] }))
+    : raw.map((s) => ({ key: `p${s.port}`, label: `${s.port}${s.name ? ` · ${shortDeviceName(s.name, 24)}` : ''}`, values: s.avg || [], port: s.port, speed: s.speed }));
+  const top = topSeries(seriesAll, 8);
+  const rows = toChartRows(shown?.buckets || [], top);
+
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 8 }}>
+        {[['port', '포트별'], ['storage', '연결 스토리지별']].map(([k, label]) => (
+          <button key={k} className={view === k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '4px 12px' }}
+            onClick={() => setView(k)}
+            title={k === 'storage' ? '같은 어레이에 물린 포트들의 처리량을 합산해, 그 스토리지가 실제로 얼마나 쓰이는지 보여줍니다.' : '포트 하나하나의 처리량입니다.'}>
+            {label}
+          </button>
+        ))}
+        <span className="muted" style={{ marginLeft: 8, fontSize: 12 }}>기간</span>
+        {HOURS.map(([h, label]) => (
+          <button key={h} className={hours === h ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '4px 10px' }}
+            onClick={() => setHours(h)}>{label}</button>
+        ))}
+      </div>
+
+      {error && <ErrorBox message={error} />}
+      {!error && !shown && <Loading />}
+      {shown && !rows.length && (
+        <div className="card muted" style={{ fontSize: 13, lineHeight: 1.8 }}>
+          아직 수집된 사용량 데이터가 없습니다.
+          <div style={{ marginTop: 4 }}>
+            <b>설정 › 수집 서버 › SAN 스위치 포트 사용량</b> 에서 수집을 켜면 <code>portperfshow</code> 를 주기적으로
+            실행해 쌓기 시작합니다(기본은 꺼짐 — 운영 스위치에 주기 접속을 임의로 만들지 않기 위해서입니다).
+            {shown.unavailable ? <div style={{ color: 'var(--amber)', marginTop: 4 }}>이 서버는 시계열 DB(node:sqlite)를 쓸 수 없어 이력이 저장되지 않습니다.</div> : null}
+          </div>
+        </div>
+      )}
+
+      {!!rows.length && (
+        <>
+          <div className="card" style={{ padding: 8, marginBottom: 8 }}>
+            <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>
+              {view === 'storage' ? '연결 스토리지별 합산 처리량' : '포트별 처리량'} · 평균 사용량 상위 {top.length}개 ·
+              값은 스위치가 보고한 바이트/초를 bps 로 환산한 것입니다.
+            </div>
+            <ResponsiveContainer width="100%" height={260}>
+              <LineChart data={rows} margin={{ top: 4, right: 12, bottom: 4, left: 4 }}>
+                <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
+                <XAxis dataKey="ts" tickFormatter={(t) => tsLabel(t, hours)} fontSize={11} minTickGap={28} />
+                <YAxis tickFormatter={(v) => bps(v * 8)} fontSize={11} width={78} />
+                <Tooltip
+                  labelFormatter={(t) => new Date(t).toLocaleString()}
+                  formatter={(v, name) => [bytesPerSecText(v), name]} />
+                <Legend wrapperStyle={{ fontSize: 11 }} />
+                {top.map((s, i) => (
+                  <Line key={s.key} type="monotone" dataKey={s.key} name={s.label} dot={false}
+                    stroke={LINE_COLORS[i % LINE_COLORS.length]} strokeWidth={1.6} connectNulls={false} isAnimationActive={false} />
+                ))}
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* 분석 표 — 평균/최대, 그리고 포화도(협상 속도 대비 %). 절대값만으로는 증설 판단이 안 된다. */}
+          <div className="table-wrap" style={{ maxHeight: '28vh', overflow: 'auto' }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>{view === 'storage' ? '스토리지' : '포트'}</th>
+                  {view === 'storage' ? <th>포트 수</th> : <th>연결 장비</th>}
+                  {view === 'port' && <th>속도</th>}
+                  <th>평균</th><th>최대</th>
+                  {view === 'port' && <th title="최대 처리량 ÷ 협상 속도. 속도를 모르는 포트는 판정하지 않습니다(빈칸).">포화도(최대) ⓘ</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {seriesAll.map((s) => {
+                  const v = s.values.filter((x) => x != null);
+                  const avg = v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0;
+                  const max = v.length ? Math.max(...v) : 0;
+                  const speed = view === 'port' ? (s.speed || speedOf(s.port)) : '';
+                  const sat = view === 'port' ? saturationPct(max, speed) : null;
+                  const lvl = saturationLevel(sat);
+                  return (
+                    <tr key={s.key}>
+                      <td style={ELLIPSIS} title={s.label}><b>{view === 'storage' ? s.key : s.port}</b></td>
+                      {view === 'storage'
+                        ? <td className="muted">{(raw.find((x) => x.key === s.key)?.ports || []).length}</td>
+                        : <td style={ELLIPSIS} title={raw.find((x) => x.port === s.port)?.name || ''}>{shortDeviceName(raw.find((x) => x.port === s.port)?.name || '', 30) || '—'}</td>}
+                      {view === 'port' && <td>{speed || <span className="muted">—</span>}</td>}
+                      <td>{bytesPerSecText(avg)}</td>
+                      <td>{bytesPerSecText(max)}</td>
+                      {view === 'port' && (
+                        <td style={{ color: lvl === 'none' ? TONE.muted : TONE[lvl], fontWeight: lvl === 'bad' ? 600 : 400 }}>
+                          {sat == null ? '—' : `${sat}%`}
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 /** 포트 상세 — 이 화면이 '포트 모니터링'의 본체다. */
-function PortDetail({ detail, setDetail, portFilter, setPortFilter, portQ, setPortQ }) {
+function PortDetail({ detail, setDetail, portFilter, setPortFilter, portQ, setPortQ, infoOpen, setInfoOpen, tab, setTab, sort, setSort }) {
   const d = detail;
   const list = d.ports?.list || [];
   const unit = d.extra?.rateUnit || 'fps';
-  const filtered = filterPorts(list, portFilter).filter((p) => {
+  const filtered = sortPorts(filterPorts(list, portFilter).filter((p) => {
     if (!portQ.trim()) return true;
     const s = portQ.trim().toLowerCase();
     return [p.slotPort, p.portType, p.attachedName, (p.attached || []).join(' '), p.sfpVendor, p.sfpSerial]
       .some((v) => String(v || '').toLowerCase().includes(s));
-  });
+  }), sort.key, sort.dir);
   return (
     <Modal title={`포트 상세 — ${d.device?.name || ''}`} onClose={() => setDetail(null)} width={1180}>
       {d.loading && <Loading />}
@@ -332,7 +572,9 @@ function PortDetail({ detail, setDetail, portFilter, setPortFilter, portQ, setPo
       {!d.loading && !d.error && (
         <>
           <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
-            {d.model || '모델 미상'} · FOS {d.fabricOs || '—'} · {d.source} · 수집 {ago(d.collectedAt)}
+            {d.model || (d.extra?.switchType
+              ? <span title="chassisshow 에서 모델명(Chassis Family)을 읽지 못했습니다. 대신 스위치가 보고한 switchType 원값을 그대로 표시합니다 — 타입 코드를 모델명으로 바꾸는 표는 확실하지 않아 넣지 않았습니다.">switchType {d.extra.switchType}</span>
+              : '모델 미상')} · FOS {d.fabricOs || '—'} · {d.host || ''} · {d.source} · 수집 {ago(d.collectedAt)}
             {d.ports?.portsOmitted ? (
               <div style={{ color: TONE.warn, marginTop: 4 }}>
                 ⚠ 이 스위치는 엣지가 수집합니다. 회선 부담 때문에 중앙에는 <b>문제 포트만</b> 올라옵니다 —
@@ -344,24 +586,78 @@ function PortDetail({ detail, setDetail, portFilter, setPortFilter, portQ, setPo
             )}
           </div>
 
+          {/* 포트 목록 / 사용량 분석 전환(v2.411) — 분석 탭은 portperfshow 시계열 DB 를 읽는다. */}
+          <div className="vc-views" style={{ marginBottom: 8, display: 'flex', gap: 6 }}>
+            {[['ports', '포트 목록'], ['perf', '📈 사용량 분석']].map(([k, label]) => (
+              <button key={k} className={tab === k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '5px 14px' }}
+                onClick={() => setTab(k)}>{label}</button>
+            ))}
+          </div>
+
+          {tab === 'perf' && <PerfPanel deviceId={d.deviceId} ports={list} />}
+
+          {tab === 'ports' && <>
           <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 8 }}>
             {[['all', '전체'], ['online', '사용중'], ['free', '비어있음'], ['problem', '문제만']].map(([k, label]) => (
               <button key={k} className={portFilter === k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '4px 12px' }}
                 onClick={() => setPortFilter(k)}>{label}</button>
             ))}
+            {/* 장비 일반 정보(v2.411, 사용자 요구) — 수집은 하고 있었지만 화면에 쓰지 않던
+                WWN·Domain·시리얼·팹·존·FRU·가동일을 여기서 보여준다. 요약은 한 줄,
+                누르면 전체 항목이 펼쳐진다(표를 밀어내지 않게 기본은 접힘). */}
+            <button className="tab" style={{ flex: 'none', padding: '4px 12px' }} onClick={() => setInfoOpen((v) => !v)}
+              title="스위치 일반 정보 펼치기/접기">
+              {infoOpen ? '▾' : '▸'} 장비 정보
+            </button>
+            <span className="muted" style={{ fontSize: 12 }}>{infoSummary(d)}</span>
             <SearchBox className="input" style={{ marginLeft: 'auto', maxWidth: 240 }} value={portQ} onChange={setPortQ}
               placeholder="포트·연결 장비·SFP 찾기" />
             <span className="muted" style={{ fontSize: 12 }}>{filtered.length} / {list.length}</span>
           </div>
 
+          {infoOpen && <DeviceInfo d={d} />}
+
+          {/* table-layout:fixed + 열 너비 명시(v2.411, 사용자 신고 '1줄에 길게 나와서 읽을 수 없음').
+              기본 auto 레이아웃에서는 '연결 장비'의 긴 심볼릭 이름(SYMMETRIX::… 100자 이상)이
+              칸을 밀고 나가 옆의 CRC 열 위에 겹쳐 그려졌다. 너비를 고정해야 어떤 값이 와도
+              칸을 침범하지 못한다 — 긴 값은 셀 안에서 말줄임 처리하고 전문은 툴팁에 남긴다. */}
           <div className="table-wrap" style={{ maxHeight: '58vh', overflow: 'auto' }}>
-            <table>
+            <table style={{ tableLayout: 'fixed', width: '100%' }}>
+              <colgroup>
+                <col style={{ width: 96 }} />{/* 포트 */}
+                <col style={{ width: 74 }} />{/* 상태 */}
+                <col style={{ width: 58 }} />{/* 속도 */}
+                <col style={{ width: 74 }} />{/* 타입 */}
+                <col />{/* 연결 장비 — 남는 폭을 가져가되 넘치면 말줄임 */}
+                <col style={{ width: 150 }} />{/* 에러 카운터 */}
+                <col style={{ width: 132 }} />{/* 광레벨 */}
+                <col style={{ width: 74 }} />{/* SFP 온도 */}
+                <col style={{ width: 118 }} />{/* 처리량 */}
+              </colgroup>
+              {/* 제목 클릭으로 정렬(v2.411, 사용자 요구). 값이 없는 행은 방향과 무관하게 뒤로
+                  간다(sanSwitchPorts.sortPorts) — 미수집이 맨 앞에 오면 오독을 만든다. */}
               <thead>
                 <tr>
-                  <th>포트</th><th>상태</th><th>속도</th><th>타입</th><th>연결 장비</th>
-                  <th title="누적 에러 카운터입니다 — 마지막 초기화 이후의 합계이며, 값이 크다고 지금 장애라는 뜻은 아닙니다.">CRC / LinkFail / LossSync ⓘ</th>
-                  <th title={`SFP 수신·송신 광레벨. 일반 권장 하한 ${RX_WARN_DBM} dBm, 위험 ${RX_BAD_DBM} dBm — 정확한 임계는 SFP 모델·거리에 따라 다릅니다.`}>광레벨 Rx/Tx (dBm) ⓘ</th>
-                  <th>SFP 온도</th><th>처리량 (In/Out)</th>
+                  {[
+                    ['index', '포트', ''],
+                    ['state', '상태', ''],
+                    ['speed', '속도', ''],
+                    ['portType', '타입', ''],
+                    ['attached', '연결 장비', ''],
+                    ['err', 'CRC / LinkFail / LossSync', '누적 에러 카운터입니다 — 마지막 초기화 이후의 합계이며, 값이 크다고 지금 장애라는 뜻은 아닙니다. 정렬은 세 값의 합 기준입니다.'],
+                    ['optical', '광레벨 Rx/Tx', `SFP 수신·송신 광레벨. 일반 권장 하한 ${RX_WARN_DBM} dBm, 위험 ${RX_BAD_DBM} dBm — 정확한 임계는 SFP 모델·거리에 따라 다릅니다. 정렬은 수신(Rx) 기준입니다.`],
+                    ['temp', 'SFP 온도', ''],
+                    ['throughput', '처리량 (In/Out)', ''],
+                  ].map(([key, label, tip]) => (
+                    <th key={key} onClick={() => setSort((c) => nextSort(c, key))}
+                      style={{ cursor: 'pointer', userSelect: 'none' }}
+                      title={`${tip ? `${tip}\n\n` : ''}클릭하면 이 열로 정렬합니다.`}>
+                      {label}{tip ? ' ⓘ' : ''}
+                      <span style={{ opacity: sort.key === key ? 1 : 0.25, marginLeft: 3 }}>
+                        {sort.key === key ? (sort.dir === 'asc' ? '▲' : '▼') : '↕'}
+                      </span>
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
@@ -370,13 +666,17 @@ function PortDetail({ detail, setDetail, portFilter, setPortFilter, portQ, setPo
                   const oh = opticalHealth(p.rxPowerDbm, p.txPowerDbm);
                   return (
                     <tr key={p.index}>
-                      <td><b>{p.slotPort}</b><div className="muted" style={{ fontSize: 10.5 }}>idx {p.index}{p.address ? ` · ${p.address}` : ''}</div></td>
+                      <td style={{ overflow: 'hidden' }}><b>{p.slotPort}</b><div className="muted" style={{ ...ELLIPSIS, fontSize: 10.5 }}>idx {p.index}{p.address ? ` · ${p.address}` : ''}</div></td>
                       <td><span style={{ color: TONE[stateTone(p.state)] }} title={p.stateRaw || ''}>{stateLabel(p.state)}</span></td>
                       <td>{p.speed || <span className="muted">—</span>}</td>
-                      <td>{p.portType || <span className="muted">—</span>}</td>
-                      <td style={{ maxWidth: 240 }}>
-                        {p.attachedName ? <div>{p.attachedName}</div> : null}
-                        <span className="muted" style={{ fontSize: 10.5, wordBreak: 'break-all' }}>{(p.attached || []).join(', ') || '—'}</span>
+                      <td style={ELLIPSIS} title={p.portType || ''}>{p.portType || <span className="muted">—</span>}</td>
+                      {/* 이름·WWN 모두 한 줄 말줄임. 전문은 툴팁(마우스 올리면 전체가 보인다). */}
+                      <td style={{ overflow: 'hidden' }}
+                        title={[p.attachedName, (p.attached || []).join(', ')].filter(Boolean).join('\n') || '연결된 장비 없음'}>
+                        {p.attachedName
+                          ? <div style={ELLIPSIS}>{shortDeviceName(p.attachedName)}</div>
+                          : null}
+                        <div className="muted" style={{ ...ELLIPSIS, fontSize: 10.5 }}>{(p.attached || []).join(', ') || '—'}</div>
                       </td>
                       <td style={{ color: TONE[el.level === 'ok' ? 'muted' : el.level] }}>
                         {p.errCrc ?? '—'} / {p.errLinkFail ?? '—'} / {p.errLossSync ?? '—'}
@@ -394,9 +694,16 @@ function PortDetail({ detail, setDetail, portFilter, setPortFilter, portQ, setPo
             </table>
           </div>
 
+          </>}
+
           {Object.entries(d.sections || {}).filter(([, v]) => v && v !== 'ok').length > 0 && (
             <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>
-              미수집 항목: {Object.entries(d.sections).filter(([, v]) => v && v !== 'ok').map(([k, v]) => `${k}(${v})`).join(', ')}
+              미수집 항목 — 이 스위치에서 해당 명령을 실행하지 못했습니다(포트 현황에는 영향 없음):
+              <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                {Object.entries(d.sections).filter(([, v]) => v && v !== 'ok').map(([k, v]) => (
+                  <li key={k} style={ELLIPSIS} title={String(v)}><b>{k}</b> — {String(v)}</li>
+                ))}
+              </ul>
             </div>
           )}
         </>

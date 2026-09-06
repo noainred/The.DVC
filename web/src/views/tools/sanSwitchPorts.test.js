@@ -3,7 +3,7 @@
  * 이 규칙들이 틀리면 운영자가 **정상 포트를 장애로, 장애 포트를 정상으로** 본다.
  */
 import { describe, it, expect } from 'vitest';
-import { opticalHealth, errorLevel, capacityLevel, aggregate, throughputText, bps, filterPorts, stateLabel }
+import { opticalHealth, errorLevel, capacityLevel, aggregate, throughputText, bps, filterPorts, stateLabel, shortDeviceName, saturationPct, saturationLevel, bytesPerSecText, toChartRows, topSeries, sortPorts, nextSort }
   from './sanSwitchPorts.js';
 
 describe('opticalHealth', () => {
@@ -102,5 +102,106 @@ describe('stateLabel', () => {
     expect(stateLabel('noLicense')).toBe('라이선스 없음');
     expect(stateLabel('offline')).toBe('비어있음');
     expect(stateLabel('online')).toBe('사용중');
+  });
+});
+
+describe('shortDeviceName', () => {
+  const SYM = 'SYMMETRIX::000497700230::SAF-1d 4::FC::5978_0714+::EMUL B90F0000 698529C0 EE8A28 03.18.24 09:33.';
+  it('SYMMETRIX 심볼릭 이름을 식별 가능한 앞부분만 남긴다(표가 옆 칸을 침범하지 않게)', () => {
+    const r = shortDeviceName(SYM);
+    expect(r.length).toBeLessThanOrEqual(45);
+    expect(r.startsWith('SYMMETRIX::000497700230')).toBe(true);  // 제품군 + 어레이 시리얼은 반드시 남는다
+    expect(r.endsWith('…')).toBe(true);
+  });
+  it('짧은 이름은 건드리지 않는다', () => {
+    expect(shortDeviceName('QLE2692 FW:v9.15.01')).toBe('QLE2692 FW:v9.15.01');
+    expect(shortDeviceName('')).toBe('');
+    expect(shortDeviceName(null)).toBe('');
+  });
+  it(':: 가 없는 긴 이름은 단순 절단', () => {
+    const r = shortDeviceName('A'.repeat(80));
+    expect(r.length).toBe(44);
+    expect(r.endsWith('…')).toBe(true);
+  });
+  it('첫 세그먼트만으로 이미 max 를 넘으면 그 세그먼트는 유지한다(빈 문자열이 되면 안 된다)', () => {
+    const r = shortDeviceName(`${'X'.repeat(60)}::tail`, 20);
+    expect(r.startsWith('X'.repeat(60))).toBe(true);
+  });
+});
+
+describe('saturationPct / saturationLevel', () => {
+  it('16G 포트에서 2 GB/s(=16 Gbps)는 100%', () => {
+    expect(saturationPct(2e9, '16G')).toBe(100);
+    expect(saturationPct(1e9, '16G')).toBe(50);
+  });
+  it('같은 절대값도 포트 속도에 따라 포화도가 다르다 — 절대값만 보면 증설 판단이 틀린다', () => {
+    expect(saturationPct(5e8, '16G')).toBe(25);
+    expect(saturationPct(5e8, '4G')).toBe(100);
+  });
+  it('속도를 모르면 판정하지 않는다(null) — 0% 로 칠하면 정반대 결론이 된다', () => {
+    expect(saturationPct(5e8, '')).toBe(null);
+    expect(saturationPct(5e8, '자동')).toBe(null);
+    expect(saturationPct(null, '16G')).toBe(null);
+    expect(saturationLevel(null)).toBe('none');
+  });
+  it('등급 경계 50/80', () => {
+    expect(saturationLevel(49.9)).toBe('ok');
+    expect(saturationLevel(50)).toBe('warn');
+    expect(saturationLevel(80)).toBe('bad');
+  });
+});
+
+describe('bytesPerSecText', () => {
+  it('portperfshow 의 B/s 를 bps 로 환산해 표기(×8)', () => {
+    expect(bytesPerSecText(155_360_000)).toBe('1.24 Gbps');
+    expect(bytesPerSecText(86_400)).toBe('691 Kbps');
+    expect(bytesPerSecText(0)).toBe('0 bps');
+    expect(bytesPerSecText(null)).toBe('—');
+  });
+});
+
+describe('toChartRows / topSeries', () => {
+  it('시계열을 차트 행으로 합치고 빈 값은 null 로 남긴다(0 으로 채우면 끊긴 구간이 트래픽 0 이 된다)', () => {
+    const rows = toChartRows([100, 200], [{ key: 'a', values: [1, null] }, { key: 'b', values: [null, 4] }]);
+    expect(rows).toEqual([{ ts: 100, a: 1, b: null }, { ts: 200, a: null, b: 4 }]);
+  });
+  it('평균 사용량 상위 N개만 남긴다', () => {
+    const s = [{ key: 'x', values: [1, 1] }, { key: 'y', values: [10, 10] }, { key: 'z', values: [5, 5] }];
+    expect(topSeries(s, 2).map((x) => x.key)).toEqual(['y', 'z']);
+  });
+});
+
+describe('sortPorts', () => {
+  const L = [
+    { index: 0, state: 'online', speed: '16G', errCrc: 5, sfpTempC: 30, rxPowerDbm: -3 },
+    { index: 1, state: 'offline', speed: '', errCrc: null, sfpTempC: null, rxPowerDbm: null },
+    { index: 2, state: 'online', speed: '32G', errCrc: 0, sfpTempC: 40, rxPowerDbm: -9 },
+  ];
+  it('숫자 열 오름/내림', () => {
+    expect(sortPorts(L, 'temp', 'asc').map((p) => p.index)).toEqual([0, 2, 1]);
+    expect(sortPorts(L, 'temp', 'desc').map((p) => p.index)).toEqual([2, 0, 1]);
+  });
+  it('값이 없는 행은 방향과 무관하게 항상 뒤로 — 미수집이 맨 앞에 오면 오독한다', () => {
+    expect(sortPorts(L, 'temp', 'asc').at(-1).index).toBe(1);
+    expect(sortPorts(L, 'temp', 'desc').at(-1).index).toBe(1);
+    expect(sortPorts(L, 'speed', 'asc').at(-1).index).toBe(1);
+  });
+  it('에러 합계로 정렬(개별 카운터 3종의 합)', () => {
+    expect(sortPorts(L, 'err', 'desc').map((p) => p.index)).toEqual([0, 2, 1]);
+  });
+  it('동점이면 포트 번호 순(정렬이 매번 흔들리지 않게)', () => {
+    const same = [{ index: 5, sfpTempC: 30 }, { index: 2, sfpTempC: 30 }];
+    expect(sortPorts(same, 'temp', 'asc').map((p) => p.index)).toEqual([2, 5]);
+  });
+  it('상태는 online → faulty → disabled → offline → noLicense 우선순', () => {
+    expect(sortPorts(L, 'state', 'asc').map((p) => p.state)).toEqual(['online', 'online', 'offline']);
+  });
+});
+
+describe('nextSort', () => {
+  it('같은 열이면 방향 토글, 다른 열이면 오름차순부터', () => {
+    expect(nextSort({ key: 'index', dir: 'asc' }, 'temp')).toEqual({ key: 'temp', dir: 'asc' });
+    expect(nextSort({ key: 'temp', dir: 'asc' }, 'temp')).toEqual({ key: 'temp', dir: 'desc' });
+    expect(nextSort({ key: 'temp', dir: 'desc' }, 'temp')).toEqual({ key: 'temp', dir: 'asc' });
   });
 });

@@ -45,6 +45,8 @@ server/config/storage-latest.json
 server/config/storage-intervals.json
 server/config/sanswitch-devices.json
 server/config/sanswitch-latest.json
+server/config/sanswitch-perf-settings.json
+server/config/sanswitch-perf.db
 server/config/storage-history.db
 server/config/storage-history.db-wal
 server/config/storage-history.db-shm

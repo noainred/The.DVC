@@ -17,26 +17,76 @@ export function parseFirmwareShow(text) {
 }
 
 /**
- * chassisshow → { model, serial, partNumber }.
- * 'Chassis Family' 가 모델(6510/G620/X6-8 …)이다. 디렉터는 블레이드 항목이 여러 번 나오는데,
- * 시리얼은 **CHASSIS/WWN 카드 것**을 우선하고 없으면 첫 'Factory Serial Num' 을 쓴다.
+ * chassisshow 파싱(v2.411 — **실장비 출력으로 전면 교정**).
+ *
+ * 처음엔 'Chassis Family:' 한 줄만 찾았는데, 실제 FOS v9.0.1d 출력에는 **그 줄이 아예 없었다**
+ * (사용자 제공 실출력). 그래서 모델이 늘 '미상'으로 떴다. 실제 출력은 유닛 블록의 나열이다:
+ *
+ *   FAN  Unit: 1 / 2 / 3            ← 팬 개수
+ *   POWER SUPPLY  Unit: 1 / 2       ← 입력 전압(218.00 V), 소비전력(-240W), 부품/시리얼
+ *   CHASSIS/WWN  Unit: 1            ← 섀시 Factory Part/Serial Num, ID, Serial Num, Time Awake
+ *
+ * ⚠ 같은 키('Factory Serial Num' 등)가 여러 블록에 반복되므로 **어느 블록의 값인지**를
+ *   구분해야 한다. 예전 구현은 블록 구분이 엉성해 PSU 의 부품번호를 섀시 것으로 집었다.
+ *
+ * 소비전력은 FOS 관례상 음수로 찍힌다(-240W = 240W 소비) → 절댓값으로 정규화한다.
+ *
+ * @returns { model, serial, partNumber, chassisId, fans, psus[], powerWatts, awakeDays, aliveDays }
  */
 export function parseChassisShow(text) {
+  const out = { model: '', serial: '', partNumber: '', chassisId: '',
+    fans: 0, psus: [], powerWatts: null, awakeDays: null, aliveDays: null };
+  // CHASSIS/WWN 블록이 없는 변형(픽스드 스위치는 'Chassis Family' + 'SW BLADE' 블록만 찍는
+  // 경우가 있다) 대비 폴백. **팬/PSU 블록의 값은 절대 쓰지 않는다** — 그건 그 부품의 시리얼이라
+  // 섀시 시리얼로 보고하면 자산 대조가 틀어진다.
+  const fb = { serial: '', partNumber: '' };
   const lines = String(text || '').split(/\r?\n/);
-  const out = { model: '', serial: '', partNumber: '' };
-  let inChassisBlock = false;
+  let block = '';       // 'fan' | 'psu' | 'chassis' | ''
+  let psu = null;
+  const num = (v) => { const m = String(v).match(/-?[\d.]+/); return m ? Number(m[0]) : null; };
+  const flushPsu = () => { if (psu) { out.psus.push(psu); psu = null; } };
+
   for (const raw of lines) {
     const l = raw.trim();
     let m;
+    // 일부 FOS 버전에는 이 줄이 있다(있으면 그게 가장 정확한 모델명).
     if ((m = l.match(/^Chassis\s+Family:\s*(.+)$/i))) { out.model = m[1].trim(); continue; }
-    if (/^CHASSIS\b/i.test(l) || /^Chassis Factory/i.test(l)) inChassisBlock = true;
-    else if (/^(SW|CP|AP|POWER SUPPLY|FAN)\b/i.test(l)) inChassisBlock = false;
-    if ((m = l.match(/^Factory\s+Serial\s+Num:\s*(\S+)/i))) {
-      if (!out.serial || inChassisBlock) out.serial = m[1];
+
+    if (/^FAN\s+Unit:/i.test(l)) { flushPsu(); block = 'fan'; out.fans++; continue; }
+    if ((m = l.match(/^POWER\s+SUPPLY\s+Unit:\s*(\d+)/i))) { flushPsu(); block = 'psu'; psu = { unit: Number(m[1]) }; continue; }
+    if (/^CHASSIS(\/WWN)?\s+Unit:/i.test(l)) { flushPsu(); block = 'chassis'; continue; }
+    if (/^(SW|CP|AP|CORE)\s+BLADE\s+Slot:/i.test(l)) { flushPsu(); block = 'blade'; continue; }
+
+    if (block === 'psu' && psu) {
+      if ((m = l.match(/^Power\s+Source:\s*(.+)$/i))) psu.source = m[1].trim();
+      else if ((m = l.match(/^PS\s+Voltage\s+input:\s*(.+)$/i))) psu.voltageV = num(m[1]);
+      // -240W = 240W 소비(FOS 표기). 절댓값으로 통일한다.
+      else if ((m = l.match(/^Power\s+Usage:\s*(.+)$/i))) psu.powerW = Math.abs(num(m[1]) ?? 0) || null;
+      else if ((m = l.match(/^Factory\s+Serial\s+Num:\s*(\S+)/i))) psu.serial = m[1];
+      else if ((m = l.match(/^Factory\s+Part\s+Num:\s*(\S+)/i))) psu.partNumber = m[1];
       continue;
     }
-    if ((m = l.match(/^Factory\s+Part\s+Num:\s*(\S+)/i))) { if (!out.partNumber) out.partNumber = m[1]; }
+    if (block !== 'psu' && block !== 'fan' && block !== 'chassis') {
+      // 블록 밖 또는 BLADE 블록 — 폴백 후보로만 담아 둔다(위 주석).
+      if ((m = l.match(/^Factory\s+Serial\s+Num:\s*(\S+)/i))) { if (!fb.serial) fb.serial = m[1]; }
+      else if ((m = l.match(/^Factory\s+Part\s+Num:\s*(\S+)/i))) { if (!fb.partNumber) fb.partNumber = m[1]; }
+    }
+    if (block === 'chassis') {
+      // 'Serial Num'(BRCFPL1944R00C) 이 'Factory Serial Num'(FPL1944R00C) 보다 완전한 표기라 우선.
+      if ((m = l.match(/^Serial\s+Num:\s*(\S+)/i))) out.serial = m[1];
+      else if ((m = l.match(/^Factory\s+Serial\s+Num:\s*(\S+)/i))) { if (!out.serial) out.serial = m[1]; }
+      else if ((m = l.match(/^Factory\s+Part\s+Num:\s*(\S+)/i))) out.partNumber = m[1];
+      else if ((m = l.match(/^Part\s+Num:\s*(\S+)/i))) { if (!out.partNumber) out.partNumber = m[1]; }
+      else if ((m = l.match(/^ID:\s*(\S+)/i))) out.chassisId = m[1];
+      else if ((m = l.match(/^Time\s+Awake:\s*(\d+)/i))) out.awakeDays = Number(m[1]);
+      else if ((m = l.match(/^Time\s+Alive:\s*(\d+)/i))) out.aliveDays = Number(m[1]);
+    }
   }
+  flushPsu();
+  if (!out.serial) out.serial = fb.serial;
+  if (!out.partNumber) out.partNumber = fb.partNumber;
+  const watts = out.psus.map((p) => p.powerW).filter((w) => w != null);
+  out.powerWatts = watts.length ? watts.reduce((a, b) => a + b, 0) : null;
   return out;
 }
 
@@ -249,6 +299,57 @@ export function parseNsShow(text) {
     }
   }
   return out;
+}
+
+/**
+ * portperfshow 파싱(v2.411 — 사용자 제공 실출력 기준).
+ *
+ * 출력은 '포트 번호 줄 → ===== 구분선 → 값 줄' 이 16포트씩 반복되는 행렬이고, 마지막 블록의
+ * 끝에는 `Total` 열이 붙는다:
+ *
+ *      16       17       18  ...      31
+ *   ==========================================
+ *     86.40k 130.63k   1.05m ...    1.19m
+ *
+ * ⚠ 값의 단위는 **바이트/초**다(FOS 문서 기준). bps 로 보려면 ×8 해야 한다 — 저장은 장비가
+ *   준 원단위(B/s) 그대로 하고 환산은 화면에서 한다(저장 단계에서 환산하면 나중에 단위를
+ *   되짚을 수 없다).
+ * ⚠ portperfshow 는 Ctrl-C 전까지 화면을 계속 갱신한다. 그래서 캡처에는 **같은 행렬이 여러 벌**
+ *   들어 있을 수 있다 — 포트 번호가 되감기는 지점을 기준으로 샘플을 나누고 **마지막(가장 최근)
+ *   샘플**만 쓴다. 여러 벌을 합치면 같은 포트가 덮어써져 시점이 뒤섞인다.
+ *
+ * @returns { ports: { [portIndex]: bytesPerSec }, total: number|null, samples: number }
+ */
+export function parsePortPerfShow(text) {
+  const lines = String(text || '').split(/\r?\n/);
+  const isSep = (l) => /^=+$/.test(l.trim());
+  const tokens = (l) => l.trim().split(/\s+/).filter(Boolean);
+  const isHeader = (t) => t.length > 0 && t.every((x) => /^\d+$/.test(x) || /^total$/i.test(x)) && /^\d+$/.test(t[0]);
+
+  const samples = [];
+  let cur = null;
+  let lastFirst = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const t = tokens(lines[i]);
+    if (!isHeader(t)) continue;
+    // 구분선을 건너뛰고 값 줄을 찾는다(구분선이 없는 변형도 견디게 최대 2줄까지 본다).
+    let j = i + 1;
+    while (j < lines.length && (isSep(lines[j]) || !lines[j].trim())) j++;
+    if (j >= lines.length) break;
+    const vals = tokens(lines[j]);
+    if (!vals.length) continue;
+    const first = Number(t[0]);
+    if (!cur || first <= lastFirst) { cur = { ports: {}, total: null }; samples.push(cur); }
+    lastFirst = first;
+    for (let k = 0; k < Math.min(t.length, vals.length); k++) {
+      const v = parseCounter(vals[k]);
+      if (/^total$/i.test(t[k])) { cur.total = v; continue; }
+      if (v != null) cur.ports[Number(t[k])] = v;
+    }
+    i = j;
+  }
+  const last = samples[samples.length - 1] || { ports: {}, total: null };
+  return { ...last, samples: samples.length };
 }
 
 /** fanshow / psshow → {ok, total}. 문구가 모델마다 달라 'Ok/Faulty' 단어 수로 센다. */

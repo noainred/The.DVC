@@ -34,20 +34,45 @@ const CMD_TIMEOUT_MS = Number(process.env.SANSW_CLI_TIMEOUT_MS) || 45_000;
  *   세션 상태를 바꾸는 명령이라, 각 exec 이 독립 채널인 이 구현에서는 유지되지 않는다.
  *   그래서 VF 는 **명령마다 앞에 붙여** 실행한다(`setcontext N; switchshow`).
  */
+/**
+ * FOS 명령이 PATH 에 없을 때의 대체 경로(v2.411 — 실장비에서 확인된 결함).
+ *
+ * 실측(FOS v9.0.1d): `switchshow`·`porterrshow`·`sfpshow` 는 되는데
+ * `switchstatusshow`·`licenseshow` 는 `sh: <명령>: command not found` 로 실패했다.
+ * SSH 비대화형 exec 은 로그인 프로파일을 읽지 않아 PATH 가 대화형 CLI 와 다르고, FOS 는
+ * 명령 바이너리가 여러 디렉터리에 흩어져 있어 일부만 기본 PATH 에 잡힌다.
+ *
+ * 그래서 각 명령을 '이름 → 로그인 셸 경유 → 알려진 설치 경로' 순으로 시도한다. 실패한
+ * 후보는 그냥 다음으로 넘어가므로(runSession 의 후보 루프), 첫 후보가 되는 장비에서는
+ * 추가 왕복이 발생하지 않는다.
+ * ⚠ 아래 경로들은 FOS 에서 흔히 쓰이는 위치를 넣은 것으로 **전 모델·전 버전에서 검증하지
+ *   않았다**. 전부 실패하면 그 섹션은 지금처럼 '미수집'으로 남고 사유가 화면에 표시된다.
+ */
+const FOS_DIRS = ['/fabos/cliexec', '/fabos/link_bin', '/fabos/bin', '/bin', '/usr/bin'];
+
 function specs(vfId) {
   const pre = vfId ? `setcontext ${vfId}; ` : '';
-  const c = (s) => `${pre}${s}`;
+  /** 한 명령의 후보 목록: 그대로 → 로그인 셸(프로파일 로드) → 전체 경로들. */
+  const c = (cmd) => {
+    const [name, ...rest] = cmd.split(' ');
+    const args = rest.length ? ` ${rest.join(' ')}` : '';
+    return [
+      `${pre}${cmd}`,
+      `${pre}sh -lc '${cmd}'`,
+      ...FOS_DIRS.map((d) => `${pre}${d}/${name}${args}`),
+    ];
+  };
   return [
-    { key: 'switchshow', required: true, cmds: [c('switchshow')] },
-    { key: 'chassisshow', cmds: [c('chassisshow')] },
-    { key: 'firmwareshow', cmds: [c('firmwareshow')] },
-    { key: 'licenseshow', cmds: [c('licenseshow')] },
-    { key: 'porterrshow', cmds: [c('porterrshow')] },
-    { key: 'sfpshow', cmds: [c('sfpshow -all'), c('sfpshow')] },
-    { key: 'switchstatusshow', cmds: [c('switchstatusshow')] },
-    { key: 'fanshow', cmds: [c('fanshow')] },
-    { key: 'psshow', cmds: [c('psshow')] },
-    { key: 'nsshow', cmds: [c('nsshow')] },
+    { key: 'switchshow', required: true, cmds: c('switchshow') },
+    { key: 'chassisshow', cmds: c('chassisshow') },
+    { key: 'firmwareshow', cmds: c('firmwareshow') },
+    { key: 'licenseshow', cmds: c('licenseshow') },
+    { key: 'porterrshow', cmds: c('porterrshow') },
+    { key: 'sfpshow', cmds: [...c('sfpshow -all'), ...c('sfpshow')] },
+    { key: 'switchstatusshow', cmds: c('switchstatusshow') },
+    { key: 'fanshow', cmds: c('fanshow') },
+    { key: 'psshow', cmds: c('psshow') },
+    { key: 'nsshow', cmds: c('nsshow') },
   ];
 }
 
@@ -66,9 +91,13 @@ async function runSession(device) {
           const stdout = String(r.stdout || '');
           const stderr = String(r.stderr || '');
           // FOS 는 오류를 exit 0 + 본문 문구로 내는 경우가 흔하다(예: 'Invalid command').
+          // FOS 는 오류를 exit 0 + 본문/stderr 문구로 내는 경우가 흔하다. 'command not found' 는
+          // 줄 중간에 나오므로(`sh: licenseshow: command not found`) 앵커 없이 본다 —
+          // 앵커를 걸어 두면 실패를 '성공(빈 내용)'으로 오인해 대체 경로를 시도하지 않는다.
           const looksError = !stdout.trim()
-            || /^\s*(invalid command|command not found|permission denied|not supported)/i.test(stdout)
-            || /command not found|not recognized/i.test(stderr);
+            || /command not found|not recognized|no such file or directory/i.test(stdout)
+            || /^\s*(invalid command|permission denied|not supported)/i.test(stdout)
+            || /command not found|not recognized|no such file or directory/i.test(stderr);
           raw.push({ key: spec.key, cmd, ok: !looksError, sample: (stdout || stderr).slice(0, RAW_LIMIT) });
           if (looksError) { lastErr = new Error(firstLine(stdout || stderr) || '빈 출력'); continue; }
           out[spec.key] = stdout; done = true; break;
@@ -108,6 +137,9 @@ export function buildSnapshot(device, out = {}, errors = {}) {
   snap.wwn = sw.header.switchWwn || '';
   snap.domainId = sw.header.switchDomain != null ? Number(sw.header.switchDomain) : null;
   snap.fabricOs = P.parseFirmwareShow(out.firmwareshow || '');
+  // 모델은 chassisshow 의 'Chassis Family'. 그게 없으면 **추측하지 않고** switchshow 의
+  // switchType 원값을 화면이 그대로 보여준다(extra.switchType) — 타입 코드→모델명 매핑표는
+  // 확실하지 않아 만들지 않았다. 틀린 모델명을 보여주느니 원값이 낫다.
   snap.model = chassis.model || '';
   snap.serial = chassis.serial || '';
   snap.zoning = { effectiveConfig: (sw.header.zoning || '').replace(/^ON\s*\(?|\)?$/gi, '').trim(), zones: 0 };
@@ -132,11 +164,14 @@ export function buildSnapshot(device, out = {}, errors = {}) {
   const rate = applyRates(device.id, list);
   snap.ports = { ...summarizePorts(list), truncated: sw.ports.length > MAX_PORTS };
   snap.licenses = licenses;
-  const fans = P.parseFruShow(out.fanshow || '');
-  const psus = P.parseFruShow(out.psshow || '');
+  // FRU 상태는 fanshow/psshow 가 우선(정상/장애 판정이 있다). 그 명령이 없는 장비에서는
+  // chassisshow 의 유닛 개수로 대체한다 — 개수만 알 뿐 정상 여부는 모르므로 ok:null 로 두고
+  // 화면이 '3개'처럼 개수만 표시하게 한다(모르는 것을 '정상'으로 칠하지 않는다).
+  const fans = P.parseFruShow(out.fanshow || '') || (chassis.fans ? { ok: null, total: chassis.fans } : null);
+  const psus = P.parseFruShow(out.psshow || '') || (chassis.psus.length ? { ok: null, total: chassis.psus.length } : null);
   snap.health = {
     status: status.status || (sw.header.switchState || ''),
-    fans, psus,
+    fans, psus, powerWatts: chassis.powerWatts, psuDetail: chassis.psus.slice(0, 8),
     tempC: Math.max(...list.map((p) => p.sfpTempC ?? -Infinity)) > -Infinity
       ? Math.max(...list.map((p) => p.sfpTempC ?? -Infinity)) : null,
     alerts: Object.values(status.monitors || {}).filter((v) => v !== 'HEALTHY').length,
@@ -154,6 +189,10 @@ export function buildSnapshot(device, out = {}, errors = {}) {
   };
   snap.extra = {
     collectMethod: 'ssh',
+    // chassisshow 에서 얻은 섀시 식별·가동 정보(v2.411 — 실장비 출력에 'Chassis Family' 가
+    // 없어 모델명을 못 읽는 대신, 실제로 들어 있는 값들을 그대로 노출한다).
+    chassisPartNumber: chassis.partNumber || '', chassisId: chassis.chassisId || '',
+    awakeDays: chassis.awakeDays, aliveDays: chassis.aliveDays,
     // 속도(처리량)는 두 번째 수집부터 나온다 — UI 가 '아직 계산 전'을 정직하게 안내하도록.
     rateReady: rate.computed, rateGapSec: rate.gapSec,
     rateUnit: 'fps', // SSH 는 옥텟 카운터가 없어 프레임/초만 계산된다
