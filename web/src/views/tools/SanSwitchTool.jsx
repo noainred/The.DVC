@@ -4,7 +4,8 @@ import { fetchJson, postJson, delJson } from '../../api.js';
 import { Loading, ErrorBox, Kpi, UsageCell, Modal, SearchBox } from '../../components/ui.jsx';
 import { stateLabel, stateTone, opticalHealth, errorLevel, capacityLevel, aggregate,
   throughputText, filterPorts, shortDeviceName, saturationPct, saturationLevel, bytesPerSecText,
-  toChartRows, topSeries, bps, sortPorts, nextSort, RX_WARN_DBM, RX_BAD_DBM } from './sanSwitchPorts.js';
+  toChartRows, topSeries, bps, sortPorts, nextSort, sortRows, seriesStats,
+  RX_WARN_DBM, RX_BAD_DBM } from './sanSwitchPorts.js';
 
 /**
  * 특수기능 › SAN 스위치 모니터링(v2.410 — 사용자 요구 'Brocade SAN switch 포트 모니터링 및
@@ -416,6 +417,18 @@ function DeviceInfo({ d }) {
 }
 
 const HOURS = [[1, '1시간'], [6, '6시간'], [24, '24시간'], [24 * 7, '7일'], [24 * 30, '30일']];
+
+/** 제목 클릭 정렬 헤더(v2.412, 사용자 요구 '타이틀별로 소팅'). 분석 표 두 곳이 공유한다. */
+function SortTh({ k, label, sort, setSort, title, style }) {
+  const on = sort.key === k;
+  return (
+    <th onClick={() => setSort((c) => nextSort(c, k))} style={{ cursor: 'pointer', userSelect: 'none', ...style }}
+      title={`${title ? `${title}\n\n` : ''}클릭하면 이 열로 정렬합니다.`}>
+      {label}{title ? ' ⓘ' : ''}
+      <span style={{ opacity: on ? 1 : 0.25, marginLeft: 3 }}>{on ? (sort.dir === 'asc' ? '▲' : '▼') : '↕'}</span>
+    </th>
+  );
+}
 const LINE_COLORS = ['#60a5fa', '#f59e0b', '#34d399', '#f472b6', '#a78bfa', '#fbbf24', '#22d3ee', '#fb7185'];
 const tsLabel = (ts, hours) => {
   const d = new Date(ts);
@@ -437,6 +450,11 @@ function PerfPanel({ deviceId, ports }) {
   const [view, setView] = useState('port');     // 'port' | 'storage'
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
+  const [sort, setSort] = useState({ key: 'avg', dir: 'desc' });   // 기본: 많이 쓰는 순
+  // 연결 스토리지별 뷰에서 어레이/호스트를 구분한다 — 같은 HBA 모델·펌웨어를 쓰는 서버들은
+  // 네임서버 심볼릭 이름이 같아 한 덩어리로 묶인다(실측: 'QLE2692 FW:… (포트 25)').
+  // 그게 스토리지 2위로 올라오면 오독하므로 기본은 스토리지만 본다.
+  const [kind, setKind] = useState('array');
 
   /**
    * ⚠ 응답에 **어느 뷰의 것인지**를 각인해 두고, 뷰가 일치할 때만 그린다.
@@ -465,11 +483,34 @@ function PerfPanel({ deviceId, ports }) {
   // 뷰가 일치하는 응답만 사용(위 주석 참조). 필드도 방어적으로 읽는다.
   const shown = data && data.view === view ? data : null;
   const raw = shown?.series || [];
+  // 어레이/호스트 구분은 서버와 같은 규칙(perfDb.endpointKind)을 쓴다 — 이름에 '::' 가 있으면 어레이.
+  const kindOf = (key) => (String(key) === '(미확인)' ? 'unknown' : (String(key).includes('::') ? 'array' : 'host'));
+  const kindCounts = view === 'storage'
+    ? raw.reduce((a, s) => { const k = kindOf(s.key); a[k] = (a[k] || 0) + 1; a.all = (a.all || 0) + 1; return a; }, {})
+    : {};
+  const rawShown = view === 'storage' && kind !== 'all' ? raw.filter((s) => kindOf(s.key) === kind) : raw;
   const seriesAll = view === 'storage'
-    ? raw.map((s) => ({ key: s.key, label: `${s.key} (포트 ${(s.ports || []).length})`, values: s.sum || [] }))
-    : raw.map((s) => ({ key: `p${s.port}`, label: `${s.port}${s.name ? ` · ${shortDeviceName(s.name, 24)}` : ''}`, values: s.avg || [], port: s.port, speed: s.speed }));
+    ? rawShown.map((s) => ({ key: s.key, label: `${s.key} (포트 ${(s.ports || []).length})`, values: s.sum || [], portCount: (s.ports || []).length, kind: kindOf(s.key) }))
+    : rawShown.map((s) => ({ key: `p${s.port}`, label: `${s.port}${s.name ? ` · ${shortDeviceName(s.name, 24)}` : ''}`, values: s.avg || [], port: s.port, speed: s.speed, name: s.name }));
   const top = topSeries(seriesAll, 8);
   const rows = toChartRows(shown?.buckets || [], top);
+
+  // 표에 쓸 파생값을 미리 계산해 두고(평균·최대·포화도) 그 위에서 정렬한다 —
+  // 정렬 키와 화면에 보이는 값이 반드시 같은 계산이어야 한다.
+  const tableRows = seriesAll.map((s) => {
+    const { avg, max } = seriesStats(s.values);
+    const speed = view === 'port' ? (s.speed || speedOf(s.port)) : '';
+    return { ...s, avg, max, speed, sat: view === 'port' ? saturationPct(max, speed) : null };
+  });
+  const SORTERS = {
+    name: (r) => (view === 'storage' ? r.key : r.port),
+    attached: (r) => (view === 'storage' ? r.portCount : (r.name || null)),
+    speed: (r) => { const m = String(r.speed || '').match(/^(\d+)G$/); return m ? Number(m[1]) : null; },
+    avg: (r) => r.avg,
+    max: (r) => r.max,
+    sat: (r) => r.sat,
+  };
+  const sorted = sortRows(tableRows, SORTERS[sort.key] || SORTERS.avg, sort.dir, (r) => r.key);
 
   return (
     <div style={{ marginBottom: 10 }}>
@@ -479,6 +520,15 @@ function PerfPanel({ deviceId, ports }) {
             onClick={() => setView(k)}
             title={k === 'storage' ? '같은 어레이에 물린 포트들의 처리량을 합산해, 그 스토리지가 실제로 얼마나 쓰이는지 보여줍니다.' : '포트 하나하나의 처리량입니다.'}>
             {label}
+          </button>
+        ))}
+        {view === 'storage' && [['array', '스토리지'], ['host', '호스트(HBA)'], ['all', '전체']].map(([k, label]) => (
+          <button key={k} className={kind === k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '4px 10px' }}
+            onClick={() => setKind(k)}
+            title={k === 'array' ? '벤더 심볼릭 이름이 어레이 형식인 연결 대상입니다.'
+              : k === 'host' ? '서버 HBA 등 스토리지가 아닌 연결 대상입니다. 같은 HBA 모델·펌웨어를 쓰는 서버들은 네임서버 이름이 같아 한 덩어리로 묶입니다.'
+              : '구분 없이 모두 봅니다.'}>
+            {label}{kindCounts[k] != null ? ` ${kindCounts[k]}` : ''}
           </button>
         ))}
         <span className="muted" style={{ marginLeft: 8, fontSize: 12 }}>기간</span>
@@ -530,33 +580,34 @@ function PerfPanel({ deviceId, ports }) {
             <table>
               <thead>
                 <tr>
-                  <th>{view === 'storage' ? '스토리지' : '포트'}</th>
-                  {view === 'storage' ? <th>포트 수</th> : <th>연결 장비</th>}
-                  {view === 'port' && <th>속도</th>}
-                  <th>평균</th><th>최대</th>
-                  {view === 'port' && <th title="최대 처리량 ÷ 협상 속도. 속도를 모르는 포트는 판정하지 않습니다(빈칸).">포화도(최대) ⓘ</th>}
+                  <SortTh k="name" label={view === 'storage' ? '스토리지' : '포트'} sort={sort} setSort={setSort} />
+                  <SortTh k="attached" label={view === 'storage' ? '포트 수' : '연결 장비'} sort={sort} setSort={setSort} />
+                  {view === 'port' && <SortTh k="speed" label="속도" sort={sort} setSort={setSort} />}
+                  <SortTh k="avg" label="평균" sort={sort} setSort={setSort} />
+                  <SortTh k="max" label="최대" sort={sort} setSort={setSort} />
+                  {view === 'port' && <SortTh k="sat" label="포화도(최대)" sort={sort} setSort={setSort}
+                    title="최대 처리량 ÷ 협상 속도. 속도를 모르는 포트는 판정하지 않습니다(빈칸이며 정렬에서도 뒤로 갑니다)." />}
                 </tr>
               </thead>
               <tbody>
-                {seriesAll.map((s) => {
-                  const v = s.values.filter((x) => x != null);
-                  const avg = v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0;
-                  const max = v.length ? Math.max(...v) : 0;
-                  const speed = view === 'port' ? (s.speed || speedOf(s.port)) : '';
-                  const sat = view === 'port' ? saturationPct(max, speed) : null;
-                  const lvl = saturationLevel(sat);
+                {sorted.map((s) => {
+                  const lvl = saturationLevel(s.sat);
                   return (
                     <tr key={s.key}>
-                      <td style={ELLIPSIS} title={s.label}><b>{view === 'storage' ? s.key : s.port}</b></td>
+                      <td style={ELLIPSIS} title={s.label}>
+                        <b>{view === 'storage' ? s.key : s.port}</b>
+                        {view === 'storage' && s.kind === 'host'
+                          ? <div className="muted" style={{ fontSize: 10.5 }}>호스트(HBA)</div> : null}
+                      </td>
                       {view === 'storage'
-                        ? <td className="muted">{(raw.find((x) => x.key === s.key)?.ports || []).length}</td>
-                        : <td style={ELLIPSIS} title={raw.find((x) => x.port === s.port)?.name || ''}>{shortDeviceName(raw.find((x) => x.port === s.port)?.name || '', 30) || '—'}</td>}
-                      {view === 'port' && <td>{speed || <span className="muted">—</span>}</td>}
-                      <td>{bytesPerSecText(avg)}</td>
-                      <td>{bytesPerSecText(max)}</td>
+                        ? <td className="muted">{s.portCount}</td>
+                        : <td style={ELLIPSIS} title={s.name || ''}>{shortDeviceName(s.name || '', 30) || '—'}</td>}
+                      {view === 'port' && <td>{s.speed || <span className="muted">—</span>}</td>}
+                      <td>{bytesPerSecText(s.avg)}</td>
+                      <td>{bytesPerSecText(s.max)}</td>
                       {view === 'port' && (
                         <td style={{ color: lvl === 'none' ? TONE.muted : TONE[lvl], fontWeight: lvl === 'bad' ? 600 : 400 }}>
-                          {sat == null ? '—' : `${sat}%`}
+                          {s.sat == null ? '—' : `${s.sat}%`}
                         </td>
                       )}
                     </tr>
@@ -589,6 +640,7 @@ function DcStoragePerf({ dcPerf, onClose }) {
   const [error, setError] = useState(null);
   // 기본은 스토리지 어레이만 — 법인 합산이면 서버 HBA 가 수십 개 잡혀 표를 덮는다(실측 64개).
   const [kind, setKind] = useState('array');
+  const [sort, setSort] = useState({ key: 'avg', dir: 'desc' });   // 기본: 많이 쓰는 순
 
   useEffect(() => {
     let alive = true;
@@ -603,6 +655,15 @@ function DcStoragePerf({ dcPerf, onClose }) {
   const chartSeries = topSeries(series.map((s) => ({ key: s.key, label: `${s.key} (스위치 ${s.switches.length}·포트 ${s.portCount})`, values: s.sum })), 8);
   const rows = toChartRows(data?.buckets || [], chartSeries);
   const grand = series.reduce((a, s) => a + s.avgTotal, 0);
+  const SORTERS = {
+    name: (s) => s.key,
+    switches: (s) => s.switches.length,
+    ports: (s) => s.portCount,
+    avg: (s) => s.avgTotal,
+    max: (s) => s.maxTotal,
+    cap: (s) => (s.capacity?.pct ?? null),   // 용량 미매칭은 null → 항상 뒤로
+  };
+  const sorted = sortRows(series, SORTERS[sort.key] || SORTERS.avg, sort.dir, (s) => s.key);
 
   return (
     <Modal title={`스토리지 사용량 분석 — ${dcPerf.label}`} onClose={onClose} width={1180}>
@@ -675,12 +736,17 @@ function DcStoragePerf({ dcPerf, onClose }) {
               </colgroup>
               <thead>
                 <tr>
-                  <th>스토리지</th><th>연결 스위치</th><th>포트</th><th>평균</th><th>최대</th>
-                  <th title="등록된 스토리지 장비의 시리얼이 이 어레이 시리얼과 일치할 때만 표시합니다. 대역폭(바쁨)과 용량(참)은 다른 축이라 나란히 봐야 합니다.">용량 사용률 ⓘ</th>
+                  <SortTh k="name" label="스토리지" sort={sort} setSort={setSort} />
+                  <SortTh k="switches" label="연결 스위치" sort={sort} setSort={setSort} />
+                  <SortTh k="ports" label="포트" sort={sort} setSort={setSort} />
+                  <SortTh k="avg" label="평균" sort={sort} setSort={setSort} />
+                  <SortTh k="max" label="최대" sort={sort} setSort={setSort} />
+                  <SortTh k="cap" label="용량 사용률" sort={sort} setSort={setSort}
+                    title="등록된 스토리지 장비의 시리얼이 이 어레이 시리얼과 일치할 때만 표시합니다. 대역폭(바쁨)과 용량(참)은 다른 축이라 나란히 봐야 합니다. 미매칭은 정렬에서 뒤로 갑니다." />
                 </tr>
               </thead>
               <tbody>
-                {series.map((s) => (
+                {sorted.map((s) => (
                   <tr key={s.key}>
                     <td style={ELLIPSIS} title={s.key}>
                       <b>{s.key}</b>

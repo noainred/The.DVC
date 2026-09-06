@@ -3,7 +3,7 @@
  * 이 규칙들이 틀리면 운영자가 **정상 포트를 장애로, 장애 포트를 정상으로** 본다.
  */
 import { describe, it, expect } from 'vitest';
-import { opticalHealth, errorLevel, capacityLevel, aggregate, throughputText, bps, filterPorts, stateLabel, shortDeviceName, saturationPct, saturationLevel, bytesPerSecText, toChartRows, topSeries, sortPorts, nextSort }
+import { opticalHealth, errorLevel, capacityLevel, aggregate, throughputText, bps, filterPorts, stateLabel, shortDeviceName, saturationPct, saturationLevel, bytesPerSecText, toChartRows, topSeries, sortPorts, nextSort, sortRows, seriesStats }
   from './sanSwitchPorts.js';
 
 describe('opticalHealth', () => {
@@ -203,5 +203,26 @@ describe('nextSort', () => {
     expect(nextSort({ key: 'index', dir: 'asc' }, 'temp')).toEqual({ key: 'temp', dir: 'asc' });
     expect(nextSort({ key: 'temp', dir: 'asc' }, 'temp')).toEqual({ key: 'temp', dir: 'desc' });
     expect(nextSort({ key: 'temp', dir: 'desc' }, 'temp')).toEqual({ key: 'temp', dir: 'asc' });
+  });
+});
+
+describe('sortRows / seriesStats', () => {
+  const L = [{ n: 'b', v: 2 }, { n: 'a', v: null }, { n: 'c', v: 10 }];
+  it('숫자 오름/내림 + 값 없는 행은 항상 뒤', () => {
+    expect(sortRows(L, (r) => r.v, 'asc').map((r) => r.n)).toEqual(['b', 'c', 'a']);
+    expect(sortRows(L, (r) => r.v, 'desc').map((r) => r.n)).toEqual(['c', 'b', 'a']);
+  });
+  it('문자열 정렬', () => {
+    expect(sortRows(L, (r) => r.n, 'asc').map((r) => r.n)).toEqual(['a', 'b', 'c']);
+    expect(sortRows(L, (r) => r.n, 'desc').map((r) => r.n)).toEqual(['c', 'b', 'a']);
+  });
+  it('동점은 tie 키로 안정 정렬(정렬이 매번 흔들리지 않게)', () => {
+    const same = [{ n: 'z', v: 5 }, { n: 'a', v: 5 }];
+    expect(sortRows(same, (r) => r.v, 'asc', (r) => r.n).map((r) => r.n)).toEqual(['a', 'z']);
+  });
+  it('seriesStats: null 은 평균/최대 계산에서 제외(0 으로 채우면 평균이 내려간다)', () => {
+    expect(seriesStats([10, null, 20])).toEqual({ avg: 15, max: 20 });
+    expect(seriesStats([])).toEqual({ avg: 0, max: 0 });
+    expect(seriesStats([null, null])).toEqual({ avg: 0, max: 0 });
   });
 });
