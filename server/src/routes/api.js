@@ -15,6 +15,7 @@ import { registerInventory } from './api/inventory.js';
 import { registerVmClone } from './api/vmClone.js'; // VM 복제(백업식, v2.299)
 import { registerStorageMon } from './api/storageMon.js'; // 스토리지 모니터링(Isilon 등, v2.302)
 import { registerSanSwitch } from './api/sanSwitch.js';   // SAN 스위치 모니터링(Brocade FOS, v2.410)
+import { registerSerialLookup } from './api/serialLookup.js'; // 시리얼 통합 조회(v2.412)
 import { registerBmStorage } from './api/bmstor.js'; // 베어메탈 스토리지(SSH df 마운트 합산, v2.340)
 import { registerVmTrack } from './api/vmtrack.js'; // VM 수량 추이(00/12시 스냅샷 + 증감 상세, v2.345)
 
@@ -39,5 +40,6 @@ registerInventory(api);
 registerVmClone(api);
 registerStorageMon(api);
 registerSanSwitch(api);
+registerSerialLookup(api);
 registerBmStorage(api);
 registerVmTrack(api);
