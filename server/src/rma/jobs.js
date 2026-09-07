@@ -180,6 +180,8 @@ export function takeJobs(agent, instance = '', now = Date.now()) {
     j.claimDeadline = now + j.timeoutMs + ACK_GRACE_MS;
     set.delete(reqId);
     out.push({ reqId, ...j.spec });
+    // 1회 입력 계정(spec.secret)은 인출 즉시 중앙 메모리에서 지운다 — getJob/이력/재인출 어디에도 남지 않는다(v2.419).
+    if (j.spec && j.spec.secret) { j.spec = { ...j.spec }; delete j.spec.secret; }
   }
   if (!set.size) pendingByAgent.delete(key);
   return out;

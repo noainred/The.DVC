@@ -13,7 +13,7 @@ import net from 'node:net';
 import tls from 'node:tls';
 import dns from 'node:dns';
 import path from 'node:path';
-import { runCommand } from './exec.js';
+import { runCommand, sshExec } from './exec.js';
 import { buildTest, judge } from './tests.js';
 
 const unknown = (reply) => ({ status: 'unknown', reply });
@@ -76,7 +76,7 @@ function certDays(host, port, timeoutMs = 8000) {
 /**
  * 실행. spec = buildTest() ok 결과 또는 { test, args }. opts = { fileRoots, allowCustom }.
  */
-export async function runTest(spec, { fileRoots = ['/var/log'], allowCustom = false } = {}) {
+export async function runTest(spec, { fileRoots = ['/var/log'], allowCustom = false, resolveCreds = null, allowSsh = false, sshTargets = [] } = {}) {
   const t0 = Date.now();
   const done = (r) => ({ ...r, durationMs: Date.now() - t0 });
   const b = spec.ok ? spec : buildTest(spec.test, spec.args || {});
@@ -206,6 +206,20 @@ export async function runTest(spec, { fileRoots = ['/var/log'], allowCustom = fa
         const hits = lines.filter((l) => re.test(l));
         const j = judge.threshold(hits.length, { badAbove: a.maxMatches, unit: '건' });
         return done({ ...j, reply: `${j.reply}${hits.length ? ` — 마지막: ${hits[hits.length - 1].slice(0, 160)}` : ''}` });
+      }
+      case 'ssh': {
+        if (!allowSsh) return done(unknown('SSH 점검은 이 엣지에서 허용되지 않았습니다(RMA_ALLOW_SSH=true 필요)'));
+        const { targetAllowed } = await import('./commands.js');
+        if (!targetAllowed(a.host, sshTargets)) return done(unknown(`대상 '${a.host}' 은 이 엣지의 SSH 허용 목록(RMA_SSH_TARGETS)에 없습니다`));
+        if (typeof resolveCreds !== 'function') return done(unknown('계정 브로커 없음'));
+        const cr = await resolveCreds(a.credentialId, a.host);
+        if (!cr.ok) return done({ status: 'unknown', reply: `계정 인출 실패: ${cr.reason}` });
+        const r = await sshExec({ host: a.host, port: a.port, command: a.command, timeoutMs: a.timeoutMs }, cr.secret, { maxOutput: 64 * 1024 });
+        const out = (r.stdout || r.stderr || '').trim().split('\n').pop() || '';
+        if (r.exitCode == null) return done({ status: 'bad', reply: r.reason || 'SSH 실패' });
+        if (a.contains && !(r.stdout || '').includes(a.contains)) return done({ status: 'bad', reply: `출력에 '${a.contains}' 없음 (exit ${r.exitCode})`, value: r.exitCode });
+        const st = r.exitCode === 0 ? 'ok' : r.exitCode === 1 ? 'warn' : 'bad';
+        return done({ status: st, reply: `exit ${r.exitCode}${out ? ` — ${out.slice(0, 200)}` : ''}`, value: r.exitCode });
       }
       case 'script': {
         if (!allowCustom) return done(unknown('외부 스크립트는 이 엣지에서 허용되지 않았습니다(RMA_ALLOW_CUSTOM=true 필요)'));

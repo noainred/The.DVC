@@ -15,6 +15,7 @@ import { getRmaSettings, setAgentMode, setDefaultMode, setAgentAccess, setAgentR
 import { testCatalog, buildTest } from '../../rma/tests.js';
 import { scheduleFor, listSchedules, upsertScheduleItem, removeScheduleItem } from '../../rma/schedules.js';
 import { latestResults, testHistory, summarize, evaluateRmaItself, dropResult } from '../../rma/testResults.js';
+import { credentialUsable } from '../../security/credentialStore.js';
 import { deployRma, listRmaInstances, removeRmaInstance, deployInputIssue } from '../../rma/deploy.js';
 import { ssrfBlockReason } from '../../collector/registry.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
@@ -48,6 +49,10 @@ api.put('/tools/rma/agents/:agent/schedule', adminOnly, (req, res) => {
   const agent = String(req.params.agent || '').trim();
   if (!RE_AGENT.test(agent)) return res.status(400).json({ ok: false, reason: 'agent 형식 오류' });
   try {
+    if (String(req.body?.test) === 'ssh') {
+      const use = credentialUsable(String(req.body?.args?.credentialId || ''), { agent, host: String(req.body?.args?.host || '') });
+      if (!use.ok) return res.status(400).json({ ok: false, reason: use.reason });
+    }
     const row = upsertScheduleItem(agent, req.body || {});
     logAudit({ user: req.user?.username, action: 'RMA 점검 스케줄 저장', target: agent, detail: `${row.test}${row.name ? `(${row.name})` : ''} ${row.intervalSec}s${row.instance ? ` @${row.instance}` : ''}${row.enabled ? '' : ' (비활성)'}`, ip: req.ip });
     res.json({ ok: true, item: row, ...scheduleFor(agent) });
@@ -114,6 +119,21 @@ api.post('/tools/rma/run', adminOnly, (req, res) => {
   const issuedAt = Date.now();
   const secret = rmaPasswordFor(agent);
   const spec = { cmd: built.preset, args: built.args, timeoutMs: built.timeoutMs, label: preset?.label || built.preset, issuedAt };
+  // SSH 원격 실행(v2.419): 저장된 계정이면 중앙에서 법인/대상 범위를 먼저 검사(비밀은 안 실음 — 엣지가 브로커로
+  // 받는다). 1회 입력 계정이면 spec.secret 에 실어 보내고 인출 즉시 중앙에서 삭제(jobs.takeJobs). 감사·이력에는 없다.
+  if (built.preset === 'ssh-exec') {
+    if (built.args.credentialId) {
+      const use = credentialUsable(built.args.credentialId, { agent, host: built.args.host });
+      if (!use.ok) return res.status(400).json({ ok: false, reason: use.reason });
+      spec.args = { ...spec.args, username: use.username };
+    } else {
+      const u = String(b.secret?.username || built.args.username || '').trim(), p = String(b.secret?.password || '');
+      if (!/^[A-Za-z0-9._@\\-]{1,64}$/.test(u) || !p) return res.status(400).json({ ok: false, reason: '저장된 계정을 고르거나 1회 입력 계정(ID/비밀번호)을 입력하세요.' });
+      if (/[\x00-\x1f\x7f]/.test(p)) return res.status(400).json({ ok: false, reason: '비밀번호에 제어문자가 있습니다.' }); // eslint-disable-line no-control-regex
+      spec.args = { ...spec.args, username: u };
+      spec.secret = { username: u, password: p };
+    }
+  }
   let r;
   try {
     r = enqueueJob(agent, spec, {

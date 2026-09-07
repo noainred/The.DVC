@@ -164,10 +164,20 @@ function ResultView({ r }) {
   );
 }
 
+/** 통합 계정 목록(선택용) — 비밀 값은 없다. 법인 범위에 맞는 것만 남긴다. */
+function useCredentials(agent) {
+  const [list, setList] = useState([]);
+  useEffect(() => { let alive = true; fetchJson('/tools/credentials').then((r) => alive && setList(r.items || [])).catch(() => {}); return () => { alive = false; }; }, []);
+  return list.filter((c) => !agent || (c.agents || []).some((a) => a === '*' || a.toLowerCase() === String(agent).toLowerCase()));
+}
+
 function RunModal({ group, catalog, modes, onClose }) {
   const grouped = useMemo(() => groupCatalog(catalog), [catalog]);
   const [cmd, setCmd] = useState(catalog[0]?.id || '');
   const [args, setArgs] = useState(() => defaultArgs(catalog[0]));
+  const [useStored, setUseStored] = useState(true);   // ssh-exec: 저장된 계정 사용 여부(v2.419)
+  const [secret, setSecret] = useState({ username: '', password: '' });
+  const creds = useCredentials(group?.agent);
   const [instance, setInstance] = useState('');
   const [timeoutS, setTimeoutS] = useState('');
   const [state, setState] = useState(null);   // { reqId, phase, job, err }
@@ -181,12 +191,16 @@ function RunModal({ group, catalog, modes, onClose }) {
   const pick = (id) => { setCmd(id); setArgs(defaultArgs(catalog.find((p) => p.id === id))); setState(null); };
 
   const submit = async () => {
-    const issue = argsIssue(preset, args);
+    const isSsh = preset?.id === 'ssh-exec';
+    const sendArgs = isSsh ? { ...args, credentialId: useStored ? args.credentialId : '', username: useStored ? '' : secret.username } : args;
+    const issue = argsIssue(preset, sendArgs);
     if (issue) { setState({ err: issue }); return; }
+    if (isSsh && useStored && !sendArgs.credentialId) { setState({ err: '저장된 계정을 고르세요(통합 계정 관리에서 등록).' }); return; }
+    if (isSsh && !useStored && (!secret.username || !secret.password)) { setState({ err: '1회 입력 계정의 ID/비밀번호를 입력하세요.' }); return; }
     if (preset?.danger && !window.confirm(`'${preset.label}' 은 상태를 바꾸는 명령입니다. ${group.agent}${instance ? `/${instance}` : ''} 에서 실행할까요?`)) return;
     setState({ phase: 'submit' });
     try {
-      const r = await postJson('/tools/rma/run', { agent: group.agent, instance, cmd, args, timeoutMs: timeoutS ? Number(timeoutS) * 1000 : undefined });
+      const r = await postJson('/tools/rma/run', { agent: group.agent, instance, cmd, args: sendArgs, timeoutMs: timeoutS ? Number(timeoutS) * 1000 : undefined, ...(isSsh && !useStored ? { secret } : {}) });
       setState({ phase: 'wait', reqId: r.reqId, target: r.target, signed: r.signed });
       const started = Date.now();
       const poll = async () => {
@@ -220,7 +234,27 @@ function RunModal({ group, catalog, modes, onClose }) {
         <label>제한 시간(초)<br /><input className="input" style={{ width: 90 }} placeholder={preset?.timeoutMs ? String(preset.timeoutMs / 1000) : '30'} value={timeoutS} onChange={(e) => setTimeoutS(e.target.value.replace(/\D/g, ''))} /></label>
       </div>
       <div className="muted" style={{ margin: '4px 0 8px' }}>{targetHint(group, instance, modes)}{!onlineInst.length && !instance ? '' : ''}</div>
-      {(preset?.params || []).map((p) => (
+      {preset?.id === 'ssh-exec' && (
+        <div className="card" style={{ marginBottom: 6 }}>
+          <label><input type="checkbox" checked={useStored} onChange={(e) => setUseStored(e.target.checked)} /> <b>저장된 계정 정보 사용</b>(통합 계정 관리) — 비밀은 RMA 가 실행 직전에 브로커로 받아 메모리에서만 씁니다</label>
+          {useStored ? (
+            <div style={{ marginTop: 6 }}>
+              <select className="input" value={args.credentialId || ''} onChange={(e) => setArgs({ ...args, credentialId: e.target.value })} style={{ minWidth: 360 }}>
+                <option value="">계정 선택…</option>
+                {creds.map((c) => <option key={c.id} value={c.id}>{c.name} — {c.username} ({c.kind === 'key' ? 'SSH 키' : '비밀번호'}) · 대상 {(c.hosts || []).join(',')}</option>)}
+              </select>
+              {!creds.length && <div className="muted" style={{ fontSize: 12 }}>이 법인에 허용된 저장 계정이 없습니다 — 특수기능 › 통합 계정 관리에서 등록하세요.</div>}
+            </div>
+          ) : (
+            <div className="flex gap wrap" style={{ marginTop: 6 }}>
+              <input className="input" value={secret.username} onChange={(e) => setSecret({ ...secret, username: e.target.value })} placeholder="계정(ID)" />
+              <input className="input" type="password" autoComplete="new-password" value={secret.password} onChange={(e) => setSecret({ ...secret, password: e.target.value })} placeholder="비밀번호(1회, 저장 안 됨)" />
+              <span className="muted" style={{ fontSize: 12 }}>1회 입력 비밀은 잡 인출 즉시 중앙에서 삭제되며 이력·감사에 남지 않습니다.</span>
+            </div>
+          )}
+        </div>
+      )}
+      {(preset?.params || []).filter((p) => !(preset?.id === 'ssh-exec' && (p.name === 'credentialId' || p.name === 'username'))).map((p) => (
         <div key={p.name} style={{ marginBottom: 6 }}>
           <label>{p.label}{p.required ? ' *' : ''} <span className="muted">({p.hint}{p.type === 'int' && p.min != null ? `, ${p.min}~${p.max}` : ''})</span><br />
             {p.type === 'shell'
@@ -375,6 +409,7 @@ function ScheduleTab({ groups, tests, schedules }) {
     catch (e) { setErr(e.message); }
   };
   const tform = form ? testOf(form.test) : null;
+  const creds = useCredentials(agent);
   return (
     <div>
       <div className="flex gap wrap" style={{ alignItems: 'center', margin: '8px 0' }}>
@@ -425,7 +460,12 @@ function ScheduleTab({ groups, tests, schedules }) {
           {(tform?.params || []).map((p) => (
             <div key={p.name} style={{ marginTop: 6 }}>
               <label>{p.label}{p.required ? ' *' : ''} <span className="muted">({p.hint}{p.type === 'int' && p.min != null ? `, ${p.min}~${p.max}` : ''})</span><br />
-                {p.type === 'shell'
+                {p.name === 'credentialId' && tform?.id === 'ssh'
+                  ? <select className="input" value={form.args[p.name] || ''} onChange={(e) => setForm({ ...form, args: { ...form.args, [p.name]: e.target.value } })} style={{ minWidth: 340 }}>
+                      <option value="">저장된 계정 선택…</option>
+                      {creds.map((c) => <option key={c.id} value={c.id}>{c.name} — {c.username} ({c.kind === 'key' ? 'SSH 키' : '비밀번호'})</option>)}
+                    </select>
+                  : p.type === 'shell'
                   ? <textarea className="input" rows={2} style={{ width: '100%', fontFamily: 'monospace' }} value={form.args[p.name] || ''} onChange={(e) => setForm({ ...form, args: { ...form.args, [p.name]: e.target.value } })} />
                   : <input className="input" style={{ width: p.type === 'int' ? 110 : 340 }} value={form.args[p.name] ?? ''} onChange={(e) => setForm({ ...form, args: { ...form.args, [p.name]: e.target.value } })} />}
               </label>

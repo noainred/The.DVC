@@ -51,7 +51,7 @@ const keyFile = () => path.join(config.configDir, 'secrets-key');
 // 'edge 접속에 사용하는 계정'). vcenterPass/guestPass/centralToken/collectorToken 은
 // agent-deploy-targets.json(에이전트 배포 대상)의 시크릿 필드명. passwordHash 등 유사 이름은
 // 걸리지 않는다(정확 일치 — users.json 해시 오봉인 방지).
-export const SECRET_FIELDS = new Set(['password', 'privateKey', 'token', 'vcenterPass', 'guestPass', 'centralToken', 'collectorToken']);
+export const SECRET_FIELDS = new Set(['password', 'privateKey', 'passphrase', 'token', 'vcenterPass', 'guestPass', 'centralToken', 'collectorToken']);
 
 // 마이그레이션(모드 전환) 대상 파일 — 각 레지스트리 load/save 에 open/seal 이 끼워진 파일만.
 // (uagmon 데스크톱 앱은 별도 배포물이라 서버 스코프 밖 — 여기 등록하지 않는다.)
@@ -62,6 +62,7 @@ export const SECRET_FILES = [
   'storage-devices.json',          // 스토리지 장비(Isilon 등) 접속 비밀번호(v2.302)
   'sanswitch-devices.json',        // SAN 스위치(Brocade FOS) 접속 비밀번호(v2.410)
   'rma-agents.json',               // 엣지 RMA(원격 명령) 서명 비밀번호(v2.416)
+  'credentials.json',              // 통합 계정 관리(RMA SSH 계정: 비밀번호/개인키/패스프레이즈, v2.419)
   'idrac.json',                    // iDRAC/OME 계정
   'idrac-scan-ranges.json',        // 법인별 iDRAC 스캔 계정
   'gpu-guest.json',                // GPU 게스트 OS 공용/VM별 계정

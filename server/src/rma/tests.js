@@ -86,6 +86,13 @@ export const TESTS = [
     { name: 'pattern', label: '패턴(정규식)', type: 'text', required: true },
     { name: 'tailLines', label: '검사 줄 수(끝에서)', type: 'int', min: 10, max: 100000, def: 2000 },
     { name: 'maxMatches', label: '허용 일치 수', type: 'int', min: 0, max: 1000000, def: 0 }] },
+  { id: 'ssh', group: 'SSH', label: 'SSH 원격 명령 점검(종료코드/출력 포함)', desc: '통합 계정 관리의 계정으로 대상 서버에 접속해 명령을 실행하고 종료코드(0=ok)·출력 포함 문자열로 판정. 엣지 RMA_ALLOW_SSH=true 필요.', params: [
+    { name: 'host', label: '대상 호스트', type: 'host', required: true },
+    { name: 'port', label: 'SSH 포트', type: 'int', min: 1, max: 65535, def: 22 },
+    { name: 'credentialId', label: '저장된 계정 id', type: 'text', required: true },
+    { name: 'command', label: '실행 명령(원격 셸)', type: 'shell', required: true },
+    { name: 'contains', label: '출력 포함 문자열(선택)', type: 'text' },
+    { name: 'timeoutMs', label: '타임아웃(ms)', type: 'int', min: 1000, max: 300000, def: 30000 }] },
   { id: 'script', group: '사용자 정의', label: '외부 스크립트(종료코드 0=ok, 1=warn, 그 외 bad)', desc: '엣지 RMA_ALLOW_CUSTOM=true 일 때만 실행.', params: [
     { name: 'command', label: '명령', type: 'shell', required: true },
     { name: 'timeoutMs', label: '타임아웃(ms)', type: 'int', min: 1000, max: 300000, def: 30000 }] },

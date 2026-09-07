@@ -444,6 +444,10 @@ HostMonitor 의 RMA(Remote Monitoring Agent) 를 참고한 **엣지 별도 프�
   RMA 재시작 · 로그 이벤트 · HTTP 요청 · TCP/UDP 전송 · Syslog. 허용/차단 목록 `RMA_ENABLED_COMMANDS`/`RMA_DISABLED_COMMANDS`·
   `RMA_ENABLED_TESTS`/`RMA_DISABLED_TESTS`(엣지가 최종 판정). 접속 허용 IP·코멘트·원격 관리(`RMA_REMOTE_MANAGE`, 축소만)·
   감사 로그(`RMA_AUDIT_LOG`/`RMA_FAILURE_LOG`)·무연결 알림 명령(`RMA_OFFLINE_*`, `RMA_RESTORE_CMD`).
+- **SSH 원격 실행/점검 + 통합 계정 관리(v2.419)**: 특수기능 › 통합 계정 관리에서 ID/비밀번호 또는 SSH 개인키 계정을 등록
+  (봉인 저장·비밀 무반환·OTP 재인증·법인/대상 호스트 사용 범위·감사). RMA `ssh-exec` 명령·`ssh` 점검은 '저장된 계정 사용'을
+  켜면 그 계정을, 끄면 1회 입력 계정을 쓴다. 비밀은 엣지가 실행 직전 브로커(`/api/central/rma-credential`)에서 받아 메모리에서만
+  사용한다. 엣지 `RMA_ALLOW_SSH=true` + `RMA_SSH_TARGETS` 필요.
 - **이력**: 실행 이력은 중앙 `rma-history.db`(sqlite, `RMA_HISTORY_DAYS` 기본 90일, 행당 출력 64KB)에 남는다(v2.417).
   node:sqlite 가 없는 환경은 메모리 링(300건)으로 폴백.
 - **관련 튜닝(v2.417)**: `STORAGE_DEVICE_TIMEOUT_MS`(스토리지 장비당 수집 타임아웃, 기본 180000) ·

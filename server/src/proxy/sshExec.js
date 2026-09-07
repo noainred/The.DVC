@@ -6,7 +6,7 @@
 
 import { Client as SSHClient } from 'ssh2';
 
-function connect({ host, port = 22, username, password, privateKey, readyTimeout = Number(process.env.SSH_READY_TIMEOUT_MS) || 60000, signal }) {
+function connect({ host, port = 22, username, password, privateKey, passphrase, readyTimeout = Number(process.env.SSH_READY_TIMEOUT_MS) || 60000, signal }) {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) return reject(new Error('SSH 접속 취소(타임아웃)'));
     const conn = new SSHClient();
@@ -21,7 +21,7 @@ function connect({ host, port = 22, username, password, privateKey, readyTimeout
       finish(prompts.map(() => password || ''));
     });
     const auth = { host, port, username, readyTimeout, keepaliveInterval: 15000 };
-    if (privateKey) auth.privateKey = privateKey;
+    if (privateKey) { auth.privateKey = privateKey; if (passphrase) auth.passphrase = passphrase; }
     else { auth.password = password; auth.tryKeyboard = true; }
     conn.connect(auth);
   });

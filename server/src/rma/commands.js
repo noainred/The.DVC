@@ -122,6 +122,15 @@ export const PRESETS = [
     { name: 'severity', label: '심각도(0~7)', type: 'int', min: 0, max: 7, def: 6 }], native: 'syslog', timeoutMs: 10_000 },
   { id: 'who',         group: '보안', label: '접속 세션 (who)',                   argv: () => ['who'] },
   { id: 'last-reboot', group: '보안', label: '최근 재부팅 (last -x reboot)',      argv: () => ['last', '-x', 'reboot', '-n', '5'] },
+  // ── SSH 원격 실행(v2.419) — 엣지 망 안의 다른 서버에 SSH 로 접속해 명령 실행. 계정은 통합 계정 관리(credentialId)
+  //    또는 1회 입력(spec.secret — 잡 인출 즉시 중앙에서 삭제). 엣지 RMA_ALLOW_SSH=true + RMA_SSH_TARGETS 허용 목록.
+  { id: 'ssh-exec',    group: 'SSH', label: 'SSH 원격 명령 실행 (통합 계정 또는 1회 입력)',
+    params: [{ name: 'host', label: '대상 호스트', type: 'host', required: true },
+             { name: 'port', label: 'SSH 포트', type: 'int', min: 1, max: 65535, def: 22 },
+             { name: 'credentialId', label: '저장된 계정 id(비우면 1회 입력 계정)', type: 'text' },
+             { name: 'username', label: '계정(1회 입력 시)', type: 'text' },
+             { name: 'command', label: '실행 명령(원격 셸)', type: 'shell', required: true }],
+    native: 'ssh-exec', sshPolicy: true, danger: true, timeoutMs: 60_000 },
   { id: 'custom',      group: '자유 명령', label: '자유 명령 (엣지에서 RMA_ALLOW_CUSTOM=true 일 때만)',
     params: [{ name: 'command', label: '명령', type: 'shell', required: true }],
     shell: true, danger: true, timeoutMs: 60_000 },
@@ -173,6 +182,7 @@ export function buildCommand(cmd, rawArgs = {}, opts = {}) {
       args[p.name] = n;
     } else args[p.name] = v;
   }
+  // shell 타입 파라미터가 있어도 native(원격 SSH)면 로컬 자유 명령이 아니다 — allowCustom 과 무관.
   if (preset.shell && !opts.allowCustom) {
     return { ok: false, issue: '자유 명령은 이 엣지에서 허용되지 않았습니다 — 엣지 portal.env 에 RMA_ALLOW_CUSTOM=true 를 설정해야 합니다.' };
   }
@@ -186,6 +196,10 @@ export function buildCommand(cmd, rawArgs = {}, opts = {}) {
     if (!commandAllowed(preset.id, pol)) return { ok: false, issue: `이 엣지에서 허용되지 않은 명령입니다: ${preset.id} (RMA_ENABLED_COMMANDS/RMA_DISABLED_COMMANDS)` };
     if (preset.unitPolicy && !(pol.serviceUnits || []).some((u) => u === args.unit)) return { ok: false, issue: `서비스 '${args.unit}' 은 이 엣지의 허용 목록(RMA_SERVICE_UNITS)에 없습니다.` };
     if (preset.rebootPolicy && !pol.allowReboot) return { ok: false, issue: '재부팅은 이 엣지에서 허용되지 않았습니다(RMA_ALLOW_REBOOT=true 필요).' };
+    if (preset.sshPolicy) {
+      if (!pol.allowSsh) return { ok: false, issue: 'SSH 원격 실행은 이 엣지에서 허용되지 않았습니다(RMA_ALLOW_SSH=true 필요).' };
+      if (!targetAllowed(args.host, pol.sshTargets)) return { ok: false, issue: `대상 '${args.host}' 은 이 엣지의 SSH 허용 목록(RMA_SSH_TARGETS)에 없습니다.` };
+    }
   }
   const out = { ok: true, preset: preset.id, args, timeoutMs, maxLines: preset.maxLines || 0, sudo: !!preset.sudo, danger: !!preset.danger };
   if (preset.native) out.native = preset.native;
@@ -210,6 +224,26 @@ export function commandAllowed(id, policy = {}) {
   if (dis.has(id)) return false;
   if (!en.length || en.includes('*')) return true;
   return en.includes(id);
+}
+
+/**
+ * SSH 대상 허용 판정(순수, v2.419) — IPv4/CIDR/정확 호스트명/`*.suffix`/`*`. 빈 목록 = **전부 허용**
+ * (RMA_ALLOW_SSH 자체가 opt-in 이므로; 좁히려면 목록을 지정).
+ */
+export function targetAllowed(host, list = []) {
+  const h = String(host || '').trim().toLowerCase();
+  if (!h) return false;
+  if (!list || !list.length) return true;
+  const toN = (s) => { const p = s.split('.').map(Number); return p.length === 4 && p.every((x) => Number.isInteger(x) && x >= 0 && x <= 255) ? ((p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3]) >>> 0 : null; };
+  const n = toN(h);
+  for (const raw of list) {
+    const e = String(raw).trim().toLowerCase();
+    if (e === '*') return true;
+    if (e.startsWith('*.')) { if (h.endsWith(e.slice(1))) return true; continue; }
+    if (e.includes('/')) { const [b, bits] = e.split('/'); const bn = toN(b); const k = Number(bits); if (n == null || bn == null || !(k >= 0 && k <= 32)) continue; const mask = k === 0 ? 0 : (0xffffffff << (32 - k)) >>> 0; if ((n & mask) === (bn & mask)) return true; continue; }
+    if (e === h) return true;
+  }
+  return false;
 }
 
 /** 쉼표/공백 구분 목록 파싱(순수). */

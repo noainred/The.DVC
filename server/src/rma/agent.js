@@ -25,6 +25,8 @@
  *   RMA_SERVICE_UNITS        service-start/stop/restart 가 다룰 수 있는 유닛 목록(sudoers 도 같은 목록으로 생성)
  *   RMA_ALLOW_REBOOT         true 면 reboot 프리셋 허용(sudoers 도 함께)
  *   RMA_FILE_ROOTS           파일 점검 허용 루트(쉼표, 기본 /var/log)
+ *   RMA_ALLOW_SSH            true 면 SSH 원격 실행/점검(ssh-exec·ssh) 허용(기본 false) — 계정은 중앙 브로커에서 메모리로만 받음
+ *   RMA_SSH_TARGETS          SSH 대상 허용 목록(IP/CIDR/호스트명/*.suffix, 쉼표, 비우면 전부)
  *   RMA_TEST_CONCURRENCY     동시 점검 수(기본 4)
  *   RMA_REMOTE_MANAGE        true 면 중앙이 내려주는 원격 설정(longpoll·동시성·점검 허용 축소)을 받아들인다(기본 false)
  *   RMA_AUDIT_LOG            성공 감사 로그 파일(jsonl) / RMA_FAILURE_LOG 거부·실패 로그 파일
@@ -62,6 +64,7 @@ export const POLICY = {
   enabled: parseList(env.RMA_ENABLED_COMMANDS), disabled: parseList(env.RMA_DISABLED_COMMANDS),
   enabledTests: parseList(env.RMA_ENABLED_TESTS), disabledTests: parseList(env.RMA_DISABLED_TESTS),
   serviceUnits: parseList(env.RMA_SERVICE_UNITS), allowReboot: env.RMA_ALLOW_REBOOT === 'true',
+  allowSsh: env.RMA_ALLOW_SSH === 'true', sshTargets: parseList(env.RMA_SSH_TARGETS),
   fileRoots: (() => { const l = parseList(env.RMA_FILE_ROOTS).filter((p) => /^\/[A-Za-z0-9._/-]*$/.test(p)); return l.length ? l : ['/var/log']; })(),
 };
 /** 원격 관리로 바뀔 수 있는 값(RMA_REMOTE_MANAGE=true 일 때만 중앙 config 를 받아들인다). */
@@ -95,7 +98,7 @@ function info() {
     hostname: os.hostname(), version: VERSION, os: `${os.type()} ${os.release()}`, pid: process.pid, priority: PRIORITY,
     uptimeSec: Math.round((Date.now() - STARTED) / 1000), allowCustom: ALLOW_CUSTOM, signed: !!PASSWORD, busy,
     comment: COMMENT, remoteManage: REMOTE_MANAGE, stats: { ...stats },
-    policy: { enabled: POLICY.enabled, disabled: POLICY.disabled, enabledTests: POLICY.enabledTests, disabledTests: POLICY.disabledTests, serviceUnits: POLICY.serviceUnits, allowReboot: POLICY.allowReboot, fileRoots: POLICY.fileRoots },
+    policy: { enabled: POLICY.enabled, disabled: POLICY.disabled, enabledTests: POLICY.enabledTests, disabledTests: POLICY.disabledTests, serviceUnits: POLICY.serviceUnits, allowReboot: POLICY.allowReboot, fileRoots: POLICY.fileRoots, allowSsh: POLICY.allowSsh, sshTargets: POLICY.sshTargets },
     scheduleVersion: schedule.version, scheduledTests: schedule.tests.length, outbox: outbox.length,
     runtime: { longpollMs: runtime.longpollMs, testConcurrency: runtime.testConcurrency },
   };
@@ -113,6 +116,17 @@ export async function handleJob(job, { password = PASSWORD, allowCustom = ALLOW_
   if (!v.ok) { stats.rejected++; auditFail({ kind: 'job', reqId: job.reqId, cmd: job.cmd, reason: v.reason }); return { ok: false, reason: v.reason, rejected: true }; }
   const b = buildCommand(job.cmd, job.args || {}, { allowCustom, timeoutMs: job.timeoutMs, policy });
   if (!b.ok) { stats.rejected++; auditFail({ kind: 'job', reqId: job.reqId, cmd: job.cmd, reason: b.issue }); return { ok: false, reason: b.issue, rejected: true }; }
+  // SSH 원격 실행: 계정은 잡에 없다 — 브로커(credentialId) 또는 1회 입력(job.secret, 중앙은 인출 즉시 삭제)에서
+  // 메모리로만 받아 spec 에 붙이고, 결과·감사·이력에는 싣지 않는다.
+  if (b.native === 'ssh-exec') {
+    if (b.args.credentialId) {
+      const cr = await resolveCreds(b.args.credentialId, b.args.host);
+      if (!cr.ok) { stats.rejected++; auditFail({ kind: 'job', reqId: job.reqId, cmd: b.preset, reason: cr.reason }); return { ok: false, reason: `계정 인출 실패: ${cr.reason}`, rejected: true }; }
+      b.creds = cr.secret;
+    } else if (job.secret && job.secret.username) {
+      b.creds = { username: String(job.secret.username), password: String(job.secret.password || '') };
+    } else return { ok: false, reason: 'SSH 계정이 지정되지 않았습니다(저장된 계정 또는 1회 입력).', rejected: true };
+  }
   stats.active++;
   try {
     const r = await exec(b, { maxOutput: MAX_OUTPUT });
@@ -122,6 +136,25 @@ export async function handleJob(job, { password = PASSWORD, allowCustom = ALLOW_
     return { ...r, cmd: b.preset, argv: b.argv || null, instance: INSTANCE };
   } finally { stats.active--; }
 }
+
+// ── 계정 브로커(v2.419) — 중앙 /rma-credential 에서 받아 메모리에만 잠시 보관(파일 저장 금지) ──
+const CRED_CACHE_MS = Math.max(0, Number(env.RMA_CRED_CACHE_MS) || 10 * 60_000);
+const credCache = new Map(); // `${id}|${host}` → { at, secret, name }
+export async function resolveCreds(credentialId, host) {
+  const key = `${credentialId}|${String(host).toLowerCase()}`;
+  const c = credCache.get(key);
+  if (c && Date.now() - c.at < CRED_CACHE_MS) return { ok: true, secret: c.secret, name: c.name, cached: true };
+  try {
+    const r = await resilientFetch(`${CENTRAL_URL}/api/central/rma-credential`, {
+      method: 'POST', headers: headers(), body: JSON.stringify({ agent: AGENT, instance: INSTANCE, credentialId, host }), timeoutMs: 20_000, retries: 1,
+    });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok || !body.ok) return { ok: false, reason: body.reason || `HTTP ${r.status}` };
+    credCache.set(key, { at: Date.now(), secret: body.secret, name: body.name });
+    return { ok: true, secret: body.secret, name: body.name };
+  } catch (e) { return { ok: false, reason: e.message }; }
+}
+setInterval(() => { const now = Date.now(); for (const [k, v] of credCache) if (now - v.at >= CRED_CACHE_MS) credCache.delete(k); }, 60_000).unref?.();
 
 // ── 점검 스케줄(중앙 배포) + 실행 + outbox ──
 const SCHEDULE_FILE = path.join(CONFIG_DIR, `rma-schedule-${INSTANCE}.json`);
@@ -167,7 +200,7 @@ async function runOne(t) {
     if (!testAllowed(t.test)) r = { status: 'unknown', reply: `이 엣지에서 허용되지 않은 점검(${t.test}) — RMA_ENABLED_TESTS/RMA_DISABLED_TESTS`, durationMs: 0 };
     else {
       const b = buildTest(t.test, t.args || {});
-      r = b.ok ? await runTest(b, { fileRoots: POLICY.fileRoots, allowCustom: ALLOW_CUSTOM }) : { status: 'unknown', reply: b.issue, durationMs: 0 };
+      r = b.ok ? await runTest(b, { fileRoots: POLICY.fileRoots, allowCustom: ALLOW_CUSTOM, resolveCreds, allowSsh: POLICY.allowSsh, sshTargets: POLICY.sshTargets }) : { status: 'unknown', reply: b.issue, durationMs: 0 };
     }
     stats.testsRun++; if (r.status === 'bad' || r.status === 'unknown') stats.testsFailed++;
     pushOutbox({ id: t.id, test: t.test, name: t.name || '', status: r.status, reply: r.reply, value: r.value ?? null, at: Date.now(), durationMs: r.durationMs, instance: INSTANCE });
