@@ -60,7 +60,7 @@ export default function SerialLookup() {
           value={q} onChange={setQ} placeholder="시리얼 / 서비스 태그 / WWN / 부품번호 입력" />
         {busy && <span className="muted" style={{ fontSize: 12 }}>찾는 중…</span>}
         <button className="tab" style={{ marginLeft: 'auto', flex: 'none', padding: '6px 12px' }}
-          onClick={() => downloadFile(`/tools/serial-lookup/export.csv?q=${encodeURIComponent(q.trim())}&kinds=${encodeURIComponent(kindParam)}`)}
+          onClick={() => downloadFile(`/tools/serial-lookup/export.csv?q=${encodeURIComponent(q.trim())}&kinds=${encodeURIComponent(kindParam)}`).catch((e) => setError(e.message))}
           title="현재 검색 결과(검색어가 없으면 선택한 종류 전체)를 CSV 로 내려받습니다.">⬇ CSV 내보내기</button>
       </div>
 

@@ -133,6 +133,7 @@ fi
 echo "==> Adding installer + systemd unit"
 cp "$SCRIPT_DIR/install.sh" "$SCRIPT_DIR/uninstall.sh" "$STAGE/"
 cp "$SCRIPT_DIR/vmware-portal.service" "$STAGE/"
+cp "$SCRIPT_DIR/vmware-portal-rma@.service" "$STAGE/"
 cp "$SCRIPT_DIR/portal.env.example" "$STAGE/"
 cp "$SCRIPT_DIR/OFFLINE-INSTALL.md" "$STAGE/README.md"
 chmod +x "$STAGE/install.sh" "$STAGE/uninstall.sh"

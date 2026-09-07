@@ -210,7 +210,7 @@ export function topSeries(series = [], n = 8) {
  */
 export const SORT_KEYS = {
   index: (p) => p.index,
-  state: (p) => ['online', 'faulty', 'disabled', 'offline', 'noLicense'].indexOf(p.state),
+  state: (p) => { const i = ['online', 'faulty', 'disabled', 'offline', 'noLicense'].indexOf(p.state); return i < 0 ? null : i; }, // unknown 은 값 없음 → 항상 뒤
   speed: (p) => { const m = String(p.speed || '').match(/^(\d+)G$/); return m ? Number(m[1]) : null; },
   portType: (p) => p.portType || null,
   attached: (p) => p.attachedName || (p.attached || [])[0] || null,

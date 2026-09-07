@@ -65,7 +65,27 @@ export function deviceInputIssue(input = {}) {
   if (!String(input.username || '').trim()) return '접속 계정을 입력하세요.';
   // 제어문자 비밀번호 거부(스토리지 등록부와 동일) — 값이 오류 메시지에 실려 유출되는 경로 차단.
   if (/[\x00-\x1f\x7f]/.test(String(input.password ?? ''))) return '비밀번호에 제어문자(개행·탭 등)가 포함되어 있습니다 — 붙여넣기 내용을 확인하세요.'; // eslint-disable-line no-control-regex
+  // vfId 는 SSH 수집기가 `setcontext <vfId>;` 로 CLI 에 삽입한다 — 정수(1..128) 또는 빈 값만(셸 조립 불변조건).
+  if (input.vfId != null && input.vfId !== '' && !(/^\d{1,3}$/.test(String(input.vfId).trim()) && Number(input.vfId) >= 1 && Number(input.vfId) <= 128)) return 'Virtual Fabric ID 는 1~128 정수만 가능합니다.';
+  for (const k of ['sshPort', 'httpsPort']) {
+    if (input[k] != null && input[k] !== '' && !(/^\d{1,5}$/.test(String(input[k]).trim()) && Number(input[k]) >= 1 && Number(input[k]) <= 65535)) return `${k} 는 1~65535 정수만 가능합니다.`;
+  }
   return null;
+}
+
+/** 저장·테스트 공용 정규화(순수) — 검증 통과 입력을 수집기가 기대하는 타입으로 굳힌다(문자열 vfId 가 CLI 에 그대로 가지 않게). */
+export function normalizeDeviceInput(input = {}) {
+  return {
+    ...input,
+    type: String(input.type || '').trim(),
+    name: String(input.name || '').trim(),
+    host: String(input.host || '').trim(),
+    username: String(input.username || '').trim(),
+    collectMethod: normalizeCollectMethod(String(input.type || '').trim(), String(input.collectMethod || '')),
+    sshPort: Math.max(1, Math.min(65535, Math.floor(Number(input.sshPort)) || 22)),
+    httpsPort: Math.max(1, Math.min(65535, Math.floor(Number(input.httpsPort)) || 443)),
+    vfId: input.vfId === '' || input.vfId == null ? null : Math.max(1, Math.min(128, Math.floor(Number(input.vfId)) || 128)),
+  };
 }
 
 export function saveDevice(input = {}) {
@@ -126,12 +146,19 @@ export function devicesForAgent(agentName) {
 }
 
 /** 엣지: 중앙 pull 결과 반영 — 내 몫을 통째로 교체(중앙이 진실의 원천). */
-export function applyPulledDevices(list) {
+export function applyPulledDevices(list, { onRemoved = null } = {}) {
   const db = load();
   const mine = String(config.agent.name || '').toLowerCase();
   const keep = db.devices.filter((d) => String(d.agent || '').toLowerCase() !== mine);
-  db.devices = [...keep, ...(list || []).map((d) => ({ ...d, pulled: true }))];
+  const before = new Set(db.devices.filter((d) => String(d.agent || '').toLowerCase() === mine).map((d) => d.id));
+  const next = (list || []).map((d) => ({ ...d, pulled: true }));
+  db.devices = [...keep, ...next];
   persist();
+  // 중앙에서 삭제/이관된 장비의 id — 호출자가 로컬 스냅샷을 지워야 한다(안 지우면 낡은 스냅샷이
+  // 매 주기 중앙으로 push 돼 중앙 화면에 orphan 으로 영구 표시된다 — v2.416 리뷰 결함 #4).
+  const nextIds = new Set(next.map((d) => d.id));
+  const removed = [...before].filter((id) => !nextIds.has(id));
+  if (removed.length && typeof onRemoved === 'function') { try { onRemoved(removed); } catch { /* best effort */ } }
   return db.devices.length;
 }
 

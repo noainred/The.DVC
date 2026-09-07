@@ -1,0 +1,33 @@
+[Unit]
+Description=VMware Portal RMA (remote command agent) instance %i
+Documentation=https://github.com/noainred/The.DVC
+After=network-online.target
+Wants=network-online.target
+# 포탈 본체와 함께 재시작(업그레이드 시 새 코드 반영) — 단, 본체가 죽어도 RMA 는 독립적으로 살아 있다.
+PartOf=vmware-portal.service
+
+[Service]
+Type=simple
+User=@USER@
+Group=@USER@
+EnvironmentFile=@CONFIG_DIR@/portal.env
+EnvironmentFile=-@CONFIG_DIR@/rma-%i.env
+Environment=RMA_INSTANCE=%i
+Environment=NODE_ENV=production
+WorkingDirectory=@PREFIX@/app
+ExecStart=@PREFIX@/runtime/node/bin/node @PREFIX@/app/server/src/rma/agent.js
+Restart=always
+RestartSec=3
+TimeoutStopSec=15
+KillMode=mixed
+
+# Hardening — 명령 실행 프로세스라 본체보다 완화(ProtectSystem=full 은 /usr 읽기 전용 유지).
+NoNewPrivileges=false
+PrivateTmp=true
+ProtectSystem=full
+ProtectControlGroups=true
+ProtectKernelTunables=true
+ReadWritePaths=@PREFIX@ @CONFIG_DIR@
+
+[Install]
+WantedBy=multi-user.target

@@ -7,6 +7,7 @@ import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { applyPulledDevices } from '../sanswitch/registry.js';
+import { dropSnapshot } from '../sanswitch/store.js';
 import { collectDeviceNow } from '../sanswitch/poller.js';
 import { pushSanSwitchNow } from '../sanswitch/push.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
@@ -37,7 +38,8 @@ async function _pull() {
     const sig = crypto.createHash('sha1').update(JSON.stringify(devices)).digest('hex');
     let applied = false;
     if (sig !== _lastSig) {
-      applyPulledDevices(devices);
+      // 중앙에서 빠진 장비의 로컬 스냅샷도 함께 제거(낡은 스냅샷이 매 주기 push 되어 orphan 으로 남는 것 방지).
+      applyPulledDevices(devices, { onRemoved: (ids) => ids.forEach((id) => { try { dropSnapshot(id); } catch { /* */ } }) });
       _lastSig = sig;
       applied = true;
       console.log(`[sanswitch-config] 중앙 배포 스위치 적용: agent=${config.agent.name} ${devices.length}대`);

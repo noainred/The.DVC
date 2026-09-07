@@ -67,7 +67,9 @@ export function toDbm(v) {
   if (v == null || v === '') return null;
   const n = Number(v);
   if (!Number.isFinite(n)) return null;
-  if (n <= 0) return Math.round(n * 10) / 10;      // 이미 dBm
+  // 0 µW 는 '빛 없음'(미연결/무광 SFP) — 0 dBm(완벽한 광레벨)이 아니라 null 로 둔다(v2.416 리뷰 확정).
+  if (n === 0) return null;
+  if (n < 0) return Math.round(n * 10) / 10;       // 이미 dBm
   return Math.round(10 * Math.log10(n / 1000) * 10) / 10; // µW → dBm
 }
 

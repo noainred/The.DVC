@@ -6,12 +6,12 @@
  *    노출하지 않는다('vCenter 귀속 없는 데이터는 범위 계정에 노출 금지' — server/CLAUDE.md).
  *  - 변경(등록/수정/삭제/테스트/수집): adminOnly + 감사로그.
  */
-import { requireRole } from '../../auth/auth.js';
+import { requireRole, requirePerm } from '../../auth/auth.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { SAN_SWITCH_TYPES, collectMethodsFor } from '../../sanswitch/types.js';
-import { listDevices, saveDevice, deleteDevice, deviceInputIssue, getDeviceWithSecret } from '../../sanswitch/registry.js';
+import { listDevices, saveDevice, deleteDevice, deviceInputIssue, getDeviceWithSecret, normalizeDeviceInput } from '../../sanswitch/registry.js';
 import { localSnapshots, getSnapshot, dropSnapshot } from '../../sanswitch/store.js';
 import { collectDeviceNow, sanSwitchPollerStatus, pollSanSwitchOnce, testDeviceConnection } from '../../sanswitch/poller.js';
 import { edgeSanSwitchSnapshots } from '../../central/sanSwitchEdge.js';
@@ -26,6 +26,7 @@ import { localSnapshots as storageLocalSnaps } from '../../storage/store.js';
 import { edgeStorageSnapshots } from '../../central/storageEdge.js';
 
 const adminOnly = requireRole('admin');
+const toolsPerm = requirePerm('tools'); // 조회 라우트에도 기능 권한(v2.416 감사 L-3 — 프론트 게이팅만으로는 API 직접 호출을 못 막는다)
 const fullScopeOnly = (req, res, next) => {
   if (scopedVcenterIds(req.user, store.get())) {
     return res.status(403).json({ ok: false, reason: 'SAN 스위치 모니터링은 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다.' });
@@ -40,13 +41,18 @@ const listShape = (s) => {
   return { ...s, ports: { ...ports, listCount: (list || []).length } };
 };
 
+/** `?ports=1,2,3` 파싱(순수). 빈 값/빈 토큰은 무시 — `''.split(',')` → [''] → Number('') → 0 함정 방지. */
+export function parsePortsParam(v) {
+  return String(v || '').split(',').map((x) => x.trim()).filter(Boolean).map(Number).filter(Number.isInteger).slice(0, 64);
+}
+
 export function registerSanSwitch(api) {
 
 /**
  * 통합 조회 — 이 노드(중앙) 직접 수집분 + 전 엣지 push 분을 합쳐 장비별 최신 스냅샷 반환.
  * 같은 deviceId 가 양쪽에 있으면 최신 collectedAt 우선(스토리지 화면과 동일 규칙).
  */
-api.get('/tools/sanswitch', fullScopeOnly, (_req, res) => {
+api.get('/tools/sanswitch', toolsPerm, fullScopeOnly, (_req, res) => {
   const byId = new Map();
   for (const s of [...localSnapshots(), ...edgeSanSwitchSnapshots()]) {
     const cur = byId.get(s.deviceId);
@@ -70,7 +76,7 @@ api.get('/tools/sanswitch', fullScopeOnly, (_req, res) => {
  *   회선으로 매 주기 수백 행을 밀지 않기 위함). 그래서 응답에 portsOmitted 를 그대로 실어
  *   화면이 '정상 포트 N개는 엣지에만 있음'을 정직하게 안내하게 한다.
  */
-api.get('/tools/sanswitch/devices/:id/ports', fullScopeOnly, (req, res) => {
+api.get('/tools/sanswitch/devices/:id/ports', toolsPerm, fullScopeOnly, (req, res) => {
   const local = getSnapshot(req.params.id);
   const edge = edgeSanSwitchSnapshots().find((s) => s.deviceId === req.params.id);
   const snap = (!local || (edge && (edge.collectedAt || 0) > (local.collectedAt || 0))) ? edge : local;
@@ -122,8 +128,10 @@ api.post('/tools/sanswitch/test', adminOnly, async (req, res) => {
     const saved = getDeviceWithSecret(b.id);
     if (saved && saved.host === String(b.host || '').trim()) password = saved.password || '';
   }
-  const device = { ...b, id: b.id || `test-${Date.now()}`, password };
-  logAudit({ user: req.user?.username, action: 'SAN 스위치 연결 테스트', target: `${b.name || ''}(${b.host})`, detail: `${b.type}/${b.collectMethod || ''}` });
+  // body 를 그대로 수집기에 넘기지 않는다 — vfId 는 CLI(`setcontext <vfId>;`)에 삽입되므로 저장 경로와
+  // 같은 정규화(정수 1..128 / 포트 1..65535)를 거친다(v2.416 보안 감사 M-1).
+  const device = { ...normalizeDeviceInput(b), id: b.id || `test-${Date.now()}`, password };
+  logAudit({ user: req.user?.username, action: 'SAN 스위치 연결 테스트', target: `${b.name || ''}(${b.host})`, detail: `${b.type}/${b.collectMethod || ''} user=${device.username}${device.vfId ? ` vf=${device.vfId}` : ''}` });
   const r = await testDeviceConnection(device, { timeoutMs: 60_000 });
   res.json(r);
 });
@@ -181,15 +189,17 @@ api.post('/tools/sanswitch/perf/collect', adminOnly, async (req, res) => {
  * 포트별 사용량 시계열. 원시 점을 그대로 주지 않고 버킷 평균으로 내려준다(브라우저 보호).
  * 단위는 **바이트/초**(portperfshow 원단위) — 화면이 ×8 해 bps 로 환산한다.
  */
-api.get('/tools/sanswitch/devices/:id/perf', fullScopeOnly, async (req, res) => {
+api.get('/tools/sanswitch/devices/:id/perf', toolsPerm, fullScopeOnly, async (req, res) => {
   const hours = Math.max(1, Math.min(24 * 90, Number(req.query.hours) || 24));
-  const ports = String(req.query.ports || '').split(',').map((x) => Number(x)).filter(Number.isFinite).slice(0, 64);
+  // ⚠ `''.split(',')` 은 [''] 이고 Number('') 은 0 이라, 빈 토큰을 먼저 걸러야 한다 — 안 거르면
+  //   ports 미지정이 '포트 0 만' 으로 둔갑한다(v2.416 리뷰 확정 결함).
+  const ports = parsePortsParam(req.query.ports);
   const r = await portSeries(req.params.id, { hours, ports: ports.length ? ports : null });
   res.json({ ok: true, unit: 'bytesPerSec', hours, ...r });
 });
 
 /** 연결 장비(스토리지 어레이)별 합산 시계열 — 포트가 아니라 '어느 스토리지가 얼마나 쓰이나'. */
-api.get('/tools/sanswitch/devices/:id/perf/storage', fullScopeOnly, async (req, res) => {
+api.get('/tools/sanswitch/devices/:id/perf/storage', toolsPerm, fullScopeOnly, async (req, res) => {
   const hours = Math.max(1, Math.min(24 * 90, Number(req.query.hours) || 24));
   const r = await storageSeries(req.params.id, { hours });
   res.json({ ok: true, unit: 'bytesPerSec', hours, ...r });
@@ -206,7 +216,7 @@ api.get('/tools/sanswitch/devices/:id/perf/storage', fullScopeOnly, async (req, 
  * **용량 사용률**을 함께 붙여 준다. 대역폭(얼마나 바쁜가)과 용량(얼마나 찼는가)은 다른 축이라
  * 나란히 봐야 증설 판단이 된다. ⚠ 확실히 일치할 때만 붙이고, 아니면 비운다(억지 매칭 금지).
  */
-api.get('/tools/sanswitch/perf/storage-summary', fullScopeOnly, async (req, res) => {
+api.get('/tools/sanswitch/perf/storage-summary', toolsPerm, fullScopeOnly, async (req, res) => {
   const hours = Math.max(1, Math.min(24 * 90, Number(req.query.hours) || 24));
   // 법인은 **여러 개**를 받을 수 있다(쉼표 구분). 빈 값이면 전체.
   const dcs = String(req.query.datacenterId || '').split(',').map((x) => x.trim()).filter(Boolean);

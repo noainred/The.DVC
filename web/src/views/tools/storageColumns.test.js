@@ -118,3 +118,15 @@ describe('cellValue', () => {
     expect(cellValue('health', vp)).toBe('healthy');
   });
 });
+
+describe('v2.416 리뷰 회귀 — num() 이 null/undefined 를 0 으로 만들지 않는다', () => {
+  it('capacity.pct 가 null 이면 usage 는 null(0% 막대 금지), usedBytes 미수집도 null', () => {
+    const row = { snap: { capacity: { totalBytes: 0, usedBytes: null, pct: null } } };
+    expect(cellValue('usage', row)).toBeNull();
+    expect(cellValue('capUsed', row)).toBeNull();
+    expect(cellValue('capTotal', row)).toBeNull();
+  });
+  it('진짜 0 은 0 으로 남는다', () => {
+    expect(cellValue('usage', { snap: { capacity: { pct: 0 } } })).toBe(0);
+  });
+});

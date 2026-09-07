@@ -40,6 +40,7 @@ export const KINDS = [
 ];
 
 const CACHE_MS = Math.max(5_000, Number(process.env.SERIAL_INDEX_CACHE_MS) || 30_000);
+const REFRESH_MIN_MS = 10_000; // ?refresh=1 최소 간격
 let _cache = null; // { at, rows }
 
 /**
@@ -244,7 +245,13 @@ export function buildSerialIndex(req, { includeSfp = true } = {}) {
 /** 캐시된 인덱스(짧은 TTL — 매 타이핑마다 수만 행을 다시 만들지 않기 위해). */
 export function serialIndex(req, { force = false } = {}) {
   if (!force && _cache && Date.now() - _cache.at < CACHE_MS) return _cache;
-  const built = buildSerialIndex(req);
+  // 강제 재구축은 최소 간격(REFRESH_MIN_MS)으로 스로틀 — 누구나 ?refresh=1 로 매 요청 전량 재구축을
+  // 강제해 이벤트 루프를 잡는 것 방지(v2.416 감사 L-2).
+  if (force && _cache && Date.now() - _cache.at < REFRESH_MIN_MS) return _cache;
+  // ⚠ 요청 필터(vcenterId/datacenterId/baremetal)를 인덱스에 반영하지 않는다 — 전역 캐시 1개를 여러 사용자가
+  //   공유하므로, 한 요청의 필터로 축소된 인덱스가 30초 동안 다른 사용자에게 결손으로 보인다(L-2).
+  void req;
+  const built = buildSerialIndex({ query: {}, user: req?.user });
   _cache = { at: Date.now(), ...built };
   return _cache;
 }

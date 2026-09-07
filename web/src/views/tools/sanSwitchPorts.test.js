@@ -226,3 +226,13 @@ describe('sortRows / seriesStats', () => {
     expect(seriesStats([null, null])).toEqual({ avg: 0, max: 0 });
   });
 });
+
+describe('v2.416 리뷰 회귀 — 상태 정렬에서 unknown 은 값 없음(항상 뒤)', () => {
+  it('오름차순에서도 unknown 포트가 맨 앞에 오지 않는다', () => {
+    const ports = [{ index: 1, state: 'unknown' }, { index: 2, state: 'online' }, { index: 3, state: 'offline' }];
+    const asc = sortPorts(ports, 'state', 'asc').map((p) => p.index);
+    expect(asc[asc.length - 1]).toBe(1);
+    const desc = sortPorts(ports, 'state', 'desc').map((p) => p.index);
+    expect(desc[desc.length - 1]).toBe(1);
+  });
+});

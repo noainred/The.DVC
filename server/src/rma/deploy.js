@@ -1,0 +1,160 @@
+/**
+ * RMA 원격 배포(중앙 → 엣지 서버, SSH) — 포탈이 이미 설치된 서버에 RMA 인스턴스를 1개 이상
+ * 띄운다(agent/deploy.js 의 SSH 배포 패턴). 한 서버에 여러 인스턴스(템플릿 유닛 %i) 또는 여러
+ * 서버에 하나씩 — 어느 쪽이든 같은 법인(agent 토큰)으로 중앙에 붙고, 분배는 중앙 설정이 정한다.
+ *
+ * 절차(root SSH):
+ *  1. `systemctl show vmware-portal` 로 설치 경로(PREFIX)·서비스 계정·portal.env 위치를 역추적
+ *     (추측하지 않는다 — 다른 경로에 설치된 포탈에 엉뚱한 유닛을 쓰지 않게).
+ *  2. 템플릿 유닛 `vmware-portal-rma@.service` 작성(unitTemplate.js — 패키지의 파일과 동일 본문).
+ *  3. portal.env 에 RMA_* 키 upsert(RMA_PASSWORD·RMA_ALLOW_CUSTOM, 선택적으로 AGENT_NAME/CENTRAL_*).
+ *  4. 인스턴스별 `rma-<name>.env`(RMA_PRIORITY) 작성 → `systemctl enable --now vmware-portal-rma@<name>`.
+ *  5. sudoers 한 줄(포탈 재시작 프리셋) — visudo -cf 검증 후 설치.
+ *
+ * 셸 조립 규약: 값은 전부 화이트리스트 정규식 통과 후에만 삽입(선행 - 불가). 비밀번호는 셸에
+ * 싣지 않고 SFTP 로 파일에 쓴다(env 파일은 KEY=VALUE 라 `'`·공백·`$` 등은 값에서 배제).
+ */
+import { withSsh } from '../proxy/sshExec.js';
+import { renderUnit, RMA_SUDOERS } from './unitTemplate.js';
+
+export const RE_INSTANCE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+const RE_PATH = /^\/[A-Za-z0-9._/-]{1,200}$/;
+const RE_USER = /^[a-z_][a-z0-9_-]{0,31}$/;
+const RE_ENV_VALUE = /^[A-Za-z0-9!@#%^&*()_+=.,:;~/?-]{0,256}$/; // KEY=VALUE 안전 집합(공백·따옴표·$·백틱·\ 배제)
+const RE_URL = /^https?:\/\/[A-Za-z0-9.-]+(?::\d{1,5})?$/;
+
+const creds = (t) => ({ host: t.host, port: t.port || 22, username: t.username, password: t.password, privateKey: t.privateKey || undefined });
+
+/** 입력 검증(순수). 오류면 사유, 정상이면 null. */
+export function deployInputIssue(opts = {}) {
+  const inst = Array.isArray(opts.instances) ? opts.instances : [];
+  if (!inst.length) return '인스턴스를 1개 이상 지정하세요.';
+  if (inst.length > 8) return '한 번에 최대 8개 인스턴스까지 배포할 수 있습니다.';
+  const seen = new Set();
+  for (const i of inst) {
+    const name = String(i?.name || '').trim();
+    if (!RE_INSTANCE.test(name)) return `인스턴스 이름 형식 오류: '${name.slice(0, 30)}' (영숫자·._-, 64자 이내, 선행 - 불가)`;
+    if (seen.has(name.toLowerCase())) return `인스턴스 이름 중복: ${name}`;
+    seen.add(name.toLowerCase());
+    const pr = i?.priority;
+    if (pr != null && pr !== '' && !(Number.isInteger(Number(pr)) && Number(pr) >= 0 && Number(pr) <= 1000)) return `'${name}' 우선순위는 0~1000 정수여야 합니다.`;
+  }
+  if (opts.password != null && opts.password !== '' && !RE_ENV_VALUE.test(String(opts.password))) return 'RMA 비밀번호에 허용되지 않는 문자가 있습니다(공백·따옴표·$·백틱·\\ 불가, 256자 이내).';
+  if (opts.agentName && !RE_ENV_VALUE.test(String(opts.agentName))) return 'AGENT_NAME 형식 오류';
+  if (opts.centralUrl && !RE_URL.test(String(opts.centralUrl).replace(/\/+$/, ''))) return 'CENTRAL_URL 형식 오류(http(s)://host[:port])';
+  if (opts.centralToken && !RE_ENV_VALUE.test(String(opts.centralToken))) return '토큰 형식 오류';
+  return null;
+}
+
+/** 설치 경로 역추적 — { prefix, user, configDir, envFile } 또는 { error }. 원격 출력은 재검증한다. */
+export async function resolveInstall(exec) {
+  const show = (await exec('systemctl show vmware-portal -p ExecStart,User,EnvironmentFiles 2>/dev/null || true').catch(() => ({ stdout: '' }))).stdout;
+  const user = /\nUser=([^\n]+)/.exec('\n' + show)?.[1]?.trim() || '';
+  const exe = /path=(\S+\/runtime\/node\/bin\/node)/.exec(show)?.[1] || '';
+  const prefix = exe.replace(/\/runtime\/node\/bin\/node$/, '');
+  const envFile = /EnvironmentFiles=(\S+)/.exec(show)?.[1] || '';
+  const configDir = envFile.replace(/\/[^/]+$/, '');
+  if (!prefix || !RE_PATH.test(prefix)) return { error: 'vmware-portal 서비스의 설치 경로를 확인할 수 없습니다 — 이 서버에 포탈(엣지)이 systemd 로 설치되어 있어야 합니다.' };
+  if (!RE_USER.test(user)) return { error: `서비스 계정을 확인할 수 없습니다(User=${user.slice(0, 20)}).` };
+  if (!RE_PATH.test(envFile) || !RE_PATH.test(configDir)) return { error: 'portal.env 위치(EnvironmentFile)를 확인할 수 없습니다.' };
+  const agentJs = (await exec(`test -f ${prefix}/app/server/src/rma/agent.js && echo yes || echo no`).catch(() => ({ stdout: '' }))).stdout.trim();
+  if (agentJs !== 'yes') return { error: `이 서버의 포탈에 RMA 코드(${prefix}/app/server/src/rma/agent.js)가 없습니다 — 엣지를 v2.416 이상으로 먼저 업그레이드하세요.` };
+  return { prefix, user, configDir, envFile };
+}
+
+async function upsertEnv(exec, envFile, pairs) {
+  if (!pairs.length) return;
+  const delScript = pairs.map(([k]) => `/^${k}=/d`).join(';');
+  await exec(`sed -i '${delScript}' ${envFile} 2>/dev/null || true`);
+  const block = '\n# --- RMA (auto-deployed) ---\n' + pairs.map(([k, v]) => `${k}=${v}`).join('\n') + '\n';
+  await exec(`printf '%s' '${block.replace(/'/g, "'\\''")}' >> ${envFile}`);
+}
+
+/**
+ * 배포 실행. target = SSH 접속 정보(root), opts = { instances:[{name,priority}], password, allowCustom, agentName, centralUrl, centralToken }
+ * 반환 { ok, install, instances:[{name, active, log?}], sudoers, reason? }
+ */
+export async function deployRma(target, opts = {}) {
+  if (!target?.host || !target?.username) return { ok: false, reason: 'host/username 을 입력하세요.' };
+  const issue = deployInputIssue(opts);
+  if (issue) return { ok: false, reason: issue };
+  try {
+    return await withSsh(creds(target), async ({ exec, writeFile }) => {
+      const idu = await exec('id -u');
+      if (idu.stdout.trim() !== '0') return { ok: false, reason: 'RMA 배포는 root 권한이 필요합니다(systemd 유닛·sudoers 작성). root 로 접속하세요.' };
+      const inst = await resolveInstall(exec);
+      if (inst.error) return { ok: false, reason: inst.error };
+
+      // 1) 템플릿 유닛
+      await writeFile('/etc/systemd/system/vmware-portal-rma@.service', renderUnit(inst), 0o644);
+      // 2) portal.env upsert — 비밀번호는 값 집합이 검증돼 있어 KEY=VALUE 로 안전.
+      const pairs = [['RMA_ENABLED', 'true']];
+      if (opts.password != null && opts.password !== '') pairs.push(['RMA_PASSWORD', String(opts.password)]);
+      if (opts.clearPassword) pairs.push(['RMA_PASSWORD', '']);
+      pairs.push(['RMA_ALLOW_CUSTOM', opts.allowCustom ? 'true' : 'false']);
+      if (opts.agentName) pairs.push(['AGENT_NAME', String(opts.agentName)]);
+      if (opts.centralUrl) pairs.push(['CENTRAL_URL', String(opts.centralUrl).replace(/\/+$/, '')]);
+      if (opts.centralToken) pairs.push(['CENTRAL_TOKEN', String(opts.centralToken)]);
+      await upsertEnv(exec, inst.envFile, pairs);
+      // 3) sudoers(포탈 재시작 프리셋) — 문법 검증 실패 시 설치하지 않는다(sudo 전체가 깨지는 사고 방지).
+      const sudoTmp = '/tmp/vmware-portal-rma.sudoers';
+      await writeFile(sudoTmp, RMA_SUDOERS(inst.user), 0o440);
+      const vis = await exec(`visudo -cf ${sudoTmp} >/dev/null 2>&1 && install -m 0440 ${sudoTmp} /etc/sudoers.d/vmware-portal-rma && echo ok || echo fail; rm -f ${sudoTmp}`);
+      const sudoers = vis.stdout.trim() === 'ok';
+      // 4) 인스턴스별 env + 기동
+      await exec('systemctl daemon-reload');
+      const results = [];
+      for (const i of opts.instances) {
+        const name = String(i.name).trim();
+        const pr = i.priority != null && i.priority !== '' ? Number(i.priority) : 100;
+        await writeFile(`${inst.configDir}/rma-${name}.env`, `RMA_INSTANCE=${name}\nRMA_PRIORITY=${pr}\n`, 0o640);
+        await exec(`chown ${inst.user}:${inst.user} ${inst.configDir}/rma-${name}.env 2>/dev/null || true`);
+        await exec(`systemctl enable vmware-portal-rma@${name} >/dev/null 2>&1; systemctl restart vmware-portal-rma@${name} 2>&1 || true`);
+        let active = '';
+        for (let k = 0; k < 6; k++) {
+          active = (await exec(`systemctl is-active vmware-portal-rma@${name}`).catch(() => ({ stdout: '' }))).stdout.trim();
+          if (active === 'active' || active === 'failed') break;
+          await exec('sleep 1');
+        }
+        let log = '';
+        if (active !== 'active') log = (await exec(`journalctl -u vmware-portal-rma@${name} --no-pager -n 30 2>&1`).catch(() => ({ stdout: '' }))).stdout.slice(-3000);
+        results.push({ name, priority: pr, active, log });
+      }
+      const ok = results.every((r) => r.active === 'active');
+      return { ok, install: inst, instances: results, sudoers, reason: ok ? undefined : '일부 인스턴스가 active 가 아닙니다 — 로그를 확인하세요(토큰/CENTRAL_URL 오류가 흔한 원인).' };
+    });
+  } catch (err) { return { ok: false, reason: err.message }; }
+}
+
+/** 서버의 RMA 인스턴스 목록 — [{ name, active, enabled }]. */
+export async function listRmaInstances(target) {
+  if (!target?.host || !target?.username) return { ok: false, reason: 'host/username 을 입력하세요.' };
+  try {
+    return await withSsh(creds(target), async ({ exec }) => {
+      const out = (await exec("systemctl list-units --all --plain --no-legend 'vmware-portal-rma@*' 2>/dev/null || true")).stdout;
+      const rows = [];
+      for (const line of out.split('\n')) {
+        const m = /^vmware-portal-rma@([A-Za-z0-9._-]+)\.service\s+\S+\s+(\S+)\s+(\S+)/.exec(line.trim());
+        if (m) rows.push({ name: m[1], active: m[2], sub: m[3] });
+      }
+      const unit = (await exec('test -f /etc/systemd/system/vmware-portal-rma@.service && echo yes || echo no')).stdout.trim() === 'yes';
+      const inst = await resolveInstall(exec);
+      return { ok: true, unitInstalled: unit, install: inst.error ? null : inst, instances: rows };
+    });
+  } catch (err) { return { ok: false, reason: err.message }; }
+}
+
+/** 인스턴스 제거(정지·비활성·env 삭제). 유닛 템플릿과 portal.env 의 RMA 키는 남긴다. */
+export async function removeRmaInstance(target, name) {
+  if (!target?.host || !target?.username) return { ok: false, reason: 'host/username 을 입력하세요.' };
+  const n = String(name || '').trim();
+  if (!RE_INSTANCE.test(n)) return { ok: false, reason: '인스턴스 이름 형식 오류' };
+  try {
+    return await withSsh(creds(target), async ({ exec }) => {
+      const inst = await resolveInstall(exec);
+      await exec(`systemctl disable --now vmware-portal-rma@${n} 2>&1 || true`);
+      if (!inst.error) await exec(`rm -f ${inst.configDir}/rma-${n}.env`);
+      return { ok: true, name: n };
+    });
+  } catch (err) { return { ok: false, reason: err.message }; }
+}

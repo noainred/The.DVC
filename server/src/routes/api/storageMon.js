@@ -1,7 +1,7 @@
 // 스토리지 모니터링 라우트(v2.302) — 특수기능 '스토리지 모니터링(Isilon 등)' 화면용.
 // 조회: 전체 범위 계정만(스토리지는 vCenter 귀속이 없는 인프라 장비 — 'vCenter 귀속 없는
 // 데이터는 범위 계정에 노출 금지' 규칙, fleet 과 동일 403 패턴). 변경: adminOnly + 감사로그.
-import { requireRole } from '../../auth/auth.js';
+import { requireRole, requirePerm } from '../../auth/auth.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
@@ -22,6 +22,7 @@ import { INTERVAL_SPEC, loadIntervalConfig, saveIntervalConfig, intervalsForAgen
   envIntervals, runtimeIntervalSource, applyOwnIntervals } from '../../storage/intervals.js';
 
 const adminOnly = requireRole('admin');
+const toolsPerm = requirePerm('tools'); // 조회 라우트 기능 권한(v2.416 감사 L-3)
 const fullScopeOnly = (req, res, next) => {
   if (scopedVcenterIds(req.user, store.get())) {
     return res.status(403).json({ ok: false, reason: '스토리지 모니터링은 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다.' });
@@ -36,7 +37,7 @@ export function registerStorageMon(api) {
  * 같은 deviceId 가 양쪽에 있으면 최신 collectedAt 우선. 법인/타입별 뷰는 프론트가 이 평탄
  * 목록을 그룹핑한다(뷰 추가가 서버 변경 없이 가능 — 확장 요구 반영).
  */
-api.get('/tools/storage', fullScopeOnly, (_req, res) => {
+api.get('/tools/storage', toolsPerm, fullScopeOnly, (_req, res) => {
   const byId = new Map();
   for (const s of [...localSnapshots(), ...edgeStorageSnapshots()]) {
     const cur = byId.get(s.deviceId);
@@ -147,7 +148,7 @@ api.delete('/tools/storage/devices/:id', adminOnly, (req, res) => {
  * poller.inFlight = 지금 수집 중인 장비('진행중'), events = 최근 완료 이벤트('완료', newest-first).
  * 조회 전용이라 fullScopeOnly(스토리지는 vCenter 범위 밖 — 다른 스토리지 조회와 동일 게이트).
  */
-api.get('/tools/storage/activity', fullScopeOnly, (req, res) => {
+api.get('/tools/storage/activity', toolsPerm, fullScopeOnly, (req, res) => {
   res.json({ poller: storagePollerStatus(), events: listActivity(Number(req.query.limit) || 100) });
 });
 
@@ -367,7 +368,7 @@ function usageRange(query = {}) {
   return { range: `${days}d`, spanMs: days * 86400e3, bucketMs: days <= 7 ? 0 : Math.ceil((days * 86400e3) / 800) };
 }
 
-api.get('/tools/storage/devices/:id/history', fullScopeOnly, async (req, res) => {
+api.get('/tools/storage/devices/:id/history', toolsPerm, fullScopeOnly, async (req, res) => {
   const { spanMs, bucketMs, range } = usageRange(req.query);
   res.json({ db: await dbAvailable(), range, spanMs, bucketMs, points: await capacityHistory(req.params.id, Date.now() - spanMs, bucketMs) });
 });
@@ -378,7 +379,7 @@ api.get('/tools/storage/devices/:id/history', fullScopeOnly, async (req, res) =>
  * 각 점의 devices(그 버킷에 데이터가 있던 장비 수)를 함께 반환해, 일부 장비만 수집된 구간을
  * '전체 용량 급감' 으로 오독하지 않게 화면이 표시한다.
  */
-api.get('/tools/storage/history', fullScopeOnly, async (req, res) => {
+api.get('/tools/storage/history', toolsPerm, fullScopeOnly, async (req, res) => {
   const { spanMs, bucketMs, range } = usageRange(req.query);
   // 전체 합산은 버킷이 필수 — 12시간 구간이라도 10분 버킷으로 시각을 정렬한다.
   const b = bucketMs || 600_000;
