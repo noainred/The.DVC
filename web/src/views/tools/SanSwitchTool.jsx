@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
 import { fetchJson, postJson, delJson } from '../../api.js';
+import { MODES, bucketText, perfQuery, toLocalDt, rangeIssueOf, rangeLabel, RANGE_MAX_DAYS } from './sanSwitchPerfText.js';
 import { Loading, ErrorBox, Kpi, UsageCell, Modal, SearchBox } from '../../components/ui.jsx';
 import { stateLabel, stateTone, opticalHealth, errorLevel, capacityLevel, aggregate,
   throughputText, filterPorts, shortDeviceName, saturationPct, saturationLevel, bytesPerSecText,
@@ -430,6 +431,93 @@ function DeviceInfo({ d }) {
 
 const HOURS = [[1, '1시간'], [6, '6시간'], [24, '24시간'], [24 * 7, '7일'], [24 * 30, '30일']];
 
+/**
+ * 기간 선택(v2.420, 사용자 요구 '조회 조건에 내가 원하는 기간의 값을 볼 수 있는 기능') —
+ * 최근 N시간 칩 + '기간 지정'(시작·끝 datetime-local). range 가 있으면 칩보다 우선한다.
+ */
+function RangePicker({ hours, setHours, range, setRange }) {
+  const [open, setOpen] = useState(false);
+  const [fromStr, setFromStr] = useState(() => toLocalDt(Date.now() - 24 * 3600_000));
+  const [toStr, setToStr] = useState('');
+  const [issue, setIssue] = useState(null);
+  const apply = () => {
+    const r = rangeIssueOf(fromStr, toStr);
+    if (r.issue) { setIssue(r.issue); return; }
+    setIssue(null); setRange({ from: r.from, to: r.to }); setOpen(false);
+  };
+  return (
+    <>
+      <span className="muted" style={{ fontSize: 12, marginLeft: 6 }} title="차트·표가 계산되는 시간 구간입니다. 구간을 120 등분한 폭이 '버킷'이 되며, 버킷 폭은 차트 위 설명에 표시됩니다.">기간</span>
+      {HOURS.map(([h, label]) => (
+        <button key={h} className={!range && hours === h ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '4px 10px' }}
+          title={`지금부터 최근 ${label} 을 봅니다. 버킷 폭 ≈ ${bucketText(Math.max(60_000, (h * 3600_000) / 120))}`}
+          onClick={() => { setRange(null); setHours(h); }}>{label}</button>
+      ))}
+      <button className={range ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '4px 10px' }}
+        title={`원하는 시작·끝 시각을 직접 지정합니다(한 번에 최대 ${RANGE_MAX_DAYS}일). 끝을 비우면 지금까지입니다.`}
+        onClick={() => setOpen((v) => !v)}>
+        📅 기간 지정{range ? `: ${rangeLabel(range)}` : ''}
+      </button>
+      {range && (
+        <button className="tab" style={{ flex: 'none', padding: '4px 8px' }} title="기간 지정을 해제하고 최근 N시간 보기로 돌아갑니다."
+          onClick={() => { setRange(null); setOpen(false); }}>✕</button>
+      )}
+      {open && (
+        <div className="flex gap wrap" style={{ alignItems: 'center', width: '100%', fontSize: 12, marginTop: 4 }}>
+          <label>시작 <input className="input" type="datetime-local" value={fromStr} onChange={(e) => setFromStr(e.target.value)} style={{ width: 200 }} /></label>
+          <label>끝 <input className="input" type="datetime-local" value={toStr} onChange={(e) => setToStr(e.target.value)} style={{ width: 200 }} placeholder="비우면 지금" /></label>
+          <button className="login-btn" style={{ flex: 'none', padding: '4px 12px' }} onClick={apply}>적용</button>
+          <span className="muted">끝을 비우면 지금까지 · 최대 {RANGE_MAX_DAYS}일 · 보관 기간(설정 › 수집 서버) 밖의 시각은 데이터가 없습니다.</span>
+          {issue && <span style={{ color: TONE.bad }}>{issue}</span>}
+        </div>
+      )}
+    </>
+  );
+}
+
+/** 평균/피크 보기 선택(v2.420, 사용자 요구) — 각 기준의 산출 방식을 툴팁으로 상세히 붙인다. */
+function ModePicker({ mode, setMode }) {
+  return (
+    <>
+      <span className="muted" style={{ fontSize: 12, marginLeft: 6 }} title="차트 선과 표의 평균·최대가 어떤 값으로 계산되는지 고릅니다.">기준</span>
+      {MODES.map(([k, label, help]) => (
+        <button key={k} className={mode === k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '4px 10px' }}
+          title={help} onClick={() => setMode(k)}>{label}</button>
+      ))}
+    </>
+  );
+}
+
+/**
+ * 값 산출 방식 상세 설명(v2.420, 사용자 요구 '메뉴에 최대한 자세한 설명') — 접었다 펼친다.
+ * 여기 문구는 서버 perfDb.js 의 실제 계산과 일치해야 한다(버킷 = 구간/120, 하한 60초; 평균 = 포트별 AVG 합;
+ * 피크 = 포트별 MAX 합). 바꾸면 양쪽을 같이 고칠 것.
+ */
+function MetricHelp({ mode, bucketMs, hours, scope, intervalHint }) {
+  const [open, setOpen] = useState(false);
+  const bw = bucketText(bucketMs);
+  return (
+    <div style={{ fontSize: 11.5, lineHeight: 1.7 }}>
+      <button className="tab" style={{ padding: '2px 8px', fontSize: 11 }} onClick={() => setOpen(!open)}
+        title="이 화면의 숫자가 어떻게 계산되는지 자세히 설명합니다.">
+        {open ? '▾' : '▸'} ⓘ 값 산출 방식 — 지금은 <b>{mode === 'peak' ? '피크 기준' : '평균 기준'}</b> · 버킷 폭 <b>{bw}</b>
+      </button>
+      {open && (
+        <div className="card muted" style={{ marginTop: 6, padding: '8px 10px' }}>
+          <div><b>① 원천 표본</b> — 설정된 수집 주기{intervalHint ? `(${intervalHint})` : ''}마다 각 스위치에 SSH 로 <code>portperfshow</code> 를 표본 시간만큼 받아쓰고,
+            마지막 화면 1벌의 <b>포트별 바이트/초</b>를 DB 에 저장합니다. 즉 표본 1개는 그 순간(약 1초 창)의 처리량이며, <b>수집 주기 사이의 순간 변동은 관측되지 않습니다</b>(정직한 한계).</div>
+          <div><b>② 버킷</b> — 조회 구간({scope || `최근 ${hours}시간`})을 120 등분(하한 60초)한 폭이 버킷입니다. 지금은 <b>{bw}</b>. 버킷마다 포트별로 표본의 <b>평균(AVG)</b>과 <b>최댓값(MAX)</b>을 계산합니다. 구간이 길수록 버킷이 넓어집니다.</div>
+          <div><b>③ 평균 기준</b> — 버킷 안 포트별 AVG 를 같은 스토리지(어레이)에 물린 포트끼리 <b>합산</b>한 선입니다. 표의 '평균'은 이 선의 평균, '최대'는 이 선의 최댓값입니다. 지속 부하(평소 사용량)를 보는 데 맞고, 구간이 길면 순간 피크가 평균에 깎입니다.</div>
+          <div><b>④ 피크 기준</b> — 버킷 안 포트별 MAX 를 같은 스토리지의 포트끼리 <b>합산</b>한 선입니다. 표의 '평균'은 이 선의 평균, '최대'는 기간 내 최고 피크입니다. 포화·증설 판단에 맞습니다. ⚠ 포트마다 최댓값이 찍힌 시각이 다를 수 있어 "동시에 발생한 총량"보다 <b>크거나 같은 상한값</b>입니다.</div>
+          <div><b>⑤ 법인 카드·전체 합계</b> — 스토리지별 값의 <b>단순 합</b>입니다. 각 스토리지의 최댓값 시각이 다르므로 카드의 '최대'는 동시 최대가 아니라 상한입니다(예: A 가 10시에 200, B 가 14시에 150 이면 카드 최대 350).</div>
+          <div><b>⑥ 단위·합산</b> — 스위치 보고값(바이트/초) × 8 = bps 로 표시합니다. 스토리지는 이중화를 위해 팹 A/B 두 스위치에 나눠 물리므로 법인 분석은 <b>모든 스위치를 합산</b>합니다. 엣지 위임 스위치의 시계열은 그 엣지에만 있어 중앙 합산에 빠집니다(안내 배너로 표시).</div>
+          <div><b>⑦ 빈 구간</b> — 표본이 없는 버킷은 0 이 아니라 '없음'(선이 끊김)으로 두고 평균에서도 제외합니다. 0 으로 채우면 조회 범위를 넓힐수록 평균이 내려가는 왜곡이 생깁니다.</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** 제목 클릭 정렬 헤더(v2.412, 사용자 요구 '타이틀별로 소팅'). 분석 표 두 곳이 공유한다. */
 function SortTh({ k, label, sort, setSort, title, style }) {
   const on = sort.key === k;
@@ -459,6 +547,8 @@ const tsLabel = (ts, hours) => {
  */
 function PerfPanel({ deviceId, ports }) {
   const [hours, setHours] = useState(24);
+  const [range, setRange] = useState(null);     // {from,to} ms — 기간 지정(v2.420)
+  const [mode, setMode] = useState('avg');      // 'avg' | 'peak' (v2.420)
   const [view, setView] = useState('port');     // 'port' | 'storage'
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
@@ -480,11 +570,11 @@ function PerfPanel({ deviceId, ports }) {
     setData(null); setError(null);
     const v = view;
     const path = v === 'storage' ? `/tools/sanswitch/devices/${deviceId}/perf/storage` : `/tools/sanswitch/devices/${deviceId}/perf`;
-    fetchJson(path, { hours })
+    fetchJson(path, perfQuery({ hours, range }))
       .then((d) => { if (alive) setData({ ...d, view: v }); })
       .catch((e) => { if (alive) setError(e.message); });
     return () => { alive = false; };
-  }, [deviceId, hours, view]);
+  }, [deviceId, hours, range, view]);
 
   // 포트 현재 속도(포화도 계산용) — 목록 스냅샷에서 가져온다.
   const speedOf = useMemo(() => {
@@ -501,9 +591,12 @@ function PerfPanel({ deviceId, ports }) {
     ? raw.reduce((a, s) => { const k = kindOf(s.key); a[k] = (a[k] || 0) + 1; a.all = (a.all || 0) + 1; return a; }, {})
     : {};
   const rawShown = view === 'storage' && kind !== 'all' ? raw.filter((s) => kindOf(s.key) === kind) : raw;
+  // 보기 기준(v2.420): 평균 = 버킷 AVG(합), 피크 = 버킷 MAX(합). 서버가 둘 다 내려주고 화면이 고른다.
+  const peak = mode === 'peak';
   const seriesAll = view === 'storage'
-    ? rawShown.map((s) => ({ key: s.key, label: `${s.key} (포트 ${(s.ports || []).length})`, values: s.sum || [], portCount: (s.ports || []).length, kind: kindOf(s.key) }))
-    : rawShown.map((s) => ({ key: `p${s.port}`, label: `${s.port}${s.name ? ` · ${shortDeviceName(s.name, 24)}` : ''}`, values: s.avg || [], rawMax: s.max, port: s.port, speed: s.speed, name: s.name }));
+    ? rawShown.map((s) => ({ key: s.key, label: `${s.key} (포트 ${(s.ports || []).length})`, values: (peak ? s.peak : s.sum) || [], portCount: (s.ports || []).length, kind: kindOf(s.key) }))
+    : rawShown.map((s) => ({ key: `p${s.port}`, label: `${s.port}${s.name ? ` · ${shortDeviceName(s.name, 24)}` : ''}`, values: (peak ? s.peak : s.avg) || [], rawMax: s.max, port: s.port, speed: s.speed, name: s.name }));
+  const effHours = shown?.hours || hours;
   const top = topSeries(seriesAll, 8);
   const rows = toChartRows(shown?.buckets || [], top);
 
@@ -547,12 +640,11 @@ function PerfPanel({ deviceId, ports }) {
             {label}{kindCounts[k] != null ? ` ${kindCounts[k]}` : ''}
           </button>
         ))}
-        <span className="muted" style={{ marginLeft: 8, fontSize: 12 }}>기간</span>
-        {HOURS.map(([h, label]) => (
-          <button key={h} className={hours === h ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '4px 10px' }}
-            onClick={() => setHours(h)}>{label}</button>
-        ))}
+        <ModePicker mode={mode} setMode={setMode} />
+        <RangePicker hours={hours} setHours={setHours} range={range} setRange={setRange} />
       </div>
+      {shown && <div style={{ marginBottom: 6 }}><MetricHelp mode={mode} bucketMs={shown.bucketMs} hours={effHours} scope={range ? rangeLabel(range) : ''} /></div>}
+      {shown?.rangeIssue && <div className="card muted" style={{ fontSize: 12, borderColor: 'var(--amber)' }}>⚠ 기간 지정 무시됨: {shown.rangeIssue} — 최근 24시간으로 표시합니다.</div>}
 
       {error && <ErrorBox message={error} />}
       {!error && !shown && <Loading />}
@@ -573,13 +665,13 @@ function PerfPanel({ deviceId, ports }) {
         <>
           <div className="card" style={{ padding: 8, marginBottom: 8 }}>
             <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>
-              {view === 'storage' ? '연결 스토리지별 합산 처리량' : '포트별 처리량'} · 평균 사용량 상위 {top.length}개 ·
-              값은 스위치가 보고한 바이트/초를 bps 로 환산한 것입니다.
+              {view === 'storage' ? '연결 스토리지별 합산 처리량' : '포트별 처리량'} · <b>{peak ? '피크 기준(버킷 안 최댓값)' : '평균 기준(버킷 안 평균)'}</b> · 버킷 폭 {bucketText(shown.bucketMs)} ·
+              {' '}상위 {top.length}개 · 값은 스위치가 보고한 바이트/초를 bps 로 환산한 것입니다.
             </div>
             <ResponsiveContainer width="100%" height={260}>
               <LineChart data={rows} margin={{ top: 4, right: 12, bottom: 4, left: 4 }}>
                 <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
-                <XAxis dataKey="ts" tickFormatter={(t) => tsLabel(t, hours)} fontSize={11} minTickGap={28} />
+                <XAxis dataKey="ts" tickFormatter={(t) => tsLabel(t, effHours)} fontSize={11} minTickGap={28} />
                 <YAxis tickFormatter={(v) => bps(v * 8)} fontSize={11} width={78} />
                 <Tooltip
                   labelFormatter={(t) => new Date(t).toLocaleString()}
@@ -601,8 +693,10 @@ function PerfPanel({ deviceId, ports }) {
                   <SortTh k="name" label={view === 'storage' ? '스토리지' : '포트'} sort={sort} setSort={setSort} />
                   <SortTh k="attached" label={view === 'storage' ? '포트 수' : '연결 장비'} sort={sort} setSort={setSort} />
                   {view === 'port' && <SortTh k="speed" label="속도" sort={sort} setSort={setSort} />}
-                  <SortTh k="avg" label="평균" sort={sort} setSort={setSort} />
-                  <SortTh k="max" label="최대" sort={sort} setSort={setSort} />
+                  <SortTh k="avg" label="평균" sort={sort} setSort={setSort}
+                    title={peak ? '피크 기준: 버킷별 최댓값(포트별 MAX 합) 선의 평균입니다.' : '평균 기준: 버킷별 평균(포트별 AVG 합) 선의 평균입니다.'} />
+                  <SortTh k="max" label="최대" sort={sort} setSort={setSort}
+                    title={view === 'port' ? '기간 안 원시 표본의 최댓값(MAX)입니다 — 버킷 폭과 무관한 실제 피크.' : (peak ? '피크 기준: 기간 내 최고 피크(버킷별 포트 MAX 합의 최댓값)입니다.' : '평균 기준: 버킷별 평균 합 선의 최댓값입니다. 버킷이 넓을수록 실제 피크보다 낮게 나옵니다.')} />
                   {view === 'port' && <SortTh k="sat" label="포화도(최대)" sort={sort} setSort={setSort}
                     title="최대 처리량 ÷ 협상 속도. 속도를 모르는 포트는 판정하지 않습니다(빈칸이며 정렬에서도 뒤로 갑니다)." />}
                 </tr>
@@ -654,6 +748,8 @@ function PerfPanel({ deviceId, ports }) {
  */
 function DcStoragePerf({ dcPerf, onClose }) {
   const [hours, setHours] = useState(24);
+  const [range, setRange] = useState(null);     // 기간 지정(v2.420)
+  const [mode, setMode] = useState('avg');      // 평균/피크 기준(v2.420)
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   // 기본은 스토리지 어레이만 — 법인 합산이면 서버 HBA 가 수십 개 잡혀 표를 덮는다(실측 64개).
@@ -670,12 +766,17 @@ function DcStoragePerf({ dcPerf, onClose }) {
   useEffect(() => {
     let alive = true;
     setData(null); setError(null);
-    fetchJson('/tools/sanswitch/perf/storage-summary', { datacenterId: dcParam, hours, split: split ? '1' : '0' })
+    fetchJson('/tools/sanswitch/perf/storage-summary', { datacenterId: dcParam, ...perfQuery({ hours, range }), split: split ? '1' : '0' })
       .then((d) => { if (alive) setData(d); })
       .catch((e) => { if (alive) setError(e.message); });
     return () => { alive = false; };
-  }, [dcParam, hours, split]);
+  }, [dcParam, hours, range, split]);
 
+  // 보기 기준(v2.420): 평균 = sum/avgTotal/maxTotal, 피크 = peak/peakAvg/peakTotal. 정렬 키와 표시 값이 같은 계산이어야 한다.
+  const peak = mode === 'peak';
+  const avgOf = (s) => (peak ? (s.peakAvg || 0) : s.avgTotal);
+  const maxOf = (s) => (peak ? (s.peakTotal || 0) : s.maxTotal);
+  const effHours = data?.hours || hours;
   const series = (data?.series || []).filter((s) => kind === 'all' || s.endpointKind === kind);
   const multiDc = dcSet.size !== 1;   // 법인 2곳 이상 또는 전체 — 그때만 분리/합산이 의미 있다
   const showDcCol = !!data?.split;
@@ -684,17 +785,17 @@ function DcStoragePerf({ dcPerf, onClose }) {
     // 접두어가 없으면 범례에서 구분할 수 없다.
     key: `${s.datacenterId ?? ''}\u0000${s.key}`,
     label: `${showDcCol && s.datacenterName ? `${s.datacenterName} · ` : ''}${s.key} (스위치 ${s.switches.length}·포트 ${s.portCount})`,
-    values: s.sum,
+    values: (peak ? s.peak : s.sum) || [],
   })), 8);
   const rows = toChartRows(data?.buckets || [], chartSeries);
-  const grand = series.reduce((a, s) => a + s.avgTotal, 0);
+  const grand = series.reduce((a, s) => a + avgOf(s), 0);
   const SORTERS = {
     dc: (s) => s.datacenterName || null,
     name: (s) => s.key,
     switches: (s) => s.switches.length,
     ports: (s) => s.portCount,
-    avg: (s) => s.avgTotal,
-    max: (s) => s.maxTotal,
+    avg: avgOf,
+    max: maxOf,
     cap: (s) => (s.capacity?.pct ?? null),   // 용량 미매칭은 null → 항상 뒤로
   };
   const sorted = sortRows(series, SORTERS[sort.key] || SORTERS.avg, sort.dir, (s) => s.key);
@@ -704,8 +805,8 @@ function DcStoragePerf({ dcPerf, onClose }) {
   // 법인 소계 앞에 '전체 합계'를 둔다 — 법인별로 나눠 보면서도 전사 총량을 함께 봐야
   // '어느 법인이 전체의 몇 %인가'를 판단할 수 있다.
   const dcTotals = data?.byDatacenter || [];
-  const grandAvg = dcTotals.reduce((a, d) => a + d.avgTotal, 0);
-  const grandMax = dcTotals.reduce((a, d) => a + d.maxTotal, 0);
+  const grandAvg = dcTotals.reduce((a, d) => a + avgOf(d), 0);
+  const grandMax = dcTotals.reduce((a, d) => a + maxOf(d), 0);
 
   return (
     <Modal title={`스토리지 사용량 분석 — ${scopeLabel}`} onClose={onClose} width={1180}>
@@ -750,17 +851,16 @@ function DcStoragePerf({ dcPerf, onClose }) {
             {split ? '🏢 법인별 분리' : '🔗 법인 합산'}
           </button>
         )}
-        <span className="muted" style={{ fontSize: 12, marginLeft: 6 }}>기간</span>
-        {HOURS.map(([h, label]) => (
-          <button key={h} className={hours === h ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '4px 10px' }}
-            onClick={() => setHours(h)}>{label}</button>
-        ))}
+        <ModePicker mode={mode} setMode={setMode} />
+        <RangePicker hours={hours} setHours={setHours} range={range} setRange={setRange} />
         {data && (
-          <span className="muted" style={{ marginLeft: 'auto', fontSize: 12 }}>
-            스위치 {data.switches.length}대 합산 · {series.length}개 · 평균 합 {bytesPerSecText(grand)}
+          <span className="muted" style={{ marginLeft: 'auto', fontSize: 12 }} title={peak ? '표시 중인 스토리지들의 피크 기준 평균(버킷별 MAX 합 선의 평균)을 더한 값' : '표시 중인 스토리지들의 평균 기준 평균을 더한 값'}>
+            스위치 {data.switches.length}대 합산 · {series.length}개 · {peak ? '피크 평균 합' : '평균 합'} {bytesPerSecText(grand)}
           </span>
         )}
       </div>
+      {data && <div style={{ marginBottom: 6 }}><MetricHelp mode={mode} bucketMs={data.bucketMs} hours={effHours} scope={range ? rangeLabel(range) : ''} /></div>}
+      {data?.rangeIssue && <div className="card muted" style={{ fontSize: 12, borderColor: 'var(--amber)' }}>⚠ 기간 지정 무시됨: {data.rangeIssue} — 최근 24시간으로 표시합니다.</div>}
 
       {error && <ErrorBox message={error} />}
       {!error && !data && <Loading />}
@@ -783,14 +883,14 @@ function DcStoragePerf({ dcPerf, onClose }) {
       {!!dcTotals.length && data.split && (
         <div className="kpis" style={{ marginBottom: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))' }}>
           {dcTotals.length > 1 && (
-            <Kpi label="🌐 전체 합계" value={bytesPerSecText(grandAvg)} accent="var(--blue)"
-              meta={`법인 ${dcTotals.length} · 스토리지 ${dcTotals.reduce((a, d) => a + d.storages, 0)} · 최대 ${bytesPerSecText(grandMax)}`} />
+            <Kpi label={`🌐 전체 합계(${peak ? '피크' : '평균'} 기준)`} value={bytesPerSecText(grandAvg)} accent="var(--blue)"
+              meta={`법인 ${dcTotals.length} · 스토리지 ${dcTotals.reduce((a, d) => a + d.storages, 0)} · 최대 ${bytesPerSecText(grandMax)}(법인별 최댓값의 단순 합 — 동시 최대가 아닌 상한)`} />
           )}
           {dcTotals.map((d) => (
-            <Kpi key={d.datacenterId || '_'} label={`🏢 ${d.name}`} value={bytesPerSecText(d.avgTotal)}
-              pct={grandAvg ? Math.round((d.avgTotal / grandAvg) * 100) : undefined}
-              meta={`스토리지 ${d.storages} · 스위치 ${d.switches} · 최대 ${bytesPerSecText(d.maxTotal)}`
-                + (dcTotals.length > 1 && grandAvg ? ` · 전체의 ${Math.round((d.avgTotal / grandAvg) * 100)}%` : '')} />
+            <Kpi key={d.datacenterId || '_'} label={`🏢 ${d.name}`} value={bytesPerSecText(avgOf(d))}
+              pct={grandAvg ? Math.round((avgOf(d) / grandAvg) * 100) : undefined}
+              meta={`스토리지 ${d.storages} · 스위치 ${d.switches} · 최대 ${bytesPerSecText(maxOf(d))}(스토리지별 최댓값의 합)`
+                + (dcTotals.length > 1 && grandAvg ? ` · 전체의 ${Math.round((avgOf(d) / grandAvg) * 100)}%` : '')} />
           ))}
         </div>
       )}
@@ -799,13 +899,13 @@ function DcStoragePerf({ dcPerf, onClose }) {
         <>
           <div className="card" style={{ padding: 8, marginBottom: 8 }}>
             <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>
-              스토리지별 합산 처리량({data.split ? '법인별로 분리' : '법인 구분 없이 합산'}) · 평균 사용량 상위 {chartSeries.length}개 ·
-              스위치가 여러 대인 항목은 팹 A/B 를 합친 값입니다.
+              스토리지별 합산 처리량({data.split ? '법인별로 분리' : '법인 구분 없이 합산'}) · <b>{peak ? '피크 기준(버킷 안 포트별 최댓값 합)' : '평균 기준(버킷 안 포트별 평균 합)'}</b> · 버킷 폭 {bucketText(data.bucketMs)} ·
+              상위 {chartSeries.length}개 · 스위치가 여러 대인 항목은 팹 A/B 를 합친 값입니다.
             </div>
             <ResponsiveContainer width="100%" height={250}>
               <LineChart data={rows} margin={{ top: 4, right: 12, bottom: 4, left: 4 }}>
                 <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
-                <XAxis dataKey="ts" tickFormatter={(t) => tsLabel(t, hours)} fontSize={11} minTickGap={28} />
+                <XAxis dataKey="ts" tickFormatter={(t) => tsLabel(t, effHours)} fontSize={11} minTickGap={28} />
                 <YAxis tickFormatter={(v) => bps(v * 8)} fontSize={11} width={78} />
                 <Tooltip labelFormatter={(t) => new Date(t).toLocaleString()} formatter={(v, name) => [bytesPerSecText(v), name]} />
                 <Legend wrapperStyle={{ fontSize: 11 }} />
@@ -830,8 +930,10 @@ function DcStoragePerf({ dcPerf, onClose }) {
                   <SortTh k="name" label="스토리지" sort={sort} setSort={setSort} />
                   <SortTh k="switches" label="연결 스위치" sort={sort} setSort={setSort} />
                   <SortTh k="ports" label="포트" sort={sort} setSort={setSort} />
-                  <SortTh k="avg" label="평균" sort={sort} setSort={setSort} />
-                  <SortTh k="max" label="최대" sort={sort} setSort={setSort} />
+                  <SortTh k="avg" label="평균" sort={sort} setSort={setSort}
+                    title={peak ? '피크 기준: 버킷별 포트 MAX 합 선의 평균입니다(평소 피크 수준).' : '평균 기준: 버킷별 포트 AVG 합 선의 평균입니다(평소 사용량).'} />
+                  <SortTh k="max" label="최대" sort={sort} setSort={setSort}
+                    title={peak ? '피크 기준: 기간 내 최고 피크(버킷별 포트 MAX 합의 최댓값). 포트마다 최댓값 시각이 다를 수 있어 동시 총량의 상한입니다.' : '평균 기준: 버킷별 평균 합 선의 최댓값. 버킷이 넓을수록(긴 기간) 실제 피크보다 낮게 나옵니다 — 피크는 "피크 기준"으로 보세요.'} />
                   <SortTh k="cap" label="용량 사용률" sort={sort} setSort={setSort}
                     title="등록된 스토리지 장비의 시리얼이 이 어레이 시리얼과 일치할 때만 표시합니다. 대역폭(바쁨)과 용량(참)은 다른 축이라 나란히 봐야 합니다. 미매칭은 정렬에서 뒤로 갑니다." />
                 </tr>
@@ -848,8 +950,8 @@ function DcStoragePerf({ dcPerf, onClose }) {
                     </td>
                     <td style={ELLIPSIS} title={s.switches.join(', ')}>{s.switches.join(', ')}</td>
                     <td>{s.portCount}</td>
-                    <td>{bytesPerSecText(s.avgTotal)}</td>
-                    <td>{bytesPerSecText(s.maxTotal)}</td>
+                    <td>{bytesPerSecText(avgOf(s))}</td>
+                    <td>{bytesPerSecText(maxOf(s))}</td>
                     <td>
                       {s.capacity
                         ? <span title={`${s.capacity.name} (${s.capacity.type})`}>

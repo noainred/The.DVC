@@ -16,6 +16,7 @@
  *  - node:sqlite 미지원 환경은 no-op 폴백(수집·화면은 살아있고 DB 만 비활성 — available() 로 정직 표기)
  */
 
+import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 
@@ -84,8 +85,35 @@ export async function savePerfSample(deviceId, ts, samples = {}, meta = [], rete
 function pruneOld(db, retentionDays) {
   try {
     const cut = Date.now() - Math.max(1, Number(retentionDays) || 90) * 86400e3;
-    db.conn.prepare('DELETE FROM port_perf WHERE ts < ?').run(cut); // ts 단독 인덱스로 탐색
-  } catch (e) { console.warn(`[sanswitch-perf] prune 실패: ${e.message}`); }
+    return db.conn.prepare('DELETE FROM port_perf WHERE ts < ?').run(cut); // ts 단독 인덱스로 탐색
+  } catch (e) { console.warn(`[sanswitch-perf] prune 실패: ${e.message}`); return null; }
+}
+
+/** 보관 기간 즉시 적용(v2.420, 설정 화면 '지금 정리') — 삭제 행 수를 돌려준다. */
+export async function pruneNow(retentionDays) {
+  const db = await open();
+  if (!db) return { deleted: 0, unavailable: true };
+  const r = pruneOld(db, retentionDays);
+  return { deleted: Number(r?.changes || 0) };
+}
+
+/**
+ * 조회 구간(v2.420) — hours(최근 N시간) 또는 from/to(사용자 지정 기간, ms). 버킷 폭은 구간을 points 개로 나눈 값
+ * (하한 60초). 구간이 길수록 버킷이 넓어져 평균은 더 평탄해진다(화면 설명에 명시).
+ */
+export function rangeOf({ hours = 24, from = null, to = null, points = 120 } = {}) {
+  const now = Date.now();
+  let since, until;
+  if (Number.isFinite(Number(from)) && Number(from) > 0) {
+    since = Number(from);
+    until = Number.isFinite(Number(to)) && Number(to) > since ? Number(to) : now;
+  } else {
+    until = now;
+    since = now - Math.max(1, hours) * 3600e3;
+  }
+  const span = Math.max(60_000, until - since);
+  const bucketMs = Math.max(60_000, Math.round(span / Math.max(10, points)));
+  return { since, until, bucketMs, spanHours: span / 3600e3 };
 }
 
 /**
@@ -93,18 +121,17 @@ function pruneOld(db, retentionDays) {
  * (버킷 = 요청 구간을 points 개로 나눈 폭). 원시 점을 수만 개 던지면 브라우저가 멈춘다.
  * @returns { buckets:[ts...], series:[{port, name, speed, avg[], max}], bucketMs }
  */
-export async function portSeries(deviceId, { hours = 24, ports = null, points = 120 } = {}) {
+export async function portSeries(deviceId, { hours = 24, ports = null, points = 120, from = null, to = null } = {}) {
   const db = await open();
   if (!db) return { buckets: [], series: [], bucketMs: 0, unavailable: true };
-  const since = Date.now() - Math.max(1, hours) * 3600e3;
-  const bucketMs = Math.max(60_000, Math.round((hours * 3600e3) / Math.max(10, points)));
+  const { since, until, bucketMs } = rangeOf({ hours, from, to, points });
   const filter = ports?.length ? ` AND port IN (${ports.map(() => '?').join(',')})` : '';
   const rows = db.conn.prepare(
     `SELECT port, (ts / ${bucketMs}) AS b, AVG(bps) AS avg_bps, MAX(bps) AS max_bps
-       FROM port_perf WHERE device_id = ? AND ts >= ?${filter}
+       FROM port_perf WHERE device_id = ? AND ts >= ? AND ts <= ?${filter}
       GROUP BY port, b ORDER BY b ASC`,
-  ).all(String(deviceId), since, ...(ports || []));
-  return shape(db, deviceId, rows, bucketMs, since);
+  ).all(String(deviceId), since, until, ...(ports || []));
+  return { ...shape(db, deviceId, rows, bucketMs, since), until };
 }
 
 function shape(db, deviceId, rows, bucketMs, since) {
@@ -119,10 +146,11 @@ function shape(db, deviceId, rows, bucketMs, since) {
     if (!byPort.has(p)) {
       const m = meta.get(p) || {};
       byPort.set(p, { port: p, name: m.attached_name || '', speed: m.speed || '', portType: m.port_type || '',
-        avg: new Array(buckets.length).fill(null), max: 0 });
+        avg: new Array(buckets.length).fill(null), peak: new Array(buckets.length).fill(null), max: 0 });
     }
     const s = byPort.get(p);
     s.avg[idx.get(Number(r.b))] = Math.round(Number(r.avg_bps));
+    s.peak[idx.get(Number(r.b))] = Math.round(Number(r.max_bps)); // 버킷 안 원시 표본 최댓값(v2.420 '피크 기준' 보기)
     s.max = Math.max(s.max, Math.round(Number(r.max_bps)));
   }
   return { buckets, bucketMs, since, series: [...byPort.values()].sort((a, b) => a.port - b.port) };
@@ -133,16 +161,15 @@ function shape(db, deviceId, rows, bucketMs, since) {
  * 볼 수 있게'. 같은 어레이에 여러 포트가 물려 있으므로(SYMMETRIX 의 SAF-1d/3d/5d…) 포트
  * 처리량을 **어레이 단위로 합산**해야 그 스토리지가 실제로 얼마나 쓰이는지 보인다.
  */
-export async function storageSeries(deviceId, { hours = 24, points = 120 } = {}) {
+export async function storageSeries(deviceId, { hours = 24, points = 120, from = null, to = null } = {}) {
   const db = await open();
   if (!db) return { buckets: [], series: [], unavailable: true };
-  const since = Date.now() - Math.max(1, hours) * 3600e3;
-  const bucketMs = Math.max(60_000, Math.round((hours * 3600e3) / Math.max(10, points)));
+  const { since, until, bucketMs } = rangeOf({ hours, from, to, points });
   const rows = db.conn.prepare(
-    `SELECT p.port AS port, (p.ts / ${bucketMs}) AS b, AVG(p.bps) AS avg_bps
-       FROM port_perf p WHERE p.device_id = ? AND p.ts >= ?
+    `SELECT p.port AS port, (p.ts / ${bucketMs}) AS b, AVG(p.bps) AS avg_bps, MAX(p.bps) AS max_bps
+       FROM port_perf p WHERE p.device_id = ? AND p.ts >= ? AND p.ts <= ?
       GROUP BY p.port, b ORDER BY b ASC`,
-  ).all(String(deviceId), since);
+  ).all(String(deviceId), since, until);
   const metaRows = db.conn.prepare('SELECT port, attached_name FROM port_meta WHERE device_id = ?').all(String(deviceId));
   const groupOf = new Map(metaRows.map((m) => [Number(m.port), storageKey(m.attached_name)]));
 
@@ -157,22 +184,29 @@ export async function storageSeries(deviceId, { hours = 24, points = 120 } = {})
   const byGroup = new Map();
   for (const r of rows) {
     const g = groupOf.get(Number(r.port)) || '(미확인)';
-    if (!byGroup.has(g)) byGroup.set(g, { key: g, ports: new Set(), sum: new Array(buckets.length).fill(null) });
+    if (!byGroup.has(g)) byGroup.set(g, { key: g, ports: new Set(), sum: new Array(buckets.length).fill(null), peak: new Array(buckets.length).fill(null) });
     const s = byGroup.get(g);
     s.ports.add(Number(r.port));
     const i = idx.get(Number(r.b));
     s.sum[i] = (s.sum[i] ?? 0) + Math.round(Number(r.avg_bps));
+    // 피크 시리즈(v2.420): 버킷 안 **포트별 원시 샘플 최댓값(MAX)** 을 포트 간 합산. 평균 시리즈보다 피크에 가깝지만
+    // 포트마다 최댓값 시각이 다를 수 있어 '동시 발생 총량'의 상한(≥ 실제 동시 피크)이다 — 화면 설명에 명시.
+    s.peak[i] = (s.peak[i] ?? 0) + Math.round(Number(r.max_bps));
   }
   const series = [...byGroup.values()]
     .map((s) => {
       const vals = s.sum.filter((v) => v != null);
+      const pv = s.peak.filter((v) => v != null);
       return {
-        key: s.key, ports: [...s.ports].sort((a, b) => a - b), sum: s.sum,
+        key: s.key, ports: [...s.ports].sort((a, b) => a - b), sum: s.sum, peak: s.peak,
         avgTotal: vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0,
+        maxTotal: vals.length ? Math.max(...vals) : 0,
+        peakAvg: pv.length ? pv.reduce((a, b) => a + b, 0) / pv.length : 0,
+        peakTotal: pv.length ? Math.max(...pv) : 0,
       };
     })
     .sort((a, b) => b.avgTotal - a.avgTotal);
-  return { buckets, bucketMs, since, series };
+  return { buckets, bucketMs, since, until, series };
 }
 
 /**
@@ -199,17 +233,16 @@ export function storageKey(name) {
  * @param deviceIds 합산할 스위치 id 배열(법인 필터 결과)
  * @returns { buckets, bucketMs, series:[{ key, ports:[{deviceId,port}], deviceIds[], sum[], avgTotal, maxTotal }] }
  */
-export async function storageSeriesMulti(deviceIds = [], { hours = 24, points = 120, groupOf = null } = {}) {
+export async function storageSeriesMulti(deviceIds = [], { hours = 24, points = 120, groupOf = null, from = null, to = null } = {}) {
   const db = await open();
   if (!db || !deviceIds.length) return { buckets: [], series: [], bucketMs: 0, unavailable: !db };
-  const since = Date.now() - Math.max(1, hours) * 3600e3;
-  const bucketMs = Math.max(60_000, Math.round((hours * 3600e3) / Math.max(10, points)));
+  const { since, until, bucketMs } = rangeOf({ hours, from, to, points });
   const ph = deviceIds.map(() => '?').join(',');
   const rows = db.conn.prepare(
-    `SELECT device_id, port, (ts / ${bucketMs}) AS b, AVG(bps) AS avg_bps
-       FROM port_perf WHERE device_id IN (${ph}) AND ts >= ?
+    `SELECT device_id, port, (ts / ${bucketMs}) AS b, AVG(bps) AS avg_bps, MAX(bps) AS max_bps
+       FROM port_perf WHERE device_id IN (${ph}) AND ts >= ? AND ts <= ?
       GROUP BY device_id, port, b ORDER BY b ASC`,
-  ).all(...deviceIds.map(String), since);
+  ).all(...deviceIds.map(String), since, until);
   const metaRows = db.conn.prepare(`SELECT device_id, port, attached_name FROM port_meta WHERE device_id IN (${ph})`)
     .all(...deviceIds.map(String));
   const storageOf = new Map(metaRows.map((m) => [`${m.device_id}|${m.port}`, storageKey(m.attached_name)]));
@@ -226,22 +259,26 @@ export async function storageSeriesMulti(deviceIds = [], { hours = 24, points = 
     const gk = groupOf ? `${g}\u0000${st}` : st;
     // 0 이 아니라 null 로 시작한다 — 버킷은 조회에 포함된 전 장비의 합집합이라, 비어 있는
     // 버킷을 0 으로 세면 조회 범위를 넓힐수록 평균이 내려간다(위 storageSeries 머리말 참조).
-    if (!byGroup.has(gk)) byGroup.set(gk, { key: st, group: g, ports: new Map(), sum: new Array(buckets.length).fill(null) });
+    if (!byGroup.has(gk)) byGroup.set(gk, { key: st, group: g, ports: new Map(), sum: new Array(buckets.length).fill(null), peak: new Array(buckets.length).fill(null) });
     const s = byGroup.get(gk);
     s.ports.set(`${r.device_id}|${Number(r.port)}`, { deviceId: String(r.device_id), port: Number(r.port) });
     const i = idx.get(Number(r.b));
     s.sum[i] = (s.sum[i] ?? 0) + Math.round(Number(r.avg_bps));
+    s.peak[i] = (s.peak[i] ?? 0) + Math.round(Number(r.max_bps)); // 포트별 버킷 MAX 의 합(위 storageSeries 주석 참조)
   }
   const series = [...byGroup.values()].map((s) => {
     const vals = s.sum.filter((v) => v != null);
+    const pv = s.peak.filter((v) => v != null);
     const ports = [...s.ports.values()];
     return {
-      key: s.key, group: s.group, ports, deviceIds: [...new Set(ports.map((p) => p.deviceId))], sum: s.sum,
-      avgTotal: vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0,
-      maxTotal: vals.length ? Math.max(...vals) : 0,
+      key: s.key, group: s.group, ports, deviceIds: [...new Set(ports.map((p) => p.deviceId))], sum: s.sum, peak: s.peak,
+      avgTotal: vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0,   // 버킷 평균 합의 평균
+      maxTotal: vals.length ? Math.max(...vals) : 0,                                 // 버킷 평균 합의 최댓값
+      peakAvg: pv.length ? pv.reduce((a, b) => a + b, 0) / pv.length : 0,           // 버킷 피크 합의 평균
+      peakTotal: pv.length ? Math.max(...pv) : 0,                                    // 버킷 피크 합의 최댓값(기간 내 최고 피크)
     };
   }).sort((a, b) => b.avgTotal - a.avgTotal);
-  return { buckets, bucketMs, since, series };
+  return { buckets, bucketMs, since, until, series };
 }
 
 /**
@@ -288,7 +325,11 @@ export async function perfDbStats() {
   try {
     const r = db.conn.prepare('SELECT COUNT(*) AS n, MIN(ts) AS oldest, MAX(ts) AS newest FROM port_perf').get();
     const d = db.conn.prepare('SELECT COUNT(DISTINCT device_id) AS n FROM port_perf').get();
-    return { available: true, rows: Number(r?.n || 0), oldest: Number(r?.oldest || 0), newest: Number(r?.newest || 0), devices: Number(d?.n || 0), file: FILE() };
+    const day = db.conn.prepare('SELECT COUNT(*) AS n FROM port_perf WHERE ts >= ?').get(Date.now() - 86400e3);
+    let fileBytes = 0;
+    for (const suf of ['', '-wal']) { try { fileBytes += fs.statSync(FILE() + suf).size; } catch { /* */ } }
+    return { available: true, rows: Number(r?.n || 0), oldest: Number(r?.oldest || 0), newest: Number(r?.newest || 0), devices: Number(d?.n || 0), file: FILE(),
+      fileBytes, rowsLastDay: Number(day?.n || 0) };
   } catch (e) { return { available: true, error: e.message }; }
 }
 
