@@ -436,6 +436,11 @@ HostMonitor 의 RMA(Remote Monitoring Agent) 를 참고한 **엣지 별도 프�
 - **엣지 설정(portal.env)**: `RMA_ENABLED=true` `RMA_INSTANCES=default`(공백 구분) `RMA_PASSWORD=…`
   `RMA_ALLOW_CUSTOM=false` `RMA_LONGPOLL_MS=20000` `RMA_MAX_OUTPUT=262144`. 인스턴스별 `rma-<이름>.env` 에
   `RMA_INSTANCE`/`RMA_PRIORITY`. 수동 기동: `systemctl enable --now vmware-portal-rma@default`.
+- **이력**: 실행 이력은 중앙 `rma-history.db`(sqlite, `RMA_HISTORY_DAYS` 기본 90일, 행당 출력 64KB)에 남는다(v2.417).
+  node:sqlite 가 없는 환경은 메모리 링(300건)으로 폴백.
+- **관련 튜닝(v2.417)**: `STORAGE_DEVICE_TIMEOUT_MS`(스토리지 장비당 수집 타임아웃, 기본 180000) ·
+  `SANSW_PERF_DEVICE_TIMEOUT_MS`(포트 사용량 장비당, 기본 접속 60초+캡처×2+30초) · `SANSW_PUSH_CHUNK_BYTES`(엣지 push
+  청크, 기본 700KB) · `SANSW_PUSH_GZIP`(기본 true) · `SSH_EXEC_MAX_OUTPUT`(SSH 명령 출력 상한, 기본 4MB).
 - **배포**: 화면의 'RMA 배포(SSH root)' 가 `systemctl show vmware-portal` 로 설치 경로/계정을 역추적해 템플릿
   유닛·인스턴스 env·sudoers(포탈 재시작 한 줄, visudo 검증)를 쓰고 기동한다. 오프라인 패키지 `install.sh` 도
   `RMA_ENABLED=true` 면 인스턴스를 기동한다. 엣지가 v2.416 이상이어야 한다.

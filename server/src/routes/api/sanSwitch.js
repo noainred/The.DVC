@@ -42,6 +42,8 @@ const listShape = (s) => {
 };
 
 /** `?ports=1,2,3` 파싱(순수). 빈 값/빈 토큰은 무시 — `''.split(',')` → [''] → Number('') → 0 함정 방지. */
+export const NONE_DC = '__none__';
+
 export function parsePortsParam(v) {
   return String(v || '').split(',').map((x) => x.trim()).filter(Boolean).map(Number).filter(Number.isInteger).slice(0, 64);
 }
@@ -219,13 +221,18 @@ api.get('/tools/sanswitch/devices/:id/perf/storage', toolsPerm, fullScopeOnly, a
 api.get('/tools/sanswitch/perf/storage-summary', toolsPerm, fullScopeOnly, async (req, res) => {
   const hours = Math.max(1, Math.min(24 * 90, Number(req.query.hours) || 24));
   // 법인은 **여러 개**를 받을 수 있다(쉼표 구분). 빈 값이면 전체.
-  const dcs = String(req.query.datacenterId || '').split(',').map((x) => x.trim()).filter(Boolean);
+  // '__none__' 은 법인 미지정 장비(datacenterId 빈 값)를 뜻하는 센티널(v2.417) — 쉼표 목록은 '' 를
+  // 표현할 수 없어 예전에는 '(법인 미지정)' 을 고르면 전체로 둔갑했다(리뷰 확정).
+  const dcs = String(req.query.datacenterId || '').split(',').map((x) => x.trim()).filter(Boolean).map((x) => (x === NONE_DC ? '' : x));
   const dcSet = dcs.length ? new Set(dcs) : null;
   // split=1 이면 같은 어레이라도 법인마다 따로 집계한다(사용자 요구 — 복수 법인을 한꺼번에
   // 보면서도 법인 구분이 사라지지 않게). 기본은 법인이 2곳 이상일 때 자동 분리.
   const split = req.query.split == null ? dcs.length !== 1 : req.query.split === '1';
   const devices = listDevices().filter((d) => d.enabled !== false && (!dcSet || dcSet.has(String(d.datacenterId || ''))));
   const ids = devices.map((d) => d.id);
+  // 엣지 위임 스위치(agent 지정)는 portperfshow 시계열이 **그 엣지 로컬 DB** 에만 있고 중앙으로 오지
+  // 않는다(push 는 스냅샷만). 빈 시리즈가 '트래픽 없음' 처럼 보이지 않게 개수와 사유를 함께 준다.
+  const edgeSwitches = devices.filter((d) => String(d.agent || '').trim()).map((d) => ({ id: d.id, name: d.name || d.host, agent: d.agent }));
   const groupOf = split ? new Map(devices.map((d) => [String(d.id), String(d.datacenterId || '')])) : null;
   const agg = await storageSeriesMulti(ids, { hours, groupOf });
 
@@ -288,13 +295,14 @@ api.get('/tools/sanswitch/perf/storage-summary', toolsPerm, fullScopeOnly, async
     const m = new Map();
     for (const d of listDevices().filter((x) => x.enabled !== false)) {
       const id = String(d.datacenterId || '');
-      if (!m.has(id)) m.set(id, { id, name: dcNameOf(id), switches: 0 });
+      if (!m.has(id)) m.set(id, { id: id || NONE_DC, name: dcNameOf(id), switches: 0 }); // 미지정은 센티널 id 로 내려 화면이 고를 수 있게
       m.get(id).switches++;
     }
     return [...m.values()].sort((a, b) => String(a.name).localeCompare(String(b.name)));
   })();
   res.json({
-    ok: true, unit: 'bytesPerSec', hours, datacenterIds: dcs, split, allDatacenters: allDcs,
+    ok: true, unit: 'bytesPerSec', hours, datacenterIds: dcs.map((x) => x || NONE_DC), split, allDatacenters: allDcs,
+    edgeSwitches, edgeNote: edgeSwitches.length ? `이 범위의 스위치 ${edgeSwitches.length}대는 엣지(${[...new Set(edgeSwitches.map((e) => e.agent))].join(', ')}) 수집이라 포트 사용량 시계열이 중앙에 없습니다 — 해당 엣지 포탈의 SAN 스위치 화면에서 확인하세요.` : '',
     byDatacenter: Object.values(byDc).map((x) => ({ ...x, switches: x.switches.size }))
       .sort((a, b) => b.avgTotal - a.avgTotal),
     switches: devices.map((d) => ({ id: d.id, name: d.name, host: d.host, datacenterId: d.datacenterId, datacenterName: dcNameOf(d.datacenterId) })),

@@ -6,11 +6,15 @@
 
 import { Client as SSHClient } from 'ssh2';
 
-function connect({ host, port = 22, username, password, privateKey, readyTimeout = Number(process.env.SSH_READY_TIMEOUT_MS) || 60000 }) {
+function connect({ host, port = 22, username, password, privateKey, readyTimeout = Number(process.env.SSH_READY_TIMEOUT_MS) || 60000, signal }) {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(new Error('SSH 접속 취소(타임아웃)'));
     const conn = new SSHClient();
-    conn.on('ready', () => resolve(conn));
-    conn.on('error', reject);
+    // 취소(signal) — 호출자의 장비당 타임아웃이 접속 대기 중에 만료되면 접속 시도 자체를 끊는다.
+    const onAbort = () => { try { conn.end(); } catch { /* */ } reject(new Error('SSH 접속 취소(타임아웃)')); };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    conn.on('ready', () => { signal?.removeEventListener('abort', onAbort); resolve(conn); });
+    conn.on('error', (e) => { signal?.removeEventListener('abort', onAbort); reject(e); });
     // password 대신 keyboard-interactive 만 허용하는 서버 지원(ssh2는 명시적으로 켜야 시도).
     // 같은 비밀번호로 모든 프롬프트에 응답한다.
     conn.on('keyboard-interactive', (name, instr, lang, prompts, finish) => {
@@ -27,20 +31,28 @@ function connect({ host, port = 22, username, password, privateKey, readyTimeout
 // 원격 명령이 hang 하면 'close' 이벤트가 오지 않아 이 Promise 가 영원히 미결로 남고,
 // 이를 await 하는 폴러(bmstor 수집 등)가 running=true 로 영구 고착된다(실측 장애). Promise.race
 // 대신 인라인 타이머로 stream 을 닫고 reject 해, 매달린 채널도 정리한다.
+// 출력 누적 상한(v2.417) — 고장 장비가 타임아웃까지 출력을 흘리면 메모리가 무한히 자란다.
+// 넘치면 채널을 닫고 reject(정직: 절단본을 성공으로 넘기지 않는다). execCapture 는 자체 2MB 캡.
+const EXEC_MAX_OUTPUT = Math.max(64 * 1024, Number(process.env.SSH_EXEC_MAX_OUTPUT) || 4 * 1024 * 1024);
 function exec(conn, command, timeoutMs = Number(process.env.SSH_EXEC_TIMEOUT_MS) || 60000) {
   return new Promise((resolve, reject) => {
     conn.exec(command, (err, stream) => {
       if (err) return reject(err);
-      let stdout = '', stderr = '', done = false;
+      let stdout = '', stderr = '', done = false, bytes = 0;
       const finish = (fn, arg) => { if (done) return; done = true; clearTimeout(timer); fn(arg); };
+      const kill = () => { try { stream.close?.(); } catch { /* */ } try { stream.destroy?.(); } catch { /* */ } };
       const timer = setTimeout(() => {
-        try { stream.close?.(); } catch { /* */ }
-        try { stream.destroy?.(); } catch { /* */ }
+        kill();
         finish(reject, new Error(`SSH exec 타임아웃(${Math.round(timeoutMs / 1000)}s): ${command}`));
       }, Math.max(1000, timeoutMs));
       timer.unref?.();
-      stream.on('data', (d) => { stdout += d.toString(); });
-      stream.stderr.on('data', (d) => { stderr += d.toString(); });
+      const onChunk = (which) => (d) => {
+        bytes += d.length;
+        if (bytes > EXEC_MAX_OUTPUT) { kill(); return finish(reject, new Error(`SSH exec 출력 상한(${Math.round(EXEC_MAX_OUTPUT / 1024)}KB) 초과: ${command}`)); }
+        if (which === 'out') stdout += d.toString(); else stderr += d.toString();
+      };
+      stream.on('data', onChunk('out'));
+      stream.stderr.on('data', onChunk('err'));
       stream.on('error', (e) => finish(reject, e));          // 채널/연결 오류로도 반드시 결말 짓는다
       stream.stderr.on('error', () => { /* stderr 스트림 오류는 비치명 — 무시 */ });
       stream.on('close', (code) => finish(resolve, { command, code, stdout, stderr }));
@@ -118,9 +130,19 @@ function sftpWriteFile(conn, path, content, mode = 0o644) {
  * Open a session, run fn({exec, readFile, writeFile, log}), and always close.
  * `log` accumulates {command, code, stdout, stderr} entries for the response.
  */
-export async function withSsh(creds, fn) {
-  const conn = await connect(creds);
+export async function withSsh(creds, fn, { signal = creds?.signal } = {}) {
+  const conn = await connect({ ...creds, signal });
   const log = [];
+  // 취소(signal, v2.417): 호출자의 장비당 타임아웃이 만료되면 **세션을 실제로 끊는다**. 예전에는
+  // 호출자가 Promise.race 로 결과만 포기하고 세션은 남은 명령을 끝까지 돌렸다(최대 ~8.5분) —
+  // 동시성 상한이 실효를 잃고 다음 주기가 같은 장비에 두 번째 세션을 열었다(리뷰 확정).
+  let onAbort = null;
+  const aborted = new Promise((_, reject) => {
+    if (!signal) return;
+    onAbort = () => { try { conn.end(); } catch { /* */ } reject(new Error('SSH 세션 취소(타임아웃)')); };
+    if (signal.aborted) onAbort(); else signal.addEventListener('abort', onAbort, { once: true });
+  });
+  aborted.catch(() => {}); // 취소가 없으면 영원히 미결 — unhandled 방지
   const api = {
     // timeoutMs 는 선택 — 생략하면 exec 의 기본값(SSH_EXEC_TIMEOUT_MS 또는 60s). 원격에서
     // `timeout <N> tcpdump` 처럼 **의도적으로 오래 도는** 명령은 반드시 명시해야 한다(과거
@@ -134,9 +156,22 @@ export async function withSsh(creds, fn) {
     log,
   };
   try {
-    const result = await fn(api);
+    const result = signal ? await Promise.race([fn(api), aborted]) : await fn(api);
     return { ok: true, log, ...result };
   } finally {
+    if (onAbort) signal?.removeEventListener('abort', onAbort);
     try { conn.end(); } catch { /* ignore */ }
   }
+}
+
+/**
+ * 장비당 타임아웃 헬퍼(v2.417) — AbortController 로 signal 을 만들어 fn(signal) 을 돌리고, 기한이
+ * 지나면 abort 한다(withSsh 가 세션을 끊는다). 결과만 포기하는 Promise.race 대신 이걸 쓸 것.
+ */
+export async function withDeadline(ms, fn, label = '타임아웃') {
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort(), Math.max(1000, ms)); // unref 하지 않는다 — 대기 중인 수집을 반드시 끊어야 한다
+  try { return await fn(ac.signal); }
+  catch (e) { if (ac.signal.aborted) throw new Error(`${label}(${Math.round(ms / 1000)}초)`); throw e; }
+  finally { clearTimeout(t); }
 }

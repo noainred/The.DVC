@@ -8,7 +8,7 @@
 import { requireRole } from '../../auth/auth.js';
 import { logAudit } from '../../audit.js';
 import { catalog, buildCommand, describeCommand, getPreset } from '../../rma/commands.js';
-import { enqueueJob, getJob, listHistory, listRmaAgents, DONE_TTL } from '../../rma/jobs.js';
+import { enqueueJob, getJob, listHistoryAsync, listRmaAgents, DONE_TTL } from '../../rma/jobs.js';
 import { signJob } from '../../rma/signing.js';
 import { rmaPasswordFor, setRmaPassword, listRmaPasswordMeta } from '../../rma/agentSecrets.js';
 import { getRmaSettings, setAgentMode, setDefaultMode } from '../../rma/settings.js';
@@ -64,8 +64,8 @@ api.get('/tools/rma/jobs/:reqId', adminOnly, (req, res) => {
   res.json(getJob(String(req.params.reqId || '')));
 });
 
-api.get('/tools/rma/history', adminOnly, (req, res) => {
-  res.json({ rows: listHistory({ agent: String(req.query.agent || ''), limit: Number(req.query.limit) || 100 }) });
+api.get('/tools/rma/history', adminOnly, async (req, res) => {
+  res.json({ rows: await listHistoryAsync({ agent: String(req.query.agent || ''), limit: Number(req.query.limit) || 100 }) });
 });
 
 /** 법인 RMA 비밀번호 등록/해제 — Body { password } ('' = 해제). 값은 응답·감사로그에 싣지 않는다. */

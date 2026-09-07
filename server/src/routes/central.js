@@ -531,7 +531,19 @@ centralRouter.post('/storage-data', async (req, res) => {
   const agent = req.centralAuth?.mode === 'agent' ? req.centralAuth.agent : String(req.body?.agent || '').trim();
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
   const { saveEdgeStorage } = await import('../central/storageEdge.js');
-  const saved = saveEdgeStorage(agent, req.body?.devices || []);
+  // 소유권 필터(v2.417, sanswitch-data 와 동일): 개별 토큰 엣지는 자기에게 위임된 deviceId 만,
+  // collectedAt 은 수신 시각으로 clamp. 공유 토큰(레거시)은 기존 신뢰 유지.
+  let devices = Array.isArray(req.body?.devices) ? req.body.devices : [];
+  const now = Date.now();
+  devices = devices.map((d) => (d && typeof d === 'object' ? { ...d, collectedAt: Math.min(Number(d.collectedAt) || now, now) } : d));
+  if (req.centralAuth.mode === 'agent') {
+    const { devicesForAgent } = await import('../storage/registry.js');
+    const owned = new Set(devicesForAgent(agent).map((d) => d.id));
+    const before = devices.length;
+    devices = devices.filter((d) => d && owned.has(d.deviceId));
+    if (before !== devices.length) console.warn(`[central] storage-data: ${agent} 미위임 deviceId ${before - devices.length}건 드롭(위조 방지)`);
+  }
+  const saved = saveEdgeStorage(agent, devices);
   res.json({ ok: true, saved });
 });
 
@@ -609,7 +621,8 @@ centralRouter.post('/sanswitch-data', async (req, res) => {
     devices = devices.filter((d) => d && owned.has(d.deviceId));
     if (before !== devices.length) console.warn(`[central] sanswitch-data: ${agent} 미위임 deviceId ${before - devices.length}건 드롭(위조 방지)`);
   }
-  const saved = saveEdgeSanSwitch(agent, devices);
+  const chunk = Math.max(0, Number(req.body?.chunk) || 0), chunks = Math.max(1, Number(req.body?.chunks) || 1);
+  const saved = saveEdgeSanSwitch(agent, devices, { chunk, chunks });
   res.json({ ok: true, saved });
 });
 

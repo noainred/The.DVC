@@ -11,7 +11,8 @@
  * CLAUDE.md 폴러 규칙: 재진입 가드(수동 실행과 공유) + 동시 수집 제한 + 장비당 타임아웃 +
  * startAdaptiveTimer(주기를 상수로 굳히지 않는다 — 설정 변경이 재시작 없이 먹어야 한다).
  */
-import { withSsh } from '../proxy/sshExec.js';
+import { withSsh, withDeadline } from '../proxy/sshExec.js';
+import { probeCommands } from './collectors/fosSsh.js';
 import { devicesForThisNode, getDeviceWithSecret } from './registry.js';
 import { getSnapshot } from './store.js';
 import { parsePortPerfShow } from './collectors/fosParse.js';
@@ -20,8 +21,13 @@ import { loadPerfSettings } from './perfSettings.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 
 const CONCURRENCY = Math.max(1, Math.min(8, Number(process.env.SANSW_PERF_CONCURRENCY) || 2));
-/** 후보 명령 — FOS 배포마다 PATH 가 달라 기본 수집기와 같은 대체 경로 규약을 따른다. */
-const FOS_DIRS = ['/fabos/cliexec', '/fabos/link_bin', '/fabos/bin', '/bin', '/usr/bin'];
+/**
+ * 장비당 타임아웃(v2.417) — 접속(≤60초) + 캡처(sampleSeconds) + 여유. 예전에는 없어서(주석만 있었음)
+ * 스위치가 많으면 한 주기가 수십 분까지 늘어졌다. 기한 만료 시 세션을 실제로 끊는다(withDeadline).
+ * 경로 추측 후보(FOS_DIRS)는 없앴다 — 기본 수집기(v2.413)와 같이 PATH 조사(probeCommands) 결과로
+ * 'portperfshow' 유무를 판단하고, 없으면 사유를 사실로 남긴다(부재 장비에서 6×캡처 시간 낭비 제거).
+ */
+const DEVICE_TIMEOUT_MS = (captureMs) => Math.max(30_000, Number(process.env.SANSW_PERF_DEVICE_TIMEOUT_MS) || (60_000 + captureMs * 2 + 30_000));
 
 let _timer = null;
 let _busy = false;
@@ -39,20 +45,23 @@ async function collectOne(dev) {
   }
   const pre = full.vfId ? `setcontext ${Number(full.vfId)}; ` : '';
   const captureMs = Math.max(3000, st.sampleSeconds * 1000);
-  const r = await withSsh(
-    { host: full.host, port: Number(full.sshPort) || 22, username: full.username, password: full.password || '' },
+  const r = await withDeadline(DEVICE_TIMEOUT_MS(captureMs), (signal) => withSsh(
+    { host: full.host, port: Number(full.sshPort) || 22, username: full.username, password: full.password || '', signal },
     async (sh) => {
-      for (const cmd of [`${pre}portperfshow`, ...FOS_DIRS.map((d) => `${pre}${d}/portperfshow`)]) {
-        const out = await sh.execCapture(cmd, captureMs);
-        const text = String(out.stdout || '');
-        if (/command not found|not recognized|no such file or directory/i.test(text) || !text.trim()) continue;
-        const parsed = parsePortPerfShow(text);
-        if (Object.keys(parsed.ports).length) return { parsed, cmd, rawLen: text.length };
+      const caps = await probeCommands(sh, `${full.host}|${full.username}`);
+      if (caps.has && !caps.has.has('portperfshow')) {
+        return { parsed: null, why: `이 스위치에 'portperfshow' 명령이 없습니다(확인 경로: ${caps.path.join(':')})` };
       }
-      return { parsed: null };
+      const out = await sh.execCapture(`${pre}portperfshow`, captureMs);
+      const text = String(out.stdout || '');
+      if (/command not found|not recognized|no such file or directory/i.test(text)) return { parsed: null, why: `portperfshow 실행 실패: ${text.trim().slice(0, 120)}` };
+      if (!text.trim()) return { parsed: null, why: `portperfshow 출력이 비어 있습니다(캡처 ${Math.round(captureMs / 1000)}초)` };
+      const parsed = parsePortPerfShow(text);
+      if (!Object.keys(parsed.ports).length) return { parsed: null, why: 'portperfshow 출력 형식을 읽지 못했습니다' };
+      return { parsed, rawLen: text.length };
     },
-  );
-  if (!r.parsed) throw new Error('portperfshow 출력을 읽지 못했습니다(명령 없음 또는 형식 불일치).');
+  ), '포트 사용량 수집 타임아웃');
+  if (!r.parsed) throw new Error(r.why || 'portperfshow 출력을 읽지 못했습니다.');
 
   // 포트 메타(연결 장비·속도)는 기본 수집 스냅샷에서 가져온다 — 시계열을 '어느 스토리지의
   // 트래픽'으로 묶어 보기 위한 것. 기본 수집 전이면 메타 없이 수치만 저장한다(나중에 채워진다).

@@ -38,6 +38,7 @@ export async function runCliSession(device, specs) {
     port: Number(device.sshPort) || 22,
     username: device.username,
     password: device.password || '',
+    signal: device._signal, // 폴러의 장비당 타임아웃(v2.417) — 만료 시 세션을 끊는다
   };
   return withSsh(creds, async (sh) => {
     const out = {};

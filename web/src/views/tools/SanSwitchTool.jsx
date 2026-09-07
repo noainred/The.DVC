@@ -77,7 +77,8 @@ export default function SanSwitchTool() {
   // 칩은 법인 '이름'으로 고르는데 서버는 id 로 거른다 — 역방향 표를 하나 둔다.
   const dcIdOfName = useMemo(() => {
     const m = new Map((data?.datacenters || []).map((d) => [d.name || d.id, d.id]));
-    return (name) => m.get(name) || '';
+    // '(법인 미지정)' 은 서버 센티널 '__none__' 로 보낸다 — '' 는 쉼표 목록에서 사라져 전체로 둔갑했다(v2.417).
+    return (name) => (name === '(법인 미지정)' ? '__none__' : (m.get(name) || ''));
   }, [data]);
 
   const rows = data?.devices || [];
@@ -763,9 +764,10 @@ function DcStoragePerf({ dcPerf, onClose }) {
 
       {error && <ErrorBox message={error} />}
       {!error && !data && <Loading />}
+      {data?.edgeNote && <div className="card muted" style={{ fontSize: 12.5, borderColor: 'var(--amber)' }}>ℹ {data.edgeNote}</div>}
       {data && (!rows.length || !series.length) && (
         <div className="card muted" style={{ fontSize: 13, lineHeight: 1.8 }}>
-          {data.series?.length && !series.length ? null : <>{dcSet.size ? '이 법인에' : '이 범위에'} 아직 수집된 포트 사용량이 없습니다.</>}
+          {data.series?.length && !series.length ? null : <>'{scopeLabel}' 범위에 아직 수집된 포트 사용량이 없습니다.</>}
           <div style={{ marginTop: 4 }}>
             <b>설정 › 수집 서버 › SAN 스위치 포트 사용량</b> 에서 수집을 켜야 <code>portperfshow</code> 로 쌓기 시작합니다(기본 꺼짐).
             {data.unavailable ? <div style={{ color: 'var(--amber)', marginTop: 4 }}>이 서버는 시계열 DB(node:sqlite)를 쓸 수 없어 이력이 저장되지 않습니다.</div> : null}

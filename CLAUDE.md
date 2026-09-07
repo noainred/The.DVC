@@ -37,6 +37,13 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     licensed/online/free)는 전체 기준을 유지하고 뺀 개수는 `portsOmitted` 로 표시할 것.
     포트 처리량은 누적 카운터 델타로 계산하므로(`rates.js`) **첫 수집은 null** 이고 카운터
     리셋(음수 델타)도 null 이다 — 0 으로 채우면 '트래픽 없음'으로 오해된다.
+    push 는 **gzip + 청크**(`push.js chunkDevices`, 요청당 700KB — 중앙 express.json 1MB 한도 아래)이며
+    청크 0 은 중앙 목록 교체·이후 청크는 upsert 병합(`central/sanSwitchEdge.js`) — 이 병합을 없애면
+    중앙 목록이 마지막 청크만 남는다.
+  - **장비당 타임아웃은 세션을 실제로 끊어야 한다**(v2.417, `proxy/sshExec.js withDeadline` + `withSsh`
+    signal): `Promise.race` 로 결과만 포기하면 SSH 세션이 남은 명령을 끝까지 돌려(최대 ~8.5분) 동시성
+    상한이 실효를 잃고 다음 주기가 같은 장비에 두 번째 세션을 연다. SAN·스토리지·perf 폴러 전부 이
+    패턴이다 — 새 SSH 수집기를 추가하면 creds 에 `signal` 을 넘길 것. `exec()` 출력 상한(4MB)도 유지.
   - **롤업 O(N)**(`withRollups`): 호스트/VM/DS/알람을 vCenter별 1회 그룹핑 후 조회(`pick`). 그룹마다 전체 재순회(O(N×vCenter)) 금지.
   - **시계열 prune 스로틀 + ts 인덱스**: 매 샘플 DELETE 스캔 금지 — N틱마다 1회(store 10틱·metrics 20틱·idrac.poller 10틱). `DELETE WHERE ts<?`는 `ts` 단독 인덱스가 있어야 풀스캔을 피한다(복합 `(server_id,ts)`로는 못 탐).
   - **ETag/304**(`util/compress.js`): res.json 래퍼가 본문 SHA-1로 약한 ETag를 발급하고 If-None-Match 일치 시 304(본문 0바이트). 이 래퍼는 res.end로 직접 종료해 Express 기본 ETag가 동작하지 않으므로, 응답 경로 수정 시 ETag 발급을 없애면 프론트 `pollFetch`의 304 지원이 통째로 죽는다(과거 실제 그 상태였음 — 15초 폴 × 30초 스냅샷이면 절반이 무변동 재전송).
