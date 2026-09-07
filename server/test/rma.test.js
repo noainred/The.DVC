@@ -173,7 +173,8 @@ test('분배 active-backup: 우선순위 최저(주)에만 배정, 주 오프라
   assert.equal(target, 'primary');
   assert.equal(takeJobs('m3', 'backup', now).length, 0, '주가 온라인이면 예비는 받지 않는다');
   // 주 하트비트 만료 → 예비가 페일오버로 인출
-  const later = now + HEARTBEAT_STALE_MS + 1;
+  // 하트비트 lastSeen 은 noteHeartbeat 내부의 Date.now() 라 test 의 now 보다 몇 ms 뒤일 수 있다 — 여유를 둔다(CI 에서 1회 실패).
+  const later = Date.now() + HEARTBEAT_STALE_MS + 5_000;
   assert.equal(takeJobs('m3', 'backup', later).length, 1);
   assert.equal(getJob(reqId).failover, true);
   assert.equal(getJob(reqId).instance, 'backup');
@@ -190,7 +191,7 @@ test('명시 인스턴스 지정은 분배 방식과 무관하게 그 인스턴�
   const { target } = enqueueJob('m4', { cmd: 'uptime', args: {} }, { instance: 'b', now });
   assert.equal(target, 'b');
   assert.equal(takeJobs('m4', 'a', now).length, 0);
-  assert.equal(takeJobs('m4', 'a', now + HEARTBEAT_STALE_MS + 1).length, 1, 'b 오프라인 → a 가 대신');
+  assert.equal(takeJobs('m4', 'a', Date.now() + HEARTBEAT_STALE_MS + 5_000).length, 1, 'b 오프라인 → a 가 대신');
 });
 test('listRmaAgents: 법인별 그룹·온라인 수·주 인스턴스·모드', () => {
   _resetRma();
