@@ -572,3 +572,27 @@ test('storageSeriesMulti: groupOf 에 없는 장비는 빈 그룹으로 떨어�
   assert.equal(r.series[0].group, '');
   _resetForTest();
 });
+
+test('집계 평균은 조회 범위에 흔들리지 않는다(빈 버킷을 0 으로 세지 않는다)', async () => {
+  const { savePerfSample, storageSeriesMulti, available, _resetForTest } = await import('../src/sanswitch/perfDb.js');
+  if (!(await available())) return;
+  _resetForTest();
+  const now = Date.now();
+  const A = 'SYMMETRIX::AAA::x';
+  const B = 'SYMMETRIX::BBB::x';
+  // dev-a 와 dev-b 의 표본 시각이 어긋나 있다(현장에서 스위치마다 폴링 시각이 다른 상황).
+  for (const t of [now - 600_000, now - 300_000]) await savePerfSample('dev-a', t, { 0: 1000 }, [{ port: 0, attachedName: A }]);
+  for (const t of [now - 60_000, now]) await savePerfSample('dev-b', t, { 0: 500 }, [{ port: 0, attachedName: B }]);
+
+  const alone = await storageSeriesMulti(['dev-a'], { hours: 1 });
+  const together = await storageSeriesMulti(['dev-a', 'dev-b'], { hours: 1 });
+  const aAlone = alone.series.find((s) => s.key === 'SYMMETRIX::AAA');
+  const aTogether = together.series.find((s) => s.key === 'SYMMETRIX::AAA');
+  assert.equal(Math.round(aAlone.avgTotal), Math.round(aTogether.avgTotal),
+    '같은 스토리지의 평균이 조회에 포함된 다른 장비 때문에 달라지면 안 된다');
+  assert.equal(Math.round(aAlone.avgTotal), 1000);
+  // 데이터가 없는 버킷은 0 이 아니라 null 이어야 한다(차트에서 끊긴 구간으로 그려야 하므로).
+  assert.ok(aTogether.sum.some((v) => v === null), '빈 버킷은 null 로 남아야 한다');
+  assert.ok(!aTogether.sum.some((v) => v === 0), '빈 버킷을 0 으로 채우면 트래픽 없음으로 오해된다');
+  _resetForTest();
+});

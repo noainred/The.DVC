@@ -272,8 +272,19 @@ api.get('/tools/sanswitch/perf/storage-summary', fullScopeOnly, async (req, res)
     byDc[k].maxTotal += s.maxTotal;
     for (const id of s.deviceIds) byDc[k].switches.add(id);
   }
+  // 화면이 창을 닫지 않고 범위를 바꿀 수 있게, **필터와 무관한 전 법인 목록**을 함께 준다
+  // (스위치가 등록된 법인만). 이게 없으면 사용자가 목록 화면으로 돌아가 칩을 다시 골라야 한다.
+  const allDcs = (() => {
+    const m = new Map();
+    for (const d of listDevices().filter((x) => x.enabled !== false)) {
+      const id = String(d.datacenterId || '');
+      if (!m.has(id)) m.set(id, { id, name: dcNameOf(id), switches: 0 });
+      m.get(id).switches++;
+    }
+    return [...m.values()].sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  })();
   res.json({
-    ok: true, unit: 'bytesPerSec', hours, datacenterIds: dcs, split,
+    ok: true, unit: 'bytesPerSec', hours, datacenterIds: dcs, split, allDatacenters: allDcs,
     byDatacenter: Object.values(byDc).map((x) => ({ ...x, switches: x.switches.size }))
       .sort((a, b) => b.avgTotal - a.avgTotal),
     switches: devices.map((d) => ({ id: d.id, name: d.name, host: d.host, datacenterId: d.datacenterId, datacenterName: dcNameOf(d.datacenterId) })),

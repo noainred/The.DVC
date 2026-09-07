@@ -149,18 +149,28 @@ export async function storageSeries(deviceId, { hours = 24, points = 120 } = {})
   const bucketSet = [...new Set(rows.map((r) => Number(r.b)))].sort((a, b) => a - b);
   const buckets = bucketSet.map((b) => b * bucketMs);
   const idx = new Map(bucketSet.map((b, i) => [b, i]));
+  // ⚠ 버킷 배열을 0 으로 채우면 안 된다(v2.415 에서 잡은 결함): 버킷 목록은 **조회에 포함된 전
+  // 장비의 합집합**이라, 다른 스위치의 표본 시각 때문에 생긴 빈 버킷이 이 스토리지의 '트래픽 0'
+  // 으로 계산되어 평균이 내려갔다. 그래서 **조회 범위를 넓히면 같은 스토리지의 평균이 떨어지는**
+  // 현상이 생겼다(실측: OC2 가 단독 조회 4.16 Gbps, 전체 조회 3.81 Gbps).
+  // null 로 두고 값이 있는 버킷만 평균에 넣는다. 차트도 null 을 끊긴 구간으로 그린다.
   const byGroup = new Map();
   for (const r of rows) {
     const g = groupOf.get(Number(r.port)) || '(미확인)';
-    if (!byGroup.has(g)) byGroup.set(g, { key: g, ports: new Set(), sum: new Array(buckets.length).fill(0), total: 0 });
+    if (!byGroup.has(g)) byGroup.set(g, { key: g, ports: new Set(), sum: new Array(buckets.length).fill(null) });
     const s = byGroup.get(g);
     s.ports.add(Number(r.port));
-    const v = Math.round(Number(r.avg_bps));
-    s.sum[idx.get(Number(r.b))] += v;
-    s.total += v;
+    const i = idx.get(Number(r.b));
+    s.sum[i] = (s.sum[i] ?? 0) + Math.round(Number(r.avg_bps));
   }
   const series = [...byGroup.values()]
-    .map((s) => ({ key: s.key, ports: [...s.ports].sort((a, b) => a - b), sum: s.sum, avgTotal: s.total / Math.max(1, buckets.length) }))
+    .map((s) => {
+      const vals = s.sum.filter((v) => v != null);
+      return {
+        key: s.key, ports: [...s.ports].sort((a, b) => a - b), sum: s.sum,
+        avgTotal: vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0,
+      };
+    })
     .sort((a, b) => b.avgTotal - a.avgTotal);
   return { buckets, bucketMs, since, series };
 }
@@ -214,10 +224,13 @@ export async function storageSeriesMulti(deviceIds = [], { hours = 24, points = 
     // 복수 법인을 한꺼번에 보면서도 법인 구분이 사라지지 않게(사용자 요구, v2.414).
     const g = groupOf ? (groupOf.get(String(r.device_id)) ?? '') : null;
     const gk = groupOf ? `${g}\u0000${st}` : st;
-    if (!byGroup.has(gk)) byGroup.set(gk, { key: st, group: g, ports: new Map(), sum: new Array(buckets.length).fill(0) });
+    // 0 이 아니라 null 로 시작한다 — 버킷은 조회에 포함된 전 장비의 합집합이라, 비어 있는
+    // 버킷을 0 으로 세면 조회 범위를 넓힐수록 평균이 내려간다(위 storageSeries 머리말 참조).
+    if (!byGroup.has(gk)) byGroup.set(gk, { key: st, group: g, ports: new Map(), sum: new Array(buckets.length).fill(null) });
     const s = byGroup.get(gk);
     s.ports.set(`${r.device_id}|${Number(r.port)}`, { deviceId: String(r.device_id), port: Number(r.port) });
-    s.sum[idx.get(Number(r.b))] += Math.round(Number(r.avg_bps));
+    const i = idx.get(Number(r.b));
+    s.sum[i] = (s.sum[i] ?? 0) + Math.round(Number(r.avg_bps));
   }
   const series = [...byGroup.values()].map((s) => {
     const vals = s.sum.filter((v) => v != null);

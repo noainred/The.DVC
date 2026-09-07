@@ -648,7 +648,11 @@ function DcStoragePerf({ dcPerf, onClose }) {
   const [sort, setSort] = useState({ key: 'avg', dir: 'desc' });   // 기본: 많이 쓰는 순
   // 법인이 2곳 이상이면 기본은 **법인별 분리**. '합산'을 고르면 같은 어레이를 법인 구분 없이 합친다.
   const [split, setSplit] = useState(true);
-  const dcParam = (dcPerf.datacenterIds || []).join(',');
+  // 범위(법인)를 **창 안에서** 바꾼다 — 예전에는 목록 화면에서 칩을 먼저 고르고 창을 열어야 해서,
+  // '전체 법인'과 '특정 법인'을 오가려면 매번 창을 닫아야 했다(사용자 요구, v2.415).
+  // 빈 Set = 전체 법인.
+  const [dcSet, setDcSet] = useState(() => new Set(dcPerf.datacenterIds || []));
+  const dcParam = [...dcSet].join(',');
 
   useEffect(() => {
     let alive = true;
@@ -660,7 +664,7 @@ function DcStoragePerf({ dcPerf, onClose }) {
   }, [dcParam, hours, split]);
 
   const series = (data?.series || []).filter((s) => kind === 'all' || s.endpointKind === kind);
-  const multiDc = (dcPerf.datacenterIds || []).length !== 1;   // 법인 2곳 이상(또는 전체)
+  const multiDc = dcSet.size !== 1;   // 법인 2곳 이상 또는 전체 — 그때만 분리/합산이 의미 있다
   const showDcCol = !!data?.split;
   const chartSeries = topSeries(series.map((s) => ({
     // 법인별로 분리했으면 라벨에 법인을 앞세운다 — 같은 어레이 이름이 법인마다 나오므로
@@ -681,9 +685,37 @@ function DcStoragePerf({ dcPerf, onClose }) {
     cap: (s) => (s.capacity?.pct ?? null),   // 용량 미매칭은 null → 항상 뒤로
   };
   const sorted = sortRows(series, SORTERS[sort.key] || SORTERS.avg, sort.dir, (s) => s.key);
+  const scopeLabel = dcSet.size === 0
+    ? '전체 법인'
+    : (data?.allDatacenters || []).filter((d) => dcSet.has(d.id)).map((d) => d.name).join(', ') || dcPerf.label;
+  // 법인 소계 앞에 '전체 합계'를 둔다 — 법인별로 나눠 보면서도 전사 총량을 함께 봐야
+  // '어느 법인이 전체의 몇 %인가'를 판단할 수 있다.
+  const dcTotals = data?.byDatacenter || [];
+  const grandAvg = dcTotals.reduce((a, d) => a + d.avgTotal, 0);
+  const grandMax = dcTotals.reduce((a, d) => a + d.maxTotal, 0);
 
   return (
-    <Modal title={`스토리지 사용량 분석 — ${dcPerf.label}`} onClose={onClose} width={1180}>
+    <Modal title={`스토리지 사용량 분석 — ${scopeLabel}`} onClose={onClose} width={1180}>
+      {/* 범위 선택 — '전체 법인'과 개별 법인을 여기서 바로 오간다. */}
+      <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 8 }}>
+        <span className="muted" style={{ fontSize: 12, minWidth: 42 }}>🏢 범위</span>
+        <button className={dcSet.size === 0 ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '4px 12px' }}
+          onClick={() => setDcSet(new Set())}
+          title="등록된 모든 법인을 대상으로 봅니다. 아래 '법인별 분리'로 법인마다 나눠 볼 수 있습니다.">
+          전체 법인{(data?.allDatacenters || []).length ? ` ${data.allDatacenters.length}` : ''}
+        </button>
+        {(data?.allDatacenters || []).map((d) => {
+          const on = dcSet.has(d.id);
+          return (
+            <button key={d.id || '_'} className={on ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '4px 12px' }}
+              aria-pressed={on}
+              onClick={() => setDcSet((p) => { const n = new Set(p); n.has(d.id) ? n.delete(d.id) : n.add(d.id); return n; })}
+              title={`${d.name} — 스위치 ${d.switches}대. 여러 법인을 함께 고를 수 있습니다.`}>
+              {d.name}<span className="muted" style={{ fontWeight: 400, fontSize: 11 }}>{d.switches}</span>
+            </button>
+          );
+        })}
+      </div>
       <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 8 }}>
         {/* 연결 대상 구분 — 어레이/호스트를 섞으면 스토리지가 HBA 수십 개에 묻힌다. */}
         {[['array', '스토리지'], ['host', '호스트(HBA)'], ['all', '전체']].map(([k, label]) => (
@@ -734,11 +766,17 @@ function DcStoragePerf({ dcPerf, onClose }) {
       )}
 
       {/* 법인 소계 — '어느 법인이 얼마나 쓰나'를 먼저 보여준다(복수 법인 분리 보기의 핵심). */}
-      {!!(data?.byDatacenter || []).length && data.split && (
-        <div className="kpis" style={{ marginBottom: 8, gridTemplateColumns: `repeat(auto-fit, minmax(190px, 1fr))` }}>
-          {data.byDatacenter.map((d) => (
+      {!!dcTotals.length && data.split && (
+        <div className="kpis" style={{ marginBottom: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))' }}>
+          {dcTotals.length > 1 && (
+            <Kpi label="🌐 전체 합계" value={bytesPerSecText(grandAvg)} accent="var(--blue)"
+              meta={`법인 ${dcTotals.length} · 스토리지 ${dcTotals.reduce((a, d) => a + d.storages, 0)} · 최대 ${bytesPerSecText(grandMax)}`} />
+          )}
+          {dcTotals.map((d) => (
             <Kpi key={d.datacenterId || '_'} label={`🏢 ${d.name}`} value={bytesPerSecText(d.avgTotal)}
-              meta={`스토리지 ${d.storages} · 스위치 ${d.switches} · 최대 ${bytesPerSecText(d.maxTotal)}`} />
+              pct={grandAvg ? Math.round((d.avgTotal / grandAvg) * 100) : undefined}
+              meta={`스토리지 ${d.storages} · 스위치 ${d.switches} · 최대 ${bytesPerSecText(d.maxTotal)}`
+                + (dcTotals.length > 1 && grandAvg ? ` · 전체의 ${Math.round((d.avgTotal / grandAvg) * 100)}%` : '')} />
           ))}
         </div>
       )}
