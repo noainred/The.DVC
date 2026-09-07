@@ -62,7 +62,7 @@ const _caps = new Map(); // `${host}|${user}` → { at, has:Set<string>, path:st
 /** 장비가 돌려준 경로 문자열 중 **안전한 절대경로만** 통과(셸 조립에 그대로 들어가므로). */
 const SAFE_DIR = /^\/[A-Za-z0-9._/-]{1,200}$/;
 
-async function probeCommands(sh, key) {
+export async function probeCommands(sh, key) {
   const cached = _caps.get(key);
   if (cached && Date.now() - cached.at < CAPS_TTL_MS) return cached;
   try {
@@ -105,10 +105,10 @@ function specs(vfId) {
   ];
 }
 
-async function runSession(device) {
+async function runSession(device, signal) {
   const creds = {
     host: device.host, port: Number(device.sshPort) || 22,
-    username: device.username, password: device.password || '',
+    username: device.username, password: device.password || '', signal,
   };
   return withSsh(creds, async (sh) => {
     const out = {}; const raw = []; const errors = {};
@@ -246,8 +246,8 @@ export function buildSnapshot(device, out = {}, errors = {}) {
 }
 
 /** 수집 진입점. raw(명령 원문)는 연결 테스트에서만 쓰고 스냅샷에는 넣지 않는다(대역폭). */
-export async function collect(device, { withRaw = false } = {}) {
-  const r = await runSession(device);
+export async function collect(device, { withRaw = false, signal } = {}) {
+  const r = await runSession(device, signal);
   const snap = buildSnapshot(device, r.out, r.errors);
   return withRaw ? { snap, raw: r.raw } : snap;
 }

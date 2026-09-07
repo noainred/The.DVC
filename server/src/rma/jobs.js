@@ -27,6 +27,7 @@
  * 전부 깨워 즉시 인출을 시도한다(배정 대상이 아닌 인스턴스는 빈 결과로 곧 다시 폴링).
  */
 import { modeFor } from './settings.js';
+import { saveHistoryRow, listHistoryRows } from './historyDb.js';
 
 const jobs = new Map();            // reqId -> job
 const pendingByAgent = new Map();  // agentLower -> Set<reqId>
@@ -65,6 +66,8 @@ function pushHistory(j, now) {
     truncated: !!r.truncated || String(r.stdout || '').length > HISTORY_OUTPUT_MAX,
   });
   if (history.length > HISTORY_MAX) history.length = HISTORY_MAX;
+  // 영속 이력(v2.417) — sqlite 가 있으면 함께 저장(재시작 후에도 출력까지 남는다). 실패해도 메모리 링은 유지.
+  saveHistoryRow({ ...history[0], stdout: String(r.stdout || ''), stderr: String(r.stderr || ''), truncated: !!r.truncated }).catch(() => {});
 }
 
 /** 기한 내 ack 없는 running 잡 → 재인출 없이(비멱등) 오류 종결. now 주입은 테스트용. */
@@ -216,6 +219,12 @@ export function getJob(reqId) {
   const base = { reqId: j.reqId, agent: j.agent, target: j.target, instance: j.instance, failover: !!j.failover, mode: j.mode, cmd: j.spec?.cmd, args: j.spec?.args || {}, label: j.spec?.label || '', user: j.user, createdAt: j.createdAt, takenAt: j.takenAt };
   if (j.state === 'done') return { state: 'done', ...base, doneAt: j.doneAt, result: j.result };
   return { state: j.state === 'running' ? 'running' : 'pending', ...base };
+}
+
+/** 이력 조회(비동기) — sqlite 이력이 있으면 그것을, 없으면 메모리 링을 돌려준다. */
+export async function listHistoryAsync(opts = {}) {
+  const rows = await listHistoryRows(opts).catch(() => null);
+  return rows ?? listHistory(opts);
 }
 
 export function listHistory({ agent = '', limit = 100 } = {}) {

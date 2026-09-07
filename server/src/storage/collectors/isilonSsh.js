@@ -199,7 +199,7 @@ export function normalizeIsiStatus(device, parsed, { version = '', users = null 
 export async function collectViaSsh(device) {
   try {
     const r = await withSsh(
-      { host: device.host, port: Number(device.sshPort) || 22, username: device.username, password: device.password || '' },
+      { host: device.host, port: Number(device.sshPort) || 22, username: device.username, password: device.password || '', signal: device._signal },
       async (sh) => {
         const status = await sh.exec('isi status'); // 핵심 — 실패하면 아래 catch 로(수집 실패)
         // 부가 명령은 각각 best-effort: 버전·계정이 없어도 status 파싱 결과는 살린다.

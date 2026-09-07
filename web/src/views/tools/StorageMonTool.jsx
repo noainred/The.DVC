@@ -46,6 +46,89 @@ function failReason(s) {
     || '사유 미상(장비 상세에서 섹션별 결과를 확인하세요)';
 }
 
+/**
+ * 한 칸 렌더(v2.406) — ⚠ 렌더 함수 **밖**에 둔다(v2.417): 안에서 정의하면 매 렌더 새 컴포넌트 타입이 되어
+ * 셀이 언마운트/재마운트되고 버튼 포커스가 끊긴다(StorageIntervals 와 같은 결함).
+ * 원문: — 값 계산은 storageColumns.cellValue(순수, 테스트로 고정)가 하고
+ * 여기서는 '어떻게 보일지'만 정한다. 값이 null 이면 '—'(0 으로 위장 금지).
+ */
+function Cell({ col, r, ctx }) {
+  const { setDetail, typeLabel, dcName, busy, collectNow, setForm, remove } = ctx;
+  const s = r.snap;
+  const v = cellValue(col.key, r);
+  const dash = <span className="muted">—</span>;
+  switch (col.key) {
+    case 'device':
+      return <td><button className="cell-link" onClick={() => setDetail(r.id)}><b>{s?.name || r.name}</b></button><div className="muted" style={{ fontSize: 11 }}>{r.host}</div></td>;
+    case 'type':
+      return <td><span className="badge blue">{typeLabel(r.type)}</span></td>;
+    case 'dc':
+      return <td className="muted">{dcName(r.datacenterId)}</td>;
+    case 'collect': {
+      // 수집 주체(중앙/엣지) + 방식 배지. 실제 수집된 스냅샷의 방식이 진실이고, 없으면 등록값
+      // (saveDevice 가 타입별 허용 목록으로 보정해 저장한다 — types.js COLLECT_METHODS).
+      const m = s?.extra?.collectMethod || r.collectMethod || 'api';
+      return (
+        <td>{r.agent ? <span className="badge" style={{ background: 'rgba(167,139,250,.2)', color: '#a78bfa' }}>{r.agent}</span> : <span className="muted">중앙</span>}
+          <span className={`badge ${m === 'ssh' ? 'blue' : 'gray'}`} style={{ marginLeft: 4, fontSize: 10 }} title={`모니터링(수집) 방식: ${m.toUpperCase()} — 등록/수정에서 변경`}>{m.toUpperCase()}</span>
+        </td>
+      );
+    }
+    case 'version':
+      return <td className="muted" style={{ fontSize: 12 }}>{s?.version || '—'}</td>;
+    case 'usage':
+      return (
+        <td style={{ minWidth: col.minWidth }}>
+          {v != null ? <UsageCell pct={v} /> : dash}
+          {s?.capacity?.totalBytes ? <div className="muted" style={{ fontSize: 10.5 }}>{tbFmt(s.capacity.usedBytes)} / {tbFmt(s.capacity.totalBytes)}</div> : null}
+        </td>
+      );
+    case 'hdd': case 'ssd':
+      return <td style={{ minWidth: col.minWidth }}><MediaCell m={v} /></td>;
+    case 'capTotal': case 'capUsed': case 'capFree': case 'physical': case 'logical':
+      return <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{v != null ? tbFmt(v) : dash}</td>;
+    case 'dataReduction':
+      return <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }} title="논리 사용량 ÷ 물리 사용량(중복제거·압축 효과)">{v != null ? `${v.toFixed(2)}:1` : dash}</td>;
+    case 'nodes':
+      return <td style={{ textAlign: 'right' }}>{v == null ? dash : <>{v}{s?.nodes?.unhealthy ? <b style={{ color: 'var(--red)' }}> ⚠{s.nodes.unhealthy}</b> : null}</>}</td>;
+    case 'health':
+      return <td>{v ? <span className={`badge ${/ok|healthy|normal/i.test(String(v)) ? 'green' : 'red'}`}>{v}</span> : dash}</td>;
+    case 'status':
+      return (
+        <td>
+          {/* ⚠ 실패 사유를 이 칸에 '항상 보이는 한 줄'로 넣지 말 것 — 사유가 길면 상태 열이
+              넓어져 표가 컨테이너를 넘고 오른쪽 '작업' 열이 잘린다(v2.403 실측·수정).
+              사유는 자리를 차지하지 않는 경로로만: 호버=title, 클릭=상세 창. */}
+          {/* MOCK 배지(v2.408) — 수집 노드가 DATA_SOURCE=mock 이면 값이 전부 가짜다.
+              예전에는 version 의 '(mock)' 괄호로만 드러나 진짜 수집값처럼 보였다. */}
+          {s?.extra?.mock && (
+            <span className="badge red" style={{ marginRight: 4 }}
+              title={'이 장비의 값은 실제 수집이 아니라 개발용 가짜 데이터입니다.\n'
+                + '수집 노드(중앙 또는 엣지)가 DATA_SOURCE=mock 으로 실행 중입니다.\n'
+                + 'portal.env 에 DATA_SOURCE=live (또는 EDGE_MODE=all) 를 넣고 재시작하세요.'}>MOCK</span>
+          )}
+          {!s ? <span className="badge gray">수집 전</span> : s.ok ? <span className="badge green">정상</span> : (
+            <button type="button" className="badge red fail-badge" onClick={() => setDetail(r.id)}
+              title={`실패 사유: ${failReason(s)}\n\n(클릭하면 상세 창에서 전체 내용을 봅니다)`}>
+              실패 <span aria-hidden="true">ⓘ</span>
+            </button>
+          )}
+          <div className="muted" style={{ fontSize: 10.5 }}>{ago(s?.collectedAt)}{s?.agent ? ` · ${s.agent}` : ''}</div>
+        </td>
+      );
+    case 'actions':
+      return (
+        <td className="right" style={{ whiteSpace: 'nowrap' }}>
+          <button className="logout-btn" style={{ padding: '3px 8px', fontSize: 11.5 }} disabled={busy} onClick={() => collectNow(r.id)} title={r.agent ? '엣지 수집 장비 — 주기 반영 안내' : '지금 수집(연결 테스트)'}>수집</button>
+          {' '}<button className="logout-btn" style={{ padding: '3px 8px', fontSize: 11.5 }} disabled={busy} onClick={() => setForm({ ...r, password: '' })}>수정</button>
+          {' '}<button className="logout-btn" style={{ padding: '3px 8px', fontSize: 11.5, color: 'var(--red)' }} disabled={busy} onClick={() => remove(r)}>삭제</button>
+        </td>
+      );
+    default:
+      return <td style={{ textAlign: col.align === 'right' ? 'right' : undefined }}>{v == null || v === '' ? dash : v}</td>;
+  }
+}
+
 export default function StorageMonTool() {
   const [d, setD] = useState(null);
   const [err, setErr] = useState(null);
@@ -173,85 +256,8 @@ export default function StorageMonTool() {
     } catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(false); }
   };
 
-  /**
-   * 한 칸 렌더(v2.406) — 값 계산은 storageColumns.cellValue(순수, 테스트로 고정)가 하고
-   * 여기서는 '어떻게 보일지'만 정한다. 값이 null 이면 '—'(0 으로 위장 금지).
-   */
-  const Cell = ({ col, r }) => {
-    const s = r.snap;
-    const v = cellValue(col.key, r);
-    const dash = <span className="muted">—</span>;
-    switch (col.key) {
-      case 'device':
-        return <td><button className="cell-link" onClick={() => setDetail(r.id)}><b>{s?.name || r.name}</b></button><div className="muted" style={{ fontSize: 11 }}>{r.host}</div></td>;
-      case 'type':
-        return <td><span className="badge blue">{typeLabel(r.type)}</span></td>;
-      case 'dc':
-        return <td className="muted">{dcName(r.datacenterId)}</td>;
-      case 'collect': {
-        // 수집 주체(중앙/엣지) + 방식 배지. 실제 수집된 스냅샷의 방식이 진실이고, 없으면 등록값
-        // (saveDevice 가 타입별 허용 목록으로 보정해 저장한다 — types.js COLLECT_METHODS).
-        const m = s?.extra?.collectMethod || r.collectMethod || 'api';
-        return (
-          <td>{r.agent ? <span className="badge" style={{ background: 'rgba(167,139,250,.2)', color: '#a78bfa' }}>{r.agent}</span> : <span className="muted">중앙</span>}
-            <span className={`badge ${m === 'ssh' ? 'blue' : 'gray'}`} style={{ marginLeft: 4, fontSize: 10 }} title={`모니터링(수집) 방식: ${m.toUpperCase()} — 등록/수정에서 변경`}>{m.toUpperCase()}</span>
-          </td>
-        );
-      }
-      case 'version':
-        return <td className="muted" style={{ fontSize: 12 }}>{s?.version || '—'}</td>;
-      case 'usage':
-        return (
-          <td style={{ minWidth: col.minWidth }}>
-            {v != null ? <UsageCell pct={v} /> : dash}
-            {s?.capacity?.totalBytes ? <div className="muted" style={{ fontSize: 10.5 }}>{tbFmt(s.capacity.usedBytes)} / {tbFmt(s.capacity.totalBytes)}</div> : null}
-          </td>
-        );
-      case 'hdd': case 'ssd':
-        return <td style={{ minWidth: col.minWidth }}><MediaCell m={v} /></td>;
-      case 'capTotal': case 'capUsed': case 'capFree': case 'physical': case 'logical':
-        return <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{v != null ? tbFmt(v) : dash}</td>;
-      case 'dataReduction':
-        return <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }} title="논리 사용량 ÷ 물리 사용량(중복제거·압축 효과)">{v != null ? `${v.toFixed(2)}:1` : dash}</td>;
-      case 'nodes':
-        return <td style={{ textAlign: 'right' }}>{v == null ? dash : <>{v}{s?.nodes?.unhealthy ? <b style={{ color: 'var(--red)' }}> ⚠{s.nodes.unhealthy}</b> : null}</>}</td>;
-      case 'health':
-        return <td>{v ? <span className={`badge ${/ok|healthy|normal/i.test(String(v)) ? 'green' : 'red'}`}>{v}</span> : dash}</td>;
-      case 'status':
-        return (
-          <td>
-            {/* ⚠ 실패 사유를 이 칸에 '항상 보이는 한 줄'로 넣지 말 것 — 사유가 길면 상태 열이
-                넓어져 표가 컨테이너를 넘고 오른쪽 '작업' 열이 잘린다(v2.403 실측·수정).
-                사유는 자리를 차지하지 않는 경로로만: 호버=title, 클릭=상세 창. */}
-            {/* MOCK 배지(v2.408) — 수집 노드가 DATA_SOURCE=mock 이면 값이 전부 가짜다.
-                예전에는 version 의 '(mock)' 괄호로만 드러나 진짜 수집값처럼 보였다. */}
-            {s?.extra?.mock && (
-              <span className="badge red" style={{ marginRight: 4 }}
-                title={'이 장비의 값은 실제 수집이 아니라 개발용 가짜 데이터입니다.\n'
-                  + '수집 노드(중앙 또는 엣지)가 DATA_SOURCE=mock 으로 실행 중입니다.\n'
-                  + 'portal.env 에 DATA_SOURCE=live (또는 EDGE_MODE=all) 를 넣고 재시작하세요.'}>MOCK</span>
-            )}
-            {!s ? <span className="badge gray">수집 전</span> : s.ok ? <span className="badge green">정상</span> : (
-              <button type="button" className="badge red fail-badge" onClick={() => setDetail(r.id)}
-                title={`실패 사유: ${failReason(s)}\n\n(클릭하면 상세 창에서 전체 내용을 봅니다)`}>
-                실패 <span aria-hidden="true">ⓘ</span>
-              </button>
-            )}
-            <div className="muted" style={{ fontSize: 10.5 }}>{ago(s?.collectedAt)}{s?.agent ? ` · ${s.agent}` : ''}</div>
-          </td>
-        );
-      case 'actions':
-        return (
-          <td className="right" style={{ whiteSpace: 'nowrap' }}>
-            <button className="logout-btn" style={{ padding: '3px 8px', fontSize: 11.5 }} disabled={busy} onClick={() => collectNow(r.id)} title={r.agent ? '엣지 수집 장비 — 주기 반영 안내' : '지금 수집(연결 테스트)'}>수집</button>
-            {' '}<button className="logout-btn" style={{ padding: '3px 8px', fontSize: 11.5 }} disabled={busy} onClick={() => setForm({ ...r, password: '' })}>수정</button>
-            {' '}<button className="logout-btn" style={{ padding: '3px 8px', fontSize: 11.5, color: 'var(--red)' }} disabled={busy} onClick={() => remove(r)}>삭제</button>
-          </td>
-        );
-      default:
-        return <td style={{ textAlign: col.align === 'right' ? 'right' : undefined }}>{v == null || v === '' ? dash : v}</td>;
-    }
-  };
+  // 셀 렌더 컨텍스트 — Cell 은 최상위 컴포넌트(아래 참조)라 매 렌더 재마운트되지 않는다(v2.417).
+  const cellCtx = { setDetail, typeLabel, dcName, busy, collectNow, setForm, remove };
 
   /** 한 타입만 담긴 표(컬럼이 그 타입 전용). */
   const TypedTable = ({ list, type, caption }) => {
@@ -272,7 +278,7 @@ export default function StorageMonTool() {
               {list.length === 0 && <tr><td colSpan={cols.length} className="center muted" style={{ padding: 20 }}>등록된 장비가 없습니다 — "+ 장비 등록"으로 시작하세요.</td></tr>}
               {list.map((r) => (
                 <tr key={r.id} style={{ opacity: r.enabled === false ? 0.5 : 1 }}>
-                  {cols.map((c) => <Cell key={c.key} col={c} r={r} />)}
+                  {cols.map((c) => <Cell key={c.key} col={c} r={r} ctx={cellCtx} />)}
                 </tr>
               ))}
             </tbody>

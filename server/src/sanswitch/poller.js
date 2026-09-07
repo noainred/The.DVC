@@ -15,6 +15,7 @@ import { emptySnapshot } from './types.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import * as fosSsh from './collectors/fosSsh.js';
 import * as fosRest from './collectors/fosRest.js';
+import { withDeadline } from '../proxy/sshExec.js';
 
 const CONCURRENCY = Math.max(1, Math.min(16, Number(process.env.SANSW_CONCURRENCY) || 4));
 const DEVICE_TIMEOUT_MS = Math.max(30_000, Number(process.env.SANSW_DEVICE_TIMEOUT_MS) || 120_000);
@@ -45,7 +46,8 @@ async function collectOne(dev) {
     } else {
       try {
         // 장비당 타임아웃 — 느린 1대가 전체 주기를 막지 않게(고RTT 법인 대비).
-        snap = await withTimeout(fn(full), DEVICE_TIMEOUT_MS, `수집 타임아웃(${Math.round(DEVICE_TIMEOUT_MS / 1000)}초)`);
+        // v2.417: 결과만 포기하는 race 가 아니라 signal 로 세션을 실제로 끊는다(동시성 상한 실효 유지).
+        snap = await withDeadline(DEVICE_TIMEOUT_MS, (signal) => fn(full, { signal }), '수집 타임아웃');
       } catch (e) {
         snap = emptySnapshot(full);
         snap.error = e.message || String(e);
@@ -56,10 +58,6 @@ async function collectOne(dev) {
     putSnapshot(snap);
     return snap.ok;
   } finally { _inFlight.delete(dev.id); }
-}
-
-function withTimeout(p, ms, msg) {
-  return Promise.race([p, new Promise((_, rej) => { const t = setTimeout(() => rej(new Error(msg)), ms); t.unref?.(); })]);
 }
 
 /** 동시 개수 제한 실행(storage.collectPool 과 같은 패턴 — 순간 부하 평탄화). */
@@ -105,10 +103,10 @@ export async function testDeviceConnection(device, { timeoutMs = 60_000 } = {}) 
   try {
     if (device.type !== 'brocade') throw new Error(`수집기 미구현: ${device.type}`);
     if (device.collectMethod === 'rest') {
-      const snap = await withTimeout(fosRest.collect(device), timeoutMs, '테스트 타임아웃');
+      const snap = await withDeadline(timeoutMs, (signal) => fosRest.collect(device, { signal }), '테스트 타임아웃');
       return { ok: true, ms: Date.now() - t0, snap: summary(snap), cliRaw: [] };
     }
-    const { snap, raw } = await withTimeout(fosSsh.collect(device, { withRaw: true }), timeoutMs, '테스트 타임아웃');
+    const { snap, raw } = await withDeadline(timeoutMs, (signal) => fosSsh.collect(device, { withRaw: true, signal }), '테스트 타임아웃');
     return { ok: true, ms: Date.now() - t0, snap: summary(snap), cliRaw: raw };
   } catch (e) {
     return { ok: false, ms: Date.now() - t0, reason: e.message || String(e) };

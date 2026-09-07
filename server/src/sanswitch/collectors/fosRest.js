@@ -73,7 +73,8 @@ export function toDbm(v) {
   return Math.round(10 * Math.log10(n / 1000) * 10) / 10; // µW → dBm
 }
 
-function makeClient(device) {
+const sig = (ms, outer) => (outer ? AbortSignal.any([outer, AbortSignal.timeout(ms)]) : AbortSignal.timeout(ms));
+function makeClient(device, signal) {
   // 포트 기본 443 — 등록부에서 바꿀 수 있다(NAT/포트포워딩 뒤 스위치).
   const base = `https://${device.host}:${Number(device.httpsPort) || 443}/rest`;
   const auth = Buffer.from(`${device.username}:${device.password || ''}`).toString('base64');
@@ -84,7 +85,7 @@ function makeClient(device) {
     async login() {
       const res = await fetch(`${base}/login`, {
         method: 'POST', headers: { Authorization: `Basic ${auth}`, Accept: 'application/yang-data+json' },
-        dispatcher, signal: AbortSignal.timeout(TIMEOUT_MS),
+        dispatcher, signal: sig(TIMEOUT_MS, signal),
       });
       if (res.status === 401) throw new Error('인증 실패(401) — 계정/비밀번호 확인');
       if (res.status === 404) throw new Error('/rest 없음(404) — FOS 8.2.1 미만으로 보입니다. 수집 방식을 SSH 로 바꾸세요.');
@@ -96,7 +97,7 @@ function makeClient(device) {
     async get(modulePath) {
       const res = await fetch(`${base}/running/${modulePath}${vf}`, {
         headers: { Authorization: token, Accept: 'application/yang-data+json' },
-        dispatcher, signal: AbortSignal.timeout(TIMEOUT_MS),
+        dispatcher, signal: sig(TIMEOUT_MS, signal),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const j = await res.json();
@@ -185,8 +186,8 @@ export function buildSnapshot(device, parts = {}) {
 const num = (v) => (v == null || v === '' || Number.isNaN(Number(v)) ? null : Number(v));
 
 /** 수집 진입점. 섹션 실패는 sections 에 남기고 계속 진행한다(포트 표는 살린다). */
-export async function collect(device) {
-  const c = makeClient(device);
+export async function collect(device, { signal } = {}) {
+  const c = makeClient(device, signal);
   await c.login();
   const parts = {}; const sections = {};
   const grab = async (key, modulePath, required = false) => {

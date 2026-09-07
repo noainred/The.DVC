@@ -265,3 +265,21 @@ test('deployInputIssue: 인스턴스 이름·중복·우선순위·비밀번호 
   assert.match(deployInputIssue({ instances: [{ name: 'a' }], password: "pw'; rm -rf /" }), /비밀번호/);
   assert.match(deployInputIssue({ instances: [{ name: 'a' }], centralUrl: 'ftp://x' }), /CENTRAL_URL/);
 });
+
+// ── v2.417 개선 — 이력 sqlite 영속화 ──
+test('historyDb: 저장 후 조회(법인 필터·출력 상한), DB 가 있으면 listHistoryAsync 가 DB 를 쓴다', async () => {
+  const h = await import('../src/rma/historyDb.js');
+  if (!(await h.historyAvailable())) { console.log('node:sqlite 없음 — 건너뜀'); return; }
+  _resetRma();
+  const { reqId } = enqueueJob('H1', { cmd: 'uptime', args: { x: 1 } }, { user: 'admin', timeoutMs: 5000 });
+  takeJobs('H1', 'a');
+  setJobResult(reqId, { ok: true, stdout: 'x'.repeat(70 * 1024), exitCode: 0, durationMs: 5 });
+  await new Promise((r) => setTimeout(r, 50));
+  const rows = await h.listHistoryRows({ agent: 'h1', limit: 10 });
+  const row = rows.find((x) => x.reqId === reqId);
+  assert.ok(row, 'DB 에 저장됨(대소문자 무시 조회)');
+  assert.equal(row.instance, 'a'); assert.equal(row.ok, true); assert.deepEqual(row.args, { x: 1 });
+  assert.ok(row.stdout.length <= 64 * 1024 && row.truncated, '출력 상한 + truncated 표시');
+  const viaJobs = await jobsMod.listHistoryAsync({ agent: 'H1', limit: 5 });
+  assert.ok(viaJobs.some((x) => x.reqId === reqId));
+});

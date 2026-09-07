@@ -20,6 +20,9 @@ import { saveCapacityPoint } from './db.js';
 import { recordActivity } from './activityLog.js';
 import { runtimeIntervals, runtimeIntervalSource, centralIntervalsInfo, startAdaptiveTimer, applyOwnIntervals } from './intervals.js';
 
+import { withDeadline } from '../proxy/sshExec.js';
+/** 장비당 수집 타임아웃 — 느린 어레이 1대가 전체 주기를 막지 않게(기본 3분, 하한 30초). */
+const DEVICE_TIMEOUT_MS = Math.max(30_000, Number(process.env.STORAGE_DEVICE_TIMEOUT_MS) || 180_000);
 const COLLECTORS = { isilon: isilon.collect, powerstore: powerstore.collect, unity480: unity.collect,
   xtremio: xtremio.collect, vmax: powermax.collect, powermax: powermax.collect,
   vplex: vplex.collect, metronode: vplex.collect };
@@ -70,7 +73,9 @@ async function collectOneInner(dev, startedAt) {
     //   재할당이 통째로 덮어써 플래그가 사라진다(실측으로 잡은 실수).
     snap.extra = { mock: true, collectMethod: full.collectMethod || 'ssh', clusterHealth: 'OK', dataReduction: '1.00:1', storageEfficiency: '0.83:1', vhsBytes: 15.4 * 1024 ** 4, l3TotalBytes: 8.7 * 1024 ** 4 };
   } else {
-    try { snap = await fn(full); }
+    // 장비당 타임아웃(v2.417) — 예전에는 없었다(CLAUDE.md 'per-vCenter 타임아웃' 규약 위반). SSH 계열
+    // 수집기는 device._signal 을 withSsh creds 로 넘겨 기한 만료 시 세션을 실제로 끊는다.
+    try { snap = await withDeadline(DEVICE_TIMEOUT_MS, (signal) => fn({ ...full, _signal: signal }), '수집 타임아웃'); }
     catch (e) { snap = emptySnapshot(full); snap.error = e.message; }
   }
   // ⚠ 스냅샷 저장(회귀 수정 — v2.310 적대적 검증에서 확정): v2.308 리팩터가 이 무조건
