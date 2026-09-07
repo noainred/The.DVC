@@ -35,44 +35,73 @@ const CMD_TIMEOUT_MS = Number(process.env.SANSW_CLI_TIMEOUT_MS) || 45_000;
  *   그래서 VF 는 **명령마다 앞에 붙여** 실행한다(`setcontext N; switchshow`).
  */
 /**
- * FOS 명령이 PATH 에 없을 때의 대체 경로(v2.411 — 실장비에서 확인된 결함).
+ * 명령 가용성 조사(v2.412 — 실장비 진단으로 교정).
  *
- * 실측(FOS v9.0.1d): `switchshow`·`porterrshow`·`sfpshow` 는 되는데
- * `switchstatusshow`·`licenseshow` 는 `sh: <명령>: command not found` 로 실패했다.
- * SSH 비대화형 exec 은 로그인 프로파일을 읽지 않아 PATH 가 대화형 CLI 와 다르고, FOS 는
- * 명령 바이너리가 여러 디렉터리에 흩어져 있어 일부만 기본 PATH 에 잡힌다.
+ * v2.411 에서는 `switchstatusshow` 가 안 되자 '흔히 쓰이는 경로'를 **추측해서** 하나씩
+ * 찔러봤다. 사용자가 실장비에서 확인해 준 결과 그 추측은 틀렸고, 더 중요하게는
+ * **그 명령 자체가 이 스위치에 없었다**:
  *
- * 그래서 각 명령을 '이름 → 로그인 셸 경유 → 알려진 설치 경로' 순으로 시도한다. 실패한
- * 후보는 그냥 다음으로 넘어가므로(runSession 의 후보 루프), 첫 후보가 되는 장비에서는
- * 추가 왕복이 발생하지 않는다.
- * ⚠ 아래 경로들은 FOS 에서 흔히 쓰이는 위치를 넣은 것으로 **전 모델·전 버전에서 검증하지
- *   않았다**. 전부 실패하면 그 섹션은 지금처럼 '미수집'으로 남고 사유가 화면에 표시된다.
+ *   > which switchstatusshow
+ *   which: no switchstatusshow in (/fabos/link_bin:/bin:/usr/bin:/sbin:/usr/sbin:
+ *          /fabos/link_abin:/fabos/link_sbin:/fabos/link_rbin:/fabos/factory:/fabos/xtool)
+ *   > ls /fabos/&#42;/switchstatusshow  →  No such file or directory
+ *
+ * 그래서 경로를 추측하지 않고 **장비에 직접 묻는다**: 세션 시작에 한 번 `echo $PATH` 로 실제
+ * 검색 경로를 받고, 그 디렉터리들의 파일 목록으로 '이 스위치가 가진 명령 집합'을 만든다.
+ * 이후에는 있는 명령만 실행하고, 없는 명령은 **시도조차 하지 않고** 사유를 남긴다.
+ *
+ * 얻는 것: ① 없는 명령에 6번씩 SSH 왕복하던 낭비 제거 ② '왜 안 되는지'가 추측이 아닌 사실로
+ * 표시됨 ③ 모델·펌웨어마다 다른 명령 구성에 코드 변경 없이 적응.
+ *
+ * ⚠ root 계정은 raw 셸을 받지만 admin 계정의 로그인 셸은 FOS CLI 라, **계정에 따라 쓸 수 있는
+ *   명령이 다르다**. 그래서 캐시 키에 계정을 포함한다.
  */
-const FOS_DIRS = ['/fabos/cliexec', '/fabos/link_bin', '/fabos/bin', '/bin', '/usr/bin'];
+const CAPS_TTL_MS = Math.max(60_000, Number(process.env.SANSW_CAPS_TTL_MS) || 6 * 3600_000);
+const _caps = new Map(); // `${host}|${user}` → { at, has:Set<string>, path:string[] }
 
+/** 장비가 돌려준 경로 문자열 중 **안전한 절대경로만** 통과(셸 조립에 그대로 들어가므로). */
+const SAFE_DIR = /^\/[A-Za-z0-9._/-]{1,200}$/;
+
+async function probeCommands(sh, key) {
+  const cached = _caps.get(key);
+  if (cached && Date.now() - cached.at < CAPS_TTL_MS) return cached;
+  try {
+    const pr = await sh.exec('echo $PATH', 15_000);
+    const dirs = String(pr.stdout || '').trim().split(':').map((d) => d.trim())
+      .filter((d) => SAFE_DIR.test(d)).slice(0, 20);
+    if (!dirs.length) throw new Error('PATH 를 읽지 못했습니다');
+    const ls = await sh.exec(`ls ${dirs.join(' ')} 2>/dev/null`, 25_000);
+    const has = new Set(String(ls.stdout || '').split(/\s+/).map((x) => x.trim()).filter(Boolean));
+    if (!has.size) throw new Error('명령 목록이 비었습니다');
+    const rec = { at: Date.now(), has, path: dirs };
+    _caps.set(key, rec);
+    return rec;
+  } catch (e) {
+    // 조사 실패 시에는 '전부 있다'고 보고 그냥 실행한다 — 조사 실패가 수집 실패로 번지면 안 된다.
+    const rec = { at: Date.now(), has: null, path: [], probeError: e.message };
+    _caps.set(key, rec);
+    return rec;
+  }
+}
+
+/**
+ * 실행할 명령 목록. `sfpshow` 처럼 옵션 유무가 버전마다 다른 것만 후보를 둔다
+ * (경로 추측 후보는 없앴다 — 위 머리말 참조).
+ */
 function specs(vfId) {
   const pre = vfId ? `setcontext ${vfId}; ` : '';
-  /** 한 명령의 후보 목록: 그대로 → 로그인 셸(프로파일 로드) → 전체 경로들. */
-  const c = (cmd) => {
-    const [name, ...rest] = cmd.split(' ');
-    const args = rest.length ? ` ${rest.join(' ')}` : '';
-    return [
-      `${pre}${cmd}`,
-      `${pre}sh -lc '${cmd}'`,
-      ...FOS_DIRS.map((d) => `${pre}${d}/${name}${args}`),
-    ];
-  };
+  const c = (cmd) => `${pre}${cmd}`;
   return [
-    { key: 'switchshow', required: true, cmds: c('switchshow') },
-    { key: 'chassisshow', cmds: c('chassisshow') },
-    { key: 'firmwareshow', cmds: c('firmwareshow') },
-    { key: 'licenseshow', cmds: c('licenseshow') },
-    { key: 'porterrshow', cmds: c('porterrshow') },
-    { key: 'sfpshow', cmds: [...c('sfpshow -all'), ...c('sfpshow')] },
-    { key: 'switchstatusshow', cmds: c('switchstatusshow') },
-    { key: 'fanshow', cmds: c('fanshow') },
-    { key: 'psshow', cmds: c('psshow') },
-    { key: 'nsshow', cmds: c('nsshow') },
+    { key: 'switchshow', bin: 'switchshow', required: true, cmds: [c('switchshow')] },
+    { key: 'chassisshow', bin: 'chassisshow', cmds: [c('chassisshow')] },
+    { key: 'firmwareshow', bin: 'firmwareshow', cmds: [c('firmwareshow')] },
+    { key: 'licenseshow', bin: 'licenseshow', cmds: [c('licenseshow')] },
+    { key: 'porterrshow', bin: 'porterrshow', cmds: [c('porterrshow')] },
+    { key: 'sfpshow', bin: 'sfpshow', cmds: [c('sfpshow -all'), c('sfpshow')] },
+    { key: 'switchstatusshow', bin: 'switchstatusshow', cmds: [c('switchstatusshow')] },
+    { key: 'fanshow', bin: 'fanshow', cmds: [c('fanshow')] },
+    { key: 'psshow', bin: 'psshow', cmds: [c('psshow')] },
+    { key: 'nsshow', bin: 'nsshow', cmds: [c('nsshow')] },
   ];
 }
 
@@ -83,14 +112,27 @@ async function runSession(device) {
   };
   return withSsh(creds, async (sh) => {
     const out = {}; const raw = []; const errors = {};
+    // 이 스위치가 실제로 가진 명령 집합을 먼저 조사한다(경로 추측 금지 — 위 머리말).
+    const caps = await probeCommands(sh, `${device.host}|${device.username}`);
+    if (caps.probeError) raw.push({ key: '_probe', cmd: 'echo $PATH; ls $PATH', ok: false, sample: `명령 조사 실패(그대로 실행합니다): ${caps.probeError}` });
+    else raw.push({ key: '_probe', cmd: 'echo $PATH; ls $PATH', ok: true, sample: `PATH: ${caps.path.join(':')}\n확인된 명령 ${caps.has.size}개` });
+
     for (const spec of specs(device.vfId)) {
+      // 조사에 성공했고 그 명령이 없으면 **시도하지 않는다** — 없는 명령에 SSH 왕복을
+      // 반복하지 않고, 사유도 추측이 아닌 사실('이 스위치에 없음')로 남긴다.
+      if (caps.has && spec.bin && !caps.has.has(spec.bin)) {
+        const why = `이 스위치에 '${spec.bin}' 명령이 없습니다(펌웨어/계정이 제공하지 않음)`;
+        errors[spec.key] = why;
+        raw.push({ key: spec.key, cmd: spec.bin, ok: false, sample: `${why}\n확인 경로: ${caps.path.join(':')}` });
+        if (spec.required) throw new Error(`${spec.key}: ${why}`);
+        continue;
+      }
       let lastErr = null; let done = false;
       for (const cmd of spec.cmds) {
         try {
           const r = await sh.exec(cmd, CMD_TIMEOUT_MS);
           const stdout = String(r.stdout || '');
           const stderr = String(r.stderr || '');
-          // FOS 는 오류를 exit 0 + 본문 문구로 내는 경우가 흔하다(예: 'Invalid command').
           // FOS 는 오류를 exit 0 + 본문/stderr 문구로 내는 경우가 흔하다. 'command not found' 는
           // 줄 중간에 나오므로(`sh: licenseshow: command not found`) 앵커 없이 본다 —
           // 앵커를 걸어 두면 실패를 '성공(빈 내용)'으로 오인해 대체 경로를 시도하지 않는다.

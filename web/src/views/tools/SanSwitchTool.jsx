@@ -161,11 +161,16 @@ export default function SanSwitchTool() {
               나눠 물리므로 스위치 하나만 보면 트래픽의 절반만 보인다. 선택한 법인의 모든
               스위치를 합산해야 어레이의 실제 사용량이 나온다. */}
           <button className="tab" style={{ flex: 'none', padding: '6px 12px' }}
-            onClick={() => setDcPerf({ datacenterId: dcSel.size === 1 ? dcIdOfName([...dcSel][0]) : '', label: dcSel.size === 1 ? [...dcSel][0] : '전체' })}
-            title={dcSel.size === 1
-              ? `'${[...dcSel][0]}' 법인의 모든 스위치를 합산해 스토리지별 사용량을 분석합니다.`
-              : '법인 칩을 하나 고르면 그 법인만, 고르지 않으면 전체 스위치를 합산해 분석합니다.'}>
-            📊 스토리지 사용량 분석{dcSel.size === 1 ? ` — ${[...dcSel][0]}` : ' — 전체'}
+            onClick={() => setDcPerf({
+              // 선택한 법인을 **전부** 넘긴다(v2.414) — 예전에는 1개일 때만 그 법인이고 2개
+              // 이상이면 '전체'로 뭉쳐져 법인 구분이 사라졌다(사용자 신고).
+              datacenterIds: [...dcSel].map(dcIdOfName).filter(Boolean),
+              label: dcSel.size ? [...dcSel].join(', ') : '전체',
+            })}
+            title={dcSel.size
+              ? `선택한 법인(${[...dcSel].join(', ')})의 스위치를 법인별로 나눠 스토리지 사용량을 분석합니다.`
+              : '법인 칩을 고르면 그 법인들만, 고르지 않으면 전체를 분석합니다. 법인을 2곳 이상 고르면 법인별로 분리해 보여줍니다.'}>
+            📊 스토리지 사용량 분석{dcSel.size ? ` — ${[...dcSel].join(', ')}` : ' — 전체'}
           </button>
           <SearchBox className="input" style={{ marginLeft: 'auto', maxWidth: 260, minWidth: 180 }}
             value={q} onChange={setQ} placeholder="스위치·host·모델·엣지 찾기" />
@@ -641,21 +646,37 @@ function DcStoragePerf({ dcPerf, onClose }) {
   // 기본은 스토리지 어레이만 — 법인 합산이면 서버 HBA 가 수십 개 잡혀 표를 덮는다(실측 64개).
   const [kind, setKind] = useState('array');
   const [sort, setSort] = useState({ key: 'avg', dir: 'desc' });   // 기본: 많이 쓰는 순
+  // 법인이 2곳 이상이면 기본은 **법인별 분리**. '합산'을 고르면 같은 어레이를 법인 구분 없이 합친다.
+  const [split, setSplit] = useState(true);
+  // 범위(법인)를 **창 안에서** 바꾼다 — 예전에는 목록 화면에서 칩을 먼저 고르고 창을 열어야 해서,
+  // '전체 법인'과 '특정 법인'을 오가려면 매번 창을 닫아야 했다(사용자 요구, v2.415).
+  // 빈 Set = 전체 법인.
+  const [dcSet, setDcSet] = useState(() => new Set(dcPerf.datacenterIds || []));
+  const dcParam = [...dcSet].join(',');
 
   useEffect(() => {
     let alive = true;
     setData(null); setError(null);
-    fetchJson('/tools/sanswitch/perf/storage-summary', { datacenterId: dcPerf.datacenterId, hours })
+    fetchJson('/tools/sanswitch/perf/storage-summary', { datacenterId: dcParam, hours, split: split ? '1' : '0' })
       .then((d) => { if (alive) setData(d); })
       .catch((e) => { if (alive) setError(e.message); });
     return () => { alive = false; };
-  }, [dcPerf.datacenterId, hours]);
+  }, [dcParam, hours, split]);
 
   const series = (data?.series || []).filter((s) => kind === 'all' || s.endpointKind === kind);
-  const chartSeries = topSeries(series.map((s) => ({ key: s.key, label: `${s.key} (스위치 ${s.switches.length}·포트 ${s.portCount})`, values: s.sum })), 8);
+  const multiDc = dcSet.size !== 1;   // 법인 2곳 이상 또는 전체 — 그때만 분리/합산이 의미 있다
+  const showDcCol = !!data?.split;
+  const chartSeries = topSeries(series.map((s) => ({
+    // 법인별로 분리했으면 라벨에 법인을 앞세운다 — 같은 어레이 이름이 법인마다 나오므로
+    // 접두어가 없으면 범례에서 구분할 수 없다.
+    key: `${s.datacenterId ?? ''}\u0000${s.key}`,
+    label: `${showDcCol && s.datacenterName ? `${s.datacenterName} · ` : ''}${s.key} (스위치 ${s.switches.length}·포트 ${s.portCount})`,
+    values: s.sum,
+  })), 8);
   const rows = toChartRows(data?.buckets || [], chartSeries);
   const grand = series.reduce((a, s) => a + s.avgTotal, 0);
   const SORTERS = {
+    dc: (s) => s.datacenterName || null,
     name: (s) => s.key,
     switches: (s) => s.switches.length,
     ports: (s) => s.portCount,
@@ -664,9 +685,37 @@ function DcStoragePerf({ dcPerf, onClose }) {
     cap: (s) => (s.capacity?.pct ?? null),   // 용량 미매칭은 null → 항상 뒤로
   };
   const sorted = sortRows(series, SORTERS[sort.key] || SORTERS.avg, sort.dir, (s) => s.key);
+  const scopeLabel = dcSet.size === 0
+    ? '전체 법인'
+    : (data?.allDatacenters || []).filter((d) => dcSet.has(d.id)).map((d) => d.name).join(', ') || dcPerf.label;
+  // 법인 소계 앞에 '전체 합계'를 둔다 — 법인별로 나눠 보면서도 전사 총량을 함께 봐야
+  // '어느 법인이 전체의 몇 %인가'를 판단할 수 있다.
+  const dcTotals = data?.byDatacenter || [];
+  const grandAvg = dcTotals.reduce((a, d) => a + d.avgTotal, 0);
+  const grandMax = dcTotals.reduce((a, d) => a + d.maxTotal, 0);
 
   return (
-    <Modal title={`스토리지 사용량 분석 — ${dcPerf.label}`} onClose={onClose} width={1180}>
+    <Modal title={`스토리지 사용량 분석 — ${scopeLabel}`} onClose={onClose} width={1180}>
+      {/* 범위 선택 — '전체 법인'과 개별 법인을 여기서 바로 오간다. */}
+      <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 8 }}>
+        <span className="muted" style={{ fontSize: 12, minWidth: 42 }}>🏢 범위</span>
+        <button className={dcSet.size === 0 ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '4px 12px' }}
+          onClick={() => setDcSet(new Set())}
+          title="등록된 모든 법인을 대상으로 봅니다. 아래 '법인별 분리'로 법인마다 나눠 볼 수 있습니다.">
+          전체 법인{(data?.allDatacenters || []).length ? ` ${data.allDatacenters.length}` : ''}
+        </button>
+        {(data?.allDatacenters || []).map((d) => {
+          const on = dcSet.has(d.id);
+          return (
+            <button key={d.id || '_'} className={on ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '4px 12px' }}
+              aria-pressed={on}
+              onClick={() => setDcSet((p) => { const n = new Set(p); n.has(d.id) ? n.delete(d.id) : n.add(d.id); return n; })}
+              title={`${d.name} — 스위치 ${d.switches}대. 여러 법인을 함께 고를 수 있습니다.`}>
+              {d.name}<span className="muted" style={{ fontWeight: 400, fontSize: 11 }}>{d.switches}</span>
+            </button>
+          );
+        })}
+      </div>
       <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 8 }}>
         {/* 연결 대상 구분 — 어레이/호스트를 섞으면 스토리지가 HBA 수십 개에 묻힌다. */}
         {[['array', '스토리지'], ['host', '호스트(HBA)'], ['all', '전체']].map(([k, label]) => (
@@ -678,6 +727,16 @@ function DcStoragePerf({ dcPerf, onClose }) {
             {label}{data?.counts?.[k] != null ? ` ${data.counts[k]}` : (k === 'all' && data ? ` ${(data.series || []).length}` : '')}
           </button>
         ))}
+        {/* 법인이 2곳 이상일 때만 의미가 있다 — 한 법인이면 분리·합산이 같은 결과다. */}
+        {multiDc && (
+          <button className="tab" style={{ flex: 'none', padding: '4px 12px', marginLeft: 6 }}
+            onClick={() => setSplit((v) => !v)}
+            title={split
+              ? '지금은 법인별로 나눠 보고 있습니다. 누르면 같은 어레이를 법인 구분 없이 합칩니다.'
+              : '지금은 법인 구분 없이 합쳐 보고 있습니다. 누르면 법인별로 나눕니다.'}>
+            {split ? '🏢 법인별 분리' : '🔗 법인 합산'}
+          </button>
+        )}
         <span className="muted" style={{ fontSize: 12, marginLeft: 6 }}>기간</span>
         {HOURS.map(([h, label]) => (
           <button key={h} className={hours === h ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '4px 10px' }}
@@ -706,11 +765,27 @@ function DcStoragePerf({ dcPerf, onClose }) {
         </div>
       )}
 
+      {/* 법인 소계 — '어느 법인이 얼마나 쓰나'를 먼저 보여준다(복수 법인 분리 보기의 핵심). */}
+      {!!dcTotals.length && data.split && (
+        <div className="kpis" style={{ marginBottom: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))' }}>
+          {dcTotals.length > 1 && (
+            <Kpi label="🌐 전체 합계" value={bytesPerSecText(grandAvg)} accent="var(--blue)"
+              meta={`법인 ${dcTotals.length} · 스토리지 ${dcTotals.reduce((a, d) => a + d.storages, 0)} · 최대 ${bytesPerSecText(grandMax)}`} />
+          )}
+          {dcTotals.map((d) => (
+            <Kpi key={d.datacenterId || '_'} label={`🏢 ${d.name}`} value={bytesPerSecText(d.avgTotal)}
+              pct={grandAvg ? Math.round((d.avgTotal / grandAvg) * 100) : undefined}
+              meta={`스토리지 ${d.storages} · 스위치 ${d.switches} · 최대 ${bytesPerSecText(d.maxTotal)}`
+                + (dcTotals.length > 1 && grandAvg ? ` · 전체의 ${Math.round((d.avgTotal / grandAvg) * 100)}%` : '')} />
+          ))}
+        </div>
+      )}
+
       {!!rows.length && (
         <>
           <div className="card" style={{ padding: 8, marginBottom: 8 }}>
             <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>
-              스토리지별 합산 처리량(법인 내 전 스위치) · 평균 사용량 상위 {chartSeries.length}개 ·
+              스토리지별 합산 처리량({data.split ? '법인별로 분리' : '법인 구분 없이 합산'}) · 평균 사용량 상위 {chartSeries.length}개 ·
               스위치가 여러 대인 항목은 팹 A/B 를 합친 값입니다.
             </div>
             <ResponsiveContainer width="100%" height={250}>
@@ -731,11 +806,13 @@ function DcStoragePerf({ dcPerf, onClose }) {
           <div className="table-wrap" style={{ maxHeight: '40vh', overflow: 'auto' }}>
             <table style={{ tableLayout: 'fixed', width: '100%' }}>
               <colgroup>
+                {showDcCol && <col style={{ width: 110 }} />}
                 <col /><col style={{ width: 150 }} /><col style={{ width: 70 }} />
                 <col style={{ width: 110 }} /><col style={{ width: 110 }} /><col style={{ width: 190 }} />
               </colgroup>
               <thead>
                 <tr>
+                  {showDcCol && <SortTh k="dc" label="법인" sort={sort} setSort={setSort} />}
                   <SortTh k="name" label="스토리지" sort={sort} setSort={setSort} />
                   <SortTh k="switches" label="연결 스위치" sort={sort} setSort={setSort} />
                   <SortTh k="ports" label="포트" sort={sort} setSort={setSort} />
@@ -747,7 +824,8 @@ function DcStoragePerf({ dcPerf, onClose }) {
               </thead>
               <tbody>
                 {sorted.map((s) => (
-                  <tr key={s.key}>
+                  <tr key={`${s.datacenterId ?? ''}|${s.key}`}>
+                    {showDcCol && <td style={ELLIPSIS} title={s.datacenterName || ''}><b>{s.datacenterName || '—'}</b></td>}
                     <td style={ELLIPSIS} title={s.key}>
                       <b>{s.key}</b>
                       <div className="muted" style={{ fontSize: 10.5 }}>
@@ -924,7 +1002,7 @@ function PortDetail({ detail, setDetail, portFilter, setPortFilter, portQ, setPo
 
           {Object.entries(d.sections || {}).filter(([, v]) => v && v !== 'ok').length > 0 && (
             <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>
-              미수집 항목 — 이 스위치에서 해당 명령을 실행하지 못했습니다(포트 현황에는 영향 없음):
+              미수집 항목 — <b>포트 현황·사용량에는 영향이 없습니다.</b> 이 스위치가 그 명령을 제공하지 않거나 실행에 실패했습니다:
               <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
                 {Object.entries(d.sections).filter(([, v]) => v && v !== 'ok').map(([k, v]) => (
                   <li key={k} style={ELLIPSIS} title={String(v)}><b>{k}</b> — {String(v)}</li>

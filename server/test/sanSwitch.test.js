@@ -504,3 +504,95 @@ test('storageSeriesMulti: 대상이 없으면 빈 결과(전체 스캔으로 흐
   assert.deepEqual(r.series, []);
   assert.deepEqual(r.buckets, []);
 });
+
+// ── v2.412: 명령 가용성 조사(경로 추측 제거) ──────────────────────────────────
+test('수집기 소스: 경로를 추측하지 않고 장비에 직접 묻는다(실장비 진단 반영)', () => {
+  const src = fs.readFileSync(new URL('../src/sanswitch/collectors/fosSsh.js', import.meta.url), 'utf8');
+  // v2.411 의 추측 경로 목록은 실장비에서 틀린 것으로 확인됐다(실제 PATH 는 /fabos/link_bin 계열).
+  assert.ok(!/FOS_DIRS/.test(src), '경로 추측 목록을 되살리지 말 것 — 장비의 $PATH 를 읽어야 한다');
+  assert.ok(!src.includes("'/fabos/cliexec'"), '실장비에 없는 경로를 후보로 넣지 말 것');
+  assert.ok(src.includes('probeCommands'), '세션 시작에 명령 가용성을 조사해야 한다');
+  assert.ok(src.includes('echo $PATH'), '검색 경로는 장비가 알려준 값을 쓴다');
+  // 장비가 준 경로 문자열이 셸 조립에 그대로 들어가므로 형식 검증이 반드시 있어야 한다.
+  assert.ok(/SAFE_DIR\s*=\s*\//.test(src), '장비가 준 경로는 절대경로 화이트리스트로 검증해야 한다');
+});
+
+test('명령 가용성 조사: 경로 화이트리스트가 주입 문자열을 거른다', () => {
+  // fosSsh.js 의 SAFE_DIR 와 같은 규칙 — 셸에 그대로 들어가는 값이라 회귀로 고정한다.
+  const SAFE_DIR = /^\/[A-Za-z0-9._/-]{1,200}$/;
+  for (const ok of ['/fabos/link_bin', '/usr/bin', '/fabos/link_abin', '/bin']) {
+    assert.ok(SAFE_DIR.test(ok), `정상 경로가 막히면 안 된다: ${ok}`);
+  }
+  for (const bad of ['/tmp; rm -rf /', '/a$(id)', '/a`id`', '/a|b', '/a b', 'relative/path', '', '/a&&b']) {
+    assert.ok(!SAFE_DIR.test(bad), `주입 가능한 값이 통과하면 안 된다: ${JSON.stringify(bad)}`);
+  }
+});
+
+// ── v2.414: 복수 법인 분리 집계 ───────────────────────────────────────────────
+test('storageSeriesMulti(groupOf): 같은 어레이라도 법인마다 따로 집계한다', async () => {
+  const { savePerfSample, storageSeriesMulti, available, _resetForTest } = await import('../src/sanswitch/perfDb.js');
+  if (!(await available())) return;
+  _resetForTest();
+  const now = Date.now();
+  const NAME = 'PowerStore::SHARED-MODEL::NodeA::FC';   // 두 법인이 같은 심볼릭 이름을 쓰는 경우
+  for (const dev of ['oc-a', 'oc-b', 'az-a']) {
+    const meta = [{ port: 0, attachedName: NAME, speed: '16G' }];
+    await savePerfSample(dev, now - 60_000, { 0: 1000 }, meta);
+    await savePerfSample(dev, now, { 0: 1000 }, meta);
+  }
+  const groupOf = new Map([['oc-a', 'dc-oc'], ['oc-b', 'dc-oc'], ['az-a', 'dc-az']]);
+
+  const split = await storageSeriesMulti(['oc-a', 'oc-b', 'az-a'], { hours: 1, groupOf });
+  const oc = split.series.find((s) => s.group === 'dc-oc');
+  const az = split.series.find((s) => s.group === 'dc-az');
+  assert.ok(oc && az, '법인별로 따로 나와야 한다');
+  assert.equal(oc.ports.length, 2, 'OC 는 스위치 2대');
+  assert.equal(az.ports.length, 1, 'AZ 는 스위치 1대');
+  assert.ok(oc.avgTotal > az.avgTotal);
+
+  const merged = await storageSeriesMulti(['oc-a', 'oc-b', 'az-a'], { hours: 1 });   // groupOf 없음 = 합산
+  const one = merged.series.find((s) => s.key.startsWith('PowerStore'));
+  assert.equal(merged.series.filter((s) => s.key.startsWith('PowerStore')).length, 1, '합산 모드는 하나로 묶인다');
+  assert.equal(one.ports.length, 3);
+  assert.equal(one.group, null, '합산 모드에는 법인 구분이 없다');
+  assert.equal(Math.round(one.avgTotal), Math.round(oc.avgTotal + az.avgTotal),
+    '분리 합계 = 합산 값이어야 한다(둘 중 하나가 틀리면 여기서 드러난다)');
+  _resetForTest();
+});
+
+test('storageSeriesMulti: groupOf 에 없는 장비는 빈 그룹으로 떨어진다(누락되지 않는다)', async () => {
+  const { savePerfSample, storageSeriesMulti, available, _resetForTest } = await import('../src/sanswitch/perfDb.js');
+  if (!(await available())) return;
+  _resetForTest();
+  const now = Date.now();
+  await savePerfSample('x-1', now - 60_000, { 0: 500 }, [{ port: 0, attachedName: 'A::B::C' }]);
+  await savePerfSample('x-1', now, { 0: 500 }, [{ port: 0, attachedName: 'A::B::C' }]);
+  const r = await storageSeriesMulti(['x-1'], { hours: 1, groupOf: new Map() });
+  assert.equal(r.series.length, 1, '법인 매핑이 없어도 데이터가 사라지면 안 된다');
+  assert.equal(r.series[0].group, '');
+  _resetForTest();
+});
+
+test('집계 평균은 조회 범위에 흔들리지 않는다(빈 버킷을 0 으로 세지 않는다)', async () => {
+  const { savePerfSample, storageSeriesMulti, available, _resetForTest } = await import('../src/sanswitch/perfDb.js');
+  if (!(await available())) return;
+  _resetForTest();
+  const now = Date.now();
+  const A = 'SYMMETRIX::AAA::x';
+  const B = 'SYMMETRIX::BBB::x';
+  // dev-a 와 dev-b 의 표본 시각이 어긋나 있다(현장에서 스위치마다 폴링 시각이 다른 상황).
+  for (const t of [now - 600_000, now - 300_000]) await savePerfSample('dev-a', t, { 0: 1000 }, [{ port: 0, attachedName: A }]);
+  for (const t of [now - 60_000, now]) await savePerfSample('dev-b', t, { 0: 500 }, [{ port: 0, attachedName: B }]);
+
+  const alone = await storageSeriesMulti(['dev-a'], { hours: 1 });
+  const together = await storageSeriesMulti(['dev-a', 'dev-b'], { hours: 1 });
+  const aAlone = alone.series.find((s) => s.key === 'SYMMETRIX::AAA');
+  const aTogether = together.series.find((s) => s.key === 'SYMMETRIX::AAA');
+  assert.equal(Math.round(aAlone.avgTotal), Math.round(aTogether.avgTotal),
+    '같은 스토리지의 평균이 조회에 포함된 다른 장비 때문에 달라지면 안 된다');
+  assert.equal(Math.round(aAlone.avgTotal), 1000);
+  // 데이터가 없는 버킷은 0 이 아니라 null 이어야 한다(차트에서 끊긴 구간으로 그려야 하므로).
+  assert.ok(aTogether.sum.some((v) => v === null), '빈 버킷은 null 로 남아야 한다');
+  assert.ok(!aTogether.sum.some((v) => v === 0), '빈 버킷을 0 으로 채우면 트래픽 없음으로 오해된다');
+  _resetForTest();
+});
