@@ -72,3 +72,31 @@ test('rma-poll 롱폴 → enqueue 로 깨어남 → rma-result 로 ack, 남의 r
   const stale = await post('/rma-result', { reqId: 'rma_nope', result: {} }, tA.token);
   assert.equal((await stale.json()).stale, true);
 });
+
+// ── v2.418: 결과 동봉·스케줄 배포·접속 허용 IP ──
+test('rma-poll: 스케줄 배포(assignKey) + 결과 동봉 반영(남의 항목 id 는 무시) + 접속 허용 IP 거부', async () => {
+  const t = tokens.issueAgentToken('RMA-E');
+  const sch = await import('../src/rma/schedules.js');
+  const res = await import('../src/rma/testResults.js');
+  const settings = await import('../src/rma/settings.js');
+  const item = sch.upsertScheduleItem('RMA-E', { test: 'tcp', args: { host: 'h', port: 22 }, intervalSec: 60, name: 'ssh' });
+  // 첫 폴: scheduleVersion 0 → 스케줄 내려옴
+  let r = await post('/rma-poll', { agent: 'RMA-E', instance: 'n1', info: {}, wait: 0, scheduleVersion: 0 }, t.token);
+  let body = await r.json();
+  assert.ok(body.schedule, '스케줄 배포'); assert.equal(body.schedule.tests[0].id, item.id); assert.ok(body.schedule.assignKey);
+  // 같은 버전·같은 assignKey 로 폴 → 스케줄 미포함, 결과 동봉 반영
+  r = await post('/rma-poll', { agent: 'RMA-E', instance: 'n1', info: {}, wait: 0, scheduleVersion: body.schedule.version, assignKey: body.schedule.assignKey,
+    results: [{ id: item.id, test: 'tcp', status: 'bad', reply: 'closed', at: Date.now() }, { id: 'forged', test: 'tcp', status: 'ok', reply: 'x', at: Date.now() }] }, t.token);
+  body = await r.json();
+  assert.equal(body.schedule, undefined); assert.equal(body.accepted, 1, '알려진 항목만 반영');
+  const rows = res.latestResults({ agent: 'RMA-E' });
+  assert.equal(rows.length, 1); assert.equal(rows[0].status, 'bad'); assert.equal(rows[0].instance, 'n1'); assert.equal(rows[0].name, 'ssh');
+  // 접속 허용 IP 설정 → 127.0.0.1 이 목록에 없으면 403
+  settings.setAgentAccess('RMA-E', { allowedIps: ['10.9.9.9'] });
+  r = await post('/rma-poll', { agent: 'RMA-E', instance: 'n1', info: {}, wait: 0 }, t.token);
+  assert.equal(r.status, 403); assert.match((await r.json()).reason, /허용 IP/);
+  settings.setAgentAccess('RMA-E', { allowedIps: ['127.0.0.0/8'] });
+  r = await post('/rma-poll', { agent: 'RMA-E', instance: 'n1', info: {}, wait: 0 }, t.token);
+  assert.equal(r.status, 200);
+  settings.setAgentAccess('RMA-E', {});
+});

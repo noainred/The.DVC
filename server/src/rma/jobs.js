@@ -248,9 +248,23 @@ export function noteHeartbeat(agent, instance, info = {}, { ip = '' } = {}) {
     allowCustom: !!info.allowCustom,
     signed: !!info.signed,
     busy: !!info.busy,
+    comment: String(info.comment || '').slice(0, 200),
+    remoteManage: !!info.remoteManage,
+    stats: info.stats && typeof info.stats === 'object' ? { active: Number(info.stats.active) || 0, performed: Number(info.stats.performed) || 0, rejected: Number(info.stats.rejected) || 0, testsRun: Number(info.stats.testsRun) || 0, testsFailed: Number(info.stats.testsFailed) || 0 } : null,
+    policy: info.policy && typeof info.policy === 'object' ? {
+      enabled: (info.policy.enabled || []).map(String).slice(0, 200), disabled: (info.policy.disabled || []).map(String).slice(0, 200),
+      enabledTests: (info.policy.enabledTests || []).map(String).slice(0, 200), disabledTests: (info.policy.disabledTests || []).map(String).slice(0, 200),
+      serviceUnits: (info.policy.serviceUnits || []).map(String).slice(0, 100), allowReboot: !!info.policy.allowReboot, fileRoots: (info.policy.fileRoots || []).map(String).slice(0, 20),
+    } : null,
+    scheduleVersion: Number(info.scheduleVersion) || 0, scheduledTests: Number(info.scheduledTests) || 0, outbox: Number(info.outbox) || 0,
     ip,
   };
   heartbeats.set(hbKey(a, inst), { agent: a, instance: inst, lastSeen: Date.now(), info: safe });
+}
+
+/** 법인의 온라인 인스턴스 이름 목록(스케줄 배정용). */
+export function onlineInstances(agent, now = Date.now()) {
+  return instancesOf(agent, now).filter((h) => h.online).map((h) => h.instance);
 }
 
 /** 법인별 인스턴스 그룹 목록(UI). */

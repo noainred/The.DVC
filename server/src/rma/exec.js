@@ -11,6 +11,8 @@
  */
 import { spawn } from 'node:child_process';
 import net from 'node:net';
+import dgram from 'node:dgram';
+import os from 'node:os';
 
 export const DEFAULT_MAX_OUTPUT = Number(process.env.RMA_MAX_OUTPUT) || 256 * 1024;
 
@@ -41,8 +43,45 @@ export function tcpPortCheck(host, port, timeoutMs = 5_000) {
  * { ok, exitCode, signal, stdout, stderr, durationMs, timedOut, truncated, clipped }
  * ok = 정상 종료(exit 0) 이고 타임아웃/출력초과 없음.
  */
+/** TCP 전송 — 연결 후 문자열을 보내고 응답 앞부분(최대 4KB, 2초)을 회신. */
+export function tcpSend(host, port, data = '', timeoutMs = 10_000) {
+  const t0 = Date.now();
+  return new Promise((resolve) => {
+    const sock = net.connect({ host, port: Number(port) });
+    let out = ''; let done = false;
+    const fin = (ok, reason) => { if (done) return; done = true; try { sock.destroy(); } catch { /* */ } resolve({ ok, exitCode: ok ? 0 : 1, stdout: out, stderr: ok ? '' : `${reason}\n`, durationMs: Date.now() - t0, timedOut: false, truncated: false }); };
+    sock.setTimeout(Math.max(500, timeoutMs));
+    sock.once('connect', () => { if (data) sock.write(data.replace(/\\n/g, '\n').replace(/\\r/g, '\r')); setTimeout(() => fin(true), 2000).unref?.(); });
+    sock.on('data', (b) => { out += b.toString('utf8'); if (out.length > 4096) { out = out.slice(0, 4096); fin(true); } });
+    sock.once('end', () => fin(true));
+    sock.once('timeout', () => fin(!!out, 'timeout')); sock.once('error', (e) => fin(false, e?.code || e?.message));
+  });
+}
+/** UDP 전송(응답 기대 없음 — 송신 성공만 보고). */
+export function udpSend(host, port, data) {
+  const t0 = Date.now();
+  return new Promise((resolve) => {
+    const s = dgram.createSocket('udp4');
+    const buf = Buffer.from(String(data), 'utf8');
+    s.send(buf, Number(port), host, (err) => { try { s.close(); } catch { /* */ } resolve(err ? { ok: false, exitCode: 1, stdout: '', stderr: `${err.code || err.message}\n`, durationMs: Date.now() - t0 } : { ok: true, exitCode: 0, stdout: `sent ${buf.length} bytes to ${host}:${port}\n`, stderr: '', durationMs: Date.now() - t0 }); });
+  });
+}
+/** Syslog(RFC 3164, facility user=1) — UDP 로 전송. */
+export function syslogSend(host, port, message, severity = 6) {
+  const pri = 1 * 8 + Math.max(0, Math.min(7, Number(severity) || 0));
+  const ts = new Date().toString().slice(4, 24); // 'Sep  7 12:34:56' 형식 근사
+  return udpSend(host, port, `<${pri}>${ts} ${os.hostname()} vmware-portal-rma: ${String(message).slice(0, 900)}`);
+}
+
 export function runCommand(spec, { maxOutput = DEFAULT_MAX_OUTPUT } = {}) {
   if (spec.native === 'tcp-port') return tcpPortCheck(spec.args.host, spec.args.port, Math.min(spec.timeoutMs, 30_000));
+  if (spec.native === 'tcp-send') return tcpSend(spec.args.host, spec.args.port, spec.args.data || '', Math.min(spec.timeoutMs, 30_000));
+  if (spec.native === 'udp-send') return udpSend(spec.args.host, spec.args.port, spec.args.data);
+  if (spec.native === 'syslog') return syslogSend(spec.args.host, spec.args.port, spec.args.message, spec.args.severity);
+  if (spec.native === 'rma-restart') {
+    // systemd Restart=always 가 재기동한다. 결과를 먼저 회신할 수 있게 지연 종료(agent.js 가 postResult 후 exit 하도록 플래그만).
+    return Promise.resolve({ ok: true, exitCode: 0, stdout: 'RMA 프로세스를 3초 뒤 종료합니다(systemd 가 재기동)\n', stderr: '', durationMs: 0, restartSelf: true });
+  }
   const t0 = Date.now();
   const timeoutMs = Math.max(1000, Number(spec.timeoutMs) || 30_000);
   return new Promise((resolve) => {

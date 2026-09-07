@@ -1,6 +1,22 @@
 {
   "notes": [
     {
+      "version": "2.418.0",
+      "date": "2026-09-07",
+      "title": "RMA 확장 — HostMonitor RMA 기능 대응(점검 스케줄·액션·허용 목록·접속 IP·감사 로그·원격 관리·무연결 알림)",
+      "notes": [
+        "**점검(Tests) 카탈로그 + 엣지 실행기**(`rma/tests.js`·`testRunner.js`, 22종): Ping·Trace·TCP·DNS·NTP·URL(상태/응답시간/본문)·인증서 만료·디스크 여유·CPU·메모리·부하·프로세스·systemd 서비스·인터페이스 UP·파일 존재/크기/갱신 지연/개수·텍스트 로그 패턴·외부 스크립트(종료코드)·RMA 자체 상태(마스터 점검). 대부분 네이티브(Node) 구현이라 외부 바이너리 의존이 적다. 파일 계열은 엣지 `RMA_FILE_ROOTS`(기본 /var/log) 아래만(realpath 검사, portal.env 읽기 차단).",
+        "**중앙 점검 스케줄(HostMonitor 'Test by agent')**: 특수기능 › 원격 명령 › '점검 스케줄' 탭에서 법인별 점검(주기·파라미터·인스턴스)을 등록하면 RMA 가 롱폴 응답으로 받아(버전/배정키가 바뀔 때만) 현지에서 주기 실행하고 결과를 다음 폴에 동봉한다. 인스턴스 미지정 항목은 온라인 인스턴스에 **결정적으로 분산**(중복 실행 없음, 오프라인 시 재배정). 중앙 불통이면 결과를 엣지 outbox 파일에 보관했다가 재접속 후 전송(Active RMA 의 결과 보관·재전송). 스케줄도 파일 보관으로 재시작 후 이어간다.",
+        "**점검 상태·이력·알림**: '점검 상태' 탭에 법인별 ok/warn/bad/unknown 요약·최신 결과·상태 유지 시각·마지막 정상 시각, 행 클릭 시 24시간 이력. 이력은 상태 변화 + 1시간마다만 저장(sqlite `rma-tests.db`, 90일). 연속 2회 실패/불명 시 알림 채널로 1회 발화, 복구 시 해소 알림.",
+        "**액션 추가**(`commands.js`): 서비스 start/stop/restart(엣지 `RMA_SERVICE_UNITS` 허용 목록 + sudoers 자동 생성) · 프로세스 종료(kill, RMA 계정 소유만) · 재부팅(엣지 `RMA_ALLOW_REBOOT=true` 필요) · RMA 에이전트 재시작 · 로그 이벤트(logger→journal) · HTTP 요청(GET/POST) · TCP/UDP 전송 · Syslog(RFC3164).",
+        "**에이전트별 허용 목록**(HostMonitor '허용 테스트/액션'): 엣지 `RMA_ENABLED_COMMANDS/RMA_DISABLED_COMMANDS`·`RMA_ENABLED_TESTS/RMA_DISABLED_TESTS`. 엣지가 최종 판정하고 하트비트로 정책을 보고해 중앙 화면에 표시된다.",
+        "**접속 허용 IP·코멘트·원격 관리·통계·감사 로그**: 법인별 접속 허용 IP/CIDR(중앙이 다른 출처의 폴링을 403) · `RMA_COMMENT` · 원격 관리(RMA Manager 대응: 엣지 `RMA_REMOTE_MANAGE=true` 인 인스턴스만 롱폴/동시성/점검 축소를 수용 — 허용 확대는 불가) · 하트비트에 active/performed/rejected/점검 실행·실패 수 · 엣지 성공/실패 감사 로그(jsonl, `RMA_AUDIT_LOG`/`RMA_FAILURE_LOG`).",
+        "**무연결 알림(HostMonitor 'Alerts')**: 중앙과 `RMA_OFFLINE_MINUTES` 이상 연결이 없으면 `RMA_OFFLINE_PING_HOST` 를 ping 해 결과에 따라 `RMA_OFFLINE_CMD_OK`/`RMA_OFFLINE_CMD_FAIL` 을, 복구 시 `RMA_RESTORE_CMD` 를 실행한다(전부 현장 portal.env 설정 — 중앙이 바꿀 수 없음).",
+        "SSH 배포 화면에 정책 항목(서비스 유닛·파일 루트·허용 명령/점검·재부팅·원격 관리·코멘트) 추가, `install.sh` 도 `RMA_SERVICE_UNITS`/`RMA_ALLOW_REBOOT` 로 sudoers 를 생성한다. 암호화 통신은 기존 TLS(중앙 https)로 충족되며, HostMonitor 의 Windows 전용·SNMP·VMware/Cisco 등 벤더별 점검은 이 포탈이 이미 별도 수집기로 다루므로 RMA 에 넣지 않았다(정직 표기).",
+        "회귀 테스트: `test/rmaTests.test.js`(8) · `rmaCentral.test.js` +1 · 웹 +1."
+      ]
+    },
+    {
       "version": "2.417.0",
       "date": "2026-09-07",
       "title": "리뷰 개선 포인트 11건 적용 — SSH 세션 취소·스토리지 장비당 타임아웃·SAN push 청크/gzip·RMA 이력 DB",

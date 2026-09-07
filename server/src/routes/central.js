@@ -40,7 +40,10 @@ import { takeLogQueries, setLogQueryResult, vcenterOfReq } from '../central/logQ
 import { specToRange } from '../ipam/rangePolicies.js';
 import { ipToNum } from '../ipam/ledger.js';
 import { takeCaptureJobs, setCaptureResult, captureAgentOfReq } from '../central/captureJobs.js';
-import { takeJobsWait as takeRmaJobsWait, setJobResult as setRmaJobResult, jobAgentOf as rmaJobAgentOf, noteHeartbeat as noteRmaHeartbeat } from '../rma/jobs.js';
+import { takeJobsWait as takeRmaJobsWait, setJobResult as setRmaJobResult, jobAgentOf as rmaJobAgentOf, noteHeartbeat as noteRmaHeartbeat, onlineInstances as rmaOnlineInstances } from '../rma/jobs.js';
+import { accessFor as rmaAccessFor, ipAllowed as rmaIpAllowed, remoteFor as rmaRemoteFor } from '../rma/settings.js';
+import { scheduleFor as rmaScheduleFor, assignForInstance as rmaAssign } from '../rma/schedules.js';
+import { ingestResult as rmaIngestResult } from '../rma/testResults.js';
 import { takeBmstorJobs, ackBmstorJob, bmstorAgentOfReq } from '../bmstor/jobs.js';
 import { applyBmstorResults } from '../bmstor/poller.js';
 import { recordCapture } from '../net/captureHistory.js';
@@ -582,11 +585,36 @@ centralRouter.post('/rma-poll', async (req, res) => {
   const agent = req.centralAuth.agent;
   const b = req.body || {};
   const ip = String(req.socket?.remoteAddress || '').replace(/^::ffff:/, '');
+  // 접속 허용 IP(v2.418, HostMonitor 'Accept connections from…' 대응) — 법인별 목록이 있으면 그 밖의 출처는 거부.
+  const access = rmaAccessFor(agent);
+  if (!rmaIpAllowed(ip, access.allowedIps)) {
+    console.warn(`[central] rma-poll: ${agent} 허용되지 않은 출처 IP ${ip} 거부`);
+    return res.status(403).json({ ok: false, reason: `이 법인의 RMA 접속 허용 IP 목록에 없는 출처(${ip})입니다 — 설정 › 원격 명령 › 접속 허용 IP 를 확인하세요.` });
+  }
   const instance = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(String(b.instance || '')) ? String(b.instance) : 'default';
   noteRmaHeartbeat(agent, instance, b.info || {}, { ip });
+  // 점검 결과 동봉(outbox) — 이 법인의 스케줄에 있는 항목만 반영(남의 항목 id 로 상태 위조 차단).
+  const sch = rmaScheduleFor(agent);
+  const known = new Set(sch.tests.map((t) => t.id));
+  const nameOf = new Map(sch.tests.map((t) => [t.id, t.name || '']));
+  const results = Array.isArray(b.results) ? b.results.slice(0, 500) : [];
+  let accepted = 0;
+  for (const r of results) {
+    if (!r || !known.has(String(r.id))) continue;
+    try { await rmaIngestResult(agent, { ...r, instance }, { name: nameOf.get(String(r.id)) }); accepted++; } catch { /* */ }
+  }
   const wait = Math.min(55_000, Math.max(0, Number(b.wait) || 0));
   const jobs = await takeRmaJobsWait(agent, instance, wait);
-  res.json({ ok: true, jobs });
+  const out = { ok: true, jobs, accepted };
+  // 스케줄 배포 — 엣지가 보고한 버전과 다를 때만(인스턴스별로 나눠 배정). 배정은 온라인 인스턴스 집합에
+  // 결정적이라, 인스턴스가 늘거나 줄면 다음 폴에서 다시 내려간다(버전은 같아도 배정이 달라질 수 있어
+  // 배정 서명(assignKey)을 함께 비교).
+  const assign = rmaAssign(sch, instance, rmaOnlineInstances(agent));
+  const assignKey = `${sch.version}:${assign.tests.map((t) => t.id).join(',')}`;
+  if (String(b.assignKey || '') !== assignKey || Number(b.scheduleVersion) !== sch.version) out.schedule = { version: sch.version, assignKey, tests: assign.tests };
+  const remote = rmaRemoteFor(agent);
+  if (remote.longpollMs || remote.testConcurrency || remote.disabledTests.length) out.config = remote;
+  res.json(out);
 });
 // Body: { reqId, result }
 centralRouter.post('/rma-result', (req, res) => {

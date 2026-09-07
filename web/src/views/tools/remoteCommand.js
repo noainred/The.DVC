@@ -83,3 +83,11 @@ export function targetHint(group, instance, modes = []) {
   if (group.mode === 'balance') return `부하 분산: 온라인 ${online.length}개 중 진행 중 명령이 가장 적은 인스턴스에 배정`;
   return `Active-Active: 온라인 ${online.length}개 중 먼저 폴링한 인스턴스가 실행`;
 }
+
+/** 점검 상태 색/라벨(v2.418). */
+export function statusTone(status, TONE = { ok: '#22c55e', warn: '#f59e0b', bad: '#ef4444', muted: '#94a3b8' }) {
+  return status === 'ok' ? TONE.ok : status === 'warn' ? TONE.warn : status === 'bad' ? TONE.bad : TONE.muted;
+}
+export function statusLabel(status) {
+  return { ok: '정상', warn: '경고', bad: '실패', unknown: '불명' }[status] || status || '—';
+}

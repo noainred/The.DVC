@@ -15,8 +15,9 @@
  *    된다. 각 법인 담당자가 자기 엣지에서 명시적으로 켜야 한다 — 중앙 관리자가 원격으로 켤 수
  *    없다(RMA 의 '외부 명령 허용' 옵션이 에이전트 측 설정인 것과 같은 원칙).
  *  - 파일 내용을 읽는 프리셋(cat 등)은 두지 않는다 — portal.env(토큰·비밀)가 읽히는 경로가 된다.
- *  - 재부팅/전원 프리셋은 두지 않는다. 포탈 서비스 재시작만 sudo 규칙(install.sh 가 sudoers 로
- *    정확히 그 한 줄만 허용)으로 제공한다.
+ *  - 상태를 바꾸는 액션(v2.418, HostMonitor RMA 'Actions' 대응)은 **엣지 정책**에 묶인다: 서비스
+ *    start/stop/restart 는 RMA_SERVICE_UNITS 목록의 유닛만, reboot 는 RMA_ALLOW_REBOOT=true 일 때만,
+ *    허용/차단 목록(RMA_ENABLED_COMMANDS/RMA_DISABLED_COMMANDS)이 최종. sudoers 는 같은 목록에서 생성한다.
  */
 
 const RE_HOST = /^[A-Za-z0-9][A-Za-z0-9.:-]{0,253}$/;                 // IP(v4/v6)·호스트명, 선행 - 금지
@@ -31,7 +32,8 @@ export const PARAM_TYPES = {
   path: { re: RE_PATH, hint: '절대경로(예: /etc/vmware-portal)' },
   url:  { re: RE_URL,  hint: 'http(s)://host[:port][/path]' },
   text: { re: RE_TEXT, hint: '영숫자·._:/@-' },
-  int:  { re: /^\d{1,6}$/, hint: '정수' },
+  message: { re: /^[^\x00-\x1f\x7f]{1,1000}$/, hint: '자유 문자열 한 줄(1000자, 제어문자·개행 불가) — argv 인수로만 전달' }, // eslint-disable-line no-control-regex
+  int:  { re: /^\d{1,7}$/, hint: '정수' },
 };
 
 /**
@@ -93,6 +95,31 @@ export const PRESETS = [
     argv: (a) => ['journalctl', '-u', a.unit, '-n', String(a.lines), '--no-pager'] },
   { id: 'portal-restart', group: '서비스', label: '포탈 서비스 재시작 (sudo systemctl restart vmware-portal)',
     argv: () => ['systemctl', 'restart', 'vmware-portal.service'], sudo: true, danger: true, timeoutMs: 60_000 },
+  // ── HostMonitor RMA 'Actions' 대응(v2.418) — 서비스 제어는 엣지 RMA_SERVICE_UNITS 허용 목록 + sudoers 규칙에 묶인다 ──
+  { id: 'service-start', group: '서비스', label: '서비스 시작 (sudo systemctl start)', params: [{ name: 'unit', label: '유닛', type: 'unit', required: true }],
+    argv: (a) => ['systemctl', 'start', `${a.unit}.service`], sudo: true, danger: true, unitPolicy: true, timeoutMs: 60_000 },
+  { id: 'service-stop', group: '서비스', label: '서비스 중지 (sudo systemctl stop)', params: [{ name: 'unit', label: '유닛', type: 'unit', required: true }],
+    argv: (a) => ['systemctl', 'stop', `${a.unit}.service`], sudo: true, danger: true, unitPolicy: true, timeoutMs: 60_000 },
+  { id: 'service-restart', group: '서비스', label: '서비스 재시작 (sudo systemctl restart)', params: [{ name: 'unit', label: '유닛', type: 'unit', required: true }],
+    argv: (a) => ['systemctl', 'restart', `${a.unit}.service`], sudo: true, danger: true, unitPolicy: true, timeoutMs: 60_000 },
+  { id: 'kill-pid', group: '프로세스', label: '프로세스 종료 (kill, RMA 계정 소유 프로세스만)', params: [{ name: 'pid', label: 'PID', type: 'int', min: 2, max: 4194304, required: true },
+    { name: 'force', label: '강제(1=SIGKILL)', type: 'int', min: 0, max: 1, def: 0 }],
+    argv: (a) => ['kill', a.force === 1 ? '-KILL' : '-TERM', String(a.pid)], danger: true },
+  { id: 'reboot', group: '시스템', label: '재부팅 (sudo systemctl reboot — 엣지 RMA_ALLOW_REBOOT=true 필요)', argv: () => ['systemctl', 'reboot'], sudo: true, danger: true, rebootPolicy: true, timeoutMs: 15_000 },
+  { id: 'rma-restart', group: '에이전트', label: 'RMA 에이전트 재시작 (systemd 가 재기동)', native: 'rma-restart', danger: true },
+  { id: 'log-event', group: '기타', label: '로그 이벤트 기록 (logger → journal)', params: [{ name: 'message', label: '메시지', type: 'message', required: true },
+    { name: 'priority', label: '우선순위(info/warning/err)', type: 'text', def: 'info' }],
+    argv: (a) => ['logger', '-t', 'vmware-portal-rma', '-p', `user.${/^(info|warning|err|notice|crit)$/.test(a.priority) ? a.priority : 'info'}`, a.message] },
+  { id: 'http-request', group: '기타', label: 'HTTP 요청 (curl GET/POST)', params: [{ name: 'url', label: 'URL', type: 'url', required: true },
+    { name: 'method', label: '메서드(GET/POST)', type: 'text', def: 'GET' }, { name: 'body', label: '본문(POST, 선택)', type: 'message' }],
+    argv: (a) => ['curl', '-sS', '-m', '15', '--max-redirs', '2', '-X', /^POST$/i.test(a.method) ? 'POST' : 'GET', ...(a.body ? ['-H', 'Content-Type: application/json', '--data', a.body] : []), '-o', '/dev/null', '-w', '%{http_code} %{time_total}s', a.url], timeoutMs: 30_000 },
+  { id: 'tcp-send', group: '기타', label: 'TCP 전송 (연결 후 문자열 전송, 응답 앞부분 회신)', params: [{ name: 'host', label: '대상', type: 'host', required: true },
+    { name: 'port', label: '포트', type: 'int', min: 1, max: 65535, required: true }, { name: 'data', label: '전송 문자열', type: 'message' }], native: 'tcp-send', timeoutMs: 15_000 },
+  { id: 'udp-send', group: '기타', label: 'UDP 전송', params: [{ name: 'host', label: '대상', type: 'host', required: true },
+    { name: 'port', label: '포트', type: 'int', min: 1, max: 65535, required: true }, { name: 'data', label: '전송 문자열', type: 'message', required: true }], native: 'udp-send', timeoutMs: 10_000 },
+  { id: 'syslog', group: '기타', label: 'Syslog 전송 (UDP 514, RFC3164)', params: [{ name: 'host', label: 'Syslog 서버', type: 'host', required: true },
+    { name: 'port', label: '포트', type: 'int', min: 1, max: 65535, def: 514 }, { name: 'message', label: '메시지', type: 'message', required: true },
+    { name: 'severity', label: '심각도(0~7)', type: 'int', min: 0, max: 7, def: 6 }], native: 'syslog', timeoutMs: 10_000 },
   { id: 'who',         group: '보안', label: '접속 세션 (who)',                   argv: () => ['who'] },
   { id: 'last-reboot', group: '보안', label: '최근 재부팅 (last -x reboot)',      argv: () => ['last', '-x', 'reboot', '-n', '5'] },
   { id: 'custom',      group: '자유 명령', label: '자유 명령 (엣지에서 RMA_ALLOW_CUSTOM=true 일 때만)',
@@ -153,6 +180,13 @@ export function buildCommand(cmd, rawArgs = {}, opts = {}) {
   const base = preset.timeoutMs || LIMITS.timeoutMs.def;
   const timeoutMs = Number.isFinite(reqTimeout) && reqTimeout > 0
     ? Math.min(LIMITS.timeoutMs.max, Math.max(LIMITS.timeoutMs.min, reqTimeout)) : base;
+  // 엣지 정책(v2.418): 허용 목록·서비스 유닛 목록·재부팅 opt-in. 중앙은 opts.policy 없이(형식만) 검증한다.
+  const pol = opts.policy;
+  if (pol) {
+    if (!commandAllowed(preset.id, pol)) return { ok: false, issue: `이 엣지에서 허용되지 않은 명령입니다: ${preset.id} (RMA_ENABLED_COMMANDS/RMA_DISABLED_COMMANDS)` };
+    if (preset.unitPolicy && !(pol.serviceUnits || []).some((u) => u === args.unit)) return { ok: false, issue: `서비스 '${args.unit}' 은 이 엣지의 허용 목록(RMA_SERVICE_UNITS)에 없습니다.` };
+    if (preset.rebootPolicy && !pol.allowReboot) return { ok: false, issue: '재부팅은 이 엣지에서 허용되지 않았습니다(RMA_ALLOW_REBOOT=true 필요).' };
+  }
   const out = { ok: true, preset: preset.id, args, timeoutMs, maxLines: preset.maxLines || 0, sudo: !!preset.sudo, danger: !!preset.danger };
   if (preset.native) out.native = preset.native;
   else if (preset.shell) out.shell = args.command;
@@ -164,6 +198,22 @@ export function buildCommand(cmd, rawArgs = {}, opts = {}) {
   }
   return out;
 }
+
+/**
+ * 엣지 허용 정책(순수, v2.418) — HostMonitor RMA 의 '에이전트별 허용 테스트/액션 목록'에 해당.
+ * policy = { enabled: ['*'|id…], disabled: [id…], serviceUnits: [unit…], allowReboot }
+ * enabled 가 비어 있거나 '*' 이면 전부 허용(disabled 제외). custom 은 allowCustom 이 별도로 다룬다.
+ */
+export function commandAllowed(id, policy = {}) {
+  const en = policy.enabled || [];
+  const dis = new Set(policy.disabled || []);
+  if (dis.has(id)) return false;
+  if (!en.length || en.includes('*')) return true;
+  return en.includes(id);
+}
+
+/** 쉼표/공백 구분 목록 파싱(순수). */
+export const parseList = (s) => String(s || '').split(/[,\s]+/).map((x) => x.trim()).filter(Boolean);
 
 /** 감사로그·이력 표시용 한 줄 요약(비밀 없음 — 파라미터는 전부 화이트리스트 통과값). */
 export function describeCommand(cmd, args = {}) {
