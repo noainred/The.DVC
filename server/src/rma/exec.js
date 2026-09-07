@@ -73,7 +73,31 @@ export function syslogSend(host, port, message, severity = 6) {
   return udpSend(host, port, `<${pri}>${ts} ${os.hostname()} vmware-portal-rma: ${String(message).slice(0, 900)}`);
 }
 
+/**
+ * SSH 원격 실행(v2.419) — creds = { username, password? | privateKey?, passphrase? } 는 호출자(agent.js)가
+ * 브로커/1회 입력에서 받아 **메모리로만** 넘긴다. 결과에 creds 를 절대 싣지 않는다.
+ */
+export async function sshExec({ host, port = 22, command, timeoutMs = 60_000 }, creds, { maxOutput = DEFAULT_MAX_OUTPUT } = {}) {
+  const t0 = Date.now();
+  const { withSsh, withDeadline } = await import('../proxy/sshExec.js');
+  if (!creds || !creds.username) return { ok: false, exitCode: null, stdout: '', stderr: '계정 정보 없음\n', durationMs: 0, reason: 'SSH 계정 정보가 없습니다.' };
+  try {
+    const r = await withDeadline(timeoutMs, (signal) => withSsh(
+      { host, port: Number(port) || 22, username: creds.username, password: creds.password || '', privateKey: creds.privateKey || undefined, passphrase: creds.passphrase || undefined, signal },
+      async (sh) => { const x = await sh.exec(command, Math.max(1000, timeoutMs - 5000)); return { x }; },
+    ), 'SSH 실행 타임아웃');
+    const out = String(r.x.stdout || '').slice(0, maxOutput), err = String(r.x.stderr || '').slice(0, 64 * 1024);
+    const code = r.x.code;
+    return { ok: code === 0, exitCode: code, signal: null, stdout: out, stderr: err, durationMs: Date.now() - t0, timedOut: false, truncated: String(r.x.stdout || '').length > maxOutput, ...(code !== 0 ? { reason: `원격 종료 코드 ${code}` } : {}) };
+  } catch (e) {
+    const timedOut = /타임아웃|취소/.test(e.message);
+    const msg = /All configured authentication methods failed/i.test(e.message) ? 'SSH 인증 실패(계정/비밀번호/키 확인)' : e.message;
+    return { ok: false, exitCode: null, signal: null, stdout: '', stderr: `${msg}\n`, durationMs: Date.now() - t0, timedOut, truncated: false, reason: msg };
+  }
+}
+
 export function runCommand(spec, { maxOutput = DEFAULT_MAX_OUTPUT } = {}) {
+  if (spec.native === 'ssh-exec') return sshExec({ host: spec.args.host, port: spec.args.port, command: spec.args.command, timeoutMs: spec.timeoutMs }, spec.creds, { maxOutput });
   if (spec.native === 'tcp-port') return tcpPortCheck(spec.args.host, spec.args.port, Math.min(spec.timeoutMs, 30_000));
   if (spec.native === 'tcp-send') return tcpSend(spec.args.host, spec.args.port, spec.args.data || '', Math.min(spec.timeoutMs, 30_000));
   if (spec.native === 'udp-send') return udpSend(spec.args.host, spec.args.port, spec.args.data);

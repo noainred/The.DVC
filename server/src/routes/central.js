@@ -44,6 +44,8 @@ import { takeJobsWait as takeRmaJobsWait, setJobResult as setRmaJobResult, jobAg
 import { accessFor as rmaAccessFor, ipAllowed as rmaIpAllowed, remoteFor as rmaRemoteFor } from '../rma/settings.js';
 import { scheduleFor as rmaScheduleFor, assignForInstance as rmaAssign } from '../rma/schedules.js';
 import { ingestResult as rmaIngestResult } from '../rma/testResults.js';
+import { brokerFetch as credentialBrokerFetch } from '../security/credentialStore.js';
+import { logAudit } from '../audit.js';
 import { takeBmstorJobs, ackBmstorJob, bmstorAgentOfReq } from '../bmstor/jobs.js';
 import { applyBmstorResults } from '../bmstor/poller.js';
 import { recordCapture } from '../net/captureHistory.js';
@@ -616,6 +618,34 @@ centralRouter.post('/rma-poll', async (req, res) => {
   if (remote.longpollMs || remote.testConcurrency || remote.disabledTests.length) out.config = remote;
   res.json(out);
 });
+/**
+ * 통합 계정 브로커(v2.419) — RMA 가 SSH 실행 직전에 계정(비밀 포함)을 받아 간다. **개별 토큰 전용** +
+ * 계정의 법인/대상 호스트 범위 검사(credentialStore) + 법인당 분당 상한 + 감사로그(비밀 미기재).
+ * Body: { credentialId, host }
+ */
+const credRate = new Map(); // agentLower → { winStart, n }
+const CRED_RATE_PER_MIN = Math.max(10, Number(process.env.RMA_CRED_RATE_PER_MIN) || 120);
+centralRouter.post('/rma-credential', (req, res) => {
+  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+  if (req.centralAuth.mode !== 'agent') return res.status(403).json({ ok: false, reason: '계정 브로커는 엣지별 개별 토큰만 허용합니다.' });
+  const agent = req.centralAuth.agent;
+  const b = req.body || {};
+  const id = String(b.credentialId || ''), host = String(b.host || '').trim();
+  if (!/^cred_[A-Za-z0-9_]{1,64}$/.test(id) || !/^[A-Za-z0-9][A-Za-z0-9.:-]{0,253}$/.test(host)) return res.status(400).json({ ok: false, reason: 'credentialId/host 형식 오류' });
+  const k = String(agent).toLowerCase(); const now = Date.now();
+  const rl = credRate.get(k) || { winStart: now, n: 0 };
+  if (now - rl.winStart > 60_000) { rl.winStart = now; rl.n = 0; }
+  if (++rl.n > CRED_RATE_PER_MIN) { credRate.set(k, rl); return res.status(429).json({ ok: false, reason: '계정 인출 요청이 너무 잦습니다(분당 상한).' }); }
+  credRate.set(k, rl);
+  const ip = String(req.socket?.remoteAddress || '').replace(/^::ffff:/, '');
+  const r = credentialBrokerFetch(id, { agent, host });
+  logAudit({ user: `rma:${agent}`, action: r.ok ? 'RMA 계정 브로커 인출' : 'RMA 계정 브로커 거부', target: r.ok ? r.name : id, detail: `→ ${host}${b.instance ? ` (인스턴스 ${String(b.instance).slice(0, 64)})` : ''}${r.ok ? '' : ` — ${r.reason}`}`, ip });
+  if (!r.ok) return res.status(403).json({ ok: false, reason: r.reason });
+  res.set('Cache-Control', 'no-store');
+  res.json({ ok: true, name: r.name, secret: r.secret });
+});
+
 // Body: { reqId, result }
 centralRouter.post('/rma-result', (req, res) => {
   if (!centralEnabled()) return res.status(404).json({ ok: false });
