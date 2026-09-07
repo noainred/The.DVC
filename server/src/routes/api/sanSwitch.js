@@ -20,7 +20,10 @@ import { knownAgentNames } from '../../central/knownAgents.js';
 import { requestCollect, hasPendingRequest } from '../../sanswitch/collectRequests.js';
 import { loadPerfSettings, savePerfSettings, LIMITS as PERF_LIMITS } from '../../sanswitch/perfSettings.js';
 import { pollPerfOnce, sanSwitchPerfStatus } from '../../sanswitch/perfPoller.js';
-import { portSeries, storageSeries, perfDbStats } from '../../sanswitch/perfDb.js';
+import { portSeries, storageSeries, storageSeriesMulti, arraySerialOf, endpointKind, perfDbStats } from '../../sanswitch/perfDb.js';
+import { listDevices as listStorageDevices } from '../../storage/registry.js';
+import { localSnapshots as storageLocalSnaps } from '../../storage/store.js';
+import { edgeStorageSnapshots } from '../../central/storageEdge.js';
 
 const adminOnly = requireRole('admin');
 const fullScopeOnly = (req, res, next) => {
@@ -190,6 +193,65 @@ api.get('/tools/sanswitch/devices/:id/perf/storage', fullScopeOnly, async (req, 
   const hours = Math.max(1, Math.min(24 * 90, Number(req.query.hours) || 24));
   const r = await storageSeries(req.params.id, { hours });
   res.json({ ok: true, unit: 'bytesPerSec', hours, ...r });
+});
+
+/**
+ * 법인(또는 전체) 단위 스토리지 사용량 통합 분석(v2.412, 사용자 요구
+ * '법인을 선택하면 그 법인의 모든 스토리지 사용량을 분석').
+ *
+ * 스토리지 어레이는 이중화를 위해 팹 A/B 두 스위치에 나눠 물린다 — 스위치 한 대만 보면
+ * 그 어레이 트래픽의 절반만 보인다. 여기서는 법인 안의 **모든 스위치를 합산**한다.
+ *
+ * 덤으로, 어레이 키에서 뽑은 시리얼이 등록된 스토리지 장비의 시리얼과 일치하면 그 장비의
+ * **용량 사용률**을 함께 붙여 준다. 대역폭(얼마나 바쁜가)과 용량(얼마나 찼는가)은 다른 축이라
+ * 나란히 봐야 증설 판단이 된다. ⚠ 확실히 일치할 때만 붙이고, 아니면 비운다(억지 매칭 금지).
+ */
+api.get('/tools/sanswitch/perf/storage-summary', fullScopeOnly, async (req, res) => {
+  const hours = Math.max(1, Math.min(24 * 90, Number(req.query.hours) || 24));
+  const dc = String(req.query.datacenterId || '').trim();
+  const devices = listDevices().filter((d) => d.enabled !== false && (!dc || String(d.datacenterId || '') === dc));
+  const ids = devices.map((d) => d.id);
+  const agg = await storageSeriesMulti(ids, { hours });
+
+  // 등록 스토리지의 최신 스냅샷(용량) 색인 — 시리얼 정규화 후 대조.
+  const norm = (v) => String(v ?? '').toLowerCase().replace(/[\s:_.-]/g, '');
+  const stDevById = new Map(listStorageDevices().map((d) => [d.id, d]));
+  const capBySerial = new Map();
+  for (const snap of [...storageLocalSnaps(), ...edgeStorageSnapshots()]) {
+    if (!snap?.ok) continue;
+    const d = stDevById.get(snap.deviceId) || {};
+    if (dc && String(d.datacenterId || '') !== dc) continue;  // 다른 법인의 어레이를 붙이지 않는다
+    const info = {
+      deviceId: snap.deviceId, name: d.name || snap.name || '', type: d.type || '',
+      totalBytes: snap.capacity?.totalBytes ?? null, usedBytes: snap.capacity?.usedBytes ?? null,
+      pct: snap.capacity?.pct ?? null,
+    };
+    for (const key of [snap.serial, ...(snap.extra?.appliances || []).map((a) => a.serviceTag)]) {
+      if (key) capBySerial.set(norm(key), info);
+    }
+  }
+
+  const nameOf = new Map(devices.map((d) => [d.id, d.name || d.host || d.id]));
+  const series = agg.series.map((s) => {
+    const serial = arraySerialOf(s.key);
+    const capacity = serial ? (capBySerial.get(norm(serial)) || null) : null;
+    return {
+      ...s,
+      arraySerial: serial,
+      // 어레이/호스트 구분 — 법인 합산에서는 서버 HBA 가 수십 개씩 잡혀 표를 덮는다.
+      // 화면 기본은 어레이만 보여주고 호스트는 따로 고를 수 있게 한다.
+      endpointKind: endpointKind(s.key, { matched: !!capacity }),
+      switches: s.deviceIds.map((id) => nameOf.get(id) || id),
+      portCount: s.ports.length,
+      capacity,
+    };
+  });
+  const counts = series.reduce((a, s) => { a[s.endpointKind] = (a[s.endpointKind] || 0) + 1; return a; }, {});
+  res.json({
+    ok: true, unit: 'bytesPerSec', hours, datacenterId: dc,
+    switches: devices.map((d) => ({ id: d.id, name: d.name, host: d.host, datacenterId: d.datacenterId })),
+    buckets: agg.buckets, bucketMs: agg.bucketMs, series, counts, unavailable: agg.unavailable || false,
+  });
 });
 
 /** 이 노드 몫 전체 재수집(관리자 수동 실행 — 폴러와 재진입 가드를 공유한다). */

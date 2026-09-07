@@ -250,6 +250,39 @@ export function nextSort(cur, key) {
   return { key, dir: cur.dir === 'asc' ? 'desc' : 'asc' };
 }
 
+/**
+ * 임의 표의 제목 정렬(순수, v2.412 — 사용자 요구 '타이틀별로 소팅').
+ * sortPorts 와 **같은 규칙**을 쓴다: 값이 없는 행(null)은 정렬 방향과 무관하게 항상 뒤로.
+ * 오름차순에서 null 이 맨 앞에 몰리면 '미수집'이 최상위 항목으로 읽히기 때문이다.
+ *
+ * @param get  행 → 정렬 값(숫자 또는 문자열, 없으면 null)
+ * @param tie  동점일 때의 안정 정렬 키(선택) — 없으면 원래 순서를 유지하지 않는다
+ */
+export function sortRows(rows = [], get, dir = 'asc', tie = null) {
+  const sign = dir === 'desc' ? -1 : 1;
+  const tieOf = tie || (() => 0);
+  return [...rows].sort((a, b) => {
+    const va = get(a); const vb = get(b);
+    if (va == null && vb == null) return String(tieOf(a)).localeCompare(String(tieOf(b)));
+    if (va == null) return 1;
+    if (vb == null) return -1;
+    if (typeof va === 'string' || typeof vb === 'string') {
+      const c = String(va).localeCompare(String(vb));
+      return c !== 0 ? c * sign : String(tieOf(a)).localeCompare(String(tieOf(b)));
+    }
+    return va === vb ? String(tieOf(a)).localeCompare(String(tieOf(b))) : (va - vb) * sign;
+  });
+}
+
+/** 시계열 배열의 평균/최대(순수) — 분석 표의 정렬·표시가 같은 값을 쓰게 한 곳에 둔다. */
+export function seriesStats(values = []) {
+  const v = values.filter((x) => x != null);
+  return {
+    avg: v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0,
+    max: v.length ? Math.max(...v) : 0,
+  };
+}
+
 /** 포트 목록 필터(순수) — 화면의 '문제만 보기'가 무엇을 남기는지 한 곳에서 정의. */
 export function filterPorts(list = [], mode = 'all') {
   if (mode === 'online') return list.filter((p) => p.state === 'online');

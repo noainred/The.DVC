@@ -450,3 +450,57 @@ test('perfDb: 저장→조회 왕복과 스토리지 합산', async () => {
   assert.deepEqual(sym.ports, [0, 1], '같은 어레이의 두 포트가 하나로 묶여야 한다');
   _resetForTest();
 });
+
+// ── v2.412: 법인 단위(여러 스위치) 스토리지 사용량 합산 ────────────────────────
+test('arraySerialOf: 어레이 시리얼처럼 보이는 조각만 뽑는다(억지 매칭 금지)', async () => {
+  const { arraySerialOf } = await import('../src/sanswitch/perfDb.js');
+  assert.equal(arraySerialOf('SYMMETRIX::000497700230'), '000497700230');
+  assert.equal(arraySerialOf('PowerStore::PS-GLOBAL-0A1B'), 'PS-GLOBAL-0A1B');
+  assert.equal(arraySerialOf('X::SAF-1d 4'), '', '공백이 든 포트 표기는 시리얼이 아니다');
+  assert.equal(arraySerialOf('Emulex PPN-10:00'), '', ':: 가 없으면 시리얼을 뽑지 않는다');
+  assert.equal(arraySerialOf('A::bc'), '', '너무 짧은 조각은 시리얼로 보지 않는다');
+});
+
+test('endpointKind: 어레이/호스트 구분 — 법인 합산에서 HBA 가 표를 덮지 않게', async () => {
+  const { endpointKind } = await import('../src/sanswitch/perfDb.js');
+  assert.equal(endpointKind('SYMMETRIX::000497700230'), 'array');
+  assert.equal(endpointKind('PowerStore::PS-GLOBAL-0A1B'), 'array');
+  assert.equal(endpointKind('Emulex PPN-10:00:00:10:9b:c1:74:87'), 'host');
+  assert.equal(endpointKind('QLE2692 FW:v9.15.01 DVR:v5.4.84.0'), 'host');
+  assert.equal(endpointKind('(미확인)'), 'unknown');
+  // 등록 스토리지 시리얼과 일치하면 이름 형식과 무관하게 어레이(확정 근거 우선)
+  assert.equal(endpointKind('FLAT-ARRAY-NAME', { matched: true }), 'array');
+});
+
+test('storageSeriesMulti: 여러 스위치에 나뉜 어레이를 하나로 합산한다(팹 A/B)', async () => {
+  const { savePerfSample, storageSeriesMulti, available, _resetForTest } = await import('../src/sanswitch/perfDb.js');
+  if (!(await available())) return;
+  _resetForTest();
+  const now = Date.now();
+  const NAME = 'SYMMETRIX::000497700230::SAF-1d 4::FC';
+  // 같은 어레이가 팹 A(sw-a)와 팹 B(sw-b)에 각각 2포트씩 물려 있다.
+  for (const dev of ['sw-a', 'sw-b']) {
+    const meta = [{ port: 0, attachedName: NAME, speed: '16G' }, { port: 1, attachedName: NAME, speed: '16G' },
+      { port: 2, attachedName: 'Emulex PPN-10:00', speed: '16G' }];
+    await savePerfSample(dev, now - 60_000, { 0: 1000, 1: 1000, 2: 50 }, meta);
+    await savePerfSample(dev, now, { 0: 1000, 1: 1000, 2: 50 }, meta);
+  }
+  const one = await storageSeriesMulti(['sw-a'], { hours: 1 });
+  const both = await storageSeriesMulti(['sw-a', 'sw-b'], { hours: 1 });
+  const symOne = one.series.find((s) => s.key.startsWith('SYMMETRIX'));
+  const symBoth = both.series.find((s) => s.key.startsWith('SYMMETRIX'));
+  assert.equal(symOne.ports.length, 2);
+  assert.equal(symBoth.ports.length, 4, '두 스위치의 포트가 하나의 어레이로 합쳐져야 한다');
+  assert.deepEqual(symBoth.deviceIds.sort(), ['sw-a', 'sw-b']);
+  assert.ok(symBoth.avgTotal > symOne.avgTotal,
+    '스위치 한 대만 보면 그 어레이 트래픽의 절반만 보인다 — 합산이 더 커야 한다');
+  assert.equal(Math.round(symBoth.avgTotal), Math.round(symOne.avgTotal * 2));
+  _resetForTest();
+});
+
+test('storageSeriesMulti: 대상이 없으면 빈 결과(전체 스캔으로 흐르지 않는다)', async () => {
+  const { storageSeriesMulti } = await import('../src/sanswitch/perfDb.js');
+  const r = await storageSeriesMulti([], { hours: 1 });
+  assert.deepEqual(r.series, []);
+  assert.deepEqual(r.buckets, []);
+});
