@@ -208,35 +208,49 @@ api.get('/tools/sanswitch/devices/:id/perf/storage', fullScopeOnly, async (req, 
  */
 api.get('/tools/sanswitch/perf/storage-summary', fullScopeOnly, async (req, res) => {
   const hours = Math.max(1, Math.min(24 * 90, Number(req.query.hours) || 24));
-  const dc = String(req.query.datacenterId || '').trim();
-  const devices = listDevices().filter((d) => d.enabled !== false && (!dc || String(d.datacenterId || '') === dc));
+  // 법인은 **여러 개**를 받을 수 있다(쉼표 구분). 빈 값이면 전체.
+  const dcs = String(req.query.datacenterId || '').split(',').map((x) => x.trim()).filter(Boolean);
+  const dcSet = dcs.length ? new Set(dcs) : null;
+  // split=1 이면 같은 어레이라도 법인마다 따로 집계한다(사용자 요구 — 복수 법인을 한꺼번에
+  // 보면서도 법인 구분이 사라지지 않게). 기본은 법인이 2곳 이상일 때 자동 분리.
+  const split = req.query.split == null ? dcs.length !== 1 : req.query.split === '1';
+  const devices = listDevices().filter((d) => d.enabled !== false && (!dcSet || dcSet.has(String(d.datacenterId || ''))));
   const ids = devices.map((d) => d.id);
-  const agg = await storageSeriesMulti(ids, { hours });
+  const groupOf = split ? new Map(devices.map((d) => [String(d.id), String(d.datacenterId || '')])) : null;
+  const agg = await storageSeriesMulti(ids, { hours, groupOf });
 
   // 등록 스토리지의 최신 스냅샷(용량) 색인 — 시리얼 정규화 후 대조.
   const norm = (v) => String(v ?? '').toLowerCase().replace(/[\s:_.-]/g, '');
   const stDevById = new Map(listStorageDevices().map((d) => [d.id, d]));
-  const capBySerial = new Map();
+  // 법인별로 분리해 볼 때는 **그 법인의 스토리지 용량만** 붙여야 한다 — 그래서 키에 법인을 넣는다.
+  const capBySerial = new Map();   // `${dc}\u0000${serial}` 또는 split 아니면 serial
+  const capKey = (dcId, serial) => (split ? `${dcId}\u0000${serial}` : serial);
   for (const snap of [...storageLocalSnaps(), ...edgeStorageSnapshots()]) {
     if (!snap?.ok) continue;
     const d = stDevById.get(snap.deviceId) || {};
-    if (dc && String(d.datacenterId || '') !== dc) continue;  // 다른 법인의 어레이를 붙이지 않는다
+    if (dcSet && !dcSet.has(String(d.datacenterId || ''))) continue;  // 범위 밖 법인의 어레이는 붙이지 않는다
     const info = {
       deviceId: snap.deviceId, name: d.name || snap.name || '', type: d.type || '',
       totalBytes: snap.capacity?.totalBytes ?? null, usedBytes: snap.capacity?.usedBytes ?? null,
       pct: snap.capacity?.pct ?? null,
     };
     for (const key of [snap.serial, ...(snap.extra?.appliances || []).map((a) => a.serviceTag)]) {
-      if (key) capBySerial.set(norm(key), info);
+      if (key) capBySerial.set(capKey(String(d.datacenterId || ''), norm(key)), info);
     }
   }
 
   const nameOf = new Map(devices.map((d) => [d.id, d.name || d.host || d.id]));
+  const dcNameOf = (() => {
+    try { const m = new Map(listDatacenters().map((x) => [x.id, x.name || x.id])); return (id) => m.get(id) || id || '(법인 미지정)'; }
+    catch { return (id) => id || '(법인 미지정)'; }
+  })();
   const series = agg.series.map((s) => {
     const serial = arraySerialOf(s.key);
-    const capacity = serial ? (capBySerial.get(norm(serial)) || null) : null;
+    const capacity = serial ? (capBySerial.get(capKey(s.group ?? '', norm(serial))) || null) : null;
     return {
       ...s,
+      datacenterId: s.group ?? null,
+      datacenterName: s.group == null ? null : dcNameOf(s.group),
       arraySerial: serial,
       // 어레이/호스트 구분 — 법인 합산에서는 서버 HBA 가 수십 개씩 잡혀 표를 덮는다.
       // 화면 기본은 어레이만 보여주고 호스트는 따로 고를 수 있게 한다.
@@ -247,9 +261,22 @@ api.get('/tools/sanswitch/perf/storage-summary', fullScopeOnly, async (req, res)
     };
   });
   const counts = series.reduce((a, s) => { a[s.endpointKind] = (a[s.endpointKind] || 0) + 1; return a; }, {});
+  // 법인별 소계 — '어느 법인이 얼마나 쓰나'를 한눈에(스토리지만 합산, 호스트 제외).
+  const byDc = {};
+  for (const s of series) {
+    if (s.endpointKind !== 'array') continue;
+    const k = s.datacenterId ?? '';
+    if (!byDc[k]) byDc[k] = { datacenterId: k, name: dcNameOf(k), storages: 0, avgTotal: 0, maxTotal: 0, switches: new Set() };
+    byDc[k].storages++;
+    byDc[k].avgTotal += s.avgTotal;
+    byDc[k].maxTotal += s.maxTotal;
+    for (const id of s.deviceIds) byDc[k].switches.add(id);
+  }
   res.json({
-    ok: true, unit: 'bytesPerSec', hours, datacenterId: dc,
-    switches: devices.map((d) => ({ id: d.id, name: d.name, host: d.host, datacenterId: d.datacenterId })),
+    ok: true, unit: 'bytesPerSec', hours, datacenterIds: dcs, split,
+    byDatacenter: Object.values(byDc).map((x) => ({ ...x, switches: x.switches.size }))
+      .sort((a, b) => b.avgTotal - a.avgTotal),
+    switches: devices.map((d) => ({ id: d.id, name: d.name, host: d.host, datacenterId: d.datacenterId, datacenterName: dcNameOf(d.datacenterId) })),
     buckets: agg.buckets, bucketMs: agg.bucketMs, series, counts, unavailable: agg.unavailable || false,
   });
 });

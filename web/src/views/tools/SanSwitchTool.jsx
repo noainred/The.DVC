@@ -161,11 +161,16 @@ export default function SanSwitchTool() {
               나눠 물리므로 스위치 하나만 보면 트래픽의 절반만 보인다. 선택한 법인의 모든
               스위치를 합산해야 어레이의 실제 사용량이 나온다. */}
           <button className="tab" style={{ flex: 'none', padding: '6px 12px' }}
-            onClick={() => setDcPerf({ datacenterId: dcSel.size === 1 ? dcIdOfName([...dcSel][0]) : '', label: dcSel.size === 1 ? [...dcSel][0] : '전체' })}
-            title={dcSel.size === 1
-              ? `'${[...dcSel][0]}' 법인의 모든 스위치를 합산해 스토리지별 사용량을 분석합니다.`
-              : '법인 칩을 하나 고르면 그 법인만, 고르지 않으면 전체 스위치를 합산해 분석합니다.'}>
-            📊 스토리지 사용량 분석{dcSel.size === 1 ? ` — ${[...dcSel][0]}` : ' — 전체'}
+            onClick={() => setDcPerf({
+              // 선택한 법인을 **전부** 넘긴다(v2.414) — 예전에는 1개일 때만 그 법인이고 2개
+              // 이상이면 '전체'로 뭉쳐져 법인 구분이 사라졌다(사용자 신고).
+              datacenterIds: [...dcSel].map(dcIdOfName).filter(Boolean),
+              label: dcSel.size ? [...dcSel].join(', ') : '전체',
+            })}
+            title={dcSel.size
+              ? `선택한 법인(${[...dcSel].join(', ')})의 스위치를 법인별로 나눠 스토리지 사용량을 분석합니다.`
+              : '법인 칩을 고르면 그 법인들만, 고르지 않으면 전체를 분석합니다. 법인을 2곳 이상 고르면 법인별로 분리해 보여줍니다.'}>
+            📊 스토리지 사용량 분석{dcSel.size ? ` — ${[...dcSel].join(', ')}` : ' — 전체'}
           </button>
           <SearchBox className="input" style={{ marginLeft: 'auto', maxWidth: 260, minWidth: 180 }}
             value={q} onChange={setQ} placeholder="스위치·host·모델·엣지 찾기" />
@@ -641,21 +646,33 @@ function DcStoragePerf({ dcPerf, onClose }) {
   // 기본은 스토리지 어레이만 — 법인 합산이면 서버 HBA 가 수십 개 잡혀 표를 덮는다(실측 64개).
   const [kind, setKind] = useState('array');
   const [sort, setSort] = useState({ key: 'avg', dir: 'desc' });   // 기본: 많이 쓰는 순
+  // 법인이 2곳 이상이면 기본은 **법인별 분리**. '합산'을 고르면 같은 어레이를 법인 구분 없이 합친다.
+  const [split, setSplit] = useState(true);
+  const dcParam = (dcPerf.datacenterIds || []).join(',');
 
   useEffect(() => {
     let alive = true;
     setData(null); setError(null);
-    fetchJson('/tools/sanswitch/perf/storage-summary', { datacenterId: dcPerf.datacenterId, hours })
+    fetchJson('/tools/sanswitch/perf/storage-summary', { datacenterId: dcParam, hours, split: split ? '1' : '0' })
       .then((d) => { if (alive) setData(d); })
       .catch((e) => { if (alive) setError(e.message); });
     return () => { alive = false; };
-  }, [dcPerf.datacenterId, hours]);
+  }, [dcParam, hours, split]);
 
   const series = (data?.series || []).filter((s) => kind === 'all' || s.endpointKind === kind);
-  const chartSeries = topSeries(series.map((s) => ({ key: s.key, label: `${s.key} (스위치 ${s.switches.length}·포트 ${s.portCount})`, values: s.sum })), 8);
+  const multiDc = (dcPerf.datacenterIds || []).length !== 1;   // 법인 2곳 이상(또는 전체)
+  const showDcCol = !!data?.split;
+  const chartSeries = topSeries(series.map((s) => ({
+    // 법인별로 분리했으면 라벨에 법인을 앞세운다 — 같은 어레이 이름이 법인마다 나오므로
+    // 접두어가 없으면 범례에서 구분할 수 없다.
+    key: `${s.datacenterId ?? ''}\u0000${s.key}`,
+    label: `${showDcCol && s.datacenterName ? `${s.datacenterName} · ` : ''}${s.key} (스위치 ${s.switches.length}·포트 ${s.portCount})`,
+    values: s.sum,
+  })), 8);
   const rows = toChartRows(data?.buckets || [], chartSeries);
   const grand = series.reduce((a, s) => a + s.avgTotal, 0);
   const SORTERS = {
+    dc: (s) => s.datacenterName || null,
     name: (s) => s.key,
     switches: (s) => s.switches.length,
     ports: (s) => s.portCount,
@@ -678,6 +695,16 @@ function DcStoragePerf({ dcPerf, onClose }) {
             {label}{data?.counts?.[k] != null ? ` ${data.counts[k]}` : (k === 'all' && data ? ` ${(data.series || []).length}` : '')}
           </button>
         ))}
+        {/* 법인이 2곳 이상일 때만 의미가 있다 — 한 법인이면 분리·합산이 같은 결과다. */}
+        {multiDc && (
+          <button className="tab" style={{ flex: 'none', padding: '4px 12px', marginLeft: 6 }}
+            onClick={() => setSplit((v) => !v)}
+            title={split
+              ? '지금은 법인별로 나눠 보고 있습니다. 누르면 같은 어레이를 법인 구분 없이 합칩니다.'
+              : '지금은 법인 구분 없이 합쳐 보고 있습니다. 누르면 법인별로 나눕니다.'}>
+            {split ? '🏢 법인별 분리' : '🔗 법인 합산'}
+          </button>
+        )}
         <span className="muted" style={{ fontSize: 12, marginLeft: 6 }}>기간</span>
         {HOURS.map(([h, label]) => (
           <button key={h} className={hours === h ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '4px 10px' }}
@@ -706,11 +733,21 @@ function DcStoragePerf({ dcPerf, onClose }) {
         </div>
       )}
 
+      {/* 법인 소계 — '어느 법인이 얼마나 쓰나'를 먼저 보여준다(복수 법인 분리 보기의 핵심). */}
+      {!!(data?.byDatacenter || []).length && data.split && (
+        <div className="kpis" style={{ marginBottom: 8, gridTemplateColumns: `repeat(auto-fit, minmax(190px, 1fr))` }}>
+          {data.byDatacenter.map((d) => (
+            <Kpi key={d.datacenterId || '_'} label={`🏢 ${d.name}`} value={bytesPerSecText(d.avgTotal)}
+              meta={`스토리지 ${d.storages} · 스위치 ${d.switches} · 최대 ${bytesPerSecText(d.maxTotal)}`} />
+          ))}
+        </div>
+      )}
+
       {!!rows.length && (
         <>
           <div className="card" style={{ padding: 8, marginBottom: 8 }}>
             <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>
-              스토리지별 합산 처리량(법인 내 전 스위치) · 평균 사용량 상위 {chartSeries.length}개 ·
+              스토리지별 합산 처리량({data.split ? '법인별로 분리' : '법인 구분 없이 합산'}) · 평균 사용량 상위 {chartSeries.length}개 ·
               스위치가 여러 대인 항목은 팹 A/B 를 합친 값입니다.
             </div>
             <ResponsiveContainer width="100%" height={250}>
@@ -731,11 +768,13 @@ function DcStoragePerf({ dcPerf, onClose }) {
           <div className="table-wrap" style={{ maxHeight: '40vh', overflow: 'auto' }}>
             <table style={{ tableLayout: 'fixed', width: '100%' }}>
               <colgroup>
+                {showDcCol && <col style={{ width: 110 }} />}
                 <col /><col style={{ width: 150 }} /><col style={{ width: 70 }} />
                 <col style={{ width: 110 }} /><col style={{ width: 110 }} /><col style={{ width: 190 }} />
               </colgroup>
               <thead>
                 <tr>
+                  {showDcCol && <SortTh k="dc" label="법인" sort={sort} setSort={setSort} />}
                   <SortTh k="name" label="스토리지" sort={sort} setSort={setSort} />
                   <SortTh k="switches" label="연결 스위치" sort={sort} setSort={setSort} />
                   <SortTh k="ports" label="포트" sort={sort} setSort={setSort} />
@@ -747,7 +786,8 @@ function DcStoragePerf({ dcPerf, onClose }) {
               </thead>
               <tbody>
                 {sorted.map((s) => (
-                  <tr key={s.key}>
+                  <tr key={`${s.datacenterId ?? ''}|${s.key}`}>
+                    {showDcCol && <td style={ELLIPSIS} title={s.datacenterName || ''}><b>{s.datacenterName || '—'}</b></td>}
                     <td style={ELLIPSIS} title={s.key}>
                       <b>{s.key}</b>
                       <div className="muted" style={{ fontSize: 10.5 }}>

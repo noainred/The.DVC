@@ -189,7 +189,7 @@ export function storageKey(name) {
  * @param deviceIds 합산할 스위치 id 배열(법인 필터 결과)
  * @returns { buckets, bucketMs, series:[{ key, ports:[{deviceId,port}], deviceIds[], sum[], avgTotal, maxTotal }] }
  */
-export async function storageSeriesMulti(deviceIds = [], { hours = 24, points = 120 } = {}) {
+export async function storageSeriesMulti(deviceIds = [], { hours = 24, points = 120, groupOf = null } = {}) {
   const db = await open();
   if (!db || !deviceIds.length) return { buckets: [], series: [], bucketMs: 0, unavailable: !db };
   const since = Date.now() - Math.max(1, hours) * 3600e3;
@@ -202,16 +202,20 @@ export async function storageSeriesMulti(deviceIds = [], { hours = 24, points = 
   ).all(...deviceIds.map(String), since);
   const metaRows = db.conn.prepare(`SELECT device_id, port, attached_name FROM port_meta WHERE device_id IN (${ph})`)
     .all(...deviceIds.map(String));
-  const groupOf = new Map(metaRows.map((m) => [`${m.device_id}|${m.port}`, storageKey(m.attached_name)]));
+  const storageOf = new Map(metaRows.map((m) => [`${m.device_id}|${m.port}`, storageKey(m.attached_name)]));
 
   const bucketSet = [...new Set(rows.map((r) => Number(r.b)))].sort((a, b) => a - b);
   const buckets = bucketSet.map((b) => b * bucketMs);
   const idx = new Map(bucketSet.map((b, i) => [b, i]));
   const byGroup = new Map();
   for (const r of rows) {
-    const g = groupOf.get(`${r.device_id}|${Number(r.port)}`) || '(미확인)';
-    if (!byGroup.has(g)) byGroup.set(g, { key: g, ports: new Map(), sum: new Array(buckets.length).fill(0) });
-    const s = byGroup.get(g);
+    const st = storageOf.get(`${r.device_id}|${Number(r.port)}`) || '(미확인)';
+    // groupOf 가 주어지면(법인별 분리) 같은 어레이라도 **법인마다 따로** 집계한다 —
+    // 복수 법인을 한꺼번에 보면서도 법인 구분이 사라지지 않게(사용자 요구, v2.414).
+    const g = groupOf ? (groupOf.get(String(r.device_id)) ?? '') : null;
+    const gk = groupOf ? `${g}\u0000${st}` : st;
+    if (!byGroup.has(gk)) byGroup.set(gk, { key: st, group: g, ports: new Map(), sum: new Array(buckets.length).fill(0) });
+    const s = byGroup.get(gk);
     s.ports.set(`${r.device_id}|${Number(r.port)}`, { deviceId: String(r.device_id), port: Number(r.port) });
     s.sum[idx.get(Number(r.b))] += Math.round(Number(r.avg_bps));
   }
@@ -219,7 +223,7 @@ export async function storageSeriesMulti(deviceIds = [], { hours = 24, points = 
     const vals = s.sum.filter((v) => v != null);
     const ports = [...s.ports.values()];
     return {
-      key: s.key, ports, deviceIds: [...new Set(ports.map((p) => p.deviceId))], sum: s.sum,
+      key: s.key, group: s.group, ports, deviceIds: [...new Set(ports.map((p) => p.deviceId))], sum: s.sum,
       avgTotal: vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0,
       maxTotal: vals.length ? Math.max(...vals) : 0,
     };

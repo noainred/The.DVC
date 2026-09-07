@@ -527,3 +527,48 @@ test('명령 가용성 조사: 경로 화이트리스트가 주입 문자열을 
     assert.ok(!SAFE_DIR.test(bad), `주입 가능한 값이 통과하면 안 된다: ${JSON.stringify(bad)}`);
   }
 });
+
+// ── v2.414: 복수 법인 분리 집계 ───────────────────────────────────────────────
+test('storageSeriesMulti(groupOf): 같은 어레이라도 법인마다 따로 집계한다', async () => {
+  const { savePerfSample, storageSeriesMulti, available, _resetForTest } = await import('../src/sanswitch/perfDb.js');
+  if (!(await available())) return;
+  _resetForTest();
+  const now = Date.now();
+  const NAME = 'PowerStore::SHARED-MODEL::NodeA::FC';   // 두 법인이 같은 심볼릭 이름을 쓰는 경우
+  for (const dev of ['oc-a', 'oc-b', 'az-a']) {
+    const meta = [{ port: 0, attachedName: NAME, speed: '16G' }];
+    await savePerfSample(dev, now - 60_000, { 0: 1000 }, meta);
+    await savePerfSample(dev, now, { 0: 1000 }, meta);
+  }
+  const groupOf = new Map([['oc-a', 'dc-oc'], ['oc-b', 'dc-oc'], ['az-a', 'dc-az']]);
+
+  const split = await storageSeriesMulti(['oc-a', 'oc-b', 'az-a'], { hours: 1, groupOf });
+  const oc = split.series.find((s) => s.group === 'dc-oc');
+  const az = split.series.find((s) => s.group === 'dc-az');
+  assert.ok(oc && az, '법인별로 따로 나와야 한다');
+  assert.equal(oc.ports.length, 2, 'OC 는 스위치 2대');
+  assert.equal(az.ports.length, 1, 'AZ 는 스위치 1대');
+  assert.ok(oc.avgTotal > az.avgTotal);
+
+  const merged = await storageSeriesMulti(['oc-a', 'oc-b', 'az-a'], { hours: 1 });   // groupOf 없음 = 합산
+  const one = merged.series.find((s) => s.key.startsWith('PowerStore'));
+  assert.equal(merged.series.filter((s) => s.key.startsWith('PowerStore')).length, 1, '합산 모드는 하나로 묶인다');
+  assert.equal(one.ports.length, 3);
+  assert.equal(one.group, null, '합산 모드에는 법인 구분이 없다');
+  assert.equal(Math.round(one.avgTotal), Math.round(oc.avgTotal + az.avgTotal),
+    '분리 합계 = 합산 값이어야 한다(둘 중 하나가 틀리면 여기서 드러난다)');
+  _resetForTest();
+});
+
+test('storageSeriesMulti: groupOf 에 없는 장비는 빈 그룹으로 떨어진다(누락되지 않는다)', async () => {
+  const { savePerfSample, storageSeriesMulti, available, _resetForTest } = await import('../src/sanswitch/perfDb.js');
+  if (!(await available())) return;
+  _resetForTest();
+  const now = Date.now();
+  await savePerfSample('x-1', now - 60_000, { 0: 500 }, [{ port: 0, attachedName: 'A::B::C' }]);
+  await savePerfSample('x-1', now, { 0: 500 }, [{ port: 0, attachedName: 'A::B::C' }]);
+  const r = await storageSeriesMulti(['x-1'], { hours: 1, groupOf: new Map() });
+  assert.equal(r.series.length, 1, '법인 매핑이 없어도 데이터가 사라지면 안 된다');
+  assert.equal(r.series[0].group, '');
+  _resetForTest();
+});
