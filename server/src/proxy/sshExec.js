@@ -5,24 +5,65 @@
  */
 
 import { Client as SSHClient } from 'ssh2';
+import { createRequire } from 'node:module';
 
-function connect({ host, port = 22, username, password, privateKey, passphrase, readyTimeout = Number(process.env.SSH_READY_TIMEOUT_MS) || 60000, signal }) {
+/**
+ * 구형 장비 호환 알고리즘(v2.421). ssh2 기본 목록은 현대 알고리즘만 켜 두는데, 구형 Fabric OS/iDRAC 등은
+ * diffie-hellman-group1-sha1 · ssh-dss · aes-cbc · hmac-sha1-96 만 제공하는 경우가 있어 "no matching key
+ * exchange algorithm" 으로 핸드셰이크가 실패한다. 이때 **1회만** 라이브러리가 지원하는 전 목록으로 재시도한다
+ * (SSH_LEGACY_FALLBACK=0 으로 끔). 정직한 한계: 이 포탈은 known_hosts 호스트키 검증을 하지 않으므로 알고리즘
+ * 하향 자체가 MITM 방어 수준을 낮추는 것은 아니다(원래 없음) — 다만 약한 알고리즘 사용은 추적 로그에 남긴다.
+ */
+const LEGACY_FALLBACK = process.env.SSH_LEGACY_FALLBACK !== '0';
+const LEGACY_ALGOS = (() => {
+  try {
+    const c = createRequire(import.meta.url)('ssh2/lib/protocol/constants.js'); // 공개 API 가 아니라 방어적으로 로드
+    return { kex: c.SUPPORTED_KEX, serverHostKey: c.SUPPORTED_SERVER_HOST_KEY, cipher: c.SUPPORTED_CIPHER, hmac: c.SUPPORTED_MAC };
+  } catch { return null; }
+})();
+const NO_MATCH = /no matching (key exchange|host key|cipher|MAC|compression)|Handshake failed/i;
+
+function connect({ host, port = 22, username, password, privateKey, passphrase, readyTimeout = Number(process.env.SSH_READY_TIMEOUT_MS) || 60000, signal, trace = null, verbose = false, _legacy = false }) {
+  const say = (msg, level) => { try { trace?.(msg, level); } catch { /* */ } };
   return new Promise((resolve, reject) => {
     if (signal?.aborted) return reject(new Error('SSH 접속 취소(타임아웃)'));
     const conn = new SSHClient();
+    const t0 = Date.now();
+    say(`SSH 접속 시도 → ${host}:${port} 계정=${username || '(없음)'} 인증=${privateKey ? '개인키' : '비밀번호'}${_legacy ? ' [구형 알고리즘 포함 재시도]' : ''} (readyTimeout ${Math.round(readyTimeout / 1000)}s)`);
     // 취소(signal) — 호출자의 장비당 타임아웃이 접속 대기 중에 만료되면 접속 시도 자체를 끊는다.
-    const onAbort = () => { try { conn.end(); } catch { /* */ } reject(new Error('SSH 접속 취소(타임아웃)')); };
+    const onAbort = () => { try { conn.end(); } catch { /* */ } say('SSH 접속 취소(호출자 타임아웃)', 'error'); reject(new Error('SSH 접속 취소(타임아웃)')); };
     signal?.addEventListener('abort', onAbort, { once: true });
-    conn.on('ready', () => { signal?.removeEventListener('abort', onAbort); resolve(conn); });
-    conn.on('error', (e) => { signal?.removeEventListener('abort', onAbort); reject(e); });
+    conn.on('ready', () => { signal?.removeEventListener('abort', onAbort); say(`SSH 세션 준비 완료(인증 성공) +${Date.now() - t0}ms`); resolve(conn); });
+    conn.on('error', (e) => {
+      signal?.removeEventListener('abort', onAbort);
+      say(`SSH 오류: ${e.message}${e.level ? ` (level=${e.level})` : ''}${e.code ? ` code=${e.code}` : ''} +${Date.now() - t0}ms`, 'error');
+      // 구형 알고리즘 폴백 — 협상 실패에만, 1회만.
+      if (LEGACY_FALLBACK && LEGACY_ALGOS && !_legacy && NO_MATCH.test(e.message || '')) {
+        say('알고리즘 협상 실패 → 구형 알고리즘(diffie-hellman-group1-sha1/ssh-dss/aes-cbc 등)까지 열어 1회 재시도합니다.', 'warn');
+        try { conn.end(); } catch { /* */ }
+        connect({ host, port, username, password, privateKey, passphrase, readyTimeout, signal, trace, verbose, _legacy: true }).then(resolve, reject);
+        return;
+      }
+      reject(e);
+    });
+    if (trace) {
+      conn.on('banner', (msg) => say(`서버 배너: ${String(msg).trim().slice(0, 300)}`));
+      conn.on('handshake', (n) => say(`핸드셰이크 완료 +${Date.now() - t0}ms — kex=${n?.kex} hostkey=${n?.serverHostKey} cipher=${n?.cs?.cipher} mac=${n?.cs?.mac || '(AEAD)'}`));
+      conn.on('close', () => say(`SSH 연결 종료 +${Date.now() - t0}ms`, 'debug'));
+    }
     // password 대신 keyboard-interactive 만 허용하는 서버 지원(ssh2는 명시적으로 켜야 시도).
     // 같은 비밀번호로 모든 프롬프트에 응답한다.
     conn.on('keyboard-interactive', (name, instr, lang, prompts, finish) => {
+      say(`keyboard-interactive 프롬프트 ${prompts.length}개 — 같은 비밀번호로 응답`, 'debug');
       finish(prompts.map(() => password || ''));
     });
     const auth = { host, port, username, readyTimeout, keepaliveInterval: 15000 };
     if (privateKey) { auth.privateKey = privateKey; if (passphrase) auth.passphrase = passphrase; }
     else { auth.password = password; auth.tryKeyboard = true; }
+    if (_legacy) auth.algorithms = LEGACY_ALGOS;
+    // '자세히'(ssh -vvv 상당): ssh2 의 debug 콜백은 소켓 연결·ident 교환·KEXINIT·인증 방식 시도·채널 열기까지
+    // 프로토콜 단계마다 한 줄씩 남긴다. 비밀번호는 찍히지 않는다(ssh2 가 로그에 넣지 않음).
+    if (verbose && trace) auth.debug = (m) => say(`ssh2: ${m}`, 'debug');
     conn.connect(auth);
   });
 }
@@ -133,6 +174,17 @@ function sftpWriteFile(conn, path, content, mode = 0o644) {
 export async function withSsh(creds, fn, { signal = creds?.signal } = {}) {
   const conn = await connect({ ...creds, signal });
   const log = [];
+  const trace = typeof creds?.trace === 'function' ? creds.trace : null;
+  const say = (m, lv) => { try { trace?.(m, lv); } catch { /* */ } };
+  const traced = async (label, cmd, run) => {
+    const t0 = Date.now();
+    say(`실행: ${cmd}`);
+    try {
+      const r = await run();
+      say(`완료(${label}): exit=${r.code ?? '—'} stdout ${Buffer.byteLength(r.stdout || '')}B stderr ${Buffer.byteLength(r.stderr || '')}B +${Date.now() - t0}ms${r.captured ? ' [캡처 종료]' : ''}`);
+      return r;
+    } catch (e) { say(`실패(${label}): ${e.message} +${Date.now() - t0}ms`, 'error'); throw e; }
+  };
   // 취소(signal, v2.417): 호출자의 장비당 타임아웃이 만료되면 **세션을 실제로 끊는다**. 예전에는
   // 호출자가 Promise.race 로 결과만 포기하고 세션은 남은 명령을 끝까지 돌렸다(최대 ~8.5분) —
   // 동시성 상한이 실효를 잃고 다음 주기가 같은 장비에 두 번째 세션을 열었다(리뷰 확정).
@@ -147,9 +199,9 @@ export async function withSsh(creds, fn, { signal = creds?.signal } = {}) {
     // timeoutMs 는 선택 — 생략하면 exec 의 기본값(SSH_EXEC_TIMEOUT_MS 또는 60s). 원격에서
     // `timeout <N> tcpdump` 처럼 **의도적으로 오래 도는** 명령은 반드시 명시해야 한다(과거
     // pcap/트래픽 캡처가 최대 120초를 허용하면서 전송 계층은 60초에 끊어 항상 실패했다).
-    exec: async (cmd, timeoutMs) => { const r = await exec(conn, cmd, timeoutMs); log.push(r); return r; },
+    exec: async (cmd, timeoutMs) => { const r = await (trace ? traced('exec', cmd, () => exec(conn, cmd, timeoutMs)) : exec(conn, cmd, timeoutMs)); log.push(r); return r; },
     // 스스로 끝나지 않는 갱신형 명령(portperfshow 등) 전용 — captureMs 만큼 모으고 채널을 닫는다.
-    execCapture: async (cmd, captureMs) => { const r = await execCapture(conn, cmd, captureMs); log.push(r); return r; },
+    execCapture: async (cmd, captureMs) => { const r = await (trace ? traced('capture', cmd, () => execCapture(conn, cmd, captureMs)) : execCapture(conn, cmd, captureMs)); log.push(r); return r; },
     readFile: (p) => sftpReadFile(conn, p),
     writeFile: (p, c, m) => sftpWriteFile(conn, p, c, m),
     putFile: (local, remote) => sftpPutFile(conn, local, remote),

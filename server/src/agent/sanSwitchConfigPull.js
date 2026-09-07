@@ -8,7 +8,7 @@ import { config } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { applyPulledDevices } from '../sanswitch/registry.js';
 import { dropSnapshot } from '../sanswitch/store.js';
-import { collectDeviceNow } from '../sanswitch/poller.js';
+import { collectDeviceNow, testDeviceConnection } from '../sanswitch/poller.js';
 import { pushSanSwitchNow } from '../sanswitch/push.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 
@@ -51,12 +51,27 @@ async function _pull() {
       try { await collectDeviceNow(id); collected++; } catch (e) { console.warn(`[sanswitch-config] 재수집 실패 ${id}: ${e.message}`); }
     }
     if (collected) await pushSanSwitchNow().catch(() => {}); // 결과를 push 주기까지 기다리지 않게
-    _last = { at: Date.now(), applied, count: devices.length, collectRequested: wants.length, collected };
-    return { ok: true, applied, unchanged: !applied, count: devices.length, collectRequested: wants.length, collected };
+    // 연결 테스트 대행(v2.421): 중앙 등록 화면의 테스트를 현지에서 실행하고 결과(추적 로그 포함)를 회신한다.
+    // pull 자체를 막지 않도록 비동기로 돌린다(테스트는 최대 60초).
+    const tests = Array.isArray(body?.testNow) ? body.testNow.slice(0, 5) : [];
+    for (const t of tests) runDelegatedTest(t).catch((e) => console.warn(`[sanswitch-config] 테스트 대행 실패 ${t?.id}: ${e.message}`));
+    _last = { at: Date.now(), applied, count: devices.length, collectRequested: wants.length, collected, testRequested: tests.length };
+    return { ok: true, applied, unchanged: !applied, count: devices.length, collectRequested: wants.length, collected, testRequested: tests.length };
   } catch (e) {
     _last = { at: Date.now(), error: e.message };
     return { ok: false, reason: e.message };
   }
+}
+
+async function runDelegatedTest(t) {
+  const device = t?.device && typeof t.device === 'object' ? t.device : null;
+  if (!t?.id || !device) return;
+  const result = await testDeviceConnection(device, { timeoutMs: Math.min(120_000, Number(t.timeoutMs) || 60_000), verbose: !!t.verbose, ranOn: config.agent.name || '엣지' });
+  const res = await resilientFetch(`${config.agent.centralUrl}/api/central/sanswitch-test-result`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Central-Token': config.agent.centralToken },
+    body: JSON.stringify({ agent: config.agent.name || '', id: t.id, result }), timeoutMs: 20_000, retries: 2,
+  });
+  if (!res.ok) throw new Error(`sanswitch-test-result <- ${res.status}`);
 }
 
 export function startSanSwitchConfigPull() {

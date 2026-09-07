@@ -13,7 +13,8 @@ import { logAudit } from '../../audit.js';
 import { SAN_SWITCH_TYPES, collectMethodsFor } from '../../sanswitch/types.js';
 import { listDevices, saveDevice, deleteDevice, deviceInputIssue, getDeviceWithSecret, normalizeDeviceInput } from '../../sanswitch/registry.js';
 import { localSnapshots, getSnapshot, dropSnapshot } from '../../sanswitch/store.js';
-import { collectDeviceNow, sanSwitchPollerStatus, pollSanSwitchOnce, testDeviceConnection } from '../../sanswitch/poller.js';
+import { collectDeviceNow, sanSwitchPollerStatus, pollSanSwitchOnce } from '../../sanswitch/poller.js';
+import { startTestRun, getTestRun } from '../../sanswitch/testRuns.js';
 import { edgeSanSwitchSnapshots } from '../../central/sanSwitchEdge.js';
 import { listDatacenters } from '../../datacenter/store.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
@@ -156,9 +157,21 @@ api.post('/tools/sanswitch/test', adminOnly, async (req, res) => {
   // body 를 그대로 수집기에 넘기지 않는다 — vfId 는 CLI(`setcontext <vfId>;`)에 삽입되므로 저장 경로와
   // 같은 정규화(정수 1..128 / 포트 1..65535)를 거친다(v2.416 보안 감사 M-1).
   const device = { ...normalizeDeviceInput(b), id: b.id || `test-${Date.now()}`, password };
-  logAudit({ user: req.user?.username, action: 'SAN 스위치 연결 테스트', target: `${b.name || ''}(${b.host})`, detail: `${b.type}/${b.collectMethod || ''} user=${device.username}${device.vfId ? ` vf=${device.vfId}` : ''}` });
-  const r = await testDeviceConnection(device, { timeoutMs: 60_000 });
-  res.json(r);
+  const verbose = b.verbose === true || b.verbose === '1';
+  logAudit({ user: req.user?.username, action: 'SAN 스위치 연결 테스트', target: `${b.name || ''}(${b.host})`, detail: `${b.type}/${b.collectMethod || ''} user=${device.username}${device.vfId ? ` vf=${device.vfId}` : ''}${device.agent ? ` 엣지=${device.agent}` : ''}${verbose ? ' 자세히(ssh -vvv)' : ''}` });
+  // v2.421: 비동기 실행 — 즉시 runId 를 돌려주고 화면이 진행 로그를 폴링한다(엣지 위임 장비는 그 엣지가 실행).
+  try {
+    const r = startTestRun(device, { verbose, user: req.user?.username || '' });
+    res.json({ ok: true, runId: r.id, target: r.target });
+  } catch (e) { res.status(429).json({ ok: false, reason: e.message }); }
+});
+
+/** 연결 테스트 진행/결과 조회 — 추적 로그(단계별)·결과. 비밀번호는 없다. */
+api.get('/tools/sanswitch/test/:runId', adminOnly, (req, res) => {
+  const r = getTestRun(req.params.runId);
+  if (!r) return res.status(404).json({ ok: false, reason: '테스트를 찾을 수 없습니다(만료 30분).' });
+  res.set('Cache-Control', 'no-store');
+  res.json({ ok: true, run: r });
 });
 
 /**

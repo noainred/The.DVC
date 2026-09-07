@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
 import { fetchJson, postJson, delJson } from '../../api.js';
 import { MODES, bucketText, perfQuery, toLocalDt, rangeIssueOf, rangeLabel, RANGE_MAX_DAYS } from './sanSwitchPerfText.js';
+import { statusText, traceText, isActive, phaseLabel } from './sanSwitchTestText.js';
 import { Loading, ErrorBox, Kpi, UsageCell, Modal, SearchBox } from '../../components/ui.jsx';
 import { stateLabel, stateTone, opticalHealth, errorLevel, capacityLevel, aggregate,
   throughputText, filterPorts, shortDeviceName, saturationPct, saturationLevel, bytesPerSecText,
@@ -54,12 +55,14 @@ export default function SanSwitchTool() {
   const [test, setTest] = useState(null);
   const [detail, setDetail] = useState(null);      // 포트 상세 모달 { device, ports, ... }
   const detailSeq = useRef(0);
+  const testTimer = useRef(null);                  // 연결 테스트 폴링 타이머(v2.421) — 훅은 조기 return 위에
   const [dcPerf, setDcPerf] = useState(null);      // 법인 단위 스토리지 사용량 분석 모달
   const [portFilter, setPortFilter] = useState('all');
   const [portQ, setPortQ] = useState('');
   const [infoOpen, setInfoOpen] = useState(false);   // 장비 일반 정보 펼침
   const [tab, setTab] = useState('ports');           // 포트 목록 / 사용량 분석
   const [sort, setSort] = useState({ key: 'index', dir: 'asc' });  // 표 정렬(제목 클릭)
+  useEffect(() => () => { if (testTimer.current) clearInterval(testTimer.current); }, []); // 언마운트 시 테스트 폴링 정리
 
   const load = async () => {
     try { setData(await fetchJson('/tools/sanswitch')); setError(null); }
@@ -115,11 +118,24 @@ export default function SanSwitchTool() {
     catch (e) { setMsg(`삭제 실패: ${e.message}`); }
     finally { setBusy(false); }
   };
-  const runTest = async () => {
-    setBusy(true); setTest(null);
-    try { setTest(await postJson('/tools/sanswitch/test', form)); }
-    catch (e) { setTest({ ok: false, reason: e.message }); }
-    finally { setBusy(false); }
+  // 연결 테스트(v2.421): 등록 즉시 runId 를 받고 1초마다 진행 로그를 폴링한다 — 어느 단계에서 기다리는지 보인다.
+  // verbose=true 면 SSH 프로토콜 로그(ssh -vvv 상당)까지 남긴다.
+  const stopTestPoll = () => { if (testTimer.current) { clearInterval(testTimer.current); testTimer.current = null; } };
+  const runTest = async (verbose = false) => {
+    stopTestPoll();
+    setBusy(true); setTest({ run: { status: 'running', trace: [], elapsedMs: 0, verbose } });
+    try {
+      const r = await postJson('/tools/sanswitch/test', { ...form, verbose });
+      const poll = async () => {
+        try {
+          const d = await fetchJson(`/tools/sanswitch/test/${r.runId}`);
+          setTest({ run: d.run });
+          if (!isActive(d.run)) { stopTestPoll(); setBusy(false); }
+        } catch (e) { stopTestPoll(); setBusy(false); setTest({ run: { status: 'done', trace: [], elapsedMs: 0, result: { ok: false, reason: e.message, phase: 'unknown' } } }); }
+      };
+      testTimer.current = setInterval(poll, 1000);
+      await poll();
+    } catch (e) { setBusy(false); setTest({ run: { status: 'done', trace: [], elapsedMs: 0, result: { ok: false, reason: e.message, phase: 'unknown' } } }); }
   };
   const collectNow = async (r) => {
     setBusy(true); setMsg(null);
@@ -255,7 +271,7 @@ export default function SanSwitchTool() {
         {data.poller?.busy ? ' · 수집 진행중' : ''}
       </div>
 
-      {form && <DeviceForm {...{ form, setForm, data, save, busy, runTest, test, setTest }} />}
+      {form && <DeviceForm {...{ form, setForm, data, save, busy, runTest, test, setTest, stopTestPoll }} />}
       {detail && <PortDetail {...{ detail, setDetail, portFilter, setPortFilter, portQ, setPortQ, infoOpen, setInfoOpen, tab, setTab, sort, setSort }} />}
       {dcPerf && <DcStoragePerf dcPerf={dcPerf} onClose={() => setDcPerf(null)} />}
     </>
@@ -263,11 +279,11 @@ export default function SanSwitchTool() {
 }
 
 /** 등록/수정 폼 — 수집 방식 목록은 서버 카탈로그(types.js)를 그대로 그린다. */
-function DeviceForm({ form, setForm, data, save, busy, runTest, test, setTest }) {
+function DeviceForm({ form, setForm, data, save, busy, runTest, test, setTest, stopTestPoll }) {
   const set = (k) => (e) => setForm((p) => ({ ...p, [k]: e.target.value }));
   const type = data.types.find((t) => t.type === form.type) || data.types[0];
   return (
-    <Modal title={form.id ? 'SAN 스위치 수정' : 'SAN 스위치 등록'} onClose={() => { setForm(null); setTest(null); }} width={760}>
+    <Modal title={form.id ? 'SAN 스위치 수정' : 'SAN 스위치 등록'} onClose={() => { setForm(null); setTest(null); stopTestPoll(); }} width={760}>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 10 }}>
         <label style={{ fontSize: 12 }}>표시명<input className="input" value={form.name} onChange={set('name')} placeholder="예: SAN-A-01" /></label>
         <label style={{ fontSize: 12 }}>host (IP/호스트명)<input className="input" value={form.host} onChange={set('host')} placeholder="10.10.10.11" /></label>
@@ -309,25 +325,55 @@ function DeviceForm({ form, setForm, data, save, busy, runTest, test, setTest })
       <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>
         {(type?.methods || []).find((m) => m.value === form.collectMethod)?.hint}
       </div>
-      <div className="flex gap" style={{ marginTop: 12 }}>
-        <button className="tab" disabled={busy} onClick={runTest}>연결 테스트</button>
+      <div className="flex gap wrap" style={{ marginTop: 12, alignItems: 'center' }}>
+        <button className="tab" disabled={busy} onClick={() => runTest(false)}
+          title={`입력한 값으로 실제 접속해 봅니다(저장하지 않음). DNS → TCP → SSH/REST → 명령 실행 순으로 단계별 로그가 실시간으로 표시됩니다.${form.agent ? `\n수집 주체가 엣지(${form.agent})이므로 그 엣지가 현지에서 실행합니다 — 엣지의 다음 설정 pull(기본 5분) 때 가져갑니다.` : '\n수집 주체가 "중앙이 직접 수집"이므로 중앙 포탈 서버에서 접속합니다 — 중앙에서 닿지 않는 IP 면 TCP 단계에서 멈춥니다.'}`}>
+          연결 테스트
+        </button>
+        <button className="tab" disabled={busy} onClick={() => runTest(true)}
+          title="ssh -vvv 에 해당하는 SSH 프로토콜 단계 로그(소켓 연결·ident 교환·키 교환 알고리즘·인증 방식 시도·채널 열기)까지 남깁니다. 어느 단계에서 멈추는지 추적할 때 쓰세요. 비밀번호는 로그에 남지 않습니다.">
+          🔍 자세히 테스트(ssh -vvv)
+        </button>
         <button className="login-btn" style={{ flex: 'none', padding: '6px 18px' }} disabled={busy} onClick={save}>저장</button>
+        {busy && test?.run && <span className="muted" style={{ fontSize: 12 }}>{statusText(test.run)}</span>}
       </div>
-      {test && <TestResult test={test} />}
+      {test?.run && <TestResult run={test.run} />}
     </Modal>
   );
 }
 
-/** 연결 테스트 결과 — 실패해도 원인을 감추지 않고, SSH 는 CLI 원문을 접어서 보여준다. */
-function TestResult({ test }) {
+/**
+ * 연결 테스트 결과(v2.421) — 실행 중에는 단계별 추적 로그를 실시간으로, 끝나면 성공/실패 + 단계 + 원인 안내.
+ * 실패해도 원인을 감추지 않고, SSH 는 CLI 원문을 접어서 보여준다. '로그 복사'로 추적 로그 전체를 복사한다.
+ */
+function TestResult({ run }) {
   const [open, setOpen] = useState(false);
+  const [traceOpen, setTraceOpen] = useState(true);
+  const [copied, setCopied] = useState(false);
+  const logRef = useRef(null);
+  const active = isActive(run);
+  const test = run.result || {};
+  const trace = run.trace || [];
+  useEffect(() => { if (active && logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, [trace.length, active]);
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(`${statusText(run)}\n${test.reason ? `사유: ${test.reason}\n` : ''}${test.hint ? `안내: ${test.hint}\n` : ''}\n${traceText(trace)}`); setCopied(true); setTimeout(() => setCopied(false), 1500); }
+    catch { setCopied(false); }
+  };
+  const debugCount = trace.filter((l) => l.level === 'debug').length;
   return (
     <div className="card" style={{ marginTop: 12 }}>
-      <div style={{ color: test.ok ? TONE.ok : TONE.bad, fontWeight: 600 }}>
-        {test.ok ? '연결 성공' : '연결 실패'} <span className="muted" style={{ fontWeight: 400 }}>({test.ms}ms)</span>
+      <div style={{ color: active ? TONE.warn : (test.ok ? TONE.ok : TONE.bad), fontWeight: 600 }}>
+        {active ? '⏳ ' : ''}{statusText(run)}
+        {run.target ? <span className="muted" style={{ fontWeight: 400 }}> · 실행 위치: 엣지 {run.target}</span> : <span className="muted" style={{ fontWeight: 400 }}> · 실행 위치: 중앙</span>}
+        {run.verbose ? <span className="muted" style={{ fontWeight: 400 }}> · 자세히(ssh -vvv)</span> : null}
       </div>
-      {!test.ok && <div style={{ marginTop: 6 }}>{test.reason}</div>}
-      {test.ok && test.snap && (
+      {!active && !test.ok && (
+        <div style={{ marginTop: 6, fontSize: 13, lineHeight: 1.6 }}>
+          <div><b>실패 단계:</b> {phaseLabel(test.phase)} · <b>사유:</b> {test.reason}</div>
+          {test.hint && <div className="muted" style={{ marginTop: 4, borderLeft: '3px solid var(--amber)', paddingLeft: 8 }}>💡 {test.hint}</div>}
+        </div>
+      )}
+      {!active && test.ok && test.snap && (
         <div style={{ marginTop: 6, fontSize: 13, lineHeight: 1.7 }}>
           이름 <b>{test.snap.name}</b> · 모델 <b>{test.snap.model || '—'}</b> · FOS <b>{test.snap.fabricOs || '—'}</b>
           {' · '}Domain {test.snap.domainId ?? '—'} · 시리얼 {test.snap.serial || '—'}
@@ -339,7 +385,25 @@ function TestResult({ test }) {
           )}
         </div>
       )}
-      {!!(test.cliRaw || []).length && (
+      {/* 단계별 추적 로그 — 실행 중에도 보인다(어디서 기다리는지). */}
+      <div className="flex gap" style={{ marginTop: 8, alignItems: 'center' }}>
+        <button className="tab" style={{ padding: '2px 8px' }} onClick={() => setTraceOpen(!traceOpen)}
+          title="DNS → TCP → SSH 핸드셰이크 → 인증 → 명령 실행 순으로, 각 단계의 시작·완료·소요 시간을 기록합니다. 마지막 줄이 지금 기다리는 곳입니다.">
+          {traceOpen ? '▾' : '▸'} 단계별 추적 로그 ({trace.length}줄{debugCount ? ` · SSH 프로토콜 ${debugCount}줄` : ''})
+        </button>
+        <button className="tab" style={{ padding: '2px 8px' }} onClick={copy} title="상태·사유·안내·추적 로그 전체를 클립보드에 복사합니다(장애 문의에 붙여넣기).">{copied ? '복사됨 ✓' : '📋 로그 복사'}</button>
+        {run.traceDropped ? <span className="muted" style={{ fontSize: 11 }}>상한 초과로 {run.traceDropped}줄 생략</span> : null}
+      </div>
+      {traceOpen && (
+        <pre ref={logRef} style={{ fontSize: 11, whiteSpace: 'pre-wrap', margin: '6px 0 0', maxHeight: 260, overflow: 'auto', lineHeight: 1.5 }}>
+          {trace.length ? trace.map((l, i) => (
+            <div key={i} style={{ color: l.level === 'error' ? TONE.bad : l.level === 'warn' ? TONE.warn : l.level === 'debug' ? TONE.muted : undefined }}>
+              [+{(Number(l.t) / 1000).toFixed(3)}s] {l.level === 'debug' ? '· ' : ''}{l.msg}
+            </div>
+          )) : <span className="muted">아직 로그가 없습니다.</span>}
+        </pre>
+      )}
+      {!active && !!(test.cliRaw || []).length && (
         <>
           <button className="tab" style={{ marginTop: 8, padding: '2px 8px' }} onClick={() => setOpen(!open)}>
             {open ? '▾' : '▸'} CLI 명령 원문 ({test.cliRaw.length}개)

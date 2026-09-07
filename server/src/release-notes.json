@@ -1,6 +1,21 @@
 {
   "notes": [
     {
+      "version": "2.421.0",
+      "date": "2026-09-07",
+      "title": "SAN 스위치 연결 테스트 진단 — 단계별 실시간 추적 로그 · 자세히(ssh -vvv) · 엣지 대행 · 구형 알고리즘 폴백",
+      "notes": [
+        "연결 테스트가 **비동기 실행**으로 바뀜(사용자 요구 '연결 테스트 누르면 멈출 때 있는데 왜 안되는지 구체적으로 로그를 볼 수 있게'): `POST /tools/sanswitch/test` 가 즉시 runId 를 돌려주고 화면이 1초마다 `GET /tools/sanswitch/test/:id` 로 **단계별 추적 로그를 실시간으로** 본다 — DNS 해석(결과 IP·ms) → TCP 연결(10초 사전 점검, 성공/거부/무응답) → SSH 배너·핸드셰이크(협상된 kex/hostkey/cipher/mac) → 인증 → 명령별 실행 시간/출력 크기 → 출력 해석. 마지막 줄이 '지금 기다리는 곳'이다.",
+        "실패 시 **단계(phase) + 사유 + 원인 안내(hint)** 를 붙인다(`sanswitch/testDiag.js classifyFailure`, 순수 함수·테스트 고정): ENOTFOUND→DNS, ECONNREFUSED→포트 닫힘, SYN 무응답→방화벽/경로(중앙 실행이면 '수집 주체를 엣지로' 안내), handshake 타임아웃, no matching 알고리즘, 인증 실패, exec 타임아웃/출력 상한, REST 401/404, 엣지 미회신. '📋 로그 복사'로 상태·사유·안내·전체 추적 로그를 복사.",
+        "**🔍 자세히 테스트(ssh -vvv)** 버튼(사용자 요구): ssh2 debug 콜백을 켜 소켓 연결·ident 교환·KEXINIT·인증 방식 시도·채널 열기 등 프로토콜 단계 로그를 함께 남긴다(비밀번호 미기재, 상한 600줄). 일반 테스트에는 프로토콜 로그가 없다.",
+        "**엣지 대행**: 수집 주체가 엣지인 스위치는 중앙이 직접 붙지 않고 요청을 큐에 두어 엣지가 설정 pull 응답 `testNow` 로 가져가 현지에서 실행, `POST /api/central/sanswitch-test-result` 로 결과(추적 로그 포함)를 회신한다. 예전에는 중앙 포탈이 닿지 않는 엣지 망 IP 에 직접 붙어 60초 뒤 타임아웃만 봤다 — 스크린샷의 WA-1(수집 주체 엣지 agent-WA) 처럼 **'멈춤'으로 보이던 유력 원인**(추정 — 실제 원인은 추적 로그로 확인). 대상 엣지만 결과 회신 가능(agent 대조)·회신 본문 정화·GET 응답에 비밀번호 없음. 대기 상한 `SANSW_TEST_PICKUP_MS`(10분)/`SANSW_TEST_RESULT_MS`(5분).",
+        "**구형 알고리즘 폴백**(`proxy/sshExec.js`): 'no matching key exchange/host key/cipher/MAC' 로 핸드셰이크가 실패하면 ssh2 지원 전 목록(diffie-hellman-group1-sha1·ssh-dss·aes-cbc·hmac-sha1-96 등)으로 **1회만** 재시도하고 협상 결과를 추적 로그에 남긴다(`SSH_LEGACY_FALLBACK=0` 으로 끔). 폴러·RMA·스토리지 SSH 전부 같은 경로라 구형 장비 수집도 함께 개선된다. 정직한 한계: 이 포탈은 known_hosts 검증을 하지 않으므로 MITM 방어 수준이 낮아지는 것은 아니다(원래 없음).",
+        "SSH 추적은 `withSsh(creds{trace,verbose})` 로 공통화 — 접속 시도·배너·핸드셰이크·세션 준비·명령 실행/완료/실패·연결 종료. fosSsh 명령 조사·섹션 해석, fosRest 로그인/GET 단계도 추적에 남긴다. 폴러는 trace 를 넘기지 않아 비용 0.",
+        "테스트: `sanSwitchTest2421.test.js` 8건 — 분류 규칙, 사전 점검(닫힌/열린 포트, DNS 건너뜀), 비동기 등록부(닫힌 포트는 60초 대기 없이 tcp 단계 종료·비밀 무노출), 엣지 대행(큐→인출→대상 엣지만 회신·정화), **로컬 ssh2 서버**로 추적 로그·verbose 프로토콜 로그·인증 실패·구형 알고리즘 전용 서버 폴백·testDeviceConnection 단계 분류를 실제 SSH 로 검증. 웹 `sanSwitchTestText.test.js` 3건.",
+        "CLAUDE.md 에 사용자 선호 추가(사용자 요구 '기억해줘'): 데이터 조회 화면의 모든 표는 제목 클릭 정렬을 갖춘다 — 다음 릴리스(v2.422)에서 전 화면 적용."
+      ]
+    },
+    {
       "version": "2.420.0",
       "date": "2026-09-07",
       "title": "SAN 포트 사용량 분석: 평균/피크 기준 선택 · 기간 지정 조회 · 보관 기간 설정 강화 · 값 산출 방식 상세 설명",

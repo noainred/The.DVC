@@ -105,15 +105,19 @@ function specs(vfId) {
   ];
 }
 
-async function runSession(device, signal) {
+async function runSession(device, signal, { trace = null, verbose = false } = {}) {
   const creds = {
     host: device.host, port: Number(device.sshPort) || 22,
     username: device.username, password: device.password || '', signal,
+    trace, verbose, // 연결 테스트 추적(v2.421) — 폴러는 넘기지 않는다(null)
   };
   return withSsh(creds, async (sh) => {
     const out = {}; const raw = []; const errors = {};
     // 이 스위치가 실제로 가진 명령 집합을 먼저 조사한다(경로 추측 금지 — 위 머리말).
+    trace?.('명령 가용성 조사(echo $PATH; ls) — 캐시 6시간');
     const caps = await probeCommands(sh, `${device.host}|${device.username}`);
+    if (caps.probeError) trace?.(`명령 조사 실패(그대로 진행): ${caps.probeError}`, 'warn');
+    else trace?.(`PATH ${caps.path.length}개 디렉터리 · 확인된 명령 ${caps.has.size}개`);
     if (caps.probeError) raw.push({ key: '_probe', cmd: 'echo $PATH; ls $PATH', ok: false, sample: `명령 조사 실패(그대로 실행합니다): ${caps.probeError}` });
     else raw.push({ key: '_probe', cmd: 'echo $PATH; ls $PATH', ok: true, sample: `PATH: ${caps.path.join(':')}\n확인된 명령 ${caps.has.size}개` });
 
@@ -246,8 +250,9 @@ export function buildSnapshot(device, out = {}, errors = {}) {
 }
 
 /** 수집 진입점. raw(명령 원문)는 연결 테스트에서만 쓰고 스냅샷에는 넣지 않는다(대역폭). */
-export async function collect(device, { withRaw = false, signal } = {}) {
-  const r = await runSession(device, signal);
+export async function collect(device, { withRaw = false, signal, trace = null, verbose = false } = {}) {
+  const r = await runSession(device, signal, { trace, verbose });
+  trace?.(`출력 해석: 성공 섹션 ${Object.keys(r.out).length}개, 실패 ${Object.keys(r.errors).length}개${Object.keys(r.errors).length ? ` (${Object.keys(r.errors).join(', ')})` : ''}`);
   const snap = buildSnapshot(device, r.out, r.errors);
   return withRaw ? { snap, raw: r.raw } : snap;
 }

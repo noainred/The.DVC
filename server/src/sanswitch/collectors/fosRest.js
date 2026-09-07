@@ -186,13 +186,17 @@ export function buildSnapshot(device, parts = {}) {
 const num = (v) => (v == null || v === '' || Number.isNaN(Number(v)) ? null : Number(v));
 
 /** 수집 진입점. 섹션 실패는 sections 에 남기고 계속 진행한다(포트 표는 살린다). */
-export async function collect(device, { signal } = {}) {
+export async function collect(device, { signal, trace = null } = {}) {
   const c = makeClient(device, signal);
-  await c.login();
+  const t0 = Date.now();
+  trace?.(`REST 로그인 → https://${device.host}:${Number(device.httpsPort) || 443}/rest/login (Basic, 자체서명 허용)`);
+  try { await c.login(); trace?.(`REST 로그인 성공 +${Date.now() - t0}ms`); }
+  catch (e) { trace?.(`REST 로그인 실패: ${e.message} +${Date.now() - t0}ms`, 'error'); throw e; }
   const parts = {}; const sections = {};
   const grab = async (key, modulePath, required = false) => {
-    try { parts[key] = await c.get(modulePath); sections[key] = 'ok'; }
-    catch (e) { sections[key] = e.message; if (required) throw e; }
+    const t1 = Date.now();
+    try { parts[key] = await c.get(modulePath); sections[key] = 'ok'; trace?.(`GET ${modulePath} ok +${Date.now() - t1}ms`); }
+    catch (e) { sections[key] = e.message; trace?.(`GET ${modulePath} 실패: ${e.message}`, required ? 'error' : 'warn'); if (required) throw e; }
   };
   try {
     await grab('ports', 'brocade-interface/fibrechannel', true);

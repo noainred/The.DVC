@@ -16,6 +16,8 @@ import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import * as fosSsh from './collectors/fosSsh.js';
 import * as fosRest from './collectors/fosRest.js';
 import { withDeadline } from '../proxy/sshExec.js';
+import { classifyFailure, makeTracer } from './testDiag.js';
+import { precheckTarget } from './precheck.js';
 
 const CONCURRENCY = Math.max(1, Math.min(16, Number(process.env.SANSW_CONCURRENCY) || 4));
 const DEVICE_TIMEOUT_MS = Math.max(30_000, Number(process.env.SANSW_DEVICE_TIMEOUT_MS) || 120_000);
@@ -98,18 +100,42 @@ export async function collectDeviceNow(id) {
  * 도는 것이라, 저장하면 화면에 유령 장비가 생긴다(스토리지의 testDeviceConnection 과 동일 규칙).
  * SSH 방식은 CLI 원문을 함께 돌려줘, 파싱이 빗나갔을 때 운영자가 실제 출력을 보고 판단할 수 있게 한다.
  */
-export async function testDeviceConnection(device, { timeoutMs = 60_000 } = {}) {
+/**
+ * v2.421: 단계별 추적(trace) + 사전 점검(DNS·TCP) + 실패 분류(phase/hint).
+ *  - `trace(msg, level)` 를 주면 진행 상황을 실시간으로 받는다(테스트 실행 화면이 폴링으로 보여준다).
+ *  - `verbose` 면 SSH 프로토콜 단계 로그(ssh2 debug — ssh -vvv 상당)까지 남긴다.
+ *  - 사전 점검은 **접속이 어디서 막히는지**를 분리한다: DNS 해석 → TCP 연결(10초) 을 먼저 따로 해 보고
+ *    실패하면 SSH 를 시도하지 않고 그 단계에서 끝낸다(readyTimeout 60초를 기다리며 "멈춘" 것처럼 보이지 않게).
+ */
+export async function testDeviceConnection(device, { timeoutMs = 60_000, trace = null, verbose = false, ranOn = '중앙' } = {}) {
   const t0 = Date.now();
+  const tracer = makeTracer(t0);
+  const say = (m, lv = 'info') => { tracer.push(m, lv); try { trace?.(m, lv); } catch { /* */ } };
+  const rest = device.collectMethod === 'rest';
+  const port = rest ? (Number(device.httpsPort) || 443) : (Number(device.sshPort) || 22);
+  let phase = 'dns';
+  const done = (r) => ({ ...r, ms: Date.now() - t0, trace: tracer.lines, traceDropped: tracer.dropped, ranOn, verbose });
   try {
+    say(`연결 테스트 시작 — ${device.type}/${rest ? 'REST' : 'SSH'} ${device.host}:${port} 계정=${device.username || '(없음)'}${device.vfId ? ` VF=${device.vfId}` : ''} 실행 위치=${ranOn} 제한 ${Math.round(timeoutMs / 1000)}초${verbose ? ' [자세히: SSH 프로토콜 로그 포함]' : ''}`);
     if (device.type !== 'brocade') throw new Error(`수집기 미구현: ${device.type}`);
-    if (device.collectMethod === 'rest') {
-      const snap = await withDeadline(timeoutMs, (signal) => fosRest.collect(device, { signal }), '테스트 타임아웃');
-      return { ok: true, ms: Date.now() - t0, snap: summary(snap), cliRaw: [] };
+    // 사전 점검 — DNS·TCP 를 따로 재서 '어디서 막히는지' 분리
+    const pre = await precheckTarget(device.host, port, { trace: say, timeoutMs: Math.min(10_000, timeoutMs) });
+    if (!pre.ok) { phase = pre.phase; throw new Error(pre.reason); }
+    phase = rest ? 'rest' : 'ssh-handshake';
+    if (rest) {
+      const snap = await withDeadline(timeoutMs, (signal) => fosRest.collect(device, { signal, trace: say }), '테스트 타임아웃');
+      say(`완료 — 이름 ${snap.name || '—'} 모델 ${snap.model || '—'} FOS ${snap.fabricOs || '—'} 포트 ${snap.ports?.online ?? '—'}/${snap.ports?.licensed ?? '—'}`);
+      return done({ ok: true, snap: summary(snap), cliRaw: [], phase: 'done' });
     }
-    const { snap, raw } = await withDeadline(timeoutMs, (signal) => fosSsh.collect(device, { withRaw: true, signal }), '테스트 타임아웃');
-    return { ok: true, ms: Date.now() - t0, snap: summary(snap), cliRaw: raw };
+    const wrapped = (m, lv) => { if (/세션 준비 완료/.test(String(m))) phase = 'exec'; else if (/핸드셰이크 완료/.test(String(m))) phase = 'ssh-auth'; say(m, lv); };
+    const { snap, raw } = await withDeadline(timeoutMs, (signal) => fosSsh.collect(device, { withRaw: true, signal, trace: wrapped, verbose }), '테스트 타임아웃');
+    say(`완료 — 이름 ${snap.name || '—'} 모델 ${snap.model || '—'} FOS ${snap.fabricOs || '—'} 포트 ${snap.ports?.online ?? '—'}/${snap.ports?.licensed ?? '—'} (${Date.now() - t0}ms)`);
+    return done({ ok: true, snap: summary(snap), cliRaw: raw, phase: 'done' });
   } catch (e) {
-    return { ok: false, ms: Date.now() - t0, reason: e.message || String(e) };
+    const reason = e.message || String(e);
+    const c = classifyFailure(reason, phase, { agentDelegated: !!String(device.agent || '').trim(), ranOn });
+    say(`실패(${c.phase}): ${reason}`, 'error');
+    return done({ ok: false, reason, phase: c.phase, hint: c.hint });
   }
 }
 
