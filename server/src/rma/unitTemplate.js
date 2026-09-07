@@ -39,8 +39,20 @@ ReadWritePaths=@PREFIX@ @CONFIG_DIR@
 WantedBy=multi-user.target
 `;
 
-/** sudoers 규칙 — 프리셋 portal-restart(commands.js sudo:true)가 요구하는 단 한 줄. */
-export const RMA_SUDOERS = (user) => `# vmware-portal RMA: 포탈 서비스 재시작만 허용(commands.js portal-restart)\n${user} ALL=(root) NOPASSWD: /usr/bin/systemctl restart vmware-portal.service\n`;
+/**
+ * sudoers 규칙 — 프리셋이 요구하는 정확한 명령만. 기본은 포탈 재시작 한 줄이고, 엣지의
+ * RMA_SERVICE_UNITS(허용 유닛)·RMA_ALLOW_REBOOT 에 따라 start/stop/restart 와 reboot 줄이 추가된다(v2.418).
+ * 유닛 이름은 systemd 유닛 문자 집합만 통과(sudoers 파일에 그대로 들어간다).
+ */
+export const RMA_SUDOERS = (user, { units = [], reboot = false } = {}) => {
+  const lines = ['# vmware-portal RMA: 프리셋이 요구하는 systemctl 명령만 허용(commands.js sudo:true)', `${user} ALL=(root) NOPASSWD: /usr/bin/systemctl restart vmware-portal.service`];
+  for (const u of units) {
+    if (!/^[A-Za-z0-9][A-Za-z0-9@._-]{0,79}$/.test(u)) continue;
+    for (const verb of ['start', 'stop', 'restart']) lines.push(`${user} ALL=(root) NOPASSWD: /usr/bin/systemctl ${verb} ${u}.service`);
+  }
+  if (reboot) lines.push(`${user} ALL=(root) NOPASSWD: /usr/bin/systemctl reboot`);
+  return lines.join('\n') + '\n';
+};
 
 export function renderUnit({ prefix, user, configDir }) {
   return RMA_UNIT_TEMPLATE.replace(/@PREFIX@/g, prefix).replace(/@USER@/g, user).replace(/@CONFIG_DIR@/g, configDir);

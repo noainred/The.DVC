@@ -63,7 +63,9 @@ test('catalog: 함수 제거·힌트 부여, 파일 내용 읽기 프리셋(cat 
   const c = catalog();
   assert.ok(c.length > 20);
   for (const p of c) { assert.equal(typeof p.argv, 'undefined'); for (const x of p.params || []) if (x.type !== 'shell') assert.ok(x.hint); }
-  assert.ok(!c.some((p) => /^(reboot|poweroff|shutdown|halt)/.test(p.id)));
+  // v2.418: reboot 프리셋은 존재하되 엣지 RMA_ALLOW_REBOOT opt-in(rebootPolicy) 으로만 실행된다
+  assert.ok(c.find((p) => p.id === 'reboot')?.rebootPolicy === true);
+  assert.ok(!c.some((p) => /^(poweroff|shutdown|halt)/.test(p.id)));
   assert.ok(!c.some((p) => (p.params || []).some((x) => x.type === 'path') && p.id !== 'ls'));
   assert.equal(describeCommand('ping', { host: 'h', count: 4 }), 'ping(host=h, count=4)');
 });

@@ -43,8 +43,13 @@ export function deployInputIssue(opts = {}) {
   if (opts.agentName && !RE_ENV_VALUE.test(String(opts.agentName))) return 'AGENT_NAME 형식 오류';
   if (opts.centralUrl && !RE_URL.test(String(opts.centralUrl).replace(/\/+$/, ''))) return 'CENTRAL_URL 형식 오류(http(s)://host[:port])';
   if (opts.centralToken && !RE_ENV_VALUE.test(String(opts.centralToken))) return '토큰 형식 오류';
+  for (const u of listOf(opts.serviceUnits)) if (!/^[A-Za-z0-9][A-Za-z0-9@._-]{0,79}$/.test(u)) return `서비스 유닛 이름 형식 오류: ${u.slice(0, 30)}`;
+  for (const r of listOf(opts.fileRoots)) if (!/^\/[A-Za-z0-9._/-]{0,200}$/.test(r)) return `파일 허용 루트 형식 오류: ${r.slice(0, 30)}`;
+  for (const k of ['enabledCommands', 'enabledTests']) for (const id of listOf(opts[k])) if (!/^[A-Za-z0-9*._-]{1,40}$/.test(id)) return `${k} 항목 형식 오류: ${id.slice(0, 30)}`;
+  if (opts.comment && !RE_ENV_VALUE.test(String(opts.comment))) return '코멘트에 허용되지 않는 문자가 있습니다(공백·따옴표 불가).';
   return null;
 }
+const listOf = (v) => (Array.isArray(v) ? v : String(v || '').split(/[,\s]+/)).map((x) => String(x).trim()).filter(Boolean);
 
 /** 설치 경로 역추적 — { prefix, user, configDir, envFile } 또는 { error }. 원격 출력은 재검증한다. */
 export async function resolveInstall(exec) {
@@ -92,13 +97,22 @@ export async function deployRma(target, opts = {}) {
       if (opts.password != null && opts.password !== '') pairs.push(['RMA_PASSWORD', String(opts.password)]);
       if (opts.clearPassword) pairs.push(['RMA_PASSWORD', '']);
       pairs.push(['RMA_ALLOW_CUSTOM', opts.allowCustom ? 'true' : 'false']);
+      // v2.418 정책 키 — 지정된 것만 기록(비우면 기존 값 유지). 목록은 쉼표 구분.
+      const units = listOf(opts.serviceUnits), roots = listOf(opts.fileRoots), ec = listOf(opts.enabledCommands), et = listOf(opts.enabledTests);
+      if (opts.serviceUnits != null) pairs.push(['RMA_SERVICE_UNITS', units.join(',')]);
+      if (opts.allowReboot != null) pairs.push(['RMA_ALLOW_REBOOT', opts.allowReboot ? 'true' : 'false']);
+      if (roots.length) pairs.push(['RMA_FILE_ROOTS', roots.join(',')]);
+      if (opts.enabledCommands != null) pairs.push(['RMA_ENABLED_COMMANDS', ec.join(',')]);
+      if (opts.enabledTests != null) pairs.push(['RMA_ENABLED_TESTS', et.join(',')]);
+      if (opts.remoteManage != null) pairs.push(['RMA_REMOTE_MANAGE', opts.remoteManage ? 'true' : 'false']);
+      if (opts.comment) pairs.push(['RMA_COMMENT', String(opts.comment)]);
       if (opts.agentName) pairs.push(['AGENT_NAME', String(opts.agentName)]);
       if (opts.centralUrl) pairs.push(['CENTRAL_URL', String(opts.centralUrl).replace(/\/+$/, '')]);
       if (opts.centralToken) pairs.push(['CENTRAL_TOKEN', String(opts.centralToken)]);
       await upsertEnv(exec, inst.envFile, pairs);
       // 3) sudoers(포탈 재시작 프리셋) — 문법 검증 실패 시 설치하지 않는다(sudo 전체가 깨지는 사고 방지).
       const sudoTmp = '/tmp/vmware-portal-rma.sudoers';
-      await writeFile(sudoTmp, RMA_SUDOERS(inst.user), 0o440);
+      await writeFile(sudoTmp, RMA_SUDOERS(inst.user, { units: listOf(opts.serviceUnits), reboot: !!opts.allowReboot }), 0o440);
       const vis = await exec(`visudo -cf ${sudoTmp} >/dev/null 2>&1 && install -m 0440 ${sudoTmp} /etc/sudoers.d/vmware-portal-rma && echo ok || echo fail; rm -f ${sudoTmp}`);
       const sudoers = vis.stdout.trim() === 'ok';
       // 4) 인스턴스별 env + 기동

@@ -48,6 +48,10 @@ server/config/sanswitch-latest.json
 server/config/rma-agents.json
 server/config/rma-settings.json
 server/config/rma-history.db*
+server/config/rma-schedules.json
+server/config/rma-tests.db*
+server/config/rma-schedule-*.json
+server/config/rma-outbox-*.json
 server/config/sanswitch-perf-settings.json
 server/config/sanswitch-perf.db
 server/config/storage-history.db

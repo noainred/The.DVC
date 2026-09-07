@@ -436,6 +436,14 @@ HostMonitor 의 RMA(Remote Monitoring Agent) 를 참고한 **엣지 별도 프�
 - **엣지 설정(portal.env)**: `RMA_ENABLED=true` `RMA_INSTANCES=default`(공백 구분) `RMA_PASSWORD=…`
   `RMA_ALLOW_CUSTOM=false` `RMA_LONGPOLL_MS=20000` `RMA_MAX_OUTPUT=262144`. 인스턴스별 `rma-<이름>.env` 에
   `RMA_INSTANCE`/`RMA_PRIORITY`. 수동 기동: `systemctl enable --now vmware-portal-rma@default`.
+- **점검(Tests, v2.418)**: 중앙 '점검 스케줄' 탭에서 법인별 점검(Ping/Trace/TCP/DNS/NTP/URL/인증서 만료/디스크/CPU/메모리/부하/
+  프로세스/서비스/인터페이스/파일 존재·크기·갱신·개수/텍스트 로그/외부 스크립트/RMA 자체 상태)을 주기·인스턴스와 함께 등록하면
+  RMA 가 현지에서 실행하고 결과를 폴링에 동봉한다(중앙 불통 시 outbox 보관 후 재전송). '점검 상태' 탭에 최신 상태·24h 이력,
+  연속 실패 시 알림 채널 발화·복구 해소. 미지정 항목은 온라인 인스턴스에 자동 분산(중복 실행 없음).
+- **액션(v2.418)**: 서비스 start/stop/restart(`RMA_SERVICE_UNITS` 허용 목록 → sudoers 자동) · kill · 재부팅(`RMA_ALLOW_REBOOT`) ·
+  RMA 재시작 · 로그 이벤트 · HTTP 요청 · TCP/UDP 전송 · Syslog. 허용/차단 목록 `RMA_ENABLED_COMMANDS`/`RMA_DISABLED_COMMANDS`·
+  `RMA_ENABLED_TESTS`/`RMA_DISABLED_TESTS`(엣지가 최종 판정). 접속 허용 IP·코멘트·원격 관리(`RMA_REMOTE_MANAGE`, 축소만)·
+  감사 로그(`RMA_AUDIT_LOG`/`RMA_FAILURE_LOG`)·무연결 알림 명령(`RMA_OFFLINE_*`, `RMA_RESTORE_CMD`).
 - **이력**: 실행 이력은 중앙 `rma-history.db`(sqlite, `RMA_HISTORY_DAYS` 기본 90일, 행당 출력 64KB)에 남는다(v2.417).
   node:sqlite 가 없는 환경은 메모리 링(300건)으로 폴백.
 - **관련 튜닝(v2.417)**: `STORAGE_DEVICE_TIMEOUT_MS`(스토리지 장비당 수집 타임아웃, 기본 180000) ·

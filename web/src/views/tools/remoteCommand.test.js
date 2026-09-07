@@ -2,7 +2,7 @@
  * remoteCommand 회귀 테스트(v2.416) — 원격 명령(RMA) 화면의 판정·문구.
  */
 import { describe, it, expect } from 'vitest';
-import { ago, durationText, uptimeText, agentStatus, resultSummary, defaultArgs, argsIssue, groupCatalog, modeLabel, targetHint } from './remoteCommand.js';
+import { ago, durationText, uptimeText, agentStatus, resultSummary, defaultArgs, argsIssue, groupCatalog, modeLabel, targetHint, statusTone, statusLabel } from './remoteCommand.js';
 
 describe('agentStatus', () => {
   it('미배포(하트비트 없음)·오프라인·온라인을 구분한다', () => {
@@ -66,5 +66,13 @@ describe('포맷 헬퍼', () => {
     expect(groupCatalog([{ id: 'a', group: 'X' }, { id: 'b', group: 'Y' }, { id: 'c', group: 'X' }])).toEqual([{ group: 'X', items: [{ id: 'a', group: 'X' }, { id: 'c', group: 'X' }] }, { group: 'Y', items: [{ id: 'b', group: 'Y' }] }]);
     expect(modeLabel('balance', [{ id: 'balance', label: '부하 분산' }])).toBe('부하 분산');
     expect(modeLabel('', [])).toBe('전역 기본');
+  });
+});
+
+describe('v2.418 점검 상태 헬퍼', () => {
+  it('statusTone / statusLabel', () => {
+    const T = { ok: 'g', warn: 'y', bad: 'r', muted: 'm' };
+    expect(statusTone('ok', T)).toBe('g'); expect(statusTone('warn', T)).toBe('y'); expect(statusTone('bad', T)).toBe('r'); expect(statusTone('unknown', T)).toBe('m');
+    expect(statusLabel('ok')).toBe('정상'); expect(statusLabel('bad')).toBe('실패'); expect(statusLabel(undefined)).toBe('—');
   });
 });

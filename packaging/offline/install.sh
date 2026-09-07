@@ -186,7 +186,15 @@ if [[ -f "$SCRIPT_DIR/vmware-portal-rma@.service" ]]; then
       "$SCRIPT_DIR/vmware-portal-rma@.service" > "/etc/systemd/system/vmware-portal-rma@.service"
   # sudoers: 포탈 서비스 재시작 프리셋(commands.js portal-restart)만 허용 — visudo 검증 실패 시 설치하지 않음.
   SUDO_TMP="$(mktemp)"
-  printf '# vmware-portal RMA: 포탈 서비스 재시작만 허용(commands.js portal-restart)\n%s ALL=(root) NOPASSWD: /usr/bin/systemctl restart vmware-portal.service\n' "$SERVICE_USER" > "$SUDO_TMP"
+  printf '# vmware-portal RMA: 프리셋이 요구하는 systemctl 명령만 허용(commands.js sudo:true)\n%s ALL=(root) NOPASSWD: /usr/bin/systemctl restart vmware-portal.service\n' "$SERVICE_USER" > "$SUDO_TMP"
+  # v2.418: portal.env 의 RMA_SERVICE_UNITS(쉼표/공백 구분)·RMA_ALLOW_REBOOT 로 start/stop/restart·reboot 줄 추가
+  RMA_UNITS="$(grep -E '^RMA_SERVICE_UNITS=' "$CONFIG_DIR/portal.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr ',' ' ')"
+  for u in $RMA_UNITS; do
+    if [[ "$u" =~ ^[A-Za-z0-9][A-Za-z0-9@._-]{0,79}$ ]]; then
+      for verb in start stop restart; do printf '%s ALL=(root) NOPASSWD: /usr/bin/systemctl %s %s.service\n' "$SERVICE_USER" "$verb" "$u" >> "$SUDO_TMP"; done
+    fi
+  done
+  if grep -qE '^RMA_ALLOW_REBOOT=true' "$CONFIG_DIR/portal.env" 2>/dev/null; then printf '%s ALL=(root) NOPASSWD: /usr/bin/systemctl reboot\n' "$SERVICE_USER" >> "$SUDO_TMP"; fi
   if visudo -cf "$SUDO_TMP" >/dev/null 2>&1; then install -m 0440 "$SUDO_TMP" /etc/sudoers.d/vmware-portal-rma; fi
   rm -f "$SUDO_TMP"
 fi
