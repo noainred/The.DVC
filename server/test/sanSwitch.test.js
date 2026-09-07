@@ -504,3 +504,26 @@ test('storageSeriesMulti: 대상이 없으면 빈 결과(전체 스캔으로 흐
   assert.deepEqual(r.series, []);
   assert.deepEqual(r.buckets, []);
 });
+
+// ── v2.412: 명령 가용성 조사(경로 추측 제거) ──────────────────────────────────
+test('수집기 소스: 경로를 추측하지 않고 장비에 직접 묻는다(실장비 진단 반영)', () => {
+  const src = fs.readFileSync(new URL('../src/sanswitch/collectors/fosSsh.js', import.meta.url), 'utf8');
+  // v2.411 의 추측 경로 목록은 실장비에서 틀린 것으로 확인됐다(실제 PATH 는 /fabos/link_bin 계열).
+  assert.ok(!/FOS_DIRS/.test(src), '경로 추측 목록을 되살리지 말 것 — 장비의 $PATH 를 읽어야 한다');
+  assert.ok(!src.includes("'/fabos/cliexec'"), '실장비에 없는 경로를 후보로 넣지 말 것');
+  assert.ok(src.includes('probeCommands'), '세션 시작에 명령 가용성을 조사해야 한다');
+  assert.ok(src.includes('echo $PATH'), '검색 경로는 장비가 알려준 값을 쓴다');
+  // 장비가 준 경로 문자열이 셸 조립에 그대로 들어가므로 형식 검증이 반드시 있어야 한다.
+  assert.ok(/SAFE_DIR\s*=\s*\//.test(src), '장비가 준 경로는 절대경로 화이트리스트로 검증해야 한다');
+});
+
+test('명령 가용성 조사: 경로 화이트리스트가 주입 문자열을 거른다', () => {
+  // fosSsh.js 의 SAFE_DIR 와 같은 규칙 — 셸에 그대로 들어가는 값이라 회귀로 고정한다.
+  const SAFE_DIR = /^\/[A-Za-z0-9._/-]{1,200}$/;
+  for (const ok of ['/fabos/link_bin', '/usr/bin', '/fabos/link_abin', '/bin']) {
+    assert.ok(SAFE_DIR.test(ok), `정상 경로가 막히면 안 된다: ${ok}`);
+  }
+  for (const bad of ['/tmp; rm -rf /', '/a$(id)', '/a`id`', '/a|b', '/a b', 'relative/path', '', '/a&&b']) {
+    assert.ok(!SAFE_DIR.test(bad), `주입 가능한 값이 통과하면 안 된다: ${JSON.stringify(bad)}`);
+  }
+});

@@ -924,7 +924,7 @@ function PortDetail({ detail, setDetail, portFilter, setPortFilter, portQ, setPo
 
           {Object.entries(d.sections || {}).filter(([, v]) => v && v !== 'ok').length > 0 && (
             <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>
-              미수집 항목 — 이 스위치에서 해당 명령을 실행하지 못했습니다(포트 현황에는 영향 없음):
+              미수집 항목 — <b>포트 현황·사용량에는 영향이 없습니다.</b> 이 스위치가 그 명령을 제공하지 않거나 실행에 실패했습니다:
               <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
                 {Object.entries(d.sections).filter(([, v]) => v && v !== 'ok').map(([k, v]) => (
                   <li key={k} style={ELLIPSIS} title={String(v)}><b>{k}</b> — {String(v)}</li>
