@@ -88,6 +88,9 @@ export async function pollSanSwitchOnce() {
 export async function collectDeviceNow(id) {
   const dev = devicesForThisNode().find((d) => d.id === id) || getDeviceWithSecret(id);
   if (!dev) throw new Error('이 노드가 수집하는 장비가 아닙니다.');
+  // 폴러와 가드를 공유한다(CLAUDE.md '수동 실행 API 도 같은 가드') — 같은 스위치에 SSH 세션이 겹치면
+  // in-flight 상태가 먼저 끝난 쪽에 지워지고 처리량 델타 간격이 흐트러진다.
+  if (_inFlight.has(dev.id)) return false;
   await collectOne(dev);
   return true;
 }

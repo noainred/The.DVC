@@ -217,6 +217,9 @@ export function parseSfpShow(text) {
   const out = {};
   let cur = null;
   const num = (s) => { const m = String(s).match(/-?[\d.]+/); return m ? Number(m[0]) : null; };
+  // 광 레벨: '-inf dBm (0.0 uW)' 처럼 무광 포트는 dBm 자리가 -inf 다. 첫 숫자 매치(num)는 -inf 를
+  // 건너뛰고 괄호 안 0.0 을 잡아 '0 dBm'(완벽한 광레벨)으로 오독한다 → 무광은 null(v2.416 리뷰 확정).
+  const dbm = (s) => { const t = String(s).trim(); if (/^-?inf\b/i.test(t) || /^n\/?a\b/i.test(t)) return null; const m = t.match(/^-?[\d.]+/); return m ? Number(m[0]) : num(t); };
   for (const raw of lines) {
     const l = raw.trim();
     let m;
@@ -229,8 +232,8 @@ export function parseSfpShow(text) {
     if ((m = l.match(/^Temperature:\s*(.+)$/i))) cur.tempC = num(m[1]);
     else if ((m = l.match(/^Voltage:\s*(.+)$/i))) cur.voltageMv = num(m[1]);
     else if ((m = l.match(/^Current:\s*(.+)$/i))) cur.currentMa = num(m[1]);
-    else if ((m = l.match(/^RX\s*Power:\s*(.+)$/i))) cur.rxPowerDbm = num(m[1]);
-    else if ((m = l.match(/^TX\s*Power:\s*(.+)$/i))) cur.txPowerDbm = num(m[1]);
+    else if ((m = l.match(/^RX\s*Power:\s*(.+)$/i))) cur.rxPowerDbm = dbm(m[1]);
+    else if ((m = l.match(/^TX\s*Power:\s*(.+)$/i))) cur.txPowerDbm = dbm(m[1]);
     else if ((m = l.match(/^Vendor\s*Name:\s*(.+)$/i))) cur.vendor = m[1].trim();
     else if ((m = l.match(/^Vendor\s*PN:\s*(.+)$/i))) cur.partNumber = m[1].trim();
     else if ((m = l.match(/^Serial\s*No:\s*(.+)$/i))) cur.serial = m[1].trim();
@@ -348,8 +351,15 @@ export function parsePortPerfShow(text) {
     }
     i = j;
   }
-  const last = samples[samples.length - 1] || { ports: {}, total: null };
-  return { ...last, samples: samples.length };
+  // 캡처가 값 줄 중간에서 끊기면 마지막 샘플이 부분(포트 수 부족)일 수 있다 — 직전 완전 샘플보다
+  // 포트 수가 적으면 마지막 것을 버리고 직전 샘플을 쓴다(절단 토큰이 '최신 값'으로 저장되는 것 방지).
+  let pick = samples.length - 1;
+  if (pick >= 1) {
+    const n = (s) => Object.keys(s.ports).length;
+    if (n(samples[pick]) < n(samples[pick - 1])) pick -= 1;
+  }
+  const last = samples[pick] || { ports: {}, total: null };
+  return { ...last, samples: samples.length, partialDropped: pick < samples.length - 1 };
 }
 
 /** fanshow / psshow → {ok, total}. 문구가 모델마다 달라 'Ok/Faulty' 단어 수로 센다. */

@@ -124,7 +124,9 @@ export function cellValue(key, row) {
   const s = row?.snap || null;
   const ex = s?.extra || {};
   const cap = s?.capacity || null;
-  const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
+  // ⚠ null/'' 을 먼저 걸러야 한다 — Number(null)===0 이 유한값이라 미수집이 '0%'·'0 TB' 로 둔갑한다
+  //   (모듈 머리말 규칙 위반 사례 — v2.416 리뷰 확정).
+  const num = (v) => (v == null || v === '' ? null : Number.isFinite(Number(v)) ? Number(v) : null);
 
   switch (key) {
     case 'usage': return num(cap?.pct);

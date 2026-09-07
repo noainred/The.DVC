@@ -11,6 +11,29 @@ import { presetsFor, msLabel, effectiveFor, sourceOf, lagText, toBody } from './
  * 그래서 여기서 저장한 값은 엣지가 **다음 설정 pull 때 가져가서** 적용한다. 화면에서도 그
  * 지연을 숨기지 않고 표시한다(즉시 적용처럼 보이면 '설정했는데 안 바뀐다'는 오해가 생긴다).
  */
+// 셀 컴포넌트는 **렌더 함수 밖**에 둔다 — 안에서 정의하면 매 렌더마다 새 타입이 되어 <select> 가
+// 언마운트/재마운트되고 값을 고른 직후 포커스를 잃는다(v2.416 리뷰 확정).
+function Cell({ target, form, s, globalForm, setCell }) {
+  const inheritedFrom = target === '__global__' ? null : globalForm[s.key];
+  const cur = form[s.key] ?? '';
+  const presets = presetsFor(s.min);
+  // 파일 직접 편집 등으로 프리셋에 없는 값이 들어오면 옵션을 하나 만들어 보여준다 — 없으면 브라우저가
+  // 첫 옵션('미지정')을 표시해 '미지정'으로 읽힌다(상태에는 값이 남아 저장 시 유지되는데 화면만 다름).
+  const extra = cur && !presets.some((p) => String(p.ms) === String(cur)) ? [{ ms: Number(cur), label: `${msLabel(Number(cur))} (직접 지정)` }] : [];
+  return (
+    <select className="input" style={{ minWidth: 104 }} value={cur}
+      onChange={(e) => setCell(target, s.key, e.target.value)}
+      title={`${s.label}\n하한 ${msLabel(s.min)} · 기본 ${msLabel(s.def)}\n${s.hint}`}>
+      <option value="">
+        {target === '__global__'
+          ? '미지정(엣지 로컬)'
+          : `상속(${inheritedFrom ? msLabel(Number(inheritedFrom)) : '엣지 로컬'})`}
+      </option>
+      {[...extra, ...presets].map((p) => <option key={p.ms} value={String(p.ms)}>{p.label}</option>)}
+    </select>
+  );
+}
+
 export default function StorageIntervals() {
   // ⚠ 훅은 전부 조기 return 위에 — 조기 반환 뒤에 훅을 추가하면 React #310 으로 화면이
   //   통째로 크래시한다(v2.202 실제 사고, CLAUDE.md 프론트 회귀 방지).
@@ -62,21 +85,6 @@ export default function StorageIntervals() {
     finally { setBusy(false); }
   };
 
-  const Cell = ({ target, form, s }) => {
-    const inheritedFrom = target === '__global__' ? null : globalForm[s.key];
-    return (
-      <select className="input" style={{ minWidth: 104 }} value={form[s.key] ?? ''}
-        onChange={(e) => setCell(target, s.key, e.target.value)}
-        title={`${s.label}\n하한 ${msLabel(s.min)} · 기본 ${msLabel(s.def)}\n${s.hint}`}>
-        <option value="">
-          {target === '__global__'
-            ? '미지정(엣지 로컬)'
-            : `상속(${inheritedFrom ? msLabel(Number(inheritedFrom)) : '엣지 로컬'})`}
-        </option>
-        {presetsFor(s.min).map((p) => <option key={p.ms} value={String(p.ms)}>{p.label}</option>)}
-      </select>
-    );
-  };
 
   return (
     <>
@@ -107,7 +115,7 @@ export default function StorageIntervals() {
           <tbody>
             <tr style={{ background: 'var(--panel-2, rgba(127,127,127,.08))' }}>
               <td><b>전역 기본</b><div className="muted" style={{ fontSize: 11 }}>모든 엣지 + 중앙에 적용(개별 지정이 우선)</div></td>
-              {spec.map((s) => <td key={s.key}><Cell target="__global__" form={globalForm} s={s} /></td>)}
+              {spec.map((s) => <td key={s.key}><Cell target="__global__" form={globalForm} s={s} globalForm={globalForm} setCell={setCell} /></td>)}
               <td className="muted">{lagText(effectiveFor(globalForm, {}), envDefaults)}</td>
             </tr>
             {targets.map((t) => {
@@ -118,7 +126,7 @@ export default function StorageIntervals() {
                   <td><b>{t.label}</b><div className="muted" style={{ fontSize: 11 }}>{t.hint}</div></td>
                   {spec.map((s) => (
                     <td key={s.key}>
-                      <Cell target={t.key} form={form} s={s} />
+                      <Cell target={t.key} form={form} s={s} globalForm={globalForm} setCell={setCell} />
                       <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
                         {sourceOf(s.key, globalForm, form) === 'inherit' ? '엣지 로컬' : `→ ${msLabel(Number(eff[s.key]))}`}
                       </div>

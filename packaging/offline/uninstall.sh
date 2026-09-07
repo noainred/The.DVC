@@ -24,6 +24,11 @@ done
 echo "==> 서비스 중지/비활성화: $SERVICE_NAME"
 systemctl disable --now "$SERVICE_NAME" 2>/dev/null || true
 rm -f "/etc/systemd/system/${SERVICE_NAME}.service"
+# RMA 인스턴스(vmware-portal-rma@*) 전부 정지 + 템플릿·sudoers 제거
+for u in $(systemctl list-units --all --plain --no-legend 'vmware-portal-rma@*' 2>/dev/null | awk '{print $1}'); do
+  systemctl disable --now "$u" 2>/dev/null || true
+done
+rm -f /etc/systemd/system/vmware-portal-rma@.service /etc/sudoers.d/vmware-portal-rma
 systemctl daemon-reload
 
 echo "==> 앱/런타임 제거: $PREFIX"

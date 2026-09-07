@@ -176,9 +176,40 @@ sed -e "s|@PREFIX@|$PREFIX|g" \
     -e "s|@CONFIG_DIR@|$CONFIG_DIR|g" \
     "$SCRIPT_DIR/vmware-portal.service" > "/etc/systemd/system/${SERVICE_NAME}.service"
 
+# 6-0) RMA(원격 명령 에이전트, v2.416) 템플릿 유닛 — 항상 설치하되 인스턴스는 portal.env 의
+# RMA_ENABLED=true 일 때만 기동한다(기본 off — 각 법인 담당자가 명시적으로 켠다).
+# 인스턴스 이름은 RMA_INSTANCES(공백 구분, 기본 'default'). 여러 개면 한 서버에 여러 프로세스.
+if [[ -f "$SCRIPT_DIR/vmware-portal-rma@.service" ]]; then
+  sed -e "s|@PREFIX@|$PREFIX|g" \
+      -e "s|@USER@|$SERVICE_USER|g" \
+      -e "s|@CONFIG_DIR@|$CONFIG_DIR|g" \
+      "$SCRIPT_DIR/vmware-portal-rma@.service" > "/etc/systemd/system/vmware-portal-rma@.service"
+  # sudoers: 포탈 서비스 재시작 프리셋(commands.js portal-restart)만 허용 — visudo 검증 실패 시 설치하지 않음.
+  SUDO_TMP="$(mktemp)"
+  printf '# vmware-portal RMA: 포탈 서비스 재시작만 허용(commands.js portal-restart)\n%s ALL=(root) NOPASSWD: /usr/bin/systemctl restart vmware-portal.service\n' "$SERVICE_USER" > "$SUDO_TMP"
+  if visudo -cf "$SUDO_TMP" >/dev/null 2>&1; then install -m 0440 "$SUDO_TMP" /etc/sudoers.d/vmware-portal-rma; fi
+  rm -f "$SUDO_TMP"
+fi
+
 systemctl daemon-reload
 systemctl enable "$SERVICE_NAME" >/dev/null 2>&1 || true
 systemctl restart "$SERVICE_NAME"
+
+# 6-0-1) RMA 인스턴스 기동(RMA_ENABLED=true 인 경우)
+if grep -qE '^RMA_ENABLED=true' "$CONFIG_DIR/portal.env" 2>/dev/null; then
+  RMA_INSTANCES="$(grep -E '^RMA_INSTANCES=' "$CONFIG_DIR/portal.env" | tail -1 | cut -d= -f2-)"
+  for inst in ${RMA_INSTANCES:-default}; do
+    if [[ "$inst" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]]; then
+      [[ -f "$CONFIG_DIR/rma-$inst.env" ]] || printf 'RMA_INSTANCE=%s\nRMA_PRIORITY=100\n' "$inst" > "$CONFIG_DIR/rma-$inst.env"
+      chown "$SERVICE_USER:$SERVICE_USER" "$CONFIG_DIR/rma-$inst.env" 2>/dev/null || true; chmod 0640 "$CONFIG_DIR/rma-$inst.env"
+      systemctl enable "vmware-portal-rma@$inst" >/dev/null 2>&1 || true
+      systemctl restart "vmware-portal-rma@$inst" 2>&1 || true
+      echo "==> RMA 인스턴스 기동: vmware-portal-rma@$inst"
+    else
+      echo "⚠ RMA_INSTANCES 항목 '$inst' 은 이름 형식(영숫자·._-)에 맞지 않아 건너뜁니다."
+    fi
+  done
+fi
 
 # 6-1) OTP 콘솔 등록 도구 바로가기 -------------------------------------------
 # admin/operator 는 OTP 전용이라 첫 관리자 등록·잠금 복구에 이 도구가 필요하다.
@@ -206,6 +237,8 @@ echo "    URL    : http://<이 서버 IP>:${PORT}"
 echo "    상태   : systemctl status ${SERVICE_NAME}"
 echo "    로그   : journalctl -u ${SERVICE_NAME} -f"
 echo "    설정   : ${CONFIG_DIR}/portal.env  (수정 후 systemctl restart ${SERVICE_NAME})"
+echo "    RMA    : portal.env 에 RMA_ENABLED=true (+RMA_PASSWORD) 후 install.sh 재실행 또는"
+echo "             systemctl enable --now vmware-portal-rma@default  (원격 명령 에이전트, 엣지 전용)"
 echo ""
 echo "  ── 최초 로그인 (admin/operator 는 OTP 전용) ─────────────────────────"
 echo "    1) 임의 생성된 최초 비밀번호 확인:"

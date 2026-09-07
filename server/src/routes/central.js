@@ -40,6 +40,7 @@ import { takeLogQueries, setLogQueryResult, vcenterOfReq } from '../central/logQ
 import { specToRange } from '../ipam/rangePolicies.js';
 import { ipToNum } from '../ipam/ledger.js';
 import { takeCaptureJobs, setCaptureResult, captureAgentOfReq } from '../central/captureJobs.js';
+import { takeJobsWait as takeRmaJobsWait, setJobResult as setRmaJobResult, jobAgentOf as rmaJobAgentOf, noteHeartbeat as noteRmaHeartbeat } from '../rma/jobs.js';
 import { takeBmstorJobs, ackBmstorJob, bmstorAgentOfReq } from '../bmstor/jobs.js';
 import { applyBmstorResults } from '../bmstor/poller.js';
 import { recordCapture } from '../net/captureHistory.js';
@@ -552,13 +553,63 @@ centralRouter.get('/sanswitch-config', async (req, res) => {
 
 // POST /api/central/sanswitch-data — 엣지 수집 스냅샷 수신. 저장 키는 body.agent 가 아니라
 // **인증된 agent**(개별 토큰 바인딩)만 쓴다. 공유 토큰(레거시)은 body.agent 신뢰(기존 축과 동일).
+/**
+ * RMA 원격 명령(v2.416) — 엣지의 별도 프로세스(rma/agent.js)가 자기 잡을 롱폴 인출(claim)하고
+ * 결과를 회신(ack)한다. **개별 토큰 전용**(svcmon-report 3규약: agent 모드 필수 · 키는
+ * req.centralAuth.agent 만 · X-Agent-Name 이중 방어). 공유 CENTRAL_TOKEN 으로는 어느 엣지가
+ * 명령을 가져가는지 신뢰할 수 없고, 원격 명령은 자격증명보다 더 큰 권한이라 예외를 두지 않는다.
+ * Body: { agent, instance, info:{hostname,version,os,pid,uptimeSec,priority,allowCustom,signed,busy}, wait }
+ * instance = 같은 법인의 여러 RMA 프로세스 구별자(분배는 rma/jobs.js). 형식 검증 후 그대로 키로 쓴다.
+ */
+centralRouter.post('/rma-poll', async (req, res) => {
+  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+  if (req.centralAuth.mode !== 'agent') {
+    return res.status(403).json({ ok: false, reason: '원격 명령(RMA)은 엣지별 개별 토큰만 허용합니다 — 설정 › 엣지 토큰에서 이 엣지의 토큰을 발급해 portal.env 의 EDGE_TOKEN/CENTRAL_TOKEN 에 넣으세요.' });
+  }
+  const agent = req.centralAuth.agent;
+  const b = req.body || {};
+  const ip = String(req.socket?.remoteAddress || '').replace(/^::ffff:/, '');
+  const instance = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(String(b.instance || '')) ? String(b.instance) : 'default';
+  noteRmaHeartbeat(agent, instance, b.info || {}, { ip });
+  const wait = Math.min(55_000, Math.max(0, Number(b.wait) || 0));
+  const jobs = await takeRmaJobsWait(agent, instance, wait);
+  res.json({ ok: true, jobs });
+});
+// Body: { reqId, result }
+centralRouter.post('/rma-result', (req, res) => {
+  if (!centralEnabled()) return res.status(404).json({ ok: false });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+  if (req.centralAuth.mode !== 'agent') return res.status(403).json({ ok: false, reason: '원격 명령(RMA)은 엣지별 개별 토큰만 허용합니다.' });
+  const b = req.body || {};
+  if (!b.reqId) return res.status(400).json({ ok: false, reason: 'reqId가 필요합니다.' });
+  const owner = rmaJobAgentOf(String(b.reqId));
+  if (!owner) return res.json({ ok: true, stale: true });
+  if (owner.toLowerCase() !== String(req.centralAuth.agent).toLowerCase()) return res.status(403).json({ ok: false, reason: '이 reqId 는 요청 에이전트의 잡이 아닙니다.' });
+  const stored = setRmaJobResult(String(b.reqId), b.result);
+  res.json({ ok: true, stale: !stored });
+});
+
 centralRouter.post('/sanswitch-data', async (req, res) => {
   if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
   if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
   const agent = req.centralAuth?.mode === 'agent' ? req.centralAuth.agent : String(req.body?.agent || '').trim();
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
   const { saveEdgeSanSwitch } = await import('../central/sanSwitchEdge.js');
-  const saved = saveEdgeSanSwitch(agent, req.body?.devices || []);
+  // 소유권 필터(v2.416 감사 L-1): 개별 토큰 엣지는 **자기에게 위임된 deviceId** 만 올릴 수 있다 — 남의
+  // 스위치 id 로 '정상' 스냅샷을 밀어 실제 장애를 가리는 위조 차단. collectedAt 도 수신 시각으로 clamp
+  // (미래 시각으로 '최신 우선' 병합을 항상 이기는 것 방지). 공유 토큰(레거시)은 기존 신뢰 유지.
+  let devices = Array.isArray(req.body?.devices) ? req.body.devices : [];
+  const now = Date.now();
+  devices = devices.map((d) => (d && typeof d === 'object' ? { ...d, collectedAt: Math.min(Number(d.collectedAt) || now, now) } : d));
+  if (req.centralAuth.mode === 'agent') {
+    const { devicesForAgent } = await import('../sanswitch/registry.js');
+    const owned = new Set(devicesForAgent(agent).map((d) => d.id));
+    const before = devices.length;
+    devices = devices.filter((d) => d && owned.has(d.deviceId));
+    if (before !== devices.length) console.warn(`[central] sanswitch-data: ${agent} 미위임 deviceId ${before - devices.length}건 드롭(위조 방지)`);
+  }
+  const saved = saveEdgeSanSwitch(agent, devices);
   res.json({ ok: true, saved });
 });
 

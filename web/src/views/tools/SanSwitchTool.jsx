@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
 import { fetchJson, postJson, delJson } from '../../api.js';
 import { Loading, ErrorBox, Kpi, UsageCell, Modal, SearchBox } from '../../components/ui.jsx';
@@ -52,6 +52,7 @@ export default function SanSwitchTool() {
   const [msg, setMsg] = useState(null);
   const [test, setTest] = useState(null);
   const [detail, setDetail] = useState(null);      // 포트 상세 모달 { device, ports, ... }
+  const detailSeq = useRef(0);
   const [dcPerf, setDcPerf] = useState(null);      // 법인 단위 스토리지 사용량 분석 모달
   const [portFilter, setPortFilter] = useState('all');
   const [portQ, setPortQ] = useState('');
@@ -87,7 +88,9 @@ export default function SanSwitchTool() {
       .some((v) => String(v || '').toLowerCase().includes(s));
   });
   const shown = searched.filter((r) => dcSel.size === 0 || dcSel.has(dcName(r.datacenterId)));
-  const dcChips = [...new Set(searched.map((r) => dcName(r.datacenterId)))].sort((a, b) => a.localeCompare(b));
+  // 칩은 검색 결과가 아니라 **등록 전체**에서 파생한다 — 검색어로 어떤 법인이 걸러지면 그 법인의
+  // 활성 칩이 화면에서 사라져 해제할 수단이 없어진다(v2.416 리뷰 확정).
+  const dcChips = [...new Set(rows.map((r) => dcName(r.datacenterId)))].sort((a, b) => a.localeCompare(b));
   const agg = aggregate(shown);
 
   if (error && !data) return <ErrorBox message={error} />;   // 데이터 보유 중 폴링 오류로 화면을 갈아치우지 않음
@@ -123,10 +126,13 @@ export default function SanSwitchTool() {
     finally { setBusy(false); }
   };
   const openDetail = async (r) => {
+    // 응답 순서 가드 — 늦게 온 이전 요청이 현재 상세를 덮거나, 닫은 모달을 다시 여는 것 방지(고RTT).
+    const seq = ++detailSeq.current;
     setDetail({ loading: true, device: r }); setPortFilter('all'); setPortQ(''); setInfoOpen(false); setTab('ports'); setSort({ key: 'index', dir: 'asc' });
-    try { setDetail({ device: r, ...(await fetchJson(`/tools/sanswitch/devices/${r.id}/ports`)) }); }
-    catch (e) { setDetail({ device: r, error: e.message }); }
+    try { const d = await fetchJson(`/tools/sanswitch/devices/${r.id}/ports`); if (detailSeq.current === seq) setDetail({ device: r, ...d }); }
+    catch (e) { if (detailSeq.current === seq) setDetail({ device: r, error: e.message }); }
   };
+  const closeDetail = () => { detailSeq.current++; setDetail(null); };
 
   return (
     <>
@@ -235,7 +241,7 @@ export default function SanSwitchTool() {
               );
             })}
             {!shown.length && <tr><td colSpan={13} className="muted" style={{ textAlign: 'center', padding: 24 }}>
-              등록된 SAN 스위치가 없습니다. 오른쪽 위 '+ 스위치 등록'으로 추가하세요.
+              {rows.length ? '검색어/법인 필터에 맞는 스위치가 없습니다 — 검색어를 지우거나 법인 칩을 해제하세요.' : "등록된 SAN 스위치가 없습니다. 오른쪽 위 '+ 스위치 등록'으로 추가하세요."}
             </td></tr>}
           </tbody>
         </table>
@@ -384,7 +390,7 @@ function DeviceInfo({ d }) {
     ['스위치 역할', d.extra?.switchRole],
     ['스위치 상태', d.switchState],
     ['Fabric 이름', d.extra?.fabricName],
-    ['팹 스위치 수', d.fabric?.switches],
+    ['팹 스위치 수', d.fabric?.switches || null], // SSH 수집은 팹 정보를 채우지 않아 0 — 0대는 있을 수 없으므로 숨긴다
     ['활성 Zone 설정', d.zoning?.effectiveConfig],
     ['팬', h.fans ? (h.fans.ok == null ? `${h.fans.total}개` : `${h.fans.ok}/${h.fans.total} 정상`) : ''],
     ['전원공급장치', h.psus ? (h.psus.ok == null ? `${h.psus.total}개` : `${h.psus.ok}/${h.psus.total} 정상`) : ''],
@@ -496,14 +502,18 @@ function PerfPanel({ deviceId, ports }) {
   const rawShown = view === 'storage' && kind !== 'all' ? raw.filter((s) => kindOf(s.key) === kind) : raw;
   const seriesAll = view === 'storage'
     ? rawShown.map((s) => ({ key: s.key, label: `${s.key} (포트 ${(s.ports || []).length})`, values: s.sum || [], portCount: (s.ports || []).length, kind: kindOf(s.key) }))
-    : rawShown.map((s) => ({ key: `p${s.port}`, label: `${s.port}${s.name ? ` · ${shortDeviceName(s.name, 24)}` : ''}`, values: s.avg || [], port: s.port, speed: s.speed, name: s.name }));
+    : rawShown.map((s) => ({ key: `p${s.port}`, label: `${s.port}${s.name ? ` · ${shortDeviceName(s.name, 24)}` : ''}`, values: s.avg || [], rawMax: s.max, port: s.port, speed: s.speed, name: s.name }));
   const top = topSeries(seriesAll, 8);
   const rows = toChartRows(shown?.buckets || [], top);
 
   // 표에 쓸 파생값을 미리 계산해 두고(평균·최대·포화도) 그 위에서 정렬한다 —
   // 정렬 키와 화면에 보이는 값이 반드시 같은 계산이어야 한다.
   const tableRows = seriesAll.map((s) => {
-    const { avg, max } = seriesStats(s.values);
+    const st = seriesStats(s.values);
+    const avg = st.avg;
+    // '최대'는 버킷 평균의 최댓값이 아니라 서버가 준 **원시 샘플 피크**(MAX(bps))다 — 30일 조회면 버킷이
+    // 6시간이라 평균의 최댓값은 피크를 크게 깎고, 그 값으로 포화도를 내면 과소 판정된다(v2.416 리뷰 확정).
+    const max = s.rawMax != null && Number(s.rawMax) > 0 ? Number(s.rawMax) : st.max;
     const speed = view === 'port' ? (s.speed || speedOf(s.port)) : '';
     return { ...s, avg, max, speed, sat: view === 'port' ? saturationPct(max, speed) : null };
   });
@@ -545,9 +555,11 @@ function PerfPanel({ deviceId, ports }) {
 
       {error && <ErrorBox message={error} />}
       {!error && !shown && <Loading />}
-      {shown && !rows.length && (
+      {shown && (!rows.length || !top.length) && (
         <div className="card muted" style={{ fontSize: 13, lineHeight: 1.8 }}>
-          아직 수집된 사용량 데이터가 없습니다.
+          {rows.length && raw.length && !seriesAll.length
+            ? <>'{kind === 'array' ? '스토리지' : kind === 'host' ? '호스트(HBA)' : ''}' 로 분류된 연결 대상이 없습니다 — 위에서 '전체'를 눌러 보세요.</>
+            : <>아직 수집된 사용량 데이터가 없습니다.</>}
           <div style={{ marginTop: 4 }}>
             <b>설정 › 수집 서버 › SAN 스위치 포트 사용량</b> 에서 수집을 켜면 <code>portperfshow</code> 를 주기적으로
             실행해 쌓기 시작합니다(기본은 꺼짐 — 운영 스위치에 주기 접속을 임의로 만들지 않기 위해서입니다).
@@ -751,9 +763,9 @@ function DcStoragePerf({ dcPerf, onClose }) {
 
       {error && <ErrorBox message={error} />}
       {!error && !data && <Loading />}
-      {data && !rows.length && (
+      {data && (!rows.length || !series.length) && (
         <div className="card muted" style={{ fontSize: 13, lineHeight: 1.8 }}>
-          이 {dcPerf.label === '전체' ? '범위' : '법인'}에 아직 수집된 포트 사용량이 없습니다.
+          {data.series?.length && !series.length ? null : <>{dcSet.size ? '이 법인에' : '이 범위에'} 아직 수집된 포트 사용량이 없습니다.</>}
           <div style={{ marginTop: 4 }}>
             <b>설정 › 수집 서버 › SAN 스위치 포트 사용량</b> 에서 수집을 켜야 <code>portperfshow</code> 로 쌓기 시작합니다(기본 꺼짐).
             {data.unavailable ? <div style={{ color: 'var(--amber)', marginTop: 4 }}>이 서버는 시계열 DB(node:sqlite)를 쓸 수 없어 이력이 저장되지 않습니다.</div> : null}
@@ -870,7 +882,7 @@ function PortDetail({ detail, setDetail, portFilter, setPortFilter, portQ, setPo
       .some((v) => String(v || '').toLowerCase().includes(s));
   }), sort.key, sort.dir);
   return (
-    <Modal title={`포트 상세 — ${d.device?.name || ''}`} onClose={() => setDetail(null)} width={1180}>
+    <Modal title={`포트 상세 — ${d.device?.name || ''}`} onClose={closeDetail} width={1180}>
       {d.loading && <Loading />}
       {d.error && <ErrorBox message={d.error} />}
       {!d.loading && !d.error && (

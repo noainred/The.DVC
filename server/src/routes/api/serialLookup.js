@@ -7,13 +7,14 @@
  * 되찾는 형태라, 범위 계정에 열어 두면 시리얼 대입으로 범위 밖 자산을 열거할 수 있다
  * (vmMetrics.js 의 serviceTag 우회 선례와 같은 모양).
  */
-import { requireRole } from '../../auth/auth.js';
+import { requireRole, requirePerm } from '../../auth/auth.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { KINDS, serialIndex, searchSerials } from '../../insights/serialLookup.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
 
+const toolsPerm = requirePerm('tools'); // 조회 라우트 기능 권한(v2.416 감사 L-3)
 const fullScopeOnly = (req, res, next) => {
   if (scopedVcenterIds(req.user, store.get())) {
     return res.status(403).json({ ok: false, reason: '시리얼 조회는 전체 범위(vCenter 제한 없는) 계정만 사용할 수 있습니다.' });
@@ -34,7 +35,7 @@ export function registerSerialLookup(api) {
  * 조회. q 없으면 **종류별 수집 현황만** 돌려준다(전체 수만 행을 그냥 쏟지 않는다).
  * q 는 대소문자와 구분자(`:`·`-`·공백)를 무시하고 부분 일치한다.
  */
-api.get('/tools/serial-lookup', fullScopeOnly, (req, res) => {
+api.get('/tools/serial-lookup', toolsPerm, fullScopeOnly, (req, res) => {
   const q = String(req.query.q || '').trim();
   const kinds = String(req.query.kinds || '').split(',').map((s) => s.trim()).filter(Boolean);
   const idx = serialIndex(req, { force: req.query.refresh === '1' });
@@ -57,7 +58,7 @@ api.get('/tools/serial-lookup', fullScopeOnly, (req, res) => {
 });
 
 /** 검색 결과 CSV 내보내기(자산 대조·RMA 목록 작성용). 감사로그를 남긴다. */
-api.get('/tools/serial-lookup/export.csv', fullScopeOnly, (req, res) => {
+api.get('/tools/serial-lookup/export.csv', toolsPerm, fullScopeOnly, (req, res) => {
   const q = String(req.query.q || '').trim();
   const kinds = String(req.query.kinds || '').split(',').map((s) => s.trim()).filter(Boolean);
   const idx = serialIndex(req);

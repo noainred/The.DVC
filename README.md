@@ -337,7 +337,7 @@ git 소스로 실행하면 `CONFIG_DIR` 기본값이 `server/config` 라 이 파
 
 ### 토큰 라우터(에이전트↔중앙)
 - `/api/collector/{export,ping,idrac-scan,upgrade,set-password}` — **`X-Collector-Token`** 게이트(전력 export·중앙→엣지 PUSH 스캔·원격 업그레이드).
-- `/api/central/{register-collector,assignment,result,inventory,fleet,idrac-scan-jobs,idrac-scan-progress,idrac-scan-result,ip-scan-assignment,ip-scan-result,gpu-guest-data,agent-config,ping-jobs,ping-result,log-queries,log-query-result,capture-jobs,capture-result,users-config,gpu-guest-config}` — **`X-Central-Token`** 게이트(엣지→중앙 보고·위임 잡 인출·중앙 배포 설정 pull).
+- `/api/central/{register-collector,assignment,result,inventory,fleet,idrac-scan-jobs,idrac-scan-progress,idrac-scan-result,ip-scan-assignment,ip-scan-result,gpu-guest-data,agent-config,ping-jobs,ping-result,log-queries,log-query-result,capture-jobs,capture-result,users-config,gpu-guest-config,rma-poll,rma-result}` — **`X-Central-Token`** 게이트(엣지→중앙 보고·위임 잡 인출·중앙 배포 설정 pull).
   - **엣지별 개별 토큰(v2.191+)**: 설정 → 수집 서버 → 🔑에서 엣지별 토큰을 발급하면 그 토큰은 **자기 `agent` 데이터만** 접근한다(남의 이름으로 조회 시 403). 엣지는 이 값을 기존 `CENTRAL_TOKEN` 자리에 넣기만 하면 되므로 사이트별로 무중단 이관할 수 있고, 이관 완료 후 `CENTRAL_REQUIRE_AGENT_TOKEN=true`로 공유 토큰을 금지한다.
 - `/dl/{versions.json,<번들>}` — 공개 업그레이드 소스(자동 업그레이드 원격 베이스).
 - `/api/ping/*` — 핑/네트워크 모니터링(조회=인증, 대상 관리=관리자).
@@ -417,6 +417,28 @@ git 소스로 실행하면 `CONFIG_DIR` 기본값이 `server/config` 라 이 파
 - **IP 능동 스캔(TCP 커넥트 + ICMP ping)**: vCenter가 모르는 물리/타가상화/네트워크 장비 IP를 공통 포트(22/80/443/445/3389/623/8006/902/5985…)로 탐지하고, 포트가 전부 닫힌 서버는 ICMP ping 으로 생존 감지(v2.359 — 설정에서 끌 수 있음). **스캔은 별도 프로세스(child_process)에서 격리 실행**(v2.363)해 TCP/ping/역DNS 부하·FD 를 포탈에서 떼어낸다(중앙·엣지 공통, 데드라인 초과 시 자식만 강제종료·포탈 무영향, 워커 실패 시 인라인 폴백). ping 은 **fping 이 있으면 배치(한 프로세스로 다수 IP)**, 없으면 동시성 상한(기본 8) per-IP 폴백 → 서버종류 "스캔"으로 대장에 채움. **설정 › IP 스캔**에서 할당 에이전트 선택·대역/포트/주기 설정, 에이전트별 보고 현황 표시.
   - 에이전트 측: `AGENT_NAME=<이름>`, `CENTRAL_URL=<중앙주소>`, `CENTRAL_TOKEN=<동일토큰>` / 중앙 측: `CENTRAL_TOKEN` 설정 필수.
   - ⚠️ 포트 스캔은 침투성 — **승인된 대역만**, 레이트리밋, 보안팀 공지 후 사용.
+
+## 원격 명령 에이전트 (RMA · `server/src/rma/`, v2.416)
+
+HostMonitor 의 RMA(Remote Monitoring Agent) 를 참고한 **엣지 별도 프로세스**. 포탈 본체와 독립된
+`vmware-portal-rma@<인스턴스>` systemd 유닛(템플릿)으로 상주하며 중앙을 **롱폴(아웃바운드 전용, 개별 엣지
+토큰 필수)** 해 프리셋 명령을 실행하고 결과만 회신한다(passive 모드 — 엣지가 NAT 뒤여도 동작). 포탈이 죽거나
+업그레이드 재시작 중에도 서비스 상태·로그·재시작을 원격에서 다룰 수 있다.
+
+- **화면**: 특수기능 › 원격 명령 실행(RMA) — 법인/인스턴스 상태(하트비트), 명령 실행·결과, 이력, 법인별 분배
+  설정·서명 비밀번호, SSH 원격 배포. 전부 admin + 감사로그.
+- **다중 인스턴스**: 한 법인에 RMA 를 여러 개(한 서버에 여러 프로세스 / 여러 서버에 하나씩). 법인별 분배 방식 —
+  `active-active`(선착 인출) · `balance`(최소 부하→라운드로빈) · `active-backup`(주/예비, `RMA_PRIORITY` 낮을수록 주).
+  배정 인스턴스가 오프라인이면 다른 인스턴스가 자동 페일오버. 특정 인스턴스 지정 실행 가능.
+- **보안**: 프리셋 id+파라미터만 전송, 엣지가 화이트리스트 재검증 후 셸 없이 spawn · 자유 명령은 엣지
+  `RMA_ALLOW_CUSTOM=true` 에서만 · 법인별 `RMA_PASSWORD`(HMAC-SHA256 서명, ±10분) · 비멱등이라 미회신은 재인출
+  없이 실패 종결 · 타임아웃/출력 상한/줄 수 제한 · 파일 읽기·재부팅 프리셋 없음.
+- **엣지 설정(portal.env)**: `RMA_ENABLED=true` `RMA_INSTANCES=default`(공백 구분) `RMA_PASSWORD=…`
+  `RMA_ALLOW_CUSTOM=false` `RMA_LONGPOLL_MS=20000` `RMA_MAX_OUTPUT=262144`. 인스턴스별 `rma-<이름>.env` 에
+  `RMA_INSTANCE`/`RMA_PRIORITY`. 수동 기동: `systemctl enable --now vmware-portal-rma@default`.
+- **배포**: 화면의 'RMA 배포(SSH root)' 가 `systemctl show vmware-portal` 로 설치 경로/계정을 역추적해 템플릿
+  유닛·인스턴스 env·sudoers(포탈 재시작 한 줄, visudo 검증)를 쓰고 기동한다. 오프라인 패키지 `install.sh` 도
+  `RMA_ENABLED=true` 면 인스턴스를 기동한다. 엣지가 v2.416 이상이어야 한다.
 
 ---
 

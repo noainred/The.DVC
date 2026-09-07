@@ -596,3 +596,58 @@ test('집계 평균은 조회 범위에 흔들리지 않는다(빈 버킷을 0 �
   assert.ok(!aTogether.sum.some((v) => v === 0), '빈 버킷을 0 으로 채우면 트래픽 없음으로 오해된다');
   _resetForTest();
 });
+
+// ── v2.416 리뷰 확정 결함 회귀 ──
+test('v2.416: ?ports 미지정은 전체(null) — 빈 문자열이 [0] 으로 둔갑하지 않는다', async () => {
+  const { parsePortsParam } = await import('../src/routes/api/sanSwitch.js');
+  assert.deepEqual(parsePortsParam(''), []);
+  assert.deepEqual(parsePortsParam(undefined), []);
+  assert.deepEqual(parsePortsParam('1,,3, 5'), [1, 3, 5]);
+  assert.deepEqual(parsePortsParam('0'), [0], '명시적 0 은 유효한 포트');
+});
+test('v2.416: deviceInputIssue 가 vfId/포트를 검증하고 normalizeDeviceInput 이 정수로 굳힌다(setcontext 주입 차단)', async () => {
+  const { deviceInputIssue, normalizeDeviceInput } = await import('../src/sanswitch/registry.js');
+  const base = { type: 'brocade', name: 'sw', host: '10.0.0.5', username: 'admin', password: 'x' };
+  assert.equal(deviceInputIssue(base), null);
+  assert.match(deviceInputIssue({ ...base, vfId: '1; switchdisable' }), /Virtual Fabric/);
+  assert.match(deviceInputIssue({ ...base, vfId: '0' }), /Virtual Fabric/);
+  assert.match(deviceInputIssue({ ...base, vfId: '129' }), /Virtual Fabric/);
+  assert.equal(deviceInputIssue({ ...base, vfId: '' }), null);
+  assert.equal(deviceInputIssue({ ...base, vfId: 12 }), null);
+  assert.match(deviceInputIssue({ ...base, sshPort: '22; id' }), /sshPort/);
+  const n = normalizeDeviceInput({ ...base, vfId: '12', sshPort: '2222' });
+  assert.equal(n.vfId, 12); assert.equal(n.sshPort, 2222); assert.equal(n.httpsPort, 443);
+  assert.equal(normalizeDeviceInput({ ...base }).vfId, null);
+});
+test('v2.416: 무광 SFP — REST 0 µW 와 CLI "-inf dBm (0.0 uW)" 는 0 dBm 이 아니라 null', async () => {
+  const { toDbm } = await import('../src/sanswitch/collectors/fosRest.js');
+  assert.equal(toDbm(0), null); assert.equal(toDbm('0'), null);
+  assert.equal(toDbm(-3.5), -3.5); assert.equal(toDbm(1000), 0, '1000 µW = 0 dBm(실제 값)');
+  const { parseSfpShow } = await import('../src/sanswitch/collectors/fosParse.js');
+  const r = parseSfpShow(['Port  4:', 'RX Power: -inf dBm (0.0 uW)', 'TX Power: -2.4 dBm (575.0 uW)', 'Port  5:', 'RX Power: N/A', 'TX Power: 316.2 uW (-5.0 dBm)'].join('\n'));
+  assert.equal(r[4].rxPowerDbm, null); assert.equal(r[4].txPowerDbm, -2.4);
+  assert.equal(r[5].rxPowerDbm, null); assert.equal(r[5].txPowerDbm, 316.2, '기존 형식(첫 숫자)은 그대로');
+});
+test('v2.416: portperfshow 마지막 샘플이 절단(포트 수 부족)이면 직전 완전 샘플을 쓴다', async () => {
+  const { parsePortPerfShow } = await import('../src/sanswitch/collectors/fosParse.js');
+  const full = ['   0   1   2   3 Total', '=====================', '1.0m 2.0m 3.0m 4.0m 10.0m'].join('\n');
+  const cut = ['   0   1   2   3 Total', '=====================', '5.0m 6.'].join('\n');
+  const r = parsePortPerfShow(`${full}\n${cut}\n`);
+  assert.equal(r.samples, 2);
+  assert.equal(r.partialDropped, true);
+  assert.equal(r.ports[0], 1_000_000, '절단 샘플(5.0m/6.) 대신 직전 완전 샘플');
+  const ok = parsePortPerfShow(`${full}\n${full.replace(/1\.0m/, '9.0m')}\n`);
+  assert.equal(ok.partialDropped, false); assert.equal(ok.ports[0], 9_000_000);
+});
+test('v2.416: applyPulledDevices 는 중앙에서 빠진 내 장비 id 를 onRemoved 로 알린다(잔존 스냅샷 정리용)', async () => {
+  const reg = await import('../src/sanswitch/registry.js');
+  const { config } = await import('../src/config.js');
+  const prevName = config.agent.name; config.agent.name = 'edge-x';
+  reg._resetForTest();
+  try {
+    reg.applyPulledDevices([{ id: 'a', agent: 'edge-x', type: 'brocade', name: 'a', host: '10.1.1.1' }, { id: 'b', agent: 'edge-x', type: 'brocade', name: 'b', host: '10.1.1.2' }]);
+    let removed = null;
+    reg.applyPulledDevices([{ id: 'a', agent: 'edge-x', type: 'brocade', name: 'a', host: '10.1.1.1' }], { onRemoved: (ids) => { removed = ids; } });
+    assert.deepEqual(removed, ['b']);
+  } finally { config.agent.name = prevName; reg._resetForTest(); }
+});
