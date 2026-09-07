@@ -20,7 +20,7 @@ import { knownAgentNames } from '../../central/knownAgents.js';
 import { requestCollect, hasPendingRequest } from '../../sanswitch/collectRequests.js';
 import { loadPerfSettings, savePerfSettings, LIMITS as PERF_LIMITS } from '../../sanswitch/perfSettings.js';
 import { pollPerfOnce, sanSwitchPerfStatus } from '../../sanswitch/perfPoller.js';
-import { portSeries, storageSeries, storageSeriesMulti, arraySerialOf, endpointKind, perfDbStats } from '../../sanswitch/perfDb.js';
+import { portSeries, storageSeries, storageSeriesMulti, arraySerialOf, endpointKind, perfDbStats, pruneNow } from '../../sanswitch/perfDb.js';
 import { listDevices as listStorageDevices } from '../../storage/registry.js';
 import { localSnapshots as storageLocalSnaps } from '../../storage/store.js';
 import { edgeStorageSnapshots } from '../../central/storageEdge.js';
@@ -43,6 +43,29 @@ const listShape = (s) => {
 
 /** `?ports=1,2,3` 파싱(순수). 빈 값/빈 토큰은 무시 — `''.split(',')` → [''] → Number('') → 0 함정 방지. */
 export const NONE_DC = '__none__';
+
+/**
+ * 조회 기간 파라미터(v2.420, 사용자 요구 '조회 조건에 내가 원하는 기간의 값을 볼 수 있는 기능').
+ *  - `from`/`to`(epoch ms 또는 ISO/`datetime-local` 문자열) 가 있으면 그 구간(둘 중 하나만 있으면 나머지는
+ *    to=지금 / from=to-24h). 최대 366일, from>=to 이면 400 대신 24h 로 되돌린다(화면이 잘못 보내도
+ *    빈 화면이 되지 않게).
+ *  - 없으면 `hours`(1~2160, 기본 24).
+ */
+export function rangeParams(q = {}) {
+  const parse = (v) => {
+    if (v == null || v === '') return null;
+    const n = /^\d+$/.test(String(v)) ? Number(v) : Date.parse(String(v));
+    return Number.isFinite(n) && n > 0 ? n : null;
+  };
+  const hours = Math.max(1, Math.min(24 * 90, Number(q.hours) || 24));
+  let from = parse(q.from), to = parse(q.to);
+  if (from == null && to == null) return { hours, from: null, to: null };
+  if (to == null) to = Date.now();
+  if (from == null) from = to - 24 * 3600_000;
+  const MAX = 366 * 24 * 3600_000;
+  if (from >= to || to - from > MAX) return { hours: 24, from: null, to: null, issue: from >= to ? '시작이 끝보다 늦습니다' : '최대 366일까지 조회할 수 있습니다' };
+  return { hours: Math.max(1, Math.round((to - from) / 3600_000)), from, to };
+}
 
 export function parsePortsParam(v) {
   return String(v || '').split(',').map((x) => x.trim()).filter(Boolean).map(Number).filter(Number.isInteger).slice(0, 64);
@@ -181,6 +204,19 @@ api.put('/tools/sanswitch/perf/settings', adminOnly, async (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
 });
 
+/**
+ * 보관 기간 밖 표본 즉시 정리(v2.420, 설정 화면 '지금 정리'). 폴러의 prune 스로틀(20틱)을 기다리지
+ * 않고 현재 retentionDays 기준으로 DELETE 1회 — ts 단독 인덱스를 타므로 풀스캔이 아니다.
+ */
+api.post('/tools/sanswitch/perf/prune', adminOnly, async (req, res) => {
+  try {
+    const st = loadPerfSettings();
+    const r = await pruneNow(st.retentionDays);
+    logAudit({ user: req.user?.username, action: 'SAN 포트 사용량 DB 즉시 정리', detail: `보관 ${st.retentionDays}일 기준 ${r.deleted ?? 0}행 삭제` });
+    res.json({ ok: true, ...r, db: await perfDbStats() });
+  } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+});
+
 /** 지금 1회 수집(설정이 꺼져 있어도 관리자가 눌러 시험할 수 있게 force). */
 api.post('/tools/sanswitch/perf/collect', adminOnly, async (req, res) => {
   logAudit({ user: req.user?.username, action: 'SAN 포트 사용량 즉시 수집' });
@@ -192,19 +228,19 @@ api.post('/tools/sanswitch/perf/collect', adminOnly, async (req, res) => {
  * 단위는 **바이트/초**(portperfshow 원단위) — 화면이 ×8 해 bps 로 환산한다.
  */
 api.get('/tools/sanswitch/devices/:id/perf', toolsPerm, fullScopeOnly, async (req, res) => {
-  const hours = Math.max(1, Math.min(24 * 90, Number(req.query.hours) || 24));
+  const { hours, from, to, issue } = rangeParams(req.query);
   // ⚠ `''.split(',')` 은 [''] 이고 Number('') 은 0 이라, 빈 토큰을 먼저 걸러야 한다 — 안 거르면
   //   ports 미지정이 '포트 0 만' 으로 둔갑한다(v2.416 리뷰 확정 결함).
   const ports = parsePortsParam(req.query.ports);
-  const r = await portSeries(req.params.id, { hours, ports: ports.length ? ports : null });
-  res.json({ ok: true, unit: 'bytesPerSec', hours, ...r });
+  const r = await portSeries(req.params.id, { hours, from, to, ports: ports.length ? ports : null });
+  res.json({ ok: true, unit: 'bytesPerSec', hours, from, to, rangeIssue: issue || null, ...r });
 });
 
 /** 연결 장비(스토리지 어레이)별 합산 시계열 — 포트가 아니라 '어느 스토리지가 얼마나 쓰이나'. */
 api.get('/tools/sanswitch/devices/:id/perf/storage', toolsPerm, fullScopeOnly, async (req, res) => {
-  const hours = Math.max(1, Math.min(24 * 90, Number(req.query.hours) || 24));
-  const r = await storageSeries(req.params.id, { hours });
-  res.json({ ok: true, unit: 'bytesPerSec', hours, ...r });
+  const { hours, from, to, issue } = rangeParams(req.query);
+  const r = await storageSeries(req.params.id, { hours, from, to });
+  res.json({ ok: true, unit: 'bytesPerSec', hours, from, to, rangeIssue: issue || null, ...r });
 });
 
 /**
@@ -219,7 +255,7 @@ api.get('/tools/sanswitch/devices/:id/perf/storage', toolsPerm, fullScopeOnly, a
  * 나란히 봐야 증설 판단이 된다. ⚠ 확실히 일치할 때만 붙이고, 아니면 비운다(억지 매칭 금지).
  */
 api.get('/tools/sanswitch/perf/storage-summary', toolsPerm, fullScopeOnly, async (req, res) => {
-  const hours = Math.max(1, Math.min(24 * 90, Number(req.query.hours) || 24));
+  const { hours, from, to, issue: rangeIssue } = rangeParams(req.query);
   // 법인은 **여러 개**를 받을 수 있다(쉼표 구분). 빈 값이면 전체.
   // '__none__' 은 법인 미지정 장비(datacenterId 빈 값)를 뜻하는 센티널(v2.417) — 쉼표 목록은 '' 를
   // 표현할 수 없어 예전에는 '(법인 미지정)' 을 고르면 전체로 둔갑했다(리뷰 확정).
@@ -234,7 +270,7 @@ api.get('/tools/sanswitch/perf/storage-summary', toolsPerm, fullScopeOnly, async
   // 않는다(push 는 스냅샷만). 빈 시리즈가 '트래픽 없음' 처럼 보이지 않게 개수와 사유를 함께 준다.
   const edgeSwitches = devices.filter((d) => String(d.agent || '').trim()).map((d) => ({ id: d.id, name: d.name || d.host, agent: d.agent }));
   const groupOf = split ? new Map(devices.map((d) => [String(d.id), String(d.datacenterId || '')])) : null;
-  const agg = await storageSeriesMulti(ids, { hours, groupOf });
+  const agg = await storageSeriesMulti(ids, { hours, from, to, groupOf });
 
   // 등록 스토리지의 최신 스냅샷(용량) 색인 — 시리얼 정규화 후 대조.
   const norm = (v) => String(v ?? '').toLowerCase().replace(/[\s:_.-]/g, '');
@@ -283,10 +319,12 @@ api.get('/tools/sanswitch/perf/storage-summary', toolsPerm, fullScopeOnly, async
   for (const s of series) {
     if (s.endpointKind !== 'array') continue;
     const k = s.datacenterId ?? '';
-    if (!byDc[k]) byDc[k] = { datacenterId: k, name: dcNameOf(k), storages: 0, avgTotal: 0, maxTotal: 0, switches: new Set() };
+    if (!byDc[k]) byDc[k] = { datacenterId: k, name: dcNameOf(k), storages: 0, avgTotal: 0, maxTotal: 0, peakAvg: 0, peakTotal: 0, switches: new Set() };
     byDc[k].storages++;
     byDc[k].avgTotal += s.avgTotal;
     byDc[k].maxTotal += s.maxTotal;
+    byDc[k].peakAvg += s.peakAvg || 0;
+    byDc[k].peakTotal += s.peakTotal || 0;
     for (const id of s.deviceIds) byDc[k].switches.add(id);
   }
   // 화면이 창을 닫지 않고 범위를 바꿀 수 있게, **필터와 무관한 전 법인 목록**을 함께 준다
@@ -301,7 +339,7 @@ api.get('/tools/sanswitch/perf/storage-summary', toolsPerm, fullScopeOnly, async
     return [...m.values()].sort((a, b) => String(a.name).localeCompare(String(b.name)));
   })();
   res.json({
-    ok: true, unit: 'bytesPerSec', hours, datacenterIds: dcs.map((x) => x || NONE_DC), split, allDatacenters: allDcs,
+    ok: true, unit: 'bytesPerSec', hours, from, to, until: agg.until ?? null, rangeIssue: rangeIssue || null, datacenterIds: dcs.map((x) => x || NONE_DC), split, allDatacenters: allDcs,
     edgeSwitches, edgeNote: edgeSwitches.length ? `이 범위의 스위치 ${edgeSwitches.length}대는 엣지(${[...new Set(edgeSwitches.map((e) => e.agent))].join(', ')}) 수집이라 포트 사용량 시계열이 중앙에 없습니다 — 해당 엣지 포탈의 SAN 스위치 화면에서 확인하세요.` : '',
     byDatacenter: Object.values(byDc).map((x) => ({ ...x, switches: x.switches.size }))
       .sort((a, b) => b.avgTotal - a.avgTotal),
