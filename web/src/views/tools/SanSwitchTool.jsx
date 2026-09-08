@@ -930,6 +930,11 @@ function DcStoragePerf({ dcPerf, onClose }) {
       {error && <ErrorBox message={error} />}
       {!error && !data && <Loading />}
       {data?.edgeNote && <div className="card muted" style={{ fontSize: 12.5, borderColor: 'var(--amber)' }}>ℹ {data.edgeNote}</div>}
+      {data && (data.edgeSwitches || []).some((e) => e.lastSampleAt) && (
+        <div className="muted" style={{ fontSize: 11.5, marginBottom: 6 }}>
+          엣지 중계 반영: {(data.edgeSwitches || []).filter((e) => e.lastSampleAt).map((e) => `${e.name} ${ago(e.lastSampleAt)}`).join(' · ')}
+        </div>
+      )}
       {data && (!rows.length || !series.length) && (
         <div className="card muted" style={{ fontSize: 13, lineHeight: 1.8 }}>
           {data.series?.length && !series.length ? null : <>'{scopeLabel}' 범위에 아직 수집된 포트 사용량이 없습니다.</>}

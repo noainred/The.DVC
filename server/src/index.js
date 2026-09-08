@@ -87,6 +87,7 @@ import { startSanSwitchPoller } from './sanswitch/poller.js';    // SAN 스위�
 import { startSanSwitchPush } from './sanswitch/push.js';        // 〃 엣지→중앙 push
 import { startSanSwitchConfigPull } from './agent/sanSwitchConfigPull.js'; // 〃 중앙→엣지 배포 pull
 import { startSanSwitchPerfPoller } from './sanswitch/perfPoller.js';    // 〃 포트 사용량(portperfshow) 수집(v2.411)
+import { startSanSwitchPerfPush } from './sanswitch/perfPush.js';        // 〃 엣지→중앙 포트 사용량 시계열 중계(v2.423)
 import { startBmstorPoller } from './bmstor/poller.js';           // 베어메탈 스토리지(SSH df, v2.340)
 import { startBmstorWorker } from './agent/bmstorWorker.js';       // 〃 폴링 위임 워커(엣지, v2.341)
 import { startVmtrackPoller } from './vmtrack/poller.js';          // VM 수량 추이 00/12시 스냅샷(v2.345)
@@ -235,6 +236,7 @@ const stagger = [
   startStoragePoller, startStoragePush, startStorageConfigPull, // 스토리지 모니터링(v2.302) — 전부 재진입 가드, push/pull 은 CENTRAL_URL 미설정 시 자기기동 안 함
   startSanSwitchPoller, startSanSwitchPush, startSanSwitchConfigPull, // SAN 스위치(v2.410) — 동일 규약(재진입 가드 + 적응형 타이머)
   startSanSwitchPerfPoller, // SAN 포트 사용량(v2.411) — 설정에서 꺼져 있으면 틱만 돌고 아무것도 안 한다
+  startSanSwitchPerfPush,   // 〃 엣지→중앙 중계(v2.423) — CENTRAL_URL 미설정이면 자기기동 안 함, 커서 방식
   startBmstorPoller, // 베어메탈 스토리지(v2.340) — 30초 틱 + 재진입 가드, 등록 0대면 대기
   startBmstorWorker, // 〃 폴링 위임 워커(v2.341) — CENTRAL_URL 미설정이면 자기기동 안 함
   startVmtrackPoller, // VM 수량 추이(v2.345) — 60초 틱, 슬롯(00/12시) 미기록 시에만 수집 + 재진입 가드

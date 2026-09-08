@@ -19,6 +19,8 @@ import { parsePortPerfShow } from './collectors/fosParse.js';
 import { savePerfSample } from './perfDb.js';
 import { loadPerfSettings } from './perfSettings.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
+import { config } from '../config.js';
+import { pushPerfNow } from './perfPush.js';
 
 const CONCURRENCY = Math.max(1, Math.min(8, Number(process.env.SANSW_PERF_CONCURRENCY) || 2));
 /**
@@ -98,6 +100,8 @@ export async function pollPerfOnce({ force = false } = {}) {
       } catch (e) { failed++; errors.push(`${d.name || d.id}: ${e.message}`); }
     });
     _last = { at: Date.now(), collected, failed, durationMs: Date.now() - t0, total: devices.length, errors: errors.slice(0, 5) };
+    // 엣지(v2.423): 수집 직후 중앙으로 중계 — push 타이머를 기다리면 최대 한 주기(기본 5분)가 더 걸린다.
+    if (collected && config.agent.centralUrl && config.agent.centralToken) pushPerfNow().catch(() => {});
     return { ok: true, ..._last };
   } finally { _busy = false; }
 }

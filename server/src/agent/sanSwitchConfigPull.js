@@ -9,6 +9,7 @@ import { resilientFetch } from '../util/resilientFetch.js';
 import { applyPulledDevices } from '../sanswitch/registry.js';
 import { dropSnapshot } from '../sanswitch/store.js';
 import { collectDeviceNow, testDeviceConnection } from '../sanswitch/poller.js';
+import { applyCentralPerfSettings } from '../sanswitch/perfSettings.js';
 import { pushSanSwitchNow } from '../sanswitch/push.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 
@@ -44,6 +45,9 @@ async function _pull() {
       applied = true;
       console.log(`[sanswitch-config] 중앙 배포 스위치 적용: agent=${config.agent.name} ${devices.length}대`);
     }
+    // 포트 사용량 수집 설정(v2.423): 중앙이 지정한 값을 적용(SANSW_PERF_LOCAL=1 이면 무시). 켜짐이 바뀌면 다음 틱부터 수집.
+    let perfApplied = false;
+    if (body?.perf) { try { perfApplied = applyCentralPerfSettings(body.perf); if (perfApplied) console.log(`[sanswitch-config] 중앙 포트 사용량 설정 적용: ${JSON.stringify(body.perf)}`); } catch (e) { console.warn(`[sanswitch-config] perf 설정 적용 실패: ${e.message}`); } }
     // '지금 수집' 요청 — 구성이 안 바뀌어도 **매 pull 마다** 처리한다(재수집은 흔한 요청).
     const wants = Array.isArray(body?.collectNow) ? body.collectNow.slice(0, 20) : [];
     let collected = 0;
@@ -55,8 +59,8 @@ async function _pull() {
     // pull 자체를 막지 않도록 비동기로 돌린다(테스트는 최대 60초).
     const tests = Array.isArray(body?.testNow) ? body.testNow.slice(0, 5) : [];
     for (const t of tests) runDelegatedTest(t).catch((e) => console.warn(`[sanswitch-config] 테스트 대행 실패 ${t?.id}: ${e.message}`));
-    _last = { at: Date.now(), applied, count: devices.length, collectRequested: wants.length, collected, testRequested: tests.length };
-    return { ok: true, applied, unchanged: !applied, count: devices.length, collectRequested: wants.length, collected, testRequested: tests.length };
+    _last = { at: Date.now(), applied, count: devices.length, collectRequested: wants.length, collected, testRequested: tests.length, perfApplied };
+    return { ok: true, applied, unchanged: !applied, count: devices.length, collectRequested: wants.length, collected, testRequested: tests.length, perfApplied };
   } catch (e) {
     _last = { at: Date.now(), error: e.message };
     return { ok: false, reason: e.message };

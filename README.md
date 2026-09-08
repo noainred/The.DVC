@@ -448,6 +448,9 @@ HostMonitor 의 RMA(Remote Monitoring Agent) 를 참고한 **엣지 별도 프�
   (봉인 저장·비밀 무반환·OTP 재인증·법인/대상 호스트 사용 범위·감사). RMA `ssh-exec` 명령·`ssh` 점검은 '저장된 계정 사용'을
   켜면 그 계정을, 끄면 1회 입력 계정을 쓴다. 비밀은 엣지가 실행 직전 브로커(`/api/central/rma-credential`)에서 받아 메모리에서만
   사용한다. 엣지 `RMA_ALLOW_SSH=true` + `RMA_SSH_TARGETS` 필요.
+- **엣지 스위치 포트 사용량 중계(v2.423)**: 위임 스위치의 portperfshow 시계열을 엣지가 커서 방식(마지막 rowid 뒤만)·gzip·청크로
+  `POST /api/central/sanswitch-perf` 에 올리고 중앙이 같은 DB 에 적재 — 중앙의 스토리지 사용량 분석이 엣지 법인도 보여준다.
+  중앙의 포트 사용량 수집 설정이 `sanswitch-config` 응답 `perf` 로 엣지에 내려간다(`SANSW_PERF_LOCAL=1` 로 현장 설정 고정).
 - **모든 표 제목 클릭 정렬(v2.422)**: 웹의 표 181개를 공용 `components/STable.jsx` 로 통일 — 헤더 클릭 시 셀 내용(숫자·단위·%·
   날짜 인식)으로 정렬(오름 → 내림 → 해제). 자체 정렬 표(onClick th/컴포넌트 th)는 자동 제외. 새 표는 `<STable>` 을 쓴다.
 - **SAN 스위치 연결 테스트 진단(v2.421)**: 등록 화면의 '연결 테스트'가 비동기 실행(`POST /tools/sanswitch/test` → runId,

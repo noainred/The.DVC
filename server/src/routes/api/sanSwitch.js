@@ -21,7 +21,7 @@ import { knownAgentNames } from '../../central/knownAgents.js';
 import { requestCollect, hasPendingRequest } from '../../sanswitch/collectRequests.js';
 import { loadPerfSettings, savePerfSettings, LIMITS as PERF_LIMITS } from '../../sanswitch/perfSettings.js';
 import { pollPerfOnce, sanSwitchPerfStatus } from '../../sanswitch/perfPoller.js';
-import { portSeries, storageSeries, storageSeriesMulti, arraySerialOf, endpointKind, perfDbStats, pruneNow } from '../../sanswitch/perfDb.js';
+import { portSeries, storageSeries, storageSeriesMulti, arraySerialOf, endpointKind, perfDbStats, pruneNow, latestSampleTs } from '../../sanswitch/perfDb.js';
 import { listDevices as listStorageDevices } from '../../storage/registry.js';
 import { localSnapshots as storageLocalSnaps } from '../../storage/store.js';
 import { edgeStorageSnapshots } from '../../central/storageEdge.js';
@@ -281,7 +281,12 @@ api.get('/tools/sanswitch/perf/storage-summary', toolsPerm, fullScopeOnly, async
   const ids = devices.map((d) => d.id);
   // 엣지 위임 스위치(agent 지정)는 portperfshow 시계열이 **그 엣지 로컬 DB** 에만 있고 중앙으로 오지
   // 않는다(push 는 스냅샷만). 빈 시리즈가 '트래픽 없음' 처럼 보이지 않게 개수와 사유를 함께 준다.
-  const edgeSwitches = devices.filter((d) => String(d.agent || '').trim()).map((d) => ({ id: d.id, name: d.name || d.host, agent: d.agent }));
+  // v2.423: 엣지가 시계열을 중앙으로 중계하므로 '중앙에 없음'이 아니라 **마지막 반영 시각**을 보여준다. 아직 한 번도 오지 않은
+  // 스위치만 안내(엣지가 v2.423 미만이거나 포트 사용량 수집이 꺼져 있거나 첫 push 대기).
+  const edgeRaw = devices.filter((d) => String(d.agent || '').trim());
+  const lastTs = await latestSampleTs(edgeRaw.map((d) => d.id));
+  const edgeSwitches = edgeRaw.map((d) => ({ id: d.id, name: d.name || d.host, agent: d.agent, lastSampleAt: lastTs.get(String(d.id)) || null }));
+  const edgeMissing = edgeSwitches.filter((e) => !e.lastSampleAt);
   const groupOf = split ? new Map(devices.map((d) => [String(d.id), String(d.datacenterId || '')])) : null;
   const agg = await storageSeriesMulti(ids, { hours, from, to, groupOf });
 
@@ -353,7 +358,9 @@ api.get('/tools/sanswitch/perf/storage-summary', toolsPerm, fullScopeOnly, async
   })();
   res.json({
     ok: true, unit: 'bytesPerSec', hours, from, to, until: agg.until ?? null, rangeIssue: rangeIssue || null, datacenterIds: dcs.map((x) => x || NONE_DC), split, allDatacenters: allDcs,
-    edgeSwitches, edgeNote: edgeSwitches.length ? `이 범위의 스위치 ${edgeSwitches.length}대는 엣지(${[...new Set(edgeSwitches.map((e) => e.agent))].join(', ')}) 수집이라 포트 사용량 시계열이 중앙에 없습니다 — 해당 엣지 포탈의 SAN 스위치 화면에서 확인하세요.` : '',
+    edgeSwitches, edgeNote: edgeMissing.length
+      ? `엣지(${[...new Set(edgeMissing.map((e) => e.agent))].join(', ')}) 수집 스위치 ${edgeMissing.length}대(${edgeMissing.map((e) => e.name).join(', ')})의 포트 사용량 시계열이 아직 중앙에 오지 않았습니다. 확인: ① 설정 › 수집 서버 › SAN 스위치 포트 사용량이 켜져 있는지(중앙 설정이 엣지에도 내려갑니다) ② 그 엣지가 v2.423 이상인지(엣지가 현지 수집분을 중앙으로 중계) ③ 켠 직후면 수집 주기(기본 5분) + 엣지 설정 pull(≤5분) 뒤 반영됩니다.`
+      : '',
     byDatacenter: Object.values(byDc).map((x) => ({ ...x, switches: x.switches.size }))
       .sort((a, b) => b.avgTotal - a.avgTotal),
     switches: devices.map((d) => ({ id: d.id, name: d.name, host: d.host, datacenterId: d.datacenterId, datacenterName: dcNameOf(d.datacenterId) })),
