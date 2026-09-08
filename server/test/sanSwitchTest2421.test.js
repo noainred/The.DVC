@@ -175,3 +175,13 @@ test('testDeviceConnection(SSH): 로컬 ssh 서버에 붙어 단계 추적을 �
   assert.ok(r.hint && r.hint.length > 10);
   assert.ok(!JSON.stringify(r).includes('"pw"'));
 });
+
+test('withSsh: 서버가 준비 전에 소켓을 끊으면 매달리지 않고 reject 된다(미결 Promise 방지)', { timeout: 30_000 }, async () => {
+  const { withSsh } = await import('../src/proxy/sshExec.js');
+  const srv = net.createServer((sock) => { sock.write('SSH-2.0-drop\r\n'); setTimeout(() => sock.destroy(), 200); });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const t0 = Date.now();
+  await assert.rejects(withSsh({ host: '127.0.0.1', port: srv.address().port, username: 'a', password: 'b', readyTimeout: 20_000 }, async () => ({})));
+  assert.ok(Date.now() - t0 < 10_000, 'readyTimeout 을 기다리지 않는다');
+  await new Promise((r) => srv.close(r));
+});

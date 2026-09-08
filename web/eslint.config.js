@@ -8,6 +8,7 @@
 // 않는다(lint 는 error 가 있을 때만 비정상 종료). 나머지 스타일 규칙은 의도적으로 켜지 않는다
 // (병렬 작업과의 충돌·대량 노이즈 방지 — 딱 훅 안전성만 본다).
 import reactHooks from 'eslint-plugin-react-hooks';
+import globals from 'globals';
 
 export default [
   {
@@ -17,10 +18,14 @@ export default [
       ecmaVersion: 2023,
       sourceType: 'module',
       parserOptions: { ecmaFeatures: { jsx: true } },
+      globals: { ...globals.browser, ...globals.es2021, process: 'readonly' },
     },
     rules: {
       'react-hooks/rules-of-hooks': 'error',
       'react-hooks/exhaustive-deps': 'warn',
+      // no-undef(v2.421): 다른 컴포넌트의 지역 함수를 그대로 참조하는 실수(v2.416 SanSwitchTool `closeDetail` —
+      // 포트 상세를 열면 ReferenceError 로 특수기능 전체 크래시, 2.416~2.420 실제 장애)를 CI 이전에 잡는다.
+      'no-undef': 'error',
     },
   },
 ];

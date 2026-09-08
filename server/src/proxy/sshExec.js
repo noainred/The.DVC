@@ -46,10 +46,19 @@ function connect({ host, port = 22, username, password, privateKey, passphrase, 
       }
       reject(e);
     });
+    // 준비(ready) 전에 연결이 닫히면(서버가 핸드셰이크/인증 중 소켓을 끊는 경우 ssh2 는 'error' 없이 'close' 만 낼 수 있다)
+    // 반드시 reject 한다 — 안 하면 이 Promise 가 영원히 미결로 남아 호출자가 매달린다(v2.421 CI 에서 실제 발생:
+    // 'Promise resolution is still pending but the event loop has already resolved').
+    let settled = false;
+    conn.once('ready', () => { settled = true; });
+    conn.once('error', () => { settled = true; });
+    conn.on('close', () => {
+      if (trace) say(`SSH 연결 종료 +${Date.now() - t0}ms`, 'debug');
+      if (!settled) { settled = true; signal?.removeEventListener('abort', onAbort); reject(new Error('SSH 연결이 준비 전에 닫혔습니다(서버가 세션을 끊음 — 접속 제한/알고리즘/배너 확인)')); }
+    });
     if (trace) {
       conn.on('banner', (msg) => say(`서버 배너: ${String(msg).trim().slice(0, 300)}`));
       conn.on('handshake', (n) => say(`핸드셰이크 완료 +${Date.now() - t0}ms — kex=${n?.kex} hostkey=${n?.serverHostKey} cipher=${n?.cs?.cipher} mac=${n?.cs?.mac || '(AEAD)'}`));
-      conn.on('close', () => say(`SSH 연결 종료 +${Date.now() - t0}ms`, 'debug'));
     }
     // password 대신 keyboard-interactive 만 허용하는 서버 지원(ssh2는 명시적으로 켜야 시도).
     // 같은 비밀번호로 모든 프롬프트에 응답한다.

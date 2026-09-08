@@ -8,6 +8,7 @@ import { stateLabel, stateTone, opticalHealth, errorLevel, capacityLevel, aggreg
   throughputText, filterPorts, shortDeviceName, saturationPct, saturationLevel, bytesPerSecText,
   toChartRows, topSeries, bps, sortPorts, nextSort, sortRows, seriesStats,
   RX_WARN_DBM, RX_BAD_DBM } from './sanSwitchPorts.js';
+import { STable } from '../../components/STable.jsx';
 
 /**
  * 특수기능 › SAN 스위치 모니터링(v2.410 — 사용자 요구 'Brocade SAN switch 포트 모니터링 및
@@ -206,7 +207,7 @@ export default function SanSwitchTool() {
 
       {/* 스위치 목록 */}
       <div className="table-wrap">
-        <table>
+        <STable>
           <thead>
             <tr>
               <th>스위치</th><th>법인</th><th>모델</th><th>FOS</th><th>Domain</th><th>상태</th>
@@ -262,7 +263,7 @@ export default function SanSwitchTool() {
               {rows.length ? '검색어/법인 필터에 맞는 스위치가 없습니다 — 검색어를 지우거나 법인 칩을 해제하세요.' : "등록된 SAN 스위치가 없습니다. 오른쪽 위 '+ 스위치 등록'으로 추가하세요."}
             </td></tr>}
           </tbody>
-        </table>
+        </STable>
       </div>
 
       <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>
@@ -272,7 +273,7 @@ export default function SanSwitchTool() {
       </div>
 
       {form && <DeviceForm {...{ form, setForm, data, save, busy, runTest, test, setTest, stopTestPoll }} />}
-      {detail && <PortDetail {...{ detail, setDetail, portFilter, setPortFilter, portQ, setPortQ, infoOpen, setInfoOpen, tab, setTab, sort, setSort }} />}
+      {detail && <PortDetail {...{ detail, setDetail, closeDetail, portFilter, setPortFilter, portQ, setPortQ, infoOpen, setInfoOpen, tab, setTab, sort, setSort }} />}
       {dcPerf && <DcStoragePerf dcPerf={dcPerf} onClose={() => setDcPerf(null)} />}
     </>
   );
@@ -751,7 +752,7 @@ function PerfPanel({ deviceId, ports }) {
 
           {/* 분석 표 — 평균/최대, 그리고 포화도(협상 속도 대비 %). 절대값만으로는 증설 판단이 안 된다. */}
           <div className="table-wrap" style={{ maxHeight: '28vh', overflow: 'auto' }}>
-            <table>
+            <STable>
               <thead>
                 <tr>
                   <SortTh k="name" label={view === 'storage' ? '스토리지' : '포트'} sort={sort} setSort={setSort} />
@@ -790,7 +791,7 @@ function PerfPanel({ deviceId, ports }) {
                   );
                 })}
               </tbody>
-            </table>
+            </STable>
           </div>
         </>
       )}
@@ -982,7 +983,7 @@ function DcStoragePerf({ dcPerf, onClose }) {
           </div>
 
           <div className="table-wrap" style={{ maxHeight: '40vh', overflow: 'auto' }}>
-            <table style={{ tableLayout: 'fixed', width: '100%' }}>
+            <STable style={{ tableLayout: 'fixed', width: '100%' }}>
               <colgroup>
                 {showDcCol && <col style={{ width: 110 }} />}
                 <col /><col style={{ width: 150 }} /><col style={{ width: 70 }} />
@@ -1027,7 +1028,7 @@ function DcStoragePerf({ dcPerf, onClose }) {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </STable>
           </div>
           <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
             합산 대상 스위치: {data.switches.map((s) => s.name).join(' · ')}
@@ -1039,7 +1040,10 @@ function DcStoragePerf({ dcPerf, onClose }) {
 }
 
 /** 포트 상세 — 이 화면이 '포트 모니터링'의 본체다. */
-function PortDetail({ detail, setDetail, portFilter, setPortFilter, portQ, setPortQ, infoOpen, setInfoOpen, tab, setTab, sort, setSort }) {
+// ⚠ closeDetail 은 상위 컴포넌트의 함수라 **prop 으로 받아야** 한다 — v2.416 에서 응답 순서 가드를 넣으며 상위에만 정의하고
+//   여기서 그대로 참조해, 포트 상세를 열면 ReferenceError 로 특수기능 화면 전체가 죽었다(v2.416~2.420 실제 장애, v2.421 수정).
+//   eslint 에 no-undef 가 없어 잡지 못했다 → eslint.config.js 에 no-undef 추가.
+function PortDetail({ detail, setDetail, closeDetail, portFilter, setPortFilter, portQ, setPortQ, infoOpen, setInfoOpen, tab, setTab, sort, setSort }) {
   const d = detail;
   const list = d.ports?.list || [];
   const unit = d.extra?.rateUnit || 'fps';
@@ -1106,7 +1110,7 @@ function PortDetail({ detail, setDetail, portFilter, setPortFilter, portQ, setPo
               칸을 밀고 나가 옆의 CRC 열 위에 겹쳐 그려졌다. 너비를 고정해야 어떤 값이 와도
               칸을 침범하지 못한다 — 긴 값은 셀 안에서 말줄임 처리하고 전문은 툴팁에 남긴다. */}
           <div className="table-wrap" style={{ maxHeight: '58vh', overflow: 'auto' }}>
-            <table style={{ tableLayout: 'fixed', width: '100%' }}>
+            <STable style={{ tableLayout: 'fixed', width: '100%' }}>
               <colgroup>
                 <col style={{ width: 96 }} />{/* 포트 */}
                 <col style={{ width: 74 }} />{/* 상태 */}
@@ -1175,7 +1179,7 @@ function PortDetail({ detail, setDetail, portFilter, setPortFilter, portQ, setPo
                 })}
                 {!filtered.length && <tr><td colSpan={9} className="muted" style={{ textAlign: 'center', padding: 20 }}>조건에 맞는 포트가 없습니다.</td></tr>}
               </tbody>
-            </table>
+            </STable>
           </div>
 
           </>}
