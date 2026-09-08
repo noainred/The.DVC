@@ -9,29 +9,17 @@ import { fetchRemoteVersions, listLocalPackages, downloadPackage } from '../../u
 import { getPackageSettings, savePackageSettings } from '../../upgrade/packageSettings.js';
 import { listTargets, getTargetRaw, saveTarget, removeTarget, recordResult, findTargetByHost, listTargetsRaw } from '../../agent/deployRegistry.js';
 import { targetsToCsv, sampleCsv as deploySampleCsv, parseTargetsCsv, analyzeTargetsImport } from '../../agent/deployCsv.js';
+import { parseTargetsText, analyzeBulkDeploy, targetsToText, sampleText } from '../../agent/deployText.js';   // 대량 배포 텍스트(v2.432)
+import { startBulkDeploy, getRun, listRuns, cancelRun, activeRunId } from '../../agent/bulkDeploy.js';        // 대량 배포 실행기(v2.432)
+import { autoRegisterCollector } from '../../agent/autoRegister.js';
 import { logAudit } from '../../audit.js';
+import { ipBlockReason } from '../../collector/registry.js';
 import { centralTokenInfo } from '../../central/token.js';
 import path from 'node:path';
-import { addCollector, updateCollector, loadCollectors } from '../../collector/registry.js';
-import { pullNow } from '../../collector/puller.js';
-import { adminOnly, ensureCollectorDatacenter, requireSettingsOwner } from './shared.js';
+import { adminOnly, requireSettingsOwner } from './shared.js';
 
 
-// 배포 성공 후, 그 호스트를 중앙에 '수집 서버'로 자동 등록(설치+등록 원클릭).
-// collectorToken이 있고 registerCollector!==false 일 때만. 같은 id면 갱신.
-function autoRegisterCollector(target, portalPort) {
-  if (!target?.collectorToken || target.registerCollector === false) return null;
-  const port = Number(portalPort) || 4000;
-  const id = (String(target.collectorDatacenter || target.agentName || target.host || '').trim().toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '')) || `col-${target.host}`;
-  // v2.428: 중계 엣지 경유 대상(SSH 포트≠22 등)은 host:portalPort 가 중앙에서 닿는 주소가 아니다 — 광고 URL 이 있으면 그것을 쓴다.
-  const url = String(target.advertiseUrl || '').trim().replace(/\/+$/, '') || `http://${target.host}:${port}`;
-  const body = { id, name: target.agentName || target.collectorDatacenter || target.host, datacenter: target.collectorDatacenter || '', url, token: target.collectorToken, enabled: true };
-  const exists = loadCollectors().find((c) => c.id === id);
-  const r = exists ? updateCollector(id, body) : addCollector(body);
-  if (r.ok) { ensureCollectorDatacenter(r.collector); pullNow().catch(() => {}); }
-  return r.ok ? { registered: true, id, url, updated: !!exists } : { registered: false, reason: r.reason };
-}
+// 배포 성공 후의 수집 서버 자동 등록은 agent/autoRegister.js 로 이관(v2.432) — 단건·대량 배포가 같은 규칙을 쓴다.
 
 export function registerDeployLlm(adminRouter) {
 
@@ -187,6 +175,84 @@ adminRouter.post('/agent-deploy/deploy-all', adminOnly, async (_req, res) => {
     results.push({ id: t.id, host: t.host, agentName: t.agentName, ok: r.ok, active: r.active, reason: r.reason });
   }
   res.json({ ok: true, deployed: results.filter((r) => r.ok).length, total: results.length, results });
+});
+
+/* ── 대량 배포(v2.432, 사용자 요구 '엣지노드 배포를 대용량으로 할 수 있게 import export text 방식과
+ * 입력 전에 배포하는 기능') ────────────────────────────────────────────────────────────────
+ * 기존 CSV 가져오기(v2.339)는 '파일 업로드 → 대상 저장' 전용이고, deploy-all 은 저장된 대상만
+ * 순차 배포하며 응답을 끝까지 붙잡는다. 여기서는 **붙여넣은 텍스트로 저장 없이 즉시 배포**하고
+ * runId 폴링으로 진행률을 본다. 성공한 노드만 선택적으로 저장·수집 서버 등록.
+ * 보안: adminOnly + 감사로그, 응답에 자격증명 없음(auth 방식만), host 는 SSRF 가드를 통과해야 배포된다.
+ */
+adminRouter.post('/agent-deploy/bulk/preview', adminOnly, (req, res) => {
+  try {
+    const text = String(req.body?.text || '');
+    if (text.length > 1_000_000) return res.status(400).json({ ok: false, reason: '입력이 1MB 를 넘습니다.' });
+    const { rows, skipped, header } = parseTargetsText(text, req.body?.defaults || {});
+    if (!rows.length) return res.status(400).json({ ok: false, reason: '인식된 행이 없습니다. host 열(첫 열)을 확인하거나 샘플을 받아 형식을 맞추세요.', skipped: skipped.slice(0, 50) });
+    const { report, summary } = analyzeBulkDeploy(rows, {
+      existingId: (h, p, u) => findTargetByHost(h, p, u)?.id,
+      blockReason: (h) => ipBlockReason(h),
+    });
+    res.json({ ok: true, report, summary, skipped: skipped.slice(0, 50), header: !!header, total: rows.length });
+  } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
+});
+
+adminRouter.post('/agent-deploy/bulk/run', adminOnly, (req, res) => {
+  try {
+    const text = String(req.body?.text || '');
+    if (text.length > 1_000_000) return res.status(400).json({ ok: false, reason: '입력이 1MB 를 넘습니다.' });
+    const { rows } = parseTargetsText(text, req.body?.defaults || {});
+    const { report } = analyzeBulkDeploy(rows, {
+      existingId: (h, p, u) => findTargetByHost(h, p, u)?.id,
+      blockReason: (h) => ipBlockReason(h),
+    });
+    const badLines = new Set(report.filter((r) => r.action === 'error').map((r) => r.line));
+    const only = Array.isArray(req.body?.onlyLines) && req.body.onlyLines.length ? new Set(req.body.onlyLines.map(Number)) : null;
+    const targets = rows.filter((r) => !badLines.has(r._line) && (!only || only.has(r._line)));
+    if (!targets.length) return res.status(400).json({ ok: false, reason: '배포 가능한 행이 없습니다(미리보기의 오류를 먼저 해결하세요).', errors: report.filter((r) => r.action === 'error').slice(0, 50) });
+    const r = startBulkDeploy(targets, {
+      saveTargets: req.body?.saveTargets !== false,
+      registerCollector: req.body?.registerCollector !== false,
+      portalPort: req.body?.portalPort, installerPath: req.body?.installerPath,
+      by: req.user?.username || '',
+    });
+    logAudit({ user: req.user?.username, action: '엣지 노드 대량 배포 시작',
+      detail: `${targets.length}대 · 저장=${req.body?.saveTargets !== false} 수집등록=${req.body?.registerCollector !== false} 호스트=${targets.slice(0, 20).map((t) => t.host).join(',')}${targets.length > 20 ? ' …' : ''}`,
+      ip: req.ip || '' });
+    res.status(r.ok ? 200 : 409).json({ ...r, total: targets.length, skippedErrors: report.filter((x) => x.action === 'error').length });
+  } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
+});
+
+adminRouter.get('/agent-deploy/bulk', adminOnly, (_req, res) => res.json({ ok: true, runs: listRuns(), activeRunId: activeRunId() }));
+adminRouter.get('/agent-deploy/bulk/:runId', adminOnly, (req, res) => {
+  const r = getRun(req.params.runId);
+  if (!r) return res.status(404).json({ ok: false, reason: '실행을 찾을 수 없습니다(최근 5회만 보관).' });
+  res.json(r);
+});
+adminRouter.post('/agent-deploy/bulk/:runId/cancel', adminOnly, (req, res) => {
+  const r = cancelRun(req.params.runId);
+  if (r.ok) logAudit({ user: req.user?.username, action: '엣지 노드 대량 배포 취소', detail: req.params.runId, ip: req.ip || '' });
+  res.status(r.ok ? 200 : 400).json(r);
+});
+
+/* 텍스트 내보내기 — 붙여넣기 입력칸에 그대로 다시 넣을 수 있는 형식(왕복). 비밀 포함은 소유자 게이트. */
+adminRouter.get('/agent-deploy/targets/export.txt', adminOnly, (req, res) => {
+  const withSecrets = String(req.query.secrets || '') === '1';
+  const send = () => {
+    const list = withSecrets ? listTargetsRaw() : listTargets();
+    logAudit({ user: req.user?.username, action: withSecrets ? '배포 대상 텍스트 내보내기(비밀 포함)' : '배포 대상 텍스트 내보내기', detail: `${list.length}대`, ip: req.ip || '' });
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="agent-deploy-targets${withSecrets ? '-with-secrets' : ''}.txt"`);
+    res.send(targetsToText(list, { includeSecrets: withSecrets }));
+  };
+  if (withSecrets) return requireSettingsOwner(req, res, send);
+  send();
+});
+adminRouter.get('/agent-deploy/targets/sample.txt', adminOnly, (_req, res) => {
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="agent-deploy-bulk-sample.txt"');
+  res.send(sampleText());
 });
 
 // --- Local LLM (Ollama) config for natural-language search ---

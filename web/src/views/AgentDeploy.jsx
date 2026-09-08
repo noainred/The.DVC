@@ -4,6 +4,7 @@ import { Loading } from '../components/ui.jsx';
 // CSV 일괄 관리(v2.339) — 검증 드라이런 → 덮어쓰기 확인 → 실행. 공용 모달(수집 서버 CSV UX).
 import { CsvExportModal, CsvImportModal } from '../components/CsvBulkModals.jsx';
 import { STable } from '../components/STable.jsx';
+import BulkDeploy from './BulkDeploy.jsx';   // 대량 배포(텍스트 붙여넣기 → 등록 없이 즉시 설치, v2.432)
 
 const EMPTY = {
   host: '', port: 22, username: 'root', password: '', privateKey: '',
@@ -22,7 +23,7 @@ export default function AgentDeploy() {
   const [pkg, setPkg] = useState(null);
   const [dl, setDl] = useState({ kinds: ['installer_cent9'], version: '', busy: false });
   const [pkgCfg, setPkgCfg] = useState(null); // { baseUrl, dir } editable
-  const [subtab, setSubtab] = useState('status'); // status(에이전트 현황·기본) | add(에이전트 추가) | packages(설치 패키지 자동 다운로드)
+  const [subtab, setSubtab] = useState('status'); // status(에이전트 현황·기본) | add(에이전트 추가) | bulk(대량 배포) | packages(설치 패키지 자동 다운로드)
   const [sort, setSort] = useState({ key: 'agentName', dir: 'asc' }); // 에이전트 현황 표 헤더 정렬
   const [csvModal, setCsvModal] = useState(null); // 'export' | 'import' | null — 대상 CSV 일괄 관리(v2.339)
 
@@ -160,8 +161,11 @@ export default function AgentDeploy() {
       <div className="flex gap wrap" style={{ marginBottom: 12 }}>
         <button className={subtab === 'status' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 14px' }} onClick={() => setSubtab('status')}>📋 에이전트 현황</button>
         <button className={subtab === 'add' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 14px' }} onClick={() => setSubtab('add')}>➕ 에이전트 추가/변경</button>
+        <button className={subtab === 'bulk' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 14px' }} onClick={() => setSubtab('bulk')}>🚀 대량 배포 (텍스트 붙여넣기)</button>
         <button className={subtab === 'packages' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 14px' }} onClick={() => setSubtab('packages')}>⬇ 에이전트 설치 패키지 자동 다운로드</button>
       </div>
+
+      {subtab === 'bulk' && <BulkDeploy />}
 
       {subtab === 'packages' && (
       <div className="card" style={{ marginBottom: 12 }}>
