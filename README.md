@@ -448,6 +448,10 @@ HostMonitor 의 RMA(Remote Monitoring Agent) 를 참고한 **엣지 별도 프�
   (봉인 저장·비밀 무반환·OTP 재인증·법인/대상 호스트 사용 범위·감사). RMA `ssh-exec` 명령·`ssh` 점검은 '저장된 계정 사용'을
   켜면 그 계정을, 끄면 1회 입력 계정을 쓴다. 비밀은 엣지가 실행 직전 브로커(`/api/central/rma-credential`)에서 받아 메모리에서만
   사용한다. 엣지 `RMA_ALLOW_SSH=true` + `RMA_SSH_TARGETS` 필요.
+- **HAProxy 경로 점검(v2.430, 특수기능)**: 중계 엣지 호스트(수집 서버 URL 자동 + 수동) × 포트 프로파일(4000/4065/4066/4067/4068/4001)을
+  주기 점검(`relaycheck/`) — TCP → 프로토콜(SSH 배너·TLS/HTTP·포탈 ping) → 정체 대조(IRS 포트가 중계 엣지 자신으로 되돌아오는지,
+  HQ 포트가 이 중앙 인스턴스에 닿는지: `/api/health` 의 `instance`). 연속 N회 실패 시 알림 채널 발화·복구 알림, 실패 행에
+  원인 후보·조치·haproxy.cfg 예시. `RELAYCHECK_CONCURRENCY`(기본 4).
 - **구성도 미스매치 12건 수정(v2.428)**: 강제 토큰 동기화가 포워더 유닛(haproxy 등)의 EnvironmentFile 을 고치고 재시작하던 사고
   차단(`portalUnitAllowed`) · 같은 host 의 SSH 대상이 여럿이면 자동 선택 금지(후보 반환, `pickSshTarget`) · 배포 폼/env 에
   `EDGE_ADVERTISE_URL` · 자기등록 400 은 30분 백오프 · 정체 대조에서 DC 제외 + 다른 항목 id 와 같으면 불일치 · `EDGE_ADVERTISE_URL`

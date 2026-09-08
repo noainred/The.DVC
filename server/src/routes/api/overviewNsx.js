@@ -1,4 +1,5 @@
 // 헬스/개요 집계 + NSX 조회 — api.js(구 2,445줄) 분할(v2.283.0). 본문은 원본 그대로, 등록 순서는 api.js 호출 순서가 보존한다.
+import { instanceId } from '../../instanceId.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { currentVersion, config } from '../../config.js';
@@ -17,6 +18,8 @@ api.get('/health', (_req, res) => {
   const connected = byStatus('connected');
   const g = snap.rollups?.global || {};
   res.json({
+    instance: instanceId(), agent: config.agent?.name || '', // v2.429: HAProxy 경로 점검이 '이 응답이 나 자신인지' 대조
+
     status: 'ok',
     version: currentVersion(),
     source: snap.source,
