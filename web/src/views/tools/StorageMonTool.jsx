@@ -58,6 +58,66 @@ function failReason(s) {
  * 원문: — 값 계산은 storageColumns.cellValue(순수, 테스트로 고정)가 하고
  * 여기서는 '어떻게 보일지'만 정한다. 값이 null 이면 '—'(0 으로 위장 금지).
  */
+/**
+ * 한 타입만 담긴 표(컬럼이 그 타입 전용). ⚠ 모듈 최상위 컴포넌트(v2.425, 리뷰 #7) — 예전에는 StorageMonTool 렌더 함수
+ * 안에서 정의돼 30초 폴링마다 새 함수 타입이 되어 서브트리가 **재마운트**됐다(STable 정렬 상태·포커스·스크롤 소실).
+ */
+function TypedTable({ list, type, caption, ctx, typeLabel }) {
+  const cols = columnsFor(type);
+  return (
+    <div style={{ marginBottom: caption ? 10 : 0 }}>
+      {caption && (
+        <div className="muted" style={{ fontSize: 12, margin: '0 0 4px 2px' }}>
+          <span className="badge blue">{typeLabel(type)}</span> <span style={{ marginLeft: 4 }}>{list.length}대</span>
+        </div>
+      )}
+      {/* ⚠ 표에 자체 세로 스크롤(max-height)을 다시 넣지 말 것 — 장비가 20대만 넘어도 페이지
+          스크롤과 표 스크롤이 이중으로 겹쳐 목록을 훑기 불편하다(2026-09-02 사용자 지적). */}
+      <div className="table-wrap">
+        <STable>
+          <thead><tr>{cols.map((c) => <th key={c.key} className={c.align === 'right' ? 'right' : undefined} style={c.align === 'right' ? { textAlign: 'right' } : undefined}>{c.label}</th>)}</tr></thead>
+          <tbody>
+            {list.length === 0 && <tr><td colSpan={cols.length} className="center muted" style={{ padding: 20 }}>등록된 장비가 없습니다 — "+ 장비 등록"으로 시작하세요.</td></tr>}
+            {list.map((r) => (
+              <tr key={r.id} style={{ opacity: r.enabled === false ? 0.5 : 1 }}>
+                {/* data-sort(v2.425): 셀이 컴포넌트라 STable 이 텍스트를 못 읽는다 — 정렬 값은 storageColumns.cellValue 로 준다. */}
+                {cols.map((c) => <Cell key={c.key} col={c} r={r} ctx={ctx} data-sort={sortValueOf(c.key, r)} />)}
+              </tr>
+            ))}
+          </tbody>
+        </STable>
+      </div>
+    </div>
+  );
+}
+
+/** 정렬 값 — 숫자/문자/null 을 STable 이 인식하는 문자열로(null 은 '' → 항상 뒤). */
+function sortValueOf(key, r) {
+  if (key === 'status') return r.snap ? (r.snap.ok ? '2' : '0') : '1';
+  if (key === 'actions') return '';
+  const v = cellValue(key, r);
+  return v == null ? '' : String(v);
+}
+
+/**
+ * 장비 표(v2.406, 사용자 요구 '각각의 스토리지 전용 컬럼').
+ * 스토리지 타입마다 의미 있는 지표가 다르다 — PowerStore 는 Physical/Logical/Data Reduction,
+ * Isilon 은 HDD/SSD 풀, VPLEX 는 자체 용량이 없어 디렉터·헬스다. 하나의 고정 컬럼 집합으로는
+ * 어떤 타입엔 빈 칸이, 어떤 타입엔 필요한 열이 없다.
+ * 그래서 **목록에 여러 타입이 섞여 있으면 타입별로 표를 나눠** 각자의 전용 컬럼으로 그린다.
+ * 단일 타입이면 표 하나(제목 없이) — 법인별/타입별 뷰에서 불필요한 머리글이 늘지 않게.
+ */
+function DeviceTable({ list, ctx, typeLabel }) {
+  const types = [...new Set(list.map((r) => r.type))];
+  if (list.length === 0) return <TypedTable list={list} type={null} ctx={ctx} typeLabel={typeLabel} />;
+  if (types.length === 1) return <TypedTable list={list} type={types[0]} ctx={ctx} typeLabel={typeLabel} />;
+  // 여러 타입 — 타입별 표로 나눈다(타입 이름 순서 고정: 화면이 갱신마다 흔들리지 않게).
+  const byType = types
+    .map((t) => [t, list.filter((r) => r.type === t)])
+    .sort((a, b) => String(typeLabel(a[0])).localeCompare(String(typeLabel(b[0]))));
+  return <>{byType.map(([t, rows]) => <TypedTable key={t} list={rows} type={t} caption ctx={ctx} typeLabel={typeLabel} />)}</>;
+}
+
 function Cell({ col, r, ctx }) {
   const { setDetail, typeLabel, dcName, busy, collectNow, setForm, remove } = ctx;
   const s = r.snap;
@@ -274,54 +334,6 @@ export default function StorageMonTool() {
   // 셀 렌더 컨텍스트 — Cell 은 최상위 컴포넌트(아래 참조)라 매 렌더 재마운트되지 않는다(v2.417).
   const cellCtx = { setDetail, typeLabel, dcName, busy, collectNow, setForm, remove };
 
-  /** 한 타입만 담긴 표(컬럼이 그 타입 전용). */
-  const TypedTable = ({ list, type, caption }) => {
-    const cols = columnsFor(type);
-    return (
-      <div style={{ marginBottom: caption ? 10 : 0 }}>
-        {caption && (
-          <div className="muted" style={{ fontSize: 12, margin: '0 0 4px 2px' }}>
-            <span className="badge blue">{typeLabel(type)}</span> <span style={{ marginLeft: 4 }}>{list.length}대</span>
-          </div>
-        )}
-        {/* ⚠ 표에 자체 세로 스크롤(max-height)을 다시 넣지 말 것 — 장비가 20대만 넘어도 페이지
-            스크롤과 표 스크롤이 이중으로 겹쳐 목록을 훑기 불편하다(2026-09-02 사용자 지적). */}
-        <div className="table-wrap">
-          <STable>
-            <thead><tr>{cols.map((c) => <th key={c.key} className={c.align === 'right' ? 'right' : undefined} style={c.align === 'right' ? { textAlign: 'right' } : undefined}>{c.label}</th>)}</tr></thead>
-            <tbody>
-              {list.length === 0 && <tr><td colSpan={cols.length} className="center muted" style={{ padding: 20 }}>등록된 장비가 없습니다 — "+ 장비 등록"으로 시작하세요.</td></tr>}
-              {list.map((r) => (
-                <tr key={r.id} style={{ opacity: r.enabled === false ? 0.5 : 1 }}>
-                  {cols.map((c) => <Cell key={c.key} col={c} r={r} ctx={cellCtx} />)}
-                </tr>
-              ))}
-            </tbody>
-          </STable>
-        </div>
-      </div>
-    );
-  };
-
-  /**
-   * 장비 표(v2.406, 사용자 요구 '각각의 스토리지 전용 컬럼').
-   * 스토리지 타입마다 의미 있는 지표가 다르다 — PowerStore 는 Physical/Logical/Data Reduction,
-   * Isilon 은 HDD/SSD 풀, VPLEX 는 자체 용량이 없어 디렉터·헬스다. 하나의 고정 컬럼 집합으로는
-   * 어떤 타입엔 빈 칸이, 어떤 타입엔 필요한 열이 없다.
-   * 그래서 **목록에 여러 타입이 섞여 있으면 타입별로 표를 나눠** 각자의 전용 컬럼으로 그린다.
-   * 단일 타입이면 표 하나(제목 없이) — 법인별/타입별 뷰에서 불필요한 머리글이 늘지 않게.
-   */
-  const DeviceTable = ({ list }) => {
-    const types = [...new Set(list.map((r) => r.type))];
-    if (list.length === 0) return <TypedTable list={list} type={null} />;
-    if (types.length === 1) return <TypedTable list={list} type={types[0]} />;
-    // 여러 타입 — 타입별 표로 나눈다(타입 이름 순서 고정: 화면이 갱신마다 흔들리지 않게).
-    const byType = types
-      .map((t) => [t, list.filter((r) => r.type === t)])
-      .sort((a, b) => String(typeLabel(a[0])).localeCompare(String(typeLabel(b[0]))));
-    return <>{byType.map(([t, rows]) => <TypedTable key={t} list={rows} type={t} caption />)}</>;
-  };
-
   return (
     <div>
       <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 12 }}>
@@ -453,7 +465,7 @@ export default function StorageMonTool() {
       {importOpen && <CsvImport onClose={() => setImportOpen(false)} onDone={() => { setImportOpen(false); load(); }} />}
       {exportOpen && <CsvExport onClose={() => setExportOpen(false)} />}
 
-      {view === 'devices' && <DeviceTable list={shown} />}
+      {view === 'devices' && <DeviceTable list={shown} ctx={cellCtx} typeLabel={typeLabel} />}
       {/* 통합 추이(v2.380) — 전체 합산 + 장비별 선택. 기간 12시간/24시간/1주 등.
           여기는 검색을 적용하지 않는다(전체 합산 차트라 부분집합이면 '전체'가 거짓이 된다). */}
       {view === 'trend' && <StorageTrendPanel devices={rows} />}
@@ -463,14 +475,14 @@ export default function StorageMonTool() {
         return (
           <div key={dc} style={{ marginBottom: 14 }}>
             <div className="section-title" style={{ fontSize: 14 }}>🏢 {dc} <span className="muted" style={{ fontSize: 12, fontWeight: 400 }}>— 장비 {list.length} · {tbFmt(u)} / {tbFmt(t)}{t ? ` (${Math.round((u / t) * 100)}%)` : ''}</span></div>
-            <DeviceTable list={list} />
+            <DeviceTable list={list} ctx={cellCtx} typeLabel={typeLabel} />
           </div>
         );
       })}
       {view === 'type' && groupShown((r) => typeLabel(r.type)).map(([ty, list]) => (
         <div key={ty} style={{ marginBottom: 14 }}>
           <div className="section-title" style={{ fontSize: 14 }}>📦 {ty} <span className="muted" style={{ fontSize: 12, fontWeight: 400 }}>— 장비 {list.length}</span></div>
-          <DeviceTable list={list} />
+          <DeviceTable list={list} ctx={cellCtx} typeLabel={typeLabel} />
         </div>
       ))}
 

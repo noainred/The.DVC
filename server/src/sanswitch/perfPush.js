@@ -17,7 +17,7 @@ import zlib from 'node:zlib';
 import { promisify } from 'node:util';
 import { config } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
-import { samplesAfter, metaFor } from './perfDb.js';
+import { samplesAfter, metaFor, maxRowid } from './perfDb.js';
 import { loadPerfSettings } from './perfSettings.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
@@ -53,24 +53,56 @@ export function chunkRows(rows, maxBytes = CHUNK_BYTES) {
   return chunks;
 }
 
+/** meta 행을 크기 기준으로 청크(순수, v2.425) — 청크 0 에 전량을 얹어 1MB 를 넘기던 결함(리뷰 #2) 수정. */
+export function chunkMeta(meta, maxBytes = CHUNK_BYTES) {
+  const chunks = []; let cur = []; let size = 2;
+  for (const m of meta) {
+    const n = JSON.stringify([m.d, m.p, m.ts, m.name, m.wwn, m.speed, m.type]).length + 1;
+    if (cur.length && size + n > maxBytes) { chunks.push(cur); cur = []; size = 2; }
+    cur.push(m); size += n;
+  }
+  if (cur.length) chunks.push(cur);
+  return chunks;
+}
+
+/**
+ * 커서 정합(순수, v2.425): port_perf 는 rowid 테이블이라 전량 prune/DB 재생성 뒤 rowid 가 1 부터 다시 시작한다.
+ * 커서가 현재 MAX(rowid) 보다 크면 낡은 커서 — 0 으로 되돌린다(중앙이 (device,ts,port) 중복을 건너뛰므로 재전송 안전).
+ */
+export function reconcileCursor(cursor, max) {
+  const c = Number(cursor) || 0;
+  if (max == null) return c; // DB 비활성 → 판단 불가, 유지
+  const m = Number(max);
+  if (!Number.isFinite(m)) return c;
+  return c > m ? 0 : c;
+}
+
 export async function pushPerfNow() {
   if (!config.agent.centralUrl || !config.agent.centralToken) return { ok: false, reason: 'push 비활성화(CENTRAL_URL/TOKEN 미설정)' };
   if (_busy) return { ok: false, reason: '이전 push 진행 중' };
   _busy = true;
   try {
-    const from = loadCursor();
+    let from = loadCursor();
+    const max = await maxRowid();
+    const rec = reconcileCursor(from, max);
+    if (rec !== from) { console.warn(`[sanswitch-perf-push] 커서(${from})가 현재 최대 rowid(${max})보다 큼 — 표가 비워졌다 재적재된 것으로 보고 0 으로 되돌립니다.`); from = rec; saveCursor(0); }
     const { rows, maxRowid, unavailable } = await samplesAfter(from, MAX_ROWS);
     if (unavailable) { _last = { at: Date.now(), sent: 0, reason: 'DB 비활성' }; return { ok: false, reason: 'DB 비활성' }; }
     if (!rows.length) { _last = { at: Date.now(), sent: 0, cursor: from }; return { ok: true, sent: 0 }; }
     const meta = await metaFor(rows.map((r) => r.d));
-    const chunks = chunkRows(rows);
+    // meta 는 별도 청크로 먼저(각 청크가 예산 안), 그 뒤 표본 청크 — 어느 요청도 700KB 예산을 넘지 않는다.
+    const payloads = [
+      ...chunkMeta(meta).map((m) => ({ rows: [], meta: m })),
+      ...chunkRows(rows).map((r) => ({ rows: r, meta: [] })),
+    ];
+    const chunks = payloads;
     let sent = 0, bytes = 0, gzBytes = 0;
     for (let i = 0; i < chunks.length; i++) {
-      const c = chunks[i];
+      const c = chunks[i].rows;
       const json = Buffer.from(JSON.stringify({
         agent: config.agent.name, chunk: i, chunks: chunks.length,
         rows: c.map((r) => [r.d, r.ts, r.p, r.b]),
-        meta: i === 0 ? meta.map((m) => [m.d, m.p, m.ts, m.name, m.wwn, m.speed, m.type]) : [],
+        meta: chunks[i].meta.map((m) => [m.d, m.p, m.ts, m.name, m.wwn, m.speed, m.type]),
       }));
       let body = json;
       const hdrs = { 'Content-Type': 'application/json', 'X-Agent-Name': config.agent.name, 'X-Central-Token': config.agent.centralToken };
@@ -80,7 +112,7 @@ export async function pushPerfNow() {
       if (res.status === 404) throw new Error('중앙에 sanswitch-perf 엔드포인트 없음(중앙이 v2.423 미만)');
       if (!res.ok) throw new Error(`sanswitch-perf <- ${res.status} (청크 ${i + 1}/${chunks.length})`);
       sent += c.length;
-      saveCursor(Number(c[c.length - 1].rowid)); // 청크마다 커서 전진 — 다음 청크가 실패해도 성공분은 재전송하지 않는다
+      if (c.length) saveCursor(Number(c[c.length - 1].rowid)); // 청크마다 커서 전진 — 다음 청크가 실패해도 성공분은 재전송하지 않는다
     }
     _last = { at: Date.now(), sent, chunks: chunks.length, bytes, gzBytes, cursor: maxRowid, more: rows.length >= MAX_ROWS };
     // 상한만큼 읽었으면 밀린 표본이 더 있을 수 있다 — 다음 틱을 기다리지 않고 이어서 한 번 더.

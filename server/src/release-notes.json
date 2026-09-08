@@ -1,6 +1,21 @@
 {
   "notes": [
     {
+      "version": "2.427.0",
+      "date": "2026-09-08",
+      "title": "리뷰 버그 1~7 수정 — 브로커 재봉인 블로킹·중계 커서/meta·스토리지 타임아웃 취소·403 폴링·표 정렬 2건",
+      "notes": [
+        "#1 [높음] 통합 계정 브로커 인출마다 `credentials.json` 전체를 scrypt 로 재봉인(항목당 200~400ms 동기)하던 결함 — 카운터(useCount/lastUsedAt/lastUsedBy)를 별도 `credentials-usage.json`(비밀 없음)에 5초 디바운스로 저장. 비밀 파일은 등록/수정/삭제 때만 다시 쓴다. 계정 30개면 요청 1건당 6~25초 메인 루프 정지가 사라진다.",
+        "#2 [높음] 엣지 포트 사용량 중계 커서(rowid)가 표 전량 prune/재생성 뒤 rowid 재시작을 감지 못해 중계가 영구 정지하던 결함 — push 진입 시 MAX(rowid) 와 비교해 커서가 크면 0 으로 되돌린다(중앙이 (device,ts,port) 중복을 건너뛰므로 재전송 안전).",
+        "#3 [높음] 중계 청크 0 에 port_meta 전량을 얹어 700KB 예산을 넘겨(디렉터 5대 ≈ 330KB + 표본 700KB) 중앙 1MB 한도에 413 을 반복하던 결함 — meta 를 별도 청크로 예산 안에서 나눠 먼저 보내고 표본 청크가 뒤따른다(빈 표본 청크는 커서를 건드리지 않음).",
+        "#4 [높음] 스토리지 폴러는 `device._signal`, 연결 테스트는 `opts.signal` 로만 넘겨 REST 수집기(PowerStore/Unity/PowerMax/VPLEX)는 폴러 타임아웃에, SSH 수집기는 테스트 타임아웃에 끊기지 않던 결함 — 양쪽 경로 모두 두 인자로 전달.",
+        "#5 [높음] 웹 `pollFetch` 가 평문 Error 를 던져 `err.status` 가 없어 usePolling 의 403 폴링 중단·AccessDenied 안내가 무력하던 결함 — `httpFail()` 로 HttpError 를 던진다(viewer 가 RMA 화면에서 10초마다 403 반복하던 현상 해소).",
+        "#6 [높음] 스토리지 장비 표는 셀이 `<Cell>` 컴포넌트라 STable 이 셀을 찾지 못해 헤더를 눌러도 순서가 불변이던 결함 — `cellText` 가 td 없는 행의 컴포넌트 자식을 셀로 인식하고, 장비 표는 각 셀에 `data-sort={cellValue()}` 를 준다(숫자·용량·상태 정렬 정확).",
+        "#7 [높음] `TypedTable`/`DeviceTable` 이 렌더 함수 안에서 정의돼 30초 폴링마다 서브트리가 재마운트(정렬 상태·포커스·스크롤 소실)되던 결함 — 모듈 최상위로 옮기고 ctx/typeLabel 을 props 로 전달.",
+        "테스트: `bugfix2425.test.js` 4건(브로커 비밀 파일 무재기록·카운터 파일, 커서 정합, meta 청크, signal 양방향 전달), 웹 `sortableText.test.js` 컴포넌트 셀 정렬 1건 추가."
+      ]
+    },
+    {
       "version": "2.426.0",
       "date": "2026-09-08",
       "title": "중앙→엣지A→엣지B(포워딩) 토폴로지 트러블슈팅 — 응답 엣지 정체 표시·자기등록 URL 검증·단계별 연결 테스트·빈/mock 인벤토리 경고(v2.424 로 준비했으나 다른 세션의 PDU 릴리스 2.424/2.425 와 번호 충돌 → 2.426.0 으로 게시)",

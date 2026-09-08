@@ -84,7 +84,10 @@ function firstTr(node) {
 
 /** 행(tr)의 colIndex 번째 셀 텍스트. colSpan 셀이 있는 행(빈 안내 행 등)은 null → 정렬 대상 아님(뒤로). */
 export function cellText(tr, colIndex) {
-  const cells = React.Children.toArray(tr?.props?.children || []).filter((c) => React.isValidElement(c) && (c.type === 'td' || c.type === 'th'));
+  const kids = React.Children.toArray(tr?.props?.children || []).filter((c) => React.isValidElement(c));
+  // td/th 가 하나도 없으면 셀이 컴포넌트(<Cell col=… />)로 감싸인 표 — 엘리먼트 자식을 그대로 셀로 본다(v2.425, 리뷰 #6:
+  // 스토리지 장비 표는 헤더를 눌러도 순서가 불변이었다). 컴포넌트 셀은 colSpan 1 로 간주하고 props 에서 값을 찾는다.
+  const cells = kids.some((c) => c.type === 'td' || c.type === 'th') ? kids.filter((c) => c.type === 'td' || c.type === 'th') : kids;
   if (!cells.length) return null;
   let i = 0;
   for (const c of cells) {
