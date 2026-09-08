@@ -4,6 +4,7 @@ import { fetchJson, postJson, delJson, downloadFile } from '../../api.js';
 import { Loading, ErrorBox, Kpi, UsageCell, Modal, SearchBox, usageColor } from '../../components/ui.jsx';
 import { columnsFor, cellValue } from './storageColumns.js';
 import { UNIT_OPTIONS, formatBytes, loadUnit, saveUnit } from './storageUnits.js';
+import { STable } from '../../components/STable.jsx';
 
 /**
  * 특수기능 › 스토리지 모니터링(v2.302) — 글로벌 법인 스토리지(Isilon 우선, XtremIO·PowerStore·
@@ -39,6 +40,11 @@ const ago = (ts) => {
  * 섹션만 오류)일 때도 사유가 반드시 드러나야 하기 때문이다(v2.316 에서 확인된 요구사항).
  * 목록의 '실패' 배지 툴팁과 상세 창이 같은 문자열을 쓰도록 여기 한 곳에 둔다.
  */
+/** 부분 실패 사유(v2.422) — ok 인데 섹션 오류가 있으면 그 목록(없으면 ''). */
+function partialReason(s) {
+  return Object.entries(s?.sections || {}).filter(([, v]) => /오류/.test(String(v))).map(([k, v]) => `${k} ${v}`).join(' · ');
+}
+
 function failReason(s) {
   if (!s) return '수집 기록 없음';
   return s.error
@@ -107,7 +113,16 @@ function Cell({ col, r, ctx }) {
                 + '수집 노드(중앙 또는 엣지)가 DATA_SOURCE=mock 으로 실행 중입니다.\n'
                 + 'portal.env 에 DATA_SOURCE=live (또는 EDGE_MODE=all) 를 넣고 재시작하세요.'}>MOCK</span>
           )}
-          {!s ? <span className="badge gray">수집 전</span> : s.ok ? <span className="badge green">정상</span> : (
+          {/* 부분 실패(v2.422): 접속·구성은 됐지만 용량 등 일부 섹션이 실패한 장비 — 예전에는 '정상 + 0.0 TB' 로
+              보여 수집이 되는 줄 알았다(PowerStore 실측). 사유는 실패 배지와 같은 경로(툴팁/상세 창)로. */}
+          {!s ? <span className="badge gray">수집 전</span> : s.ok ? (
+            partialReason(s)
+              ? <button type="button" className="badge amber fail-badge" onClick={() => setDetail(r.id)}
+                  title={`부분 실패 — 접속은 됐지만 일부 섹션을 수집하지 못했습니다:\n${partialReason(s)}\n\n(클릭하면 상세 창에서 전체 내용을 봅니다)`}>
+                  부분 <span aria-hidden="true">ⓘ</span>
+                </button>
+              : <span className="badge green">정상</span>
+          ) : (
             <button type="button" className="badge red fail-badge" onClick={() => setDetail(r.id)}
               title={`실패 사유: ${failReason(s)}\n\n(클릭하면 상세 창에서 전체 내용을 봅니다)`}>
               실패 <span aria-hidden="true">ⓘ</span>
@@ -272,7 +287,7 @@ export default function StorageMonTool() {
         {/* ⚠ 표에 자체 세로 스크롤(max-height)을 다시 넣지 말 것 — 장비가 20대만 넘어도 페이지
             스크롤과 표 스크롤이 이중으로 겹쳐 목록을 훑기 불편하다(2026-09-02 사용자 지적). */}
         <div className="table-wrap">
-          <table>
+          <STable>
             <thead><tr>{cols.map((c) => <th key={c.key} className={c.align === 'right' ? 'right' : undefined} style={c.align === 'right' ? { textAlign: 'right' } : undefined}>{c.label}</th>)}</tr></thead>
             <tbody>
               {list.length === 0 && <tr><td colSpan={cols.length} className="center muted" style={{ padding: 20 }}>등록된 장비가 없습니다 — "+ 장비 등록"으로 시작하세요.</td></tr>}
@@ -282,7 +297,7 @@ export default function StorageMonTool() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </STable>
         </div>
       </div>
     );
@@ -545,7 +560,7 @@ function ActivityPanel() {
       {/* 완료(최근) */}
       <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-dim)', margin: '4px 0 6px' }}>▸ 완료 <span className="muted" style={{ fontWeight: 400 }}>(최근 {events.length}건)</span></div>
       <div className="table-wrap" style={{ maxHeight: '32vh' }}>
-        <table>
+        <STable>
           <thead><tr><th>시각</th><th>장비</th><th>출처</th><th>결과</th><th style={{ textAlign: 'right' }}>노드</th><th>용량</th><th style={{ textAlign: 'right' }}>소요</th><th>비고</th></tr></thead>
           <tbody>
             {events.length === 0 && <tr><td colSpan={8} className="center muted" style={{ padding: 16 }}>아직 수집 기록이 없습니다.</td></tr>}
@@ -564,7 +579,7 @@ function ActivityPanel() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </STable>
       </div>
     </div>
   );
@@ -701,7 +716,7 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
             <>
               <div className="section-title" style={{ fontSize: 13 }}>{r.type === 'xtremio' ? '스토리지 컨트롤러' : r.type === 'unity480' ? '스토리지 프로세서(SP)' : (r.type === 'vplex' || r.type === 'metronode') ? '디렉터' : '노드'} {nodeList.length}{s.nodes.count > nodeList.length ? ` (표시 상한 — 전체 ${s.nodes.count})` : ''}</div>
               <div className="table-wrap" style={{ maxHeight: '32vh', marginBottom: 12 }}>
-                <table>
+                <STable>
                   <thead><tr>
                     <th style={{ textAlign: 'right', width: 40 }}>ID</th>
                     {ncol.name && <th>이름</th>}
@@ -729,7 +744,7 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </STable>
               </div>
             </>
           )}
@@ -802,12 +817,12 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
           {Array.isArray(ex.appliances) && ex.appliances.length > 0 && (
             <>
               <div className="section-title" style={{ fontSize: 13 }}>어플라이언스 {ex.appliances.length}</div>
-              <table className="data-table" style={{ width: '100%', fontSize: 12.5, marginBottom: 12 }}>
+              <STable className="data-table" style={{ width: '100%', fontSize: 12.5, marginBottom: 12 }}>
                 <thead><tr><th style={{ textAlign: 'left' }}>이름</th><th>모델</th><th>서비스 태그</th></tr></thead>
                 <tbody>{ex.appliances.map((a, i) => (
                   <tr key={i}><td>{a.name || '—'}</td><td className="muted">{a.model || '—'}</td><td className="muted" style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{a.serviceTag || '—'}</td></tr>
                 ))}</tbody>
-              </table>
+              </STable>
             </>
           )}
 
@@ -825,12 +840,12 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
           {(s.pools || []).length > 0 && (
             <>
               <div className="section-title" style={{ fontSize: 13 }}>{r.type === 'xtremio' ? '클러스터 용량' : (r.type === 'vmax' || r.type === 'powermax') ? '어레이별 용량' : '스토리지 풀'} {s.pools.length}</div>
-              <table className="data-table" style={{ width: '100%', fontSize: 12.5, marginBottom: 12 }}>
+              <STable className="data-table" style={{ width: '100%', fontSize: 12.5, marginBottom: 12 }}>
                 <thead><tr><th style={{ textAlign: 'left' }}>{r.type === 'xtremio' ? '클러스터' : (r.type === 'vmax' || r.type === 'powermax') ? '어레이' : '풀'}</th><th style={{ textAlign: 'right' }}>사용</th><th style={{ textAlign: 'right' }}>전체</th><th>사용률</th></tr></thead>
                 <tbody>{s.pools.map((p, i) => (
                   <tr key={i}><td>{p.name}</td><td style={{ textAlign: 'right' }}>{tbFmt(p.usedBytes)}</td><td style={{ textAlign: 'right' }}>{tbFmt(p.totalBytes)}</td><td>{p.pct != null ? <UsageCell pct={p.pct} /> : '—'}</td></tr>
                 ))}</tbody>
-              </table>
+              </STable>
             </>
           )}
           {(s.accounts || []).length > 0 && (
@@ -849,12 +864,12 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
                 ? <div className="muted" style={{ fontSize: 12.5, marginBottom: 12 }}>✅ 미해결 Critical 이벤트 없음</div>
                 : (
                   <div className="table-wrap" style={{ maxHeight: '20vh', marginBottom: 12 }}>
-                    <table>
+                    <STable>
                       <thead><tr><th>시각</th><th style={{ textAlign: 'right' }}>LNN</th><th>이벤트</th></tr></thead>
                       <tbody>{s.extra.criticalEvents.map((e, i) => (
                         <tr key={i}><td style={{ whiteSpace: 'nowrap', fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{e.time}</td><td style={{ textAlign: 'right' }}>{e.lnn}</td><td style={{ fontSize: 12.5, color: 'var(--red)' }}>{e.event}</td></tr>
                       ))}</tbody>
-                    </table>
+                    </STable>
                   </div>
                 )}
             </>
@@ -868,7 +883,7 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
                 ? <div className="muted" style={{ fontSize: 12.5, marginBottom: 8 }}>실행/대기/실패 잡 없음</div>
                 : (
                   <div className="table-wrap" style={{ maxHeight: '22vh', marginBottom: 8 }}>
-                    <table>
+                    <STable>
                       <thead><tr><th>잡</th><th>구분</th><th>Impact</th><th style={{ textAlign: 'right' }}>Pri</th><th>Policy</th><th>Phase</th><th>Run Time</th></tr></thead>
                       <tbody>
                         {s.extra.jobs.running.map((j, i) => (
@@ -881,19 +896,19 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
                           <tr key={`f${i}`}><td style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{j.job}</td><td><span className="badge red">실패</span></td><td colSpan={5} style={{ fontSize: 12 }}>{j.detail}</td></tr>
                         ))}
                       </tbody>
-                    </table>
+                    </STable>
                   </div>
                 )}
               {s.extra.jobs.recent.length > 0 && (
                 <>
                   <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>최근 잡 결과 {s.extra.jobs.recent.length}건</div>
                   <div className="table-wrap" style={{ maxHeight: '18vh', marginBottom: 12 }}>
-                    <table>
+                    <STable>
                       <thead><tr><th>시각</th><th>잡</th><th>결과</th></tr></thead>
                       <tbody>{s.extra.jobs.recent.map((j, i) => (
                         <tr key={i}><td style={{ whiteSpace: 'nowrap', fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{j.time}</td><td style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{j.job}</td><td><span className={`badge ${/succeeded/i.test(j.event) ? 'green' : 'red'}`}>{j.event}</span></td></tr>
                       ))}</tbody>
-                    </table>
+                    </STable>
                   </div>
                 </>
               )}
@@ -929,6 +944,18 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
               <span key={k} className={`badge ${v === 'ok' ? 'green' : v === 'skip' ? 'gray' : 'red'}`} title={String(v)}>{k}: {v === 'ok' ? 'OK' : v === 'skip' ? '건너뜀' : '오류'}</span>
             ))}
           </div>
+          {/* 섹션 오류 원문 + PowerStore 공간 지표 시도 내역(v2.421) — 배지의 툴팁만으로는 복사·공유가 안 된다. */}
+          {Object.entries(s.sections || {}).some(([, v]) => /오류/.test(String(v))) && (
+            <pre style={{ fontSize: 11.5, whiteSpace: 'pre-wrap', margin: '6px 0 0', color: 'var(--red)' }}>
+              {Object.entries(s.sections || {}).filter(([, v]) => /오류/.test(String(v))).map(([k, v]) => `${k}: ${v}`).join('\n')}
+            </pre>
+          )}
+          {ex.spaceDebug && (
+            <div className="muted" style={{ fontSize: 11.5, marginTop: 6, lineHeight: 1.6 }}>
+              공간 지표 조회 경로: <b>{ex.spaceDebug.source || '—'}</b>{ex.spaceDebug.interval ? ` · 구간 ${ex.spaceDebug.interval}` : ''}
+              {(ex.spaceDebug.tried || []).length ? <div>시도 내역: {ex.spaceDebug.tried.join(' → ')}</div> : null}
+            </div>
+          )}
           {/* skip 사유 노출(v2.311) — VPLEX/Metro Node 의 capacity skip 은 오류가 아니라 제품 특성
               (가상화 계층 — 자체 용량 없음). 사유 없이 '건너뜀'만 보이면 수집 실패로 오해한다. */}
           {s.extra?.capacityNote && <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>ℹ {s.extra.capacityNote}</div>}
@@ -1389,7 +1416,7 @@ function CsvImport({ onClose, onDone }) {
             {!verified && <b style={{ color: 'var(--amber)', marginLeft: 8 }}>⚠ 내용이 변경됨 — 재검증 필요</b>}
           </div>
           <div className="table-wrap" style={{ maxHeight: '26vh' }}>
-            <table>
+            <STable>
               <thead><tr><th style={{ textAlign: 'right' }}>행</th><th>장비</th><th>host</th><th>타입</th><th>동작</th><th>비밀번호</th><th>문제</th></tr></thead>
               <tbody>
                 {check.report.map((r, i) => (
@@ -1404,7 +1431,7 @@ function CsvImport({ onClose, onDone }) {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </STable>
           </div>
         </div>
       )}

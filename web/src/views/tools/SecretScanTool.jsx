@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson } from '../../api.js';
 import { Loading, ErrorBox, Kpi } from '../../components/ui.jsx';
+import { STable } from '../../components/STable.jsx';
 
 /**
  * 특수기능 › 평문 자격증명 점검(v2.297, admin 전용) — 설정 파일·portal.env·로그·소스에
@@ -61,7 +62,7 @@ export default function SecretScanTool() {
       {/* ① 설정 파일 */}
       <div className="section-title" style={{ fontSize: 14 }}>① 설정 파일(CONFIG_DIR/*.json) — 확정 분류</div>
       <div className="table-wrap" style={{ maxHeight: '38vh', marginBottom: 14 }}>
-        <table>
+        <STable>
           <thead><tr><th>파일</th><th>권한</th><th style={{ textAlign: 'right' }}>평문</th><th style={{ textAlign: 'right' }}>암호화</th><th style={{ textAlign: 'right' }}>빈값</th><th>상세(필드 위치)</th></tr></thead>
           <tbody>
             {(d.configFiles || []).length === 0 && <tr><td colSpan={6} className="muted" style={{ padding: 14 }}>비밀 필드를 가진 설정 파일이 없습니다.</td></tr>}
@@ -82,7 +83,7 @@ export default function SecretScanTool() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </STable>
       </div>
 
       {/* ② portal.env */}
@@ -118,7 +119,7 @@ export default function SecretScanTool() {
         ? <div className="muted" style={{ fontSize: 13 }}>✅ 소스에서 하드코딩 자격증명 의심 라인이 발견되지 않았습니다.</div>
         : (
           <div className="table-wrap" style={{ maxHeight: '32vh' }}>
-            <table>
+            <STable>
               <thead><tr><th>파일</th><th style={{ textAlign: 'right' }}>줄</th><th>내용(마스킹)</th></tr></thead>
               <tbody>
                 {(d.source.hits || []).map((h, i) => (
@@ -129,7 +130,7 @@ export default function SecretScanTool() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </STable>
           </div>
         )}
     </div>

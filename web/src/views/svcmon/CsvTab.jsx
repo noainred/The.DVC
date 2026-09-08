@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { fetchJson, downloadFile } from '../../api.js';
 import { ErrorBox } from '../../components/ui.jsx';
+import { STable } from '../../components/STable.jsx';
 
 /**
  * 성능점검 대상 내보내기 — CSV · XLSX(엑셀) · JSON 세 포맷.
@@ -85,7 +86,7 @@ export default function CsvTab({ canEdit }) {
 
         {showCols && schema && (
           <div className="table-wrap" style={{ maxHeight: '40vh', marginTop: 10 }}>
-            <table>
+            <STable>
               <thead><tr><th>컬럼</th><th>뜻</th><th>필수</th><th>값</th><th>해당 유형</th></tr></thead>
               <tbody>
                 {[...schema.target, ...schema.test].map((c) => (
@@ -105,7 +106,7 @@ export default function CsvTab({ canEdit }) {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </STable>
             <div className="muted" style={{ fontSize: 11, padding: '6px 2px' }}>
               빈 칸 = 기본값(하한이 아닙니다). <code>id</code>·<code>order</code> 컬럼은 없습니다 —
               가져오기가 항상 새 항목으로 등록하므로 왕복에 의미가 없습니다.

@@ -3,6 +3,7 @@ import { openRemoteSession } from '../remote/sessions.js';
 import { fetchJson, postJson, delJson, getToken, usePolling } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { ProxyEditor, HealthDot } from './ProxySettings.jsx';
+import { STable } from '../components/STable.jsx';
 
 const PROTOCOLS = [['ssh', 'SSH'], ['rdp', 'RDP']];
 const STATUS_BADGE = { active: 'green', manual: 'amber', pending: 'gray', error: 'red' };
@@ -152,7 +153,7 @@ export default function RemoteAccess() {
           </div>
           <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>현재 설정된 중계 서버(HAProxy)입니다. 자세한 구성은 설정 → 중계 서버에서도 가능합니다.</div>
           <div className="table-wrap">
-            <table>
+            <STable>
               <thead><tr><th>상태</th><th>이름</th><th>프록시 주소</th><th>공개포트 시작</th><th>할당 vCenter</th><th>프로비저닝</th><th style={{ textAlign: 'right' }}>관리</th></tr></thead>
               <tbody>
                 {proxies.length === 0 && <tr><td colSpan={7} className="center muted" style={{ padding: 18 }}>추가 중계 서버가 없습니다. (모두 기본 프록시 사용)</td></tr>}
@@ -172,14 +173,14 @@ export default function RemoteAccess() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </STable>
           </div>
         </div>
       )}
 
       <div className="section-title" style={{ marginTop: 0 }}>접속 대상</div>
       <div className="table-wrap">
-        <table>
+        <STable>
           <thead><tr><th>이름</th><th>프로토콜</th><th>대상</th><th>프록시</th><th>공개 포트</th><th>상태</th><th style={{ textAlign: 'right' }}>접속</th></tr></thead>
           <tbody>
             {data.mappings.length === 0 && <tr><td colSpan={7} className="center muted" style={{ padding: 26 }}>등록된 대상이 없습니다.</td></tr>}
@@ -206,7 +207,7 @@ export default function RemoteAccess() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </STable>
       </div>
 
       <div className="muted" style={{ fontSize: 12, marginTop: 12, lineHeight: 1.7 }}>

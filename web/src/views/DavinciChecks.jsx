@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { fetchJson, usePolling, getToken } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { fmtBytes } from '../util/fmt.js';
+import { STable } from '../components/STable.jsx';
 
 const DOT = { ok: '#22c55e', warn: '#f59e0b', down: '#ef4444', off: '#64748b', slow: '#f97316' };
 const LBL = { ok: '정상', warn: '주의', down: '실패', off: '비활성', slow: '느림' };
@@ -63,7 +64,7 @@ export function NetworkCheck() {
       </div>
       <div className="card" style={{ padding: 14 }}>
         <div className="table-wrap" style={{ maxHeight: '52vh' }}>
-          <table><thead><tr><th>유형</th><th>이름</th><th>호스트</th><th>리전</th><th>도달성</th><th style={{ textAlign: 'right' }}>RTT</th><th>수집</th></tr></thead>
+          <STable><thead><tr><th>유형</th><th>이름</th><th>호스트</th><th>리전</th><th>도달성</th><th style={{ textAlign: 'right' }}>RTT</th><th>수집</th></tr></thead>
             <tbody>
               {(d.endpoints || []).map((e) => (
                 <tr key={`${e.kind}:${e.id}`}>
@@ -76,7 +77,7 @@ export function NetworkCheck() {
                   <td className="muted" style={{ fontSize: 12 }}>{e.collected || '—'}</td>
                 </tr>
               ))}
-            </tbody></table>
+            </tbody></STable>
         </div>
         <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>※ ‘에이전트 경유’ = 중앙에서 직접 443 도달은 안 되지만 현장 에이전트가 수집 중(정상). 사설망 vCenter에서 흔합니다.</div>
       </div>
@@ -130,7 +131,7 @@ export function VmwareConfigBackup() {
       {sites.length > 0 && (
         <div className="card" style={{ padding: 14 }}>
           <div className="table-wrap" style={{ maxHeight: '44vh' }}>
-            <table><thead><tr><th>vCenter</th><th>리전</th><th>버전</th><th style={{ textAlign: 'right' }}>호스트</th><th style={{ textAlign: 'right' }}>VM</th><th style={{ textAlign: 'right' }}>DS</th><th style={{ textAlign: 'right' }}>네트워크</th></tr></thead>
+            <STable><thead><tr><th>vCenter</th><th>리전</th><th>버전</th><th style={{ textAlign: 'right' }}>호스트</th><th style={{ textAlign: 'right' }}>VM</th><th style={{ textAlign: 'right' }}>DS</th><th style={{ textAlign: 'right' }}>네트워크</th></tr></thead>
               <tbody>
                 {sites.map((s) => (
                   <tr key={s.vcenter.id}>
@@ -143,7 +144,7 @@ export function VmwareConfigBackup() {
                     <td style={{ textAlign: 'right' }}>{s.counts.networks}</td>
                   </tr>
                 ))}
-              </tbody></table>
+              </tbody></STable>
           </div>
           {preview?.nsx?.managers?.length > 0 && <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>NSX: 매니저 {preview.nsx.managers.length} · 세그먼트 {preview.nsx.segments.length} · 게이트웨이 {preview.nsx.gateways.length} 포함</div>}
         </div>

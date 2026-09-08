@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { fetchJson, postJson, delJson } from '../../api.js';
 import { Loading, ErrorBox, SearchBox } from '../../components/ui.jsx';
+import { STable } from '../../components/STable.jsx';
 
 /**
  * 특수기능 › VM 복제(백업)(v2.299, admin 전용) — 사용자 요구사항:
@@ -57,7 +58,7 @@ export default function VmCloneTool() {
       {form && <JobForm d={d} form={form} setForm={setForm} onSaved={() => { setForm(null); load(); }} />}
 
       <div className="table-wrap" style={{ maxHeight: '46vh' }}>
-        <table>
+        <STable>
           <thead><tr><th>VM</th><th>vCenter</th><th>대상</th><th>스케줄</th><th style={{ textAlign: 'right' }}>보존</th><th>정지점</th><th>보유 사본</th><th>최근 실행</th><th className="right">작업</th></tr></thead>
           <tbody>
             {d.jobs.length === 0 && <tr><td colSpan={9} className="center muted" style={{ padding: 22 }}>복제 잡이 없습니다 — "+ 복제 잡 추가"로 vCenter별 VM 을 지정하세요.</td></tr>}
@@ -83,7 +84,7 @@ export default function VmCloneTool() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </STable>
       </div>
       <div className="muted" style={{ fontSize: 11.5, marginTop: 8 }}>
         NFS 마운트 등록/해제·로그·트러블슈팅은 <b>설정 › NFS 마운트(백업 대상)</b>에서. 복제 대상 VM 은 Platform 트리에 <span className="badge blue" style={{ fontSize: 10 }}>Clone</span> 배지로 표시됩니다.

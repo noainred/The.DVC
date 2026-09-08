@@ -9,6 +9,7 @@ import { Loading, ErrorBox, Kpi, VmLink } from '../../components/ui.jsx';
 import EscClose from '../../components/EscClose.jsx';
 import { fmtAgo } from '../../util/fmt.js';
 import { hasDsData } from './storageTrack.js';
+import { STable } from '../../components/STable.jsx';
 
 const DAY_OPTS = [7, 30, 90, 365];
 // 슬롯 라벨: '8/21 00시' — 하루 2점이라 날짜만으로는 구분이 안 된다.
@@ -267,7 +268,7 @@ export default function VmTrackTool() {
           <div className="card" style={{ padding: 12 }}>
             <b style={{ fontSize: 13 }}>스냅샷 이력 <span className="muted" style={{ fontWeight: 400, fontSize: 11.5 }}>(증감 숫자를 누르면 어떤 VM 인지 봅니다)</span></b>
             <div className="table-wrap" style={{ maxHeight: '46vh', marginTop: 8 }}>
-              <table>
+              <STable>
                 <thead>
                   <tr>
                     <th>시각</th><th style={{ textAlign: 'right' }}>총 VM</th>
@@ -355,7 +356,7 @@ export default function VmTrackTool() {
                     );
                   })}
                 </tbody>
-              </table>
+              </STable>
             </div>
           </div>
         </>
@@ -412,7 +413,7 @@ function DsChangeDetail({ title, snapId = null, slot = null, onClose }) {
             </div>
             {shown.length === 0 ? <div className="muted" style={{ fontSize: 13 }}>해당 항목이 없습니다.</div> : (
               <div className="table-wrap" style={{ maxHeight: '56vh' }}>
-                <table>
+                <STable>
                   <thead>
                     <tr>
                       <th>구분</th><th>데이터스토어</th>{items.some((r) => r.vcenterId) && <th>vCenter</th>}
@@ -443,7 +444,7 @@ function DsChangeDetail({ title, snapId = null, slot = null, onClose }) {
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </STable>
               </div>
             )}
             <div className="muted" style={{ fontSize: 11.5, marginTop: 8, lineHeight: 1.7 }}>
@@ -502,7 +503,7 @@ function ChangeDetail({ title, snapId = null, slot = null, focus = 'all', onClos
             </div>
             {shown.length === 0 ? <div className="muted" style={{ fontSize: 13 }}>해당 항목이 없습니다.</div> : (
               <div className="table-wrap" style={{ maxHeight: '56vh' }}>
-                <table>
+                <STable>
                   <thead>
                     <tr>
                       <th>구분</th><th>VM</th>{items.some((r) => r.vcenterId) && <th>vCenter</th>}
@@ -528,7 +529,7 @@ function ChangeDetail({ title, snapId = null, slot = null, focus = 'all', onClos
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </STable>
               </div>
             )}
             <div className="muted" style={{ fontSize: 11.5, marginTop: 8, lineHeight: 1.7 }}>

@@ -6,6 +6,7 @@ import React, { useState } from 'react';
 import { putJson, postJson } from '../../api.js';
 // CSV 일괄 관리(v2.339) — 검증 드라이런 → 덮어쓰기 확인 → 실행. 공용 모달(수집 서버 CSV UX).
 import { CsvExportModal, CsvImportModal } from '../../components/CsvBulkModals.jsx';
+import { STable } from '../../components/STable.jsx';
 
 // ---- vCenter별 iDRAC 스캔 대역(주기 자동 발견) ------------------------------
 // 각 vCenter에 iDRAC IP 대역 + 계정을 저장하면, 주기 스캐너가 그 대역을 돌며 Dell iDRAC을
@@ -244,7 +245,7 @@ export function IdracScanRanges({ data, vcenters, datacenters = [], agents, busy
       )}
 
       <div className="table-wrap">
-        <table>
+        <STable>
           <thead><tr>
             <Th k="name">법인(DataCenter)</Th><Th k="service">서비스</Th><Th k="ranges">대역</Th><Th k="username">계정</Th><Th k="agent">스캔 주체</Th><Th k="enabled">주기</Th><Th k="lastRun">최근 결과</Th><th className="right">작업</th>
           </tr></thead>
@@ -272,7 +273,7 @@ export function IdracScanRanges({ data, vcenters, datacenters = [], agents, busy
               </tr>
             ))}
           </tbody>
-        </table>
+        </STable>
       </div>
 
       {st.lastRun && !st.running && (

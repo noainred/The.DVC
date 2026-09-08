@@ -19,6 +19,7 @@ import { tb, gbTb, perVcSummary, growth, hasDsData } from './storageTrack.js';
 import DsTrendModal from './DsTrendModal.jsx'; // 개별 DS 추이 모달(v2.354) — 변경 이력 칩/행 클릭용
 
 const DAY_OPTS = [7, 30, 90, 365];
+import { STable } from '../../components/STable.jsx';
 const slotLabel = (slot) => {
   const m = /^(\d{4})-(\d{2})-(\d{2})T(00|12)$/.exec(String(slot || ''));
   return m ? `${Number(m[2])}/${Number(m[3])} ${m[4]}시` : String(slot || '');
@@ -207,7 +208,7 @@ export default function StorageTrackTool() {
               <b style={{ fontSize: 13 }}>vCenter별 현재 사용량 · {days}일 증감</b>
               <span className="muted" style={{ fontSize: 11.5, marginLeft: 8 }}>헤더 클릭으로 정렬 · 증감을 누르면 그 vCenter 의 최근 변화 상세</span>
               <div className="table-wrap" style={{ maxHeight: '40vh', marginTop: 8 }}>
-                <table>
+                <STable>
                   <thead>
                     <tr>
                       {th('vcenterId', 'vCenter', 'left')}
@@ -240,7 +241,7 @@ export default function StorageTrackTool() {
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </STable>
               </div>
             </div>
           )}
@@ -261,7 +262,7 @@ export default function StorageTrackTool() {
           <div className="card" style={{ padding: 12 }}>
             <b style={{ fontSize: 13 }}>스냅샷 이력 <span className="muted" style={{ fontWeight: 400, fontSize: 11.5 }}>(증감을 누르면 변화한 데이터스토어 목록)</span></b>
             <div className="table-wrap" style={{ maxHeight: '46vh', marginTop: 8 }}>
-              <table>
+              <STable>
                 <thead>
                   <tr>
                     <th>시각</th><th style={{ textAlign: 'right' }}>DS</th>
@@ -291,7 +292,7 @@ export default function StorageTrackTool() {
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </STable>
             </div>
             <div className="muted" style={{ fontSize: 11.5, marginTop: 8, lineHeight: 1.7 }}>
               '일평균 증가'와 '가용 소진 ~N일'은 <b>실측 기간의 평균 증가 속도가 유지된다고 가정한 선형 추정</b>입니다(예측 모델이 아님).
@@ -393,7 +394,7 @@ function DsChangeHistory({ days, vcenterId, onPick, onSlot }) {
           </div>
         ) : (
           <div className="table-wrap" style={{ maxHeight: '46vh', marginTop: 8 }}>
-            <table>
+            <STable>
               <thead>
                 <tr><th>시각</th><th style={{ textAlign: 'right' }}>변화 DS</th><th style={{ textAlign: 'right' }}>합계 증감</th><th>DS별 증감(|증감| 큰 순)</th></tr>
               </thead>
@@ -416,7 +417,7 @@ function DsChangeHistory({ days, vcenterId, onPick, onSlot }) {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </STable>
           </div>
         )
       )}
@@ -427,7 +428,7 @@ function DsChangeHistory({ days, vcenterId, onPick, onSlot }) {
           <div className="muted" style={{ fontSize: 12.5, marginTop: 8 }}>표시할 데이터스토어가 없습니다{changedOnly ? " — '변화 있는 DS 만' 을 해제하면 전체가 보입니다." : '.'}</div>
         ) : (
           <div className="table-wrap" style={{ maxHeight: '52vh', marginTop: 8 }}>
-            <table>
+            <STable>
               <thead>
                 <tr>
                   <th>데이터스토어</th>{!vcenterId && <th>vCenter</th>}<th>유형</th>
@@ -456,7 +457,7 @@ function DsChangeHistory({ days, vcenterId, onPick, onSlot }) {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </STable>
           </div>
         )
       )}
@@ -701,7 +702,7 @@ function DsPerStore({ days, vcenterId }) {
           <div className="muted" style={{ fontSize: 12.5, marginTop: 6 }}>표시할 데이터스토어가 없습니다(첫 스냅샷 이후부터 집계).</div>
         ) : (
           <div className="table-wrap" style={{ maxHeight: '36vh', marginTop: 6 }}>
-            <table>
+            <STable>
               <thead>
                 <tr>
                   <th>데이터스토어</th><th>vCenter</th><th>유형</th>
@@ -726,7 +727,7 @@ function DsPerStore({ days, vcenterId }) {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </STable>
           </div>
         )}
       </div>
@@ -773,7 +774,7 @@ function DsDetail({ title, snapId = null, slot = null, onClose }) {
             </div>
             {shown.length === 0 ? <div className="muted" style={{ fontSize: 13 }}>해당 항목이 없습니다.</div> : (
               <div className="table-wrap" style={{ maxHeight: '56vh' }}>
-                <table>
+                <STable>
                   <thead>
                     <tr>
                       <th>구분</th><th>데이터스토어</th>{items.some((r) => r.vcenterId) && <th>vCenter</th>}<th>유형</th>
@@ -800,7 +801,7 @@ function DsDetail({ title, snapId = null, slot = null, onClose }) {
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </STable>
               </div>
             )}
           </>

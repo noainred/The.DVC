@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { fetchJson, usePolling } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { Card, itemsOf } from './shared.jsx';
+import { STable } from '../../components/STable.jsx';
 
 
 // vCenter별/DataCenter별 데이터스토어(스토리지) 용량 현황. 각 vCenter에 어떤 스토리지가
@@ -38,7 +39,7 @@ function DsCapBar({ capacityGB, freeGB }) {
 function DsVcTable({ items }) {
   const sorted = items.slice().sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { numeric: true }));
   return (
-    <table className="data-table" style={{ width: '100%', fontSize: 12.5, marginTop: 8 }}>
+    <STable className="data-table" style={{ width: '100%', fontSize: 12.5, marginTop: 8 }}>
       <thead><tr>
         <th style={{ textAlign: 'left' }}>데이터스토어</th><th>유형</th>
         <th style={{ textAlign: 'right' }}>전체</th><th style={{ textAlign: 'right' }}>사용</th>
@@ -61,7 +62,7 @@ function DsVcTable({ items }) {
           </tr>
         );
       })}</tbody>
-    </table>
+    </STable>
   );
 }
 

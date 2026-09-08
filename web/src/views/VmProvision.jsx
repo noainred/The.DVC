@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { fetchJson, postJson, putJson, delJson, usePolling } from '../api.js';
 import { Loading, ErrorBox, SearchBox } from '../components/ui.jsx';
 import EscClose from '../components/EscClose.jsx';
+import { STable } from '../components/STable.jsx';
 
 const chipStyle = { cursor: 'pointer', padding: '5px 12px', fontSize: 12, userSelect: 'none' };
 const chipActive = { border: '1px solid var(--accent,#6366f1)', color: '#c7d2fe', background: 'rgba(99,102,241,.15)' };
@@ -156,7 +157,7 @@ export default function VmProvision() {
         </div>
 
         <div className="table-wrap" style={{ maxHeight: '34vh' }}>
-          <table>
+          <STable>
             <thead><tr><th>유형</th><th>이름</th><th>Guest OS</th><th>전원/상태</th><th className="right">vCPU / RAM</th></tr></thead>
             <tbody>
               {sources.length === 0 && <tr><td colSpan={5} className="center muted" style={{ padding: 22 }}>{srcLoading ? '검색 중…' : '일치하는 템플릿/VM이 없습니다.'}</td></tr>}
@@ -171,7 +172,7 @@ export default function VmProvision() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </STable>
         </div>
 
         {sel
@@ -322,14 +323,14 @@ export default function VmProvision() {
         <>
           <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>미리보기 — 생성될 VM {preview.count}대 {preview.count > preview.vms.length && `(처음 ${preview.vms.length}대 표시)`}</div>
           <div className="table-wrap" style={{ maxHeight: '34vh', marginBottom: 18 }}>
-            <table>
+            <STable>
               <thead><tr><th>#</th><th>VM 이름</th><th>Hostname</th><th>IP</th></tr></thead>
               <tbody>
                 {preview.vms.map((v, i) => (
                   <tr key={v.name}><td className="muted">{i + 1}</td><td><b>{v.name}</b></td><td>{v.hostname}</td><td className="muted">{v.ip || (form.guest.ipMode === 'dhcp' ? 'DHCP' : '—')}</td></tr>
                 ))}
               </tbody>
-            </table>
+            </STable>
           </div>
         </>
       )}
@@ -363,7 +364,7 @@ function JobProgress({ jobId }) {
         ].filter(Boolean).join(' · ')}</div>
       )}
       <div className="table-wrap" style={{ maxHeight: '34vh' }}>
-        <table>
+        <STable>
           <thead><tr><th>VM</th><th>Hostname</th><th>IP</th><th>상태</th><th>비고</th></tr></thead>
           <tbody>
             {job.vms.map((v) => (
@@ -374,7 +375,7 @@ function JobProgress({ jobId }) {
               </tr>
             ))}
           </tbody>
-        </table>
+        </STable>
       </div>
     </div>
   );
@@ -388,7 +389,7 @@ function RecentJobs({ onOpen, activeId }) {
     <>
       <div className="section-title">최근 작업</div>
       <div className="table-wrap">
-        <table>
+        <STable>
           <thead><tr><th>시작</th><th>원본</th><th>대수</th><th>상태</th><th></th></tr></thead>
           <tbody>
             {jobs.map((j) => (
@@ -401,7 +402,7 @@ function RecentJobs({ onOpen, activeId }) {
               </tr>
             ))}
           </tbody>
-        </table>
+        </STable>
       </div>
     </>
   );
@@ -440,7 +441,7 @@ function SavedJobs({ onLoad, vcenters, reloadKey }) {
         <span className="muted" style={{ fontSize: 12 }}>{vc ? `${vcName(vc)} · ` : '전체 · '}{data.total}건</span>
       </div>
       <div className="table-wrap" style={{ maxHeight: '44vh' }}>
-        <table>
+        <STable>
           <thead><tr><th>시작</th><th>이름 패턴</th><th>원본</th><th>vCenter</th><th>대수</th><th>메모 · 태그</th><th className="right">작업</th></tr></thead>
           <tbody>
             {items.length === 0 && <tr><td colSpan={7} className="center muted" style={{ padding: 20 }}>저장된 작업이 없습니다. VM을 생성하면 자동 저장됩니다.</td></tr>}
@@ -463,7 +464,7 @@ function SavedJobs({ onLoad, vcenters, reloadKey }) {
               </tr>
             ))}
           </tbody>
-        </table>
+        </STable>
       </div>
       {!q && data.total > (data.items || []).length && (
         <div style={{ marginTop: 8, textAlign: 'center' }}>

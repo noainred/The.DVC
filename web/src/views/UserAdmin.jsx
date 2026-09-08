@@ -6,6 +6,7 @@ import { TOOLS as SPECIAL_TOOLS } from './specialToolsList.js';
 // 권한 매트릭스 순수 연산(v2.295, 3차 감사 확정 #6) — toolsDenied '거부목록 반전' 의미론을
 // vitest 로 고정(userAdmin/permMatrixOps.test.js). 이 파일은 setState 래퍼만 유지.
 import { hasMatrixKey, toggleMatrixKey, isToolAllowed, toggleToolDenied, setAllToolsDenied } from './userAdmin/permMatrixOps.js';
+import { STable } from '../components/STable.jsx';
 
 const ROLES = ['viewer', 'operator', 'admin'];
 const REGIONS = ['아시아', '중국', '유럽', '북미'];
@@ -194,7 +195,7 @@ export default function UserAdmin() {
       )}
 
       <div className="table-wrap">
-        <table>
+        <STable>
           <thead><tr><th>사용자 ID</th><th>이름</th><th>역할</th><th>로그인 방식</th><th>데이터 범위</th><th style={{ textAlign: 'right' }}>관리</th></tr></thead>
           <tbody>
             {data.users.map((u) => (
@@ -250,7 +251,7 @@ export default function UserAdmin() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </STable>
       </div>
 
       <div className="muted" style={{ fontSize: 12, marginTop: 12, lineHeight: 1.7 }}>
@@ -279,7 +280,7 @@ export default function UserAdmin() {
             서버에서 강제되므로(메뉴를 숨겨도 API 직접 호출 차단), 저장 즉시 각 사용자에 반영됩니다.
           </div>
           <div className="table-wrap">
-            <table>
+            <STable>
               <thead><tr><th>기능</th><th style={{ textAlign: 'center' }}>admin</th><th style={{ textAlign: 'center' }}>operator</th><th style={{ textAlign: 'center' }}>viewer</th></tr></thead>
               <tbody>
                 {(() => {
@@ -302,7 +303,7 @@ export default function UserAdmin() {
                   return rows;
                 })()}
               </tbody>
-            </table>
+            </STable>
           </div>
 
           {/* 특수 기능 도구별 접근 — '특수 기능' 권한을 가진 역할에 대해 개별 도구를 켜고 끈다. */}
@@ -322,7 +323,7 @@ export default function UserAdmin() {
             <b>관리자 전용</b> 도구(VM 생성·에이전트 작업 등)는 admin에게만 노출되어 목록에서 제외됩니다.
           </div>
           <div className="table-wrap">
-            <table>
+            <STable>
               <thead><tr><th>도구</th><th style={{ textAlign: 'center' }}>admin</th><th style={{ textAlign: 'center' }}>operator</th><th style={{ textAlign: 'center' }}>viewer</th></tr></thead>
               <tbody>
                 {SPECIAL_TOOLS.filter((t) => !t.adminOnly).map((t) => (
@@ -334,7 +335,7 @@ export default function UserAdmin() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </STable>
           </div>
 
           {permDirty && <div className="muted" style={{ fontSize: 12, marginTop: 8, color: '#fbbf24' }}>변경사항이 저장되지 않았습니다 — [저장]을 눌러 적용하세요.</div>}

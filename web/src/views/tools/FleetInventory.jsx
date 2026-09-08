@@ -4,6 +4,7 @@ import { fetchJson, postJson, putJson } from '../../api.js';
 import { Loading, ErrorBox, ResultCount, SearchBox } from '../../components/ui.jsx';
 import { Card, fmtWatts } from './shared.jsx';
 import { csvCell } from '../../util/csv.js'; // 수식 인젝션 가드 포함 공통 셀 이스케이프
+import { STable } from '../../components/STable.jsx';
 
 
 /** Generic on-demand fetch hook (runs when params change). */
@@ -203,7 +204,7 @@ export function FleetInventory({ isAdmin }) {
           )}
           <ResultCount total={(d.bareMetal || []).length} shown={bm.length} label="베어메탈" filtered={!!term || !!fvc} />
           <div className="table-wrap" style={{ maxHeight: '60vh' }}>
-            <table>
+            <STable>
               <thead><tr>{isAdmin && <th style={{ width: 28 }}><input type="checkbox" checked={allShownSelected} onChange={toggleAllShown} title="현재 목록 전체 선택" /></th>}<th>서버</th><th>모델</th><th>서비스태그</th><th>법인(vCenter)</th><th>수집</th><th style={{ textAlign: 'right' }}>현재 전력</th>{isAdmin && <th>분류</th>}</tr></thead>
               <tbody>
                 {bm.map((b, i) => (
@@ -225,7 +226,7 @@ export function FleetInventory({ isAdmin }) {
                 ))}
                 {!bm.length && <tr><td colSpan={isAdmin ? 8 : 6} className="center muted" style={{ padding: 20 }}>베어메탈 서버가 없습니다.</td></tr>}
               </tbody>
-            </table>
+            </STable>
           </div>
         </>
       )}
@@ -234,7 +235,7 @@ export function FleetInventory({ isAdmin }) {
         <>
           <ResultCount total={(d.virtualizationHosts || []).length} shown={vh.length} label="호스트" filtered={!!term || !!fvc} />
           <div className="table-wrap" style={{ maxHeight: '60vh' }}>
-            <table>
+            <STable>
               <thead><tr><th>호스트</th><th>vCenter</th><th>지역</th><th>모델</th><th>서비스태그</th><th style={{ textAlign: 'right' }}>코어</th><th style={{ textAlign: 'right' }}>메모리</th><th>전력원</th><th style={{ textAlign: 'right' }}>현재 전력</th>{isAdmin && <th>분류</th>}</tr></thead>
               <tbody>
                 {vh.map((h, i) => (
@@ -253,7 +254,7 @@ export function FleetInventory({ isAdmin }) {
                 ))}
                 {!vh.length && <tr><td colSpan={isAdmin ? 10 : 9} className="center muted" style={{ padding: 20 }}>가상화 호스트가 없습니다.</td></tr>}
               </tbody>
-            </table>
+            </STable>
           </div>
         </>
       )}

@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { fetchJson, postJson, putJson, getToken } from '../../api.js';
 import { Loading, ErrorBox, Modal } from '../../components/ui.jsx';
 import { DEVTYPE_LABEL, MGMT } from './ipamShared.jsx';
+import { STable } from '../../components/STable.jsx';
 
 
 /** Per-IP user memo + tags editor (separate from vCenter notes). */
@@ -396,7 +397,7 @@ export function IpScanSettings({ onClose }) {
         <div style={{ marginTop: 14 }}>
           <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>에이전트별 보고 현황</div>
           <div className="table-wrap" style={{ maxHeight: '24vh' }}>
-            <table>
+            <STable>
               <thead><tr><th>에이전트</th><th>마지막 보고</th><th style={{ textAlign: 'right' }}>스캔 / 응답</th><th>상태</th></tr></thead>
               <tbody>
                 {Object.entries(reports).sort((a, b) => (b[1].at || 0) - (a[1].at || 0)).map(([name, r]) => {
@@ -412,7 +413,7 @@ export function IpScanSettings({ onClose }) {
                   );
                 })}
               </tbody>
-            </table>
+            </STable>
           </div>
         </div>
       )}
@@ -478,7 +479,7 @@ export function ScanStatusModal({ onClose }) {
 
           <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>완료된 스캔 이력 (최근 {runs.length}건 · 포탈/에이전트 통합)</div>
           <div className="table-wrap" style={{ maxHeight: '46vh' }}>
-            <table>
+            <STable>
               <thead><tr><th>완료 시각</th><th>에이전트</th><th style={{ textAlign: 'right' }}>스캔 / 응답</th><th style={{ textAlign: 'right' }}>소요</th></tr></thead>
               <tbody>
                 {runs.length === 0 && <tr><td colSpan={4} className="center muted" style={{ padding: 20 }}>완료된 스캔 이력이 없습니다.</td></tr>}
@@ -491,7 +492,7 @@ export function ScanStatusModal({ onClose }) {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </STable>
           </div>
         </>
       )}

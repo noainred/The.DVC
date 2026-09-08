@@ -13,6 +13,7 @@ import { fetchJson } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import EscClose from '../../components/EscClose.jsx';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
+import { STable } from '../../components/STable.jsx';
 
 const LINE_COLORS = ['#60a5fa', '#f87171', '#34d399', '#fbbf24', '#a78bfa', '#f472b6', '#22d3ee', '#fb923c', '#4ade80', '#e879f9', '#94a3b8', '#fca5a5'];
 const FW_TYPE_ORDER = ['iDRAC', 'BIOS', 'NIC', 'Storage', 'GPU', 'PSU', 'Disk', 'CPLD', 'Driver', '기타'];
@@ -190,7 +191,7 @@ export function IdracDetailModal({ server, onClose }) {
               {(inv.psus || []).length > 0 && (
                 <div style={{ marginBottom: 14 }}>
                   <div style={{ fontSize: 13, fontWeight: 700, margin: '6px 0' }}>전원공급장치(PSU) {inv.psus.length}</div>
-                  <table className="data-table" style={{ width: '100%', fontSize: 13 }}>
+                  <STable className="data-table" style={{ width: '100%', fontSize: 13 }}>
                     <thead><tr><th style={{ textAlign: 'left' }}>이름</th><th style={{ textAlign: 'left' }}>모델</th><th style={{ textAlign: 'left' }}>용량/출력</th><th style={{ textAlign: 'left' }}>입력</th><th style={{ textAlign: 'left' }}>상태</th></tr></thead>
                     <tbody>{inv.psus.map((p, i) => (
                       <tr key={i}><td>{p.name}</td><td className="muted">{p.model || '—'}</td>
@@ -198,7 +199,7 @@ export function IdracDetailModal({ server, onClose }) {
                         <td className="tabular">{p.lineInputVoltage != null ? `${p.lineInputVoltage}V` : '—'}{p.inputWatts != null ? ` · ${p.inputWatts}W` : ''}</td>
                         <td><span className={`badge ${/ok/i.test(p.health) ? 'green' : p.health ? 'amber' : 'gray'}`}>{p.health || p.state || '—'}</span></td></tr>
                     ))}</tbody>
-                  </table>
+                  </STable>
                 </div>
               )}
 
@@ -206,7 +207,7 @@ export function IdracDetailModal({ server, onClose }) {
                 <div style={{ marginBottom: 14 }}>
                   <div style={{ fontSize: 13, fontWeight: 700, margin: '6px 0' }}>물리 디스크 {inv.disks.length} {inv.disks.some((d) => d.predictiveFailure) && <span className="badge red" style={{ marginLeft: 6 }}>⚠ SMART 예측 실패</span>}</div>
                   <div style={{ maxHeight: 200, overflow: 'auto' }}>
-                    <table className="data-table" style={{ width: '100%', fontSize: 13 }}>
+                    <STable className="data-table" style={{ width: '100%', fontSize: 13 }}>
                       <thead><tr><th style={{ textAlign: 'left' }}>디스크</th><th style={{ textAlign: 'left' }}>용량</th><th style={{ textAlign: 'left' }}>미디어</th><th style={{ textAlign: 'left' }}>상태</th></tr></thead>
                       <tbody>{inv.disks.map((d, i) => (
                         <tr key={i}><td>{d.name}<div className="muted" style={{ fontSize: 11 }}>{d.model}</div></td>
@@ -214,7 +215,7 @@ export function IdracDetailModal({ server, onClose }) {
                           <td className="muted">{d.media || '—'}{d.protocol ? ` · ${d.protocol}` : ''}</td>
                           <td>{d.predictiveFailure ? <span className="badge red">예측 실패</span> : <span className={`badge ${/ok/i.test(d.health) ? 'green' : d.health ? 'amber' : 'gray'}`}>{d.health || d.state || '—'}</span>}</td></tr>
                       ))}</tbody>
-                    </table>
+                    </STable>
                   </div>
                 </div>
               )}
@@ -222,13 +223,13 @@ export function IdracDetailModal({ server, onClose }) {
               {(inv.gpus || []).length > 0 && (
                 <div style={{ marginBottom: 14 }}>
                   <div style={{ fontSize: 13, fontWeight: 700, margin: '6px 0' }}>GPU(iDRAC 인식) {inv.gpus.length}</div>
-                  <table className="data-table" style={{ width: '100%', fontSize: 13 }}>
+                  <STable className="data-table" style={{ width: '100%', fontSize: 13 }}>
                     <thead><tr><th style={{ textAlign: 'left' }}>이름</th><th style={{ textAlign: 'left' }}>모델</th><th style={{ textAlign: 'left' }}>상태</th></tr></thead>
                     <tbody>{inv.gpus.map((g, i) => (
                       <tr key={i}><td>{g.name}</td><td className="muted">{[g.manufacturer, g.model].filter(Boolean).join(' ') || '—'}</td>
                         <td><span className={`badge ${/ok/i.test(g.health) ? 'green' : g.health ? 'amber' : 'gray'}`}>{g.health || g.state || '—'}</span></td></tr>
                     ))}</tbody>
-                  </table>
+                  </STable>
                 </div>
               )}
 
@@ -293,7 +294,7 @@ export function IdracDetailModal({ server, onClose }) {
               <div style={{ fontSize: 13, fontWeight: 700, margin: '6px 0' }}>펌웨어 / 드라이버 버전 ({(inv.firmware || []).length})</div>
               {(inv.firmware || []).length === 0 ? <div className="muted" style={{ fontSize: 13 }}>펌웨어 인벤토리를 읽지 못했습니다(모델/권한 확인). “↻ 즉시 재수집”을 눌러보세요.</div> : (
                 <div style={{ maxHeight: 340, overflow: 'auto' }}>
-                  <table className="data-table" style={{ width: '100%', fontSize: 13 }}>
+                  <STable className="data-table" style={{ width: '100%', fontSize: 13 }}>
                     <thead><tr><th style={{ textAlign: 'left' }}>종류</th><th style={{ textAlign: 'left' }}>구성요소</th><th style={{ textAlign: 'left' }}>버전</th></tr></thead>
                     <tbody>
                       {orderedTypes.map((ty) => fwByType[ty].map((f, i) => (
@@ -304,7 +305,7 @@ export function IdracDetailModal({ server, onClose }) {
                         </tr>
                       )))}
                     </tbody>
-                  </table>
+                  </STable>
                 </div>
               )}
               <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>인벤토리는 30분마다 자동 갱신됩니다. 방금 값을 보려면 “↻ 즉시 재수집”.</div>
@@ -332,7 +333,7 @@ export function IdracDetailModal({ server, onClose }) {
                 </div>
                 <div style={{ fontSize: 13, fontWeight: 700, margin: '6px 0' }}>iDRAC 인식 GPU {gpuProbe.gpus.length}</div>
                 {gpuProbe.gpus.length === 0 ? <div className="muted" style={{ fontSize: 13 }}>iDRAC가 인식한 GPU가 없습니다(패스쓰루로 게스트에 직접 할당된 경우 안 보일 수 있음).</div> : (
-                  <table className="data-table" style={{ width: '100%', fontSize: 13 }}>
+                  <STable className="data-table" style={{ width: '100%', fontSize: 13 }}>
                     <thead><tr><th style={{ textAlign: 'left' }}>GPU</th><th style={{ textAlign: 'left' }}>사용률</th><th style={{ textAlign: 'left' }}>온도</th><th style={{ textAlign: 'left' }}>전력</th><th style={{ textAlign: 'left' }}>상태</th></tr></thead>
                     <tbody>{gpuProbe.gpus.map((g, i) => (
                       <tr key={i}>
@@ -343,7 +344,7 @@ export function IdracDetailModal({ server, onClose }) {
                         <td><span className={`badge ${/ok/i.test(g.health) ? 'green' : g.health ? 'amber' : 'gray'}`}>{g.health || g.state || '—'}</span></td>
                       </tr>
                     ))}</tbody>
-                  </table>
+                  </STable>
                 )}
                 <div style={{ fontSize: 13, fontWeight: 700, margin: '12px 0 6px' }}>텔레메트리</div>
                 <div className="muted" style={{ fontSize: 13 }}>

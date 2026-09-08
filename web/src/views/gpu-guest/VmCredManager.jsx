@@ -7,6 +7,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, putJson, postJson } from '../../api.js';
 import { VmLink } from '../../components/ui.jsx';
 import { fmtAgo } from './shared.jsx';
+import { STable } from '../../components/STable.jsx';
 
 /** 클릭하면 정렬되는 테이블 헤더(오름/내림 토글 + 방향 화살표). */
 function SortTh({ k, sort, onSort, children }) {
@@ -227,7 +228,7 @@ export function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared, dep
             공용 계정 — 🐧Linux <b>{vcShared.username || '(미설정)'}</b>{vcShared.hasPassword ? '·비번O' : ''} · 🪟Windows <b>{vcShared.winUsername || '(Linux로 폴백)'}</b>{vcShared.hasWinPassword ? '·비번O' : ''} · {(osFilter === 'all' && powerFilter === 'all') ? `VM ${rows.length}개` : `표시 ${shown.length}/${rows.length}개`} · 🟢켜짐 {onCount} · ⚫꺼짐 {rows.length - onCount} · 별도 계정 {ownCount}개
           </div>
           <div style={{ overflowX: 'auto', maxWidth: '100%' }}>
-            <table className="data-table" style={{ width: '100%', fontSize: 13 }}>
+            <STable className="data-table" style={{ width: '100%', fontSize: 13 }}>
               <thead><tr>
                 <th style={{ textAlign: 'center', width: 28 }}>
                   <input type="checkbox" title="표시된 VM 전체 선택/해제"
@@ -307,7 +308,7 @@ export function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared, dep
                   );
                 })}
               </tbody>
-            </table>
+            </STable>
           </div>
 
           <div className="flex gap wrap" style={{ alignItems: 'center', marginTop: 12 }}>

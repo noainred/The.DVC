@@ -3,6 +3,7 @@ import { fetchJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import GuestScanJobs from './GuestScanJobs.jsx';
+import { STable } from '../components/STable.jsx';
 
 const fmtTime = (ts) => (ts ? new Date(ts).toLocaleString('ko-KR') : '—');
 const fmtHour = (ts) => new Date(ts).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit' });
@@ -54,7 +55,7 @@ export default function NetIssues() {
         <div className="card" style={{ padding: 14, marginBottom: 12 }}>
           <div className="section-title" style={{ marginTop: 0, fontSize: 15 }}>이슈 상위 VM ({d.topVms.length})</div>
           <div className="table-wrap" style={{ maxHeight: '38vh' }}>
-            <table><thead><tr><th>VM</th><th>vCenter</th><th>OS</th><th style={{ textAlign: 'right' }}>드롭</th><th style={{ textAlign: 'right' }}>에러</th><th style={{ textAlign: 'right' }}>이벤트</th><th style={{ textAlign: 'right' }}>최대드롭률</th></tr></thead>
+            <STable><thead><tr><th>VM</th><th>vCenter</th><th>OS</th><th style={{ textAlign: 'right' }}>드롭</th><th style={{ textAlign: 'right' }}>에러</th><th style={{ textAlign: 'right' }}>이벤트</th><th style={{ textAlign: 'right' }}>최대드롭률</th></tr></thead>
               <tbody>{d.topVms.map((v) => (
                 <tr key={v.key}>
                   <td><b>{v.vm}</b></td><td style={{ fontSize: 12 }}>{v.vcenterId}</td><td style={{ fontSize: 12 }}>{v.os || '—'}</td>
@@ -63,7 +64,7 @@ export default function NetIssues() {
                   <td style={{ textAlign: 'right' }}>{v.events}</td>
                   <td style={{ textAlign: 'right' }}>{v.maxRate ? `${v.maxRate}%` : '—'}</td>
                 </tr>
-              ))}</tbody></table>
+              ))}</tbody></STable>
           </div>
         </div>
       )}
@@ -78,10 +79,10 @@ export default function NetIssues() {
       <div className="card" style={{ padding: 14 }}>
         <div className="section-title" style={{ marginTop: 0, fontSize: 15 }}>최근 이슈</div>
         <div className="table-wrap" style={{ maxHeight: '40vh' }}>
-          <table><thead><tr><th>시각</th><th>VM</th><th>인터페이스</th><th style={{ textAlign: 'right' }}>드롭</th><th style={{ textAlign: 'right' }}>에러</th><th style={{ textAlign: 'right' }}>드롭률</th></tr></thead>
+          <STable><thead><tr><th>시각</th><th>VM</th><th>인터페이스</th><th style={{ textAlign: 'right' }}>드롭</th><th style={{ textAlign: 'right' }}>에러</th><th style={{ textAlign: 'right' }}>드롭률</th></tr></thead>
             <tbody>{d.recent.map((r, i) => (
               <tr key={i}><td className="muted" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{fmtTime(r.ts)}</td><td style={{ fontSize: 12 }}>{r.vm}</td><td style={{ fontSize: 12 }}>{r.iface}</td><td style={{ textAlign: 'right' }}>{r.newDrop}</td><td style={{ textAlign: 'right' }}>{r.newErr}</td><td className="muted" style={{ textAlign: 'right', fontSize: 12 }}>{r.dropRate != null ? `${r.dropRate}%` : '—'}</td></tr>
-            ))}</tbody></table>
+            ))}</tbody></STable>
         </div>
       </div>
     </div>

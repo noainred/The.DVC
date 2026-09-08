@@ -17,6 +17,7 @@ import { VmReconfigButton } from './VmReconfig.jsx';
 import { fetchJson, postJson } from '../api.js';
 import { Modal } from './Modal.jsx';
 import { GpuBadge, UsageCell, StateBadge, Loading, ErrorBox } from './primitives.jsx';
+import { STable } from './STable.jsx';
 
 function DRow({ label, children, full = false, nowrap = false }) {
   return (
@@ -184,7 +185,7 @@ export function HostVmsModal({ host, vcenterId, onClose }) {
           </div>
           {/* 모달 본문이 스크롤하지 않으므로(bodyScroll=false) 표가 남은 높이를 채우고 여기서만 스크롤한다. */}
           <div className="table-wrap" style={{ flex: '0 1 auto', minHeight: 0 }}>
-            <table>
+            <STable>
               <thead><tr>
                 {sortTh('name', 'VM')}{sortTh('power', '전원', 'center')}{sortTh('guestOS', 'Guest OS')}
                 {sortTh('cpu', 'vCPU', 'right')}{sortTh('ram', 'RAM', 'right')}{sortTh('ip', 'IP')}
@@ -202,7 +203,7 @@ export function HostVmsModal({ host, vcenterId, onClose }) {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </STable>
           </div>
         </>
       )}
@@ -257,7 +258,7 @@ function DsBrowseSection({ item }) {
         ? <div className="muted" style={{ fontSize: 13 }}>이 데이터스토어에 할당된 VM 이 없습니다.{d.unknownVmCount ? ` (수집 스냅샷에 아직 없는 VM ${d.unknownVmCount}대 별도)` : ''}</div>
         : (
           <div className="table-wrap" style={{ maxHeight: '32vh' }}>
-            <table>
+            <STable>
               <thead><tr><th>VM</th><th>전원</th><th>호스트</th><th>클러스터</th><th>Guest OS</th><th style={{ textAlign: 'right' }}>사용(GB)</th></tr></thead>
               <tbody>
                 {d.vms.map((v) => (
@@ -271,7 +272,7 @@ function DsBrowseSection({ item }) {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </STable>
           </div>
         ))}
       {view === 'files' && (
@@ -281,7 +282,7 @@ function DsBrowseSection({ item }) {
           {files.length === 0 && !d.filesError && <div className="muted" style={{ fontSize: 13 }}>{q ? '검색 결과 없음' : '파일 없음'}</div>}
           {files.length > 0 && (
             <div className="table-wrap" style={{ maxHeight: '32vh' }}>
-              <table>
+              <STable>
                 <thead><tr><th>폴더</th><th>파일</th><th>유형</th><th style={{ textAlign: 'right' }}>크기</th><th>수정</th></tr></thead>
                 <tbody>
                   {files.slice(0, 2000).map((f, i) => {
@@ -297,7 +298,7 @@ function DsBrowseSection({ item }) {
                     );
                   })}
                 </tbody>
-              </table>
+              </STable>
             </div>
           )}
           {files.length > 2000 && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>화면에는 2,000개까지 표시 — 검색으로 좁혀 보세요.</div>}
@@ -393,7 +394,7 @@ export function EntityDetail({ type, item, onClose }) {
         <div style={{ marginTop: 14 }}>
           <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>스토리지 어댑터 (HBA) — {item.hbas.length}</div>
           <div className="table-wrap" style={{ maxHeight: '28vh' }}>
-            <table>
+            <STable>
               <thead><tr><th>어댑터</th><th>유형</th><th>모델</th><th style={{ textAlign: 'right' }}>속도</th><th>WWN</th></tr></thead>
               <tbody>
                 {item.hbas.map((h, i) => (
@@ -406,7 +407,7 @@ export function EntityDetail({ type, item, onClose }) {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </STable>
           </div>
         </div>
       )}

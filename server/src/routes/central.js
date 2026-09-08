@@ -565,7 +565,22 @@ centralRouter.get('/sanswitch-config', async (req, res) => {
   }
   const { devicesForAgent } = await import('../sanswitch/registry.js');
   const { takeRequestsForAgent } = await import('../sanswitch/collectRequests.js');
-  res.json({ ok: true, agent, devices: devicesForAgent(agent), collectNow: takeRequestsForAgent(agent) });
+  const { takeTestRequestsForAgent } = await import('../sanswitch/testRuns.js');
+  // testNow(v2.421): 중앙 등록 화면의 '연결 테스트' 를 이 엣지가 현지에서 대행(비밀번호 포함 — 엣지가 로그인해야 한다).
+  res.json({ ok: true, agent, devices: devicesForAgent(agent), collectNow: takeRequestsForAgent(agent), testNow: takeTestRequestsForAgent(agent) });
+});
+
+// POST /api/central/sanswitch-test-result — 엣지가 대행한 연결 테스트 결과(추적 로그 포함) 회신(v2.421).
+// 개별 토큰이면 바인딩 agent 만, 공유 토큰은 body.agent — 어느 쪽이든 그 요청의 대상 엣지와 같아야 한다.
+centralRouter.post('/sanswitch-test-result', async (req, res) => {
+  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+  const agent = req.centralAuth?.mode === 'agent' ? req.centralAuth.agent : String(req.body?.agent || '').trim();
+  if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
+  const { completeTestRun } = await import('../sanswitch/testRuns.js');
+  const r = completeTestRun(String(req.body?.id || ''), agent, req.body?.result);
+  if (!r.ok) return res.status(404).json(r);
+  res.json({ ok: true });
 });
 
 // POST /api/central/sanswitch-data — 엣지 수집 스냅샷 수신. 저장 키는 body.agent 가 아니라

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { fetchJson, postJson, putJson, delJson, usePolling } from '../../api.js';
 import { Loading, ErrorBox, Kpi, Modal } from '../../components/ui.jsx';
 import { ago, durationText, uptimeText, agentStatus, resultSummary, defaultArgs, argsIssue, groupCatalog, modeLabel, targetHint, statusTone, statusLabel } from './remoteCommand.js';
+import { STable } from '../../components/STable.jsx';
 
 /**
  * 특수기능 › 원격 명령 실행(RMA, v2.416).
@@ -77,7 +78,7 @@ export default function RemoteCommand() {
       </div>
 
       <div className="table-wrap">
-        <table>
+        <STable>
           <thead><tr><th>법인/엣지</th><th>상태</th><th>인스턴스</th><th>분배</th><th>대기</th><th>보안</th><th>마지막 접속</th><th></th></tr></thead>
           <tbody>
             {groups.map((g) => {
@@ -111,13 +112,13 @@ export default function RemoteCommand() {
             })}
             {!groups.length && <tr><td colSpan={8} className="muted">알려진 엣지가 없습니다. 엣지에 개별 토큰을 발급하고 RMA 를 배포하세요.</td></tr>}
           </tbody>
-        </table>
+        </STable>
       </div>
 
       <div className="section-title" style={{ marginTop: 16 }}>최근 실행 이력</div>
       {histErr && <div className="card muted">이력 조회 오류: {histErr}</div>}
       <div className="table-wrap">
-        <table>
+        <STable>
           <thead><tr><th>시각</th><th>법인</th><th>인스턴스</th><th>명령</th><th>요청자</th><th>결과</th><th>소요</th></tr></thead>
           <tbody>
             {(hist || []).map((h) => {
@@ -135,7 +136,7 @@ export default function RemoteCommand() {
             })}
             {hist && !hist.length && <tr><td colSpan={7} className="muted">아직 실행 이력이 없습니다.</td></tr>}
           </tbody>
-        </table>
+        </STable>
       </div>
       </>}
 
@@ -420,7 +421,7 @@ function ScheduleTab({ groups, tests, schedules }) {
       <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>HostMonitor 'Test by agent' 에 해당 — 중앙이 정한 점검을 RMA 가 현지에서 주기 실행하고 결과만 회신합니다. 중앙 불통 시 결과는 엣지에 보관됐다가 재접속 후 전송됩니다.</div>
       {err && <div className="error-box">{err}</div>}
       <div className="table-wrap">
-        <table>
+        <STable>
           <thead><tr><th>이름</th><th>점검</th><th>파라미터</th><th>주기</th><th>인스턴스</th><th>상태</th><th></th></tr></thead>
           <tbody>
             {(sch?.tests || []).map((row) => (
@@ -436,7 +437,7 @@ function ScheduleTab({ groups, tests, schedules }) {
             ))}
             {sch && !(sch.tests || []).length && <tr><td colSpan={7} className="muted">이 법인에 등록된 점검이 없습니다. '+ 점검 추가'로 시작하세요.</td></tr>}
           </tbody>
-        </table>
+        </STable>
       </div>
       {form && (
         <Modal title={`${form.id ? '점검 수정' : '점검 추가'} — ${agent}`} onClose={() => setForm(null)} width={720}>
@@ -497,7 +498,7 @@ function StatusTab({ groups }) {
       </div>
       {error && !data && <ErrorBox message={error} />}
       <div className="table-wrap">
-        <table>
+        <STable>
           <thead><tr><th>법인</th><th>점검</th><th>상태</th><th>결과</th><th>값</th><th>인스턴스</th><th>마지막 실행</th><th>상태 유지</th><th>마지막 정상</th></tr></thead>
           <tbody>
             {rows.map((r) => (
@@ -511,14 +512,14 @@ function StatusTab({ groups }) {
             ))}
             {data && !rows.length && <tr><td colSpan={9} className="muted">결과가 없습니다 — 점검 스케줄을 등록하면 RMA 가 실행하고 여기에 상태가 쌓입니다.</td></tr>}
           </tbody>
-        </table>
+        </STable>
       </div>
       {hist && (
         <Modal title={`${hist.r.agent} · ${hist.r.name || hist.r.test} — 24시간 이력(상태 변화 + 1시간 단위)`} onClose={() => setHist(null)} width={820}>
           {hist.err && <div className="error-box">{hist.err}</div>}
           {hist.unavailable && <div className="muted">이 서버는 node:sqlite 가 없어 이력이 저장되지 않습니다.</div>}
-          <div className="table-wrap"><table><thead><tr><th>시각</th><th>상태</th><th>결과</th><th>값</th><th>인스턴스</th></tr></thead>
-            <tbody>{(hist.rows || []).map((h, i) => <tr key={i}><td className="muted">{new Date(h.ts).toLocaleString()}</td><td style={{ color: statusTone(h.status, TONE) }}>{statusLabel(h.status)}</td><td>{h.reply}</td><td>{h.value ?? '—'}</td><td><code>{h.instance || '—'}</code></td></tr>)}</tbody></table></div>
+          <div className="table-wrap"><STable><thead><tr><th>시각</th><th>상태</th><th>결과</th><th>값</th><th>인스턴스</th></tr></thead>
+            <tbody>{(hist.rows || []).map((h, i) => <tr key={i}><td className="muted">{new Date(h.ts).toLocaleString()}</td><td style={{ color: statusTone(h.status, TONE) }}>{statusLabel(h.status)}</td><td>{h.reply}</td><td>{h.value ?? '—'}</td><td><code>{h.instance || '—'}</code></td></tr>)}</tbody></STable></div>
         </Modal>
       )}
     </div>

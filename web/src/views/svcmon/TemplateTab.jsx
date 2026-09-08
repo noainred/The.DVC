@@ -3,6 +3,7 @@ import { fetchJson, postJson, putJson, delJson, downloadFile } from '../../api.j
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import EscClose from '../../components/EscClose.jsx';
 import PreviewTable from './PreviewTable.jsx';
+import { STable } from '../../components/STable.jsx';
 
 /**
  * 점검 템플릿 — 서비스 유형(Linux 서버·웹/TLS·DNS…)별 점검 묶음을 정의하고 대상에 적용한다.
@@ -243,7 +244,7 @@ export default function TemplateTab({ canEdit, initialApply = null }) {
         </div>
 
         <div className="table-wrap" style={{ maxHeight: '40vh' }}>
-          <table>
+          <STable>
             <thead>
               <tr>
                 <th>이름</th><th style={{ width: 84 }}>구분</th><th style={{ width: 58, textAlign: 'right' }}>항목</th>
@@ -282,7 +283,7 @@ export default function TemplateTab({ canEdit, initialApply = null }) {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </STable>
         </div>
       </div>
 
@@ -372,7 +373,7 @@ export default function TemplateTab({ canEdit, initialApply = null }) {
           </div>
 
           <div className="table-wrap" style={{ maxHeight: '36vh' }}>
-            <table>
+            <STable>
               <thead>
                 <tr>
                   <th style={{ width: 40 }}>#</th><th>이름</th><th style={{ width: 70 }}>유형</th>
@@ -409,7 +410,7 @@ export default function TemplateTab({ canEdit, initialApply = null }) {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </STable>
           </div>
         </div>
       )}

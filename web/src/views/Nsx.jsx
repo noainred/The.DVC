@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { usePolling, fetchJson } from '../api.js';
 import { Kpi, DataTable, Modal, Loading, ErrorBox, SearchBox, VmLink } from '../components/ui.jsx';
+import { STable } from '../components/STable.jsx';
 
 const MGR_BADGE = { connected: 'green', degraded: 'amber', unreachable: 'red', pending: 'gray', disabled: 'gray' };
 const MGR_LABEL = { connected: '정상', degraded: '저하', unreachable: '연결끊김', pending: '대기', disabled: '비활성' };
@@ -59,7 +60,7 @@ export default function Nsx() {
       </div>
 
       <div className="table-wrap" style={{ marginBottom: 14 }}>
-        <table>
+        <STable>
           <thead><tr><th>NSX Manager</th><th>상태</th><th>버전</th><th>리전</th><th>vCenter</th><th className="right">T0/T1</th><th className="right">세그먼트</th><th className="right">노드</th><th className="right">DFW</th></tr></thead>
           <tbody>
             {managers.length === 0 && <tr><td colSpan={9} className="center muted" style={{ padding: 24 }}>등록된 NSX Manager가 없습니다. 설정 → NSX 관리에서 추가하세요.</td></tr>}
@@ -77,7 +78,7 @@ export default function Nsx() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </STable>
       </div>
 
       <div className="flex gap wrap" style={{ marginBottom: 8, alignItems: 'center' }}>
@@ -290,7 +291,7 @@ function SegmentVms({ subnets }) {
         : rows.length === 0 ? <div className="muted" style={{ fontSize: 12 }}>이 서브넷에서 수집된 IP가 없습니다.</div>
         : (
           <div className="table-wrap" style={{ maxHeight: '34vh' }}>
-            <table>
+            <STable>
               <thead><tr><th>IP</th><th>VM / 용도</th><th>Hostname</th><th>분류</th></tr></thead>
               <tbody>
                 {rows.map((r) => (
@@ -302,7 +303,7 @@ function SegmentVms({ subnets }) {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </STable>
           </div>
         )}
     </div>

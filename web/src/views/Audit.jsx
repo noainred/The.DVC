@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson } from '../api.js';
 import { Loading, ErrorBox, SearchBox } from '../components/ui.jsx';
+import { STable } from '../components/STable.jsx';
 
 /** 설정 → 감사 로그: 누가 언제 무엇을 했는지(쓰기/로그인) 기록 조회. */
 export default function Audit() {
@@ -34,7 +35,7 @@ export default function Audit() {
         <span className="muted" style={{ fontSize: 12 }}>{data.total}건</span>
       </div>
       <div className="table-wrap" style={{ maxHeight: '60vh' }}>
-        <table>
+        <STable>
           <thead><tr><th>시각</th><th>사용자</th><th>작업</th><th>대상</th><th>IP</th></tr></thead>
           <tbody>
             {data.items.length === 0 && <tr><td colSpan={5} className="center muted" style={{ padding: 22 }}>기록이 없습니다.</td></tr>}
@@ -48,7 +49,7 @@ export default function Audit() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </STable>
       </div>
       {data.total > data.items.length && (
         <div style={{ marginTop: 8, textAlign: 'center' }}>

@@ -8,6 +8,7 @@ import EscClose from '../../components/EscClose.jsx';
 // 때문에 뷰 전체가 결합되고 Settings·SpecialTools 청크가 IdracAdmin 을 공유 의존하던 문제 해소.
 import { IdracDetailModal } from '../idrac/IdracDetailModal.jsx';
 import { Card, tempColor, useTool } from './shared.jsx';
+import { STable } from '../../components/STable.jsx';
 
 
 export function Hardware({ scope }) {
@@ -99,7 +100,7 @@ function HwDrillModal({ dc, dim, keyVal, onClose, onServer }) {
         {loading ? <Loading /> : error ? <ErrorBox message={error} /> : rows.length === 0 ? (
           <div className="muted" style={{ padding: 16 }}>해당 서버가 없습니다.</div>
         ) : (
-          <table className="data-table" style={{ width: '100%', fontSize: 12.5 }}>
+          <STable className="data-table" style={{ width: '100%', fontSize: 12.5 }}>
             <thead><tr>
               <th style={{ textAlign: 'left' }}>이름</th><th style={{ textAlign: 'left' }}>주소</th>
               <th style={{ textAlign: 'left' }}>서비스태그</th><th style={{ textAlign: 'left' }}>모델</th>
@@ -114,7 +115,7 @@ function HwDrillModal({ dc, dim, keyVal, onClose, onServer }) {
                 {dim === 'gpu' && <td style={{ textAlign: 'right' }}>{s.gpuCount}장</td>}
               </tr>
             ))}</tbody>
-          </table>
+          </STable>
         )}
       </div>
     </div>
@@ -349,7 +350,7 @@ function ServerListBody({ corpName, model, servers, onRow }) {
           <button className="logout-btn" style={{ flex: 'none', padding: '7px 12px' }} disabled={!(servers || []).length} onClick={exportCsv}>⬇ CSV</button>
         </div>
       </div>
-      <table className="data-table" style={{ width: '100%', fontSize: 13 }}>
+      <STable className="data-table" style={{ width: '100%', fontSize: 13 }}>
         <thead><tr>
           <th style={{ textAlign: 'left' }}>이름</th><th>유형</th>{allMode && <th style={{ textAlign: 'left' }}>모델</th>}<th style={{ textAlign: 'left' }}>주소</th><th style={{ textAlign: 'left' }}>서비스태그</th><th>상태</th>
         </tr></thead>
@@ -366,7 +367,7 @@ function ServerListBody({ corpName, model, servers, onRow }) {
             </tr>
           );
         })}</tbody>
-      </table>
+      </STable>
     </>
   );
 }
@@ -441,7 +442,7 @@ function PartsInventory({ vc, onServer }) {
         {(data.missing || []).length > 0 && <span title={(data.missing || []).slice(0, 30).map((m) => m.name).join(', ')}> (목록은 마우스 오버)</span>}
         {' '}— 파트 {rows.length}종 · 행을 클릭하면 장착 서버가 보입니다. 인벤토리는 30분 주기 수집이며 세대/라이선스에 따라 일부 항목이 비어 있을 수 있습니다.
       </div>
-      <table className="data-table" style={{ width: '100%', fontSize: 13 }}>
+      <STable className="data-table" style={{ width: '100%', fontSize: 13 }}>
         <thead><tr><th>분류</th>{th('label', '파트(모델)')}<th>상세</th>{th('count', '수량')}{th('serverCount', '서버 수')}</tr></thead>
         <tbody>
           {rows.map((b) => (
@@ -455,7 +456,7 @@ function PartsInventory({ vc, onServer }) {
           ))}
           {!rows.length && <tr><td colSpan={5} className="muted">조건에 맞는 파트가 없습니다.</td></tr>}
         </tbody>
-      </table>
+      </STable>
       {drill && (
         // 창 폭 자동 계산 — 행별 컬럼 문자수 합의 최댓값으로 필요한 폭을 근사(13px 폰트 ≈ 자당
         // 8px + 패딩/뱃지 여유)하고 뷰포트 95% 로 상한. 기본폭(560) 모달에서 호스트네임이
@@ -474,7 +475,7 @@ function PartsInventory({ vc, onServer }) {
             <>
               <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>{drill.servers.length}대 장착 — 서버를 클릭하면 iDRAC 상세가 열립니다.</div>
               <div style={{ overflowX: 'auto' }}>
-                <table className="data-table" style={{ width: '100%', fontSize: 13, whiteSpace: 'nowrap' }}>
+                <STable className="data-table" style={{ width: '100%', fontSize: 13, whiteSpace: 'nowrap' }}>
                   <thead><tr><th>서버</th><th>호스트 IP</th><th>호스트네임</th><th>모델</th><th>법인(vCenter)</th><th style={{ textAlign: 'right' }}>수량</th></tr></thead>
                   <tbody>
                     {drill.servers.map((s) => (
@@ -488,7 +489,7 @@ function PartsInventory({ vc, onServer }) {
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </STable>
               </div>
             </>
           )}
@@ -699,7 +700,7 @@ function ServerFirmwareFinder({ vc }) {
                     <span className={`badge ${FW_CAT_COLOR[c.category] || 'gray'}`}>{c.category}</span>
                     <span className="muted" style={{ fontWeight: 400, marginLeft: 6 }}>{c.versions.length}개 버전</span>
                   </div>
-                  <table className="data-table" style={{ width: '100%', fontSize: 13 }}>
+                  <STable className="data-table" style={{ width: '100%', fontSize: 13 }}>
                     <thead><tr><th style={{ textAlign: 'left' }}>버전</th><th style={{ textAlign: 'right', width: 110 }}>설치 서버</th><th style={{ textAlign: 'left' }}>서버 목록</th></tr></thead>
                     <tbody>{c.versions.map((v) => (
                       <tr key={v.version}>
@@ -708,7 +709,7 @@ function ServerFirmwareFinder({ vc }) {
                         <td className="muted" style={{ fontSize: 12 }} title={v.servers.join(', ')}>{v.servers.slice(0, 8).join(', ')}{v.servers.length > 8 ? ` 외 ${v.servers.length - 8}대` : ''}</td>
                       </tr>
                     ))}</tbody>
-                  </table>
+                  </STable>
                 </div>
               ))}
             </div>
@@ -768,7 +769,7 @@ GPU <b style={{ color: 'var(--accent)' }}>{d.totalGpus}</b>장 · <b>{d.models.l
             return (
               <div className="card" style={{ padding: 14, marginBottom: 14 }}>
                 <div style={{ fontWeight: 700, marginBottom: 8 }}>🎮 {m.model} — {m.count}장 / {m.serverCount}대 서버</div>
-                <table className="data-table" style={{ width: '100%', fontSize: 13 }}>
+                <STable className="data-table" style={{ width: '100%', fontSize: 13 }}>
                   <thead><tr><th style={{ textAlign: 'left' }}>서버</th><th style={{ textAlign: 'left' }}>서비스태그</th><th style={{ textAlign: 'left' }}>소속 vCenter</th><th style={{ textAlign: 'right' }}>장수</th></tr></thead>
                   <tbody>{m.servers.map((s) => (
                     <tr key={s.id + (s.source || '')}><td>{s.source === 'physical' ? <span>{s.name} <span className="badge gray" style={{ fontSize: 10 }}>물리</span></span> : <button className="cell-link" onClick={() => onServer(s)}>{s.name}</button>} <span className="muted" style={{ fontSize: 11 }}>({s.host || s.id})</span></td>
@@ -776,7 +777,7 @@ GPU <b style={{ color: 'var(--accent)' }}>{d.totalGpus}</b>장 · <b>{d.models.l
                       <td className="muted">{s.vcenterId || '—'}</td>
                       <td style={{ textAlign: 'right' }}><b>{s.count}</b></td></tr>
                   ))}</tbody>
-                </table>
+                </STable>
               </div>
             );
           })()}

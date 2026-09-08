@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { usePolling, fetchJson, postJson, putJson, delJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
+import { STable } from '../components/STable.jsx';
 
 // 상태별 색상(파이썬 원본의 baseline 편차 색상 코딩 이식).
 const COLOR = { ok: '#22c55e', warn: '#eab308', crit: '#f97316', down: '#ef4444', unknown: '#6b7280' };
@@ -145,7 +146,7 @@ export default function PingMonitor() {
       )}
 
       <div className="table-wrap" style={{ marginBottom: 16 }}>
-        <table>
+        <STable>
           <thead><tr><th>상태</th><th>대상</th><th>주소</th><th>방식</th><th className="right">현재 RTT</th><th className="right">기준</th><th>측정</th>{isAdmin && <th className="right">작업</th>}</tr></thead>
           <tbody>
             {targets.length === 0 && <tr><td colSpan={isAdmin ? 8 : 7} className="center muted" style={{ padding: 24 }}>등록된 Ping 대상이 없습니다. {isAdmin ? '“+ 대상 추가”로 등록하세요.' : '관리자에게 대상 등록을 요청하세요.'}</td></tr>}
@@ -165,7 +166,7 @@ export default function PingMonitor() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </STable>
       </div>
       <div className="muted" style={{ fontSize: 11, marginTop: -8, marginBottom: 12 }}>* 기준값 옆 별표는 자동 산출(최근 정상 응답의 중앙값)을 의미합니다. 행을 클릭하면 아래에 추세가 표시됩니다.</div>
 

@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { Loading, ErrorBox, UsageCell, VmLink } from '../../components/ui.jsx';
 import { Card, useTool } from './shared.jsx';
+import { STable } from '../../components/STable.jsx';
 
 
 /** 운영 인사이트 — 라이트사이징 · 클러스터 N+1 · 알람 핫스팟 · GPU 유휴 (기존 스냅샷 기반). */
@@ -20,7 +21,7 @@ export function Insights({ scope }) {
   ];
   const vmRows = (arr) => (
     <div className="table-wrap" style={{ maxHeight: '52vh' }}>
-      <table><thead><tr><th>VM</th><th>법인</th><th>호스트</th><th style={{ textAlign: 'right' }}>vCPU</th><th style={{ textAlign: 'right' }}>RAM</th><th>CPU%</th><th>MEM%</th></tr></thead>
+      <STable><thead><tr><th>VM</th><th>법인</th><th>호스트</th><th style={{ textAlign: 'right' }}>vCPU</th><th style={{ textAlign: 'right' }}>RAM</th><th>CPU%</th><th>MEM%</th></tr></thead>
         <tbody>
           {arr.length === 0 && <tr><td colSpan={7} className="center muted" style={{ padding: 18 }}>해당 VM이 없습니다.</td></tr>}
           {arr.map((v) => (
@@ -33,7 +34,7 @@ export function Insights({ scope }) {
               <td>{v.cpuPct == null ? '—' : <UsageCell pct={v.cpuPct} />}</td><td>{v.memPct == null ? '—' : <UsageCell pct={v.memPct} />}</td>
             </tr>
           ))}
-        </tbody></table>
+        </tbody></STable>
     </div>
   );
   return (
@@ -60,7 +61,7 @@ export function Insights({ scope }) {
       {sec === 'n1' && (
         <div className="table-wrap" style={{ maxHeight: '64vh' }}>
           <div className="muted" style={{ fontSize: 12, margin: '0 0 8px' }}>호스트 1대(가장 큰 호스트) 장애 시 잔여 용량으로 현재 사용량을 수용할 수 있는지. 90% 초과·단일 호스트면 위험.</div>
-          <table><thead><tr><th>법인</th><th>클러스터</th><th style={{ textAlign: 'right' }}>호스트</th><th>현재 CPU</th><th>현재 MEM</th><th>1대 장애 후 CPU</th><th>1대 장애 후 MEM</th><th>N+1</th></tr></thead>
+          <STable><thead><tr><th>법인</th><th>클러스터</th><th style={{ textAlign: 'right' }}>호스트</th><th>현재 CPU</th><th>현재 MEM</th><th>1대 장애 후 CPU</th><th>1대 장애 후 MEM</th><th>N+1</th></tr></thead>
             <tbody>
               {cl.map((c) => (
                 <tr key={`${c.vcenterId}:${c.cluster}`} style={{ background: c.n1Ok ? undefined : 'rgba(239,68,68,.10)' }}>
@@ -71,31 +72,31 @@ export function Insights({ scope }) {
                   <td>{c.n1Ok ? <span className="badge green">여유</span> : <span className="badge red">위험</span>}</td>
                 </tr>
               ))}
-            </tbody></table>
+            </tbody></STable>
         </div>
       )}
       {sec === 'alarms' && (
         <div className="grid2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
           <div><div className="section-title" style={{ fontSize: 14 }}>알람 많은 엔티티</div>
-            <div className="table-wrap" style={{ maxHeight: '52vh' }}><table><thead><tr><th>엔티티</th><th style={{ textAlign: 'right' }}>알람 수</th></tr></thead>
+            <div className="table-wrap" style={{ maxHeight: '52vh' }}><STable><thead><tr><th>엔티티</th><th style={{ textAlign: 'right' }}>알람 수</th></tr></thead>
               <tbody>{ah.topEntities.length === 0 && <tr><td colSpan={2} className="center muted" style={{ padding: 18 }}>알람 없음</td></tr>}
-                {ah.topEntities.map((e) => <tr key={e.entity}><td>{e.entity}</td><td style={{ textAlign: 'right' }}><b>{e.count}</b></td></tr>)}</tbody></table></div></div>
+                {ah.topEntities.map((e) => <tr key={e.entity}><td>{e.entity}</td><td style={{ textAlign: 'right' }}><b>{e.count}</b></td></tr>)}</tbody></STable></div></div>
           <div><div className="section-title" style={{ fontSize: 14 }}>센터별 알람</div>
-            <div className="table-wrap" style={{ maxHeight: '52vh' }}><table><thead><tr><th>vCenter</th><th style={{ textAlign: 'right' }}>알람 수</th></tr></thead>
-              <tbody>{ah.byVcenter.map((e) => <tr key={e.vcenterId || '_'}><td>{e.vcenterId || '—'}</td><td style={{ textAlign: 'right' }}><b>{e.count}</b></td></tr>)}</tbody></table></div></div>
+            <div className="table-wrap" style={{ maxHeight: '52vh' }}><STable><thead><tr><th>vCenter</th><th style={{ textAlign: 'right' }}>알람 수</th></tr></thead>
+              <tbody>{ah.byVcenter.map((e) => <tr key={e.vcenterId || '_'}><td>{e.vcenterId || '—'}</td><td style={{ textAlign: 'right' }}><b>{e.count}</b></td></tr>)}</tbody></STable></div></div>
         </div>
       )}
       {sec === 'gpu' && (
         <div className="table-wrap" style={{ maxHeight: '64vh' }}>
           <div className="muted" style={{ fontSize: 12, margin: '0 0 8px' }}>ESXi 보고 사용률 &lt;10% GPU 호스트(유휴/낭비 후보). 미보고({gw.unreporting})는 패스쓰루로 사용률 미관측.</div>
-          <table><thead><tr><th>호스트</th><th>법인</th><th>GPU 모델</th><th style={{ textAlign: 'right' }}>개수</th><th>사용률</th><th style={{ textAlign: 'right' }}>할당 VM</th></tr></thead>
+          <STable><thead><tr><th>호스트</th><th>법인</th><th>GPU 모델</th><th style={{ textAlign: 'right' }}>개수</th><th>사용률</th><th style={{ textAlign: 'right' }}>할당 VM</th></tr></thead>
             <tbody>
               {gw.list.length === 0 && <tr><td colSpan={6} className="center muted" style={{ padding: 18 }}>유휴 GPU 호스트가 없습니다.</td></tr>}
               {gw.list.map((g) => (
                 <tr key={g.host}><td><b>{g.host}</b></td><td className="muted">{g.vcenterId}</td><td>{g.model}</td>
                   <td style={{ textAlign: 'right' }}>{g.count}</td><td><UsageCell pct={g.util} /></td><td style={{ textAlign: 'right' }}>{g.assignedVms}</td></tr>
               ))}
-            </tbody></table>
+            </tbody></STable>
         </div>
       )}
     </>
@@ -134,41 +135,41 @@ export function Threats({ scope }) {
       {sec === 'mining' && (
         <div className="table-wrap" style={{ maxHeight: '64vh' }}>
           <div className="muted" style={{ fontSize: 12, margin: '0 0 8px' }}>전원 ON·CPU ≥ 90%. 지속 고부하는 크립토마이닝/폭주 프로세스 신호일 수 있습니다(확정 아님).</div>
-          <table><thead><tr><th>VM</th><th>법인</th><th>호스트</th><th>CPU%</th><th>MEM%</th></tr></thead>
+          <STable><thead><tr><th>VM</th><th>법인</th><th>호스트</th><th>CPU%</th><th>MEM%</th></tr></thead>
             <tbody>{data.mining.length === 0 && <tr><td colSpan={5} className="center muted" style={{ padding: 18 }}>해당 없음</td></tr>}
-              {data.mining.map((v) => <tr key={`${v.vcenterId}:${v.name}`}><td><b>{v.name}</b></td><td className="muted">{v.vcenterId}</td><td className="muted" style={{ fontSize: 12 }}>{v.host}</td><td><UsageCell pct={v.cpuPct} /></td><td>{v.memPct == null ? '—' : <UsageCell pct={v.memPct} />}</td></tr>)}</tbody></table>
+              {data.mining.map((v) => <tr key={`${v.vcenterId}:${v.name}`}><td><b>{v.name}</b></td><td className="muted">{v.vcenterId}</td><td className="muted" style={{ fontSize: 12 }}>{v.host}</td><td><UsageCell pct={v.cpuPct} /></td><td>{v.memPct == null ? '—' : <UsageCell pct={v.memPct} />}</td></tr>)}</tbody></STable>
         </div>
       )}
       {sec === 'risky' && (
         <div className="table-wrap" style={{ maxHeight: '64vh' }}>
           <div className="muted" style={{ fontSize: 12, margin: '0 0 8px' }}>스캔에서 확인된 위험 서비스 포트(Telnet/SMB/RDP/DB 등). <b>공인 IP 노출</b>은 즉시 점검 권장.</div>
-          <table><thead><tr><th>IP</th><th>호스트명</th><th>위험 포트</th><th>분류</th><th>위험도</th></tr></thead>
+          <STable><thead><tr><th>IP</th><th>호스트명</th><th>위험 포트</th><th>분류</th><th>위험도</th></tr></thead>
             <tbody>{data.risky.length === 0 && <tr><td colSpan={5} className="center muted" style={{ padding: 18 }}>해당 없음</td></tr>}
-              {data.risky.map((r) => <tr key={r.ip} style={{ background: r.public ? 'rgba(239,68,68,.10)' : undefined }}><td><b>{r.ip}</b></td><td className="muted">{r.hostname || '—'}</td><td>{(r.ports || []).map((p) => <span key={p} className="badge amber" style={{ marginRight: 4 }}>{p}</span>)}</td><td>{r.public ? <span className="badge red">공인</span> : <span className="badge gray">사설</span>}</td><td>{r.severity === 'high' ? <span className="badge red">높음</span> : <span className="badge amber">보통</span>}</td></tr>)}</tbody></table>
+              {data.risky.map((r) => <tr key={r.ip} style={{ background: r.public ? 'rgba(239,68,68,.10)' : undefined }}><td><b>{r.ip}</b></td><td className="muted">{r.hostname || '—'}</td><td>{(r.ports || []).map((p) => <span key={p} className="badge amber" style={{ marginRight: 4 }}>{p}</span>)}</td><td>{r.public ? <span className="badge red">공인</span> : <span className="badge gray">사설</span>}</td><td>{r.severity === 'high' ? <span className="badge red">높음</span> : <span className="badge amber">보통</span>}</td></tr>)}</tbody></STable>
         </div>
       )}
       {sec === 'eol' && (
         <div className="table-wrap" style={{ maxHeight: '64vh' }}>
-          <table><thead><tr><th>VM</th><th>법인</th><th>OS</th><th>사유</th></tr></thead>
+          <STable><thead><tr><th>VM</th><th>법인</th><th>OS</th><th>사유</th></tr></thead>
             <tbody>{data.eol.length === 0 && <tr><td colSpan={4} className="center muted" style={{ padding: 18 }}>해당 없음</td></tr>}
-              {data.eol.map((v) => <tr key={`${v.vcenterId}:${v.name}`}><td><b>{v.name}</b></td><td className="muted">{v.vcenterId}</td><td>{v.os}</td><td><span className="badge amber">{v.reason}</span></td></tr>)}</tbody></table>
+              {data.eol.map((v) => <tr key={`${v.vcenterId}:${v.name}`}><td><b>{v.name}</b></td><td className="muted">{v.vcenterId}</td><td>{v.os}</td><td><span className="badge amber">{v.reason}</span></td></tr>)}</tbody></STable>
         </div>
       )}
       {sec === 'rogue' && (
         <div className="table-wrap" style={{ maxHeight: '64vh' }}>
           <div className="muted" style={{ fontSize: 12, margin: '0 0 8px' }}>vCenter가 모르는데 최근 7일 내 처음 스캔된 IP — 미등록 장비/침입 가능성 점검.</div>
-          <table><thead><tr><th>IP</th><th>호스트명</th><th>최초 관측</th><th>포트</th></tr></thead>
+          <STable><thead><tr><th>IP</th><th>호스트명</th><th>최초 관측</th><th>포트</th></tr></thead>
             <tbody>{data.rogue.length === 0 && <tr><td colSpan={4} className="center muted" style={{ padding: 18 }}>해당 없음</td></tr>}
-              {data.rogue.map((r) => <tr key={r.ip}><td><b>{r.ip}</b></td><td className="muted">{r.hostname || '—'}</td><td className="muted" style={{ fontSize: 12 }}>{fmt(r.firstSeen)}</td><td className="muted" style={{ fontSize: 12 }}>{(r.ports || []).join(', ')}</td></tr>)}</tbody></table>
+              {data.rogue.map((r) => <tr key={r.ip}><td><b>{r.ip}</b></td><td className="muted">{r.hostname || '—'}</td><td className="muted" style={{ fontSize: 12 }}>{fmt(r.firstSeen)}</td><td className="muted" style={{ fontSize: 12 }}>{(r.ports || []).join(', ')}</td></tr>)}</tbody></STable>
         </div>
       )}
       {sec === 'ids' && (
         <>
           <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>NSX 분산 IDS/IPS. {data.ids.managers.map((m) => `${m.name}: ${m.enabled === true ? '활성' : m.enabled === false ? '비활성' : '미상'}(프로파일 ${m.profiles})`).join(' · ') || 'NSX 매니저 없음'}</div>
           <div className="table-wrap" style={{ maxHeight: '60vh' }}>
-            <table><thead><tr><th>시각</th><th>시그니처</th><th>심각도</th><th>출발지</th><th>목적지</th><th>조치</th><th style={{ textAlign: 'right' }}>횟수</th></tr></thead>
+            <STable><thead><tr><th>시각</th><th>시그니처</th><th>심각도</th><th>출발지</th><th>목적지</th><th>조치</th><th style={{ textAlign: 'right' }}>횟수</th></tr></thead>
               <tbody>{data.ids.events.length === 0 && <tr><td colSpan={7} className="center muted" style={{ padding: 18 }}>IDS 이벤트가 없습니다(미활성 또는 NSX 버전/NAPP 미지원일 수 있음).</td></tr>}
-                {data.ids.events.map((e) => <tr key={e.id}><td className="muted" style={{ fontSize: 12 }}>{fmt(e.at)}</td><td>{e.signature}</td><td>{/crit|high/.test(e.severity) ? <span className="badge red">{e.severity}</span> : <span className="badge amber">{e.severity}</span>}</td><td className="muted">{e.src || '—'}</td><td className="muted">{e.dst || '—'}</td><td>{e.action || '—'}</td><td style={{ textAlign: 'right' }}>{e.count}</td></tr>)}</tbody></table>
+                {data.ids.events.map((e) => <tr key={e.id}><td className="muted" style={{ fontSize: 12 }}>{fmt(e.at)}</td><td>{e.signature}</td><td>{/crit|high/.test(e.severity) ? <span className="badge red">{e.severity}</span> : <span className="badge amber">{e.severity}</span>}</td><td className="muted">{e.src || '—'}</td><td className="muted">{e.dst || '—'}</td><td>{e.action || '—'}</td><td style={{ textAlign: 'right' }}>{e.count}</td></tr>)}</tbody></STable>
           </div>
         </>
       )}

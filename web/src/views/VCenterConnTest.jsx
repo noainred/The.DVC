@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson, postJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
+import { STable } from '../components/STable.jsx';
 
 /**
  * vCenter 연결 테스트 — 등록된 모든 vCenter의 로그인 연결을 한 번에(병렬) 점검한다.
@@ -100,7 +101,7 @@ export default function VCenterConnTest() {
       </div>
 
       <div className="table-wrap">
-        <table>
+        <STable>
           <thead><tr>
             <th>ID</th><th>이름</th><th>호스트</th><th>수집</th><th>결과</th><th className="right">작업</th>
           </tr></thead>
@@ -136,7 +137,7 @@ export default function VCenterConnTest() {
               );
             })}
           </tbody>
-        </table>
+        </STable>
       </div>
       <div className="muted" style={{ marginTop: 10, fontSize: 12, lineHeight: 1.7 }}>
         · 연결 실패 시 <b>중계 경로 테스트</b>로 TCP→TLS→HTTP 어느 단계에서 막혔는지 확인할 수 있습니다(HAProxy 중계 환경 진단).

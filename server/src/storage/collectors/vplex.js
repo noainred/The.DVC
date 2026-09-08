@@ -66,7 +66,7 @@ export function normalizeVplex(device, raw) {
   return snap;
 }
 
-export async function collect(device) {
+export async function collect(device, { signal = null } = {}) {
   // 수집 방식 분기(v2.405) — 등록 시 고른 collectMethod 로 REST/SSH(vplexcli) 를 가른다.
   // isilon.js 와 같은 패턴: 타입 파일이 자기 방식을 안다(poller 는 타입만 안다).
   if (device.collectMethod === 'ssh') {
@@ -74,10 +74,10 @@ export async function collect(device) {
     return collectViaSsh(device);
   }
   const port = Number(process.env.STORAGE_VPLEX_PORT) || 443;
-  const getV2 = makeGetter(device, { port });
+  const getV2 = makeGetter(device, { port, signal });
   // v1 인증은 Username/Password 커스텀 헤더(이 API 세대의 공식 방식 — Basic 은 무시된다).
   // makeGetter 가 헤더 값을 사전 검증(제어문자 차단·값 미포함 오류)한다 — restCommon 참조.
-  const getV1 = makeGetter(device, { port, headers: { Username: device.username, Password: device.password || '' } });
+  const getV1 = makeGetter(device, { port, headers: { Username: device.username, Password: device.password || '' }, signal });
   const raw = { version: '', clusters: null, directors: null };
   const snap = emptySnapshot(device); // 섹션 오류 임시 기록용(정규화 후 병합)
   // ⚠ 401 처리(v2.311 적대적 검증 반영): v1 과 v2 는 **인증 방식이 다르다**(v2=Basic,

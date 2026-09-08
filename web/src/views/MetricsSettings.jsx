@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, putJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
+import { STable } from '../components/STable.jsx';
 
 // Common presets for the temperature/metrics sampling interval.
 const PRESETS = [
@@ -241,7 +242,7 @@ export function VmPerfTrackingSettings() {
 
       {usage.length > 0 && (
         <div className="table-wrap" style={{ marginBottom: 12, maxHeight: 220 }}>
-          <table>
+          <STable>
             <thead><tr><th>저장된 vCenter 데이터</th><th style={{ textAlign: 'right' }}>용량</th></tr></thead>
             <tbody>
               {usage.map((u) => (
@@ -251,7 +252,7 @@ export function VmPerfTrackingSettings() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </STable>
         </div>
       )}
 

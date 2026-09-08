@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, putJson, delJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import EscClose from '../components/EscClose.jsx';
+import { STable } from '../components/STable.jsx';
 
 const REGIONS = ['아시아', '중국', '유럽', '북미'];
 const EMPTY = {
@@ -147,7 +148,7 @@ export default function VCenterAdmin() {
       </div>
 
       <div className="table-wrap">
-        <table>
+        <STable>
           <thead><tr>
             <th>ID</th><th>이름</th><th>호스트</th><th>계정</th><th>리전</th><th>위치</th><th>자격증명</th><th className="right">작업</th>
           </tr></thead>
@@ -173,7 +174,7 @@ export default function VCenterAdmin() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </STable>
       </div>
 
       {/* 데이터 소스 / 서버 파일 불러오기 / vCenter 표시 순서 — 페이지 하단으로 이동 */}
@@ -325,7 +326,7 @@ function VcenterOrderCard() {
         <>
           {msg && <div style={{ margin: '8px 0', padding: '8px 12px', borderRadius: 8, fontSize: 13, background: msg.ok ? 'rgba(34,197,94,.12)' : 'rgba(239,68,68,.12)', color: msg.ok ? '#4ade80' : '#f87171' }}>{msg.text}</div>}
           <div className="table-wrap" style={{ marginTop: 8, maxHeight: '44vh' }}>
-            <table>
+            <STable>
               <thead><tr><th style={{ width: 50 }}>순서</th><th>이름</th><th>ID</th><th>리전</th><th className="right">이동</th></tr></thead>
               <tbody>
                 {list.length === 0 && <tr><td colSpan={5} className="center muted" style={{ padding: 18 }}>등록된 vCenter가 없습니다.</td></tr>}
@@ -342,7 +343,7 @@ function VcenterOrderCard() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </STable>
           </div>
           <div className="flex gap" style={{ marginTop: 10 }}>
             <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={save}>순서 저장</button>

@@ -7,6 +7,7 @@ import { IMPORT_ACCEPT, readImportFile } from './fileFormat.js';
 // 순수 로직(상수·IP/호스트 검사·자유형식 파서·검증 코어·페이로드 생성)은 bulkRows.js 로 추출
 // (v2.295, 3차 감사 확정 #3) — vitest(bulkRows.test.js)가 서버 검증과의 드리프트를 고정한다.
 import { TABLE_CAP, MAX_COUNT, ipMsg, EMPTY_ROW, parseFree, validateRows, buildTargetRows } from './bulkRows.js';
+import { STable } from '../../components/STable.jsx';
 
 /**
  * 대량 자동등록 — 줄마다 {엣지·호스트네임·IP} 를 직접 입력해 대상을 한꺼번에 만든다.
@@ -287,7 +288,7 @@ export default function BulkTab({ canEdit, prefill }) {
             </div>
           ) : (
             <div className="table-wrap" style={{ maxHeight: '46vh', marginTop: 12 }}>
-              <table>
+              <STable>
                 <thead><tr>
                   <th style={{ width: 44 }}>#</th><th style={{ width: 200 }}>엣지 이름</th><th>호스트네임</th><th style={{ width: 200 }}>IP</th>
                 </tr></thead>
@@ -315,7 +316,7 @@ export default function BulkTab({ canEdit, prefill }) {
                     );
                   })}
                 </tbody>
-              </table>
+              </STable>
             </div>
           )
         )}
@@ -431,7 +432,7 @@ export default function BulkTab({ canEdit, prefill }) {
           '되돌리기'는 그 배치로 등록된 대상만 삭제합니다. 등록 당시 수와 <b>현재 남아 있는 수</b>를 나란히 보여줍니다.
         </div>
         <div className="table-wrap" style={{ maxHeight: '34vh' }}>
-          <table>
+          <STable>
             <thead><tr>
               <th style={{ width: 100 }}>배치</th><th style={{ width: 150 }}>시각</th><th style={{ width: 90 }}>방식</th>
               <th>경로</th><th style={{ width: 110, textAlign: 'right' }}>대상(당시/현재)</th>
@@ -452,7 +453,7 @@ export default function BulkTab({ canEdit, prefill }) {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </STable>
         </div>
       </div>
     </div>

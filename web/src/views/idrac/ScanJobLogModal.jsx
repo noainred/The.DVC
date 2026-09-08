@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson, postJson } from '../../api.js';
 import { Loading, ErrorBox, Modal } from '../../components/ui.jsx';
+import { STable } from '../../components/STable.jsx';
 
 // ---- 스캔 잡 세부 로그창 ------------------------------------------------------
 // '스캔 현황' 행의 [로그]를 누르면 열림. 잡의 이벤트 타임라인(생성→인출→진행→완료/오류) +
@@ -77,7 +78,7 @@ export function ScanJobLogModal({ reqId, dcName, onClose }) {
           ))}
           {/* 이벤트 타임라인(최신 위) */}
           <div className="table-wrap" style={{ maxHeight: '46vh' }}>
-            <table>
+            <STable>
               <thead><tr><th style={{ width: 90 }}>시각</th><th>내용</th></tr></thead>
               <tbody>
                 {(d.events || []).length === 0 && <tr><td colSpan={2} className="muted" style={{ padding: 14 }}>이벤트가 없습니다.</td></tr>}
@@ -88,7 +89,7 @@ export function ScanJobLogModal({ reqId, dcName, onClose }) {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </STable>
           </div>
           {d.result?.error && <div style={{ marginTop: 8, fontSize: 12.5, color: '#f87171' }}>오류: {d.result.error}</div>}
           {d.result?.authFailed > 0 && (

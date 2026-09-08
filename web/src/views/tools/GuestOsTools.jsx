@@ -4,6 +4,7 @@ import { fetchJson, postJson, putJson, getToken } from '../../api.js';
 import { DataTable, Loading, ErrorBox, Modal, SearchBox, VmLink } from '../../components/ui.jsx';
 import { Card, useTool } from './shared.jsx';
 import { csvCell as esc } from '../../util/csv.js'; // 수식 인젝션 가드 포함 공통 셀 이스케이프
+import { STable } from '../../components/STable.jsx';
 
 
 export function GuestOs({ scope }) {
@@ -64,7 +65,7 @@ export function GuestOs({ scope }) {
       {view === 'vcenter' ? (
         // vCenter별 — 각 행 클릭 시 그 vCenter의 OS별 VM 수·할당 vCPU 분해를 펼친다(사용자 요구).
         <div className="table-wrap">
-          <table>
+          <STable>
             <thead><tr><th>vCenter (법인)</th><th style={{ textAlign: 'right' }}>VM 수</th><th style={{ textAlign: 'right' }}>할당 vCPU</th><th style={{ textAlign: 'right' }}>OS 종류</th></tr></thead>
             <tbody>
               {rows.length === 0 && <tr><td colSpan={4} className="center muted" style={{ padding: 16 }}>표시할 vCenter가 없습니다.</td></tr>}
@@ -78,7 +79,7 @@ export function GuestOs({ scope }) {
                   </tr>
                   {openVc === vc.id && (
                     <tr><td colSpan={4} style={{ padding: 0 }}>
-                      <table style={{ width: '100%', background: 'rgba(255,255,255,.02)' }}>
+                      <STable style={{ width: '100%', background: 'rgba(255,255,255,.02)' }}>
                         <thead><tr><th style={{ paddingLeft: 24 }}>Guest OS</th><th>계열</th><th style={{ textAlign: 'right' }}>VM 수</th><th style={{ textAlign: 'right' }}>할당 vCPU</th></tr></thead>
                         <tbody>
                           {(vc.os || []).map((o) => (
@@ -92,13 +93,13 @@ export function GuestOs({ scope }) {
                             </tr>
                           ))}
                         </tbody>
-                      </table>
+                      </STable>
                     </td></tr>
                   )}
                 </React.Fragment>
               ))}
             </tbody>
-          </table>
+          </STable>
         </div>
       ) : (
         <DataTable columns={view === 'os' ? osCols : famCols} rows={rows} initialSort={{ key: 'total', dir: 'desc' }} />

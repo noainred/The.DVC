@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
 import { fetchJson, postJson, downloadFile } from '../api.js';
 import { ErrorBox, Loading } from '../components/ui.jsx';
+import { STable } from '../components/STable.jsx';
 
 const levelClass = { 높음: 'red', 중간: 'amber', 경고: 'amber', 낮음: 'gray' };
 
 function FindingTable({ rows }) {
   return (
     <div className="table-wrap" style={{ maxHeight: '48vh' }}>
-      <table>
+      <STable>
         <thead><tr><th>수준</th><th>항목</th><th>판단</th><th>근거</th></tr></thead>
         <tbody>{rows.map((r) => (
           <tr key={`${r.level}-${r.title}`}>
@@ -17,7 +18,7 @@ function FindingTable({ rows }) {
             <td><code>{r.evidence}</code></td>
           </tr>
         ))}</tbody>
-      </table>
+      </STable>
     </div>
   );
 }

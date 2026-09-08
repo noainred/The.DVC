@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { fetchJson, postJson, putJson, delJson, usePolling } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import EscClose from '../components/EscClose.jsx';
+import { STable } from '../components/STable.jsx';
 
 const REGIONS = ['아시아', '중국', '유럽', '북미'];
 const EMPTY = { id: '', name: '', host: 'https://', username: '', password: '', vcenterId: '', proxyId: '', enabled: true, pollIntervalSec: '', timeoutMs: '', location: { region: '아시아' } };
@@ -69,7 +70,7 @@ export default function NsxAdmin() {
       </div>
 
       <div className="table-wrap">
-        <table>
+        <STable>
           <thead><tr><th>ID</th><th>이름</th><th>호스트</th><th>계정</th><th>리전</th><th>연결 vCenter</th><th>자격증명</th><th>수집</th><th className="right">작업</th></tr></thead>
           <tbody>
             {list.length === 0 && <tr><td colSpan={9} className="center muted" style={{ padding: 28 }}>등록된 NSX Manager가 없습니다. “+ NSX Manager 추가”로 등록하세요.</td></tr>}
@@ -90,7 +91,7 @@ export default function NsxAdmin() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </STable>
       </div>
 
       {form && (

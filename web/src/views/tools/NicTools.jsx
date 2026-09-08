@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { fetchJson } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { csvCell } from '../../util/csv.js'; // 수식 인젝션 가드 포함 공통 셀 이스케이프
+import { STable } from '../../components/STable.jsx';
 
 
 /**
@@ -84,7 +85,7 @@ export function NicSpeed() {
 
       <div className="card" style={{ padding: 0, marginTop: 12 }}>
         <div className="table-wrap" style={{ maxHeight: '60vh' }}>
-          <table>
+          <STable>
             <thead><tr>
               <Th k="name">서버</Th><Th k="serviceTag">서비스태그</Th><Th k="model">모델</Th>
               <Th k="datacenter">DataCenter</Th><Th k="type">유형</Th><Th k="maxSpeedMbps">최고 속도</Th>
@@ -114,7 +115,7 @@ export function NicSpeed() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </STable>
         </div>
       </div>
     </div>
@@ -219,7 +220,7 @@ export function NicModels() {
 
       <div className="card" style={{ padding: 0, marginTop: 12 }}>
         <div className="table-wrap" style={{ maxHeight: '60vh' }}>
-          <table>
+          <STable>
             <thead><tr>
               <Th k="name">서버</Th><Th k="serviceTag">서비스태그</Th><Th k="model">서버 모델</Th>
               <Th k="datacenter">DataCenter</Th><Th k="type">유형</Th>
@@ -262,7 +263,7 @@ export function NicModels() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </STable>
         </div>
       </div>
     </div>

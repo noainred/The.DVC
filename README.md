@@ -448,6 +448,15 @@ HostMonitor 의 RMA(Remote Monitoring Agent) 를 참고한 **엣지 별도 프�
   (봉인 저장·비밀 무반환·OTP 재인증·법인/대상 호스트 사용 범위·감사). RMA `ssh-exec` 명령·`ssh` 점검은 '저장된 계정 사용'을
   켜면 그 계정을, 끄면 1회 입력 계정을 쓴다. 비밀은 엣지가 실행 직전 브로커(`/api/central/rma-credential`)에서 받아 메모리에서만
   사용한다. 엣지 `RMA_ALLOW_SSH=true` + `RMA_SSH_TARGETS` 필요.
+- **모든 표 제목 클릭 정렬(v2.422)**: 웹의 표 181개를 공용 `components/STable.jsx` 로 통일 — 헤더 클릭 시 셀 내용(숫자·단위·%·
+  날짜 인식)으로 정렬(오름 → 내림 → 해제). 자체 정렬 표(onClick th/컴포넌트 th)는 자동 제외. 새 표는 `<STable>` 을 쓴다.
+- **SAN 스위치 연결 테스트 진단(v2.421)**: 등록 화면의 '연결 테스트'가 비동기 실행(`POST /tools/sanswitch/test` → runId,
+  `GET /tools/sanswitch/test/:id` 1초 폴링)으로 바뀌어 DNS → TCP(10초 사전 점검) → SSH 핸드셰이크(협상 알고리즘) → 인증 →
+  명령 실행 단계별 추적 로그를 **실시간으로** 보여주고, 실패 시 단계·사유·원인 안내(hint)를 붙인다. '🔍 자세히 테스트'는
+  ssh2 debug(ssh -vvv 상당) 프로토콜 로그를 함께 남긴다(비밀번호 미기재). **수집 주체가 엣지인 스위치는 그 엣지가 대행**
+  (설정 pull 응답 `testNow` → 현지 실행 → `POST /api/central/sanswitch-test-result`, 기본 pull 5분) — 예전에는 중앙이 닿지
+  않는 IP 에 직접 붙어 60초 타임아웃만 봤다('멈춤'의 유력 원인). 구형 FOS 가 dh-group1-sha1/ssh-dss/aes-cbc 만 제공해
+  "no matching key exchange" 로 실패하면 **1회 자동 폴백**(`SSH_LEGACY_FALLBACK=0` 으로 끔, 로그에 표시).
 - **이력**: 실행 이력은 중앙 `rma-history.db`(sqlite, `RMA_HISTORY_DAYS` 기본 90일, 행당 출력 64KB)에 남는다(v2.417).
   node:sqlite 가 없는 환경은 메모리 링(300건)으로 폴백.
 - **관련 튜닝(v2.417)**: `STORAGE_DEVICE_TIMEOUT_MS`(스토리지 장비당 수집 타임아웃, 기본 180000) ·

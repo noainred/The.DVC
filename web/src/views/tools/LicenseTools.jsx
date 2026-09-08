@@ -4,6 +4,7 @@ import { fetchJson, postJson, delJson } from '../../api.js';
 import { DataTable, Loading, ErrorBox, UsageCell } from '../../components/ui.jsx';
 import { Card, useTool } from './shared.jsx';
 import { csvCell } from '../../util/csv.js'; // 수식 인젝션 가드 포함 공통 셀 이스케이프
+import { STable } from '../../components/STable.jsx';
 
 
 export function Solutions() {
@@ -63,7 +64,7 @@ export function Solutions() {
               </div>
             )}
             <div className="table-wrap">
-              <table>
+              <STable>
                 <thead><tr><th>확장 솔루션</th><th>버전</th><th>공급사</th></tr></thead>
                 <tbody>
                   {(it.solutions || []).slice(0, 30).map((s) => (
@@ -71,7 +72,7 @@ export function Solutions() {
                   ))}
                   {(it.solutions || []).length === 0 && <tr><td colSpan={3} className="muted center" style={{ padding: 14 }}>vCenter 확장 솔루션 정보 없음</td></tr>}
                 </tbody>
-              </table>
+              </STable>
             </div>
           </div>
         ))}
@@ -220,7 +221,7 @@ export function LicenseExpiry({ scope, isAdmin }) {
           <summary style={{ cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>🖥️ Horizon 연결 서버 관리 ({(hz || []).length}대 등록)</summary>
           <div className="card" style={{ marginTop: 8, padding: 14 }}>
             {(hz || []).length > 0 && (
-              <table style={{ marginBottom: 10 }}>
+              <STable style={{ marginBottom: 10 }}>
                 <thead><tr><th>ID</th><th>이름</th><th>host</th><th>계정</th><th>도메인</th><th className="right">작업</th></tr></thead>
                 <tbody>
                   {hz.map((s) => (
@@ -233,7 +234,7 @@ export function LicenseExpiry({ scope, isAdmin }) {
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </STable>
             )}
             <div className="spec-grid">
               <label>ID <input className="input" value={hzForm.id} onChange={hzSet('id')} placeholder="비우면 host로 자동" /></label>
