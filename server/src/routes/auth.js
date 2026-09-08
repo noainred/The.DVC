@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { config } from '../config.js';
-import { authenticate, signToken, authMiddleware, requireEnrolled, requireRole, getUser, beginTotpEnroll, confirmTotpEnroll, setupState } from '../auth/auth.js';
+import { authenticate, signToken, verifyToken, authMiddleware, requireEnrolled, requireRole, getUser, beginTotpEnroll, confirmTotpEnroll, setupState } from '../auth/auth.js';
 import { rolePermissions, roleToolsDenied } from '../auth/permissions.js';
 import { loadAdConfig, saveAdConfig, testAd } from '../auth/ad.js';
 import { requireSettingsOwner } from './admin/shared.js';
@@ -22,7 +22,16 @@ authRouter.get('/config', (_req, res) => {
   // ⚠ settingsOwners(설정 소유 '계정명' 목록)는 여기에 싣지 않는다 — 미인증 응답이라
   // 공격자에게 유효 관정 계정명을 알려주는 열거 단서가 된다(감사 C1 후속). 프론트의 '설정' 탭
   // 노출 판단은 인증 후 /auth/me 의 isSettingsOwner 불리언을 쓴다(서버는 requireSettingsOwner 로 강제).
-  res.json({ authEnabled: config.auth.enabled, adEnabled: Boolean(ad.enabled && ad.url), idleLogoutEnabled: sec.idleLogoutEnabled, idleLogoutMin: sec.idleLogoutMin, ...setupState() });
+  res.json({
+    authEnabled: config.auth.enabled, adEnabled: Boolean(ad.enabled && ad.url),
+    idleLogoutEnabled: sec.idleLogoutEnabled, idleLogoutMin: sec.idleLogoutMin,
+    // 세션 만료 경고·연장(v2.428) — 값 자체는 비밀이 아니고, 클라이언트가 이 값으로 경고 타이머를
+    // 건다. 실제 만료 판정은 서버(토큰 exp)가 소유하므로 클라이언트가 이 값을 조작해도
+    // 세션이 길어지지 않는다(경고를 늦게 볼 뿐).
+    sessionWarnEnabled: sec.sessionWarnEnabled, sessionWarnMin: sec.sessionWarnMin,
+    sessionExtendMin: sec.sessionExtendMin, sessionMaxHours: sec.sessionMaxHours,
+    ...setupState(),
+  });
 });
 
 authRouter.post('/login', async (req, res) => {
@@ -97,6 +106,66 @@ authRouter.get('/me', authMiddleware, (req, res) => {
   const owners = (() => { try { return loadSessionSecurity().settingsOwners || []; } catch { return []; } })();
   const isSettingsOwner = !config.auth.enabled || owners.includes(req.user.username); // username 만(위 주석 참고)
   res.json({ user: { ...req.user, totpEnabled: !!u?.totpEnabled, local: !!u, permissions: rolePermissions(req.user.role), toolsDenied: roleToolsDenied(req.user.role), isSettingsOwner, serviceHubUrl: config.serviceHubUrl || '' } });
+});
+
+/**
+ * 세션 연장(v2.428) — "계속 사용 중입니다" 클릭.
+ *
+ * 왜 필요한가: 토큰 수명(AUTH_TOKEN_TTL, 기본 8시간)이 끝나면 작업 중이어도 예고 없이 로그아웃된다.
+ * 만료 N분 전에 물어보고, 사용자가 확인하면 만료를 M분 미룬 **새 토큰**을 발급한다.
+ *
+ * 보안 경계(되돌리지 말 것):
+ *  1. **경고 창 안에서만 허용**한다. 아니면 클라이언트가 로그인 직후부터 연장을 반복 호출해
+ *     만료를 무한정 밀어 올릴 수 있다(정책 무력화). 창 밖 호출은 409 로 거절한다.
+ *  2. 새 만료는 `지금 + M분`이 아니라 **`기존 만료 + M분`**이다. 사용자가 이해하는 '연장'이
+ *     그것이고, 지금 기준으로 잡으면 경고 시점(만료 10분 전)에 눌렀을 때 실제로는 50분만 늘어난다.
+ *  3. `sessionMaxHours`(0=무제한)로 **로그인 시각(iat) 기준 총 상한**을 강제한다. 상한에 걸리면
+ *     그 지점까지만 늘리고 `capped:true` 를 알린다(조용히 무시하지 않는다).
+ *  4. 페이로드는 원본 토큰의 클레임을 그대로 승계한다 — 특히 `sid`(단일 세션)와 `tv`(토큰 버전).
+ *     여기서 새 sid 를 발급하면 다른 기기의 세션을 밀어내고, tv 를 빼면 폐기된 토큰이 되살아난다.
+ *     role/name 도 토큰이 아니라 resolveTokenUser 가 매 요청 레코드에서 다시 읽으므로 승계로 충분하다.
+ */
+authRouter.post('/extend', authMiddleware, (req, res) => {
+  if (!config.auth.enabled) return res.json({ ok: true, disabled: true }); // 인증 off면 만료 개념이 없다
+  const raw = (req.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
+  const payload = raw && verifyToken(raw);
+  if (!payload || !payload.exp) return res.status(401).json({ ok: false, reason: '토큰이 유효하지 않습니다.' });
+
+  const sec = loadSessionSecurity();
+  if (!sec.sessionWarnEnabled) return res.status(409).json({ ok: false, reason: '세션 연장이 비활성화되어 있습니다.' });
+
+  const now = Math.floor(Date.now() / 1000);
+  const warnSec = Math.max(1, Number(sec.sessionWarnMin) || 10) * 60;
+  const extendSec = Math.max(1, Number(sec.sessionExtendMin) || 60) * 60;
+
+  // (1) 경고 창 밖 호출 거절 — 무한 연장 차단.
+  if (payload.exp - now > warnSec) {
+    return res.status(409).json({
+      ok: false, reason: '아직 연장할 수 없습니다(만료 임박 시에만 연장 가능).',
+      expiresAt: payload.exp * 1000, warnMin: sec.sessionWarnMin,
+    });
+  }
+
+  // (2) 기존 만료 기준으로 연장. (3) 총 상한이 있으면 그 지점까지만.
+  let nextExp = payload.exp + extendSec;
+  let capped = false;
+  const maxH = Number(sec.sessionMaxHours) || 0;
+  if (maxH > 0) {
+    const hardLimit = (Number(payload.iat) || now) + maxH * 3600;
+    if (nextExp > hardLimit) { nextExp = hardLimit; capped = true; }
+    if (nextExp <= now) {
+      return res.status(409).json({ ok: false, reason: `세션 총 상한(${maxH}시간)에 도달해 더 연장할 수 없습니다. 다시 로그인하세요.`, capped: true });
+    }
+  }
+
+  // (4) 클레임 승계 — sid/tv 를 반드시 유지한다.
+  const { sub, role, name, src, tv, sid } = payload;
+  const token = signToken(
+    { sub, role, name, ...(src ? { src, tv } : {}), ...(sid ? { sid } : {}) },
+    { exp: nextExp },
+  );
+  logAudit({ user: req.user?.username, action: '세션 연장', target: `${sec.sessionExtendMin}분`, detail: capped ? `총 상한(${maxH}h)까지만 연장` : `만료 ${new Date(nextExp * 1000).toISOString()}` });
+  res.json({ ok: true, token, expiresAt: nextExp * 1000, extendedMin: sec.sessionExtendMin, capped });
 });
 
 // Self-service TOTP (Google Authenticator) enrollment for the current local user.

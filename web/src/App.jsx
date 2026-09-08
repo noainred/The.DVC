@@ -5,6 +5,7 @@ import { RemoteConsoleWindow } from './remote/RemoteConsoleWindow.jsx';
 import Login from './views/Login.jsx';
 import ForceOtpEnroll from './views/ForceOtpEnroll.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
+import SessionExpiryGuard from './components/SessionExpiryGuard.jsx';
 import { STable } from './components/STable.jsx';
 
 // 탭 화면은 지연 로드(코드 스플릿)해 초기 번들/첫 로딩을 줄인다(recharts 등 무거운 의존성 분리).
@@ -151,6 +152,14 @@ export default function App() {
       </div></div>
     }>
       <Portal user={user} onLogout={logout} />
+      {/* 세션 수명 만료 경고·연장(v2.428) — 유휴 로그아웃과는 별개 축이다.
+          만료되면 서버가 이미 401 을 주지만, 화면을 그대로 두면 '멈춘 화면'을 보게 되므로
+          여기서도 로그아웃시켜 사유를 안내한다. */}
+      <SessionExpiryGuard cfg={authCfg} onExpire={() => {
+        setToken(null); broadcastLogout();
+        setLoginNotice('접속 시간이 만료되어 자동 로그아웃되었습니다. 다시 로그인하세요.');
+        setUser(null);
+      }} />
     </ErrorBoundary>
   );
 }

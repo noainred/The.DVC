@@ -111,7 +111,8 @@ adminRouter.put('/security/session', adminOnly, requireSettingsOwner, (req, res)
   const before = loadConfiguredSecurity();
   let after;
   try {
-    after = saveSessionSecurity({ idleLogoutEnabled: req.body?.idleLogoutEnabled, idleLogoutMin: req.body?.idleLogoutMin, settingsOwners: req.body?.settingsOwners, loginPolicy: req.body?.loginPolicy, singleSession: req.body?.singleSession, demoSession: req.body?.demoSession });
+    after = saveSessionSecurity({ idleLogoutEnabled: req.body?.idleLogoutEnabled, idleLogoutMin: req.body?.idleLogoutMin, settingsOwners: req.body?.settingsOwners, loginPolicy: req.body?.loginPolicy, singleSession: req.body?.singleSession, demoSession: req.body?.demoSession,
+      sessionWarnEnabled: req.body?.sessionWarnEnabled, sessionWarnMin: req.body?.sessionWarnMin, sessionExtendMin: req.body?.sessionExtendMin, sessionMaxHours: req.body?.sessionMaxHours });
   } catch (e) { return res.status(400).json({ ok: false, reason: e.message }); }
   const fmt = (s) => (s.idleLogoutEnabled ? `${s.idleLogoutMin}분` : '비활성');
   const polLabel = (p) => ({ otp_only: 'OTP 전용', otp_or_password: 'OTP+비밀번호(혼용)', password_only: '비밀번호 전용' }[p] || '기본(고권한 OTP 전용)');
@@ -123,6 +124,9 @@ adminRouter.put('/security/session', adminOnly, requireSettingsOwner, (req, res)
   if ((before.loginPolicy || '') !== (after.loginPolicy || '')) parts.push(`로그인 방식 ${polLabel(before.loginPolicy)} → ${polLabel(after.loginPolicy)}`);
   if (!!before.singleSession !== !!after.singleSession) parts.push(`단일 세션 강제 ${before.singleSession ? 'ON' : 'OFF'} → ${after.singleSession ? 'ON' : 'OFF'}`);
   if ((before.demoSession || '') !== (after.demoSession || '')) parts.push(`Demo 중복 접속 ${demoLabel(before.demoSession)} → ${demoLabel(after.demoSession)}`);
+  // 세션 만료 경고·연장(v2.428) — 무제한(0) 전환은 8시간 정책을 사실상 해제하므로 감사에 또렷이 남긴다.
+  const warnLabel = (x) => (x.sessionWarnEnabled ? `${x.sessionWarnMin}분 전 경고 · ${x.sessionExtendMin}분 연장 · 총상한 ${x.sessionMaxHours ? `${x.sessionMaxHours}시간` : '무제한'}` : '비활성');
+  if (warnLabel(before) !== warnLabel(after)) parts.push(`세션 만료 경고 ${warnLabel(before)} → ${warnLabel(after)}`);
   logAudit({ user: username, action: '세션 보안/설정 접근 변경', target: 'security/session', detail: parts.join(' · ') || '변경 없음', ip: req.ip || '' });
   res.json({ ok: true, settings: after });
 });
