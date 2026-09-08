@@ -14,7 +14,7 @@ test('identityIssue: 응답 agent 가 id/name/DC 중 하나와 같으면 null, �
   const { identityIssue } = await import('../src/collector/registry.js');
   const entry = { id: 'gm1-IRS', name: 'GM1-IRS', datacenter: 'gm1' };
   assert.equal(identityIssue(entry, { agent: 'gm1-irs' }), null);
-  assert.equal(identityIssue(entry, { agent: 'GM1' }), null, 'DC 이름과 같아도 허용');
+  assert.ok(identityIssue(entry, { agent: 'GM1' }), 'v2.428: DC 이름과 같은 것만으로는 통과하지 않는다(포워딩이 중계 엣지 자신으로 되돌아온 경우)');
   assert.equal(identityIssue(entry, {}), null, '구버전 엣지');
   const iss = identityIssue(entry, { agent: 'gm2', hostname: 'edge-a' });
   assert.equal(iss.agent, 'gm2'); assert.match(iss.reason, /응답한 엣지는 'gm2'\(edge-a\)/);

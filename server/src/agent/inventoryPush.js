@@ -10,6 +10,7 @@
 
 import zlib from 'node:zlib';
 import { promisify } from 'node:util';
+import os from 'node:os';
 import { config } from '../config.js';
 import { store } from '../store.js';
 import { resilientFetch } from '../util/resilientFetch.js';
@@ -26,13 +27,15 @@ let running = false; // 한 push 사이클이 (대용량/고RTT로) 주기보다
                      // 연결·트래픽이 누적되는 것을 방지(single-flight).
 
 function headers(extra = {}) {
-  return { 'Content-Type': 'application/json', ...extra, ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
+  // X-Agent-Hostname(v2.428): 같은 AGENT_NAME 이 다른 장비에서 오는 충돌을 중앙이 잡을 수 있게.
+  return { 'Content-Type': 'application/json', 'X-Agent-Hostname': os.hostname(), ...extra, ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
 }
 
 async function pushVcenter(snap, vc) {
   const slice = {
     agent: config.agent.name,
     vcenterId: vc.id,
+    source: config.dataSource, // v2.428: 'mock' 이면 중앙이 저장을 거부한다(가짜 데이터 혼입 차단)
     vcenter: vc,
     hosts: snap.hosts.filter((h) => h.vcenterId === vc.id),
     vms: snap.vms.filter((v) => v.vcenterId === vc.id),

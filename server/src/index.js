@@ -134,6 +134,10 @@ app.use('/api/central/agent-config', BIG_JSON); // 엣지 설정 통합 push(다
 // 대상 가져오기는 XLSX 를 base64 로 실을 수 있어(2,000행 규모 ~1MB 초과 가능) 큰 한도를 준다.
 app.use('/api/svcmon/targets/import', BIG_JSON);
 app.use('/api/svcmon/targets/hostmap/parse', BIG_JSON);
+// TRUST_PROXY(v2.428, 구성도 미스매치 #8): 중앙/엣지가 HAProxy·nginx 뒤에 있으면 홉 수(예 1)를 지정 — req.ip 가 X-Forwarded-For 의
+// 실제 클라이언트가 되어 레이트리밋 버킷·감사 IP·수집 인증 거부 로그가 프록시 IP 로 뭉치지 않는다. 프록시가 없으면 절대 켜지 말 것
+// (아무 클라이언트나 X-Forwarded-For 로 IP 를 속인다). HAProxy 는 http 모드에서 `option forwardfor` 필요.
+if (process.env.TRUST_PROXY) app.set('trust proxy', /^\d+$/.test(process.env.TRUST_PROXY) ? Number(process.env.TRUST_PROXY) : process.env.TRUST_PROXY);
 app.use(express.json({ limit: '1mb' }));
 
 // Lightweight request logging for the log viewer (skip the log endpoint itself).

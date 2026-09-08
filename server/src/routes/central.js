@@ -22,6 +22,7 @@ import { getAssignment, setResult } from '../central/assignments.js';
 import { tokenMatches } from '../util/secureCompare.js';
 import { resolveAgentByToken, hasAnyAgentToken, listAgentTokens } from '../central/agentTokens.js';
 import { setInventory, getInventory, listInventory } from '../central/inventory.js';
+import { noteAgentIdentity, noteVcenterOwner } from '../central/agentIdentity.js';
 import { setEdgeFleet } from '../central/fleet.js';
 import { setGuestGpu } from '../gpu/store.js';
 import { setGpuGuestDiag } from '../central/gpuGuestDiag.js';
@@ -204,7 +205,8 @@ centralRouter.post('/register-collector', async (req, res) => {
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
       return res.status(400).json({ ok: false, reason: 'port가 올바르지 않습니다(1~65535) — urlHint로 전체 주소를 지정하세요.' });
     }
-    let ip = String(req.socket?.remoteAddress || '').replace(/^::ffff:/, '');
+    // v2.428: TRUST_PROXY 설정 시 express 가 X-Forwarded-For 로 계산한 req.ip 를 쓴다(중앙이 프록시 뒤일 때). 아니면 소켓 peer.
+    let ip = String((req.app?.get('trust proxy') ? req.ip : '') || req.socket?.remoteAddress || '').replace(/^::ffff:/, '');
     if (!ip) return res.status(400).json({ ok: false, reason: '요청 IP를 확인할 수 없습니다(urlHint를 지정하세요).' });
     // 중앙이 리버스 프록시(nginx/HAProxy) 뒤면 peer가 127.0.0.1이 되어 모든 엣지가 중앙
     // 자신으로 등록되는 사고가 난다 → 루프백이면 거절하고 urlHint를 요구.
@@ -222,13 +224,23 @@ centralRouter.post('/register-collector', async (req, res) => {
   // v2.424: peer IP 로 유도한 URL 은 **실제로 이 엣지에 닿는지** 확인한 뒤에만 등록한다. 중앙→엣지A→엣지B 처럼 B 가 A 의
   // 포워딩을 거쳐 오면 peer IP 는 A 라, 'B 이름 + A 주소:B 포트 + B 토큰' 항목이 생겨 A 에 403 을 반복하며 '오류'로 남았다
   // (실제 사례). ping 이 403/불일치/불통이면 등록하지 않고 EDGE_ADVERTISE_URL 을 요구한다.
-  if (!String(b.urlHint || '').trim() && process.env.CENTRAL_VERIFY_SELF_REGISTER !== 'false') {
+  const hinted = !!String(b.urlHint || '').trim();
+  let unverified = '';
+  if (process.env.CENTRAL_VERIFY_SELF_REGISTER !== 'false') {
     const v = await verifyDerivedCollectorUrl({ url, name, datacenter: String(b.datacenter || ''), token: String(b.collectorToken) });
-    if (!v.ok) { console.warn(`[central] 엣지 자기등록 거부: ${name} — ${v.reason}`); return res.status(400).json({ ok: false, reason: v.reason }); }
+    if (!v.ok) {
+      // 유도 URL 은 거부(잘못된 항목 생성 방지). 관리자가 지정한 urlHint(EDGE_ADVERTISE_URL)는 등록은 하되 '미검증' 사유를 남긴다(v2.428, 미스매치 #10).
+      if (!hinted) { console.warn(`[central] 엣지 자기등록 거부: ${name} — ${v.reason}`); return res.status(400).json({ ok: false, reason: v.reason }); }
+      unverified = v.reason;
+    }
   }
   const r = upsertCollectorFromAgent({ name, url, token: String(b.collectorToken), datacenter: String(b.datacenter || '') });
-  if (r.ok) console.log(`[central] 엣지 자기등록: ${name} → ${url}${b.version ? ` (v${b.version})` : ''}`);
-  res.status(r.ok ? 200 : 400).json(r);
+  if (r.ok) console.log(`[central] 엣지 자기등록: ${name} → ${url}${b.version ? ` (v${b.version})` : ''}${unverified ? ` ⚠ 미검증: ${unverified}` : ''}`);
+  if (r.ok && unverified) {
+    const { setCollectorStatus } = await import('../collector/state.js');
+    setCollectorStatus(r.collector?.id || name, { ok: false, error: `등록 URL(EDGE_ADVERTISE_URL) 검증 실패: ${unverified}`, unverified: true });
+  }
+  res.status(r.ok ? 200 : 400).json(r.ok ? { ...r, unverified: unverified || undefined } : r);
 });
 
 // Agent posts its scan result. Body: { agent, scanned, found:[...], unreachable, notIdrac, authFailed }
@@ -379,6 +391,15 @@ centralRouter.post('/inventory', (req, res) => {
       return res.status(403).json({ ok: false, reason: `vcenterId '${b.vcenterId}'는 '${owner}' 소유입니다(다른 엣지가 덮어쓸 수 없습니다).` });
     }
   }
+  // v2.428(미스매치 #12): mock 노드의 인벤토리는 저장하지 않는다 — IRS 들이 DATA_SOURCE=mock 으로 같은 가짜 vCenter id 를 push 해
+  // 서로 덮어쓰고 실데이터와 섞였다. 엣지는 v2.408 부터 자기 로그로만 경고했다.
+  if (b.source === 'mock' || b.mock === true) {
+    noteAgentIdentity(agent, { hostname: req.get('X-Agent-Hostname') || '', mock: true, peer: req.socket?.remoteAddress || '' });
+    return res.status(400).json({ ok: false, reason: `엣지 '${agent}' 가 mock(가짜) 데이터를 보냈습니다 — 저장하지 않습니다. 엣지 portal.env 에 DATA_SOURCE=live 를 넣고 vCenter 를 등록·재시작하세요.` });
+  }
+  // v2.428(미스매치 #6/#7): 같은 vcenterId 를 다른 agent 가 번갈아 push 하거나, 같은 agent 이름이 다른 hostname 에서 오면 충돌로 기록.
+  noteAgentIdentity(agent, { hostname: req.get('X-Agent-Hostname') || '', mock: false, peer: req.socket?.remoteAddress || '' });
+  noteVcenterOwner(String(b.vcenterId), agent);
   const arr = (x, n) => (Array.isArray(x) ? x.slice(0, n) : []);
   const slice = {
     vcenter: b.vcenter,
@@ -699,7 +720,13 @@ centralRouter.post('/rma-poll', async (req, res) => {
     try { await rmaIngestResult(agent, { ...r, instance }, { name: nameOf.get(String(r.id)) }); accepted++; } catch { /* */ }
   }
   const wait = Math.min(55_000, Math.max(0, Number(b.wait) || 0));
-  const jobs = await takeRmaJobsWait(agent, instance, wait);
+  // v2.428(미스매치 #11): 롱폴 대기 중 클라이언트(HAProxy 타임아웃 등)가 끊기면 깨어나도 claim 하지 않는다 — 예전에는 응답을
+  // 버리면서 잡을 claim(MAX_CLAIMS=1)해 실행되지 않은 명령이 '미회신'으로 종결됐다.
+  let gone = false;
+  // ⚠ req.on('close') 는 본문을 다 읽으면 소켓이 살아 있어도 발생한다(Node 16+) — 응답 객체의 close(연결 종료) + writableFinished 로 판정.
+  res.on('close', () => { if (!res.writableFinished) gone = true; });
+  const jobs = await takeRmaJobsWait(agent, instance, wait, { isAlive: () => !gone });
+  if (gone) return; // 소켓이 이미 닫혔다 — 응답 불가
   const out = { ok: true, jobs, accepted };
   // 스케줄 배포 — 엣지가 보고한 버전과 다를 때만(인스턴스별로 나눠 배정). 배정은 온라인 인스턴스 집합에
   // 결정적이라, 인스턴스가 늘거나 줄면 다음 폴에서 다시 내려간다(버전은 같아도 배정이 달라질 수 있어

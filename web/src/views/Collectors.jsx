@@ -146,7 +146,15 @@ export default function Collectors() {
     if (!window.confirm(`'${form.id}' 엣지(${form.url})의 COLLECTOR_TOKEN을 이 화면의 토큰으로 강제 교체하고 서비스를 재시작할까요?\n\n· 저장된 'Edge 노드 포탈 설치' SSH 대상을 사용합니다.\n· 중앙 저장 토큰도 같은 값으로 고정(🔒)됩니다.`)) return;
     setBusy(true); setMsg(null);
     try {
-      const r = await postJson(`/admin/collectors/${encodeURIComponent(form.id)}/force-token`, { token: form.token || undefined, url: form.url || undefined });
+      let r = await postJson(`/admin/collectors/${encodeURIComponent(form.id)}/force-token`, { token: form.token || undefined, url: form.url || undefined });
+      // v2.428: 같은 host 에 SSH 대상이 여럿(중계 엣지 :22 / 포워딩 경유 IRS :4067)이면 서버가 후보를 돌려준다 — 관리자가 고른다.
+      if (!r.ok && Array.isArray(r.candidates) && r.candidates.length) {
+        const menu = r.candidates.map((c, i) => `${i + 1}) ${c.id} — ${c.host}:${c.port}${c.agentName ? ` (${c.agentName})` : ''} 포탈 :${c.portalPort}`).join('\n');
+        const pick = window.prompt(`${r.reason}\n\n번호를 입력하세요:\n${menu}`, '');
+        const idx = Number(pick) - 1;
+        if (!(idx >= 0 && idx < r.candidates.length)) { setMsg({ ok: false, text: '토큰 강제 동기화 취소' }); return; }
+        r = await postJson(`/admin/collectors/${encodeURIComponent(form.id)}/force-token`, { token: form.token || undefined, url: form.url || undefined, sshTargetId: r.candidates[idx].id });
+      }
       setMsg(r.ok
         ? { ok: true, text: `토큰 강제 동기화 완료 — ${r.host} (SSH 대상: ${r.sshTarget}${r.unit && r.unit !== 'vmware-portal' ? ` · 인스턴스 ${r.unit}` : ''}) · 서비스 ${r.active}${r.note ? ` · ${r.note}` : ''}${r.verified ? ' · 연결 재검증 성공 ✅' : ` · 재검증 실패(${r.verifyReason || '?'}) — 잠시 후 '연결 테스트'를 다시 실행하세요`}` }
         : { ok: false, text: `토큰 강제 동기화 실패: ${r.reason}` });
@@ -200,6 +208,15 @@ export default function Collectors() {
 
   const list = data.collectors || [];
   const status = data.status || {};
+  // v2.428: 같은 AGENT_NAME 이 다른 장비(hostname)에서 push 되거나 같은 vcenterId 를 다른 agent 가 번갈아 push 하면 충돌 표시.
+  const ident = data.identity || { byAgent: {}, vcenterConflicts: [] };
+  const identityOf = (c) => {
+    const a = ident.byAgent?.[String(c.id || '').toLowerCase()] || ident.byAgent?.[String(c.name || '').toLowerCase()];
+    if (a?.conflict) return `AGENT_NAME '${a.agent}' 이(가) 서로 다른 장비(${a.hostname} / ${a.conflict.hostname})에서 push 됩니다 — 한 엣지의 portal.env 를 복사해 이름이 겹친 것으로 보입니다. 이름을 서로 다르게 하세요.`;
+    const vc = (ident.vcenterConflicts || []).find((x) => [x.agent, x.other].map((v) => String(v).toLowerCase()).includes(String(c.id || '').toLowerCase()));
+    if (vc) return `vCenter id '${vc.vcenterId}' 를 '${vc.agent}' 와 '${vc.other}' 가 번갈아 push 합니다 — 두 엣지가 같은 vCenter id(예: mock id 또는 복사한 vcenters.json)를 씁니다.`;
+    return '';
+  };
   const totalHosts = Object.values(status).reduce((a, s) => a + (s.ok ? (s.hosts || 0) : 0), 0);
   const erroredCount = list.filter((c) => status[c.id] && status[c.id].ok === false).length;
   // 등록된 에이전트 수량 통계(상태별).
@@ -393,6 +410,15 @@ export default function Collectors() {
                       <span className="badge amber" style={{ marginLeft: 4, fontSize: 10 }} title={s.identity.reason}>
                         응답 {s.identity.agent}
                       </span>
+                    )}
+                    {s?.mock && (
+                      <span className="badge red" style={{ marginLeft: 4, fontSize: 10 }} title="이 엣지는 DATA_SOURCE=mock 으로 실행 중 — 가짜 데이터입니다. 중앙은 이 엣지의 인벤토리 push 를 저장하지 않습니다(v2.428). portal.env 에 DATA_SOURCE=live 를 넣고 vCenter 를 등록·재시작하세요.">MOCK</span>
+                    )}
+                    {s?.unverified && (
+                      <span className="badge amber" style={{ marginLeft: 4, fontSize: 10 }} title={s.error || ''}>URL 미검증</span>
+                    )}
+                    {identityOf(c) && (
+                      <span className="badge red" style={{ marginLeft: 4, fontSize: 10 }} title={identityOf(c)}>이름 충돌</span>
                     )}
                     {s?.authDeny?.count > 0 && (
                       <span className="badge amber" style={{ marginLeft: 4, fontSize: 10 }}

@@ -4,7 +4,7 @@ import { requirePerm, setLocalPassword } from '../../auth/auth.js';
 import { inUserScope, inUserWriteScope } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { forceCollectorToken } from '../../agent/deploy.js';
-import { listTargets, getTargetRaw } from '../../agent/deployRegistry.js';
+import { listTargets, getTargetRaw, pickSshTarget } from '../../agent/deployRegistry.js';
 import { logAudit } from '../../audit.js';
 import { loadVcenterConfig } from '../../config.js';
 import { getVmHardware, reconfigVm } from '../../provision/reconfig.js';
@@ -14,6 +14,7 @@ import { collectorsToCsv, sampleCsv as collectorsSampleCsv, parseCollectorsCsv, 
 import { clearCollectorServers } from '../../collector/remoteInventory.js';
 import { listDatacenters, getDatacenterAssign, addDatacenter, updateDatacenter, removeDatacenter, setVcenterDatacenterMany, getDatacenterOrder, saveDatacenterOrder } from '../../datacenter/store.js';
 import { allCollectorStatus, clearCollectorHosts } from '../../collector/state.js';
+import { agentIdentitySummary } from '../../central/agentIdentity.js';
 import { pullNow } from '../../collector/puller.js';
 import { pushUpgradeToCollectors } from '../../collector/upgradePush.js';
 import { resilientFetch } from '../../util/resilientFetch.js';
@@ -71,7 +72,7 @@ export function registerCollectorsDc(adminRouter) {
 
 // List registered collectors (tokens redacted) + live pull status.
 adminRouter.get('/collectors', adminOnly, (_req, res) => {
-  res.json({ collectors: listCollectors(), status: allCollectorStatus() });
+  res.json({ collectors: listCollectors(), status: allCollectorStatus(), identity: agentIdentitySummary() });
 });
 
 adminRouter.post('/collectors', adminOnly, (req, res) => {
@@ -430,13 +431,14 @@ adminRouter.post('/collectors/:id/force-token', adminOnly, async (req, res) => {
   let host = ''; let urlPort = 0;
   try { const u = new URL(url); host = u.hostname; urlPort = Number(u.port) || (u.protocol === 'https:' ? 443 : 80); } catch { /* 아래에서 처리 */ }
   if (!host) return res.status(400).json({ ok: false, reason: '수집 서버 URL에서 호스트를 확인할 수 없습니다.' });
-  const target = listTargets().map((t) => getTargetRaw(t.id)).find((t) => t && String(t.host || '').trim() === host);
-  if (!target) {
-    return res.status(404).json({ ok: false, reason: `SSH 배포 대상에 ${host} 가 없습니다. '수집 서버 → 원격 법인(DC)에 Edge 노드 포탈 설치'에서 이 호스트를 먼저 저장(SSH 계정 포함)하세요.` });
-  }
+  const pick = pickSshTarget(listTargets().map((t) => getTargetRaw(t.id)).filter(Boolean), host, req.body?.sshTargetId);
+  if (!pick.ok) return res.status(pick.candidates ? 409 : 404).json({ ok: false, reason: pick.reason, candidates: pick.candidates });
+  const target = pick.target;
   // URL 포트를 실제 서비스 중인 인스턴스를 역추적해 적용 — 같은 호스트 다중 인스턴스(:4000/:4001)나
   // NAT 포워딩(다른 장비)일 때 기본 인스턴스만 고치고 '성공'으로 오판하던 버그 방지.
-  const r = await forceCollectorToken(target, token, { urlPort });
+  // v2.428: 대상이 포워딩 경유(SSH 포트≠22 등 명시 선택)면 URL 포트(중계 엣지의 4068)가 아니라 그 장비의 포탈 포트로 역추적한다.
+  const probePort = pick.viaRelay ? (Number(target.portalPort) || 4000) : urlPort;
+  const r = await forceCollectorToken(target, token, { urlPort: probePort });
   logAudit({ user: req.user?.username, action: '수집 서버 토큰 강제 동기화', target: `${saved.id} (${host})`, detail: r.ok ? `성공 · 서비스 ${r.active}` : `실패 — ${r.reason}`, ip: req.ip || '' });
   if (!r.ok) return res.status(400).json({ ok: false, reason: r.reason, host, sshTarget: target.id, log: r.log });
   // 중앙 저장 토큰도 동일 값으로 고정(managed) — 엣지 자기등록이 이 값을 덮어쓰지 않게.

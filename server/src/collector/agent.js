@@ -111,6 +111,7 @@ export async function buildExport() {
     datacenter: config.collector.datacenter || '',
     agent: config.agent.name || '',      // v2.424: 응답 엣지 정체(중앙의 URL↔엣지 불일치 판정용)
     hostname: os.hostname(),
+    mock: config.dataSource === 'mock',  // v2.428: 가짜 데이터 노드임을 중앙에 명시(구성도 미스매치 #12)
     generatedAt: Date.now(),
     poller: getPollerStatus(),
     omeDevices: allOmeDevices().length,
