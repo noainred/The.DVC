@@ -26,6 +26,26 @@ function assertHeaderSafe(headers) {
   }
 }
 
+/**
+ * HTTP 실패 → 사유 문자열(v2.422, 사용자 요구 'PowerStore 접속은 되는데 수집이 안 됨'). 예전에는 `HTTP 422` 만
+ * 남아 **왜** 거부됐는지 알 수 없었다. PowerStore/Unity 는 오류 본문에 `messages[].message_l10n`(또는 code) 로
+ * 사유를 주므로 그것을 뽑고, 아니면 본문 앞 200자를 붙인다. 장비 비밀번호가 본문에 되울려도 마스킹한다.
+ */
+export async function httpFailMessage(res, device = null) {
+  let text = '';
+  try { text = await res.text(); } catch { text = ''; }
+  let detail = '';
+  try {
+    const j = JSON.parse(text);
+    const msgs = Array.isArray(j?.messages) ? j.messages : (Array.isArray(j) ? j : []);
+    detail = msgs.map((m) => m?.message_l10n || m?.message || m?.code || '').filter(Boolean).join(' / ');
+    if (!detail && (j?.message || j?.error || j?.errorCode)) detail = String(j.message || j.error || j.errorCode);
+  } catch { /* JSON 아님 */ }
+  if (!detail) detail = String(text || '').replace(/[\x00-\x1f]+/g, ' ').trim().slice(0, 200);
+  if (device?.password && detail.includes(device.password)) detail = detail.split(device.password).join('***');
+  return `HTTP ${res.status}${detail ? ` — ${detail}` : ''}`;
+}
+
 export function makeGetter(device, { port = 443, headers = {} } = {}) {
   assertHeaderSafe(headers); // 값 미포함 오류로 즉시 차단(아래 머리말 참조 — 유출 방지)
   const auth = Buffer.from(`${device.username}:${device.password || ''}`).toString('base64');
@@ -35,7 +55,7 @@ export function makeGetter(device, { port = 443, headers = {} } = {}) {
       dispatcher, signal: AbortSignal.timeout(TIMEOUT_MS),
     });
     if (res.status === 401) throw new Error('인증 실패(401) — 계정/비밀번호 확인');
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) throw new Error(await httpFailMessage(res, device));
     return res.json();
   };
 }
@@ -53,7 +73,7 @@ export function makeRawGetter(device, { port = 443, headers = {} } = {}) {
       dispatcher, signal: AbortSignal.timeout(TIMEOUT_MS),
     });
     if (res.status === 401) throw new Error('인증 실패(401) — 계정/비밀번호 확인');
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) throw new Error(await httpFailMessage(res, device));
     return { body: await res.json(), headers: res.headers };
   };
 }
@@ -76,7 +96,7 @@ export function makePoster(device, { port = 443, headers = {} } = {}) {
       dispatcher, signal: AbortSignal.timeout(TIMEOUT_MS),
     });
     if (res.status === 401) throw new Error('인증 실패(401) — 계정/비밀번호 확인');
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) throw new Error(await httpFailMessage(res, device));
     return res.json();
   };
 }

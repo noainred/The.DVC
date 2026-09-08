@@ -42,8 +42,15 @@ export function normalizePowerstore(device, raw) {
   //   '물리 총량이 있는 점 중 timestamp 가 가장 큰 것'을 고른다. 예전에는 first()(=[0])만 봐서
   //   generate 응답에서는 가장 오래된 점(대개 값이 비어 있음)을 집어 용량이 '—' 로 남았다.
   const m = pickLatestSpacePoint(raw.metrics);
-  if (m) {
-    const total = Number(m.physical_total) || 0;
+  // 진단(v2.422): 공간 지표를 어디서(generate/GET)·어떤 구간으로 받았고 점이 몇 개였는지 — 용량이 비면 이 정보가
+  // 상세 창 '섹션별 수집 상태' 옆에 보여 원인을 좁힌다(예전에는 '정상 + 0.0 TB' 로만 보여 원인을 알 수 없었다).
+  if (raw.metricsDebug) snap.extra.spaceDebug = raw.metricsDebug;
+  const total = Number(m?.physical_total) || 0;
+  if (m && !total) {
+    // ⚠ 점은 있는데 physical_total 이 없거나 0 — 'ok + 0 TB' 로 위장하지 않는다(정직 표기).
+    const keys = Object.keys(m).filter((k) => k !== 'entity' && k !== 'entity_id').slice(0, 12).join(',');
+    snap.sections.capacity = `오류: 공간 지표 점 ${Array.isArray(raw.metrics) ? raw.metrics.length : 1}개 중 physical_total 이 있는 점이 없음(필드: ${keys || '없음'})`;
+  } else if (m) {
     const used = Number(m.physical_used) || 0;
     snap.capacity = { totalBytes: total, usedBytes: used, pct: total ? Math.round((used / total) * 1000) / 10 : null };
     snap.sections.capacity = 'ok';
@@ -161,20 +168,63 @@ const METRICS_INTERVAL = process.env.STORAGE_POWERSTORE_METRICS_INTERVAL || 'One
  * 응답 헤더로 내려준다 — 토큰이 있으면 실어 보내고, 없으면 그냥 보낸다(요구하지 않는 버전 대응).
  * generate 가 실패하면 구버전용 GET 컬렉션으로 폴백한다(둘 다 실패해야 섹션 오류).
  */
-async function fetchSpaceMetrics({ post, csrf, get, entity, entityId }) {
-  try {
-    return await post('/api/rest/metrics/generate',
-      { entity, entity_id: String(entityId ?? ''), interval: METRICS_INTERVAL },
-      csrf ? { 'DELL-EMC-TOKEN': csrf } : {});
-  } catch (e) {
-    // 구버전/변형 폴백 — 컬렉션 GET 이 되는 환경도 있다. 마지막 오류를 그대로 올린다.
-    try {
-      return await tryAny(get, [
-        `/api/rest/${entity}?select=*&order=timestamp.desc&limit=1`,
-        `/api/rest/${entity}?select=*&limit=1`,
-      ]);
-    } catch { throw e; }
+const SPACE_INTERVALS = (() => {
+  const first = METRICS_INTERVAL;
+  return [first, ...['One_Day', 'One_Hour', 'Five_Mins'].filter((x) => x !== first)];
+})();
+const hasTotal = (pts) => (Array.isArray(pts) ? pts : [pts]).some((p) => p && Number(p.physical_total) > 0);
+
+/**
+ * v2.422(사용자 요구 '접속은 되는데 데이터 수집이 안 됨'): 원인 후보를 전부 순서대로 시도하고 **무엇을 시도했는지**
+ * debug 로 남긴다.
+ *  ① generate 를 구간 One_Day → One_Hour → Five_Mins 순으로 — 어떤 구간은 최신 점이 아직 집계 전이라 physical_total
+ *     이 비어 오고(그래서 '0 TB'), 다른 구간에는 값이 있다. physical_total>0 인 점이 나오면 멈춘다.
+ *  ② CSRF 거부(4xx 본문에 token/CSRF)면 `GET /api/rest/login_session` 으로 DELL-EMC-TOKEN 을 새로 받아 1회 재시도
+ *     — 앞선 GET 응답 헤더에 토큰이 없는 버전이 있다.
+ *  ③ 전부 실패하면 구버전 GET 컬렉션 폴백. 마지막 오류에 시도 내역을 붙인다.
+ * 반환: { points, debug:{ source, interval, tried:[...] } }
+ */
+export async function fetchSpaceMetrics({ post, csrf, get, rawGet = null, entity, entityId, intervals = SPACE_INTERVALS, accept = hasTotal }) {
+  const tried = [];
+  let token = csrf;
+  let lastErr = null;
+  let lastPts = null;
+  for (const interval of intervals) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const pts = await post('/api/rest/metrics/generate', { entity, entity_id: String(entityId ?? ''), interval }, token ? { 'DELL-EMC-TOKEN': token } : {});
+        const n = Array.isArray(pts) ? pts.length : (pts ? 1 : 0);
+        const ok = accept(pts);
+        tried.push(`generate ${interval}: ${n}점${ok ? '(값 있음)' : '(physical_total 없음)'}`);
+        if (ok) return { points: pts, debug: { source: 'generate', interval, tried } };
+        if (n) lastPts = pts;
+        break; // 응답은 왔으나 값 없음 → 다음 구간
+      } catch (e) {
+        lastErr = e;
+        tried.push(`generate ${interval}: ${e.message}`);
+        // CSRF 토큰 거부 → login_session 에서 토큰을 받아 1회 재시도
+        if (attempt === 0 && rawGet && /token|csrf|403|422/i.test(e.message)) {
+          try {
+            const r = await rawGet('/api/rest/login_session');
+            const t = r.headers.get('DELL-EMC-TOKEN') || r.headers.get('dell-emc-token') || null;
+            if (t && t !== token) { token = t; tried.push('login_session 에서 CSRF 토큰 재확보'); continue; }
+          } catch (e2) { tried.push(`login_session: ${e2.message}`); }
+        }
+        break;
+      }
+    }
   }
+  // 구버전/변형 폴백 — 컬렉션 GET 이 되는 환경도 있다.
+  try {
+    const pts = await tryAny(get, [
+      `/api/rest/${entity}?select=*&order=timestamp.desc&limit=1`,
+      `/api/rest/${entity}?select=*&limit=1`,
+    ]);
+    tried.push(`GET ${entity}: ${Array.isArray(pts) ? pts.length : 1}점`);
+    if (accept(pts) || !lastPts) return { points: pts, debug: { source: 'get', interval: null, tried } };
+  } catch (e) { tried.push(`GET ${entity}: ${e.message}`); if (!lastErr) lastErr = e; }
+  if (lastPts) return { points: lastPts, debug: { source: 'generate', interval: null, tried } }; // 값 없는 점이라도 돌려 정직 표기(normalize 가 오류로 남김)
+  throw new Error(`${lastErr ? lastErr.message : '공간 지표 없음'} [시도: ${tried.join(' · ')}]`);
 }
 
 export async function collect(device) {
@@ -206,14 +256,18 @@ export async function collect(device) {
     await step('sw', () => get('/api/rest/software_installed?select=release_version,build_version&limit=1'));
     await step('appliances', () => get('/api/rest/appliance?select=id,name,model,service_tag'));
     const clusterId = (Array.isArray(raw.cluster) ? raw.cluster[0] : raw.cluster)?.id ?? 0;
-    await step('metrics', () => fetchSpaceMetrics({ post, csrf, get, entity: 'space_metrics_by_cluster', entityId: clusterId }));
+    await step('metrics', async () => {
+      const r = await fetchSpaceMetrics({ post, csrf, get, rawGet, entity: 'space_metrics_by_cluster', entityId: clusterId });
+      raw.metricsDebug = r.debug;
+      return r.points;
+    });
     // 어플라이언스별 물리 사용량 → pools. 부가 정보라 실패해도 섹션 오류로 만들지 않는다
     // (클러스터 합계가 이미 있으면 화면은 정상 — 여기서 실패를 키우면 '실패'로 오표시된다).
     if (Array.isArray(raw.appliances) && raw.appliances.length) {
       const pools = [];
       for (const a of raw.appliances.slice(0, 32)) {
         try {
-          const pts = await fetchSpaceMetrics({ post, csrf, get, entity: 'space_metrics_by_appliance', entityId: a.id });
+          const { points: pts } = await fetchSpaceMetrics({ post, csrf, get, rawGet, entity: 'space_metrics_by_appliance', entityId: a.id });
           const pt = pickLatestSpacePoint(pts);
           const t = Number(pt?.physical_total) || 0;
           const u = Number(pt?.physical_used) || 0;
@@ -241,7 +295,7 @@ export async function collect(device) {
     await step('nasServers', () => get('/api/rest/nas_server?select=id&limit=500'));
     await step('storageContainers', () => get('/api/rest/storage_container?select=id&limit=500'));
     await step('replication', () => get('/api/rest/replication_session?select=id,state&limit=500'));
-    await step('perf', () => fetchSpaceMetrics({ post, csrf, get, entity: 'performance_metrics_by_cluster', entityId: clusterId }));
+    await step('perf', async () => (await fetchSpaceMetrics({ post, csrf, get, rawGet, entity: 'performance_metrics_by_cluster', entityId: clusterId, intervals: ['Five_Mins', 'One_Hour'], accept: (pts) => (Array.isArray(pts) ? pts.length > 0 : !!pts) })).points);
   } catch (e) {
     const out = normalizePowerstore(device, raw);
     out.error = e.message;

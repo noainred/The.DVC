@@ -39,6 +39,11 @@ const ago = (ts) => {
  * 섹션만 오류)일 때도 사유가 반드시 드러나야 하기 때문이다(v2.316 에서 확인된 요구사항).
  * 목록의 '실패' 배지 툴팁과 상세 창이 같은 문자열을 쓰도록 여기 한 곳에 둔다.
  */
+/** 부분 실패 사유(v2.422) — ok 인데 섹션 오류가 있으면 그 목록(없으면 ''). */
+function partialReason(s) {
+  return Object.entries(s?.sections || {}).filter(([, v]) => /오류/.test(String(v))).map(([k, v]) => `${k} ${v}`).join(' · ');
+}
+
 function failReason(s) {
   if (!s) return '수집 기록 없음';
   return s.error
@@ -107,7 +112,16 @@ function Cell({ col, r, ctx }) {
                 + '수집 노드(중앙 또는 엣지)가 DATA_SOURCE=mock 으로 실행 중입니다.\n'
                 + 'portal.env 에 DATA_SOURCE=live (또는 EDGE_MODE=all) 를 넣고 재시작하세요.'}>MOCK</span>
           )}
-          {!s ? <span className="badge gray">수집 전</span> : s.ok ? <span className="badge green">정상</span> : (
+          {/* 부분 실패(v2.422): 접속·구성은 됐지만 용량 등 일부 섹션이 실패한 장비 — 예전에는 '정상 + 0.0 TB' 로
+              보여 수집이 되는 줄 알았다(PowerStore 실측). 사유는 실패 배지와 같은 경로(툴팁/상세 창)로. */}
+          {!s ? <span className="badge gray">수집 전</span> : s.ok ? (
+            partialReason(s)
+              ? <button type="button" className="badge amber fail-badge" onClick={() => setDetail(r.id)}
+                  title={`부분 실패 — 접속은 됐지만 일부 섹션을 수집하지 못했습니다:\n${partialReason(s)}\n\n(클릭하면 상세 창에서 전체 내용을 봅니다)`}>
+                  부분 <span aria-hidden="true">ⓘ</span>
+                </button>
+              : <span className="badge green">정상</span>
+          ) : (
             <button type="button" className="badge red fail-badge" onClick={() => setDetail(r.id)}
               title={`실패 사유: ${failReason(s)}\n\n(클릭하면 상세 창에서 전체 내용을 봅니다)`}>
               실패 <span aria-hidden="true">ⓘ</span>
@@ -929,6 +943,18 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
               <span key={k} className={`badge ${v === 'ok' ? 'green' : v === 'skip' ? 'gray' : 'red'}`} title={String(v)}>{k}: {v === 'ok' ? 'OK' : v === 'skip' ? '건너뜀' : '오류'}</span>
             ))}
           </div>
+          {/* 섹션 오류 원문 + PowerStore 공간 지표 시도 내역(v2.421) — 배지의 툴팁만으로는 복사·공유가 안 된다. */}
+          {Object.entries(s.sections || {}).some(([, v]) => /오류/.test(String(v))) && (
+            <pre style={{ fontSize: 11.5, whiteSpace: 'pre-wrap', margin: '6px 0 0', color: 'var(--red)' }}>
+              {Object.entries(s.sections || {}).filter(([, v]) => /오류/.test(String(v))).map(([k, v]) => `${k}: ${v}`).join('\n')}
+            </pre>
+          )}
+          {ex.spaceDebug && (
+            <div className="muted" style={{ fontSize: 11.5, marginTop: 6, lineHeight: 1.6 }}>
+              공간 지표 조회 경로: <b>{ex.spaceDebug.source || '—'}</b>{ex.spaceDebug.interval ? ` · 구간 ${ex.spaceDebug.interval}` : ''}
+              {(ex.spaceDebug.tried || []).length ? <div>시도 내역: {ex.spaceDebug.tried.join(' → ')}</div> : null}
+            </div>
+          )}
           {/* skip 사유 노출(v2.311) — VPLEX/Metro Node 의 capacity skip 은 오류가 아니라 제품 특성
               (가상화 계층 — 자체 용량 없음). 사유 없이 '건너뜀'만 보이면 수집 실패로 오해한다. */}
           {s.extra?.capacityNote && <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>ℹ {s.extra.capacityNote}</div>}

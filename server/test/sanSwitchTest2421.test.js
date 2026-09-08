@@ -19,7 +19,7 @@ async function closedPort() {
   const port = srv.address().port; await new Promise((r) => srv.close(r)); return port;
 }
 
-test('classifyFailure: 메시지 → 단계/안내 (DNS·TCP·핸드셰이크·인증·exec·타임아웃)', async () => {
+test('classifyFailure: 메시지 → 단계/안내 (DNS·TCP·핸드셰이크·인증·exec·타임아웃)', { timeout: 60_000 }, async () => {
   const { classifyFailure, makeTracer, traceText } = await import('../src/sanswitch/testDiag.js');
   assert.equal(classifyFailure('getaddrinfo ENOTFOUND sw1').phase, 'dns');
   assert.equal(classifyFailure('TCP 연결 실패: ECONNREFUSED').phase, 'tcp');
@@ -40,14 +40,16 @@ test('classifyFailure: 메시지 → 단계/안내 (DNS·TCP·핸드셰이크·�
   assert.match(traceText(tr.lines), /\[\+0\.\d{3}s\] a\n\[\+0\.\d{3}s\] ✖ b/);
 });
 
-test('precheckTarget: 닫힌 포트는 tcp 단계 ECONNREFUSED, 열린 포트는 성공, IP 는 DNS 를 건너뛴다', async () => {
+test('precheckTarget: 닫힌 포트는 tcp 단계 ECONNREFUSED, 열린 포트는 성공, IP 는 DNS 를 건너뛴다', { timeout: 60_000 }, async () => {
   const { precheckTarget } = await import('../src/sanswitch/precheck.js');
   const lines = [];
   const p = await closedPort();
   const r = await precheckTarget('127.0.0.1', p, { trace: (m) => lines.push(m), timeoutMs: 3000 });
   assert.equal(r.ok, false); assert.equal(r.phase, 'tcp'); assert.match(r.reason, /ECONNREFUSED/);
   assert.ok(!lines.some((l) => /DNS 해석:/.test(l)), 'IP 는 DNS 단계를 건너뛴다');
-  const srv = net.createServer(); await new Promise((res) => srv.listen(0, '127.0.0.1', res));
+  // 러너에 따라 localhost 가 ::1 로 풀릴 수 있어, 해석된 주소에서 listen 한다.
+  const { address: lo } = await (await import('node:dns')).promises.lookup('localhost');
+  const srv = net.createServer(); await new Promise((res) => srv.listen(0, lo, res));
   const ok = await precheckTarget('localhost', srv.address().port, { trace: (m) => lines.push(m), timeoutMs: 3000 });
   assert.equal(ok.ok, true);
   assert.ok(lines.some((l) => /DNS 해석 결과: localhost →/.test(l)));
@@ -55,7 +57,7 @@ test('precheckTarget: 닫힌 포트는 tcp 단계 ECONNREFUSED, 열린 포트는
   await new Promise((res) => srv.close(res));
 });
 
-test('testRuns: 중앙 실행은 즉시 runId 를 주고 진행 로그를 폴링으로 본다 — 닫힌 포트면 tcp 단계에서 빨리 끝난다', async () => {
+test('testRuns: 중앙 실행은 즉시 runId 를 주고 진행 로그를 폴링으로 본다 — 닫힌 포트면 tcp 단계에서 빨리 끝난다', { timeout: 60_000 }, async () => {
   const { startTestRun, getTestRun, _resetForTest } = await import('../src/sanswitch/testRuns.js');
   _resetForTest();
   const port = await closedPort();
@@ -73,7 +75,7 @@ test('testRuns: 중앙 실행은 즉시 runId 를 주고 진행 로그를 폴링
   _resetForTest();
 });
 
-test('testRuns: 엣지 위임 장비는 큐 → 엣지가 가져감(비밀번호 포함) → 대상 엣지만 결과 회신 가능', async () => {
+test('testRuns: 엣지 위임 장비는 큐 → 엣지가 가져감(비밀번호 포함) → 대상 엣지만 결과 회신 가능', { timeout: 60_000 }, async () => {
   const { startTestRun, getTestRun, takeTestRequestsForAgent, completeTestRun, _resetForTest } = await import('../src/sanswitch/testRuns.js');
   _resetForTest();
   const { id } = startTestRun({ type: 'brocade', collectMethod: 'ssh', host: '10.93.95.37', sshPort: 22, username: 'admin', password: 'pw', agent: 'agent-WA' }, { verbose: false });
@@ -97,7 +99,9 @@ test('testRuns: 엣지 위임 장비는 큐 → 엣지가 가져감(비밀번호
 /** 로컬 ssh2 서버 — 비밀번호 인증 + exec 'echo' 응답. algorithms 로 구형 전용 서버를 흉내낼 수 있다. */
 function startSshServer({ algorithms, respond = (cmd) => `ran:${cmd}\n` } = {}) {
   const { privateKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048, privateKeyEncoding: { type: 'pkcs1', format: 'pem' }, publicKeyEncoding: { type: 'pkcs1', format: 'pem' } });
+  const clients = new Set();
   const server = new ssh2.Server({ hostKeys: [privateKey], banner: 'FOS-TEST', ...(algorithms ? { algorithms } : {}) }, (client) => {
+    clients.add(client); client.on('close', () => clients.delete(client));
     client.on('authentication', (ctx) => (ctx.method === 'password' && ctx.password === 'pw' ? ctx.accept() : ctx.reject(['password'])));
     client.on('ready', () => {
       client.on('session', (accept) => {
@@ -107,10 +111,16 @@ function startSshServer({ algorithms, respond = (cmd) => `ran:${cmd}\n` } = {}) 
     });
     client.on('error', () => {});
   });
-  return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve({ server, port: server.address().port, close: () => new Promise((r) => server.close(r)) })));
+  // close: 남은 세션을 강제로 끊고, 서버 close 콜백을 최대 3초만 기다린다(러너에서 세션이 늦게 닫혀도 테스트가 매달리지 않게).
+  const close = () => new Promise((r) => {
+    for (const c of clients) { try { c.end(); } catch { /* */ } }
+    const t = setTimeout(r, 3000); t.unref?.();
+    server.close(() => { clearTimeout(t); r(); });
+  });
+  return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve({ server, port: server.address().port, close })));
 }
 
-test('withSsh 추적: 접속·배너·핸드셰이크·세션 준비·실행 로그를 남기고, verbose 면 ssh2 프로토콜 로그(ssh -vvv 상당)도 남긴다', async () => {
+test('withSsh 추적: 접속·배너·핸드셰이크·세션 준비·실행 로그를 남기고, verbose 면 ssh2 프로토콜 로그(ssh -vvv 상당)도 남긴다', { timeout: 60_000 }, async () => {
   const { withSsh } = await import('../src/proxy/sshExec.js');
   const srv = await startSshServer();
   const lines = [];
@@ -130,7 +140,7 @@ test('withSsh 추적: 접속·배너·핸드셰이크·세션 준비·실행 로
   assert.ok(!txt.some((m) => m.includes('pw')), '비밀번호는 로그에 없다');
 });
 
-test('withSsh 인증 실패는 오류 로그로 남고 reject 된다; verbose 아니면 ssh2 프로토콜 로그가 없다', async () => {
+test('withSsh 인증 실패는 오류 로그로 남고 reject 된다; verbose 아니면 ssh2 프로토콜 로그가 없다', { timeout: 60_000 }, async () => {
   const { withSsh } = await import('../src/proxy/sshExec.js');
   const srv = await startSshServer();
   const lines = [];
@@ -140,7 +150,7 @@ test('withSsh 인증 실패는 오류 로그로 남고 reject 된다; verbose �
   assert.equal(lines.filter((l) => /^ssh2: /.test(l.m)).length, 0);
 });
 
-test('구형 알고리즘 전용 서버(dh-group1-sha1/aes128-cbc)에는 1회 폴백으로 붙고 추적 로그에 남는다', async () => {
+test('구형 알고리즘 전용 서버(dh-group1-sha1/aes128-cbc)에는 1회 폴백으로 붙고 추적 로그에 남는다', { timeout: 60_000 }, async () => {
   const { withSsh } = await import('../src/proxy/sshExec.js');
   const srv = await startSshServer({ algorithms: { kex: ['diffie-hellman-group1-sha1'], cipher: ['aes128-cbc'], serverHostKey: ['ssh-rsa'], hmac: ['hmac-sha1'] } });
   const lines = [];
@@ -152,7 +162,7 @@ test('구형 알고리즘 전용 서버(dh-group1-sha1/aes128-cbc)에는 1회 �
   assert.ok(lines.some((m) => /kex=diffie-hellman-group1-sha1/.test(m)), '협상된 약한 알고리즘이 표시된다');
 });
 
-test('testDeviceConnection(SSH): 로컬 ssh 서버에 붙어 단계 추적을 남기고, 명령이 없으면 exec 단계 실패로 분류', async () => {
+test('testDeviceConnection(SSH): 로컬 ssh 서버에 붙어 단계 추적을 남기고, 명령이 없으면 exec 단계 실패로 분류', { timeout: 60_000 }, async () => {
   const { testDeviceConnection } = await import('../src/sanswitch/poller.js');
   // 명령을 모르는 서버(제한 셸 흉내) — 필수 명령 switchshow 가 없으면 실패해야 한다.
   const srv = await startSshServer({ respond: (cmd) => `sh: ${cmd.split(' ')[0]}: command not found\n` });

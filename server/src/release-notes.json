@@ -3,7 +3,7 @@
     {
       "version": "2.421.0",
       "date": "2026-09-07",
-      "title": "SAN 스위치 연결 테스트 진단 — 단계별 실시간 추적 로그 · 자세히(ssh -vvv) · 엣지 대행 · 구형 알고리즘 폴백",
+      "title": "SAN 스위치 연결 테스트 진단(실시간 추적·ssh -vvv·엣지 대행·구형 알고리즘 폴백) + PowerStore 용량 수집 수정",
       "notes": [
         "연결 테스트가 **비동기 실행**으로 바뀜(사용자 요구 '연결 테스트 누르면 멈출 때 있는데 왜 안되는지 구체적으로 로그를 볼 수 있게'): `POST /tools/sanswitch/test` 가 즉시 runId 를 돌려주고 화면이 1초마다 `GET /tools/sanswitch/test/:id` 로 **단계별 추적 로그를 실시간으로** 본다 — DNS 해석(결과 IP·ms) → TCP 연결(10초 사전 점검, 성공/거부/무응답) → SSH 배너·핸드셰이크(협상된 kex/hostkey/cipher/mac) → 인증 → 명령별 실행 시간/출력 크기 → 출력 해석. 마지막 줄이 '지금 기다리는 곳'이다.",
         "실패 시 **단계(phase) + 사유 + 원인 안내(hint)** 를 붙인다(`sanswitch/testDiag.js classifyFailure`, 순수 함수·테스트 고정): ENOTFOUND→DNS, ECONNREFUSED→포트 닫힘, SYN 무응답→방화벽/경로(중앙 실행이면 '수집 주체를 엣지로' 안내), handshake 타임아웃, no matching 알고리즘, 인증 실패, exec 타임아웃/출력 상한, REST 401/404, 엣지 미회신. '📋 로그 복사'로 상태·사유·안내·전체 추적 로그를 복사.",
@@ -12,7 +12,10 @@
         "**구형 알고리즘 폴백**(`proxy/sshExec.js`): 'no matching key exchange/host key/cipher/MAC' 로 핸드셰이크가 실패하면 ssh2 지원 전 목록(diffie-hellman-group1-sha1·ssh-dss·aes-cbc·hmac-sha1-96 등)으로 **1회만** 재시도하고 협상 결과를 추적 로그에 남긴다(`SSH_LEGACY_FALLBACK=0` 으로 끔). 폴러·RMA·스토리지 SSH 전부 같은 경로라 구형 장비 수집도 함께 개선된다. 정직한 한계: 이 포탈은 known_hosts 검증을 하지 않으므로 MITM 방어 수준이 낮아지는 것은 아니다(원래 없음).",
         "SSH 추적은 `withSsh(creds{trace,verbose})` 로 공통화 — 접속 시도·배너·핸드셰이크·세션 준비·명령 실행/완료/실패·연결 종료. fosSsh 명령 조사·섹션 해석, fosRest 로그인/GET 단계도 추적에 남긴다. 폴러는 trace 를 넘기지 않아 비용 0.",
         "테스트: `sanSwitchTest2421.test.js` 8건 — 분류 규칙, 사전 점검(닫힌/열린 포트, DNS 건너뜀), 비동기 등록부(닫힌 포트는 60초 대기 없이 tcp 단계 종료·비밀 무노출), 엣지 대행(큐→인출→대상 엣지만 회신·정화), **로컬 ssh2 서버**로 추적 로그·verbose 프로토콜 로그·인증 실패·구형 알고리즘 전용 서버 폴백·testDeviceConnection 단계 분류를 실제 SSH 로 검증. 웹 `sanSwitchTestText.test.js` 3건.",
-        "CLAUDE.md 에 사용자 선호 추가(사용자 요구 '기억해줘'): 데이터 조회 화면의 모든 표는 제목 클릭 정렬을 갖춘다 — 다음 릴리스(v2.422)에서 전 화면 적용."
+        "CLAUDE.md 에 사용자 선호 추가(사용자 요구 '기억해줘'): 데이터 조회 화면의 모든 표는 제목 클릭 정렬을 갖춘다 — 다음 릴리스(v2.422)에서 전 화면 적용.",
+        "**PowerStore '접속은 되는데 수집이 안 됨' 수정**(사용자 요구, 스크린샷: 정상 배지 · 버전 3.5.0.2 · 노드 2 · 용량 0.0 TB): ① 원인 은폐 제거 — 공간 지표 점은 왔지만 `physical_total` 이 없으면 예전에는 capacity 를 'ok + 0 TB' 로 저장해 정상처럼 보였다. 이제 capacity 섹션 오류(점 개수·응답 필드 목록 포함)로 남기고, 목록 상태 배지가 **'부분 ⓘ'**(주황, 접속 OK·일부 섹션 실패)로 바뀌며 상세 창에 섹션 오류 원문과 **공간 지표 시도 내역**(`extra.spaceDebug`: generate/GET 경로·구간·각 시도 결과)을 표시한다. ② 조회 강화 — `metrics/generate` 를 One_Day → One_Hour → Five_Mins 순으로 시도해 `physical_total>0` 인 점이 나오면 채택(최신 점이 아직 집계 전이라 비어 오는 구간 대응), CSRF 거부(4xx token/CSRF/403/422)면 `GET /api/rest/login_session` 으로 DELL-EMC-TOKEN 을 새로 받아 1회 재시도, 전부 실패 시 구버전 GET 폴백. ③ REST 오류 사유 — `HTTP 422` 만 남던 오류에 장비 응답 본문(`messages[].message_l10n`)을 붙인다(PowerStore/Unity 공통, 비밀번호 마스킹). 정직한 한계: 실장비 응답을 직접 보지 못해 위 후보 중 무엇이 실제 원인인지는 상세 창의 시도 내역으로 확인해야 한다.",
+        "CI 안정화: `npm test` 에 `--test-timeout=120000`(테스트 1건이 매달리면 실패로 드러나게 — 이번 릴리스 CI 에서 서버 테스트 잡이 20분 넘게 진행 중으로 남아 취소), 2421 테스트에 개별 타임아웃·ssh2 테스트 서버 강제 종료(3초 상한)·localhost 가 ::1 로 풀리는 러너 대응.",
+        "테스트: `powerstoreSpace2421.test.js` 5건(구간 폴백·CSRF 재확보·전부 실패 시 시도 내역·physical_total 없는 점 오류 표기·HTTP 오류 본문 사유)."
       ]
     },
     {
