@@ -4,6 +4,7 @@ import { logAudit } from '../../audit.js';
 import { loadSettings, saveSettings, LIMITS, KINDS, DEFAULT_PROFILE } from '../../relaycheck/settings.js';
 import { relayCheckStatus, runRelayChecks, buildTargets } from '../../relaycheck/poller.js';
 import { loadCollectors } from '../../collector/registry.js';
+import { loadTopology } from '../../relaytopo/store.js';
 
 const adminOnly = requireRole('admin');
 const toolsPerm = requirePerm('tools');
@@ -11,7 +12,7 @@ const toolsPerm = requirePerm('tools');
 export function registerRelayCheck(api) {
 api.get('/tools/relaycheck', toolsPerm, (_req, res) => {
   const st = relayCheckStatus();
-  const targets = buildTargets(st.settings, loadCollectors()).map((t) => ({ key: t.key, host: t.host, port: t.port, kind: t.kind, label: t.label, site: t.site, collectorId: t.collectorId, expectAgent: t.expectAgent || '' }));
+  const targets = buildTargets(st.settings, loadCollectors(), loadTopology()).map((t) => ({ key: t.key, host: t.host, port: t.port, kind: t.kind, label: t.label, site: t.site, collectorId: t.collectorId, expectAgent: t.expectAgent || '' }));
   res.json({ ok: true, ...st, targets, limits: LIMITS, defaultProfile: DEFAULT_PROFILE, kinds: KINDS });
 });
 api.put('/tools/relaycheck/settings', adminOnly, (req, res) => {

@@ -448,6 +448,13 @@ HostMonitor 의 RMA(Remote Monitoring Agent) 를 참고한 **엣지 별도 프�
   (봉인 저장·비밀 무반환·OTP 재인증·법인/대상 호스트 사용 범위·감사). RMA `ssh-exec` 명령·`ssh` 점검은 '저장된 계정 사용'을
   켜면 그 계정을, 끄면 1회 입력 계정을 쓴다. 비밀은 엣지가 실행 직전 브로커(`/api/central/rma-credential`)에서 받아 메모리에서만
   사용한다. 엣지 `RMA_ALLOW_SSH=true` + `RMA_SSH_TARGETS` 필요.
+- **중계 토폴로지 · HAProxy 구성(v2.431, 특수기능)**: Main–Edge DVC–IRS 구조를 표로 입력(스프레드시트 붙여넣기 · CSV/JSON
+  가져오기/내보내기(비밀 제외) · 노드별 SSH ID/비밀번호/키 봉인 저장)하면 서비스 표(IRS 포탈 4068 · IRS SSH 4067 · IRS vCenter 4066 ·
+  Edge vCenter 4065 · HQ 4001 …)를 사이트별 HAProxy 관리 블록(`# BEGIN/END vmware-portal-relay`)으로 생성해 중계 엣지에 검증
+  (`haproxy -c`)·백업·적용·reload(실패 시 롤백)한다(`relaytopo/`). 표 자체 오류(중복 IP·Edge=IRS·수집 서버 누락/불일치)를 즉시 점검하고,
+  각 노드에 SSH 로 실제 haproxy.cfg·서비스·리스너·portal.env 를 가져와 기대값과 대조(정상/블록 없음/백엔드 불일치/self-loop/리스너
+  없음/timeout)해 해결책을 제시한다. IRS 는 중계 엣지 :4067 경유. 2D SVG/3D 캔버스 그래픽(라이브러리 없음). 입력한 사이트는 HAProxy
+  경로 점검 대상에 자동 포함. `RELAYTOPO_SSH_TIMEOUT_MS`(기본 45000)·`RELAYTOPO_CONCURRENCY`(기본 4).
 - **HAProxy 경로 점검(v2.430, 특수기능)**: 중계 엣지 호스트(수집 서버 URL 자동 + 수동) × 포트 프로파일(4000/4065/4066/4067/4068/4001)을
   주기 점검(`relaycheck/`) — TCP → 프로토콜(SSH 배너·TLS/HTTP·포탈 ping) → 정체 대조(IRS 포트가 중계 엣지 자신으로 되돌아오는지,
   HQ 포트가 이 중앙 인스턴스에 닿는지: `/api/health` 의 `instance`). 연속 N회 실패 시 알림 채널 발화·복구 알림, 실패 행에

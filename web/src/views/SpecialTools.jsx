@@ -33,6 +33,7 @@ import PduTool from './tools/PduTool.jsx';
 import RemoteCommand from './tools/RemoteCommand.jsx'; // 원격 명령 실행(RMA, v2.416 — admin 전용)
 import CredentialManager from './tools/CredentialManager.jsx'; // 통합 계정 관리(v2.419 — admin 전용)
 import RelayCheckTool from './tools/RelayCheckTool.jsx';       // HAProxy 경로 점검(v2.429)
+import RelayTopoTool from './tools/RelayTopoTool.jsx';         // 중계 토폴로지·HAProxy 구성(v2.431)
 import SerialLookup from './tools/SerialLookup.jsx';   // 시리얼 통합 조회(v2.412)
 import VmTrackTool from './tools/VmTrackTool.jsx'; // VM 수량 추이(00/12시 스냅샷 + 증감 상세, v2.345)
 import StorageTrackTool from './tools/StorageTrackTool.jsx'; // 스토리지 사용량 추이(같은 스냅샷의 DS 관점 뷰, v2.350)
@@ -290,6 +291,7 @@ function ToolPanel({ tool, onBack, isAdmin }) {
       {tool === 'rma' && <RemoteCommand />}
       {tool === 'credentials' && <CredentialManager />}
       {tool === 'relaycheck' && <RelayCheckTool />}
+      {tool === 'relaytopo' && <RelayTopoTool />}
       {tool === 'serial-lookup' && <SerialLookup />}
       {tool === 'vm-track' && <VmTrackTool />}
       {tool === 'storage-track' && <StorageTrackTool />}

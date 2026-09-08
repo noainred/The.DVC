@@ -56,6 +56,7 @@ export function normalizeSettings(input = {}) {
     timeoutMs: clamp(input.timeoutMs, LIMITS.timeoutMs),
     failStreak: clamp(input.failStreak, LIMITS.failStreak),
     autoHosts: input.autoHosts !== false,     // 수집 서버 URL 호스트를 자동 대상에 포함
+    topologyHosts: input.topologyHosts !== false, // 중계 토폴로지(v2.431) 사이트의 Edge 주소도 대상에 포함(그 사이트 서비스 표 기준 포트)
     alerts: input.alerts !== false,           // 상태 전이 시 알림 채널 발화
     profile: profile.length ? profile : DEFAULT_PROFILE.map((p) => ({ ...p, label: '' })),
     hosts, exclude,

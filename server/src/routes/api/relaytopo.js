@@ -1,0 +1,101 @@
+/**
+ * 중계 토폴로지 라우트(v2.431) — 특수기능 '중계 토폴로지(HAProxy 구성)'. 조회는 tools 권한, 저장/가져오기/적용은 admin + 감사.
+ * 비밀(SSH 비밀번호/키)은 어떤 응답에도 없다(has* 플래그). 내보내기(JSON/CSV)도 비밀을 제외한다.
+ */
+import { requireRole, requirePerm } from '../../auth/auth.js';
+import { logAudit } from '../../audit.js';
+import { loadTopology, loadTopologyRaw, saveTopology, parseTopologyTable, topologyToCsv, mergeImport, normalizeTopology, redactTopology, DEFAULT_SERVICES, TARGETS } from '../../relaytopo/store.js';
+import { validateTopology, kindForService } from '../../relaytopo/validate.js';
+import { renderManagedBlock } from '../../relaytopo/haproxy.js';
+import { fetchSite, fetchAll, applySite, testNode, lastResults, resolveNodeAccess } from '../../relaytopo/ops.js';
+import { loadCollectors } from '../../collector/registry.js';
+import { listTargets } from '../../agent/deployRegistry.js';
+
+const adminOnly = requireRole('admin');
+const toolsPerm = requirePerm('tools');
+const RE_DC = /^[^\s/\\]{1,40}$/;
+
+export function registerRelayTopo(api) {
+api.get('/tools/relaytopo', toolsPerm, (_req, res) => {
+  const topo = loadTopology();
+  const issues = validateTopology(topo, loadCollectors());
+  const raw = loadTopologyRaw();
+  const access = Object.fromEntries(raw.sites.map((s) => [s.dc, { edge: accessView(raw, s, 'edge'), irs: accessView(raw, s, 'irs') }]));
+  access._main = { main: accessView(raw, null, 'main') };
+  res.json({ ok: true, topology: topo, issues, results: lastResults(), access, targets: TARGETS, defaultServices: DEFAULT_SERVICES, deployTargets: listTargets().map((t) => ({ id: t.id, host: t.host, username: t.username })), kinds: topo.services.map((s) => ({ key: s.key, kind: kindForService(s, topo.main) })) });
+});
+function accessView(raw, site, role) { const a = resolveNodeAccess(raw, site, role); return { host: a.host || '', port: a.port || 0, via: a.via || '', source: a.source || '', error: a.error || '' }; }
+
+api.put('/tools/relaytopo', adminOnly, (req, res) => {
+  try {
+    const saved = saveTopology(req.body || {});
+    logAudit({ user: req.user?.username, action: '중계 토폴로지 저장', detail: `sites=${saved.sites.length} services=${saved.services.map((s) => `${s.key}:${s.listenPort}`).join(',')}`, ip: req.ip });
+    res.json({ ok: true, topology: saved, issues: validateTopology(saved, loadCollectors()) });
+  } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
+});
+
+/** 가져오기: body { text?(표/CSV/TSV 붙여넣기 또는 파일 내용), json?(내보낸 JSON 객체), replace?, apply? }. apply=false 면 미리보기만. */
+api.post('/tools/relaytopo/import', adminOnly, (req, res) => {
+  try {
+    const { text = '', json = null, replace = false, apply = false } = req.body || {};
+    let parsed; let format = 'table';
+    if (json && typeof json === 'object') { const n = normalizeTopology(json); parsed = { main: n.main, sites: n.sites, services: n.services, skipped: [] }; format = 'json'; }
+    else if (typeof text === 'string' && text.trim().startsWith('{')) { const n = normalizeTopology(JSON.parse(text)); parsed = { main: n.main, sites: n.sites, services: n.services, skipped: [] }; format = 'json'; }
+    else { if (String(text).length > 2_000_000) throw new Error('입력이 2MB 를 넘습니다.'); parsed = parseTopologyTable(text); }
+    if (!parsed.sites.length && !(parsed.main?.privateIp || parsed.main?.publicIp)) return res.status(400).json({ ok: false, reason: '인식된 행이 없습니다. 열 순서(Datacenter, Server(Main/Edge/IRS), private IP, public IP …) 또는 내보낸 CSV/JSON 을 확인하세요.', skipped: parsed.skipped });
+    const merged = mergeImport(loadTopologyRaw(), parsed, { replace: !!replace });
+    const preview = redactTopology(normalizeTopology(merged, loadTopologyRaw()));
+    if (!apply) return res.json({ ok: true, preview, format, parsedSites: parsed.sites.length, skipped: parsed.skipped.slice(0, 50), issues: validateTopology(preview, loadCollectors()) });
+    const saved = saveTopology(merged);
+    logAudit({ user: req.user?.username, action: '중계 토폴로지 가져오기', detail: `format=${format} sites=${parsed.sites.length} replace=${!!replace} skipped=${parsed.skipped.length}`, ip: req.ip });
+    res.json({ ok: true, topology: saved, format, parsedSites: parsed.sites.length, skipped: parsed.skipped.slice(0, 50), issues: validateTopology(saved, loadCollectors()) });
+  } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
+});
+
+/** 내보내기(비밀 없음): ?format=json|csv */
+api.get('/tools/relaytopo/export', adminOnly, (req, res) => {
+  const topo = loadTopology(); const day = new Date().toISOString().slice(0, 10);
+  logAudit({ user: req.user?.username, action: '중계 토폴로지 내보내기', detail: `format=${req.query.format || 'json'} sites=${topo.sites.length}`, ip: req.ip });
+  if (String(req.query.format || 'json').toLowerCase() === 'csv') {
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8'); res.setHeader('Content-Disposition', `attachment; filename="relay-topology-${day}.csv"`);
+    return res.send(topologyToCsv(topo));
+  }
+  const strip = (n) => ({ ...n, ssh: { port: n.ssh?.port || 22, username: n.ssh?.username || '' } });
+  const out = { version: 1, exportedAt: new Date().toISOString(), note: '비밀(SSH 비밀번호/키)은 포함되지 않습니다.', main: strip(topo.main), services: topo.services, sites: topo.sites.map((s) => ({ ...s, edge: strip(s.edge), irs: strip(s.irs) })) };
+  res.setHeader('Content-Type', 'application/json; charset=utf-8'); res.setHeader('Content-Disposition', `attachment; filename="relay-topology-${day}.json"`);
+  res.send(JSON.stringify(out, null, 2));
+});
+
+api.get('/tools/relaytopo/render/:dc', toolsPerm, (req, res) => {
+  const topo = loadTopology(); const site = topo.sites.find((s) => s.dc === req.params.dc);
+  if (!site) return res.status(404).json({ ok: false, reason: '사이트가 없습니다.' });
+  const { text, missing } = renderManagedBlock(site, topo.services, topo.main);
+  res.json({ ok: true, dc: site.dc, text, missing: missing.map((m) => m.key) });
+});
+
+api.post('/tools/relaytopo/fetch', adminOnly, async (req, res) => {
+  logAudit({ user: req.user?.username, action: '중계 토폴로지 전체 가져오기(SSH)', ip: req.ip });
+  res.json({ ok: true, results: await fetchAll({ withIrs: req.body?.withIrs !== false }) });
+});
+api.post('/tools/relaytopo/fetch/:dc', adminOnly, async (req, res) => {
+  if (!RE_DC.test(req.params.dc)) return res.status(400).json({ ok: false, reason: '잘못된 사이트 이름' });
+  logAudit({ user: req.user?.username, action: '중계 토폴로지 가져오기(SSH)', target: req.params.dc, ip: req.ip });
+  res.json(await fetchSite(req.params.dc, { withIrs: req.body?.withIrs !== false }));
+});
+api.post('/tools/relaytopo/apply/:dc', adminOnly, async (req, res) => {
+  if (!RE_DC.test(req.params.dc)) return res.status(400).json({ ok: false, reason: '잘못된 사이트 이름' });
+  const dryRun = !!req.body?.dryRun;
+  if (!dryRun && req.body?.confirm !== true) return res.status(400).json({ ok: false, reason: '적용에는 confirm=true 가 필요합니다(중계 엣지의 haproxy.cfg 를 교체하고 reload 합니다).' });
+  logAudit({ user: req.user?.username, action: dryRun ? '중계 HAProxy 구성 검증(모의)' : '중계 HAProxy 구성 적용', target: req.params.dc, ip: req.ip });
+  const r = await applySite(req.params.dc, { dryRun });
+  logAudit({ user: req.user?.username, action: `중계 HAProxy 구성 ${dryRun ? '검증' : '적용'} 결과`, target: req.params.dc, detail: `ok=${r.ok} applied=${!!r.applied} ${(r.steps || []).filter((s) => !s.ok).map((s) => s.name).join(',')}`, ip: req.ip });
+  res.json(r);
+});
+api.post('/tools/relaytopo/test-ssh', adminOnly, async (req, res) => {
+  const { dc = '', role = 'edge' } = req.body || {};
+  if (!['edge', 'irs', 'main'].includes(role)) return res.status(400).json({ ok: false, reason: 'role 은 edge|irs|main' });
+  if (role !== 'main' && !RE_DC.test(dc)) return res.status(400).json({ ok: false, reason: '잘못된 사이트 이름' });
+  logAudit({ user: req.user?.username, action: '중계 토폴로지 SSH 테스트', target: `${dc || 'Main'}/${role}`, ip: req.ip });
+  res.json(await testNode(dc, role));
+});
+}
