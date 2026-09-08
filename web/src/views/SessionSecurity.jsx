@@ -23,7 +23,7 @@ export default function SessionSecurity() {
     try {
       const owners = String(s.settingsOwners || '').split(/[\s,]+/).map((x) => x.trim()).filter(Boolean);
       // demoSession(v2.294): null 도 유효한 상태값('전역 따름')이라 항상 전송한다(서버가 정규화).
-      const r = await putJson('/admin/security/session', { idleLogoutEnabled: s.idleLogoutEnabled, idleLogoutMin: Number(s.idleLogoutMin) || 30, settingsOwners: owners, loginPolicy: s.loginPolicy || undefined, singleSession: !!s.singleSession, demoSession: s.demoSession || null, otp: otp.trim() });
+      const r = await putJson('/admin/security/session', { idleLogoutEnabled: s.idleLogoutEnabled, idleLogoutMin: Number(s.idleLogoutMin) || 30, settingsOwners: owners, loginPolicy: s.loginPolicy || undefined, singleSession: !!s.singleSession, demoSession: s.demoSession || null, sessionWarnEnabled: !!s.sessionWarnEnabled, sessionWarnMin: Number(s.sessionWarnMin) || 10, sessionExtendMin: Number(s.sessionExtendMin) || 60, sessionMaxHours: s.sessionMaxHours === '' ? 0 : Number(s.sessionMaxHours) || 0, otp: otp.trim() });
       if (r && r.ok === false) { setMsg(`오류: ${r.reason || '저장 실패'}`); }
       else { const ns = r.settings || s; setS({ ...ns, settingsOwners: (ns.settingsOwners || []).join(', ') }); setOtp(''); setMsg('저장되었습니다. 변경 내역은 감사 로그에 기록됩니다.'); }
     } catch (e) { setMsg(`오류: ${e.message}`); }
@@ -47,6 +47,39 @@ export default function SessionSecurity() {
           <input className="input" type="number" min={1} max={1440} style={{ width: 100 }} disabled={!s.idleLogoutEnabled}
             value={s.idleLogoutMin} onChange={(e) => setS({ ...s, idleLogoutMin: e.target.value })} />
           <span className="muted">분 (1~1440)</span>
+        </div>
+
+        <div style={{ borderTop: '1px solid rgba(255,255,255,.08)', marginTop: 16, paddingTop: 14 }}>
+          <label className="flex gap" style={{ alignItems: 'center', cursor: 'pointer', marginBottom: 8 }}>
+            <input type="checkbox" checked={s.sessionWarnEnabled !== false} onChange={(e) => setS({ ...s, sessionWarnEnabled: e.target.checked })} />
+            <b>접속 시간 만료 경고·연장 사용</b>
+          </label>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 10, lineHeight: 1.6 }}>
+            접속 시간(토큰 수명, 기본 8시간 — 서버 <code>AUTH_TOKEN_TTL</code>)이 끝나기 전에
+            “계속 사용 중이신가요?”를 띄우고, 사용자가 확인하면 만료를 미룹니다.
+            <b>유휴 자동 로그아웃과는 별개</b>입니다(저쪽은 ‘입력이 없으면’, 이쪽은 ‘세션 수명이 다 되면’).
+          </div>
+          <div className="flex gap wrap" style={{ alignItems: 'center', gap: 12, marginBottom: 8 }}>
+            <span className="muted">만료</span>
+            <input className="input" type="number" min={1} max={120} style={{ width: 90 }} disabled={s.sessionWarnEnabled === false}
+              value={s.sessionWarnMin ?? 10} onChange={(e) => setS({ ...s, sessionWarnMin: e.target.value })} />
+            <span className="muted">분 전에 물어보고, 확인하면</span>
+            <input className="input" type="number" min={5} max={720} style={{ width: 90 }} disabled={s.sessionWarnEnabled === false}
+              value={s.sessionExtendMin ?? 60} onChange={(e) => setS({ ...s, sessionExtendMin: e.target.value })} />
+            <span className="muted">분 연장</span>
+          </div>
+          <div className="flex gap wrap" style={{ alignItems: 'center', gap: 12 }}>
+            <span className="muted">세션 총 상한</span>
+            <input className="input" type="number" min={0} max={720} style={{ width: 90 }} disabled={s.sessionWarnEnabled === false}
+              value={s.sessionMaxHours ?? 0} onChange={(e) => setS({ ...s, sessionMaxHours: e.target.value })} />
+            <span className="muted">시간 (0 = 무제한)</span>
+          </div>
+          <div className="muted" style={{ fontSize: 11, marginTop: 6, lineHeight: 1.6 }}>
+            ⚠ <b>0(무제한)</b>이면 사용자가 계속 확인하는 한 세션이 무기한 이어집니다 —
+            8시간 강제 로그아웃 정책을 사실상 해제하는 것과 같습니다. 정책을 유지하려면 상한을 지정하세요
+            (예: 12 → 로그인 후 12시간이 지나면 더는 연장되지 않음).<br />
+            연장은 <b>경고가 뜬 뒤에만</b> 가능합니다(서버 강제) — 그렇지 않으면 만료를 무한정 밀어 올릴 수 있습니다.
+          </div>
         </div>
 
         <div style={{ borderTop: '1px solid rgba(255,255,255,.08)', marginTop: 16, paddingTop: 14 }}>
