@@ -8,7 +8,8 @@ import { listTargets, getTargetRaw } from '../../agent/deployRegistry.js';
 import { logAudit } from '../../audit.js';
 import { loadVcenterConfig } from '../../config.js';
 import { getVmHardware, reconfigVm } from '../../provision/reconfig.js';
-import { listCollectors, addCollector, updateCollector, removeCollector, loadCollectors, ssrfBlockReason, collectorInputIssue } from '../../collector/registry.js';
+import { listCollectors, addCollector, updateCollector, removeCollector, loadCollectors, ssrfBlockReason, collectorInputIssue, identityIssue } from '../../collector/registry.js';
+import { precheckTarget } from '../../sanswitch/precheck.js';
 import { collectorsToCsv, sampleCsv as collectorsSampleCsv, parseCollectorsCsv, analyzeCollectorsImport } from '../../collector/csv.js';
 import { clearCollectorServers } from '../../collector/remoteInventory.js';
 import { listDatacenters, getDatacenterAssign, addDatacenter, updateDatacenter, removeDatacenter, setVcenterDatacenterMany, getDatacenterOrder, saveDatacenterOrder } from '../../datacenter/store.js';
@@ -366,6 +367,18 @@ adminRouter.post('/collectors/test', adminOnly, async (req, res) => {
   if (ssrf) return res.status(400).json({ ok: false, reason: ssrf });
   const started = Date.now();
   let retried = 0;
+  // 단계별 추적(v2.424, 사용자 요구 '중앙→엣지A→엣지B 포워딩 트러블슈팅'): 어디서 막히는지(TCP/토큰/정체) 분리한다.
+  const steps = [];
+  const entry = body.id ? loadCollectors().find((c) => c.id === body.id) : null;
+  let host = '', port = 0;
+  try { const u = new URL(url); host = u.hostname.replace(/^\[|\]$/g, ''); port = Number(u.port) || (u.protocol === 'https:' ? 443 : 80); } catch { /* */ }
+  const pre = await precheckTarget(host, port, { trace: (m, lv) => steps.push({ msg: m, level: lv || 'info' }), timeoutMs: 8_000 });
+  if (!pre.ok) {
+    const hint = pre.phase === 'tcp' && /ECONNREFUSED/.test(pre.reason)
+      ? `중앙에서 ${host}:${port} 까지는 도달했지만 그 포트에 리스너가 없습니다. 이 URL 이 중계 엣지의 포워딩 포트라면 포워딩 규칙(iptables DNAT/socat/nginx)이 없거나 죽은 것입니다.`
+      : pre.phase === 'tcp' ? `중앙에서 ${host}:${port} 로 TCP 가 닿지 않습니다(SYN 무응답) — 방화벽/경로. 이 주소가 중계 엣지(A)라면 A 자체가 중앙에서 닿는지 먼저 확인하세요.` : '';
+    return res.json({ ok: false, reason: `${pre.reason}${hint ? ` · ${hint}` : ''}`, phase: pre.phase, steps, ms: Date.now() - started, retried });
+  }
   try {
     // 단발 fetch는 고RTT·일시적 네트워크 블립에 '가끔 연결 안 됨'으로 오판된다 → 재시도로 흡수.
     const r = await resilientFetch(`${url.replace(/\/+$/, '')}/api/collector/export`, {
@@ -384,12 +397,21 @@ adminRouter.post('/collectors/test', adminOnly, async (req, res) => {
           : (r.status === 405 || r.status === 400)
             ? '이 주소가 수집 에이전트(포탈)가 아닐 수 있습니다. URL/포트를 확인하세요.'
             : '';
-      return res.json({ ok: false, reason: `HTTP ${r.status}${serverMsg ? ` — ${serverMsg}` : ''}${hint ? ` · ${hint}` : ''}`, status: r.status, ms: Date.now() - started, retried });
+      // 403 이면 '누가 거부했는지' 를 ping 없이도 알 수 있게 topology 힌트를 덧붙인다.
+      const fwdHint = (r.status === 403 || r.status === 401) && entry && loadCollectors().some((c) => c.id !== entry.id && (() => { try { return new URL(c.url).hostname === host; } catch { return false; } })())
+        ? ` 같은 호스트(${host})에 다른 수집 서버 항목이 있습니다 — 이 URL 이 포워딩 포트라면 거부한 쪽은 포워딩 대상(엣지B)이 아니라 중계 엣지(A) 자신일 수 있습니다(포워딩 규칙 확인). '토큰 강제 동기화'는 URL 호스트(A)에 SSH 하므로 이 항목에는 쓰지 마세요.`
+        : '';
+      steps.push({ msg: `export HTTP ${r.status}${serverMsg ? ` — ${serverMsg}` : ''}`, level: 'error' });
+      return res.json({ ok: false, reason: `HTTP ${r.status}${serverMsg ? ` — ${serverMsg}` : ''}${hint ? ` · ${hint}` : ''}${fwdHint}`, status: r.status, steps, ms: Date.now() - started, retried });
     }
     const data = await r.json();
-    res.json({ ok: true, ms: Date.now() - started, retried, hosts: data.hosts, version: data.version, datacenter: data.datacenter });
+    steps.push({ msg: `export 200 · 응답 엣지 ${data.agent || '(구버전: 이름 없음)'}${data.hostname ? `(${data.hostname})` : ''} · v${data.version || '?'} · DC ${data.datacenter || '—'} · 호스트 ${data.hosts ?? '—'}대`, level: 'info' });
+    const identity = identityIssue(entry || { id: String(body.id || body.name || ''), name: body.name, datacenter: body.datacenter }, data);
+    if (identity) steps.push({ msg: identity.reason, level: 'warn' });
+    res.json({ ok: true, ms: Date.now() - started, retried, hosts: data.hosts, version: data.version, datacenter: data.datacenter, agent: data.agent || '', hostname: data.hostname || '', identity, steps });
   } catch (err) {
-    res.json({ ok: false, reason: err.message, ms: Date.now() - started, retried });
+    steps.push({ msg: err.message, level: 'error' });
+    res.json({ ok: false, reason: err.message, steps, ms: Date.now() - started, retried });
   }
 });
 

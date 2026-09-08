@@ -448,6 +448,14 @@ HostMonitor 의 RMA(Remote Monitoring Agent) 를 참고한 **엣지 별도 프�
   (봉인 저장·비밀 무반환·OTP 재인증·법인/대상 호스트 사용 범위·감사). RMA `ssh-exec` 명령·`ssh` 점검은 '저장된 계정 사용'을
   켜면 그 계정을, 끄면 1회 입력 계정을 쓴다. 비밀은 엣지가 실행 직전 브로커(`/api/central/rma-credential`)에서 받아 메모리에서만
   사용한다. 엣지 `RMA_ALLOW_SSH=true` + `RMA_SSH_TARGETS` 필요.
+- **중앙→엣지A→엣지B(포워딩) 토폴로지 트러블슈팅(v2.424)**: 중앙이 B 에 직접 못 닿고 A 의 포워딩 포트(예 A:4068→B:4000)로만
+  닿는 구성에서 ① 엣지 응답에 `agent`/`hostname` 이 실려 중앙이 "이 URL 에 실제로 누가 응답했는지"를 표시(수집 서버 상태의
+  `응답 <이름>` 배지 = 포워딩이 A 자신으로 되돌아오거나 자기등록 URL 이 A 를 가리킴) ② B 의 자기등록이 peer IP(A) 로 URL 을
+  유도하면 중앙이 ping 으로 정체·토큰을 검증해 잘못된 항목(A 주소 + B 토큰 → 403 반복)을 만들지 않고 `EDGE_ADVERTISE_URL`
+  을 요구(`CENTRAL_VERIFY_SELF_REGISTER=false` 로 끔) ③ 연결 테스트가 TCP → export → 정체 단계로 어디서 막히는지와 토폴로지
+  힌트(포워딩 리스너 없음·중계 엣지가 거부·같은 호스트의 다른 항목)를 보여준다. **권장 설정**: B 의 portal.env 에
+  `EDGE_ADVERTISE_URL=http://<A주소>:<A의 포워딩 포트>` + `CENTRAL_URL=http://<A주소>:<A가 중앙으로 포워딩하는 포트>`, 중앙 항목의
+  토큰은 **B 의** `COLLECTOR_TOKEN`. '토큰 강제 동기화'는 URL 호스트(A)에 SSH 하므로 포워딩 항목에는 쓰지 말 것.
 - **엣지 스위치 포트 사용량 중계(v2.423)**: 위임 스위치의 portperfshow 시계열을 엣지가 커서 방식(마지막 rowid 뒤만)·gzip·청크로
   `POST /api/central/sanswitch-perf` 에 올리고 중앙이 같은 DB 에 적재 — 중앙의 스토리지 사용량 분석이 엣지 법인도 보여준다.
   중앙의 포트 사용량 수집 설정이 `sanswitch-config` 응답 `perf` 로 엣지에 내려간다(`SANSW_PERF_LOCAL=1` 로 현장 설정 고정).

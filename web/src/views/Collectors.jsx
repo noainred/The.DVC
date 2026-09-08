@@ -1,4 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
+/** mock 생성기(server/src/mock/generator.js)의 vCenter id 패턴 — 실데이터가 아닌 push 를 표에서 드러낸다(v2.424). */
+const MOCK_VC_RE = /^vc-(us|br|eu|me|ap|cn)-[a-z]+$/;
 import { fetchJson, postJson, putJson, delJson, downloadFile } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import EscClose from '../components/EscClose.jsx';
@@ -129,9 +131,10 @@ export default function Collectors() {
     try {
       const r = await postJson('/admin/collectors/test', form);
       const retryNote = r.retried ? ` · 재시도 ${r.retried}회` : '';
+      const stepsText = (r.steps || []).length ? `\n단계: ${r.steps.map((s) => `${s.level === 'error' ? '✖' : s.level === 'warn' ? '⚠' : '·'} ${s.msg}`).join('\n')}` : '';
       setMsg(r.ok
-        ? { ok: true, text: `연결 성공 (${r.ms}ms${retryNote}) · 호스트 ${r.hosts ?? '—'}대 · v${r.version || '?'}${r.datacenter ? ` · ${r.datacenter}` : ''}` }
-        : { ok: false, text: `연결 실패: ${r.reason}${r.retried ? ` (재시도 ${r.retried}회 후)` : ''}` });
+        ? { ok: !r.identity, text: `${r.identity ? '⚠ 연결은 되지만 다른 엣지가 응답' : '연결 성공'} (${r.ms}ms${retryNote}) · 호스트 ${r.hosts ?? '—'}대 · v${r.version || '?'}${r.datacenter ? ` · ${r.datacenter}` : ''}${r.agent ? ` · 응답 엣지 ${r.agent}${r.hostname ? `(${r.hostname})` : ''}` : ''}${r.identity ? `\n${r.identity.reason}` : ''}${stepsText}` }
+        : { ok: false, text: `연결 실패: ${r.reason}${r.retried ? ` (재시도 ${r.retried}회 후)` : ''}${stepsText}` });
     } catch (e) { setMsg({ ok: false, text: e.message }); }
     finally { setBusy(false); }
   };
@@ -386,6 +389,11 @@ export default function Collectors() {
                     : (s.ok && s.degraded) ? <span className="badge amber" title={`일시적 연결 오류: ${s.error || ''} — 직전 데이터·온라인 유지 중(연속 실패 ${s.fails || 1}회). 한 번 더 실패하면 '오류'로 내려갑니다.`}>저하</span>
                       : s.ok ? <span className="badge green">정상</span>
                         : <span className="badge red" title={s.error}>오류</span>}
+                    {s?.identity && (
+                      <span className="badge amber" style={{ marginLeft: 4, fontSize: 10 }} title={s.identity.reason}>
+                        응답 {s.identity.agent}
+                      </span>
+                    )}
                     {s?.authDeny?.count > 0 && (
                       <span className="badge amber" style={{ marginLeft: 4, fontSize: 10 }}
                         title={`엣지에서 인증 거부 ${s.authDeny.count}건(기동 후 누적) — 마지막: ${s.authDeny.lastWhy || ''}${s.authDeny.lastAt ? ` · ${new Date(s.authDeny.lastAt).toLocaleString('ko-KR')}` : ''} (${s.authDeny.lastEndpoint || ''}). 다른 중앙/구버전 토큰이 이 엣지를 두드리고 있을 수 있습니다.`}>
@@ -452,7 +460,7 @@ export default function Collectors() {
             {msg && (
               <div style={{ marginTop: 12, padding: '9px 12px', borderRadius: 8, fontSize: 13,
                 background: msg.ok ? 'rgba(34,197,94,.12)' : 'rgba(239,68,68,.12)',
-                color: msg.ok ? '#4ade80' : '#f87171' }}>{msg.text}</div>
+                color: msg.ok ? "#4ade80" : "#f87171", whiteSpace: "pre-wrap" }}>{msg.text}</div>
             )}
 
             <div className="flex gap" style={{ marginTop: 16 }}>
@@ -602,7 +610,16 @@ function IngestStats({ data, onReset }) {
                     <td className="right tabular">{r.intervalSec != null ? `${r.intervalSec}s` : '—'}</td>
                     <td className="right tabular" style={{ color: hot ? 'var(--amber)' : undefined }}>{fmtRate(r.bytesPerSec)}</td>
                     <td className="muted" style={{ fontSize: 12 }}>
-                      {r.last ? <>{ep(r.last.endpoint)}{r.last.vcenterId ? ` · ${r.last.vcenterId}` : ''}{r.last.vms != null ? ` · 호스트 ${r.last.hosts}·VM ${r.last.vms}` : ''}{r.last.gzip ? ' · gzip' : ' · 무압축'}</> : '—'}
+                      {r.last ? <>{ep(r.last.endpoint)}{r.last.vcenterId ? ` · ${r.last.vcenterId}` : ''}{r.last.vms != null ? ` · 호스트 ${r.last.hosts}·VM ${r.last.vms}` : ''}{r.last.gzip ? ' · gzip' : ' · 무압축'}
+                        {/* 빈/mock 인벤토리(v2.424): push 는 되지만 실데이터가 아니다 — mock 생성기 vCenter id(vc-*) 또는 호스트 0·VM 0. */}
+                        {(MOCK_VC_RE.test(String(r.last.vcenterId || '')) || (r.last.vms === 0 && r.last.hosts === 0)) && (
+                          <span className="badge amber" style={{ marginLeft: 6, fontSize: 10 }}
+                            title={MOCK_VC_RE.test(String(r.last.vcenterId || ''))
+                              ? `'${r.last.vcenterId}' 는 개발용 mock 생성기의 vCenter id 입니다 — 이 엣지가 DATA_SOURCE=mock(또는 EDGE_MODE=all 없이 DATA_SOURCE 미설정)으로 돌고 있어 실데이터가 아닙니다. portal.env 에 DATA_SOURCE=live 를 넣고 vCenter 를 등록·재시작하세요.`
+                              : '최근 push 에 호스트 0·VM 0 — 이 엣지에 vCenter 가 등록되지 않았거나 수집이 실패하고 있습니다(엣지 포탈의 설정 › vCenter 관리 확인).'}>
+                            {MOCK_VC_RE.test(String(r.last.vcenterId || '')) ? 'MOCK' : '빈 인벤토리'}
+                          </span>
+                        )}</> : '—'}
                     </td>
                     <td className="right muted" style={{ fontSize: 11.5 }}>{ago(r.lastAt)}</td>
                   </tr>
