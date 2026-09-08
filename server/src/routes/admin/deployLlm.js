@@ -9,11 +9,12 @@ import { fetchRemoteVersions, listLocalPackages, downloadPackage } from '../../u
 import { getPackageSettings, savePackageSettings } from '../../upgrade/packageSettings.js';
 import { listTargets, getTargetRaw, saveTarget, removeTarget, recordResult, findTargetByHost, listTargetsRaw } from '../../agent/deployRegistry.js';
 import { targetsToCsv, sampleCsv as deploySampleCsv, parseTargetsCsv, analyzeTargetsImport } from '../../agent/deployCsv.js';
-import { parseTargetsText, analyzeBulkDeploy, targetsToText, sampleText } from '../../agent/deployText.js';   // 대량 배포 텍스트(v2.432)
+import { parseTargetsText, analyzeBulkDeploy, targetsToText, targetsToTextCsv, sampleText, sampleTextCsv, fillAutoTokens, COLUMN_PRESETS, DEFAULT_PRESET } from '../../agent/deployText.js';   // 대량 배포 텍스트/CSV(v2.432)
 import { startBulkDeploy, getRun, listRuns, cancelRun, activeRunId } from '../../agent/bulkDeploy.js';        // 대량 배포 실행기(v2.432)
 import { autoRegisterCollector } from '../../agent/autoRegister.js';
 import { logAudit } from '../../audit.js';
 import { ipBlockReason } from '../../collector/registry.js';
+import crypto from 'node:crypto';
 import { centralTokenInfo } from '../../central/token.js';
 import path from 'node:path';
 import { adminOnly, requireSettingsOwner } from './shared.js';
@@ -184,17 +185,34 @@ adminRouter.post('/agent-deploy/deploy-all', adminOnly, async (_req, res) => {
  * runId 폴링으로 진행률을 본다. 성공한 노드만 선택적으로 저장·수집 서버 등록.
  * 보안: adminOnly + 감사로그, 응답에 자격증명 없음(auth 방식만), host 는 SSRF 가드를 통과해야 배포된다.
  */
+/** 토큰 자동 채움 옵션(순수 조립) — 중앙 토큰은 이 포탈 값, 수집 토큰은 **노드마다 새 난수**. */
+function autoTokenOpts(body) {
+  return {
+    centralToken: body?.autoCentralToken ? (centralTokenInfo().token || '') : '',
+    autoCollectorToken: !!body?.autoCollectorToken,
+    gen: () => crypto.randomBytes(24).toString('hex'),
+  };
+}
+
+/** 화면이 고를 수 있는 열 순서 프리셋(헤더가 있으면 헤더가 우선). */
+adminRouter.get('/agent-deploy/bulk/presets', adminOnly, (_req, res) => res.json({
+  ok: true, presets: Object.entries(COLUMN_PRESETS).map(([k, v]) => ({ key: k, label: v.label, columns: v.columns })),
+  defaultPreset: DEFAULT_PRESET, hasCentralToken: !!centralTokenInfo().token,
+}));
+
 adminRouter.post('/agent-deploy/bulk/preview', adminOnly, (req, res) => {
   try {
     const text = String(req.body?.text || '');
     if (text.length > 1_000_000) return res.status(400).json({ ok: false, reason: '입력이 1MB 를 넘습니다.' });
-    const { rows, skipped, header } = parseTargetsText(text, req.body?.defaults || {});
+    const { rows, skipped, header, columns } = parseTargetsText(text, req.body?.defaults || {}, { columns: req.body?.columns });
     if (!rows.length) return res.status(400).json({ ok: false, reason: '인식된 행이 없습니다. host 열(첫 열)을 확인하거나 샘플을 받아 형식을 맞추세요.', skipped: skipped.slice(0, 50) });
+    // 미리보기에서도 토큰 자동 채움을 반영해 '자동 생성' 여부를 보여준다(값은 응답에 넣지 않는다).
+    fillAutoTokens(rows, autoTokenOpts(req.body));
     const { report, summary } = analyzeBulkDeploy(rows, {
       existingId: (h, p, u) => findTargetByHost(h, p, u)?.id,
       blockReason: (h) => ipBlockReason(h),
     });
-    res.json({ ok: true, report, summary, skipped: skipped.slice(0, 50), header: !!header, total: rows.length });
+    res.json({ ok: true, report, summary, skipped: skipped.slice(0, 50), header: !!header, columns, total: rows.length });
   } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
 });
 
@@ -202,7 +220,8 @@ adminRouter.post('/agent-deploy/bulk/run', adminOnly, (req, res) => {
   try {
     const text = String(req.body?.text || '');
     if (text.length > 1_000_000) return res.status(400).json({ ok: false, reason: '입력이 1MB 를 넘습니다.' });
-    const { rows } = parseTargetsText(text, req.body?.defaults || {});
+    const { rows } = parseTargetsText(text, req.body?.defaults || {}, { columns: req.body?.columns });
+    fillAutoTokens(rows, autoTokenOpts(req.body));
     const { report } = analyzeBulkDeploy(rows, {
       existingId: (h, p, u) => findTargetByHost(h, p, u)?.id,
       blockReason: (h) => ipBlockReason(h),
@@ -242,17 +261,19 @@ adminRouter.get('/agent-deploy/targets/export.txt', adminOnly, (req, res) => {
   const send = () => {
     const list = withSecrets ? listTargetsRaw() : listTargets();
     logAudit({ user: req.user?.username, action: withSecrets ? '배포 대상 텍스트 내보내기(비밀 포함)' : '배포 대상 텍스트 내보내기', detail: `${list.length}대`, ip: req.ip || '' });
-    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="agent-deploy-targets${withSecrets ? '-with-secrets' : ''}.txt"`);
-    res.send(targetsToText(list, { includeSecrets: withSecrets }));
+    const csv = String(req.query.format || '').toLowerCase() === 'csv';
+    res.setHeader('Content-Type', csv ? 'text/csv; charset=utf-8' : 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="agent-deploy-targets${withSecrets ? '-with-secrets' : ''}.${csv ? 'csv' : 'txt'}"`);
+    res.send(csv ? targetsToTextCsv(list, { includeSecrets: withSecrets }) : targetsToText(list, { includeSecrets: withSecrets }));
   };
   if (withSecrets) return requireSettingsOwner(req, res, send);
   send();
 });
-adminRouter.get('/agent-deploy/targets/sample.txt', adminOnly, (_req, res) => {
-  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-  res.setHeader('Content-Disposition', 'attachment; filename="agent-deploy-bulk-sample.txt"');
-  res.send(sampleText());
+adminRouter.get('/agent-deploy/targets/sample.txt', adminOnly, (req, res) => {
+  const csv = String(req.query.format || '').toLowerCase() === 'csv';
+  res.setHeader('Content-Type', csv ? 'text/csv; charset=utf-8' : 'text/plain; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="agent-deploy-bulk-sample.${csv ? 'csv' : 'txt'}"`);
+  res.send(csv ? sampleTextCsv() : sampleText());
 });
 
 // --- Local LLM (Ollama) config for natural-language search ---

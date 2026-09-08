@@ -214,6 +214,99 @@ test('routes: bulk preview(오류 표시·비밀 무반환) / run(오류 행 제
     assert.match(txt, /^# Edge 노드 배포 대상/);
     assert.equal(txt.includes('SECRETPW'), false);
     const sample = await (await fetch(`${base}/agent-deploy/targets/sample.txt`)).text();
-    assert.match(sample, /host\[:SSH포트\]/);
+    assert.match(sample, /열 순서/); assert.match(sample, /root@10\.116\.158\.221/);
+  } finally { srv.close(); }
+});
+
+/* ── v2.432.1 추가 요구: 열 순서 선택(ip/id/pw · ip/pw) · user@host · 토큰 자동 · CSV ───────── */
+
+test('deployText: 열 순서 프리셋 — ip/id/pw, ip/pw 를 정확히 매핑(3열 추측 금지)', async () => {
+  const { parseTargetsText, COLUMN_PRESETS, DEFAULT_PRESET, resolveColumns } = await import('../src/agent/deployText.js');
+  const line = '10.1.1.1\tops\tSecret!1\n';
+  // 기본 프리셋(host·이름·계정)에서는 3열이 '이름/계정'으로 읽힌다 — 그래서 선택이 필요하다.
+  const base = parseTargetsText(line, {}, { columns: DEFAULT_PRESET }).rows[0];
+  assert.equal(base.agentName, 'ops'); assert.equal(base.username, 'Secret!1');
+  // ip id pw
+  const idpw = parseTargetsText(line, {}, { columns: 'host-user-pass' }).rows[0];
+  assert.equal(idpw.username, 'ops'); assert.equal(idpw.password, 'Secret!1'); assert.equal(idpw.agentName, '');
+  // ip pw (계정은 공통값)
+  const ippw = parseTargetsText('10.1.1.1\tSecret!1\n', { username: 'root' }, { columns: 'host-pass' }).rows[0];
+  assert.equal(ippw.username, 'root'); assert.equal(ippw.password, 'Secret!1');
+  // 프리셋 키가 이상하면 기본으로 폴백, 배열도 허용
+  assert.deepEqual(resolveColumns('nope'), COLUMN_PRESETS[DEFAULT_PRESET].columns);
+  assert.deepEqual(resolveColumns(['host', 'password']), ['host', 'password']);
+  // 헤더가 있으면 프리셋보다 헤더가 우선
+  const hdr = parseTargetsText('host\tpassword\n10.2.2.2\tPw!\n', {}, { columns: 'host-user-pass' });
+  assert.equal(hdr.rows[0].password, 'Pw!'); assert.equal(hdr.rows[0].username, 'root');
+});
+
+test('deployText.splitHostPort: user@host[:port] — 행의 계정이 공통 계정을 이긴다', async () => {
+  const { splitHostPort, parseTargetsText } = await import('../src/agent/deployText.js');
+  assert.deepEqual(splitHostPort('ops@10.1.1.1:2222'), { user: 'ops', host: '10.1.1.1', port: '2222' });
+  assert.deepEqual(splitHostPort('10.1.1.1'), { user: '', host: '10.1.1.1', port: '' });
+  assert.deepEqual(splitHostPort('2001:db8::1'), { user: '', host: '2001:db8::1', port: '' }, 'IPv6 은 포트로 나누지 않는다');
+  const r = parseTargetsText('ops@10.1.1.1:2222\tPw!\n', { username: 'root' }, { columns: 'host-pass' }).rows[0];
+  assert.equal(r.username, 'ops'); assert.equal(r.port, '2222'); assert.equal(r.password, 'Pw!');
+});
+
+test('deployText.fillAutoTokens: 중앙 토큰 공통 · 수집 토큰은 노드마다 다른 값 · 기존 값 보존', async () => {
+  const { parseTargetsText, fillAutoTokens, analyzeBulkDeploy } = await import('../src/agent/deployText.js');
+  const { rows } = parseTargetsText('10.1.1.1\tA\n10.1.1.2\tB\n10.1.1.3\tC\n', { username: 'root', password: 'pw', collectorToken: '' });
+  rows[2].collectorToken = 'MINE';              // 표/공통값으로 이미 지정한 행
+  let n = 0;
+  fillAutoTokens(rows, { centralToken: 'CT', autoCollectorToken: true, gen: () => `tok${++n}` });
+  assert.deepEqual(rows.map((r) => r.centralToken), ['CT', 'CT', 'CT'], '중앙은 하나이므로 공통');
+  assert.equal(new Set(rows.slice(0, 2).map((r) => r.collectorToken)).size, 2, '수집 토큰은 노드마다 다르다');
+  assert.equal(rows[2].collectorToken, 'MINE', '이미 값이 있으면 덮어쓰지 않는다');
+  const { report } = analyzeBulkDeploy(rows, {});
+  assert.deepEqual(report.map((r) => r.collectorToken), ['auto', 'auto', 'set']);
+  assert.deepEqual(report.map((r) => r.centralToken), ['auto', 'auto', 'auto']);
+  assert.equal(JSON.stringify(report).includes('tok1'), false, '판정 결과에 토큰 값이 없다');
+  assert.equal(JSON.stringify(report).includes('MINE'), false);
+});
+
+test('deployText.sampleTextCsv / targetsToTextCsv: 엑셀 CSV(BOM·수식 가드) 왕복', async () => {
+  const { sampleTextCsv, targetsToTextCsv, parseTargetsText } = await import('../src/agent/deployText.js');
+  const csv = sampleTextCsv();
+  assert.match(csv, /^﻿host,port,username/);
+  const back = parseTargetsText(csv, {});
+  assert.equal(back.rows.length, 2, '샘플 CSV 를 그대로 다시 읽을 수 있다');
+  assert.equal(back.rows[0].host, '10.112.158.221'); assert.equal(back.rows[0].agentName, 'AZ');
+  // 수식 인젝션 가드(csvLine) — '=' 로 시작하는 값이 그대로 나가지 않는다
+  const evil = targetsToTextCsv([{ host: '10.1.1.1', agentName: '=cmd|\'/c calc\'!A1', port: 22, username: 'root' }]);
+  assert.equal(evil.includes(',=cmd'), false, 'CSV 수식 인젝션 가드');
+});
+
+test('routes: presets 목록 · columns 전달 · 토큰 자동 · CSV 내보내기/샘플', async () => {
+  const express = (await import('express')).default;
+  const { registerDeployLlm } = await import('../src/routes/admin/deployLlm.js');
+  const app = express(); app.use(express.json({ limit: '2mb' }));
+  const r = express.Router(); registerDeployLlm(r); app.use('/api/admin', r);
+  const srv = app.listen(0); await new Promise((x) => srv.once('listening', x));
+  const base = `http://127.0.0.1:${srv.address().port}/api/admin`;
+  const post = (p, b) => fetch(`${base}${p}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) });
+  try {
+    const pre = await (await fetch(`${base}/agent-deploy/bulk/presets`)).json();
+    assert.ok(pre.presets.some((p) => p.key === 'host-user-pass'), 'ip/id/pw 프리셋 제공');
+    assert.equal(pre.defaultPreset, 'host-name-user-pass');
+
+    // columns='host-user-pass' → 3열이 host/계정/비밀번호로 매핑되고, 수집 토큰은 자동 생성 표시
+    const j = await (await post('/agent-deploy/bulk/preview', {
+      text: '10.30.0.1\tops\tSecret!1\n', columns: 'host-user-pass', autoCollectorToken: true, defaults: {},
+    })).json();
+    assert.equal(j.ok, true); assert.equal(j.summary.ready, 1);
+    assert.equal(j.report[0].username, 'ops');
+    assert.equal(j.report[0].auth, 'password');
+    assert.equal(j.report[0].collectorToken, 'auto');
+    assert.equal(JSON.stringify(j).includes('Secret!1'), false, '미리보기 응답에 비밀번호 없음');
+    assert.deepEqual(j.columns, ['host', 'username', 'password']);
+
+    const csv = await fetch(`${base}/agent-deploy/targets/export.txt?format=csv`);
+    assert.match(csv.headers.get('content-type'), /text\/csv/);
+    assert.match(csv.headers.get('content-disposition'), /agent-deploy-targets\.csv/);
+    const sc = await fetch(`${base}/agent-deploy/targets/sample.txt?format=csv`);
+    assert.match(sc.headers.get('content-disposition'), /sample\.csv/);
+    // fetch().text() 는 UTF-8 BOM 을 제거한다 — BOM 자체는 위 sampleTextCsv 단위 테스트에서 고정.
+    assert.match(await sc.text(), /^host,port,username/);
   } finally { srv.close(); }
 });

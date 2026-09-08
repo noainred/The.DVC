@@ -43,8 +43,28 @@ const ALIASES = {
   centralToken: ['centraltoken', '중앙토큰'],
   collectorToken: ['collectortoken', '수집토큰'],
 };
-/** 헤더 없는 표의 위치 열 — 실사용 빈도 순(호스트 → 법인/이름 → 계정 → 비밀번호). */
-export const POSITIONAL = ['host', 'agentName', 'username', 'password'];
+/**
+ * 헤더 없는 표의 **열 순서 프리셋**(v2.432.1, 사용자 요구 '서버별로 ip/pwd 넣는 기능 · 1줄에 ip/id/pw 넣는 기능').
+ * 3열짜리 표는 `host 이름 계정` 과 `host 계정 비밀번호` 를 자동으로 구분할 수 없다(둘 다 흔한 형식이고
+ * 값만 보고 맞히면 **비밀번호가 계정 자리로 들어가는** 사고가 난다). 그래서 추측하지 않고 화면에서 고르게 한다.
+ * 헤더 행이 있으면 프리셋보다 헤더가 우선한다.
+ */
+export const COLUMN_PRESETS = {
+  'host-name-user-pass': { label: 'host · 이름/법인 · 계정 · 비밀번호', columns: ['host', 'agentName', 'username', 'password'] },
+  'host-user-pass': { label: 'host · 계정 · 비밀번호   (ip id pw)', columns: ['host', 'username', 'password'] },
+  'host-pass': { label: 'host · 비밀번호   (ip pw)', columns: ['host', 'password'] },
+  'host-name-pass': { label: 'host · 이름/법인 · 비밀번호', columns: ['host', 'agentName', 'password'] },
+  'host-user-pass-name': { label: 'host · 계정 · 비밀번호 · 이름/법인', columns: ['host', 'username', 'password', 'agentName'] },
+  'host-only': { label: 'host 만 (나머지는 공통값)', columns: ['host'] },
+};
+export const DEFAULT_PRESET = 'host-name-user-pass';
+/** 기본 위치 열(하위 호환) — COLUMN_PRESETS[DEFAULT_PRESET].columns 와 같다. */
+export const POSITIONAL = COLUMN_PRESETS[DEFAULT_PRESET].columns;
+/** 프리셋 키 또는 열 배열 → 열 배열(순수). 알 수 없으면 기본 프리셋. */
+export function resolveColumns(spec) {
+  if (Array.isArray(spec) && spec.length) return spec.filter((k) => ALIASES[k] !== undefined || k === 'host');
+  return COLUMN_PRESETS[spec]?.columns || POSITIONAL;
+}
 const BOOL_KEYS = ['autoUpgrade', 'pushInventory', 'enabled'];
 
 const norm = (s) => String(s ?? '').trim().toLowerCase().replace(/[^a-z0-9가-힣]/g, '');
@@ -86,20 +106,27 @@ function headerMap(cells) {
   return hits >= 2 && map.host !== undefined ? map : null;
 }
 
-/** `10.0.0.1:2222` → { host, port }. 콜론이 2개 이상이면(IPv6) 나누지 않는다. */
+/**
+ * `root@10.0.0.1:2222` → { user:'root', host:'10.0.0.1', port:'2222' }(순수).
+ * `user@` 접두와 `:port` 접미는 둘 다 선택. 콜론이 2개 이상이면(IPv6) 포트로 나누지 않는다.
+ */
 export function splitHostPort(v) {
-  const s = String(v ?? '').trim();
+  let s = String(v ?? '').trim();
+  let user = '';
+  const at = s.lastIndexOf('@');
+  if (at > 0) { user = s.slice(0, at).trim(); s = s.slice(at + 1).trim(); }
   const m = /^([A-Za-z0-9.\-_]+):(\d{1,5})$/.exec(s);
-  return m ? { host: m[1], port: m[2] } : { host: s, port: '' };
+  return m ? { user, host: m[1], port: m[2] } : { user, host: s, port: '' };
 }
 
 /**
  * 붙여넣은 텍스트 → 배포 대상 행 목록(순수). defaults 는 공통 기본값(행 값이 우선).
  * @returns {{ rows: Array, skipped: Array<{line:number,text:string,reason:string}>, header: object|null, count:number }}
  */
-export function parseTargetsText(text, defaults = {}) {
+export function parseTargetsText(text, defaults = {}, { columns } = {}) {
   const lines = splitRows(text);
   const d = defaults || {};
+  const pos = resolveColumns(columns ?? d.columns);
   const rows = []; const skipped = [];
   let map = null; let sawHeader = false;
   for (const { line, cells } of lines) {
@@ -112,7 +139,7 @@ export function parseTargetsText(text, defaults = {}) {
     }
     const get = (key) => {
       if (map) { const i = map[key]; return i === undefined ? '' : (cells[i] ?? '').trim(); }
-      const p = POSITIONAL.indexOf(key);
+      const p = pos.indexOf(key);
       return p >= 0 ? (cells[p] ?? '').trim() : '';
     };
     const hp = splitHostPort(get('host'));
@@ -123,7 +150,7 @@ export function parseTargetsText(text, defaults = {}) {
       _line: line,
       host: hp.host,
       port: get('port') || hp.port || String(d.port || '') || '22',
-      username: pick('username', 'root'),
+      username: hp.user || pick('username', 'root'),   // `root@10.1.1.1` 형식이면 그 계정이 우선
       agentName: pick('agentName'),
       collectorDatacenter: pick('collectorDatacenter'),
       centralUrl: pick('centralUrl'),
@@ -143,7 +170,7 @@ export function parseTargetsText(text, defaults = {}) {
     row._hasSecret = SECRET_COLS.some((k) => !!row[k]) || !!row.privateKey;
     rows.push(row);
   }
-  return { rows, skipped, header: map, count: rows.length };
+  return { rows, skipped, header: map, columns: pos, count: rows.length };
 }
 
 /**
@@ -180,10 +207,28 @@ export function analyzeBulkDeploy(rows, { existingId = () => undefined, blockRea
       agentName: row.agentName, collectorDatacenter: row.collectorDatacenter,
       portalPort: row.portalPort || '', centralUrl: row.centralUrl || '',
       auth: row.privateKey ? 'key' : row.password ? 'password' : '', // 값이 아니라 '방식'만
+      centralToken: row.centralToken ? (row._autoCentralToken ? 'auto' : 'set') : '',   // 유무·출처만(값 아님)
+      collectorToken: row.collectorToken ? (row._autoCollectorToken ? 'auto' : 'set') : '',
       existing: !!id, action, reason,
     });
   }
   return { report, summary };
+}
+
+/**
+ * 토큰 자동 채움(v2.432.1, 사용자 요구 '토큰 자동으로 넣는 기능'). 순수 — 난수 생성기는 주입받는다.
+ *  - centralToken: 이 중앙 포탈의 토큰을 비어 있는 행에 채운다(전 노드 공통 — 중앙이 하나이므로).
+ *  - collectorToken: **노드마다 다른 값**을 새로 만든다(중앙이 각 엣지를 당겨갈 때 쓰는 비밀 —
+ *    한 값을 전 노드가 공유하면 한 대만 털려도 전 사이트 수집 데이터가 열린다).
+ * 이미 값이 있는 행(표에 열로 적었거나 공통 기본값)은 건드리지 않는다.
+ */
+export function fillAutoTokens(rows, { centralToken = '', autoCollectorToken = false, gen } = {}) {
+  for (const r of rows || []) {
+    if (centralToken && !r.centralToken) { r.centralToken = centralToken; r._autoCentralToken = true; }
+    if (autoCollectorToken && !r.collectorToken && typeof gen === 'function') { r.collectorToken = gen(); r._autoCollectorToken = true; }
+    if (r.collectorToken) r._hasSecret = true;
+  }
+  return rows;
 }
 
 /** 저장된 대상 → 탭 구분 텍스트(내보내기). 비밀은 includeSecrets 일 때만(호출부가 소유자 게이트 책임). */
@@ -203,23 +248,42 @@ export function targetsToText(targets, { includeSecrets = false } = {}) {
   return head + lines.join('\n') + '\n';
 }
 
-/** 붙여넣기용 샘플(헤더 없는 위치 형식 + 헤더 형식 둘 다 안내). */
+/** 붙여넣기용 샘플 — 화면의 '열 순서'와 헤더 형식을 모두 안내한다. */
 export function sampleText() {
   return [
-    '# 형식 1 — 헤더 없이 위치로: host[:SSH포트]  이름/법인  계정  비밀번호',
-    '#   계정·비밀번호·중앙 URL 등은 아래 "공통 자격증명/기본값"에 한 번만 넣으면 생략할 수 있습니다.',
-    '10.112.158.221\tAZ\troot',
-    '10.113.158.221\tGM1\troot',
-    '10.114.158.221:2222\tGM2\troot',
+    '# ── 형식 A) 열 순서를 화면에서 고르고 값만 붙여넣기 ──────────────────────────',
+    '# 열 순서 "host · 이름/법인 · 계정 · 비밀번호" 일 때',
+    '10.112.158.221\tAZ\troot\tPassw0rd!',
+    '10.113.158.221\tGM1\troot\tPassw0rd!',
     '',
-    '# 형식 2 — 헤더를 적으면 열 순서가 자유롭습니다(별칭 지원: ip/계정/법인/포트 …)',
-    'host\tagentName\tcollectorDatacenter\tportalPort\tautoUpgrade',
-    '10.115.158.221\tHD\tHD\t4000\ttrue',
+    '# 열 순서 "host · 계정 · 비밀번호" (ip id pw) 일 때',
+    '# 10.114.158.221\troot\tPassw0rd!',
+    '',
+    '# 열 순서 "host · 비밀번호" (ip pw) 일 때 — 계정은 공통값(root)을 씁니다',
+    '# 10.115.158.221\tPassw0rd!',
+    '',
+    '# ── 형식 B) 계정을 host 에 붙여쓰기 (열 순서와 무관) ─────────────────────────',
+    '# root@10.116.158.221\tPassw0rd!',
+    '# ops@10.117.158.221:2222\tPassw0rd!',
+    '',
+    '# ── 형식 C) 헤더를 적으면 열 순서가 자유롭습니다(헤더가 화면 선택보다 우선) ──',
+    '# 별칭: ip·호스트 / 계정·id / 비밀번호·pw / 법인·dc / 포탈포트 / 중앙url / 수집토큰 …',
+    'host\tusername\tpassword\tagentName\tportalPort',
+    '10.118.158.221\troot\tPassw0rd!\tHD\t4000',
   ].join('\n') + '\n';
 }
 
-/** CSV 로 내려받고 싶을 때(엑셀 호환) — 텍스트와 같은 열. */
+/** CSV 로 내려받기(엑셀 호환) — 텍스트와 같은 열. csvLine 이 수식 인젝션(=,+,-,@)을 가드한다. */
 export function targetsToTextCsv(targets, opts) {
   const lines = targetsToText(targets, opts).split('\n').filter((l) => l && !l.startsWith('#'));
   return CSV_BOM + lines.map((l) => csvLine(l.split('\t'))).join('\r\n') + '\r\n';
+}
+
+/** CSV 샘플(헤더 + 예시 2행) — 엑셀에서 열어 채운 뒤 그대로 올리면 된다. */
+export function sampleTextCsv() {
+  return CSV_BOM + [
+    csvLine(TEXT_COLUMNS),
+    csvLine(['10.112.158.221', '22', 'root', 'AZ', 'AZ', 'http://192.168.20.143:4000', '', '4000', '', 'true', 'false', 'true', 'Passw0rd!', '', '']),
+    csvLine(['10.113.158.221', '22', 'root', 'GM1', 'GM1', 'http://192.168.20.143:4000', '', '4000', '', 'true', 'false', 'true', '', '', '']),
+  ].join('\r\n') + '\r\n';
 }
