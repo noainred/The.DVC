@@ -68,7 +68,8 @@ function envPairs({ agentName, centralUrl, centralToken, collectorToken, collect
   return p;
 }
 
-const creds = (t) => ({ host: t.host, port: t.port || 22, username: t.username, password: t.password, privateKey: t.privateKey || undefined });
+// signal(v2.432): 대량 배포의 노드당 기한/취소가 SSH 세션을 **실제로 끊도록** 넘긴다(v2.417 규약 — 결과만 포기하는 race 금지).
+const creds = (t) => ({ host: t.host, port: t.port || 22, username: t.username, password: t.password, privateKey: t.privateKey || undefined, passphrase: t.passphrase || undefined, signal: t.signal });
 
 /**
  * 배포 대상(agent)에 GPU 게스트 수집 설정을 직접 주입한다 — agent 포탈에 따로 로그인해

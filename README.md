@@ -448,6 +448,14 @@ HostMonitor 의 RMA(Remote Monitoring Agent) 를 참고한 **엣지 별도 프�
   (봉인 저장·비밀 무반환·OTP 재인증·법인/대상 호스트 사용 범위·감사). RMA `ssh-exec` 명령·`ssh` 점검은 '저장된 계정 사용'을
   켜면 그 계정을, 끄면 1회 입력 계정을 쓴다. 비밀은 엣지가 실행 직전 브로커(`/api/central/rma-credential`)에서 받아 메모리에서만
   사용한다. 엣지 `RMA_ALLOW_SSH=true` + `RMA_SSH_TARGETS` 필요.
+- **Edge 노드 대량 배포(v2.432, 설정 › 에이전트 배포 › 대량 배포)**: 엑셀·위키의 서버 목록을 붙여넣으면
+  (헤더 없으면 `host[:SSH포트] · 이름/법인 · 계정 · 비밀번호` 위치, 헤더 있으면 열 순서 자유·별칭 인식)
+  **대상 등록 없이 바로 설치**한다(`agent/deployText.js`·`agent/bulkDeploy.js`). 계정·키·중앙 URL·토큰 등
+  공통 값은 화면에 한 번만 입력하고 행 값이 우선한다. 배포 전 행별 검증(문법·중복·자격증명 유무·SSRF 차단)
+  후 오류 행은 자동 제외하며, runId 폴링으로 노드별 진행률·실패 로그를 본다. 성공한 노드만 선택적으로 대상
+  저장 + 수집 서버 자동 등록. 동시 설치 `AGENT_DEPLOY_CONCURRENCY`(기본 2)·노드당
+  `AGENT_DEPLOY_TIMEOUT_MS`(기본 15분, 초과 시 SSH 세션 절단)·취소 지원·한 번에 최대 500대.
+  저장된 대상을 같은 텍스트 형식으로 내보내 왕복 편집할 수 있다(비밀 제외, `?secrets=1` 은 설정 소유자).
 - **중계 토폴로지 · HAProxy 구성(v2.431, 특수기능)**: Main–Edge DVC–IRS 구조를 표로 입력(스프레드시트 붙여넣기 · CSV/JSON
   가져오기/내보내기(비밀 제외) · 노드별 SSH ID/비밀번호/키 봉인 저장)하면 서비스 표(IRS 포탈 4068 · IRS SSH 4067 · IRS vCenter 4066 ·
   Edge vCenter 4065 · HQ 4001 …)를 사이트별 HAProxy 관리 블록(`# BEGIN/END vmware-portal-relay`)으로 생성해 중계 엣지에 검증
