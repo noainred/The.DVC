@@ -61,6 +61,68 @@ async function open() {
 export async function available() { return !!(await open()); }
 
 /**
+ * 엣지 → 중앙 중계(v2.423, 사용자 요구 '엣지 스위치도 중앙에서 사용량 분석'). 엣지가 마지막으로 올린 rowid 뒤의 표본을
+ * 커서 방식으로 읽는다(전량 재전송 금지 — 고RTT 회선). rows: [{ rowid, d, ts, p, b }]
+ */
+export async function samplesAfter(rowid = 0, limit = 20_000) {
+  const db = await open();
+  if (!db) return { rows: [], maxRowid: rowid, unavailable: true };
+  const rows = db.conn.prepare('SELECT rowid AS rowid, device_id AS d, ts, port AS p, bps AS b FROM port_perf WHERE rowid > ? ORDER BY rowid LIMIT ?')
+    .all(Number(rowid) || 0, Math.max(1, Math.min(100_000, Number(limit) || 20_000)));
+  return { rows, maxRowid: rows.length ? Number(rows[rows.length - 1].rowid) : (Number(rowid) || 0) };
+}
+
+/** 장비들의 port_meta(연결 장비 이름·속도) — 중계 시 함께 보내 중앙이 스토리지별로 묶을 수 있게. */
+export async function metaFor(deviceIds = []) {
+  const db = await open();
+  if (!db || !deviceIds.length) return [];
+  const ids = [...new Set(deviceIds.map(String))].slice(0, 500);
+  return db.conn.prepare(`SELECT device_id AS d, port AS p, ts, attached_name AS name, attached_wwn AS wwn, speed, port_type AS type FROM port_meta WHERE device_id IN (${ids.map(() => '?').join(',')})`).all(...ids);
+}
+
+/** 각 장비의 최신 표본 시각(중앙 화면 '엣지 마지막 반영' 표시용). → Map(deviceId → ts) */
+export async function latestSampleTs(deviceIds = []) {
+  const db = await open();
+  const out = new Map();
+  if (!db || !deviceIds.length) return out;
+  const ids = [...new Set(deviceIds.map(String))].slice(0, 500);
+  for (const r of db.conn.prepare(`SELECT device_id AS d, MAX(ts) AS ts FROM port_perf WHERE device_id IN (${ids.map(() => '?').join(',')}) GROUP BY device_id`).all(...ids)) out.set(String(r.d), Number(r.ts));
+  return out;
+}
+
+/**
+ * 중앙: 엣지가 올린 표본을 적재(트랜잭션 1회). 같은 (device, ts, port) 가 이미 있으면 건너뛴다 — 엣지가 부분 성공 뒤
+ * 재전송해도 중복이 쌓이지 않게(idx_pp_dev_port_ts 로 탐색). rows: [{d,ts,p,b}], meta: [{d,p,ts,name,wwn,speed,type}]
+ * ⚠ 호출자가 소유권(deviceId ∈ devicesForAgent) 을 먼저 걸러야 한다.
+ */
+export async function importSamples(rows = [], meta = [], retentionDays = 90) {
+  const db = await open();
+  if (!db) return { inserted: 0, skipped: 0, unavailable: true };
+  const ins = db.conn.prepare('INSERT INTO port_perf (device_id, ts, port, bps) SELECT ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM port_perf WHERE device_id = ? AND port = ? AND ts = ?)');
+  let inserted = 0, skipped = 0;
+  db.conn.exec('BEGIN');
+  try {
+    for (const r of rows) {
+      const d = String(r.d ?? ''), ts = Number(r.ts), p = Number(r.p), b = Math.max(0, Math.round(Number(r.b)));
+      if (!d || !Number.isFinite(ts) || !Number.isInteger(p) || !Number.isFinite(b)) { skipped++; continue; }
+      const x = ins.run(d, ts, p, b, d, p, ts);
+      if (Number(x.changes) > 0) inserted++; else skipped++;
+    }
+    for (const m of meta) {
+      const d = String(m.d ?? ''); const p = Number(m.p);
+      if (!d || !Number.isInteger(p)) continue;
+      // 더 새로운 메타만 반영(엣지 청크가 순서 없이 와도 최신을 유지)
+      const cur = db.conn.prepare('SELECT ts FROM port_meta WHERE device_id = ? AND port = ?').get(d, p);
+      if (cur && Number(cur.ts) > Number(m.ts)) continue;
+      db.upMeta.run(d, p, Number(m.ts) || Date.now(), String(m.name || ''), String(m.wwn || ''), String(m.speed || ''), String(m.type || ''));
+    }
+    db.conn.exec('COMMIT');
+  } catch (e) { try { db.conn.exec('ROLLBACK'); } catch { /* */ } throw e; }
+  if (++_pruneTick % PRUNE_EVERY === 0) pruneOld(db, retentionDays);
+  return { inserted, skipped };
+}
+
+/**
  * 한 번의 수집 결과 저장. samples = { [port]: bytesPerSec }, meta = [{port, attachedName, ...}].
  * ⚠ 128포트 × 스위치 수를 매 주기 쓰므로 **반드시 트랜잭션**으로 묶는다(CLAUDE.md — 과거 IPAM
  *   무트랜잭션 6천 행이 25초 블로킹을 낸 사고와 같은 종류).

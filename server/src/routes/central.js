@@ -566,8 +566,36 @@ centralRouter.get('/sanswitch-config', async (req, res) => {
   const { devicesForAgent } = await import('../sanswitch/registry.js');
   const { takeRequestsForAgent } = await import('../sanswitch/collectRequests.js');
   const { takeTestRequestsForAgent } = await import('../sanswitch/testRuns.js');
+  const { loadPerfSettings } = await import('../sanswitch/perfSettings.js');
   // testNow(v2.421): 중앙 등록 화면의 '연결 테스트' 를 이 엣지가 현지에서 대행(비밀번호 포함 — 엣지가 로그인해야 한다).
-  res.json({ ok: true, agent, devices: devicesForAgent(agent), collectNow: takeRequestsForAgent(agent), testNow: takeTestRequestsForAgent(agent) });
+  // perf(v2.423): 중앙의 포트 사용량 수집 설정(켜짐/주기/표본/보관)을 위임 스위치에도 적용 — 엣지가 현지 수집 후 중앙으로 중계.
+  res.json({ ok: true, agent, devices: devicesForAgent(agent), collectNow: takeRequestsForAgent(agent), testNow: takeTestRequestsForAgent(agent), perf: loadPerfSettings() });
+});
+
+/**
+ * POST /api/central/sanswitch-perf — 엣지가 현지 수집한 portperfshow 시계열 중계 수신(v2.423).
+ * body { agent, chunk, chunks, rows:[[deviceId, ts, port, bytesPerSec]...], meta:[[deviceId, port, ts, name, wwn, speed, type]...] }
+ * 소유권(sanswitch-data 와 동일): 개별 토큰 엣지는 자기에게 위임된 deviceId 만 — 남의 스위치 시계열 위조 차단.
+ * ts 는 수신 시각으로 clamp(미래 시각이 '최신' 판정을 항상 이기는 것 방지). 적재는 perfDb.importSamples(트랜잭션·중복 건너뜀).
+ */
+centralRouter.post('/sanswitch-perf', async (req, res) => {
+  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+  const agent = req.centralAuth?.mode === 'agent' ? req.centralAuth.agent : String(req.body?.agent || '').trim();
+  if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
+  const { devicesForAgent } = await import('../sanswitch/registry.js');
+  const { importSamples } = await import('../sanswitch/perfDb.js');
+  const { loadPerfSettings } = await import('../sanswitch/perfSettings.js');
+  const owned = new Set(devicesForAgent(agent).map((d) => String(d.id)));
+  const now = Date.now();
+  const rowsIn = Array.isArray(req.body?.rows) ? req.body.rows.slice(0, 100_000) : [];
+  const metaIn = Array.isArray(req.body?.meta) ? req.body.meta.slice(0, 20_000) : [];
+  const rows = rowsIn.filter((r) => Array.isArray(r) && owned.has(String(r[0]))).map((r) => ({ d: String(r[0]), ts: Math.min(Number(r[1]) || now, now), p: Number(r[2]), b: Number(r[3]) }));
+  const meta = metaIn.filter((m) => Array.isArray(m) && owned.has(String(m[0]))).map((m) => ({ d: String(m[0]), p: Number(m[1]), ts: Math.min(Number(m[2]) || now, now), name: m[3], wwn: m[4], speed: m[5], type: m[6] }));
+  const dropped = rowsIn.length - rows.length;
+  if (dropped > 0) console.warn(`[central] sanswitch-perf: ${agent} 미위임 deviceId 표본 ${dropped}건 드롭(위조 방지)`);
+  const r = await importSamples(rows, meta, loadPerfSettings().retentionDays);
+  res.json({ ok: true, ...r, dropped });
 });
 
 // POST /api/central/sanswitch-test-result — 엣지가 대행한 연결 테스트 결과(추적 로그 포함) 회신(v2.421).

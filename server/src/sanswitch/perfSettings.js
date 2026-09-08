@@ -54,4 +54,20 @@ export function savePerfSettings(input = {}) {
   return { ..._cache };
 }
 
+/**
+ * 엣지: 중앙이 내려준 포트 사용량 설정 적용(v2.423). 중앙의 '설정 › 수집 서버 › SAN 스위치 포트 사용량'이 위임 스위치에도
+ * 먹어야 한다 — 예전에는 엣지 로컬 설정(기본 꺼짐)만 봐서 중앙에서 켜도 엣지는 수집하지 않았다.
+ * `SANSW_PERF_LOCAL=1` 이면 현장 설정을 지킨다(중앙 무시). 값이 같으면 파일을 다시 쓰지 않는다.
+ * 반환: true = 바뀌어 적용됨.
+ */
+export function applyCentralPerfSettings(remote) {
+  if (!remote || typeof remote !== 'object') return false;
+  if (String(process.env.SANSW_PERF_LOCAL || '') === '1') return false;
+  const next = normalizePerfSettings({ ...loadPerfSettings(), ...remote });
+  const cur = loadPerfSettings();
+  if (JSON.stringify(next) === JSON.stringify(cur)) return false;
+  savePerfSettings(next);
+  return true;
+}
+
 export function _resetForTest() { _cache = null; }
