@@ -29,6 +29,7 @@ import VmCloneTool from './tools/VmCloneTool.jsx'; // VM 복제(백업식, v2.29
 import StorageMonTool from './tools/StorageMonTool.jsx'; // 스토리지 모니터링(Isilon 등, v2.302 — admin 전용)
 import BmStorageTool from './tools/BmStorageTool.jsx'; // 베어메탈 스토리지(SSH df 합산, v2.340 — admin 전용)
 import SanSwitchTool from './tools/SanSwitchTool.jsx';
+import PduTool from './tools/PduTool.jsx';
 import RemoteCommand from './tools/RemoteCommand.jsx'; // 원격 명령 실행(RMA, v2.416 — admin 전용)
 import CredentialManager from './tools/CredentialManager.jsx'; // 통합 계정 관리(v2.419 — admin 전용)
 import SerialLookup from './tools/SerialLookup.jsx';   // 시리얼 통합 조회(v2.412)
@@ -284,6 +285,7 @@ function ToolPanel({ tool, onBack, isAdmin }) {
       {tool === 'storage-mon' && <StorageMonTool />}
       {tool === 'bm-storage' && <BmStorageTool />}
       {tool === 'san-switch' && <SanSwitchTool />}
+      {tool === 'pdu' && <PduTool />}
       {tool === 'rma' && <RemoteCommand />}
       {tool === 'credentials' && <CredentialManager />}
       {tool === 'serial-lookup' && <SerialLookup />}
