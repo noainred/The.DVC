@@ -175,3 +175,73 @@ test('summarize: 값 없으면 null 유지(0 으로 채우지 않음)', () => {
   assert.equal(s2.tempMaxC, 25.1);
   assert.equal(s2.units, 2);
 });
+
+// ── 임계치 판정(v2.425) ──────────────────────────────────────────────────────
+test('evaluateSnapshot: 값이 null 이면 판정하지 않는다(센서 미장착·첫 수집)', async () => {
+  const th = await import('../src/pdu/thresholds.js');
+  const v = th.evaluateSnapshot({ id: 'x', name: 'P', sensors: [{ index: 1, tempC: null, humidityPct: null }], units: [{ index: 1, powerW: null, banks: [] }] }, th.DEFAULTS);
+  assert.equal(v.length, 0, 'null 을 0 으로 보면 센서 고장을 놓친다');
+});
+
+test('evaluateSnapshot: 온도 경고/위험 경계', async () => {
+  const th = await import('../src/pdu/thresholds.js');
+  const cfg = { ...th.DEFAULTS, tempWarnC: 27, tempCritC: 32 };
+  const mk = (t) => th.evaluateSnapshot({ id: 'x', name: 'P', sensors: [{ index: 1, tempC: t }], units: [] }, cfg);
+  assert.equal(mk(26.9).length, 0);
+  assert.equal(mk(27)[0].severity, 'warning');
+  assert.equal(mk(31.9)[0].severity, 'warning');
+  assert.equal(mk(32)[0].severity, 'critical');
+});
+
+test('evaluateSnapshot: 습도는 상·하한 양방향', async () => {
+  const th = await import('../src/pdu/thresholds.js');
+  const cfg = { ...th.DEFAULTS, humLowPct: 20, humHighPct: 70, tempWarnC: null, tempCritC: null };
+  const mk = (h) => th.evaluateSnapshot({ id: 'x', name: 'P', sensors: [{ index: 1, humidityPct: h }], units: [] }, cfg);
+  assert.match(mk(75)[0].title, /상한 초과/);
+  assert.match(mk(15)[0].title, /하한 미만/);
+  assert.equal(mk(45).length, 0);
+});
+
+test('evaluateSnapshot: 임계치가 null 인 항목은 감시하지 않는다', async () => {
+  const th = await import('../src/pdu/thresholds.js');
+  const cfg = { ...th.DEFAULTS, powerWarnW: null, powerCritW: null, bankWarnA: null, bankCritA: null, tempWarnC: null, tempCritC: null, humLowPct: null, humHighPct: null };
+  const v = th.evaluateSnapshot({ id: 'x', name: 'P', sensors: [{ index: 1, tempC: 99, humidityPct: 99 }], units: [{ index: 1, powerW: 99999, banks: [{ index: 1, currentA: 99 }] }] }, cfg);
+  assert.equal(v.length, 0);
+});
+
+test('diffAlerts: 상태 전이에서만 알리고, 해소되면 복구 1통', async () => {
+  const th = await import('../src/pdu/thresholds.js');
+  const state = new Map();
+  const v = [{ key: 'k1', severity: 'warning', title: 't', detail: 'd' }];
+  const now = Date.now();
+  assert.equal(th.diffAlerts(v, { now, state }).fire.length, 1, '최초 발생은 알린다');
+  assert.equal(th.diffAlerts(v, { now: now + 1000, state }).fire.length, 0, '같은 상태는 쿨다운 전까지 재알림 없음');
+  // 악화(경고→위험)는 쿨다운과 무관하게 즉시
+  const worse = [{ key: 'k1', severity: 'critical', title: 't', detail: 'd' }];
+  assert.equal(th.diffAlerts(worse, { now: now + 2000, state }).fire.length, 1);
+  // 해소
+  const r = th.diffAlerts([], { now: now + 3000, state });
+  assert.equal(r.resolve.length, 1);
+  assert.equal(state.size, 0, '복구 후 상태가 남으면 다음 발생을 재알림으로 오인한다');
+});
+
+test('diffAlerts: 쿨다운 경과 후에는 재알림(repeat 표시)', async () => {
+  const th = await import('../src/pdu/thresholds.js');
+  const state = new Map();
+  const v = [{ key: 'k2', severity: 'warning', title: 't', detail: 'd' }];
+  const now = Date.now();
+  th.diffAlerts(v, { now, state, cooldownMs: 1000 });
+  const r = th.diffAlerts(v, { now: now + 1500, state, cooldownMs: 1000 });
+  assert.equal(r.fire.length, 1);
+  assert.equal(r.fire[0].repeat, true);
+});
+
+test('saveThresholds: 빈 문자열은 null(감시 안 함), 0 은 유효값으로 보존', async () => {
+  const th = await import('../src/pdu/thresholds.js');
+  th.saveThresholds({ tempWarnC: '' });
+  assert.equal(th.loadThresholds().tempWarnC, null);
+  th.saveThresholds({ tempWarnC: 0 });
+  assert.equal(th.loadThresholds().tempWarnC, 0, '0 은 유효한 임계치일 수 있다');
+  th.saveThresholds({ tempWarnC: 27 });
+  assert.equal(th.loadThresholds().tempWarnC, 27);
+});

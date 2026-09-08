@@ -17,6 +17,8 @@ import { devicesForThisNode, getDeviceWithSecret } from './registry.js';
 import { recordSnapshot } from './db.js';
 import { pollMs, startAdaptiveTimer } from './intervals.js';
 import { emptySnapshot, summarize } from './types.js';
+import { evaluateSnapshot, diffAlerts, loadThresholds } from './thresholds.js';
+import { loadAlertConfig, notify } from '../alerts.js';
 
 const CONCURRENCY = Math.max(1, Number(process.env.PDU_CONCURRENCY) || 4);
 const DEVICE_TIMEOUT_MS = Math.max(10_000, Number(process.env.PDU_DEVICE_TIMEOUT_MS) || 90_000);
@@ -87,9 +89,32 @@ export async function pollOnce() {
       }
     };
     await Promise.all(Array.from({ length: Math.min(CONCURRENCY, devices.length) }, worker));
+    // 임계치 평가는 **한 주기가 끝난 뒤 한 번**만 한다 — 장비마다 평가하면 '복구' 판정이
+    // 아직 수집 안 된 장비를 '위반 해소'로 잘못 읽는다(diffAlerts 는 전체 위반 집합을 본다).
+    await evaluateAndNotify();
     _last = { at: Date.now(), ok, fail, durationMs: Date.now() - started };
     return { ok: true, devices: devices.length, collected: ok, failed: fail };
   } finally { _running = false; }
+}
+
+/**
+ * 이 노드가 들고 있는 스냅샷 전체를 임계치와 대조해 상태 전이분만 알린다.
+ * 엣지에서도 동작한다(현장에서 바로 알리는 편이 빠르다 — 중앙 push 를 기다리지 않는다).
+ */
+async function evaluateAndNotify() {
+  try {
+    const th = loadThresholds();
+    if (th.enabled === false) return;
+    const violations = [];
+    for (const s of _snapshots.values()) violations.push(...evaluateSnapshot(s, th));
+    const cfg = loadAlertConfig();
+    const { fire, resolve } = diffAlerts(violations, { cooldownMs: (cfg.cooldownMin || 60) * 60_000 });
+    for (const a of [...fire, ...resolve]) {
+      await notify(a, cfg).catch(() => {}); // 알림 실패가 수집을 막지 않는다
+    }
+  } catch (e) {
+    console.error('[pdu] 임계치 평가 실패:', e.message);
+  }
 }
 
 export function startPduPoller() {

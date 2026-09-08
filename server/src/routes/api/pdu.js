@@ -20,6 +20,7 @@ import { collectDeviceNow, testDeviceConnection, pollOnce, pduPollerStatus, loca
 import { edgePduSnapshots, edgePduStatus } from '../../central/pduEdge.js';
 import { requestCollect, hasPendingRequest } from '../../pdu/collectRequests.js';
 import { INTERVAL_SPEC, saveIntervals, runtimeIntervals, intervalsForEdge } from '../../pdu/intervals.js';
+import { THRESHOLD_SPEC, loadThresholds, saveThresholds, evaluateSnapshot, activeViolations } from '../../pdu/thresholds.js';
 import { powerSeries, envSeries, dbStats } from '../../pdu/db.js';
 import { devicesToCsv, csvToDevices, sampleCsv } from '../../pdu/csv.js';
 import { summarize } from '../../pdu/types.js';
@@ -49,6 +50,7 @@ export function registerPdu(api) {
 
   // ---- 목록/현황 ------------------------------------------------------------
   api.get('/tools/pdu', toolsPerm, fullScopeOnly, (_req, res) => {
+    const th = loadThresholds();
     const snaps = new Map(allSnapshots().map((s) => [s.id, s]));
     const devices = listDevices().map((d) => {
       const s = snaps.get(d.id) || null;
@@ -64,6 +66,8 @@ export function registerPdu(api) {
           })),
           sensors: s.sensors || [],
           notes: s.notes || [],
+          // 임계치 위반을 장비 행에 함께 실어 화면이 별도 조회 없이 배지를 그린다.
+          violations: evaluateSnapshot(s, th),
         } : null,
       };
     });
@@ -76,7 +80,16 @@ export function registerPdu(api) {
       edges: edgePduStatus(),
       intervals: runtimeIntervals(),
       intervalSpec: INTERVAL_SPEC,
+      thresholds: th,
+      thresholdSpec: THRESHOLD_SPEC,
+      activeViolations: activeViolations(),
     });
+  });
+
+  api.post('/tools/pdu/thresholds', adminOnly, (req, res) => {
+    const next = saveThresholds(req.body || {});
+    logAudit({ user: req.user?.username, action: 'PDU 임계치 변경', target: JSON.stringify(next) });
+    res.json({ ok: true, thresholds: next });
   });
 
   api.get('/tools/pdu/:id', toolsPerm, fullScopeOnly, (req, res) => {

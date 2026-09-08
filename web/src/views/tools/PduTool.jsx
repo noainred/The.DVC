@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { fetchJson, postJson, delJson, downloadFile } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import EscClose from '../../components/EscClose.jsx';
+import PduCharts from './PduCharts.jsx';
 
 /**
  * 특수 기능 › PDU 정보 — APC Rack PDU 2G(rpdu2g) 전력·뱅크·온도·습도.
@@ -37,6 +38,8 @@ export default function PduTool() {
   const [openId, setOpenId] = useState(null);   // 상세 펼침
   const [csvOpen, setCsvOpen] = useState(false);
   const [ivOpen, setIvOpen] = useState(false);
+  const [thOpen, setThOpen] = useState(false);
+  const [tab, setTab] = useState('list'); // list | charts
 
   const load = async () => {
     try { setData(await fetchJson('/tools/pdu')); setError(null); }
@@ -107,6 +110,7 @@ export default function PduTool() {
         </span>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button className="logout-btn" style={{ padding: '7px 12px' }} onClick={() => setIvOpen(true)}>⏱ 수집 주기</button>
+          <button className="logout-btn" style={{ padding: '7px 12px' }} onClick={() => setThOpen(true)}>🚨 임계치</button>
           <button className="logout-btn" style={{ padding: '7px 12px' }} onClick={() => setCsvOpen(true)}>📄 CSV</button>
           <button className="logout-btn" style={{ padding: '7px 12px' }} disabled={busy} onClick={collectAll}>⚡ 전체 수집</button>
           <button className="login-btn" style={{ flex: 'none', padding: '7px 14px' }} onClick={openAdd}>+ PDU 추가</button>
@@ -117,6 +121,14 @@ export default function PduTool() {
         APC Rack PDU 2G(rpdu2g) 에 SSH 로 접속해 <b>전력(kW·kWh·역률)</b>, <b>뱅크/상별 전류</b>,
         <b>온도·습도</b>를 수집합니다. <b>데이지체인된 PDU 대수와 센서 개수는 자동 탐지</b>하므로
         따로 입력하지 않습니다. 원격지 장비는 ‘수집 주체’를 엣지로 지정하면 그 엣지가 현지 수집 후 중앙으로 올립니다.
+      </div>
+
+      {/* 목록 / 추이 탭 */}
+      <div className="vcd-views" style={{ marginBottom: 12 }}>
+        {[['list', '📋 목록'], ['charts', '📈 추이']].map(([k, l]) => (
+          <button key={k} className={tab === k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 14px' }}
+            onClick={() => setTab(k)}>{l}</button>
+        ))}
       </div>
 
       {/* 요약 카드 */}
@@ -130,7 +142,9 @@ export default function PduTool() {
       {msg && <div className={msg.ok ? 'card' : 'card error-box'} style={{ padding: 10, marginBottom: 12, fontSize: 13 }}>{msg.text}</div>}
       {error && data && <div className="card error-box" style={{ padding: 10, marginBottom: 12, fontSize: 13 }}>폴링 오류: {error}</div>}
 
-      {devices.length === 0 ? (
+      {tab === 'charts' && <PduCharts devices={devices} thresholds={data.thresholds || {}} />}
+
+      {tab === 'list' && (devices.length === 0 ? (
         <div className="muted" style={{ fontSize: 13 }}>등록된 PDU 가 없습니다. ‘+ PDU 추가’ 또는 CSV 가져오기로 등록하세요.</div>
       ) : (
         <div className="table-wrap">
@@ -155,6 +169,12 @@ export default function PduTool() {
                         </b>
                         {d.enabled === false && <span className="badge" style={{ marginLeft: 6 }}>중지</span>}
                         {s && !s.ok && <span className="badge red" style={{ marginLeft: 6 }} title={s.error}>오류</span>}
+                        {(s?.violations || []).length > 0 && (
+                          <span className="badge" style={{ marginLeft: 6, background: s.violations.some((v) => v.severity === 'critical') ? 'rgba(239,68,68,.2)' : 'rgba(245,158,11,.2)', color: s.violations.some((v) => v.severity === 'critical') ? '#ef4444' : '#f59e0b' }}
+                            title={s.violations.map((v) => `${v.title} — ${v.detail}`).join('\n')}>
+                            🚨 {s.violations.length}
+                          </span>
+                        )}
                       </td>
                       <td className="muted" style={{ fontSize: 12 }}>{d.host}</td>
                       <td>{d.datacenterId || <span className="muted">—</span>}</td>
@@ -181,11 +201,12 @@ export default function PduTool() {
             </tbody>
           </table>
         </div>
-      )}
+      ))}
 
       {form && <DeviceModal {...{ form, setF, setForm, close, save, runTest, busy, testing, test, msg, data }} />}
       {csvOpen && <CsvModal onClose={() => { setCsvOpen(false); load(); }} />}
       {ivOpen && <IntervalModal data={data} onClose={() => { setIvOpen(false); load(); }} />}
+      {thOpen && <ThresholdModal data={data} onClose={() => { setThOpen(false); load(); }} />}
     </>
   );
 }
@@ -210,6 +231,16 @@ function Detail({ snap }) {
         {snap.appVersion && <>APP {snap.appVersion} · </>}
         수집 {snap.agent ? `엣지(${snap.agent})` : '중앙 직접'}
       </div>
+      {(snap.violations || []).length > 0 && (
+        <div className="card error-box" style={{ padding: 10, marginBottom: 8, textAlign: 'left' }}>
+          <b>🚨 임계치 위반 {snap.violations.length}건</b>
+          {snap.violations.map((v) => (
+            <div key={v.key} style={{ marginTop: 4 }}>
+              {v.severity === 'critical' ? '🔴' : '🟠'} {v.title} — {v.detail}
+            </div>
+          ))}
+        </div>
+      )}
       {(snap.notes || []).map((n, i) => <div key={i} className="muted" style={{ marginBottom: 4 }}>ⓘ {n}</div>)}
       {snap.error && <div className="error-box" style={{ padding: 8, marginBottom: 8 }}>{snap.error}</div>}
 
@@ -426,6 +457,58 @@ function IntervalModal({ data, onClose }) {
           </div>
         ))}
         <button className="login-btn" style={{ flex: 'none', padding: '8px 18px' }} disabled={busy} onClick={save}>{busy ? '저장 중…' : '저장'}</button>
+        {msg && <div className={msg.ok ? 'card' : 'card error-box'} style={{ marginTop: 10, padding: 10, fontSize: 13 }}>{msg.text}</div>}
+      </div>
+    </>
+  );
+}
+
+function ThresholdModal({ data, onClose }) {
+  const spec = data.thresholdSpec || [];
+  const cur = data.thresholds || {};
+  const [vals, setVals] = useState(() => Object.fromEntries(spec.map((s) => [s.key, cur[s.key] ?? ''])));
+  const [enabled, setEnabled] = useState(cur.enabled !== false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const save = async () => {
+    setBusy(true); setMsg(null);
+    try {
+      await postJson('/tools/pdu/thresholds', { enabled, ...vals });
+      setMsg({ ok: true, text: '저장했습니다. 다음 수집 주기부터 적용됩니다.' });
+      setTimeout(onClose, 900);
+    } catch (e) { setMsg({ ok: false, text: e.message }); } finally { setBusy(false); }
+  };
+  return (
+    <>
+      <EscClose onClose={onClose} />
+      <div className="card" style={{ marginTop: 16, padding: 18 }}>
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 10 }}>
+          <b style={{ fontSize: 14 }}>🚨 PDU 임계치 · 알림</b>
+          <button className="logout-btn" style={{ padding: '5px 10px', marginLeft: 'auto' }} onClick={onClose}>닫기</button>
+        </div>
+        <div className="muted" style={{ fontSize: 12.5, marginBottom: 12, lineHeight: 1.6 }}>
+          임계치를 넘으면 <b>설정 › 알림</b>에 등록된 채널(Slack/Teams/웹훅)로 보냅니다.
+          <b>상태가 바뀔 때만</b> 알리고(정상→경고→위험), 해소되면 복구 1통을 보냅니다.
+          재알림 간격은 알림 설정의 쿨다운을 따릅니다. <b>비워 두면 그 항목은 감시하지 않습니다.</b>
+          측정값이 없으면(센서 미장착·첫 수집) 판정하지 않습니다.
+        </div>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 13 }}>
+          <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
+          임계치 감시 사용
+        </label>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(240px,1fr))', gap: 12 }}>
+          {spec.map((s) => (
+            <div key={s.key}>
+              <label className="muted" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>{s.label}</label>
+              <input className="input" type="number" step="0.1" value={vals[s.key] ?? ''} placeholder="비우면 감시 안 함"
+                onChange={(e) => setVals((v) => ({ ...v, [s.key]: e.target.value }))} />
+              <div className="muted" style={{ fontSize: 11.5, marginTop: 4 }}>{s.hint}</div>
+            </div>
+          ))}
+        </div>
+        <button className="login-btn" style={{ flex: 'none', padding: '8px 18px', marginTop: 14 }} disabled={busy} onClick={save}>
+          {busy ? '저장 중…' : '저장'}
+        </button>
         {msg && <div className={msg.ok ? 'card' : 'card error-box'} style={{ marginTop: 10, padding: 10, fontSize: 13 }}>{msg.text}</div>}
       </div>
     </>
