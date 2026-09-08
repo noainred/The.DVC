@@ -244,13 +244,16 @@ export async function ssrfBlockReasonResolved(urlStr) {
  * 자기등록이 peer IP(A) 로 URL 을 유도해 A 를 가리키는 경우. 구버전 엣지(agent 없음)는 판정하지 않는다(null).
  * @returns null(일치/판정불가) | { agent, hostname, reason }
  */
-export function identityIssue(entry, data = {}) {
+export function identityIssue(entry, data = {}, otherIds = []) {
   const agent = String(data?.agent || '').trim();
   if (!agent || !entry) return null;
   const norm = (v) => String(v || '').trim().toLowerCase();
-  const ok = [entry.id, entry.name, entry.datacenter].map(norm).filter(Boolean).some((v) => v === norm(agent));
+  // v2.428: DC 이름은 대조에서 뺀다 — 포워딩이 중계 엣지 자신으로 되돌아오면 응답 agent(gm1)가 IRS 항목의 DC(gm1)와 같아
+  //         불일치를 못 잡았다(구성도 미스매치 #9). 다른 등록 항목의 id 와 같으면 확실한 불일치.
+  const other = (otherIds || []).map(norm).find((v) => v && v === norm(agent) && v !== norm(entry.id));
+  const ok = !other && [entry.id, entry.name].map(norm).filter(Boolean).some((v) => v === norm(agent));
   if (ok) return null;
-  return { agent, hostname: String(data?.hostname || ''), reason: `이 URL 에 응답한 엣지는 '${agent}'${data?.hostname ? `(${data.hostname})` : ''} 인데 등록 항목은 '${entry.id}' 입니다 — 포트포워딩이 다른 엣지(대개 중계 엣지 자신)로 가거나, 자기등록 URL 이 중계 엣지를 가리킵니다.` };
+  return { agent, hostname: String(data?.hostname || ''), reason: `이 URL 에 응답한 엣지는 '${agent}'${data?.hostname ? `(${data.hostname})` : ''} 인데 등록 항목은 '${entry.id}' 입니다${other ? ` — '${agent}' 은 다른 수집 서버 항목입니다(포워딩이 그 엣지, 대개 중계 엣지 자신으로 감)` : ' — 포트포워딩이 다른 엣지로 가거나, 자기등록 URL 이 중계 엣지를 가리킵니다'}.` };
 }
 
 /**

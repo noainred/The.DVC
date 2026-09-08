@@ -188,7 +188,7 @@ export function takeJobs(agent, instance = '', now = Date.now()) {
 }
 
 /** 롱폴 인출 — 받을 잡이 없으면 최대 waitMs 동안 enqueue 를 기다린다(도착 시 즉시 재시도). */
-export async function takeJobsWait(agent, instance = '', waitMs = 0) {
+export async function takeJobsWait(agent, instance = '', waitMs = 0, { isAlive = () => true } = {}) {
   const now = takeJobs(agent, instance);
   if (now.length || waitMs <= 0) return now;
   const key = lc(agent);
@@ -198,6 +198,7 @@ export async function takeJobsWait(agent, instance = '', waitMs = 0) {
     const t = setTimeout(done, waitMs); // unref 하지 않는다 — 응답 대기 중인 HTTP 요청이 있으므로 루프를 살려야 한다
     set.add(done); waiters.set(key, set);
   });
+  if (!isAlive()) return []; // 대기 중 연결이 끊겼다 — claim 하지 않는다(v2.428). 잡은 큐에 남아 다음 폴이 가져간다.
   return takeJobs(agent, instance);
 }
 

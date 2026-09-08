@@ -1,6 +1,24 @@
 {
   "notes": [
     {
+      "version": "2.429.0",
+      "date": "2026-09-08",
+      "title": "구성도(중앙→Edge DVC HAProxy→IRS) 미스매치 12건 전부 수정(다른 세션의 2.428 접속 만료 경고와 번호 충돌 → 2.429.0)",
+      "notes": [
+        "#2 [치명] 토큰 강제 동기화가 URL 포트(:4068)를 서비스하는 유닛을 역추적할 때 haproxy.service 의 EnvironmentFile(/etc/sysconfig/haproxy)에 COLLECTOR_TOKEN 을 쓰고 HAProxy 를 재시작하던 사고 차단 — `portalUnitAllowed()` 로 `vmware-portal(@인스턴스)` 유닛만 허용, 그 외는 '포워더가 서비스 중 — 포워딩 대상 장비의 SSH 대상을 지정' 오류.",
+        "#3 [높음] 강제 동기화 SSH 대상 선택이 host 만 비교해 같은 host 의 첫 대상(Edge DVC :22)으로 SSH 하던 결함 — `pickSshTarget()`: host 가 겹치면 후보(409)를 돌려주고 관리자가 고른다(UI 프롬프트, `sshTargetId`). 포워딩 경유 대상은 URL 포트가 아니라 그 장비의 포탈 포트로 역추적.",
+        "#1/#4 [높음] 배포 폼·env 에 `EDGE_ADVERTISE_URL`(중앙에서 접근하는 URL) 추가, 배포 성공 시 자동 등록 URL 도 이 값을 우선. NAT/HAProxy 뒤 IRS 를 UI 로 배포해도 자기등록이 중계 엣지를 가리키지 않는다.",
+        "#5 [높음] 자기등록이 400(설정 오류)으로 거부되면 60초마다 재시도해 양쪽 로그를 채우던 결함 — 30분 백오프(`backoffFor`) + 마지막 결과 보존(`selfRegisterStatus`).",
+        "#6/#7 [높음] 같은 AGENT_NAME 이 다른 장비에서 push 되거나 같은 vcenterId 를 다른 agent 가 번갈아 push 해도 경고가 없던 결함 — 엣지가 `X-Agent-Hostname` 을 동봉하고 중앙 `central/agentIdentity.js` 가 30분 창에서 충돌을 기록, 수집 서버 화면에 '이름 충돌' 배지와 사유.",
+        "#8 [보통] 프록시 뒤 클라이언트 IP: `TRUST_PROXY=<홉수>` 로 `app.set('trust proxy')`, 레이트리밋 `clientIp` 가 그때만 `req.ip` 를 쓴다(주석과 달리 도달 불가였던 경로 수정). 자기등록 peer IP 유도도 동일.",
+        "#9 [보통] 정체 대조(`identityIssue`)가 DC 이름 일치를 허용해 포워딩이 중계 엣지 자신으로 되돌아온 경우(응답 gm1 = IRS 항목 DC gm1)를 못 잡던 결함 — DC 제외, 응답 agent 가 다른 등록 항목 id 와 같으면 즉시 불일치.",
+        "#10 [보통] `EDGE_ADVERTISE_URL`(urlHint) 은 검증 없이 저장되던 결함 — ping 검증 후 실패해도 등록은 하되 상태에 'URL 미검증' + 사유 표시(관리자 의도 존중).",
+        "#11 [보통] RMA 롱폴 대기 중 클라이언트(HAProxy 타임아웃 등)가 끊겨도 깨어나면 claim 하던 결함 — `req.on('close')` 로 감지해 `takeJobsWait(..., {isAlive})` 가 claim 하지 않는다. 잡은 큐에 남아 다음 폴이 가져간다.",
+        "#12 [보통] mock 노드 인벤토리를 중앙이 그대로 저장하던 결함 — 엣지 push 에 `source`, export 에 `mock` 을 실어 중앙이 `source==='mock'` push 를 400 으로 거부하고 수집 서버 상태에 'MOCK' 배지.",
+        "테스트: `topologyFix2428.test.js` 8건(유닛 화이트리스트·대상 선택·정체 대조·백오프·trust proxy IP·롱폴 claim 취소·정체/vcenterId 충돌·mock 거부)."
+      ]
+    },
+    {
       "version": "2.428.0",
       "date": "2026-09-08",
       "title": "접속 시간 만료 경고 + 연장 — 8시간 만료 10분 전에 '사용 중이신가요?' 확인, 1시간 연장",

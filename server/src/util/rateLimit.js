@@ -15,8 +15,10 @@ const HARD_CAP = 50_000; // 키 맵 메모리 상한(초과 시 만료 항목 �
 
 const buckets = new Map(); // key -> { count, windowStart }
 
-function clientIp(req) {
-  // 실제 peer 우선(X-Forwarded-For 스푸핑 방지). 프록시 뒤면 trust proxy 설정 시 req.ip 사용 가능.
+export function clientIp(req) {
+  // 기본은 실제 peer(X-Forwarded-For 스푸핑 방지). TRUST_PROXY 로 trust proxy 가 설정된 경우에만 req.ip(v2.428 — 예전에는 주석과 달리
+  // req.ip 경로가 도달 불가라 프록시 뒤에서 전 사용자가 한 버킷을 공유했다).
+  if (req.app?.get?.('trust proxy') && req.ip) return String(req.ip);
   return (req.socket?.remoteAddress || req.ip || 'unknown').toString();
 }
 

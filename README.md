@@ -448,6 +448,11 @@ HostMonitor 의 RMA(Remote Monitoring Agent) 를 참고한 **엣지 별도 프�
   (봉인 저장·비밀 무반환·OTP 재인증·법인/대상 호스트 사용 범위·감사). RMA `ssh-exec` 명령·`ssh` 점검은 '저장된 계정 사용'을
   켜면 그 계정을, 끄면 1회 입력 계정을 쓴다. 비밀은 엣지가 실행 직전 브로커(`/api/central/rma-credential`)에서 받아 메모리에서만
   사용한다. 엣지 `RMA_ALLOW_SSH=true` + `RMA_SSH_TARGETS` 필요.
+- **구성도 미스매치 12건 수정(v2.428)**: 강제 토큰 동기화가 포워더 유닛(haproxy 등)의 EnvironmentFile 을 고치고 재시작하던 사고
+  차단(`portalUnitAllowed`) · 같은 host 의 SSH 대상이 여럿이면 자동 선택 금지(후보 반환, `pickSshTarget`) · 배포 폼/env 에
+  `EDGE_ADVERTISE_URL` · 자기등록 400 은 30분 백오프 · 정체 대조에서 DC 제외 + 다른 항목 id 와 같으면 불일치 · `EDGE_ADVERTISE_URL`
+  도 검증(실패 시 'URL 미검증' 표시) · mock 인벤토리 push 거부(`source:'mock'`) · `X-Agent-Hostname` 으로 같은 AGENT_NAME 충돌·
+  같은 vcenterId 번갈아 push 충돌 표시 · `TRUST_PROXY` · RMA 롱폴 클라이언트 끊김 시 claim 취소.
 - **중앙→엣지A→엣지B(포워딩) 토폴로지 트러블슈팅(v2.424)**: 중앙이 B 에 직접 못 닿고 A 의 포워딩 포트(예 A:4068→B:4000)로만
   닿는 구성에서 ① 엣지 응답에 `agent`/`hostname` 이 실려 중앙이 "이 URL 에 실제로 누가 응답했는지"를 표시(수집 서버 상태의
   `응답 <이름>` 배지 = 포워딩이 A 자신으로 되돌아오거나 자기등록 URL 이 A 를 가리킴) ② B 의 자기등록이 peer IP(A) 로 URL 을

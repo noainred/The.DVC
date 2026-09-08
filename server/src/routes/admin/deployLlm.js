@@ -24,7 +24,8 @@ function autoRegisterCollector(target, portalPort) {
   const port = Number(portalPort) || 4000;
   const id = (String(target.collectorDatacenter || target.agentName || target.host || '').trim().toLowerCase()
     .replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '')) || `col-${target.host}`;
-  const url = `http://${target.host}:${port}`;
+  // v2.428: 중계 엣지 경유 대상(SSH 포트≠22 등)은 host:portalPort 가 중앙에서 닿는 주소가 아니다 — 광고 URL 이 있으면 그것을 쓴다.
+  const url = String(target.advertiseUrl || '').trim().replace(/\/+$/, '') || `http://${target.host}:${port}`;
   const body = { id, name: target.agentName || target.collectorDatacenter || target.host, datacenter: target.collectorDatacenter || '', url, token: target.collectorToken, enabled: true };
   const exists = loadCollectors().find((c) => c.id === id);
   const r = exists ? updateCollector(id, body) : addCollector(body);

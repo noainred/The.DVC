@@ -14,7 +14,7 @@ import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; /
 const FILE = path.join(config.configDir, 'agent-deploy-targets.json');
 const SECRET_KEYS = ['password', 'privateKey'];
 const FIELDS = ['host', 'port', 'username', 'password', 'privateKey', 'agentName',
-  'centralUrl', 'centralToken', 'collectorToken', 'collectorDatacenter', 'installerPath', 'portalPort', 'autoUpgrade', 'pushInventory', 'enabled'];
+  'centralUrl', 'centralToken', 'collectorToken', 'collectorDatacenter', 'installerPath', 'portalPort', 'autoUpgrade', 'pushInventory', 'enabled', 'advertiseUrl'];
 
 let cache = null;
 
@@ -105,4 +105,24 @@ export function recordResult(id, result) {
   if (!t) return;
   t.lastResult = { at: Date.now(), ok: result.ok, active: result.active, reason: result.reason };
   persist();
+}
+
+/**
+ * 강제 동기화 SSH 대상 선택(순수, v2.428 — 구성도 미스매치 #3). 같은 host 를 쓰는 배포 대상이 둘 이상이면(Edge DVC :22 와
+ * 포워딩 경유 IRS :4067) 자동 선택하지 않고 후보를 돌려준다 — 예전에는 먼저 저장된 Edge DVC 로 SSH 해 IRS 토큰을 A 에 적용했다.
+ * @returns { ok, target, viaRelay } | { ok:false, reason, candidates? }
+ */
+export function pickSshTarget(targets, host, sshTargetId = '') {
+  const same = targets.filter((t) => t && String(t.host || '').trim() === host);
+  if (sshTargetId) {
+    const t = same.find((x) => String(x.id) === String(sshTargetId));
+    if (!t) return { ok: false, reason: `지정한 SSH 대상(${sshTargetId})이 host ${host} 의 저장 대상에 없습니다.` };
+    return { ok: true, target: t, viaRelay: Number(t.port || 22) !== 22 || same.length > 1 };
+  }
+  if (!same.length) return { ok: false, reason: `SSH 배포 대상에 ${host} 가 없습니다. '수집 서버 → 원격 법인(DC)에 Edge 노드 포탈 설치'에서 이 호스트를 먼저 저장(SSH 계정 포함)하세요.` };
+  if (same.length > 1) {
+    return { ok: false, reason: `host ${host} 를 쓰는 SSH 대상이 ${same.length}개입니다(중계 엣지와 포워딩 경유 장비). 어느 장비의 토큰을 바꿀지 sshTargetId 로 지정하세요.`,
+      candidates: same.map((t) => ({ id: t.id, host: t.host, port: Number(t.port || 22), agentName: t.agentName || '', portalPort: Number(t.portalPort) || 4000 })) };
+  }
+  return { ok: true, target: same[0], viaRelay: Number(same[0].port || 22) !== 22 };
 }

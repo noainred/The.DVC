@@ -40,13 +40,15 @@ export function installerInfo(explicit) {
 }
 
 // 주입할 env 키/값 쌍(빈 값은 제외). 재배포 시 이 키들을 portal.env에서 교체(upsert)한다.
-function envPairs({ agentName, centralUrl, centralToken, collectorToken, collectorDatacenter, scanIntervalMs, autoUpgrade, upgradeIntervalMs, pushInventory, inventoryIntervalMs, gpuGuest }, port) {
+function envPairs({ agentName, centralUrl, centralToken, collectorToken, collectorDatacenter, scanIntervalMs, autoUpgrade, upgradeIntervalMs, pushInventory, inventoryIntervalMs, gpuGuest, advertiseUrl }, port) {
   const p = [];
   if (port) p.push(['PORT', String(port)]); // 기존 portal.env의 PORT(예: 잘못된 22)도 교체
   // GPU 게스트 수집(또는 사이트 위임)을 하려면 실데이터 수집 모드여야 한다(mock 금지).
   if ((gpuGuest && gpuGuest.enabled) || pushInventory) p.push(['DATA_SOURCE', 'live']);
   if (agentName) p.push(['AGENT_NAME', agentName]);
   if (centralUrl) p.push(['CENTRAL_URL', centralUrl]);
+  // 중앙에서 이 엣지에 접근하는 주소(v2.428, 구성도 미스매치 #4) — 중계 엣지의 포워딩 포트(예 http://<A>:4068) 뒤에 있으면 필수.
+  if (advertiseUrl) p.push(['EDGE_ADVERTISE_URL', String(advertiseUrl).replace(/\/+$/, '')]);
   if (centralToken) p.push(['CENTRAL_TOKEN', centralToken]);
   if (scanIntervalMs) p.push(['AGENT_SCAN_INTERVAL_MS', String(scanIntervalMs)]);
   if (collectorToken) p.push(['COLLECTOR_TOKEN', collectorToken]);
@@ -226,6 +228,13 @@ async function waitActive(exec, tries = 15, delaySec = 2, unit = 'vmware-portal'
  * 무의미하므로, 리슨 중인 프로세스(pid→unit→EnvironmentFiles) 기준으로 대상을 결정하고,
  * 특정할 수 없으면 추측으로 진행하지 않고 명확한 진단과 함께 실패시킨다(exec 주입 방지 검증 포함).
  */
+/** 토큰 동기화 등 env 수정을 허용하는 유닛(순수, v2.428) — 포탈 유닛만. haproxy/nginx/socat 같은 포워더 유닛의 EnvironmentFile 을
+ *  건드리고 재시작하면 그 사이트의 포워딩 전부가 순간 단절된다(구성도: Edge DVC 의 :4068 은 haproxy.service 가 리슨). */
+export function portalUnitAllowed(unit) {
+  // vmware-portal · vmware-portal@inst · vmware-portal-irs(별도 인스턴스 명명) 허용, vmware-portal-rma@x 는 '@' 가 꼬리에 있어 제외.
+  return /^vmware-portal([@-][A-Za-z0-9._-]+)?$/.test(String(unit || ''));
+}
+
 export async function resolvePortalUnit(exec, urlPort) {
   const def = { unit: 'vmware-portal', envFile: '/etc/vmware-portal/portal.env', note: '' };
   const port = Number(urlPort);
@@ -244,6 +253,10 @@ export async function resolvePortalUnit(exec, urlPort) {
   const unitRaw = (await exec(`ps -o unit= -p ${pid} 2>/dev/null || true`).catch(() => ({ stdout: '' }))).stdout.trim();
   const unit = /^[A-Za-z0-9@:._-]+\.service$/.test(unitRaw) ? unitRaw.replace(/\.service$/, '') : '';
   if (!unit) return { error: `:${port} 는 systemd 서비스가 아닌 프로세스(pid ${pid})가 서비스 중입니다(docker/수동 실행 등). 자동 토큰 동기화를 적용할 수 없습니다 — 해당 프로세스의 COLLECTOR_TOKEN을 직접 수정하세요.` };
+  if (!portalUnitAllowed(unit)) {
+    // v2.428: 포워더(haproxy 등)의 EnvironmentFile 에 토큰을 쓰고 재시작하던 사고 차단(구성도 미스매치 #2).
+    return { error: `:${port} 를 서비스하는 유닛이 '${unit}' 입니다(포탈이 아닌 포워더/프록시). 이 URL 은 포트포워딩으로 다른 장비(IRS)를 가리키므로 이 호스트의 파일을 고치면 안 됩니다 — 포워딩 대상 장비의 SSH 대상(예: 같은 host 의 :4067)을 지정해 적용하세요.` };
+  }
   if (unit === def.unit) return def;
   const ef = (await exec(`systemctl show ${unit} -p EnvironmentFiles 2>/dev/null || true`).catch(() => ({ stdout: '' }))).stdout;
   const m = /EnvironmentFiles=(\S+)/.exec(ef);

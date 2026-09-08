@@ -264,6 +264,8 @@ export default function AgentDeploy() {
         <div className="agent-grid">
           <label title="이 에이전트의 고유 식별 이름. IP 스캔 '할당 에이전트' 드롭다운과 중앙 할당 매칭(AGENT_NAME)에 사용됩니다. 사이트/DC가 드러나게 지으세요. 예: OC2-Agent, Seoul-DC1. 자동 채우기는 SSH 호스트 기반으로 제안합니다.">
             <span className="cap">에이전트 이름(AGENT_NAME)</span><input className="input" value={f.agentName} onChange={set('agentName')} placeholder="예: OC2-Agent / Seoul-DC1" /></label>
+          <label title="중앙 포탈이 이 엣지에 접근할 때 쓰는 주소(EDGE_ADVERTISE_URL). 비우면 자기등록 시 중앙이 '요청 peer IP + 포탈 포트'로 유도합니다 — 중계 엣지의 HAProxy 포워딩 뒤(SSH 포트 4067 로 배포하는 IRS 등)에 있으면 peer 가 중계 엣지라 반드시 http://<중계 엣지 IP>:<포워딩 포트>(예 :4068) 를 지정하세요(v2.428).">
+            <span className="cap">중앙에서 접근하는 URL(EDGE_ADVERTISE_URL)</span><input className="input" value={f.advertiseUrl || ''} onChange={set('advertiseUrl')} placeholder="비우면 peer IP 유도 · 포워딩 뒤면 http://<중계엣지>:4068" /></label>
           <label title="에이전트가 접속할 '중앙 포탈' 주소. 에이전트 서버에서 도달 가능한 IP/호스트:포트여야 합니다(끝에 / 없이). 예: http://192.168.20.143:4000. 자동 채우기는 지금 접속한 포탈 주소로 채웁니다 — 에이전트 망에서 안 닿으면 외부 접근용 주소로 바꾸세요.">
             <span className="cap">중앙 URL(CENTRAL_URL)</span><input className="input" value={f.centralUrl} onChange={set('centralUrl')} placeholder="http://<포탈주소>:4000" /></label>
           <label title="중앙↔에이전트 공유 비밀. 중앙 포탈의 CENTRAL_TOKEN과 반드시 동일해야 하며 다르면 403. '생성'을 누르면 안전한 랜덤 토큰을 만들어 이 포탈(중앙) 환경(portal.env)에 저장하고 칸을 채웁니다(리붓해도 유지). 이미 있으면 자동 입력됩니다.">

@@ -59,9 +59,9 @@ async function pullOne(c) {
   // 서버 분석용 인벤토리 병합: 엣지가 보낸 서버 목록(자격증명 없음)을 그 수집기 것으로 교체
   // 저장한다. 위임 법인 서버가 중앙 '서버 분석'에 나타난다. 구버전 엣지는 servers가 없어 빈 배열.
   setCollectorServers(c.id, data.datacenter || c.datacenter, Array.isArray(data.servers) ? data.servers : []);
-  const identity = identityIssue(c, data);
+  const identity = identityIssue(c, data, loadCollectors().map((x) => x.id));
   if (identity) console.warn(`[collector] ${c.id} 정체 불일치: ${identity.reason}`);
-  return { hosts, version: data.version, datacenter: data.datacenter || c.datacenter, servers: Array.isArray(data.servers) ? data.servers.length : 0, authDeny: data.authDeny || null, agent: data.agent || '', hostname: data.hostname || '', identity };
+  return { hosts, version: data.version, datacenter: data.datacenter || c.datacenter, servers: Array.isArray(data.servers) ? data.servers.length : 0, authDeny: data.authDeny || null, agent: data.agent || '', hostname: data.hostname || '', identity, mock: data.mock === true };
 }
 
 let pulling = false; // 재진입 가드 — 저하된 수집기(재시도 포함 60초+)가 있으면 주기가 겹쳐
@@ -108,7 +108,7 @@ async function pullNowInner() {
     try {
       const r = await pullOne(c);
       fails.set(c.id, 0);
-      setCollectorStatus(c.id, { ok: true, hosts: r.hosts, version: r.version, datacenter: r.datacenter, authDeny: r.authDeny, error: null, agent: r.agent, hostname: r.hostname, identity: r.identity || null });
+      setCollectorStatus(c.id, { ok: true, hosts: r.hosts, version: r.version, datacenter: r.datacenter, authDeny: r.authDeny, error: null, agent: r.agent, hostname: r.hostname, identity: r.identity || null, mock: !!r.mock });
     } catch (err) {
       const d = describeError(err);
       const isAuth = /인증 실패|토큰/.test(d.message);
