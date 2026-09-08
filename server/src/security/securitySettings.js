@@ -13,7 +13,15 @@ const FILE = path.join(config.configDir, 'security-session.json');
 // 설정 소유 계정을 '파일/환경변수'로도 지정할 수 있게 하는 경로(운영자가 직접 편집).
 // portal.env 와 같은 CONFIG_DIR 에 두며, 한 줄에 계정 하나(# 주석 허용).
 const OWNERS_FILE = path.join(config.configDir, 'settings-owners.txt');
-const DEFAULTS = { idleLogoutEnabled: true, idleLogoutMin: 30, settingsOwners: ['noainred'] };
+const DEFAULTS = {
+  idleLogoutEnabled: true, idleLogoutMin: 30, settingsOwners: ['noainred'],
+  // 세션 만료 경고·연장(v2.428) — 토큰 수명(AUTH_TOKEN_TTL, 기본 8시간)이 다 되기 전에
+  // '계속 사용 중인지' 물어보고, 사용자가 확인하면 그만큼 만료를 미룬다.
+  sessionWarnEnabled: true,
+  sessionWarnMin: 10,     // 만료 몇 분 전에 물어볼지
+  sessionExtendMin: 60,   // 확인 시 몇 분 연장할지
+  sessionMaxHours: 0,     // 로그인 후 총 세션 상한(시간). 0 = 무제한(연장 횟수 제한 없음)
+};
 
 // 로그인 자격 정책(전역) — 설정 소유자가 '설정 › 세션 보안'에서 지정. null(미설정)=레거시
 // (고권한 OTP 전용, 그 외 혼용). auth.js 가 이 값으로 OTP 강제 여부를 판정한다.
@@ -59,6 +67,11 @@ export function loadConfiguredSecurity() {
     loginPolicy: normPolicy(p.loginPolicy), // null = 미설정(레거시)
     singleSession: !!p.singleSession,       // 단일 세션 강제(ID 공유 금지). 기본 false(옵트인).
     demoSession: normDemoSession(p.demoSession), // null=전역 따름 | 'allow' 중복 허용 | 'single' 중복 차단(v2.294)
+    sessionWarnEnabled: p.sessionWarnEnabled !== undefined ? !!p.sessionWarnEnabled : DEFAULTS.sessionWarnEnabled,
+    sessionWarnMin: clamp(p.sessionWarnMin, 1, 120, DEFAULTS.sessionWarnMin),      // 1분~2시간 전
+    sessionExtendMin: clamp(p.sessionExtendMin, 5, 720, DEFAULTS.sessionExtendMin), // 5분~12시간
+    // 0 = 무제한. clamp 는 0 을 하한으로 올려버리므로 여기서만 별도 처리한다.
+    sessionMaxHours: (p.sessionMaxHours === 0 || p.sessionMaxHours === '0') ? 0 : clamp(p.sessionMaxHours, 0, 720, DEFAULTS.sessionMaxHours),
   };
 }
 
@@ -248,6 +261,12 @@ export function saveSessionSecurity(partial = {}) {
     // Demo 중복 접속(v2.294) — undefined 면 기존 유지, 제공되면 정규화(무효값·null = '전역 따름'으로
     // 명시 리셋). loginPolicy 와 달리 null 리셋을 허용하는 이유: '전역 따름'이 정식 상태값이다.
     demoSession: partial.demoSession !== undefined ? normDemoSession(partial.demoSession) : cur.demoSession,
+    sessionWarnEnabled: partial.sessionWarnEnabled !== undefined ? !!partial.sessionWarnEnabled : cur.sessionWarnEnabled,
+    sessionWarnMin: partial.sessionWarnMin !== undefined ? clamp(partial.sessionWarnMin, 1, 120, cur.sessionWarnMin) : cur.sessionWarnMin,
+    sessionExtendMin: partial.sessionExtendMin !== undefined ? clamp(partial.sessionExtendMin, 5, 720, cur.sessionExtendMin) : cur.sessionExtendMin,
+    sessionMaxHours: partial.sessionMaxHours !== undefined
+      ? ((Number(partial.sessionMaxHours) === 0 || partial.sessionMaxHours === '') ? 0 : clamp(partial.sessionMaxHours, 0, 720, cur.sessionMaxHours))
+      : cur.sessionMaxHours,
   };
   // 원자적 쓰기 — settingsOwners(설정 편집 권한)를 담는 권한 config. 부분기록으로 손상되면
   // 로드가 DEFAULTS로 조용히 리셋돼 소유자 경계가 무너진다.

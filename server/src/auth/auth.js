@@ -76,9 +76,16 @@ function ttlSeconds(ttl) {
   return n * ({ s: 1, m: 60, h: 3600, d: 86400 }[m[2]] || 1);
 }
 
-export function signToken(payload) {
+/**
+ * @param payload 토큰 클레임(sub/role/name/src/tv/sid …)
+ * @param opts.exp 만료 시각(epoch 초)을 명시할 때. 세션 연장(POST /auth/extend)이 기존 만료를
+ *   기준으로 늘린 값을 그대로 넣기 위해 필요하다 — 지정하지 않으면 기존처럼 `지금 + tokenTtl`.
+ *   ⚠ 여기서 상한을 두지 않는다(호출부가 정책을 소유). 라우트가 '경고창 안에서만' + 절대 상한을
+ *   강제하므로, 이 함수에 정책을 중복으로 넣으면 두 곳이 어긋날 때 조용히 짧은 쪽이 이긴다.
+ */
+export function signToken(payload, { exp = null } = {}) {
   const now = Math.floor(Date.now() / 1000);
-  const body = { ...payload, iat: now, exp: now + ttlSeconds(config.auth.tokenTtl) };
+  const body = { ...payload, iat: now, exp: exp != null ? Math.floor(exp) : now + ttlSeconds(config.auth.tokenTtl) };
   const head = b64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
   const data = `${head}.${b64url(JSON.stringify(body))}`;
   const sig = crypto.createHmac('sha256', SECRET).update(data).digest('base64url');
