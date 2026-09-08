@@ -238,6 +238,42 @@ export async function ssrfBlockReasonResolved(urlStr) {
   return null;
 }
 
+/**
+ * 응답 엣지 정체 ↔ 등록 항목 대조(v2.424, 순수). 엣지가 export/ping 에 실은 agent 이름이 등록 id/표시이름과 다르면
+ * 그 URL 이 **다른 엣지**에 닿고 있다는 뜻이다 — 엣지A 포워딩(A:4068→B)이 A 자신(:4000)으로 되돌아오거나, B 의
+ * 자기등록이 peer IP(A) 로 URL 을 유도해 A 를 가리키는 경우. 구버전 엣지(agent 없음)는 판정하지 않는다(null).
+ * @returns null(일치/판정불가) | { agent, hostname, reason }
+ */
+export function identityIssue(entry, data = {}) {
+  const agent = String(data?.agent || '').trim();
+  if (!agent || !entry) return null;
+  const norm = (v) => String(v || '').trim().toLowerCase();
+  const ok = [entry.id, entry.name, entry.datacenter].map(norm).filter(Boolean).some((v) => v === norm(agent));
+  if (ok) return null;
+  return { agent, hostname: String(data?.hostname || ''), reason: `이 URL 에 응답한 엣지는 '${agent}'${data?.hostname ? `(${data.hostname})` : ''} 인데 등록 항목은 '${entry.id}' 입니다 — 포트포워딩이 다른 엣지(대개 중계 엣지 자신)로 가거나, 자기등록 URL 이 중계 엣지를 가리킵니다.` };
+}
+
+/**
+ * peer IP 로 유도한 자기등록 URL 검증(v2.424). 그 URL 의 /api/collector/ping 을 엣지의 토큰으로 두드려
+ * ① 403 → 그 주소는 다른 엣지(중계/NAT 장비) ② 응답 agent ≠ name → 다른 엣지 ③ 불통 → 중앙이 못 닿는 주소.
+ * 반환 { ok:true } | { ok:false, reason }. fetchImpl 은 테스트 주입용.
+ */
+export async function verifyDerivedCollectorUrl({ url, name, datacenter = '', token }, fetchImpl = globalThis.fetch) {
+  let why = '';
+  try {
+    const pr = await fetchImpl(`${String(url).replace(/\/+$/, '')}/api/collector/ping`, { headers: { Accept: 'application/json', 'X-Collector-Token': String(token || '') }, signal: AbortSignal.timeout(8_000) });
+    if (pr.status === 403 || pr.status === 401) why = `유도한 주소 ${url} 이(가) 이 엣지의 토큰을 거부(403) — 그 주소는 다른 엣지(중계/NAT 장비)입니다`;
+    else if (!pr.ok) why = `유도한 주소 ${url} 응답 HTTP ${pr.status}`;
+    else {
+      const j = await pr.json().catch(() => ({}));
+      const iss = identityIssue({ id: name, name, datacenter }, j);
+      if (iss) why = `유도한 주소 ${url} 에 응답한 엣지가 '${iss.agent}' (이 엣지 '${name}' 아님)`;
+    }
+  } catch (e) { why = `유도한 주소 ${url} 에 중앙이 닿지 못함(${e.message})`; }
+  if (!why) return { ok: true };
+  return { ok: false, reason: `${why}. NAT/포워딩 뒤 엣지는 portal.env 에 EDGE_ADVERTISE_URL=http://<중앙에서 닿는 주소>:<포트> 를 지정하세요(중계 엣지의 포워딩 포트).` };
+}
+
 function normalize(body, existing = null) {
   const e = existing ? { ...existing } : {};
   const id = String(body.id ?? e.id ?? '').trim();

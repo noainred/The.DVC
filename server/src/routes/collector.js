@@ -6,6 +6,7 @@
 
 import { Router } from 'express';
 import express from 'express';
+import os from 'node:os';
 import { config, currentVersion } from '../config.js';
 import { buildExport } from '../collector/agent.js';
 import { upgradeManager } from '../upgrade/manager.js';
@@ -72,7 +73,9 @@ collectorRouter.get('/export', async (req, res) => {
 collectorRouter.get('/ping', (req, res) => {
   if (!config.collector.token) { logCollectorDeny(req, 'ping'); return res.status(404).json({ ok: false }); }
   if (!checkToken(req)) { logCollectorDeny(req, 'ping'); return res.status(403).json({ ok: false }); }
-  res.json({ ok: true, datacenter: config.collector.datacenter || '', version: currentVersion() });
+  // agent/hostname(v2.424): 중앙이 '이 URL 이 실제로 어느 엣지에 닿았는지' 확인한다 — 엣지A 포트포워딩으로 엣지B 를
+  // 등록한 토폴로지에서 포워딩이 A 자신으로 되돌아오거나 자기등록 URL 이 A 를 가리키는 사고를 드러낸다.
+  res.json({ ok: true, datacenter: config.collector.datacenter || '', version: currentVersion(), agent: config.agent.name || '', hostname: os.hostname() });
 });
 
 // 중앙 포탈이 이 엣지의 로컬 계정 비밀번호를 원격 변경(기본 비번 일괄 교체용).

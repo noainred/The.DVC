@@ -5,6 +5,7 @@
  * never re-exported remote data — so there are no pull loops.
  */
 
+import os from 'node:os';
 import { config, currentVersion } from '../config.js';
 import { getCollectorDenyStats } from '../routes/collector.js';
 import { localPowerByHostName } from '../idrac/service.js';
@@ -108,6 +109,8 @@ export async function buildExport() {
   return {
     version: currentVersion(),
     datacenter: config.collector.datacenter || '',
+    agent: config.agent.name || '',      // v2.424: 응답 엣지 정체(중앙의 URL↔엣지 불일치 판정용)
+    hostname: os.hostname(),
     generatedAt: Date.now(),
     poller: getPollerStatus(),
     omeDevices: allOmeDevices().length,

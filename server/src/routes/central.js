@@ -28,7 +28,7 @@ import { setGpuGuestDiag } from '../central/gpuGuestDiag.js';
 import { takePingJobs, setPingResults } from '../central/pingJobs.js';
 import { takeIdracScanJobs, setIdracScanResult, setIdracScanProgress, agentOfReq } from '../central/idracScanJobs.js';
 import { pullNow as pullCollectorsNow } from '../collector/puller.js';
-import { upsertCollectorFromAgent, ssrfBlockReasonResolved } from '../collector/registry.js';
+import { upsertCollectorFromAgent, ssrfBlockReasonResolved, verifyDerivedCollectorUrl } from '../collector/registry.js';
 import { recordIngest, noteInventoryCompression } from '../central/ingestStats.js';
 import { notify } from '../alerts.js';
 import { ingestReport } from '../central/svcmonEdge.js';
@@ -219,6 +219,13 @@ centralRouter.post('/register-collector', async (req, res) => {
   // 대역으로 '해석되는 이름'을 놓친다(감사 M-R4). RFC1918 사내 대역은 허용, 루프백/메타데이터만 차단.
   const ssrfReason = await ssrfBlockReasonResolved(String(url));
   if (ssrfReason) return res.status(400).json({ ok: false, reason: `수집 서버 URL: ${ssrfReason}` });
+  // v2.424: peer IP 로 유도한 URL 은 **실제로 이 엣지에 닿는지** 확인한 뒤에만 등록한다. 중앙→엣지A→엣지B 처럼 B 가 A 의
+  // 포워딩을 거쳐 오면 peer IP 는 A 라, 'B 이름 + A 주소:B 포트 + B 토큰' 항목이 생겨 A 에 403 을 반복하며 '오류'로 남았다
+  // (실제 사례). ping 이 403/불일치/불통이면 등록하지 않고 EDGE_ADVERTISE_URL 을 요구한다.
+  if (!String(b.urlHint || '').trim() && process.env.CENTRAL_VERIFY_SELF_REGISTER !== 'false') {
+    const v = await verifyDerivedCollectorUrl({ url, name, datacenter: String(b.datacenter || ''), token: String(b.collectorToken) });
+    if (!v.ok) { console.warn(`[central] 엣지 자기등록 거부: ${name} — ${v.reason}`); return res.status(400).json({ ok: false, reason: v.reason }); }
+  }
   const r = upsertCollectorFromAgent({ name, url, token: String(b.collectorToken), datacenter: String(b.datacenter || '') });
   if (r.ok) console.log(`[central] 엣지 자기등록: ${name} → ${url}${b.version ? ` (v${b.version})` : ''}`);
   res.status(r.ok ? 200 : 400).json(r);
