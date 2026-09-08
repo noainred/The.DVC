@@ -20,6 +20,7 @@ import { registerSerialLookup } from './api/serialLookup.js'; // 시리얼 통�
 import { registerRma } from './api/rma.js';                   // 원격 명령 실행(RMA, v2.416)
 import { registerCredentials } from './api/credentials.js';   // 통합 계정 관리(v2.419)
 import { registerRelayCheck } from './api/relaycheck.js';     // HAProxy 경로 점검(v2.429)
+import { registerRelayTopo } from './api/relaytopo.js';       // 중계 토폴로지·HAProxy 구성(v2.431)
 import { registerBmStorage } from './api/bmstor.js'; // 베어메탈 스토리지(SSH df 마운트 합산, v2.340)
 import { registerVmTrack } from './api/vmtrack.js'; // VM 수량 추이(00/12시 스냅샷 + 증감 상세, v2.345)
 
@@ -49,5 +50,6 @@ registerSerialLookup(api);
 registerRma(api);
 registerCredentials(api);
 registerRelayCheck(api);
+registerRelayTopo(api);
 registerBmStorage(api);
 registerVmTrack(api);

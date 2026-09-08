@@ -6,6 +6,8 @@ import { loadSettings, KINDS } from './settings.js';
 import { runCheck } from './checks.js';
 import { remedyFor } from './remedy.js';
 import { loadCollectors } from '../collector/registry.js';
+import { loadTopology } from '../relaytopo/store.js';        // 중계 토폴로지(v2.431) — 입력한 사이트도 점검 대상
+import { kindForService } from '../relaytopo/validate.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import { notify } from '../alerts.js';
 
@@ -19,19 +21,27 @@ const _state = new Map(); // `${host}:${port}` → { target, ok, phase, error, d
  * 점검 대상 생성(순수 — 테스트 고정). 수집 서버 URL 호스트(autoHosts) + 수동 호스트 × 프로파일. 포탈 종류는 같은 host:port 의
  * 수집 서버 항목에서 토큰·기대 이름을 붙인다. 중계 엣지(:4000 항목)의 이름은 relayAgent 로 넘겨 'IRS 포트가 자기에게 되돌아옴'을 판정.
  */
-export function buildTargets(settings, collectors = []) {
+export function buildTargets(settings, collectors = [], topology = null) {
   const hostOf = (u) => { try { return new URL(u).hostname.replace(/^\[|\]$/g, ''); } catch { return ''; } };
   const portOf = (u) => { try { const x = new URL(u); return Number(x.port) || (x.protocol === 'https:' ? 443 : 80); } catch { return 0; } };
   const cols = collectors.filter((c) => c.enabled !== false && c.url).map((c) => ({ ...c, _host: hostOf(c.url), _port: portOf(c.url) }));
   const hosts = new Map();
   if (settings.autoHosts) for (const c of cols) if (c._host) hosts.set(c._host, hosts.get(c._host) || c.datacenter || c.name || '');
   for (const h of settings.hosts || []) hosts.set(h.host, h.label || hosts.get(h.host) || '');
+  // 중계 토폴로지(v2.431) 사이트: 중앙이 접속하는 Edge 주소(public 우선) + 그 사이트의 서비스 표에서 뽑은 포트 프로파일.
+  const topoHosts = new Map(); const topoProfile = [];
+  if (topology && settings.topologyHosts !== false) {
+    const pp = topology.main?.portalPort || 4000;
+    topoProfile.push({ port: pp, kind: 'edge-portal' });
+    for (const s of topology.services || []) { const kind = s.enabled !== false && kindForService(s, topology.main); if (kind && !topoProfile.some((p) => p.port === s.listenPort)) topoProfile.push({ port: s.listenPort, kind, label: s.label }); }
+    for (const site of topology.sites || []) { const h = site.edge?.publicIp || site.edge?.privateIp; if (h && !hosts.has(h)) { hosts.set(h, site.dc); topoHosts.set(h, site.dc); } }
+  }
   const exclude = new Set(settings.exclude || []);
   const ids = cols.map((c) => c.id);
   const out = [];
   for (const [host, label] of hosts) {
     const relay = cols.find((c) => c._host === host && c._port === 4000);
-    for (const p of settings.profile) {
+    for (const p of (topoHosts.has(host) ? topoProfile : settings.profile)) {
       const key = `${host}:${p.port}`;
       if (exclude.has(key)) continue;
       const col = cols.find((c) => c._host === host && c._port === p.port);
@@ -68,7 +78,7 @@ export async function runRelayChecks({ force = false } = {}) {
   _busy = true;
   const t0 = Date.now();
   try {
-    const targets = buildTargets(st, loadCollectors());
+    const targets = buildTargets(st, loadCollectors(), safeTopology());
     const seen = new Set();
     let okN = 0, failN = 0;
     await pool(targets, CONCURRENCY, async (t) => {
@@ -95,6 +105,7 @@ export async function runRelayChecks({ force = false } = {}) {
   } finally { _busy = false; }
 }
 
+function safeTopology() { try { return loadTopology(); } catch { return null; } }
 export function relayCheckStatus() {
   const st = loadSettings();
   return { last: _last, busy: _busy, settings: st, results: [..._state.values()].sort((a, b) => (a.target.host + a.target.port).localeCompare(b.target.host + b.target.port, undefined, { numeric: true })), kinds: KINDS };
