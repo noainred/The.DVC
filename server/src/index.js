@@ -84,6 +84,9 @@ import { startDailyReport } from './reports/dailyReport.js';
 import { startVmCloneScheduler } from './vmclone/scheduler.js'; // VM 복제(백업식) 스케줄러(v2.299)
 import { startStoragePoller } from './storage/poller.js';        // 스토리지 수집(v2.302)
 import { startSanSwitchPoller } from './sanswitch/poller.js';    // SAN 스위치 수집(Brocade FOS, v2.410)
+import { startPduPoller } from './pdu/poller.js';                 // PDU 수집(APC Rack PDU 2G, v2.424)
+import { startPduPush } from './pdu/push.js';                     // 엣지→중앙 PDU 스냅샷 push(v2.424)
+import { startPduConfigPull } from './agent/pduConfigPull.js';    // 중앙→엣지 PDU 배포 pull(v2.424)
 import { startSanSwitchPush } from './sanswitch/push.js';        // 〃 엣지→중앙 push
 import { startSanSwitchConfigPull } from './agent/sanSwitchConfigPull.js'; // 〃 중앙→엣지 배포 pull
 import { startSanSwitchPerfPoller } from './sanswitch/perfPoller.js';    // 〃 포트 사용량(portperfshow) 수집(v2.411)
@@ -235,6 +238,7 @@ const stagger = [
   startVmCloneScheduler, // VM 복제(백업식) — 60초 틱, 재진입 가드 + 전역 직렬 실행 큐(runner)
   startStoragePoller, startStoragePush, startStorageConfigPull, // 스토리지 모니터링(v2.302) — 전부 재진입 가드, push/pull 은 CENTRAL_URL 미설정 시 자기기동 안 함
   startSanSwitchPoller, startSanSwitchPush, startSanSwitchConfigPull, // SAN 스위치(v2.410) — 동일 규약(재진입 가드 + 적응형 타이머)
+  startPduPoller, startPduPush, startPduConfigPull, // PDU(v2.424) — 동일 규약(자동 센서 탐지 + 재진입 가드 + 적응형 타이머)
   startSanSwitchPerfPoller, // SAN 포트 사용량(v2.411) — 설정에서 꺼져 있으면 틱만 돌고 아무것도 안 한다
   startSanSwitchPerfPush,   // 〃 엣지→중앙 중계(v2.423) — CENTRAL_URL 미설정이면 자기기동 안 함, 커서 방식
   startBmstorPoller, // 베어메탈 스토리지(v2.340) — 30초 틱 + 재진입 가드, 등록 0대면 대기

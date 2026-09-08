@@ -15,6 +15,7 @@ import { registerInventory } from './api/inventory.js';
 import { registerVmClone } from './api/vmClone.js'; // VM 복제(백업식, v2.299)
 import { registerStorageMon } from './api/storageMon.js'; // 스토리지 모니터링(Isilon 등, v2.302)
 import { registerSanSwitch } from './api/sanSwitch.js';   // SAN 스위치 모니터링(Brocade FOS, v2.410)
+import { registerPdu } from './api/pdu.js';               // PDU 정보(APC Rack PDU 2G, v2.424)
 import { registerSerialLookup } from './api/serialLookup.js'; // 시리얼 통합 조회(v2.412)
 import { registerRma } from './api/rma.js';                   // 원격 명령 실행(RMA, v2.416)
 import { registerCredentials } from './api/credentials.js';   // 통합 계정 관리(v2.419)
@@ -42,6 +43,7 @@ registerInventory(api);
 registerVmClone(api);
 registerStorageMon(api);
 registerSanSwitch(api);
+registerPdu(api);
 registerSerialLookup(api);
 registerRma(api);
 registerCredentials(api);
