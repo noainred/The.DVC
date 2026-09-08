@@ -9,7 +9,7 @@
     "dev": "node --watch src/index.js",
     "start": "node src/index.js",
     "otp-enroll": "node src/tools/otp-enroll.js",
-    "test": "node --test --experimental-sqlite --test-timeout=120000 test/*.test.js"
+    "test": "node --test --experimental-sqlite --test-timeout=120000 --test-reporter=spec test/*.test.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
