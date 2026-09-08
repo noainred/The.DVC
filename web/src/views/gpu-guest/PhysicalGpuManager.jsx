@@ -6,6 +6,7 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson, putJson, postJson, delJson } from '../../api.js';
 import { Field } from './shared.jsx';
+import { STable } from '../../components/STable.jsx';
 
 const PEMPTY = { id: '', name: '', host: '', port: 22, username: 'root', password: '', os: 'linux', vcenterId: '', enabled: true };
 // 오류 분류별 배지 색: 로그인 안됨=red · 드라이버 없음=amber · 접속 불가=gray · 기타=red
@@ -122,7 +123,7 @@ export function PhysicalGpuManager({ vcs }) {
               <div style={{ marginTop: 10 }}>
                 <div style={{ fontSize: 13, marginBottom: 6 }}>완료 — 대상 <b>{bulkRes.total}</b> · 등록/갱신 <b style={{ color: 'var(--green)' }}>{bulkRes.registered}</b> · 실패 {bulkRes.total - bulkRes.registered}{bulkRes.truncated ? ' · ⚠ 512개 초과분 생략' : ''}</div>
                 <div style={{ maxHeight: 220, overflow: 'auto' }}>
-                  <table className="data-table" style={{ width: '100%', fontSize: 12 }}>
+                  <STable className="data-table" style={{ width: '100%', fontSize: 12 }}>
                     <thead><tr><th style={{ textAlign: 'left' }}>IP</th><th style={{ textAlign: 'left' }}>결과</th></tr></thead>
                     <tbody>{(bulkRes.results || []).map((x) => (
                       <tr key={x.ip}><td className="tabular">{x.ip}</td>
@@ -130,7 +131,7 @@ export function PhysicalGpuManager({ vcs }) {
                           : x.noGpu ? <span className="muted">로그인 OK · GPU 없음(미등록)</span>
                             : <span style={{ color: 'var(--red)' }}>❌ {x.error || '접속 실패'}</span>}</td></tr>
                     ))}</tbody>
-                  </table>
+                  </STable>
                 </div>
               </div>
             ))}
@@ -154,7 +155,7 @@ export function PhysicalGpuManager({ vcs }) {
       })()}
 
       <div style={{ overflowX: 'auto' }}>
-        <table className="data-table" style={{ width: '100%', fontSize: 13 }}>
+        <STable className="data-table" style={{ width: '100%', fontSize: 13 }}>
           <thead><tr><th style={{ textAlign: 'left' }}>이름</th><th style={{ textAlign: 'left' }}>IP/계정</th><th style={{ textAlign: 'left' }}>소속</th><th style={{ textAlign: 'left' }}>GPU/사용률</th><th style={{ textAlign: 'left' }}>상태</th><th style={{ textAlign: 'right' }}>작업</th></tr></thead>
           <tbody>
             {(d?.servers || []).length === 0 && <tr><td colSpan={6} className="center muted" style={{ padding: 18 }}>등록된 물리 GPU 서버가 없습니다.</td></tr>}
@@ -179,7 +180,7 @@ export function PhysicalGpuManager({ vcs }) {
               );
             })}
           </tbody>
-        </table>
+        </STable>
       </div>
       {testRes && testRes.who !== 'form' && (
         <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>

@@ -11,6 +11,7 @@ import { Loading, ErrorBox } from '../components/ui.jsx';
 import { Field, fmtAgo } from './gpu-guest/shared.jsx';
 import { VmCredManager } from './gpu-guest/VmCredManager.jsx';
 import { PhysicalGpuManager } from './gpu-guest/PhysicalGpuManager.jsx';
+import { STable } from '../components/STable.jsx';
 
 /**
  * GPU 게스트 수집 설정 — 패스쓰루 GPU는 ESXi에서 사용률을 못 보므로, 선택한 법인의
@@ -158,7 +159,7 @@ export default function GpuGuestSettings() {
         </div>
         {vcs.length === 0 ? <span className="muted">등록된 vCenter가 없습니다. 먼저 vCenter를 등록하세요.</span> : (
           <div style={{ overflowX: 'auto' }}>
-            <table className="data-table" style={{ width: '100%' }}>
+            <STable className="data-table" style={{ width: '100%' }}>
               <thead><tr>
                 <th style={{ textAlign: 'left' }}>모니터링</th>
                 <th style={{ textAlign: 'left' }}>법인 / vCenter</th>
@@ -188,7 +189,7 @@ export default function GpuGuestSettings() {
                   );
                 })}
               </tbody>
-            </table>
+            </STable>
           </div>
         )}
         <div className="flex gap" style={{ alignItems: 'center', marginTop: 12 }}>

@@ -4,6 +4,7 @@ import { fetchJson, postJson, delJson, downloadFile } from '../../api.js';
 import { Loading, ErrorBox, Kpi, UsageCell, Modal, SearchBox, usageColor } from '../../components/ui.jsx';
 import { columnsFor, cellValue } from './storageColumns.js';
 import { UNIT_OPTIONS, formatBytes, loadUnit, saveUnit } from './storageUnits.js';
+import { STable } from '../../components/STable.jsx';
 
 /**
  * 특수기능 › 스토리지 모니터링(v2.302) — 글로벌 법인 스토리지(Isilon 우선, XtremIO·PowerStore·
@@ -286,7 +287,7 @@ export default function StorageMonTool() {
         {/* ⚠ 표에 자체 세로 스크롤(max-height)을 다시 넣지 말 것 — 장비가 20대만 넘어도 페이지
             스크롤과 표 스크롤이 이중으로 겹쳐 목록을 훑기 불편하다(2026-09-02 사용자 지적). */}
         <div className="table-wrap">
-          <table>
+          <STable>
             <thead><tr>{cols.map((c) => <th key={c.key} className={c.align === 'right' ? 'right' : undefined} style={c.align === 'right' ? { textAlign: 'right' } : undefined}>{c.label}</th>)}</tr></thead>
             <tbody>
               {list.length === 0 && <tr><td colSpan={cols.length} className="center muted" style={{ padding: 20 }}>등록된 장비가 없습니다 — "+ 장비 등록"으로 시작하세요.</td></tr>}
@@ -296,7 +297,7 @@ export default function StorageMonTool() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </STable>
         </div>
       </div>
     );
@@ -559,7 +560,7 @@ function ActivityPanel() {
       {/* 완료(최근) */}
       <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-dim)', margin: '4px 0 6px' }}>▸ 완료 <span className="muted" style={{ fontWeight: 400 }}>(최근 {events.length}건)</span></div>
       <div className="table-wrap" style={{ maxHeight: '32vh' }}>
-        <table>
+        <STable>
           <thead><tr><th>시각</th><th>장비</th><th>출처</th><th>결과</th><th style={{ textAlign: 'right' }}>노드</th><th>용량</th><th style={{ textAlign: 'right' }}>소요</th><th>비고</th></tr></thead>
           <tbody>
             {events.length === 0 && <tr><td colSpan={8} className="center muted" style={{ padding: 16 }}>아직 수집 기록이 없습니다.</td></tr>}
@@ -578,7 +579,7 @@ function ActivityPanel() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </STable>
       </div>
     </div>
   );
@@ -715,7 +716,7 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
             <>
               <div className="section-title" style={{ fontSize: 13 }}>{r.type === 'xtremio' ? '스토리지 컨트롤러' : r.type === 'unity480' ? '스토리지 프로세서(SP)' : (r.type === 'vplex' || r.type === 'metronode') ? '디렉터' : '노드'} {nodeList.length}{s.nodes.count > nodeList.length ? ` (표시 상한 — 전체 ${s.nodes.count})` : ''}</div>
               <div className="table-wrap" style={{ maxHeight: '32vh', marginBottom: 12 }}>
-                <table>
+                <STable>
                   <thead><tr>
                     <th style={{ textAlign: 'right', width: 40 }}>ID</th>
                     {ncol.name && <th>이름</th>}
@@ -743,7 +744,7 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </STable>
               </div>
             </>
           )}
@@ -816,12 +817,12 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
           {Array.isArray(ex.appliances) && ex.appliances.length > 0 && (
             <>
               <div className="section-title" style={{ fontSize: 13 }}>어플라이언스 {ex.appliances.length}</div>
-              <table className="data-table" style={{ width: '100%', fontSize: 12.5, marginBottom: 12 }}>
+              <STable className="data-table" style={{ width: '100%', fontSize: 12.5, marginBottom: 12 }}>
                 <thead><tr><th style={{ textAlign: 'left' }}>이름</th><th>모델</th><th>서비스 태그</th></tr></thead>
                 <tbody>{ex.appliances.map((a, i) => (
                   <tr key={i}><td>{a.name || '—'}</td><td className="muted">{a.model || '—'}</td><td className="muted" style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{a.serviceTag || '—'}</td></tr>
                 ))}</tbody>
-              </table>
+              </STable>
             </>
           )}
 
@@ -839,12 +840,12 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
           {(s.pools || []).length > 0 && (
             <>
               <div className="section-title" style={{ fontSize: 13 }}>{r.type === 'xtremio' ? '클러스터 용량' : (r.type === 'vmax' || r.type === 'powermax') ? '어레이별 용량' : '스토리지 풀'} {s.pools.length}</div>
-              <table className="data-table" style={{ width: '100%', fontSize: 12.5, marginBottom: 12 }}>
+              <STable className="data-table" style={{ width: '100%', fontSize: 12.5, marginBottom: 12 }}>
                 <thead><tr><th style={{ textAlign: 'left' }}>{r.type === 'xtremio' ? '클러스터' : (r.type === 'vmax' || r.type === 'powermax') ? '어레이' : '풀'}</th><th style={{ textAlign: 'right' }}>사용</th><th style={{ textAlign: 'right' }}>전체</th><th>사용률</th></tr></thead>
                 <tbody>{s.pools.map((p, i) => (
                   <tr key={i}><td>{p.name}</td><td style={{ textAlign: 'right' }}>{tbFmt(p.usedBytes)}</td><td style={{ textAlign: 'right' }}>{tbFmt(p.totalBytes)}</td><td>{p.pct != null ? <UsageCell pct={p.pct} /> : '—'}</td></tr>
                 ))}</tbody>
-              </table>
+              </STable>
             </>
           )}
           {(s.accounts || []).length > 0 && (
@@ -863,12 +864,12 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
                 ? <div className="muted" style={{ fontSize: 12.5, marginBottom: 12 }}>✅ 미해결 Critical 이벤트 없음</div>
                 : (
                   <div className="table-wrap" style={{ maxHeight: '20vh', marginBottom: 12 }}>
-                    <table>
+                    <STable>
                       <thead><tr><th>시각</th><th style={{ textAlign: 'right' }}>LNN</th><th>이벤트</th></tr></thead>
                       <tbody>{s.extra.criticalEvents.map((e, i) => (
                         <tr key={i}><td style={{ whiteSpace: 'nowrap', fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{e.time}</td><td style={{ textAlign: 'right' }}>{e.lnn}</td><td style={{ fontSize: 12.5, color: 'var(--red)' }}>{e.event}</td></tr>
                       ))}</tbody>
-                    </table>
+                    </STable>
                   </div>
                 )}
             </>
@@ -882,7 +883,7 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
                 ? <div className="muted" style={{ fontSize: 12.5, marginBottom: 8 }}>실행/대기/실패 잡 없음</div>
                 : (
                   <div className="table-wrap" style={{ maxHeight: '22vh', marginBottom: 8 }}>
-                    <table>
+                    <STable>
                       <thead><tr><th>잡</th><th>구분</th><th>Impact</th><th style={{ textAlign: 'right' }}>Pri</th><th>Policy</th><th>Phase</th><th>Run Time</th></tr></thead>
                       <tbody>
                         {s.extra.jobs.running.map((j, i) => (
@@ -895,19 +896,19 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
                           <tr key={`f${i}`}><td style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{j.job}</td><td><span className="badge red">실패</span></td><td colSpan={5} style={{ fontSize: 12 }}>{j.detail}</td></tr>
                         ))}
                       </tbody>
-                    </table>
+                    </STable>
                   </div>
                 )}
               {s.extra.jobs.recent.length > 0 && (
                 <>
                   <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>최근 잡 결과 {s.extra.jobs.recent.length}건</div>
                   <div className="table-wrap" style={{ maxHeight: '18vh', marginBottom: 12 }}>
-                    <table>
+                    <STable>
                       <thead><tr><th>시각</th><th>잡</th><th>결과</th></tr></thead>
                       <tbody>{s.extra.jobs.recent.map((j, i) => (
                         <tr key={i}><td style={{ whiteSpace: 'nowrap', fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{j.time}</td><td style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{j.job}</td><td><span className={`badge ${/succeeded/i.test(j.event) ? 'green' : 'red'}`}>{j.event}</span></td></tr>
                       ))}</tbody>
-                    </table>
+                    </STable>
                   </div>
                 </>
               )}
@@ -1415,7 +1416,7 @@ function CsvImport({ onClose, onDone }) {
             {!verified && <b style={{ color: 'var(--amber)', marginLeft: 8 }}>⚠ 내용이 변경됨 — 재검증 필요</b>}
           </div>
           <div className="table-wrap" style={{ maxHeight: '26vh' }}>
-            <table>
+            <STable>
               <thead><tr><th style={{ textAlign: 'right' }}>행</th><th>장비</th><th>host</th><th>타입</th><th>동작</th><th>비밀번호</th><th>문제</th></tr></thead>
               <tbody>
                 {check.report.map((r, i) => (
@@ -1430,7 +1431,7 @@ function CsvImport({ onClose, onDone }) {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </STable>
           </div>
         </div>
       )}

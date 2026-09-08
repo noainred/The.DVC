@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { fetchJson, postJson, usePolling } from '../../api.js';
 import { DataTable, Loading, ErrorBox, Modal } from '../../components/ui.jsx';
 import { Card } from './shared.jsx';
+import { STable } from '../../components/STable.jsx';
 
 
 // 바이트를 사람이 읽는 단위로.
@@ -99,7 +100,7 @@ function DbDetailModal({ f, health, onClose, onCheck, checking }) {
                 <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>{h.skipped.join(' · ')}</div>
               )}
               <div className="table-wrap" style={{ maxHeight: 260 }}>
-                <table>
+                <STable>
                   <thead><tr><th>테이블</th><th style={{ textAlign: 'right' }}>행 수</th><th style={{ textAlign: 'right' }}>인덱스</th><th>데이터 기간</th></tr></thead>
                   <tbody>
                     {(h.tables || []).map((t) => (
@@ -114,7 +115,7 @@ function DbDetailModal({ f, health, onClose, onCheck, checking }) {
                     ))}
                     {(h.tables || []).length === 0 && <tr><td colSpan={4} className="muted" style={{ padding: 12 }}>테이블 없음</td></tr>}
                   </tbody>
-                </table>
+                </STable>
               </div>
               <details style={{ marginTop: 10 }}>
                 <summary className="muted" style={{ fontSize: 12, cursor: 'pointer' }}>스키마(DDL) 보기</summary>
@@ -186,7 +187,7 @@ function DbLocationPanel() {
 
       {inv.files.length > 0 && (
         <div className="table-wrap" style={{ maxHeight: 200, marginBottom: 12 }}>
-          <table>
+          <STable>
             <thead><tr><th>대상</th><th>내용</th><th style={{ textAlign: 'right' }}>용량</th></tr></thead>
             <tbody>
               {inv.files.map((f) => (
@@ -197,7 +198,7 @@ function DbLocationPanel() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </STable>
         </div>
       )}
       <div className="muted" style={{ fontSize: 11.5, marginBottom: 12 }}>
@@ -258,7 +259,7 @@ sudo systemctl start ${service}`}
         <details>
           <summary className="muted" style={{ fontSize: 12, cursor: 'pointer' }}>생성된 스크립트 {d.scripts.length}개 · 저장 위치 <code>{d.migrationsDir}</code></summary>
           <div className="table-wrap" style={{ maxHeight: 180, marginTop: 8 }}>
-            <table>
+            <STable>
               <thead><tr><th>파일</th><th>종류</th><th style={{ textAlign: 'right' }}>크기</th><th>생성</th></tr></thead>
               <tbody>
                 {d.scripts.map((f) => (
@@ -270,7 +271,7 @@ sudo systemctl start ${service}`}
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </STable>
           </div>
         </details>
       )}
@@ -330,7 +331,7 @@ function HealthPanel({ report, busy, onRun }) {
             <Card label="경고" value={report.warningCount} accent={report.warningCount ? 'var(--amber)' : undefined} />
           </div>
           <div className="table-wrap" style={{ maxHeight: 320 }}>
-            <table>
+            <STable>
               <thead><tr><th>DB</th><th>정합성</th><th>FK</th><th>저널</th><th style={{ textAlign: 'right' }}>빈 페이지</th><th>경고</th></tr></thead>
               <tbody>
                 {(report.results || []).map((r) => (
@@ -347,7 +348,7 @@ function HealthPanel({ report, busy, onRun }) {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </STable>
           </div>
         </>
       )}

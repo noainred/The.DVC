@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, putJson, delJson } from '../../api.js';
 import { Loading, ErrorBox, Kpi, Modal } from '../../components/ui.jsx';
 import { resultSummary, ago } from './remoteCommand.js';
+import { STable } from '../../components/STable.jsx';
 
 /**
  * 특수기능 › 통합 계정 관리(v2.419).
@@ -48,7 +49,7 @@ export default function CredentialManager() {
         <button className="login-btn" onClick={() => setForm({ ...EMPTY })}>+ 계정 등록</button>
       </div>
       <div className="table-wrap">
-        <table>
+        <STable>
           <thead><tr><th>이름</th><th>종류</th><th>계정</th><th>사용 가능 법인</th><th>대상 호스트</th><th>키 지문</th><th>사용</th><th>변경</th><th></th></tr></thead>
           <tbody>
             {items.map((c) => (
@@ -70,7 +71,7 @@ export default function CredentialManager() {
             ))}
             {!items.length && <tr><td colSpan={9} className="muted">등록된 계정이 없습니다.</td></tr>}
           </tbody>
-        </table>
+        </STable>
       </div>
       {form && <CredForm form={form} agents={data.agents || []} onClose={() => setForm(null)} onSaved={() => { setForm(null); reload(); }} />}
       {test && <TestModal cred={test} rmaAgents={data.rmaAgents || []} onClose={() => { setTest(null); reload(); }} />}

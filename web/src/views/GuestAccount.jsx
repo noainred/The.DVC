@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, usePolling } from '../api.js';
 import { Loading } from '../components/ui.jsx';
+import { STable } from '../components/STable.jsx';
 
 /** 설정 → 게스트 계정 추가 — VMware Tools(게스트 작업)로 게스트 OS에 sudo 계정 추가. */
 export default function GuestAccount() {
@@ -76,7 +77,7 @@ export default function GuestAccount() {
           </div>
           {!vms ? <Loading /> : vms.length === 0 ? <div className="muted" style={{ fontSize: 12 }}>가동 중인 VM이 없습니다.</div> : (
             <div className="table-wrap" style={{ maxHeight: '40vh' }}>
-              <table><thead><tr><th></th><th>VM</th><th>Guest OS</th><th>VMware Tools</th><th>호스트</th></tr></thead>
+              <STable><thead><tr><th></th><th>VM</th><th>Guest OS</th><th>VMware Tools</th><th>호스트</th></tr></thead>
                 <tbody>{vms.map((v) => (
                   <tr key={v.id} style={{ opacity: v.toolsStatus === 'RUNNING' ? 1 : 0.5 }}>
                     <td><input type="checkbox" checked={sel.has(v.id)} disabled={v.toolsStatus !== 'RUNNING'} onChange={() => toggle(v.id)} /></td>
@@ -84,7 +85,7 @@ export default function GuestAccount() {
                     <td><span className={`badge ${v.toolsStatus === 'RUNNING' ? 'green' : 'gray'}`}>{v.toolsStatus === 'RUNNING' ? '가동' : '미실행'}</span></td>
                     <td className="muted" style={{ fontSize: 12 }}>{v.host}</td>
                   </tr>
-                ))}</tbody></table>
+                ))}</tbody></STable>
             </div>
           )}
         </div>
@@ -99,14 +100,14 @@ export default function GuestAccount() {
         <div className="card" style={{ padding: 14 }}>
           <div className="section-title" style={{ marginTop: 0, fontSize: 15 }}>결과 — 성공 {res.ok} · 실패 {res.fail}</div>
           <div className="table-wrap" style={{ maxHeight: '44vh' }}>
-            <table><thead><tr><th>VM</th><th>결과</th><th>상세</th></tr></thead>
+            <STable><thead><tr><th>VM</th><th>결과</th><th>상세</th></tr></thead>
               <tbody>{(res.results || []).map((r) => (
                 <tr key={r.vmId}>
                   <td><b>{r.name}</b></td>
                   <td>{r.ok ? <span className="badge green">성공</span> : <span className="badge red">실패</span>}</td>
                   <td style={{ fontSize: 12 }}>{r.ok ? <span className="muted">{(r.stdout || '').split('\n').slice(-1)[0]}</span> : <span className="badge red" style={{ whiteSpace: 'normal' }}>{r.error}</span>}</td>
                 </tr>
-              ))}</tbody></table>
+              ))}</tbody></STable>
           </div>
         </div>
       )}

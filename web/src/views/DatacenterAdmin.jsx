@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson, postJson, putJson, delJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
+import { STable } from '../components/STable.jsx';
 
 /**
  * DataCenter(법인) 관리 — vCenter의 상위 개념.
@@ -113,7 +114,7 @@ export default function DatacenterAdmin() {
         </div>
       )}
       <div className="table-wrap" style={{ marginBottom: 22 }}>
-        <table>
+        <STable>
           <thead><tr>
             <Th k="id" label="ID" /><Th k="name" label="이름" /><Th k="region" label="리전" />
             <Th k="count" label="vCenter 수" /><Th k="note" label="메모" /><th className="right">작업</th>
@@ -134,7 +135,7 @@ export default function DatacenterAdmin() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </STable>
       </div>
 
       {/* 1-b) DataCenter 표시 순서 지정 */}
@@ -146,7 +147,7 @@ export default function DatacenterAdmin() {
         <button className="login-btn" style={{ flex: 'none', padding: '8px 14px', opacity: dirtyCount ? 1 : 0.5 }} disabled={busy || !dirtyCount} onClick={saveAssign}>변경 저장{dirtyCount ? ` (${dirtyCount})` : ''}</button>
       </div>
       <div className="table-wrap">
-        <table>
+        <STable>
           <thead><tr><th>vCenter</th><th>현재 소속 DataCenter</th></tr></thead>
           <tbody>
             {vcs.length === 0 && <tr><td colSpan={2} className="center muted" style={{ padding: 24 }}>등록된 vCenter가 없습니다.</td></tr>}
@@ -167,7 +168,7 @@ export default function DatacenterAdmin() {
               );
             })}
           </tbody>
-        </table>
+        </STable>
       </div>
       {dcs.length === 0 && <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>먼저 위에서 DataCenter를 1개 이상 정의해야 vCenter를 할당할 수 있습니다.</div>}
     </>
@@ -208,7 +209,7 @@ function DatacenterOrderCard() {
         <>
           {msg && <div style={{ margin: '8px 0', padding: '8px 12px', borderRadius: 8, fontSize: 13, background: msg.ok ? 'rgba(34,197,94,.12)' : 'rgba(239,68,68,.12)', color: msg.ok ? '#4ade80' : '#f87171' }}>{msg.text}</div>}
           <div className="table-wrap" style={{ marginTop: 8, maxHeight: '44vh' }}>
-            <table>
+            <STable>
               <thead><tr><th style={{ width: 50 }}>순서</th><th>이름</th><th>ID</th><th>리전</th><th className="right">이동</th></tr></thead>
               <tbody>
                 {list.length === 0 && <tr><td colSpan={5} className="center muted" style={{ padding: 18 }}>등록된 DataCenter가 없습니다.</td></tr>}
@@ -225,7 +226,7 @@ function DatacenterOrderCard() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </STable>
           </div>
           <div className="flex gap" style={{ marginTop: 10 }}>
             <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={save}>순서 저장</button>

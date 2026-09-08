@@ -7,6 +7,7 @@ import {
 } from 'recharts';
 // 표시 포맷터는 util/fmt.js 로 통합(v2.319 모듈화 #9 — 본문 동일 이동, 기능 무변)
 import { fmtAgo, num, fmtDate, dec1, fmtW, fmtWh, fmtKg } from '../util/fmt.js';
+import { STable } from '../components/STable.jsx';
 
 function Kpi({ label, value, sub, color }) {
   return (
@@ -66,10 +67,10 @@ function FinOps() {
         <div className="card" style={{ padding: 14, flex: '2 1 380px' }}>
           <div className="section-title" style={{ marginTop: 0 }}>전력 상위 호스트</div>
           <div className="table-wrap" style={{ maxHeight: '46vh' }}>
-            <table><thead><tr><th>호스트</th><th>vCenter</th><th>모델</th><th style={{ textAlign: 'right' }}>W</th></tr></thead>
+            <STable><thead><tr><th>호스트</th><th>vCenter</th><th>모델</th><th style={{ textAlign: 'right' }}>W</th></tr></thead>
               <tbody>{d.topHosts.map((h) => (
                 <tr key={h.host}><td><b>{h.host}</b></td><td className="muted">{h.vcenterId}</td><td className="muted" style={{ fontSize: 12 }}>{h.model || '—'}</td><td style={{ textAlign: 'right' }}>{fmtW(h.watts)}</td></tr>
-              ))}</tbody></table>
+              ))}</tbody></STable>
           </div>
         </div>
         <div className="card" style={{ padding: 14, flex: '1 1 260px' }}>
@@ -112,7 +113,7 @@ function Anomaly() {
           <div className="flex between"><b>{fam.label}</b><span className={`badge ${fam.count ? 'red' : 'green'}`}>{fam.count}건</span></div>
           {fam.items.length > 0 && (
             <div className="table-wrap" style={{ maxHeight: '36vh', marginTop: 6 }}>
-              <table><thead><tr><th>엔티티</th><th style={{ textAlign: 'right' }}>현재값</th><th style={{ textAlign: 'right' }}>평소</th><th style={{ textAlign: 'right' }}>Z</th><th>시각</th></tr></thead>
+              <STable><thead><tr><th>엔티티</th><th style={{ textAlign: 'right' }}>현재값</th><th style={{ textAlign: 'right' }}>평소</th><th style={{ textAlign: 'right' }}>Z</th><th>시각</th></tr></thead>
                 <tbody>{fam.items.map((it) => (
                   <tr key={it.key}>
                     <td style={{ fontSize: 12 }}>{it.key}</td>
@@ -121,7 +122,7 @@ function Anomaly() {
                     <td style={{ textAlign: 'right' }}><span className="badge red">{it.direction === 'high' ? '▲' : '▼'} {Math.abs(it.z)}</span></td>
                     <td className="muted" style={{ fontSize: 11 }}>{fmtAgo(it.at)}</td>
                   </tr>
-                ))}</tbody></table>
+                ))}</tbody></STable>
             </div>
           )}
         </div>
@@ -182,18 +183,18 @@ function Forecast() {
         {(d?.datastores || []).length === 0
           ? <div className="muted" style={{ fontSize: 12 }}>아직 추세를 낼 만큼 시계열이 쌓이지 않았습니다(며칠 후 표시).</div>
           : <div className="table-wrap" style={{ maxHeight: '46vh' }}>
-            <table><thead><tr><th>데이터스토어</th><th>vCenter</th><th style={{ textAlign: 'right' }}>사용률</th><th style={{ textAlign: 'right' }}>증가율</th><th style={{ textAlign: 'right' }}>포화까지</th><th>예상일</th></tr></thead>
-              <tbody>{d.datastores.map(dsRow)}</tbody></table>
+            <STable><thead><tr><th>데이터스토어</th><th>vCenter</th><th style={{ textAlign: 'right' }}>사용률</th><th style={{ textAlign: 'right' }}>증가율</th><th style={{ textAlign: 'right' }}>포화까지</th><th>예상일</th></tr></thead>
+              <tbody>{d.datastores.map(dsRow)}</tbody></STable>
           </div>}
       </div>
       {(d?.gpu || []).length > 0 && (
         <div className="card" style={{ padding: 14 }}>
           <div className="section-title" style={{ marginTop: 0 }}>GPU 사용률 추세(vCenter)</div>
-          <div className="table-wrap"><table><thead><tr><th>vCenter</th><th style={{ textAlign: 'right' }}>현재</th><th style={{ textAlign: 'right' }}>증가율</th><th style={{ textAlign: 'right' }}>포화까지</th><th>예상일</th></tr></thead>
+          <div className="table-wrap"><STable><thead><tr><th>vCenter</th><th style={{ textAlign: 'right' }}>현재</th><th style={{ textAlign: 'right' }}>증가율</th><th style={{ textAlign: 'right' }}>포화까지</th><th>예상일</th></tr></thead>
             <tbody>{d.gpu.map((g) => (
               <tr key={g.vcenterId}><td><b>{g.vcenterId}</b></td><td style={{ textAlign: 'right' }}>{g.current}%</td><td style={{ textAlign: 'right' }}>{g.slopePerDay > 0 ? '+' : ''}{g.slopePerDay}%/일</td>
                 <td style={{ textAlign: 'right' }}>{g.daysToLimit == null ? '안정' : <span className="badge amber">{g.daysToLimit}일</span>}</td><td className="muted">{g.etaTs ? fmtDate(g.etaTs) : '—'}</td></tr>
-            ))}</tbody></table></div>
+            ))}</tbody></STable></div>
         </div>
       )}
       </>)}
@@ -225,17 +226,17 @@ function Security() {
       </div>
       <div className="card" style={{ padding: 14, marginBottom: 12 }}>
         <div className="section-title" style={{ marginTop: 0 }}>vCenter</div>
-        <div className="table-wrap"><table><thead><tr><th>vCenter</th><th>버전</th><th>빌드</th><th>상태</th><th>취약점/EOL</th></tr></thead>
+        <div className="table-wrap"><STable><thead><tr><th>vCenter</th><th>버전</th><th>빌드</th><th>상태</th><th>취약점/EOL</th></tr></thead>
           <tbody>{(d?.vcenters || []).map((v) => (
             <tr key={v.id}><td><b>{v.name}</b></td><td>{v.version}</td><td className="muted">{v.build || '—'}</td><td>{badge(v.worst)}</td>{advCell(v)}</tr>
-          ))}</tbody></table></div>
+          ))}</tbody></STable></div>
       </div>
       <div className="card" style={{ padding: 14 }}>
         <div className="section-title" style={{ marginTop: 0 }}>ESXi 호스트 ({(d?.hosts || []).length})</div>
-        <div className="table-wrap" style={{ maxHeight: '48vh' }}><table><thead><tr><th>호스트</th><th>vCenter</th><th>버전</th><th>빌드</th><th>상태</th><th>취약점/EOL</th></tr></thead>
+        <div className="table-wrap" style={{ maxHeight: '48vh' }}><STable><thead><tr><th>호스트</th><th>vCenter</th><th>버전</th><th>빌드</th><th>상태</th><th>취약점/EOL</th></tr></thead>
           <tbody>{(d?.hosts || []).map((h) => (
             <tr key={h.id}><td><b>{h.name}</b></td><td className="muted">{h.vcenterId}</td><td>{h.version}</td><td className="muted">{h.build || '—'}</td><td>{badge(h.worst)}</td>{advCell(h)}</tr>
-          ))}</tbody></table></div>
+          ))}</tbody></STable></div>
       </div>
     </div>
   );
@@ -332,19 +333,19 @@ function Incidents() {
       {(d?.open || []).length > 0 && (
         <div className="card" style={{ padding: 14, marginBottom: 12 }}>
           <div className="section-title" style={{ marginTop: 0 }}>진행중 인시던트</div>
-          <div className="table-wrap"><table><thead><tr><th>심각도</th><th>제목</th><th>상세</th><th style={{ textAlign: 'right' }}>경과</th></tr></thead>
+          <div className="table-wrap"><STable><thead><tr><th>심각도</th><th>제목</th><th>상세</th><th style={{ textAlign: 'right' }}>경과</th></tr></thead>
             <tbody>{d.open.map((o) => (
               <tr key={o.key}><td>{sev(o.severity)}</td><td><b>{o.title}</b></td><td className="muted" style={{ fontSize: 12 }}>{o.detail}</td><td style={{ textAlign: 'right' }}>{o.ageMin}분</td></tr>
-            ))}</tbody></table></div>
+            ))}</tbody></STable></div>
         </div>
       )}
       <div className="card" style={{ padding: 14 }}>
         <div className="section-title" style={{ marginTop: 0 }}>타임라인</div>
         {(d?.timeline || []).length === 0 ? <div className="muted" style={{ fontSize: 12 }}>기록된 이벤트가 없습니다.</div>
-          : <div className="table-wrap" style={{ maxHeight: '48vh' }}><table><thead><tr><th>시각</th><th>구분</th><th>심각도</th><th>제목</th></tr></thead>
+          : <div className="table-wrap" style={{ maxHeight: '48vh' }}><STable><thead><tr><th>시각</th><th>구분</th><th>심각도</th><th>제목</th></tr></thead>
             <tbody>{d.timeline.map((e, i) => (
               <tr key={i}><td className="muted" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{new Date(e.ts).toLocaleString('ko-KR')}</td><td style={{ fontSize: 12 }}>{e.kind === 'resolved' ? '해소' : '발생'}</td><td>{sev(e.severity)}</td><td style={{ fontSize: 12 }}>{e.title}</td></tr>
-            ))}</tbody></table></div>}
+            ))}</tbody></STable></div>}
       </div>
     </div>
   );

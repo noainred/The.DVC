@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
+import { STable } from '../../components/STable.jsx';
 
 /**
  * 성능점검 로그 분석 — CSV 로그를 기간·버킷(시간/일/주/월/분기/반기/연간)으로 집계해 본다.
@@ -134,7 +135,7 @@ export default function AnalyzeTab() {
           <div className="card" style={{ padding: 14 }}>
             <b>구간별 ({buckets.length})</b>
             <div className="table-wrap" style={{ maxHeight: '52vh', marginTop: 8 }}>
-              <table>
+              <STable>
                 <thead>
                   <tr>
                     <th style={{ width: 120 }}>구간</th>
@@ -174,7 +175,7 @@ export default function AnalyzeTab() {
                     );
                   })}
                 </tbody>
-              </table>
+              </STable>
             </div>
             <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
               가용률 = 정상 ÷ 기록. '상태 변화만 기록' 모드 구간은 기록 자체가 전이 시점뿐이라

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { postJson, usePolling } from '../api.js';
 import { VmLink, Loading } from '../components/ui.jsx';
+import { STable } from '../components/STable.jsx';
 
 const GPU_MODE = [['', '전체'], ['any', 'GPU 있음'], ['passthrough', '패스쓰루'], ['vgpu', 'vGPU'], ['none', 'GPU 없음']];
 
@@ -14,7 +15,7 @@ function Field({ f, setF, k, ph, w = 130 }) {
 function VmTable({ list, evidence }) {
   return (
     <div className="table-wrap" style={{ maxHeight: '46vh' }}>
-      <table><thead><tr><th>VM</th><th>vCenter</th><th>호스트</th><th>Guest OS</th><th>IP</th><th>게이트웨이</th><th>GPU</th><th>전원</th>{evidence && <th>증거</th>}</tr></thead>
+      <STable><thead><tr><th>VM</th><th>vCenter</th><th>호스트</th><th>Guest OS</th><th>IP</th><th>게이트웨이</th><th>GPU</th><th>전원</th>{evidence && <th>증거</th>}</tr></thead>
         <tbody>{(list || []).map((v) => (
           <tr key={v.id}>
             <td><VmLink name={v.name} vcenterId={v.vcenterId} ip={v.ipAddress} /></td>
@@ -27,7 +28,7 @@ function VmTable({ list, evidence }) {
             <td>{v.powerState === 'POWERED_ON' ? <span className="badge green">On</span> : <span className="badge gray">Off</span>}</td>
             {evidence && <td style={{ fontSize: 11, maxWidth: 280 }}><span className="muted">{v.evidence}</span></td>}
           </tr>
-        ))}</tbody></table>
+        ))}</tbody></STable>
     </div>
   );
 }
@@ -139,7 +140,7 @@ export default function DeepSearch() {
           {scanItems.length === 0 ? (
             <div className="muted" style={{ fontSize: 12 }}>스캔 결과에서 일치하는 IP가 없습니다. (IP/서브넷/검색어 조건이 있어야 하며, IP 스캔이 실행돼 결과가 있어야 합니다)</div>
           ) : (
-            <table className="data-table" style={{ width: '100%', fontSize: 12.5 }}>
+            <STable className="data-table" style={{ width: '100%', fontSize: 12.5 }}>
               <thead><tr>
                 <th style={{ textAlign: 'left' }}>IP</th><th style={{ textAlign: 'left' }}>호스트명</th>
                 <th style={{ textAlign: 'left' }}>열린 포트</th><th style={{ textAlign: 'left' }}>서비스</th>
@@ -155,7 +156,7 @@ export default function DeepSearch() {
                   <td className="muted">{s.lastSeen ? new Date(s.lastSeen).toLocaleString() : '—'}</td>
                 </tr>
               ))}</tbody>
-            </table>
+            </STable>
           )}
         </div>
       )}

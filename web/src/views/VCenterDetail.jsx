@@ -9,6 +9,7 @@ import { parseTokens, entityMatches, notesSnippet, sumVmResources, fmtGb } from 
 import { allocByHost, countByHost, virtSum as virtSumOf } from './vcdVirt.js';
 // '전체 현황' 평면 표/CSV — 트리를 펼치지 않고 모든 클러스터·호스트를 한 번에(v2.335).
 import { buildOverviewRows, overviewCsv, OVERVIEW_COLUMNS } from './vcdOverview.js';
+import { STable } from '../components/STable.jsx';
 
 const VIEWS = [
   { k: 'hosts', label: '호스트 및 클러스터', icon: '🖥️' },
@@ -580,7 +581,7 @@ function OverviewTable({ rows }) {
   };
   return (
     <div className="table-wrap card" style={{ maxHeight: '66vh', padding: 0 }}>
-      <table>
+      <STable>
         <thead>
           <tr>{OVERVIEW_COLUMNS.map((c) => <th key={c.key} style={{ textAlign: c.num ? 'right' : 'left', whiteSpace: 'nowrap' }}>{c.label}</th>)}</tr>
         </thead>
@@ -595,7 +596,7 @@ function OverviewTable({ rows }) {
             </tr>
           ))}
         </tbody>
-      </table>
+      </STable>
     </div>
   );
 }
@@ -763,7 +764,7 @@ function VCenterCompare({ site, onClose }) {
         {!other ? (
           <div className="muted" style={{ fontSize: 13, padding: 12 }}>오른쪽에서 비교할 vCenter를 선택하세요.</div>
         ) : (
-          <table className="data-table" style={{ width: '100%', fontSize: 13 }}>
+          <STable className="data-table" style={{ width: '100%', fontSize: 13 }}>
             <thead><tr><th style={{ textAlign: 'left' }}>지표</th><th style={{ textAlign: 'right' }}>{site.name}</th><th style={{ textAlign: 'right' }}>{other.name}</th><th style={{ textAlign: 'right' }}>차이</th></tr></thead>
             <tbody>
               {CMP_METRICS.map((mt) => {
@@ -779,7 +780,7 @@ function VCenterCompare({ site, onClose }) {
                 );
               })}
             </tbody>
-          </table>
+          </STable>
         )}
         <div className="muted" style={{ fontSize: 11, marginTop: 10 }}>초록=더 양호(사용률·알람이 낮은 쪽), 주황=상대적으로 높음. 규모 지표(호스트/VM/용량)는 색 없이 차이만 표시.</div>
       </div>

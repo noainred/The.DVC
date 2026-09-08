@@ -8,6 +8,7 @@ import { Loading, ErrorBox, Kpi } from '../../components/ui.jsx';
 import EscClose from '../../components/EscClose.jsx';
 import { CsvExportModal, CsvImportModal } from '../../components/CsvBulkModals.jsx'; // CSV 일괄 관리(v2.341)
 import { fmtAgo } from '../../util/fmt.js';
+import { STable } from '../../components/STable.jsx';
 
 // 바이트 → 사람이 읽는 용량(TB/GB). 합산값이 크므로 TB 우선.
 const fmtBytes = (b) => {
@@ -143,7 +144,7 @@ export default function BmStorageTool() {
           <b style={{ fontSize: 13 }}>그룹별 합산</b>
           <span className="muted" style={{ fontSize: 11.5, marginLeft: 8 }}>서버가 여러 그룹(최대 3개)에 속하면 각 그룹에 모두 합산됩니다 — 그룹 합의 총계는 전체 KPI 보다 클 수 있음</span>
           <div className="table-wrap" style={{ marginTop: 8 }}>
-            <table>
+            <STable>
               <thead><tr><th>그룹</th><th style={{ textAlign: 'right' }}>서버</th><th style={{ textAlign: 'right' }}>총 용량</th><th style={{ textAlign: 'right' }}>사용량</th><th style={{ textAlign: 'right' }}>사용 가능</th><th>사용률</th></tr></thead>
               <tbody>
                 {groups.map((g) => (
@@ -157,7 +158,7 @@ export default function BmStorageTool() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </STable>
           </div>
         </div>
       )}
@@ -168,7 +169,7 @@ export default function BmStorageTool() {
         {servers.length === 0
           ? <div className="muted" style={{ fontSize: 13, marginTop: 8 }}>등록된 서버가 없습니다. '+ 서버 추가'로 SSH 접속 정보와 측정할 마운트 포인트를 등록하세요.</div>
           : <div className="table-wrap" style={{ marginTop: 8 }}>
-            <table>
+            <STable>
               <thead><tr><th>이름</th><th>호스트</th><th>그룹</th><th>수집 주체</th><th style={{ textAlign: 'right' }}>마운트</th><th style={{ textAlign: 'right' }}>총 용량</th><th style={{ textAlign: 'right' }}>사용량</th><th style={{ textAlign: 'right' }}>사용 가능</th><th>사용률</th><th>최근 수집</th><th>작업</th></tr></thead>
               <tbody>
                 {servers.map((s) => (
@@ -198,7 +199,7 @@ export default function BmStorageTool() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </STable>
           </div>}
       </div>
 

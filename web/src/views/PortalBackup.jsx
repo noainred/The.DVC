@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { fetchJson, postJson, putJson, delJson, getToken } from '../api.js';
 import { Loading, ErrorBox, Modal } from '../components/ui.jsx';
 import { fmtBytes, fmtTime } from '../util/fmt.js';
+import { STable } from '../components/STable.jsx';
 
 // fmtBytes/fmtTime 은 util/fmt.js 로 통합(v2.319 — 동일 구현 복붙 제거)
 const REASON = { manual: '수동', schedule: '정기', change: '변경감지', startup: '시작', 'pre-restore': '복원전' };
@@ -104,7 +105,7 @@ export default function PortalBackup() {
         <div className="section-title" style={{ marginTop: 0, fontSize: 15 }}>백업 목록 ({d.backups.length})</div>
         {d.backups.length === 0 ? <div className="muted" style={{ fontSize: 12 }}>백업이 없습니다. ‘지금 백업’으로 첫 백업을 생성하세요.</div> : (
           <div className="table-wrap" style={{ maxHeight: '46vh' }}>
-            <table><thead><tr><th>파일</th><th>시각</th><th style={{ textAlign: 'right' }}>크기</th><th>작업</th></tr></thead>
+            <STable><thead><tr><th>파일</th><th>시각</th><th style={{ textAlign: 'right' }}>크기</th><th>작업</th></tr></thead>
               <tbody>
                 {d.backups.map((b) => (
                   <tr key={b.name}>
@@ -120,7 +121,7 @@ export default function PortalBackup() {
                     </td>
                   </tr>
                 ))}
-              </tbody></table>
+              </tbody></STable>
           </div>
         )}
       </div>

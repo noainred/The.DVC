@@ -6,6 +6,7 @@
 import React, { useRef, useState } from 'react';
 import { postJson, downloadFile } from '../api.js';
 import EscClose from './EscClose.jsx';
+import { STable } from './STable.jsx';
 
 /**
  * 내보내기 모달. exportPath 로 다운로드하고, secrets 체크 시 `?secrets=1`(또는 secretsQuery)을
@@ -107,7 +108,7 @@ export function CsvImportModal({ title, description, importPath, samplePath, col
               {!verified && <b style={{ color: 'var(--amber)', marginLeft: 8 }}>⚠ 내용이 변경됨 — 재검증 필요</b>}
             </div>
             <div className="table-wrap" style={{ maxHeight: '26vh' }}>
-              <table>
+              <STable>
                 <thead><tr><th style={{ textAlign: 'right' }}>행</th>{columns.map((c) => <th key={c.key} style={{ textAlign: c.align || 'left' }}>{c.label}</th>)}<th>동작</th><th>문제</th></tr></thead>
                 <tbody>
                   {check.report.map((r, i) => (
@@ -119,7 +120,7 @@ export function CsvImportModal({ title, description, importPath, samplePath, col
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </STable>
             </div>
             {/* 덮어쓰기 확인 — 명시 체크 없이는 기존 항목을 건드리지 않는다(서버도 강제). */}
             {verified && check.summary.overwrite > 0 && !result && (

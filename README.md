@@ -448,6 +448,8 @@ HostMonitor 의 RMA(Remote Monitoring Agent) 를 참고한 **엣지 별도 프�
   (봉인 저장·비밀 무반환·OTP 재인증·법인/대상 호스트 사용 범위·감사). RMA `ssh-exec` 명령·`ssh` 점검은 '저장된 계정 사용'을
   켜면 그 계정을, 끄면 1회 입력 계정을 쓴다. 비밀은 엣지가 실행 직전 브로커(`/api/central/rma-credential`)에서 받아 메모리에서만
   사용한다. 엣지 `RMA_ALLOW_SSH=true` + `RMA_SSH_TARGETS` 필요.
+- **모든 표 제목 클릭 정렬(v2.422)**: 웹의 표 181개를 공용 `components/STable.jsx` 로 통일 — 헤더 클릭 시 셀 내용(숫자·단위·%·
+  날짜 인식)으로 정렬(오름 → 내림 → 해제). 자체 정렬 표(onClick th/컴포넌트 th)는 자동 제외. 새 표는 `<STable>` 을 쓴다.
 - **SAN 스위치 연결 테스트 진단(v2.421)**: 등록 화면의 '연결 테스트'가 비동기 실행(`POST /tools/sanswitch/test` → runId,
   `GET /tools/sanswitch/test/:id` 1초 폴링)으로 바뀌어 DNS → TCP(10초 사전 점검) → SSH 핸드셰이크(협상 알고리즘) → 인증 →
   명령 실행 단계별 추적 로그를 **실시간으로** 보여주고, 실패 시 단계·사유·원인 안내(hint)를 붙인다. '🔍 자세히 테스트'는

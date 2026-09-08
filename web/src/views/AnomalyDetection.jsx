@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson, putJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
+import { STable } from '../components/STable.jsx';
 
 /**
  * 설정 → 이상동작 탐지 — 짧은 시간(직전 수집 주기) 안에 다수 VM이 동시에 전원 OFF 되면
@@ -70,7 +71,7 @@ export default function AnomalyDetection() {
         <b style={{ fontSize: 14 }}>vCenter별 임계</b>
         {vcs.length === 0 ? <div className="muted" style={{ fontSize: 13, marginTop: 8 }}>등록된 vCenter가 없습니다.</div> : (
           <div className="table-wrap" style={{ marginTop: 8 }}>
-            <table><thead><tr><th>법인 / vCenter</th><th>지역</th><th style={{ textAlign: 'right' }}>동시 다운 임계(대)</th></tr></thead>
+            <STable><thead><tr><th>법인 / vCenter</th><th>지역</th><th style={{ textAlign: 'right' }}>동시 다운 임계(대)</th></tr></thead>
               <tbody>{vcs.map((vc) => (
                 <tr key={vc.id}>
                   <td><b>{vc.name || vc.id}</b><div className="muted" style={{ fontSize: 11 }}>{vc.id}</div></td>
@@ -82,7 +83,7 @@ export default function AnomalyDetection() {
                       onChange={(e) => setPer(vc.id, e.target.value)} />
                   </td>
                 </tr>
-              ))}</tbody></table>
+              ))}</tbody></STable>
           </div>
         )}
       </div>

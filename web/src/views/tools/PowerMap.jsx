@@ -4,6 +4,7 @@ import { usePolling } from '../../api.js';
 import { Loading, ErrorBox, ResultCount, SearchBox } from '../../components/ui.jsx';
 import { Card, fmtKwh, fmtWatts, useTool } from './shared.jsx';
 import { csvCell } from '../../util/csv.js'; // 수식 인젝션 가드 포함 공통 셀 이스케이프
+import { STable } from '../../components/STable.jsx';
 
 
 /** 가로 막대(비중 표시) — recharts 없이 CSS만으로. */
@@ -86,7 +87,7 @@ export function PowerMap({ scope }) {
                     <span className="muted">월 {won(d.costMonth)} · 연 {won(d.costYear)}</span>
                   </div>
                 </div>
-                <table style={{ width: '100%', fontSize: 13 }}>
+                <STable style={{ width: '100%', fontSize: 13 }}>
                   <thead><tr>
                     <th style={{ textAlign: 'left' }}>2차 분류</th><th style={{ textAlign: 'right' }}>서버</th>
                     <th style={{ textAlign: 'right' }}>현재 전력</th><th style={{ width: 160 }}>비중</th>
@@ -108,7 +109,7 @@ export function PowerMap({ scope }) {
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </STable>
               </div>
             );
           })}
@@ -118,7 +119,7 @@ export function PowerMap({ scope }) {
 
       {view === 'vcenter' && (
         <div className="table-wrap" style={{ maxHeight: '60vh' }}>
-          <table>
+          <STable>
             <thead><tr><th>법인(vCenter)</th><th>지역</th><th style={{ textAlign: 'right' }}>서버</th><th style={{ textAlign: 'right' }}>현재 전력</th><th style={{ width: 160 }}>비중</th><th style={{ textAlign: 'right' }}>월 요금</th><th style={{ textAlign: 'right' }}>연 요금</th></tr></thead>
             <tbody>
               {data.byVcenter.map((r) => (
@@ -133,13 +134,13 @@ export function PowerMap({ scope }) {
               ))}
               {!data.byVcenter.length && <tr><td colSpan={7} className="center muted" style={{ padding: 20 }}>측정된 전력이 없습니다.</td></tr>}
             </tbody>
-          </table>
+          </STable>
         </div>
       )}
 
       {view === 'model' && (
         <div className="table-wrap" style={{ maxHeight: '60vh' }}>
-          <table>
+          <STable>
             <thead><tr><th>모델</th><th style={{ textAlign: 'right' }}>서버</th><th style={{ textAlign: 'right' }}>현재 전력</th><th style={{ width: 160 }}>비중</th><th style={{ textAlign: 'right' }}>대당 평균</th><th style={{ textAlign: 'right' }}>연 요금</th></tr></thead>
             <tbody>
               {data.byModel.map((r) => (
@@ -154,13 +155,13 @@ export function PowerMap({ scope }) {
               ))}
               {!data.byModel.length && <tr><td colSpan={6} className="center muted" style={{ padding: 20 }}>모델 정보가 없습니다.</td></tr>}
             </tbody>
-          </table>
+          </STable>
         </div>
       )}
 
       {view === 'region' && (
         <div className="table-wrap" style={{ maxHeight: '60vh' }}>
-          <table>
+          <STable>
             <thead><tr><th>지역</th><th style={{ textAlign: 'right' }}>vCenter</th><th style={{ textAlign: 'right' }}>서버</th><th style={{ textAlign: 'right' }}>현재 전력</th><th style={{ textAlign: 'right' }}>연 요금</th></tr></thead>
             <tbody>
               {data.byRegion.map((r) => (
@@ -173,7 +174,7 @@ export function PowerMap({ scope }) {
               ))}
               {!data.byRegion.length && <tr><td colSpan={5} className="center muted" style={{ padding: 20 }}>—</td></tr>}
             </tbody>
-          </table>
+          </STable>
         </div>
       )}
 
@@ -184,7 +185,7 @@ export function PowerMap({ scope }) {
           </div>
           <ResultCount total={(data.servers || []).length} shown={servers.length} label="서버" filtered={!!term} />
           <div className="table-wrap" style={{ maxHeight: '60vh' }}>
-            <table>
+            <STable>
               <thead><tr><th>서버</th><th>모델</th><th>서비스태그</th><th>법인(vCenter)</th><th>수집</th><th style={{ textAlign: 'right' }}>현재 전력</th></tr></thead>
               <tbody>
                 {servers.map((s, i) => (
@@ -199,7 +200,7 @@ export function PowerMap({ scope }) {
                 ))}
                 {!servers.length && <tr><td colSpan={6} className="center muted" style={{ padding: 20 }}>표시할 서버가 없습니다.</td></tr>}
               </tbody>
-            </table>
+            </STable>
           </div>
         </>
       )}

@@ -3,6 +3,7 @@
 // (vcenters 는 현재 바디에서 미사용이지만 셸 호출부와의 계약을 바꾸지 않기 위해 유지 — 정리는 별도 변경으로.)
 import React, { useState } from 'react';
 import { ScanJobLogModal } from './ScanJobLogModal.jsx';
+import { STable } from '../../components/STable.jsx';
 
 // ---- 스캔 현황(주기 스캐너 + 진행 중/최근 위임 잡) --------------------------
 // iDRAC 스캔이 지금 어디까지 진행됐는지 어디서든 한눈에 확인. 주기 스캐너 상태 + 진행 중·최근
@@ -107,7 +108,7 @@ export function IdracScanJobs({ data, vcenters, datacenters = [], busy, onRefres
         </div>
       ) : (
         <div className="table-wrap">
-          <table>
+          <STable>
             <thead><tr>
               <th>상태</th><th>유형</th><th>대상</th><th>에이전트</th><th>진행/결과</th><th>시각</th><th>로그</th>
             </tr></thead>
@@ -128,7 +129,7 @@ export function IdracScanJobs({ data, vcenters, datacenters = [], busy, onRefres
                 </tr>
               ))}
             </tbody>
-          </table>
+          </STable>
         </div>
       )}
 

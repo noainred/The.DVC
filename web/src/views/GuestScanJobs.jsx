@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson, putJson, postJson, delJson, usePolling } from '../api.js';
+import { STable } from '../components/STable.jsx';
 
 const fmtTime = (ts) => (ts ? new Date(ts).toLocaleString('ko-KR') : '—');
 const TYPE_LBL = { 'login-fails': '로그인 실패', 'net-issues': '네트워크 이슈' };
@@ -26,7 +27,7 @@ export default function GuestScanJobs({ type }) {
       </div>
       <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>지정한 주기로 vCenter별·OS별 게스트 OS를 조사해 기록·저장합니다(VMware Tools 가동 VM 대상). 게스트 계정 비우면 GPU 게스트 설정 계정 사용.</p>
       {!jobs ? <div className="muted">불러오는 중…</div> : jobs.length === 0 ? <div className="muted" style={{ fontSize: 12 }}>등록된 조사가 없습니다.</div> : (
-        <div className="table-wrap"><table><thead><tr><th>이름</th><th>vCenter</th><th>OS</th><th>주기</th><th>최근</th><th>건수</th><th>상태</th><th>작업</th></tr></thead>
+        <div className="table-wrap"><STable><thead><tr><th>이름</th><th>vCenter</th><th>OS</th><th>주기</th><th>최근</th><th>건수</th><th>상태</th><th>작업</th></tr></thead>
           <tbody>{jobs.map((j) => (
             <tr key={j.id}>
               <td><b>{j.name}</b></td><td style={{ fontSize: 12 }}>{j.vcenterId || '—'}</td><td style={{ fontSize: 12 }}>{j.os}</td><td style={{ fontSize: 12 }}>{j.intervalMin}분</td>
@@ -39,7 +40,7 @@ export default function GuestScanJobs({ type }) {
                 <button className="tab" style={{ padding: '3px 8px', fontSize: 11, color: 'var(--red)' }} onClick={() => del(j.id)}>삭제</button>
               </div></td>
             </tr>
-          ))}</tbody></table></div>
+          ))}</tbody></STable></div>
       )}
       {form && (
         <div className="card" style={{ padding: 12, marginTop: 10, border: '1px solid var(--accent,#2563eb)' }}>

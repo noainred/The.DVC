@@ -4,6 +4,7 @@ import { fetchJson, postJson, getToken } from '../../api.js';
 import { DataTable, Loading, ErrorBox, UsageCell, Modal, VmLink } from '../../components/ui.jsx';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Brush } from 'recharts';
 import { Card, fmtTrendTick, saveResponseAsFile, useTool } from './shared.jsx';
+import { STable } from '../../components/STable.jsx';
 
 
 const GPU_MODE = { vgpu: ['vGPU', 'green'], passthrough: ['패스쓰루', 'amber'], vsga: ['vSGA', 'blue'] };
@@ -41,7 +42,7 @@ function GpuVmsModal({ title, params, onClose }) {
         <>
           <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>GPU 할당 VM <b>{d.total}</b>개 · 어떤 VM이 어떤 방식/프로파일로 GPU를 사용하는지 보여줍니다. <span style={{ opacity: 0.8 }}>사용률·메모리는 게스트 OS(nvidia-smi) 수집값 — 전원 ON·VMware Tools·GPU 게스트 수집 계정이 있어야 표시됩니다(패스쓰루·vGPU 공통).</span></div>
           <div className="table-wrap">
-            <table>
+            <STable>
               <thead><tr><th>VM</th><th>법인</th><th>호스트</th><th>GPU 모델</th><th>사용 방식</th><th>프로파일</th><th style={{ textAlign: 'right' }}>장수</th><th style={{ textAlign: 'right' }}>사용률</th><th style={{ textAlign: 'right' }}>메모리</th><th>전원</th></tr></thead>
               <tbody>
                 {d.vms.length === 0 && <tr><td colSpan={10} className="center muted" style={{ padding: 20 }}>GPU 할당 VM이 없습니다.</td></tr>}
@@ -60,7 +61,7 @@ function GpuVmsModal({ title, params, onClose }) {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </STable>
           </div>
         </>
       )}

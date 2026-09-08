@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, putJson, delJson, downloadFile } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import EscClose from '../components/EscClose.jsx';
+import { STable } from '../components/STable.jsx';
 
 const EMPTY = { id: '', name: '', datacenter: '', url: 'http://', token: '', enabled: true };
 
@@ -324,7 +325,7 @@ export default function Collectors() {
 
         {(agentTok?.tokens || []).length > 0 && (
           <div className="table-wrap" style={{ marginTop: 10 }}>
-            <table>
+            <STable>
               <thead><tr><th>엣지(에이전트)</th><th>발급</th><th>마지막 사용</th><th className="right">작업</th></tr></thead>
               <tbody>
                 {agentTok.tokens.map((t) => (
@@ -339,7 +340,7 @@ export default function Collectors() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </STable>
           </div>
         )}
 
@@ -365,7 +366,7 @@ export default function Collectors() {
       </div>
 
       <div className="table-wrap">
-        <table>
+        <STable>
           <thead><tr>
             {th('id', 'ID')}{th('name', '이름')}{th('datacenter', '데이터센터')}{th('url', 'URL')}{th('state', '상태')}{th('hosts', '호스트')}{th('version', '버전')}{th('sync', '최근 동기화')}{th('enabled', '수집')}<th className="right">작업</th>
           </tr></thead>
@@ -407,7 +408,7 @@ export default function Collectors() {
               );
             })}
           </tbody>
-        </table>
+        </STable>
       </div>
 
       {form && (
@@ -519,7 +520,7 @@ export default function Collectors() {
                   {pwResult.central && ` · 중앙 포탈 ${pwResult.central.ok ? '변경됨' : `실패(${pwResult.central.reason})`}`}
                 </div>
                 <div className="table-wrap" style={{ maxHeight: '40vh' }}>
-                  <table>
+                  <STable>
                     <thead><tr><th>엣지</th><th>결과</th><th>비고</th></tr></thead>
                     <tbody>
                       {(pwResult.results || []).map((r) => (
@@ -530,7 +531,7 @@ export default function Collectors() {
                         </tr>
                       ))}
                     </tbody>
-                  </table>
+                  </STable>
                 </div>
                 <div className="flex gap" style={{ marginTop: 14 }}>
                   <button className="logout-btn" style={{ padding: '10px 18px' }} onClick={() => setPwForm(null)}>닫기</button>
@@ -584,7 +585,7 @@ function IngestStats({ data, onReset }) {
         <div className="muted" style={{ fontSize: 12 }}>아직 수신된 push가 없습니다(사이트 위임 에이전트가 push하면 집계됩니다).</div>
       ) : (
         <div className="table-wrap">
-          <table>
+          <STable>
             <thead><tr>
               <th>에이전트</th><th className="right">총 수신</th><th className="right">push 수</th><th className="right">평균 크기</th>
               <th className="right">평균 간격</th><th className="right">평균 수신율</th><th>최근 페이로드</th><th className="right">최근</th>
@@ -608,7 +609,7 @@ function IngestStats({ data, onReset }) {
                 );
               })}
             </tbody>
-          </table>
+          </STable>
         </div>
       )}
       <div className="muted" style={{ fontSize: 11.5, marginTop: 8, lineHeight: 1.7 }}>
@@ -728,7 +729,7 @@ function CollectorsCsvImportModal({ onClose, onDone }) {
               {!verified && <b style={{ color: 'var(--amber)', marginLeft: 8 }}>⚠ 내용이 변경됨 — 재검증 필요</b>}
             </div>
             <div className="table-wrap" style={{ maxHeight: '26vh' }}>
-              <table>
+              <STable>
                 <thead><tr><th style={{ textAlign: 'right' }}>행</th><th>id</th><th>URL</th><th>동작</th><th>토큰</th><th>문제</th></tr></thead>
                 <tbody>
                   {check.report.map((r, i) => (
@@ -742,7 +743,7 @@ function CollectorsCsvImportModal({ onClose, onDone }) {
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </STable>
             </div>
             {/* 덮어쓰기 확인(사용자 요구) — 명시 체크 없이는 기존 항목을 건드리지 않는다. */}
             {verified && check.summary.overwrite > 0 && !result && (

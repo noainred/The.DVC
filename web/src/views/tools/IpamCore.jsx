@@ -7,6 +7,7 @@ import { DEVTYPE_LABEL, DiscoveryBadge, MGMT, MgmtBadge } from './ipamShared.jsx
 import { IpamNetMap, IpamRanges, RangePolicies } from './IpamNet.jsx';
 import { IpScanSettings, IpmsSettings, MemoEditor, OverrideEditor, ScanStatusModal } from './IpamSettings.jsx';
 import { Card, useTool } from './shared.jsx';
+import { STable } from '../../components/STable.jsx';
 
 
 /**
@@ -291,7 +292,7 @@ function Ipam({ scope, onScope }) {
                   </div>
                 )}
                 <div className="table-wrap" style={{ maxHeight: '62vh' }}>
-                  <table>
+                  <STable>
                     <thead><tr><th>{base}.X</th><th>Purpose</th><th>Hostname</th><th>서버종류</th><th>확인 방식</th><th>OS</th><th>메모(Notes)</th><th>전원</th><th>분류</th><th>상태</th><th>사용이력</th><th>메모 · 태그</th></tr></thead>
                     <tbody>
                       {shown.length === 0 && <tr><td colSpan={12} className="center muted" style={{ padding: 22 }}>해당 상태의 IP가 없습니다.</td></tr>}
@@ -334,7 +335,7 @@ function Ipam({ scope, onScope }) {
                         </tr>
                       ))}
                     </tbody>
-                  </table>
+                  </STable>
                 </div>
               </>
             );
@@ -472,7 +473,7 @@ function IpHistoryModal({ row, scope, onClose }) {
 
           <div className="muted" style={{ fontSize: 12, margin: '4px 0 6px' }}>사용 / 미사용 구간</div>
           <div className="table-wrap" style={{ marginBottom: 14 }}>
-            <table>
+            <STable>
               <thead><tr><th>구간</th><th>시작</th><th>종료</th><th style={{ textAlign: 'right' }}>기간</th></tr></thead>
               <tbody>
                 {[...segs].reverse().map((s, i) => (
@@ -485,12 +486,12 @@ function IpHistoryModal({ row, scope, onClose }) {
                 ))}
                 {!segs.length && <tr><td colSpan={4} className="center muted" style={{ padding: 16 }}>구간 정보가 없습니다.</td></tr>}
               </tbody>
-            </table>
+            </STable>
           </div>
 
           <div className="muted" style={{ fontSize: 12, margin: '4px 0 6px' }}>전이 기록(확인 시점별)</div>
           <div className="table-wrap">
-            <table>
+            <STable>
               <thead><tr><th>시각</th><th>전이</th><th>호스트명</th><th>포트</th></tr></thead>
               <tbody>
                 {[...(h.events || [])].reverse().map((e, i) => (
@@ -503,7 +504,7 @@ function IpHistoryModal({ row, scope, onClose }) {
                 ))}
                 {!(h.events || []).length && <tr><td colSpan={4} className="center muted" style={{ padding: 18 }}>기록된 전이가 없습니다.</td></tr>}
               </tbody>
-            </table>
+            </STable>
           </div>
           <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>※ 일정 시간(스캔 주기의 3배 또는 최소 3시간) 동안 응답이 없으면 '해제'로 기록됩니다.</div>
         </>

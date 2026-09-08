@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson, putJson, delJson, postJson } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
+import { STable } from '../../components/STable.jsx';
 
 /**
  * 엣지 배정 — '어느 엣지가 어느 대상을 점검하는가'를 중앙에서 관리한다.
@@ -187,7 +188,7 @@ export default function AssignTab({ canEdit }) {
             중앙→엣지 접속을 요구하지 않습니다. 살아있음의 진실은 '보고가 오는가'입니다.
           </div>
           <div className="table-wrap">
-            <table>
+            <STable>
               <thead><tr><th>검사</th><th style={{ width: 90 }}>결과</th><th style={{ width: 100, textAlign: 'right' }}>RTT</th><th>비고</th></tr></thead>
               <tbody>
                 <tr>
@@ -216,7 +217,7 @@ export default function AssignTab({ canEdit }) {
                   </>)}
                 </tr>
               </tbody>
-            </table>
+            </STable>
           </div>
         </div>
       )}
@@ -227,7 +228,7 @@ export default function AssignTab({ canEdit }) {
           <button className="tab" onClick={load}>새로 고침</button>
         </div>
         <div className="table-wrap" style={{ maxHeight: '40vh' }}>
-          <table>
+          <STable>
             <thead>
               <tr>
                 <th>엣지</th><th style={{ width: 88 }}>상태</th><th>범위</th>
@@ -273,7 +274,7 @@ export default function AssignTab({ canEdit }) {
                 );
               })}
             </tbody>
-          </table>
+          </STable>
         </div>
         <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>
           '활성'은 엣지가 정의를 받아 적용했고 <b>적용 수가 배정 수와 정확히 일치</b>한다는 뜻입니다.

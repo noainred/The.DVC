@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, putJson, delJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import EscClose from '../components/EscClose.jsx';
+import { STable } from '../components/STable.jsx';
 
 const EMPTY = { agent: '', ips: '', username: 'root', password: '', enabled: true };
 
@@ -111,7 +112,7 @@ export default function AgentScans() {
       </div>
 
       <div className="table-wrap">
-        <table>
+        <STable>
           <thead><tr>
             <th>에이전트</th><th>IP 대역</th><th>계정</th><th>상태</th><th>마지막 스캔</th><th>발견</th><th className="right">작업</th>
           </tr></thead>
@@ -141,13 +142,13 @@ export default function AgentScans() {
                   {expanded === a.agent && r?.found?.length > 0 && (
                     <tr><td colSpan={7} style={{ background: 'rgba(12,19,34,.5)' }}>
                       <div style={{ maxHeight: 220, overflowY: 'auto', fontSize: 12 }}>
-                        <table><thead><tr><th>IP</th><th>서비스태그</th><th>호스트명</th><th>모델</th></tr></thead>
+                        <STable><thead><tr><th>IP</th><th>서비스태그</th><th>호스트명</th><th>모델</th></tr></thead>
                           <tbody>
                             {r.found.map((f) => (
                               <tr key={f.ip}><td><b>{f.ip}</b></td><td className="muted">{f.serviceTag || '—'}</td><td className="muted">{f.hostName || '—'}</td><td className="muted">{[f.manufacturer, f.model].filter(Boolean).join(' ') || '—'}</td></tr>
                             ))}
                           </tbody>
-                        </table>
+                        </STable>
                       </div>
                       <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>미응답 {r.unreachable} · 타장비 {r.notIdrac} · 인증실패 {r.authFailed}{r.durationMs ? ` · ${(r.durationMs / 1000).toFixed(0)}s` : ''}</div>
                     </td></tr>
@@ -156,7 +157,7 @@ export default function AgentScans() {
               );
             })}
           </tbody>
-        </table>
+        </STable>
       </div>
 
       {form && (

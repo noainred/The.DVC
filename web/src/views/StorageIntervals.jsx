@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { fetchJson, putJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { presetsFor, msLabel, effectiveFor, sourceOf, lagText, toBody } from './storageIntervals.js';
+import { STable } from '../components/STable.jsx';
 
 /**
  * 스토리지 수집 주기(중앙 → 엣지 배포, v2.409 — 사용자 요구
@@ -104,7 +105,7 @@ export default function StorageIntervals() {
       </div>
 
       <div className="table-wrap">
-        <table>
+        <STable>
           <thead>
             <tr>
               <th style={{ minWidth: 160 }}>대상</th>
@@ -137,7 +138,7 @@ export default function StorageIntervals() {
               );
             })}
           </tbody>
-        </table>
+        </STable>
       </div>
 
       <div className="flex gap" style={{ marginTop: 12, alignItems: 'center' }}>

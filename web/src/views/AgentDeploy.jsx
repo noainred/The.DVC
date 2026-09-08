@@ -3,6 +3,7 @@ import { fetchJson, postJson, putJson, delJson } from '../api.js';
 import { Loading } from '../components/ui.jsx';
 // CSV 일괄 관리(v2.339) — 검증 드라이런 → 덮어쓰기 확인 → 실행. 공용 모달(수집 서버 CSV UX).
 import { CsvExportModal, CsvImportModal } from '../components/CsvBulkModals.jsx';
+import { STable } from '../components/STable.jsx';
 
 const EMPTY = {
   host: '', port: 22, username: 'root', password: '', privateKey: '',
@@ -369,7 +370,7 @@ export default function AgentDeploy() {
           {targets.length === 0
             ? <span className="muted" style={{ fontSize: 13 }}>저장된 대상이 없습니다. '➕ 에이전트 추가' 탭에서 대상을 저장한 뒤 여기서 배포·상태확인·관리하세요.</span>
             : <div className="table-wrap">
-            <table>
+            <STable>
               <thead><tr>
                 {[['host', '호스트'], ['agentName', '에이전트'], ['centralUrl', '중앙'], ['lastResult', '마지막 결과']].map(([k, label]) => (
                   <th key={k} style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }}
@@ -402,7 +403,7 @@ export default function AgentDeploy() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </STable>
           </div>}
         </div>
       )}

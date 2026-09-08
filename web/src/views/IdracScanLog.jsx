@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { usePolling, fetchJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
+import { STable } from '../components/STable.jsx';
 
 /**
  * 설정 → 수집 서버 → 스캔 로그 — 주기/수동 iDRAC 스캔의 법인(DataCenter)별 실행 이력.
@@ -73,7 +74,7 @@ export default function IdracScanLog() {
         </div>
       ) : (
         <div className="table-wrap" style={{ maxHeight: '62vh' }}>
-          <table>
+          <STable>
             <thead><tr>
               <th>시각</th><th>법인</th><th>서비스</th><th>구분</th><th>방식</th>
               <th style={{ textAlign: 'right' }}>스캔</th><th style={{ textAlign: 'right' }}>발견</th><th style={{ textAlign: 'right' }}>등록</th>
@@ -97,7 +98,7 @@ export default function IdracScanLog() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </STable>
         </div>
       )}
     </div>

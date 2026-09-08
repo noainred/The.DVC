@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson, postJson, putJson, delJson } from '../api.js';
 import { Loading, ErrorBox, Modal } from '../components/ui.jsx';
+import { STable } from '../components/STable.jsx';
 
 /** 설정 → 중계 서버(프록시): HAProxy Data Plane / SSH 자동배포 + vCenter별 프록시 할당. */
 export default function ProxySettings() {
@@ -134,7 +135,7 @@ export default function ProxySettings() {
           );
         })()}
         <div className="table-wrap">
-          <table>
+          <STable>
             <thead><tr><th>상태</th><th>이름</th><th>프록시 주소</th><th>공개포트 시작</th><th>할당 vCenter</th><th>프로비저닝</th><th style={{ textAlign: 'right' }}>관리</th></tr></thead>
             <tbody>
               {proxies.length === 0 && <tr><td colSpan={7} className="center muted" style={{ padding: 20 }}>추가 프록시가 없습니다. (모두 기본 프록시 사용)</td></tr>}
@@ -154,7 +155,7 @@ export default function ProxySettings() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </STable>
         </div>
       </div>
 

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, putJson, postJson, usePolling, getToken } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
+import { STable } from '../components/STable.jsx';
 
 const fmtTime = (ts) => (ts ? new Date(ts).toLocaleString('ko-KR') : '—');
 const fmtNum = (n) => (n == null ? '—' : Number(n).toLocaleString());
@@ -153,7 +154,7 @@ function LogViewer() {
         </div>
       </div>
       <div className="table-wrap" style={{ maxHeight: '52vh' }}>
-        <table><thead><tr><th>시각</th><th>vCenter</th><th>심각도</th><th>유형</th><th>대상</th><th>사용자</th><th>메시지</th></tr></thead>
+        <STable><thead><tr><th>시각</th><th>vCenter</th><th>심각도</th><th>유형</th><th>대상</th><th>사용자</th><th>메시지</th></tr></thead>
           <tbody>
             {rows.length === 0 && !loading && <tr><td colSpan={7} className="center muted" style={{ padding: 20 }}>보관된 로그가 없습니다.</td></tr>}
             {rows.map((r, i) => {
@@ -170,7 +171,7 @@ function LogViewer() {
                 </tr>
               );
             })}
-          </tbody></table>
+          </tbody></STable>
       </div>
       {mode === 'local' && rows.length < total && <button className="tab" style={{ marginTop: 10, padding: '7px 16px' }} disabled={loading} onClick={() => load(false)}>{loading ? '불러오는 중…' : `더 보기 (${rows.length}/${fmtNum(total)})`}</button>}
       {mode === 'edge' && loading && <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>엣지 포탈에 조회 중… (응답 대기)</div>}

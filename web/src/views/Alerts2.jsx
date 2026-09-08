@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson, putJson, postJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
+import { STable } from '../components/STable.jsx';
 
 const RULE_LABEL = {
   criticalAlarms: '위험(critical) 알람 발생',
@@ -72,7 +73,7 @@ export default function Alerts2() {
       <div className="card">
         <b style={{ fontSize: 14 }}>현재 발생 중 ({d.firing.length})</b>
         <div className="table-wrap" style={{ marginTop: 8, maxHeight: '32vh' }}>
-          <table>
+          <STable>
             <thead><tr><th>심각도</th><th>내용</th><th>상세</th><th>발생</th></tr></thead>
             <tbody>
               {d.firing.length === 0 && <tr><td colSpan={4} className="center muted" style={{ padding: 16 }}>발생 중인 알림이 없습니다.</td></tr>}
@@ -85,7 +86,7 @@ export default function Alerts2() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </STable>
         </div>
         {d.recent?.length > 0 && (
           <>

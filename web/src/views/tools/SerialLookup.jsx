@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { fetchJson, downloadFile } from '../../api.js';
 import { Loading, ErrorBox, SearchBox } from '../../components/ui.jsx';
+import { STable } from '../../components/STable.jsx';
 
 /**
  * 특수기능 › 시리얼 조회(v2.412, 사용자 요구 '서버·스토리지·네트워크·SAN switch 등 등록되고
@@ -98,7 +99,7 @@ export default function SerialLookup() {
 
       {!!rows.length && (
         <div className="table-wrap">
-          <table>
+          <STable>
             <thead>
               <tr>
                 <th style={{ minWidth: 180 }}>시리얼</th><th>항목</th><th>장비 종류</th>
@@ -129,7 +130,7 @@ export default function SerialLookup() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </STable>
         </div>
       )}
     </>

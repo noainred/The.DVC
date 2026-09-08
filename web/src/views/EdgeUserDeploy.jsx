@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson, postJson, delJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
+import { STable } from '../components/STable.jsx';
 
 const ROLES = ['viewer', 'operator', 'admin'];
 const ROLE_LABEL = { viewer: '조회', operator: '운영', admin: '관리자' };
@@ -136,7 +137,7 @@ export default function EdgeUserDeploy() {
           {viewTarget !== ALL && <span className="muted" style={{ fontSize: 12 }}>이 엣지 전용 목록 — 실제 적용은 여기 + 🌐 모든 엣지 목록을 합쳐 반영됩니다.</span>}
         </div>
         <div className="table-wrap">
-          <table>
+          <STable>
             <thead><tr><th style={{ textAlign: 'left' }}>사용자 ID</th><th style={{ textAlign: 'left' }}>이름</th><th style={{ textAlign: 'left' }}>역할</th><th style={{ textAlign: 'left' }}>비밀번호</th><th style={{ textAlign: 'right' }}>관리</th></tr></thead>
             <tbody>
               {users.length === 0 && <tr><td colSpan={5} className="muted" style={{ padding: 14, textAlign: 'center' }}>이 대상에 배포된 사용자가 없습니다.</td></tr>}
@@ -153,7 +154,7 @@ export default function EdgeUserDeploy() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </STable>
         </div>
       </div>
 

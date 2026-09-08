@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
+import { STable } from '../components/STable.jsx';
 
 const fmtAgo = (ts) => {
   if (!ts) return '없음';
@@ -85,7 +86,7 @@ function VcDiag({ d, failOnly }) {
       {d.error && <div className="badge red" style={{ marginTop: 4, whiteSpace: 'normal' }}>오류: {d.error}</div>}
       {all.length > 0 && (
         <div className="table-wrap" style={{ maxHeight: '40vh', marginTop: 6 }}>
-          <table><thead><tr>
+          <STable><thead><tr>
             <SortTh k="vm" sort={sort} onSort={toggleSort}>VM</SortTh>
             <SortTh k="host" sort={sort} onSort={toggleSort}>호스트</SortTh>
             {hasOsAcct && <SortTh k="os" sort={sort} onSort={toggleSort}>OS / 계정</SortTh>}
@@ -110,7 +111,7 @@ function VcDiag({ d, failOnly }) {
                   </td>
                 </tr>
               ))}
-            </tbody></table>
+            </tbody></STable>
         </div>
       )}
     </div>
@@ -202,10 +203,10 @@ export default function GpuGuestDiag() {
         <button className="logout-btn" style={{ padding: '6px 12px' }} onClick={() => setGuide((g) => !g)}>{guide ? '▼' : '▶'} 트러블슈팅 가이드 (단계별)</button>
         {guide && (
           <div className="table-wrap" style={{ marginTop: 10 }}>
-            <table><thead><tr><th>단계</th><th>하는 일</th><th>막히면 흔한 원인/조치</th></tr></thead>
+            <STable><thead><tr><th>단계</th><th>하는 일</th><th>막히면 흔한 원인/조치</th></tr></thead>
               <tbody>
                 {STAGES.map(([s, w, c]) => <tr key={s}><td><b>{s}</b></td><td style={{ fontSize: 12 }}>{w}</td><td style={{ fontSize: 12 }}>{c}</td></tr>)}
-              </tbody></table>
+              </tbody></STable>
             <div className="muted" style={{ fontSize: 12, marginTop: 10, lineHeight: 1.7 }}>
               <b>서버별 점검 명령</b><br />
               · Agent: <code>journalctl -u vmware-portal -f | grep gpu-guest</code> (선별/실행/다운로드/push)<br />

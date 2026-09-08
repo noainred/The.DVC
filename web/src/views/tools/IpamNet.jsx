@@ -6,6 +6,7 @@ import { CsvImportModal } from '../../components/CsvBulkModals.jsx';
 import { DEVTYPE_LABEL, MGMT, MgmtBadge } from './ipamShared.jsx';
 import { ScanProgressBar } from './IpamSettings.jsx';
 import { Card } from './shared.jsx';
+import { STable } from '../../components/STable.jsx';
 
 
 /** vCenter별 IP 대역 저장 + 주기 스캔 + 스캔결과(첨부) 다운로드. */
@@ -90,7 +91,7 @@ export function IpamRanges() {
           </span>
         </div>
         <div className="table-wrap" style={{ marginTop: 8 }}>
-          <table><thead><tr><th>vCenter</th><th>대역</th><th className="right">IP 수</th><th>주기</th><th>수정시각</th><th className="right">작업</th></tr></thead>
+          <STable><thead><tr><th>vCenter</th><th>대역</th><th className="right">IP 수</th><th>주기</th><th>수정시각</th><th className="right">작업</th></tr></thead>
             <tbody>
               {list.length === 0 && <tr><td colSpan={6} className="center muted" style={{ padding: 18 }}>등록된 대역이 없습니다.</td></tr>}
               {list.map((e) => (
@@ -106,7 +107,7 @@ export function IpamRanges() {
                   </td>
                 </tr>
               ))}
-            </tbody></table>
+            </tbody></STable>
         </div>
       </div>
 
@@ -116,7 +117,7 @@ export function IpamRanges() {
           <button className="logout-btn" style={{ padding: '7px 12px' }} onClick={downloadReport}>⬇ 전체 결과 CSV</button>
         </div>
         <div className="table-wrap" style={{ marginTop: 8, maxHeight: '40vh' }}>
-          <table><thead><tr><th>완료시각</th><th>에이전트</th><th className="right">스캔/응답</th><th className="right">소요</th></tr></thead>
+          <STable><thead><tr><th>완료시각</th><th>에이전트</th><th className="right">스캔/응답</th><th className="right">소요</th></tr></thead>
             <tbody>
               {runs.length === 0 && <tr><td colSpan={4} className="center muted" style={{ padding: 18 }}>완료된 스캔 기록이 없습니다. ‘지금 스캔’으로 실행하세요.</td></tr>}
               {runs.map((r, i) => (
@@ -127,7 +128,7 @@ export function IpamRanges() {
                   <td className="right muted">{r.durationMs != null ? `${(r.durationMs / 1000).toFixed(1)}s` : '—'}</td>
                 </tr>
               ))}
-            </tbody></table>
+            </tbody></STable>
         </div>
         <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>스캔 결과는 ‘⬇ 스캔 결과(CSV)’로 첨부파일처럼 내려받을 수 있습니다(IP·호스트명·상태·포트·서비스·최초/최근 관측).</div>
       </div>
@@ -382,7 +383,7 @@ export function RangePolicies({ scope, canManage, vcenters = [], onChanged }) {
         <div className="card"><span className="muted">등록된 대역 정책이 없습니다. ‘＋ 새 정책’으로 대역(예: 10.0.0.0/24)에 기본 관리상태를 지정하세요.</span></div>
       ) : (
         <div className="table-wrap">
-          <table>
+          <STable>
             <thead><tr><th>활성</th><th>대역(spec)</th><th>커버 IP</th><th>상태</th><th>vCenter</th><th>우선순위</th><th>담당/라벨</th><th>비고</th><th></th></tr></thead>
             <tbody>
               {policies.map((p) => (
@@ -404,7 +405,7 @@ export function RangePolicies({ scope, canManage, vcenters = [], onChanged }) {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </STable>
         </div>
       )}
       {edit && <PolicyForm policy={edit} vcenters={vcenters} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); load(); onChanged?.(); }} />}

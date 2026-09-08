@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson, postJson, delJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
+import { STable } from '../components/STable.jsx';
 
 /**
  * 설정 › NFS 마운트(백업 대상)(v2.299, admin 전용) — 사용자 요구사항:
@@ -54,7 +55,7 @@ export default function NfsMounts() {
 
       {/* 마운트 목록 */}
       <div className="table-wrap" style={{ maxHeight: '30vh', marginBottom: 12 }}>
-        <table>
+        <STable>
           <thead><tr><th>서버:경로</th><th>옵션</th><th>마운트 지점</th><th>상태</th><th className="right">작업</th></tr></thead>
           <tbody>
             {d.mounts.length === 0 && <tr><td colSpan={5} className="center muted" style={{ padding: 18 }}>등록된 NFS 마운트가 없습니다.</td></tr>}
@@ -73,13 +74,13 @@ export default function NfsMounts() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </STable>
       </div>
 
       {/* 실행 로그(요구사항: 결과·로그 보기) */}
       <div className="section-title" style={{ fontSize: 14 }}>실행 로그(최근 50)</div>
       <div className="table-wrap" style={{ maxHeight: '24vh', marginBottom: 12 }}>
-        <table>
+        <STable>
           <thead><tr><th>시각</th><th>항목</th><th>동작</th><th>결과</th><th>상세(stderr 요약)</th></tr></thead>
           <tbody>
             {(d.logs || []).length === 0 && <tr><td colSpan={5} className="center muted" style={{ padding: 14 }}>아직 실행 이력이 없습니다.</td></tr>}
@@ -93,7 +94,7 @@ export default function NfsMounts() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </STable>
       </div>
 
       {/* 트러블슈팅(요구사항) */}

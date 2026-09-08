@@ -1,4 +1,5 @@
 import React from 'react';
+import { STable } from '../../components/STable.jsx';
 
 /**
  * 성능점검 대량 작업 미리보기 — CSV 가져오기·대량 자동등록·템플릿 적용이 **같은 계약**으로 쓴다.
@@ -132,7 +133,7 @@ export default function PreviewTable({ result, title = '미리보기' }) {
             표본 {sample.length}건{result.truncatedSample || result.truncated?.sample ? ' (앞 20 + 끝 5 + 건너뜀 일부만 표시)' : ''}
           </div>
           <div className="table-wrap" style={{ maxHeight: '48vh' }}>
-            <table>
+            <STable>
               <thead>
                 <tr>
                   <th style={{ width: 52 }}>#</th>
@@ -162,7 +163,7 @@ export default function PreviewTable({ result, title = '미리보기' }) {
                   );
                 })}
               </tbody>
-            </table>
+            </STable>
           </div>
         </>
       )}

@@ -9,6 +9,7 @@ import { DataTable, Loading, ErrorBox, StateBadge, ResultCount, Kpi, SearchBox, 
 import { csvCell } from '../util/csv.js'; // 수식 인젝션 가드 포함 공통 셀 이스케이프
 
 const fmtDate = (ts) => (ts ? new Date(ts).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' }) : '—');
+import { STable } from '../components/STable.jsx';
 const fmtDay = (ts) => (ts ? new Date(ts).toLocaleDateString('ko-KR') : '—');
 const tb = (gb) => (gb >= 1024 ? `${(gb / 1024).toFixed(1)} TB` : `${Math.round(gb)} GB`);
 
@@ -98,14 +99,14 @@ export function DailyHealth({ scope, isAdmin }) {
           </div>
           {open === s.key && s.items?.length > 0 && (
             <div className="table-wrap" style={{ marginTop: 10, maxHeight: '40vh' }}>
-              <table>
+              <STable>
                 <thead><tr>{Object.keys(s.items[0]).map((k) => <th key={k}>{k}</th>)}</tr></thead>
                 <tbody>
                   {s.items.map((it, i) => (
                     <tr key={i}>{Object.entries(it).map(([k, v]) => <td key={k}>{k.toLowerCase().includes('ts') ? fmtDate(v) : String(v ?? '—')}</td>)}</tr>
                   ))}
                 </tbody>
-              </table>
+              </STable>
             </div>
           )}
         </div>
@@ -395,21 +396,21 @@ export function AlertChannels({ isAdmin }) {
         <div className="card" style={{ marginBottom: 12 }}>
           <b style={{ fontSize: 13, color: 'var(--red)' }}>🔥 발화 중</b>
           <div className="table-wrap" style={{ marginTop: 8, maxHeight: '30vh' }}>
-            <table>
+            <STable>
               <thead><tr><th>심각도</th><th>제목</th><th>상세</th><th>시작</th></tr></thead>
               <tbody>
                 {data.firing.map((f, i) => (
                   <tr key={i}><td><span className={`badge ${f.severity === 'critical' ? 'red' : 'amber'}`}>{f.severity}</span></td><td>{f.title}</td><td className="muted">{f.detail}</td><td>{fmtDate(f.since)}</td></tr>
                 ))}
               </tbody>
-            </table>
+            </STable>
           </div>
         </div>
       )}
       <div className="card" style={{ padding: 0 }}>
         <div style={{ padding: '10px 14px' }}><b style={{ fontSize: 13 }}>최근 발송 이력</b></div>
         <div className="table-wrap" style={{ maxHeight: '45vh' }}>
-          <table>
+          <STable>
             <thead><tr><th>시각</th><th>심각도</th><th>제목</th><th>채널 결과</th></tr></thead>
             <tbody>
               {(data.recent || []).length === 0 && <tr><td colSpan={4} className="muted" style={{ padding: 16, textAlign: 'center' }}>발송 이력이 없습니다.</td></tr>}
@@ -422,7 +423,7 @@ export function AlertChannels({ isAdmin }) {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </STable>
         </div>
       </div>
     </>
@@ -533,7 +534,7 @@ export function ChangeHistory({ scope }) {
       </div>
       <div className="card" style={{ padding: 0 }}>
         <div className="table-wrap" style={{ maxHeight: '62vh' }}>
-          <table>
+          <STable>
             <thead><tr><th>시각</th><th>분류</th><th>계정</th><th>대상</th><th>내용</th><th>vCenter</th></tr></thead>
             <tbody>
               {(data.rows || []).length === 0 && <tr><td colSpan={6} className="muted" style={{ padding: 16, textAlign: 'center' }}>조건에 맞는 변경 이벤트가 없습니다.</td></tr>}
@@ -548,7 +549,7 @@ export function ChangeHistory({ scope }) {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </STable>
         </div>
       </div>
       <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>vCenter 이벤트 장기 보관 DB 기반 — 로그 수집 설정(관리자 › vCenter 로그)의 보관 기간 내 이벤트만 조회됩니다.</p>

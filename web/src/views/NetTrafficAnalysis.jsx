@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, putJson, delJson, usePolling } from '../api.js';
 import { ErrorBox, Modal } from '../components/ui.jsx';
+import { STable } from '../components/STable.jsx';
 
 const DOT = { ok: '#22c55e', warning: '#f59e0b', error: '#ef4444' };
 const SevDot = ({ s }) => <span style={{ display: 'inline-block', width: 9, height: 9, borderRadius: '50%', background: DOT[s] || '#64748b', marginRight: 7 }} />;
@@ -27,7 +28,7 @@ function History() {
       </div>
       {!d ? <div className="muted">불러오는 중…</div> : d.length === 0 ? <div className="muted" style={{ fontSize: 12 }}>저장된 캡처가 없습니다.</div> : (
         <div className="table-wrap" style={{ maxHeight: '54vh' }}>
-          <table><thead><tr><th>시각</th><th>구분</th><th>모드</th><th>A ↔ B</th><th>결과</th><th>진단</th></tr></thead>
+          <STable><thead><tr><th>시각</th><th>구분</th><th>모드</th><th>A ↔ B</th><th>결과</th><th>진단</th></tr></thead>
             <tbody>{d.map((c) => (
               <tr key={c.id} style={{ cursor: 'pointer' }} onClick={() => view(c.id)}>
                 <td className="muted" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{fmtTime(c.at)}</td>
@@ -37,7 +38,7 @@ function History() {
                 <td>{worstBadge(c.worst)}</td>
                 <td className="muted" style={{ fontSize: 12 }}>{(c.issues || [])[0]?.title || '—'}</td>
               </tr>
-            ))}</tbody></table>
+            ))}</tbody></STable>
         </div>
       )}
       {sel && (
@@ -70,7 +71,7 @@ function Monitors() {
       </div>
       <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>두 서버 간 캡처를 주기적으로 자동 실행해 이력에 기록하고, 경로 손실/미수신 등 이슈가 감지되면 알림(설정 › 알림 채널)을 보냅니다.</p>
       {!d ? <div className="muted">불러오는 중…</div> : d.length === 0 ? <div className="muted" style={{ fontSize: 12 }}>등록된 모니터가 없습니다.</div> : (
-        <div className="table-wrap"><table><thead><tr><th>이름</th><th>모드</th><th>A ↔ B</th><th>주기</th><th>최근</th><th>상태</th><th>작업</th></tr></thead>
+        <div className="table-wrap"><STable><thead><tr><th>이름</th><th>모드</th><th>A ↔ B</th><th>주기</th><th>최근</th><th>상태</th><th>작업</th></tr></thead>
           <tbody>{d.map((m) => (
             <tr key={m.id}>
               <td><b>{m.name}</b></td><td style={{ fontSize: 12 }}>{m.mode === 'dual' ? '동시' : '단일'}</td>
@@ -83,7 +84,7 @@ function Monitors() {
                 <button className="tab" style={{ padding: '3px 8px', fontSize: 11, color: 'var(--red)' }} onClick={() => del(m.id)}>삭제</button>
               </div></td>
             </tr>
-          ))}</tbody></table></div>
+          ))}</tbody></STable></div>
       )}
       {form && (
         <Modal title="모니터 추가" onClose={() => setForm(null)} width={560}>

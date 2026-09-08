@@ -5,6 +5,7 @@ import { RemoteConsoleWindow } from './remote/RemoteConsoleWindow.jsx';
 import Login from './views/Login.jsx';
 import ForceOtpEnroll from './views/ForceOtpEnroll.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
+import { STable } from './components/STable.jsx';
 
 // 탭 화면은 지연 로드(코드 스플릿)해 초기 번들/첫 로딩을 줄인다(recharts 등 무거운 의존성 분리).
 const Overview = lazy(() => import('./views/Overview.jsx'));
@@ -462,7 +463,7 @@ function VcDownList({ onClose }) {
         <div className="muted" style={{ padding: 8, fontSize: 13 }}>지금은 전부 연결되어 있습니다(마지막 수집 이후 복구됐을 수 있음 — 헤더 카운트는 최대 30초 지연).</div>
       ) : (
         <>
-          <table className="data-table" style={{ width: '100%', fontSize: 13 }}>
+          <STable className="data-table" style={{ width: '100%', fontSize: 13 }}>
             <thead><tr><th style={{ textAlign: 'left' }}>상태</th><th style={{ textAlign: 'left' }}>vCenter</th><th style={{ textAlign: 'left' }}>위치</th><th style={{ textAlign: 'left' }}>버전</th><th style={{ textAlign: 'right' }}>호스트/VM</th></tr></thead>
             <tbody>
               {list.map((v) => (
@@ -475,7 +476,7 @@ function VcDownList({ onClose }) {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </STable>
           <div className="muted" style={{ fontSize: 11.5, marginTop: 10, lineHeight: 1.6 }}>
             · <b>불가(unreachable)</b>: 마지막 수집에서 로그인/응답 실패 — 네트워크·자격증명·vCenter 서비스 상태를 확인하세요(설정 › vCenter 연결 테스트).<br />
             · 계정에 vCenter 범위 제한이 있으면 이 목록은 내 범위만 보여줘 헤더 숫자와 다를 수 있습니다.

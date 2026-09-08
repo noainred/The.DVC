@@ -6,6 +6,7 @@ import {
 import { usePolling } from '../api.js';
 import { Loading, ErrorBox, usageColor, Modal } from '../components/ui.jsx';
 import { GuestOsVmsModal } from './SpecialTools.jsx';
+import { STable } from '../components/STable.jsx';
 
 const OS_COLORS = {
   Windows: '#3b82f6', RHEL: '#ef4444', Ubuntu: '#f59e0b', CentOS: '#a855f7',
@@ -58,7 +59,7 @@ function RatioModal({ rows, kind = 'cpu', onClose }) {
     <Modal title={title} onClose={onClose} width={720} resizable minWidth={480} minHeight={360}>
       <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>{desc} <span style={{ opacity: .8 }}>제목을 클릭하면 정렬됩니다.</span></div>
       <div className="table-wrap" style={{ overflow: 'visible' }}>
-        <table>
+        <STable>
           <thead><tr>
             {COLS.map(([key, label, align]) => (
               <th key={key} style={{ textAlign: align, cursor: 'pointer', userSelect: 'none' }} onClick={() => toggle(key)} title="클릭하여 정렬">{label}{arrow(key)}</th>
@@ -78,7 +79,7 @@ function RatioModal({ rows, kind = 'cpu', onClose }) {
               </tr>
             ))}
           </tbody>
-        </table>
+        </STable>
       </div>
     </Modal>
   );
@@ -217,7 +218,7 @@ export default function Summary({ scope, onGotoTab }) {
             </div>
           </div>
           <div className="table-wrap">
-            <table>
+            <STable>
               <thead><tr>
                 <th>Guest OS</th><th className="right">VM</th><th className="right">vCPU</th><th className="right">메모리(GB)</th><th className="right">디스크(GB)</th>
               </tr></thead>
@@ -240,7 +241,7 @@ export default function Summary({ scope, onGotoTab }) {
                   <td className="right tabular">{fmt(osAllocTotals.diskGB)}</td>
                 </tr>
               </tbody>
-            </table>
+            </STable>
           </div>
         </div>
 
@@ -296,7 +297,7 @@ export default function Summary({ scope, onGotoTab }) {
 
       <div className="section-title">vCenter별 기여도 (사이트별 합계)</div>
       <div className="table-wrap">
-        <table>
+        <STable>
           <thead><tr>{vcCols.map((col) => <th key={col.key} style={{ textAlign: col.align || 'left' }}>{col.label}</th>)}</tr></thead>
           <tbody>
             {s.byVcenter.map((r) => (
@@ -325,7 +326,7 @@ export default function Summary({ scope, onGotoTab }) {
               <td className="right tabular">{Number(totals.provisionedTB).toFixed(1)}</td>
             </tr>
           </tbody>
-        </table>
+        </STable>
       </div>
       {showRatio && <RatioModal kind="cpu" rows={s.byVcenter} onClose={() => setShowRatio(false)} />}
       {showMemRatio && <RatioModal kind="mem" rows={s.byVcenter} onClose={() => setShowMemRatio(false)} />}

@@ -3,6 +3,7 @@ import { fetchJson, putJson, postJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import GuestScanJobs from './GuestScanJobs.jsx';
+import { STable } from '../components/STable.jsx';
 
 const fmtTime = (ts) => (ts ? new Date(ts).toLocaleString('ko-KR') : '—');
 const fmtHour = (ts) => new Date(ts).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit' });
@@ -80,7 +81,7 @@ export default function LoginFails() {
         <div className="card" style={{ padding: 14, marginBottom: 12 }}>
           <div className="section-title" style={{ marginTop: 0, fontSize: 15 }}>브루트포스 의심 ({d.offenders.length})</div>
           <div className="table-wrap" style={{ maxHeight: '36vh' }}>
-            <table><thead><tr><th>유형</th><th>대상</th><th style={{ textAlign: 'right' }}>최근창</th><th style={{ textAlign: 'right' }}>누적</th><th>상태</th><th>마지막</th></tr></thead>
+            <STable><thead><tr><th>유형</th><th>대상</th><th style={{ textAlign: 'right' }}>최근창</th><th style={{ textAlign: 'right' }}>누적</th><th>상태</th><th>마지막</th></tr></thead>
               <tbody>{d.offenders.map((o) => (
                 <tr key={o.label + o.key}>
                   <td>{o.label === 'user' ? '계정' : '출발지 IP'}</td><td><b>{o.key}</b></td>
@@ -88,7 +89,7 @@ export default function LoginFails() {
                   <td>{o.active ? <span className="badge red">활성</span> : <span className="badge amber">의심</span>}</td>
                   <td className="muted" style={{ fontSize: 11 }}>{fmtTime(o.lastTs)}</td>
                 </tr>
-              ))}</tbody></table>
+              ))}</tbody></STable>
           </div>
         </div>
       )}
@@ -101,10 +102,10 @@ export default function LoginFails() {
       <div className="card" style={{ padding: 14, marginTop: 12 }}>
         <div className="section-title" style={{ marginTop: 0, fontSize: 15 }}>최근 로그인 실패</div>
         <div className="table-wrap" style={{ maxHeight: '40vh' }}>
-          <table><thead><tr><th>시각</th><th>출처</th><th>계정</th><th>IP</th><th>유형</th></tr></thead>
+          <STable><thead><tr><th>시각</th><th>출처</th><th>계정</th><th>IP</th><th>유형</th></tr></thead>
             <tbody>{d.recent.map((r, i) => (
               <tr key={i}><td className="muted" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{fmtTime(r.ts)}</td><td style={{ fontSize: 12 }}>{r.source}</td><td style={{ fontSize: 12 }}>{r.user}</td><td className="muted" style={{ fontSize: 12 }}>{r.ip || '—'}</td><td className="muted" style={{ fontSize: 11 }}>{r.type}</td></tr>
-            ))}</tbody></table>
+            ))}</tbody></STable>
         </div>
       </div>
     </div>

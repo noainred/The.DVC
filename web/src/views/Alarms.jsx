@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { usePolling, fetchJson, postJson, delJson } from '../api.js';
 import { DataTable, SeverityBadge, Loading, ErrorBox, EntityDetail, Modal } from '../components/ui.jsx';
+import { STable } from '../components/STable.jsx';
 
 const ENDPOINT = { vm: '/vms', host: '/hosts', datastore: '/datastores' };
 
@@ -90,7 +91,7 @@ export default function Alarms({ filters }) {
           {muteErr && <div className="error-box" style={{ marginBottom: 8 }}>해제 실패: {muteErr}</div>}
           {mutes.length === 0 ? <div className="muted" style={{ padding: 12 }}>무시 규칙이 없습니다.</div> : (
             <div className="table-wrap">
-              <table>
+              <STable>
                 <thead><tr><th>대상유형</th><th>메시지 패턴</th><th>범위</th><th className="right">해제</th></tr></thead>
                 <tbody>
                   {mutes.map((m) => (
@@ -102,7 +103,7 @@ export default function Alarms({ filters }) {
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </STable>
             </div>
           )}
           <div className="muted" style={{ fontSize: 12, marginTop: 10 }}>해제하면 다음 수집 주기에 해당 알람이 다시 표시됩니다.</div>

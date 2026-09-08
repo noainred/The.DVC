@@ -5,6 +5,7 @@ import { fetchJson, usePolling } from '../../api.js';
 import { Loading, ErrorBox, Modal } from '../../components/ui.jsx';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
 import { Card } from './shared.jsx';
+import { STable } from '../../components/STable.jsx';
 
 const C = (v) => (v == null ? '—' : `${v}℃`);
 
@@ -223,7 +224,7 @@ function VcCard({ dc, expanded, onToggle, onTrend }) {
 
       {expanded && dc.hosts.length > 0 && (
         <div className="table-wrap" style={{ marginTop: 8, maxHeight: 260 }}>
-          <table>
+          <STable>
             <thead><tr>
               <th>서버</th><th style={{ textAlign: 'right' }}>흡기</th><th style={{ textAlign: 'right' }}>배기</th>
               <th style={{ textAlign: 'right' }}>CPU</th><th style={{ textAlign: 'right' }}>ΔT</th>
@@ -239,7 +240,7 @@ function VcCard({ dc, expanded, onToggle, onTrend }) {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </STable>
         </div>
       )}
     </div>
