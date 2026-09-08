@@ -40,12 +40,41 @@ export const KINDS = [
 let _db = null;
 let seq = 0;
 
+/**
+ * 사용 카운터(useCount/lastUsedAt/lastUsedBy)는 **별도 파일**(credentials-usage.json, 비밀 없음)에 디바운스로 쓴다(v2.425).
+ * 예전에는 브로커 인출마다 persist() → 전 항목을 새 salt 로 scrypt 재봉인(항목당 200~400ms 동기) → 계정 30개면 요청 1건에
+ * 메인 루프 6~25초 정지(리뷰 확정 결함 #1). 비밀 파일은 등록/수정/삭제 때만 다시 쓴다.
+ */
+const USAGE_FILE = () => path.join(config.configDir, 'credentials-usage.json');
+const USAGE_DEBOUNCE_MS = 5_000;
+let _usageTimer = null;
+function loadUsage() {
+  try { if (fs.existsSync(USAGE_FILE())) return JSON.parse(fs.readFileSync(USAGE_FILE(), 'utf8')) || {}; } catch { /* 카운터는 손실 허용 */ }
+  return {};
+}
+function flushUsage() {
+  _usageTimer = null;
+  const out = {};
+  for (const c of load().items) if (c.useCount) out[c.id] = { useCount: c.useCount, lastUsedAt: c.lastUsedAt || null, lastUsedBy: c.lastUsedBy || '' };
+  try { atomicWriteFileSync(USAGE_FILE(), JSON.stringify(out), { mode: 0o600 }); } catch { /* 카운터 기록 실패는 사용을 막지 않는다 */ }
+}
+function scheduleUsagePersist() {
+  if (_usageTimer) return;
+  _usageTimer = setTimeout(flushUsage, USAGE_DEBOUNCE_MS);
+  _usageTimer.unref?.();
+}
+export function _flushUsageForTest() { if (_usageTimer) { clearTimeout(_usageTimer); _usageTimer = null; } flushUsage(); }
+
 function load() {
   if (_db) return _db;
   try {
     if (fs.existsSync(FILE())) {
       const p = openSecretsDeep(JSON.parse(fs.readFileSync(FILE(), 'utf8')));
-      _db = { items: Array.isArray(p.items) ? p.items : [] };
+      const usage = loadUsage();
+      _db = { items: (Array.isArray(p.items) ? p.items : []).map((c) => {
+        const u = usage[c.id];
+        return u ? { ...c, useCount: Math.max(Number(c.useCount) || 0, Number(u.useCount) || 0), lastUsedAt: u.lastUsedAt || c.lastUsedAt || null, lastUsedBy: u.lastUsedBy || c.lastUsedBy || '' } : c;
+      }) };
       return _db;
     }
   } catch { preserveCorrupt(FILE()); }
@@ -179,7 +208,7 @@ export function brokerFetch(id, { agent, host }) {
   if (!agentAllowed(agent, c.agents)) return { ok: false, reason: `계정 '${c.name}' 은 법인 '${agent}' 에 허용되지 않았습니다.` };
   if (!hostAllowed(host, c.hosts)) return { ok: false, reason: `계정 '${c.name}' 은 대상 '${host}' 에 허용되지 않았습니다.` };
   c.useCount = (c.useCount || 0) + 1; c.lastUsedAt = Date.now(); c.lastUsedBy = `${agent}→${host}`;
-  try { persist(); } catch { /* 카운터 기록 실패는 사용을 막지 않는다 */ }
+  scheduleUsagePersist(); // 비밀 파일 재봉인 없이 카운터만 디바운스 저장(v2.425)
   const secret = { kind: c.kind, username: c.username };
   if (c.kind === 'password') secret.password = c.password || '';
   else { secret.privateKey = c.privateKey || ''; if (c.passphrase) secret.passphrase = c.passphrase; }

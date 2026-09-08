@@ -72,6 +72,14 @@ describe('sortableText (v2.422 표 자동 정렬)', () => {
     expect(headerSortable(h('th', null, ''))).toBe(false);
     expect(headerSortable(h('td', null, 'x'))).toBe(false);
   });
+  it('cellText: td 가 없는 컴포넌트 셀(<Cell data-sort>)도 셀로 인식한다(v2.425)', () => {
+    const Cell = () => null;
+    const tr = h('tr', null, h(Cell, { 'data-sort': 'zeta', col: {}, r: {} }), h(Cell, { 'data-sort': '42', col: {}, r: {} }));
+    expect(cellText(tr, 0)).toBe('zeta');
+    expect(cellText(tr, 1)).toBe('42');
+    const rows = [h('tr', { key: 'a' }, h(Cell, { 'data-sort': '10' })), h('tr', { key: 'b' }, h(Cell, { 'data-sort': '2' }))];
+    expect(sortChildren(rows, 0, 'asc').map((r) => r.key)).toEqual(['b', 'a']);
+  });
   it('cellText: colSpan 을 고려한 열 인덱스', () => {
     const tr = h('tr', null, h('td', { colSpan: 2 }, 'AB'), h('td', null, 'C'));
     expect(cellText(tr, 0)).toBeNull();

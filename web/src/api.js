@@ -329,7 +329,8 @@ async function pollFetch(path, params, signal, etag) {
     if (res.status === 304) return { notModified: true, etag: res.headers.get('ETag') || etag };
     if (!res.ok) {
       if (attempt < retries && isTransientFront(null, res.status)) { await sleep(300 * 2 ** attempt); continue; }
-      throw new Error(`${path} -> ${res.status}`);
+      // v2.425: 평문 Error 면 err.status 가 없어 usePolling 의 403 중단·AccessDenied 안내가 전부 무력했다(리뷰 #5) → HttpError.
+      throw httpFail(path, res, await res.json().catch(() => null));
     }
     return { notModified: false, data: await res.json(), etag: res.headers.get('ETag') || null };
   }

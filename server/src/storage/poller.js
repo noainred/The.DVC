@@ -75,7 +75,8 @@ async function collectOneInner(dev, startedAt) {
   } else {
     // 장비당 타임아웃(v2.417) — 예전에는 없었다(CLAUDE.md 'per-vCenter 타임아웃' 규약 위반). SSH 계열
     // 수집기는 device._signal 을 withSsh creds 로 넘겨 기한 만료 시 세션을 실제로 끊는다.
-    try { snap = await withDeadline(DEVICE_TIMEOUT_MS, (signal) => fn({ ...full, _signal: signal }), '수집 타임아웃'); }
+    // v2.425: SSH 계열은 device._signal, REST 계열은 opts.signal 을 읽는다 — 양쪽에 넘겨야 어느 수집기든 실제로 끊긴다(리뷰 #4).
+    try { snap = await withDeadline(DEVICE_TIMEOUT_MS, (signal) => fn({ ...full, _signal: signal }, { signal }), '수집 타임아웃'); }
     catch (e) { snap = emptySnapshot(full); snap.error = e.message; }
   }
   // ⚠ 스냅샷 저장(회귀 수정 — v2.310 적대적 검증에서 확정): v2.308 리팩터가 이 무조건
@@ -159,7 +160,7 @@ export async function testDeviceConnection(device, { timeoutMs = 60_000 } = {}) 
   const timer = setTimeout(() => ac.abort(), Math.max(1000, timeoutMs));
   try {
     const snap = await Promise.race([
-      fn(device, { signal: ac.signal }),
+      fn({ ...device, _signal: ac.signal }, { signal: ac.signal }),
       new Promise((_, reject) => ac.signal.addEventListener('abort', () => reject(new Error(`테스트 시간 초과(${Math.round(timeoutMs / 1000)}초) — 방화벽/포트 또는 장비 응답 지연을 확인하세요.`)), { once: true })),
     ]);
     return { ...snap, ms: Date.now() - startedAt };

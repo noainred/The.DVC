@@ -72,6 +72,14 @@ export async function samplesAfter(rowid = 0, limit = 20_000) {
   return { rows, maxRowid: rows.length ? Number(rows[rows.length - 1].rowid) : (Number(rowid) || 0) };
 }
 
+/** 현재 최대 rowid(중계 커서 리셋 감지용, v2.425). 표가 비면 0. */
+export async function maxRowid() {
+  const db = await open();
+  if (!db) return null;
+  const r = db.conn.prepare('SELECT MAX(rowid) AS m FROM port_perf').get();
+  return Number(r?.m || 0);
+}
+
 /** 장비들의 port_meta(연결 장비 이름·속도) — 중계 시 함께 보내 중앙이 스토리지별로 묶을 수 있게. */
 export async function metaFor(deviceIds = []) {
   const db = await open();
