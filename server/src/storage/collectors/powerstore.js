@@ -227,22 +227,24 @@ export async function fetchSpaceMetrics({ post, csrf, get, rawGet = null, entity
   throw new Error(`${lastErr ? lastErr.message : '공간 지표 없음'} [시도: ${tried.join(' · ')}]`);
 }
 
-export async function collect(device) {
+export async function collect(device, { signal = null } = {}) {
   // 수집 방식 분기(v2.405) — 등록 시 고른 collectMethod 로 REST/SSH(pstcli) 를 가른다.
   // isilon.js 와 같은 패턴: 타입 파일이 자기 방식을 안다(poller 는 타입만 안다).
   if (device.collectMethod === 'ssh') {
     const { collectViaSsh } = await import('./powerstoreSsh.js');
     return collectViaSsh(device);
   }
-  const get = makeGetter(device, { port: PORT() });
-  const rawGet = makeRawGetter(device, { port: PORT() });
-  const post = makePoster(device, { port: PORT() });
+  const get = makeGetter(device, { port: PORT(), signal });
+  const rawGet = makeRawGetter(device, { port: PORT(), signal });
+  const post = makePoster(device, { port: PORT(), signal });
   const raw = {};
   const snap = emptySnapshot(device);
   const sect = { cluster: 'config', metrics: 'capacity', nodes: 'nodes', users: 'accounts', alerts: 'alerts' };
   const step = async (key, fn) => {
+    // 취소(signal)면 남은 단계를 시도하지 않는다 — 연결 테스트 타임아웃 뒤 20여 회의 요청이 이어지지 않게(v2.421).
+    if (signal?.aborted) throw new Error('수집 취소(타임아웃)');
     try { raw[key] = await fn(); }
-    catch (e) { if (sect[key]) snap.sections[sect[key]] = `오류: ${e.message}`; if (/401/.test(e.message)) throw e; }
+    catch (e) { if (sect[key]) snap.sections[sect[key]] = `오류: ${e.message}`; if (/401/.test(e.message) || signal?.aborted) throw e; }
   };
   let csrf = null;
   try {
@@ -266,6 +268,7 @@ export async function collect(device) {
     if (Array.isArray(raw.appliances) && raw.appliances.length) {
       const pools = [];
       for (const a of raw.appliances.slice(0, 32)) {
+        if (signal?.aborted) break;
         try {
           const { points: pts } = await fetchSpaceMetrics({ post, csrf, get, rawGet, entity: 'space_metrics_by_appliance', entityId: a.id });
           const pt = pickLatestSpacePoint(pts);

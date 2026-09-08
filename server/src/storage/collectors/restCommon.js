@@ -8,6 +8,9 @@ import { Agent } from 'undici';
 
 const dispatcher = new Agent({ connect: { rejectUnauthorized: false } });
 const TIMEOUT_MS = Number(process.env.STORAGE_HTTP_TIMEOUT_MS) || 15_000;
+/** 요청 signal(v2.421): 호출자 취소(signal) + 요청 타임아웃을 합친다 — 연결 테스트가 끝난 뒤 수집기가 백그라운드에서 계속
+ *  요청을 이어가지 않게(라우팅 불가 주소면 요청마다 15초 × 20여 회 = 수 분간 세션이 남았다 — CI 에서 실제 관측). */
+const reqSignal = (signal) => (signal ? AbortSignal.any([signal, AbortSignal.timeout(TIMEOUT_MS)]) : AbortSignal.timeout(TIMEOUT_MS));
 
 /**
  * 헤더 값 사전 검증(v2.311 적대적 검증 확정 결함 수정 — 자격증명 유출 차단).
@@ -46,13 +49,13 @@ export async function httpFailMessage(res, device = null) {
   return `HTTP ${res.status}${detail ? ` — ${detail}` : ''}`;
 }
 
-export function makeGetter(device, { port = 443, headers = {} } = {}) {
+export function makeGetter(device, { port = 443, headers = {}, signal = null } = {}) {
   assertHeaderSafe(headers); // 값 미포함 오류로 즉시 차단(아래 머리말 참조 — 유출 방지)
   const auth = Buffer.from(`${device.username}:${device.password || ''}`).toString('base64');
   return async (apiPath) => {
     const res = await fetch(`https://${device.host}:${port}${apiPath}`, {
       headers: { Authorization: `Basic ${auth}`, Accept: 'application/json', ...headers },
-      dispatcher, signal: AbortSignal.timeout(TIMEOUT_MS),
+      dispatcher, signal: reqSignal(signal),
     });
     if (res.status === 401) throw new Error('인증 실패(401) — 계정/비밀번호 확인');
     if (!res.ok) throw new Error(await httpFailMessage(res, device));
@@ -64,13 +67,13 @@ export function makeGetter(device, { port = 443, headers = {} } = {}) {
  * GET + 응답 헤더까지 필요한 경우(v2.404). PowerStore 는 POST 에 CSRF 토큰(DELL-EMC-TOKEN)을
  * 요구하는데, 그 값을 앞선 GET 의 **응답 헤더**로 내려준다 — makeGetter 는 본문만 주므로 별도.
  */
-export function makeRawGetter(device, { port = 443, headers = {} } = {}) {
+export function makeRawGetter(device, { port = 443, headers = {}, signal = null } = {}) {
   assertHeaderSafe(headers);
   const auth = Buffer.from(`${device.username}:${device.password || ''}`).toString('base64');
   return async (apiPath) => {
     const res = await fetch(`https://${device.host}:${port}${apiPath}`, {
       headers: { Authorization: `Basic ${auth}`, Accept: 'application/json', ...headers },
-      dispatcher, signal: AbortSignal.timeout(TIMEOUT_MS),
+      dispatcher, signal: reqSignal(signal),
     });
     if (res.status === 401) throw new Error('인증 실패(401) — 계정/비밀번호 확인');
     if (!res.ok) throw new Error(await httpFailMessage(res, device));
@@ -84,7 +87,7 @@ export function makeRawGetter(device, { port = 443, headers = {} } = {}) {
  * ⚠ 실제 구성을 바꾸는 POST 를 이 헬퍼로 추가하지 말 것 — 스토리지 모니터링은 조회 전용이며,
  *   쓰기 경로가 생기면 감사/권한 설계를 다시 해야 한다.
  */
-export function makePoster(device, { port = 443, headers = {} } = {}) {
+export function makePoster(device, { port = 443, headers = {}, signal = null } = {}) {
   assertHeaderSafe(headers);
   const auth = Buffer.from(`${device.username}:${device.password || ''}`).toString('base64');
   return async (apiPath, body, extraHeaders = {}) => {
@@ -93,7 +96,7 @@ export function makePoster(device, { port = 443, headers = {} } = {}) {
       method: 'POST',
       headers: { Authorization: `Basic ${auth}`, Accept: 'application/json', 'Content-Type': 'application/json', ...headers, ...extraHeaders },
       body: JSON.stringify(body ?? {}),
-      dispatcher, signal: AbortSignal.timeout(TIMEOUT_MS),
+      dispatcher, signal: reqSignal(signal),
     });
     if (res.status === 401) throw new Error('인증 실패(401) — 계정/비밀번호 확인');
     if (!res.ok) throw new Error(await httpFailMessage(res, device));

@@ -19,6 +19,9 @@ import os from 'node:os';
 import path from 'node:path';
 
 process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-unity-'));
+// 라우팅 불가 주소(192.0.2.x)는 러너에 따라 패킷이 드롭돼 요청마다 15초를 기다린다(GitHub 러너 실측 — 파일이 120초 타임아웃).
+// 요청 타임아웃을 줄여 테스트가 네트워크 환경과 무관하게 빨리 끝나게 한다.
+process.env.STORAGE_HTTP_TIMEOUT_MS = '1500';
 
 // ─── 1) 시계열 점 선택 ─────────────────────────────────────────────────────────────
 test('pickLatestSpacePoint: 오름차순 응답에서 최신 점을 고른다(예전 [0] 버그 고정)', async () => {

@@ -29,7 +29,8 @@
         "CI 안정화: `npm test` 에 `--test-timeout=120000`(테스트 1건이 매달리면 실패로 드러나게 — 이번 릴리스 CI 에서 서버 테스트 잡이 20분 넘게 진행 중으로 남아 취소), 2421 테스트에 개별 타임아웃·ssh2 테스트 서버 강제 종료(3초 상한)·localhost 가 ::1 로 풀리는 러너 대응.",
         "테스트: `powerstoreSpace2421.test.js` 5건(구간 폴백·CSRF 재확보·전부 실패 시 시도 내역·physical_total 없는 점 오류 표기·HTTP 오류 본문 사유).",
         "SSH 접속 견고성: 서버가 준비(ready) 전에 소켓을 끊으면 ssh2 가 error 없이 close 만 내 connect Promise 가 영원히 미결로 남았다(CI 에서 'Promise resolution is still pending but the event loop has already resolved' 로 실제 발생). close 를 reject 로 결말 지어 호출자가 매달리지 않게 했다(운영에서는 장비당 타임아웃이 끊어 주지만 그 시간만큼 낭비).",
-        "공용 표 컴포넌트 `components/STable.jsx` 도입(SAN 스위치 화면 선적용) — 헤더 클릭 정렬. 전 화면 일괄 적용은 v2.422."
+        "공용 표 컴포넌트 `components/STable.jsx` 도입(SAN 스위치 화면 선적용) — 헤더 클릭 정렬. 전 화면 일괄 적용은 v2.422.",
+        "스토리지 연결 테스트 취소(v2.421): `storage/poller.testDeviceConnection` 이 타임아웃 시 결과만 포기하던 race 대신 AbortSignal 로 REST 수집기(PowerStore/Unity/PowerMax/VPLEX)의 남은 요청을 실제로 끊는다 — 라우팅 불가 주소면 요청마다 15초 × 20여 회가 백그라운드에서 이어졌다(CI 러너에서 `storagePowerstoreUnity.test.js` 파일이 120초를 넘겨 취소된 실제 원인). 취소 뒤 남은 단계는 시도하지 않는다."
       ]
     },
     {

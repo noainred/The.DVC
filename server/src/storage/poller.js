@@ -153,19 +153,19 @@ export async function testDeviceConnection(device, { timeoutMs = 60_000 } = {}) 
   const fn = COLLECTORS[device.type];
   const startedAt = Date.now();
   if (!fn) return { ok: false, error: `수집기 미구현: ${device.type}`, sections: {}, ms: 0 };
-  let timer = null;
+  // v2.421: 결과만 포기하는 race 가 아니라 **signal 로 수집기를 실제로 끊는다**(CLAUDE.md withDeadline 규칙). 예전에는
+  // 타임아웃 뒤에도 REST 수집기가 남은 요청(20여 회 × 15초)을 백그라운드에서 이어가 세션·소켓이 수 분간 남았다.
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), Math.max(1000, timeoutMs));
   try {
     const snap = await Promise.race([
-      fn(device),
-      new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`테스트 시간 초과(${Math.round(timeoutMs / 1000)}초) — 방화벽/포트 또는 장비 응답 지연을 확인하세요.`)), timeoutMs);
-        timer.unref?.();
-      }),
+      fn(device, { signal: ac.signal }),
+      new Promise((_, reject) => ac.signal.addEventListener('abort', () => reject(new Error(`테스트 시간 초과(${Math.round(timeoutMs / 1000)}초) — 방화벽/포트 또는 장비 응답 지연을 확인하세요.`)), { once: true })),
     ]);
     return { ...snap, ms: Date.now() - startedAt };
   } catch (e) {
     return { ok: false, error: e.message, sections: {}, ms: Date.now() - startedAt };
-  } finally { if (timer) clearTimeout(timer); }
+  } finally { clearTimeout(timer); }
 }
 
 export function startStoragePoller() {

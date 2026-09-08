@@ -65,8 +65,8 @@ export function normalizePowermax(device, raw) {
   return snap;
 }
 
-export async function collect(device) {
-  const get = makeGetter(device, { port: Number(process.env.STORAGE_UNISPHERE_PORT) || 8443 });
+export async function collect(device, { signal = null } = {}) {
+  const get = makeGetter(device, { port: Number(process.env.STORAGE_UNISPHERE_PORT) || 8443, signal });
   const raw = { caps: {} };
   const snap = emptySnapshot(device); // 섹션 오류 임시 기록용
   try {
