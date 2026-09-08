@@ -559,6 +559,49 @@ centralRouter.post('/storage-data', async (req, res) => {
   res.json({ ok: true, saved });
 });
 
+// ── PDU 모니터링 위임(v2.424) — 스토리지 위임과 완전히 같은 규약 ────────────────
+// GET /api/central/pdu-config?agent=<이름> — 이 엣지 몫 PDU 목록(자격증명 포함: 엣지가 PDU 에
+// SSH 로그인해야 한다). 개별 토큰이면 바인딩된 agent 와 요청 agent 불일치를 거부(자격증명 횡탈 차단).
+centralRouter.get('/pdu-config', async (req, res) => {
+  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+  const agent = String(req.query.agent || req.get('X-Agent-Name') || '').trim();
+  if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
+  if (req.centralAuth?.mode === 'agent' && String(req.centralAuth.agent).toLowerCase() !== agent.toLowerCase()) {
+    return res.status(403).json({ ok: false, reason: '토큰의 agent 와 요청 agent 불일치' });
+  }
+  const { devicesForAgent } = await import('../pdu/registry.js');
+  const { takeRequestsForAgent } = await import('../pdu/collectRequests.js');
+  // intervals: **지정한 키만** 내려간다 — 전 키를 채우면 엣지 portal.env 의 현장 설정을 덮어쓴다.
+  const { intervalsForEdge } = await import('../pdu/intervals.js');
+  res.json({
+    ok: true, agent, devices: devicesForAgent(agent), collectNow: takeRequestsForAgent(agent),
+    intervals: intervalsForEdge(),
+  });
+});
+
+// POST /api/central/pdu-data — 엣지 수집 스냅샷 수신. 저장 키는 body.agent 가 아니라
+// **인증된 agent**(개별 토큰 바인딩)만 쓴다. 미위임 장비 id 는 드롭(위조 방지).
+centralRouter.post('/pdu-data', async (req, res) => {
+  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+  const agent = req.centralAuth?.mode === 'agent' ? req.centralAuth.agent : String(req.body?.agent || '').trim();
+  if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
+  const { saveEdgePdu } = await import('../central/pduEdge.js');
+  let snapshots = Array.isArray(req.body?.snapshots) ? req.body.snapshots : [];
+  const now = Date.now();
+  snapshots = snapshots.map((s) => (s && typeof s === 'object' ? { ...s, collectedAt: Math.min(Number(s.collectedAt) || now, now) } : s));
+  if (req.centralAuth.mode === 'agent') {
+    const { devicesForAgent } = await import('../pdu/registry.js');
+    const owned = new Set(devicesForAgent(agent).map((d) => d.id));
+    const before = snapshots.length;
+    snapshots = snapshots.filter((s) => s && owned.has(s.id));
+    if (before !== snapshots.length) console.warn(`[central] pdu-data: ${agent} 미위임 id ${before - snapshots.length}건 드롭(위조 방지)`);
+  }
+  const saved = saveEdgePdu(agent, snapshots);
+  res.json({ ok: true, saved });
+});
+
 // ── SAN 스위치 모니터링 위임(v2.410) — 스토리지 위임과 완전히 같은 규약 ──────────
 // GET /api/central/sanswitch-config?agent=<이름> — 이 엣지 몫 스위치 목록(자격증명 포함:
 // 엣지가 스위치에 SSH/REST 로그인해야 한다). 개별 토큰이면 바인딩 agent 불일치를 거부.
