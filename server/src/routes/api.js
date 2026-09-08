@@ -19,6 +19,7 @@ import { registerPdu } from './api/pdu.js';               // PDU 정보(APC Rack
 import { registerSerialLookup } from './api/serialLookup.js'; // 시리얼 통합 조회(v2.412)
 import { registerRma } from './api/rma.js';                   // 원격 명령 실행(RMA, v2.416)
 import { registerCredentials } from './api/credentials.js';   // 통합 계정 관리(v2.419)
+import { registerRelayCheck } from './api/relaycheck.js';     // HAProxy 경로 점검(v2.429)
 import { registerBmStorage } from './api/bmstor.js'; // 베어메탈 스토리지(SSH df 마운트 합산, v2.340)
 import { registerVmTrack } from './api/vmtrack.js'; // VM 수량 추이(00/12시 스냅샷 + 증감 상세, v2.345)
 
@@ -47,5 +48,6 @@ registerPdu(api);
 registerSerialLookup(api);
 registerRma(api);
 registerCredentials(api);
+registerRelayCheck(api);
 registerBmStorage(api);
 registerVmTrack(api);
