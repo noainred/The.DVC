@@ -399,7 +399,7 @@ centralRouter.post('/inventory', (req, res) => {
   }
   // v2.428(미스매치 #6/#7): 같은 vcenterId 를 다른 agent 가 번갈아 push 하거나, 같은 agent 이름이 다른 hostname 에서 오면 충돌로 기록.
   noteAgentIdentity(agent, { hostname: req.get('X-Agent-Hostname') || '', mock: false, peer: req.socket?.remoteAddress || '' });
-  noteVcenterOwner(String(b.vcenterId), agent);
+  noteVcenterOwner(String(b.vcenterId), agent, { peer: req.socket?.remoteAddress || '', hostname: req.get('X-Agent-Hostname') || '' });
   const arr = (x, n) => (Array.isArray(x) ? x.slice(0, n) : []);
   const slice = {
     vcenter: b.vcenter,

@@ -7,6 +7,7 @@
 import { Router } from 'express';
 import express from 'express';
 import os from 'node:os';
+import { createHash } from 'node:crypto';
 import { config, currentVersion } from '../config.js';
 import { buildExport } from '../collector/agent.js';
 import { upgradeManager } from '../upgrade/manager.js';
@@ -33,24 +34,71 @@ function checkToken(req) {
 // deny 통계(관측성): 엣지에서 무음으로 삼켜지던 인증 거부를 집계해 export에 실어 중앙 UI가
 // '이 엣지에 최근 토큰 거부 N건'을 보여줄 수 있게 한다(토큰 값은 절대 포함하지 않음).
 const denyStats = { count: 0, lastAt: null, lastWhy: '', lastEndpoint: '' };
-export function getCollectorDenyStats() { return { ...denyStats }; }
+// v2.437: 중앙 화면이 '거부 N' 배지만 보여 주고 원인을 못 보여 줬다(툴팁에 마지막 사유 한 줄뿐,
+// 출처 IP 는 엣지 콘솔 로그에만 있어 SSH 로 들어가야 했다). 최근 거부를 **엣지 안에서** 링버퍼로
+// 들고 있다가 export 에 실어 중앙에서 바로 열어 볼 수 있게 한다.
+//   · 토큰 값은 절대 담지 않는다(길이·앞 4글자 지문만 — 지문은 '어느 토큰인지' 구분용).
+//   · 크기 상한: 최근 20건 + 출처 12개(고RTT 회선에서 export 본문이 커지지 않게).
+const DENY_KEEP = 20, DENY_SRC_KEEP = 12;
+const denyRecent = [];              // [{ at, endpoint, ip, why, tokenLen, fp, ua }] — 최신이 앞
+const denyBySrc = new Map();        // ip → { ip, count, firstAt, lastAt, lastWhy, lastEndpoint }
+/**
+ * 토큰 지문 — sha256 앞 8자 + 길이. **값의 일부도 싣지 않는다**(앞 몇 글자를 노출하면 그것도 토큰 값이다 —
+ * server/CLAUDE.md '비밀 값은 어떤 API 응답에도 싣지 않는다'). 서로 다른 요청이 같은 토큰인지 구분하는 용도.
+ */
+function tokenFp(t) { return t ? `sha256:${createHash('sha256').update(String(t)).digest('hex').slice(0, 8)}(len=${String(t).length})` : ''; }
+export function getCollectorDenyStats() {
+  return {
+    ...denyStats,
+    recent: denyRecent.slice(0, DENY_KEEP),
+    bySrc: [...denyBySrc.values()].sort((a, b) => b.count - a.count).slice(0, DENY_SRC_KEEP),
+  };
+}
+export function _resetCollectorDenyStats() {
+  denyStats.count = 0; denyStats.lastAt = null; denyStats.lastWhy = ''; denyStats.lastEndpoint = '';
+  denyRecent.length = 0; denyBySrc.clear(); _denyLogAt.clear();
+}
 const _denyLogAt = new Map();
 function logCollectorDeny(req, endpoint) {
   const ip = req.ip || req.socket?.remoteAddress || '?';
+  const provided = req.get('X-Collector-Token') || (req.get('Authorization') || '').replace(/^Bearer\s+/i, '');
+  // 사유는 세 갈래 — 이 구분이 해결 방법을 가른다(엣지 설정 / 요청자 헤더 누락 / 토큰 값 불일치).
+  // 화면(상세 카드)용 문구와 콘솔 로그 문구를 분리한다 — 로그 문구는 운영 grep·기존 테스트가 고정한 계약이다.
+  const why = !config.collector.token ? 'COLLECTOR_TOKEN 미설정(이 엣지의 수집 기능이 꺼져 있음)'
+    : !provided ? '요청에 X-Collector-Token 헤더 없음'
+      : '토큰 불일치';
+  const logWhy = !config.collector.token ? 'COLLECTOR_TOKEN 미설정(collector 비활성)'
+    : !provided ? '요청에 X-Collector-Token 없음'
+      : '토큰 불일치';
   // 통계는 스로틀과 무관하게 매 거부마다 집계(로그만 스로틀).
   denyStats.count++;
   denyStats.lastAt = Date.now();
   denyStats.lastEndpoint = endpoint;
-  denyStats.lastWhy = !config.collector.token ? 'COLLECTOR_TOKEN 미설정' : '토큰 불일치/누락';
-  const key = `${endpoint}:${ip}`;
+  denyStats.lastWhy = !config.collector.token ? 'COLLECTOR_TOKEN 미설정' : (provided ? '토큰 불일치' : '토큰 헤더 없음');
   const now = Date.now();
+  denyRecent.unshift({
+    at: now, endpoint, ip, why,
+    tokenLen: provided ? provided.length : 0,
+    fp: tokenFp(provided),
+    ua: String(req.get('User-Agent') || '').slice(0, 80),
+  });
+  if (denyRecent.length > DENY_KEEP) denyRecent.length = DENY_KEEP;
+  let src = denyBySrc.get(ip);
+  if (!src) {
+    // 백스톱: 출처가 무한히 늘지 않게(스캐너 대비) 가장 오래된 항목을 밀어낸다.
+    if (denyBySrc.size >= DENY_SRC_KEEP * 4) {
+      let oldest = null;
+      for (const [k, v] of denyBySrc) if (!oldest || v.lastAt < oldest[1].lastAt) oldest = [k, v];
+      if (oldest) denyBySrc.delete(oldest[0]);
+    }
+    src = { ip, count: 0, firstAt: now, lastAt: now, lastWhy: '', lastEndpoint: '' };
+    denyBySrc.set(ip, src);
+  }
+  src.count++; src.lastAt = now; src.lastWhy = why; src.lastEndpoint = endpoint;
+  const key = `${endpoint}:${ip}`;
   if (now - (_denyLogAt.get(key) || 0) < 30_000) return;
   _denyLogAt.set(key, now);
-  const provided = req.get('X-Collector-Token') || (req.get('Authorization') || '').replace(/^Bearer\s+/i, '');
-  const why = !config.collector.token ? 'COLLECTOR_TOKEN 미설정(collector 비활성)'
-    : !provided ? '요청에 X-Collector-Token 없음'
-      : '토큰 불일치';
-  console.warn(`[collector] 인증 거부(${endpoint}) — src=${ip} · ${why} · 요청토큰=${provided ? `제공됨(len=${provided.length})` : '없음'}`);
+  console.warn(`[collector] 인증 거부(${endpoint}) — src=${ip} · ${logWhy} · 요청토큰=${provided ? `제공됨(len=${provided.length})` : '없음'}`);
 }
 
 collectorRouter.get('/export', async (req, res) => {
