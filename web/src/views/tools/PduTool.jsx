@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { STable } from '../../components/STable.jsx';
 import { useHashTab } from '../../hooks/useHashTab.js';
 import { fetchJson, postJson, delJson, downloadFile } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
@@ -150,7 +151,10 @@ export default function PduTool() {
         <div className="muted" style={{ fontSize: 13 }}>등록된 PDU 가 없습니다. ‘+ PDU 추가’ 또는 CSV 가져오기로 등록하세요.</div>
       ) : (
         <div className="table-wrap">
-          <table>
+          {/* v2.447(감사 I5): v2.422 에서 표 181개를 STable 로 바꿀 때 이 표 하나가 raw table 로 남아
+              헤더 클릭 정렬이 동작하지 않았다. 펼침 상세행은 React.Fragment 로 묶여 있어 sortChildren 이
+              Fragment 단위로 옮기므로 상세행이 분리되지 않는다. */}
+          <STable>
             <thead>
               <tr>
                 <th>이름</th><th>주소</th><th>법인</th><th>수집 주체</th>
@@ -201,7 +205,7 @@ export default function PduTool() {
                 );
               })}
             </tbody>
-          </table>
+          </STable>
         </div>
       ))}
 

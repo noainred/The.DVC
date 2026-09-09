@@ -218,6 +218,14 @@ class UserStore:
                     return user["tokenVersion"] if user["enabled"] else None
         return None
 
+    def role_of(self, username: str):
+        """현재 저장된 역할(세션 판정의 진실의 원천). 계정이 없거나 중지면 None."""
+        with self._lock:
+            for user in self._load():
+                if user["username"] == username:
+                    return str(user["role"]) if user["enabled"] else None
+        return None
+
     def bump_token_version(self, username: str) -> None:
         """그 계정으로 발급된 모든 토큰을 즉시 무효화한다."""
         with self._lock:
@@ -263,6 +271,11 @@ class UserStore:
             if role is not None:
                 if role not in ROLES:
                     raise AuthError("역할은 admin 또는 viewer 여야 합니다.")
+                # v2.447(감사 S3): 역할이 바뀌면 tokenVersion 을 올려 **기존 세션을 즉시 무효화**한다.
+                # 예전에는 enabled=False 일 때만 올렸기 때문에 admin→viewer 강등이 세션 TTL(기본 8시간)
+                # 동안 반영되지 않아, 강등된 계정이 사용자 생성·백업 다운로드를 계속 할 수 있었다.
+                if str(target.get("role")) != role:
+                    target["tokenVersion"] = int(target["tokenVersion"]) + 1
                 target["role"] = role
             if enabled is not None:
                 if bool(enabled) is False and target["enabled"]:
@@ -469,12 +482,18 @@ class SessionStore:
             if cutoff is not None and float(body.get("i", 0)) <= cutoff:
                 return None
 
+        role = str(body.get("r", "viewer"))
         if self._users is not None:
             current = self._users.token_version(username)
             # 계정이 사라졌거나 중지됐거나, 비밀번호가 바뀐 뒤 발급된 토큰이 아니면 거부.
             if current is None or int(body.get("v", 0)) != int(current):
                 return None
-        return {"username": username, "role": str(body.get("r", "viewer"))}
+            # v2.447(감사 S3): 역할은 **저장소가 진실의 원천**이다. 토큰 payload 의 r 을 그대로 믿으면
+            # 위 tokenVersion 인상이 어떤 경로로든 누락됐을 때 강등이 반영되지 않는다(이중 방어).
+            live = self._users.role_of(username)
+            if live is not None:
+                role = live
+        return {"username": username, "role": role}
 
     def _next_issued(self) -> float:
         """단조 증가 발급시각 — 같은 마이크로초 충돌로 폐기/재발급 경계가 무너지지 않게."""

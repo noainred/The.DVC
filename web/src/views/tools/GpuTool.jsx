@@ -1,5 +1,6 @@
 // GpuTool.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
 import React, { useEffect, useState, useRef } from 'react';
+import { useLatest } from '../../hooks/useLatest.js';
 import { useHashTab } from '../../hooks/useHashTab.js';
 import { fetchJson, postJson, getToken } from '../../api.js';
 import { DataTable, Loading, ErrorBox, UsageCell, Modal, VmLink } from '../../components/ui.jsx';
@@ -33,10 +34,13 @@ function VmGpuModeBadge({ gpu }) {
 function GpuVmsModal({ title, params, onClose }) {
   const [d, setD] = useState(null);
   const [err, setErr] = useState(null);
+  // v2.447(감사 B16): params 가 deps 에서 빠져 있어 필터가 바뀌어도 재조회하지 않았고(낡은 클로저),
+  // cleanup 도 없어 모달을 바로 닫으면 죽은 컴포넌트에 setState 했다. 세대 가드로 둘 다 해결.
+  const run = useLatest();
+  const qs = new URLSearchParams(Object.entries(params || {}).filter(([, v]) => v)).toString();
   useEffect(() => {
-    const qs = new URLSearchParams(Object.entries(params || {}).filter(([, v]) => v)).toString();
-    fetchJson(`/tools/gpu/vms${qs ? `?${qs}` : ''}`).then(setD).catch((e) => setErr(e.message));
-  }, []);
+    run(fetchJson(`/tools/gpu/vms${qs ? `?${qs}` : ''}`), setD, (e) => setErr(e.message));
+  }, [qs, run]);
   return (
     <Modal title={title} onClose={onClose} width={1000} resizable minWidth={560} minHeight={380}>
       {err ? <ErrorBox message={err} /> : !d ? <Loading /> : (
@@ -345,10 +349,11 @@ function GpuExportModal({ scope, onClose, onSnapshot }) {
   const [vc, setVc] = useState(scope || ''); // 내보낼 vCenter(빈값=전체)
   const [vcs, setVcs] = useState([]);
   useEffect(() => { fetchJson('/vcenters').then((d) => setVcs(d || [])).catch(() => {}); }, []);
+  const runMeta = useLatest();   // v2.447: 세대 가드(감사 B16)
   useEffect(() => {
     const q = vc ? `?vcenterId=${encodeURIComponent(vc)}` : '';
-    fetchJson(`/tools/gpu/series-meta${q}`).then(setMeta).catch(() => setMeta({ collectedSince: null, sampleCount: 0 }));
-  }, [vc]);
+    runMeta(fetchJson(`/tools/gpu/series-meta${q}`), setMeta, () => setMeta({ collectedSince: null, sampleCount: 0 }));
+  }, [vc, runMeta]);
   const fmtTs = (ts) => (ts ? new Date(ts).toLocaleString('ko-KR') : null);
   const sinceTxt = meta && meta.collectedSince
     ? `${fmtTs(meta.collectedSince)} 부터 데이터가 쌓여 있습니다`

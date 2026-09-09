@@ -26,6 +26,13 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (!id.includes('node_modules')) return undefined;
+          // v2.447(감사 T11): recharts 와 d3-geo 를 분리한다. 로그인 화면(loginThemes.jsx)이
+          // d3-geo 의 심볼 2개(geoEquirectangular·geoPath)만 쓰는데 한 청크로 묶여 있어
+          // **차트가 없는 로그인 화면에 recharts 520KB 전량이 modulepreload** 되고 있었다(실측).
+          // d3-geo/d3-array 등 지도용만 vendor-geo 로 떼어내 로그인 경로의 전송량을 줄인다.
+          // ⚠ d3-path 는 recharts 도 쓰므로 여기 넣으면 vendor-geo ↔ vendor-charts 순환 청크가 된다
+          // (빌드 경고 'Circular chunk'). 지도 전용 패키지만 뗀다.
+          if (id.includes('/d3-geo') || id.includes('/topojson')) return 'vendor-geo';
           if (id.includes('recharts') || id.includes('/d3-')) return 'vendor-charts';
           if (id.includes('react-dom') || id.includes('/react/') || id.includes('/scheduler/')) return 'vendor-react';
           return undefined; // 그 외는 Rollup 기본 분할(lazy 경계 보존)

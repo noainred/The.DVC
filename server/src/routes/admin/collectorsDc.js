@@ -1,5 +1,6 @@
 // 수집기 CRUD/운영·데이터센터·VM 재구성 — admin.js(구 2,410줄) 분할(v2.285.0). 본문은 원본 그대로, 등록 순서는 admin.js 호출 순서가 보존한다.
 import { config } from '../../config.js';
+import { morefOf } from '../../vcenter/registry.js';   // v2.447: vcenterId 에 콜론이 있어도 안전한 moref 추출(감사 B1)
 import { requirePerm, setLocalPassword } from '../../auth/auth.js';
 import { inUserScope, inUserWriteScope } from '../../auth/scope.js';
 import { store } from '../../store.js';
@@ -283,7 +284,7 @@ adminRouter.get('/vm/:id/hardware', requirePerm('vm.reconfig'), async (req, res)
     const byName = (a, b) => String(a.name).localeCompare(String(b.name), undefined, { numeric: true, sensitivity: 'base' });
     const networks = (t.snap.networks || [])
       .filter((n) => n.vcenterId === t.vc.id)
-      .map((n) => ({ id: n.id, name: n.name, type: n.type, moref: String(n.id).split(':').slice(1).join(':') }))
+      .map((n) => ({ id: n.id, name: n.name, type: n.type, moref: morefOf(n.id, n.vcenterId || t.vc.id) }))
       .sort(byName);
     // 디스크 추가 시 선택할 데이터스토어 후보(해당 vCenter). 이름순으로 정렬(여유/총용량은 라벨에 표시).
     const datastores = (t.snap.datastores || [])

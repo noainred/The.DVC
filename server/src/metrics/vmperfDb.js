@@ -19,6 +19,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { config } from '../config.js';
 
 // DB 저장 경로 설정(v2.379)을 따른다 — config.dbDir 이 있으면 그 아래 vmperf/.
@@ -31,12 +32,63 @@ const TOTAL_FILE = '_all';      // 그 계열이 사는 파일명
 
 const round1 = (x) => (x == null ? null : Math.round(x * 10) / 10);
 
-/** vCenter id → 안전한 파일명. 경로 조작·OS 금지문자 차단(id 는 설정 파일에서 오지만 방어). */
+/**
+ * vCenter id → 안전한 파일명. 경로 조작·OS 금지문자 차단(id 는 설정 파일에서 오지만 방어).
+ *
+ * v2.447(감사 B3): 예전에는 sanitize 결과만 썼는데 그 매핑이 **단사가 아니었다** —
+ * `apac:vc01` 과 `apac_vc01` 이 똑같이 `apac_vc01.db` 가 되어
+ *  ① 두 vCenter 의 시계열이 한 파일에 섞이고
+ *  ② `DELETE /tools/waste/settings/data?vcenterId=apac:vc01` 이 **다른 vCenter 데이터까지 파일째 삭제**했다(복구 불가).
+ * 이제 원본 id 의 해시 8자를 접미사로 붙여 충돌을 없앤다. 파일명에서 원본 id 를 되돌릴 수 없으므로
+ * 역산이 필요한 곳(vmperfDiskUsage)은 사이드카 인덱스(_index.json)를 쓴다.
+ * 구버전 파일(해시 없는 이름)은 getVmperfDb 가 처음 열 때 1회 리네임한다.
+ */
 export function dbFileName(vcenterId) {
+  const raw = String(vcenterId ?? '');
+  if (raw === TOTAL_KEY) return TOTAL_FILE;
+  const safe = raw.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 100);
+  const h = createHash('sha1').update(raw, 'utf8').digest('hex').slice(0, 8);
+  return `${safe || '_unknown'}-${h}`;
+}
+
+/** 구버전(해시 접미사 없는) 파일명 — 마이그레이션 판정에만 쓴다. */
+function legacyDbFileName(vcenterId) {
   const raw = String(vcenterId ?? '');
   if (raw === TOTAL_KEY) return TOTAL_FILE;
   const safe = raw.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120);
   return safe || '_unknown';
+}
+
+const INDEX_FILE = () => path.join(DIR, '_index.json');
+
+/** 파일명(base) → 원본 vcenterId 매핑. 파일명이 비가역이라 역산은 이 인덱스로만 한다. */
+function readIndex() {
+  try { return JSON.parse(fs.readFileSync(INDEX_FILE(), 'utf8')) || {}; } catch { return {}; }
+}
+function rememberIndex(file, vcenterId) {
+  try {
+    const idx = readIndex();
+    if (idx[file] === vcenterId) return;
+    idx[file] = vcenterId;
+    fs.writeFileSync(INDEX_FILE(), JSON.stringify(idx, null, 2), { mode: 0o600 });
+  } catch { /* 인덱스는 표시·정리 편의용 — 실패해도 수집은 계속한다 */ }
+}
+
+/** 구버전 파일명이 있고 새 이름이 없으면 1회 리네임(-wal/-shm 포함). */
+function migrateLegacyFile(vcenterId, file) {
+  const legacy = legacyDbFileName(vcenterId);
+  if (legacy === file) return;
+  const newPath = path.join(DIR, `${file}.db`);
+  const oldPath = path.join(DIR, `${legacy}.db`);
+  try {
+    if (fs.existsSync(newPath) || !fs.existsSync(oldPath)) return;
+    for (const suffix of ['.db', '.db-wal', '.db-shm']) {
+      const from = path.join(DIR, `${legacy}${suffix}`);
+      const to = path.join(DIR, `${file}${suffix}`);
+      if (fs.existsSync(from)) fs.renameSync(from, to);
+    }
+    console.log(`[vmperf] DB 파일명 마이그레이션: ${legacy}.db → ${file}.db (id 충돌 방지, v2.447)`);
+  } catch (e) { console.warn(`[vmperf] 파일명 마이그레이션 실패(${legacy}): ${e.message}`); }
 }
 
 const open = new Map(); // fileName -> { db, st, usedAt }
@@ -89,7 +141,9 @@ function prepare(db) {
     bucketHourly: db.prepare(`SELECT CAST(h/? AS INTEGER)*? AS b, SUM(sum)/SUM(n) AS avg, MIN(mn) AS min, MAX(mx) AS max
       FROM samples_hourly WHERE metric=? AND k=? AND h>=? GROUP BY b ORDER BY b DESC LIMIT ?`),
     hourlyMin: db.prepare('SELECT MIN(h) AS mn FROM samples_hourly WHERE metric=? AND k=?'),
-    meta: db.prepare('SELECT MIN(ts) AS mn, MAX(ts) AS mx, COUNT(*) AS n FROM samples WHERE metric=?'),
+    // v2.447(감사 B3): k 필터 추가 — 파일이 한 vCenter 전용이라도, 구버전 충돌 파일이 남아 있으면
+    // 남의 행까지 세어 '수집 시작' 이 틀리게 표시됐다.
+    meta: db.prepare('SELECT MIN(ts) AS mn, MAX(ts) AS mx, COUNT(*) AS n FROM samples WHERE metric=? AND k=?'),
     prune: db.prepare('DELETE FROM samples WHERE ts < ?'),
     pruneHourly: db.prepare('DELETE FROM samples_hourly WHERE h < ?'),
   };
@@ -103,12 +157,14 @@ export async function getVmperfDb(vcenterId) {
   const hit = open.get(file);
   if (hit) { hit.usedAt = Date.now(); return hit; }
   fs.mkdirSync(DIR, { recursive: true });
+  migrateLegacyFile(vcenterId, file);          // v2.447: 구버전 파일명 → 해시 접미사 이름
   const p = path.join(DIR, `${file}.db`);
   const db = new mod.DatabaseSync(p);
   // 공용 metrics DB 와 같은 PRAGMA — WAL 로 읽기/쓰기 병행, fsync 완화(단건 insert 5ms→0.01ms 실측).
   try { db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=3000;'); } catch { /* 구버전 폴백 */ }
   const st = prepare(db);
   try { fs.chmodSync(p, 0o600); } catch { /* best effort */ }
+  rememberIndex(file, String(vcenterId ?? ''));  // 파일명 역산용(비가역 해시라 인덱스 필요)
   const entry = { db, st, usedAt: Date.now(), file };
   open.set(file, entry);
   evictIfNeeded();
@@ -156,7 +212,7 @@ export async function vmperfHistory(vcenterId, metric, sinceTs, bucketMs, limit)
 export async function vmperfMeta(vcenterId, metric = 'vm_cpu_alloc_mhz') {
   const x = await getVmperfDb(vcenterId);
   if (!x) return { firstTs: null, lastTs: null, count: 0 };
-  const r = x.st.meta.get(metric);
+  const r = x.st.meta.get(metric, String(vcenterId ?? ''));
   return { firstTs: r?.mn ?? null, lastTs: r?.mx ?? null, count: Number(r?.n || 0) };
 }
 
@@ -203,13 +259,16 @@ export function dropVmperfDb(vcenterId) {
 export function vmperfDiskUsage() {
   let files = [];
   try { files = fs.readdirSync(DIR).filter((f) => f.endsWith('.db')); } catch { return []; }
+  const idx = readIndex();                       // v2.447: 파일명 → 원본 vcenterId
   return files.map((f) => {
     const base = f.replace(/\.db$/, '');
     let bytes = 0;
     for (const suffix of ['', '-wal', '-shm']) {
       try { bytes += fs.statSync(path.join(DIR, `${f}${suffix}`)).size; } catch { /* 없으면 0 */ }
     }
-    return { vcenterId: base === TOTAL_FILE ? TOTAL_KEY : base, file: f, bytes };
+    // 인덱스에 있으면 원본 id, 없으면(구버전 파일·인덱스 유실) 파일명 그대로 — 표시용 최선값.
+    const vcId = base === TOTAL_FILE ? TOTAL_KEY : (idx[base] !== undefined ? idx[base] : base);
+    return { vcenterId: vcId, file: f, bytes };
   }).sort((a, b) => b.bytes - a.bytes);
 }
 

@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { geoEquirectangular, geoPath } from 'd3-geo';
-import { feature } from 'topojson-client';
-import geoData from 'world-atlas/countries-110m.json';
+// v2.447(감사 T11/T12): 지도 테마 자원을 **동적 로드**한다. 예전에는 정적 import 라
+//  ① 세계지도 topojson 105KB 가 entry 청크에 인라인되고(entry 의 약 43%)
+//  ② d3-geo 가 벤더 청크를 거쳐 recharts(496KB)까지 로그인 화면에 modulepreload 시켰다.
+// 10종 테마 중 지도 테마가 뽑혔을 때만 받으면 되므로, 그 순간 import() 한다.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 로그인 화면 테마 10종 — 로그인마다 랜덤으로 하나가 표시된다(재미 요소).
@@ -79,8 +80,23 @@ const SITES = [
 function DotMap() {
   const wrapRef = useRef(null); const canvasRef = useRef(null);
   const [markers, setMarkers] = useState([]);
+  const [land, setLand] = useState(null);
   useEffect(() => {
-    const land = feature(geoData, geoData.objects.countries);
+    let alive = true;
+    // 세 모듈을 병렬로 받아 land(GeoJSON)만 상태에 담는다. 실패해도 로그인은 계속되어야 하므로
+    // 조용히 포기한다(배경 장식이라 없으면 점만 안 그려진다).
+    Promise.all([import('d3-geo'), import('topojson-client'), import('world-atlas/countries-110m.json')])
+      .then(([d3geo, topo, geo]) => {
+        if (!alive) return;
+        const data = geo.default || geo;
+        setLand({ feature: topo.feature(data, data.objects.countries), geoEquirectangular: d3geo.geoEquirectangular, geoPath: d3geo.geoPath });
+      })
+      .catch(() => { /* 지도 없이 표시 */ });
+    return () => { alive = false; };
+  }, []);
+  useEffect(() => {
+    if (!land) return undefined;
+    const { feature: landGeo, geoEquirectangular, geoPath } = land;
     const draw = () => {
       const wrap = wrapRef.current, canvas = canvasRef.current;
       if (!wrap || !canvas) return;
@@ -93,7 +109,7 @@ function DotMap() {
       const off = document.createElement('canvas'); off.width = w; off.height = h;
       const octx = off.getContext('2d', { willReadFrequently: true });
       const path = geoPath(projection, octx);
-      octx.fillStyle = '#fff'; octx.beginPath(); path(land); octx.fill();
+      octx.fillStyle = '#fff'; octx.beginPath(); path(landGeo); octx.fill();
       const img = octx.getImageData(0, 0, w, h).data;
       const ctx = canvas.getContext('2d');
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, w, h);
@@ -115,7 +131,7 @@ function DotMap() {
     const ro = new ResizeObserver(draw);
     if (wrapRef.current) ro.observe(wrapRef.current);
     return () => ro.disconnect();
-  }, []);
+  }, [land]);   // land 가 도착하면 다시 그린다(동적 로드, v2.447)
   return (
     <div ref={wrapRef} className="dv-map" aria-hidden="true">
       <canvas ref={canvasRef} />

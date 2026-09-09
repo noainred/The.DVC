@@ -5,6 +5,7 @@
  */
 
 import { loadVcenterConfig } from '../config.js';
+import { morefOf } from '../vcenter/registry.js';   // v2.447: 콜론 포함 vcenterId 안전(감사 B1)
 import { store } from '../store.js';
 import { VimSoapClient, addGuestUser } from '../gpu/guestops.js';
 import { loadGpuGuestSettings, resolveVmCreds } from '../gpu/settings.js';
@@ -30,7 +31,7 @@ export async function addUsersToVms({ vcenterId, vmIds = [], username, password,
     await c.login();
     for (const vmId of vmIds) {
       const v = vmById.get(vmId);
-      const moref = String(vmId).split(':').slice(1).join(':') || String(vmId);
+      const moref = morefOf(vmId, v?.vcenterId || vcenterId);
       const name = v?.name || moref;
       try {
         if (!v) { results.push({ vmId, name, ok: false, error: '스냅샷에서 VM을 찾을 수 없음' }); continue; }

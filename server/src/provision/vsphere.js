@@ -12,17 +12,19 @@
 
 import { VimSoapClient } from '../vcenter/soapClient.js';
 import { store } from '../store.js';
+import { morefOf } from '../vcenter/registry.js';   // v2.447: 콜론 포함 vcenterId 안전(감사 B1)
 
 // Resolve a host/datastore display name to its MoRef using the live snapshot
 // (snapshot ids are `${vcId}:${moref}`), scoped to one vCenter.
-const morefOf = (id) => String(id || '').split(':').slice(1).join(':');
+// v2.447(감사 B1): vcenterId 에 콜론이 있을 수 있어 split(':') 로 자르면 MoRef 가 깨진다 —
+// 공용 morefOf(id, vcenterId) 로 통일(vcenter/registry.js).
 function findHostRef(vcenterId, name) {
   const h = store.get().hosts.find((x) => x.vcenterId === vcenterId && x.name === name);
-  return h ? morefOf(h.id) : null;
+  return h ? morefOf(h.id, vcenterId) : null;
 }
 function findDatastoreRef(vcenterId, name) {
   const d = store.get().datastores.find((x) => x.vcenterId === vcenterId && x.name === name);
-  return d ? morefOf(d.id) : null;
+  return d ? morefOf(d.id, vcenterId) : null;
 }
 
 const esc = (s) => String(s ?? '')
@@ -94,7 +96,7 @@ export function createProvisioner(vc) {
   return {
     async cloneOne(source, vm, { powerOn = false, placement = {} } = {}) {
       await ensureLogin();
-      const srcRef = morefOf(source.id) || source.id;
+      const srcRef = morefOf(source.id, source.vcenterId || vcenterId) || source.id;
       // Target folder: the operator's choice would need a name→MoRef lookup; for
       // now we place into the source's parent folder (same as source).
       const folder = await parentFolder(srcRef);

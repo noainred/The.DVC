@@ -89,6 +89,14 @@ const ENVELOPE = (body) =>
   `xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">` +
   `<soapenv:Body>${body}</soapenv:Body></soapenv:Envelope>`;
 
+/**
+ * vCenter 별 perf 카운터 카탈로그 캐시(v2.447, 감사 T1) — key: vCenter id, value: { at, map }.
+ * 정적 메타데이터라 TTL 을 길게 잡는다. 카탈로그가 바뀌는 유일한 경우는 vCenter 업그레이드인데,
+ * 그때는 6시간 안에 자연 만료되거나 포탈 재시작으로 비워진다. 엔트리 수는 vCenter 수(≤30)로 유계.
+ */
+const PERF_COUNTER_CACHE = new Map();
+const PERF_COUNTER_TTL_MS = Math.max(60_000, Number(process.env.PERF_COUNTER_TTL_MS) || 6 * 3_600_000);
+
 export class VimSoapClient {
   constructor(vc) {
     this.vc = vc;
@@ -294,9 +302,20 @@ export class VimSoapClient {
     return out;
   }
 
-  /** Map 'group.name.rollup' -> counterId from the PerformanceManager catalog. */
+  /**
+   * Map 'group.name.rollup' -> counterId from the PerformanceManager catalog.
+   *
+   * v2.447(감사 T1): **vCenter 별 프로세스 캐시**를 둔다. 이 카탈로그는 vCenter 의 정적 메타데이터
+   * (카운터 수백~천 개, 응답 수백 KB)인데 예전에는 지표를 볼 때마다 매번 내려받아 파싱했다.
+   * `/tools/waste` 의 평균 조회는 VM 40대 × 지표 2종 = 80회 호출이라 카탈로그만 수십 MB 를
+   * 반복 전송했고, 파싱(정규식 4개 × 블록 수)은 전부 메인 스레드에서 돌았다.
+   * 카운터 ID 는 vCenter 를 재설치하지 않는 한 바뀌지 않으므로 TTL 6시간이면 충분하다.
+   */
   async perfCounterMap() {
     if (!this.sc.perfManager) return new Map();
+    const ck = `${this.vc?.id || this.vc?.host || ''}`;
+    const hit = PERF_COUNTER_CACHE.get(ck);
+    if (hit && Date.now() - hit.at < PERF_COUNTER_TTL_MS && hit.map.size) return hit.map;
     const objs = await this.retrieveObjectProps('PerformanceManager', this.sc.perfManager, ['perfCounter']);
     const xml = objs[0]?.props?.perfCounter || '';
     const map = new Map();
@@ -307,6 +326,7 @@ export class VimSoapClient {
       const rollup = /<rollupType>(\w+)<\/rollupType>/.exec(blk)?.[1];
       if (key && name && group && rollup) map.set(`${group}.${name}.${rollup}`, key);
     }
+    if (map.size) PERF_COUNTER_CACHE.set(ck, { at: Date.now(), map });
     return map;
   }
 

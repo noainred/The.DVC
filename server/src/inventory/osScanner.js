@@ -5,6 +5,7 @@
  */
 
 import fs from 'node:fs';
+import { morefOf } from '../vcenter/registry.js';   // v2.447: vcenterId 에 콜론이 있어도 안전한 moref 추출(감사 B1)
 import path from 'node:path';
 import { config, loadVcenterConfig } from '../config.js';
 import { store } from '../store.js';
@@ -95,7 +96,7 @@ async function scanVcenter(vc, targets, settings) {
       const isWindows = /windows/i.test(v.guestOS || '');
       const creds = resolveVmCreds(gset, vc.id, v.id, isWindows);
       if (!creds || !creds.username) { upsertOs(v, null, '게스트 계정 없음'); errs.push(`${v.name}:계정없음`); return; }
-      const moref = String(v.id).split(':').slice(1).join(':') || String(v.id);
+      const moref = morefOf(v.id, vc.id);
       const h = hostByName.get(v.host); const dlHosts = h ? [h.mgmtIp, h.name].filter(Boolean) : [];
       try {
         const detected = await detectGuestOs(c, moref, creds, { isWindows, dlHosts });

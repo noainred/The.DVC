@@ -183,3 +183,23 @@ export async function testConnection(body) {
     return { ok: false, reason: d.message, hint: d.hint, code: d.code, ms: Date.now() - started };
   }
 }
+
+/**
+ * VM/네트워크/호스트 id(`${vcenterId}:${moref}`)에서 moref 를 잘라낸다(v2.447, 감사 B1).
+ *
+ * ⚠️ `split(':')` 금지: vCenter id 자체에 콜론이 들어갈 수 있어(위 유효성 검사가 허용한다)
+ * `split(':').slice(1).join(':')` 은 `apac:vc01:vm-123` 에서 `vc01:vm-123` 을 돌려준다.
+ * 그 잘못된 moref 로 SOAP 를 호출하면 GPU 수집·OS 스캔·게스트 계정·VM 복제가 전량 실패한다.
+ * 알려진 프리픽스 길이로 자르는 것만이 안전하다(vmExport.js·dsBrowse.js 가 쓰던 방식을 공용화).
+ *
+ * @param {string} id        `${vcenterId}:${moref}`
+ * @param {string} vcenterId 그 객체의 vcenterId(스냅샷 객체의 `vcenterId` 필드)
+ * @returns {string} moref. vcenterId 를 모르거나 프리픽스가 맞지 않으면 첫 콜론 뒤 전체(최선 추정).
+ */
+export function morefOf(id, vcenterId) {
+  const s = String(id || '');
+  const vc = String(vcenterId || '');
+  if (vc && s.startsWith(`${vc}:`)) return s.slice(vc.length + 1);
+  const i = s.indexOf(':');
+  return i >= 0 ? s.slice(i + 1) : s;
+}

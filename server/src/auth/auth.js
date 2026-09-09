@@ -867,6 +867,9 @@ export async function authenticate(username, password) {
 // AUTH_DISABLED_ROLE=viewer|operator 로 낮출 수 있고, requireRole도 이 역할로 실제 검사한다.
 const AUTH_DISABLED_ROLE = VALID_ROLES.includes(process.env.AUTH_DISABLED_ROLE)
   ? process.env.AUTH_DISABLED_ROLE : 'admin';
+
+/** 인증 비활성(AUTH_ENABLED=false) 환경에서 검사에 쓰는 대체 역할. 라우터 게이트가 공유한다(v2.447). */
+export function authDisabledRole() { return AUTH_DISABLED_ROLE; }
 if (!config.auth.enabled) {
   console.warn(`[auth] ⚠ 인증이 비활성(AUTH_ENABLED=false) — 모든 요청이 익명 '${AUTH_DISABLED_ROLE}' 권한으로 처리됩니다. 운영 환경에서는 인증을 켜거나 AUTH_DISABLED_ROLE=viewer 로 제한하세요.`);
 }

@@ -9,8 +9,14 @@
 // 태그)이 전부 이 클러스터에 집중되는데, 같은 파일이 Loading/ErrorBox(86개 파일 소비)의
 // 수출원이라 기능 커밋마다 최다 소비 공유 파일이 diff 에 걸렸다 — 다중 세션 병합 충돌 표면 축소.
 import React, { useState, useEffect } from 'react';
-import HostPowerPanel from './HostPowerPanel.jsx';
-import { VmMetricButton, HostMetricButton } from './VmMetrics.jsx';
+// v2.447(감사 T11): 차트를 쓰는 두 모듈을 lazy 로 — 이 파일은 components/ui.jsx 가 재수출해
+// **앱 entry 그래프에 정적으로 붙어 있어서**, recharts(vendor-charts 496KB)가 차트가 없는
+// 로그인 화면에서까지 modulepreload 됐다(실측). 둘 다 상세 화면에서만 렌더되므로 지연 로드가 맞다.
+const HostPowerPanel = React.lazy(() => import('./HostPowerPanel.jsx'));
+const VmMetricButton = React.lazy(() => import('./VmMetrics.jsx').then((m) => ({ default: m.VmMetricButton })));
+const HostMetricButton = React.lazy(() => import('./VmMetrics.jsx').then((m) => ({ default: m.HostMetricButton })));
+/** lazy 컴포넌트를 감싸는 얇은 경계 — 버튼 하나가 뜨는 동안 상세 화면이 접히지 않게 폴백을 최소화. */
+const Lazy = ({ children }) => <React.Suspense fallback={null}>{children}</React.Suspense>;
 import { VmConsoleButton } from './VmConsole.jsx';
 import { VmRemoteButton } from './VmRemote.jsx';
 import { VmReconfigButton } from './VmReconfig.jsx';
@@ -419,10 +425,10 @@ export function EntityDetail({ type, item, onClose }) {
           </div>
         </div>
       )}
-      {type === 'host' && <HostPowerPanel hostName={item.name} serviceTag={item.serviceTag} />}
+      {type === 'host' && <Lazy><HostPowerPanel hostName={item.name} serviceTag={item.serviceTag} /></Lazy>}
       {type === 'host' && (
         <div className="flex gap" style={{ marginTop: 14, justifyContent: 'flex-end' }}>
-          <HostMetricButton hostId={item.id} hostName={item.name} />
+          <Lazy><HostMetricButton hostId={item.id} hostName={item.name} /></Lazy>
         </div>
       )}
       {type === 'vm' && (
@@ -432,7 +438,7 @@ export function EntityDetail({ type, item, onClose }) {
           <VmReconfigButton vm={item} />
           <VmConsoleButton vmId={item.id} vmName={item.name} />
           <VmRemoteButton item={item} />
-          <VmMetricButton vmId={item.id} vmName={item.name} />
+          <Lazy><VmMetricButton vmId={item.id} vmName={item.name} /></Lazy>
         </div>
       )}
       {type === 'host' && showHostVms && (

@@ -5,6 +5,7 @@
  */
 
 import { loadVcenterConfig } from '../config.js';
+import { morefOf } from '../vcenter/registry.js';   // v2.447: vcenterId 에 콜론이 있어도 안전한 moref 추출(감사 B1)
 import { VimSoapClient, runGuestScript } from '../gpu/guestops.js';
 import { loadGpuGuestSettings, resolveVmCreds } from '../gpu/settings.js';
 
@@ -139,7 +140,7 @@ export async function guestProbe(candidates, probe, { guestUser = '', guestPass 
         const isWindows = /windows/i.test(v.guestOS || '');
         const creds = (guestUser && guestPass) ? { username: guestUser, password: guestPass } : resolveVmCreds(gset, vcId, v.id, isWindows);
         if (!creds || !creds.username) { errors.push({ vm: v.name, error: '게스트 계정 없음' }); return; }
-        const moref = String(v.id).split(':').slice(1).join(':') || String(v.id);
+        const moref = morefOf(v.id, v.vcenterId || vcId);
         try {
           checked++;
           const r = await runGuestScript(c, moref, creds, probeScript(probe, isWindows), { isWindows, timeoutMs: 20_000 });

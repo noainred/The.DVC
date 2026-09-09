@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import BoldText from '../../components/boldText.jsx';   // v2.447: 서버 문구의 **강조** 별표 노출 방지(감사 I6)
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
 import { fetchJson, postJson, delJson } from '../../api.js';
 import { MODES, bucketText, perfQuery, toLocalDt, rangeIssueOf, rangeLabel, RANGE_MAX_DAYS } from './sanSwitchPerfText.js';
@@ -371,7 +372,7 @@ function TestResult({ run }) {
       {!active && !test.ok && (
         <div style={{ marginTop: 6, fontSize: 13, lineHeight: 1.6 }}>
           <div><b>실패 단계:</b> {phaseLabel(test.phase)} · <b>사유:</b> {test.reason}</div>
-          {test.hint && <div className="muted" style={{ marginTop: 4, borderLeft: '3px solid var(--amber)', paddingLeft: 8 }}>💡 {test.hint}</div>}
+          {test.hint && <div className="muted" style={{ marginTop: 4, borderLeft: '3px solid var(--amber)', paddingLeft: 8 }}>💡 <BoldText text={test.hint} /></div>}
         </div>
       )}
       {!active && test.ok && test.snap && (

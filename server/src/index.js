@@ -305,6 +305,30 @@ const svcmonShutdown = () => {
   try { flushSvcmonStore(); } catch { /* noop */ }
   try { closeSvcmonPool(); } catch { /* noop */ }
 };
-process.on('SIGTERM', () => { svcmonShutdown(); process.exit(0); });
-process.on('SIGINT', () => { svcmonShutdown(); process.exit(0); });
+/**
+ * 정상 종료(v2.447, 감사 I3) — 예전에는 곧바로 process.exit(0) 이라 **진행 중인 HTTP 응답이 잘렸다**.
+ * 업그레이드 재시작이 잦은 배포라 그 순간의 요청이 실패로 보였다. 이제
+ *  ① 새 연결 수락을 멈추고(server.close) ② 진행 중 응답이 끝나기를 기다린 뒤 ③ 종료한다.
+ * 걸린 연결(keep-alive·SSE·WS) 때문에 무한 대기하지 않도록 상한(기본 8초)을 둔다 —
+ * systemd 의 TimeoutStopSec 보다 짧아야 SIGKILL 로 잘리지 않는다.
+ */
+const SHUTDOWN_GRACE_MS = Math.max(1000, Math.min(60_000, Number(process.env.SHUTDOWN_GRACE_MS) || 8000));
+let shuttingDown = false;
+const gracefulExit = (signal) => {
+  if (shuttingDown) return;            // 두 번째 시그널은 무시(중복 종료 경로 방지)
+  shuttingDown = true;
+  console.log(`[shutdown] ${signal} 수신 — 새 연결을 멈추고 진행 중 요청을 마무리합니다(최대 ${Math.round(SHUTDOWN_GRACE_MS / 1000)}초).`);
+  const done = (code) => { svcmonShutdown(); process.exit(code); };
+  const timer = setTimeout(() => {
+    console.warn('[shutdown] 유예 시간 초과 — 남은 연결을 끊고 종료합니다.');
+    done(0);
+  }, SHUTDOWN_GRACE_MS);
+  timer.unref?.();
+  try {
+    server.close(() => { clearTimeout(timer); console.log('[shutdown] 진행 중 요청 완료 — 정상 종료'); done(0); });
+    server.closeIdleConnections?.();   // keep-alive 유휴 소켓은 즉시 정리(Node 18.2+)
+  } catch { clearTimeout(timer); done(0); }
+};
+process.on('SIGTERM', () => gracefulExit('SIGTERM'));
+process.on('SIGINT', () => gracefulExit('SIGINT'));
 process.on('exit', svcmonShutdown);

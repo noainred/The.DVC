@@ -78,8 +78,10 @@ export function flushAllNow() { for (const file of _stores.keys()) { const st = 
 let _exitHooked = false;
 function ensureExitFlush() {
   if (_exitHooked) return; _exitHooked = true;
+  // v2.447(감사 I3): 시그널에서는 flush 만 — process.exit 를 부르면 index.js 의 정상 종료가
+  // 실행되지 못한다(진행 중 HTTP 응답이 끊김). 'exit' 훅이 있어 flush 자체는 보장된다.
   for (const ev of ['exit', 'SIGINT', 'SIGTERM', 'beforeExit']) {
-    try { process.once(ev, () => { flushAllNow(); if (ev !== 'exit' && ev !== 'beforeExit') process.exit(0); }); } catch { /* */ }
+    try { process.once(ev, () => { flushAllNow(); }); } catch { /* */ }
   }
 }
 
