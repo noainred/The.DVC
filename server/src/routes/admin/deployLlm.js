@@ -12,6 +12,11 @@ import { targetsToCsv, sampleCsv as deploySampleCsv, parseTargetsCsv, analyzeTar
 import { parseTargetsText, analyzeBulkDeploy, targetsToText, targetsToTextCsv, sampleText, sampleTextCsv, fillAutoTokens, COLUMN_PRESETS, DEFAULT_PRESET } from '../../agent/deployText.js';   // 대량 배포 텍스트/CSV(v2.432)
 import { startBulkDeploy, getRun, listRuns, cancelRun, activeRunId } from '../../agent/bulkDeploy.js';        // 대량 배포 실행기(v2.432)
 import { autoRegisterCollector } from '../../agent/autoRegister.js';
+import { diffTargets, targetUrl, tokenOk, STATUS as SYNC_STATUS } from '../../agent/collectorSync.js';  // 에이전트↔수집 서버 대조(v2.434)
+import { forceCollectorToken } from '../../agent/deploy.js';
+import { loadCollectors } from '../../collector/registry.js';
+import { pullNow } from '../../collector/puller.js';
+import { resilientFetch } from '../../util/resilientFetch.js';
 import { logAudit } from '../../audit.js';
 import { ipBlockReason } from '../../collector/registry.js';
 import crypto from 'node:crypto';
@@ -80,9 +85,32 @@ adminRouter.post('/agent-deploy', adminOnly, async (req, res) => {
 // Saved targets + bulk deploy.
 adminRouter.get('/agent-deploy/targets', adminOnly, (_req, res) => res.json({ targets: listTargets() }));
 
+/**
+ * 대상 저장 — v2.434 부터 **저장만 해도 수집 서버로 자동 등록**한다(사용자 요구 '에이전트를 등록하면
+ * 자동으로 수집서버(원격)에 등록'). 예전에는 '배포 성공' 시에만 등록돼, 대상만 미리 등록해 둔 사이트가
+ * 수집 서버 목록에 영영 안 떴다. registerCollector===false 면 건너뛴다.
+ * autoCollectorToken=true 면 토큰이 없을 때 새로 만들어 대상에 저장한다 — 다만 그 토큰은 **엣지에 아직
+ * 없으므로** 배포하거나 '엣지에 반영'을 해야 pull 이 200 이 된다(응답의 needsEdgeSync 로 알린다).
+ */
 adminRouter.post('/agent-deploy/targets', adminOnly, (req, res) => {
-  const r = saveTarget(req.body || {});
-  res.status(r.ok ? 200 : 400).json(r);
+  const body = { ...(req.body || {}) };
+  let generated = false;
+  if (!String(body.collectorToken || '').trim() && req.body?.autoCollectorToken && body.registerCollector !== false) {
+    const existing = body.id ? getTargetRaw(body.id)?.collectorToken : '';
+    if (existing) body.collectorToken = existing;
+    else { body.collectorToken = crypto.randomBytes(24).toString('hex'); generated = true; }
+  }
+  const r = saveTarget(body);
+  if (!r.ok) return res.status(400).json(r);
+  let collector = null;
+  try {
+    const raw = getTargetRaw(r.target?.id) || body;
+    collector = autoRegisterCollector(raw, raw.portalPort || body.portalPort);
+  } catch (e) { collector = { registered: false, reason: e.message }; }
+  if (collector?.registered) {
+    logAudit({ user: req.user?.username, action: '배포 대상 저장 시 수집 서버 자동 등록', target: collector.id, detail: `${collector.url}${generated ? ' · 토큰 신규 생성' : ''}`, ip: req.ip || '' });
+  }
+  res.json({ ...r, collector, tokenGenerated: generated, needsEdgeSync: generated });
 });
 
 adminRouter.delete('/agent-deploy/targets/:id', adminOnly, (req, res) => {
@@ -253,6 +281,84 @@ adminRouter.post('/agent-deploy/bulk/:runId/cancel', adminOnly, (req, res) => {
   const r = cancelRun(req.params.runId);
   if (r.ok) logAudit({ user: req.user?.username, action: '엣지 노드 대량 배포 취소', detail: req.params.runId, ip: req.ip || '' });
   res.status(r.ok ? 200 : 400).json(r);
+});
+
+/* ── 에이전트 ↔ 수집 서버(원격) 대조·연결(v2.434, 사용자 요구 '에이전트가 설치되어 있는데 수집서버가
+ * 설정되어 있지 않으면 추가하는 기능') ──────────────────────────────────────────────────────
+ * 엣지에 깔리는 프로그램은 하나지만 중앙은 그 하나를 두 목록에 적어 둔다(설치용 SSH 대상 / pull 용 URL+토큰).
+ * 여기서 두 목록을 맞춰 보고, 빠진 수집 서버를 만들어 준다. 응답에 토큰 값은 넣지 않는다.
+ */
+adminRouter.get('/agent-deploy/collector-sync', adminOnly, (_req, res) => {
+  const targets = listTargets().map((t) => getTargetRaw(t.id)).filter(Boolean);
+  const { rows, orphans, summary } = diffTargets(targets, loadCollectors());
+  res.json({ ok: true, rows, orphans, summary, statusLabels: SYNC_STATUS });
+});
+
+/**
+ * 빠진 수집 서버 추가(선택 행). 옵션:
+ *  · generateToken : 대상에 수집 토큰이 없으면 새로 만들어 대상에 저장한다.
+ *  · syncToEdge    : SSH 로 엣지 portal.env 의 COLLECTOR_TOKEN 을 그 값으로 교체하고 서비스를 재시작한다.
+ *                    (새로 만든 토큰은 엣지에 없으므로 이걸 켜야 바로 pull 이 된다. 서비스가 잠깐 끊긴다.)
+ *  · verify        : 등록 후 실제로 /api/collector/export 가 200 인지 확인한다.
+ * SSH 는 무겁다 — 한 번에 최대 50건, 동시 3건.
+ */
+adminRouter.post('/agent-deploy/collector-sync', adminOnly, async (req, res) => {
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(String).slice(0, 50) : [];
+  if (!ids.length) return res.status(400).json({ ok: false, reason: '추가할 대상을 선택하세요(최대 50건).' });
+  const generateToken = req.body?.generateToken !== false;
+  const syncToEdge = !!req.body?.syncToEdge;
+  const verify = req.body?.verify !== false;
+  logAudit({ user: req.user?.username, action: '에이전트 → 수집 서버 일괄 추가', detail: `${ids.length}건 · 토큰생성=${generateToken} 엣지반영=${syncToEdge}`, ip: req.ip || '' });
+
+  const results = [];
+  const run = async (id) => {
+    const t = getTargetRaw(id);
+    const base = { id, host: t?.host || '', agentName: t?.agentName || '', url: t ? targetUrl(t) : '' };
+    if (!t) { results.push({ ...base, ok: false, reason: '대상을 찾을 수 없습니다.' }); return; }
+    if (t.enabled === false) { results.push({ ...base, ok: false, reason: '비활성 대상입니다.' }); return; }
+    let token = String(t.collectorToken || '').trim();
+    let tokenGenerated = false;
+    if (!token) {
+      if (!generateToken) { results.push({ ...base, ok: false, reason: '수집 토큰이 없습니다(토큰 생성을 켜세요).' }); return; }
+      token = crypto.randomBytes(24).toString('hex'); tokenGenerated = true;
+      // saveTarget 은 부분 수정에도 host 를 요구하므로 원본을 통째로 넘긴다(FIELDS 필터라 lastResult 는 보존).
+      const sv = saveTarget({ ...t, id, collectorToken: token });
+      if (!sv.ok) { results.push({ ...base, ok: false, reason: `토큰 저장 실패: ${sv.reason}` }); return; }
+    }
+    if (!tokenOk(token)) { results.push({ ...base, ok: false, reason: '저장된 수집 토큰에 사용할 수 없는 문자가 있습니다(영숫자·._~+/=- 만).' }); return; }
+
+    // 엣지 반영(선택) — 새 토큰이면 이걸 해야 pull 이 통한다.
+    let edge = null;
+    if (syncToEdge) {
+      const r = await forceCollectorToken({ ...t, collectorToken: token }, token, { urlPort: Number(t.portalPort) || 4000 });
+      edge = { ok: !!r.ok, active: r.active || '', unit: r.unit || '', reason: r.reason || '', log: String(r.log || '').slice(-1500) };
+      if (!r.ok) { results.push({ ...base, ok: false, tokenGenerated, edge, reason: `엣지 반영 실패 — ${r.reason}` }); return; }
+    }
+
+    const col = autoRegisterCollector({ ...t, collectorToken: token }, t.portalPort);
+    if (!col?.registered) { results.push({ ...base, ok: false, tokenGenerated, edge, reason: col?.reason || '수집 서버 등록 실패' }); return; }
+
+    let verified = null;
+    if (verify) {
+      try {
+        const vr = await resilientFetch(`${col.url}/api/collector/export`, {
+          headers: { Accept: 'application/json', 'X-Collector-Token': token },
+          timeoutMs: config.collector.timeoutMs, retries: 1,
+        });
+        verified = { ok: vr.ok, reason: vr.ok ? '' : `HTTP ${vr.status}${vr.status === 403 ? ' (엣지의 COLLECTOR_TOKEN 이 다릅니다 — 배포하거나 엣지 반영을 켜세요)' : ''}` };
+      } catch (e) { verified = { ok: false, reason: e.message }; }
+    }
+    results.push({ ...base, ok: true, collectorId: col.id, collectorUrl: col.url, updated: !!col.updated, tokenGenerated, edge, verified });
+  };
+
+  const it = ids[Symbol.iterator]();
+  await Promise.all(Array.from({ length: Math.min(3, ids.length) }, async () => {
+    for (let n = it.next(); !n.done; n = it.next()) await run(n.value);
+  }));
+  if (results.some((r) => r.ok)) pullNow().catch(() => {});
+  const added = results.filter((r) => r.ok).length;
+  logAudit({ user: req.user?.username, action: '에이전트 → 수집 서버 일괄 추가 결과', detail: `성공 ${added}/${results.length}`, ip: req.ip || '' });
+  res.json({ ok: true, added, total: results.length, results, statusLabels: SYNC_STATUS });
 });
 
 /* 텍스트 내보내기 — 붙여넣기 입력칸에 그대로 다시 넣을 수 있는 형식(왕복). 비밀 포함은 소유자 게이트. */

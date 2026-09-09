@@ -5,6 +5,7 @@ import { Loading } from '../components/ui.jsx';
 import { CsvExportModal, CsvImportModal } from '../components/CsvBulkModals.jsx';
 import { STable } from '../components/STable.jsx';
 import BulkDeploy from './BulkDeploy.jsx';   // 대량 배포(텍스트 붙여넣기 → 등록 없이 즉시 설치, v2.432)
+import CollectorSync from './CollectorSync.jsx'; // 에이전트 ↔ 수집 서버(원격) 대조·연결(v2.434)
 
 const EMPTY = {
   host: '', port: 22, username: 'root', password: '', privateKey: '',
@@ -114,10 +115,19 @@ export default function AgentDeploy() {
   };
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
 
+  // v2.434: 저장만 해도 수집 서버(원격)로 자동 등록된다(사용자 요구). 수집 토큰이 없으면 서버가 만들어
+  // 대상에 저장하는데, 그 토큰은 **아직 엣지에 없으므로** 배포하거나 '엣지에 반영'을 해야 pull 이 통한다.
   const saveTarget = async () => {
-    const r = await postJson('/admin/agent-deploy/targets', { id: f.id, ...f }).catch((e) => ({ ok: false, reason: e.message }));
-    if (r.ok) { await loadTargets(); setResult({ kind: 'save', ok: true, reason: '대상을 저장했습니다.' }); }
-    else setResult({ kind: 'save', ok: false, reason: r.reason });
+    const r = await postJson('/admin/agent-deploy/targets', { id: f.id, ...f, autoCollectorToken: f.registerCollector !== false })
+      .catch((e) => ({ ok: false, reason: e.message }));
+    if (r.ok) {
+      await loadTargets();
+      const c = r.collector;
+      const extra = c?.registered
+        ? ` · 수집 서버 '${c.id}' ${c.updated ? '갱신' : '등록'}(${c.url})${r.tokenGenerated ? ' · 수집 토큰을 새로 만들었습니다 — 배포하거나 에이전트 현황의 \'엣지에 반영\'을 해야 데이터를 당겨옵니다.' : ''}`
+        : (c?.reason ? ` · 수집 서버 등록 안 됨: ${c.reason}` : '');
+      setResult({ kind: 'save', ok: true, reason: `대상을 저장했습니다.${extra}` });
+    } else setResult({ kind: 'save', ok: false, reason: r.reason });
   };
   // gpuGuest는 EMPTY 기본값과 깊게 병합(저장 안 된 옛 대상도 안전) + 비밀번호는 비우고 has* 플래그 보존.
   const editTarget = (t) => { setF({ ...EMPTY, ...t, gpuGuest: { ...EMPTY.gpuGuest, ...(t.gpuGuest || {}) }, password: '', privateKey: '' }); setSubtab('add'); };
@@ -342,6 +352,8 @@ export default function AgentDeploy() {
         portal.env에 에이전트 설정 주입 → <code>vmware-portal</code> 서비스 재시작. 설치 후 설정 → 수집 서버/에이전트 작업에서 등록·확인하세요.
       </div>
       </>)}
+
+      {subtab === 'status' && <CollectorSync />}
 
       {subtab === 'status' && (
         <div className="card" style={{ marginBottom: 14 }}>
