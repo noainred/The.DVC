@@ -10,6 +10,7 @@
 //   · vCenter별 현재 사용량/용량/사용률 + 기간 증감 표(정렬)  · 일평균 증가량(GB/일)
 //   · 선형 추정 '용량 소진 예상' — 추정임을 화면에 명시(가정: 최근 기간 증가 속도 유지)
 import React, { useEffect, useMemo, useState } from 'react';
+import { useLatest } from '../../hooks/useLatest.js';
 import { useHashTab } from '../../hooks/useHashTab.js';
 import { ResponsiveContainer, ComposedChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend, ReferenceLine } from 'recharts';
 import { fetchJson, postJson } from '../../api.js';
@@ -321,6 +322,7 @@ const deltaColor = (gb) => (gb > 0 ? 'var(--amber)' : gb < 0 ? 'var(--green)' : 
  * 데이터는 diff-압축 저장(ds_changes/ds_series) — 무변화 DS 는 행이 없어 전체 vCenter 도 가볍다.
  */
 function DsChangeHistory({ days, vcenterId, onPick, onSlot }) {
+  const run = useLatest();   // v2.447: 늦게 온 이전 스코프 응답이 최신 화면을 덮지 않게(감사 B16)
   // 하위 탭을 URL 에 실어 새로고침·북마크·뒤로가기에서 유지한다(v2.438, hooks/useHashTab.js).
   const [view, setView] = useHashTab({ base: ['tools', 'storage-track'], valid: ['slots', 'ds'], fallback: 'slots' });
   const [log, setLog] = useState(null);
@@ -334,16 +336,14 @@ function DsChangeHistory({ days, vcenterId, onPick, onSlot }) {
   useEffect(() => { setPage(0); }, [vcenterId, days, q, changedOnly, view]);
   useEffect(() => {
     if (view !== 'slots') return;
-    fetchJson('/tools/vm-track/ds-change-log', { days, vcenterId })
-      .then((d) => { setLog(d); setErr(null); })
-      .catch((e) => setErr(e.message));
-  }, [view, days, vcenterId]);
+    run(fetchJson('/tools/vm-track/ds-change-log', { days, vcenterId }),
+      (d) => { setLog(d); setErr(null); }, (e) => setErr(e.message));
+  }, [view, days, vcenterId, run]);
   useEffect(() => {
     if (view !== 'ds') return;
-    fetchJson('/tools/vm-track/ds-pivot', { days, vcenterId, q, changedOnly: changedOnly ? 1 : 0, offset: page * LIMIT, limit: LIMIT })
-      .then((d) => { setPivot(d); setErr(null); })
-      .catch((e) => setErr(e.message));
-  }, [view, days, vcenterId, q, changedOnly, page]);
+    run(fetchJson('/tools/vm-track/ds-pivot', { days, vcenterId, q, changedOnly: changedOnly ? 1 : 0, offset: page * LIMIT, limit: LIMIT }),
+      (d) => { setPivot(d); setErr(null); }, (e) => setErr(e.message));
+  }, [view, days, vcenterId, q, changedOnly, page, run]);
 
   const chip = (it) => (
     <button key={`${it.dsId}`} className="tab" onClick={() => onPick(it)}
@@ -477,6 +477,7 @@ function DsChangeHistory({ days, vcenterId, onPick, onSlot }) {
  * 그리면 응답 수 MB·렌더 폭주라 vCenter 선택 시에만 표시하고 12개씩 페이지로 넘긴다.
  */
 function DsAllGrid({ days, vcenterId }) {
+  const run = useLatest();   // v2.447: 세대 가드(감사 B16)
   const LIMIT = 12;
   const [q, setQ] = useState('');
   const [sort, setSort] = useState('used');
@@ -486,10 +487,9 @@ function DsAllGrid({ days, vcenterId }) {
   useEffect(() => { setPage(0); }, [vcenterId, q, sort, days]);
   useEffect(() => {
     if (!vcenterId) { setData(null); return; }
-    fetchJson('/tools/vm-track/ds-series-all', { vcenterId, days, q, sort, offset: page * LIMIT, limit: LIMIT })
-      .then((d) => { setData(d); setErr(null); })
-      .catch((e) => setErr(e.message));
-  }, [vcenterId, days, q, sort, page]);
+    run(fetchJson('/tools/vm-track/ds-series-all', { vcenterId, days, q, sort, offset: page * LIMIT, limit: LIMIT }),
+      (d) => { setData(d); setErr(null); }, (e) => setErr(e.message));
+  }, [vcenterId, days, q, sort, page, run]);
 
   if (!vcenterId) {
     return (
@@ -592,6 +592,7 @@ function DsMiniChart({ item, days }) {
  * 화면은 받은 points 를 그대로 그린다.
  */
 function DsPerStore({ days, vcenterId }) {
+  const runList = useLatest(); const runTop = useLatest(); const runSeries = useLatest();  // v2.447: 세대 가드(감사 B16)
   const [list, setList] = useState(null);   // 선택 목록(로스터)
   const [top, setTop] = useState(null);     // 기간 증감 상위
   const [sel, setSel] = useState('');       // 선택된 dsId
@@ -601,21 +602,18 @@ function DsPerStore({ days, vcenterId }) {
 
   useEffect(() => { setSel(''); }, [vcenterId]); // 범위가 바뀌면 선택 해제(다른 vCenter 의 DS 잔류 방지)
   useEffect(() => {
-    fetchJson('/tools/vm-track/ds-list', { vcenterId })
-      .then((d) => { setList(d.items || []); setErr(null); })
-      .catch((e) => setErr(e.message));
-  }, [vcenterId]);
+    runList(fetchJson('/tools/vm-track/ds-list', { vcenterId }),
+      (d) => { setList(d.items || []); setErr(null); }, (e) => setErr(e.message));
+  }, [vcenterId, runList]);
   useEffect(() => {
-    fetchJson('/tools/vm-track/ds-top', { days, vcenterId, limit: 15 })
-      .then((d) => { setTop(d); setErr(null); })
-      .catch((e) => setErr(e.message));
-  }, [days, vcenterId]);
+    runTop(fetchJson('/tools/vm-track/ds-top', { days, vcenterId, limit: 15 }),
+      (d) => { setTop(d); setErr(null); }, (e) => setErr(e.message));
+  }, [days, vcenterId, runTop]);
   useEffect(() => {
     if (!sel) { setSeries(null); return; }
-    fetchJson('/tools/vm-track/ds-series', { dsId: sel, days })
-      .then((d) => { setSeries(d); setErr(null); })
-      .catch((e) => setErr(e.message));
-  }, [sel, days]);
+    runSeries(fetchJson('/tools/vm-track/ds-series', { dsId: sel, days }),
+      (d) => { setSeries(d); setErr(null); }, (e) => setErr(e.message));
+  }, [sel, days, runSeries]);
 
   const ql = q.trim().toLowerCase();
   const filtered = (list || []).filter((d) => !ql
@@ -745,14 +743,14 @@ const DS_KIND = {
 
 /** 사용량 변화 데이터스토어 상세 — VM 추이 화면과 같은 엔드포인트를 쓴다(단일 진실). */
 function DsDetail({ title, snapId = null, slot = null, onClose }) {
+  const run = useLatest();   // v2.447: 세대 가드(감사 B16)
   const [items, setItems] = useState(null);
   const [err, setErr] = useState(null);
   const [kind, setKind] = useState('all');
   useEffect(() => {
-    fetchJson('/tools/vm-track/ds-changes', { ...(snapId != null ? { snapId } : {}), ...(slot ? { slot } : {}) })
-      .then((d) => setItems(d.items || []))
-      .catch((e) => setErr(e.message));
-  }, [snapId, slot]);
+    run(fetchJson('/tools/vm-track/ds-changes', { ...(snapId != null ? { snapId } : {}), ...(slot ? { slot } : {}) }),
+      (d) => setItems(d.items || []), (e) => setErr(e.message));
+  }, [snapId, slot, run]);
 
   const shown = useMemo(() => (items || []).filter((r) => kind === 'all' || r.kind === kind), [items, kind]);
   const countOf = (k) => (items || []).filter((r) => r.kind === k).length;

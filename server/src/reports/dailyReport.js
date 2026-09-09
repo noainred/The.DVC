@@ -67,9 +67,17 @@ export async function runDailyReportNow() {
     const report = computeHealthReport(store.get(), { snapshotAgeDays: s.snapshotAgeDays, dsWarnPct: s.dsWarnPct, certs: certStatus() });
     const text = buildDailyReportText(report);
     const results = await sendText(text, '일일 헬스체크 리포트');
-    cache.lastRunTs = Date.now();
-    persist();
-    return { ok: results.length === 0 || results.some((r) => /:(2\d\d)/.test(r)), results, issues: report.summary.issues };
+    // v2.447(감사 B6): 예전에는 성공 여부와 무관하게 lastRunTs 를 갱신해, 웹훅이 전부 실패해도
+    // tick() 이 '오늘 이미 발송' 으로 보고 **그날 다시 시도하지 않았다**(운영자는 리포트를 못 받고
+    // 로그에는 '발송 완료' 만 남았다). 이제 한 채널이라도 2xx 일 때만 갱신해 다음 틱에 재시도한다.
+    // 채널이 하나도 없으면 성공이 아니라 '설정 없음' 으로 정직하게 알린다(테스트 발송이 아무 데도
+    // 안 갔는데 성공으로 보이던 문제).
+    if (!results.length) {
+      return { ok: false, reason: '알림 채널이 설정되지 않았습니다 — 설정 › 알림 에서 Slack/Teams/이메일을 먼저 등록하세요.', results, issues: report.summary.issues };
+    }
+    const anyOk = results.some((r) => /:(2\d\d)/.test(r));
+    if (anyOk) { cache.lastRunTs = Date.now(); persist(); }
+    return { ok: anyOk, results, issues: report.summary.issues, ...(anyOk ? {} : { reason: '모든 알림 채널 전송에 실패했습니다 — 다음 주기에 재시도합니다.' }) };
   } finally {
     running = false;
   }
@@ -84,8 +92,9 @@ async function tick() {
   const due = now.getHours() > s.hour || (now.getHours() === s.hour && now.getMinutes() >= s.minute);
   if (!due) return;
   if (s.lastRunTs && sameDay(s.lastRunTs, now.getTime())) return; // 오늘 이미 발송
-  await runDailyReportNow();
-  console.log('[daily-report] 일일 헬스체크 리포트 발송 완료');
+  const r = await runDailyReportNow();
+  if (r?.ok) console.log('[daily-report] 일일 헬스체크 리포트 발송 완료');
+  else console.warn(`[daily-report] 발송 실패 — ${r?.reason || '알 수 없는 오류'} (다음 틱에 재시도)`);
 }
 
 export function dailyReportStatus() {

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useLatest } from '../../hooks/useLatest.js';
 import { useHashTab } from '../../hooks/useHashTab.js';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
 import { fetchJson, postJson, delJson, downloadFile } from '../../api.js';
@@ -1479,11 +1480,11 @@ function AreaJsonViewer({ deviceId, area, onClose }) {
   const [rows, setRows] = useState(null);   // 영역의 엔드포인트 목록
   const [sel, setSel] = useState(null);     // 선택한 엔드포인트 원문
   const [err, setErr] = useState(null);
+  const run = useLatest();   // v2.447: 장비/영역을 바꾸면 이전 응답을 버린다(감사 B16)
   useEffect(() => {
-    fetchJson(`/tools/storage/devices/${encodeURIComponent(deviceId)}/areas`)
-      .then((r) => setRows((r.rows || []).filter((x) => x.area === area)))
-      .catch((e) => setErr(e.message));
-  }, [deviceId, area]);
+    run(fetchJson(`/tools/storage/devices/${encodeURIComponent(deviceId)}/areas`),
+      (r) => setRows((r.rows || []).filter((x) => x.area === area)), (e) => setErr(e.message));
+  }, [deviceId, area, run]);
   const open = (ep) => fetchJson(`/tools/storage/devices/${encodeURIComponent(deviceId)}/areas/json`, { endpoint: ep })
     .then((r) => setSel({ ep, ...r })).catch((e) => setSel({ ep, error: e.message }));
   return (

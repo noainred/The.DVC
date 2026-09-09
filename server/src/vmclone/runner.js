@@ -30,8 +30,10 @@ import {
   destroyClone, vmFilePaths, parseDsPath, backupFileFilter, datacenterPathOf, downloadDsFile,
 } from './vsphere.js';
 import { getMount, mountedSet, mountPointOf } from '../system/nfsMounts.js';
+import { morefOf } from '../vcenter/registry.js';   // v2.447: 콜론 포함 vcenterId 안전(감사 B1)
 
-const morefOf = (id) => String(id || '').split(':').slice(1).join(':');
+// v2.447(감사 B1): 로컬 split(':') 헬퍼 제거 — vcenterId 에 콜론이 있으면 잘못된 MoRef 로
+// 스냅샷/클론을 시도하게 된다. 공용 morefOf(id, vcenterId) 사용.
 const stamp = () => {
   const d = new Date();
   const p = (n) => String(n).padStart(2, '0');
@@ -79,7 +81,7 @@ async function runJob(jobId, trigger) {
       return;
     }
 
-    const vmRef = morefOf(job.vmId);
+    const vmRef = morefOf(job.vmId, job.vcenterId);
     if (!vmRef) throw new Error('VM MoRef 해석 실패');
     const c = new VimSoapClient(vcCfg);
     await c.login();
@@ -97,7 +99,7 @@ async function runJob(jobId, trigger) {
         if (!folder) throw new Error('원본 VM 폴더 조회 실패');
         const cloneName = `${job.vmName}-bak-${stamp()}`;
         _running.phase = `클론 중 → ${job.dest.datastoreName}`;
-        const newRef = await cloneFromSnapshot(c, { vmRef, folderRef: folder, name: cloneName, dsRef: morefOf(ds.id), snapshotRef: snapRef });
+        const newRef = await cloneFromSnapshot(c, { vmRef, folderRef: folder, name: cloneName, dsRef: morefOf(ds.id, job.vcenterId), snapshotRef: snapRef });
 
         // 보존정책 — 원장 기준(이름 패턴 아님), 켜져 있는 클론은 건너뛰고 보고.
         _running.phase = '보존정책 적용';

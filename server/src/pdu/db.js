@@ -31,6 +31,9 @@ async function open() {
     const { DatabaseSync } = await import('node:sqlite');
     fs.mkdirSync(path.dirname(FILE), { recursive: true });
     const conn = new DatabaseSync(FILE);
+    // v2.447(감사 S4): DB 파일 권한 0600 — 다른 DB 모듈(idrac/metrics/logs/ipam/vmtrack/capacity/ping)은
+    // 전부 적용돼 있는데 이 파일만 빠져 있었다. 같은 호스트의 다른 로컬 사용자가 읽을 수 있었다.
+    try { fs.chmodSync(FILE, 0o600); } catch { /* best effort */ }
     conn.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=3000;');
     conn.exec(`
       CREATE TABLE IF NOT EXISTS pdu_sample (

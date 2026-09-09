@@ -1,4 +1,7 @@
 import { Router } from 'express';
+import { config } from '../config.js';
+import { authDisabledRole } from '../auth/auth.js';
+import { toolAccessIssue } from '../auth/toolAccess.js';
 import { registerVmMetrics } from './api/vmMetrics.js';
 import { registerOverviewNsx } from './api/overviewNsx.js';
 import { registerProvision } from './api/provision.js';
@@ -29,6 +32,17 @@ import { registerVmTrack } from './api/vmtrack.js'; // VM 수량 추이(00/12시
 // 원본(단일 파일 시절) 정의 순서를 그대로 유지한다. 새 라우트 추가 시 해당 도메인 모듈에 넣을 것.
 // RBAC(requirePerm)·scope 강제는 각 모듈 라우트에 그대로 있다(CLAUDE.md 보안 불변조건).
 export const api = Router();
+
+// 특수 기능 '도구별 접근'(toolsDenied) 서버 집행(v2.447, 감사 S2) — 프론트 toolAllowed() 만으로는
+// curl 직접 호출을 막지 못했다. register* 보다 **먼저** 걸어야 모든 /tools 라우트에 적용된다.
+// 매핑에 없는 경로는 통과시킨다(auth/toolAccess.js 주석 참조 — 오차단 방지).
+api.use('/tools', (req, res, next) => {
+  const role = !config.auth.enabled ? authDisabledRole() : (req.user && req.user.role);
+  const issue = toolAccessIssue(role, req.path);
+  if (!issue) return next();
+  return res.status(403).json({ error: 'forbidden', requiredPerm: [`tool:${issue.tool}`], reason: issue.reason });
+});
+
 registerVmMetrics(api);
 registerOverviewNsx(api);
 registerProvision(api);

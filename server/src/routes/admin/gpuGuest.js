@@ -1,5 +1,6 @@
 // 메트릭 설정·GPU 게스트/물리·엣지 사용자 — admin.js(구 2,410줄) 분할(v2.285.0). 본문은 원본 그대로, 등록 순서는 admin.js 호출 순서가 보존한다.
 import { store } from '../../store.js';
+import { morefOf } from '../../vcenter/registry.js';   // v2.447: vcenterId 에 콜론이 있어도 안전한 moref 추출(감사 B1)
 import { loadMetricsSettings, saveMetricsSettings, METRICS_LIMITS } from '../../metrics/settings.js';
 import { forceGpuUtilCollect, clearGpuUtilForce } from '../../vcenter/soapClient.js';
 import { metricsSamplerStatus, rescheduleMetricsSampler } from '../../metrics/sampler.js';
@@ -298,7 +299,7 @@ adminRouter.post('/gpu-guest/test', adminOnly, async (req, res) => {
         else if (it.username) creds = { username: it.username, password: it.passwordless ? '' : (it.password || (vcShared.vms?.[it.vmId]?.password || '')), passwordless: !!it.passwordless };
         else creds = resolveVmCreds(s, vcenterId, it.vmId, isWindows);
         if (!creds || !creds.username) { results[i] = { vmId: it.vmId, login: false, read: false, error: '계정 없음', trace: [{ t: Date.now(), msg: '✗ 건너뜀 — 사용할 계정 없음(공용/별도 계정 미설정)' }] }; continue; }
-        const moref = String(v.id).split(':').slice(1).join(':');
+        const moref = morefOf(v.id, v.vcenterId || vcenterId);
         const dlHosts = dlByHost.get(v.host) || [];
         // SSH 접속 고정 IP: 요청에 실린 선택값(it.ip, 저장 전 실시간 테스트) 우선, 없으면 저장된 vmIps.
         const preferIp = it.ip !== undefined ? String(it.ip || '').trim() : ((s.vcenters[vcenterId]?.vmIps || {})[it.vmId] || '');

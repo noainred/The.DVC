@@ -3,6 +3,7 @@
 // · 증감(+N/-N) 숫자를 누르면 그 슬롯에 생성/삭제된 VM 과 위치(클러스터·호스트·데이터스토어)
 // 데이터는 서버 전용 DB(vm-track.db)에서 오고, 사용자 데이터 범위(scope)는 서버가 강제한다.
 import React, { useEffect, useMemo, useState } from 'react';
+import { useLatest } from '../../hooks/useLatest.js';
 import { ResponsiveContainer, ComposedChart, LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend, ReferenceLine } from 'recharts';
 import { fetchJson, postJson } from '../../api.js';
 import { Loading, ErrorBox, Kpi, VmLink } from '../../components/ui.jsx';
@@ -28,9 +29,11 @@ export default function VmTrackTool() {
   const [detail, setDetail] = useState(null); // { title, snapId?, slot? } — 증감 클릭 상세 모달
   const [dsDetail, setDsDetail] = useState(null); // 데이터스토어 사용량 변경 상세(v2.348)
 
-  const load = () => fetchJson('/tools/vm-track', { days, vcenterId })
-    .then((d) => { setData(d); setError(null); })
-    .catch((e) => setError(e.message));
+  // v2.447(감사 B16): 세대 가드 — 고RTT vCenter 를 빠르게 바꾸면 느린 이전 응답이 나중에 도착해
+  // 최신 스코프 화면을 덮어썼다. useLatest 가 마지막 요청 결과만 반영한다.
+  const run = useLatest();
+  const load = () => run(fetchJson('/tools/vm-track', { days, vcenterId }),
+    (d) => { setData(d); setError(null); }, (e) => setError(e.message));
   // load 는 매 렌더 재생성되므로 deps 에 넣으면 무한 루프 — 조회 파라미터만 의존한다(기존 뷰 관례).
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { load(); }, [days, vcenterId]);

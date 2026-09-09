@@ -7,9 +7,36 @@
  * key는 보통 `${snapshot.generatedAt}|${params...}`로 만든다(스냅샷이 갱신되면 key가 바뀌어
  * 자동 무효화). ttlMs는 generatedAt이 어떤 이유로 멈춰도 과도하게 오래된 값을 안 주도록 하는
  * 백스톱이다.
+ *
+ * v2.447(감사 T6) — **엔드포인트당 슬롯 1개 → 소형 LRU**:
+ *   예전에는 `name -> {key,...}` 라 이름당 최근 key **하나만** 보관했다. 사용자 A 가
+ *   `?vcenterId=kr`, B 가 `?vcenterId=pl` 로 같은 화면을 폴링하면 매 요청이 서로의 엔트리를
+ *   축출해 **히트율이 0%** 가 됐다(5,850 VM 집계를 폴 주기마다 사람 수만큼 반복). scope 가 다른
+ *   계정이 섞여도 extraKey 가 달라 같은 현상이 났다. 이제 이름별로 최대 MAX_PER_NAME 개의 key 를
+ *   LRU 로 들고 있어 사용자·필터 조합이 그 안이면 설계 의도(스냅샷당 1회 계산)대로 동작한다.
+ *   엔트리 수는 (엔드포인트 42개 × MAX_PER_NAME) 로 유계이고, 값은 스냅샷이 넘어가면 교체된다.
  */
 
-const store = new Map(); // name -> { key, at, value, promise }
+const MAX_PER_NAME = Math.max(2, Math.min(64, Number(process.env.SNAP_CACHE_PER_NAME) || 12));
+const store = new Map(); // name -> Map(key -> { at, value, promise })  ※ Map 은 삽입 순서 = LRU 순서
+
+function bucket(name) {
+  let b = store.get(name);
+  if (!b) { b = new Map(); store.set(name, b); }
+  return b;
+}
+
+/** 접근한 key 를 맨 뒤로 보내 LRU 순서를 유지하고, 상한 초과분(가장 오래 안 쓴 것)을 버린다. */
+function touch(b, key, entry) {
+  b.delete(key);
+  b.set(key, entry);
+  while (b.size > MAX_PER_NAME) {
+    const oldest = b.keys().next().value;
+    const e = b.get(oldest);
+    if (e?.promise) break;          // 진행 중 계산은 버리지 않는다(합류 중인 요청이 있을 수 있다)
+    b.delete(oldest);
+  }
+}
 
 /**
  * @param name    캐시 이름(엔드포인트별 고유)
@@ -19,27 +46,29 @@ const store = new Map(); // name -> { key, at, value, promise }
  */
 export async function snapMemo(name, key, ttlMs, compute) {
   const now = Date.now();
-  const cur = store.get(name);
-  if (cur && cur.key === key) {
-    if (cur.value !== undefined && (now - cur.at) < ttlMs) return cur.value; // 신선한 캐시 히트
+  const b = bucket(name);
+  const cur = b.get(key);
+  if (cur) {
+    // v2.447(감사 B14): 'has' 플래그로 값 유무를 판정한다 — undefined 를 '값 없음'과 '계산 중'의
+    // 겸용 센티널로 쓰면 compute() 가 정상적으로 undefined 를 돌려주는 순간 영구 캐시 미스가 된다.
+    if (cur.has && (now - cur.at) < ttlMs) { touch(b, key, cur); return cur.value; }
     if (cur.promise) return cur.promise;                                     // 진행 중 계산에 합류
   }
   const promise = (async () => {
     const value = await compute();
-    // 이 계산이 끝났을 때 이미 더 새로운 key의 계산이 진행 중이면(스냅샷이 넘어감) 그 항목을
-    // 덮어쓰지 않는다 — 덮어쓰면 새 key의 in-flight promise가 사라져 후속 요청이 다시 재계산
-    // (single-flight 붕괴). 내 항목이거나 같은 key일 때만 결과를 커밋한다.
-    const s = store.get(name);
-    if (!s || s.promise === promise || s.key === key) store.set(name, { key, at: Date.now(), value, promise: null });
+    // 이 계산이 끝났을 때 이미 다른 계산이 이 key 를 차지했으면 덮어쓰지 않는다 — 덮어쓰면
+    // 그쪽 in-flight promise 가 사라져 후속 요청이 다시 재계산한다(single-flight 붕괴).
+    const s = b.get(key);
+    if (!s || s.promise === promise) touch(b, key, { at: Date.now(), value, has: true, promise: null });
     return value;
   })();
-  // 진행 중 표시(같은 key 동시 요청이 위에서 promise에 합류). 이전 값은 key가 같을 때만 임시 보존.
-  store.set(name, { key, at: now, value: (cur && cur.key === key) ? cur.value : undefined, promise });
+  // 진행 중 표시(같은 key 동시 요청이 위에서 promise 에 합류). 이전 값은 있으면 임시 보존.
+  touch(b, key, { at: now, value: cur ? cur.value : undefined, has: !!cur?.has, promise });
   try {
     return await promise;
   } catch (e) {
-    const s = store.get(name);
-    if (s && s.promise === promise) store.delete(name); // 실패한 계산은 캐시에 남기지 않음
+    const s = b.get(key);
+    if (s && s.promise === promise) b.delete(key);   // 실패한 계산은 캐시에 남기지 않음
     throw e;
   }
 }
@@ -67,4 +96,9 @@ export function sendCached(req, res, key, payload, { maxAge = 0 } = {}) {
   if ((req.headers['if-none-match'] || '') === etag) { res.status(304).end(); return true; }
   res.json(payload);
   return false;
+}
+
+/** 진단용 — 이름별 보관 중인 key 수(운영 문제 추적 시 사용). */
+export function snapCacheStats() {
+  return [...store].map(([name, b]) => ({ name, keys: b.size }));
 }

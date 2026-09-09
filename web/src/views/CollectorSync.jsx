@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import BoldText from '../components/boldText.jsx';   // v2.447: 서버 문구의 **강조** 별표 노출 방지(감사 I6)
 import { fetchJson, postJson } from '../api.js';
 import { STable } from '../components/STable.jsx';
 
@@ -202,7 +203,7 @@ export default function CollectorSync() {
                       대상 {probe[r.id].target.ok ? <span className="badge green">OK</span> : <span className="badge red">{probe[r.id].target.reason || '실패'}</span>}<br />
                       <b>권장 {RECO[probe[r.id].recommend] || '—'}</b>
                     </span>) : <span className="muted">—</span>}</td>
-                  <td className="muted" style={{ maxWidth: 420 }}>{r.issue}{r.fix ? <><br /><b>조치:</b> {r.fix}</> : null}
+                  <td className="muted" style={{ maxWidth: 420 }}><BoldText text={r.issue} />{r.fix ? <><br /><b>조치:</b> <BoldText text={r.fix} /></> : null}
                     {probe?.[r.id]?.why ? <><br /><b style={{ color: 'var(--accent)' }}>진단:</b> {probe[r.id].why}</> : null}</td>
                 </tr>))}</tbody>
             </STable>

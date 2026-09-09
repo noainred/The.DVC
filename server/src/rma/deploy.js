@@ -84,7 +84,7 @@ export async function deployRma(target, opts = {}) {
   const issue = deployInputIssue(opts);
   if (issue) return { ok: false, reason: issue };
   try {
-    return await withSsh(creds(target), async ({ exec, writeFile }) => {
+    const r = await withSsh(creds(target), async ({ exec, writeFile }) => {
       const idu = await exec('id -u');
       if (idu.stdout.trim() !== '0') return { ok: false, reason: 'RMA 배포는 root 권한이 필요합니다(systemd 유닛·sudoers 작성). root 로 접속하세요.' };
       const inst = await resolveInstall(exec);
@@ -137,6 +137,12 @@ export async function deployRma(target, opts = {}) {
       const ok = results.every((r) => r.active === 'active');
       return { ok, install: inst, instances: results, sudoers, reason: ok ? undefined : '일부 인스턴스가 active 가 아닙니다 — 로그를 확인하세요(토큰/CENTRAL_URL 오류가 흔한 원인).' };
     });
+    // v2.447(감사 S10): withSsh 는 { ok, log, ... } 를 돌려주는데 그 log 에는
+    // `printf '…RMA_PASSWORD=<평문>…CENTRAL_TOKEN=<평문>' >> portal.env` 명령이 그대로 들어 있다.
+    // 응답 본문은 브라우저 캐시·HAR·중계 프록시 로그에 남으므로 비밀은 싣지 않는다
+    // (relaytopo/ops.js 가 같은 이유로 delete r.log 를 한다). 인스턴스별 journalctl 로그는 유지.
+    if (r && typeof r === 'object') delete r.log;
+    return r;
   } catch (err) { return { ok: false, reason: err.message }; }
 }
 
@@ -144,7 +150,7 @@ export async function deployRma(target, opts = {}) {
 export async function listRmaInstances(target) {
   if (!target?.host || !target?.username) return { ok: false, reason: 'host/username 을 입력하세요.' };
   try {
-    return await withSsh(creds(target), async ({ exec }) => {
+    const r = await withSsh(creds(target), async ({ exec }) => {
       const out = (await exec("systemctl list-units --all --plain --no-legend 'vmware-portal-rma@*' 2>/dev/null || true")).stdout;
       const rows = [];
       for (const line of out.split('\n')) {
@@ -155,6 +161,12 @@ export async function listRmaInstances(target) {
       const inst = await resolveInstall(exec);
       return { ok: true, unitInstalled: unit, install: inst.error ? null : inst, instances: rows };
     });
+    // v2.447(감사 S10): withSsh 는 { ok, log, ... } 를 돌려주는데 그 log 에는
+    // `printf '…RMA_PASSWORD=<평문>…CENTRAL_TOKEN=<평문>' >> portal.env` 명령이 그대로 들어 있다.
+    // 응답 본문은 브라우저 캐시·HAR·중계 프록시 로그에 남으므로 비밀은 싣지 않는다
+    // (relaytopo/ops.js 가 같은 이유로 delete r.log 를 한다). 인스턴스별 journalctl 로그는 유지.
+    if (r && typeof r === 'object') delete r.log;
+    return r;
   } catch (err) { return { ok: false, reason: err.message }; }
 }
 
@@ -164,11 +176,17 @@ export async function removeRmaInstance(target, name) {
   const n = String(name || '').trim();
   if (!RE_INSTANCE.test(n)) return { ok: false, reason: '인스턴스 이름 형식 오류' };
   try {
-    return await withSsh(creds(target), async ({ exec }) => {
+    const r = await withSsh(creds(target), async ({ exec }) => {
       const inst = await resolveInstall(exec);
       await exec(`systemctl disable --now vmware-portal-rma@${n} 2>&1 || true`);
       if (!inst.error) await exec(`rm -f ${inst.configDir}/rma-${n}.env`);
       return { ok: true, name: n };
     });
+    // v2.447(감사 S10): withSsh 는 { ok, log, ... } 를 돌려주는데 그 log 에는
+    // `printf '…RMA_PASSWORD=<평문>…CENTRAL_TOKEN=<평문>' >> portal.env` 명령이 그대로 들어 있다.
+    // 응답 본문은 브라우저 캐시·HAR·중계 프록시 로그에 남으므로 비밀은 싣지 않는다
+    // (relaytopo/ops.js 가 같은 이유로 delete r.log 를 한다). 인스턴스별 journalctl 로그는 유지.
+    if (r && typeof r === 'object') delete r.log;
+    return r;
   } catch (err) { return { ok: false, reason: err.message }; }
 }

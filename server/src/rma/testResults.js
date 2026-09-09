@@ -7,6 +7,7 @@
  *  - 알림: ok→bad/unknown(연속 N회, 기본 2회) 시 notify(key `rma-test:${agent}:${id}`), 복구 시 해소 알림.
  *    'rma-itself' 는 하트비트로 중앙이 판정한다(evaluateRmaItself).
  */
+import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { notify } from '../alerts.js';
@@ -24,6 +25,9 @@ async function open() {
   try {
     const { DatabaseSync } = await import('node:sqlite');
     const conn = new DatabaseSync(FILE());
+    // v2.447(감사 S4): DB 파일 권한 0600 — 다른 DB 모듈(idrac/metrics/logs/ipam/vmtrack/capacity/ping)은
+    // 전부 적용돼 있는데 이 파일만 빠져 있었다. 같은 호스트의 다른 로컬 사용자가 읽을 수 있었다.
+    try { fs.chmodSync(FILE(), 0o600); } catch { /* best effort */ }
     conn.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=3000;
       CREATE TABLE IF NOT EXISTS test_results (agent TEXT NOT NULL, test_id TEXT NOT NULL, instance TEXT, ts INTEGER NOT NULL, status TEXT NOT NULL, reply TEXT, value REAL);
       CREATE INDEX IF NOT EXISTS idx_tr_ts ON test_results (ts);

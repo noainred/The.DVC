@@ -8,6 +8,7 @@
  */
 
 import { config, loadVcenterConfig } from '../config.js';
+import { morefOf } from '../vcenter/registry.js';   // v2.447: vcenterId 에 콜론이 있어도 안전한 moref 추출(감사 B1)
 import { store } from '../store.js';
 import { loadGpuGuestSettings, resolveVmCreds, resolveVmIp, resolveCollectMethod } from './settings.js';
 import { setGuestGpu, pruneGuestGpu, guestGpuCounts } from './store.js';
@@ -117,7 +118,7 @@ async function pollLive(snap, vc, s) {
       const isWindows = /windows/i.test(v.guestOS || '');
       const creds = resolveVmCreds(s, vc.id, v.id, isWindows);
       if (!creds) return;
-      const moref = String(v.id).split(':').slice(1).join(':');
+      const moref = morefOf(v.id, vc.id);
       const dlHosts = dlByHost.get(v.host) || [];
       // Windows는 기본적으로 OpenSSH 서버가 없어 SSH 단독('ssh')이면 수집이 실패한다. Windows VM은
       // VMware Tools 게스트 작업(cmd.exe /c nvidia-smi.exe) 우선(auto)으로 자동 조정(리눅스는 그대로).

@@ -26,7 +26,9 @@ test('vCenter별로 파일이 분리되고 조회가 그 DB만 본다', { skip: 
   }
   const dir = process.env.VMPERF_DB_DIR;
   const files = fs.readdirSync(dir).filter((f) => f.endsWith('.db')).sort();
-  assert.deepEqual(files, ['vc-a.db', 'vc-b.db'], 'vCenter 당 파일 1개');
+  // v2.447: 파일명이 `<sanitized>-<sha1 8자>` 로 바뀌었다(id 충돌로 남의 데이터를 지우던 문제).
+  assert.deepEqual(files, [`${db.dbFileName('vc-a')}.db`, `${db.dbFileName('vc-b')}.db`].sort(), 'vCenter 당 파일 1개');
+  assert.ok(files.every((f) => /-[0-9a-f]{8}\.db$/.test(f)), `해시 접미사가 붙어야 한다: ${files.join(',')}`);
 
   const a = await db.vmperfHistory('vc-a', 'vm_cpu_used_mhz', t0 - HOUR, HOUR, 100);
   assert.ok(a.length >= 5, `vc-a 포인트 ${a.length}`);
@@ -45,12 +47,16 @@ test('전체 합계는 _all.db 로 분리 저장된다', { skip: !sqliteOk ? 'no
   assert.equal(pts.at(-1)?.avg, 28000);
 });
 
-test('파일명 sanitize — 경로 조작 차단', () => {
-  assert.equal(db.dbFileName('vc-eu-central'), 'vc-eu-central');
+test('파일명 sanitize — 경로 조작 차단 + 단사(v2.447 감사 B3)', () => {
+  assert.match(db.dbFileName('vc-eu-central'), /^vc-eu-central-[0-9a-f]{8}$/);
   assert.equal(db.dbFileName(''), '_all');
   assert.ok(!db.dbFileName('../../etc/passwd').includes('/'), '슬래시 제거');
   assert.ok(!db.dbFileName('..\\win').includes('\\'), '백슬래시 제거');
-  assert.equal(db.dbFileName('a:b*c?'), 'a_b_c_', 'OS 금지문자 치환');
+  assert.match(db.dbFileName('a:b*c?'), /^a_b_c_-[0-9a-f]{8}$/, 'OS 금지문자 치환');
+  // ★ 핵심 회귀: sanitize 결과가 같아도 원본 id 가 다르면 **다른 파일**이어야 한다.
+  // 예전에는 둘 다 'apac_vc01.db' 라 한쪽을 지우면 다른 vCenter 시계열까지 날아갔다.
+  assert.notEqual(db.dbFileName('apac:vc01'), db.dbFileName('apac_vc01'), 'id 충돌 시 파일이 분리돼야 한다');
+  assert.notEqual(db.dbFileName('a/b'), db.dbFileName('a_b'));
 });
 
 test('prune 이 보존기간 밖 행을 지운다(0 이면 무제한)', { skip: !sqliteOk ? 'node:sqlite 미지원' : false }, async () => {
@@ -73,7 +79,7 @@ test('prune 이 보존기간 밖 행을 지운다(0 이면 무제한)', { skip: 
 test('제외 시 파일 삭제로 용량을 회수한다', { skip: !sqliteOk ? 'node:sqlite 미지원' : false }, async () => {
   const ts = Date.now();
   await db.insertVmperf('vc-drop', rowsFor('vc-drop', 5000, 100), ts);
-  const p = path.join(process.env.VMPERF_DB_DIR, 'vc-drop.db');
+  const p = path.join(process.env.VMPERF_DB_DIR, `${db.dbFileName('vc-drop')}.db`);
   assert.ok(fs.existsSync(p), '생성됨');
   const usageBefore = db.vmperfDiskUsage().find((u) => u.vcenterId === 'vc-drop');
   assert.ok(usageBefore && usageBefore.bytes > 0, `사용량 측정 ${usageBefore?.bytes}B`);

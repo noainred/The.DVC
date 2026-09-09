@@ -6,50 +6,87 @@ import React, { useEffect, useState, useRef } from 'react';
 import { fetchJson, postJson, usePolling, toolAllowed, can } from '../api.js';
 import { SearchBox } from '../components/ui.jsx';
 import { TOOLS } from './specialToolsList.js';
-import Topology3D from './Topology3D.jsx';
-import { ServiceCheck, NetworkCheck, VmwareConfigBackup } from './DavinciChecks.jsx';
-import NetTrafficAnalysis from './NetTrafficAnalysis.jsx';
-import DeepSearch from './DeepSearch.jsx';
-import VmProvision from './VmProvision.jsx';
-import AgentScans from './AgentScans.jsx';
-import SvcMonConfig from './SvcMonConfig.jsx';
-import NsxAdmin from './Nsx.jsx';
-import Explore from './Explore.jsx';
-import CapacityAdvisor from './CapacityAdvisor.jsx';
-import LoginFails from './LoginFails.jsx';
-import NetIssues from './NetIssues.jsx';
-import { DailyHealth, SnapshotAge, ZombieVms, CertExpiry, Rightsizing, CapacityForecast, AlertChannels, ComplianceReport, ChangeHistory, UnprotectedVms } from './ToolsReports.jsx';
-import { AiSearch } from './tools/AiSearch.jsx';
-import { VmExport } from './tools/VmExport.jsx';
-import { Insights, Threats } from './tools/InsightsThreats.jsx';
-import { Esxi, Hardware, Hba, ServerAnalysis, VcVersion } from './tools/HardwareTools.jsx';
-import SecretScanTool from './tools/SecretScanTool.jsx'; // 평문 자격증명 점검(v2.297, admin 전용)
-import CodexCheck from './CodexCheck.jsx'; // 보안점검 — 상단 메뉴에서 특수기능으로 이동(v2.298)
-import VmCloneTool from './tools/VmCloneTool.jsx'; // VM 복제(백업식, v2.299 — admin 전용)
-import StorageMonTool from './tools/StorageMonTool.jsx'; // 스토리지 모니터링(Isilon 등, v2.302 — admin 전용)
-import BmStorageTool from './tools/BmStorageTool.jsx'; // 베어메탈 스토리지(SSH df 합산, v2.340 — admin 전용)
-import SanSwitchTool from './tools/SanSwitchTool.jsx';
-import PduTool from './tools/PduTool.jsx';
-import RemoteCommand from './tools/RemoteCommand.jsx'; // 원격 명령 실행(RMA, v2.416 — admin 전용)
-import CredentialManager from './tools/CredentialManager.jsx'; // 통합 계정 관리(v2.419 — admin 전용)
-import RelayCheckTool from './tools/RelayCheckTool.jsx';       // HAProxy 경로 점검(v2.429)
-import RelayTopoTool from './tools/RelayTopoTool.jsx';         // 중계 토폴로지·HAProxy 구성(v2.431)
-import SerialLookup from './tools/SerialLookup.jsx';   // 시리얼 통합 조회(v2.412)
-import VmTrackTool from './tools/VmTrackTool.jsx'; // VM 수량 추이(00/12시 스냅샷 + 증감 상세, v2.345)
-import StorageTrackTool from './tools/StorageTrackTool.jsx'; // 스토리지 사용량 추이(같은 스냅샷의 DS 관점 뷰, v2.350)
-import { PortalDb } from './tools/PortalDb.jsx';
-import { RoomTemp } from './tools/RoomTemp.jsx';
-import { NicModels, NicSpeed } from './tools/NicTools.jsx';
-import { Shutdown } from './tools/ShutdownTool.jsx';
-import { FleetInventory } from './tools/FleetInventory.jsx';
-import { Capacity, EsxiTemp, Forecast, ThinVms, Waste } from './tools/CapacityTools.jsx';
-import { VmFinder } from './tools/VmFinderTool.jsx';
-import { GuestOs, RealOs } from './tools/GuestOsTools.jsx';
-import { PowerMap } from './tools/PowerMap.jsx';
-import { DupIp, Snapshots, VmTools } from './tools/VmInfoTools.jsx';
-import { DatastoreUsage } from './tools/DatastoreUsage.jsx';
-import { LicenseExpiry, Licenses, Solutions } from './tools/LicenseTools.jsx';
-import { Gpu } from './tools/GpuTool.jsx';
+
+
+/**
+ * v2.447(감사 T13): 도구 48개를 정적 import 하던 것을 **React.lazy** 로 바꿨다.
+ * 실측으로 SpecialTools 청크가 893.8KB 단일 덩어리였고, 사용자는 '특수 기능' 탭을 열 때
+ * 실제로 볼 도구 1개를 위해 48개 전부를 내려받았다. 이제 셸(카드 그리드·권한 게이트·딥링크)만
+ * 즉시 로드하고 각 도구는 선택하는 순간 자기 청크를 받는다. ToolPanel 전체를 <Suspense> 로 감싼다.
+ *
+ * ⚠️ 파일 하단의 재export(IpamStandalone·GuestOsVmsModal)는 App.jsx·Summary.jsx 가 쓰므로
+ * 정적으로 유지한다 — lazy 로 바꾸면 그 두 화면이 깨진다.
+ */
+const Topology3D = React.lazy(() => import('./Topology3D.jsx'));
+const NetTrafficAnalysis = React.lazy(() => import('./NetTrafficAnalysis.jsx'));
+const DeepSearch = React.lazy(() => import('./DeepSearch.jsx'));
+const VmProvision = React.lazy(() => import('./VmProvision.jsx'));
+const AgentScans = React.lazy(() => import('./AgentScans.jsx'));
+const SvcMonConfig = React.lazy(() => import('./SvcMonConfig.jsx'));
+const NsxAdmin = React.lazy(() => import('./Nsx.jsx'));
+const Explore = React.lazy(() => import('./Explore.jsx'));
+const CapacityAdvisor = React.lazy(() => import('./CapacityAdvisor.jsx'));
+const LoginFails = React.lazy(() => import('./LoginFails.jsx'));
+const NetIssues = React.lazy(() => import('./NetIssues.jsx'));
+const SecretScanTool = React.lazy(() => import('./tools/SecretScanTool.jsx'));
+const CodexCheck = React.lazy(() => import('./CodexCheck.jsx'));
+const VmCloneTool = React.lazy(() => import('./tools/VmCloneTool.jsx'));
+const StorageMonTool = React.lazy(() => import('./tools/StorageMonTool.jsx'));
+const BmStorageTool = React.lazy(() => import('./tools/BmStorageTool.jsx'));
+const SanSwitchTool = React.lazy(() => import('./tools/SanSwitchTool.jsx'));
+const PduTool = React.lazy(() => import('./tools/PduTool.jsx'));
+const RemoteCommand = React.lazy(() => import('./tools/RemoteCommand.jsx'));
+const CredentialManager = React.lazy(() => import('./tools/CredentialManager.jsx'));
+const RelayCheckTool = React.lazy(() => import('./tools/RelayCheckTool.jsx'));
+const RelayTopoTool = React.lazy(() => import('./tools/RelayTopoTool.jsx'));
+const SerialLookup = React.lazy(() => import('./tools/SerialLookup.jsx'));
+const VmTrackTool = React.lazy(() => import('./tools/VmTrackTool.jsx'));
+const StorageTrackTool = React.lazy(() => import('./tools/StorageTrackTool.jsx'));
+const ServiceCheck = React.lazy(() => import('./DavinciChecks.jsx').then((m) => ({ default: m.ServiceCheck })));
+const NetworkCheck = React.lazy(() => import('./DavinciChecks.jsx').then((m) => ({ default: m.NetworkCheck })));
+const VmwareConfigBackup = React.lazy(() => import('./DavinciChecks.jsx').then((m) => ({ default: m.VmwareConfigBackup })));
+const DailyHealth = React.lazy(() => import('./ToolsReports.jsx').then((m) => ({ default: m.DailyHealth })));
+const SnapshotAge = React.lazy(() => import('./ToolsReports.jsx').then((m) => ({ default: m.SnapshotAge })));
+const ZombieVms = React.lazy(() => import('./ToolsReports.jsx').then((m) => ({ default: m.ZombieVms })));
+const CertExpiry = React.lazy(() => import('./ToolsReports.jsx').then((m) => ({ default: m.CertExpiry })));
+const Rightsizing = React.lazy(() => import('./ToolsReports.jsx').then((m) => ({ default: m.Rightsizing })));
+const CapacityForecast = React.lazy(() => import('./ToolsReports.jsx').then((m) => ({ default: m.CapacityForecast })));
+const AlertChannels = React.lazy(() => import('./ToolsReports.jsx').then((m) => ({ default: m.AlertChannels })));
+const ComplianceReport = React.lazy(() => import('./ToolsReports.jsx').then((m) => ({ default: m.ComplianceReport })));
+const ChangeHistory = React.lazy(() => import('./ToolsReports.jsx').then((m) => ({ default: m.ChangeHistory })));
+const UnprotectedVms = React.lazy(() => import('./ToolsReports.jsx').then((m) => ({ default: m.UnprotectedVms })));
+const AiSearch = React.lazy(() => import('./tools/AiSearch.jsx').then((m) => ({ default: m.AiSearch })));
+const VmExport = React.lazy(() => import('./tools/VmExport.jsx').then((m) => ({ default: m.VmExport })));
+const Insights = React.lazy(() => import('./tools/InsightsThreats.jsx').then((m) => ({ default: m.Insights })));
+const Threats = React.lazy(() => import('./tools/InsightsThreats.jsx').then((m) => ({ default: m.Threats })));
+const Esxi = React.lazy(() => import('./tools/HardwareTools.jsx').then((m) => ({ default: m.Esxi })));
+const Hardware = React.lazy(() => import('./tools/HardwareTools.jsx').then((m) => ({ default: m.Hardware })));
+const Hba = React.lazy(() => import('./tools/HardwareTools.jsx').then((m) => ({ default: m.Hba })));
+const ServerAnalysis = React.lazy(() => import('./tools/HardwareTools.jsx').then((m) => ({ default: m.ServerAnalysis })));
+const VcVersion = React.lazy(() => import('./tools/HardwareTools.jsx').then((m) => ({ default: m.VcVersion })));
+const PortalDb = React.lazy(() => import('./tools/PortalDb.jsx').then((m) => ({ default: m.PortalDb })));
+const RoomTemp = React.lazy(() => import('./tools/RoomTemp.jsx').then((m) => ({ default: m.RoomTemp })));
+const NicModels = React.lazy(() => import('./tools/NicTools.jsx').then((m) => ({ default: m.NicModels })));
+const NicSpeed = React.lazy(() => import('./tools/NicTools.jsx').then((m) => ({ default: m.NicSpeed })));
+const Shutdown = React.lazy(() => import('./tools/ShutdownTool.jsx').then((m) => ({ default: m.Shutdown })));
+const FleetInventory = React.lazy(() => import('./tools/FleetInventory.jsx').then((m) => ({ default: m.FleetInventory })));
+const Capacity = React.lazy(() => import('./tools/CapacityTools.jsx').then((m) => ({ default: m.Capacity })));
+const EsxiTemp = React.lazy(() => import('./tools/CapacityTools.jsx').then((m) => ({ default: m.EsxiTemp })));
+const Forecast = React.lazy(() => import('./tools/CapacityTools.jsx').then((m) => ({ default: m.Forecast })));
+const ThinVms = React.lazy(() => import('./tools/CapacityTools.jsx').then((m) => ({ default: m.ThinVms })));
+const Waste = React.lazy(() => import('./tools/CapacityTools.jsx').then((m) => ({ default: m.Waste })));
+const VmFinder = React.lazy(() => import('./tools/VmFinderTool.jsx').then((m) => ({ default: m.VmFinder })));
+const GuestOs = React.lazy(() => import('./tools/GuestOsTools.jsx').then((m) => ({ default: m.GuestOs })));
+const RealOs = React.lazy(() => import('./tools/GuestOsTools.jsx').then((m) => ({ default: m.RealOs })));
+const PowerMap = React.lazy(() => import('./tools/PowerMap.jsx').then((m) => ({ default: m.PowerMap })));
+const DupIp = React.lazy(() => import('./tools/VmInfoTools.jsx').then((m) => ({ default: m.DupIp })));
+const Snapshots = React.lazy(() => import('./tools/VmInfoTools.jsx').then((m) => ({ default: m.Snapshots })));
+const VmTools = React.lazy(() => import('./tools/VmInfoTools.jsx').then((m) => ({ default: m.VmTools })));
+const DatastoreUsage = React.lazy(() => import('./tools/DatastoreUsage.jsx').then((m) => ({ default: m.DatastoreUsage })));
+const LicenseExpiry = React.lazy(() => import('./tools/LicenseTools.jsx').then((m) => ({ default: m.LicenseExpiry })));
+const Licenses = React.lazy(() => import('./tools/LicenseTools.jsx').then((m) => ({ default: m.Licenses })));
+const Solutions = React.lazy(() => import('./tools/LicenseTools.jsx').then((m) => ({ default: m.Solutions })));
+const Gpu = React.lazy(() => import('./tools/GpuTool.jsx').then((m) => ({ default: m.Gpu })));
 
 
 // URL 해시(#/tools/<기능키>)에서 현재 도구 키를 읽는다(바로가기/북마크 지원).
@@ -262,7 +299,10 @@ function ToolPanel({ tool, onBack, isAdmin }) {
   const scoped = ['vm-export', 'dupip', 'vmtools', 'snapshots', 'hba', 'gpu', 'licenses', 'license-expiry', 'esxi', 'hardware', 'powermap', 'guestos', 'real-os', 'thinvms', 'capacity', 'waste', 'esxitemp', 'forecast', 'dsusage',
     'daily-health', 'snapshot-age', 'zombie-vms', 'rightsizing', 'capacity-forecast', 'compliance-report', 'change-history', 'unprotected-vms'].includes(tool);
 
+  // v2.447(감사 T13): 도구가 lazy 라 로딩 중 폴백이 필요하다. 셸(뒤로가기·스코프 선택)은 이미
+  // 그려진 상태이므로 폴백은 패널 영역만 차지한다(화면 전체가 접히지 않게).
   return (
+    <React.Suspense fallback={<div className="card" style={{ padding: 20, textAlign: 'center' }}><span className="muted">도구를 불러오는 중…</span></div>}>
     <>
       <div className="flex wrap" style={{ marginBottom: 12, alignItems: 'center', gap: 12 }}>
         <button className="tab" onClick={onBack}>← 특수 기능</button>
@@ -349,6 +389,7 @@ function ToolPanel({ tool, onBack, isAdmin }) {
       {tool === 'login-fails' && (isAdmin ? <LoginFails /> : <div className="card"><span className="muted">관리자 전용 기능입니다.</span></div>)}
       {tool === 'net-issues' && (isAdmin ? <NetIssues /> : <div className="card"><span className="muted">관리자 전용 기능입니다.</span></div>)}
     </>
+    </React.Suspense>
   );
 }
 

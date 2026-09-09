@@ -47,8 +47,11 @@ if (config.central?.token && !config.agent?.centralUrl) {
   let flushed = false;
   const onExit = () => { if (flushed) return; flushed = true; flushEdgeFleetNow(); };
   process.once('exit', onExit);
-  process.once('SIGTERM', () => { onExit(); process.exit(0); });
-  process.once('SIGINT', () => { onExit(); process.exit(0); });
+  // v2.447(감사 I3): 시그널에서는 **flush 만** 한다. 예전에는 여기서 process.exit(0) 을 불러
+  // index.js 의 정상 종료(진행 중 HTTP 응답 대기)가 실행되기도 전에 프로세스가 죽었다.
+  // 종료 결정은 index.js gracefulExit 한 곳에만 둔다('exit' 훅이 있어 flush 는 어차피 보장된다).
+  process.once('SIGTERM', onExit);
+  process.once('SIGINT', onExit);
 }
 
 /** 엣지가 push한 베어메탈 목록 저장. */

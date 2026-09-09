@@ -4,12 +4,15 @@
  */
 
 import { config, loadVcenterConfig } from '../config.js';
+import { eachLimited } from '../routes/api/shared.js';   // v2.447: vCenter 병렬 수집(감사 T2)
 import { store } from '../store.js';
 import { collectVCenterEvents } from '../vcenter/soapClient.js';
 import { getLogsDb } from './db.js';
 import { loadLogSettings } from './settings.js';
 
 const SEV_RANK = { info: 0, warning: 1, error: 2 };
+// 동시 수집 상한 — 28개를 한꺼번에 열면 매 주기 SOAP 파싱이 몰린다(store.collectPool 과 같은 취지).
+const LOG_CONCURRENCY = Math.max(1, Math.min(16, Number(process.env.VCLOGS_CONCURRENCY) || 6));
 const DAY = 86_400_000;
 
 let timer = null;
@@ -58,17 +61,36 @@ export async function pollLogsOnce() {
     const minRank = SEV_RANK[s.minSeverity] || 0;
     const vcs = mock ? (store.get().vcenters || []).map((v) => ({ id: v.id, name: v.name })) : (loadVcenterConfig().vcenters || []);
     let collected = 0;
-    for (const vc of vcs) {
+    // v2.447(감사 T2): vCenter 를 **병렬 + per-vCenter 데드라인**으로 수집한다.
+    // 예전에는 순차 await 라 vCenter 당 왕복 5회 이상(login→createCollector→readNext…→destroy→logout)이
+    // 그대로 더해졌다 — 28곳 중 폴란드·미 동부처럼 RTT 800ms 를 넘는 곳이 섞이면 한 주기가 10초를
+    // 훌쩍 넘고, 이벤트가 많아 readNext 가 여러 번 돌면 수십 초까지 늘어났다. '수집은 병렬 + per-vCenter
+    // 타임아웃, 느린 1개가 전체를 막지 않게' 라는 CLAUDE.md 불변조건이 이 폴러에만 빠져 있었다.
+    // DB 적재는 수집이 끝난 뒤 메인에서 한 번에 한다(동시 write 로 SQLITE_BUSY 를 만들지 않게).
+    const deadlineMs = (vc) => Math.max(60_000, (vc?.timeoutMs > 0 ? vc.timeoutMs : 30_000) * 2);
+    const withDeadline = (vc, p) => {
+      let timer;
+      const guard = new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`수집 데드라인 초과(${Math.round(deadlineMs(vc) / 1000)}초)`)), deadlineMs(vc));
+        timer.unref?.();
+      });
+      return Promise.race([p, guard]).finally(() => clearTimeout(timer));
+    };
+    const perVc = [];
+    await eachLimited(vcs, LOG_CONCURRENCY, async (vc) => {
       try {
         const last = db.lastTs(vc.id);
         const sinceTs = last ? last + 1 : Date.now() - 7 * DAY; // 첫 수집은 최근 7일
-        const events = mock ? synthEvents(vc.id, sinceTs, 25) : await collectVCenterEvents(vc, { sinceTs, max: s.maxPerPoll });
+        const events = mock
+          ? synthEvents(vc.id, sinceTs, 25)
+          : await withDeadline(vc, collectVCenterEvents(vc, { sinceTs, max: s.maxPerPoll }));
         const rows = events
           .filter((e) => (SEV_RANK[e.severity] || 0) >= minRank)
           .map((e) => ({ vcenterId: vc.id, key: e.key, ts: e.ts, severity: e.severity, type: e.type, user: e.user, entity: e.entity, message: e.message }));
-        if (rows.length) { db.insertMany(rows); collected += rows.length; }
+        if (rows.length) perVc.push(rows);
       } catch (e) { console.warn(`[vclogs] ${vc.id} 수집 실패: ${e.message}`); }
-    }
+    });
+    for (const rows of perVc) { db.insertMany(rows); collected += rows.length; }
     // prune/용량 점검은 매 폴이 아니라 N폴마다 1회(DELETE 스캔·크기 계산 비용 절감).
     if (tick++ % PRUNE_EVERY === 0) {
       if (s.retentionDays > 0) {

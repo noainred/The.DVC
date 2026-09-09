@@ -40,8 +40,34 @@ jobs:
       - name: 서버 단위테스트 (node:test)
         run: npm --prefix server test
 
+      # v2.447(감사 I2): lint 가 CI 에 없어 eslint 경고 75건이 그대로 통과했다.
+      # react-hooks/rules-of-hooks 는 error 라 화면 크래시(React #310)를 막는 게이트다 —
+      # 경고는 통과시키되(--max-warnings 미지정) 에러는 반드시 실패시킨다.
+      - name: 웹 린트 (eslint — 훅 규칙 게이트)
+        run: npm --prefix web run lint
+
+      - name: 웹 테스트 (vitest)
+        run: npm --prefix web run test
+
       - name: 웹 빌드 (vite)
         run: npm --prefix web run build
+
+      # v2.447(감사 I2): 의존성 취약점을 릴리스 전에 드러낸다. 운영 배포에 들어가는 것은
+      # production 의존성이므로 --omit=dev 로 좁히고, high 이상만 실패시킨다(moderate 는 로그로).
+      # 에어갭 배포라 즉시 조치가 어려운 경우가 있어 continue-on-error 로 '경고' 성격을 유지한다.
+      # v2.447(감사 I1): 환경변수 문서를 코드에서 자동 생성한다 — 손으로 관리하면 다시 어긋난다.
+      # 갱신을 잊었다고 릴리스를 막지는 않되(경고), 어긋난 사실은 로그에 드러낸다.
+      - name: 문서 최신 여부 (docs/ENV.md · docs/CONFIG-FILES.md)
+        continue-on-error: true
+        run: |
+          node scripts/env-doc.mjs --check
+          node scripts/config-doc.mjs --check
+
+      - name: 의존성 취약점 점검 (npm audit)
+        continue-on-error: true
+        run: |
+          echo '=== server ==='; npm --prefix server audit --omit=dev --audit-level=high || true
+          echo '=== web ===';    npm --prefix web audit --omit=dev --audit-level=high || true
 
   pyportal:
     name: 서비스 허브 테스트 (Python)

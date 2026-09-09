@@ -15,15 +15,30 @@ import { withSsh } from '../proxy/sshExec.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 
+/** 설치 패키지 파일명 규격 — 이 정규식을 만족하는 파일만 배포 대상이 될 수 있다(v2.447 감사 S1). */
+const INSTALLER_RE = /^vmware-portal-offline-.*-(el9|cent9)-x64\.tar\.gz$/;
+
 /** Find the newest offline installer tarball in download/ or the packages dir (or a given path). */
 export function resolveInstaller(explicit) {
-  if (explicit) return fs.existsSync(explicit) ? explicit : null;
   const dirs = [path.join(ROOT, 'download'), config.packages?.dir].filter(Boolean);
+  // v2.447(감사 S1): explicit 경로에 제한이 없어 `installerPath=/etc/vmware-portal/portal.env` 같은
+  // 임의 파일을 지정할 수 있었고, deployAgent 가 tar 검증 **전에** SFTP 로 올리므로 그 파일이
+  // 공격자 호스트로 그대로 전송됐다(AUTH_SECRET·TOTP·자격증명 유출 → 토큰 위조). 이제
+  // ① 파일명이 설치 패키지 규격이어야 하고 ② 실경로가 허용 디렉터리 안이어야 한다(심볼릭 링크 우회 차단).
+  if (explicit) {
+    if (!INSTALLER_RE.test(path.basename(explicit))) return null;
+    let real; try { real = fs.realpathSync(explicit); } catch { return null; }
+    const inAllowed = dirs.some((d) => {
+      let rd; try { rd = fs.realpathSync(d); } catch { return false; }
+      return real === rd || real.startsWith(rd + path.sep);
+    });
+    return inAllowed ? real : null;
+  }
   let best = null;
   for (const dir of dirs) {
     try {
       for (const f of fs.readdirSync(dir)) {
-        if (!/^vmware-portal-offline-.*-el9-x64\.tar\.gz$/.test(f)) continue;
+        if (!INSTALLER_RE.test(f)) continue;
         const m = fs.statSync(path.join(dir, f)).mtimeMs;
         if (!best || m > best.m) best = { p: path.join(dir, f), m };
       }
