@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useHashTab } from '../../hooks/useHashTab.js';
 import { fetchJson, postJson, delJson, downloadFile } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import EscClose from '../../components/EscClose.jsx';
@@ -39,7 +40,8 @@ export default function PduTool() {
   const [csvOpen, setCsvOpen] = useState(false);
   const [ivOpen, setIvOpen] = useState(false);
   const [thOpen, setThOpen] = useState(false);
-  const [tab, setTab] = useState('list'); // list | charts
+  // 하위 탭을 URL 에 실어 새로고침·북마크·뒤로가기에서 유지한다(v2.438, hooks/useHashTab.js).
+  const [tab, setTab] = useHashTab({ base: ['tools', 'pdu'], valid: ['list', 'charts'], fallback: 'list' });
 
   const load = async () => {
     try { setData(await fetchJson('/tools/pdu')); setError(null); }

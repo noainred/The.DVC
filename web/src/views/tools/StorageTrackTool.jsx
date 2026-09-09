@@ -10,6 +10,7 @@
 //   · vCenter별 현재 사용량/용량/사용률 + 기간 증감 표(정렬)  · 일평균 증가량(GB/일)
 //   · 선형 추정 '용량 소진 예상' — 추정임을 화면에 명시(가정: 최근 기간 증가 속도 유지)
 import React, { useEffect, useMemo, useState } from 'react';
+import { useHashTab } from '../../hooks/useHashTab.js';
 import { ResponsiveContainer, ComposedChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend, ReferenceLine } from 'recharts';
 import { fetchJson, postJson } from '../../api.js';
 import { Loading, ErrorBox, Kpi } from '../../components/ui.jsx';
@@ -320,7 +321,8 @@ const deltaColor = (gb) => (gb > 0 ? 'var(--amber)' : gb < 0 ? 'var(--green)' : 
  * 데이터는 diff-압축 저장(ds_changes/ds_series) — 무변화 DS 는 행이 없어 전체 vCenter 도 가볍다.
  */
 function DsChangeHistory({ days, vcenterId, onPick, onSlot }) {
-  const [view, setView] = useState('slots'); // 'slots'(A 시각별) | 'ds'(B DS별)
+  // 하위 탭을 URL 에 실어 새로고침·북마크·뒤로가기에서 유지한다(v2.438, hooks/useHashTab.js).
+  const [view, setView] = useHashTab({ base: ['tools', 'storage-track'], valid: ['slots', 'ds'], fallback: 'slots' });
   const [log, setLog] = useState(null);
   const [pivot, setPivot] = useState(null);
   const [q, setQ] = useState('');

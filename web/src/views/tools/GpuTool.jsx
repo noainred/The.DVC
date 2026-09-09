@@ -1,5 +1,6 @@
 // GpuTool.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
 import React, { useEffect, useState, useRef } from 'react';
+import { useHashTab } from '../../hooks/useHashTab.js';
 import { fetchJson, postJson, getToken } from '../../api.js';
 import { DataTable, Loading, ErrorBox, UsageCell, Modal, VmLink } from '../../components/ui.jsx';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Brush } from 'recharts';
@@ -86,7 +87,8 @@ export function Gpu({ scope }) {
     const res = await fetch(`/api/tools/gpu.${fmt}${q}`, { headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {} });
     await saveResponseAsFile(res, `gpu-${new Date().toISOString().slice(0, 10)}.${fmt}`);
   };
-  const [view, setView] = useState('host'); // host | cluster | vc | model
+  // 하위 탭을 URL 에 실어 새로고침·북마크·뒤로가기에서 유지한다(v2.438, hooks/useHashTab.js).
+  const [view, setView] = useHashTab({ base: ['tools', 'gpu'], valid: ['host', 'cluster', 'vc', 'model'], fallback: 'host' });
   const [hist, setHist] = useState(null);   // { level, key, days, points, synthesized }
   const [vmList, setVmList] = useState(null); // { title, params } for GpuVmsModal
   const [days, setDays] = useState(7);

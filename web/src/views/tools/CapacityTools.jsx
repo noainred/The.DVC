@@ -1,5 +1,6 @@
 // CapacityTools.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
 import React, { useEffect, useState, useRef } from 'react';
+import { useHashTab } from '../../hooks/useHashTab.js';
 import { fetchJson, postJson } from '../../api.js';
 import { DataTable, Loading, ErrorBox, StateBadge, UsageCell, Modal, ResultCount, SearchBox, VmLink } from '../../components/ui.jsx';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Brush } from 'recharts';
@@ -8,7 +9,8 @@ import { Card, fmtTrendTick, tb, tempColor, useTool } from './shared.jsx';
 
 export function EsxiTemp({ scope }) {
   const { loading, data, error } = useTool('/tools/esxi-temp', scope ? { vcenterId: scope } : {});
-  const [view, setView] = useState('host'); // host | cluster | vc
+  // 하위 탭을 URL 에 실어 새로고침·북마크·뒤로가기에서 유지한다(v2.438, hooks/useHashTab.js).
+  const [view, setView] = useHashTab({ base: ['tools', 'esxitemp'], valid: ['host', 'cluster', 'vc'], fallback: 'host' });
   const [hist, setHist] = useState(null); // { level, key, days, points, synthesized }
   const [days, setDays] = useState(7);
   const [bucket, setBucket] = useState('auto'); // auto | minute | hour | day
@@ -285,7 +287,8 @@ function WasteTrend({ scope }) {
 
 export function Waste({ scope }) {
   const { loading, data, error } = useTool('/tools/waste', scope ? { vcenterId: scope } : {});
-  const [tab, setTab] = useState('off');
+  // 하위 탭을 URL 에 실어 새로고침·북마크·뒤로가기에서 유지한다(v2.438, hooks/useHashTab.js).
+  const [tab, setTab] = useHashTab({ base: ['tools', 'waste'], valid: ['off', 'snap', 'tools', 'cpu', 'mem', 'trend'], fallback: 'off' });
   // ⚠ 훅은 **조기 return 위**에서 전부 선언한다(CLAUDE.md 프론트 회귀 방지). useSparklines 는
   // 내부에 useState/useEffect 를 가지므로 아래 `if (loading) return` 뒤에 두면 렌더 간 훅 개수가
   // 달라져 React #310 으로 화면 전체가 크래시한다(v2.375 에서 실제 발생 → v2.376 수정).

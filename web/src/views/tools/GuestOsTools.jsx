@@ -1,5 +1,6 @@
 // GuestOsTools.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
 import React, { useEffect, useState } from 'react';
+import { useHashTab } from '../../hooks/useHashTab.js';
 import { fetchJson, postJson, putJson, getToken } from '../../api.js';
 import { DataTable, Loading, ErrorBox, Modal, SearchBox, VmLink } from '../../components/ui.jsx';
 import { Card, useTool } from './shared.jsx';
@@ -9,7 +10,8 @@ import { STable } from '../../components/STable.jsx';
 
 export function GuestOs({ scope }) {
   const [q, setQ] = useState('');
-  const [view, setView] = useState('os'); // os | family | vcenter (v2.328: vCenter별 분해)
+  // 하위 탭을 URL 에 실어 새로고침·북마크·뒤로가기에서 유지한다(v2.438, hooks/useHashTab.js).
+  const [view, setView] = useHashTab({ base: ['tools', 'guestos'], valid: ['os', 'family', 'vcenter'], fallback: 'os' });
   const [power, setPower] = useState('all'); // all | on | off
   const [kind, setKind] = useState('all');   // all | vm | template
   const [vmList, setVmList] = useState(null); // { label, q:{os|family} }

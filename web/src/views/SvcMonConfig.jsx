@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useHashTab } from '../hooks/useHashTab.js';
 import { getCurrentUser } from '../api.js';
 import CsvTab from './svcmon/CsvTab.jsx';
 import TemplateTab from './svcmon/TemplateTab.jsx';
@@ -41,7 +42,9 @@ export default function SvcMonConfig() {
   const canEdit = me?.role === 'admin' || me?.role === 'operator';
   // 프리필은 최초 렌더에서 1회만 읽는다(리렌더마다 읽으면 sessionStorage 를 이미 비운 뒤라 사라진다).
   const [prefill] = useState(takePrefill);
-  const [tab, setTab] = useState(() => (prefill?.tab && TABS.some((t) => t.k === prefill.tab) ? prefill.tab : TABS[0].k));
+  // 하위 탭을 URL 에 실어 새로고침·북마크·뒤로가기에서 유지한다(v2.438, hooks/useHashTab.js).
+  const [tab, setTab] = useHashTab({ base: ['tools', 'svcmon-config'], valid: TABS.map((t) => t.k),
+    fallback: prefill?.tab && TABS.some((t) => t.k === prefill.tab) ? prefill.tab : TABS[0].k });
   const cur = TABS.find((t) => t.k === tab) || TABS[0];
 
   return (

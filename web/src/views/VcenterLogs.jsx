@@ -83,7 +83,10 @@ function LogViewer() {
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(false);
   const [sources, setSources] = useState({ local: [], remote: [] });
-  const [mode, setMode] = useState('local'); // 'local' | 'edge'
+  // 'local' | 'edge' — 사용자가 고르는 탭이 아니라 **조회 로직이 정하는 파생 상태**다(load() 가
+  // 선택한 vCenter 의 보관 위치를 보고 설정). URL 에 실으면 조회할 때마다 해시가 덮여 무의미하므로
+  // v2.438 하위 탭 URL 유지 대상에서 제외한다.
+  const [mode, setMode] = useState('local');
   const LIMIT = 200;
   const remoteAgent = (id) => sources.remote.find((r) => r.vcenterId === id)?.agent;
 

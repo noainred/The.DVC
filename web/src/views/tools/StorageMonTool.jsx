@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useHashTab } from '../../hooks/useHashTab.js';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
 import { fetchJson, postJson, delJson, downloadFile } from '../../api.js';
 import { Loading, ErrorBox, Kpi, UsageCell, Modal, SearchBox, usageColor } from '../../components/ui.jsx';
@@ -209,7 +210,8 @@ export default function StorageMonTool() {
   const [err, setErr] = useState(null);
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
-  const [view, setView] = useState('devices');   // devices | dc | type
+  // 하위 탭을 URL 에 실어 새로고침·북마크·뒤로가기에서 유지한다(v2.438, hooks/useHashTab.js).
+  const [view, setView] = useHashTab({ base: ['tools', 'storage-mon'], valid: ['devices', 'dc', 'type', 'trend'], fallback: 'devices' });
   const [detail, setDetail] = useState(null);    // 장비 상세 모달 — id 로 보관(v2.306: load() 후 최신 스냅샷 자동 반영)
   const [form, setForm] = useState(null);        // 등록/수정 폼
   const [importOpen, setImportOpen] = useState(false); // CSV 가져오기 모달(v2.313)
