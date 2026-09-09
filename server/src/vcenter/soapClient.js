@@ -354,20 +354,7 @@ export class VimSoapClient {
     const xml = await this.#call(
       `<QueryPerf xmlns="urn:vim25"><_this type="PerformanceManager">${this.sc.perfManager}</_this>${spec}</QueryPerf>`
     );
-    const rv = /<returnval[^>]*>([\s\S]*?)<\/returnval>/.exec(xml)?.[1] || '';
-    // sampleInfo 는 한 번(공통 타임스탬프), value 블록은 카운터별로 반복된다.
-    const times = [...rv.matchAll(/<timestamp>([^<]+)<\/timestamp>/g)].map((m) => m[1]);
-    for (const blk of rv.split(/<value\b(?=[ >])/).slice(1)) {
-      // 각 value 블록: <id><counterId>N</counterId>...</id> 뒤에 <value>...</value> 반복
-      const cid = /<counterId>(\d+)<\/counterId>/.exec(blk)?.[1];
-      if (!cid || !out.has(cid)) continue;
-      const vals = [...blk.matchAll(/<value>(-?\d+)<\/value>/g)].map((m) => Number(m[1]));
-      const n = Math.min(times.length, vals.length);
-      const pts = [];
-      for (let i = 0; i < n; i++) pts.push({ t: times[i], v: vals[i] });
-      out.set(cid, pts);
-    }
-    return out;
+    return parsePerfMultiXml(xml, ids);
   }
 
   /** Installed solutions / plug-ins registered with vCenter (ExtensionManager). */
@@ -761,6 +748,48 @@ function parseVmGpu(deviceXml) {
 // Snapshot count/size/createTime — soapParse.js의 순수 파서 snapshotInfo를 사용(워커 공유·단위테스트).
 
 // vCenter PerformanceManager intervals and the counters we expose on demand.
+/**
+ * QueryPerf(다중 카운터) 응답 파싱 — 순수(v2.446). 반환 Map<counterId, [{t,v}]>.
+ *
+ * ⚠ v2.445 회귀의 원인: PerfEntityMetric 은 계열 컨테이너도 `<value xsi:type="PerfMetricIntSeries">`,
+ * 그 안의 표본도 `<value>123</value>` 로 **같은 태그명**을 쓴다. `rv.split(/<value\b/)` 로 자르면
+ * 안쪽 표본까지 split 경계가 되어 각 조각이 자기 여는 태그를 잃고, counterId 를 가진 조각에는
+ * `<value>N</value>` 가 한 개도 안 남는다 → 전 카운터가 빈 배열 → 자원 축소 근거 리포트가
+ * 모든 VM·모든 기간에서 '근거 불충분'. 그래서 계열 경계는 **`<id>` 블록**으로 잡는다
+ * (표본에는 `<id>` 가 없으므로 안전). 회귀 테스트: server/test/perfParse.test.js.
+ *
+ * 같은 counterId 가 여러 번 오면(인스턴스별 계열) **집계(빈 instance)를 우선**하고, 집계가 없으면
+ * 첫 계열만 쓴다 — 인스턴스 계열이 집계를 덮어써 vCPU 한 개 값만 남는 것을 막는다.
+ */
+export function parsePerfMultiXml(xml, counterIds = []) {
+  const ids = [...new Set((counterIds || []).filter(Boolean).map(String))];
+  const out = new Map(ids.map((id) => [id, []]));
+  if (!ids.length) return out;
+  const rv = /<returnval[^>]*>([\s\S]*?)<\/returnval>/.exec(xml || '')?.[1] || '';
+  if (!rv) return out;
+  // sampleInfo 는 계열이 아니라 엔티티 단위로 한 번(공통 타임스탬프).
+  const times = [...rv.matchAll(/<timestamp>([^<]+)<\/timestamp>/g)].map((m) => m[1]);
+  const marks = [...rv.matchAll(/<id>([\s\S]*?)<\/id>/g)];
+  const picked = new Map(); // cid -> 채택한 instance
+  for (let i = 0; i < marks.length; i++) {
+    const cid = /<counterId>(\d+)<\/counterId>/.exec(marks[i][1])?.[1];
+    if (!cid || !out.has(cid)) continue;
+    const instance = /<instance>([^<]*)<\/instance>/.exec(marks[i][1])?.[1] || '';
+    // 이미 담았으면 건너뛴다 — 단 '인스턴스 계열 → 집계 계열' 로의 승격만 허용.
+    if (picked.has(cid) && !(picked.get(cid) !== '' && instance === '')) continue;
+    const from = marks[i].index + marks[i][0].length;
+    const to = i + 1 < marks.length ? marks[i + 1].index : rv.length;
+    const vals = [...rv.slice(from, to).matchAll(/<value>(-?\d+)<\/value>/g)].map((m) => Number(m[1]));
+    if (!vals.length) continue;
+    const n = Math.min(times.length, vals.length);
+    const pts = [];
+    for (let k = 0; k < n; k++) pts.push({ t: times[k], v: vals[k] });
+    out.set(cid, pts);
+    picked.set(cid, instance);
+  }
+  return out;
+}
+
 export const PERF_INTERVALS = { realtime: 20, day: 300, week: 1800, month: 7200, year: 86400 };
 const PERF_COUNTERS = {
   cpu: { key: 'cpu.usage.average', unit: '%', div: 100 },
