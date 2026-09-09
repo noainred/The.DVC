@@ -1,5 +1,6 @@
 // HardwareTools.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
 import React, { useEffect, useState, useMemo, useRef } from 'react';
+import { useHashTab } from '../../hooks/useHashTab.js';
 import { fetchJson } from '../../api.js';
 import { DataTable, Loading, ErrorBox, StateBadge, Modal, SearchBox } from '../../components/ui.jsx';
 import { csvCell as esc } from '../../util/csv.js'; // 수식 인젝션 가드 포함 공통 셀 이스케이프
@@ -500,7 +501,8 @@ function PartsInventory({ vc, onServer }) {
 }
 
 export function ServerAnalysis() {
-  const [sub, setSub] = useState('info'); // 법인별 서버 정보가 기본
+  // 하위 탭을 URL 에 실어 새로고침·북마크·뒤로가기에서 유지한다(v2.438, hooks/useHashTab.js).
+  const [sub, setSub] = useHashTab({ base: ['tools', 'serveranalysis'], valid: ['info', 'hw', 'parts', 'temp', 'gpu'], fallback: 'info' });
   const [dc, setDc] = useState('');   // 1차 박스: '' 전체 | DataCenter id
   const [lvl2, setLvl2] = useState(''); // 2차 박스: '' 전체 | vc:<id> | baremetal
   const [vcs, setVcs] = useState([]);

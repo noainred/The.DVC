@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useHashTab } from '../hooks/useHashTab.js';
 import { fetchJson, postJson, putJson, delJson } from '../api.js';
 import { Loading } from '../components/ui.jsx';
 // CSV 일괄 관리(v2.339) — 검증 드라이런 → 덮어쓰기 확인 → 실행. 공용 모달(수집 서버 CSV UX).
@@ -24,7 +25,10 @@ export default function AgentDeploy() {
   const [pkg, setPkg] = useState(null);
   const [dl, setDl] = useState({ kinds: ['installer_cent9'], version: '', busy: false });
   const [pkgCfg, setPkgCfg] = useState(null); // { baseUrl, dir } editable
-  const [subtab, setSubtab] = useState('status'); // status(에이전트 현황·기본) | add(에이전트 추가) | bulk(대량 배포) | packages(설치 패키지 자동 다운로드)
+  // status(에이전트 현황·기본) | add(에이전트 추가) | bulk(대량 배포) | packages(설치 패키지 자동 다운로드)
+  // 3단 해시(#/settings/agent-deploy/<키>)로 새로고침에도 유지한다(v2.438) — 배포 작업 중
+  // 새로고침이 잦은 화면이라 매번 현황 탭으로 되돌아가는 것이 특히 번거로웠다.
+  const [subtab, setSubtab] = useHashTab({ base: ['settings', 'agent-deploy'], valid: ['status', 'add', 'bulk', 'packages'], fallback: 'status' });
   const [sort, setSort] = useState({ key: 'agentName', dir: 'asc' }); // 에이전트 현황 표 헤더 정렬
   const [csvModal, setCsvModal] = useState(null); // 'export' | 'import' | null — 대상 CSV 일괄 관리(v2.339)
 

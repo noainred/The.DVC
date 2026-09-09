@@ -1,5 +1,6 @@
 // PowerMap.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
 import React, { useState } from 'react';
+import { useHashTab } from '../../hooks/useHashTab.js';
 import { usePolling } from '../../api.js';
 import { Loading, ErrorBox, ResultCount, SearchBox } from '../../components/ui.jsx';
 import { Card, fmtKwh, fmtWatts, useTool } from './shared.jsx';
@@ -19,7 +20,8 @@ function Bar({ frac, color = 'var(--accent-2,#22d3ee)' }) {
 export function PowerMap({ scope }) {
   const { loading, data, error } = useTool('/insights/power-breakdown', scope ? { vcenterId: scope } : {});
   const { data: vcList } = usePolling('/vcenters', {}, 60_000);
-  const [view, setView] = useState('datacenter'); // datacenter | vcenter | model | region | server
+  // 하위 탭을 URL 에 실어 새로고침·북마크·뒤로가기에서 유지한다(v2.438, hooks/useHashTab.js).
+  const [view, setView] = useHashTab({ base: ['tools', 'powermap'], valid: ['datacenter', 'vcenter', 'model', 'region', 'server'], fallback: 'datacenter' });
   const [q, setQ] = useState('');
   if (loading) return <Loading />;
   if (error) return <ErrorBox message={error} />;

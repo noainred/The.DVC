@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React from 'react';
+import { useHashTab } from '../hooks/useHashTab.js';
 import VCenterAdmin from './VCenterAdmin.jsx';
 import DatacenterAdmin from './DatacenterAdmin.jsx';
 import VCenterConnTest from './VCenterConnTest.jsx';
@@ -88,9 +89,17 @@ const GROUPS = {
 };
 const groupChildren = (g) => SUB.filter((s) => s.group === g);
 
+const DEFAULT_SUB = 'vcenter-admin';
+const SUB_KEYS = SUB.map((s) => s.k);
+
 /** 설정 — 관리자용 하위 메뉴. 수집/원격접속은 2개 그룹으로 묶어 2단 탭으로 표시. */
 export default function Settings({ initialSub }) {
-  const [sub, setSub] = useState(SUB.some((s) => s.k === initialSub) ? initialSub : 'vcenter-admin');
+  // 하위 탭을 URL(#/settings/<키>)에 싣는다(v2.438) — 새로고침해도 보던 화면이 유지되고,
+  // 하위 항목이 30개가 넘어 매번 다시 찾아 들어가야 했던 불편이 사라진다. 링크 공유도 된다.
+  const [sub, setSub] = useHashTab({
+    base: ['settings'], valid: SUB_KEYS,
+    fallback: SUB_KEYS.includes(initialSub) ? initialSub : DEFAULT_SUB,
+  });
   const cur = SUB.find((s) => s.k === sub) || SUB[0];
   const Cur = cur.C;
   const activeGroup = cur.group || null;

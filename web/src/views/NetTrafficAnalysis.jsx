@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useHashTab } from '../hooks/useHashTab.js';
 import { fetchJson, postJson, putJson, delJson, usePolling } from '../api.js';
 import { ErrorBox, Modal } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
@@ -110,7 +111,8 @@ function Monitors() {
 }
 
 export default function NetTrafficAnalysis() {
-  const [tab, setTab] = useState('capture');
+  // 하위 탭을 URL 에 실어 새로고침·북마크·뒤로가기에서 유지한다(v2.438, hooks/useHashTab.js).
+  const [tab, setTab] = useHashTab({ base: ['tools', 'net-traffic'], valid: ['capture', 'history', 'monitor'], fallback: 'capture' });
   const TABS = [['capture', '캡처 분석'], ['history', '이력'], ['monitor', '연속 모니터링']];
   return (
     <div>

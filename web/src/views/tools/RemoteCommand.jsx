@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useHashTab } from '../../hooks/useHashTab.js';
 import { fetchJson, postJson, putJson, delJson, usePolling } from '../../api.js';
 import { Loading, ErrorBox, Kpi, Modal } from '../../components/ui.jsx';
 import { ago, durationText, uptimeText, agentStatus, resultSummary, defaultArgs, argsIssue, groupCatalog, modeLabel, targetHint, statusTone, statusLabel } from './remoteCommand.js';
@@ -29,7 +30,8 @@ export default function RemoteCommand() {
   const [histErr, setHistErr] = useState('');
   const [view, setView] = useState(null);      // history row detail
   const [refreshTick, setRefreshTick] = useState(0);
-  const [tab, setTab] = useState('run');        // run | schedule | status
+  // 하위 탭을 URL 에 실어 새로고침·북마크·뒤로가기에서 유지한다(v2.438, hooks/useHashTab.js).
+  const [tab, setTab] = useHashTab({ base: ['tools', 'rma'], valid: ['run', 'schedule', 'status'], fallback: 'run' });
 
   useEffect(() => {
     let alive = true;

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useHashTab } from '../../hooks/useHashTab.js';
 import { fetchJson, postJson, putJson, downloadFile } from '../../api.js';
 import { Loading, ErrorBox, Kpi, Modal } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
@@ -23,7 +24,8 @@ export default function RelayTopoTool() {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [form, setForm] = useState(null);
-  const [tab, setTab] = useState('config');
+  // 하위 탭을 URL 에 실어 새로고침·북마크·뒤로가기에서 유지한다(v2.438, hooks/useHashTab.js).
+  const [tab, setTab] = useHashTab({ base: ['tools', 'relaytopo'], valid: ['config', 'check', 'graph'], fallback: 'config' });
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
   const [edit, setEdit] = useState(null);          // 사이트 편집 모달 { site, index|-1 }

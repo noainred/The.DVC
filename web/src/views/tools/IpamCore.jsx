@@ -1,5 +1,6 @@
 // IpamCore.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
 import React, { useEffect, useState, useMemo, useRef } from 'react';
+import { useHashTab } from '../../hooks/useHashTab.js';
 import { fetchJson, usePolling, getToken } from '../../api.js';
 import { DataTable, Loading, ErrorBox, StateBadge, EntityDetail, Modal, ResultCount, SearchBox, VmLink } from '../../components/ui.jsx';
 import { VmRemoteButton } from '../../components/VmRemote.jsx';
@@ -45,7 +46,8 @@ function Ipam({ scope, onScope }) {
   const [editMemo, setEditMemo] = useState(null); // { ip, memo, tags } for the editor
   const [histIp, setHistIp] = useState(null); // IP 사용 이력 모달 대상
   const [scanStatusOpen, setScanStatusOpen] = useState(false); // 스캔 상태(진행/이력) 모달
-  const [view, setView] = useState('list'); // list | sheet
+  // 목록/대역 시트 전환을 URL(#/ipam/<키>)에 싣는다(v2.438).
+  const [view, setView] = useHashTab({ base: ['ipam'], valid: ['list', 'sheet'], fallback: 'list' });
   const [subnets, setSubnets] = useState([]);
   const [base, setBase] = useState('');
   const [sheet, setSheet] = useState(null);

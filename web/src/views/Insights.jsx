@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useHashTab } from '../hooks/useHashTab.js';
 import { fetchJson, putJson, postJson, usePolling } from '../api.js';
 import { Loading, ErrorBox, VmLink } from '../components/ui.jsx';
 import { enableNotifications } from '../pwa.js';
@@ -411,7 +412,8 @@ const PANELS = [
 ];
 
 export default function Insights() {
-  const [sub, setSub] = useState('finops');
+  // 하위 패널 7종을 URL(#/insights/<키>)에 싣는다(v2.438) — 새로고침·북마크·링크 공유 지원.
+  const [sub, setSub] = useHashTab({ base: ['insights'], valid: PANELS.map((p) => p.k), fallback: 'finops' });
   const Cur = (PANELS.find((p) => p.k === sub) || PANELS[0]).C;
   return (
     <div>

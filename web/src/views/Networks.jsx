@@ -1,4 +1,5 @@
 import React, { lazy, Suspense, useState } from 'react';
+import { useHashTab } from '../hooks/useHashTab.js';
 import { usePolling } from '../api.js';
 import { DataTable, Loading, ErrorBox, ResultCount } from '../components/ui.jsx';
 import IpmsMatches from '../components/IpmsMatches.jsx';
@@ -45,7 +46,9 @@ const SUBS = [
 ];
 
 export default function Networks({ filters }) {
-  const [sub, setSub] = useState('list');
+  // 하위 탭을 URL(#/networks/<키>)에 싣는다(v2.438) — Ping 모니터링을 보다 새로고침하면
+  // 목록으로 튀던 문제를 없앤다.
+  const [sub, setSub] = useHashTab({ base: ['networks'], valid: SUBS.map(([k]) => k), fallback: 'list' });
   return (
     <>
       <div className="flex gap wrap" style={{ marginBottom: 12 }}>

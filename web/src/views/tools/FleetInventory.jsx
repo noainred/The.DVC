@@ -1,5 +1,6 @@
 // FleetInventory.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
 import React, { useEffect, useState, useRef } from 'react';
+import { useHashTab } from '../../hooks/useHashTab.js';
 import { fetchJson, postJson, putJson } from '../../api.js';
 import { Loading, ErrorBox, ResultCount, SearchBox } from '../../components/ui.jsx';
 import { Card, fmtWatts } from './shared.jsx';
@@ -48,7 +49,8 @@ function VcAssignSelect({ value, vcenters, onChange, disabled }) {
 export function FleetInventory({ isAdmin }) {
   const [d, setD] = useState(null);
   const [err, setErr] = useState(null);
-  const [view, setView] = useState('baremetal'); // baremetal | virt
+  // 하위 탭을 URL 에 실어 새로고침·북마크·뒤로가기에서 유지한다(v2.438, hooks/useHashTab.js).
+  const [view, setView] = useHashTab({ base: ['tools', 'fleet'], valid: ['baremetal', 'virt'], fallback: 'baremetal' });
   const [q, setQ] = useState('');
   const [fvc, setFvc] = useState('');             // 법인(vCenter)/DC 필터: '' 전체, '__none__' 미지정
   const [busy, setBusy] = useState('');

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useHashTab } from '../hooks/useHashTab.js';
 import { usePolling, fetchJson } from '../api.js';
 import { Kpi, DataTable, Modal, Loading, ErrorBox, SearchBox, VmLink } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
@@ -14,7 +15,8 @@ const VIEWS = [['gateways', '게이트웨이'], ['segments', '세그먼트'], ['
 export default function Nsx() {
   const [mgr, setMgr] = useState('');
   const { data, error, loading } = usePolling('/nsx', mgr ? { managerId: mgr } : {}, 20_000);
-  const [view, setView] = useState('gateways');
+  // 하위 탭을 URL 에 실어 새로고침·북마크·뒤로가기에서 유지한다(v2.438, hooks/useHashTab.js).
+  const [view, setView] = useHashTab({ base: ['tools', 'nsx'], valid: ['gateways', 'segments', 'nodes', 'dfw', 'groups'], fallback: 'gateways' });
   const [q, setQ] = useState('');
   const [detail, setDetail] = useState(null); // { type, item }
   // NOTE: all hooks must run before any early return (React error #310).

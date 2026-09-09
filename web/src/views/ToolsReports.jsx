@@ -4,6 +4,7 @@
  * 규약: 훅은 조기 return 위에 선언(React #310) · error && !data 일 때만 전체 오류 · CSV는 BOM.
  */
 import React, { useEffect, useState } from 'react';
+import { useHashTab } from '../hooks/useHashTab.js';
 import { fetchJson, postJson, putJson, usePolling } from '../api.js';
 import { DataTable, Loading, ErrorBox, StateBadge, ResultCount, Kpi, SearchBox, VmLink } from '../components/ui.jsx';
 import { csvCell } from '../util/csv.js'; // 수식 인젝션 가드 포함 공통 셀 이스케이프
@@ -163,7 +164,8 @@ export function SnapshotAge({ scope }) {
 
 /* ── ③ 좀비/방치 리소스 ────────────────────────────────────────────── */
 export function ZombieVms({ scope }) {
-  const [tab, setTab] = useState('poweredOff');
+  // 하위 탭을 URL 에 실어 새로고침·북마크·뒤로가기에서 유지한다(v2.438, hooks/useHashTab.js).
+  const [tab, setTab] = useHashTab({ base: ['tools', 'zombie-vms'], valid: ['poweredOff', 'snapshotHogs', 'orphaned', 'templates'], fallback: 'poweredOff' });
   const { data, error, loading } = usePolling('/tools/report/zombies', { vcenterId: scope }, 30_000);
   if (loading && !data) return <Loading />;
   if (error && !data) return <ErrorBox message={error} />;
@@ -254,7 +256,8 @@ export function CertExpiry({ isAdmin }) {
 
 /* ── ⑤ VM 라이트사이징 ─────────────────────────────────────────────── */
 export function Rightsizing({ scope }) {
-  const [tab, setTab] = useState('oversized');
+  // 하위 탭을 URL 에 실어 새로고침·북마크·뒤로가기에서 유지한다(v2.438, hooks/useHashTab.js).
+  const [tab, setTab] = useHashTab({ base: ['tools', 'rightsizing'], valid: ['oversized', 'idle', 'undersized'], fallback: 'oversized' });
   const { data, error, loading } = usePolling('/tools/report/rightsizing', { vcenterId: scope }, 30_000);
   if (loading && !data) return <Loading />;
   if (error && !data) return <ErrorBox message={error} />;
@@ -432,7 +435,8 @@ export function AlertChannels({ isAdmin }) {
 
 /* ── ⑧ 버전/패치 준수 리포트 ───────────────────────────────────────── */
 export function ComplianceReport({ scope }) {
-  const [tab, setTab] = useState('tools');
+  // 하위 탭을 URL 에 실어 새로고침·북마크·뒤로가기에서 유지한다(v2.438, hooks/useHashTab.js).
+  const [tab, setTab] = useHashTab({ base: ['tools', 'compliance-report'], valid: ['tools', 'hw', 'esxi'], fallback: 'tools' });
   const { data, error, loading } = usePolling('/tools/report/compliance', { vcenterId: scope }, 30_000);
   if (loading && !data) return <Loading />;
   if (error && !data) return <ErrorBox message={error} />;
@@ -561,7 +565,8 @@ export function ChangeHistory({ scope }) {
 export function UnprotectedVms({ scope }) {
   const [lookbackDays, setLookbackDays] = useState(7);
   const [patterns, setPatterns] = useState('');
-  const [tab, setTab] = useState('unprotected');
+  // 하위 탭을 URL 에 실어 새로고침·북마크·뒤로가기에서 유지한다(v2.438, hooks/useHashTab.js).
+  const [tab, setTab] = useHashTab({ base: ['tools', 'unprotected-vms'], valid: ['unprotected', 'protected'], fallback: 'unprotected' });
   const { data, error, loading } = usePolling('/tools/report/unprotected', { vcenterId: scope, lookbackDays, patterns }, 60_000);
   if (loading && !data) return <Loading />;
   if (error && !data) return <ErrorBox message={error} />;

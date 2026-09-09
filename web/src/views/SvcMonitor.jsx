@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useHashTab } from '../hooks/useHashTab.js';
 import { usePolling, postJson, putJson, delJson, fetchJson, getCurrentUser, downloadFile } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { useTreeDnd } from '../hooks/useTreeDnd.js';
@@ -101,7 +102,8 @@ export default function SvcMonitor() {
   const me = getCurrentUser();
   const canEdit = me?.role === 'admin' || me?.role === 'operator';
 
-  const [mode, setMode] = useState('infra');           // 'infra' | 'service'
+  // 인프라/서비스 전환을 URL(#/svcmon/<키>)에 싣는다(v2.438) — 새로고침해도 보던 쪽이 유지된다.
+  const [mode, setMode] = useHashTab({ base: ['svcmon'], valid: ['infra', 'service'], fallback: 'infra' });
   const [sel, setSel] = useState('');
   const [expanded, setExpanded] = useState({});
   const [treeQ, setTreeQ] = useState('');

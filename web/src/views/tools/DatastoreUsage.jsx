@@ -1,5 +1,6 @@
 // DatastoreUsage.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
 import React, { useEffect, useState } from 'react';
+import { useHashTab } from '../../hooks/useHashTab.js';
 import { fetchJson, usePolling } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { Card, itemsOf } from './shared.jsx';
@@ -70,7 +71,8 @@ export function DatastoreUsage({ scope }) {
   const { loading, data, error } = usePolling('/datastores', {}, 15_000);
   const { data: vcList } = usePolling('/vcenters', {}, 60_000);
   const [dc, setDc] = useState({ datacenters: [], assign: {} });
-  const [view, setView] = useState('dc'); // 'dc'(1차 DataCenter) | 'vc'(vCenter 평면)
+  // 하위 탭을 URL 에 실어 새로고침·북마크·뒤로가기에서 유지한다(v2.438, hooks/useHashTab.js).
+  const [view, setView] = useHashTab({ base: ['tools', 'dsusage'], valid: ['dc', 'vc'], fallback: 'dc' });
   const [q, setQ] = useState('');
   useEffect(() => { fetchJson('/admin/datacenters').then((r) => setDc({ datacenters: r.datacenters || [], assign: r.assign || {} })).catch(() => {}); }, []);
   if (loading && !data) return <Loading />;
