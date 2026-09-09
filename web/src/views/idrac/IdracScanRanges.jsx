@@ -7,6 +7,7 @@ import { putJson, postJson } from '../../api.js';
 // CSV 일괄 관리(v2.339) — 검증 드라이런 → 덮어쓰기 확인 → 실행. 공용 모달(수집 서버 CSV UX).
 import { CsvExportModal, CsvImportModal } from '../../components/CsvBulkModals.jsx';
 import { STable } from '../../components/STable.jsx';
+import { describeScanRun } from './scanRunText.js';
 
 // ---- vCenter별 iDRAC 스캔 대역(주기 자동 발견) ------------------------------
 // 각 vCenter에 iDRAC IP 대역 + 계정을 저장하면, 주기 스캐너가 그 대역을 돌며 Dell iDRAC을
@@ -41,12 +42,19 @@ export function IdracScanRanges({ data, vcenters, datacenters = [], agents, busy
       {children}{sort.key === k ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : <span style={{ opacity: 0.35 }}> ↕</span>}
     </th>
   );
+  // v2.441: 성공/실패 배지 + '발견 N대'(사용자 요구). 판정·문구는 순수 모듈에 두고 여기서는 표시만.
+  const TONE = { green: 'var(--green)', red: '#f87171', amber: '#fbbf24', muted: 'var(--muted)' };
   const fmtRun = (r) => {
-    if (!r) return <span className="muted">—</span>;
-    const when = r.at ? new Date(r.at).toLocaleString('ko-KR') : '';
-    if (r.error) return <span style={{ color: '#f87171' }} title={r.error}>오류 · {when}</span>;
-    if (r.delegated) return <span style={{ color: '#a78bfa' }} title={`에이전트 ${r.agent || ''} 위임`}>위임{r.agent ? `(${r.agent})` : ''} · {when}</span>;
-    return <span className="muted">발견 {r.found ?? 0} · 등록 {r.registered ?? 0}{r.scanned != null ? ` · 스캔 ${r.scanned}` : ''} · {when}</span>;
+    const d = describeScanRun(r);
+    if (d.state === 'none') return <span className="muted">—</span>;
+    return (
+      <span title={d.title} style={{ color: TONE[d.tone] }}>
+        <span className={`badge ${d.tone === 'green' ? 'green' : d.tone === 'red' ? 'red' : d.tone === 'amber' ? 'amber' : 'gray'}`}
+          style={{ marginRight: 5, fontSize: 10 }}>{d.badge}</span>
+        {d.text}
+        {d.when && <span className="muted"> · {d.when}</span>}
+      </span>
+    );
   };
   const intervalH = st.intervalMs != null ? Math.round(st.intervalMs / 3600000 * 10) / 10 : null;
   // 주기 설정(시간) — 저장 시 즉시 재적용(0=주기 끔, 수동 스캔만). 스캔 중지 버튼과 함께 헤더에 배치.

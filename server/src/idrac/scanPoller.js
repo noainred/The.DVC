@@ -150,7 +150,16 @@ export async function runIdracScanOnce(opts = {}) {
         foundTotal += (r.found || 0);
         registeredTotal += (r.registered || 0);
         if (r.error) errors.push(`${e.datacenterId}: ${r.error}`);
-        if (e.id) recordScanRangeRun(e.id, { scanned: r.scanned ?? null, found: r.found ?? null, registered: r.registered ?? null, delegated: !!r.delegated, agent: r.agent || null, error: r.error || null });
+        // v2.441: 위임이면 reqId 를 함께 남긴다 — 나중에 에이전트가 결과를 회신할 때
+        // recordScanRangeRunByReqId 가 이 값으로 짝을 찾아 발견/등록 수치를 채운다.
+        // (예전에는 '던짐' 만 기록돼 '최근 결과' 가 영원히 '위임(AZ) · 시각' 이었다.)
+        if (e.id) {
+          recordScanRangeRun(e.id, {
+            scanned: r.scanned ?? null, found: r.found ?? null, registered: r.registered ?? null,
+            delegated: !!r.delegated, agent: r.agent || null, error: r.error || null,
+            ...(r.delegated ? { reqId: r.reqId || '', dispatch: r.dispatch || e.dispatch || 'poll', dispatchedAt: Date.now(), pending: true } : {}),
+          });
+        }
         // 스캔 로그(이력) 적재 — 위임은 '요청' 단계로 기록하고, 결과는 에이전트 회신 시
         // setIdracScanResult 훅이 별도 1건(phase=result)으로 남긴다(reqId로 짝 맞춤).
         appendIdracScanLog({
