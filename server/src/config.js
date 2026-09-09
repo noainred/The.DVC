@@ -308,11 +308,28 @@ export function currentVersion() {
 let openSecretsDeepRef = null;
 import('./security/secretVault.js').then((m) => { openSecretsDeepRef = m.openSecretsDeep; }).catch(() => {});
 
+/**
+ * 번들 예제 템플릿(vcenters.example.json)으로 폴백할지(v2.444).
+ *
+ * 사고: 신규 배포한 IRS 엣지들이 vCenter 를 아직 등록하지 않은 상태에서 이 템플릿으로 폴백해
+ * `vc-us-east` · `vc-ap-northeast` 같은 **가짜 vCenter 를 실제로 수집 시도**했고(접속 실패 →
+ * 호스트 0·VM 0), 그 빈 슬라이스를 중앙에 push 해 중앙 vCenter 목록이 오염됐다. 화면상
+ * 6개 사이트가 똑같은 'vc-ap-northeast' 를 보내고 있었다 — 전부 같은 템플릿을 읽은 것이다.
+ *
+ * 이 폴백은 원래 데모 편의('works out of the box')였는데, **mock 모드는 이 목록을 쓰지 않는다**
+ * (store.js 가 mock 이면 generateSnapshot 으로 즉시 반환). 즉 폴백은 live/auto 에서만 일어나고
+ * 거기서는 순수한 사고 원인이다. 그래서 기본을 '폴백 안 함' 으로 바꾼다.
+ * 데모로 되살리려면 `VCENTERS_EXAMPLE_FALLBACK=true`.
+ */
+const EXAMPLE_FALLBACK = process.env.VCENTERS_EXAMPLE_FALLBACK === 'true';
+let warnedExample = false;
+
 export function loadVcenterConfig() {
   const candidates = [
     path.join(process.env.CONFIG_DIR || path.resolve(ROOT, 'config'), 'vcenters.json'),
     path.resolve(ROOT, 'config', 'vcenters.json'),           // legacy in-app location
-    path.resolve(ROOT, 'config', 'vcenters.example.json'),   // bundled template
+    // 번들 템플릿은 명시적으로 켰을 때만(v2.444) — 기본은 '등록 없으면 빈 목록'.
+    ...(EXAMPLE_FALLBACK ? [path.resolve(ROOT, 'config', 'vcenters.example.json')] : []),
   ];
   for (const file of candidates) {
     if (fs.existsSync(file)) {
@@ -326,6 +343,10 @@ export function loadVcenterConfig() {
           // vcenters.json 을 직접 읽는 수집 핵심 경로다 — 암호화 모드에서 복호를 빠뜨리면
           // 모든 vCenter 로그인이 암호문 비번으로 실패한다. 지연 import 로 순환을 피한다
           // (secretVault 도 config 를 import — 상단 정적 import 시 TDZ 기동 실패).
+          if (file.endsWith('vcenters.example.json') && !warnedExample) {
+            warnedExample = true;
+            console.warn('[config] ⚠ vCenter 가 등록되지 않아 **예제 템플릿**(vcenters.example.json)을 읽었습니다 — vc-us-east 같은 가짜 vCenter 를 수집 시도하고 중앙에 빈 인벤토리를 보냅니다. 설정 › vCenter 관리에서 실제 vCenter 를 등록하세요(이 폴백은 VCENTERS_EXAMPLE_FALLBACK=true 로 켜져 있습니다).');
+          }
           return { file, vcenters: openSecretsDeepRef ? openSecretsDeepRef(vcenters) : vcenters };
         }
       } catch (err) {

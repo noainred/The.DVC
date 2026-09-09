@@ -54,3 +54,47 @@ test('저장돼 있던 목 인벤토리를 정리한다 — 실데이터는 남�
   // 다시 불러도 아무것도 안 지운다(멱등).
   assert.deepEqual(inv.pruneMockInventory(), []);
 });
+
+/* ── v2.444: 번들 예제 템플릿(vcenters.example.json) 경로 ──────────────────────────────
+ * 실제 원인이었다 — 신규 IRS 엣지들이 vCenter 미등록 상태에서 그 템플릿으로 폴백해
+ * 'vc-us-east'/'vc-ap-northeast' 를 **live 로 수집 시도**하고(접속 실패 → 호스트 0·VM 0)
+ * 빈 슬라이스를 중앙에 push 했다. 화면상 6개 사이트가 똑같은 id 를 보냈다. */
+test('예제 템플릿 항목도 목업으로 판정한다(이미 배포된 구버전 엣지 차단)', () => {
+  assert.equal(isMockVcenter({ id: 'vc-us-east', name: 'vcenter-us-east.corp.local' }), true);
+  assert.equal(isMockVcenter({ id: 'vc-ap-northeast', name: 'vcenter-ap-northeast.corp.local' }), true);
+  assert.equal(isMockVcenter({ id: 'vc-eu-central', name: 'vcenter-eu-central.corp.local' }), true);
+  // 같은 id 라도 이름이 고객 것이면 실데이터 — 지우면 안 된다.
+  assert.equal(isMockVcenter({ id: 'vc-ap-northeast', name: '서울 vCenter' }), false);
+});
+
+test('판정 목록이 실제 예제 파일과 일치한다(파일만 고치고 목록을 잊는 것 방지)', async () => {
+  const fs = await import('node:fs');
+  const url = await import('node:url');
+  const path = await import('node:path');
+  const here = path.dirname(url.fileURLToPath(import.meta.url));
+  const file = path.join(here, '..', 'config', 'vcenters.example.json');
+  const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+  for (const v of parsed.vcenters) {
+    assert.equal(isMockVcenter({ id: v.id, name: v.name }), true, `예제의 ${v.id} 를 목업으로 못 잡는다`);
+  }
+});
+
+test('예제 템플릿 폴백은 기본으로 꺼져 있다(v2.444) — 등록 없으면 빈 목록', async () => {
+  const os = await import('node:os');
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'novc-'));
+  const prevDir = process.env.CONFIG_DIR; const prevFb = process.env.VCENTERS_EXAMPLE_FALLBACK;
+  process.env.CONFIG_DIR = empty;
+  delete process.env.VCENTERS_EXAMPLE_FALLBACK;
+  try {
+    const cfg = await import(`../src/config.js?t=${Date.now()}`);
+    const r = cfg.loadVcenterConfig();
+    // 등록 파일이 없으면 예제로 채우지 않는다 — 가짜 vCenter 를 수집하지 않게.
+    assert.deepEqual(r.vcenters, []);
+    assert.equal(r.file, null);
+  } finally {
+    if (prevDir === undefined) delete process.env.CONFIG_DIR; else process.env.CONFIG_DIR = prevDir;
+    if (prevFb !== undefined) process.env.VCENTERS_EXAMPLE_FALLBACK = prevFb;
+  }
+});
