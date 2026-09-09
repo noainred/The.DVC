@@ -18,15 +18,31 @@
  * 값은 SITES 하나에서 파생하므로 사이트를 추가/변경해도 자동으로 따라간다.
  */
 export function mockVcenterIdentities() {
-  return SITES.map((s) => ({ id: s.id, name: s.name }));
+  return [...SITES.map((s) => ({ id: s.id, name: s.name })), ...EXAMPLE_SITES];
 }
 
-/** 이 vCenter(또는 {id,name})가 목 데이터인가 — id·이름 동시 일치. */
+/**
+ * 번들 예제 템플릿(config/vcenters.example.json)의 항목(v2.444).
+ *
+ * 신규 엣지가 vCenter 미등록 상태에서 그 템플릿으로 폴백해 **실제로 수집을 시도**하고
+ * (접속 실패 → 호스트 0·VM 0) 그 빈 슬라이스를 중앙에 push 했다 — 6개 사이트가 똑같이
+ * 'vc-ap-northeast' 를 보내 중앙 목록이 오염됐다. v2.444 에서 폴백 자체를 껐지만, **이미
+ * 배포돼 돌고 있는 구버전 엣지**가 계속 보내므로 중앙이 내용으로도 막아야 한다.
+ * 값은 그 파일과 같아야 한다(테스트로 고정).
+ */
+const EXAMPLE_SITES = [
+  { id: 'vc-us-east', name: 'vcenter-us-east.corp.local' },
+  { id: 'vc-eu-central', name: 'vcenter-eu-central.corp.local' },
+  { id: 'vc-ap-northeast', name: 'vcenter-ap-northeast.corp.local' },
+];
+
+/** 이 vCenter(또는 {id,name})가 목 데이터/예제 템플릿인가 — id·이름 동시 일치. */
 export function isMockVcenter(vc) {
   const id = String(vc?.id || '').trim();
   const name = String(vc?.name || '').trim();
   if (!id) return false;
-  return SITES.some((s) => s.id === id && s.name === name);
+  return SITES.some((s) => s.id === id && s.name === name)
+    || EXAMPLE_SITES.some((s) => s.id === id && s.name === name);
 }
 
 const SITES = [
