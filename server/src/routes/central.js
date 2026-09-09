@@ -23,6 +23,7 @@ import { tokenMatches } from '../util/secureCompare.js';
 import { resolveAgentByToken, hasAnyAgentToken, listAgentTokens } from '../central/agentTokens.js';
 import { setInventory, getInventory, listInventory } from '../central/inventory.js';
 import { noteAgentIdentity, noteVcenterOwner } from '../central/agentIdentity.js';
+import { isMockVcenter } from '../mock/generator.js';
 import { setEdgeFleet } from '../central/fleet.js';
 import { setGuestGpu } from '../gpu/store.js';
 import { setGpuGuestDiag } from '../central/gpuGuestDiag.js';
@@ -393,9 +394,22 @@ centralRouter.post('/inventory', (req, res) => {
   }
   // v2.428(미스매치 #12): mock 노드의 인벤토리는 저장하지 않는다 — IRS 들이 DATA_SOURCE=mock 으로 같은 가짜 vCenter id 를 push 해
   // 서로 덮어쓰고 실데이터와 섞였다. 엣지는 v2.408 부터 자기 로그로만 경고했다.
-  if (b.source === 'mock' || b.mock === true) {
+  // v2.443: 플래그(source)만 믿지 않는다 — `DATA_SOURCE=auto` 는 vCenter 접속 실패 시 목 데이터로
+  // 폴백하면서도 source 는 'auto' 라 이 검사를 통과했고, 구버전 엣지는 source 필드 자체가 없다.
+  // 그래서 **내용으로도** 판정한다: 생성기의 id·이름이 둘 다 일치하면 목업이다(오탐 사실상 없음).
+  // 사용자 신고: 신규 배포 엣지를 live 로 바꿨는데 중앙 vCenter 목록에 'east us' 목업이 올라왔다.
+  const mockByFlag = b.source === 'mock' || b.mock === true;
+  const mockByContent = isMockVcenter(b.vcenter) || isMockVcenter({ id: String(b.vcenterId || ''), name: b.vcenter?.name });
+  if (mockByFlag || mockByContent) {
     noteAgentIdentity(agent, { hostname: req.get('X-Agent-Hostname') || '', mock: true, peer: req.socket?.remoteAddress || '' });
-    return res.status(400).json({ ok: false, reason: `엣지 '${agent}' 가 mock(가짜) 데이터를 보냈습니다 — 저장하지 않습니다. 엣지 portal.env 에 DATA_SOURCE=live 를 넣고 vCenter 를 등록·재시작하세요.` });
+    const why = mockByFlag
+      ? `엣지가 스스로 mock 임을 알렸습니다(source=${b.source || 'mock'})`
+      : `보낸 vCenter '${b.vcenterId}' 가 데모 생성기의 가짜 사이트와 id·이름이 같습니다(DATA_SOURCE=auto 로 접속 실패 시 목 데이터로 폴백했거나, 엣지가 구버전이라 mock 표시를 못 보냅니다)`;
+    return res.status(400).json({
+      ok: false,
+      reason: `엣지 '${agent}' 가 mock(가짜) 데이터를 보냈습니다 — 저장하지 않습니다. ${why}. 엣지 portal.env 에 DATA_SOURCE=live 를 넣고(auto 는 접속 실패 시 가짜로 채웁니다) vCenter 접속 정보를 확인·재시작하세요.`,
+      mockBlocked: true, by: mockByFlag ? 'flag' : 'content',
+    });
   }
   // v2.428(미스매치 #6/#7): 같은 vcenterId 를 다른 agent 가 번갈아 push 하거나, 같은 agent 이름이 다른 hostname 에서 오면 충돌로 기록.
   noteAgentIdentity(agent, { hostname: req.get('X-Agent-Hostname') || '', mock: false, peer: req.socket?.remoteAddress || '' });
