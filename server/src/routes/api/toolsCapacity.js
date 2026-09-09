@@ -6,8 +6,9 @@ import { store } from '../../store.js';
 import { loadVcenterConfig } from '../../config.js';
 import { fetchVmMetric, fetchVmRightsizeSeries } from '../../vcenter/soapClient.js';
 import { analyzeRightsize } from '../../tools/rightsize.js';
+import { diskBreakdown, analyzeDiskTrend, diskTrendPolicyFromEnv } from '../../tools/diskTrend.js';
 import { getMetricsDb } from '../../metrics/db.js';
-import { vmperfHistory, vmperfMeta, vmperfDiskUsage, dropVmperfDb, dbFileName, VMPERF_METRICS, VMPERF_DISK_METRICS } from '../../metrics/vmperfDb.js';
+import { vmperfHistory, vmperfMeta, vmperfDiskUsage, dropVmperfDb, dbFileName, VMPERF_METRICS, VMPERF_DISK_METRICS, VMPERF_VMDISK_METRICS } from '../../metrics/vmperfDb.js';
 import { loadVmperfSettings, saveVmperfSettings, VMPERF_LIMITS } from '../../metrics/vmperfSettings.js';
 import { memoJson, hash, linregSlope, eachLimited, scopeSlice, scopeKey } from './shared.js';
 
@@ -718,6 +719,91 @@ api.get('/tools/esxi-temp/history', async (req, res) => {
 });
 
 // 데이터스토어 용량 추세/예측 — ds_usedgb 히스토리로 선형회귀 → 가득 찰 예상일.
+/**
+ * 디스크 트렌드(v2.446) — 용량 리포트 › 디스크 트렌드. "할당(프로비저닝)·사용·회수 가능" 의
+ * 현재 구성 + 기간별 시계열 + 판정·근거·참고 문서. 정의·판정은 tools/diskTrend.js(순수).
+ *
+ * 시계열 출처: 샘플러가 vCenter 별 독립 DB(vmperfDb)에 적재한 집계 — 용량/사용(ds_*_vc, v2.377)과
+ * VM 디스크(vm_disk_*, vm_snap_gb, v2.446). 전체('')는 _all.db. /tools/waste/history 와 같은 scope 규칙:
+ * 범위 제한 계정은 전체 합계를 볼 수 없고(범위 밖 포함), 범위 밖 vCenter 는 빈 결과(존재 은닉).
+ *
+ * query: vcenterId(생략=전체) · days(1~1830, 기본 30) · bucket(hour|day|week, 기본 auto)
+ */
+api.get('/tools/capacity/disk-history', async (req, res) => {
+  const snap = store.get();
+  const vcId = String(req.query.vcenterId || '');
+  const days = Math.max(1, Math.min(1830, Number(req.query.days) || 30));
+  const allowed = scopedVcenterIds(req.user, snap);
+  if (allowed) {
+    if (!vcId) return res.status(403).json({ ok: false, reason: '전체 합계 트렌드는 전체 범위 계정만 조회할 수 있습니다. vCenter 를 선택하세요.' });
+    if (!allowed.has(vcId)) return res.json({ ok: true, vcenterId: vcId, days, bucketMs: 0, points: [], breakdown: null, analysis: null });
+  }
+  if (vcId && !(snap.vcenters || []).some((v) => v.id === vcId)) {
+    return res.json({ ok: true, vcenterId: vcId, days, bucketMs: 0, points: [], breakdown: null, analysis: null });
+  }
+  const since = Date.now() - days * 86_400_000;
+  const BUCKET = { hour: 3_600_000, day: 86_400_000, week: 7 * 86_400_000 };
+  const bucketMs = BUCKET[req.query.bucket]
+    || (days <= 3 ? 3_600_000 : days <= 60 ? 6 * 3_600_000 : days <= 400 ? 86_400_000 : 7 * 86_400_000);
+  const limit = bucketMs <= 3_600_000 ? 3000 : 1500;
+
+  const scoped = scopeSlice(snap, req.user, vcId || undefined);
+  const policy = diskTrendPolicyFromEnv();
+  const breakdown = diskBreakdown(scoped.vms, scoped.datastores, { policy });
+
+  const METRICS = [...VMPERF_DISK_METRICS, ...VMPERF_VMDISK_METRICS];
+  let points = [];
+  let collectedSince = { ds: null, vm: null };
+  let synthesized = false;
+  try {
+    const series = await Promise.all(METRICS.map((m) => vmperfHistory(vcId, m, since, bucketMs, limit)));
+    const byTs = new Map();
+    METRICS.forEach((m, i) => {
+      for (const p of series[i] || []) {
+        let e = byTs.get(p.ts); if (!e) { e = { ts: p.ts }; byTs.set(p.ts, e); }
+        e[m] = p.avg;
+      }
+    });
+    const r1 = (x) => (x == null ? null : Number(Number(x).toFixed(1)));
+    points = [...byTs.values()].sort((a, b) => a.ts - b.ts).map((e) => {
+      const off = r1(e.vm_disk_off_gb); const sn = r1(e.vm_snap_gb);
+      return {
+        ts: e.ts,
+        dsCapGB: r1(e.ds_cap_gb_vc), dsUsedGB: r1(e.ds_used_gb_vc),
+        provGB: r1(e.vm_disk_prov_gb), usedGB: r1(e.vm_disk_used_gb),
+        offGB: off, snapGB: sn,
+        reclaimGB: off == null && sn == null ? null : r1((off || 0) + (sn || 0)),
+      };
+    });
+    const [m1, m2] = await Promise.all([vmperfMeta(vcId, 'ds_cap_gb_vc'), vmperfMeta(vcId, 'vm_disk_prov_gb')]);
+    collectedSince = { ds: m1.firstTs ?? null, vm: m2.firstTs ?? null };
+  } catch { points = []; }
+
+  // 데모(mock): 실 시계열이 없으므로 현재 구성에서 되감은 **합성** 추이를 만들어 화면 동작을 보여준다.
+  // 응답에 synthesized 를 달아 화면이 '데모 합성 데이터' 로 표시한다(실데이터로 오인 방지).
+  if (snap.source === 'mock' && breakdown.ds.capGB > 0) {
+    synthesized = true;
+    const n = Math.max(2, Math.min(400, Math.round(days * 86_400_000 / bucketMs)));
+    const b = breakdown;
+    const g = 0.0006 + (hash(vcId || 'all') % 5) * 0.0002; // 일 증가율(용량 대비)
+    points = [];
+    for (let i = n; i >= 0; i--) {
+      const ts = Date.now() - i * bucketMs;
+      const back = (i * bucketMs) / 86_400_000;
+      const f = Math.max(0.5, 1 - g * back);
+      const wob = 1 + 0.01 * Math.sin(i / 3);
+      const used = b.ds.usedGB * f * wob; const vmUsed = b.vm.committedGB * f * wob;
+      const off = b.reclaim.off.gb * (0.8 + 0.2 * Math.abs(Math.sin(i / 7)));
+      const sn = b.reclaim.snap.gb * (0.6 + 0.4 * Math.abs(Math.cos(i / 5)));
+      points.push({ ts, dsCapGB: b.ds.capGB, dsUsedGB: Math.round(used), provGB: Math.round(b.vm.provGB * (0.97 + 0.03 * f)), usedGB: Math.round(vmUsed), offGB: Math.round(off), snapGB: Math.round(sn * 10) / 10, reclaimGB: Math.round((off + sn) * 10) / 10 });
+    }
+    collectedSince = { ds: points[0].ts, vm: points[0].ts };
+  }
+
+  const analysis = analyzeDiskTrend({ points, breakdown, days, policy });
+  res.json({ ok: true, vcenterId: vcId || 'all', days, bucketMs, collectedSince, synthesized, points, breakdown, analysis });
+});
+
 api.get('/tools/capacity-forecast', async (req, res) => {
   const snap = store.get();
   const vcId = req.query.vcenterId;

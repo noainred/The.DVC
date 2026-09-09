@@ -217,5 +217,7 @@ export function vmperfDiskUsage() {
 // 디스크는 vCenter 데이터스토어의 사용/용량 합계 — CPU·MEM 의 '사용/할당' 과 같은 형태로 본다.
 export const VMPERF_METRICS = ['vm_cpu_alloc_mhz', 'vm_cpu_used_mhz', 'vm_mem_alloc_mb', 'vm_mem_used_mb'];
 export const VMPERF_DISK_METRICS = ['ds_cap_gb_vc', 'ds_used_gb_vc'];
+// VM 디스크 집계(v2.446): 할당(committed+uncommitted)·커밋·정지 VM 커밋·스냅샷 크기(GB). 키 규약 동일.
+export const VMPERF_VMDISK_METRICS = ['vm_disk_prov_gb', 'vm_disk_used_gb', 'vm_disk_off_gb', 'vm_snap_gb'];
 export const VMPERF_ALL_METRICS = [...VMPERF_METRICS, ...VMPERF_DISK_METRICS];
 export const vmperfDir = () => DIR;

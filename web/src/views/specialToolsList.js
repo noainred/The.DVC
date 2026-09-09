@@ -24,7 +24,7 @@ export const TOOLS = [
   { k: 'storage-track', icon: '💾', label: '스토리지 사용량 추이', desc: 'vCenter 데이터스토어 용량·사용량·사용률 매일 00시·12시 추이(VM 수량 추이와 같은 스냅샷) · vCenter별 현재/증감 표 · 데이터스토어별 개별 추이(선택 차트 + 기간 증감 상위) · 일평균 증가량과 가용 소진 예상(선형 추정) · 증감 클릭 시 변화 데이터스토어 상세' },
   { k: 'vmfinder', icon: '🧭', label: 'VM 정밀 검색 / 유휴 VM', desc: '다수 vCenter·폴더·클러스터·풀 + 조건 · 1일/1주 평균 CPU로 미사용 VM' },
   { k: 'deepsearch', icon: '🔭', label: '심층 검색', desc: '게이트웨이·서브넷·GPU·OS 등 다조건 + 게스트 탐침(GPU드라이버·프로세스) · 전체/복수 vCenter' },
-  { k: 'capacity', icon: '📈', label: '용량 리포트', desc: '클러스터별 여유·오버커밋·수용여력 · 전체/법인별' },
+  { k: 'capacity', icon: '📈', label: '용량 리포트', desc: '클러스터별 여유·오버커밋·수용여력 · 디스크 트렌드(할당·사용·회수 가능) · 전체/법인별' },
   { k: 'waste', icon: '♻️', label: '낭비 리소스', desc: '정지 VM·스냅샷·thin 회수가능·Tools 미설치' },
   { k: 'esxitemp', icon: '🌡️', label: 'ESXi 온도', desc: '호스트/클러스터/법인별 현재 온도 + 최근 5년 추이' },
   { k: 'forecast', icon: '🔮', label: '용량 추세/예측', desc: '데이터스토어 증가율·가득 찰 예상일' },
