@@ -12,17 +12,36 @@ import { loadCollectors } from '../../collector/registry.js';
 import { listTargets } from '../../agent/deployRegistry.js';
 
 const adminOnly = requireRole('admin');
+/**
+ * v2.435(감사 S3): 조회를 **admin 전용**으로 올렸다.
+ * 예전에는 `requirePerm('tools')` 였는데 `auth/permissions.js` 기준 **operator 가 tools 를 기본 보유**하므로,
+ * 화면 카드가 adminOnly 여도 API 직접 호출로 원격 `haproxy.cfg` 전문·`portal.env` 발췌·배포 대상 목록·
+ * 전 사이트 내부 IP 가 그대로 나갔다(`server/CLAUDE.md` "기능 권한은 서버가 진실의 원천" 위반).
+ * haproxy.cfg 에는 `stats auth`·`insecure-password` 같은 자격증명이 관행적으로 들어간다.
+ * tools 권한 계정에는 **요약만** 준다(cfg/env 본문 제거 — ops.stripCfg).
+ */
 const toolsPerm = requirePerm('tools');
+// 거부 기본값 — authMiddleware 는 인증 비활성 시에도 req.user 를 AUTH_DISABLED_ROLE 로 채우므로
+// (auth.js:909) 이 판정으로 충분하고, authMiddleware 없이 mount 되는 사고에도 데이터가 새지 않는다.
+const isAdmin = (req) => req.user?.role === 'admin';
 const RE_DC = /^[^\s/\\]{1,40}$/;
 
 export function registerRelayTopo(api) {
-api.get('/tools/relaytopo', toolsPerm, (_req, res) => {
+api.get('/tools/relaytopo', toolsPerm, (req, res) => {
+  const admin = isAdmin(req);
   const topo = loadTopology();
   const issues = validateTopology(topo, loadCollectors());
   const raw = loadTopologyRaw();
   const access = Object.fromEntries(raw.sites.map((s) => [s.dc, { edge: accessView(raw, s, 'edge'), irs: accessView(raw, s, 'irs') }]));
   access._main = { main: accessView(raw, null, 'main') };
-  res.json({ ok: true, topology: topo, issues, results: lastResults(), access, targets: TARGETS, defaultServices: DEFAULT_SERVICES, deployTargets: listTargets().map((t) => ({ id: t.id, host: t.host, username: t.username })), kinds: topo.services.map((s) => ({ key: s.key, kind: kindForService(s, topo.main) })) });
+  res.json({
+    ok: true, admin, topology: topo, issues,
+    results: lastResults({ full: admin }),                       // 비-admin 에는 cfg/env 본문 제거
+    access: admin ? access : {},                                 // 접속 경로·자격증명 출처는 admin 만
+    targets: TARGETS, defaultServices: DEFAULT_SERVICES,
+    deployTargets: admin ? listTargets().map((t) => ({ id: t.id, host: t.host, username: t.username })) : [],
+    kinds: topo.services.map((s) => ({ key: s.key, kind: kindForService(s, topo.main) })),
+  });
 });
 function accessView(raw, site, role) { const a = resolveNodeAccess(raw, site, role); return { host: a.host || '', port: a.port || 0, via: a.via || '', source: a.source || '', error: a.error || '' }; }
 
@@ -66,7 +85,7 @@ api.get('/tools/relaytopo/export', adminOnly, (req, res) => {
   res.send(JSON.stringify(out, null, 2));
 });
 
-api.get('/tools/relaytopo/render/:dc', toolsPerm, (req, res) => {
+api.get('/tools/relaytopo/render/:dc', adminOnly, (req, res) => {   // 관리 블록에는 전 사이트 내부 IP 가 들어간다(v2.435)
   const topo = loadTopology(); const site = topo.sites.find((s) => s.dc === req.params.dc);
   if (!site) return res.status(404).json({ ok: false, reason: '사이트가 없습니다.' });
   const { text, missing } = renderManagedBlock(site, topo.services, topo.main);

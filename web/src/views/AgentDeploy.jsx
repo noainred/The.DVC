@@ -130,7 +130,9 @@ export default function AgentDeploy() {
     } else setResult({ kind: 'save', ok: false, reason: r.reason });
   };
   // gpuGuest는 EMPTY 기본값과 깊게 병합(저장 안 된 옛 대상도 안전) + 비밀번호는 비우고 has* 플래그 보존.
-  const editTarget = (t) => { setF({ ...EMPTY, ...t, gpuGuest: { ...EMPTY.gpuGuest, ...(t.gpuGuest || {}) }, password: '', privateKey: '' }); setSubtab('add'); };
+  // v2.435: 서버가 centralToken/collectorToken 도 가리므로(SECRET_KEYS) 폼은 빈 값으로 두고,
+  // has* 플래그로 '저장됨' 만 표시한다. 빈 채로 저장하면 서버가 기존 값을 유지한다.
+  const editTarget = (t) => { setF({ ...EMPTY, ...t, gpuGuest: { ...EMPTY.gpuGuest, ...(t.gpuGuest || {}) }, password: '', privateKey: '', centralToken: '', collectorToken: '' }); setSubtab('add'); };
   const removeTarget = async (t) => { if (window.confirm(`'${t.host}' 대상을 삭제할까요?`)) { await delJson(`/admin/agent-deploy/targets/${t.id}`).catch(() => {}); await loadTargets(); } };
   const deployTarget = async (t) => {
     if (!window.confirm(`${t.host} 에 배포할까요?`)) return;
@@ -285,14 +287,14 @@ export default function AgentDeploy() {
           <label title="중앙↔에이전트 공유 비밀. 중앙 포탈의 CENTRAL_TOKEN과 반드시 동일해야 하며 다르면 403. '생성'을 누르면 안전한 랜덤 토큰을 만들어 이 포탈(중앙) 환경(portal.env)에 저장하고 칸을 채웁니다(리붓해도 유지). 이미 있으면 자동 입력됩니다.">
             <span className="cap">중앙 토큰(CENTRAL_TOKEN)</span>
             <div className="flex gap" style={{ alignItems: 'center' }}>
-              <input className="input" value={f.centralToken} onChange={set('centralToken')} placeholder={tokenInfo.hasToken ? '' : '미설정 — 생성 클릭'} />
+              <input className="input" value={f.centralToken} onChange={set('centralToken')} placeholder={f.hasCentralToken ? '저장됨 — 비우면 기존 값 유지' : (tokenInfo.hasToken ? '' : '미설정 — 생성 클릭')} />
               <button className="logout-btn" type="button" style={{ flex: 'none', padding: '7px 12px', whiteSpace: 'nowrap' }} disabled={genBusy} onClick={genToken}
                 title="없으면 안전한 랜덤 토큰을 생성해 이 포탈(중앙) 환경에 저장하고 채웁니다">{genBusy ? '생성 중…' : (tokenInfo.hasToken ? '현재값' : '생성')}</button>
             </div>
             <span className="muted" style={{ fontSize: 11 }}>{tokenInfo.hasToken ? '✅ 중앙 토큰이 이 포탈에 설정됨(자동 입력됨)' : '⚠ 중앙 미설정 — 생성 시 portal.env에 저장(리붓 유지)'}</span>
           </label>
           <label title="(선택) 이 에이전트를 '전력/데이터 pull 대상'으로도 쓸 때만. 중앙이 이 에이전트의 /api/collector/export 를 당겨갈 때 쓰는 임의 비밀입니다. iDRAC/IP 스캔만 할 거면 비워두세요. 자동 채우기는 랜덤값을 넣습니다. 중앙 '설정 › 수집 서버' 등록 시 같은 값을 사용하세요.">
-            <span className="cap">전력수집 토큰(COLLECTOR_TOKEN, 선택)</span><input className="input" value={f.collectorToken} onChange={set('collectorToken')} placeholder="(전력수집 시에만)" /></label>
+            <span className="cap">전력수집 토큰(COLLECTOR_TOKEN, 선택){f.hasCollectorToken ? <span className="badge green" style={{ marginLeft: 6 }}>저장됨</span> : null}</span><input className="input" value={f.collectorToken} onChange={set('collectorToken')} placeholder={f.hasCollectorToken ? '저장됨 — 비우면 기존 값 유지' : '(전력수집 시에만)'} /></label>
           <label title="(선택) 전력수집 에이전트가 보고할 데이터센터 라벨. 수집 토큰을 쓸 때만 의미 있습니다. 예: OC2. 안 쓰면 비움. ※ 아래 '수집 서버 자동 등록'을 켜면 배포 후 중앙에 자동 등록됩니다.">
             <span className="cap">수집 DC명(COLLECTOR_DATACENTER, 선택)</span>
             <input className="input" list="collector-dc-list" value={f.collectorDatacenter} onChange={set('collectorDatacenter')} placeholder="예: OC2 (목록에서 선택 또는 직접 입력)" />

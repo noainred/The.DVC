@@ -12,7 +12,14 @@ import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 
 const FILE = path.join(config.configDir, 'agent-deploy-targets.json');
-const SECRET_KEYS = ['password', 'privateKey'];
+/**
+ * 응답에서 가리고, 저장 시 '빈 값 = 기존 유지' 로 다루는 비밀 필드.
+ * v2.435: `centralToken`·`collectorToken` 추가(감사 지적) — 예전에는 두 토큰이 `GET /agent-deploy/targets`
+ * 응답과 저장 응답에 **평문으로** 실려 나갔다. 중앙 토큰이 새면 그 토큰을 가진 누구나 엣지→중앙 API 를
+ * 호출할 수 있고, 수집 토큰이 새면 그 엣지의 수집 데이터를 그대로 당겨갈 수 있다.
+ * 화면은 `hasCentralToken`/`hasCollectorToken` 플래그로 저장 여부만 보고, 빈 값을 보내면 기존 값이 유지된다.
+ */
+const SECRET_KEYS = ['password', 'privateKey', 'centralToken', 'collectorToken'];
 const FIELDS = ['host', 'port', 'username', 'password', 'privateKey', 'agentName',
   'centralUrl', 'centralToken', 'collectorToken', 'collectorDatacenter', 'installerPath', 'portalPort', 'autoUpgrade', 'pushInventory', 'enabled', 'advertiseUrl'];
 

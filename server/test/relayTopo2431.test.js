@@ -59,7 +59,12 @@ test('store.topologyToCsv ↔ parseTopologyTable 왕복 + mergeImport(같은 DC 
   const cur = st.normalizeTopology({ sites: [{ dc: 'AZ', edge: { privateIp: '1.1.1.1', ssh: { username: 'root', password: 'keep' } }, irs: {} }, { dc: 'OLD', edge: { privateIp: '2.2.2.2' }, irs: {} }] });
   const merged = st.normalizeTopology(st.mergeImport(cur, p));
   assert.equal(merged.sites.find((s) => s.dc === 'AZ').edge.privateIp, '192.168.30.221');
-  assert.equal(merged.sites.find((s) => s.dc === 'AZ').edge.ssh.password, 'keep', '가져오기가 저장된 비밀을 지우지 않음');
+  // v2.435(감사 S1): 가져오기로 **host 가 바뀌면** 저장된 비밀을 잇지 않는다. 예전에는 이월했고,
+  // 그 경로로 운영 서버 비밀번호를 임의 호스트에 보낼 수 있었다(불변조건 v2.257 M3 회귀).
+  assert.equal(merged.sites.find((s) => s.dc === 'AZ').edge.ssh.password, '', 'IP 가 바뀌면 저장된 비밀을 버린다');
+  // 같은 IP 로 다시 가져오면 기존 비밀은 유지된다(왕복 편집 편의).
+  const same = st.normalizeTopology(st.mergeImport(cur, { sites: [{ dc: 'AZ', edge: { privateIp: '1.1.1.1', vcenterIp: '1.1.1.9' }, irs: {} }] }));
+  assert.equal(same.sites.find((s) => s.dc === 'AZ').edge.ssh.password, 'keep', 'IP 가 같으면 유지');
   assert.ok(merged.sites.find((s) => s.dc === 'OLD'), '병합 모드는 기존 DC 유지');
   const replaced = st.normalizeTopology(st.mergeImport(cur, p, { replace: true }));
   assert.equal(replaced.sites.length, 1);
@@ -178,7 +183,11 @@ test('routes: GET(비밀 무반환·issues·access) / PUT / import 미리보기�
   const express = (await import('express')).default;
   const { registerRelayTopo } = await import('../src/routes/api/relaytopo.js');
   const st = await import('../src/relaytopo/store.js'); st._resetForTest();
-  const app = express(); app.use(express.json({ limit: '2mb' })); const api = express.Router(); registerRelayTopo(api); app.use('/api', api);
+  const app = express(); app.use(express.json({ limit: '2mb' }));
+  // 실제 앱은 /api 앞에 authMiddleware 가 있어 req.user 가 항상 채워진다(auth.js:909).
+  // v2.435 부터 조회 응답이 req.user.role 로 축약되므로(거부 기본값) 테스트도 같은 전제를 만든다.
+  app.use((req, _res, next) => { req.user = { username: 'admin', role: 'admin' }; next(); });
+  const api = express.Router(); registerRelayTopo(api); app.use('/api', api);
   const srv = app.listen(0); await new Promise((r) => srv.once('listening', r)); const base = `http://127.0.0.1:${srv.address().port}/api`;
   try {
     let r = await (await fetch(`${base}/tools/relaytopo`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ main: MAIN, sites: [{ ...SITE, edge: { ...SITE.edge, ssh: { username: 'root', password: 'secret-pw' } } }] }) })).json();
