@@ -8,7 +8,8 @@ import { getAllAgentConfigs } from '../../central/agentConfig.js';
 import { updateServer, removeServer, importServers, parseCsv, bulkAddByIps, registerScanned, assignVcenter, deleteServers, loadRegistry as loadIdracRegistry } from '../../idrac/registry.js';
 import { expandIpList } from '../../idrac/iprange.js';
 import { scanForIdracs } from '../../idrac/scan.js';
-import { enqueueIdracScan, enqueueIdracRegister, getIdracScanResult, listIdracScanJobs, getIdracScanJobLog, cancelIdracScanJob, recentPollingAgents } from '../../central/idracScanJobs.js';
+import { listTargets } from '../../agent/deployRegistry.js';
+import { enqueueIdracScan, enqueueIdracRegister, getIdracScanResult, listIdracScanJobs, getIdracScanJobLog, cancelIdracScanJob, recentPollingAgents, agentOfReq } from '../../central/idracScanJobs.js';
 import { pushIdracScan } from '../../central/idracScanPush.js';
 import { getPollerStatus, pollNow } from '../../idrac/poller.js';
 import { listScanRanges, saveScanRanges, removeScanRanges, getScanRangeRaw } from '../../idrac/scanRanges.js';
@@ -357,7 +358,16 @@ adminRouter.get('/idrac/scan-job-log', adminOnly, (req, res) => {
   // 수집 서버(원격)로 등록된 id/이름(소문자) — '등록·정상인데 폴링만 없음' 진단에 사용.
   const collectors = new Set();
   for (const c of listCollectors()) { if (c.id) collectors.add(String(c.id).toLowerCase()); if (c.name) collectors.add(String(c.name).toLowerCase()); }
-  const r = getIdracScanJobLog(String(req.query.reqId || ''), { collectors });
+  // v2.440: 배포 대상에 그 엣지가 등록돼 있으면 SSH 접속 주소를 조치 절차의 명령에 그대로 넣는다
+  // (사용자가 '어느 장비에 붙어야 하나' 를 다시 찾지 않게). 비밀은 넘기지 않는다 — host/port/계정만.
+  const reqId = String(req.query.reqId || '');
+  const jobAgent = agentOfReq(reqId).trim().toLowerCase();
+  let deployTarget = null;
+  if (jobAgent) {
+    const t = listTargets().find((x) => String(x.agentName || '').trim().toLowerCase() === jobAgent);
+    if (t) deployTarget = { host: t.host || '', port: Number(t.port) || 22, username: t.username || 'root' };
+  }
+  const r = getIdracScanJobLog(reqId, { collectors, deployTarget });
   res.status(r.ok ? 200 : 404).json(r);
 });
 

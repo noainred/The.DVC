@@ -52,10 +52,21 @@ export function pushIdracScan(agent, { ips, username, password, vcenterId = '', 
         timeoutMs: PUSH_TIMEOUT_MS, retries: 1,
       });
       if (!r.ok) {
-        const hint = r.status === 403 ? ' — 수집 서버 토큰(X-Collector-Token) 불일치'
-          : r.status === 404 ? ' — 엣지가 구버전이라 PUSH 스캔 엔드포인트가 없거나 collector 비활성'
-            : '';
-        setIdracScanResult(reqId, { error: `엣지 응답 HTTP ${r.status}${hint}. 수집 서버 URL/토큰/버전을 확인하세요.` });
+        // v2.440: 상태코드별로 원인이 갈린다 — 실측으로 확인한 규칙이다.
+        //   403 = collector 라우터에 도달했고 **토큰이 틀림**
+        //   401 = 그 경로가 **없어서** collector 라우터를 지나 일반 인증 미들웨어로 떨어짐
+        //         → 엣지가 구버전(PUSH 스캔 엔드포인트 미탑재). 토큰 문제가 아니다.
+        //   404 = collector 비활성(COLLECTOR_TOKEN 미설정) 또는 경로 없음
+        // 예전에는 401 에 힌트가 없어 'URL/토큰/버전을 확인하세요' 로 셋을 나열했고, 실제 원인이
+        // 버전인데 사용자가 토큰부터 뒤지게 만들었다.
+        // ⚠ 이 오류 문자열에는 마크다운(**강조**)을 쓰지 말 것 — 이벤트 타임라인·로그·알림 등
+        //   렌더러가 없는 경로로도 흐르므로 별표가 그대로 노출된다(v2.440 실제 발생).
+        //   강조가 필요한 안내는 remedy 카드(scanRemedy.js)에만 둔다.
+        const hint = r.status === 403 ? ' — 수집 서버 토큰(X-Collector-Token) 불일치입니다. 설정 › 엣지 노드 포탈 설치 › 수집 서버 연결 상태의 [진단]으로 어느 값이 통하는지 확인한 뒤 정렬하세요.'
+          : r.status === 401 ? ' — 이 엣지에 PUSH 스캔 엔드포인트(/api/collector/idrac-scan)가 없습니다. 경로가 없어 인증 라우터가 401 을 낸 것으로, 토큰 문제가 아니라 엣지가 구버전입니다. 설정 › 수집 서버(원격)에서 이 엣지 버전을 확인하고 [업그레이드]하거나, 스캔 방식을 에이전트 폴링으로 바꾸세요.'
+            : r.status === 404 ? ' — 엣지의 collector 기능이 꺼져 있거나(COLLECTOR_TOKEN 미설정) 경로가 없습니다.'
+              : '';
+        setIdracScanResult(reqId, { error: `엣지 응답 HTTP ${r.status}${hint}`, httpStatus: r.status });
         return;
       }
       const data = await r.json().catch(() => ({}));

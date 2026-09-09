@@ -14,6 +14,7 @@
 
 import { expandIpList } from '../idrac/iprange.js';
 import { appendIdracScanLog } from '../idrac/scanLog.js';
+import { buildPendingRemedy, buildPushErrorRemedy } from './scanRemedy.js';
 
 // 스캔에 실제로 사용된 자격증명의 '지문' — 평문은 절대 남기지 않는다. 계정명 + 비밀번호 길이 +
 // 비복원 해시(djb2)만 표시해, "다른 법인은 되는데 이 법인만 인증 실패"일 때 법인 간 설정을
@@ -381,6 +382,7 @@ export function getIdracScanJobLog(reqId, opts = {}) {
   const agentKey = String(j.agent || '').trim().toLowerCase();
   const isRegisteredCollector = collectorSet ? collectorSet.has(agentKey) : false;
   const hints = [];
+  let remedy = null;   // v2.440: 구체적 조치 카드(대기 + 폴링 없음일 때)
   if (j.state === 'pending') {
     if (!lastPoll) {
       hints.push({ level: 'error', msg: `에이전트 '${j.agent}'의 잡 인출 폴링 기록이 없습니다 — 엣지 포탈이 꺼져 있거나 AGENT_NAME 불일치, CENTRAL_URL/CENTRAL_TOKEN 미설정일 수 있습니다.` });
@@ -392,9 +394,22 @@ export function getIdracScanJobLog(reqId, opts = {}) {
       }
       if (others.length) hints.push({ level: 'warn', msg: `현재 폴링 중인 에이전트: ${others.join(', ')} — 이 잡은 '${j.agent}'용인데 그 이름으로는 폴링이 없습니다. 엣지의 AGENT_NAME이 '${j.agent}'와 일치하는지(대소문자 무관) 확인하세요.` });
       else hints.push({ level: 'warn', msg: '현재 중앙에 폴링하는 에이전트가 하나도 없습니다 — 엣지 프로세스 미기동, CENTRAL_URL 미설정, 또는 네트워크/토큰 문제일 수 있습니다.' });
+      // v2.440: 원인 설명에서 멈추지 않고 **확인 명령·수정 절차·검증 방법·바로 갈 화면**까지 만든다
+      // (사용자 요구 '해결방법을 구체적으로 화면에 표시'). 판정은 순수 모듈(scanRemedy)에 둔다.
+      remedy = buildPendingRemedy({
+        agent: j.agent, pollingAgents: others, isRegisteredCollector,
+        deployTarget: opts.deployTarget || null,
+      });
     }
     else if (now - lastPoll > 30_000) hints.push({ level: 'warn', msg: `에이전트가 ${Math.round((now - lastPoll) / 1000)}초째 폴링하지 않습니다(정상 주기 5초) — 엣지 포탈 상태/네트워크를 확인하세요.` });
     else hints.push({ level: 'info', msg: '에이전트는 정상 폴링 중이며 곧 잡을 인출합니다.' });
+  }
+  // v2.440: PUSH 실패(오류 종결)도 조치 카드를 만든다 — 상태코드마다 원인이 갈리는데
+  // 화면에는 한 줄 오류만 남아 사용자가 토큰부터 뒤지곤 했다(실제로는 401=구버전).
+  if (j.state === 'error' && j.result?.error) {
+    remedy = buildPushErrorRemedy({
+      agent: j.agent, httpStatus: j.result.httpStatus || 0, error: j.result.error, collectorUrl: j.edgeUrl || '',
+    });
   }
   if (j.state === 'running') {
     if (j.dispatch === 'push') {
@@ -422,6 +437,7 @@ export function getIdracScanJobLog(reqId, opts = {}) {
     progress: j.progress ? { ...j.progress } : null,
     result: j.result ? { ...j.result, found: undefined, foundCount: j.result.foundCount || 0 } : null,
     hints,
+    remedy,
     events: [...(j.events || [])],
   };
 }
