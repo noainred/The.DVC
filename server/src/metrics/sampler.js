@@ -41,7 +41,7 @@ async function sampleOnce() {
  * (임의값 추정 금지 — /tools/waste 의 overAllocatedReport 와 같은 규칙). 메모리는 호스트
  * 정보 없이 계산 가능하므로 전원 On 전량을 집계한다. 전원 OFF/템플릿은 제외(사용률 0 이라 왜곡).
  */
-function vmAllocRows(snap, settings) {
+export function vmAllocRows(snap, settings) {
   // `${vcenterId}|${host.name}` -> 코어당 MHz. 이름 단독 키는 vCenter 간 동명 호스트가
   // 덮어써 다른 사이트 MHz 로 환산되는 오염이 생긴다(v2.388 수정).
   const hostMhz = new Map();
@@ -54,11 +54,26 @@ function vmAllocRows(snap, settings) {
   const agg = new Map();
   const bucket = (id) => {
     let e = agg.get(id);
-    if (!e) { e = { cpuUsed: 0, cpuAlloc: 0, memUsed: 0, memAlloc: 0, dsUsed: 0, dsCap: 0 }; agg.set(id, e); }
+    if (!e) { e = { cpuUsed: 0, cpuAlloc: 0, memUsed: 0, memAlloc: 0, dsUsed: 0, dsCap: 0, diskProv: 0, diskUsed: 0, diskOff: 0, snapGB: 0 }; agg.set(id, e); }
     return e;
   };
   for (const v of snap.vms || []) {
-    if (v.powerState !== 'POWERED_ON' || v.template) continue;
+    if (v.template) continue;
+    // 디스크 트렌드(v2.446) — 용량 리포트 › 디스크 트렌드의 '할당(프로비저닝)/커밋/정지 VM/스냅샷' 계열.
+    // 전원 OFF VM 도 스토리지는 점유하므로 CPU/MEM 과 달리 **전원 무관하게** 집계한다.
+    if (vmperfTracks(v.vcenterId, settings)) {
+      const committed = Number(v.storageGB) || 0;
+      const uncommitted = Number(v.uncommittedGB) || 0;
+      const snapGB = Number(v.snapshotSizeGB) || 0;
+      for (const id of (settings.trackTotal ? [v.vcenterId, ''] : [v.vcenterId])) {
+        const e = bucket(id);
+        e.diskProv += committed + uncommitted;
+        e.diskUsed += committed;
+        if (v.powerState !== 'POWERED_ON') e.diskOff += committed;
+        e.snapGB += snapGB;
+      }
+    }
+    if (v.powerState !== 'POWERED_ON') continue;
     const memMB = Number(v.memMB) || 0;
     const memPct = Number(v.memUsagePct) || 0;
     const vcpu = Number(v.cpuCount) || 0;
@@ -109,6 +124,14 @@ function vmAllocRows(snap, settings) {
     if (e.dsCap > 0) {
       rows.push({ metric: 'ds_cap_gb_vc', k, v: Math.round(e.dsCap) });
       rows.push({ metric: 'ds_used_gb_vc', k, v: Math.round(e.dsUsed) });
+    }
+    // VM 디스크 집계(v2.446) — 할당이 0 이면(VM 없음) 행을 만들지 않는다(결측은 결측으로).
+    // 정지/스냅샷은 0 이 실제값(없음)이므로 할당 행이 있을 때 함께 기록한다.
+    if (e.diskProv > 0) {
+      rows.push({ metric: 'vm_disk_prov_gb', k, v: Math.round(e.diskProv) });
+      rows.push({ metric: 'vm_disk_used_gb', k, v: Math.round(e.diskUsed) });
+      rows.push({ metric: 'vm_disk_off_gb', k, v: Math.round(e.diskOff) });
+      rows.push({ metric: 'vm_snap_gb', k, v: Math.round(e.snapGB * 10) / 10 });
     }
     if (rows.length) out.set(k, rows);
   }

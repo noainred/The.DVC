@@ -6,6 +6,7 @@ import { DataTable, Loading, ErrorBox, StateBadge, UsageCell, Modal, ResultCount
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Brush } from 'recharts';
 import { Card, fmtTrendTick, tb, tempColor, useTool } from './shared.jsx';
 import RightsizeReport from './RightsizeReport.jsx'; // v2.445: VM 자원 축소 근거 리포트
+import DiskTrend from './DiskTrend.jsx'; // v2.446: 디스크 트렌드(할당·사용·회수 가능)
 
 
 export function EsxiTemp({ scope }) {
@@ -121,9 +122,19 @@ export function Forecast({ scope }) {
 }
 
 export function Capacity({ scope }) {
+  // 하위 탭(클러스터/디스크 트렌드)을 URL 에 실어 새로고침·북마크에서 유지(v2.438 규약). 훅은 조기 return 위.
+  const [tab, setTab] = useHashTab({ base: ['tools', 'capacity'], valid: ['cluster', 'disk'], fallback: 'cluster' });
   const { loading, data, error } = useTool('/tools/capacity', scope ? { vcenterId: scope } : {});
-  if (loading) return <Loading />;
-  if (error) return <ErrorBox message={error} />;
+  const tabs = (
+    <div className="flex gap wrap" style={{ marginBottom: 12 }}>
+      {[['cluster', '클러스터 수용여력'], ['disk', '💽 디스크 트렌드 (할당·사용·회수 가능)']].map(([k, l]) => (
+        <button key={k} className={tab === k ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '6px 12px' }} onClick={() => setTab(k)}>{l}</button>
+      ))}
+    </div>
+  );
+  if (tab === 'disk') return <>{tabs}<DiskTrend scope={scope} /></>;
+  if (loading) return <>{tabs}<Loading /></>;
+  if (error) return <>{tabs}<ErrorBox message={error} /></>;
   const t = data.totals;
   const cols = [
     { key: 'cluster', label: '클러스터', render: (c) => <b>{c.cluster}</b> },
@@ -140,6 +151,7 @@ export function Capacity({ scope }) {
   ];
   return (
     <>
+      {tabs}
       <div className="kpis" style={{ marginBottom: 14 }}>
         <Card label="클러스터" value={t.clusters} meta={`호스트 ${t.hosts}`} />
         <Card label="물리코어 / 할당 vCPU" value={`${t.cores} / ${t.vcpuAllocated}`} meta={`${t.vcpuPerCore}:1 평균`} accent={t.vcpuPerCore >= 4 ? 'var(--red)' : undefined} />
