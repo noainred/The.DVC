@@ -73,3 +73,27 @@ describe('describeScanRun', () => {
     expect(d.title).not.toContain('위임');
   });
 });
+
+describe('metrics — 등록 수량 강조(v2.442, 사용자 요구)', () => {
+  it('발견/등록/스캔을 조각으로 내보내고 등록에만 accent 를 붙인다', () => {
+    const d = describeScanRun({ at: 1, ok: true, found: 6, registered: 6, scanned: 30, unreachable: 20 });
+    expect(d.metrics).toEqual([
+      { k: '발견', n: 6, unit: '대' },
+      { k: '등록', n: 6, unit: '대', accent: 'red' },
+      { k: '스캔', n: 30, unit: '개' },
+    ]);
+    expect(d.extra).toEqual(['무응답 20']);
+    // 문자열도 그대로 유지된다(툴팁·구버전 호환).
+    expect(d.text).toBe('발견 6대 · 등록 6대 · 스캔 30개 (무응답 20)');
+  });
+
+  it('등록 값이 없으면 등록 조각을 만들지 않는다', () => {
+    const d = describeScanRun({ at: 1, ok: true, found: 2 });
+    expect(d.metrics.map((m) => m.k)).toEqual(['발견']);
+  });
+
+  it('실패·대기에는 metrics 가 없다(색 강조 대상이 아니다)', () => {
+    expect(describeScanRun({ at: 1, error: 'x' }).metrics).toBe(undefined);
+    expect(describeScanRun({ at: 1, delegated: true, pending: true }).metrics).toBe(undefined);
+  });
+});

@@ -48,16 +48,20 @@ export function describeScanRun(r, now = Date.now()) {
   }
 
   // ③ 성공 — 사용자 요구 형식: '발견 N대'. 등록/스캔/무응답/인증실패는 뒤에 덧붙인다.
+  // metrics 로도 함께 내보낸다 — 화면이 **등록 수량 숫자만 빨간색**으로 강조하기 위해서다
+  // (v2.442, 사용자 요구). 문자열 text 는 툴팁·테스트·구버전 호환용으로 그대로 둔다.
   const found = Number(r.found) || 0;
-  const parts = [`발견 ${found}대`];
-  if (r.registered != null) parts.push(`등록 ${Number(r.registered) || 0}대`);
-  if (r.scanned != null) parts.push(`스캔 ${Number(r.scanned) || 0}개`);
+  const metrics = [{ k: '발견', n: found, unit: '대' }];
+  if (r.registered != null) metrics.push({ k: '등록', n: Number(r.registered) || 0, unit: '대', accent: 'red' });
+  if (r.scanned != null) metrics.push({ k: '스캔', n: Number(r.scanned) || 0, unit: '개' });
+  const parts = metrics.map((m) => `${m.k} ${m.n}${m.unit}`);
   const extra = [];
   if (r.unreachable) extra.push(`무응답 ${r.unreachable}`);
   if (r.authFailed) extra.push(`인증실패 ${r.authFailed}`);
   const d = dur(r.durationMs);
   return {
     state: 'ok', badge: '성공', tone: found > 0 ? 'green' : 'muted',
+    metrics, extra,
     text: `${parts.join(' · ')}${extra.length ? ` (${extra.join(' · ')})` : ''}`,
     title: `${who}${d ? ` · 소요 ${d}` : ''}${extra.length ? ` · ${extra.join(' · ')}` : ''}`,
     when,
