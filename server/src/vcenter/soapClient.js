@@ -873,8 +873,16 @@ export const RIGHTSIZE_COUNTERS = {
 
 /**
  * 한 VM 의 리포트 계열 전부를 **로그인 1회 + QueryPerf 1회** 로 가져온다.
- * interval: day|week|month|year(PERF_INTERVALS). 반환 { intervalSec, series:{name:[{t,v}]}, missing:[name] }.
- * 카운터가 그 vCenter 에 없으면(통계 레벨 축소 등) missing 에 이름을 넣고 계열은 비운다 — 추정하지 않는다.
+ * interval: day|week|month|year(PERF_INTERVALS).
+ * 반환 { intervalSec, series:{name:[{t,v}]}, missing:[], empty:[], noData:[] } — 계열이 빈 이유를
+ * **세 가지로 구분**한다(v2.449). 셋 다 화면에는 '—' 로 보이지만 원인과 대응이 완전히 다르다:
+ *   · missing — vCenter **카운터 카탈로그에 그 카운터가 없다**(버전 차이). 조회 자체가 불가.
+ *   · empty   — 카탈로그에는 있는데 **QueryPerf 가 그 계열을 아예 안 돌려줬다**. 그 롤업 구간의
+ *               통계 레벨이 이 카운터를 수집하지 않는 경우가 대표적이다.
+ *   · noData  — 표본은 왔는데 **전부 결측(-1)**. 카운터는 수집 대상이지만 이 기간 값이 없다
+ *               (VM 이 꺼져 있었거나 보관 기간이 지났음).
+ * 구분이 없으면 사용자가 '통계 레벨을 올려야 하는지 / 기간을 줄여야 하는지' 를 판단할 수 없다
+ * (v2.445~2.448 에서 mem.active·mem.swapped 가 조용히 '—' 로만 나오던 문제).
  */
 export async function fetchVmRightsizeSeries(vc, moref, interval, { start, end } = {}) {
   const intervalId = PERF_INTERVALS[interval] || 1800;
@@ -883,7 +891,11 @@ export async function fetchVmRightsizeSeries(vc, moref, interval, { start, end }
   try {
     const map = await c.perfCounterMap();
     const wanted = Object.entries(RIGHTSIZE_COUNTERS).map(([name, cfg]) => ({ name, cfg, id: map.get(cfg.key) || null }));
-    const missing = wanted.filter((w) => !w.id).map((w) => w.name);
+    // 진단 문구에는 vCenter 카운터 키를 함께 싣는다 — 사용자가 vCenter 에서 바로 대조할 수 있게.
+    const label = (w) => `${w.name}(${w.cfg.key})`;
+    const missing = wanted.filter((w) => !w.id).map(label);
+    const empty = [];
+    const noData = [];
     const startTime = start ? new Date(start).toISOString() : null;
     const endTime = end ? new Date(end).toISOString() : null;
     const raw = await c.queryEntityPerfMulti('VirtualMachine', moref, wanted.map((w) => w.id), intervalId, { startTime, endTime });
@@ -891,10 +903,13 @@ export async function fetchVmRightsizeSeries(vc, moref, interval, { start, end }
     for (const w of wanted) {
       if (!w.id) { series[w.name] = []; continue; }
       const pts = raw.get(w.id) || [];
+      if (!pts.length) { series[w.name] = []; empty.push(label(w)); continue; }
       // vCenter 는 결측을 -1 로 준다 → null 로 바꿔 차트가 0 으로 오해하지 않게 한다.
-      series[w.name] = pts.map((p) => ({ t: p.t, v: p.v < 0 ? null : (w.cfg.div > 1 ? Math.round((p.v / w.cfg.div) * 10) / 10 : p.v) }));
+      const mapped = pts.map((p) => ({ t: p.t, v: p.v < 0 ? null : (w.cfg.div > 1 ? Math.round((p.v / w.cfg.div) * 10) / 10 : p.v) }));
+      series[w.name] = mapped;
+      if (mapped.every((p) => p.v == null)) noData.push(label(w));
     }
-    return { intervalSec: intervalId, series, missing };
+    return { intervalSec: intervalId, series, missing, empty, noData };
   } finally {
     await c.logout();
   }

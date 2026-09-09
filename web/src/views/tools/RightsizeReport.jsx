@@ -6,11 +6,12 @@
  * 판정·문구·인용은 서버 순수 모듈(tools/rightsize.js)이 만들고 여기서는 표시만 한다.
  * 데이터는 vCenter 가 자체 보관하는 성능 롤업을 이 창을 열 때 조회한다(평소 수집 없음).
  */
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine, Legend } from 'recharts';
 import { fetchJson } from '../../api.js';
 import EscClose from '../../components/EscClose.jsx';
 import { STable } from '../../components/STable.jsx';
+import { exportFileName, saveElementAsJpg, saveElementAsPdf } from './reportExport.js';
 
 const DAYS = [7, 30, 90];
 const tip = { background: '#0f172a', border: '1px solid #334155', borderRadius: 8, fontSize: 12 };
@@ -41,10 +42,14 @@ function Stat({ k, v, sub }) {
 }
 
 export default function RightsizeReport({ vm, onClose }) {
+  // ⚠ 훅은 전부 최상단(조기 return 위)에 — CLAUDE.md 프론트 회귀 방지(React #310).
   const [days, setDays] = useState(7);
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
+  const sheetRef = useRef(null);          // PDF/JPG 로 저장할 영역(모달 본문 전체)
+  const [saving, setSaving] = useState(''); // '' | 'pdf' | 'jpg'
+  const [saveErr, setSaveErr] = useState('');
   useEffect(() => {
     let alive = true;
     setLoading(true); setError(null);
@@ -61,20 +66,46 @@ export default function RightsizeReport({ vm, onClose }) {
   const memRows = r ? merge(r.series, ['memActiveMB', 'memConsumedMB', 'memBalloonMB', 'memSwappedMB']) : [];
   const readyRows = r ? (r.readyPctSeries || []).map((p) => ({ t: Date.parse(p.t), v: p.v })).filter((p) => Number.isFinite(p.t)) : [];
 
+  // PDF/JPG 저장(v2.449) — 감축 결재 근거로 파일을 남길 수 있어야 한다는 사용자 요구.
+  // 라이브러리는 클릭 시점에 동적 import 되므로(reportExport.js) 평소 번들에는 실리지 않는다.
+  const save = async (kind) => {
+    const el = sheetRef.current;
+    if (!el || saving) return;
+    setSaving(kind); setSaveErr('');
+    try {
+      const name = exportFileName(vm.name, days, kind === 'pdf' ? 'pdf' : 'jpg');
+      if (kind === 'pdf') await saveElementAsPdf(el, name);
+      else await saveElementAsJpg(el, name);
+    } catch (e) {
+      setSaveErr(e?.message || String(e));
+    } finally {
+      setSaving('');
+    }
+  };
+
   return (
     <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <EscClose onClose={onClose} />
-      <div className="modal card" style={{ maxWidth: 1100, width: '96vw', maxHeight: '92vh', overflow: 'auto' }}>
+      <div ref={sheetRef} className="modal card" style={{ maxWidth: 1100, width: '96vw', maxHeight: '92vh', overflow: 'auto' }}>
         <div className="flex between" style={{ marginBottom: 8, alignItems: 'center' }}>
           <div>
             <b style={{ fontSize: 15 }}>📊 자원 축소 근거 리포트 — {vm.name}</b>
             <div className="muted" style={{ fontSize: 11.5 }}>{vm.vcenterId} · {vm.host} · {vm.guestOS || ''}</div>
           </div>
-          <div className="flex gap" style={{ alignItems: 'center' }}>
+          {/* data-export-hide: 저장 결과물에는 버튼이 남지 않게 캡처에서 제외한다. */}
+          <div className="flex gap" style={{ alignItems: 'center' }} data-export-hide>
+            <button className="tab" style={{ padding: '5px 12px', fontSize: 12 }} disabled={!r || !!saving}
+              title="이 리포트 전체를 A4 여러 장 PDF 로 저장합니다(스크롤로 가려진 부분까지 포함)."
+              onClick={() => save('pdf')}>{saving === 'pdf' ? '저장 중…' : '⬇ PDF'}</button>
+            <button className="tab" style={{ padding: '5px 12px', fontSize: 12 }} disabled={!r || !!saving}
+              title="이 리포트 전체를 JPG 이미지 한 장으로 저장합니다."
+              onClick={() => save('jpg')}>{saving === 'jpg' ? '저장 중…' : '⬇ JPG'}</button>
+            <span style={{ width: 1, height: 18, background: 'rgba(255,255,255,.14)' }} />
             {DAYS.map((d) => <button key={d} className={days === d ? 'login-btn' : 'tab'} style={{ padding: '5px 12px', fontSize: 12 }} onClick={() => setDays(d)}>최근 {d}일</button>)}
             <button className="logout-btn" onClick={onClose}>닫기</button>
           </div>
         </div>
+        {saveErr && <div className="error-box" style={{ margin: '0 0 8px' }} data-export-hide>저장 실패: {saveErr}</div>}
 
         {loading && <div className="muted" style={{ padding: 40, textAlign: 'center' }}>vCenter 에서 {days}일 성능 이력을 불러오는 중… (고RTT 사이트는 수 초)</div>}
         {error && <div className="error-box" style={{ margin: 8 }}>조회 실패: {error}</div>}

@@ -61,3 +61,46 @@ test('parsePerfMultiXml: 빈 응답·표본 없는 응답·카운터 미지정�
   assert.deepEqual([...parsePerfMultiXml('<returnval/>', ['6'])], [['6', []]]);
   assert.equal(parsePerfMultiXml(`${HEAD}</returnval>`, []).size, 0);
 });
+
+/* ── v2.449: 계열이 빈 '이유' 를 세 가지로 구분해 알리는지 ───────────────────────
+ * v2.445~2.448 은 카탈로그 없음·표본 없음·전부 결측을 전부 똑같이 '—' 로만 보여줘,
+ * mem.active·mem.swapped 가 왜 비는지(통계 레벨 문제인지 기간 문제인지) 알 수 없었다. */
+const { analyzeRightsize } = await import('../src/tools/rightsize.js');
+
+const okSeries = (n, v) => Array.from({ length: n }, (_, i) => ({ t: new Date(Date.UTC(2026, 0, 1) + i * 1800_000).toISOString(), v }));
+/** 근거 게이트를 통과하는 최소 입력(8일치 30분 표본). */
+const baseArgs = () => ({
+  vm: { id: 'vc:vm-1', name: 'x', powerState: 'POWERED_ON', cpuCount: 8, memMB: 65536 },
+  hostMhzPerCore: 2400, intervalSec: 1800, days: 7,
+  now: Date.UTC(2026, 0, 9),
+  series: { cpuUsageMhz: okSeries(400, 1000), memConsumedMB: okSeries(400, 8192) },
+});
+
+test('analyzeRightsize: missing/empty/noData 를 서로 다른 문구로 구분해 보고한다', () => {
+  const r = analyzeRightsize({
+    ...baseArgs(),
+    missing: ['memActiveMB(mem.active.average)'],
+    empty: ['memSwappedMB(mem.swapped.average)'],
+    noData: ['memBalloonMB(mem.vmmemctl.average)'],
+  });
+  const joined = r.evidence.reasons.join('\n');
+  assert.match(joined, /카운터 없음: memActiveMB\(mem\.active\.average\)/);
+  assert.match(joined, /표본 없음: memSwappedMB\(mem\.swapped\.average\)/);
+  assert.match(joined, /값 전부 결측: memBalloonMB\(mem\.vmmemctl\.average\)/);
+  // 세 문구가 서로 달라야 원인 구분이 된다(같은 문구면 진단 가치가 없다).
+  assert.equal(new Set(r.evidence.reasons).size, 3);
+});
+
+test('analyzeRightsize: 계열이 비어도 근거가 충분하면 판정은 계속된다(진단은 안내일 뿐)', () => {
+  // active 가 없어도 consumed p95 로 권장치가 나와야 한다 — 진단 문구가 판정을 막으면 안 된다.
+  const r = analyzeRightsize({ ...baseArgs(), missing: ['memActiveMB(mem.active.average)'] });
+  assert.equal(r.evidence.sufficient, true);
+  assert.equal(r.verdict.state, 'reduce');
+  assert.ok(r.mem.recommendedMB > 0);
+});
+
+test('analyzeRightsize: 진단 배열을 안 넘겨도(구버전 호출) 예외 없이 동작한다', () => {
+  const r = analyzeRightsize(baseArgs());
+  assert.equal(r.evidence.reasons.length, 0);
+  assert.equal(r.evidence.sufficient, true);
+});
