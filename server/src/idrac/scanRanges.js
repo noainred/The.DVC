@@ -212,3 +212,29 @@ export function recordScanRangeRun(id, run) {
   data.entries = { ...data.entries, [key]: { ...cur, lastRun: { at: Date.now(), ...run } } };
   write(data);
 }
+
+/**
+ * 위임 스캔의 **결과**를 그 대역 엔트리에 반영한다(v2.441).
+ *
+ * 왜 필요했나: 위임(에이전트/PUSH) 스캔은 폴러가 **잡을 던진 시점**에만 lastRun 을 남겼고
+ * (`delegated:true, found:null`), 나중에 에이전트가 결과를 회신하면 스캔 로그(phase=result)에만
+ * 적재하고 이 엔트리는 갱신하지 않았다. 그래서 '법인별 iDRAC 장비 스캔' 표의 '최근 결과' 열이
+ * 19개 법인 대부분에서 영원히 `위임(AZ) · 시각` 으로만 보이고 **몇 대를 찾았는지·성공했는지**
+ * 알 수 없었다(사용자 지적). 회신 시 reqId 로 짝을 찾아 실제 수치를 채운다.
+ *
+ * 짝 맞춤은 lastRun.reqId — 던질 때 함께 저장한다. 이후 같은 엔트리를 다시 스캔하면 reqId 가
+ * 새 값으로 덮이므로, 늦게 도착한 옛 결과가 새 실행을 덮어쓰지 않는다.
+ * @returns {boolean} 반영했으면 true
+ */
+export function recordScanRangeRunByReqId(reqId, run) {
+  const rid = String(reqId || '').trim();
+  if (!rid) return false;
+  const data = read();
+  const hit = Object.entries(data.entries).find(([, e]) => String(e?.lastRun?.reqId || '') === rid);
+  if (!hit) return false;
+  const [key, cur] = hit;
+  // 던질 때 남긴 값(agent/dispatch/reqId/dispatchedAt)은 유지하고 결과 수치만 덮는다.
+  data.entries = { ...data.entries, [key]: { ...cur, lastRun: { ...cur.lastRun, ...run, at: Date.now() } } };
+  write(data);
+  return true;
+}

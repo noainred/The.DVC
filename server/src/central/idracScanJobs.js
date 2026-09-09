@@ -14,6 +14,7 @@
 
 import { expandIpList } from '../idrac/iprange.js';
 import { appendIdracScanLog } from '../idrac/scanLog.js';
+import { recordScanRangeRunByReqId } from '../idrac/scanRanges.js';
 import { buildPendingRemedy, buildPushErrorRemedy } from './scanRemedy.js';
 
 // 스캔에 실제로 사용된 자격증명의 '지문' — 평문은 절대 남기지 않는다. 계정명 + 비밀번호 길이 +
@@ -322,6 +323,17 @@ export function setIdracScanResult(reqId, data = {}) {
       addEvent(j, `인증 거부 IP(${ips.length}${data.authFailedIpsTruncated ? '+' : ''}): ${preview}${ips.length > 20 ? ` … 외 ${ips.length - 20}개(전체는 로그창 하단)` : ''}`, 'warn');
     }
   }
+  // v2.441: 위임 스캔의 결과를 그 대역 엔트리의 '최근 결과' 에 반영한다 —
+  // 예전에는 스캔 로그에만 남고 표는 '위임(…) · 시각' 에서 멈춰 몇 대를 찾았는지 알 수 없었다.
+  try {
+    const foundN = data.foundCount ?? (Array.isArray(data.found) ? data.found.length : 0);
+    recordScanRangeRunByReqId(reqId, {
+      pending: false, ok: !data.error,
+      scanned: data.scanned ?? null, found: data.error ? null : foundN, registered: data.error ? null : (data.registered || 0),
+      unreachable: data.unreachable ?? null, authFailed: data.authFailed ?? null,
+      durationMs: data.durationMs ?? null, error: data.error || null,
+    });
+  } catch { /* 기록 실패가 결과 처리를 막지 않는다 */ }
   // 비밀번호 등 민감정보는 저장하지 않는다(result는 발견 목록·요약만).
   j.result = {
     scanned: data.scanned || 0,
