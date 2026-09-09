@@ -517,7 +517,7 @@ api.get('/tools/rightsize', async (req, res) => {
     const step = (days * 86_400_000) / n;
     const mk = (base, amp) => Array.from({ length: n }, (_, i) => ({ t: new Date(start + i * step).toISOString(), v: Math.max(0, Math.round((base + Math.sin(i / 7) * amp + Math.cos(i / 13) * amp * 0.5) * 10) / 10) }));
     const mhz = hostMhzPerCore || 2400; const allocMhz = (vm.cpuCount || 1) * mhz;
-    fetched = { intervalSec: interval === 'week' ? 1800 : interval === 'month' ? 7200 : 86_400, missing: [], series: {
+    fetched = { intervalSec: interval === 'week' ? 1800 : interval === 'month' ? 7200 : 86_400, missing: [], empty: [], noData: [], series: {
       cpuUsageMhz: mk(allocMhz * ((vm.cpuUsagePct || 5) / 100), allocMhz * 0.03),
       cpuUsagePct: mk(vm.cpuUsagePct || 5, 3), cpuReadyMs: mk(60, 30),
       memActiveMB: mk((vm.memMB || 4096) * ((vm.memUsagePct || 5) / 100), (vm.memMB || 4096) * 0.02),
@@ -531,7 +531,12 @@ api.get('/tools/rightsize', async (req, res) => {
     try { fetched = await fetchVmRightsizeSeries(vc, moref, interval, { start, end }); }
     catch (e) { return res.status(502).json({ ok: false, reason: `vCenter 성능 조회 실패: ${e.message}` }); }
   }
-  const report = analyzeRightsize({ vm, hostMhzPerCore, intervalSec: fetched.intervalSec, days, series: fetched.series, missing: fetched.missing, policy: rightsizePolicy() });
+  const report = analyzeRightsize({
+    vm, hostMhzPerCore, intervalSec: fetched.intervalSec, days, series: fetched.series,
+    // 계열이 빈 이유 3종(카탈로그 없음 / 표본 없음 / 전부 결측)을 그대로 넘겨 화면이 원인을 말하게 한다(v2.449).
+    missing: fetched.missing, empty: fetched.empty, noData: fetched.noData,
+    policy: rightsizePolicy(),
+  });
   const out = { ...report, series: fetched.series, synthesized: !!fetched.synthesized };
   rightsizeCache.set(ck, { at: Date.now(), report: out });
   if (rightsizeCache.size > 2000) for (const [k, e] of rightsizeCache) if (Date.now() - e.at > RIGHTSIZE_TTL_MS) rightsizeCache.delete(k);

@@ -106,7 +106,7 @@ export function windowInfo(series, intervalSec, days, now = Date.now()) {
  * 주 판정. 입력 series 의 각 계열은 [{t:ISO, v:number|null}].
  * @returns 리포트 객체(화면이 그대로 표시). 값이 없는 것은 null — 추정하지 않는다.
  */
-export function analyzeRightsize({ vm = {}, hostMhzPerCore = null, intervalSec = 1800, days = 7, series = {}, missing = [], policy: pol = {}, now = Date.now() } = {}) {
+export function analyzeRightsize({ vm = {}, hostMhzPerCore = null, intervalSec = 1800, days = 7, series = {}, missing = [], empty = [], noData = [], policy: pol = {}, now = Date.now() } = {}) {
   // 호출자가 env 미설정 키를 undefined 로 넘겨도 기본값을 덮지 않는다 — v2.445 개발 중 실제로
   // { headroomPct: undefined } 가 스프레드로 기본값을 지워 산식이 NaN(권고 null)이 됐다.
   const policy = { ...DEFAULT_POLICY };
@@ -127,7 +127,11 @@ export function analyzeRightsize({ vm = {}, hostMhzPerCore = null, intervalSec =
   if (!base.length) { evidence.sufficient = false; evidence.reasons.push('vCenter 에서 이 기간의 성능 이력을 받지 못했습니다(통계 보관 기간 밖이거나 수집 레벨이 낮을 수 있음).'); }
   if (base.length && win.coverageDays < policy.minDays) { evidence.sufficient = false; evidence.reasons.push(`관측 기간 ${win.coverageDays}일 — 정책 하한 ${policy.minDays}일 미만입니다. 주간 패턴(주말·월말 배치 등)을 최소 한 번은 봐야 감축을 권고할 수 있습니다.`); }
   if (base.length && win.coveragePct < policy.minCoveragePct) { evidence.sufficient = false; evidence.reasons.push(`샘플 커버리지 ${win.coveragePct}%(${win.samples}/${win.expectedSamples}) — 정책 하한 ${policy.minCoveragePct}% 미만입니다. 수집 공백이 커서 피크를 놓쳤을 수 있습니다.`); }
-  for (const m of missing || []) evidence.reasons.push(`카운터 없음: ${m} — 이 vCenter 의 통계 레벨/버전에서 제공되지 않아 해당 판정은 생략합니다.`);
+  // 계열이 비는 이유를 셋으로 나눠 알린다(v2.449) — 화면에는 다 '—' 로 보이지만 대응이 다르다.
+  // 이 구분이 없어 mem.active·mem.swapped 가 왜 비는지 알 수 없던 것이 v2.445~2.448 의 실제 문제였다.
+  for (const m of missing || []) evidence.reasons.push(`카운터 없음: ${m} — 이 vCenter 의 카운터 카탈로그에 없습니다(버전 차이). 해당 판정은 생략합니다.`);
+  for (const m of empty || []) evidence.reasons.push(`표본 없음: ${m} — 카운터는 있으나 vCenter 가 이 롤업(${intervalSec}초) 구간에서 계열을 돌려주지 않았습니다. 그 구간의 통계 레벨이 이 카운터를 수집하지 않을 가능성이 큽니다(vCenter › Configure › General › Statistics).`);
+  for (const m of noData || []) evidence.reasons.push(`값 전부 결측: ${m} — 표본은 왔지만 모두 -1(값 없음)입니다. 이 기간에 VM 이 꺼져 있었거나 보관 기간이 지난 구간입니다.`);
 
   /* ── CPU ─────────────────────────────────────────────────────── */
   const cpuUsed = stats(S('cpuUsageMhz'));
