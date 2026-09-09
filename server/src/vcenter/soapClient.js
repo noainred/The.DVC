@@ -335,6 +335,41 @@ export class VimSoapClient {
     return out;
   }
 
+  /**
+   * 여러 perf 카운터를 **한 번의 QueryPerf** 로 조회한다(v2.445, 자원 축소 근거 리포트).
+   * 리포트는 VM 하나에 CPU·메모리 8계열을 보는데, 계열마다 왕복하면 고RTT(800ms+) 사이트에서
+   * 리포트 한 장에 6초 이상 걸린다. metricId 를 한 querySpec 에 나열하면 vCenter 가 한 응답에
+   * 계열별 <value> 블록을 돌려준다. 반환: Map<counterId, [{t,v}]>. 카운터가 응답에 없으면 빈 배열.
+   */
+  async queryEntityPerfMulti(entityType, ref, counterIds, intervalId, { startTime, endTime } = {}) {
+    const ids = [...new Set((counterIds || []).filter(Boolean))];
+    const out = new Map(ids.map((id) => [id, []]));
+    if (!ids.length) return out;
+    const metricIds = ids.map((id) => `<metricId><counterId>${id}</counterId><instance></instance></metricId>`).join('');
+    const spec =
+      `<querySpec><entity type="${entityType}">${ref}</entity>` +
+      (startTime ? `<startTime>${startTime}</startTime>` : '') +
+      (endTime ? `<endTime>${endTime}</endTime>` : '') +
+      metricIds + `<intervalId>${intervalId}</intervalId></querySpec>`;
+    const xml = await this.#call(
+      `<QueryPerf xmlns="urn:vim25"><_this type="PerformanceManager">${this.sc.perfManager}</_this>${spec}</QueryPerf>`
+    );
+    const rv = /<returnval[^>]*>([\s\S]*?)<\/returnval>/.exec(xml)?.[1] || '';
+    // sampleInfo 는 한 번(공통 타임스탬프), value 블록은 카운터별로 반복된다.
+    const times = [...rv.matchAll(/<timestamp>([^<]+)<\/timestamp>/g)].map((m) => m[1]);
+    for (const blk of rv.split(/<value\b(?=[ >])/).slice(1)) {
+      // 각 value 블록: <id><counterId>N</counterId>...</id> 뒤에 <value>...</value> 반복
+      const cid = /<counterId>(\d+)<\/counterId>/.exec(blk)?.[1];
+      if (!cid || !out.has(cid)) continue;
+      const vals = [...blk.matchAll(/<value>(-?\d+)<\/value>/g)].map((m) => Number(m[1]));
+      const n = Math.min(times.length, vals.length);
+      const pts = [];
+      for (let i = 0; i < n; i++) pts.push({ t: times[i], v: vals[i] });
+      out.set(cid, pts);
+    }
+    return out;
+  }
+
   /** Installed solutions / plug-ins registered with vCenter (ExtensionManager). */
   async retrieveExtensions() {
     if (!this.sc.extensionManager) return [];
@@ -763,6 +798,58 @@ export async function fetchEntityMetric(vc, entityType, moref, type, interval, {
 
 export const fetchVmMetric = (vc, moref, type, interval, opts) => fetchEntityMetric(vc, 'VirtualMachine', moref, type, interval, opts);
 export const fetchHostMetric = (vc, moref, type, interval, opts) => fetchEntityMetric(vc, 'HostSystem', moref, type, interval, opts);
+
+/**
+ * 자원 축소 근거 리포트용 VM 카운터(v2.445). 전부 vCenter **통계 레벨 1** 에 포함되는 계열이라
+ * 기본 설정의 vCenter 라면 추가 설정 없이 1일(5분)·1주(30분)·1달(2시간)·1년(1일) 롤업이 있다.
+ *  - cpu.usagemhz.average  : 실제 사용 MHz(vCPU 산정 근거)      - cpu.usage.average : 사용률 %(×0.01)
+ *  - cpu.ready.summation   : Ready 시간 ms(경합 — 감축 보류 신호. %Ready = ms/(interval*1000)/vCPU)
+ *  - mem.active.average    : 게스트가 실제로 만지는 메모리 KB(VMware 가이드의 '워킹셋' 추정 지표)
+ *  - mem.consumed.average  : 호스트가 그 VM 에 실제 배정한 KB(캐시 포함 — 감축 시 최소 여유 기준)
+ *  - mem.vmmemctl.average  : 벌룬 KB(>0 = 호스트 메모리 압박으로 회수 중 → 감축 금지 신호)
+ *  - mem.swapped.average   : 호스트 스왑 KB(>0 = 심각한 압박 → 감축 금지)
+ *  - mem.usage.average     : 사용률 %(×0.01)
+ * 카운터 이름·의미는 VMware 'Performance Best Practices for vSphere' 및 'Memory Resource Management' 문서 기준.
+ */
+export const RIGHTSIZE_COUNTERS = {
+  cpuUsageMhz:   { key: 'cpu.usagemhz.average', unit: 'MHz', div: 1 },
+  cpuUsagePct:   { key: 'cpu.usage.average',    unit: '%',   div: 100 },
+  cpuReadyMs:    { key: 'cpu.ready.summation',  unit: 'ms',  div: 1 },
+  memActiveMB:   { key: 'mem.active.average',   unit: 'MB',  div: 1024 },
+  memConsumedMB: { key: 'mem.consumed.average', unit: 'MB',  div: 1024 },
+  memBalloonMB:  { key: 'mem.vmmemctl.average', unit: 'MB',  div: 1024 },
+  memSwappedMB:  { key: 'mem.swapped.average',  unit: 'MB',  div: 1024 },
+  memUsagePct:   { key: 'mem.usage.average',    unit: '%',   div: 100 },
+};
+
+/**
+ * 한 VM 의 리포트 계열 전부를 **로그인 1회 + QueryPerf 1회** 로 가져온다.
+ * interval: day|week|month|year(PERF_INTERVALS). 반환 { intervalSec, series:{name:[{t,v}]}, missing:[name] }.
+ * 카운터가 그 vCenter 에 없으면(통계 레벨 축소 등) missing 에 이름을 넣고 계열은 비운다 — 추정하지 않는다.
+ */
+export async function fetchVmRightsizeSeries(vc, moref, interval, { start, end } = {}) {
+  const intervalId = PERF_INTERVALS[interval] || 1800;
+  const c = new VimSoapClient(vc);
+  await c.login();
+  try {
+    const map = await c.perfCounterMap();
+    const wanted = Object.entries(RIGHTSIZE_COUNTERS).map(([name, cfg]) => ({ name, cfg, id: map.get(cfg.key) || null }));
+    const missing = wanted.filter((w) => !w.id).map((w) => w.name);
+    const startTime = start ? new Date(start).toISOString() : null;
+    const endTime = end ? new Date(end).toISOString() : null;
+    const raw = await c.queryEntityPerfMulti('VirtualMachine', moref, wanted.map((w) => w.id), intervalId, { startTime, endTime });
+    const series = {};
+    for (const w of wanted) {
+      if (!w.id) { series[w.name] = []; continue; }
+      const pts = raw.get(w.id) || [];
+      // vCenter 는 결측을 -1 로 준다 → null 로 바꿔 차트가 0 으로 오해하지 않게 한다.
+      series[w.name] = pts.map((p) => ({ t: p.t, v: p.v < 0 ? null : (w.cfg.div > 1 ? Math.round((p.v / w.cfg.div) * 10) / 10 : p.v) }));
+    }
+    return { intervalSec: intervalId, series, missing };
+  } finally {
+    await c.logout();
+  }
+}
 
 /** Trigger VMware Tools upgrade on the given VM MoRefs. Returns per-VM result. */
 export async function upgradeVmTools(vc, morefs) {

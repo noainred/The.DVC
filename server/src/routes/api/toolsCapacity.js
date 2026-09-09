@@ -4,7 +4,8 @@ import { requireRole } from '../../auth/auth.js';   // 설정 변경/데이터 �
 import { logAudit } from '../../audit.js';           // 수집 정책 변경·데이터 삭제는 감사 기록
 import { store } from '../../store.js';
 import { loadVcenterConfig } from '../../config.js';
-import { fetchVmMetric } from '../../vcenter/soapClient.js';
+import { fetchVmMetric, fetchVmRightsizeSeries } from '../../vcenter/soapClient.js';
+import { analyzeRightsize } from '../../tools/rightsize.js';
 import { getMetricsDb } from '../../metrics/db.js';
 import { vmperfHistory, vmperfMeta, vmperfDiskUsage, dropVmperfDb, dbFileName, VMPERF_METRICS, VMPERF_DISK_METRICS } from '../../metrics/vmperfDb.js';
 import { loadVmperfSettings, saveVmperfSettings, VMPERF_LIMITS } from '../../metrics/vmperfSettings.js';
@@ -466,6 +467,74 @@ api.post('/tools/waste/spark', async (req, res) => {
     for (const [k, e] of sparkCache) if (now - e.at > SPARK_TTL_MS) sparkCache.delete(k);
   }
   res.json({ type, interval: 'week', unit: '%', maxVms: SPARK_MAX_VMS, truncated, synthesized: snap.source === 'mock', series });
+});
+
+/**
+ * VM 자원 축소 **근거 리포트**(v2.445) — GET /tools/rightsize?vmId=&days=7|30|90
+ *
+ * 사용자 요구: '줄여도 되는 구체적 근거 — 기간별 추이 차트·벌룬/스왑·설명·공식 문서'.
+ * 데이터 출처: vCenter 가 자체 보관하는 성능 롤업(우리가 5,850 VM 분을 쌓지 않는다). 한 VM 당
+ * 로그인 1회 + QueryPerf 1회(8계열 동시)라 고RTT 사이트에서도 리포트 한 장 ≈ 왕복 3회.
+ * 판정은 순수 모듈(tools/rightsize.js)이 하고 여기서는 scope·캐시·실재 검사만 한다.
+ *  - scope: VM 이 허용 vCenter 소속으로 스냅샷에 실재해야 한다(범위 밖은 404 — 존재 은닉).
+ *  - 캐시 5분(vmId|days) — 기간 탭을 오가며 같은 조회를 반복하지 않게.
+ *  - 정책은 env 로 조정(RIGHTSIZE_HEADROOM_PCT 등) — 응답에 실어 화면이 '무엇 기준인지' 보여준다.
+ */
+const rightsizeCache = new Map(); // `${vmId}|${days}` -> { at, report }
+const RIGHTSIZE_TTL_MS = 5 * 60_000;
+const rightsizePolicy = () => ({
+  headroomPct: Number(process.env.RIGHTSIZE_HEADROOM_PCT) || undefined,
+  minDays: Number(process.env.RIGHTSIZE_MIN_DAYS) || undefined,
+  minCoveragePct: Number(process.env.RIGHTSIZE_MIN_COVERAGE_PCT) || undefined,
+  capReductionPct: Number(process.env.RIGHTSIZE_CAP_REDUCTION_PCT) || undefined,
+  readyWarnPct: Number(process.env.RIGHTSIZE_READY_WARN_PCT) || undefined,
+});
+
+api.get('/tools/rightsize', async (req, res) => {
+  const vmId = String(req.query.vmId || '');
+  const days = [7, 30, 90].includes(Number(req.query.days)) ? Number(req.query.days) : 7;
+  const snap = store.get();
+  const vm = (snap.vms || []).find((v) => v.id === vmId);
+  const allowed = scopedVcenterIds(req.user, snap);
+  if (!vm || (allowed && !allowed.has(vm.vcenterId))) return res.status(404).json({ ok: false, reason: 'VM 을 찾을 수 없습니다.' });
+  const ck = `${vmId}|${days}`;
+  const hit = rightsizeCache.get(ck);
+  if (hit && Date.now() - hit.at < RIGHTSIZE_TTL_MS) return res.json({ ok: true, cached: true, ...hit.report });
+
+  // 호스트 코어당 MHz — 샘플러와 같은 계산(총 MHz ÷ 코어). 모르면 null(추정 금지).
+  const host = (snap.hosts || []).find((h) => h.vcenterId === vm.vcenterId && h.name === vm.host);
+  const cores = Number(host?.cpuCores) || 0; const total = Number(host?.cpuTotalMhz) || 0;   // 샘플러와 동일 필드
+  const hostMhzPerCore = cores > 0 && total > 0 ? total / cores : null;
+  // 기간 → vCenter 롤업 간격. 1주=30분, 1달=2시간, 그 이상=1일(기본 통계 레벨 1 의 보관 규약).
+  const interval = days <= 7 ? 'week' : days <= 30 ? 'month' : 'year';
+  const end = Date.now(); const start = end - days * 86_400_000;
+
+  let fetched;
+  if (snap.source === 'mock') {
+    // 데모: 현재 사용률 주변의 합성 시계열(synthesized 로 표기). 벌룬/스왑은 0.
+    const n = Math.floor((days * 86_400) / (interval === 'week' ? 1800 : interval === 'month' ? 7200 : 86_400));
+    const step = (days * 86_400_000) / n;
+    const mk = (base, amp) => Array.from({ length: n }, (_, i) => ({ t: new Date(start + i * step).toISOString(), v: Math.max(0, Math.round((base + Math.sin(i / 7) * amp + Math.cos(i / 13) * amp * 0.5) * 10) / 10) }));
+    const mhz = hostMhzPerCore || 2400; const allocMhz = (vm.cpuCount || 1) * mhz;
+    fetched = { intervalSec: interval === 'week' ? 1800 : interval === 'month' ? 7200 : 86_400, missing: [], series: {
+      cpuUsageMhz: mk(allocMhz * ((vm.cpuUsagePct || 5) / 100), allocMhz * 0.03),
+      cpuUsagePct: mk(vm.cpuUsagePct || 5, 3), cpuReadyMs: mk(60, 30),
+      memActiveMB: mk((vm.memMB || 4096) * ((vm.memUsagePct || 5) / 100), (vm.memMB || 4096) * 0.02),
+      memConsumedMB: mk((vm.memMB || 4096) * (((vm.memUsagePct || 5) + 15) / 100), (vm.memMB || 4096) * 0.02),
+      memBalloonMB: mk(0, 0), memSwappedMB: mk(0, 0), memUsagePct: mk(vm.memUsagePct || 5, 2),
+    }, synthesized: true };
+  } else {
+    const vc = loadVcenterConfig().vcenters.find((x) => x.id === vm.vcenterId);
+    if (!vc) return res.status(404).json({ ok: false, reason: 'vCenter 설정을 찾을 수 없습니다.' });
+    const moref = vm.id.slice(String(vm.vcenterId || '').length + 1);   // vc.id 에 콜론이 있을 수 있어 split 금지
+    try { fetched = await fetchVmRightsizeSeries(vc, moref, interval, { start, end }); }
+    catch (e) { return res.status(502).json({ ok: false, reason: `vCenter 성능 조회 실패: ${e.message}` }); }
+  }
+  const report = analyzeRightsize({ vm, hostMhzPerCore, intervalSec: fetched.intervalSec, days, series: fetched.series, missing: fetched.missing, policy: rightsizePolicy() });
+  const out = { ...report, series: fetched.series, synthesized: !!fetched.synthesized };
+  rightsizeCache.set(ck, { at: Date.now(), report: out });
+  if (rightsizeCache.size > 2000) for (const [k, e] of rightsizeCache) if (Date.now() - e.at > RIGHTSIZE_TTL_MS) rightsizeCache.delete(k);
+  res.json({ ok: true, cached: false, ...out });
 });
 
 // Thin-provisioned VM finder. thin = uncommitted(여유)이 큰 VM(추정). committed=실사용,
