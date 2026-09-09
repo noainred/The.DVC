@@ -51,7 +51,21 @@ export function IdracScanRanges({ data, vcenters, datacenters = [], agents, busy
       <span title={d.title} style={{ color: TONE[d.tone] }}>
         <span className={`badge ${d.tone === 'green' ? 'green' : d.tone === 'red' ? 'red' : d.tone === 'amber' ? 'amber' : 'gray'}`}
           style={{ marginRight: 5, fontSize: 10 }}>{d.badge}</span>
-        {d.text}
+        {/* v2.442: 등록 수량 숫자만 빨간색으로 강조(사용자 요구). metrics 가 있으면 조각으로 렌더하고,
+            없으면(대기·실패) 기존 문자열 그대로. */}
+        {d.metrics
+          ? <>
+            {d.metrics.map((m, i) => (
+              <React.Fragment key={m.k}>
+                {i > 0 && ' · '}
+                {m.k}{' '}
+                <b style={m.accent === 'red' ? { color: '#f87171' } : undefined}>{m.n.toLocaleString()}</b>
+                {m.unit}
+              </React.Fragment>
+            ))}
+            {d.extra?.length ? ` (${d.extra.join(' · ')})` : ''}
+          </>
+          : d.text}
         {d.when && <span className="muted"> · {d.when}</span>}
       </span>
     );
