@@ -1,6 +1,21 @@
 {
   "notes": [
     {
+      "version": "2.435.0",
+      "date": "2026-09-09",
+      "title": "보안 감사 지적 수정 — 자격증명 유출 2건·조회 권한·롤백 오판·백업 실패·설정 소실 + 배포 대상 토큰 차단",
+      "notes": [
+        "[I1·높음] 중계 토폴로지 HAProxy 적용의 `systemctl is-active` 판정이 **'inactive' 를 성공으로 읽었다**(`/active\\s*$/` 가 'inactive' 에 매치 — 실측 확인). reload 실패로 haproxy 가 내려앉아도 초록 '성공' 으로 보고되고 **롤백이 실행되지 않았다**. 마지막 비어있지 않은 줄을 정확히 비교하는 `isActiveOut()` 로 교체하고 롤백 판정에도 같이 적용했다. 롤백 성공 여부(`rollbackOk`)도 결과에 남긴다.",
+        "[S1·높음] 중계 토폴로지에서 **노드 IP 를 바꿔도 저장된 SSH 비밀이 이월**됐다. 이월 규칙이 dc 이름만 봐서, `edge.publicIp` 만 공격자 호스트로 바꾸고 비밀번호를 빈 값으로 저장한 뒤 SSH 테스트를 부르면 운영 서버의 root 비밀번호가 그 호스트로 평문 전송됐다(실측 확인). `server/CLAUDE.md` v2.257 M3('host 변경 시 저장 비번을 이월하지 않는다')의 직접 회귀였다. 저장·가져오기(mergeImport)·Main 노드 전 경로에서 host 가 바뀌면 비밀번호·개인키·패스프레이즈를 모두 폐기한다(IP 가 같으면 기존대로 유지).",
+        "[S2·높음] 배포 대상 자격증명의 **교차 유출** — `role==='irs'` 폴백만 자격증명 출처(배포 대상)와 접속 대상(토폴로지 입력값)이 분리돼 있어, IRS IP 를 공격자 호스트로 적고 `sshTargetId` 로 아무 배포 대상을 고르면 `agent-deploy-targets.json`(봉인 저장·정상 API 로는 반환 안 되는 값)의 비밀번호가 그 호스트로 전송됐다. 이제 배포 대상 자격증명은 **그 배포 대상 자신에게 접속할 때만** 쓴다(IRS 는 중계 엣지가 바로 그 배포 대상일 때만 — 엣지 자신에 들어가는 것과 같은 신뢰 경계). 그 외에는 사유를 밝히고 거부한다.",
+        "[S3·높음] 중계 토폴로지 조회가 `requirePerm('tools')` 였는데 `auth/permissions.js` 기준 **operator 가 tools 를 기본 보유**한다. 화면 카드가 adminOnly 여도 API 직접 호출로 원격 `haproxy.cfg` 전문·`portal.env` 발췌·배포 대상 목록·전 사이트 내부 IP 가 나갔다(haproxy.cfg 에는 `stats auth`·`insecure-password` 가 관행적으로 들어간다). `GET /tools/relaytopo` 는 비-admin 에게 **요약만** 주고(cfg/env 본문 제거, 배포 대상·접속 경로 미포함), `GET /render/:dc` 는 admin 전용으로 올렸다. 이름과 달리 아무것도 지우지 않던 `stripCfg` 를 실제로 구현했다. 판정은 **거부 기본값**(`req.user?.role === 'admin'`).",
+        "[S5·보통] HAProxy 적용의 백업이 `test -f … && cp -a …; install …` 이라 **cp 가 실패해도 `;` 뒤의 install 이 진행**됐다. 디스크 풀·ro 마운트·SELinux 로 백업이 안 된 채 원본을 덮어쓰면 reload 실패 시 롤백이 없는 백업을 복사하려다 실패해 원본이 영구 유실된다. 백업 → 존재·크기 확인 → 교체를 `set -e` + 종료코드(91/92/93)로 묶어 실패 지점을 구분해 보고하고, 백업이 안 되면 **원본을 건드리지 않고 중단**한다.",
+        "[S6·보통] `cat cfg || true` 가 '파일 없음' 과 '읽기 실패' 를 구분하지 못했다. 읽기에 실패했는데 빈 문자열로 넘어가면 병합 결과가 관리 블록만 담은 cfg 가 되고, 그건 haproxy 문법상 유효해 `haproxy -c` 를 통과한 뒤 기존 global/defaults/listen 을 전부 날린다. 존재 여부를 `__HAS__`/`__NONE__` 신호로 분리해, 파일은 있는데 내용이 비면 중단한다.",
+        "[배포 대상 토큰] `agent/deployRegistry.js` 의 `redact()` 가 `password`/`privateKey` 만 가려서 **`centralToken`·`collectorToken` 이 `GET /agent-deploy/targets` 응답과 저장 응답에 평문으로** 실렸다(v2.339~). 중앙 토큰이 새면 그 토큰으로 엣지→중앙 API 를 호출할 수 있고, 수집 토큰이 새면 그 엣지의 수집 데이터를 당겨갈 수 있다. `SECRET_KEYS` 에 두 토큰을 추가해 `hasCentralToken`/`hasCollectorToken` 플래그만 내보내고, 빈 값 저장은 기존 값을 유지한다(화면은 '저장됨 — 비우면 기존 값 유지' 로 안내). 비밀 포함 CSV 내보내기(설정 소유자 전용)는 그대로 원본을 준다.",
+        "테스트: `securityFix2435.test.js` 6건 신규 — isActiveOut 진리표(inactive/activating/deactivating/앞줄 잡음), S1 4경로(저장·IP 동일·Main·가져오기), S2 4경로(IRS 거부·중계 엣지 허용·Edge host 불일치 거부·동일 IP 허용), S3 응답 축약 + admin 전용 403, redact 왕복(빈 값 유지·새 값 교체·raw 보존) + collectorSync 의 has* 경로. 기존 `relayTopo2431.test.js` 2건은 **취약한 동작을 고정하고 있던 단정**이라 새 동작으로 갱신했다(가져오기 비밀 이월 → 폐기, 라우트 테스트에 authMiddleware 전제 추가)."
+      ]
+    },
+    {
       "version": "2.434.0",
       "date": "2026-09-08",
       "title": "에이전트 ↔ 수집 서버(원격) 자동 연결 — 대상 저장 시 자동 등록 + 미등록 에이전트 탐지·일괄 추가",

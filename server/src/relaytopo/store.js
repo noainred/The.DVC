@@ -52,10 +52,24 @@ function normSsh(input, prev) {
   }
   return out;
 }
-const normNode = (n, prev) => ({ privateIp: ip(n?.privateIp), publicIp: ip(n?.publicIp), vcenterIp: ip(n?.vcenterIp), ssh: normSsh(n?.ssh, prev?.ssh) });
+/**
+ * 노드 정규화. **host(privateIp/publicIp)가 바뀌면 저장된 비밀을 이월하지 않는다**(v2.435 — 감사 S1).
+ *
+ * 왜: 이월 규칙이 dc 이름만 보고 동작해서, `edge.publicIp` 만 공격자 호스트로 바꾸고 비밀번호를 빈 값으로
+ * 저장한 뒤 SSH 테스트를 부르면 **운영 서버의 root 비밀번호가 그 호스트로 평문 전송**됐다(실측 확인).
+ * `server/CLAUDE.md` v2.257 M3("host 변경 시 저장 비번을 이월하지 않는다")의 직접 회귀였다.
+ * 개인키/패스프레이즈는 publickey 인증이라 선로에 나가지 않지만, 같은 규칙으로 함께 끊는다(원칙 단순화).
+ */
+function normNode(n, prev) {
+  const next = { privateIp: ip(n?.privateIp), publicIp: ip(n?.publicIp), vcenterIp: ip(n?.vcenterIp) };
+  const hostChanged = !!prev && (next.privateIp !== (prev.privateIp || '') || next.publicIp !== (prev.publicIp || ''));
+  return { ...next, ssh: normSsh(n?.ssh, hostChanged ? null : prev?.ssh), _secretsDropped: hostChanged && hasSecret(prev?.ssh) };
+}
+const hasSecret = (ssh) => SSH_SECRETS.some((k) => !!ssh?.[k]);
 
 export function normalizeTopology(input = {}, prev = null) {
-  const main = { name: str(input.main?.name, 40) || 'Main', privateIp: ip(input.main?.privateIp), publicIp: ip(input.main?.publicIp), portalPort: port(input.main?.portalPort, 4000), ssh: normSsh(input.main?.ssh, prev?.main?.ssh) };
+  const mainHostChanged = !!prev?.main && (ip(input.main?.privateIp) !== (prev.main.privateIp || '') || ip(input.main?.publicIp) !== (prev.main.publicIp || ''));
+  const main = { name: str(input.main?.name, 40) || 'Main', privateIp: ip(input.main?.privateIp), publicIp: ip(input.main?.publicIp), portalPort: port(input.main?.portalPort, 4000), ssh: normSsh(input.main?.ssh, mainHostChanged ? null : prev?.main?.ssh) };
   const services = (Array.isArray(input.services) ? input.services : DEFAULT_SERVICES).map((s) => ({
     key: str(s?.key, 32).toLowerCase(), label: str(s?.label, 40), listenPort: port(s?.listenPort, 0),
     target: TARGETS[s?.target] ? s.target : 'irs', targetPort: port(s?.targetPort, 0), mode: s?.mode === 'http' ? 'http' : 'tcp', enabled: s?.enabled !== false,
@@ -64,12 +78,19 @@ export function normalizeTopology(input = {}, prev = null) {
   const seenPort = new Set(); const uniq = [];
   for (const s of services) { if (seenPort.has(s.listenPort)) continue; seenPort.add(s.listenPort); uniq.push(s); }
   const prevSites = new Map((prev?.sites || []).map((s) => [s.dc, s]));
+  const dropped = [];   // host 가 바뀌어 저장된 비밀을 버린 노드(화면에 알린다 — 조용히 지우면 더 나쁘다)
   const sites = (Array.isArray(input.sites) ? input.sites : []).map((s) => {
     const dc = str(s?.dc, 40); const p = prevSites.get(dc);
-    return { dc, edge: normNode(s?.edge, p?.edge), irs: normNode(s?.irs, p?.irs), sshTargetId: str(s?.sshTargetId, 64), note: str(s?.note, 200) };
+    const edge = normNode(s?.edge, p?.edge); const irs = normNode(s?.irs, p?.irs);
+    if (edge._secretsDropped) dropped.push(`${dc} Edge`);
+    if (irs._secretsDropped) dropped.push(`${dc} IRS`);
+    delete edge._secretsDropped; delete irs._secretsDropped;
+    return { dc, edge, irs, sshTargetId: str(s?.sshTargetId, 64), note: str(s?.note, 200) };
   }).filter((s) => s.dc).slice(0, 200);
   const seenDc = new Set(); const uniqSites = sites.filter((s) => (seenDc.has(s.dc) ? false : (seenDc.add(s.dc), true)));
-  return { main, services: uniq.length ? uniq : DEFAULT_SERVICES.map((x) => ({ ...x })), sites: uniqSites };
+  const out = { main, services: uniq.length ? uniq : DEFAULT_SERVICES.map((x) => ({ ...x })), sites: uniqSites };
+  if (dropped.length) Object.defineProperty(out, 'secretsDropped', { value: dropped, enumerable: false });
+  return out;
 }
 
 let _cache = null;
@@ -166,7 +187,14 @@ export function mergeImport(current, parsed, { replace = false } = {}) {
   const byDc = new Map((replace ? [] : next.sites).map((s) => [s.dc, s]));
   for (const p of parsed.sites || []) {
     const cur = byDc.get(p.dc) || { dc: p.dc, edge: { privateIp: '', publicIp: '', vcenterIp: '', ssh: {} }, irs: { privateIp: '', publicIp: '', vcenterIp: '', ssh: {} }, sshTargetId: '', note: '' };
-    const mergeNode = (a, b) => ({ privateIp: b?.privateIp || a.privateIp, publicIp: b?.publicIp || a.publicIp, vcenterIp: b?.vcenterIp || a.vcenterIp, ssh: { ...(a.ssh || {}), ...Object.fromEntries(Object.entries(b?.ssh || {}).filter(([, v]) => v)) } });
+    // S1(v2.435): 가져오기로 host 가 바뀌면 저장된 비밀을 잇지 않는다(저장 경로와 같은 규칙).
+    const mergeNode = (a, b) => {
+      const privateIp = b?.privateIp || a.privateIp; const publicIp = b?.publicIp || a.publicIp;
+      const changed = (privateIp !== (a.privateIp || '') || publicIp !== (a.publicIp || ''));
+      const keep = changed ? {} : (a.ssh || {});
+      return { privateIp, publicIp, vcenterIp: b?.vcenterIp || a.vcenterIp,
+        ssh: { ...keep, ...Object.fromEntries(Object.entries(b?.ssh || {}).filter(([, v]) => v)) } };
+    };
     byDc.set(p.dc, { ...cur, edge: mergeNode(cur.edge, p.edge), irs: mergeNode(cur.irs, p.irs), note: p.note || cur.note });
   }
   next.sites = [...byDc.values()];

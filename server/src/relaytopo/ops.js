@@ -35,13 +35,51 @@ export function resolveNodeAccess(topo, site, role) {
   const blocked = ipBlockReason(host); if (blocked) return { error: blocked };
   const own = node.ssh || {};
   if (own.username && (own.password || own.privateKey)) return { host, port, via, source: 'topology', creds: { host, port, username: own.username, password: own.password || undefined, privateKey: own.privateKey || undefined, passphrase: own.passphrase || undefined } };
-  const t = (site?.sshTargetId && getTargetRaw(site.sshTargetId)) || listTargetsRaw().find((x) => [node.publicIp, node.privateIp].includes(String(x.host || '').trim()) && (x.password || x.privateKey));
-  if (t && role !== 'irs') return { host: t.host, port: Number(t.port) || 22, via, source: `deploy:${t.id}`, creds: { host: t.host, port: Number(t.port) || 22, username: t.username, password: t.password || undefined, privateKey: t.privateKey || undefined } };
-  if (t && role === 'irs') return { host, port, via, source: `deploy:${t.id}`, creds: { host, port, username: t.username, password: t.password || undefined, privateKey: t.privateKey || undefined } };
+  /*
+   * 배포 대상 폴백(v2.435 — 감사 S2 로 좁힘).
+   *
+   * 예전에는 `role === 'irs'` 분기가 **자격증명 출처(배포 대상)와 접속 대상(토폴로지 입력값)을 분리**해서,
+   * IRS IP 를 공격자 호스트로 적어 두고 sshTargetId 로 아무 배포 대상을 고르면 `agent-deploy-targets.json`
+   * (봉인 저장·정상 API 로는 반환되지 않는 값)의 SSH 비밀번호가 그 호스트로 전송됐다 — 다른 비밀 저장소의
+   * 자격증명을 이 도구로 끌어내는 교차 유출이다.
+   *
+   * 이제 배포 대상 자격증명은 **그 배포 대상 자신의 host 로 접속할 때만** 쓴다:
+   *  · Edge/Main : 접속 host 가 배포 대상 host 와 같아야 한다(같은 IP 로 저장된 대상만 매칭되므로 자연히 성립).
+   *  · IRS       : 중계 엣지를 경유하므로 '접속 host = 중계 엣지' 다. 그 중계 엣지가 **바로 그 배포 대상**일
+   *                때만 허용한다(엣지 자신에 SSH 로 들어가는 것과 같은 신뢰 경계). 그 외에는 거부하고
+   *                IRS 노드에 자체 자격증명을 입력하라고 안내한다.
+   */
+  const idMatch = site?.sshTargetId ? getTargetRaw(site.sshTargetId) : null;
+  const hostMatch = listTargetsRaw().find((x) => [node.publicIp, node.privateIp].filter(Boolean).includes(String(x.host || '').trim()) && (x.password || x.privateKey));
+  const t = idMatch || hostMatch;
+  if (t && (t.password || t.privateKey)) {
+    if (role !== 'irs') {
+      const tHost = String(t.host || '').trim();
+      if (![node.publicIp, node.privateIp].filter(Boolean).includes(tHost)) {
+        return { error: `${role} 의 지정 배포 대상(${t.id})은 호스트가 ${tHost} 라 이 노드(${node.publicIp || node.privateIp})와 다릅니다 — 다른 서버의 자격증명을 보내지 않도록 거부했습니다. 노드에 자체 SSH 계정을 입력하세요.`, host, port, via };
+      }
+      return { host: tHost, port: Number(t.port) || 22, via, source: `deploy:${t.id}`, creds: { host: tHost, port: Number(t.port) || 22, username: t.username, password: t.password || undefined, privateKey: t.privateKey || undefined, passphrase: t.passphrase || undefined } };
+    }
+    // IRS: 접속 host 는 중계 엣지다. 그 엣지가 이 배포 대상 자신일 때만 자격증명을 쓴다.
+    const edgeIps = [site?.edge?.publicIp, site?.edge?.privateIp].filter(Boolean);
+    if (edgeIps.includes(String(t.host || '').trim()) && edgeIps.includes(host)) {
+      return { host, port, via, source: `deploy:${t.id}`, creds: { host, port, username: t.username, password: t.password || undefined, privateKey: t.privateKey || undefined, passphrase: t.passphrase || undefined } };
+    }
+    return { error: `IRS 는 배포 대상(${t.id}, host ${t.host})의 자격증명을 쓸 수 없습니다 — 접속 대상(${host}:${port})이 그 배포 대상이 아니라, 다른 서버의 비밀번호가 전송될 수 있습니다. IRS 노드에 자체 SSH 계정을 입력하세요.`, host, port, via };
+  }
   return { error: `${role} SSH 자격증명이 없습니다(토폴로지 노드의 ID/비밀번호·키 또는 배포 대상 ${node.publicIp || node.privateIp}).`, host, port, via };
 }
 
 const sudo = (creds) => (creds.username === 'root' ? '' : 'sudo -n ');
+/**
+ * `systemctl is-active` 출력 판정(순수, v2.435 — 감사 I1).
+ * ⚠ 예전 정규식 `/active\s*$/` 는 **'inactive' 에도 매치**됐다(실측). 그래서 reload 실패로 haproxy 가
+ * 내려앉아도 '성공' 으로 보고되고 롤백이 실행되지 않았다. 마지막 비어있지 않은 줄을 정확히 비교한다.
+ */
+export function isActiveOut(out) {
+  const lines = String(out || '').trim().split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  return lines.length > 0 && lines[lines.length - 1] === 'active';
+}
 const listenPorts = (out) => [...new Set(String(out || '').split(/\s+/).map((a) => Number(a.split(':').pop())).filter((n) => n > 0))];
 
 /** 노드 1개 검사(SSH 1세션, 노드당 타임아웃). role: 'edge'|'irs'|'main'. */
@@ -117,10 +155,20 @@ export async function fetchAll(opts = {}) {
   await pool(topo.sites.map((s) => s.dc), CONCURRENCY, async (dc) => { out.push(await fetchSite(dc, opts)); });
   return out;
 }
-export function lastResults() { return Object.fromEntries([..._last.entries()].map(([dc, r]) => [dc, stripCfg(r)])); }
-export function lastResult(dc) { const r = _last.get(dc); return r ? stripCfg(r) : null; }
-/** 응답용: cfg 전문은 남기되 노드 비밀은 없음(inspectNode 가 비밀을 반환하지 않음). */
-const stripCfg = (r) => r;
+export function lastResults({ full = false } = {}) { return Object.fromEntries([..._last.entries()].map(([dc, r]) => [dc, full ? r : stripCfg(r)])); }
+export function lastResult(dc, { full = false } = {}) { const r = _last.get(dc); return r ? (full ? r : stripCfg(r)) : null; }
+/**
+ * 응답 축약(v2.435 — 감사 S3). 예전 `stripCfg = (r) => r` 은 이름과 달리 아무것도 지우지 않아,
+ * 원격 `haproxy.cfg` 전문·`portal.env` 발췌·노드 IP/커널이 그대로 나갔다. haproxy.cfg 에는 `stats auth`·
+ * `insecure-password` 같은 자격증명이 관행적으로 들어간다. 조회 권한이 낮은 경로에는 **요약만** 준다.
+ */
+function stripCfg(r) {
+  if (!r) return r;
+  const node = (n) => (n ? { ...n, haproxy: n.haproxy ? { ...n.haproxy, cfg: '', cfgBytes: (n.haproxy.cfg || '').length } : n.haproxy,
+    portal: n.portal ? { units: n.portal.units, env: [], envCount: (n.portal.env || []).length } : n.portal,
+    node: n.node ? { hostname: n.node.hostname } : n.node } : n);
+  return { ...r, edge: node(r.edge), irs: node(r.irs) };
+}
 export function _resetForTest() { _last.clear(); _busy.clear(); }
 
 /**
@@ -144,8 +192,18 @@ export async function applySite(dc, { dryRun = false, timeoutMs = TIMEOUT_MS * 2
       const ver = await exec('haproxy -v 2>/dev/null | head -1', 15_000);
       if (!ver.stdout.trim()) { step('haproxy 확인', false, 'haproxy 가 설치돼 있지 않습니다. dnf install -y haproxy 후 다시 시도'); return { applied: false }; }
       step('haproxy 확인', true, ver.stdout.trim());
-      const cur = await exec(`${S}cat ${CFG} 2>/dev/null || true`, 15_000);
-      const before = cur.stdout || '';
+      // S6(v2.435): `cat … || true` 는 '파일 없음' 과 '읽기 실패' 를 구분하지 못한다. 읽기에 실패했는데
+      // 빈 문자열로 넘어가면 병합 결과가 **관리 블록만 담은 cfg** 가 되고, 그건 haproxy 문법상 유효해
+      // `haproxy -c` 를 통과한 뒤 기존 global/defaults/listen 을 전부 날린다. 존재 여부를 별도 신호로 받는다.
+      const cur = await exec(`test -f ${CFG} && echo __HAS__ || echo __NONE__; ${S}cat ${CFG} 2>/dev/null || true`, 15_000);
+      const m0 = /^(__HAS__|__NONE__)\r?\n?/.exec(cur.stdout || '');
+      const hadCfg = m0?.[1] === '__HAS__';
+      const before = m0 ? (cur.stdout || '').slice(m0[0].length) : (cur.stdout || '');
+      if (hadCfg && !before.trim()) {
+        step('현재 cfg 읽기', false, `${CFG} 는 있는데 내용을 읽지 못했습니다(권한·I/O). 빈 파일로 간주하면 기존 설정을 통째로 잃으므로 중단합니다.`);
+        return { applied: false };
+      }
+      step('현재 cfg 읽기', true, hadCfg ? `${before.length}바이트` : '기존 cfg 없음(새로 만듭니다)');
       const merged = mergeManagedBlock(before, block);
       if (merged === before) { step('변경 없음', true, '관리 블록이 이미 같습니다.'); return { applied: false, unchanged: true, merged }; }
       const ts = new Date().toISOString().replace(/[:.]/g, '-');
@@ -160,13 +218,30 @@ export async function applySite(dc, { dryRun = false, timeoutMs = TIMEOUT_MS * 2
       step('haproxy -c 검증', true, chk.stdout.replace(/rc=\d+\s*$/, '').trim() || 'Configuration file is valid');
       if (dryRun) { await exec(`rm -f ${tmp}`, 5000).catch(() => {}); step('모의 실행', true, '검증만 수행(파일 교체 없음)'); return { applied: false, dryRun: true, merged }; }
       const bak = `${CFG}.bak-${ts}`;
-      const b = await exec(`${S}sh -c 'test -f ${CFG} && cp -a ${CFG} ${bak}; install -m 644 ${tmp} ${CFG} && rm -f ${tmp} && echo replaced'`, 15_000);
-      if (!/replaced/.test(b.stdout)) { step('교체', false, b.stderr || b.stdout); return { applied: false, merged }; }
-      step('백업·교체', true, before ? `백업 ${bak}` : '(기존 cfg 없음)');
-      const rl = await exec(`${S}systemctl reload haproxy 2>&1 || ${S}systemctl restart haproxy 2>&1; echo "rc=$?"; ${S}systemctl is-active haproxy`, 30_000);
-      const ok = /\nactive\s*$/.test(`\n${rl.stdout.trim()}`) || /active\s*$/.test(rl.stdout.trim());
+      // S5(v2.435): 예전에는 `test -f … && cp -a …; install …` 이라 **cp 가 실패해도 `;` 뒤의 install 이 진행**됐다.
+      // 디스크 풀·ro 마운트·SELinux 로 백업이 안 된 채 원본을 덮어쓰면, reload 실패 시 롤백이 없는 백업을
+      // 복사하려다 실패해 원본이 영구 유실된다. 백업 → 확인 → 교체를 `&&` 로 묶고 실패 코드를 구분한다.
+      const b = await exec(`${S}sh -c 'set -e; if [ -f ${CFG} ]; then cp -a ${CFG} ${bak} || exit 91; [ -s ${bak} ] || exit 92; fi; install -m 644 ${tmp} ${CFG} || exit 93; rm -f ${tmp}; echo replaced'; echo "rc=$?"`, 15_000);
+      const brc = Number((/rc=(\d+)/.exec(b.stdout) || [])[1]);
+      if (!/replaced/.test(b.stdout)) {
+        const why = brc === 91 ? `백업(cp -a ${CFG} → ${bak}) 실패 — 원본을 건드리지 않고 중단했습니다.`
+          : brc === 92 ? `백업 파일이 비어 있습니다(${bak}) — 원본을 건드리지 않고 중단했습니다.`
+            : brc === 93 ? `교체(install) 실패 — 백업은 ${bak} 에 있습니다.`
+              : (b.stderr || b.stdout || '알 수 없는 오류');
+        step('백업·교체', false, why);
+        return { applied: false, merged, backup: hadCfg ? bak : '' };
+      }
+      step('백업·교체', true, hadCfg ? `백업 ${bak}` : '(기존 cfg 없음 — 백업 생략)');
+      const rl = await exec(`${S}systemctl reload haproxy 2>&1 || ${S}systemctl restart haproxy 2>&1; ${S}systemctl is-active haproxy`, 30_000);
+      const ok = isActiveOut(rl.stdout);   // I1(v2.435): 'inactive' 를 성공으로 읽던 정규식 제거
       step('reload/restart', ok, rl.stdout.trim());
-      if (!ok && before) { const rb = await exec(`${S}sh -c 'cp -a ${bak} ${CFG} && (systemctl reload haproxy || systemctl restart haproxy); systemctl is-active haproxy'`, 30_000); step('롤백(백업 복원)', /active/.test(rb.stdout), rb.stdout.trim()); return { applied: false, rolledBack: true, merged }; }
+      if (!ok && hadCfg) {
+        const rb = await exec(`${S}sh -c 'cp -a ${bak} ${CFG} && (systemctl reload haproxy || systemctl restart haproxy) >/dev/null 2>&1; systemctl is-active haproxy'`, 30_000);
+        const rbOk = isActiveOut(rb.stdout);
+        step('롤백(백업 복원)', rbOk, rbOk ? `${bak} 복원 후 active` : `복원했으나 서비스가 ${rb.stdout.trim() || '미상'} 입니다 — 수동 확인 필요`);
+        return { applied: false, rolledBack: true, rollbackOk: rbOk, merged, backup: bak };
+      }
+      if (!ok) { step('롤백 불가', false, '기존 cfg 가 없어 복원할 백업이 없습니다 — haproxy 상태를 직접 확인하세요.'); return { applied: false, merged }; }
       const ss = await exec(`ss -ltnH 2>/dev/null | awk '{print $4}'`, 15_000);
       const ports = listenPorts(ss.stdout);
       const want = topo.services.filter((s) => s.enabled !== false && !missing.some((m) => m.key === s.key)).map((s) => s.listenPort);
