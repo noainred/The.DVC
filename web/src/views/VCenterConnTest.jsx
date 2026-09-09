@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import BoldText from '../components/boldText.jsx';
 import { fetchJson, postJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
@@ -171,7 +172,7 @@ function RelaySteps({ r }) {
         <div className="muted" style={{ marginBottom: 4, fontSize: 11, wordBreak: 'break-all' }}>TLS 오류 원문: <code>{r.steps.tls.error}</code></div>
       )}
       <div style={{ color: r.verdict.state === 'ok' ? 'var(--green)' : 'var(--amber)', lineHeight: 1.6 }}>
-        {r.verdict.state === 'ok' ? '✅' : '⚠️'} {r.verdict.text}
+        {r.verdict.state === 'ok' ? '✅' : '⚠️'} <BoldText text={r.verdict.text} />
       </div>
     </div>
   );

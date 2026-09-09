@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { fetchJson, postJson } from '../../api.js';
 import { Loading, ErrorBox, Modal } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
+import BoldText from '../../components/boldText.jsx';
 
 // ---- 스캔 잡 세부 로그창 ------------------------------------------------------
 // '스캔 현황' 행의 [로그]를 누르면 열림. 잡의 이벤트 타임라인(생성→인출→진행→완료/오류) +
@@ -76,6 +77,9 @@ export function ScanJobLogModal({ reqId, dcName, onClose }) {
               {h.level === 'error' ? '⛔ ' : h.level === 'warn' ? '⚠ ' : 'ℹ️ '}{h.msg}
             </div>
           ))}
+          {/* 해결 절차(v2.440) — 원인 설명에서 끝내지 않고 확인 명령·수정·검증까지 보여준다.
+              사용자 요구: '이런 이슈 있을때 해결방법을 구체적으로 화면에 표시'. */}
+          {d.remedy && <RemedyCard r={d.remedy} />}
           {/* 이벤트 타임라인(최신 위) */}
           <div className="table-wrap" style={{ maxHeight: '46vh' }}>
             <STable>
@@ -91,7 +95,7 @@ export function ScanJobLogModal({ reqId, dcName, onClose }) {
               </tbody>
             </STable>
           </div>
-          {d.result?.error && <div style={{ marginTop: 8, fontSize: 12.5, color: '#f87171' }}>오류: {d.result.error}</div>}
+          {d.result?.error && <div style={{ marginTop: 8, fontSize: 12.5, color: '#f87171', lineHeight: 1.6 }}>오류: <BoldText text={d.result.error} /></div>}
           {d.result?.authFailed > 0 && (
             <div style={{ marginTop: 8, fontSize: 12.5, color: '#fbbf24' }}>
               ⚠ 인증실패 {d.result.authFailed}건{d.result.authFailReason ? ` — ${d.result.authFailReason}` : ''}
@@ -117,5 +121,61 @@ export function ScanJobLogModal({ reqId, dcName, onClose }) {
         </>
       )}
     </Modal>
+  );
+}
+
+/** 명령 한 줄(또는 여러 줄) — 클릭 한 번으로 복사. 터미널에 그대로 붙여 넣는 것이 조치의 실체다. */
+function Cmd({ text }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    // navigator.clipboard 는 비보안 컨텍스트(사내 http)에서 없을 수 있어 textarea 폴백을 둔다.
+    const done = () => { setCopied(true); setTimeout(() => setCopied(false), 1200); };
+    try {
+      if (navigator.clipboard?.writeText) { navigator.clipboard.writeText(text).then(done).catch(() => {}); return; }
+    } catch { /* 아래 폴백 */ }
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); done();
+    } catch { /* 복사 실패는 조용히 — 텍스트는 화면에 그대로 보인다 */ }
+  };
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, marginTop: 4 }}>
+      <pre style={{ margin: 0, flex: 1, padding: '6px 9px', borderRadius: 6, background: 'rgba(0,0,0,.28)',
+        fontSize: 11.5, whiteSpace: 'pre-wrap', wordBreak: 'break-all', fontFamily: 'ui-monospace, monospace' }}>{text}</pre>
+      <button className="tab" style={{ flex: 'none', padding: '4px 9px', fontSize: 11 }} onClick={copy}>{copied ? '복사됨' : '복사'}</button>
+    </div>
+  );
+}
+
+/** 해결 절차 카드 — 왜 그런지(한 줄) → 무엇을 하는지(번호 절차 + 명령) → 어디로 가면 되는지. */
+function RemedyCard({ r }) {
+  return (
+    <div style={{ marginBottom: 10, padding: '10px 12px', borderRadius: 9,
+      background: 'rgba(96,165,250,.10)', border: '1px solid rgba(96,165,250,.35)' }}>
+      <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 5 }}>🛠 {r.title}</div>
+      <div style={{ fontSize: 12.5, lineHeight: 1.65, marginBottom: 9 }}><BoldText text={r.why} /></div>
+      <ol style={{ margin: '0 0 8px', paddingLeft: 20, fontSize: 12.5, lineHeight: 1.7 }}>
+        {(r.steps || []).map((st, i) => (
+          <li key={i} style={{ marginBottom: 6 }}>
+            <span><BoldText text={st.text} /></span>
+            {st.cmd && <Cmd text={st.cmd} />}
+          </li>
+        ))}
+      </ol>
+      {(r.where || []).length > 0 && (
+        <ul className="muted" style={{ margin: '0 0 8px', paddingLeft: 18, fontSize: 11.5, lineHeight: 1.6 }}>
+          {r.where.map((w, i) => <li key={i}><code>{w}</code></li>)}
+        </ul>
+      )}
+      {(r.links || []).length > 0 && (
+        <div className="flex gap wrap" style={{ alignItems: 'center' }}>
+          <span className="muted" style={{ fontSize: 11.5 }}>바로 가기:</span>
+          {r.links.map((l, i) => (
+            <a key={i} className="tab" href={l.hash} style={{ flex: 'none', padding: '4px 10px', fontSize: 11.5, textDecoration: 'none' }}>{l.label}</a>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
