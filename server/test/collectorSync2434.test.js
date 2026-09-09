@@ -150,3 +150,131 @@ test('routes: 대상 저장이 수집 서버로 자동 등록(토큰 자동 생�
     assert.equal(nope.added, 0); assert.match(nope.results[0].reason, /찾을 수 없습니다/);
   } finally { srv.close(); }
 });
+
+/* ── v2.436: URL 중복 감지 · 토큰 정렬(방향) · 진단 · 문구 정정 ─────────────────────────────── */
+
+test('diffTargets: 두 대상이 같은 수집 서버를 가리키면 url-conflict (중계 뒤 IRS 실사용 형태)', async () => {
+  const { diffTargets } = await import('../src/agent/collectorSync.js');
+  // 실사용: WA(엣지, SSH 22)와 WA-IRS(중계 경유, SSH 4067)의 수집 URL 이 둘 다 host:4000 으로 계산돼 겹친다.
+  const targets = [
+    { id: 'wa', host: '192.168.40.221', port: 22, portalPort: 4000, agentName: 'WA', collectorToken: 'tok' },
+    { id: 'wairs', host: '192.168.40.221', port: 4067, portalPort: 4000, agentName: 'WA-IRS', collectorToken: 'tok2' },
+  ];
+  const collectors = [{ id: 'wa', url: 'http://192.168.40.221:4000', token: 'tok' }];
+  const { rows, summary } = diffTargets(targets, collectors);
+  assert.equal(rows[0].status, 'linked', '먼저 온 대상이 수집 서버를 차지');
+  assert.equal(rows[1].status, 'url-conflict');
+  assert.equal(summary.conflict, 1);
+  assert.match(rows[1].issue, /중복 매칭/);
+  assert.match(rows[1].fix, /SSH 포트가 4067|광고 URL/, '중계 경유 대상에는 광고 URL 을 안내');
+  assert.equal(rows[1].canAdd, false); assert.equal(rows[1].canFix, false, '사람이 주소를 정해야 하므로 자동 조치 대상 아님');
+  // 광고 URL 을 지정하면 충돌이 사라진다
+  const fixed = diffTargets([targets[0], { ...targets[1], advertiseUrl: 'http://192.168.40.221:4068' }], collectors);
+  assert.equal(fixed.rows[1].status, 'missing', '별개 수집 서버가 없으므로 추가 대상');
+  assert.equal(fixed.summary.conflict, 0);
+});
+
+test('diffTargets: 토큰 불일치·토큰 없음은 canFix(정렬 가능), 문구가 403 을 단정하지 않는다', async () => {
+  const { diffTargets, ACTION } = await import('../src/agent/collectorSync.js');
+  const targets = [
+    { id: 'a', host: '10.1.1.1', portalPort: 4000, agentName: 'A', collectorToken: 'target-side' },
+    { id: 'b', host: '10.1.1.2', portalPort: 4000, agentName: 'B' },                                  // 수집 서버는 있는데 대상 토큰 없음
+  ];
+  const collectors = [
+    { id: 'a', url: 'http://10.1.1.1:4000', token: 'central-side' },
+    { id: 'b', url: 'http://10.1.1.2:4000', token: 'central-b' },
+  ];
+  const { rows, summary } = diffTargets(targets, collectors);
+  assert.equal(rows[0].status, 'token-mismatch');
+  assert.equal(rows[0].canFix, true, 'v2.436: 선택해서 정렬할 수 있어야 한다(예전에는 canAdd=false 로 체크박스조차 없었다)');
+  assert.equal(rows[0].action, 'align');
+  assert.equal(rows[0].issue.includes('403'), false, '확인하지 않은 403 을 단정하지 않는다');
+  assert.match(rows[0].issue, /재배포하면/, '진짜 위험(재배포 시 덮어씀)을 알린다');
+  assert.match(rows[0].fix, /진단/);
+  assert.equal(rows[1].status, 'no-token'); assert.equal(rows[1].canFix, true); assert.equal(rows[1].canAdd, false);
+  assert.equal(summary.fixable, 2);
+  assert.ok(ACTION.align && ACTION.add);
+});
+
+test('routes: 토큰 정렬 방향 — central-to-target / target-to-central 이 각각 한쪽만 바꾼다', async () => {
+  const express = (await import('express')).default;
+  const { registerDeployLlm } = await import('../src/routes/admin/deployLlm.js');
+  const reg = await import('../src/collector/registry.js');
+  const dreg = await import('../src/agent/deployRegistry.js');
+  const app = express(); app.use(express.json({ limit: '2mb' }));
+  const r = express.Router(); registerDeployLlm(r); app.use('/api/admin', r);
+  const srv = app.listen(0); await new Promise((x) => srv.once('listening', x));
+  const base = `http://127.0.0.1:${srv.address().port}/api/admin`;
+  const post = (p, b) => fetch(`${base}${p}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) });
+  try {
+    // 대상 저장 → 자동 등록(둘 다 'orig') → 중앙 토큰만 바꿔 불일치를 만든다
+    const sv = await (await post('/agent-deploy/targets', {
+      host: '10.60.1.1', port: 22, username: 'root', agentName: 'DIRA', collectorDatacenter: 'DIRA',
+      portalPort: 4000, collectorToken: 'orig-token-1111',
+    })).json();
+    const id = sv.target.id;
+    reg.updateCollector('dira', { ...reg.loadCollectors().find((c) => c.id === 'dira'), token: 'central-token-2222' }, { managed: true });
+
+    let sync = await (await fetch(`${base}/agent-deploy/collector-sync`)).json();
+    let row = sync.rows.find((x) => x.agentName === 'DIRA');
+    assert.equal(row.status, 'token-mismatch'); assert.equal(row.canFix, true);
+
+    // ① 중앙 → 대상: 배포 대상만 바뀌고 수집 서버는 그대로
+    let res = await (await post('/agent-deploy/collector-sync', { ids: [id], tokenDirection: 'central-to-target', verify: false })).json();
+    assert.equal(res.added, 1);
+    assert.equal(res.results[0].aligned, 'central-to-target');
+    assert.equal(dreg.getTargetRaw(id).collectorToken, 'central-token-2222', '대상이 중앙 값을 받는다');
+    assert.equal(reg.loadCollectors().find((c) => c.id === 'dira').token, 'central-token-2222', '수집 서버는 불변');
+    assert.equal(JSON.stringify(res).includes('central-token-2222'), false, '응답에 토큰 값 없음');
+    sync = await (await fetch(`${base}/agent-deploy/collector-sync`)).json();
+    assert.equal(sync.rows.find((x) => x.agentName === 'DIRA').status, 'linked', '정렬 후 연결됨');
+
+    // ② 대상 → 중앙: 대상 토큰을 바꾼 뒤 반대 방향
+    dreg.saveTarget({ ...dreg.getTargetRaw(id), collectorToken: 'target-token-3333' });
+    res = await (await post('/agent-deploy/collector-sync', { ids: [id], tokenDirection: 'target-to-central', verify: false })).json();
+    assert.equal(res.results[0].aligned, 'target-to-central');
+    assert.equal(reg.loadCollectors().find((c) => c.id === 'dira').token, 'target-token-3333', '수집 서버가 대상 값을 받는다');
+    assert.equal(dreg.getTargetRaw(id).collectorToken, 'target-token-3333', '대상은 불변');
+  } finally { srv.close(); }
+});
+
+test('routes: 진단(probe) — 두 토큰을 실제로 시도하고 권장 방향을 낸다, 토큰 값은 무반환', async () => {
+  const express = (await import('express')).default;
+  const { registerDeployLlm } = await import('../src/routes/admin/deployLlm.js');
+  const reg = await import('../src/collector/registry.js');
+  const app = express(); app.use(express.json({ limit: '2mb' }));
+  const r = express.Router(); registerDeployLlm(r); app.use('/api/admin', r);
+  const srv = app.listen(0); await new Promise((x) => srv.once('listening', x));
+  const base = `http://127.0.0.1:${srv.address().port}/api/admin`;
+  const post = (p, b) => fetch(`${base}${p}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) });
+
+  // 가짜 엣지 — '중앙 토큰' 만 받아들인다(가장 흔한 실사용 형태: 토큰 재발급 후 대상 기록만 낡음)
+  const edgeApp = express();
+  edgeApp.get('/api/collector/export', (req, res) => {
+    if (req.get('X-Collector-Token') !== 'edge-live-token') return res.status(403).json({ error: 'forbidden' });
+    res.json({ ok: true, hosts: [] });
+  });
+  const edge = edgeApp.listen(0); await new Promise((x) => edge.once('listening', x));
+  const edgePort = edge.address().port;
+  try {
+    const sv = await (await post('/agent-deploy/targets', {
+      host: '127.0.0.1', port: 22, username: 'root', agentName: 'PROBE', collectorDatacenter: 'PROBE',
+      portalPort: edgePort, collectorToken: 'stale-target-token',
+    })).json();
+    const id = sv.target.id;
+    reg.updateCollector('probe', { ...reg.loadCollectors().find((c) => c.id === 'probe'), token: 'edge-live-token' }, { managed: true });
+
+    const p = await (await post('/agent-deploy/collector-sync/probe', { ids: [id] })).json();
+    assert.equal(p.ok, true);
+    const x = p.results[0];
+    assert.equal(x.central.ok, true, '중앙 토큰은 통한다');
+    assert.equal(x.target.ok, false, '대상 토큰은 403');
+    assert.match(x.target.reason, /403/);
+    assert.equal(x.recommend, 'central-to-target');
+    assert.match(x.why, /배포 대상 기록만 낡았습니다/);
+    const j = JSON.stringify(p);
+    assert.equal(j.includes('edge-live-token'), false, '진단 응답에 토큰 값 없음');
+    assert.equal(j.includes('stale-target-token'), false);
+    assert.equal((await post('/agent-deploy/collector-sync/probe', { ids: [] })).status, 400);
+  } finally { srv.close(); edge.close(); }
+});
