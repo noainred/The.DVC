@@ -162,8 +162,15 @@ function RelaySteps({ r }) {
         <Step label="TCP" s={r.steps.tcp} />
         <Step label="TLS" s={r.steps.tls} />
         <Step label="HTTP" s={r.steps.http} />
+        {/* v2.439: TLS 가 '평문 응답' 으로 판정되면 그 포트의 정체를 평문 HTTP 로 확인한 결과를 함께 보여준다. */}
+        {r.steps.plain && <Step label="평문 HTTP" s={r.steps.plain} />}
+        {r.portRole && <span className="badge gray" style={{ marginRight: 4 }} title="중계 표준 포트 규약">:{r.port} = {r.portRole}</span>}
       </div>
-      <div style={{ color: r.verdict.state === 'ok' ? 'var(--green)' : 'var(--amber)' }}>
+      {/* TLS 실패 원문은 원인 판별의 근거라 접어 두지 않고 그대로 보여준다(예전엔 title 툴팁뿐이었다). */}
+      {r.steps.tls && !r.steps.tls.ok && r.steps.tls.error && (
+        <div className="muted" style={{ marginBottom: 4, fontSize: 11, wordBreak: 'break-all' }}>TLS 오류 원문: <code>{r.steps.tls.error}</code></div>
+      )}
+      <div style={{ color: r.verdict.state === 'ok' ? 'var(--green)' : 'var(--amber)', lineHeight: 1.6 }}>
         {r.verdict.state === 'ok' ? '✅' : '⚠️'} {r.verdict.text}
       </div>
     </div>
