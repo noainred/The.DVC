@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **284개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **287개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-09)
@@ -12,7 +12,7 @@
 > (루트 CLAUDE.md '스토리지 폴러 주기는 중앙 배포값' 참조).
 
 
-## 공용 유틸 (12)
+## 공용 유틸 (13)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -23,6 +23,7 @@
 | `LOOP_LAG_INTERVAL_MS` | `30000` |  | util/loopLag.js |
 | `LOOP_LAG_MONITOR` | `기본 아님('0' 일 때만 적용)` |  | util/loopLag.js |
 | `LOOP_LAG_WARN_MS` | `500` |  | util/loopLag.js |
+| `SNAP_CACHE_PER_NAME` | `12` |  | util/snapCache.js |
 | `SOAP_PARSE_MIN_CHARS` | `262144` |  | util/soapParsePool.js |
 | `SOAP_PARSE_WORKERS` |  |  | util/soapParsePool.js |
 | `WAN_CONNECT_TIMEOUT_MS` | `20000` |  | util/resilientFetch.js |
@@ -111,6 +112,12 @@
 | `VC_TLS_MIN_VERSION` | `'TLSv1'` |  | config.js |
 | `VC_TLS_REJECT_UNAUTHORIZED` | `기본 아님('true' 일 때만 적용)` | ✅ | config.js |
 | `VCENTERS_EXAMPLE_FALLBACK` | `기본 아님('true' 일 때만 적용)` |  | config.js |
+
+## 로그 (1)
+
+| 키 | 기본값 | 예시 | 정의 위치 |
+|---|---|---|---|
+| `VCLOGS_CONCURRENCY` | `6` |  | logs/poller.js |
 
 ## 메트릭 수집 (5)
 
@@ -444,10 +451,11 @@
 | `SANSW_TEST_PICKUP_MS` | `10` | ✅ | sanswitch/testRuns.js |
 | `SANSW_TEST_RESULT_MS` | `5` | ✅ | sanswitch/testRuns.js |
 
-## vCenter 수집 (1)
+## vCenter 수집 (2)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
+| `PERF_COUNTER_TTL_MS` | `6` |  | vcenter/soapClient.js |
 | `VC_KEEPALIVE_MS` | `4000` |  | vcenter/restClient.js |
 
 ## VM 프로비저닝 (1)
@@ -458,4 +466,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 59 / 284
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 59 / 287
