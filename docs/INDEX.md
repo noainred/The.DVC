@@ -14,7 +14,7 @@
 | [GUIDE-BEGINNER.md](GUIDE-BEGINNER.md) | 처음 사용자 가이드 — 조회 위주 기본 사용법(화면 캡처 포함) |
 | [GUIDE-INTERMEDIATE.md](GUIDE-INTERMEDIATE.md) | 중급 사용자 가이드 — 운영 리포트·특수 기능 등 실무 기능 활용 |
 | [GUIDE-ADMIN.md](GUIDE-ADMIN.md) | 관리자 가이드 — 설치·구성·계정/권한·보안 운영 |
-| [SETTINGS.md](SETTINGS.md) | **설정 화면 34개 탭 전체 안내** — 각 탭의 기능·저장 파일·환경변수·권한·주의사항 |
+| [SETTINGS.md](SETTINGS.md) | **설정 화면 32개 탭 전체 안내** — 각 탭의 기능·저장 파일·환경변수·권한·주의사항 |
 | [ENV.md](ENV.md) | **환경변수 레퍼런스**(284개, 자동 생성) — 분류·기본값·정의 위치 |
 | [CONFIG-FILES.md](CONFIG-FILES.md) | **설정·데이터 파일 레퍼런스**(118개, 자동 생성) — 용도·원자적 쓰기·권한·지우면 생기는 일 |
 
