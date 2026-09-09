@@ -5,6 +5,7 @@ import { fetchJson, postJson } from '../../api.js';
 import { DataTable, Loading, ErrorBox, StateBadge, UsageCell, Modal, ResultCount, SearchBox, VmLink } from '../../components/ui.jsx';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Brush } from 'recharts';
 import { Card, fmtTrendTick, tb, tempColor, useTool } from './shared.jsx';
+import RightsizeReport from './RightsizeReport.jsx'; // v2.445: VM 자원 축소 근거 리포트
 
 
 export function EsxiTemp({ scope }) {
@@ -296,6 +297,8 @@ export function Waste({ scope }) {
   const oa = data?.overAllocated || null; // 과할당(할당 vs 사용) — 구버전 서버 응답이면 없음
   const spark = useSparklines(tab === 'cpu' ? oa?.cpuTop : tab === 'mem' ? oa?.memTop : null,
     tab === 'mem' ? 'mem' : 'cpu', !!oa && (tab === 'cpu' || tab === 'mem'));
+  // v2.445: '📊 근거' 로 여는 자원 축소 근거 리포트 대상 VM. 훅이므로 조기 return 위에 둔다.
+  const [reportVm, setReportVm] = useState(null);
   if (loading) return <Loading />;
   if (error) return <ErrorBox message={error} />;
   const tb2 = (g) => (g >= 1024 ? `${(g / 1024).toFixed(1)} TB` : `${g} GB`);
@@ -343,6 +346,7 @@ export function Waste({ scope }) {
           { key: 'cpuSavingPct', label: '절감 가능', align: 'right', render: (v) => (v.cpuSavingPct == null ? '—' : <b>{v.cpuSavingPct}%</b>) },
           { key: 'host', label: 'ESXi 호스트', render: (v) => <span className="muted">{v.host}</span> },
           { key: 'spark', label: '7일 사용률 추이', sortValue: (v) => sparkAvg(spark.map[v.id]), render: (v) => <Sparkline points={spark.map[v.id]} /> },
+          { key: 'report', label: '근거', sortable: false, render: (v) => <button className="tab" style={{ padding: '4px 9px', fontSize: 11.5 }} onClick={() => setReportVm(v)} title="기간별 추이·p95·CPU Ready·권장 vCPU 와 참고 문서">📊 리포트</button> },
         ]} />
         {spark.info?.truncated && <div className="muted" style={{ fontSize: 11.5, marginTop: 4 }}>※ 추이 차트는 vCenter 성능 조회 부담을 고려해 상위 {spark.info.maxVms}대만 표시합니다.</div>}
         {spark.info?.synthesized && <div className="muted" style={{ fontSize: 11.5, marginTop: 4 }}>※ 데모(mock) 모드의 합성 데이터입니다.</div>}
@@ -362,10 +366,12 @@ export function Waste({ scope }) {
           { key: 'guestOS', label: 'Guest OS' },
           { key: 'host', label: 'ESXi 호스트', render: (v) => <span className="muted">{v.host}</span> },
           { key: 'spark', label: '7일 사용률 추이', sortValue: (v) => sparkAvg(spark.map[v.id]), render: (v) => <Sparkline points={spark.map[v.id]} color="#4ade80" /> },
+          { key: 'report', label: '근거', sortable: false, render: (v) => <button className="tab" style={{ padding: '4px 9px', fontSize: 11.5 }} onClick={() => setReportVm(v)} title="Active·Consumed·벌룬·스왑 추이와 권장 메모리, 참고 문서">📊 리포트</button> },
         ]} />
         {spark.info?.truncated && <div className="muted" style={{ fontSize: 11.5, marginTop: 4 }}>※ 추이 차트는 vCenter 성능 조회 부담을 고려해 상위 {spark.info.maxVms}대만 표시합니다.</div>}
       </>}
       {tab === 'trend' && <WasteTrend scope={scope} />}
+      {reportVm && <RightsizeReport vm={reportVm} onClose={() => setReportVm(null)} />}
       <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>※ 고아 디스크(orphaned VMDK)는 데이터스토어 파일 스캔이 필요해 현재 미포함입니다.</div>
       {oa && <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
         ※ 과할당 수치는 <b>스냅샷 시점(현재)의 순간 사용률</b> 기준 추정입니다 — 리사이징 결정에는 기간 평균·피크(예: 1주 P95)를 함께 확인하세요. 전원이 꺼진 VM은 제외했고(위 ‘전원 꺼짐’ 참조),

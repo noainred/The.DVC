@@ -1,6 +1,23 @@
 {
   "notes": [
     {
+      "version": "2.445.0",
+      "date": "2026-09-09",
+      "title": "VM 자원 축소 근거 리포트 — 기간별 추이 차트·벌룬/스왑·p95·권장치·VMware 공식 문서 인용",
+      "notes": [
+        "사용자 요구: '낭비 리소스에서 CPU·메모리를 줄여도 되는 **구체적인 근거**를 볼 수 있게 — 주기 점검한 사용률 추이를 차트로, 기간별로, 구체적 설명과 근거자료(벌룬·스왑 포함), VMware best practice 와 참고 공식 문서까지. 근거가 충분해야 자원을 줄일 수 있다'. 기존 화면은 스냅샷 시점 순간값 1회와 작은 스파크라인뿐이었다.",
+        "**특수 기능 › 낭비 리소스 › CPU/메모리 과할당** 표에 '📊 리포트' 열이 생겼다. 열면 **최근 7·30·90일** 을 골라 볼 수 있고, 판정 → CPU → 메모리 → 디스크 → 방법론·참고 문서 순으로 보여준다.",
+        "**데이터 출처**: vCenter 가 자체 보관하는 성능 롤업(1주=30분·1달=2시간·1년=1일, 통계 레벨 1 기본 카운터). 중앙이 5,850 VM 분 시계열을 따로 쌓지 않고, 창을 열 때 그 VM 만 조회한다 — **로그인 1회 + QueryPerf 1회(8계열 동시)** 라 고RTT 사이트에서도 리포트 한 장 ≈ 왕복 3회. 결과는 5분 캐시.",
+        "**CPU**: 사용 MHz 평균·p95·최대, 사용률, **CPU Ready(vCPU 당 %)**. 권장 vCPU = ⌈p95 × (1+여유 20%) ÷ 코어당 MHz⌉(최대값이 p95 의 1.5배를 넘는 스파이크형은 최대값 기준). Ready p95 가 5% 를 넘으면 경합으로 보고 **보류**(감축이 아니라 배치 문제).",
+        "**메모리**: **Active(워킹셋)·Consumed(호스트 배정)·Balloon(벌룬)·Swapped(호스트 스왑)·Usage%** 5계열의 평균·p95·최대와 해석. 권장 = ⌈max(consumed p95, active 최대) × (1+여유)⌉ — active 만 보면 캐시를 빼앗으므로 consumed 를 하한에 넣는다. **벌룬·스왑이 관측 창에서 한 번이라도 0 을 넘으면 감축 보류**(관측 시간 중 비율까지 표시).",
+        "**근거 게이트**: 관측 7일 미만·샘플 커버리지 60% 미만·전원 OFF·이력 없음이면 **'근거 불충분 — 권고하지 않음'** 으로 끝낸다. 부족한 근거로 권고를 내지 않는다.",
+        "**감축 상한 50%**: 권고 축소 폭은 현재 할당의 절반을 넘지 않는다 — VMware Aria Operations 의 과대 VM 권고 상한과 같은 규칙(8 vCPU → 최대 4 감축). 정책은 env(RIGHTSIZE_HEADROOM_PCT·MIN_DAYS·MIN_COVERAGE_PCT·CAP_REDUCTION_PCT·READY_WARN_PCT)로 조정되며 화면이 어느 정책 기준인지 함께 보여준다.",
+        "**참고 문서 6건을 리포트 안에 링크·용도와 함께 인용**: Performance Best Practices for vSphere 8.0, Understanding Memory Resource Management in VMware ESX(기술백서), Broadcom KB 438023(ESXi 8.0 rightsizing), Aria Operations 'Using Rightsize'(50% 상한), Aria 'Calculate and Forecast Capacity'(피크 기준 권고), vSphere Monitoring and Performance(통계 간격·레벨).",
+        "정직한 한계: ① **디스크 사용률 이력은 없다** — vCenter 기본 통계에 게스트 파일시스템 사용률이 없어(guest.disk 는 Tools 경유·비시계열) 현재 커밋/미커밋 용량만 보여주고 그렇게 명시한다. ② 각 점은 롤업 간격의 평균이라 순간 피크는 더 높을 수 있다 — 여유(headroom)를 두는 이유. ③ 애플리케이션 벤더 최소 사양·라이선스 조건은 반영되지 않는다. ④ 판정 문구는 순수 모듈로 고정했지만, 실제 vCenter 카운터 응답은 mock 환경에서 재현했을 뿐 실운영 vCenter 로는 검증하지 못했다. ⑤ 참고 문서 6건의 URL 은 개발 환경에서 vmware.com·broadcom.com 접근이 차단돼 **실제 열리는지 확인하지 못했다**(제목·내용은 알려진 공식 문서이나 Broadcom 이관 후 주소가 바뀌었을 수 있음 — 열리지 않으면 제목으로 검색). 리포트 하단에도 같은 안내를 넣었다.",
+        "테스트: 서버 16건(`test/rightsize2445.test.js` — 근거 게이트 3종, 사용자 사례(256GB/2.6GB) 산식과 50% 상한, 벌룬·스왑·Ready 보류, 스파이크 처리, 추정 금지, 인용 문서 존재)."
+      ]
+    },
+    {
       "version": "2.444.0",
       "date": "2026-09-09",
       "title": "신규 엣지가 예제 템플릿 vCenter 를 수집·push 하던 문제 수정 (east us 목업의 진짜 원인)",
