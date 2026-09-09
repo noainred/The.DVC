@@ -5,6 +5,7 @@ import { fetchJson, postJson, putJson, delJson, downloadFile } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import EscClose from '../components/EscClose.jsx';
 import { STable } from '../components/STable.jsx';
+import { rowCards } from './collectorDiag.js';
 
 const EMPTY = { id: '', name: '', datacenter: '', url: 'http://', token: '', enabled: true };
 
@@ -26,6 +27,7 @@ export default function Collectors() {
   const [pwBusy, setPwBusy] = useState(false);
   const [dcs, setDcs] = useState([]); // 데이터센터(법인) 목록 — 등록 폼 콤보박스용
   const [csvModal, setCsvModal] = useState(null); // 'export' | 'import' | null — CSV 일괄 관리(v2.338)
+  const [diag, setDiag] = useState(null); // { collector, cards[] } — 경고 배지 상세(v2.437)
 
   const load = async () => {
     try { setData(await fetchJson('/admin/collectors')); setError(null); }
@@ -210,13 +212,6 @@ export default function Collectors() {
   const status = data.status || {};
   // v2.428: 같은 AGENT_NAME 이 다른 장비(hostname)에서 push 되거나 같은 vcenterId 를 다른 agent 가 번갈아 push 하면 충돌 표시.
   const ident = data.identity || { byAgent: {}, vcenterConflicts: [] };
-  const identityOf = (c) => {
-    const a = ident.byAgent?.[String(c.id || '').toLowerCase()] || ident.byAgent?.[String(c.name || '').toLowerCase()];
-    if (a?.conflict) return `AGENT_NAME '${a.agent}' 이(가) 서로 다른 장비(${a.hostname} / ${a.conflict.hostname})에서 push 됩니다 — 한 엣지의 portal.env 를 복사해 이름이 겹친 것으로 보입니다. 이름을 서로 다르게 하세요.`;
-    const vc = (ident.vcenterConflicts || []).find((x) => [x.agent, x.other].map((v) => String(v).toLowerCase()).includes(String(c.id || '').toLowerCase()));
-    if (vc) return `vCenter id '${vc.vcenterId}' 를 '${vc.agent}' 와 '${vc.other}' 가 번갈아 push 합니다 — 두 엣지가 같은 vCenter id(예: mock id 또는 복사한 vcenters.json)를 씁니다.`;
-    return '';
-  };
   const totalHosts = Object.values(status).reduce((a, s) => a + (s.ok ? (s.hosts || 0) : 0), 0);
   const erroredCount = list.filter((c) => status[c.id] && status[c.id].ok === false).length;
   // 등록된 에이전트 수량 통계(상태별).
@@ -394,6 +389,7 @@ export default function Collectors() {
             {sortedList.length === 0 && <tr><td colSpan={10} className="center muted" style={{ padding: 28 }}>등록된 수집 서버가 없습니다. “+ 수집 서버 추가”로 등록하세요.</td></tr>}
             {sortedList.map((c) => {
               const s = status[c.id];
+              const cards = rowCards(c, s, ident);
               return (
                 <tr key={c.id}>
                   <td><b>{c.id}</b></td>
@@ -406,26 +402,22 @@ export default function Collectors() {
                     : (s.ok && s.degraded) ? <span className="badge amber" title={`일시적 연결 오류: ${s.error || ''} — 직전 데이터·온라인 유지 중(연속 실패 ${s.fails || 1}회). 한 번 더 실패하면 '오류'로 내려갑니다.`}>저하</span>
                       : s.ok ? <span className="badge green">정상</span>
                         : <span className="badge red" title={s.error}>오류</span>}
-                    {s?.identity && (
-                      <span className="badge amber" style={{ marginLeft: 4, fontSize: 10 }} title={s.identity.reason}>
-                        응답 {s.identity.agent}
-                      </span>
-                    )}
                     {s?.mock && (
                       <span className="badge red" style={{ marginLeft: 4, fontSize: 10 }} title="이 엣지는 DATA_SOURCE=mock 으로 실행 중 — 가짜 데이터입니다. 중앙은 이 엣지의 인벤토리 push 를 저장하지 않습니다(v2.428). portal.env 에 DATA_SOURCE=live 를 넣고 vCenter 를 등록·재시작하세요.">MOCK</span>
                     )}
                     {s?.unverified && (
                       <span className="badge amber" style={{ marginLeft: 4, fontSize: 10 }} title={s.error || ''}>URL 미검증</span>
                     )}
-                    {identityOf(c) && (
-                      <span className="badge red" style={{ marginLeft: 4, fontSize: 10 }} title={identityOf(c)}>이름 충돌</span>
-                    )}
-                    {s?.authDeny?.count > 0 && (
-                      <span className="badge amber" style={{ marginLeft: 4, fontSize: 10 }}
-                        title={`엣지에서 인증 거부 ${s.authDeny.count}건(기동 후 누적) — 마지막: ${s.authDeny.lastWhy || ''}${s.authDeny.lastAt ? ` · ${new Date(s.authDeny.lastAt).toLocaleString('ko-KR')}` : ''} (${s.authDeny.lastEndpoint || ''}). 다른 중앙/구버전 토큰이 이 엣지를 두드리고 있을 수 있습니다.`}>
-                        거부 {s.authDeny.count}
-                      </span>
-                    )}</td>
+                    {/* v2.437: 경고 배지는 클릭하면 원인·근거·해결 절차를 담은 상세 카드를 연다.
+                        (예전엔 title 툴팁 한 줄이 전부라 '어디서 보나'를 알 수 없었다 — 사용자 요구.) */}
+                    {cards.map((card, i) => (
+                      <button key={`${card.kind}-${i}`} type="button" className={`badge ${card.tone}`}
+                        style={{ marginLeft: 4, fontSize: 10, cursor: 'pointer', border: 'none', textDecoration: 'underline dotted' }}
+                        title={`${card.title} — 클릭하면 원인·해결 방법`}
+                        onClick={() => setDiag({ collector: c, cards })}>
+                        {card.badge} ⓘ
+                      </button>
+                    ))}</td>
                   <td className="tabular">{s?.ok ? (s.hosts ?? 0).toLocaleString() : '—'}</td>
                   <td className="muted">
                     {s?.version ? <>v{s.version}{central && s.version !== central && <span className="badge amber" style={{ marginLeft: 6 }} title={`중앙 v${central}`}>구버전</span>}</> : '—'}
@@ -581,7 +573,102 @@ export default function Collectors() {
           </div>
         </div>
       )}
+
+      {diag && <DiagModal entry={diag} onClose={() => setDiag(null)} />}
     </>
+  );
+}
+
+/**
+ * 경고 배지 상세(v2.437) — 원인·근거·해결 절차를 한 화면에.
+ * 문구·판정은 views/collectorDiag.js(순수)에서 만들고 여기서는 표시만 한다.
+ */
+function DiagModal({ entry, onClose }) {
+  const { collector: c, cards } = entry;
+  return (
+    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <EscClose onClose={onClose} />
+      <div className="modal card" style={{ maxWidth: 860 }}>
+        <div className="flex between" style={{ marginBottom: 12 }}>
+          <b style={{ fontSize: 15 }}>진단 — {c.id}{c.name && c.name !== c.id ? ` (${c.name})` : ''} · {c.url}</b>
+          <button className="logout-btn" onClick={onClose}>닫기</button>
+        </div>
+        {cards.map((card, i) => (
+          <div key={`${card.kind}-${i}`} className="card" style={{ marginBottom: 12, borderLeft: `3px solid var(--${card.tone === 'red' ? 'red' : 'amber'})` }}>
+            <div style={{ fontWeight: 700, marginBottom: 4 }}>
+              <span className={`badge ${card.tone}`} style={{ marginRight: 6, fontSize: 10 }}>{card.badge}</span>
+              {card.title}
+            </div>
+            <div className="muted" style={{ marginBottom: 10, lineHeight: 1.6 }}>{card.summary}</div>
+
+            <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>근거(서버가 실제로 관측한 값)</div>
+            <div className="table-wrap" style={{ marginBottom: 10 }}>
+              <STable>
+                <thead><tr><th>항목</th><th>값</th></tr></thead>
+                <tbody>{card.evidence.map((e, j) => <tr key={j}><td className="muted">{e.k}</td><td>{e.v}</td></tr>)}</tbody>
+              </STable>
+            </div>
+
+            {card.note && <div className="muted" style={{ marginBottom: 10, color: 'var(--amber)' }}>{card.note}</div>}
+
+            {card.rows?.length > 0 && (
+              <>
+                <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>최근 거부 내역 (최대 20건 · 토큰 값은 저장하지 않음)</div>
+                <div className="table-wrap" style={{ marginBottom: 10 }}>
+                  <STable>
+                    <thead><tr><th>시각</th><th>출처 IP</th><th>대상</th><th>사유</th><th>요청 토큰</th><th>User-Agent</th></tr></thead>
+                    <tbody>
+                      {card.rows.map((r, j) => (
+                        <tr key={j}>
+                          <td className="muted nowrap" data-sort={r.at}>{r.at ? new Date(r.at).toLocaleString('ko-KR') : '—'}</td>
+                          <td>{r.ip || '—'}</td>
+                          <td className="muted">{r.endpoint || '—'}</td>
+                          <td>{r.why || '—'}</td>
+                          <td className="muted">{r.fp || (r.tokenLen ? `len=${r.tokenLen}` : '없음')}</td>
+                          <td className="muted" style={{ fontSize: 11 }}>{r.ua || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </STable>
+                </div>
+              </>
+            )}
+
+            {card.bySrc?.length > 0 && (
+              <>
+                <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>출처별 집계</div>
+                <div className="table-wrap" style={{ marginBottom: 10 }}>
+                  <STable>
+                    <thead><tr><th>출처 IP</th><th className="right">건수</th><th>처음</th><th>마지막</th><th>마지막 사유</th></tr></thead>
+                    <tbody>
+                      {card.bySrc.map((r, j) => (
+                        <tr key={j}>
+                          <td>{r.ip}</td>
+                          <td className="right tabular" data-sort={r.count}>{r.count}</td>
+                          <td className="muted nowrap" data-sort={r.firstAt}>{r.firstAt ? new Date(r.firstAt).toLocaleString('ko-KR') : '—'}</td>
+                          <td className="muted nowrap" data-sort={r.lastAt}>{r.lastAt ? new Date(r.lastAt).toLocaleString('ko-KR') : '—'}</td>
+                          <td className="muted">{r.lastWhy || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </STable>
+                </div>
+              </>
+            )}
+
+            <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>해결 방법</div>
+            <ol style={{ margin: '0 0 10px', paddingLeft: 20, lineHeight: 1.7 }}>
+              {card.steps.map((t, j) => <li key={j}>{t}</li>)}
+            </ol>
+
+            <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>원문은 어디서 보나</div>
+            <ul className="muted" style={{ margin: 0, paddingLeft: 20, lineHeight: 1.7 }}>
+              {card.where.map((t, j) => <li key={j}><code>{t}</code></li>)}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
