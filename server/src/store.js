@@ -329,8 +329,10 @@ class Store {
             merged.datastores.push(...s.datastores);
             merged.networks.push(...s.networks);
             merged.alarms.push(...s.alarms);
-          } else if (isAuto && pushSite(merged, getMock(), vc.id)) {
+          } else if (isAuto && pushSite(merged, getMock(), vc.id, { mock: true })) {
             // auto 폴백: 목 데이터에 이 vc.id가 있으면 그걸로 채운다.
+            // v2.443: 채운 vCenter 에 mock 표시를 남긴다 — 이 데이터는 가짜라서 중앙에 push 하면
+            // 안 되는데, DATA_SOURCE 는 'auto' 라 기존 차단(source==='mock')을 그냥 통과했다.
           } else {
             // 보존 창을 넘긴 장기 장애(또는 lastGood 없음) → 최소 unreachable 엔트리(인벤토리는 비움).
             merged.vcenters.push({ id: vc.id, name: vc.name, location: vc.location, status: 'unreachable', error: c.err.message, hint: c.err.hint, code: c.err.code });
@@ -378,9 +380,9 @@ class Store {
 
 // 목 스냅샷에서 vcId에 해당하는 사이트를 target에 복사. vc를 찾았으면 true(호출부가 폴백
 // 엔트리 삽입 여부를 판단).
-function pushSite(target, source, vcId) {
+function pushSite(target, source, vcId, mark = null) {
   const vc = source.vcenters.find((v) => v.id === vcId);
-  if (vc) target.vcenters.push(vc);
+  if (vc) target.vcenters.push(mark ? { ...vc, ...mark } : vc);
   target.hosts.push(...source.hosts.filter((h) => h.vcenterId === vcId));
   target.vms.push(...source.vms.filter((v) => v.vcenterId === vcId));
   target.datastores.push(...source.datastores.filter((d) => d.vcenterId === vcId));

@@ -12,6 +12,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { isMockVcenter } from '../mock/generator.js';
 
 const FILE = path.join(config.configDir, 'central-inventory.json');
 
@@ -78,6 +79,27 @@ export function listInventory() {
     hosts: e.data?.hosts?.length || 0, vms: e.data?.vms?.length || 0,
     datastores: e.data?.datastores?.length || 0,
   })).sort((a, b) => (b.at || 0) - (a.at || 0));
+}
+
+/**
+ * 이미 저장돼 있는 **목(가짜) 인벤토리**를 지운다(v2.443).
+ *
+ * 차단이 들어오기 전(또는 DATA_SOURCE=auto 폴백으로) 저장된 데모 사이트가 중앙 화면에 남아
+ * 실데이터와 섞여 보였다(사용자 신고: live 로 바꿨는데 'east us' 가 올라옴). 기동 시 1회 훑어
+ * 생성기의 id·이름이 둘 다 일치하는 항목만 제거한다 — 둘 다 같을 일은 없어 실데이터는 안 지운다.
+ * @returns {string[]} 제거한 vCenter id 목록
+ */
+export function pruneMockInventory() {
+  const removed = [];
+  for (const [id, e] of Object.entries(cache)) {
+    const vc = e?.data?.vcenter || { id, name: e?.data?.vcenter?.name };
+    if (isMockVcenter({ id, name: vc?.name })) { delete cache[id]; removed.push(id); }
+  }
+  if (removed.length) {
+    console.warn(`[central] 저장돼 있던 목(가짜) 인벤토리 ${removed.length}건 제거: ${removed.join(', ')} — 엣지가 DATA_SOURCE=auto 로 폴백했거나 구버전이라 올라온 데이터입니다.`);
+    persistSoon();
+  }
+  return removed;
 }
 
 /** 레지스트리에서 제거된 vCenter의 캐시 정리. */

@@ -7,6 +7,28 @@
  * Values drift slightly on every poll to make the live dashboard feel real.
  */
 
+/**
+ * mock 데이터 식별(v2.443, 사용자 신고 '신규 배포 엣지가 live 인데 east us 목업이 올라옴').
+ *
+ * 중앙의 기존 차단은 push 본문의 `source === 'mock'` 플래그만 봤다. 그런데
+ *   · `DATA_SOURCE=auto` 는 vCenter 접속 실패 시 **목 데이터로 폴백**하면서도 source 는 'auto' 라 통과하고
+ *   · 구버전 엣지는 source 필드 자체를 안 보내 통과한다
+ * 그래서 실제로는 가짜인 인벤토리가 중앙에 저장될 수 있었다. 아래 목록으로 **id+이름이 둘 다
+ * 생성기 것과 같을 때만** 목업으로 판정한다(둘 다 우연히 일치할 일은 없어 오탐이 사실상 없다).
+ * 값은 SITES 하나에서 파생하므로 사이트를 추가/변경해도 자동으로 따라간다.
+ */
+export function mockVcenterIdentities() {
+  return SITES.map((s) => ({ id: s.id, name: s.name }));
+}
+
+/** 이 vCenter(또는 {id,name})가 목 데이터인가 — id·이름 동시 일치. */
+export function isMockVcenter(vc) {
+  const id = String(vc?.id || '').trim();
+  const name = String(vc?.name || '').trim();
+  if (!id) return false;
+  return SITES.some((s) => s.id === id && s.name === name);
+}
+
 const SITES = [
   { id: 'vc-us-east', name: 'vcenter-us-east-01', city: 'Ashburn', country: 'USA', region: '북미', lat: 39.04, lon: -77.49, hosts: 24 },
   { id: 'vc-us-west', name: 'vcenter-us-west-01', city: 'San Jose', country: 'USA', region: '북미', lat: 37.33, lon: -121.89, hosts: 18 },
