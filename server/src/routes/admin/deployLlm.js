@@ -12,9 +12,9 @@ import { targetsToCsv, sampleCsv as deploySampleCsv, parseTargetsCsv, analyzeTar
 import { parseTargetsText, analyzeBulkDeploy, targetsToText, targetsToTextCsv, sampleText, sampleTextCsv, fillAutoTokens, COLUMN_PRESETS, DEFAULT_PRESET } from '../../agent/deployText.js';   // 대량 배포 텍스트/CSV(v2.432)
 import { startBulkDeploy, getRun, listRuns, cancelRun, activeRunId } from '../../agent/bulkDeploy.js';        // 대량 배포 실행기(v2.432)
 import { autoRegisterCollector } from '../../agent/autoRegister.js';
-import { diffTargets, targetUrl, tokenOk, STATUS as SYNC_STATUS } from '../../agent/collectorSync.js';  // 에이전트↔수집 서버 대조(v2.434)
+import { diffTargets, targetUrl, tokenOk, STATUS as SYNC_STATUS, ACTION as SYNC_ACTION } from '../../agent/collectorSync.js';  // 에이전트↔수집 서버 대조(v2.434~2.436)
 import { forceCollectorToken } from '../../agent/deploy.js';
-import { loadCollectors } from '../../collector/registry.js';
+import { loadCollectors, updateCollector } from '../../collector/registry.js';
 import { pullNow } from '../../collector/puller.js';
 import { resilientFetch } from '../../util/resilientFetch.js';
 import { logAudit } from '../../audit.js';
@@ -291,8 +291,63 @@ adminRouter.post('/agent-deploy/bulk/:runId/cancel', adminOnly, (req, res) => {
 adminRouter.get('/agent-deploy/collector-sync', adminOnly, (_req, res) => {
   const targets = listTargets().map((t) => getTargetRaw(t.id)).filter(Boolean);
   const { rows, orphans, summary } = diffTargets(targets, loadCollectors());
-  res.json({ ok: true, rows, orphans, summary, statusLabels: SYNC_STATUS });
+  res.json({ ok: true, rows, orphans, summary, statusLabels: SYNC_STATUS, actionLabels: SYNC_ACTION });
 });
+
+/**
+ * 진단(v2.436) — **엣지가 실제로 어느 토큰을 받는지 측정**한다. 대조 표는 두 저장소의 값만 비교하므로
+ * '토큰 불일치' 가 곧 장애를 뜻하지는 않는다(수집 서버 화면에서 토큰을 재발급·강제 동기화하면
+ * collectors.json 과 엣지만 갱신되고 배포 대상 기록은 낡은 채로 남는다). 추측 대신 재 본다.
+ *
+ * 각 대상의 수집 URL 로 `/api/collector/export` 를 두 번 호출한다 — ① 수집 서버(중앙) 토큰 ② 배포 대상 토큰.
+ * 결과로 권장 방향을 낸다:
+ *   · 중앙 토큰만 통함 → `central-to-target`(중앙 값을 대상에 복사 · SSH 불필요) — 가장 흔한 정상 케이스
+ *   · 대상 토큰만 통함 → `target-to-central`(대상 값을 중앙에 반영 · SSH 불필요)
+ *   · 둘 다 안 통함   → `target-to-edge`(SSH 로 엣지에 밀어넣기) 또는 엣지 자체 점검
+ * 응답에 토큰 값은 넣지 않는다(통했는지 여부만).
+ */
+adminRouter.post('/agent-deploy/collector-sync/probe', adminOnly, async (req, res) => {
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(String).slice(0, 50) : [];
+  if (!ids.length) return res.status(400).json({ ok: false, reason: '진단할 대상을 선택하세요(최대 50건).' });
+  const cols = loadCollectors();
+  const hit = async (url, token) => {
+    if (!token) return { tried: false, ok: false, reason: '토큰 없음' };
+    try {
+      const r = await resilientFetch(`${String(url).replace(/\/+$/, '')}/api/collector/export`, {
+        headers: { Accept: 'application/json', 'X-Collector-Token': token },
+        timeoutMs: config.collector.timeoutMs, retries: 0,
+      });
+      return { tried: true, ok: r.ok, reason: r.ok ? '' : `HTTP ${r.status}` };
+    } catch (e) { return { tried: true, ok: false, reason: e.message }; }
+  };
+  const results = [];
+  const run = async (id) => {
+    const t = getTargetRaw(id);
+    if (!t) { results.push({ id, ok: false, reason: '대상을 찾을 수 없습니다.' }); return; }
+    const url = targetUrl(t);
+    const col = cols.find((c) => String(c.url || '').replace(/\/+$/, '') === url) || cols.find((c) => c.id === collectorIdOf(t));
+    const central = await hit(url, col?.token);
+    const target = await hit(url, t.collectorToken);
+    let recommend = 'none'; let why = '';
+    if (central.ok && !target.ok) { recommend = 'central-to-target'; why = '엣지가 중앙(수집 서버) 토큰을 받습니다 — 배포 대상 기록만 낡았습니다. 재배포 전에 맞춰 두세요.'; }
+    else if (!central.ok && target.ok) { recommend = 'target-to-central'; why = '엣지가 배포 대상 토큰을 받습니다 — 중앙 수집 서버의 토큰이 낡아 지금 pull 이 실패 중입니다.'; }
+    else if (central.ok && target.ok) { recommend = 'central-to-target'; why = '두 토큰이 모두 통합니다(엣지가 최근 교체 중이거나 값이 같음). 중앙 값 기준으로 통일하세요.'; }
+    else { recommend = 'target-to-edge'; why = `어느 토큰도 통하지 않습니다(중앙: ${central.reason || '실패'} · 대상: ${target.reason || '실패'}). 엣지가 꺼져 있거나 주소가 틀렸을 수 있으니 먼저 확인하고, 맞다면 '대상 → 엣지' 로 밀어넣으세요.`; }
+    results.push({
+      id, host: t.host, agentName: t.agentName || '', url, collectorId: col?.id || '',
+      central: { tried: central.tried, ok: central.ok, reason: central.reason },
+      target: { tried: target.tried, ok: target.ok, reason: target.reason },
+      recommend, why, ok: true,
+    });
+  };
+  const it = ids[Symbol.iterator]();
+  await Promise.all(Array.from({ length: Math.min(4, ids.length) }, async () => {
+    for (let n = it.next(); !n.done; n = it.next()) await run(n.value);
+  }));
+  logAudit({ user: req.user?.username, action: '수집 서버 토큰 진단', detail: `${results.length}건`, ip: req.ip || '' });
+  res.json({ ok: true, results });
+});
+const collectorIdOf = (t) => String(t?.collectorDatacenter || t?.agentName || t?.host || '').trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
 
 /**
  * 빠진 수집 서버 추가(선택 행). 옵션:
@@ -306,9 +361,12 @@ adminRouter.post('/agent-deploy/collector-sync', adminOnly, async (req, res) => 
   const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(String).slice(0, 50) : [];
   if (!ids.length) return res.status(400).json({ ok: false, reason: '추가할 대상을 선택하세요(최대 50건).' });
   const generateToken = req.body?.generateToken !== false;
-  const syncToEdge = !!req.body?.syncToEdge;
+  // 'add-only' 는 수집 서버가 있어도 정렬하지 않고 기존(추가) 흐름만 탄다 — 하위 호환.
+  const tokenDirection = ['central-to-target', 'target-to-central', 'target-to-edge', 'add-only'].includes(req.body?.tokenDirection)
+    ? req.body.tokenDirection : 'central-to-target';
+  const syncToEdge = !!req.body?.syncToEdge || tokenDirection === 'target-to-edge';
   const verify = req.body?.verify !== false;
-  logAudit({ user: req.user?.username, action: '에이전트 → 수집 서버 일괄 추가', detail: `${ids.length}건 · 토큰생성=${generateToken} 엣지반영=${syncToEdge}`, ip: req.ip || '' });
+  logAudit({ user: req.user?.username, action: '에이전트 → 수집 서버 일괄 추가', detail: `${ids.length}건 · 방향=${tokenDirection} 토큰생성=${generateToken} 엣지반영=${syncToEdge}`, ip: req.ip || '' });
 
   const results = [];
   const run = async (id) => {
@@ -316,6 +374,32 @@ adminRouter.post('/agent-deploy/collector-sync', adminOnly, async (req, res) => 
     const base = { id, host: t?.host || '', agentName: t?.agentName || '', url: t ? targetUrl(t) : '' };
     if (!t) { results.push({ ...base, ok: false, reason: '대상을 찾을 수 없습니다.' }); return; }
     if (t.enabled === false) { results.push({ ...base, ok: false, reason: '비활성 대상입니다.' }); return; }
+
+    /* v2.436 토큰 정렬 — 수집 서버가 **이미 있는** 대상은 '추가' 가 아니라 '정렬' 이다.
+     * central-to-target: 수집 서버 토큰을 배포 대상에 복사(SSH 불필요 · 기본, 재배포 지뢰 제거)
+     * target-to-central: 배포 대상 토큰을 수집 서버에 반영(SSH 불필요 · 엣지가 대상 값을 받을 때)
+     * target-to-edge   : 배포 대상 토큰을 엣지 portal.env 에 밀어넣고 중앙도 맞춤(SSH · 서비스 재시작) */
+    const existing = loadCollectors().find((c) => String(c.url || '').replace(/\/+$/, '') === targetUrl(t));
+    if (existing && tokenDirection !== 'add-only') {
+      if (tokenDirection === 'central-to-target') {
+        if (!existing.token) { results.push({ ...base, ok: false, reason: `수집 서버 '${existing.id}' 에 토큰이 없습니다 — 그 화면에서 먼저 발급하세요.` }); return; }
+        const sv = saveTarget({ ...t, collectorToken: existing.token });
+        results.push({ ...base, ok: sv.ok, aligned: 'central-to-target', collectorId: existing.id,
+          reason: sv.ok ? '' : sv.reason, note: sv.ok ? '수집 서버 토큰을 배포 대상에 복사했습니다(엣지·수집 동작 불변).' : '' });
+        return;
+      }
+      if (tokenDirection === 'target-to-central') {
+        const tok = String(t.collectorToken || '').trim();
+        if (!tok) { results.push({ ...base, ok: false, reason: '배포 대상에 토큰이 없습니다.' }); return; }
+        const upd = updateCollector(existing.id, { ...existing, token: tok }, { managed: true });
+        if (upd.ok) pullNow().catch(() => {});
+        results.push({ ...base, ok: upd.ok, aligned: 'target-to-central', collectorId: existing.id,
+          reason: upd.ok ? '' : upd.reason, note: upd.ok ? '배포 대상 토큰을 수집 서버에 반영했습니다(엣지 미변경).' : '' });
+        return;
+      }
+      // target-to-edge 는 아래 공통 흐름(엣지 반영 + 등록)으로 내려간다.
+    }
+
     let token = String(t.collectorToken || '').trim();
     let tokenGenerated = false;
     if (!token) {
