@@ -11,6 +11,7 @@ import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { fetchJson, putJson, postJson, downloadFile } from '../../api.js';
 import { STable } from '../../components/STable.jsx';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
+import GuestDiskDetailModal from './GuestDiskDetailModal.jsx';
 
 // ── 단위 변환(값은 GB 기준) ──────────────────────────────────────────────
 const UNIT_DIV = { GB: 1, TB: 1024, PB: 1024 * 1024 };
@@ -29,12 +30,6 @@ function fmtSize(gb, unit) {
 }
 const pct = (x) => (x == null ? '—' : `${x}%`);
 
-const TREND = {
-  growing: { label: '증가', color: 'var(--gd-up, #f87171)' },
-  flat: { label: '평탄', color: 'var(--gd-flat, #93c5fd)' },
-  shrinking: { label: '감소', color: 'var(--gd-down, #4ade80)' },
-};
-const trendLabel = (t) => (t && TREND[t] ? TREND[t] : { label: '근거 부족', color: 'var(--muted, #9ca3af)' });
 const when = (ts) => (ts ? new Date(ts).toLocaleString() : '—');
 
 const UNIT_OPTS = [['auto', '자동'], ['GB', 'GB'], ['TB', 'TB'], ['PB', 'PB']];
@@ -71,8 +66,7 @@ export default function GuestDiskReport({ scope = '' }) {
   const [group, setGroup] = useState('none');
   const [pageSize, setPageSize] = useState('50');   // 한 화면 표시 개수('0'=전체)
   const [page, setPage] = useState(0);              // 0-based
-  const [detail, setDetail] = useState(null);
-  const [detailBusy, setDetailBusy] = useState(false);
+  const [detailVm, setDetailVm] = useState(null);   // { id, name } — 추이 상세 팝업 대상
   const [form, setForm] = useState(null);
 
   const reload = useCallback(async (mrStr = minReclaimStr, ratioStr = maxRatioStr) => {
@@ -101,12 +95,8 @@ export default function GuestDiskReport({ scope = '' }) {
     const s = String(next); setMinReclaimStr(s); reload(s, maxRatioStr);
   };
 
-  const openVm = async (vmId) => {
-    setDetailBusy(true); setDetail(null);
-    try { setDetail(await fetchJson(`/tools/guest-disk/vm/${encodeURIComponent(vmId)}`)); }
-    catch (e) { setDetail({ error: e.message }); }
-    finally { setDetailBusy(false); }
-  };
+  // 행 클릭 → 추이 상세 팝업(모달)을 연다. 데이터·기간 조회는 모달이 스스로 한다.
+  const openVm = (r) => setDetailVm({ id: r.vmId, name: r.vmName });
   const runNow = async () => {
     setBusy('run');
     try {
@@ -185,7 +175,7 @@ export default function GuestDiskReport({ scope = '' }) {
     </thead>
   );
   const rowEl = (r) => (
-    <tr key={r.vmId} className="gd-row" onClick={() => openVm(r.vmId)} title="클릭하면 파티션별 상세·추이">
+    <tr key={r.vmId} className="gd-row" onClick={() => openVm(r)} title="클릭하면 파티션별 상세·추이(팝업)">
       <td>{r.corpName || '—'}</td>
       <td>{r.vcenterName || r.vcenterId}</td>
       <td>{r.cluster || '—'}</td>
@@ -375,41 +365,7 @@ export default function GuestDiskReport({ scope = '' }) {
         </div>
       )}
 
-      {(detailBusy || detail) && (
-        <div className="gd-detail">
-          {detailBusy && <Loading />}
-          {detail?.error && <ErrorBox error={detail.error} />}
-          {detail && !detail.error && (
-            <>
-              <div className="gd-detail-head">
-                <b>{detail.vmName}</b>
-                <span className="muted">{detail.corpName ? `${detail.corpName} · ` : ''}{detail.vcenterName}{detail.cluster ? ` · ${detail.cluster}` : ''}</span>
-                <span className="muted">할당 {fmtSize(detail.allocGB, unit)} · 사용 {fmtSize(detail.usedGB, unit)} · 회수가능 <b className="gd-free">{fmtSize(detail.freeGB, unit)}</b></span>
-                {detail.vmTrend?.growthGBPerDay != null && (
-                  <span style={{ color: trendLabel(detail.vmTrend.trend).color }}>전체 추이 {trendLabel(detail.vmTrend.trend).label} ({detail.vmTrend.growthGBPerDay > 0 ? '+' : ''}{detail.vmTrend.growthGBPerDay} GB/일)</span>
-                )}
-              </div>
-              <STable className="gd-table">
-                <thead><tr><th>파티션</th><th className="gd-num">할당</th><th className="gd-num">사용</th><th className="gd-num">여유</th><th className="gd-num">증가율(GB/일)</th><th>추이</th><th data-nosort>판정</th></tr></thead>
-                <tbody>
-                  {(detail.partitions || []).map((p) => (
-                    <tr key={p.path}>
-                      <td>{p.path}</td>
-                      <td data-sort={p.capGB} className="gd-num">{fmtSize(p.capGB, unit)}</td>
-                      <td data-sort={p.usedGB} className="gd-num">{fmtSize(p.usedGB, unit)}</td>
-                      <td data-sort={p.freeGB} className="gd-num gd-free">{fmtSize(p.freeGB, unit)}</td>
-                      <td data-sort={p.trend?.growthGBPerDay == null ? -9999 : p.trend.growthGBPerDay} className="gd-num">{p.trend?.growthGBPerDay == null ? '—' : p.trend.growthGBPerDay}</td>
-                      <td><span style={{ color: trendLabel(p.trend?.trend).color }}>{trendLabel(p.trend?.trend).label}</span></td>
-                      <td data-nosort>{p.advice?.label || '—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </STable>
-              <p className="muted gd-note">추이는 관측 시작 이후만 표시합니다(그 이전 근거 부족). 표본이 2점 미만이면 증가율을 계산하지 않습니다.</p>
-            </>
-          )}
-        </div>
-      )}
+      {detailVm && <GuestDiskDetailModal vm={detailVm} initUnit={unit} onClose={() => setDetailVm(null)} />}
     </div>
   );
 }
