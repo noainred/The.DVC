@@ -6,6 +6,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { fetchJson, postJson, usePolling, toolAllowed, can } from '../api.js';
 import { SearchBox } from '../components/ui.jsx';
 import { TOOLS } from './specialToolsList.js';
+import { buildSections } from './toolSections.js'; // 카테고리 섹션 계산(v2.455, 순수)
 
 
 /**
@@ -66,6 +67,7 @@ const ServerAnalysis = React.lazy(() => import('./tools/HardwareTools.jsx').then
 const VcVersion = React.lazy(() => import('./tools/HardwareTools.jsx').then((m) => ({ default: m.VcVersion })));
 const PortalDb = React.lazy(() => import('./tools/PortalDb.jsx').then((m) => ({ default: m.PortalDb })));
 const DirUsageReport = React.lazy(() => import('./tools/DirUsageReport.jsx').then((m) => ({ default: m.DirUsageReport })));
+const MailDiag = React.lazy(() => import('./tools/MailDiag.jsx').then((m) => ({ default: m.MailDiag })));
 const RoomTemp = React.lazy(() => import('./tools/RoomTemp.jsx').then((m) => ({ default: m.RoomTemp })));
 const NicModels = React.lazy(() => import('./tools/NicTools.jsx').then((m) => ({ default: m.NicModels })));
 const NicSpeed = React.lazy(() => import('./tools/NicTools.jsx').then((m) => ({ default: m.NicSpeed })));
@@ -113,6 +115,9 @@ export default function SpecialTools() {
   const gridRef = useRef(null);               // 메뉴 그리드 너비 측정용
   const [favCount, setFavCount] = useState(4); // 한 줄에 들어가는 카드 수(화면폭 자동, 기본 4)
   const [recent, setRecent] = useState(loadRecent); // 최근 검색어(최신순, 1줄 표시)
+  // 카테고리 설정(v2.455) — 76개 카드를 섹션으로 나눈다. 미설정/실패면 기존 단일 그리드 그대로.
+  const [cats, setCats] = useState(null);
+  const [openCats, setOpenCats] = useState({});
   const addRecent = (q) => {
     const t = String(q || '').trim();
     if (!t) return;
@@ -137,6 +142,25 @@ export default function SpecialTools() {
     setTool(k); window.location.hash = k ? `#/tools/${k}` : '#/tools';
   };
   // 뒤로/앞으로 가기 및 외부에서 바로가기로 진입할 때 동기화.
+  // 카테고리 설정을 한 번만 읽는다(자주 바뀌지 않는다). 실패는 무시 — 섹션 없이 기존대로 그린다.
+  useEffect(() => {
+    let alive = true;
+    fetchJson('/admin/tool-categories')
+      .then((r) => {
+        if (!alive) return;
+        setCats(r?.settings || null);
+        // '첫 카테고리만 펼치기' 설정이면 나머지를 접은 상태로 시작한다.
+        if (r?.settings?.collapseOthers) {
+          const o = {};
+          (r.settings.categories || []).forEach((c, idx) => { o[c.id] = idx === 0; });
+          o._uncategorized = false;
+          setOpenCats(o);
+        }
+      })
+      .catch(() => { /* 카테고리는 편의 기능이다 — 못 읽어도 화면은 동작해야 한다 */ });
+    return () => { alive = false; };
+  }, []);
+
   useEffect(() => {
     const onHash = () => setTool(toolFromHash());
     window.addEventListener('hashchange', onHash);
@@ -199,6 +223,8 @@ export default function SpecialTools() {
     const lock = lockReasonOf(t);
     return lock ? { ...t, disabled: true, comingSoon: false, lockReason: lock } : t;
   });
+  // 카테고리 설정(v2.455) — 76개 카드를 섹션으로 나눈다. 실패해도 화면은 기존대로 그린다.
+  // ⚠ 훅은 조기 return 위 최상단에 있어야 한다(React #310) — 이 컴포넌트는 아래에서 return 하므로 안전.
   const ql = menuQ.trim().toLowerCase();
   const shown = ql
     ? base.filter((t) => t.label.toLowerCase().startsWith(ql) || t.label.toLowerCase().includes(ql) || (t.desc || '').toLowerCase().includes(ql))
@@ -213,6 +239,13 @@ export default function SpecialTools() {
   // 비활성(준비 중) 카드는 항상 맨 뒤로 보낸다.
   const shownSorted = shown.slice().sort((a, b) =>
     (a.disabled ? 1 : 0) - (b.disabled ? 1 : 0) || (countOf.get(b.k) || 0) - (countOf.get(a.k) || 0));
+
+  // 카테고리 섹션. 검색 중에는 섹션을 나누지 않는다 — 찾는 중에 여러 섹션에 흩어지면 오히려 느리다
+  // (중복 소속이라 같은 카드가 두 번 나오기도 한다).
+  const sections = ql ? [] : buildSections(cats, shownSorted.map((t) => t.k));
+  const byKey = new Map(shownSorted.map((t) => [t.k, t]));
+  const card = (t, sectionId) => renderToolCard(t, sectionId, { countOf, externalUrls, openTool });
+
   return (
     <>
       <div className="section-title" style={{ marginTop: 0 }}>🛠️ 특수 기능</div>
@@ -260,8 +293,34 @@ export default function SpecialTools() {
         </div>
       )}
       <div className="muted" style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>
-        📋 전체 메뉴 <span style={{ fontWeight: 400 }}>· 클릭(사용) 많은 순 정렬</span>
+        📋 전체 메뉴 <span style={{ fontWeight: 400 }}>· {sections.length ? '카테고리별' : '클릭(사용) 많은 순 정렬'}</span>
       </div>
+
+      {/* 카테고리 사용 시: 섹션별로 나눠 그린다. 같은 도구가 여러 섹션에 나오는 것은 정상이다(중복 소속). */}
+      {sections.length > 0 && sections.map((sec) => {
+        const open = openCats[sec.id] !== false;
+        return (
+          <div key={sec.id} style={{ marginBottom: 18 }}>
+            <button className="tab" onClick={() => setOpenCats((o) => ({ ...o, [sec.id]: !open }))}
+              style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
+                padding: '7px 12px', marginBottom: open ? 10 : 0, fontSize: 13, fontWeight: 600,
+                background: 'rgba(255,255,255,.04)' }}
+              title={open ? '접기' : '펼치기'}>
+              <span style={{ fontSize: 15 }}>{sec.icon}</span>
+              <span>{sec.label}</span>
+              <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>{sec.tools.length}개</span>
+              <span className="muted" style={{ marginLeft: 'auto', fontSize: 11 }}>{open ? '▾' : '▸'}</span>
+            </button>
+            {open && (
+              <div className="vc-grid">
+                {sec.tools.map((k) => byKey.get(k)).filter(Boolean).map((t) => card(t, sec.id))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {sections.length === 0 && (
       <div className="vc-grid" ref={gridRef}>
         {shown.length === 0 && <div className="muted" style={{ gridColumn: '1 / -1', padding: 24 }}>“{menuQ}”에 해당하는 메뉴가 없습니다.</div>}
         {shownSorted.map((t) => (
@@ -289,7 +348,39 @@ export default function SpecialTools() {
           </div>
         ))}
       </div>
+      )}
     </>
+  );
+}
+
+/**
+ * 카드 1장 — 섹션 렌더와 기존 단일 그리드가 같은 모양을 쓰도록 함수로 뽑았다.
+ * 중복 소속이면 같은 도구가 여러 섹션에 나오므로 key 에 섹션 id 를 섞는다(React key 충돌 방지).
+ */
+function renderToolCard(t, sectionId, { countOf, externalUrls, openTool }) {
+  return (
+    <div key={sectionId ? `${sectionId}:${t.k}` : t.k} className="card vc-card"
+      style={{
+        cursor: t.disabled ? 'not-allowed' : 'pointer',
+        opacity: t.disabled ? 0.5 : 1,
+        ...(t.danger && !t.disabled ? { borderColor: 'var(--red)' } : {}),
+      }}
+      onClick={t.disabled ? undefined : () => openTool(t.k)}
+      title={t.lockReason || (t.disabled ? (t.comingSoon ? '준비 중 (곧 제공)' : '비활성화됨')
+        : t.external ? `새 탭으로 열기: ${externalUrls[t.external]}` : `바로가기: #/tools/${t.k}`)}>
+      <div className="flex between" style={{ alignItems: 'flex-start' }}>
+        <div style={{ fontSize: 30, filter: t.disabled ? 'grayscale(1)' : 'none' }}>{t.icon}</div>
+        {t.lockReason
+          ? <span className="badge gray" style={{ fontSize: 11 }} title={t.lockReason}>🔒 권한 없음</span>
+          : countOf.get(t.k) > 0 && <span className="badge gray" style={{ fontSize: 11 }} title="전체 사용자 누적 실행 횟수">{countOf.get(t.k)}회</span>}
+      </div>
+      <div className="vc-name" style={{ marginTop: 8, ...(t.danger && !t.disabled ? { color: 'var(--red)' } : {}) }}>{t.label}</div>
+      <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>{t.desc}</div>
+      <div className="vc-foot">
+        <span className="muted">{t.lockReason ? (t.adminOnly ? '관리자 전용' : '접근 권한 없음') : t.disabled ? (t.comingSoon ? '준비 중' : '비활성화됨') : t.external ? '새 탭으로 열기' : '클릭하여 실행'}</span>
+        <span className="muted">{t.disabled ? '' : t.external ? '↗' : '→'}</span>
+      </div>
+    </div>
   );
 }
 
@@ -385,6 +476,7 @@ function ToolPanel({ tool, onBack, isAdmin }) {
       {tool === 'roomtemp' && <RoomTemp />}
       {tool === 'portaldb' && <PortalDb />}
       {tool === 'dir-usage' && (isAdmin ? <DirUsageReport /> : <div className="card"><span className="muted">관리자 전용 기능입니다.</span></div>)}
+      {tool === 'mail-diag' && (isAdmin ? <MailDiag /> : <div className="card"><span className="muted">관리자 전용 기능입니다.</span></div>)}
       {tool === 'shutdown' && <Shutdown />}
       {tool === 'vmprovision' && (isAdmin ? <VmProvision /> : <div className="card"><span className="muted">관리자 전용 기능입니다.</span></div>)}
       {tool === 'agent-scans' && (isAdmin ? <AgentScans /> : <div className="card"><span className="muted">관리자 전용 기능입니다.</span></div>)}
