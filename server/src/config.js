@@ -250,6 +250,16 @@ export const config = {
     // EDGE_MODE=all 이면 기본 on(AGENT_PUSH_INVENTORY=false로 명시적 off 가능).
     pushInventory: EDGE_ALL ? process.env.AGENT_PUSH_INVENTORY !== 'false' : process.env.AGENT_PUSH_INVENTORY === 'true',
     inventoryIntervalMs: Number(process.env.AGENT_INVENTORY_INTERVAL_MS) || 60_000,
+    // 게스트 디스크 회수 리포트(v2.466): 중앙은 site 모드 vCenter 에 직접 접속하지 않으므로
+    // guest.disk(게스트 파티션 할당/사용)를 라이브 조회할 수 없다. 엣지가 로컬 vCenter 의
+    // guest.disk 를 수집해 중앙으로 push 해야 리포트가 site vCenter 도 덮는다.
+    // 인벤토리 push 가 켜진 사이트에서 기본 on(AGENT_PUSH_GUESTDISK=false 로 off).
+    // 게스트 파티션은 천천히 변하므로 주기는 길게(기본 12h) — 인벤토리 주기(60초)와 별도.
+    // 명시 지정(env 존재)이 최우선, 미지정이면 EDGE_ALL + 인벤토리 push 켜짐일 때만 기본 on.
+    pushGuestDisk: process.env.AGENT_PUSH_GUESTDISK != null
+      ? process.env.AGENT_PUSH_GUESTDISK !== 'false'
+      : (EDGE_ALL && process.env.AGENT_PUSH_INVENTORY !== 'false'),
+    guestDiskIntervalMs: Number(process.env.AGENT_GUESTDISK_INTERVAL_MS) || 43_200_000, // 12h
   },
   auth: {
     enabled: process.env.AUTH_ENABLED !== 'false',

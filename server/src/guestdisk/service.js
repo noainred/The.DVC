@@ -10,7 +10,7 @@ import { loadVcenterConfig } from '../config.js';
 import { collectDetails } from '../vcenter/vmExport.js';
 import { parseGuestDisks } from '../vcenter/soapParse.js';
 import { vmSummary, rankReclaim, usageTrend, reclaimAdvice } from './analyze.js';
-import { commitCollection, listLatest, vmSeries, partSeries, latestOne } from './db.js';
+import { commitCollection, listLatest, vmSeries, partSeries, latestOne, coverageByVcenter } from './db.js';
 import { datacenterOfVcenter, listDatacenters } from '../datacenter/store.js';
 
 /** vCenterId → { corpId, corpName, region } 매핑(법인=DataCenter 할당 + 스냅샷 region). */
@@ -106,7 +106,42 @@ export async function reclaimReport({ allowed = null, minReclaimGB = 5, maxRatio
     }
   } catch { /* 스냅샷 없음 */ }
   const clusters = [...cl].sort((a, b) => String(a).localeCompare(String(b)));
-  return { rows: enriched, totalReclaimGB, vmCount: enriched.length, clusters, minReclaimGB, maxRatioPct: Number.isFinite(mr) ? mr : null, scoped: Boolean(allowed) };
+  // 커버리지 — 범위 내(또는 선택한) vCenter 각각의 데이터 유무·신선도·수집원(정직 표시용).
+  // vm_latest 에 데이터가 있는 vCenter 만이 아니라 '보여야 할 모든 vCenter'를 기준으로 만든다:
+  // 데이터가 0 인 vCenter 도 '왜 없나(엣지 push 대기 / Tools 미보고 / direct 미수집)'를 화면이 알린다.
+  const coverage = await buildCoverage(ids, idSet, vcenterId);
+  return { rows: enriched, totalReclaimGB, vmCount: enriched.length, clusters, coverage, minReclaimGB, maxRatioPct: Number.isFinite(mr) ? mr : null, scoped: Boolean(allowed) };
+}
+
+/**
+ * vCenter 별 커버리지 행 — 화면이 데이터 유무·수집원(direct/site)·신선도를 보이게 한다.
+ * ids: 조회 대상 vCenterId 배열(null=무제한). idSet: Set(ids) 또는 null. vcenterId: 단일 선택(있으면 그것만).
+ */
+async function buildCoverage(ids, idSet, vcenterId) {
+  let cov = new Map();
+  try { cov = await coverageByVcenter(ids); } catch { cov = new Map(); }
+  const snap = store.get();
+  const meta = buildVcMeta();
+  // 보여야 할 vCenter 목록: 스냅샷의 vCenter 중 scope/선택 안에 드는 것.
+  const list = (snap.vcenters || []).filter((v) => {
+    if (vcenterId && v.id !== vcenterId) return false;
+    if (idSet && !idSet.has(v.id)) return false;
+    return true;
+  });
+  const out = list.map((v) => {
+    const c = cov.get(v.id) || { vmCount: 0, lastTs: null };
+    const m = meta(v.id);
+    return {
+      vcenterId: v.id,
+      vcenterName: v.name || v.id,
+      corpName: m.corpName,
+      collectSource: v.collectSource === 'site' ? 'site' : 'direct', // site=엣지 수집(push), direct=중앙 직접
+      vmCount: c.vmCount,
+      lastTs: c.lastTs,
+    };
+  });
+  out.sort((a, b) => String(a.vcenterName).localeCompare(String(b.vcenterName)));
+  return out;
 }
 
 /** 한 VM 의 파티션별 최신값 + 추이 판정(드릴다운). */

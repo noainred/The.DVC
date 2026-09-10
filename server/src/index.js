@@ -53,6 +53,7 @@ import { startCollectorPuller } from './collector/puller.js';
 import { startAgentScanner } from './agent/scanner.js';
 import { startIdracScanWorker } from './agent/idracScanWorker.js';
 import { startInventoryPush } from './agent/inventoryPush.js';
+import { startGuestDiskPush } from './agent/guestDiskPush.js';
 import { startFleetPush } from './agent/fleetPush.js';
 import { startGpuGuestPush } from './agent/gpuGuestPush.js';
 import { startGpuGuestConfigPull } from './agent/gpuGuestConfigPull.js';
@@ -134,6 +135,7 @@ app.use(rateLimit({ skip: (req) => {
 // 이벤트 루프를 막는 것을 허용하는 과대 한도였다(필요 시 JSON_BODY_LIMIT로 상향 가능).
 const BIG_JSON = express.json({ limit: process.env.JSON_BODY_LIMIT || '16mb' });
 app.use('/api/central/inventory', BIG_JSON);
+app.use('/api/central/guest-disk', BIG_JSON); // 게스트 디스크 push(v2.466) — inventory 와 동종(그 vCenter 전 VM+파티션). 1mb 기본이면 대형 site vCenter 가 413 으로 조용히 실패
 app.use('/api/central/agent-config', BIG_JSON); // 엣지 설정 통합 push(다수 파일)
 // 대상 가져오기는 XLSX 를 base64 로 실을 수 있어(2,000행 규모 ~1MB 초과 가능) 큰 한도를 준다.
 app.use('/api/svcmon/targets/import', BIG_JSON);
@@ -255,6 +257,7 @@ const stagger = [
   startVmtrackPoller, // VM 수량 추이(v2.345) — 60초 틱, 슬롯(00/12시) 미기록 시에만 수집 + 재진입 가드
   startDirUsageScheduler, // 폴더 사용량 Top-N 리포트(v2.454) — 60초 틱 + 재진입 가드, 설정 꺼짐이면 결과 수거만
   startGuestDiskPoller, // 게스트 디스크 회수 리포트(v2.459) — 60초 틱, opt-in(기본 꺼짐)·주기 경과 시에만 수집 + 재진입 가드
+  startGuestDiskPush,   // 〃 엣지→중앙 push(v2.466) — site 모드 vCenter 의 guest.disk 를 엣지가 수집해 중앙에 올림. CENTRAL_URL·pushGuestDisk 미충족이면 자기기동 안 함
 ];
 stagger.forEach((start, i) => setTimeout(() => { try { start(); } catch (e) { console.error('[start] 폴러 기동 실패:', e?.message); } }, i * 1500).unref?.());
 

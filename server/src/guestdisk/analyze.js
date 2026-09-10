@@ -92,5 +92,44 @@ export function reclaimAdvice(freeGB, trend, { minReclaimGB = 5 } = {}) {
   return { safe: false, label: '근거 부족(추이 표본 부족)' };
 }
 
+/**
+ * 엣지 push 로 받은 게스트 디스크 VM 배열을 정규화·검증한다(중앙 수신 경로 — 엣지를 맹신하지 않음).
+ * 상한: VM 200,000 · VM 당 파티션 128. 숫자는 유한·음수 아님으로 강제하고 문자열은 잘라낸다.
+ * commitCollection 이 기대하는 형태로 되돌린다: [{vmId,vmName,allocGB,usedGB,partCount,parts:[{path,capGB,usedGB}]}].
+ * 순수 함수라 라우트·테스트가 공유한다(부수효과 없음).
+ */
+export function sanitizeGuestDiskVms(raw, { maxVms = 200_000, maxParts = 128 } = {}) {
+  const src = Array.isArray(raw) ? raw : [];
+  const out = [];
+  const str = (v, n = 512) => (v == null ? '' : String(v).slice(0, n));
+  const nn = (v) => { const x = Number(v); return Number.isFinite(x) && x > 0 ? round1(x) : 0; };
+  for (const vm of src) {
+    if (out.length >= maxVms) break;
+    if (!vm || typeof vm !== 'object') continue;
+    const vmId = str(vm.vmId);
+    if (!vmId) continue; // 식별 불가 행은 버린다(DB PK)
+    const partsSrc = Array.isArray(vm.parts) ? vm.parts.slice(0, maxParts) : [];
+    const parts = [];
+    for (const p of partsSrc) {
+      if (!p || typeof p !== 'object') continue;
+      const ppath = str(p.path, 1024); const cap = nn(p.capGB);
+      if (!ppath && !cap) continue; // 경로·용량 모두 없는 잡음 파티션은 버린다(parseGuestDisks 와 동일)
+      parts.push({ path: ppath, capGB: cap, usedGB: nn(p.usedGB) });
+    }
+    out.push({
+      vmId,
+      vmName: str(vm.vmName) || vmId,
+      allocGB: nn(vm.allocGB),
+      usedGB: nn(vm.usedGB),
+      // 저장·관측된 파티션 수(parts.length)를 그대로 쓴다 — 엣지 신고 partCount 를 신뢰하면
+      // 상한(maxParts)으로 잘린 상세와 어긋나 '128개 저장했는데 4096 파티션'처럼 표시된다.
+      // 정상 엣지는 partCount==parts.length 라 무손실이고, 잡음/초과분만 조여진다.
+      partCount: parts.length,
+      parts,
+    });
+  }
+  return out;
+}
+
 function round1(n) { return Math.round((Number(n) || 0) * 10) / 10; }
 function round2(n) { return Math.round((Number(n) || 0) * 100) / 100; }

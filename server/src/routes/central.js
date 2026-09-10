@@ -46,6 +46,9 @@ import { takeJobsWait as takeRmaJobsWait, setJobResult as setRmaJobResult, jobAg
 import { accessFor as rmaAccessFor, ipAllowed as rmaIpAllowed, remoteFor as rmaRemoteFor } from '../rma/settings.js';
 import { scheduleFor as rmaScheduleFor, assignForInstance as rmaAssign } from '../rma/schedules.js';
 import { ingestResult as rmaIngestResult } from '../rma/testResults.js';
+import { commitCollection as commitGuestDisk } from '../guestdisk/db.js';
+import { load as loadGuestDiskSettings } from '../guestdisk/settings.js';
+import { sanitizeGuestDiskVms } from '../guestdisk/analyze.js';
 import { brokerFetch as credentialBrokerFetch } from '../security/credentialStore.js';
 import { logAudit } from '../audit.js';
 import { takeBmstorJobs, ackBmstorJob, bmstorAgentOfReq } from '../bmstor/jobs.js';
@@ -425,6 +428,42 @@ centralRouter.post('/inventory', (req, res) => {
   };
   setInventory(String(b.vcenterId), slice, agent, b.generatedAt || null);
   res.json({ ok: true, vcenterId: b.vcenterId, hosts: slice.hosts.length, vms: slice.vms.length });
+});
+
+// 사이트 위임 게스트 디스크 수신(v2.466) — 엣지가 로컬 vCenter 의 guest.disk 를 수집해 push.
+// 중앙은 site 모드 vCenter 에 직접 SOAP 를 못 걸어 게스트 디스크 회수 리포트가 site vCenter 를
+// 못 덮던 문제의 수신 절반. /inventory 와 같은 신뢰 경계(개별 토큰 → agent 강제 + TOFU 소유권 +
+// mock 차단)를 적용하고, 받은 VM 배열을 sanitize 후 guest-disk.db 에 커밋한다.
+// Body: { agent, source, vcenterId, vcenterName, vms:[{vmId,vmName,allocGB,usedGB,partCount,parts[]}], generatedAt }
+centralRouter.post('/guest-disk', async (req, res) => {
+  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+  const b = req.body || {};
+  if (!b.vcenterId) return res.status(400).json({ ok: false, reason: 'vcenterId가 필요합니다.' });
+  // 출처 agent 는 개별 토큰이면 토큰에서 해석한 값을 강제(body.agent 위조 무효화).
+  const agent = req.centralAuth.agent || String(b.agent || '').trim();
+  // 소유권 경계(TOFU): 이 vcenterId 인벤토리를 이미 다른 엣지가 등록했다면 개별 토큰은 덮어쓸 수 없다.
+  // (인벤토리와 동일 모델 — 미등록/direct-mode 는 TOFU 통과. gpu-guest-data 정책과 같음.)
+  if (req.centralAuth.mode === 'agent' && !agentOwnsVcenter(agent, String(b.vcenterId))) {
+    const owner = getInventory(String(b.vcenterId))?.agent || '';
+    return res.status(403).json({ ok: false, reason: `vcenterId '${b.vcenterId}'는 '${owner}' 소유입니다(다른 엣지가 덮어쓸 수 없습니다).` });
+  }
+  // mock(가짜) 데이터는 저장하지 않는다(/inventory 와 동일 — 실데이터 오염 차단).
+  if (b.source === 'mock' || b.mock === true || isMockVcenter({ id: String(b.vcenterId || ''), name: b.vcenterName })) {
+    return res.status(400).json({ ok: false, reason: `엣지 '${agent}' 가 mock(가짜) 게스트 디스크를 보냈습니다 — 저장하지 않습니다.`, mockBlocked: true });
+  }
+  const vms = sanitizeGuestDiskVms(b.vms);
+  const vcName = String(b.vcenterName || '').slice(0, 256) || String(b.vcenterId);
+  // 시계열 ts 는 중앙 수신시각(단일 권위 시계)을 쓴다 — 엣지 wall-clock(generatedAt)을 그대로
+  // 쓰면 NTP 미동기 엣지의 시계 오차가 prune(중앙 Date.now 기준)·신선도와 어긋난다(미래 skew =
+  // 영구 미prune 누적, 과거 skew = 방금 받은 추이가 즉시 prune). /inventory 도 generatedAt 을
+  // 신선도 메타로만 쓰고 시계열 ts 로는 쓰지 않는다. generatedAt 은 참고용으로만 로그.
+  const ts = Date.now();
+  const commit = await commitGuestDisk(String(b.vcenterId), vcName, vms, { ts, changeThresholdGB: loadGuestDiskSettings().changeThresholdGB });
+  if (!commit || !commit.ok) return res.status(500).json({ ok: false, reason: commit?.reason || 'guest-disk 커밋 실패(DB 사용 불가)' });
+  noteVcenterOwner(String(b.vcenterId), agent, { peer: req.socket?.remoteAddress || '', hostname: req.get('X-Agent-Hostname') || '' });
+  console.log(`[central] guest-disk 수신: agent=${agent} vc=${b.vcenterId} vms=${vms.length} (series vm=${commit.vmSeriesRows} part=${commit.partSeriesRows})`);
+  res.json({ ok: true, vcenterId: b.vcenterId, vms: vms.length, vmSeriesRows: commit.vmSeriesRows, partSeriesRows: commit.partSeriesRows });
 });
 
 // 엣지 베어메탈 집계: 현장 포탈이 자기 DC의 베어메탈 목록(전력 미보고 포함)을 push.
