@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { serviceDownKind, diagnosticLines, diagnosticText, SERVICE_DOWN_TEXT } from './serviceDownText.js';
+import { serviceDownKind, diagnosticLines, diagnosticText, SERVICE_DOWN_TEXT, headlineFor } from './serviceDownText.js';
 
 /**
  * v2.459 회귀 고정.
@@ -83,5 +83,21 @@ describe('문구·진단 항목', () => {
   it('HTTP 정보가 없으면 그 줄은 생략한다(빈 값을 보여주지 않는다)', () => {
     const keys = diagnosticLines('network', 'Failed to fetch', null).map(([k]) => k);
     expect(keys).toEqual(['구분', '발생 시각', '원문 메시지']);
+  });
+});
+
+
+describe('headlineFor — 연결 끊김은 "업데이트 재시작" + 자동 재연결', () => {
+  it('network/timeout 은 업데이트 재시작 헤드라인 + autoReconnect true', () => {
+    for (const k of ['network', 'timeout']) {
+      const h = headlineFor(k);
+      expect(h.title).toContain('재시작');
+      expect(h.autoReconnect).toBe(true);
+    }
+  });
+  it('5xx(gateway/internal)은 자동 새로고침하지 않는다(서버는 살아서 오류를 돌려줌)', () => {
+    for (const k of ['gateway', 'internal']) {
+      expect(headlineFor(k).autoReconnect).toBe(false);
+    }
   });
 });

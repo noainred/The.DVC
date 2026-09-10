@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<!-- JS 가 막힌 환경 폴백 — 15초마다 루트를 다시 시도. 백엔드가 살아나면 포탈이 뜨고,
+     아직 재시작 중이면 프록시가 이 페이지를 다시 내려준다. -->
+<meta http-equiv="refresh" content="15" />
+<title>업데이트 중 · The Davinci Virtual Platform</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+    background:#0a0e17; color:#e6edf6;
+    font-family:"Pretendard",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Malgun Gothic",sans-serif; }
+  .card { width:min(520px,92vw); padding:36px 32px; text-align:center;
+    background:linear-gradient(160deg,#1a2236,#141b2d); border:1px solid #243049; border-radius:20px;
+    box-shadow:0 20px 60px rgba(0,0,0,.4); }
+  .spin { width:48px; height:48px; margin:0 auto 20px; border-radius:50%;
+    border:4px solid rgba(59,130,246,.25); border-top-color:#3b82f6; animation:spin 0.9s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spin { animation:none; } }
+  h1 { margin:0 0 10px; font-size:22px; letter-spacing:-.01em; }
+  p { margin:6px 0; color:#8b9bb4; font-size:14px; line-height:1.7; }
+  .status { margin-top:18px; font-size:13px; color:#93c5fd; }
+  .dot { display:inline-block; width:7px; height:7px; border-radius:50%; background:#3b82f6;
+    margin-right:6px; animation:pulse 1.2s ease-in-out infinite; vertical-align:middle; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.25} }
+  .foot { margin-top:16px; font-size:12px; color:#5d6b85; }
+  a { color:#3b82f6; text-decoration:none; }
+</style>
+</head>
+<body>
+  <div class="card" role="status" aria-live="polite">
+    <div class="spin" aria-hidden="true"></div>
+    <h1>업데이트 후 재시작 중입니다</h1>
+    <p>새 버전을 적용하고 서비스를 다시 시작하는 중입니다.<br />데이터는 안전하며, 준비되면 <b>자동으로 이 화면이 포탈로 돌아갑니다</b>.</p>
+    <p class="status"><span class="dot" aria-hidden="true"></span><span id="msg">서비스 준비 상태를 확인하는 중…</span> <span id="elapsed"></span></p>
+    <p class="foot">잠시만 기다려 주세요. 1~2분 넘게 계속되면 관리자에게 문의해 주세요.<br />
+      <a href="/" id="retry">지금 새로고침</a></p>
+  </div>
+<script>
+  // 백엔드가 살아났는지 폴링하다, 응답이 오면 포탈로 이동한다. 이 페이지는 프록시가 다운 중에만
+  // 내려주므로, /api/health 가 200 이면 백엔드가 복귀한 것(프록시가 정상 통과).
+  var t0 = Date.now();
+  var el = document.getElementById('elapsed');
+  var msg = document.getElementById('msg');
+  setInterval(function () {
+    var s = Math.floor((Date.now() - t0) / 1000);
+    el.textContent = '(' + s + '초 경과)';
+  }, 1000);
+  function probe() {
+    fetch('/api/health', { cache: 'no-store' })
+      .then(function (r) { if (r.ok) { msg.textContent = '서비스가 준비됐습니다 — 이동합니다…'; location.href = '/'; } })
+      .catch(function () { /* 아직 재시작 중 */ });
+  }
+  setInterval(probe, 3000);
+  probe();
+</script>
+</body>
+</html>

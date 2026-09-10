@@ -76,8 +76,10 @@ export async function collectAndStore(vcenterId, { changeThresholdGB = 1 } = {})
  * 회수 리포트 — vm_latest 를 scope 로 좁혀 회수 순위를 만든다.
  * allowed: Set<vcenterId> | null(무제한). opts: { minReclaimGB }
  */
-export async function reclaimReport({ allowed = null, minReclaimGB = 5, maxRatioPct = null } = {}) {
-  const ids = allowed ? [...allowed] : null;
+export async function reclaimReport({ allowed = null, minReclaimGB = 5, maxRatioPct = null, vcenterId = null } = {}) {
+  let ids = allowed ? [...allowed] : null;
+  // 특정 vCenter 선택 — scope 우선: 허용 목록 안일 때만 좁힌다(범위 밖이면 빈 결과).
+  if (vcenterId) ids = (allowed && !allowed.has(vcenterId)) ? [] : [vcenterId];
   const rows = await listLatest(ids);
   const ranked = rankReclaim(rows, { minReclaimGB });
   // 각 행에 그룹핑 축(법인=DataCenter · vCenter · 클러스터)을 붙인다 — 프론트가 선택 구분.

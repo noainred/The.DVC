@@ -874,3 +874,10 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 .gd-pager-btns { display:inline-flex; align-items:center; gap:5px; margin-left:auto; }
 .gd-pager-pos { font-size:12px; color:var(--text-dim); font-variant-numeric:tabular-nums; padding:0 4px; }
 .gd-step:disabled { opacity:.4; cursor:default; background:var(--panel-2); color:var(--text-faint); border-color:var(--border); }
+
+/* 서비스 재시작 자동 재연결 표시(v2.462) */
+.sd-reconnect { display:flex; align-items:center; gap:9px; margin:10px 0 4px; padding:9px 12px; border-radius:10px; background:color-mix(in srgb,var(--accent) 10%,transparent); border:1px solid color-mix(in srgb,var(--accent) 30%,var(--border)); color:var(--text); font-size:13px; }
+.sd-spin { width:14px; height:14px; border-radius:50%; border:2px solid color-mix(in srgb,var(--accent) 35%,transparent); border-top-color:var(--accent); animation:sd-spin 0.8s linear infinite; flex:none; }
+@keyframes sd-spin { to { transform:rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .sd-spin { animation:none; } }
+.gd-search input { width:200px; text-align:left; }

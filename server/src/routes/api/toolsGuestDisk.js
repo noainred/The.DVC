@@ -19,7 +19,8 @@ export function registerToolsGuestDisk(api) {
     const allowed = scopedVcenterIds(req.user, store.get());
     const minReclaimGB = req.query.minReclaimGB != null ? Number(req.query.minReclaimGB) : loadSettings().minReclaimGB;
     const maxRatioPct = req.query.maxRatioPct != null && req.query.maxRatioPct !== '' ? Number(req.query.maxRatioPct) : null;
-    const report = await reclaimReport({ allowed, minReclaimGB: Number.isFinite(minReclaimGB) ? minReclaimGB : 5, maxRatioPct });
+    const vcenterId = req.query.vcenterId ? String(req.query.vcenterId) : null;
+    const report = await reclaimReport({ allowed, minReclaimGB: Number.isFinite(minReclaimGB) ? minReclaimGB : 5, maxRatioPct, vcenterId });
     res.json({ ...report, db: guestDiskDbStatus(), poller: guestDiskPollerStatus(), settings: loadSettings() });
   });
 
@@ -37,7 +38,8 @@ export function registerToolsGuestDisk(api) {
     const allowed = scopedVcenterIds(req.user, store.get());
     const minReclaimGB = req.query.minReclaimGB != null ? Number(req.query.minReclaimGB) : loadSettings().minReclaimGB;
     const maxRatioPct = req.query.maxRatioPct != null && req.query.maxRatioPct !== '' ? Number(req.query.maxRatioPct) : null;
-    const report = await reclaimReport({ allowed, minReclaimGB: Number.isFinite(minReclaimGB) ? minReclaimGB : 5, maxRatioPct });
+    const vcenterId = req.query.vcenterId ? String(req.query.vcenterId) : null;
+    const report = await reclaimReport({ allowed, minReclaimGB: Number.isFinite(minReclaimGB) ? minReclaimGB : 5, maxRatioPct, vcenterId });
     const csv = reclaimCsv(report.rows);
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="guest-disk-reclaim-${new Date().toISOString().slice(0, 10)}.csv"`);

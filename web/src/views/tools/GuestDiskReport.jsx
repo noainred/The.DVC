@@ -7,7 +7,7 @@
  *
  * 판정·저장은 서버(guestdisk/*)가 하고 여기서는 표시만 한다.
  */
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { fetchJson, putJson, postJson, downloadFile } from '../../api.js';
 import { STable } from '../../components/STable.jsx';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
@@ -57,13 +57,15 @@ function Segmented({ opts, value, onChange, label }) {
   );
 }
 
-export default function GuestDiskReport() {
+export default function GuestDiskReport({ scope = '' }) {
+  const scopeRef = useRef(scope); scopeRef.current = scope;   // 상단 vCenter 선택('' = 전체)
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [busy, setBusy] = useState('');
-  const [minReclaimStr, setMinReclaimStr] = useState('5');  // 문자열 상태 — 0 이 안 지워지던 버그 수정
+  const [minReclaimStr, setMinReclaimStr] = useState('0');  // 기본 0=전체 표시(문자열 상태 — 0 이 안 지워지던 버그 수정)
   const [maxRatioStr, setMaxRatioStr] = useState('');       // 사용률(%) 이하 필터(빈 값 = 미적용)
+  const [qStr, setQStr] = useState('');                     // VM/vCenter/클러스터 이름 검색(클라이언트)
   const [unit, setUnit] = useState('auto');
   const [group, setGroup] = useState('none');
   const [pageSize, setPageSize] = useState('50');   // 한 화면 표시 개수('0'=전체)
@@ -77,6 +79,7 @@ export default function GuestDiskReport() {
     const mr = Number(mrStr);
     const params = { minReclaimGB: Number.isFinite(mr) ? mr : 0 };
     if (ratioStr !== '' && Number.isFinite(Number(ratioStr))) params.maxRatioPct = Number(ratioStr);
+    if (scopeRef.current) params.vcenterId = scopeRef.current;
     try {
       const r = await fetchJson('/tools/guest-disk', params);
       setData(r);
@@ -84,11 +87,12 @@ export default function GuestDiskReport() {
     } catch (e) { setError(e.message); }
   }, [minReclaimStr, maxRatioStr]);
 
+  useEffect(() => { fetchJson('/auth/me').then((m) => setIsAdmin(m?.user?.role === 'admin')).catch(() => {}); }, []);
+  // 최초 로드 + 상단 vCenter 선택이 바뀔 때 재조회(현재 필터값 유지).
   useEffect(() => {
-    reload('5', '');
-    fetchJson('/auth/me').then((m) => setIsAdmin(m?.user?.role === 'admin')).catch(() => {});
+    reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [scope]);
 
   // 최소 회수(GB) 증감 버튼(+100/-100/+500/-500) — 0 미만으로는 내리지 않는다.
   const bumpMin = (delta) => {
@@ -118,10 +122,16 @@ export default function GuestDiskReport() {
   const exportCsv = () => {
     const q = new URLSearchParams({ minReclaimGB: String(Number(minReclaimStr) || 0) });
     if (maxRatioStr !== '' && Number.isFinite(Number(maxRatioStr))) q.set('maxRatioPct', String(Number(maxRatioStr)));
+    if (scope) q.set('vcenterId', scope);
     downloadFile(`/api/tools/guest-disk/export.csv?${q.toString()}`).catch((e) => alert(e.message));
   };
 
-  const rows = useMemo(() => data?.rows || [], [data]);
+  const rows = useMemo(() => {
+    const all = data?.rows || [];
+    const q = qStr.trim().toLowerCase();
+    if (!q) return all;
+    return all.filter((r) => `${r.vmName || ''} ${r.vcenterName || ''} ${r.cluster || ''} ${r.corpName || ''}`.toLowerCase().includes(q));
+  }, [data, qStr]);
   // 구분(그룹핑) — 선택 축으로 묶고 회수합계 내림차순 정렬.
   const groups = useMemo(() => {
     if (group === 'none') return null;
@@ -143,7 +153,7 @@ export default function GuestDiskReport() {
   const pageClamped = Math.min(page, totalPages - 1);
   const pageItems = perPage > 0 ? items.slice(pageClamped * perPage, pageClamped * perPage + perPage) : items;
   // 구분·페이지 크기·데이터가 바뀌면 첫 페이지로(훅은 조기 return 위에 둔다 — React #310).
-  useEffect(() => { setPage(0); }, [group, pageSize, data]);
+  useEffect(() => { setPage(0); }, [group, pageSize, data, qStr]);
 
   if (error && !data) return <ErrorBox error={error} />;
   if (!data) return <Loading />;
@@ -213,6 +223,11 @@ export default function GuestDiskReport() {
         <Segmented label="개수" opts={PAGE_OPTS} value={pageSize} onChange={setPageSize} />
       </div>
       <div className="gd-toolbar">
+        <label className="gd-min gd-search">
+          <span>검색</span>
+          <input type="text" value={qStr} onChange={(e) => setQStr(e.target.value)} placeholder="VM·vCenter·클러스터 이름" />
+          {qStr && <button type="button" className="gd-step" onClick={() => setQStr('')} title="검색 지우기">✕</button>}
+        </label>
         <div className="gd-min">
           <span>최소 회수(GB)</span>
           <button type="button" className="gd-step" onClick={() => bumpMin(-500)}>-500</button>
@@ -231,9 +246,9 @@ export default function GuestDiskReport() {
           {maxRatioStr !== '' && <button type="button" className="gd-step" onClick={() => { setMaxRatioStr(''); reload(minReclaimStr, ''); }} title="필터 해제">✕</button>}
         </label>
         <button type="button" className="gd-btn" onClick={() => reload(minReclaimStr, maxRatioStr)}>적용</button>
+        {isAdmin && <button type="button" className="gd-btn" disabled={busy === 'run'} onClick={runNow}>{busy === 'run' ? '수집 중…' : '지금 수집'}</button>}
         <div className="gd-spacer" />
         <button type="button" className="gd-btn primary" onClick={exportCsv} disabled={!rows.length}>⬇ CSV ({data.vmCount})</button>
-        {isAdmin && <button type="button" className="gd-btn" disabled={busy === 'run'} onClick={runNow}>{busy === 'run' ? '수집 중…' : '지금 수집'}</button>}
       </div>
 
       {isAdmin && form && (

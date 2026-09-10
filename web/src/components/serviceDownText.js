@@ -46,6 +46,26 @@ export const SERVICE_DOWN_TEXT = {
   esc: '계속되면 관리자에게 문의해 주세요.',
 };
 
+/**
+ * 원인별 헤드라인(순수). **연결 자체가 안 되는 경우(network/timeout)** 는 서버가 응답을 아예 못 하는
+ * 상태 — 대부분 업그레이드 적용 후 재시작으로 잠깐 내려간 것이라, '업데이트 재시작 중' 으로 안내하고
+ * 화면이 스스로 재연결하게 한다(autoReconnect). 반면 5xx(gateway/internal)는 서버가 살아서 오류를
+ * 돌려준 것이라 자동 새로고침하면 오류만 반복되므로 수동 재시도로 둔다.
+ * @returns {{title, sub, act, esc, autoReconnect:boolean}}
+ */
+export function headlineFor(kind) {
+  if (kind === 'network' || kind === 'timeout') {
+    return {
+      title: '업데이트 후 재시작 중입니다',
+      sub: '새 버전을 적용하고 서비스를 다시 시작하는 중입니다. 데이터는 안전하며, 준비되면 이 화면이 자동으로 다시 연결합니다.',
+      act: '자동으로 다시 연결을 시도하고 있습니다 — 잠시만 기다려 주세요.',
+      esc: '1~2분 넘게 계속되면 관리자에게 문의해 주세요.',
+      autoReconnect: true,
+    };
+  }
+  return { ...SERVICE_DOWN_TEXT, autoReconnect: false };
+}
+
 const KIND_LABEL = {
   gateway: '게이트웨이 오류(서비스 재시작·중계 구간)',
   internal: '서버 내부 오류',
