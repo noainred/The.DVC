@@ -26,7 +26,8 @@ export function registerToolsGuestDisk(api) {
 
   // 한 VM 의 파티션별 최신값 + 추이 — scope 단건 검사(범위 밖은 404 존재 은닉).
   api.get('/tools/guest-disk/vm/:id', async (req, res) => {
-    const detail = await vmDetail(req.params.id);
+    const days = req.query.days != null ? Number(req.query.days) : 0;
+    const detail = await vmDetail(req.params.id, { days: Number.isFinite(days) && days > 0 ? days : 0 });
     if (!detail) return res.status(404).json({ error: 'not found' });
     const allowed = scopedVcenterIds(req.user, store.get());
     if (allowed && !allowed.has(detail.vcenterId)) return res.status(404).json({ error: 'not found' });

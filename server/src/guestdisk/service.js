@@ -156,11 +156,13 @@ async function buildCoverage(ids, idSet, vcenterId) {
   return out;
 }
 
-/** 한 VM 의 파티션별 최신값 + 추이 판정(드릴다운). */
-export async function vmDetail(vmId, { flatPerDayGB = 0.1 } = {}) {
+/** 한 VM 의 파티션별 최신값 + 추이 판정(드릴다운). days>0 이면 그 구간만 조회(최근 N일). */
+export async function vmDetail(vmId, { flatPerDayGB = 0.1, days = 0 } = {}) {
   const latest = await latestOne(vmId);
   if (!latest) return null;
-  const [vs, ps] = await Promise.all([vmSeries(vmId), partSeries(vmId)]);
+  const d = Number(days);
+  const sinceTs = Number.isFinite(d) && d > 0 ? Date.now() - d * 86_400_000 : 0;
+  const [vs, ps] = await Promise.all([vmSeries(vmId, sinceTs), partSeries(vmId, sinceTs)]);
   // 파티션별로 점을 모아 추이 판정.
   const byPath = new Map();
   for (const r of ps) {
@@ -176,7 +178,8 @@ export async function vmDetail(vmId, { flatPerDayGB = 0.1 } = {}) {
   });
   const vmTrend = usageTrend(vs.map((p) => ({ ts: p.ts, usedGB: p.usedGB })), { flatPerDayGB });
   const freeGB = Math.round(Math.max(0, latest.allocGB - latest.usedGB) * 10) / 10;
-  return { ...latest, freeGB, vmTrend, vmTrendSeries: vs, partitions };
+  const ratioPct = latest.allocGB > 0 ? Math.round((latest.usedGB / latest.allocGB) * 1000) / 10 : null;
+  return { ...latest, freeGB, ratioPct, vmTrend, vmTrendSeries: vs, partitions, days: sinceTs ? d : null, sinceTs: sinceTs || null };
 }
 
 /** CSV — 회수 목록(VM 1행). 수식 인젝션 가드 + BOM. rows 는 rankReclaim 결과. */
