@@ -100,3 +100,37 @@ test('commitCollection — 빈 수집은 이전 latest 를 지우지 않는다(b
 
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('reclaimReport — 사용률 필터 미설정(null)이 목록을 비우지 않는다(v2.467 회귀)', async () => {
+  // ★ 회귀: v2.461~2.466 은 maxRatioPct 미설정을 null 로 넘겼는데 Number(null)===0 이라
+  //   '사용률 0% 이하' 필터가 조용히 돌아 사용량>0 VM 을 전부 제거했다(716대 수집돼도 0대).
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gd-ratio-'));
+  process.env.GUESTDISK_DB_PATH = path.join(dir, 'guest-disk.db');
+  const db = await import(`../src/guestdisk/db.js?t=${Date.now()}-r`);
+  const svc = await import(`../src/guestdisk/service.js?t=${Date.now()}-r`);
+  const gdb = await db.getDb();
+  if (!gdb) { console.warn('node:sqlite 없음 — reclaimReport 필터 테스트 skip'); return; }
+
+  const vc = 'vc-r';
+  // 사용량>0 인 정상 VM 3대(ratioPct 25/80/40) — 미설정 필터에서 전부 나와야 한다.
+  await db.commitCollection(vc, 'VC R', [
+    { vmId: 'vc-r:1', vmName: 'A', allocGB: 100, usedGB: 25, partCount: 1, parts: [{ path: 'C:\\', capGB: 100, usedGB: 25 }] },
+    { vmId: 'vc-r:2', vmName: 'B', allocGB: 100, usedGB: 80, partCount: 1, parts: [{ path: 'C:\\', capGB: 100, usedGB: 80 }] },
+    { vmId: 'vc-r:3', vmName: 'C', allocGB: 100, usedGB: 40, partCount: 1, parts: [{ path: 'C:\\', capGB: 100, usedGB: 40 }] },
+  ], { ts: 1000, changeThresholdGB: 1 });
+
+  // 미설정(null) — 필터가 돌면 안 된다. 3대 모두 나와야 한다.
+  const rNull = await svc.reclaimReport({ allowed: null, minReclaimGB: 0, maxRatioPct: null, vcenterId: vc });
+  assert.equal(rNull.vmCount, 3, '사용률 미설정이면 사용량>0 VM 도 전부 나온다(버그였다면 0)');
+  assert.equal(rNull.collectedCount, 3, '수집 카운트는 필터와 무관');
+
+  // 명시적 50% 이하 — 25·40 두 대만.
+  const r50 = await svc.reclaimReport({ allowed: null, minReclaimGB: 0, maxRatioPct: 50, vcenterId: vc });
+  assert.equal(r50.vmCount, 2, '사용률 50% 이하는 25·40 두 대');
+
+  // 명시적 0% 이하 — 정상 VM 은 0대(의도된 필터, 버그 아님).
+  const r0 = await svc.reclaimReport({ allowed: null, minReclaimGB: 0, maxRatioPct: 0, vcenterId: vc });
+  assert.equal(r0.vmCount, 0, '명시적 0% 이하는 사용량>0 VM 을 정상 제외');
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});

@@ -81,6 +81,15 @@ export async function reclaimReport({ allowed = null, minReclaimGB = 5, maxRatio
   // 특정 vCenter 선택 — scope 우선: 허용 목록 안일 때만 좁힌다(범위 밖이면 빈 결과).
   if (vcenterId) ids = (allowed && !allowed.has(vcenterId)) ? [] : [vcenterId];
   const rows = await listLatest(ids);
+  // 필터(최소 회수/사용률)와 무관하게 '수집된 VM 수'와 '가장 큰 회수여유'를 먼저 잰다 —
+  // 목록이 비었을 때 화면이 '데이터 없음'인지 '필터 때문'인지 정직하게 가르게 한다.
+  let collectedCount = 0; let maxFreeGB = 0;
+  for (const r of rows) {
+    collectedCount++;
+    const f = Math.max(0, (Number(r.allocGB) || 0) - (Number(r.usedGB) || 0));
+    if (f > maxFreeGB) maxFreeGB = f;
+  }
+  maxFreeGB = Math.round(maxFreeGB * 10) / 10;
   const ranked = rankReclaim(rows, { minReclaimGB });
   // 각 행에 그룹핑 축(법인=DataCenter · vCenter · 클러스터)을 붙인다 — 프론트가 선택 구분.
   const meta = buildVcMeta();
@@ -91,7 +100,10 @@ export async function reclaimReport({ allowed = null, minReclaimGB = 5, maxRatio
     return { ...r, corpId: m.corpId, corpName: m.corpName, region: m.region, cluster: clusterOf.get(r.vmId) || '(미지정)' };
   });
   // 사용률(%) 이하 필터 — 할당 대비 사용이 낮은(회수 여지가 큰) VM 만. 비율 null(할당 0)은 제외.
-  const mr = Number(maxRatioPct);
+  // ★ 버그(v2.461~2.466): 미설정이면 maxRatioPct 는 null 인데 Number(null)===0 이라 isFinite(0)===true 로
+  //   '문턱 0%' 필터가 조용히 돌아 사용량>0 인 VM 을 전부 제거했다(716대 수집돼도 목록 0대). null/''
+  //   (미설정)은 반드시 필터를 건너뛰고, 명시적 0 만 '0% 이하' 필터로 취급한다.
+  const mr = (maxRatioPct == null || maxRatioPct === '') ? NaN : Number(maxRatioPct);
   if (Number.isFinite(mr)) enriched = enriched.filter((r) => r.ratioPct != null && r.ratioPct <= mr);
   const totalReclaimGB = Math.round(enriched.reduce((s, r) => s + (r.freeGB || 0), 0) * 10) / 10;
   // 콤보용 클러스터 목록 — **인벤토리 기준**(게스트 데이터가 없어도 vCenter 선택 시 채워지게).
@@ -110,7 +122,7 @@ export async function reclaimReport({ allowed = null, minReclaimGB = 5, maxRatio
   // vm_latest 에 데이터가 있는 vCenter 만이 아니라 '보여야 할 모든 vCenter'를 기준으로 만든다:
   // 데이터가 0 인 vCenter 도 '왜 없나(엣지 push 대기 / Tools 미보고 / direct 미수집)'를 화면이 알린다.
   const coverage = await buildCoverage(ids, idSet, vcenterId);
-  return { rows: enriched, totalReclaimGB, vmCount: enriched.length, clusters, coverage, minReclaimGB, maxRatioPct: Number.isFinite(mr) ? mr : null, scoped: Boolean(allowed) };
+  return { rows: enriched, totalReclaimGB, vmCount: enriched.length, collectedCount, maxFreeGB, clusters, coverage, minReclaimGB, maxRatioPct: Number.isFinite(mr) ? mr : null, scoped: Boolean(allowed) };
 }
 
 /**
