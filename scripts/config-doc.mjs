@@ -39,7 +39,24 @@ const NOTES = {
   'relay-topology.json': ['중계(HAProxy) 토폴로지 정의', '노드 SSH 자격증명 포함 — host 변경 시 비밀 미이월'],
   'db-location.json': ['시계열 DB 저장 경로(dbDir)', '이 값이 가리키는 곳에 *.db 가 만들어진다'],
   'vmperf': ['디렉터리 — vCenter별 VM 성능 DB(+ _index.json 역산 매핑)', 'v2.448 부터 파일명에 해시 접미사(id 충돌 방지)'],
+  'packages': ['디렉터리 — 내려받은 설치/업그레이드 패키지 보관(PACKAGE_DIR)', '에이전트 배포 설치본도 여기서 찾는다. 지워도 다시 내려받는다(폐쇄망은 PACKAGE_BASE_URL 로 LAN 미러 지정)'],
   'initial-admin-password.txt': ['최초 기동 시 생성된 관리자 임시 비밀번호', '⚠ 로그인 후 즉시 변경하고 이 파일을 삭제할 것'],
+  // ── 시계열 DB (용량 대부분을 차지한다 — 운영 실측 기준으로 크기를 적어 둔다) ──
+  'host-temp.db': ['지표 시계열(온도·GPU·데이터스토어·포탈 메모리) — 이름과 달리 범용 DB',
+    '⚠ 보통 가장 큰 파일(운영 실측 34.3GB). v2.451 부터 온도는 변화분만 저장한다(TEMP_RAW_RETENTION_DAYS·METRICS_DEADBAND_TEMP_C). 지우면 온도·GPU·용량예측 이력이 사라진다(현재값은 재수집)'],
+  'idrac-power.db': ['서버 소비전력 시계열 + 시간당 롤업(power_hourly)',
+    '⚠ 두 번째로 큰 파일(운영 실측 26.9GB). 지우면 전력 대시보드·FinOps(kWh·비용·CO2) 이력이 사라진다'],
+  'ping-monitor.db': ['핑 모니터 응답시간·손실 시계열', '지워도 모니터는 계속 동작한다(이력만 사라짐)'],
+  'capacity.db': ['리소스 적정성(용량) 샘플 시계열', '지워도 현재 진단은 재수집된다(추이만 사라짐)'],
+  'vm-track.db': ['VM 수량·데이터스토어 사용량 추이(변경분만 저장)', '슬롯 기반(하루 2회)이라 증가가 완만하다'],
+  'storage-history.db': ['스토리지 장비(8종) 용량 이력', ''],
+  'sanswitch-perf.db': ['SAN 스위치 포트 처리량(누적 카운터 델타)', '첫 수집·카운터 리셋은 값이 없다(null) — 0 으로 채우지 않는다'],
+  'pdu.db': ['PDU 전력 시계열', ''],
+  'rma-history.db': ['원격 명령(RMA) 실행 이력', ''],
+  'rma-tests.db': ['원격 점검(RMA) 결과 이력', '상태 변화 + 1시간 단위만 저장(diff-저장)'],
+  'ipam.db': ['IPAM IP 관리대장(외부 프로그램이 직접 읽는 공유 파일)',
+    '⚠ WAL 로 전환하지 말 것(외부 리더의 -wal/-shm 호환 미확인). **DB 경로 이관 대상에서도 제외**된다 — 외부 연동이 경로를 고정으로 알고 있기 때문'],
+  'vcenter-logs.db': ['vCenter 이벤트/태스크 로그 수집 캐시', '보존일수(설정 › vCenter 로그 보관)로 통제한다. 경로 이관 대상 아님'],
 };
 
 function walk(dir, out = []) {
@@ -62,7 +79,18 @@ for (const f of walk(SRC)) {
   const text = fs.readFileSync(f, 'utf8');
   const rel = path.relative(SRC, f).replace(/\\/g, '/');
   const summary = moduleSummary(text);
-  for (const m of text.matchAll(/path\.join\([^)]*?(?:configDir|dbDir|DIR|ROOT)[^)]*?,\s*'([^']+)'\s*\)/g)) {
+  // ① `path.join(<...DIR...>, 'name')` ② `dbFile('name.db')` 같은 헬퍼 호출.
+  // ②가 없던 v2.448~2.450 은 **가장 큰 DB 4개**(host-temp 34.3GB · idrac-power 26.9GB ·
+  // ping-monitor · capacity)를 통째로 빠뜨렸다 — config.js 가 `dbFile()` 헬퍼로 만들기 때문.
+  // 백업·용량 판단에 쓰라고 만든 문서에서 제일 큰 파일이 빠져 있으면 문서의 의미가 없다.
+  const hits = [
+    // 괄호 한 겹 중첩까지 허용한다 — `path.join(process.env.CONFIG_DIR || path.resolve(ROOT,'config'), 'ipam.db')`
+    // 처럼 안쪽에 괄호가 있으면 `[^)]*?` 로는 못 잡는다(그래서 ipam.db 가 빠져 있었다).
+    // 디렉터리 변수명은 소문자 `dir` 도 받는다(`path.join(dir, 'vcenter-logs.db')`).
+    ...text.matchAll(/path\.join\((?:[^()']|\([^()]*\))*?(?:configDir|dbDir|DIR|ROOT|\bdir\b)(?:[^()']|\([^()]*\))*?,\s*'([^']+)'\s*\)/g),
+    ...text.matchAll(/\b\w*(?:dbFile|DbFile|cfgFile|configFile)\(\s*'([^']+)'\s*\)/g),
+  ];
+  for (const m of hits) {
     const name = m[1];
     if (!name || name.includes('/') || name.startsWith('.')) continue;
     const cur = files.get(name) || { modules: new Set(), atomic: false, preserve: false, mode600: false, summary: '' };
@@ -90,6 +118,13 @@ let md = `# 설정·데이터 파일 레퍼런스 (자동 생성)
 - 열 의미: **원자적** = 쓰기 도중 크래시에도 파일이 깨지지 않음(\`atomicWriteFileSync\`) · **손상보존** = 읽기 실패 시 원본을 \`.corrupt.<ts>\` 로 보존 · **0600** = 소유자만 읽기
 
 > ⚠️ **백업**: 설정 › 포탈 백업이 이 디렉터리를 통째로 담는다. 수동 백업 시에도 \`portal.env\`·\`auth-secret\`·\`secrets-key\`·\`users.json\` 은 반드시 포함할 것 — 이 넷이 없으면 복원해도 로그인·복호가 안 된다.
+>
+> 💾 **용량**: 디스크를 쓰는 것은 거의 전부 \`.db\`(SQLite 시계열)다. 특수 기능 › 포탈 DB 에서
+> 파일별 크기를 보고, 필요하면 \`db-location.json\` 으로 큰 볼륨에 옮긴다.
+> **SQLite 의 보존기간 정리(DELETE)는 파일 크기를 줄이지 않는다** — 빈 공간이 재사용될 뿐이라
+> 파일은 '더 커지지 않고 멈추는' 것이지 작아지지 않는다. 실제로 줄이려면 \`VACUUM\` 이 필요하고,
+> \`VACUUM\` 은 **원본 크기만큼의 여유 공간**을 임시로 쓴다(34GB DB → 34GB 이상 필요).
+> 여유가 부족하면 **먼저 경로를 큰 볼륨으로 옮긴 뒤** VACUUM 하는 순서가 맞다.
 
 | 파일 | 종류 | 용도 | 원자적 | 손상보존 | 0600 | 정의 모듈 |
 |---|---|---|:--:|:--:|:--:|---|

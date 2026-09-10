@@ -1,6 +1,25 @@
 {
   "notes": [
     {
+      "version": "2.452.0",
+      "date": "2026-09-10",
+      "title": "설정 문서 전면 갱신 — 문서 생성기가 못 잡던 환경변수 28개·설정 파일 6개 복구(최대 DB 2개 포함)",
+      "notes": [
+        "요청: '모든 설정에 대한 세부적인 설명 문서 작성 업데이트'. 갱신하면서 **문서 생성기 자체의 누락**을 먼저 찾아 고쳤다 — 생성은 성공하고 CI 의 `--check` 도 통과했지만 내용이 비어 있던 항목들이다.",
+        "**① 환경변수 28개 복구(289 → 317)** — `scripts/env-doc.mjs` 는 `process.env.KEY` 만 훑었다. `const env = process.env` 나 `policyFromEnv(env = process.env)` 처럼 **별칭에 담아 쓰는 모듈은 통째로 빠졌다**: `rma/agent.js` 25개 + `metrics/deadband.js` 3개.",
+        "  누락분에는 `RMA_ALLOW_CUSTOM`(자유 명령 허용) · `RMA_ALLOW_SSH` · `RMA_ALLOW_REBOOT` · `RMA_FILE_ROOTS` · `RMA_SERVICE_UNITS` 처럼 **엣지에서만 켤 수 있는 보안 옵트인**이 포함돼 있었다. 설계상 현장 담당자가 명시적으로 켜야 하는 값인데 문서 어디에도 없어 **존재조차 알 수 없는 상태**였다.",
+        "  이제 스캐너가 별칭을 인식한다. 같은 줄에 리터럴 기본값이 없는 6개(dead-band 3 · diskTrend 3)는 `MANUAL` 에 적고, **코드 상수와 어긋나면 테스트가 CI 에서 잡는다**(문서가 조용히 거짓말하는 것을 막는다).",
+        "**② 설정 파일 6개 복구(118 → 124)** — `scripts/config-doc.mjs` 가 `path.join(<DIR>, 'name')` 만 인식해 `dbFile('x.db')` 헬퍼로 만드는 파일을 놓쳤다. 하필 **가장 큰 두 개**가 여기였다: `host-temp.db`(운영 실측 34.3GB) · `idrac-power.db`(26.9GB), 그리고 `ping-monitor.db` · `capacity.db`. 괄호 중첩을 못 넘던 문제로 `ipam.db` · `vcenter-logs.db` 도 빠져 있었다.",
+        "  백업·용량 판단에 쓰라고 만든 문서에서 제일 큰 파일이 빠져 있으면 문서의 목적 자체가 무너진다. 파일별로 '지우면 어떻게 되는가' 도 함께 적었다.",
+        "**③ docs/SETTINGS.md 갱신** — 지표 수집 탭에 **보존기간이 두 개인 이유**(원본 `samples` 90일 / 시간당 롤업 `samples_hourly` 5년)를 표로 넣고, **변화분만 저장(dead-band)** 의 임계·최대 간격·끄는 법·한계를 설명했다. iDRAC 탭에도 전력 dead-band 와 `IDRAC_RAW_RETENTION_DAYS` 를 추가했다.",
+        "  **부록 A 신설** — 설정 메뉴 밖이지만 설정에 해당하는 '특수 기능 › 포탈 DB'(DB 저장 경로 변경). 옮기는 파일 10종과 **의도적으로 안 옮기는 2종**(`ipam.db` 는 외부 프로그램이 경로를 고정으로 알고 읽는 공유 원장, `vcenter-logs.db` 는 별도 보존 설정), 서비스 이름(`vmware-portal`)과 계정(`vmportal`)이 다르다는 점, systemd 하드닝 경로가 사전 점검에서 거부되는 이유를 적었다.",
+        "  **부록 A-2** — '보존기간을 줄였는데 파일이 그대로다' 에 대한 답: SQLite 의 DELETE 는 빈 페이지를 남길 뿐이라 **'더 커지지 않고 멈추는' 것이지 작아지지 않는다**. 줄이려면 VACUUM 이 필요하고 VACUUM 은 원본 크기만큼 임시 공간을 쓰므로, 여유가 부족하면 **경로를 큰 볼륨으로 옮긴 뒤 VACUUM** 하는 순서가 맞다.",
+        "**④ 문서의 거짓 안내 2건 삭제** — v2.448 의 지표 수집 항목이 `METRICS_SAMPLE_INTERVAL_MS` · `METRICS_RETENTION_DAYS` 를 안내했는데 **코드에 없는 키**였다(실제는 `TEMP_SAMPLE_INTERVAL_MS` · `TEMP_RETENTION_DAYS`). 저장 파일도 `metrics.db` 로 적혀 있었으나 실제는 `host-temp.db` 다. 이제 SETTINGS.md 가 안내하는 환경변수는 전부 ENV.md 에 실재해야 하며, 아니면 테스트가 실패한다.",
+        "회귀 방지 테스트 8건 추가(`server/test/docsGen2452.test.js`) — 별칭 스캔 · 보안 옵트인 키 존재 · 손으로 적은 기본값 ↔ 코드 상수 일치 · 이관 대상 DB 전수 · VACUUM 한계 기재 · 설정 탭 32개 코드 대조 · 존재하지 않는 환경변수 안내 금지.",
+        "정직한 한계: 이번 변경은 **문서와 생성기만** 손댔고 런타임 동작은 바뀌지 않았다. 생성기는 여전히 정규식 기반이라 새로운 표현 방식이 나오면 또 놓칠 수 있다 — 그래서 '문서가 최신인가' 대신 '스캐너가 이 형태들을 잡는가' 를 테스트로 고정했다."
+      ]
+    },
+    {
       "version": "2.451.0",
       "date": "2026-09-10",
       "title": "시계열 DB 용량 감축(온도 34GB·전력 27GB) — 변화분만 저장 + 원본/롤업 보존 분리 · DB 경로 변경 로직 결함 8건 수정",
