@@ -142,6 +142,10 @@ function DbLocationPanel() {
   const [err, setErr] = useState(null);
   const [target, setTarget] = useState('');
   const [service, setService] = useState('vmware-portal');
+  // v2.451: 서비스 '이름' 과 실행 '계정' 은 다르다(install.sh: SERVICE_NAME=vmware-portal / SERVICE_USER=vmportal).
+  // 예전에는 계정을 보내지 않아 서버 기본값('vmware-portal')이 쓰였고, 그런 계정이 없어 chown 이
+  // 조용히 건너뛰어져 마이그레이션이 무효화됐다. 이제 화면에서 지정하고 기본값도 실제 계정으로 둔다.
+  const [runUser, setRunUser] = useState('vmportal');
   const [pf, setPf] = useState(null);
   const [made, setMade] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -162,7 +166,7 @@ function DbLocationPanel() {
   const makeScript = async () => {
     setBusy(true); setConfirm(false);
     try {
-      const r = await postJson('/admin/portal-db/location/script', { targetDir: target, service });
+      const r = await postJson('/admin/portal-db/location/script', { targetDir: target, service, user: runUser });
       setMade(r); await load();
     } catch (e) { setMade({ ok: false, reason: e.message }); }
     finally { setBusy(false); }
@@ -209,7 +213,8 @@ function DbLocationPanel() {
       <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 10 }}>
         <input className="input" style={{ flex: 1, minWidth: 280 }} placeholder="새 경로(절대) — 예: /data/vmware-portal-db"
           value={target} onChange={(e) => setTarget(e.target.value)} />
-        <input className="input" style={{ width: 180 }} placeholder="systemd 서비스명" value={service} onChange={(e) => setService(e.target.value)} />
+        <input className="input" style={{ width: 170 }} placeholder="systemd 서비스명" title="systemd 유닛 이름 (기본 vmware-portal)" value={service} onChange={(e) => setService(e.target.value)} />
+        <input className="input" style={{ width: 150 }} placeholder="서비스 실행 계정" title="포탈이 실행되는 리눅스 계정 (기본 vmportal). 확인: systemctl show <서비스> -p User" value={runUser} onChange={(e) => setRunUser(e.target.value)} />
         <button className="logout-btn" style={{ flex: 'none', padding: '7px 14px' }} disabled={busy || !target.trim()} onClick={check}>
           {busy ? '확인 중…' : '사전 점검'}
         </button>

@@ -35,6 +35,32 @@ const q = (s) => `'${String(s).replace(/'/g, "'\\''")}'`;
  * 순서: 확인 → 서비스 정지 → 복사(rsync 우선, 없으면 cp) → 체크섬 검증 → 경로 설정 파일 기록
  *       → 소유권/권한 → 안내(원본 보존, 기동은 마지막 단계에서 관리자가 확인 후)
  */
+/**
+ * 기본 서비스/계정(v2.451 수정) — `packaging/offline/install.sh` 의 실제 값과 맞춘다.
+ *   SERVICE_NAME="vmware-portal"  (systemd 유닛 이름)
+ *   SERVICE_USER="vmportal"       (실행 계정) ← 예전에는 이 둘을 혼동해 user 기본값이 'vmware-portal' 이었다.
+ * 그 결과 생성된 스크립트의 `id "$RUN_USER"` 가 실패해 chown 이 **조용히 건너뛰어지고**,
+ * 새 경로와 db-location.json 이 root:root 로 남아 포탈이 읽지 못했다. config.js 의 readDbDir 은
+ * 권한 오류를 '파일 없음' 과 구분하지 않고 null 로 폴백하므로, 마이그레이션이 무효화된 사실이
+ * 아무 데도 드러나지 않았다(스크립트는 '완료' 라고 보고).
+ */
+export const DEFAULT_SERVICE = 'vmware-portal';
+export const DEFAULT_USER = 'vmportal';
+
+/**
+ * 서비스명·계정명 검증(v2.451) — 이 값들은 생성되는 .sh 와 **README 의 bash 블록**에 삽입되고,
+ * README 는 "이대로 sudo 로 실행하세요" 라고 안내하는 곳이다. targetDir 은 v2.388 에서 제어문자를
+ * 막았는데 형제 필드인 service/user 에는 같은 검증이 없어, 개행 한 번으로 코드블록에 임의 명령을
+ * 심을 수 있었다(admin → root). systemd 유닛명·리눅스 계정명의 합법 문자만 허용한다.
+ */
+const NAME_RE = /^[A-Za-z0-9._@-]{1,64}$/;
+export function unitNameIssue(v, what) {
+  const s = String(v ?? '');
+  if (!s) return `${what}을(를) 입력하세요.`;
+  if (!NAME_RE.test(s)) return `${what}에 쓸 수 없는 문자가 있습니다(영문·숫자·. _ @ - 만, 64자 이내).`;
+  return null;
+}
+
 function renderBash({ srcDir, targetDir, inv, service, user, configDir, ts }) {
   const files = [];
   for (const m of MIGRATABLE) if (inv.files.some((f) => f.file === m.file)) files.push(m.file);
@@ -150,9 +176,16 @@ fi
 log "검증 통과"
 
 # 5) 소유권·권한 — 서비스 계정이 읽고 쓸 수 있게
-if id "\$RUN_USER" >/dev/null 2>&1; then
-  chown -R "\$RUN_USER":"\$RUN_USER" "\$DST" || log "WARN chown 실패(수동 확인 필요)"
+# v2.451: 계정이 없으면 **중단한다**. 예전에는 조용히 건너뛰어 새 경로가 root:root 0700 으로 남았고,
+# 포탈(비-root)이 읽지 못해 옛 경로로 되돌아갔는데도 스크립트는 '완료' 라고 보고했다.
+if ! id "\$RUN_USER" >/dev/null 2>&1; then
+  log "ERROR 서비스 계정 '\$RUN_USER' 이(가) 없습니다."
+  log "      실제 계정 확인:  systemctl show \$SERVICE -p User"
+  log "      확인한 이름으로 다시 생성하거나, 이 파일의 RUN_USER 를 고쳐 실행하세요."
+  log "      (원본은 그대로입니다. 서비스만 다시 시작하면 이전 상태로 돌아갑니다: systemctl start \$SERVICE)"
+  exit 6
 fi
+chown -R "\$RUN_USER":"\$RUN_USER" "\$DST" || { log "ERROR chown 실패 — 새 경로를 서비스 계정이 읽을 수 없습니다."; exit 7; }
 chmod 700 "\$DST" || true
 find "\$DST" -maxdepth 2 -type f -name '*.db*' -exec chmod 600 {} \\; || true
 log "권한 설정 완료"
@@ -161,7 +194,8 @@ log "권한 설정 완료"
 LOCFILE="\${CONFIG_DIR%/}/db-location.json"
 printf '{\\n  "dbDir": "%s",\\n  "updatedAt": %s\\n}\\n' "\$DST" "\$(date +%s000)" > "\$LOCFILE"
 chmod 600 "\$LOCFILE"
-if id "\$RUN_USER" >/dev/null 2>&1; then chown "\$RUN_USER":"\$RUN_USER" "\$LOCFILE" || true; fi
+# 이 파일을 포탈이 못 읽으면 새 경로가 적용되지 않는다(조용한 폴백) — 실패를 삼키지 않는다.
+chown "\$RUN_USER":"\$RUN_USER" "\$LOCFILE" || { log "ERROR db-location.json chown 실패 — 새 경로가 적용되지 않습니다."; exit 8; }
 log "경로 설정 기록: \$LOCFILE → \$DST"
 
 echo
@@ -278,7 +312,7 @@ sudo systemctl start ${service}
  * 스크립트 + 설명 파일 생성. 파일을 만들기만 하고 실행하지 않는다.
  * @returns { dir, scriptPath, readmePath, scriptName, inventory }
  */
-export function writeMigrationScript({ targetDir, service = 'vmware-portal', user = 'vmware-portal', now = Date.now() } = {}) {
+export function writeMigrationScript({ targetDir, service = DEFAULT_SERVICE, user = DEFAULT_USER, now = Date.now() } = {}) {
   const srcDir = dbDir() || defaultDbDir();
   const configDir = defaultDbDir();
   const inv = migrationInventory(srcDir);

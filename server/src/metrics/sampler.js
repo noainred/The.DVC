@@ -228,8 +228,15 @@ async function sampleOnceInner() {
 
   // Retention prune (runtime-configurable). 매 샘플마다 DELETE 스캔하면 비용이 크므로
   // 약 20샘플(기본 60s면 ~20분)에 1회만 실행한다 — store의 전력 적재 prune과 동일한 절감 패턴.
-  const { retentionDays } = loadMetricsSettings();
-  if (retentionDays > 0 && (++_pruneTicks % 20 === 1)) { try { db.prune(ts - retentionDays * 86_400_000); } catch { /* */ } }
+  const { retentionDays, rawRetentionDays } = loadMetricsSettings();
+  if (retentionDays > 0 && (++_pruneTicks % 20 === 1)) {
+    try {
+      // v2.451: 원본은 rawRetentionDays(기본 90일), 롤업은 retentionDays(기본 5년).
+      // rawRetentionDays 가 0 이거나 retentionDays 보다 길면 예전처럼 같은 기준을 쓴다.
+      const raw = rawRetentionDays > 0 ? Math.min(rawRetentionDays, retentionDays) : retentionDays;
+      db.prune(ts - raw * 86_400_000, ts - retentionDays * 86_400_000);
+    } catch { /* */ }
+  }
   lastRun = { at: ts, rows: rows.length, hostsWithTemp: hostsWithTemp.length };
 }
 
@@ -237,7 +244,7 @@ const round1 = (x) => (x == null ? null : Number(x.toFixed(1)));
 
 export function metricsSamplerStatus() {
   const s = loadMetricsSettings();
-  return { intervalMs: s.sampleIntervalMs, retentionDays: s.retentionDays, lastRun };
+  return { intervalMs: s.sampleIntervalMs, retentionDays: s.retentionDays, rawRetentionDays: s.rawRetentionDays, lastRun };
 }
 
 /** (Re)arm the periodic timer from the current effective settings. */

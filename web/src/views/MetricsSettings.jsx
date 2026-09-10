@@ -27,6 +27,8 @@ export default function MetricsSettings() {
   const [error, setError] = useState(null);
   const [intervalSec, setIntervalSec] = useState(60);
   const [retentionDays, setRetentionDays] = useState(1830);
+  // 원본(분 단위) 보존 — 롤업과 분리(v2.451). 용량의 대부분이 원본이라 이 값이 파일 크기를 좌우한다.
+  const [rawRetentionDays, setRawRetentionDays] = useState(90);
   const [gpuEnabled, setGpuEnabled] = useState(true);
   const [gpuSec, setGpuSec] = useState(60);
   const [busy, setBusy] = useState(false);
@@ -42,6 +44,7 @@ export default function MetricsSettings() {
         inited.current = true;
         setIntervalSec(Math.round((d.settings.sampleIntervalMs || 60000) / 1000));
         setRetentionDays(d.settings.retentionDays ?? 1830);
+        setRawRetentionDays(d.settings.rawRetentionDays ?? 90);
         setGpuEnabled(d.settings.gpuUtilEnabled !== false);
         setGpuSec(d.settings.gpuUtilIntervalSec ?? 60);
       }
@@ -65,7 +68,7 @@ export default function MetricsSettings() {
     setBusy(true); setMsg(null);
     try {
       const ms = Math.max(limits.minIntervalMs, Math.min(limits.maxIntervalMs, intervalSec * 1000));
-      const r = await putJson('/admin/metrics/settings', { sampleIntervalMs: ms, retentionDays: Number(retentionDays) || 0, gpuUtilEnabled: gpuEnabled, gpuUtilIntervalSec: Number(gpuSec) || 60 });
+      const r = await putJson('/admin/metrics/settings', { sampleIntervalMs: ms, retentionDays: Number(retentionDays) || 0, rawRetentionDays: Number(rawRetentionDays) || 0, gpuUtilEnabled: gpuEnabled, gpuUtilIntervalSec: Number(gpuSec) || 60 });
       setData(r);
       setIntervalSec(Math.round(r.settings.sampleIntervalMs / 1000));
       setMsg('저장되었습니다. 새 주기가 즉시 적용됩니다.');
@@ -102,7 +105,22 @@ export default function MetricsSettings() {
         <div className="flex gap" style={{ alignItems: 'center', marginTop: 6 }}>
           <input className="input" type="number" min={0} value={retentionDays}
             onChange={(e) => setRetentionDays(Number(e.target.value))} style={{ width: 120 }} />
-          <span className="muted">일 (기본 1830일 ≈ 5년)</span>
+          <span className="muted">일 (기본 1830일 ≈ 5년) — <b>시간당 롤업</b>(평균·최소·최대) 기준</span>
+        </div>
+
+        <label className="muted" style={{ fontSize: 12, display: 'block', marginTop: 12 }}>원본(분 단위) 보존 기간 (일, 0=위 보존기간과 동일)</label>
+        <div className="flex gap" style={{ alignItems: 'center', marginTop: 6 }}>
+          <input className="input" type="number" min={0} value={rawRetentionDays}
+            onChange={(e) => setRawRetentionDays(Number(e.target.value))} style={{ width: 120 }} />
+          <span className="muted">일 (기본 90일)</span>
+        </div>
+        <div className="muted" style={{ fontSize: 11.5, marginTop: 6, lineHeight: 1.6 }}>
+          DB 용량의 대부분은 <b>원본</b>입니다(658 호스트 × 1분 = 약 95만 행/일). 이 값을 지나면 원본은 지우고
+          <b> 시간당 평균·최소·최대</b>만 위 보존기간까지 남깁니다 — 60분 이상 구간 조회는 이미 롤업을 쓰므로
+          장기 추이 그래프는 그대로 보입니다. 짧게 잡을수록 파일이 작아지고, <b>지난 원본은 복구되지 않습니다.</b>
+          <br />
+          또한 값이 거의 변하지 않는 구간은 원본을 생략합니다(온도 0.5℃ · 전력 3W 미만 변화, 최소 30분마다 1행은 보장).
+          임계는 <code>METRICS_DEADBAND_TEMP_C</code> · <code>METRICS_DEADBAND_POWER_W</code> 로 조정하고 0 이면 끕니다.
         </div>
 
         <div style={{ borderTop: '1px solid rgba(255,255,255,.08)', marginTop: 16, paddingTop: 14 }}>

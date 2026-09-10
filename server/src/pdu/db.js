@@ -16,7 +16,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 
-const FILE = process.env.PDU_DB || path.join(config.configDir, 'pdu.db');
+// DB 저장 경로 설정(v2.379)을 따른다 — config.dbDir 이 있으면 그 아래. env 가 최우선.
+// v2.451: 이 파일만 configDir 에 고정돼 있어, 경로를 옮겨도 PDU 이력은 계속 CONFIG_DIR 에 쌓였다
+// (기본 보존 400일이라 용량 압박 해소라는 원래 목적이 반쪽이 됐다).
+const FILE = process.env.PDU_DB || path.join(config.dbDir || config.configDir, 'pdu.db');
 const RETAIN_DAYS = Math.max(1, Number(process.env.PDU_RETAIN_DAYS) || 400); // 기본 400일(연 단위 추이)
 const PRUNE_EVERY = 20; // 20회 적재마다 1회만 prune
 

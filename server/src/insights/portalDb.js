@@ -13,6 +13,8 @@ import path from 'node:path';
 import { config } from '../config.js';
 
 const CONFIG_DIR = config.configDir;
+// 옮긴 DB 저장 경로(null = configDir 사용). db-location.json → config.dbDir (v2.379).
+const DB_DIR = config.dbDir || null;
 
 // 파일명 → 용도 설명. configDir 스캔 결과에 매칭해 사람이 읽을 설명을 붙인다.
 const PURPOSES = {
@@ -200,8 +202,30 @@ export function enumerateDbFiles() {
     }
   } catch { /* configDir 없음 */ }
 
-  // 2) 설정상 명시된 DB 경로(외부로 override 가능) — 누락 방지 위해 명시 추가
-  for (const p of [config.temp?.dbPath, config.idrac?.dbPath, config.ipam?.dbPath]) {
+  // 1-b) DB 저장 경로를 옮겼으면(v2.379 db-location.json) 그 디렉터리도 스캔한다(v2.451 수정).
+  // 예전에는 configDir 만 봐서, 마이그레이션 후 ping-monitor·capacity·vm-track·storage-history·
+  // sanswitch-perf·rma-*·pdu·vmperf 가 이 화면에서 통째로 사라졌다. 마이그레이션 README 가
+  // "완료 후 이 화면에서 경로·용량을 확인하세요" 라고 안내하는데 정작 확인이 불가능했다.
+  if (DB_DIR && path.resolve(DB_DIR) !== path.resolve(CONFIG_DIR)) {
+    try {
+      for (const name of fs.readdirSync(DB_DIR)) {
+        const abs = path.join(DB_DIR, name);
+        if (/\.(db|json|ndjson)$/i.test(name)) { add(abs); continue; }
+        // vmperf/ 처럼 vCenter별 DB 가 들어가는 하위 디렉터리도 한 단계 훑는다.
+        try {
+          if (fs.statSync(abs).isDirectory()) {
+            for (const sub of fs.readdirSync(abs)) if (/\.db$/i.test(sub)) add(path.join(abs, sub));
+          }
+        } catch { /* 접근 불가 — 무시 */ }
+      }
+    } catch { /* dbDir 없음/권한 없음 */ }
+  }
+
+  // 2) 설정상 명시된 DB 경로(외부로 override 가능) — 누락 방지 위해 명시 추가.
+  // v2.451: 개별 *_DB_PATH env 로 완전히 다른 위치를 가리킬 수 있는 것들을 전부 넣는다
+  // (예전에는 temp·idrac·ipam 3개뿐이라 나머지가 목록에서 빠졌다).
+  for (const p of [config.temp?.dbPath, config.idrac?.dbPath, config.ipam?.dbPath,
+    config.ping?.dbPath, config.capacity?.dbPath]) {
     if (p) add(p);
   }
 
@@ -268,10 +292,14 @@ function trendFor(absPath, sizeBytes = 0) {
   return { samples: arr.slice(-60), growthBytes, spanMs, perDayBytes, forecast: forecastFrom(last.bytes, perDayBytes, spanMs) };
 }
 
-/** 설정 디렉터리가 있는 파일시스템의 여유 공간 — 예측이 디스크를 넘는지 판단하는 기준. */
+/**
+ * DB 가 실제로 쌓이는 파일시스템의 여유 공간 — 예측이 디스크를 넘는지 판단하는 기준.
+ * v2.451: 경로를 옮겼으면 **새 볼륨**을 봐야 한다. 예전에는 CONFIG_DIR 고정이라
+ * 마이그레이션 후 '디스크 소진 예상일' 이 엉뚱한(옛) 볼륨 기준으로 나왔다.
+ */
 function diskFree() {
   try {
-    const st = fs.statfsSync(CONFIG_DIR);
+    const st = fs.statfsSync(DB_DIR || CONFIG_DIR);
     const total = st.blocks * st.bsize;
     const free = st.bavail * st.bsize;
     return { totalBytes: total, freeBytes: free, usedBytes: total - free };
@@ -297,6 +325,8 @@ export function portalDbReport(now = Date.now()) {
   return {
     generatedAt: now,
     configDir: CONFIG_DIR,
+    dbDir: DB_DIR,                     // 화면이 '어느 볼륨 기준인지' 표시할 수 있게(v2.451)
+    diskPath: DB_DIR || CONFIG_DIR,
     sampleIntervalMs: SAMPLE_INTERVAL_MS,
     totalBytes,
     count: files.length,
