@@ -5,14 +5,15 @@
  * CONFIG_DIR 은 보통 OS 파티션(/etc/vmware-portal)이라 여유가 작다. 큰 별도 볼륨으로 옮길 수
  * 있어야 한다.
  *
- * 동작 방식(중요 — 프로세스 재시작은 사용자가 한다)
- *  1. 설정 화면에서 새 경로를 지정하면 먼저 **사전 점검**을 한다(존재/쓰기권한/여유공간/같은 경로 여부).
- *  2. '마이그레이션 시작'을 누르면 **수집을 전면 정지**(emergencyStop 재사용)하고 DB 핸들을 닫은 뒤
- *     파일을 **복사**한다(이동이 아니라 복사 — 원본을 남겨 실패 시 즉시 되돌릴 수 있게).
- *  3. 복사 후 **크기·SHA-256 검증**을 하고, 성공하면 새 경로를 db-location.json 에 저장한다.
- *  4. 프로세스를 스스로 재시작하지 않는다(systemd 관할). 화면에 **"수동 재시작 필요"** 를 안내하고
- *     그때까지 수집은 정지 상태로 둔다 — 옛 경로에 새 데이터가 섞이는 것을 막기 위함이다.
- *  5. **원본은 지우지 않는다.** 사용자가 새 경로로 정상 기동을 확인한 뒤 직접 삭제한다.
+ * 동작 방식 — **포탈은 직접 옮기지 않는다.** 실행 스크립트를 만들어 주고 관리자가 root 로 돌린다
+ * (열린 SQLite 를 프로세스가 살아 있는 채로 옮기면 손상 위험이 있고, 서비스 정지·기동은 systemd 관할이다).
+ *  1. 화면에서 새 경로를 지정하면 **사전 점검**(preflight)을 한다 — 절대경로·문자 검증·존재·쓰기권한
+ *     실측·여유공간·같은 경로 여부·systemd 하드닝 경로.
+ *  2. '스크립트 생성'을 누르면 `migrateScript.js` 가 bash 스크립트 + README 를 만든다.
+ *  3. 관리자가 `sudo bash <스크립트>` 로 실행한다 — 서비스 정지 → 복사(rsync/cp) → **SHA-256 검증**
+ *     → 소유권·권한 설정 → db-location.json 기록.
+ *  4. 관리자가 서비스를 다시 시작한다. 기동 시 config.js 가 db-location.json 을 읽어 DB 경로를 바꾼다.
+ *  5. **원본은 지우지 않는다.** 새 경로로 정상 기동을 확인한 뒤 관리자가 직접 삭제한다.
  *
  * 적용 시점: 기동 시 config.js 가 이 파일을 읽어 각 DB 경로를 새 디렉터리로 바꾼다
  * (개별 *_DB_PATH env 가 있으면 env 가 우선 — 명시 설정을 덮지 않는다).
@@ -34,6 +35,15 @@ export const MIGRATABLE = [
   { file: 'capacity.db', label: '용량 샘플' },
   { file: 'vm-track.db', label: 'VM 수량·스토리지 추이' },
   { file: 'storage-history.db', label: '스토리지 장비 이력' },
+  // ▼ v2.379 이후 추가된 DB — 등재가 누락돼 있었다(v2.451 수정).
+  //   이 파일들은 config.dbDir 을 **이미 따르므로**(rma/historyDb.js·rma/testResults.js·
+  //   sanswitch/perfDb.js·pdu/db.js), 목록에서 빠지면 '경로는 새 곳을 보는데 복사는 안 된' 상태가 된다
+  //   → 재시작 후 새 경로에 빈 DB 가 생기고 기존 이력은 옛 경로에 남아 화면에서 사라진다.
+  //   README 4단계로 원본을 지우면 실제로 소실된다. 아래 dbFilesInCode() 회귀 테스트가 재발을 막는다.
+  { file: 'sanswitch-perf.db', label: 'SAN 스위치 포트 처리량 이력(v2.410)' },
+  { file: 'rma-history.db', label: '원격 명령(RMA) 실행 이력(v2.416)' },
+  { file: 'rma-tests.db', label: '원격 명령(RMA) 점검 결과(v2.418)' },
+  { file: 'pdu.db', label: 'PDU 전력·온습도 이력(v2.424)' },
   // vcenter-logs.db 는 **이미 자체 경로 설정**(설정 › 로그 수집의 storagePath)이 있어 제외한다 —
   // 두 곳에서 경로를 제어하면 어느 쪽이 이겼는지 알 수 없다(그 화면에서 옮기세요).
   // ipam.db 는 **외부 프로그램이 경로를 고정해 읽는 공유 파일**이라 기본 대상에서 제외한다
@@ -54,22 +64,7 @@ export function dbDir() {
   return v && String(v).trim() ? String(v).trim() : null;
 }
 
-/**
- * 파일명 → 실제 사용할 절대 경로. config.js 가 각 DB 경로를 만들 때 쓴다.
- * dbDir 이 설정돼 있으면 그 아래, 없으면 CONFIG_DIR 아래.
- */
-export function dbFilePath(name) {
-  const d = dbDir();
-  return path.join(d || CONFIG_DIR, name);
-}
 
-/** 설정 저장(경로만). 검증은 호출부(라우트)가 preflight 로 먼저 한다. */
-export function saveDbDir(dir) {
-  const next = { ...readFile(), dbDir: dir ? String(dir) : '', updatedAt: Date.now() };
-  fs.mkdirSync(CONFIG_DIR, { recursive: true });
-  fs.writeFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
-  return dbDir();
-}
 
 const sidecars = (p) => [p, `${p}-wal`, `${p}-shm`];
 
@@ -132,6 +127,24 @@ export function preflight(targetDir) {
   if (target && path.resolve(target).startsWith(path.resolve(src) + path.sep)) {
     warnings.push('대상이 현재 경로의 하위입니다 — 권장하지 않습니다(백업·정리가 헷갈립니다).');
   }
+  // systemd 하드닝(v2.451) — packaging/offline/vmware-portal.service 는
+  //   ProtectSystem=full  → /usr·/boot·/efi·/etc 읽기전용
+  //   ProtectHome=true    → /home·/root·/run/user 접근 차단
+  //   ReadWritePaths=@PREFIX@ @CONFIG_DIR@  → 이 둘만 예외
+  // 새 경로가 위 보호 대상 안이면 서비스가 **기동 후에야** 쓰기 실패를 만난다(스크립트는 root 로
+  // 도니 복사는 성공한다). 그래서 사전에 걸러 준다. 유닛을 직접 읽지는 않으므로(설치 위치가
+  // 배포마다 다르다) 경로 규칙으로만 판단하고, 확정이 아니라 경고/차단 문구로 안내한다.
+  if (target && !reasons.length) {
+    const abs = path.resolve(target);
+    const under = (dir) => abs === dir || abs.startsWith(`${dir}/`);
+    const cfgAbs = path.resolve(CONFIG_DIR);
+    const inConfigDir = abs === cfgAbs || abs.startsWith(`${cfgAbs}/`);
+    if ((under('/home') || under('/root'))) {
+      reasons.push('systemd 하드닝(ProtectHome=true) 때문에 /home·/root 아래는 서비스가 접근할 수 없습니다 — /data 같은 별도 볼륨을 쓰세요.');
+    } else if ((under('/usr') || under('/boot') || under('/efi')) || (under('/etc') && !inConfigDir)) {
+      reasons.push('systemd 하드닝(ProtectSystem=full) 때문에 /usr·/boot·/etc 아래는 서비스가 쓸 수 없습니다(CONFIG_DIR 은 예외) — /data 같은 별도 볼륨을 쓰거나 유닛의 ReadWritePaths 에 경로를 추가하세요.');
+    }
+  }
   let created = false;
   if (target && !reasons.length) {
     try {
@@ -161,53 +174,5 @@ export function preflight(targetDir) {
   return { ok: reasons.length === 0, reasons, warnings, created, inventory: inv, targetFree, estimatedSeconds: Math.ceil(inv.totalBytes / (50 * 1024 * 1024)) };
 }
 
-/**
- * 실제 복사 + 검증. **원본은 삭제하지 않는다.**
- * onProgress({ file, copiedBytes, totalBytes }) 로 진행률을 알린다.
- * 반환 { ok, copied[], failed[], totalBytes, verified }
- */
-export async function copyToDir(targetDir, { onProgress = null } = {}) {
-  const src = dbDir() || CONFIG_DIR;
-  const inv = migrationInventory(src);
-  const copied = []; const failed = [];
-  let done = 0;
 
-  const copyOne = (from, to) => {
-    fs.mkdirSync(path.dirname(to), { recursive: true });
-    fs.copyFileSync(from, to);
-    // 검증: 크기 + SHA-256(무성 손상으로 절단본이 남는 것을 막는다).
-    const a = sizeOf(from); const b = sizeOf(to);
-    if (a !== b) throw new Error(`크기 불일치(${a} → ${b})`);
-    if (sha256(from) !== sha256(to)) throw new Error('체크섬 불일치');
-    try { fs.chmodSync(to, 0o600); } catch { /* best effort */ }
-    return b;
-  };
-
-  for (const f of inv.files) {
-    try {
-      if (f.kind === 'file') {
-        for (const p of sidecars(path.join(src, f.file))) {
-          if (!fs.existsSync(p)) continue;
-          const to = path.join(targetDir, path.basename(p));
-          done += copyOne(p, to);
-          if (onProgress) onProgress({ file: path.basename(p), copiedBytes: done, totalBytes: inv.totalBytes });
-          await new Promise((r) => setImmediate(r)); // 큰 파일 사이 양보
-        }
-      } else {
-        const fromDir = path.join(src, f.dir);
-        for (const name of fs.readdirSync(fromDir)) {
-          done += copyOne(path.join(fromDir, name), path.join(targetDir, f.dir, name));
-          if (onProgress) onProgress({ file: `${f.dir}/${name}`, copiedBytes: done, totalBytes: inv.totalBytes });
-          await new Promise((r) => setImmediate(r));
-        }
-      }
-      copied.push({ ...f });
-    } catch (e) {
-      failed.push({ ...f, error: e.message });
-    }
-  }
-  return { ok: failed.length === 0, copied, failed, totalBytes: inv.totalBytes, copiedBytes: done, sourceDir: src, targetDir };
-}
-
-export const dbLocationFile = () => FILE;
 export const defaultDbDir = () => CONFIG_DIR;

@@ -91,7 +91,7 @@ export function VmRemoteButton({ item }) {
   return (
     <>
       <button className="logout-btn" disabled={canRemote === false} title={probeTip} style={{ padding: '8px 14px', opacity: canRemote === false ? 0.5 : 1, color: probeColor || undefined, borderColor: probeColor || undefined }}
-        onClick={() => { setError(null); setOpen(true); }} title={probeTip}>
+        onClick={() => { setError(null); setOpen(true); }}>
         🔗 원격 접속{anyLoading ? ' …' : ' ●'}
       </button>
 

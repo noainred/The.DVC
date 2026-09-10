@@ -9,10 +9,12 @@
  */
 
 import fs from 'node:fs';
+import { shouldStore, policyFromEnv } from '../metrics/deadband.js';   // v2.451: 변화분만 저장
 import path from 'node:path';
 import { config } from '../config.js';
 
 const DB_PATH = config.idrac.dbPath;
+const deadbandPolicy = policyFromEnv();
 
 let impl = null; // chosen backend
 
@@ -97,6 +99,10 @@ function initSqlite() {
     const bucketsHourlyStmt = db.prepare('SELECT server_id, hb, sumw, cnt FROM power_hourly WHERE hb >= ?');
     const pruneHourlyStmt = db.prepare('DELETE FROM power_hourly WHERE hb < ?');
     const delOneHourlyStmt = db.prepare('DELETE FROM power_hourly WHERE server_id = ?');
+    // dead-band 상태(v2.451): serverId -> 마지막으로 **원본에 저장한** 샘플. 메모리 전용이라
+    // 재시작하면 서버당 1행이 한 번 더 저장될 뿐이다. 크기는 등록 서버 수로 유계.
+    const lastKeptW = new Map();
+    let _skippedW = 0;
     return {
       kind: 'sqlite',
       insert: (serverId, watts, ts) => { const r = insertStmt.run(serverId, watts, ts); rollupOne(serverId, watts, ts); return r; },
@@ -104,11 +110,27 @@ function initSqlite() {
       // 원시 + 시간당 롤업을 같은 트랜잭션에서 갱신해 항상 정합(원시와 집계가 어긋나지 않음).
       insertMany: (samples) => {
         if (!samples || !samples.length) return 0;
+        // v2.451 — **변화분만 원본에 저장**(dead-band, metrics/deadband.js 와 같은 규약).
+        // 유휴 서버의 소비전력은 몇 W 안에서만 진동하는데 매 폴마다 전량 적재돼
+        // idrac-power.db 가 26.9GB 까지 자랐다(운영 실측).
+        // 시간당 롤업(power_hourly)은 **생략분까지 전부** 갱신하므로 대시보드의 24h 피크·평균·
+        // 최소는 정확히 유지된다(집계는 롤업에서 계산한다 — statsHourlyStmt 참조).
         db.exec('BEGIN');
-        try { for (const s of samples) { insertStmt.run(s.serverId, s.watts, s.ts); rollupOne(s.serverId, s.watts, s.ts); } db.exec('COMMIT'); }
-        catch (e) { try { db.exec('ROLLBACK'); } catch { /* */ } throw e; }
+        try {
+          for (const s of samples) {
+            const prev = lastKeptW.get(s.serverId) || null;
+            if (shouldStore(prev, { v: s.watts, ts: s.ts }, deadbandPolicy.power)) {
+              insertStmt.run(s.serverId, s.watts, s.ts);
+              lastKeptW.set(s.serverId, { v: s.watts, ts: s.ts });
+            } else { _skippedW++; }
+            rollupOne(s.serverId, s.watts, s.ts);   // 롤업은 전량
+          }
+          db.exec('COMMIT');
+        } catch (e) { try { db.exec('ROLLBACK'); } catch { /* */ } throw e; }
         return samples.length;
       },
+      /** 진단용 — dead-band 로 생략한 누적 샘플 수. */
+      deadbandSkipped: () => _skippedW,
       serverIds: () => idsStmt.all().map((r) => r.id),
       deleteServers: (ids) => { let n = 0; db.exec('BEGIN'); try { for (const id of ids) { n += delOneStmt.run(id).changes || 0; delOneHourlyStmt.run(id); } db.exec('COMMIT'); } catch (e) { try { db.exec('ROLLBACK'); } catch { /* */ } throw e; } return n; },
       latest: (serverId) => latestStmt.get(serverId) || null,
@@ -133,7 +155,14 @@ function initSqlite() {
         // 비-시간 버킷은 원시 테이블에서(현재 대시보드는 항상 1시간이라 이 경로는 예외적).
         return bucketStmt.all(bucketMs, sinceTs).map((r) => ({ serverId: r.server_id, bucket: r.bk * bucketMs, avg: r.avgw }));
       },
-      prune: (beforeTs) => { const r = pruneStmt.run(beforeTs); try { pruneHourlyStmt.run(Math.floor(beforeTs / HOUR_MS)); } catch { /* */ } return r; },
+      // v2.451: 원본과 롤업의 보존기간 분리(metrics/db.js 와 같은 규약).
+      // rollupBeforeTs 생략 시 기존 동작(둘 다 같은 기준).
+      prune: (beforeTs, rollupBeforeTs = null) => {
+        const r = pruneStmt.run(beforeTs);
+        const rb = rollupBeforeTs == null ? beforeTs : rollupBeforeTs;
+        try { pruneHourlyStmt.run(Math.floor(rb / HOUR_MS)); } catch { /* */ }
+        return r;
+      },
     };
   });
 }

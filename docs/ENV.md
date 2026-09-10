@@ -1,9 +1,9 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **287개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **289개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
-- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-09)
+- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-10)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다.
 - `portal.env.example` 에 예시가 있는 키는 ✅, 없는 키는 빈칸으로 표시한다.
 - 기본값 칸이 비어 있으면 코드에서 한 줄로 추출하지 못한 것이다(해당 파일을 참조).
@@ -30,7 +30,7 @@
 | `WAN_MAX_CONNECTIONS` | `6` |  | util/resilientFetch.js |
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
 
-## 공통 (78)
+## 공통 (80)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -66,6 +66,7 @@
 | `IDRAC_ENABLED` | `기본 적용('false' 로 끄기)` | ✅ | config.js |
 | `IDRAC_POLL_CONCURRENCY` |  |  | config.js |
 | `IDRAC_POLL_INTERVAL_MS` |  | ✅ | config.js |
+| `IDRAC_RAW_RETENTION_DAYS` | `0` |  | config.js |
 | `IDRAC_RETENTION_DAYS` | `90` | ✅ | config.js |
 | `IDRAC_SCAN_INTERVAL_MS` |  |  | config.js |
 | `IDRAC_TIMEOUT_MS` | `15000` |  | config.js |
@@ -94,6 +95,7 @@
 | `SITE_INVENTORY_STALE_MS` | `300000` |  | store.js |
 | `SVCMON_ROLE` | `''` |  | config.js |
 | `TEMP_DB_PATH` |  |  | config.js |
+| `TEMP_RAW_RETENTION_DAYS` | `90` |  | config.js |
 | `TEMP_RETENTION_DAYS` | `1830` |  | config.js |
 | `TEMP_SAMPLE_INTERVAL_MS` | `60000` |  | config.js |
 | `TOTP_ISSUER` | `'VMware Portal'` |  | config.js |
@@ -466,4 +468,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 59 / 287
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 59 / 289

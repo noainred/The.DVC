@@ -258,6 +258,8 @@ const server = app.listen(config.port, () => {
   console.log(`\n  VMware Global Monitoring Portal — API`);
   console.log(`  ▸ listening on http://localhost:${config.port}`);
   console.log(`  ▸ data source: ${config.dataSource}`);
+  // v2.451: DB 저장 경로를 기동 로그에 남긴다 — 옮겼는데 권한 문제로 폴백된 경우를 여기서 알 수 있다.
+  console.log(`  ▸ db dir: ${config.dbDir || `${config.configDir} (기본)`}`);
   console.log(`  ▸ poll interval: ${config.pollIntervalMs / 1000}s`);
   console.log(`  ▸ auth: ${config.auth.enabled ? 'enabled' : 'disabled'}\n`);
   // OTP 전용 정책에서 로그인 가능한 관리자가 하나도 없으면 콘솔 등록 절차를 안내(조용한 잠금 방지).

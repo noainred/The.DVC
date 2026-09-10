@@ -12,7 +12,7 @@ import { config } from '../config.js';
 const FILE = path.join(config.configDir, 'metrics.json');
 
 // Fields editable from the portal.
-const FIELDS = ['sampleIntervalMs', 'retentionDays', 'gpuUtilEnabled', 'gpuUtilIntervalSec'];
+const FIELDS = ['sampleIntervalMs', 'retentionDays', 'rawRetentionDays', 'gpuUtilEnabled', 'gpuUtilIntervalSec'];
 
 // Guardrails: don't let the UI set an interval so small it hammers vCenter.
 const MIN_INTERVAL_MS = 10_000;   // 10초
@@ -26,7 +26,9 @@ function readFile() {
 
 /** Effective settings = env defaults overlaid with persisted overrides. */
 export function loadMetricsSettings() {
-  const eff = { sampleIntervalMs: config.temp.sampleIntervalMs, retentionDays: config.temp.retentionDays, gpuUtilEnabled: true, gpuUtilIntervalSec: 60 };
+  // rawRetentionDays(v2.451): **원본(분 단위)** 보존기간. 롤업(시간당 평균·최소·최대)은
+  // retentionDays 만큼 그대로 남는다. 0 = 원본도 retentionDays 를 따름(예전 동작).
+  const eff = { sampleIntervalMs: config.temp.sampleIntervalMs, retentionDays: config.temp.retentionDays, rawRetentionDays: config.temp.rawRetentionDays, gpuUtilEnabled: true, gpuUtilIntervalSec: 60 };
   const persisted = readFile();
   // 로드에도 coerce 적용 — 손으로 고친/손상된 metrics.json의 0·문자열 주기가 그대로
   // setInterval에 흘러들면 Node가 1ms로 클램프해 초당 1000회 샘플러 틱이 돈다.
@@ -37,6 +39,7 @@ export function loadMetricsSettings() {
 function coerce(field, v) {
   if (field === 'sampleIntervalMs') return Math.max(MIN_INTERVAL_MS, Math.min(MAX_INTERVAL_MS, Number(v) || MIN_INTERVAL_MS));
   if (field === 'retentionDays') return Math.max(0, Math.floor(Number(v) || 0));
+  if (field === 'rawRetentionDays') return Math.max(0, Math.floor(Number(v) || 0));
   if (field === 'gpuUtilEnabled') return v !== false;
   if (field === 'gpuUtilIntervalSec') return Math.max(MIN_GPU_SEC, Math.min(MAX_GPU_SEC, Math.floor(Number(v) || 60)));
   return v;

@@ -10,7 +10,7 @@ import { probeRelayPath } from '../../vcenter/relayProbe.js';
 import { portalDbReport, enumerateDbFiles } from '../../insights/portalDb.js';
 import { inspectMany } from '../../insights/dbHealth.js';
 import { dbDir, defaultDbDir, preflight, migrationInventory } from '../../insights/dbLocation.js';
-import { writeMigrationScript, listMigrationScripts, migrationsDir } from '../../insights/migrateScript.js';
+import { writeMigrationScript, listMigrationScripts, migrationsDir, DEFAULT_SERVICE, DEFAULT_USER, unitNameIssue } from '../../insights/migrateScript.js';
 import { getCodexCheckReport, renderCodexCheckMarkdown, writeCodexCheckReport } from '../../security/codexCheck.js';
 import { getMetricsDb } from '../../metrics/db.js';
 import { memtrackReport } from '../../system/memtrack.js';
@@ -138,10 +138,18 @@ adminRouter.post('/portal-db/location/script', adminOnly, (req, res) => {
     const targetDir = String(req.body?.targetDir || '').trim();
     const pf = preflight(targetDir);
     if (!pf.ok) return res.status(400).json({ ok: false, reason: pf.reasons.join(' / '), preflight: pf });
+    // v2.451: 기본 계정은 install.sh 의 SERVICE_USER('vmportal') 와 맞춘다(예전엔 서비스명과 혼동).
+    // service/user 는 생성 스크립트와 README 의 bash 블록에 삽입되므로 targetDir 과 같은 수준으로 검증한다.
+    const service = String(req.body?.service || DEFAULT_SERVICE);
+    const user = String(req.body?.user || DEFAULT_USER);
+    for (const [v, what] of [[service, '서비스 이름'], [user, '서비스 계정']]) {
+      const issue = unitNameIssue(v, what);
+      if (issue) return res.status(400).json({ ok: false, reason: issue });
+    }
     const out = writeMigrationScript({
       targetDir,
-      service: String(req.body?.service || 'vmware-portal'),
-      user: String(req.body?.user || 'vmware-portal'),
+      service,
+      user,
     });
     logAudit({
       user: req.user?.username, action: 'DB 마이그레이션 스크립트 생성',

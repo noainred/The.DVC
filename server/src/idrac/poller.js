@@ -94,7 +94,12 @@ async function pollOnceInner() {
   catch (e) { console.warn('[idrac] 전력 적재 실패:', e.message); }
   // Retention pruning — 매 폴 DELETE 스캔 금지(store.js/metrics 샘플러와 동일 스로틀 패턴).
   if (config.idrac.retentionDays > 0 && (++pruneTick % 10 === 0)) {
-    try { db.prune(ts - config.idrac.retentionDays * 86_400_000); } catch { /* best effort */ }
+    try {
+      // v2.451: 원본은 rawRetentionDays(설정 시), 롤업은 retentionDays. 0 이면 기존과 동일.
+      const keep = config.idrac.retentionDays;
+      const raw = config.idrac.rawRetentionDays > 0 ? Math.min(config.idrac.rawRetentionDays, keep) : keep;
+      db.prune(ts - raw * 86_400_000, ts - keep * 86_400_000);
+    } catch { /* best effort */ }
   }
   const failed = results.filter((r) => r.error).length;
   lastRun = { at: ts, ok: results.length - failed, failed, results };

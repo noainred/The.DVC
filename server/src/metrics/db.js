@@ -10,6 +10,7 @@
  */
 
 import fs from 'node:fs';
+import { splitByDeadband, policyFromEnv } from './deadband.js';
 import path from 'node:path';
 import { config } from '../config.js';
 
@@ -80,13 +81,26 @@ function initSqlite() {
     // 비싸진다(iDRAC 전력 withLatestCache 와 같은 문제·같은 처방). 최초 호출에 1회 시드 후
     // 쓰기 경로에서 O(1) 갱신. 캐시 갱신은 반드시 '커밋 성공 후'(실패분 유령 데이터 방지).
     const latestCache = new Map(); // metric -> Map<k, {v, ts}>
+    // dead-band 상태(v2.451): `${metric} ${k}` -> 마지막으로 **원본에 저장한** 샘플.
+    // 프로세스 메모리에만 둔다 — 재시작하면 각 계열의 첫 샘플이 한 번 더 저장될 뿐이라 안전하다.
+    // 크기는 (계열 x 키) 로 유계(호스트 658 + 클러스터/vCenter 집계 수준).
+    const lastKept = new Map();
+    const deadbandPolicy = policyFromEnv();
+    let _skippedTotal = 0;
     return {
       kind: 'sqlite',
       insertMany: (rows, ts) => {
+        // v2.451 — **변화분만 원본에 저장**(dead-band). 온도처럼 값이 거의 그대로인 계열이
+        // 1분마다 전량 적재되며 host-temp.db 가 34.3GB 까지 자랐다(운영 실측).
+        // 롤업(samples_hourly)은 **생략분까지 전부** 갱신하므로 시간당 평균·최소·최대는 정확하다.
+        // latestCache(최신값)도 생략분으로 갱신한다 — 화면의 '현재 온도' 는 저장 여부와 무관하다.
+        const { store, skipped } = splitByDeadband(rows, ts, lastKept, deadbandPolicy);
+        _skippedTotal += skipped;
         db.exec('BEGIN');
         try {
           const h = Math.floor(ts / HOUR) * HOUR;
-          for (const r of rows) { ins.run(r.metric, r.k, r.v, ts); insHour.run(r.metric, r.k, h, r.v, r.v, r.v); }
+          for (const r of store) ins.run(r.metric, r.k, r.v, ts);
+          for (const r of rows) insHour.run(r.metric, r.k, h, r.v, r.v, r.v);  // 롤업은 전량
           db.exec('COMMIT');
         } catch (e) { try { db.exec('ROLLBACK'); } catch { /* */ } throw e; }
         for (const r of rows) {
@@ -94,6 +108,8 @@ function initSqlite() {
           if (c) { const cur = c.get(r.k); if (!cur || ts >= cur.ts) c.set(r.k, { v: r.v, ts }); }
         }
       },
+      /** 진단용 — dead-band 로 생략한 누적 행 수(설정 화면·로그에서 효과 확인). */
+      deadbandSkipped: () => _skippedTotal,
       latestAll: (metric) => {
         let c = latestCache.get(metric);
         if (!c) {
@@ -138,11 +154,20 @@ function initSqlite() {
       recentAvg: (metric, sinceTs) => { const map = new Map(); for (const r of recentAvgAll.all(metric, sinceTs)) map.set(r.k, { avg: round1(r.avg), max: round1(r.max) }); return map; },
       meta: (metric) => { const r = metaStmt.get(metric); return { firstTs: r?.mn ?? null, lastTs: r?.mx ?? null, count: Number(r?.n || 0) }; },
       dump: (metric, sinceTs, untilTs, limit) => dumpStmt.all(metric, sinceTs, untilTs, limit).map((r) => ({ k: r.k, v: r.v, ts: r.ts })),
-      prune: (beforeTs) => {
+      /**
+       * @param beforeTs        이 시각 이전의 **원본**을 지운다.
+       * @param rollupBeforeTs  이 시각 이전의 **롤업**을 지운다(생략 시 원본과 같은 기준 — 기존 동작).
+       *
+       * v2.451: 원본과 롤업의 보존기간을 분리했다. 원본은 분 단위라 용량의 대부분을 차지하지만
+       * 오래된 구간을 분 단위로 볼 일은 드물고, 60분+ 버킷 조회는 이미 롤업을 쓴다(위 history 참조).
+       * 그래서 원본은 짧게(기본 90일), 롤업은 길게(기존 보존기간, 기본 5년) 둘 수 있다.
+       */
+      prune: (beforeTs, rollupBeforeTs = null) => {
         const r = prune.run(beforeTs);
-        // 롤업도 함께 정리(원본만 지우면 집계가 영원히 남는다). 경계의 부분 시간대(1시간 미만)는
+        // 롤업도 정리한다(원본만 지우면 집계가 영원히 남는다). 경계의 부분 시간대(1시간 미만)는
         // 남겨 롤업이 원본보다 먼저 비는 일이 없게 한다. 실패해도 원본 prune 결과는 유지.
-        try { pruneHourly.run(beforeTs - HOUR); } catch (e) { console.warn(`[metrics] 롤업 prune 실패: ${e.message}`); }
+        const rb = (rollupBeforeTs == null ? beforeTs : rollupBeforeTs) - HOUR;
+        try { pruneHourly.run(rb); } catch (e) { console.warn(`[metrics] 롤업 prune 실패: ${e.message}`); }
         for (const c of latestCache.values()) {
           for (const [k, e] of c) if (e.ts < beforeTs) c.delete(k);
         }

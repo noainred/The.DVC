@@ -43,12 +43,22 @@ const EDGE_CENTRAL_URL = (process.env.CENTRAL_URL || '').replace(/\/+$/, '');
  * dbLocation.js 를 import 하면 순환 참조가 되므로 여기서 파일을 직접 읽는다(기동 시 1회).
  */
 function readDbDir() {
+  const cfgDir = process.env.CONFIG_DIR || path.resolve(ROOT, 'config');
+  const file = path.join(cfgDir, 'db-location.json');
   try {
-    const cfgDir = process.env.CONFIG_DIR || path.resolve(ROOT, 'config');
-    const j = JSON.parse(fs.readFileSync(path.join(cfgDir, 'db-location.json'), 'utf8'));
+    const j = JSON.parse(fs.readFileSync(file, 'utf8'));
     const v = j && j.dbDir ? String(j.dbDir).trim() : '';
     return v || null;
-  } catch { return null; }
+  } catch (e) {
+    // v2.451: 예전에는 모든 예외를 조용히 삼켜 null 을 돌려줬다. 그래서 마이그레이션 스크립트가
+    // 소유권을 잘못 잡아 이 파일을 못 읽는 경우(EACCES)에도 아무 흔적 없이 **옛 경로로 폴백**했고,
+    // 관리자는 "복사·검증 완료" 만 보고 성공했다고 믿었다. '파일 없음'(정상)과 그 외를 구분한다.
+    if (e && e.code !== 'ENOENT') {
+      console.error(`[db-location] ${file} 을(를) 읽지 못해 **기본 경로(CONFIG_DIR)로 폴백**합니다: ${e.message}`);
+      console.error('[db-location] DB 경로를 옮겼다면 이 상태에서는 적용되지 않습니다 — 파일 권한(서비스 계정 읽기 가능)을 확인하세요.');
+    }
+    return null;
+  }
 }
 const DB_DIR = readDbDir();
 /** DB 파일 경로 — 설정된 dbDir 이 있으면 그 아래, 없으면 CONFIG_DIR. */
@@ -103,6 +113,9 @@ export const config = {
     dbPath: process.env.IDRAC_DB_PATH || dbFile('idrac-power.db'),
     // How many days of samples to retain (older rows pruned). 0 = keep all.
     retentionDays: Number(process.env.IDRAC_RETENTION_DAYS) || 90,
+    // 원본(샘플 단위) 보존기간(v2.451). 0 = retentionDays 와 동일(기존 동작).
+    // 시간당 롤업(power_hourly)은 retentionDays 만큼 남으므로 대시보드 집계는 그대로다.
+    rawRetentionDays: Number(process.env.IDRAC_RAW_RETENTION_DAYS) || 0,
     // Per-request timeout to the iDRAC Redfish API.
     timeoutMs: Number(process.env.IDRAC_TIMEOUT_MS) || 15_000,
     // --- OME (OpenManage Enterprise) tuning ---
@@ -120,7 +133,11 @@ export const config = {
     // so it survives upgrades. 5-year retention by default; sampled on an interval.
     dbPath: process.env.TEMP_DB_PATH || dbFile('host-temp.db'),
     sampleIntervalMs: Number(process.env.TEMP_SAMPLE_INTERVAL_MS) || 60_000,  // 1분 (설정에서 변경 가능)
-    retentionDays: Number(process.env.TEMP_RETENTION_DAYS) || 1830,           // ~5년
+    retentionDays: Number(process.env.TEMP_RETENTION_DAYS) || 1830,           // ~5년(시간당 롤업 기준)
+    // 원본(분 단위) 보존기간(v2.451) — 용량의 대부분이 원본이라 짧게 두고, 그 이전 구간은
+    // 시간당 롤업(평균·최소·최대)만 남긴다. 60분+ 버킷 조회는 이미 롤업을 쓰므로 장기 추이는 그대로 보인다.
+    // 0 = 원본도 retentionDays 를 따름(예전 동작).
+    rawRetentionDays: Number(process.env.TEMP_RAW_RETENTION_DAYS) || 90,
   },
   ping: {
     // 네트워크 Ping 모니터링 — 등록한 대상(호스트)의 도달성/지연(RTT)을 주기적으로 측정해
