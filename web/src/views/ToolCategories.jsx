@@ -169,7 +169,9 @@ export default function ToolCategories() {
         </div>
 
         {/* ── 도구 선택 ── */}
-        <div>
+        {/* minWidth:0 — 이게 없으면 내부 기능 그리드(minmax 240px 다열)의 본질 최소폭이
+            1fr 트랙(기본 min-width:auto)을 밀어내 좌측 카테고리 열을 덮어 잘린다(v2.458). */}
+        <div style={{ minWidth: 0 }}>
           <div className="flex gap" style={{ alignItems: 'center', marginBottom: 6, flexWrap: 'wrap' }}>
             <b style={{ fontSize: 13 }}>
               {cur ? <>‘{cur.icon} {cur.label}’ 에 포함할 기능</> : '기능 목록'}

@@ -216,7 +216,13 @@ function Portal({ user, onLogout }) {
 
   const saveLanding = (id) => { setLandingTab(id); localStorage.setItem(LANDING_KEY, id); };
 
-  const { data: health } = usePolling('/health', {}, 20_000);
+  const { data: health, error: healthError } = usePolling('/health', {}, 20_000);
+  // 업그레이드 중 판정(v2.458): 새 버전이 가용(updateAvailable)인 상태에서 서버가 응답을 멈추면
+  // (업그레이드 적용 → 재시작으로 포탈이 잠시 멈춘다) 헤더 배지를 빨간 점멸 'Upgrading…'로 바꾼다.
+  // health 폴링은 실패해도 직전 값을 유지하므로(usePolling) health.updateAvailable 은 마지막 정상
+  // 응답값이 남아 있고, healthError 는 현재 불응답을 뜻한다. 서버가 새 버전으로 돌아오면 에러가
+  // 풀려 자동 해제되고, 버전 변경이 감지되면 아래 '업그레이드 완료' 토스트가 뜬다.
+  const upgrading = Boolean(health?.updateAvailable) && Boolean(healthError);
   const { data: vcenters } = usePolling('/vcenters', {}, 60_000);
 
   // Notify when the running version changes (an upgrade was applied + restarted).
@@ -293,14 +299,29 @@ function Portal({ user, onLogout }) {
           <div className="logo" onClick={bumpEgg} style={{ cursor: 'pointer' }}>V</div>
           <div>
             <h1 className="brand-title">The Davinci<br />Virtual Platform</h1>
-            {health?.version && <span className="ver-badge brand-ver" style={{ cursor: 'pointer' }} title="릴리즈 노트 보기" onClick={() => setShowNotes(true)}>v{health.version}</span>}
-            {health?.source && (
-              <span className="ver-badge brand-ver" style={{
-                marginLeft: 6,
-                color: health.source === 'live' ? '#4ade80' : health.source === 'mock' ? '#fbbf24' : '#22d3ee',
-                background: health.source === 'live' ? 'rgba(34,197,94,.12)' : health.source === 'mock' ? 'rgba(245,158,11,.14)' : 'rgba(34,211,238,.12)',
-                borderColor: 'transparent',
-              }} title="데이터 소스">{health.source.toUpperCase()}</span>
+            {upgrading ? (
+              <span className="ver-badge brand-ver upgrading-badge"
+                title={`업그레이드 진행 중 — 서버가 재시작되어 잠시 응답하지 않습니다${health?.latestVersion ? ` (→ v${health.latestVersion})` : ''}`}>
+                ● Upgrading…
+              </span>
+            ) : (
+              <>
+                {health?.version && <span className="ver-badge brand-ver" style={{ cursor: 'pointer' }} title="릴리즈 노트 보기" onClick={() => setShowNotes(true)}>v{health.version}</span>}
+                {health?.source && (
+                  <span className="ver-badge brand-ver" style={{
+                    marginLeft: 6,
+                    color: health.source === 'live' ? '#4ade80' : health.source === 'mock' ? '#fbbf24' : '#22d3ee',
+                    background: health.source === 'live' ? 'rgba(34,197,94,.12)' : health.source === 'mock' ? 'rgba(245,158,11,.14)' : 'rgba(34,211,238,.12)',
+                    borderColor: 'transparent',
+                  }} title="데이터 소스">{health.source.toUpperCase()}</span>
+                )}
+                {health?.updateAvailable && (
+                  <span className="ver-badge brand-ver" style={{ cursor: 'pointer', marginLeft: 6, color: '#4ade80', background: 'rgba(34,197,94,.12)', borderColor: 'transparent' }}
+                    title={`새 버전 v${health.latestVersion || '?'} 가 있습니다 — 업그레이드 탭에서 적용`} onClick={() => setShowNotes(true)}>
+                    ▲ 새 버전{health.latestVersion ? ` v${health.latestVersion}` : ''}
+                  </span>
+                )}
+              </>
             )}
           </div>
         </div>
