@@ -40,6 +40,7 @@ const when = (ts) => (ts ? new Date(ts).toLocaleString() : '—');
 const UNIT_OPTS = [['auto', '자동'], ['GB', 'GB'], ['TB', 'TB'], ['PB', 'PB']];
 const GROUP_OPTS = [['none', '없음'], ['corp', '법인'], ['vcenter', 'vCenter'], ['cluster', '클러스터']];
 const groupField = { corp: 'corpName', vcenter: 'vcenterName', cluster: 'cluster' };
+const PAGE_OPTS = [['25', '25'], ['50', '50'], ['100', '100'], ['200', '200'], ['0', '전체']];
 
 // 세그먼트 컨트롤(단위·구분 토글)
 function Segmented({ opts, value, onChange, label }) {
@@ -65,6 +66,8 @@ export default function GuestDiskReport() {
   const [maxRatioStr, setMaxRatioStr] = useState('');       // 사용률(%) 이하 필터(빈 값 = 미적용)
   const [unit, setUnit] = useState('auto');
   const [group, setGroup] = useState('none');
+  const [pageSize, setPageSize] = useState('50');   // 한 화면 표시 개수('0'=전체)
+  const [page, setPage] = useState(0);              // 0-based
   const [detail, setDetail] = useState(null);
   const [detailBusy, setDetailBusy] = useState(false);
   const [form, setForm] = useState(null);
@@ -133,6 +136,15 @@ export default function GuestDiskReport() {
     return [...m.values()].sort((a, b) => b.free - a.free);
   }, [rows, group]);
 
+  // 페이지네이션 — 구분 없음이면 VM 행, 구분이면 그룹을 한 화면 개수 단위로 나눈다('0'=전체).
+  const items = group === 'none' ? rows : (groups || []);
+  const perPage = Number(pageSize) || 0;
+  const totalPages = perPage > 0 ? Math.max(1, Math.ceil(items.length / perPage)) : 1;
+  const pageClamped = Math.min(page, totalPages - 1);
+  const pageItems = perPage > 0 ? items.slice(pageClamped * perPage, pageClamped * perPage + perPage) : items;
+  // 구분·페이지 크기·데이터가 바뀌면 첫 페이지로(훅은 조기 return 위에 둔다 — React #310).
+  useEffect(() => { setPage(0); }, [group, pageSize, data]);
+
   if (error && !data) return <ErrorBox error={error} />;
   if (!data) return <Loading />;
 
@@ -198,6 +210,7 @@ export default function GuestDiskReport() {
       <div className="gd-toolbar">
         <Segmented label="단위" opts={UNIT_OPTS} value={unit} onChange={setUnit} />
         <Segmented label="구분" opts={GROUP_OPTS} value={group} onChange={setGroup} />
+        <Segmented label="개수" opts={PAGE_OPTS} value={pageSize} onChange={setPageSize} />
       </div>
       <div className="gd-toolbar">
         <div className="gd-min">
@@ -237,15 +250,36 @@ export default function GuestDiskReport() {
         <div className="gd-warn">최근 수집에서 {poller.lastResult.errors.length}개 vCenter 조회 실패(엣지 수집 vCenter는 중앙에서 직접 접속이 안 될 수 있습니다).</div>
       )}
 
+      {rows.length > 0 && (
+        <div className="gd-pager">
+          <span className="gd-pager-sum">
+            전체 <b>{data.vmCount.toLocaleString()}</b>대
+            {group !== 'none' && <> · <b>{items.length}</b>개 {GROUP_OPTS.find((g) => g[0] === group)[1]}</>}
+            {perPage > 0
+              ? <> · <b>{totalPages}</b>페이지 중 <b>{pageClamped + 1}</b>페이지 ({perPage}{group === 'none' ? '개' : '그룹'}씩)</>
+              : <> · 전체 한 화면</>}
+          </span>
+          {perPage > 0 && totalPages > 1 && (
+            <span className="gd-pager-btns">
+              <button type="button" className="gd-step" disabled={pageClamped <= 0} onClick={() => setPage(0)}>« 처음</button>
+              <button type="button" className="gd-step" disabled={pageClamped <= 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>‹ 이전</button>
+              <span className="gd-pager-pos">{pageClamped + 1} / {totalPages}</span>
+              <button type="button" className="gd-step" disabled={pageClamped >= totalPages - 1} onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}>다음 ›</button>
+              <button type="button" className="gd-step" disabled={pageClamped >= totalPages - 1} onClick={() => setPage(totalPages - 1)}>끝 »</button>
+            </span>
+          )}
+        </div>
+      )}
+
       {rows.length === 0 ? (
         <div className="gd-empty">
           회수 대상이 없습니다. {data.settings?.enabled ? '' : '주기 수집이 꺼져 있으면 '}‘지금 수집’으로 데이터를 채운 뒤 확인하세요(VMware Tools가 실행 중인 VM만 집계됩니다).
         </div>
       ) : group === 'none' ? (
-        <STable className="gd-table">{tableHead}<tbody>{rows.map(rowEl)}</tbody></STable>
+        <STable className="gd-table">{tableHead}<tbody>{pageItems.map(rowEl)}</tbody></STable>
       ) : (
         <div className="gd-groups">
-          {groups.map((g) => (
+          {pageItems.map((g) => (
             <details key={g.key} className="gd-group" open={groups.length <= 8}>
               <summary>
                 <span className="gd-group-name">{g.key}</span>
