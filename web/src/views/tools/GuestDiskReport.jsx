@@ -172,6 +172,9 @@ export default function GuestDiskReport({ scope = '' }) {
 
   const poller = data.poller || {};
   const dbOk = data.db?.available;
+  const coverage = Array.isArray(data.coverage) ? data.coverage : [];
+  const covWithData = coverage.filter((c) => c.vmCount > 0).length;
+  const covEmpty = coverage.length - covWithData;
 
   const tableHead = (
     <thead>
@@ -306,9 +309,34 @@ export default function GuestDiskReport({ scope = '' }) {
         </div>
       )}
 
+      {coverage.length > 0 && (
+        <details className="gd-coverage" open={rows.length === 0}>
+          <summary>
+            vCenter 커버리지 — {coverage.length}개 중 <b>{covWithData}</b>개 데이터 있음{covEmpty > 0 ? `, ${covEmpty}개 없음` : ''}
+          </summary>
+          <STable className="gd-table">
+            <thead><tr><th>vCenter</th><th>법인</th><th>수집원</th><th className="gd-num">데이터 VM</th><th>최근 수집</th><th data-nosort>상태</th></tr></thead>
+            <tbody>
+              {coverage.map((c) => (
+                <tr key={c.vcenterId}>
+                  <td>{c.vcenterName}</td>
+                  <td>{c.corpName || '—'}</td>
+                  <td>{c.collectSource === 'site' ? '엣지 수집(push)' : '중앙 직접'}</td>
+                  <td data-sort={c.vmCount} className="gd-num">{c.vmCount.toLocaleString()}</td>
+                  <td data-sort={c.lastTs || 0}>{when(c.lastTs)}</td>
+                  <td data-nosort>{c.vmCount > 0 ? '✅ 데이터 있음' : (c.collectSource === 'site' ? '⏳ 엣지 push 대기' : '⏳ 미수집')}</td>
+                </tr>
+              ))}
+            </tbody>
+          </STable>
+          <p className="muted gd-note">‘데이터 VM’은 VMware Tools가 파티션을 보고한 VM 수입니다. <b>엣지 수집(site)</b> vCenter는 중앙이 직접 접속할 수 없어, 엣지가 게스트 디스크를 중앙으로 push할 때 채워집니다(기본 12시간 주기). <b>중앙 직접</b> vCenter는 ‘지금 수집’ 또는 주기 수집을 켜면 채워집니다.</p>
+        </details>
+      )}
+
       {rows.length === 0 ? (
         <div className="gd-empty">
           회수 대상이 없습니다. {data.settings?.enabled ? '' : '주기 수집이 꺼져 있으면 '}‘지금 수집’으로 데이터를 채운 뒤 확인하세요(VMware Tools가 실행 중인 VM만 집계됩니다).
+          {covEmpty > 0 && <> 위 <b>vCenter 커버리지</b>에서 데이터가 없는 vCenter와 사유(엣지 push 대기/미수집)를 확인하세요.</>}
         </div>
       ) : group === 'none' ? (
         <STable className="gd-table">{tableHead}<tbody>{pageItems.map(rowEl)}</tbody></STable>

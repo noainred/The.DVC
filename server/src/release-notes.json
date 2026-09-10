@@ -1,6 +1,18 @@
 {
   "notes": [
     {
+      "version": "2.466.0",
+      "date": "2026-09-11",
+      "title": "게스트 디스크 회수 리포트 — 엣지 수집 vCenter 지원(재개발)",
+      "notes": [
+        "근본 원인: 게스트 파티션 할당/사용(guest.disk)은 기본 폴에 포함되지 않고 중앙이 vCenter 에 직접 라이브 SOAP 를 걸어야만 얻습니다. 그런데 collectMode='site'(엣지 위임) vCenter 는 중앙이 직접 접속하지 않는 구조(고RTT 회피)라, 그런 vCenter 는 게스트 디스크 데이터가 아예 없었습니다. '처음엔 됐는데 이제 안 됨'은 중앙이 직접 수집하는 vCenter 에서만 동작했기 때문입니다.",
+        "해결: 로컬 vCenter 를 직접 수집하는 엣지가 guest.disk 를 모아 중앙으로 push 합니다(기존 인벤토리 push 와 같은 단방향 아웃바운드). 중앙은 /api/central/guest-disk 에서 받아(agent 바인딩·TOFU 소유권·mock 차단·sanitize) guest-disk.db 에 저장하고 리포트가 조회합니다. 이제 site 수집 vCenter 도 리포트에 나타납니다.",
+        "엣지 push 는 인벤토리 push 가 켜진 사이트에서 기본 on(AGENT_PUSH_GUESTDISK=false 로 off), 게스트 파티션은 천천히 변하므로 기본 12시간 주기(AGENT_GUESTDISK_INTERVAL_MS). single-flight 가드 + per-vCenter 오류 격리.",
+        "중앙 주기 폴러는 site 위임 vCenter 를 라이브 조회에서 제외합니다(매번 실패/타임아웃하던 오류 제거) — site 는 엣지 push 로만 수신합니다.",
+        "정직 표시: 리포트에 'vCenter 커버리지' 패널을 추가해 vCenter별 데이터 유무·수집원(엣지/중앙)·최근 수집 시각과 '데이터 없음' 사유(엣지 push 대기/미수집)를 그대로 보여줍니다."
+      ]
+    },
+    {
       "version": "2.465.0",
       "date": "2026-09-11",
       "title": "게스트 디스크 리포트 — 표 헤더와 숫자 정렬 일치(우측 정렬)",
