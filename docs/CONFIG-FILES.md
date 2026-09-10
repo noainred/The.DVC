@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **126개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **127개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-09-10)
@@ -84,6 +84,7 @@
 | `login-fails.ndjson` | 로그(NDJSON) | 로그인 실패 저장소(분석용) — 포탈 자체 실패 + 게스트 OS 조사 결과를 적재한다. |  |  | ✅ | security/loginStore.js |
 | `login-monitor.json` | 설정 | 로그인 실패 주기 모니터 — 일정 주기로 로그인 실패를 분석하고, 브루트포스(임계 이상 반복) 의심이 | ✅ |  | ✅ | security/loginMonitor.js |
 | `login-policy-users.txt` | 텍스트 | 세션 보안 설정 — 유휴 자동 로그아웃(분) 등. CONFIG_DIR/security-session.json. | ✅ | ✅ | ✅ | security/securitySettings.js |
+| `mail.json` | 설정 | 포탈 공용 메일(SMTP) 설정 (`mail.json`, v2.454). | ✅ | ✅ | ✅ | mail/settings.js |
 | `metrics.json` | 설정 | Runtime-editable metrics sampler settings (온도/용량/GPU 수집 주기·보존기간). |  |  | ✅ | metrics/settings.js |
 | `net-issues-state.json` | 설정 | 게스트 네트워크 이슈 저장소 — 스캔마다 직전 카운터와 비교해 '증가분(델타)'을 산출하고, |  |  | ✅ | security/netIssueStore.js |
 | `net-issues.ndjson` | 로그(NDJSON) | 게스트 네트워크 이슈 저장소 — 스캔마다 직전 카운터와 비교해 '증가분(델타)'을 산출하고, |  |  | ✅ | security/netIssueStore.js |

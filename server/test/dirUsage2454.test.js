@@ -9,7 +9,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseDuOutput, topEntries, deltaMap, removedEntries, humanBytes, buildScanRecord, MAX_ENTRIES } from '../src/dirusage/scan.js';
 import { renderReport, renderSubject } from '../src/dirusage/report.js';
-import { targetIssue, mailIssue, smtpIssue, validate, DEFAULTS } from '../src/dirusage/settings.js';
+import { targetIssue, mailIssue, validate, DEFAULTS } from '../src/dirusage/settings.js';
 import { isDue, sameTop } from '../src/dirusage/scheduler.js';
 import { buildMime, dotStuff, encodeHeaderWord, normalizeAddresses, parseReply, pickAuthMech, ehloCaps } from '../src/util/smtp.js';
 import { fileRootIssue, buildCommand, PRESETS } from '../src/rma/commands.js';
@@ -186,22 +186,17 @@ test('대상 검증 — 경로·주기·TopN', () => {
   assert.match(targetIssue({ ...T, intervalHours: 0 }), /주기/);
 });
 
-test('메일 검증 — 발송을 켰을 때만 엄격하고, SMTP 설정까지 함께 본다', () => {
-  const smtp = { host: 'relay.local', port: 25, from: 'portal@corp.local' };
-  assert.equal(mailIssue({ enabled: false }, {}), null, '꺼져 있으면 검사하지 않는다');
-  assert.match(mailIssue({ enabled: true, to: [] }, smtp), /받는 사람/);
-  assert.match(mailIssue({ enabled: true, to: ['not-an-email'] }, smtp), /형식 오류/);
-  assert.equal(mailIssue({ enabled: true, to: ['a@b.com'] }, smtp), null);
-  assert.match(mailIssue({ enabled: true, to: ['a@b.com'] }, { ...smtp, host: '' }), /SMTP 서버/);
+test('메일 검증 — 수신자를 비우는 것은 오류가 아니다(공용 설정의 수신자를 쓴다)', () => {
+  assert.equal(mailIssue({ enabled: false }), null, '꺼져 있으면 검사하지 않는다');
+  assert.equal(mailIssue({ enabled: true, to: [] }), null, '비우면 공용 수신자로 간다');
+  assert.match(mailIssue({ enabled: true, to: ['not-an-email'] }), /형식 오류/);
+  assert.equal(mailIssue({ enabled: true, to: ['a@b.com'] }), null);
 });
 
-test('SMTP 검증 — 계정만 있고 비밀번호가 없으면 오류(이미 저장된 경우는 비워 둔다)', () => {
-  const base = { host: 'r', port: 25, from: 'a@b.com' };
-  assert.equal(smtpIssue(base), null);
-  assert.match(smtpIssue({ ...base, user: 'u' }), /비밀번호/);
-  assert.equal(smtpIssue({ ...base, user: 'u', password: 'p' }), null);
-  assert.match(smtpIssue({ ...base, from: 'bad' }), /From/);
-  assert.match(smtpIssue({ ...base, port: 0 }), /포트/);
+test('이 기능 설정에는 SMTP 가 없다 — 공용 mail.json 이 소유한다', () => {
+  // 기능마다 SMTP 를 두면 운영자가 같은 값을 여러 번 입력하고, 한쪽만 고쳐 놓고
+  // "왜 이 메일만 안 오지" 를 겪는다. 이 계약을 되돌리지 말 것.
+  assert.equal(DEFAULTS.smtp, undefined);
 });
 
 test('전체 검증 — 대상 id 중복을 잡는다', () => {

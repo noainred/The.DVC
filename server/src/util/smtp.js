@@ -173,7 +173,9 @@ function expect(reply, okCodes, what) {
  * 메일 1건 발송.
  *
  * @param {{host:string, port?:number, secure?:boolean, startTls?:boolean, user?:string, password?:string,
- *          from:string, timeoutMs?:number, rejectUnauthorized?:boolean, name?:string}} cfg
+ *          from:string, displayFrom?:string, timeoutMs?:number, rejectUnauthorized?:boolean, name?:string}} cfg
+ *   `from` 은 봉투 주소(MAIL FROM)로 쓰이는 **순수 주소**, `displayFrom` 은 헤더 From 에 넣을
+ *   표시 이름 포함 문자열이다(생략하면 from 을 그대로 쓴다).
  * @param {{to:string[]|string, cc?:string[]|string, subject:string, html?:string, text?:string}} msg
  * @returns {Promise<{accepted:string[], code:number, text:string}>}
  */
@@ -240,7 +242,11 @@ export async function sendMail(cfg, msg) {
     if (!accepted.length) throw new Error('모든 수신자가 거부되었습니다(릴레이 권한·주소 확인).');
 
     expect(await converse(sk, 'DATA', timeoutMs), [354], 'DATA');
-    const mime = buildMime({ from, to: to.ok, cc: cc.ok, subject: msg.subject, html: msg.html, text: msg.text });
+    // 봉투(MAIL FROM)는 순수 주소, 헤더 From 은 표시 이름을 붙일 수 있다("VMware Portal <a@b>").
+    // 표시 이름은 호출부(mail/service.js)가 제어문자·따옴표를 제거한 뒤 넘긴다.
+    const headerFrom = String(cfg.displayFrom || '').trim() || from;
+    if (HEADER_UNSAFE.test(headerFrom)) throw new Error('보내는 사람 표시 이름에 제어문자를 쓸 수 없습니다.');
+    const mime = buildMime({ from: headerFrom, to: to.ok, cc: cc.ok, subject: msg.subject, html: msg.html, text: msg.text });
     const sent = expect(await converse(sk, `${dotStuff(mime)}\r\n.`, timeoutMs), [250], '본문 전송');
     try { await converse(sk, 'QUIT', 3000); } catch { /* QUIT 응답은 못 받아도 무방 */ }
     return { accepted, code: sent.code, text: sent.lines[sent.lines.length - 1] || '' };

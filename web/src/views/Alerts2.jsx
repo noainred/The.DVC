@@ -40,8 +40,12 @@ export default function Alerts2() {
           <label style={{ gridColumn: '1 / -1' }}>Slack Incoming Webhook URL<input className="input" value={c.channels.slack.url} onChange={(e) => setCh('slack', 'url', e.target.value)} placeholder="https://hooks.slack.com/services/..." /></label>
           <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }}><input type="checkbox" checked={!!c.channels.webhook.enabled} onChange={(e) => setCh('webhook', 'enabled', e.target.checked)} /> Webhook 사용</label>
           <label style={{ gridColumn: '1 / -1' }}>Webhook URL (JSON POST)<input className="input" value={c.channels.webhook.url} onChange={(e) => setCh('webhook', 'url', e.target.value)} placeholder="https://your-endpoint/alerts" /></label>
+          <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }}><input type="checkbox" checked={!!c.channels.email?.enabled} onChange={(e) => setCh('email', 'enabled', e.target.checked)} /> 메일 사용</label>
         </div>
-        <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>이메일은 SMTP가 필요해 현재는 Webhook 경유를 권장합니다(사내 webhook→메일 게이트웨이).</div>
+        <div className="muted" style={{ fontSize: 11, marginTop: 6, lineHeight: 1.7 }}>
+          ✉ 메일은 <b>설정 › 메일 발송</b>의 SMTP 설정과 수신자를 씁니다(v2.454) — 여기서는 이 채널을 쓸지만 정합니다.
+          그 화면에서 <b>메일 발송 사용</b>과 <b>'알림' 종류</b>가 함께 켜져 있어야 실제로 나갑니다.
+        </div>
         <div className="flex gap" style={{ marginTop: 10 }}>
           <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={save}>저장</button>
           <button className="logout-btn" style={{ padding: '8px 14px' }} onClick={test}>테스트 발송</button>

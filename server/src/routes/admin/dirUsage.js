@@ -2,18 +2,15 @@
 //
 // 권한 경계(server/CLAUDE.md 규약을 그대로 따른다):
 //  - 조회/저장/실행은 **adminOnly**. 상태 변경 라우트라 requireRole 로 게이트한다.
-//  - SMTP 비밀번호를 다루는 저장·발송 테스트는 **requireSettingsOwner** — 백업·자격증명과 같은
-//    등급이다(릴레이 계정이 유출되면 사내 메일 위조에 쓰인다).
-//  - **비밀 값은 응답에 싣지 않는다** — redact() 가 hasPassword 불리언만 남긴다. '보기' 경로 금지.
-//  - 상태 변경은 전부 logAudit(비밀 미기재).
+//  - SMTP 접속 정보는 **여기 없다** — 포탈 공용 메일 설정(설정 › 메일 발송, `mail.json`)이 소유하고
+//    이 기능은 `sendPortalMail({ kind: 'dirusage' })` 로 보낸다. 따라서 이 라우트에 비밀 값이 없다.
+//  - 상태 변경은 전부 logAudit.
 import { requireRole } from '../../auth/auth.js';
 import { logAudit } from '../../audit.js';
-import { requireSettingsOwner } from './shared.js';
-import { load as loadCfg, save as saveCfg, redact, validate, smtpIssue } from '../../dirusage/settings.js';
+import { load as loadCfg, save as saveCfg, redact, validate } from '../../dirusage/settings.js';
 import { getDb, dbStatus } from '../../dirusage/db.js';
 import { runNow, schedulerStatus } from '../../dirusage/scheduler.js';
 import { renderReport, renderSubject } from '../../dirusage/report.js';
-import { sendMail } from '../../util/smtp.js';
 import { listRmaAgents } from '../../rma/jobs.js';
 
 const adminOnly = requireRole('admin');
@@ -33,16 +30,10 @@ export function registerDirUsage(adminRouter) {
     });
   });
 
-  // 저장 — SMTP 비밀번호가 들어오므로 설정 소유자만.
-  adminRouter.put('/dir-usage', adminOnly, requireSettingsOwner, (req, res) => {
+  // 저장 — 비밀 값이 없으므로 adminOnly 로 충분하다(SMTP 는 설정 › 메일 발송이 소유자 게이트).
+  adminRouter.put('/dir-usage', adminOnly, (req, res) => {
     const body = req.body || {};
-    // 저장 전 검증: 현재 저장된 비밀번호를 합쳐 판정해야 '비워 두면 기존 유지'가 오탐되지 않는다.
-    const cur = loadCfg();
-    const merged = {
-      ...cur, ...body,
-      smtp: { ...cur.smtp, ...(body.smtp || {}), password: body.smtp?.password || cur.smtp.password },
-    };
-    const errs = validate(merged);
+    const errs = validate({ ...loadCfg(), ...body });
     if (errs.length) return res.status(400).json({ ok: false, reason: errs[0], errors: errs });
     const saved = saveCfg(body);
     logAudit({
@@ -91,28 +82,8 @@ export function registerDirUsage(adminRouter) {
     res.json({ ok: true, subject: renderSubject(cfg.mail.subject, { root: scan.root, agent: scan.agent, ts: scan.ts, topN: scan.entries.length }), html, text });
   });
 
-  // 메일 발송 테스트 — SMTP 설정 확인용. 비밀번호를 쓰므로 설정 소유자만.
-  adminRouter.post('/dir-usage/test-mail', adminOnly, requireSettingsOwner, async (req, res) => {
-    const cfg = loadCfg();
-    const issue = smtpIssue(cfg.smtp);
-    if (issue) return res.status(400).json({ ok: false, reason: issue });
-    const to = req.body?.to || cfg.mail.to;
-    if (!to || (Array.isArray(to) && !to.length)) return res.status(400).json({ ok: false, reason: '받는 사람을 지정하세요.' });
-    try {
-      const r = await sendMail(cfg.smtp, {
-        to,
-        subject: '[VMware Portal] 폴더 사용량 리포트 메일 테스트',
-        text: '이 메일이 보이면 SMTP 설정이 정상입니다.\n실제 리포트는 설정한 주기마다 자동 발송됩니다.',
-        html: '<div style="font-family:sans-serif"><p>이 메일이 보이면 <b>SMTP 설정이 정상</b>입니다.</p><p style="color:#667085;font-size:12.5px">실제 리포트는 설정한 주기마다 자동 발송됩니다.</p></div>',
-      });
-      logAudit({ user: req.user?.username, action: '폴더 사용량 리포트 메일 테스트', detail: `${r.accepted.length}명 수신`, ip: req.ip });
-      res.json({ ok: true, accepted: r.accepted, reply: r.text });
-    } catch (e) {
-      // 오류 메시지에 비밀번호가 실리지 않는다(smtp.js 가 인증 단계 명령을 가린다).
-      logAudit({ user: req.user?.username, action: '폴더 사용량 리포트 메일 테스트(실패)', detail: e.message.slice(0, 200), ip: req.ip });
-      res.status(502).json({ ok: false, reason: e.message });
-    }
-  });
+  // 메일 테스트는 공용 설정 화면(설정 › 메일 발송)의 `POST /admin/mail/test` 하나로 통일했다 —
+  // 기능마다 테스트 버튼이 따로 있으면 어느 SMTP 를 시험한 것인지 헷갈린다.
 }
 
 /** DB 행 → report.js 가 기대하는 레코드 모양. */

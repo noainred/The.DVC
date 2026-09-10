@@ -21,8 +21,7 @@ import { load as loadSettings } from './settings.js';
 import { parseDuOutput, buildScanRecord } from './scan.js';
 import { renderReport, renderSubject } from './report.js';
 import { getDb } from './db.js';
-import { sendMail } from '../util/smtp.js';
-import { logAudit } from '../audit.js';
+import { sendPortalMail } from '../mail/service.js';   // 공용 메일 발송(설정 › 메일 발송)
 
 /** 틱 주기 — 주기 자체는 시간 단위라 1분 간격으로 도래만 확인하면 충분하다. */
 const TICK_MS = Math.max(30_000, Number(process.env.DIRUSAGE_TICK_MS) || 60_000);
@@ -142,16 +141,24 @@ async function ingest(cfg, targetId, p, stdout, now) {
     db.markMailed(id, 0, '직전과 동일해 발송 생략(변경 시에만 발송)');
     return;
   }
-  try {
-    const { html, text } = renderReport(rec, prev);
-    const subject = renderSubject(mail.subject, { root: rec.root, agent: rec.agent, ts: rec.ts, topN: rec.entries.length });
-    const res = await sendMail(cfg.smtp, { to: mail.to, cc: mail.cc, subject, html, text });
+  const { html, text } = renderReport(rec, prev);
+  const subject = renderSubject(mail.subject, { root: rec.root, agent: rec.agent, ts: rec.ts, topN: rec.entries.length });
+  // sendPortalMail 은 throw 하지 않는다 — 수신자·SMTP 미설정은 skipped 로, 실제 실패만 failed 로 온다.
+  // 수신자를 비워 두면 공용 설정(설정 › 메일 발송)의 종류별/기본 수신자로 간다.
+  const res = await sendPortalMail({
+    kind: 'dirusage', subject, html, text,
+    to: (mail.to || []).length ? mail.to : null,
+    cc: (mail.cc || []).length ? mail.cc : null,
+  });
+  if (res.ok) {
     db.markMailed(id, 1, `${res.accepted.length}명 수신`);
     note('info', `${p.root}: 메일 발송 완료(${res.accepted.length}명)`);
-    logAudit({ user: 'system', action: 'dirusage.mail', detail: `${rec.root} → ${res.accepted.length}명` });
-  } catch (e) {
-    db.markMailed(id, 2, e.message);
-    note('error', `${p.root}: 메일 발송 실패 — ${e.message}`);
+  } else if (res.skipped) {
+    db.markMailed(id, 0, res.reason);
+    note('info', `${p.root}: 메일 미발송 — ${res.reason}`);
+  } else {
+    db.markMailed(id, 2, res.reason);
+    note('error', `${p.root}: 메일 발송 실패 — ${res.reason}`);
   }
 }
 

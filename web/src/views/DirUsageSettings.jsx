@@ -22,9 +22,7 @@ export default function DirUsageSettings() {
   const [targets, setTargets] = useState([]);
   const [enabled, setEnabled] = useState(false);
   const [mail, setMail] = useState({ enabled: false, to: '', cc: '', subject: '', onlyOnChange: false });
-  const [smtp, setSmtp] = useState({ host: '', port: 25, secure: false, startTls: true, user: '', password: '', from: '', rejectUnauthorized: true });
   const [retentionDays, setRetentionDays] = useState(365);
-  const [testTo, setTestTo] = useState('');
   const inited = useRef(false);
 
   const load = async () => {
@@ -41,7 +39,6 @@ export default function DirUsageSettings() {
           enabled: !!s.mail?.enabled, to: (s.mail?.to || []).join(', '), cc: (s.mail?.cc || []).join(', '),
           subject: s.mail?.subject || '', onlyOnChange: !!s.mail?.onlyOnChange,
         });
-        setSmtp({ ...smtp, ...(s.smtp || {}), password: '' });   // 비밀번호는 서버가 내려주지 않는다
         setRetentionDays(s.retentionDays ?? 365);
       }
       setErr(null);
@@ -62,12 +59,9 @@ export default function DirUsageSettings() {
       const body = {
         enabled, targets, retentionDays: Number(retentionDays) || 365,
         mail: { ...mail, to: splitAddr(mail.to), cc: splitAddr(mail.cc) },
-        // 비밀번호는 입력했을 때만 보낸다 — 빈 값이면 서버가 기존 값을 유지한다.
-        smtp: { ...smtp, password: smtp.password || undefined },
       };
       const r = await sendJson('/admin/dir-usage', 'PUT', body);
       setMsg('저장되었습니다. 다음 틱(최대 1분)부터 적용됩니다.');
-      setSmtp((s) => ({ ...s, password: '' }));
       if (r?.settings) setD((prev) => ({ ...prev, settings: r.settings }));
     } catch (e) { setMsg(`오류: ${e.message}`); }
     finally { setBusy(false); }
@@ -79,15 +73,6 @@ export default function DirUsageSettings() {
       const r = await postJson('/admin/dir-usage/run', { targetId });
       setMsg(r.ok ? `${r.queued.map((q) => `${q.path}: ${q.state}`).join(' · ')} — ${r.note}` : `오류: ${r.reason}`);
       load();
-    } catch (e) { setMsg(`오류: ${e.message}`); }
-    finally { setBusy(false); }
-  };
-
-  const testMail = async () => {
-    setBusy(true); setMsg(null);
-    try {
-      const r = await postJson('/admin/dir-usage/test-mail', { to: splitAddr(testTo || mail.to) });
-      setMsg(r.ok ? `테스트 메일을 보냈습니다(${r.accepted.length}명). 받은 편지함을 확인하세요.` : `오류: ${r.reason}`);
     } catch (e) { setMsg(`오류: ${e.message}`); }
     finally { setBusy(false); }
   };
@@ -195,39 +180,15 @@ export default function DirUsageSettings() {
         <input type="checkbox" checked={mail.onlyOnChange} onChange={(e) => setMail({ ...mail, onlyOnChange: e.target.checked })} />
         직전 회차와 Top 목록이 <b>같으면 보내지 않음</b>
       </label>
+      <Field label="스캔 이력 보존(일)">
+        <input className="input" type="number" min={1} max={3650} style={{ width: 120 }} value={retentionDays}
+          onChange={(e) => setRetentionDays(Number(e.target.value))} />
+      </Field>
 
-      {/* ── SMTP ─────────────────────────────────────────────── */}
-      <h4 style={{ margin: '20px 0 8px', fontSize: 14 }}>SMTP 서버</h4>
-      <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
-        사내 릴레이 기준입니다. 인증이 필요 없으면 계정을 비워 두세요.
-        평문 연결이라도 서버가 STARTTLS 를 광고하면 <b>자동으로 승격</b>한 뒤 인증 정보를 보냅니다.
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 10 }}>
-        <Field label="서버 주소"><input className="input" value={smtp.host} placeholder="relay.corp.local" onChange={(e) => setSmtp({ ...smtp, host: e.target.value })} /></Field>
-        <Field label="포트"><input className="input" type="number" min={1} max={65535} value={smtp.port} onChange={(e) => setSmtp({ ...smtp, port: Number(e.target.value) })} /></Field>
-        <Field label="보내는 사람(From)"><input className="input" value={smtp.from} placeholder="vmware-portal@corp.local" onChange={(e) => setSmtp({ ...smtp, from: e.target.value })} /></Field>
-        <Field label="계정 (선택)"><input className="input" value={smtp.user} onChange={(e) => setSmtp({ ...smtp, user: e.target.value })} /></Field>
-        <Field label={`비밀번호 ${d.settings?.smtp?.hasPassword ? '(저장됨 — 바꿀 때만 입력)' : ''}`}>
-          <input className="input" type="password" value={smtp.password} autoComplete="new-password"
-            placeholder={d.settings?.smtp?.hasPassword ? '●●●●●●' : ''} onChange={(e) => setSmtp({ ...smtp, password: e.target.value })} />
-        </Field>
-        <Field label="이력 보존(일)"><input className="input" type="number" min={1} max={3650} value={retentionDays} onChange={(e) => setRetentionDays(Number(e.target.value))} /></Field>
-      </div>
-      <div className="flex gap" style={{ alignItems: 'center', flexWrap: 'wrap', marginTop: 8, fontSize: 12.5 }}>
-        <label className="flex gap" style={{ alignItems: 'center' }}>
-          <input type="checkbox" checked={smtp.secure} onChange={(e) => setSmtp({ ...smtp, secure: e.target.checked })} /> 처음부터 TLS(465)
-        </label>
-        <label className="flex gap" style={{ alignItems: 'center' }}>
-          <input type="checkbox" checked={smtp.startTls !== false} onChange={(e) => setSmtp({ ...smtp, startTls: e.target.checked })} /> STARTTLS 사용
-        </label>
-        <label className="flex gap" style={{ alignItems: 'center' }}>
-          <input type="checkbox" checked={smtp.rejectUnauthorized !== false} onChange={(e) => setSmtp({ ...smtp, rejectUnauthorized: e.target.checked })} /> 인증서 검증
-        </label>
-      </div>
-      <div className="flex gap" style={{ alignItems: 'center', marginTop: 10, flexWrap: 'wrap' }}>
-        <input className="input" style={{ width: 240 }} value={testTo} placeholder="테스트 수신 주소(비우면 위 받는 사람)"
-          onChange={(e) => setTestTo(e.target.value)} />
-        <button className="logout-btn" style={{ padding: '5px 12px', fontSize: 12 }} disabled={busy} onClick={testMail}>메일 테스트</button>
+      <div className="muted" style={{ fontSize: 12, marginTop: 12, padding: '9px 11px', borderRadius: 6, background: 'rgba(46,144,250,.08)', border: '1px solid rgba(46,144,250,.3)', lineHeight: 1.7 }}>
+        ✉ <b>SMTP 서버 설정은 여기 없습니다.</b> 포탈의 모든 기능이 함께 쓰는
+        <b> 설정 › 메일 발송</b> 한 곳에서 정합니다(메일 테스트도 거기서 합니다).
+        위 <b>받는 사람</b>을 비워 두면 그 화면의 기능별/기본 수신자로 갑니다.
       </div>
 
       <div className="flex gap" style={{ alignItems: 'center', marginTop: 18, flexWrap: 'wrap' }}>

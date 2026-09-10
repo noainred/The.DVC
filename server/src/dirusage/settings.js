@@ -1,22 +1,22 @@
 /**
  * dirusage/settings.js — 폴더 사용량 리포트 설정 (`dirusage.json`, v2.454).
  *
- * 담는 것: 스캔 대상 목록(엣지·경로·주기·Top N) · 메일 수신자 · SMTP 접속 정보.
- * SMTP 비밀번호는 봉인 대상이라 `SECRET_FILES` 에 이 파일을 등록했다(secretVault).
+ * 담는 것: 스캔 대상 목록(엣지·경로·주기·Top N) · 이 리포트의 수신자.
+ *
+ * ⚠️ **SMTP 접속 정보는 여기 두지 않는다.** 포탈 공용 메일 설정(`mail.json`, 설정 › 메일 발송)
+ * 한 곳에서만 정하고 이 기능은 `sendPortalMail({ kind: 'dirusage' })` 로 보낸다. 기능마다 SMTP 를
+ * 따로 두면 운영자가 같은 값을 여러 번 입력하고, 한쪽만 고쳐 놓고 "왜 이 메일만 안 오지" 를 겪는다.
+ * 수신자를 비워 두면 공용 설정의 종류별/기본 수신자로 간다.
  *
  * 규약(되돌리지 말 것):
- *  - **비밀 값은 어떤 API 응답에도 싣지 않는다** — `redact()` 가 `hasPassword` 불리언만 남긴다
- *    (통합 계정 관리 v2.419 와 같은 규약). '보기'·'내보내기' 경로를 만들지 말 것.
- *  - 저장 시 **빈 비밀번호 = 기존 유지** — 화면이 값을 못 받으므로 그대로 저장하면 지워진다.
  *  - 원자적 쓰기 + 손상 보존(preserveCorrupt). 조용한 빈값 반환 금지.
- *  - 검증은 순수 함수(`targetIssue`·`mailIssue`·`smtpIssue`)로 분리한다 — 웹 테스트가 node 환경이라
+ *  - 검증은 순수 함수(`targetIssue`·`mailIssue`)로 분리한다 — 웹 테스트가 node 환경이라
  *    화면 렌더 테스트가 불가하므로 판정을 여기에 고정한다.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
-import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js';
 import { TOP_N_MIN, TOP_N_MAX } from './scan.js';
 import { normalizeAddresses } from '../util/smtp.js';
 
@@ -37,14 +37,10 @@ export const DEFAULTS = Object.freeze({
   targets: [],                      // [{ id, label, agent, instance, path, topN, intervalHours, enabled }]
   mail: {
     enabled: false,
-    to: [],
+    to: [],                         // 비우면 공용 설정(설정 › 메일 발송)의 수신자를 쓴다
     cc: [],
     subject: '[VMware Portal] {root} 폴더 사용량 Top {topN} ({date})',
     onlyOnChange: false,            // true 면 직전과 Top 목록이 같으면 보내지 않는다
-  },
-  smtp: {
-    host: '', port: 25, secure: false, startTls: true,
-    user: '', password: '', from: '', rejectUnauthorized: true, timeoutMs: 20000,
   },
   retentionDays: 365,               // 스캔 이력 보존
 });
@@ -76,7 +72,7 @@ export function load() {
   const out = structuredClone(DEFAULTS);
   try {
     if (fs.existsSync(FILE)) {
-      const p = openSecretsDeep(JSON.parse(fs.readFileSync(FILE, 'utf8')) || {});
+      const p = JSON.parse(fs.readFileSync(FILE, 'utf8')) || {};
       if (typeof p.enabled === 'boolean') out.enabled = p.enabled;
       if (Array.isArray(p.targets)) out.targets = p.targets.slice(0, MAX_TARGETS).map(normTarget);
       if (p.mail && typeof p.mail === 'object') {
@@ -89,11 +85,10 @@ export function load() {
           onlyOnChange: p.mail.onlyOnChange === true,
         };
       }
-      if (p.smtp && typeof p.smtp === 'object') out.smtp = { ...out.smtp, ...p.smtp };
       if (p.retentionDays != null) out.retentionDays = clamp(p.retentionDays, 1, 3650, 365);
     }
   } catch (e) {
-    // 손상 파일을 조용히 빈 설정으로 넘기면 다음 저장이 원본(수신자·SMTP 계정)을 지운다.
+    // 손상 파일을 조용히 빈 설정으로 넘기면 다음 저장이 원본(대상 목록·수신자)을 지운다.
     preserveCorrupt(FILE);
     console.warn(`[dirusage] 설정 로드 실패 — 원본을 .corrupt 로 보존하고 기본값으로 시작합니다: ${e.message}`);
   }
@@ -101,7 +96,7 @@ export function load() {
   return cache;
 }
 
-/** 저장 — 빈 비밀번호는 기존 값을 유지한다(화면이 비밀번호를 되받지 못하므로). */
+/** 저장 — 대상·수신자만 다룬다(SMTP 는 공용 mail.json). */
 export function save(body = {}) {
   const cur = load();
   const next = structuredClone(cur);
@@ -116,35 +111,17 @@ export function save(body = {}) {
       onlyOnChange: body.mail.onlyOnChange === true,
     };
   }
-  if (body.smtp && typeof body.smtp === 'object') {
-    const s = body.smtp;
-    next.smtp = {
-      host: String(s.host ?? cur.smtp.host).trim().slice(0, 253),
-      port: clamp(s.port, 1, 65535, cur.smtp.port || 25),
-      secure: s.secure === true,
-      startTls: s.startTls !== false,
-      user: String(s.user ?? cur.smtp.user).trim().slice(0, 200),
-      // ★ 빈 값 = 기존 유지. 지우려면 명시적으로 clearPassword 를 보낸다.
-      password: s.clearPassword === true ? '' : (s.password ? String(s.password) : cur.smtp.password),
-      from: String(s.from ?? cur.smtp.from).trim().slice(0, 253),
-      rejectUnauthorized: s.rejectUnauthorized !== false,
-      timeoutMs: clamp(s.timeoutMs, 1000, 120000, cur.smtp.timeoutMs || 20000),
-    };
-  }
   if (body.retentionDays != null) next.retentionDays = clamp(body.retentionDays, 1, 3650, 365);
 
-  atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep(next), null, 2), { mode: 0o600 });
+  atomicWriteFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
   cache = next;
   return next;
 }
 
 export function invalidate() { cache = null; }
 
-/** API 응답용 — 비밀 값을 제거하고 존재 여부만 남긴다. */
-export function redact(cfg = load()) {
-  const { password, ...smtp } = cfg.smtp || {};
-  return { ...cfg, smtp: { ...smtp, hasPassword: !!password } };
-}
+/** API 응답용. 이 파일에는 비밀 값이 없다(SMTP 는 공용 mail.json 소관). */
+export function redact(cfg = load()) { return cfg; }
 
 /* ── 검증(순수) ─────────────────────────────────────────────────────────── */
 
@@ -166,25 +143,16 @@ export function targetIssue(t) {
   return null;
 }
 
-/** 메일 설정의 문제점(발송을 켰을 때만 엄격). */
-export function mailIssue(mail, smtp) {
+/**
+ * 메일 설정의 문제점(발송을 켰을 때만 엄격).
+ * 수신자를 **비워 두는 것은 오류가 아니다** — 공용 설정(설정 › 메일 발송)의 수신자를 쓴다는 뜻이다.
+ * SMTP 자체의 검증은 공용 설정(mail/settings.js smtpIssue)이 소유한다.
+ */
+export function mailIssue(mail) {
   if (!mail?.enabled) return null;
   const to = normalizeAddresses(mail.to);
   const cc = normalizeAddresses(mail.cc || []);
   if (to.bad.length || cc.bad.length) return `주소 형식 오류: ${[...to.bad, ...cc.bad].join(', ')}`;
-  if (!to.ok.length && !cc.ok.length) return '받는 사람을 한 명 이상 입력하세요.';
-  return smtpIssue(smtp);
-}
-
-/** SMTP 설정의 문제점. */
-export function smtpIssue(smtp) {
-  if (!String(smtp?.host || '').trim()) return 'SMTP 서버 주소를 입력하세요.';
-  const from = String(smtp?.from || '').trim();
-  if (!from) return '보내는 사람(From) 주소를 입력하세요.';
-  if (normalizeAddresses([from]).ok.length !== 1) return '보내는 사람(From) 주소 형식이 올바르지 않습니다.';
-  const port = Number(smtp?.port);
-  if (!Number.isFinite(port) || port < 1 || port > 65535) return '포트는 1~65535 사이여야 합니다.';
-  if (smtp?.user && !smtp?.password) return '계정을 입력했다면 비밀번호도 필요합니다(이미 저장돼 있다면 비워 두세요).';
   return null;
 }
 
@@ -197,7 +165,7 @@ export function validate(cfg) {
   }
   const ids = (cfg?.targets || []).map((t) => t.id);
   if (new Set(ids).size !== ids.length) out.push('대상 id 가 중복되었습니다.');
-  const m = mailIssue(cfg?.mail, cfg?.smtp);
+  const m = mailIssue(cfg?.mail);
   if (m) out.push(`메일: ${m}`);
   return out;
 }
