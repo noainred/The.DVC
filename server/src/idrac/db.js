@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import { shouldStore, policyFromEnv } from '../metrics/deadband.js';   // v2.451: 변화분만 저장
 import path from 'node:path';
 import { config } from '../config.js';
+import { chunkedDelete } from '../util/chunkedPrune.js';
 
 const DB_PATH = config.idrac.dbPath;
 const deadbandPolicy = policyFromEnv();
@@ -75,7 +76,9 @@ function initSqlite() {
     // — 60s 폴×24h=1440 > limit 1000이면 최근 ~7h가 차트에서 사라짐). DESC로 최신 limit개를
     // 선택한 뒤 오름차순으로 되돌려 NDJSON 폴백(slice(-limit))과 순서·의미를 일치시킨다.
     const historyStmt = db.prepare('SELECT ts, watts FROM power_samples WHERE server_id = ? AND ts >= ? ORDER BY ts DESC LIMIT ?');
-    const pruneStmt = db.prepare('DELETE FROM power_samples WHERE ts < ?');
+    // 청크 DELETE (v2.453) — metrics/db.js 와 같은 이유. idrac-power.db 도 운영 실측 26.9GB 라
+    // 한 방 DELETE 는 이벤트 루프를 수 분 멈춘다. rowid 서브쿼리 + LIMIT 으로 끊는다.
+    const pruneStmt = db.prepare('DELETE FROM power_samples WHERE rowid IN (SELECT rowid FROM power_samples WHERE ts < ? LIMIT ?)');
     // 집계(전력 대시보드): 서버별 24h 피크/평균/최소/마지막 + 시간버킷 평균 — SQL GROUP BY로 효율 계산.
     // 비-시간 버킷(예외적)만 원시 테이블에서 계산 — 현재 대시보드는 항상 1시간 버킷이라 롤업 사용.
     const bucketStmt = db.prepare('SELECT server_id, CAST(ts / ? AS INTEGER) AS bk, AVG(watts) AS avgw FROM power_samples WHERE ts >= ? GROUP BY server_id, bk');
@@ -97,7 +100,7 @@ function initSqlite() {
     // 24h 통계를 시간당 롤업에서 계산: peak=MAX(maxw), min=MIN(minw), avg=SUM(sumw)/SUM(cnt), last=MAX(last_ts).
     const statsHourlyStmt = db.prepare('SELECT server_id, MAX(maxw) AS peak, MIN(minw) AS minw, SUM(sumw) AS sumw, SUM(cnt) AS cnt, MAX(last_ts) AS last FROM power_hourly WHERE hb >= ? GROUP BY server_id');
     const bucketsHourlyStmt = db.prepare('SELECT server_id, hb, sumw, cnt FROM power_hourly WHERE hb >= ?');
-    const pruneHourlyStmt = db.prepare('DELETE FROM power_hourly WHERE hb < ?');
+    const pruneHourlyStmt = db.prepare('DELETE FROM power_hourly WHERE rowid IN (SELECT rowid FROM power_hourly WHERE hb < ? LIMIT ?)');
     const delOneHourlyStmt = db.prepare('DELETE FROM power_hourly WHERE server_id = ?');
     // dead-band 상태(v2.451): serverId -> 마지막으로 **원본에 저장한** 샘플. 메모리 전용이라
     // 재시작하면 서버당 1행이 한 번 더 저장될 뿐이다. 크기는 등록 서버 수로 유계.
@@ -157,11 +160,13 @@ function initSqlite() {
       },
       // v2.451: 원본과 롤업의 보존기간 분리(metrics/db.js 와 같은 규약).
       // rollupBeforeTs 생략 시 기존 동작(둘 다 같은 기준).
-      prune: (beforeTs, rollupBeforeTs = null) => {
-        const r = pruneStmt.run(beforeTs);
+      prune: async (beforeTs, rollupBeforeTs = null) => {
+        const r = await chunkedDelete(pruneStmt, [beforeTs], { label: 'idrac.power_samples' });
+        if (r.deleted > 0) console.log(`[idrac] 전력 원본 prune ${r.deleted.toLocaleString()}행 삭제(${r.chunks}청크)${r.done ? '' : ' — 상한 도달, 다음 주기에 계속'}`);
         const rb = rollupBeforeTs == null ? beforeTs : rollupBeforeTs;
-        try { pruneHourlyStmt.run(Math.floor(rb / HOUR_MS)); } catch { /* */ }
-        return r;
+        try { await chunkedDelete(pruneHourlyStmt, [Math.floor(rb / HOUR_MS)], { label: 'idrac.power_hourly' }); }
+        catch (e) { console.warn(`[idrac] 롤업 prune 실패: ${e.message}`); }
+        return r.deleted;
       },
     };
   });
@@ -273,7 +278,7 @@ function withLatestCache(db) {
     deleteServers: (ids) => { const n = db.deleteServers(ids); for (const id of ids) cache.delete(id); return n; },
     // prune으로 beforeTs 이전 행이 전부 지워진 서버(죽은 서버)는 캐시에서도 축출한다.
     // 안 그러면 latest/latestAll이 사라진 서버의 낡은 최신값을 영원히 반환한다.
-    prune: (beforeTs) => { const r = db.prune(beforeTs); for (const [id, v] of cache) if (v.ts < beforeTs) cache.delete(id); return r; },
+    prune: async (beforeTs, rollupBeforeTs = null) => { const r = await db.prune(beforeTs, rollupBeforeTs); for (const [id, v] of cache) if (v.ts < beforeTs) cache.delete(id); return r; },
     latest: (serverId) => cache.get(serverId) || null,
     latestAll: () => new Map(cache),
   };

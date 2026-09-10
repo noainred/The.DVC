@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **317개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **319개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-10)
@@ -12,7 +12,7 @@
 > (루트 CLAUDE.md '스토리지 폴러 주기는 중앙 배포값' 참조).
 
 
-## 공용 유틸 (13)
+## 공용 유틸 (15)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -23,6 +23,8 @@
 | `LOOP_LAG_INTERVAL_MS` | `30000` |  | util/loopLag.js |
 | `LOOP_LAG_MONITOR` | `기본 아님('0' 일 때만 적용)` |  | util/loopLag.js |
 | `LOOP_LAG_WARN_MS` | `500` |  | util/loopLag.js |
+| `PRUNE_CHUNK_ROWS` |  |  | util/chunkedPrune.js |
+| `PRUNE_MAX_ROWS` |  |  | util/chunkedPrune.js |
 | `SNAP_CACHE_PER_NAME` | `12` |  | util/snapCache.js |
 | `SOAP_PARSE_MIN_CHARS` | `262144` |  | util/soapParsePool.js |
 | `SOAP_PARSE_WORKERS` |  |  | util/soapParsePool.js |
@@ -91,7 +93,7 @@
 | `SITE_INVENTORY_STALE_MS` | `300000` |  | store.js |
 | `SVCMON_ROLE` | `''` |  | config.js |
 | `TEMP_DB_PATH` |  |  | config.js |
-| `TEMP_RAW_RETENTION_DAYS` | `90` |  | config.js |
+| `TEMP_RAW_RETENTION_DAYS` | `0` |  | config.js |
 | `TEMP_RETENTION_DAYS` | `1830` |  | config.js |
 | `TEMP_SAMPLE_INTERVAL_MS` | `60000` |  | config.js |
 | `TOTP_ISSUER` | `'VMware Portal'` |  | config.js |
@@ -496,4 +498,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 317
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 319

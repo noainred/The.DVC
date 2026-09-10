@@ -77,7 +77,7 @@ test('prune: 원본·롤업·latest 캐시를 함께 정리한다', async () => 
   db.insertMany([{ metric: 'temp_vc', k: 'new', v: 2 }], T0 + 3 * HOUR);
   db.latestAll('temp_vc'); // 캐시 시드(old 포함)
   const cutoff = T0 + 2 * HOUR;
-  db.prune(cutoff);
+  await db.prune(cutoff);
   assert.equal(db.meta('temp_vc').count, 1, '원본에서 old 삭제');
   const latest = db.latestAll('temp_vc');
   assert.equal(latest.has('old'), false, '캐시에서도 old 제거');

@@ -98,8 +98,8 @@ async function pollOnceInner() {
       // v2.451: 원본은 rawRetentionDays(설정 시), 롤업은 retentionDays. 0 이면 기존과 동일.
       const keep = config.idrac.retentionDays;
       const raw = config.idrac.rawRetentionDays > 0 ? Math.min(config.idrac.rawRetentionDays, keep) : keep;
-      db.prune(ts - raw * 86_400_000, ts - keep * 86_400_000);
-    } catch { /* best effort */ }
+      await db.prune(ts - raw * 86_400_000, ts - keep * 86_400_000);
+    } catch (e) { console.warn(`[idrac] prune 실패: ${e.message}`); }
   }
   const failed = results.filter((r) => r.error).length;
   lastRun = { at: ts, ok: results.length - failed, failed, results };

@@ -28,7 +28,7 @@ export default function MetricsSettings() {
   const [intervalSec, setIntervalSec] = useState(60);
   const [retentionDays, setRetentionDays] = useState(1830);
   // 원본(분 단위) 보존 — 롤업과 분리(v2.451). 용량의 대부분이 원본이라 이 값이 파일 크기를 좌우한다.
-  const [rawRetentionDays, setRawRetentionDays] = useState(90);
+  const [rawRetentionDays, setRawRetentionDays] = useState(0);
   const [gpuEnabled, setGpuEnabled] = useState(true);
   const [gpuSec, setGpuSec] = useState(60);
   const [busy, setBusy] = useState(false);
@@ -44,7 +44,7 @@ export default function MetricsSettings() {
         inited.current = true;
         setIntervalSec(Math.round((d.settings.sampleIntervalMs || 60000) / 1000));
         setRetentionDays(d.settings.retentionDays ?? 1830);
-        setRawRetentionDays(d.settings.rawRetentionDays ?? 90);
+        setRawRetentionDays(d.settings.rawRetentionDays ?? 0);
         setGpuEnabled(d.settings.gpuUtilEnabled !== false);
         setGpuSec(d.settings.gpuUtilIntervalSec ?? 60);
       }
@@ -112,7 +112,7 @@ export default function MetricsSettings() {
         <div className="flex gap" style={{ alignItems: 'center', marginTop: 6 }}>
           <input className="input" type="number" min={0} value={rawRetentionDays}
             onChange={(e) => setRawRetentionDays(Number(e.target.value))} style={{ width: 120 }} />
-          <span className="muted">일 (기본 90일)</span>
+          <span className="muted">일 (기본 0 = 끔)</span>
         </div>
         <div className="muted" style={{ fontSize: 11.5, marginTop: 6, lineHeight: 1.6 }}>
           DB 용량의 대부분은 <b>원본</b>입니다(658 호스트 × 1분 = 약 95만 행/일). 이 값을 지나면 원본은 지우고
@@ -120,7 +120,17 @@ export default function MetricsSettings() {
           장기 추이 그래프는 그대로 보입니다. 짧게 잡을수록 파일이 작아지고, <b>지난 원본은 복구되지 않습니다.</b>
           <br />
           또한 값이 거의 변하지 않는 구간은 원본을 생략합니다(온도 0.5℃ · 전력 3W 미만 변화, 최소 30분마다 1행은 보장).
-          임계는 <code>METRICS_DEADBAND_TEMP_C</code> · <code>METRICS_DEADBAND_POWER_W</code> 로 조정하고 0 이면 끕니다.
+          이 생략은 <b>기본으로 동작</b>하며 파일이 <b>더 커지지 않게</b> 합니다. 임계는
+          <code> METRICS_DEADBAND_TEMP_C</code> · <code>METRICS_DEADBAND_POWER_W</code> 로 조정하고 0 이면 끕니다.
+        </div>
+        <div style={{ fontSize: 11.5, marginTop: 8, lineHeight: 1.6, padding: '8px 10px', borderRadius: 6, background: 'rgba(255,176,32,.10)', border: '1px solid rgba(255,176,32,.35)' }}>
+          ⚠ <b>처음 켤 때 주의</b> — 이미 오래 쌓인 DB 라면 이 값을 넣는 순간 <b>그 이전 원본 전체</b>가 삭제 대상이
+          됩니다(5년치라면 수억 행). 삭제는 이벤트 루프를 막지 않도록 청크로 나눠 <b>여러 주기에 걸쳐</b> 진행되며
+          진행 상황이 서버 로그에 남습니다. 되돌리려면 <b>0</b> 으로 두세요.
+          <br />
+          ⚠ <b>파일 크기는 바로 줄지 않습니다</b> — SQLite 의 삭제는 빈 공간을 남길 뿐이라 <b>“더 커지지 않고 멈추는”</b>
+          것입니다. 실제로 회수하려면 <code>VACUUM</code> 이 필요하고, 그때 <b>원본 크기만큼의 여유 공간</b>이 듭니다.
+          여유가 부족하면 특수 기능 › <b>포탈 DB</b> 에서 큰 볼륨으로 경로를 먼저 옮긴 뒤 VACUUM 하세요.
         </div>
 
         <div style={{ borderTop: '1px solid rgba(255,255,255,.08)', marginTop: 16, paddingTop: 14 }}>

@@ -96,7 +96,10 @@ async function persistVcenterPower(snap) {
     if (db.insertMany) db.insertMany(samples);
     // 보존기간 prune은 매 폴이 아니라 가끔(약 10주기)만 — DELETE 스캔 비용 절감.
     if (config.idrac.retentionDays > 0 && (++_vcPersistTicks % 10 === 0)) {
-      try { db.prune(ts - config.idrac.retentionDays * 86_400_000); } catch { /* best effort */ }
+      // v2.453: db.prune 은 청크 삭제라 **비동기**다 — await 를 빼면 부동 프로미스가 되어
+      // 실패가 unhandledRejection 으로 새고 다음 주기와 겹쳐 돌 수 있다.
+      try { await db.prune(ts - config.idrac.retentionDays * 86_400_000); }
+      catch (e) { console.warn(`[store] 전력 prune 실패: ${e.message}`); }
     }
   } catch { /* best effort — 전력 적재 실패는 수집을 막지 않음 */ }
 }

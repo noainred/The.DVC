@@ -229,13 +229,20 @@ async function sampleOnceInner() {
   // Retention prune (runtime-configurable). 매 샘플마다 DELETE 스캔하면 비용이 크므로
   // 약 20샘플(기본 60s면 ~20분)에 1회만 실행한다 — store의 전력 적재 prune과 동일한 절감 패턴.
   const { retentionDays, rawRetentionDays } = loadMetricsSettings();
-  if (retentionDays > 0 && (++_pruneTicks % 20 === 1)) {
+  // ⚠ `% 20 === 0` 이어야 한다(v2.453). `=== 1` 이면 **기동 후 첫 샘플**에서 곧바로 prune 이
+  // 돌아, 보존기간을 줄인 직후 재시작한 포탈이 첫 1분 안에 대량 삭제를 시작한다 —
+  // v2.451 에서 실제로 그렇게 멈췄다(34.3GB DB, accept 큐가 차서 웹 타임아웃).
+  // 이제 삭제 자체도 청크로 양보하지만(metrics/db.js), 기동 직후를 피하는 것도 함께 유지한다.
+  if (retentionDays > 0 && (++_pruneTicks % 20 === 0)) {
     try {
-      // v2.451: 원본은 rawRetentionDays(기본 90일), 롤업은 retentionDays(기본 5년).
+      // v2.451: 원본은 rawRetentionDays, 롤업은 retentionDays(기본 5년).
       // rawRetentionDays 가 0 이거나 retentionDays 보다 길면 예전처럼 같은 기준을 쓴다.
       const raw = rawRetentionDays > 0 ? Math.min(rawRetentionDays, retentionDays) : retentionDays;
-      db.prune(ts - raw * 86_400_000, ts - retentionDays * 86_400_000);
-    } catch { /* */ }
+      await db.prune(ts - raw * 86_400_000, ts - retentionDays * 86_400_000);
+    } catch (e) {
+      // 조용히 삼키면 디스크 부족(SQLITE_FULL)조차 흔적이 없다 — v2.451 장애 때 실제로 그랬다.
+      console.warn(`[metrics] prune 실패: ${e.message}`);
+    }
   }
   lastRun = { at: ts, rows: rows.length, hostsWithTemp: hostsWithTemp.length };
 }
