@@ -909,7 +909,33 @@ export async function fetchVmRightsizeSeries(vc, moref, interval, { start, end }
       series[w.name] = mapped;
       if (mapped.every((p) => p.v == null)) noData.push(label(w));
     }
-    return { intervalSec: intervalId, series, missing, empty, noData };
+    // 실시간(20초) 현재값 폴백 — mem.active 같은 level-2 카운터는 기본 통계 레벨(1)에서 주/월/년
+    // 롤업에 안 잡히지만(그래서 empty/noData), vCenter 는 **실시간 구간(최근 ~1시간)** 에서는 늘
+    // 수집한다. 그 현재값을 별도로 조회해 '이력엔 없어도 현재값은 이렇다'를 정직하게 채운다.
+    // 주의: 이 값은 **다일 감축 하한 계산엔 쓰지 않는다**(1시간 표본이라 다일 피크를 과소추정) —
+    // 화면에 '실시간(최근 1시간)' 으로 명시해 참고값으로만 보인다.
+    const RT_FALLBACK = new Set(['memActiveMB', 'memConsumedMB', 'memBalloonMB', 'memSwappedMB']);
+    const emptySet = new Set([...empty, ...noData]);
+    const rtNeed = wanted.filter((w) => w.id && RT_FALLBACK.has(w.name) && emptySet.has(label(w)));
+    let realtime = null;
+    if (rtNeed.length && interval !== 'realtime') {
+      try {
+        const rtStart = new Date(Date.now() - 3_600_000).toISOString();
+        const rtEnd = new Date().toISOString();
+        const rtRaw = await c.queryEntityPerfMulti('VirtualMachine', moref, rtNeed.map((w) => w.id), PERF_INTERVALS.realtime, { startTime: rtStart, endTime: rtEnd });
+        const rt = {};
+        for (const w of rtNeed) {
+          const vals = (rtRaw.get(w.id) || [])
+            .map((p) => (p.v < 0 ? null : (w.cfg.div > 1 ? Math.round((p.v / w.cfg.div) * 10) / 10 : p.v)))
+            .filter((v) => v != null);
+          if (!vals.length) continue;
+          const sum = vals.reduce((s, x) => s + x, 0);
+          rt[w.name] = { latest: vals[vals.length - 1], max: Math.max(...vals), avg: Math.round((sum / vals.length) * 10) / 10, samples: vals.length };
+        }
+        if (Object.keys(rt).length) realtime = rt;
+      } catch { realtime = null; /* 실시간도 안 되면 조용히 넘어간다 — 이력 '표본 없음' 안내는 유지 */ }
+    }
+    return { intervalSec: intervalId, series, missing, empty, noData, realtime };
   } finally {
     await c.logout();
   }
