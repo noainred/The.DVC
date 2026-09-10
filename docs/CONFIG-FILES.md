@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **128개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **130개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-09-10)
@@ -59,6 +59,8 @@
 | `fleet-tags.json` | 설정 | 통합 서버 인벤토리 — 수동 분류 예외(override) 저장. | ✅ |  |  | insights/fleetTags.js |
 | `gpu-guest.json` | 설정 | GPU 게스트 수집 설정 — 어떤 법인(vCenter)의 패스쓰루 GPU VM을 게스트 OS 계정으로 | ✅ | ✅ | ✅ | gpu/settings.js |
 | `gpu-physical.json` | 설정 | 물리(베어메탈) GPU 서버 등록부 — 가상화하지 않은 서버를 IP+계정으로 등록해 SSH(nvidia-smi)로 | ✅ | ✅ | ✅ | gpu/physicalRegistry.js |
+| `guest-disk.db` | DB | 게스트 디스크 회수 리포트 시계열 DB(v2.459). |  |  |  | guestdisk/db.js |
+| `guest-disk.json` | 설정 | 게스트 디스크 회수 리포트 설정 (`guest-disk.json`, v2.459). | ✅ | ✅ | ✅ | guestdisk/settings.js |
 | `guest-scans.json` | 설정 | 게스트 조사 스케줄러 — 사용자가 지정한 주기로 게스트 OS를 조사해 기록·저장한다. | ✅ |  | ✅ | security/guestScanScheduler.js |
 | `horizon.json` | 설정 | Horizon Connection Server 연동 — 라이선스 만료일 확인 전용(가벼운 통합). | ✅ | ✅ | ✅ | horizon/horizon.js |
 | `host-temp.db` | DB | 지표 시계열(온도·GPU·데이터스토어·포탈 메모리) — 이름과 달리 범용 DB |  |  |  | config.js |
