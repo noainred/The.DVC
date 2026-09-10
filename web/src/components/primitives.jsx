@@ -9,8 +9,10 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 // 권한 거부(403) 안내 — AccessDenied 는 api.js 만 참조하므로 이 import 로 순환이 생기지 않는다
 // (api.js 는 컴포넌트를 import 하지 않는다). 위 '순환의 씨앗' 주의사항과 배치되지 않음.
-import { permissionInfoFor } from '../api.js';
+import { permissionInfoFor, httpInfoFor } from '../api.js';
 import AccessDenied from './AccessDenied.jsx';
+import ServiceDown from './ServiceDown.jsx';
+import { serviceDownKind } from './serviceDownText.js';
 
 /** VM GPU 배지 — vGPU/패스쓰루/혼합. Vms.jsx 에 있던 것을 공용으로 옮겼다(상세 화면 단일화). */
 const GPU_TYPE = { vgpu: ['vGPU', 'green'], passthrough: ['패스쓰루', 'amber'], mixed: ['혼합', 'purple'] };
@@ -202,5 +204,11 @@ export function Loading() { return <div className="loading">불러오는 중…<
 export function ErrorBox({ message, info = null }) {
   const perm = info || permissionInfoFor(message);
   if (perm) return <AccessDenied info={perm} message={message} />;
+  // v2.459: 5xx·네트워크 실패는 '오류'가 아니라 **일시적 미가용**(업그레이드 중 재시작 포함)이다.
+  // 빨간 "오류: Failed to fetch" 로 두면 사용자가 데이터 손실·자기 잘못으로 오해해 새로고침을
+  // 반복한다. 403 → AccessDenied 와 같은 단일 지점 처리.
+  const http = httpInfoFor(message);
+  const kind = serviceDownKind(message, http);
+  if (kind) return <ServiceDown kind={kind} message={message} http={http} />;
   return <div className="error-box">오류: {message}</div>;
 }

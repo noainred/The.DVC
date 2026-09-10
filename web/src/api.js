@@ -79,7 +79,15 @@ export const isPermissionError = (e) => !!e && e.status === 403;
 const permMemo = new Map();          // message -> { info, at }
 const PERM_MEMO_TTL_MS = 5 * 60_000;
 const PERM_MEMO_MAX = 50;
-export function notePermissionError(message, info) {
+
+/**
+ * v2.459: **모든 상태코드**를 기록한다(과거에는 403 만).
+ * 왜: 5xx 를 '일시적 미가용 안내'로 바꾸려면 상태코드가 필요한데, `httpFail` 은 서버가 사유를 주면
+ * 메시지에 `-> 500` 을 남기지 않는다 — 즉 문자열만으로는 사유 있는 500 을 영영 판정할 수 없다.
+ * 403 계약은 그대로다: `permissionInfoFor` 가 status===403 일 때만 정보를 돌려주므로,
+ * 다른 상태에서 AccessDenied 가 잘못 뜨는 일은 없다(보안 불변조건 유지).
+ */
+export function noteHttpError(message, info) {
   if (!message || !info) return;
   permMemo.set(String(message), { info, at: Date.now() });
   if (permMemo.size > PERM_MEMO_MAX) {
@@ -87,19 +95,29 @@ export function notePermissionError(message, info) {
     for (const k of permMemo.keys()) { permMemo.delete(k); if (permMemo.size <= PERM_MEMO_MAX) break; }
   }
 }
-/** 이 메시지가 권한 거부에서 온 것이면 그 정보를, 아니면 null. */
-export function permissionInfoFor(message) {
-  const hit = permMemo.get(String(message ?? ''));
+/** 이전 이름 — 호출부 호환용(403 전용 의미로 쓰이던 것). */
+export const notePermissionError = noteHttpError;
+
+function memoHit(message) {
+  const k = String(message ?? '');
+  const hit = permMemo.get(k);
   if (!hit) return null;
-  if (Date.now() - hit.at > PERM_MEMO_TTL_MS) { permMemo.delete(String(message)); return null; }
+  if (Date.now() - hit.at > PERM_MEMO_TTL_MS) { permMemo.delete(k); return null; }
   return hit.info;
 }
+/** 이 메시지가 권한 거부(403)에서 온 것이면 그 정보를, 아니면 null. */
+export function permissionInfoFor(message) {
+  const hit = memoHit(message);
+  return hit && hit.status === 403 ? hit : null;
+}
+/** 이 메시지의 원본 HTTP 정보(상태·경로) — 상태코드가 필요한 화면용. 없으면 null. */
+export function httpInfoFor(message) { return memoHit(message); }
 
-/** !res.ok 공통 처리 — 사유를 살리고 403 이면 권한 정보를 보존한다. */
+/** !res.ok 공통 처리 — 사유를 살리고 상태·경로를 사이드 채널에 보존한다. */
 function httpFail(path, res, data) {
   const msg = data?.reason || data?.error || `${path} -> ${res.status}`;
   const err = new HttpError(msg, { status: res.status, path, body: data });
-  if (res.status === 403) notePermissionError(msg, err);
+  noteHttpError(msg, err);
   return err;
 }
 
