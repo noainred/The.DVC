@@ -42,9 +42,11 @@ function remember(entry) {
  * @param {string[]|string} [o.to] 명시 수신자(주면 종류별·기본 수신자보다 우선)
  * @param {string[]|string} [o.cc]
  * @param {string} [o.by]      감사로그에 남길 실행 주체(사람이 누른 경우 사용자명)
+ * @param {boolean} [o.trace]  단계별 SMTP 대화를 수집해 결과에 담는다(진단 화면 전용).
+ *                             비밀번호는 util/smtp.js 가 가린다 — 여기서 따로 지울 필요가 없다.
  * @returns {Promise<{ok:boolean, reason?:string, accepted?:string[], skipped?:boolean}>}
  */
-export async function sendPortalMail({ kind, subject, html = '', text = '', to = null, cc = null, by = 'system' }) {
+export async function sendPortalMail({ kind, subject, html = '', text = '', to = null, cc = null, by = 'system', trace = false }) {
   const cfg = loadMail();
   const at = Date.now();
 
@@ -53,12 +55,12 @@ export async function sendPortalMail({ kind, subject, html = '', text = '', to =
     // '꺼져 있음'·'수신자 없음' 은 오류가 아니라 정책대로 동작한 것이다 — 이력에는 남기되
     // 실패로 세지 않는다(설정 화면에서 "왜 안 왔는지" 를 확인할 수 있어야 한다).
     remember({ at, kind, subject: String(subject || '').slice(0, 200), state: 'skipped', note: r.reason });
-    return { ok: false, skipped: true, reason: r.reason };
+    return { ok: false, skipped: true, reason: r.reason, trace: null };
   }
   if (!withinRateLimit(sentAt, cfg.rateLimitPerHour, at)) {
     const note = `시간당 발송 한도(${cfg.rateLimitPerHour}건)를 넘어 건너뜁니다 — 알림 폭주로 릴레이가 차단되는 것을 막습니다.`;
     remember({ at, kind, subject: String(subject || '').slice(0, 200), state: 'skipped', note });
-    return { ok: false, skipped: true, reason: note };
+    return { ok: false, skipped: true, reason: note, trace: null };
   }
 
   const ccList = cc == null ? r.cc : (Array.isArray(cc) ? cc : [cc]);
@@ -69,19 +71,20 @@ export async function sendPortalMail({ kind, subject, html = '', text = '', to =
   try {
     const res = await sendMail({ ...cfg.smtp, from: cfg.smtp.from, displayFrom: from }, {
       to: r.to, cc: ccList, subject, html, text,
-    });
+    }, { trace });
     sentAt.push(at);
     while (sentAt.length && sentAt[0] < at - 3600_000) sentAt.shift();
     remember({ at, kind, subject: String(subject || '').slice(0, 200), state: 'sent', note: `${res.accepted.length}명 수신`, to: res.accepted });
     logAudit({ user: by, action: '메일 발송', target: kindLabel(kind), detail: `${res.accepted.length}명 — ${String(subject || '').slice(0, 120)}` });
-    return { ok: true, accepted: res.accepted };
+    return { ok: true, accepted: res.accepted, trace: res.trace || null, reply: res.text };
   } catch (e) {
     lastError = e.message;
     remember({ at, kind, subject: String(subject || '').slice(0, 200), state: 'failed', note: e.message.slice(0, 300) });
     // 비밀번호는 util/smtp.js 가 오류 메시지에서 가린다.
     console.warn(`[mail] ${kindLabel(kind)} 발송 실패: ${e.message}`);
     logAudit({ user: by, action: '메일 발송 실패', target: kindLabel(kind), detail: e.message.slice(0, 200) });
-    return { ok: false, reason: e.message };
+    // 실패한 대화가 진단의 핵심이다 — 있으면 그대로 올려 보낸다(비밀번호는 이미 가려져 있다).
+    return { ok: false, reason: e.message, trace: e.trace || null };
   }
 }
 

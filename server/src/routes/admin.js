@@ -14,6 +14,7 @@ import { registerHorizonAssign } from './admin/horizonAssign.js';
 import { registerBackupNetSec } from './admin/backupNetSec.js';
 import { registerNfsMounts } from './admin/nfsMounts.js'; // Edge NFS 마운트(v2.299)
 import { registerMail } from './admin/mail.js';         // 공용 메일 발송 설정(v2.454)
+import { registerToolCategories } from './admin/toolCategories.js'; // 특수 기능 카테고리(v2.455)
 import { registerDirUsage } from './admin/dirUsage.js'; // 폴더 사용량 Top-N 리포트(v2.454)
 
 // 관리자 API 집계 라우터 — v2.285.0 대형 파일 분할.
@@ -36,4 +37,5 @@ registerHorizonAssign(adminRouter);
 registerBackupNetSec(adminRouter);
 registerNfsMounts(adminRouter);
 registerMail(adminRouter);
+registerToolCategories(adminRouter);
 registerDirUsage(adminRouter);

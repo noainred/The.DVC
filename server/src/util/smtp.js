@@ -16,6 +16,10 @@
  *  - 서버 응답 버퍼에 상한(64KB)을 둔다 — 악의적/고장난 서버가 메모리를 밀어 넣지 못하게.
  *  - 단계마다 타임아웃. 연결이 멈춰도 폴러가 영원히 붙잡히지 않는다.
  *  - 헤더 주입 차단: 주소·제목의 CR/LF 는 거부한다(BCC 몰래 추가·본문 위조 방지).
+ *  - **추적 로그(v2.455)**: `opts.trace` 를 주면 단계별 명령/응답을 배열로 모은다(진단 화면용).
+ *    ⚠ AUTH 단계의 명령은 `AUTH PLAIN <redacted>` 로 **반드시 가린다** — base64 토큰에 비밀번호가
+ *    그대로 들어 있어 로그로 새면 릴레이 계정이 유출된다(proxy/sshExec.js 추적 로그와 같은 원칙).
+ *    본문(DATA)도 통째로 싣지 않고 바이트 수만 남긴다(수신자 정보·내용 유출 방지).
  */
 import net from 'node:net';
 import tls from 'node:tls';
@@ -136,19 +140,33 @@ export function pickAuthMech(reply) {
   return null;
 }
 
-/** 한 줄 대화 — 명령을 보내고 완성된 응답 한 덩어리를 기다린다. */
-function converse(sock, line, timeoutMs, { redact = false } = {}) {
+/**
+ * 한 줄 대화 — 명령을 보내고 완성된 응답 한 덩어리를 기다린다.
+ *
+ * @param {object} [o]
+ * @param {boolean} [o.redact] 인증 단계 — 명령을 로그·오류에 그대로 남기지 않는다
+ * @param {string}  [o.as]     추적 로그에 남길 명령 표기(원문 대신). 예: 'AUTH PLAIN <redacted>'
+ * @param {object[]} [o.trace] 있으면 { dir, text, ms } 를 여기에 push 한다
+ */
+function converse(sock, line, timeoutMs, { redact = false, as = null, trace = null } = {}) {
   return new Promise((resolve, reject) => {
     let buf = '';
     let done = false;
+    const t0 = Date.now();
     const finish = (err, val) => {
       if (done) return;
       done = true;
       clearTimeout(t);
       sock.off('data', onData); sock.off('error', onErr); sock.off('close', onClose);
+      if (trace) {
+        if (err) trace.push({ dir: '!', text: err.message.slice(0, 300), ms: Date.now() - t0 });
+        else trace.push({ dir: '<', text: (val.lines || []).join(' / ').slice(0, 500), code: val.code, ms: Date.now() - t0 });
+      }
       err ? reject(err) : resolve(val);
     };
     const label = redact ? '<인증 정보>' : String(line ?? '').split('\r')[0].slice(0, 40);
+    // ★ 추적 로그에 원문 대신 `as` 를 남긴다 — 인증 명령의 base64 에 비밀번호가 들어 있다.
+    if (trace && line != null) trace.push({ dir: '>', text: as != null ? as : String(line).split('\r')[0].slice(0, 300) });
     const t = setTimeout(() => finish(new Error(`SMTP 응답 시간 초과(${timeoutMs}ms): ${label}`)), timeoutMs);
     const onData = (d) => {
       buf += d.toString('utf8');
@@ -179,7 +197,10 @@ function expect(reply, okCodes, what) {
  * @param {{to:string[]|string, cc?:string[]|string, subject:string, html?:string, text?:string}} msg
  * @returns {Promise<{accepted:string[], code:number, text:string}>}
  */
-export async function sendMail(cfg, msg) {
+export async function sendMail(cfg, msg, opts = {}) {
+  // 추적 로그(진단 화면). 비밀번호는 절대 담기지 않는다 — 인증 단계는 `as` 로 가린다.
+  const trace = opts.trace ? [] : null;
+  const T = trace ? { trace } : {};
   const host = String(cfg?.host || '').trim();
   if (!host) throw new Error('SMTP 서버 주소가 없습니다.');
   const port = Number(cfg.port) || (cfg.secure ? 465 : 25);
@@ -203,19 +224,21 @@ export async function sendMail(cfg, msg) {
 
   let sk = sock;
   try {
-    expect(await converse(sk, null, timeoutMs), [220], 'SMTP 접속');
+    if (trace) trace.push({ dir: 'i', text: `TCP ${cfg.secure ? 'TLS ' : ''}연결 성공 ${host}:${port}` });
+    expect(await converse(sk, null, timeoutMs, T), [220], 'SMTP 접속');
     const me = cfg.name || 'vmware-portal';
-    let ehlo = expect(await converse(sk, `EHLO ${me}`, timeoutMs), [250], 'EHLO');
+    let ehlo = expect(await converse(sk, `EHLO ${me}`, timeoutMs, T), [250], 'EHLO');
 
     // STARTTLS — 평문 연결에서 인증 정보를 보내기 전에 반드시 승격한다.
     if (cfg.startTls !== false && !cfg.secure && ehloCaps(ehlo).has('STARTTLS')) {
-      expect(await converse(sk, 'STARTTLS', timeoutMs), [220], 'STARTTLS');
+      expect(await converse(sk, 'STARTTLS', timeoutMs, T), [220], 'STARTTLS');
       sk = await new Promise((resolve, reject) => {
         const up = tls.connect({ socket: sock, servername: host, rejectUnauthorized: cfg.rejectUnauthorized !== false },
           () => resolve(up));
         up.once('error', (e) => reject(new Error(`STARTTLS 협상 실패: ${e.message}`)));
       });
-      ehlo = expect(await converse(sk, `EHLO ${me}`, timeoutMs), [250], 'EHLO(TLS)');
+      if (trace) trace.push({ dir: 'i', text: 'STARTTLS 승격 완료 — 이후 통신은 암호화됩니다' });
+      ehlo = expect(await converse(sk, `EHLO ${me}`, timeoutMs, T), [250], 'EHLO(TLS)');
     }
 
     if (cfg.user) {
@@ -224,32 +247,37 @@ export async function sendMail(cfg, msg) {
       const b64 = (s) => Buffer.from(String(s), 'utf8').toString('base64');
       if (mech === 'PLAIN') {
         const tok = Buffer.from(`\0${cfg.user}\0${cfg.password || ''}`, 'utf8').toString('base64');
-        expect(await converse(sk, `AUTH PLAIN ${tok}`, timeoutMs, { redact: true }), [235], 'SMTP 인증');
+        expect(await converse(sk, `AUTH PLAIN ${tok}`, timeoutMs, { ...T, redact: true, as: 'AUTH PLAIN <redacted>' }), [235], 'SMTP 인증');
       } else {
-        expect(await converse(sk, 'AUTH LOGIN', timeoutMs, { redact: true }), [334], 'SMTP 인증');
-        expect(await converse(sk, b64(cfg.user), timeoutMs, { redact: true }), [334], 'SMTP 인증(계정)');
-        expect(await converse(sk, b64(cfg.password || ''), timeoutMs, { redact: true }), [235], 'SMTP 인증(비밀번호)');
+        expect(await converse(sk, 'AUTH LOGIN', timeoutMs, { ...T, redact: true, as: 'AUTH LOGIN' }), [334], 'SMTP 인증');
+        expect(await converse(sk, b64(cfg.user), timeoutMs, { ...T, redact: true, as: '<계정 base64>' }), [334], 'SMTP 인증(계정)');
+        expect(await converse(sk, b64(cfg.password || ''), timeoutMs, { ...T, redact: true, as: '<비밀번호 base64 — 기록하지 않음>' }), [235], 'SMTP 인증(비밀번호)');
       }
     }
 
-    expect(await converse(sk, `MAIL FROM:<${from}>`, timeoutMs), [250], 'MAIL FROM');
+    expect(await converse(sk, `MAIL FROM:<${from}>`, timeoutMs, T), [250], 'MAIL FROM');
     const accepted = [];
     for (const rcpt of [...to.ok, ...cc.ok]) {
-      const r = await converse(sk, `RCPT TO:<${rcpt}>`, timeoutMs);
+      const r = await converse(sk, `RCPT TO:<${rcpt}>`, timeoutMs, T);
       if (r.code === 250 || r.code === 251) accepted.push(rcpt);
       // 개별 거부는 치명적이지 않다 — 나머지에게는 보낸다. 전원 거부면 아래에서 오류.
     }
     if (!accepted.length) throw new Error('모든 수신자가 거부되었습니다(릴레이 권한·주소 확인).');
 
-    expect(await converse(sk, 'DATA', timeoutMs), [354], 'DATA');
+    expect(await converse(sk, 'DATA', timeoutMs, T), [354], 'DATA');
     // 봉투(MAIL FROM)는 순수 주소, 헤더 From 은 표시 이름을 붙일 수 있다("VMware Portal <a@b>").
     // 표시 이름은 호출부(mail/service.js)가 제어문자·따옴표를 제거한 뒤 넘긴다.
     const headerFrom = String(cfg.displayFrom || '').trim() || from;
     if (HEADER_UNSAFE.test(headerFrom)) throw new Error('보내는 사람 표시 이름에 제어문자를 쓸 수 없습니다.');
     const mime = buildMime({ from: headerFrom, to: to.ok, cc: cc.ok, subject: msg.subject, html: msg.html, text: msg.text });
-    const sent = expect(await converse(sk, `${dotStuff(mime)}\r\n.`, timeoutMs), [250], '본문 전송');
-    try { await converse(sk, 'QUIT', 3000); } catch { /* QUIT 응답은 못 받아도 무방 */ }
-    return { accepted, code: sent.code, text: sent.lines[sent.lines.length - 1] || '' };
+    // 본문은 추적 로그에 싣지 않는다(내용·수신자 유출 방지) — 크기만 남긴다.
+    const sent = expect(await converse(sk, `${dotStuff(mime)}\r\n.`, timeoutMs, { ...T, as: `<본문 ${Buffer.byteLength(mime, 'utf8')} bytes>` }), [250], '본문 전송');
+    try { await converse(sk, 'QUIT', 3000, T); } catch { /* QUIT 응답은 못 받아도 무방 */ }
+    return { accepted, code: sent.code, text: sent.lines[sent.lines.length - 1] || '', trace };
+  } catch (e) {
+    // 실패한 대화야말로 진단에 필요하다 — 오류에 지금까지의 추적을 붙여 던진다.
+    if (trace) e.trace = trace;
+    throw e;
   } finally {
     try { sk.destroy(); } catch { /* noop */ }
     if (sk !== sock) { try { sock.destroy(); } catch { /* noop */ } }

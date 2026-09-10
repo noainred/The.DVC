@@ -73,6 +73,7 @@ export const TOOLS = [
   { k: 'vmware-backup', icon: '🗃️', label: 'VMware 구성 백업', desc: '사이트의 수집 구성(호스트·VM·DS·네트워크·NSX) 스냅샷 내보내기' },
   { k: 'roomtemp', icon: '🌡️', label: '법인 전산실 운영 온도', desc: '모든 법인의 흡기(Inlet)·배기(Exhaust)·CPU 온도 범위를 카드로 한 페이지 종합 · ASHRAE 권장 대역(18~27℃) 대비 상태 · 배기−흡기 ΔT · 서버별 상세', adminOnly: true },
   { k: 'portaldb', icon: '🗄️', label: '포탈 DB', desc: '사용 중 모든 DB/데이터 파일의 경로·파일명·용도·크기·증가 추이' },
+  { k: 'mail-diag', icon: '✉️', label: '메일 진단', desc: 'SMTP 서버 설정 + 테스트 발송 · 연결/STARTTLS/인증/수신자까지 단계별 대화 로그로 실패 지점 확인(비밀번호는 가려짐)', adminOnly: true },
   { k: 'dir-usage', icon: '📁', label: '폴더 사용량 Top-N', desc: '엣지에 마운트된 공유 폴더의 하위 폴더(=사용자)별 사용량 Top N · 직전 대비 증감 · 주기 수집 결과와 메일 발송 이력', adminOnly: true },
   { k: 'diskadd', icon: '🧩', label: '디스크 추가 자동화', desc: 'VM 디스크 추가 할당 자동화 (준비 중)', disabled: true, comingSoon: true },
   { k: 'backup', icon: '💾', label: '백업', desc: '설정 백업/복원 (준비 중)', disabled: true, comingSoon: true },

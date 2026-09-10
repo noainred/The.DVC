@@ -49,6 +49,8 @@ export function registerMail(adminRouter) {
     const to = req.body?.to;
     const r = await sendPortalMail({
       kind: 'test',
+      // 진단 화면이 단계별 대화를 보여준다(요구사항). 비밀번호는 추적에 담기지 않는다.
+      trace: req.body?.trace !== false,
       to: to && (Array.isArray(to) ? to.length : String(to).trim()) ? to : null,
       by: req.user?.username || 'admin',
       subject: '[VMware Portal] 메일 발송 테스트',
