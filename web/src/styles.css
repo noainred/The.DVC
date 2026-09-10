@@ -881,3 +881,5 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 @keyframes sd-spin { to { transform:rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .sd-spin { animation:none; } }
 .gd-search input { width:200px; text-align:left; }
+.gd-sel { padding:5px 9px; border-radius:8px; background:var(--bg-soft); border:1px solid var(--border); color:var(--text); font:inherit; font-size:12px; max-width:220px; }
+.gd-sel:focus { outline:none; border-color:var(--accent); }
