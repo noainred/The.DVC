@@ -37,6 +37,7 @@
 | [AIRGAP-LLM-SETUP-GUIDE.md](AIRGAP-LLM-SETUP-GUIDE.md) | 에어갭 LLM 서버 구축 — Rocky9 + A40 vGPU + Ollama + Qwen(자연어 검색 백엔드) |
 | [EDGE-COLLECTOR-MERGE.md](EDGE-COLLECTOR-MERGE.md) | 이전 절차서 — 별도 수집서버(전력 전용 VM)를 엣지 노드로 통합·폐기 |
 | [NETWORK-COMMS-FIREWALL.md](NETWORK-COMMS-FIREWALL.md) | 전 프로세스 통신 경로 82종 — 방화벽(ACL) 오픈 가이드(포트·방향·근거 코드) |
+| [MAINTENANCE-PAGE.md](MAINTENANCE-PAGE.md) | 업데이트·재시작 다운타임 안내 — 앱 내 자동 재연결(v2.462) + 새 탭 접속용 프록시 유지보수 페이지(nginx/HAProxy) |
 | [CAPACITY-ADVISOR.md](CAPACITY-ADVISOR.md) | 리소스 적정성 진단 — 중앙/엣지 서버 자체의 증설·감축 판단 기능 설명 |
 
 ## 4. 기능별 상세 문서

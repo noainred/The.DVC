@@ -19,7 +19,7 @@ export const DEFAULTS = Object.freeze({
   intervalHours: 12,       // 수집 주기(시간). 게스트 파티션은 천천히 변하므로 자주 볼 필요가 없다.
   changeThresholdGB: 1,    // 파티션 used 가 이만큼 바뀔 때만 추이 행을 남긴다(diff-저장).
   retentionDays: 180,      // part_series/vm_series 보존 기간(prune).
-  minReclaimGB: 5,         // 회수 목록에서 이보다 작은 여유는 제외(잡음 컷).
+  minReclaimGB: 0,         // 기본 0 = 전체 표시(회수 여유가 작아도 보이게). 필요 시 올려서 좁힌다.
 });
 
 const clampNum = (v, lo, hi, dflt) => {

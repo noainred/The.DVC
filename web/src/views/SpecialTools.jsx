@@ -389,7 +389,7 @@ function ToolPanel({ tool, onBack, isAdmin }) {
   const meta = TOOLS.find((t) => t.k === tool);
   const [scope, setScope] = useState('');
   const { data: vcList } = usePolling('/vcenters', {}, 60_000);
-  const scoped = ['vm-export', 'dupip', 'vmtools', 'snapshots', 'hba', 'gpu', 'licenses', 'license-expiry', 'esxi', 'hardware', 'powermap', 'guestos', 'real-os', 'thinvms', 'capacity', 'waste', 'esxitemp', 'forecast', 'dsusage',
+  const scoped = ['vm-export', 'dupip', 'vmtools', 'snapshots', 'hba', 'gpu', 'licenses', 'license-expiry', 'esxi', 'hardware', 'powermap', 'guestos', 'real-os', 'thinvms', 'guest-disk', 'capacity', 'waste', 'esxitemp', 'forecast', 'dsusage',
     'daily-health', 'snapshot-age', 'zombie-vms', 'rightsizing', 'capacity-forecast', 'compliance-report', 'change-history', 'unprotected-vms'].includes(tool);
 
   // v2.447(감사 T13): 도구가 lazy 라 로딩 중 폴백이 필요하다. 셸(뒤로가기·스코프 선택)은 이미
@@ -427,7 +427,7 @@ function ToolPanel({ tool, onBack, isAdmin }) {
       {tool === 'relaytopo' && <RelayTopoTool />}
       {tool === 'serial-lookup' && <SerialLookup />}
       {tool === 'vm-track' && <VmTrackTool />}
-      {tool === 'guest-disk' && <GuestDiskReport />}
+      {tool === 'guest-disk' && <GuestDiskReport scope={scope} />}
       {tool === 'storage-track' && <StorageTrackTool />}
       {tool === 'vmfinder' && <VmFinder />}
       {tool === 'capacity' && <Capacity scope={scope} />}

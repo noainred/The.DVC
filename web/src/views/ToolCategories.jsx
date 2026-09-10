@@ -133,9 +133,9 @@ export default function ToolCategories() {
         {cats.length === 0 && <> — <button className="logout-btn" style={{ padding: '2px 10px', fontSize: 11 }} disabled={busy} onClick={loadPreset}>추천 분류로 시작</button></>}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px,300px) 1fr', gap: 16, alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px,300px) minmax(0,1fr)', gap: 16, alignItems: 'start' }}>
         {/* ── 카테고리 목록 ── */}
-        <div>
+        <div style={{ minWidth: 0 }}>
           <div className="flex gap" style={{ alignItems: 'center', marginBottom: 6 }}>
             <b style={{ fontSize: 13 }}>카테고리</b>
             <button className="logout-btn" style={{ padding: '2px 10px', fontSize: 11, marginLeft: 'auto' }} onClick={addCat}>+ 추가</button>
@@ -169,9 +169,10 @@ export default function ToolCategories() {
         </div>
 
         {/* ── 도구 선택 ── */}
-        {/* minWidth:0 — 이게 없으면 내부 기능 그리드(minmax 240px 다열)의 본질 최소폭이
-            1fr 트랙(기본 min-width:auto)을 밀어내 좌측 카테고리 열을 덮어 잘린다(v2.458). */}
-        <div style={{ minWidth: 0 }}>
+        {/* minWidth:0 + minmax(0,1fr) 트랙 + overflow:hidden — 내부 기능 그리드(minmax 240px 다열)의
+            본질 최소폭이 트랙을 밀어내 좌측 카테고리 열을 덮던 문제(v2.458 부분수정 → v2.462 완전봉인).
+            트랙 자체를 minmax(0,1fr)로 두고, 넘치더라도 이 열 안에서 클립되게 한다. */}
+        <div style={{ minWidth: 0, overflow: 'hidden' }}>
           <div className="flex gap" style={{ alignItems: 'center', marginBottom: 6, flexWrap: 'wrap' }}>
             <b style={{ fontSize: 13 }}>
               {cur ? <>‘{cur.icon} {cur.label}’ 에 포함할 기능</> : '기능 목록'}
