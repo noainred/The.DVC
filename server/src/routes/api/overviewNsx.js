@@ -3,6 +3,7 @@ import { instanceId } from '../../instanceId.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { currentVersion, config } from '../../config.js';
+import { upgradeManager } from '../../upgrade/manager.js';
 import { getGuestGpuHost } from '../../gpu/store.js';
 import { nsxStore } from '../../nsx/store.js';
 import { loadRegistry as loadNsxRegistry } from '../../nsx/registry.js';
@@ -17,6 +18,13 @@ api.get('/health', (_req, res) => {
   const byStatus = (s) => snap.vcenters.filter((v) => v.status === s).length;
   const connected = byStatus('connected');
   const g = snap.rollups?.global || {};
+  // 업그레이드 가용 요약(비민감 — 버전 문자열뿐). 헤더가 '새 버전 있음'을 표시하고,
+  // 서버 불응답(폴링 실패)과 결합해 '업그레이드 중' 점멸을 판정하는 데 쓴다(v2.458).
+  // lastCheck 는 백그라운드 폴러/수동 확인이 채운다. 접근 제어와 무관(전 사용자 헤더).
+  const lc = upgradeManager.lastCheck || null;
+  const upW = lc?.watch?.available ? String(lc.watch.version || '') : '';
+  const upR = lc?.remote?.available ? String(lc.remote.latest || '') : '';
+  const updateAvailable = Boolean(upW || upR);
   res.json({
     instance: instanceId(), agent: config.agent?.name || '', // v2.429: HAProxy 경로 점검이 '이 응답이 나 자신인지' 대조
 
@@ -38,6 +46,8 @@ api.get('/health', (_req, res) => {
     alarms: g.alarms || 0,
     alarmsCritical: g.alarmsCritical || 0,
     cpuUsagePct: g.cpuUsagePct || 0,
+    updateAvailable,
+    latestVersion: upR || upW || null,
     features: { upgradeTab: config.ui.showUpgradeTab },
   });
 });
