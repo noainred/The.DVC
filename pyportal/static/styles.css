@@ -508,3 +508,15 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
   .search { width: 160px; }
   .stat-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* 로그인 화면 비밀번호 재설정 안내(v2.449) — 무인증 재설정 엔드포인트를 두지 않고
+   서버 콘솔 복구 절차를 알려 준다(CSP: 인라인 style 금지 → 클래스로만). */
+.link-btn { align-self: flex-start; background: none; border: none; padding: 2px 0; margin: 0;
+  color: var(--accent-hi); font-family: inherit; font-size: 11px; cursor: pointer; text-decoration: underline; }
+.link-btn:hover { color: var(--accent); }
+.recover-panel { display: flex; flex-direction: column; gap: 6px; margin-top: 2px;
+  padding: 12px; border-radius: 12px; background: var(--accent-soft); border: 1px solid var(--line); }
+.recover-title { margin: 0; font-weight: 600; font-size: 12px; color: var(--text); }
+.recover-cmd { margin: 2px 0; padding: 8px 10px; border-radius: 9px; background: rgba(9, 13, 23, 0.7);
+  border: 1px solid var(--line); color: var(--accent-2); font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11px; overflow-x: auto; white-space: pre; }

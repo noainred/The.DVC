@@ -43,7 +43,16 @@ export function AuthFields({ f, title = 'Operator Sign In', sub = 'Authenticate 
           </label>
           <button type="button" className="lt-forgot" onClick={f.toggleForgot}>FORGOT PASSWORD?</button>
         </div>
-        {f.forgotInfo && <div className="lt-hint">비밀번호 초기화는 포탈 관리자에게 요청하세요 (사용자 관리 → 비밀번호 재설정). 체크 해제 시 브라우저를 닫으면 자동 로그아웃됩니다.</div>}
+        {f.forgotInfo && (
+          <div className="lt-hint">
+            비밀번호 초기화는 다른 <b>포탈 관리자</b>에게 요청하세요 (사용자 관리 → 비밀번호 재설정).<br />
+            <b>아무도 로그인할 수 없는 잠금</b> 상태(전 관리자 OTP 분실 등)라면 보안상 웹이 아니라
+            <b> 서버 콘솔</b>에서만 복구합니다 — 서버에 접속해 OTP 재등록 도구를 실행하세요:
+            <code style={{ display: 'block', margin: '6px 0', padding: '6px 8px', borderRadius: 5, background: 'rgba(148,163,184,.14)', wordBreak: 'break-all' }}>sudo ./otp-enroll.sh &lt;계정&gt;</code>
+            긴급 시 <code>OTP_ROLE_ENFORCE=false</code>로 강제 등록을 임시 해제할 수 있습니다.
+            자세한 절차는 문서 <code>docs/HUB-PASSWORD-RECOVERY.md</code> 참고. 체크 해제 시 브라우저를 닫으면 자동 로그아웃됩니다.
+          </div>
+        )}
 
         {f.error && <div className="lt-error">{f.error}</div>}
 
