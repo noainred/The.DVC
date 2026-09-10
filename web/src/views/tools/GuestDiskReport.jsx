@@ -66,6 +66,7 @@ export default function GuestDiskReport({ scope = '' }) {
   const [minReclaimStr, setMinReclaimStr] = useState('0');  // 기본 0=전체 표시(문자열 상태 — 0 이 안 지워지던 버그 수정)
   const [maxRatioStr, setMaxRatioStr] = useState('');       // 사용률(%) 이하 필터(빈 값 = 미적용)
   const [qStr, setQStr] = useState('');                     // VM/vCenter/클러스터 이름 검색(클라이언트)
+  const [clusterSel, setClusterSel] = useState('');         // 클러스터 콤보 선택('' = 전체)
   const [unit, setUnit] = useState('auto');
   const [group, setGroup] = useState('none');
   const [pageSize, setPageSize] = useState('50');   // 한 화면 표시 개수('0'=전체)
@@ -126,12 +127,18 @@ export default function GuestDiskReport({ scope = '' }) {
     downloadFile(`/api/tools/guest-disk/export.csv?${q.toString()}`).catch((e) => alert(e.message));
   };
 
+  // 콤보용 클러스터 목록 — 현재 로드된 데이터에 실재하는 클러스터만(선택 vCenter 기준).
+  const clusterOpts = useMemo(
+    () => [...new Set((data?.rows || []).map((r) => r.cluster).filter((c) => c && c !== '(미지정)'))].sort((a, b) => a.localeCompare(b)),
+    [data],
+  );
   const rows = useMemo(() => {
-    const all = data?.rows || [];
+    let all = data?.rows || [];
+    if (clusterSel) all = all.filter((r) => r.cluster === clusterSel);
     const q = qStr.trim().toLowerCase();
     if (!q) return all;
     return all.filter((r) => `${r.vmName || ''} ${r.vcenterName || ''} ${r.cluster || ''} ${r.corpName || ''}`.toLowerCase().includes(q));
-  }, [data, qStr]);
+  }, [data, qStr, clusterSel]);
   // 구분(그룹핑) — 선택 축으로 묶고 회수합계 내림차순 정렬.
   const groups = useMemo(() => {
     if (group === 'none') return null;
@@ -153,7 +160,11 @@ export default function GuestDiskReport({ scope = '' }) {
   const pageClamped = Math.min(page, totalPages - 1);
   const pageItems = perPage > 0 ? items.slice(pageClamped * perPage, pageClamped * perPage + perPage) : items;
   // 구분·페이지 크기·데이터가 바뀌면 첫 페이지로(훅은 조기 return 위에 둔다 — React #310).
-  useEffect(() => { setPage(0); }, [group, pageSize, data, qStr]);
+  useEffect(() => { setPage(0); }, [group, pageSize, data, qStr, clusterSel]);
+  // vCenter(범위)가 바뀌면 이전 vCenter 의 클러스터 선택은 무효 — 전체로 되돌린다.
+  useEffect(() => { setClusterSel(''); }, [scope]);
+  // 선택한 클러스터가 새 데이터에 없으면 전체로.
+  useEffect(() => { if (clusterSel && !clusterOpts.includes(clusterSel)) setClusterSel(''); }, [clusterOpts, clusterSel]);
 
   if (error && !data) return <ErrorBox error={error} />;
   if (!data) return <Loading />;
@@ -227,6 +238,14 @@ export default function GuestDiskReport({ scope = '' }) {
           <span>검색</span>
           <input type="text" value={qStr} onChange={(e) => setQStr(e.target.value)} placeholder="VM·vCenter·클러스터 이름" />
           {qStr && <button type="button" className="gd-step" onClick={() => setQStr('')} title="검색 지우기">✕</button>}
+        </label>
+        <label className="gd-min">
+          <span>클러스터</span>
+          <select className="gd-sel" value={clusterSel} onChange={(e) => setClusterSel(e.target.value)}
+            title={clusterOpts.length ? '' : '표시할 데이터가 있어야 클러스터가 채워집니다'}>
+            <option value="">전체 클러스터{clusterOpts.length ? ` (${clusterOpts.length})` : ''}</option>
+            {clusterOpts.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
         </label>
         <div className="gd-min">
           <span>최소 회수(GB)</span>
