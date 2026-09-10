@@ -315,7 +315,18 @@ const svcmonShutdown = () => {
  *  ① 새 연결 수락을 멈추고(server.close) ② 진행 중 응답이 끝나기를 기다린 뒤 ③ 종료한다.
  * 걸린 연결(keep-alive·SSE·WS) 때문에 무한 대기하지 않도록 상한(기본 8초)을 둔다 —
  * systemd 의 TimeoutStopSec 보다 짧아야 SIGKILL 로 잘리지 않는다.
+ *
+ * ⚠ v2.456 — 위 상한을 **매번 통째로 쓰고 있었다**(운영 실측: stop 8.2초 + start 1.0초).
+ * 원인은 RMA 롱폴이다: 엣지가 최대 55초짜리 폴로 HTTP 연결을 열어 두는데(`routes/central.js`),
+ * 법인 수만큼 그 연결이 살아 있고 `server.close()` 는 **전부 닫혀야** 콜백을 부른다.
+ * 그래서 종료 순서를 이렇게 고쳤다:
+ *   ⓐ 롱폴 대기자를 즉시 깨우고(releaseAllWaiters) — 각 폴이 '잡 없음'으로 바로 응답하고 닫힌다
+ *   ⓑ server.close() + 유휴 keep-alive 정리
+ *   ⓒ 그래도 남은 연결(WS 터널·전송 중 응답)은 짧은 지연 뒤 강제로 끊는다(closeAllConnections)
+ * 잡을 잃지 않는다 — 깨어난 폴은 claim 하지 않고, 큐에 남은 잡은 다음 폴이 가져간다.
  */
+import { releaseAllWaiters as releaseRmaWaiters } from './rma/jobs.js'; // 종료 시 롱폴 해제(v2.456)
+
 const SHUTDOWN_GRACE_MS = Math.max(1000, Math.min(60_000, Number(process.env.SHUTDOWN_GRACE_MS) || 8000));
 let shuttingDown = false;
 const gracefulExit = (signal) => {
@@ -328,10 +339,21 @@ const gracefulExit = (signal) => {
     done(0);
   }, SHUTDOWN_GRACE_MS);
   timer.unref?.();
+  // ⓒ 진행 중 요청에 마무리할 시간을 주되, 오래 걸리는 연결(WS 터널·대용량 내려받기) 때문에
+  // 유예 전체를 기다리지 않는다. 기본 1.5초 — 일반 API 응답은 그 안에 끝난다.
+  const HARD_MS = Math.max(200, Math.min(SHUTDOWN_GRACE_MS - 200, Number(process.env.SHUTDOWN_HARD_MS) || 1500));
+  const hard = setTimeout(() => {
+    try { server.closeAllConnections?.(); } catch { /* Node 18.2 미만이면 없다 */ }
+  }, HARD_MS);
+  hard.unref?.();
+  // ⓐ 롱폴 먼저 해제 — 이게 없으면 아래 server.close() 가 최대 55초짜리 폴을 기다린다.
+  let woken = 0;
+  try { woken = releaseRmaWaiters(); } catch { /* 종료 경로에서 실패해도 계속 진행 */ }
+  if (woken) console.log(`[shutdown] RMA 롱폴 ${woken}건 해제`);
   try {
-    server.close(() => { clearTimeout(timer); console.log('[shutdown] 진행 중 요청 완료 — 정상 종료'); done(0); });
+    server.close(() => { clearTimeout(timer); clearTimeout(hard); console.log('[shutdown] 진행 중 요청 완료 — 정상 종료'); done(0); });
     server.closeIdleConnections?.();   // keep-alive 유휴 소켓은 즉시 정리(Node 18.2+)
-  } catch { clearTimeout(timer); done(0); }
+  } catch { clearTimeout(timer); clearTimeout(hard); done(0); }
 };
 process.on('SIGTERM', () => gracefulExit('SIGTERM'));
 process.on('SIGINT', () => gracefulExit('SIGINT'));
