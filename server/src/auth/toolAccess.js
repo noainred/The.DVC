@@ -35,6 +35,7 @@ export const TOOL_PATH_KEYS = Object.freeze({
   esxi: 'esxi',
   'esxi-temp': 'esxitemp',
   gpu: 'gpu',
+  'guest-disk': 'guest-disk',
   'guest-os': 'guestos',
   hardware: 'hardware',
   hba: 'hba',

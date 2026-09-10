@@ -165,8 +165,9 @@ export const VM_EXPORT_COLUMNS = [
   { key: 'notes', label: '메모', get: (vm) => vm.notes || '' },
 ];
 
-/** 라이브 보강 — 대상 vCenter 에 로그인해 per-VM 상세 속성을 한 번에 가져온다. */
-async function collectDetails(vc, morefs) {
+/** 라이브 보강 — 대상 vCenter 에 로그인해 per-VM 상세 속성을 한 번에 가져온다.
+ *  (v2.459: 게스트 디스크 회수 리포트 폴러가 같은 벌크 조회를 재사용하므로 export 한다.) */
+export async function collectDetails(vc, morefs) {
   const c = new VimSoapClient(vc);
   await c.login();
   try {

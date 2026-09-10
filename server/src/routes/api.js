@@ -14,6 +14,7 @@ import { registerChecksLogs } from './api/checksLogs.js';
 import { registerToolsAnalytics } from './api/toolsAnalytics.js';
 import { registerToolsCapacity } from './api/toolsCapacity.js';
 import { registerToolsInfo } from './api/toolsInfo.js';
+import { registerToolsGuestDisk } from './api/toolsGuestDisk.js';
 import { registerInventory } from './api/inventory.js';
 import { registerVmClone } from './api/vmClone.js'; // VM 복제(백업식, v2.299)
 import { registerStorageMon } from './api/storageMon.js'; // 스토리지 모니터링(Isilon 등, v2.302)
@@ -55,6 +56,7 @@ registerChecksLogs(api);
 registerToolsAnalytics(api);
 registerToolsCapacity(api);
 registerToolsInfo(api);
+registerToolsGuestDisk(api);
 registerInventory(api);
 registerVmClone(api);
 registerStorageMon(api);
