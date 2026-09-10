@@ -805,3 +805,72 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 .svc-anal-bar i { display: block; height: 100%; }
 .svc-anal-bar i.ok { background: var(--green); opacity: .75; }
 .svc-anal-bar i.bad { background: var(--red); opacity: .9; }
+
+/* ── 게스트 디스크 회수 리포트(v2.461) — 단위/구분 토글·카드·표 ─────────────── */
+.gd-report { --gd-up:#f87171; --gd-flat:#93c5fd; --gd-down:#4ade80; }
+.gd-hero h3 { margin:0 0 4px; font-size:20px; letter-spacing:-.01em; }
+.gd-hero p { margin:0; color:var(--text-dim); font-size:12.5px; line-height:1.7; max-width:900px; }
+.gd-cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; margin:16px 0; }
+.gd-card { position:relative; padding:14px 16px; border-radius:14px; background:linear-gradient(160deg,var(--panel-2),var(--panel)); border:1px solid var(--border); overflow:hidden; }
+.gd-card.accent { border-color:color-mix(in srgb,var(--accent) 55%,var(--border)); box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 20%,transparent) inset; }
+.gd-card.accent::before { content:''; position:absolute; inset:0 auto 0 0; width:4px; background:linear-gradient(var(--accent),var(--accent-2)); }
+.gd-card-k { font-size:11px; color:var(--text-faint); font-weight:600; letter-spacing:.02em; }
+.gd-card-v { font-size:26px; font-weight:800; margin-top:4px; letter-spacing:-.02em; }
+.gd-card-v small { font-size:13px; font-weight:600; color:var(--text-dim); margin-left:2px; }
+.gd-card.accent .gd-card-v { color:var(--accent-2); }
+.gd-card-v.on { color:var(--green); } .gd-card-v.off { color:var(--text-faint); }
+.gd-card-m { font-size:11px; color:var(--text-dim); margin-top:3px; }
+.gd-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:10px 14px; margin:10px 0; }
+.gd-spacer { flex:1 1 auto; }
+.gd-seg-wrap { display:inline-flex; align-items:center; gap:7px; }
+.gd-seg-label { font-size:11.5px; color:var(--text-faint); font-weight:600; }
+.gd-seg { display:inline-flex; padding:2px; background:var(--bg-soft); border:1px solid var(--border); border-radius:10px; }
+.gd-seg-btn { border:none; background:none; color:var(--text-dim); font:inherit; font-size:12px; padding:4px 11px; border-radius:8px; cursor:pointer; transition:background .12s,color .12s; }
+.gd-seg-btn:hover { color:var(--text); }
+.gd-seg-btn.active { background:var(--accent); color:#fff; font-weight:600; }
+.gd-min { display:inline-flex; align-items:center; gap:5px; font-size:12px; color:var(--text-faint); }
+.gd-min input { width:96px; padding:5px 9px; border-radius:8px; background:var(--bg-soft); border:1px solid var(--border); color:var(--text); font:inherit; font-size:12px; text-align:right; }
+.gd-min input:focus { outline:none; border-color:var(--accent); }
+.gd-step { border:1px solid var(--border); background:var(--panel-2); color:var(--text-dim); font:inherit; font-size:11px; font-weight:600; padding:4px 8px; border-radius:7px; cursor:pointer; }
+.gd-step:hover { background:var(--accent); color:#fff; border-color:var(--accent); }
+.gd-btn { border:1px solid var(--border); background:var(--panel-2); color:var(--text); font:inherit; font-size:12px; padding:6px 14px; border-radius:9px; cursor:pointer; }
+.gd-btn:hover:not(:disabled) { border-color:var(--accent); }
+.gd-btn:disabled { opacity:.5; cursor:default; }
+.gd-btn.primary { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
+.gd-admin { display:flex; flex-wrap:wrap; align-items:center; gap:10px 14px; padding:12px 14px; margin:8px 0; border:1px solid var(--border); border-radius:12px; background:var(--bg-soft); font-size:12.5px; }
+.gd-chk,.gd-inline { display:inline-flex; align-items:center; gap:6px; color:var(--text-dim); }
+.gd-inline input { width:60px; padding:4px 8px; border-radius:7px; background:var(--panel); border:1px solid var(--border); color:var(--text); font:inherit; text-align:right; }
+.gd-admin-note { flex-basis:100%; font-size:11px; color:var(--text-faint); }
+.gd-warn { font-size:11.5px; color:#fbbf24; margin:4px 0; }
+.gd-empty { padding:24px 0; color:var(--text-dim); }
+.gd-table { width:100%; }
+.gd-table th { font-size:11px; color:var(--text-faint); }
+.gd-row { cursor:pointer; transition:background .1s; }
+.gd-row:hover { background:color-mix(in srgb,var(--accent) 9%,transparent); }
+.gd-vm { font-weight:600; }
+.gd-num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.gd-free { color:var(--gd-down,#4ade80); font-weight:700; }
+.gd-ratio { position:relative; display:inline-block; min-width:70px; }
+.gd-ratio span { position:relative; z-index:1; font-size:11.5px; }
+.gd-ratio i { position:absolute; left:0; right:0; bottom:-3px; height:3px; border-radius:2px; background:linear-gradient(90deg,var(--accent),var(--accent-2)); display:block; }
+.gd-more { font-size:11px; color:var(--text-faint); }
+.gd-row:hover .gd-more { color:var(--accent); }
+.gd-groups { display:flex; flex-direction:column; gap:10px; }
+.gd-group { border:1px solid var(--border); border-radius:12px; overflow:hidden; background:var(--panel); }
+.gd-group > summary { display:flex; flex-wrap:wrap; align-items:baseline; gap:10px; padding:11px 14px; cursor:pointer; list-style:none; background:var(--bg-soft); }
+.gd-group > summary::-webkit-details-marker { display:none; }
+.gd-group > summary::before { content:'▸'; color:var(--text-faint); transition:transform .12s; }
+.gd-group[open] > summary::before { transform:rotate(90deg); }
+.gd-group-name { font-weight:700; font-size:13.5px; }
+.gd-group-meta { font-size:12px; color:var(--text-dim); }
+.gd-group .gd-table { padding:0 6px 6px; }
+.gd-detail { margin-top:14px; padding:14px; border:1px solid var(--border); border-radius:12px; background:var(--panel); }
+.gd-detail-head { display:flex; flex-wrap:wrap; align-items:baseline; gap:10px; font-size:13px; }
+.gd-detail-head > b { font-size:15px; }
+.gd-note { font-size:11px; margin-top:8px; }
+.gd-pager { display:flex; flex-wrap:wrap; align-items:center; gap:8px 14px; margin:6px 0 10px; }
+.gd-pager-sum { font-size:12.5px; color:var(--text-dim); }
+.gd-pager-sum b { color:var(--text); }
+.gd-pager-btns { display:inline-flex; align-items:center; gap:5px; margin-left:auto; }
+.gd-pager-pos { font-size:12px; color:var(--text-dim); font-variant-numeric:tabular-nums; padding:0 4px; }
+.gd-step:disabled { opacity:.4; cursor:default; background:var(--panel-2); color:var(--text-faint); border-color:var(--border); }
