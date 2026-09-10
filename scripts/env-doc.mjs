@@ -8,6 +8,10 @@
  *
  * 수집 방법: `process.env.KEY` 참조를 전부 찾아 모듈 경로로 분류하고, 같은 줄에서 기본값
  * (`|| 8`, `?? 'x'`, `=== 'true'`)을 추출한다. 값 자체는 읽지 않는다(비밀 노출 없음).
+ * v2.451 부터 **`process.env` 를 별칭에 담아 쓰는 모듈**(`const env = process.env` ·
+ * `policyFromEnv(env = process.env)`)의 `env.KEY` 도 같이 잡는다 — 그 전에는 RMA 25키와
+ * dead-band 3키가 통째로 빠져 있었고, 그중 RMA_ALLOW_SSH·RMA_ALLOW_CUSTOM·RMA_FILE_ROOTS 처럼
+ * **엣지에서만 켤 수 있는 보안 옵트인**이 문서에 없어 운영자가 존재조차 알 수 없었다.
  *
  * 사용: node scripts/env-doc.mjs        (docs/ENV.md 갱신)
  *       node scripts/env-doc.mjs --check (갱신이 필요하면 1 로 종료 — CI 에서 씀)
@@ -22,14 +26,22 @@ const OUT = path.join(ROOT, 'docs', 'ENV.md');
 const EXAMPLE = path.join(ROOT, 'packaging', 'offline', 'portal.env.example');
 
 /**
- * 스캐너가 못 잡는 키를 손으로 보완한다 — `process.env.X` 가 아니라 함수 인자로 env 를 받는 모듈
- * (예: `diskTrendPolicyFromEnv(env = process.env)` 안의 `env.KEY`)은 정규식에 걸리지 않는다.
- * 그런 모듈을 새로 만들면 여기에 추가할 것.
+ * 스캐너가 그래도 못 잡는 키(또는 기본값)를 손으로 보완한다. **먼저 스캐너가 잡히는지 확인할 것** — v2.451 부터
+ * `process.env` 를 별칭에 담는 모듈(`const env = process.env` · `policyFromEnv(env = process.env)`)의
+ * `env.KEY` 참조도 자동으로 잡는다(그 전에는 RMA 25키·dead-band 3키가 통째로 빠져 있었다).
+ * 그래도 안 잡히는 형태(런타임 조합 키 등)만 여기에 넣는다.
  */
-const EXTRA = {
+const MANUAL = {
+  // diskTrend 는 `set('warnPct', env.DISKTREND_WARN_PCT)` 처럼 **같은 줄에 기본값이 없다**
+  // (기본은 DEFAULT_POLICY 병합에서 온다). deadband 는 기본이 식별자(`DEFAULT_POLICY.temp.eps`)라
+  // 리터럴로 추출되지 않는다. 두 경우만 손으로 적고, 코드 상수와 어긋나면
+  // `server/test/envDocScan.test.js` 가 CI 에서 잡는다(값 드리프트 방지).
   DISKTREND_WARN_PCT: { area: '분석 도구', file: 'tools/diskTrend.js', def: '75' },
   DISKTREND_CRIT_PCT: { area: '분석 도구', file: 'tools/diskTrend.js', def: '85' },
   DISKTREND_SNAPSHOT_MAX_HOURS: { area: '분석 도구', file: 'tools/diskTrend.js', def: '72' },
+  METRICS_DEADBAND_TEMP_C: { area: '메트릭 수집', file: 'metrics/deadband.js', def: '0.5' },
+  METRICS_DEADBAND_POWER_W: { area: '메트릭 수집', file: 'metrics/deadband.js', def: '3' },
+  METRICS_DEADBAND_MAX_GAP_MS: { area: '메트릭 수집', file: 'metrics/deadband.js', def: '1800000' },
 };
 
 /** 런타임이 주는 값 — 포탈 설정이 아니므로 문서에서 제외. */
@@ -59,8 +71,9 @@ function walk(dir, out = []) {
 }
 
 /** 같은 줄에서 기본값 추출 — `|| 8` · `?? 'x'` · `=== 'true'` · `!== 'false'`. */
-function defaultOf(line, key) {
-  const after = line.slice(line.indexOf(`process.env.${key}`) + `process.env.${key}`.length);
+function defaultOf(line, key, ref) {
+  const at = line.indexOf(ref);
+  const after = at < 0 ? '' : line.slice(at + ref.length);
   // `Number(process.env.X) || 300` · `Math.max(1, Number(process.env.X) || 8)` 처럼 괄호로 감싼
   // 형태가 흔하므로 닫는 괄호를 건너뛰고 기본값을 찾는다.
   let m = after.match(/^[\s)]*(?:\|\||\?\?)\s*(-?\d+(?:_\d+)*|'[^']{0,40}'|"[^"]{0,40}"|true|false)/);
@@ -70,19 +83,35 @@ function defaultOf(line, key) {
   return '';
 }
 
+/**
+ * `process.env` 를 담은 지역 별칭 이름들을 찾는다 — `const env = process.env;`(rma/agent.js) ·
+ * `export function policyFromEnv(env = process.env)`(metrics/deadband.js, tools/diskTrend.js).
+ * 이 별칭이 있는 파일에서는 `<별칭>.KEY` 도 환경변수 참조로 본다.
+ * (`process.env.X` 처럼 뒤에 키가 붙은 형태는 별칭이 아니므로 제외한다.)
+ */
+function envAliases(text) {
+  const names = new Set();
+  for (const m of text.matchAll(/\b([A-Za-z_$][\w$]*)\s*=\s*process\.env(?!\s*\.)/g)) names.add(m[1]);
+  names.delete('process');
+  return names;
+}
+
 const rows = new Map();  // KEY -> { area, files:Set, def }
 for (const file of walk(SRC)) {
   let text;
   try { text = fs.readFileSync(file, 'utf8'); } catch { continue; }
   const rel = path.relative(SRC, file).replace(/\\/g, '/');
   const area = AREA[rel.split('/')[0]] || '공통';
+  // `process.env.KEY` + 이 파일이 쓰는 별칭의 `alias.KEY` 를 한 정규식으로 훑는다.
+  const aliases = envAliases(text);
+  const refRe = new RegExp(`(?:process\\.env|\\b(?:${['__never__', ...aliases].join('|')}))\\.([A-Z][A-Z_0-9]*)`, 'g');
   for (const line of text.split('\n')) {
-    for (const m of line.matchAll(/process\.env\.([A-Z][A-Z_0-9]*)/g)) {
+    for (const m of line.matchAll(refRe)) {
       const key = m[1];
       if (SKIP.has(key)) continue;
       const cur = rows.get(key) || { area, files: new Set(), def: '' };
       cur.files.add(rel);
-      if (!cur.def) cur.def = defaultOf(line, key);
+      if (!cur.def) cur.def = defaultOf(line, key, m[0]);
       // 여러 모듈에서 쓰면 첫 분류를 유지하되 '공통' 보다 구체적인 쪽을 선호
       if (cur.area === '공통' && area !== '공통') cur.area = area;
       rows.set(key, cur);
@@ -90,9 +119,11 @@ for (const file of walk(SRC)) {
   }
 }
 
-for (const [key, v] of Object.entries(EXTRA)) {
-  if (rows.has(key)) continue;
-  rows.set(key, { area: v.area, files: new Set([v.file]), def: v.def });
+// 스캐너가 찾은 키는 그대로 두고 **비어 있는 기본값만** 채운다. 아예 못 찾은 키는 새로 넣는다.
+for (const [key, v] of Object.entries(MANUAL)) {
+  const cur = rows.get(key);
+  if (!cur) rows.set(key, { area: v.area, files: new Set([v.file]), def: v.def });
+  else if (!cur.def) cur.def = v.def;
 }
 
 let documented = new Set();

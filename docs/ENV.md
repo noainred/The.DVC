@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **289개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **317개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-10)
@@ -30,13 +30,12 @@
 | `WAN_MAX_CONNECTIONS` | `6` |  | util/resilientFetch.js |
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
 
-## 공통 (80)
+## 공통 (76)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `AGENT_AUTO_REGISTER` | `기본 적용('false' 로 끄기)` | ✅ | config.js |
 | `AGENT_INVENTORY_INTERVAL_MS` | `60000` |  | config.js |
-| `AGENT_NAME` |  | ✅ | config.js |
 | `AGENT_PUSH_INVENTORY` | `기본 적용('false' 로 끄기)` |  | config.js |
 | `AGENT_SCAN_INTERVAL_MS` | `3600000` | ✅ | config.js |
 | `AUDIT_MAX` | `20000` |  | audit.js |
@@ -50,9 +49,7 @@
 | `CAPACITY_RAW_RETENTION_HOURS` |  |  | config.js |
 | `CAPACITY_ROLLUP_RETENTION_DAYS` |  |  | config.js |
 | `CAPACITY_SAMPLE_INTERVAL_MS` |  |  | config.js |
-| `CENTRAL_URL` | `''` | ✅ | config.js |
 | `COLLECT_CONCURRENCY` | `8` |  | store.js |
-| `COLLECTOR_DATACENTER` |  | ✅ | config.js |
 | `COLLECTOR_PULL_INTERVAL_MS` |  | ✅ | config.js |
 | `COLLECTOR_TIMEOUT_MS` | `20000` |  | config.js |
 | `COLLECTOR_TOKEN` |  | ✅ | config.js |
@@ -61,7 +58,6 @@
 | `DATA_SOURCE` |  | ✅ | config.js |
 | `DATACENTER` | `''` |  | config.js |
 | `EDGE_MODE` | `''` | ✅ | config.js |
-| `EDGE_TOKEN` |  | ✅ | config.js |
 | `IDRAC_DB_PATH` |  | ✅ | config.js |
 | `IDRAC_ENABLED` | `기본 적용('false' 로 끄기)` | ✅ | config.js |
 | `IDRAC_POLL_CONCURRENCY` |  |  | config.js |
@@ -121,10 +117,13 @@
 |---|---|---|---|
 | `VCLOGS_CONCURRENCY` | `6` |  | logs/poller.js |
 
-## 메트릭 수집 (5)
+## 메트릭 수집 (8)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
+| `METRICS_DEADBAND_MAX_GAP_MS` | `1800000` |  | metrics/deadband.js |
+| `METRICS_DEADBAND_POWER_W` | `3` |  | metrics/deadband.js |
+| `METRICS_DEADBAND_TEMP_C` | `0.5` |  | metrics/deadband.js |
 | `VMPERF_DB_DIR` |  |  | metrics/vmperfDb.js |
 | `VMPERF_ENABLED` | `기본 적용('false' 로 끄기)` |  | metrics/vmperfSettings.js |
 | `VMPERF_MAX_OPEN_DB` | `8` |  | metrics/vmperfDb.js |
@@ -234,15 +233,44 @@
 | `SVCMON_PUSH` | `기본 적용('false' 로 끄기)` |  | agent/svcmonPush.js |
 | `SVCMON_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | agent/svcmonPush.js |
 
-## 원격 명령(RMA) (6)
+## 원격 명령(RMA) (35)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
+| `AGENT_NAME` |  | ✅ | config.js, rma/agent.js |
+| `CENTRAL_URL` | `''` | ✅ | config.js, rma/agent.js |
+| `COLLECTOR_DATACENTER` |  | ✅ | config.js, rma/agent.js |
+| `EDGE_TOKEN` | `''` | ✅ | config.js, rma/agent.js |
 | `RMA_ACK_GRACE_MS` | `30000` |  | rma/jobs.js |
+| `RMA_ALLOW_CUSTOM` | `기본 아님('true' 일 때만 적용)` | ✅ | rma/agent.js |
+| `RMA_ALLOW_REBOOT` | `기본 아님('true' 일 때만 적용)` | ✅ | rma/agent.js |
+| `RMA_ALLOW_SSH` | `기본 아님('true' 일 때만 적용)` | ✅ | rma/agent.js |
+| `RMA_AUDIT_LOG` |  | ✅ | rma/agent.js |
+| `RMA_COMMENT` | `''` | ✅ | rma/agent.js |
+| `RMA_CRED_CACHE_MS` | `10` |  | rma/agent.js |
+| `RMA_DISABLED_COMMANDS` |  |  | rma/agent.js |
+| `RMA_DISABLED_TESTS` |  |  | rma/agent.js |
+| `RMA_ENABLED_COMMANDS` |  | ✅ | rma/agent.js |
+| `RMA_ENABLED_TESTS` |  | ✅ | rma/agent.js |
+| `RMA_FAILURE_LOG` |  | ✅ | rma/agent.js |
+| `RMA_FILE_ROOTS` |  | ✅ | rma/agent.js |
 | `RMA_HEARTBEAT_STALE_MS` | `90000` |  | rma/jobs.js |
 | `RMA_HISTORY_DAYS` | `90` |  | rma/historyDb.js |
+| `RMA_INSTANCE` |  |  | rma/agent.js |
+| `RMA_LONGPOLL_MS` | `20000` | ✅ | rma/agent.js |
 | `RMA_MAX_OUTPUT` | `256` | ✅ | rma/exec.js |
+| `RMA_OFFLINE_CMD_FAIL` | `''` |  | rma/agent.js |
+| `RMA_OFFLINE_CMD_OK` | `''` | ✅ | rma/agent.js |
+| `RMA_OFFLINE_MINUTES` | `0` | ✅ | rma/agent.js |
+| `RMA_OFFLINE_PING_HOST` |  | ✅ | rma/agent.js |
+| `RMA_PASSWORD` | `''` | ✅ | rma/agent.js |
+| `RMA_PRIORITY` |  |  | rma/agent.js |
+| `RMA_REMOTE_MANAGE` | `기본 아님('true' 일 때만 적용)` | ✅ | rma/agent.js |
+| `RMA_RESTORE_CMD` |  |  | rma/agent.js |
+| `RMA_SERVICE_UNITS` |  | ✅ | rma/agent.js |
+| `RMA_SSH_TARGETS` |  | ✅ | rma/agent.js |
 | `RMA_TEST_ALERT_STREAK` | `2` |  | rma/testResults.js |
+| `RMA_TEST_CONCURRENCY` | `4` | ✅ | rma/agent.js |
 | `RMA_TEST_HISTORY_DAYS` | `90` |  | rma/testResults.js |
 
 ## 원격 접속(프록시) (22)
@@ -276,7 +304,7 @@
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
-| `CONFIG_DIR` |  | ✅ | config.js, insights/dbLocation.js |
+| `CONFIG_DIR` |  | ✅ | config.js, insights/dbLocation.js 외 1 |
 | `DB_HEALTH_COUNT_MAX_BYTES` | `512` |  | insights/dbHealth.js |
 | `DB_HEALTH_FULL_MAX_BYTES` | `256` |  | insights/dbHealth.js |
 | `PORTAL_DB_MIN_FORECAST_MS` | `3600000` |  | insights/portalDb.js |
@@ -324,7 +352,7 @@
 | `CENTRAL_FLEET_MAX_AGENTS` | `500` |  | central/fleet.js |
 | `CENTRAL_FLEET_TTL_MS` | `30` |  | central/fleet.js |
 | `CENTRAL_PDU_TTL_MS` | `6` |  | central/pduEdge.js |
-| `CENTRAL_TOKEN` | `''` | ✅ | central/token.js, config.js |
+| `CENTRAL_TOKEN` | `''` | ✅ | central/token.js, config.js 외 1 |
 | `IDRAC_PUSH_TIMEOUT_MS` | `15` |  | central/idracScanPush.js |
 | `IDRAC_SCAN_ACK_TIMEOUT_MS` | `90000` |  | central/idracScanJobs.js |
 | `INGEST_PLAIN_WARN_BYTES` | `512` |  | central/ingestStats.js |
@@ -468,4 +496,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 59 / 289
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 317
