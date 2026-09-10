@@ -42,6 +42,7 @@ import { resilientFetch } from '../util/resilientFetch.js';
 import { buildCommand, parseList } from './commands.js';
 import { verifyJob } from './signing.js';
 import { runCommand, DEFAULT_MAX_OUTPUT } from './exec.js';
+import { pathAllowed } from './testRunner.js';  // 파일 경로 realpath 검사(점검과 같은 판정)
 import { buildTest } from './tests.js';
 import { runTest } from './testRunner.js';
 
@@ -126,6 +127,16 @@ export async function handleJob(job, { password = PASSWORD, allowCustom = ALLOW_
     } else if (job.secret && job.secret.username) {
       b.creds = { username: String(job.secret.username), password: String(job.secret.password || '') };
     } else return { ok: false, reason: 'SSH 계정이 지정되지 않았습니다(저장된 계정 또는 1회 입력).', rejected: true };
+  }
+  // 파일 경로 정책 2차 검사(v2.454) — buildCommand 는 순수 모듈이라 문자열 비교만 한다.
+  // 여기서 realpath 로 다시 보아 심볼릭 링크로 허용 루트 밖을 가리키는 경우를 막는다
+  // (`/var/log/evil -> /etc` 같은 링크는 문자열 검사를 통과한다). testRunner 와 같은 판정 함수.
+  if (b.filePolicy) {
+    if (!pathAllowed(b.args?.path, policy.fileRoots)) {
+      stats.rejected++;
+      auditFail({ kind: 'job', reqId: job.reqId, cmd: b.preset, reason: 'file-root' });
+      return { ok: false, rejected: true, reason: `경로가 허용 목록(RMA_FILE_ROOTS: ${(policy.fileRoots || []).join(', ')}) 밖입니다 — 심볼릭 링크 포함해 확인하세요.` };
+    }
   }
   stats.active++;
   try {

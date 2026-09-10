@@ -57,6 +57,16 @@ export const PRESETS = [
   { id: 'ls',          group: '디스크', label: '디렉터리 목록 (ls -la)',
     params: [{ name: 'path', label: '경로', type: 'path', required: true, def: '/etc/vmware-portal' }],
     argv: (a) => ['ls', '-la', a.path] },
+  // 폴더 사용량 Top-N(v2.454) — 하위 폴더별 바이트 합계. 파일 **내용은 읽지 않고** 디렉터리
+  // 엔트리 크기만 센다(ls 와 같은 위험도). 주기 자동 실행이라 `filePolicy` 로 엣지의
+  // RMA_FILE_ROOTS 안으로 제한한다 — 명령 프리셋 중 유일하게 경로 정책을 받는 항목이다.
+  //  -x: 다른 파일시스템으로 넘어가지 않음(마운트 밑의 마운트까지 세면 몇 시간이 걸린다)
+  //  -b: 바이트(--apparent-size 아님 — 실제 점유 블록이 아니라 파일 크기 합)
+  //  --max-depth=1: 바로 아래 한 단계만(사용자별 폴더). 깊이를 늘리면 출력이 폭증한다.
+  { id: 'du-top', group: '디스크', label: '하위 폴더 사용량 (du --max-depth=1)',
+    params: [{ name: 'path', label: '폴더', type: 'path', required: true }],
+    argv: (a) => ['du', '-x', '-b', '--max-depth=1', a.path],
+    filePolicy: true, timeoutMs: 900_000, maxLines: 20_000 },
   { id: 'top',         group: '프로세스', label: 'CPU 상위 프로세스 (top -bn1)', argv: () => ['top', '-bn1', '-w', '200'], maxLines: 40 },
   { id: 'ps-cpu',      group: '프로세스', label: 'CPU 순 프로세스 (ps)',          argv: () => ['ps', 'aux', '--sort=-%cpu'], maxLines: 30 },
   { id: 'ps-mem',      group: '프로세스', label: '메모리 순 프로세스 (ps)',       argv: () => ['ps', 'aux', '--sort=-%mem'], maxLines: 30 },
@@ -139,6 +149,26 @@ export const PRESETS = [
 const byId = new Map(PRESETS.map((p) => [p.id, p]));
 export const getPreset = (id) => byId.get(String(id || '')) || null;
 
+/**
+ * 경로가 엣지의 허용 루트 안인가 — **경계를 포함한** 프리픽스 비교(순수).
+ * `/var/log` 가 허용일 때 `/var/logs` 는 통과하면 안 되므로 루트와 정확히 같거나 `루트 + '/'` 로
+ * 시작할 때만 허용한다. `..` 은 정규화 전에 거부한다(경로 문자열로 상위 탈출 차단).
+ * realpath 기반 최종 검사는 엣지가 실행 직전에 한 번 더 한다(심볼릭 링크 탈출).
+ */
+export function fileRootIssue(p, roots) {
+  const target = String(p || '');
+  if (!target.startsWith('/')) return '절대경로만 사용할 수 있습니다.';
+  if (target.split('/').includes('..')) return "경로에 '..' 를 쓸 수 없습니다.";
+  const norm = target.length > 1 ? target.replace(/\/+$/, '') : target;
+  const list = (roots || []).map((r) => String(r || '')).filter((r) => r.startsWith('/'));
+  if (!list.length) return '이 엣지에 파일 접근 허용 경로가 없습니다(RMA_FILE_ROOTS).';
+  const ok = list.some((r) => {
+    const rr = r.length > 1 ? r.replace(/\/+$/, '') : r;
+    return norm === rr || norm.startsWith(rr === '/' ? '/' : rr + '/');
+  });
+  return ok ? null : `경로 '${norm}' 은 이 엣지의 허용 목록(RMA_FILE_ROOTS: ${list.join(', ')}) 밖입니다.`;
+}
+
 export const LIMITS = {
   timeoutMs: { min: 1_000, max: 300_000, def: 30_000 },
   shellMaxLen: 2_000,
@@ -196,12 +226,20 @@ export function buildCommand(cmd, rawArgs = {}, opts = {}) {
     if (!commandAllowed(preset.id, pol)) return { ok: false, issue: `이 엣지에서 허용되지 않은 명령입니다: ${preset.id} (RMA_ENABLED_COMMANDS/RMA_DISABLED_COMMANDS)` };
     if (preset.unitPolicy && !(pol.serviceUnits || []).some((u) => u === args.unit)) return { ok: false, issue: `서비스 '${args.unit}' 은 이 엣지의 허용 목록(RMA_SERVICE_UNITS)에 없습니다.` };
     if (preset.rebootPolicy && !pol.allowReboot) return { ok: false, issue: '재부팅은 이 엣지에서 허용되지 않았습니다(RMA_ALLOW_REBOOT=true 필요).' };
+    // 파일 경로 정책(v2.454) — 여기서는 **정규화 후 경계(/) 프리픽스**만 본다. 심볼릭 링크 탈출은
+    // 문자열로 막을 수 없으므로 엣지가 실행 직전 realpath 로 다시 검사한다(agent.js) — 두 겹이다.
+    // 접두 문자열만으로 끝내면 `/var/log` 허용이 `/var/logs` 를 통과시킨다(v2.418 과 같은 함정).
+    if (preset.filePolicy) {
+      const issue = fileRootIssue(args.path, pol.fileRoots);
+      if (issue) return { ok: false, issue };
+    }
     if (preset.sshPolicy) {
       if (!pol.allowSsh) return { ok: false, issue: 'SSH 원격 실행은 이 엣지에서 허용되지 않았습니다(RMA_ALLOW_SSH=true 필요).' };
       if (!targetAllowed(args.host, pol.sshTargets)) return { ok: false, issue: `대상 '${args.host}' 은 이 엣지의 SSH 허용 목록(RMA_SSH_TARGETS)에 없습니다.` };
     }
   }
   const out = { ok: true, preset: preset.id, args, timeoutMs, maxLines: preset.maxLines || 0, sudo: !!preset.sudo, danger: !!preset.danger };
+  if (preset.filePolicy) out.filePolicy = true;  // 엣지가 realpath 로 2차 검사하도록 표시(agent.js)
   if (preset.native) out.native = preset.native;
   else if (preset.shell) out.shell = args.command;
   else {

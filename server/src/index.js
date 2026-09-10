@@ -43,6 +43,7 @@ import { startIdracPoller } from './idrac/poller.js';
 import { startIdracScanPoller } from './idrac/scanPoller.js';
 import { startNsxPoller } from './nsx/store.js';
 import { startAlertEngine } from './alerts.js';
+import { startDirUsageScheduler } from './dirusage/scheduler.js'; // 폴더 사용량 Top-N 리포트(v2.454)
 import { startMetricsSampler } from './metrics/sampler.js';
 import { startGpuGuestPoller } from './gpu/poller.js';
 import { startPhysicalGpuPoller } from './gpu/physicalPoller.js';
@@ -251,6 +252,7 @@ const stagger = [
   startBmstorPoller, // 베어메탈 스토리지(v2.340) — 30초 틱 + 재진입 가드, 등록 0대면 대기
   startBmstorWorker, // 〃 폴링 위임 워커(v2.341) — CENTRAL_URL 미설정이면 자기기동 안 함
   startVmtrackPoller, // VM 수량 추이(v2.345) — 60초 틱, 슬롯(00/12시) 미기록 시에만 수집 + 재진입 가드
+  startDirUsageScheduler, // 폴더 사용량 Top-N 리포트(v2.454) — 60초 틱 + 재진입 가드, 설정 꺼짐이면 결과 수거만
 ];
 stagger.forEach((start, i) => setTimeout(() => { try { start(); } catch (e) { console.error('[start] 폴러 기동 실패:', e?.message); } }, i * 1500).unref?.());
 
