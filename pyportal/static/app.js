@@ -203,6 +203,7 @@
     state.pendingPane = pane || state.pendingPane || "shortcuts";
     $("login-msg").textContent = "";
     $("login-input").value = "";
+    $("login-recover").hidden = true;   // 열 때마다 안내 패널은 접어 둔다
     $("login-modal").hidden = false;
     setTimeout(function () { $("login-input").focus(); }, 30);
   }
@@ -1978,6 +1979,9 @@
     // 로그인 모달
     $("login-submit").addEventListener("click", submitLogin);
     $("login-cancel").addEventListener("click", function () { $("login-modal").hidden = true; });
+    $("login-forgot").addEventListener("click", function () {
+      var p = $("login-recover"); p.hidden = !p.hidden;   // 안내 패널 토글(서버 호출 없음)
+    });
     $("login-input").addEventListener("keydown", function (event) {
       if (event.key === "Enter") submitLogin();
     });

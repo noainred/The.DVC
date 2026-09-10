@@ -44,6 +44,7 @@
 | 문서 | 용도 |
 |---|---|
 | [SERVICE-HUB.md](SERVICE-HUB.md) | 서비스 허브(pyportal) 운영 가이드 — 서비스 포탈 바로가기 허브 사용법 |
+| [HUB-PASSWORD-RECOVERY.md](HUB-PASSWORD-RECOVERY.md) | **비밀번호 분실·잠금 복구** — 다빈치(OTP 재등록)·pyportal(콘솔 초기화) 관리자 계정 복구 절차 |
 | [SVCMON-ARCHITECTURE.md](SVCMON-ARCHITECTURE.md) | 성능점검(svcmon) 아키텍처 — 1만 대·일 2GB 로그 전제의 용량 산정·튜닝 |
 | [SVCMON-TESTS.md](SVCMON-TESTS.md) | 성능점검 테스트 유형 15종 — 프로토콜·판정 기준·파라미터 |
 | [SVCMON-BULK.md](SVCMON-BULK.md) | 성능점검 대량 등록 — CSV 가져오기/내보내기·대량 자동등록 |

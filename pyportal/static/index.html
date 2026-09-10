@@ -611,6 +611,18 @@
         <button class="btn btn-ghost" id="login-cancel" type="button">취소</button>
         <span class="form-msg" id="login-msg"></span>
       </div>
+      <button class="link-btn" id="login-forgot" type="button">비밀번호를 잊으셨나요? · 비밀번호 재설정</button>
+      <div class="recover-panel" id="login-recover" hidden>
+        <p class="recover-title">비밀번호 재설정 (관리자 복구)</p>
+        <p class="muted">보안상 재설정은 <b>서버에 접속할 수 있는 운영자</b>만 콘솔에서 실행합니다.
+          웹 화면에서 바로 초기화하면 누구나 관리자 계정을 탈취·잠금할 수 있어 제공하지 않습니다.</p>
+        <p class="muted">서버(설치 디렉터리)에서 아래 명령을 실행하세요. 새 임시 비밀번호가 <b>한 번</b> 출력되고
+          기존 로그인 세션은 모두 무효화됩니다. 로그인 후 즉시 변경하세요.</p>
+        <pre class="recover-cmd">python3 app.py --reset-password admin</pre>
+        <p class="field-hint">systemd 설치본(계정 dchub · 데이터 <code>/etc/dc-service-hub</code>)은
+          <code>sudo -u dchub HUB_DATA_DIR=/etc/dc-service-hub python3 /opt/dc-service-hub/app.py --reset-password admin</code>.
+          자세한 절차는 문서 <code>docs/HUB-PASSWORD-RECOVERY.md</code> 참고.</p>
+      </div>
     </div>
   </div>
 
