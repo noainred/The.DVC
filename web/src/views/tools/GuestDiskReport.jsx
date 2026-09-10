@@ -177,7 +177,7 @@ export default function GuestDiskReport({ scope = '' }) {
     <thead>
       <tr>
         <th>법인</th><th>vCenter</th><th>클러스터</th><th>VM</th>
-        <th>할당</th><th>사용</th><th>회수가능</th><th>사용률</th><th>파티션</th><th data-nosort>추이</th>
+        <th className="gd-num">할당</th><th className="gd-num">사용</th><th className="gd-num">회수가능</th><th className="gd-num">사용률</th><th className="gd-num">파티션</th><th data-nosort>추이</th>
       </tr>
     </thead>
   );
@@ -341,7 +341,7 @@ export default function GuestDiskReport({ scope = '' }) {
                 )}
               </div>
               <STable className="gd-table">
-                <thead><tr><th>파티션</th><th>할당</th><th>사용</th><th>여유</th><th>증가율(GB/일)</th><th>추이</th><th data-nosort>판정</th></tr></thead>
+                <thead><tr><th>파티션</th><th className="gd-num">할당</th><th className="gd-num">사용</th><th className="gd-num">여유</th><th className="gd-num">증가율(GB/일)</th><th>추이</th><th data-nosort>판정</th></tr></thead>
                 <tbody>
                   {(detail.partitions || []).map((p) => (
                     <tr key={p.path}>
