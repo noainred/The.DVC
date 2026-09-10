@@ -134,10 +134,15 @@ export const config = {
     dbPath: process.env.TEMP_DB_PATH || dbFile('host-temp.db'),
     sampleIntervalMs: Number(process.env.TEMP_SAMPLE_INTERVAL_MS) || 60_000,  // 1분 (설정에서 변경 가능)
     retentionDays: Number(process.env.TEMP_RETENTION_DAYS) || 1830,           // ~5년(시간당 롤업 기준)
-    // 원본(분 단위) 보존기간(v2.451) — 용량의 대부분이 원본이라 짧게 두고, 그 이전 구간은
-    // 시간당 롤업(평균·최소·최대)만 남긴다. 60분+ 버킷 조회는 이미 롤업을 쓰므로 장기 추이는 그대로 보인다.
-    // 0 = 원본도 retentionDays 를 따름(예전 동작).
-    rawRetentionDays: Number(process.env.TEMP_RAW_RETENTION_DAYS) || 90,
+    // 원본(분 단위) 보존기간 — 용량의 대부분이 원본이라 짧게 두면, 그 이전 구간은 시간당
+    // 롤업(평균·최소·최대)만 남는다. 60분+ 버킷 조회는 이미 롤업을 쓰므로 장기 추이는 그대로다.
+    //
+    // ⚠ 기본값은 **0(끔)** 이다(v2.453). v2.451 은 기본 90 이었는데, 5년치가 쌓인 34.3GB DB 에서
+    // 업그레이드 후 첫 샘플에 **수억 행이 삭제 대상**이 되어 포탈이 멈췄다(실제 운영 장애).
+    // 과거 데이터를 대량으로 지우는 동작은 **운영자가 설정 화면에서 명시적으로 켜야** 한다 —
+    // 업그레이드가 조용히 시작할 일이 아니다. 삭제 자체는 이제 청크로 양보하지만(util/chunkedPrune.js),
+    // 기본값으로 켜지 않는다는 원칙은 유지한다. 용량이 '더 늘지 않게' 하는 dead-band 는 기본 동작이다.
+    rawRetentionDays: Number(process.env.TEMP_RAW_RETENTION_DAYS) || 0,
   },
   ping: {
     // 네트워크 Ping 모니터링 — 등록한 대상(호스트)의 도달성/지연(RTT)을 주기적으로 측정해

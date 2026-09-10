@@ -11,6 +11,7 @@
 
 import fs from 'node:fs';
 import { splitByDeadband, policyFromEnv } from './deadband.js';
+import { chunkedDelete } from '../util/chunkedPrune.js';
 import path from 'node:path';
 import { config } from '../config.js';
 
@@ -57,14 +58,17 @@ function initSqlite() {
     const recentAvgAll = db.prepare(`SELECT k, AVG(v) avg, MAX(v) max FROM samples WHERE metric=? AND ts>=? GROUP BY k`);
     const metaStmt = db.prepare('SELECT MIN(ts) AS mn, MAX(ts) AS mx, COUNT(*) AS n FROM samples WHERE metric=?');
     const dumpStmt = db.prepare('SELECT k, v, ts FROM samples WHERE metric=? AND ts>=? AND ts<=? ORDER BY ts, k LIMIT ?');
-    const prune = db.prepare('DELETE FROM samples WHERE ts < ?');
+    // ⚠ 청크 DELETE (v2.453). 한 방 `DELETE ... WHERE ts < ?` 는 삭제 대상이 수억 행이면
+    // 프로세스 전체를 수 분 이상 멈춘다(v2.451 에서 실제 장애 — accept 큐가 차서 웹 타임아웃).
+    // rowid 서브쿼리 + LIMIT 으로 끊고 청크 사이에 이벤트 루프를 양보한다(util/chunkedPrune.js).
+    const prune = db.prepare('DELETE FROM samples WHERE rowid IN (SELECT rowid FROM samples WHERE ts < ? LIMIT ?)');
     const HOUR = 3600_000;
     const insHour = db.prepare(`INSERT INTO samples_hourly (metric, k, h, n, sum, mn, mx) VALUES (?, ?, ?, 1, ?, ?, ?)
       ON CONFLICT(metric, k, h) DO UPDATE SET n=n+1, sum=sum+excluded.sum, mn=MIN(mn, excluded.mn), mx=MAX(mx, excluded.mx)`);
     const bucketHourly = db.prepare(`SELECT CAST(h/? AS INTEGER)*? AS b, SUM(sum)/SUM(n) AS avg, MIN(mn) AS min, MAX(mx) AS max
       FROM samples_hourly WHERE metric=? AND k=? AND h>=? GROUP BY b ORDER BY b DESC LIMIT ?`);
     const hourlyMin = db.prepare('SELECT MIN(h) AS mn FROM samples_hourly WHERE metric=? AND k=?');
-    const pruneHourly = db.prepare('DELETE FROM samples_hourly WHERE h < ?');
+    const pruneHourly = db.prepare('DELETE FROM samples_hourly WHERE rowid IN (SELECT rowid FROM samples_hourly WHERE h < ? LIMIT ?)');
     // ⚠ 키별 상한을 **SQL 에서** 적용한다(2026-08-13 감사 '성능 잔여 A'). 과거에는 창 전체를
     //   전량 읽어 JS 에서 arr.slice(-limitPerKey) 로 잘랐다 — 창이 클램프(최대 7일)돼도
     //   1분 버킷이면 키당 10,080 버킷 × 키 수천 개의 행 객체를 모두 할당한 뒤 대부분 버렸다.
@@ -162,16 +166,20 @@ function initSqlite() {
        * 오래된 구간을 분 단위로 볼 일은 드물고, 60분+ 버킷 조회는 이미 롤업을 쓴다(위 history 참조).
        * 그래서 원본은 짧게(기본 90일), 롤업은 길게(기존 보존기간, 기본 5년) 둘 수 있다.
        */
-      prune: (beforeTs, rollupBeforeTs = null) => {
-        const r = prune.run(beforeTs);
+      prune: async (beforeTs, rollupBeforeTs = null) => {
+        // v2.453: 청크 + 이벤트 루프 양보. 상한에 걸리면 남은 것을 다음 주기가 이어서 지운다 —
+        // 한 주기에 다 지우려다 포탈을 멈추지 않는다.
+        const r = await chunkedDelete(prune, [beforeTs], { label: 'metrics.samples' });
+        if (r.deleted > 0) console.log(`[metrics] 원본 prune ${r.deleted.toLocaleString()}행 삭제(${r.chunks}청크)${r.done ? '' : ' — 상한 도달, 다음 주기에 계속'}`);
         // 롤업도 정리한다(원본만 지우면 집계가 영원히 남는다). 경계의 부분 시간대(1시간 미만)는
         // 남겨 롤업이 원본보다 먼저 비는 일이 없게 한다. 실패해도 원본 prune 결과는 유지.
         const rb = (rollupBeforeTs == null ? beforeTs : rollupBeforeTs) - HOUR;
-        try { pruneHourly.run(rb); } catch (e) { console.warn(`[metrics] 롤업 prune 실패: ${e.message}`); }
+        try { await chunkedDelete(pruneHourly, [rb], { label: 'metrics.hourly' }); }
+        catch (e) { console.warn(`[metrics] 롤업 prune 실패: ${e.message}`); }
         for (const c of latestCache.values()) {
           for (const [k, e] of c) if (e.ts < beforeTs) c.delete(k);
         }
-        return r;
+        return r.deleted;
       },
     };
   });

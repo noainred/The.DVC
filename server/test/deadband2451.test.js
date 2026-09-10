@@ -107,10 +107,14 @@ test('policyFromEnv — 값이 없거나 이상하면 기본값, 0 이면 비활
   assert.equal(policyFromEnv({ METRICS_DEADBAND_MAX_GAP_MS: '1000' }).temp.maxGapMs, 60_000);
 });
 
-test('설정 기본값 — 원본 90일 / 롤업 5년(온도), 전력은 기존 90일 유지', async () => {
+test('설정 기본값 — 롤업 보존은 유지, 원본 대량 삭제는 기본 꺼짐(v2.453)', async () => {
+  // v2.451 은 원본 보존 기본값을 90 으로 켰다가 34.3GB DB 에서 운영 장애를 냈다
+  // (기동 직후 수억 행 동기 DELETE → 이벤트 루프 정지 → 웹 타임아웃).
+  // 과거 데이터를 대량 삭제하는 동작은 운영자가 설정 화면에서 명시적으로 켜야 한다.
+  // 자세한 회귀 고정은 test/chunkedPrune2453.test.js.
   const { config } = await import('../src/config.js');
   assert.equal(config.temp.retentionDays, 1830, '롤업(시간당 평균·최소·최대)은 5년');
-  assert.equal(config.temp.rawRetentionDays, 90, '원본(분 단위)은 90일');
+  assert.equal(config.temp.rawRetentionDays, 0, '원본 보존 분리는 opt-in(0=끔)');
   assert.equal(config.idrac.retentionDays, 90);
   assert.equal(config.idrac.rawRetentionDays, 0, '0 = 기존 동작(원본도 90일)');
 });
