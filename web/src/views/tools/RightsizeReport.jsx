@@ -26,6 +26,17 @@ const STATE = {
   keep: { color: 'var(--muted)', badge: 'gray', icon: 'ℹ️' },
 };
 
+// 이력 통계(null 가능) + 실시간 폴백 → 표시 셀. 이력이 있으면 그대로, 이력이 비고(레벨 낮아 롤업
+// 미수집) 실시간 현재값(최근 1시간)이 있으면 그것을 참고값으로 채운다(p95 는 실시간에 없어 '—').
+function memCell(s, rtc) {
+  const has = s && (s.avg != null || s.max != null);
+  if (has) return { avg: gb(s.avg), p95: gb(s.p95), max: gb(s.max), isRt: false };
+  if (rtc) return { avg: gb(rtc.avg), p95: '—', max: gb(rtc.max), isRt: true };
+  return { avg: '—', p95: '—', max: '—', isRt: false };
+}
+const RT_TAG = <span title="vCenter 실시간(최근 1시간) 구간에서 조회한 현재값 — 이력 통계 레벨과 무관"
+  style={{ background: '#0ea5e9', color: '#fff', fontSize: 9, marginLeft: 4, padding: '0 4px', borderRadius: 4, verticalAlign: 'middle' }}>실시간</span>;
+
 /** 시계열 여러 개를 t 기준으로 합쳐 recharts 행으로. */
 function merge(series, keys) {
   const byT = new Map();
@@ -61,6 +72,7 @@ export default function RightsizeReport({ vm, onClose }) {
   }, [vm.id, days]);
 
   const r = data;
+  const rt = r?.realtime || {};   // 이력 롤업에 안 잡힌 level-2 mem 카운터의 실시간 현재값(참고)
   const st = r ? STATE[r.verdict?.state] || STATE.keep : null;
   const cpuRows = r ? merge(r.series, ['cpuUsageMhz']).map((e) => ({ ...e, alloc: r.cpu.allocMhz })) : [];
   const memRows = r ? merge(r.series, ['memActiveMB', 'memConsumedMB', 'memBalloonMB', 'memSwappedMB']) : [];
@@ -193,10 +205,30 @@ export default function RightsizeReport({ vm, onClose }) {
                 <STable>
                   <thead><tr><th>계열</th><th>의미</th><th className="right">평균</th><th className="right">p95</th><th className="right">최대</th><th>해석</th></tr></thead>
                   <tbody>
-                    <tr><td><b>Active</b></td><td className="muted">게스트가 실제로 만지는 메모리(워킹셋 추정)</td><td className="right">{gb(r.mem.active.avg)}</td><td className="right">{gb(r.mem.active.p95)}</td><td className="right">{gb(r.mem.active.max)}</td><td className="muted">감축 하한 후보 ①</td></tr>
-                    <tr><td><b>Consumed</b></td><td className="muted">호스트가 이 VM 에 실제 배정한 메모리(캐시 포함)</td><td className="right">{gb(r.mem.consumed.avg)}</td><td className="right">{gb(r.mem.consumed.p95)}</td><td className="right">{gb(r.mem.consumed.max)}</td><td className="muted">감축 하한 후보 ② — active 만 보면 캐시를 빼앗음</td></tr>
-                    <tr style={{ color: r.mem.balloon.samplesAbove0 ? '#fbbf24' : undefined }}><td><b>Balloon</b></td><td className="muted">ESXi 가 벌룬 드라이버로 회수한 양(&gt;0 = 호스트 압박)</td><td className="right">{gb(r.mem.balloon.avg)}</td><td className="right">{gb(r.mem.balloon.p95)}</td><td className="right">{gb(r.mem.balloon.max)}</td><td>{r.mem.balloon.samplesAbove0 ? `관측 시간의 ${r.mem.balloon.pctTime}% 에서 0 초과 → 감축 보류` : '관측 없음 → 정상'}</td></tr>
-                    <tr style={{ color: r.mem.swapped.samplesAbove0 ? '#f87171' : undefined }}><td><b>Swapped</b></td><td className="muted">호스트 스왑으로 내려간 양(&gt;0 = 심각한 압박)</td><td className="right">{gb(r.mem.swapped.avg)}</td><td className="right">{gb(r.mem.swapped.p95)}</td><td className="right">{gb(r.mem.swapped.max)}</td><td>{r.mem.swapped.samplesAbove0 ? `관측 시간의 ${r.mem.swapped.pctTime}% 에서 0 초과 → 감축 금지` : '관측 없음 → 정상'}</td></tr>
+                    {(() => { const c = memCell(r.mem.active, rt.memActiveMB); return (
+                      <tr style={c.isRt ? { background: 'rgba(14,165,233,.08)' } : undefined}>
+                        <td><b>Active</b></td><td className="muted">게스트가 실제로 만지는 메모리(워킹셋 추정)</td>
+                        <td className="right">{c.avg}{c.isRt && RT_TAG}</td><td className="right">{c.p95}</td><td className="right">{c.max}</td>
+                        <td className="muted">{c.isRt ? '이력 롤업엔 표본 없음 · 실시간(최근 1시간) 현재값 — vCenter 통계 레벨 ↑ 시 이력도 쌓임' : '감축 하한 후보 ①'}</td>
+                      </tr>); })()}
+                    {(() => { const c = memCell(r.mem.consumed, rt.memConsumedMB); return (
+                      <tr style={c.isRt ? { background: 'rgba(14,165,233,.08)' } : undefined}>
+                        <td><b>Consumed</b></td><td className="muted">호스트가 이 VM 에 실제 배정한 메모리(캐시 포함)</td>
+                        <td className="right">{c.avg}{c.isRt && RT_TAG}</td><td className="right">{c.p95}</td><td className="right">{c.max}</td>
+                        <td className="muted">{c.isRt ? '이력 롤업엔 표본 없음 · 실시간 현재값' : '감축 하한 후보 ② — active 만 보면 캐시를 빼앗음'}</td>
+                      </tr>); })()}
+                    {(() => { const c = memCell(r.mem.balloon, rt.memBalloonMB); const has = r.mem.balloon && (r.mem.balloon.avg != null || r.mem.balloon.max != null); return (
+                      <tr style={r.mem.balloon.samplesAbove0 ? { color: '#fbbf24' } : c.isRt ? { background: 'rgba(14,165,233,.08)' } : undefined}>
+                        <td><b>Balloon</b></td><td className="muted">ESXi 가 벌룬 드라이버로 회수한 양(&gt;0 = 호스트 압박)</td>
+                        <td className="right">{c.avg}{c.isRt && RT_TAG}</td><td className="right">{c.p95}</td><td className="right">{c.max}</td>
+                        <td>{has ? (r.mem.balloon.samplesAbove0 ? `관측 시간의 ${r.mem.balloon.pctTime}% 에서 0 초과 → 감축 보류` : '관측 없음 → 정상') : c.isRt ? '이력 없음 · 실시간 현재값' : '관측 없음'}</td>
+                      </tr>); })()}
+                    {(() => { const c = memCell(r.mem.swapped, rt.memSwappedMB); const has = r.mem.swapped && (r.mem.swapped.avg != null || r.mem.swapped.max != null); return (
+                      <tr style={r.mem.swapped.samplesAbove0 ? { color: '#f87171' } : c.isRt ? { background: 'rgba(14,165,233,.08)' } : undefined}>
+                        <td><b>Swapped</b></td><td className="muted">호스트 스왑으로 내려간 양(&gt;0 = 심각한 압박)</td>
+                        <td className="right">{c.avg}{c.isRt && RT_TAG}</td><td className="right">{c.p95}</td><td className="right">{c.max}</td>
+                        <td>{has ? (r.mem.swapped.samplesAbove0 ? `관측 시간의 ${r.mem.swapped.pctTime}% 에서 0 초과 → 감축 금지` : '관측 없음 → 정상') : c.isRt ? '이력 없음 · 실시간 현재값' : '관측 없음'}</td>
+                      </tr>); })()}
                     <tr><td><b>Usage %</b></td><td className="muted">vCenter 표시 사용률(active ÷ 할당)</td><td className="right">{n1(r.mem.usagePct.avg, '%')}</td><td className="right">{n1(r.mem.usagePct.p95, '%')}</td><td className="right">{n1(r.mem.usagePct.max, '%')}</td><td className="muted">참고</td></tr>
                   </tbody>
                 </STable>

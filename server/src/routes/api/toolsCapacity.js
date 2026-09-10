@@ -537,7 +537,8 @@ api.get('/tools/rightsize', async (req, res) => {
     missing: fetched.missing, empty: fetched.empty, noData: fetched.noData,
     policy: rightsizePolicy(),
   });
-  const out = { ...report, series: fetched.series, synthesized: !!fetched.synthesized };
+  // realtime: 이력 롤업에 안 잡힌 level-2 mem 카운터의 실시간(최근 1시간) 현재값(참고). 감축 하한엔 미반영.
+  const out = { ...report, series: fetched.series, realtime: fetched.realtime || null, synthesized: !!fetched.synthesized };
   rightsizeCache.set(ck, { at: Date.now(), report: out });
   if (rightsizeCache.size > 2000) for (const [k, e] of rightsizeCache) if (Date.now() - e.at > RIGHTSIZE_TTL_MS) rightsizeCache.delete(k);
   res.json({ ok: true, cached: false, ...out });
