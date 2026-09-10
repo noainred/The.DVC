@@ -202,6 +202,26 @@ export async function takeJobsWait(agent, instance = '', waitMs = 0, { isAlive =
   return takeJobs(agent, instance);
 }
 
+/**
+ * 대기 중인 롱폴을 **전부 즉시 깨운다** — 종료(SIGTERM) 경로 전용 (v2.456).
+ *
+ * 왜 필요한가: 엣지 RMA 는 최대 55초짜리 롱폴로 HTTP 연결을 열어 둔다(`routes/central.js`).
+ * 법인이 여러 개면 항상 그만큼의 연결이 살아 있고, `server.close()` 는 **열린 연결이 전부
+ * 끝나야** 콜백을 부른다. 그래서 재시작할 때마다 종료 유예(기본 8초)를 통째로 소진하고
+ * 강제 종료됐다 — 업그레이드가 그만큼 느려 보였다(실측: stop 8.2초 + start 1.0초).
+ *
+ * 깨우면 각 롱폴은 '받을 잡 없음'으로 즉시 응답하고 연결이 닫혀 `server.close()` 가 곧바로
+ * 완료된다. 잡을 잃지 않는다 — 깨어난 폴은 큐를 다시 확인하고, 큐에 남은 잡은 다음 폴이 가져간다.
+ */
+export function releaseAllWaiters() {
+  let n = 0;
+  for (const set of waiters.values()) {
+    for (const resolve of set) { try { resolve(); n++; } catch { /* */ } }
+  }
+  waiters.clear();
+  return n;
+}
+
 /** ack — 결과 저장. TTL 정리/중복이면 false. */
 export function setJobResult(reqId, result) {
   const j = jobs.get(String(reqId || ''));
