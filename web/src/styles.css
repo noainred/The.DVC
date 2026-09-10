@@ -228,6 +228,10 @@ tbody tr:last-child td { border-bottom: none; }
 .access-denied .ad-facts dd.ad-reason { color: var(--text-dim); font-family: var(--mono); font-size: 12px; }
 
 .access-denied .ad-action { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); }
+/* ServiceDown 의 '상세 정보'(클릭 시 펼침) — .access-denied 판을 그대로 재사용한다(v2.459). */
+.access-denied .sd-detail { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--border); }
+.access-denied .sd-detail .ad-facts { margin: 0 0 10px; }
+.access-denied .sd-detail dd.ad-reason { word-break: break-all; }
 .access-denied .ad-ask { margin: 0 0 10px; font-size: 13px; color: var(--text-dim); }
 .access-denied .ad-ask strong { color: var(--text); }
 .access-denied .ad-req {

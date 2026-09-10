@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { HttpError, isPermissionError, notePermissionError, permissionInfoFor } from './api.js';
+import { HttpError, isPermissionError, notePermissionError, permissionInfoFor, noteHttpError, httpInfoFor } from './api.js';
 
 // 403 권한 정보 사이드 채널 — 공용 ErrorBox 가 `message`(문자열)만 받는 계약을 깨지 않고
 // '접근 제어 안내'로 렌더할 수 있게 하는 통로다. 이게 죽으면 전 화면이 다시 "오류: forbidden"
@@ -74,5 +74,32 @@ describe('permMemo — 메시지로 권한 정보를 되찾는다', () => {
   it('빈 인자는 무시(방어)', () => {
     expect(() => notePermissionError('', null)).not.toThrow();
     expect(permissionInfoFor('')).toBeNull();
+  });
+});
+
+/**
+ * v2.459: 사이드 채널이 **모든 상태코드**를 기록하도록 넓혔다(5xx 안내 화면에 상태코드가 필요).
+ * 여기서 고정하는 불변조건은 하나 — **넓힌 기록이 403 판정을 오염시키면 안 된다.**
+ * permissionInfoFor 가 403 이 아닌 항목을 돌려주면 500·502 에서 "권한이 없습니다" 가 떠서
+ * 사용자가 엉뚱한 권한 요청을 하게 된다.
+ */
+describe('httpInfoFor — 전 상태코드 기록(v2.459)', () => {
+  it('403 이 아닌 항목은 permissionInfoFor 가 절대 돌려주지 않는다', () => {
+    const e500 = new HttpError('메일 설정을 읽지 못했습니다', { status: 500, path: '/api/admin/mail' });
+    noteHttpError(e500.message, e500);
+    expect(permissionInfoFor(e500.message)).toBeNull();      // ← AccessDenied 오작동 방지
+    expect(httpInfoFor(e500.message)).toBe(e500);            // 상태코드는 되찾을 수 있다
+    expect(httpInfoFor(e500.message).status).toBe(500);
+  });
+
+  it('403 은 두 함수 모두에서 되찾을 수 있다(기존 계약 유지)', () => {
+    const e403 = new HttpError('forbidden', { status: 403, body: { requiredPerm: ['tools'] } });
+    noteHttpError(e403.message, e403);
+    expect(permissionInfoFor('forbidden')).toBe(e403);
+    expect(httpInfoFor('forbidden')).toBe(e403);
+  });
+
+  it('기록되지 않은 메시지는 null(추측하지 않는다)', () => {
+    expect(httpInfoFor('한 번도 본 적 없는 문구')).toBeNull();
   });
 });
