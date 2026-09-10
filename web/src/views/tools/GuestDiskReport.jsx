@@ -127,11 +127,12 @@ export default function GuestDiskReport({ scope = '' }) {
     downloadFile(`/api/tools/guest-disk/export.csv?${q.toString()}`).catch((e) => alert(e.message));
   };
 
-  // 콤보용 클러스터 목록 — 현재 로드된 데이터에 실재하는 클러스터만(선택 vCenter 기준).
-  const clusterOpts = useMemo(
-    () => [...new Set((data?.rows || []).map((r) => r.cluster).filter((c) => c && c !== '(미지정)'))].sort((a, b) => a.localeCompare(b)),
-    [data],
-  );
+  // 콤보용 클러스터 목록 — 서버 인벤토리 기준(선택 vCenter 의 클러스터, 게스트 데이터가 없어도 채워짐).
+  // 서버가 안 주면 로드된 데이터에서 유추(하위호환).
+  const clusterOpts = useMemo(() => {
+    if (Array.isArray(data?.clusters) && data.clusters.length) return data.clusters;
+    return [...new Set((data?.rows || []).map((r) => r.cluster).filter((c) => c && c !== '(미지정)'))].sort((a, b) => a.localeCompare(b));
+  }, [data]);
   const rows = useMemo(() => {
     let all = data?.rows || [];
     if (clusterSel) all = all.filter((r) => r.cluster === clusterSel);
