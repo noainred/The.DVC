@@ -66,7 +66,18 @@ test('catalog: 함수 제거·힌트 부여, 파일 내용 읽기 프리셋(cat 
   // v2.418: reboot 프리셋은 존재하되 엣지 RMA_ALLOW_REBOOT opt-in(rebootPolicy) 으로만 실행된다
   assert.ok(c.find((p) => p.id === 'reboot')?.rebootPolicy === true);
   assert.ok(!c.some((p) => /^(poweroff|shutdown|halt)/.test(p.id)));
-  assert.ok(!c.some((p) => (p.params || []).some((x) => x.type === 'path') && p.id !== 'ls'));
+  // 경로를 받는 프리셋 계약(v2.454 강화): `ls` 는 이 규칙 이전부터 있던 **레거시 예외**이고,
+  // 그 밖에 path 를 받는 프리셋은 **반드시 filePolicy** 를 가져야 한다 — 엣지 RMA_FILE_ROOTS 안으로
+  // 제한되고 엣지가 realpath 로 2차 검사한다(agent.js). 이 규칙을 지우고 임의 경로를 받는 프리셋을
+  // 추가하면 portal.env 가 있는 디렉터리까지 열거된다.
+  const LEGACY_PATH_PRESETS = new Set(['ls']);
+  for (const p of c) {
+    if (!(p.params || []).some((x) => x.type === 'path')) continue;
+    if (LEGACY_PATH_PRESETS.has(p.id)) continue;
+    assert.equal(p.filePolicy, true, `경로를 받는 프리셋 '${p.id}' 에 filePolicy 가 없다(RMA_FILE_ROOTS 밖을 읽게 된다)`);
+  }
+  // 파일 **내용**을 읽는 프리셋은 여전히 금지다(du 는 크기만 센다).
+  assert.ok(!c.some((p) => /^(cat|head|tail|less|more|strings|grep)/.test(p.id)));
   assert.equal(describeCommand('ping', { host: 'h', count: 4 }), 'ping(host=h, count=4)');
 });
 

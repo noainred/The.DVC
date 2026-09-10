@@ -65,6 +65,7 @@ const Hba = React.lazy(() => import('./tools/HardwareTools.jsx').then((m) => ({ 
 const ServerAnalysis = React.lazy(() => import('./tools/HardwareTools.jsx').then((m) => ({ default: m.ServerAnalysis })));
 const VcVersion = React.lazy(() => import('./tools/HardwareTools.jsx').then((m) => ({ default: m.VcVersion })));
 const PortalDb = React.lazy(() => import('./tools/PortalDb.jsx').then((m) => ({ default: m.PortalDb })));
+const DirUsageReport = React.lazy(() => import('./tools/DirUsageReport.jsx').then((m) => ({ default: m.DirUsageReport })));
 const RoomTemp = React.lazy(() => import('./tools/RoomTemp.jsx').then((m) => ({ default: m.RoomTemp })));
 const NicModels = React.lazy(() => import('./tools/NicTools.jsx').then((m) => ({ default: m.NicModels })));
 const NicSpeed = React.lazy(() => import('./tools/NicTools.jsx').then((m) => ({ default: m.NicSpeed })));
@@ -383,6 +384,7 @@ function ToolPanel({ tool, onBack, isAdmin }) {
       {tool === 'vmware-backup' && <VmwareConfigBackup />}
       {tool === 'roomtemp' && <RoomTemp />}
       {tool === 'portaldb' && <PortalDb />}
+      {tool === 'dir-usage' && (isAdmin ? <DirUsageReport /> : <div className="card"><span className="muted">관리자 전용 기능입니다.</span></div>)}
       {tool === 'shutdown' && <Shutdown />}
       {tool === 'vmprovision' && (isAdmin ? <VmProvision /> : <div className="card"><span className="muted">관리자 전용 기능입니다.</span></div>)}
       {tool === 'agent-scans' && (isAdmin ? <AgentScans /> : <div className="card"><span className="muted">관리자 전용 기능입니다.</span></div>)}

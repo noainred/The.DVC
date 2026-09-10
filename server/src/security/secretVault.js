@@ -74,6 +74,7 @@ export const SECRET_FILES = [
   'agent-deploy-targets.json',     // 에이전트 배포 대상 SSH 계정/키
   'relay-topology.json',           // 중계 토폴로지 노드(Main/Edge/IRS) SSH 계정/키(v2.431)
   'central-agent-gpu-guest.json',  // 엣지 배포용 GPU 게스트 설정 사본(계정 포함)
+  'mail.json',                     // 포탈 공용 메일(SMTP) 계정 비밀번호(v2.454)
 ];
 
 /* ── 정책(모드·레벨·알고리즘) ─────────────────────────────────────────────── */

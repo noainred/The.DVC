@@ -1,8 +1,10 @@
 /**
  * Alerting — evaluates threshold/condition rules against the current snapshot on
  * an interval and pushes notifications to Slack(incoming webhook) and/or a
- * generic Webhook(JSON POST). Dependency-free (HTTP via fetch). Email은 SMTP
- * 라이브러리가 필요하므로 현재는 webhook 경유를 권장(추후 옵션).
+ * generic Webhook(JSON POST) · **Email**(v2.454). Dependency-free — HTTP 는 fetch,
+ * 메일은 `util/smtp.js`(net/tls 직접 구현)를 `mail/service.js` 경유로 쓴다.
+ * 메일 SMTP·수신자는 **설정 › 메일 발송** 한 곳에서만 정하고 여기서는 on/off 만 본다
+ * (기능마다 SMTP 를 따로 두면 운영자가 같은 값을 여러 번 입력하게 된다).
  *
  * Config: CONFIG_DIR/alerts.json. Fires on a condition becoming active (new),
  * re-notifies after cooldown while still active, and notes resolution.
@@ -17,6 +19,7 @@ import { logAudit } from './audit.js';
 import { resilientFetch } from './util/resilientFetch.js';
 import { ssrfBlockReasonResolved } from './collector/registry.js';
 import { Agent as UndiciAgent } from 'undici';
+import { sendPortalMail } from './mail/service.js'; // 공용 메일 발송(v2.454)
 
 const FILE = path.join(config.configDir, 'alerts.json');
 
@@ -25,6 +28,8 @@ const DEFAULTS = {
     slack: { enabled: false, url: '' },
     webhook: { enabled: false, url: '' },
     teams: { enabled: false, url: '' }, // Microsoft Teams incoming webhook (MessageCard)
+    // 메일은 URL 이 아니라 전역 SMTP 설정(mail.json)을 쓴다 — 여기서는 이 채널을 쓸지만 정한다.
+    email: { enabled: false },
   },
   rules: {
     criticalAlarms: { enabled: true },
@@ -262,14 +267,40 @@ export async function notify(alert, cfg = loadAlertConfig()) {
   if (cfg.channels.teams?.enabled && cfg.channels.teams.url) {
     try { const r = await post(cfg.channels.teams.url, buildTeamsPayload(alert, text)); results.push(`teams:${r.status}`); } catch (e) { results.push(`teams:err ${e.message}`); }
   }
+  if (cfg.channels.email?.enabled) {
+    // sendPortalMail 은 throw 하지 않는다(폴러가 메일 하나로 죽으면 안 된다) — 결과만 기록.
+    const r = await sendPortalMail({ kind: 'alert', subject: alertSubject(alert), html: alertHtml(alert), text });
+    results.push(`email:${r.ok ? 'ok' : (r.skipped ? 'skip' : 'err')}${r.ok ? '' : ` ${r.reason}`}`);
+  }
   return results;
+}
+
+/** 알림 메일 제목 — 심각도를 앞에 두어 받은 편지함에서 정렬·필터가 쉽게. */
+export function alertSubject(alert) {
+  const sev = alert?.severity === 'critical' ? '[위험]' : alert?.severity === 'info' ? '[안내]' : '[경고]';
+  return `${sev} ${String(alert?.title || '알림').slice(0, 180)}`;
+}
+
+/** 알림 메일 본문(HTML) — 메일 클라이언트 호환을 위해 인라인 스타일만 쓴다. */
+export function alertHtml(alert) {
+  const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const color = alert?.severity === 'critical' ? '#d92d20' : alert?.severity === 'info' ? '#2e90fa' : '#f79009';
+  const label = alert?.severity === 'critical' ? '위험' : alert?.severity === 'info' ? '안내' : '경고';
+  return `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Malgun Gothic',sans-serif;max-width:680px;padding:16px;color:#101828;">
+  <div style="display:inline-block;padding:2px 10px;border-radius:10px;background:${color};color:#fff;font-size:12px;font-weight:600;">${label}</div>
+  <h2 style="margin:10px 0 6px;font-size:17px;">${esc(alert?.title || '알림')}</h2>
+  ${alert?.detail ? `<pre style="white-space:pre-wrap;word-break:break-word;font-family:inherit;font-size:13px;line-height:1.7;color:#344054;margin:0;">${esc(alert.detail)}</pre>` : ''}
+  <div style="color:#667085;font-size:11.5px;margin-top:16px;border-top:1px solid #eaecf0;padding-top:10px;">
+    VMware Global Monitoring Portal — 설정 › 메일 발송에서 수신자와 종류별 on/off 를 바꿀 수 있습니다.
+  </div>
+</div>`;
 }
 
 /**
  * 일반 텍스트 브로드캐스트(일일 리포트 등) — 알림 규칙/억제와 무관하게 활성 채널 전체로 발송.
  * title은 Teams 카드 제목·웹훅 메타에 쓰인다.
  */
-export async function sendText(text, title = 'VMware Portal 리포트') {
+export async function sendText(text, title = 'VMware Portal 리포트', kind = 'daily') {
   const cfg = loadAlertConfig();
   const results = [];
   if (cfg.channels.slack?.enabled && cfg.channels.slack.url) {
@@ -280,6 +311,11 @@ export async function sendText(text, title = 'VMware Portal 리포트') {
   }
   if (cfg.channels.teams?.enabled && cfg.channels.teams.url) {
     try { const r = await post(cfg.channels.teams.url, buildTeamsPayload({ title, detail: text, severity: 'info' }, text)); results.push(`teams:${r.status}`); } catch (e) { results.push(`teams:err ${e.message}`); }
+  }
+  if (cfg.channels.email?.enabled) {
+    // 일일 리포트 등 브로드캐스트는 'daily' 종류로 보낸다 — 알림과 수신자를 따로 둘 수 있게.
+    const r = await sendPortalMail({ kind, subject: title, html: alertHtml({ title, detail: text, severity: 'info' }), text });
+    results.push(`email:${r.ok ? 'ok' : (r.skipped ? 'skip' : 'err')}${r.ok ? '' : ` ${r.reason}`}`);
   }
   return results;
 }

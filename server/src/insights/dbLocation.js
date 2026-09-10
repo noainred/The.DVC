@@ -43,6 +43,7 @@ export const MIGRATABLE = [
   { file: 'sanswitch-perf.db', label: 'SAN 스위치 포트 처리량 이력(v2.410)' },
   { file: 'rma-history.db', label: '원격 명령(RMA) 실행 이력(v2.416)' },
   { file: 'rma-tests.db', label: '원격 명령(RMA) 점검 결과(v2.418)' },
+  { file: 'dirusage.db', label: '폴더 사용량 리포트 이력(엣지 공유 폴더 Top-N)' },
   { file: 'pdu.db', label: 'PDU 전력·온습도 이력(v2.424)' },
   // vcenter-logs.db 는 **이미 자체 경로 설정**(설정 › 로그 수집의 storagePath)이 있어 제외한다 —
   // 두 곳에서 경로를 제어하면 어느 쪽이 이겼는지 알 수 없다(그 화면에서 옮기세요).

@@ -24,6 +24,8 @@ import GpuGuestSettings from './GpuGuestSettings.jsx';
 import GpuGuestDiag from './GpuGuestDiag.jsx';
 import GpuSettings from './GpuSettings.jsx';
 import NfsMounts from './NfsMounts.jsx'; // Edge NFS 마운트(백업 대상, v2.299)
+import MailSettings from './MailSettings.jsx';          // 포탈 공용 메일(SMTP) 발송(v2.454)
+import DirUsageSettings from './DirUsageSettings.jsx'; // 폴더 사용량 Top-N 리포트(v2.454)
 import PortalBackup from './PortalBackup.jsx';
 import VcenterLogs from './VcenterLogs.jsx';
 import GuestAccount from './GuestAccount.jsx';
@@ -66,8 +68,10 @@ const SUB = [
   { k: 'anomaly', label: '이상동작 탐지', C: AnomalyDetection, group: 'security' },
   { k: 'ai-search', label: 'AI 검색', C: LlmSettings },
   { k: 'alerts', label: '알림', C: Alerts2 },
+  { k: 'mail', label: '메일 발송', C: MailSettings },
   { k: 'backup', label: '포탈 백업', C: PortalBackup },
   { k: 'nfs-mounts', label: 'NFS 마운트(백업 대상)', C: NfsMounts },
+  { k: 'dir-usage', label: '폴더 사용량 리포트', C: DirUsageSettings },
   { k: 'vclogs', label: 'vCenter 로그 보관', C: VcenterLogs, group: 'log' },
   { k: 'diagnostics', label: '진단·로그', C: Diagnostics, group: 'log' },
   { k: 'audit', label: '감사 로그', C: Audit, group: 'log' },
