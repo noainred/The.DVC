@@ -94,7 +94,19 @@ export async function reclaimReport({ allowed = null, minReclaimGB = 5, maxRatio
   const mr = Number(maxRatioPct);
   if (Number.isFinite(mr)) enriched = enriched.filter((r) => r.ratioPct != null && r.ratioPct <= mr);
   const totalReclaimGB = Math.round(enriched.reduce((s, r) => s + (r.freeGB || 0), 0) * 10) / 10;
-  return { rows: enriched, totalReclaimGB, vmCount: enriched.length, minReclaimGB, maxRatioPct: Number.isFinite(mr) ? mr : null, scoped: Boolean(allowed) };
+  // 콤보용 클러스터 목록 — **인벤토리 기준**(게스트 데이터가 없어도 vCenter 선택 시 채워지게).
+  // scope 준수: ids(허용∩선택 vCenter) 안의 VM 클러스터만. ids=null 이면 무제한 계정.
+  const idSet = ids ? new Set(ids) : null;
+  const cl = new Set();
+  try {
+    for (const v of (store.get().vms || [])) {
+      if (!v.cluster) continue;
+      if (idSet && !idSet.has(v.vcenterId)) continue;
+      cl.add(v.cluster);
+    }
+  } catch { /* 스냅샷 없음 */ }
+  const clusters = [...cl].sort((a, b) => String(a).localeCompare(String(b)));
+  return { rows: enriched, totalReclaimGB, vmCount: enriched.length, clusters, minReclaimGB, maxRatioPct: Number.isFinite(mr) ? mr : null, scoped: Boolean(allowed) };
 }
 
 /** 한 VM 의 파티션별 최신값 + 추이 판정(드릴다운). */
