@@ -334,10 +334,31 @@ export default function GuestDiskReport({ scope = '' }) {
       )}
 
       {rows.length === 0 ? (
-        <div className="gd-empty">
-          회수 대상이 없습니다. {data.settings?.enabled ? '' : '주기 수집이 꺼져 있으면 '}‘지금 수집’으로 데이터를 채운 뒤 확인하세요(VMware Tools가 실행 중인 VM만 집계됩니다).
-          {covEmpty > 0 && <> 위 <b>vCenter 커버리지</b>에서 데이터가 없는 vCenter와 사유(엣지 push 대기/미수집)를 확인하세요.</>}
-        </div>
+        (data.collectedCount > 0 && !qStr && !clusterSel) ? (
+          // 데이터는 있는데(수집됨) 필터가 다 걸러낸 경우 — '데이터 없음'과 구분해 정직하게 안내.
+          <div className="gd-empty">
+            범위 내 <b>{data.collectedCount.toLocaleString()}대</b>가 수집됐지만, <b>최소 회수 {fmtSize(data.minReclaimGB, unit)}</b> 조건{Number.isFinite(Number(maxRatioStr)) && maxRatioStr !== '' ? <> · <b>사용률 {maxRatioStr}% 이하</b> 조건</> : ''}을 넘는 VM이 없습니다.
+            {' '}가장 여유가 큰 VM도 <b className="gd-free">{fmtSize(data.maxFreeGB, unit)}</b>입니다{data.maxFreeGB > 0 ? '' : ' (모든 VM이 할당=사용, 즉 회수 여유 0)'}.
+            <div style={{ marginTop: 10 }}>
+              <button type="button" className="gd-btn primary"
+                onClick={() => { setMinReclaimStr('0'); setMaxRatioStr(''); reload('0', ''); }}>
+                최소 회수 0으로 전체 보기 ({data.collectedCount.toLocaleString()}대)
+              </button>
+              {data.maxFreeGB > 0 && (
+                <span className="gd-admin-note" style={{ marginLeft: 10 }}>
+                  또는 최소 회수를 {Math.max(1, Math.floor(data.maxFreeGB / 2))} 이하로 낮춰 보세요.
+                </span>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="gd-empty">
+            {data.collectedCount > 0
+              ? <>수집된 {data.collectedCount.toLocaleString()}대 중 현재 검색·클러스터·필터 조건에 맞는 VM이 없습니다. 검색어/클러스터/최소 회수를 조정하세요.</>
+              : <>회수 대상이 없습니다. {data.settings?.enabled ? '' : '주기 수집이 꺼져 있으면 '}‘지금 수집’으로 데이터를 채운 뒤 확인하세요(VMware Tools가 실행 중인 VM만 집계됩니다).</>}
+            {data.collectedCount === 0 && covEmpty > 0 && <> 위 <b>vCenter 커버리지</b>에서 데이터가 없는 vCenter와 사유(엣지 push 대기/미수집)를 확인하세요.</>}
+          </div>
+        )
       ) : group === 'none' ? (
         <STable className="gd-table">{tableHead}<tbody>{pageItems.map(rowEl)}</tbody></STable>
       ) : (
