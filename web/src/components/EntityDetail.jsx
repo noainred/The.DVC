@@ -434,12 +434,13 @@ export function EntityDetail({ type, item, onClose }) {
       )}
       {type === 'host' && <Lazy><HostPowerPanel hostName={item.name} serviceTag={item.serviceTag} /></Lazy>}
       {type === 'host' && (
-        <div className="flex gap" style={{ marginTop: 14, justifyContent: 'flex-end' }}>
+        <div className="flex gap" style={{ marginTop: 14, justifyContent: 'flex-end', flexWrap: 'wrap', rowGap: 8 }}>
           <Lazy><HostMetricButton hostId={item.id} hostName={item.name} /></Lazy>
         </div>
       )}
       {type === 'vm' && (
-        <div className="flex gap" style={{ marginTop: 14, justifyContent: 'flex-end' }}>
+        // flexWrap: 버튼 총폭이 모달보다 넓으면 다음 줄로 접는다(안 접으면 justify-end 라 왼쪽 버튼이 잘림 — 사용자 신고).
+        <div className="flex gap" style={{ marginTop: 14, justifyContent: 'flex-end', flexWrap: 'wrap', rowGap: 8 }}>
           {/* 사양 변경은 4개 VM 상세 화면 중 '가상머신' 탭에만 있어 화면마다 기능이 달랐다(v2.240 통일).
               권한(vm.reconfig)이 없으면 버튼이 스스로 렌더되지 않는다 — 서버도 requirePerm 으로 강제. */}
           <VmReconfigButton vm={item} />
