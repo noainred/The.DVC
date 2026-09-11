@@ -63,11 +63,16 @@ jobs:
           node scripts/env-doc.mjs --check
           node scripts/config-doc.mjs --check
 
-      - name: 의존성 취약점 점검 (npm audit)
-        continue-on-error: true
+      # v2.478: critical 은 CI 를 실패시킨다(자동 업그레이드 경로에 critical 의존성이 실리는 것을 차단).
+      # high 이하는 정보성으로 출력만 한다 — 잔여 high(d3-color: 3d-force-graph·react-simple-maps 경유, 외부 입력
+      # 도달 불가)·moderate(exceljs→uuid v4 만 사용) 는 수용된 항목이라 차단하면 매 PR 이 막힌다.
+      - name: 의존성 취약점 점검 (npm audit — critical 차단)
         run: |
-          echo '=== server ==='; npm --prefix server audit --omit=dev --audit-level=high || true
-          echo '=== web ===';    npm --prefix web audit --omit=dev --audit-level=high || true
+          echo '=== server (정보) ==='; npm --prefix server audit --omit=dev --audit-level=high || true
+          echo '=== web (정보) ===';    npm --prefix web audit --omit=dev --audit-level=high || true
+          echo '=== critical 차단 ===';
+          npm --prefix server audit --omit=dev --audit-level=critical
+          npm --prefix web audit --omit=dev --audit-level=critical
 
   pyportal:
     name: 서비스 허브 테스트 (Python)
