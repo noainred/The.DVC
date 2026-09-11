@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **131개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **132개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-09-11)
@@ -63,6 +63,7 @@
 | `guest-disk.json` | 설정 | 게스트 디스크 회수 리포트 설정 (`guest-disk.json`, v2.459). | ✅ | ✅ | ✅ | guestdisk/settings.js |
 | `guest-scans.json` | 설정 | 게스트 조사 스케줄러 — 사용자가 지정한 주기로 게스트 OS를 조사해 기록·저장한다. | ✅ |  | ✅ | security/guestScanScheduler.js |
 | `horizon.json` | 설정 | Horizon Connection Server 연동 — 라이선스 만료일 확인 전용(가벼운 통합). | ✅ | ✅ | ✅ | horizon/horizon.js |
+| `host-access.json` | 설정 | 호스트 접근 제어 설정(`host-access.json`, v2.485). | ✅ | ✅ | ✅ | hostaccess/settings.js |
 | `host-temp.db` | DB | 지표 시계열(온도·GPU·데이터스토어·포탈 메모리) — 이름과 달리 범용 DB |  |  |  | config.js |
 | `idrac-inventory.json` | 설정 | Cache of the latest hardware/firmware inventory collected per iDRAC server. |  |  | ✅ | idrac/invCache.js |
 | `idrac-power.db` | DB | 서버 소비전력 시계열 + 시간당 롤업(power_hourly) |  |  |  | config.js |

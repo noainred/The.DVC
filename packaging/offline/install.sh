@@ -199,6 +199,16 @@ if [[ -f "$SCRIPT_DIR/vmware-portal-rma@.service" ]]; then
   rm -f "$SUDO_TMP"
 fi
 
+# v2.485 호스트 접근 제어(설정 › Security › 호스트 접근 제어): 포탈이 firewalld 로 SSH/웹 클라이언트 제어·OS 방화벽 추가
+# 규칙을 적용하려면 서비스 계정에 firewall-cmd 와 sshd 서비스 start/stop/enable/disable 의 sudo 가 필요하다.
+# 정확히 이 명령들만 허용(다른 systemctl 인자는 불가). visudo 검증 실패 시 설치하지 않는다(화면이 필요한 줄을 안내).
+if command -v firewall-cmd &>/dev/null; then
+  HA_TMP="$(mktemp)"
+  printf '# vmware-portal 호스트 접근 제어(v2.485): firewalld 제어 + sshd 서비스 중지/재개만 허용\n%s ALL=(root) NOPASSWD: /usr/bin/firewall-cmd\n%s ALL=(root) NOPASSWD: /usr/bin/systemctl stop sshd.service, /usr/bin/systemctl start sshd.service, /usr/bin/systemctl disable sshd.service, /usr/bin/systemctl enable sshd.service\n' "$SERVICE_USER" "$SERVICE_USER" > "$HA_TMP"
+  if visudo -cf "$HA_TMP" >/dev/null 2>&1; then install -m 0440 "$HA_TMP" /etc/sudoers.d/vmware-portal-hostaccess; fi
+  rm -f "$HA_TMP"
+fi
+
 systemctl daemon-reload
 systemctl enable "$SERVICE_NAME" >/dev/null 2>&1 || true
 systemctl restart "$SERVICE_NAME"
