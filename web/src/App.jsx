@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react';
-import { usePolling, fetchJson, getToken, setToken, setUnauthorizedHandler, fetchAuthConfig, fetchMe, broadcastLogout, LOGOUT_BROADCAST_KEY, setCurrentUser, toolAllowed } from './api.js';
+import { usePolling, fetchJson, postJson, getToken, setToken, setUnauthorizedHandler, fetchAuthConfig, fetchMe, broadcastLogout, LOGOUT_BROADCAST_KEY, setCurrentUser, toolAllowed } from './api.js';
 import { SearchBox, Modal, StateBadge, Loading, ErrorBox } from './components/ui.jsx';
 import { RemoteConsoleWindow } from './remote/RemoteConsoleWindow.jsx';
 import Login from './views/Login.jsx';
@@ -467,7 +467,7 @@ function Portal({ user, onLogout }) {
       )}
 
       {showNotes && <Suspense fallback={null}><ReleaseNotes isAdmin={user.role === 'admin'} onClose={() => setShowNotes(false)} /></Suspense>}
-      {showVcDown && <VcDownList onClose={() => setShowVcDown(false)} />}
+      {showVcDown && <VcDownList user={user} onClose={() => setShowVcDown(false)} />}
       <RemoteConsoleWindow />
     </div>
   );
@@ -480,35 +480,63 @@ function Portal({ user, onLogout }) {
  * (헤더 카운트는 전체 기준이라 수가 다를 수 있음 — 모달 하단에 그 사실을 명시해 혼동 방지).
  * connected 외 전부(불가·수집중·점검중)를 보여줘 '왜 N/M 인가'를 한 화면에서 설명한다.
  */
-function VcDownList({ onClose }) {
+function VcDownList({ user, onClose }) {
   const [list, setList] = useState(null);
   const [err, setErr] = useState(null);
+  // id → { testing, ok, ms, reason, hint } — '접속확인' 버튼 결과(v2.476). 접속되면 그 행을 정상으로 표시.
+  const [checks, setChecks] = useState({});
+  const isAdmin = user?.role === 'admin';
   useEffect(() => {
     fetchJson('/vcenters').then((r) => setList((r || []).filter((v) => v.status !== 'connected')))
       .catch((e) => setErr(e.message));
   }, []);
+  // 저장된 자격증명으로 즉시 로그인 테스트(관리자 전용 라우트). 성공하면 이 행을 '접속 확인됨'(정상)으로
+  // 표시한다 — 수집이 도는 status 는 다음 주기에 반영되므로, 지금 접속 가능 여부만 정직하게 보여준다.
+  const runCheck = async (v) => {
+    setChecks((m) => ({ ...m, [v.id]: { ...m[v.id], testing: true } }));
+    try {
+      const r = await postJson('/admin/vcenters/test', { id: v.id });
+      setChecks((m) => ({ ...m, [v.id]: { ...r, testing: false } }));
+    } catch (e) {
+      setChecks((m) => ({ ...m, [v.id]: { ok: false, reason: e.message, testing: false } }));
+    }
+  };
   return (
-    <Modal title="연결 안 되는 vCenter" onClose={onClose} width={640}>
+    <Modal title="연결 안 되는 vCenter" onClose={onClose} width={isAdmin ? 760 : 640}>
       {err ? <ErrorBox message={err} /> : !list ? <Loading /> : list.length === 0 ? (
         <div className="muted" style={{ padding: 8, fontSize: 13 }}>지금은 전부 연결되어 있습니다(마지막 수집 이후 복구됐을 수 있음 — 헤더 카운트는 최대 30초 지연).</div>
       ) : (
         <>
           <STable className="data-table" style={{ width: '100%', fontSize: 13 }}>
-            <thead><tr><th style={{ textAlign: 'left' }}>상태</th><th style={{ textAlign: 'left' }}>vCenter</th><th style={{ textAlign: 'left' }}>위치</th><th style={{ textAlign: 'left' }}>버전</th><th style={{ textAlign: 'right' }}>호스트/VM</th></tr></thead>
+            <thead><tr><th style={{ textAlign: 'left' }}>상태</th><th style={{ textAlign: 'left' }}>vCenter</th><th style={{ textAlign: 'left' }}>위치</th><th style={{ textAlign: 'left' }}>버전</th><th style={{ textAlign: 'right' }}>호스트/VM</th>{isAdmin && <th data-nosort style={{ textAlign: 'right' }}>접속확인</th>}</tr></thead>
             <tbody>
-              {list.map((v) => (
-                <tr key={v.id}>
-                  <td><StateBadge state={v.status} /></td>
-                  <td><b>{v.name}</b><div className="muted" style={{ fontSize: 11 }}>{v.id}</div></td>
-                  <td className="muted">{[v.location?.city, v.location?.country].filter(Boolean).join(', ') || '—'}</td>
-                  <td className="muted">{v.version ? `v${v.version}` : '—'}</td>
-                  <td style={{ textAlign: 'right' }} className="muted">{v.metrics?.hosts ?? '—'} / {v.metrics?.vms ?? '—'}</td>
-                </tr>
-              ))}
+              {list.map((v) => {
+                const c = checks[v.id];
+                return (
+                  <tr key={v.id}>
+                    <td>{c && !c.testing && c.ok
+                      ? <span className="badge green" title={c.ms != null ? `응답 ${c.ms}ms` : ''}>✓ 접속 확인됨</span>
+                      : <StateBadge state={v.status} />}</td>
+                    <td><b>{v.name}</b><div className="muted" style={{ fontSize: 11 }}>{v.id}</div></td>
+                    <td className="muted">{[v.location?.city, v.location?.country].filter(Boolean).join(', ') || '—'}</td>
+                    <td className="muted">{v.version ? `v${v.version}` : '—'}</td>
+                    <td style={{ textAlign: 'right' }} className="muted">{v.metrics?.hosts ?? '—'} / {v.metrics?.vms ?? '—'}</td>
+                    {isAdmin && (
+                      <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                        <button className="tab" disabled={c?.testing} onClick={() => runCheck(v)}>{c?.testing ? '확인 중…' : '접속확인'}</button>
+                        {c && !c.testing && !c.ok && (
+                          <div style={{ color: '#f87171', fontSize: 11.5, marginTop: 3, textAlign: 'right', whiteSpace: 'normal' }}>{c.reason}{c.hint ? <div className="muted" style={{ fontSize: 11 }}>💡 {c.hint}</div> : null}</div>
+                        )}
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
             </tbody>
           </STable>
           <div className="muted" style={{ fontSize: 11.5, marginTop: 10, lineHeight: 1.6 }}>
             · <b>불가(unreachable)</b>: 마지막 수집에서 로그인/응답 실패 — 네트워크·자격증명·vCenter 서비스 상태를 확인하세요(설정 › vCenter 연결 테스트).<br />
+            {isAdmin && <>· <b>접속확인</b>: 저장된 자격증명으로 지금 로그인 테스트합니다. 성공하면 '접속 확인됨'으로 표시되며, 목록의 수집 상태(호스트/VM 수)는 다음 수집 주기에 정상으로 반영됩니다.<br /></>}
             · 계정에 vCenter 범위 제한이 있으면 이 목록은 내 범위만 보여줘 헤더 숫자와 다를 수 있습니다.
           </div>
         </>
