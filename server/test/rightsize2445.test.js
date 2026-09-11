@@ -46,6 +46,24 @@ test('근거 불충분 ① — 관측 기간이 정책 하한(7일) 미만이면
   assert.match(r.evidence.reasons.join(' '), /정책 하한 7일 미만/);
 });
 
+test('근거 게이트 — 7일 요청에서 롤업 지연으로 관측 6.9일이어도 하한을 통과한다(v2.471 회귀)', () => {
+  // 사용자 신고: 30/90일은 되는데 '최근 7일' 만 '근거 불충분(관측 6.9일 < 하한 7일)'. 실제 vCenter
+  // 주간 롤업은 가장 최근 점이 몇 시간 지연돼 7일을 요청해도 span 이 ~6.9일 → 딱 하한을 못 넘었다.
+  const iv = 1800; const lagMs = 3.5 * 3600 * 1000; const n = 334;
+  const gen = (v) => Array.from({ length: n }, (_, i) => ({ t: new Date(NOW - lagMs - (n - 1 - i) * iv * 1000).toISOString(), v }));
+  const series = { cpuUsageMhz: gen(500), cpuReadyMs: gen(100), memActiveMB: gen(2600), memConsumedMB: gen(6000), memBalloonMB: gen(0), memSwappedMB: gen(0) };
+  const w = windowInfo(series.cpuUsageMhz, iv, 7, NOW);
+  assert.ok(w.coverageDays < 7 && w.coverageDays >= 6.8, `관측 span 은 6.9 근처여야(실제=${w.coverageDays})`);
+  const r = analyzeRightsize({ vm: VM, hostMhzPerCore: MHZ, intervalSec: iv, days: 7, series, now: NOW });
+  assert.equal(r.evidence.sufficient, true, '롤업 경계 손실(6.9일)만으로 근거 불충분이 되면 안 된다');
+  assert.notEqual(r.verdict.state, 'insufficient');
+  // 진짜로 짧은 이력(5일)은 여전히 걸러진다 — 경계 허용이 정책을 무력화하지 않는다.
+  const short = { cpuUsageMhz: flat(5, 500), memConsumedMB: flat(5, 6000), memBalloonMB: flat(5, 0), memSwappedMB: flat(5, 0) };
+  const rs = analyzeRightsize({ vm: VM, hostMhzPerCore: MHZ, intervalSec: iv, days: 7, series: short, now: NOW });
+  assert.equal(rs.evidence.sufficient, false);
+  assert.match(rs.evidence.reasons.join(' '), /정책 하한 7일 미만/);
+});
+
 test('근거 불충분 ② — 샘플 커버리지가 낮으면(수집 공백) 권고하지 않는다', () => {
   // 7일 창인데 하루치만 있는 경우 → 커버리지 ~14%
   const sparse = mk(7, 1800, (i) => (i % 7 === 0 ? 500 : null));

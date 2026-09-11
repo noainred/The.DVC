@@ -14,7 +14,7 @@ import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianG
 import { fetchJson } from '../../api.js';
 import EscClose from '../../components/EscClose.jsx';
 import { STable } from '../../components/STable.jsx';
-import { safeFileName, saveElementAsJpg, saveElementAsPdf } from './reportExport.js';
+import { safeFileName, saveElementAsJpg, saveDocAsPdf } from './reportExport.js';
 
 const DAYS = [[7, '7일'], [30, '30일'], [90, '90일'], [365, '1년'], [0, '전체']];
 const UNIT_OPTS = [['auto', '자동'], ['GB', 'GB'], ['TB', 'TB'], ['PB', 'PB']];
@@ -51,6 +51,48 @@ function Stat({ k, v, sub, color }) {
       {sub && <div className="muted" style={{ fontSize: 10.5 }}>{sub}</div>}
     </div>
   );
+}
+
+/** 벡터 PDF 문서 모델 — 화면(recharts)과 같은 내용을 글자·도형으로 그린다(reportExport.saveDocAsPdf). */
+function buildGuestDoc(d, vm, days, u, div) {
+  const size = (gb) => fmtSize(gb, u);
+  const vt = d.vmTrend;
+  const blocks = [];
+  blocks.push({ type: 'kvrow', items: [
+    { k: '할당(게스트 인식)', v: size(d.allocGB) },
+    { k: '사용', v: size(d.usedGB) },
+    { k: '회수 가능(여유)', v: size(d.freeGB), color: 'green' },
+    { k: '사용률', v: d.ratioPct == null ? '—' : `${d.ratioPct}%`, sub: '사용 / 할당' },
+    { k: '파티션 수', v: String((d.partitions || []).length) },
+    { k: '전체 사용량 추이', v: `${trendLabel(vt?.trend).label}${vt?.growthGBPerDay != null ? ` (${vt.growthGBPerDay > 0 ? '+' : ''}${vt.growthGBPerDay} GB/일)` : ''}`, sub: vt?.spanDays ? `관측 ${vt.spanDays}일` : '표본 부족' },
+  ] });
+  blocks.push({ type: 'heading', text: `게스트 총 사용량 추이 ${days > 0 ? `(최근 ${days}일)` : '(전체 기간)'}` });
+  blocks.push({ type: 'linechart', unitLabel: u, refY: d.allocGB != null ? d.allocGB / div : null, refLabel: '할당', points: (d.vmTrendSeries || []).map((p) => ({ t: p.ts, v: p.usedGB / div })) });
+  blocks.push({ type: 'heading', text: '파티션별 할당·사용·추이' });
+  blocks.push({ type: 'table', columns: [
+    { label: '파티션', w: 2.6 }, { label: '할당', align: 'right', w: 1 }, { label: '사용', align: 'right', w: 1 },
+    { label: '여유', align: 'right', w: 1 }, { label: '사용률', align: 'right', w: 0.9 }, { label: '증가율(GB/일)', align: 'right', w: 1.2 },
+    { label: '관측기간', align: 'right', w: 0.9 }, { label: '추이', w: 0.8 }, { label: '판정', w: 1.6 },
+  ], rows: (d.partitions || []).map((p) => {
+    const rp = p.capGB > 0 ? Math.round((p.usedGB / p.capGB) * 1000) / 10 : null;
+    return [
+      { text: p.path }, { text: size(p.capGB), align: 'right' }, { text: size(p.usedGB), align: 'right' },
+      { text: size(p.freeGB), align: 'right', color: 'green' }, { text: rp == null ? '—' : `${rp}%`, align: 'right' },
+      { text: p.trend?.growthGBPerDay == null ? '—' : String(p.trend.growthGBPerDay), align: 'right' },
+      { text: p.trend?.spanDays ? `${p.trend.spanDays}일` : '—', align: 'right' },
+      { text: trendLabel(p.trend?.trend).label }, { text: p.advice?.label || '—' },
+    ];
+  }) });
+  for (const p of (d.partitions || [])) {
+    blocks.push({ type: 'linechart', title: `${p.path} — 사용 ${size(p.usedGB)} / 할당 ${size(p.capGB)} · 여유 ${size(p.freeGB)}`, unitLabel: u, refY: p.capGB != null ? p.capGB / div : null, refLabel: '할당', points: (p.trend?.points || []).map((pt) => ({ t: pt.ts, v: pt.usedGB / div })) });
+  }
+  blocks.push({ type: 'note', text: '여유(회수 가능)는 게스트 관점의 회수 상한이며 실제 회수는 디스크 축소(shrink)+UNMAP 이 필요하고 OS·정렬에 따라 전량을 못 줄일 수 있습니다. 추이는 관측 시작 이후만 표시하고 표본 2점 미만이면 증가율을 계산하지 않습니다(변경분만 저장).' });
+  return {
+    title: `게스트 디스크 추이 상세 — ${vm.name}`,
+    subtitle: `${d.corpName ? d.corpName + ' · ' : ''}${d.vcenterName || d.vcenterId}${d.cluster && d.cluster !== '(미지정)' ? ' · ' + d.cluster : ''}`,
+    meta: `${days > 0 ? `최근 ${days}일` : '전체 기간'}${d.ts ? ` · 최신 수집 ${new Date(d.ts).toLocaleString()}` : ''}`,
+    blocks,
+  };
 }
 
 /** 한 시계열([{ts,usedGB,capGB?}])을 recharts 행으로. 값은 표시 단위로 나눈다. */
@@ -115,7 +157,8 @@ export default function GuestDiskDetailModal({ vm, initUnit = 'auto', onClose })
       const stamp = `${now.getFullYear()}${p(now.getMonth() + 1)}${p(now.getDate())}-${p(now.getHours())}${p(now.getMinutes())}`;
       const label = days > 0 ? `최근${days}일` : '전체';
       const name = `${safeFileName(`게스트디스크추이_${vm.name}_${label}_${stamp}`)}.${kind === 'pdf' ? 'pdf' : 'jpg'}`;
-      if (kind === 'pdf') await saveElementAsPdf(el, name);
+      // PDF 는 글자·도형(벡터) — 문서 모델을 jsPDF 로 직접 그린다(한글 임베드 폰트). JPG 는 화면 캡처.
+      if (kind === 'pdf') { if (!d) return; await saveDocAsPdf(buildGuestDoc(d, vm, days, dispUnit, div), name); }
       else await saveElementAsJpg(el, name);
     } catch (e) { setSaveErr(e?.message || String(e)); }
     finally { setSaving(''); }

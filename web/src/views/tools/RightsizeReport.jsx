@@ -11,7 +11,7 @@ import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianG
 import { fetchJson } from '../../api.js';
 import EscClose from '../../components/EscClose.jsx';
 import { STable } from '../../components/STable.jsx';
-import { exportFileName, saveElementAsJpg, saveElementAsPdf } from './reportExport.js';
+import { exportFileName, saveElementAsJpg, saveDocAsPdf } from './reportExport.js';
 
 const DAYS = [7, 30, 90];
 const tip = { background: '#0f172a', border: '1px solid #334155', borderRadius: 8, fontSize: 12 };
@@ -36,6 +36,58 @@ function memCell(s, rtc) {
 }
 const RT_TAG = <span title="vCenter 실시간(최근 1시간) 구간에서 조회한 현재값 — 이력 통계 레벨과 무관"
   style={{ background: '#0ea5e9', color: '#fff', fontSize: 9, marginLeft: 4, padding: '0 4px', borderRadius: 4, verticalAlign: 'middle' }}>실시간</span>;
+
+/** 벡터 PDF 문서 모델 — 화면과 같은 내용을 글자·도형으로(reportExport.saveDocAsPdf). */
+function buildRightsizeDoc(r, vm, days) {
+  const mMB = (mb) => (mb == null ? '—' : `${(mb / 1024).toFixed(1)} GB`);
+  const mGHz = (mhz) => (mhz == null ? '—' : `${(mhz / 1000).toFixed(2)} GHz`);
+  const pc = (x) => (x == null ? '—' : `${x}%`);
+  const rt = r.realtime || {};
+  const w = r.window || {}; const cpu = r.cpu || {}; const mem = r.mem || {};
+  const blocks = [];
+  blocks.push({ type: 'heading', text: `판정 — ${r.verdict?.title || ''}` });
+  if (r.verdict?.summary) blocks.push({ type: 'note', text: r.verdict.summary });
+  for (const rs of (r.evidence?.reasons || [])) blocks.push({ type: 'note', text: `• ${rs}` });
+  blocks.push({ type: 'kvrow', items: [
+    { k: '관측 기간', v: `${w.coverageDays ?? 0}일`, sub: w.firstTs ? `${new Date(w.firstTs).toLocaleDateString()} ~ ${new Date(w.lastTs).toLocaleDateString()}` : '' },
+    { k: '샘플', v: `${w.samples ?? 0} / ${w.expectedSamples ?? 0}`, sub: `커버리지 ${pc(w.coveragePct)} · 간격 ${w.intervalSec}초` },
+    { k: '정책', v: `여유 ${r.policy?.headroomPct}% · 상한 ${r.policy?.capReductionPct}%`, sub: `최소 ${r.policy?.minDays}일 · 커버리지 ${r.policy?.minCoveragePct}%` },
+  ] });
+  blocks.push({ type: 'heading', text: `CPU — vCPU ${cpu.vcpu}${cpu.allocMhz ? ` (${mGHz(cpu.allocMhz)} 할당)` : ''}${cpu.recommendedVcpu != null ? ` · 권장 ${cpu.recommendedVcpu}${cpu.reductionVcpu > 0 ? ` (−${cpu.reductionVcpu}, ${cpu.reductionPct}%)` : ' (변경 없음)'}${cpu.capped ? ' · 50% 상한' : ''}` : ''}` });
+  blocks.push({ type: 'kvrow', items: [
+    { k: '사용 MHz 평균', v: mGHz(cpu.used?.avg) },
+    { k: '사용 MHz p95', v: mGHz(cpu.used?.p95), sub: '산정 기준' },
+    { k: '사용 MHz 최대', v: mGHz(cpu.used?.max) },
+    { k: '사용률 p95/최대', v: `${pc(cpu.usagePct?.p95)} / ${pc(cpu.usagePct?.max)}` },
+    { k: 'CPU Ready p95', v: pc(cpu.readyPct?.p95), sub: `경고선 ${r.policy?.readyWarnPct}%` },
+  ] });
+  const cpuPts = (r.series?.cpuUsageMhz || []).map((p) => ({ t: Date.parse(p.t), v: p.v == null ? null : p.v / 1000 })).filter((p) => Number.isFinite(p.t) && p.v != null);
+  blocks.push({ type: 'linechart', title: '사용 MHz 추이', unitLabel: 'GHz', refY: cpu.used?.p95 != null ? cpu.used.p95 / 1000 : null, refLabel: 'p95', points: cpuPts });
+  blocks.push({ type: 'heading', text: `메모리 — ${mMB(mem.allocMB)} 할당${mem.recommendedMB != null ? ` · 권장 ${mMB(mem.recommendedMB)}${mem.reductionPct > 0 ? ` (${mem.reductionPct}%)` : ' (변경 없음)'}` : ''}` });
+  const memCell = (s, rtc) => { const has = s && (s.avg != null || s.max != null); if (has) return { avg: mMB(s.avg), p95: mMB(s.p95), max: mMB(s.max), rt: false }; if (rtc) return { avg: mMB(rtc.avg), p95: '—', max: mMB(rtc.max), rt: true }; return { avg: '—', p95: '—', max: '—', rt: false }; };
+  const memRow = (label, mean, s, rtc, note) => { const c = memCell(s, rtc); return [
+    { text: label }, { text: mean }, { text: c.avg + (c.rt ? ' (실시간)' : ''), align: 'right', color: c.rt ? 'blue' : 'text' }, { text: c.p95, align: 'right' }, { text: c.max, align: 'right' }, { text: c.rt ? '이력 없음 · 실시간(최근 1시간) 현재값' : note },
+  ]; };
+  blocks.push({ type: 'table', columns: [
+    { label: '계열', w: 1 }, { label: '의미', w: 2.5 }, { label: '평균', align: 'right', w: 1 }, { label: 'p95', align: 'right', w: 1 }, { label: '최대', align: 'right', w: 1 }, { label: '해석', w: 2.4 },
+  ], rows: [
+    memRow('Active', '게스트가 실제로 만지는 메모리(워킹셋)', mem.active, rt.memActiveMB, '감축 하한 후보 ①'),
+    memRow('Consumed', '호스트가 배정한 메모리(캐시 포함)', mem.consumed, rt.memConsumedMB, '감축 하한 후보 ②'),
+    memRow('Balloon', '벌룬 회수(>0=호스트 압박)', mem.balloon, rt.memBalloonMB, mem.balloon?.samplesAbove0 ? `${mem.balloon.pctTime}% 에서 0 초과 → 보류` : '관측 없음 → 정상'),
+    memRow('Swapped', '호스트 스왑(>0=심각한 압박)', mem.swapped, rt.memSwappedMB, mem.swapped?.samplesAbove0 ? `${mem.swapped.pctTime}% 에서 0 초과 → 금지` : '관측 없음 → 정상'),
+    [{ text: 'Usage %' }, { text: 'vCenter 사용률(active÷할당)' }, { text: pc(mem.usagePct?.avg), align: 'right' }, { text: pc(mem.usagePct?.p95), align: 'right' }, { text: pc(mem.usagePct?.max), align: 'right' }, { text: '참고' }],
+  ] });
+  const memPts = (r.series?.memConsumedMB || []).map((p) => ({ t: Date.parse(p.t), v: p.v == null ? null : p.v / 1024 })).filter((p) => Number.isFinite(p.t) && p.v != null);
+  blocks.push({ type: 'linechart', title: 'Consumed 메모리 추이', unitLabel: 'GB', refY: mem.allocMB != null ? mem.allocMB / 1024 : null, refLabel: '할당', points: memPts });
+  if (mem.basisNote) blocks.push({ type: 'note', text: `메모리 산정: ${mem.basisNote}` });
+  blocks.push({ type: 'note', text: '이 리포트는 vCenter 롤업 통계(각 점=간격 평균)를 근거로 합니다. 순간 피크는 이보다 높을 수 있으므로 감축은 여유를 두고 적용 후 재확인하세요. 실시간 표시 값은 참고용 현재값이며 다일 감축 하한 계산에는 반영하지 않습니다.' });
+  return {
+    title: `자원 축소 근거 리포트 — ${vm.name}`,
+    subtitle: `${vm.vcenterId} · ${vm.host || ''} · ${vm.guestOS || ''}`,
+    meta: `최근 ${days}일 · 롤업 ${w.intervalSec}초${r.cached ? ' · 5분 캐시' : ''}${r.synthesized ? ' · 데모(mock)' : ''}`,
+    blocks,
+  };
+}
 
 /** 시계열 여러 개를 t 기준으로 합쳐 recharts 행으로. */
 function merge(series, keys) {
@@ -86,7 +138,8 @@ export default function RightsizeReport({ vm, onClose }) {
     setSaving(kind); setSaveErr('');
     try {
       const name = exportFileName(vm.name, days, kind === 'pdf' ? 'pdf' : 'jpg');
-      if (kind === 'pdf') await saveElementAsPdf(el, name);
+      // PDF 는 글자·도형(벡터) — 문서 모델을 jsPDF 로 직접 그린다(한글 임베드 폰트). JPG 는 화면 캡처.
+      if (kind === 'pdf') { if (!r) return; await saveDocAsPdf(buildRightsizeDoc(r, vm, days), name); }
       else await saveElementAsJpg(el, name);
     } catch (e) {
       setSaveErr(e?.message || String(e));

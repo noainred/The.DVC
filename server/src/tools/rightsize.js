@@ -125,7 +125,13 @@ export function analyzeRightsize({ vm = {}, hostMhzPerCore = null, intervalSec =
   const evidence = { sufficient: true, reasons: [] };
   if (vm.powerState && vm.powerState !== 'POWERED_ON') { evidence.sufficient = false; evidence.reasons.push('전원이 꺼진 VM 은 사용률 근거가 없습니다 — 켜진 상태에서 관측해야 합니다.'); }
   if (!base.length) { evidence.sufficient = false; evidence.reasons.push('vCenter 에서 이 기간의 성능 이력을 받지 못했습니다(통계 보관 기간 밖이거나 수집 레벨이 낮을 수 있음).'); }
-  if (base.length && win.coverageDays < policy.minDays) { evidence.sufficient = false; evidence.reasons.push(`관측 기간 ${win.coverageDays}일 — 정책 하한 ${policy.minDays}일 미만입니다. 주간 패턴(주말·월말 배치 등)을 최소 한 번은 봐야 감축을 권고할 수 있습니다.`); }
+  // 롤업 경계·발행 지연 허용: 딱 N일을 요청해도 관측 span 은 첫 점(구간 시작 후)·마지막 점(가장
+  // 최근 롤업이 몇 시간 지연) 때문에 항상 N일보다 조금 짧다(예: 7일 요청 → 6.9일). 그래서 minDays 를
+  // 그대로 비교하면 '최근 7일' 이 하한 7일을 영원히 못 넘어 늘 '근거 불충분' 이 됐다(사용자 신고).
+  // 롤업 간격 몇 배 + 여유를 허용해 이 경계 손실만 눈감아 준다(진짜 짧은 이력은 여전히 걸러짐 —
+  // 예: 이력이 5일뿐이면 통과 못 함. 커버리지% 게이트도 별도로 유지).
+  const spanTolDays = Math.min(1, (intervalSec / 86_400) * 6 + 0.2);
+  if (base.length && win.coverageDays < policy.minDays - spanTolDays) { evidence.sufficient = false; evidence.reasons.push(`관측 기간 ${win.coverageDays}일 — 정책 하한 ${policy.minDays}일 미만입니다. 주간 패턴(주말·월말 배치 등)을 최소 한 번은 봐야 감축을 권고할 수 있습니다.`); }
   if (base.length && win.coveragePct < policy.minCoveragePct) { evidence.sufficient = false; evidence.reasons.push(`샘플 커버리지 ${win.coveragePct}%(${win.samples}/${win.expectedSamples}) — 정책 하한 ${policy.minCoveragePct}% 미만입니다. 수집 공백이 커서 피크를 놓쳤을 수 있습니다.`); }
   // 계열이 비는 이유를 셋으로 나눠 알린다(v2.449) — 화면에는 다 '—' 로 보이지만 대응이 다르다.
   // 이 구분이 없어 mem.active·mem.swapped 가 왜 비는지 알 수 없던 것이 v2.445~2.448 의 실제 문제였다.
