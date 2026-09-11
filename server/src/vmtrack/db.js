@@ -174,6 +174,9 @@ function initSqlite() {
         (snap_id, ts, vcenter_id, kind, vm_id, name, cluster, host, datastore, power_state, cpu, mem_mb, storage_gb, guest_os)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
       rosterOf: db.prepare('SELECT vm_id, name, cluster, host, datastore, power_state, cpu, mem_mb, storage_gb, guest_os FROM roster WHERE vcenter_id=?'),
+      // v2.483 '꺼진 지 N일': VM 별 최신 전원 전환 슬롯 시각 + 로스터 first_seen(추적 시작 이후 계속 꺼짐 판정용).
+      powerChangesOf: db.prepare("SELECT vm_id, kind, MAX(ts) AS ts FROM changes WHERE vcenter_id=? AND kind IN ('powered_off','powered_on') GROUP BY vm_id, kind"),
+      rosterFirstSeenOf: db.prepare('SELECT vm_id, first_seen, power_state FROM roster WHERE vcenter_id=?'),
       rosterVcenters: db.prepare('SELECT DISTINCT vcenter_id FROM roster'),
       upsertRoster: db.prepare(`INSERT INTO roster
         (vcenter_id, vm_id, name, cluster, host, datastore, power_state, cpu, mem_mb, storage_gb, guest_os, first_seen)
@@ -308,6 +311,26 @@ export async function loadRoster(vcenterId) {
   if (!x) return new Map();
   const rows = x.st.rosterOf.all(String(vcenterId));
   return new Map(rows.map((r) => [r.vm_id, r]));
+}
+
+/** v2.483: VM 별 최신 전원 전환 시각(Map vm_id → {offTs,onTs}). changes 는 diff 만 저장돼 작다(풀스캔 무해). */
+export async function loadPowerChanges(vcenterId) {
+  const x = await getDb();
+  if (!x) return null;
+  const map = new Map();
+  for (const r of x.st.powerChangesOf.all(String(vcenterId))) {
+    const e = map.get(r.vm_id) || { offTs: 0, onTs: 0 };
+    if (r.kind === 'powered_off') e.offTs = Number(r.ts) || 0; else e.onTs = Number(r.ts) || 0;
+    map.set(r.vm_id, e);
+  }
+  return map;
+}
+
+/** v2.483: 로스터 first_seen·전원 상태(Map vm_id → {firstSeen, powerState}). first_seen 은 upsert 로 갱신되지 않는다. */
+export async function loadRosterFirstSeen(vcenterId) {
+  const x = await getDb();
+  if (!x) return null;
+  return new Map(x.st.rosterFirstSeenOf.all(String(vcenterId)).map((r) => [r.vm_id, { firstSeen: Number(r.first_seen) || 0, powerState: r.power_state || '' }]));
 }
 
 /** roster 에 존재하는 vCenter 목록(등록 해제된 vCenter 정리 판단용). */
