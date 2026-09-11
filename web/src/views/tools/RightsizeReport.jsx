@@ -231,18 +231,22 @@ export default function RightsizeReport({ vm, onClose }) {
                 </ResponsiveContainer>
               </div>
               {readyRows.length > 0 && (
-                <div style={{ height: 110, marginTop: 6 }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={readyRows} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#243049" />
-                      <XAxis dataKey="t" stroke="#8b9bb4" fontSize={10} minTickGap={50} tickFormatter={(t) => tick(t, days)} />
-                      <YAxis stroke="#8b9bb4" fontSize={10} width={60} domain={[0, (max) => Math.max(max, r.policy.readyWarnPct * 2)]} tickFormatter={(v) => `${v.toFixed(1)}%`} />
-                      <Tooltip contentStyle={tip} labelFormatter={(t) => new Date(t).toLocaleString('ko-KR')} formatter={(v) => [`${v?.toFixed?.(2)}%`, 'CPU Ready/vCPU']} />
-                      <Line type="monotone" dataKey="v" name="CPU Ready %/vCPU" stroke="#f97316" strokeWidth={1.4} dot={false} isAnimationActive={false} connectNulls />
-                      <ReferenceLine y={r.policy.readyWarnPct} stroke="#ef4444" strokeDasharray="2 2" />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
+                <>
+                  <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>CPU Ready %/vCPU 추이 — 값이 클수록 vCPU 가 물리 CPU 를 기다린 시간(경합). {r.policy.readyWarnPct}% 경고선을 넘으면 CPU 감축을 보류합니다.</div>
+                  <div style={{ height: 128, marginTop: 2 }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={readyRows} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#243049" />
+                        <XAxis dataKey="t" stroke="#8b9bb4" fontSize={10} minTickGap={50} tickFormatter={(t) => tick(t, days)} />
+                        <YAxis stroke="#8b9bb4" fontSize={10} width={60} domain={[0, (max) => Math.max(max, r.policy.readyWarnPct * 2)]} tickFormatter={(v) => `${v.toFixed(1)}%`} />
+                        <Tooltip contentStyle={tip} labelFormatter={(t) => new Date(t).toLocaleString('ko-KR')} formatter={(v) => [`${v?.toFixed?.(2)}%`, 'CPU Ready/vCPU']} />
+                        <Legend wrapperStyle={{ fontSize: 11 }} />
+                        <Line type="monotone" dataKey="v" name="CPU Ready %/vCPU" stroke="#f97316" strokeWidth={1.4} dot={false} isAnimationActive={false} connectNulls />
+                        <ReferenceLine y={r.policy.readyWarnPct} stroke="#ef4444" strokeDasharray="2 2" label={{ value: `경고선 ${r.policy.readyWarnPct}%`, fill: '#ef4444', fontSize: 10, position: 'insideTopRight' }} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </>
               )}
             </div>
 
