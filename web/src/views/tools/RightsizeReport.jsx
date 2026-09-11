@@ -64,7 +64,7 @@ function buildRightsizeDoc(r, vm, days) {
     { k: 'CPU Ready p95', v: pc(cpu.readyPct?.p95), sub: `경고선 ${r.policy?.readyWarnPct}%` },
   ] });
   const cpuPts = (r.series?.cpuUsageMhz || []).map((p) => ({ t: Date.parse(p.t), v: p.v == null ? null : p.v / 1000 })).filter((p) => Number.isFinite(p.t) && p.v != null);
-  blocks.push({ type: 'linechart', title: '사용 MHz 추이', unitLabel: 'GHz', refY: cpu.used?.p95 != null ? cpu.used.p95 / 1000 : null, refLabel: 'p95', points: cpuPts });
+  blocks.push({ type: 'linechart', title: '사용 MHz 추이', unitLabel: 'GHz', refY: cpu.used?.p95 != null ? cpu.used.p95 / 1000 : null, refLabel: 'p95', axisMax: cpu.allocMhz != null ? cpu.allocMhz / 1000 : null, points: cpuPts });
   blocks.push({ type: 'heading', text: `메모리 — ${mMB(mem.allocMB)} 할당${mem.recommendedMB != null ? ` · 권장 ${mMB(mem.recommendedMB)}${mem.reductionPct > 0 ? ` (${mem.reductionPct}%)` : ' (변경 없음)'}` : ''}` });
   const memCell = (s, rtc) => { const has = s && (s.avg != null || s.max != null); if (has) return { avg: mMB(s.avg), p95: mMB(s.p95), max: mMB(s.max), rt: false }; if (rtc) return { avg: mMB(rtc.avg), p95: '—', max: mMB(rtc.max), rt: true }; return { avg: '—', p95: '—', max: '—', rt: false }; };
   const memRow = (label, mean, s, rtc, note) => { const c = memCell(s, rtc); return [
@@ -220,7 +220,8 @@ export default function RightsizeReport({ vm, onClose }) {
                   <LineChart data={cpuRows} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#243049" />
                     <XAxis dataKey="t" stroke="#8b9bb4" fontSize={11} minTickGap={50} tickFormatter={(t) => tick(t, days)} />
-                    <YAxis stroke="#8b9bb4" fontSize={11} width={60} tickFormatter={(v) => `${(v / 1000).toFixed(1)}G`} />
+                    {/* Y축 상단을 할당 용량까지 — 사용량 대비 여유가 한눈에 보이게(사용자 요구). 데이터가 더 크면 확장. */}
+                    <YAxis stroke="#8b9bb4" fontSize={11} width={60} domain={[0, (max) => Math.max(max, r.cpu.allocMhz || 0)]} tickFormatter={(v) => `${(v / 1000).toFixed(1)}G`} />
                     <Tooltip contentStyle={tip} labelFormatter={(t) => new Date(t).toLocaleString('ko-KR')} formatter={(v, k) => [ghz(v), k === 'cpuUsageMhz' ? '사용 MHz' : k]} />
                     <Legend wrapperStyle={{ fontSize: 11 }} />
                     <Line type="monotone" dataKey="cpuUsageMhz" name="사용 MHz" stroke="#3b82f6" strokeWidth={1.6} dot={false} isAnimationActive={false} connectNulls />
@@ -299,7 +300,8 @@ export default function RightsizeReport({ vm, onClose }) {
                   <LineChart data={memRows} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#243049" />
                     <XAxis dataKey="t" stroke="#8b9bb4" fontSize={11} minTickGap={50} tickFormatter={(t) => tick(t, days)} />
-                    <YAxis stroke="#8b9bb4" fontSize={11} width={60} tickFormatter={(v) => `${(v / 1024).toFixed(0)}G`} />
+                    {/* Y축 상단을 할당 용량까지(사용자 요구). 데이터가 더 크면 확장. */}
+                    <YAxis stroke="#8b9bb4" fontSize={11} width={60} domain={[0, (max) => Math.max(max, r.mem.allocMB || 0)]} tickFormatter={(v) => `${(v / 1024).toFixed(0)}G`} />
                     <Tooltip contentStyle={tip} labelFormatter={(t) => new Date(t).toLocaleString('ko-KR')} formatter={(v, k) => [gb(v), { memActiveMB: 'Active', memConsumedMB: 'Consumed', memBalloonMB: 'Balloon', memSwappedMB: 'Swapped' }[k] || k]} />
                     <Legend wrapperStyle={{ fontSize: 11 }} />
                     <Line type="monotone" dataKey="memConsumedMB" name="Consumed" stroke="#a855f7" strokeWidth={1.6} dot={false} isAnimationActive={false} connectNulls />
