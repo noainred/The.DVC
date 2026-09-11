@@ -325,6 +325,8 @@ sudo firewall-cmd --permanent --add-port=4000/tcp && sudo firewall-cmd --reload
 
 자세한 통신/방화벽 매트릭스는 [docs/NETWORK-COMMS-FIREWALL.md](NETWORK-COMMS-FIREWALL.md) 참고.
 
+> **호스트 접근 제어(v2.485)**: 설치 후에는 설정 › Security › **호스트 접근 제어**에서 이 호스트의 SSH/포탈 포트 인바운드를 출발지 허용목록으로 좁히거나 SSH 를 완전 차단할 수 있다(firewalld, 런타임 적용 → 미확정 시 자동 복원). 포탈 서비스 계정에 `firewall-cmd` sudo 가 필요하며 `packaging/offline/install.sh` 가 `/etc/sudoers.d/vmware-portal-hostaccess` 로 설치한다. 수동 설치(이 문서 방식)나 v2.485 이전에 설치한 서버는 화면이 안내하는 두 줄을 root 가 `visudo -f /etc/sudoers.d/vmware-portal-hostaccess` 로 추가한다. 상세: [docs/HOST-ACCESS.md](HOST-ACCESS.md).
+
 ---
 
 ## 7. 보안 설정 (권장 — v2.210.0 반영)

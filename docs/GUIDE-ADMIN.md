@@ -53,6 +53,13 @@
 - **특수 계정** — `noainred`(수퍼관리자, 강등/삭제 불가) · `thedvcdemp`(데모, viewer 고정).
 - **OTP 전원 잠금 복구** — 콘솔에서 `otp-enroll.sh`(번들 래퍼) 실행. 문서의 경고대로
   **root 직접 실행 금지**(파일 소유권 사고). 긴급 해제는 `OTP_ROLE_ENFORCE=false`.
+- **호스트 접근 제어 (v2.485)** — 설정 › Security › 호스트 접근 제어. 이 서버의 **SSH**(열림/허용목록/완전 차단,
+  선택 시 sshd 중지)·**웹**(포탈 포트·80/443 허용목록)·**OS 방화벽 추가 규칙**을 firewalld 로 적용합니다.
+  절차: ① 계획 보기(실행 없음) → ② 적용(런타임, 본인 OTP) → ③ 새 창에서 SSH/포탈 접속 확인 → ④ 확정(OTP).
+  확정하지 않으면 N분(기본 5분) 뒤 자동으로 되돌립니다. 웹 허용목록에는 **내 IP(관리자 본인)** 와 **이 호스트의
+  4000 으로 들어오는 엣지·수집 에이전트 대역**을 반드시 넣으세요. SSH 완전 차단 전에 콘솔(iDRAC/IPMI) 경로 확보.
+  업그레이드로 올라온 서버는 화면이 안내하는 sudoers 줄을 root 가 한 번 추가해야 합니다. 상세·오픈소스 권고:
+  [HOST-ACCESS.md](HOST-ACCESS.md).
 - 보안 감사 이력·불변조건: [SECURITY-AUDIT.md](../SECURITY-AUDIT.md), [AUDIT-2026-06-27.md](AUDIT-2026-06-27.md).
 
 ## 4. 알림 · 일일 리포트
@@ -103,5 +110,5 @@
 | 관리자(본 문서) | GUIDE-ADMIN.md |
 | 설치 | [INSTALL.md](INSTALL.md) · [OFFLINE-INSTALL.md](../packaging/offline/OFFLINE-INSTALL.md) |
 | 서비스 허브 | [SERVICE-HUB.md](SERVICE-HUB.md) · [pyportal/README.md](../pyportal/README.md) |
-| 네트워크/방화벽 | [NETWORK-COMMS-FIREWALL.md](NETWORK-COMMS-FIREWALL.md) |
+| 네트워크/방화벽 | [NETWORK-COMMS-FIREWALL.md](NETWORK-COMMS-FIREWALL.md) · [HOST-ACCESS.md](HOST-ACCESS.md)(호스트 접근 제어, v2.485) |
 | 릴리스/보안 | [RELEASES.md](RELEASES.md) · [SECURITY-AUDIT.md](../SECURITY-AUDIT.md) |

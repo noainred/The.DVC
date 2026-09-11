@@ -1,6 +1,17 @@
 {
   "notes": [
     {
+      "version": "2.485.1",
+      "date": "2026-09-12",
+      "title": "문서 — 호스트 접근 제어(v2.485) 반영: 보안 불변조건·방화벽 매트릭스·관리자 가이드·설치 문서",
+      "notes": [
+        "server/CLAUDE.md: 호스트 접근 제어 불변조건 추가(commit-confirm 자동 복원·서버측 자기 잠금 검사·sshd 중지는 확정 단계·OTP/소유자 경계·sudo 인자 고정·관리 대상 규칙만 변경).",
+        "docs/NETWORK-COMMS-FIREWALL.md: 포탈 호스트 인바운드 표에 SSH 행과 '호스트에서 제어' 안내(엣지·수집 에이전트 출발지 대역을 웹 허용목록에 포함해야 함) + §4 보안 참고.",
+        "docs/GUIDE-ADMIN.md: §3 사용 절차(계획→적용→새 창 확인→확정)와 주의, 문서 지도에 HOST-ACCESS.md. docs/INSTALL.md·packaging/offline/OFFLINE-INSTALL.md: sudoers 파일과 업그레이드 서버 수동 추가 절차.",
+        "코드 변경 없음."
+      ]
+    },
+    {
       "version": "2.485.0",
       "date": "2026-09-12",
       "title": "설정 › Security › 호스트 접근 제어 — SSH/웹(80·443·포탈 포트) 클라이언트 제어 + OS 방화벽 추가 규칙(firewalld, commit-confirm)",
