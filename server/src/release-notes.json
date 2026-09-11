@@ -1,6 +1,18 @@
 {
   "notes": [
     {
+      "version": "2.485.0",
+      "date": "2026-09-12",
+      "title": "설정 › Security › 호스트 접근 제어 — SSH/웹(80·443·포탈 포트) 클라이언트 제어 + OS 방화벽 추가 규칙(firewalld, commit-confirm)",
+      "notes": [
+        "새 탭 '호스트 접근 제어': ① SSH 열림/허용목록(IP·CIDR)/완전 차단(+선택: sshd 서비스 중지) ② 웹(포탈 포트 + 선택한 80/443) 열림/허용목록 ③ OS 방화벽 추가 규칙(포트·프로토콜·accept/drop/reject·출발지). 엔진은 Rocky 9 기본 firewalld(기본 존 rich rule).",
+        "잠금 사고 방지: 적용은 런타임에만 → 확정 대기(1~30분, 기본 5분) 안에 '확정' 하지 않으면 자동 --reload 로 되돌림(포탈 재시작에도 기한 유지). 웹 허용목록은 요청자 IP 포함이 필수, 포탈 포트는 항상 포함, 존 target ACCEPT·포탈 포트 전체 drop 은 오류. 중간 명령 실패 시 즉시 되돌림. sshd 중지/재개는 확정 단계에서만.",
+        "권한: 조회 admin, 초안/계획 admin+설정 소유자, 적용/확정 admin+설정 소유자+본인 OTP. 전부 감사 로그. 포탈이 관리하는 규칙(ssh·웹 포트·추가 규칙·직전 적용분)만 추가/삭제하고 그 밖의 존 설정은 건드리지 않음.",
+        "설치: install.sh 가 /etc/sudoers.d/vmware-portal-hostaccess(firewall-cmd + sshd start/stop/enable/disable 만) 설치. 업그레이드로 올라온 서버는 화면이 안내하는 sudoers 줄을 root 가 한 번 추가해야 함(그 전엔 '엔진 사용 불가' 로 표시, 변경 없음).",
+        "문서: docs/HOST-ACCESS.md — 설계·한계·함께 쓰면 좋은 오픈소스(fail2ban/sshguard/CrowdSec/OpenSCAP/Lynis/Wazuh/WireGuard/PAM OTP/Teleport) 사실 기반 비교. 테스트 hostAccess2485(검증·파싱·계획·상태 기계)."
+      ]
+    },
+    {
       "version": "2.484.0",
       "date": "2026-09-12",
       "title": "설정 › 전원 꺼짐 점검 — 몇 시간마다 점검할지 설정(기본 6시간) + 점검 관측을 '꺼진 지' 출처로",

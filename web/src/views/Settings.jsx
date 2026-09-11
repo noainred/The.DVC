@@ -20,6 +20,7 @@ import Audit from './Audit.jsx';
 import MetricsSettings from './MetricsSettings.jsx';
 import StorageIntervals from './StorageIntervals.jsx'; // 스토리지 수집 주기(중앙→엣지 배포, v2.409)
 import PowerOffCheckSettings from './PowerOffCheckSettings.jsx'; // 전원 꺼짐 점검 주기(v2.484)
+import HostAccessSettings from './HostAccessSettings.jsx'; // 호스트 접근 제어(SSH/웹/OS 방화벽, v2.485)
 import SanSwitchPerf from './SanSwitchPerf.jsx';       // SAN 스위치 포트 사용량 수집(portperfshow, v2.411)
 import GpuGuestSettings from './GpuGuestSettings.jsx';
 import GpuGuestDiag from './GpuGuestDiag.jsx';
@@ -69,6 +70,7 @@ const SUB = [
   { k: 'session-security', label: '세션 보안', C: SessionSecurity, group: 'security' },
   { k: 'secrets', label: '자격증명 저장 방식', C: SecretsSettings, group: 'security' },
   { k: 'anomaly', label: '이상동작 탐지', C: AnomalyDetection, group: 'security' },
+  { k: 'host-access', label: '호스트 접근 제어', C: HostAccessSettings, group: 'security' },
   { k: 'ai-search', label: 'AI 검색', C: LlmSettings },
   { k: 'alerts', label: '알림', C: Alerts2 },
   { k: 'mail', label: '메일 발송', C: MailSettings },
@@ -92,7 +94,7 @@ const GROUPS = {
   gpu: { label: '🎮 GPU 사용량 수집', desc: 'GPU 수집(ESXi vGPU/사용률) · GPU 게스트 수집(패스쓰루, 게스트 OS 내부) · GPU 수집 진단을 한 곳에서.' },
   'remote-srv': { label: '🔌 원격 접속 서버', desc: '브라우저 SSH/RDP 중계 서버(프록시)와 원격접속 설정을 한 곳에서.' },
   usercontrol: { label: '👤 User Control', desc: '사용자 계정(역할·2FA)·엣지 사용자 배포(중앙→엣지)·인증(AD/LDAP) 연동을 한 곳에서.' },
-  security: { label: '🛡️ Security', desc: '세션 보안과 이상동작 탐지를 한 곳에서.' },
+  security: { label: '🛡️ Security', desc: '세션 보안·이상동작 탐지·호스트 접근 제어(SSH/웹/OS 방화벽)를 한 곳에서.' },
   log: { label: '📋 Log', desc: 'vCenter 로그 보관 · 진단·로그 · 감사 로그를 한 곳에서.' },
 };
 const groupChildren = (g) => SUB.filter((s) => s.group === g);

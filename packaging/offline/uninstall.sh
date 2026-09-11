@@ -28,7 +28,7 @@ rm -f "/etc/systemd/system/${SERVICE_NAME}.service"
 for u in $(systemctl list-units --all --plain --no-legend 'vmware-portal-rma@*' 2>/dev/null | awk '{print $1}'); do
   systemctl disable --now "$u" 2>/dev/null || true
 done
-rm -f /etc/systemd/system/vmware-portal-rma@.service /etc/sudoers.d/vmware-portal-rma
+rm -f /etc/systemd/system/vmware-portal-rma@.service /etc/sudoers.d/vmware-portal-rma /etc/sudoers.d/vmware-portal-hostaccess
 systemctl daemon-reload
 
 echo "==> 앱/런타임 제거: $PREFIX"

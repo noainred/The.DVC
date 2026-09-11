@@ -16,6 +16,7 @@ import { registerNfsMounts } from './admin/nfsMounts.js'; // Edge NFS 마운트(
 import { registerMail } from './admin/mail.js';         // 공용 메일 발송 설정(v2.454)
 import { registerToolCategories } from './admin/toolCategories.js'; // 특수 기능 카테고리(v2.455)
 import { registerDirUsage } from './admin/dirUsage.js'; // 폴더 사용량 Top-N 리포트(v2.454)
+import { registerHostAccess } from './admin/hostAccess.js'; // 호스트 접근 제어(SSH/웹/OS 방화벽, v2.485)
 
 // 관리자 API 집계 라우터 — v2.285.0 대형 파일 분할.
 // 도메인 구현은 ./admin/*.js 로 이동. ⚠️ register 호출 순서 = 라우트 등록 순서(Express 매칭 순서).
@@ -39,3 +40,4 @@ registerNfsMounts(adminRouter);
 registerMail(adminRouter);
 registerToolCategories(adminRouter);
 registerDirUsage(adminRouter);
+registerHostAccess(adminRouter);
