@@ -303,6 +303,12 @@ adminRouter.post('/gpu-guest/test', adminOnly, async (req, res) => {
         const dlHosts = dlByHost.get(v.host) || [];
         // SSH 접속 고정 IP: 요청에 실린 선택값(it.ip, 저장 전 실시간 테스트) 우선, 없으면 저장된 vmIps.
         const preferIp = it.ip !== undefined ? String(it.ip || '').trim() : ((s.vcenters[vcenterId]?.vmIps || {})[it.vmId] || '');
+        // v2.480(3차 감사 S5): 요청에 비밀번호를 직접 싣지 않은(공용/저장 자격증명) 테스트는 SSH 대상 IP 를 그 VM 의 알려진 IP 로만 —
+        // {vmId, useShared:true, ip:'공격자'} 로 법인 공용 비밀번호를 외부 sshd 에 보내던 경로 차단.
+        if (preferIp && !(it.username && it.password)) {
+          const known = new Set([...(v.ipAddresses || []), v.ipAddress].filter(Boolean).map(String));
+          if (!known.has(preferIp)) { results[i] = { vmId: it.vmId, login: false, read: false, error: '요청 IP 가 이 VM 의 알려진 IP 가 아님', trace: [{ t: Date.now(), msg: `✗ 거부 — ${preferIp} 는 VM 의 알려진 IP(${[...known].join(', ') || '없음'})가 아닙니다(저장 자격증명 보호)` }] }; continue; }
+        }
         const reqMethod = ['guestops', 'ssh', 'auto'].includes(req.body?.method) ? req.body.method : (s.collectMethod || 'guestops');
         // Windows는 기본적으로 sshd가 없어 SSH 단독이면 실패 → VMware Tools 게스트작업 우선(auto)으로 조정.
         const method = resolveCollectMethod(reqMethod, isWindows);

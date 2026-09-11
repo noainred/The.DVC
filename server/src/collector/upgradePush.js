@@ -4,6 +4,7 @@
  * restarts. Best-effort and isolated per agent.
  */
 
+import { createHash } from 'node:crypto';
 import { loadCollectors } from './registry.js';
 import { setCollectorStatus, getCollectorStatus } from './state.js';
 import { _internals as _rf } from '../util/resilientFetch.js'; // wanAgent — WAN 전용 로컬 디스패처(전역 오염 없음)
@@ -27,12 +28,14 @@ export function netFailReason(msg) {
   return m;
 }
 
+const _shaCache = new WeakMap(); // 같은 번들 버퍼는 1회만 해시(수집기 수만큼 반복 해시 방지)
+function bundleSha(bytes) { let v = _shaCache.get(bytes); if (!v) { v = createHash('sha256').update(bytes).digest('hex'); _shaCache.set(bytes, v); } return v; }
 export async function pushBundleToCollector(c, bytes, { restart = true, force = false, timeout = Number(process.env.EDGE_PUSH_TIMEOUT_MS) || 600_000 } = {}) {
   const url = `${String(c.url).replace(/\/+$/, '')}/api/collector/upgrade?restart=${restart}${force ? '&force=true' : ''}`;
   try {
     const res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/gzip', ...(c.token ? { 'X-Collector-Token': c.token } : {}) },
+      headers: { 'Content-Type': 'application/gzip', 'X-Bundle-Sha256': bundleSha(bytes), ...(c.token ? { 'X-Collector-Token': c.token } : {}) }, // v2.480: 수신측 무결성 검증
       body: bytes,
       dispatcher: _rf.wanAgent, // 전역 디스패처가 검증 ON으로 복원돼(감사 C1/C3) 자체서명 https 엣지 호환용 WAN 디스패처 명시
       signal: AbortSignal.timeout(timeout),

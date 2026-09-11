@@ -70,6 +70,15 @@ adminRouter.get('/vclogs/status', adminOnly, async (_req, res) => {
   try { res.json(await logStatus()); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 adminRouter.put('/vclogs/settings', adminOnly, (req, res) => {
+  // v2.480(3차 감사 S4): storagePath 무검증 → 임의 절대경로에 SQLite(+wal/shm) 생성. 절대경로·상위경로·제어문자·시스템 디렉터리 거부.
+  const sp = typeof req.body?.storagePath === 'string' ? req.body.storagePath.trim() : '';
+  if (sp) {
+    const bad = [...sp].some((c) => c.charCodeAt(0) < 32) ? '제어문자'
+      : !sp.startsWith('/') ? '절대경로여야 합니다'
+        : sp.split(/[\\/]+/).includes('..') ? '상위 경로(..) 불가'
+          : /^\/(etc|proc|sys|dev|boot|root|bin|sbin|usr|lib|lib64|run)(\/|$)/.test(sp) ? '시스템 디렉터리 불가' : '';
+    if (bad) return res.status(400).json({ ok: false, reason: `로그 저장 경로: ${bad}` });
+  }
   const s = saveLogSettings(req.body || {});
   if (s._pathChanged) resetLogsDb(); // 저장 경로 변경 → 다음 접근 시 새 경로로 재오픈
   rescheduleLogPoller();
@@ -131,7 +140,7 @@ adminRouter.post('/net/pcap', adminOnly, async (req, res) => {
 });
 
 // 캡처 이력
-adminRouter.get('/net/history', adminOnly, (req, res) => res.json({ captures: listCaptures({ limit: Number(req.query.limit) || 100 }) }));
+adminRouter.get('/net/history', adminOnly, (req, res) => res.json({ captures: listCaptures({ limit: Math.max(1, Math.min(1000, Number(req.query.limit) || 100)) }) })); // v2.480: limit 상한
 adminRouter.get('/net/history/:id', adminOnly, (req, res) => { const c = getCapture(req.params.id); return c ? res.json(c) : res.status(404).json({ ok: false }); });
 adminRouter.delete('/net/history/:id', adminOnly, (req, res) => res.json({ ok: deleteCapture(req.params.id) }));
 

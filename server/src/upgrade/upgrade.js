@@ -420,8 +420,27 @@ export async function upgradeFromRemote(baseUrl, installDir, currentVersion, des
 
 /** Push a bundle (tar.gz bytes) to a registered edge's upgrade endpoint.
  *  대용량 번들+고RTT를 고려해 타임아웃을 넉넉히 둔다. 재시도는 적용하지 않는다(적용=재시작이라 경합 오탐 위험). */
+/**
+ * 수신측 번들 무결성 판정(v2.480, 3차 감사 코어2 S1 — server/CLAUDE.md "자체 업그레이드·엣지 푸시 양쪽 모두 검증" 규약).
+ * 예전엔 엣지 /api/upgrade/bundle·수집기 /api/collector/upgrade 가 sha256 을 받지도 검증하지도 않아, 토큰 탈취/http 중간자가
+ * 임의 tar.gz 를 설치·재시작시킬 수 있었다. 헤더 부재는 UPGRADE_ALLOW_UNVERIFIED=true 일 때만 통과(자체 업그레이드와 같은 예외).
+ * @returns {string|null} 거부 사유(null 이면 통과)
+ */
+export function bundleShaIssue(headerSha, bytes, { allowUnverified = String(process.env.UPGRADE_ALLOW_UNVERIFIED || '').toLowerCase() === 'true' } = {}) {
+  const want = String(headerSha || '').trim().toLowerCase();
+  if (!want) {
+    if (allowUnverified) { console.warn('[upgrade] ⚠ X-Bundle-Sha256 없이 번들 수신(UPGRADE_ALLOW_UNVERIFIED=true) — 무결성 미검증'); return null; }
+    return 'X-Bundle-Sha256 헤더가 없어 번들 무결성을 검증할 수 없습니다 — 설치를 거부합니다(중앙 v2.480+ 에서 push 하거나, 신뢰망이면 UPGRADE_ALLOW_UNVERIFIED=true).';
+  }
+  if (!/^[0-9a-f]{64}$/.test(want)) return 'X-Bundle-Sha256 형식이 올바르지 않습니다.';
+  const got = crypto.createHash('sha256').update(bytes).digest('hex');
+  if (got !== want) return `sha256 불일치 — 번들 무결성 검증 실패(기대 ${want.slice(0, 12)}…, 실제 ${got.slice(0, 12)}…)`;
+  return null;
+}
+
 export async function pushBundleToEdge(edge, archivePath, { timeout = Number(process.env.EDGE_PUSH_TIMEOUT_MS) || 600_000 } = {}) {
   const data = fs.readFileSync(archivePath);
+  const sha = crypto.createHash('sha256').update(data).digest('hex'); // v2.480: 수신측 검증용
   // restart=true 필수 — 없으면 엣지는 설치 디렉터리만 교체하고 구버전 프로세스가 계속 돈다.
   // (currentVersion()이 디스크의 package.json을 읽어 '새 버전'으로 보고하므로 재푸시도 거부됨.)
   const url = `${String(edge.url).replace(/\/+$/, '')}/api/upgrade/bundle?restart=true`;
@@ -430,6 +449,7 @@ export async function pushBundleToEdge(edge, archivePath, { timeout = Number(pro
       method: 'POST',
       headers: {
         'Content-Type': 'application/gzip',
+        'X-Bundle-Sha256': sha,
         ...(edge.token ? { Authorization: `Bearer ${edge.token}` } : {}),
       },
       body: data,

@@ -12,7 +12,7 @@ import { config, currentVersion } from '../config.js';
 import { buildExport } from '../collector/agent.js';
 import { upgradeManager } from '../upgrade/manager.js';
 import { tokenMatches } from '../util/secureCompare.js';
-import { upgradeFromBundleBytes, restartProcess } from '../upgrade/upgrade.js';
+import { upgradeFromBundleBytes, restartProcess, bundleShaIssue } from '../upgrade/upgrade.js';
 import { setLocalPassword } from '../auth/auth.js';
 import { logAudit } from '../audit.js';
 import { runLocalIdracScan } from '../idrac/localScan.js';
@@ -200,6 +200,8 @@ collectorRouter.post('/upgrade',
   express.raw({ type: ['application/gzip', 'application/octet-stream'], limit: '256mb' }),
   async (req, res) => {
     if (!req.body || !req.body.length) return res.status(400).json({ ok: false, reason: 'empty bundle' });
+    const shaIssue = bundleShaIssue(req.get('x-bundle-sha256'), req.body); // v2.480(3차 감사): 수집기 수신 번들도 검증
+    if (shaIssue) return res.status(400).json({ ok: false, reason: shaIssue });
 
     // 파일 복사(config 보존) 전에 라이브 WAL SQLite 체크포인트 → 엣지 복사본 정합성 확보(best-effort).
     try { await checkpointConfigDbs(config.configDir); } catch { /* never block upgrade */ }

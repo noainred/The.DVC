@@ -12,6 +12,8 @@ process.env.DEFAULT_ADMIN_PASSWORD = 'bootstrap-pass-1';
 
 const auth = await import('../src/auth/auth.js?otp-policy');
 
+// v2.480: OTP 등록 확정 코드는 같은 30초 창에서 로그인에 재사용되지 않는다(3차 감사 코어2 S5) — 등록 뒤 로그인은 다음 창 코드로.
+const nextCode = (s) => totp.generateToken(s, { counter: Math.floor(Date.now() / 1000 / 30) + 1 });
 test('부트스트랩: OTP 미등록 admin 은 비밀번호로 로그인되지만 mustEnrollOtp 세션', () => {
   const who = auth.authenticateLocal('admin', 'bootstrap-pass-1');
   assert.ok(who, 'OTP 등록 전에는 비번 로그인이 되어야 함(최초 설치 경로)');
@@ -64,7 +66,7 @@ test('OTP 등록 확정 → 비밀번호 삭제 + 이후 비번 로그인 불가
   // 예전 비밀번호로는 더 이상 로그인 불가(해시가 없으므로 실패).
   assert.equal(auth.authenticateLocal('op1', 'operator-pass-1'), null);
   // 새 OTP 코드로는 로그인되고, 더 이상 등록 강제 대상이 아님.
-  const who = auth.authenticateLocal('op1', totp.generateToken(op.totpSecret));
+  const who = auth.authenticateLocal('op1', nextCode(op.totpSecret));
   assert.ok(who && !who.mustEnrollOtp, 'OTP 로그인 성공 + 등록 강제 해제');
 });
 

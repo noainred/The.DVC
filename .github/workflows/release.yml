@@ -16,6 +16,12 @@ on:
 permissions:
   contents: write
 
+# v2.480(3차 감사 B-4): 태그 push 와 workflow_dispatch 가 겹치면 두 러너가 각자 prev/versions.json 을 받아 prune·--clobber 해
+# 한쪽 버전이 versions.json 에서 사라지거나 방금 올린 자산이 지워진다(자동 업그레이드 유실). 롤링 릴리스는 직렬로만.
+concurrency:
+  group: release-downloads
+  cancel-in-progress: false
+
 env:
   NODE_VERSION: '22.20.0'
   RELEASE_TAG: downloads
@@ -23,6 +29,7 @@ env:
 jobs:
   build-and-publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
       - name: Checkout
         uses: actions/checkout@v4

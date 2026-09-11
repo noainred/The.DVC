@@ -288,7 +288,7 @@ export default function BulkTab({ canEdit, prefill }) {
             </div>
           ) : (
             <div className="table-wrap" style={{ maxHeight: '46vh', marginTop: 12 }}>
-              <STable>
+              <STable sortable={false}>{/* v2.480(3차 감사 WB-5): 입력 편집 표 — 정렬 활성이면 키 입력마다 행이 재정렬돼 편집 행이 튄다 */}
                 <thead><tr>
                   <th style={{ width: 44 }}>#</th><th style={{ width: 200 }}>엣지 이름</th><th>호스트네임</th><th style={{ width: 200 }}>IP</th>
                 </tr></thead>
