@@ -142,11 +142,15 @@ export default function ToolCategories() {
             {cats.length > 0 && <button className="logout-btn" style={{ padding: '2px 10px', fontSize: 11 }} disabled={busy} onClick={loadPreset}>추천 분류</button>}
           </div>
           {cats.length === 0 && <div className="muted" style={{ fontSize: 12.5, padding: '10px 0' }}>카테고리가 없습니다. '추천 분류로 시작' 또는 '+ 추가'를 누르세요.</div>}
-          <div style={{ display: 'grid', gap: 6 }}>
+          {/* v2.477: 카드 목록 열을 minmax(0,1fr) 로 — 암시적 auto 열은 min-content 하한을 가져, 카드 안의
+              .input(클래스 min-width 220px 가 인라인 width:44 를 이김) + 이름 input 고유폭(~200px)이 열 최소폭
+              452px 가 되어 300px 트랙을 넘치고 오른쪽 기능 그리드가 그 위에 그려졌다(헤드리스 측정으로 확인).
+              아이콘 칸은 minWidth 로 클래스 하한을 끄고, 카드 자체도 minWidth:0 으로 트랙 폭에 맞춘다. */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr)', gap: 6 }}>
             {cats.map((c, i) => (
-              <div key={c.id} className="card" style={{ padding: 8, borderColor: sel === c.id ? 'var(--accent, #2e90fa)' : undefined }}>
-                <div className="flex gap" style={{ alignItems: 'center' }}>
-                  <input className="input" style={{ width: 44, textAlign: 'center' }} value={c.icon || ''} maxLength={4}
+              <div key={c.id} className="card" style={{ padding: 8, minWidth: 0, borderColor: sel === c.id ? 'var(--accent, #2e90fa)' : undefined }}>
+                <div className="flex gap" style={{ alignItems: 'center', minWidth: 0 }}>
+                  <input className="input" style={{ width: 44, minWidth: 44, flex: 'none', textAlign: 'center' }} value={c.icon || ''} maxLength={4}
                     onChange={(e) => patchCat(c.id, { icon: e.target.value })} title="아이콘(이모지)" />
                   <input className="input" style={{ flex: 1, minWidth: 0 }} value={c.label}
                     onChange={(e) => patchCat(c.id, { label: e.target.value })} />
