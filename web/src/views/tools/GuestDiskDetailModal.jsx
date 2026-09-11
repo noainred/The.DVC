@@ -114,7 +114,8 @@ function TrendChart({ rows, unitLabel, days, capGB, height = 220 }) {
         <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,.18)" />
         <XAxis dataKey="t" type="number" domain={['dataMin', 'dataMax']} scale="time"
           tickFormatter={(t) => dt(t, days)} tick={{ fontSize: 11, fill: '#94a3b8' }} />
-        <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} width={54}
+        {/* Y축 상단을 할당 용량(capGB)까지 — 사용량 대비 여유가 한눈에 보이게(사용자 요구). 데이터가 더 크면 확장. */}
+        <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} width={54} domain={[0, (max) => Math.max(max, capGB || 0)]}
           tickFormatter={(v) => `${v.toLocaleString(undefined, { maximumFractionDigits: 1 })}`} />
         <Tooltip contentStyle={tipStyle} labelFormatter={(t) => new Date(t).toLocaleString()}
           formatter={(v, n) => [`${Number(v).toLocaleString(undefined, { maximumFractionDigits: 2 })} ${unitLabel}`, n === 'used' ? '사용' : '할당']} />

@@ -264,6 +264,9 @@ function drawLineChart(ctx, block) {
   const xs = pts.map((p) => p.t); const ys = pts.map((p) => p.v);
   let minY = Math.min(...ys); let maxY = Math.max(...ys);
   if (block.refY != null) { minY = Math.min(minY, block.refY); maxY = Math.max(maxY, block.refY); }
+  // Y축 상단을 할당 용량까지(사용자 요구) — 사용량 대비 여유가 한눈에 보이게. 데이터가 더 크면 확장.
+  if (block.axisMax != null && Number.isFinite(block.axisMax)) maxY = Math.max(maxY, block.axisMax);
+  minY = Math.min(minY, 0);
   if (minY === maxY) { maxY = minY + 1; minY -= 1; }
   const minX = Math.min(...xs); const maxX = Math.max(...xs);
   const sx = (t) => px + (maxX === minX ? 0 : (t - minX) / (maxX - minX)) * pw;
