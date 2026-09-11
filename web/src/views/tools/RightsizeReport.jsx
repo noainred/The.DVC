@@ -12,10 +12,40 @@ import { fetchJson } from '../../api.js';
 import EscClose from '../../components/EscClose.jsx';
 import { STable } from '../../components/STable.jsx';
 import { exportFileName, saveElementAsJpg, saveDocAsPdf } from './reportExport.js';
+// v2.481: 디스크 섹션에 게스트 디스크 사용량(guest.disk 수집·추이)을 함께 보인다(사용자 요청) — 표기는 게스트 디스크 상세와 동일 유틸.
+import { fmtSize, resolveUnit, UNIT_DIV, trendLabel, toRows, TrendChart } from './GuestDiskDetailModal.jsx';
+
+/** 게스트 디스크 응답을 PDF 블록으로(게스트 디스크 상세 PDF 와 같은 구성, 파티션별 차트는 생략). */
+function guestDiskBlocks(gd, days) {
+  if (!gd) return [];
+  const maxGB = Math.max(gd.allocGB || 0, ...(gd.partitions || []).map((p) => p.capGB || 0));
+  const u = resolveUnit('auto', maxGB); const div = UNIT_DIV[u]; const size = (g) => fmtSize(g, u);
+  const vt = gd.vmTrend;
+  return [
+    { type: 'kvrow', items: [
+      { k: '게스트 할당', v: size(gd.allocGB) }, { k: '게스트 사용', v: size(gd.usedGB) }, { k: '회수 가능(여유)', v: size(gd.freeGB), color: 'green' },
+      { k: '사용률', v: gd.ratioPct == null ? '—' : `${gd.ratioPct}%`, sub: '사용 / 할당' }, { k: '파티션 수', v: String((gd.partitions || []).length) },
+      { k: '전체 사용량 추이', v: `${trendLabel(vt?.trend).label}${vt?.growthGBPerDay != null ? ` (${vt.growthGBPerDay > 0 ? '+' : ''}${vt.growthGBPerDay} GB/일)` : ''}`, sub: vt?.spanDays ? `관측 ${vt.spanDays}일` : '표본 부족' },
+    ] },
+    { type: 'linechart', title: `게스트 총 사용량 추이 (최근 ${days}일)`, unitLabel: u, refY: gd.allocGB != null ? gd.allocGB / div : null, refLabel: '할당', points: (gd.vmTrendSeries || []).map((p) => ({ t: p.ts, v: p.usedGB / div })) },
+    { type: 'table', columns: [
+      { label: '파티션', w: 2.6 }, { label: '할당', align: 'right', w: 1 }, { label: '사용', align: 'right', w: 1 }, { label: '여유', align: 'right', w: 1 },
+      { label: '사용률', align: 'right', w: 0.9 }, { label: '증가율(GB/일)', align: 'right', w: 1.2 }, { label: '관측기간', align: 'right', w: 0.9 }, { label: '추이', w: 0.8 }, { label: '판정', w: 1.6 },
+    ], rows: (gd.partitions || []).map((p) => {
+      const rp = p.capGB > 0 ? Math.round((p.usedGB / p.capGB) * 1000) / 10 : null;
+      return [{ text: p.path }, { text: size(p.capGB), align: 'right' }, { text: size(p.usedGB), align: 'right' }, { text: size(p.freeGB), align: 'right', color: 'green' },
+        { text: rp == null ? '—' : `${rp}%`, align: 'right' }, { text: p.trend?.growthGBPerDay == null ? '—' : String(p.trend.growthGBPerDay), align: 'right' },
+        { text: p.trend?.spanDays ? `${p.trend.spanDays}일` : '—', align: 'right' }, { text: trendLabel(p.trend?.trend).label }, { text: p.advice?.label || '—' }];
+    }) },
+    { type: 'note', text: `게스트 디스크는 VMware Tools guest.disk 를 엣지가 주기 수집한 값(최신 ${gd.ts ? new Date(gd.ts).toLocaleString('ko-KR') : '—'})입니다. 여유(회수 가능)는 게스트 관점의 회수 상한이며 실제 회수는 디스크 축소(shrink)+UNMAP 이 필요합니다. 추이는 변경분만 저장하므로 표본 2점 미만이면 증가율을 계산하지 않습니다.` },
+  ];
+}
 
 const DAYS = [7, 30, 90, 180, 365];
-// 90일 초과는 vCenter 'year' 롤업(86400초=1일 샘플, 1년 보관)에서 조회한다 — 6개월·1년 검토 지원.
-const dayLabel = (d) => (d === 365 ? '1년' : d === 180 ? '6개월' : `${d}일`);
+// 90일 초과는 vCenter 'year' 롤업(86400초=1일 샘플, 1년 보관)에서 조회한다. 탭 이름은 조회 일수 그대로(180일·365일, v2.481 사용자 요청).
+const dayLabel = (d) => `${d}일`;
+// 관측 기간 부제 — 실제 데이터 범위(표본 구간 포함)와 첫~마지막 롤업 시각. 요청 창보다 짧으면 최신 롤업 미발행·보관 경계 때문이다.
+const dataRange = (w, fmt) => (w?.firstTs ? `데이터 ${w.coverageDays ?? 0}일 · ${fmt(w.firstTs)} ~ ${fmt(w.lastTs)}` : '데이터 없음');
 const tip = { background: '#0f172a', border: '1px solid #334155', borderRadius: 8, fontSize: 12 };
 const gb = (mb) => (mb == null ? '—' : `${(mb / 1024).toFixed(1)} GB`);
 const ghz = (mhz) => (mhz == null ? '—' : `${(mhz / 1000).toFixed(2)} GHz`);
@@ -40,7 +70,7 @@ const RT_TAG = <span title="vCenter 실시간(최근 1시간) 구간에서 조�
   style={{ background: '#0ea5e9', color: '#fff', fontSize: 9, marginLeft: 4, padding: '0 4px', borderRadius: 4, verticalAlign: 'middle' }}>실시간</span>;
 
 /** 벡터 PDF 문서 모델 — 화면과 같은 내용을 글자·도형으로(reportExport.saveDocAsPdf). */
-function buildRightsizeDoc(r, vm, days) {
+function buildRightsizeDoc(r, vm, days, gd = null) {
   const mMB = (mb) => (mb == null ? '—' : `${(mb / 1024).toFixed(1)} GB`);
   const mGHz = (mhz) => (mhz == null ? '—' : `${(mhz / 1000).toFixed(2)} GHz`);
   const pc = (x) => (x == null ? '—' : `${x}%`);
@@ -51,7 +81,7 @@ function buildRightsizeDoc(r, vm, days) {
   if (r.verdict?.summary) blocks.push({ type: 'note', text: r.verdict.summary });
   for (const rs of (r.evidence?.reasons || [])) blocks.push({ type: 'note', text: `• ${rs}` });
   blocks.push({ type: 'kvrow', items: [
-    { k: '관측 기간', v: `${w.coverageDays ?? 0}일`, sub: w.firstTs ? `${new Date(w.firstTs).toLocaleDateString()} ~ ${new Date(w.lastTs).toLocaleDateString()}` : '' },
+    { k: '관측 기간', v: `${w.days ?? days}일`, sub: dataRange(w, (t) => new Date(t).toLocaleDateString()) },
     { k: '샘플', v: `${w.samples ?? 0} / ${w.expectedSamples ?? 0}`, sub: `커버리지 ${pc(w.coveragePct)} · 간격 ${w.intervalSec}초` },
     { k: '정책', v: `여유 ${r.policy?.headroomPct}% · 상한 ${r.policy?.capReductionPct}%`, sub: `최소 ${r.policy?.minDays}일 · 커버리지 ${r.policy?.minCoveragePct}%` },
   ] });
@@ -73,15 +103,25 @@ function buildRightsizeDoc(r, vm, days) {
   blocks.push({ type: 'table', columns: [
     { label: '계열', w: 1 }, { label: '의미', w: 2.5 }, { label: '평균', align: 'right', w: 1 }, { label: 'p95', align: 'right', w: 1 }, { label: '최대', align: 'right', w: 1 }, { label: '해석', w: 2.4 },
   ], rows: [
-    memRow('Active', '게스트가 실제로 만지는 메모리(워킹셋)', mem.active, rt.memActiveMB, '감축 하한 후보 ①'),
-    memRow('Consumed', '호스트가 배정한 메모리(캐시 포함)', mem.consumed, rt.memConsumedMB, '감축 하한 후보 ②'),
+    memRow('Active', '게스트가 실제로 만지는 메모리(워킹셋)', mem.active, rt.memActiveMB, mem.memBasis === 'consumed' ? '감축 하한 후보 ①' : '산정 기준(워킹셋 최대 × 여유)'),
+    memRow('Consumed', '호스트가 배정한 메모리(캐시 포함)', mem.consumed, rt.memConsumedMB, mem.memBasis === 'consumed' ? '감축 하한 후보 ②' : '참고 — 회수 안 된 과거 터치 페이지, 필요량 근거 아님'),
     memRow('Balloon', '벌룬 회수(>0=호스트 압박)', mem.balloon, rt.memBalloonMB, mem.balloon?.samplesAbove0 ? `${mem.balloon.pctTime}% 에서 0 초과 → 보류` : '관측 없음 → 정상'),
     memRow('Swapped', '호스트 스왑(>0=심각한 압박)', mem.swapped, rt.memSwappedMB, mem.swapped?.samplesAbove0 ? `${mem.swapped.pctTime}% 에서 0 초과 → 금지` : '관측 없음 → 정상'),
-    [{ text: 'Usage %' }, { text: 'vCenter 사용률(active÷할당)' }, { text: pc(mem.usagePct?.avg), align: 'right' }, { text: pc(mem.usagePct?.p95), align: 'right' }, { text: pc(mem.usagePct?.max), align: 'right' }, { text: '참고' }],
+    [{ text: 'Usage %' }, { text: 'vCenter 사용률(active÷할당)' }, { text: pc(mem.usagePct?.avg), align: 'right' }, { text: pc(mem.usagePct?.p95), align: 'right' }, { text: pc(mem.usagePct?.max), align: 'right' }, { text: String(mem.workingSetSource || '').startsWith('usagePct') ? '워킹셋 복원 출처(최대 × 할당)' : '참고' }],
   ] });
   const memPts = (r.series?.memConsumedMB || []).map((p) => ({ t: Date.parse(p.t), v: p.v == null ? null : p.v / 1024 })).filter((p) => Number.isFinite(p.t) && p.v != null);
   blocks.push({ type: 'linechart', title: 'Consumed 메모리 추이', unitLabel: 'GB', refY: mem.allocMB != null ? mem.allocMB / 1024 : null, refLabel: '할당', points: memPts });
   if (mem.basisNote) blocks.push({ type: 'note', text: `메모리 산정: ${mem.basisNote}` });
+  if (mem.skipReason) blocks.push({ type: 'note', text: `• ${mem.skipReason}` });
+  if (mem.consumedNote) blocks.push({ type: 'note', text: `• ${mem.consumedNote}` });
+  blocks.push({ type: 'heading', text: '디스크' });
+  blocks.push({ type: 'kvrow', items: [
+    { k: '커밋(실사용) 용량', v: r.disk?.storageGB != null ? `${r.disk.storageGB} GB` : '—' },
+    { k: '미커밋(thin 여유)', v: r.disk?.uncommittedGB != null ? `${r.disk.uncommittedGB} GB` : '—', sub: r.disk?.thin ? 'thin 디스크' : 'thick' },
+    { k: 'VMware Tools', v: r.disk?.toolsStatus || '—' },
+  ] });
+  if (gd) blocks.push(...guestDiskBlocks(gd, days));
+  else if (r.disk?.note) blocks.push({ type: 'note', text: r.disk.note });
   blocks.push({ type: 'note', text: '이 리포트는 vCenter 롤업 통계(각 점=간격 평균)를 근거로 합니다. 순간 피크는 이보다 높을 수 있으므로 감축은 여유를 두고 적용 후 재확인하세요. 실시간 표시 값은 참고용 현재값이며 다일 감축 하한 계산에는 반영하지 않습니다.' });
   return {
     title: `자원 축소 근거 리포트 — ${vm.name}`,
@@ -115,6 +155,8 @@ export default function RightsizeReport({ vm, onClose }) {
   const sheetRef = useRef(null);          // PDF/JPG 로 저장할 영역(모달 본문 전체)
   const [saving, setSaving] = useState(''); // '' | 'pdf' | 'jpg'
   const [saveErr, setSaveErr] = useState('');
+  // v2.481: 게스트 디스크 사용량(guest.disk 수집) — 같은 기간으로 병행 조회. 404 = 이 VM 은 수집 대상 아님(정직하게 '수집 없음').
+  const [gd, setGd] = useState({ data: null, none: false, error: '' });
   useEffect(() => {
     let alive = true;
     setLoading(true); setError(null);
@@ -122,6 +164,10 @@ export default function RightsizeReport({ vm, onClose }) {
       .then((d) => { if (alive) setData(d); })
       .catch((e) => { if (alive) setError(e.message); })
       .finally(() => { if (alive) setLoading(false); });
+    setGd({ data: null, none: false, error: '' });
+    fetchJson(`/tools/guest-disk/vm/${encodeURIComponent(vm.id)}?days=${days}`)
+      .then((d) => { if (alive) setGd({ data: d, none: false, error: '' }); })
+      .catch((e) => { if (alive) setGd({ data: null, none: e?.status === 404, error: e?.status === 404 ? '' : (e?.message || String(e)) }); });
     return () => { alive = false; };
   }, [vm.id, days]);
 
@@ -130,6 +176,12 @@ export default function RightsizeReport({ vm, onClose }) {
   const st = r ? STATE[r.verdict?.state] || STATE.keep : null;
   const cpuRows = r ? merge(r.series, ['cpuUsageMhz']).map((e) => ({ ...e, alloc: r.cpu.allocMhz })) : [];
   const memRows = r ? merge(r.series, ['memActiveMB', 'memConsumedMB', 'memBalloonMB', 'memSwappedMB']) : [];
+  // 게스트 디스크 표시 단위(이 VM 의 최대 할당값 기준, 게스트 디스크 상세와 동일 규칙)
+  const gdd = gd.data;
+  const gdUnit = gdd ? resolveUnit('auto', Math.max(gdd.allocGB || 0, ...(gdd.partitions || []).map((p) => p.capGB || 0))) : 'GB';
+  const gdDiv = UNIT_DIV[gdUnit];
+  const gdRows = gdd ? toRows((gdd.vmTrendSeries || []).map((p) => ({ ts: p.ts, usedGB: p.usedGB, capGB: p.allocGB })), gdDiv) : [];
+  const gdVt = gdd?.vmTrend;
   const readyRows = r ? (r.readyPctSeries || []).map((p) => ({ t: Date.parse(p.t), v: p.v })).filter((p) => Number.isFinite(p.t)) : [];
 
   // PDF/JPG 저장(v2.449) — 감축 결재 근거로 파일을 남길 수 있어야 한다는 사용자 요구.
@@ -141,7 +193,7 @@ export default function RightsizeReport({ vm, onClose }) {
     try {
       const name = exportFileName(vm.name, days, kind === 'pdf' ? 'pdf' : 'jpg');
       // PDF 는 글자·도형(벡터) — 문서 모델을 jsPDF 로 직접 그린다(한글 임베드 폰트). JPG 는 화면 캡처.
-      if (kind === 'pdf') { if (!r) return; await saveDocAsPdf(buildRightsizeDoc(r, vm, days), name); }
+      if (kind === 'pdf') { if (!r) return; await saveDocAsPdf(buildRightsizeDoc(r, vm, days, gd.data), name); }
       else await saveElementAsJpg(el, name);
     } catch (e) {
       setSaveErr(e?.message || String(e));
@@ -188,7 +240,7 @@ export default function RightsizeReport({ vm, onClose }) {
                 </ul>
               )}
               <div className="flex gap wrap" style={{ marginTop: 8, gap: 18 }}>
-                <Stat k="관측 기간" v={`${r.window.coverageDays ?? 0}일`} sub={r.window.firstTs ? `${new Date(r.window.firstTs).toLocaleString('ko-KR')} ~ ${new Date(r.window.lastTs).toLocaleString('ko-KR')}` : '데이터 없음'} />
+                <Stat k="관측 기간" v={`${r.window.days ?? days}일`} sub={dataRange(r.window, (t) => new Date(t).toLocaleString('ko-KR'))} />
                 <Stat k="샘플" v={`${r.window.samples} / ${r.window.expectedSamples}`} sub={`커버리지 ${n1(r.window.coveragePct, '%')} · 간격 ${r.window.intervalSec}초`} />
                 <Stat k="정책" v={`여유 ${r.policy.headroomPct}% · 상한 ${r.policy.capReductionPct}%`} sub={`최소 ${r.policy.minDays}일 · 커버리지 ${r.policy.minCoveragePct}% · Ready ${r.policy.readyWarnPct}%`} />
                 {r.synthesized && <span className="badge gray" style={{ alignSelf: 'center' }}>데모(mock) 합성 데이터</span>}
@@ -269,13 +321,13 @@ export default function RightsizeReport({ vm, onClose }) {
                       <tr style={c.isRt ? { background: 'rgba(14,165,233,.08)' } : undefined}>
                         <td><b>Active</b></td><td className="muted">게스트가 실제로 만지는 메모리(워킹셋 추정)</td>
                         <td className="right">{c.avg}{c.isRt && RT_TAG}</td><td className="right">{c.p95}</td><td className="right">{c.max}</td>
-                        <td className="muted">{c.isRt ? '이력 롤업엔 표본 없음 · 실시간(최근 1시간) 현재값 — vCenter 통계 레벨 ↑ 시 이력도 쌓임' : '감축 하한 후보 ①'}</td>
+                        <td className="muted">{c.isRt ? `이력 롤업엔 표본 없음 · 실시간(최근 1시간) 현재값${String(r.mem.workingSetSource || '').includes('realtime') ? ' — 워킹셋 산정에 반영' : ''} — vCenter 통계 레벨 ↑ 시 이력도 쌓임` : r.mem.memBasis === 'consumed' ? '감축 하한 후보 ①' : '산정 기준 — 워킹셋 최대 × 여유'}</td>
                       </tr>); })()}
                     {(() => { const c = memCell(r.mem.consumed, rt.memConsumedMB); return (
                       <tr style={c.isRt ? { background: 'rgba(14,165,233,.08)' } : undefined}>
                         <td><b>Consumed</b></td><td className="muted">호스트가 이 VM 에 실제 배정한 메모리(캐시 포함)</td>
                         <td className="right">{c.avg}{c.isRt && RT_TAG}</td><td className="right">{c.p95}</td><td className="right">{c.max}</td>
-                        <td className="muted">{c.isRt ? '이력 롤업엔 표본 없음 · 실시간 현재값' : '감축 하한 후보 ② — active 만 보면 캐시를 빼앗음'}</td>
+                        <td className="muted">{c.isRt ? '이력 롤업엔 표본 없음 · 실시간 현재값' : r.mem.memBasis === 'consumed' ? '감축 하한 후보 ② — active 만 보면 캐시를 빼앗음' : '참고 — ESXi 가 회수하지 않은 과거 터치 페이지(캐시 포함). 필요량 근거 아님'}</td>
                       </tr>); })()}
                     {(() => { const c = memCell(r.mem.balloon, rt.memBalloonMB); const has = r.mem.balloon && (r.mem.balloon.avg != null || r.mem.balloon.max != null); return (
                       <tr style={r.mem.balloon.samplesAbove0 ? { color: '#fbbf24' } : c.isRt ? { background: 'rgba(14,165,233,.08)' } : undefined}>
@@ -289,11 +341,13 @@ export default function RightsizeReport({ vm, onClose }) {
                         <td className="right">{c.avg}{c.isRt && RT_TAG}</td><td className="right">{c.p95}</td><td className="right">{c.max}</td>
                         <td>{has ? (r.mem.swapped.samplesAbove0 ? `관측 시간의 ${r.mem.swapped.pctTime}% 에서 0 초과 → 감축 금지` : '관측 없음 → 정상') : c.isRt ? '이력 없음 · 실시간 현재값' : '관측 없음'}</td>
                       </tr>); })()}
-                    <tr><td><b>Usage %</b></td><td className="muted">vCenter 표시 사용률(active ÷ 할당)</td><td className="right">{n1(r.mem.usagePct.avg, '%')}</td><td className="right">{n1(r.mem.usagePct.p95, '%')}</td><td className="right">{n1(r.mem.usagePct.max, '%')}</td><td className="muted">참고</td></tr>
+                    <tr><td><b>Usage %</b></td><td className="muted">vCenter 표시 사용률(active ÷ 할당)</td><td className="right">{n1(r.mem.usagePct.avg, '%')}</td><td className="right">{n1(r.mem.usagePct.p95, '%')}</td><td className="right">{n1(r.mem.usagePct.max, '%')}</td><td className="muted">{String(r.mem.workingSetSource || '').startsWith('usagePct') ? '워킹셋 복원 출처 — active 이력이 없어 최대 × 할당으로 산정' : '참고'}</td></tr>
                   </tbody>
                 </STable>
               </div>
               {r.mem.basisMB != null && <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>산정 근거: {r.mem.basisNote} = <b style={{ color: 'var(--text)' }}>{gb(r.mem.basisMB)}</b> → {r.policy.memStepMB} MB 단위 올림 → 권장 <b style={{ color: 'var(--text)' }}>{gb(r.mem.recommendedMB)}</b></div>}
+              {r.mem.skipReason && <div className="muted" style={{ fontSize: 12.5, marginBottom: 4 }}>ℹ {r.mem.skipReason}</div>}
+              {r.mem.consumedNote && <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>ℹ {r.mem.consumedNote}</div>}
               {r.mem.blockers.map((b, i) => <div key={i} style={{ color: '#fbbf24', fontSize: 12.5, marginBottom: 4 }}>⚠ {b}</div>)}
               <div style={{ height: 240 }}>
                 <ResponsiveContainer width="100%" height="100%">
@@ -323,7 +377,64 @@ export default function RightsizeReport({ vm, onClose }) {
                 <Stat k="미커밋(thin 여유)" v={r.disk.uncommittedGB != null ? `${r.disk.uncommittedGB} GB` : '—'} sub={r.disk.thin ? 'thin 디스크' : 'thick'} />
                 <Stat k="VMware Tools" v={r.disk.toolsStatus || '—'} />
               </div>
-              <div className="muted" style={{ fontSize: 12, marginTop: 6, lineHeight: 1.6 }}>{r.disk.note}</div>
+              {/* v2.481: 게스트 디스크 사용량(guest.disk 수집·추이) — 있으면 붙이고, 없으면 예전처럼 한계를 정직하게 표시 */}
+              {gdd ? (
+                <div style={{ marginTop: 10 }}>
+                  <div className="flex between" style={{ alignItems: 'baseline', flexWrap: 'wrap', gap: 8 }}>
+                    <b style={{ fontSize: 13 }}>게스트 디스크 사용량 (VMware Tools guest.disk · 최근 {days}일)</b>
+                    <span className="muted" style={{ fontSize: 11 }}>단위 {gdUnit}{gdd.ts ? ` · 최신 수집 ${new Date(gdd.ts).toLocaleString('ko-KR')}` : ''}</span>
+                  </div>
+                  <div className="flex gap wrap" style={{ gap: 18, marginTop: 6 }}>
+                    <Stat k="게스트 할당" v={fmtSize(gdd.allocGB, gdUnit)} />
+                    <Stat k="게스트 사용" v={fmtSize(gdd.usedGB, gdUnit)} />
+                    <Stat k="회수 가능(여유)" v={<span style={{ color: '#4ade80' }}>{fmtSize(gdd.freeGB, gdUnit)}</span>} sub="게스트 관점 회수 상한" />
+                    <Stat k="사용률" v={gdd.ratioPct == null ? '—' : `${gdd.ratioPct}%`} sub="사용 / 할당" />
+                    <Stat k="파티션 수" v={(gdd.partitions || []).length} />
+                    <Stat k="전체 사용량 추이"
+                      v={<span style={{ color: trendLabel(gdVt?.trend).color }}>{trendLabel(gdVt?.trend).label}{gdVt?.growthGBPerDay != null ? ` (${gdVt.growthGBPerDay > 0 ? '+' : ''}${gdVt.growthGBPerDay} GB/일)` : ''}</span>}
+                      sub={gdVt?.spanDays ? `관측 ${gdVt.spanDays}일 · 점 ${gdRows.length}개` : '표본 부족'} />
+                  </div>
+                  <div style={{ marginTop: 8 }}>
+                    <TrendChart rows={gdRows} unitLabel={gdUnit} days={days} capGB={gdd.allocGB != null ? gdd.allocGB / gdDiv : null} height={200} />
+                  </div>
+                  <div className="table-wrap" style={{ marginTop: 8 }}>
+                    <STable className="gd-table rpt-wrap">
+                      <thead><tr>
+                        <th>파티션</th><th className="gd-num">할당</th><th className="gd-num">사용</th><th className="gd-num">여유</th>
+                        <th className="gd-num">사용률</th><th className="gd-num">증가율(GB/일)</th><th className="gd-num">관측기간</th><th>추이</th><th data-nosort>판정</th>
+                      </tr></thead>
+                      <tbody>
+                        {(gdd.partitions || []).map((p) => {
+                          const rp = p.capGB > 0 ? Math.round((p.usedGB / p.capGB) * 1000) / 10 : null;
+                          return (
+                            <tr key={p.path}>
+                              <td>{p.path}</td>
+                              <td data-sort={p.capGB} className="gd-num">{fmtSize(p.capGB, gdUnit)}</td>
+                              <td data-sort={p.usedGB} className="gd-num">{fmtSize(p.usedGB, gdUnit)}</td>
+                              <td data-sort={p.freeGB} className="gd-num" style={{ color: '#4ade80' }}>{fmtSize(p.freeGB, gdUnit)}</td>
+                              <td data-sort={rp == null ? -1 : rp} className="gd-num">{rp == null ? '—' : `${rp}%`}</td>
+                              <td data-sort={p.trend?.growthGBPerDay == null ? -9999 : p.trend.growthGBPerDay} className="gd-num">{p.trend?.growthGBPerDay == null ? '—' : p.trend.growthGBPerDay}</td>
+                              <td data-sort={p.trend?.spanDays || 0} className="gd-num">{p.trend?.spanDays ? `${p.trend.spanDays}일` : '—'}</td>
+                              <td><span style={{ color: trendLabel(p.trend?.trend).color }}>{trendLabel(p.trend?.trend).label}</span></td>
+                              <td data-nosort>{p.advice?.label || '—'}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </STable>
+                  </div>
+                  <div className="muted" style={{ fontSize: 11.5, marginTop: 6, lineHeight: 1.6 }}>
+                    여유(회수 가능)는 <b>게스트 관점의 회수 상한</b>입니다. 실제 회수는 디스크 축소(shrink)+UNMAP 이 필요하며 OS·정렬에 따라 전량을 못 줄일 수 있습니다.
+                    추이는 변경분만 저장하므로 점 간격이 불규칙하고 표본 2점 미만이면 증가율을 계산하지 않습니다(더 긴 기간 탭으로 확인).
+                  </div>
+                </div>
+              ) : (
+                <div className="muted" style={{ fontSize: 12, marginTop: 6, lineHeight: 1.6 }}>
+                  {r.disk.note}
+                  {gd.none && <> 이 VM 은 게스트 디스크 수집 데이터가 없습니다(수집 대상 아님·아직 미수집·Tools 미실행). 특수 기능 › 게스트 디스크 회수에서 수집 상태를 확인하세요.</>}
+                  {gd.error && <> 게스트 디스크 조회 실패: {gd.error}</>}
+                </div>
+              )}
             </div>
 
             {/* 방법론 + 참고 문서 */}

@@ -11,8 +11,16 @@
  * 가져와 넘긴다(vCenter 가 자체 보관하는 통계 롤업 — 우리가 5,850 VM 분을 따로 쌓지 않는다).
  *
  * 방법론(출처는 CITATIONS 참조):
- *  · 메모리: 워킹셋은 mem.active 로 추정하되, 감축 하한은 **consumed 의 p95** 와 **active 의 최대**
- *    중 큰 값 + 여유(headroom). active 만 보면 캐시로 잡힌 메모리를 빼앗아 성능이 떨어진다.
+ *  · 메모리(v2.481 변경): 감축 하한은 **워킹셋(mem.active) 의 관측 최대** + 여유(headroom).
+ *    active 이력이 없으면(기본 통계 레벨 1 은 주/월/년 롤업에 mem.active 를 안 남김) 레벨 1 에 항상
+ *    있는 **mem.usage(= active ÷ 할당, %) × 할당** 으로 복원하고, 실시간(최근 1시간) active 최대가
+ *    더 크면 그것을 쓴다(하한을 올리는 방향만). **consumed 는 하한으로 쓰지 않는다** — consumed 는
+ *    ESXi 가 회수하지 않은 '한 번이라도 만진' 페이지라 호스트 압박이 없으면 시간이 지나며 할당에
+ *    수렴한다(Linux 는 page cache 로 전 RAM 을 만짐). v2.445~2.480 은 max(consumed p95, active 최대)
+ *    를 하한으로 써서 active 5 GB·consumed 511 GB 인 512 GB VM 이 '변경 없음' 이 됐다(낭비 리소스
+ *    탭은 같은 VM 을 절감 99% 로 표시 — 사용자 신고). 캐시 의존 워크로드(DB 등)는 active 가
+ *    과소추정할 수 있으므로 여유 20% 와 50% 상한이 완충이고, 화면에 그 한계를 명시한다.
+ *    정책 RIGHTSIZE_MEM_BASIS=consumed 로 예전 보수적 산식을 유지할 수 있다.
  *  · 벌룬(mem.vmmemctl)·스왑(mem.swapped)이 관측 창 안에서 0 을 넘긴 적이 있으면 그 호스트가
  *    이미 메모리를 회수 중이라는 뜻 → **감축 보류**(VMware 가이드: 호스트 스왑이 정규적으로
  *    일어나는 과할당은 피하라).
@@ -65,6 +73,7 @@ export const DEFAULT_POLICY = {
   capReductionPct: 50,   // Aria Operations 과대 권고 상한(현재 할당의 50% 까지만 감축)
   readyWarnPct: 5,       // vCPU 당 %Ready 경고선(관행적 5%) — 넘으면 CPU 감축 보류
   memStepMB: 1024,       // 메모리 권고는 1GB 단위로 올림
+  memBasis: 'active',    // 'active'(워킹셋 피크, v2.481 기본) | 'consumed'(구 산식: max(consumed p95, active 최대))
 };
 
 const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
@@ -91,26 +100,34 @@ export function stats(series) {
   return { n: v.length, avg: r1(sum / v.length), p95: r1(percentile(v, 95)), max: r1(Math.max(...v)), min: r1(Math.min(...v)) };
 }
 
-/** 관측 창 요약 — 얼마나 오래·얼마나 촘촘히 봤는가(근거 게이트의 입력). */
+/**
+ * 관측 창 요약 — 얼마나 오래·얼마나 촘촘히 봤는가(근거 게이트의 입력).
+ *  - days/start/end: 사용자가 요청한 조회 창(화면의 '관측 기간' 주 값). v2.481 — 예전엔 첫~마지막 표본 사이
+ *    시간만 보여줘 7일 요청이 6.9일, 1년 요청이 363일로 표시됐다(사용자 신고: 검색 조건과 결과 불일치).
+ *  - coverageDays: 실제 데이터 범위. 각 롤업 표본은 intervalSec 구간의 평균이므로 표본 N개 = N개 구간이다 —
+ *    (마지막-첫) 만 세면 항상 1구간이 빠진다. 마지막 표본의 구간까지 포함해 센다. 최신 롤업이 아직 발행되지
+ *    않은 지연(일 롤업은 최대 ~2일)은 데이터가 정말 없는 것이므로 요청 창보다 짧게 그대로 보인다(추정 금지).
+ */
 export function windowInfo(series, intervalSec, days, now = Date.now()) {
   const ts = (series || []).map((p) => Date.parse(p?.t)).filter((t) => Number.isFinite(t));
   const firstTs = ts.length ? Math.min(...ts) : null;
   const lastTs = ts.length ? Math.max(...ts) : null;
-  const coverageDays = firstTs != null ? r1((lastTs - firstTs) / 86_400_000) : 0;
+  const coverageDays = firstTs != null ? r1((lastTs - firstTs + Math.max(0, intervalSec) * 1000) / 86_400_000) : 0;
   const samples = values(series).length;
   const expected = Math.max(1, Math.floor((days * 86_400) / Math.max(1, intervalSec)));
-  return { days, intervalSec, firstTs, lastTs, coverageDays, samples, expectedSamples: expected, coveragePct: r0(clamp((samples / expected) * 100, 0, 100)), now };
+  return { days, start: now - days * 86_400_000, end: now, intervalSec, firstTs, lastTs, coverageDays, samples, expectedSamples: expected, coveragePct: r0(clamp((samples / expected) * 100, 0, 100)), now };
 }
 
 /**
  * 주 판정. 입력 series 의 각 계열은 [{t:ISO, v:number|null}].
  * @returns 리포트 객체(화면이 그대로 표시). 값이 없는 것은 null — 추정하지 않는다.
  */
-export function analyzeRightsize({ vm = {}, hostMhzPerCore = null, intervalSec = 1800, days = 7, series = {}, missing = [], empty = [], noData = [], policy: pol = {}, now = Date.now() } = {}) {
+export function analyzeRightsize({ vm = {}, hostMhzPerCore = null, intervalSec = 1800, days = 7, series = {}, missing = [], empty = [], noData = [], realtime = null, policy: pol = {}, now = Date.now() } = {}) {
   // 호출자가 env 미설정 키를 undefined 로 넘겨도 기본값을 덮지 않는다 — v2.445 개발 중 실제로
   // { headroomPct: undefined } 가 스프레드로 기본값을 지워 산식이 NaN(권고 null)이 됐다.
   const policy = { ...DEFAULT_POLICY };
-  for (const [k, v] of Object.entries(pol || {})) if (v !== undefined && v !== null && Number.isFinite(Number(v))) policy[k] = Number(v);
+  for (const [k, v] of Object.entries(pol || {})) if (k !== 'memBasis' && v !== undefined && v !== null && Number.isFinite(Number(v))) policy[k] = Number(v);
+  policy.memBasis = String(pol?.memBasis || '').toLowerCase() === 'consumed' ? 'consumed' : 'active';
   const S = (k) => series[k] || [];
   const vcpu = Number(vm.cpuCount) || 0;
   const memAllocMB = Number(vm.memMB) || 0;
@@ -180,19 +197,42 @@ export function analyzeRightsize({ vm = {}, hostMhzPerCore = null, intervalSec =
   const balloon = { ...stats(S('memBalloonMB')), samplesAbove0: balloonV.filter((v) => v > 0).length, pctTime: balloonV.length ? r0((balloonV.filter((v) => v > 0).length / balloonV.length) * 100) : null };
   const swapped = { ...stats(S('memSwappedMB')), samplesAbove0: swapV.filter((v) => v > 0).length, pctTime: swapV.length ? r0((swapV.filter((v) => v > 0).length / swapV.length) * 100) : null };
   const memPct = stats(S('memUsagePct'));
+  // 워킹셋 피크(v2.481): active 이력 최대 → 없으면 mem.usage(%)×할당 으로 복원 → 실시간 active 최대가 더 크면 채택.
+  const rtActiveMax = Number(realtime?.memActiveMB?.max);
+  let workingSetMB = null; let workingSetSource = null;
+  if (active.max != null) { workingSetMB = active.max; workingSetSource = 'active'; }
+  else if (memPct.max != null && memAllocMB > 0) { workingSetMB = r0((memPct.max / 100) * memAllocMB); workingSetSource = 'usagePct'; }
+  if (Number.isFinite(rtActiveMax) && rtActiveMax > 0 && (workingSetMB == null || rtActiveMax > workingSetMB)) { workingSetMB = r0(rtActiveMax); workingSetSource = workingSetMB == null ? 'realtime' : (workingSetSource ? `${workingSetSource}+realtime` : 'realtime'); }
   const mem = {
     allocMB: memAllocMB, active, consumed, balloon, swapped, usagePct: memPct,
     recommendedMB: null, reductionMB: null, reductionPct: null, capped: false, blockers: [], ok: false,
-    basisMB: null,
+    basisMB: null, workingSetMB, workingSetSource, memBasis: policy.memBasis, skipReason: null,
+    // consumed 가 워킹셋보다 훨씬 크면 그 의미를 설명한다(예전엔 이것이 하한이라 감축이 불가능했다).
+    consumedNote: consumed.p95 != null && workingSetMB != null && consumed.p95 > workingSetMB * 2
+      ? `consumed p95 ${consumed.p95} MB 는 워킹셋 ${workingSetMB} MB 의 ${r1(consumed.p95 / workingSetMB)}배 — ESXi 가 회수하지 않은 과거 터치 페이지(게스트 page cache 포함)로, 호스트 압박이 없으면 할당에 수렴합니다. 필요량의 근거가 아니라 '게스트가 한 번이라도 만진 양' 입니다.`
+      : null,
   };
-  if (evidence.sufficient && memAllocMB > 0 && (consumed.p95 != null || active.max != null)) {
+  const canMem = policy.memBasis === 'consumed' ? (consumed.p95 != null || active.max != null) : workingSetMB != null;
+  if (evidence.sufficient && memAllocMB > 0 && policy.memBasis !== 'consumed' && workingSetMB == null) {
+    // 압박 신호(blockers → '보류')가 아니라 '산정 불가' 다 — CPU 판정은 그대로 진행하고 메모리만 비운다.
+    mem.skipReason = '워킹셋(mem.active) 이력·mem.usage·실시간값이 모두 없어 메모리 필요량을 산정하지 않습니다(추정 금지). vCenter 통계 레벨을 확인하세요.';
+  }
+  if (evidence.sufficient && memAllocMB > 0 && canMem) {
     if (balloon.samplesAbove0 > 0) mem.blockers.push(`벌룬 관측 — 최대 ${balloon.max} MB, 관측 시간의 ${balloon.pctTime}% 에서 0 초과. ESXi 가 이 VM 에서 메모리를 회수한 적이 있다는 뜻이라 호스트 압박이 있습니다. 감축 전에 호스트 메모리 여유부터 확인하세요.`);
     if (swapped.samplesAbove0 > 0) mem.blockers.push(`호스트 스왑 관측 — 최대 ${swapped.max} MB, 관측 시간의 ${swapped.pctTime}% 에서 0 초과. VMware 가이드가 피하라고 하는 상태입니다. 이 VM 은 감축 대상이 아니라 호스트 과할당 해소 대상입니다.`);
-    // 하한 = max(consumed p95, active 최대) × (1+여유) — active 만 보면 캐시를 빼앗는다.
-    const floorMB = Math.max(consumed.p95 ?? 0, active.max ?? 0);
+    let floorMB;
+    if (policy.memBasis === 'consumed') {
+      // 구 산식(정책으로 선택 시): max(consumed p95, active 최대) × (1+여유)
+      floorMB = Math.max(consumed.p95 ?? 0, active.max ?? 0);
+      mem.basisNote = `max(consumed p95 ${consumed.p95 ?? '—'} MB, active 최대 ${active.max ?? '—'} MB) × (1 + ${policy.headroomPct}%)`;
+    } else {
+      floorMB = workingSetMB;
+      const src = { active: 'active 이력 최대', usagePct: 'mem.usage 최대 × 할당(active 이력 없음 → 레벨 1 사용률로 복원)', realtime: '실시간(최근 1시간) active 최대' };
+      const srcLabel = String(workingSetSource || '').split('+').map((s) => src[s] || s).join(' → 실시간이 더 커서 ');
+      mem.basisNote = `워킹셋 최대 ${workingSetMB} MB(${srcLabel}) × (1 + ${policy.headroomPct}%)`;
+    }
     const basis = floorMB * (1 + policy.headroomPct / 100);
     mem.basisMB = r0(basis);
-    mem.basisNote = `max(consumed p95 ${consumed.p95 ?? '—'} MB, active 최대 ${active.max ?? '—'} MB) × (1 + ${policy.headroomPct}%)`;
     let rec = Math.ceil(basis / policy.memStepMB) * policy.memStepMB;
     const floorAlloc = Math.ceil((memAllocMB * (1 - policy.capReductionPct / 100)) / policy.memStepMB) * policy.memStepMB;
     if (rec < floorAlloc) { rec = floorAlloc; mem.capped = true; }
@@ -226,7 +266,9 @@ export function analyzeRightsize({ vm = {}, hostMhzPerCore = null, intervalSec =
   const methodology = [
     `관측 창: 최근 ${days}일, vCenter 롤업 간격 ${intervalSec}초(${intervalSec === 300 ? '1일 통계' : intervalSec === 1800 ? '1주 통계' : intervalSec === 7200 ? '1달 통계' : '1년 통계'}). 각 점은 그 간격의 평균이므로 순간 피크는 이보다 높을 수 있습니다.`,
     `CPU 권고 vCPU = ⌈(사용 MHz p95 × (1 + ${policy.headroomPct}%)) ÷ 코어당 MHz⌉. 최대값이 p95 의 1.5배를 넘는 스파이크형이면 최대값을 씁니다. CPU Ready p95 가 vCPU 당 ${policy.readyWarnPct}% 를 넘으면 경합으로 보고 보류합니다.`,
-    `메모리 권고 = ⌈max(consumed p95, active 최대) × (1 + ${policy.headroomPct}%)⌉ (${policy.memStepMB} MB 단위). 벌룬·스왑이 관측 창에서 0 을 넘긴 적이 있으면 보류합니다.`,
+    policy.memBasis === 'consumed'
+      ? `메모리 권고 = ⌈max(consumed p95, active 최대) × (1 + ${policy.headroomPct}%)⌉ (${policy.memStepMB} MB 단위, 정책 RIGHTSIZE_MEM_BASIS=consumed). 벌룬·스왑이 관측 창에서 0 을 넘긴 적이 있으면 보류합니다.`
+      : `메모리 권고 = ⌈워킹셋(mem.active) 관측 최대 × (1 + ${policy.headroomPct}%)⌉ (${policy.memStepMB} MB 단위). active 이력이 없으면 mem.usage(= active ÷ 할당) × 할당으로 복원하고 실시간 active 최대가 더 크면 그 값을 씁니다. consumed 는 ESXi 가 회수하지 않은 과거 터치 페이지(캐시 포함)라 필요량 근거로 쓰지 않습니다. active 는 표본 추정치라 캐시 의존 워크로드(DB 등)는 과소추정할 수 있으니 여유 ${policy.headroomPct}%·상한 ${policy.capReductionPct}% 를 완충으로 두고 적용 후 게스트 메모리 압박(swap·OOM)을 재확인하세요. 벌룬·스왑이 관측 창에서 0 을 넘긴 적이 있으면 보류합니다.`,
     `감축 폭은 현재 할당의 ${policy.capReductionPct}% 를 넘지 않습니다(Aria Operations 과대 권고 상한). 관측 ${policy.minDays}일·커버리지 ${policy.minCoveragePct}% 미만이면 권고하지 않습니다.`,
   ];
 

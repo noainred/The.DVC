@@ -489,6 +489,7 @@ const rightsizePolicy = () => ({
   minCoveragePct: Number(process.env.RIGHTSIZE_MIN_COVERAGE_PCT) || undefined,
   capReductionPct: Number(process.env.RIGHTSIZE_CAP_REDUCTION_PCT) || undefined,
   readyWarnPct: Number(process.env.RIGHTSIZE_READY_WARN_PCT) || undefined,
+  memBasis: process.env.RIGHTSIZE_MEM_BASIS || undefined, // 'active'(기본, v2.481) | 'consumed'(구 산식)
 });
 
 api.get('/tools/rightsize', requirePerm('tools'), async (req, res) => {
@@ -535,7 +536,8 @@ api.get('/tools/rightsize', requirePerm('tools'), async (req, res) => {
     vm, hostMhzPerCore, intervalSec: fetched.intervalSec, days, series: fetched.series,
     // 계열이 빈 이유 3종(카탈로그 없음 / 표본 없음 / 전부 결측)을 그대로 넘겨 화면이 원인을 말하게 한다(v2.449).
     missing: fetched.missing, empty: fetched.empty, noData: fetched.noData,
-    policy: rightsizePolicy(),
+    policy: rightsizePolicy(), now: end, // v2.481: window.start/end 가 실제 vCenter 조회 창과 같게
+    realtime: fetched.realtime || null,   // v2.481: 이력에 active 가 없을 때 실시간 active 최대를 워킹셋 하한에 반영
   });
   // realtime: 이력 롤업에 안 잡힌 level-2 mem 카운터의 실시간(최근 1시간) 현재값(참고). 감축 하한엔 미반영.
   const out = { ...report, series: fetched.series, realtime: fetched.realtime || null, synthesized: !!fetched.synthesized };

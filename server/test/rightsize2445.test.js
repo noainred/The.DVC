@@ -53,7 +53,8 @@ test('근거 게이트 — 7일 요청에서 롤업 지연으로 관측 6.9일�
   const gen = (v) => Array.from({ length: n }, (_, i) => ({ t: new Date(NOW - lagMs - (n - 1 - i) * iv * 1000).toISOString(), v }));
   const series = { cpuUsageMhz: gen(500), cpuReadyMs: gen(100), memActiveMB: gen(2600), memConsumedMB: gen(6000), memBalloonMB: gen(0), memSwappedMB: gen(0) };
   const w = windowInfo(series.cpuUsageMhz, iv, 7, NOW);
-  assert.ok(w.coverageDays < 7 && w.coverageDays >= 6.8, `관측 span 은 6.9 근처여야(실제=${w.coverageDays})`);
+  assert.ok(w.coverageDays <= 7 && w.coverageDays >= 6.8, `데이터 범위는 7일 근처여야(실제=${w.coverageDays})`);
+  assert.equal(w.days, 7); assert.equal(w.end, NOW); assert.equal(w.start, NOW - 7 * 86_400_000); // v2.481: 요청 창은 그대로 7일
   const r = analyzeRightsize({ vm: VM, hostMhzPerCore: MHZ, intervalSec: iv, days: 7, series, now: NOW });
   assert.equal(r.evidence.sufficient, true, '롤업 경계 손실(6.9일)만으로 근거 불충분이 되면 안 된다');
   assert.notEqual(r.verdict.state, 'insufficient');
@@ -95,24 +96,59 @@ test('감축 가능 — 사용자 사례(256GB 중 2.6GB) : 산식과 50% 상한
   assert.equal(r.cpu.capped, true);
   assert.equal(r.cpu.reductionVcpu, 4);
   assert.equal(r.cpu.reductionPct, 50);
-  // 메모리: max(consumed p95 6000, active 최대 2600)=6000 ×1.2 = 7200 → 1GB 올림 8192 MB… 상한 128 GB 가 더 크다 → 128 GB, capped
+  // 메모리(v2.481): 워킹셋(active 최대 2600) ×1.2 = 3120 → 1GB 올림 4096 MB… 상한 128 GB 가 더 크다 → 128 GB, capped
   assert.equal(r.mem.recommendedMB, 128 * 1024);
   assert.equal(r.mem.capped, true);
   assert.equal(r.mem.reductionPct, 50);
   assert.match(r.verdict.summary, /vCPU 8 → 4/);
   assert.match(r.verdict.summary, /256 GB → 128 GB/);
   // 근거 문구가 산식을 그대로 보여준다
-  assert.match(r.mem.basisNote, /consumed p95 6000 MB/);
-  assert.match(r.mem.basisNote, /active 최대 2600 MB/);
+  assert.match(r.mem.basisNote, /워킹셋 최대 2600 MB\(active 이력 최대\)/);
+  assert.doesNotMatch(r.mem.basisNote, /consumed/); // v2.481: consumed 는 하한이 아니다
+  assert.match(r.mem.consumedNote, /consumed p95 6000 MB 는 워킹셋 2600 MB/);
 });
 
-test('상한을 끄면(정책) 실제 산식대로 권고한다 — 메모리 8 GB, vCPU 1', () => {
+test('상한을 끄면(정책) 실제 산식대로 권고한다 — 메모리 4 GB(워킹셋 기준), vCPU 1', () => {
   const series = { cpuUsageMhz: flat(7, 500), memActiveMB: flat(7, 2600), memConsumedMB: flat(7, 6000), memBalloonMB: flat(7, 0), memSwappedMB: flat(7, 0) };
   const r = analyzeRightsize({ vm: VM, hostMhzPerCore: MHZ, intervalSec: 1800, days: 7, series, policy: { capReductionPct: 100 }, now: NOW });
   assert.equal(r.cpu.recommendedVcpu, 1);   // ⌈500×1.2/2400⌉ = 1
-  assert.equal(r.mem.recommendedMB, 8 * 1024);   // 7200 → 8192
+  assert.equal(r.mem.recommendedMB, 4 * 1024);   // 2600×1.2 = 3120 → 4096
   assert.equal(r.cpu.capped, false);
   assert.equal(r.mem.capped, false);
+  // 구 산식은 정책으로 선택 가능(RIGHTSIZE_MEM_BASIS=consumed): max(6000, 2600)×1.2 = 7200 → 8192
+  const old = analyzeRightsize({ vm: VM, hostMhzPerCore: MHZ, intervalSec: 1800, days: 7, series, policy: { capReductionPct: 100, memBasis: 'consumed' }, now: NOW });
+  assert.equal(old.mem.recommendedMB, 8 * 1024);
+  assert.match(old.mem.basisNote, /consumed p95 6000 MB/);
+});
+
+test('v2.481 사용자 사례 — 512 GB 할당·active 5 GB·consumed 511 GB: consumed 는 하한이 아니므로 감축 가능(50% 상한)', () => {
+  // 낭비 리소스 탭은 이 VM 을 '절감 99%' 로 보여주는데 리포트는 consumed 하한 때문에 '권장 512 GB(변경 없음)' 이었다.
+  // 실제 vCenter 레벨 1: 주간 롤업에 mem.active 표본 없음(empty) · mem.usage(%) 는 있음 · 실시간 active 5.1 GB.
+  const vm = { ...VM, cpuCount: 64, memMB: 512 * 1024 };
+  const series = { cpuUsageMhz: flat(7, 500), cpuReadyMs: flat(7, 100), memActiveMB: [], memConsumedMB: flat(7, 523300), memBalloonMB: flat(7, 0), memSwappedMB: [], memUsagePct: mk(7, 1800, (i) => (i === 10 ? 1.2 : 1)) };
+  const r = analyzeRightsize({ vm, hostMhzPerCore: MHZ, intervalSec: 1800, days: 7, series, realtime: { memActiveMB: { latest: 5222, max: 5222, avg: 5200, samples: 180 } }, empty: ['memActiveMB(mem.active.average)', 'memSwappedMB(mem.swapped.average)'], now: NOW });
+  assert.equal(r.evidence.sufficient, true);
+  // 워킹셋: usage 최대 1.2% × 524288 = 6291 MB > 실시간 5222 → usagePct 출처
+  assert.equal(r.mem.workingSetMB, 6291);
+  assert.equal(r.mem.workingSetSource, 'usagePct');
+  assert.equal(r.mem.capped, true);
+  assert.equal(r.mem.recommendedMB, 256 * 1024);   // 6291×1.2 = 7549 → 8192 이지만 50% 상한 → 256 GB
+  assert.equal(r.mem.reductionPct, 50);
+  assert.equal(r.mem.ok, true);
+  assert.equal(r.verdict.state, 'reduce');
+  assert.match(r.verdict.summary, /512 GB → 256 GB/);
+  assert.match(r.mem.basisNote, /mem\.usage 최대 × 할당/);
+  assert.match(r.mem.consumedNote, /할당에 수렴/);
+  // 실시간 active 가 복원값보다 크면 그쪽을 쓴다(하한을 올리는 방향)
+  const r2 = analyzeRightsize({ vm, hostMhzPerCore: MHZ, intervalSec: 1800, days: 7, series, realtime: { memActiveMB: { max: 9000 } }, now: NOW });
+  assert.equal(r2.mem.workingSetMB, 9000);
+  assert.equal(r2.mem.workingSetSource, 'usagePct+realtime');
+  // 워킹셋 출처가 전혀 없으면 추정하지 않는다
+  const r3 = analyzeRightsize({ vm, hostMhzPerCore: MHZ, intervalSec: 1800, days: 7, series: { ...series, memUsagePct: [] }, now: NOW });
+  assert.equal(r3.mem.recommendedMB, null);
+  assert.match(r3.mem.skipReason, /워킹셋.*모두 없어/);
+  assert.equal(r3.mem.blockers.length, 0);              // 산정 불가는 압박 신호(보류)가 아니다
+  assert.notEqual(r3.verdict.state, 'hold');
 });
 
 test('보류 — 벌룬이 한 번이라도 0 을 넘으면 메모리 감축을 권고하지 않는다', () => {

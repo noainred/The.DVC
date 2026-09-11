@@ -92,11 +92,16 @@ test('analyzeRightsize: missing/empty/noData 를 서로 다른 문구로 구분�
 });
 
 test('analyzeRightsize: 계열이 비어도 근거가 충분하면 판정은 계속된다(진단은 안내일 뿐)', () => {
-  // active 가 없어도 consumed p95 로 권장치가 나와야 한다 — 진단 문구가 판정을 막으면 안 된다.
+  // 진단 문구가 판정을 막으면 안 된다 — CPU 는 그대로 '감축 가능'.
+  // v2.481: 메모리는 워킹셋(active/usage/실시간) 기준이라 consumed 만 있으면 산정하지 않고(skipReason) 보류로도 바꾸지 않는다.
   const r = analyzeRightsize({ ...baseArgs(), missing: ['memActiveMB(mem.active.average)'] });
   assert.equal(r.evidence.sufficient, true);
   assert.equal(r.verdict.state, 'reduce');
-  assert.ok(r.mem.recommendedMB > 0);
+  assert.equal(r.mem.recommendedMB, null);
+  assert.match(r.mem.skipReason, /워킹셋/);
+  // 구 산식(정책 memBasis=consumed)에서는 consumed p95 로 권장치가 나온다.
+  const old = analyzeRightsize({ ...baseArgs(), missing: ['memActiveMB(mem.active.average)'], policy: { memBasis: 'consumed' } });
+  assert.ok(old.mem.recommendedMB > 0);
 });
 
 test('analyzeRightsize: 진단 배열을 안 넘겨도(구버전 호출) 예외 없이 동작한다', () => {

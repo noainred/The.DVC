@@ -16,23 +16,23 @@ import EscClose from '../../components/EscClose.jsx';
 import { STable } from '../../components/STable.jsx';
 import { safeFileName, saveElementAsJpg, saveDocAsPdf } from './reportExport.js';
 
-const DAYS = [[7, '7일'], [30, '30일'], [90, '90일'], [180, '6개월'], [365, '1년'], [0, '전체']];
+const DAYS = [[7, '7일'], [30, '30일'], [90, '90일'], [180, '180일'], [365, '365일'], [0, '전체']];
 const UNIT_OPTS = [['auto', '자동'], ['GB', 'GB'], ['TB', 'TB'], ['PB', 'PB']];
-const UNIT_DIV = { GB: 1, TB: 1024, PB: 1024 * 1024 };
+export const UNIT_DIV = { GB: 1, TB: 1024, PB: 1024 * 1024 };
 const TREND = {
   growing: { label: '증가', color: '#f87171' },
   flat: { label: '평탄', color: '#93c5fd' },
   shrinking: { label: '감소', color: '#4ade80' },
 };
-const trendLabel = (t) => (t && TREND[t] ? TREND[t] : { label: '근거 부족', color: '#9ca3af' });
+export const trendLabel = (t) => (t && TREND[t] ? TREND[t] : { label: '근거 부족', color: '#9ca3af' });
 
 /** 표시 단위 결정(auto 면 값 크기로) + 라벨. */
-function resolveUnit(unit, maxGB) {
+export function resolveUnit(unit, maxGB) {
   if (unit && unit !== 'auto') return unit;
   const abs = Math.abs(maxGB || 0);
   return abs >= 1024 * 1024 ? 'PB' : abs >= 1024 ? 'TB' : 'GB';
 }
-function fmtSize(gb, unit = 'auto') {
+export function fmtSize(gb, unit = 'auto') {
   if (gb == null || Number.isNaN(gb)) return '—';
   const u = resolveUnit(unit, gb);
   const v = gb / UNIT_DIV[u];
@@ -96,7 +96,7 @@ function buildGuestDoc(d, vm, days, u, div) {
 }
 
 /** 한 시계열([{ts,usedGB,capGB?}])을 recharts 행으로. 값은 표시 단위로 나눈다. */
-function toRows(points, div) {
+export function toRows(points, div) {
   return (points || [])
     .filter((p) => p && Number.isFinite(Number(p.ts)))
     .map((p) => ({ t: Number(p.ts), used: p.usedGB == null ? null : p.usedGB / div, cap: p.capGB == null ? null : p.capGB / div }))
@@ -104,9 +104,9 @@ function toRows(points, div) {
 }
 
 /** 사용량 추이 라인차트(용량 기준선 포함). rows: [{t, used, cap?}] */
-function TrendChart({ rows, unitLabel, days, capGB, height = 220 }) {
+export function TrendChart({ rows, unitLabel, days, capGB, height = 220 }) {
   if (!rows || rows.length < 2) {
-    return <div className="gd-spark-empty">추이 표본 부족 — 이 구간에 관측점이 2개 미만입니다(변경분만 저장). 더 긴 구간(90일/1년/전체)을 눌러 보세요.</div>;
+    return <div className="gd-spark-empty">추이 표본 부족 — 이 구간에 관측점이 2개 미만입니다(변경분만 저장). 더 긴 구간(90일/365일/전체)을 눌러 보세요.</div>;
   }
   return (
     <ResponsiveContainer width="100%" height={height}>
