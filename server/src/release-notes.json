@@ -1,6 +1,17 @@
 {
   "notes": [
     {
+      "version": "2.486.0",
+      "date": "2026-09-12",
+      "title": "Overview — CPU/메모리 카드에 iDRAC 인식 전체 물리 서버의 코어 수·물리 메모리 량 표시",
+      "notes": [
+        "CPU 사용률 카드 두 번째 줄: '물리 서버 코어 N · iDRAC M대' — 중앙 직접 등록 + 위임 법인 원격 서버(OME 엔트리 제외, 중복 제거)의 Redfish ProcessorSummary.CoreCount 합계(없으면 소켓별 cores 합). 메모리 사용률 카드: '물리 메모리 N GB · iDRAC M대'(MemorySummary.TotalSystemMemoryGiB 합, GB 로 환산 병기).",
+        "사용률(%)과 첫 줄(GHz·GB)은 그대로 vCenter(ESXi 호스트) 실측입니다 — 베어메탈은 사용률 자료가 없어 물리 합계로 %를 다시 계산하지 않고 출처를 나란히 표기합니다(첫 줄에 'ESXi' 표기 추가).",
+        "인벤토리가 없는 서버는 합계에 넣지 않고 '(코어 정보 K대)' 처럼 개수만 표시합니다(추정 금지). iDRAC 등록이 0대면 두 번째 줄은 나오지 않습니다.",
+        "API: /overview 응답에 physical{servers,withInventory,withCores,withMemory,cores,threads,sockets,memGiB,memGB} 추가. 테스트 physicalCapacity2486."
+      ]
+    },
+    {
       "version": "2.485.1",
       "date": "2026-09-12",
       "title": "문서 — 호스트 접근 제어(v2.485) 반영: 보안 불변조건·방화벽 매트릭스·관리자 가이드·설치 문서",

@@ -10,6 +10,24 @@ import { loadRegistry as loadNsxRegistry } from '../../nsx/registry.js';
 import { fetchGroupMembers } from '../../nsx/client.js';
 import { memoJson, hash, scopeKey } from './shared.js';
 import { visibleNsxManagers, managerInScope, scopedNsxRollup } from '../../nsx/scope.js';
+import { loadRegistry as loadIdracRegistry } from '../../idrac/registry.js';
+import { remoteServersResolved, invForServer } from '../admin/shared.js';
+import { aggregatePhysical } from '../../idrac/physicalCapacity.js'; // v2.486: iDRAC 인식 전체 물리 서버 코어·메모리
+
+/**
+ * v2.486: iDRAC 가 인식한 모든 물리 서버(중앙 직접 등록 + 위임 법인 원격, OME 엔트리 제외, id 중복은 중앙 우선)의
+ * 코어·메모리 합계. Overview CPU/메모리 카드가 vCenter(ESXi) 수치와 나란히 보인다. 스냅샷마다 1회(memoJson).
+ */
+function physicalCapacity() {
+  try {
+    const local = loadIdracRegistry().filter((s) => s.type !== 'ome');
+    const seen = new Set(local.map((s) => String(s.id)));
+    const servers = local.concat(remoteServersResolved().filter((s) => !seen.has(String(s.id))));
+    return aggregatePhysical(servers, invForServer);
+  } catch (e) {
+    return { servers: 0, withInventory: 0, withCores: 0, withMemory: 0, cores: 0, threads: 0, sockets: 0, memGiB: 0, memGB: 0, error: e?.message || String(e) };
+  }
+}
 
 export function registerOverviewNsx(api) {
 
@@ -83,7 +101,7 @@ api.get('/overview', (req, res) => memoJson(req, res, 'overview', (snap) => {
   }
   for (const v of snap.vms) if (v.gpu && (!allowed || allowed.has(v.vcenterId))) gpuVms++;
   const gpuUtilPct = utilN ? Math.round(utilSum / utilN) : 0;
-  return { generatedAt: snap.generatedAt, source: snap.source, ...rollups, gpuCards, gpuVms, gpuUtilPct, gpuUtilHosts: utilN };
+  return { generatedAt: snap.generatedAt, source: snap.source, ...rollups, gpuCards, gpuVms, gpuUtilPct, gpuUtilHosts: utilN, physical: physicalCapacity() };
 }, { extraKey: scopeKey(req.user, store.get()) }));
 
 // NSX overview — aggregated snapshot from the NSX Manager poller (separate from

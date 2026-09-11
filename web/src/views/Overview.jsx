@@ -104,8 +104,16 @@ export default function Overview({ onSelectSite, onGotoTab }) {
           accent="var(--accent-2)" onClick={() => onGotoTab?.('vcenters')} />
         <Kpi label="ESXi 호스트" value={fmt(g.hosts)} meta={`정상 ${g.hostsConnected} · 점검 ${g.hostsMaintenance} · 끊김 ${g.hostsDisconnected}`} onClick={() => onGotoTab?.('hosts')} />
         <Kpi label="가상머신" value={fmt(g.vms)} meta={`구동중 ${fmt(g.vmsPoweredOn)} · 정지 ${fmt(g.vmsPoweredOff)}`} accent="var(--green)" onClick={() => onGotoTab?.('vms')} />
-        <Kpi label="CPU 사용률" value={`${g.cpuUsagePct}%`} pct={g.cpuUsagePct} meta={`${g.cpuUsedGhz} / ${g.cpuTotalGhz} GHz · ${fmt(g.cpuCores)} cores`} />
-        <Kpi label="메모리 사용률" value={`${g.memUsagePct}%`} pct={g.memUsagePct} meta={`${fmt(g.memUsedGB)} / ${fmt(g.memTotalGB)} GB`} />
+        {/* v2.486: 사용률(%)은 vCenter(ESXi 호스트) 실측이고, 두 번째 줄은 iDRAC 가 인식한 모든 물리 서버(베어메탈 포함)의
+            코어·메모리 합계 — 출처가 달라 나란히 표기한다(물리 합계로 %를 다시 계산하지 않음: 베어메탈은 사용률 자료가 없다). */}
+        <Kpi label="CPU 사용률" value={`${g.cpuUsagePct}%`} pct={g.cpuUsagePct} meta={<>
+          {g.cpuUsedGhz} / {g.cpuTotalGhz} GHz · ESXi {fmt(g.cpuCores)} cores
+          {ov.physical?.servers > 0 && <><br />물리 서버 코어 <b>{fmt(ov.physical.cores)}</b> · iDRAC {fmt(ov.physical.servers)}대{ov.physical.withCores < ov.physical.servers ? ` (코어 정보 ${fmt(ov.physical.withCores)}대)` : ''}</>}
+        </>} />
+        <Kpi label="메모리 사용률" value={`${g.memUsagePct}%`} pct={g.memUsagePct} meta={<>
+          {fmt(g.memUsedGB)} / {fmt(g.memTotalGB)} GB (ESXi)
+          {ov.physical?.servers > 0 && <><br />물리 메모리 <b>{fmt(ov.physical.memGB)}</b> GB · iDRAC {fmt(ov.physical.servers)}대{ov.physical.withMemory < ov.physical.servers ? ` (메모리 정보 ${fmt(ov.physical.withMemory)}대)` : ''}</>}
+        </>} />
         <Kpi label="스토리지 사용률" value={`${g.storageUsagePct}%`} pct={g.storageUsagePct} meta={`${g.storageUsedTB} / ${g.storageTotalTB} TB · ${g.datastores} DS`} onClick={() => onGotoTab?.('datastores')} />
         {g.powerReporting > 0 && (
           <Kpi label="총 소비전력" value={`${fmt(g.powerKw)} kW`} accent="var(--amber)"
