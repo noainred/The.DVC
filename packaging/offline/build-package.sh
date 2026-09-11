@@ -71,10 +71,10 @@ elif [[ "$OFFLINE" == "1" ]]; then
 else
   echo "==> Downloading Node.js runtime"
   curl -fsSL "$NODE_URL" -o "$BUILD_DIR/${NODE_PKG}.tar.xz"
-  if curl -fsSL "$NODE_SHA_URL" -o "$BUILD_DIR/SHASUMS256.txt" 2>/dev/null; then
-    ( cd "$BUILD_DIR" && grep " ${NODE_PKG}.tar.xz\$" SHASUMS256.txt | sha256sum -c - )
-    echo "    checksum OK"
-  fi
+  # v2.480(3차 감사): SHASUMS 다운로드 실패 시 검증을 조용히 건너뛰던 것(set -e 는 if 조건에 미적용) → 실패는 빌드 중단
+  curl -fsSL "$NODE_SHA_URL" -o "$BUILD_DIR/SHASUMS256.txt" || { echo "ERROR: SHASUMS256.txt 다운로드 실패 — Node 런타임 무결성을 검증할 수 없어 빌드를 중단합니다" >&2; exit 1; }
+  ( cd "$BUILD_DIR" && grep " ${NODE_PKG}.tar.xz\$" SHASUMS256.txt | sha256sum -c - )
+  echo "    checksum OK"
   tar -xJf "$BUILD_DIR/${NODE_PKG}.tar.xz" -C "$STAGE/runtime"
 fi
 # Normalize the extracted runtime directory to runtime/node

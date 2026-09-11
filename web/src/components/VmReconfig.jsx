@@ -60,7 +60,10 @@ function VmReconfigModal({ vm, onClose }) {
     const plan = {};
     if (hw && numOr(cpu, hw.cpu) !== hw.cpu) plan.numCPUs = numOr(cpu, hw.cpu);
     if (hw && numOr(cps, hw.coresPerSocket) !== (hw.coresPerSocket || 0) && numOr(cps, 0) >= 1) plan.coresPerSocket = numOr(cps, 0);
-    if (hw && numOr(ramGB, 0) * 1024 !== hw.memMB) plan.memoryMB = numOr(ramGB, 0) * 1024;
+    // v2.480(3차 감사 WB-1): memMB 가 1024 배수가 아닌 VM(1.5GB·2.5GB…)은 초기값(반올림 GB)과 원본 MB 가 달라 아무것도
+    // 안 바꿔도 memoryMB 가 전송됐다(반올림이 내려가면 감소 요청 → 서버 차단). 표시 GB 기준으로 '바뀌었을 때만' 전송.
+    const ramGB0 = Math.round((hw?.memMB || 0) / 1024);
+    if (hw && numOr(ramGB, ramGB0) !== ramGB0) plan.memoryMB = numOr(ramGB, ramGB0) * 1024;
     const diskGrows = Object.entries(grows)
       .map(([key, gb]) => ({ key: Number(key), newGB: numOr(gb, 0) }))
       .filter((g) => { const d = hw.disks.find((x) => x.key === g.key); return d && g.newGB > d.capacityGB; });
@@ -80,7 +83,7 @@ function VmReconfigModal({ vm, onClose }) {
     const s = [];
     if (hw && numOr(cpu, hw.cpu) !== hw.cpu) s.push(`vCPU ${hw.cpu}→${numOr(cpu, hw.cpu)}`);
     if (hw && numOr(cps, hw.coresPerSocket) !== (hw.coresPerSocket || 0) && numOr(cps, 0) >= 1) s.push(`코어/소켓 →${numOr(cps, 0)}`);
-    if (hw && numOr(ramGB, 0) * 1024 !== hw.memMB) s.push(`RAM ${Math.round(hw.memMB / 1024)}→${numOr(ramGB, 0)}GB`);
+    if (hw && numOr(ramGB, Math.round(hw.memMB / 1024)) !== Math.round(hw.memMB / 1024)) s.push(`RAM ${Math.round(hw.memMB / 1024)}→${numOr(ramGB, 0)}GB`);
     Object.entries(grows).forEach(([key, gb]) => { const d = hw?.disks.find((x) => x.key === Number(key)); if (d && numOr(gb, 0) > d.capacityGB) s.push(`${d.label} ${d.capacityGB}→${numOr(gb, 0)}GB`); });
     adds.forEach((a) => { if (numOr(a.gb, 0) > 0) s.push(`디스크 추가 +${numOr(a.gb, 0)}GB${a.ds ? ` (${a.ds})` : ''}`); });
     nicAdds.forEach((id) => { const n = networks.find((x) => x.id === id); if (n) s.push(`NIC 추가(${n.name})`); });

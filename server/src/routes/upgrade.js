@@ -6,6 +6,7 @@ import path from 'node:path';
 import { currentVersion, config } from '../config.js';
 import { requireRole } from '../auth/auth.js';
 import { upgradeManager } from '../upgrade/manager.js';
+import { bundleShaIssue } from '../upgrade/upgrade.js'; // v2.480(3차 감사): 엣지 수신 번들 sha256 검증
 import { upgradeFromBundleBytes, restartProcess } from '../upgrade/upgrade.js';
 import { ssrfBlockReason } from '../collector/registry.js';
 
@@ -190,6 +191,8 @@ upgradeRouter.post('/bundle', adminOnly, express.raw({ type: ['application/gzip'
     if (!upgradeManager.enabled) return res.status(409).json({ ok: false, reason: 'auto-upgrade disabled' });
     if (!s.installDir) return res.status(409).json({ ok: false, reason: 'installDir not set' });
     if (!req.body || !req.body.length) return res.status(400).json({ ok: false, reason: 'empty bundle' });
+    const shaIssue = bundleShaIssue(req.get('x-bundle-sha256'), req.body);
+    if (shaIssue) return res.status(400).json({ ok: false, reason: shaIssue });
 
     const result = upgradeFromBundleBytes(req.body, s.installDir, currentVersion(), s.packageName);
     upgradeManager.lastResult = { at: Date.now(), source: 'edge-push', ...result };

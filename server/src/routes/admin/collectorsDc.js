@@ -361,7 +361,12 @@ adminRouter.post('/collectors/upgrade', adminOnly, async (req, res) => {
 adminRouter.post('/collectors/test', adminOnly, async (req, res) => {
   const body = req.body || {};
   let { url, token } = body;
-  if (body.id) { const saved = loadCollectors().find((c) => c.id === body.id); if (saved) { url = url || saved.url; token = token || saved.token; } }
+  if (body.id) {
+    const saved = loadCollectors().find((c) => c.id === body.id);
+    // v2.480(3차 감사 S2): 저장 토큰을 물려받으면 URL 도 저장값으로 고정 — 임의 URL 에 저장 토큰을 헤더로 보내던 경로 차단
+    // (토큰 열람은 소유자 전용인데 전송은 admin 이었다). 새 URL 을 시험하려면 토큰도 함께 입력해야 한다.
+    if (saved) { if (!token) { token = saved.token; url = saved.url; } else { url = url || saved.url; } }
+  }
   if (!url) return res.status(400).json({ ok: false, reason: 'url이 필요합니다.' });
   if (!/^https?:\/\//.test(url)) url = `http://${url}`;
   // SSRF 방어: 링크로컬/클라우드 메타데이터 주소로는 토큰을 붙여 요청하지 않는다(등록 경로와 동일 가드).
@@ -425,7 +430,8 @@ adminRouter.post('/collectors/:id/force-token', adminOnly, async (req, res) => {
   if (!saved) return res.status(404).json({ ok: false, reason: `없는 수집 서버: ${req.params.id}` });
   const token = String(req.body?.token || saved.token || '').trim();
   if (!token) return res.status(400).json({ ok: false, reason: '토큰이 없습니다. 이 화면에서 토큰을 입력(또는 자동 생성)한 뒤 다시 시도하세요.' });
-  let url = String(req.body?.url || saved.url || '').trim();
+  // v2.480(3차 감사 S2): 저장 토큰(req.body.token 없음)을 쓰는 동기화는 URL 도 저장값 고정
+  let url = String((req.body?.token ? req.body?.url : '') || saved.url || '').trim();
   if (url && !/^https?:\/\//.test(url)) url = `http://${url}`;
   const ssrf = url ? ssrfBlockReason(url) : 'URL이 없습니다.';
   if (ssrf) return res.status(400).json({ ok: false, reason: ssrf });

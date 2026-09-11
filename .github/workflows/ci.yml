@@ -23,6 +23,7 @@ concurrency:
 
 jobs:
   server-and-web:
+    timeout-minutes: 30 # v2.480: 기본 6시간 — 127.0.0.1 바인딩 멈춤 사례가 있어 러너 장기 점유 방지
     name: 서버 단위테스트 + 웹 빌드
     runs-on: ubuntu-latest
     steps:
@@ -75,6 +76,7 @@ jobs:
           npm --prefix web audit --omit=dev --audit-level=critical
 
   pyportal:
+    timeout-minutes: 20
     name: 서비스 허브 테스트 (Python)
     runs-on: ubuntu-latest
     strategy:

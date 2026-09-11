@@ -115,7 +115,7 @@ export async function testConnection(body) {
   let entry = body;
   if (!entry.password && entry.id) {
     const saved = loadRegistry().find((m) => m.id === entry.id);
-    if (saved) entry = { ...saved, ...body, password: body.password || saved.password };
+    if (saved) entry = { ...saved, ...body, password: saved.password, host: saved.host }; // v2.480(3차 감사 S6): 저장 비밀번호를 물려받는 테스트는 host 도 저장값으로 고정 — body.host 만 공격자 IP 로 바꿔 평문 비밀번호를 받는 경로 차단(PDU S-1 과 같은 규칙)
   }
   if (!entry.host || !entry.username || !entry.password) {
     return { ok: false, reason: 'host/username/password가 필요합니다.' };

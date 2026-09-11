@@ -90,7 +90,8 @@ export function save(body = {}) {
       startTls: s.startTls !== false,
       user: String(s.user ?? cur.smtp.user).trim().slice(0, 200),
       // ★ 빈 값 = 기존 유지. 지우려면 clearPassword 를 명시적으로 보낸다.
-      password: s.clearPassword === true ? '' : (s.password ? String(s.password) : cur.smtp.password),
+      // v2.480(3차 감사 S8): host 가 바뀌면 저장 비번 이월 금지(PDU S-1 규칙) — 새 SMTP 로 평문 자격증명 전송 방지
+      password: s.clearPassword === true ? '' : (s.password ? String(s.password) : (String(s.host ?? cur.smtp.host).trim() !== String(cur.smtp.host || '').trim() ? '' : cur.smtp.password)),
       from: String(s.from ?? cur.smtp.from).trim().slice(0, 253),
       fromName: String(s.fromName ?? cur.smtp.fromName).slice(0, 80),
       rejectUnauthorized: s.rejectUnauthorized !== false,

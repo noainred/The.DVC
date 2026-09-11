@@ -55,7 +55,7 @@ adminRouter.get('/agent-deploy/defaults', adminOnly, (req, res) => {
   res.json({
     centralUrl: `${proto}://${host}`,
     portalPort: config.port,
-    central: centralTokenInfo(),
+    central: { hasToken: !!centralTokenInfo().hasToken }, // v2.480(3차 감사 S1): 토큰 평문은 소유자 전용 /central-token 으로만(웹 AgentDeploy 는 이미 그 경로 사용)
   });
 });
 

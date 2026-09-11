@@ -783,10 +783,12 @@ export function confirmTotpEnroll(username, code, { actor = null, trusted = fals
   if (!u || !pending) return { ok: false, reason: '먼저 OTP 등록을 시작하세요.' };
   const denied = totpRebindDenied(u, actor, trusted);
   if (denied) return denied;
-  if (!totp.verifyToken(code, pending)) return { ok: false, reason: 'OTP 코드가 일치하지 않습니다.' };
+  const enrollCtr = totp.verifyToken(code, pending);
+  if (enrollCtr == null) return { ok: false, reason: 'OTP 코드가 일치하지 않습니다.' };
   u.totpSecret = pending;
   delete u.totpPendingSecret;
   u.totpEnabled = true;
+  u.totpLastCounter = enrollCtr; // v2.480(3차 감사 코어2 S5): 등록 확정 코드를 같은 30초 창에서 로그인에 재사용(replay)하지 못하게 사용 카운터 기록
   // OTP 전용 강제 대상만 비밀번호를 폐기(이후 OTP 로만 로그인). 혼용/비번전용 정책·사용자별
   // 재정의에서는 비밀번호를 유지해 둘 다 로그인할 수 있게 한다 — 정책이 결정하는 지점이다.
   if (isOtpOnlyUser(u.username, u.role || 'viewer')) delete u.passwordHash;

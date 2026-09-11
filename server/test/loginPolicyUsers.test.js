@@ -25,6 +25,8 @@ const enroll = (username) => {
   return b.secret;
 };
 
+// v2.480: OTP 등록 확정 코드는 같은 30초 창에서 로그인에 재사용되지 않는다(3차 감사 코어2 S5) — 등록 뒤 로그인은 다음 창 코드로.
+const nextCode = (s) => totp.generateToken(s, { counter: Math.floor(Date.now() / 1000 / 30) + 1 });
 test('파일 재정의 파싱 — 별칭·구분자·주석·형식오류 무시', () => {
   setUserFile([
     '# 사용자별 로그인 방식',
@@ -97,7 +99,7 @@ test('재정의=otp: 전역이 혼용이어도 그 사용자만 강제 등록 + 
   const u = auth.loadUsers().find((x) => x.username === 'fotp');
   assert.ok(!u.passwordHash, 'otp 재정의 사용자는 등록 즉시 비밀번호 폐기');
   assert.equal(auth.authenticateLocal('fotp', 'pw-fotp-123'), null);
-  assert.ok(auth.authenticateLocal('fotp', totp.generateToken(secret)));
+  assert.ok(auth.authenticateLocal('fotp', nextCode(secret)));
 });
 
 test('재정의=both: 등록 후에도 비번 유지 → 비번·OTP 둘 다 로그인', () => {
@@ -108,7 +110,7 @@ test('재정의=both: 등록 후에도 비번 유지 → 비번·OTP 둘 다 로
   const u = auth.loadUsers().find((x) => x.username === 'fkeep');
   assert.ok(u.passwordHash, 'both 재정의는 등록 후에도 비밀번호 유지');
   assert.ok(auth.authenticateLocal('fkeep', 'pw-fkeep-123'));
-  assert.ok(auth.authenticateLocal('fkeep', totp.generateToken(secret)));
+  assert.ok(auth.authenticateLocal('fkeep', nextCode(secret)));
 });
 
 test('재정의=password: 비번 보유자는 OTP 거부, 비번 없는 계정은 OTP 폴백(잠금 방지)', () => {
@@ -125,7 +127,7 @@ test('재정의=password: 비번 보유자는 OTP 거부, 비번 없는 계정�
   const s2 = enroll('fnopw'); // otp 재정의에서 등록 → 비번 폐기
   assert.ok(!auth.loadUsers().find((x) => x.username === 'fnopw').passwordHash);
   setUserFile('fnopw=password\n');
-  assert.ok(auth.authenticateLocal('fnopw', totp.generateToken(s2)), 'OTP 폴백으로 로그인(잠금 방지)');
+  assert.ok(auth.authenticateLocal('fnopw', nextCode(s2)), 'OTP 폴백으로 로그인(잠금 방지)');
 });
 
 test('resolveTokenUser 의 mustEnrollOtp 도 사용자별 재정의를 즉시 반영', () => {

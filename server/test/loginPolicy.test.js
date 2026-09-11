@@ -30,6 +30,8 @@ auth.createUser({ username: 'poladm', name: 'pol adm', role: 'admin', password: 
 auth.createUser({ username: 'polop', name: 'pol op', role: 'operator', password: 'pw-op-123' });
 auth.createUser({ username: 'polview', name: 'pol view', role: 'viewer', password: 'pw-vw-123' });
 
+// v2.480: OTP 등록 확정 코드는 같은 30초 창에서 로그인에 재사용되지 않는다(3차 감사 코어2 S5) — 등록 뒤 로그인은 다음 창 코드로.
+const nextCode = (s) => totp.generateToken(s, { counter: Math.floor(Date.now() / 1000 / 30) + 1 });
 test('기본(미설정) 정책 = 레거시: 고권한만 OTP 전용 강제, viewer 는 아님', () => {
   // security-session.json 이 아직 없음 → loginPolicy null → 레거시.
   assert.equal(auth.isOtpOnlyRole('admin'), true);
@@ -78,7 +80,7 @@ test('혼용 정책에서 OTP 등록: 비밀번호 유지 → 비번·OTP 둘 �
   // 비번으로 로그인 가능.
   assert.ok(auth.authenticateLocal('polenr', 'pw-enr-123'));
   // OTP 로도 로그인 가능(둘 중 하나 허용).
-  assert.ok(auth.authenticateLocal('polenr', totp.generateToken(secret)));
+  assert.ok(auth.authenticateLocal('polenr', nextCode(secret)));
 });
 
 test("'otp_only' 정책에서 OTP 등록: 비밀번호 폐기 → 비번 로그인 소멸", () => {
@@ -89,7 +91,7 @@ test("'otp_only' 정책에서 OTP 등록: 비밀번호 폐기 → 비번 로그�
   assert.equal(u.totpEnabled, true);
   assert.ok(!u.passwordHash, 'OTP 전용 정책에서는 등록 즉시 비밀번호가 삭제되어야 함');
   assert.equal(auth.authenticateLocal('polenr2', 'pw-enr2-123'), null); // 비번 거부
-  assert.ok(auth.authenticateLocal('polenr2', totp.generateToken(secret))); // OTP 만
+  assert.ok(auth.authenticateLocal('polenr2', nextCode(secret))); // OTP 만
 });
 
 test("'password_only': 비번 보유 계정은 OTP 거부(전용) · 비번 없는 계정은 OTP 폴백(잠금 방지)", () => {
@@ -107,5 +109,5 @@ test("'password_only': 비번 보유 계정은 OTP 거부(전용) · 비번 없�
   const s2 = enroll('polonly'); // otp_only 에서 등록 → 비번 폐기
   assert.ok(!auth.loadUsers().find((x) => x.username === 'polonly').passwordHash);
   setPolicy('password_only');
-  assert.ok(auth.authenticateLocal('polonly', totp.generateToken(s2)), 'OTP 폴백으로 로그인 가능(잠금 방지)');
+  assert.ok(auth.authenticateLocal('polonly', nextCode(s2)), 'OTP 폴백으로 로그인 가능(잠금 방지)');
 });

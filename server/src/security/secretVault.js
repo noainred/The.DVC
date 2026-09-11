@@ -194,6 +194,9 @@ export function sealSecret(plain, pol = policy()) {
 
 const warned = new Set(); // 같은 사유 경고 1회(폴링 루프 로그 폭주 방지)
 /** 암호문 → 평문. 봉인 포맷이 아니면 그대로 반환(평문 혼재 허용). 복호 실패는 ''(throw 금지). */
+let _decryptFailures = 0;
+/** 복호 실패 누적 횟수(v2.480) — 정책 전환 시 '이 파일에서 실패가 났는가' 판정용. */
+export function decryptFailureCount() { return _decryptFailures; }
 export function openSecret(v) {
   if (!isSealed(v)) return v;
   try {
@@ -206,6 +209,9 @@ export function openSecret(v) {
   } catch (e) {
     const k = String(e.message).slice(0, 60);
     if (!warned.has(k)) { warned.add(k); console.warn(`[secrets] ⚠ 자격증명 복호 실패(${k}) — 빈 값으로 대체. 키(secrets-key/SECRETS_KEY) 변경·유실 여부를 확인하고 해당 계정 비밀번호를 재입력하세요.`); }
+    // 빈 값 반환은 유지한다(봉인문을 비밀번호로 쓰면 매 폴링마다 잘못된 비밀번호로 로그인해 서비스 계정 잠금 위험). 대신
+    // v2.480(3차 감사 코어2 S2): 실패 횟수를 세어 migrateSecretFiles 가 복호 실패 파일의 재기록(암호문 소거)을 건너뛴다.
+    _decryptFailures += 1;
     return '';
   }
 }
@@ -256,7 +262,11 @@ export function migrateSecretFiles(newPolicy) {
       if (!fs.existsSync(fp)) { out.files.push({ file: name, changed: false, secrets: 0 }); continue; }
       const raw = fs.readFileSync(fp, 'utf8');
       const data = JSON.parse(raw);
+      const failBefore = _decryptFailures;
       openSecretsDeep(data);                               // ① 전부 평문으로
+      // v2.480(3차 감사 코어2 S2): 이 파일에서 복호 실패가 있었으면 재기록하지 않는다 — 실패값 '' 를 디스크에 쓰면 암호문이
+      // 영구 소거된다(키 env 누락 상태에서 '평문 전환' 1회면 전 레지스트리 비밀 유실). 키를 복구한 뒤 다시 전환하면 된다.
+      if (_decryptFailures > failBefore) { out.errors.push({ file: name, error: `복호 실패 ${_decryptFailures - failBefore}건 — 암호문 보존을 위해 이 파일은 재기록하지 않음(키 확인 후 재시도)` }); continue; }
       let count = 0;
       walk(data, (k, v) => {                               // ② 대상 필드 수 집계(보고용)
         if (k && SECRET_FIELDS.has(k) && typeof v === 'string' && v !== '') count += 1;

@@ -102,7 +102,7 @@ remoteRouter.post('/probe', requirePerm('remote.access'), async (req, res) => {
 });
 
 // vCenter → proxy assignments (any authenticated user; secrets redacted for admin view).
-remoteRouter.get('/proxies', (_req, res) => {
+remoteRouter.get('/proxies', requirePerm('remote.access'), (_req, res) => { // v2.480(3차 감사): 중계 주소는 원격접속 권한자에게만
   res.json({ proxies: listProxies().map((p) => ({ id: p.id, name: p.name, proxyHost: p.proxyHost, vcenterIds: p.vcenterIds, guacdConfigured: !!p.guacd?.host })) });
 });
 
