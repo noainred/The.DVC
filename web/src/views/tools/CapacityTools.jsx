@@ -346,7 +346,8 @@ export function Waste({ scope }) {
         ))}
       </div>
       {tab === 'off' && (() => {
-        const SRC = { event: 'vCenter 전원 이벤트(정확)', track: 'VM 추적 12시간 슬롯 전환(그 시각 이후 확실히 꺼짐 — 하한)', first_seen: 'VM 추적 시작 이후 계속 꺼짐(하한)' };
+        const SRC = { event: 'vCenter 전원 이벤트(정확)', observed: `전원 꺼짐 점검(${offSince?.sources?.observedIntervalHours || 6}시간 주기)에서 관측된 현재 꺼짐 구간 시작 — 하한`, track: 'VM 추적 12시간 슬롯 전환(그 시각 이후 확실히 꺼짐 — 하한)', first_seen: 'VM 추적 시작 이후 계속 꺼짐(하한)' };
+        const SRC_SHORT = { event: '이벤트', observed: '점검', track: '추적', first_seen: '관측 시작' };
         const rows = data.poweredOff.vms.map((v) => ({ ...v, ...(offSince?.byId?.[v.id] || {}) }));
         return (<>
           <DataTable rows={rows} initialSort={{ key: 'storageGB', dir: 'desc' }} columns={[
@@ -357,14 +358,16 @@ export function Waste({ scope }) {
                 ? <span className="muted">{offSince ? '—' : '…'}</span>
                 : <span title={`${SRC[v.source] || v.source} · ${new Date(v.offSince).toLocaleString('ko-KR')}`}>
                     <b style={{ color: v.offDays >= 90 ? 'var(--amber)' : undefined }}>{v.exact ? '' : '≥ '}{v.offDays}일</b>
-                    <div className="muted" style={{ fontSize: 11 }}>{new Date(v.offSince).toLocaleDateString('ko-KR')} · {v.source === 'event' ? '이벤트' : v.source === 'track' ? '추적' : '관측 시작'}</div>
+                    <div className="muted" style={{ fontSize: 11 }}>{new Date(v.offSince).toLocaleDateString('ko-KR')} · {SRC_SHORT[v.source] || v.source}</div>
                   </span>) },
           ]} />
           <div className="muted" style={{ fontSize: 12, marginTop: 6, lineHeight: 1.6 }}>
             <b>꺼진 지</b> 출처 — <b>이벤트</b>: vCenter 전원 이벤트(정확, 로그 수집이 켜져 있고 보관 기간 안일 때; VM 이름 기준이라 동명 VM 은 구분 못 함) ·
+            <b> 점검</b>: 전원 꺼짐 점검({offSince?.sources?.observedIntervalHours || 6}시간 주기, 설정 › 수집 서버 › 전원 꺼짐 점검)에서 처음 꺼진 것으로 관측된 시각('≥' 하한, 정밀도 = 주기) ·
             <b> 추적</b>: VM 추적의 12시간 슬롯에서 On→Off 전환이 관측된 시각(실제로는 그 직전 슬롯 사이 — '≥' 하한) ·
             <b> 관측 시작</b>: VM 추적 시작부터 계속 꺼짐('≥' 하한). '—' 는 세 출처 모두 없음(로그 수집·VM 추적이 꺼져 있거나 보관 기간 밖).
             {offSince && !offSince.error && !offSince.sources?.events && <> 이 조회에서 이벤트 출처는 사용되지 않았습니다(vCenter 로그 수집 확인).</>}
+            {offSince && !offSince.error && offSince.sources?.observedEnabled === false && <> 전원 꺼짐 점검이 꺼져 있습니다(설정에서 켜면 점검 주기 정밀도로 추적).</>}
             {offSince?.error && <> 조회 실패: {offSince.error}</>}
           </div>
         </>);

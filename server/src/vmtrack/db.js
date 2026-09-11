@@ -101,6 +101,13 @@ function initSqlite() {
         PRIMARY KEY (vcenter_id, ds_id)
       );
 
+      -- v2.484 전원 꺼짐 점검(tools/powerOffPoller.js): 현재 꺼짐 구간의 관측 시작. 켜지거나 사라지면 행 삭제.
+      CREATE TABLE IF NOT EXISTS power_off_seen (
+        vcenter_id TEXT NOT NULL, vm_id TEXT NOT NULL, name TEXT,
+        off_since INTEGER NOT NULL, last_seen INTEGER NOT NULL,
+        PRIMARY KEY (vcenter_id, vm_id)
+      );
+
       CREATE TABLE IF NOT EXISTS roster (
         vcenter_id TEXT NOT NULL, vm_id TEXT NOT NULL,
         name TEXT, cluster TEXT, host TEXT, datastore TEXT,
@@ -177,6 +184,12 @@ function initSqlite() {
       // v2.483 '꺼진 지 N일': VM 별 최신 전원 전환 슬롯 시각 + 로스터 first_seen(추적 시작 이후 계속 꺼짐 판정용).
       powerChangesOf: db.prepare("SELECT vm_id, kind, MAX(ts) AS ts FROM changes WHERE vcenter_id=? AND kind IN ('powered_off','powered_on') GROUP BY vm_id, kind"),
       rosterFirstSeenOf: db.prepare('SELECT vm_id, first_seen, power_state FROM roster WHERE vcenter_id=?'),
+      // v2.484 전원 꺼짐 점검 표
+      offSeenOf: db.prepare('SELECT vm_id, name, off_since, last_seen FROM power_off_seen WHERE vcenter_id=?'),
+      upsertOffSeen: db.prepare(`INSERT INTO power_off_seen (vcenter_id, vm_id, name, off_since, last_seen) VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(vcenter_id, vm_id) DO UPDATE SET name=excluded.name, last_seen=excluded.last_seen`), // off_since 는 유지
+      delOffSeen: db.prepare('DELETE FROM power_off_seen WHERE vcenter_id=? AND vm_id=?'),
+      offSeenMaxTs: db.prepare('SELECT MAX(last_seen) AS mx FROM power_off_seen'),
       rosterVcenters: db.prepare('SELECT DISTINCT vcenter_id FROM roster'),
       upsertRoster: db.prepare(`INSERT INTO roster
         (vcenter_id, vm_id, name, cluster, host, datastore, power_state, cpu, mem_mb, storage_gb, guest_os, first_seen)
@@ -331,6 +344,50 @@ export async function loadRosterFirstSeen(vcenterId) {
   const x = await getDb();
   if (!x) return null;
   return new Map(x.st.rosterFirstSeenOf.all(String(vcenterId)).map((r) => [r.vm_id, { firstSeen: Number(r.first_seen) || 0, powerState: r.power_state || '' }]));
+}
+
+/** v2.484: 점검 표 조회(Map vm_id → {offSince, lastSeen}). */
+export async function loadOffSeen(vcenterId) {
+  const x = await getDb();
+  if (!x) return null;
+  return new Map(x.st.offSeenOf.all(String(vcenterId)).map((r) => [r.vm_id, { offSince: Number(r.off_since) || 0, lastSeen: Number(r.last_seen) || 0 }]));
+}
+
+/** v2.484: 마지막 점검 시각(재시작 직후 즉시 재점검 방지용). */
+export async function lastPowerOffObservationTs() {
+  const x = await getDb();
+  if (!x) return 0;
+  return Number(x.st.offSeenMaxTs.get()?.mx || 0);
+}
+
+/**
+ * v2.484: 전원 꺼짐 점검 1회 적재 — 단일 트랜잭션. perVc: [{ vcenterId, offVms:[{vmId,name}] }]
+ * 꺼진 VM: 없으면 insert(off_since=ts), 있으면 last_seen 갱신(off_since 유지). 목록에 없는 기존 행(켜졌거나 삭제)은 delete.
+ * @returns {{ok:boolean, offVms:number, inserted:number, deleted:number}}
+ */
+export async function commitPowerOffObservation({ ts, perVc }) {
+  const x = await getDb();
+  if (!x) return { ok: false, offVms: 0, inserted: 0, deleted: 0 };
+  const { db, st } = x;
+  let offVms = 0, inserted = 0, deleted = 0;
+  db.exec('BEGIN');
+  try {
+    for (const vc of perVc || []) {
+      const existing = new Set(st.offSeenOf.all(String(vc.vcenterId)).map((r) => r.vm_id));
+      const cur = new Set();
+      for (const v of vc.offVms || []) {
+        cur.add(v.vmId); offVms++;
+        if (!existing.has(v.vmId)) inserted++;
+        st.upsertOffSeen.run(vc.vcenterId, v.vmId, v.name || '', ts, ts);
+      }
+      for (const id of existing) if (!cur.has(id)) { st.delOffSeen.run(vc.vcenterId, id); deleted++; }
+    }
+    db.exec('COMMIT');
+    return { ok: true, offVms, inserted, deleted };
+  } catch (e) {
+    try { db.exec('ROLLBACK'); } catch { /* */ }
+    throw e;
+  }
 }
 
 /** roster 에 존재하는 vCenter 목록(등록 해제된 vCenter 정리 판단용). */

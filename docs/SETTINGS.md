@@ -1,6 +1,6 @@
 # 설정 화면 안내 — 모든 탭·모든 설정 (v2.455)
 
-포탈 상단 **설정** 메뉴의 35개 화면을 화면 순서대로 설명한다. 각 항목은
+포탈 상단 **설정** 메뉴의 36개 화면을 화면 순서대로 설명한다. 각 항목은
 **무엇을 하는가 → 어디에 저장되는가 → 관련 환경변수 → 권한 → 주의사항** 순이다.
 
 - 파일은 전부 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만들어진다 → [설정·데이터 파일 레퍼런스](CONFIG-FILES.md)
@@ -104,42 +104,48 @@
 - **권한**: `settings`
 - **주의**: **중앙이 지정한 키만 내려간다** — 전 키를 채워 보내면 각 법인이 `portal.env` 로 잡아둔 현장 설정을 덮어쓴다. 하한(60초 / 영역수집 10분)은 서버가 강제하고, 빈 값·0 은 '미지정'으로 버린다.
 
-### 9. SAN 스위치 포트 사용량 — `#/settings/sansw-perf`
+### 9. 전원 꺼짐 점검 — `#/settings/power-off-check`
+- **무엇**: 몇 시간마다 스냅샷의 **전원 꺼진 VM** 을 기록할지 정한다(기본 켜짐·6시간, 1~168시간). 이 기록이 특수 기능 › 낭비 리소스 › 전원 꺼짐 표의 **'꺼진 지 N일'** 에 '점검' 출처로 쓰인다 — 처음 꺼진 것으로 보이면 그 시각을 현재 꺼짐 구간의 시작으로 남기고, 다시 켜지거나 삭제되면 지운다. '지금 점검' 으로 즉시 1회 실행하고 최근 결과(꺼진 VM 수·새 구간·해제)를 본다.
+- **저장**: `power-off-check.json`(설정) · `vm-track.db` 의 `power_off_seen` 표(관측)
+- **권한**: 조회 `tools` · 변경/수동 점검 `admin`
+- **주의**: 실제 꺼진 시각은 직전 점검과 그 점검 사이이므로 **정밀도 = 점검 주기**(화면엔 `≥ N일 · 점검` 하한). vCenter 전원 이벤트(로그 보관, 정확)가 있으면 그쪽이 우선한다. vCenter 를 다시 조회하지 않고 스냅샷만 읽으므로 자주 돌려도 부하가 거의 없다. 저장 즉시 반영(재시작 불필요).
+
+### 10. SAN 스위치 포트 사용량 — `#/settings/sansw-perf`
 - **무엇**: SAN 스위치 포트 처리량 수집 주기·보존기간을 정하고 즉시 수집/정리를 실행한다.
 - **저장**: `sanswitch-perf-settings.json` · `sanswitch-perf.db`
 - **환경변수**: `SANSW_CONCURRENCY`(동시 수집, 기본 4)
 - **권한**: `settings`
 - **주의**: 포트 처리량은 누적 카운터의 델타라 **첫 수집은 값이 없다**(null). 카운터 리셋(음수 델타)도 null 이며 0 으로 채우지 않는다 — 0 은 '트래픽 없음'으로 오해되기 때문.
 
-### 10. GPU 수집 — `#/settings/gpu-collect`
+### 11. GPU 수집 — `#/settings/gpu-collect`
 - **무엇**: ESXi 호스트의 물리 GPU 사용률 수집을 켜고 끈다.
 - **저장**: `gpu-physical.json`
 - **권한**: `settings`
 
-### 11. GPU 게스트 수집 — `#/settings/gpu-guest`
+### 12. GPU 게스트 수집 — `#/settings/gpu-guest`
 - **무엇**: 패스쓰루 GPU 는 호스트에서 사용률이 보이지 않으므로, 게스트 OS 안에서 `nvidia-smi` 를 돌려 수집한다. 게스트 계정·SSH 접속을 설정하고 에이전트에 배포한다.
 - **저장**: `gpu-guest.json` · 중앙 배포본은 `central-agent-gpu-guest.json`
 - **권한**: `settings`
 - **주의**: 게스트 자격증명이 필요하다 — 통합 계정(자격증명 저장 방식)과 함께 관리할 것.
 
-### 12. GPU 수집 진단 — `#/settings/gpu-guest-diag`
+### 13. GPU 수집 진단 — `#/settings/gpu-guest-diag`
 - **무엇**: GPU 게스트 수집이 실패하는 VM 을 단계별(계정 → 로그인 → 명령 실행 → 파싱)로 추적한다.
 - **저장**: 없음(진단 결과는 메모리)
 - **권한**: `settings`
 
-### 13. 게스트 계정 추가 — `#/settings/guest-account`
+### 14. 게스트 계정 추가 — `#/settings/guest-account`
 - **무엇**: 여러 VM 의 게스트 OS 안에 계정을 일괄 생성한다(수집용 계정 배포).
 - **권한**: `guest.deploy`(기본 admin)
 - **주의**: 게스트 OS 를 실제로 변경하는 작업이다 — 대상 VM 을 반드시 확인할 것.
 
-### 14. 수집 서버(원격) — `#/settings/collectors`
+### 15. 수집 서버(원격) — `#/settings/collectors`
 - **무엇**: 원격 법인의 엣지 포탈을 '수집 서버'로 등록해 중앙이 데이터를 당겨온다. 연결 상태·수신 통계·이름 충돌·인증 거부를 배지로 보여주고, 배지를 누르면 원인·근거·해결 절차가 나온다(v2.437).
 - **저장**: `collectors.json`(URL·토큰) · 수신 통계는 메모리
 - **환경변수**: `COLLECTOR_TIMEOUT_MS` · `CENTRAL_REQUIRE_AGENT_TOKEN`
 - **권한**: `settings`
 - **주의**: 토큰이 어긋나면 엣지가 401/403 을 낸다 — **401 은 대개 엣지가 구버전**이라는 뜻이다(경로 없음). '진단'으로 엣지가 실제로 받는 값을 확인할 수 있다.
 
-### 15. 원격 법인(DC)에 Edge 노드 포탈 설치 — `#/settings/agent-deploy`
+### 16. 원격 법인(DC)에 Edge 노드 포탈 설치 — `#/settings/agent-deploy`
 - **무엇**: SSH 로 원격 서버에 포탈 설치본을 올려 엣지 노드를 만든다. 현황·추가·대량배포·패키지 탭으로 나뉘며 CSV 가져오기/내보내기를 지원한다.
 - **저장**: `agent-deploy-targets.json`(SSH 접속 정보 + 토큰 4종, 봉인 저장) · `packages.json`
 - **권한**: `settings`, **비밀 포함 CSV 내보내기는 설정 소유자만**
@@ -149,13 +155,13 @@
 
 ## 🔌 원격 접속 서버
 
-### 16. 중계 서버 — `#/settings/proxy`
+### 17. 중계 서버 — `#/settings/proxy`
 - **무엇**: 브라우저 SSH/RDP 를 중계하는 프록시 서버를 등록하고 배포·테스트한다.
 - **저장**: `remote-access.json`
 - **환경변수**: `GUACD_HOST` · `GUACD_PORT`
 - **권한**: admin
 
-### 17. 원격접속 설정 — `#/settings/remote`
+### 18. 원격접속 설정 — `#/settings/remote`
 - **무엇**: 원격 접속 매핑(대상 호스트 ↔ 공개 포트)을 관리한다.
 - **저장**: `remote-access.json`
 - **권한**: `remote.access`(매핑 소유자 개념 있음)
@@ -165,19 +171,19 @@
 
 ## 👤 User Control
 
-### 18. 메인포탈 사용자 관리 — `#/settings/users`
+### 19. 메인포탈 사용자 관리 — `#/settings/users`
 - **무엇**: 계정 생성·역할 변경·비밀번호 재설정·2FA(TOTP) 관리, **역할별 기능 권한 매트릭스**, **데이터 범위(vCenter 제한)**, **특수 기능 도구별 접근**을 설정한다.
 - **저장**: `users.json`(해시·TOTP 시크릿) · `permissions.json`(매트릭스·도구 거부)
 - **권한**: `users.manage`
 - **권한 키 18종**: `dashboard` · `inv.hosts` · `inv.vms` · `inv.datastores` · `inv.networks` · `inv.nsx` · `inv.alarms` · `tools` · `insights` · `remote.access` · `vm.console` · `vm.reconfig` · `vm.provision` · `guest.deploy` · `settings` · `upgrade` · `users.manage`
 - **주의**: **도구별 접근 거부는 v2.448 부터 서버가 집행한다** — 그 전에는 화면에서만 숨겨져 API 직접 호출이 통과했다. 데이터 범위를 건 계정은 전체 합계 조회가 막힌다(범위 밖 데이터가 섞이기 때문).
 
-### 19. 엣지 사용자 배포 — `#/settings/edge-users`
+### 20. 엣지 사용자 배포 — `#/settings/edge-users`
 - **무엇**: 중앙에서 만든 계정을 엣지 포탈들에 일괄 배포한다.
 - **저장**: `central-agent-users.json`
 - **권한**: `users.manage`
 
-### 20. 인증(AD) — `#/settings/auth-ad`
+### 21. 인증(AD) — `#/settings/auth-ad`
 - **무엇**: Active Directory/LDAP 연동을 설정한다(도메인·서버·검색 필터·그룹↔역할 매핑). 연결 테스트를 제공한다.
 - **저장**: `auth.json`
 - **환경변수**: `AD_ENABLED` · `AD_URL` · `AD_DOMAIN` · `AD_ADMIN_GROUP` · `AD_OPERATOR_GROUP` · `AD_VIEWER_GROUP` · `AD_USER_FILTER` · `AD_TIMEOUT_MS`
@@ -188,19 +194,19 @@
 
 ## 🛡️ Security
 
-### 21. 세션 보안 — `#/settings/session-security`
+### 22. 세션 보안 — `#/settings/session-security`
 - **무엇**: 세션 만료 시간, 단일 세션 강제(ID 공유 금지), 로그인 실패 잠금, OTP 의무화를 설정한다.
 - **저장**: `security-session.json` · `active-sessions.json`(현재 세션)
 - **권한**: admin
 - **주의**: OTP 의무화를 켜면 미등록 사용자는 등록 화면으로 강제 이동한다.
 
-### 22. 자격증명 저장 방식 — `#/settings/secrets`
+### 23. 자격증명 저장 방식 — `#/settings/secrets`
 - **무엇**: 장비 비밀번호를 평문으로 둘지 **봉인(암호화)** 할지 정하고, 전환을 실행한다.
 - **저장**: `secrets-policy.json` · 키는 `secrets-key`
 - **권한**: admin(설정 소유자 권장)
 - **주의**: **`secrets-key` 를 잃으면 봉인된 비밀은 복호할 수 없다** — 백업에 반드시 포함할 것. 비밀 값은 어떤 API 응답에도 실리지 않는다.
 
-### 23. 이상동작 탐지 — `#/settings/anomaly`
+### 24. 이상동작 탐지 — `#/settings/anomaly`
 - **무엇**: 사용량·이벤트의 이상 패턴 탐지 임계와 대상 vCenter 를 설정한다.
 - **저장**: `anomaly` 관련 설정(`alerts.json` 과 연동)
 - **권한**: admin
@@ -209,19 +215,19 @@
 
 ## 그 밖의 설정
 
-### 24. AI 검색 — `#/settings/ai-search`
+### 25. AI 검색 — `#/settings/ai-search`
 - **무엇**: 자연어 검색에 쓸 LLM(로컬 Ollama 또는 외부 API)을 설정하고, 에어갭 환경에 Ollama 를 배포한다.
 - **저장**: `llm.json`
 - **권한**: admin
 - **주의**: 외부 API 를 쓰면 질의 내용이 외부로 나간다 — 에어갭 정책을 확인할 것.
 
-### 25. 알림 — `#/settings/alerts`
+### 26. 알림 — `#/settings/alerts`
 - **무엇**: 임계 규칙과 알림 채널(Slack/Teams/이메일/웹훅)을 설정하고 테스트 발송한다. 일일 헬스체크 리포트 시각도 여기서 정한다.
 - **저장**: `alerts.json` · `daily-report.json`
 - **권한**: admin
 - **주의**: v2.448 부터 채널이 하나도 없으면 테스트 발송이 **성공이 아니라 '설정 없음'** 으로 표시된다. 일일 리포트는 전송이 전부 실패하면 다음 주기에 재시도한다.
 
-### 26. 메일 발송 — `#/settings/mail`
+### 27. 메일 발송 — `#/settings/mail`
 - **무엇**: 포탈의 **모든 기능이 함께 쓰는** SMTP 설정(v2.454). 알림·일일 리포트·폴더 사용량 리포트가 여기 설정을 따르며, **기능별로 켜고 끄거나 수신자를 따로 지정**할 수 있다. 기능마다 SMTP 를 따로 두면 같은 값을 여러 번 입력하게 되고, 한쪽만 고쳐 놓고 "왜 이 알림만 안 오지" 를 겪는다.
 - **저장**: `mail.json`(SMTP 계정은 봉인 저장)
 - **권한**: 조회는 `settings`, **저장과 메일 테스트는 설정 소유자** — 릴레이 계정이 유출되면 사내 메일 위조에 쓰이므로 백업·통합 계정과 같은 등급으로 본다.
@@ -233,7 +239,7 @@
   - 알림을 메일로 받으려면 **설정 › 알림에서 '메일 사용'** 도 함께 켜야 한다(두 스위치가 모두 켜져야 나간다).
   - **특수 기능 › 메일 진단**(v2.455)에서 같은 설정을 고치면서 테스트 발송의 **SMTP 대화를 단계별로** 볼 수 있다(연결·STARTTLS·인증·수신자 중 어디서 막혔는지). 로그에 비밀번호는 나오지 않는다 — 서버가 인증 단계를 `<redacted>` 로 가려서 보낸다.
 
-### 27. 특수 기능 카테고리 — `#/settings/tool-categories`
+### 28. 특수 기능 카테고리 — `#/settings/tool-categories`
 - **무엇**: 특수 기능이 **76개**라 한 화면에 다 깔면 찾기 어렵다. 서버/네트워크/스토리지/가상화처럼 **직접 만든 카테고리**로 묶어 섹션별로 보여준다(v2.455).
 - **중복 소속이 정상이다** — 한 기능을 여러 카테고리에 넣을 수 있다. 예: 'ESXi 온도'는 *서버*이자 *가상화*, '폴더 사용량'은 *스토리지*이자 *리포트*.
 - **저장**: `tool-categories.json`
@@ -246,18 +252,18 @@
   - '추천 분류로 시작'은 불러오기만 한다 — **저장을 눌러야** 반영된다(기존 분류가 버튼 한 번에 날아가지 않게).
   - 메뉴 빠른 찾기로 **검색 중일 때는 섹션을 나누지 않는다**(중복 소속이라 같은 카드가 여러 번 나와 오히려 느리다).
 
-### 28. 포탈 백업 — `#/settings/backup`
+### 29. 포탈 백업 — `#/settings/backup`
 - **무엇**: `CONFIG_DIR` 전체와 DB 를 묶어 백업하고, 스케줄·보존 개수·저장 위치(로컬/NFS)를 정한다. 복원도 여기서 한다.
 - **저장**: `backup.json`(설정) · `backups/`(산출물)
 - **권한**: **admin + 설정 소유자**(비밀이 통째로 들어가므로)
 - **주의**: 백업 파일에는 `portal.env`·`auth-secret`·`secrets-key`·`users.json` 이 들어 있다 — **백업 파일 자체가 최고 등급 비밀**이다. 안전한 곳에 두고 접근을 제한할 것.
 
-### 29. NFS 마운트(백업 대상) — `#/settings/nfs-mounts`
+### 30. NFS 마운트(백업 대상) — `#/settings/nfs-mounts`
 - **무엇**: 백업을 저장할 NFS 마운트를 등록·확인한다.
 - **저장**: `nfs-mounts.json`
 - **권한**: admin
 
-### 30. 폴더 사용량 리포트 — `#/settings/dir-usage`
+### 31. 폴더 사용량 리포트 — `#/settings/dir-usage`
 - **무엇**: 엣지 서버에 마운트된 공유 폴더의 **하위 폴더별 사용량**을 주기마다 수집해 **Top N**을 뽑고, 지정한 주소로 메일을 보낸다(v2.454). 집계 단위는 **하위 폴더 이름**이다 — `/mnt/share/hong` 이면 사용자 `hong`. 파일 소유자(uid) 기준이 아니다(전체 파일을 훑어야 해 NFS 에서 수십 분~시간이 걸린다).
 - **실행 주체**: 그 법인의 **RMA 에이전트**가 현지에서 `du -x -b --max-depth=1` 을 돌리고 결과만 회신한다. 고지연 회선(폴란드·미국 동부)에 부담이 없다.
 - **저장**: `dirusage.json`(대상·수신자) · `dirusage.db`(스캔 이력). **SMTP 는 여기 없다** — 위 *메일 발송* 이 소유하고 이 기능은 그것을 쓴다(수신자를 비우면 그 화면의 기능별/기본 수신자로 간다).
@@ -270,33 +276,33 @@
   - 직전 수집이 없으면 증감을 표시하지 않는다(0 으로 채우지 않는다).
   - 메일 테스트는 *메일 발송* 화면 한 곳에서 한다 — 기능마다 테스트 버튼이 따로 있으면 어느 SMTP 를 시험한 것인지 헷갈린다.
 
-### 31. vCenter 로그 보관 — `#/settings/vclogs`
+### 32. vCenter 로그 보관 — `#/settings/vclogs`
 - **무엇**: vCenter 이벤트를 주기적으로 수집해 장기 보관한다. 최소 심각도·보존기간·주기를 정하고 즉시 수집을 실행한다.
 - **저장**: `vcenter-logs.json`(설정) · `logs.db`(이벤트)
 - **환경변수**: `VCLOGS_CONCURRENCY`(동시 수집 vCenter 수, 기본 6 — v2.448 신설)
 - **권한**: admin
 - **주의**: v2.448 부터 vCenter 를 병렬로 수집하고 장비당 데드라인을 둔다(느린 1곳이 전체를 막지 않게).
 
-### 32. 진단·로그 — `#/settings/diagnostics`
+### 33. 진단·로그 — `#/settings/diagnostics`
 - **무엇**: 서버 상태(업타임·메모리·이벤트 루프 지연)와 최근 로그를 본다. DB 용량·폴러 상태도 확인할 수 있다.
 - **저장**: 없음(실시간)
 - **권한**: admin
 
-### 33. 감사 로그 — `#/settings/audit`
+### 34. 감사 로그 — `#/settings/audit`
 - **무엇**: 누가 언제 무엇을 바꿨는지 기록을 조회한다.
 - **저장**: `audit.ndjson`
 - **환경변수**: `AUDIT_MAX`(보관 행 수)
 - **권한**: admin
 - **주의**: 상태 변경 API 가 자동으로 기록한다. 보안 자산이므로 별도 보관 정책을 두는 것이 좋다.
 
-### 34. ⬆ 업그레이드 — `#/settings/upgrade`
+### 35. ⬆ 업그레이드 — `#/settings/upgrade`
 - **무엇**: 새 버전을 확인·내려받아 적용하고 재시작한다. 오프라인(에어갭) 번들 업로드도 지원한다.
 - **저장**: `upgrade.json` · `vmware-portal-release`
 - **환경변수**: `UPGRADE_REMOTE_BASE` · `UPGRADE_ALLOW_UNVERIFIED`
 - **권한**: `upgrade`
 - **주의**: 번들은 **sha256 검증에 실패하면 설치를 거부**한다. `UPGRADE_ALLOW_UNVERIFIED=true` 는 그 검증을 **모든 소스에 대해** 끄므로 권장하지 않는다.
 
-### 35. About — `#/settings/about`
+### 36. About — `#/settings/about`
 - **무엇**: 현재 버전·릴리스 노트·라이선스·시스템 정보를 본다.
 - **권한**: 로그인 사용자
 

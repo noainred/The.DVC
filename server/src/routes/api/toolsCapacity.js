@@ -7,6 +7,8 @@ import { loadVcenterConfig } from '../../config.js';
 import { fetchVmMetric, fetchVmRightsizeSeries } from '../../vcenter/soapClient.js';
 import { analyzeRightsize } from '../../tools/rightsize.js';
 import { poweredOffSinceFor } from '../../tools/powerOff.js'; // v2.483: 전원 꺼진 VM 의 꺼진 시각
+import { loadPowerOffSettings, savePowerOffSettings, LIMITS as POWEROFF_LIMITS } from '../../tools/powerOffSettings.js'; // v2.484
+import { powerOffPollerStatus, runPowerOffCheckNow } from '../../tools/powerOffPoller.js';
 import { diskBreakdown, analyzeDiskTrend, diskTrendPolicyFromEnv } from '../../tools/diskTrend.js';
 import { getMetricsDb } from '../../metrics/db.js';
 import { vmperfHistory, vmperfMeta, vmperfDiskUsage, dropVmperfDb, dbFileName, VMPERF_METRICS, VMPERF_DISK_METRICS, VMPERF_VMDISK_METRICS } from '../../metrics/vmperfDb.js';
@@ -191,6 +193,20 @@ api.get('/tools/waste/off-since', requirePerm('tools'), async (req, res) => {
   } catch (e) {
     res.status(500).json({ ok: false, reason: `꺼진 시각 조회 실패: ${e.message}` });
   }
+});
+
+// v2.484 전원 꺼짐 점검 설정/상태(조회는 tools 권한, 변경·수동 점검은 admin — 게스트 디스크 설정과 같은 경계).
+api.get('/tools/waste/off-check', requirePerm('tools'), (_req, res) => {
+  res.json({ ok: true, ...powerOffPollerStatus(), limits: POWEROFF_LIMITS });
+});
+api.put('/tools/waste/off-check/settings', requireRole('admin'), (req, res) => {
+  const next = savePowerOffSettings(req.body || {});
+  logAudit({ user: req.user?.username, action: '전원 꺼짐 점검 설정 변경', detail: `enabled=${next.enabled} interval=${next.intervalHours}h`, ip: req.ip || '' });
+  res.json({ ok: true, settings: next });
+});
+api.post('/tools/waste/off-check/run', requireRole('admin'), async (req, res) => {
+  logAudit({ user: req.user?.username, action: '전원 꺼짐 수동 점검', ip: req.ip || '' });
+  res.json(await runPowerOffCheckNow('manual'));
 });
 
 /**

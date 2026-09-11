@@ -1,9 +1,9 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **130개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **131개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
-- 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-09-10)
+- 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-09-11)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이다. 설명 보완은 `scripts/config-doc.mjs` 의 `NOTES` 에 추가한다.
 - 열 의미: **원자적** = 쓰기 도중 크래시에도 파일이 깨지지 않음(`atomicWriteFileSync`) · **손상보존** = 읽기 실패 시 원본을 `.corrupt.<ts>` 로 보존 · **0600** = 소유자만 읽기
 
@@ -27,8 +27,8 @@
 | `alerts.json` | 설정 | Alerting — evaluates threshold/condition rules against the current snapshot on | ✅ |  | ✅ | alerts.js |
 | `audit.ndjson` | 로그(NDJSON) | 감사 로그(상태 변경 기록) | ✅ |  | ✅ | audit.js |
 | `auth-secret` | 디렉터리 | 세션 토큰 서명 키(자동 생성) | ✅ | ✅ | ✅ | auth/auth.js |
-| `auth.json` | 설정 | Active Directory (LDAP) authentication — UPN simple bind + group→role mapping. |  |  | ✅ | auth/ad.js |
-| `backup.json` | 설정 | 백업 설정 + 스케줄러 + 변경 감시. |  |  | ✅ | backup/settings.js |
+| `auth.json` | 설정 | Active Directory (LDAP) authentication — UPN simple bind + group→role mapping. | ✅ | ✅ | ✅ | auth/ad.js |
+| `backup.json` | 설정 | 백업 설정 + 스케줄러 + 변경 감시. | ✅ | ✅ | ✅ | backup/settings.js |
 | `backups` | 디렉터리 | 포탈 백업 코어 — 중앙 포탈의 모든 설정(CONFIG_DIR의 *.json / *.env)과, 엣지 포탈(에이전트)이 | ✅ |  | ✅ | backup/service.js |
 | `bm-storage.json` | 설정 | 베어메탈 스토리지 서버 목록 + 설정(v2.340). | ✅ | ✅ | ✅ | bmstor/registry.js |
 | `capacity.db` | DB | 리소스 적정성(용량) 샘플 시계열 |  |  |  | config.js |
@@ -53,7 +53,7 @@
 | `dirusage.db` | DB | 폴더 사용량 스캔 이력 DB (`dirusage.db`, v2.454). |  |  | ✅ | dirusage/db.js |
 | `dirusage.json` | 설정 | 폴더 사용량 리포트 설정 (`dirusage.json`, v2.454). | ✅ | ✅ | ✅ | dirusage/settings.js |
 | `download` | 디렉터리 | iDRAC-scan collector agent auto-deploy. The central portal pushes its offline |  |  | ✅ | agent/deploy.js |
-| `emergency-stop.json` | 설정 | 긴급중단(Emergency Stop) — 2인 승인(관리자 2명 OTP)으로만 켜고/끄는 전역 수집 정지 스위치. |  |  | ✅ | security/emergencyStop.js |
+| `emergency-stop.json` | 설정 | 긴급중단(Emergency Stop) — 2인 승인(관리자 2명 OTP)으로만 켜고/끄는 전역 수집 정지 스위치. | ✅ | ✅ | ✅ | security/emergencyStop.js |
 | `finops.json` | 설정 | FinOps — 전력 수집(iDRAC/OME/원격) 데이터를 kWh·전기요금·CO2로 환산해 vCenter/지역별로 | ✅ |  |  | insights/finops.js |
 | `fleet-assign.json` | 설정 | 통합 서버 인벤토리 — 베어메탈/물리 서버의 '소속 법인(vCenter)' 수동 등록 저장. | ✅ |  |  | insights/fleetAssign.js |
 | `fleet-tags.json` | 설정 | 통합 서버 인벤토리 — 수동 분류 예외(override) 저장. | ✅ |  |  | insights/fleetTags.js |
@@ -68,7 +68,7 @@
 | `idrac-power.db` | DB | 서버 소비전력 시계열 + 시간당 롤업(power_hourly) |  |  |  | config.js |
 | `idrac-scan-log.json` | 설정 | iDRAC 스캔 실행 로그 — 주기/수동 스캔의 법인(DataCenter)별 실행 결과를 영속 저장한다. | ✅ |  | ✅ | idrac/scanLog.js |
 | `idrac-scan-ranges.json` | 설정 | 법인(DataCenter)별 iDRAC 스캔 대역 저장소 — 각 법인에 귀속된 iDRAC IP 대역과 그 대역 스캔에 | ✅ | ✅ | ✅ | idrac/scanRanges.js |
-| `idrac-scan-settings.json` | 설정 | iDRAC 자동 발견 폴러 — vCenter별로 저장된 IP 대역을 주기적으로 스캔해 Dell iDRAC을 |  |  | ✅ | idrac/scanPoller.js |
+| `idrac-scan-settings.json` | 설정 | iDRAC 자동 발견 폴러 — vCenter별로 저장된 IP 대역을 주기적으로 스캔해 Dell iDRAC을 | ✅ | ✅ | ✅ | idrac/scanPoller.js |
 | `idrac.json` | 설정 | iDRAC registry — the managed list of Dell servers whose power draw we collect | ✅ | ✅ | ✅ | idrac/registry.js |
 | `initial-admin-password.txt` | 텍스트 | 최초 기동 시 생성된 관리자 임시 비밀번호 | ✅ | ✅ | ✅ | auth/auth.js |
 | `ipam-annotations.json` | 설정 | Per-IP user annotations (custom memo + tags) for the IP ledger. These are | ✅ |  |  | ipam/annotations.js |
@@ -82,12 +82,12 @@
 | `ipam-settings.json` | 설정 | IPMS settings — IP ranges to hide from the IP ledger. Supports a global | ✅ |  |  | ipam/settings.js |
 | `ipam-vcenter-ranges.json` | 설정 | vCenter별 IP 스캔 대역 저장소 — 각 vCenter(법인/사이트)에 귀속된 스캔 대역을 저장하고, | ✅ |  | ✅ | ipam/rangeStore.js |
 | `ipam.db` | DB | IPAM IP 관리대장(외부 프로그램이 직접 읽는 공유 파일) |  |  |  | config.js |
-| `llm.json` | 설정 | Local LLM (Ollama) settings for natural-language search. Stored in |  |  | ✅ | llm/config.js |
+| `llm.json` | 설정 | Local LLM (Ollama) settings for natural-language search. Stored in | ✅ | ✅ | ✅ | llm/config.js |
 | `login-fails.ndjson` | 로그(NDJSON) | 로그인 실패 저장소(분석용) — 포탈 자체 실패 + 게스트 OS 조사 결과를 적재한다. |  |  | ✅ | security/loginStore.js |
 | `login-monitor.json` | 설정 | 로그인 실패 주기 모니터 — 일정 주기로 로그인 실패를 분석하고, 브루트포스(임계 이상 반복) 의심이 | ✅ |  | ✅ | security/loginMonitor.js |
 | `login-policy-users.txt` | 텍스트 | 세션 보안 설정 — 유휴 자동 로그아웃(분) 등. CONFIG_DIR/security-session.json. | ✅ | ✅ | ✅ | security/securitySettings.js |
 | `mail.json` | 설정 | 포탈 공용 메일(SMTP) 설정 (`mail.json`, v2.454). | ✅ | ✅ | ✅ | mail/settings.js |
-| `metrics.json` | 설정 | Runtime-editable metrics sampler settings (온도/용량/GPU 수집 주기·보존기간). |  |  | ✅ | metrics/settings.js |
+| `metrics.json` | 설정 | Runtime-editable metrics sampler settings (온도/용량/GPU 수집 주기·보존기간). | ✅ | ✅ | ✅ | metrics/settings.js |
 | `net-issues-state.json` | 설정 | 게스트 네트워크 이슈 저장소 — 스캔마다 직전 카운터와 비교해 '증가분(델타)'을 산출하고, |  |  | ✅ | security/netIssueStore.js |
 | `net-issues.ndjson` | 로그(NDJSON) | 게스트 네트워크 이슈 저장소 — 스캔마다 직전 카운터와 비교해 '증가분(델타)'을 산출하고, |  |  | ✅ | security/netIssueStore.js |
 | `nfs-mounts.json` | 설정 | Edge 노드 NFS 마운트 관리(v2.299). | ✅ | ✅ | ✅ | system/nfsMounts.js |
@@ -104,11 +104,12 @@
 | `ping-monitor.db` | DB | 핑 모니터 응답시간·손실 시계열 |  |  |  | config.js |
 | `ping-targets.json` | 설정 | Ping 모니터링 대상 레지스트리 — CONFIG_DIR/ping-targets.json. | ✅ |  |  | ping/store.js |
 | `portal.env` | 기타 | 환경변수(설치본이 읽는 유일한 설정 파일) |  |  |  | security/secretScan.js |
+| `power-off-check.json` | 설정 | 전원 꺼짐 점검 설정(`power-off-check.json`, v2.484, 사용자 요청 "몇 시간마다 점검하는지 설정"). | ✅ | ✅ | ✅ | tools/powerOffSettings.js |
 | `power-settings.json` | 설정 | 전력 집계 표시 설정 — CONFIG_DIR/power-settings.json. | ✅ |  | ✅ | idrac/powerSettings.js |
 | `provision-saved.json` | 설정 | Saved VM-provisioning jobs — every created job's spec is persisted so it can | ✅ |  | ✅ | provision/saved.js |
 | `relay-topology.json` | 설정 | 중계(HAProxy) 토폴로지 정의 | ✅ | ✅ | ✅ | relaytopo/store.js |
 | `relaycheck-settings.json` | 설정 | HAProxy 경로 점검 설정(v2.429, 사용자 요구 '특수기능에 haproxy 설정을 주기적으로 점검해서 알람으로 알려주고 | ✅ | ✅ | ✅ | relaycheck/settings.js |
-| `release-notes.json` | 설정 | Release notes: a built-in changelog (server/src/release-notes.json, shipped |  |  | ✅ | release-notes.js |
+| `release-notes.json` | 설정 | Release notes: a built-in changelog (server/src/release-notes.json, shipped | ✅ | ✅ | ✅ | release-notes.js |
 | `remote-access.json` | 설정 | Remote-access configuration + mapping store (CONFIG_DIR/remote-access.json). | ✅ | ✅ | ✅ | proxy/registry.js |
 | `rma-agents.json` | 설정 | 중앙 측 RMA 에이전트 비밀번호 저장소 — `rma-agents.json` { version, agents: { name: { password, updatedAt } } }. | ✅ | ✅ | ✅ | rma/agentSecrets.js |
 | `rma-history.db` | DB | 원격 명령(RMA) 실행 이력 |  |  | ✅ | rma/historyDb.js |
@@ -136,7 +137,7 @@
 | `svcmon.json` | 설정 | 성능점검 대상/폴더 저장소 — `CONFIG_DIR/svcmon.json` 전용 파일(포탈 코어와 분리). | ✅ | ✅ |  | svcmon/store.js |
 | `tool-categories.json` | 설정 | 특수 기능 카테고리 설정 (`tool-categories.json`, v2.455). | ✅ | ✅ | ✅ | toolcats/settings.js |
 | `tool-usage.json` | 설정 | 특수 기능 사용 빈도 집계 — "사람들이 자주 쓰는 메뉴"를 자동 추천하기 위한 카운터. | ✅ |  |  | tool-usage.js |
-| `ui.json` | 설정 | Shared UI settings persisted server-side (CONFIG_DIR/ui.json) so layout |  |  |  | ui-settings.js |
+| `ui.json` | 설정 | Shared UI settings persisted server-side (CONFIG_DIR/ui.json) so layout | ✅ | ✅ | ✅ | ui-settings.js |
 | `upgrade.json` | 설정 | Runtime-editable auto-upgrade settings. Env vars provide the defaults; values | ✅ |  | ✅ | upgrade/settings.js |
 | `users.json` | 설정 | 포탈 계정(역할·비밀번호 해시·TOTP 시크릿) | ✅ | ✅ | ✅ | auth/auth.js |
 | `vcenter-logs.db` | DB | vCenter 이벤트/태스크 로그 수집 캐시 |  |  | ✅ | logs/db.js |
@@ -146,7 +147,7 @@
 | `vm-clone.json` | 설정 | VM 복제(백업식) 잡 저장소(v2.299). | ✅ | ✅ | ✅ | vmclone/store.js |
 | `vm-track.db` | DB | VM 수량·데이터스토어 사용량 추이(변경분만 저장) |  |  | ✅ | vmtrack/db.js |
 | `vmperf` | 디렉터리 | 디렉터리 — vCenter별 VM 성능 DB(+ _index.json 역산 매핑) |  |  | ✅ | metrics/vmperfDb.js |
-| `vmperf.json` | 설정 | 낭비 리소스(VM 성능) 트래킹 설정 — 보존기간 + 대상 vCenter 선택(v2.376). |  |  | ✅ | metrics/vmperfSettings.js |
+| `vmperf.json` | 설정 | 낭비 리소스(VM 성능) 트래킹 설정 — 보존기간 + 대상 vCenter 선택(v2.376). | ✅ | ✅ | ✅ | metrics/vmperfSettings.js |
 | `vmware-portal-release` | 디렉터리 | RedHat 계열의 /etc/redhat-release 처럼, CONFIG_DIR에 현재 포탈 버전을 한 줄로 명시하는 |  |  |  | util/releaseFile.js |
 
 ## 주의가 필요한 파일
