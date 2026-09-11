@@ -1,5 +1,6 @@
 // vCenter 목록 + 중복IP/솔루션/VMtools/스냅샷 도구 — api.js(구 2,445줄) 분할(v2.283.0). 본문은 원본 그대로, 등록 순서는 api.js 호출 순서가 보존한다.
 import { scopedVcenterIds } from '../../auth/scope.js';
+import { requirePerm } from '../../auth/auth.js'; // v2.479(감사 S-4)
 import { store } from '../../store.js';
 import { sortByOrder } from '../../vcenter/order.js';
 import { nsxStore } from '../../nsx/store.js';
@@ -19,7 +20,7 @@ api.get('/vcenters', (req, res) => {
 
 // Special tool: find IPv4 addresses assigned to more than one VM, optionally
 // scoped to one vCenter (?vcenterId=). Helps catch duplicate/conflicting IPs.
-api.get('/tools/duplicate-ips', (req, res) => {
+api.get('/tools/duplicate-ips', requirePerm('tools'), (req, res) => {
   const snap = store.get();
   let vms = snap.vms;
   // scope 는 요청 필터보다 먼저 — 범위 제한 계정이 ?vcenterId 로 우회해 전 사이트 VM 을 못 보게.
@@ -55,7 +56,7 @@ api.get('/tools/duplicate-ips', (req, res) => {
 // 아니라 ① 사이트별 ESXi 버전 분포(hosts) ② 실제 NSX Manager 버전(nsxStore — vCenter 확장 항목
 // 보다 권위 있음)을 함께 반환하고, 전 함대 버전 드리프트(vCenter/ESXi/NSX 분포)를 요약한다.
 // scope: 조회 라우트 규칙(v2.322) — vCenter 는 scopedVcenterIds, NSX 는 nsx/scope.js 귀속 판정.
-api.get('/tools/solutions', (req, res) => {
+api.get('/tools/solutions', requirePerm('tools'), (req, res) => {
   const snap = store.get();
   const allowed = scopedVcenterIds(req.user, snap);
   const vcs = (snap.vcenters || []).filter((vc) => !allowed || allowed.has(vc.id));
@@ -119,7 +120,7 @@ api.get('/tools/solutions', (req, res) => {
 });
 
 // VMware Tools version distribution (optionally per vCenter).
-api.get('/tools/vmtools', (req, res) => {
+api.get('/tools/vmtools', requirePerm('tools'), (req, res) => {
   const snap = store.get();
   let vms = snap.vms;
   const allowed = scopedVcenterIds(req.user, snap);
@@ -142,7 +143,7 @@ api.get('/tools/vmtools', (req, res) => {
 });
 
 // VMs that have snapshots (optionally per vCenter).
-api.get('/tools/snapshots', (req, res) => {
+api.get('/tools/snapshots', requirePerm('tools'), (req, res) => {
   const snap = store.get();
   let vms = snap.vms.filter((v) => (v.snapshotCount || 0) > 0);
   const allowed = scopedVcenterIds(req.user, snap);

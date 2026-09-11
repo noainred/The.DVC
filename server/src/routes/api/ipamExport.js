@@ -66,12 +66,12 @@ export function registerIpamExport(api) {
 // 만들어 JSON.stringify + SHA-1(ETag)이 요청마다 이벤트 루프를 세웠다. 목록에선 hasOwner
 // 플래그만 내리고, 상세 팝업은 /vms/lookup?ip= 로 클릭 시 1건만 가져온다(프론트 지연 조회).
 // 호스트/스캔 행은 원래 작아 유지. buildIpamRows 결과는 캐시 공유 객체라 여기서 변형하지 않는다.
-api.get('/tools/ipam', (req, res) => {
+api.get('/tools/ipam', requirePerm('tools'), (req, res) => {
   const snap = store.get();
   const data = buildIpamRows(snap, req.query.vcenterId, scopedVcenterIds(req.user, snap));
   res.json({ ...data, rows: data.rows.map((r) => (r.ownerType === 'vm' && r.owner ? { ...r, owner: undefined, hasOwner: true } : r)) });
 });
-api.get('/tools/vm-export', async (req, res) => {
+api.get('/tools/vm-export', requirePerm('tools'), async (req, res) => {
   const vcenterId = vmExportGuard(req, res);
   if (!vcenterId) return;
   try {
@@ -80,7 +80,7 @@ api.get('/tools/vm-export', async (req, res) => {
     res.json({ ...r, rows: r.rows.slice(0, 100) });
   } catch (e) { res.status(502).json({ error: e.message }); }
 });
-api.get('/tools/vm-export.csv', async (req, res) => {
+api.get('/tools/vm-export.csv', requirePerm('tools'), async (req, res) => {
   const vcenterId = vmExportGuard(req, res);
   if (!vcenterId) return;
   try {
@@ -92,24 +92,24 @@ api.get('/tools/vm-export.csv', async (req, res) => {
 });
 
 // IPAM 추천 기능 30선 — 유명 IPAM 솔루션 대표 기능을 수집 데이터로 계산.
-api.get('/tools/ipam/insights', (req, res) => {
+api.get('/tools/ipam/insights', requirePerm('tools'), (req, res) => {
   const snap = store.get();
   res.json(buildIpamInsights(snap, req.query.vcenterId || '', scopedVcenterIds(req.user, snap)));
 });
 
 // Per-/24 subnet ledger (Excel-style): subnet list, one subnet's rows, or full .xlsx.
-api.get('/tools/ipam/subnets', (req, res) => {
+api.get('/tools/ipam/subnets', requirePerm('tools'), (req, res) => {
   const snap = store.get();
   res.json({ subnets: listSubnets(snap, req.query.vcenterId, scopedVcenterIds(req.user, snap)) });
 });
-api.get('/tools/ipam/sheet', (req, res) => {
+api.get('/tools/ipam/sheet', requirePerm('tools'), (req, res) => {
   const snap = store.get();
   const sheets = buildSubnetSheets(snap, { vcenterId: req.query.vcenterId, onlyBase: req.query.base, allowed: scopedVcenterIds(req.user, snap) });
   res.json(sheets[0] || { subnet: '', rows: [] });
 });
 
 // Per-IP usage history (scan-derived online/offline transitions over time).
-api.get('/tools/ipam/history', (req, res) => {
+api.get('/tools/ipam/history', requirePerm('tools'), (req, res) => {
   // 스캔 이력은 vCenter 귀속이 없어 scope 판정 불가 → 범위 제한 계정에는 노출하지 않는다
   // (ledger.js 스캔 행 차단·deep-search scanItems 미노출과 같은 정책. 임의 IP 프로빙 차단).
   if (scopedVcenterIds(req.user, store.get())) return res.json({ ip: req.query.ip, history: null });
@@ -117,7 +117,7 @@ api.get('/tools/ipam/history', (req, res) => {
 });
 
 // vCenter별 등록 스캔 대역 목록(+vCenter 이름·IP 수 추정).
-api.get('/tools/ipam/vc-ranges', (req, res) => {
+api.get('/tools/ipam/vc-ranges', requirePerm('tools'), (req, res) => {
   const snap = store.get();
   const allowed = scopedVcenterIds(req.user, snap);   // 범위 밖 vCenter id·name 열거 차단
   const vcName = {};
@@ -132,7 +132,7 @@ api.get('/tools/ipam/vc-ranges', (req, res) => {
 
 // 스캔 대역 목록 CSV 내보내기 — JSON 라우트(/tools/ipam/vc-ranges)와 같은 scope 교집합.
 // vCenter 는 표시명으로 내보낸다(가져오기가 이름/ID 둘 다 해석). 재가져오기 가능한 형식.
-api.get('/tools/ipam/vc-ranges.csv', (req, res) => {
+api.get('/tools/ipam/vc-ranges.csv', requirePerm('tools'), (req, res) => {
   const snap = store.get();
   const allowed = scopedVcenterIds(req.user, snap);
   const vcName = {};
@@ -144,7 +144,7 @@ api.get('/tools/ipam/vc-ranges.csv', (req, res) => {
 });
 
 // 네트워크 맵 — 대역(/24) 선택 시 OS별·시간대별 사용/미사용 격자.
-api.get('/tools/ipam/netmap', (req, res) => {
+api.get('/tools/ipam/netmap', requirePerm('tools'), (req, res) => {
   const snap = store.get();
   res.json(buildNetmap(snap, {
     vcenterId: req.query.vcenterId || '', base: req.query.base || '',
@@ -153,7 +153,7 @@ api.get('/tools/ipam/netmap', (req, res) => {
 });
 
 // 스캔 결과를 '첨부파일'처럼 내려받기(CSV). 현재 결과 + 이력(상태/최초관측) 조인.
-api.get('/tools/ipam/scan-report.csv', (req, res) => {
+api.get('/tools/ipam/scan-report.csv', requirePerm('tools'), (req, res) => {
   const head = 'ip,hostname,status,open_ports,services,first_seen,last_seen,agent';
   // 스캔 결과 전량(전 사이트 IP/포트/서비스/수집엣지)은 vCenter 귀속이 없어 scope 판정 불가 →
   // 범위 제한 계정에는 헤더만 반환한다(ledger.js 스캔 행 차단과 일관 — 이 경로로 새면 하드닝 무의미).
@@ -178,7 +178,7 @@ api.get('/tools/ipam/scan-report.csv', (req, res) => {
 });
 
 // Per-IP user annotation (custom memo + tags), separate from vCenter notes.
-api.get('/tools/ipam/annotation', (req, res) => {
+api.get('/tools/ipam/annotation', requirePerm('tools'), (req, res) => {
   const ip = req.query.ip;
   const snap = store.get();
   const allowed = scopedVcenterIds(req.user, snap);
@@ -205,7 +205,7 @@ api.put('/tools/ipam/annotation', requirePerm('tools'), (req, res) => {
 
 // ---- IP 수동 관리(override) — vCenter/스캔 자동발견과 별개의 운영자 관리상태 -------------
 // 선택지(상태/디바이스종류)와 현재 관리 요약을 함께 내려준다(프론트 폼 구성용).
-api.get('/tools/ipam/manage-meta', (req, res) => {
+api.get('/tools/ipam/manage-meta', requirePerm('tools'), (req, res) => {
   // 요약(정책·override)을 범위 제한 계정에는 스코프해 집계 — policiesSummary 는 byVcenter 로 타
   // vCenter id 를, overridesSummary 는 함대 전체 override 규모를 흘리므로 둘 다 스코프(대칭).
   const snap = store.get();
@@ -217,7 +217,7 @@ api.get('/tools/ipam/manage-meta', (req, res) => {
     policyStatuses: POLICY_STATUSES, policiesSummary: policiesSummary(polList) });
 });
 // 한 IP의 override 조회.
-api.get('/tools/ipam/ip/:ip', (req, res) => {
+api.get('/tools/ipam/ip/:ip', requirePerm('tools'), (req, res) => {
   const snap = store.get();
   const allowed = scopedVcenterIds(req.user, snap);
   const ov = getOverride(req.params.ip);
@@ -292,7 +292,7 @@ api.post('/tools/ipam/bulk', requirePerm('tools'), (req, res) => {
 
 // ---- 대역(subnet/range) 단위 정책 — IP override와 평행. 대역 기본 관리상태를 한 항목으로. -------
 // 정책 목록 + 요약 + 상태 enum.
-api.get('/tools/ipam/policies', (req, res) => {
+api.get('/tools/ipam/policies', requirePerm('tools'), (req, res) => {
   // 범위 제한 계정에는 자기 vCenter 에 귀속된 정책만(전역 정책·타 vCenter 정책 id·claimedVcenterId 미노출).
   const allowed = scopedVcenterIds(req.user, store.get());
   let policies = getPolicies();
@@ -301,7 +301,7 @@ api.get('/tools/ipam/policies', (req, res) => {
   res.json({ policies, summary: policiesSummary(allowed ? policies : null), statuses: POLICY_STATUSES });
 });
 // 특정 IP에 무엇이 적용되는지 미리보기(정책 + override). 대역 입력 시 size 미리보기 겸용.
-api.get('/tools/ipam/policies/ip/:ip', (req, res) => {
+api.get('/tools/ipam/policies/ip/:ip', requirePerm('tools'), (req, res) => {
   const ip = req.params.ip;
   const n = ipToNum(ip);
   const snap = store.get();
@@ -318,7 +318,7 @@ api.get('/tools/ipam/policies/ip/:ip', (req, res) => {
   res.json({ ip, vcenterId: req.query.vcenterId || '', applied: applied || null, override, size: specToRange(ip)?.size ?? null });
 });
 // 대역 spec 미리보기(IP 개수) — 폼 입력 검증용(조회).
-api.get('/tools/ipam/policies/preview', (req, res) => {
+api.get('/tools/ipam/policies/preview', requirePerm('tools'), (req, res) => {
   const r = specToRange(String(req.query.spec || ''));
   res.json({ spec: req.query.spec || '', valid: !!r, size: r?.size ?? 0, lo: r?.lo ?? null, hi: r?.hi ?? null });
 });
@@ -382,7 +382,7 @@ api.delete('/tools/ipam/policies/:id', requirePerm('tools'), (req, res) => {
   if (r.ok) { logAudit({ user: req.user?.username, action: '대역정책 삭제', target: `정책 ${pol?.spec || req.params.id}`, detail: pol ? JSON.stringify(pol).slice(0, 800) : '' }); try { store.syncLedger(); } catch { /* */ } }
   res.status(r.ok ? 200 : 400).json(r);
 });
-api.get('/tools/ipam.xlsx', async (req, res) => {
+api.get('/tools/ipam.xlsx', requirePerm('tools'), async (req, res) => {
   try {
     const snap = store.get();
     const sheets = buildSubnetSheets(snap, { vcenterId: req.query.vcenterId, allowed: scopedVcenterIds(req.user, snap) });
@@ -395,7 +395,7 @@ api.get('/tools/ipam.xlsx', async (req, res) => {
 });
 
 // CSV export of the IP ledger for sharing with other tools/spreadsheets.
-api.get('/tools/ipam.csv', (req, res) => {
+api.get('/tools/ipam.csv', requirePerm('tools'), (req, res) => {
   const snap = store.get();
   const { rows } = buildIpamRows(snap, req.query.vcenterId, scopedVcenterIds(req.user, snap));
   const head = ['ip', 'vcenter_id', 'vcenter_name', 'owner_type', 'owner_name', 'power_state', 'guest_os', 'host_name', 'cluster', 'scope', 'multi_homed', 'duplicate',

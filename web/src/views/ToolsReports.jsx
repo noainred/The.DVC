@@ -348,7 +348,7 @@ export function AlertChannels({ isAdmin }) {
   if (error && !data) return <ErrorBox message={error} />;
   const save = async () => {
     setMsg('저장 중…');
-    try { await putJson('/admin/alerts', cfg); setMsg('저장됨'); }
+    try { const r = await putJson('/admin/alerts', cfg); if (r && r.ok === false) throw new Error(r.reason || '저장 실패'); setMsg('저장됨'); } // v2.479: sendJson 은 400 을 throw 하지 않는다(웹 B-1)
     catch (e) { setMsg(`실패: ${e.message}`); }
   };
   const test = async () => {

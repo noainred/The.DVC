@@ -1,5 +1,6 @@
 // 일일 리포트(헬스·스냅샷 나이·좀비·인증서·라이트사이징 등) — api.js(구 2,445줄) 분할(v2.283.0). 본문은 원본 그대로, 등록 순서는 api.js 호출 순서가 보존한다.
 import { scopedVcenterIds } from '../../auth/scope.js';
+import { requirePerm } from '../../auth/auth.js'; // v2.479(감사 S-4): /tools 조회 tools 권한
 import { store } from '../../store.js';
 import { config } from '../../config.js';
 import { getLogsDb } from '../../logs/db.js';
@@ -30,7 +31,7 @@ function scopedCerts(user, snap, vcenterId) {
 export function registerReports(api) {
 
 // ① 일일 헬스체크 리포트(vCheck 스타일) — 화면 조회용(발송은 /admin/report/daily).
-api.get('/tools/report/health', (req, res) => memoJson(req, res, 'report-health', (snap) => {
+api.get('/tools/report/health', requirePerm('tools'), (req, res) => memoJson(req, res, 'report-health', (snap) => {
   const scoped = scopeSlice(snap, req.user, req.query.vcenterId);
   return computeHealthReport(scoped, {
     snapshotAgeDays: Number(req.query.snapshotAgeDays) || undefined,
@@ -40,7 +41,7 @@ api.get('/tools/report/health', (req, res) => memoJson(req, res, 'report-health'
 }, { extraKey: scopeKey(req.user, store.get()) }));
 
 // ② 스냅샷 나이 감시 — 생성일 기준 오래된 스냅샷(수집 확장으로 snapshotOldestTs 사용 가능).
-api.get('/tools/report/snapshot-age', (req, res) => memoJson(req, res, 'report-snapage', (snap) => {
+api.get('/tools/report/snapshot-age', requirePerm('tools'), (req, res) => memoJson(req, res, 'report-snapage', (snap) => {
   const scoped = scopeSlice(snap, req.user, req.query.vcenterId);
   const minAgeDays = Math.max(0, Number(req.query.minAgeDays) || 0);
   const minSizeGB = Math.max(0, Number(req.query.minSizeGB) || 0);
@@ -64,24 +65,24 @@ api.get('/tools/report/snapshot-age', (req, res) => memoJson(req, res, 'report-s
 }, { extraKey: scopeKey(req.user, store.get()) }));
 
 // ③ 좀비/방치 리소스(RVTools 스타일).
-api.get('/tools/report/zombies', (req, res) => memoJson(req, res, 'report-zombies', (snap) => {
+api.get('/tools/report/zombies', requirePerm('tools'), (req, res) => memoJson(req, res, 'report-zombies', (snap) => {
   const scoped = scopeSlice(snap, req.user, req.query.vcenterId);
   return computeZombies(scoped, { snapshotMinGB: Number(req.query.snapshotMinGB) || undefined, snapshotAgeDays: Number(req.query.snapshotAgeDays) || undefined });
 }, { extraKey: scopeKey(req.user, store.get()) }));
 
 // ④ 인증서 만료 감시 — certMonitor 캐시(12시간 주기 + 관리자 새로고침).
-api.get('/tools/report/certs', (req, res) => {
+api.get('/tools/report/certs', requirePerm('tools'), (req, res) => {
   res.json(scopedCerts(req.user, store.get(), req.query.vcenterId));
 });
 
 // ⑤ VM 라이트사이징 — 관측 평균/피크(vmStats 누적) 기반 축소 추천.
-api.get('/tools/report/rightsizing', (req, res) => memoJson(req, res, 'report-rightsizing', (snap) => {
+api.get('/tools/report/rightsizing', requirePerm('tools'), (req, res) => memoJson(req, res, 'report-rightsizing', (snap) => {
   const scoped = scopeSlice(snap, req.user, req.query.vcenterId);
   return { ...computeRightsizing(scoped.vms, vmStatsFor), stats: vmStatsMeta() };
 }, { extraKey: scopeKey(req.user, store.get()), ttlMs: 30_000 }));
 
 // ⑥ 용량 고갈 예측 — 기존 forecastCapacity(선형회귀) 재사용(특수기능 진입점).
-api.get('/tools/report/capacity', async (req, res) => {
+api.get('/tools/report/capacity', requirePerm('tools'), async (req, res) => {
   try {
     const snap = store.get();
     const scoped = scopeSlice(snap, req.user, req.query.vcenterId);
@@ -91,27 +92,30 @@ api.get('/tools/report/capacity', async (req, res) => {
 });
 
 // ⑦ 알림 채널·이력 — 웹훅 URL(시크릿)은 절대 내리지 않는다(설정 여부만).
-api.get('/tools/report/alerts', (_req, res) => {
+api.get('/tools/report/alerts', requirePerm('tools'), (req, res) => {
   const st = alertStatus();
+  // v2.479(감사 S-3): 범위 제한 계정에는 자기 vCenter 귀속 알림만(귀속 없는 항목은 미노출 — 규약). 전체 범위는 그대로.
+  const allowed = scopedVcenterIds(req.user, store.get());
+  const slice = (arr) => (allowed ? (arr || []).filter((a) => a && a.vcenterId && allowed.has(a.vcenterId)) : arr);
   const ch = st.config?.channels || {};
   const chan = (c) => ({ enabled: !!c?.enabled, configured: !!c?.url });
   res.json({
     channels: { slack: chan(ch.slack), webhook: chan(ch.webhook), teams: chan(ch.teams) },
     cooldownMin: st.config?.cooldownMin, suppressWindowMin: st.config?.suppressWindowMin,
-    engineOn: st.engineOn, firing: st.firing, recent: st.recent,
+    engineOn: st.engineOn, firing: slice(st.firing), recent: slice(st.recent),
     daily: (() => { const d = dailyReportStatus(); return { enabled: d.enabled, hour: d.hour, minute: d.minute, lastRunTs: d.lastRunTs }; })(),
   });
 });
 
 // ⑧ 버전/패치 준수 리포트.
-api.get('/tools/report/compliance', (req, res) => memoJson(req, res, 'report-compliance', (snap) => {
+api.get('/tools/report/compliance', requirePerm('tools'), (req, res) => memoJson(req, res, 'report-compliance', (snap) => {
   const scoped = scopeSlice(snap, req.user, req.query.vcenterId);
   return computeCompliance(scoped);
 }, { extraKey: scopeKey(req.user, store.get()) }));
 
 // ⑨ 구성 변경 이력 — vcenter-logs.db에서 변경성 이벤트만. SQL 선필터(기간/vCenter/검색어) 후
 // JS 정규식 분류. 창 내 최대 2만 행 스캔(스캔 상한·잘림 여부를 응답에 명시).
-api.get('/tools/report/changes', async (req, res) => {
+api.get('/tools/report/changes', requirePerm('tools'), async (req, res) => {
   try {
     const db = await getLogsDb();
     const snap = store.get();
@@ -138,7 +142,7 @@ api.get('/tools/report/changes', async (req, res) => {
 });
 
 // ⑩ 미보호 VM(백업 공백) — 백업 계정 패턴의 스냅샷 이벤트가 관측되지 않은 가동 VM.
-api.get('/tools/report/unprotected', async (req, res) => {
+api.get('/tools/report/unprotected', requirePerm('tools'), async (req, res) => {
   try {
     const db = await getLogsDb();
     const snap = store.get();

@@ -29,9 +29,12 @@ let _last = { at: null, ok: 0, fail: 0, durationMs: null };
 const _snapshots = new Map();         // deviceId → 최근 스냅샷(중앙/엣지 공통 인메모리)
 
 /** 한 대 수집 + 시계열 적재. 실패해도 스냅샷(ok:false)을 남겨 화면이 원인을 보여준다. */
+const _inFlight = new Set();          // v2.479(감사 도메인 B-3): 같은 장비 동시 수집 금지(수동 '지금 수집' × 폴러 — SSH 2세션·늦은 결과가 최신을 덮음)
 export async function collectDeviceNow(deviceId, { onTrace = null } = {}) {
   const dev = getDeviceWithSecret(deviceId);
   if (!dev) return { ok: false, reason: '없는 장비입니다.' };
+  if (_inFlight.has(dev.id)) return { ok: false, skipped: true, reason: '이 장비는 이미 수집 중입니다.' };
+  _inFlight.add(dev.id);
   const started = Date.now();
   try {
     const snap = await withDeadline(DEVICE_TIMEOUT_MS,
@@ -47,7 +50,7 @@ export async function collectDeviceNow(deviceId, { onTrace = null } = {}) {
     snap.agent = config.agent.centralUrl ? config.agent.name : '';
     _snapshots.set(dev.id, snap);
     return { ok: false, ms: Date.now() - started, reason: snap.error };
-  }
+  } finally { _inFlight.delete(dev.id); }
 }
 
 /** 등록 화면 '연결 테스트' — 저장 전 임의 입력으로도 동작(레지스트리를 거치지 않는다). */

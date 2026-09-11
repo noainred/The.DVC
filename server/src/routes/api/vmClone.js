@@ -3,7 +3,7 @@
 // operator 개방은 운영 검증 후 별도 결정(서버가 진실의 원천 — server/CLAUDE.md RBAC 규칙).
 // 예외: /badges 는 Platform 트리(전 사용자)가 'Clone' 아이콘 표시에 쓰는 조회라 로그인만 요구
 // 하되, scope 제한 계정에는 범위 밖 vCenter 를 비운다(존재 자체도 안 흘림 — scope 규칙).
-import { requireRole } from '../../auth/auth.js';
+import { requireRole, requirePerm } from '../../auth/auth.js'; // v2.479(감사 S-4)
 import { scopedVcenterIds, inUserWriteScope } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
@@ -64,7 +64,7 @@ api.post('/tools/vm-clone/jobs/:id/run', adminOnly, (req, res) => {
  * 로그인 사용자 전체 허용(민감정보 아님 — 어떤 VM 이 백업 대상인지 뿐), scope 는 강제:
  * 범위 밖 vCenter 요청은 빈 목록(404 아님 — 트리 폴링 경로라 오류 소음을 만들지 않는다).
  */
-api.get('/tools/vm-clone/badges', (req, res) => {
+api.get('/tools/vm-clone/badges', requirePerm('tools'), (req, res) => {
   const vcenterId = String(req.query.vcenterId || '');
   const allowed = scopedVcenterIds(req.user, store.get());
   if (!vcenterId || (allowed && !allowed.has(vcenterId))) return res.json({ vmIds: [] });

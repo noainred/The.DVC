@@ -98,6 +98,7 @@ export function saveBmServer(body = {}) {
   const existing = body.id ? data.servers.find((s) => s.id === body.id) : null;
   if (!existing && data.servers.length >= 1000) return { ok: false, reason: '서버는 최대 1,000대까지 등록할 수 있습니다.' };
   const server = existing || { id: crypto.randomBytes(5).toString('hex') };
+  const hostChanged = !!existing && existing.host !== host; // v2.479(감사 S-2): host 변경 시 비밀번호 이월 금지
   server.host = host;
   server.port = port;
   server.username = username;
@@ -118,7 +119,7 @@ export function saveBmServer(body = {}) {
   server.enabled = body.enabled !== false;
   // 빈/마스킹 비밀번호는 기존 유지(편집 시 재입력 강요 안 함) — 신규인데 비었으면 빈 값 저장(무비번 SSH 허용 안 하는 서버는 수집 실패로 표시됨).
   if (body.password !== undefined && body.password !== '' && body.password !== '********') server.password = String(body.password);
-  else if (!existing) server.password = '';
+  else if (!existing || hostChanged) server.password = ''; // 신규 또는 host 변경 → 빈 값(재입력 필요)
   if (!existing) data.servers.push(server);
   persist();
   return { ok: true, server: redact(server) };

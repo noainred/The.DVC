@@ -1,4 +1,4 @@
-import { config, loadVcenterConfig } from './config.js';
+import { config, loadVcenterConfig , secretsReady } from './config.js';
 import { generateSnapshot } from './mock/generator.js';
 import { collectFromVCenter } from './vcenter/restClient.js';
 import { describeError } from './util/errors.js';
@@ -371,7 +371,8 @@ class Store {
   }
 
   start() {
-    this.refresh({ scheduled: true }); // 최초 1회(가드 비어 있어 즉시 실행)
+    // v2.479(감사 코어 B-2): 자격증명 복호 모듈(secretVault 지연 import)이 준비된 뒤 첫 수집 — 암호문 로그인 방지.
+    secretsReady.then(() => this.refresh({ scheduled: true })).catch(() => {});
     this.timer = setInterval(() => { this.refresh({ scheduled: true }).catch(() => {}); }, config.pollIntervalMs);
     this.timer.unref?.();
   }

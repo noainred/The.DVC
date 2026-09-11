@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from './config.js';
 import { atomicWriteFileSync } from './util/atomicWrite.js';
+import { clientIp } from './util/rateLimit.js'; // v2.479(감사 코어 B-4): XFF 는 TRUST_PROXY 일 때만
 
 const FILE = path.join(config.configDir, 'audit.ndjson');
 const MAX = Number(process.env.AUDIT_MAX) || 20000;
@@ -91,7 +92,7 @@ export function auditMiddleware(req, res, next) {
       user: req.user?.username || 'anonymous',
       action: describe(req.method, urlPath),
       target: urlPath,
-      ip: (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').toString().split(',')[0],
+      ip: clientIp(req), // 프록시 없는 배포에서 임의 클라이언트가 헤더로 감사 IP 를 위조하던 경로 차단
     });
   });
   next();

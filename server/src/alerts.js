@@ -59,6 +59,7 @@ export function loadAlertConfig() {
           slack: { ...DEFAULTS.channels.slack, ...s.channels?.slack },
           webhook: { ...DEFAULTS.channels.webhook, ...s.channels?.webhook },
           teams: { ...DEFAULTS.channels.teams, ...s.channels?.teams },
+          email: { ...DEFAULTS.channels.email, ...s.channels?.email }, // v2.479(감사 코어 B-1): 로드에서 탈락돼 메일 알림이 죽어 있었다
         },
         rules: { ...DEFAULTS.rules, ...(s.rules || {}) },
         cooldownMin: s.cooldownMin ?? DEFAULTS.cooldownMin,
@@ -76,6 +77,7 @@ export function saveAlertConfig(body = {}) {
       slack: { enabled: !!body.channels?.slack?.enabled, url: body.channels?.slack?.url ?? cur.channels.slack.url },
       webhook: { enabled: !!body.channels?.webhook?.enabled, url: body.channels?.webhook?.url ?? cur.channels.webhook.url },
       teams: { enabled: !!body.channels?.teams?.enabled, url: body.channels?.teams?.url ?? (cur.channels.teams?.url || '') },
+      email: { enabled: !!body.channels?.email?.enabled }, // v2.479: 저장에서도 탈락(웹 체크박스가 저장 직후 풀리던 원인)
     },
     rules: { ...cur.rules, ...(body.rules || {}) },
     cooldownMin: Math.max(1, Number(body.cooldownMin) || cur.cooldownMin),
@@ -94,23 +96,23 @@ export function evaluate(snap, cfg = loadAlertConfig()) {
   const R = cfg.rules;
   if (R.criticalAlarms?.enabled) {
     for (const a of (snap.alarms || []).filter((x) => x.severity === 'critical').slice(0, 100)) {
-      out.push({ key: `alarm:${a.id || a.name}`, severity: 'critical', title: `위험 알람: ${a.name || a.entity || ''}`, detail: `${a.vcenterId || ''} ${a.entity || ''} ${a.status || ''}`.trim() });
+      out.push({ key: `alarm:${a.id || a.name}`, vcenterId: a.vcenterId || '', severity: 'critical', title: `위험 알람: ${a.name || a.entity || ''}`, detail: `${a.vcenterId || ''} ${a.entity || ''} ${a.status || ''}`.trim() });
     }
   }
   if (R.vcenterDown?.enabled) {
     for (const v of (snap.vcenters || []).filter((x) => x.status === 'unreachable')) {
-      out.push({ key: `vc:${v.id}`, severity: 'critical', title: `vCenter 수집 실패: ${v.name || v.id}`, detail: v.error || '연결 불가' });
+      out.push({ key: `vc:${v.id}`, vcenterId: v.id, severity: 'critical', title: `vCenter 수집 실패: ${v.name || v.id}`, detail: v.error || '연결 불가' });
     }
   }
   if (R.hostDisconnected?.enabled) {
     for (const h of (snap.hosts || []).filter((x) => x.connectionState === 'DISCONNECTED').slice(0, 100)) {
-      out.push({ key: `host:${h.id}`, severity: 'warning', title: `호스트 연결 끊김: ${h.name}`, detail: `${h.vcenterId} / ${h.cluster || ''}` });
+      out.push({ key: `host:${h.id}`, vcenterId: h.vcenterId || '', severity: 'warning', title: `호스트 연결 끊김: ${h.name}`, detail: `${h.vcenterId} / ${h.cluster || ''}` });
     }
   }
   if (R.datastorePct?.enabled) {
     const th = Number(R.datastorePct.threshold) || 90;
     for (const d of (snap.datastores || []).filter((x) => (x.usagePct || 0) >= th).slice(0, 200)) {
-      out.push({ key: `ds:${d.id}`, severity: d.usagePct >= 95 ? 'critical' : 'warning', title: `데이터스토어 용량 ${d.usagePct}%: ${d.name}`, detail: `${d.vcenterId} · 여유 ${d.freeGB}GB` });
+      out.push({ key: `ds:${d.id}`, vcenterId: d.vcenterId || '', severity: d.usagePct >= 95 ? 'critical' : 'warning', title: `데이터스토어 용량 ${d.usagePct}%: ${d.name}`, detail: `${d.vcenterId} · 여유 ${d.freeGB}GB` });
     }
   }
   if (R.ramOvercommitPct?.enabled || R.vcpuPerCore?.enabled) {
@@ -330,7 +332,7 @@ function pushRecent(entry) { recent.unshift(entry); if (recent.length > 200) rec
 
 async function tick() {
   const cfg = loadAlertConfig();
-  if (!cfg.channels.slack?.enabled && !cfg.channels.webhook?.enabled && !cfg.channels.teams?.enabled) { // still track state for UI
+  if (!cfg.channels.slack?.enabled && !cfg.channels.webhook?.enabled && !cfg.channels.teams?.enabled && !cfg.channels.email?.enabled) { // still track state for UI (v2.479: email 포함)
     refreshState(cfg, false);
     return;
   }
@@ -403,5 +405,5 @@ function rescheduleAlertEngine() {
 export async function testAlert(user) {
   const res = await notify({ key: 'test', severity: 'warning', title: '테스트 알림', detail: `${user || ''} · ${new Date().toLocaleString()}` });
   logAudit({ user: user || 'unknown', action: '알림 테스트 발송', detail: res.join(', ') });
-  return { ok: res.some((r) => /:(2\d\d)/.test(r)) || res.length === 0, results: res };
+  return { ok: res.some((r) => /:(2\d\d|ok)\b/.test(r)) || res.length === 0, results: res }; // v2.479: 메일 결과 'email:ok' 인식(코어 B-9)
 }

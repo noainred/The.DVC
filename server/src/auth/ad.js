@@ -211,7 +211,7 @@ function bindAsync(client, dn, password) {
 
 // RFC 4515 LDAP 필터 값 이스케이프 — 사용자 입력이 필터 구조를 왜곡하지 못하게(필터 인젝션 방지).
 function ldapEscape(v) {
-  return String(v ?? '').replace(/[\\*() ]/g, (c) => `\\${c.charCodeAt(0).toString(16).padStart(2, '0')}`);
+  return String(v ?? '').replace(/[\\*()\x00]/g, (c) => `\\${c.charCodeAt(0).toString(16).padStart(2, '0')}`);
 }
 
 function searchUser(client, ad, username, upn) {

@@ -11,6 +11,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 
 const FILE = path.join(config.configDir, 'emergency-stop.json');
 
@@ -23,7 +24,7 @@ function load() {
       const p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
       if (p && typeof p === 'object') { state = p; return state; }
     }
-  } catch { /* fall through to default */ }
+  } catch (e) { preserveCorrupt(FILE, e.message); console.error('[emergency-stop] 상태 파일 손상 — 기본(비활성)으로 시작합니다. 긴급중단이 필요하면 다시 누르세요.'); } // v2.479: 손상 시 조용한 해제 금지(보존+경고)
   state = { active: false, by: [], at: null };
   return state;
 }
@@ -31,7 +32,7 @@ function load() {
 function persist() {
   try {
     fs.mkdirSync(path.dirname(FILE), { recursive: true });
-    fs.writeFileSync(FILE, JSON.stringify(state, null, 2), { mode: 0o600 });
+    atomicWriteFileSync(FILE, JSON.stringify(state, null, 2), { mode: 0o600 });
     try { fs.chmodSync(FILE, 0o600); } catch { /* best effort */ }
   } catch (e) { console.error(`[emergency-stop] persist 실패: ${e.message}`); }
 }

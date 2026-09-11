@@ -28,7 +28,7 @@ api.get('/tools/secret-scan', requireRole('admin'), async (req, res) => {
 
 // Guest OS distribution — VM counts grouped by Guest OS (종류·버전), optionally
 // per vCenter. Family rollup + full-name detail; power(on/off) split.
-api.get('/tools/guest-os', (req, res) => memoJson(req, res, 'tools-guest-os', (snap) => {
+api.get('/tools/guest-os', requirePerm('tools'), (req, res) => memoJson(req, res, 'tools-guest-os', (snap) => {
   let vms = snap.vms;
   const allowed = scopedVcenterIds(req.user, snap);
   if (allowed) vms = vms.filter((v) => allowed.has(v.vcenterId));
@@ -46,7 +46,7 @@ api.get('/tools/guest-os', (req, res) => memoJson(req, res, 'tools-guest-os', (s
 
 // 특정 Guest OS(종류·버전) 또는 계열에 해당하는 VM 목록 — VM 수 클릭 시 대상 VM/CSV용.
 // 쿼리: vcenterId·power(on/off)·kind(vm/template) + os(정확 일치) 또는 family(계열).
-api.get('/tools/guest-os/vms', (req, res) => {
+api.get('/tools/guest-os/vms', requirePerm('tools'), (req, res) => {
   const snap = store.get();
   let vms = snap.vms;
   const allowed = scopedVcenterIds(req.user, snap);
@@ -70,7 +70,7 @@ api.get('/tools/guest-os/vms', (req, res) => {
 });
 
 // Host HBA adapters and their link speeds (optionally per vCenter).
-api.get('/tools/hba', (req, res) => {
+api.get('/tools/hba', requirePerm('tools'), (req, res) => {
   const snap = store.get();
   let hosts = snap.hosts;
   const allowed = scopedVcenterIds(req.user, snap);
@@ -94,7 +94,7 @@ api.get('/tools/hba', (req, res) => {
 });
 
 // License overview across all vCenters (optionally one). Aggregates per product.
-api.get('/tools/licenses', (req, res) => {
+api.get('/tools/licenses', requirePerm('tools'), (req, res) => {
   const snap = store.get();
   let vcs = snap.vcenters || [];
   const allowed = scopedVcenterIds(req.user, snap);
@@ -120,7 +120,7 @@ api.get('/tools/licenses', (req, res) => {
 // VCF/VVF 등 vCenter에 할당된 전 제품) + NSX Manager(/api/v1/licenses) + Horizon Connection
 // Server(REST /config/v1/licenses, 10분 캐시) 취합. 만료/임박(90일)/정상/영구 + 제품군 분류.
 // vCenter/NSX는 캐시 스냅샷만 사용(추가 수집 없음), Horizon만 캐시 만료 시 라이브 조회.
-api.get('/tools/license-expiry', async (req, res) => {
+api.get('/tools/license-expiry', requirePerm('tools'), async (req, res) => {
   const snap = store.get();
   let vcs = snap.vcenters || [];
   const allowed = scopedVcenterIds(req.user, snap);
