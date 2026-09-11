@@ -493,7 +493,7 @@ const rightsizePolicy = () => ({
 
 api.get('/tools/rightsize', async (req, res) => {
   const vmId = String(req.query.vmId || '');
-  const days = [7, 30, 90].includes(Number(req.query.days)) ? Number(req.query.days) : 7;
+  const days = [7, 30, 90, 180, 365].includes(Number(req.query.days)) ? Number(req.query.days) : 7;
   const snap = store.get();
   const vm = (snap.vms || []).find((v) => v.id === vmId);
   const allowed = scopedVcenterIds(req.user, snap);
