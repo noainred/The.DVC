@@ -9,7 +9,7 @@ import { store } from '../store.js';
 import { loadVcenterConfig } from '../config.js';
 import { collectDetails } from '../vcenter/vmExport.js';
 import { parseGuestDisks } from '../vcenter/soapParse.js';
-import { vmSummary, rankReclaim, usageTrend, reclaimAdvice } from './analyze.js';
+import { vmSummary, rankReclaim, usageTrend, reclaimAdvice, normUsageFactor } from './analyze.js';
 import { commitCollection, listLatest, vmSeries, partSeries, latestOne, coverageByVcenter } from './db.js';
 import { datacenterOfVcenter, listDatacenters } from '../datacenter/store.js';
 
@@ -76,7 +76,8 @@ export async function collectAndStore(vcenterId, { changeThresholdGB = 1 } = {})
  * 회수 리포트 — vm_latest 를 scope 로 좁혀 회수 순위를 만든다.
  * allowed: Set<vcenterId> | null(무제한). opts: { minReclaimGB }
  */
-export async function reclaimReport({ allowed = null, minReclaimGB = 5, maxRatioPct = null, vcenterId = null } = {}) {
+export async function reclaimReport({ allowed = null, minReclaimGB = 5, maxRatioPct = null, vcenterId = null, usageFactor = 1 } = {}) {
+  const uf = normUsageFactor(usageFactor);   // v2.482: 회수 = 할당 − 사용×배율
   let ids = allowed ? [...allowed] : null;
   // 특정 vCenter 선택 — scope 우선: 허용 목록 안일 때만 좁힌다(범위 밖이면 빈 결과).
   if (vcenterId) ids = (allowed && !allowed.has(vcenterId)) ? [] : [vcenterId];
@@ -86,11 +87,11 @@ export async function reclaimReport({ allowed = null, minReclaimGB = 5, maxRatio
   let collectedCount = 0; let maxFreeGB = 0;
   for (const r of rows) {
     collectedCount++;
-    const f = Math.max(0, (Number(r.allocGB) || 0) - (Number(r.usedGB) || 0));
+    const f = Math.max(0, (Number(r.allocGB) || 0) - (Number(r.usedGB) || 0) * uf);
     if (f > maxFreeGB) maxFreeGB = f;
   }
   maxFreeGB = Math.round(maxFreeGB * 10) / 10;
-  const ranked = rankReclaim(rows, { minReclaimGB });
+  const ranked = rankReclaim(rows, { minReclaimGB, usageFactor: uf });
   // 각 행에 그룹핑 축(법인=DataCenter · vCenter · 클러스터)을 붙인다 — 프론트가 선택 구분.
   const meta = buildVcMeta();
   const clusterOf = new Map();
@@ -122,7 +123,7 @@ export async function reclaimReport({ allowed = null, minReclaimGB = 5, maxRatio
   // vm_latest 에 데이터가 있는 vCenter 만이 아니라 '보여야 할 모든 vCenter'를 기준으로 만든다:
   // 데이터가 0 인 vCenter 도 '왜 없나(엣지 push 대기 / Tools 미보고 / direct 미수집)'를 화면이 알린다.
   const coverage = await buildCoverage(ids, idSet, vcenterId);
-  return { rows: enriched, totalReclaimGB, vmCount: enriched.length, collectedCount, maxFreeGB, clusters, coverage, minReclaimGB, maxRatioPct: Number.isFinite(mr) ? mr : null, scoped: Boolean(allowed) };
+  return { rows: enriched, totalReclaimGB, vmCount: enriched.length, collectedCount, maxFreeGB, clusters, coverage, minReclaimGB, maxRatioPct: Number.isFinite(mr) ? mr : null, usageFactor: uf, scoped: Boolean(allowed) };
 }
 
 /**
@@ -157,9 +158,10 @@ async function buildCoverage(ids, idSet, vcenterId) {
 }
 
 /** 한 VM 의 파티션별 최신값 + 추이 판정(드릴다운). days>0 이면 그 구간만 조회(최근 N일). */
-export async function vmDetail(vmId, { flatPerDayGB = 0.1, days = 0 } = {}) {
+export async function vmDetail(vmId, { flatPerDayGB = 0.1, days = 0, usageFactor = 1 } = {}) {
   const latest = await latestOne(vmId);
   if (!latest) return null;
+  const uf = normUsageFactor(usageFactor);   // v2.482: 목록과 같은 배율로 파티션/VM 여유 계산
   const d = Number(days);
   const sinceTs = Number.isFinite(d) && d > 0 ? Date.now() - d * 86_400_000 : 0;
   const [vs, ps] = await Promise.all([vmSeries(vmId, sinceTs), partSeries(vmId, sinceTs)]);
@@ -172,21 +174,21 @@ export async function vmDetail(vmId, { flatPerDayGB = 0.1, days = 0 } = {}) {
     e.capGB = r.capGB; e.usedGB = r.usedGB; // 최신값(ORDER BY path,ts)
   }
   const partitions = [...byPath.values()].map((e) => {
-    const freeGB = Math.round(Math.max(0, e.capGB - e.usedGB) * 10) / 10;
+    const freeGB = Math.round(Math.max(0, e.capGB - e.usedGB * uf) * 10) / 10;
     const trend = usageTrend(e.points, { flatPerDayGB });
     return { path: e.path, capGB: e.capGB, usedGB: e.usedGB, freeGB, trend, advice: reclaimAdvice(freeGB, trend.trend) };
   });
   const vmTrend = usageTrend(vs.map((p) => ({ ts: p.ts, usedGB: p.usedGB })), { flatPerDayGB });
-  const freeGB = Math.round(Math.max(0, latest.allocGB - latest.usedGB) * 10) / 10;
+  const freeGB = Math.round(Math.max(0, latest.allocGB - latest.usedGB * uf) * 10) / 10;
   const ratioPct = latest.allocGB > 0 ? Math.round((latest.usedGB / latest.allocGB) * 1000) / 10 : null;
-  return { ...latest, freeGB, ratioPct, vmTrend, vmTrendSeries: vs, partitions, days: sinceTs ? d : null, sinceTs: sinceTs || null };
+  return { ...latest, freeGB, ratioPct, usageFactor: uf, vmTrend, vmTrendSeries: vs, partitions, days: sinceTs ? d : null, sinceTs: sinceTs || null };
 }
 
 /** CSV — 회수 목록(VM 1행). 수식 인젝션 가드 + BOM. rows 는 rankReclaim 결과. */
 export function reclaimCsv(rows) {
   const cols = [
     ['corpName', '법인'], ['vcenterName', 'vCenter'], ['cluster', '클러스터'], ['vmName', 'VM'],
-    ['allocGB', '할당(GB)'], ['usedGB', '사용(GB)'],
+    ['allocGB', '할당(GB)'], ['usedGB', '사용(GB)'], ['neededGB', '필요=사용×배율(GB)'],
     ['freeGB', '회수가능(GB)'], ['ratioPct', '사용률(%)'], ['partCount', '파티션수'],
   ];
   const esc = (v) => {

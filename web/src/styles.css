@@ -835,6 +835,7 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 .gd-min input:focus { outline:none; border-color:var(--accent); }
 .gd-step { border:1px solid var(--border); background:var(--panel-2); color:var(--text-dim); font:inherit; font-size:11px; font-weight:600; padding:4px 8px; border-radius:7px; cursor:pointer; }
 .gd-step:hover { background:var(--accent); color:#fff; border-color:var(--accent); }
+.gd-step.gd-step-on { background:var(--accent); color:#fff; border-color:var(--accent); }
 .gd-btn { border:1px solid var(--border); background:var(--panel-2); color:var(--text); font:inherit; font-size:12px; padding:6px 14px; border-radius:9px; cursor:pointer; }
 .gd-btn:hover:not(:disabled) { border-color:var(--accent); }
 .gd-btn:disabled { opacity:.5; cursor:default; }

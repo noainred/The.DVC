@@ -7,7 +7,10 @@
  * 정의(화면 문구도 이 정의를 그대로 쓴다):
  *  · 할당(alloc)   : 게스트가 인식한 파티션 capacity 합(GB). VMware Tools 가 보고한 파일시스템 크기.
  *  · 사용(used)    : 파티션 used(=capacity−free) 합(GB).
- *  · 여유(free)    : 할당−사용. **게스트 안에서 비어 있는 공간** = 디스크를 줄이면 회수 가능한 상한.
+ *  · 여유(free)    : 할당−사용×배율. **게스트 안에서 비어 있는 공간** = 디스크를 줄이면 회수 가능한 상한.
+ *                    배율(usageFactor, v2.482 사용자 요청)은 '사용량의 N배는 남겨 둔다' 는 운영 여유다 —
+ *                    100 TB 할당·30 TB 사용이면 70 TB 를 다 뺄 수는 없으니 배율 2 → 100−30×2 = 40 TB.
+ *                    기본 1(= 할당−사용). 음수는 0 으로 자른다(회수 불가).
  *  · 비율(ratio)   : 사용/할당 × 100. 할당 0 이면 null(추정하지 않는다).
  *
  * 정직 원칙:
@@ -36,19 +39,28 @@ export function vmSummary(parts) {
  * opts: { minReclaimGB=5 } — 이보다 작은 여유는 제외(잡음 컷).
  * 반환: { rows(정렬·회수량 포함), totalReclaimGB, vmCount }
  */
-export function rankReclaim(rows, { minReclaimGB = 5 } = {}) {
+/** 사용량 배율 정규화 — 숫자·양수만 인정, 0.1~100 으로 제한. 그 외(미지정·0·음수·NaN)는 1(기본). */
+export function normUsageFactor(x) {
+  const f = Number(x);
+  if (!Number.isFinite(f) || f <= 0) return 1;
+  return Math.min(100, Math.max(0.1, Math.round(f * 100) / 100));
+}
+
+export function rankReclaim(rows, { minReclaimGB = 5, usageFactor = 1 } = {}) {
+  const f = normUsageFactor(usageFactor);
   const out = [];
   for (const r of (rows || [])) {
     const alloc = Number(r.allocGB) || 0;
     const used = Number(r.usedGB) || 0;
-    const free = round1(Math.max(0, alloc - used));
+    const neededGB = round1(used * f);                       // 남겨 둘 양 = 사용 × 배율
+    const free = round1(Math.max(0, alloc - neededGB));
     const ratioPct = alloc > 0 ? Math.round((used / alloc) * 1000) / 10 : null;
     if (free < minReclaimGB) continue;
-    out.push({ ...r, allocGB: round1(alloc), usedGB: round1(used), freeGB: free, ratioPct });
+    out.push({ ...r, allocGB: round1(alloc), usedGB: round1(used), neededGB, freeGB: free, ratioPct });
   }
   out.sort((a, b) => b.freeGB - a.freeGB);
   const totalReclaimGB = round1(out.reduce((s, r) => s + r.freeGB, 0));
-  return { rows: out, totalReclaimGB, vmCount: out.length };
+  return { rows: out, totalReclaimGB, vmCount: out.length, usageFactor: f };
 }
 
 /**

@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { vmSummary, rankReclaim, usageTrend, reclaimAdvice } from '../src/guestdisk/analyze.js';
+import { vmSummary, rankReclaim, usageTrend, reclaimAdvice, normUsageFactor } from '../src/guestdisk/analyze.js';
 import { reclaimCsv } from '../src/guestdisk/service.js';
 
 test('vmSummary — 파티션 합·여유·비율', () => {
@@ -30,6 +30,30 @@ test('rankReclaim — 여유 큰 순 정렬 + 잡음 컷 + 합계', () => {
   assert.equal(r.vmCount, 2);
   assert.equal(r.totalReclaimGB, 90);
   assert.equal(r.rows[0].freeGB, 80);
+});
+
+test('rankReclaim — 사용량 배율(v2.482): 회수 = 할당 − 사용×배율, 음수는 0', () => {
+  // 사용자 예: 100 TB 할당·30 TB 사용, 배율 2 → 100 − 30×2 = 40 TB
+  const rows = [
+    { vmId: 'a', allocGB: 100, usedGB: 30 },   // ×2 → 40
+    { vmId: 'b', allocGB: 100, usedGB: 60 },   // ×2 → 0 (컷)
+    { vmId: 'c', allocGB: 100, usedGB: 10 },   // ×2 → 80
+  ];
+  const r = rankReclaim(rows, { minReclaimGB: 5, usageFactor: 2 });
+  assert.deepEqual(r.rows.map((x) => x.vmId), ['c', 'a']);
+  assert.equal(r.rows[1].freeGB, 40);
+  assert.equal(r.rows[1].neededGB, 60);
+  assert.equal(r.totalReclaimGB, 120);
+  assert.equal(r.usageFactor, 2);
+  // 배율 미지정/0/음수/NaN 은 1(= 예전 결과 그대로)
+  const base = rankReclaim(rows, { minReclaimGB: 5 });
+  assert.equal(base.rows.find((x) => x.vmId === 'a').freeGB, 70);
+  assert.equal(rankReclaim(rows, { minReclaimGB: 5, usageFactor: 0 }).rows.find((x) => x.vmId === 'a').freeGB, 70);
+  assert.equal(rankReclaim(rows, { minReclaimGB: 5, usageFactor: 'x' }).usageFactor, 1);
+  assert.equal(normUsageFactor(1.5), 1.5);
+  assert.equal(normUsageFactor(1000), 100);   // 상한
+  assert.equal(normUsageFactor(0.01), 0.1);   // 하한
+  assert.equal(normUsageFactor(-2), 1);
 });
 
 test('usageTrend — 증가/평탄/근거부족', () => {

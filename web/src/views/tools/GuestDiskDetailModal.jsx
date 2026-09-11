@@ -61,7 +61,7 @@ function buildGuestDoc(d, vm, days, u, div) {
   blocks.push({ type: 'kvrow', items: [
     { k: '할당(게스트 인식)', v: size(d.allocGB) },
     { k: '사용', v: size(d.usedGB) },
-    { k: '회수 가능(여유)', v: size(d.freeGB), color: 'green' },
+    { k: '회수 가능(여유)', v: size(d.freeGB), color: 'green', sub: Number(d.usageFactor) > 0 && Number(d.usageFactor) !== 1 ? `배율 ×${d.usageFactor}` : undefined },
     { k: '사용률', v: d.ratioPct == null ? '—' : `${d.ratioPct}%`, sub: '사용 / 할당' },
     { k: '파티션 수', v: String((d.partitions || []).length) },
     { k: '전체 사용량 추이', v: `${trendLabel(vt?.trend).label}${vt?.growthGBPerDay != null ? ` (${vt.growthGBPerDay > 0 ? '+' : ''}${vt.growthGBPerDay} GB/일)` : ''}`, sub: vt?.spanDays ? `관측 ${vt.spanDays}일` : '표본 부족' },
@@ -127,7 +127,7 @@ export function TrendChart({ rows, unitLabel, days, capGB, height = 220 }) {
   );
 }
 
-export default function GuestDiskDetailModal({ vm, initUnit = 'auto', onClose }) {
+export default function GuestDiskDetailModal({ vm, initUnit = 'auto', usageFactor = 1, onClose }) {
   // ⚠ 훅은 전부 최상단(조기 return 위)에 — CLAUDE.md 프론트 회귀 방지(React #310).
   const [days, setDays] = useState(30);
   const [unit, setUnit] = useState(initUnit || 'auto');
@@ -141,13 +141,14 @@ export default function GuestDiskDetailModal({ vm, initUnit = 'auto', onClose })
   useEffect(() => {
     let alive = true;
     setLoading(true); setError(null);
-    const q = days > 0 ? `?days=${days}` : '';
+    const uf = Number(usageFactor) > 0 && Number(usageFactor) !== 1 ? Number(usageFactor) : 1;
+    const q = `?days=${days > 0 ? days : 0}${uf !== 1 ? `&usageFactor=${uf}` : ''}`;   // v2.482: 목록과 같은 배율
     fetchJson(`/tools/guest-disk/vm/${encodeURIComponent(vm.id)}${q}`)
       .then((d) => { if (alive) setData(d); })
       .catch((e) => { if (alive) setError(e.message); })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
-  }, [vm.id, days]);
+  }, [vm.id, days, usageFactor]);
 
   const save = async (kind) => {
     const el = sheetRef.current;
@@ -214,7 +215,7 @@ export default function GuestDiskDetailModal({ vm, initUnit = 'auto', onClose })
               <div className="flex gap wrap" style={{ gap: 18 }}>
                 <Stat k="할당(게스트 인식)" v={fmtSize(d.allocGB, dispUnit)} />
                 <Stat k="사용" v={fmtSize(d.usedGB, dispUnit)} />
-                <Stat k="회수 가능(여유)" v={fmtSize(d.freeGB, dispUnit)} color="#4ade80" />
+                <Stat k="회수 가능(여유)" v={fmtSize(d.freeGB, dispUnit)} color="#4ade80" sub={Number(d.usageFactor) > 0 && Number(d.usageFactor) !== 1 ? `배율 ×${d.usageFactor}: 할당 − 사용×${d.usageFactor}` : undefined} />
                 <Stat k="사용률" v={pct(d.ratioPct)} sub="사용 / 할당" />
                 <Stat k="파티션 수" v={(d.partitions || []).length} />
                 <Stat k="전체 사용량 추이"
