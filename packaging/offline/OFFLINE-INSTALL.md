@@ -85,6 +85,21 @@ sudo -u vmportal /opt/vmware-portal/runtime/node/bin/node \
   -e "import('./src/auth/auth.js').then(m=>console.log(m.hashPassword(process.argv[1])))" 'YourPassword'
 ```
 
+### 호스트 접근 제어 sudoers (v2.485)
+
+`install.sh` 는 서비스 계정(`vmportal`)이 포탈 화면(설정 › Security › 호스트 접근 제어)에서 firewalld 를 제어할 수 있도록
+`/etc/sudoers.d/vmware-portal-hostaccess` 를 설치한다(`firewall-cmd` 전체 + `systemctl {stop,start,disable,enable} sshd.service`
+만, visudo 검증 실패 시 미설치). **v2.485 이전에 설치해 업그레이드 번들로만 올라온 서버**에는 이 파일이 없으므로 화면의
+'엔진 상태' 가 안내하는 두 줄을 root 가 한 번 추가한다:
+
+```bash
+visudo -f /etc/sudoers.d/vmware-portal-hostaccess
+# vmportal ALL=(root) NOPASSWD: /usr/bin/firewall-cmd
+# vmportal ALL=(root) NOPASSWD: /usr/bin/systemctl stop sshd.service, /usr/bin/systemctl start sshd.service, /usr/bin/systemctl disable sshd.service, /usr/bin/systemctl enable sshd.service
+```
+
+`uninstall.sh` 가 함께 제거한다. 설계·잠금 방지·오픈소스 권고는 `docs/HOST-ACCESS.md`.
+
 ## 운영 명령
 
 ```bash
