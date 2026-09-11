@@ -397,7 +397,7 @@ git 소스로 실행하면 `CONFIG_DIR` 기본값이 `server/config` 라 이 파
 특수 기능 카드는 현재 **77개**(`web/src/views/specialToolsList.js` 가 진실의 원천; 설정 › 특수 기능 카테고리로 섹션 묶기 가능). 위 목록에 없는 최근 도구:
 
 - **게스트 디스크 회수**(`guest-disk`, v2.466+): 게스트 OS 파티션 할당/사용량을 엣지가 수집해 중앙으로 push(`POST /api/central/guest-disk`), 회수 후보(과할당) 리포트·VM 상세 추이(7일~1년)·PDF/JPG 내보내기.
-- **자원 축소 근거 리포트**(`rightsize`, v2.445+): vCenter 성능 롤업(일/주/월/년)으로 CPU·메모리 실사용 p95·CPU Ready 를 계산해 권장 사양을 제시. 이력에 없는 메모리 카운터(active/swapped)는 실시간(최근 1시간)으로 폴백. 차트 Y축은 할당 용량까지 표시.
+- **자원 축소 근거 리포트**(`rightsize`, v2.445+): vCenter 성능 롤업(일/주/월/년)으로 CPU·메모리 실사용 p95·CPU Ready 를 계산해 권장 사양을 제시. 이력에 없는 메모리 카운터(active/swapped)는 실시간(최근 1시간)으로 폴백. 차트 Y축은 할당 용량까지 표시. **v2.481**: 메모리 권고는 워킹셋(mem.active) 관측 최대 × (1+여유) 기준 — consumed 는 ESXi 가 회수하지 않은 과거 터치 페이지라 하한으로 쓰지 않는다(예전엔 consumed 하한 때문에 사실상 항상 '변경 없음'). active 이력이 없으면 mem.usage × 할당으로 복원, 실시간 active 최대가 더 크면 채택. `RIGHTSIZE_MEM_BASIS=consumed` 로 구 산식 유지 가능. 관측 기간 주 값은 요청 창(7/30/90/180/365일), 실제 데이터 범위는 부제. 디스크 섹션에 게스트 디스크(guest.disk) 사용량·파티션·추이를 같은 기간으로 결합.
 - **벡터 PDF 내보내기**(v2.471+): 리포트를 이미지가 아니라 글자·도형으로 그린다(Pretendard KS X 1001 서브셋 폰트 번들, OFL). 표 셀은 열 폭에 맞춰 줄바꿈(v2.475).
 - **연결 안 되는 vCenter 모달의 접속확인**(v2.476): 헤더 `(N 불가)` 클릭 → 목록에서 관리자가 즉시 로그인 테스트(`POST /admin/vcenters/test`). 성공하면 `✓ 접속 확인됨` 으로 표시(수집 상태는 다음 주기에 반영).
 - 통합 계정 관리(`credentials`, v2.419)·SAN 스위치 모니터링(`sanswitch`, v2.410)·중계 토폴로지/경로 점검(`relaytopo`/`relaycheck`, v2.431)·원격 명령 실행(`rma`, v2.416)·PDU 정보·폴더 사용량 Top-N·시리얼 조회.
