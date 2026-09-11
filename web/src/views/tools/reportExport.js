@@ -125,3 +125,191 @@ export async function saveElementAsPdf(el, filename, { scale = 2, quality = 0.92
   pdf.save(filename);
   return { pages: slices.length, width: canvas.width, height: canvas.height };
 }
+
+/* ══════════════ 벡터 PDF — 글자·도형(래스터 이미지 대신 jsPDF 로 직접 그림) ══════════════
+ * 사용자 요구(v2.471): "PDF 를 그림이 아니라 글자와 도형으로". html2canvas 캡처는 화면을 픽셀로
+ * 떠 넣어 확대하면 흐리고 텍스트 선택도 안 된다. 여기서는 리포트의 '문서 모델'을 받아 제목·표·
+ * 차트를 jsPDF 의 text/line/rect 로 그린다 → 선택·확대해도 선명한 벡터, 파일도 작다.
+ * 한글은 임베드 폰트(Pretendard KS X 1001 서브셋, 저장 클릭 시 동적 로드)로 진짜 텍스트로 그린다.
+ *
+ * 문서 모델: { title, subtitle?, meta?, blocks: [ block ] }
+ *   block = { type:'kvrow', items:[{k,v,color?,sub?}] }
+ *         | { type:'heading', text, right? }
+ *         | { type:'note', text }
+ *         | { type:'table', columns:[{label,align?,w?}], rows:[[cell]] }  cell={text,align?,color?}
+ *         | { type:'linechart', title?, unitLabel?, refY?, refLabel?, points:[{t,v}] }
+ */
+const PAL = {
+  text: [30, 41, 59], muted: [100, 116, 139], line: [226, 232, 240], head: [241, 245, 249],
+  blue: [37, 99, 235], green: [22, 163, 74], red: [220, 38, 38], amber: [217, 119, 6], zebra: [248, 250, 252],
+};
+const PAGE = { w: 210, h: 297, m: 12 };
+const RGB = { green: PAL.green, red: PAL.red, amber: PAL.amber, blue: PAL.blue, muted: PAL.muted, text: PAL.text };
+const colorOf = (name) => RGB[name] || PAL.text;
+
+async function newVectorPdf() {
+  const { jsPDF } = await import('jspdf');
+  const { PRETENDARD_KSX_BASE64 } = await import('../../vendor/pretendardKsxFont.js');
+  const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait', compress: true });
+  pdf.addFileToVFS('PretendardKSX.ttf', PRETENDARD_KSX_BASE64);
+  pdf.addFont('PretendardKSX.ttf', 'Pretendard', 'normal');
+  pdf.setFont('Pretendard', 'normal');
+  return pdf;
+}
+
+function ensureSpace(ctx, need) {
+  if (ctx.y + need > PAGE.h - PAGE.m) { ctx.pdf.addPage(); ctx.y = PAGE.m; }
+}
+function tcol(pdf, rgb) { pdf.setTextColor(rgb[0], rgb[1], rgb[2]); }
+function fillcol(pdf, rgb) { pdf.setFillColor(rgb[0], rgb[1], rgb[2]); }
+function drawcol(pdf, rgb) { pdf.setDrawColor(rgb[0], rgb[1], rgb[2]); }
+// 임베드 폰트 폭으로 말줄임 — 셀·라벨이 열 폭을 넘지 않게.
+function ellipsize(pdf, s, maxW) {
+  s = String(s == null ? '' : s);
+  if (pdf.getTextWidth(s) <= maxW) return s;
+  let lo = 0; let hi = s.length;
+  while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (pdf.getTextWidth(s.slice(0, mid) + '…') <= maxW) lo = mid; else hi = mid - 1; }
+  return s.slice(0, lo) + '…';
+}
+
+function drawHeader(ctx, doc) {
+  const { pdf } = ctx; const x = PAGE.m;
+  pdf.setFontSize(15); tcol(pdf, PAL.text);
+  pdf.text(ellipsize(pdf, doc.title || '', PAGE.w - PAGE.m * 2), x, ctx.y);
+  ctx.y += 6.5;
+  if (doc.subtitle) { pdf.setFontSize(10); tcol(pdf, PAL.muted); pdf.text(ellipsize(pdf, doc.subtitle, PAGE.w - PAGE.m * 2), x, ctx.y); ctx.y += 5; }
+  if (doc.meta) { pdf.setFontSize(9); tcol(pdf, PAL.muted); pdf.text(ellipsize(pdf, doc.meta, PAGE.w - PAGE.m * 2), x, ctx.y); ctx.y += 4.5; }
+  drawcol(pdf, PAL.line); pdf.setLineWidth(0.3); pdf.line(x, ctx.y, PAGE.w - PAGE.m, ctx.y); ctx.y += 5;
+}
+
+function drawKvRow(ctx, items) {
+  const { pdf } = ctx; const x0 = PAGE.m; const avail = PAGE.w - PAGE.m * 2;
+  const cols = Math.min(items.length, 6) || 1;
+  const cw = avail / cols;
+  ensureSpace(ctx, 13);
+  const rowTop = ctx.y;
+  items.forEach((it, i) => {
+    const col = i % cols;
+    if (col === 0 && i > 0) ctx.y += 13;
+    const x = x0 + col * cw;
+    let yy = ctx.y;
+    pdf.setFontSize(8); tcol(pdf, PAL.muted); pdf.text(ellipsize(pdf, it.k, cw - 2), x, yy); yy += 4.6;
+    pdf.setFontSize(11.5); tcol(pdf, colorOf(it.color)); pdf.text(ellipsize(pdf, it.v, cw - 2), x, yy); yy += 4;
+    if (it.sub) { pdf.setFontSize(7.5); tcol(pdf, PAL.muted); pdf.text(ellipsize(pdf, it.sub, cw - 2), x, yy); }
+  });
+  ctx.y = rowTop + Math.ceil(items.length / cols) * 13 + 2;
+}
+
+function drawHeading(ctx, text) {
+  ensureSpace(ctx, 9);
+  const { pdf } = ctx; ctx.y += 1;
+  pdf.setFontSize(11.5); tcol(pdf, PAL.text); pdf.text(text, PAGE.m, ctx.y); ctx.y += 5.5;
+}
+function drawNote(ctx, text) {
+  const { pdf } = ctx; pdf.setFontSize(8); tcol(pdf, PAL.muted);
+  const lines = pdf.splitTextToSize(text, PAGE.w - PAGE.m * 2);
+  ensureSpace(ctx, lines.length * 3.6 + 2);
+  pdf.text(lines, PAGE.m, ctx.y); ctx.y += lines.length * 3.6 + 2;
+}
+
+function drawTable(ctx, columns, rows) {
+  const { pdf } = ctx; const x0 = PAGE.m; const avail = PAGE.w - PAGE.m * 2;
+  const wsum = columns.reduce((s, c) => s + (c.w || 1), 0);
+  const widths = columns.map((c) => (c.w || 1) / wsum * avail);
+  const rowH = 6.4; const padX = 1.6;
+  const drawHeadRow = () => {
+    fillcol(pdf, PAL.head); pdf.rect(x0, ctx.y, avail, rowH, 'F');
+    pdf.setFontSize(8.2); tcol(pdf, PAL.muted);
+    let cx = x0;
+    columns.forEach((c, i) => {
+      const w = widths[i]; const align = c.align || 'left';
+      const tx = align === 'right' ? cx + w - padX : cx + padX;
+      pdf.text(ellipsize(pdf, c.label, w - padX * 2), tx, ctx.y + rowH - 2, { align });
+      cx += w;
+    });
+    ctx.y += rowH;
+  };
+  ensureSpace(ctx, rowH * 2); drawHeadRow();
+  rows.forEach((r, ri) => {
+    if (ctx.y + rowH > PAGE.h - PAGE.m) { ctx.pdf.addPage(); ctx.y = PAGE.m; drawHeadRow(); }
+    if (ri % 2 === 1) { fillcol(pdf, PAL.zebra); pdf.rect(x0, ctx.y, avail, rowH, 'F'); }
+    pdf.setFontSize(8.4);
+    let cx = x0;
+    columns.forEach((c, i) => {
+      const cell = r[i] || {}; const w = widths[i]; const align = cell.align || c.align || 'left';
+      tcol(pdf, colorOf(cell.color));
+      const tx = align === 'right' ? cx + w - padX : cx + padX;
+      pdf.text(ellipsize(pdf, cell.text, w - padX * 2), tx, ctx.y + rowH - 2, { align });
+      cx += w;
+    });
+    ctx.y += rowH;
+  });
+  drawcol(pdf, PAL.line); pdf.setLineWidth(0.2); pdf.line(x0, ctx.y, x0 + avail, ctx.y);
+  ctx.y += 3;
+}
+
+function drawLineChart(ctx, block) {
+  const { pdf } = ctx; const x0 = PAGE.m; const avail = PAGE.w - PAGE.m * 2;
+  const chartH = 46; const labelH = block.title ? 5 : 0;
+  ensureSpace(ctx, chartH + labelH + 8);
+  if (block.title) { pdf.setFontSize(9.5); tcol(pdf, PAL.text); pdf.text(block.title, x0, ctx.y + 3.5); ctx.y += labelH; }
+  const px = x0 + 16; const pw = avail - 20; const py = ctx.y + 2; const ph = chartH - 10;
+  const pts = (block.points || []).filter((p) => p && Number.isFinite(Number(p.t)) && Number.isFinite(Number(p.v))).map((p) => ({ t: +p.t, v: +p.v })).sort((a, b) => a.t - b.t);
+  // 축 상자
+  drawcol(pdf, PAL.line); pdf.setLineWidth(0.2); pdf.rect(px, py, pw, ph, 'S');
+  if (pts.length < 2) {
+    pdf.setFontSize(8); tcol(pdf, PAL.muted); pdf.text('추이 표본 부족(관측 2점 미만) — 더 긴 구간을 선택하세요', px + 3, py + ph / 2);
+    ctx.y = py + ph + 6; return;
+  }
+  const xs = pts.map((p) => p.t); const ys = pts.map((p) => p.v);
+  let minY = Math.min(...ys); let maxY = Math.max(...ys);
+  if (block.refY != null) { minY = Math.min(minY, block.refY); maxY = Math.max(maxY, block.refY); }
+  if (minY === maxY) { maxY = minY + 1; minY -= 1; }
+  const minX = Math.min(...xs); const maxX = Math.max(...xs);
+  const sx = (t) => px + (maxX === minX ? 0 : (t - minX) / (maxX - minX)) * pw;
+  const sy = (v) => py + ph - (v - minY) / (maxY - minY) * ph;
+  // y 그리드 3줄 + 라벨
+  pdf.setFontSize(7); tcol(pdf, PAL.muted); drawcol(pdf, PAL.line);
+  for (let g = 0; g <= 2; g++) {
+    const v = minY + (maxY - minY) * (g / 2); const yy = sy(v);
+    pdf.setLineWidth(0.1); pdf.line(px, yy, px + pw, yy);
+    pdf.text(v.toLocaleString(undefined, { maximumFractionDigits: 1 }), px - 1.5, yy + 1, { align: 'right' });
+  }
+  // 기준선(할당 용량)
+  if (block.refY != null) {
+    drawcol(pdf, PAL.amber); pdf.setLineWidth(0.3); pdf.setLineDashPattern([1, 1], 0);
+    pdf.line(px, sy(block.refY), px + pw, sy(block.refY)); pdf.setLineDashPattern([], 0);
+    pdf.setFontSize(6.8); tcol(pdf, PAL.amber); pdf.text(block.refLabel || '할당', px + pw, sy(block.refY) - 0.8, { align: 'right' });
+  }
+  // 추이선 + 점
+  drawcol(pdf, PAL.blue); pdf.setLineWidth(0.5);
+  for (let i = 1; i < pts.length; i++) pdf.line(sx(pts[i - 1].t), sy(pts[i - 1].v), sx(pts[i].t), sy(pts[i].v));
+  fillcol(pdf, PAL.blue);
+  pts.forEach((p) => pdf.circle(sx(p.t), sy(p.v), 0.45, 'F'));
+  // x 라벨(처음·끝)
+  pdf.setFontSize(7); tcol(pdf, PAL.muted);
+  const dt = (t) => { const d = new Date(t); return `${d.getMonth() + 1}/${d.getDate()}`; };
+  pdf.text(dt(minX), px, py + ph + 3.5); pdf.text(dt(maxX), px + pw, py + ph + 3.5, { align: 'right' });
+  if (block.unitLabel) pdf.text(`단위 ${block.unitLabel}`, px + pw, py - 1, { align: 'right' });
+  ctx.y = py + ph + 6;
+}
+
+/** 문서 모델 → 벡터 PDF 저장(한글 임베드 폰트). blocks 를 순서대로 그린다. */
+export async function saveDocAsPdf(doc, filename) {
+  const pdf = await newVectorPdf();
+  const ctx = { pdf, y: PAGE.m };
+  drawHeader(ctx, doc);
+  for (const b of (doc.blocks || [])) {
+    if (!b) continue;
+    if (b.type === 'kvrow') drawKvRow(ctx, b.items || []);
+    else if (b.type === 'heading') drawHeading(ctx, b.text || '');
+    else if (b.type === 'note') drawNote(ctx, b.text || '');
+    else if (b.type === 'table') drawTable(ctx, b.columns || [], b.rows || []);
+    else if (b.type === 'linechart') drawLineChart(ctx, b);
+  }
+  // 페이지 번호(벡터)
+  const n = pdf.getNumberOfPages();
+  for (let i = 1; i <= n; i++) { pdf.setPage(i); pdf.setFontSize(7.5); tcol(pdf, PAL.muted); pdf.text(`${i} / ${n}`, PAGE.w - PAGE.m, PAGE.h - 6, { align: 'right' }); }
+  pdf.save(filename);
+  return { pages: n };
+}
