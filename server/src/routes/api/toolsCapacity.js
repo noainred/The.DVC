@@ -6,6 +6,7 @@ import { store } from '../../store.js';
 import { loadVcenterConfig } from '../../config.js';
 import { fetchVmMetric, fetchVmRightsizeSeries } from '../../vcenter/soapClient.js';
 import { analyzeRightsize } from '../../tools/rightsize.js';
+import { poweredOffSinceFor } from '../../tools/powerOff.js'; // v2.483: 전원 꺼진 VM 의 꺼진 시각
 import { diskBreakdown, analyzeDiskTrend, diskTrendPolicyFromEnv } from '../../tools/diskTrend.js';
 import { getMetricsDb } from '../../metrics/db.js';
 import { vmperfHistory, vmperfMeta, vmperfDiskUsage, dropVmperfDb, dbFileName, VMPERF_METRICS, VMPERF_DISK_METRICS, VMPERF_VMDISK_METRICS } from '../../metrics/vmperfDb.js';
@@ -164,14 +165,33 @@ api.get('/tools/waste', requirePerm('tools'), (req, res) => memoJson(req, res, '
     scope: vcId || 'all',
     // 할당했지만 쓰지 않는 CPU clock·메모리(v2.373). 아래 idle 헬퍼가 계산한다.
     overAllocated: overAllocatedReport(scopeSlice(snap, req.user, vcId), vms),
+    // v2.483: 상위 50 → 300 — '꺼진 지 N일' 로 정렬·검토하려면 목록이 잘리면 안 된다(행당 필드 5개라 가볍다).
     poweredOff: { count: off.length, storageGB: off.reduce((a, v) => a + (v.storageGB || 0), 0),
-      vms: top(off, (v) => v.storageGB || 0).map((v) => ({ id: v.id, name: v.name, vcenterId: v.vcenterId, storageGB: v.storageGB, guestOS: v.guestOS })) },
+      vms: top(off, (v) => v.storageGB || 0, 300).map((v) => ({ id: v.id, name: v.name, vcenterId: v.vcenterId, storageGB: v.storageGB, guestOS: v.guestOS })) },
     snapshots: { count: snaps.length, sizeGB: r1(snaps.reduce((a, v) => a + (v.snapshotSizeGB || 0), 0)),
       vms: top(snaps, (v) => v.snapshotSizeGB || 0).map((v) => ({ id: v.id, name: v.name, vcenterId: v.vcenterId, snapshotCount: v.snapshotCount, snapshotSizeGB: v.snapshotSizeGB })) },
     thinReclaim: { count: thin.length, reclaimableGB: thin.reduce((a, v) => a + (v.uncommittedGB || 0), 0) },
     noTools: { count: noTools.length, vms: noTools.slice(0, 50).map((v) => ({ id: v.id, name: v.name, vcenterId: v.vcenterId, toolsStatus: v.toolsStatus })) },
   };
 }, { extraKey: scopeKey(req.user, store.get()) }));
+
+/**
+ * 전원 꺼진 VM 의 '꺼진 지 N일'(v2.483) — GET /tools/waste/off-since?vcenterId=
+ * /tools/waste 와 같은 scope 규칙. 출처(이벤트/추적/first_seen)·정확도는 tools/powerOff.js 참조.
+ * 비동기(DB 조회)라 memoJson 동기 콜백인 /tools/waste 에 합치지 않고 별도 엔드포인트 — 화면이 목록을
+ * 먼저 그리고 이 값을 뒤이어 채운다.
+ */
+api.get('/tools/waste/off-since', requirePerm('tools'), async (req, res) => {
+  const vcId = req.query.vcenterId ? String(req.query.vcenterId) : '';
+  const snap = store.get();
+  const off = scopeSlice(snap, req.user, vcId).vms.filter((v) => !v.template && v.powerState !== 'POWERED_ON');
+  try {
+    const r = await poweredOffSinceFor(off.map((v) => ({ id: v.id, name: v.name, vcenterId: v.vcenterId })));
+    res.json({ scope: vcId || 'all', generatedAt: Date.now(), ...r });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: `꺼진 시각 조회 실패: ${e.message}` });
+  }
+});
 
 /**
  * 할당 vs 실사용 트렌드(v2.374) — '주기적 실사용률을 보고 할당량을 조절' 하기 위한 시계열.

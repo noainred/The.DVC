@@ -38,6 +38,11 @@ function initSqlite() {
       -- prune(DELETE WHERE ts<?)·pruneOldest(ORDER BY ts)는 ts 단독 인덱스가 있어야 풀스캔/
       -- 풀정렬을 피한다(복합 (vcenterId,ts)로는 선행열 없는 ts 조건을 못 탐 — CLAUDE.md 규칙).
       CREATE INDEX IF NOT EXISTS idx_events_ts_only ON events (ts);
+      -- v2.483 '꺼진 지 N일': 전원 이벤트만 담는 **부분 인덱스** — 전체 이벤트(수백만 행)를 인덱싱하지 않고
+      -- 전원 on/off 행만 담아 작다. 최초 생성 시 테이블 1회 스캔(수백만 행이면 수 초, 기동 시 1회).
+      -- 조회는 반드시 같은 WHERE type IN (...) 리터럴을 써야 이 인덱스를 탄다.
+      CREATE INDEX IF NOT EXISTS idx_events_power ON events (vcenterId, type, entity, ts)
+        WHERE type IN ('VmPoweredOffEvent','VmPoweredOnEvent');
     `);
     try { fs.chmodSync(DB_PATH, 0o600); } catch { /* */ }
     const ins = db.prepare('INSERT OR IGNORE INTO events (vcenterId,k,ts,severity,type,user,entity,message) VALUES (?,?,?,?,?,?,?,?)');
@@ -45,6 +50,7 @@ function initSqlite() {
     const prune = db.prepare('DELETE FROM events WHERE ts < ?');
     const metaStmt = db.prepare('SELECT COUNT(*) n, MIN(ts) mn, MAX(ts) mx FROM events');
     const vcStmt = db.prepare('SELECT vcenterId, COUNT(*) n, MAX(ts) mx FROM events GROUP BY vcenterId');
+    const powerStmt = db.prepare("SELECT entity, type, MAX(ts) AS ts FROM events WHERE vcenterId=? AND type IN ('VmPoweredOffEvent','VmPoweredOnEvent') GROUP BY entity, type"); // idx_events_power
     const build = (where, params) => ({ where, params });
     function filterSql(f) {
       const w = []; const p = [];
@@ -64,6 +70,7 @@ function initSqlite() {
       kind: 'sqlite',
       insertMany: (rows) => { db.exec('BEGIN'); try { for (const r of rows) ins.run(r.vcenterId, r.key || `${r.ts}:${(r.message || '').slice(0, 40)}`, r.ts, r.severity, r.type, r.user, r.entity, r.message); db.exec('COMMIT'); } catch (e) { try { db.exec('ROLLBACK'); } catch { /* */ } throw e; } },
       lastTs: (vc) => Number(lastTsStmt.get(vc)?.mx || 0),
+      lastPowerEvents: (vc) => powerStmt.all(String(vc)),   // v2.483: [{entity,type,ts}]
       // rowid 타이브레이커: ts 동률 행이 많은 로그 특성상 ORDER BY ts 만으로는 OFFSET 페이징이
       // 청크 간 중복/누락될 수 있다(정렬이 비결정적) — CSV 청크 내보내기·UI 페이징 안정성용.
       query: (f = {}, limit = 200, offset = 0) => { const { where, params } = filterSql(f); return db.prepare(`SELECT vcenterId,ts,severity,type,user,entity,message FROM events ${where} ORDER BY ts DESC, rowid DESC LIMIT ? OFFSET ?`).all(...params, limit, offset); },
@@ -97,6 +104,7 @@ function initJson() {
       if (fresh.length) try { fs.appendFileSync(file, fresh.map((r) => JSON.stringify(r)).join('\n') + '\n', { mode: 0o600 }); } catch { /* */ }
     },
     lastTs: (vc) => rows.reduce((mx, r) => (r.vcenterId === vc && r.ts > mx ? r.ts : mx), 0),
+    lastPowerEvents: (vc) => { const m = new Map(); for (const r of rows) { if (r.vcenterId !== vc || (r.type !== 'VmPoweredOffEvent' && r.type !== 'VmPoweredOnEvent')) continue; const k = `${r.entity}|${r.type}`; if (!m.has(k) || m.get(k).ts < r.ts) m.set(k, { entity: r.entity, type: r.type, ts: r.ts }); } return [...m.values()]; },
     query: (f = {}, limit = 200, offset = 0) => rows.filter((r) => match(r, f)).sort((a, b) => b.ts - a.ts).slice(offset, offset + limit),
     count: (f = {}) => rows.filter((r) => match(r, f)).length,
     meta: () => { const vc = new Map(); let mn = null, mx = null; for (const r of rows) { if (mn == null || r.ts < mn) mn = r.ts; if (mx == null || r.ts > mx) mx = r.ts; const g = vc.get(r.vcenterId) || { vcenterId: r.vcenterId, count: 0, lastTs: 0 }; g.count++; g.lastTs = Math.max(g.lastTs, r.ts); vc.set(r.vcenterId, g); } return { count: rows.length, firstTs: mn, lastTs: mx, vcenters: [...vc.values()] }; },
