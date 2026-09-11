@@ -239,7 +239,7 @@ export default function GuestDiskDetailModal({ vm, initUnit = 'auto', onClose })
             {/* 파티션 요약 표 */}
             <div className="card" style={{ marginBottom: 10 }}>
               <b>파티션별 할당·사용·추이</b>
-              <STable className="gd-table" style={{ marginTop: 6 }}>
+              <STable className="gd-table rpt-wrap" style={{ marginTop: 6 }}>
                 <thead><tr>
                   <th>파티션</th><th className="gd-num">할당</th><th className="gd-num">사용</th><th className="gd-num">여유</th>
                   <th className="gd-num">사용률</th><th className="gd-num">증가율(GB/일)</th><th className="gd-num">관측기간</th><th>추이</th><th data-nosort>판정</th>
