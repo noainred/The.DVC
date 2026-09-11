@@ -113,7 +113,9 @@ export async function bmCollectNow(trigger = 'manual') {
       if (r.ok) ok++; else errors++;
     }
     // 삭제된 서버의 잔존 결과 정리(유령 표시 방지).
-    const ids = new Set(servers.map((s) => s.id));
+    // v2.478(감사 B12): 정리 기준은 '등록된 전체'(비활성 포함) — 활성만 기준이면 서버를 비활성으로 바꾼 순간
+    // 마지막 수집 결과가 지워져 화면에 용량 0·'미수집'으로 남는다.
+    const ids = new Set(listBmServersRaw().map((s) => s.id));
     for (const id of [...latest.keys()]) if (!ids.has(id)) latest.delete(id);
     lastRunAt = at;
     // 필드명 okCount — { ok:true, ...summary } 스프레드에서 성공 여부(boolean)를 덮지 않게.

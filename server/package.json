@@ -1,6 +1,6 @@
 {
   "name": "vmware-portal-server",
-  "version": "2.477.0",
+  "version": "2.478.0",
   "private": true,
   "type": "module",
   "description": "Aggregation API for the VMware global monitoring portal",
@@ -19,5 +19,8 @@
     "ssh2": "^1.17.0",
     "undici": "^6.21.0",
     "ws": "^8.21.0"
+  },
+  "overrides": {
+    "qs": "^6.16.0"
   }
 }

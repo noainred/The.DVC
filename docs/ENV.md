@@ -1,9 +1,9 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **326개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **329개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
-- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-10)
+- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-11)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다.
 - `portal.env.example` 에 예시가 있는 키는 ✅, 없는 키는 빈칸으로 표시한다.
 - 기본값 칸이 비어 있으면 코드에서 한 줄로 추출하지 못한 것이다(해당 파일을 참조).
@@ -32,12 +32,14 @@
 | `WAN_MAX_CONNECTIONS` | `6` |  | util/resilientFetch.js |
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
 
-## 공통 (83)
+## 공통 (85)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `AGENT_AUTO_REGISTER` | `기본 적용('false' 로 끄기)` | ✅ | config.js |
+| `AGENT_GUESTDISK_INTERVAL_MS` | `43200000` |  | config.js |
 | `AGENT_INVENTORY_INTERVAL_MS` | `60000` |  | config.js |
+| `AGENT_PUSH_GUESTDISK` | `기본 적용('false' 로 끄기)` |  | config.js |
 | `AGENT_PUSH_INVENTORY` | `기본 적용('false' 로 끄기)` |  | config.js |
 | `AGENT_SCAN_INTERVAL_MS` | `3600000` | ✅ | config.js |
 | `AUDIT_MAX` | `20000` |  | audit.js |
@@ -221,7 +223,7 @@
 | `UPGRADE_ALLOW_UNVERIFIED` | `기본 아님('true' 일 때만 적용)` | ✅ | upgrade/bundleSource.js, upgrade/fetchPackage.js 외 1 |
 | `UPGRADE_TLS_INSECURE` | `기본 적용('true' 로 끄기)` |  | upgrade/upgradeAgent.js |
 
-## 엣지 에이전트 (16)
+## 엣지 에이전트 (17)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -230,11 +232,12 @@
 | `AGENT_CONFIG_PUSH_MS` | `1800000` |  | agent/configPush.js |
 | `AGENT_DEPLOY_CONCURRENCY` | `2` | ✅ | agent/bulkDeploy.js |
 | `AGENT_DEPLOY_TIMEOUT_MS` | `900000` | ✅ | agent/bulkDeploy.js |
+| `AGENT_GUESTDISK_PUSH_TIMEOUT_MS` | `120000` |  | agent/guestDiskPush.js |
 | `AGENT_IDRAC_SCAN_POLL_MS` | `5000` |  | agent/idracScanWorker.js |
 | `AGENT_LOGQ_POLL_MS` | `4000` |  | agent/logQueryWorker.js |
 | `AGENT_PING_POLL_MS` | `4000` |  | agent/pingWorker.js |
 | `AGENT_PUSH_FLEET` | `기본 적용('false' 로 끄기)` |  | agent/fleetPush.js |
-| `AGENT_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | agent/inventoryPush.js |
+| `AGENT_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | agent/guestDiskPush.js, agent/inventoryPush.js |
 | `AGENT_PUSH_TIMEOUT_MS` | `60000` |  | agent/fleetPush.js, agent/inventoryPush.js |
 | `EDGE_ADVERTISE_URL` | `''` | ✅ | agent/selfRegister.js |
 | `SANSW_CONFIG_PULL_MS` | `5` |  | agent/sanSwitchConfigPull.js |
@@ -505,4 +508,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 326
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 329

@@ -1,6 +1,6 @@
 // 용량/낭비/씬/VM파인더/온도/용량예측 — api.js(구 2,445줄) 분할(v2.283.0). 본문은 원본 그대로, 등록 순서는 api.js 호출 순서가 보존한다.
 import { scopedVcenterIds } from '../../auth/scope.js';
-import { requireRole } from '../../auth/auth.js';   // 설정 변경/데이터 삭제는 관리자 전용
+import { requireRole, requirePerm } from '../../auth/auth.js'; // v2.478(감사 S5): /tools/* 조회도 tools 권한 게이트   // 설정 변경/데이터 삭제는 관리자 전용
 import { logAudit } from '../../audit.js';           // 수집 정책 변경·데이터 삭제는 감사 기록
 import { store } from '../../store.js';
 import { loadVcenterConfig } from '../../config.js';
@@ -15,7 +15,7 @@ import { memoJson, hash, linregSlope, eachLimited, scopeSlice, scopeKey } from '
 export function registerToolsCapacity(api) {
 
 // Capacity report — per-cluster compute capacity, allocation, overcommit, headroom.
-api.get('/tools/capacity', (req, res) => memoJson(req, res, 'tools-capacity', (snap) => {
+api.get('/tools/capacity', requirePerm('tools'), (req, res) => memoJson(req, res, 'tools-capacity', (snap) => {
   const vcId = req.query.vcenterId;
   const scoped = scopeSlice(snap, req.user, vcId);   // 사용자 scope + ?vcenterId
   const hosts = scoped.hosts;
@@ -87,7 +87,7 @@ function overAllocatedReport(scoped, vms) {
   for (const h of scoped.hosts || []) {
     const cores = Number(h.cpuCores) || 0;
     const total = Number(h.cpuTotalMhz) || 0;
-    if (cores > 0 && total > 0) hostMhz.set(h.name, total / cores);
+    if (cores > 0 && total > 0) hostMhz.set(`${h.vcenterId}|${h.name}`, total / cores); // v2.478(감사 B13): 주석대로 vCenter 별 키
   }
   const on = vms.filter((v) => v.powerState === 'POWERED_ON');
   let cpuAllocMhz = 0; let cpuUsedMhz = 0; let excludedNoHostMhz = 0;
@@ -98,7 +98,7 @@ function overAllocatedReport(scoped, vms) {
     const memMB = Number(v.memMB) || 0;
     const cpuPct = Number(v.cpuUsagePct) || 0;
     const memPct = Number(v.memUsagePct) || 0;
-    const mhzPerCore = hostMhz.get(v.host);
+    const mhzPerCore = hostMhz.get(`${v.vcenterId}|${v.host}`);
     // 메모리는 호스트 정보 없이도 계산 가능(MB 단위 그대로).
     const mUsed = memMB * (memPct / 100);
     memAllocMB += memMB; memUsedMB += mUsed;
@@ -151,7 +151,7 @@ function overAllocatedReport(scoped, vms) {
 
 // Waste report — 자원 낭비 후보 모음(스냅샷 기반): 전원 꺼진 VM, 스냅샷 보유 VM,
 // thin 회수가능, Tools 미설치. (고아 VMDK는 데이터스토어 파일 스캔이 필요해 미포함)
-api.get('/tools/waste', (req, res) => memoJson(req, res, 'tools-waste', (snap) => {
+api.get('/tools/waste', requirePerm('tools'), (req, res) => memoJson(req, res, 'tools-waste', (snap) => {
   const vcId = req.query.vcenterId;
   const vms = scopeSlice(snap, req.user, vcId).vms.filter((v) => !v.template);
   const r1 = (x) => Number((x || 0).toFixed(1));
@@ -183,7 +183,7 @@ api.get('/tools/waste', (req, res) => memoJson(req, res, 'tools-waste', (snap) =
  * 응답 points: { ts, cpuAllocGHz, cpuUsedGHz, cpuUsedPct, memAllocGB, memUsedGB, memUsedPct }
  *   — 사용률·절감 가능(%)은 할당/사용에서 파생 계산한다(중복 저장하지 않음).
  */
-api.get('/tools/waste/history', async (req, res) => {
+api.get('/tools/waste/history', requirePerm('tools'), async (req, res) => {
   const vcId = String(req.query.vcenterId || '');
   const days = Math.max(1, Math.min(1830, Number(req.query.days) || 30));
   // scope: 특정 vCenter 요청은 소유 검사, 전체('')는 범위 제한 계정에 주지 않는다
@@ -229,7 +229,7 @@ api.get('/tools/waste/history', async (req, res) => {
     }));
     const m = await vmperfMeta(vcId, 'vm_cpu_alloc_mhz');
     meta = { firstTs: m.firstTs, lastTs: m.lastTs };
-  } catch { points = []; }
+  } catch (e) { console.warn('[toolsCapacity] 시계열 조회 실패 — 빈 배열로 응답(감사 B8):', e?.message); points = []; }
   // 관측 시작 이전 구간은 데이터가 없다 — 프론트가 '수집 시작' 을 표기할 수 있게 meta 를 준다.
   res.json({ vcenterId: vcId || 'all', days, bucketMs, collectedSince: meta?.firstTs ?? null, points });
 });
@@ -305,7 +305,7 @@ api.get('/vcenters/:id/usage-history', async (req, res) => {
     const m2 = await vmperfMeta(vcId, 'ds_cap_gb_vc');
     const firsts = [m1.firstTs, m2.firstTs].filter((x) => x != null);
     collectedSince = firsts.length ? Math.min(...firsts) : null;
-  } catch { points = []; }
+  } catch (e) { console.warn('[toolsCapacity] 시계열 조회 실패 — 빈 배열로 응답(감사 B8):', e?.message); points = []; }
 
   res.json({ vcenterId: vcId, range: rangeKey, bucketMs, ranges: Object.keys(USAGE_RANGES), collectedSince, points });
 });
@@ -315,7 +315,7 @@ api.get('/vcenters/:id/usage-history', async (req, res) => {
  * 6,000 VM 규모에서 이 계열은 용량이 빠르게 늘어(실측 행당 ~308B) 운영자가 통제해야 한다.
  * GET 은 로그인 사용자, 변경(PUT)·삭제(DELETE)는 관리자 전용(수집 정책·데이터 삭제라서).
  */
-api.get('/tools/waste/settings', (req, res) => {
+api.get('/tools/waste/settings', requirePerm('tools'), (req, res) => {
   const snap = store.get();
   const allowed = scopedVcenterIds(req.user, snap);
   const s = loadVmperfSettings();
@@ -404,7 +404,7 @@ const sparkCache = new Map(); // `${vmId}|${type}` -> { at, points }
 const SPARK_TTL_MS = 5 * 60_000;
 const SPARK_MAX_VMS = Math.max(1, Math.min(64, Number(process.env.WASTE_SPARK_MAX_VMS) || 24));
 
-api.post('/tools/waste/spark', async (req, res) => {
+api.post('/tools/waste/spark', requirePerm('tools'), async (req, res) => {
   const type = req.body?.type === 'mem' ? 'mem' : 'cpu';
   const ids = Array.isArray(req.body?.vmIds) ? req.body.vmIds.map(String) : [];
   if (!ids.length) return res.json({ type, series: {}, truncated: false });
@@ -491,7 +491,7 @@ const rightsizePolicy = () => ({
   readyWarnPct: Number(process.env.RIGHTSIZE_READY_WARN_PCT) || undefined,
 });
 
-api.get('/tools/rightsize', async (req, res) => {
+api.get('/tools/rightsize', requirePerm('tools'), async (req, res) => {
   const vmId = String(req.query.vmId || '');
   const days = [7, 30, 90, 180, 365].includes(Number(req.query.days)) ? Number(req.query.days) : 7;
   const snap = store.get();
@@ -546,7 +546,7 @@ api.get('/tools/rightsize', async (req, res) => {
 
 // Thin-provisioned VM finder. thin = uncommitted(여유)이 큰 VM(추정). committed=실사용,
 // provisioned=committed+uncommitted. 회수 가능 추정 = uncommitted 합계.
-api.get('/tools/thin-vms', (req, res) => memoJson(req, res, 'tools-thin-vms', (snap) => {
+api.get('/tools/thin-vms', requirePerm('tools'), (req, res) => memoJson(req, res, 'tools-thin-vms', (snap) => {
   let vms = snap.vms;
   const allowed = scopedVcenterIds(req.user, snap);
   if (allowed) vms = vms.filter((v) => allowed.has(v.vcenterId));
@@ -574,7 +574,7 @@ api.get('/tools/thin-vms', (req, res) => memoJson(req, res, 'tools-thin-vms', (s
 // Advanced VM finder: scope by 다수 vCenter + folder/cluster/resourcePool +
 // conditions. Optional withAvg → 1일/1주 평균 CPU(유휴 판정). 평균은 live는
 // vCenter 성능 API 온디맨드(상한 있음), mock은 현재값 기반 합성.
-api.post('/tools/vm-finder', async (req, res) => {
+api.post('/tools/vm-finder', requirePerm('tools'), async (req, res) => {
   const b = req.body || {};
   const snap = store.get();
   const inList = (v, arr) => !arr || !arr.length || arr.includes(v);
@@ -645,7 +645,7 @@ api.post('/tools/vm-finder', async (req, res) => {
 });
 
 // ESXi 온도 — 현재 값(호스트/클러스터/법인별 그룹) + 5년 히스토리 시계열.
-api.get('/tools/esxi-temp', async (req, res) => {
+api.get('/tools/esxi-temp', requirePerm('tools'), async (req, res) => {
   const snap = store.get();
   const vcId = req.query.vcenterId;
   const allowed = scopedVcenterIds(req.user, snap);
@@ -682,7 +682,7 @@ api.get('/tools/esxi-temp', async (req, res) => {
 });
 
 // Temperature history (5년까지). level=host|cluster|vc, key=대상키, days=기간.
-api.get('/tools/esxi-temp/history', async (req, res) => {
+api.get('/tools/esxi-temp/history', requirePerm('tools'), async (req, res) => {
   const level = ['host', 'cluster', 'vc'].includes(req.query.level) ? req.query.level : 'host';
   const metric = { host: 'temp_host', cluster: 'temp_cluster', vc: 'temp_vc' }[level];
   const key = String(req.query.key || '');
@@ -706,7 +706,7 @@ api.get('/tools/esxi-temp/history', async (req, res) => {
   // 분 단위 등 미세 집계는 점이 많아질 수 있어 상한을 넉넉히.
   const limit = bucketMs <= 60_000 ? 5000 : bucketMs <= 3_600_000 ? 3000 : 1500;
   let points = [];
-  try { const db = await getMetricsDb(); points = db.history(metric, key, since, bucketMs, limit); } catch { points = []; }
+  try { const db = await getMetricsDb(); points = db.history(metric, key, since, bucketMs, limit); } catch (e) { console.warn('[toolsCapacity] 시계열 조회 실패 — 빈 배열로 응답(감사 B8):', e?.message); points = []; }
   let synthesized = false;
   if (points.length < 2 && store.get().source === 'mock') {
     // 데모: 합성 시계열(계절·일교차·분 변동 반영). 분 단위는 점이 많아 최근 구간만.
@@ -735,7 +735,7 @@ api.get('/tools/esxi-temp/history', async (req, res) => {
  *
  * query: vcenterId(생략=전체) · days(1~1830, 기본 30) · bucket(hour|day|week, 기본 auto)
  */
-api.get('/tools/capacity/disk-history', async (req, res) => {
+api.get('/tools/capacity/disk-history', requirePerm('tools'), async (req, res) => {
   const snap = store.get();
   const vcId = String(req.query.vcenterId || '');
   const days = Math.max(1, Math.min(1830, Number(req.query.days) || 30));
@@ -783,7 +783,7 @@ api.get('/tools/capacity/disk-history', async (req, res) => {
     });
     const [m1, m2] = await Promise.all([vmperfMeta(vcId, 'ds_cap_gb_vc'), vmperfMeta(vcId, 'vm_disk_prov_gb')]);
     collectedSince = { ds: m1.firstTs ?? null, vm: m2.firstTs ?? null };
-  } catch { points = []; }
+  } catch (e) { console.warn('[toolsCapacity] 시계열 조회 실패 — 빈 배열로 응답(감사 B8):', e?.message); points = []; }
 
   // 데모(mock): 실 시계열이 없으므로 현재 구성에서 되감은 **합성** 추이를 만들어 화면 동작을 보여준다.
   // 응답에 synthesized 를 달아 화면이 '데모 합성 데이터' 로 표시한다(실데이터로 오인 방지).
@@ -810,7 +810,7 @@ api.get('/tools/capacity/disk-history', async (req, res) => {
   res.json({ ok: true, vcenterId: vcId || 'all', days, bucketMs, collectedSince, synthesized, points, breakdown, analysis });
 });
 
-api.get('/tools/capacity-forecast', async (req, res) => {
+api.get('/tools/capacity-forecast', requirePerm('tools'), async (req, res) => {
   const snap = store.get();
   const vcId = req.query.vcenterId;
   const allowed = scopedVcenterIds(req.user, snap);

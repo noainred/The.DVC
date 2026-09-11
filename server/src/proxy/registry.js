@@ -237,7 +237,9 @@ export function touchMapping(id) {
 export function listMappingsForUser(user) {
   const all = load().mappings;
   if (!user || user.role === 'admin') return all;
-  return all.filter((m) => !m.owner || m.owner === user.username);
+  // v2.478(감사 S7): 소유자 없는(레거시) 매핑은 admin 전용 — v2.313/v2.322 삭제·게이트웨이 규칙과 일치.
+  if (user?.role === 'admin') return all;
+  return all.filter((m) => m.owner && m.owner === user.username);
 }
 
 export function removeMapping(id) {

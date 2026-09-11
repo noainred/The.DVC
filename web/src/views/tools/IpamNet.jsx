@@ -49,13 +49,14 @@ export function IpamRanges() {
     const blob = await res.blob(); const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = `ip-scan-report-${new Date().toISOString().slice(0, 10)}.csv`; a.click(); URL.revokeObjectURL(url);
   };
-  if (error) return <ErrorBox message={error} />;
+  if (error && !data) return <ErrorBox message={error} />; // v2.478(감사 B15): 데이터 보유 중 일시 오류는 화면 유지(아래 배너)
   if (!data) return <Loading />;
   const fmtDt = (t) => (t ? new Date(t).toLocaleString('ko-KR') : '—');
   const list = data.ranges || [];
   const runs = status?.runs || [];
   return (
     <>
+      {error && <div style={{ color: "#f87171", fontSize: 12, marginBottom: 8 }}>⚠ 최근 조회 실패: {error} — 이전 데이터를 표시 중입니다.</div>}
       <div className="card" style={{ marginBottom: 12 }}>
         <b style={{ fontSize: 14 }}>vCenter별 스캔 대역</b>
         <div className="muted" style={{ fontSize: 12, margin: '4px 0 10px' }}>vCenter(법인)에 IP 대역을 저장하면 주기 스캔이 이 대역들을 함께 스캔해 사용 현황을 갱신합니다. 형식: CIDR(10.0.0.0/24)·범위(10.0.0.1-50)·단일 IP, 한 줄에 하나.</div>
@@ -195,7 +196,7 @@ export function IpamNetMap() {
     return () => { active = false; };
     // eslint-disable-next-line
   }, [vc, base, days]);
-  if (error) return <ErrorBox message={error} />;
+  if (error && !data) return <ErrorBox message={error} />; // v2.478(감사 B15): 데이터 보유 중 일시 오류는 화면 유지(아래 배너)
   if (!data) return <Loading />;
   const N = data.buckets?.length || 0;
   const bi = bucket == null ? Math.max(0, N - 1) : Math.min(bucket, N - 1);
@@ -211,6 +212,7 @@ export function IpamNetMap() {
   const s = data.summary || {};
   return (
     <>
+      {error && <div style={{ color: "#f87171", fontSize: 12, marginBottom: 8 }}>⚠ 최근 조회 실패: {error} — 이전 데이터를 표시 중입니다.</div>}
       <div className="flex gap wrap" style={{ marginBottom: 10, alignItems: 'center' }}>
         <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }}><span className="muted">vCenter</span>
           <select className="select" value={vc} onChange={(e) => { setVc(e.target.value); setBase(''); }}>

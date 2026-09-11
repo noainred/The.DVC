@@ -36,7 +36,8 @@ remoteRouter.post('/rdp-ticket', requirePerm('remote.access'), (req, res) => {
 const mappingProxy = (m) => getProxyById(m.proxyId);
 
 // Public-ish (any authenticated user): list mappings + how to connect.
-remoteRouter.get('/mappings', (req, res) => {
+// v2.478(감사 S7): 목록도 remote.access 권한 게이트 — 비-admin 은 자기 소유 매핑만(listMappingsForUser).
+remoteRouter.get('/mappings', requirePerm('remote.access'), (req, res) => {
   res.json({
     mappings: listMappingsForUser(req.user).map(({ error, ...m }) => {
       const p = mappingProxy(m);
@@ -254,9 +255,16 @@ remoteRouter.delete('/mappings/:id', requirePerm('remote.access'), async (req, r
 });
 
 // Download an .rdp file pointing at proxyHost:publicPort (client-side RDP).
-remoteRouter.get('/rdp/:id', (req, res) => {
+// v2.478(감사 S8): 권한·소유자·scope 검사 없이 .rdp(중계 주소:포트)를 발급하던 경로. WS 게이트웨이와
+// 같은 규칙(mappingAccessIssue 와 동일: 소유자 없는 매핑=admin 전용, 대상 호스트 scope)을 적용하고
+// 위반은 404 로 존재를 숨긴다(조회 범위 밖 = 404 규약).
+remoteRouter.get('/rdp/:id', requirePerm('remote.access'), (req, res) => {
   const m = getMapping(req.params.id);
   if (!m || m.protocol !== 'rdp') return res.status(404).end();
+  if (req.user?.role !== 'admin') {
+    if (m.owner !== req.user?.username) return res.status(404).end();
+    if (targetHostScopeIssue(store.get(), scopedVcenterIds(req.user, store.get()), m.targetHost)) return res.status(404).end();
+  }
   const proxyHost = mappingProxy(m).proxyHost;
   const host = proxyHost || m.targetHost;
   const port = proxyHost ? m.publicPort : m.targetPort;

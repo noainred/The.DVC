@@ -237,7 +237,7 @@ export function registerHardwareGpu(api) {
 
 // Host hardware (vendor/model) summary — per vendor, per model, and the
 // vCenter × vendor × model breakdown ("어떤 법인에 어떤 모델 몇 대").
-api.get('/tools/hardware', (req, res) => {
+api.get('/tools/hardware', requirePerm('tools'), (req, res) => {
   const snap = store.get();
   let hosts = snap.hosts;
   const allowed = scopedVcenterIds(req.user, snap);
@@ -269,7 +269,7 @@ api.get('/tools/hardware', (req, res) => {
 });
 
 // ESXi version distribution + host list (optionally per vCenter).
-api.get('/tools/esxi', (req, res) => {
+api.get('/tools/esxi', requirePerm('tools'), (req, res) => {
   const snap = store.get();
   let hosts = snap.hosts;
   const allowed = scopedVcenterIds(req.user, snap);
@@ -288,13 +288,13 @@ api.get('/tools/esxi', (req, res) => {
   });
 });
 
-api.get('/tools/gpu', (req, res) => {
+api.get('/tools/gpu', requirePerm('tools'), (req, res) => {
   const snap = store.get();
   res.json(buildGpuInventory(snap, req.query.vcenterId, scopedVcenterIds(req.user, snap)));
 });
 
 // GPU 사용량/인벤토리 JSON export — 집계 결과 그대로 파일로 내려받기.
-api.get('/tools/gpu.json', (req, res) => {
+api.get('/tools/gpu.json', requirePerm('tools'), (req, res) => {
   const snap = store.get();
   const data = buildGpuInventory(snap, req.query.vcenterId, scopedVcenterIds(req.user, snap));
   const body = JSON.stringify({ generatedAt: new Date().toISOString(), vcenterId: req.query.vcenterId || null, ...data }, null, 2);
@@ -302,7 +302,7 @@ api.get('/tools/gpu.json', (req, res) => {
 });
 
 // GPU 사용량/인벤토리 CSV export — 호스트별 한 행(모델·장수·모드·사용률·할당 VM).
-api.get('/tools/gpu.csv', (req, res) => {
+api.get('/tools/gpu.csv', requirePerm('tools'), (req, res) => {
   const snap = store.get();
   const data = buildGpuInventory(snap, req.query.vcenterId, scopedVcenterIds(req.user, snap));
   const head = ['host', 'vcenter_id', 'cluster', 'gpu_model', 'gpu_count', 'mem_gb', 'mode', 'mode_breakdown', 'util_pct', 'util_source', 'assigned_vms'];
@@ -318,15 +318,15 @@ api.get('/tools/gpu.csv', (req, res) => {
 
 // GPU 사용률 시계열 수집 메타 — '언제부터 데이터가 쌓였는지'(수집 시작/마지막/샘플 수).
 // export 모달에서 사용자가 수집 시작 일시를 보고 전체/기간을 고르도록.
-api.get('/tools/gpu/series-meta', async (req, res) => {
+api.get('/tools/gpu/series-meta', requirePerm('tools'), async (req, res) => {
   try {
     const db = await getMetricsDb();
     const m = db.meta('gpu_util');
     res.json({ collectedSince: m.firstTs, latestAt: m.lastTs, sampleCount: m.count });
   } catch { res.json({ collectedSince: null, latestAt: null, sampleCount: 0 }); }
 });
-api.get('/tools/gpu/export.csv', (req, res) => gpuSeriesExport(req, res, 'csv'));
-api.get('/tools/gpu/export.json', (req, res) => gpuSeriesExport(req, res, 'json'));
+api.get('/tools/gpu/export.csv', requirePerm('tools'), (req, res) => gpuSeriesExport(req, res, 'csv'));
+api.get('/tools/gpu/export.json', requirePerm('tools'), (req, res) => gpuSeriesExport(req, res, 'json'));
 
 // VM IP Ping(위임) — 중앙은 VM 사설 IP에 직접 못 가므로, 그 vCenter 담당 에이전트가
 // ping을 대행한다. POST로 요청 큐잉 → 에이전트가 인출/실행/보고 → GET으로 녹/적 조회.
@@ -353,7 +353,7 @@ api.get('/tools/ip-ping', requirePerm('tools'), (req, res) => {
 
 // GPU가 할당된 VM 목록 — 어떤 VM이 어떤 방식(vGPU/패스쓰루)·프로파일로 GPU를 쓰는지.
 // 선택 필터: vcenterId, host, mode(vgpu|passthrough|mixed), model(호스트 GPU 모델).
-api.get('/tools/gpu/vms', (req, res) => {
+api.get('/tools/gpu/vms', requirePerm('tools'), (req, res) => {
   const snap = store.get();
   // 호스트명 → GPU 모델 매핑(모델 필터용)
   const hostModel = {};

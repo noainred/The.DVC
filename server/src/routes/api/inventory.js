@@ -4,6 +4,7 @@ import { scopedVcenterIds, inUserScope } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { browseDatastore } from '../../vcenter/dsBrowse.js';
 import { listMutes, addMute, removeMute } from '../../alarm-mutes.js';
+import { auditMiddleware } from '../../audit.js'; // v2.478(감사 S15): 알람 음소거는 무기록이었다
 import { recordToolUse, getTopTools } from '../../tool-usage.js';
 import { memoJson, applyFilters, sortBy, scopeKey, osFamily } from './shared.js';
 
@@ -362,12 +363,12 @@ api.get('/alarms', (req, res) => memoJson(req, res, 'inv:alarms', (snap) => {
 
 // Alarm mute rules — "이 알람 앞으로 무시". Muted alarms are filtered globally.
 api.get('/alarm-mutes', (_req, res) => res.json({ mutes: listMutes() }));
-api.post('/alarm-mutes', requirePerm('inv.alarms'), (req, res) => {
+api.post('/alarm-mutes', requirePerm('inv.alarms'), auditMiddleware, (req, res) => {
   const result = addMute(req.body || {});
   if (result.ok) store.refresh().catch(() => {}); // re-apply immediately
   res.status(result.ok ? 200 : 400).json(result);
 });
-api.delete('/alarm-mutes/:id', requirePerm('inv.alarms'), (req, res) => {
+api.delete('/alarm-mutes/:id', requirePerm('inv.alarms'), auditMiddleware, (req, res) => {
   // req.params.id는 Express가 이미 1회 URL 디코드한 값 — 추가 decodeURIComponent는 이중
   // 디코드가 되어 '%' 포함 규칙(사용률 알람 등)에서 값 손상/URIError(500)를 유발한다.
   const result = removeMute(req.params.id);

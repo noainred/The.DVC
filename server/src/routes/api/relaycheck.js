@@ -12,7 +12,10 @@ const toolsPerm = requirePerm('tools');
 export function registerRelayCheck(api) {
 api.get('/tools/relaycheck', toolsPerm, (_req, res) => {
   const st = relayCheckStatus();
-  const targets = buildTargets(st.settings, loadCollectors(), loadTopology()).map((t) => ({ key: t.key, host: t.host, port: t.port, kind: t.kind, label: t.label, site: t.site, collectorId: t.collectorId, expectAgent: t.expectAgent || '' }));
+  // v2.478(감사 S9): operator(tools 권한)에게 전 사이트 중계 엣지 IP·포트가 노출되던 것을 admin 전용으로 —
+  // 비-admin 은 라벨·사이트·종류만 받는다(relaytopo stripCfg 와 같은 '거부 기본값' 규칙).
+  const isAdmin = _req.user?.role === 'admin';
+  const targets = buildTargets(st.settings, loadCollectors(), loadTopology()).map((t) => ({ key: t.key, host: isAdmin ? t.host : '', port: isAdmin ? t.port : null, kind: t.kind, label: t.label, site: t.site, collectorId: t.collectorId, expectAgent: t.expectAgent || '' }));
   res.json({ ok: true, ...st, targets, limits: LIMITS, defaultProfile: DEFAULT_PROFILE, kinds: KINDS });
 });
 api.put('/tools/relaycheck/settings', adminOnly, (req, res) => {

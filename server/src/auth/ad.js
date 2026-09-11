@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import ldap from 'ldapjs';
 import { config } from '../config.js';
+import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js'; // v2.478(감사 B5/S12): 원자적 쓰기 + 손상 시 preserveCorrupt — 크래시 1회로 설정이 소실되고 다음 저장이 빈 값으로 덮어쓰는 사고 방지
 
 const FILE = path.join(config.configDir, 'auth.json');
 
@@ -38,7 +39,7 @@ const ENV_DEFAULTS = {
 
 export function loadAdConfig() {
   let saved = {};
-  try { if (fs.existsSync(FILE)) saved = JSON.parse(fs.readFileSync(FILE, 'utf8'))?.ad || {}; } catch { saved = {}; }
+  try { if (fs.existsSync(FILE)) saved = JSON.parse(fs.readFileSync(FILE, 'utf8'))?.ad || {}; } catch (e) { preserveCorrupt(FILE, e.message); saved = {}; }
   const merged = { ...ENV_DEFAULTS, ...saved };
   // groupMatch만 env를 우선한다 — UI 저장으로 auth.json에 'exact'가 박히면 긴급 하위호환
   // 스위치(AD_GROUP_MATCH=substring)가 먹지 않아 로그인 역할 매핑을 되돌릴 수 없게 된다.
@@ -52,7 +53,7 @@ export function saveAdConfig(partial) {
   const next = { ...cur };
   for (const k of allowed) if (partial[k] !== undefined) next[k] = partial[k];
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
-  fs.writeFileSync(FILE, JSON.stringify({ ad: next }, null, 2), { mode: 0o600 });
+  atomicWriteFileSync(FILE, JSON.stringify({ ad: next }, null, 2), { mode: 0o600 });
   try { fs.chmodSync(FILE, 0o600); } catch { /* mode는 신규생성 시에만 적용 — 덮어쓰기에도 0600 보장 */ }
   return next;
 }

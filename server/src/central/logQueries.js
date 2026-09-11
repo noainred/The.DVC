@@ -28,14 +28,16 @@ function pruneResults() {
 
 /** reqId 가 발급된(=조회 대상) vCenter id. 소유권 검증용. 모르면 ''. */
 export function vcenterOfReq(reqId) { return reqVc.get(String(reqId))?.vcenterId || ''; }
+/** reqId 를 큐잉한 사용자(v2.478, 감사 S6 IDOR): 결과 폴링은 그 사용자(또는 admin)만. */
+export function ownerOfReq(reqId) { return reqVc.get(String(reqId))?.owner || ''; }
 
-export function enqueueLogQuery(vcenterId, filter = {}) {
+export function enqueueLogQuery(vcenterId, filter = {}, owner = '') {
   const reqId = newReqId();
   const arr = pending.get(vcenterId) || [];
   arr.push({ reqId, filter, at: Date.now() });
   if (arr.length > 50) arr.splice(0, arr.length - 50);
   pending.set(vcenterId, arr);
-  reqVc.set(reqId, { vcenterId, at: Date.now() });
+  reqVc.set(reqId, { vcenterId, at: Date.now(), owner: String(owner || '') });
   return reqId;
 }
 
