@@ -99,6 +99,7 @@ import { startBmstorPoller } from './bmstor/poller.js';           // 베어메�
 import { startBmstorWorker } from './agent/bmstorWorker.js';       // 〃 폴링 위임 워커(엣지, v2.341)
 import { startVmtrackPoller } from './vmtrack/poller.js';          // VM 수량 추이 00/12시 스냅샷(v2.345)
 import { startGuestDiskPoller } from './guestdisk/poller.js';       // 게스트 디스크 회수 리포트(v2.459)
+import { startPowerOffPoller } from './tools/powerOffPoller.js';     // 전원 꺼짐 점검(v2.484)
 import { startStoragePush } from './storage/push.js';            // 엣지→중앙 스냅샷 push(v2.302)
 import { startStorageConfigPull } from './agent/storageConfigPull.js'; // 중앙→엣지 장비 배포 pull(v2.302)
 
@@ -257,6 +258,7 @@ const stagger = [
   startVmtrackPoller, // VM 수량 추이(v2.345) — 60초 틱, 슬롯(00/12시) 미기록 시에만 수집 + 재진입 가드
   startDirUsageScheduler, // 폴더 사용량 Top-N 리포트(v2.454) — 60초 틱 + 재진입 가드, 설정 꺼짐이면 결과 수거만
   startGuestDiskPoller, // 게스트 디스크 회수 리포트(v2.459) — 60초 틱, opt-in(기본 꺼짐)·주기 경과 시에만 수집 + 재진입 가드
+  startPowerOffPoller,  // 전원 꺼짐 점검(v2.484) — 60초 틱, 설정 주기(기본 6h) 경과 시 스냅샷의 꺼진 VM 관측 적재 + 재진입 가드, vCenter 왕복 없음
   startGuestDiskPush,   // 〃 엣지→중앙 push(v2.466) — site 모드 vCenter 의 guest.disk 를 엣지가 수집해 중앙에 올림. CENTRAL_URL·pushGuestDisk 미충족이면 자기기동 안 함
 ];
 stagger.forEach((start, i) => setTimeout(() => { try { start(); } catch (e) { console.error('[start] 폴러 기동 실패:', e?.message); } }, i * 1500).unref?.());

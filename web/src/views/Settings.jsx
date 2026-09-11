@@ -19,6 +19,7 @@ import Alerts2 from './Alerts2.jsx';
 import Audit from './Audit.jsx';
 import MetricsSettings from './MetricsSettings.jsx';
 import StorageIntervals from './StorageIntervals.jsx'; // 스토리지 수집 주기(중앙→엣지 배포, v2.409)
+import PowerOffCheckSettings from './PowerOffCheckSettings.jsx'; // 전원 꺼짐 점검 주기(v2.484)
 import SanSwitchPerf from './SanSwitchPerf.jsx';       // SAN 스위치 포트 사용량 수집(portperfshow, v2.411)
 import GpuGuestSettings from './GpuGuestSettings.jsx';
 import GpuGuestDiag from './GpuGuestDiag.jsx';
@@ -48,6 +49,7 @@ const SUB = [
   { k: 'idrac-scan-log', label: '스캔 로그', C: IdracScanLog, group: 'collect' },
   { k: 'metrics', label: '지표 수집', C: MetricsSettings, group: 'collect' },
   { k: 'storage-intervals', label: '스토리지 수집 주기', C: StorageIntervals, group: 'collect' },
+  { k: 'power-off-check', label: '전원 꺼짐 점검', C: PowerOffCheckSettings, group: 'collect' },
   { k: 'sansw-perf', label: 'SAN 스위치 포트 사용량', C: SanSwitchPerf, group: 'collect' },
   // --- GPU 사용량 수집 그룹 ---
   { k: 'gpu-collect', label: 'GPU 수집', C: GpuSettings, group: 'gpu' },
