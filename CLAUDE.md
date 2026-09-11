@@ -11,6 +11,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
 - 오프라인 패키지: `packaging/offline/build-package.sh` (Rocky Linux 9)
 - 의존성: CI(`ci.yml`)의 `npm audit` 는 **critical 만 차단**(v2.478). 잔여 수용 항목 — 웹 high `d3-color`(3d-force-graph·react-simple-maps 경유, 색 문자열이 상수라 외부 입력 도달 불가), 서버 moderate `exceljs→uuid`(exceljs 는 `uuid.v4` 만 사용). 새 critical 이 뜨면 PR 이 막히니 `npm audit --omit=dev` 로 먼저 확인.
 - 작업 방식 메모(2026-09-11 실제 사고): 백그라운드 분석 에이전트 6개가 **10시간 동안 완료 알림 없이** 멈춘 적이 있다. 30분 내 알림이 없으면 죽은 것으로 보고 **직접 grep→파일 열기→판정** 방식으로 전환할 것(대기하지 말 것).
+- 소스 NUL 바이트 탐지는 `tr -cd '\000' < 파일 | wc -c` 로(`grep -cP '\x00'` 은 0 을 돌려주는 오탐 — v2.478 문서 오판의 원인). `file` 이 JS 를 'data' 로 분류하면 의심할 것. 분석 에이전트는 `model` 을 지정하지 말고 기본 모델로, 결과를 scratchpad 파일에도 쓰게 하면 12분 안에 돌아온다(2026-09-11 2차 감사 실측).
 
 ## 운영 환경 (성능 설계 시 반드시 고려)
 

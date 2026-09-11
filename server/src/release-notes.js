@@ -8,12 +8,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
+import { atomicWriteFileSync, preserveCorrupt } from './util/atomicWrite.js';
 
 const BUILTIN = path.join(path.dirname(fileURLToPath(import.meta.url)), 'release-notes.json');
 const USER_FILE = path.join(config.configDir, 'release-notes.json');
 
 function readJson(file) {
-  try { if (fs.existsSync(file)) return JSON.parse(fs.readFileSync(file, 'utf8'))?.notes || []; } catch { /* ignore */ }
+  try { if (fs.existsSync(file)) return JSON.parse(fs.readFileSync(file, 'utf8'))?.notes || []; } catch (e) { if (file === USER_FILE) preserveCorrupt(file, e.message); } // v2.479(감사 B-18): 사용자 노트 손상 시 보존
   return [];
 }
 
@@ -44,7 +45,7 @@ export function saveNote({ version, date, title, notes } = {}) {
     notes: Array.isArray(notes) ? notes.filter(Boolean) : String(notes || '').split('\n').map((s) => s.trim()).filter(Boolean),
   });
   fs.mkdirSync(path.dirname(USER_FILE), { recursive: true });
-  fs.writeFileSync(USER_FILE, JSON.stringify({ notes: list }, null, 2), { mode: 0o600 });
+  atomicWriteFileSync(USER_FILE, JSON.stringify({ notes: list }, null, 2), { mode: 0o600 });
   return { ok: true };
 }
 
@@ -53,6 +54,6 @@ export function deleteNote(version) {
   const list = readJson(USER_FILE);
   const next = list.filter((n) => n.version !== version);
   if (next.length === list.length) return { ok: false, reason: '사용자 기록 노트가 아니거나 없습니다.' };
-  fs.writeFileSync(USER_FILE, JSON.stringify({ notes: next }, null, 2), { mode: 0o600 });
+  atomicWriteFileSync(USER_FILE, JSON.stringify({ notes: next }, null, 2), { mode: 0o600 });
   return { ok: true };
 }

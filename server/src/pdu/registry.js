@@ -72,8 +72,11 @@ function normalize(input, existing = null) {
     name: String(input.name ?? e.name ?? '').trim(),
     host: String(input.host ?? e.host ?? '').trim(),
     username: String(input.username ?? e.username ?? '').trim(),
-    // 빈 비밀번호는 기존 유지(편집 시 재입력 강요하지 않음)
-    password: input.password ? String(input.password) : (e.password || ''),
+    // 빈 비밀번호는 기존 유지(편집 시 재입력 강요하지 않음) — 단 **host 가 바뀌면 이월 금지**(v2.479, 감사 S-1):
+    // 이월하면 host 만 공격자 IP 로 바꾼 뒤 다음 폴링이 저장 비밀번호로 그 호스트에 SSH 로그인한다
+    // (uagmon M3 · relaytopo v2.435 · storage/sanswitch 와 같은 규칙).
+    password: input.password ? String(input.password)
+      : ((input.host !== undefined && String(input.host).trim() !== String(e.host || '').trim()) ? '' : (e.password || '')),
     sshPort: Number(input.sshPort ?? e.sshPort ?? 22) || 22,
     datacenterId: String(input.datacenterId ?? e.datacenterId ?? '').trim(),
     // 수집 주체: '' = 중앙 직접, 그 외 = 그 엣지 이름에 위임(스토리지/SAN 스위치와 동일 규약)

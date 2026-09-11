@@ -1,5 +1,6 @@
 // 인사이트·위협 탐지·GPU 이력 — api.js(구 2,445줄) 분할(v2.283.0). 본문은 원본 그대로, 등록 순서는 api.js 호출 순서가 보존한다.
 import { scopedVcenterIds } from '../../auth/scope.js';
+import { requirePerm } from '../../auth/auth.js'; // v2.479(감사 S-4)
 import { store } from '../../store.js';
 import { scanResultList, getIpHistoryMap } from '../../ipam/scanStore.js';
 import { getClassifier } from '../../ipam/settings.js';
@@ -23,7 +24,7 @@ export function registerToolsAnalytics(api) {
 // 운영 인사이트 — 기존 스냅샷만으로 계산하는 모니터링 분석 묶음:
 //  ② VM 라이트사이징(유휴/과대/과소)  ④ 클러스터 N+1(호스트 1대 장애 여력)
 //  ⑧ 알람 핫스팟(심각도/엔티티/센터)   ⑩ GPU 유휴/낭비
-api.get('/tools/insights', (req, res) => memoJson(req, res, 'tools-insights', (snap) => {
+api.get('/tools/insights', requirePerm('tools'), (req, res) => memoJson(req, res, 'tools-insights', (snap) => {
   // scopeSlice 가 사용자 scope + ?vcenterId 를 함께 적용(hosts/vms/alarms 스코프). extraKey 로 캐시도 분리.
   const scoped = scopeSlice(snap, req.user, req.query.vcenterId);
   const hosts = scoped.hosts;
@@ -92,7 +93,7 @@ api.get('/tools/insights', (req, res) => memoJson(req, res, 'tools-insights', (s
 
   return { generatedAt: snap.generatedAt, rightsizing, clusters, alarmHotspot, gpuWaste };
 }, { extraKey: scopeKey(req.user, store.get()) }));
-api.get('/tools/threats', (req, res) => memoJson(req, res, 'tools-threats', (snap) => {
+api.get('/tools/threats', requirePerm('tools'), (req, res) => memoJson(req, res, 'tools-threats', (snap) => {
   const vc = req.query.vcenterId;
   const allowed = scopedVcenterIds(req.user, snap);
   // VM 기반(mining/eol)은 사용자 scope 로 거른다. 스캔/NSX-IDS 는 vCenter 귀속이 없는 조직 전역
@@ -146,7 +147,7 @@ api.get('/tools/threats', (req, res) => memoJson(req, res, 'tools-threats', (sna
 }, { extraKey: scopeKey(req.user, store.get()) }));
 
 // GPU 사용률 히스토리(5년까지). level=host|cluster|vc, key=대상키, days=기간.
-api.get('/tools/gpu/history', async (req, res) => {
+api.get('/tools/gpu/history', requirePerm('tools'), async (req, res) => {
   const level = ['host', 'cluster', 'vc'].includes(req.query.level) ? req.query.level : 'host';
   const metric = { host: 'gpu_util', cluster: 'gpu_cluster', vc: 'gpu_vc' }[level];
   const key = String(req.query.key || '');

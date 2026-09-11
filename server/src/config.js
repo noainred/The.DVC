@@ -338,7 +338,10 @@ export function currentVersion() {
 // secretVault 지연 로드(순환 import 회피) — 로드 완료 전 호출되면 평문 그대로 반환한다.
 // 기동 시퀀스상 첫 수집은 항상 이 import 완료 후이므로(비동기 폴러) 실질 공백은 없다.
 let openSecretsDeepRef = null;
-import('./security/secretVault.js').then((m) => { openSecretsDeepRef = m.openSecretsDeep; }).catch(() => {});
+// v2.479(감사 코어 B-2): 이 import 는 index.js 최상위 코드가 끝난 뒤에야 완료되므로, 동기 호출되는 첫 store.refresh 는
+// 암호화 모드에서 봉인문(암호문) 비밀번호로 vCenter 로그인을 시도했다(재시작마다 전 vCenter 1회 실패). store.start 가
+// secretsReady 를 기다린 뒤 첫 수집을 돌린다.
+export const secretsReady = import('./security/secretVault.js').then((m) => { openSecretsDeepRef = m.openSecretsDeep; }).catch(() => {});
 
 /**
  * 번들 예제 템플릿(vcenters.example.json)으로 폴백할지(v2.444).

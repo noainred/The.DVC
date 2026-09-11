@@ -8,6 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { createBackup } from './service.js';
 
 const FILE = path.join(config.configDir, 'backup.json');
@@ -26,7 +27,8 @@ let cache = null;
 export function loadBackupSettings() {
   if (cache) return cache;
   cache = { ...DEFAULTS };
-  try { if (fs.existsSync(FILE)) cache = { ...DEFAULTS, ...JSON.parse(fs.readFileSync(FILE, 'utf8')) }; } catch { /* */ }
+  try { if (fs.existsSync(FILE)) cache = { ...DEFAULTS, ...JSON.parse(fs.readFileSync(FILE, 'utf8')) }; }
+  catch (e) { preserveCorrupt(FILE, e.message); } // v2.479(감사 S-9): 손상 시 조용히 기본값(정기 백업 off)으로 돌아가지 않게 보존+경고
   return cache;
 }
 
@@ -41,7 +43,7 @@ export function saveBackupSettings(body = {}) {
     retention: Math.max(1, Math.min(500, Number(body.retention) || cur.retention)),
   };
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
-  fs.writeFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
+  atomicWriteFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
   cache = next;
   reschedule();
   return next;
