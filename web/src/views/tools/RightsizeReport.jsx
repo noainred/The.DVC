@@ -13,7 +13,9 @@ import EscClose from '../../components/EscClose.jsx';
 import { STable } from '../../components/STable.jsx';
 import { exportFileName, saveElementAsJpg, saveDocAsPdf } from './reportExport.js';
 
-const DAYS = [7, 30, 90];
+const DAYS = [7, 30, 90, 180, 365];
+// 90일 초과는 vCenter 'year' 롤업(86400초=1일 샘플, 1년 보관)에서 조회한다 — 6개월·1년 검토 지원.
+const dayLabel = (d) => (d === 365 ? '1년' : d === 180 ? '6개월' : `${d}일`);
 const tip = { background: '#0f172a', border: '1px solid #334155', borderRadius: 8, fontSize: 12 };
 const gb = (mb) => (mb == null ? '—' : `${(mb / 1024).toFixed(1)} GB`);
 const ghz = (mhz) => (mhz == null ? '—' : `${(mhz / 1000).toFixed(2)} GHz`);
@@ -84,7 +86,7 @@ function buildRightsizeDoc(r, vm, days) {
   return {
     title: `자원 축소 근거 리포트 — ${vm.name}`,
     subtitle: `${vm.vcenterId} · ${vm.host || ''} · ${vm.guestOS || ''}`,
-    meta: `최근 ${days}일 · 롤업 ${w.intervalSec}초${r.cached ? ' · 5분 캐시' : ''}${r.synthesized ? ' · 데모(mock)' : ''}`,
+    meta: `최근 ${dayLabel(days)} · 롤업 ${w.intervalSec}초${r.cached ? ' · 5분 캐시' : ''}${r.synthesized ? ' · 데모(mock)' : ''}`,
     blocks,
   };
 }
@@ -166,7 +168,7 @@ export default function RightsizeReport({ vm, onClose }) {
               title="이 리포트 전체를 JPG 이미지 한 장으로 저장합니다."
               onClick={() => save('jpg')}>{saving === 'jpg' ? '저장 중…' : '⬇ JPG'}</button>
             <span style={{ width: 1, height: 18, background: 'rgba(255,255,255,.14)' }} />
-            {DAYS.map((d) => <button key={d} className={days === d ? 'login-btn' : 'tab'} style={{ padding: '5px 12px', fontSize: 12 }} onClick={() => setDays(d)}>최근 {d}일</button>)}
+            {DAYS.map((d) => <button key={d} className={days === d ? 'login-btn' : 'tab'} style={{ padding: '5px 12px', fontSize: 12 }} onClick={() => setDays(d)}>최근 {dayLabel(d)}</button>)}
             <button className="logout-btn" onClick={onClose}>닫기</button>
           </div>
         </div>

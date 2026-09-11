@@ -16,7 +16,7 @@ import EscClose from '../../components/EscClose.jsx';
 import { STable } from '../../components/STable.jsx';
 import { safeFileName, saveElementAsJpg, saveDocAsPdf } from './reportExport.js';
 
-const DAYS = [[7, '7일'], [30, '30일'], [90, '90일'], [365, '1년'], [0, '전체']];
+const DAYS = [[7, '7일'], [30, '30일'], [90, '90일'], [180, '6개월'], [365, '1년'], [0, '전체']];
 const UNIT_OPTS = [['auto', '자동'], ['GB', 'GB'], ['TB', 'TB'], ['PB', 'PB']];
 const UNIT_DIV = { GB: 1, TB: 1024, PB: 1024 * 1024 };
 const TREND = {
