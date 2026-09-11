@@ -15,6 +15,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js'; // v2.478(감사 B5/S12): 원자적 쓰기 + 손상 시 preserveCorrupt — 크래시 1회로 설정이 소실되고 다음 저장이 빈 값으로 덮어쓰는 사고 방지
 
 const FILE = path.join(config.configDir, 'vmperf.json');
 const FIELDS = ['enabled', 'retentionDays', 'vcenterIds', 'trackTotal'];
@@ -24,7 +25,7 @@ const MAX_RETENTION_DAYS = 1830;
 
 function readFile() {
   if (!fs.existsSync(FILE)) return {};
-  try { return JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}; } catch { return {}; }
+  try { return JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}; } catch (e) { preserveCorrupt(FILE, e.message); return {}; }
 }
 
 function coerce(field, v) {
@@ -58,7 +59,7 @@ export function saveVmperfSettings(partial = {}) {
   const next = readFile();
   for (const f of FIELDS) if (partial[f] !== undefined) next[f] = coerce(f, partial[f]);
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
-  fs.writeFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
+  atomicWriteFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
   return loadVmperfSettings();
 }
 

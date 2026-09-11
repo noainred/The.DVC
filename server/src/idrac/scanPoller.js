@@ -16,6 +16,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js'; // v2.478(감사 B5/S12): 원자적 쓰기 + 손상 시 preserveCorrupt — 크래시 1회로 설정이 소실되고 다음 저장이 빈 값으로 덮어쓰는 사고 방지
 import { scanForIdracs } from './scan.js';
 import { registerScanned } from './registry.js';
 import { pollNow } from './poller.js';
@@ -39,7 +40,7 @@ let settingsCache;
 function loadScanSettingsFile() {
   if (settingsCache !== undefined) return settingsCache;
   try { settingsCache = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')); }
-  catch { settingsCache = null; }
+  catch (e) { preserveCorrupt(SETTINGS_FILE, e.message); settingsCache = null; } // 파일 없음(ENOENT)이면 preserveCorrupt 는 no-op
   return settingsCache;
 }
 function intervalMs() {
@@ -54,7 +55,7 @@ export function setIdracScanIntervalMs(ms) {
   settingsCache = { ...(loadScanSettingsFile() || {}), intervalMs: v };
   try {
     fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
-    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settingsCache, null, 2), { mode: 0o600 });
+    atomicWriteFileSync(SETTINGS_FILE, JSON.stringify(settingsCache, null, 2), { mode: 0o600 });
   } catch (e) { return { ok: false, reason: `저장 실패: ${e.message}` }; }
   rescheduleIdracScanPoller();
   return { ok: true, intervalMs: v };

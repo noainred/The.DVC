@@ -7,6 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from './config.js';
+import { atomicWriteFileSync, preserveCorrupt } from './util/atomicWrite.js'; // v2.478(감사 B5/S12): 원자적 쓰기 + 손상 시 preserveCorrupt — 크래시 1회로 설정이 소실되고 다음 저장이 빈 값으로 덮어쓰는 사고 방지
 
 const FILE = path.join(config.configDir, 'ui.json');
 // mapSpread: 같은/비슷한 좌표의 법인 마커를 겹치지 않게 흩뜨리는 반경(px). 0이면 분산 안 함(겹침).
@@ -15,7 +16,8 @@ const DEFAULTS = { mapHeight: 420, mapLambda: -127, mapOffsetY: 0, mapSpread: 10
 export function loadUiSettings() {
   try {
     return { ...DEFAULTS, ...JSON.parse(fs.readFileSync(FILE, 'utf8')) };
-  } catch {
+  } catch (e) {
+    preserveCorrupt(FILE, e.message); // 파일 없음이면 no-op
     return { ...DEFAULTS };
   }
 }
@@ -40,6 +42,6 @@ export function saveUiSettings(partial = {}) {
     next.mapSpread = Math.max(0, Math.min(60, Math.round(Number(partial.mapSpread))));
   }
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
-  fs.writeFileSync(FILE, JSON.stringify(next, null, 2));
+  atomicWriteFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
   return next;
 }

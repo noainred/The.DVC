@@ -45,7 +45,7 @@ function load() {
 // 빈 목록으로 덮어써 전 모니터 정의(자격증명 포함)가 사라진다. tmp+fsync+rename으로 방지.
 function persist() { try { atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep(cache), null, 2), { mode: 0o600 }); } catch { /* */ } } // 암호화 모드면 password/privateKey 봉인
 
-const redact = (m) => ({
+const redact = (m) => ({ useSudo: m.useSudo !== false,
   id: m.id, name: m.name, enabled: m.enabled, mode: m.mode, intervalMin: m.intervalMin,
   iface: m.iface, seconds: m.seconds, maxPackets: m.maxPackets,
   hostA: m.hostA?.host || '', hostB: m.mode === 'dual' ? (m.hostB?.host || '') : (m.peer || ''),
@@ -63,7 +63,9 @@ export function saveMonitor(body = {}) {
     intervalMin: Math.max(1, Math.min(1440, Number(body.intervalMin) || 10)),
     iface: body.iface || 'any', seconds: Math.min(60, Math.max(1, Number(body.seconds) || 10)), maxPackets: Math.min(20000, Math.max(10, Number(body.maxPackets) || 1000)),
     hostA: body.hostA || {}, hostB: body.hostB || {}, peer: body.peer || '',
-    useSudo: body.useSudo !== false,
+    // v2.478(감사 B7): 시작/중지 토글처럼 useSudo 를 안 보내면 기존 값을 유지(예전엔 true 로 되돌아가 sudo -n 막힌
+    // 서버에서 매 주기 캡처 실패). redact 도 useSudo 를 내려 프론트가 복원할 수 있게 한다.
+    useSudo: body.useSudo !== undefined ? body.useSudo !== false : (cache.find((x) => x.id === id)?.useSudo !== false),
     lastRun: null, lastWorst: null, lastDetail: '',
   };
   const idx = cache.findIndex((x) => x.id === id);

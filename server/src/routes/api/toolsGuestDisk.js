@@ -5,7 +5,7 @@
  * 않는다(보안 불변조건). 상태변경(설정 저장·수동 수집)은 requireRole('admin').
  */
 import { scopedVcenterIds } from '../../auth/scope.js';
-import { requireRole } from '../../auth/auth.js';
+import { requireRole, requirePerm } from '../../auth/auth.js'; // v2.478(감사 S5): 조회는 tools 권한
 import { logAudit } from '../../audit.js';
 import { store } from '../../store.js';
 import { reclaimReport, vmDetail, reclaimCsv } from '../../guestdisk/service.js';
@@ -15,7 +15,7 @@ import { load as loadSettings, save as saveSettings } from '../../guestdisk/sett
 
 export function registerToolsGuestDisk(api) {
   // 회수 목록(VM별 할당/사용/여유/비율) — scope 적용.
-  api.get('/tools/guest-disk', async (req, res) => {
+  api.get('/tools/guest-disk', requirePerm('tools'), async (req, res) => {
     const allowed = scopedVcenterIds(req.user, store.get());
     const minReclaimGB = req.query.minReclaimGB != null ? Number(req.query.minReclaimGB) : loadSettings().minReclaimGB;
     const maxRatioPct = req.query.maxRatioPct != null && req.query.maxRatioPct !== '' ? Number(req.query.maxRatioPct) : null;
@@ -25,7 +25,7 @@ export function registerToolsGuestDisk(api) {
   });
 
   // 한 VM 의 파티션별 최신값 + 추이 — scope 단건 검사(범위 밖은 404 존재 은닉).
-  api.get('/tools/guest-disk/vm/:id', async (req, res) => {
+  api.get('/tools/guest-disk/vm/:id', requirePerm('tools'), async (req, res) => {
     const days = req.query.days != null ? Number(req.query.days) : 0;
     const detail = await vmDetail(req.params.id, { days: Number.isFinite(days) && days > 0 ? days : 0 });
     if (!detail) return res.status(404).json({ error: 'not found' });
@@ -35,7 +35,7 @@ export function registerToolsGuestDisk(api) {
   });
 
   // CSV — 회수 목록. scope 적용, 수식 인젝션 가드 + BOM 은 service 에서.
-  api.get('/tools/guest-disk/export.csv', async (req, res) => {
+  api.get('/tools/guest-disk/export.csv', requirePerm('tools'), async (req, res) => {
     const allowed = scopedVcenterIds(req.user, store.get());
     const minReclaimGB = req.query.minReclaimGB != null ? Number(req.query.minReclaimGB) : loadSettings().minReclaimGB;
     const maxRatioPct = req.query.maxRatioPct != null && req.query.maxRatioPct !== '' ? Number(req.query.maxRatioPct) : null;
@@ -48,7 +48,7 @@ export function registerToolsGuestDisk(api) {
   });
 
   // 상태 — DB/폴러/설정.
-  api.get('/tools/guest-disk/status', (_req, res) => {
+  api.get('/tools/guest-disk/status', requirePerm('tools'), (_req, res) => {
     res.json({ db: guestDiskDbStatus(), poller: guestDiskPollerStatus(), settings: loadSettings() });
   });
 

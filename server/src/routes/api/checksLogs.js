@@ -1,4 +1,5 @@
 // 심층검색·서비스/네트워크 점검·vCenter 로그 — api.js(구 2,445줄) 분할(v2.283.0). 본문은 원본 그대로, 등록 순서는 api.js 호출 순서가 보존한다.
+import { requirePerm } from '../../auth/auth.js'; // v2.478(감사 S5)
 import { scopedVcenterIds, inUserScope } from '../../auth/scope.js';
 import { guardCell } from '../../util/csv.js';
 import { store } from '../../store.js';
@@ -9,7 +10,7 @@ import { getServiceCheck } from '../../health/services.js';
 import { getNetworkCheck } from '../../health/network.js';
 import { buildVmwareConfigExport } from '../../backup/vmwareExport.js';
 import { getLogsDb } from '../../logs/db.js';
-import { enqueueLogQuery, getLogQueryResult } from '../../central/logQueries.js';
+import { enqueueLogQuery, getLogQueryResult, ownerOfReq, vcenterOfReq } from '../../central/logQueries.js';
 import { listInventory } from '../../central/inventory.js';
 import { getAllGpuGuestDiag } from '../../central/gpuGuestDiag.js';
 import zlib from 'node:zlib';
@@ -34,7 +35,7 @@ function scopeLogMeta(meta, allowed) {
 export function registerChecksLogs(api) {
 
 // 심층 검색(스냅샷 1차) — 다조건 + 범위(전체/특정/복수 vCenter). Body: { vcenterIds[], filters{} }.
-api.post('/tools/deep-search', (req, res) => {
+api.post('/tools/deep-search', requirePerm('tools'), (req, res) => {
   const b = req.body || {};
   const f = b.filters || {};
   const snap = store.get();
@@ -56,20 +57,20 @@ api.post('/tools/deep-search', (req, res) => {
 });
 
 // 다빈치 서비스 점검 — 포탈 내부 서비스/수집기 상태 통합.
-api.get('/tools/service-check', (_req, res) => {
+api.get('/tools/service-check', requirePerm('tools'), (_req, res) => {
   try { res.json(getServiceCheck()); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 
 // 글로벌 네트워크 점검 — 제어플레인(vCenter/NSX) 도달성·RTT + 네트워크 객체 요약.
 // v2.322 보안 감사: 범위 제한 계정은 허용 vCenter·귀속 NSX 매니저만(범위 밖 host/이름/region/RTT 차단).
-api.get('/tools/network-check', async (req, res) => {
+api.get('/tools/network-check', requirePerm('tools'), async (req, res) => {
   try { res.json(await getNetworkCheck(scopedVcenterIds(req.user, store.get()))); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 
 // 사이트 VMware 솔루션 구성 백업 — 수집 구성 스냅샷. ?vcenterId=로 사이트 한정, ?download=1로 gzip 파일.
 // v2.322 보안 감사(HIGH): 범위 제한 계정은 허용 vCenter(및 귀속 NSX 매니저)로만 — 과거 이 라우트만
 // scope 를 안 걸어 범위 밖 전 함대 ESXi 관리 IP·전 VM IP/메모·NSX DFW 규칙이 gzip 으로 새었다.
-api.get('/tools/vmware-config', async (req, res) => {
+api.get('/tools/vmware-config', requirePerm('tools'), async (req, res) => {
   try {
     const allowed = scopedVcenterIds(req.user, store.get());
     const reqVc = req.query.vcenterId ? String(req.query.vcenterId) : null;
@@ -109,7 +110,7 @@ api.get('/tools/vmware-config', async (req, res) => {
 });
 
 // 로그 출처 — 이 포탈 로컬 보관(local) vs 엣지 보관(remote, 연합 조회 필요).
-api.get('/tools/vclogs/sources', (_req, res) => {
+api.get('/tools/vclogs/sources', requirePerm('tools'), (_req, res) => {
   const localIds = new Set((loadVcenterConfig().vcenters || []).map((v) => v.id));
   const vcAgent = new Map();
   for (const inv of listInventory()) if (inv.agent) vcAgent.set(inv.vcenterId, inv.agent);
@@ -120,22 +121,28 @@ api.get('/tools/vclogs/sources', (_req, res) => {
 });
 
 // 엣지 로그 연합 조회 — 요청 큐잉(POST) / 결과 폴링(GET ?reqId=).
-api.post('/tools/vclogs/federate', (req, res) => {
+api.post('/tools/vclogs/federate', requirePerm('tools'), (req, res) => {
   const b = req.body || {};
   const vcenterId = String(b.vcenterId || '').trim();
   if (!vcenterId) return res.status(400).json({ ok: false, reason: 'vcenterId가 필요합니다.' });
   // scope 강제: 범위 밖 vCenter 의 엣지 로그 연합 조회를 큐잉할 수 없다(범위 밖은 존재도 숨겨 404).
   if (!inUserScope(req.user, store.get(), vcenterId)) return res.status(404).json({ ok: false, reason: 'vCenter를 찾을 수 없습니다.' });
   const filter = { vcenterId, severity: b.severity || '', q: b.q || '', since: Number(b.since) || 0, until: Number(b.until) || 0, limit: Math.min(500, Number(b.limit) || 200) };
-  res.json({ ok: true, reqId: enqueueLogQuery(vcenterId, filter) });
+  res.json({ ok: true, reqId: enqueueLogQuery(vcenterId, filter, req.user?.username || '') });
 });
-api.get('/tools/vclogs/federate', (req, res) => {
+api.get('/tools/vclogs/federate', requirePerm('tools'), (req, res) => {
   const reqId = String(req.query.reqId || '');
   if (!reqId) return res.status(400).json({ ok: false, reason: 'reqId가 필요합니다.' });
+  // v2.478(감사 S6): reqId 는 `lq_<ms36>_<seq36>` 로 예측 가능 → 큐잉한 사용자(또는 admin)만 결과를 받고,
+  // 대상 vCenter 가 조회 범위 밖이면 404(존재 은닉). 만료(TTL)된 reqId 는 기존대로 빈 결과.
+  const owner = ownerOfReq(reqId);
+  if (owner && req.user?.role !== 'admin' && owner !== req.user?.username) return res.status(404).json({ ok: false, reason: '조회 요청을 찾을 수 없습니다.' });
+  const vcOf = vcenterOfReq(reqId);
+  if (vcOf && !inUserScope(req.user, store.get(), vcOf)) return res.status(404).json({ ok: false, reason: '조회 요청을 찾을 수 없습니다.' });
   res.json({ ok: true, ...getLogQueryResult(reqId) });
 });
 // vCenter 장기 보관 로그 조회 — 필터: vcenterId·severity·q·since·until + 페이징.
-api.get('/tools/vclogs', async (req, res) => {
+api.get('/tools/vclogs', requirePerm('tools'), async (req, res) => {
   try {
     const db = await getLogsDb();
     const f = { vcenterId: req.query.vcenterId || '', severity: req.query.severity || '', q: req.query.q || '',
@@ -146,7 +153,7 @@ api.get('/tools/vclogs', async (req, res) => {
     res.json({ total: db.count(f), rows: db.query(f, limit, offset), meta: scopeLogMeta(db.meta(), allowed), dbKind: db.kind });
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
-api.get('/tools/vclogs/export.csv', async (req, res) => {
+api.get('/tools/vclogs/export.csv', requirePerm('tools'), async (req, res) => {
   try {
     const db = await getLogsDb();
     const f = { vcenterId: req.query.vcenterId || '', severity: req.query.severity || '', q: req.query.q || '',

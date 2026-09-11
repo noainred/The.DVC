@@ -11,6 +11,7 @@
 
 import { Router } from 'express';
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getPackageDir } from '../upgrade/packageSettings.js';
@@ -36,8 +37,27 @@ function findFile(name) {
 }
 
 /** 패키지 디렉터리를 스캔해 versions.json 생성(번들 기준 최신 선택). */
-function buildVersions() {
-  const byVer = new Map(); // ver -> { version, tar_gz, size_bytes }
+// v2.478(감사 S17): sha256 이 없으면 엣지 업그레이드가 항상 fail-closed 라 현장이 UPGRADE_ALLOW_UNVERIFIED 로
+// 우회하게 되고, 그 env 는 전역이라 GitHub 공식 경로의 검증까지 함께 꺼진다. 번들마다 sha256 을 실어
+// 검증이 통과하게 한다. 해시는 스트리밍(이벤트 루프 비블로킹)이며 path+size+mtime 키로 캐시, 동시 요청은 1회만.
+const shaCache = new Map(); // path -> { size, mtimeMs, sha256 }
+const shaInflight = new Map(); // path -> Promise<string>
+async function sha256Of(p) {
+  const st = fs.statSync(p);
+  const c = shaCache.get(p);
+  if (c && c.size === st.size && c.mtimeMs === st.mtimeMs) return c.sha256;
+  if (shaInflight.has(p)) return shaInflight.get(p);
+  const job = new Promise((resolve, reject) => {
+    const h = crypto.createHash('sha256');
+    fs.createReadStream(p).on('data', (d) => h.update(d)).on('end', () => resolve(h.digest('hex'))).on('error', reject);
+  }).then((sha) => { shaCache.set(p, { size: st.size, mtimeMs: st.mtimeMs, sha256: sha }); return sha; })
+    .finally(() => shaInflight.delete(p));
+  shaInflight.set(p, job);
+  return job;
+}
+
+async function buildVersions() {
+  const byVer = new Map(); // ver -> { version, tar_gz, size_bytes, sha256 }
   for (const d of sourceDirs()) {
     let files = [];
     try { files = fs.readdirSync(d); } catch { continue; }
@@ -45,15 +65,16 @@ function buildVersions() {
       const m = BUNDLE_RE.exec(f);
       if (!m) continue;
       if (byVer.has(m[1])) continue;
-      try { byVer.set(m[1], { version: m[1], tar_gz: f, size_bytes: fs.statSync(path.join(d, f)).size }); } catch { /* */ }
+      try { byVer.set(m[1], { version: m[1], tar_gz: f, size_bytes: fs.statSync(path.join(d, f)).size, _path: path.join(d, f) }); } catch { /* */ }
     }
   }
   const versions = [...byVer.values()].sort((a, b) => cmp(b.version, a.version));
+  await Promise.all(versions.map(async (v) => { try { v.sha256 = await sha256Of(v._path); } catch { /* 해시 실패 시 sha256 없이(엣지는 fail-closed) */ } delete v._path; }));
   return { latest: versions[0]?.version || '', versions };
 }
 
-dlSourceRouter.get('/versions.json', (_req, res) => {
-  res.json(buildVersions());
+dlSourceRouter.get('/versions.json', async (_req, res) => {
+  try { res.json(await buildVersions()); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 dlSourceRouter.get('/:file', (req, res) => {

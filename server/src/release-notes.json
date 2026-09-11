@@ -1,6 +1,17 @@
 {
   "notes": [
     {
+      "version": "2.478.0",
+      "date": "2026-09-11",
+      "title": "전체 소스 감사 후속 — 미적용 보안·버그 17건 조치, 의존성 critical 해소, CI 차단, 문서 정합성",
+      "notes": [
+        "보안(직전 감사 미적용분 조치): /api/tools/* 조회(GET)에 tools 기능 권한 게이트(S5 — capacity·waste·rightsize·guest-disk·vclogs·hardware·gpu 등 34개 라우트), 엣지 로그 연합 조회 결과를 큐잉한 사용자/admin + vCenter 범위 안에서만 반환(S6 IDOR), 원격접속 매핑 목록·.rdp 발급에 remote.access 권한 + 소유자·범위 검사(S7·S8 — 소유자 없는 매핑은 admin 전용), HAProxy 경로 점검 응답에서 비-admin 은 엣지 IP·포트 마스킹(S9), AD 설정·수집 주기·VM 성능·iDRAC 스캔·UI 설정 파일 5종을 원자적 쓰기 + 손상 보존으로(S12·B5), 알람 음소거·VMware Tools 업그레이드 감사로그(S15), 중앙 /dl/versions.json 에 번들 sha256 제공(S17 — 엣지 업그레이드 무결성 검증이 통과되어 UPGRADE_ALLOW_UNVERIFIED 우회 유인 제거).",
+        "버그: 실제 OS 스캔 수동 실행이 주기 틱과 재진입 가드를 공유(B2), 네트워크 모니터 시작/중지 토글이 useSudo 를 true 로 되돌리던 것(B7), 시계열 조회 실패를 조용히 빈 배열로 삼키던 4곳에 경고 로그(B8), 베어메탈 스토리지 서버를 비활성으로 바꾸면 마지막 결과가 지워지던 것(B12), 과할당 리포트의 코어당 MHz 를 동명 호스트가 서로 덮어쓰던 것(B13 — vCenter별 키), IP 스캔 대역/네트워크 맵 화면이 데이터 보유 중 일시 오류로 전체가 오류 화면으로 바뀌던 것(B15 — 배너 유지).",
+        "의존성(실측): 웹 jspdf 2.5.2→4.2.1 로 critical(ReDoS/DoS)·moderate(dompurify) 해소 — 한글 폰트 임베드·표 줄바꿈 헤드리스 재검증. 서버 qs 6.16 override + undici/brace-expansion/body-parser 갱신으로 high 0. 잔여 수용: 웹 d3-color(3d-force-graph 경유·외부 입력 도달 불가), 서버 exceljs→uuid(v4 만 사용). CI 의 npm audit 는 critical 만 차단(기존 비차단).",
+        "문서: README 에 /api/tools 루트 14개·central 라우트 16개 보강 + 최근 도구(게스트 디스크 회수·자원 축소 근거·벡터 PDF·접속확인) 절, docs/ENV.md 재생성(329키), INDEX 수치 갱신, docs/AUDIT-2026-09-11.md(재판정표·보류 사유·미수행 항목 정직 기록). 정직 기록: 병렬 분석 에이전트가 완료되지 않아 v2.446 이후 신규 코드의 신규 취약점 탐색은 이번에 수행하지 못했다(다음 후보)."
+      ]
+    },
+    {
       "version": "2.477.0",
       "date": "2026-09-11",
       "title": "설정 › 특수 기능 카테고리 — 카테고리 카드가 기능 목록에 덮여 안 보이던 겹침 수정",

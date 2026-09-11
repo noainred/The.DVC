@@ -110,6 +110,13 @@ async function scanVcenter(vc, targets, settings) {
 
 /** 즉시 실행. scopeVcId 지정 시 그 vCenter만, 아니면 설정 scope(all/특정). 반환 요약. */
 export async function runOsScanNow(scopeVcId) {
+  // v2.478(감사 B2): 수동 '지금 스캔' API 와 60초 틱이 가드를 공유한다 — 겹치면 SSH/SOAP 세션 2배 +
+  // lastFound/lastErr 상호 덮어쓰기(net/monitor.runMonitorNow 패턴).
+  if (running) return { ok: false, skipped: true, reason: '이미 스캔이 진행 중입니다.' };
+  running = true;
+  try { return await runOsScanNowInner(scopeVcId); } finally { running = false; }
+}
+async function runOsScanNowInner(scopeVcId) {
   const s = loadOsScanSettings();
   const scope = scopeVcId || (s.scope && s.scope !== 'all' ? s.scope : '');
   const vcs = (loadVcenterConfig().vcenters || []).filter((v) => !scope || v.id === scope);
@@ -140,8 +147,7 @@ export function startOsScanner() {
     const s = loadOsScanSettings();
     if (!s.enabled) return;
     if (s.lastRun && Date.now() - s.lastRun < s.intervalMin * 60_000) return;
-    running = true;
-    runOsScanNow().catch((e) => console.warn('[osscan] 실행 실패:', e?.message)).finally(() => { running = false; });
+    runOsScanNow().catch((e) => console.warn('[osscan] 실행 실패:', e?.message)); // 가드는 runOsScanNow 안에서 공유
   }, 60_000);
   timer.unref?.();
   console.log('[osscan] 실제 OS 인벤토리 스캐너 시작');

@@ -1,5 +1,6 @@
 // GuestOS/HBA/라이선스/Tools업그레이드/UI설정 — api.js(구 2,445줄) 분할(v2.283.0). 본문은 원본 그대로, 등록 순서는 api.js 호출 순서가 보존한다.
 import { requireRole, requirePerm } from '../../auth/auth.js';
+import { auditMiddleware } from '../../audit.js';
 import { scopedVcenterIds, writeScopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { loadVcenterConfig } from '../../config.js';
@@ -185,7 +186,7 @@ api.get('/tools/license-expiry', async (req, res) => {
 });
 
 // Trigger VMware Tools upgrade on one or more VMs. Body: { ids:[vmId,...] }.
-api.post('/vms/upgrade-tools', requirePerm('tools'), async (req, res) => {
+api.post('/vms/upgrade-tools', requirePerm('tools'), auditMiddleware, async (req, res) => { // v2.478(감사 S15): 게스트 재부팅 유발 작업 감사
   let ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
   if (!ids.length) return res.status(400).json({ ok: false, reason: '대상 VM이 없습니다.' });
   const snap = store.get();

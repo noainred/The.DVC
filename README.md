@@ -319,8 +319,9 @@ git 소스로 실행하면 `CONFIG_DIR` 기본값이 `server/config` 라 이 파
 | `GET/POST/DELETE /alarm-mutes` `GET/PUT /ui-settings` `POST /search/nl` | 음소거 · UI설정 · 자연어검색 |
 
 ### 특수기능 `/api/tools/*`
-`gpu`(+`/history`,`/vms`), `esxi-temp`(+`/history`), `capacity`, `capacity-forecast`, `waste`, `thin-vms`, `guest-os`, `hba`, `licenses`, **`license-expiry`**(vCenter+NSX+Horizon 만료일), `esxi`, `solutions`, `hardware`, `vmtools`, `snapshots`, `duplicate-ips`, `vm-finder`(POST), `ipam`(+`/subnets`,`/sheet`,`/annotation`,`.xlsx`,`.csv`), `deep-search`(POST), `ip-ping`, `service-check`, `network-check`, `vmware-config`, `vclogs`(+`/export.csv`,`/federate`,`/sources`), **`storage`**(+`/devices`,`/devices/import`,`/collect-all`,`/activity` — 스토리지 어레이 모니터링), **`vm-clone`**(+`/jobs`,`/jobs/:id/run`,`/badges` — 백업식 복제), **`vm-track`**(+`/changes`,`/ds-changes`,`/ds-list`,`/ds-series`,`/ds-series-all`,`/ds-top`,`/ds-change-log`,`/ds-pivot`,`/snapshot` — VM 수량·데이터스토어 사용량 추이, v2.345~2.356), **`bm-storage`**(+`/servers`,`/settings`,`/collect`,`/import`,`/export.csv` — 베어메탈 스토리지, 관리자)
+`gpu`(+`/history`,`/vms`), `esxi-temp`(+`/history`), `capacity`, `capacity-forecast`, `waste`, `thin-vms`, `guest-os`, `hba`, `licenses`, **`license-expiry`**(vCenter+NSX+Horizon 만료일), `esxi`, `solutions`, `hardware`, `vmtools`, `snapshots`, `duplicate-ips`, `vm-finder`(POST), `ipam`(+`/subnets`,`/sheet`,`/annotation`,`.xlsx`,`.csv`), `deep-search`(POST), `ip-ping`, `service-check`, `network-check`, `vmware-config`, `vclogs`(+`/export.csv`,`/federate`,`/sources`), **`storage`**(+`/devices`,`/devices/import`,`/collect-all`,`/activity` — 스토리지 어레이 모니터링), **`vm-clone`**(+`/jobs`,`/jobs/:id/run`,`/badges` — 백업식 복제), **`vm-track`**(+`/changes`,`/ds-changes`,`/ds-list`,`/ds-series`,`/ds-series-all`,`/ds-top`,`/ds-change-log`,`/ds-pivot`,`/snapshot` — VM 수량·데이터스토어 사용량 추이, v2.345~2.356), **`bm-storage`**(+`/servers`,`/settings`,`/collect`,`/import`,`/export.csv` — 베어메탈 스토리지, 관리자), **`rightsize`**(자원 축소 근거 리포트 — CPU/메모리 실사용 통계·권장 사양, `?days=7|30|90|180|365`, v2.445+), **`guest-disk`**(+`/vm/:id`,`/export.csv`,`/status`,`/run` — 게스트 OS 디스크 할당/사용량·회수 후보, 엣지 push 수집, v2.466+), **`sanswitch`**(SAN 스위치 포트·처리량, v2.410+), **`pdu`**(PDU 정보, v2.4xx), **`credentials`**(통합 계정 관리 — 비밀 값은 어떤 응답에도 미포함, v2.419), **`rma`**(원격 명령 실행 — 프리셋 카탈로그, v2.416), **`relaytopo`**(중계 토폴로지/HAProxy 구성, admin 전용 렌더, v2.431), **`relaycheck`**(HAProxy 경로 점검 — 비-admin 은 대상 IP·포트 마스킹, v2.478), **`serial-lookup`**, **`secret-scan`**(평문 자격증명 점검), **`threats`**(위협 탐지), **`vm-export`**(VM 전체 정보 CSV), **`report`**(일일 헬스체크 리포트), **`insights`**
 
+> **v2.478+: `/api/tools/*` 는 조회(GET)까지 `tools` 기능 권한 게이트**입니다(감사 S5 — 예전엔 capacity/waste/rightsize/guest-disk/vclogs/hardware/gpu 등 조회가 무게이트라 `tools` 권한이 없는 viewer 도 curl 로 내려받을 수 있었음). 화면에서 403 은 공용 `ErrorBox` 가 `AccessDenied` 안내로 바꿔 보여줍니다.
 > 상태변경(POST/PUT/DELETE) 라우트는 **기능 권한(`requirePerm`)** 으로 보호됩니다(v2.196+) — IPAM 편집·ip-ping·Tools 업그레이드는 `tools`, 알람 음소거는 `inv.alarms`, VM 사양변경은 `vm.reconfig`, 원격 콘솔은 `vm.console`, SSH/RDP 터널·probe·rdp-ticket은 `remote.access`. 기본 매트릭스는 기존 `requireRole('admin','operator')` 동작과 동일(viewer는 조회 전용)이며, 설정 › 사용자 관리에서 역할별로 조정할 수 있습니다.
 
 ### 인사이트 `/api/insights/*`
@@ -336,8 +337,8 @@ git 소스로 실행하면 `CONFIG_DIR` 기본값이 `server/config` 라 이 파
 `status`, `check`, `apply`, `restart`, `settings`, `bundle`
 
 ### 토큰 라우터(에이전트↔중앙)
-- `/api/collector/{export,ping,idrac-scan,upgrade,set-password}` — **`X-Collector-Token`** 게이트(전력 export·중앙→엣지 PUSH 스캔·원격 업그레이드).
-- `/api/central/{register-collector,assignment,result,inventory,fleet,idrac-scan-jobs,idrac-scan-progress,idrac-scan-result,ip-scan-assignment,ip-scan-result,gpu-guest-data,agent-config,ping-jobs,ping-result,log-queries,log-query-result,capture-jobs,capture-result,users-config,gpu-guest-config,rma-poll,rma-result}` — **`X-Central-Token`** 게이트(엣지→중앙 보고·위임 잡 인출·중앙 배포 설정 pull).
+- `/api/collector/{export,ping,idrac-scan,bmstor-collect,upgrade,set-password}` — **`X-Collector-Token`** 게이트(전력 export·중앙→엣지 PUSH 스캔·원격 업그레이드).
+- `/api/central/{register-collector,assignment,result,inventory,fleet,idrac-scan-jobs,idrac-scan-progress,idrac-scan-result,ip-scan-assignment,ip-scan-result,gpu-guest-data,agent-config,ping-jobs,ping-result,log-queries,log-query-result,capture-jobs,capture-result,users-config,gpu-guest-config,rma-poll,rma-result,rma-credential,guest-disk,storage-config,storage-data,sanswitch-config,sanswitch-data,sanswitch-perf,sanswitch-test-result,pdu-config,pdu-data,bmstor-jobs,bmstor-result,svcmon-config,svcmon-config-ack,svcmon-report,capacity-report}` — **`X-Central-Token`** 게이트(엣지→중앙 보고·위임 잡 인출·중앙 배포 설정 pull).
   - **엣지별 개별 토큰(v2.191+)**: 설정 → 수집 서버 → 🔑에서 엣지별 토큰을 발급하면 그 토큰은 **자기 `agent` 데이터만** 접근한다(남의 이름으로 조회 시 403). 엣지는 이 값을 기존 `CENTRAL_TOKEN` 자리에 넣기만 하면 되므로 사이트별로 무중단 이관할 수 있고, 이관 완료 후 `CENTRAL_REQUIRE_AGENT_TOKEN=true`로 공유 토큰을 금지한다.
 - `/dl/{versions.json,<번들>}` — 공개 업그레이드 소스(자동 업그레이드 원격 베이스).
 - `/api/ping/*` — 핑/네트워크 모니터링(조회=인증, 대상 관리=관리자).
@@ -390,6 +391,16 @@ git 소스로 실행하면 `CONFIG_DIR` 기본값이 `server/config` 라 이 파
 > **설정**의 포탈 백업 · vCenter 로그 보관 · 게스트 계정 추가 · GPU 게스트 수집/진단도 참고.
 
 ---
+
+### 최근 추가·변경 (v2.445 ~ v2.478)
+
+특수 기능 카드는 현재 **77개**(`web/src/views/specialToolsList.js` 가 진실의 원천; 설정 › 특수 기능 카테고리로 섹션 묶기 가능). 위 목록에 없는 최근 도구:
+
+- **게스트 디스크 회수**(`guest-disk`, v2.466+): 게스트 OS 파티션 할당/사용량을 엣지가 수집해 중앙으로 push(`POST /api/central/guest-disk`), 회수 후보(과할당) 리포트·VM 상세 추이(7일~1년)·PDF/JPG 내보내기.
+- **자원 축소 근거 리포트**(`rightsize`, v2.445+): vCenter 성능 롤업(일/주/월/년)으로 CPU·메모리 실사용 p95·CPU Ready 를 계산해 권장 사양을 제시. 이력에 없는 메모리 카운터(active/swapped)는 실시간(최근 1시간)으로 폴백. 차트 Y축은 할당 용량까지 표시.
+- **벡터 PDF 내보내기**(v2.471+): 리포트를 이미지가 아니라 글자·도형으로 그린다(Pretendard KS X 1001 서브셋 폰트 번들, OFL). 표 셀은 열 폭에 맞춰 줄바꿈(v2.475).
+- **연결 안 되는 vCenter 모달의 접속확인**(v2.476): 헤더 `(N 불가)` 클릭 → 목록에서 관리자가 즉시 로그인 테스트(`POST /admin/vcenters/test`). 성공하면 `✓ 접속 확인됨` 으로 표시(수집 상태는 다음 주기에 반영).
+- 통합 계정 관리(`credentials`, v2.419)·SAN 스위치 모니터링(`sanswitch`, v2.410)·중계 토폴로지/경로 점검(`relaytopo`/`relaycheck`, v2.431)·원격 명령 실행(`rma`, v2.416)·PDU 정보·폴더 사용량 Top-N·시리얼 조회.
 
 ## 설정 메뉴 구조
 
