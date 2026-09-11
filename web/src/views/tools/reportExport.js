@@ -216,33 +216,42 @@ function drawTable(ctx, columns, rows) {
   const { pdf } = ctx; const x0 = PAGE.m; const avail = PAGE.w - PAGE.m * 2;
   const wsum = columns.reduce((s, c) => s + (c.w || 1), 0);
   const widths = columns.map((c) => (c.w || 1) / wsum * avail);
-  const rowH = 6.4; const padX = 1.6;
+  const padX = 1.6; const lineH = 3.5; const padY = 1.9;
+  // 셀 내용을 열 폭에 맞춰 여러 줄로 접는다(잘리지 않게 — 사용자 요구 '문장 길면 줄바꿈').
+  const wrap = (text, w, fontSize) => { pdf.setFontSize(fontSize); return pdf.splitTextToSize(String(text == null ? '' : text), Math.max(4, w - padX * 2)); };
   const drawHeadRow = () => {
-    fillcol(pdf, PAL.head); pdf.rect(x0, ctx.y, avail, rowH, 'F');
+    const linesArr = columns.map((c, i) => wrap(c.label, widths[i], 8.2));
+    const maxLines = Math.max(1, ...linesArr.map((l) => l.length));
+    const h = maxLines * lineH + padY * 2;
+    if (ctx.y + h > PAGE.h - PAGE.m) { pdf.addPage(); ctx.y = PAGE.m; }
+    fillcol(pdf, PAL.head); pdf.rect(x0, ctx.y, avail, h, 'F');
     pdf.setFontSize(8.2); tcol(pdf, PAL.muted);
     let cx = x0;
     columns.forEach((c, i) => {
       const w = widths[i]; const align = c.align || 'left';
       const tx = align === 'right' ? cx + w - padX : cx + padX;
-      pdf.text(ellipsize(pdf, c.label, w - padX * 2), tx, ctx.y + rowH - 2, { align });
+      linesArr[i].forEach((ln, li) => pdf.text(ln, tx, ctx.y + padY + lineH - 1 + li * lineH, { align }));
       cx += w;
     });
-    ctx.y += rowH;
+    ctx.y += h;
   };
-  ensureSpace(ctx, rowH * 2); drawHeadRow();
+  ensureSpace(ctx, 20); drawHeadRow();
   rows.forEach((r, ri) => {
-    if (ctx.y + rowH > PAGE.h - PAGE.m) { ctx.pdf.addPage(); ctx.y = PAGE.m; drawHeadRow(); }
-    if (ri % 2 === 1) { fillcol(pdf, PAL.zebra); pdf.rect(x0, ctx.y, avail, rowH, 'F'); }
+    const linesArr = columns.map((c, i) => wrap((r[i] || {}).text, widths[i], 8.4));
+    const maxLines = Math.max(1, ...linesArr.map((l) => l.length));
+    const h = maxLines * lineH + padY * 2;
+    if (ctx.y + h > PAGE.h - PAGE.m) { pdf.addPage(); ctx.y = PAGE.m; drawHeadRow(); }
+    if (ri % 2 === 1) { fillcol(pdf, PAL.zebra); pdf.rect(x0, ctx.y, avail, h, 'F'); }
     pdf.setFontSize(8.4);
     let cx = x0;
     columns.forEach((c, i) => {
       const cell = r[i] || {}; const w = widths[i]; const align = cell.align || c.align || 'left';
       tcol(pdf, colorOf(cell.color));
       const tx = align === 'right' ? cx + w - padX : cx + padX;
-      pdf.text(ellipsize(pdf, cell.text, w - padX * 2), tx, ctx.y + rowH - 2, { align });
+      linesArr[i].forEach((ln, li) => pdf.text(ln, tx, ctx.y + padY + lineH - 1 + li * lineH, { align }));
       cx += w;
     });
-    ctx.y += rowH;
+    ctx.y += h;
   });
   drawcol(pdf, PAL.line); pdf.setLineWidth(0.2); pdf.line(x0, ctx.y, x0 + avail, ctx.y);
   ctx.y += 3;
@@ -293,7 +302,8 @@ function drawLineChart(ctx, block) {
   pdf.setFontSize(7); tcol(pdf, PAL.muted);
   const dt = (t) => { const d = new Date(t); return `${d.getMonth() + 1}/${d.getDate()}`; };
   pdf.text(dt(minX), px, py + ph + 3.5); pdf.text(dt(maxX), px + pw, py + ph + 3.5, { align: 'right' });
-  if (block.unitLabel) pdf.text(`단위 ${block.unitLabel}`, px + pw, py - 1, { align: 'right' });
+  // 단위 라벨은 좌상단에 — 우상단은 '할당' 기준선 라벨 자리라 겹친다(사용자 신고).
+  if (block.unitLabel) pdf.text(`단위 ${block.unitLabel}`, px, py - 1.2);
   ctx.y = py + ph + 6;
 }
 

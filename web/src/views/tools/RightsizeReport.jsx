@@ -198,7 +198,7 @@ export default function RightsizeReport({ vm, onClose }) {
 
             {/* CPU */}
             <div className="card" style={{ marginBottom: 10 }}>
-              <div className="flex between" style={{ alignItems: 'center', marginBottom: 6 }}>
+              <div className="flex between" style={{ alignItems: 'center', marginBottom: 6, flexWrap: 'wrap', gap: 6 }}>
                 <b>CPU — vCPU {r.cpu.vcpu}{r.cpu.allocMhz ? ` (${ghz(r.cpu.allocMhz)} 할당)` : ''}</b>
                 {r.cpu.recommendedVcpu != null && (
                   <span className={`badge ${r.cpu.ok ? 'green' : r.cpu.blockers.length ? 'amber' : 'gray'}`}>
@@ -253,7 +253,7 @@ export default function RightsizeReport({ vm, onClose }) {
 
             {/* 메모리 */}
             <div className="card" style={{ marginBottom: 10 }}>
-              <div className="flex between" style={{ alignItems: 'center', marginBottom: 6 }}>
+              <div className="flex between" style={{ alignItems: 'center', marginBottom: 6, flexWrap: 'wrap', gap: 6 }}>
                 <b>메모리 — {gb(r.mem.allocMB)} 할당</b>
                 {r.mem.recommendedMB != null && (
                   <span className={`badge ${r.mem.ok ? 'green' : r.mem.blockers.length ? 'amber' : 'gray'}`}>
@@ -262,7 +262,7 @@ export default function RightsizeReport({ vm, onClose }) {
                 )}
               </div>
               <div className="table-wrap" style={{ marginBottom: 8 }}>
-                <STable>
+                <STable className="rpt-wrap">
                   <thead><tr><th>계열</th><th>의미</th><th className="right">평균</th><th className="right">p95</th><th className="right">최대</th><th>해석</th></tr></thead>
                   <tbody>
                     {(() => { const c = memCell(r.mem.active, rt.memActiveMB); return (

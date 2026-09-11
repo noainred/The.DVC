@@ -198,6 +198,8 @@ tbody tr:last-child td { border-bottom: none; }
 .right { text-align: right; }
 .center { text-align: center; }
 .nowrap { white-space: nowrap; }
+/* 리포트 표(자원 축소·게스트 디스크)는 문장/긴 경로가 있어 셀을 줄바꿈한다(기본 tbody td 는 nowrap). */
+.rpt-wrap tbody td { white-space: normal; overflow-wrap: anywhere; word-break: break-word; line-height: 1.45; }
 .tabular { font-variant-numeric: tabular-nums; }
 
 .loading, .error-box { padding: 40px; text-align: center; color: var(--text-dim); }
