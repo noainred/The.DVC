@@ -20,14 +20,16 @@ export function registerToolsGuestDisk(api) {
     const minReclaimGB = req.query.minReclaimGB != null ? Number(req.query.minReclaimGB) : loadSettings().minReclaimGB;
     const maxRatioPct = req.query.maxRatioPct != null && req.query.maxRatioPct !== '' ? Number(req.query.maxRatioPct) : null;
     const vcenterId = req.query.vcenterId ? String(req.query.vcenterId) : null;
-    const report = await reclaimReport({ allowed, minReclaimGB: Number.isFinite(minReclaimGB) ? minReclaimGB : 5, maxRatioPct, vcenterId });
+    const usageFactor = req.query.usageFactor != null ? Number(req.query.usageFactor) : 1; // v2.482: 회수 = 할당 − 사용×배율(정규화는 service)
+    const report = await reclaimReport({ allowed, minReclaimGB: Number.isFinite(minReclaimGB) ? minReclaimGB : 5, maxRatioPct, vcenterId, usageFactor });
     res.json({ ...report, db: guestDiskDbStatus(), poller: guestDiskPollerStatus(), settings: loadSettings() });
   });
 
   // 한 VM 의 파티션별 최신값 + 추이 — scope 단건 검사(범위 밖은 404 존재 은닉).
   api.get('/tools/guest-disk/vm/:id', requirePerm('tools'), async (req, res) => {
     const days = req.query.days != null ? Number(req.query.days) : 0;
-    const detail = await vmDetail(req.params.id, { days: Number.isFinite(days) && days > 0 ? days : 0 });
+    const usageFactor = req.query.usageFactor != null ? Number(req.query.usageFactor) : 1;
+    const detail = await vmDetail(req.params.id, { days: Number.isFinite(days) && days > 0 ? days : 0, usageFactor });
     if (!detail) return res.status(404).json({ error: 'not found' });
     const allowed = scopedVcenterIds(req.user, store.get());
     if (allowed && !allowed.has(detail.vcenterId)) return res.status(404).json({ error: 'not found' });
@@ -40,7 +42,8 @@ export function registerToolsGuestDisk(api) {
     const minReclaimGB = req.query.minReclaimGB != null ? Number(req.query.minReclaimGB) : loadSettings().minReclaimGB;
     const maxRatioPct = req.query.maxRatioPct != null && req.query.maxRatioPct !== '' ? Number(req.query.maxRatioPct) : null;
     const vcenterId = req.query.vcenterId ? String(req.query.vcenterId) : null;
-    const report = await reclaimReport({ allowed, minReclaimGB: Number.isFinite(minReclaimGB) ? minReclaimGB : 5, maxRatioPct, vcenterId });
+    const usageFactor = req.query.usageFactor != null ? Number(req.query.usageFactor) : 1;
+    const report = await reclaimReport({ allowed, minReclaimGB: Number.isFinite(minReclaimGB) ? minReclaimGB : 5, maxRatioPct, vcenterId, usageFactor });
     const csv = reclaimCsv(report.rows);
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="guest-disk-reclaim-${new Date().toISOString().slice(0, 10)}.csv"`);

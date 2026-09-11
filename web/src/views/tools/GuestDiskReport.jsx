@@ -60,6 +60,7 @@ export default function GuestDiskReport({ scope = '' }) {
   const [busy, setBusy] = useState('');
   const [minReclaimStr, setMinReclaimStr] = useState('0');  // 기본 0=전체 표시(문자열 상태 — 0 이 안 지워지던 버그 수정)
   const [maxRatioStr, setMaxRatioStr] = useState('');       // 사용률(%) 이하 필터(빈 값 = 미적용)
+  const [factorStr, setFactorStr] = useState('1');          // v2.482 사용량 배율 — 회수 = 할당 − 사용×배율(기본 1)
   const [qStr, setQStr] = useState('');                     // VM/vCenter/클러스터 이름 검색(클라이언트)
   const [clusterSel, setClusterSel] = useState('');         // 클러스터 콤보 선택('' = 전체)
   const [unit, setUnit] = useState('auto');
@@ -69,18 +70,19 @@ export default function GuestDiskReport({ scope = '' }) {
   const [detailVm, setDetailVm] = useState(null);   // { id, name } — 추이 상세 팝업 대상
   const [form, setForm] = useState(null);
 
-  const reload = useCallback(async (mrStr = minReclaimStr, ratioStr = maxRatioStr) => {
+  const reload = useCallback(async (mrStr = minReclaimStr, ratioStr = maxRatioStr, fStr = factorStr) => {
     setError(null);
     const mr = Number(mrStr);
     const params = { minReclaimGB: Number.isFinite(mr) ? mr : 0 };
     if (ratioStr !== '' && Number.isFinite(Number(ratioStr))) params.maxRatioPct = Number(ratioStr);
+    if (fStr !== '' && Number.isFinite(Number(fStr)) && Number(fStr) > 0 && Number(fStr) !== 1) params.usageFactor = Number(fStr);
     if (scopeRef.current) params.vcenterId = scopeRef.current;
     try {
       const r = await fetchJson('/tools/guest-disk', params);
       setData(r);
       setForm({ enabled: !!r.settings?.enabled, intervalHours: r.settings?.intervalHours ?? 12 });
     } catch (e) { setError(e.message); }
-  }, [minReclaimStr, maxRatioStr]);
+  }, [minReclaimStr, maxRatioStr, factorStr]);
 
   useEffect(() => { fetchJson('/auth/me').then((m) => setIsAdmin(m?.user?.role === 'admin')).catch(() => {}); }, []);
   // 최초 로드 + 상단 vCenter 선택이 바뀔 때 재조회(현재 필터값 유지).
@@ -92,8 +94,10 @@ export default function GuestDiskReport({ scope = '' }) {
   // 최소 회수(GB) 증감 버튼(+100/-100/+500/-500) — 0 미만으로는 내리지 않는다.
   const bumpMin = (delta) => {
     const next = Math.max(0, (Number(minReclaimStr) || 0) + delta);
-    const s = String(next); setMinReclaimStr(s); reload(s, maxRatioStr);
+    const s = String(next); setMinReclaimStr(s); reload(s, maxRatioStr, factorStr);
   };
+  // 사용량 배율 프리셋 — 누르면 즉시 재조회.
+  const setFactor = (v) => { const s = String(v); setFactorStr(s); reload(minReclaimStr, maxRatioStr, s); };
 
   // 행 클릭 → 추이 상세 팝업(모달)을 연다. 데이터·기간 조회는 모달이 스스로 한다.
   const openVm = (r) => setDetailVm({ id: r.vmId, name: r.vmName });
@@ -113,6 +117,7 @@ export default function GuestDiskReport({ scope = '' }) {
   const exportCsv = () => {
     const q = new URLSearchParams({ minReclaimGB: String(Number(minReclaimStr) || 0) });
     if (maxRatioStr !== '' && Number.isFinite(Number(maxRatioStr))) q.set('maxRatioPct', String(Number(maxRatioStr)));
+    if (Number.isFinite(Number(factorStr)) && Number(factorStr) > 0 && Number(factorStr) !== 1) q.set('usageFactor', String(Number(factorStr)));
     if (scope) q.set('vcenterId', scope);
     downloadFile(`/api/tools/guest-disk/export.csv?${q.toString()}`).catch((e) => alert(e.message));
   };
@@ -165,12 +170,13 @@ export default function GuestDiskReport({ scope = '' }) {
   const coverage = Array.isArray(data.coverage) ? data.coverage : [];
   const covWithData = coverage.filter((c) => c.vmCount > 0).length;
   const covEmpty = coverage.length - covWithData;
+  const uf = Number(data.usageFactor) || 1;   // 서버가 실제 적용한 배율(정규화 후)
 
   const tableHead = (
     <thead>
       <tr>
         <th>법인</th><th>vCenter</th><th>클러스터</th><th>VM</th>
-        <th className="gd-num">할당</th><th className="gd-num">사용</th><th className="gd-num">회수가능</th><th className="gd-num">사용률</th><th className="gd-num">파티션</th><th data-nosort>추이</th>
+        <th className="gd-num">할당</th><th className="gd-num">사용</th><th className="gd-num" title={uf !== 1 ? `회수가능 = 할당 − 사용 × ${uf}` : '회수가능 = 할당 − 사용'}>회수가능{uf !== 1 ? ` (×${uf})` : ''}</th><th className="gd-num">사용률</th><th className="gd-num">파티션</th><th data-nosort>추이</th>
       </tr>
     </thead>
   );
@@ -182,7 +188,7 @@ export default function GuestDiskReport({ scope = '' }) {
       <td className="gd-vm">{r.vmName}</td>
       <td data-sort={r.allocGB} className="gd-num">{fmtSize(r.allocGB, unit)}</td>
       <td data-sort={r.usedGB} className="gd-num">{fmtSize(r.usedGB, unit)}</td>
-      <td data-sort={r.freeGB} className="gd-num gd-free">{fmtSize(r.freeGB, unit)}</td>
+      <td data-sort={r.freeGB} className="gd-num gd-free" title={uf !== 1 ? `${fmtSize(r.allocGB, unit)} − ${fmtSize(r.usedGB, unit)} × ${uf} (필요 ${fmtSize(r.neededGB, unit)})` : undefined}>{fmtSize(r.freeGB, unit)}</td>
       <td data-sort={r.ratioPct == null ? -1 : r.ratioPct} className="gd-num">
         <div className="gd-ratio"><span>{pct(r.ratioPct)}</span><i style={{ width: `${Math.min(100, r.ratioPct || 0)}%` }} /></div>
       </td>
@@ -203,7 +209,7 @@ export default function GuestDiskReport({ scope = '' }) {
         <div className="gd-card accent">
           <div className="gd-card-k">회수 가능 합계</div>
           <div className="gd-card-v">{fmtSize(data.totalReclaimGB, unit === 'auto' ? 'auto' : unit)}</div>
-          <div className="gd-card-m">여유 ≥ {fmtSize(data.minReclaimGB, unit)}</div>
+          <div className="gd-card-m">여유 ≥ {fmtSize(data.minReclaimGB, unit)}{uf !== 1 ? ` · 배율 ×${uf} (회수 = 할당 − 사용×${uf})` : ''}</div>
         </div>
         <div className="gd-card">
           <div className="gd-card-k">대상 VM</div>
@@ -226,6 +232,15 @@ export default function GuestDiskReport({ scope = '' }) {
         <Segmented label="단위" opts={UNIT_OPTS} value={unit} onChange={setUnit} />
         <Segmented label="구분" opts={GROUP_OPTS} value={group} onChange={setGroup} />
         <Segmented label="개수" opts={PAGE_OPTS} value={pageSize} onChange={setPageSize} />
+        {/* v2.482 사용량 배율 — 회수 가능 = 할당 − 사용×배율. 100 TB 할당·30 TB 사용에 ×2 → 40 TB. */}
+        <div className="gd-min" title="회수 가능 = 할당 − 사용 × 배율. 사용량의 N배는 운영 여유로 남겨 둔다는 뜻입니다(예: 100 TB 할당·30 TB 사용, ×2 → 40 TB).">
+          <span>사용량 배율</span>
+          {[1, 1.5, 2, 3].map((v) => <button key={v} type="button" className={`gd-step${Number(factorStr) === v ? ' gd-step-on' : ''}`} onClick={() => setFactor(v)}>×{v}</button>)}
+          <input type="text" inputMode="decimal" style={{ width: 56 }} value={factorStr}
+            onChange={(e) => setFactorStr(e.target.value.replace(/[^\d.]/g, ''))}
+            onKeyDown={(e) => { if (e.key === 'Enter') reload(minReclaimStr, maxRatioStr, factorStr); }} placeholder="1" />
+          <span className="muted" style={{ fontSize: 11 }}>배 → 회수 = 할당 − 사용×배율</span>
+        </div>
       </div>
       <div className="gd-toolbar">
         <label className="gd-min gd-search">
@@ -258,7 +273,7 @@ export default function GuestDiskReport({ scope = '' }) {
             onKeyDown={(e) => { if (e.key === 'Enter') reload(minReclaimStr, maxRatioStr); }} placeholder="전체" />
           {maxRatioStr !== '' && <button type="button" className="gd-step" onClick={() => { setMaxRatioStr(''); reload(minReclaimStr, ''); }} title="필터 해제">✕</button>}
         </label>
-        <button type="button" className="gd-btn" onClick={() => reload(minReclaimStr, maxRatioStr)}>적용</button>
+        <button type="button" className="gd-btn" onClick={() => reload(minReclaimStr, maxRatioStr, factorStr)}>적용</button>
         {isAdmin && <button type="button" className="gd-btn" disabled={busy === 'run'} onClick={runNow}>{busy === 'run' ? '수집 중…' : '지금 수집'}</button>}
         <div className="gd-spacer" />
         <button type="button" className="gd-btn primary" onClick={exportCsv} disabled={!rows.length}>⬇ CSV ({data.vmCount})</button>
@@ -365,7 +380,7 @@ export default function GuestDiskReport({ scope = '' }) {
         </div>
       )}
 
-      {detailVm && <GuestDiskDetailModal vm={detailVm} initUnit={unit} onClose={() => setDetailVm(null)} />}
+      {detailVm && <GuestDiskDetailModal vm={detailVm} initUnit={unit} usageFactor={uf} onClose={() => setDetailVm(null)} />}
     </div>
   );
 }
