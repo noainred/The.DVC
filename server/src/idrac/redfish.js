@@ -13,6 +13,7 @@
  */
 
 import { Agent } from 'undici';
+import { classifyBmcVendor } from './vendorMatch.js'; // v2.495: 비-Dell BMC 판별(추가 HTTP 0회)
 import { constants as cryptoConstants } from 'node:crypto';
 import { config } from '../config.js';
 import { parseDigestChallenge, buildDigestHeader } from './digestAuth.js';
@@ -227,6 +228,12 @@ export async function probeIdrac(host, username, password, timeoutMs = 3000) {
   }
   const sig = JSON.stringify(root || {}).toLowerCase();
   let dell = root?.Vendor === 'Dell' || Boolean(root?.Oem?.Dell) || sig.includes('idrac') || sig.includes('dell');
+  // v2.495: 벤더 판별(순수 vendorMatch) — 이미 받은 루트 문서만 쓴다. 기존 dell 식은 회귀 방지를 위해
+  // 그대로 두고 OR 로만 확장한다. 두 반환 지점(인증 실패·성공) 모두 이 필드를 실어야 한다 — HPE 는
+  // Dell 계정이 거부돼 **인증 실패 분기**로 빠지는 것이 기본 경로이기 때문.
+  const vend = classifyBmcVendor({ root });
+  if (vend.vendor === 'dell') dell = true;
+  const vendorFields = () => ({ redfish: vend.redfish, vendor: vend.vendor, vendorLabel: vend.label, vendorEvidence: vend.evidence, product: vend.product });
 
   // 2) System identity (with auth). rawGet이 Basic → Digest → 세션 토큰 순으로 자동 시도한다.
   let model = '', manufacturer = '', serviceTag = '', hostName = '', authHint = '';
@@ -243,7 +250,7 @@ export async function probeIdrac(host, username, password, timeoutMs = 3000) {
           : privish ? `로그인 권한 없음 추정 — iDRAC: "${idracMsg}"`
             : `자격증명 거부 — iDRAC: "${idracMsg}"`)
         : '자격증명 거부 — Basic·Digest·세션 인증 모두 실패(사용자/비밀번호/로그인 권한/계정 잠금 확인)';
-      return { ok: true, isIdrac: dell, dell, authFailed: true, authHint };
+      return { ok: true, isIdrac: dell, dell, authFailed: true, authHint, ...vendorFields() };
     }
     if (sres.ok) {
       const sroot = await sres.json();
@@ -260,7 +267,13 @@ export async function probeIdrac(host, username, password, timeoutMs = 3000) {
   } catch { /* identity optional; service root already classified it */ }
 
   if ((manufacturer + model).toLowerCase().includes('dell')) dell = true;
-  return { ok: true, isIdrac: dell, dell, authFailed: false, model, manufacturer, serviceTag, hostName };
+  // 인증이 통했으면 Manufacturer/Model 로 벤더 판별을 보강한다(Oem 키가 없는 범용 BMC 등).
+  const vend2 = (vend.vendor === 'unknown' && (manufacturer || model)) ? classifyBmcVendor({ root, manufacturer, model }) : vend;
+  if (vend2.vendor === 'dell') dell = true;
+  return {
+    ok: true, isIdrac: dell, dell, authFailed: false, model, manufacturer, serviceTag, hostName,
+    redfish: vend2.redfish, vendor: dell ? 'dell' : vend2.vendor, vendorLabel: dell ? 'Dell' : vend2.label, vendorEvidence: vend2.evidence, product: vend2.product,
+  };
 }
 
 /**

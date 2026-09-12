@@ -502,7 +502,7 @@ function PartsInventory({ vc, onServer }) {
 
 export function ServerAnalysis() {
   // 하위 탭을 URL 에 실어 새로고침·북마크·뒤로가기에서 유지한다(v2.438, hooks/useHashTab.js).
-  const [sub, setSub] = useHashTab({ base: ['tools', 'serveranalysis'], valid: ['info', 'hw', 'parts', 'temp', 'gpu'], fallback: 'info' });
+  const [sub, setSub] = useHashTab({ base: ['tools', 'serveranalysis'], valid: ['info', 'hw', 'parts', 'temp', 'gpu', 'fw', 'unsupported'], fallback: 'info' });
   const [dc, setDc] = useState('');   // 1차 박스: '' 전체 | DataCenter id
   const [lvl2, setLvl2] = useState(''); // 2차 박스: '' 전체 | vc:<id> | baremetal
   const [vcs, setVcs] = useState([]);
@@ -532,6 +532,8 @@ export function ServerAnalysis() {
           <button className={sub === 'temp' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('temp')}>🌡 법인별 온도</button>
           <button className={sub === 'gpu' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('gpu')}>🎮 GPU 정보</button>
           <button className={sub === 'fw' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('fw')}>🏷 BIOS/iDRAC 버전 정보</button>
+          <button className={sub === 'unsupported' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('unsupported')}
+            title="iDRAC 스캔 대역에서 발견된 Dell 이 아닌 서버(HPE iLO 등). Redfish 서비스 루트가 응답했으나 Dell 시그니처가 없는 장비만 담습니다.">🚫 미지원 서버</button>
         </div>
         <div className="flex gap" style={{ alignItems: 'center', fontSize: 13 }}>
           {/* 1차 박스: 법인(DataCenter) — 고르면 그 법인의 모든 장비 */}
@@ -563,6 +565,7 @@ export function ServerAnalysis() {
       {sub === 'gpu' && <ServerGpuFinder {...sp} />}
       {sub === 'fw' && <ServerFirmwareFinder {...sp} />}
       {sub === 'temp' && <ServerTempFinder {...sp} />}
+      {sub === 'unsupported' && <UnsupportedServers {...sp} />}
       {detail && <IdracDetailModal server={detail} onClose={() => setDetail(null)} />}
     </div>
   );
@@ -600,6 +603,73 @@ function tempKindMatch(kind, sensor) {
   if (kind === 'mem') return /dimm|mem|메모리/.test(s);
   if (kind === 'other') return !/cpu|proc|gpu|accel|inlet|intake|exhaust|outlet|dimm|mem/.test(s);
   return true;
+}
+
+/**
+ * 미지원 서버(v2.495) — iDRAC 스캔이 발견한 비-Dell Redfish 장비(HPE iLO 등).
+ * 출처는 중앙 직접 스캔 + 위임(엣지) 스캔이 함께 보관되는 영속 스토어라, 위임 환경에서도 비지 않는다
+ * (루트 CLAUDE.md '위임 환경에서 중앙 화면이 비면 안 된다'). 표는 공용 STable(헤더 클릭 정렬).
+ */
+function UnsupportedServers({ vc }) {
+  const [d, setD] = useState(null);
+  const [err, setErr] = useState(null);
+  const dc = vc?.datacenterId || '';
+  useEffect(() => {
+    let dead = false;
+    setD(null); setErr(null);
+    fetchJson('/admin/idrac/unsupported', dc ? { datacenterId: dc } : {})
+      .then((r) => { if (!dead) setD(r); })
+      .catch((e) => { if (!dead) setErr(e.message); });
+    return () => { dead = true; };
+  }, [dc]);
+  if (err) return <ErrorBox message={err} />;
+  if (!d) return <Loading />;
+  const rows = d.rows || [];
+  const fmt = (t) => (t ? new Date(t).toLocaleString('ko-KR') : '—');
+  const groups = d.groups || [];
+  const lastScan = groups.length ? Math.max(...groups.map((g) => g.at || 0)) : 0;
+  return (
+    <div>
+      <div className="kpis" style={{ marginBottom: 12 }}>
+        <Card label="미지원 서버" value={rows.length.toLocaleString()} meta="Dell 이 아닌 Redfish 장비" accent={rows.length ? 'var(--amber)' : undefined} />
+        <Card label="스캔 그룹" value={groups.length} meta="법인·서비스·스캔 주체 조합" />
+        <Card label="마지막 스캔" value={lastScan ? new Date(lastScan).toLocaleDateString('ko-KR') : '—'} meta={lastScan ? new Date(lastScan).toLocaleTimeString('ko-KR') : '스캔 결과 없음'} />
+      </div>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 8, lineHeight: 1.7 }}>
+        정의: <b>Redfish 서비스 루트(/redfish/v1)가 응답했으나 Dell 시그니처가 없는 장비</b>. 벤더는 루트 문서의 Oem 키·Vendor·제품명으로
+        판별하며 '근거' 열에 무엇을 보고 판단했는지 적습니다(확신이 없으면 'Dell 아님(벤더 미확인)'). Redfish 자체가 없는 장비(응답 없음·HTTP 오류)는
+        식별할 수 없어 여기에 없습니다. 목록은 스캔 성공 시 그 법인·서비스 그룹 단위로 교체되고, 실패·중단 시에는 직전 결과를 유지합니다.
+        {d.truncatedGroups > 0 && <> <b style={{ color: 'var(--amber)' }}>그룹 {d.truncatedGroups}개는 상한(200대)으로 잘렸습니다.</b></>}
+      </div>
+      {!rows.length ? (
+        <div className="muted" style={{ padding: 20, textAlign: 'center' }}>
+          {groups.length ? '스캔 대역에서 Dell 이 아닌 Redfish 장비를 발견하지 않았습니다.' : '아직 스캔 결과가 없습니다 — 설정 › 수집 서버 › iDRAC 스캔 대역에서 스캔이 한 번 돌아야 채워집니다(v2.495 이후 스캔부터).'}
+        </div>
+      ) : (
+        <div className="table-wrap" style={{ maxHeight: '64vh' }}>
+          <STable>
+            <thead><tr><th>IP</th><th>벤더</th><th>제품/모델</th><th>호스트명</th><th>근거</th><th>인증</th><th>법인</th><th>서비스</th><th>스캔 주체</th><th>발견 시각</th></tr></thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={`${r.agent}|${r.datacenterId}|${r.service}|${r.ip}`}>
+                  <td><b>{r.ip}</b></td>
+                  <td><span className={`badge ${r.vendor === 'unknown' ? 'gray' : 'amber'}`}>{r.vendorLabel || r.vendor}</span></td>
+                  <td>{[r.product, r.model].filter(Boolean).join(' · ') || <span className="muted">—</span>}{r.manufacturer ? <div className="muted" style={{ fontSize: 11 }}>{r.manufacturer}</div> : null}</td>
+                  <td>{r.hostName || <span className="muted">—</span>}</td>
+                  <td className="muted" style={{ fontSize: 11.5 }} title={r.evidence}>{r.evidence || '—'}</td>
+                  <td>{r.authFailed ? <span className="badge gray" title="스캔 대역 계정(Dell 용)이 이 장비에서 거부됨 — 정상(다른 벤더 계정이 다름)">거부</span> : <span className="badge green">통과</span>}</td>
+                  <td>{r.datacenterId || <span className="muted">(미지정)</span>}</td>
+                  <td>{r.service || <span className="muted">—</span>}</td>
+                  <td>{r.source === 'edge' ? <span className="badge blue" title={r.agent}>엣지 {r.agent}</span> : <span className="badge">중앙</span>}</td>
+                  <td data-sort={r.scannedAt}>{fmt(r.scannedAt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </STable>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function ServerTempFinder({ vc, onServer }) {

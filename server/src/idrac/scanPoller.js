@@ -14,6 +14,7 @@
  */
 
 import fs from 'node:fs';
+import { saveUnsupportedServers } from '../central/unsupportedServers.js'; // v2.495: 중앙 직접 스캔의 미지원 서버 보관
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js'; // v2.478(감사 B5/S12): 원자적 쓰기 + 손상 시 preserveCorrupt — 크래시 1회로 설정이 소실되고 다음 저장이 빈 값으로 덮어쓰는 사고 방지
@@ -91,6 +92,11 @@ async function scanOneDatacenter(e, onProgress, trigger = 'periodic') {
   // 중앙 직접 스캔 → 발견한 iDRAC을 그 법인(DataCenter)에 등록(법인 DB).
   const r = await scanForIdracs({ ips, username: e.username, password: e.password, onProgress, shouldAbort: () => stopRequested });
   let registered = 0;
+  // v2.495: 비-Dell(미지원) 서버 보관 — 중앙 직접 스캔은 agent '' 키. 중단된 스캔은 부분 결과라 저장하지 않는다(직전 보존).
+  if (!r.aborted) {
+    try { saveUnsupportedServers({ agent: '', datacenterId: e.datacenterId || '', service: e.service || '', trigger: 'periodic' }, r.unsupported || [], { count: r.unsupportedCount, truncated: r.unsupportedTruncated }); }
+    catch (err) { console.warn('[idrac-scan] 미지원 서버 저장 실패:', err?.message); }
+  }
   // replace-datacenter는 이 법인의 기존 등록을 '발견 목록'으로 통째 교체한다. 스캔이 중단
   // (aborted)되거나 IP 상한으로 절단(truncated)돼 부분 결과면, 스캔 안 된 서버가 삭제된다
   // (자격증명·전력 이력까지). 부분 결과일 때는 merge로 강등해 데이터 손실을 막는다.
@@ -100,7 +106,7 @@ async function scanOneDatacenter(e, onProgress, trigger = 'periodic') {
     const reg = registerScanned(r.found, e.username, e.password, effectiveMode, '', e.datacenterId);
     if (reg.ok) registered = (reg.added || 0) + (reg.updated || 0);
   }
-  return { datacenterId: e.datacenterId, delegated: false, scanned: r.scanned, found: r.found.length, registered, truncated: r.truncated, aborted: r.aborted, modeDowngraded: e.mode === 'replace-datacenter' && partial };
+  return { datacenterId: e.datacenterId, delegated: false, scanned: r.scanned, found: r.found.length, registered, truncated: r.truncated, aborted: r.aborted, modeDowngraded: e.mode === 'replace-datacenter' && partial, unsupported: r.unsupportedCount || 0 };
 }
 
 /**

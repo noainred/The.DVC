@@ -1,5 +1,6 @@
 // iDRAC 등록/전력/하드웨어 분석(NIC·온도·펌웨어·GPU 인벤토리) — admin.js(구 2,410줄) 분할(v2.285.0). 본문은 원본 그대로, 등록 순서는 admin.js 호출 순서가 보존한다.
 import { store } from '../../store.js';
+import { listUnsupportedServers } from '../../central/unsupportedServers.js'; // v2.495: 스캔이 발견한 비-Dell 서버
 import { logAudit } from '../../audit.js';
 import { listPhysical } from '../../gpu/physicalRegistry.js';
 import { listRegistry as listServers, addServer, testServer, loadRegistry as loadIdracRegistry } from '../../idrac/registry.js';
@@ -325,6 +326,18 @@ adminRouter.get('/idrac/hardware-servers', adminOnly, (req, res) => {
   }
   out.sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { numeric: true }));
   res.json({ ok: true, dim, key, datacenterId: dcFilter, count: out.length, servers: out });
+});
+
+/**
+ * 서버 분석 › 미지원 서버(v2.495) — iDRAC 스캔이 발견한 **비-Dell Redfish 장비**(HPE iLO 등).
+ * 출처: 중앙 직접 스캔 + 위임(엣지) 스캔 결과가 함께 보관된 영속 스토어(central/unsupportedServers.js).
+ * 스캔 발견물은 vCenter 귀속이 없는 데이터라 범위 계정에 노출하지 않는다(adminOnly — server/CLAUDE.md).
+ * ?datacenterId= 로 법인 필터(서버 분석의 1차 박스와 같은 키).
+ */
+adminRouter.get('/idrac/unsupported', adminOnly, (req, res) => {
+  const datacenterId = String(req.query.datacenterId || '').trim();
+  const r = listUnsupportedServers({ datacenterId });
+  res.json({ ok: true, ...r, generatedAt: Date.now() });
 });
 
 // 서버 분석 — 전체 iDRAC 서버의 최신 온도센서(CPU/GPU/Inlet/Exhaust 등) 평탄화(정렬용).

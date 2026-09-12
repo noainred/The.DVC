@@ -13,6 +13,7 @@
  */
 
 import { expandIpList } from '../idrac/iprange.js';
+import { saveUnsupportedServers } from './unsupportedServers.js'; // v2.495: 비-Dell(미지원) 서버 영속 보관
 import { appendIdracScanLog } from '../idrac/scanLog.js';
 import { recordScanRangeRunByReqId } from '../idrac/scanRanges.js';
 import { buildPendingRemedy, buildPushErrorRemedy } from './scanRemedy.js';
@@ -345,11 +346,29 @@ export function setIdracScanResult(reqId, data = {}) {
     authFailReason: data.authFailReason || null,
     authFailedIps: Array.isArray(data.authFailedIps) ? data.authFailedIps.slice(0, 200) : [],
     authFailedIpsTruncated: !!data.authFailedIpsTruncated,
+    // v2.495: 비-Dell Redfish 장비(HPE iLO 등). 화이트리스트에 넣지 않으면 엣지가 보내도 여기서 사라진다.
+    unsupported: Array.isArray(data.unsupported) ? data.unsupported.slice(0, 200) : [],
+    unsupportedCount: Number(data.unsupportedCount) || (Array.isArray(data.unsupported) ? data.unsupported.length : 0),
+    unsupportedTruncated: !!data.unsupportedTruncated,
     registered: data.registered || 0,
     truncated: !!data.truncated,
     durationMs: data.durationMs || null,
     error: data.error || null,
   };
+  // v2.495: 미지원 서버 영속 보관 — 성공한 '스캔' 잡에서만(오류·중단 시 직전 스냅샷 보존). 귀속은 본문이
+  // 아니라 잡 레코드(j.agent/j.datacenterId/j.service)에서, 항목은 잡의 대상 IP 범위 안의 것만(침해된
+  // 엣지가 임의 IP 를 심는 것 차단 — ip-scan-result 선례). 스캔이 절단(truncated)됐어도 받은 만큼은 저장한다.
+  if (!data.error && (j.action || 'scan') === 'scan' && !data.aborted) {
+    try {
+      let allowed = null;
+      try { allowed = new Set(expandIpList(j.ips).ips); } catch { allowed = null; }
+      const raw = j.result.unsupported;
+      const inRange = allowed ? raw.filter((x) => allowed.has(String(x?.ip || '').trim())) : raw;
+      if (allowed && inRange.length !== raw.length) console.warn(`[central] idrac-scan-result: ${j.agent} 대상 범위 밖 미지원 항목 ${raw.length - inRange.length}개 드롭(위조 방지)`);
+      saveUnsupportedServers({ agent: j.agent, datacenterId: j.datacenterId, service: j.service, trigger: j.trigger }, inRange,
+        { count: j.result.unsupportedCount, truncated: j.result.unsupportedTruncated });
+    } catch (e) { console.warn('[central] 미지원 서버 저장 실패:', e?.message); }
+  }
   // 스캔 로그(이력) — 위임 스캔의 '결과'를 영속 기록한다(설정 > 수집 서버 > 스캔 로그).
   // 폴러가 위임 요청 시 남긴 phase=dispatch 기록과 reqId로 짝을 이룬다. 등록(register) 잡은 제외.
   if ((j.action || 'scan') === 'scan') {
