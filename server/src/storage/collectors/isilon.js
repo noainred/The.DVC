@@ -16,7 +16,8 @@ import { Agent } from 'undici';
 import { emptySnapshot } from '../types.js';
 
 // Isilon 전용 로컬 TLS 디스패처 — 사내 자체서명 장비 한정(다른 fetch 에 주입 금지).
-const isilonDispatcher = new Agent({ connect: { rejectUnauthorized: false } });
+// 보안(M-4): STORAGE_TLS_VERIFY=true 면 인증서 검증을 켠다(기본은 기존대로 해제).
+const isilonDispatcher = new Agent({ connect: { rejectUnauthorized: process.env.STORAGE_TLS_VERIFY === 'true' } });
 const PORT = Number(process.env.STORAGE_ISILON_PORT) || 8080;
 const TIMEOUT_MS = Number(process.env.STORAGE_HTTP_TIMEOUT_MS) || 15_000;
 

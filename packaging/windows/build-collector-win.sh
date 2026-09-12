@@ -15,9 +15,9 @@
 #
 # Usage (run on any machine; provide a downloaded Windows Node zip):
 #   packaging/windows/build-collector-win.sh \
-#       --node-zip /path/node-v22.20.0-win-x64.zip [--out DIR]
+#       --node-zip /path/node-v22.23.2-win-x64.zip [--out DIR]
 #
-# Get the Node zip from: https://nodejs.org/dist/v22.20.0/node-v22.20.0-win-x64.zip
+# Get the Node zip from: https://nodejs.org/dist/v22.23.2/node-v22.23.2-win-x64.zip
 
 set -euo pipefail
 

@@ -25,7 +25,12 @@ export function attachSshGateway(server) {
   const wss = new WebSocketServer({ noServer: true });
 
   server.on('upgrade', (req, socket, head) => {
-    const url = new URL(req.url, 'http://localhost');
+    // ⚠ 보안(M-1, 2026-09-12): 잘못된 요청줄(예: `GET //[`)은 `new URL` 이 throw 하는데, upgrade
+    // 리스너에서 throw 하면 EventEmitter 가 **나머지 리스너를 호출하지 않아** index.js 의 catch-all
+    // 소켓 파기가 건너뛰어져 무인증 FD 누수가 됐다(2026-08-17 #7 회귀). throw 대신 return 하면
+    // 뒤의 catch-all 이 정상적으로 소켓을 파기한다.
+    let url;
+    try { url = new URL(req.url, 'http://localhost'); } catch { return; }
     if (url.pathname !== '/api/remote/ssh') return; // let other upgrade handlers run
     // Auth via token query param (browsers can't set WS headers).
     // 역할 검사(감사/SECURITY-AUDIT H3): 원격 SSH 터널 개통은 admin/operator만 — viewer 토큰으로

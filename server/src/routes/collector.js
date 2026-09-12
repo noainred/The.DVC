@@ -197,7 +197,7 @@ collectorRouter.post('/upgrade',
     if (!checkToken(req)) { logCollectorDeny(req, 'upgrade'); return res.status(403).json({ ok: false, reason: '토큰 불일치' }); }
     next();
   },
-  express.raw({ type: ['application/gzip', 'application/octet-stream'], limit: '256mb' }),
+  express.raw({ type: ['application/gzip', 'application/octet-stream'], limit: '210mb' }),
   async (req, res) => {
     if (!req.body || !req.body.length) return res.status(400).json({ ok: false, reason: 'empty bundle' });
     const shaIssue = bundleShaIssue(req.get('x-bundle-sha256'), req.body); // v2.480(3차 감사): 수집기 수신 번들도 검증

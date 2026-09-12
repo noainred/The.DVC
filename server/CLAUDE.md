@@ -280,3 +280,28 @@
   `port port="P"` rich rule·`P/tcp`·http/https, 추가 규칙, 직전 적용분(`applied.rich`). 그 밖의 존 설정(다른 서비스·포트·
   인터페이스·다른 존)은 보존한다 — 전체 존을 '포탈 설정으로 교체' 하는 방식으로 바꾸지 말 것.
 
+## 2026-09-12 보안 감사 조치 — 되돌리지 말 것 (security_check_20260912.MD)
+
+- **central 바인딩은 '실제 저장 키'를 검사한다**(`routes/central.js` requestedAgent/registerName): `/register-collector`
+  의 저장 키는 `body.name` 이므로 헤더/쿼리 `agent` 와 **별도로** 항상 대조한다(H-1). agent 이름을 여러 소스에서 OR
+  단락으로 고르는 새 라우트를 만들 때, '헤더 하나로 본문 키 검사를 건너뛰는' 형태를 만들지 말 것 — 개별 토큰 엣지가
+  남의 수집 서버 URL·토큰을 덮어써 중앙이 그 URL 로 자격증명을 실어 호출하게 되는 유출 피벗이 된다. 회귀 테스트:
+  `test/securityH1RegisterCollector.test.js`.
+- **연결 테스트 host/url 저장값 고정은 remote 프록시에도 적용**(`routes/remote.js` /test·/deploy/test, H-2): 저장 비밀
+  (`********`/미입력) 재사용 시 dataplane url·deploy host/port 를 저장값으로 고정하고 `ssrfBlockReasonResolved`/`ipBlockReason`
+  을 건다. v2.480 규칙(vCenter/NSX/…)의 형제 라우트 누락이었다 — 새 "저장 항목 연결 테스트" 는 전부 이 규칙을 따른다.
+- **WS upgrade 리스너에서 `new URL(req.url)` 은 try/catch**(`proxy/sshGateway.js`·`guacdTunnel.js`, M-1): 잘못된 요청줄
+  로 throw 하면 EventEmitter 가 뒤 리스너(index.js catch-all 소켓 파기)를 호출하지 않아 무인증 FD 누수가 된다. 파싱
+  실패 시 throw 대신 return 하고 catch-all 이 파기하게 둔다. 새 upgrade 리스너도 동일.
+- **ping 조회 라우트 scope**(`routes/ping.js`, M-2): vCenter 타깃(`vc_<id>`)은 `scopedVcenterIds` 로 거른다(단건 404).
+- **패키지/업그레이드 원격 fetch 는 SSRF 가드**(`upgrade/fetchPackage.js` fetchRemoteVersions, M-3): admin 지정 baseUrl 도
+  `ssrfBlockReasonResolved` 통과 후에만 조회한다.
+- **압축 해제는 출력 상한**(`upgrade/archive.js`, L-1): `zlib.gunzipSync`/`inflateRawSync` 에 `maxOutputLength: MAX_BUNDLE_BYTES`.
+  express.raw 본문 한도는 MAX_BUNDLE_BYTES 근처(210mb)로 유지.
+- **verifyPassword 는 해시/솔트 길이를 검증**(`auth/auth.js`, L-7): `scrypt$<32hex salt>$<128hex hash>` 규격 미달(특히 빈
+  해시)은 즉시 false — 손상/주입 해시가 만능키가 되지 않게. 회귀 테스트: `test/security2026-09-12.test.js`.
+- **REST 수집기 TLS 검증 옵트인**(`storage/collectors/*`·`sanswitch/collectors/fosRest.js`, M-4): `STORAGE_TLS_VERIFY`/
+  `SANSWITCH_TLS_VERIFY` 로 켤 수 있게 하되 기본은 자체서명 허용(기존 동작). 전역 디스패처로 바꾸지 말 것.
+- **.gitignore 는 SECRET_FILES 를 모두 포함**(L-8): `SECRET_FILES ⊆ .gitignore` 를 유지하고, 런타임 DB 는 `server/config/*.db`
+  와일드카드로 선차단한다. 배포 기본값(`ipam-scan.json`)에 활성 스캔을 커밋하지 말 것(L-9 — 없으면 스캔 기본 비활성).
+

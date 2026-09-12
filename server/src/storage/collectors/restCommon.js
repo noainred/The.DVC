@@ -6,7 +6,9 @@
  */
 import { Agent } from 'undici';
 
-const dispatcher = new Agent({ connect: { rejectUnauthorized: false } });
+// 기본은 자체서명 장비 대응으로 검증 해제(기존 동작 유지). 보안(M-4, 2026-09-12): 사설 CA·공인
+// 인증서를 쓰는 사이트는 STORAGE_TLS_VERIFY=true 로 검증을 켜 MITM(어레이 관리자 자격증명 탈취)을 막는다.
+const dispatcher = new Agent({ connect: { rejectUnauthorized: process.env.STORAGE_TLS_VERIFY === 'true' } });
 const TIMEOUT_MS = Number(process.env.STORAGE_HTTP_TIMEOUT_MS) || 15_000;
 /** 요청 signal(v2.421): 호출자 취소(signal) + 요청 타임아웃을 합친다 — 연결 테스트가 끝난 뒤 수집기가 백그라운드에서 계속
  *  요청을 이어가지 않게(라우팅 불가 주소면 요청마다 15초 × 20여 회 = 수 분간 세션이 남았다 — CI 에서 실제 관측). */

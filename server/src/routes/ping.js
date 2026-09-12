@@ -22,6 +22,8 @@
 
 import express from 'express';
 import { requireRole } from '../auth/auth.js';
+import { scopedVcenterIds } from '../auth/scope.js';
+import { store } from '../store.js';
 import { loadVcenterConfig } from '../config.js';
 import {
   listTargets, addTarget, updateTarget, removeTarget, seedVcenterTargets,
@@ -44,20 +46,46 @@ const RANGES = {
 };
 const rangeMsOf = (q, def = '1d') => RANGES[String(q || def)] || RANGES[def];
 
+// ⚠ 보안(M-2, 2026-09-12): 조회 라우트에 사용자 vCenter scope 를 강제한다. 범위 제한 계정이
+// 전 vCenter 관리 호스트명·IP·응답시간을 열람하던 갭(CLAUDE.md "조회 라우트 scope 는 예외 없이")
+// 을 닫는다. vCenter 타깃 id 는 'vc_<vcenterId>' 이므로 그 접두를 벗겨 허용 집합과 대조한다.
+// manual 타깃(vCenter 귀속 없음)은 그대로 두고(기존 동작), edge 타깃은 별도 라우트(DC 그룹)다.
+function vcScope(req) {
+  const allowed = scopedVcenterIds(req.user, store.get()); // null = 전체 허용
+  const vcIdOf = (id) => (String(id).startsWith('vc_') ? String(id).slice(3) : null);
+  return {
+    all: !allowed,
+    okId: (id) => { if (!allowed) return true; const v = vcIdOf(id); return v == null || allowed.has(v); },
+    okVcenterId: (vcId) => !allowed || allowed.has(String(vcId)),
+  };
+}
+
 const vcenterList = () => (loadVcenterConfig().vcenters || []).map((v) => ({ id: v.id, name: v.name || v.id, host: v.host }));
 const vcNameMap = () => { const m = new Map(vcenterList().map((v) => [String(v.id), v.name])); return (id) => m.get(String(id)) || id; };
 const dcNameMap = () => { const m = new Map(listDatacenters().map((d) => [d.id, d.name || d.id])); return (id) => m.get(String(id)) || id; };
 
 // ── 공통(기존 Ping 모니터링) — manual/vcenter만 ────────────────────────────────
-pingRouter.get('/status', async (_req, res) => {
-  try { res.json(await statusAll(['manual', 'vcenter'])); } catch (e) { res.status(500).json({ error: e.message }); }
+pingRouter.get('/status', async (req, res) => {
+  try {
+    const scope = vcScope(req);
+    const r = await statusAll(['manual', 'vcenter']);
+    if (scope.all) return res.json(r);
+    const targets = (r.targets || []).filter((t) => scope.okId(t.id));
+    const counts = targets.reduce((a, t) => { a[t.status] = (a[t.status] || 0) + 1; return a; }, {});
+    res.json({ targets, counts, total: targets.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-pingRouter.get('/targets', (_req, res) => res.json({ targets: listTargets().filter((t) => t.source === 'manual' || t.source === 'vcenter') }));
+pingRouter.get('/targets', (req, res) => {
+  const scope = vcScope(req);
+  res.json({ targets: listTargets().filter((t) => (t.source === 'manual' || t.source === 'vcenter') && scope.okId(t.id)) });
+});
 
 pingRouter.get('/series', async (req, res) => {
   const id = String(req.query.id || '');
   if (!id) return res.status(400).json({ ok: false, reason: 'id가 필요합니다.' });
+  // 범위 밖 vCenter 대상은 404(존재 은닉 — 단건 라우트 규약).
+  if (!vcScope(req).okId(id)) return res.status(404).json({ ok: false, reason: '없는 대상' });
   const points = Math.max(30, Math.min(1000, Number(req.query.points) || 240));
   try { const r = await seriesOf(id, { rangeMs: rangeMsOf(req.query.range, '6h'), points }); res.status(r.ok ? 200 : 404).json(r); }
   catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
@@ -100,11 +128,15 @@ pingRouter.post('/edge/sync', adminOnly, (_req, res) => {
 // ── vCenter 포트 응답속도 — vCenter×사용자지정포트, vCenter 그룹 ────────────────
 pingRouter.get('/vcport/overview', async (req, res) => {
   try {
+    const scope = vcScope(req);
     const r = await overviewGrouped('vcport', 'vcenterId', {
       rangeMs: rangeMsOf(req.query.range, '1d'), points: Math.max(60, Math.min(600, Number(req.query.points) || 300)),
       groupName: vcNameMap(),
     });
-    res.json({ ...r, ports: getVcPorts() });
+    // 범위 제한 계정에는 허용 vCenter 그룹만(그룹 id = vcenterId). total 도 재계산.
+    const groups = scope.all ? r.groups : (r.groups || []).filter((g) => scope.okVcenterId(g.id));
+    const total = groups.reduce((a, g) => a + (g.items?.length || 0), 0);
+    res.json({ ...r, groups, total, ports: getVcPorts() });
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 

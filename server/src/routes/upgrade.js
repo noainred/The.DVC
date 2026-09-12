@@ -185,7 +185,7 @@ upgradeRouter.put('/settings', adminOnly, (req, res) => {
 
 // Edge endpoint: accept a tar.gz bundle pushed by the portal and self-install.
 // Raw gzip body; admin-gated like the rest.
-upgradeRouter.post('/bundle', adminOnly, express.raw({ type: ['application/gzip', 'application/octet-stream'], limit: '256mb' }),
+upgradeRouter.post('/bundle', adminOnly, express.raw({ type: ['application/gzip', 'application/octet-stream'], limit: '210mb' }),
   (req, res) => {
     const s = upgradeManager.settings;
     if (!upgradeManager.enabled) return res.status(409).json({ ok: false, reason: 'auto-upgrade disabled' });

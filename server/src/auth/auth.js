@@ -27,7 +27,12 @@ export function verifyPassword(password, stored) {
   try {
     const [scheme, saltHex, hashHex] = String(stored).split('$');
     if (scheme !== 'scrypt') return false;
+    // ⚠ 보안(L-7, 2026-09-12): 해시/솔트 길이를 hashPassword 규격(솔트 16B=32hex, 해시 64B=128hex)으로
+    // 검증한다. 이 검사가 없으면 `scrypt$<salt>$`(빈 해시) 형태 레코드가 keylen 0 → 빈 버퍼가 되어
+    // timingSafeEqual(빈,빈)===true 로 **모든 비밀번호가 통과**한다(손상/주입된 해시가 만능키가 됨).
+    if (saltHex?.length !== 32 || hashHex?.length !== 128) return false;
     const expected = Buffer.from(hashHex, 'hex');
+    if (expected.length !== 64) return false;
     const actual = crypto.scryptSync(password, Buffer.from(saltHex, 'hex'), expected.length);
     return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
   } catch {
