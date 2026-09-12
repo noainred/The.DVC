@@ -148,7 +148,8 @@ function Stat({ k, v, sub }) {
 
 export default function RightsizeReport({ vm, onClose }) {
   // ⚠ 훅은 전부 최상단(조기 return 위)에 — CLAUDE.md 프론트 회귀 방지(React #310).
-  const [days, setDays] = useState(7);
+  // v2.496(사용자 요구): 기본 30일. 기간 선택은 버튼 5개 대신 콤보 박스 — 툴바 공간을 줄이고 줄바꿈 넘침도 예방.
+  const [days, setDays] = useState(30);
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -205,14 +206,18 @@ export default function RightsizeReport({ vm, onClose }) {
   return (
     <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <EscClose onClose={onClose} />
-      <div ref={sheetRef} className="modal card" style={{ maxWidth: 1100, width: '96vw', maxHeight: '92vh', overflow: 'auto' }}>
-        <div className="flex between" style={{ marginBottom: 8, alignItems: 'center' }}>
-          <div>
+      <div ref={sheetRef} className="modal card" style={{ maxWidth: 1100, width: '96vw', maxHeight: '92vh', overflowY: 'auto', overflowX: 'hidden' }}>
+        {/* v2.496: 툴바는 줄바꿈된다. v2.481 에서 기간 버튼이 5개로 늘며 이 줄이 모달 폭을 넘쳐 가로 스크롤이
+            생겼고, 그러면 아래 모든 문장이 그 넓은 폭 기준으로 배치되어 '줄바꿈이 안 되는' 것처럼 잘려 보였다
+            (v2.475 의 표 셀·섹션 제목 줄바꿈 수정은 이 줄을 다루지 않았다). minWidth:0 은 제목이 길어도 flex 자식이
+            내용 폭을 고집하지 않게 하는 표준 처방. */}
+        <div className="flex between" style={{ marginBottom: 8, alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+          <div style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
             <b style={{ fontSize: 15 }}>📊 자원 축소 근거 리포트 — {vm.name}</b>
             <div className="muted" style={{ fontSize: 11.5 }}>{vm.vcenterId} · {vm.host} · {vm.guestOS || ''}</div>
           </div>
           {/* data-export-hide: 저장 결과물에는 버튼이 남지 않게 캡처에서 제외한다. */}
-          <div className="flex gap" style={{ alignItems: 'center' }} data-export-hide>
+          <div className="flex gap" style={{ alignItems: 'center', flexWrap: 'wrap' }} data-export-hide>
             <button className="tab" style={{ padding: '5px 12px', fontSize: 12 }} disabled={!r || !!saving}
               title="이 리포트 전체를 A4 여러 장 PDF 로 저장합니다(스크롤로 가려진 부분까지 포함)."
               onClick={() => save('pdf')}>{saving === 'pdf' ? '저장 중…' : '⬇ PDF'}</button>
@@ -220,7 +225,12 @@ export default function RightsizeReport({ vm, onClose }) {
               title="이 리포트 전체를 JPG 이미지 한 장으로 저장합니다."
               onClick={() => save('jpg')}>{saving === 'jpg' ? '저장 중…' : '⬇ JPG'}</button>
             <span style={{ width: 1, height: 18, background: 'rgba(255,255,255,.14)' }} />
-            {DAYS.map((d) => <button key={d} className={days === d ? 'login-btn' : 'tab'} style={{ padding: '5px 12px', fontSize: 12 }} onClick={() => setDays(d)}>최근 {dayLabel(d)}</button>)}
+            <label className="flex gap" style={{ alignItems: 'center', fontSize: 12 }} title="관측 기간 — vCenter 성능 롤업에서 이 기간의 표본을 가져옵니다">
+              <span className="muted">관측 기간</span>
+              <select className="select" style={{ padding: '4px 8px', fontSize: 12 }} value={days} onChange={(e) => setDays(Number(e.target.value))}>
+                {DAYS.map((d) => <option key={d} value={d}>최근 {dayLabel(d)}</option>)}
+              </select>
+            </label>
             <button className="logout-btn" onClick={onClose}>닫기</button>
           </div>
         </div>
@@ -235,7 +245,7 @@ export default function RightsizeReport({ vm, onClose }) {
               <div style={{ fontWeight: 700, fontSize: 14 }}>{st.icon} {r.verdict.title}</div>
               <div style={{ marginTop: 4, lineHeight: 1.6 }}>{r.verdict.summary}</div>
               {r.evidence.reasons.length > 0 && (
-                <ul style={{ margin: '6px 0 0', paddingLeft: 18, fontSize: 12.5, lineHeight: 1.6, color: r.evidence.sufficient ? 'var(--muted)' : '#f87171' }}>
+                <ul style={{ margin: '6px 0 0', paddingLeft: 18, fontSize: 12.5, lineHeight: 1.6, color: r.evidence.sufficient ? 'var(--muted)' : '#f87171', whiteSpace: 'normal', overflowWrap: 'anywhere' }}>
                   {r.evidence.reasons.map((x, i) => <li key={i}>{x}</li>)}
                 </ul>
               )}
@@ -266,7 +276,7 @@ export default function RightsizeReport({ vm, onClose }) {
                 <Stat k="CPU Ready p95 (vCPU당)" v={n1(r.cpu.readyPct.p95, '%')} sub={`경고선 ${r.policy.readyWarnPct}%`} />
                 <Stat k="산정 근거" v={r.cpu.basisMhz != null ? ghz(r.cpu.basisMhz) : '—'} sub={r.cpu.basisNote || ''} />
               </div>
-              {r.cpu.blockers.map((b, i) => <div key={i} style={{ color: '#fbbf24', fontSize: 12.5, marginBottom: 4 }}>⚠ {b}</div>)}
+              {r.cpu.blockers.map((b, i) => <div key={i} style={{ color: '#fbbf24', fontSize: 12.5, marginBottom: 4, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>⚠ {b}</div>)}
               <div style={{ height: 220 }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={cpuRows} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
@@ -348,7 +358,7 @@ export default function RightsizeReport({ vm, onClose }) {
               {r.mem.basisMB != null && <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>산정 근거: {r.mem.basisNote} = <b style={{ color: 'var(--text)' }}>{gb(r.mem.basisMB)}</b> → {r.policy.memStepMB} MB 단위 올림 → 권장 <b style={{ color: 'var(--text)' }}>{gb(r.mem.recommendedMB)}</b></div>}
               {r.mem.skipReason && <div className="muted" style={{ fontSize: 12.5, marginBottom: 4 }}>ℹ {r.mem.skipReason}</div>}
               {r.mem.consumedNote && <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>ℹ {r.mem.consumedNote}</div>}
-              {r.mem.blockers.map((b, i) => <div key={i} style={{ color: '#fbbf24', fontSize: 12.5, marginBottom: 4 }}>⚠ {b}</div>)}
+              {r.mem.blockers.map((b, i) => <div key={i} style={{ color: '#fbbf24', fontSize: 12.5, marginBottom: 4, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>⚠ {b}</div>)}
               <div style={{ height: 240 }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={memRows} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
