@@ -311,6 +311,7 @@ api.get('/datastores', (req, res) => memoJson(req, res, 'inv:datastores', (snap)
 // 데이터스토어 브라우즈 — 할당 VM + 실제 파일 목록(라이브, 60초 캐시). id 를 직접 받는
 // 단건 라우트이므로 vCenter 단위 scope 를 별도 검사하고 범위 밖은 404(존재 여부 미노출).
 api.get('/datastores/:id/browse', async (req, res) => {
+  res.locals.perfExpectSlow = true; // v2.498: vCenter 탐색 태스크를 최대 90초 기다리는 정상 장기 요청
   const id = req.params.id;
   const snap = store.get();
   const ds = (snap.datastores || []).find((d) => d.id === id);

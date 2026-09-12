@@ -20,6 +20,9 @@ import { writeReleaseFile } from './util/releaseFile.js';
 import { compression } from './util/compress.js';
 import { rateLimit } from './util/rateLimit.js';
 import { startLoopLagMonitor } from './util/loopLag.js';
+// v2.498: 서버 성능 측정 — 요청 지연·진행 중 요청 추적(설정 › 서버 성능 측정). 계측 실패는 서비스에 영향 없음.
+import { beginRequest, endRequest, pruneHangLog } from './perf/monitor.js';
+import { routeKeyOf } from './perf/stats.js';
 import { store } from './store.js';
 import { api } from './routes/api.js';
 import { authRouter } from './routes/auth.js';
@@ -149,14 +152,44 @@ if (process.env.TRUST_PROXY) app.set('trust proxy', /^\d+$/.test(process.env.TRU
 app.use(express.json({ limit: '1mb' }));
 
 // Lightweight request logging for the log viewer (skip the log endpoint itself).
+// v2.498: 같은 자리에서 성능 측정도 한다 — 요청당 비용은 Map set/delete + 카운터뿐이고,
+// 임계를 넘은 요청만 링에 남는다(perf/monitor.js). 라이브 로그 한 줄의 형식·조건은 그대로 유지한다
+// (진단·로그 화면 회귀 방지). 클라이언트가 끊은 요청(finish 없이 close)은 로그에는 남기지 않고
+// 성능 측정에만 status 499 로 넣는다 — 웹 GET 은 20초에 스스로 끊으므로 그 사실이 튜닝의 핵심 단서다.
 app.use((req, res, next) => {
   const url = req.originalUrl.split('?')[0];
   if (url === '/api/admin/logs') return next();
   const start = Date.now();
-  res.on('finish', () => {
-    const level = res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info';
-    pushLog(level, `${req.method} ${url} ${res.statusCode} ${Date.now() - start}ms`);
-  });
+  // 성능 집계는 **API 요청만** 한다 — 정적 자산(해시 파일명)까지 넣으면 라우트 키가 빌드마다
+  // 새로 생기고 표가 잡음으로 덮인다. 라이브 로그 한 줄은 예전처럼 전 경로에 남는다.
+  const isApi = url.startsWith('/api');
+  const perfId = isApi ? beginRequest({ method: req.method, path: url }) : null;
+  let settled = false;
+  const settle = (aborted) => {
+    if (settled) return;
+    settled = true;
+    const ms = Date.now() - start;
+    if (!aborted) {
+      const level = res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info';
+      pushLog(level, `${req.method} ${url} ${res.statusCode} ${ms}ms`);
+    }
+    if (!isApi) return;
+    try {
+      // express 가 매칭한 템플릿(`baseUrl + route.path`)이 남아 있으면 그것을, 아니면 경로의 식별자
+      // 세그먼트를 마스킹한 키를 쓴다(카디널리티 유계). 두 방식이 섞여 같은 라우트가 갈라지지 않게
+      // 템플릿은 '/api' 로 시작할 때만 채택한다(라우터 dispatch 후 baseUrl 이 복원되는 경우 대비).
+      const tmpl = req.route?.path ? `${req.baseUrl || ''}${req.route.path === '/' ? '' : req.route.path}` : '';
+      const route = tmpl && tmpl.startsWith('/api') ? tmpl.slice(0, 120) : routeKeyOf({ path: url });
+      endRequest(perfId, {
+        method: req.method, path: url, route,
+        status: aborted ? 499 : res.statusCode, ms,
+        user: req.user?.username || '', bytes: Number(res.getHeader('Content-Length')) || null,
+        expectSlow: !!res.locals?.perfExpectSlow,
+      });
+    } catch { /* 계측 실패는 무시 */ }
+  };
+  res.on('finish', () => settle(false));
+  res.on('close', () => settle(!res.writableEnded));
   next();
 });
 
@@ -236,6 +269,7 @@ app.use((err, req, res, _next) => {
 try { const rf = writeReleaseFile(); if (rf) console.log(`[release] ${rf} 기록`); } catch { /* best effort */ }
 store.start();
 startLoopLagMonitor(); // 이벤트 루프 지연 계측(additive·no-op-on-fail) — docs/ARCH-HEAVY-JOB-ISOLATION.md §10-0
+try { pruneHangLog(); } catch { /* hang 로그 보존일 정리(기동 1회) — 실패 무시 */ }
 upgradeManager.start();
 const stagger = [
   startSelfRegister, // 엣지 자기등록(EDGE_MODE=all) — 중앙 수집 서버 목록에 자동 등록

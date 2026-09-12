@@ -372,6 +372,7 @@ let wasteExportBusy = null; // { user, at }
 const WASTE_EXPORT_MAX_REPORTS = Math.max(1, Math.min(1000, Number(process.env.WASTE_EXPORT_MAX_REPORTS) || 200));
 const WASTE_EXPORT_CHUNK = Math.max(1, Math.min(50, Number(process.env.WASTE_EXPORT_CHUNK) || 8));
 api.get('/tools/waste/export', requirePerm('tools'), async (req, res) => {
+  res.locals.perfExpectSlow = true; // v2.498: vCenter 성능 조회를 동반해 수십 초가 정상인 내보내기
   if (wasteExportBusy) {
     const sec = Math.round((Date.now() - wasteExportBusy.at) / 1000);
     return res.status(409).json({ ok: false, error: 'export_busy', reason: `다른 내보내기가 진행 중입니다(${wasteExportBusy.user || '사용자'} · ${sec}초 경과). 끝난 뒤 다시 시도하세요.` });
