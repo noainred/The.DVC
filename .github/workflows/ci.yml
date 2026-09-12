@@ -15,6 +15,10 @@ on:
 
 permissions:
   contents: read
+  # 'pyportal 변경 PR 의 ver.txt 갱신 확인' 스텝이 `gh api …/pulls/N/files` 로 PR 변경 파일을 읽는다 —
+  # 비공개 저장소에서 GITHUB_TOKEN 이 contents:read 만 가지면 이 호출이 거부돼(HTTP 403) pyportal 을
+  # 건드리지 않은 PR 까지 전부 실패했다(#445·#446·#447 pull_request 실행 실측 — 같은 커밋의 push 는 통과).
+  pull-requests: read
 
 concurrency:
   # 같은 브랜치에 연속 push 하면 이전 실행은 취소한다(러너 낭비 방지).
