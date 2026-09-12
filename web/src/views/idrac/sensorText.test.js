@@ -1,10 +1,10 @@
 // v2.493 — iDRAC 센서 탭 문구 판정 회귀 고정.
 // 핵심: '값이 없다' 를 '텔레메트리 미지원' 으로 단정하지 않는다(2026-09-12 사용자 신고 재발 방지).
 import { describe, it, expect } from 'vitest';
-import { cpuBadgeText, maxTempText, sampleCountText, emptyNote, latestTempRows, tempColorOf } from './sensorText.js';
+import { cpuBadgeText, maxTempText, sampleCountText, emptyNote, latestTempRows, tempColorOf, fetchErrorNote } from './sensorText.js';
 
 const localWithData = {
-  remote: false, seriesAvailable: true, cpuSynced: true, count: 42,
+  remote: false, seriesAvailable: true, cpuSynced: true, count: 42, intervalMs: 60000,
   samples: [{ t: 1, cpu: 12, temps: { 'CPU1 Temp': 52 } }],
   latest: { t: 1, cpu: 12, temps: { 'CPU1 Temp': 52, 'Inlet Temp': 21 }, fans: {} },
   sensors: ['CPU1 Temp', 'Inlet Temp'],
@@ -73,4 +73,24 @@ describe('현재값 표', () => {
     expect(tempColorOf(40)).toBe('var(--red)');
     expect(tempColorOf(null)).toBe('var(--text-faint)');
   });
+});
+
+describe('수집 주기는 API 값을 쓴다(하드코딩 금지)', () => {
+  it('intervalMs 를 분/초로 표기하고, 없으면 단정하지 않는다', () => {
+    expect(sampleCountText({ seriesAvailable: true, count: 3, intervalMs: 300000 })).toContain('5분 간격');
+    expect(sampleCountText({ seriesAvailable: true, count: 3, intervalMs: 30000 })).toContain('30초 간격');
+    expect(sampleCountText({ seriesAvailable: true, count: 3 })).toContain('수집 주기 미확인');
+  });
+});
+
+describe('조회 실패는 수집 0 과 구분한다', () => {
+  it('실패 사유를 밝히고 수집 중단과 다름을 알린다', () => {
+    const n = fetchErrorNote(new Error('not found'));
+    expect(n).toContain('not found');
+    expect(n).toContain('수집이 멈춘 것과는 다릅니다');
+  });
+  it('OME 소스는 별도 안내', () => {
+    expect(fetchErrorNote(new Error('OME 소스는 센서 시계열을 지원하지 않습니다.'))).toContain('OME');
+  });
+  it('오류가 없으면 null', () => expect(fetchErrorNote(null)).toBe(null));
 });

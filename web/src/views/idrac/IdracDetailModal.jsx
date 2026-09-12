@@ -11,7 +11,7 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson } from '../../api.js';
 // 센서 탭 문구 판정(v2.493) — '값 없음' 을 '텔레메트리 미지원' 으로 단정하지 않게 순수 모듈로 고정.
-import { cpuBadgeText, maxTempText, sampleCountText, emptyNote, latestTempRows, tempColorOf } from './sensorText.js';
+import { cpuBadgeText, maxTempText, sampleCountText, emptyNote, latestTempRows, tempColorOf, fetchErrorNote } from './sensorText.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import EscClose from '../../components/EscClose.jsx';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
@@ -25,13 +25,18 @@ export function IdracDetailModal({ server, onClose }) {
   const [inv, setInv] = useState(null);
   const [invErr, setInvErr] = useState(null);
   const [sensors, setSensors] = useState(null);
+  const [sensErr, setSensErr] = useState(null); // 센서 조회 실패(수집 0 과 구분해 표시)
   const [tab, setTab] = useState('charts'); // charts | versions | gpu
   const [gpuProbe, setGpuProbe] = useState(null); // null | 'loading' | result
   const [vh, setVh] = useState(null); // 서비스태그로 매칭된 vCenter 가상화 호스트
   const runGpuProbe = () => { setGpuProbe('loading'); fetchJson(`/admin/idrac/${encodeURIComponent(server.id)}/gpu-probe`).then(setGpuProbe).catch((e) => setGpuProbe({ ok: false, reason: e.message })); };
   const loadInv = (refresh) => fetchJson(`/admin/idrac/${encodeURIComponent(server.id)}/inventory${refresh ? '?refresh=1' : ''}`)
     .then((r) => { setInv(r.inventory); setInvErr(null); }).catch((e) => setInvErr(e.message));
-  const loadSensors = () => fetchJson(`/admin/idrac/${encodeURIComponent(server.id)}/sensors?minutes=180`).then(setSensors).catch(() => {});
+  // v2.493: 오류를 삼키지 않는다 — 404/400/403 이 와도 예전에는 '아직 수집된 센서 샘플이 없습니다'
+  // 와 똑같이 보여 '수집 0' 과 '조회 실패' 를 구분할 수 없었다.
+  const loadSensors = () => fetchJson(`/admin/idrac/${encodeURIComponent(server.id)}/sensors?minutes=180`)
+    .then((d) => { setSensors(d); setSensErr(null); })
+    .catch((e) => setSensErr(e));
   useEffect(() => {
     loadInv(false); loadSensors();
     fetchJson(`/admin/idrac/${encodeURIComponent(server.id)}/vcenter-host`).then(setVh).catch(() => setVh(null));
@@ -182,7 +187,9 @@ export function IdracDetailModal({ server, onClose }) {
                 </div>
               </>
             )}
-            {emptyNote(sensors) && <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>{emptyNote(sensors)}</div>}
+            {sensErr
+              ? <div className="badge amber" style={{ fontSize: 12, marginTop: 8 }}>{fetchErrorNote(sensErr)}</div>
+              : emptyNote(sensors) && <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>{emptyNote(sensors)}</div>}
           </div>
         )}
 

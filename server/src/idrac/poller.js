@@ -43,8 +43,20 @@ async function pollOnceInner() {
     return;
   }
   // live/auto: mock 데모 잔존 항목(id 'mock-')은 실제 폴 대상에서 제외(가짜 주소 폴 잡음 방지).
-  const servers = loadRegistry().filter((s) => s.enabled !== false && s.host && s.username && s.password && !String(s.id).startsWith('mock-'));
-  if (!servers.length) { lastRun = { at: Date.now(), ok: 0, failed: 0, results: [] }; return; }
+  const registry = loadRegistry();
+  const servers = registry.filter((s) => s.enabled !== false && s.host && s.username && s.password && !String(s.id).startsWith('mock-'));
+  // v2.493: 폴 대상에서 제외된 서버를 **이유와 함께** 기록한다. 이전에는 조용히 빠져 lastRun 에
+  // 흔적조차 없었다 — 비밀번호 미저장·비활성 서버가 '수집이 멈춘 것' 으로 오해되고, 화면·로그
+  // 어디에도 구분 단서가 없었다(2026-09-12 신고 진단 중 확인).
+  const skipReason = (s) => (!s.host ? '주소 없음'
+    : !s.username ? '계정 없음'
+      : !s.password ? '비밀번호 미저장'
+        : s.enabled === false ? '비활성(사용 안 함)'
+          : String(s.id).startsWith('mock-') ? 'mock 데모 잔존 항목' : '');
+  // 필드명은 notPolled — 긴급중단 경로가 `skipped` 를 문자열로 쓰고 있어(위 isStopped 분기) 타입이 섞이면
+  // 화면이 둘을 구분할 수 없다.
+  const notPolled = registry.filter((s) => !servers.includes(s)).map((s) => ({ id: s.id, name: s.name, reason: skipReason(s) }));
+  if (!servers.length) { lastRun = { at: Date.now(), ok: 0, failed: 0, results: [], notPolled }; return; }
   const db = await getDb();
   const ts = Date.now();
   const results = [];
@@ -116,7 +128,7 @@ async function pollOnceInner() {
     } catch (e) { console.warn(`[idrac] prune 실패: ${e.message}`); }
   }
   const failed = results.filter((r) => r.error).length;
-  lastRun = { at: ts, ok: results.length - failed, failed, results };
+  lastRun = { at: ts, ok: results.length - failed, failed, results, notPolled };
   if (failed) console.warn(`[idrac] poll: ${results.length - failed}/${results.length} 성공`);
 }
 

@@ -28,13 +28,29 @@ export function maxTempText(sensors) {
   return t.length ? `최고 온도 ${Math.max(...t)}℃` : '최고 온도 —';
 }
 
-/** 수집 주기·샘플 수 안내. 위임 서버는 '중앙 보유 이력 없음' 을 밝힌다. */
+/**
+ * 수집 주기·샘플 수 안내. 위임 서버는 '중앙 보유 이력 없음' 을 밝힌다.
+ * 주기는 **API 가 알려주는 실제 값**(intervalMs, 기본 60초·설정 가능)을 쓴다 — 예전에는 '1분 간격'
+ * 이 화면에 하드코딩돼 있어 주기를 바꾸면 문구가 사실과 달라졌다.
+ */
 export function sampleCountText(sensors) {
   if (sensors && sensors.seriesAvailable === false) {
     const at = sensors.syncedAt ? new Date(sensors.syncedAt).toLocaleString('ko-KR') : '—';
     return `위임 수집(엣지) · 최신값 동기화 ${at} · 중앙 이력 없음`;
   }
-  return `1분 간격 · 최근 ${sensors?.count || 0}샘플 · 30초마다 갱신`;
+  const ms = Number(sensors?.intervalMs);
+  const every = Number.isFinite(ms) && ms > 0
+    ? (ms % 60_000 === 0 ? `${ms / 60_000}분 간격` : `${Math.round(ms / 1000)}초 간격`)
+    : '수집 주기 미확인';
+  return `${every} · 최근 ${sensors?.count || 0}샘플 · 30초마다 갱신`;
+}
+
+/** 센서 조회가 실패한 경우의 안내 — '수집 0' 과 '조회 실패' 를 구분한다(둘은 할 일이 다르다). */
+export function fetchErrorNote(err) {
+  if (!err) return null;
+  const m = String(err.message || err);
+  if (/OME/.test(m)) return `이 항목은 OME(OpenManage) 소스입니다 — 센서 시계열을 제공하지 않습니다. (${m})`;
+  return `센서 조회에 실패했습니다: ${m} — 수집이 멈춘 것과는 다릅니다(권한·대상 없음·서버 오류 확인).`;
 }
 
 /**
