@@ -4,7 +4,8 @@ import { requireRole, requirePerm } from '../../auth/auth.js'; // v2.478(감사 
 import { logAudit } from '../../audit.js';           // 수집 정책 변경·데이터 삭제는 감사 기록
 import { store } from '../../store.js';
 import { loadVcenterConfig } from '../../config.js';
-import { fetchVmMetric, fetchVmRightsizeSeries } from '../../vcenter/soapClient.js';
+import { fetchVmMetric, fetchVmRightsizeSeries, fetchVmsUsageBatch, PERF_INTERVALS } from '../../vcenter/soapClient.js';
+import { USAGE_DAYS, normDays, intervalForDays } from '../../vcenter/perfBatch.js'; // v2.492: 트리 행 기간 사용률
 import { analyzeRightsize } from '../../tools/rightsize.js';
 import { poweredOffSinceFor } from '../../tools/powerOff.js'; // v2.483: 전원 꺼진 VM 의 꺼진 시각
 import { loadPowerOffSettings, savePowerOffSettings, LIMITS as POWEROFF_LIMITS } from '../../tools/powerOffSettings.js'; // v2.484
@@ -184,6 +185,106 @@ api.get('/tools/waste', requirePerm('tools'), (req, res) => memoJson(req, res, '
     noTools: { count: noTools.length, vms: noTools.slice(0, 50).map((v) => ({ id: v.id, name: v.name, vcenterId: v.vcenterId, toolsStatus: v.toolsStatus })) },
   };
 }, { extraKey: scopeKey(req.user, store.get()) }));
+
+/**
+ * VM 기간 사용률 배치 조회(v2.492) — POST /vms/usage
+ *   body { vmIds: string[], days: 7|30|90|180|365 }
+ *   → { days, interval, intervalSec, maxVms, truncated, synthesized, source, usage: { vmId: {…}|null } }
+ *
+ * 왜 이 엔드포인트인가: Platform › 'VM 및 폴더' 트리 행에는 지금 **할당 사양**(vCPU·GB)만 있고
+ * 실제로 얼마나 쓰는지가 없다. 기간 실사용률의 유일한 출처는 vCenter 가 보관하는 성능 롤업이며,
+ * 우리 DB 에는 per-VM 시계열이 없다(sampler.js 주석 — 5,850 VM × 시간당 1행 = 연 5천만 행이라
+ * 의도적으로 적재하지 않는다). 그래서 **필요할 때 화면에 보이는 행만** 빌려온다.
+ *
+ * 폭주 방지(28 vCenter · 일부 RTT 800ms 초과):
+ *  - 요청당 VM 상한 MAX_VMS(기본 60) — 초과분은 잘라내고 truncated 로 알린다.
+ *  - vCenter 당 **로그인 1회 + 청크(25 VM)당 QueryPerf 1회**(fetchVmsUsageBatch). VM 1대씩
+ *    로그인하는 기존 경로(fetchVmMetric)로 60 VM 을 돌리면 왕복이 수백 회가 된다.
+ *  - vCenter 동시성 4(eachLimited) — 느린 한 곳이 나머지를 막지 않게.
+ *  - 결과 5분 캐시(usageCache, 키 `vmId|days`) — 폴더 접기/펼치기·재렌더로 같은 VM 을 반복 조회하지 않게.
+ *  - per-vCenter best effort: 한 vCenter 실패가 전체를 깨지 않고 그 VM 들만 null.
+ *
+ * scope: 요청 vmId 중 '허용 vCenter 소속으로 **스냅샷에 실재하는**' VM 만 남긴다(범위 밖 VM 성능
+ * 유출 차단 — spark 와 같은 규약). 전량 조회 라우트가 아니므로 memoJson 을 쓰지 않는다.
+ * 권한: 트리는 Platform 화면이라 /tools 아래에 두지 않는다(도구별 접근 거부가 인벤토리 화면을
+ * 막지 않게). 읽기성 POST 이므로 상태변경 RBAC 대상이 아니다.
+ */
+const usageCache = new Map(); // `${vmId}|${days}` -> { at, u }
+const USAGE_TTL_MS = 5 * 60_000;
+const USAGE_MAX_VMS = Math.max(1, Math.min(200, Number(process.env.VM_USAGE_MAX_VMS) || 60));
+
+api.post('/vms/usage', async (req, res) => {
+  const days = normDays(req.body?.days);
+  const interval = intervalForDays(days);
+  const ids = Array.isArray(req.body?.vmIds) ? req.body.vmIds.map(String) : [];
+  const base = { days, interval, intervalSec: PERF_INTERVALS[interval], maxVms: USAGE_MAX_VMS, allDays: USAGE_DAYS };
+  if (!ids.length) return res.json({ ...base, truncated: false, synthesized: false, usage: {} });
+  const snap = store.get();
+  const allowed = scopedVcenterIds(req.user, snap);
+  const byId = new Map((snap.vms || []).map((v) => [v.id, v]));
+  const targets = [];
+  for (const id of ids) {
+    const v = byId.get(id);
+    if (!v) continue;
+    if (allowed && !allowed.has(v.vcenterId)) continue;
+    targets.push(v);
+    if (targets.length >= USAGE_MAX_VMS) break;
+  }
+  const truncated = ids.length > targets.length;
+  const now = Date.now();
+  const usage = {};
+  const need = [];
+  for (const v of targets) {
+    const hit = usageCache.get(`${v.id}|${days}`);
+    if (hit && now - hit.at < USAGE_TTL_MS) usage[v.id] = hit.u;
+    else need.push(v);
+  }
+  const put = (id, u) => { usage[id] = u; usageCache.set(`${id}|${days}`, { at: now, u }); };
+  if (need.length) {
+    if (snap.source === 'mock') {
+      // 데모(mock): 실데이터가 없으므로 스냅샷 순간값 주변으로 **결정적** 합성값을 만든다.
+      // 응답에 synthesized:true 로 표기해 화면이 '합성' 임을 밝힌다(실측처럼 보이면 안 된다).
+      for (const v of need) {
+        const jit = (seed, span) => ((hash(`${v.id}|${days}|${seed}`) % 1000) / 1000 - 0.5) * span;
+        const mk = (cur) => {
+          const avg = Math.max(0, Math.min(100, Math.round(((cur || 0) * 0.8 + jit('a', 12)) * 10) / 10));
+          return { avg, max: Math.max(avg, Math.min(100, Math.round((avg + 8 + jit('m', 20)) * 10) / 10)) };
+        };
+        const c = mk(v.cpuUsagePct); const mm = mk(v.memUsagePct);
+        put(v.id, v.powerState === 'POWERED_ON'
+          ? { cpuPct: c.avg, cpuMax: c.max, memPct: mm.avg, memMax: mm.max, samples: days <= 30 ? days * 12 : days, coverageDays: days }
+          : null);
+      }
+    } else {
+      const cfgs = loadVcenterConfig().vcenters;
+      // vCenter 별로 묶어 로그인을 1회로 줄인다(VM 1대당 로그인 금지 — 이 엔드포인트의 존재 이유).
+      const groups = new Map();
+      for (const v of need) {
+        if (!groups.has(v.vcenterId)) groups.set(v.vcenterId, []);
+        groups.get(v.vcenterId).push(v);
+      }
+      const end = now;
+      const start = now - days * 86_400_000;
+      await eachLimited([...groups.entries()], 4, async ([vcId, list]) => {
+        const vc = cfgs.find((x) => x.id === vcId);
+        if (!vc) { for (const v of list) put(v.id, null); return; }
+        // vm.id = `${vc.id}:${moref}` 이고 vc.id 자체에 콜론이 있을 수 있다 → split 대신 길이로 자른다
+        // (dsBrowse.js·spark 와 같은 패턴. split 이면 moref 가 깨져 그 vCenter 전체가 조용히 빈다).
+        const refOf = (v) => v.id.slice(String(v.vcenterId || '').length + 1);
+        try {
+          const r = await fetchVmsUsageBatch(vc, list.map(refOf), interval, { start, end });
+          for (const v of list) put(v.id, r.usage.get(refOf(v)) || null);
+        } catch {
+          for (const v of list) put(v.id, null); // 이 vCenter 만 실패(권한·사이트 위임 수집 등) — 트리는 계속 그린다
+        }
+      });
+    }
+  }
+  if (usageCache.size > 8000) {
+    for (const [k, e] of usageCache) if (now - e.at > USAGE_TTL_MS) usageCache.delete(k);
+  }
+  res.json({ ...base, truncated, synthesized: snap.source === 'mock', source: snap.source || '', usage });
+});
 
 /**
  * 클러스터·폴더 선택 목록(v2.491) — GET /tools/groups?vcenterId=

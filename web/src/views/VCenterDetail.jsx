@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { fetchJson, usePolling } from '../api.js';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { fetchJson, postJson, usePolling } from '../api.js';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import { Loading, ErrorBox, StateBadge, UsageCell, EntityDetail, DataTable, SearchBox } from '../components/ui.jsx';
 import EscClose from '../components/EscClose.jsx';
@@ -10,6 +10,11 @@ import { allocByHost, countByHost, virtSum as virtSumOf } from './vcdVirt.js';
 // '전체 현황' 평면 표/CSV — 트리를 펼치지 않고 모든 클러스터·호스트를 한 번에(v2.335).
 import { buildOverviewRows, overviewCsv, OVERVIEW_COLUMNS } from './vcdOverview.js';
 import { STable } from '../components/STable.jsx';
+// VM 행의 기간 실사용률(v2.492) — 기간 프리셋·보이는 행 수집·문구·색 판정은 순수 모듈(vitest 고정).
+import {
+  USAGE_DAYS, DEFAULT_USAGE_DAYS, normUsageDays, usageDaysLabel, usageKey,
+  visibleTreeVmIds, visibleHostVmIds, pendingIds, mergeUsage, usageText, usageTitle, usagePctColor,
+} from './vcdUsage.js';
 
 const VIEWS = [
   { k: 'hosts', label: '호스트 및 클러스터', icon: '🖥️' },
@@ -176,6 +181,16 @@ export default function VCenterDetail({ site, onBack }) {
   const [dsKind, setDsKind] = useState('');  // datastore storage filter
   const [comparing, setComparing] = useState(false); // vCenter 2개 비교 모드
   const toggle = (k) => setOpen((o) => ({ ...o, [k]: !o[k] }));
+  // VM 기간 실사용률(v2.492, 사용자 요구) — 트리 행에는 할당 사양만 있어서 '실제로 얼마나 쓰는지'를
+  // 볼 수 없었다. 출처는 vCenter 성능 롤업이고 우리 DB 에 per-VM 시계열이 없으므로(5,850 VM 규모라
+  // 의도적으로 적재하지 않는다) **펼쳐진 행만** 서버 배치로 빌려온다(POST /vms/usage).
+  // ⚠ 훅이므로 위 규칙대로 컴포넌트 최상단에 선언한다.
+  const [usageDays, setUsageDays] = useState(DEFAULT_USAGE_DAYS);
+  const [usage, setUsage] = useState({});        // `${days}|${vmId}` -> 요약 | null(표본 없음)
+  const [usageInfo, setUsageInfo] = useState({ loading: false, synthesized: false, truncated: false, maxVms: 0, error: '' });
+  // 조회 루프가 '이미 받은 것' 을 판정할 때 state 를 읽으면 클로저가 낡는다 → ref 를 진실의 원천으로 둔다.
+  const usageRef = useRef({});
+  const usageMaxRef = useRef(60); // 서버가 알려준 요청당 상한(첫 응답에서 갱신)
 
   const { data: hostsD } = usePolling('/hosts', { vcenterId }, 20_000);
   // VM 복제(백업) 잡 대상 vmId 집합(v2.299) — 트리 VM 행에 'Clone' 배지 표시(사용자 요구).
@@ -186,8 +201,10 @@ export default function VCenterDetail({ site, onBack }) {
   const { data: dsD } = usePolling('/datastores', { vcenterId }, 30_000);
   const { data: netD } = usePolling('/networks', { vcenterId }, 30_000);
 
-  const hosts = hostsD?.items || [];
-  const vms = vmsD?.items || [];
+  // v2.492: useMemo 로 정체성을 안정화한다 — 매 렌더 새 배열이면 이 값을 deps 로 쓰는 모든 useMemo
+  // (가상화율·폴더트리·검색·사용률 대상 수집)가 폴링 틱마다 전부 재계산된다(eslint 경고의 실체).
+  const hosts = useMemo(() => hostsD?.items || [], [hostsD]);
+  const vms = useMemo(() => vmsD?.items || [], [vmsD]);
   // 표시용 VM 목록 — 'Off VM 포함' 해제 시 POWERED_OFF 를 숨긴다. 트리·검색뿐 아니라
   // CPU·MEM 가상화율(할당 vCPU/RAM 합계)도 이 목록을 기준으로 계산한다(v2.334, 사용자 요구 —
   // '꺼진 VM 제외하고 실제로 켜진 부하만 보는' 용도. 전체 기준으로 보려면 체크박스를 켠다).
@@ -277,6 +294,56 @@ export default function VCenterDetail({ site, onBack }) {
     if (!tokens.length) return [];
     return hosts.filter((h) => entityMatches(h.name, '', tokens, false).hit);
   }, [hosts, tokens]);
+
+  // ── VM 기간 실사용률 조회(v2.492) ────────────────────────────────────────────────
+  // 지금 화면에 그려지는 VM 만 대상으로 한다: 검색 중이면 일치 결과, 'VM 및 폴더' 트리는 펼친
+  // 폴더의 VM, '호스트 및 클러스터' 트리는 펼친 호스트의 VM. 전량(최대 5,000)을 조회하면 고RTT
+  // vCenter 에서 분 단위가 걸린다 — 서버도 요청당 상한(기본 60)을 둔다.
+  const wantIds = useMemo(() => {
+    if (view !== 'vms' && view !== 'hosts') return [];
+    if (query) return matches.slice(0, SEARCH_CAP).map((mm) => mm.v.id);
+    if (view === 'vms') return visibleTreeVmIds(folderTree, open);
+    return visibleHostVmIds(hosts, vmsByHost, open);
+  }, [view, query, matches, folderTree, open, hosts, vmsByHost]);
+  // 효과 의존성은 문자열로 고정한다 — 배열 정체성은 매 렌더 바뀌어 무한 조회가 된다.
+  const wantKey = wantIds.join(',');
+  useEffect(() => {
+    if (!wantIds.length) return undefined;
+    let alive = true;
+    // 서버 상한을 넘는 만큼은 **순차** 라운드로 나눠 조회한다(동시 폭주 금지). 라운드 상한으로
+    // vCenter 로 나가는 요청 수를 예측 가능하게 묶는다(폴더를 전부 펼친 경우 대비).
+    const MAX_ROUNDS = 6;
+    (async () => {
+      for (let round = 0; round < MAX_ROUNDS && alive; round++) {
+        const todo = pendingIds(wantIds, usageDays, usageRef.current, usageMaxRef.current);
+        if (!todo.length) return;
+        setUsageInfo((i) => ({ ...i, loading: true, error: '' }));
+        try {
+          const r = await postJson('/vms/usage', { vmIds: todo, days: usageDays });
+          if (!alive) return;
+          // 조회했지만 표본이 없으면 null 로 기억한다 — 같은 VM 을 매 렌더 다시 조회하지 않게.
+          const merged = mergeUsage(usageRef.current, usageDays, r?.usage);
+          for (const id of todo) { const k = usageKey(usageDays, id); if (!(k in merged)) merged[k] = null; }
+          usageRef.current = merged;
+          if (r?.maxVms) usageMaxRef.current = r.maxVms;
+          setUsage(merged);
+          setUsageInfo({ loading: false, synthesized: !!r?.synthesized, truncated: !!r?.truncated, maxVms: r?.maxVms || usageMaxRef.current, error: '' });
+        } catch (e) {
+          if (!alive) return;
+          // 조회 실패는 화면 전체 오류로 바꾸지 않는다 — 트리는 계속 보여야 한다(고RTT 깜빡임 방지 규약).
+          setUsageInfo((i) => ({ ...i, loading: false, error: e?.message || String(e) }));
+          return;
+        }
+      }
+    })();
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantKey, usageDays, vcenterId]);
+  // 행에 넘길 props — 조회 여부(known)를 구분해 '조회 중…' 과 '표본 없음' 을 다르게 보인다.
+  const usageProps = (vmId) => {
+    const k = usageKey(usageDays, vmId);
+    return { u: usage[k], known: k in usage, days: usageDays, loading: usageInfo.loading, synthesized: usageInfo.synthesized };
+  };
 
   // Datastore storage-type filter + per-kind counts.
   const dsCounts = useMemo(() => {
@@ -372,6 +439,28 @@ export default function VCenterDetail({ site, onBack }) {
               </span>
             )}
           </div>
+          {/* VM 기간 실사용률(v2.492, 사용자 요구) — 행에는 할당 사양만 있어 '실제로 얼마나 쓰는지'를
+              볼 수 없었다. 기본 30일이고 7~365일을 고를 수 있다. 출처는 vCenter 성능 롤업이며 우리
+              DB 에 per-VM 시계열이 없으므로 **펼쳐진 행만** 요청 시 조회한다(요청당 상한 있음). */}
+          <div className="flex gap wrap" style={{ alignItems: 'center', margin: '0 0 8px', fontSize: 12 }}>
+            <span className="muted">실사용률 기간</span>
+            {USAGE_DAYS.map((d) => (
+              <button key={d} className={usageDays === d ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '5px 11px' }}
+                onClick={() => setUsageDays(normUsageDays(d))}
+                title={`최근 ${usageDaysLabel(d)} 평균 CPU·메모리 사용률을 VM 행에 표시합니다(${d <= 30 ? 'vCenter 2시간 롤업' : 'vCenter 1일 롤업'} 기준)`}>
+                {usageDaysLabel(d)}
+              </button>
+            ))}
+            <span className="muted">
+              {usageInfo.loading ? '조회 중…' : ''}
+              {!usageInfo.loading && usageInfo.truncated ? `요청당 상한 ${usageInfo.maxVms || 60}대씩 나눠 조회합니다` : ''}
+            </span>
+            {usageInfo.error && <span className="badge amber" title={usageInfo.error}>사용률 조회 실패 — 행은 '—' 로 표시</span>}
+            {usageInfo.synthesized && <span className="badge blue" title="데모(mock) 데이터 소스입니다 — 사용률은 합성값이며 실측이 아닙니다">합성값(데모)</span>}
+            <span className="muted" style={{ marginLeft: 'auto' }}>
+              출처: vCenter 성능 롤업 · 펼친 폴더·검색 결과의 VM 만 조회
+            </span>
+          </div>
           {view === 'hosts' && overview && (
             <>
               <div className="muted" style={{ fontSize: 12, margin: '0 0 8px' }}>
@@ -428,6 +517,7 @@ export default function VCenterDetail({ site, onBack }) {
                   sub={<>
                     {`🧩 ${vm.cluster || '—'} · 🖥️ ${vm.host || '—'} · 📁 ${vm.folder || 'vm'} · ${vm.cpuCount || 0}vCPU · ${Math.round((vm.memMB || 0) / 1024)}GB · 💾 ${fmtGb(vm.storageGB || 0)}`}
                     {/* 메모로만 걸린 결과 — 어떤 메모 문구에 걸렸는지 스니펫으로 표시(하이라이트 포함) */}
+                    <VmUsageCell {...usageProps(vm.id)} />
                     {viaNotes && <span style={{ color: 'var(--amber)' }}> · 📝 <Highlight text={notesSnippet(vm.notes, token)} tokens={tokens} /></span>}
                     <VmBadges vm={vm} cloneSet={cloneSet} />
                   </>} />
@@ -456,7 +546,7 @@ export default function VCenterDetail({ site, onBack }) {
                     {(vmsByHost.get(h.name) || []).map((vm) => (
                       <Leaf key={vm.id} icon="🧊" onClick={() => setSel({ type: 'vm', item: vm })}
                         label={vm.name} badge={<StateBadge state={vm.powerState} />}
-                        sub={<>{`${vm.guestOS} · ${vm.cpuCount}vCPU · ${Math.round(vm.memMB / 1024)}GB`}<VmBadges vm={vm} cloneSet={cloneSet} /></>} />
+                        sub={<>{`${vm.guestOS} · ${vm.cpuCount}vCPU · ${Math.round(vm.memMB / 1024)}GB`}<VmUsageCell {...usageProps(vm.id)} /><VmBadges vm={vm} cloneSet={cloneSet} /></>} />
                     ))}
                   </Tree>
                 ))}
@@ -468,7 +558,7 @@ export default function VCenterDetail({ site, onBack }) {
 
         {view === 'vms' && !query && (
           <Node label={`📁 ${site.name} / vm`} defaultOpen sub={`${visibleVms.length} VM`}>
-            <FolderNodes node={folderTree} path="" open={open} toggle={toggle} cloneSet={cloneSet} onSelect={(vm) => setSel({ type: 'vm', item: vm })} />
+            <FolderNodes node={folderTree} path="" open={open} toggle={toggle} cloneSet={cloneSet} usageProps={usageProps} onSelect={(vm) => setSel({ type: 'vm', item: vm })} />
           </Node>
         )}
 
@@ -553,6 +643,31 @@ function MiniBar({ label, pct }) {
         <span style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${p}%`, background: c, borderRadius: 5 }} />
       </span>
       <b style={{ fontSize: 12, color: c, minWidth: 34, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{p}%</b>
+    </span>
+  );
+}
+
+/**
+ * VM 행의 기간 실사용률 셀(v2.492) — 트리 한 줄에 들어가도록 짧은 텍스트로 그린다.
+ * 값 없음을 두 가지로 구분한다: 아직 조회하지 않았으면 '조회 중…'(또는 '—'), 조회했는데 표본이
+ * 없으면 '표본 없음'. 둘을 합치면 사용자가 '느린 건지 데이터가 없는 건지' 알 수 없다.
+ * 트리 행은 nowrap 이라 MiniBar(바 2개 ≈ 300px) 대신 수치만 쓴다.
+ */
+function VmUsageCell({ u, known, days, loading, synthesized }) {
+  if (!known) {
+    return <span className="muted" style={{ fontSize: 11.5 }}> · {usageDaysLabel(days)} {loading ? '조회 중…' : '—'}</span>;
+  }
+  if (!u) {
+    return <span className="muted" style={{ fontSize: 11.5 }} title={usageTitle(null, days)}> · {usageDaysLabel(days)} 표본 없음</span>;
+  }
+  const num = (x) => (x == null ? '—' : `${Math.round(x)}%`);
+  return (
+    <span style={{ fontSize: 11.5 }} title={usageTitle(u, days, { synthesized })}>
+      <span className="muted"> · {usageDaysLabel(days)} CPU </span>
+      <b style={{ color: usagePctColor(u.cpuPct), fontVariantNumeric: 'tabular-nums' }}>{num(u.cpuPct)}</b>
+      <span className="muted"> · MEM </span>
+      <b style={{ color: usagePctColor(u.memPct), fontVariantNumeric: 'tabular-nums' }}>{num(u.memPct)}</b>
+      {synthesized && <span className="muted"> (합성)</span>}
     </span>
   );
 }
@@ -652,7 +767,7 @@ function Highlight({ text, tokens }) {
   );
 }
 
-function FolderNodes({ node, path, open, toggle, onSelect, cloneSet }) {
+function FolderNodes({ node, path, open, toggle, onSelect, cloneSet, usageProps }) {
   const childFolders = Object.keys(node.folders).sort();
   return (
     <>
@@ -661,10 +776,10 @@ function FolderNodes({ node, path, open, toggle, onSelect, cloneSet }) {
         const f = node.folders[name];
         return (
           <Tree key={key} k={key} open={open} toggle={toggle} icon="📁" label={name} sub={`${f.count} VM`}>
-            <FolderNodes node={f} path={`${path}/${name}`} open={open} toggle={toggle} cloneSet={cloneSet} onSelect={onSelect} />
+            <FolderNodes node={f} path={`${path}/${name}`} open={open} toggle={toggle} cloneSet={cloneSet} usageProps={usageProps} onSelect={onSelect} />
             {f.vms.map((vm) => (
               <Leaf key={vm.id} icon="🧊" onClick={() => onSelect(vm)} label={vm.name} badge={<StateBadge state={vm.powerState} />}
-                sub={<>{`${vm.guestOS} · ${vm.cpuCount}vCPU · ${Math.round(vm.memMB / 1024)}GB`}<VmBadges vm={vm} cloneSet={cloneSet} /></>} />
+                sub={<>{`${vm.guestOS} · ${vm.cpuCount}vCPU · ${Math.round(vm.memMB / 1024)}GB`}<VmUsageCell {...usageProps(vm.id)} /><VmBadges vm={vm} cloneSet={cloneSet} /></>} />
             ))}
           </Tree>
         );

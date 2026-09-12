@@ -1,9 +1,9 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **329개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **333개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
-- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-11)
+- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-12)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다.
 - `portal.env.example` 에 예시가 있는 키는 ✅, 없는 키는 빈칸으로 표시한다.
 - 기본값 칸이 비어 있으면 코드에서 한 줄로 추출하지 못한 것이다(해당 파일을 참조).
@@ -188,7 +188,7 @@
 | `EDGE_PUSH_TIMEOUT_MS` | `600000` |  | collector/upgradePush.js, upgrade/upgrade.js |
 | `SSRF_ALLOW_LOOPBACK` | `''` | ✅ | collector/registry.js |
 
-## 스토리지 수집 (15)
+## 스토리지 수집 (16)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -203,6 +203,7 @@
 | `STORAGE_POWERSTORE_LIST_LIMIT` | `2000` |  | storage/collectors/powerstore.js |
 | `STORAGE_POWERSTORE_METRICS_INTERVAL` | `'OneDay'` |  | storage/collectors/powerstore.js |
 | `STORAGE_POWERSTORE_PORT` | `443` |  | storage/collectors/powerstore.js |
+| `STORAGE_TLS_VERIFY` | `기본 아님('true' 일 때만 적용)` |  | storage/collectors/isilon.js, storage/collectors/restCommon.js |
 | `STORAGE_UNISPHERE_PORT` | `8443` |  | storage/collectors/powermax.js |
 | `STORAGE_UNITY_PORT` | `443` |  | storage/collectors/unity.js |
 | `STORAGE_VPLEX_PORT` | `443` |  | storage/collectors/vplex.js |
@@ -386,7 +387,7 @@
 |---|---|---|---|
 | `HEALTH_PROBE_TIMEOUT_MS` | `5000` |  | health/network.js |
 
-## API 라우트 (19)
+## API 라우트 (21)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -398,6 +399,7 @@
 | `METRICS_EXPORT_TOKEN` | `''` |  | routes/metricsExport.js |
 | `RIGHTSIZE_CAP_REDUCTION_PCT` |  |  | routes/api/toolsCapacity.js |
 | `RIGHTSIZE_HEADROOM_PCT` |  |  | routes/api/toolsCapacity.js |
+| `RIGHTSIZE_MEM_BASIS` |  |  | routes/api/toolsCapacity.js |
 | `RIGHTSIZE_MIN_COVERAGE_PCT` |  |  | routes/api/toolsCapacity.js |
 | `RIGHTSIZE_MIN_DAYS` |  |  | routes/api/toolsCapacity.js |
 | `RIGHTSIZE_READY_WARN_PCT` |  |  | routes/api/toolsCapacity.js |
@@ -408,6 +410,7 @@
 | `UPGRADE_PATH_ALLOW_BASES` | `''` |  | routes/upgrade.js |
 | `UPGRADE_PATH_CHECK` | `''` |  | routes/upgrade.js |
 | `VCLOGS_EXPORT_MAX_ROWS` | `100000` |  | routes/api/checksLogs.js |
+| `VM_USAGE_MAX_VMS` | `60` |  | routes/api/toolsCapacity.js |
 | `WASTE_SPARK_MAX_VMS` | `24` |  | routes/api/toolsCapacity.js |
 
 ## GPU (1)
@@ -469,7 +472,7 @@
 | `PDU_INTERVALS_LOCAL` | `기본 아님('1' 일 때만 적용)` |  | pdu/intervals.js |
 | `PDU_RETAIN_DAYS` | `400` |  | pdu/db.js |
 
-## SAN 스위치 (19)
+## SAN 스위치 (20)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -492,6 +495,7 @@
 | `SANSW_PUSH_PORT_LIMIT` | `64` |  | sanswitch/push.js |
 | `SANSW_TEST_PICKUP_MS` | `10` | ✅ | sanswitch/testRuns.js |
 | `SANSW_TEST_RESULT_MS` | `5` | ✅ | sanswitch/testRuns.js |
+| `SANSWITCH_TLS_VERIFY` | `기본 아님('true' 일 때만 적용)` |  | sanswitch/collectors/fosRest.js |
 
 ## vCenter 수집 (2)
 
@@ -508,4 +512,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 329
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 333
