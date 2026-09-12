@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **132개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **133개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-09-12)
@@ -44,6 +44,7 @@
 | `central-inventory.json` | 설정 | 위임 사이트가 push 한 인벤토리 캐시 | ✅ |  | ✅ | central/inventory.js |
 | `central-pdu.json` | 설정 | 엣지가 push 한 PDU 스냅샷의 중앙 보관소(v2.424). | ✅ | ✅ | ✅ | central/pduEdge.js |
 | `central-svcmon-assign.json` | 설정 | 성능점검 배정 — 중앙이 관리하는 '어느 엣지가 어느 대상을 점검하는가'. | ✅ | ✅ |  | central/svcmonAssign.js |
+| `central-unsupported-servers.json` | 설정 | iDRAC 스캔이 발견한 **비-Dell(미지원) 서버**의 중앙 보관소(v2.495). | ✅ | ✅ | ✅ | central/unsupportedServers.js |
 | `collectors.json` | 설정 | 원격 수집 서버(엣지) 목록과 토큰 | ✅ | ✅ | ✅ | collector/registry.js |
 | `credentials-usage.json` | 설정 | 통합 계정 관리 저장소(v2.419) — RMA 가 엣지 망 안의 서버에 SSH 로 점검·명령을 실행할 때 쓰는 | ✅ | ✅ | ✅ | security/credentialStore.js |
 | `credentials.json` | 설정 | 통합 계정(장비 SSH/API 자격증명) | ✅ | ✅ | ✅ | security/credentialStore.js |

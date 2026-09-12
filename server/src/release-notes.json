@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "2.495.0",
+      "date": "2026-09-12",
+      "title": "iDRAC 스캔 — 비-Dell(HPE 등) 서버를 '미지원 서버' 로 표시",
+      "notes": [
+        "iDRAC 스캔 대역에 Dell 이 아닌 서버(HPE iLO·Lenovo XCC·Supermicro 등)가 있으면 특수 기능 › 서버 분석 › **미지원 서버** 탭에 보여준다(사용자 요구). 지금까지는 그런 장비가 Dell 계정을 거부해 '인증실패' 로 집계되거나 '비iDRAC' 카운터로만 남아 IP·정체가 사라졌다.",
+        "벤더 판별은 스캔이 **이미 무인증으로 받는 Redfish 서비스 루트**(/redfish/v1)만 쓴다 — 추가 HTTP 요청 0회. 근거 우선순위 Oem 키 → Vendor → Manufacturer(인증 성공 시) → 제품명(휴리스틱) → 기존 Dell 시그니처 폴백. 확신이 없으면 'Dell 아님(벤더 미확인)' 으로 두고 화면의 '근거' 열에 무엇을 보고 판단했는지 적는다(순수 모듈 idrac/vendorMatch.js + 테스트 5건). 기존 Dell 판별식은 그대로 두고 OR 로만 확장했다(회귀 0).",
+        "'미지원 서버' 의 정의를 좁게 둔다 — **Redfish 서비스 루트가 응답했으나 Dell 시그니처가 없는 장비**. Redfish 양성 신호(RedfishVersion·@odata.id·Links.Sessions) 없는 HTTPS 응답(스위치 웹UI·ESXi·프린터)은 담지 않는다(현행 '비iDRAC' 카운터가 그 잡탕이다). Redfish 자체가 없는 장비는 식별 불가라 화면에 그 한계를 명시한다. 발견 목록(found)에는 절대 넣지 않는다 — 넣으면 등록되어 전력 폴러가 영구 실패 수집을 반복한다.",
+        "위임(엣지) 환경 대응: 스캔 결과에 unsupported 배열(상한 200 · 중앙 회신 본문 1MB 안)을 추가하면 폴링·push 두 위임 경로 모두에 자동 전파되지만, 중앙의 결과 화이트리스트(central/idracScanJobs.js)와 직접 스캔 반환(idrac/scanPoller.js)이 모르는 필드를 버리므로 두 곳을 열었다. 위임 잡은 완료 10분 뒤 gc 되는 인메모리라 **영속 보관소**(central/unsupportedServers.js, CONFIG_DIR/central-unsupported-servers.json — atomicWrite·preserveCorrupt)를 두고, 스캔 성공 시에만 그 (엣지·법인·서비스) 그룹을 교체하며 실패·중단 시 직전 결과를 보존한다(v2.493 '위임 환경에서 빈 화면' 재발 방지).",
+        "보안: 저장 키·귀속은 본문이 아니라 중앙이 만든 잡 레코드(agent·법인·서비스)에서만 취하고, 잡의 대상 IP 범위 밖 항목은 드롭한다(침해된 엣지가 다른 법인 관리망 주소를 심는 것 차단 — ip-scan-result 선례). 자격증명은 저장하지 않는다. 조회 라우트 GET /admin/idrac/unsupported 는 adminOnly(스캔 발견물은 vCenter 귀속이 없어 범위 계정에 노출하지 않는 규약).",
+        "참고: '인증실패' 수치의 의미가 바뀐다 — 비-Dell 장비가 미지원 분기로 빠지므로 기존 인증실패 카운터와 IP 목록이 그만큼 줄어든다. 인증 문제가 해결된 것이 아니라 분리된 것이다."
+      ]
+    },
+    {
       "version": "2.494.0",
       "date": "2026-09-12",
       "title": "추이 — 호스트/클러스터/vCenter 별 보기 + 트리 사용량 조회 옵트인 + '표본 없음' 사유 표시",

@@ -16,6 +16,21 @@ export async function scanForIdracs({ ips, username, password, concurrency = 32,
   const authHints = new Map(); // 인증실패 원인별 카운트(예: '자격증명 거부') — 로그 진단용
   const authFailedIps = []; // '계정 맞는데 막힌' IP 목록 — 어느 iDRAC을 점검할지 로그에 표시(상한 200)
   const MAX_AUTHFAIL_IPS = 200;
+  // v2.495: '미지원 서버' — Redfish 서비스 루트가 응답했으나 Dell 이 아닌 장비(HPE iLO 등).
+  // 정의를 좁게 둔다: Redfish 양성 신호(redfish:true) 가 없는 HTTPS 응답(스위치 웹UI·ESXi·프린터)은
+  // 담지 않는다 — 담으면 목록이 잡탕이 되어 신뢰를 잃는다. 상한 200(authFailedIps 와 동일 — 중앙
+  // 회신 본문 1MB 한도 안). found 에는 절대 넣지 않는다(등록되어 전력 폴러가 영구 실패 수집을 반복).
+  const unsupported = [];
+  const MAX_UNSUPPORTED = 200;
+  let unsupportedCount = 0;
+  const noteUnsupported = (ip, r) => {
+    if (!r.redfish || r.vendor === 'dell') return false;
+    unsupportedCount++;
+    if (unsupported.length < MAX_UNSUPPORTED) {
+      unsupported.push({ ip, vendor: r.vendor || 'unknown', vendorLabel: r.vendorLabel || '', evidence: r.vendorEvidence || '', product: r.product || '', model: r.model || '', manufacturer: r.manufacturer || '', hostName: r.hostName || '', authFailed: !!r.authFailed, at: Date.now() });
+    }
+    return true;
+  };
   let idx = 0;
   let done = 0;
   // 진행률 콜백(스로틀): 너무 잦은 호출을 피하려 일정 개수마다만 보고.
@@ -32,6 +47,10 @@ export async function scanForIdracs({ ips, username, password, concurrency = 32,
       const ip = targets[idx++];
       const r = await probeIdrac(ip, username, password, perHostTimeout);
       if (!r.ok) unreachable++;
+      // v2.495: 비-Dell Redfish 장비는 '인증실패'·'비iDRAC' 카운터 앞에서 분리한다 — Dell 계정으로
+      // 찌른 HPE iLO 는 401 이라 예전에는 '인증실패' 로 집계돼 정체 없이 사라졌다. 분기 순서(authFailed
+      // 우선)는 그대로 두되 그 앞에 한 단계만 추가한다(기존 authHints/authFailedIps 진단 기능 보존).
+      else if (noteUnsupported(ip, r)) { /* 미지원 서버 — found 에 넣지 않는다 */ }
       else if (r.authFailed) {
         authFailed++;
         if (r.authHint) authHints.set(r.authHint, (authHints.get(r.authHint) || 0) + 1);
@@ -63,6 +82,10 @@ export async function scanForIdracs({ ips, username, password, concurrency = 32,
     authFailReason,
     authFailedIps, // 인증 거부된 IP 목록(≤200) — 어느 iDRAC을 점검할지
     authFailedIpsTruncated: authFailed > authFailedIps.length,
+    // v2.495: 비-Dell Redfish 장비(HPE iLO 등). 상한 200 — 넘으면 unsupportedTruncated 로 알린다.
+    unsupported: unsupported.sort((a, b) => a.ip.localeCompare(b.ip, undefined, { numeric: true })),
+    unsupportedCount,
+    unsupportedTruncated: unsupportedCount > unsupported.length,
     truncated: truncated || list.length > max,
     ipErrors: errors,
   };
