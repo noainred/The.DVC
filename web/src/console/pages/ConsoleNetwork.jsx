@@ -33,9 +33,9 @@ export default function ConsoleNetwork({ global: g, sitesAll, scope, polls }) {
   return (
     <>
       <div className="dvc-kpis">
-        <KpiCard label="포트그룹" value={fmtInt(g?.networks)} accent="#e6edf6" meta={nets.data ? `Distributed ${tc.distributed} · Standard ${tc.standard}${tc.other ? ` · 기타 ${tc.other}` : ''}` : '수집 대기'} />
-        <KpiCard label="NSX 매니저" value={r ? `${r.managersUp} / ${r.managers}` : '—'} accent="#a855f7" meta={r ? `T0 ${r.t0} · T1 ${r.t1}${r.managersDegraded ? ` · 저하 ${r.managersDegraded}` : ''}${(polls.nsx.data.collectionErrors || []).length ? ` · 수집 오류 ${polls.nsx.data.collectionErrors.length}` : ''}` : 'NSX 수집 대기'} />
-        <KpiCard label="세그먼트" value={fmtInt(r?.segments)} accent="#22d3ee" meta={r ? `Overlay ${r.overlaySegments} · VLAN ${r.vlanSegments}` : 'NSX 수집 대기'} />
+        <KpiCard label="포트그룹" value={fmtInt(g?.networks)} accent="#0f172a" meta={nets.data ? `Distributed ${tc.distributed} · Standard ${tc.standard}${tc.other ? ` · 기타 ${tc.other}` : ''}` : '수집 대기'} />
+        <KpiCard label="NSX 매니저" value={r ? `${r.managersUp} / ${r.managers}` : '—'} accent="#7c3aed" meta={r ? `T0 ${r.t0} · T1 ${r.t1}${r.managersDegraded ? ` · 저하 ${r.managersDegraded}` : ''}${(polls.nsx.data.collectionErrors || []).length ? ` · 수집 오류 ${polls.nsx.data.collectionErrors.length}` : ''}` : 'NSX 수집 대기'} />
+        <KpiCard label="세그먼트" value={fmtInt(r?.segments)} accent="#0891b2" meta={r ? `Overlay ${r.overlaySegments} · VLAN ${r.vlanSegments}` : 'NSX 수집 대기'} />
         <KpiCard label="트랜스포트 노드" value={r ? fmtInt(r.hostNodes + r.edgeNodes) : '—'} accent={tnDown ? '#ef4444' : '#22c55e'} meta={r ? `호스트 ${r.hostNodes} · 엣지 ${r.edgeNodes} · DOWN ${tnDown}` : 'NSX 수집 대기'} />
         <KpiCard label="IPAM /24 대역" value={ipam.data ? fmtInt(ist.count) : '—'} accent="#3b82f6" meta={ipam.data ? (ist.count ? `평균 사용 ${fmtPct(ist.avgPct)} · 90% 초과 ${ist.over90}` : '대역 없음') : canIpam ? '수집 대기' : "권한 필요('tools')"} />
       </div>
@@ -51,13 +51,13 @@ export default function ConsoleNetwork({ global: g, sitesAll, scope, polls }) {
                     {managers.map((m) => (
                       <tr key={m.id} className={m.level === 2 ? 'crit' : ''}>
                         <td><div className="dvc-mono" style={{ fontSize: 12, fontWeight: 600 }}>{m.name}</div><div className="dvc-cellsub">{m.host}</div></td>
-                        <td style={{ color: REGION_COLORS[m.region] || '#8b9bb4', fontSize: 11.5 }}>{m.region || '—'}</td>
+                        <td style={{ color: REGION_COLORS[m.region] || '#6b7280', fontSize: 11.5 }}>{m.region || '—'}</td>
                         <td className="dvc-dim">{m.vcenterId || '—'}</td>
                         <td className="dvc-dim dvc-mono" style={{ fontSize: 11 }}>{m.version || '—'}</td>
                         <td className="num">{fmtInt(m.nodeCount)}</td>
                         <td className="num">{fmtInt(m.gateways)}</td>
                         <td className="num">{fmtInt(m.segments)}</td>
-                        <td className="num" data-sort={m.nodes.down}><span style={{ color: '#4ade80' }}>{m.nodes.up}</span> / <span style={{ color: m.nodes.down ? '#f87171' : '#5d6b85' }}>{m.nodes.down}</span></td>
+                        <td className="num" data-sort={m.nodes.down}><span style={{ color: '#16a34a' }}>{m.nodes.up}</span> / <span style={{ color: m.nodes.down ? '#dc2626' : '#9ca3af' }}>{m.nodes.down}</span></td>
                         <td className="num">{fmtInt(m.firewall?.rules)}</td>
                         <td><StateBadge state={m.status} />{m.collectError && <span className="dvc-badge lv1" style={{ marginLeft: 6 }}>수집 오류</span>}</td>
                       </tr>
@@ -78,7 +78,7 @@ export default function ConsoleNetwork({ global: g, sitesAll, scope, polls }) {
                     <tbody>
                       {pgRows.map((x) => (
                         <tr key={x.vcenterId}>
-                          <td><div className="dvc-mono" style={{ fontSize: 12, fontWeight: 600 }}>{x.name}</div><div className="dvc-cellsub" style={{ color: REGION_COLORS[x.region] || '#5d6b85' }}>{x.region}</div></td>
+                          <td><div className="dvc-mono" style={{ fontSize: 12, fontWeight: 600 }}>{x.name}</div><div className="dvc-cellsub" style={{ color: REGION_COLORS[x.region] || '#9ca3af' }}>{x.region}</div></td>
                           <td className="num">{x.total}</td><td className="num dvc-dim">{x.distributed}</td><td className="num dvc-dim">{x.standard}</td><td className="num dvc-dim">{x.vlans}</td><td className="num">{fmtInt(x.vms)}</td>
                         </tr>
                       ))}

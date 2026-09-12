@@ -50,7 +50,7 @@ export function LevelBadge({ level, label }) {
   const cls = level == null ? 'lvn' : `lv${level}`;
   return <span className={`dvc-badge ${cls}`}>{label ?? (level == null ? '—' : LEVEL_LABEL[level])}</span>;
 }
-export const levelColor = (level) => (level == null ? '#5d6b85' : LEVEL_COLOR[level]);
+export const levelColor = (level) => (level == null ? '#9ca3af' : LEVEL_COLOR[level]);
 
 export function Empty({ children }) { return <div className="dvc-empty">{children}</div>; }
 

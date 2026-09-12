@@ -14,7 +14,7 @@ export const WARN_PCT = 75;
 export const CRIT_PCT = 90;
 export const LEVEL_COLOR = ['#22c55e', '#f59e0b', '#ef4444'];
 export const LEVEL_LABEL = ['정상', '주의', '위험'];
-export const REGION_COLORS = { '아시아': '#22d3ee', '중국': '#ef4444', '유럽': '#a855f7', '북미': '#3b82f6' };
+export const REGION_COLORS = { '아시아': '#0891b2', '중국': '#ef4444', '유럽': '#7c3aed', '북미': '#3b82f6' };
 export const DOMAIN_LABEL = { COMPUTE: '컴퓨트', STORAGE: '스토리지', NETWORK: '네트워크', OTHER: '기타' };
 
 const num = (v) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
@@ -25,7 +25,7 @@ export function levelOf(pct) {
   if (p == null) return null;
   return p >= CRIT_PCT ? 2 : p >= WARN_PCT ? 1 : 0;
 }
-export const colorOf = (pct) => { const l = levelOf(pct); return l == null ? '#5d6b85' : LEVEL_COLOR[l]; };
+export const colorOf = (pct) => { const l = levelOf(pct); return l == null ? '#9ca3af' : LEVEL_COLOR[l]; };
 
 export const fmtInt = (n) => (num(n) == null ? '—' : Number(n).toLocaleString('en-US'));
 export const fmtPct = (n) => (num(n) == null ? '—' : `${Math.round(Number(n))}%`);
@@ -206,7 +206,7 @@ export function svcmonLevel(summary) {
 export function tempColor(t) {
   const v = num(t);
   if (v == null) return null;
-  return v >= 26 ? '#ef4444' : v >= 24 ? '#f59e0b' : v >= 22 ? '#3a4a66' : '#3b82f6';
+  return v >= 26 ? '#ef4444' : v >= 24 ? '#f59e0b' : v >= 22 ? '#d1d5db' : '#3b82f6';
 }
 
 /**

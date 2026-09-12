@@ -120,7 +120,7 @@ export default function DvcConsole({ user, health, onExit }) {
         </nav>
         <div className="dvc-foot">
           <div className="dvc-foot-row"><span>VERSION</span><b>{health?.version ? `v${health.version}` : '—'}</b></div>
-          <div className="dvc-foot-row"><span>SOURCE</span><b style={{ color: health?.source === 'live' ? '#4ade80' : '#fbbf24' }}>{(health?.source || '—').toUpperCase()}</b></div>
+          <div className="dvc-foot-row"><span>SOURCE</span><b style={{ color: health?.source === 'live' ? '#16a34a' : '#d97706' }}>{(health?.source || '—').toUpperCase()}</b></div>
           <div className="dvc-foot-row"><span>VCENTER</span><b>{health ? `${health.vcentersConnected}/${health.vcenters}` : '—'}</b></div>
           <div className="dvc-foot-row"><span>UPDATED</span><b>{updated}</b></div>
         </div>
@@ -131,7 +131,7 @@ export default function DvcConsole({ user, health, onExit }) {
           <label className="dvc-search">
             <span className="dvc-mono">⌕</span>
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="이 화면의 표 · 목록 검색 (이름 / 사이트 / 메시지)" />
-            {q ? <button className="dvc-kbd" style={{ background: 'transparent', color: '#8b9bb4', cursor: 'pointer' }} onClick={() => setQ('')}>지움</button> : <span className="dvc-kbd">필터</span>}
+            {q ? <button className="dvc-kbd" style={{ background: 'transparent', color: '#6b7280', cursor: 'pointer' }} onClick={() => setQ('')}>지움</button> : <span className="dvc-kbd">필터</span>}
           </label>
           <label className="dvc-chip"><span>리전</span>
             <select value={region} onChange={(e) => { setRegion(e.target.value); setFocusVc(''); }}>
@@ -164,7 +164,7 @@ export default function DvcConsole({ user, health, onExit }) {
             </div>
             <div className="dvc-head-sub">
               {global ? `${fmtInt(global.vcenters)} vCenter · ${fmtInt(global.hosts)} 호스트 · ${fmtInt(global.vms)} VM` : '수집 대기'}
-              {(region || focusVc) && <span> · 표·목록 범위: <b style={{ color: '#7cc8f5' }}>{focusVc ? (sitesAll.find((s) => s.id === focusVc)?.name || focusVc) : region}</b> (KPI·타일은 전사 기준)</span>}
+              {(region || focusVc) && <span> · 표·목록 범위: <b style={{ color: '#2563eb' }}>{focusVc ? (sitesAll.find((s) => s.id === focusVc)?.name || focusVc) : region}</b> (KPI·타일은 전사 기준)</span>}
             </div>
           </div>
           {ov.error && ov.data && <div className="dvc-banner">갱신 실패(직전 데이터 표시 중): {ov.error}</div>}

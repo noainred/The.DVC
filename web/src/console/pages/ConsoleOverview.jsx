@@ -25,7 +25,7 @@ export default function ConsoleOverview({ tiles, global: g, ov, sitesAll, alarms
             <div className="dvc-tile-h"><span className="dvc-tile-name">{t.name}</span><span style={{ flex: 1 }} /><LevelBadge level={t.level} label={t.level == null ? '판정 불가' : undefined} /></div>
             <div className="dvc-tile-value">{t.value}</div>
             <div className="dvc-tile-meta">{t.meta}</div>
-            <div className="dvc-tile-ci"><span style={{ color: '#f87171' }}>C {t.crit}</span><span style={{ color: '#fbbf24' }}>W {t.warn}</span><span style={{ color: '#5d6b85' }}>I {t.info}</span></div>
+            <div className="dvc-tile-ci"><span style={{ color: '#dc2626' }}>C {t.crit}</span><span style={{ color: '#d97706' }}>W {t.warn}</span><span style={{ color: '#9ca3af' }}>I {t.info}</span></div>
           </button>
         ))}
       </div>
@@ -47,12 +47,12 @@ export default function ConsoleOverview({ tiles, global: g, ov, sitesAll, alarms
               {attention.length === 0 && <Empty>범위 안에 활성 알람이 없습니다.</Empty>}
               {attention.map((a) => (
                 <div className="dvc-attn" key={a.id}>
-                  <div className="dvc-attn-stripe" style={{ background: SEV_COLOR[a.severity] || '#5d6b85' }} />
+                  <div className="dvc-attn-stripe" style={{ background: SEV_COLOR[a.severity] || '#9ca3af' }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div className="dvc-attn-title"><span className="dvc-tag">{DOMAIN_LABEL[domainOf(a.entityType)]}</span><span>{a.message}</span></div>
                     <div className="dvc-attn-meta">{a.entity} · {a.vcenterId}{a.acknowledged ? ' · 확인됨' : ''}</div>
                   </div>
-                  <span className="dvc-num" style={{ fontSize: 10.5, color: SEV_COLOR[a.severity] || '#8b9bb4', flex: 'none' }}>{ageText(a.time, now)}</span>
+                  <span className="dvc-num" style={{ fontSize: 10.5, color: SEV_COLOR[a.severity] || '#6b7280', flex: 'none' }}>{ageText(a.time, now)}</span>
                 </div>
               ))}
             </div>
@@ -80,11 +80,11 @@ export default function ConsoleOverview({ tiles, global: g, ov, sitesAll, alarms
                     <div style={{ marginTop: 6, display: 'flex' }}><Bar pct={pct} large marks={[WARN_PCT, CRIT_PCT]} /></div>
                   </div>
                 ))}
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, borderTop: '1px solid rgba(36,48,73,.6)', paddingTop: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, borderTop: '1px solid rgba(229,231,235,.6)', paddingTop: 12 }}>
                   <span style={{ fontSize: 12.5, fontWeight: 600 }}>전력</span>
                   <span className="dvc-num dvc-faint" style={{ fontSize: 10.5 }}>측정 서버 {fmtInt(g.powerReporting)}대 합계{g.powerRegistered ? ` · iDRAC 등록 ${fmtInt(g.powerRegistered)}대` : ''}</span>
                   <span style={{ flex: 1 }} />
-                  <span className="dvc-num" style={{ fontSize: 12.5, fontWeight: 700, color: '#fbbf24' }}>{g.powerReporting ? `${fmtInt(g.powerKw)} kW` : '—'}</span>
+                  <span className="dvc-num" style={{ fontSize: 12.5, fontWeight: 700, color: '#d97706' }}>{g.powerReporting ? `${fmtInt(g.powerKw)} kW` : '—'}</span>
                 </div>
                 <div className="dvc-note">계약 전력·랙 용량은 수집 항목이 아니라 전력은 비율(%) 없이 측정 합계만 표시합니다. 사용률은 vCenter(ESXi) 실측입니다.</div>
               </div>
@@ -100,13 +100,13 @@ export default function ConsoleOverview({ tiles, global: g, ov, sitesAll, alarms
                   {sites.map((s) => (
                     <tr key={s.id} className={`click${scope.focusVc === s.id ? ' focus' : ''}`} onClick={() => go('compute', { vcenterId: s.id })}>
                       <td><div className="dvc-cellname">{s.name} <span className="dvc-dim" style={{ fontWeight: 400 }}>{s.city}</span></div></td>
-                      <td style={{ color: REGION_COLORS[s.region] || '#8b9bb4', fontSize: 11.5 }}>{s.region}</td>
+                      <td style={{ color: REGION_COLORS[s.region] || '#6b7280', fontSize: 11.5 }}>{s.region}</td>
                       <td className="num" data-sort={s.hosts ?? ''}>{fmtInt(s.hosts)}</td>
                       <td className="num" data-sort={s.vms ?? ''}>{fmtInt(s.vms)}</td>
                       <td data-sort={s.cpu ?? ''}><PctCell pct={s.cpu} /></td>
                       <td data-sort={s.sto ?? ''}><PctCell pct={s.sto} /></td>
-                      <td className="num" style={{ color: '#fbbf24' }} data-sort={s.powerKw ?? ''}>{s.powerKw != null ? `${s.powerKw} kW` : '—'}</td>
-                      <td className="num" data-sort={s.alarmsCritical + s.alarmsWarning} style={{ color: s.alarmsCritical ? '#f87171' : s.alarmsWarning ? '#fbbf24' : '#8b9bb4' }}>{s.alarmsCritical + s.alarmsWarning}</td>
+                      <td className="num" style={{ color: '#d97706' }} data-sort={s.powerKw ?? ''}>{s.powerKw != null ? `${s.powerKw} kW` : '—'}</td>
+                      <td className="num" data-sort={s.alarmsCritical + s.alarmsWarning} style={{ color: s.alarmsCritical ? '#dc2626' : s.alarmsWarning ? '#d97706' : '#6b7280' }}>{s.alarmsCritical + s.alarmsWarning}</td>
                       <td><StateBadge state={s.status} /></td>
                     </tr>
                   ))}

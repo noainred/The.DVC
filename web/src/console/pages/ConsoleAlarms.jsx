@@ -32,8 +32,8 @@ export default function ConsoleAlarms({ alarmsAll, scope, polls }) {
           </button>
         ))}
         <div className="dvc-sev" style={{ cursor: 'default' }}>
-          <div className="dvc-sev-stripe" style={{ background: '#8b9bb4' }} />
-          <div className="dvc-sev-count" style={{ color: '#8b9bb4' }}>{mutes.data ? fmtInt(mutes.data.mutes.length) : '—'}</div>
+          <div className="dvc-sev-stripe" style={{ background: '#6b7280' }} />
+          <div className="dvc-sev-count" style={{ color: '#6b7280' }}>{mutes.data ? fmtInt(mutes.data.mutes.length) : '—'}</div>
           <div><div className="dvc-sev-label">무시 규칙</div><div className="dvc-sev-meta">알람 뮤트 규칙 · 총계에 미포함</div></div>
         </div>
       </div>
@@ -61,8 +61,8 @@ export default function ConsoleAlarms({ alarmsAll, scope, polls }) {
                         <td className="ellipsis" style={{ fontSize: 12.5, fontWeight: 600 }} title={a.message}>{a.message}</td>
                         <td className="dvc-mono dvc-dim ellipsis" style={{ fontSize: 10.5, maxWidth: 180 }} title={a.entity}>{a.entity}</td>
                         <td className="dvc-dim" style={{ fontSize: 11.5 }}>{a.vcenterId}</td>
-                        <td className="num" data-sort={Date.parse(a.time) || ''} style={{ color: a.severity === 'critical' ? '#f87171' : '#8b9bb4' }}>{ageText(a.time, now)}</td>
-                        <td className="num" style={{ fontSize: 10.5, color: a.acknowledged ? '#5d6b85' : '#fbbf24' }}>{a.acknowledged ? '✓ 확인' : '미확인'}</td>
+                        <td className="num" data-sort={Date.parse(a.time) || ''} style={{ color: a.severity === 'critical' ? '#dc2626' : '#6b7280' }}>{ageText(a.time, now)}</td>
+                        <td className="num" style={{ fontSize: 10.5, color: a.acknowledged ? '#9ca3af' : '#d97706' }}>{a.acknowledged ? '✓ 확인' : '미확인'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -75,11 +75,11 @@ export default function ConsoleAlarms({ alarmsAll, scope, polls }) {
           {groups.length === 0 ? <Empty>묶을 알람이 없습니다.</Empty> : (
             <div className="dvc-rows">
               {groups.map((g) => (
-                <div key={g.key} style={{ padding: '11px 0', borderBottom: '1px solid rgba(36,48,73,.5)' }}>
+                <div key={g.key} style={{ padding: '11px 0', borderBottom: '1px solid rgba(229,231,235,.5)' }}>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
                     <span style={{ width: 8, height: 8, borderRadius: 2, background: g.severity === 'critical' ? '#ef4444' : g.severity === 'warning' ? '#f59e0b' : '#3b82f6', flex: 'none' }} />
                     <span style={{ fontSize: 12.5, fontWeight: 600, flex: 1 }}>{g.sample}</span>
-                    <span className="dvc-num" style={{ fontSize: 10.5, color: g.severity === 'critical' ? '#f87171' : g.severity === 'warning' ? '#fbbf24' : '#60a5fa' }}>{g.count}건</span>
+                    <span className="dvc-num" style={{ fontSize: 10.5, color: g.severity === 'critical' ? '#dc2626' : g.severity === 'warning' ? '#d97706' : '#2563eb' }}>{g.count}건</span>
                   </div>
                   <div className="dvc-mono dvc-faint" style={{ fontSize: 10.5, marginTop: 4 }}>{g.vcenterId} · {DOMAIN_LABEL[g.domain]} · {g.entities.join(', ')}{g.count > g.entities.length ? ` 외 ${g.count - g.entities.length}` : ''}</div>
                 </div>

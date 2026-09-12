@@ -19,11 +19,11 @@ export default function ConsoleCompute({ global: g, ov, sitesAll, scope, polls }
   return (
     <>
       <div className="dvc-kpis">
-        <KpiCard label="vCenter" value={g ? `${g.vcentersConnected}/${g.vcenters}` : '—'} accent="#22d3ee" meta={g ? `연결 불가 ${unreach}${g.vcentersMaintenance ? ` · 점검중 ${g.vcentersMaintenance}` : ''}` : '수집 대기'} />
-        <KpiCard label="물리 서버 (ESXi)" value={fmtInt(g?.hosts)} accent="#e6edf6" meta={g ? `정상 ${fmtInt(g.hostsConnected)} · 점검 ${fmtInt(g.hostsMaintenance)} · 끊김 ${fmtInt(g.hostsDisconnected)}${ov?.physical?.servers ? ` · iDRAC 등록 ${fmtInt(ov.physical.servers)}` : ''}` : '수집 대기'} />
+        <KpiCard label="vCenter" value={g ? `${g.vcentersConnected}/${g.vcenters}` : '—'} accent="#0891b2" meta={g ? `연결 불가 ${unreach}${g.vcentersMaintenance ? ` · 점검중 ${g.vcentersMaintenance}` : ''}` : '수집 대기'} />
+        <KpiCard label="물리 서버 (ESXi)" value={fmtInt(g?.hosts)} accent="#0f172a" meta={g ? `정상 ${fmtInt(g.hostsConnected)} · 점검 ${fmtInt(g.hostsMaintenance)} · 끊김 ${fmtInt(g.hostsDisconnected)}${ov?.physical?.servers ? ` · iDRAC 등록 ${fmtInt(ov.physical.servers)}` : ''}` : '수집 대기'} />
         <KpiCard label="가상머신" value={fmtInt(g?.vms)} accent="#22c55e" meta={g ? `구동 ${fmtInt(g.vmsPoweredOn)} · 정지 ${fmtInt(g.vmsPoweredOff)}` : '수집 대기'} />
         <KpiCard label="클러스터" value={cap.data ? fmtInt(cap.data.totals?.clusters) : '—'} accent="#f59e0b" meta={cap.data ? `vCPU/코어 ${cap.data.totals?.vcpuPerCore} · RAM 여유 ${fmtInt(cap.data.totals?.ramHeadroomGB)} GB` : canCap ? '용량 집계 대기' : "권한 필요('tools')"} />
-        <KpiCard label="GPU" value={ov ? `${fmtInt(ov.gpuCards)}장` : '—'} accent="#a855f7" meta={ov ? `GPU VM ${fmtInt(ov.gpuVms)} · 활용 ${ov.gpuUtilHosts ? `${ov.gpuUtilPct}% (${ov.gpuUtilHosts} 호스트 보고)` : '보고 없음'}` : '수집 대기'} />
+        <KpiCard label="GPU" value={ov ? `${fmtInt(ov.gpuCards)}장` : '—'} accent="#7c3aed" meta={ov ? `GPU VM ${fmtInt(ov.gpuVms)} · 활용 ${ov.gpuUtilHosts ? `${ov.gpuUtilPct}% (${ov.gpuUtilHosts} 호스트 보고)` : '보고 없음'}` : '수집 대기'} />
       </div>
 
       <div className="dvc-grid2 wide">

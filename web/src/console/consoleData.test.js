@@ -12,7 +12,7 @@ describe('임계 판정', () => {
     expect(levelOf(0)).toBe(0); expect(levelOf(WARN_PCT - 1)).toBe(0); expect(levelOf(WARN_PCT)).toBe(1);
     expect(levelOf(CRIT_PCT - 1)).toBe(1); expect(levelOf(CRIT_PCT)).toBe(2);
   });
-  it('값 없음은 null 이고 회색', () => { expect(levelOf(null)).toBeNull(); expect(levelOf('')).toBeNull(); expect(colorOf(undefined)).toBe('#5d6b85'); });
+  it('값 없음은 null 이고 회색', () => { expect(levelOf(null)).toBeNull(); expect(levelOf('')).toBeNull(); expect(colorOf(undefined)).toBe('#9ca3af'); });
   it('fmt: null 은 —', () => { expect(fmtInt(null)).toBe('—'); expect(fmtInt(1234)).toBe('1,234'); expect(fmtPct(59.6)).toBe('60%'); });
 });
 
@@ -103,7 +103,7 @@ describe('스토리지·네트워크·IPAM', () => {
 });
 
 describe('설비', () => {
-  it('온도 색 눈금', () => { expect(tempColor(21)).toBe('#3b82f6'); expect(tempColor(23)).toBe('#3a4a66'); expect(tempColor(25)).toBe('#f59e0b'); expect(tempColor(26)).toBe('#ef4444'); expect(tempColor(null)).toBeNull(); });
+  it('온도 색 눈금', () => { expect(tempColor(21)).toBe('#3b82f6'); expect(tempColor(23)).toBe('#d1d5db'); expect(tempColor(25)).toBe('#f59e0b'); expect(tempColor(26)).toBe('#ef4444'); expect(tempColor(null)).toBeNull(); });
   it('vCenter 별 호스트 온도·iDRAC 연동 집계', () => {
     const hosts = [
       { vcenterId: 'vc-a', name: 'h1', tempC: 24.5, idracBacked: true, powerWatts: 200, connectionState: 'CONNECTED' },
