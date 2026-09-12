@@ -388,9 +388,22 @@ function renderToolCard(t, sectionId, { countOf, externalUrls, openTool }) {
 function ToolPanel({ tool, onBack, isAdmin }) {
   const meta = TOOLS.find((t) => t.k === tool);
   const [scope, setScope] = useState('');
+  // v2.491: vCenter 아래 하위 범위 — 클러스터/폴더. vCenter 를 고른 뒤에만 쓴다(클러스터 이름은
+  // vCenter 간 중복될 수 있어, 전체 범위에서 이름으로 거르면 다른 사이트 VM 까지 섞인다).
+  const [cluster, setCluster] = useState('');
+  const [folder, setFolder] = useState('');
   const { data: vcList } = usePolling('/vcenters', {}, 60_000);
   const scoped = ['vm-export', 'dupip', 'vmtools', 'snapshots', 'hba', 'gpu', 'licenses', 'license-expiry', 'esxi', 'hardware', 'powermap', 'guestos', 'real-os', 'thinvms', 'guest-disk', 'capacity', 'waste', 'esxitemp', 'forecast', 'dsusage',
     'daily-health', 'snapshot-age', 'zombie-vms', 'rightsizing', 'capacity-forecast', 'compliance-report', 'change-history', 'unprotected-vms'].includes(tool);
+
+  // v2.491: 클러스터·폴더 콤보를 지원하는(= 서버가 cluster/folder 쿼리를 실제로 거르는) 도구만.
+  // 여기에 도구를 추가하려면 그 라우트가 groupFilter.js 의 필터를 적용해야 한다 — 화면에만 콤보를
+  // 띄우고 서버가 무시하면 '아무 일도 안 하는 필터' 가 된다.
+  const groupScoped = ['waste'].includes(tool);
+  // 목록은 선택한 vCenter 기준(전체에서는 조회하지 않는다). 5분 주기 — 인벤토리 구조는 자주 안 바뀐다.
+  const { data: groups } = usePolling(groupScoped && scope ? '/tools/groups' : '', scope ? { vcenterId: scope } : {}, 300_000);
+  const clusterList = groups?.clusters || [];
+  const folderList = groups?.folders || [];
 
   // v2.447(감사 T13): 도구가 lazy 라 로딩 중 폴백이 필요하다. 셸(뒤로가기·스코프 선택)은 이미
   // 그려진 상태이므로 폴백은 패널 영역만 차지한다(화면 전체가 접히지 않게).
@@ -403,9 +416,31 @@ function ToolPanel({ tool, onBack, isAdmin }) {
         {scoped && (
           <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }}>
             <span className="muted">범위</span>
-            <select className="select" value={scope} onChange={(e) => setScope(e.target.value)}>
+            <select className="select" value={scope} onChange={(e) => { setScope(e.target.value); setCluster(''); setFolder(''); }}>
               <option value="">전체 vCenter</option>
               {(vcList || []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+            </select>
+          </label>
+        )}
+        {scoped && groupScoped && (
+          <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }}>
+            <span className="muted">클러스터</span>
+            <select className="select" style={{ maxWidth: 230 }} value={cluster} disabled={!scope}
+              title={!scope ? 'vCenter 를 먼저 선택하세요(클러스터 이름은 vCenter 간 중복될 수 있습니다).' : ''}
+              onChange={(e) => setCluster(e.target.value)}>
+              <option value="">{scope ? '전체 클러스터' : 'vCenter 선택 후'}</option>
+              {clusterList.map((c) => <option key={c.name} value={c.name}>{c.name} ({c.vms} VM · 호스트 {c.hosts})</option>)}
+            </select>
+          </label>
+        )}
+        {scoped && groupScoped && (
+          <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }}>
+            <span className="muted">폴더</span>
+            <select className="select" style={{ maxWidth: 230 }} value={folder} disabled={!scope || !folderList.length}
+              title={!scope ? 'vCenter 를 먼저 선택하세요.' : !folderList.length ? '이 vCenter 는 폴더 정보가 수집되지 않았습니다(SOAP 수집 경로에서만 채워짐).' : ''}
+              onChange={(e) => setFolder(e.target.value)}>
+              <option value="">{!scope ? 'vCenter 선택 후' : !folderList.length ? '폴더 정보 없음' : '전체 폴더'}</option>
+              {folderList.map((f) => <option key={f.name} value={f.name}>{f.name} ({f.vms} VM)</option>)}
             </select>
           </label>
         )}
@@ -431,7 +466,7 @@ function ToolPanel({ tool, onBack, isAdmin }) {
       {tool === 'storage-track' && <StorageTrackTool />}
       {tool === 'vmfinder' && <VmFinder />}
       {tool === 'capacity' && <Capacity scope={scope} />}
-      {tool === 'waste' && <Waste scope={scope} />}
+      {tool === 'waste' && <Waste scope={scope} cluster={scope ? cluster : ''} folder={scope ? folder : ''} />}
       {tool === 'esxitemp' && <EsxiTemp scope={scope} />}
       {tool === 'forecast' && <Forecast scope={scope} />}
       {tool === 'dsusage' && <DatastoreUsage scope={scope} />}

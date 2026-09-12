@@ -298,8 +298,30 @@ function WasteTrend({ scope }) {
   );
 }
 
-export function Waste({ scope }) {
-  const { loading, data, error } = useTool('/tools/waste', scope ? { vcenterId: scope } : {});
+/**
+ * 낭비 리소스 표의 검색 결과 개수 표시(v2.491).
+ *
+ * 공용 `ResultCount` 는 shown<total 을 '상위 N개 표시'(서버측 상위 절단)로 문구화한다 — 이름 검색
+ * 결과에 그 문구를 쓰면 절단으로 오해되므로 '이름 일치 M개' 로 정확히 적는다(추정·과장 금지 규칙).
+ */
+function MatchCount({ total = 0, shown = 0, term = '', label = 'VM' }) {
+  return (
+    <div className="muted result-count" style={{ marginBottom: 10 }}>
+      총 <b style={{ color: 'var(--text)' }}>{total.toLocaleString()}</b>개 {label}
+      {term ? <>
+        {' · 이름 일치 '}<b style={{ color: 'var(--text)' }}>{shown.toLocaleString()}</b>개
+        <span className="badge blue" style={{ marginLeft: 8 }}>검색: {term}</span>
+      </> : null}
+    </div>
+  );
+}
+
+export function Waste({ scope, cluster = '', folder = '' }) {
+  // v2.491: 클러스터·폴더는 **서버에서** 거른다 — KPI 카드·탭 개수·과할당 집계까지 선택 범위 기준이
+  // 되어야 하기 때문이다(화면에서 표만 걸러내면 카드 수치와 표가 어긋난다). 상위 SpecialTools 헤더가
+  // vCenter 를 고른 뒤에만 값을 넘긴다.
+  const params = { ...(scope ? { vcenterId: scope } : {}), ...(cluster ? { cluster } : {}), ...(folder ? { folder } : {}) };
+  const { loading, data, error } = useTool('/tools/waste', params);
   // 하위 탭을 URL 에 실어 새로고침·북마크·뒤로가기에서 유지한다(v2.438, hooks/useHashTab.js).
   const [tab, setTab] = useHashTab({ base: ['tools', 'waste'], valid: ['off', 'snap', 'tools', 'cpu', 'mem', 'trend'], fallback: 'off' });
   // ⚠ 훅은 **조기 return 위**에서 전부 선언한다(CLAUDE.md 프론트 회귀 방지). useSparklines 는
@@ -311,22 +333,39 @@ export function Waste({ scope }) {
     tab === 'mem' ? 'mem' : 'cpu', !!oa && (tab === 'cpu' || tab === 'mem'));
   // v2.445: '📊 근거' 로 여는 자원 축소 근거 리포트 대상 VM. 훅이므로 조기 return 위에 둔다.
   const [reportVm, setReportVm] = useState(null);
+  // v2.491: VM 이름 검색 — 아래 하위 탭(전원 꺼짐·스냅샷·Tools 미실행·CPU/메모리 과할당)의 표를
+  // 이름으로 거른다. 훅이므로 조기 return 위에 선언한다(CLAUDE.md 프론트 회귀 방지).
+  const [q, setQ] = useState('');
   // v2.483: 전원 꺼진 VM 의 '꺼진 지 N일' — 목록(/tools/waste)과 별도로 조회해 뒤이어 채운다(출처: 이벤트/추적/first_seen).
   const [offSince, setOffSince] = useState(null); // { byId: {vmId: {offSince, offDays, source, exact}}, sources, error }
   useEffect(() => {
     if (!data) return;
     let alive = true;
     setOffSince(null);
-    fetchJson('/tools/waste/off-since', scope ? { vcenterId: scope } : {})
+    fetchJson('/tools/waste/off-since', params)
       .then((r) => { if (!alive) return; const byId = {}; for (const x of r.rows || []) byId[x.id] = x; setOffSince({ byId, sources: r.sources || {}, error: '' }); })
       .catch((e) => { if (alive) setOffSince({ byId: {}, sources: {}, error: e?.message || String(e) }); });
     return () => { alive = false; };
-  }, [data, scope]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, scope, cluster, folder]);
   if (loading) return <Loading />;
   if (error) return <ErrorBox message={error} />;
   const tb2 = (g) => (g >= 1024 ? `${(g / 1024).toFixed(1)} TB` : `${g} GB`);
+  // 이름만 대조한다(대소문자 무시·부분일치). KPI 카드 수치는 전체 기준을 유지하고 표만 거른다.
+  const term = q.trim();
+  const lower = term.toLowerCase();
+  const byName = (rows) => (lower ? (rows || []).filter((r) => (r.name || '').toLowerCase().includes(lower)) : (rows || []));
+  const emptyText = term ? `이름에 '${term}' 이(가) 포함된 VM 이 없습니다.` : '데이터가 없습니다.';
   return (
     <>
+      {(cluster || folder) && (
+        <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
+          아래 모든 수치는 선택한 범위 기준입니다 —
+          {cluster ? <> 클러스터 <b style={{ color: 'var(--text)' }}>{cluster}</b></> : null}
+          {cluster && folder ? ' ·' : null}
+          {folder ? <> 폴더 <b style={{ color: 'var(--text)' }}>{folder}</b></> : null}
+        </div>
+      )}
       <div className="kpis" style={{ marginBottom: 14 }}>
         <Card label="전원 꺼진 VM" value={data.poweredOff.count} meta={`스토리지 ${tb2(data.poweredOff.storageGB)} 점유`} accent={data.poweredOff.count ? 'var(--amber)' : undefined} />
         <Card label="스냅샷 보유 VM" value={data.snapshots.count} meta={`${tb2(data.snapshots.sizeGB)} 사용`} accent={data.snapshots.count ? 'var(--amber)' : undefined} />
@@ -339,18 +378,22 @@ export function Waste({ scope }) {
           meta={`할당 ${tb2(oa.mem.allocGB)} · 사용 ${tb2(oa.mem.usedGB)} → 절감 가능 ${oa.mem.savingPct}%`}
           accent={oa.mem.savingPct >= 50 ? 'var(--amber)' : undefined} />}
       </div>
-      <div className="flex gap" style={{ marginBottom: 8 }}>
+      <div className="flex gap wrap" style={{ marginBottom: 8, alignItems: 'center' }}>
         {[['off', `전원 꺼짐 (${data.poweredOff.count})`], ['snap', `스냅샷 (${data.snapshots.count})`], ['tools', `Tools 미실행 (${data.noTools.count})`],
           ...(oa ? [['cpu', `CPU 과할당 (${oa.cpu.candidates})`], ['mem', `메모리 과할당 (${oa.mem.candidates})`], ['trend', '📈 사용 추이']] : [])].map(([k, l]) => (
           <button key={k} className={tab === k ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setTab(k)}>{l}</button>
         ))}
+        {tab !== 'trend' && <SearchBox className="input" style={{ marginLeft: 'auto', maxWidth: 260, minWidth: 170 }}
+          placeholder="🔍 VM 이름 검색" value={q} onChange={setQ} />}
       </div>
       {tab === 'off' && (() => {
         const SRC = { event: 'vCenter 전원 이벤트(정확)', observed: `전원 꺼짐 점검(${offSince?.sources?.observedIntervalHours || 6}시간 주기)에서 관측된 현재 꺼짐 구간 시작 — 하한`, track: 'VM 추적 12시간 슬롯 전환(그 시각 이후 확실히 꺼짐 — 하한)', first_seen: 'VM 추적 시작 이후 계속 꺼짐(하한)' };
         const SRC_SHORT = { event: '이벤트', observed: '점검', track: '추적', first_seen: '관측 시작' };
-        const rows = data.poweredOff.vms.map((v) => ({ ...v, ...(offSince?.byId?.[v.id] || {}) }));
+        const all = data.poweredOff.vms.map((v) => ({ ...v, ...(offSince?.byId?.[v.id] || {}) }));
+        const rows = byName(all);
         return (<>
-          <DataTable rows={rows} initialSort={{ key: 'storageGB', dir: 'desc' }} columns={[
+          <MatchCount total={all.length} shown={rows.length} term={term} />
+          <DataTable rows={rows} emptyText={emptyText} initialSort={{ key: 'storageGB', dir: 'desc' }} columns={[
             { key: 'name', label: 'VM', render: (v) => <VmLink name={v.name} vcenterId={v.vcenterId} label={v.name} /> }, { key: 'vcenterId', label: 'vCenter', render: (v) => <span className="muted">{v.vcenterId}</span> },
             { key: 'guestOS', label: 'OS' }, { key: 'storageGB', label: '스토리지', align: 'right', render: (v) => tb2(v.storageGB) },
             { key: 'offDays', label: '꺼진 지', align: 'right', render: (v) => (
@@ -372,17 +415,24 @@ export function Waste({ scope }) {
           </div>
         </>);
       })()}
-      {tab === 'snap' && <DataTable rows={data.snapshots.vms} initialSort={{ key: 'snapshotSizeGB', dir: 'desc' }} columns={[
+      {tab === 'snap' && <>
+        <MatchCount total={(data.snapshots.vms || []).length} shown={byName(data.snapshots.vms).length} term={term} />
+        <DataTable rows={byName(data.snapshots.vms)} emptyText={emptyText} initialSort={{ key: 'snapshotSizeGB', dir: 'desc' }} columns={[
         { key: 'name', label: 'VM', render: (v) => <VmLink name={v.name} vcenterId={v.vcenterId} label={v.name} /> }, { key: 'vcenterId', label: 'vCenter', render: (v) => <span className="muted">{v.vcenterId}</span> },
-        { key: 'snapshotCount', label: '개수', align: 'right' }, { key: 'snapshotSizeGB', label: '크기', align: 'right', render: (v) => tb2(v.snapshotSizeGB) }]} />}
-      {tab === 'tools' && <DataTable rows={data.noTools.vms} columns={[
+        { key: 'snapshotCount', label: '개수', align: 'right' }, { key: 'snapshotSizeGB', label: '크기', align: 'right', render: (v) => tb2(v.snapshotSizeGB) }]} />
+      </>}
+      {tab === 'tools' && <>
+        <MatchCount total={(data.noTools.vms || []).length} shown={byName(data.noTools.vms).length} term={term} />
+        <DataTable rows={byName(data.noTools.vms)} emptyText={emptyText} columns={[
         { key: 'name', label: 'VM', render: (v) => <VmLink name={v.name} vcenterId={v.vcenterId} label={v.name} /> }, { key: 'vcenterId', label: 'vCenter', render: (v) => <span className="muted">{v.vcenterId}</span> },
-        { key: 'toolsStatus', label: 'Tools 상태', render: (v) => <span className="badge amber">{v.toolsStatus}</span> }]} />}
+        { key: 'toolsStatus', label: 'Tools 상태', render: (v) => <span className="badge amber">{v.toolsStatus}</span> }]} />
+      </>}
       {tab === 'cpu' && oa && <>
         <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
           할당 clock = vCPU × 호스트 코어당 MHz · 사용 clock = 할당 × 현재 사용률. 사용률 <b>{oa.thresholds.cpuIdlePct}% 이하</b>이고 vCPU 2개 이상인 VM만 후보로 봅니다(1 vCPU 는 줄일 수 없음).
         </div>
-        <DataTable rows={oa.cpuTop} initialSort={{ key: 'cpuIdleMhz', dir: 'desc' }} columns={[
+        <MatchCount total={(oa.cpuTop || []).length} shown={byName(oa.cpuTop).length} term={term} />
+        <DataTable rows={byName(oa.cpuTop)} emptyText={emptyText} initialSort={{ key: 'cpuIdleMhz', dir: 'desc' }} columns={[
           { key: 'name', label: 'VM', render: (v) => <VmLink name={v.name} vcenterId={v.vcenterId} label={v.name} /> },
           { key: 'vcenterId', label: 'vCenter', render: (v) => <span className="muted">{v.vcenterId}</span> },
           { key: 'vcpu', label: 'vCPU', align: 'right' },
@@ -402,7 +452,8 @@ export function Waste({ scope }) {
         <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
           사용 메모리는 게스트가 실제로 쓰는 양(guest memory usage)입니다. 사용률 <b>{oa.thresholds.memIdlePct}% 이하</b>인 VM을 후보로 봅니다.
         </div>
-        <DataTable rows={oa.memTop} initialSort={{ key: 'memIdleGB', dir: 'desc' }} columns={[
+        <MatchCount total={(oa.memTop || []).length} shown={byName(oa.memTop).length} term={term} />
+        <DataTable rows={byName(oa.memTop)} emptyText={emptyText} initialSort={{ key: 'memIdleGB', dir: 'desc' }} columns={[
           { key: 'name', label: 'VM', render: (v) => <VmLink name={v.name} vcenterId={v.vcenterId} label={v.name} /> },
           { key: 'vcenterId', label: 'vCenter', render: (v) => <span className="muted">{v.vcenterId}</span> },
           { key: 'memAllocGB', label: '할당', align: 'right', render: (v) => tb2(v.memAllocGB) },
