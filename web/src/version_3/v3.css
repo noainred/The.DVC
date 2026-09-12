@@ -1,0 +1,193 @@
+/* version_3 — 신규 포탈(V3, v2.490). Claude Design 'DVC Console.dc.html' 아트보드의 인라인 값을 그대로 클래스로 옮겼다.
+   배경 #f4f6f9 · 본문 #1a2130 · 패널 #ffffff · 보더 #dfe4ec · 표 머리 #f0f3f7 · 행 구분 #e6eaf0 · 막대 트랙 #e8ecf2 ·
+   보조 텍스트 #526075 / #68738a · 상태색 빨강 #dc2626 · 주황 #b45309(텍스트) #d97706(막대) · 초록 #15803d(텍스트) #16a34a(막대) ·
+   강조 #2563eb / #0e7490 · 활성 메뉴 rgba(59,130,246,.85). 모든 클래스에 v3- 접두 — 기존 개발 포탈(styles.css)·콘솔(console.css)과 섞이지 않는다.
+   글꼴: 아트보드는 Pretendard·JetBrains Mono 를 CDN 에서 받지만 오프라인 포탈은 외부 CDN 을 쓸 수 없어 로컬 설치 글꼴 → 시스템 글꼴 순으로 폴백한다. */
+.v3 { display: flex; min-height: 100vh; background: #f4f6f9; color: #1a2130; font-family: Pretendard, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif; font-size: 13px; line-height: 1.4; }
+.v3 * { box-sizing: border-box; }
+.v3 button { font-family: inherit; }
+.v3 a { color: #0e7490; text-decoration: none; }
+.v3 a:hover { color: #0f9d8a; text-decoration: underline; }
+.v3-mono { font-family: "JetBrains Mono", var(--mono, ui-monospace), Menlo, Consolas, monospace; }
+.v3-num { font-family: "JetBrains Mono", var(--mono, ui-monospace), Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; }
+.v3-dim { color: #526075; }
+.v3-faint { color: #68738a; }
+@keyframes v3Pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+
+/* ── 좌측 내비(236px) ── */
+.v3-side { width: 236px; flex: none; background: #ffffff; border-right: 1px solid #dfe4ec; display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; }
+.v3-brand { display: flex; align-items: center; gap: 10px; padding: 16px 16px 14px; border-bottom: 1px solid #dfe4ec; }
+.v3-logo { width: 32px; height: 32px; border-radius: 9px; background: linear-gradient(135deg, #2563eb, #0e7490); display: grid; place-items: center; font-weight: 800; color: #ffffff; flex: none; }
+.v3-brand-title { font-size: 13.5px; font-weight: 700; line-height: 1.2; }
+.v3-brand-sub { font-family: "JetBrains Mono", var(--mono, ui-monospace), monospace; font-size: 10px; color: #526075; margin-top: 2px; }
+.v3-nav { flex: 1; overflow: auto; padding: 10px 10px 12px; }
+.v3-nav-group { margin-bottom: 10px; }
+.v3-nav-label { display: flex; align-items: center; gap: 8px; padding: 6px 8px 4px; font-family: "JetBrains Mono", var(--mono, ui-monospace), monospace; font-size: 9.5px; letter-spacing: .14em; color: #68738a; }
+.v3-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex: none; margin-left: auto; }
+.v3-nav-item { display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; padding: 7px 10px; border-radius: 7px; border: none; font-size: 12.5px; font-weight: 600; cursor: pointer; background: transparent; color: #3a4556; }
+.v3-nav-item:hover { background: #f0f3f7; }
+.v3-nav-item.active { background: rgba(59,130,246,.85); color: #ffffff; }
+.v3-nav-item .v3-nav-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v3-nav-item .v3-nav-count { font-family: "JetBrains Mono", var(--mono, ui-monospace), monospace; font-size: 10px; color: #68738a; }
+.v3-nav-item.active .v3-nav-count { color: rgba(255,255,255,.75); }
+.v3-nav-item.ext { font-weight: 500; color: #526075; }
+.v3-foot { padding: 12px 16px 14px; border-top: 1px solid #dfe4ec; display: flex; flex-direction: column; gap: 6px; }
+.v3-foot-row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.v3-foot-row span { font-family: "JetBrains Mono", var(--mono, ui-monospace), monospace; font-size: 9.5px; letter-spacing: .06em; color: #68738a; }
+.v3-foot-row b { font-family: "JetBrains Mono", var(--mono, ui-monospace), monospace; font-size: 11.5px; color: #1a2130; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ── 본문 · 상단바 ── */
+.v3-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.v3-top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 12px 24px; border-bottom: 1px solid #dfe4ec; background: rgba(255,255,255,.92); position: sticky; top: 0; z-index: 5; min-width: 0; backdrop-filter: blur(8px); }
+.v3-search { display: flex; align-items: center; gap: 8px; padding: 0 12px; height: 34px; background: #ffffff; border: 1px solid #dfe4ec; border-radius: 8px; flex: 1; min-width: 160px; max-width: 380px; color: #68738a; font-size: 12.5px; }
+.v3-search input { flex: 1; min-width: 0; background: transparent; border: none; outline: none; color: #1a2130; font-size: 12.5px; font-family: inherit; }
+.v3-search input::placeholder { color: #68738a; }
+.v3-kbd { font-family: "JetBrains Mono", var(--mono, ui-monospace), monospace; font-size: 10px; padding: 1px 6px; border: 1px solid #dfe4ec; border-radius: 4px; background: transparent; color: #68738a; }
+.v3-chip { display: flex; align-items: center; gap: 7px; height: 34px; padding: 0 11px; background: #ffffff; border: 1px solid #dfe4ec; border-radius: 8px; font-size: 12px; white-space: nowrap; color: #68738a; }
+.v3-chip select { background: transparent; border: none; color: #1a2130; font-weight: 700; font-size: 12px; font-family: inherit; outline: none; cursor: pointer; }
+.v3-live { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 20px; background: #ffffff; border: 1px solid #dfe4ec; font-family: "JetBrains Mono", var(--mono, ui-monospace), monospace; font-size: 11px; color: #526075; white-space: nowrap; }
+.v3-live i { width: 7px; height: 7px; border-radius: 50%; background: #16a34a; box-shadow: 0 0 8px #16a34a; animation: v3Pulse 2.4s ease-in-out infinite; }
+.v3-live.down i { background: #dc2626; box-shadow: 0 0 8px #dc2626; }
+@media (prefers-reduced-motion: reduce) { .v3-live i { animation: none; } }
+.v3-user { display: flex; align-items: center; gap: 9px; }
+.v3-avatar { width: 30px; height: 30px; border-radius: 50%; background: #dbe7fb; color: #1a2130; display: grid; place-items: center; font-weight: 700; font-size: 12px; }
+.v3-user-name { font-size: 12.5px; font-weight: 600; line-height: 1.2; }
+.v3-user-role { font-size: 10.5px; color: #526075; }
+.v3-exit { height: 30px; padding: 0 11px; border-radius: 8px; border: 1px solid #dfe4ec; background: transparent; color: #526075; font-size: 11.5px; cursor: pointer; white-space: nowrap; }
+.v3-exit:hover { color: #1a2130; border-color: #2563eb; }
+.v3-body { padding: 20px 24px 40px; display: flex; flex-direction: column; gap: 16px; }
+.v3-head { display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap; }
+.v3-crumb { font-family: "JetBrains Mono", var(--mono, ui-monospace), monospace; font-size: 10.5px; letter-spacing: .14em; color: #68738a; }
+.v3-title { font-size: 22px; font-weight: 700; letter-spacing: -.01em; margin-top: 4px; }
+.v3-head-sub { margin-left: auto; font-size: 12px; color: #526075; }
+.v3-banner { font-size: 12px; padding: 8px 12px; border-radius: 8px; background: rgba(220,38,38,.08); border: 1px solid rgba(220,38,38,.35); color: #b91c1c; }
+.v3-note { font-size: 11.5px; color: #526075; line-height: 1.6; }
+.v3-empty { padding: 18px; font-size: 12px; color: #526075; line-height: 1.6; }
+.v3-empty b { color: #1a2130; }
+
+/* ── 도메인 타일(개요) ── */
+.v3-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+.v3-tile { text-align: left; padding: 14px 16px 15px; border-radius: 12px; background: #ffffff; border: 1px solid #dfe4ec; border-top: 3px solid #68738a; color: inherit; cursor: pointer; }
+.v3-tile:hover { border-color: #2563eb; border-top-color: var(--tile, #68738a); }
+.v3-tile.lv2 { border-color: rgba(239,68,68,.35); }
+.v3-tile-h { display: flex; align-items: center; gap: 8px; }
+.v3-tile-name { font-size: 12.5px; font-weight: 700; }
+.v3-tile-value { font-size: 24px; font-weight: 800; margin-top: 10px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v3-tile-meta { font-size: 11px; color: #526075; margin-top: 4px; line-height: 1.45; }
+.v3-tile-ci { display: flex; gap: 10px; margin-top: 10px; font-family: "JetBrains Mono", var(--mono, ui-monospace), monospace; font-size: 10.5px; }
+
+/* ── 배지 · 막대 · 태그 ── */
+.v3-badge { display: inline-block; font-family: "JetBrains Mono", var(--mono, ui-monospace), monospace; font-size: 9.5px; font-weight: 700; padding: 2px 7px; border-radius: 4px; white-space: nowrap; }
+.v3-badge.lv0 { background: rgba(34,197,94,.14); color: #15803d; }
+.v3-badge.lv1 { background: rgba(245,158,11,.16); color: #b45309; }
+.v3-badge.lv2 { background: rgba(239,68,68,.16); color: #dc2626; }
+.v3-badge.lvn { background: rgba(139,155,180,.12); color: #526075; }
+.v3-tag { font-family: "JetBrains Mono", var(--mono, ui-monospace), monospace; font-size: 9.5px; letter-spacing: .08em; padding: 1px 6px; border-radius: 3px; background: rgba(139,155,180,.12); color: #526075; white-space: nowrap; }
+.v3-bar { flex: 1; height: 6px; border-radius: 3px; background: #e8ecf2; overflow: hidden; display: block; position: relative; min-width: 40px; }
+.v3-bar > i { display: block; height: 100%; }
+.v3-bar.lg { height: 8px; border-radius: 4px; }
+.v3-bar .v3-mark { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(26,33,48,.3); }
+.v3-pct { display: flex; align-items: center; gap: 8px; }
+.v3-pct > .v3-num { font-size: 10.5px; color: #526075; width: 34px; text-align: right; }
+
+/* ── 패널 · 그리드 ── */
+.v3-grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; align-items: start; }
+.v3-grid2.wide { grid-template-columns: minmax(0, 1.7fr) minmax(320px, 1fr); }
+.v3-grid2.wide-r { grid-template-columns: minmax(300px, 1fr) minmax(0, 1.7fr); }
+@media (max-width: 1100px) { .v3-grid2.wide, .v3-grid2.wide-r { grid-template-columns: 1fr; } }
+.v3-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.v3-panel { border-radius: 12px; background: #ffffff; border: 1px solid #dfe4ec; min-width: 0; overflow: hidden; }
+.v3-panel-h { display: flex; align-items: center; gap: 10px; padding: 13px 18px; border-bottom: 1px solid #dfe4ec; flex-wrap: wrap; }
+.v3-panel-h b { font-size: 14px; }
+.v3-panel-h .v3-sub { font-size: 12px; color: #526075; }
+.v3-panel-h .v3-right { margin-left: auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.v3-panel-b { padding: 14px 18px 16px; }
+.v3-legend { display: flex; align-items: center; gap: 6px; font-family: "JetBrains Mono", var(--mono, ui-monospace), monospace; font-size: 10.5px; color: #526075; white-space: nowrap; }
+.v3-legend i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.v3-rows { display: flex; flex-direction: column; }
+.v3-row { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid #e6eaf0; }
+.v3-row:last-child { border-bottom: none; }
+.v3-row .v3-grow { flex: 1; min-width: 0; }
+.v3-row-title { font-family: "JetBrains Mono", var(--mono, ui-monospace), monospace; font-size: 11.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v3-row-meta { font-size: 10.5px; color: #68738a; margin-top: 2px; }
+.v3-advice { padding: 11px 13px; border-radius: 9px; background: #f4f6f9; border: 1px solid #dfe4ec; border-left: 3px solid #68738a; }
+.v3-advice-title { font-size: 12.5px; font-weight: 600; line-height: 1.45; }
+.v3-advice-meta { font-family: "JetBrains Mono", var(--mono, ui-monospace), monospace; font-size: 10.5px; color: #68738a; margin-top: 4px; }
+
+/* ── KPI ── */
+.v3-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+.v3-kpi { padding: 14px 16px 15px; border-radius: 12px; background: #ffffff; border: 1px solid #dfe4ec; border-left: 3px solid var(--kpi, #1a2130); min-width: 0; }
+.v3-kpi-label { font-size: 12px; color: #526075; }
+.v3-kpi-value { font-size: 24px; font-weight: 800; margin-top: 6px; color: var(--kpi, #1a2130); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v3-kpi-meta { font-size: 11px; color: #68738a; margin-top: 5px; line-height: 1.45; }
+
+/* ── 표(STable) — 아트보드의 그리드 헤더(#f0f3f7 · 대문자 모노 9.5px) ── */
+.v3-tablewrap { overflow: auto; }
+.v3-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.v3-table th { text-align: left; padding: 9px 10px; background: #f0f3f7; border-top: 1px solid #dfe4ec; border-bottom: 1px solid #dfe4ec; font-family: "JetBrains Mono", var(--mono, ui-monospace), monospace; font-size: 9.5px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: #526075; white-space: nowrap; cursor: pointer; user-select: none; }
+.v3-table th:first-child, .v3-table td:first-child { padding-left: 18px; }
+.v3-table th:last-child, .v3-table td:last-child { padding-right: 18px; }
+.v3-table td { padding: 8px 10px; border-bottom: 1px solid #e6eaf0; vertical-align: middle; }
+.v3-table tr:last-child td { border-bottom: none; }
+.v3-table .num { text-align: right; font-family: "JetBrains Mono", var(--mono, ui-monospace), monospace; font-size: 11.5px; white-space: nowrap; }
+.v3-table .v3-pct { min-width: 120px; }
+.v3-table tr.click { cursor: pointer; }
+.v3-table tr.click:hover td { background: rgba(59,130,246,.06); }
+.v3-table tr.focus td { background: rgba(59,130,246,.12); }
+.v3-table tr.crit td { background: rgba(239,68,68,.05); }
+.v3-table .v3-cellname { font-size: 12.5px; font-weight: 700; }
+.v3-table .v3-cellsub { font-size: 10.5px; color: #68738a; margin-top: 1px; font-weight: 400; }
+.v3-table .ellipsis { max-width: 320px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ── 개요: 그리드 지도(아트보드 방식 — 경위도를 % 좌표로) ── */
+.v3-map { position: relative; height: 320px; min-width: 520px; background: #eef2f7; overflow: hidden; }
+.v3-map-grid { position: absolute; inset: 0; background-image: repeating-linear-gradient(0deg, rgba(200,208,220,.55) 0 1px, transparent 1px 40px), repeating-linear-gradient(90deg, rgba(200,208,220,.55) 0 1px, transparent 1px 60px); }
+.v3-map-eq { position: absolute; left: 0; right: 0; top: 55.5%; height: 1px; background: rgba(8,145,178,.25); }
+.v3-marker { position: absolute; border-radius: 50%; border: 2px solid rgba(255,255,255,.85); cursor: pointer; padding: 0; }
+.v3-marker-label { position: absolute; transform: translateX(-50%); font-family: "JetBrains Mono", var(--mono, ui-monospace), monospace; font-size: 10px; white-space: nowrap; pointer-events: none; }
+.v3-mapwrap { overflow: auto hidden; }
+
+/* ── 지금 주목 ── */
+.v3-attn { display: flex; gap: 11px; align-items: flex-start; padding: 11px 0; border-bottom: 1px solid #e6eaf0; }
+.v3-attn:last-child { border-bottom: none; }
+.v3-attn-stripe { width: 4px; align-self: stretch; border-radius: 3px; flex: none; }
+.v3-attn-title { display: flex; align-items: baseline; gap: 7px; flex-wrap: wrap; font-size: 12.5px; font-weight: 600; line-height: 1.4; }
+.v3-attn-meta { font-family: "JetBrains Mono", var(--mono, ui-monospace), monospace; font-size: 10.5px; color: #68738a; margin-top: 4px; }
+
+/* ── 알람 센터 ── */
+.v3-sevs { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.v3-sev { display: flex; align-items: center; gap: 14px; padding: 15px 18px; border-radius: 12px; border: 1px solid #dfe4ec; text-align: left; color: inherit; cursor: pointer; }
+.v3-sev.on { outline: 2px solid #2563eb; outline-offset: -1px; }
+.v3-sev-stripe { width: 6px; height: 40px; border-radius: 3px; flex: none; }
+.v3-sev-count { font-size: 32px; font-weight: 800; line-height: 1; }
+.v3-sev-label { font-size: 12px; font-weight: 700; color: #3a4556; white-space: nowrap; }
+.v3-sev-meta { font-family: "JetBrains Mono", var(--mono, ui-monospace), monospace; font-size: 10.5px; color: #68738a; margin-top: 3px; white-space: nowrap; }
+.v3-filters { display: flex; align-items: center; gap: 8px; padding: 11px 18px; flex-wrap: wrap; }
+.v3-filter { font-family: "JetBrains Mono", var(--mono, ui-monospace), monospace; font-size: 10.5px; padding: 3px 9px; border-radius: 5px; background: transparent; color: #526075; border: 1px solid #dfe4ec; cursor: pointer; }
+.v3-filter.on { background: rgba(59,130,246,.18); color: #1d4ed8; border-color: rgba(59,130,246,.4); }
+
+/* ── SAN 셀 · 온도 스트립 · 스파크 ── */
+.v3-cells { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+@media (max-width: 1100px) { .v3-cells { grid-template-columns: repeat(4, 1fr); } }
+.v3-cell { padding: 7px 6px; border-radius: 6px; border: 1px solid #dfe4ec; background: #f4f6f9; text-align: center; color: #526075; }
+.v3-cell.lv0 { background: rgba(34,197,94,.08); border-color: rgba(34,197,94,.25); }
+.v3-cell.lv1 { background: rgba(245,158,11,.1); border-color: rgba(245,158,11,.35); color: #b45309; }
+.v3-cell.lv2 { background: rgba(239,68,68,.12); border-color: rgba(239,68,68,.4); color: #dc2626; }
+.v3-cell-name { font-family: "JetBrains Mono", var(--mono, ui-monospace), monospace; font-size: 9.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v3-cell-val { font-family: "JetBrains Mono", var(--mono, ui-monospace), monospace; font-size: 11px; font-weight: 700; margin-top: 2px; }
+.v3-temps { display: flex; gap: 2px; height: 14px; min-width: 60px; }
+.v3-temps > i { flex: 1; border-radius: 2px; display: block; background: transparent; border: 1px dashed #dfe4ec; }
+.v3-temps > i.has { border: none; }
+
+/* ── 반응형 ── */
+@media (max-width: 1100px) { .v3-side { width: 200px; } }
+@media (max-width: 760px) {
+  .v3 { flex-direction: column; }
+  .v3-side { width: 100%; height: auto; position: static; border-right: none; border-bottom: 1px solid #dfe4ec; }
+  .v3-nav { display: flex; flex-wrap: wrap; gap: 2px 14px; padding: 8px 10px; }
+  .v3-nav-group { margin-bottom: 4px; }
+  .v3-foot { display: none; }
+  .v3-body { padding: 16px; }
+  .v3-top { padding: 10px 16px; }
+  .v3-map { min-width: 0; }
+}

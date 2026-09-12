@@ -30,6 +30,9 @@ const ReleaseNotes = lazy(() => import('./views/ReleaseNotes.jsx'));
 // 기존 탭 화면은 그대로 두고(개발용), 콘솔은 자체 좌측 내비·6화면을 가진다. 실 API 만 사용.
 const DvcConsole = lazy(() => import('./console/DvcConsole.jsx'));
 const isConsoleHash = () => window.location.hash.replace(/^#\/?/, '').split('/')[0] === 'console';
+// 신규 포탈(version_3, v2.490) — 설정 › 신규 포탈 보기 › V3 버튼으로 진입하는 별도 화면(#/v3/…). 기존 화면은 개발용으로 그대로.
+const V3App = lazy(() => import('./version_3/V3App.jsx'));
+const isV3Hash = () => window.location.hash.replace(/^#\/?/, '').split('/')[0] === 'v3';
 
 const TABS = [
   { id: 'overview', label: 'Overview' }, // 랜딩(항상 노출)
@@ -193,6 +196,8 @@ function Portal({ user, onLogout }) {
   const [showVcDown, setShowVcDown] = useState(false); // 헤더 상태 칩의 '(N 불가)' 클릭 → 연결 안 되는 vCenter 목록 모달(v2.300)
   // 통합 관제 콘솔 표시 여부(v2.487) — 해시 첫 세그먼트 'console' 로 판단해 새로고침해도 콘솔에 머문다.
   const [consoleOn, setConsoleOn] = useState(isConsoleHash);
+  // 신규 포탈(V3) 표시 여부(v2.490) — 해시 첫 세그먼트 'v3' 로 판단해 새로고침해도 신규 포탈에 머문다.
+  const [v3On, setV3On] = useState(isV3Hash);
 
   const cur = tabFilters[tab] || {};
   const region = cur.region || '';
@@ -213,10 +218,11 @@ function Portal({ user, onLogout }) {
   // 누르면 전체 vCenter 목록으로 복귀한다(드릴다운은 VCenters 내부 상태라 탭 클릭만으론 못 되돌림).
   const [platformResetSeq, setPlatformResetSeq] = useState(0);
   useEffect(() => {
-    if (!tabFromHash() && !isConsoleHash()) window.history.replaceState(null, '', `#/${tab}`);
+    if (!tabFromHash() && !isConsoleHash() && !isV3Hash()) window.history.replaceState(null, '', `#/${tab}`);
     const onHash = () => {
-      if (isConsoleHash()) { setConsoleOn(true); return; } // 콘솔 내부 페이지 전환은 콘솔이 처리
-      setConsoleOn(false);
+      if (isConsoleHash()) { setConsoleOn(true); setV3On(false); return; } // 콘솔 내부 페이지 전환은 콘솔이 처리
+      if (isV3Hash()) { setV3On(true); setConsoleOn(false); return; }     // 신규 포탈 내부 페이지 전환은 V3App 이 처리
+      setConsoleOn(false); setV3On(false);
       const t = tabFromHash(); if (t) setTabState(t);
     };
     window.addEventListener('hashchange', onHash);
@@ -226,6 +232,8 @@ function Portal({ user, onLogout }) {
   // 콘솔 진입/복귀 — 복귀 시 목적지 해시(콘솔 내비의 '개발 포탈 ↗' 항목)가 있으면 그 탭으로, 없으면 직전 탭으로.
   const openConsole = () => { setConsoleOn(true); window.location.hash = '#/console'; };
   const exitConsole = (hash) => { setConsoleOn(false); window.location.hash = hash || `#/${tab}`; };
+  // 신규 포탈(V3) 복귀 — 목적지 해시(내비의 개발 포탈 항목)가 있으면 그 탭으로, 없으면 직전 탭으로.
+  const exitV3 = (hash) => { setV3On(false); window.location.hash = hash || `#/${tab}`; };
 
   const saveLanding = (id) => { setLandingTab(id); localStorage.setItem(LANDING_KEY, id); };
 
@@ -311,6 +319,14 @@ function Portal({ user, onLogout }) {
     return (
       <Suspense fallback={<div className="login-screen"><div className="loading">관제 콘솔 불러오는 중…</div></div>}>
         <DvcConsole user={user} health={health} onExit={exitConsole} />
+      </Suspense>
+    );
+  }
+  // 신규 포탈(version_3, v2.490) — 포탈 셸 대신 전체 화면. 훅은 모두 위에서 선언된 뒤라 조기 반환해도 훅 개수가 같다.
+  if (v3On) {
+    return (
+      <Suspense fallback={<div className="login-screen"><div className="loading">신규 포탈(V3) 불러오는 중…</div></div>}>
+        <V3App user={user} health={health} onExit={exitV3} />
       </Suspense>
     );
   }

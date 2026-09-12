@@ -21,6 +21,7 @@ import MetricsSettings from './MetricsSettings.jsx';
 import StorageIntervals from './StorageIntervals.jsx'; // 스토리지 수집 주기(중앙→엣지 배포, v2.409)
 import PowerOffCheckSettings from './PowerOffCheckSettings.jsx'; // 전원 꺼짐 점검 주기(v2.484)
 import HostAccessSettings from './HostAccessSettings.jsx'; // 호스트 접근 제어(SSH/웹/OS 방화벽, v2.485)
+import V3Portal from './V3Portal.jsx'; // 신규 포탈 보기(version_3 진입, v2.490)
 import SanSwitchPerf from './SanSwitchPerf.jsx';       // SAN 스위치 포트 사용량 수집(portperfshow, v2.411)
 import GpuGuestSettings from './GpuGuestSettings.jsx';
 import GpuGuestDiag from './GpuGuestDiag.jsx';
@@ -75,6 +76,7 @@ const SUB = [
   { k: 'alerts', label: '알림', C: Alerts2 },
   { k: 'mail', label: '메일 발송', C: MailSettings },
   { k: 'tool-categories', label: '특수 기능 카테고리', C: ToolCategories },
+  { k: 'v3-portal', label: '신규 포탈 보기', C: V3Portal },
   { k: 'backup', label: '포탈 백업', C: PortalBackup },
   { k: 'nfs-mounts', label: 'NFS 마운트(백업 대상)', C: NfsMounts },
   { k: 'dir-usage', label: '폴더 사용량 리포트', C: DirUsageSettings },
