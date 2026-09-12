@@ -62,17 +62,27 @@ async function pollOnceInner() {
         setOmeDevices(s.id, devices, { usedMetricService });
         results.push({ id: s.id, name: s.name, type: 'ome', devices: count, measured, metric: usedMetricService ? 'powermanager' : 'inventory' });
       } else {
-        const r = await fetchPower(s);
-        samples.push({ serverId: s.id, watts: r.watts, ts });
+        // v2.493: 전력 조회 실패가 **센서·인벤토리 수집을 막지 않게** 개별로 격리한다.
+        // 이전에는 fetchPower 가 던지면 이 블록 전체가 catch 로 빠져 온도·CPU 가 통째로 0샘플이
+        // 됐다(전력 메트릭만 막힌 iDRAC·라이선스 차이에서 발생 가능). 온도 수집이 전력 수집에
+        // 종속될 이유는 없다. 실패 사유는 results 에 남겨 '지금 폴' 응답에서 보이게 한다.
+        let powerErr = null;
+        const r = await fetchPower(s).catch((e) => { powerErr = e; return null; });
+        if (r && r.watts != null) samples.push({ serverId: s.id, watts: r.watts, ts });
         // 온도센서 + CPU 사용량을 매 주기(1분) 수집해 시계열에 적재(차트용, 격리).
         // 시계열에는 팬을 {name,rpm}만 싣는다 — 파트 필드(model/partNumber)는 정적 정보라
         // 1440샘플 시계열에 반복 저장하면 메모리만 낭비(인벤토리 갱신 시에만 보관).
         let sensorFans = null;
+        let sensorErr = null;
         try {
           const sn = await fetchSensors(s);
           sensorFans = sn.fans;
           pushSensorSample(s.id, { t: ts, cpuUsagePct: sn.cpuUsagePct, temps: sn.temps, fans: (sn.fans || []).map((f) => ({ name: f.name, rpm: f.rpm })) });
-        } catch { /* 센서 실패는 전력 수집과 무관 */ }
+        } catch (e) {
+          // v2.493: 조용히 삼키지 않는다 — 센서만 실패하는 상황(Thermal 미지원 등)을 진단할 수
+          // 있게 사유를 results 에 남긴다(전력 수집과는 무관하게 계속 진행).
+          sensorErr = e;
+        }
         // Refresh rich inventory on a slow cadence (best-effort, non-blocking).
         if (inventoryStale(s.id, INVENTORY_MAX_AGE_MS)) {
           try {
@@ -82,7 +92,11 @@ async function pollOnceInner() {
             setInventory(s.id, inv);
           } catch { /* keep last */ }
         }
-        results.push({ id: s.id, name: s.name, type: 'idrac', watts: r.watts });
+        results.push({
+          id: s.id, name: s.name, type: 'idrac', watts: r ? r.watts : null,
+          ...(powerErr ? { error: describeError(powerErr).message } : {}),
+          ...(sensorErr ? { sensorError: describeError(sensorErr).message } : {}),
+        });
       }
     } catch (err) {
       const d = describeError(err);
