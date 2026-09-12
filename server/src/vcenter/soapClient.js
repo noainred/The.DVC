@@ -15,6 +15,7 @@ import { loadMetricsSettings } from '../metrics/settings.js';
 import { parseObjectContent, xmlUnescape, snapshotInfo } from './soapParse.js';
 import { vcDispatcher } from './restClient.js';
 import { parseObjectContentAsync } from '../util/soapParsePool.js';
+import { parseEntityPerfBatchXml, summarizeVmUsage } from './perfBatch.js'; // v2.492: 다중 VM 기간 사용률(엔티티별 파싱)
 
 // soapParse.js로 분리된 순수 파서를 재-export(기존 import 경로 호환: 테스트가 여기서 가져옴).
 export { parseObjectContent, xmlUnescape };
@@ -375,6 +376,34 @@ export class VimSoapClient {
       `<QueryPerf xmlns="urn:vim25"><_this type="PerformanceManager">${this.sc.perfManager}</_this>${spec}</QueryPerf>`
     );
     return parsePerfMultiXml(xml, ids);
+  }
+
+  /**
+   * 다중 VM × 다중 카운터 QueryPerf(v2.492) → Map&lt;moref, Map&lt;counterId, [{t,v}]&gt;&gt;.
+   *
+   * querySpec 을 VM 마다 하나씩 이어 붙여 **요청 1회**로 받는다(queryHostPower 가 호스트 전력에
+   * 쓰는, 운영에서 검증된 다중 엔티티 패턴). VM 1대당 로그인+조회를 반복하던 기존 경로와 달리
+   * 고RTT 회선에서도 왕복 수가 VM 수에 비례하지 않는다.
+   *
+   * 응답은 엔티티별 `<returnval>` 로 오므로 parseEntityPerfBatchXml(전 returnval 순회)로 읽는다 —
+   * 이 파일의 parsePerfMultiXml 은 첫 returnval 만 읽으므로 여기에 쓸 수 없다.
+   * 호출자가 morefs 를 청크로 나눠 준다(요청 XML·응답 크기 제어).
+   */
+  async queryVmsPerfBatch(counterIds, morefs, intervalId, { startTime, endTime } = {}) {
+    const ids = [...new Set((counterIds || []).filter(Boolean).map(String))];
+    const refs = [...new Set((morefs || []).filter(Boolean).map(String))];
+    if (!ids.length || !refs.length) return new Map();
+    const metricIds = ids.map((id) => `<metricId><counterId>${id}</counterId><instance></instance></metricId>`).join('');
+    const specs = refs.map((ref) =>
+      `<querySpec><entity type="VirtualMachine">${ref}</entity>`
+      + (startTime ? `<startTime>${startTime}</startTime>` : '')
+      + (endTime ? `<endTime>${endTime}</endTime>` : '')
+      + metricIds + `<intervalId>${intervalId}</intervalId></querySpec>`
+    ).join('');
+    const xml = await this.#call(
+      `<QueryPerf xmlns="urn:vim25"><_this type="PerformanceManager">${this.sc.perfManager}</_this>${specs}</QueryPerf>`
+    );
+    return parseEntityPerfBatchXml(xml, ids, 'VirtualMachine');
   }
 
   /** Installed solutions / plug-ins registered with vCenter (ExtensionManager). */
@@ -936,6 +965,46 @@ export async function fetchVmRightsizeSeries(vc, moref, interval, { start, end }
       } catch { realtime = null; /* 실시간도 안 되면 조용히 넘어간다 — 이력 '표본 없음' 안내는 유지 */ }
     }
     return { intervalSec: intervalId, series, missing, empty, noData, realtime };
+  } finally {
+    await c.logout();
+  }
+}
+
+/**
+ * 여러 VM 의 기간 CPU·메모리 사용률 요약(v2.492) — 로그인 1회 + 청크당 QueryPerf 1회.
+ *
+ * 반환 Map&lt;moref, {cpuPct,cpuMax,memPct,memMax,samples,coverageDays} | null&gt;.
+ * null = 그 VM 표본 없음(꺼져 있었음·보관 기간 밖·통계 레벨 문제) — 0 으로 채우지 않는다.
+ * counters: cpu.usage.average · mem.usage.average(둘 다 vCenter 통계 레벨 1 계열).
+ *
+ * chunkSize: 한 QueryPerf 에 넣을 VM 수(기본 25). 응답 XML 크기가 (VM 수 × 표본 수)에 정비례하고
+ * 파싱이 메인스레드 정규식이라, 청크를 키우면 이벤트 루프 정지 위험이 커진다.
+ * 반환에 실패 사유를 싣지 않는 대신, 카운터 자체가 없으면 counters:[] 로 알린다.
+ */
+export async function fetchVmsUsageBatch(vc, morefs, interval, { start, end, chunkSize = 25 } = {}) {
+  const intervalId = PERF_INTERVALS[interval] || PERF_INTERVALS.month;
+  const refs = [...new Set((morefs || []).filter(Boolean).map(String))];
+  const out = new Map();
+  if (!refs.length) return { usage: out, counters: [], intervalSec: intervalId };
+  const c = new VimSoapClient(vc);
+  await c.login();
+  try {
+    const map = await c.perfCounterMap();
+    const cpuId = map.get('cpu.usage.average') || null;
+    const memId = map.get('mem.usage.average') || null;
+    const ids = [cpuId, memId].filter(Boolean);
+    if (!ids.length) return { usage: out, counters: [], intervalSec: intervalId };
+    const startTime = start ? new Date(start).toISOString() : null;
+    const endTime = end ? new Date(end).toISOString() : null;
+    const size = Math.max(1, Math.min(100, Number(chunkSize) || 25));
+    for (let i = 0; i < refs.length; i += size) {
+      const chunk = refs.slice(i, i + size);
+      const byRef = await c.queryVmsPerfBatch(ids, chunk, intervalId, { startTime, endTime });
+      for (const ref of chunk) out.set(ref, summarizeVmUsage(byRef.get(ref), { cpuId, memId }));
+      // 청크 사이에 이벤트 루프를 양보한다 — 대량 export 패턴(routes/api gpuSeriesExport)과 같은 이유.
+      if (i + size < refs.length) await new Promise((r) => setImmediate(r));
+    }
+    return { usage: out, counters: [cpuId ? 'cpu.usage.average' : null, memId ? 'mem.usage.average' : null].filter(Boolean), intervalSec: intervalId };
   } finally {
     await c.logout();
   }
