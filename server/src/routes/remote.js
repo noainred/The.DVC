@@ -18,9 +18,11 @@ import { previewConfig, testDeploy, deployToProxy } from '../proxy/deploy.js';
 import { provision, deprovision } from '../proxy/provision.js';
 import { withSsh } from '../proxy/sshExec.js';
 import { issueRdpTicket } from '../proxy/rdpTicket.js';
+import { ssrfBlockReasonResolved, ipBlockReason } from '../collector/registry.js';
 
 export const remoteRouter = Router();
 const adminOnly = requireRole('admin');
+const REDACT = '********'; // getConfigSafe 가 비밀을 가릴 때 쓰는 플레이스홀더(proxy/registry.js REDACT 와 동일)
 
 // RDP 자격증명을 URL 쿼리스트링 대신 1회용 티켓으로 전달(감사 H18). 클라이언트는 접속 직전
 // 이 엔드포인트로 자격증명을 보내 티켓 ID를 받고, WebSocket 쿼리엔 티켓 ID만 싣는다 →
@@ -161,19 +163,36 @@ remoteRouter.post('/proxies/:id/health', adminOnly, async (req, res) => {
 });
 
 // Test a proxy's Data Plane API (by proxyId, or the default).
+// ⚠ 보안(H-2, 2026-09-12 — v2.480 "연결 테스트 시 host/url 저장값 고정" 규칙 적용): 저장된 비밀번호를
+// 재사용(플레이스홀더 또는 미입력)하면 접속 URL 도 저장값으로 고정한다. 그러지 않으면 admin 이 요청
+// url 만 공격자 호스트로 바꾸고 password:'********' 를 보내 저장된 Data Plane 비밀번호를 그 호스트로
+// 평문(Basic) 전송시킬 수 있다. 새 URL 을 시험하려면 비밀번호를 새로 입력해야 한다.
 remoteRouter.post('/test', adminOnly, async (req, res) => {
   const proxy = getProxyById((req.body || {}).proxyId);
-  const dp = { ...proxy.dataplane, ...((req.body || {}).dataplane || {}) };
-  if (dp.password === '********') dp.password = proxy.dataplane.password;
+  const body = (req.body || {}).dataplane || {};
+  const dp = { ...proxy.dataplane, ...body };
+  const reuseSecret = body.password === REDACT || body.password === undefined;
+  if (body.password === REDACT) dp.password = proxy.dataplane.password;
+  if (reuseSecret) { dp.url = proxy.dataplane.url; dp.basePath = proxy.dataplane.basePath; }
+  const block = await ssrfBlockReasonResolved(dp.url);
+  if (block) return res.json({ ok: false, reason: `대상 주소가 차단되었습니다: ${block}`, method: 'blocked' });
   res.json(await testDataplane(dp));
 });
 
 // --- SSH-based proxy auto-deploy (alternative to Data Plane API) ---
+// ⚠ 보안(H-2): 저장된 비밀번호/개인키를 재사용하면 접속 host/port 도 저장값으로 고정한다 —
+// dep.host 만 바꿔 저장된 root 비밀번호·SSH 개인키를 공격자 sshd 로 보내는 것을 막는다.
 remoteRouter.post('/deploy/test', adminOnly, async (req, res) => {
   const proxy = getProxyById((req.body || {}).proxyId);
-  const dep = { ...proxy.deploy, ...((req.body || {}).deploy || {}) };
-  if (dep.password === '********') dep.password = proxy.deploy.password;
-  if (dep.privateKey === '********') dep.privateKey = proxy.deploy.privateKey;
+  const body = (req.body || {}).deploy || {};
+  const dep = { ...proxy.deploy, ...body };
+  const reusePw = body.password === REDACT || body.password === undefined;
+  const reuseKey = body.privateKey === REDACT || body.privateKey === undefined;
+  if (body.password === REDACT) dep.password = proxy.deploy.password;
+  if (body.privateKey === REDACT) dep.privateKey = proxy.deploy.privateKey;
+  if ((reusePw && proxy.deploy.password) || (reuseKey && proxy.deploy.privateKey)) { dep.host = proxy.deploy.host; dep.port = proxy.deploy.port; }
+  const block = ipBlockReason(dep.host);
+  if (block) return res.json({ ok: false, reason: `대상 호스트가 차단되었습니다: ${block}`, method: 'blocked' });
   res.json(await testDeploy(dep));
 });
 

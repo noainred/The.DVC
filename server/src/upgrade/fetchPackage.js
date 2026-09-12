@@ -12,11 +12,17 @@ import { config } from '../config.js';
 import { getPackageBaseUrl, getPackageDir } from './packageSettings.js';
 import { upgradeAgent } from './upgradeAgent.js';
 import { resilientFetch } from '../util/resilientFetch.js';
+import { ssrfBlockReasonResolved } from '../collector/registry.js';
 
 const trim = (u) => String(u || '').replace(/\/+$/, '');
 
 export async function fetchRemoteVersions(baseUrl) {
   const base = baseUrl || getPackageBaseUrl();
+  // ⚠ 보안(M-3, 2026-09-12): admin 이 지정한 baseUrl(설정 › 수집 서버 › 패키지 저장소, 또는 즉석
+  // ?baseUrl=)로 임의 내부 주소를 fetch 해 응답 본문을 되돌려받는 SSRF 를 막는다. 루프백/링크로컬/
+  // 메타데이터는 차단, 사내 RFC1918·공개 미러는 허용(업그레이드 remoteBase 와 동일 정책).
+  const block = await ssrfBlockReasonResolved(`${trim(base)}/versions.json`);
+  if (block) throw new Error(`패키지 저장소 주소가 차단되었습니다: ${block}`);
   // 고RTT·일시 오류 재시도. 단 TLS 검증 디스패처(upgradeAgent)는 유지(MITM→RCE 방지).
   const res = await resilientFetch(`${trim(base)}/versions.json`, { dispatcher: upgradeAgent, timeoutMs: 20000, retries: 2 });
   if (!res.ok) throw new Error(`versions.json HTTP ${res.status}`);

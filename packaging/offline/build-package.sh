@@ -17,12 +17,12 @@
 #           script can be re-run on an air-gapped build host.
 #
 # Usage:
-#   packaging/offline/build-package.sh [--node-version 22.20.0] [--out DIR]
-#   packaging/offline/build-package.sh --offline --node-tarball /path/node-v22.20.0-linux-x64.tar.xz
+#   packaging/offline/build-package.sh [--node-version 22.23.2] [--out DIR]
+#   packaging/offline/build-package.sh --offline --node-tarball /path/node-v22.23.2-linux-x64.tar.xz
 
 set -euo pipefail
 
-NODE_VERSION="${NODE_VERSION:-22.20.0}"
+NODE_VERSION="${NODE_VERSION:-22.23.2}"
 ARCH="x64"
 OUT_DIR=""
 OFFLINE="${OFFLINE:-0}"
@@ -102,6 +102,13 @@ APP="$STAGE/app"
 mkdir -p "$APP/server" "$APP/web"
 cp -r "$REPO_ROOT/server/src" "$APP/server/src"
 cp -r "$REPO_ROOT/server/config" "$APP/server/config"
+# 보안(L-9, 2026-09-12): 빌드 호스트의 '런타임' config(개발 중 생성된 DB·시크릿·수집 설정)가
+# 패키지에 섞여 나가지 않게, 스테이징 복사본에서 예제(*.example.json)를 제외한 config 산출물을 지운다.
+# 실 설정은 설치 시 CONFIG_DIR(/etc/vmware-portal)에서 읽으므로 패키지에는 예제만 있으면 된다.
+find "$APP/server/config" -mindepth 1 -maxdepth 1 \
+  \( -name '*.db' -o -name '*.db-wal' -o -name '*.db-shm' -o -name '*.ndjson' \
+     -o -name 'ipam-scan.json' -o -name 'portal.env' -o -name 'secrets-key' -o -name 'auth-secret' \
+     -o \( -name '*.json' ! -name '*.example.json' \) \) -exec rm -rf {} + 2>/dev/null || true
 cp "$REPO_ROOT/server/package.json" "$REPO_ROOT/server/package-lock.json" "$APP/server/"
 cp "$REPO_ROOT/package.json" "$APP/"
 cp -r "$REPO_ROOT/web/dist" "$APP/web/dist"

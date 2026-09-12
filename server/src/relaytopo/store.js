@@ -17,7 +17,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js';
-import { parseCsvRows } from '../util/csv.js';
+import { parseCsvRows, csvLine, unguardCell } from '../util/csv.js';
 
 const FILE = () => path.join(config.configDir, 'relay-topology.json');
 const RE_IP = /^(\d{1,3}\.){3}\d{1,3}$|^[A-Za-z0-9.-]{1,253}$/;
@@ -132,7 +132,8 @@ export function parseTopologyTable(text) {
   let dc = ''; let cols = null; // cols: 내보내기 CSV 머리글 인덱스
   const site = (d) => { if (!sites.has(d)) sites.set(d, { dc: d, edge: { privateIp: '', publicIp: '', vcenterIp: '', ssh: {} }, irs: { privateIp: '', publicIp: '', vcenterIp: '', ssh: {} }, note: '' }); return sites.get(d); };
   for (const cells0 of rows) {
-    const cells = cells0.map((c) => String(c || '').trim());
+    // 보안(L-2): 내보내기에서 수식가드(`'` 접두)를 붙였으므로 가져오기에서 걷어낸다(왕복 무손실).
+    const cells = cells0.map((c) => unguardCell(String(c || '').trim()));
     const line = cells.join('\t');
     if (!cells.some(Boolean)) continue;
     const low = cells.map((c) => c.toLowerCase());
@@ -164,15 +165,17 @@ export function parseTopologyTable(text) {
   return { main, sites: [...sites.values()], skipped };
 }
 
-/** CSV 내보내기(순수, 비밀 없음). 머리글은 parseTopologyTable 이 다시 읽을 수 있는 형태. */
+/** CSV 내보내기(순수, 비밀 없음). 머리글은 parseTopologyTable 이 다시 읽을 수 있는 형태.
+ *  보안(L-2, 2026-09-12): 다른 12개 CSV 빌더처럼 `csvLine`(수식 인젝션 가드 포함)을 쓴다 —
+ *  dc·note 에 `=cmd|...`·`=HYPERLINK(...)` 를 넣어 다른 admin 의 엑셀에서 실행되는 것을 막는다.
+ *  가져오기 parseTopologyTable 이 unguardCell 로 걷어내므로 왕복 무손실이다. */
 export function topologyToCsv(t) {
-  const q = (v) => { const s = String(v ?? ''); return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-  const lines = [['dc', 'role', 'privateIp', 'publicIp', 'vcenterIp', 'sshPort', 'sshUser', 'portalPort', 'note'].join(',')];
+  const lines = [csvLine(['dc', 'role', 'privateIp', 'publicIp', 'vcenterIp', 'sshPort', 'sshUser', 'portalPort', 'note'])];
   const m = t.main || {};
-  lines.push([m.name || 'Main', 'Main', m.privateIp, m.publicIp, '', m.ssh?.port || 22, m.ssh?.username || '', m.portalPort || 4000, ''].map(q).join(','));
+  lines.push(csvLine([m.name || 'Main', 'Main', m.privateIp, m.publicIp, '', m.ssh?.port || 22, m.ssh?.username || '', m.portalPort || 4000, '']));
   for (const s of t.sites || []) {
-    lines.push([s.dc, 'Edge', s.edge?.privateIp, s.edge?.publicIp, s.edge?.vcenterIp, s.edge?.ssh?.port || 22, s.edge?.ssh?.username || '', '', s.note || ''].map(q).join(','));
-    lines.push([s.dc, 'IRS', s.irs?.privateIp, s.irs?.publicIp, s.irs?.vcenterIp, s.irs?.ssh?.port || 22, s.irs?.ssh?.username || '', '', ''].map(q).join(','));
+    lines.push(csvLine([s.dc, 'Edge', s.edge?.privateIp, s.edge?.publicIp, s.edge?.vcenterIp, s.edge?.ssh?.port || 22, s.edge?.ssh?.username || '', '', s.note || '']));
+    lines.push(csvLine([s.dc, 'IRS', s.irs?.privateIp, s.irs?.publicIp, s.irs?.vcenterIp, s.irs?.ssh?.port || 22, s.irs?.ssh?.username || '', '', '']));
   }
   return `﻿${lines.join('\r\n')}\r\n`;
 }

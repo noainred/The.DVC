@@ -135,6 +135,20 @@ server/config/*.db-wal
 server/config/*.db-shm
 server/config/horizon.json
 sbp-shortcuts.json
+
+# 보안 감사 2026-09-12(L-8/L-9) — 누락돼 있던 시크릿/런타임 파일 차단.
+#  - SECRET_FILES(secretVault 봉인 대상)인데 .gitignore 에 없던 3종: 커밋 시 비밀 평문 유출.
+#  - 런타임 SQLite DB 는 개별 나열 대신 와일드카드로 선차단(capacity/guest-disk/vm-track 등 신규 포함).
+#  - portal.env 는 AUTH_SECRET·CENTRAL_TOKEN 을 담는다(`.env` 정확일치 패턴만으론 안 걸림).
+server/config/pdu-devices.json
+server/config/relay-topology.json
+server/config/mail.json
+server/config/active-sessions.json
+server/config/host-access.json
+server/config/ipam-scan.json
+server/config/portal.env
+server/config/*.db
+server/config/vmperf/
 sbp-shortcuts.csv
 sbp-proxy-shortcuts.json
 design-preview.html

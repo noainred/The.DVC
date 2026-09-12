@@ -60,7 +60,10 @@ export function parseTar(buf) {
 /** Decompress a .tar.gz / .tgz buffer and parse it. */
 export function parseTarGz(buf) {
   const isGzip = buf.length > 2 && buf[0] === 0x1f && buf[1] === 0x8b;
-  return parseTar(isGzip ? zlib.gunzipSync(buf) : buf);
+  // ⚠ 보안(L-1, 2026-09-12): 압축 폭탄 방어 — `maxOutputLength` 없이 gunzip 하면 수 MB gzip 이
+  // 수 GB 로 팽창해 힙을 고갈시킨다(누적 크기 검사는 압축 해제가 끝난 뒤라 늦다). 여기서 상한을
+  // 걸어 초과 시 ERR_BUFFER_TOO_LARGE 로 즉시 실패시킨다.
+  return parseTar(isGzip ? zlib.gunzipSync(buf, { maxOutputLength: MAX_BUNDLE_BYTES }) : buf);
 }
 
 /** Parse a ZIP buffer (stored + deflate) into [{name, data}] via the central directory. */
@@ -99,7 +102,8 @@ export function parseZip(buf) {
 
     let data;
     if (method === 0) data = Buffer.from(comp);
-    else if (method === 8) data = zlib.inflateRawSync(comp);
+    // 보안(L-1): zip 엔트리도 압축 해제 출력 상한을 건다(zip bomb 방어).
+    else if (method === 8) data = zlib.inflateRawSync(comp, { maxOutputLength: MAX_BUNDLE_BYTES });
     else throw new Error(`Unsupported ZIP compression method ${method}`);
     entries.push({ name, data });
   }

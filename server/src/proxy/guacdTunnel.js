@@ -48,7 +48,10 @@ function parseInstruction(str, start) {
 export function attachRdpGateway(server) {
   const wss = new WebSocketServer({ noServer: true });
   server.on('upgrade', (req, socket, head) => {
-    const url = new URL(req.url, 'http://localhost');
+    // ⚠ 보안(M-1): 잘못된 요청줄로 `new URL` 이 throw 하면 뒤 리스너(index.js catch-all)가 실행되지
+    // 않아 소켓이 파기되지 않는다 — throw 대신 return(sshGateway 와 동일).
+    let url;
+    try { url = new URL(req.url, 'http://localhost'); } catch { return; }
     if (url.pathname !== '/api/remote/rdp') return;
     // 역할 검사(감사/SECURITY-AUDIT H3): RDP 터널 개통은 admin/operator만(viewer 차단).
     // ⚠ user 는 블록 '밖'에서 선언 — 아래 handleUpgrade 가 쓴다(sshGateway 와 동일 규칙·동일 결함).

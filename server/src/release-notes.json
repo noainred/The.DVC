@@ -1,6 +1,23 @@
 {
   "notes": [
     {
+      "version": "2.488.0",
+      "date": "2026-09-12",
+      "title": "보안 하드닝 — 2026-09-12 감사 확정 취약점 조치(High 2 · Medium 6 · Low 5) + 회귀 테스트",
+      "notes": [
+        "[High] 중앙 /register-collector agent 바인딩 우회 차단(routes/central.js): X-Agent-Name/?agent 헤더로 미들웨어를 통과한 뒤 body.name 에 남의 엣지 이름을 넣어 그 수집 서버 URL·토큰을 탈취(중앙이 그 URL 로 iDRAC/SSH 자격증명을 실어 호출 → 유출 피벗)하던 결함. 이제 register-collector 는 헤더 유무와 무관하게 body.name 을 토큰 agent 와 항상 대조한다.",
+        "[High] 원격 접속 프록시 연결 테스트 자격증명 유출 차단(routes/remote.js /test·/deploy/test): 저장 비밀번호·SSH 개인키를 플레이스홀더(********)로 재사용할 때 접속 url/host 를 저장값으로 고정한다(v2.480 규칙 적용). host 만 바꿔 저장 비밀을 공격자 호스트로 보내는 것을 막고, url/host 에 SSRF/IP 가드를 추가했다.",
+        "[Medium] WebSocket upgrade 소켓 누수 수정(proxy/sshGateway·guacdTunnel): 잘못된 요청줄(예: `GET //[`)의 new URL 예외가 catch-all 소켓 파기를 건너뛰어 무인증 FD 누수가 되던 회귀(2026-08-17 #7)를 try/catch 로 막았다.",
+        "[Medium] Ping 모니터링 조회 라우트에 사용자 vCenter scope 적용(routes/ping.js /status·/targets·/series·/vcport/overview): 범위 제한 계정이 전 vCenter 관리 호스트·IP·응답시간을 열람하던 갭을 닫았다(범위 밖 단건은 404).",
+        "[Medium] 패키지 저장소 baseUrl SSRF 가드(upgrade/fetchPackage.js): admin 이 지정한 패키지 저장소 주소로 임의 내부 주소를 조회하던 경로를 해석형 가드로 차단(루프백/메타데이터 차단, 사내 RFC1918·공개 미러 허용).",
+        "[Medium] 스토리지·SAN 스위치 REST 수집기 TLS 검증 옵트인(STORAGE_TLS_VERIFY·SANSWITCH_TLS_VERIFY): 기본은 기존대로 자체서명 허용, 사설 CA·공인 인증서 사이트는 검증을 켤 수 있다.",
+        "[Medium] 배포 Node 런타임 22.20.0 → 22.23.2(release.yml·offline·windows 빌드): 22.x 보안 릴리스 4개(High CVE 포함)를 수신. ⚠ 오프라인 설치 패키지·수집기를 재빌드·재배포해야 런타임이 반영된다(앱만 교체하는 업그레이드 번들로는 런타임이 안 바뀜).",
+        "[Low] 업그레이드 아카이브 압축 폭탄 방어(upgrade/archive.js): gunzip/inflateRaw 출력 상한(maxOutputLength) + 업로드 본문 한도 축소. 중계 토폴로지 CSV 수식 인젝션 가드(relaytopo/store.js, 왕복 무손실). verifyPassword 가 빈/규격 미달 해시를 만능키로 통과시키던 결함 차단(auth.js). .gitignore 에 시크릿/런타임 파일(pdu-devices·relay-topology·mail·portal.env·*.db 등) 추가 + capacity.db·ipam-scan.json 추적 해제(기본 IP 스캔 비활성화). 오프라인 패키지가 빌드 호스트의 런타임 config 를 담지 않도록 예제 외 파일 제외.",
+        "검증: 서버 단위테스트 1649건 통과(신규 회귀 테스트 security2026-09-12·securityH1RegisterCollector 포함), 웹 lint 0 error·빌드 통과. 상세 근거: security_check_20260912.MD.",
+        "미적용(후속 과제): M-5 hostaccess firewall-cmd sudoers 인자 제한(패키징·실 firewalld 검증 필요), L-3 WS 세션토큰 티켓화, L-4 서버측 로그아웃, L-5 CSP 기본값, L-6 RDP 세션 상한 — 위험도·검증 범위가 커 별도 PR 로 분리."
+      ]
+    },
+    {
       "version": "2.487.0",
       "date": "2026-09-12",
       "title": "통합 관제 콘솔(DVC Console) — 헤더 데이터 소스 배지(LIVE/MOCK) 클릭으로 전환되는 별도 화면 · 8 도메인 좌측 내비 · 6 화면(전사 현황·컴퓨트·스토리지·네트워크·물리/설비·알람 센터)",

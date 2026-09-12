@@ -131,12 +131,16 @@ function resolveCentralAuth(req) {
 }
 
 // 요청이 다루려는 agent 이름(쿼리·헤더·본문 순).
-// /register-collector 는 자기 이름을 body.name 으로 알리므로 그 필드도 바인딩 대상에 포함한다
-// (개별 토큰을 가진 엣지가 남의 이름으로 수집 서버를 덮어쓰는 것 방지).
 const requestedAgent = (req) => String(
-  req.query?.agent || req.get('X-Agent-Name') || req.body?.agent
-  || (req.path === '/register-collector' ? req.body?.name : '') || '',
+  req.query?.agent || req.get('X-Agent-Name') || req.body?.agent || '',
 ).trim();
+
+// /register-collector 의 실제 저장 키는 body.name 이다 — 바인딩에서 **항상 별도로** 대조한다.
+// ⚠ 보안(H-1, 2026-09-12): 이 값을 requestedAgent 의 OR 체인 끝에 두면, 공격자가 X-Agent-Name
+// 에 자기 이름을 넣어 미들웨어를 통과시키고 body.name 에는 남의 엣지 이름을 넣어 그 수집 서버의
+// URL·collectorToken 을 덮어쓸 수 있었다(중앙이 그 URL 로 자격증명을 실어 호출 → 유출 피벗).
+// 그래서 헤더 유무와 무관하게 register-collector 는 body.name 을 반드시 검사한다.
+const registerName = (req) => (req.path === '/register-collector' ? String(req.body?.name || '').trim() : '');
 
 // 인증 1회 해석 + agent 바인딩 강제(모든 라우트 공통). 라우트별 authed(req)는 이 결과를 읽는다.
 centralRouter.use((req, res, next) => {
@@ -144,14 +148,19 @@ centralRouter.use((req, res, next) => {
   req.centralAuth = auth;
   if (!auth.ok) return next(); // 각 라우트가 404/403을 구분해 응답(하위호환 유지)
   const want = requestedAgent(req);
-  if (auth.mode === 'agent' && want && want.toLowerCase() !== String(auth.agent).toLowerCase()) {
-    // 개별 토큰은 남의 이름으로 조회/보고할 수 없다 — 자격증명 횡탈·데이터 위장 차단.
-    console.warn(`[central] agent 불일치 거부 — 토큰=${auth.agent} 요청=${want} (${req.method} ${req.path})`);
-    return res.status(403).json({ ok: false, reason: `이 토큰은 '${auth.agent}' 전용입니다(요청: '${want}').` });
+  if (auth.mode === 'agent') {
+    // 개별 토큰은 남의 이름으로 조회/보고/등록할 수 없다 — 자격증명 횡탈·데이터 위장 차단.
+    // want(쿼리/헤더/본문 agent)와 register-collector 의 body.name 을 **둘 다** 대조한다.
+    for (const claim of [want, registerName(req)]) {
+      if (claim && claim.toLowerCase() !== String(auth.agent).toLowerCase()) {
+        console.warn(`[central] agent 불일치 거부 — 토큰=${auth.agent} 요청=${claim} (${req.method} ${req.path})`);
+        return res.status(403).json({ ok: false, reason: `이 토큰은 '${auth.agent}' 전용입니다(요청: '${claim}').` });
+      }
+    }
   }
   if (auth.mode === 'shared') {
     sharedStats.uses++; sharedStats.lastAt = Date.now();
-    sharedStats.lastAgent = want || '(unknown)'; sharedStats.lastPath = req.path;
+    sharedStats.lastAgent = want || registerName(req) || '(unknown)'; sharedStats.lastPath = req.path;
   }
   next();
 });
