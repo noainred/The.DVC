@@ -83,11 +83,29 @@ export function usageText(u, days) {
 }
 
 /**
+ * 표본이 없을 때의 짧은 라벨(v2.494). 이유를 아는 경우에는 그것을 말한다.
+ *
+ * 왜: 켜진 VM 은 값이 나오고 **꺼진 VM·템플릿만** '표본 없음' 으로 보인다(사용자 신고 2026-09-13).
+ * vCenter 는 전원이 꺼진 VM 의 사용률을 기록하지 않으니 정상 동작인데, '표본 없음' 만 보면 수집
+ * 실패처럼 읽힌다. 전원 상태는 화면이 이미 알고 있으므로 그 사실을 함께 적는다 — 단, 기간 중
+ * 일부만 켜져 있었다면 값이 나오므로(그때는 이 함수를 타지 않는다) 인과를 단정하지는 않는다.
+ */
+export function noSampleLabel({ poweredOff = false, template = false } = {}) {
+  if (template) return '템플릿 · 표본 없음';
+  if (poweredOff) return '전원 꺼짐 · 표본 없음';
+  return '표본 없음';
+}
+
+/**
  * 툴팁 — 평균만 보고 판단하지 않도록 최대값·표본 수·실제 덮은 기간을 함께 밝힌다.
  * 요청 기간보다 표본이 짧으면(신규 VM·보관 기간) 그 사실을 먼저 알린다.
  */
-export function usageTitle(u, days, { synthesized = false } = {}) {
-  if (!u) return `최근 ${usageDaysLabel(days)} 표본이 없습니다 — 전원이 꺼져 있었거나 vCenter 보관 기간 밖입니다.`;
+export function usageTitle(u, days, { synthesized = false, poweredOff = false, template = false } = {}) {
+  if (!u) {
+    if (template) return `템플릿은 전원을 켜지 않으므로 vCenter 에 사용률 표본이 없습니다(최근 ${usageDaysLabel(days)}).`;
+    if (poweredOff) return `전원이 꺼져 있어 최근 ${usageDaysLabel(days)} 사용률 표본이 없습니다. vCenter 는 꺼진 VM 의 사용률을 기록하지 않습니다(기간 중 일부만 켜져 있었다면 그만큼의 평균이 표시됩니다).`;
+    return `최근 ${usageDaysLabel(days)} 표본이 없습니다 — vCenter 보관 기간 밖이거나 그 구간에 켜져 있지 않았습니다.`;
+  }
   const parts = [];
   parts.push(`CPU 평균 ${u.cpuPct == null ? '—' : `${u.cpuPct}%`} · 최대 ${u.cpuMax == null ? '—' : `${u.cpuMax}%`}`);
   parts.push(`MEM 평균 ${u.memPct == null ? '—' : `${u.memPct}%`} · 최대 ${u.memMax == null ? '—' : `${u.memMax}%`}`);

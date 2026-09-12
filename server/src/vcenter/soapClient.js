@@ -389,6 +389,25 @@ export class VimSoapClient {
    * 이 파일의 parsePerfMultiXml 은 첫 returnval 만 읽으므로 여기에 쓸 수 없다.
    * 호출자가 morefs 를 청크로 나눠 준다(요청 XML·응답 크기 제어).
    */
+  /** 다중 엔티티 × 다중 카운터 QueryPerf(v2.494: VM 전용에서 엔티티 타입 일반화). */
+  async queryEntitiesPerfBatch(entityType, counterIds, morefs, intervalId, { startTime, endTime, maxSample = 0 } = {}) {
+    const ids = [...new Set((counterIds || []).filter(Boolean).map(String))];
+    const refs = [...new Set((morefs || []).filter(Boolean).map(String))];
+    if (!ids.length || !refs.length) return new Map();
+    const metricIds = ids.map((id) => `<metricId><counterId>${id}</counterId><instance></instance></metricId>`).join('');
+    const specs = refs.map((ref) =>
+      `<querySpec><entity type="${entityType}">${ref}</entity>`
+      + (startTime ? `<startTime>${startTime}</startTime>` : '')
+      + (endTime ? `<endTime>${endTime}</endTime>` : '')
+      + (maxSample > 0 ? `<maxSample>${maxSample}</maxSample>` : '')
+      + metricIds + `<intervalId>${intervalId}</intervalId></querySpec>`
+    ).join('');
+    const xml = await this.#call(
+      `<QueryPerf xmlns="urn:vim25"><_this type="PerformanceManager">${this.sc.perfManager}</_this>${specs}</QueryPerf>`
+    );
+    return parseEntityPerfBatchXml(xml, ids, entityType);
+  }
+
   async queryVmsPerfBatch(counterIds, morefs, intervalId, { startTime, endTime } = {}) {
     const ids = [...new Set((counterIds || []).filter(Boolean).map(String))];
     const refs = [...new Set((morefs || []).filter(Boolean).map(String))];
@@ -1005,6 +1024,50 @@ export async function fetchVmsUsageBatch(vc, morefs, interval, { start, end, chu
       if (i + size < refs.length) await new Promise((r) => setImmediate(r));
     }
     return { usage: out, counters: [cpuId ? 'cpu.usage.average' : null, memId ? 'mem.usage.average' : null].filter(Boolean), intervalSec: intervalId };
+  } finally {
+    await c.logout();
+  }
+}
+
+/**
+ * 호스트 여러 대의 CPU·메모리 사용률 **시계열**(v2.494) — 로그인 1회 + 청크당 QueryPerf 1회.
+ *
+ * 왜 필요한가: '추이' 화면을 호스트·클러스터 단위로 보려면 per-호스트 시계열이 필요한데 우리 DB 에는
+ * vCenter 단위 합계만 있다(`metrics/sampler.js` 가 per-호스트 계열을 만들지 않는다 — 의도된 설계).
+ * 그래서 vCenter 성능 롤업에서 요청 시에만 빌려온다. 클러스터는 호출자가 호스트별 계열을 평균한다
+ * (`perfBatch.averageByTimestamp` — 결측 호스트는 분모에서 제외).
+ *
+ * 반환 { series: Map&lt;moref, Map&lt;counterId,[{t,v}]&gt;&gt;, cpuId, memId, intervalSec }.
+ * 카운터가 없으면 해당 id 는 null 이고 호출자가 '수집 없음' 으로 표시한다(0 으로 채우지 않는다).
+ */
+export async function fetchHostsPerfSeries(vc, morefs, interval, { start, end, chunkSize = 20 } = {}) {
+  const intervalId = PERF_INTERVALS[interval] || PERF_INTERVALS.day;
+  const refs = [...new Set((morefs || []).filter(Boolean).map(String))];
+  const merged = new Map();
+  if (!refs.length) return { series: merged, cpuId: null, memId: null, intervalSec: intervalId };
+  const c = new VimSoapClient(vc);
+  await c.login();
+  try {
+    const map = await c.perfCounterMap();
+    const cpuId = map.get('cpu.usage.average') || null;
+    const memId = map.get('mem.usage.average') || null;
+    const ids = [cpuId, memId].filter(Boolean);
+    if (!ids.length) return { series: merged, cpuId, memId, intervalSec: intervalId };
+    // realtime(20초) 구간은 startTime/endTime 대신 maxSample 로 최근 구간을 받는다 — vCenter 의
+    // 실시간 버퍼는 약 1시간뿐이라 과거 시각을 주면 빈 응답이 온다.
+    const rt = interval === 'realtime';
+    const startTime = rt || !start ? null : new Date(start).toISOString();
+    const endTime = rt || !end ? null : new Date(end).toISOString();
+    const size = Math.max(1, Math.min(60, Number(chunkSize) || 20));
+    for (let i = 0; i < refs.length; i += size) {
+      const chunk = refs.slice(i, i + size);
+      const byRef = await c.queryEntitiesPerfBatch('HostSystem', ids, chunk, intervalId, {
+        startTime, endTime, maxSample: rt ? 180 : 0,
+      });
+      for (const [ref, v] of byRef) merged.set(ref, v);
+      if (i + size < refs.length) await new Promise((r) => setImmediate(r));
+    }
+    return { series: merged, cpuId, memId, intervalSec: intervalId };
   } finally {
     await c.logout();
   }

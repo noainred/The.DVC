@@ -132,3 +132,47 @@ export function summarizeVmUsage(byCounter, { cpuId, memId }) {
     coverageDays: cov,
   };
 }
+
+/**
+ * 추이 조회 기간(ms) → vCenter 롤업 구간(v2.494).
+ *
+ * 호스트·클러스터 추이는 우리 DB 에 없다(저장되는 것은 vCenter 단위 합계뿐 —
+ * `metrics/sampler.js` 가 per-호스트 CPU/메모리 계열을 만들지 않는다). 그래서 vCenter 성능
+ * 롤업에서 그때그때 빌려오고, 기간에 맞는 **가장 거친 롤업**을 골라 표본 수를 억제한다.
+ * vSphere 기본 4단계: realtime 20초(~1시간) · day 5분(1일) · week 30분(1주) · month 2시간(1달) ·
+ * year 1일(1년). 한 시간 구간은 realtime 만 있고, 1년은 year 만 있다.
+ */
+export function intervalForRangeMs(ms) {
+  const h = Number(ms) / 3_600_000;
+  if (!Number.isFinite(h) || h <= 0) return 'day';
+  if (h <= 1.5) return 'realtime';   // 1시간
+  if (h <= 24) return 'day';         // 6·12·24시간 → 5분
+  if (h <= 24 * 7) return 'week';    // 7일 → 30분
+  if (h <= 24 * 31) return 'month';  // 30일 → 2시간
+  return 'year';                     // 60·120·365일 → 1일
+}
+
+/**
+ * 엔티티별 계열(Map&lt;moref, Map&lt;cid, [{t,v}]&gt;&gt;) → 타임스탬프별 평균(v2.494).
+ *
+ * 클러스터 추이는 그 클러스터 호스트들의 평균이다. 결측(-1)과 값 없는 호스트는 **분모에서 제외**한다 —
+ * 0 으로 세면 꺼진/미보고 호스트가 평균을 끌어내려 사실과 달라진다. 반환은 ts 오름차순 배열이며
+ * 각 점에 기여한 호스트 수(n)를 함께 싣는다(화면이 근거를 밝힐 수 있게).
+ */
+export function averageByTimestamp(byRef, cid, div = 100) {
+  const acc = new Map(); // tsMs -> { sum, n }
+  for (const byCounter of byRef?.values?.() || []) {
+    for (const p of byCounter?.get?.(String(cid)) || []) {
+      const v = Number(p?.v);
+      if (!Number.isFinite(v) || v < 0) continue;
+      const ts = Date.parse(p.t);
+      if (!Number.isFinite(ts)) continue;
+      let e = acc.get(ts);
+      if (!e) { e = { sum: 0, n: 0 }; acc.set(ts, e); }
+      e.sum += v / (div || 1); e.n += 1;
+    }
+  }
+  return [...acc.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([ts, e]) => ({ ts, avg: Math.round((e.sum / e.n) * 10) / 10, n: e.n }));
+}

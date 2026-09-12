@@ -100,3 +100,36 @@ test('VM 한 건 요약 — cpu/mem 평균·최대·커버리지, 둘 다 없으
     { cpuPct: 5, cpuMax: 5, memPct: null, memMax: null, samples: 3, coverageDays: 2 });
   assert.equal(summarizeVmUsage(undefined, { cpuId: '6', memId: '24' }), null);
 });
+
+// ── v2.494: 호스트/클러스터 추이 ─────────────────────────────────────────────
+import { intervalForRangeMs, averageByTimestamp } from '../src/vcenter/perfBatch.js';
+
+test('기간(ms) → 롤업: 1h realtime · 24h 이하 day · 7일 week · 30일 month · 그 이상 year', () => {
+  const H = 3_600_000, D = 86_400_000;
+  assert.equal(intervalForRangeMs(H), 'realtime');
+  assert.equal(intervalForRangeMs(6 * H), 'day');
+  assert.equal(intervalForRangeMs(24 * H), 'day');
+  assert.equal(intervalForRangeMs(7 * D), 'week');
+  assert.equal(intervalForRangeMs(30 * D), 'month');
+  assert.equal(intervalForRangeMs(60 * D), 'year');
+  assert.equal(intervalForRangeMs(365 * D), 'year');
+  assert.equal(intervalForRangeMs(0), 'day');        // 비정상 입력은 안전한 기본
+  assert.equal(intervalForRangeMs('x'), 'day');
+});
+
+test('클러스터 평균 — 타임스탬프별로 호스트 평균, 결측(-1)·값 없는 호스트는 분모에서 제외', () => {
+  const t0 = '2026-09-01T00:00:00Z', t1 = '2026-09-01T00:05:00Z';
+  const mk = (pts) => new Map([['6', pts]]);
+  const byRef = new Map([
+    ['host-1', mk([{ t: t0, v: 2000 }, { t: t1, v: 4000 }])],
+    ['host-2', mk([{ t: t0, v: 4000 }, { t: t1, v: -1 }])],   // t1 결측
+    ['host-3', mk([])],                                        // 값 없음
+  ]);
+  const out = averageByTimestamp(byRef, '6', 100);
+  assert.deepEqual(out, [
+    { ts: Date.parse(t0), avg: 30, n: 2 },   // (20+40)/2
+    { ts: Date.parse(t1), avg: 40, n: 1 },   // 결측 제외 → host-1 만
+  ]);
+  assert.deepEqual(averageByTimestamp(new Map(), '6'), []);
+  assert.deepEqual(averageByTimestamp(null, '6'), []);
+});

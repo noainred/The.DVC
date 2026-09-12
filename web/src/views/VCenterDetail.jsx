@@ -13,7 +13,7 @@ import { STable } from '../components/STable.jsx';
 // VM 행의 기간 실사용률(v2.492) — 기간 프리셋·보이는 행 수집·문구·색 판정은 순수 모듈(vitest 고정).
 import {
   USAGE_DAYS, DEFAULT_USAGE_DAYS, normUsageDays, usageDaysLabel, usageKey,
-  visibleTreeVmIds, visibleHostVmIds, pendingIds, mergeUsage, usageText, usageTitle, usagePctColor,
+  visibleTreeVmIds, visibleHostVmIds, pendingIds, mergeUsage, usageText, usageTitle, usagePctColor, noSampleLabel,
 } from './vcdUsage.js';
 
 const VIEWS = [
@@ -51,18 +51,20 @@ const TREND_SERIES = {
 };
 
 /** 추이 데이터 로더 — 기간 변경 시 재조회. 훅 규칙(조기 return 위 선언)을 지킨다. */
-function useUsageHistory(vcenterId, range, enabled = true) {
+function useUsageHistory(vcenterId, range, enabled = true, scope = '') {
   const [d, setD] = useState(null);
   const [err, setErr] = useState(null);
   useEffect(() => {
     if (!enabled || !vcenterId) { setD(null); return undefined; }
     let dead = false;
     setD(null); setErr(null);
-    fetchJson(`/vcenters/${encodeURIComponent(vcenterId)}/usage-history`, { range })
+    // v2.494: scope=host:<id>|cluster:<이름> 이면 서버가 vCenter 성능 롤업을 요청 시 빌려온다(우리 DB 엔
+    // vCenter 합계만 있다). 빈 scope 는 기존 저장 시계열(vCenter 전체).
+    fetchJson(`/vcenters/${encodeURIComponent(vcenterId)}/usage-history`, { range, ...(scope ? { scope } : {}) })
       .then((r) => { if (!dead) setD(r); })
       .catch((e) => { if (!dead) setErr(e.message); });
     return () => { dead = true; };
-  }, [vcenterId, range, enabled]);
+  }, [vcenterId, range, enabled, scope]);
   return { d, err };
 }
 
@@ -87,11 +89,19 @@ function MiniTrend({ points, field, color, label }) {
 }
 
 /** 📈 추이 탭 — 기간 9종 × CPU/메모리/디스크의 사용량 vs 할당량. */
-function TrendView({ vcenterId }) {
+function TrendView({ vcenterId, clusters = [], hosts = [] }) {
   const [range, setRange] = useState('24h');
   const [mode, setMode] = useState('pct');   // pct(사용률) | abs(절대량)
-  const { d, err } = useUsageHistory(vcenterId, range);
+  // v2.494(사용자 요구): 추이를 vCenter 전체 / 클러스터 / 호스트 단위로. 훅은 조기 return 위에.
+  const [scopeKind, setScopeKind] = useState('vc'); // vc | cluster | host
+  const [scopeKey, setScopeKey] = useState('');
+  const scope = scopeKind === 'vc' || !scopeKey ? '' : `${scopeKind}:${scopeKey}`;
+  const { d, err } = useUsageHistory(vcenterId, range, true, scope);
   const pts = d?.points || [];
+  const isVc = !scope;
+  const clusterNames = clusters.map(([name]) => name);
+  const hostList = [...hosts].sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  const pickKind = (k) => { setScopeKind(k); setScopeKey(k === 'cluster' ? (clusterNames[0] || '') : k === 'host' ? (hostList[0]?.id || '') : ''); };
   const fmtTs = (t) => {
     const dt = new Date(t);
     // 24시간 이하는 시:분, 그 이상은 월/일(+시)로 — 축 라벨이 과밀해지지 않게.
@@ -101,6 +111,25 @@ function TrendView({ vcenterId }) {
   };
   return (
     <div className="card" style={{ padding: 14 }}>
+      {/* 범위: vCenter 전체(저장 시계열) / 클러스터·호스트(vCenter 성능 롤업 요청 시 조회) */}
+      <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 8, fontSize: 12 }}>
+        <span className="muted">범위</span>
+        {[['vc', 'vCenter 전체'], ['cluster', '클러스터'], ['host', '호스트']].map(([k, label]) => (
+          <button key={k} className={scopeKind === k ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '5px 10px', fontSize: 12 }}
+            onClick={() => pickKind(k)} disabled={(k === 'cluster' && !clusterNames.length) || (k === 'host' && !hostList.length)}>{label}</button>
+        ))}
+        {scopeKind === 'cluster' && (
+          <select className="select" style={{ maxWidth: 260 }} value={scopeKey} onChange={(e) => setScopeKey(e.target.value)}>
+            {clusterNames.map((c) => <option key={c} value={c}>{c} ({(clusters.find(([n]) => n === c)?.[1] || []).length} 호스트)</option>)}
+          </select>
+        )}
+        {scopeKind === 'host' && (
+          <select className="select" style={{ maxWidth: 300 }} value={scopeKey} onChange={(e) => setScopeKey(e.target.value)}>
+            {hostList.map((h) => <option key={h.id} value={h.id}>{h.name}{h.cluster ? ` · ${h.cluster}` : ''}</option>)}
+          </select>
+        )}
+        {!isVc && <span className="muted">vCenter 성능 롤업을 요청 시 조회 — 우리 DB 에는 vCenter 합계만 저장됩니다</span>}
+      </div>
       <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 10 }}>
         <div className="flex gap wrap" style={{ gap: 6 }}>
           {TREND_RANGES.map(([k, label]) => (
@@ -109,14 +138,21 @@ function TrendView({ vcenterId }) {
           ))}
         </div>
         <div className="flex gap">
-          <button className={mode === 'pct' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '5px 12px', fontSize: 12 }} onClick={() => setMode('pct')}>사용률(%)</button>
-          <button className={mode === 'abs' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '5px 12px', fontSize: 12 }} onClick={() => setMode('abs')}>사용량/할당량</button>
+          <button className={mode === 'pct' || !isVc ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '5px 12px', fontSize: 12 }} onClick={() => setMode('pct')}>사용률(%)</button>
+          <button className={mode === 'abs' && isVc ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '5px 12px', fontSize: 12 }} onClick={() => setMode('abs')}
+            disabled={!isVc} title={!isVc ? '호스트·클러스터 범위는 사용률(%)만 제공합니다(vCenter 성능 카운터가 % 단위)' : ''}>사용량/할당량</button>
         </div>
       </div>
 
       {err ? <ErrorBox message={err} />
         : !d ? <Loading />
-          : pts.length < 2 ? (
+          : pts.length < 2 && !isVc ? (
+            <div className="muted" style={{ fontSize: 13, padding: 24, textAlign: 'center', lineHeight: 1.7 }}>
+              {d.reason
+                ? <>이 범위의 추이를 가져오지 못했습니다: <b>{d.reason}</b></>
+                : <>이 기간에 vCenter 가 돌려준 표본이 없습니다 — 호스트가 그 구간에 연결되어 있지 않았거나 vCenter 통계 보관 기간 밖입니다.</>}
+            </div>
+          ) : pts.length < 2 ? (
             <div className="muted" style={{ fontSize: 13, padding: 24, textAlign: 'center', lineHeight: 1.7 }}>
               이 기간에 표시할 추이 데이터가 없습니다.<br />
               사용량 추이는 <b>수집이 시작된 시점부터</b> 쌓입니다
@@ -127,13 +163,16 @@ function TrendView({ vcenterId }) {
             <>
               {Object.entries(TREND_SERIES).map(([key, sInfo]) => {
                 const has = pts.some((p) => p[mode === 'pct' ? sInfo.pct : sInfo.used] != null);
+                // 호스트·클러스터 범위의 디스크는 값이 존재할 수 없다(호스트 성능 카운터에 없음) —
+                // 빈 차트 틀을 그리지 않고 한 줄로만 알린다(CLAUDE.md '없는 이력을 빈 틀로 두지 않는다').
+                const hideChart = !isVc && key === 'disk';
                 return (
-                  <div key={key} style={{ marginBottom: 18 }}>
+                  <div key={key} style={{ marginBottom: hideChart ? 8 : 18 }}>
                     <div className="flex between" style={{ alignItems: 'baseline', marginBottom: 4 }}>
                       <b style={{ fontSize: 13 }}>{sInfo.label}</b>
-                      {!has && <span className="muted" style={{ fontSize: 11.5 }}>데이터 없음(수집 대기)</span>}
+                      {!has && <span className="muted" style={{ fontSize: 11.5 }}>{hideChart ? '해당 없음(호스트 성능 카운터에 디스크 사용률이 없음)' : !isVc ? '표본 없음' : '데이터 없음(수집 대기)'}</span>}
                     </div>
-                    <div style={{ width: '100%', height: 170 }}>
+                    {!hideChart && <div style={{ width: '100%', height: 170 }}>
                       <ResponsiveContainer>
                         <LineChart data={pts} margin={{ top: 6, right: 14, bottom: 2, left: 0 }}>
                           <CartesianGrid stroke="rgba(148,163,184,.14)" />
@@ -150,11 +189,16 @@ function TrendView({ vcenterId }) {
                             </>}
                         </LineChart>
                       </ResponsiveContainer>
-                    </div>
+                    </div>}
                   </div>
                 );
               })}
               <div className="muted" style={{ fontSize: 11.5, lineHeight: 1.7 }}>
+                {!isVc && (
+                  <>출처: vCenter 성능 롤업({d.interval || '—'}) · {scopeKind === 'cluster' ? `호스트 ${d.hosts ?? 0}대 평균` : '호스트 1대'}
+                    {d.hostsOmitted > 0 ? <b style={{ color: 'var(--amber)' }}> · 상한으로 {d.hostsOmitted}대 제외(이름순 앞 {d.hosts}대의 평균)</b> : null}
+                    {d.synthesized ? ' · 데모 합성값(실측 아님)' : ''}<br /></>
+                )}
                 점선 = 할당(디스크는 총 용량), 실선 = 실사용. 집계 단위 {(d.bucketMs || 0) >= 86_400_000 ? `${Math.round(d.bucketMs / 86_400_000)}일` : (d.bucketMs || 0) >= 3_600_000 ? `${Math.round(d.bucketMs / 3_600_000)}시간` : `${Math.round((d.bucketMs || 0) / 60_000)}분`} 평균 · 표본 {pts.length}점
                 {d.collectedSince ? ` · 수집 시작 ${new Date(d.collectedSince).toLocaleDateString('ko-KR')}` : ''}
                 <br />※ 선이 끊긴 구간은 그 시각에 수집이 없었다는 뜻입니다(0이 아니라 결측). 디스크는 데이터스토어 사용/총용량 합계입니다.
@@ -185,6 +229,9 @@ export default function VCenterDetail({ site, onBack }) {
   // 볼 수 없었다. 출처는 vCenter 성능 롤업이고 우리 DB 에 per-VM 시계열이 없으므로(5,850 VM 규모라
   // 의도적으로 적재하지 않는다) **펼쳐진 행만** 서버 배치로 빌려온다(POST /vms/usage).
   // ⚠ 훅이므로 위 규칙대로 컴포넌트 최상단에 선언한다.
+  // v2.494(사용자 요구): 기본은 **조회하지 않는다**. 기간 조회는 vCenter 성능 API 를 때리므로
+  // 화면을 열 때마다 자동으로 나가면 부하가 된다. 체크박스를 켜야 기간 선택이 나타나고 조회한다.
+  const [usageOn, setUsageOn] = useState(false);
   const [usageDays, setUsageDays] = useState(DEFAULT_USAGE_DAYS);
   const [usage, setUsage] = useState({});        // `${days}|${vmId}` -> 요약 | null(표본 없음)
   const [usageInfo, setUsageInfo] = useState({ loading: false, synthesized: false, truncated: false, maxVms: 0, error: '' });
@@ -300,11 +347,12 @@ export default function VCenterDetail({ site, onBack }) {
   // 폴더의 VM, '호스트 및 클러스터' 트리는 펼친 호스트의 VM. 전량(최대 5,000)을 조회하면 고RTT
   // vCenter 에서 분 단위가 걸린다 — 서버도 요청당 상한(기본 60)을 둔다.
   const wantIds = useMemo(() => {
+    if (!usageOn) return [];                       // 체크 해제 = 요청 0건
     if (view !== 'vms' && view !== 'hosts') return [];
     if (query) return matches.slice(0, SEARCH_CAP).map((mm) => mm.v.id);
     if (view === 'vms') return visibleTreeVmIds(folderTree, open);
     return visibleHostVmIds(hosts, vmsByHost, open);
-  }, [view, query, matches, folderTree, open, hosts, vmsByHost]);
+  }, [usageOn, view, query, matches, folderTree, open, hosts, vmsByHost]);
   // 효과 의존성은 문자열로 고정한다 — 배열 정체성은 매 렌더 바뀌어 무한 조회가 된다.
   const wantKey = wantIds.join(',');
   useEffect(() => {
@@ -340,9 +388,14 @@ export default function VCenterDetail({ site, onBack }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wantKey, usageDays, vcenterId]);
   // 행에 넘길 props — 조회 여부(known)를 구분해 '조회 중…' 과 '표본 없음' 을 다르게 보인다.
-  const usageProps = (vmId) => {
-    const k = usageKey(usageDays, vmId);
-    return { u: usage[k], known: k in usage, days: usageDays, loading: usageInfo.loading, synthesized: usageInfo.synthesized };
+  // vm 을 그대로 받는다 — 표본이 없을 때 '전원 꺼짐·템플릿' 인지 말해주려면 전원 상태가 필요하다.
+  const usageProps = (vm) => {
+    const k = usageKey(usageDays, vm.id);
+    return {
+      enabled: usageOn,
+      u: usage[k], known: k in usage, days: usageDays, loading: usageInfo.loading, synthesized: usageInfo.synthesized,
+      poweredOff: vm.powerState !== 'POWERED_ON', template: !!vm.template,
+    };
   };
 
   // Datastore storage-type filter + per-kind counts.
@@ -398,10 +451,19 @@ export default function VCenterDetail({ site, onBack }) {
             {v.icon} {v.label}
           </button>
         ))}
+        {/* v2.494: 기간 실사용률은 **옵트인**. vCenter 성능 조회라 화면을 열 때마다 자동으로 나가면
+            부하가 된다(펼친 행만 조회하지만 고RTT 에서는 그마저도 비싸다). 체크하면 기간 선택 줄이
+            나타나고, 해제하면 요청이 0건이 되며 행의 사용률 표시도 사라진다. */}
+        {(view === 'hosts' || view === 'vms') && (
+          <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12, flex: 'none', cursor: 'pointer', marginLeft: 8 }}
+            title="체크하면 VM 행에 선택한 기간의 평균 CPU·메모리 실사용률을 표시합니다(vCenter 성능 롤업 조회 — 펼친 폴더·검색 결과의 VM 만). 해제하면 조회하지 않습니다.">
+            <input type="checkbox" checked={usageOn} onChange={(e) => setUsageOn(e.target.checked)} /> 📊 사용량 조회
+          </label>
+        )}
       </div>
 
       {/* 📈 추이(v2.377) — 기간 9종 × CPU/메모리/디스크 사용량 vs 할당량 */}
-      {view === 'trend' && <div style={{ marginTop: 10 }}><TrendView vcenterId={vcenterId} /></div>}
+      {view === 'trend' && <div style={{ marginTop: 10 }}><TrendView vcenterId={vcenterId} clusters={clusters} hosts={hosts} /></div>}
 
       {(view === 'hosts' || view === 'vms') && (
         <>
@@ -442,6 +504,7 @@ export default function VCenterDetail({ site, onBack }) {
           {/* VM 기간 실사용률(v2.492, 사용자 요구) — 행에는 할당 사양만 있어 '실제로 얼마나 쓰는지'를
               볼 수 없었다. 기본 30일이고 7~365일을 고를 수 있다. 출처는 vCenter 성능 롤업이며 우리
               DB 에 per-VM 시계열이 없으므로 **펼쳐진 행만** 요청 시 조회한다(요청당 상한 있음). */}
+          {usageOn && (
           <div className="flex gap wrap" style={{ alignItems: 'center', margin: '0 0 8px', fontSize: 12 }}>
             <span className="muted">실사용률 기간</span>
             {USAGE_DAYS.map((d) => (
@@ -461,6 +524,7 @@ export default function VCenterDetail({ site, onBack }) {
               출처: vCenter 성능 롤업 · 펼친 폴더·검색 결과의 VM 만 조회
             </span>
           </div>
+          )}
           {view === 'hosts' && overview && (
             <>
               <div className="muted" style={{ fontSize: 12, margin: '0 0 8px' }}>
@@ -517,7 +581,7 @@ export default function VCenterDetail({ site, onBack }) {
                   sub={<>
                     {`🧩 ${vm.cluster || '—'} · 🖥️ ${vm.host || '—'} · 📁 ${vm.folder || 'vm'} · ${vm.cpuCount || 0}vCPU · ${Math.round((vm.memMB || 0) / 1024)}GB · 💾 ${fmtGb(vm.storageGB || 0)}`}
                     {/* 메모로만 걸린 결과 — 어떤 메모 문구에 걸렸는지 스니펫으로 표시(하이라이트 포함) */}
-                    <VmUsageCell {...usageProps(vm.id)} />
+                    <VmUsageCell {...usageProps(vm)} />
                     {viaNotes && <span style={{ color: 'var(--amber)' }}> · 📝 <Highlight text={notesSnippet(vm.notes, token)} tokens={tokens} /></span>}
                     <VmBadges vm={vm} cloneSet={cloneSet} />
                   </>} />
@@ -546,7 +610,7 @@ export default function VCenterDetail({ site, onBack }) {
                     {(vmsByHost.get(h.name) || []).map((vm) => (
                       <Leaf key={vm.id} icon="🧊" onClick={() => setSel({ type: 'vm', item: vm })}
                         label={vm.name} badge={<StateBadge state={vm.powerState} />}
-                        sub={<>{`${vm.guestOS} · ${vm.cpuCount}vCPU · ${Math.round(vm.memMB / 1024)}GB`}<VmUsageCell {...usageProps(vm.id)} /><VmBadges vm={vm} cloneSet={cloneSet} /></>} />
+                        sub={<>{`${vm.guestOS} · ${vm.cpuCount}vCPU · ${Math.round(vm.memMB / 1024)}GB`}<VmUsageCell {...usageProps(vm)} /><VmBadges vm={vm} cloneSet={cloneSet} /></>} />
                     ))}
                   </Tree>
                 ))}
@@ -653,12 +717,18 @@ function MiniBar({ label, pct }) {
  * 없으면 '표본 없음'. 둘을 합치면 사용자가 '느린 건지 데이터가 없는 건지' 알 수 없다.
  * 트리 행은 nowrap 이라 MiniBar(바 2개 ≈ 300px) 대신 수치만 쓴다.
  */
-function VmUsageCell({ u, known, days, loading, synthesized }) {
+function VmUsageCell({ enabled, u, known, days, loading, synthesized, poweredOff, template }) {
+  if (!enabled) return null;                      // '사용량 조회' 미체크 = 행에 아무것도 붙이지 않는다
   if (!known) {
     return <span className="muted" style={{ fontSize: 11.5 }}> · {usageDaysLabel(days)} {loading ? '조회 중…' : '—'}</span>;
   }
   if (!u) {
-    return <span className="muted" style={{ fontSize: 11.5 }} title={usageTitle(null, days)}> · {usageDaysLabel(days)} 표본 없음</span>;
+    // 이유를 아는 경우(전원 꺼짐·템플릿)에는 그것을 적는다 — '표본 없음' 만 보면 수집 실패로 읽힌다.
+    return (
+      <span className="muted" style={{ fontSize: 11.5 }} title={usageTitle(null, days, { poweredOff, template })}>
+        {' · '}{usageDaysLabel(days)} {noSampleLabel({ poweredOff, template })}
+      </span>
+    );
   }
   const num = (x) => (x == null ? '—' : `${Math.round(x)}%`);
   return (
@@ -779,7 +849,7 @@ function FolderNodes({ node, path, open, toggle, onSelect, cloneSet, usageProps 
             <FolderNodes node={f} path={`${path}/${name}`} open={open} toggle={toggle} cloneSet={cloneSet} usageProps={usageProps} onSelect={onSelect} />
             {f.vms.map((vm) => (
               <Leaf key={vm.id} icon="🧊" onClick={() => onSelect(vm)} label={vm.name} badge={<StateBadge state={vm.powerState} />}
-                sub={<>{`${vm.guestOS} · ${vm.cpuCount}vCPU · ${Math.round(vm.memMB / 1024)}GB`}<VmUsageCell {...usageProps(vm.id)} /><VmBadges vm={vm} cloneSet={cloneSet} /></>} />
+                sub={<>{`${vm.guestOS} · ${vm.cpuCount}vCPU · ${Math.round(vm.memMB / 1024)}GB`}<VmUsageCell {...usageProps(vm)} /><VmBadges vm={vm} cloneSet={cloneSet} /></>} />
             ))}
           </Tree>
         );

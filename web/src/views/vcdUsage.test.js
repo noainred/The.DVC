@@ -5,7 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   USAGE_DAYS, DEFAULT_USAGE_DAYS, normUsageDays, usageDaysLabel, usageKey,
-  visibleTreeVmIds, visibleHostVmIds, pendingIds, mergeUsage, usageText, usageTitle, usagePctColor,
+  visibleTreeVmIds, visibleHostVmIds, pendingIds, mergeUsage, usageText, usageTitle, usagePctColor, noSampleLabel,
 } from './vcdUsage.js';
 
 const vm = (id) => ({ id, name: id });
@@ -99,5 +99,22 @@ describe('문구·색 — 추정 금지', () => {
     expect(usagePctColor(59)).toBe('var(--green)');
     expect(usagePctColor(60)).toBe('var(--amber)');
     expect(usagePctColor(85)).toBe('var(--red)');
+  });
+});
+
+describe('표본 없음 — 이유를 아는 경우엔 그것을 말한다(v2.494)', () => {
+  it('전원 꺼짐·템플릿을 구분하고, 모르면 일반 문구', () => {
+    expect(noSampleLabel({ poweredOff: true })).toBe('전원 꺼짐 · 표본 없음');
+    expect(noSampleLabel({ template: true })).toBe('템플릿 · 표본 없음');
+    expect(noSampleLabel({ poweredOff: true, template: true })).toBe('템플릿 · 표본 없음'); // 템플릿이 더 구체적
+    expect(noSampleLabel({})).toBe('표본 없음');
+    expect(noSampleLabel()).toBe('표본 없음');
+  });
+  it('툴팁은 vCenter 가 꺼진 VM 사용률을 기록하지 않는다는 사실을 밝히고, 인과를 단정하지 않는다', () => {
+    const t = usageTitle(null, 30, { poweredOff: true });
+    expect(t).toContain('꺼진 VM');
+    expect(t).toContain('일부만 켜져 있었다면');   // 기간 중 일부 가동 시 값이 나온다는 단서
+    expect(usageTitle(null, 30, { template: true })).toContain('템플릿');
+    expect(usageTitle(null, 30)).toContain('보관 기간');
   });
 });
