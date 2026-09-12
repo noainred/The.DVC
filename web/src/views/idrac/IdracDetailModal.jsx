@@ -10,6 +10,8 @@
 // IdracDetailModal(HardwareTools 전용)·ScanJobLogModal·IdracScanJobs·IdracScanRanges(셸이 조립).
 import React, { useEffect, useState } from 'react';
 import { fetchJson } from '../../api.js';
+// 센서 탭 문구 판정(v2.493) — '값 없음' 을 '텔레메트리 미지원' 으로 단정하지 않게 순수 모듈로 고정.
+import { cpuBadgeText, maxTempText, sampleCountText, emptyNote, latestTempRows, tempColorOf, fetchErrorNote } from './sensorText.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import EscClose from '../../components/EscClose.jsx';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
@@ -23,13 +25,18 @@ export function IdracDetailModal({ server, onClose }) {
   const [inv, setInv] = useState(null);
   const [invErr, setInvErr] = useState(null);
   const [sensors, setSensors] = useState(null);
+  const [sensErr, setSensErr] = useState(null); // 센서 조회 실패(수집 0 과 구분해 표시)
   const [tab, setTab] = useState('charts'); // charts | versions | gpu
   const [gpuProbe, setGpuProbe] = useState(null); // null | 'loading' | result
   const [vh, setVh] = useState(null); // 서비스태그로 매칭된 vCenter 가상화 호스트
   const runGpuProbe = () => { setGpuProbe('loading'); fetchJson(`/admin/idrac/${encodeURIComponent(server.id)}/gpu-probe`).then(setGpuProbe).catch((e) => setGpuProbe({ ok: false, reason: e.message })); };
   const loadInv = (refresh) => fetchJson(`/admin/idrac/${encodeURIComponent(server.id)}/inventory${refresh ? '?refresh=1' : ''}`)
     .then((r) => { setInv(r.inventory); setInvErr(null); }).catch((e) => setInvErr(e.message));
-  const loadSensors = () => fetchJson(`/admin/idrac/${encodeURIComponent(server.id)}/sensors?minutes=180`).then(setSensors).catch(() => {});
+  // v2.493: 오류를 삼키지 않는다 — 404/400/403 이 와도 예전에는 '아직 수집된 센서 샘플이 없습니다'
+  // 와 똑같이 보여 '수집 0' 과 '조회 실패' 를 구분할 수 없었다.
+  const loadSensors = () => fetchJson(`/admin/idrac/${encodeURIComponent(server.id)}/sensors?minutes=180`)
+    .then((d) => { setSensors(d); setSensErr(null); })
+    .catch((e) => setSensErr(e));
   useEffect(() => {
     loadInv(false); loadSensors();
     fetchJson(`/admin/idrac/${encodeURIComponent(server.id)}/vcenter-host`).then(setVh).catch(() => setVh(null));
@@ -111,10 +118,13 @@ export function IdracDetailModal({ server, onClose }) {
         {tab === 'charts' && (
           <div>
             <div className="flex gap wrap" style={{ marginBottom: 10 }}>
-              <span className="badge blue">CPU 사용량 {latest?.cpu != null ? `${latest.cpu}%` : '— (텔레메트리 미지원)'}</span>
-              <span className="badge amber">최고 온도 {(() => { const t = Object.values(latest?.temps || {}); return t.length ? `${Math.max(...t)}℃` : '—'; })()}</span>
-              <span className="muted" style={{ fontSize: 12, alignSelf: 'center' }}>1분 간격 · 최근 {sensors?.count || 0}샘플 · 30초마다 갱신</span>
+              <span className="badge blue">{cpuBadgeText(sensors)}</span>
+              <span className="badge amber">{maxTempText(sensors)}</span>
+              <span className="muted" style={{ fontSize: 12, alignSelf: 'center' }}>{sampleCountText(sensors)}</span>
             </div>
+            {/* v2.493: 시계열이 없으면 빈 차트 틀을 두 개 띄우지 않는다 — 위임(엣지) 서버는
+                중앙에 이력이 없어 늘 빈 틀이 됐다. 값은 아래 '현재값' 표로 보여준다. */}
+            {chartData.length > 0 && (<>
             <div style={{ fontSize: 13, fontWeight: 700, margin: '6px 0' }}>CPU 사용량 (%)</div>
             <div style={{ width: '100%', height: 180 }}>
               <ResponsiveContainer>
@@ -142,6 +152,7 @@ export function IdracDetailModal({ server, onClose }) {
                 </LineChart>
               </ResponsiveContainer>
             </div>
+            </>)}
             {fanNames.length > 0 && (
               <>
                 <div style={{ fontSize: 13, fontWeight: 700, margin: '12px 0 6px' }}>팬 속도 (RPM) — {fanNames.length}개</div>
@@ -161,7 +172,28 @@ export function IdracDetailModal({ server, onClose }) {
                 </div>
               </>
             )}
-            {(!sensors || !sensors.samples?.length) && <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>아직 수집된 센서 샘플이 없습니다. 첫 수집(1분 주기) 후 표시됩니다.</div>}
+            {/* 현재값 표(v2.493) — 차트는 시계열이 있어야 그려지지만, 최신 스냅샷만 있는 경우
+                (위임 법인 엣지 수집)에도 **값은 보여준다**. 예전에는 이 경우 '센서 0개' 로만 보여
+                같은 서버가 '법인별 온도' 에서는 정상 표시되는데 여기서는 수집이 멈춘 것처럼 보였다. */}
+            {latestTempRows(sensors).length > 0 && (
+              <>
+                <div style={{ fontSize: 13, fontWeight: 700, margin: '12px 0 6px' }}>
+                  현재값 — 온도 센서 {latestTempRows(sensors).length}개
+                  {sensors?.latest?.t ? <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}> · {new Date(sensors.latest.t).toLocaleString('ko-KR')}</span> : null}
+                </div>
+                <div className="flex gap wrap">
+                  {latestTempRows(sensors).map((r) => (
+                    <span key={r.name} className="badge" style={{ fontSize: 11.5 }} title={`${r.name} ${r.celsius}℃`}>
+                      <span className="muted">{r.name}</span>{' '}
+                      <b style={{ color: tempColorOf(r.celsius), fontVariantNumeric: 'tabular-nums' }}>{r.celsius}℃</b>
+                    </span>
+                  ))}
+                </div>
+              </>
+            )}
+            {sensErr
+              ? <div className="badge amber" style={{ fontSize: 12, marginTop: 8 }}>{fetchErrorNote(sensErr)}</div>
+              : emptyNote(sensors) && <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>{emptyNote(sensors)}</div>}
           </div>
         )}
 

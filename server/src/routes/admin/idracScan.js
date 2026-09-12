@@ -18,7 +18,7 @@ import { listDatacenters } from '../../datacenter/store.js';
 import { startIdracScanNow, idracScanStatus, stopIdracScanNow, setIdracScanIntervalMs } from '../../idrac/scanPoller.js';
 import { listIdracScanLog, idracScanLogDatacenters } from '../../idrac/scanLog.js';
 import { getInventory as getIdracInventory } from '../../idrac/invCache.js';
-import { getSensorSeries } from '../../idrac/sensorStore.js';
+import { getSensorSeries, remoteSensorView } from '../../idrac/sensorStore.js';
 import { fetchInventory as fetchIdracInventory, fetchSensors as fetchIdracSensors, probeGpuTelemetry } from '../../idrac/redfish.js';
 import { listCollectors } from '../../collector/registry.js';
 import { findRemoteServer } from '../../collector/remoteInventory.js';
@@ -92,8 +92,13 @@ adminRouter.get('/idrac/:id/vcenter-host', adminOnly, (req, res) => {
 adminRouter.get('/idrac/:id/sensors', adminOnly, async (req, res) => {
   const s = loadIdracRegistry().find((x) => x.id === req.params.id);
   if (!s) {
-    // 위임 법인 원격 서버: 중앙에 시계열이 없음(온도 동기화는 후속). 상세 팝업이 에러나지 않게 빈 응답.
-    if (findRemoteServer(req.params.id)) return res.json({ ok: true, remote: true, latest: null, series: [], live: null });
+    // 위임 법인 원격 서버(v2.493): 중앙에 **시계열은 없지만 최신 센서 스냅샷은 있다**(엣지 export
+    // 의 s.sensors — '법인별 온도' 화면이 이미 그 값을 쓴다). 예전에는 여기서 latest:null 을
+    // 돌려줘 같은 서버가 법인별 온도에서는 52℃ 로 보이는데 상세 모달에서는 '센서 0개 · 0샘플 ·
+    // 텔레메트리 미지원' 으로 보였다 → 수집 중단으로 오해. 최신값을 그대로 실어 보내고
+    // seriesAvailable:false 로 '이력은 엣지에만 있음' 을 밝힌다.
+    const rs = findRemoteServer(req.params.id);
+    if (rs) return res.json({ ok: true, ...remoteSensorView(rs), live: null, intervalMs: getPollerStatus().intervalMs });
     return res.status(404).json({ ok: false, reason: '서버를 찾을 수 없습니다.' });
   }
   if (s.type === 'ome') return res.status(400).json({ ok: false, reason: 'OME 소스는 센서 시계열을 지원하지 않습니다.' });
@@ -102,7 +107,9 @@ adminRouter.get('/idrac/:id/sensors', adminOnly, async (req, res) => {
     try { live = await fetchIdracSensors(s); } catch (e) { live = { error: e.message }; }
   }
   const minutes = Math.max(0, Math.min(1440, Number(req.query.minutes) || 0));
-  res.json({ ok: true, ...getSensorSeries(s.id, { minutes }), live, intervalMs: getPollerStatus().intervalMs });
+  // seriesAvailable: 중앙이 이 서버의 시계열을 갖는지(로컬 등록 = 가짐). 화면이 '샘플 없음'과
+  // '이력 미동기화(위임)'를 구분해 안내하는 근거.
+  res.json({ ok: true, remote: false, seriesAvailable: true, cpuSynced: true, ...getSensorSeries(s.id, { minutes }), live, intervalMs: getPollerStatus().intervalMs });
 });
 
 // iDRAC에서 GPU 사용률 수집 가능 여부 실측 확인(GPU 목록 + 텔레메트리 리포트).

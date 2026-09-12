@@ -43,8 +43,20 @@ async function pollOnceInner() {
     return;
   }
   // live/auto: mock 데모 잔존 항목(id 'mock-')은 실제 폴 대상에서 제외(가짜 주소 폴 잡음 방지).
-  const servers = loadRegistry().filter((s) => s.enabled !== false && s.host && s.username && s.password && !String(s.id).startsWith('mock-'));
-  if (!servers.length) { lastRun = { at: Date.now(), ok: 0, failed: 0, results: [] }; return; }
+  const registry = loadRegistry();
+  const servers = registry.filter((s) => s.enabled !== false && s.host && s.username && s.password && !String(s.id).startsWith('mock-'));
+  // v2.493: 폴 대상에서 제외된 서버를 **이유와 함께** 기록한다. 이전에는 조용히 빠져 lastRun 에
+  // 흔적조차 없었다 — 비밀번호 미저장·비활성 서버가 '수집이 멈춘 것' 으로 오해되고, 화면·로그
+  // 어디에도 구분 단서가 없었다(2026-09-12 신고 진단 중 확인).
+  const skipReason = (s) => (!s.host ? '주소 없음'
+    : !s.username ? '계정 없음'
+      : !s.password ? '비밀번호 미저장'
+        : s.enabled === false ? '비활성(사용 안 함)'
+          : String(s.id).startsWith('mock-') ? 'mock 데모 잔존 항목' : '');
+  // 필드명은 notPolled — 긴급중단 경로가 `skipped` 를 문자열로 쓰고 있어(위 isStopped 분기) 타입이 섞이면
+  // 화면이 둘을 구분할 수 없다.
+  const notPolled = registry.filter((s) => !servers.includes(s)).map((s) => ({ id: s.id, name: s.name, reason: skipReason(s) }));
+  if (!servers.length) { lastRun = { at: Date.now(), ok: 0, failed: 0, results: [], notPolled }; return; }
   const db = await getDb();
   const ts = Date.now();
   const results = [];
@@ -62,17 +74,27 @@ async function pollOnceInner() {
         setOmeDevices(s.id, devices, { usedMetricService });
         results.push({ id: s.id, name: s.name, type: 'ome', devices: count, measured, metric: usedMetricService ? 'powermanager' : 'inventory' });
       } else {
-        const r = await fetchPower(s);
-        samples.push({ serverId: s.id, watts: r.watts, ts });
+        // v2.493: 전력 조회 실패가 **센서·인벤토리 수집을 막지 않게** 개별로 격리한다.
+        // 이전에는 fetchPower 가 던지면 이 블록 전체가 catch 로 빠져 온도·CPU 가 통째로 0샘플이
+        // 됐다(전력 메트릭만 막힌 iDRAC·라이선스 차이에서 발생 가능). 온도 수집이 전력 수집에
+        // 종속될 이유는 없다. 실패 사유는 results 에 남겨 '지금 폴' 응답에서 보이게 한다.
+        let powerErr = null;
+        const r = await fetchPower(s).catch((e) => { powerErr = e; return null; });
+        if (r && r.watts != null) samples.push({ serverId: s.id, watts: r.watts, ts });
         // 온도센서 + CPU 사용량을 매 주기(1분) 수집해 시계열에 적재(차트용, 격리).
         // 시계열에는 팬을 {name,rpm}만 싣는다 — 파트 필드(model/partNumber)는 정적 정보라
         // 1440샘플 시계열에 반복 저장하면 메모리만 낭비(인벤토리 갱신 시에만 보관).
         let sensorFans = null;
+        let sensorErr = null;
         try {
           const sn = await fetchSensors(s);
           sensorFans = sn.fans;
           pushSensorSample(s.id, { t: ts, cpuUsagePct: sn.cpuUsagePct, temps: sn.temps, fans: (sn.fans || []).map((f) => ({ name: f.name, rpm: f.rpm })) });
-        } catch { /* 센서 실패는 전력 수집과 무관 */ }
+        } catch (e) {
+          // v2.493: 조용히 삼키지 않는다 — 센서만 실패하는 상황(Thermal 미지원 등)을 진단할 수
+          // 있게 사유를 results 에 남긴다(전력 수집과는 무관하게 계속 진행).
+          sensorErr = e;
+        }
         // Refresh rich inventory on a slow cadence (best-effort, non-blocking).
         if (inventoryStale(s.id, INVENTORY_MAX_AGE_MS)) {
           try {
@@ -82,7 +104,11 @@ async function pollOnceInner() {
             setInventory(s.id, inv);
           } catch { /* keep last */ }
         }
-        results.push({ id: s.id, name: s.name, type: 'idrac', watts: r.watts });
+        results.push({
+          id: s.id, name: s.name, type: 'idrac', watts: r ? r.watts : null,
+          ...(powerErr ? { error: describeError(powerErr).message } : {}),
+          ...(sensorErr ? { sensorError: describeError(sensorErr).message } : {}),
+        });
       }
     } catch (err) {
       const d = describeError(err);
@@ -102,7 +128,7 @@ async function pollOnceInner() {
     } catch (e) { console.warn(`[idrac] prune 실패: ${e.message}`); }
   }
   const failed = results.filter((r) => r.error).length;
-  lastRun = { at: ts, ok: results.length - failed, failed, results };
+  lastRun = { at: ts, ok: results.length - failed, failed, results, notPolled };
   if (failed) console.warn(`[idrac] poll: ${results.length - failed}/${results.length} 성공`);
 }
 
