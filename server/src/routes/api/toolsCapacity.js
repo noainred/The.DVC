@@ -14,6 +14,7 @@ import { getMetricsDb } from '../../metrics/db.js';
 import { vmperfHistory, vmperfMeta, vmperfDiskUsage, dropVmperfDb, dbFileName, VMPERF_METRICS, VMPERF_DISK_METRICS, VMPERF_VMDISK_METRICS } from '../../metrics/vmperfDb.js';
 import { loadVmperfSettings, saveVmperfSettings, VMPERF_LIMITS } from '../../metrics/vmperfSettings.js';
 import { memoJson, hash, linregSlope, eachLimited, scopeSlice, scopeKey } from './shared.js';
+import { normGroupQuery, filterVmsByGroup, inventoryGroups, hasGroup } from './groupFilter.js'; // v2.491: 클러스터·폴더 하위 범위
 
 export function registerToolsCapacity(api) {
 
@@ -156,7 +157,12 @@ function overAllocatedReport(scoped, vms) {
 // thin 회수가능, Tools 미설치. (고아 VMDK는 데이터스토어 파일 스캔이 필요해 미포함)
 api.get('/tools/waste', requirePerm('tools'), (req, res) => memoJson(req, res, 'tools-waste', (snap) => {
   const vcId = req.query.vcenterId;
-  const vms = scopeSlice(snap, req.user, vcId).vms.filter((v) => !v.template);
+  // scope(vcenterId) 교집합이 먼저, 그 다음 클러스터·폴더(v2.491). 호스트는 거르지 않는다 —
+  // overAllocatedReport 가 '코어당 MHz' 조회표로만 쓰므로, 폴더 선택(클러스터를 넘나듦)에서
+  // 호스트까지 거르면 CPU clock 환산이 통째로 '근거 없음' 이 된다.
+  const scoped = scopeSlice(snap, req.user, vcId);
+  const group = normGroupQuery(req.query);
+  const vms = filterVmsByGroup(scoped.vms, group).filter((v) => !v.template);
   const r1 = (x) => Number((x || 0).toFixed(1));
   const off = vms.filter((v) => v.powerState !== 'POWERED_ON');
   const snaps = vms.filter((v) => (v.snapshotCount || 0) > 0);
@@ -165,8 +171,10 @@ api.get('/tools/waste', requirePerm('tools'), (req, res) => memoJson(req, res, '
   const top = (arr, fn, n = 50) => [...arr].sort((a, b) => fn(b) - fn(a)).slice(0, n);
   return {
     scope: vcId || 'all',
+    // v2.491: 적용된 하위 범위를 응답에 실어 화면이 '무엇을 기준으로 센 수치' 인지 표시할 수 있게 한다.
+    group: hasGroup(group) ? group : null,
     // 할당했지만 쓰지 않는 CPU clock·메모리(v2.373). 아래 idle 헬퍼가 계산한다.
-    overAllocated: overAllocatedReport(scopeSlice(snap, req.user, vcId), vms),
+    overAllocated: overAllocatedReport(scoped, vms),
     // v2.483: 상위 50 → 300 — '꺼진 지 N일' 로 정렬·검토하려면 목록이 잘리면 안 된다(행당 필드 5개라 가볍다).
     poweredOff: { count: off.length, storageGB: off.reduce((a, v) => a + (v.storageGB || 0), 0),
       vms: top(off, (v) => v.storageGB || 0, 300).map((v) => ({ id: v.id, name: v.name, vcenterId: v.vcenterId, storageGB: v.storageGB, guestOS: v.guestOS })) },
@@ -178,6 +186,18 @@ api.get('/tools/waste', requirePerm('tools'), (req, res) => memoJson(req, res, '
 }, { extraKey: scopeKey(req.user, store.get()) }));
 
 /**
+ * 클러스터·폴더 선택 목록(v2.491) — GET /tools/groups?vcenterId=
+ *
+ * 특수 기능 헤더의 콤보 박스가 **실재하는 값만** 고르게 하기 위한 목록(자유 입력 금지 → 오타로
+ * '결과 0건' 이 나오는 사고를 막는다). scope 를 먼저 적용하므로 범위 제한 계정은 자기 vCenter 의
+ * 클러스터·폴더만 본다. 폴더는 SOAP 수집 경로에서만 채워지므로 REST 수집 vCenter 는 빈 배열이 정상.
+ */
+api.get('/tools/groups', requirePerm('tools'), (req, res) => memoJson(req, res, 'tools-groups', (snap) => {
+  const vcId = req.query.vcenterId;
+  return { scope: vcId || 'all', ...inventoryGroups(scopeSlice(snap, req.user, vcId)) };
+}, { ttlMs: 30_000, extraKey: scopeKey(req.user, store.get()) }));
+
+/**
  * 전원 꺼진 VM 의 '꺼진 지 N일'(v2.483) — GET /tools/waste/off-since?vcenterId=
  * /tools/waste 와 같은 scope 규칙. 출처(이벤트/추적/first_seen)·정확도는 tools/powerOff.js 참조.
  * 비동기(DB 조회)라 memoJson 동기 콜백인 /tools/waste 에 합치지 않고 별도 엔드포인트 — 화면이 목록을
@@ -186,7 +206,8 @@ api.get('/tools/waste', requirePerm('tools'), (req, res) => memoJson(req, res, '
 api.get('/tools/waste/off-since', requirePerm('tools'), async (req, res) => {
   const vcId = req.query.vcenterId ? String(req.query.vcenterId) : '';
   const snap = store.get();
-  const off = scopeSlice(snap, req.user, vcId).vms.filter((v) => !v.template && v.powerState !== 'POWERED_ON');
+  const off = filterVmsByGroup(scopeSlice(snap, req.user, vcId).vms, normGroupQuery(req.query))
+    .filter((v) => !v.template && v.powerState !== 'POWERED_ON');
   try {
     const r = await poweredOffSinceFor(off.map((v) => ({ id: v.id, name: v.name, vcenterId: v.vcenterId })));
     res.json({ scope: vcId || 'all', generatedAt: Date.now(), ...r });

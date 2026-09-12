@@ -15,6 +15,11 @@ on:
 
 permissions:
   contents: read
+  # 'pyportal 변경 PR 의 ver.txt 갱신 확인' 스텝이 `gh api .../pulls/<n>/files` 로 PR 변경 목록을
+  # 읽는다. contents 만 주면 그 호출이 403(Resource not accessible by integration)으로 죽어
+  # **PR 실행이 항상 빨간불**이 되고, 정작 검사하려던 ver.txt 게이트는 한 번도 평가되지 않는다.
+  # 읽기 전용이며 pull_request_target 을 쓰지 않으므로 포크 PR 에 비밀이 노출되지 않는다.
+  pull-requests: read
 
 concurrency:
   # 같은 브랜치에 연속 push 하면 이전 실행은 취소한다(러너 낭비 방지).

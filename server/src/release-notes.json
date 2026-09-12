@@ -1,6 +1,18 @@
 {
   "notes": [
     {
+      "version": "2.491.0",
+      "date": "2026-09-12",
+      "title": "낭비 리소스 — VM 이름 검색 + 클러스터·폴더 범위",
+      "notes": [
+        "특수 기능 › 낭비 리소스 탭 바에 'VM 이름 검색' 입력 추가 — 전원 꺼짐·스냅샷·Tools 미실행·CPU 과할당·메모리 과할당 5개 표를 VM 이름 부분일치(대소문자 무시)로 거른다. 검색어는 탭을 바꿔도 유지되고 표 위에 '총 N개 VM · 이름 일치 M개' 를 표시한다(KPI 카드는 전체 기준 유지 — 검색은 표만 거름).",
+        "헤더의 '범위'(vCenter) 옆에 '클러스터' · '폴더' 콤보 박스 추가 — vCenter 를 고르면 그 vCenter 에 실재하는 클러스터/폴더만 목록에 올라오고(VM·호스트 수 표시), 고르면 그 범위로 본다. 목록은 GET /api/tools/groups (tools 권한 + 사용자 scope 적용).",
+        "클러스터·폴더 필터는 **서버에서** 적용한다(GET /api/tools/waste·/waste/off-since 의 cluster·folder 쿼리) — KPI 카드·탭 개수·과할당 집계까지 선택 범위 기준이 되어 화면과 수치가 어긋나지 않는다. scope(vcenterId) 교집합이 항상 먼저 적용된다.",
+        "클러스터 이름은 vCenter 간 중복될 수 있어 vCenter 선택 전에는 두 콤보를 비활성으로 둔다. 폴더(vm.folder)는 SOAP 수집 경로에서만 채워지므로 REST 수집만 쓰는 vCenter 는 '폴더 정보 없음' 으로 표시한다(값을 추정하지 않음).",
+        "검색 결과가 없으면 표에 \"이름에 '<검색어>' 이(가) 포함된 VM 이 없습니다.\" 를 표시. 한글 입력은 공용 SearchBox(IME 조합 보호)를 사용. 판정 로직은 routes/api/groupFilter.js(순수) + server/test/groupFilter2491.test.js 로 고정."
+      ]
+    },
+    {
       "version": "2.490.0",
       "date": "2026-09-12",
       "title": "신규 포탈(V3, web/src/version_3) — Claude Design 'DVC Console' 시안 구현 + 설정 › 신규 포탈 보기",
