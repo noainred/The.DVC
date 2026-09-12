@@ -4,8 +4,8 @@ import { requireRole, requirePerm } from '../../auth/auth.js'; // v2.478(감사 
 import { logAudit } from '../../audit.js';           // 수집 정책 변경·데이터 삭제는 감사 기록
 import { store } from '../../store.js';
 import { loadVcenterConfig } from '../../config.js';
-import { fetchVmMetric, fetchVmRightsizeSeries, fetchVmsUsageBatch, PERF_INTERVALS } from '../../vcenter/soapClient.js';
-import { USAGE_DAYS, normDays, intervalForDays } from '../../vcenter/perfBatch.js'; // v2.492: 트리 행 기간 사용률
+import { fetchVmMetric, fetchVmRightsizeSeries, fetchVmsUsageBatch, fetchHostsPerfSeries, PERF_INTERVALS } from '../../vcenter/soapClient.js';
+import { USAGE_DAYS, normDays, intervalForDays, intervalForRangeMs, averageByTimestamp } from '../../vcenter/perfBatch.js'; // v2.492: 트리 행 기간 사용률 · v2.494: 호스트/클러스터 추이
 import { analyzeRightsize } from '../../tools/rightsize.js';
 import { poweredOffSinceFor } from '../../tools/powerOff.js'; // v2.483: 전원 꺼진 VM 의 꺼진 시각
 import { loadPowerOffSettings, savePowerOffSettings, LIMITS as POWEROFF_LIMITS } from '../../tools/powerOffSettings.js'; // v2.484
@@ -431,6 +431,63 @@ api.get('/vcenters/:id/usage-history', async (req, res) => {
   const since = Date.now() - ms;
   // 점 수 상한 — 버킷이 작은 구간(1h/5분=12점)엔 여유가 크고, 365일/1일=365점도 안전하다.
   const limit = 2000;
+
+  // ── v2.494: scope=host:<hostId> | cluster:<이름> — 호스트·클러스터 단위 추이 ────────────────
+  // 우리 DB 에는 vCenter 단위 합계만 있다(sampler 가 per-호스트 계열을 만들지 않는다). 그래서 이
+  // 두 범위는 vCenter 성능 롤업을 **요청 시** 빌려온다(fetchHostsPerfSeries — 로그인 1회 + 청크당
+  // QueryPerf 1회). 디스크는 호스트 성능 카운터에 대응하는 값이 없어 null 로 두고 화면이 '해당 없음'
+  // 을 표시한다(0 으로 채우지 않는다). 클러스터는 호스트별 계열의 타임스탬프별 평균(결측 제외).
+  const scopeRaw = String(req.query.scope || '').trim();
+  const scopeM = /^(host|cluster):(.+)$/.exec(scopeRaw);
+  if (scopeM) {
+    const [, kind, key] = scopeM;
+    const vcHosts = (snap.hosts || []).filter((h) => h.vcenterId === vcId);
+    let targets = kind === 'host'
+      ? vcHosts.filter((h) => h.id === key)
+      : vcHosts.filter((h) => (h.cluster || 'standalone') === key).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    // 범위 밖·없는 대상은 404(존재 은닉 — 단건 라우트 불변조건). vCenter scope 는 위에서 이미 검사했다.
+    if (!targets.length) return res.status(404).json({ ok: false, reason: 'not found' });
+    const totalHosts = targets.length;
+    // 클러스터 호스트 상한 — 89대 클러스터 × 24h(5분 롤업 288표본) 이면 표본 5만 개다. 상한을 넘으면
+    // 이름순 앞 N 대의 평균이며 hostsOmitted 로 정직하게 알린다(조용히 잘라 '전체 평균' 처럼 보이지 않게).
+    const MAX_HOSTS = Math.max(1, Math.min(200, Number(process.env.TREND_CLUSTER_MAX_HOSTS) || 40));
+    if (targets.length > MAX_HOSTS) targets = targets.slice(0, MAX_HOSTS);
+    const interval = intervalForRangeMs(ms);
+    const intervalSec = PERF_INTERVALS[interval];
+    if (snap.source === 'mock') {
+      // 데모: 스냅샷 순간값 주변의 합성 곡선(실측 아님 — synthesized 표기).
+      const n = Math.max(2, Math.min(288, Math.round(ms / (intervalSec * 1000))));
+      const base = targets.reduce((a, h) => ({ c: a.c + (h.cpuUsagePct || 0), m: a.m + (h.memUsagePct || 0) }), { c: 0, m: 0 });
+      const bc = base.c / targets.length; const bm = base.m / targets.length;
+      const points = Array.from({ length: n }, (_, i) => {
+        const ts = Date.now() - (n - 1 - i) * intervalSec * 1000;
+        const w = Math.sin(i / 7) * 6 + Math.cos(i / 13) * 3;
+        return { ts, cpuPct: Math.max(0, Math.min(100, Math.round(bc + w))), memPct: Math.max(0, Math.min(100, Math.round(bm + w / 2))), diskPct: null, cpuHosts: targets.length, memHosts: targets.length };
+      });
+      return res.json({ vcenterId: vcId, scope: scopeRaw, range: rangeKey, bucketMs: intervalSec * 1000, ranges: Object.keys(USAGE_RANGES), collectedSince: null, points, source: 'vcenter-perf', synthesized: true, hosts: targets.length, hostsTotal: totalHosts, hostsOmitted: totalHosts - targets.length, diskAvailable: false });
+    }
+    const vc = loadVcenterConfig().vcenters.find((x) => x.id === vcId);
+    if (!vc) return res.json({ vcenterId: vcId, scope: scopeRaw, range: rangeKey, bucketMs: intervalSec * 1000, ranges: Object.keys(USAGE_RANGES), collectedSince: null, points: [], source: 'vcenter-perf', hosts: 0, hostsTotal: totalHosts, hostsOmitted: 0, diskAvailable: false, reason: 'vCenter 설정 없음(위임 수집 vCenter 는 중앙에서 성능 조회 불가)' });
+    try {
+      const refOf = (h) => h.id.slice(String(h.vcenterId || '').length + 1); // vc.id 에 콜론이 있을 수 있어 split 금지
+      const r = await fetchHostsPerfSeries(vc, targets.map(refOf), interval, { start: since, end: Date.now() });
+      const cpu = r.cpuId ? averageByTimestamp(r.series, r.cpuId, 100) : [];
+      const mem = r.memId ? averageByTimestamp(r.series, r.memId, 100) : [];
+      const byTs = new Map();
+      for (const p of cpu) { const e = byTs.get(p.ts) || { ts: p.ts }; e.cpuPct = p.avg; e.cpuHosts = p.n; byTs.set(p.ts, e); }
+      for (const p of mem) { const e = byTs.get(p.ts) || { ts: p.ts }; e.memPct = p.avg; e.memHosts = p.n; byTs.set(p.ts, e); }
+      const points = [...byTs.values()].sort((a, b) => a.ts - b.ts).map((e) => ({ diskPct: null, ...e }));
+      return res.json({
+        vcenterId: vcId, scope: scopeRaw, range: rangeKey, bucketMs: intervalSec * 1000, ranges: Object.keys(USAGE_RANGES),
+        collectedSince: null, points, source: 'vcenter-perf', interval, hosts: targets.length, hostsTotal: totalHosts,
+        hostsOmitted: totalHosts - targets.length, diskAvailable: false,
+        counters: { cpu: !!r.cpuId, mem: !!r.memId },
+      });
+    } catch (e) {
+      // 조회 실패는 500 이 아니라 빈 점 + reason — 화면이 '데이터 없음' 과 '조회 실패' 를 구분해 안내한다.
+      return res.json({ vcenterId: vcId, scope: scopeRaw, range: rangeKey, bucketMs: intervalSec * 1000, ranges: Object.keys(USAGE_RANGES), collectedSince: null, points: [], source: 'vcenter-perf', hosts: 0, hostsTotal: totalHosts, hostsOmitted: 0, diskAvailable: false, reason: `vCenter 성능 조회 실패: ${e?.message || e}` });
+    }
+  }
 
   let points = [];
   let collectedSince = null;

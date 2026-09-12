@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **333개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **334개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-12)
@@ -387,7 +387,7 @@
 |---|---|---|---|
 | `HEALTH_PROBE_TIMEOUT_MS` | `5000` |  | health/network.js |
 
-## API 라우트 (21)
+## API 라우트 (22)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -406,6 +406,7 @@
 | `RMA_CRED_RATE_PER_MIN` | `120` |  | routes/central.js |
 | `SECRETS_KEY` |  |  | routes/admin/opsSettings.js, security/secretVault.js |
 | `SVCMON_XLSX_MAX_BYTES` | `8000000` |  | routes/svcmon/shared.js |
+| `TREND_CLUSTER_MAX_HOSTS` | `40` |  | routes/api/toolsCapacity.js |
 | `UPGRADE_INSTALL_DIR` | `''` | ✅ | config.js, routes/upgrade.js |
 | `UPGRADE_PATH_ALLOW_BASES` | `''` |  | routes/upgrade.js |
 | `UPGRADE_PATH_CHECK` | `''` |  | routes/upgrade.js |
@@ -512,4 +513,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 333
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 334
