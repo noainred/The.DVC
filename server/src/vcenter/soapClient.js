@@ -938,52 +938,130 @@ export async function fetchVmRightsizeSeries(vc, moref, interval, { start, end }
   await c.login();
   try {
     const map = await c.perfCounterMap();
-    const wanted = Object.entries(RIGHTSIZE_COUNTERS).map(([name, cfg]) => ({ name, cfg, id: map.get(cfg.key) || null }));
-    // 진단 문구에는 vCenter 카운터 키를 함께 싣는다 — 사용자가 vCenter 에서 바로 대조할 수 있게.
-    const label = (w) => `${w.name}(${w.cfg.key})`;
-    const missing = wanted.filter((w) => !w.id).map(label);
+    const wanted = rightsizeWanted(map);
+    // 진단 문구에는 vCenter 카운터 키를 함께 싣는다 — 사용자가 vCenter 에서 바로 대조할 수 있게(rsLabel).
+    const missing = wanted.filter((w) => !w.id).map(rsLabel);
     const empty = [];
     const noData = [];
     const startTime = start ? new Date(start).toISOString() : null;
     const endTime = end ? new Date(end).toISOString() : null;
     const raw = await c.queryEntityPerfMulti('VirtualMachine', moref, wanted.map((w) => w.id), intervalId, { startTime, endTime });
-    const series = {};
-    for (const w of wanted) {
-      if (!w.id) { series[w.name] = []; continue; }
-      const pts = raw.get(w.id) || [];
-      if (!pts.length) { series[w.name] = []; empty.push(label(w)); continue; }
-      // vCenter 는 결측을 -1 로 준다 → null 로 바꿔 차트가 0 으로 오해하지 않게 한다.
-      const mapped = pts.map((p) => ({ t: p.t, v: p.v < 0 ? null : (w.cfg.div > 1 ? Math.round((p.v / w.cfg.div) * 10) / 10 : p.v) }));
-      series[w.name] = mapped;
-      if (mapped.every((p) => p.v == null)) noData.push(label(w));
-    }
+    const series = mapRightsizeRaw(wanted, raw, empty, noData);
     // 실시간(20초) 현재값 폴백 — mem.active 같은 level-2 카운터는 기본 통계 레벨(1)에서 주/월/년
     // 롤업에 안 잡히지만(그래서 empty/noData), vCenter 는 **실시간 구간(최근 ~1시간)** 에서는 늘
     // 수집한다. 그 현재값을 별도로 조회해 '이력엔 없어도 현재값은 이렇다'를 정직하게 채운다.
     // 주의: 이 값은 **다일 감축 하한 계산엔 쓰지 않는다**(1시간 표본이라 다일 피크를 과소추정) —
     // 화면에 '실시간(최근 1시간)' 으로 명시해 참고값으로만 보인다.
-    const RT_FALLBACK = new Set(['memActiveMB', 'memConsumedMB', 'memBalloonMB', 'memSwappedMB']);
-    const emptySet = new Set([...empty, ...noData]);
-    const rtNeed = wanted.filter((w) => w.id && RT_FALLBACK.has(w.name) && emptySet.has(label(w)));
+    const rtNeed = rtFallbackNeeded(wanted, empty, noData);
     let realtime = null;
     if (rtNeed.length && interval !== 'realtime') {
       try {
         const rtStart = new Date(Date.now() - 3_600_000).toISOString();
         const rtEnd = new Date().toISOString();
         const rtRaw = await c.queryEntityPerfMulti('VirtualMachine', moref, rtNeed.map((w) => w.id), PERF_INTERVALS.realtime, { startTime: rtStart, endTime: rtEnd });
-        const rt = {};
-        for (const w of rtNeed) {
-          const vals = (rtRaw.get(w.id) || [])
-            .map((p) => (p.v < 0 ? null : (w.cfg.div > 1 ? Math.round((p.v / w.cfg.div) * 10) / 10 : p.v)))
-            .filter((v) => v != null);
-          if (!vals.length) continue;
-          const sum = vals.reduce((s, x) => s + x, 0);
-          rt[w.name] = { latest: vals[vals.length - 1], max: Math.max(...vals), avg: Math.round((sum / vals.length) * 10) / 10, samples: vals.length };
-        }
-        if (Object.keys(rt).length) realtime = rt;
+        realtime = summarizeRealtime(rtNeed, rtRaw);
       } catch { realtime = null; /* 실시간도 안 되면 조용히 넘어간다 — 이력 '표본 없음' 안내는 유지 */ }
     }
     return { intervalSec: intervalId, series, missing, empty, noData, realtime };
+  } finally {
+    await c.logout();
+  }
+}
+
+/* ── 리포트 계열 공용 헬퍼(v2.497: 단건 fetchVmRightsizeSeries 와 배치 fetchVmsRightsizeBatch 가 공유) ── */
+const rsLabel = (w) => `${w.name}(${w.cfg.key})`;
+/** 카운터 카탈로그 → wanted 목록(id 없으면 null = missing). */
+function rightsizeWanted(map) {
+  return Object.entries(RIGHTSIZE_COUNTERS).map(([name, cfg]) => ({ name, cfg, id: map.get(cfg.key) || null }));
+}
+/** raw(Map counterId → [{t,v}]) → series. empty/noData 배열에 사유를 push 한다(-1 결측 → null, 단위 나눔). */
+function mapRightsizeRaw(wanted, raw, empty, noData) {
+  const series = {};
+  for (const w of wanted) {
+    if (!w.id) { series[w.name] = []; continue; }
+    const pts = (raw && raw.get(w.id)) || [];
+    if (!pts.length) { series[w.name] = []; empty.push(rsLabel(w)); continue; }
+    // vCenter 는 결측을 -1 로 준다 → null 로 바꿔 차트가 0 으로 오해하지 않게 한다.
+    const mapped = pts.map((p) => ({ t: p.t, v: p.v < 0 ? null : (w.cfg.div > 1 ? Math.round((p.v / w.cfg.div) * 10) / 10 : p.v) }));
+    series[w.name] = mapped;
+    if (mapped.every((p) => p.v == null)) noData.push(rsLabel(w));
+  }
+  return series;
+}
+const RT_FALLBACK = new Set(['memActiveMB', 'memConsumedMB', 'memBalloonMB', 'memSwappedMB']);
+/** 이력이 빈 메모리 계열 중 실시간(20초) 구간에서 다시 볼 것들. */
+function rtFallbackNeeded(wanted, empty, noData) {
+  const emptySet = new Set([...empty, ...noData]);
+  return wanted.filter((w) => w.id && RT_FALLBACK.has(w.name) && emptySet.has(rsLabel(w)));
+}
+/** 실시간 raw → { name: {latest,max,avg,samples} } 또는 null. */
+function summarizeRealtime(rtNeed, rtRaw) {
+  const rt = {};
+  for (const w of rtNeed) {
+    const vals = ((rtRaw && rtRaw.get(w.id)) || [])
+      .map((p) => (p.v < 0 ? null : (w.cfg.div > 1 ? Math.round((p.v / w.cfg.div) * 10) / 10 : p.v)))
+      .filter((v) => v != null);
+    if (!vals.length) continue;
+    const sum = vals.reduce((s, x) => s + x, 0);
+    rt[w.name] = { latest: vals[vals.length - 1], max: Math.max(...vals), avg: Math.round((sum / vals.length) * 10) / 10, samples: vals.length };
+  }
+  return Object.keys(rt).length ? rt : null;
+}
+
+/**
+ * 여러 VM 의 리포트 계열 8종을 **로그인 1회 + 청크당 QueryPerf 1회** 로 가져온다(v2.497, 엑셀 내보내기용).
+ * 단건 fetchVmRightsizeSeries 를 VM 수만큼 돌리면 왕복이 VM 수 × 3 이라 고RTT 회선에서 수십 VM 이
+ * 분 단위가 된다. 반환 Map&lt;moref, { intervalSec, series, missing, empty, noData, realtime }&gt; —
+ * 각 값은 단건 반환과 같은 형태라 analyzeRightsize 에 그대로 넣는다.
+ *
+ * chunkSize 기본 8: 계열 8개 × 표본(30일 'month' 360 / 1년 'year' 365) ≈ 요청당 2~3만 값 — 기존 사용률
+ * 배치(2계열 × 25 VM)와 비슷한 응답 크기·정규식 파싱 CPU. 청크 사이 setImmediate 로 양보한다.
+ * 실시간 폴백은 이력이 빈 VM 만 모아 청크 25 로 별도 배치한다(VM 마다 한 번 더 왕복하지 않게).
+ */
+export async function fetchVmsRightsizeBatch(vc, morefs, interval, { start, end, chunkSize = 8 } = {}) {
+  const intervalId = PERF_INTERVALS[interval] || 1800;
+  const refs = [...new Set((morefs || []).filter(Boolean).map(String))];
+  const out = new Map();
+  if (!refs.length) return out;
+  const c = new VimSoapClient(vc);
+  await c.login();
+  try {
+    const map = await c.perfCounterMap();
+    const wanted = rightsizeWanted(map);
+    const missing = wanted.filter((w) => !w.id).map(rsLabel);
+    const ids = wanted.map((w) => w.id).filter(Boolean);
+    const startTime = start ? new Date(start).toISOString() : null;
+    const endTime = end ? new Date(end).toISOString() : null;
+    const size = Math.max(1, Math.min(50, Number(chunkSize) || 8));
+    const rtNeedByRef = new Map();
+    for (let i = 0; i < refs.length; i += size) {
+      const chunk = refs.slice(i, i + size);
+      const byRef = ids.length ? await c.queryEntitiesPerfBatch('VirtualMachine', ids, chunk, intervalId, { startTime, endTime }) : new Map();
+      for (const ref of chunk) {
+        const empty = []; const noData = [];
+        const series = mapRightsizeRaw(wanted, byRef.get(ref), empty, noData);
+        out.set(ref, { intervalSec: intervalId, series, missing: [...missing], empty, noData, realtime: null });
+        const need = rtFallbackNeeded(wanted, empty, noData);
+        if (need.length && interval !== 'realtime') rtNeedByRef.set(ref, need);
+      }
+      if (i + size < refs.length) await new Promise((r) => setImmediate(r));
+    }
+    // 실시간 폴백 배치 — 필요한 VM 만, 필요한 카운터의 합집합으로 조회(VM 별로는 자기 필요분만 요약).
+    if (rtNeedByRef.size) {
+      const rtIds = [...new Set([...rtNeedByRef.values()].flat().map((w) => w.id))];
+      const rtRefs = [...rtNeedByRef.keys()];
+      const rtStart = new Date(Date.now() - 3_600_000).toISOString();
+      const rtEnd = new Date().toISOString();
+      for (let i = 0; i < rtRefs.length; i += 25) {
+        const chunk = rtRefs.slice(i, i + 25);
+        try {
+          const rtByRef = await c.queryEntitiesPerfBatch('VirtualMachine', rtIds, chunk, PERF_INTERVALS.realtime, { startTime: rtStart, endTime: rtEnd });
+          for (const ref of chunk) { const e = out.get(ref); if (e) e.realtime = summarizeRealtime(rtNeedByRef.get(ref), rtByRef.get(ref)); }
+        } catch { /* 실시간 폴백 실패는 조용히 — 이력 '표본 없음' 안내는 유지(단건과 같은 규약) */ }
+        if (i + 25 < rtRefs.length) await new Promise((r) => setImmediate(r));
+      }
+    }
+    return out;
   } finally {
     await c.logout();
   }

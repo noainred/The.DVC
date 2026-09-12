@@ -4,9 +4,13 @@ import { requireRole, requirePerm } from '../../auth/auth.js'; // v2.478(감사 
 import { logAudit } from '../../audit.js';           // 수집 정책 변경·데이터 삭제는 감사 기록
 import { store } from '../../store.js';
 import { loadVcenterConfig } from '../../config.js';
-import { fetchVmMetric, fetchVmRightsizeSeries, fetchVmsUsageBatch, fetchHostsPerfSeries, PERF_INTERVALS } from '../../vcenter/soapClient.js';
+import { fetchVmMetric, fetchVmRightsizeSeries, fetchVmsRightsizeBatch, fetchVmsUsageBatch, fetchHostsPerfSeries, PERF_INTERVALS } from '../../vcenter/soapClient.js';
 import { USAGE_DAYS, normDays, intervalForDays, intervalForRangeMs, averageByTimestamp } from '../../vcenter/perfBatch.js'; // v2.492: 트리 행 기간 사용률 · v2.494: 호스트/클러스터 추이
 import { analyzeRightsize } from '../../tools/rightsize.js';
+import { buildWasteSheets, reportTargets, reportFileName, exportZipName } from '../../tools/wasteExport.js'; // v2.497: 낭비 리소스 엑셀 내보내기
+import { sheetsToWorkbook } from '../../tools/wasteExportXlsx.js';
+import { renderRightsizeHtml } from '../../tools/rightsizeHtml.js';
+import { zipMany } from '../../util/zip.js';
 import { poweredOffSinceFor } from '../../tools/powerOff.js'; // v2.483: 전원 꺼진 VM 의 꺼진 시각
 import { loadPowerOffSettings, savePowerOffSettings, LIMITS as POWEROFF_LIMITS } from '../../tools/powerOffSettings.js'; // v2.484
 import { powerOffPollerStatus, runPowerOffCheckNow } from '../../tools/powerOffPoller.js';
@@ -82,7 +86,7 @@ api.get('/tools/capacity', requirePerm('tools'), (req, res) => memoJson(req, res
  *   없다 — 그래서 이 리포트는 '후보 탐색·규모 감각' 용도이고 화면에도 그렇게 표기한다.
  *   전원이 꺼진 VM 은 사용률이 0 이라 여기서 제외한다(이미 poweredOff 항목이 다룬다).
  */
-function overAllocatedReport(scoped, vms) {
+function overAllocatedReport(scoped, vms, { top = 50 } = {}) {
   const r1 = (x) => Number((x || 0).toFixed(1));
   const pctOf = (used, alloc) => (alloc > 0 ? Math.round((used / alloc) * 100) : 0);
   // 호스트 코어당 MHz — VM 의 vCPU 를 clock(MHz) 으로 환산하는 유일한 근거.
@@ -135,6 +139,8 @@ function overAllocatedReport(scoped, vms) {
   const byIdleMhz = (a, b) => (b.cpuIdleMhz || 0) - (a.cpuIdleMhz || 0);
   const byIdleGB = (a, b) => (b.memIdleGB || 0) - (a.memIdleGB || 0);
   return {
+    // wasteReport 가 vCenter 별 후보 수를 세고 지운다(응답에는 실리지 않음).
+    cpuCandidatesList: cpuCand.map((x) => ({ vcenterId: x.vcenterId })), memCandidatesList: memCand.map((x) => ({ vcenterId: x.vcenterId })),
     thresholds: { cpuIdlePct: CPU_IDLE_PCT, memIdlePct: MEM_IDLE_PCT },
     poweredOnVms: on.length,
     excludedNoHostMhz,     // 호스트 코어 MHz 를 몰라 clock 집계에서 빠진 VM 수(투명성)
@@ -148,9 +154,46 @@ function overAllocatedReport(scoped, vms) {
       usedPct: pctOf(memUsedMB, memAllocMB), savingPct: Math.max(0, 100 - pctOf(memUsedMB, memAllocMB)),
       candidates: memCand.length,
     },
-    // 상위 후보 목록(각 50개 상한 — 응답 크기 유계).
-    cpuTop: [...cpuCand].sort(byIdleMhz).slice(0, 50),
-    memTop: [...memCand].sort(byIdleGB).slice(0, 50),
+    // 상위 후보 목록(각 50개 상한 — 응답 크기 유계. 엑셀 내보내기 '전량' 은 top=Infinity).
+    cpuTop: [...cpuCand].sort(byIdleMhz).slice(0, top),
+    memTop: [...memCand].sort(byIdleGB).slice(0, top),
+  };
+}
+
+/**
+ * 낭비 리소스 본문(v2.497: /tools/waste 콜백에서 추출) — 화면 응답과 엑셀 내보내기가 **같은 함수**를 쓴다
+ * (수치 불일치 방지). topOff/topOther 로 상위 N 절단을 제어한다(화면 300/50, 내보내기 전량은 Infinity).
+ * byVcenter: vCenter 별 현황(사용자 요구 'vCenter 별 전체 현황') — 절단 전 전체 기준.
+ */
+function wasteReport(scoped, vms, { topOff = 300, topOther = 50 } = {}) {
+  const r1 = (x) => Number((x || 0).toFixed(1));
+  const off = vms.filter((v) => v.powerState !== 'POWERED_ON');
+  const snaps = vms.filter((v) => (v.snapshotCount || 0) > 0);
+  const thin = vms.filter((v) => v.thin);
+  const noTools = vms.filter((v) => v.powerState === 'POWERED_ON' && v.toolsStatus && v.toolsStatus !== 'RUNNING');
+  const top = (arr, fn, n = 50) => [...arr].sort((a, b) => fn(b) - fn(a)).slice(0, n);
+  const overAllocated = overAllocatedReport(scoped, vms, { top: topOther });
+  // vCenter 별 집계(전체 기준, 절단 무관). 과할당 후보 수는 items 가 아닌 후보 판정을 다시 세지 않고
+  // cpuTop/memTop(전량일 때만 완전) 대신 임계로 직접 센다 — 화면 KPI 의 candidates 와 같은 규칙.
+  const byVc = new Map();
+  const bump = (id, f) => { let e = byVc.get(id); if (!e) { e = { vcenterId: id, vms: 0, poweredOff: 0, poweredOffGB: 0, snapshots: 0, snapshotGB: 0, noTools: 0, thinReclaimGB: 0, cpuCandidates: 0, memCandidates: 0 }; byVc.set(id, e); } f(e); };
+  for (const v of vms) bump(v.vcenterId, (e) => { e.vms++; });
+  for (const v of off) bump(v.vcenterId, (e) => { e.poweredOff++; e.poweredOffGB += v.storageGB || 0; });
+  for (const v of snaps) bump(v.vcenterId, (e) => { e.snapshots++; e.snapshotGB += v.snapshotSizeGB || 0; });
+  for (const v of noTools) bump(v.vcenterId, (e) => { e.noTools++; });
+  for (const v of thin) bump(v.vcenterId, (e) => { e.thinReclaimGB += v.uncommittedGB || 0; });
+  for (const v of overAllocated.cpuCandidatesList || []) bump(v.vcenterId, (e) => { e.cpuCandidates++; });
+  for (const v of overAllocated.memCandidatesList || []) bump(v.vcenterId, (e) => { e.memCandidates++; });
+  delete overAllocated.cpuCandidatesList; delete overAllocated.memCandidatesList;
+  return {
+    overAllocated,
+    poweredOff: { count: off.length, storageGB: off.reduce((a, v) => a + (v.storageGB || 0), 0),
+      vms: top(off, (v) => v.storageGB || 0, topOff).map((v) => ({ id: v.id, name: v.name, vcenterId: v.vcenterId, storageGB: v.storageGB, guestOS: v.guestOS })) },
+    snapshots: { count: snaps.length, sizeGB: r1(snaps.reduce((a, v) => a + (v.snapshotSizeGB || 0), 0)),
+      vms: top(snaps, (v) => v.snapshotSizeGB || 0, topOther).map((v) => ({ id: v.id, name: v.name, vcenterId: v.vcenterId, snapshotCount: v.snapshotCount, snapshotSizeGB: v.snapshotSizeGB })) },
+    thinReclaim: { count: thin.length, reclaimableGB: thin.reduce((a, v) => a + (v.uncommittedGB || 0), 0) },
+    noTools: { count: noTools.length, vms: noTools.slice(0, topOther).map((v) => ({ id: v.id, name: v.name, vcenterId: v.vcenterId, toolsStatus: v.toolsStatus })) },
+    byVcenter: [...byVc.values()].sort((a, b) => a.vcenterId.localeCompare(b.vcenterId)).map((e) => ({ ...e, poweredOffGB: r1(e.poweredOffGB), snapshotGB: r1(e.snapshotGB), thinReclaimGB: r1(e.thinReclaimGB) })),
   };
 }
 
@@ -164,25 +207,13 @@ api.get('/tools/waste', requirePerm('tools'), (req, res) => memoJson(req, res, '
   const scoped = scopeSlice(snap, req.user, vcId);
   const group = normGroupQuery(req.query);
   const vms = filterVmsByGroup(scoped.vms, group).filter((v) => !v.template);
-  const r1 = (x) => Number((x || 0).toFixed(1));
-  const off = vms.filter((v) => v.powerState !== 'POWERED_ON');
-  const snaps = vms.filter((v) => (v.snapshotCount || 0) > 0);
-  const thin = vms.filter((v) => v.thin);
-  const noTools = vms.filter((v) => v.powerState === 'POWERED_ON' && v.toolsStatus && v.toolsStatus !== 'RUNNING');
-  const top = (arr, fn, n = 50) => [...arr].sort((a, b) => fn(b) - fn(a)).slice(0, n);
   return {
     scope: vcId || 'all',
     // v2.491: 적용된 하위 범위를 응답에 실어 화면이 '무엇을 기준으로 센 수치' 인지 표시할 수 있게 한다.
     group: hasGroup(group) ? group : null,
-    // 할당했지만 쓰지 않는 CPU clock·메모리(v2.373). 아래 idle 헬퍼가 계산한다.
-    overAllocated: overAllocatedReport(scoped, vms),
-    // v2.483: 상위 50 → 300 — '꺼진 지 N일' 로 정렬·검토하려면 목록이 잘리면 안 된다(행당 필드 5개라 가볍다).
-    poweredOff: { count: off.length, storageGB: off.reduce((a, v) => a + (v.storageGB || 0), 0),
-      vms: top(off, (v) => v.storageGB || 0, 300).map((v) => ({ id: v.id, name: v.name, vcenterId: v.vcenterId, storageGB: v.storageGB, guestOS: v.guestOS })) },
-    snapshots: { count: snaps.length, sizeGB: r1(snaps.reduce((a, v) => a + (v.snapshotSizeGB || 0), 0)),
-      vms: top(snaps, (v) => v.snapshotSizeGB || 0).map((v) => ({ id: v.id, name: v.name, vcenterId: v.vcenterId, snapshotCount: v.snapshotCount, snapshotSizeGB: v.snapshotSizeGB })) },
-    thinReclaim: { count: thin.length, reclaimableGB: thin.reduce((a, v) => a + (v.uncommittedGB || 0), 0) },
-    noTools: { count: noTools.length, vms: noTools.slice(0, 50).map((v) => ({ id: v.id, name: v.name, vcenterId: v.vcenterId, toolsStatus: v.toolsStatus })) },
+    // 본문은 wasteReport(v2.497 추출) — 할당했지만 쓰지 않는 CPU clock·메모리(v2.373), 전원 꺼짐(v2.483:
+    // 상위 50 → 300, '꺼진 지 N일' 정렬·검토용), 스냅샷·thin·Tools 미실행 + vCenter 별 현황.
+    ...wasteReport(scoped, vms),
   };
 }, { extraKey: scopeKey(req.user, store.get()) }));
 
@@ -316,6 +347,170 @@ api.get('/tools/waste/off-since', requirePerm('tools'), async (req, res) => {
     res.status(500).json({ ok: false, reason: `꺼진 시각 조회 실패: ${e.message}` });
   }
 });
+
+/**
+ * 낭비 리소스 엑셀 내보내기(v2.497) — GET /tools/waste/export?vcenterId=&cluster=&folder=&days=30&full=0
+ *   → application/zip = waste-<scope>-<stamp>.xlsx + reports/<vm>.html
+ *
+ * 사용자 요구: "vCenter 별 전체 현황을 엑셀로 — 이 표를 그대로, 근거/리포트 파일을 엑셀에서 클릭해 볼 수 있게
+ * 첨부파일로". xlsx 는 화면 하위 탭과 같은 6시트(tools/wasteExport.js), CPU/메모리 과할당 VM 마다 자원 축소
+ * 근거 리포트(HTML, tools/rightsizeHtml.js)를 ZIP 안 reports/ 에 넣고 시트의 '근거 리포트' 셀이 상대 링크로
+ * 가리킨다. 리포트 형식이 HTML 인 이유: 서버에 PDF 엔진이 없고(웹 jsPDF 전용) 에어갭 패키지에 의존성을
+ * 추가하지 않기 위해서(브라우저 인쇄 → PDF 가능).
+ *
+ * 부하 설계(28 vCenter · RTT 800ms 초과 사이트):
+ *  - 리포트 계열은 vCenter 당 로그인 1회 + 8 VM 청크당 QueryPerf 1회(fetchVmsRightsizeBatch), vCenter 동시 4.
+ *  - 5분 rightsizeCache 공유 — 모달에서 이미 본 VM 은 왕복 0, 내보내기 뒤 모달을 열면 즉시.
+ *  - 리포트 상한 WASTE_EXPORT_MAX_REPORTS(기본 200) — 넘는 VM 은 '리포트 생략(상한)' 으로 정직 표기.
+ *  - 서버 전체 동시 1건(wasteExportBusy) — 반복 클릭으로 vCenter/포탈 CPU 가 몰리지 않게(폴러 재진입 가드와
+ *    같은 원칙). 진행 중이면 409 export_busy.
+ *  - HTML 생성 10건마다·xlsx 200행마다 setImmediate 양보.
+ * scope: /tools/waste 와 동일(scopeSlice → cluster/folder). 리포트 대상도 그 결과에서만 나온다.
+ * full=1: 상위 N 절단 없이 전량(전원 꺼짐 300·그 외 50 → 전부). 리포트 상한은 그대로 적용된다.
+ */
+let wasteExportBusy = null; // { user, at }
+const WASTE_EXPORT_MAX_REPORTS = Math.max(1, Math.min(1000, Number(process.env.WASTE_EXPORT_MAX_REPORTS) || 200));
+const WASTE_EXPORT_CHUNK = Math.max(1, Math.min(50, Number(process.env.WASTE_EXPORT_CHUNK) || 8));
+api.get('/tools/waste/export', requirePerm('tools'), async (req, res) => {
+  if (wasteExportBusy) {
+    const sec = Math.round((Date.now() - wasteExportBusy.at) / 1000);
+    return res.status(409).json({ ok: false, error: 'export_busy', reason: `다른 내보내기가 진행 중입니다(${wasteExportBusy.user || '사용자'} · ${sec}초 경과). 끝난 뒤 다시 시도하세요.` });
+  }
+  wasteExportBusy = { user: req.user?.username || '', at: Date.now() };
+  const t0 = Date.now();
+  try {
+    const vcId = req.query.vcenterId ? String(req.query.vcenterId) : '';
+    const days = normDays(req.query.days);
+    const full = ['1', 'true', 'yes'].includes(String(req.query.full || '').toLowerCase());
+    const snap = store.get();
+    const scoped = scopeSlice(snap, req.user, vcId);
+    const group = normGroupQuery(req.query);
+    const vms = filterVmsByGroup(scoped.vms, group).filter((v) => !v.template);
+    const waste = wasteReport(scoped, vms, full ? { topOff: Infinity, topOther: Infinity } : {});
+    // 화면의 VM 이름 검색(q)을 그대로 반영한다 — 사용자 요구가 '이 표를 그대로' 이므로, 검색 중이면
+    // 화면에 보이는 행만 나간다. KPI·vCenter 별 현황은 화면과 같이 **전체 기준**을 유지하고(카드 수치와
+    // 표가 어긋나지 않게) 필터 사실은 요약 시트에 적는다. 리포트 대상도 필터 후 목록에서만 고른다.
+    const q = String(req.query.q || '').trim();
+    if (q) {
+      const lower = q.toLowerCase();
+      const byName = (rows) => (rows || []).filter((r) => (r.name || '').toLowerCase().includes(lower));
+      waste.poweredOff.vms = byName(waste.poweredOff.vms);
+      waste.snapshots.vms = byName(waste.snapshots.vms);
+      waste.noTools.vms = byName(waste.noTools.vms);
+      waste.overAllocated.cpuTop = byName(waste.overAllocated.cpuTop);
+      waste.overAllocated.memTop = byName(waste.overAllocated.memTop);
+    }
+    // '꺼진 지' — 실패해도 내보내기는 계속(시트 주석에 사유).
+    let offSince = null;
+    try {
+      const off = vms.filter((v) => v.powerState !== 'POWERED_ON');
+      offSince = await poweredOffSinceFor(off.map((v) => ({ id: v.id, name: v.name, vcenterId: v.vcenterId })));
+    } catch (e) { offSince = { rows: [], error: e.message }; }
+    // 근거 리포트(CPU ∪ 메모리 과할당 VM, id 중복 제거).
+    const targets = reportTargets(waste);
+    const capped = targets.slice(0, WASTE_EXPORT_MAX_REPORTS);
+    const reports = new Map();
+    for (const v of targets.slice(WASTE_EXPORT_MAX_REPORTS)) reports.set(v.id, { skipped: `상한 ${WASTE_EXPORT_MAX_REPORTS}대` });
+    const results = await rightsizeReportsFor(snap, capped, days);
+    const files = []; let failed = 0; let n = 0;
+    for (const v of capped) {
+      const r = results.get(v.id);
+      if (!r || r.error) { reports.set(v.id, { error: r?.error || '알 수 없음' }); failed++; continue; }
+      const file = reportFileName(v);
+      files.push({ name: file, data: renderRightsizeHtml({ report: r.report, vm: r.report.vm || v, days, generatedAt: t0 }) });
+      reports.set(v.id, { file, verdict: r.report.verdict });
+      if ((++n % 10) === 0) await new Promise((resolve) => setImmediate(resolve));
+    }
+    const reportNote = `리포트 ${files.length}건 생성${failed ? ` · vCenter 조회 실패 ${failed}건` : ''}${targets.length > capped.length ? ` · 상한 초과로 생략 ${targets.length - capped.length}건(WASTE_EXPORT_MAX_REPORTS=${WASTE_EXPORT_MAX_REPORTS})` : ''}${snap.source === 'mock' ? ' · 데모(mock) 합성 데이터' : ''}`;
+    const sheets = buildWasteSheets({ waste, offSince, reports, scopeLabel: vcId || 'all', cluster: group.cluster, folder: group.folder, days, full, generatedAt: t0, reportNote, nameFilter: q });
+    const wb = await sheetsToWorkbook(sheets);
+    const xlsx = Buffer.from(await wb.xlsx.writeBuffer());
+    const zipName = exportZipName({ scope: vcId || 'all', cluster: group.cluster, folder: group.folder, at: t0 });
+    const zip = zipMany([{ name: zipName.replace(/\.zip$/, '.xlsx'), data: xlsx }, ...files]);
+    logAudit({ user: req.user?.username, action: '낭비 리소스 엑셀 내보내기', target: vcId || 'all',
+      detail: `days=${days} full=${full} cluster=${group.cluster || ''} folder=${group.folder || ''} q=${q} reports=${files.length} failed=${failed} skipped=${targets.length - capped.length} bytes=${zip.length} ms=${Date.now() - t0}`, ip: req.ip || '' });
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${zipName}"`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(zip);
+  } catch (e) {
+    console.error('[waste-export] 실패:', e);
+    if (!res.headersSent) res.status(500).json({ ok: false, reason: `내보내기 실패: ${e.message}` });
+  } finally {
+    wasteExportBusy = null;
+  }
+});
+
+/**
+ * 여러 VM 의 자원 축소 근거 리포트를 만든다(v2.497, 엑셀 내보내기용). /tools/rightsize 단건과 같은 판정·캐시.
+ * 반환 Map&lt;vmId, { report } | { error }&gt;. vCenter 별로 묶어 배치 조회(동시 4), 한 vCenter 실패는 그 VM 들만 error.
+ */
+async function rightsizeReportsFor(snap, targets, days) {
+  const out = new Map();
+  const interval = days <= 7 ? 'week' : days <= 30 ? 'month' : 'year';
+  const end = Date.now(); const start = end - days * 86_400_000;
+  const hostMhz = new Map();
+  for (const h of snap.hosts || []) {
+    const cores = Number(h.cpuCores) || 0; const total = Number(h.cpuTotalMhz) || 0;
+    if (cores > 0 && total > 0) hostMhz.set(`${h.vcenterId}|${h.name}`, total / cores);
+  }
+  const mhzOf = (vm) => hostMhz.get(`${vm.vcenterId}|${vm.host}`) ?? null;
+  const vmById = new Map((snap.vms || []).map((v) => [v.id, v]));
+  const analyze = (vm, fetched) => {
+    const report = analyzeRightsize({
+      vm, hostMhzPerCore: mhzOf(vm), intervalSec: fetched.intervalSec, days, series: fetched.series,
+      missing: fetched.missing, empty: fetched.empty, noData: fetched.noData, policy: rightsizePolicy(), now: end, realtime: fetched.realtime || null,
+    });
+    return { ...report, series: fetched.series, realtime: fetched.realtime || null, synthesized: !!fetched.synthesized };
+  };
+  const remember = (vm, rep) => {
+    rightsizeCache.set(`${vm.id}|${days}`, { at: Date.now(), report: rep });
+    if (rightsizeCache.size > 2000) for (const [k, e] of rightsizeCache) if (Date.now() - e.at > RIGHTSIZE_TTL_MS) rightsizeCache.delete(k);
+  };
+  const byVc = new Map();
+  for (const t of targets) {
+    const vm = vmById.get(t.id);
+    if (!vm) { out.set(t.id, { error: 'VM 을 스냅샷에서 찾을 수 없습니다' }); continue; }
+    const hit = rightsizeCache.get(`${vm.id}|${days}`);
+    if (hit && end - hit.at < RIGHTSIZE_TTL_MS) { out.set(vm.id, { report: { ...hit.report, cached: true } }); continue; }
+    if (snap.source === 'mock') { const rep = analyze(vm, mockRightsizeSeries(vm, days, interval, mhzOf(vm), start)); remember(vm, rep); out.set(vm.id, { report: rep }); continue; }
+    if (!byVc.has(vm.vcenterId)) byVc.set(vm.vcenterId, []);
+    byVc.get(vm.vcenterId).push(vm);
+  }
+  if (!byVc.size) return out;
+  const cfg = loadVcenterConfig().vcenters || [];
+  const morefOf = (vm) => vm.id.slice(String(vm.vcenterId || '').length + 1); // vc.id 에 콜론이 있을 수 있어 split 금지
+  await eachLimited([...byVc.entries()], 4, async ([vcenterId, list]) => {
+    const vc = cfg.find((x) => x.id === vcenterId);
+    if (!vc) { for (const vm of list) out.set(vm.id, { error: 'vCenter 설정을 찾을 수 없습니다' }); return; }
+    try {
+      const m = await fetchVmsRightsizeBatch(vc, list.map(morefOf), interval, { start, end, chunkSize: WASTE_EXPORT_CHUNK });
+      for (const vm of list) {
+        const fetched = m.get(morefOf(vm));
+        if (!fetched) { out.set(vm.id, { error: 'vCenter 가 이 VM 의 계열을 돌려주지 않았습니다' }); continue; }
+        const rep = analyze(vm, fetched); remember(vm, rep); out.set(vm.id, { report: rep });
+      }
+    } catch (e) {
+      for (const vm of list) out.set(vm.id, { error: `vCenter 성능 조회 실패: ${e.message}` });
+    }
+  });
+  return out;
+}
+
+/** 데모(mock)용 합성 리포트 계열 — 현재 사용률 주변의 시계열(synthesized 로 표기). 벌룬/스왑은 0. */
+function mockRightsizeSeries(vm, days, interval, hostMhzPerCore, start) {
+  const n = Math.floor((days * 86_400) / (interval === 'week' ? 1800 : interval === 'month' ? 7200 : 86_400));
+  const step = (days * 86_400_000) / n;
+  const mk = (base, amp) => Array.from({ length: n }, (_, i) => ({ t: new Date(start + i * step).toISOString(), v: Math.max(0, Math.round((base + Math.sin(i / 7) * amp + Math.cos(i / 13) * amp * 0.5) * 10) / 10) }));
+  const mhz = hostMhzPerCore || 2400; const allocMhz = (vm.cpuCount || 1) * mhz;
+  return { intervalSec: interval === 'week' ? 1800 : interval === 'month' ? 7200 : 86_400, missing: [], empty: [], noData: [], series: {
+    cpuUsageMhz: mk(allocMhz * ((vm.cpuUsagePct || 5) / 100), allocMhz * 0.03),
+    cpuUsagePct: mk(vm.cpuUsagePct || 5, 3), cpuReadyMs: mk(60, 30),
+    memActiveMB: mk((vm.memMB || 4096) * ((vm.memUsagePct || 5) / 100), (vm.memMB || 4096) * 0.02),
+    memConsumedMB: mk((vm.memMB || 4096) * (((vm.memUsagePct || 5) + 15) / 100), (vm.memMB || 4096) * 0.02),
+    memBalloonMB: mk(0, 0), memSwappedMB: mk(0, 0), memUsagePct: mk(vm.memUsagePct || 5, 2),
+  }, synthesized: true };
+}
 
 // v2.484 전원 꺼짐 점검 설정/상태(조회는 tools 권한, 변경·수동 점검은 admin — 게스트 디스크 설정과 같은 경계).
 api.get('/tools/waste/off-check', requirePerm('tools'), (_req, res) => {
@@ -728,18 +923,7 @@ api.get('/tools/rightsize', requirePerm('tools'), async (req, res) => {
 
   let fetched;
   if (snap.source === 'mock') {
-    // 데모: 현재 사용률 주변의 합성 시계열(synthesized 로 표기). 벌룬/스왑은 0.
-    const n = Math.floor((days * 86_400) / (interval === 'week' ? 1800 : interval === 'month' ? 7200 : 86_400));
-    const step = (days * 86_400_000) / n;
-    const mk = (base, amp) => Array.from({ length: n }, (_, i) => ({ t: new Date(start + i * step).toISOString(), v: Math.max(0, Math.round((base + Math.sin(i / 7) * amp + Math.cos(i / 13) * amp * 0.5) * 10) / 10) }));
-    const mhz = hostMhzPerCore || 2400; const allocMhz = (vm.cpuCount || 1) * mhz;
-    fetched = { intervalSec: interval === 'week' ? 1800 : interval === 'month' ? 7200 : 86_400, missing: [], empty: [], noData: [], series: {
-      cpuUsageMhz: mk(allocMhz * ((vm.cpuUsagePct || 5) / 100), allocMhz * 0.03),
-      cpuUsagePct: mk(vm.cpuUsagePct || 5, 3), cpuReadyMs: mk(60, 30),
-      memActiveMB: mk((vm.memMB || 4096) * ((vm.memUsagePct || 5) / 100), (vm.memMB || 4096) * 0.02),
-      memConsumedMB: mk((vm.memMB || 4096) * (((vm.memUsagePct || 5) + 15) / 100), (vm.memMB || 4096) * 0.02),
-      memBalloonMB: mk(0, 0), memSwappedMB: mk(0, 0), memUsagePct: mk(vm.memUsagePct || 5, 2),
-    }, synthesized: true };
+    fetched = mockRightsizeSeries(vm, days, interval, hostMhzPerCore, start);
   } else {
     const vc = loadVcenterConfig().vcenters.find((x) => x.id === vm.vcenterId);
     if (!vc) return res.status(404).json({ ok: false, reason: 'vCenter 설정을 찾을 수 없습니다.' });

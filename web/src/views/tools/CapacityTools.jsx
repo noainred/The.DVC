@@ -1,12 +1,14 @@
 // CapacityTools.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
 import React, { useEffect, useState, useRef } from 'react';
 import { useHashTab } from '../../hooks/useHashTab.js';
-import { fetchJson, postJson } from '../../api.js';
+import { fetchJson, postJson, downloadFile } from '../../api.js';
 import { DataTable, Loading, ErrorBox, StateBadge, UsageCell, Modal, ResultCount, SearchBox, VmLink } from '../../components/ui.jsx';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Brush } from 'recharts';
 import { Card, fmtTrendTick, tb, tempColor, useTool } from './shared.jsx';
 import RightsizeReport from './RightsizeReport.jsx'; // v2.445: VM 자원 축소 근거 리포트
 import DiskTrend from './DiskTrend.jsx'; // v2.446: 디스크 트렌드(할당·사용·회수 가능)
+// v2.497: 엑셀(ZIP) 내보내기 버튼 문구·예상치 — 판정은 순수 모듈(node 테스트로 고정)
+import { reportCount, exportLabel, exportTitle, progressNote, exportErrText } from './wasteExportText.js';
 
 
 export function EsxiTemp({ scope }) {
@@ -338,6 +340,30 @@ export function Waste({ scope, cluster = '', folder = '' }) {
   const [q, setQ] = useState('');
   // v2.483: 전원 꺼진 VM 의 '꺼진 지 N일' — 목록(/tools/waste)과 별도로 조회해 뒤이어 채운다(출처: 이벤트/추적/first_seen).
   const [offSince, setOffSince] = useState(null); // { byId: {vmId: {offSince, offDays, source, exact}}, sources, error }
+  // v2.497: 엑셀(ZIP) 내보내기 — 표 5개 + vCenter 별 현황 xlsx + VM 별 근거 리포트(HTML) 첨부.
+  // 훅은 조기 return 위에 선언한다(CLAUDE.md 프론트 회귀 방지 — React #310).
+  const [exportDays, setExportDays] = useState(30);   // 근거 리포트 관측 기간(리포트 모달 기본과 동일)
+  const [exporting, setExporting] = useState(false);
+  const [exportErr, setExportErr] = useState('');
+  const [exportSec, setExportSec] = useState(0);      // 경과 초 — '멈춘 것' 으로 오해하지 않게 보여준다
+  useEffect(() => {
+    if (!exporting) return undefined;
+    const t0 = Date.now();
+    setExportSec(0);
+    const id = setInterval(() => setExportSec((Date.now() - t0) / 1000), 1000);
+    return () => clearInterval(id);
+  }, [exporting]);
+  const runExport = async () => {
+    if (exporting) return;
+    setExporting(true); setExportErr('');
+    try {
+      await downloadFile(`/tools/waste/export?${new URLSearchParams({ ...params, days: String(exportDays), ...(q.trim() ? { q: q.trim() } : {}) }).toString()}`);
+    } catch (e) {
+      setExportErr(exportErrText(e));
+    } finally {
+      setExporting(false);
+    }
+  };
   useEffect(() => {
     if (!data) return;
     let alive = true;
@@ -385,7 +411,23 @@ export function Waste({ scope, cluster = '', folder = '' }) {
         ))}
         {tab !== 'trend' && <SearchBox className="input" style={{ marginLeft: 'auto', maxWidth: 260, minWidth: 170 }}
           placeholder="🔍 VM 이름 검색" value={q} onChange={setQ} />}
+        {tab !== 'trend' && (
+          <span className="flex gap" style={{ alignItems: 'center', flex: 'none' }}>
+            <select className="select" style={{ width: 116 }} value={exportDays} disabled={exporting}
+              onChange={(e) => setExportDays(Number(e.target.value))} title="근거 리포트의 vCenter 성능 관측 기간">
+              {[7, 30, 90, 180, 365].map((d) => <option key={d} value={d}>근거 {d}일</option>)}
+            </select>
+            <button className="logout-btn" style={{ flex: 'none', padding: '7px 12px' }} disabled={exporting} onClick={runExport}
+              title={exportTitle({ reportVms: reportCount(data, { nameFilter: q }), vcenters: (data.byVcenter || []).length || 1, days: exportDays, nameFilter: q })}>
+              {exportLabel({ busy: exporting, elapsedSec: exportSec })}
+            </button>
+          </span>
+        )}
       </div>
+      {exporting && <div className="muted" style={{ fontSize: 12, marginBottom: 8, overflowWrap: 'anywhere' }}>
+        {progressNote({ reportVms: reportCount(data, { nameFilter: q }), vcenters: (data.byVcenter || []).length || 1, days: exportDays, elapsedSec: exportSec })}
+      </div>}
+      {exportErr && <div className="muted" style={{ fontSize: 12, marginBottom: 8, color: 'var(--amber)', overflowWrap: 'anywhere' }}>{exportErr}</div>}
       {tab === 'off' && (() => {
         const SRC = { event: 'vCenter 전원 이벤트(정확)', observed: `전원 꺼짐 점검(${offSince?.sources?.observedIntervalHours || 6}시간 주기)에서 관측된 현재 꺼짐 구간 시작 — 하한`, track: 'VM 추적 12시간 슬롯 전환(그 시각 이후 확실히 꺼짐 — 하한)', first_seen: 'VM 추적 시작 이후 계속 꺼짐(하한)' };
         const SRC_SHORT = { event: '이벤트', observed: '점검', track: '추적', first_seen: '관측 시작' };
