@@ -26,6 +26,10 @@ const SpecialTools = lazy(() => import('./views/SpecialTools.jsx'));
 const SvcMonitor = lazy(() => import('./views/SvcMonitor.jsx'));
 const Insights = lazy(() => import('./views/Insights.jsx'));
 const ReleaseNotes = lazy(() => import('./views/ReleaseNotes.jsx'));
+// 통합 관제 콘솔(v2.487) — 헤더의 데이터 소스 배지(LIVE/MOCK)를 누르면 전환되는 별도 화면(#/console/…).
+// 기존 탭 화면은 그대로 두고(개발용), 콘솔은 자체 좌측 내비·6화면을 가진다. 실 API 만 사용.
+const DvcConsole = lazy(() => import('./console/DvcConsole.jsx'));
+const isConsoleHash = () => window.location.hash.replace(/^#\/?/, '').split('/')[0] === 'console';
 
 const TABS = [
   { id: 'overview', label: 'Overview' }, // 랜딩(항상 노출)
@@ -187,6 +191,8 @@ function Portal({ user, onLogout }) {
   const [menuFilter, setMenuFilter] = useState({}); // { [tabId]: value }
   const [showNotes, setShowNotes] = useState(false);
   const [showVcDown, setShowVcDown] = useState(false); // 헤더 상태 칩의 '(N 불가)' 클릭 → 연결 안 되는 vCenter 목록 모달(v2.300)
+  // 통합 관제 콘솔 표시 여부(v2.487) — 해시 첫 세그먼트 'console' 로 판단해 새로고침해도 콘솔에 머문다.
+  const [consoleOn, setConsoleOn] = useState(isConsoleHash);
 
   const cur = tabFilters[tab] || {};
   const region = cur.region || '';
@@ -207,12 +213,19 @@ function Portal({ user, onLogout }) {
   // 누르면 전체 vCenter 목록으로 복귀한다(드릴다운은 VCenters 내부 상태라 탭 클릭만으론 못 되돌림).
   const [platformResetSeq, setPlatformResetSeq] = useState(0);
   useEffect(() => {
-    if (!tabFromHash()) window.history.replaceState(null, '', `#/${tab}`);
-    const onHash = () => { const t = tabFromHash(); if (t) setTabState(t); };
+    if (!tabFromHash() && !isConsoleHash()) window.history.replaceState(null, '', `#/${tab}`);
+    const onHash = () => {
+      if (isConsoleHash()) { setConsoleOn(true); return; } // 콘솔 내부 페이지 전환은 콘솔이 처리
+      setConsoleOn(false);
+      const t = tabFromHash(); if (t) setTabState(t);
+    };
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // 콘솔 진입/복귀 — 복귀 시 목적지 해시(콘솔 내비의 '개발 포탈 ↗' 항목)가 있으면 그 탭으로, 없으면 직전 탭으로.
+  const openConsole = () => { setConsoleOn(true); window.location.hash = '#/console'; };
+  const exitConsole = (hash) => { setConsoleOn(false); window.location.hash = hash || `#/${tab}`; };
 
   const saveLanding = (id) => { setLandingTab(id); localStorage.setItem(LANDING_KEY, id); };
 
@@ -292,6 +305,16 @@ function Portal({ user, onLogout }) {
   // Drill into a site → set the HOSTS tab's own vCenter filter, then go there.
   const selectSite = (id) => { patchFilter({ vcenterId: id, region: '' }, 'hosts'); setTab('hosts'); };
 
+  // 통합 관제 콘솔 — 포탈 셸(헤더·탭·필터·상태바) 대신 전체 화면으로 그린다. 위 훅들은 모두 선언된 뒤라
+  // 조기 반환해도 훅 개수가 렌더마다 같다(CLAUDE.md 프론트엔드 규칙). /health 폴링은 그대로 유지돼 콘솔에 넘긴다.
+  if (consoleOn) {
+    return (
+      <Suspense fallback={<div className="login-screen"><div className="loading">관제 콘솔 불러오는 중…</div></div>}>
+        <DvcConsole user={user} health={health} onExit={exitConsole} />
+      </Suspense>
+    );
+  }
+
   return (
     <div className="app">
       <header className="topbar">
@@ -308,12 +331,13 @@ function Portal({ user, onLogout }) {
               <>
                 {health?.version && <span className="ver-badge brand-ver" style={{ cursor: 'pointer' }} title="릴리즈 노트 보기" onClick={() => setShowNotes(true)}>v{health.version}</span>}
                 {health?.source && (
-                  <span className="ver-badge brand-ver" style={{
-                    marginLeft: 6,
+                  <span className="ver-badge brand-ver" role="button" tabIndex={0} style={{
+                    marginLeft: 6, cursor: 'pointer',
                     color: health.source === 'live' ? '#4ade80' : health.source === 'mock' ? '#fbbf24' : '#22d3ee',
                     background: health.source === 'live' ? 'rgba(34,197,94,.12)' : health.source === 'mock' ? 'rgba(245,158,11,.14)' : 'rgba(34,211,238,.12)',
                     borderColor: 'transparent',
-                  }} title="데이터 소스">{health.source.toUpperCase()}</span>
+                  }} title={`데이터 소스: ${health.source} — 클릭하면 통합 관제 콘솔로 전환`}
+                    onClick={openConsole} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openConsole(); } }}>{health.source.toUpperCase()}</span>
                 )}
                 {health?.updateAvailable && (
                   <span className="ver-badge brand-ver" style={{ cursor: 'pointer', marginLeft: 6, color: '#4ade80', background: 'rgba(34,197,94,.12)', borderColor: 'transparent' }}
