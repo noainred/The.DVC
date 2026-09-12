@@ -122,6 +122,9 @@ export function IdracDetailModal({ server, onClose }) {
               <span className="badge amber">{maxTempText(sensors)}</span>
               <span className="muted" style={{ fontSize: 12, alignSelf: 'center' }}>{sampleCountText(sensors)}</span>
             </div>
+            {/* v2.493: 시계열이 없으면 빈 차트 틀을 두 개 띄우지 않는다 — 위임(엣지) 서버는
+                중앙에 이력이 없어 늘 빈 틀이 됐다. 값은 아래 '현재값' 표로 보여준다. */}
+            {chartData.length > 0 && (<>
             <div style={{ fontSize: 13, fontWeight: 700, margin: '6px 0' }}>CPU 사용량 (%)</div>
             <div style={{ width: '100%', height: 180 }}>
               <ResponsiveContainer>
@@ -149,6 +152,7 @@ export function IdracDetailModal({ server, onClose }) {
                 </LineChart>
               </ResponsiveContainer>
             </div>
+            </>)}
             {fanNames.length > 0 && (
               <>
                 <div style={{ fontSize: 13, fontWeight: 700, margin: '12px 0 6px' }}>팬 속도 (RPM) — {fanNames.length}개</div>
