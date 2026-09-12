@@ -1,6 +1,17 @@
 {
   "notes": [
     {
+      "version": "2.490.0",
+      "date": "2026-09-12",
+      "title": "신규 포탈(V3, web/src/version_3) — Claude Design 'DVC Console' 시안 구현 + 설정 › 신규 포탈 보기",
+      "notes": [
+        "설정 › '신규 포탈 보기' 탭의 V3 버튼(또는 새 창)으로 #/v3 에 진입. 기존 화면은 개발용으로 그대로 두고, 신규 포탈은 web/src/version_3/ 에 분리(V3App · 6 페이지 · nav · data · v3.css).",
+        "시안 값 그대로: 라이트 테마(배경 #f4f6f9 · 보더 #dfe4ec · 모노 숫자 · 표 머리 #f0f3f7), 좌측 236px 8도메인 내비(활성 rgba(59,130,246,.85)), 상단 검색/리전/vCenter 범위/LIVE/사용자, 6화면 — 전사 현황(도메인 타일 6 · 경위도 기반 그리드 지도 마커(클러스터 벌림·라벨 3슬롯) · 지금 주목 · 용량 헤드룸 · 사이트 표), 컴퓨트, 스토리지, 네트워크, 물리·설비, 알람 센터.",
+        "데이터는 실 API 만(/overview·/alarms·/nsx·/svcmon/state·/datastores·/tools/storage·/tools/pdu·/tools/sanswitch·/tools/capacity(-forecast)·/networks·/tools/ipam/subnets·/hosts·/alarm-mutes·/admin/idrac). 시안의 목업 수치는 쓰지 않고, 수집 API 가 없는 항목(백본 회선·계약 전력·펌웨어 기준선·보증 만료)은 '수집 없음' 으로 표시. 권한 없는 API 는 호출하지 않음.",
+        "판정 규칙은 기존 콘솔 consoleData.js 를 재사용(임계 75/90, 회귀 테스트 고정). 지도 마커 배치·색 판정은 version_3/data.test.js 7건으로 고정. 글꼴은 CDN 대신 설치 글꼴 → 시스템 글꼴 폴백."
+      ]
+    },
+    {
       "version": "2.489.0",
       "date": "2026-09-12",
       "title": "업그레이드 경로 테스트용 마이너 버전업(코드 변경 없음)",
