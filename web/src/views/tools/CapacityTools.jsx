@@ -7,6 +7,7 @@ import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianG
 import { Card, fmtTrendTick, tb, tempColor, useTool } from './shared.jsx';
 import RightsizeReport from './RightsizeReport.jsx'; // v2.445: VM 자원 축소 근거 리포트
 import DiskTrend from './DiskTrend.jsx'; // v2.446: 디스크 트렌드(할당·사용·회수 가능)
+import { sparkCellState, sparkCellText, sparkProgressText, sparkCapText, SPARK_ROW_CAP } from './sparkBatch.js';
 // v2.497: 엑셀(ZIP) 내보내기 버튼 문구·예상치 — 판정은 순수 모듈(node 테스트로 고정)
 import { reportCount, exportLabel, exportTitle, progressNote, exportErrText } from './wasteExportText.js';
 
@@ -175,9 +176,14 @@ const sparkAvg = (pts) => (pts && pts.length ? Math.round((pts.reduce((a, p) => 
  * recharts 를 행마다 마운트하면 수십 개 차트로 렌더가 무거워지므로 순수 SVG path 를 쓴다.
  * 값이 %(0~100) 라 y 축을 0~100 으로 고정해 행 간 높이를 비교 가능하게 한다.
  */
-function Sparkline({ points, color = '#fbbf24', width = 132, height = 26 }) {
-  if (points === undefined) return <span className="muted" style={{ fontSize: 11 }}>…</span>;
-  if (!points || points.length < 2) return <span className="muted" style={{ fontSize: 11 }} title="vCenter 에 이 VM 의 성능 히스토리가 없습니다(전원 OFF·권한·수집 방식 등)">—</span>;
+function Sparkline({ points, color = '#fbbf24', width = 132, height = 26, requested = false }) {
+  // v2.502: '아직 순서가 안 온 것'(…)과 '조회했는데 없는 것'(—)을 구분한다. 예전에는 둘 다
+  // undefined 여서 표 아래쪽 행이 영원히 '…' 로 남았고, 사용자는 고장인지 대기인지 알 수 없었다.
+  const state = sparkCellState(points, requested);
+  if (state !== 'ok') {
+    const t = sparkCellText(state);
+    return <span className="muted" style={{ fontSize: 11 }} title={t.title}>{t.text}</span>;
+  }
   const pad = 2;
   const n = points.length;
   const xs = (i) => pad + (i * (width - pad * 2)) / (n - 1);
@@ -206,20 +212,65 @@ function Sparkline({ points, color = '#fbbf24', width = 132, height = 26 }) {
  * 행마다 개별 요청하면 수십 개 HTTP + vCenter SOAP 이 몰리므로, vmId 목록을 한 번에 POST 한다.
  * 서버가 요청당 VM 수를 제한(기본 24)하고 5분 캐시하므로 여기서도 상한을 맞춰 보낸다.
  */
+/** 추이 조회의 진행·한계를 밝히는 각주 — 조용히 자르지 않는다(v2.502). */
+function SparkNote({ spark }) {
+  const progress = sparkProgressText(spark.progress || {});
+  const cap = sparkCapText(spark.totalRows);
+  if (!progress && !cap) return null;
+  return (
+    <div className="muted" style={{ fontSize: 11.5, marginTop: 4 }}>
+      {progress && <div>※ {progress}</div>}
+      {cap && <div>※ {cap}</div>}
+    </div>
+  );
+}
+
 function useSparklines(rows, type, enabled) {
-  const [map, setMap] = useState({});      // vmId -> points | null
-  const [info, setInfo] = useState(null);  // { truncated, synthesized, maxVms }
-  const ids = Array.isArray(rows) ? rows.map((r) => r.id).filter(Boolean) : [];
-  const key = ids.slice(0, 24).join(',');
+  const [map, setMap] = useState({});        // vmId -> points | null
+  const [info, setInfo] = useState(null);    // { synthesized, maxVms, capped, skipped }
+  const [asked, setAsked] = useState(() => new Set()); // 서버에 이미 물어본 id(대기와 '없음' 구분용)
+  const [done, setDone] = useState(0);       // 진행 표시
+  const all = Array.isArray(rows) ? rows.map((r) => r.id).filter(Boolean) : [];
+  const ids = all.slice(0, SPARK_ROW_CAP);
+  const key = ids.join(',');
   useEffect(() => {
-    if (!enabled || !key) { setMap({}); setInfo(null); return undefined; }
+    if (!enabled || !key) { setMap({}); setInfo(null); setAsked(new Set()); setDone(0); return undefined; }
     let dead = false;
-    postJson('/tools/waste/spark', { vmIds: key.split(','), type })
-      .then((r) => { if (!dead) { setMap(r.series || {}); setInfo({ truncated: r.truncated, synthesized: r.synthesized, maxVms: r.maxVms }); } })
-      .catch(() => { if (!dead) { setMap({}); setInfo(null); } });
+    setMap({}); setAsked(new Set()); setDone(0);
+    (async () => {
+      const list = key.split(',');
+      // 첫 배치는 서버 상한을 모르므로 보수적으로 시작하고, 응답의 maxVms 로 이후 배치를 맞춘다
+      // (화면에 24 를 하드코딩하지 않는다 — 서버가 WASTE_SPARK_MAX_VMS 로 조정한다).
+      let size = 24;
+      let i = 0;
+      let skipped = 0;
+      while (i < list.length && !dead) {
+        const batch = list.slice(i, i + size);
+        try {
+          // 순차 배치가 의도다: 고RTT vCenter 에 QueryPerf 를 한꺼번에 몰지 않기 위해 배치를
+          // 하나씩 보낸다(서버가 배치 안에서 6개 동시). 병렬로 바꾸면 28개 vCenter 환경에서
+          // 한 화면 진입이 수십 개 SOAP 을 동시에 띄운다.
+          const r = await postJson('/tools/waste/spark', { vmIds: batch, type });
+          if (dead) return;
+          if (Number(r.maxVms) > 0) size = Number(r.maxVms);
+          const got = r.series || {};
+          skipped += Number(r.skipped) || 0;
+          setMap((m) => ({ ...m, ...got }));
+          setAsked((prev) => { const n = new Set(prev); for (const id of batch) n.add(id); return n; });
+          setInfo({ synthesized: r.synthesized, maxVms: r.maxVms, capped: !!r.capped, skipped });
+        } catch {
+          if (dead) return;
+          // 이 배치만 실패 — 나머지는 계속 시도한다. 실패한 id 는 '물어봤다' 로 표시해
+          // 영원히 '…' 로 남지 않게 한다(원인은 단정하지 않고 '—' 로 보인다).
+          setAsked((prev) => { const n = new Set(prev); for (const id of batch) n.add(id); return n; });
+        }
+        i += batch.length;
+        if (!dead) setDone(i);
+      }
+    })();
     return () => { dead = true; };
   }, [key, type, enabled]);
-  return { map, info };
+  return { map, info, asked, progress: { done, total: ids.length, skipped: info?.skipped || 0 }, totalRows: all.length };
 }
 
 /**
@@ -484,10 +535,10 @@ export function Waste({ scope, cluster = '', folder = '' }) {
           { key: 'cpuUsagePct', label: '사용률', align: 'right', render: (v) => `${v.cpuUsagePct}%` },
           { key: 'cpuSavingPct', label: '절감 가능', align: 'right', render: (v) => (v.cpuSavingPct == null ? '—' : <b>{v.cpuSavingPct}%</b>) },
           { key: 'host', label: 'ESXi 호스트', render: (v) => <span className="muted">{v.host}</span> },
-          { key: 'spark', label: '7일 사용률 추이', sortValue: (v) => sparkAvg(spark.map[v.id]), render: (v) => <Sparkline points={spark.map[v.id]} /> },
+          { key: 'spark', label: '7일 사용률 추이', sortValue: (v) => sparkAvg(spark.map[v.id]), render: (v) => <Sparkline points={spark.map[v.id]} requested={spark.asked.has(v.id)} /> },
           { key: 'report', label: '근거', sortable: false, render: (v) => <button className="tab" style={{ padding: '4px 9px', fontSize: 11.5 }} onClick={() => setReportVm(v)} title="기간별 추이·p95·CPU Ready·권장 vCPU 와 참고 문서">📊 리포트</button> },
         ]} />
-        {spark.info?.truncated && <div className="muted" style={{ fontSize: 11.5, marginTop: 4 }}>※ 추이 차트는 vCenter 성능 조회 부담을 고려해 상위 {spark.info.maxVms}대만 표시합니다.</div>}
+        <SparkNote spark={spark} />
         {spark.info?.synthesized && <div className="muted" style={{ fontSize: 11.5, marginTop: 4 }}>※ 데모(mock) 모드의 합성 데이터입니다.</div>}
       </>}
       {tab === 'mem' && oa && <>
@@ -505,10 +556,10 @@ export function Waste({ scope, cluster = '', folder = '' }) {
           { key: 'memSavingPct', label: '절감 가능', align: 'right', render: (v) => (v.memSavingPct == null ? '—' : <b>{v.memSavingPct}%</b>) },
           { key: 'guestOS', label: 'Guest OS' },
           { key: 'host', label: 'ESXi 호스트', render: (v) => <span className="muted">{v.host}</span> },
-          { key: 'spark', label: '7일 사용률 추이', sortValue: (v) => sparkAvg(spark.map[v.id]), render: (v) => <Sparkline points={spark.map[v.id]} color="#4ade80" /> },
+          { key: 'spark', label: '7일 사용률 추이', sortValue: (v) => sparkAvg(spark.map[v.id]), render: (v) => <Sparkline points={spark.map[v.id]} color="#4ade80" requested={spark.asked.has(v.id)} /> },
           { key: 'report', label: '근거', sortable: false, render: (v) => <button className="tab" style={{ padding: '4px 9px', fontSize: 11.5 }} onClick={() => setReportVm(v)} title="Active·Consumed·벌룬·스왑 추이와 권장 메모리, 참고 문서">📊 리포트</button> },
         ]} />
-        {spark.info?.truncated && <div className="muted" style={{ fontSize: 11.5, marginTop: 4 }}>※ 추이 차트는 vCenter 성능 조회 부담을 고려해 상위 {spark.info.maxVms}대만 표시합니다.</div>}
+        <SparkNote spark={spark} />
       </>}
       {tab === 'trend' && <WasteTrend scope={scope} />}
       {reportVm && <RightsizeReport vm={reportVm} onClose={() => setReportVm(null)} />}
