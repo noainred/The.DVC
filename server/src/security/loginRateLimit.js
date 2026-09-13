@@ -46,11 +46,25 @@ const acctKeyOf = (username) => `acct:${String(username || '?').toLowerCase()}`;
  * 카운터가 있어야 이 패턴이 멈춘다. 사용자명 사전 열거 스윕도 같은 카운터에 걸린다.
  *
  * 임계값은 per-IP+계정 키보다 높게(기본 6×=48회/창) 잡는다 — NAT 뒤 사무실 하나가 오타 몇 번으로
- * 통째로 잠기는 가용성 사고를 피하기 위한 절충이며, 정상 로그인 1회가 이 카운터도 리셋한다.
- * 정직한 한계: 공유 NAT 에서 실패가 48회 누적되면 그 출발지 전체가 잠긴다(LOGIN_IP_FACTOR 로 조정).
+ * 통째로 잠기는 가용성 사고를 피하기 위한 절충이다.
+ *
+ * ⚠ v2.503 정정(감사 S2, medium — v2.500 의 내 주석이 틀렸다): "정상 로그인 1회가 이 카운터도
+ * 리셋한다" 는 **잠금 전까지만** 참이다. 일단 잠기면 `checkLoginAllowed` 가 시도 자체를 막으므로
+ * 성공 경로에 도달할 수 없다(자기지속). 계정 무관 키라 이 잠금은 **그 출발지의 전 사용자**에게
+ * 걸리고, 리버스 프록시 뒤라면 그 출발지가 곧 전 사용자다 → 48회 실패로 15분 전체 로그인 마비.
+ * 그래서 두 가지를 바꾼다:
+ *  · 이 레이어의 잠금 시간만 **분리**한다(`LOGIN_IP_LOCKOUT_MS`, 기본 60초). 목적이 '계정 열거와
+ *    scrypt CPU 소진을 늦추는 것' 이므로 60초면 충분하다 — IP당 분당 ~48회 scrypt(≈2.3초 CPU)로
+ *    묶이고, 오탐으로 잠긴 사무실은 15분이 아니라 1분 만에 복구된다. 계정을 아는 진짜 브루트포스는
+ *    per-IP+계정(8회/15분)·계정 전역(80회/15분) 레이어가 그대로 막는다.
+ *  · 호출부는 `util/rateLimit.js clientIp(req)` 로 출발지를 정한다 — `trust proxy` 가 설정된
+ *    배포에서만 XFF 를 신뢰하고, 아니면 실제 peer 를 쓴다(v2.428 과 같은 규약). 그 전에는
+ *    `req.socket.remoteAddress` 고정이라 프록시 뒤 전 사용자가 한 키를 공유했다.
+ * 정직한 한계: 그래도 공유 NAT 에서 48회 실패가 누적되면 그 출발지가 60초 잠긴다.
  */
 const IP_FACTOR = Number(process.env.LOGIN_IP_FACTOR) || 6;
 const IP_MAX_FAILS = MAX_FAILS * IP_FACTOR;
+const IP_LOCKOUT_MS = Math.max(1_000, Number(process.env.LOGIN_IP_LOCKOUT_MS) || 60_000);
 const ipKeyOf = (ip) => `ip:${String(ip || '?')}`;                               // ':' 접두 — 위 두 키와 불충돌
 
 function prune(now) {
@@ -80,15 +94,15 @@ export function checkLoginAllowed(ip, username, now = Date.now()) {
 
 /** 실패 시 호출. 임계 도달하면 잠금. 반환: { locked, retryAfterSec, remaining }. */
 // 한 키(per-IP 또는 계정 전역)의 실패를 집계하고 임계 도달 시 잠근다. 반환: { locked, retryAfterSec, remaining }.
-function bump(key, max, now) {
+function bump(key, max, now, lockMs = LOCKOUT_MS) {
   let rec = attempts.get(key);
   if (!rec || (now - (rec.first || 0)) > WINDOW_MS) rec = { count: 0, first: now, lockUntil: 0 }; // 창 만료 시 리셋
   rec.count += 1;
   if (rec.count >= max) {
-    rec.lockUntil = now + LOCKOUT_MS;
+    rec.lockUntil = now + lockMs;
     rec.count = 0; rec.first = now;
     attempts.set(key, rec);
-    return { locked: true, retryAfterSec: Math.ceil(LOCKOUT_MS / 1000) };
+    return { locked: true, retryAfterSec: Math.ceil(lockMs / 1000) };
   }
   attempts.set(key, rec);
   return { locked: false, remaining: max - rec.count };
@@ -99,7 +113,7 @@ export function recordLoginFailure(ip, username, now = Date.now()) {
   prune(now);
   const perIp = bump(keyOf(ip, username), MAX_FAILS, now);            // 단일 출발지+계정(빠른 잠금)
   const acct = bump(acctKeyOf(username), ACCT_MAX_FAILS, now);        // 분산 합산(느린 계정 전역 잠금)
-  const srcIp = bump(ipKeyOf(ip), IP_MAX_FAILS, now);                 // 계정명 무관(사용자명 로테이션 차단)
+  const srcIp = bump(ipKeyOf(ip), IP_MAX_FAILS, now, IP_LOCKOUT_MS);  // 계정명 무관(사용자명 로테이션 차단) — 짧은 잠금(위 주석)
   const locked = perIp.locked || acct.locked || srcIp.locked;
   return { locked, retryAfterSec: Math.max(perIp.retryAfterSec || 0, acct.retryAfterSec || 0, srcIp.retryAfterSec || 0) || undefined, remaining: perIp.remaining };
 }

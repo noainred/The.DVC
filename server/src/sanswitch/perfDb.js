@@ -52,6 +52,9 @@ async function open() {
         VALUES (?,?,?,?,?,?,?)
         ON CONFLICT(device_id, port) DO UPDATE SET ts=excluded.ts, attached_name=excluded.attached_name,
           attached_wwn=excluded.attached_wwn, speed=excluded.speed, port_type=excluded.port_type`),
+      // v2.503: importSamples 의 포트별 '더 새로운 메타만 반영' 조회. 예전에는 루프 안에서
+      // prepare() 를 새로 만들어 디렉터(512~768포트) push 마다 그만큼 SQL 파싱이 반복됐다.
+      metaTs: conn.prepare('SELECT ts FROM port_meta WHERE device_id = ? AND port = ?'),
     };
     return _db;
   } catch (e) {
@@ -123,7 +126,9 @@ export async function importSamples(rows = [], meta = [], retentionDays = 90) {
       const d = String(m.d ?? ''); const p = Number(m.p);
       if (!d || !Number.isInteger(p)) continue;
       // 더 새로운 메타만 반영(엣지 청크가 순서 없이 와도 최신을 유지)
-      const cur = db.conn.prepare('SELECT ts FROM port_meta WHERE device_id = ? AND port = ?').get(d, p);
+      // v2.503: 예전에는 이 줄에서 포트마다 `prepare()` 를 새로 만들었다 — 디렉터 1대가 512~768포트라
+      // 한 요청에 그만큼 SQL 파싱·계획 수립이 반복됐다(같은 파일의 upMeta 는 이미 초기화 때 준비돼 있다).
+      const cur = db.metaTs.get(d, p);
       if (cur && Number(cur.ts) > Number(m.ts)) continue;
       db.upMeta.run(d, p, Number(m.ts) || Date.now(), String(m.name || ''), String(m.wwn || ''), String(m.speed || ''), String(m.type || ''));
     }

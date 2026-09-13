@@ -18,7 +18,12 @@
  */
 import { withJob } from '../perf/monitor.js'; // v2.498: 스톨 발생 시 '진행 중 작업' 표시(계측 전용)
 
-const MAX_PER_NAME = Math.max(2, Math.min(64, Number(process.env.SNAP_CACHE_PER_NAME) || 12));
+// v2.503(성능 감사 P3): 기본값 12 는 **운영 vCenter 수(28, 30+ 확장 예정)보다 작다**.
+// 화면 대부분이 `?vcenterId=` 로 스코프를 나누므로, 법인별로 다른 화면을 동시에 보는 사용자가
+// 13명만 돼도 LRU 가 스래싱해 v2.447 이 고친 '히트율 0%' 가 그대로 되살아난다.
+// 32 로 올리면 28개 vCenter + 'all' + 여유가 한 번에 들어간다. 상한은 엔드포인트 수 × 이 값이고
+// 값은 스냅샷이 넘어가면 교체되므로(메모리는 스냅샷 1세대분) 비용은 키 수만큼의 참조뿐이다.
+export const MAX_PER_NAME = Math.max(2, Math.min(64, Number(process.env.SNAP_CACHE_PER_NAME) || 32));
 const store = new Map(); // name -> Map(key -> { at, value, promise })  ※ Map 은 삽입 순서 = LRU 순서
 
 function bucket(name) {

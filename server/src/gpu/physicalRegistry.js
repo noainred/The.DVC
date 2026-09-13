@@ -12,6 +12,7 @@ import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
+import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js'; // v2.503: 접속처 변경 시 저장 비밀 폐기
 
 const FILE = path.join(config.configDir, 'gpu-physical.json');
 
@@ -63,18 +64,25 @@ export function addPhysical(body = {}) {
 export function updatePhysical(id, body = {}) {
   const s = getPhysicalRaw(id);
   if (!s) return { ok: false, reason: '서버를 찾을 수 없습니다.' };
+  const before = { host: s.host, port: s.port, username: s.username };   // 접속처 변경 판정용(아래)
   if (body.name !== undefined) s.name = String(body.name || '').trim() || s.host;
   if (body.host !== undefined) s.host = String(body.host || '').trim();
   if (body.port !== undefined) s.port = Number(body.port) || 22;
   if (body.username !== undefined) s.username = String(body.username || '').trim();
   // 빈 비밀번호 = 기존 유지
   if (body.password !== undefined && body.password !== '') s.password = String(body.password);
+  // ⚠ 보안 불변조건(v2.503, 감사 S1 #6) — 접속처(host/port/username)가 바뀌었는데 새 비밀번호를
+  // 주지 않았다면 저장 비밀번호를 승계하지 않는다. 이 스토어는 SSH 로 로그인해 nvidia-smi 를
+  // 돌리므로, host 만 바꿔 저장하면 다음 수집에서 운영 비밀번호가 공격자 sshd 로 간다.
+  // 판정은 공용(`util/secretCarry.js`) — 각자 구현하면 다음 스토어에서 또 빠진다.
+  const droppedSecrets = accessMoved(before, body, ['host', 'port', 'username'])
+    ? dropCarriedSecrets(s, body, ['password']) : [];
   if (body.os !== undefined && ['linux', 'windows'].includes(body.os)) s.os = body.os;
   if (body.vcenterId !== undefined) s.vcenterId = String(body.vcenterId || '').trim();
   if (body.enabled !== undefined) s.enabled = !!body.enabled;
   if (Array.isArray(body.gpuModels)) s.gpuModels = body.gpuModels.slice(0, 32);
   persist();
-  return { ok: true };
+  return { ok: true, droppedSecrets };
 }
 
 export function removePhysical(id) {

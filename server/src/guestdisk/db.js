@@ -28,6 +28,9 @@ function initSqlite() {
   return import('node:sqlite').then(({ DatabaseSync }) => {
     fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
     const db = new DatabaseSync(DB_PATH);
+    // v2.503: DB 파일 권한 0600 — v2.447 감사로 12개 DB 모듈에 일괄 적용된 규약인데
+    // 이 파일(v2.459 신규)만 빠져 있었다. 게스트 디스크 사용량은 VM 이름·마운트 경로를 담는다.
+    try { fs.chmodSync(DB_PATH, 0o600); } catch { /* */ }
     try { db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=3000;'); } catch { /* 구버전 폴백 */ }
     db.exec(`
       CREATE TABLE IF NOT EXISTS vm_latest (

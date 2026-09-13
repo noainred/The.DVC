@@ -82,14 +82,19 @@ api.get('/tools/report/rightsizing', requirePerm('tools'), (req, res) => memoJso
 }, { extraKey: scopeKey(req.user, store.get()), ttlMs: 30_000 }));
 
 // ⑥ 용량 고갈 예측 — 기존 forecastCapacity(선형회귀) 재사용(특수기능 진입점).
-api.get('/tools/report/capacity', requirePerm('tools'), async (req, res) => {
-  try {
-    const snap = store.get();
-    const scoped = scopeSlice(snap, req.user, req.query.vcenterId);
-    // allowed 를 함께 넘겨 GPU 예측(스냅샷 밖 metrics DB gpu_vc 키)도 범위로 제한(v2.288 확정 버그).
-    res.json(await forecastCapacity(scoped, { days: Number(req.query.days) || 14, vcenterId: req.query.vcenterId || '', allowed: scopedVcenterIds(req.user, snap) }));
-  } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
-});
+/**
+ * ⑥ 용량 예측 — v2.503 성능 수정: `forecastCapacity` 는 **데이터스토어 1대당 시계열 조회**를 돈다
+ * (`insights/forecast.js fit()`). `node:sqlite` 는 동기 API 뿐이라 DS 1,100대면 그 루프 전체가
+ * 이벤트 루프를 잡는다. 형제 라우트는 전부 memoJson 을 쓰는데 이것만 빠져 있었고, 화면은 이
+ * 리포트를 60초마다 폴링한다. `/api/insights/forecast` 는 이미 같은 계산을 60초 snapMemo 로
+ * 감싸고 있었다 — 같은 계산의 캐시 유무가 라우트마다 갈려 있던 상태다.
+ * 캐시 라우트이므로 `extraKey: scopeKey(...)` 는 필수다(빠지면 무제한 계정 결과가 범위 계정에 샌다).
+ */
+api.get('/tools/report/capacity', requirePerm('tools'), (req, res) => memoJson(req, res, 'report-capacity', async (snap) => {
+  const scoped = scopeSlice(snap, req.user, req.query.vcenterId);
+  // allowed 를 함께 넘겨 GPU 예측(스냅샷 밖 metrics DB gpu_vc 키)도 범위로 제한(v2.288 확정 버그).
+  return forecastCapacity(scoped, { days: Number(req.query.days) || 14, vcenterId: req.query.vcenterId || '', allowed: scopedVcenterIds(req.user, snap) });
+}, { ttlMs: 30_000, extraKey: scopeKey(req.user, store.get()) }));
 
 // ⑦ 알림 채널·이력 — 웹훅 URL(시크릿)은 절대 내리지 않는다(설정 여부만).
 api.get('/tools/report/alerts', requirePerm('tools'), (req, res) => {
@@ -142,10 +147,11 @@ api.get('/tools/report/changes', requirePerm('tools'), async (req, res) => {
 });
 
 // ⑩ 미보호 VM(백업 공백) — 백업 계정 패턴의 스냅샷 이벤트가 관측되지 않은 가동 VM.
-api.get('/tools/report/unprotected', requirePerm('tools'), async (req, res) => {
-  try {
-    const db = await getLogsDb();
-    const snap = store.get();
+// v2.503 성능: 이 라우트는 로그 DB 에서 **2만 행을 동기로** 읽어 VM 전량과 대조하는데 memo 가
+// 없었다(형제 리포트는 전부 memoJson). 화면은 60초마다 폴링한다 — 사용자 수만큼 그대로 반복됐다.
+api.get('/tools/report/unprotected', requirePerm('tools'), (req, res) => memoJson(req, res, 'report-unprotected', async (snap) => {
+  const db = await getLogsDb();
+  {
     const scoped = scopeSlice(snap, req.user, req.query.vcenterId);
     const lookbackDays = Math.min(90, Math.max(1, Number(req.query.lookbackDays) || 7));
     const patterns = String(req.query.patterns || '').split(',').map((s) => s.trim()).filter(Boolean);
@@ -156,7 +162,7 @@ api.get('/tools/report/unprotected', requirePerm('tools'), async (req, res) => {
     const lf = { vcenterId: vcParam, q: 'Snapshot', since: Date.now() - lookbackDays * 86_400_000 };
     if (allowed) lf.vcenterIds = vcParam ? (allowed.has(vcParam) ? [vcParam] : []) : [...allowed];
     const rows = db.query(lf, 20_000, 0);
-    res.json(computeUnprotected(scoped.vms, rows, { patterns: patterns.length ? patterns : DEFAULT_BACKUP_PATTERNS, lookbackDays }));
-  } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
-});
+    return computeUnprotected(scoped.vms, rows, { patterns: patterns.length ? patterns : DEFAULT_BACKUP_PATTERNS, lookbackDays });
+  }
+}, { ttlMs: 30_000, extraKey: scopeKey(req.user, store.get()) }));
 }

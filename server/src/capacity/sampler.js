@@ -66,8 +66,11 @@ export async function sampleOnce() {
     if (!snap.rows.length) return;              // 첫 틱은 델타 기준선만 잡혀 비어 있을 수 있다
     const db = await getCapacityDb();
     db.insertSnapshot('local', snap.rows, snap.ts, hostMeta());
-    tick += 1;
-    if (tick % PRUNE_EVERY === 1) db.prune(snap.ts);
+    // ⚠ v2.503: `% PRUNE_EVERY === 1` 이었다 — tick 이 1 이 되는 **기동 후 첫 샘플**에서 곧바로
+    // 참이 된다. `metrics/sampler.js` 가 명시적으로 금지한 v2.453 패턴(보존기간을 줄이고 재시작하면
+    // 첫 샘플이 그 차액을 한 번에 지운다 — v2.451 에서 34.3GB DB 로 실제 포탈이 멈췄다)이
+    // 이 파일에 남아 있었다. `(++tick % N) === 0` 이면 첫 실행은 N 번째 샘플이다.
+    if ((tick += 1) % PRUNE_EVERY === 0) db.prune(snap.ts);
     lastRun = { at: snap.ts, metrics: snap.rows.length };
     lastErr = '';
   } catch (e) {

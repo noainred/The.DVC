@@ -11,6 +11,7 @@ import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 import { bumpFleetRev } from '../insights/fleetRev.js';
+import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js'; // v2.503: url 변경 시 저장 토큰 폐기
 
 const FILE = path.join(config.configDir, 'collectors.json');
 
@@ -308,7 +309,13 @@ function normalize(body, existing = null) {
     token: body.token ? String(body.token) : e.token || '',
     enabled: body.enabled != null ? Boolean(body.enabled) : (e.enabled != null ? e.enabled : true),
   };
-  return [entry, null];
+  // ⚠ 보안 불변조건(v2.503, 감사 S1 #6) — 접속처(url)가 바뀌면 저장 토큰을 승계하지 않는다.
+  // 수집 서버 토큰은 중앙이 그 URL 로 **자격증명을 실어 호출**하는 열쇠다(v2.500 C-1 이 막은
+  // `/register-collector` 횡탈과 같은 자산). 저장 요청 1회로 url 만 바꾸면 그 토큰이 새 주소로
+  // 간다 — v2.480 의 '연결 테스트는 저장값 고정' 은 테스트 라우트만 막으므로 우회된다.
+  const droppedSecrets = existing && accessMoved(existing, body, ['url'])
+    ? dropCarriedSecrets(entry, body, ['token']) : [];
+  return [entry, null, droppedSecrets];
 }
 
 /**

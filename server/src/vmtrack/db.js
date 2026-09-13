@@ -69,6 +69,13 @@ function initSqlite() {
       );
       CREATE INDEX IF NOT EXISTS idx_changes_snap ON changes (snap_id);
       CREATE INDEX IF NOT EXISTS idx_changes_ts ON changes (ts);
+      -- v2.503: '꺼진 지 N일'(powerChangesOf)은 vCenter 마다 한 번씩 불린다. 이 인덱스가 없으면
+      -- 계획이 SCAN changes + temp b-tree GROUP BY 라 28 vCenter = 풀스캔 28회다. 열 순서를 쿼리와
+      -- 맞춰 **커버링**으로 만들어 테이블 접근까지 없앤다.
+      -- 실측(1.23M행 = 28 vCenter × 3년 보존 가정): 2,329ms → 114ms (20.4배). 기존 대형 DB 는 최초
+      -- 기동 시 1회 생성 비용이 든다(1.2M행 1,211ms 실측) — metrics/db.js 의 idx_samples_mt 와 같은 선례다.
+      -- 주석에 있던 "changes 는 diff 만 저장돼 작다" 전제는 보존 기본값이 1,095일이라 시간이 지나면 무너진다.
+      CREATE INDEX IF NOT EXISTS idx_changes_vc_kind ON changes (vcenter_id, kind, vm_id, ts);
 
       -- 데이터스토어 변경분(v2.348) — 슬롯별로 '의미 있게 바뀐' DS 만 1행씩(임계 미만 변화는 저장 안 함).
       -- 전 DS 를 매 슬롯 저장하면 28 vCenter × 수백 DS × 2회/일 = 연 수백만 행이 되므로 diff 만 남긴다.

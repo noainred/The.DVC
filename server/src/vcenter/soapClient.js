@@ -222,19 +222,19 @@ export class VimSoapClient {
     return out;
   }
 
-  /** Find the counterId for power.power.average from the perf counter catalog. */
+  /**
+   * Find the counterId for power.power.average from the perf counter catalog.
+   *
+   * ⚠ v2.503 성능 수정: 예전에는 이 함수가 카탈로그를 **직접** 내려받아 파싱했다 — v2.447 이
+   * 같은 문제를 고치며 만든 `perfCounterMap()` 캐시(vCenter별·TTL 6시간)를 쓰지 않았다.
+   * 카탈로그는 응답 수백 KB(합성 실측 461KB)이고 이 함수는 **수집 주기마다 vCenter 마다** 불리므로,
+   * 28 vCenter 기준 30초마다 약 13MB 를 재전송하고 그만큼 정규식 파싱을 메인 스레드에서 돌렸다
+   * (전송량은 합성 응답 기준 추정 — 실제 vCenter 응답 크기는 버전·카운터 수에 따라 다르다).
+   * 이제 캐시된 맵에서 키만 꺼낸다. 새 카운터를 찾는 함수를 추가할 때도 `perfCounterMap()` 을 쓸 것.
+   */
   async powerCounterId() {
     if (!this.sc.perfManager) return null;
-    const objs = await this.retrieveObjectProps('PerformanceManager', this.sc.perfManager, ['perfCounter']);
-    const xml = objs[0]?.props?.perfCounter || '';
-    for (const blk of xml.split('<PerfCounterInfo').slice(1)) {
-      const key = /<key>(\d+)<\/key>/.exec(blk)?.[1];
-      const name = /<nameInfo>[\s\S]*?<key>(\w+)<\/key>/.exec(blk)?.[1];
-      const group = /<groupInfo>[\s\S]*?<key>(\w+)<\/key>/.exec(blk)?.[1];
-      const rollup = /<rollupType>(\w+)<\/rollupType>/.exec(blk)?.[1];
-      if (key && group === 'power' && name === 'power' && rollup === 'average') return key;
-    }
-    return null;
+    return (await this.perfCounterMap()).get('power.power.average') || null;
   }
 
   /** Query real-time host power (Watts) for the given host MoRefs -> Map<ref, watts>. */
@@ -263,19 +263,10 @@ export class VimSoapClient {
     return out;
   }
 
-  /** counterId for gpu.utilization.average (호스트 GPU 사용률 %). */
+  /** counterId for gpu.utilization.average (호스트 GPU 사용률 %). 카탈로그 캐시 경유(v2.503 — powerCounterId 주석 참조). */
   async gpuUtilCounterId() {
     if (!this.sc.perfManager) return null;
-    const objs = await this.retrieveObjectProps('PerformanceManager', this.sc.perfManager, ['perfCounter']);
-    const xml = objs[0]?.props?.perfCounter || '';
-    for (const blk of xml.split('<PerfCounterInfo').slice(1)) {
-      const key = /<key>(\d+)<\/key>/.exec(blk)?.[1];
-      const name = /<nameInfo>[\s\S]*?<key>(\w+)<\/key>/.exec(blk)?.[1];
-      const group = /<groupInfo>[\s\S]*?<key>(\w+)<\/key>/.exec(blk)?.[1];
-      const rollup = /<rollupType>(\w+)<\/rollupType>/.exec(blk)?.[1];
-      if (key && group === 'gpu' && name === 'utilization' && rollup === 'average') return key;
-    }
-    return null;
+    return (await this.perfCounterMap()).get('gpu.utilization.average') || null;
   }
 
   /** 호스트별 GPU 사용률(%) — instance="*"(GPU별)을 호스트 단위 평균으로. Map<ref, pct>. */
