@@ -126,7 +126,34 @@ jobs:
           gh release view "$RELEASE_TAG" >/dev/null 2>&1 \
             || gh release create "$RELEASE_TAG" --title "Downloads (rolling)" \
                  --notes "포탈 설치/업그레이드 자산. release 워크플로가 자동 갱신합니다." --latest=false
-          gh release upload "$RELEASE_TAG" dist-offline/* --clobber
+
+          # ⚠ 2026-09-13 실제 사고: `gh release upload dist-offline/* --clobber` 한 줄로 전부 올리면
+          # **versions.json 하나의 실패가 패키지 게시까지 막는다**. 그날 clobber 가 기존 versions.json
+          # 자산(asset id 560524226)을 지우는 단계에서 GitHub 이 HTTP 500 을 돌려줘 v2.502.0 패키지가
+          # 한 개도 올라가지 못했다. 30분 간격 2회 연속 같은 지점에서 실패했고 3차에서 성공했다 —
+          # 즉 **간헐적 서버 오류**이고, 재시도로 해소된다. 문제는 오류 자체가 아니라 그 한 건이
+          # 나머지 15개 자산 업로드까지 취소시킨 구조였다.
+          # 그래서 ① 패키지를 먼저 올리고 ② versions.json 은 재시도·명시적 삭제 폴백으로 따로 올린다.
+          # 순서가 중요하다: versions.json 이 먼저 바뀌면 아직 없는 패키지를 가리키는 창이 생긴다.
+          mapfile -t OTHERS < <(find dist-offline -maxdepth 1 -type f ! -name 'versions.json' | sort)
+          if [ ${#OTHERS[@]} -gt 0 ]; then
+            gh release upload "$RELEASE_TAG" "${OTHERS[@]}" --clobber
+            echo "패키지 업로드 완료: ${#OTHERS[@]}개"
+          fi
+
+          # versions.json = 자동 업그레이드의 진실의 원천. 여기서 실패하면 원격 업그레이드가
+          # 이전 버전에 머무르므로 **조용히 넘어가지 않고** 재시도 후 명확히 실패시킨다.
+          ok=0
+          for i in 1 2 3 4 5; do
+            if gh release upload "$RELEASE_TAG" dist-offline/versions.json --clobber; then ok=1; break; fi
+            echo "versions.json 업로드 실패(시도 $i) — 기존 자산을 지우고 다시 시도합니다"
+            gh release delete-asset "$RELEASE_TAG" versions.json -y || true
+            sleep $((i * 15))
+          done
+          if [ "$ok" != 1 ]; then
+            echo "::error::versions.json 갱신 실패 — 패키지는 올라갔지만 자동 업그레이드는 이전 버전에 머뭅니다."
+            exit 1
+          fi
           echo "업로드 완료: $(ls dist-offline | tr '\n' ' ')"
 
   # UAG Monitor macOS 데스크톱 앱 — macOS 러너에서 빌드해야 한다. Apple Silicon 은
