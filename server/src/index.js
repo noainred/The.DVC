@@ -227,7 +227,14 @@ app.use('/api/remote', authMiddleware, requireEnrolled, auditMiddleware, remoteR
 // 만이라 'insights' 권한 없는 계정도 API 직접 호출이 가능했다(프론트 메뉴만 숨김). CLAUDE.md
 // '기능 권한은 서버가 진실의 원천' 규칙 적용. admin 은 항상 전 권한.
 app.use('/api/insights', authMiddleware, requireEnrolled, requirePerm('insights'), insightsRouter); // FinOps·이상탐지·예측·보안·토폴로지·인시던트·ChatOps
-app.use('/api/svcmon', authMiddleware, requireEnrolled, svcmonRouter);   // 성능점검(HostMonitor식 서비스 모니터링)
+// v2.506(감사 S1 N-2): `requirePerm('svcmon')` 추가. 예전에는 authMiddleware+requireEnrolled 만
+// 있어 **로그인한 아무 계정이나** `GET /api/svcmon/state?limit=2000` 으로 전 법인 감시 대상의
+// host(내부 IP/FQDN)·점검 포트·경로를 전량 페이징할 수 있었다(`/edges` 는 각 법인 엣지의 관측
+// 소스 IP·포탈 포트까지). 바로 위 `/api/insights` 는 이미 requirePerm 을 강제하고 있었고,
+// 같은 라우터의 로그 파일 라우트도 편집 권한을 요구했는데 `/state`·`/edges`·`/templates` 만
+// 무가드였다(게이팅 비대칭). svcmon 에는 vCenter scope 축이 없어 범위 제한 계정도 전량을 본다.
+// 엣지 수집은 `/api/central/svcmon-*`(개별 토큰) 을 쓰므로 이 게이트에 영향받지 않는다(확인함).
+app.use('/api/svcmon', authMiddleware, requireEnrolled, requirePerm('svcmon'), svcmonRouter);   // 성능점검(HostMonitor식 서비스 모니터링)
 app.use('/api/capacity', authMiddleware, requireEnrolled, capacityRouter); // 리소스 적정성 진단(라우터 내부 admin 강제)
 // auditMiddleware: 대상 추가/삭제·vCenter 시드·엣지 동기화가 전부 admin 전용 상태변경이다.
 app.use('/api/ping', authMiddleware, requireEnrolled, auditMiddleware, pingRouter);       // 네트워크 Ping 모니터링(조회=인증, 대상관리=관리자)

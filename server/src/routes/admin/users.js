@@ -1,6 +1,8 @@
 // 사용자 관리·권한 매트릭스·비밀번호·TOTP — admin.js(구 2,410줄) 분할(v2.285.0). 본문은 원본 그대로, 등록 순서는 admin.js 호출 순서가 보존한다.
 import { listUsers, createUser, updateUser, deleteUser, beginTotpEnroll, confirmTotpEnroll, disableTotp, setLocalPassword, clearLoginCredentials } from '../../auth/auth.js';
 import { PERMISSION_CATALOG, ROLES, loadMatrix, saveMatrix, resetMatrix, rolePermissions } from '../../auth/permissions.js';
+// v2.506: 도구 거부목록의 '서버 집행 가능 여부' 를 권한 화면에 함께 내려준다(무음 실패 제거).
+import { enforcedToolKeys, TOOL_ENFORCEMENT_NOTES } from '../../auth/toolAccess.js';
 import { logAudit } from '../../audit.js';
 import { adminOnly } from './shared.js';
 
@@ -37,6 +39,16 @@ adminRouter.get('/permissions', adminOnly, (_req, res) => {
     catalog: PERMISSION_CATALOG,
     roles: ROLES,
     matrix: { admin: rolePermissions('admin'), ...loadMatrix() },
+    // v2.506(감사 미해결 #5): **서버가 실제로 막을 수 있는 도구인지** 함께 내려준다.
+    // 도구 거부목록 게이트는 `api.use('/tools', …)` 에만 걸려 있어, 자기 API 가 `/api/tools/*`
+    // 가 아닌 도구(예 /admin/*·/insights/*)는 이 목록으로 못 막는다. 그런데 화면은 그냥
+    // '차단됨' 으로 보여 관리자가 통제가 걸린 줄 오인했다 — 이 모듈이 v2.447 에 없애려 한
+    // 무음 실패가 그대로 남아 있던 부분이다. 화면이 '서버 집행 불가(사유)' 를 표시할 수 있게
+    // 근거를 준다. 키 목록은 프론트가 갖고 있으므로(specialToolsList.js) 판정표만 내려보낸다.
+    toolEnforcement: {
+      enforced: [...enforcedToolKeys()].sort(),
+      notes: TOOL_ENFORCEMENT_NOTES,
+    },
   });
 });
 adminRouter.put('/permissions', adminOnly, (req, res) => {

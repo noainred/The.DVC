@@ -19,6 +19,7 @@ import { logAudit } from './audit.js';
 import { resilientFetch } from './util/resilientFetch.js';
 import { ssrfBlockReasonResolved } from './collector/registry.js';
 import { Agent as UndiciAgent } from 'undici';
+import { ssrfLookup } from './util/ssrfLookup.js';   // v2.506: DNS 리바인딩(TOCTOU) 차단
 import { sendPortalMail } from './mail/service.js'; // 공용 메일 발송(v2.454)
 
 const FILE = path.join(config.configDir, 'alerts.json');
@@ -215,7 +216,12 @@ function updatePrevPower(prev, snap) {
 
 // 웹훅은 Slack 등 '공인 CA' SaaS가 대상 — 내부 자체서명용 wanAgent(검증 off)로 보내면
 // 웹훅 URL(시크릿 포함)이 무검증 TLS로 나간다. 검증 켠 전용 디스패처를 사용한다.
-const webhookAgent = new UndiciAgent({ connect: { rejectUnauthorized: true }, connections: 4 });
+// v2.506(감사 S1 #2): DNS 리바인딩(TOCTOU) 차단 — 검증을 `lookup` 안에서 해 소켓이 실제로 쓸
+// 주소를 그 순간에 검사한다. SNI(`servername`)·Host·인증서 검증은 원래 호스트명을 그대로 쓴다.
+// 자세한 근거는 util/ssrfLookup.js 머리말.
+// 웹훅 URL 은 관리자가 넣는 외부 주소라 리바인딩 표적이 되기 쉽다(223행의 사전 검사만으로는
+// 검사-접속 사이가 열려 있었다). `redirect:'manual'` 과 함께 2중으로 막는다.
+const webhookAgent = new UndiciAgent({ connect: { rejectUnauthorized: true, lookup: ssrfLookup }, connections: 4 });
 async function post(url, payload) {
   // 웹훅 URL 은 사용자 입력 — 전송 **직전**에 해석형 SSRF 가드를 다시 통과시킨다. 저장 시점에만
   // 검사하면 그 뒤 DNS 가 루프백/메타데이터로 바뀌는 경우(TOCTOU/DNS rebinding)를 놓친다. RFC1918

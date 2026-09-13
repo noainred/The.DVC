@@ -258,11 +258,24 @@ export function identityIssue(entry, data = {}, otherIds = []) {
 }
 
 /**
+ * 수집 토큰을 싣는 요청의 기본 fetch(v2.506, 적대적 검증) — **전역 fetch 를 쓰지 않는다.**
+ * 전역 fetch 는 기본 디스패처라 DNS 리바인딩 차단 lookup 이 없다. 이 함수의 요청에는
+ * `X-Collector-Token` 이 실리므로, 검사 후 이름이 사내 주소로 재해석되면 그 토큰이 내부로 나간다.
+ * `resilientFetch`(wanAgent, lookup 탑재)를 쓰되 재시도는 0 으로 둔다 — 이 검증은 '닿는가' 를
+ * 보는 것이고 재시도가 판정을 흐리기 때문이다(기존 동작과 같게 유지).
+ * 순환 import 를 피하려고 지연 로드한다(resilientFetch 는 leaf util 이지만 방향을 고정해 둔다).
+ */
+async function tokenFetch(u, init) {
+  const { resilientFetch } = await import('../util/resilientFetch.js');
+  return resilientFetch(u, { ...init, retries: 0 });
+}
+
+/**
  * peer IP 로 유도한 자기등록 URL 검증(v2.424). 그 URL 의 /api/collector/ping 을 엣지의 토큰으로 두드려
  * ① 403 → 그 주소는 다른 엣지(중계/NAT 장비) ② 응답 agent ≠ name → 다른 엣지 ③ 불통 → 중앙이 못 닿는 주소.
  * 반환 { ok:true } | { ok:false, reason }. fetchImpl 은 테스트 주입용.
  */
-export async function verifyDerivedCollectorUrl({ url, name, datacenter = '', token }, fetchImpl = globalThis.fetch) {
+export async function verifyDerivedCollectorUrl({ url, name, datacenter = '', token }, fetchImpl = tokenFetch) {
   let why = '';
   try {
     const pr = await fetchImpl(`${String(url).replace(/\/+$/, '')}/api/collector/ping`, { headers: { Accept: 'application/json', 'X-Collector-Token': String(token || '') }, signal: AbortSignal.timeout(8_000) });

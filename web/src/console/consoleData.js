@@ -352,11 +352,17 @@ export function buildDomainTiles({ global: g, alarms, nsx, svcmon, pdu, idracPol
     const meta = idracPoller ? `iDRAC 등록 ${fmtInt(idracPoller.servers)}대 · 응답 ${fmtInt(lr?.ok)} · 무응답 ${fmtInt(lr?.failed)}` : permission.idrac === false ? '관리자 권한 필요 (/admin/idrac)' : 'iDRAC 폴러 상태 대기';
     tiles.push({ page: 'facility', name: '물리 서버 BMC', level, value: pct == null ? '—' : `${pct}%`, meta, crit: String(lr?.failed || 0), warn: '0', info: '0' });
   }
-  // 서비스 점검 — svcmon summary.
+  // 서비스 점검 — svcmon summary. /api/svcmon 은 svcmon 기능 권한 게이트(v2.506) 아래라
+  // 권한이 없으면 셸이 폴링을 아예 걸지 않는다(svcmon=null). 그 경우를 '점검 상태 대기'(수집 원인)로
+  // 표시하면 거짓 원인이 되므로(CLAUDE.md v2.493 규칙) permission.svcmon===false 를 따로 밝힌다.
   {
     const s = svcmon?.summary || null;
     const level = svcmonLevel(s);
-    tiles.push({ page: 'alarms', name: '서비스 점검', level, value: s ? fmtInt(s.total) : '—', meta: s ? (s.total ? `점검 항목 · 실패 ${s.bad} · 경고 ${s.warn} · 지연 ${s.stale}` : '등록된 점검 항목 없음') : '점검 상태 대기', crit: String(s?.bad || 0), warn: String(s?.warn || 0), info: String(s?.stale || 0) });
+    const noPerm = !s && permission.svcmon === false;
+    const meta = s
+      ? (s.total ? `점검 항목 · 실패 ${s.bad} · 경고 ${s.warn} · 지연 ${s.stale}` : '등록된 점검 항목 없음')
+      : noPerm ? '조회 권한 없음 (서비스 모니터)' : '점검 상태 대기';
+    tiles.push({ page: 'alarms', name: '서비스 점검', level, value: s ? fmtInt(s.total) : '—', meta, crit: String(s?.bad || 0), warn: String(s?.warn || 0), info: String(s?.stale || 0) });
   }
   return tiles;
 }

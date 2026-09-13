@@ -10,11 +10,13 @@ import tls from 'node:tls';
 import https from 'node:https';
 import http from 'node:http';
 import { ssrfBlockReasonResolved } from '../collector/registry.js';
+import { ssrfLookup } from '../util/ssrfLookup.js';   // v2.506: DNS 리바인딩(TOCTOU) 차단
 
 function tcpStep(host, port, timeoutMs) {
   return new Promise((resolve) => {
     const t0 = Date.now();
-    const sock = net.connect({ host, port });
+    // v2.506: 4개 접속부 전부에 lookup 을 단다 — 하나라도 빠지면 그 단계가 TOCTOU 로 남는다.
+    const sock = net.connect({ host, port, lookup: ssrfLookup });
     let settled = false;
     const done = (r) => { if (settled) return; settled = true; try { sock.destroy(); } catch { /* */ } resolve({ ...r, ms: Date.now() - t0 }); };
     sock.setTimeout(timeoutMs);
@@ -30,7 +32,8 @@ function tlsStep(host, port, timeoutMs) {
     let settled = false;
     const done = (r) => { if (settled) return; settled = true; try { sock.destroy(); } catch { /* */ } resolve({ ...r, ms: Date.now() - t0 }); };
     const sock = tls.connect(
-      { host, port, servername: host, rejectUnauthorized: false, minVersion: 'TLSv1', ciphers: 'DEFAULT@SECLEVEL=0', timeout: timeoutMs },
+      // v2.506: lookup 으로 리바인딩 차단(아래 httpStep 과 동일). servername 은 원 호스트 유지.
+      { host, port, servername: host, lookup: ssrfLookup, rejectUnauthorized: false, minVersion: 'TLSv1', ciphers: 'DEFAULT@SECLEVEL=0', timeout: timeoutMs },
       () => { const c = sock.getPeerCertificate(); done({ ok: true, protocol: sock.getProtocol(), cert: c && c.subject ? { cn: c.subject.CN || '', issuer: c.issuer?.CN || '', validTo: c.valid_to || '' } : null }); },
     );
     sock.setTimeout(timeoutMs);
@@ -45,7 +48,7 @@ function httpStep(host, port, timeoutMs) {
     let settled = false;
     const done = (r) => { if (settled) return; settled = true; resolve({ ...r, ms: Date.now() - t0 }); };
     const req = https.request(
-      { host, port, path: '/sdk', method: 'GET', rejectUnauthorized: false, servername: host, timeout: timeoutMs },
+      { host, port, path: '/sdk', method: 'GET', rejectUnauthorized: false, servername: host, lookup: ssrfLookup, timeout: timeoutMs },
       (res) => { done({ ok: true, status: res.statusCode }); res.resume(); req.destroy(); },
     );
     req.on('timeout', () => { req.destroy(); done({ ok: false, error: 'HTTP 응답 시간 초과 — TLS는 되나 vCenter 서비스(vpxd)/경로 응답이 없음' }); });
@@ -83,7 +86,7 @@ function plainHttpStep(host, port, timeoutMs) {
     const t0 = Date.now();
     let settled = false;
     const done = (r) => { if (settled) return; settled = true; resolve({ ...r, ms: Date.now() - t0 }); };
-    const req = http.request({ host, port, path: '/', method: 'GET', timeout: timeoutMs }, (res) => {
+    const req = http.request({ host, port, path: '/', method: 'GET', lookup: ssrfLookup, timeout: timeoutMs }, (res) => {
       let body = '';
       res.setEncoding('utf8');
       res.on('data', (c) => { if (body.length < 2048) body += c; });   // 앞부분만 — 대용량 페이지를 끌어오지 않는다

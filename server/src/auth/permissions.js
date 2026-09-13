@@ -33,6 +33,10 @@ export const PERMISSION_CATALOG = [
   // 도구·분석
   { key: 'tools', label: '특수 기능(IPAM·핑·검색 등)', group: '도구·분석' },
   { key: 'insights', label: '인사이트(FinOps·이상탐지 등)', group: '도구·분석' },
+  // v2.506(감사 S1 N-2): 서비스 모니터는 **전 법인 감시 대상의 내부 IP/FQDN·점검 포트·경로**를
+  // 준다 — 사실상 인프라 인벤토리 내보내기다. 그래서 조회에도 별도 권한이 필요하다.
+  // (같은 파일의 로그 라우트는 이미 편집 권한을 요구했는데 /state·/edges 는 무가드였다.)
+  { key: 'svcmon', label: '서비스 모니터(성능점검)', group: '도구·분석' },
   // 원격·작업(상태 변경) — VM 상세의 3버튼이 각각 매핑된다.
   { key: 'remote.access', label: '원격 접속(SSH/RDP 터널)', group: '원격·작업' },
   { key: 'vm.console', label: '원격 콘솔(VMRC/웹 콘솔)', group: '원격·작업' },
@@ -48,6 +52,24 @@ export const PERMISSION_CATALOG = [
 export const ALL_PERMISSION_KEYS = PERMISSION_CATALOG.map((p) => p.key);
 const CATALOG_SET = new Set(ALL_PERMISSION_KEYS);
 
+/**
+ * 저장 스키마 버전 — **권한 키를 새로 추가할 때 반드시 올리고 `KEYS_ADDED_IN` 에 적을 것**(v2.506).
+ *
+ * 왜 필요한가: `loadMatrix` 는 저장된 행을 그대로 쓴다(`m.operator ?? DEFAULT_MATRIX.operator`).
+ * 행은 '부여된 키의 배열' 이라 **"그 키가 아직 없던 파일" 과 "관리자가 명시적으로 거부한 키" 를
+ * 구분할 수 없다.** 그래서 카탈로그에 키만 추가하면, 권한 UI 를 한 번이라도 저장한 현장에서는
+ * 그 키가 조용히 '거부' 가 되어 **operator 가 업그레이드만으로 기존 기능을 잃는다**
+ * (svcmon 을 추가하면서 실제로 그렇게 될 상황이었다).
+ *
+ * 그래서 저장 파일에 버전을 남기고, 파일이 그 키가 생기기 전 버전이면 **그 키에 한해** 기본값을
+ * 합친다(가산만 — 관리자가 이미 내린 결정은 건드리지 않는다). 한 번 저장되면 버전이 찍혀
+ * 이후로는 마이그레이션이 돌지 않는다.
+ */
+const SCHEMA_VERSION = 2;
+const KEYS_ADDED_IN = Object.freeze({
+  2: ['svcmon'],   // v2.506 — 서비스 모니터 조회 권한 분리
+});
+
 // 기본 매트릭스(admin 은 항상 전체라 매트릭스에 담지 않는다).
 //   operator: 조회 + 도구/분석 + 원격·작업(상태 변경) — 기존 requireRole('admin','operator') 동작과 동일.
 //   viewer  : 조회 + 인사이트(읽기)만 — 상태 변경 불가.
@@ -57,7 +79,7 @@ const CATALOG_SET = new Set(ALL_PERMISSION_KEYS);
 const DEFAULT_MATRIX = {
   operator: [
     'dashboard', 'inv.hosts', 'inv.vms', 'inv.datastores', 'inv.networks', 'inv.nsx', 'inv.alarms',
-    'tools', 'insights', 'remote.access', 'vm.console',
+    'tools', 'insights', 'svcmon', 'remote.access', 'vm.console',
   ],
   viewer: [
     'dashboard', 'inv.hosts', 'inv.vms', 'inv.datastores', 'inv.networks', 'inv.nsx', 'inv.alarms',
@@ -86,6 +108,24 @@ function sanitizeTools(arr) {
   return [...new Set((Array.isArray(arr) ? arr : []).map((x) => String(x || '').trim()).filter((k) => /^[a-z0-9-]+$/.test(k)))];
 }
 
+/**
+ * 가산 마이그레이션(순수) — 저장 파일 버전이 낮으면 그 뒤에 추가된 키의 **기본값만** 합친다.
+ * 기본값에 없는 키는 넣지 않는다(viewer 에 svcmon 을 주지 않는 것이 이번 수정의 목적).
+ *
+ * export 하는 이유: 이 판정이 틀리면 업그레이드만으로 operator 가 기능을 잃거나(가산 실패)
+ * viewer 가 권한을 얻는다(과잉 가산). 보안·가용성 양쪽에 걸리는 로직이라 **순수 함수로 노출해
+ * 테스트로 고정**한다(이 저장소의 '판정은 순수 모듈에 두고 회귀로 고정' 규약).
+ */
+export function migrateRow(row, role, fileVer) {
+  if (fileVer >= SCHEMA_VERSION) return row;
+  const out = new Set(row);
+  for (const [v, keys] of Object.entries(KEYS_ADDED_IN)) {
+    if (Number(v) <= fileVer) continue;                       // 그 버전 파일이 이미 결정한 키
+    for (const k of keys) if ((DEFAULT_MATRIX[role] || []).includes(k)) out.add(k);
+  }
+  return [...out];
+}
+
 function defaultMatrix() {
   return {
     operator: [...DEFAULT_MATRIX.operator],
@@ -103,9 +143,11 @@ export function loadMatrix() {
       const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
       const m = parsed && typeof parsed === 'object' ? (parsed.matrix || parsed) : {};
       const td = m.toolsDenied || {};
+      // 버전이 없는 파일(= v2.505 이하가 쓴 것)은 1 로 본다 — 위 SCHEMA_VERSION 주석 참조.
+      const fileVer = Math.max(1, Math.floor(Number(parsed?.schemaVersion) || 1));
       cached = {
-        operator: sanitizeRow(m.operator ?? DEFAULT_MATRIX.operator),
-        viewer: sanitizeRow(m.viewer ?? DEFAULT_MATRIX.viewer),
+        operator: migrateRow(sanitizeRow(m.operator ?? DEFAULT_MATRIX.operator), 'operator', fileVer),
+        viewer: migrateRow(sanitizeRow(m.viewer ?? DEFAULT_MATRIX.viewer), 'viewer', fileVer),
         toolsDenied: {
           operator: sanitizeTools(td.operator ?? DEFAULT_TOOLS_DENIED.operator),
           viewer: sanitizeTools(td.viewer ?? DEFAULT_TOOLS_DENIED.viewer),
@@ -123,7 +165,8 @@ export function loadMatrix() {
 }
 
 function persistMatrix() {
-  atomicWriteFileSync(matrixFile(), JSON.stringify({ matrix: cached }, null, 2), { mode: 0o600 });
+  // schemaVersion 을 함께 쓴다 — 없으면 다음 키 추가 때 또 '조용한 거부' 가 된다(위 주석).
+  atomicWriteFileSync(matrixFile(), JSON.stringify({ schemaVersion: SCHEMA_VERSION, matrix: cached }, null, 2), { mode: 0o600 });
 }
 
 /** operator/viewer 두 행 + 특수기능 거부목록을 저장(부분 갱신 허용). admin 행은 무시된다. */

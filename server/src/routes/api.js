@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { config } from '../config.js';
 import { authDisabledRole } from '../auth/auth.js';
-import { toolAccessIssue } from '../auth/toolAccess.js';
+import { toolGate, exactToolAccessIssue } from '../auth/toolAccess.js';
 import { registerVmMetrics } from './api/vmMetrics.js';
 import { registerOverviewNsx } from './api/overviewNsx.js';
 import { registerProvision } from './api/provision.js';
@@ -39,12 +39,15 @@ export const api = Router();
 // 특수 기능 '도구별 접근'(toolsDenied) 서버 집행(v2.447, 감사 S2) — 프론트 toolAllowed() 만으로는
 // curl 직접 호출을 막지 못했다. register* 보다 **먼저** 걸어야 모든 /tools 라우트에 적용된다.
 // 매핑에 없는 경로는 통과시킨다(auth/toolAccess.js 주석 참조 — 오차단 방지).
-api.use('/tools', (req, res, next) => {
-  const role = !config.auth.enabled ? authDisabledRole() : (req.user && req.user.role);
-  const issue = toolAccessIssue(role, req.path);
-  if (!issue) return next();
-  return res.status(403).json({ error: 'forbidden', requiredPerm: [`tool:${issue.tool}`], reason: issue.reason });
-});
+// 역할 결정만 여기서 한다(인증 비활성 환경의 대체 역할). 게이트 본체는 auth/toolAccess.js
+// toolGate() — 그래야 회귀 테스트가 실제 미들웨어를 express 앱에 마운트해 403 을 확인할 수 있다.
+const toolGateRole = (req) => (!config.auth.enabled ? authDisabledRole() : (req.user && req.user.role));
+api.use('/tools', toolGate({ roleOf: toolGateRole }));
+// 같은 집행을 `/api/tools` **밖**의 전용 엔드포인트에도 적용한다(v2.506 검증 반영):
+// `/search/nl`(AI 검색)·`/top`(탐색·랭킹)은 각각 한 화면만 쓰는데 기능 권한 게이트가 없어
+// 도구를 거부해도 curl 로 그대로 200 이 나왔다. 정확 일치 표(TOOL_EXACT_PATHS)만 보므로
+// 다른 경로에는 영향이 없다.
+api.use(toolGate({ roleOf: toolGateRole, issueOf: exactToolAccessIssue }));
 
 registerVmMetrics(api);
 registerOverviewNsx(api);

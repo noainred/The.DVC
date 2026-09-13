@@ -141,3 +141,31 @@ describe('rowMatches', () => {
     expect(rowMatches(r, 'frank')).toBe(true); expect(rowMatches(r, 'eu 30')).toBe(true); expect(rowMatches(r, 'seoul')).toBe(false); expect(rowMatches(r, '')).toBe(true);
   });
 });
+
+describe('buildDomainTiles — 서비스 점검 타일의 원인 표시(v2.506)', () => {
+  const base = { global: null, alarms: [], nsx: null, pdu: null, idracPoller: null, dsOver: null, storageDevices: null };
+  const svcTile = (o) => buildDomainTiles({ ...base, ...o }).find((t) => t.name === '서비스 점검');
+
+  it('권한이 없어 폴링을 안 걸었으면 권한 없음으로 밝힌다(거짓 원인 금지)', () => {
+    // v2.506 에서 /api/svcmon 이 requirePerm('svcmon') 아래로 들어갔다. 셸은 권한이 없으면
+    // path 를 null 로 넘겨 폴링을 안 건다 → svcmon=null. 그 상태를 '점검 상태 대기'(수집 원인)로
+    // 쓰면 사용자가 수집 장애로 오해한다(CLAUDE.md v2.493 규칙).
+    const t = svcTile({ svcmon: null, permission: { svcmon: false } });
+    expect(t.meta).toMatch(/권한/);
+    expect(t.meta).not.toMatch(/대기/);
+    expect(t.level).toBe(null);
+    expect(t.value).toBe('—');
+  });
+  it('권한은 있는데 아직 데이터가 없으면 수집 대기로 남긴다', () => {
+    const t = svcTile({ svcmon: null, permission: { svcmon: true } });
+    expect(t.meta).toBe('점검 상태 대기');
+  });
+  it('permission 을 안 넘긴 호출부는 기존 문구를 유지한다(하위호환)', () => {
+    expect(svcTile({ svcmon: null }).meta).toBe('점검 상태 대기');
+  });
+  it('데이터가 있으면 권한 플래그와 무관하게 집계를 보여준다', () => {
+    const t = svcTile({ svcmon: { summary: { total: 4, ok: 3, warn: 0, bad: 1, stale: 0 } }, permission: { svcmon: false } });
+    expect(t.value).toBe('4');
+    expect(t.meta).toMatch(/실패 1/);
+  });
+});
