@@ -12,6 +12,7 @@ import { recordCapture } from './captureHistory.js';
 import { notify } from '../alerts.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
+import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js';
 
 const FILE = path.join(config.configDir, 'capture-monitors.json');
 
@@ -72,7 +73,16 @@ export function saveMonitor(body = {}) {
   if (idx >= 0) {
     const prev = cache[idx];
     // 자격증명: 목록은 creds를 노출하지 않으므로, 새 값이 비면 기존 유지(토글/수정 시 보존).
-    const merge = (a = {}, b = {}) => ({ host: b.host || a.host, port: b.port || a.port, username: b.username || a.username, password: b.password || a.password, privateKey: b.privateKey || a.privateKey });
+    // ⚠ 보안(v2.500 감사 M1): 단, **접속처(host/port/계정)가 바뀌면 승계하지 않는다**. 없으면
+    // `PUT /api/admin/net/monitors` 로 host 만 공격자 주소로 바꾼 뒤 `POST .../:id/run` 을 부르면
+    // 저장된 캡처 호스트 SSH 비밀번호·개인키가 그 주소로 전송된다(60초 스케줄러가 계속 재시도).
+    // 규칙 설명: util/secretCarry.js.
+    const merge = (a = {}, b = {}) => {
+      const moved = accessMoved(a, b, ['host', 'port', 'username']);
+      const out = { host: b.host || a.host, port: b.port || a.port, username: b.username || a.username, password: b.password || a.password, privateKey: b.privateKey || a.privateKey };
+      if (moved) dropCarriedSecrets(out, b, ['password', 'privateKey']);
+      return out;
+    };
     m.hostA = merge(prev.hostA, body.hostA); m.hostB = merge(prev.hostB, body.hostB); m.peer = body.peer || prev.peer;
     m.lastRun = prev.lastRun; m.lastWorst = prev.lastWorst; m.lastDetail = prev.lastDetail;
     cache[idx] = m;

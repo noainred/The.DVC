@@ -37,6 +37,7 @@ import GuestAccount from './GuestAccount.jsx';
 import AnomalyDetection from './AnomalyDetection.jsx';
 import SessionSecurity from './SessionSecurity.jsx';
 import SecretsSettings from './SecretsSettings.jsx'; // 자격증명 저장 방식(평문/암호화, v2.296)
+import SecuritySelfCheck from './SecuritySelfCheck.jsx'; // 보안 자가진단(지금 이 서버의 실측 상태, v2.500)
 import Upgrade from './Upgrade.jsx';
 import About from './About.jsx';
 
@@ -73,6 +74,7 @@ const SUB = [
   { k: 'secrets', label: '자격증명 저장 방식', C: SecretsSettings, group: 'security' },
   { k: 'anomaly', label: '이상동작 탐지', C: AnomalyDetection, group: 'security' },
   { k: 'host-access', label: '호스트 접근 제어', C: HostAccessSettings, group: 'security' },
+  { k: 'security-self-check', label: '보안 자가진단', C: SecuritySelfCheck, group: 'security' },
   { k: 'ai-search', label: 'AI 검색', C: LlmSettings },
   { k: 'alerts', label: '알림', C: Alerts2 },
   { k: 'mail', label: '메일 발송', C: MailSettings },

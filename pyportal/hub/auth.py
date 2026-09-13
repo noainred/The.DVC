@@ -50,6 +50,21 @@ def hash_password(password: str) -> dict:
     }
 
 
+_DUMMY_SALT = secrets.token_bytes(16)
+
+
+def _burn_password_work(password: str) -> None:
+    """비밀번호 해시와 같은 비용의 더미 KDF.
+
+    없는 계정·중지 계정도 존재 계정과 같은 시간을 쓰게 해, 응답시간으로 계정을 열거하지
+    못하게 한다(v2.500 감사 M1 — 실측 100배 차이였다). 결과는 쓰지 않는다.
+    """
+    try:
+        hashlib.pbkdf2_hmac("sha256", str(password or "").encode("utf-8"), _DUMMY_SALT, PBKDF2_ROUNDS)
+    except Exception:
+        pass
+
+
 def verify_password(record, password: str) -> bool:
     if not isinstance(record, dict) or not isinstance(password, str) or not password:
         return False
@@ -203,11 +218,17 @@ class UserStore:
                 if user["username"].lower() != name.lower():
                     continue
                 if not user["enabled"] or not user["password"]:
+                    # v2.500(감사 M1): 중지·비번없는 계정도 **같은 비용**을 태운다. 아래 주석 참조.
+                    _burn_password_work(password)
                     return None
                 if verify_password(user["password"], password):
                     return {"username": user["username"], "role": user["role"],
                             "tokenVersion": user["tokenVersion"]}
                 return None
+        # v2.500(감사 M1): 없는 계정은 PBKDF2 를 돌리지 않아 응답이 훨씬 빨랐다(로컬 실측:
+        # 존재 계정 오답 ~128ms vs 없는 계정 ~1.5ms, 약 100배). 문구는 같아도 **타이밍으로**
+        # 계정 열거가 됐다 — 이 함수의 문서화된 의도가 우회된 것이다. 더미 해시로 비용을 맞춘다.
+        _burn_password_work(password)
         return None
 
     def token_version(self, username: str):

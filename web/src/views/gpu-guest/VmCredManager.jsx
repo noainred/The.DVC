@@ -35,7 +35,8 @@ export function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared, dep
   const [testProg, setTestProg] = useState(null); // { done, total } 테스트 진행률(부분 갱신)
   const [selected, setSelected] = useState(() => new Set()); // 선택 테스트 대상 VM id
   const [testMethod, setTestMethod] = useState(''); // '' = 저장된 설정 방식 | guestops | ssh | auto
-  const [revealCreds, setRevealCreds] = useState(false); // 디버그: 실행 로그에 실제 id/pw 평문
+  // v2.500(감사): 서버가 maskPw 로 **길이만** 보낸다 — 평문이 아니다. 문구를 사실에 맞춘다.
+  const [revealCreds, setRevealCreds] = useState(false); // 디버그: 실행 로그에 계정명 + 비번 길이 표시
   const [logLines, setLogLines] = useState([]);   // 실행 로그 콘솔(명령/단계별)
   const [showLog, setShowLog] = useState(true);
   const logRef = useRef(null);
@@ -326,8 +327,8 @@ export function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared, dep
                 <option value="ssh">SSH 직접</option>
               </select>
             </label>
-            <label className="flex gap" style={{ alignItems: 'center', fontSize: 12 }} title="실행 로그에 실제 전송되는 ID/비밀번호를 평문으로 표시(디버그). 이 응답에만 보이고 디스크/중앙에는 기록되지 않습니다.">
-              <input type="checkbox" checked={revealCreds} onChange={(e) => setRevealCreds(e.target.checked)} /> 🔓 자격증명 평문(디버그)
+            <label className="flex gap" style={{ alignItems: 'center', fontSize: 12 }} title="실행 로그에 실제 전송되는 계정명과 비밀번호 길이를 표시합니다(디버그). 비밀번호 값은 서버가 보내지 않으며, 이 응답에만 보이고 디스크/중앙에는 기록되지 않습니다.">
+              <input type="checkbox" checked={revealCreds} onChange={(e) => setRevealCreds(e.target.checked)} /> 🔓 자격증명 확인(계정명·비번 길이)
             </label>
             <button className="login-btn" style={{ flex: 'none', padding: '8px 18px' }} disabled={busy} onClick={saveCreds}>{busy ? '저장 중…' : 'VM별 계정 저장'}</button>
             {testProg && (

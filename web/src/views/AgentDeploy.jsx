@@ -41,6 +41,7 @@ export default function AgentDeploy() {
   };
   const loadTargets = () => fetchJson('/admin/agent-deploy/targets').then((d) => setTargets(d.targets)).catch(() => {});
   // 실행 중 서버의 중앙 토큰/기본값을 읽어 폼에 자동 입력.
+  const [showCentralToken, setShowCentralToken] = useState(false);   // v2.500: 중앙 토큰 가리기 토글
   const [tokenInfo, setTokenInfo] = useState({ hasToken: false });
   const [defaults, setDefaults] = useState(null);
   const [genBusy, setGenBusy] = useState(false);
@@ -291,7 +292,10 @@ export default function AgentDeploy() {
           <label title="중앙↔에이전트 공유 비밀. 중앙 포탈의 CENTRAL_TOKEN과 반드시 동일해야 하며 다르면 403. '생성'을 누르면 안전한 랜덤 토큰을 만들어 이 포탈(중앙) 환경(portal.env)에 저장하고 칸을 채웁니다(리붓해도 유지). 이미 있으면 자동 입력됩니다.">
             <span className="cap">중앙 토큰(CENTRAL_TOKEN)</span>
             <div className="flex gap" style={{ alignItems: 'center' }}>
-              <input className="input" value={f.centralToken} onChange={set('centralToken')} placeholder={f.hasCentralToken ? '저장됨 — 비우면 기존 값 유지' : (tokenInfo.hasToken ? '' : '미설정 — 생성 클릭')} />
+              {/* v2.500(감사): 다른 화면의 비밀 입력은 전부 type="password" 인데 이 칸만 평문이었다 —
+                  화면 공유·어깨너머 노출을 줄인다. 필요할 때 눈 버튼으로 확인한다. */}
+              <input className="input" type={showCentralToken ? 'text' : 'password'} value={f.centralToken} onChange={set('centralToken')} placeholder={f.hasCentralToken ? '저장됨 — 비우면 기존 값 유지' : (tokenInfo.hasToken ? '' : '미설정 — 생성 클릭')} />
+              <button type="button" className="btn-sm" onClick={() => setShowCentralToken((v) => !v)} title={showCentralToken ? '가리기' : '보기'}>{showCentralToken ? '🙈' : '👁'}</button>
               <button className="logout-btn" type="button" style={{ flex: 'none', padding: '7px 12px', whiteSpace: 'nowrap' }} disabled={genBusy} onClick={genToken}
                 title="없으면 안전한 랜덤 토큰을 생성해 이 포탈(중앙) 환경에 저장하고 채웁니다">{genBusy ? '생성 중…' : (tokenInfo.hasToken ? '현재값' : '생성')}</button>
             </div>

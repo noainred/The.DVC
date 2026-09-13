@@ -213,8 +213,20 @@ function tailRaw() {
 }
 
 /** 최근 limit 건(최신 먼저). kind 로 필터 가능. 파싱 실패 줄은 건너뛴다. */
+/**
+ * 조회. **보존일이 지난 줄은 돌려주지 않는다**(v2.500 감사 M-1).
+ *
+ * 왜 조회에서도 거르는가: 파일 정리는 ①기동 ②설정 저장 ③append 200건마다 만 돌기 때문에, hang 이
+ * 드문 정상 운영(하루 몇 건)에서는 200건이 쌓이는 데 수십 일이 걸린다. 그 동안 '14일 보존' 설정이
+ * 무의미해지고 사용자명·클라이언트 IP·User-Agent·요청 경로가 그대로 조회된다 — 공격이 아니라
+ * 통제 미이행이다. 파일 정리 시점에 의존하지 않게 조회 자체에서 컷오프를 적용하고, 거른 건수를
+ * `staleHidden` 으로 **밝힌다**(조용히 줄이면 '기록이 왜 없지?' 가 된다).
+ */
 export function readHangs({ limit = 200, kind = '' } = {}) {
   const out = [];
+  const days = retentionDaysNow();
+  const cutoff = days > 0 ? Date.now() - days * 86_400_000 : 0;
+  let staleHidden = 0;
   try {
     if (!fs.existsSync(FILE)) return { rows: [], total: 0, file: FILE, exists: false };
     // total 은 '읽은 꼬리의 줄 수' 다 — 파일이 읽기 상한을 넘었으면 그 사실을 함께 알린다
@@ -227,13 +239,15 @@ export function readHangs({ limit = 200, kind = '' } = {}) {
       try {
         const o = JSON.parse(lines[i]);
         if (kind && o?.kind !== kind) continue;
+        // at 이 없거나 숫자가 아닌 줄은 나이를 알 수 없다 — 버리지 않고 보여준다(모르는 것을 지우지 않는다).
+        if (cutoff && Number(o?.at) > 0 && Number(o.at) < cutoff) { staleHidden += 1; continue; }
         out.push(o);
       } catch { bad += 1; }
       // 정렬을 위해 want 보다 조금 더 모은다(뒤쪽 줄이 항상 최신이라는 보장이 없다 — 위 주석).
       if (out.length >= want * 2 + 50) break;
     }
     out.sort((a, b) => (Number(b?.at) || 0) - (Number(a?.at) || 0));
-    return { rows: out.slice(0, want), total: lines.length, tailOnly, badLines: bad, file: FILE, exists: true };
+    return { rows: out.slice(0, want), total: lines.length, tailOnly, badLines: bad, staleHidden, retentionDays: days, file: FILE, exists: true };
   } catch (e) {
     return { rows: [], total: 0, file: FILE, exists: true, error: e.message };
   }

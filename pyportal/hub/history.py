@@ -67,6 +67,13 @@ class HealthHistory:
         Path(self._path).parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(self._path, check_same_thread=False)
         self._db.row_factory = sqlite3.Row
+        # v2.500(감사 L6): 다른 데이터 파일(users.json·session-secret·audit.log)은 전부 0600 인데
+        # sqlite 생성 파일만 umask 기본(0644)이었다. 점검 이력에는 등록 링크·내부 호스트가 담긴다.
+        try:
+            import os as _os
+            _os.chmod(self._path, 0o600)
+        except OSError:
+            pass
         self._prepare()
 
     def _prepare(self):

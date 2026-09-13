@@ -291,11 +291,25 @@ export function warnIfNoOtpAdmin() {
   return true;
 }
 
+/**
+ * 비밀번호 해시와 동일 비용의 더미 KDF — **비밀번호 경로를 타지 않은 요청도** 같은 시간을 쓰게 한다.
+ *
+ * v2.500(감사 M-2): 기존 코드는 '없는 사용자' 에만 더미를 태웠다. 그런데 OTP 전용 정책 + 등록 완료
+ * 계정(= admin/operator 의 최종 상태)은 `tryOtp()` 만 타고 `/^\d{4,8}$/` 불일치로 즉시 반환한다
+ * (실측 ~0.07ms). 없는 계정은 ~48ms 다 — 650배 차이라, 사용자명 사전을 **계정당 1회씩** 넣어
+ * 응답이 빠른 이름 = 실재하는 OTP 등록 계정(주로 관리자)을 골라낼 수 있었다. 계정당 1회라 잠금도
+ * 발동하지 않는다. 그래서 '비밀번호 검증을 실제로 수행했는가' 를 추적해, 안 했으면 여기서 태운다.
+ * 성공 응답도 예외가 아니다 — 성공만 빠르면 그것도 신호다.
+ */
+function burnPasswordWork(credential) {
+  try { crypto.scryptSync(String(credential || ''), _dummySalt, 64); } catch { /* */ }
+}
+
 export function authenticateLocal(username, credential) {
   const user = loadUsers().find((u) => u.username === username);
   if (!user) {
     // 없는 사용자도 동일 비용의 scrypt를 태워 응답시간 차이로 사용자명을 열거하지 못하게 한다.
-    try { crypto.scryptSync(String(credential || ''), _dummySalt, 64); } catch { /* */ }
+    burnPasswordWork(credential);
     return null;
   }
   const role = user.role || 'viewer';
@@ -308,26 +322,34 @@ export function authenticateLocal(username, credential) {
     if (ctr !== user.totpLastCounter) { user.totpLastCounter = ctr; try { persistUsers(); } catch { /* */ } }
     return true;
   };
-  const tryPassword = () => !!user.passwordHash && verifyPassword(credential, user.passwordHash);
+  // 비밀번호 KDF 를 **실제로** 돌렸는지 추적한다(해시가 없으면 verifyPassword 가 안 돈다).
+  let kdfRan = false;
+  const tryPassword = () => {
+    if (!user.passwordHash) return false;
+    kdfRan = true;
+    return verifyPassword(credential, user.passwordHash);
+  };
+  // 어떤 경로로 빠져나가도 총 작업량을 맞춘다(성공·실패·조기반환 모두).
+  const equalize = (result) => { if (!kdfRan) burnPasswordWork(credential); return result; };
 
   if (enforced) {
     // OTP 전용 강제 — 등록됐으면 OTP 로만, 미등록이면 비밀번호(부트스트랩)로 로그인하되 이 세션은
     // mustEnrollOtp 가 붙어 등록 외 아무 것도 못 한다(등록을 마치면 비밀번호는 삭제된다).
-    if (user.totpEnabled && user.totpSecret) { if (!tryOtp()) return null; }
-    else if (!tryPassword()) return null;
+    if (user.totpEnabled && user.totpSecret) { if (!tryOtp()) return equalize(null); }
+    else if (!tryPassword()) return equalize(null);
   } else {
     // 강제 아님 — 이 사용자에게 적용되는 정책(사용자별 재정의 > 전역)에 따라 허용 자격을 정한다.
     const p = loginPolicyFor(user.username);
     if (p === 'password_only' && user.passwordHash) {
       // 비밀번호 전용 — 비번 보유 계정은 비번만(OTP 거부). 비번 없는 레거시(OTP 전용이었던)
       // 계정은 아래 분기의 OTP 폴백으로 로그인해 잠기지 않는다.
-      if (!tryPassword()) return null;
+      if (!tryPassword()) return equalize(null);
     } else {
       // 혼용(otp_or_password)·레거시 viewer·비번 없는 password_only 계정 — 비번 또는 OTP 아무거나.
-      if (!tryPassword() && !tryOtp()) return null;
+      if (!tryPassword() && !tryOtp()) return equalize(null);
     }
   }
-  return {
+  return equalize({
     username: user.username,
     name: user.name || user.username,
     role,
@@ -335,7 +357,7 @@ export function authenticateLocal(username, credential) {
     totpEnabled: !!user.totpEnabled,
     // OTP 전용 강제 대상이 아직 OTP 미등록 → 이번 세션은 'OTP 등록 전용'.
     mustEnrollOtp: enforced && !user.totpEnabled,
-  };
+  });
 }
 
 /* ------------------------------ user management ---------------------------- */

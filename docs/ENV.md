@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **344개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **345개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-13)
@@ -154,12 +154,13 @@
 | `BMSTOR_PUSH_TIMEOUT_MS` | `180000` |  | bmstor/poller.js |
 | `BMSTOR_SSH_TIMEOUT_MS` | `15000` |  | bmstor/collect.js |
 
-## 보안 (11)
+## 보안 (12)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `LOGIN_FAIL_WINDOW_MS` | `15` |  | security/loginRateLimit.js |
 | `LOGIN_GLOBAL_FACTOR` | `10` |  | security/loginRateLimit.js |
+| `LOGIN_IP_FACTOR` | `6` |  | security/loginRateLimit.js |
 | `LOGIN_LOCKOUT_MS` | `15` |  | security/loginRateLimit.js |
 | `LOGIN_MAX_FAILS` | `8` |  | security/loginRateLimit.js |
 | `LOGIN_POLICY_USERS` | `''` |  | security/securitySettings.js |
@@ -523,4 +524,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 344
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 345

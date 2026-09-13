@@ -46,8 +46,9 @@ function persist() {
 
 const clean = (x) => ({
   ip: String(x?.ip || '').trim(),
-  vendor: String(x?.vendor || 'unknown'),
-  vendorLabel: String(x?.vendorLabel || ''),
+  // v2.500(감사 L-5): 형제 필드는 모두 절단되는데 이 둘만 무제한이었다(엣지가 보고하는 값이다).
+  vendor: String(x?.vendor || 'unknown').slice(0, 60),
+  vendorLabel: String(x?.vendorLabel || '').slice(0, 60),
   evidence: String(x?.evidence || '').slice(0, 200),
   product: String(x?.product || '').slice(0, 120),
   model: String(x?.model || '').slice(0, 120),

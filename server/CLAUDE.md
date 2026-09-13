@@ -305,3 +305,60 @@
 - **.gitignore 는 SECRET_FILES 를 모두 포함**(L-8): `SECRET_FILES ⊆ .gitignore` 를 유지하고, 런타임 DB 는 `server/config/*.db`
   와일드카드로 선차단한다. 배포 기본값(`ipam-scan.json`)에 활성 스캔을 커밋하지 말 것(L-9 — 없으면 스캔 기본 비활성).
 
+## 2026-09-13 보안 전수 감사 조치 — 되돌리지 말 것 (docs/AUDIT-2026-09-13.md)
+
+8도메인 병렬 감사(라우트 701건 전수 포함) 확정 조치. 회귀 테스트: `test/securityAudit2026-09-13.test.js`(16건).
+
+- **경로 문자열 비교로 보안 게이트를 만들지 말 것**(`routes/central.js`, C-1 critical): v2.488 의 H-1 대조가
+  `req.path === '/register-collector'` 정확 일치에 걸려 있어 **Express 기본 라우팅에서 우회됐다** —
+  `strict routing=false`·`case sensitive=false` 라 `/register-collector/`·`/Register-Collector`·
+  `/register-collector/.` 은 핸들러에 도달하면서 그 비교만 거짓이 된다(3변형 모두 200 등록 실측).
+  이제 강제는 **핸들러 안**(`registerBindingDenied`)에서 경로와 무관하게 하고, 미들웨어의 `normPath()` 는
+  심층 방어일 뿐이다. 새 게이트를 `req.path ===` 로 만들지 말 것. 테스트는 변형 경로를 반드시 포함한다.
+- **접속처가 바뀌면 저장 비밀을 승계하지 않는다 — 판정은 `util/secretCarry.js` 하나로**(H1·H2·H4):
+  `accessMoved(prev, body, idKeys)` + `dropCarriedSecrets(target, body, secretKeys)`. 같은 결함이
+  `agent/deployRegistry.js`(SSH 비번·CENTRAL_TOKEN·COLLECTOR_TOKEN)·`proxy/registry.js`(Data Plane URL·
+  SSH host)·`net/monitor.js`(캡처 호스트) 세 곳에서 **독립적으로** 발견됐다 — 각자 구현하면 다음 스토어에서
+  또 빠진다. v2.480 의 "연결 테스트는 host 를 저장값으로 고정" 은 테스트 라우트만 막으므로, **저장 시점**에
+  버리는 이 규칙이 함께 있어야 한다(저장 요청을 한 번 끼우면 그 방어를 지나간다).
+  `idKeys` 는 '어디에 접속하는가' 를 정하는 필드다(`['host','port','username']` 또는 `['url']`).
+  버릴 때는 `delete`(키 제거)다 — `''` 로 덮으면 "빈 값 = 기존 유지" 규칙을 타는 구현에서 되살아난다.
+- **중앙 토큰을 원격 호스트에 배달하는 경로는 설정 소유자 전용**(`routes/admin/deployLlm.js`, H3):
+  `autoCentralToken` 은 평문 CENTRAL_TOKEN 을 요청자가 지정한 host 의 `portal.env` 에 기록한다 —
+  백업 아카이브와 같은 등급의 자산이므로 `ownerIfAutoCentralToken` 으로 게이트한다(옵션을 쓸 때만 게이트해
+  토큰을 직접 입력하는 기존 흐름은 보존). adminOnly 만으로 두면 소유자가 아닌 admin 이 토큰을 받아간다.
+- **상태변경 라우트 RBAC 은 `requirePerm` 만으로 대체되지 않는다**(`routes/api/inventory.js`, B/M-1):
+  `inv.alarms` 는 **viewer 기본 권한**이고 `requirePerm` 은 역할을 보지 않는다. 알람 음소거 생성/삭제가
+  그 상태로 열려 있어 viewer 가 전 vCenter 알람을 영구 음소거할 수 있었다(AUDIT-2026-06-27 C2 의 회귀).
+  `requireRole('admin','operator')` + `requirePerm` **둘 다** 걸고, 범위 제한 계정은 전 vCenter 규칙을
+  만들거나 지울 수 없게 한다(`alarm-mutes.js muteCreateIssue`/`muteDeleteIssue`/`visibleMutes` — 전 vCenter
+  규칙은 그 사용자 화면에도 적용되므로 **목록에서는 숨기지 않는다**).
+- **역할별 축약은 응답을 스프레드하지 말고 전용 모듈에서**(`relaycheck/view.js`, D/M1): v2.478(S9)은
+  `targets[].host/port` 만 가렸는데 라우트가 `relayCheckStatus()` 를 `...st` 로 펼쳐 `settings.hosts` 와
+  `results[].target.host/port` 가 그대로 나갔고, `key` 가 `"host:port"` 라 가린 값이 복원됐다.
+  `relayCheckView(st, targets, isAdmin)` 를 통과한 것만 내보내고, 가린 사실은 `redacted` 로 밝힌다
+  (operator 는 `tools` 를 기본 보유한다 — '거부 기본값' 규칙).
+- **로그인 잠금에는 계정명과 무관한 출발지 카운터가 있어야 한다**(`security/loginRateLimit.js`, A/M-1):
+  `<ip>|<user>`·`acct:<user>` 만으로는 **사용자명을 매번 바꾸면** 어느 카운터도 차지 않는다. 로그인은 요청마다
+  동기 scrypt(측정 ~48ms)를 태우므로 단일 출발지로 이벤트 루프를 포화시킬 수 있다. `ip:<ip>` 카운터를
+  per-IP+계정 키보다 높은 임계(기본 6×)로 두고, 정상 로그인 1회가 리셋한다(NAT 오탐 완화).
+- **로그인 응답시간은 자격 종류와 무관해야 한다**(`auth/auth.js` `burnPasswordWork`/`equalize`, A/M-2):
+  더미 scrypt 를 '없는 사용자' 에만 태우면, OTP 전용 + 등록 완료 계정(= 관리자의 최종 상태)이 OTP 형식 검사에서
+  즉시 반환돼 없는 계정보다 650배 빨라진다 → **계정당 1회 요청으로 관리자 계정 열거**(잠금 미발동).
+  비밀번호 KDF 실행 여부를 추적해 **성공·실패·조기반환 전 경로**에서 작업량을 맞춘다.
+- **보존일은 정리 시점이 아니라 조회에서도 강제**(`perf/hangLog.js readHangs`, H/M-1): 정리가 기동·설정 저장·
+  append 200건마다만 돌아 hang 이 드문 환경에서는 14일 설정에도 사용자명·IP·UA 가 수십 일 조회됐다.
+  컷오프를 조회에 적용하고 가린 건수를 `staleHidden` 으로 밝힌다(조용히 줄이면 '기록이 왜 없지' 가 된다).
+- **비밀 파일은 SECRET_FILES 등록과 `.gitignore` 를 **함께**(C/M4): `bm-storage.json` 이 둘 다 빠져 있었다.
+  `SECRET_FILES ⊆ .gitignore` 는 회귀 테스트로 고정했다 — 등록만 하고 차단을 잊는 사고를 막는다.
+  v2.49x 런타임 파일(`perf-hangs.ndjson`·`perf-monitor.json`·`central-unsupported-servers.json`)도 차단 대상이다.
+- **엣지가 push 한 설정 사본도 손상 보존 대상**(`central/agentConfig.js`, C/M3): `central-agent-config.json` 은
+  각 법인의 `portal.env`(AUTH_SECRET·CENTRAL_TOKEN)·`users.json`(TOTP)·`vcenters.json` 사본이다. 로드 catch 가
+  조용히 `{}` 를 돌려주면 3초 디바운스 persist 가 온전했던 원본을 덮어써 전 법인 사본이 유실된다.
+- **소스에 리터럴 NUL 바이트를 두지 말 것**(`svcmon/store.js`, C/L4): `file(1)` 이 `data` 로 보고 grep/ripgrep 이
+  **파일 전체를 건너뛰어** 보안 감사의 사각지대가 된다(루트 CLAUDE.md v2.478 오판과 같은 원인).
+  같은 값을 `\u0000` 이스케이프로 쓴다. 탐지는 `tr -cd '\000' < 파일 | wc -c`.
+- **범용 압축 유틸은 경로 탈출을 스스로 막는다**(`util/zip.js zipMany`, H/L-1): 현재 호출부가 안전해도
+  다음 호출부가 vCenter/VM 문자열을 그대로 넘길 수 있다 — 세그먼트 `..`·드라이브 문자를 거부한다.
+- **동시 실행 가드의 409 응답에 타 사용자 계정명을 싣지 말 것**(`routes/api/toolsCapacity.js`, H/L-2):
+  tools 권한만 있는 계정이 연타해 관리자 로그인 ID 를 알아내는 계정 열거 단서다(본인일 때만 표기).
