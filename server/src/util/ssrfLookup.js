@@ -36,9 +36,14 @@
  * 옵션**을 받는다. 검증을 lookup 안에서 하면:
  *   · **TOCTOU 창이 0 이다** — 소켓이 실제로 쓸 바로 그 주소를 검사한다(검사 후 재해석 없음).
  *   · SNI·Host·인증서 검증은 원래 호스트명을 그대로 쓴다(접속 주소만 검증된 IP).
- *   · DNS 조회가 '가드용 1회 + 접속용 1회' 에서 **1회**로 줄어든다. `server/CLAUDE.md` 의
- *     "타임아웃 없는 DNS 조회를 핫패스에 넣지 말 것"(폴러 지연) 규칙과 충돌하지 않고
- *     오히려 조회 수를 줄인다.
+ *   · **추가 DNS 조회를 만들지 않는다** — 이 훅은 Node 가 어차피 하던 접속용 해석을 대신하는
+ *     것이라, 사전 가드가 없는 경로(예 `resilientFetch` 일반 호출)에서는 조회가 1회 그대로다.
+ *     ⚠ 정직 정정(v2.506 적대적 검증): 처음 주석에 "가드용+접속용 2회에서 1회로 줄어든다" 고
+ *     썼는데 **사실이 아니다** — 배선한 5곳의 사전 가드(`ssrfBlockReasonResolved`)를 그대로
+ *     남겨 뒀기 때문이다(IP 리터럴 검사를 위해 필요하다). 실측: `relayProbe` 프로브 1회에
+ *     사전 가드 1회 + 4단계 접속 각 1회 = 5회. 즉 **줄지는 않고 늘지도 않는다**(사전 가드는
+ *     종전과 동일). `server/CLAUDE.md` 의 "타임아웃 없는 DNS 를 핫패스에 넣지 말 것" 규칙에
+ *     대해서는, 이 훅이 타임아웃을 가진 유일한 경로라는 점이 개선이다.
  *   · 리다이렉트를 따라가는 클라이언트도 **매 홉마다** 이 lookup 을 타므로 자동으로 보호된다.
  *
  * ## 한계(정직하게)
@@ -58,24 +63,48 @@ import { ipBlockReason } from '../collector/registry.js';
 const isAllForm = (opts) => !!(opts && typeof opts === 'object' && opts.all);
 
 /**
- * 주소 목록에서 차단 사유를 찾는다(순수). 하나라도 차단 대역이면 **전체를 거부**한다.
+ * 주소 목록에서 **허용 주소만 남긴다**(순수). 반환: `{ allowed, dropped, reason }`.
  *
- * 왜 '하나라도' 인가: 공격자는 A 레코드에 정상 IP 와 사내 IP 를 함께 실어, 클라이언트가
- * 어느 것을 고르든 한 번은 사내로 가게 만들 수 있다(멀티-A 리바인딩). 통과한 주소만 쓰도록
- * 걸러내는 것보다 거부가 안전하고, 정상 대상이 사내 대역을 섞어 광고하는 경우는 없다.
+ * ## 왜 '하나라도 차단이면 전체 거부' 가 아닌가 (v2.506, 적대적 검증 지적)
  *
- * @param {Array<{address:string, family?:number}>|string} addrs
- * @returns {string|null} 차단 사유 또는 null(허용)
+ * 처음에는 전체 거부로 만들었다. 멀티-A 리바인딩(공격자가 A 레코드에 정상 IP 와 사내 IP 를 함께
+ * 실어 어느 것을 고르든 한 번은 사내로 가게 만드는 수법)을 막으려는 의도였다.
+ * 그런데 그 조합이 **변경 전에 없던 실패 모드**를 만들었다: 사내 듀얼스택 FQDN(A=192.168.x +
+ * AAAA=fd00::x)은 `ipv6BlockReason` 이 ULA(fc00::/7)를 차단하므로(`collector/registry.js`)
+ * 허용 주소가 살아 있는데도 **연결 전체가 거부**된다 → 수집·업그레이드가 멈춘다.
+ *
+ * 걸러내기로 바꿔도 리바인딩 방어는 **약해지지 않는다**: 차단 주소를 목록에서 제거하면 공격자는
+ * 우리가 그 주소로 붙게 만들 수 없다(우리는 허용 주소로만 붙는다). 공격자의 목적이 '사내 주소에
+ * 도달' 인데 그 주소가 후보에서 사라지므로 공격은 실패한다. 전체 거부는 그보다 엄격할 뿐이고,
+ * 그 엄격함의 대가가 정상 사내 환경의 장애였다.
+ *
+ * 단, 허용 주소가 **하나도 없으면** 차단한다(그때는 거부가 유일한 선택이다).
+ * 걸러낸 사실은 `dropped` 로 돌려주어 호출부가 감사 로그에 남긴다 — 조용히 줄이지 않는다.
+ *
+ * `{all:false}`(단일 주소) 형태에서는 걸러낼 대상이 없으므로 차단이 곧 거부다.
  */
-export function addressBlockReason(addrs) {
+export function filterAddresses(addrs) {
   const list = Array.isArray(addrs) ? addrs : [{ address: addrs }];
+  const allowed = [];
+  const dropped = [];
+  let reason = null;
   for (const a of list) {
     const ip = typeof a === 'string' ? a : a?.address;
     if (!ip) continue;
     const r = ipBlockReason(ip);
-    if (r) return r;
+    if (r) { dropped.push({ address: ip, reason: r }); if (!reason) reason = r; }
+    else allowed.push(a);
   }
-  return null;
+  return { allowed, dropped, reason };
+}
+
+/**
+ * 이전 이름 유지(호환) — 허용 주소가 하나도 없을 때의 사유를 돌려준다. null 이면 통과 가능.
+ * 새 코드는 `filterAddresses` 를 쓸 것(걸러낸 목록이 필요하다).
+ */
+export function addressBlockReason(addrs) {
+  const { allowed, reason } = filterAddresses(addrs);
+  return allowed.length ? null : (reason || '허용된 주소가 없습니다.');
 }
 
 /** 차단 시 콜백에 넘길 오류 — 호출부가 사유를 사용자에게 그대로 보여줄 수 있게 코드를 붙인다. */
@@ -96,9 +125,10 @@ export function ssrfLookupError(hostname, reason) {
  *   타임아웃 옵션이 없어 타이머로 포기한다 — 해석 자체는 백그라운드에서 끝날 수 있지만 **호출부가
  *   기다리지 않는다**(폴러가 DNS 지연에 묶이는 것을 막는 것이 목적이다).
  * @param {Function} [o.lookupImpl=dns.lookup]  테스트 주입용.
- * @param {Function} [o.onBlock]  차단 시 호출(감사 로그용). 던지지 말 것.
+ * @param {Function} [o.onBlock]  전면 차단 시 호출(감사 로그용). 던지지 말 것.
+ * @param {Function} [o.onDrop]   일부만 걸러냈을 때 호출(리바인딩 시도 흔적). 던지지 말 것.
  */
-export function makeSsrfLookup({ timeoutMs = 3000, lookupImpl = dns.lookup, onBlock = null } = {}) {
+export function makeSsrfLookup({ timeoutMs = 3000, lookupImpl = dns.lookup, onBlock = null, onDrop = null } = {}) {
   const limit = Math.max(250, Math.min(30_000, Number(timeoutMs) || 3000));
   return function ssrfLookup(hostname, options, callback) {
     // Node 는 `lookup(hostname, callback)` 형태로도 부를 수 있다.
@@ -111,9 +141,12 @@ export function makeSsrfLookup({ timeoutMs = 3000, lookupImpl = dns.lookup, onBl
       clearTimeout(timer);
       cb(err, ...rest);
     };
-    // ⚠ 이 타이머를 `unref()` 하지 않는다: unref 하면 이벤트 루프에 다른 활성 핸들이 없을 때
-    // 타이머가 울리지 않아 **콜백이 영원히 안 불린다**(= 연결이 무한 대기). 실측으로 확인했다.
-    // 최대 limit(기본 3초)만큼 프로세스 종료가 늦어질 수 있지만, 연결이 매달리는 것보다 낫다.
+    // ⚠ 이 타이머를 `unref()` 하지 않는다. 실측(node 22): unref 한 타이머는 이벤트 루프에 다른
+    // 활성 핸들이 없으면 **울리지 않고 프로세스가 즉시 끝나고**(fired=false, 경과 0ms), 활성
+    // 핸들이 있으면 정상적으로 울린다(301ms). 즉 unref 는 '문맥에 따라 타임아웃이 있기도 없기도
+    // 한' 비결정적 방어가 된다 — 실제 connect 중에는 소켓이 루프를 살려 두니 대개 울리지만,
+    // 그 '대개' 에 의존할 이유가 없다. 대가는 프로세스 종료가 최대 limit(기본 3초)만큼 늦어지는
+    // 것뿐이다. (초판 주석의 '연결이 무한 대기' 는 틀렸다 — 그 경우 프로세스가 먼저 끝난다.)
     const timer = setTimeout(() => {
       const e = new Error(`DNS 해석 시간 초과(${limit}ms): ${hostname}`);
       e.code = 'ETIMEDOUT';
@@ -123,13 +156,21 @@ export function makeSsrfLookup({ timeoutMs = 3000, lookupImpl = dns.lookup, onBl
     try {
       lookupImpl(hostname, opts, (err, address, family) => {
         if (err) return finish(err);
-        const addrs = isAllForm(opts) ? address : [{ address, family }];
-        const reason = addressBlockReason(addrs);
-        if (reason) {
-          try { if (onBlock) onBlock({ hostname, addrs, reason }); } catch { /* 로깅 실패가 차단을 막지 않게 */ }
-          return finish(ssrfLookupError(hostname, reason));
+        const all = isAllForm(opts);
+        const addrs = all ? address : [{ address, family }];
+        const { allowed, dropped, reason } = filterAddresses(addrs);
+        if (!allowed.length) {
+          try { if (onBlock) onBlock({ hostname, addrs, reason, dropped }); } catch { /* 로깅 실패가 차단을 막지 않게 */ }
+          return finish(ssrfLookupError(hostname, reason || '허용된 주소가 없습니다.'));
         }
-        return isAllForm(opts) ? finish(null, address) : finish(null, address, family);
+        // 일부만 걸러냈으면 **조용히 넘기지 않는다** — 리바인딩 시도일 수 있으므로 기록한다.
+        if (dropped.length) {
+          try { if (onDrop) onDrop({ hostname, dropped, kept: allowed.length }); } catch { /* */ }
+        }
+        // `{all:true}` 는 undici 가 배열을 기대한다(실측: opts = {hints:32, all:true}).
+        // 단일 형태는 첫 허용 주소를 그대로 돌려준다(원래 형태 보존).
+        if (all) return finish(null, allowed);
+        return finish(null, allowed[0]?.address ?? address, allowed[0]?.family ?? family);
       });
     } catch (e) { finish(e); }
   };
@@ -141,6 +182,7 @@ export function makeSsrfLookup({ timeoutMs = 3000, lookupImpl = dns.lookup, onBl
  */
 export const ssrfLookup = makeSsrfLookup({
   onBlock: ({ hostname, reason }) => console.warn(`[ssrf] DNS 리바인딩 차단: ${hostname} — ${reason}`),
+  onDrop: ({ hostname, dropped, kept }) => console.warn(`[ssrf] ${hostname}: 차단 대역 ${dropped.length}개 제외(허용 ${kept}개로 접속) — ${dropped[0]?.reason || ''}`),
 });
 
 /**

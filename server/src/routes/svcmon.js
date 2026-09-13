@@ -4,7 +4,8 @@
  * import 경로(index.js `app.use('/api/svcmon', svcmonRouter)`)가 바뀌지 않고, 도메인 구현은
  * ./svcmon/*.js 의 register*(router) 로 이동했다. 본문은 원본 그대로(기능 변화 없음).
  *
- * 공통 규칙(원본 헤더에서 이관): 조회는 로그인 사용자, 변경은 admin/operator(CLAUDE.md RBAC
+ * 공통 규칙(원본 헤더에서 이관): v2.506 부터 **마운트 자체가 requirePerm('svcmon')** 아래다
+ * (index.js) — 즉 조회도 svcmon 기능 권한이 있어야 한다. 그 위에 변경은 admin/operator(CLAUDE.md RBAC
  * 불변조건 — 게이트는 ./svcmon/shared.js 의 canEdit/adminOnly). 응답은 res.json 래퍼가
  * ETag/304 를 처리하므로 무변동 폴링은 본문 0바이트다.
  *

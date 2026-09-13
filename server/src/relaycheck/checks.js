@@ -6,11 +6,15 @@ import net from 'node:net';
 import { probeRelayPath } from '../vcenter/relayProbe.js';
 import { identityIssue } from '../collector/registry.js';
 import { instanceId } from '../instanceId.js';
+// v2.506(적대적 검증): 전역 fetch 는 lookup 이 없어 수집 토큰이 리바인딩된 주소로 나갈 수 있었다.
+import { resilientFetch } from '../util/resilientFetch.js';
+import { ssrfLookup } from '../util/ssrfLookup.js';
 
 function tcp(host, port, timeoutMs) {
   return new Promise((resolve) => {
     const t0 = Date.now();
-    const sock = net.connect({ host, port });
+    // v2.506: DNS 리바인딩 차단(util/ssrfLookup.js) — 중계 점검도 외부 입력 host 로 붙는다.
+    const sock = net.connect({ host, port, lookup: ssrfLookup });
     let done = false;
     const fin = (r) => { if (done) return; done = true; try { sock.destroy(); } catch { /* */ } resolve({ ...r, ms: Date.now() - t0 }); };
     sock.setTimeout(timeoutMs, () => fin({ ok: false, phase: 'timeout', error: `TCP 연결 타임아웃(${Math.round(timeoutMs / 1000)}초)` }));
@@ -22,7 +26,8 @@ function tcp(host, port, timeoutMs) {
 function sshBanner(host, port, timeoutMs) {
   return new Promise((resolve) => {
     const t0 = Date.now();
-    const sock = net.connect({ host, port });
+    // v2.506: DNS 리바인딩 차단(util/ssrfLookup.js) — 중계 점검도 외부 입력 host 로 붙는다.
+    const sock = net.connect({ host, port, lookup: ssrfLookup });
     let done = false; let buf = '';
     const fin = (r) => { if (done) return; done = true; try { sock.destroy(); } catch { /* */ } resolve({ ...r, ms: Date.now() - t0 }); };
     sock.setTimeout(timeoutMs, () => fin({ ok: false, phase: buf ? 'banner' : 'timeout', error: buf ? `SSH 배너가 아님: ${buf.slice(0, 40)}` : 'TCP/배너 타임아웃' }));
@@ -36,7 +41,7 @@ async function portalPing(host, port, { token, expectAgent, otherIds = [], timeo
   const base = `http://${host}:${port}`;
   try {
     if (token) {
-      const r = await fetch(`${base}/api/collector/ping`, { headers: { Accept: 'application/json', 'X-Collector-Token': token }, signal: AbortSignal.timeout(timeoutMs) });
+      const r = await resilientFetch(`${base}/api/collector/ping`, { headers: { Accept: 'application/json', 'X-Collector-Token': token }, timeoutMs, retries: 0 });
       if (r.status === 403 || r.status === 401) return { ok: false, phase: 'auth', error: 'HTTP 403 토큰 거부', ms: Date.now() - t0 };
       if (r.status === 404) return { ok: false, phase: 'auth', error: 'HTTP 404 — 응답 포탈에 COLLECTOR_TOKEN 미설정(또는 포탈 아님)', ms: Date.now() - t0 };
       if (!r.ok) return { ok: false, phase: 'http', error: `HTTP ${r.status}`, ms: Date.now() - t0 };
@@ -45,7 +50,7 @@ async function portalPing(host, port, { token, expectAgent, otherIds = [], timeo
       if (iss) return { ok: false, phase: 'identity', error: iss.reason, got: { agent: j.agent, hostname: j.hostname }, ms: Date.now() - t0 };
       return { ok: true, detail: `응답 ${j.agent || '(이름 없음)'}${j.hostname ? `(${j.hostname})` : ''} v${j.version || '?'}`, got: { agent: j.agent, hostname: j.hostname }, ms: Date.now() - t0 };
     }
-    const r = await fetch(`${base}/api/health`, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(timeoutMs) });
+    const r = await resilientFetch(`${base}/api/health`, { headers: { Accept: 'application/json' }, timeoutMs, retries: 0 });
     if (!r.ok) return { ok: false, phase: 'http', error: `HTTP ${r.status}`, ms: Date.now() - t0 };
     const j = await r.json().catch(() => ({}));
     return { ok: true, detail: `health 200 v${j.version || '?'}`, got: { instance: j.instance, agent: j.agent }, ms: Date.now() - t0 };

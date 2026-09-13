@@ -397,7 +397,7 @@
 ## 2026-09-13 감사 미해결 3건 조치(v2.506) — 되돌리지 말 것
 
 `docs/PERF-AUDIT-2026-09-13.md` 4절에 '남은 미해결' 로 적어 둔 것 중 3건을 닫았다.
-회귀 테스트: `test/audit2506.test.js`(23건).
+회귀 테스트: `test/audit2506.test.js`(28건 — 적대적 검증으로 11건을 고치고 테스트를 보강했다).
 
 - **`/api/svcmon` 은 `requirePerm('svcmon')` 로 게이트한다**(`index.js`, S1 N-2):
   예전에는 `authMiddleware + requireEnrolled` 만 있어 **로그인한 아무 계정이나**
@@ -422,18 +422,33 @@
   · `net.connect`·`tls.connect`·`https.request`·`http.request`·undici `Agent` **전부 `lookup`
     옵션을 받는다.** 검증을 lookup 안에서 하면 소켓이 실제로 쓸 주소를 그 순간 검사하므로
     **TOCTOU 창이 0** 이고, SNI(`servername`)·Host·인증서 검증은 원 호스트명을 그대로 쓴다.
-    DNS 조회도 '가드용 + 접속용' 2회에서 1회로 줄어 "타임아웃 없는 DNS 를 핫패스에 넣지 말 것"
-    규칙과 충돌하지 않는다. 참조 구현은 `uagmon/lib/uag.js:30-55`(IP 바꿔치기 방식)이며,
+    ⚠ **DNS 조회 횟수는 줄지 않는다** — 초판 문서에 '2회→1회' 라고 적었는데 거짓이었다. IP 리터럴
+    방어를 위해 사전 가드를 그대로 남겼기 때문이다(실측: 호스트명 대상 `resilientFetch` 1회 →
+    `dns.lookup` 2회). 이 조치의 효과는 '간극 제거' 이고 '조회 절감' 이 아니다. 참조 구현은
+    `uagmon/lib/uag.js:30-55`(IP 바꿔치기 방식)이며,
     접속 수단이 5가지로 갈리는 `server/src` 에서는 수단마다 SNI·Host 를 손으로 붙이다 한 곳을
     빠뜨리면 조용히 검증이 약해지므로 lookup 훅으로 일반화했다.
-  · 배선 지점: `util/resilientFetch.js`(wanAgent — dispatcher 미지정 전 호출부를 한 번에 덮는다)·
-    `alerts.js`(webhookAgent)·`horizon/horizon.js`(dispatcher)·`vcenter/relayProbe.js`(**4곳** —
-    net/tls/https/http)·`security/certMonitor.js`. relayProbe 를 2곳만 고치면 나머지 2단계가
-    TOCTOU 로 남는다(실제로 그렇게 만들었다가 검증에서 잡혔다).
+  · 배선 지점(`grep -rn "lookup: ssrfLookup" src/` = **11곳**): `util/resilientFetch.js`(wanAgent —
+    dispatcher 미지정 전 호출부를 한 번에 덮는다)·`alerts.js`(webhookAgent)·`horizon/horizon.js`
+    (dispatcher)·`vcenter/relayProbe.js`(**4곳** — net/tls/https/http)·`security/certMonitor.js`·
+    `upgrade/upgradeAgent.js`·`relaycheck/checks.js`(**2곳**). relayProbe 를 2곳만 고치면 나머지
+    2단계가 TOCTOU 로 남는다(실제로 그렇게 만들었다가 검증에서 잡혔다).
+  · ⚠ **`resilientFetch(url, {dispatcher})` 로 dispatcher 를 직접 넘기면 wanAgent 의 lookup 이
+    통째로 사라진다**(`const disp = dispatcher || wanAgent`). 새 Agent 를 만들어 넘길 때는
+    `connect:{ lookup: ssrfLookup }` 을 직접 붙일 것 — `upgrade/upgradeAgent.js` 가 그 경우였다.
+  · ⚠ **`globalThis.fetch` 에는 lookup 이 없다.** 토큰을 실어 보내는 호출을 전역 fetch 로 하면
+    리바인딩으로 그 토큰이 사내 주소로 나간다 — `collector/registry.js` 의
+    `verifyDerivedCollectorUrl` 이 `X-Collector-Token` 을 들고 그 상태였다(기본 `fetchImpl` 을
+    `resilientFetch` 기반 `tokenFetch` 로 교체).
+  · **멀티-A 는 걸러낸다, 전부 거부하지 않는다**(`filterAddresses`): '하나라도 차단이면 전체 거부' 로
+    만들면 사내 **이중스택** 이름(A=192.168.x + AAAA=fd00::x, ULA 는 차단 대역)이 하드 실패한다.
+    거른 주소는 후보 집합에서 사라지므로 리바인딩 방어는 동등하다. 남은 게 없을 때만 거부.
   · **한계(실측 확인)**: IP 리터럴 URL 은 lookup 이 불리지 않는다. 그래서 기존 동기
     `ssrfBlockReason(url)` 을 **없애면 안 된다** — 이 훅은 대체가 아니라 '이름이 IP 로 바뀌는
-    순간' 을 덮는 보완이다. 타이머를 `unref()` 하지 말 것(유휴 루프에서 타이머가 안 울려
-    콜백이 영원히 안 불린다 — 연결 무한 대기. 실측으로 확인했다).
+    순간' 을 덮는 보완이다. 타이머를 `unref()` 하지 말 것 — 실측(node 22): unref 한 타이머는
+    다른 활성 핸들이 없으면 **울리지 않고 프로세스가 먼저 끝나고**(fired=false, 0ms), 활성 핸들이
+    있으면 정상 발화한다(301ms). 즉 문맥에 따라 타임아웃이 있기도 없기도 한 비결정적 방어가 된다.
+    (초판 문서의 '연결 무한 대기' 는 틀렸다 — 그 경우 프로세스가 먼저 끝난다.)
 - **도구 거부목록은 '막을 수 있는 것' 과 '왜 못 막는지' 를 모두 선언한다**(`auth/toolAccess.js`, S1 #5):
   게이트는 `api.use('/tools', …)`(`routes/api.js`) 에만 걸려 있어, 자기 API 가 `/api/tools/*` 가
   아닌 도구는 구조적으로 범위 밖이다. 감사가 "41개 미매핑" 이라 한 것의 실체가 이것이다.
@@ -448,3 +463,18 @@
     무음 실패를 없애는 것이 이 모듈의 존재 이유인데 41개에 남아 있었다).
   · `toolCoverage().undeclared` 가 **0** 임을 테스트가 고정한다 — 새 도구를 추가하면서 매핑도
     선언도 빠뜨리면 CI 가 깨진다. 이 테스트를 지우면 구멍이 다시 조용히 넓어진다.
+  · ⚠ **경로 매칭은 소문자로 한다**(`stripExt`): Express 의 `case sensitive routing` 기본값은
+    false 다. 대소문자를 구분해 매칭하면 `/api/Tools/Ipam` 이 **라우트에는 닿으면서 매핑만 빗나가**
+    게이트 전체를 우회한다(적대적 검증에서 실제로 뚫렸다). 소문자화는 과차단을 만들지 않는다.
+  · ⚠ **선언 사유는 '실제로 열어 확인한 것' 만 적을 것.** 초판은 `aisearch`·`explore` 를
+    "각자 requirePerm/adminOnly 로 보호됨" 이라 적었는데 `/search/nl`·`/top` 에는 **게이트가
+    아예 없었다**. 거짓 사유는 무음 실패보다 나쁘다(관리자가 잘못된 판단을 한다). 두 경로는
+    각각 한 화면 전용임을 확인해 `TOOL_EXACT_PATHS` 로 **실제 집행 대상**으로 옮겼다 — 여러 화면이
+    공유하는 경로는 절대 여기 넣지 말 것(`dsusage`=`/api/datastores` 가 그래서 SHARED 다).
+  · 게이트 본체는 `toolGate({roleOf, issueOf})` 팩토리다 — `routes/api.js` 에 인라인으로 두면
+    회귀 테스트가 **소스 문자열 grep** 밖에 할 수 없다(미들웨어 순서가 바뀌어도 통과한다).
+    지금 테스트는 실제 express 앱에 이 미들웨어를 마운트하고 실제 `permissions.json` 을 읽혀
+    대소문자·확장자·쿼리·끝 슬래시 변형까지 403 을 확인한다.
+  · **`toolEnforcement` 를 화면이 실제로 쓴다** — `web/src/views/UserAdmin.jsx` 의 '도구별 접근'
+    표에 '서버 집행' 열(`views/userAdmin/toolEnforcementText.js`, 순수 모듈 + 회귀 테스트).
+    서버만 내려주고 화면이 쓰지 않으면 이 모듈이 없애려던 무음 실패가 그대로 남는다.

@@ -11,7 +11,7 @@
  * 해시는 #/console/<page> — 새로고침해도 같은 화면에 머문다(App.jsx 가 'console' 첫 세그먼트를 콘솔로 해석).
  */
 import React, { useEffect, useMemo, useState } from 'react';
-import { usePolling, toolAllowed } from '../api.js';
+import { usePolling, toolAllowed, can } from '../api.js';
 import ErrorBoundary from '../components/ErrorBoundary.jsx';
 import { hashSegments } from '../hooks/hashTab.js';
 import './console.css';
@@ -52,7 +52,10 @@ export default function DvcConsole({ user, health, onExit }) {
   const ov = usePolling('/overview', {}, 15_000);
   const al = usePolling('/alarms', {}, 15_000);
   const nsx = usePolling('/nsx', {}, 30_000);
-  const svc = usePolling('/svcmon/state', { limit: 1 }, 30_000);
+  // svcmon 은 기능 권한 게이트(v2.506) 아래다 — 권한 없는 역할에 폴링을 걸면 30초마다 403 이고
+  // usePolling 이 폴링을 끊은 뒤에도 타일이 '점검 상태 대기'(거짓 원인)로 남는다.
+  const canSvcmon = can('svcmon');
+  const svc = usePolling(canSvcmon ? '/svcmon/state' : null, { limit: 1 }, 30_000);
   const ds = usePolling('/datastores', {}, 60_000);
   const canStorage = toolAllowed('storage-mon'), canPdu = toolAllowed('pdu');
   const stor = usePolling(canStorage ? '/tools/storage' : null, {}, 60_000);
@@ -73,8 +76,8 @@ export default function DvcConsole({ user, health, onExit }) {
   const tiles = useMemo(() => buildDomainTiles({
     global, alarms: alarmsAll, nsx: nsx.data, svcmon: svc.data, pdu: pdu.data, idracPoller: idrac.data?.poller || null,
     dsOver, storageDevices: stor.data ? stor.data.devices.length : null,
-    permission: { idrac: isAdmin, pdu: canPdu },
-  }), [global, alarmsAll, nsx.data, svc.data, pdu.data, idrac.data, dsOver, stor.data, isAdmin, canPdu]);
+    permission: { idrac: isAdmin, pdu: canPdu, svcmon: canSvcmon },
+  }), [global, alarmsAll, nsx.data, svc.data, pdu.data, idrac.data, dsOver, stor.data, isAdmin, canPdu, canSvcmon]);
   const sev = severityCounts(alarmsAll);
 
   const counts = { hosts: fmtInt(global?.hosts), datastores: fmtInt(global?.datastores), networks: fmtInt(global?.networks), powerReporting: fmtInt(global?.powerReporting), alarms: al.data ? fmtInt(sev.total) : '' };

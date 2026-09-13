@@ -14,7 +14,10 @@ import { requireRole } from '../../auth/auth.js';
 import { listTargets, planBulkTargets } from '../../svcmon/store.js';
 import { judgeCapacity, suggestIntervalSec } from '../../svcmon/capacity.js';
 
-// 조회는 로그인 사용자, 변경은 admin/operator(CLAUDE.md RBAC 불변조건). 전 모듈이 이 두 게이트를 공유.
+// 변경은 admin/operator(CLAUDE.md RBAC 불변조건). 전 모듈이 이 게이트를 공유.
+// 조회 라우트에 개별 게이트가 없는 이유: v2.506 부터 마운트가 requirePerm('svcmon') 아래라
+// (index.js) 라우터에 도달한 요청은 이미 기능 권한을 통과한 것이다. 마운트 게이트를 지우면
+// 조회 6개(/state·/edges·/edge-state·/templates·/log·/log/windows)가 다시 무가드가 된다.
 export const canEdit = requireRole('admin', 'operator');
 export const adminOnly = requireRole('admin');
 

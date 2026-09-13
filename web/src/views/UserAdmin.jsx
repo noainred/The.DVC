@@ -3,6 +3,10 @@ import QRCode from 'qrcode';
 import { fetchJson, postJson, patchJson, delJson, putJson } from '../api.js';
 import { Loading, ErrorBox, Modal } from '../components/ui.jsx';
 import { TOOLS as SPECIAL_TOOLS } from './specialToolsList.js';
+import { enforcementOf, enforcementSummary, LEVEL_SERVER, LEVEL_PARTIAL } from './userAdmin/toolEnforcementText.js';
+
+// 도구별 접근 표에 나오는 행 — adminOnly 도구는 admin 전용이라 제외(모듈 상수: 렌더마다 재계산 불필요).
+const TOOL_ROWS = SPECIAL_TOOLS.filter((t) => !t.adminOnly);
 // 권한 매트릭스 순수 연산(v2.295, 3차 감사 확정 #6) — toolsDenied '거부목록 반전' 의미론을
 // vitest 로 고정(userAdmin/permMatrixOps.test.js). 이 파일은 setState 래퍼만 유지.
 import { hasMatrixKey, toggleMatrixKey, isToolAllowed, toggleToolDenied, setAllToolsDenied } from './userAdmin/permMatrixOps.js';
@@ -117,7 +121,7 @@ export default function UserAdmin() {
   };
   const setAllTools = (role, allow) => {
     // 차단 대상 키는 카탈로그(SPECIAL_TOOLS)에서 adminOnly 제외 — 순수 모듈은 카탈로그를 모른다.
-    setPerms((p) => ({ ...p, matrix: setAllToolsDenied(p.matrix, role, allow, SPECIAL_TOOLS.filter((t) => !t.adminOnly).map((t) => t.k)) }));
+    setPerms((p) => ({ ...p, matrix: setAllToolsDenied(p.matrix, role, allow, TOOL_ROWS.map((t) => t.k)) }));
     setPermDirty(true);
   };
   const resetPerms = async () => {
@@ -321,19 +325,27 @@ export default function UserAdmin() {
           <div className="muted" style={{ fontSize: 12, marginBottom: 8, lineHeight: 1.7 }}>
             체크 = 해당 도구 접근 허용. '특수 기능' 기본 권한이 있어야 도구가 보이며, 여기서 도구별로 세부 차단할 수 있습니다.
             <b>관리자 전용</b> 도구(VM 생성·에이전트 작업 등)는 admin에게만 노출되어 목록에서 제외됩니다.
+            <div style={{ marginTop: 6 }}>{enforcementSummary(TOOL_ROWS.map((t) => t.k), perms.toolEnforcement)}</div>
           </div>
           <div className="table-wrap">
             <STable>
-              <thead><tr><th>도구</th><th style={{ textAlign: 'center' }}>admin</th><th style={{ textAlign: 'center' }}>operator</th><th style={{ textAlign: 'center' }}>viewer</th></tr></thead>
+              <thead><tr><th>도구</th><th>서버 집행</th><th style={{ textAlign: 'center' }}>admin</th><th style={{ textAlign: 'center' }}>operator</th><th style={{ textAlign: 'center' }}>viewer</th></tr></thead>
               <tbody>
-                {SPECIAL_TOOLS.filter((t) => !t.adminOnly).map((t) => (
-                  <tr key={t.k}>
-                    <td>{t.icon} {t.label} <span className="muted" style={{ fontSize: 11 }}>({t.k})</span></td>
-                    <td style={{ textAlign: 'center' }}><input type="checkbox" checked readOnly disabled title="admin은 항상 전체" /></td>
-                    <td style={{ textAlign: 'center' }}><input type="checkbox" checked={toolAllowedMx('operator', t.k)} onChange={() => toggleTool('operator', t.k)} /></td>
-                    <td style={{ textAlign: 'center' }}><input type="checkbox" checked={toolAllowedMx('viewer', t.k)} onChange={() => toggleTool('viewer', t.k)} /></td>
-                  </tr>
-                ))}
+                {TOOL_ROWS.map((t) => {
+                  // 서버가 실제로 막을 수 있는지 — /admin/permissions 의 toolEnforcement 를 그대로 표시한다.
+                  // 이 칸이 '서버 차단' 이 아니면 체크를 꺼도 API 직접 호출은 통과한다(무음 실패 방지).
+                  const en = enforcementOf(t.k, perms.toolEnforcement);
+                  const cls = en.level === LEVEL_SERVER ? 'green' : en.level === LEVEL_PARTIAL ? 'yellow' : 'gray';
+                  return (
+                    <tr key={t.k}>
+                      <td>{t.icon} {t.label} <span className="muted" style={{ fontSize: 11 }}>({t.k})</span></td>
+                      <td data-sort={en.level}><span className={`badge ${cls}`} style={{ fontSize: 11 }} title={en.title}>{en.badge}</span></td>
+                      <td style={{ textAlign: 'center' }}><input type="checkbox" checked readOnly disabled title="admin은 항상 전체" /></td>
+                      <td style={{ textAlign: 'center' }}><input type="checkbox" checked={toolAllowedMx('operator', t.k)} onChange={() => toggleTool('operator', t.k)} /></td>
+                      <td style={{ textAlign: 'center' }}><input type="checkbox" checked={toolAllowedMx('viewer', t.k)} onChange={() => toggleTool('viewer', t.k)} /></td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </STable>
           </div>

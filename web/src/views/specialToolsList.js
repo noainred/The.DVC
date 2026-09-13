@@ -69,7 +69,9 @@ export const TOOLS = [
   { k: 'topo3d', icon: '🌐', label: '구성도 (3D)', desc: '설정된 구성을 3D 네트워크로 — 줌인/아웃·회전·VM 펼치기' },
   { k: 'davinci-svc', icon: '🩺', label: '다빈치 서비스 점검', desc: '포탈 내부 서비스/수집기(vCenter·NSX·전력·지표·GPU·알림·백업·에이전트) 상태 한눈에' },
   { k: 'capacity-advisor', icon: '📊', label: '리소스 적정성 진단', desc: '포탈 서버(중앙+엣지)의 CPU·메모리·네트워크·디스크 상시 실측 — 1일/1주/1달 추이로 인프라 증설/감축 조언 (관리자)', adminOnly: true },
-  { k: 'svcmon-config', icon: '⚙️', label: 'Monitoring 설정', desc: 'Monitoring 대상·점검 항목을 CSV 로 가져오기/내보내기 (샘플 제공) · 대량 자동등록 · 점검 템플릿' },
+  // svcmon: /api/svcmon 전체가 svcmon 기능 권한 게이트(v2.506) 아래다 — perm 이 없으면 카드가 열리고
+  //         화면 전체가 403 이 된다(상단 'Monitoring' 탭과 같은 경계를 여기서도 유지).
+  { k: 'svcmon-config', icon: '⚙️', label: 'Monitoring 설정', desc: 'Monitoring 대상·점검 항목을 CSV 로 가져오기/내보내기 (샘플 제공) · 대량 자동등록 · 점검 템플릿', perm: 'svcmon' },
   { k: 'net-check', icon: '📡', label: '글로벌 네트워크 점검', desc: '전세계 vCenter·NSX 제어플레인 도달성·RTT + 네트워크 객체 요약' },
   { k: 'net-traffic', icon: '🔬', label: '네트워크 트래픽 분석', desc: '두 서버 간 tcpdump 캡처·분석(핸드셰이크·재전송·RST) + 로그 자체 장애 탐지' },
   { k: 'vmware-backup', icon: '🗃️', label: 'VMware 구성 백업', desc: '사이트의 수집 구성(호스트·VM·DS·네트워크·NSX) 스냅샷 내보내기' },

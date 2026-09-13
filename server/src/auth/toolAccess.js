@@ -22,8 +22,10 @@ import { roleToolsDenied } from './permissions.js';
  * 이름이 다른 것만 주의: deep-search→deepsearch, duplicate-ips→dupip, esxi-temp→esxitemp,
  * guest-os→guestos, network-check→net-check, rightsize→rightsizing, sanswitch→san-switch,
  * storage→storage-mon, thin-vms→thinvms, vm-finder→vmfinder.
- * 의도적 제외(도구 화면 전용이 아니거나 키가 불분명): ip-ping(VM 상세에서 사용), report,
- * service-check, vclogs, vmware-config.
+ * 의도적 제외(도구 화면 전용이 아니거나 키가 불분명): ip-ping(VM 상세에서 사용), vclogs.
+ * v2.506 에서 제외 목록에서 빠진 것: `report/*` 는 리포트별로 **두 세그먼트**를 보는 별도 표
+ * (TOOL_PATH2_KEYS)로 매핑했고, `service-check`·`vmware-config` 는 각각 한 화면 전용임을
+ * 확인해 이 표에 넣었다.
  */
 export const TOOL_PATH_KEYS = Object.freeze({
   'bm-storage': 'bm-storage',
@@ -100,7 +102,40 @@ export const TOOL_PATH2_KEYS = Object.freeze({
   'vm-track/ds-change-log': 'storage-track',
 });
 
-const stripExt = (seg) => String(seg || '').replace(/\.(csv|json|xlsx|xls|txt)$/i, '');
+/**
+ * 세그먼트 정규화 — 확장자 제거 + **소문자화**(v2.506, 적대적 검증 지적).
+ *
+ * ⚠ 소문자화가 없으면 이 게이트 전체가 무력화된다: Express 는 `case sensitive routing` 기본 false 라
+ * `/api/Tools/Ipam` 이 **라우트에는 그대로 도달**하는데, 표의 키는 전부 소문자여서 조회가 빗나가
+ * `toolKeyForPath` 가 null 을 돌려준다(= 검사 안 함). 대문자 한 글자로 거부목록을 지나간다.
+ * 라우팅이 대소문자를 무시하므로 소문자 정규화는 **과차단을 만들지 않는다** — 방향이 안전하다.
+ * (v2.500 C-1 이 `req.path ===` 정확 비교로 뚫렸던 것과 같은 계열의 실수다.)
+ */
+/**
+ * `/api/tools` **밖**에 있지만 **한 도구 화면만** 쓰는 전용 엔드포인트(v2.506 검증 반영).
+ *
+ * v2.506 초판은 이 둘을 `ENFORCE_OTHER_ROUTER`("각자 requirePerm/adminOnly 로 보호됨")로 적어
+ * 뒀는데, 실제로 열어 보니 **둘 다 기능 권한 게이트가 없었다** — `routes/api/searchNotes.js:11`
+ * `/search/nl` 과 `routes/api/inventory.js:332` `/top` 은 authMiddleware + requireEnrolled +
+ * 데이터 scope(`applyFilters`/`scopedVcenterIds`)만 지난다. 사유가 거짓이면 관리자가 '차단됨' 을
+ * 보고 막힌 줄 오인하는 v2.447 의 무음 실패가 그대로 재현된다.
+ *
+ * 그래서 문구만 고치지 않고 **실제로 막는다**: 두 경로는 각각 한 화면만 쓴다(확인:
+ * `/search/nl` → `web/src/views/tools/AiSearch.jsx:55`, `/top` → `web/src/views/Explore.jsx:59`)
+ * — 즉 오차단 위험이 없다. 여러 화면이 공유하는 경로(`/datastores` 등)는 여기에 넣지 말 것
+ * (`dsusage` 가 그래서 ENFORCE_SHARED 다).
+ */
+export const TOOL_EXACT_PATHS = Object.freeze({
+  '/search/nl': 'aisearch',
+  '/top': 'explore',
+});
+
+/** 전체 경로 정규화(정확 일치용) — 소문자 + 확장자 제거 + 끝 슬래시 제거. */
+const stripPath = (pathname) => {
+  const raw = String(pathname || '').split(/[?#]/)[0].toLowerCase().replace(/\/+$/, '');
+  return raw.replace(/\.(csv|json|xlsx|xls|txt)$/i, '') || '/';
+};
+const stripExt = (seg) => String(seg || '').replace(/\.(csv|json|xlsx|xls|txt)$/i, '').toLowerCase();
 
 /**
  * `/ipam.csv?x=1` · `ipam/settings` → 'ipam' · `/report/health` → 'daily-health'.
@@ -131,6 +166,42 @@ export function toolAccessIssue(role, pathname) {
   return { tool: key, reason: `이 기능(${key})에 대한 접근이 관리자 설정으로 차단되어 있습니다.` };
 }
 
+/**
+ * `/api/tools` 밖의 전용 엔드포인트용 — 전체 경로(api 마운트 기준)를 정확 일치로 본다.
+ * 접두 일치가 아니라 **정확 일치**다: `/top` 은 막되 `/top-something` 은 건드리지 않는다.
+ */
+export function exactToolAccessIssue(role, pathname) {
+  if (role === 'admin') return null;
+  const key = TOOL_EXACT_PATHS[stripPath(pathname)];
+  if (!key) return null;
+  const denied = roleToolsDenied(role);
+  if (!denied.includes(key)) return null;
+  return { tool: key, reason: `이 기능(${key})에 대한 접근이 관리자 설정으로 차단되어 있습니다.` };
+}
+
+/**
+ * 도구 게이트 미들웨어 팩토리(v2.506 검증 반영).
+ *
+ * 예전에는 이 6줄이 `routes/api.js` 안에 **인라인**으로 두 번 들어가 있었다. 그래서 회귀
+ * 테스트가 api.js 를 문자열로 grep 하는 수밖에 없었고, 미들웨어 순서가 바뀌거나 두 번째
+ * 마운트가 빠져도 테스트는 그대로 통과했다. 팩토리로 빼면 **실제 미들웨어를 express 앱에
+ * 마운트해 403 을 확인**할 수 있다(test/audit2506.test.js).
+ *
+ * @param {object} o
+ * @param {(req:any)=>string} o.roleOf  req → 역할. 인증 비활성 환경의 대체 역할 결정은 호출부
+ *   (routes/api.js)가 한다 — 이 모듈이 auth/auth.js 를 import 하면 순환이 생긴다.
+ * @param {(role:string,pathname:string)=>({tool:string,reason:string}|null)} [o.issueOf]
+ *   기본은 `/tools` 하위 경로용 `toolAccessIssue`. 전용 엔드포인트용은 `exactToolAccessIssue`.
+ */
+export function toolGate({ roleOf, issueOf = toolAccessIssue }) {
+  return function toolGateMiddleware(req, res, next) {
+    const issue = issueOf(roleOf(req), req.path);
+    if (!issue) return next();
+    // 403 본문 계약 — 프론트 ErrorBox 가 AccessDenied 로 자동 전환하는 근거(CLAUDE.md 프론트 규칙).
+    return res.status(403).json({ error: 'forbidden', requiredPerm: [`tool:${issue.tool}`], reason: issue.reason });
+  };
+}
+
 /* ──────────────────────────────────────────────────────────────────────────────
  * 집행 커버리지(v2.506) — "왜 이 도구는 서버가 못 막는가" 를 **선언으로 남긴다**
  *
@@ -156,10 +227,13 @@ export const ENFORCE_NO_API = 'no-api';               // 외부 링크이거나 
 /** 도구 키 → [분류, 사유]. 분류는 위 상수. */
 export const TOOL_ENFORCEMENT_NOTES = Object.freeze({
   // --- /api/tools 밖 라우터(각자 requirePerm/adminOnly 로 보호됨) ---
-  aisearch: [ENFORCE_OTHER_ROUTER, '/api/search/nl'],
-  explore: [ENFORCE_OTHER_ROUTER, '/api/top · /api/vcenters(인벤토리 조회 권한)'],
+  // aisearch·explore 는 v2.506 검증에서 **게이트가 없는 것으로 확인**되어 TOOL_EXACT_PATHS 로
+  // 실제 집행 대상이 됐다(위 표 주석) — 여기에 사유를 남기지 않는다(남기면 거짓 선언이 된다).
   'codex-check': [ENFORCE_OTHER_ROUTER, '/api/admin/codex-check(adminOnly)'],
-  dsusage: [ENFORCE_OTHER_ROUTER, '/api/datastores · /api/admin/datacenters(inv.datastores)'],
+  // ⚠ v2.506 검증 정정: 예전 사유는 '/api/datastores(inv.datastores)' 였는데 `inv:datastores` 는
+  //   memoJson **캐시 이름**이고(routes/api/inventory.js:305) 그 라우트에는 requirePerm 이 없다.
+  //   데이터 scope(applyFilters+scopeKey)만 걸린다. 게다가 대시보드·콘솔·V3 가 같이 쓰는 공용
+  //   경로라 도구 하나 때문에 막을 수 없다 → SHARED 로 정직하게 분류한다.
   'real-os': [ENFORCE_OTHER_ROUTER, '/api/admin/os-scan(adminOnly)'],
   nsx: [ENFORCE_OTHER_ROUTER, '/api/admin/nsx/managers(adminOnly)'],
   powermap: [ENFORCE_OTHER_ROUTER, '/api/insights/power-breakdown(insights 권한)'],
@@ -168,7 +242,7 @@ export const TOOL_ENFORCEMENT_NOTES = Object.freeze({
   'nic-speed': [ENFORCE_OTHER_ROUTER, '/api/admin/idrac/nic-speed(adminOnly)'],
   'nic-models': [ENFORCE_OTHER_ROUTER, '/api/admin/idrac/nic-models(adminOnly)'],
   topo3d: [ENFORCE_OTHER_ROUTER, '/api/insights/graph(insights 권한)'],
-  'capacity-advisor': [ENFORCE_OTHER_ROUTER, '/api/capacity/*'],
+  'capacity-advisor': [ENFORCE_OTHER_ROUTER, '/api/capacity/*(routes/capacity.js:22 capacityRouter.use(adminOnly))'],
   'svcmon-config': [ENFORCE_OTHER_ROUTER, "/api/svcmon/*(v2.506 부터 requirePerm('svcmon'))"],
   'net-traffic': [ENFORCE_OTHER_ROUTER, '/api/admin/net/*(adminOnly)'],
   roomtemp: [ENFORCE_OTHER_ROUTER, '/api/admin/room-temp(adminOnly)'],
@@ -176,12 +250,16 @@ export const TOOL_ENFORCEMENT_NOTES = Object.freeze({
   'mail-diag': [ENFORCE_OTHER_ROUTER, '/api/admin/mail(adminOnly)'],
   'dir-usage': [ENFORCE_OTHER_ROUTER, '/api/admin/dir-usage(adminOnly)'],
   shutdown: [ENFORCE_OTHER_ROUTER, '/api/admin/emergency-stop(adminOnly)'],
-  vmprovision: [ENFORCE_OTHER_ROUTER, '/api/admin/provision/*(vm.provision 권한)'],
+  // v2.506 검증 정정: 두 라우터로 갈린다 — 조회/미리보기는 /api/provision/*
+  //   (routes/api/provision.js:14 requirePerm('vm.provision')), 잡 생성·저장본 변경은
+  //   /api/admin/provision/*(routes/admin/opsSettings.js:158 adminOnly).
+  vmprovision: [ENFORCE_OTHER_ROUTER, "/api/provision/*(requirePerm('vm.provision')) · /api/admin/provision/*(adminOnly)"],
   'agent-scans': [ENFORCE_OTHER_ROUTER, '/api/admin/assignments(adminOnly)'],
   'login-fails': [ENFORCE_OTHER_ROUTER, '/api/admin/security/login-fails(adminOnly)'],
   'net-issues': [ENFORCE_OTHER_ROUTER, '/api/admin/security/net-issues(adminOnly)'],
 
   // --- 전용 엔드포인트가 없다(공유) ---
+  dsusage: [ENFORCE_SHARED, '/api/datastores 를 대시보드·콘솔·V3 가 함께 쓴다 — 이 도구 때문에 막으면 그 화면들이 같이 빈다. 하위 /api/admin/datacenters 는 adminOnly 로 보호됨'],
   vcversion: [ENFORCE_SHARED, "/api/tools/solutions 를 'solutions' 도구와 공유 — 분리하면 그 도구가 같이 막힌다"],
 
   // --- 부분 집행 ---
@@ -196,7 +274,7 @@ export const TOOL_ENFORCEMENT_NOTES = Object.freeze({
 
 /** 서버가 실제로 막을 수 있는 도구 키 집합(두 표의 값). */
 export function enforcedToolKeys() {
-  return new Set([...Object.values(TOOL_PATH_KEYS), ...Object.values(TOOL_PATH2_KEYS)]);
+  return new Set([...Object.values(TOOL_PATH_KEYS), ...Object.values(TOOL_PATH2_KEYS), ...Object.values(TOOL_EXACT_PATHS)]);
 }
 
 /**

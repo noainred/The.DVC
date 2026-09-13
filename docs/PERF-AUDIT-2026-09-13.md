@@ -82,20 +82,30 @@
 > 그 과정에서 이 문서의 서술 두 가지가 부정확했음을 확인했다(정정):
 > · "DNS 리바인딩 TOCTOU **5곳**" → 실제 **7곳**이었다. `horizon.js` 의 폴러 경로
 >   (`fetchHorizonLicenses`)는 실행 시점 가드가 **아예 없었고**, `relayProbe.js` 는 접속부가
->   4개(net/tls/https/http)로 단일 지점이 아니었다.
+>   4개(net/tls/https/http)로 단일 지점이 아니었다. 이후 적대적 검증에서 3곳이 더 드러났다
+>   (`upgrade/upgradeAgent.js` — 자체 dispatcher 를 넘겨 wanAgent 의 lookup 을 잃고 있었다,
+>   `collector/registry.js` — 토큰을 실은 호출이 lookup 없는 `globalThis.fetch` 였다,
+>   `relaycheck/checks.js` 2곳). 최종 배선 **11곳**
+>   (`grep -rn "lookup: ssrfLookup" server/src/`).
 > · "`toolsDenied` **41개** 미매핑" → UI 키와 경로 키를 비교한 수치였다. 실제로는 다수가
->   `/api/tools/*` 를 쓰지 않아 그 게이트의 **구조적 범위 밖**이었고(각자 `requirePerm`/`adminOnly`
->   로 보호됨), 같은 경로를 공유해 분리 집행이 불가능한 것도 있었다. 지금은 집행 49 + 부분 1 +
->   사유 선언 29 = 79 로 **미지 0** 이다.
+>   `/api/tools/*` 를 쓰지 않아 그 게이트의 **구조적 범위 밖**이었고, 같은 경로를 공유해 분리
+>   집행이 불가능한 것도 있었다. 지금 실측(`toolCoverage`): UI 도구 **79**개 기준 집행 **51** +
+>   부분 집행 **1** + 사유 선언 **27** = 79, **미지 0**. 매핑 표에 등재된 도구 키 자체는 52개다
+>   (UI 카드가 없는 내부 키 포함).
+> · ⚠ 초판(v2.506 첫 커밋)이 스스로 만든 오류 3건도 같은 검증에서 잡아 고쳤다:
+>   ① 경로 매칭이 대소문자를 구분해 `/api/Tools/Ipam` 으로 게이트를 우회할 수 있었다(Express
+>   기본 라우팅은 대소문자 무시), ② 멀티-A '전부 거부' 규칙이 사내 이중스택 이름을 하드 실패로
+>   만들었다, ③ `aisearch`·`explore` 의 '다른 경계로 보호됨' 사유가 **거짓**이었다(게이트가 없었다).
+>   상세는 `server/CLAUDE.md` 'v2.506' 절.
 
 
 | 항목 | 위치 | 왜 남겼나 |
 |------|------|-----------|
 | SSH 호스트키 미검증 | `proxy/sshExec.js` | `hostVerifier` 도입은 전 엣지의 known_hosts 배포 설계가 선행돼야 한다 |
-| ✅ **해결(v2.506)** DNS 리바인딩 TOCTOU | 위 4파일 + `util/resilientFetch.js` · `routes/admin/collectorsDc.js` | 연결 시점 `lookup` 훅(`util/ssrfLookup.js`)으로 7개 지점 일괄. 실제로는 5곳이 아니라 7곳이었다(본문 정정 참조) |
+| ✅ **해결(v2.506)** DNS 리바인딩 TOCTOU | 위 4파일 + `util/resilientFetch.js` · `upgrade/upgradeAgent.js` · `collector/registry.js` · `relaycheck/checks.js` | 연결 시점 `lookup` 훅(`util/ssrfLookup.js`)으로 일괄. 5곳이 아니라 **11곳**이었다(본문 정정 참조). DNS 조회 횟수는 줄지 않는다 — IP 리터럴 방어용 사전 가드를 남겼다 |
 | `/llm-test`·`PUT /llm-config` URL 무검증 | `routes/admin/deployLlm.js` | adminOnly 이지만 SSRF 가드는 붙여야 한다 |
 | ✅ **해결(v2.506)** 조회 권한 서버 미집행 | `index.js` · `auth/permissions.js` | `/api/svcmon` 에 `requirePerm('svcmon')` + 새 권한 키(operator 기본, viewer 제외) + 구버전 파일 가산 마이그레이션. `dashboard`·`inv.*` 자체의 전역 집행은 여전히 미해결 |
-| ✅ **해결(v2.506)** `toolsDenied` 미매핑 | `auth/toolAccess.js` | 두 세그먼트 매칭 + 미스매핑 1건 수정 + 전용 매핑 3건 → 집행 37→49개. 못 막는 것은 사유 선언(미지 0, 테스트로 고정) |
+| ✅ **해결(v2.506)** `toolsDenied` 미매핑 | `auth/toolAccess.js` · `routes/api.js` · `web/src/views/UserAdmin.jsx` | 두 세그먼트 매칭 + 미스매핑 1건 수정 + 전용 매핑 5건(`/tools` 밖 2건 포함) → 매핑 키 37→**52**개(UI 79개 중 집행 51 · 부분 1 · 사유 선언 27 · 미지 0). 대소문자 우회 수정. 못 막는 것은 사유 선언 + 화면에 '서버 집행' 배지 표시(미지 0, 실 express 앱으로 403 동작 검증) |
 | 상태변경 IPAM/`upgrade-tools`/`reconfig` 에 `requireRole` 없음 | `routes/api/ipamExport.js` 외 | `tools` 권한을 viewer 에 주면 쓰기가 열린다(권한 부여가 선행돼야 성립) |
 | 중앙 push 수신부 동기 `atomicWriteFileSync` | `central/storageEdge.js` 외 | 비동기 write→rename(`central/inventory.js` 패턴) 이식 필요 |
 | 잡 폴러 5종이 중앙↔엣지 요청의 88% | `pingWorker` 외 | RMA 롱폴 패턴으로 통합해야 하며 범위가 크다 |
