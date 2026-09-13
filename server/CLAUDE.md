@@ -393,3 +393,58 @@
   (8회/15분)·계정 전역(80회/15분)이 그대로 막는다. **이 분리를 없애 LOCKOUT_MS 로 되돌리지 말 것.**
 - **DB 파일은 예외 없이 `chmod 0600`**(`guestdisk/db.js`, S-5): v2.447 에서 12개 모듈에 일괄
   적용한 규약인데 v2.459 신규 파일만 빠져 있었다. 새 SQLite 모듈에도 반드시 넣을 것.
+
+## 2026-09-13 감사 미해결 3건 조치(v2.506) — 되돌리지 말 것
+
+`docs/PERF-AUDIT-2026-09-13.md` 4절에 '남은 미해결' 로 적어 둔 것 중 3건을 닫았다.
+회귀 테스트: `test/audit2506.test.js`(23건).
+
+- **`/api/svcmon` 은 `requirePerm('svcmon')` 로 게이트한다**(`index.js`, S1 N-2):
+  예전에는 `authMiddleware + requireEnrolled` 만 있어 **로그인한 아무 계정이나**
+  `GET /api/svcmon/state?limit=2000` 으로 전 법인 감시 대상의 host(내부 IP/FQDN)·점검 포트·
+  경로를 페이징할 수 있었다. 라우트 56개 중 읽기 6개(`/state`·`/edges`·`/edge-state`·
+  `/templates`·`/log`·`/log/windows`)가 무가드였고, 같은 라우터의 로그 **파일** 라우트는 이미
+  편집 권한을 요구하고 있었다(게이팅 비대칭). svcmon 에는 **vCenter scope 축이 없어** 범위 제한
+  계정도 전량을 본다 — 그래서 조회 자체에 권한이 필요하다.
+  · 엣지 수집은 `/api/central/svcmon-*`(개별 토큰)을 쓰므로 이 게이트와 무관하다(확인함).
+  · 프론트 탭 게이트(`web/src/App.jsx`)도 **같은 키**를 써야 한다 — 다른 키면 '메뉴는 보이는데
+    API 는 403' 이 되어 사용자가 장애로 오해한다. 예전 값은 `perm:'dashboard'`(전 역할 기본 보유)였다.
+- **권한 키를 새로 추가할 때는 `SCHEMA_VERSION` 을 올리고 `KEYS_ADDED_IN` 에 적을 것**
+  (`auth/permissions.js`, v2.506): `loadMatrix` 는 저장된 행을 그대로 쓰고(`m.operator ?? DEFAULT`),
+  행은 '부여된 키의 배열' 이라 **"그 키가 없던 파일" 과 "관리자가 거부한 키" 를 구분할 수 없다.**
+  그래서 카탈로그에 키만 추가하면 권한 UI 를 한 번이라도 저장한 현장에서 그 키가 조용히 '거부' 가
+  되어 **operator 가 업그레이드만으로 기존 기능을 잃는다**. `migrateRow` 가 낮은 버전 파일에만
+  **기본값에 있는 키를 가산**하고(관리자가 내린 결정은 건드리지 않는다), 저장 시 버전을 찍는다.
+  `migrateRow` 는 순수 함수로 export 되어 있다 — 테스트로 고정할 수 있게 한 것이니 되돌리지 말 것.
+- **DNS 리바인딩은 `lookup` 훅으로 막는다 — 판정은 `util/ssrfLookup.js` 하나로**(S1 #2):
+  `ssrfBlockReasonResolved(url)` 로 검사한 **뒤 다시 호스트명으로 접속**하면 그 사이에 DNS 가
+  바뀌어(TTL 0 리바인딩) 가드를 지나간다. 검사는 맞지만 **검사한 값으로 접속하지 않는 것**이 결함이다.
+  · `net.connect`·`tls.connect`·`https.request`·`http.request`·undici `Agent` **전부 `lookup`
+    옵션을 받는다.** 검증을 lookup 안에서 하면 소켓이 실제로 쓸 주소를 그 순간 검사하므로
+    **TOCTOU 창이 0** 이고, SNI(`servername`)·Host·인증서 검증은 원 호스트명을 그대로 쓴다.
+    DNS 조회도 '가드용 + 접속용' 2회에서 1회로 줄어 "타임아웃 없는 DNS 를 핫패스에 넣지 말 것"
+    규칙과 충돌하지 않는다. 참조 구현은 `uagmon/lib/uag.js:30-55`(IP 바꿔치기 방식)이며,
+    접속 수단이 5가지로 갈리는 `server/src` 에서는 수단마다 SNI·Host 를 손으로 붙이다 한 곳을
+    빠뜨리면 조용히 검증이 약해지므로 lookup 훅으로 일반화했다.
+  · 배선 지점: `util/resilientFetch.js`(wanAgent — dispatcher 미지정 전 호출부를 한 번에 덮는다)·
+    `alerts.js`(webhookAgent)·`horizon/horizon.js`(dispatcher)·`vcenter/relayProbe.js`(**4곳** —
+    net/tls/https/http)·`security/certMonitor.js`. relayProbe 를 2곳만 고치면 나머지 2단계가
+    TOCTOU 로 남는다(실제로 그렇게 만들었다가 검증에서 잡혔다).
+  · **한계(실측 확인)**: IP 리터럴 URL 은 lookup 이 불리지 않는다. 그래서 기존 동기
+    `ssrfBlockReason(url)` 을 **없애면 안 된다** — 이 훅은 대체가 아니라 '이름이 IP 로 바뀌는
+    순간' 을 덮는 보완이다. 타이머를 `unref()` 하지 말 것(유휴 루프에서 타이머가 안 울려
+    콜백이 영원히 안 불린다 — 연결 무한 대기. 실측으로 확인했다).
+- **도구 거부목록은 '막을 수 있는 것' 과 '왜 못 막는지' 를 모두 선언한다**(`auth/toolAccess.js`, S1 #5):
+  게이트는 `api.use('/tools', …)`(`routes/api.js`) 에만 걸려 있어, 자기 API 가 `/api/tools/*` 가
+  아닌 도구는 구조적으로 범위 밖이다. 감사가 "41개 미매핑" 이라 한 것의 실체가 이것이다.
+  · **두 세그먼트 매칭**(`TOOL_PATH2_KEYS`)을 추가했다 — `/tools/report/*` 한 세그먼트가 리포트
+    도구 10개를 서비스해 첫 세그먼트만 보는 매처로는 구분할 수 없었다(10개 전부 미집행).
+  · `capacity-forecast` 세그먼트는 **엉뚱한 키**(`capacity-forecast`)로 매핑돼 있었다 — 그 경로를
+    부르는 화면은 `forecast` 다. 거부하면 다른 화면이 막히고 정작 그 도구는 안 막혔다.
+  · **공유 엔드포인트를 한 도구에 묶지 말 것** — `/tools/groups`(특수기능 헤더 공용 콤보)나
+    `/tools/ip-ping`(VM 상세에서도 쓴다)을 묶으면 그 도구를 거부한 역할의 **다른 화면이 깨진다.**
+  · 못 막는 도구는 `TOOL_ENFORCEMENT_NOTES` 에 **분류 + 사유**로 선언하고, `/admin/permissions`
+    응답의 `toolEnforcement` 로 화면에 내려보낸다(관리자가 '차단됨' 을 보고 막힌 줄 오인하는
+    무음 실패를 없애는 것이 이 모듈의 존재 이유인데 41개에 남아 있었다).
+  · `toolCoverage().undeclared` 가 **0** 임을 테스트가 고정한다 — 새 도구를 추가하면서 매핑도
+    선언도 빠뜨리면 CI 가 깨진다. 이 테스트를 지우면 구멍이 다시 조용히 넓어진다.

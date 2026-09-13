@@ -12,6 +12,7 @@ import tls from 'node:tls';
 import { loadRegistry as loadVcRegistry } from '../vcenter/registry.js';
 import { loadRegistry as loadNsxRegistry } from '../nsx/registry.js';
 import { ssrfBlockReasonResolved } from '../collector/registry.js';
+import { ssrfLookup } from '../util/ssrfLookup.js';   // v2.506: DNS 리바인딩(TOCTOU) 차단
 
 const INTERVAL_MS = 12 * 3600_000;
 const TIMEOUT_MS = 8000;
@@ -37,7 +38,9 @@ function probeCert(host, port = 443, timeoutMs = TIMEOUT_MS) {
     let settled = false;
     const done = (r) => { if (settled) return; settled = true; try { sock.destroy(); } catch { /* */ } resolve(r); };
     const sock = tls.connect(
-      { host, port, servername: host, rejectUnauthorized: false, minVersion: 'TLSv1', ciphers: 'DEFAULT@SECLEVEL=0', timeout: timeoutMs },
+      // v2.506: lookup 으로 리바인딩 차단. 인증서 만료 감시는 폴러라 매 점검마다 별도 DNS 조회를
+      // 추가하지 않는 것이 중요하다 — 이 방식은 접속용 조회 1회 안에서 검사한다.
+      { host, port, servername: host, lookup: ssrfLookup, rejectUnauthorized: false, minVersion: 'TLSv1', ciphers: 'DEFAULT@SECLEVEL=0', timeout: timeoutMs },
       () => {
         const c = sock.getPeerCertificate();
         if (!c || !c.valid_to) return done({ ok: false, error: '인증서를 읽을 수 없습니다.' });

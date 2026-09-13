@@ -39,7 +39,9 @@ const TABS = [
   { id: 'overview', label: 'Overview' }, // 랜딩(항상 노출)
   { id: 'summary', label: 'Summary', perm: 'dashboard' },
   { id: 'vcenters', label: 'Platform', perm: 'dashboard' },
-  { id: 'svcmon', label: 'Monitoring', perm: 'dashboard' },
+  // v2.506: 서버가 `requirePerm('svcmon')` 로 강제하므로 프론트 게이트도 같은 키를 쓴다 —
+  // 'dashboard'(전 역할 기본 보유)로 두면 메뉴는 보이는데 API 가 403 이 되는 사고가 난다.
+  { id: 'svcmon', label: 'Monitoring', perm: 'svcmon' },
   // 탐색·랭킹은 '특수 기능' 하위로 이동(v2.274, specialToolsList 'explore' 카드).
   { id: 'hosts', label: 'VM호스트', perm: 'inv.hosts' },
   { id: 'vms', label: '가상머신', perm: 'inv.vms' },

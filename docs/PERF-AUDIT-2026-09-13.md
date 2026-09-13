@@ -73,15 +73,29 @@
 - SSH 호스트키 미검증·DNS 리바인딩 TOCTOU 5곳·`/llm-test` SSRF·조회 권한 서버 미집행·`toolsDenied`
   41개 미매핑·CSP 기본 비활성 등 **직전 감사의 미해결 8건은 여전히 유효**하다(아래 4절).
 
-## 4. 남은 미해결 항목 (이번에 고치지 않았다 — 정직 기록)
+## 4. 남은 미해결 항목 (정직 기록)
+
+> **2026-09-13 추가(v2.506)**: 아래 표 중 3건을 닫았다 — 조회 권한 서버 미집행(svcmon) ·
+> DNS 리바인딩 TOCTOU · `toolsDenied` 미매핑. 해당 행에 ✅ 를 달고 조치 내용을 적었다.
+> 조치 상세는 `server/CLAUDE.md` 의 'v2.506' 절, 회귀 테스트는 `server/test/audit2506.test.js`.
+>
+> 그 과정에서 이 문서의 서술 두 가지가 부정확했음을 확인했다(정정):
+> · "DNS 리바인딩 TOCTOU **5곳**" → 실제 **7곳**이었다. `horizon.js` 의 폴러 경로
+>   (`fetchHorizonLicenses`)는 실행 시점 가드가 **아예 없었고**, `relayProbe.js` 는 접속부가
+>   4개(net/tls/https/http)로 단일 지점이 아니었다.
+> · "`toolsDenied` **41개** 미매핑" → UI 키와 경로 키를 비교한 수치였다. 실제로는 다수가
+>   `/api/tools/*` 를 쓰지 않아 그 게이트의 **구조적 범위 밖**이었고(각자 `requirePerm`/`adminOnly`
+>   로 보호됨), 같은 경로를 공유해 분리 집행이 불가능한 것도 있었다. 지금은 집행 49 + 부분 1 +
+>   사유 선언 29 = 79 로 **미지 0** 이다.
+
 
 | 항목 | 위치 | 왜 남겼나 |
 |------|------|-----------|
 | SSH 호스트키 미검증 | `proxy/sshExec.js` | `hostVerifier` 도입은 전 엣지의 known_hosts 배포 설계가 선행돼야 한다 |
-| DNS 리바인딩 TOCTOU | `vcenter/relayProbe.js` · `security/certMonitor.js` · `horizon/horizon.js` · `alerts.js` | 해석 IP 로 직접 접속 + TLS/Host 핀(uagmon 패턴) 이식 필요 — 4곳 각각 커넥터가 달라 범위가 크다 |
+| ✅ **해결(v2.506)** DNS 리바인딩 TOCTOU | 위 4파일 + `util/resilientFetch.js` · `routes/admin/collectorsDc.js` | 연결 시점 `lookup` 훅(`util/ssrfLookup.js`)으로 7개 지점 일괄. 실제로는 5곳이 아니라 7곳이었다(본문 정정 참조) |
 | `/llm-test`·`PUT /llm-config` URL 무검증 | `routes/admin/deployLlm.js` | adminOnly 이지만 SSRF 가드는 붙여야 한다 |
-| 조회 권한(`dashboard`·`inv.*`) 서버 미집행 | 전역 | `/api/svcmon` 전체가 기능 권한 게이트 없이 열려 있다(viewer 1계정으로 전 법인 감시 대상 host·포트 열람) |
-| `toolsDenied` 41개 미매핑 | `auth/toolAccess.js` | UI 78개 vs 서버 37개 |
+| ✅ **해결(v2.506)** 조회 권한 서버 미집행 | `index.js` · `auth/permissions.js` | `/api/svcmon` 에 `requirePerm('svcmon')` + 새 권한 키(operator 기본, viewer 제외) + 구버전 파일 가산 마이그레이션. `dashboard`·`inv.*` 자체의 전역 집행은 여전히 미해결 |
+| ✅ **해결(v2.506)** `toolsDenied` 미매핑 | `auth/toolAccess.js` | 두 세그먼트 매칭 + 미스매핑 1건 수정 + 전용 매핑 3건 → 집행 37→49개. 못 막는 것은 사유 선언(미지 0, 테스트로 고정) |
 | 상태변경 IPAM/`upgrade-tools`/`reconfig` 에 `requireRole` 없음 | `routes/api/ipamExport.js` 외 | `tools` 권한을 viewer 에 주면 쓰기가 열린다(권한 부여가 선행돼야 성립) |
 | 중앙 push 수신부 동기 `atomicWriteFileSync` | `central/storageEdge.js` 외 | 비동기 write→rename(`central/inventory.js` 패턴) 이식 필요 |
 | 잡 폴러 5종이 중앙↔엣지 요청의 88% | `pingWorker` 외 | RMA 롱폴 패턴으로 통합해야 하며 범위가 크다 |

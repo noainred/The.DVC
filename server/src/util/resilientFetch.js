@@ -14,6 +14,7 @@
  */
 
 import { Agent } from 'undici';
+import { ssrfLookup } from './ssrfLookup.js';   // v2.506: DNS 리바인딩(TOCTOU) 차단
 
 // TLS 검증은 기본 ON(보안). 과거 이 값은 `WAN_TLS_INSECURE === 'false' ? true : false`로,
 // 이름과 반대로 '미설정=검증 off'였다 — 중앙↔엣지 구간은 수집 토큰·배포 사용자 자격증명이
@@ -27,8 +28,13 @@ export const WAN_TLS_VERIFY = process.env.WAN_TLS_INSECURE !== 'true';
 if (!WAN_TLS_VERIFY) {
   console.warn('[wan] ⚠ WAN_TLS_INSECURE=true — 중앙↔엣지 HTTPS 인증서 검증이 비활성입니다(자체서명 엣지 호환용). 가능하면 사설 CA를 신뢰시키고 이 옵션을 끄세요.');
 }
+// v2.506(감사 S1 #2): 기본 디스패처에 DNS 리바인딩 차단 lookup 을 단다. 이 에이전트를 쓰는
+// 전 호출부(수집 서버 연결 테스트·동기화 등 dispatcher 미지정 경로 전부)가 한 번에 보호된다.
+// `ipBlockReason` 은 공인 IP 와 RFC1918 을 허용하고 루프백/링크로컬/메타데이터/우회표기만
+// 막으므로, GitHub 업그레이드 다운로드·중앙↔엣지 같은 정상 흐름에는 영향이 없다
+// (루프백을 치는 resilientFetch 호출부가 없음을 grep 으로 확인했다).
 const wanAgent = new Agent({
-  connect: { rejectUnauthorized: WAN_TLS_VERIFY },
+  connect: { rejectUnauthorized: WAN_TLS_VERIFY, lookup: ssrfLookup },
   connectTimeout: Number(process.env.WAN_CONNECT_TIMEOUT_MS) || 20_000,
   keepAliveTimeout: 10_000,
   keepAliveMaxTimeout: 30_000,
