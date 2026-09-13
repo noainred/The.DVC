@@ -51,7 +51,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
   - **시계열 prune 스로틀 + ts 인덱스**: 매 샘플 DELETE 스캔 금지 — N틱마다 1회(store 10틱·metrics 20틱·idrac.poller 10틱). `DELETE WHERE ts<?`는 `ts` 단독 인덱스가 있어야 풀스캔을 피한다(복합 `(server_id,ts)`로는 못 탐).
   - **ETag/304**(`util/compress.js`): res.json 래퍼가 본문 SHA-1로 약한 ETag를 발급하고 If-None-Match 일치 시 304(본문 0바이트). 이 래퍼는 res.end로 직접 종료해 Express 기본 ETag가 동작하지 않으므로, 응답 경로 수정 시 ETag 발급을 없애면 프론트 `pollFetch`의 304 지원이 통째로 죽는다(과거 실제 그 상태였음 — 15초 폴 × 30초 스냅샷이면 절반이 무변동 재전송).
   - **SQLite PRAGMA**: idrac/metrics/logs DB는 `WAL + synchronous=NORMAL + busy_timeout=3000`(단건 insert 5ms→0.01ms 실측). **ipam.db만 예외** — 외부 프로그램이 직접 읽는 공유 파일이라 저널 기본(DELETE) 유지 + busy_timeout만. WAL 전환 금지(외부 리더의 -wal/-shm 호환 미확인).
-  - **전력 latest 인메모리 캐시**(`idrac/db.js withLatestCache`): latestAll(GROUP BY MAX)은 테이블 풀스캔이라(90일 수렴 시 수억 행) 매 30초 3회 호출이 초 단위 블로킹이었음. 기동 시 1회 시드 후 쓰기 경로에서 O(1) 갱신 — **getDb() 래퍼를 우회한 직접 쓰기 금지**(캐시가 낡음). 전력 대시보드 24h 집계는 60초 캐시(`idrac/service.js aggCache`).
+  - **전력 latest 인메모리 캐시**(`idrac/db.js withLatestCache`): latestAll(GROUP BY MAX)은 테이블 풀스캔이라(90일 수렴 시 수억 행) 매 30초 3회 호출이 초 단위 블로킹이었음. 기동 시 1회 시드 후 쓰기 경로에서 O(1) 갱신 — **getDb() 래퍼를 우회한 직접 쓰기 금지**(캐시가 낡음). 전력 대시보드 24h 집계는 `power_hourly` 롤업이 담당한다(`idrac/db.js`) — v2.503 정정: 여기 적혀 있던 `idrac/service.js aggCache` 60초 캐시는 **v2.292 에 삭제됐다**(코드 주석이 직접 그렇게 밝히고 있는데 이 문서만 낡아 있었다).
   - **대량 export 청크 패턴**(`routes/api.js gpuSeriesExport`): 대량 시계열 조회는 5만 행 ts 윈도우 청크 + 청크 사이 `setImmediate` 양보 + 행 상한(`GPU_EXPORT_MAX_ROWS` 기본 30만). 1M행 동기 dump는 이벤트 루프 ~10초 정지 실측 — 새 export 추가 시 동일 패턴 필수.
   - **웹 폴링 뷰 오류 처리**: 데이터 보유 중 일시 폴링 오류 1회로 화면 전체를 ErrorBox로 갈아치우지 않는다 — `if (error && !data)`일 때만 전체 오류, 그 외엔 배너(고RTT에서 대시보드 깜빡임 방지). 스코프(파라미터) 변경 시 usePolling이 직전 데이터를 비워 이전 스코프 데이터 표시를 막는다.
   - **대량 SQLite 쓰기 오프로딩**(`ipam/writeWorker.js`, v2.215): 레저 동기화는 DELETE+수천 행
@@ -65,6 +65,32 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     ds_series 는 첫 관측 + 1GB 이상 변화만(UNIQUE(slot, ds_id) upsert) 기록하고 조회 시 step
     펼침(stepFill). 기준선 원칙: 첫 관측 이전 값은 소급 표시 금지(null/'—'), 구버전 행(ds 열 0)을
     증감 기준으로 쓰지 말 것(v2.351 '+2만 TB' 오표시 실제 발생). prune 용 `ts` 단독 인덱스 유지.
+  - **계측 히스토그램은 측정 대상의 실제 분포를 덮어야 한다**(`perf/stats.js BUCKETS_MS`, v2.503):
+    v2.498 의 첫 버킷 경계가 50ms 였는데 이 서버 API 는 거의 전부 스냅샷 집계라 50ms 미만이다 —
+    전 표본이 0번 버킷에 몰려 p50·p95·p99 가 **모두 maxMs 로 붕괴**했다(실측: `/datastores` p50=p95=max=2,
+    `/vms` 25, `/hosts` 13). 표가 '측정하고 있다' 는 착시만 주고 튜닝 정보를 주지 않았다.
+    1·2·5·10·25ms 경계를 추가했고 이 경계들을 빼면 붕괴가 재발한다. 카운터는 메모리에만 있어
+    (설정만 `perf-monitor.json`) 경계를 바꿔도 마이그레이션 대상이 없다.
+  - **표 정렬 비교기는 `Intl.Collator` 를 한 번 만들어 재사용**(`components/sortableText.js`, v2.503):
+    `localeCompare(x, undefined, {...})` 는 호출마다 옵션을 다시 해석한다. 정렬은 비교가 O(N log N)
+    이라 그 비용이 그대로 곱해진다 — 1,100행 실측 **50.1ms → 2.2ms(22배)**. `STable` 은 정렬 결과를
+    `useMemo` 로 들고 있다(폴링 틱마다 전량 재정렬하던 것) — 단, **훅은 조기 return 위**에 둔다.
+  - **중앙 push 는 gzip + 한도 확인**(v2.503): 스토리지·PDU push 가 gzip·청크 없이 **기본 1MB** 한도로
+    올라가고 있었다. 413 은 `resilientFetch` 재시도 대상이 아니라 그 법인 데이터가 **조용히 전량
+    소실**된다(guest-disk 가 v2.466 에 겪은 사고). 새 push 경로를 만들면 ① gzip ② 중앙 `BIG_JSON`
+    등록 여부 ③ 413 로그를 함께 확인할 것. `express.json` 의 limit 은 **압축 해제 후 길이**라
+    gzip 만으로는 413 이 해결되지 않는다.
+  - **응답 캐시 LRU 는 vCenter 수보다 커야 한다**(`util/snapCache.js MAX_PER_NAME`, v2.503): 화면 대부분이
+    `?vcenterId=` 로 스코프를 나누므로, 상한이 vCenter 수(28, 30+ 확장 예정)보다 작으면 법인별 화면을
+    동시에 보는 사용자 몇 명으로 LRU 가 스래싱해 v2.447 이 고친 '히트율 0%' 가 재발한다. 기본 32.
+  - **prune 스로틀은 기동 첫 틱을 피한다**(v2.453 규칙 — v2.503 에서 `capacity/sampler.js`·`logs/poller.js`
+    두 곳의 재발을 수정): `% N === 1` 과 `tick++ % N === 0`(tick 초기값 0)은 **첫 샘플/첫 폴에서 즉시 참**
+    이다. 보존기간을 줄이고 재시작하면 첫 틱이 그 차액을 한 번에 지운다. `(++tick % N) === 0` 으로 쓸 것.
+  - **N+1 을 '전 키 1쿼리' 로 합치기 전에 반드시 재 볼 것**(v2.503 실측): `/tools/capacity-forecast` 의
+    DS별 조회를 `historyAll` 형태로 합쳤더니 **2.3배 느렸다**(1,563ms → 3,586ms). `samples_hourly` PK 가
+    `(metric,k,h)` 라 키별 조회는 인덱스 선탐색이지만 `WHERE metric=? AND h>=? GROUP BY k,b` 는 파티션
+    전체를 훑고 temp b-tree 로 정렬한다. 그래서 memo + `setImmediate` 양보를 택했다. 스키마를 보지 않고
+    '합치면 빠르다' 고 단정하지 말 것.
   - (구 '미해결 후속' 2건 — 적용 완료) 전력 대시보드 시간당 롤업 테이블은 `power_hourly`
     (idrac/db.js, 적재 트랜잭션 내 증분 upsert)로, 위임 잡 인출 2단계 확인응답(claim→ack)은
     v2.290(central/captureJobs.js — claim 기한 + 재수확 reap + 재시도 상한, idracScanJobs 패턴

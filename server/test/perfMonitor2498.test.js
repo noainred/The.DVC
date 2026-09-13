@@ -18,22 +18,61 @@ const HL = await import('../src/perf/hangLog.js');
 const M = await import('../src/perf/monitor.js');
 
 /* ── 순수 통계 ───────────────────────────────────────────────────── */
+/** 경계값 → 그 경계가 상한인 버킷 인덱스(테스트가 배열 위치를 굳히지 않게). */
+const idxOf = (boundaryMs) => S.BUCKETS_MS.indexOf(boundaryMs);
+
 test('bucketIndex/percentileFromBuckets — 경계와 ∞ 버킷', () => {
   assert.equal(S.bucketIndex(0), 0);
-  assert.equal(S.bucketIndex(50), 0);
-  assert.equal(S.bucketIndex(51), 1);
+  // 첫 경계는 '가장 빠른 버킷의 상한' 이다 — 값을 굳히지 않고 배열에서 읽는다.
+  assert.equal(S.bucketIndex(S.BUCKETS_MS[0]), 0);
+  assert.equal(S.bucketIndex(S.BUCKETS_MS[0] + 0.5), 1);
   assert.equal(S.bucketIndex(60_000), S.BUCKETS_MS.length - 1);
   assert.equal(S.bucketIndex(60_001), S.BUCKETS_MS.length);
   assert.equal(S.bucketIndex(NaN), 0);
   assert.equal(S.percentileFromBuckets(new Array(S.BUCKET_N).fill(0), 95), null, '표본 0 이면 null(0 으로 채우지 않는다)');
   const counts = new Array(S.BUCKET_N).fill(0);
-  counts[0] = 90; counts[5] = 10; // 90건 ≤50ms, 10건 1000~2000ms
+  counts[idxOf(50)] = 90; counts[idxOf(2000)] = 10; // 90건 25~50ms, 10건 1000~2000ms
   const p50 = S.percentileFromBuckets(counts, 50);
   const p95 = S.percentileFromBuckets(counts, 95);
   assert.ok(p50 <= 50, `p50=${p50}`);
   assert.ok(p95 > 1000 && p95 <= 2000, `p95=${p95}`);
   const inf = new Array(S.BUCKET_N).fill(0); inf[S.BUCKET_N - 1] = 3;
   assert.equal(S.percentileFromBuckets(inf, 99), 60_000, '∞ 버킷은 마지막 경계를 하한으로 돌려준다');
+});
+
+/**
+ * v2.503 회귀 고정 — **50ms 미만 구간의 해상도**.
+ *
+ * v2.498 의 첫 경계는 50ms 였다. 이 서버의 API 는 거의 전부 스냅샷 집계라 50ms 미만이므로
+ * 모든 표본이 0번 버킷에 몰렸고, `summarizeRoute` 의 '관측 최댓값 상한' 때문에 p50·p95·p99 가
+ * 전부 maxMs 로 같아졌다 — 표가 '측정하고 있다' 는 착시만 주고 튜닝 정보를 주지 않았다.
+ * 아래 두 검사는 그 상태로 되돌아가면 실패한다.
+ */
+test('버킷 해상도 — 50ms 미만에서도 백분위가 구분된다(v2.503)', () => {
+  assert.ok(S.BUCKETS_MS[0] <= 1, `첫 경계가 ${S.BUCKETS_MS[0]}ms — 1ms 이하여야 한다`);
+  for (const b of [2, 5, 10, 25]) {
+    assert.ok(S.BUCKETS_MS.includes(b), `${b}ms 경계가 없으면 밀리초대 구분이 무너진다`);
+  }
+
+  // 2ms 짜리 라우트와 25ms 짜리 라우트가 서로 다른 버킷에 들어가야 한다.
+  assert.notEqual(S.bucketIndex(2), S.bucketIndex(25));
+
+  // ① 라우트끼리 구분된다 — 2ms 라우트와 25ms 라우트의 p50 이 같으면 표가 쓸모없다.
+  const fast = S.newRouteEntry(); for (let i = 0; i < 100; i++) S.addSample(fast, { ms: 2 });
+  const slow = S.newRouteEntry(); for (let i = 0; i < 100; i++) S.addSample(slow, { ms: 25 });
+  const f = S.summarizeRoute('/datastores', fast);
+  const w = S.summarizeRoute('/vms', slow);
+  assert.ok(f.p50Ms < w.p50Ms, `p50 이 구분되지 않는다(${f.p50Ms} vs ${w.p50Ms})`);
+
+  // ② 한 라우트 안에서 꼬리가 보인다 — 90건 2ms + 10건 40ms 면 p50 과 p95 가 달라야 한다.
+  //    v2.498 버킷에서는 둘 다 40(=maxMs)으로 붕괴했다.
+  const e = S.newRouteEntry();
+  for (let i = 0; i < 90; i++) S.addSample(e, { ms: 2 });
+  for (let i = 0; i < 10; i++) S.addSample(e, { ms: 40 });
+  const sum = S.summarizeRoute('/hosts', e);
+  assert.ok(sum.p50Ms <= 2, `p50=${sum.p50Ms} — 대다수가 2ms 인데 더 크면 안 된다`);
+  assert.ok(sum.p95Ms > sum.p50Ms, `p95(${sum.p95Ms}) 가 p50(${sum.p50Ms}) 과 같으면 붕괴 상태다`);
+  assert.ok(sum.p95Ms <= sum.maxMs, '백분위는 관측 최댓값을 넘지 않는다');
 });
 
 test('routeKeyOf — 템플릿 우선, 없으면 식별자 마스킹(카디널리티 유계)', () => {

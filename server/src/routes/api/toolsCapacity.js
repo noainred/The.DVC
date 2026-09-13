@@ -1240,15 +1240,36 @@ api.get('/tools/capacity/disk-history', requirePerm('tools'), async (req, res) =
   res.json({ ok: true, vcenterId: vcId || 'all', days, bucketMs, collectedSince, synthesized, points, breakdown, analysis });
 });
 
-api.get('/tools/capacity-forecast', requirePerm('tools'), async (req, res) => {
-  const snap = store.get();
+/**
+ * 데이터스토어 용량 예측 — GET /tools/capacity-forecast
+ *
+ * ⚠️ v2.503 성능 수정(측정 근거): 이 라우트는 **DS 하나마다 시계열 조회 2회**(metrics `history()` 는
+ * 시간버킷이면 `hourlyMin` + `bucketHourly`)를 동기로 돈다. `node:sqlite` 는 동기 API 뿐이라
+ * 루프 전체가 **이벤트 루프를 한 번도 양보하지 않는다**. 1,100 DS × 120일 시간버킷(3.17M행)을
+ * 실제로 만들어 재면 **요청당 1,563ms 하드블록**이었고(선형회귀 비용은 별도), memo 도 없어
+ * 새로고침·다중 사용자마다 그대로 반복됐다(바로 위 형제 엔드포인트들은 전부 memoJson 을 쓴다).
+ *
+ * 두 가지를 같이 건다:
+ *  1. `memoJson` — 스냅샷 리비전 + URL + scope 키로 30초 memo. 반복 조회 비용이 0 이 된다.
+ *  2. `YIELD_EVERY` 마다 `setImmediate` 양보 — 총 CPU 는 그대로지만 1.5초 하드블록이 사라져
+ *     같은 시간대의 다른 요청·폴러가 진행한다(`gpuSeriesExport`·`chunkedPrune` 과 같은 원칙).
+ *
+ * ⚠️ **'전 키 1쿼리 병합' 로 바꾸지 말 것** — 직관과 달리 **2.3배 느렸다**(실측 1,563ms → 3,586ms).
+ * `samples_hourly` PK 가 `(metric,k,h)` 라 키별 조회는 인덱스 선탐색이지만,
+ * `WHERE metric=? AND h>=? GROUP BY k,b` 는 metric 파티션 전체를 훑고 temp b-tree 로 정렬한다.
+ */
+const FORECAST_YIELD_EVERY = 100;   // DS 이만큼마다 이벤트 루프에 양보
+
+api.get('/tools/capacity-forecast', requirePerm('tools'), (req, res) => memoJson(req, res, 'capacity-forecast', async (snap) => {
   const vcId = req.query.vcenterId;
   const allowed = scopedVcenterIds(req.user, snap);
   const dss = (snap.datastores || []).filter((d) => (!allowed || allowed.has(d.vcenterId)) && (!vcId || d.vcenterId === vcId));
   let db = null; try { db = await getMetricsDb(); } catch { /* */ }
   const mock = snap.source === 'mock';
   const items = [];
+  let i = 0;
   for (const d of dss) {
+    if (++i % FORECAST_YIELD_EVERY === 0) await new Promise((r) => { setImmediate(r); });
     let pts = [];
     if (db) { try { pts = db.history('ds_usedgb', d.id, Date.now() - 120 * 86_400_000, 86_400_000, 200); } catch { /* */ } }
     let slope = null; let synthesized = false; // GB/day
@@ -1262,6 +1283,6 @@ api.get('/tools/capacity-forecast', requirePerm('tools'), async (req, res) => {
     items.push({ id: d.id, name: d.name, vcenterId: d.vcenterId, type: d.type, capacityGB: d.capacityGB, usedGB: d.usedGB, freeGB, usagePct: d.usagePct, growthGBperDay: slope == null ? null : Number(slope.toFixed(2)), daysToFull, synthesized });
   }
   items.sort((a, b) => (a.daysToFull ?? Infinity) - (b.daysToFull ?? Infinity));
-  res.json({ scope: vcId || 'all', mock, items });
-});
+  return { scope: vcId || 'all', mock, items };
+}, { ttlMs: 30_000, extraKey: scopeKey(req.user, store.get()) }));
 }

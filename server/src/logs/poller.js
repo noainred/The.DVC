@@ -92,7 +92,10 @@ export async function pollLogsOnce() {
     });
     for (const rows of perVc) { db.insertMany(rows); collected += rows.length; }
     // prune/용량 점검은 매 폴이 아니라 N폴마다 1회(DELETE 스캔·크기 계산 비용 절감).
-    if (tick++ % PRUNE_EVERY === 0) {
+    // ⚠ v2.503: `tick++ % N === 0` 은 tick 초기값이 0 이라 **첫 폴에서 즉시 참**이었다 —
+    // metrics/sampler.js 가 금지한 v2.453 패턴과 같다(보존기간을 365→90일로 줄이고 재시작하면
+    // 기동 30초 뒤 첫 폴이 수백만 행 삭제 + VACUUM 을 동기로 돈다). 전위 증가로 바꾼다.
+    if ((++tick % PRUNE_EVERY) === 0) {
       if (s.retentionDays > 0) {
         const removed = db.prune(Date.now() - s.retentionDays * DAY);
         if (removed) console.log(`[vclogs] 보관기간(${s.retentionDays}일) 초과 ${removed}건 정리`);
@@ -102,13 +105,21 @@ export async function pollLogsOnce() {
       if (s.maxSizeMB > 0) {
         const limit = s.maxSizeMB * 1024 * 1024;
         let size = db.sizeBytes(), guard = 0, dropped = 0;
+        // ⚠ v2.503: 행 수는 **루프 밖에서 1회만** 센다. 예전에는 매 반복 `db.meta().count` 를 불렀는데
+        // meta() 는 COUNT/MIN/MAX + `GROUP BY vcenterId` 로 **풀스캔 2회**다 — 상한 50회 × 2 = 최악
+        // 100회 전체 스캔이 한 틱 안에서 동기로 돌았다(삭제 자체의 스캔은 별도). 삭제한 만큼 빼가며
+        // 추정하면 되고(바로 아래 `size` 가 이미 같은 방식이다), 카운트가 조금 낡아도 영향은
+        // '이번 회차에 지우는 행 수' 뿐이다. 행 수만 필요하므로 GROUP BY 가 없는 `rowCount()` 를 쓴다.
+        let cnt = typeof db.rowCount === 'function' ? db.rowCount() : db.meta().count;
         while (size > limit && guard++ < 50) {
-          const cnt = db.meta().count;
           if (cnt <= 0) break;
           const n = db.pruneOldest(Math.max(500, Math.floor(cnt * 0.1)));
           if (!n) break;
-          dropped += n; size -= n * 220; // 행당 대략치로 추정(매 회 statSync/ VACUUM 회피)
+          dropped += n; cnt -= n; size -= n * 220; // 행당 대략치로 추정(매 회 statSync/ VACUUM 회피)
         }
+        // VACUUM 은 파일 전체 재작성(동기)이다. 그래도 부르는 이유: 삭제만으로는 파일 크기가 줄지
+        // 않아 `sizeBytes()` 기준 루프가 다음 주기에도 계속 참이 되어 **로그를 전부 지운다**.
+        // 루프 '밖에서 1회' 규약은 유지한다.
         if (dropped) { db.vacuum(); console.log(`[vclogs] 용량 제한(${s.maxSizeMB}MB) 초과 → 오래된 ${dropped}건 정리`); }
       }
     }

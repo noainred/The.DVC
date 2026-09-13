@@ -22,6 +22,7 @@ import { bumpFleetRev } from '../insights/fleetRev.js';
 import { removeInventory } from './invCache.js';
 import { clearSensorSeries } from './sensorStore.js';
 import { parseCsvRows } from '../util/csv.js';
+import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js'; // v2.503: 접속처 변경 시 저장 비밀 폐기(공용 판정)
 
 // 삭제된 서버의 파생 캐시 정리 — 안 하면 인벤토리(디스크 영속)와 센서 시계열(메모리, 서버당
 // 최대 1440샘플×64센서)이 프로세스 수명 내내 남아 서버 등록/삭제 반복 시 무한 증식한다.
@@ -123,7 +124,17 @@ function normalize(body, existing = null) {
     hostNames,
     enabled: body.enabled != null ? Boolean(body.enabled) : (e.enabled != null ? e.enabled : true),
   };
-  return [entry, null];
+
+  // ⚠ 보안 불변조건(v2.503, 감사 S1 #6) — **접속처가 바뀌면 저장 비밀을 승계하지 않는다.**
+  // 판정은 `util/secretCarry.js` 하나로 한다(각자 구현하면 다음 스토어에서 또 빠진다 — v2.500 H1/H2/H4).
+  // 이 파일은 v2.500 에서 '추정' 으로만 남아 있던 나머지 스토어 중 하나이고, 이번에 코드로 확인됐다:
+  // `{host:'https://vc.attacker.example', password:''}` 로 저장하면 host 만 바뀌고 저장 비밀번호가
+  // 그대로 남아, 다음 수집 주기에 **운영 계정·비밀번호가 그 호스트로 평문 전송**된다.
+  // v2.480 의 "연결 테스트는 host 를 저장값으로 고정" 은 테스트 라우트만 막으므로 저장 1회로 우회된다.
+  // 버린 키는 호출부가 `droppedSecrets` 로 받아 '비밀번호를 다시 입력하세요' 를 안내한다.
+  const droppedSecrets = existing && accessMoved(existing, body, ['host', 'username'])
+    ? dropCarriedSecrets(entry, body, ['password']) : [];
+  return [entry, null, droppedSecrets];
 }
 
 export function addServer(body) {
@@ -140,11 +151,11 @@ export function updateServer(id, body) {
   const list = loadRegistry();
   const idx = list.findIndex((s) => s.id === id);
   if (idx === -1) return { ok: false, reason: `없는 서버: ${id}` };
-  const [entry, err] = normalize({ ...body, id }, list[idx]);
+  const [entry, err, droppedSecrets] = normalize({ ...body, id }, list[idx]);
   if (err) return { ok: false, reason: err };
   list[idx] = entry;
   saveRegistry(list);
-  return { ok: true, server: redact(entry) };
+  return { ok: true, server: redact(entry), droppedSecrets };
 }
 
 export function removeServer(id) {

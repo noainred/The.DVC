@@ -9,6 +9,7 @@ import { recordPortalLoginFail } from '../security/loginStore.js';
 import { loadSessionSecurity, singleSessionRequired } from '../security/securitySettings.js';
 import { newSessionId, setActiveSession } from '../auth/sessions.js';
 import { checkLoginAllowed, recordLoginFailure, recordLoginSuccess } from '../security/loginRateLimit.js';
+import { clientIp } from '../util/rateLimit.js';   // v2.503: 잠금 출발지 판정을 전역 레이트리밋과 통일(trust proxy 규약)
 
 export const authRouter = Router();
 
@@ -42,9 +43,13 @@ authRouter.post('/login', async (req, res) => {
     return res.status(400).json({ error: 'username and password are required' });
   }
   const ip = (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').toString().split(',')[0];
-  // 잠금 키는 클라이언트가 위조할 수 없는 '실제 peer 주소'를 쓴다(X-Forwarded-For는 스푸핑으로
-  // 계정별 잠금을 무력화할 수 있으므로 키에 사용하지 않는다 — 감사 로그에는 XFF를 그대로 남김).
-  const gateIp = (req.socket?.remoteAddress || ip || '').toString();
+  // 잠금 키의 출발지는 `clientIp(req)` 로 정한다(v2.503, 감사 S2): **`trust proxy` 가 설정된
+  // 배포에서만** XFF 기반 `req.ip` 를 쓰고, 아니면 실제 peer 를 쓴다 — XFF 를 무조건 믿으면
+  // 스푸핑으로 잠금을 무력화할 수 있고, 반대로 peer 로 고정하면 리버스 프록시 뒤에서 **전 사용자가
+  // 한 키를 공유**해 v2.500 의 계정 무관 카운터가 전체 로그인 잠금으로 번진다.
+  // 전역 레이트리밋(util/rateLimit.js)과 같은 규약을 쓴다(v2.428 에서 같은 결함을 고쳤다).
+  // 감사 로그에는 XFF 원문(`ip`)을 그대로 남긴다.
+  const gateIp = clientIp(req);
 
   // 무차별 대입 방어: peer+계정 잠금 상태면 인증 시도 자체를 막는다.
   const gate = checkLoginAllowed(gateIp, username);

@@ -8,7 +8,7 @@ import path from 'node:path';
 import { toolKeyForPath, TOOL_PATH_KEYS } from '../src/auth/toolAccess.js';
 import { morefOf } from '../src/vcenter/registry.js';
 import { resolveInstaller } from '../src/agent/deploy.js';
-import { snapMemo, snapCacheClear, snapCacheStats, weakEtag } from '../src/util/snapCache.js';
+import { snapMemo, snapCacheClear, snapCacheStats, weakEtag, MAX_PER_NAME } from '../src/util/snapCache.js';
 
 // ── S2: 도구별 접근 서버 집행 ────────────────────────────────────────────────
 test('S2: 경로 → 도구 키 매핑(확장자·하위경로 포함), 매핑 없는 경로는 검사 대상 아님', () => {
@@ -104,10 +104,15 @@ test('B14: compute() 가 undefined 를 돌려줘도 캐시가 동작한다', asy
 
 test('T6: 이름당 보관 수는 상한을 넘지 않는다(LRU 축출)', async () => {
   snapCacheClear();
-  for (let i = 0; i < 40; i++) await snapMemo('lru', `k${i}`, 60_000, () => Promise.resolve(i));
+  // 상한 값 자체는 모듈에서 읽는다 — v2.503 에서 12→32 로 올렸다(운영 vCenter 28개보다 작아
+  // 법인별 화면을 동시에 보는 사용자가 13명만 돼도 LRU 가 스래싱했다). 고정하는 성질은 '상한이
+  // 있다' 는 것이지 특정 숫자가 아니다.
+  const N = MAX_PER_NAME + 8;
+  for (let i = 0; i < N; i++) await snapMemo('lru', `k${i}`, 60_000, () => Promise.resolve(i));
   const st = snapCacheStats().find((x) => x.name === 'lru');
-  assert.ok(st.keys <= 12, `상한 12 이내여야 한다(실제 ${st.keys})`);
+  assert.ok(st.keys <= MAX_PER_NAME, `상한 ${MAX_PER_NAME} 이내여야 한다(실제 ${st.keys})`);
   assert.ok(st.keys >= 2);
+  assert.ok(MAX_PER_NAME >= 30, `운영 vCenter 수(28, 30+ 확장 예정)보다 커야 한다(현재 ${MAX_PER_NAME})`);
 });
 
 test('T6: weakEtag/sendCached 는 그대로 동작한다(ETag/304 회귀 방지)', () => {

@@ -16,6 +16,10 @@ function dbPath() {
   return path.join(dir, 'vcenter-logs.db');
 }
 
+// `meta()`(수집 기간·vCenter별 건수) memo 수명. 이 호출은 풀스캔 2회라 행 수에 비례하고,
+// 로그 화면이 페이지를 넘길 때마다 반복된다(v2.503). 헤더 한 줄이 최대 이만큼 낡을 수 있다.
+const META_TTL_MS = Math.max(1_000, Math.min(300_000, Number(process.env.LOGS_META_TTL_MS) || 30_000));
+
 let impl = null;
 let ready = null;
 
@@ -49,7 +53,11 @@ function initSqlite() {
     const lastTsStmt = db.prepare('SELECT MAX(ts) mx FROM events WHERE vcenterId=?');
     const prune = db.prepare('DELETE FROM events WHERE ts < ?');
     const metaStmt = db.prepare('SELECT COUNT(*) n, MIN(ts) mn, MAX(ts) mx FROM events');
+    const rowCountStmt = db.prepare('SELECT COUNT(*) n FROM events');
+    let metaCache = null;                       // { at, v } — 아래 meta() 주석 참조(v2.503)
     const vcStmt = db.prepare('SELECT vcenterId, COUNT(*) n, MAX(ts) mx FROM events GROUP BY vcenterId');
+    // 용량 정리 루프가 반복 호출한다 — 매 회 prepare 하면 파싱·계획 수립이 반복된다(v2.503).
+    const pruneOldestStmt = db.prepare('DELETE FROM events WHERE rowid IN (SELECT rowid FROM events ORDER BY ts ASC LIMIT ?)');
     const powerStmt = db.prepare("SELECT entity, type, MAX(ts) AS ts FROM events WHERE vcenterId=? AND type IN ('VmPoweredOffEvent','VmPoweredOnEvent') GROUP BY entity, type"); // idx_events_power
     const build = (where, params) => ({ where, params });
     function filterSql(f) {
@@ -75,10 +83,29 @@ function initSqlite() {
       // 청크 간 중복/누락될 수 있다(정렬이 비결정적) — CSV 청크 내보내기·UI 페이징 안정성용.
       query: (f = {}, limit = 200, offset = 0) => { const { where, params } = filterSql(f); return db.prepare(`SELECT vcenterId,ts,severity,type,user,entity,message FROM events ${where} ORDER BY ts DESC, rowid DESC LIMIT ? OFFSET ?`).all(...params, limit, offset); },
       count: (f = {}) => { const { where, params } = filterSql(f); return Number(db.prepare(`SELECT COUNT(*) n FROM events ${where}`).get(...params)?.n || 0); },
-      meta: () => { const r = metaStmt.get(); const vcs = vcStmt.all().map((x) => ({ vcenterId: x.vcenterId, count: Number(x.n), lastTs: Number(x.mx) })); return { count: Number(r?.n || 0), firstTs: r?.mn || null, lastTs: r?.mx || null, vcenters: vcs }; },
-      prune: (beforeTs) => { const r = prune.run(beforeTs); return Number(r?.changes || 0); },
+      // 행 수만 — `meta()` 는 GROUP BY vcenterId 까지 돌아 **풀스캔이 2회**다. 용량 정리 루프처럼
+      // 개수만 필요한 곳이 meta() 를 부르면 그 절반이 순수 낭비다(v2.503).
+      rowCount: () => Number(rowCountStmt.get()?.n || 0),
+      /**
+       * 수집 기간·vCenter별 건수. **풀스캔 2회**(COUNT/MIN/MAX + GROUP BY)라 호출 비용이 행 수에 비례한다.
+       * v2.503: 로그 화면이 페이지를 넘길 때마다 이것을 다시 불러(필터와 무관하게 항상 전체 스캔)
+       * 4.5M행 기준 페이지마다 수백 ms 가 들었다. 화면 헤더의 '수집 기간' 한 줄은 초 단위로 최신일
+       * 이유가 없으므로 짧은 TTL 로 memo 한다. 쓰기 시 무효화하지 않는 것은 의도다 — 30초 폴러가
+       * 매 주기 insert 하므로 무효화하면 캐시가 사실상 없는 것과 같다. 최대 `META_TTL_MS` 만큼
+       * 낡을 수 있고 그 오차는 '방금 들어온 로그가 헤더 건수에 늦게 반영된다' 뿐이다.
+       */
+      meta: () => {
+        const now = Date.now();
+        if (metaCache && now - metaCache.at < META_TTL_MS) return metaCache.v;
+        const r = metaStmt.get();
+        const vcs = vcStmt.all().map((x) => ({ vcenterId: x.vcenterId, count: Number(x.n), lastTs: Number(x.mx) }));
+        const v = { count: Number(r?.n || 0), firstTs: r?.mn || null, lastTs: r?.mx || null, vcenters: vcs };
+        metaCache = { at: now, v };
+        return v;
+      },
+      prune: (beforeTs) => { const r = prune.run(beforeTs); metaCache = null; return Number(r?.changes || 0); },
       sizeBytes: () => { try { return fs.statSync(DB_PATH).size; } catch { return 0; } },
-      pruneOldest: (n) => { const r = db.prepare('DELETE FROM events WHERE rowid IN (SELECT rowid FROM events ORDER BY ts ASC LIMIT ?)').run(Math.max(1, n)); return Number(r?.changes || 0); },
+      pruneOldest: (n) => { const r = pruneOldestStmt.run(Math.max(1, n)); metaCache = null; return Number(r?.changes || 0); },
       vacuum: () => { try { db.exec('VACUUM'); } catch { /* */ } },
       path: DB_PATH,
       close: () => { try { db.close(); } catch { /* */ } },

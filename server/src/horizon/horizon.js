@@ -17,6 +17,7 @@ import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 import { describeError } from '../util/errors.js';
 import { ssrfBlockReason, ssrfBlockReasonResolved } from '../collector/registry.js';
+import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js'; // v2.503: 접속처 변경 시 저장 비밀 폐기(공용 판정)
 
 const FILE = path.join(config.configDir, 'horizon.json');
 // 사내 Horizon은 사설 인증서가 일반적 — 기본은 TLS 검증 생략, HORIZON_TLS_VERIFY=true로 강제 가능(NSX와 동일 패턴).
@@ -61,7 +62,17 @@ function normalize(body, existing = null) {
     timeoutMs: Math.max(0, Math.round(Number(body.timeoutMs ?? e.timeoutMs) || 0)) || 15_000,
   };
   if (!entry.password) return [null, 'password는 필수입니다.'];
-  return [entry, null];
+
+  // ⚠ 보안 불변조건(v2.503, 감사 S1 #6) — **접속처가 바뀌면 저장 비밀을 승계하지 않는다.**
+  // 판정은 `util/secretCarry.js` 하나로 한다(각자 구현하면 다음 스토어에서 또 빠진다 — v2.500 H1/H2/H4).
+  // 이 파일은 v2.500 에서 '추정' 으로만 남아 있던 나머지 스토어 중 하나이고, 이번에 코드로 확인됐다:
+  // `{host:'https://vc.attacker.example', password:''}` 로 저장하면 host 만 바뀌고 저장 비밀번호가
+  // 그대로 남아, 다음 수집 주기에 **운영 계정·비밀번호가 그 호스트로 평문 전송**된다.
+  // v2.480 의 "연결 테스트는 host 를 저장값으로 고정" 은 테스트 라우트만 막으므로 저장 1회로 우회된다.
+  // 버린 키는 호출부가 `droppedSecrets` 로 받아 '비밀번호를 다시 입력하세요' 를 안내한다.
+  const droppedSecrets = existing && accessMoved(existing, body, ['host', 'username', 'domain'])
+    ? dropCarriedSecrets(entry, body, ['password']) : [];
+  return [entry, null, droppedSecrets];
 }
 
 export function upsertHorizon(body) {
@@ -69,12 +80,12 @@ export function upsertHorizon(body) {
   const id = String(body.id || '').trim();
   const idx = list.findIndex((s) => s.id === id);
   // 수정 시 비번을 비우면 normalize가 기존 비번을 물려받는다(신규만 password 필수 오류).
-  const [entry, err] = normalize(body, idx >= 0 ? list[idx] : null);
+  const [entry, err, droppedSecrets] = normalize(body, idx >= 0 ? list[idx] : null);
   if (err) return { ok: false, reason: err };
   if (idx >= 0) list[idx] = entry; else list.push(entry);
   saveHorizon(list);
   cache.delete(id); // 자격증명 변경 즉시 반영
-  return { ok: true, server: redactHorizon(entry) };
+  return { ok: true, server: redactHorizon(entry), droppedSecrets };
 }
 
 export function removeHorizon(id) {

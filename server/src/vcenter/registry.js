@@ -16,6 +16,7 @@ import { VCenterClient } from './restClient.js';
 import { describeError } from '../util/errors.js';
 import { geocode } from './geocode.js';
 import { config } from '../config.js';
+import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js'; // v2.503: 접속처 변경 시 저장 비밀 폐기(공용 판정)
 
 // User registry lives in CONFIG_DIR (default app/server/config) so it can be
 // kept outside the app dir (e.g. /etc/vmware-portal) to survive upgrades.
@@ -99,7 +100,17 @@ function normalize(body, existing = null) {
     location: { city, country, region, lat, lon },
     enabled, pollIntervalSec, timeoutMs, collectMode, maintenance,
   };
-  return [entry, null];
+
+  // ⚠ 보안 불변조건(v2.503, 감사 S1 #6) — **접속처가 바뀌면 저장 비밀을 승계하지 않는다.**
+  // 판정은 `util/secretCarry.js` 하나로 한다(각자 구현하면 다음 스토어에서 또 빠진다 — v2.500 H1/H2/H4).
+  // 이 파일은 v2.500 에서 '추정' 으로만 남아 있던 나머지 스토어 중 하나이고, 이번에 코드로 확인됐다:
+  // `{host:'https://vc.attacker.example', password:''}` 로 저장하면 host 만 바뀌고 저장 비밀번호가
+  // 그대로 남아, 다음 수집 주기에 **운영 계정·비밀번호가 그 호스트로 평문 전송**된다.
+  // v2.480 의 "연결 테스트는 host 를 저장값으로 고정" 은 테스트 라우트만 막으므로 저장 1회로 우회된다.
+  // 버린 키는 호출부가 `droppedSecrets` 로 받아 '비밀번호를 다시 입력하세요' 를 안내한다.
+  const droppedSecrets = existing && accessMoved(existing, body, ['host', 'username'])
+    ? dropCarriedSecrets(entry, body, ['password']) : [];
+  return [entry, null, droppedSecrets];
 }
 
 export function addVcenter(body) {
@@ -116,11 +127,11 @@ export function updateVcenter(id, body) {
   const list = loadRegistry();
   const idx = list.findIndex((v) => v.id === id);
   if (idx === -1) return { ok: false, reason: `없는 vCenter: ${id}` };
-  const [entry, err] = normalize({ ...body, id }, list[idx]);
+  const [entry, err, droppedSecrets] = normalize({ ...body, id }, list[idx]);
   if (err) return { ok: false, reason: err };
   list[idx] = entry;
   saveRegistry(list);
-  return { ok: true, vcenter: redact(entry) };
+  return { ok: true, vcenter: redact(entry), droppedSecrets };
 }
 
 export function removeVcenter(id) {

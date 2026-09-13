@@ -11,7 +11,7 @@
  * 정렬은 화면(엘리먼트) 재배열이라 서버·상태를 건드리지 않고, 데이터가 갱신돼도 마지막 정렬이 유지된다.
  * 셀에 컴포넌트가 있으면 텍스트 자식 → value/pct/label 순으로 값을 찾고, 정확한 값을 원하면 td 에 `data-sort` 를 준다.
  */
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { headerSortable, sortChildren, nextSortState } from './sortableText.js';
 
 const ARROW = { asc: '▲', desc: '▼' };
@@ -22,6 +22,26 @@ export function STable({ sortable = true, children, ...rest }) {
   const kids = React.Children.toArray(children);
   const thead = sortable ? kids.find((c) => React.isValidElement(c) && c.type === 'thead') : null;
   const tbody = sortable ? kids.find((c) => React.isValidElement(c) && c.type === 'tbody') : null;
+
+  /**
+   * v2.503 성능: 정렬이 켜져 있으면 **매 렌더** 전량 재정렬이었다. 이 화면들은 15초 폴링으로
+   * 리렌더되므로 데이터가 그대로여도 틱마다 비용을 다시 냈다(1,100행 실측 — Collator 수정 전
+   * 52.6ms, 수정 후 2.5ms. 그래도 공짜는 아니다). tbody 자식 참조가 그대로면 결과를 재사용한다.
+   * 의존성이 참조 동일성이므로, 부모가 새 엘리먼트를 만들면(폴링으로 같은 값이 다시 와도) 재정렬한다
+   * — 정확성을 캐시보다 앞에 둔다. 같은 렌더 안의 중복 계산과 정렬과 무관한 상태 변경에서의
+   * 재정렬은 이것으로 사라진다.
+   *
+   * ⚠ **훅은 조기 return 위에 있어야 한다**(루트 CLAUDE.md 프론트 회귀 방지 — 아래 `if (!thead …)`
+   * 세 개보다 반드시 앞. 뒤로 옮기면 렌더 간 훅 개수가 달라져 React #310 으로 화면 전체가 크래시한다).
+   * 그래서 tbody 가 없을 수도 있는 시점이라 옵셔널 체이닝으로 읽는다. 자체 정렬 표(selfSorted)는
+   * `setSort` 가 연결되지 않아 `sort` 가 영원히 null 이므로 여기서 계산이 일어나지 않는다.
+   */
+  const tbodyKids = tbody?.props?.children;
+  const sortedKids = useMemo(
+    () => (sort && tbodyKids !== undefined ? sortChildren(tbodyKids, sort.col, sort.dir) : null),
+    [sort, tbodyKids],
+  );
+
   if (!thead || !tbody) return <table {...rest}>{children}</table>;
 
   const headKids = React.Children.toArray(thead.props.children);
@@ -49,7 +69,7 @@ export function STable({ sortable = true, children, ...rest }) {
   });
   const newLast = React.cloneElement(lastRow, {}, newThs);
   const newThead = React.cloneElement(thead, {}, headKids.map((r) => (r === lastRow ? newLast : r)));
-  const newTbody = sort ? React.cloneElement(tbody, {}, sortChildren(tbody.props.children, sort.col, sort.dir)) : tbody;
+  const newTbody = sort ? React.cloneElement(tbody, {}, sortedKids) : tbody;
   const out = kids.map((c) => (c === thead ? newThead : c === tbody ? newTbody : c));
   return <table {...rest}>{out}</table>;
 }
