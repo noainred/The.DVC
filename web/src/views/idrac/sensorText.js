@@ -81,3 +81,88 @@ export function latestTempRows(sensors) {
 
 /** 온도 색(기존 tempColor 규약과 동일: 40℃↑ 빨강 · 32℃↑ 주황). */
 export const tempColorOf = (c) => (c == null ? 'var(--text-faint)' : c >= 40 ? 'var(--red)' : c >= 32 ? 'var(--amber)' : 'var(--green)');
+
+/* ── 온도 장기 추이(v2.504) ──────────────────────────────────────────────────
+ * 사용자 요청: "idrac 에서 조사하는 온도를 차트로 보이게 해줘"(참고 화면은 '특수 기능 › ESXi 온도'
+ * 의 `5년 추이`). 기간·집계 단위 조작을 그 화면과 똑같이 맞추고, 판정·문구는 여기 순수 함수에 둔다
+ * (웹 테스트는 node 환경이라 컴포넌트 렌더 테스트가 불가 — 회귀는 여기서 고정한다).
+ */
+
+/** 기간 버튼(ESXi 온도 차트와 동일한 표). */
+export const TREND_RANGES = [[1, '1일'], [7, '1주'], [30, '1달'], [365, '1년'], [1830, '5년']];
+/** 집계 단위 버튼. */
+export const TREND_BUCKETS = [['auto', '자동'], ['minute', '분'], ['hour', '시간'], ['day', '일']];
+
+/** 계열(종류) → 화면 이름·색. `max` 는 항상 있고 나머지는 상세 적재를 켠 경우에만 온다. */
+export const TREND_KINDS = [
+  { key: 'max', label: '최고', color: '#f87171' },
+  { key: 'cpu', label: 'CPU', color: '#fbbf24' },
+  { key: 'exhaust', label: '배기', color: '#fb923c' },
+  { key: 'inlet', label: '흡기', color: '#22d3ee' },
+];
+
+/**
+ * 응답 → 차트에 넣을 행 배열(순수).
+ *
+ * 여러 계열의 타임스탬프를 한 행으로 합친다. 버킷이 같으면 ts 가 정확히 같으므로 Map 으로 묶는다.
+ * **없는 값은 넣지 않는다**(undefined) — 0 으로 채우면 '급냉' 으로 보인다(roomTempSeries 와 같은 규약).
+ *
+ * @returns {{rows:Array, kinds:Array<{key,label,color}>, points:number}}
+ */
+export function trendRows(hist, { fmt = (ts) => String(ts) } = {}) {
+  const series = hist?.series || {};
+  const kinds = TREND_KINDS.filter((k) => Array.isArray(series[k.key]) && series[k.key].length);
+  const byTs = new Map();
+  for (const k of kinds) {
+    for (const p of series[k.key]) {
+      const ts = Number(p?.ts);
+      if (!Number.isFinite(ts)) continue;
+      let row = byTs.get(ts);
+      if (!row) { row = { ts, t: fmt(ts) }; byTs.set(ts, row); }
+      if (p.avg != null) row[k.key] = p.avg;
+      if (p.max != null) row[`${k.key}_max`] = p.max;
+    }
+  }
+  const rows = [...byTs.values()].sort((a, b) => a.ts - b.ts);
+  return { rows, kinds, points: rows.length };
+}
+
+/**
+ * 차트를 그릴 수 없을 때의 사유(순수). null 이면 그린다.
+ * **원인을 단정하지 않는다** — v2.493 규칙: '조회 실패' 와 '수집 0' 과 '기능 비활성' 은 서로 다르다.
+ */
+export function trendEmptyReason(hist, { loading = false } = {}) {
+  if (loading) return null;
+  if (!hist) return { kind: 'none', text: '온도 추이를 아직 불러오지 않았습니다.' };
+  if (hist.error) return { kind: 'error', text: `온도 추이를 불러오지 못했습니다: ${hist.error}` };
+  if (hist.enabled === false) {
+    return { kind: 'disabled', text: '서버별 온도 시계열 적재가 꺼져 있습니다(IDRAC_TEMP_SERIES=false). 켜면 다음 수집부터 쌓입니다.' };
+  }
+  const { points } = trendRows(hist);
+  if (points === 0) {
+    return { kind: 'empty', text: '이 기간에 저장된 온도 표본이 없습니다. 시계열은 수집 주기마다 쌓이므로, 기능을 켠 시점 이후부터 표시됩니다.' };
+  }
+  if (points === 1) {
+    // 점 1개로 선을 그리면 '변화 없음' 처럼 보인다 — 없는 추이를 지어내지 않는다(v2.493 규칙).
+    return { kind: 'short', text: '표본이 1개뿐이라 추이 선을 그릴 수 없습니다(표본이 2개 이상 쌓이면 표시됩니다).' };
+  }
+  return null;
+}
+
+/**
+ * 기준선 안내 — 첫 관측 시각이 요청 구간보다 늦으면 그 사실을 밝힌다.
+ * (추적 시작 이전 구간을 사용자가 '온도가 없었다' 로 오해하지 않게 한다.)
+ */
+export function trendBaselineNote(hist, days) {
+  const first = Number(hist?.firstTs);
+  if (!Number.isFinite(first) || first <= 0) return '';
+  const since = Date.now() - Math.max(1, Number(days) || 1) * 86_400_000;
+  if (first <= since) return '';
+  return `이 서버의 온도 수집은 ${new Date(first).toLocaleString('ko-KR')} 부터입니다 — 그 이전 구간은 비어 있습니다.`;
+}
+
+/** 상세(흡기·배기·CPU) 계열이 꺼져 있을 때의 안내(켜는 방법을 함께 알린다). */
+export function trendDetailNote(hist) {
+  if (!hist || hist.detail !== false) return '';
+  return '흡기·배기·CPU 를 따로 보려면 서버에서 IDRAC_TEMP_SERIES_DETAIL=true 로 상세 적재를 켜세요(저장 행 수가 약 4배가 됩니다).';
+}

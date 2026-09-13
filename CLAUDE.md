@@ -91,6 +91,17 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     `(metric,k,h)` 라 키별 조회는 인덱스 선탐색이지만 `WHERE metric=? AND h>=? GROUP BY k,b` 는 파티션
     전체를 훑고 temp b-tree 로 정렬한다. 그래서 memo + `setImmediate` 양보를 택했다. 스키마를 보지 않고
     '합치면 빠르다' 고 단정하지 말 것.
+  - **서버별 시계열을 새로 만들 때는 계열 수를 먼저 계산할 것**(`idrac/serverTempSeries.js`, v2.504):
+    서버별 적재는 (대상 수 × 계열 수 × 24 × 365) 행/년 이다. iDRAC 온도 추이는 사용자 요청으로
+    추가했지만 **기본은 서버당 1계열**(`idractemp_max`)로 뒀다 — 965 서버 ≈ 연 845만 행으로, 이미
+    쓰고 있는 `temp_host`(ESXi 655 호스트 ≈ 연 574만 행)와 같은 규모다. 흡기·배기·CPU 를 더하면
+    4배(연 3,380만 행)라 `IDRAC_TEMP_SERIES_DETAIL=true` 옵트인으로만 켜진다. 시간당 롤업은
+    `(metric,k,hour)` upsert 라 **샘플 주기를 줄여도 행 수가 줄지 않는다** — 계열 수가 전부다.
+    결측 종류는 행을 만들지 않고(0 은 '급냉' 으로 보인다), 15분 이상 지난 표본은 적재하지 않는다
+    (죽은 서버의 마지막 값을 매 분 다시 쓰면 장기 차트가 평탄선이 된다 — v2.387 실제 사례).
+  - **키 하나의 첫/마지막 관측은 `metaKey`(MIN/MAX)로**(`metrics/db.js`, v2.504): `meta(metric)` 의
+    `COUNT(*)` 는 그 지표 파티션 전체를 훑는다(v2.503 감사 지적). 기준선 표시처럼 건수가 필요 없는
+    곳에서 `meta()` 를 부르지 말 것.
   - (구 '미해결 후속' 2건 — 적용 완료) 전력 대시보드 시간당 롤업 테이블은 `power_hourly`
     (idrac/db.js, 적재 트랜잭션 내 증분 upsert)로, 위임 잡 인출 2단계 확인응답(claim→ack)은
     v2.290(central/captureJobs.js — claim 기한 + 재수확 reap + 재시도 상한, idracScanJobs 패턴

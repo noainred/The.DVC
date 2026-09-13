@@ -8,17 +8,101 @@
 //
 // 컴팩트 후 이어받기 메모: views/idrac/ 디렉터리는 v2.292 에서 IdracAdmin 분할로 생성 —
 // IdracDetailModal(HardwareTools 전용)·ScanJobLogModal·IdracScanJobs·IdracScanRanges(셸이 조립).
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson } from '../../api.js';
 // 센서 탭 문구 판정(v2.493) — '값 없음' 을 '텔레메트리 미지원' 으로 단정하지 않게 순수 모듈로 고정.
-import { cpuBadgeText, maxTempText, sampleCountText, emptyNote, latestTempRows, tempColorOf, fetchErrorNote } from './sensorText.js';
+import {
+  cpuBadgeText, maxTempText, sampleCountText, emptyNote, latestTempRows, tempColorOf, fetchErrorNote,
+  // v2.504 온도 장기 추이 — 판정·문구는 순수 모듈에서(테스트로 고정).
+  TREND_RANGES, TREND_BUCKETS, trendRows, trendEmptyReason, trendBaselineNote, trendDetailNote,
+} from './sensorText.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import EscClose from '../../components/EscClose.jsx';
-import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend, Brush } from 'recharts';
+import { fmtTrendTick } from '../tools/shared.jsx';   // ESXi 온도 추이와 **같은** 눈금 규칙(조작을 화면마다 다르게 만들지 않는다)
 import { STable } from '../../components/STable.jsx';
 
 const LINE_COLORS = ['#60a5fa', '#f87171', '#34d399', '#fbbf24', '#a78bfa', '#f472b6', '#22d3ee', '#fb923c', '#4ade80', '#e879f9', '#94a3b8', '#fca5a5'];
 const FW_TYPE_ORDER = ['iDRAC', 'BIOS', 'NIC', 'Storage', 'GPU', 'PSU', 'Disk', 'CPLD', 'Driver', '기타'];
+
+/**
+ * 온도 **장기 추이** 차트(v2.504) — 사용자 요청 "idrac 에서 조사하는 온도를 차트로 보이게 해줘".
+ * 참고 화면으로 첨부된 '특수 기능 › ESXi 온도'의 `5년 추이` 와 **같은 조작**(1일~5년 · 집계 단위 ·
+ * 브러시 확대)을 쓴다 — 같은 일을 두 화면에서 다르게 만들지 않기 위해서다.
+ *
+ * 위쪽 '센서 차트' 와의 차이(둘 다 필요하다):
+ *  · 센서 차트  = 인메모리 24시간 · 센서 **이름별** 상세 · 중앙이 직접 수집하는 서버만.
+ *  · 이 차트    = metrics DB · 최대 5년 · **위임(엣지) 서버도 나온다**(그 서버는 위쪽 차트가 비어 있다).
+ *
+ * 정직성: 표본이 0/1개면 선을 그리지 않고 사유를 구분해 말한다. 수집 시작 이전 구간은 비워 둔다.
+ */
+function TempTrend({ serverId }) {
+  const [days, setDays] = useState(7);
+  const [bucket, setBucket] = useState('auto');
+  const [hist, setHist] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const gen = useRef(0);           // 세대 가드 — 늦은 응답이 최신 선택을 덮어쓰지 않게
+
+  useEffect(() => {
+    const my = ++gen.current;
+    setLoading(true);
+    const bq = bucket && bucket !== 'auto' ? `&bucket=${bucket}` : '';
+    fetchJson(`/admin/idrac/${encodeURIComponent(serverId)}/temp-history?days=${days}${bq}`)
+      .then((r) => { if (my === gen.current) { setHist(r); setLoading(false); } })
+      // 오류를 삼키지 않는다(v2.493) — 사용자가 '수집 0' 과 '조회 실패' 를 구분할 수 있어야 한다.
+      .catch((e) => { if (my === gen.current) { setHist({ error: e?.message || '조회 실패' }); setLoading(false); } });
+  }, [serverId, days, bucket]);
+
+  const { rows, kinds } = trendRows(hist, { fmt: (ts) => fmtTrendTick(ts, days) });
+  const empty = trendEmptyReason(hist, { loading });
+  const baseline = trendBaselineNote(hist, days);
+  const detailNote = trendDetailNote(hist);
+
+  return (
+    <div style={{ marginTop: 18, borderTop: '1px solid var(--border,#243049)', paddingTop: 12 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>
+        온도 추이 <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>· 장기(최대 5년) · 위임 수집 서버 포함</span>
+      </div>
+      <div className="flex gap wrap" style={{ marginBottom: 8 }}>
+        {TREND_RANGES.map(([d, l]) => (
+          <button key={d} className={days === d ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '6px 12px', fontSize: 12 }} onClick={() => setDays(d)}>{l}</button>
+        ))}
+      </div>
+      <div className="flex gap wrap" style={{ marginBottom: 10, alignItems: 'center' }}>
+        <span className="muted" style={{ fontSize: 12 }}>집계 단위(기준)</span>
+        {TREND_BUCKETS.map(([b, l]) => (
+          <button key={b} className={bucket === b ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '5px 11px', fontSize: 12 }} onClick={() => setBucket(b)}>{l}</button>
+        ))}
+        {rows.length ? <span className="muted" style={{ fontSize: 11 }}>{rows.length}개 구간</span> : null}
+      </div>
+      {loading ? <Loading label="온도 추이" />
+        : empty ? <div className={empty.kind === 'error' ? 'badge amber' : 'muted'} style={{ fontSize: 12 }}>{empty.text}</div>
+          : (
+            <>
+              <div style={{ width: '100%', height: 300 }}>
+                <ResponsiveContainer>
+                  <LineChart data={rows} margin={{ top: 4, right: 12, left: -10, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,.15)" />
+                    <XAxis dataKey="t" tick={{ fontSize: 10, fill: '#94a3b8' }} minTickGap={40} />
+                    <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} width={40} unit="℃" domain={['auto', 'auto']} />
+                    <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #334155', fontSize: 12 }} />
+                    <Legend wrapperStyle={{ fontSize: 11 }} />
+                    {kinds.map((k) => (
+                      <Line key={k.key} type="monotone" dataKey={k.key} name={k.label} stroke={k.color}
+                        dot={false} strokeWidth={1.8} isAnimationActive={false} connectNulls={false} />
+                    ))}
+                    <Brush dataKey="t" height={22} stroke="#6366f1" travellerWidth={8} tickFormatter={() => ''} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="muted" style={{ fontSize: 11, marginTop: 4, textAlign: 'center' }}>아래 막대를 드래그하면 구간을 좁혀 스크롤·확대해 볼 수 있습니다.</div>
+            </>
+          )}
+      {baseline && <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>{baseline}</div>}
+      {detailNote && <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>{detailNote}</div>}
+    </div>
+  );
+}
 
 /** iDRAC 서버 상세 — 버전(iDRAC/BIOS/드라이버) + 온도센서·CPU 사용량 1분 시계열 차트. */
 export function IdracDetailModal({ server, onClose }) {
@@ -194,6 +278,10 @@ export function IdracDetailModal({ server, onClose }) {
             {sensErr
               ? <div className="badge amber" style={{ fontSize: 12, marginTop: 8 }}>{fetchErrorNote(sensErr)}</div>
               : emptyNote(sensors) && <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>{emptyNote(sensors)}</div>}
+            {/* 장기 추이(v2.504) — 위쪽 센서 차트는 인메모리 24시간이라 **위임(엣지) 서버는 늘 비어 있다**.
+                이 차트는 metrics DB 계열을 쓰므로 그 서버들도 추이를 볼 수 있다. 둘 다 남겨 둔다:
+                위쪽은 센서 이름별 상세(중앙 수집), 아래쪽은 최대 5년 장기(전 서버). */}
+            <TempTrend serverId={server.id} />
           </div>
         )}
 
