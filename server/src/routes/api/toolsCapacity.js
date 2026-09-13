@@ -1,9 +1,10 @@
 // 용량/낭비/씬/VM파인더/온도/용량예측 — api.js(구 2,445줄) 분할(v2.283.0). 본문은 원본 그대로, 등록 순서는 api.js 호출 순서가 보존한다.
-import { scopedVcenterIds } from '../../auth/scope.js';
+import { scopedVcenterIds, inUserScope } from '../../auth/scope.js';
 import { requireRole, requirePerm } from '../../auth/auth.js'; // v2.478(감사 S5): /tools/* 조회도 tools 권한 게이트   // 설정 변경/데이터 삭제는 관리자 전용
 import { logAudit } from '../../audit.js';           // 수집 정책 변경·데이터 삭제는 감사 기록
 import { store } from '../../store.js';
 import { loadVcenterConfig } from '../../config.js';
+import { scanOrphanDisks } from '../../vcenter/orphanScan.js';   // v2.505: 고아 VMDK 탐지(라이브)
 import { fetchVmMetric, fetchVmRightsizeSeries, fetchVmsRightsizeBatch, fetchVmsUsageBatch, fetchHostsPerfSeries, PERF_INTERVALS } from '../../vcenter/soapClient.js';
 import { USAGE_DAYS, normDays, intervalForDays, intervalForRangeMs, averageByTimestamp } from '../../vcenter/perfBatch.js'; // v2.492: 트리 행 기간 사용률 · v2.494: 호스트/클러스터 추이
 import { analyzeRightsize } from '../../tools/rightsize.js';
@@ -1285,4 +1286,66 @@ api.get('/tools/capacity-forecast', requirePerm('tools'), (req, res) => memoJson
   items.sort((a, b) => (a.daysToFull ?? Infinity) - (b.daysToFull ?? Infinity));
   return { scope: vcId || 'all', mock, items };
 }, { ttlMs: 30_000, extraKey: scopeKey(req.user, store.get()) }));
+
+/**
+ * 고아 VMDK 후보 — 대상 데이터스토어 목록. GET /tools/orphan-vmdk/datastores?vcenterId=
+ *
+ * 스캔은 데이터스토어 1개씩 라이브로 돌리므로(무겁다), 먼저 '어디를 볼지' 를 고르게 한다.
+ * 스냅샷 집계라 빠르다. scope 를 먼저 적용한다(요청 필터보다 먼저 — 상위 규칙).
+ * 엣지 수집(site) vCenter 는 중앙에서 직접 접속이 안 되므로 스캔 가능 여부를 미리 알린다
+ * (누르고 나서 실패하는 것보다 목록에서 미리 밝히는 쪽이 정직하다).
+ */
+api.get('/tools/orphan-vmdk/datastores', requirePerm('tools'), (req, res) => memoJson(req, res, 'orphan-vmdk-ds', (snap) => {
+  const vcId = req.query.vcenterId ? String(req.query.vcenterId) : '';
+  const allowed = scopedVcenterIds(req.user, snap);
+  const cfg = loadVcenterConfig().vcenters;
+  const byVc = new Map(cfg.map((v) => [v.id, v]));
+  const items = (snap.datastores || [])
+    .filter((d) => (!allowed || allowed.has(d.vcenterId)) && (!vcId || d.vcenterId === vcId))
+    .map((d) => {
+      const vc = byVc.get(d.vcenterId);
+      // 중앙이 직접 SOAP 로 붙을 수 있어야 스캔이 된다. 엣지 위임(site) 은 접속 정보가 없다.
+      const scannable = !!vc && vc.collectMode !== 'site';
+      return {
+        id: d.id, name: d.name, vcenterId: d.vcenterId, type: d.type,
+        capacityGB: d.capacityGB, usedGB: d.usedGB, freeGB: d.freeGB, usagePct: d.usagePct,
+        scannable,
+        notScannableReason: scannable ? '' : (vc ? '엣지 위임(site) 수집 vCenter 는 중앙에서 데이터스토어를 직접 탐색할 수 없습니다.' : 'vCenter 접속 정보가 없습니다.'),
+      };
+    })
+    .sort((a, b) => (b.usedGB || 0) - (a.usedGB || 0));
+  return { scope: vcId || 'all', mock: snap.source === 'mock', total: items.length, items };
+}, { ttlMs: 30_000, extraKey: scopeKey(req.user, store.get()) }));
+
+/**
+ * 고아 VMDK 스캔 — GET /tools/orphan-vmdk?datastoreId=...&recentHours=24
+ *
+ * 사용자 요청: "VMDK 같은 파일이 VM에 연결되지 않은 상태인지 찾아내는 기능".
+ * 데이터스토어 파일 목록과 **그 데이터스토어를 쓰는 VM 전부의 `layoutEx.file`** 을 대조한다.
+ * 판정은 `tools/orphanVmdk.js`(순수·테스트 고정), 실행은 `vcenter/orphanScan.js`.
+ *
+ * ⚠ 이 라우트는 **삭제 기능을 제공하지 않는다**(의도적). 판정은 이 vCenter 인벤토리 기준이라
+ * 공유 데이터스토어·FCD·미등록 VM 등 '멀쩡히 쓰는 파일' 이 소유자 없이 보일 수 있다.
+ * 응답의 `sharedDatastoreWarning`·`confidence` 를 화면에서 지우지 말 것 — 오삭제를 막는 장치다.
+ *
+ * 단건 id 를 직접 받으므로 vCenter 단위 scope 를 별도 검사하고 **범위 밖은 404**(존재 은닉).
+ * 라이브 탐색 태스크를 최대 90초 기다리는 정상 장기 요청이라 `perfExpectSlow` 를 세운다.
+ */
+api.get('/tools/orphan-vmdk', requirePerm('tools'), async (req, res) => {
+  res.locals.perfExpectSlow = true;
+  const dsId = String(req.query.datastoreId || '');
+  const snap = store.get();
+  const ds = (snap.datastores || []).find((d) => d.id === dsId);
+  if (!ds || !inUserScope(req.user, snap, ds.vcenterId)) {
+    return res.status(404).json({ ok: false, reason: '데이터스토어를 찾을 수 없습니다.' });
+  }
+  // 보류 창(시간) — 화면이 조절한다. 0 은 '보류 판정 끔'(명시적 선택).
+  const recentHours = req.query.recentHours === undefined ? 24
+    : Math.max(0, Math.min(720, Number(req.query.recentHours) || 0));
+  try {
+    res.json({ ok: true, ...(await scanOrphanDisks(dsId, { recentHours })) });
+  } catch (e) {
+    res.status(e.status === 404 ? 404 : 502).json({ ok: false, reason: e.message });
+  }
+});
 }

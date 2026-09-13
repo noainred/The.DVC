@@ -191,3 +191,21 @@ export function parseDsSearchResults(xml, cap = Infinity) {
   }
   return { files: out, truncated };
 }
+
+/**
+ * `layoutEx.file`(ArrayOfVirtualMachineFileLayoutExFileInfo) XML → 그 VM 이 소유한 **전 파일 경로**.
+ *
+ * v2.505 고아 VMDK 탐지의 소유 집합 소스다. `<file>` 블록의 `<name>` 이 `[ds] folder/file` 형태로
+ * vmx·vmdk 디스크립터·flat/delta 익스텐트·vswp·vmsn·nvram·로그를 **전부** 담는다.
+ * 소유 집합은 크게 잡는 쪽이 안전하므로 유형을 가리지 않고 전부 넣는다 — 빠뜨리면 쓰고 있는
+ * 디스크가 고아로 보고된다(그 판정으로 사람이 파일을 지운다).
+ */
+export function parseLayoutFilePaths(xml) {
+  const out = [];
+  if (!xml) return out;
+  for (const blk of String(xml).split('<file>').slice(1)) {
+    const name = /<name>([^<]*)<\/name>/.exec(blk)?.[1];
+    if (name) out.push(xmlUnescape(name));
+  }
+  return out;
+}
