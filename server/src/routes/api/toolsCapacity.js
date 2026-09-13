@@ -845,15 +845,21 @@ api.post('/tools/waste/spark', requirePerm('tools'), async (req, res) => {
   const allowed = scopedVcenterIds(req.user, snap);
   // scope: 요청 vmId 중 '허용 vCenter 소속으로 실재하는' VM 만 남긴다(범위 밖 VM 성능 유출 차단).
   const byId = new Map((snap.vms || []).map((v) => [v.id, v]));
+  // v2.502: '상한 때문에 잘림'(capped)과 '범위 밖·스냅샷에 없음'(skipped)을 **구분**한다.
+  // 예전에는 둘을 `ids.length > targets.length` 하나로 뭉쳐 truncated 로 내려보냈는데, 화면이
+  // 이미 상한만큼 잘라 보내면 둘이 같아져 false 가 됐다 — 잘라 놓고 잘랐다는 말을 못 하는 상태였다
+  // (표 아래쪽 행이 안내 없이 '…' 로 남던 사용자 신고의 원인 중 하나).
   const targets = [];
+  let capped = false;
+  let skipped = 0;
   for (const id of ids) {
+    if (targets.length >= SPARK_MAX_VMS) { capped = true; break; }
     const v = byId.get(id);
-    if (!v) continue;
-    if (allowed && !allowed.has(v.vcenterId)) continue;
+    if (!v) { skipped += 1; continue; }
+    if (allowed && !allowed.has(v.vcenterId)) { skipped += 1; continue; }
     targets.push(v);
-    if (targets.length >= SPARK_MAX_VMS) break;
   }
-  const truncated = ids.length > targets.length;
+  const truncated = capped || skipped > 0;   // 하위호환(구버전 화면이 읽는 키)
   const now = Date.now();
   const series = {};
   const need = [];
@@ -900,7 +906,7 @@ api.post('/tools/waste/spark', requirePerm('tools'), async (req, res) => {
   if (sparkCache.size > 4000) {
     for (const [k, e] of sparkCache) if (now - e.at > SPARK_TTL_MS) sparkCache.delete(k);
   }
-  res.json({ type, interval: 'week', unit: '%', maxVms: SPARK_MAX_VMS, truncated, synthesized: snap.source === 'mock', series });
+  res.json({ type, interval: 'week', unit: '%', maxVms: SPARK_MAX_VMS, truncated, capped, skipped, synthesized: snap.source === 'mock', series });
 });
 
 /**
