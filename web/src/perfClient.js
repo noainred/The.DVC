@@ -20,6 +20,8 @@ const listeners = new Set();
 const reportState = newReportState();
 let disabled = false;           // 서버가 거부했거나 계측이 꺼져 있으면 true
 let stuckMs = 60_000;           // 서버 설정값으로 갱신(화면에 하드코딩하지 않는다)
+// v2.501: '무슨 작업을 기다리는지' 를 보이기 시작하는 문턱(서버 설정 clientDetailMs, 기본 3초).
+let detailMs = 3_000;
 let configLoaded = false;
 let configPromise = null;
 let lastConfigTry = 0;
@@ -65,6 +67,9 @@ export function subscribeInflight(fn) { listeners.add(fn); return () => listener
 /** 보고 임계(ms) — 서버 설정값. 화면이 이 값을 쓴다. */
 export const stuckThresholdMs = () => stuckMs;
 
+/** 진행상태 상세 표시 문턱(ms) — 서버 설정값. 뷰가 3초를 하드코딩하지 않게 한다. */
+export const detailThresholdMs = () => detailMs;
+
 /**
  * 서버에서 임계·활성 여부를 받아온다. **성공했을 때만** 완료로 표시한다 — 예전에는 await 전에
  * 플래그를 세워, 세션의 첫 조회가 한 번 실패하면(서버 재시작 중·고RTT) 그 탭이 새로고침 전까지
@@ -81,6 +86,7 @@ export async function loadPerfClientConfig(fetchJson) {
     try {
       const r = await fetchJson('/perf/client-config', {}, undefined, { retries: 0, timeoutMs: 10_000 });
       if (r && typeof r.clientStuckMs === 'number') stuckMs = Math.max(10_000, r.clientStuckMs);
+      if (r && typeof r.clientDetailMs === 'number') detailMs = Math.min(60_000, Math.max(1_000, r.clientDetailMs));
       if (r && r.enabled === false) disabled = true;
       configLoaded = true;
     } catch { /* 구버전 서버·일시 오류 — 기본값으로 동작하고 나중에 다시 시도 */ }

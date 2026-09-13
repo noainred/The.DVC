@@ -14,6 +14,7 @@ export const LIMITS = Object.freeze({
   slowRequestMs: { min: 200, max: 120_000 },   // 이 이상 걸린 요청을 '느린 요청' 으로 기록
   hangLagMs: { min: 100, max: 30_000 },        // 이벤트 루프 창 max 가 이 이상이면 hang 이벤트
   clientStuckMs: { min: 10_000, max: 600_000 },// 화면이 이 이상 '불러오는 중' 이면 브라우저가 보고
+  clientDetailMs: { min: 1_000, max: 60_000 }, // 화면이 이 이상 기다리면 '무슨 작업을 기다리는지' 표시(v2.501)
   keep: { min: 50, max: 5_000 },               // 느린 요청·hang 링 보관 건수
   retentionDays: { min: 1, max: 90 },          // hang 로그 파일 보존일
 });
@@ -23,6 +24,8 @@ export const DEFAULTS = Object.freeze({
   slowRequestMs: 3_000,
   hangLagMs: 1_000,
   clientStuckMs: 60_000,
+  // 사용자 요구(v2.501): "대기가 3초 이상이면 구체적으로 어떤 작업을 하는지 보여줄 것".
+  clientDetailMs: 3_000,
   keepSlow: 500,
   keepHangs: 500,
   retentionDays: 14,
@@ -52,6 +55,7 @@ export function loadPerfSettings() {
       if (given(p.slowRequestMs)) out.slowRequestMs = clamp(p.slowRequestMs, LIMITS.slowRequestMs, DEFAULTS.slowRequestMs);
       if (given(p.hangLagMs)) out.hangLagMs = clamp(p.hangLagMs, LIMITS.hangLagMs, DEFAULTS.hangLagMs);
       if (given(p.clientStuckMs)) out.clientStuckMs = clamp(p.clientStuckMs, LIMITS.clientStuckMs, DEFAULTS.clientStuckMs);
+      if (given(p.clientDetailMs)) out.clientDetailMs = clamp(p.clientDetailMs, LIMITS.clientDetailMs, DEFAULTS.clientDetailMs);
       if (given(p.keepSlow)) out.keepSlow = clamp(p.keepSlow, LIMITS.keep, DEFAULTS.keepSlow);
       if (given(p.keepHangs)) out.keepHangs = clamp(p.keepHangs, LIMITS.keep, DEFAULTS.keepHangs);
       if (given(p.retentionDays)) out.retentionDays = clamp(p.retentionDays, LIMITS.retentionDays, DEFAULTS.retentionDays);
@@ -70,6 +74,7 @@ export function savePerfSettings(body = {}) {
   if (given(body.slowRequestMs)) next.slowRequestMs = clamp(body.slowRequestMs, LIMITS.slowRequestMs, next.slowRequestMs);
   if (given(body.hangLagMs)) next.hangLagMs = clamp(body.hangLagMs, LIMITS.hangLagMs, next.hangLagMs);
   if (given(body.clientStuckMs)) next.clientStuckMs = clamp(body.clientStuckMs, LIMITS.clientStuckMs, next.clientStuckMs);
+  if (given(body.clientDetailMs)) next.clientDetailMs = clamp(body.clientDetailMs, LIMITS.clientDetailMs, next.clientDetailMs);
   if (given(body.keepSlow)) next.keepSlow = clamp(body.keepSlow, LIMITS.keep, next.keepSlow);
   if (given(body.keepHangs)) next.keepHangs = clamp(body.keepHangs, LIMITS.keep, next.keepHangs);
   if (given(body.retentionDays)) next.retentionDays = clamp(body.retentionDays, LIMITS.retentionDays, next.retentionDays);

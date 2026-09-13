@@ -89,6 +89,8 @@ export function registerPerfClient(api) {
    */
   api.get('/perf/client-config', (_req, res) => {
     const st = loadPerfSettings();
-    res.json({ enabled: st.enabled, clientStuckMs: st.clientStuckMs });
+    // clientDetailMs(v2.501): 화면이 '무슨 작업을 기다리는지' 를 보이기 시작하는 문턱. 3초를 뷰에
+    // 하드코딩하면 설정에서 바꿔도 문구가 사실과 달라진다(루트 CLAUDE.md 프론트 회귀 방지).
+    res.json({ enabled: st.enabled, clientStuckMs: st.clientStuckMs, clientDetailMs: st.clientDetailMs });
   });
 }

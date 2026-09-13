@@ -11,8 +11,9 @@ import React, { useMemo, useState, useEffect, useRef } from 'react';
 // (api.js 는 컴포넌트를 import 하지 않는다). 위 '순환의 씨앗' 주의사항과 배치되지 않음.
 import { permissionInfoFor, httpInfoFor, reportLoadingStall, ensurePerfClientConfig } from '../api.js';
 // v2.498: '불러오는 중' 이 길어지면 몇 초째인지·무엇을 기다리는지 정직하게 보이고 서버에 1회 보고한다.
-import { inflightSnapshot, stuckThresholdMs } from '../perfClient.js';
+import { inflightSnapshot, stuckThresholdMs, detailThresholdMs } from '../perfClient.js';
 import { loadingText } from '../perfClientLogic.js';
+import { secText } from './taskLabel.js';
 import AccessDenied from './AccessDenied.jsx';
 import ServiceDown from './ServiceDown.jsx';
 import { serviceDownKind } from './serviceDownText.js';
@@ -195,19 +196,27 @@ export function SearchBox({ value = '', onChange, placeholder, className = 'inpu
 }
 
 /**
- * 공용 로딩 표시(호출처 133곳 무변경 — 이 컴포넌트 하나만 바꾼다).
+ * 공용 로딩 표시(호출처 179곳 무변경 — 이 컴포넌트 하나만 바꾼다).
  *
- * 사용자 신고(v2.498): "'불러오는 중…' 이 3분 이상 지속될 때가 있다." 그때 화면이 아무것도 말해주지
- * 않으면 사용자는 원인을 알 수 없고 새로고침·재로그인을 반복한다. 그래서:
- *  · 15초까지는 기존 문구 그대로(짧은 대기에 잡음을 더하지 않는다).
- *  · 그 뒤 '(N초째)', 30초 뒤에는 **무엇을 몇 초째 기다리는지**(진행 중 요청 경로).
- *  · 기다리는 요청이 하나도 없으면 그 사실을 자백하고 새로고침 버튼을 준다 — 이 경우는 서버가
- *    느린 것이 아니라 화면(뷰) 상태 문제다. 원인을 단정하지 않고 관측된 사실만 말한다(CLAUDE.md).
- *  · 임계(서버 설정, 기본 60초)를 넘으면 서버에 1회 보고 → 설정 › 서버 성능 측정의 hang 기록.
- * 훅은 조기 return 이 없는 leaf 컴포넌트에서만 쓰므로 React #310 위험이 없다. 1초 tick 타이머는
- * 언마운트 시 해제한다.
+ * 사용자 요구(v2.501): "**대기가 3초 이상이면 구체적으로 어떤 작업을 하는지** 진행상태를 보여줄 것."
+ * v2.498 까지는 15초까지 아무 정보가 없고 30초가 지나야 경로 하나를 보여줬다 — 그 사이 사용자는
+ * 멈춘 것인지 일하는 중인지 알 수 없었다. 이제:
+ *  · 3초 미만 — '불러오는 중…' 만(짧은 대기에 잡음을 더하지 않는다).
+ *  · **3초 이상** — 경과 초 + 진행 중 작업을 **줄 단위로**: 작업 이름(경로 대신 사람 말), 각 대기
+ *    시간, 같은 작업이 겹치면 건수. 설계상 오래 걸리는 작업(고RTT vCenter 라이브 조회·엑셀 생성·
+ *    롱폴)은 '오래 걸리는 것이 정상' 이라고 밝힌다.
+ *  · 3초 이상인데 대기 요청이 없으면 — '서버 응답은 모두 받았고 화면을 그리는 중' 이라고만 말한다.
+ *    이 시점에 새로고침을 권하지 않는다(정상 렌더와 구분할 수 없다).
+ *  · stuck 임계(서버 설정, 기본 60초)를 넘고도 대기 요청이 없으면 그때 자백하고 새로고침 버튼을 준다.
+ *    동시에 서버에 1회 보고 → 설정 › 서버 성능 측정의 hang 기록.
+ *
+ * 문턱 3초와 60초는 **서버 설정값**(`clientDetailMs`·`clientStuckMs`)이다 — 뷰에 하드코딩하지 않는다.
+ * 훅은 조기 return 이 없는 leaf 컴포넌트에서만 쓰므로 React #310 위험이 없다. tick 은 500ms 로
+ * 3초 문턱을 늦지 않게 넘기고, 언마운트 시 해제한다.
+ *
+ * @param label 이 화면이 무엇을 불러오는지(선택) — 주면 '불러오는 중' 대신 그 이름을 쓴다.
  */
-export function Loading() {
+export function Loading({ label = '' } = {}) {
   const [sec, setSec] = useState(0);
   const reported = useRef(false);
   useEffect(() => {
@@ -226,15 +235,35 @@ export function Loading() {
           });
         } catch { /* 보고 실패는 화면에 영향 없음 */ }
       }
-    }, 1000);
+    }, 500);
     return () => clearInterval(id);
   }, []);
-  const rows = sec >= 15 ? inflightSnapshot(10) : [];
-  const t = loadingText({ elapsedSec: sec, inflight: rows });
+  const detailSec = detailThresholdMs() / 1000;
+  // 문턱을 넘은 뒤에만 스냅샷을 뜬다(짧은 대기에서는 아무 일도 하지 않는다).
+  const rows = sec >= detailSec ? inflightSnapshot(10) : [];
+  const t = loadingText({
+    elapsedSec: sec, inflight: rows, label,
+    detailSec, stuckSec: stuckThresholdMs() / 1000,
+  });
   return (
     <div className="loading">
       {t.text}
-      {t.detail && <div className="muted" style={{ fontSize: 12, marginTop: 6, fontWeight: 400, overflowWrap: 'anywhere' }}>{t.detail}</div>}
+      {t.tasks?.length > 0 && (
+        <ul style={{ listStyle: 'none', margin: '6px 0 0', padding: 0, fontWeight: 400 }}>
+          {t.tasks.map((x) => (
+            <li key={x.label} className="muted" style={{ fontSize: 12, marginTop: 2, overflowWrap: 'anywhere' }}>
+              {x.label}
+              {x.count > 1 ? ` ×${x.count}` : ''}
+              {' · '}
+              {secText(x.ms)} 대기
+              {x.slow && <span style={{ marginLeft: 6 }}>(오래 걸리는 것이 정상인 작업)</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+      {t.detail && t.tasks?.length === 0 && (
+        <div className="muted" style={{ fontSize: 12, marginTop: 6, fontWeight: 400, overflowWrap: 'anywhere' }}>{t.detail}</div>
+      )}
       {t.suggestReload && (
         <div style={{ marginTop: 8 }}>
           <button className="tab" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => window.location.reload()}>새로고침</button>

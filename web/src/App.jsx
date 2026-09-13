@@ -6,6 +6,7 @@ import Login from './views/Login.jsx';
 import ForceOtpEnroll from './views/ForceOtpEnroll.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 import SessionExpiryGuard from './components/SessionExpiryGuard.jsx';
+import GlobalProgress from './components/GlobalProgress.jsx'; // 3초 넘는 대기의 진행상태(v2.501)
 import { STable } from './components/STable.jsx';
 
 // 탭 화면은 지연 로드(코드 스플릿)해 초기 번들/첫 로딩을 줄인다(recharts 등 무거운 의존성 분리).
@@ -145,7 +146,7 @@ export default function App() {
     // 것이 사용자 신고('불러오는 중 3분 이상')의 재현 가능한 경로였다. 이제 타임아웃으로 최대
     // ~60초 뒤 로그인 화면으로 내려가고, 그 사이 경과 초·대기 중인 요청이 표시되며 토큰이 있는
     // 세션이면 hang 기록에도 남는다(토큰이 없으면 보고하지 않는다).
-    return <div className="login-screen"><Loading /></div>;
+    return <div className="login-screen"><Loading label="포탈 시작" /></div>;
   }
   if (!user) return <Login onSuccess={(u) => { setLoginNotice(''); setUser(u); }} notice={loginNotice} setup={authCfg} />;
   // 고권한 계정이 OTP 미등록 상태로 로그인 → 등록을 마칠 때까지 이 화면에 고정(서버도 API 차단).
@@ -171,6 +172,9 @@ export default function App() {
         setLoginNotice('접속 시간이 만료되어 자동 로그아웃되었습니다. 다시 로그인하세요.');
         setUser(null);
       }} />
+      {/* v2.501(사용자 요구): 3초 넘게 기다리는 요청이 있으면 **무슨 작업인지**를 한 곳에서 보인다.
+          화면 첫 로딩(<Loading/>)뿐 아니라 저장·연결 테스트·엑셀 생성 같은 버튼 동작도 덮는다. */}
+      <GlobalProgress />
     </ErrorBoundary>
   );
 }

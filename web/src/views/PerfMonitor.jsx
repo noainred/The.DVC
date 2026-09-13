@@ -64,7 +64,7 @@ export default function PerfMonitor() {
   const lb = loopBadge(d.loop?.last, st.hangLagMs);
   const note = loopNote({ monitorEnabled: d.loop?.monitorEnabled, windowCount: d.loop?.windowCount, windowMs: d.loop?.last?.windowMs || 30_000 });
 
-  const NUMERIC = ['slowRequestMs', 'hangLagMs', 'clientStuckMs', 'keepSlow', 'keepHangs', 'retentionDays'];
+  const NUMERIC = ['slowRequestMs', 'hangLagMs', 'clientStuckMs', 'clientDetailMs', 'keepSlow', 'keepHangs', 'retentionDays'];
   const save = async () => {
     setBusy('save'); setMsg(null);
     try {
@@ -325,6 +325,12 @@ export default function PerfMonitor() {
               <input className="input" style={{ width: 120 }} type="number" min={lim.clientStuckMs?.min} max={lim.clientStuckMs?.max}
                 value={form.clientStuckMs} onChange={(e) => setForm({ ...form, clientStuckMs: e.target.value })} />
             </label>
+            {/* v2.501(사용자 요구): 대기가 이 시간을 넘으면 화면이 '무슨 작업을 기다리는지' 를 보여준다. */}
+            <label className="flex gap" style={{ alignItems: 'center', gap: 6 }} title="이 시간을 넘게 기다리면 화면 로딩 표시와 우하단 진행 표시가 작업 이름·대기 시간을 보여줍니다.">
+              진행상태 표시 임계(ms)
+              <input className="input" style={{ width: 110 }} type="number" min={lim.clientDetailMs?.min} max={lim.clientDetailMs?.max}
+                value={form.clientDetailMs} onChange={(e) => setForm({ ...form, clientDetailMs: e.target.value })} />
+            </label>
           </div>
           <div className="flex gap wrap" style={{ alignItems: 'center', gap: 14, marginTop: 10 }}>
             <label className="flex gap" style={{ alignItems: 'center', gap: 6 }}>
@@ -348,8 +354,9 @@ export default function PerfMonitor() {
           </div>
           <div className="muted" style={{ fontSize: 11.5, marginTop: 8, lineHeight: 1.6 }}>
             허용 범위 — 느린 요청 {lim.slowRequestMs?.min}~{lim.slowRequestMs?.max}ms · hang {lim.hangLagMs?.min}~{lim.hangLagMs?.max}ms ·
-            화면 로딩 {lim.clientStuckMs?.min}~{lim.clientStuckMs?.max}ms · 보존 {lim.retentionDays?.min}~{lim.retentionDays?.max}일.
-            기본값은 각각 {fmtMs(d.defaults?.slowRequestMs)} · {fmtMs(d.defaults?.hangLagMs)} · {fmtMs(d.defaults?.clientStuckMs)} · {d.defaults?.retentionDays}일입니다.
+            화면 로딩 {lim.clientStuckMs?.min}~{lim.clientStuckMs?.max}ms · 진행상태 표시 {lim.clientDetailMs?.min}~{lim.clientDetailMs?.max}ms ·
+            보존 {lim.retentionDays?.min}~{lim.retentionDays?.max}일.
+            기본값은 각각 {fmtMs(d.defaults?.slowRequestMs)} · {fmtMs(d.defaults?.hangLagMs)} · {fmtMs(d.defaults?.clientStuckMs)} · {fmtMs(d.defaults?.clientDetailMs)} · {d.defaults?.retentionDays}일입니다.
             <br />이벤트 루프 창 주기·경고 임계는 서버 환경변수(<code>LOOP_LAG_INTERVAL_MS</code> · <code>LOOP_LAG_WARN_MS</code>)로 조정하며,
             <code>LOOP_LAG_MONITOR</code>=0 이면 루프 계측이 꺼집니다(요청 지연 집계는 계속 동작).
           </div>
