@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **336개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **341개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-12)
@@ -21,7 +21,7 @@
 | `API_RATE_WINDOW_MS` | `60000` |  | util/rateLimit.js |
 | `GZIP_MIN_BYTES` | `1024` |  | util/compress.js |
 | `LOOP_LAG_INTERVAL_MS` | `30000` |  | util/loopLag.js |
-| `LOOP_LAG_MONITOR` | `기본 아님('0' 일 때만 적용)` |  | util/loopLag.js |
+| `LOOP_LAG_MONITOR` | `기본 적용('0' 로 끄기)` |  | perf/monitor.js, util/loopLag.js |
 | `LOOP_LAG_WARN_MS` | `500` |  | util/loopLag.js |
 | `PRUNE_CHUNK_ROWS` |  |  | util/chunkedPrune.js |
 | `PRUNE_MAX_ROWS` |  |  | util/chunkedPrune.js |
@@ -32,7 +32,7 @@
 | `WAN_MAX_CONNECTIONS` | `6` |  | util/resilientFetch.js |
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
 
-## 공통 (85)
+## 공통 (89)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -84,6 +84,10 @@
 | `OME_POWER_PLUGIN_ID` | `'2F6D05BE-EE4B-4B0E-B873-C8D2F64A4625'` | ✅ | config.js |
 | `PACKAGE_BASE_URL` |  |  | config.js |
 | `PACKAGE_DIR` |  |  | config.js |
+| `PERF_HANG_LOG_MAX_BYTES` | `8` |  | perf/hangLog.js |
+| `PERF_HANG_LOG_MAX_LINES` | `20000` |  | perf/hangLog.js |
+| `PERF_HANG_LOG_MAX_PER_MIN` | `60` |  | perf/hangLog.js |
+| `PERF_INFLIGHT_MAX_AGE_MS` | `600000` |  | perf/monitor.js |
 | `PING_DB_PATH` |  |  | config.js |
 | `PING_MON_CONCURRENCY` |  |  | config.js |
 | `PING_MON_ENABLED` | `기본 적용('false' 로 끄기)` |  | config.js |
@@ -387,7 +391,7 @@
 |---|---|---|---|
 | `HEALTH_PROBE_TIMEOUT_MS` | `5000` |  | health/network.js |
 
-## API 라우트 (24)
+## API 라우트 (25)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -397,6 +401,7 @@
 | `METRICS_ALLOW_ANON` | `기본 적용('true' 로 끄기)` |  | routes/metricsExport.js |
 | `METRICS_ALLOW_QUERY_TOKEN` | `기본 아님('true' 일 때만 적용)` |  | routes/metricsExport.js |
 | `METRICS_EXPORT_TOKEN` | `''` |  | routes/metricsExport.js |
+| `PERF_CLIENT_COOLDOWN_MS` | `60000` |  | routes/api/perfClient.js |
 | `RIGHTSIZE_CAP_REDUCTION_PCT` |  |  | routes/api/toolsCapacity.js |
 | `RIGHTSIZE_HEADROOM_PCT` |  |  | routes/api/toolsCapacity.js |
 | `RIGHTSIZE_MEM_BASIS` |  |  | routes/api/toolsCapacity.js |
@@ -515,4 +520,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 336
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 341

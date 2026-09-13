@@ -1,3 +1,6 @@
+// v2.498: 진행 중 요청 레지스트리 + 장기 로딩(hang) 보고. perfClient 는 api.js 를 import 하지
+// 않으므로 순환이 없다(설정 조회는 fetchJson 을 인자로 받는다).
+import { startReq, endReq, reportStall, loadPerfClientConfig } from './perfClient.js';
 import { useEffect, useRef, useState } from 'react';
 
 const BASE = '/api';
@@ -178,6 +181,10 @@ export async function fetchJson(path, params = {}, signal, opts = {}) {
   const url = `${BASE}${path}${qs ? `?${qs}` : ''}`;
   const timeoutMs = opts.timeoutMs > 0 ? opts.timeoutMs : GET_TIMEOUT_MS;
   const retries = Number.isInteger(opts.retries) && opts.retries >= 0 ? opts.retries : 2;
+  // v2.498: 이 요청이 '진행 중' 임을 남긴다 — 화면이 오래 '불러오는 중' 일 때 무엇을 기다리는지
+  // 정직하게 보여주고 서버 hang 로그에 근거를 실을 수 있다. 종료는 finally 로 보장한다.
+  const perfId = startReq(path, 'GET');
+  try {
   let lastErr;
   for (let attempt = 0; attempt <= retries; attempt++) {
     let res;
@@ -197,35 +204,46 @@ export async function fetchJson(path, params = {}, signal, opts = {}) {
       const data = await res.json().catch(() => null);
       throw httpFail(path, res, data);
     }
-    return res.json();
+    // ⚠ `return await` 가 필요하다(v2.498): `return res.json()` 이면 try/finally 의 finally 가
+    // **본문을 읽기 전에** 실행돼 진행 중 목록에서 항목이 사라진다. 호출자는 그때부터 본문 수신
+    // + JSON.parse 를 기다리므로, 화면이 '대기 중인 요청 없음 — 화면 상태 문제' 로 오진하고
+    // 새로고침을 권한다(수백 KB 응답·고RTT 에서 실제로 발생). pollFetch·postJson 은 이미 await 다.
+    return await res.json();
   }
   throw lastErr;
+  } finally { endReq(perfId); }
 }
 
 export async function postJson(path, body = {}) {
-  const res = await fetch(`${BASE}${path}`, {
-    method: 'POST',
-    headers: authHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify(body),
-    signal: timeoutSignal(MUT_TIMEOUT_MS),
-  });
-  if (res.status === 401) { setToken(null); onUnauthorized(); throw new Error('세션이 만료되었습니다.'); }
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok && res.status !== 409) throw httpFail(path, res, data);
-  return data;
+  const perfId = startReq(path, 'POST');
+  try {
+    const res = await fetch(`${BASE}${path}`, {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(body),
+      signal: timeoutSignal(MUT_TIMEOUT_MS),
+    });
+    if (res.status === 401) { setToken(null); onUnauthorized(); throw new Error('세션이 만료되었습니다.'); }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok && res.status !== 409) throw httpFail(path, res, data);
+    return data;
+  } finally { endReq(perfId); }
 }
 
 export async function sendJson(path, method, body = {}) {
-  const res = await fetch(`${BASE}${path}`, {
-    method,
-    headers: authHeaders({ 'Content-Type': 'application/json' }),
-    body: method === 'DELETE' && !Object.keys(body).length ? undefined : JSON.stringify(body),
-    signal: timeoutSignal(MUT_TIMEOUT_MS),
-  });
-  if (res.status === 401) { setToken(null); onUnauthorized(); throw new Error('세션이 만료되었습니다.'); }
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok && res.status !== 409 && res.status !== 400) throw httpFail(path, res, data);
-  return data;
+  const perfId = startReq(path, method);
+  try {
+    const res = await fetch(`${BASE}${path}`, {
+      method,
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: method === 'DELETE' && !Object.keys(body).length ? undefined : JSON.stringify(body),
+      signal: timeoutSignal(MUT_TIMEOUT_MS),
+    });
+    if (res.status === 401) { setToken(null); onUnauthorized(); throw new Error('세션이 만료되었습니다.'); }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok && res.status !== 409 && res.status !== 400) throw httpFail(path, res, data);
+    return data;
+  } finally { endReq(perfId); }
 }
 export const putJson = (path, body) => sendJson(path, 'PUT', body);
 export const patchJson = (path, body) => sendJson(path, 'PATCH', body);
@@ -307,16 +325,33 @@ export async function login(username, password, { keep = true } = {}) {
   return data.user;
 }
 
+/**
+ * 부팅 단계 조회 2종 — **타임아웃이 반드시 있어야 한다**(v2.498).
+ * 반열림 연결(VPN 끊김·프록시 정지·재시작 중 TCP 는 살아 있고 응답만 없는 상태)에서 fetch 는
+ * 영원히 pending 이라, App.jsx 의 부팅 화면이 '불러오는 중…' 으로 수 분간 고착됐다 — 사용자 신고
+ * "'불러오는 중' 이 3분 이상 지속될 때가 있다" 의 재현 가능한 경로 중 하나다. App.jsx 에는 이미
+ * 부팅 실패를 로그인 화면으로 내려주는 catch 가 있는데, **거부되지 않으니 그 catch 가 영원히
+ * 실행되지 않았다.** 타임아웃을 주면 20초 뒤 거부되어 사용자가 쓸 수 있는 화면으로 내려간다.
+ */
 export async function fetchAuthConfig() {
-  const res = await fetch(`${BASE}/auth/config`);
+  const res = await fetch(`${BASE}/auth/config`, { signal: timeoutSignal(GET_TIMEOUT_MS) });
   return res.ok ? res.json() : { authEnabled: true };
 }
 
 export async function fetchMe() {
-  const res = await fetch(`${BASE}/auth/me`, { headers: authHeaders() });
-  if (!res.ok) return null;
-  const data = await res.json();
-  return data.user;
+  // 토큰 검증은 한 번 더 시도할 값이 있다(일시 네트워크 오류로 로그인 화면으로 떨구지 않게).
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(`${BASE}/auth/me`, { headers: authHeaders(), signal: timeoutSignal(GET_TIMEOUT_MS) });
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data.user;
+    } catch (err) {
+      if (attempt === 0 && isTransientFront(err)) { await sleep(500); continue; }
+      throw err;   // App.jsx 부팅 catch → 로그인 화면(무한 스피너 대신)
+    }
+  }
+  return null;
 }
 
 // 폴링용 조건부 fetch — ETag(If-None-Match) 지원. 서버가 캐시 헤더(ETag)를 주는 무거운
@@ -328,6 +363,8 @@ async function pollFetch(path, params, signal, etag) {
   ).toString();
   const url = `${BASE}${path}${qs ? `?${qs}` : ''}`;
   const retries = 2;
+  const perfId = startReq(path, 'GET');   // v2.498: 폴링 요청도 진행 중 목록에 보인다
+  try {
   let lastErr;
   for (let attempt = 0; attempt <= retries; attempt++) {
     let res;
@@ -353,7 +390,33 @@ async function pollFetch(path, params, signal, etag) {
     return { notModified: false, data: await res.json(), etag: res.headers.get('ETag') || null };
   }
   throw lastErr;
+  } finally { endReq(perfId); }
 }
+
+/**
+ * 장기 로딩(hang) 보고 — Loading 표시가 임계(서버 설정, 기본 60초)를 넘었을 때 1회. 실패는 무시한다.
+ * 사용자·IP 는 서버가 채우고, 여기서는 화면 해시·경로·경과·진행 중 요청만 보낸다.
+ */
+export const reportLoadingStall = (args) => {
+  // 토큰이 없으면 보고하지 않는다(로그인 화면에서 401 을 만들지 않게). 부팅 중 토큰이 있는 상태의
+  // 고착 — 사용자가 신고한 바로 그 경로 — 은 보고된다.
+  if (!getToken()) return false;
+  return reportStall({ ...args, base: BASE, headers: authHeaders() });
+};
+/**
+ * 보고 임계·활성 여부를 서버에서 받아온다(화면에 주기·임계를 하드코딩하지 않는다는 규칙).
+ * **fetchJson 을 쓰지 않는다** — 401 이면 fetchJson 이 전역 401 핸들러(강제 로그아웃)를 호출해서,
+ * 인증 전/만료 직후 화면이 로딩만 띄워도 세션이 끊긴다. 계측 때문에 세션이 끊기는 것은 용납할 수 없다.
+ * 토큰이 없으면 아예 조회하지 않는다(로그인 화면에서 불필요한 요청 금지).
+ */
+export const ensurePerfClientConfig = () => {
+  if (!getToken()) return Promise.resolve();
+  return loadPerfClientConfig(async (path, params, signal, opts) => {
+    const res = await fetch(`${BASE}${path}`, { headers: authHeaders(), signal: timeoutSignal(opts?.timeoutMs || 10_000) });
+    if (!res.ok) throw new Error(`${path} -> ${res.status}`);   // 401 도 그냥 던진다(부작용 없음)
+    return res.json();
+  });
+};
 
 /** Poll an endpoint on an interval and expose {data, error, loading}.
  *  최적화: 백그라운드 탭이면 폴링 일시정지(가시화 시 즉시 갱신), 주기에 ±10% 지터(동시 사용자

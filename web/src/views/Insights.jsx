@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useHashTab } from '../hooks/useHashTab.js';
 import { fetchJson, putJson, postJson, usePolling } from '../api.js';
 import { Loading, ErrorBox, VmLink } from '../components/ui.jsx';
@@ -29,10 +29,29 @@ function FinOps() {
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
+  const [cfgErr, setCfgErr] = useState('');
   const load = () => fetchJson('/insights/finops').then(setD).catch((e) => setErr(e.message));
-  useEffect(() => { load(); fetchJson('/insights/finops/config').then(setCfg).catch(() => {}); const t = setInterval(load, 30_000); return () => clearInterval(t); }, []);
+  // v2.498: 단가 설정 조회는 **화면 렌더를 막지 않는다**. 예전에는 이 요청이 한 번만 실패해도
+  // (cfg=null) `if (!d || !cfg) return <Loading/>` 때문에 본 데이터가 30초마다 정상 갱신되는데도
+  // 화면이 영구 '불러오는 중…' 으로 남았다 — 사용자 신고 '3분 이상 불러오는 중' 의 재현 가능한
+  // 원인이다. 실패를 조용히 삼키지 않고(.catch(()=>{}) 금지) 사유를 남기고 폴링마다 재시도한다.
+  // 403(권한 거부)은 재시도해도 결과가 같다 — 30초마다 같은 403 을 만들면 서버 로그·감사만
+  // 오염된다(CLAUDE.md: usePolling 이 403 에서 폴링을 멈추는 것과 같은 정책). 이 화면은 수제
+  // 인터벌이라 그 보호를 직접 구현한다.
+  const cfgForbidden = useRef(false);
+  const loadCfg = () => fetchJson('/insights/finops/config')
+    .then((r) => { setCfg(r); setCfgErr(''); })
+    .catch((e) => { if (e?.status === 403) cfgForbidden.current = true; setCfgErr(e.message || String(e)); });
+  // 폴링 콜백이 최신 cfg 를 보게 하는 ref(의존성 배열을 비운 채로 재시도 여부를 판단하기 위함).
+  const cfgRef = useRef(null);
+  cfgRef.current = cfg;
+  useEffect(() => {
+    load(); loadCfg();
+    const t = setInterval(() => { load(); if (!cfgRef.current && !cfgForbidden.current) loadCfg(); }, 30_000);
+    return () => clearInterval(t);
+  }, []);
   if (err && !d) return <ErrorBox message={err} />; // 데이터 보유 중 일시 폴링 오류로 화면 전체를 갈아치우지 않음(CLAUDE.md)
-  if (!d || !cfg) return <Loading />;
+  if (!d) return <Loading />;
   const cur = d.config.currency;
   const c = (v) => `${cur}${num(v)}`;
   const saveCfg = async () => {
@@ -76,6 +95,13 @@ function FinOps() {
         </div>
         <div className="card" style={{ padding: 14, flex: '1 1 260px' }}>
           <div className="section-title" style={{ marginTop: 0 }}>요금/탄소 단가 설정</div>
+          {!cfg ? (
+            <div className="muted" style={{ fontSize: 12.5, lineHeight: 1.6 }}>
+              단가 설정을 불러오지 못했습니다{cfgErr ? ` — ${cfgErr}` : ''}. 위 수치는 서버가 적용한 단가로 계산된 값이며 그대로 유효합니다.
+              <div style={{ marginTop: 8 }}><button className="tab" style={{ padding: '4px 10px', fontSize: 12 }}
+                onClick={() => { cfgForbidden.current = false; loadCfg(); }}>다시 시도</button></div>
+            </div>
+          ) : (<>
           <label className="muted" style={{ fontSize: 12 }}>전기요금 단가 (통화/kWh)</label>
           <input className="input" type="number" value={cfg.tariffPerKwh} onChange={(e) => setCfg({ ...cfg, tariffPerKwh: e.target.value })} style={{ width: '100%', marginBottom: 8 }} />
           <label className="muted" style={{ fontSize: 12 }}>통화 기호</label>
@@ -86,6 +112,7 @@ function FinOps() {
           <input className="input" type="number" step="0.1" value={cfg.pue} onChange={(e) => setCfg({ ...cfg, pue: e.target.value })} style={{ width: '100%', marginBottom: 10 }} />
           <button className="login-btn" disabled={busy} onClick={saveCfg} style={{ padding: '7px 14px' }}>저장</button>
           {msg && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>{msg}</div>}
+          </>)}
         </div>
       </div>
     </div>

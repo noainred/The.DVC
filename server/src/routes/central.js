@@ -755,6 +755,7 @@ centralRouter.post('/sanswitch-test-result', async (req, res) => {
  * instance = 같은 법인의 여러 RMA 프로세스 구별자(분배는 rma/jobs.js). 형식 검증 후 그대로 키로 쓴다.
  */
 centralRouter.post('/rma-poll', async (req, res) => {
+  res.locals.perfExpectSlow = true; // v2.498: 롱폴(최대 55초 대기)은 정상이다 — '느린 요청' 목록을 이걸로 채우지 않는다
   if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
   if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
   if (req.centralAuth.mode !== 'agent') {

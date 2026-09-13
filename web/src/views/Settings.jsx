@@ -20,6 +20,7 @@ import Audit from './Audit.jsx';
 import MetricsSettings from './MetricsSettings.jsx';
 import StorageIntervals from './StorageIntervals.jsx'; // 스토리지 수집 주기(중앙→엣지 배포, v2.409)
 import PowerOffCheckSettings from './PowerOffCheckSettings.jsx'; // 전원 꺼짐 점검 주기(v2.484)
+import PerfMonitor from './PerfMonitor.jsx'; // 서버 성능 측정(요청 지연·루프 정체·hang 로그, v2.498)
 import HostAccessSettings from './HostAccessSettings.jsx'; // 호스트 접근 제어(SSH/웹/OS 방화벽, v2.485)
 import V3Portal from './V3Portal.jsx'; // 신규 포탈 보기(version_3 진입, v2.490)
 import SanSwitchPerf from './SanSwitchPerf.jsx';       // SAN 스위치 포트 사용량 수집(portperfshow, v2.411)
@@ -82,6 +83,7 @@ const SUB = [
   { k: 'dir-usage', label: '폴더 사용량 리포트', C: DirUsageSettings },
   { k: 'vclogs', label: 'vCenter 로그 보관', C: VcenterLogs, group: 'log' },
   { k: 'diagnostics', label: '진단·로그', C: Diagnostics, group: 'log' },
+  { k: 'perf-monitor', label: '서버 성능 측정', C: PerfMonitor, group: 'log' },
   { k: 'audit', label: '감사 로그', C: Audit, group: 'log' },
   // 업그레이드: 상단 '업그레이드' 탭은 SHOW_UPGRADE_TAB로 숨겨져 있어도, 관리자 설정 안에서는
   // 항상 접근 가능하게 둔다(오프라인 업그레이드 번들 적용/원격 자동 업그레이드 설정).

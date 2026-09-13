@@ -6,6 +6,7 @@
  */
 
 import { config } from '../config.js';
+import { withJob } from '../perf/monitor.js'; // v2.498: 스톨 발생 시 '진행 중 작업' 표시(계측 전용)
 import { store } from './../store.js';
 import { getMetricsDb } from './db.js';
 import { loadMetricsSettings } from './settings.js';
@@ -28,7 +29,7 @@ async function sampleOnce() {
   if (sampling) return; // 이전 샘플이 아직 진행 중이면 이번 틱 건너뜀
   sampling = true;
   try {
-    return await sampleOnceInner();
+    return await withJob('metrics.sample', sampleOnceInner);
   } finally {
     sampling = false;
   }

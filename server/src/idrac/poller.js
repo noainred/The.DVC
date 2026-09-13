@@ -6,6 +6,7 @@
  */
 
 import { config } from '../config.js';
+import { withJob } from '../perf/monitor.js'; // v2.498: 스톨 발생 시 '진행 중 작업' 표시(계측 전용)
 import { loadRegistry } from './registry.js';
 import { fetchPower, fetchInventory, fetchSensors } from './redfish.js';
 import { pushSensorSample } from './sensorStore.js';
@@ -29,7 +30,7 @@ async function pollOnce() {
   if (running) return; // 고RTT iDRAC 다수에서 한 주기가 간격을 넘겨 폴이 중첩되는 것 방지
   running = true;
   try {
-    return await pollOnceInner();
+    return await withJob('idrac.poll', pollOnceInner);
   } finally {
     running = false;
   }

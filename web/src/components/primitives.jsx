@@ -9,7 +9,10 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 // 권한 거부(403) 안내 — AccessDenied 는 api.js 만 참조하므로 이 import 로 순환이 생기지 않는다
 // (api.js 는 컴포넌트를 import 하지 않는다). 위 '순환의 씨앗' 주의사항과 배치되지 않음.
-import { permissionInfoFor, httpInfoFor } from '../api.js';
+import { permissionInfoFor, httpInfoFor, reportLoadingStall, ensurePerfClientConfig } from '../api.js';
+// v2.498: '불러오는 중' 이 길어지면 몇 초째인지·무엇을 기다리는지 정직하게 보이고 서버에 1회 보고한다.
+import { inflightSnapshot, stuckThresholdMs } from '../perfClient.js';
+import { loadingText } from '../perfClientLogic.js';
 import AccessDenied from './AccessDenied.jsx';
 import ServiceDown from './ServiceDown.jsx';
 import { serviceDownKind } from './serviceDownText.js';
@@ -191,7 +194,55 @@ export function SearchBox({ value = '', onChange, placeholder, className = 'inpu
   );
 }
 
-export function Loading() { return <div className="loading">불러오는 중…</div>; }
+/**
+ * 공용 로딩 표시(호출처 133곳 무변경 — 이 컴포넌트 하나만 바꾼다).
+ *
+ * 사용자 신고(v2.498): "'불러오는 중…' 이 3분 이상 지속될 때가 있다." 그때 화면이 아무것도 말해주지
+ * 않으면 사용자는 원인을 알 수 없고 새로고침·재로그인을 반복한다. 그래서:
+ *  · 15초까지는 기존 문구 그대로(짧은 대기에 잡음을 더하지 않는다).
+ *  · 그 뒤 '(N초째)', 30초 뒤에는 **무엇을 몇 초째 기다리는지**(진행 중 요청 경로).
+ *  · 기다리는 요청이 하나도 없으면 그 사실을 자백하고 새로고침 버튼을 준다 — 이 경우는 서버가
+ *    느린 것이 아니라 화면(뷰) 상태 문제다. 원인을 단정하지 않고 관측된 사실만 말한다(CLAUDE.md).
+ *  · 임계(서버 설정, 기본 60초)를 넘으면 서버에 1회 보고 → 설정 › 서버 성능 측정의 hang 기록.
+ * 훅은 조기 return 이 없는 leaf 컴포넌트에서만 쓰므로 React #310 위험이 없다. 1초 tick 타이머는
+ * 언마운트 시 해제한다.
+ */
+export function Loading() {
+  const [sec, setSec] = useState(0);
+  const reported = useRef(false);
+  useEffect(() => {
+    const t0 = Date.now();
+    ensurePerfClientConfig();   // 임계값을 서버에서 1회 받아온다(하드코딩 금지)
+    const id = setInterval(() => {
+      const ms = Date.now() - t0;
+      setSec(ms / 1000);
+      if (!reported.current && ms >= stuckThresholdMs()) {
+        reported.current = true;
+        const rows = inflightSnapshot(10);
+        try {
+          reportLoadingStall({
+            view: typeof window !== 'undefined' ? window.location.hash : '',
+            path: rows[0]?.path || '', ms,
+          });
+        } catch { /* 보고 실패는 화면에 영향 없음 */ }
+      }
+    }, 1000);
+    return () => clearInterval(id);
+  }, []);
+  const rows = sec >= 15 ? inflightSnapshot(10) : [];
+  const t = loadingText({ elapsedSec: sec, inflight: rows });
+  return (
+    <div className="loading">
+      {t.text}
+      {t.detail && <div className="muted" style={{ fontSize: 12, marginTop: 6, fontWeight: 400, overflowWrap: 'anywhere' }}>{t.detail}</div>}
+      {t.suggestReload && (
+        <div style={{ marginTop: 8 }}>
+          <button className="tab" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => window.location.reload()}>새로고침</button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 /**
  * 공용 오류 표시. **권한 거부(403)는 '오류'가 아니라 접근 제어**이므로 안내 화면으로 바꿔 보여준다.

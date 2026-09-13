@@ -11,6 +11,7 @@ import { buildWasteSheets, reportTargets, reportFileName, exportZipName } from '
 import { sheetsToWorkbook } from '../../tools/wasteExportXlsx.js';
 import { renderRightsizeHtml } from '../../tools/rightsizeHtml.js';
 import { zipMany } from '../../util/zip.js';
+import { withJob, withJobSync } from '../../perf/monitor.js'; // v2.498: 루프 정체가 관측되면 '그때 이 작업이 돌았다' 를 남긴다
 import { poweredOffSinceFor } from '../../tools/powerOff.js'; // v2.483: 전원 꺼진 VM 의 꺼진 시각
 import { loadPowerOffSettings, savePowerOffSettings, LIMITS as POWEROFF_LIMITS } from '../../tools/powerOffSettings.js'; // v2.484
 import { powerOffPollerStatus, runPowerOffCheckNow } from '../../tools/powerOffPoller.js';
@@ -372,6 +373,7 @@ let wasteExportBusy = null; // { user, at }
 const WASTE_EXPORT_MAX_REPORTS = Math.max(1, Math.min(1000, Number(process.env.WASTE_EXPORT_MAX_REPORTS) || 200));
 const WASTE_EXPORT_CHUNK = Math.max(1, Math.min(50, Number(process.env.WASTE_EXPORT_CHUNK) || 8));
 api.get('/tools/waste/export', requirePerm('tools'), async (req, res) => {
+  res.locals.perfExpectSlow = true; // v2.498: vCenter 성능 조회를 동반해 수십 초가 정상인 내보내기
   if (wasteExportBusy) {
     const sec = Math.round((Date.now() - wasteExportBusy.at) / 1000);
     return res.status(409).json({ ok: false, error: 'export_busy', reason: `다른 내보내기가 진행 중입니다(${wasteExportBusy.user || '사용자'} · ${sec}초 경과). 끝난 뒤 다시 시도하세요.` });
@@ -411,22 +413,26 @@ api.get('/tools/waste/export', requirePerm('tools'), async (req, res) => {
     const capped = targets.slice(0, WASTE_EXPORT_MAX_REPORTS);
     const reports = new Map();
     for (const v of targets.slice(WASTE_EXPORT_MAX_REPORTS)) reports.set(v.id, { skipped: `상한 ${WASTE_EXPORT_MAX_REPORTS}대` });
-    const results = await rightsizeReportsFor(snap, capped, days);
+    const results = await withJob('waste.export.perf', () => rightsizeReportsFor(snap, capped, days));
     const files = []; let failed = 0; let n = 0;
     for (const v of capped) {
       const r = results.get(v.id);
       if (!r || r.error) { reports.set(v.id, { error: r?.error || '알 수 없음' }); failed++; continue; }
       const file = reportFileName(v);
-      files.push({ name: file, data: renderRightsizeHtml({ report: r.report, vm: r.report.vm || v, days, generatedAt: t0 }) });
+      files.push({ name: file, data: withJobSync('waste.export.html', () => renderRightsizeHtml({ report: r.report, vm: r.report.vm || v, days, generatedAt: t0 })) });
       reports.set(v.id, { file, verdict: r.report.verdict });
-      if ((++n % 10) === 0) await new Promise((resolve) => setImmediate(resolve));
+      // 양보 간격 3건 — v2.498 계측 실측(mock 전체 범위)에서 10건 간격은 루프를 한 번에 ~830ms
+      // 막았다(리포트 1건이 SVG 3개 × 360점). 간격을 줄여 한 덩어리를 수십 ms 로 쪼갠다.
+      if ((++n % 3) === 0) await new Promise((resolve) => setImmediate(resolve));
     }
     const reportNote = `리포트 ${files.length}건 생성${failed ? ` · vCenter 조회 실패 ${failed}건` : ''}${targets.length > capped.length ? ` · 상한 초과로 생략 ${targets.length - capped.length}건(WASTE_EXPORT_MAX_REPORTS=${WASTE_EXPORT_MAX_REPORTS})` : ''}${snap.source === 'mock' ? ' · 데모(mock) 합성 데이터' : ''}`;
     const sheets = buildWasteSheets({ waste, offSince, reports, scopeLabel: vcId || 'all', cluster: group.cluster, folder: group.folder, days, full, generatedAt: t0, reportNote, nameFilter: q });
     const wb = await sheetsToWorkbook(sheets);
-    const xlsx = Buffer.from(await wb.xlsx.writeBuffer());
+    // xlsx 직렬화·zip deflate 는 쪼갤 수 없는 동기 구간이다(exceljs·zlib 동기 API) — 작업 이름을
+    // 달아 루프 정체가 관측되면 설정 › 서버 성능 측정의 hang 기록에서 원인이 바로 보이게 한다.
+    const xlsx = await withJob('waste.export.xlsx', async () => Buffer.from(await wb.xlsx.writeBuffer()));
     const zipName = exportZipName({ scope: vcId || 'all', cluster: group.cluster, folder: group.folder, at: t0 });
-    const zip = zipMany([{ name: zipName.replace(/\.zip$/, '.xlsx'), data: xlsx }, ...files]);
+    const zip = await withJob('waste.export.zip', async () => zipMany([{ name: zipName.replace(/\.zip$/, '.xlsx'), data: xlsx }, ...files]));
     logAudit({ user: req.user?.username, action: '낭비 리소스 엑셀 내보내기', target: vcId || 'all',
       detail: `days=${days} full=${full} cluster=${group.cluster || ''} folder=${group.folder || ''} q=${q} reports=${files.length} failed=${failed} skipped=${targets.length - capped.length} bytes=${zip.length} ms=${Date.now() - t0}`, ip: req.ip || '' });
     res.setHeader('Content-Type', 'application/zip');
@@ -468,12 +474,21 @@ async function rightsizeReportsFor(snap, targets, days) {
     if (rightsizeCache.size > 2000) for (const [k, e] of rightsizeCache) if (Date.now() - e.at > RIGHTSIZE_TTL_MS) rightsizeCache.delete(k);
   };
   const byVc = new Map();
+  let localN = 0;
   for (const t of targets) {
     const vm = vmById.get(t.id);
     if (!vm) { out.set(t.id, { error: 'VM 을 스냅샷에서 찾을 수 없습니다' }); continue; }
     const hit = rightsizeCache.get(`${vm.id}|${days}`);
     if (hit && end - hit.at < RIGHTSIZE_TTL_MS) { out.set(vm.id, { report: { ...hit.report, cached: true } }); continue; }
-    if (snap.source === 'mock') { const rep = analyze(vm, mockRightsizeSeries(vm, days, interval, mhzOf(vm), start)); remember(vm, rep); out.set(vm.id, { report: rep }); continue; }
+    if (snap.source === 'mock') {
+      const rep = analyze(vm, mockRightsizeSeries(vm, days, interval, mhzOf(vm), start));
+      remember(vm, rep); out.set(vm.id, { report: rep });
+      // 데모(mock)는 8계열 × 360표본을 VM 마다 **합성**하므로 이 루프가 순수 동기 CPU 다 —
+      // v2.498 계측에서 100 VM 전량 내보내기가 이벤트 루프를 한 번에 ~800ms 막는 것을 관측했다.
+      // 5건마다 양보해 덩어리를 수십 ms 로 쪼갠다(운영 경로는 vCenter 왕복 사이에 자연히 양보된다).
+      if ((++localN % 5) === 0) await new Promise((r) => setImmediate(r));
+      continue;
+    }
     if (!byVc.has(vm.vcenterId)) byVc.set(vm.vcenterId, []);
     byVc.get(vm.vcenterId).push(vm);
   }
@@ -485,10 +500,14 @@ async function rightsizeReportsFor(snap, targets, days) {
     if (!vc) { for (const vm of list) out.set(vm.id, { error: 'vCenter 설정을 찾을 수 없습니다' }); return; }
     try {
       const m = await fetchVmsRightsizeBatch(vc, list.map(morefOf), interval, { start, end, chunkSize: WASTE_EXPORT_CHUNK });
+      let n = 0;
       for (const vm of list) {
         const fetched = m.get(morefOf(vm));
         if (!fetched) { out.set(vm.id, { error: 'vCenter 가 이 VM 의 계열을 돌려주지 않았습니다' }); continue; }
         const rep = analyze(vm, fetched); remember(vm, rep); out.set(vm.id, { report: rep });
+        // 판정(analyzeRightsize)은 8계열 × 수백 표본을 순회하는 동기 계산이다 — 한 vCenter 에
+        // VM 이 많으면 이 루프가 연속 동기 구간이 되므로 8건마다 양보한다(값은 이미 받아 뒀다).
+        if ((++n % 8) === 0) await new Promise((r) => setImmediate(r));
       }
     } catch (e) {
       for (const vm of list) out.set(vm.id, { error: `vCenter 성능 조회 실패: ${e.message}` });
