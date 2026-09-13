@@ -1,9 +1,9 @@
 // 요약·호스트·VM·데이터스토어·네트워크·알람·도구사용 — api.js(구 2,445줄) 분할(v2.283.0). 본문은 원본 그대로, 등록 순서는 api.js 호출 순서가 보존한다.
-import { requirePerm } from '../../auth/auth.js';
-import { scopedVcenterIds, inUserScope } from '../../auth/scope.js';
+import { requirePerm, requireRole } from '../../auth/auth.js';
+import { scopedVcenterIds, inUserScope, writeScopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { browseDatastore } from '../../vcenter/dsBrowse.js';
-import { listMutes, addMute, removeMute } from '../../alarm-mutes.js';
+import { listMutes, addMute, removeMute, muteCreateIssue, muteDeleteIssue, visibleMutes } from '../../alarm-mutes.js';
 import { auditMiddleware } from '../../audit.js'; // v2.478(감사 S15): 알람 음소거는 무기록이었다
 import { recordToolUse, getTopTools } from '../../tool-usage.js';
 import { memoJson, applyFilters, sortBy, scopeKey, osFamily } from './shared.js';
@@ -363,18 +363,33 @@ api.get('/alarms', (req, res) => memoJson(req, res, 'inv:alarms', (snap) => {
 }, { extraKey: scopeKey(req.user, store.get()) }));
 
 // Alarm mute rules — "이 알람 앞으로 무시". Muted alarms are filtered globally.
-api.get('/alarm-mutes', (_req, res) => res.json({ mutes: listMutes() }));
-api.post('/alarm-mutes', requirePerm('inv.alarms'), auditMiddleware, (req, res) => {
-  const result = addMute(req.body || {});
-  if (result.ok) store.refresh().catch(() => {}); // re-apply immediately
-  res.status(result.ok ? 200 : 400).json(result);
+//
+// v2.500(감사 M-1, 회귀 수정): 생성/삭제 게이트가 `requirePerm('inv.alarms')` 뿐이었다. 그런데
+// `inv.alarms` 는 DEFAULT_MATRIX 에서 **viewer 기본 권한**이고 requirePerm 은 역할을 보지 않으므로,
+// viewer 토큰으로 `POST /alarm-mutes {scope:'all'}` 을 보내면 전 vCenter 알람을 영구 음소거할 수
+// 있었다(장애 은폐). AUDIT-2026-06-27 C2 가 requireRole 로 막았던 것이 권한 매트릭스 도입 때
+// requirePerm 으로 치환되며 다시 열린 회귀다 — server/CLAUDE.md '상태변경 라우트 RBAC' 불변조건.
+// 역할 게이트 + 쓰기 범위(muteCreateIssue/muteDeleteIssue)를 함께 건다.
+api.get('/alarm-mutes', (req, res) => {
+  res.json({ mutes: visibleMutes(listMutes(), writeScopedVcenterIds(req.user, store.get())) });
 });
-api.delete('/alarm-mutes/:id', requirePerm('inv.alarms'), auditMiddleware, (req, res) => {
+api.post('/alarm-mutes', requireRole('admin', 'operator'), requirePerm('inv.alarms'), auditMiddleware, (req, res) => {
+  const body = req.body || {};
+  const issue = muteCreateIssue(body, writeScopedVcenterIds(req.user, store.get()));
+  if (issue) return res.status(403).json({ error: 'forbidden', reason: issue });
+  const result = addMute(body);
+  if (result.ok) store.refresh().catch(() => {}); // re-apply immediately
+  return res.status(result.ok ? 200 : 400).json(result);
+});
+api.delete('/alarm-mutes/:id', requireRole('admin', 'operator'), requirePerm('inv.alarms'), auditMiddleware, (req, res) => {
   // req.params.id는 Express가 이미 1회 URL 디코드한 값 — 추가 decodeURIComponent는 이중
   // 디코드가 되어 '%' 포함 규칙(사용률 알람 등)에서 값 손상/URIError(500)를 유발한다.
+  const target = listMutes().find((m) => m.id === req.params.id);
+  const issue = muteDeleteIssue(target, writeScopedVcenterIds(req.user, store.get()));
+  if (issue) return res.status(403).json({ error: 'forbidden', reason: issue });
   const result = removeMute(req.params.id);
   if (result.ok) store.refresh().catch(() => {});
-  res.status(result.ok ? 200 : 404).json(result);
+  return res.status(result.ok ? 200 : 404).json(result);
 });
 
 // 특수 기능 사용 빈도 — 자주 쓰는 메뉴 자동 추천. 모든 로그인 사용자 합산 집계.

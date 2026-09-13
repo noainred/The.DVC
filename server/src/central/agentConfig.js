@@ -6,13 +6,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 
 const FILE = path.join(config.configDir, 'central-agent-config.json');
 
 // null-proto: 에이전트 이름을 키로 쓰므로 '__proto__' 등에 의한 프로토타입 오염 방지.
 let byAgent = Object.create(null); // agent -> { at, files:{ name: content } }
-try { if (fs.existsSync(FILE)) byAgent = Object.assign(Object.create(null), JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}); } catch { byAgent = Object.create(null); }
+// ⚠ v2.500(감사 M3): 이 파일은 각 엣지가 push 한 CONFIG_DIR 사본이다(portal.env 의 AUTH_SECRET·
+// CENTRAL_TOKEN, users.json TOTP, vcenters.json 비밀번호). 손상 시 조용히 {} 로 넘어가면 3초 뒤
+// persistSoon 이 **온전했던 원본을 빈 객체로 덮어쓴다** — 전 법인 설정 사본이 영구 유실된다.
+// 다른 비밀 스토어와 같은 규약(preserveCorrupt)으로 원본을 보존한다.
+try { if (fs.existsSync(FILE)) byAgent = Object.assign(Object.create(null), JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}); } catch (e) { preserveCorrupt(FILE, e.message); byAgent = Object.create(null); }
 
 let writeTimer = null;
 function persistSoon() {

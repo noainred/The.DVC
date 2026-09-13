@@ -376,7 +376,11 @@ api.get('/tools/waste/export', requirePerm('tools'), async (req, res) => {
   res.locals.perfExpectSlow = true; // v2.498: vCenter 성능 조회를 동반해 수십 초가 정상인 내보내기
   if (wasteExportBusy) {
     const sec = Math.round((Date.now() - wasteExportBusy.at) / 1000);
-    return res.status(409).json({ ok: false, error: 'export_busy', reason: `다른 내보내기가 진행 중입니다(${wasteExportBusy.user || '사용자'} · ${sec}초 경과). 끝난 뒤 다시 시도하세요.` });
+    // v2.500(감사 L-2): 진행자 계정명은 **본인일 때만** 밝힌다. tools 권한만 있는 계정이 연타해
+    // 관리자 로그인 ID 를 알아내는 계정 열거 단서였다(미인증 응답에 계정명을 싣지 않는 규칙의 형제).
+    const mine = wasteExportBusy.user && wasteExportBusy.user === (req.user?.username || '');
+    const who = mine ? '내 요청' : '다른 사용자';
+    return res.status(409).json({ ok: false, error: 'export_busy', reason: `다른 내보내기가 진행 중입니다(${who} · ${sec}초 경과). 끝난 뒤 다시 시도하세요.` });
   }
   wasteExportBusy = { user: req.user?.username || '', at: Date.now() };
   const t0 = Date.now();
@@ -392,7 +396,7 @@ api.get('/tools/waste/export', requirePerm('tools'), async (req, res) => {
     // 화면의 VM 이름 검색(q)을 그대로 반영한다 — 사용자 요구가 '이 표를 그대로' 이므로, 검색 중이면
     // 화면에 보이는 행만 나간다. KPI·vCenter 별 현황은 화면과 같이 **전체 기준**을 유지하고(카드 수치와
     // 표가 어긋나지 않게) 필터 사실은 요약 시트에 적는다. 리포트 대상도 필터 후 목록에서만 고른다.
-    const q = String(req.query.q || '').trim();
+    const q = String(req.query.q || '').trim().slice(0, 100);   // v2.500(감사 L-6): 감사로그·시트 문구 팽창 방지
     if (q) {
       const lower = q.toLowerCase();
       const byName = (rows) => (rows || []).filter((r) => (r.name || '').toLowerCase().includes(lower));

@@ -149,6 +149,17 @@ server/config/ipam-scan.json
 server/config/portal.env
 server/config/*.db
 server/config/vmperf/
+
+# 보안 감사 2026-09-13(M-2) — v2.49x 신규 런타임 파일이 차단 목록에 없었다.
+#  - perf-hangs.ndjson: hang 기록에 사용자명·클라이언트 IP·User-Agent·요청 경로가 남는다.
+#  - perf-monitor.json: 성능 측정 설정(임계값).
+#  - central-unsupported-servers.json: 엣지가 보고한 BMC 관리 IP·hostname.
+# 기본 CONFIG_DIR 이 server/config 라 개발 호스트에서 `git add -A` 시 그대로 올라간다.
+server/config/perf-hangs.ndjson
+server/config/perf-monitor.json
+server/config/central-unsupported-servers.json
+server/config/bm-storage.json
+server/config/*.ndjson
 sbp-shortcuts.csv
 sbp-proxy-shortcuts.json
 design-preview.html

@@ -83,6 +83,11 @@ export function zipMany(entries, { maxEntries = 2000, maxBytes = 256 * 1024 * 10
   for (const e of list) {
     const name = String(e?.name || '').replace(/\\/g, '/').replace(/^\/+/, '');
     if (!name) throw new Error('zip 항목 이름이 비어 있습니다');
+    // v2.500(감사 L-1): 범용 유틸이므로 Zip Slip 방어선을 여기서 둔다. 현재 호출부는 asciiSlug 로
+    // 구분자를 지워 도달 불가지만, 다음 호출부가 vCenter/VM 문자열을 그대로 넘기면 성립한다
+    // (압축을 푸는 쪽이 경로를 신뢰하면 임의 파일 덮어쓰기). 드라이브 문자도 함께 거부한다.
+    if (name.split('/').some((seg) => seg === '..')) throw new Error(`zip 항목 이름에 상위 경로(..)를 쓸 수 없습니다: ${name}`);
+    if (/^[A-Za-z]:/.test(name)) throw new Error(`zip 항목 이름에 드라이브 문자를 쓸 수 없습니다: ${name}`);
     if (seen.has(name)) throw new Error(`zip 항목 이름 중복: ${name}`);
     seen.add(name);
     const content = Buffer.isBuffer(e.data) ? e.data : Buffer.from(String(e?.data ?? ''));

@@ -10,6 +10,7 @@ import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
+import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js';
 
 const FILE = path.join(config.configDir, 'agent-deploy-targets.json');
 /**
@@ -71,18 +72,28 @@ export function saveTarget(body = {}) {
   const list = load();
   const existing = body.id ? list.find((t) => t.id === body.id) : null;
   const target = existing || { id: crypto.randomBytes(5).toString('hex'), enabled: true };
+  // ⚠ 보안(v2.500 감사 H1): SSH 접속처가 바뀌면 승계된 비밀을 버린다 — 판정은 **필드 병합 전**에
+  // 해야 한다(병합 후에는 이전 값을 알 수 없다). 이 검사가 없던 v2.339~2.499 는
+  // `{id:<기존>, host:'attacker', password:''}` 저장 후 상태확인/배포만 부르면 저장된 root 비밀번호와
+  // CENTRAL_TOKEN·COLLECTOR_TOKEN 이 공격자 호스트로 나갔다. 규칙 설명은 util/secretCarry.js.
+  const moved = accessMoved(existing, body, ['host', 'port', 'username']);
   for (const k of FIELDS) {
     if (body[k] === undefined) continue;
     // keep stored secret when UI sends an empty/redacted value
     if (SECRET_KEYS.includes(k) && (body[k] === '' || body[k] === '********')) continue;
     target[k] = body[k];
   }
+  const droppedSecrets = moved ? dropCarriedSecrets(target, body, SECRET_KEYS) : [];
   // gpuGuest(중첩 객체) 병합 — 'GPU 게스트 수집 자동 구성' 체크/계정을 보존한다.
   // 비밀번호(vcenterPass/guestPass)는 비거나 redacted(********)면 기존 저장값을 유지(편집 시 안 지워짐).
   if (body.gpuGuest && typeof body.gpuGuest === 'object') {
     const prev = target.gpuGuest || {};
     const g = body.gpuGuest;
-    const keepSecret = (nv, ov) => (nv && nv !== '' && nv !== '********') ? nv : (ov || '');
+    // 같은 규칙(v2.500 A/H-2): vCenter 접속처가 바뀌면 그 비밀번호를 승계하지 않는다 —
+    // vcenterHost 만 바꿔 저장하고 배포하면 저장 비번이 그 호스트로 나간다.
+    const vcHostChanged = g.vcenterHost !== undefined
+      && String(g.vcenterHost || '').trim().toLowerCase() !== String(prev.vcenterHost || '').trim().toLowerCase();
+    const keepSecret = (nv, ov) => ((nv && nv !== '' && nv !== '********') ? nv : (vcHostChanged ? '' : (ov || '')));
     target.gpuGuest = {
       enabled: !!g.enabled,
       vcenterId: g.vcenterId !== undefined ? g.vcenterId : (prev.vcenterId || ''),
@@ -96,7 +107,8 @@ export function saveTarget(body = {}) {
   }
   if (!existing) list.push(target);
   cache = list; persist();
-  return { ok: true, target: redact(target) };
+  // 버린 비밀을 화면이 알 수 있게 알린다 — 조용히 비우면 '배포가 왜 실패하지?' 로 이어진다.
+  return { ok: true, target: redact(target), droppedSecrets };
 }
 
 export function removeTarget(id) {

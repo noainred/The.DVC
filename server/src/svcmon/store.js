@@ -431,7 +431,10 @@ export function addTarget(data) {
   return t;
 }
 
-const folderKey = (kind, p) => `${kind} ${p}`;
+// v2.500(감사 L4): 구분자를 리터럴 NUL 바이트로 두면 file(1) 이 이 파일을 'data' 로 보고
+// grep/ripgrep 이 binary 로 분류해 **파일 전체를 건너뛴다** — 보안 감사의 사각지대를 만들지
+// 않는다(루트 CLAUDE.md v2.478 오판이 같은 원인). 같은 값을 이스케이프로 쓴다.
+const folderKey = (kind, p) => `${kind}\u0000${p}`;
 /** 폴더 경로 인덱스 — 대량 등록에서 행마다 folders.some() 을 돌면 O(행×폴더)가 된다. */
 function folderKeySet(dbx) {
   const s = new Set();

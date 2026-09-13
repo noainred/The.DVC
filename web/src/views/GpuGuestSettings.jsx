@@ -257,8 +257,8 @@ function QuickSshTest() {
         <input className="input" type="password" style={{ width: 130 }} placeholder="비밀번호(빈칸 가능)" value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && run()} />
         <input className="input" type="number" style={{ width: 80 }} min={1} max={65535} value={port} onChange={(e) => setPort(e.target.value)} title="SSH 포트" />
         <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} disabled={busy || !ip.trim() || !username.trim()} onClick={run}>{busy ? '테스트 중…' : '테스트'}</button>
-        <label className="flex gap" style={{ alignItems: 'center', fontSize: 12 }} title="실행 로그에 실제 id/pw 평문 표시(디버그)">
-          <input type="checkbox" checked={reveal} onChange={(e) => setReveal(e.target.checked)} /> 🔓 평문
+        <label className="flex gap" style={{ alignItems: 'center', fontSize: 12 }} title="실행 로그에 계정명과 비밀번호 길이를 표시합니다(디버그) — 비밀번호 값은 서버가 보내지 않습니다.">
+          <input type="checkbox" checked={reveal} onChange={(e) => setReveal(e.target.checked)} /> 🔓 계정 확인
         </label>
       </div>
       {res && (

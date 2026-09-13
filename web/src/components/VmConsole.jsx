@@ -64,7 +64,7 @@ function VmConsoleModal({ vmId, vmName, onClose }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <button className="logout-btn" style={{ padding: '12px', fontWeight: 700, opacity: data?.vmrcUrl ? 1 : 0.5 }}
             disabled={!data?.vmrcUrl}
-            onClick={() => { if (data?.vmrcUrl) window.location.href = data.vmrcUrl; }}>
+            onClick={() => { if (/^vmrc:/i.test(String(data?.vmrcUrl || ''))) window.location.href = data.vmrcUrl; }}>   {/* v2.500(감사): 스킴 확인 후 이동 */}
             LAUNCH REMOTE CONSOLE
             <div className="muted" style={{ fontSize: 11, fontWeight: 400, marginTop: 2 }}>VMware Remote Console (VMRC) 앱 필요</div>
           </button>

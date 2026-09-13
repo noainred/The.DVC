@@ -222,13 +222,26 @@ function autoTokenOpts(body) {
   };
 }
 
+/**
+ * ⚠ 보안(v2.500 감사 A/H-1): `autoCentralToken` 은 **이 포탈의 평문 CENTRAL_TOKEN** 을 요청자가
+ * 붙여넣은 host 의 portal.env 에 SSH 로 기록한다. adminOnly 만으로는 설정 소유자가 아닌 admin 이
+ * 자기 서버를 한 줄 넣어 중앙 토큰을 받아갈 수 있고, 그 토큰이면 공유 토큰 모드에서 전 엣지의
+ * iDRAC 계정·managed passwordHash 를 인출할 수 있다. 백업 라우트(portal.env 사본)를 소유자 전용으로
+ * 묶은 것과 같은 등급의 자산이므로 같은 경계를 적용한다. **옵션을 쓸 때만** 게이트해 기존 배포
+ * 흐름(토큰을 직접 입력하는 경우)은 그대로 둔다.
+ */
+function ownerIfAutoCentralToken(req, res, next) {
+  if (!req.body?.autoCentralToken) return next();
+  return requireSettingsOwner(req, res, next);
+}
+
 /** 화면이 고를 수 있는 열 순서 프리셋(헤더가 있으면 헤더가 우선). */
 adminRouter.get('/agent-deploy/bulk/presets', adminOnly, (_req, res) => res.json({
   ok: true, presets: Object.entries(COLUMN_PRESETS).map(([k, v]) => ({ key: k, label: v.label, columns: v.columns })),
   defaultPreset: DEFAULT_PRESET, hasCentralToken: !!centralTokenInfo().token,
 }));
 
-adminRouter.post('/agent-deploy/bulk/preview', adminOnly, (req, res) => {
+adminRouter.post('/agent-deploy/bulk/preview', adminOnly, ownerIfAutoCentralToken, (req, res) => {
   try {
     const text = String(req.body?.text || '');
     if (text.length > 1_000_000) return res.status(400).json({ ok: false, reason: '입력이 1MB 를 넘습니다.' });
@@ -244,7 +257,7 @@ adminRouter.post('/agent-deploy/bulk/preview', adminOnly, (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
 });
 
-adminRouter.post('/agent-deploy/bulk/run', adminOnly, (req, res) => {
+adminRouter.post('/agent-deploy/bulk/run', adminOnly, ownerIfAutoCentralToken, (req, res) => {
   try {
     const text = String(req.body?.text || '');
     if (text.length > 1_000_000) return res.status(400).json({ ok: false, reason: '입력이 1MB 를 넘습니다.' });

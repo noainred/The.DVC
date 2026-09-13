@@ -140,7 +140,26 @@ const requestedAgent = (req) => String(
 // 에 자기 이름을 넣어 미들웨어를 통과시키고 body.name 에는 남의 엣지 이름을 넣어 그 수집 서버의
 // URL·collectorToken 을 덮어쓸 수 있었다(중앙이 그 URL 로 자격증명을 실어 호출 → 유출 피벗).
 // 그래서 헤더 유무와 무관하게 register-collector 는 body.name 을 반드시 검사한다.
-const registerName = (req) => (req.path === '/register-collector' ? String(req.body?.name || '').trim() : '');
+// ⚠ 보안(v2.500 감사 C-1): `req.path === '/register-collector'` 정확 일치는 **Express 기본 라우팅
+// 설정에서 우회된다**. strict routing=false·case sensitive=false 라 `/register-collector/`,
+// `/Register-Collector`, `/register-collector/.` 도 핸들러에는 도달하지만 이 비교는 거짓이 되어
+// body.name 대조가 통째로 건너뛰어졌다(실측: 3개 변형 모두 claim='' 인 채 200). 헤더·쿼리 agent 를
+// 생략하면 requestedAgent 도 '' 이라 미들웨어 대조가 0건이 된다.
+// 경로를 정규화해 심층 방어하고, **실제 강제는 핸들러 안**(registerBindingDenied)에서 한다 —
+// 경로 문자열에 의존하는 게이트를 다시 만들지 말 것.
+const normPath = (p) => String(p || '').replace(/\/+$/, '').replace(/\/\.$/, '').toLowerCase();
+const registerName = (req) => (normPath(req.path) === '/register-collector' ? String(req.body?.name || '').trim() : '');
+
+/**
+ * register-collector 의 저장 키(body.name) ↔ 토큰 바인딩 대조 — **경로와 무관하게** 핸들러가 부른다.
+ * 반환: null(허용) 또는 거부 사유. 공유 토큰 모드는 기존 신뢰 유지(TOFU).
+ */
+function registerBindingDenied(req, name) {
+  if (req.centralAuth?.mode !== 'agent') return null;
+  const bound = String(req.centralAuth.agent || '').trim();
+  if (!name || name.toLowerCase() === bound.toLowerCase()) return null;
+  return `이 토큰은 '${bound}' 전용입니다(요청: '${name}').`;
+}
 
 // 인증 1회 해석 + agent 바인딩 강제(모든 라우트 공통). 라우트별 authed(req)는 이 결과를 읽는다.
 centralRouter.use((req, res, next) => {
@@ -210,6 +229,12 @@ centralRouter.post('/register-collector', async (req, res) => {
   const b = req.body || {};
   const name = String(b.name || '').trim();
   if (!name) return res.status(400).json({ ok: false, reason: 'name이 필요합니다.' });
+  // v2.500(감사 C-1): 미들웨어의 경로 일치가 우회돼도 여기서 반드시 막힌다.
+  const bindDenied = registerBindingDenied(req, name);
+  if (bindDenied) {
+    console.warn(`[central] agent 불일치 거부(register-collector) — 토큰=${req.centralAuth?.agent} 요청=${name}`);
+    return res.status(403).json({ ok: false, reason: bindDenied });
+  }
   if (!b.collectorToken) return res.status(400).json({ ok: false, reason: 'collectorToken이 필요합니다(엣지의 export 인증 토큰).' });
   // URL: 엣지가 명시(urlHint)하지 않으면 요청 peer IP + 알린 포트로 유도(NAT 없는 사내망 가정).
   let url = String(b.urlHint || '').trim();

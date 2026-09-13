@@ -67,6 +67,39 @@ export function listMutes() {
   return loadMutes();
 }
 
+/* ── 범위(scope) 판정 — 순수. 라우트가 auth/scope.js 의 Set(제한 없으면 null)을 넘긴다. ──
+ *
+ * v2.500(감사 M-1): 음소거는 '알람을 안 보이게 만드는' 상태변경이다. 규칙에 vcenterId 가 없으면
+ * **전 vCenter** 에 적용되므로, 범위 제한 계정이 만들면 자기 범위 밖 사이트의 장애까지 가린다.
+ * 조회 역시 규칙의 sample(알람 원문)·entityType 이 범위 밖 사이트의 자원명을 담을 수 있다.
+ */
+
+/** 생성 허용 판정. 반환: null(허용) 또는 거부 사유. allowed=null 이면 제한 없음. */
+export function muteCreateIssue({ scope, vcenterId } = {}, allowed = null) {
+  if (!allowed) return null;                                   // 전체 범위 계정 — 기존 동작 유지
+  if (scope !== 'vcenter' || !vcenterId) return '범위가 제한된 계정은 특정 vCenter 규칙만 만들 수 있습니다(전 vCenter 음소거는 전체 범위 계정 전용).';
+  if (!allowed.has(vcenterId)) return '수정 범위 밖의 vCenter 입니다.';
+  return null;
+}
+
+/** 삭제 허용 판정. 전 vCenter 규칙(vcenterId 없음)은 전체 범위 계정만 지울 수 있다. */
+export function muteDeleteIssue(mute, allowed = null) {
+  if (!allowed) return null;
+  if (!mute) return null;                                      // 없는 규칙 — 호출부가 404 로 처리
+  if (!mute.vcenterId) return '전 vCenter 규칙은 전체 범위 계정만 삭제할 수 있습니다.';
+  if (!allowed.has(mute.vcenterId)) return '수정 범위 밖의 vCenter 규칙입니다.';
+  return null;
+}
+
+/**
+ * 목록 가시성. 전 vCenter 규칙은 **그 사용자의 화면에도 실제로 적용되므로** 숨기지 않는다
+ * (숨기면 "알람이 왜 안 보이지?" 를 설명할 수 없다). 범위 밖 특정 vCenter 규칙만 가린다.
+ */
+export function visibleMutes(mutes = [], allowed = null) {
+  if (!allowed) return mutes;
+  return mutes.filter((m) => !m.vcenterId || allowed.has(m.vcenterId));
+}
+
 /** Does any rule mute this alarm? */
 export function isMuted(alarm, mutes = loadMutes()) {
   if (!mutes.length) return false;

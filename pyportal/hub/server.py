@@ -195,11 +195,23 @@ class HubHandler(BaseHTTPRequestHandler):
         return bool(host) and origin_host != host
 
     def _hub_token_ok(self) -> bool:
-        """HUB_TOKEN 이 설정된 경우에만 검사한다(미설정이면 사내망 공개 운영)."""
+        """HUB_TOKEN 이 설정된 경우에만 검사한다(미설정이면 사내망 공개 운영).
+
+        v2.500(감사 L1): `hmac.compare_digest` 는 str 인자가 비-ASCII 면 TypeError 를 던진다
+        (파이썬 사양). 헤더는 latin-1 로 디코딩되므로 `X-Hub-Token: évil` 한 줄이면 발생했고,
+        이 호출이 _dispatch 의 try 밖이라 잡히지 않아 **응답 없이 연결이 끊겼다**(실측).
+        바이트로 비교해 그 경로를 없앤다 — 불일치는 그냥 False 다.
+        """
         if not config.token:
             return True
         supplied = self._credential("X-Hub-Token", "hub_token")
-        return bool(supplied) and hmac.compare_digest(supplied, config.token)
+        if not supplied:
+            return False
+        try:
+            return hmac.compare_digest(str(supplied).encode("utf-8", "surrogateescape"),
+                                       str(config.token).encode("utf-8", "surrogateescape"))
+        except (TypeError, ValueError, UnicodeError):
+            return False
 
     def _session_user(self):
         return self.ctx.sessions.resolve(self._credential("X-Settings-Token", "hub_settings"))
@@ -426,11 +438,22 @@ class HubHandler(BaseHTTPRequestHandler):
     # ================= 설정 =================
 
     def api_settings_state(self):
-        if not self._require_session():
+        user = self._require_session()
+        if not user:
             return None
+        # v2.500(감사 L3): notify.webhookUrl 은 **URL 자체가 자격증명**(Slack/Teams)이다. 전송은
+        # admin 전용인데 값 읽기가 일반 세션에 열려 권한 경계가 어긋났다. 비-admin 에게는 저장
+        # 여부만 알린다(있다/없다) — 값을 가린 사실을 숨기지 않으려 hasWebhookUrl 로 표시한다.
+        settings = self.ctx.settings.all()
+        if user.get("role") != "admin":
+            notify = dict(settings.get("notify") or {})
+            notify["hasWebhookUrl"] = bool(notify.get("webhookUrl"))
+            notify["webhookUrl"] = ""
+            notify["redacted"] = True
+            settings = {**settings, "notify": notify}
         return self._json({
             "success": True,
-            "settings": self.ctx.settings.all(),
+            "settings": settings,
             "choices": {
                 "backupIntervalMinutes": list(BACKUP_INTERVAL_CHOICES),
                 "healthIntervalMinutes": list(HEALTH_INTERVAL_CHOICES),
@@ -661,7 +684,10 @@ class HubHandler(BaseHTTPRequestHandler):
     # ---- 백업 ----
 
     def api_backup_list(self):
-        if not self._require_session():
+        # v2.500(감사 L2): pyportal/CLAUDE.md 는 "목록·다운로드·복원은 admin 세션만" 이라고
+        # 규정하는데 목록만 일반 세션에 열려 있었다(백업 파일명·개수·저장 디렉터리 절대경로 노출).
+        # 형제 라우트(생성·다운로드·복원·삭제)와 같은 경계로 맞춘다.
+        if not self._require_admin():
             return None
         return self._json({"success": True, "backups": self.ctx.backups.list(),
                            "status": self.ctx.backups.status()})
