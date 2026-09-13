@@ -1,9 +1,9 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **341개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **344개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
-- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-12)
+- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-13)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다.
 - `portal.env.example` 에 예시가 있는 키는 ✅, 없는 키는 빈칸으로 표시한다.
 - 기본값 칸이 비어 있으면 코드에서 한 줄로 추출하지 못한 것이다(해당 파일을 참조).
@@ -391,17 +391,20 @@
 |---|---|---|---|
 | `HEALTH_PROBE_TIMEOUT_MS` | `5000` |  | health/network.js |
 
-## API 라우트 (25)
+## API 라우트 (28)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `CENTRAL_REQUIRE_AGENT_TOKEN` | `기본 아님('true' 일 때만 적용)` |  | routes/central.js |
 | `CENTRAL_VERIFY_SELF_REGISTER` | `기본 적용('false' 로 끄기)` | ✅ | routes/central.js |
+| `COMPARE_MATRIX_MAX_CLUSTERS` | `200` |  | routes/api/compareMatrix.js |
+| `COMPARE_MATRIX_MAX_DATASTORES` | `300` |  | routes/api/compareMatrix.js |
 | `GPU_EXPORT_MAX_ROWS` | `300000` |  | routes/api/hardwareGpu.js |
 | `METRICS_ALLOW_ANON` | `기본 적용('true' 로 끄기)` |  | routes/metricsExport.js |
 | `METRICS_ALLOW_QUERY_TOKEN` | `기본 아님('true' 일 때만 적용)` |  | routes/metricsExport.js |
 | `METRICS_EXPORT_TOKEN` | `''` |  | routes/metricsExport.js |
 | `PERF_CLIENT_COOLDOWN_MS` | `60000` |  | routes/api/perfClient.js |
+| `PERF_CLIENT_MAX_PER_HOUR` | `10` |  | routes/api/perfClient.js |
 | `RIGHTSIZE_CAP_REDUCTION_PCT` |  |  | routes/api/toolsCapacity.js |
 | `RIGHTSIZE_HEADROOM_PCT` |  |  | routes/api/toolsCapacity.js |
 | `RIGHTSIZE_MEM_BASIS` |  |  | routes/api/toolsCapacity.js |
@@ -520,4 +523,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 341
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 344
