@@ -170,3 +170,12 @@ design-preview-svcmon2.html
 # 임시 작업트리) — 커밋 대상이 아니므로 무시. `.claude/agents`·`.claude/skills` 등
 # 공유 설정은 체크인해야 하므로 `.claude/` 전체가 아니라 worktrees 만 무시한다.
 .claude/worktrees/
+
+# 목(mock) 서버 검증용 CONFIG_DIR — v2.505.
+# 문서·개발 절차가 `cd server && CONFIG_DIR=tmp DATA_SOURCE=mock node src/index.js` 로 로컬
+# 검증을 안내하는데, 이 디렉터리가 차단 목록에 없어 `git add -A` 때마다 런타임 산출물
+# (vmperf/*.db·-wal·-shm · auth-secret · initial-admin-password.txt · users.json)이 스테이징에
+# 올라왔다. 실제로 v2.503 커밋에 섞여 들어가 amend 로 걷어낸 적이 있다(해당 파일들에는
+# AUTH_SECRET·초기 admin 비밀번호가 들어 있어 커밋되면 그대로 유출이다).
+# 매번 `rm -rf server/tmp` 를 기억하는 것에 의존하지 않는다.
+server/tmp/
