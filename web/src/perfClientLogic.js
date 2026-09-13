@@ -8,6 +8,8 @@
  * (b) 기다리는 요청이 하나도 없으면 그 사실을 자백하고, (c) 서버에 1회 보고해 근거를 남긴다.
  */
 
+import { taskRows, secText } from './components/taskLabel.js';
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const HEX_RE = /^[0-9a-f]{12,}$/i;
 const NUM_RE = /^\d+$/;
@@ -27,26 +29,53 @@ export function normPath(p) {
 export const normView = (hash) => String(hash || '').split('?')[0].slice(0, 120);
 
 /**
- * '불러오는 중' 표시 문구. 15초까지는 기존 문구 그대로(짧은 대기에 잡음을 더하지 않는다),
- * 그 뒤에는 경과 초, 30초 뒤에는 무엇을 기다리는지, 기다리는 요청이 없으면 그 사실을 밝힌다.
- * @returns {{text: string, detail: string, suggestReload: boolean}}
+ * '불러오는 중' 표시 문구.
+ *
+ * v2.501(사용자 요구: "대기가 3초 이상이면 구체적으로 어떤 작업을 하는지 진행상태를 보여줄 것"):
+ * 문턱을 **3초**(서버 설정값 `clientDetailMs`)로 낮추고, 경과 초와 함께 **무엇을 기다리는지**
+ * 작업 이름·건수·각 대기 시간을 보여준다. 예전에는 15초까지 아무 정보가 없고 30초가 지나야
+ * 경로 하나를 보여줬다 — 사용자는 그 사이 '멈췄나?' 를 알 수 없었다.
+ *
+ * 단계:
+ *  · 3초 미만 — '불러오는 중…' 만(짧은 대기에 잡음을 더하지 않는다).
+ *  · 3초 이상 — 경과 초 + 진행 중 작업 목록(`tasks`). 설계상 오래 걸리는 작업은 그 사실을 알린다.
+ *  · 3초 이상인데 대기 요청이 없음 — '요청은 끝났고 화면을 그리는 중' 이라고만 말한다.
+ *    **이때 새로고침을 권하지 않는다** — 렌더 중인 정상 상태와 구분할 수 없고, 3초에 새로고침을
+ *    권하면 정상 동작을 고장으로 오인하게 만든다.
+ *  · stuckSec(서버 설정 `clientStuckMs`, 기본 60초) 이상 + 대기 요청 없음 — 그때 자백하고 새로고침 제공.
+ *
+ * `tasks` 는 화면이 줄 단위로 그린다. `detail` 은 한 줄 요약으로 남겨 기존 호출부 호환을 지킨다.
+ * @returns {{text:string, detail:string, tasks:Array, suggestReload:boolean}}
  */
-export function loadingText({ elapsedSec = 0, inflight = [], hintSec = 15, detailSec = 30 } = {}) {
+export function loadingText({
+  elapsedSec = 0, inflight = [], detailSec = 3, stuckSec = 60, taskLimit = 3, label = '',
+} = {}) {
   const s = Math.max(0, Math.round(elapsedSec));
-  if (s < hintSec) return { text: '불러오는 중…', detail: '', suggestReload: false };
-  const text = `불러오는 중… (${s}초째)`;
-  if (s < detailSec) return { text, detail: '', suggestReload: false };
+  const head = label ? `${label}…` : '불러오는 중…';
+  if (s < detailSec) return { text: head, detail: '', tasks: [], suggestReload: false };
+  const text = label ? `${label}… (${s}초째)` : `불러오는 중… (${s}초째)`;
   const rows = (inflight || []).filter((x) => x && x.path);
   if (!rows.length) {
-    return {
-      text,
-      detail: '대기 중인 요청이 없습니다 — 서버 응답은 끝났는데 화면이 갱신되지 않은 상태일 수 있습니다.',
-      suggestReload: true,
-    };
+    // 오래 걸리면 자백한다. 그 전까지는 사실만: 서버 응답은 끝났고 화면을 그리는 중이다.
+    if (s >= stuckSec) {
+      return {
+        text,
+        detail: '대기 중인 요청이 없습니다 — 서버 응답은 끝났는데 화면이 갱신되지 않은 상태일 수 있습니다.',
+        tasks: [],
+        suggestReload: true,
+      };
+    }
+    return { text, detail: '서버 응답은 모두 받았고 화면을 그리는 중입니다.', tasks: [], suggestReload: false };
   }
-  const top = [...rows].sort((a, b) => (b.ms || 0) - (a.ms || 0))[0];
+  const tasks = taskRows(rows, { limit: taskLimit, normalize: normPath });
+  const top = tasks[0];
   const more = rows.length > 1 ? ` 외 ${rows.length - 1}건` : '';
-  return { text, detail: `요청 ${normPath(top.path)} 응답 대기 ${Math.round((top.ms || 0) / 1000)}초${more}`, suggestReload: false };
+  return {
+    text,
+    detail: `${top.label} 응답 대기 ${secText(top.ms)}${more}`,
+    tasks,
+    suggestReload: false,
+  };
 }
 
 /**
