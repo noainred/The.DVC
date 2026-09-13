@@ -16,6 +16,7 @@ import { memSampleRows, maybeLogMem } from '../system/memtrack.js';
 import { insertVmperf, pruneVmperf } from './vmperfDb.js';
 import { loadVmperfSettings, vmperfTracks } from './vmperfSettings.js';
 import { roomTempRows } from '../idrac/roomTempSeries.js';
+import { serverTempRows } from '../idrac/serverTempSeries.js';   // v2.504: 서버별 온도 추이(아래 주석)
 
 let timer = null;
 let lastRun = null;
@@ -216,6 +217,18 @@ async function sampleOnceInner() {
   // 이 계열이 있어야 '흡기/배기/CPU 를 눌러 1일~1년 추이' 를 볼 수 있다(그 전에는 데이터 자체가
   // 없어 24시간을 넘는 기간을 그릴 방법이 없었다 — 화면이 수집 시작 시각을 함께 표기한다).
   try { rows.push(...roomTempRows()); } catch { /* 집계 실패가 샘플링을 막지 않게 */ }
+
+  // 서버별 iDRAC 온도(v2.504, 사용자 요청 "idrac 에서 조사하는 온도를 차트로 보이게 해줘").
+  //
+  // 위 주석의 "서버별 시계열은 만들지 않는다 — 965 서버 × 3종 × 시간당 = 연 2,500만 행" 은
+  // **3종을 모두 쓸 때**의 계산이었다. 그래서 기본은 **서버당 1계열**(idractemp_max — 그 서버의
+  // 최고 온도)만 적재한다: 965 × 24 × 365 ≈ 연 845만 행으로, 이미 수용 중인 temp_host
+  // (ESXi 655 호스트 ≈ 연 574만 행)와 같은 규모다. 흡기·배기·CPU 를 따로 보려면
+  // IDRAC_TEMP_SERIES_DETAIL=true(연 3,380만 행 — 현장이 알고 켠다), 완전 비활성은
+  // IDRAC_TEMP_SERIES=false. 이 계열이 있어야 **위임(엣지) 수집 서버**도 추이 차트를 갖는다
+  // (엣지는 최신 스냅샷만 export 하므로 중앙에 이력이 0 이었다 — v2.493 이 '중앙 이력 없음' 으로
+  // 정직하게 표기한 그 공백을 이 계열이 채운다).
+  try { rows.push(...serverTempRows()); } catch { /* 집계 실패가 샘플링을 막지 않게 */ }
 
   // 포탈 자신의 프로세스 메모리(누수 추적) — 인벤토리 유무와 무관하게 항상 샘플하고,
   // 시간당 1줄 상태 로그(링 버퍼·journal)도 여기서 남긴다. 실패가 본 샘플링을 막지 않게 격리.

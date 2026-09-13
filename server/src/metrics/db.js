@@ -68,6 +68,11 @@ function initSqlite() {
     const bucketHourly = db.prepare(`SELECT CAST(h/? AS INTEGER)*? AS b, SUM(sum)/SUM(n) AS avg, MIN(mn) AS min, MAX(mx) AS max
       FROM samples_hourly WHERE metric=? AND k=? AND h>=? GROUP BY b ORDER BY b DESC LIMIT ?`);
     const hourlyMin = db.prepare('SELECT MIN(h) AS mn FROM samples_hourly WHERE metric=? AND k=?');
+    // 키 하나의 첫/마지막 관측 시각(v2.504). **COUNT 를 넣지 않는다** — `meta(metric)` 의 COUNT(*) 는
+    // 그 metric 파티션 전체를 훑는다(감사 P2 #11). MIN/MAX 만이면 PK/인덱스 양끝 seek 로 끝난다.
+    // 용도: '수집 시작 이전' 을 화면이 소급 표시하지 않게 하는 기준선(v2.351 '+2만 TB' 오표시 교훈).
+    const keyMinMax = db.prepare('SELECT MIN(ts) AS mn, MAX(ts) AS mx FROM samples WHERE metric=? AND k=?');
+    const keyHourMinMax = db.prepare('SELECT MIN(h) AS mn, MAX(h) AS mx FROM samples_hourly WHERE metric=? AND k=?');
     const pruneHourly = db.prepare('DELETE FROM samples_hourly WHERE rowid IN (SELECT rowid FROM samples_hourly WHERE h < ? LIMIT ?)');
     // ⚠ 키별 상한을 **SQL 에서** 적용한다(2026-08-13 감사 '성능 잔여 A'). 과거에는 창 전체를
     //   전량 읽어 JS 에서 arr.slice(-limitPerKey) 로 잘랐다 — 창이 클램프(최대 7일)돼도
@@ -157,6 +162,19 @@ function initSqlite() {
       },
       recentAvg: (metric, sinceTs) => { const map = new Map(); for (const r of recentAvgAll.all(metric, sinceTs)) map.set(r.k, { avg: round1(r.avg), max: round1(r.max) }); return map; },
       meta: (metric) => { const r = metaStmt.get(metric); return { firstTs: r?.mn ?? null, lastTs: r?.mx ?? null, count: Number(r?.n || 0) }; },
+      /**
+       * 키 하나의 첫/마지막 관측 시각(v2.504). 원본이 prune 으로 잘려 나가도 롤업에 남아 있을 수
+       * 있으므로 **둘 중 더 이른 첫 관측·더 늦은 마지막 관측**을 돌려준다. 건수는 세지 않는다
+       * (파티션 풀스캔을 유발한다 — `meta()` 주석 참조).
+       */
+      metaKey: (metric, k) => {
+        const a = keyMinMax.get(metric, k) || {};
+        let b = {};
+        try { b = keyHourMinMax.get(metric, k) || {}; } catch { /* 롤업 테이블이 없는 구버전 */ }
+        const mins = [a.mn, b.mn].filter((x) => x != null);
+        const maxs = [a.mx, b.mx].filter((x) => x != null);
+        return { firstTs: mins.length ? Math.min(...mins) : null, lastTs: maxs.length ? Math.max(...maxs) : null };
+      },
       dump: (metric, sinceTs, untilTs, limit) => dumpStmt.all(metric, sinceTs, untilTs, limit).map((r) => ({ k: r.k, v: r.v, ts: r.ts })),
       /**
        * @param beforeTs        이 시각 이전의 **원본**을 지운다.
@@ -225,6 +243,8 @@ function initJson() {
       const map = new Map(); for (const [k, g] of agg) map.set(k, { avg: round1(g.sum / g.n), max: round1(g.max) }); return map;
     },
     meta: (metric) => { let mn = null, mx = null, n = 0; for (const r of rows) if (r.m === metric) { n++; if (mn == null || r.t < mn) mn = r.t; if (mx == null || r.t > mx) mx = r.t; } return { firstTs: mn, lastTs: mx, count: n }; },
+    // SQLite 구현과 같은 API(v2.504) — 호출부가 폴백 여부를 몰라도 되게 한다.
+    metaKey: (metric, k) => { let mn = null, mx = null; for (const r of rows) if (r.m === metric && r.k === k) { if (mn == null || r.t < mn) mn = r.t; if (mx == null || r.t > mx) mx = r.t; } return { firstTs: mn, lastTs: mx }; },
     dump: (metric, sinceTs, untilTs, limit) => rows.filter((r) => r.m === metric && r.t >= sinceTs && r.t <= untilTs).sort((a, b) => a.t - b.t).slice(0, limit).map((r) => ({ k: r.k, v: r.v, ts: r.t })),
     prune: (beforeTs) => { const n = rows.filter((r) => r.t >= beforeTs); if (n.length !== rows.length) { rows = n; try { fs.writeFileSync(file, rows.map((r) => JSON.stringify(r)).join('\n') + '\n', { mode: 0o600 }); } catch { /* */ } } },
   };

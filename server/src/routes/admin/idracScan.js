@@ -19,6 +19,8 @@ import { startIdracScanNow, idracScanStatus, stopIdracScanNow, setIdracScanInter
 import { listIdracScanLog, idracScanLogDatacenters } from '../../idrac/scanLog.js';
 import { getInventory as getIdracInventory } from '../../idrac/invCache.js';
 import { getSensorSeries, remoteSensorView } from '../../idrac/sensorStore.js';
+import { idracTempMetric, TEMP_SERIES_ENABLED, TEMP_SERIES_DETAIL } from '../../idrac/serverTempSeries.js'; // v2.504: 서버별 온도 장기 추이
+import { getMetricsDb } from '../../metrics/db.js';
 import { fetchInventory as fetchIdracInventory, fetchSensors as fetchIdracSensors, probeGpuTelemetry } from '../../idrac/redfish.js';
 import { listCollectors } from '../../collector/registry.js';
 import { findRemoteServer } from '../../collector/remoteInventory.js';
@@ -110,6 +112,66 @@ adminRouter.get('/idrac/:id/sensors', adminOnly, async (req, res) => {
   // seriesAvailable: 중앙이 이 서버의 시계열을 갖는지(로컬 등록 = 가짐). 화면이 '샘플 없음'과
   // '이력 미동기화(위임)'를 구분해 안내하는 근거.
   res.json({ ok: true, remote: false, seriesAvailable: true, cpuSynced: true, ...getSensorSeries(s.id, { minutes }), live, intervalMs: getPollerStatus().intervalMs });
+});
+
+/**
+ * 서버별 온도 **장기 추이**(v2.504) — GET /admin/idrac/:id/temp-history?days=&bucket=
+ *
+ * 사용자 요청: "idrac 에서 조사하는 온도를 차트로 보이게 해줘"(참고로 '특수 기능 › ESXi 온도' 의
+ * `5년 추이` 차트를 첨부). 기간·집계 단위 규약을 그 라우트(`/tools/esxi-temp/history`)와 **일부러
+ * 똑같이** 맞춘다 — 같은 조작을 두 화면에서 다르게 만들지 않기 위해서다.
+ *
+ * `/idrac/:id/sensors` 와의 차이:
+ *  · sensors  = `sensorStore` 인메모리 **24시간** · 센서 이름별 상세 · 중앙 직접 수집 서버만.
+ *  · 이 라우트 = metrics DB 의 `idractemp_*` 계열 · 최대 5년 · **위임(엣지) 서버도 포함**.
+ *    (엣지는 최신 스냅샷만 export 하므로 중앙에 이력이 0 이었다 — v2.504 계열이 그 공백을 채운다.)
+ *
+ * 정직성: 첫 관측 시각(`firstTs`)을 함께 준다. 화면이 '수집 시작 이전' 을 빈 구간으로 두어
+ * 없는 이력을 지어내지 않게 하기 위함이다. 상세(흡기·배기·CPU) 계열은 `IDRAC_TEMP_SERIES_DETAIL`
+ * 로만 적재되므로, 켜져 있지 않으면 `max` 한 줄만 온다 — 그 사실을 `detail` 로 밝힌다.
+ *
+ * 권한: 다른 iDRAC 상세 라우트와 같은 `adminOnly`(서버 분석 계열은 vCenter scope 를 걸지 않는다 —
+ * 이 파일 위쪽 `/idrac/temps` 주석의 기존 규약을 따른다).
+ */
+adminRouter.get('/idrac/:id/temp-history', adminOnly, async (req, res) => {
+  const id = String(req.params.id || '');
+  const known = loadIdracRegistry().some((x) => x.id === id) || !!findRemoteServer(id);
+  if (!known) return res.status(404).json({ ok: false, reason: '서버를 찾을 수 없습니다.' });
+
+  const days = Math.max(1, Math.min(1830, Number(req.query.days) || 7));
+  const since = Date.now() - days * 86_400_000;
+  // 집계 단위(기준) — /tools/esxi-temp/history 와 동일한 표와 자동 규칙.
+  const BUCKET = { minute: 60_000, hour: 3_600_000, day: 86_400_000 };
+  const bucket = BUCKET[req.query.bucket] ? req.query.bucket : 'auto';
+  const bucketMs = BUCKET[req.query.bucket]
+    || (days <= 2 ? 3_600_000 : days <= 14 ? 6 * 3_600_000 : days <= 120 ? 86_400_000 : days <= 800 ? 7 * 86_400_000 : 30 * 86_400_000);
+  const limit = bucketMs <= 60_000 ? 5000 : bucketMs <= 3_600_000 ? 3000 : 1500;
+
+  const series = {};
+  let firstTs = null;
+  let dbError = '';
+  try {
+    const db = await getMetricsDb();
+    const kinds = TEMP_SERIES_DETAIL ? ['max', 'inlet', 'exhaust', 'cpu'] : ['max'];
+    for (const kind of kinds) {
+      const metric = idracTempMetric(kind);
+      series[kind] = db.history(metric, id, since, bucketMs, limit);
+      // 첫 관측 시각 — 화면이 '수집 시작 이전' 을 소급 표시하지 않게 한다(v2.351 '+2만 TB' 교훈).
+      try {
+        const m = db.metaKey ? db.metaKey(metric, id) : null;
+        if (m?.firstTs && (firstTs == null || m.firstTs < firstTs)) firstTs = m.firstTs;
+      } catch { /* metaKey 미지원 버전 — firstTs 없이 응답(화면이 null 을 다룬다) */ }
+    }
+  } catch (e) {
+    // 오류를 삼키지 않는다(v2.493 규칙) — '수집 0' 과 '조회 실패' 는 다르다.
+    dbError = e?.message || String(e);
+    console.warn('[idrac] 온도 추이 조회 실패:', dbError);
+  }
+  res.json({
+    ok: true, id, days, bucket, bucketMs, firstTs,
+    enabled: TEMP_SERIES_ENABLED, detail: TEMP_SERIES_DETAIL,
+    series, error: dbError || undefined,
+  });
 });
 
 // iDRAC에서 GPU 사용률 수집 가능 여부 실측 확인(GPU 목록 + 텔레메트리 리포트).

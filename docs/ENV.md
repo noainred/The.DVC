@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **345개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **351개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-13)
@@ -25,7 +25,7 @@
 | `LOOP_LAG_WARN_MS` | `500` |  | util/loopLag.js |
 | `PRUNE_CHUNK_ROWS` |  |  | util/chunkedPrune.js |
 | `PRUNE_MAX_ROWS` |  |  | util/chunkedPrune.js |
-| `SNAP_CACHE_PER_NAME` | `12` |  | util/snapCache.js |
+| `SNAP_CACHE_PER_NAME` | `32` |  | util/snapCache.js |
 | `SOAP_PARSE_MIN_CHARS` | `262144` |  | util/soapParsePool.js |
 | `SOAP_PARSE_WORKERS` |  |  | util/soapParsePool.js |
 | `WAN_CONNECT_TIMEOUT_MS` | `20000` |  | util/resilientFetch.js |
@@ -126,10 +126,11 @@
 | `VC_TLS_REJECT_UNAUTHORIZED` | `기본 아님('true' 일 때만 적용)` | ✅ | config.js |
 | `VCENTERS_EXAMPLE_FALLBACK` | `기본 아님('true' 일 때만 적용)` |  | config.js |
 
-## 로그 (1)
+## 로그 (2)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
+| `LOGS_META_TTL_MS` | `30000` |  | logs/db.js |
 | `VCLOGS_CONCURRENCY` | `6` |  | logs/poller.js |
 
 ## 메트릭 수집 (8)
@@ -154,13 +155,14 @@
 | `BMSTOR_PUSH_TIMEOUT_MS` | `180000` |  | bmstor/poller.js |
 | `BMSTOR_SSH_TIMEOUT_MS` | `15000` |  | bmstor/collect.js |
 
-## 보안 (12)
+## 보안 (13)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `LOGIN_FAIL_WINDOW_MS` | `15` |  | security/loginRateLimit.js |
 | `LOGIN_GLOBAL_FACTOR` | `10` |  | security/loginRateLimit.js |
 | `LOGIN_IP_FACTOR` | `6` |  | security/loginRateLimit.js |
+| `LOGIN_IP_LOCKOUT_MS` | `60000` |  | security/loginRateLimit.js |
 | `LOGIN_LOCKOUT_MS` | `15` |  | security/loginRateLimit.js |
 | `LOGIN_MAX_FAILS` | `8` |  | security/loginRateLimit.js |
 | `LOGIN_POLICY_USERS` | `''` |  | security/securitySettings.js |
@@ -193,7 +195,7 @@
 | `EDGE_PUSH_TIMEOUT_MS` | `600000` |  | collector/upgradePush.js, upgrade/upgrade.js |
 | `SSRF_ALLOW_LOOPBACK` | `''` | ✅ | collector/registry.js |
 
-## 스토리지 수집 (16)
+## 스토리지 수집 (17)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -208,6 +210,7 @@
 | `STORAGE_POWERSTORE_LIST_LIMIT` | `2000` |  | storage/collectors/powerstore.js |
 | `STORAGE_POWERSTORE_METRICS_INTERVAL` | `'OneDay'` |  | storage/collectors/powerstore.js |
 | `STORAGE_POWERSTORE_PORT` | `443` |  | storage/collectors/powerstore.js |
+| `STORAGE_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | storage/push.js |
 | `STORAGE_TLS_VERIFY` | `기본 아님('true' 일 때만 적용)` |  | storage/collectors/isilon.js, storage/collectors/restCommon.js |
 | `STORAGE_UNISPHERE_PORT` | `8443` |  | storage/collectors/powermax.js |
 | `STORAGE_UNITY_PORT` | `443` |  | storage/collectors/unity.js |
@@ -437,11 +440,13 @@
 |---|---|---|---|
 | `HORIZON_TLS_VERIFY` | `기본 아님('true' 일 때만 적용)` |  | horizon/horizon.js |
 
-## iDRAC/전력 (5)
+## iDRAC/전력 (7)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `IDRAC_SENSOR_SAMPLES` | `1440` |  | idrac/sensorStore.js |
+| `IDRAC_TEMP_SERIES` | `기본 적용('false' 로 끄기)` |  | idrac/serverTempSeries.js |
+| `IDRAC_TEMP_SERIES_DETAIL` | `기본 아님('true' 일 때만 적용)` |  | idrac/serverTempSeries.js |
 | `OME_POWER_CONCURRENCY` | `16` |  | idrac/ome.js |
 | `POWER_CURRENT_STALE_MS` | `2` |  | idrac/service.js |
 | `POWER_NDJSON_MAX_ROWS` | `2000000` |  | idrac/db.js |
@@ -474,7 +479,7 @@
 |---|---|---|---|
 | `NSX_TLS_REJECT_UNAUTHORIZED` | `기본 아님('true' 일 때만 적용)` |  | nsx/client.js |
 
-## PDU (5)
+## PDU (6)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -482,6 +487,7 @@
 | `PDU_DB` |  |  | pdu/db.js |
 | `PDU_DEVICE_TIMEOUT_MS` | `90000` |  | pdu/poller.js |
 | `PDU_INTERVALS_LOCAL` | `기본 아님('1' 일 때만 적용)` |  | pdu/intervals.js |
+| `PDU_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | pdu/push.js |
 | `PDU_RETAIN_DAYS` | `400` |  | pdu/db.js |
 
 ## SAN 스위치 (20)
@@ -524,4 +530,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 345
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 351
