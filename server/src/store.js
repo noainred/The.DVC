@@ -1,4 +1,5 @@
 import { config, loadVcenterConfig , secretsReady } from './config.js';
+import { withJob } from './perf/monitor.js'; // v2.498: 스톨 발생 시 '진행 중 작업' 표시(계측 전용)
 import { generateSnapshot } from './mock/generator.js';
 import { collectFromVCenter } from './vcenter/restClient.js';
 import { describeError } from './util/errors.js';
@@ -189,7 +190,8 @@ class Store {
     const collectAll = this._collectAllPending === true;
     this._collectAllPending = false;
     this._refreshing = true;
-    this._inflight = this._refreshBody(collectAll);
+    // v2.498: 이벤트 루프 정체가 관측되면 '그때 무엇이 돌던 중' 을 hang 기록에 남긴다(계측만, 동작 무변).
+    this._inflight = withJob('store.refresh', () => this._refreshBody(collectAll));
     try { await this._inflight; } finally { this._refreshing = false; this._inflight = null; }
     return undefined;
   }

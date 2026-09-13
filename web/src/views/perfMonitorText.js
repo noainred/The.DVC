@@ -21,11 +21,15 @@ export function ago(t, now = Date.now()) {
   return `${Math.floor(s / 86_400)}일 전`;
 }
 
-/** 느린 요청의 사유 라벨 — reason 은 서버가 붙인다('wall'|'stall'|'wall+stall'). */
+/**
+ * 느린 요청의 사유 라벨 — reason 은 서버가 붙인다('wall'|'stall'|'wall+stall').
+ * 정직한 표현: 루프 정체는 **30초 창 단위**로만 관측되므로 '이 요청이 그만큼 막혔다' 가 아니라
+ * '이 요청이 정체가 관측된 구간과 겹쳤다' 가 사실이다. 라벨과 도움말을 그 수준으로 맞춘다.
+ */
 export function reasonLabel(reason) {
-  if (reason === 'stall') return { label: '루프 막힘', color: 'red', help: '요청이 진행되는 동안 이벤트 루프가 멈췄습니다 — 동기 CPU 작업(파싱·집계·대량 쓰기)이 원인입니다. 튜닝 대상입니다.' };
-  if (reason === 'wall+stall') return { label: '느림 + 루프 막힘', color: 'red', help: '오래 걸렸고 그 동안 이벤트 루프도 멈췄습니다 — 같은 요청 안의 동기 작업이 원인일 가능성이 큽니다.' };
-  return { label: '오래 걸림', color: 'amber', help: '월타임만 길었습니다 — vCenter·SSH·DB 응답을 기다린 경우가 대부분이고(고RTT 사이트는 정상) 이벤트 루프는 막히지 않았습니다.' };
+  if (reason === 'stall') return { label: '루프 정체 겹침', color: 'red', help: '이 요청 구간이 이벤트 루프 정체가 관측된 30초 창과 겹쳤습니다 — 동기 CPU 작업(파싱·집계·대량 쓰기)이 후보입니다. 창 단위 관측이라 이 요청이 실제로 그만큼 막혔다는 증명은 아니며, 귀속 값은 요청 길이로 상한을 둡니다.' };
+  if (reason === 'wall+stall') return { label: '오래 걸림 + 정체 겹침', color: 'red', help: '오래 걸렸고 그 구간이 루프 정체 창과도 겹쳤습니다 — 같은 요청 안의 동기 작업이 원인일 가능성이 큽니다(창 단위 관측).' };
+  return { label: '오래 걸림', color: 'amber', help: '월타임만 길었습니다 — vCenter·SSH·DB 응답을 기다린 경우가 대부분이고(고RTT 사이트는 정상) 겹친 정체 창은 없었습니다.' };
 }
 
 /** 상태 배지 — 루프 최근 창 기준. */
@@ -55,7 +59,7 @@ export function hangSummary(ev) {
     const waited = top ? `대기 ${top.path} ${ms(top.ms)}` : '대기 중인 요청 없음(화면 상태 문제 가능)';
     return `화면 ${ev.view || '—'} 에서 ${ms(ev.ms)} 동안 로딩 · ${waited} · 그때 서버 진행 중 요청 ${ev.serverInflightN ?? 0}건`;
   }
-  const jobs = (ev.jobs || []).length ? ` · 진행 작업 ${(ev.jobs || []).join(', ')}` : ' · 진행 작업 없음(기록된 작업 밖의 동기 코드)';
+  const jobs = (ev.jobs || []).length ? ` · 진행 작업 ${(ev.jobs || []).join(', ')}` : ' · 계측된 작업 없음(수집·집계 밖의 코드일 수 있음)';
   return `이벤트 루프 최대 ${ms(ev.maxMs)} 멈춤(p99 ${ms(ev.p99Ms)})${jobs} · 진행 중 요청 ${ev.inflightN ?? 0}건 · RSS ${ev.rssMb ?? '—'}MB`;
 }
 
@@ -84,6 +88,6 @@ export function routeHint(route, slowRows = []) {
   if (!rows.length) return '';
   const stall = rows.filter((x) => String(x.reason || '').includes('stall')).length;
   if (stall === 0) return '대기형(외부 응답 기다림)';
-  if (stall === rows.length) return '루프 막힘형(동기 작업)';
-  return `혼합(루프 막힘 ${stall}/${rows.length})`;
+  if (stall === rows.length) return '정체 겹침형(동기 작업 의심)';
+  return `혼합(정체 겹침 ${stall}/${rows.length})`;
 }

@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **339개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **341개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-12)
@@ -32,7 +32,7 @@
 | `WAN_MAX_CONNECTIONS` | `6` |  | util/resilientFetch.js |
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
 
-## 공통 (87)
+## 공통 (89)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -84,8 +84,10 @@
 | `OME_POWER_PLUGIN_ID` | `'2F6D05BE-EE4B-4B0E-B873-C8D2F64A4625'` | ✅ | config.js |
 | `PACKAGE_BASE_URL` |  |  | config.js |
 | `PACKAGE_DIR` |  |  | config.js |
+| `PERF_HANG_LOG_MAX_BYTES` | `8` |  | perf/hangLog.js |
 | `PERF_HANG_LOG_MAX_LINES` | `20000` |  | perf/hangLog.js |
 | `PERF_HANG_LOG_MAX_PER_MIN` | `60` |  | perf/hangLog.js |
+| `PERF_INFLIGHT_MAX_AGE_MS` | `600000` |  | perf/monitor.js |
 | `PING_DB_PATH` |  |  | config.js |
 | `PING_MON_CONCURRENCY` |  |  | config.js |
 | `PING_MON_ENABLED` | `기본 적용('false' 로 끄기)` |  | config.js |
@@ -518,4 +520,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 339
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 341

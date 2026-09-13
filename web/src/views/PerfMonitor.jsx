@@ -98,7 +98,8 @@ export default function PerfMonitor() {
       <div className="kpis" style={{ marginBottom: 12 }}>
         <Card label="이벤트 루프(최근 창)" value={fmtMs(d.loop?.last?.maxMs)} color={lb.color === 'red' ? 'var(--red)' : lb.color === 'amber' ? 'var(--amber)' : 'var(--green)'}
           sub={`p99 ${fmtMs(d.loop?.last?.p99Ms)} · 평균 ${fmtMs(d.loop?.last?.meanMs)}${d.loop?.last?.eluPct != null ? ` · 이용률 ${pct(d.loop.last.eluPct)}` : ''}`} />
-        <Card label="진행 중 요청" value={d.totals?.inflightN ?? 0} sub={d.jobs?.length ? `작업: ${d.jobs.join(', ')}` : '진행 중 작업 없음'} />
+        <Card label="진행 중 요청" value={d.totals?.inflightN ?? 0}
+          sub={`${d.jobs?.length ? `작업: ${d.jobs.join(', ')}` : '계측된 작업 없음'}${d.totals?.reaped ? ` · 미완료 수확 ${d.totals.reaped}건` : ''}${d.totals?.untracked ? ` · 추적 포기 ${d.totals.untracked}건` : ''}`} />
         <Card label="느린 요청" value={d.totals?.slow ?? 0} sub={`전체 ${(d.totals?.requests ?? 0).toLocaleString()}건 중 · 임계 ${fmtMs(st.slowRequestMs)}`}
           color={d.totals?.slow ? 'var(--amber)' : undefined} />
         <Card label="hang 기록" value={d.totals?.hangs ?? 0} sub={`화면 로딩 보고 ${d.totals?.clientStalls ?? 0}건 · 임계 ${fmtMs(st.hangLagMs)}`} color={d.totals?.hangs ? 'var(--red)' : undefined} />
@@ -168,12 +169,11 @@ export default function PerfMonitor() {
           <div style={{ fontWeight: 700, marginBottom: 6 }}>진행 중 요청 {d.inflight?.length ? `(${d.inflight.length})` : ''}</div>
           {(d.inflight || []).length ? (
             <STable className="table">
-              <thead><tr><th>경과</th><th>메서드</th><th>경로</th><th>라우트</th></tr></thead>
+              <thead><tr><th>경과</th><th>메서드</th><th>경로</th></tr></thead>
               <tbody>{d.inflight.map((r) => (
                 <tr key={r.id}>
                   <td data-sort={r.ageMs} style={{ color: r.ageMs > 5000 ? 'var(--amber)' : undefined }}>{fmtMs(r.ageMs)}</td>
                   <td>{r.method}</td><td style={{ overflowWrap: 'anywhere' }}>{r.path}</td>
-                  <td className="muted" style={{ overflowWrap: 'anywhere' }}>{r.route}</td>
                 </tr>
               ))}</tbody>
             </STable>
@@ -186,6 +186,7 @@ export default function PerfMonitor() {
           라우트별 요청 지연. 백분위는 <b>12버킷 히스토그램의 선형 보간 근사</b>입니다(요청마다 표본을 쌓지 않아 상시 비용이 O(1)).
           정렬 기본은 '느린 건수' — 튜닝은 자주 느린 것부터 합니다. 프로세스 재시작 시 초기화됩니다.
           {d.routesTruncated && <> 라우트가 많아 상위 {(d.routes || []).length}개만 표시합니다.</>}
+          {d.totals?.routesEvicted ? <> 키 상한({d.totals.routeKeys}개)에 닿아 가장 오래된 키 {d.totals.routesEvicted}개를 퇴출했습니다 — 라우터가 매칭하지 못한 요청(401·404)은 개별 키를 만들지 않고 <code>__unauthorized__</code>·<code>__unmatched__</code> 로 모입니다.</> : null}
         </div>
         <STable className="table">
           <thead><tr><th>라우트</th><th>건수</th><th>평균</th><th>p50</th><th>p95</th><th>p99</th><th>최대</th><th>느림</th><th>느림 비율</th><th>5xx</th><th>유형</th><th>마지막</th></tr></thead>
@@ -213,14 +214,16 @@ export default function PerfMonitor() {
 
       {tab === 'slow' && (<>
         <div className="muted" style={{ fontSize: 12, marginBottom: 8, lineHeight: 1.6 }}>
-          임계({fmtMs(st.slowRequestMs)}) 를 넘은 요청과, 짧아도 <b>이벤트 루프가 막힌 구간에 걸친</b> 요청입니다.
+          임계({fmtMs(st.slowRequestMs)}) 를 넘은 요청과, 짧아도 <b>루프 정체가 관측된 구간과 겹친</b> 요청입니다.
           사유 <b>오래 걸림</b>은 외부(vCenter·SSH·DB) 응답을 기다린 것이고 — 고RTT 사이트에서는 정상입니다 —
-          <b>루프 막힘</b>은 동기 작업이 서버를 붙잡은 것이라 튜닝 대상입니다. 롱폴·데이터스토어 탐색처럼
-          오래 걸리는 것이 정상인 라우트는 월타임 기준에서 제외합니다. 최근 {st.keepSlow}건만 보관합니다.
+          <b>정체 겹침</b>은 동기 작업이 서버를 붙잡았을 가능성이 큰 쪽입니다. 다만 루프 정체는 <b>30초 창</b>
+          단위로만 관측되므로 겹침이 '이 요청이 그만큼 막혔다' 는 증명은 아니며, 귀속 값은 요청 길이로 상한을 둡니다.
+          롱폴·데이터스토어 탐색처럼 오래 걸리는 것이 정상인 라우트는 월타임 기준에서 제외합니다.
+          최근 {st.keepSlow}건만 보관합니다(프로세스 재시작 시 초기화).
         </div>
         {(d.slow || []).length ? (
           <STable className="table">
-            <thead><tr><th>시각</th><th>사유</th><th>소요</th><th>루프 막힘</th><th>상태</th><th>메서드</th><th>경로</th><th>사용자</th><th>진행중</th><th>RSS</th><th>작업</th></tr></thead>
+            <thead><tr><th>시각</th><th>사유</th><th>소요</th><th>정체 겹침</th><th>상태</th><th>메서드</th><th>경로</th><th>사용자</th><th>진행중</th><th>RSS</th><th>작업</th></tr></thead>
             <tbody>{d.slow.map((r, i) => {
               const rl = reasonLabel(r.reason);
               return (
@@ -258,7 +261,7 @@ export default function PerfMonitor() {
             {busy === 'clear' ? '삭제 중…' : '로그 비우기'}
           </button>
           <span className="muted" style={{ fontSize: 11.5 }}>
-            파일 {d.hangLog?.bytes == null ? '없음' : `${Math.round(d.hangLog.bytes / 1024)} KB`}
+            파일 {d.hangLog?.bytes == null ? '없음' : `${Math.round(d.hangLog.bytes / 1024)} KB / 상한 ${Math.round((d.hangLog?.maxBytes || 0) / 1048576)} MB`}
             {d.hangLog?.dropped ? ` · 분당 상한(${d.hangLog.maxPerMin})으로 버린 기록 ${d.hangLog.dropped}건` : ''}
             {d.hangLog?.lastError ? ` · 쓰기 오류: ${d.hangLog.lastError}` : ''}
             {' '}· 보존 {st.retentionDays}일
@@ -266,7 +269,7 @@ export default function PerfMonitor() {
         </div>
         {hangFile && (
           <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
-            파일에서 {hangFile.rows?.length ?? 0}건 읽음(총 {hangFile.total ?? 0}줄{hangFile.badLines ? ` · 파싱 실패 ${hangFile.badLines}줄` : ''}).
+            파일에서 {hangFile.rows?.length ?? 0}건 읽음({hangFile.tailOnly ? '파일이 읽기 상한을 넘어 뒤쪽 일부만 읽었습니다 — ' : '총 '}{hangFile.total ?? 0}줄{hangFile.badLines ? ` · 파싱 실패 ${hangFile.badLines}줄` : ''}).
             {hangFile.error ? ` 읽기 오류: ${hangFile.error}` : ''}
           </div>
         )}

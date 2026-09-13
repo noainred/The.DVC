@@ -16,6 +16,7 @@
  *   LRU 로 들고 있어 사용자·필터 조합이 그 안이면 설계 의도(스냅샷당 1회 계산)대로 동작한다.
  *   엔트리 수는 (엔드포인트 42개 × MAX_PER_NAME) 로 유계이고, 값은 스냅샷이 넘어가면 교체된다.
  */
+import { withJob } from '../perf/monitor.js'; // v2.498: 스톨 발생 시 '진행 중 작업' 표시(계측 전용)
 
 const MAX_PER_NAME = Math.max(2, Math.min(64, Number(process.env.SNAP_CACHE_PER_NAME) || 12));
 const store = new Map(); // name -> Map(key -> { at, value, promise })  ※ Map 은 삽입 순서 = LRU 순서
@@ -55,7 +56,8 @@ export async function snapMemo(name, key, ttlMs, compute) {
     if (cur.promise) return cur.promise;                                     // 진행 중 계산에 합류
   }
   const promise = (async () => {
-    const value = await compute();
+    // v2.498: 집계 계산 중 루프가 막히면 hang 기록에 'memo:<이름>' 으로 남는다(계측 전용).
+    const value = await withJob(`memo:${name}`, compute);
     // 이 계산이 끝났을 때 이미 다른 계산이 이 key 를 차지했으면 덮어쓰지 않는다 — 덮어쓰면
     // 그쪽 in-flight promise 가 사라져 후속 요청이 다시 재계산한다(single-flight 붕괴).
     const s = b.get(key);

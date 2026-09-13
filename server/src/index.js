@@ -134,24 +134,11 @@ app.use(rateLimit({ skip: (req) => {
   return p === '/api/health' || p === '/metrics' || p === '/dl' || p.startsWith('/dl/')
     || !p.startsWith('/api'); // 정적 자산/SPA는 제한 제외
 } }));
-// 사이트 위임 수집의 인벤토리 push(/api/central/inventory)만 수MB가 될 수 있어 큰 한도를 적용.
-// 그 외 모든 라우트는 기본 1mb로 제한해 메모리/요청 남용 면적을 줄인다.
-// 한도 16mb: 실제 사이트 push는 수백 KB~수 MB 수준 — 64mb는 동기 JSON.parse가 최악 수 초
-// 이벤트 루프를 막는 것을 허용하는 과대 한도였다(필요 시 JSON_BODY_LIMIT로 상향 가능).
-const BIG_JSON = express.json({ limit: process.env.JSON_BODY_LIMIT || '16mb' });
-app.use('/api/central/inventory', BIG_JSON);
-app.use('/api/central/guest-disk', BIG_JSON); // 게스트 디스크 push(v2.466) — inventory 와 동종(그 vCenter 전 VM+파티션). 1mb 기본이면 대형 site vCenter 가 413 으로 조용히 실패
-app.use('/api/central/agent-config', BIG_JSON); // 엣지 설정 통합 push(다수 파일)
-// 대상 가져오기는 XLSX 를 base64 로 실을 수 있어(2,000행 규모 ~1MB 초과 가능) 큰 한도를 준다.
-app.use('/api/svcmon/targets/import', BIG_JSON);
-app.use('/api/svcmon/targets/hostmap/parse', BIG_JSON);
-// TRUST_PROXY(v2.428, 구성도 미스매치 #8): 중앙/엣지가 HAProxy·nginx 뒤에 있으면 홉 수(예 1)를 지정 — req.ip 가 X-Forwarded-For 의
-// 실제 클라이언트가 되어 레이트리밋 버킷·감사 IP·수집 인증 거부 로그가 프록시 IP 로 뭉치지 않는다. 프록시가 없으면 절대 켜지 말 것
-// (아무 클라이언트나 X-Forwarded-For 로 IP 를 속인다). HAProxy 는 http 모드에서 `option forwardfor` 필요.
-if (process.env.TRUST_PROXY) app.set('trust proxy', /^\d+$/.test(process.env.TRUST_PROXY) ? Number(process.env.TRUST_PROXY) : process.env.TRUST_PROXY);
-app.use(express.json({ limit: '1mb' }));
-
 // Lightweight request logging for the log viewer (skip the log endpoint itself).
+// ⚠ 위치: **본문 파서(express.json) 앞**이다(v2.498). 뒤에 두면 본문 수신 시간과 최대 16MB 동기
+// JSON.parse 가 계측에서 빠져, 고RTT 사이트에서 수 MB 를 올리는 위임 push 가 '빠른 라우트' 로
+// 찍히고 이 프로세스의 가장 큰 단일 블로킹 사건이 표에 안 잡힌다. 레이트리밋 뒤에 두어 429 의
+// 라이브 로그 동작은 예전과 같게 유지한다.
 // v2.498: 같은 자리에서 성능 측정도 한다 — 요청당 비용은 Map set/delete + 카운터뿐이고,
 // 임계를 넘은 요청만 링에 남는다(perf/monitor.js). 라이브 로그 한 줄의 형식·조건은 그대로 유지한다
 // (진단·로그 화면 회귀 방지). 클라이언트가 끊은 요청(finish 없이 close)은 로그에는 남기지 않고
@@ -179,7 +166,13 @@ app.use((req, res, next) => {
       // 세그먼트를 마스킹한 키를 쓴다(카디널리티 유계). 두 방식이 섞여 같은 라우트가 갈라지지 않게
       // 템플릿은 '/api' 로 시작할 때만 채택한다(라우터 dispatch 후 baseUrl 이 복원되는 경우 대비).
       const tmpl = req.route?.path ? `${req.baseUrl || ''}${req.route.path === '/' ? '' : req.route.path}` : '';
-      const route = tmpl && tmpl.startsWith('/api') ? tmpl.slice(0, 120) : routeKeyOf({ path: url });
+      const route = tmpl && tmpl.startsWith('/api')
+        ? tmpl.slice(0, 120)
+        // 템플릿이 없으면(라우터 dispatch 전에 끝난 401/403, 미매칭 404) **경로 전문을 키로 쓰지
+        // 않는다** — 이 미들웨어는 인증보다 앞이라 임의 경로로 라우트 표를 채울 수 있다.
+        // 상태코드로 묶은 고정 키 1개면 충분하고, 경로 자체는 느린 요청 레코드에 남는다.
+        : (res.statusCode === 401 || res.statusCode === 403 ? '/api/__unauthorized__'
+          : res.statusCode === 404 ? '/api/__unmatched__' : routeKeyOf({ path: url }));
       endRequest(perfId, {
         method: req.method, path: url, route,
         status: aborted ? 499 : res.statusCode, ms,
@@ -192,6 +185,23 @@ app.use((req, res, next) => {
   res.on('close', () => settle(!res.writableEnded));
   next();
 });
+
+// 사이트 위임 수집의 인벤토리 push(/api/central/inventory)만 수MB가 될 수 있어 큰 한도를 적용.
+// 그 외 모든 라우트는 기본 1mb로 제한해 메모리/요청 남용 면적을 줄인다.
+// 한도 16mb: 실제 사이트 push는 수백 KB~수 MB 수준 — 64mb는 동기 JSON.parse가 최악 수 초
+// 이벤트 루프를 막는 것을 허용하는 과대 한도였다(필요 시 JSON_BODY_LIMIT로 상향 가능).
+const BIG_JSON = express.json({ limit: process.env.JSON_BODY_LIMIT || '16mb' });
+app.use('/api/central/inventory', BIG_JSON);
+app.use('/api/central/guest-disk', BIG_JSON); // 게스트 디스크 push(v2.466) — inventory 와 동종(그 vCenter 전 VM+파티션). 1mb 기본이면 대형 site vCenter 가 413 으로 조용히 실패
+app.use('/api/central/agent-config', BIG_JSON); // 엣지 설정 통합 push(다수 파일)
+// 대상 가져오기는 XLSX 를 base64 로 실을 수 있어(2,000행 규모 ~1MB 초과 가능) 큰 한도를 준다.
+app.use('/api/svcmon/targets/import', BIG_JSON);
+app.use('/api/svcmon/targets/hostmap/parse', BIG_JSON);
+// TRUST_PROXY(v2.428, 구성도 미스매치 #8): 중앙/엣지가 HAProxy·nginx 뒤에 있으면 홉 수(예 1)를 지정 — req.ip 가 X-Forwarded-For 의
+// 실제 클라이언트가 되어 레이트리밋 버킷·감사 IP·수집 인증 거부 로그가 프록시 IP 로 뭉치지 않는다. 프록시가 없으면 절대 켜지 말 것
+// (아무 클라이언트나 X-Forwarded-For 로 IP 를 속인다). HAProxy 는 http 모드에서 `option forwardfor` 필요.
+if (process.env.TRUST_PROXY) app.set('trust proxy', /^\d+$/.test(process.env.TRUST_PROXY) ? Number(process.env.TRUST_PROXY) : process.env.TRUST_PROXY);
+app.use(express.json({ limit: '1mb' }));
 
 app.use('/api/collector', collectorRouter);            // token-gated agent export (no user auth)
 app.use('/api/central', centralRouter);                // token-gated agent<->central (no user auth)

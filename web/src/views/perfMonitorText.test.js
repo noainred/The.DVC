@@ -29,12 +29,14 @@ describe('느린 요청 사유 — 기다림과 막힘을 구분한다', () => {
     expect(reasonLabel('wall').color).toBe('amber');
     expect(reasonLabel('wall').label).toBe('오래 걸림');
     expect(reasonLabel('stall').color).toBe('red');
-    expect(reasonLabel('stall').label).toBe('루프 막힘');
-    expect(reasonLabel('wall+stall').label).toContain('루프 막힘');
+    expect(reasonLabel('stall').label).toBe('루프 정체 겹침');
+    expect(reasonLabel('wall+stall').label).toContain('정체 겹침');
     expect(reasonLabel(undefined).label).toBe('오래 걸림');
   });
-  it('도움말이 무엇을 고쳐야 하는지 말한다', () => {
+  it('도움말이 무엇을 고쳐야 하는지 말하고, 창 단위 관측의 한계를 밝힌다', () => {
     expect(reasonLabel('stall').help).toContain('동기');
+    expect(reasonLabel('stall').help).toContain('증명은 아니며');
+    expect(reasonLabel('stall').help).toContain('30초');
     expect(reasonLabel('wall').help).toContain('기다린');
   });
 });
@@ -59,7 +61,7 @@ describe('hang 이벤트 요약', () => {
     expect(s).toContain('2.5초');
     expect(s).toContain('store.refresh');
     expect(s).toContain('812MB');
-    expect(hangSummary({ kind: 'loop', maxMs: 1200, jobs: [] })).toContain('진행 작업 없음');
+    expect(hangSummary({ kind: 'loop', maxMs: 1200, jobs: [] })).toContain('계측된 작업 없음');
   });
   it('화면 로딩 — 대기 요청이 없으면 화면 상태 문제 가능성을 말한다', () => {
     const a = hangSummary({ kind: 'client', view: '#/insights/finops', ms: 187_000, clientInflight: [{ path: '/insights/finops/config', ms: 120_000 }], serverInflightN: 1 });
@@ -102,8 +104,9 @@ describe('라우트 표', () => {
       { route: '/api/b', reason: 'stall' }, { route: '/api/c', reason: 'wall' }, { route: '/api/c', reason: 'wall+stall' },
     ];
     expect(routeHint('/api/a', rows)).toBe('대기형(외부 응답 기다림)');
-    expect(routeHint('/api/b', rows)).toBe('루프 막힘형(동기 작업)');
+    expect(routeHint('/api/b', rows)).toBe('정체 겹침형(동기 작업 의심)');
     expect(routeHint('/api/c', rows)).toContain('혼합');
+    expect(routeHint('/api/c', rows)).toContain('정체 겹침');
     expect(routeHint('/api/none', rows)).toBe('');
   });
 });

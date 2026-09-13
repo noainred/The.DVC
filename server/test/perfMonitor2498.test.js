@@ -144,16 +144,37 @@ test('이벤트 루프 창 — 임계 초과면 hang 이벤트 + 활성 작업 �
   assert.equal(M.activeJobNames().length, 0, 'endJob 후 활성 작업이 남으면 안 된다');
 });
 
-test('스톨 구간에 걸친 요청은 wall 이 짧아도 stall 사유로 기록된다(기다림과 막힘을 구분)', () => {
+test('루프 정체 창과 겹친 요청은 wall 이 짧아도 stall 사유로 기록된다(기다림과 막힘을 구분)', () => {
   M._resetPerfMonitorForTest();
   SET.savePerfSettings({ ...SET.DEFAULTS, slowRequestMs: 10_000, hangLagMs: 500 });
+  M.recordLoopWindow({ maxMs: 1_200, p99Ms: 800, meanMs: 30 });   // 30초 창에서 1.2초 정체가 관측됐다
   const id = M.beginRequest({ method: 'GET', path: '/api/overview' });
-  M.recordLoopWindow({ maxMs: 1_200, p99Ms: 800, meanMs: 30 });  // 요청 도중 루프가 막혔다
   M.endRequest(id, { method: 'GET', path: '/api/overview', route: '/api/overview', status: 200, ms: 900 });
   const snap = M.perfSnapshot();
-  assert.equal(snap.slow.length, 1);
+  assert.equal(snap.slow.length, 1, '임계(10초) 미만이지만 정체 창과 겹쳐 기록돼야 한다');
   assert.equal(snap.slow[0].reason, 'stall');
-  assert.ok(snap.slow[0].stallMs >= 1_200);
+  assert.equal(snap.slow[0].stallMs, 900, '귀속은 요청 길이를 넘지 못한다(물리적 상한)');
+});
+
+test('짧은 요청은 정체 창 전체를 뒤집어쓰지 않는다(거짓양성 차단)', () => {
+  M._resetPerfMonitorForTest();
+  SET.savePerfSettings({ ...SET.DEFAULTS, slowRequestMs: 10_000, hangLagMs: 500 });
+  M.recordLoopWindow({ maxMs: 25_000, p99Ms: 20_000, meanMs: 900 }); // 25초 정체가 있던 창
+  const id = M.beginRequest({ method: 'GET', path: '/api/health' });
+  M.endRequest(id, { method: 'GET', path: '/api/health', route: '/api/health', status: 200, ms: 5 });
+  const snap = M.perfSnapshot();
+  assert.equal(snap.slow.length, 0, '5ms 요청이 25초 정체를 뒤집어쓰면 느린 요청 목록이 쓰레기가 된다');
+  assert.equal(M.stallsBetween(Date.now() - 5, Date.now()).ms <= 5, true);
+});
+
+test('요청보다 과거에 닫힌 창은 귀속되지 않는다', () => {
+  M._resetPerfMonitorForTest();
+  SET.savePerfSettings({ ...SET.DEFAULTS, slowRequestMs: 10_000, hangLagMs: 500 });
+  M.recordLoopWindow({ maxMs: 2_000, p99Ms: 1_500, meanMs: 50, windowMs: 1 }); // 창 길이 1ms(먼 과거로 취급)
+  const now = Date.now();
+  const r = M.stallsBetween(now + 1_000, now + 2_000);  // 창보다 미래 구간
+  assert.equal(r.ms, 0);
+  assert.equal(r.n, 0);
 });
 
 test('브라우저 장기 로딩 보고 — 서버 사실(진행 중 요청·루프·활성 작업)과 함께 남는다', () => {
@@ -179,7 +200,7 @@ test('브라우저 장기 로딩 보고 — 서버 사실(진행 중 요청·루
   M.endRequest(pending, { status: 200, ms: 1 });
 });
 
-test('유계 — 라우트 키·링 버퍼가 무한히 자라지 않는다', () => {
+test('유계 — 라우트 키는 상한에서 가장 오래된 것을 퇴출하고(합산이 아니라) 링 버퍼도 유계다', () => {
   M._resetPerfMonitorForTest();
   SET.savePerfSettings({ ...SET.DEFAULTS, slowRequestMs: 200, keepSlow: 50 });
   for (let i = 0; i < 500; i++) {
@@ -187,10 +208,32 @@ test('유계 — 라우트 키·링 버퍼가 무한히 자라지 않는다', ()
     M.endRequest(id, { method: 'GET', path: `/api/x/${i}`, route: `/api/uniq-${i}`, status: 200, ms: 300 });
   }
   const snap = M.perfSnapshot({ routeLimit: 400 });
-  assert.ok(snap.totals.routeKeys <= 401, `라우트 키 ${snap.totals.routeKeys} — 상한(400+__other__)을 넘으면 메모리 누수`);
-  assert.ok(snap.routes.some((r) => r.route === '__other__'), '초과분은 __other__ 로 합산');
+  assert.ok(snap.totals.routeKeys <= 400, `라우트 키 ${snap.totals.routeKeys} — 상한을 넘으면 메모리 누수`);
+  assert.ok(snap.totals.routesEvicted >= 100, `퇴출 ${snap.totals.routesEvicted}건 — 합산(__other__)으로 접으면 쓰레기 키가 실제 라우트를 재시작까지 가린다`);
+  const keys = new Set(snap.routes.map((r) => r.route));
+  assert.ok(keys.has('/api/uniq-499'), '최신 키는 남아야 한다');
+  assert.ok(!keys.has('/api/uniq-0'), '가장 오래된 키가 퇴출돼야 한다');
   assert.equal(snap.slow.length, 50, 'keepSlow 상한이 지켜져야 한다');
   assert.equal(snap.totals.requests, 500);
+});
+
+test('끝나지 않은 요청은 나이로 수확되고 그 수를 숨기지 않는다', () => {
+  M._resetPerfMonitorForTest();
+  SET.savePerfSettings({ ...SET.DEFAULTS });
+  M.beginRequest({ method: 'GET', path: '/api/abandoned' });   // endRequest 가 영원히 안 온다(버려진 응답)
+  assert.equal(M.inflightSnapshot().length, 1);
+  assert.equal(M.reapInflight(0), 1, '나이 상한 0 이면 즉시 수확');
+  assert.equal(M.inflightSnapshot().length, 0);
+  assert.equal(M.perfSnapshot().totals.reaped, 1);
+});
+
+test('진행 중 요청의 경로는 절단된다(긴 URL 이 hang 기록으로 증폭되지 않게)', () => {
+  M._resetPerfMonitorForTest();
+  const long = `/api/${'a'.repeat(5_000)}`;
+  M.beginRequest({ method: 'GET', path: long });
+  const row = M.inflightSnapshot()[0];
+  assert.equal(row.path.length, 200);
+  assert.equal(row.route, undefined, '진행 중 항목에는 라우트 템플릿이 없다(없는 값을 열로 만들지 않는다)');
 });
 
 test('설정 enabled=false 면 기록을 멈추지만 진행 중 요청 추적은 유지된다', () => {
@@ -249,6 +292,29 @@ test('hang 로그 — 동시 다발 기록이 유실·중복 없이 모두 들�
   assert.equal(r.rows[0].maxMs, N - 1, '최신 먼저');
   assert.equal(HL.hangLogStatus().appended, N);
   HL._setHangLogMaxPerMinForTest(0);     // 원래 상한으로 복원
+});
+
+test('hang 로그 — 바이트 상한으로 파일이 실제로 줄어든다(줄 수만 보면 트림이 무력해진다)', () => {
+  HL.clearHangs(); HL._resetHangLogCounters();
+  // 이벤트 1건이 ~1KB 라, 줄 수 상한(기본 20,000)만 보면 꼬리 8MB 안에서 절대 도달하지 않아
+  // 파일이 무한히 자란다(개발 중 20.8MB 파일에서 trimmed 0 으로 실측). 바이트 상한으로 판정한다.
+  const line = JSON.stringify({ kind: 'loop', at: Date.now(), pad: 'x'.repeat(900) });
+  const N = 3_000;                                  // 약 2.7MB
+  fs.writeFileSync(HL.hangLogFile(), `${new Array(N).fill(line).join('\n')}\n`);
+  const before = fs.statSync(HL.hangLogFile()).size;
+  assert.ok(before > 2_000_000, `사전 조건: ${before} 바이트`);
+  // 기본 상한(8MB) 아래에서는 줄어들지 않아야 한다(과도한 트림도 결함이다).
+  assert.equal(HL.trimHangLog(0).trimmed, 0);
+  assert.equal(fs.statSync(HL.hangLogFile()).size, before);
+  // 상한을 1MB 로 낮추면 꼬리만 남기고 실제로 줄어든다.
+  HL._setHangLogMaxBytesForTest(1_000_000);
+  const t = HL.trimHangLog(0);
+  const after = fs.statSync(HL.hangLogFile()).size;
+  assert.ok(t.trimmed > 0, `trimmed=${t.trimmed}`);
+  assert.ok(after <= 1_000_000, `${after} 바이트 — 상한 아래로 줄어야 한다`);
+  assert.ok(after < before);
+  assert.equal(HL.readHangs({ limit: 5 }).rows.length, 5, '트림 후에도 읽힌다(줄이 깨지지 않았다)');
+  HL._setHangLogMaxBytesForTest(0);
 });
 
 test('hang 로그 — 보존일 지난 줄은 정리되고, 없는 파일 조회는 exists:false', () => {

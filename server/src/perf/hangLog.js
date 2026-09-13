@@ -25,6 +25,10 @@ const FILE = path.join(config.configDir, 'perf-hangs.ndjson');
 const MAX_LINES = Math.max(500, Math.min(200_000, Number(process.env.PERF_HANG_LOG_MAX_LINES) || 20_000));
 const MAX_PER_MIN = Math.max(1, Math.min(600, Number(process.env.PERF_HANG_LOG_MAX_PER_MIN) || 60));
 const MAX_READ_BYTES = 8 * 1024 * 1024; // tail 읽기 상한 — 큰 파일 전체를 메모리로 올리지 않는다
+// 파일 크기 상한. **줄 수만으로 판정하면 트림이 무력해진다**: 트림은 꼬리 MAX_READ_BYTES 만 읽어
+// 줄을 세므로, 이벤트 1건이 ~1KB 인 이 로그에서는 꼬리에 8,600줄밖에 안 담기고 MAX_LINES(기본
+// 20,000)에 영원히 도달하지 못해 파일이 무한히 자란다(개발 중 20.8MB 파일로 실측: trimmed 0).
+const MAX_BYTES = Math.max(1024 * 1024, Math.min(256 * 1024 * 1024, Number(process.env.PERF_HANG_LOG_MAX_BYTES) || 8 * 1024 * 1024));
 
 let minuteBucket = 0;
 let minuteCount = 0;
@@ -38,7 +42,9 @@ const MAX_QUEUE = 1_000;
 // 분당 상한은 모듈 로드 시 env 로 굳는다(문서 스캐너가 그 형태를 읽는다). 테스트에서만 바꿀 수
 // 있게 오버라이드를 둔다 — 운영 코드에서는 절대 호출하지 않는다.
 let maxPerMinOverride = 0;
+let maxBytesOverride = 0;
 const perMinLimit = () => maxPerMinOverride || MAX_PER_MIN;
+const maxBytesLimit = () => maxBytesOverride || MAX_BYTES;
 
 export function hangLogFile() { return FILE; }
 
@@ -89,10 +95,16 @@ export async function flushHangLog({ timeoutMs = 2_000 } = {}) {
   return { pending: queue.length, writing };
 }
 
-/** 파일을 보존일·줄 수 상한으로 정리(동기 1회, 드묾). retentionDays 0 이면 줄 수만 본다. */
+/**
+ * 파일을 보존일·줄 수·**바이트** 상한으로 정리(동기 1회, 드묾). retentionDays 0 이면 크기·줄 수만 본다.
+ * 반환에 tailOnly 를 실어 '꼬리만 검사했다' 는 사실을 숨기지 않는다(보존일 정리가 꼬리 밖 줄에는
+ * 닿지 않는다 — 대신 바이트 상한이 그 줄들을 밀어낸다).
+ */
 export function trimHangLog(retentionDays = 0) {
   try {
     if (!fs.existsSync(FILE)) return { trimmed: 0 };
+    const sizeBefore = fs.statSync(FILE).size;
+    const tailOnly = sizeBefore > MAX_READ_BYTES;
     const raw = tailRaw();
     let lines = raw.split('\n').filter(Boolean);
     const before = lines.length;
@@ -107,11 +119,19 @@ export function trimHangLog(retentionDays = 0) {
       });
     }
     if (lines.length > MAX_LINES) lines = lines.slice(lines.length - MAX_LINES);
+    // 바이트 상한 — 꼬리부터 남기고 앞을 버린다(줄 수 상한보다 먼저 걸리는 실질 상한).
+    let bytes = Buffer.byteLength(`${lines.join('\n')}\n`);
+    while (lines.length > 1 && bytes > maxBytesLimit()) {
+      const drop = Math.max(1, Math.floor(lines.length * 0.2));   // 20% 씩 버려 재계산 횟수를 줄인다
+      lines = lines.slice(drop);
+      bytes = Buffer.byteLength(`${lines.join('\n')}\n`);
+    }
     // 트림은 전량 재기록이다 — 원자적으로 써서 중간에 죽어도 로그가 잘리지 않게 한다.
     // 호출 시점 보장: flushQueue 콜백에서 쓰기가 없고 큐가 빈 순간에만 부른다(같은 틱에 append 가
     // 끼어들 수 없으므로 rename 으로 줄이 유실되지 않는다).
-    if (lines.length !== before) atomicWriteFileSync(FILE, `${lines.join('\n')}\n`, { mode: 0o600 });
-    return { trimmed: before - lines.length, lines: lines.length };
+    // 꼬리만 읽었을 때도 그 꼬리로 파일을 대체한다 — 그래야 8MB 를 넘긴 파일이 실제로 줄어든다.
+    if (lines.length !== before || tailOnly) atomicWriteFileSync(FILE, `${lines.join('\n')}\n`, { mode: 0o600 });
+    return { trimmed: before - lines.length, lines: lines.length, tailOnly, bytesBefore: sizeBefore, bytesAfter: bytes };
   } catch (e) { lastError = e.message; return { trimmed: 0, error: e.message }; }
 }
 
@@ -133,6 +153,9 @@ export function readHangs({ limit = 200, kind = '' } = {}) {
   const out = [];
   try {
     if (!fs.existsSync(FILE)) return { rows: [], total: 0, file: FILE, exists: false };
+    // total 은 '읽은 꼬리의 줄 수' 다 — 파일이 읽기 상한을 넘었으면 그 사실을 함께 알린다
+    // (앞부분을 세지 않고 '총 N건' 이라고 말하면 거짓이 된다).
+    const tailOnly = fs.statSync(FILE).size > MAX_READ_BYTES;
     const lines = tailRaw().split('\n').filter(Boolean);
     const want = Math.max(1, Math.min(2000, Number(limit) || 200));
     let bad = 0;
@@ -146,7 +169,7 @@ export function readHangs({ limit = 200, kind = '' } = {}) {
       if (out.length >= want * 2 + 50) break;
     }
     out.sort((a, b) => (Number(b?.at) || 0) - (Number(a?.at) || 0));
-    return { rows: out.slice(0, want), total: lines.length, badLines: bad, file: FILE, exists: true };
+    return { rows: out.slice(0, want), total: lines.length, tailOnly, badLines: bad, file: FILE, exists: true };
   } catch (e) {
     return { rows: [], total: 0, file: FILE, exists: true, error: e.message };
   }
@@ -161,9 +184,10 @@ export function clearHangs() {
 export function hangLogStatus() {
   let bytes = null; let mtime = null;
   try { const st = fs.statSync(FILE); bytes = st.size; mtime = st.mtimeMs; } catch { /* 파일 없음 */ }
-  return { file: FILE, bytes, mtime, appended, dropped, pending: queue.length, maxLines: MAX_LINES, maxPerMin: perMinLimit(), lastError: lastError || null };
+  return { file: FILE, bytes, mtime, appended, dropped, pending: queue.length, maxLines: MAX_LINES, maxBytes: maxBytesLimit(), maxPerMin: perMinLimit(), lastError: lastError || null };
 }
 
-/** 테스트 전용 — 분당 상한 오버라이드(0 이면 env/기본값). */
+/** 테스트 전용 — 분당 상한·바이트 상한 오버라이드(0 이면 env/기본값). */
 export function _setHangLogMaxPerMinForTest(n) { maxPerMinOverride = Math.max(0, Number(n) || 0); }
+export function _setHangLogMaxBytesForTest(n) { maxBytesOverride = Math.max(0, Number(n) || 0); }
 export function _resetHangLogCounters() { minuteBucket = 0; minuteCount = 0; dropped = 0; appended = 0; lastError = ''; sinceTrim = 0; queue = []; writing = false; }
