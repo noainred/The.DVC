@@ -141,7 +141,11 @@ export default function App() {
   setCurrentUser(user === 'loading' ? null : user);
 
   if (user === 'loading') {
-    return <div className="login-screen"><div className="loading">불러오는 중…</div></div>;
+    // v2.498: 공용 Loading 을 쓴다 — 부팅 조회(auth/config·auth/me)가 반열림 연결에서 고착되는
+    // 것이 사용자 신고('불러오는 중 3분 이상')의 재현 가능한 경로였다. 이제 타임아웃으로 최대
+    // ~60초 뒤 로그인 화면으로 내려가고, 그 사이 경과 초·대기 중인 요청이 표시되며 토큰이 있는
+    // 세션이면 hang 기록에도 남는다(토큰이 없으면 보고하지 않는다).
+    return <div className="login-screen"><Loading /></div>;
   }
   if (!user) return <Login onSuccess={(u) => { setLoginNotice(''); setUser(u); }} notice={loginNotice} setup={authCfg} />;
   // 고권한 계정이 OTP 미등록 상태로 로그인 → 등록을 마칠 때까지 이 화면에 고정(서버도 API 차단).

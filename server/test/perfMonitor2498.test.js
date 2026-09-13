@@ -317,6 +317,57 @@ test('hang 로그 — 바이트 상한으로 파일이 실제로 줄어든다(�
   HL._setHangLogMaxBytesForTest(0);
 });
 
+test('hang 로그 — 브라우저 보고(client)가 서버 정체(loop) 기록의 분당 예산을 잠식하지 못한다', () => {
+  HL._setHangLogMaxPerMinForTest(10);   // client 는 절반(5)까지만
+  HL.clearHangs(); HL._resetHangLogCounters();
+  let clientOk = 0;
+  for (let i = 0; i < 10; i++) if (HL.appendHang({ kind: 'client', at: Date.now() })) clientOk += 1;
+  assert.equal(clientOk, 5, 'client 는 전체 예산의 절반까지');
+  let loopOk = 0;
+  for (let i = 0; i < 10; i++) if (HL.appendHang({ kind: 'loop', at: Date.now() })) loopOk += 1;
+  assert.equal(loopOk, 5, '남은 예산은 서버 정체 기록이 쓸 수 있어야 한다(증거가 밀려나면 안 된다)');
+  HL._setHangLogMaxPerMinForTest(0);
+});
+
+test('hang 링 — client 이벤트가 절반을 넘기면 같은 종류를 밀어내고 loop 기록을 남긴다', () => {
+  M._resetPerfMonitorForTest(); HL._resetHangLogCounters(); HL._setHangLogMaxPerMinForTest(600);
+  SET.savePerfSettings({ ...SET.DEFAULTS, keepHangs: 50, hangLagMs: 100 });
+  M.recordLoopWindow({ maxMs: 5_000, p99Ms: 900, meanMs: 50 });     // 서버 정체 1건
+  for (let i = 0; i < 200; i++) M.recordClientStall({ user: `u${i}`, view: '#/x', ms: 90_000 });
+  const hangs = M.perfSnapshot({ hangLimit: 100 }).hangs;
+  assert.ok(hangs.length <= 50, `링 상한 ${hangs.length}`);
+  assert.ok(hangs.some((h) => h.kind === 'loop'), '저권한 계정 보고가 서버 정체 기록을 밀어내면 진단이 불가능해진다');
+  HL._setHangLogMaxPerMinForTest(0);
+});
+
+test('hang 로그 — 쓰기 중 트림 요청은 미뤄지고(유실 방지) 비우기는 대기 줄까지 버린다', async () => {
+  HL._setHangLogMaxPerMinForTest(600);
+  HL.clearHangs(); HL._resetHangLogCounters();
+  for (let i = 0; i < 20; i++) HL.appendHang({ kind: 'loop', at: Date.now() + i });
+  // 아직 쓰기가 진행 중인 이 시점의 트림은 반드시 미뤄져야 한다(rename 으로 줄이 사라진다).
+  const t = HL.trimHangLog(7);
+  assert.equal(t.deferred, true, '쓰기 중 트림은 함수가 스스로 미뤄야 한다(호출부 규약에 의존 금지)');
+  await HL.flushHangLog();
+  assert.equal(HL.readHangs({ limit: 100 }).total, 20, '유실 없음');
+  // 비우기: 대기 줄이 남아 파일을 되살리면 '비웠다' 는 보고가 거짓이 된다.
+  for (let i = 0; i < 30; i++) HL.appendHang({ kind: 'loop', at: Date.now() + i });
+  HL.clearHangs();
+  await HL.flushHangLog();
+  const after = HL.readHangs({ limit: 100 });
+  assert.equal(after.exists, false, '비운 뒤 파일이 다시 생기면 안 된다');
+  HL._setHangLogMaxPerMinForTest(0);
+});
+
+test('설정 — 빈 문자열은 미지정으로 버린다(최소값 승격 금지)', () => {
+  SET._resetPerfSettingsCache();
+  SET.savePerfSettings({ ...SET.DEFAULTS, retentionDays: 30, hangLagMs: 2_000 });
+  const r = SET.savePerfSettings({ retentionDays: '', hangLagMs: '   ', slowRequestMs: null });
+  assert.equal(r.retentionDays, 30, "빈 칸이 최소값(1일)으로 굳으면 저장 즉시 hang 기록이 지워진다");
+  assert.equal(r.hangLagMs, 2_000);
+  assert.equal(r.slowRequestMs, SET.DEFAULTS.slowRequestMs);
+  SET.savePerfSettings({ ...SET.DEFAULTS });
+});
+
 test('hang 로그 — 보존일 지난 줄은 정리되고, 없는 파일 조회는 exists:false', () => {
   HL.clearHangs(); HL._resetHangLogCounters();
   assert.equal(HL.readHangs().exists, false);

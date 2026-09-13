@@ -204,7 +204,11 @@ export async function fetchJson(path, params = {}, signal, opts = {}) {
       const data = await res.json().catch(() => null);
       throw httpFail(path, res, data);
     }
-    return res.json();
+    // ⚠ `return await` 가 필요하다(v2.498): `return res.json()` 이면 try/finally 의 finally 가
+    // **본문을 읽기 전에** 실행돼 진행 중 목록에서 항목이 사라진다. 호출자는 그때부터 본문 수신
+    // + JSON.parse 를 기다리므로, 화면이 '대기 중인 요청 없음 — 화면 상태 문제' 로 오진하고
+    // 새로고침을 권한다(수백 KB 응답·고RTT 에서 실제로 발생). pollFetch·postJson 은 이미 await 다.
+    return await res.json();
   }
   throw lastErr;
   } finally { endReq(perfId); }
@@ -393,9 +397,26 @@ async function pollFetch(path, params, signal, etag) {
  * 장기 로딩(hang) 보고 — Loading 표시가 임계(서버 설정, 기본 60초)를 넘었을 때 1회. 실패는 무시한다.
  * 사용자·IP 는 서버가 채우고, 여기서는 화면 해시·경로·경과·진행 중 요청만 보낸다.
  */
-export const reportLoadingStall = (args) => reportStall({ ...args, base: BASE, headers: authHeaders() });
-/** 보고 임계·활성 여부를 서버에서 1회 받아온다(화면에 주기·임계를 하드코딩하지 않는다는 규칙). */
-export const ensurePerfClientConfig = () => loadPerfClientConfig(fetchJson);
+export const reportLoadingStall = (args) => {
+  // 토큰이 없으면 보고하지 않는다(로그인 화면에서 401 을 만들지 않게). 부팅 중 토큰이 있는 상태의
+  // 고착 — 사용자가 신고한 바로 그 경로 — 은 보고된다.
+  if (!getToken()) return false;
+  return reportStall({ ...args, base: BASE, headers: authHeaders() });
+};
+/**
+ * 보고 임계·활성 여부를 서버에서 받아온다(화면에 주기·임계를 하드코딩하지 않는다는 규칙).
+ * **fetchJson 을 쓰지 않는다** — 401 이면 fetchJson 이 전역 401 핸들러(강제 로그아웃)를 호출해서,
+ * 인증 전/만료 직후 화면이 로딩만 띄워도 세션이 끊긴다. 계측 때문에 세션이 끊기는 것은 용납할 수 없다.
+ * 토큰이 없으면 아예 조회하지 않는다(로그인 화면에서 불필요한 요청 금지).
+ */
+export const ensurePerfClientConfig = () => {
+  if (!getToken()) return Promise.resolve();
+  return loadPerfClientConfig(async (path, params, signal, opts) => {
+    const res = await fetch(`${BASE}${path}`, { headers: authHeaders(), signal: timeoutSignal(opts?.timeoutMs || 10_000) });
+    if (!res.ok) throw new Error(`${path} -> ${res.status}`);   // 401 도 그냥 던진다(부작용 없음)
+    return res.json();
+  });
+};
 
 /** Poll an endpoint on an interval and expose {data, error, loading}.
  *  최적화: 백그라운드 탭이면 폴링 일시정지(가시화 시 즉시 갱신), 주기에 ±10% 지터(동시 사용자

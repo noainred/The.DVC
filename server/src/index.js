@@ -166,15 +166,17 @@ app.use((req, res, next) => {
       // 세그먼트를 마스킹한 키를 쓴다(카디널리티 유계). 두 방식이 섞여 같은 라우트가 갈라지지 않게
       // 템플릿은 '/api' 로 시작할 때만 채택한다(라우터 dispatch 후 baseUrl 이 복원되는 경우 대비).
       const tmpl = req.route?.path ? `${req.baseUrl || ''}${req.route.path === '/' ? '' : req.route.path}` : '';
-      const route = tmpl && tmpl.startsWith('/api')
-        ? tmpl.slice(0, 120)
-        // 템플릿이 없으면(라우터 dispatch 전에 끝난 401/403, 미매칭 404) **경로 전문을 키로 쓰지
-        // 않는다** — 이 미들웨어는 인증보다 앞이라 임의 경로로 라우트 표를 채울 수 있다.
-        // 상태코드로 묶은 고정 키 1개면 충분하고, 경로 자체는 느린 요청 레코드에 남는다.
-        : (res.statusCode === 401 || res.statusCode === 403 ? '/api/__unauthorized__'
-          : res.statusCode === 404 ? '/api/__unmatched__' : routeKeyOf({ path: url }));
+      // **라우터가 매칭하지 못한 요청은 경로를 키로도, 레코드로도 남기지 않는다.**
+      // 판정 기준은 상태코드가 아니라 `req.route` 부재다 — 상태코드로 나열하면 본문 파서가 내는
+      // 400(request aborted)·413 같은 경로가 빠져나가 임의 경로로 라우트 표와 느린 요청 링을
+      // 채울 수 있다(미인증으로 도달 가능 — 적대적 리뷰가 재현). 마스킹된 경로만 남긴다.
+      const dispatched = !!(tmpl && tmpl.startsWith('/api'));
+      const route = dispatched ? tmpl.slice(0, 120) : `/api/__predispatch_${aborted ? 499 : res.statusCode}__`;
       endRequest(perfId, {
-        method: req.method, path: url, route,
+        method: req.method,
+        // 매칭 전에 끝난 요청은 원경로 대신 마스킹 결과만 남긴다(증거 링 오염 차단).
+        path: dispatched ? url : routeKeyOf({ path: url }),
+        route,
         status: aborted ? 499 : res.statusCode, ms,
         user: req.user?.username || '', bytes: Number(res.getHeader('Content-Length')) || null,
         expectSlow: !!res.locals?.perfExpectSlow,

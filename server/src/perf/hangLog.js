@@ -28,10 +28,20 @@ const MAX_READ_BYTES = 8 * 1024 * 1024; // tail 읽기 상한 — 큰 파일 전
 // 파일 크기 상한. **줄 수만으로 판정하면 트림이 무력해진다**: 트림은 꼬리 MAX_READ_BYTES 만 읽어
 // 줄을 세므로, 이벤트 1건이 ~1KB 인 이 로그에서는 꼬리에 8,600줄밖에 안 담기고 MAX_LINES(기본
 // 20,000)에 영원히 도달하지 못해 파일이 무한히 자란다(개발 중 20.8MB 파일로 실측: trimmed 0).
-const MAX_BYTES = Math.max(1024 * 1024, Math.min(256 * 1024 * 1024, Number(process.env.PERF_HANG_LOG_MAX_BYTES) || 8 * 1024 * 1024));
+// 상한은 **읽기 창을 넘을 수 없다** — 트림이 보는 범위가 꼬리 MAX_READ_BYTES 이므로, 그보다 큰
+// 값을 설정하면 '32MB 까지 남긴다' 고 믿는데 실제로는 8MB 로 잘리고 잘린 부분이 보존일과 무관하게
+// 사라진다(리뷰에서 26.2MB → 8.0MB, 8,341줄 파기를 실측). 실효값을 status 로 그대로 내려준다.
+const MAX_BYTES = Math.max(512 * 1024, Math.min(MAX_READ_BYTES, Number(process.env.PERF_HANG_LOG_MAX_BYTES) || 8 * 1024 * 1024));
+// 재기록 목표는 상한의 70% — 상한 바로 아래로 깎으면 다음 한 건에 다시 문턱을 넘어 200건마다
+// 8MB 읽기+fsync 를 반복한다(리뷰 실측: 회수 0.04MB 에 루프 62ms 정지). 계측기가 서비스를
+// 방해하지 않는다는 원칙을 지키려면 여유를 두고 깎아야 한다.
+const MIN_RECLAIM_BYTES = 1024 * 1024;   // 이만큼도 못 줄이면 재기록하지 않는다
 
 let minuteBucket = 0;
 let minuteCount = 0;
+// 종류별 분당 사용량 — 'client'(브라우저 보고)가 전역 예산을 먹어 'loop'(서버 정체) 기록을
+// 막지 못하게 한다. client 는 전체 예산의 절반까지만 쓴다(적대적 리뷰 지적).
+let minuteByKind = new Map();
 let dropped = 0;      // 분당 상한으로 버린 줄 수(정직 표기용)
 let appended = 0;
 let lastError = '';
@@ -43,6 +53,17 @@ const MAX_QUEUE = 1_000;
 // 있게 오버라이드를 둔다 — 운영 코드에서는 절대 호출하지 않는다.
 let maxPerMinOverride = 0;
 let maxBytesOverride = 0;
+let trimPending = false;          // 쓰기 중에 들어온 트림 요청(끝난 뒤 처리)
+let pendingRetentionDays = 0;
+let generation = 0;               // clearHangs 세대 — 진행 중 쓰기의 잔여 큐가 파일을 되살리지 못하게
+let permsFixed = false;
+// 보존일을 알려주는 주입 함수 — hangLog 가 settings 를 직접 import 하면 순환이 생긴다.
+// 주입이 없으면 0(보존일 미적용, 크기·줄 수만)으로 동작한다.
+let retentionProvider = null;
+export function setHangRetentionProvider(fn) { retentionProvider = typeof fn === 'function' ? fn : null; }
+const retentionDaysNow = () => {
+  try { return Math.max(0, Number(retentionProvider?.()) || 0); } catch { return 0; }
+};
 const perMinLimit = () => maxPerMinOverride || MAX_PER_MIN;
 const maxBytesLimit = () => maxBytesOverride || MAX_BYTES;
 
@@ -53,15 +74,29 @@ function flushQueue() {
   if (writing || !queue.length) return;
   writing = true;
   const lines = queue;
+  const gen = generation;
   queue = [];
   const chunk = lines.join('');
   try {
+    // 형제 스토어(audit.js·atomicWrite.js)와 같이 쓰기 직전 디렉터리를 보장한다 — CONFIG_DIR 이
+    // 아직 없으면 append 가 ENOENT 로 조용히 버려진다.
+    try { fs.mkdirSync(path.dirname(FILE), { recursive: true }); } catch { /* 이미 있거나 권한 문제 */ }
     fs.appendFile(FILE, chunk, { mode: 0o600 }, (err) => {
       writing = false;
-      if (err) lastError = err.message; else appended += lines.length;
+      if (err) lastError = err.message;
+      else {
+        appended += lines.length;
+        // mode 는 **신규 생성 때만** 적용된다 — 파일이 0644 로 이미 있으면 그대로다. 이 파일에는
+        // 사용자명·IP·User-Agent·요청 경로가 담기므로 audit.js ensurePerms 패턴으로 1회 교정한다.
+        if (!permsFixed) { permsFixed = true; try { fs.chmodSync(FILE, 0o600); } catch { /* 무시 */ } }
+      }
+      if (gen !== generation) return;             // 그 사이 로그를 비웠다 — 잔여 큐를 되살리지 않는다
       if (queue.length) { flushQueue(); return; }
       // 트림은 쓰기가 없을 때만 — 동시에 하면 읽은 뒤 도착한 줄이 재기록으로 사라진다.
-      if (sinceTrim >= 200) { sinceTrim = 0; trimHangLog(); }
+      // 보존일은 주입된 provider 에서 읽는다(예전에는 인자 없이 불러 보존일이 자동 경로에서
+      // 아예 적용되지 않았다 — 사용자명·IP 가 설정 기간을 넘겨 남았다).
+      if (trimPending) { trimPending = false; trimHangLog(pendingRetentionDays || retentionDaysNow()); pendingRetentionDays = 0; return; }
+      if (sinceTrim >= 200) { sinceTrim = 0; trimHangLog(retentionDaysNow()); }
     });
   } catch (e) {
     writing = false;
@@ -73,10 +108,15 @@ function flushQueue() {
 export function appendHang(ev) {
   const now = Date.now();
   const bucket = Math.floor(now / 60_000);
-  if (bucket !== minuteBucket) { minuteBucket = bucket; minuteCount = 0; }
-  if (minuteCount >= perMinLimit()) { dropped += 1; return false; }
+  if (bucket !== minuteBucket) { minuteBucket = bucket; minuteCount = 0; minuteByKind = new Map(); }
+  const kind = String(ev?.kind || 'other');
+  const limit = perMinLimit();
+  const kindUsed = minuteByKind.get(kind) || 0;
+  const kindLimit = kind === 'client' ? Math.max(1, Math.floor(limit / 2)) : limit;
+  if (minuteCount >= limit || kindUsed >= kindLimit) { dropped += 1; return false; }
   if (queue.length >= MAX_QUEUE) { dropped += 1; return false; }
   minuteCount += 1;
+  minuteByKind.set(kind, kindUsed + 1);
   let line;
   try { line = `${JSON.stringify({ ...ev, at: ev?.at || now })}\n`; }
   catch { return false; }
@@ -101,6 +141,14 @@ export async function flushHangLog({ timeoutMs = 2_000 } = {}) {
  * 닿지 않는다 — 대신 바이트 상한이 그 줄들을 밀어낸다).
  */
 export function trimHangLog(retentionDays = 0) {
+  // 규약을 호출부가 아니라 **함수가 강제한다**: 진행 중 append 가 있는데 재기록(rename)을 하면
+  // 그 append 는 unlink 된 옛 inode 에 써져 사라진다(리뷰에서 20건 중 1건 유실을 5회 재현).
+  // 관리자 설정 저장·기동 경로가 이 검사 없이 부르고 있었다.
+  if (writing || queue.length) {
+    trimPending = true;
+    pendingRetentionDays = Math.max(pendingRetentionDays, Number(retentionDays) || 0);
+    return { trimmed: 0, deferred: true };
+  }
   try {
     if (!fs.existsSync(FILE)) return { trimmed: 0 };
     const sizeBefore = fs.statSync(FILE).size;
@@ -120,18 +168,34 @@ export function trimHangLog(retentionDays = 0) {
     }
     if (lines.length > MAX_LINES) lines = lines.slice(lines.length - MAX_LINES);
     // 바이트 상한 — 꼬리부터 남기고 앞을 버린다(줄 수 상한보다 먼저 걸리는 실질 상한).
+    // 목표는 상한이 아니라 그 70%: 상한 바로 아래로 깎으면 한 건만 더 들어와도
+    // 다시 문턱을 넘어 200건마다 전량 재기록이 반복된다.
     let bytes = Buffer.byteLength(`${lines.join('\n')}\n`);
-    while (lines.length > 1 && bytes > maxBytesLimit()) {
-      const drop = Math.max(1, Math.floor(lines.length * 0.2));   // 20% 씩 버려 재계산 횟수를 줄인다
-      lines = lines.slice(drop);
-      bytes = Buffer.byteLength(`${lines.join('\n')}\n`);
+    const limit = maxBytesLimit();
+    const target = Math.floor(limit * 0.7);
+    if (bytes > limit) {
+      while (lines.length > 1 && bytes > target) {
+        const drop = Math.max(1, Math.floor(lines.length * 0.1));
+        lines = lines.slice(drop);
+        bytes = Buffer.byteLength(`${lines.join('\n')}\n`);
+      }
     }
     // 트림은 전량 재기록이다 — 원자적으로 써서 중간에 죽어도 로그가 잘리지 않게 한다.
     // 호출 시점 보장: flushQueue 콜백에서 쓰기가 없고 큐가 빈 순간에만 부른다(같은 틱에 append 가
     // 끼어들 수 없으므로 rename 으로 줄이 유실되지 않는다).
     // 꼬리만 읽었을 때도 그 꼬리로 파일을 대체한다 — 그래야 8MB 를 넘긴 파일이 실제로 줄어든다.
-    if (lines.length !== before || tailOnly) atomicWriteFileSync(FILE, `${lines.join('\n')}\n`, { mode: 0o600 });
-    return { trimmed: before - lines.length, lines: lines.length, tailOnly, bytesBefore: sizeBefore, bytesAfter: bytes };
+    // 회수량이 미미하면 재기록하지 않는다(8MB fsync 를 반복하는 것이 더 해롭다). 단 꼬리만 읽은
+    // 경우(파일이 읽기 창보다 큼)에는 그 꼬리로 대체해야 파일이 실제로 줄어든다.
+    const reclaim = sizeBefore - bytes;
+    const rewrite = (lines.length !== before && reclaim >= MIN_RECLAIM_BYTES) || (tailOnly && reclaim >= MIN_RECLAIM_BYTES) || (lines.length !== before && sizeBefore <= limit);
+    if (rewrite) atomicWriteFileSync(FILE, `${lines.join('\n')}\n`, { mode: 0o600 });
+    return {
+      trimmed: rewrite ? before - lines.length : 0,
+      lines: rewrite ? lines.length : before,
+      tailOnly, skipped: !rewrite, bytesBefore: sizeBefore, bytesAfter: rewrite ? bytes : sizeBefore,
+      // 꼬리만 읽어 파일을 대체했다면 앞부분은 보존일과 무관하게 폐기된다 — 숨기지 않고 밝힌다.
+      discardedTailOnlyBytes: rewrite && tailOnly ? sizeBefore - bytes : 0,
+    };
   } catch (e) { lastError = e.message; return { trimmed: 0, error: e.message }; }
 }
 
@@ -176,9 +240,19 @@ export function readHangs({ limit = 200, kind = '' } = {}) {
 }
 
 /** 파일 삭제(관리자 '로그 비우기'). */
+/**
+ * 로그 비우기. **대기 중인 줄도 버린다** — 예전에는 큐를 그대로 둬서, 진행 중 쓰기의 콜백이
+ * 남은 줄을 appendFile 로 **파일을 다시 만들어** 기록했다(리뷰 실측: 삭제 직후 29줄 잔존).
+ * 이 파일에는 사용자명·IP·User-Agent 가 담기므로 '비웠다' 는 보고가 거짓이면 안 된다.
+ */
 export function clearHangs() {
-  try { if (fs.existsSync(FILE)) fs.rmSync(FILE); appended = 0; dropped = 0; return { ok: true }; }
-  catch (e) { return { ok: false, reason: e.message }; }
+  try {
+    generation += 1;      // 진행 중 쓰기의 후속 flush 가 잔여 큐를 쓰지 않게
+    queue = [];
+    if (fs.existsSync(FILE)) fs.rmSync(FILE);
+    appended = 0; dropped = 0; sinceTrim = 0; lastError = ''; trimPending = false; permsFixed = false;
+    return { ok: true };
+  } catch (e) { return { ok: false, reason: e.message }; }
 }
 
 export function hangLogStatus() {
@@ -190,4 +264,4 @@ export function hangLogStatus() {
 /** 테스트 전용 — 분당 상한·바이트 상한 오버라이드(0 이면 env/기본값). */
 export function _setHangLogMaxPerMinForTest(n) { maxPerMinOverride = Math.max(0, Number(n) || 0); }
 export function _setHangLogMaxBytesForTest(n) { maxBytesOverride = Math.max(0, Number(n) || 0); }
-export function _resetHangLogCounters() { minuteBucket = 0; minuteCount = 0; dropped = 0; appended = 0; lastError = ''; sinceTrim = 0; queue = []; writing = false; }
+export function _resetHangLogCounters() { minuteBucket = 0; minuteCount = 0; minuteByKind = new Map(); dropped = 0; appended = 0; lastError = ''; sinceTrim = 0; queue = []; writing = false; trimPending = false; pendingRetentionDays = 0; permsFixed = false; }

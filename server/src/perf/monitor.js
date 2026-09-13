@@ -18,7 +18,7 @@
  */
 import { monitorEventLoopDelay, performance } from 'node:perf_hooks';
 import { loadPerfSettings } from './settings.js';
-import { appendHang, hangLogStatus, trimHangLog } from './hangLog.js';
+import { appendHang, hangLogStatus, trimHangLog, setHangRetentionProvider } from './hangLog.js';
 import { newRouteEntry, addSample, summarizeRoute, rankRoutes, routeKeyOf, downsampleMax, stallWindows } from './stats.js';
 
 const MAX_ROUTES = 400;          // 넘으면 가장 오래 안 쓴 키를 퇴출한다(아래 routeEntryFor)
@@ -243,10 +243,24 @@ export function inflightSnapshot(limit = 20) {
 }
 
 /* ── hang 이벤트 ────────────────────────────────────────────────── */
+/**
+ * hang 링에 넣고 파일에 남긴다. **종류별 최소 보장 슬롯**을 둔다 — 예전에는 하나의 링을
+ * 'loop'(서버 루프 정체)와 'client'(브라우저 보고)가 공유해서, 저권한 계정 하나가 쿨다운대로
+ * 보고만 해도 몇 시간 뒤 링이 전부 client 이벤트가 되어 **서버 정체 기록이 화면에서 사라졌다**
+ * (적대적 리뷰 지적). 링을 넘길 때 같은 종류의 가장 오래된 항목부터 버려 서로를 밀어내지 못하게 한다.
+ */
 function pushHang(ev) {
   const st = loadPerfSettings();
   hangRing.push(ev);
-  if (hangRing.length > st.keepHangs) hangRing = hangRing.slice(-st.keepHangs);
+  if (hangRing.length > st.keepHangs) {
+    const kind = ev?.kind;
+    // 같은 종류가 절반을 넘겼으면 그 종류의 가장 오래된 것을, 아니면 전체에서 가장 오래된 것을 버린다.
+    const sameKind = hangRing.filter((x) => x.kind === kind).length;
+    const dropIdx = sameKind > Math.floor(st.keepHangs / 2)
+      ? hangRing.findIndex((x) => x.kind === kind)
+      : 0;
+    hangRing.splice(dropIdx < 0 ? 0 : dropIdx, 1);
+  }
   totals.hangs += 1;
   appendHang(ev);
 }
@@ -344,8 +358,12 @@ export function perfSnapshot({ routeLimit = 60, slowLimit = 100, hangLimit = 100
   };
 }
 
-/** 보존일 정리(관리자 저장 시·기동 시 1회). */
+/** 보존일 정리(관리자 저장 시·기동 시 1회). 쓰기 중이면 hangLog 가 알아서 미룬다. */
 export function pruneHangLog() { return trimHangLog(loadPerfSettings().retentionDays); }
+
+// 자동 트림(200건마다)도 보존일을 적용하도록 주입한다 — 예전에는 자동 경로가 인자 없이 불려
+// 보존일이 사실상 적용되지 않았고, 사용자명·IP 가 설정 기간을 넘겨 남았다(적대적 리뷰 지적).
+setHangRetentionProvider(() => loadPerfSettings().retentionDays);
 
 export function _resetPerfMonitorForTest() {
   routes.clear(); inflight.clear(); activeJobs.clear();

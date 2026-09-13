@@ -35,15 +35,19 @@ function FinOps() {
   // (cfg=null) `if (!d || !cfg) return <Loading/>` 때문에 본 데이터가 30초마다 정상 갱신되는데도
   // 화면이 영구 '불러오는 중…' 으로 남았다 — 사용자 신고 '3분 이상 불러오는 중' 의 재현 가능한
   // 원인이다. 실패를 조용히 삼키지 않고(.catch(()=>{}) 금지) 사유를 남기고 폴링마다 재시도한다.
+  // 403(권한 거부)은 재시도해도 결과가 같다 — 30초마다 같은 403 을 만들면 서버 로그·감사만
+  // 오염된다(CLAUDE.md: usePolling 이 403 에서 폴링을 멈추는 것과 같은 정책). 이 화면은 수제
+  // 인터벌이라 그 보호를 직접 구현한다.
+  const cfgForbidden = useRef(false);
   const loadCfg = () => fetchJson('/insights/finops/config')
     .then((r) => { setCfg(r); setCfgErr(''); })
-    .catch((e) => setCfgErr(e.message || String(e)));
+    .catch((e) => { if (e?.status === 403) cfgForbidden.current = true; setCfgErr(e.message || String(e)); });
   // 폴링 콜백이 최신 cfg 를 보게 하는 ref(의존성 배열을 비운 채로 재시도 여부를 판단하기 위함).
   const cfgRef = useRef(null);
   cfgRef.current = cfg;
   useEffect(() => {
     load(); loadCfg();
-    const t = setInterval(() => { load(); if (!cfgRef.current) loadCfg(); }, 30_000);
+    const t = setInterval(() => { load(); if (!cfgRef.current && !cfgForbidden.current) loadCfg(); }, 30_000);
     return () => clearInterval(t);
   }, []);
   if (err && !d) return <ErrorBox message={err} />; // 데이터 보유 중 일시 폴링 오류로 화면 전체를 갈아치우지 않음(CLAUDE.md)
@@ -94,7 +98,8 @@ function FinOps() {
           {!cfg ? (
             <div className="muted" style={{ fontSize: 12.5, lineHeight: 1.6 }}>
               단가 설정을 불러오지 못했습니다{cfgErr ? ` — ${cfgErr}` : ''}. 위 수치는 서버가 적용한 단가로 계산된 값이며 그대로 유효합니다.
-              <div style={{ marginTop: 8 }}><button className="tab" style={{ padding: '4px 10px', fontSize: 12 }} onClick={loadCfg}>다시 시도</button></div>
+              <div style={{ marginTop: 8 }}><button className="tab" style={{ padding: '4px 10px', fontSize: 12 }}
+                onClick={() => { cfgForbidden.current = false; loadCfg(); }}>다시 시도</button></div>
             </div>
           ) : (<>
           <label className="muted" style={{ fontSize: 12 }}>전기요금 단가 (통화/kWh)</label>

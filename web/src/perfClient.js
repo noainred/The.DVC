@@ -21,6 +21,9 @@ const reportState = newReportState();
 let disabled = false;           // 서버가 거부했거나 계측이 꺼져 있으면 true
 let stuckMs = 60_000;           // 서버 설정값으로 갱신(화면에 하드코딩하지 않는다)
 let configLoaded = false;
+let configPromise = null;
+let lastConfigTry = 0;
+const CONFIG_RETRY_MS = 60_000;
 
 const now = () => (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now());
 
@@ -62,15 +65,28 @@ export function subscribeInflight(fn) { listeners.add(fn); return () => listener
 /** 보고 임계(ms) — 서버 설정값. 화면이 이 값을 쓴다. */
 export const stuckThresholdMs = () => stuckMs;
 
-/** 서버에서 임계·활성 여부를 한 번 받아온다(실패하면 기본값 유지). */
+/**
+ * 서버에서 임계·활성 여부를 받아온다. **성공했을 때만** 완료로 표시한다 — 예전에는 await 전에
+ * 플래그를 세워, 세션의 첫 조회가 한 번 실패하면(서버 재시작 중·고RTT) 그 탭이 새로고침 전까지
+ * 기본값 60초에 못 박혔다. 그러면 관리자가 임계를 바꿔도 반영되지 않고 '계측 사용' 을 꺼도
+ * 브라우저가 계속 보고한다 — '숫자는 API 가 주는 값을 쓴다' 는 규약이 실질적으로 깨진다.
+ * 실패 시 최소 간격(60초) 뒤 다음 Loading 마운트에서 재시도하며, 진행 중 조회는 공유한다.
+ */
 export async function loadPerfClientConfig(fetchJson) {
   if (configLoaded) return;
-  configLoaded = true;
-  try {
-    const r = await fetchJson('/perf/client-config', {}, undefined, { retries: 0, timeoutMs: 10_000 });
-    if (r && typeof r.clientStuckMs === 'number') stuckMs = Math.max(10_000, r.clientStuckMs);
-    if (r && r.enabled === false) disabled = true;
-  } catch { /* 구버전 서버·일시 오류 — 기본값으로 동작 */ }
+  if (configPromise) return configPromise;
+  if (Date.now() - lastConfigTry < CONFIG_RETRY_MS) return;
+  lastConfigTry = Date.now();
+  configPromise = (async () => {
+    try {
+      const r = await fetchJson('/perf/client-config', {}, undefined, { retries: 0, timeoutMs: 10_000 });
+      if (r && typeof r.clientStuckMs === 'number') stuckMs = Math.max(10_000, r.clientStuckMs);
+      if (r && r.enabled === false) disabled = true;
+      configLoaded = true;
+    } catch { /* 구버전 서버·일시 오류 — 기본값으로 동작하고 나중에 다시 시도 */ }
+    finally { configPromise = null; }
+  })();
+  return configPromise;
 }
 
 /**
@@ -101,6 +117,6 @@ export function _perfClientState() {
   return { inflightN: inflight.size, disabled, stuckMs, dropped: reportState.dropped, keys: reportState.keys.size };
 }
 export function _resetPerfClient() {
-  inflight.clear(); seq = 0; disabled = false; stuckMs = 60_000; configLoaded = false;
+  inflight.clear(); seq = 0; disabled = false; stuckMs = 60_000; configLoaded = false; configPromise = null; lastConfigTry = 0;
   reportState.keys.clear(); reportState.hourBucket = 0; reportState.hourCount = 0; reportState.dropped = 0;
 }

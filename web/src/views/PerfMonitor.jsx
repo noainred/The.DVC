@@ -64,10 +64,16 @@ export default function PerfMonitor() {
   const lb = loopBadge(d.loop?.last, st.hangLagMs);
   const note = loopNote({ monitorEnabled: d.loop?.monitorEnabled, windowCount: d.loop?.windowCount, windowMs: d.loop?.last?.windowMs || 30_000 });
 
+  const NUMERIC = ['slowRequestMs', 'hangLagMs', 'clientStuckMs', 'keepSlow', 'keepHangs', 'retentionDays'];
   const save = async () => {
     setBusy('save'); setMsg(null);
     try {
-      const r = await putJson('/admin/perf/settings', form);
+      // 빈 칸은 **보내지 않는다** — 숫자 입력을 비운 상태로 저장하면 서버가 ''(→0)를 '범위 밖'
+      // 으로 보고 최소값으로 승격시켜, 보존일이 1일로 바뀌고 같은 요청의 정리에서 hang 기록이
+      // 즉시 지워진다(적대적 리뷰 지적). 서버도 빈 값을 무시하도록 함께 고쳤다.
+      const body = { enabled: !!form.enabled };
+      for (const k of NUMERIC) if (String(form[k] ?? '').trim() !== '') body[k] = form[k];
+      const r = await putJson('/admin/perf/settings', body);
       setForm({ ...r.settings });
       setMsg({ ok: true, text: `저장됨 — 다음 요청·다음 창부터 적용${r.pruned?.trimmed ? ` (보존일 정리 ${r.pruned.trimmed}줄)` : ''}` });
       load();

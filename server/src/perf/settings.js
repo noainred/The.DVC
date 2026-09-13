@@ -32,6 +32,13 @@ const clamp = (v, lim, dflt) => {
   const n = Number(v);
   return Number.isFinite(n) ? Math.min(lim.max, Math.max(lim.min, Math.round(n))) : dflt;
 };
+/**
+ * 값이 '지정됐는지' 판정. **빈 문자열은 미지정으로 버린다** — Number('') === 0 은 유한값이라
+ * clamp 를 타고 **최소값으로 승격**된다. 그러면 관리자가 숫자 칸을 비운 채 저장하는 순간
+ * 보존일이 1일이 되고, 같은 요청의 정리에서 hang 기록이 즉시 지워진다(적대적 리뷰 지적).
+ * 루트 CLAUDE.md 의 '빈 값·0 은 하한으로 승격하지 않고 미지정으로 버린다'(스토리지 주기 배포 계약)와 같은 규칙.
+ */
+const given = (v) => v != null && String(v).trim() !== '';
 
 let cache = null;
 
@@ -42,12 +49,12 @@ export function loadPerfSettings() {
     if (fs.existsSync(FILE)) {
       const p = JSON.parse(fs.readFileSync(FILE, 'utf8')) || {};
       if (typeof p.enabled === 'boolean') out.enabled = p.enabled;
-      if (p.slowRequestMs != null) out.slowRequestMs = clamp(p.slowRequestMs, LIMITS.slowRequestMs, DEFAULTS.slowRequestMs);
-      if (p.hangLagMs != null) out.hangLagMs = clamp(p.hangLagMs, LIMITS.hangLagMs, DEFAULTS.hangLagMs);
-      if (p.clientStuckMs != null) out.clientStuckMs = clamp(p.clientStuckMs, LIMITS.clientStuckMs, DEFAULTS.clientStuckMs);
-      if (p.keepSlow != null) out.keepSlow = clamp(p.keepSlow, LIMITS.keep, DEFAULTS.keepSlow);
-      if (p.keepHangs != null) out.keepHangs = clamp(p.keepHangs, LIMITS.keep, DEFAULTS.keepHangs);
-      if (p.retentionDays != null) out.retentionDays = clamp(p.retentionDays, LIMITS.retentionDays, DEFAULTS.retentionDays);
+      if (given(p.slowRequestMs)) out.slowRequestMs = clamp(p.slowRequestMs, LIMITS.slowRequestMs, DEFAULTS.slowRequestMs);
+      if (given(p.hangLagMs)) out.hangLagMs = clamp(p.hangLagMs, LIMITS.hangLagMs, DEFAULTS.hangLagMs);
+      if (given(p.clientStuckMs)) out.clientStuckMs = clamp(p.clientStuckMs, LIMITS.clientStuckMs, DEFAULTS.clientStuckMs);
+      if (given(p.keepSlow)) out.keepSlow = clamp(p.keepSlow, LIMITS.keep, DEFAULTS.keepSlow);
+      if (given(p.keepHangs)) out.keepHangs = clamp(p.keepHangs, LIMITS.keep, DEFAULTS.keepHangs);
+      if (given(p.retentionDays)) out.retentionDays = clamp(p.retentionDays, LIMITS.retentionDays, DEFAULTS.retentionDays);
     }
   } catch (e) {
     preserveCorrupt(FILE);
@@ -60,12 +67,12 @@ export function loadPerfSettings() {
 export function savePerfSettings(body = {}) {
   const next = { ...loadPerfSettings() };
   if (typeof body.enabled === 'boolean') next.enabled = body.enabled;
-  if (body.slowRequestMs != null) next.slowRequestMs = clamp(body.slowRequestMs, LIMITS.slowRequestMs, next.slowRequestMs);
-  if (body.hangLagMs != null) next.hangLagMs = clamp(body.hangLagMs, LIMITS.hangLagMs, next.hangLagMs);
-  if (body.clientStuckMs != null) next.clientStuckMs = clamp(body.clientStuckMs, LIMITS.clientStuckMs, next.clientStuckMs);
-  if (body.keepSlow != null) next.keepSlow = clamp(body.keepSlow, LIMITS.keep, next.keepSlow);
-  if (body.keepHangs != null) next.keepHangs = clamp(body.keepHangs, LIMITS.keep, next.keepHangs);
-  if (body.retentionDays != null) next.retentionDays = clamp(body.retentionDays, LIMITS.retentionDays, next.retentionDays);
+  if (given(body.slowRequestMs)) next.slowRequestMs = clamp(body.slowRequestMs, LIMITS.slowRequestMs, next.slowRequestMs);
+  if (given(body.hangLagMs)) next.hangLagMs = clamp(body.hangLagMs, LIMITS.hangLagMs, next.hangLagMs);
+  if (given(body.clientStuckMs)) next.clientStuckMs = clamp(body.clientStuckMs, LIMITS.clientStuckMs, next.clientStuckMs);
+  if (given(body.keepSlow)) next.keepSlow = clamp(body.keepSlow, LIMITS.keep, next.keepSlow);
+  if (given(body.keepHangs)) next.keepHangs = clamp(body.keepHangs, LIMITS.keep, next.keepHangs);
+  if (given(body.retentionDays)) next.retentionDays = clamp(body.retentionDays, LIMITS.retentionDays, next.retentionDays);
   atomicWriteFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
   cache = next;
   return next;

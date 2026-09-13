@@ -18,22 +18,43 @@
  */
 import { recordClientStall } from '../../perf/monitor.js';
 import { loadPerfSettings } from '../../perf/settings.js';
+import { routeKeyOf } from '../../perf/stats.js';
 import { clientIp } from '../../util/rateLimit.js';
 
 const COOLDOWN_MS = Math.max(5_000, Math.min(600_000, Number(process.env.PERF_CLIENT_COOLDOWN_MS) || 60_000));
+// 사용자당 시간당 상한 — 쿨다운만 두면 **계정 수·IP 축으로 분산해 우회**할 수 있다(쿨다운 키가
+// user|ip 였다). 사용자 단독 키로 시간당 상한을 따로 걸어, 저권한 계정이 hang 기록을 자기 이벤트로
+// 채워 서버 정체 기록을 밀어내지 못하게 한다(hangLog 의 종류별 분당 쿼터와 이중 방어).
+const MAX_PER_USER_HOUR = Math.max(1, Math.min(200, Number(process.env.PERF_CLIENT_MAX_PER_HOUR) || 10));
 const MAX_KEYS = 2_000;
-const seen = new Map(); // `${user}|${ip}` -> lastTs
+const seen = new Map();     // `${user}|${ip}` -> lastTs (쿨다운)
+const perUser = new Map();  // user -> { hour, n }
 
-function throttled(key, now) {
+function throttled(user, ip, now) {
+  const hour = Math.floor(now / 3_600_000);
+  const u = perUser.get(user) || { hour, n: 0 };
+  if (u.hour !== hour) { u.hour = hour; u.n = 0; }
+  if (u.n >= MAX_PER_USER_HOUR) { perUser.set(user, u); return true; }
+  const key = `${user}|${ip}`;
   const last = seen.get(key) || 0;
   if (now - last < COOLDOWN_MS) return true;
   if (seen.size >= MAX_KEYS) {
     // 가장 오래된 키를 정리(무한 증가 방지). Map 은 삽입 순서라 앞에서 지운다.
     for (const k of seen.keys()) { seen.delete(k); if (seen.size < MAX_KEYS) break; }
   }
+  if (perUser.size >= MAX_KEYS) { const first = perUser.keys().next().value; if (first !== undefined) perUser.delete(first); }
   seen.set(key, now);
+  u.n += 1; perUser.set(user, u);
   return false;
 }
+
+/**
+ * 서버측 정규화 — '쿼리스트링·본문 데이터는 받지 않는다' 는 이 라우트의 계약을 **서버가 강제한다**.
+ * 정규화가 브라우저에만 있으면 인증된 사용자가 curl 로 `?q=<검색어>&token=<값>` 이 붙은 문자열을
+ * 보내 관리자 화면·NDJSON 에 영구 저장할 수 있다(적대적 리뷰 지적). 라우트 키와 같은 마스킹을 쓴다.
+ */
+const normPath = (v) => routeKeyOf({ path: String(v || '').split('?')[0].split('#')[0] }).slice(0, 200);
+const normView = (v) => String(v || '').split('?')[0].slice(0, 120);
 
 export function registerPerfClient(api) {
   /**
@@ -48,13 +69,14 @@ export function registerPerfClient(api) {
       const st = loadPerfSettings();
       if (!st.enabled) return res.status(204).end();
       const user = req.user?.username || '';
-      const key = `${user}|${clientIp(req)}`;
-      if (throttled(key, Date.now())) return res.status(204).end();
+      const ip = clientIp(req);
+      if (throttled(user, ip, Date.now())) return res.status(204).end();
       const b = req.body || {};
       recordClientStall({
-        user, ip: clientIp(req),
-        view: b.view, path: b.path, ms: b.ms,
-        inflight: Array.isArray(b.inflight) ? b.inflight : [],
+        user, ip,
+        view: normView(b.view), path: normPath(b.path), ms: b.ms,
+        inflight: (Array.isArray(b.inflight) ? b.inflight : []).slice(0, 10)
+          .map((x) => ({ path: normPath(x?.path), ms: x?.ms })),
         userAgent: req.get('user-agent') || '',
       });
     } catch { /* 보고 처리 실패는 조용히 — 화면에 영향 없음 */ }
