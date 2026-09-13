@@ -153,7 +153,13 @@ test('루프 정체 창과 겹친 요청은 wall 이 짧아도 stall 사유로 �
   const snap = M.perfSnapshot();
   assert.equal(snap.slow.length, 1, '임계(10초) 미만이지만 정체 창과 겹쳐 기록돼야 한다');
   assert.equal(snap.slow[0].reason, 'stall');
-  assert.equal(snap.slow[0].stallMs, 900, '귀속은 요청 길이를 넘지 못한다(물리적 상한)');
+  // 귀속량은 '요청 구간 ∩ 정체 창' 이다. 창은 recordLoopWindow 시점에 닫히므로 이 테스트가 다음 줄로
+  // 넘어가는 데 걸린 시간(CI 에서 1~수 ms)만큼 겹침이 줄어든다 — 정확히 900 을 단정하면 실측 시간에
+  // 따라 깨진다(실제로 CI 에서 899 로 실패). 고정할 사실은 두 가지: ① 요청 길이를 넘지 않는다
+  // (창 자체는 1,200ms 지만 900ms 요청에 1,200 을 씌우지 않는다) ② 창이 구간을 덮으므로 거의 전 구간이다.
+  const { stallMs } = snap.slow[0];
+  assert.ok(stallMs <= 900, `귀속은 요청 길이를 넘지 못한다(물리적 상한) — ${stallMs}`);
+  assert.ok(stallMs >= 800, `창이 요청 구간을 덮으므로 거의 전 구간이 귀속돼야 한다 — ${stallMs}`);
 });
 
 test('짧은 요청은 정체 창 전체를 뒤집어쓰지 않는다(거짓양성 차단)', () => {
