@@ -149,7 +149,7 @@
     <div style="display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 16px; align-items: start">
 
       <div class="panel">
-        <div class="panelh"><b>클러스터 여력</b><span class="sub">N+1 기준</span><div class="right"><span class="src">/tools/capacity</span></div></div>
+        <div class="panelh"><b>클러스터 여력</b><span class="sub">현재 스냅샷의 할당/용량 비율 — N+1 판정 아님</span><div class="right"><span class="src">/tools/capacity</span></div></div>
         <table>
           <thead><tr><th>법인 · 클러스터</th><th style="text-align:right">호스트</th><th style="text-align:right">vCPU/코어</th><th style="text-align:right">RAM 오버커밋</th><th style="text-align:right">여유</th></tr></thead>
           <tbody>
@@ -161,7 +161,7 @@
           </tbody>
         </table>
         <div style="padding: 9px 18px 12px; border-top: 1px solid #e6eaf0; font-size: 11px; color: #68738a">
-          <b>규칙 적용 결과이지 예측이 아니다</b> — 시계열 추세가 아니라 현재 스냅샷의 할당/용량 비율이다.
+          <b>현재 스냅샷의 할당/용량 비율</b>이다 — 시계열 예측도 아니고, <b>N+1 여력(호스트 1대 장애 시 수용 가능 여부)은 수집 항목이 아니라 계산하지 않는다</b> — 시계열 추세가 아니라 현재 스냅샷의 할당/용량 비율이다.
         </div>
       </div>
 
