@@ -25,7 +25,12 @@ export const TOOLS = [
   { k: 'vmfinder', icon: '🧭', label: 'VM 정밀 검색 / 유휴 VM', desc: '다수 vCenter·폴더·클러스터·풀 + 조건 · 1일/1주 평균 CPU로 미사용 VM' },
   { k: 'deepsearch', icon: '🔭', label: '심층 검색', desc: '게이트웨이·서브넷·GPU·OS 등 다조건 + 게스트 탐침(GPU드라이버·프로세스) · 전체/복수 vCenter' },
   { k: 'capacity', icon: '📈', label: '용량 리포트', desc: '클러스터별 여유·오버커밋·수용여력 · 디스크 트렌드(할당·사용·회수 가능) · 전체/법인별' },
-  { k: 'waste', icon: '♻️', label: '낭비 리소스', desc: '정지 VM·스냅샷·thin 회수가능·Tools 미설치' },
+  // v2.507 이름 변경: '낭비 리소스' → '자원 최적화 (CPU/Memory/Disk)'(사용자 요청). 키 `waste` 는
+  //   유지한다 — 권한 매트릭스의 toolsDenied 값·딥링크 `#/tools/waste`·서버 매핑(auth/toolAccess.js)이
+  //   이 문자열이라, 바꾸면 각 법인이 저장해 둔 거부 설정과 사용자 북마크가 조용히 깨진다.
+  //   desc 에 '낭비' 를 남긴 것도 의도다 — 카드 검색이 label+desc 만 보므로(SpecialTools.jsx:233)
+  //   기존 이름으로 검색하던 사용자가 기능을 못 찾게 되는 것을 막는다.
+  { k: 'waste', icon: '♻️', label: '자원 최적화 (CPU/Memory/Disk)', desc: 'CPU·메모리 과할당(할당 vs 실사용 추이 · 감축 근거 리포트) · 전원 꺼진 VM · 스냅샷 · thin 회수가능 · Tools 미실행 — 낭비 자원 회수' },
   { k: 'esxitemp', icon: '🌡️', label: 'ESXi 온도', desc: '호스트/클러스터/법인별 현재 온도 + 최근 5년 추이' },
   { k: 'forecast', icon: '🔮', label: '용량 추세/예측', desc: '데이터스토어 증가율·가득 찰 예상일' },
   { k: 'dsusage', icon: '💽', label: 'vCenter별 스토리지', desc: 'DataCenter/vCenter별 데이터스토어 연결 현황 · 가용/전체 용량' },

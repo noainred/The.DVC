@@ -5,7 +5,7 @@ import { normPath } from '../perfClientLogic.js';
 
 describe('경로 → 작업 이름', () => {
   it('아는 경로는 사람 말로 바꾼다', () => {
-    expect(taskLabel('/tools/waste')).toMatchObject({ label: '낭비 리소스 분석', known: true, slow: false });
+    expect(taskLabel('/tools/waste')).toMatchObject({ label: '자원 최적화 분석', known: true, slow: false });
     expect(taskLabel('/summary').label).toBe('전 vCenter 요약 집계');
     expect(taskLabel('/compare/matrix').label).toBe('비교 매트릭스 집계');
   });
@@ -17,7 +17,7 @@ describe('경로 → 작업 이름', () => {
   });
   it('접두 일치는 더 구체적인 것이 이긴다', () => {
     // '/tools/' 일반 규칙보다 '/tools/waste' 정확 일치가 우선.
-    expect(taskLabel('/tools/waste').label).toBe('낭비 리소스 분석');
+    expect(taskLabel('/tools/waste').label).toBe('자원 최적화 분석');
     // 표에 없는 tools 하위는 일반 규칙으로.
     expect(taskLabel('/tools/무언가').label).toBe('특수 기능 조회');
     // /admin/perf 는 /admin/ 보다 앞에 있어야 한다.
@@ -58,7 +58,7 @@ describe('진행 중 목록 → 표시 행', () => {
   it('오래 기다린 것부터, 같은 작업은 하나로 묶고 건수를 붙인다', () => {
     const out = taskRows(rows, { normalize: normPath });
     expect(out[0]).toMatchObject({ label: '전 vCenter 요약 집계', ms: 9_000, count: 2 });
-    expect(out[1]).toMatchObject({ label: '낭비 리소스 분석', ms: 4_000, count: 1 });
+    expect(out[1]).toMatchObject({ label: '자원 최적화 분석', ms: 4_000, count: 1 });
     expect(out).toHaveLength(3);
   });
   it('상한을 지킨다', () => {

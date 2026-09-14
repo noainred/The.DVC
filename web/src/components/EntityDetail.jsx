@@ -13,7 +13,7 @@ import React, { useState, useEffect } from 'react';
 // **앱 entry 그래프에 정적으로 붙어 있어서**, recharts(vendor-charts 496KB)가 차트가 없는
 // 로그인 화면에서까지 modulepreload 됐다(실측). 둘 다 상세 화면에서만 렌더되므로 지연 로드가 맞다.
 const HostPowerPanel = React.lazy(() => import('./HostPowerPanel.jsx'));
-// v2.449: VM 상세에서도 '자원 축소 근거 리포트'(낭비 리소스 표의 📊 리포트와 같은 화면)를 연다.
+// v2.449: VM 상세에서도 '자원 축소 근거 리포트'(자원 최적화 표의 📊 리포트와 같은 화면)를 연다.
 // recharts 를 쓰므로 반드시 lazy — 정적 import 하면 이 파일이 entry 그래프에 있어 로그인 화면까지
 // 차트 번들(496KB)이 따라온다(v2.448 에서 끊어낸 경로).
 const RightsizeReport = React.lazy(() => import('../views/tools/RightsizeReport.jsx'));
@@ -447,7 +447,7 @@ export function EntityDetail({ type, item, onClose }) {
           <VmConsoleButton vmId={item.id} vmName={item.name} />
           <VmRemoteButton item={item} />
           <Lazy><VmMetricButton vmId={item.id} vmName={item.name} /></Lazy>
-          {/* 자원 축소 근거 리포트(v2.449) — 특수 기능 › 낭비 리소스 표의 '📊 리포트' 와 같은 화면이다.
+          {/* 자원 축소 근거 리포트(v2.449) — 특수 기능 › 자원 최적화 표의 '📊 리포트' 와 같은 화면이다.
               그 표에서만 열 수 있어 VM 을 검색해 들어온 경우 도구 화면으로 되돌아가야 했다. */}
           <button className="logout-btn" style={{ flex: 'none', padding: '8px 14px', whiteSpace: 'nowrap' }}
             onClick={() => setShowReport(true)}

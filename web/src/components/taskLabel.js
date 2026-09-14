@@ -2,7 +2,7 @@
  * 요청 경로 → **사람이 읽는 작업 이름**(v2.501) — 순수 함수.
  *
  * 사용자 요구: "대기가 3초 이상이면 구체적으로 어떤 작업을 하는지 진행상태를 보여줄 것."
- * 그래서 스피너가 `/tools/waste` 같은 경로 대신 '낭비 리소스 분석' 이라고 말해야 한다.
+ * 그래서 스피너가 `/tools/waste` 같은 경로 대신 '자원 최적화 분석' 이라고 말해야 한다.
  *
  * 정직성 규약:
  *  · **모르는 경로를 지어내지 않는다** — 표에 없으면 경로를 다듬어 그대로 보여주고 `known:false` 로
@@ -36,8 +36,8 @@ const EXACT = {
   '/auth/config': { label: '로그인 설정 확인' },
 
   // 도구·분석 — 스냅샷 집계는 빠르지만 라이브 조회를 동반하는 것은 slow 로 표시한다.
-  '/tools/waste': { label: '낭비 리소스 분석' },
-  '/tools/waste/export': { label: '낭비 리소스 엑셀(ZIP) 생성', slow: true },
+  '/tools/waste': { label: '자원 최적화 분석' },
+  '/tools/waste/export': { label: '자원 최적화 엑셀(ZIP) 생성', slow: true },
   '/tools/capacity': { label: '리소스 적정성 분석' },
   '/tools/capacity-forecast': { label: '용량 추이 예측' },
   '/tools/insights': { label: '인사이트 집계' },
