@@ -136,6 +136,33 @@ pyportal/ 아래 파일을 만질 때 자동 로드된다. 되돌리면 안 되�
 
 ## 프론트엔드 회귀 방지
 
+- **신규 포탈은 V4 하나다**(`web/src/version_4/`, v2.508 — v2.490 의 V3 를 승격): 셸을 더 만들지 말 것.
+  `console/` ↔ `version_3/` 가 페이지별 **58~87% 동일**했고 v2.506 svcmon 권한 버그를 **두 곳에**
+  고쳐야 했다(`server/test/audit2506.test.js:64` 가 그 배열을 하드코딩한다). 네 번째 복제를 만들면
+  같은 수정이 세 곳이 된다. V4 에 화면을 더할 때 지킬 것:
+  - **도구 키(`#/tools/<k>`) 는 어떤 이름 변경에도 바꾸지 않는다** — `permissions.json` 의
+    `toolsDenied` 값이자 `auth/toolAccess.js` 의 집행 매핑이다. 옛 이름은 `specialToolsList.js` 의
+    **`aka` 배열**에 남긴다(v2.508 신설). desc 에 검색어를 끼워 넣는 우회를 되살리지 말 것.
+    검색 매칭은 `views/toolSearch.js` 하나가 소유한다 — 카드 그리드와 ⌘K 팔레트가 같은 모듈을 쓴다.
+  - **새 도구를 추가하면 `version_4/tree.js` 에 배치한다** — 안 하면 내비에서 영원히 못 찾는다
+    (레거시 그리드에만 남는다). `tree.test.js` 가 '주소속 1회 · 미분류 0 · 유령 키 0' 을 고정한다.
+    **상태를 바꾸는 도구**(rma·vm-clone·vmprovision·shutdown·diskadd·backup·massdeploy·agent-scans)는
+    무조건 `운영 작업` 이 주소속이다 — 조회 그룹을 훑다가 실행 버튼을 만나지 않게.
+    `toolcats/catalog.js` 의 PRESET 도 같이 채운다(빠지면 화면에서 '기타' 로 밀린다).
+  - **모드 토글은 권한이 아니다**(`version_4/mode.js`): 바꾸는 것은 표 행수·기간·원시 열·펼침뿐이고
+    **권한·데이터 범위·임계값(75/90)은 두 모드가 같다**. ⚠ '호출 API 도 같다' 고 쓰지 말 것 —
+    ②와 ⑤는 패널이 달라 실제 호출 집합이 다르다(시안 초안의 오류였고 v2.508 에 정정했다).
+    `localStorage` 접근은 반드시 try/catch(프라이빗 창에서 throw).
+  - **V4 에서 무거운 API 는 15초 폴링 금지**: `/tools/capacity-forecast` 는 실측 1.5초(v2.503)라
+    120초 이상 · 페이지 마운트 시에만. **고아 VMDK 스캔(`/tools/orphan-vmdk`)은 폴링 금지** —
+    실행마다 vCenter SOAP 왕복이다(v2.505). 버튼 실행 + 재진입 가드.
+    목록(`/tools/orphan-vmdk/datastores`)은 스냅샷 memo 라 폴링해도 된다 — 둘을 구분할 것.
+    이 규약은 `server/test/v4Portal2508.test.js` 가 고정한다.
+  - **표 머리글에 영문 소문자 단위를 쓰지 말 것**: `.v3-table th` 가 `text-transform: uppercase` 라
+    `kWh` 가 **`KWH`** 로 샌다(v2.508 실제 발견 — 스크린샷을 읽어야 잡힌다). 한글 라벨로 쓰고
+    단위는 각주에 적는다.
+  - CSS 클래스 접두는 승격 후에도 `v3-` 를 유지했다(163개 규칙 전량 치환은 이득 없이 소실 위험).
+    V4 전용 셸 크롬만 `v4-` 를 쓴다.
 - **위임(엣지) 수집 환경에서 중앙 화면이 비면 안 된다**(v2.493, 2026-09-12 실제 신고 — 같은 유형이
   v2.381→2.383 에서 이미 한 번 발생했다): 위임 법인 서버는 중앙 레지스트리에 없고, 엣지가 export 로
   **최신 스냅샷만** 올려 보낸다(`collector/agent.js compactSensors` → 중앙 `collector/remoteInventory.js`).
