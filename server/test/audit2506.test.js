@@ -59,9 +59,9 @@ test('① /api/svcmon 은 마운트가 전부이며 그 마운트에 requirePerm
 
 test('① 프론트도 같은 경계를 쓴다 — 셸 폴링과 특수 기능 카드', () => {
   // 서버만 막으면 권한 없는 역할은 30초마다 403 을 받고, 타일은 '점검 상태 대기'(거짓 원인)로
-  // 남는다(CLAUDE.md v2.493). 두 셸(V3·관제 콘솔)과 특수 기능 카드가 같은 키를 봐야 한다.
+  // 남는다(CLAUDE.md v2.493). 두 셸(V4·관제 콘솔)과 특수 기능 카드가 같은 키를 봐야 한다.
   const WEB = path.resolve(HERE, '../../web/src');
-  for (const f of ['version_3/V3App.jsx', 'console/DvcConsole.jsx']) {
+  for (const f of ['version_4/V4App.jsx', 'console/DvcConsole.jsx']) {
     const src = fs.readFileSync(path.join(WEB, f), 'utf8');
     assert.match(src, /canSvcmon = can\('svcmon'\)/, `${f}: svcmon 권한 판정이 없다`);
     assert.match(src, /usePolling\(canSvcmon \? '\/svcmon\/state' : null/, `${f}: 권한 무관 폴링이 남아 있다`);

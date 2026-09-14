@@ -1,4 +1,4 @@
-// version_3/data.js 회귀(v2.490) — 그리드 지도 마커 배치(아트보드 알고리즘)와 색 판정. node 환경(DOM 없음)에서 순수 함수만.
+// version_4/data.js 회귀(v2.490) — 그리드 지도 마커 배치(아트보드 알고리즘)와 색 판정. node 환경(DOM 없음)에서 순수 함수만.
 import { describe, it, expect } from 'vitest';
 import { siteMarkers, barColor, textColor, tempCellColor, tempTextColor, alarmCountColor } from './data.js';
 

@@ -183,10 +183,11 @@
             <div class="panelh"><b>모드 토글 계약</b></div>
             <div class="panelb">
               <div class="spec"><div class="k">바꾸는 것</div><div class="v">랜딩 · 내비 순서/펼침 · 요약 밴드 · 표 기본 열/정렬/행수 · 숫자 단위 · 차트 기간</div></div>
-              <div class="spec"><div class="k">바꾸지 않는 것</div><div class="v"><b>권한 · 호출 API · 데이터 범위 · 임계값 · 자물쇠 표기</b></div></div>
+              <div class="spec"><div class="k">바꾸지 않는 것</div><div class="v"><b>권한 · 데이터 범위 · 임계값 · 자물쇠 표기</b></div></div>
+              <div class="spec"><div class="k">정정 (v2.508 구현)</div><div class="v" style="color:#b45309">시안 초안은 여기에 <b>호출 API</b> 도 넣었지만, ②와 ⑤는 패널이 달라 <b>실제 호출 집합이 다르다</b>(② capacity-forecast·waste·vm-track / ⑤ vcenters·tool-usage). 문자 그대로는 성립하지 않는다 — 보장하는 것은 <b>모드를 바꿔서 접근 권한이 생기거나 사라지지 않는다</b>는 것이다</div></div>
               <div class="spec"><div class="k">저장</div><div class="v">1) <span class="mono">?view=exec|eng</span> (그 탭만, 저장 안 함)<br>2) <span class="mono">localStorage['vmportal.viewMode']</span><br>3) 역할 기본값</div></div>
               <div class="spec"><div class="k">역할 기본</div><div class="v">admin → 경영 · operator → 엔지니어 · <b>viewer → 경영</b></div></div>
-              <div class="spec"><div class="k">왜 viewer=경영</div><div class="v" style="color:#b45309">viewer 는 <span class="mono">tools</span> 권한이 없어 <b>열 수 있는 도구가 0개</b>다. 엔지니어 랜딩은 잠긴 벽이 된다</div></div>
+              <div class="spec"><div class="k">왜 viewer=경영</div><div class="v" style="color:#b45309">viewer 는 <span class="mono">tools</span> 권한이 없어 <b>열 수 있는 도구가 0개</b>다. 엔지니어 랜딩이 잠긴 벽이 되기 때문이지, <b>경영 화면이 viewer 에게 다 보여서가 아니다</b> — 경영 랜딩의 <span class="mono">/tools/*</span> 패널(용량 소진·회수 가능 자원·VM 추이)도 똑같이 잠긴다</div></div>
               <div class="spec"><div class="k">딥링크</div><div class="v"><span class="mono">#/tools/&lt;k&gt;</span> 는 모드와 무관하게 그 화면을 연다. 모드 전환 시 현재 URL 유지</div></div>
             </div>
           </div>

@@ -2,11 +2,12 @@
 // v2.282.0 대형 파일 분할(2026-08-12): 5,070줄 단일 파일에서 도구 구현을 views/tools/ 로 분리했다.
 // 이 파일은 목록/권한 게이트/딥링크/최근검색 셸과 ToolPanel 라우팅만 가진다.
 // App.jsx(IpamStandalone)·Summary.jsx(GuestOsVmsModal) 호환을 위해 아래에서 재export 한다.
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import { fetchJson, postJson, usePolling, toolAllowed, can } from '../api.js';
 import { SearchBox } from '../components/ui.jsx';
 import { TOOLS } from './specialToolsList.js';
 import { buildSections } from './toolSections.js'; // 카테고리 섹션 계산(v2.455, 순수)
+import { searchTools } from './toolSearch.js'; // 도구 검색 매칭(v2.508, 순수 · V4 팔레트와 공용)
 
 
 /**
@@ -115,10 +116,14 @@ export default function SpecialTools() {
   // 외부 포탈 주소(서버 env SERVICE_HUB_URL). 인증 후에만 내려오며, 없으면 카드도 숨긴다.
   const [externalUrls, setExternalUrls] = useState({});
   const [topKeys, setTopKeys] = useState([]); // 자주 쓰는 기능(전체 사용자 합산 상위)
-  const gridRef = useRef(null);               // 메뉴 그리드 너비 측정용
+  // 메뉴 그리드 너비 측정용(v2.508) — ref 콜백으로 '지금 떠 있는' 그리드를 잡는다.
+  // useRef 로 단일 그리드에만 달려 있던 동안에는 **카테고리 모드에서 측정 대상이 없어**
+  // '자주 쓰는 기능' 칸 수(favCount)가 갱신되지 않았다. 상태로 두어야 그리드가 바뀔 때
+  // 효과가 다시 돌아 ResizeObserver 를 새 노드에 붙인다.
+  const [gridEl, setGridEl] = useState(null);
   const [favCount, setFavCount] = useState(4); // 한 줄에 들어가는 카드 수(화면폭 자동, 기본 4)
   const [recent, setRecent] = useState(loadRecent); // 최근 검색어(최신순, 1줄 표시)
-  // 카테고리 설정(v2.455) — 76개 카드를 섹션으로 나눈다. 미설정/실패면 기존 단일 그리드 그대로.
+  // 카테고리 설정(v2.455) — 카드(78장)를 섹션으로 나눈다. 미설정/실패면 기존 단일 그리드 그대로.
   const [cats, setCats] = useState(null);
   const [openCats, setOpenCats] = useState({});
   const addRecent = (q) => {
@@ -183,19 +188,17 @@ export default function SpecialTools() {
   }, [tool]);
   // '자주 쓰는 기능' 카드 수를 메뉴 그리드 한 줄에 들어가는 칸 수에 맞춘다(화면폭 자동, vc-grid=minmax 330px·gap 16px).
   useEffect(() => {
-    if (tool) return undefined;
-    const el = gridRef.current;
-    if (!el) return undefined;
+    if (tool || !gridEl) return undefined;
     const calc = () => {
-      const w = el.clientWidth || el.offsetWidth || 0;
+      const w = gridEl.clientWidth || gridEl.offsetWidth || 0;
       setFavCount(Math.max(1, Math.floor((w + 16) / (330 + 16))));
     };
     calc();
     const ro = (typeof ResizeObserver !== 'undefined') ? new ResizeObserver(calc) : null;
-    if (ro) ro.observe(el);
+    if (ro) ro.observe(gridEl);
     window.addEventListener('resize', calc);
     return () => { if (ro) ro.disconnect(); window.removeEventListener('resize', calc); };
-  }, [tool]);
+  }, [tool, gridEl]);
   // 도구 잠금 사유 — 접근 가능하면 null. 특수 기능은 항목이 많아 '숨김'보다 '회색 잠금'이 낫다:
   // 어떤 기능이 있는지는 보이고, 권한이 없으면 클릭만 막아 관리자에게 요청할 수 있게 한다.
   const lockReasonOf = (t) => {
@@ -226,12 +229,15 @@ export default function SpecialTools() {
     const lock = lockReasonOf(t);
     return lock ? { ...t, disabled: true, comingSoon: false, lockReason: lock } : t;
   });
-  // 카테고리 설정(v2.455) — 76개 카드를 섹션으로 나눈다. 실패해도 화면은 기존대로 그린다.
+  // 카테고리 설정(v2.455) — 카드(78장)를 섹션으로 나눈다. 실패해도 화면은 기존대로 그린다.
   // ⚠ 훅은 조기 return 위 최상단에 있어야 한다(React #310) — 이 컴포넌트는 아래에서 return 하므로 안전.
   const ql = menuQ.trim().toLowerCase();
-  const shown = ql
-    ? base.filter((t) => t.label.toLowerCase().startsWith(ql) || t.label.toLowerCase().includes(ql) || (t.desc || '').toLowerCase().includes(ql))
-    : base;
+  // 검색 매칭은 공용 규칙(v2.508, toolSearch.js) — 라벨·설명뿐 아니라 **키**(gpu·ipam·rma)와
+  // **분류명**, **구 명칭 별칭**(aka)까지 본다. V4 커맨드 팔레트가 같은 모듈을 쓴다.
+  const catLabelsOf = (t) => (cats?.categories || [])
+    .filter((c) => c && c.enabled !== false && (c.tools || []).includes(t.k))
+    .map((c) => c.label || '');
+  const shown = searchTools(base, ql, { catsOf: catLabelsOf });
   // 상위 키를 실제 도구로 매핑(노출 불가/비활성은 제외). 검색 중에는 추천을 숨긴다.
   const countOf = new Map(topKeys.map((u) => [u.k, u.count]));
   const favorites = ql ? [] : topKeys
@@ -300,7 +306,7 @@ export default function SpecialTools() {
       </div>
 
       {/* 카테고리 사용 시: 섹션별로 나눠 그린다. 같은 도구가 여러 섹션에 나오는 것은 정상이다(중복 소속). */}
-      {sections.length > 0 && sections.map((sec) => {
+      {sections.length > 0 && sections.map((sec, secIdx) => {
         const open = openCats[sec.id] !== false;
         return (
           <div key={sec.id} style={{ marginBottom: 18 }}>
@@ -315,7 +321,7 @@ export default function SpecialTools() {
               <span className="muted" style={{ marginLeft: 'auto', fontSize: 11 }}>{open ? '▾' : '▸'}</span>
             </button>
             {open && (
-              <div className="vc-grid">
+              <div className="vc-grid" ref={secIdx === 0 ? setGridEl : undefined}>
                 {sec.tools.map((k) => byKey.get(k)).filter(Boolean).map((t) => card(t, sec.id))}
               </div>
             )}
@@ -324,32 +330,11 @@ export default function SpecialTools() {
       })}
 
       {sections.length === 0 && (
-      <div className="vc-grid" ref={gridRef}>
+      // 카드 1장의 모양은 renderToolCard 하나가 소유한다(v2.508) — 예전에는 이 자리에 같은 JSX 가
+      // 인라인으로 복제돼 있어 한쪽만 고치면 두 모드의 카드가 어긋났다.
+      <div className="vc-grid" ref={setGridEl}>
         {shown.length === 0 && <div className="muted" style={{ gridColumn: '1 / -1', padding: 24 }}>“{menuQ}”에 해당하는 메뉴가 없습니다.</div>}
-        {shownSorted.map((t) => (
-          <div key={t.k} className="card vc-card"
-            style={{
-              cursor: t.disabled ? 'not-allowed' : 'pointer',
-              opacity: t.disabled ? 0.5 : 1,
-              ...(t.danger && !t.disabled ? { borderColor: 'var(--red)' } : {}),
-            }}
-            onClick={t.disabled ? undefined : () => openTool(t.k)}
-            title={t.lockReason || (t.disabled ? (t.comingSoon ? '준비 중 (곧 제공)' : '비활성화됨')
-              : t.external ? `새 탭으로 열기: ${externalUrls[t.external]}` : `바로가기: #/tools/${t.k}`)}>
-            <div className="flex between" style={{ alignItems: 'flex-start' }}>
-              <div style={{ fontSize: 30, filter: t.disabled ? 'grayscale(1)' : 'none' }}>{t.icon}</div>
-              {t.lockReason
-                ? <span className="badge gray" style={{ fontSize: 11 }} title={t.lockReason}>🔒 권한 없음</span>
-                : countOf.get(t.k) > 0 && <span className="badge gray" style={{ fontSize: 11 }} title="전체 사용자 누적 실행 횟수">{countOf.get(t.k)}회</span>}
-            </div>
-            <div className="vc-name" style={{ marginTop: 8, ...(t.danger && !t.disabled ? { color: 'var(--red)' } : {}) }}>{t.label}</div>
-            <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>{t.desc}</div>
-            <div className="vc-foot">
-              <span className="muted">{t.lockReason ? (t.adminOnly ? '관리자 전용' : '접근 권한 없음') : t.disabled ? (t.comingSoon ? '준비 중' : '비활성화됨') : t.external ? '새 탭으로 열기' : '클릭하여 실행'}</span>
-              <span className="muted">{t.disabled ? '' : t.external ? '↗' : '→'}</span>
-            </div>
-          </div>
-        ))}
+        {shownSorted.map((t) => card(t, null))}
       </div>
       )}
     </>

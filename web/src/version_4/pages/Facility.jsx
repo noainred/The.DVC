@@ -1,12 +1,33 @@
-// V3 물리 · 설비(v2.490) — KPI 5 · 사이트별 전력·온도(/hosts, /overview) · BMC(iDRAC) 건전성(/hosts + /admin/idrac) · PDU(/tools/pdu).
-import React from 'react';
-import { usePolling } from '../../api.js';
+/**
+ * V4 ⑥ 물리 · 설비(v2.490 → v2.508) — 시안 EngFacility.dc.html.
+ * KPI · 사이트별 전력·온도(/hosts, /overview) · BMC 건전성 · PDU(/tools/pdu)
+ *  + v2.508 추가: 법인 전산실 운영 온도(/admin/room-temp) · 서버 온도 추이(v2.504).
+ *
+ * /admin/* 는 **관리자 전용**이다 — 비관리자에게는 호출하지 않고(403 을 만들지 않는다) 왜 비었는지 적는다.
+ */
+import React, { useEffect, useState } from 'react';
+import { usePolling, fetchJson } from '../../api.js';
 import { STable } from '../../components/STable.jsx';
-import { Panel, Kpi, Bar, PctCell, Badge, PollState, Empty } from '../ui.jsx';
+import { Panel, Kpi, Bar, PctCell, Badge, PollState, Empty, Spark } from '../ui.jsx';
 import { hostFacilityRows, pduSummary, tempCellColor, tempTextColor, fmtInt, fmtPct, rowMatches, REGION_COLORS } from '../data.js';
 
-export default function Facility({ global: g, ov, sitesAll, scope, polls, perms }) {
+export default function Facility({ global: g, ov, sitesAll, scope, polls, perms, spec, isAdmin }) {
   const hosts = usePolling('/hosts', {}, 60_000);
+  const room = usePolling(isAdmin ? '/admin/room-temp' : null, {}, 300_000);
+  // 서버 온도 추이(v2.504) — 서버를 고른 뒤에만 1회 조회한다(시계열이라 폴링 대상이 아니다).
+  const [tempSrv, setTempSrv] = useState('');
+  const [tempDays, setTempDays] = useState(7);
+  const [hist, setHist] = useState(null);
+  const [histErr, setHistErr] = useState('');
+  useEffect(() => {
+    if (!isAdmin || !tempSrv) { setHist(null); return undefined; }
+    let dead = false;
+    setHist(null); setHistErr('');
+    fetchJson(`/admin/idrac/${encodeURIComponent(tempSrv)}/temp-history`, { days: tempDays })
+      .then((r) => { if (!dead) setHist(r); })
+      .catch((e) => { if (!dead) setHistErr(e.message || String(e)); });
+    return () => { dead = true; };
+  }, [isAdmin, tempSrv, tempDays]);
   const rows = hostFacilityRows(scope.scoped(hosts.data?.items || []), sitesAll).filter((r) => rowMatches(r, scope.q));
   const maxKw = Math.max(0, ...rows.map((r) => r.powerKw ?? 0));
   const measured = rows.reduce((a, r) => a + r.measured, 0), hostN = rows.reduce((a, r) => a + r.hosts, 0);
@@ -21,7 +42,10 @@ export default function Facility({ global: g, ov, sitesAll, scope, polls, perms 
   return (
     <>
       <div className="v3-kpis">
-        <Kpi label="총 소비전력" value={g?.powerReporting ? `${(g.powerKw / 1000).toFixed(2)} MW` : '—'} accent="#d97706" meta={g ? `${fmtInt(g.powerKw)} kW · 전력 보고 ${fmtInt(g.powerReporting)}대${g.powerUnmappedKw ? ` · 미매핑 ${g.powerUnmappedKw} kW` : ''}` : '수집 대기'} />
+        {/* 단위는 kW 로 통일한다(v2.508) — MW 표기는 79.1 kW 를 '0.08 MW' 로 보여 자릿수를 읽기 어렵게 했고,
+            사이드바 푸터·전력 화면은 kW 라 같은 값이 두 단위로 보였다. 1,000 kW 를 넘으면 MW 를 덧붙인다. */}
+        <Kpi label="총 소비전력" value={g?.powerReporting ? `${fmtInt(g.powerKw)} kW` : '—'} accent="#d97706"
+          meta={g ? `${g.powerKw >= 1000 ? `${(g.powerKw / 1000).toFixed(2)} MW · ` : ''}전력 보고 ${fmtInt(g.powerReporting)}대${g.powerUnmappedKw ? ` · 미매핑 ${g.powerUnmappedKw} kW` : ''}` : '수집 대기'} />
         <Kpi label="PDU" value={ps ? fmtInt(ps.devices) : '—'} accent="#1a2130" meta={ps ? (ps.devices ? `보고 ${ps.ok} · 무응답 ${ps.failed} · 임계 위반 ${ps.violations}` : '등록된 PDU 없음') : perms.pdu ? '수집 대기' : "권한 필요('tools')"} />
         <Kpi label="온도 센서" value={hosts.data ? fmtInt(measured) : '—'} accent={maxT == null ? '#526075' : maxT >= 26 ? '#dc2626' : maxT >= 24 ? '#d97706' : '#16a34a'} meta={hosts.data ? `호스트 흡기 측정 · 최고 ${maxT != null ? `${maxT}°C` : '—'} · 26°C 초과 ${hot}` : '호스트 수집 대기'} />
         <Kpi label="BMC 응답" value={lr ? fmtPct(((lr.ok || 0) / Math.max(1, (lr.ok || 0) + (lr.failed || 0))) * 100) : '—'} accent="#16a34a" meta={polls.idrac.data ? `iDRAC ${fmtInt(polls.idrac.data.poller?.servers)}대 · 무응답 ${fmtInt(lr?.failed)}${phys?.servers ? ` · 인식 ${fmtInt(phys.servers)}대` : ''}` : perms.idrac ? '폴러 상태 대기' : '관리자 권한 필요 (/admin/idrac)'} />
@@ -33,8 +57,10 @@ export default function Facility({ global: g, ov, sitesAll, scope, polls, perms 
           <PollState poll={hosts}>
             {rows.length === 0 ? <Empty>범위 안에 호스트가 없습니다.</Empty> : (
               <div style={{ padding: '6px 18px 14px' }}>
+                {/* 행의 열 정의는 v4.css 의 .v4-facrow 가 소유한다(v2.508) — 인라인 고정 5열이던 동안
+                    최소폭 합이 502px 이라 400px 화면에서 172px 넘쳤다(변경 전 빌드와 A/B 로 확인했다). */}
                 {rows.map((r) => (
-                  <div key={r.vcenterId} style={{ display: 'grid', gridTemplateColumns: 'minmax(150px, 1.1fr) minmax(70px, 1fr) 74px minmax(100px, 1.4fr) 60px', gap: 12, alignItems: 'center', padding: '8px 0', borderBottom: '1px solid #e6eaf0' }}>
+                  <div key={r.vcenterId} className="v4-facrow">
                     <div style={{ minWidth: 0 }}><div style={{ fontSize: 12.5, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.name} <span className="v3-dim" style={{ fontWeight: 400, fontSize: 11 }}>{r.hosts} 호스트</span></div><div className="v3-cellsub" style={{ color: REGION_COLORS[r.region] || '#68738a', fontSize: 10.5 }}>{r.city || r.vcenterId}{r.disconnected ? ` · 끊김 ${r.disconnected}` : ''}</div></div>
                     <div style={{ display: 'flex' }}><Bar pct={maxKw ? ((r.powerKw ?? 0) / maxKw) * 100 : 0} color={r.powerKw != null && maxKw && r.powerKw / maxKw >= 0.85 ? '#dc2626' : r.powerKw != null && maxKw && r.powerKw / maxKw >= 0.7 ? '#d97706' : '#2563eb'} large /></div>
                     <div className="v3-num" style={{ textAlign: 'right', fontSize: 11.5, color: '#b45309' }}>{r.powerKw != null ? `${r.powerKw} kW` : '—'}</div>
@@ -99,6 +125,78 @@ export default function Facility({ global: g, ov, sitesAll, scope, polls, perms 
             </PollState>
           </Panel>
         </div>
+      </div>
+
+      <div className="v3-grid2">
+        <Panel title="법인 전산실 운영 온도" sub={room.data ? `ASHRAE 권장 ${room.data.thresholds?.recommendMin}~${room.data.thresholds?.recommendMax}℃ · ΔT = 배기 − 흡기` : '관리자 전용'}
+          right={<span className="v3-tag">/admin/room-temp</span>}>
+          <PollState poll={isAdmin ? room : null} skipped={!isAdmin ? '이 패널은 관리자 권한이 필요합니다 (/admin/room-temp).' : undefined}>
+            {(room.data?.totals?.withData || 0) === 0 ? (
+              <Empty>
+                온도를 보고하는 서버가 <b>0대</b>입니다 — 등록 {fmtInt(room.data?.totals?.servers)}대 중
+                {' '}<b>{fmtInt(room.data?.totals?.noSensor)}대가 온도 센서를 보고하지 않습니다</b>
+                {room.data?.totals?.stale ? <>, {fmtInt(room.data.totals.stale)}대는 표본이 오래됐습니다</> : null}.
+                {' '}값을 <b>0℃ 로 채우지 않습니다</b> — 0℃ 는 급냉으로 읽힙니다.
+              </Empty>
+            ) : (
+              <div className="v4-facts">
+                {(room.data?.groups || []).filter((r) => scope.inScope(r.id)).map((r) => (
+                  <div className="v4-fact" key={r.id}>
+                    <div className="v4-fact-label">{r.name}</div>
+                    <div className="v4-fact-value" style={{ color: tempTextColor(r.inlet?.avg) }}>
+                      {r.inlet?.avg != null ? `${r.inlet.avg}℃` : '—'}
+                    </div>
+                    <div className="v4-fact-meta">
+                      흡기 {r.inlet?.min ?? '—'}~{r.inlet?.max ?? '—'} · 배기 {r.exhaust?.avg ?? '—'} · ΔT {r.deltaAvg ?? '—'}
+                      <br />서버 {fmtInt(r.hostCount)}대 · 센서 없음 {fmtInt(r.noSensorCount)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </PollState>
+        </Panel>
+
+        <Panel title="서버 온도 추이" sub="iDRAC 최고 온도 · 기본 서버당 1계열" right={<span className="v3-tag">/admin/idrac/:id/temp-history</span>}>
+          {!isAdmin ? <Empty>이 패널은 관리자 권한이 필요합니다 (/admin/idrac).</Empty> : (
+            <>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
+                <label className="v3-chip" style={{ flex: 1, minWidth: 200 }}><span>서버</span>
+                  <select value={tempSrv} onChange={(e) => setTempSrv(e.target.value)} style={{ flex: 1, minWidth: 0 }}>
+                    <option value="">선택…</option>
+                    {(polls.idrac.data?.servers || []).filter((sv) => scope.inScope(sv.mappedVcenterId || sv.vcenterId)).map((sv) => (
+                      <option key={sv.id} value={sv.id}>{sv.name}</option>
+                    ))}
+                  </select>
+                </label>
+                <div className="v4-modes">
+                  {[1, 7, 30, 90, 365].map((d) => (
+                    <button key={d} type="button" className={`v4-mode${tempDays === d ? ' on' : ''}`} onClick={() => setTempDays(d)}>{d >= 365 ? '1년' : `${d}일`}</button>
+                  ))}
+                </div>
+              </div>
+              {histErr && <div className="v3-banner">온도 이력 조회 실패: {histErr}</div>}
+              {!tempSrv && !histErr && <Empty>서버를 고르면 최근 {tempDays >= 365 ? '1년' : `${tempDays}일`} 최고 온도 추이를 보여 줍니다.</Empty>}
+              {tempSrv && !histErr && !hist && <Empty>불러오는 중…</Empty>}
+              {hist && ((hist.points || []).length < 2
+                ? <Empty>
+                    표본이 <b>{fmtInt((hist.points || []).length)}개</b>뿐이라 선을 그리지 않습니다. 온도 롤업은 시간당 1행이라
+                    최근에 등록했거나 센서를 보고하지 않으면 비어 있습니다 — <b>수집 시작 이전 구간은 소급해서 그리지 않습니다</b>.
+                  </Empty>
+                : <>
+                    <Spark points={(hist.points || []).map((pt) => ({ x: pt.ts ?? pt.h, y: pt.max ?? pt.v ?? null }))} color="#d97706" height={140} />
+                    <div className="v3-note" style={{ marginTop: 8 }}>
+                      표본 {fmtInt(hist.points.length)}개 · 단위 ℃(최고). 흡기·배기·CPU 4계열은 <b>옵트인 설정</b>으로만 켜집니다 — 켜면 적재 행 수가 4배가 됩니다.
+                    </div>
+                  </>)}
+            </>
+          )}
+        </Panel>
+      </div>
+
+      <div className="v3-note">
+        <b>‘펌웨어 기준선 준수율’은 만들지 않았습니다</b> — 설치된 버전 목록은 있지만 ‘기준선’ 을 정의해 두는 저장소가 없습니다.
+        {!spec?.rawCols && <> 경영 보기에서는 서비스태그·moref 열을 숨깁니다.</>}
       </div>
     </>
   );

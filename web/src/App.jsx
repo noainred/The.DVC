@@ -31,9 +31,14 @@ const ReleaseNotes = lazy(() => import('./views/ReleaseNotes.jsx'));
 // 기존 탭 화면은 그대로 두고(개발용), 콘솔은 자체 좌측 내비·6화면을 가진다. 실 API 만 사용.
 const DvcConsole = lazy(() => import('./console/DvcConsole.jsx'));
 const isConsoleHash = () => window.location.hash.replace(/^#\/?/, '').split('/')[0] === 'console';
-// 신규 포탈(version_3, v2.490) — 설정 › 신규 포탈 보기 › V3 버튼으로 진입하는 별도 화면(#/v3/…). 기존 화면은 개발용으로 그대로.
-const V3App = lazy(() => import('./version_3/V3App.jsx'));
+// 신규 포탈(version_4, v2.508 — v2.490 의 V3 를 승격) — 설정 › 신규 포탈 보기 › V4 버튼으로 진입하는
+// 별도 화면(#/v4/…). 기존 화면은 개발용으로 그대로 둔다.
+// ⚠ lazy() 를 유지할 것 — static import 로 바꾸면 초기 번들(index-*.js)이 셸 전체만큼 커진다.
+const V4App = lazy(() => import('./version_4/V4App.jsx'));
+const isV4Hash = () => window.location.hash.replace(/^#\/?/, '').split('/')[0] === 'v4';
+// 구 딥링크 보존: v2.490~v2.507 사용자가 저장한 #/v3/<page> 북마크를 버리지 않는다.
 const isV3Hash = () => window.location.hash.replace(/^#\/?/, '').split('/')[0] === 'v3';
+const redirectV3 = () => { window.location.replace(`${window.location.pathname}${window.location.search}${window.location.hash.replace(/^#\/?v3/, '#/v4')}`); };
 
 const TABS = [
   { id: 'overview', label: 'Overview' }, // 랜딩(항상 노출)
@@ -206,8 +211,8 @@ function Portal({ user, onLogout }) {
   const [showVcDown, setShowVcDown] = useState(false); // 헤더 상태 칩의 '(N 불가)' 클릭 → 연결 안 되는 vCenter 목록 모달(v2.300)
   // 통합 관제 콘솔 표시 여부(v2.487) — 해시 첫 세그먼트 'console' 로 판단해 새로고침해도 콘솔에 머문다.
   const [consoleOn, setConsoleOn] = useState(isConsoleHash);
-  // 신규 포탈(V3) 표시 여부(v2.490) — 해시 첫 세그먼트 'v3' 로 판단해 새로고침해도 신규 포탈에 머문다.
-  const [v3On, setV3On] = useState(isV3Hash);
+  // 신규 포탈(V4) 표시 여부(v2.508) — 해시 첫 세그먼트 'v4' 로 판단해 새로고침해도 신규 포탈에 머문다.
+  const [v4On, setV4On] = useState(isV4Hash);
 
   const cur = tabFilters[tab] || {};
   const region = cur.region || '';
@@ -228,11 +233,14 @@ function Portal({ user, onLogout }) {
   // 누르면 전체 vCenter 목록으로 복귀한다(드릴다운은 VCenters 내부 상태라 탭 클릭만으론 못 되돌림).
   const [platformResetSeq, setPlatformResetSeq] = useState(0);
   useEffect(() => {
-    if (!tabFromHash() && !isConsoleHash() && !isV3Hash()) window.history.replaceState(null, '', `#/${tab}`);
+    // ⚠ 이 가드에 셸 판정이 하나라도 빠지면 진입 직후 해시가 `#/<tab>` 으로 덮여 셸이 즉시 튕긴다.
+    if (isV3Hash()) redirectV3();
+    else if (!tabFromHash() && !isConsoleHash() && !isV4Hash()) window.history.replaceState(null, '', `#/${tab}`);
     const onHash = () => {
-      if (isConsoleHash()) { setConsoleOn(true); setV3On(false); return; } // 콘솔 내부 페이지 전환은 콘솔이 처리
-      if (isV3Hash()) { setV3On(true); setConsoleOn(false); return; }     // 신규 포탈 내부 페이지 전환은 V3App 이 처리
-      setConsoleOn(false); setV3On(false);
+      if (isV3Hash()) { redirectV3(); return; }                             // 구 딥링크 #/v3/<page> → #/v4/<page>
+      if (isConsoleHash()) { setConsoleOn(true); setV4On(false); return; }  // 콘솔 내부 페이지 전환은 콘솔이 처리
+      if (isV4Hash()) { setV4On(true); setConsoleOn(false); return; }       // 신규 포탈 내부 페이지 전환은 V4App 이 처리
+      setConsoleOn(false); setV4On(false);
       const t = tabFromHash(); if (t) setTabState(t);
     };
     window.addEventListener('hashchange', onHash);
@@ -242,8 +250,8 @@ function Portal({ user, onLogout }) {
   // 콘솔 진입/복귀 — 복귀 시 목적지 해시(콘솔 내비의 '개발 포탈 ↗' 항목)가 있으면 그 탭으로, 없으면 직전 탭으로.
   const openConsole = () => { setConsoleOn(true); window.location.hash = '#/console'; };
   const exitConsole = (hash) => { setConsoleOn(false); window.location.hash = hash || `#/${tab}`; };
-  // 신규 포탈(V3) 복귀 — 목적지 해시(내비의 개발 포탈 항목)가 있으면 그 탭으로, 없으면 직전 탭으로.
-  const exitV3 = (hash) => { setV3On(false); window.location.hash = hash || `#/${tab}`; };
+  // 신규 포탈(V4) 복귀 — 목적지 해시(내비의 개발 포탈 항목·도구)가 있으면 그리로, 없으면 직전 탭으로.
+  const exitV4 = (hash) => { setV4On(false); window.location.hash = hash || `#/${tab}`; };
 
   const saveLanding = (id) => { setLandingTab(id); localStorage.setItem(LANDING_KEY, id); };
 
@@ -332,11 +340,11 @@ function Portal({ user, onLogout }) {
       </Suspense>
     );
   }
-  // 신규 포탈(version_3, v2.490) — 포탈 셸 대신 전체 화면. 훅은 모두 위에서 선언된 뒤라 조기 반환해도 훅 개수가 같다.
-  if (v3On) {
+  // 신규 포탈(version_4, v2.508) — 포탈 셸 대신 전체 화면. 훅은 모두 위에서 선언된 뒤라 조기 반환해도 훅 개수가 같다.
+  if (v4On) {
     return (
-      <Suspense fallback={<div className="login-screen"><div className="loading">신규 포탈(V3) 불러오는 중…</div></div>}>
-        <V3App user={user} health={health} onExit={exitV3} />
+      <Suspense fallback={<div className="login-screen"><div className="loading">신규 포탈(V4) 불러오는 중…</div></div>}>
+        <V4App user={user} health={health} onExit={exitV4} />
       </Suspense>
     );
   }

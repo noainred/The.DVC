@@ -164,14 +164,14 @@ export default function MetricsSettings() {
         </div>
       </div>
 
-      {/* VM 성능 트래킹(자원 최적화 원본) — vCenter별 독립 DB · 보존기간·대상 선택(v2.376) */}
+      {/* VM 성능 트래킹(Optimization 원본) — vCenter별 독립 DB · 보존기간·대상 선택(v2.376) */}
       <VmPerfTrackingSettings />
     </div>
   );
 }
 
 /**
- * VM 성능 트래킹 설정(v2.376) — 자원 최적화의 '할당 vs 사용' 시계열을 얼마나·어떤 vCenter 만
+ * VM 성능 트래킹 설정(v2.376) — Optimization 의 '할당 vs 사용' 시계열을 얼마나·어떤 vCenter 만
  * 저장할지 고른다. 이 계열은 vCenter 별 **독립 DB**(CONFIG_DIR/vmperf/<id>.db)에 저장되므로
  * 대상에서 빼면 파일이 삭제되어 **용량이 즉시 회수**된다(공용 DB 면 행만 지워지고 파일은 안 줄어듦).
  *
@@ -228,11 +228,11 @@ export function VmPerfTrackingSettings() {
   return (
     <div className="card" style={{ padding: 16, marginTop: 14 }}>
       <div className="flex between wrap" style={{ alignItems: 'center', marginBottom: 6 }}>
-        <b style={{ fontSize: 14 }}>VM 성능 트래킹 (자원 최적화 · 할당 vs 사용)</b>
+        <b style={{ fontSize: 14 }}>VM 성능 트래킹 (Optimization · 할당 vs 사용)</b>
         <span className="muted" style={{ fontSize: 12 }}>총 사용량 <b style={{ color: 'var(--text)' }}>{fmtBytes(d.totalBytes)}</b></span>
       </div>
       <div className="muted" style={{ fontSize: 12, marginBottom: 12, lineHeight: 1.6 }}>
-        자원 최적화 › 사용 추이 차트의 원본 데이터입니다. vCenter 별로 <b>독립 DB</b>에 저장되어, 대상에서 빼면 파일을 삭제해 <b>용량이 즉시 회수</b>됩니다.
+        Optimization › 사용 추이 차트의 원본 데이터입니다. vCenter 별로 <b>독립 DB</b>에 저장되어, 대상에서 빼면 파일을 삭제해 <b>용량이 즉시 회수</b>됩니다.
         <br />용량 감각(실측): 6,000 VM · 1시간 간격이면 <b>90일 ≈ 7.4GB</b> · <b>1년 ≈ 30GB</b>. 필요한 vCenter 만 선택하는 것을 권합니다.
       </div>
 
