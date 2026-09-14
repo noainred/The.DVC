@@ -260,6 +260,12 @@ export const config = {
       ? process.env.AGENT_PUSH_GUESTDISK !== 'false'
       : (EDGE_ALL && process.env.AGENT_PUSH_INVENTORY !== 'false'),
     guestDiskIntervalMs: Number(process.env.AGENT_GUESTDISK_INTERVAL_MS) || 43_200_000, // 12h
+    // 실시간 스파이크 수집(v2.510): site 위임 vCenter 의 20초 표본은 엣지만 받을 수 있으므로 엣지의
+    // vmseries 폴러가 저장한 같은 주기 결과를 중앙에 push 한다. 게스트 디스크와 같은 기본 규칙
+    // (명시 env 최우선, 미지정이면 EDGE_ALL + 인벤토리 push 켜짐일 때만 on). 주기는 vmseries 설정을 따른다.
+    pushVmSeries: process.env.AGENT_PUSH_VMSERIES != null
+      ? process.env.AGENT_PUSH_VMSERIES !== 'false'
+      : (EDGE_ALL && process.env.AGENT_PUSH_INVENTORY !== 'false'),
   },
   auth: {
     enabled: process.env.AUTH_ENABLED !== 'false',

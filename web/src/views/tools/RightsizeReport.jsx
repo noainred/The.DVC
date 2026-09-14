@@ -14,6 +14,9 @@ import { STable } from '../../components/STable.jsx';
 import { exportFileName, saveElementAsJpg, saveDocAsPdf } from './reportExport.js';
 // v2.481: 디스크 섹션에 게스트 디스크 사용량(guest.disk 수집·추이)을 함께 보인다(사용자 요청) — 표기는 게스트 디스크 상세와 동일 유틸.
 import { fmtSize, resolveUnit, UNIT_DIV, trendLabel, toRows, TrendChart } from './GuestDiskDetailModal.jsx';
+// v2.510: 'Local + vCenter' 템플릿 — 포탈 실시간(20초) 스파이크 수집 섹션. 기존 템플릿은 'vCenter Only' 로 이름만 붙고 수치·산정은 불변.
+import RightsizeLocal from './RightsizeLocal.jsx';
+import { TEMPLATES, localPhaseText, fmtSec, coverageText } from '../vmSeriesText.js';
 
 /** 게스트 디스크 응답을 PDF 블록으로(게스트 디스크 상세 PDF 와 같은 구성, 파티션별 차트는 생략). */
 function guestDiskBlocks(gd, days) {
@@ -68,9 +71,33 @@ function memCell(s, rtc) {
 }
 const RT_TAG = <span title="vCenter 실시간(최근 1시간) 구간에서 조회한 현재값 — 이력 통계 레벨과 무관"
   style={{ background: '#0ea5e9', color: '#fff', fontSize: 9, marginLeft: 4, padding: '0 4px', borderRadius: 4, verticalAlign: 'middle' }}>실시간</span>;
+// v2.510: 'Local + vCenter' 템플릿에서 두 출처를 구분하는 배지 — vCenter 섹션은 이 배지, Local 섹션은 자기 배지.
+const VC_BADGE = <span className="badge gray" style={{ fontSize: 10, marginLeft: 6, verticalAlign: 'middle' }} title="vCenter 가 보관하는 롤업 통계(각 점 = 간격 평균)">vCenter 롤업</span>;
+
+/** PDF 용 Local 섹션 블록(v2.510) — 표시 값만(산정 미반영). */
+function localBlocks(local, r) {
+  if (!local) return [];
+  const t = localPhaseText(local, { settings: local.settings });
+  const blocks = [{ type: 'heading', text: `Local — 포탈 실시간 20초 수집 (${t.short})${local.synthesized ? ' · 데모(mock) 합성' : ''}` }];
+  if (local.available === false || local.empty) { blocks.push({ type: 'note', text: t.long }); return blocks; }
+  const p = local.peak || {}; const c = local.coverage || {};
+  const g = (mhz) => (mhz == null ? '—' : `${(mhz / 1000).toFixed(2)} GHz`); const m = (mb) => (mb == null ? '—' : `${(mb / 1024).toFixed(1)} GB`);
+  blocks.push({ type: 'kvrow', items: [
+    { k: '20초 최대 CPU', v: g(p.cpuUsageMhz?.v), sub: p.cpuUsagePct ? `${p.cpuUsagePct.v}%` : '' },
+    { k: '스파이크 횟수', v: `${local.runs?.count ?? 0}회`, sub: `하루 평균 ${local.runs?.perDay ?? 0}회` },
+    { k: '최장 지속', v: fmtSec(local.runs?.maxSec), sub: `합계 ${fmtSec(local.runs?.totalSec)}` },
+    { k: 'Ready 최대(vCPU당)', v: p.cpuReadyPct ? `${p.cpuReadyPct.v}%` : '—' },
+    { k: '20초 최대 Active', v: m(p.memActiveMB?.v) },
+    { k: '커버리지', v: `${c.pct ?? 0}%`, sub: `관측 ${c.measuredHours ?? 0}/${c.expectedHours ?? 0}시간` },
+  ] });
+  const freq = (local.freq || []).map((f) => ({ t: f.t, v: f.measured ? f.runs : null })).filter((f) => f.v != null);
+  if (freq.length) blocks.push({ type: 'linechart', title: `스파이크 빈도 (${local.bucketMs >= 86_400_000 ? '일' : '시간'}당 run 횟수 · 미측정 구간 제외)`, unitLabel: '회', points: freq });
+  blocks.push({ type: 'note', text: `${coverageText(c)} 저장 기준은 임계 이상 순간만이며 각 표본은 20초 평균입니다. 권고 vCPU/메모리 산정은 vCenter 롤업 기준이고 이 섹션은 표시·경고용입니다.${r?.cpu?.used?.max != null && p.cpuUsageMhz?.v != null ? ` 20초 최대는 롤업 최대(${g(r.cpu.used.max)})의 ${(p.cpuUsageMhz.v / r.cpu.used.max).toFixed(2)}배입니다.` : ''}` });
+  return blocks;
+}
 
 /** 벡터 PDF 문서 모델 — 화면과 같은 내용을 글자·도형으로(reportExport.saveDocAsPdf). */
-function buildRightsizeDoc(r, vm, days, gd = null) {
+function buildRightsizeDoc(r, vm, days, gd = null, local = null, template = 'vcenter') {
   const mMB = (mb) => (mb == null ? '—' : `${(mb / 1024).toFixed(1)} GB`);
   const mGHz = (mhz) => (mhz == null ? '—' : `${(mhz / 1000).toFixed(2)} GHz`);
   const pc = (x) => (x == null ? '—' : `${x}%`);
@@ -95,6 +122,7 @@ function buildRightsizeDoc(r, vm, days, gd = null) {
   ] });
   const cpuPts = (r.series?.cpuUsageMhz || []).map((p) => ({ t: Date.parse(p.t), v: p.v == null ? null : p.v / 1000 })).filter((p) => Number.isFinite(p.t) && p.v != null);
   blocks.push({ type: 'linechart', title: '사용 MHz 추이', unitLabel: 'GHz', refY: cpu.used?.p95 != null ? cpu.used.p95 / 1000 : null, refLabel: 'p95', axisMax: cpu.allocMhz != null ? cpu.allocMhz / 1000 : null, points: cpuPts });
+  if (template === 'both') blocks.push(...localBlocks(local, r));
   blocks.push({ type: 'heading', text: `메모리 — ${mMB(mem.allocMB)} 할당${mem.recommendedMB != null ? ` · 권장 ${mMB(mem.recommendedMB)}${mem.reductionPct > 0 ? ` (${mem.reductionPct}%)` : ' (변경 없음)'}` : ''}` });
   const memCell = (s, rtc) => { const has = s && (s.avg != null || s.max != null); if (has) return { avg: mMB(s.avg), p95: mMB(s.p95), max: mMB(s.max), rt: false }; if (rtc) return { avg: mMB(rtc.avg), p95: '—', max: mMB(rtc.max), rt: true }; return { avg: '—', p95: '—', max: '—', rt: false }; };
   const memRow = (label, mean, s, rtc, note) => { const c = memCell(s, rtc); return [
@@ -126,7 +154,7 @@ function buildRightsizeDoc(r, vm, days, gd = null) {
   return {
     title: `자원 축소 근거 리포트 — ${vm.name}`,
     subtitle: `${vm.vcenterId} · ${vm.host || ''} · ${vm.guestOS || ''}`,
-    meta: `최근 ${dayLabel(days)} · 롤업 ${w.intervalSec}초${r.cached ? ' · 5분 캐시' : ''}${r.synthesized ? ' · 데모(mock)' : ''}`,
+    meta: `${TEMPLATES.find((t) => t.k === template)?.label || 'vCenter Only'} · 최근 ${dayLabel(days)} · 롤업 ${w.intervalSec}초${r.cached ? ' · 5분 캐시' : ''}${r.synthesized ? ' · 데모(mock)' : ''}`,
     blocks,
   };
 }
@@ -158,6 +186,18 @@ export default function RightsizeReport({ vm, onClose }) {
   const [saveErr, setSaveErr] = useState('');
   // v2.481: 게스트 디스크 사용량(guest.disk 수집) — 같은 기간으로 병행 조회. 404 = 이 VM 은 수집 대상 아님(정직하게 '수집 없음').
   const [gd, setGd] = useState({ data: null, none: false, error: '' });
+  // v2.510: 템플릿 — 'vcenter'(vCenter Only, 기존 리포트 그대로) | 'both'(Local + vCenter). 로컬 20초 수집은 both 에서만 조회한다.
+  const [template, setTemplate] = useState('vcenter');
+  const [local, setLocal] = useState({ data: null, error: '' });
+  useEffect(() => {
+    if (template !== 'both') { setLocal({ data: null, error: '' }); return undefined; }
+    let alive = true;
+    setLocal({ data: null, error: '' });
+    fetchJson(`/tools/vmseries/local?vmId=${encodeURIComponent(vm.id)}&days=${days}`)
+      .then((d) => { if (alive) setLocal({ data: d, error: '' }); })
+      .catch((e) => { if (alive) setLocal({ data: null, error: e?.message || String(e) }); });
+    return () => { alive = false; };
+  }, [vm.id, days, template]);
   useEffect(() => {
     let alive = true;
     setLoading(true); setError(null);
@@ -194,7 +234,7 @@ export default function RightsizeReport({ vm, onClose }) {
     try {
       const name = exportFileName(vm.name, days, kind === 'pdf' ? 'pdf' : 'jpg');
       // PDF 는 글자·도형(벡터) — 문서 모델을 jsPDF 로 직접 그린다(한글 임베드 폰트). JPG 는 화면 캡처.
-      if (kind === 'pdf') { if (!r) return; await saveDocAsPdf(buildRightsizeDoc(r, vm, days, gd.data), name); }
+      if (kind === 'pdf') { if (!r) return; await saveDocAsPdf(buildRightsizeDoc(r, vm, days, gd.data, local.data, template), name); }
       else await saveElementAsJpg(el, name);
     } catch (e) {
       setSaveErr(e?.message || String(e));
@@ -214,6 +254,7 @@ export default function RightsizeReport({ vm, onClose }) {
         <div className="flex between" style={{ marginBottom: 8, alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
           <div style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
             <b style={{ fontSize: 15 }}>📊 자원 축소 근거 리포트 — {vm.name}</b>
+            <span className={`badge ${template === 'both' ? 'blue' : 'gray'}`} style={{ marginLeft: 8, fontSize: 10, verticalAlign: 'middle' }}>{TEMPLATES.find((t) => t.k === template)?.label}</span>
             <div className="muted" style={{ fontSize: 11.5 }}>{vm.vcenterId} · {vm.host} · {vm.guestOS || ''}</div>
           </div>
           {/* data-export-hide: 저장 결과물에는 버튼이 남지 않게 캡처에서 제외한다. */}
@@ -225,6 +266,12 @@ export default function RightsizeReport({ vm, onClose }) {
               title="이 리포트 전체를 JPG 이미지 한 장으로 저장합니다."
               onClick={() => save('jpg')}>{saving === 'jpg' ? '저장 중…' : '⬇ JPG'}</button>
             <span style={{ width: 1, height: 18, background: 'rgba(255,255,255,.14)' }} />
+            <label className="flex gap" style={{ alignItems: 'center', fontSize: 12 }} title={TEMPLATES.map((t) => `${t.label}: ${t.desc}`).join('\n')}>
+              <span className="muted">템플릿</span>
+              <select className="select" style={{ padding: '4px 8px', fontSize: 12 }} value={template} onChange={(e) => setTemplate(e.target.value)}>
+                {TEMPLATES.map((t) => <option key={t.k} value={t.k}>{t.label}</option>)}
+              </select>
+            </label>
             <label className="flex gap" style={{ alignItems: 'center', fontSize: 12 }} title="관측 기간 — vCenter 성능 롤업에서 이 기간의 표본을 가져옵니다">
               <span className="muted">관측 기간</span>
               <select className="select" style={{ padding: '4px 8px', fontSize: 12 }} value={days} onChange={(e) => setDays(Number(e.target.value))}>
@@ -261,7 +308,7 @@ export default function RightsizeReport({ vm, onClose }) {
             {/* CPU */}
             <div className="card" style={{ marginBottom: 10 }}>
               <div className="flex between" style={{ alignItems: 'center', marginBottom: 6, flexWrap: 'wrap', gap: 6 }}>
-                <b>CPU — vCPU {r.cpu.vcpu}{r.cpu.allocMhz ? ` (${ghz(r.cpu.allocMhz)} 할당)` : ''}</b>
+                <b>CPU — vCPU {r.cpu.vcpu}{r.cpu.allocMhz ? ` (${ghz(r.cpu.allocMhz)} 할당)` : ''}{template === 'both' && VC_BADGE}</b>
                 {r.cpu.recommendedVcpu != null && (
                   <span className={`badge ${r.cpu.ok ? 'green' : r.cpu.blockers.length ? 'amber' : 'gray'}`}>
                     권장 vCPU {r.cpu.recommendedVcpu}{r.cpu.reductionVcpu > 0 ? ` (−${r.cpu.reductionVcpu}, ${r.cpu.reductionPct}%)` : ' (변경 없음)'}{r.cpu.capped ? ' · 50% 상한 적용' : ''}
@@ -313,10 +360,13 @@ export default function RightsizeReport({ vm, onClose }) {
               )}
             </div>
 
+            {/* v2.510: Local(포탈 실시간 20초) 섹션 — 'Local + vCenter' 템플릿에서만. CPU Ready 차트 바로 아래에 스파이크 빈도를 둔다(사용자 요청 위치). */}
+            {template === 'both' && <RightsizeLocal local={local.data} localError={local.error} r={r} days={days} />}
+
             {/* 메모리 */}
             <div className="card" style={{ marginBottom: 10 }}>
               <div className="flex between" style={{ alignItems: 'center', marginBottom: 6, flexWrap: 'wrap', gap: 6 }}>
-                <b>메모리 — {gb(r.mem.allocMB)} 할당</b>
+                <b>메모리 — {gb(r.mem.allocMB)} 할당{template === 'both' && VC_BADGE}</b>
                 {r.mem.recommendedMB != null && (
                   <span className={`badge ${r.mem.ok ? 'green' : r.mem.blockers.length ? 'amber' : 'gray'}`}>
                     권장 {gb(r.mem.recommendedMB)}{r.mem.reductionMB > 0 ? ` (−${gb(r.mem.reductionMB)}, ${r.mem.reductionPct}%)` : ' (변경 없음)'}{r.mem.capped ? ' · 50% 상한 적용' : ''}

@@ -1,9 +1,9 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **351개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **367개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
-- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-13)
+- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-14)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다.
 - `portal.env.example` 에 예시가 있는 키는 ✅, 없는 키는 빈칸으로 표시한다.
 - 기본값 칸이 비어 있으면 코드에서 한 줄로 추출하지 못한 것이다(해당 파일을 참조).
@@ -32,7 +32,7 @@
 | `WAN_MAX_CONNECTIONS` | `6` |  | util/resilientFetch.js |
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
 
-## 공통 (89)
+## 공통 (101)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -41,6 +41,7 @@
 | `AGENT_INVENTORY_INTERVAL_MS` | `60000` |  | config.js |
 | `AGENT_PUSH_GUESTDISK` | `기본 적용('false' 로 끄기)` |  | config.js |
 | `AGENT_PUSH_INVENTORY` | `기본 적용('false' 로 끄기)` |  | config.js |
+| `AGENT_PUSH_VMSERIES` | `기본 적용('false' 로 끄기)` |  | config.js |
 | `AGENT_SCAN_INTERVAL_MS` | `3600000` | ✅ | config.js |
 | `AUDIT_MAX` | `20000` |  | audit.js |
 | `AUTH_ENABLED` | `기본 적용('false' 로 끄기)` | ✅ | config.js |
@@ -125,6 +126,17 @@
 | `VC_TLS_MIN_VERSION` | `'TLSv1'` |  | config.js |
 | `VC_TLS_REJECT_UNAUTHORIZED` | `기본 아님('true' 일 때만 적용)` | ✅ | config.js |
 | `VCENTERS_EXAMPLE_FALLBACK` | `기본 아님('true' 일 때만 적용)` |  | config.js |
+| `VMSERIES_CONCURRENCY` | `4` |  | vmseries/poller.js |
+| `VMSERIES_CPU_PCT` |  |  | vmseries/settings.js |
+| `VMSERIES_DB_DIR` |  |  | vmseries/db.js |
+| `VMSERIES_ENABLED` | `기본 아님('true' 일 때만 적용)` |  | vmseries/settings.js |
+| `VMSERIES_FIRST_DELAY_MS` | `180000` |  | vmseries/poller.js |
+| `VMSERIES_INTERVAL_MIN` |  |  | vmseries/settings.js |
+| `VMSERIES_MAX_OPEN_DB` | `8` |  | vmseries/db.js |
+| `VMSERIES_MEM_PCT` |  |  | vmseries/settings.js |
+| `VMSERIES_MIN_FREE_GB` | `5` |  | vmseries/poller.js |
+| `VMSERIES_READY_PCT` |  |  | vmseries/settings.js |
+| `VMSERIES_RETENTION_DAYS` |  |  | vmseries/settings.js |
 
 ## 로그 (2)
 
@@ -232,7 +244,7 @@
 | `UPGRADE_ALLOW_UNVERIFIED` | `기본 아님('true' 일 때만 적용)` | ✅ | upgrade/bundleSource.js, upgrade/fetchPackage.js 외 1 |
 | `UPGRADE_TLS_INSECURE` | `기본 적용('true' 로 끄기)` |  | upgrade/upgradeAgent.js |
 
-## 엣지 에이전트 (17)
+## 엣지 에이전트 (21)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -246,13 +258,17 @@
 | `AGENT_LOGQ_POLL_MS` | `4000` |  | agent/logQueryWorker.js |
 | `AGENT_PING_POLL_MS` | `4000` |  | agent/pingWorker.js |
 | `AGENT_PUSH_FLEET` | `기본 적용('false' 로 끄기)` |  | agent/fleetPush.js |
-| `AGENT_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | agent/guestDiskPush.js, agent/inventoryPush.js |
+| `AGENT_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | agent/guestDiskPush.js, agent/inventoryPush.js 외 1 |
 | `AGENT_PUSH_TIMEOUT_MS` | `60000` |  | agent/fleetPush.js, agent/inventoryPush.js |
+| `AGENT_VMSERIES_CHUNK_BYTES` | `700000` |  | agent/vmSeriesPush.js |
+| `AGENT_VMSERIES_CONFIG_PULL_MS` | `10` |  | agent/vmSeriesConfigPull.js |
+| `AGENT_VMSERIES_PUSH_TIMEOUT_MS` | `120000` |  | agent/vmSeriesPush.js |
 | `EDGE_ADVERTISE_URL` | `''` | ✅ | agent/selfRegister.js |
 | `SANSW_CONFIG_PULL_MS` | `5` |  | agent/sanSwitchConfigPull.js |
 | `SVCMON_CONFIG_PULL` | `기본 적용('false' 로 끄기)` |  | agent/svcmonConfigPull.js |
 | `SVCMON_PUSH` | `기본 적용('false' 로 끄기)` |  | agent/svcmonPush.js |
 | `SVCMON_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | agent/svcmonPush.js |
+| `VMSERIES_LOCAL_SETTINGS` | `기본 적용('true' 로 끄기)` |  | agent/vmSeriesConfigPull.js |
 
 ## 원격 명령(RMA) (35)
 
@@ -530,4 +546,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 351
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 367
