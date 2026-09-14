@@ -31,8 +31,8 @@ describe('로딩 문구 — 단계별로 정직해진다(v2.501: 문턱 3초)', 
     const t = loadingText({ elapsedSec: 4, inflight: [{ path: '/tools/waste?vcenterId=vc-1', ms: 4_000 }] });
     expect(t.text).toBe('불러오는 중… (4초째)');
     expect(t.tasks).toHaveLength(1);
-    expect(t.tasks[0].label).toBe('자원 최적화 분석');
-    expect(t.detail).toContain('자원 최적화 분석');
+    expect(t.tasks[0].label).toBe('Optimization 분석');
+    expect(t.detail).toContain('Optimization 분석');
     expect(t.detail).not.toContain('vc-1');   // 쿼리스트링은 정규화로 사라진다
     expect(t.suggestReload).toBe(false);
   });

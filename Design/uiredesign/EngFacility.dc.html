@@ -1,0 +1,209 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap">
+  <style>
+    body { margin: 0; background: #f4f6f9; color: #1a2130;
+           font-family: Pretendard, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif;
+           font-size: 13px; line-height: 1.4; }
+    * { box-sizing: border-box; }
+    a { color: #0e7490; text-decoration: none; }
+    .mono { font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace; }
+    .num { font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; }
+    .panel { border-radius: 12px; background: #fff; border: 1px solid #dfe4ec; overflow: hidden; }
+    .panelh { display: flex; align-items: center; gap: 10px; padding: 13px 18px; border-bottom: 1px solid #dfe4ec; flex-wrap: wrap; }
+    .panelh b { font-size: 14px; } .panelh .sub { font-size: 12px; color: #526075; }
+    .panelh .right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+    .panelb { padding: 14px 18px 16px; }
+    .kpi { padding: 14px 16px 15px; border-radius: 12px; background: #fff; border: 1px solid #dfe4ec; border-left: 3px solid #1a2130; }
+    .kpi .lab { font-size: 12px; color: #526075; }
+    .kpi .val { font-size: 24px; font-weight: 800; margin-top: 6px; font-variant-numeric: tabular-nums; }
+    .kpi .met { font-size: 11px; color: #68738a; margin-top: 5px; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th { text-align: left; padding: 9px 10px; background: #f0f3f7; border-top: 1px solid #dfe4ec; border-bottom: 1px solid #dfe4ec;
+         font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 9.5px; font-weight: 500; letter-spacing: .06em;
+         text-transform: uppercase; color: #526075; white-space: nowrap; }
+    td { padding: 8px 10px; border-bottom: 1px solid #e6eaf0; }
+    tr:last-child td { border-bottom: none; }
+    th:first-child, td:first-child { padding-left: 18px; } th:last-child, td:last-child { padding-right: 18px; }
+    td.n { text-align: right; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 11.5px; white-space: nowrap; }
+    .src { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 9.5px; color: #68738a; background: rgba(139,155,180,.1); padding: 2px 7px; border-radius: 4px; white-space: nowrap; }
+    .badge { display: inline-block; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 9.5px; font-weight: 700; padding: 2px 7px; border-radius: 4px; }
+    .seg { display: flex; border: 1px solid #dfe4ec; border-radius: 7px; overflow: hidden; background: #fff; }
+    .seg > div { padding: 4px 10px; font-size: 11px; font-weight: 600; color: #526075; font-family: "JetBrains Mono", ui-monospace, monospace; }
+    .seg > div.on { background: #2563eb; color: #fff; }
+    .sidebar { width: 236px; flex: none; background: #fff; border-right: 1px solid #dfe4ec; padding: 16px 14px; display: flex; flex-direction: column; gap: 2px; }
+    .navitem { padding: 6px 10px; border-radius: 7px; font-size: 12.5px; font-weight: 600; color: #3a4556; }
+    .navitem.on { background: rgba(59,130,246,.85); color: #fff; }
+    .navitem.sm { font-weight: 500; font-size: 12px; color: #526075; padding-left: 18px; }
+    .grouplabel { padding: 8px 8px 3px; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 9.5px; letter-spacing: .14em; color: #68738a; }
+    .roomcard { padding: 12px 14px; border-radius: 10px; background: #fff; border: 1px solid #dfe4ec; }
+  </style>
+</helmet>
+
+<div style="display: flex; width: 1440px; height: 1400px; background: #f4f6f9; overflow: hidden">
+
+  <div class="sidebar">
+    <div style="display: flex; align-items: center; gap: 10px; padding-bottom: 14px; border-bottom: 1px solid #dfe4ec; margin-bottom: 6px">
+      <div style="width: 32px; height: 32px; border-radius: 9px; background: linear-gradient(135deg, #2563eb, #0e7490); display: grid; place-items: center; font-weight: 800; color: #fff; flex: none">V</div>
+      <div style="line-height: 1.2"><div style="font-size: 13.5px; font-weight: 700">The Davinci</div><div class="mono" style="font-size: 10px; color: #526075; margin-top: 2px">GLOBAL OPS CONSOLE</div></div>
+    </div>
+    <div class="grouplabel">홈</div><div class="navitem">전사 현황</div>
+    <div class="grouplabel">컴퓨트</div><div class="navitem">컴퓨트 현황</div>
+    <div class="grouplabel">스토리지</div><div class="navitem">스토리지 현황</div>
+    <div class="grouplabel">네트워크</div><div class="navitem">네트워크 현황</div>
+    <div class="grouplabel">물리 · 설비</div>
+    <div class="navitem on">설비 현황</div>
+    <div class="navitem sm">통합 서버 인벤토리</div>
+    <div class="navitem sm">벤더 / 모델 서머리</div>
+    <div class="navitem sm">GPU 인벤토리</div>
+    <div class="navitem sm">NIC 속도 · 모델</div>
+    <div class="navitem sm">ESXi 온도</div>
+    <div class="navitem sm">법인 전산실 온도 🔒</div>
+    <div class="navitem sm">전력 분석 (전력 맵)</div>
+    <div class="navitem sm">PDU 정보 🔒</div>
+    <div class="navitem sm">시리얼 조회 🔒</div>
+    <div class="grouplabel">용량 · 모니터링 · 리포트 …</div>
+  </div>
+
+  <div style="flex: 1; min-width: 0; padding: 20px 24px 32px; display: flex; flex-direction: column; gap: 16px; overflow: hidden">
+
+    <div style="display: flex; align-items: flex-end; gap: 14px">
+      <div><div class="mono" style="font-size: 10.5px; letter-spacing: .14em; color: #68738a">FACILITY</div>
+        <div style="font-size: 22px; font-weight: 700; margin-top: 4px">물리 · 설비 — 온도 · 전력 · 하드웨어</div></div>
+      <div style="margin-left: auto; font-size: 12px; color: #526075">시안에 없던 기능(iDRAC 온도 5년 추이 v2.504 · 전산실 운영 온도)을 정식 화면으로</div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px">
+      <div class="kpi"><div class="lab">등록 서버 (iDRAC)</div><div class="val num">965</div><div class="met">응답 951 · 무응답 14</div></div>
+      <div class="kpi"><div class="lab">전력 보고 서버</div><div class="val num">812</div><div class="met">미보고 153 — 보고 기능 미지원/미설정</div></div>
+      <div class="kpi" style="border-left-color:#0e7490"><div class="lab">합계 전력</div><div class="val num" style="color:#0e7490">404 kW</div><div class="met">순간값 · 설비 미포함</div></div>
+      <div class="kpi" style="border-left-color:#d97706"><div class="lab">온도 경고 서버</div><div class="val num" style="color:#b45309">23</div><div class="met">흡기 27℃ 초과 · ASHRAE 상한</div></div>
+    </div>
+
+    <!-- 전산실 온도 카드 -->
+    <div class="panel">
+      <div class="panelh"><b>법인 전산실 운영 온도</b><span class="sub">ASHRAE 권장 18~27℃ · ΔT = 배기 중앙값 − 흡기 중앙값</span>
+        <div class="right"><span class="badge" style="background: rgba(139,155,180,.12); color:#526075">🔒 관리자 전용</span><span class="src">/admin/room-temp</span></div></div>
+      <div class="panelb" style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px">
+        <div class="roomcard" style="border-left: 3px solid #d97706">
+          <div style="display:flex; align-items:baseline; gap:7px"><b style="font-size:13px">SHA 상하이</b><span class="badge" style="margin-left:auto; background: rgba(245,158,11,.16); color:#b45309">주의</span></div>
+          <div style="margin-top:9px; font-size:11.5px; line-height:1.8">
+            <div>흡기 <b class="num" style="color:#b45309">22.1 ~ 27.4℃</b></div>
+            <div>배기 <b class="num">31.0 ~ 38.2℃</b></div>
+            <div>CPU <b class="num">48 ~ 71℃</b></div>
+            <div style="color:#526075">ΔT <b class="num" style="color:#1a2130">9.9℃</b> · iDRAC 140대</div>
+          </div>
+        </div>
+        <div class="roomcard" style="border-left: 3px solid #16a34a">
+          <div style="display:flex; align-items:baseline; gap:7px"><b style="font-size:13px">SEL 서울</b><span class="badge" style="margin-left:auto; background: rgba(34,197,94,.14); color:#15803d">정상</span></div>
+          <div style="margin-top:9px; font-size:11.5px; line-height:1.8">
+            <div>흡기 <b class="num">19.4 ~ 23.8℃</b></div>
+            <div>배기 <b class="num">28.1 ~ 34.0℃</b></div>
+            <div>CPU <b class="num">41 ~ 64℃</b></div>
+            <div style="color:#526075">ΔT <b class="num" style="color:#1a2130">9.5℃</b> · iDRAC 160대</div>
+          </div>
+        </div>
+        <div class="roomcard" style="border-left: 3px solid #16a34a">
+          <div style="display:flex; align-items:baseline; gap:7px"><b style="font-size:13px">FRA 프랑크푸르트</b><span class="badge" style="margin-left:auto; background: rgba(34,197,94,.14); color:#15803d">정상</span></div>
+          <div style="margin-top:9px; font-size:11.5px; line-height:1.8">
+            <div>흡기 <b class="num">18.8 ~ 22.6℃</b></div>
+            <div>배기 <b class="num">27.4 ~ 33.1℃</b></div>
+            <div>CPU <b class="num">39 ~ 61℃</b></div>
+            <div style="color:#526075">ΔT <b class="num" style="color:#1a2130">9.6℃</b> · iDRAC 130대</div>
+          </div>
+        </div>
+        <div class="roomcard" style="border-left: 3px solid #d97706">
+          <div style="display:flex; align-items:baseline; gap:7px"><b style="font-size:13px">SJC 산호세</b><span class="badge" style="margin-left:auto; background: rgba(245,158,11,.16); color:#b45309">주의 · 하한 미만</span></div>
+          <div style="margin-top:9px; font-size:11.5px; line-height:1.8">
+            <div>흡기 <b class="num" style="color:#b45309">14.9 ~ 17.8℃</b></div>
+            <div>배기 <b class="num">24.0 ~ 29.6℃</b></div>
+            <div>CPU <b class="num">36 ~ 57℃</b></div>
+            <div style="color:#526075">ΔT <b class="num" style="color:#1a2130">10.4℃</b> · 냉방 과다</div>
+          </div>
+        </div>
+        <div class="roomcard" style="border-left: 3px solid #68738a; opacity:.85">
+          <div style="display:flex; align-items:baseline; gap:7px"><b style="font-size:13px">IAD 미국동부</b><span class="badge" style="margin-left:auto; background: rgba(139,155,180,.12); color:#526075">센서 없음</span></div>
+          <div style="margin-top:9px; font-size:11.5px; line-height:1.8; color:#68738a">
+            <div>흡기 <b class="num">—</b></div><div>배기 <b class="num">—</b></div><div>CPU <b class="num">—</b></div>
+            <div>온도 센서를 보고하는 서버 0대</div>
+          </div>
+        </div>
+      </div>
+      <div style="padding: 0 18px 14px; font-size: 11px; color: #68738a; line-height: 1.7">
+        <b class="mono" style="color:#1a2130">—</b> 는 <b>센서를 보고하는 서버가 없다</b>는 뜻이다 — <b>0℃ 로 채우지 않는다</b>(0℃ 는 급냉으로 읽힌다).
+      </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 16px; align-items: start">
+
+      <div class="panel">
+        <div class="panelh"><b>서버 온도 추이</b><span class="sub">esxi-sha-prod-008</span>
+          <div class="right">
+            <div class="seg"><div>1일</div><div>7일</div><div class="on">30일</div><div>90일</div><div>1년</div><div>5년</div></div>
+            <span class="src">/admin/idrac/:id/temp-history</span>
+          </div></div>
+        <div class="panelb">
+          <svg width="100%" height="150" viewBox="0 0 340 150" preserveAspectRatio="none">
+            <line x1="0" y1="30" x2="340" y2="30" stroke="#e6eaf0"></line><line x1="0" y1="60" x2="340" y2="60" stroke="#e6eaf0"></line>
+            <line x1="0" y1="90" x2="340" y2="90" stroke="#e6eaf0"></line><line x1="0" y1="120" x2="340" y2="120" stroke="#e6eaf0"></line>
+            <rect x="0" y="0" width="82" height="150" fill="rgba(139,155,180,.08)"></rect>
+            <text x="6" y="16" font-size="9" fill="#68738a" font-family="monospace">수집 시작 전</text>
+            <path d="M82,58 L110,54 L138,62 L166,50 L194,56 L222,46 L250,52 L278,44 L306,48 L340,42" fill="none" stroke="#dc2626" stroke-width="2"></path>
+          </svg>
+          <div style="display: flex; justify-content: space-between; font-size: 10px; color: #68738a; margin-top: 5px"><span class="mono">08-15</span><span class="mono">08-22</span><span class="mono">09-14</span></div>
+          <div style="margin-top: 11px; padding-top: 10px; border-top: 1px solid #e6eaf0; font-size: 11.5px; color: #526075; line-height: 1.7">
+            <b style="color:#1a2130">기본은 서버당 1계열</b>(최고온도)이다. 흡기·배기·CPU 4계열은 <b>옵트인 설정</b>으로만 켜진다 — 켜면 적재 행 수가 4배가 된다.<br>
+            회색 구간은 <b>수집 시작 이전</b>이라 그리지 않는다(소급 표시 금지).
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panelh"><b>PDU 전력 · 환경</b><span class="sub">APC Rack PDU 2G</span>
+          <div class="right"><span class="badge" style="background: rgba(139,155,180,.12); color:#526075">🔒 관리자 전용</span><span class="src">/tools/pdu</span></div></div>
+        <table>
+          <thead><tr><th>PDU</th><th>법인</th><th style="text-align:right">kW</th><th style="text-align:right">누적 kWh</th><th style="text-align:right">역률</th><th style="text-align:right">온도</th></tr></thead>
+          <tbody>
+            <tr style="background: rgba(239,68,68,.05)"><td style="font-weight:700">pdu-sha-r07-a</td><td style="color:#526075">SHA</td><td class="n" style="color:#dc2626">7.9</td><td class="n">412,880</td><td class="n">0.97</td><td class="n" style="color:#dc2626">29.4℃</td></tr>
+            <tr><td style="font-weight:700">pdu-sel-r02-a</td><td style="color:#526075">SEL</td><td class="n">6.2</td><td class="n">388,140</td><td class="n">0.98</td><td class="n">23.1℃</td></tr>
+            <tr><td style="font-weight:700">pdu-fra-r11-b</td><td style="color:#526075">FRA</td><td class="n">5.8</td><td class="n">355,602</td><td class="n">0.98</td><td class="n">21.7℃</td></tr>
+            <tr><td style="font-weight:700">pdu-sjc-r04-a</td><td style="color:#526075">SJC</td><td class="n">5.1</td><td class="n">341,097</td><td class="n">0.96</td><td class="n">18.3℃</td></tr>
+            <tr><td style="font-weight:700">pdu-szx-r01-b</td><td style="color:#526075">SZX</td><td class="n">4.4</td><td class="n">298,415</td><td class="n">0.97</td><td class="n">22.8℃</td></tr>
+          </tbody>
+        </table>
+        <div style="padding: 9px 18px 12px; border-top: 1px solid #e6eaf0; font-size: 11px; color: #68738a">
+          PDU 216대 · 임계 위반 1건. 데이지체인 대수와 환경 센서 개수는 <b>자동 탐지</b>한다.
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panelh"><b>하드웨어 인벤토리</b><span class="sub">엔지니어 보기 — 서비스태그 · moref 열 포함</span>
+        <div class="right"><span class="src">/admin/idrac/hardware-servers · nic-speed · gpu-inventory</span></div></div>
+      <table>
+        <thead><tr><th>서버</th><th>서비스태그</th><th>모델</th><th>귀속 법인</th><th>NIC</th><th>GPU</th><th style="text-align:right">최고온도</th><th style="text-align:right">전력</th><th style="text-align:right">펌웨어</th></tr></thead>
+        <tbody>
+          <tr><td style="font-weight:700">esxi-sha-prod-008</td><td class="mono" style="font-size:11px; color:#526075">J7K2M91</td><td>PowerEdge R760</td><td style="color:#526075">SHA</td><td class="mono" style="font-size:11px">2× 25G</td><td>—</td><td class="n" style="color:#dc2626">71℃</td><td class="n">718 W</td><td class="mono" style="font-size:11px; text-align:right">7.10.30.10</td></tr>
+          <tr><td style="font-weight:700">esxi-sel-prod-014</td><td class="mono" style="font-size:11px; color:#526075">H2N8P43</td><td>PowerEdge R760</td><td style="color:#526075">SEL</td><td class="mono" style="font-size:11px">4× 25G</td><td class="mono" style="font-size:11px">L40S ×2</td><td class="n">64℃</td><td class="n">742 W</td><td class="mono" style="font-size:11px; text-align:right">7.10.30.10</td></tr>
+          <tr><td style="font-weight:700">esxi-fra-vdi-003</td><td class="mono" style="font-size:11px; color:#526075">K9L4R27</td><td>PowerEdge R750</td><td style="color:#526075">FRA</td><td class="mono" style="font-size:11px">2× 10G</td><td class="mono" style="font-size:11px">A16 ×1</td><td class="n">61℃</td><td class="n">691 W</td><td class="mono" style="font-size:11px; text-align:right">6.10.80.00</td></tr>
+          <tr style="background: rgba(139,155,180,.06)"><td style="font-weight:700; color:#526075">srv-bom-edge-11</td><td class="mono" style="font-size:11px; color:#526075">M3T6V58</td><td>PowerEdge R650</td><td style="color:#68738a">(미지정)</td><td class="mono" style="font-size:11px; color:#68738a">—</td><td>—</td><td class="n" style="color:#68738a">—</td><td class="n" style="color:#68738a">—</td><td class="mono" style="font-size:11px; text-align:right; color:#68738a">—</td></tr>
+        </tbody>
+      </table>
+      <div style="padding: 10px 18px 13px; border-top: 1px solid #e6eaf0; font-size: 11px; color: #68738a; line-height: 1.7">
+        마지막 행은 <b>iDRAC 은 응답하지만 vCenter 귀속을 알 수 없는 서버</b>다 — 온도·전력이 <b class="mono" style="color:#1a2130">—</b> 인 것은 그 서버가 <b>센서를 보고하지 않는다</b>는 뜻이고, 무응답과는 다르다.
+        NIC · GPU · 펌웨어가 <b class="mono" style="color:#1a2130">—</b> 인 것은 <b>vCenter 귀속이 없어 인벤토리와 대조할 수 없다</b>는 뜻이다.<br><b style="color:#b45309">'펌웨어 준수율'은 만들지 않는다</b> — 설치된 버전 목록은 있지만 '기준선' 정의 저장소가 없다.
+      </div>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

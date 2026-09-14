@@ -5,7 +5,7 @@
  * 스토리지/가상화 등 사용자가 각 기능을 카테고리에 선택해 포함. **1개 기능을 중복해서 여러
  * 카테고리에 넣을 수 있게.**"
  *
- * 실제로 도구가 76개다. 카드 그리드 하나에 76장이 깔리면 찾는 것보다 훑는 게 더 오래 걸린다.
+ * 실제로 도구가 79개다(카드 78장). 카드 그리드 하나에 78장이 깔리면 찾는 것보다 훑는 게 더 오래 걸린다.
  *
  * 설계:
  *  - 카테고리는 **사용자가 만든다**(이름·아이콘·순서 자유). 아래 `PRESET` 은 '추천 분류로 시작'
@@ -29,7 +29,9 @@ export const MAX_TOOLS_PER_CAT = 200;
 export const MAX_LABEL = 40;
 
 /**
- * '추천 분류로 시작' 프리셋 — v2.454 시점의 도구 76개 기준.
+ * '추천 분류로 시작' 프리셋 — v2.454 시점의 도구 76개 기준으로 만들었고 이후 늘어난 도구는
+ * 아래 PRESET 에 없으면 '기타'로 빠진다. 현재 도구는 79개다(v2.508 에 orphanvmdk·guest-disk·
+ * mail-diag 를 추가했다).
  *
  * 분류 기준은 **운영자가 무엇을 찾으려 하는가**다(구현 위치가 아니라). 그래서 겹치는 것이 많고,
  * 겹치는 것을 억지로 하나로 몰지 않았다 — 중복 소속이 이 기능의 요구사항이다. 예:
@@ -53,7 +55,7 @@ export const PRESET = Object.freeze([
   {
     id: 'storage', label: '스토리지', icon: '💾',
     tools: ['storage-mon', 'storage-track', 'bm-storage', 'san-switch', 'dsusage', 'thinvms',
-      'dir-usage', 'portaldb', 'snapshots', 'snapshot-age'],
+      'dir-usage', 'portaldb', 'snapshots', 'snapshot-age', 'orphanvmdk', 'guest-disk'],
   },
   {
     id: 'virtualization', label: '가상화', icon: '🧊',
@@ -63,7 +65,7 @@ export const PRESET = Object.freeze([
   {
     id: 'capacity', label: '용량·최적화', icon: '📈',
     tools: ['capacity', 'capacity-advisor', 'capacity-forecast', 'forecast', 'waste', 'rightsizing',
-      'thinvms', 'zombie-vms', 'explore', 'storage-track', 'dir-usage'],
+      'thinvms', 'zombie-vms', 'explore', 'storage-track', 'dir-usage', 'orphanvmdk', 'guest-disk'],
   },
   {
     id: 'security', label: '보안·계정', icon: '🛡️',
@@ -82,7 +84,7 @@ export const PRESET = Object.freeze([
   {
     id: 'ops', label: '운영 작업', icon: '🛠️',
     tools: ['rma', 'vmprovision', 'vm-clone', 'agent-scans', 'shutdown', 'credentials',
-      'diskadd', 'backup', 'massdeploy', 'service-hub'],
+      'diskadd', 'backup', 'massdeploy', 'service-hub', 'mail-diag'],
   },
 ]);
 

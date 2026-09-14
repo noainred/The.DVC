@@ -355,7 +355,7 @@ git 소스로 실행하면 `CONFIG_DIR` 기본값이 `server/config` 라 이 파
 | `vmfinder` | VM 정밀검색 / 유휴 VM | `dupip` | 중복 IP 찾기 |
 | `capacity` | 용량 리포트(오버커밋) | `vmtools` | VMware Tools 버전 |
 | `forecast` | 용량 추세/예측 | `snapshots` | 스냅샷 있는 VM |
-| `waste` | 자원 최적화 (CPU/Memory/Disk) | `solutions` | VMware 솔루션/NSX |
+| `waste` | Optimization (CPU·메모리 과할당 · 회수 가능) | `solutions` | VMware 솔루션/NSX |
 | `thinvms` | Thin VM 찾기 | `licenses` | 라이선스 한눈에 |
 | `guestos` | Guest OS 종류/버전 | `esxi` / `vcversion` | ESXi/vCenter 버전 분포 |
 | `esxitemp` | ESXi 온도(5년 추이) | `hardware` / `hba` | 벤더·모델 / HBA 속도 |
@@ -397,10 +397,15 @@ git 소스로 실행하면 `CONFIG_DIR` 기본값이 `server/config` 라 이 파
 특수 기능 카드는 현재 **77개**(`web/src/views/specialToolsList.js` 가 진실의 원천; 설정 › 특수 기능 카테고리로 섹션 묶기 가능). 위 목록에 없는 최근 도구:
 
 - **게스트 디스크 회수**(`guest-disk`, v2.466+): 게스트 OS 파티션 할당/사용량을 엣지가 수집해 중앙으로 push(`POST /api/central/guest-disk`), 회수 후보(과할당) 리포트·VM 상세 추이(7일~1년)·PDF/JPG 내보내기.
-- **신규 포탈(V3)**(`web/src/version_3/`, v2.490): Claude Design 'DVC Console' 시안을 값 그대로 옮긴 라이트 테마 화면(좌측 8도메인 내비 · 전사 현황/컴퓨트/스토리지/네트워크/물리·설비/알람 센터). 설정 › 신규 포탈 보기 › **V3** 버튼 또는 `#/v3` 로 진입, 기존 화면은 개발용으로 유지. 데이터는 실 API 만, 수집 없는 항목은 '수집 없음' 표시.
+- **신규 포탈(V4)**(`web/src/version_4/`, v2.508 — v2.490 의 V3 를 승격): UI 개편 시안(`Design/uiredesign/` 아트보드 8장)을 구현한 라이트 테마 셸. 설정 › 신규 포탈 보기 › **V4** 버튼 또는 `#/v4` 로 진입하고, 기존 개발 포탈은 그대로 유지한다. 옛 `#/v3` · `#/v3/<화면>` 은 `#/v4/...` 로 자동 이동한다.
+  - **화면 9개**: 전사 현황 `#/v4/overview` · 법인 비교·용량 `compare` · 전력·비용·탄소 `power` · 컴퓨트 `compute` · 스토리지 `storage` · 네트워크 `network` · 물리·설비 `facility` · 알람 센터 `alarms` · 기능 찾기 `tools`.
+  - **좌측 내비 = IA 트리 11그룹**(`version_4/tree.js`): 특수 기능 79개 + 개발 포탈 탭 14개 + 화면 9개를 **한 트리에 1회씩** 배치(미분류 0, 중복 소속은 '별칭' 표기). 도구 화면은 개발 포탈 `#/tools/<키>` 에서 열리며 **키 문자열은 바꾸지 않는다**(toolsDenied 값이자 서버 집행 매핑).
+  - **보기 모드 토글**(`version_4/mode.js`): '경영 보기 ↔ 엔지니어 보기'. 바꾸는 것은 랜딩·표 행수(10/50)·추이 기간(90일/7일)·원시 열(vCenter ID·서비스태그·moref)·수집 상태 바 펼침뿐이고, **권한·데이터 범위·임계값(75/90%)은 두 모드가 같다**. 패널 구성이 달라 호출 API 집합은 다를 수 있지만 모드로 접근 권한이 바뀌지는 않는다. `?view=exec|eng` → `localStorage` → 역할 기본값(admin·viewer=경영, operator=엔지니어) 순으로 정한다.
+  - **⌘K / Ctrl+K 커맨드 팔레트**(`version_4/palette.js`): 이름 외에 **키**(`gpu`·`ipam`·`rma`) · **분류명** · **구 명칭 별칭**(`aka`)으로도 찾는다. 같은 매칭 규칙(`views/toolSearch.js`)을 특수 기능 카드 그리드도 쓴다.
+  - 데이터는 실 API 만 쓰고, 수집 API 가 없는 항목(계약 전력 대비 %·백본 회선·펌웨어 기준선 준수율·SLA/가용률·자원의 금액 환산)은 **그리지 않고 왜 없는지 화면에 적는다**. 무거운 조회는 60초 이상 주기이고, 고아 VMDK 는 vCenter SOAP 왕복이 있어 **버튼으로 1회 스캔**한다(결과는 '삭제 대상' 이 아니라 '확인 필요 후보').
 - **Overview 물리 서버 합계**(v2.486): CPU/메모리 카드 두 번째 줄에 iDRAC 가 인식한 모든 물리 서버(중앙 등록 + 위임 법인 원격, OME 엔트리 제외)의 코어 수·물리 메모리 량을 표시. 사용률(%)은 그대로 vCenter(ESXi) 실측이며 출처를 나란히 표기(`/overview` 응답 `physical`).
 - **호스트 접근 제어**(설정 › Security, v2.485): 포탈 호스트의 SSH 열림/허용목록/완전 차단(+sshd 중지), 웹(포탈 포트·80/443) 허용목록, OS 방화벽 추가 규칙을 firewalld 로 적용. 런타임 적용 → N분 내 확정하지 않으면 자동 되돌림(commit-confirm), 요청자 IP 포함 강제, 적용/확정에 본인 OTP. 설계·오픈소스 권고는 `docs/HOST-ACCESS.md`.
-- **전원 꺼진 VM '꺼진 지 N일'**(`waste/off-since`, v2.483): 자원 최적화 › 전원 꺼짐 표의 열. vCenter 인벤토리엔 꺼진 시각이 없어 ① 전원 이벤트(로그 수집 DB, 정확) ② VM 추적 12시간 슬롯 On→Off 전환('≥' 하한) ③ 전원 꺼짐 점검(v2.484, 설정 › 수집 서버 › 전원 꺼짐 점검 — 기본 6시간마다 스냅샷의 꺼진 VM 을 관측, 정밀도 = 주기, '≥' 하한) ④ 추적 시작 이후 계속 꺼짐(first_seen, '≥' 하한)을 합쳐 판정하고 출처를 표시. 출처가 전혀 없으면 '—'.
+- **전원 꺼진 VM '꺼진 지 N일'**(`waste/off-since`, v2.483): Optimization › 전원 꺼짐 표의 열. vCenter 인벤토리엔 꺼진 시각이 없어 ① 전원 이벤트(로그 수집 DB, 정확) ② VM 추적 12시간 슬롯 On→Off 전환('≥' 하한) ③ 전원 꺼짐 점검(v2.484, 설정 › 수집 서버 › 전원 꺼짐 점검 — 기본 6시간마다 스냅샷의 꺼진 VM 을 관측, 정밀도 = 주기, '≥' 하한) ④ 추적 시작 이후 계속 꺼짐(first_seen, '≥' 하한)을 합쳐 판정하고 출처를 표시. 출처가 전혀 없으면 '—'.
 - **자원 축소 근거 리포트**(`rightsize`, v2.445+): vCenter 성능 롤업(일/주/월/년)으로 CPU·메모리 실사용 p95·CPU Ready 를 계산해 권장 사양을 제시. 이력에 없는 메모리 카운터(active/swapped)는 실시간(최근 1시간)으로 폴백. 차트 Y축은 할당 용량까지 표시. **v2.481**: 메모리 권고는 워킹셋(mem.active) 관측 최대 × (1+여유) 기준 — consumed 는 ESXi 가 회수하지 않은 과거 터치 페이지라 하한으로 쓰지 않는다(예전엔 consumed 하한 때문에 사실상 항상 '변경 없음'). active 이력이 없으면 mem.usage × 할당으로 복원, 실시간 active 최대가 더 크면 채택. `RIGHTSIZE_MEM_BASIS=consumed` 로 구 산식 유지 가능. 관측 기간 주 값은 요청 창(7/30/90/180/365일), 실제 데이터 범위는 부제. 디스크 섹션에 게스트 디스크(guest.disk) 사용량·파티션·추이를 같은 기간으로 결합.
 - **벡터 PDF 내보내기**(v2.471+): 리포트를 이미지가 아니라 글자·도형으로 그린다(Pretendard KS X 1001 서브셋 폰트 번들, OFL). 표 셀은 열 폭에 맞춰 줄바꿈(v2.475).
 - **연결 안 되는 vCenter 모달의 접속확인**(v2.476): 헤더 `(N 불가)` 클릭 → 목록에서 관리자가 즉시 로그인 테스트(`POST /admin/vcenters/test`). 성공하면 `✓ 접속 확인됨` 으로 표시(수집 상태는 다음 주기에 반영).

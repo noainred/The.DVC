@@ -136,6 +136,33 @@ pyportal/ 아래 파일을 만질 때 자동 로드된다. 되돌리면 안 되�
 
 ## 프론트엔드 회귀 방지
 
+- **신규 포탈은 V4 하나다**(`web/src/version_4/`, v2.508 — v2.490 의 V3 를 승격): 셸을 더 만들지 말 것.
+  `console/` ↔ `version_3/` 가 페이지별 **58~87% 동일**했고 v2.506 svcmon 권한 버그를 **두 곳에**
+  고쳐야 했다(`server/test/audit2506.test.js:64` 가 그 배열을 하드코딩한다). 네 번째 복제를 만들면
+  같은 수정이 세 곳이 된다. V4 에 화면을 더할 때 지킬 것:
+  - **도구 키(`#/tools/<k>`) 는 어떤 이름 변경에도 바꾸지 않는다** — `permissions.json` 의
+    `toolsDenied` 값이자 `auth/toolAccess.js` 의 집행 매핑이다. 옛 이름은 `specialToolsList.js` 의
+    **`aka` 배열**에 남긴다(v2.508 신설). desc 에 검색어를 끼워 넣는 우회를 되살리지 말 것.
+    검색 매칭은 `views/toolSearch.js` 하나가 소유한다 — 카드 그리드와 ⌘K 팔레트가 같은 모듈을 쓴다.
+  - **새 도구를 추가하면 `version_4/tree.js` 에 배치한다** — 안 하면 내비에서 영원히 못 찾는다
+    (레거시 그리드에만 남는다). `tree.test.js` 가 '주소속 1회 · 미분류 0 · 유령 키 0' 을 고정한다.
+    **상태를 바꾸는 도구**(rma·vm-clone·vmprovision·shutdown·diskadd·backup·massdeploy·agent-scans)는
+    무조건 `운영 작업` 이 주소속이다 — 조회 그룹을 훑다가 실행 버튼을 만나지 않게.
+    `toolcats/catalog.js` 의 PRESET 도 같이 채운다(빠지면 화면에서 '기타' 로 밀린다).
+  - **모드 토글은 권한이 아니다**(`version_4/mode.js`): 바꾸는 것은 표 행수·기간·원시 열·펼침뿐이고
+    **권한·데이터 범위·임계값(75/90)은 두 모드가 같다**. ⚠ '호출 API 도 같다' 고 쓰지 말 것 —
+    ②와 ⑤는 패널이 달라 실제 호출 집합이 다르다(시안 초안의 오류였고 v2.508 에 정정했다).
+    `localStorage` 접근은 반드시 try/catch(프라이빗 창에서 throw).
+  - **V4 에서 무거운 API 는 15초 폴링 금지**: `/tools/capacity-forecast` 는 실측 1.5초(v2.503)라
+    120초 이상 · 페이지 마운트 시에만. **고아 VMDK 스캔(`/tools/orphan-vmdk`)은 폴링 금지** —
+    실행마다 vCenter SOAP 왕복이다(v2.505). 버튼 실행 + 재진입 가드.
+    목록(`/tools/orphan-vmdk/datastores`)은 스냅샷 memo 라 폴링해도 된다 — 둘을 구분할 것.
+    이 규약은 `server/test/v4Portal2508.test.js` 가 고정한다.
+  - **표 머리글에 영문 소문자 단위를 쓰지 말 것**: `.v3-table th` 가 `text-transform: uppercase` 라
+    `kWh` 가 **`KWH`** 로 샌다(v2.508 실제 발견 — 스크린샷을 읽어야 잡힌다). 한글 라벨로 쓰고
+    단위는 각주에 적는다.
+  - CSS 클래스 접두는 승격 후에도 `v3-` 를 유지했다(163개 규칙 전량 치환은 이득 없이 소실 위험).
+    V4 전용 셸 크롬만 `v4-` 를 쓴다.
 - **위임(엣지) 수집 환경에서 중앙 화면이 비면 안 된다**(v2.493, 2026-09-12 실제 신고 — 같은 유형이
   v2.381→2.383 에서 이미 한 번 발생했다): 위임 법인 서버는 중앙 레지스트리에 없고, 엣지가 export 로
   **최신 스냅샷만** 올려 보낸다(`collector/agent.js compactSensors` → 중앙 `collector/remoteInventory.js`).
@@ -201,6 +228,31 @@ pyportal/ 아래 파일을 만질 때 자동 로드된다. 되돌리면 안 되�
   th 에 onClick 이 있거나 th 가 컴포넌트면 자체 정렬 표로 보고 손대지 않는다. 정확한 정렬 값이 필요한 셀은
   td 에 `data-sort`, 정렬 제외 열은 th 에 `data-nosort`, 합계 행은 `data-pin`(첫 셀 '합계/총계' 는 자동)을 쓴다.
   규칙: null/'—' 는 방향과 무관하게 항상 뒤로, 문자열은 `localeCompare`(숫자 인식), 숫자·날짜는 수치 비교.
+- **화면이 바뀌는 변경은 Chromium 으로 직접 보고 보고할 것**(v2.507 사용자 지시 '앞으로는 필요할때
+  Chromium 사용하자'): 단위 테스트는 **문자열과 판정**만 본다 — 줄바꿈·클리핑·카드 높이·그리드 정렬·
+  대소문자 변환(CSS `text-transform`)·`**강조**` 가 별표로 새는 것은 **브라우저만 잡는다**.
+  실제 사고: v2.439/v2.440/v2.505 의 `**강조**` 노출, v2.202 React #310 크래시.
+  - **띄우는 기준**: 화면에 보이는 것이 바뀌면 띄운다 — 새 화면·새 표/차트, 텍스트 길이가 눈에 띄게
+    변하는 문구 수정(라벨 11자→27자 같은 것), 조건부 렌더·훅 추가, 권한/빈 상태 분기. 순수 서버 로직·
+    테스트·문서만 바뀌면 생략하고 **생략했다는 사실을 보고에 적는다**(v2.507 에서 '문자열만 바뀌었다'
+    고 판단해 건너뛴 것이 사용자 지적을 받았다 — 판단이 틀릴 수 있으니 침묵하지 말 것).
+  - **실행 방법**(v2.507 실측, 이 환경에서 그대로 동작):
+    ```
+    cd server && mkdir -p tmp && CONFIG_DIR=tmp DATA_SOURCE=mock AUTH_ENABLED=false PORT=<포트> \
+      node src/index.js &          # 목 데이터 · 인증 없음. web/dist 를 그대로 서빙하므로 먼저 vite build
+    until curl -sf http://127.0.0.1:<포트>/api/health >/dev/null; do sleep 2; done
+    ```
+    Playwright 는 전역 설치분을 `createRequire('/opt/node22/lib/node_modules/playwright/package.json')`
+    로 불러오고 `chromium.launch({ executablePath: '/opt/pw-browsers/chromium', args: ['--no-sandbox'] })`.
+    `playwright install` 은 하지 말 것(이미 있다).
+  - **볼 것**: ① `pageerror`·console error 수집(0 인지) ② `scrollWidth - clientWidth` 로 가로 넘침
+    ③ `1440px` 과 `400px` 두 폭 ④ 실제 클릭해서 화면이 열리는지 ⑤ 스크린샷을 **직접 읽어** 확인
+    (수치만 보면 잘린 텍스트를 놓친다 — v2.507 의 스토리지 카드 클리핑을 스크린샷에서 발견했다).
+  - **내가 만든 결함인지 A/B 로 확정할 것**: 넘침·깨짐을 발견하면 변경 전 코드로 되돌려 재빌드해
+    같은 수치가 나오는지 본다. v2.507 에서 이 절차가 '가로 스크롤 115px' 이 **기존 문제**임을
+    밝혀냈다 — 확인 없이 내 탓이라 적거나 남의 탓이라 적는 것 둘 다 거짓 보고다.
+  - **끝나면 목 서버를 반드시 죽일 것**: 과거 목 서버 4개가 남아 있었다. `pgrep -af "node src/index.js"`
+    가 0 인지 확인하고 보고한다. `server/tmp/` 는 `.gitignore` 에 있다(PR #467) — 커밋되지 않는다.
 - **PR 자동 진행**: 작업 완료 시 별도 요청 없이 PR을 생성/갱신한다.
 - **PR 완료 시 GitHub 다운로드 링크 자동 안내**: 모든 PR 작업(푸시/머지 등)이 끝나면,
   요청을 기다리지 말고 자동으로 GitHub 다운로드 링크를 함께 알려준다.

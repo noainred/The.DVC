@@ -1,4 +1,4 @@
-// version_3 공용 조각(v2.490) — 패널·KPI·막대·배지·빈 상태·폴링 래퍼. 스타일은 v3.css 의 v3-* 클래스.
+// version_4 공용 조각(v2.490) — 패널·KPI·막대·배지·빈 상태·폴링 래퍼. 스타일은 v4.css 의 v3-* 클래스.
 import React from 'react';
 import { ErrorBox } from '../components/ui.jsx';
 import { LEVEL_LABEL, fmtPct, barColor, levelText } from './data.js';
@@ -62,4 +62,40 @@ export function PollState({ poll, skipped, children }) {
   if (poll.error && !poll.data) return <div style={{ padding: 12 }}><ErrorBox message={poll.error} info={poll.errorInfo} /></div>;
   if (!poll.data) return <Empty>불러오는 중…</Empty>;
   return children;
+}
+
+/**
+ * 작은 추이 차트(v2.508) — 의존성 없이 SVG 로 그린다(recharts 는 vendor-charts 496KB 를 끌어온다).
+ * points = [{ x:number, y:number|null }]. y 가 null 인 구간은 **선을 잇지 않는다** —
+ * '수집 없음'을 0 이나 직선 보간으로 그리면 있지도 않은 값을 지어내는 것이다.
+ * 표본이 2개 미만이면 차트를 그리지 않고 호출자가 이유를 문장으로 쓴다.
+ */
+export function Spark({ points, height = 120, color = '#2563eb', fill = true, yZero = false }) {
+  const pts = (points || []).filter((p) => p && Number.isFinite(Number(p.x)));
+  const ys = pts.map((p) => p.y).filter((v) => v != null && Number.isFinite(Number(v))).map(Number);
+  if (pts.length < 2 || ys.length < 2) return null;
+  const W = 100, H = 100; // viewBox 비율 좌표 — 실제 크기는 CSS 가 정한다
+  const xs = pts.map((p) => Number(p.x));
+  const x0 = Math.min(...xs), x1 = Math.max(...xs);
+  const lo = yZero ? Math.min(0, ...ys) : Math.min(...ys);
+  const hi = Math.max(...ys);
+  const span = hi - lo || 1;
+  const sx = (x) => (x1 === x0 ? 0 : ((x - x0) / (x1 - x0)) * W);
+  const sy = (y) => H - ((y - lo) / span) * H;
+  // null 을 만나면 선을 끊는다(M 으로 다시 시작).
+  let d = '', open = false;
+  pts.forEach((p) => {
+    const y = p.y == null || !Number.isFinite(Number(p.y)) ? null : Number(p.y);
+    if (y == null) { open = false; return; }
+    d += `${open ? 'L' : 'M'}${sx(Number(p.x)).toFixed(2)},${sy(y).toFixed(2)} `;
+    open = true;
+  });
+  // 면(fill)은 선이 한 번도 끊기지 않았을 때만 칠한다 — 끊긴 구간까지 칠하면 결측이 값처럼 보인다.
+  const solid = !pts.some((p) => p.y == null || !Number.isFinite(Number(p.y)));
+  return (
+    <svg className="v4-spark" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ height }} role="img">
+      {fill && solid && <path d={`${d}L${sx(x1).toFixed(2)},${H} L${sx(x0).toFixed(2)},${H} Z`} fill={color} opacity={0.1} />}
+      <path d={d.trim()} fill="none" stroke={color} strokeWidth={1.6} vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
+    </svg>
+  );
 }

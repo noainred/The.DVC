@@ -1,0 +1,234 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap">
+  <style>
+    body { margin: 0; background: #f4f6f9; color: #1a2130;
+           font-family: Pretendard, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif;
+           font-size: 13px; line-height: 1.4; }
+    * { box-sizing: border-box; }
+    a { color: #0e7490; text-decoration: none; } a:hover { color: #0f9d8a; text-decoration: underline; }
+    .mono { font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace; }
+    .num  { font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; }
+    .navitem { display: flex; align-items: center; gap: 9px; padding: 6px 10px; border-radius: 7px; font-size: 12.5px; font-weight: 600; color: #3a4556; }
+    .navitem .nm { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .navitem .ct { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 10px; color: #68738a; }
+    .navitem.on { background: rgba(59,130,246,.85); color: #ffffff; }
+    .navitem.sm { font-weight: 500; font-size: 12px; color: #526075; padding-left: 18px; }
+    .grouplabel { display: flex; align-items: center; gap: 8px; padding: 6px 8px 3px;
+                  font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 9.5px; letter-spacing: .14em; color: #68738a; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; margin-left: auto; }
+    .panel { border-radius: 12px; background: #ffffff; border: 1px solid #dfe4ec; overflow: hidden; }
+    .panelh { display: flex; align-items: center; gap: 10px; padding: 13px 18px; border-bottom: 1px solid #dfe4ec; flex-wrap: wrap; }
+    .panelh b { font-size: 14px; } .panelh .sub { font-size: 12px; color: #526075; }
+    .panelh .right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+    .panelb { padding: 14px 18px 16px; }
+    .tile { text-align: left; padding: 14px 16px 15px; border-radius: 12px; background: #ffffff; border: 1px solid #dfe4ec; border-top: 3px solid #68738a; }
+    .tile .nm { font-size: 12.5px; font-weight: 700; }
+    .tile .vl { font-size: 24px; font-weight: 800; margin-top: 10px; font-variant-numeric: tabular-nums; }
+    .tile .mt { font-size: 11px; color: #526075; margin-top: 4px; line-height: 1.45; }
+    .tile .ci { display: flex; gap: 10px; margin-top: 10px; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 10.5px; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th { text-align: left; padding: 9px 10px; background: #f0f3f7; border-top: 1px solid #dfe4ec; border-bottom: 1px solid #dfe4ec;
+         font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 9.5px; font-weight: 500; letter-spacing: .06em;
+         text-transform: uppercase; color: #526075; white-space: nowrap; }
+    td { padding: 7px 10px; border-bottom: 1px solid #e6eaf0; }
+    tr:last-child td { border-bottom: none; }
+    th:first-child, td:first-child { padding-left: 18px; } th:last-child, td:last-child { padding-right: 18px; }
+    td.n { text-align: right; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 11.5px; white-space: nowrap; }
+    .bar { flex: 1; height: 6px; border-radius: 3px; background: #e8ecf2; overflow: hidden; min-width: 40px; }
+    .bar > i { display: block; height: 100%; }
+    .pct { display: flex; align-items: center; gap: 8px; min-width: 108px; }
+    .pct > .p { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 10.5px; color: #526075; width: 34px; text-align: right; }
+    .badge { display: inline-block; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 9.5px; font-weight: 700; padding: 2px 7px; border-radius: 4px; }
+    .src { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 9.5px; color: #68738a; background: rgba(139,155,180,.1); padding: 2px 7px; border-radius: 4px; white-space: nowrap; }
+    .chip { display: flex; align-items: center; gap: 7px; height: 34px; padding: 0 11px; border: 1px solid #dfe4ec; border-radius: 8px; font-size: 12px; color: #68738a; white-space: nowrap; background:#fff; }
+    .chip b { color: #1a2130; font-weight: 700; }
+    .tool { display: flex; align-items: center; gap: 7px; padding: 6px 10px; border: 1px solid #dfe4ec; border-radius: 7px; background: #ffffff; font-size: 11.5px; font-weight: 600; color: #3a4556; white-space: nowrap; }
+  </style>
+</helmet>
+
+<div style="display: flex; width: 1440px; height: 1600px; background: #f4f6f9; overflow: hidden">
+
+  <!-- 좌측 내비 (엔지니어 보기 — 11그룹 전부 펼침) -->
+  <div style="width: 236px; flex: none; background: #ffffff; border-right: 1px solid #dfe4ec; display: flex; flex-direction: column">
+    <div style="display: flex; align-items: center; gap: 10px; padding: 16px 16px 14px; border-bottom: 1px solid #dfe4ec">
+      <div style="width: 32px; height: 32px; border-radius: 9px; background: linear-gradient(135deg, #2563eb, #0e7490); display: grid; place-items: center; font-weight: 800; color: #ffffff; flex: none">V</div>
+      <div style="line-height: 1.2"><div style="font-size: 13.5px; font-weight: 700">The Davinci</div><div class="mono" style="font-size: 10px; color: #526075; margin-top: 2px">GLOBAL OPS CONSOLE</div></div>
+    </div>
+    <div style="flex: 1; padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 1px; overflow: hidden">
+      <div class="grouplabel">홈<i class="dot" style="background:#d97706"></i></div>
+      <div class="navitem on"><span class="nm">전사 현황</span></div>
+      <div class="navitem sm"><span class="nm">요약 · 인사이트</span></div>
+      <div class="grouplabel">컴퓨트<i class="dot" style="background:#dc2626"></i></div>
+      <div class="navitem"><span class="nm">컴퓨트 현황</span><span class="ct num">658</span></div>
+      <div class="navitem sm"><span class="nm">VM호스트 · 가상머신</span></div>
+      <div class="navitem sm"><span class="nm">VM 정밀검색 · 추이</span></div>
+      <div class="grouplabel">스토리지<i class="dot" style="background:#dc2626"></i></div>
+      <div class="navitem"><span class="nm">스토리지 현황</span><span class="ct num">1,103</span></div>
+      <div class="navitem sm"><span class="nm">고아 VMDK · 회수</span></div>
+      <div class="navitem sm"><span class="nm">SAN 스위치 · 어레이</span></div>
+      <div class="grouplabel">네트워크<i class="dot" style="background:#16a34a"></i></div>
+      <div class="navitem"><span class="nm">네트워크 현황</span><span class="ct num">132</span></div>
+      <div class="navitem sm"><span class="nm">IP관리 · NSX</span><span class="ct num">412</span></div>
+      <div class="grouplabel">물리 · 설비<i class="dot" style="background:#d97706"></i></div>
+      <div class="navitem"><span class="nm">설비 현황</span><span class="ct num">965</span></div>
+      <div class="navitem sm"><span class="nm">온도 · 전력 · 하드웨어</span></div>
+      <div class="grouplabel">용량 · 최적화<i class="dot" style="background:#d97706"></i></div>
+      <div class="navitem sm"><span class="nm">자원 최적화 · 예측</span></div>
+      <div class="grouplabel">모니터링 · 알람<i class="dot" style="background:#dc2626"></i></div>
+      <div class="navitem"><span class="nm">알람 센터</span><span class="ct num">397</span></div>
+      <div class="navitem sm"><span class="nm">서비스 모니터</span><span class="ct num">1,284</span></div>
+      <div class="grouplabel">리포트 · 보안 · 운영 · 관리<i class="dot" style="background:#16a34a"></i></div>
+      <div class="navitem sm"><span class="nm">9 + 5 + 8 + 5 항목</span></div>
+    </div>
+    <div style="padding: 10px 16px 12px; border-top: 1px solid #dfe4ec; display: flex; flex-direction: column; gap: 5px">
+      <div style="display: flex; justify-content: space-between"><span class="mono" style="font-size: 9.5px; color: #68738a">VERSION</span><b class="mono" style="font-size: 11.5px">v2.507.0</b></div>
+      <div style="display: flex; justify-content: space-between"><span class="mono" style="font-size: 9.5px; color: #68738a">VCENTER</span><b class="mono" style="font-size: 11.5px">28 / 28</b></div>
+      <div style="display: flex; justify-content: space-between"><span class="mono" style="font-size: 9.5px; color: #68738a">UPDATED</span><b class="mono" style="font-size: 11.5px">7초 전</b></div>
+    </div>
+  </div>
+
+  <div style="flex: 1; min-width: 0; display: flex; flex-direction: column">
+    <div style="display: flex; align-items: center; gap: 12px; padding: 12px 24px; border-bottom: 1px solid #dfe4ec; background: #ffffff">
+      <div style="display: flex; align-items: center; gap: 8px; padding: 0 12px; height: 34px; border: 1px solid #dfe4ec; border-radius: 8px; width: 320px; color: #68738a; font-size: 12.5px">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#68738a" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.7" y2="16.7"></line></svg>
+        <span style="flex: 1">이 화면의 표 검색</span><span class="mono" style="font-size: 10px; padding: 1px 6px; border: 1px solid #dfe4ec; border-radius: 4px">⌘K</span>
+      </div>
+      <div class="chip">리전 <b>전체</b></div><div class="chip">vCenter <b>전체 28</b></div>
+      <div style="flex: 1"></div>
+      <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 3px">
+        <div style="display: flex; border: 1px solid #dfe4ec; border-radius: 8px; overflow: hidden">
+          <div style="padding: 7px 14px; font-size: 12px; font-weight: 600; color: #526075; background:#fff">경영 보기</div>
+          <div style="padding: 7px 14px; font-size: 12px; font-weight: 700; background: #2563eb; color: #ffffff">엔지니어 보기</div>
+        </div>
+        <div style="display:flex; align-items:center; gap:5px; font-size: 10px; color: #68738a">보기 설정 · 권한과 무관<span style="display:inline-grid; place-items:center; width:13px; height:13px; border-radius:50%; border:1px solid #dfe4ec; font-size:9px">?</span></div>
+      </div>
+      <div style="display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 20px; border: 1px solid #dfe4ec; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #526075">
+        <i style="width: 7px; height: 7px; border-radius: 50%; background: #16a34a; box-shadow: 0 0 8px #16a34a; display:block"></i>LIVE · 02:14:07</div>
+      <div style="display: flex; align-items: center; gap: 9px">
+        <div style="width: 30px; height: 30px; border-radius: 50%; background: #dbe7fb; display: grid; place-items: center; font-weight: 700; font-size: 12px">박</div>
+        <div><div style="font-size: 12.5px; font-weight: 600; line-height: 1.2">박준호</div><div style="font-size: 10.5px; color: #526075">admin</div></div>
+      </div>
+    </div>
+
+    <div style="padding: 20px 24px 32px; display: flex; flex-direction: column; gap: 16px">
+
+      <div style="display: flex; align-items: flex-end; gap: 14px">
+        <div><div class="mono" style="font-size: 10.5px; letter-spacing: .14em; color: #68738a">OVERVIEW</div>
+          <div style="font-size: 22px; font-weight: 700; letter-spacing: -.01em; margin-top: 4px">전사 현황</div></div>
+        <div style="margin-left: auto; font-size: 12px; color: #526075"><b style="color:#1a2130">같은 URL <span class="mono">#/overview</span></b> — 모드만 다르다</div>
+      </div>
+
+      <!-- 수집 상태 바 (엔지니어 모드에서는 펼쳐져 있다) -->
+      <div class="panel" style="border-color: rgba(59,130,246,.35)">
+        <div style="display: flex; align-items: center; gap: 18px; padding: 11px 18px; flex-wrap: wrap">
+          <span class="mono" style="font-size: 10px; letter-spacing: .1em; color: #68738a">수집</span>
+          <span style="font-size: 12px">vCenter <b class="num" style="color:#15803d">연결 28</b> · <b class="num">대기 0</b> · <b class="num">불가 0</b> · <b class="num">점검 0</b></span>
+          <span style="font-size: 12px; color:#526075">가장 최근 <b class="num" style="color:#1a2130">7초</b> · 가장 오래됨 <b class="num" style="color:#b45309">2분 11초</b></span>
+          <span style="font-size: 12px; color:#526075">엣지 <b class="num" style="color:#1a2130">9</b> · 컬렉터 <b class="num" style="color:#1a2130">9</b> 정상</span>
+          <span style="font-size: 12px; color:#526075">폴러 <span class="badge" style="background: rgba(34,197,94,.14); color:#15803d">재진입 없음</span></span>
+          <span style="margin-left: auto; font-size: 11px; color: #68738a">'대기'와 '불가'를 합치지 않는다 — 원인이 다르다</span>
+        </div>
+      </div>
+
+      <!-- 도메인 타일 6 -->
+      <div style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px">
+        <div class="tile" style="border-top-color:#dc2626; border-color: rgba(239,68,68,.35)"><div class="nm">컴퓨트</div><div class="vl">658 / 5,850</div><div class="mt">호스트 / VM · vCenter 28/28 · 끊김 8</div><div class="ci"><span style="color:#dc2626">C 8</span><span style="color:#b45309">W 31</span><span style="color:#526075">I 14</span></div></div>
+        <div class="tile" style="border-top-color:#dc2626; border-color: rgba(239,68,68,.35)"><div class="nm">스토리지</div><div class="vl">77%</div><div class="mt">1,103 DS · 14.3 / 18.6 PB · 임계 초과 7</div><div class="ci"><span style="color:#dc2626">C 5</span><span style="color:#b45309">W 18</span><span style="color:#526075">I 6</span></div></div>
+        <div class="tile" style="border-top-color:#16a34a"><div class="nm">네트워크</div><div class="vl">132</div><div class="mt">포트그룹 · NSX 4/4 · 세그먼트 86 · 엣지 12</div><div class="ci"><span style="color:#dc2626">C 1</span><span style="color:#b45309">W 9</span><span style="color:#526075">I 12</span></div></div>
+        <div class="tile" style="border-top-color:#d97706"><div class="nm">설비 · 전력</div><div class="vl">404 kW</div><div class="mt">전력 보고 812대 · PDU 216 · 임계 위반 1</div><div class="ci"><span style="color:#dc2626">C 1</span><span style="color:#b45309">W 6</span><span style="color:#526075">I 4</span></div></div>
+        <div class="tile" style="border-top-color:#d97706"><div class="nm">물리 서버 BMC 응답률</div><div class="vl">98.5%</div><div class="mt">iDRAC 등록 965대 · 응답 951 · 무응답 14</div><div class="ci"><span style="color:#dc2626">C 2</span><span style="color:#b45309">W 14</span><span style="color:#526075">I 8</span></div></div>
+        <div class="tile" style="border-top-color:#dc2626; border-color: rgba(239,68,68,.35)"><div class="nm">서비스 점검</div><div class="vl">1,284</div><div class="mt">점검 항목 · 실패 12 · 경고 27 · 지연 41</div><div class="ci"><span style="color:#dc2626">C 12</span><span style="color:#b45309">W 27</span><span style="color:#526075">I 3</span></div></div>
+      </div>
+
+      <!-- 사이트 표 + 우측 -->
+      <div style="display: grid; grid-template-columns: minmax(0,1.6fr) minmax(330px,1fr); gap: 16px; align-items: start">
+        <div class="panel">
+          <div class="panelh"><b>사이트</b><span class="sub">50행 · 최근순 · ID/수집나이 열 포함</span><div class="right"><span class="src">/vcenters → siteRows()</span></div></div>
+          <table>
+            <thead><tr><th>법인</th><th>VCENTER ID</th><th>리전</th><th style="text-align:right">호스트</th><th style="text-align:right">VM</th><th>CPU</th><th>DS</th><th style="text-align:right">알람</th><th style="text-align:right">수집</th></tr></thead>
+            <tbody>
+              <tr style="background: rgba(239,68,68,.05)"><td style="font-weight:700">SHA 상하이</td><td class="mono" style="font-size:11px; color:#526075">vc-cn-sha-01</td><td style="color:#526075">중국</td><td class="n">84</td><td class="n">734</td><td><div class="pct"><div class="bar"><i style="width:77%; background:#d97706"></i></div><span class="p" style="color:#b45309">77%</span></div></td><td><div class="pct"><div class="bar"><i style="width:77%; background:#d97706"></i></div><span class="p" style="color:#b45309">77%</span></div></td><td class="n" style="color:#dc2626">31</td><td class="n">9초</td></tr>
+              <tr style="background: rgba(239,68,68,.05)"><td style="font-weight:700">FRA 프랑크푸르트</td><td class="mono" style="font-size:11px; color:#526075">vc-eu-fra-01</td><td style="color:#526075">유럽</td><td class="n">78</td><td class="n">649</td><td><div class="pct"><div class="bar"><i style="width:63%; background:#16a34a"></i></div><span class="p">63%</span></div></td><td><div class="pct"><div class="bar"><i style="width:91%; background:#dc2626"></i></div><span class="p" style="color:#dc2626">91%</span></div></td><td class="n" style="color:#dc2626">8</td><td class="n" style="color:#b45309">1분 4초</td></tr>
+              <tr><td style="font-weight:700">SEL 서울</td><td class="mono" style="font-size:11px; color:#526075">vc-kr-seoul-01</td><td style="color:#526075">아시아</td><td class="n">96</td><td class="n">812</td><td><div class="pct"><div class="bar"><i style="width:64%; background:#16a34a"></i></div><span class="p">64%</span></div></td><td><div class="pct"><div class="bar"><i style="width:63%; background:#16a34a"></i></div><span class="p">63%</span></div></td><td class="n" style="color:#b45309">12</td><td class="n">7초</td></tr>
+              <tr><td style="font-weight:700">SJC 산호세</td><td class="mono" style="font-size:11px; color:#526075">vc-us-sjc-01</td><td style="color:#526075">북미</td><td class="n">72</td><td class="n">590</td><td><div class="pct"><div class="bar"><i style="width:58%; background:#16a34a"></i></div><span class="p">58%</span></div></td><td><div class="pct"><div class="bar"><i style="width:69%; background:#16a34a"></i></div><span class="p">69%</span></div></td><td class="n">4</td><td class="n">11초</td></tr>
+              <tr><td style="font-weight:700">SZX 선전</td><td class="mono" style="font-size:11px; color:#526075">vc-cn-szx-01</td><td style="color:#526075">중국</td><td class="n">48</td><td class="n">400</td><td><div class="pct"><div class="bar"><i style="width:52%; background:#16a34a"></i></div><span class="p">52%</span></div></td><td><div class="pct"><div class="bar"><i style="width:68%; background:#16a34a"></i></div><span class="p">68%</span></div></td><td class="n">9</td><td class="n">14초</td></tr>
+              <tr><td style="font-weight:700">WAW 바르샤바</td><td class="mono" style="font-size:11px; color:#526075">vc-pl-waw-01</td><td style="color:#526075">유럽</td><td class="n">38</td><td class="n">311</td><td><div class="pct"><div class="bar"><i style="width:44%; background:#16a34a"></i></div><span class="p">44%</span></div></td><td><div class="pct"><div class="bar"><i style="width:83%; background:#d97706"></i></div><span class="p" style="color:#b45309">83%</span></div></td><td class="n">3</td><td class="n" style="color:#b45309">2분 11초</td></tr>
+            </tbody>
+          </table>
+          <div style="padding: 9px 18px 12px; border-top: 1px solid #e6eaf0; font-size: 11px; color: #68738a">
+            FRA · WAW 의 수집 나이가 큰 것은 <b>아직 원인을 특정하지 않았다</b> — 회선 지연일 수도, 그 vCenter 의 응답 지연일 수도 있다. 이 화면은 나이만 보여주고 원인을 단정하지 않는다.
+          </div>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 16px">
+          <div class="panel">
+            <div class="panelh"><b>알람 · 상관 그룹</b><span class="sub">정규화 메시지 묶음</span><div class="right"><span class="src">/alarms → correlateAlarms()</span></div></div>
+            <div class="panelb" style="display: flex; flex-direction: column; gap: 9px">
+              <div style="padding: 10px 12px; border-radius: 9px; background: #f4f6f9; border: 1px solid #dfe4ec; border-left: 3px solid #dc2626">
+                <div style="font-size: 12.5px; font-weight: 600">호스트 연결 끊김 <b class="num" style="color:#dc2626">8건</b></div>
+                <div class="mono" style="font-size: 10.5px; color: #68738a; margin-top: 4px">vc-cn-sha-01 · HostSystem · 동일 클러스터</div>
+              </div>
+              <div style="padding: 10px 12px; border-radius: 9px; background: #f4f6f9; border: 1px solid #dfe4ec; border-left: 3px solid #d97706">
+                <div style="font-size: 12.5px; font-weight: 600">데이터스토어 사용량 경고 <b class="num" style="color:#b45309">18건</b></div>
+                <div class="mono" style="font-size: 10.5px; color: #68738a; margin-top: 4px">4개 vCenter · Datastore · 85% 임계</div>
+              </div>
+              <div style="padding: 10px 12px; border-radius: 9px; background: #f4f6f9; border: 1px solid #dfe4ec; border-left: 3px solid #d97706">
+                <div style="font-size: 12.5px; font-weight: 600">iDRAC 무응답 <b class="num" style="color:#b45309">14건</b></div>
+                <div class="mono" style="font-size: 10.5px; color: #68738a; margin-top: 4px">SZX 9 · BOM 5 · BMC</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panelh"><b>이 화면에서 쓰는 기능</b><span class="sub">컨텍스트 칩</span></div>
+            <div class="panelb" style="display: flex; flex-wrap: wrap; gap: 8px">
+              <div class="tool"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2" stroke-linecap="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>일일 헬스체크</div>
+              <div class="tool"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"></circle><polyline points="12 7 12 12 15 14"></polyline></svg>서비스 점검</div>
+              <div class="tool"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h10"></path></svg>알림 채널 · 이력</div>
+              <div class="tool"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2" stroke-linecap="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>글로벌 네트워크 점검</div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panelh"><b>자주 쓰는 기능</b><span class="sub">전체 사용자 누적</span><div class="right"><span class="src">/tool-usage/top</span></div></div>
+            <div class="panelb" style="display: flex; flex-wrap: wrap; gap: 8px">
+              <div class="tool">🥇 자원 최적화 <span class="mono" style="color:#68738a; font-weight:500">412회</span></div>
+              <div class="tool">🥈 VM 정밀 검색 <span class="mono" style="color:#68738a; font-weight:500">288회</span></div>
+              <div class="tool">🥉 용량 리포트 <span class="mono" style="color:#68738a; font-weight:500">241회</span></div>
+            </div>
+            <div style="padding: 0 18px 14px; font-size: 11px; color: #b45309; line-height: 1.6">
+              ⚠ 현재 서버가 상위 <b>12개</b>만 돌려준다(<span class="mono">Math.min(12,…)</span>) — 나머지 66개는 정렬에 반영되지 않는다. 개편 전 선행 수정 대상.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 모드 차이 요약 -->
+      <div class="panel" style="border-color: rgba(59,130,246,.35)">
+        <div class="panelh" style="background: rgba(59,130,246,.05)"><b>이 화면이 경영 보기와 다른 점</b><span class="sub">권한·API·데이터 범위는 동일하다</span></div>
+        <div class="panelb" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; font-size: 11.5px; line-height: 1.7">
+          <div><div class="mono" style="font-size: 10px; letter-spacing: .1em; color: #68738a">펼쳐짐</div>
+            <div style="margin-top: 5px">수집 상태 바 · 폴러 재진입 · 엣지/컬렉터 이름 · 수집 나이</div></div>
+          <div><div class="mono" style="font-size: 10px; letter-spacing: .1em; color: #68738a">열 추가</div>
+            <div style="margin-top: 5px">vCenter ID · 수집 나이 · 서비스태그 · moref</div></div>
+          <div><div class="mono" style="font-size: 10px; letter-spacing: .1em; color: #68738a">단위</div>
+            <div style="margin-top: 5px">GB · MHz · ℃ · ms · dBm <b>원시값</b> (경영은 TB · % · 요금으로 환산)</div></div>
+          <div><div class="mono" style="font-size: 10px; letter-spacing: .1em; color: #68738a">기간 · 행수</div>
+            <div style="margin-top: 5px">24시간 / 7일 · 표 50행 (경영은 30/90일 · 10행)</div></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

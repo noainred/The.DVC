@@ -393,8 +393,11 @@ api.delete('/alarm-mutes/:id', requireRole('admin', 'operator'), requirePerm('in
 });
 
 // 특수 기능 사용 빈도 — 자주 쓰는 메뉴 자동 추천. 모든 로그인 사용자 합산 집계.
+// 상한 200(v2.508): 웹은 '클릭 많은 순' 정렬과 'N회' 배지를 위해 n:200 을 요청하는데(SpecialTools.jsx),
+// 상한이 12 였던 동안에는 **상위 12개에만** 정렬이 실효했고 나머지 도구는 선언 순서로 남았다.
+// 집계는 인메모리 카운터 맵이라(toolUsage) n 을 키운다고 쿼리 비용이 늘지 않는다. 도구는 현재 79개다.
 api.get('/tool-usage/top', (req, res) => {
-  const n = Math.min(12, Math.max(1, Number(req.query.n) || 3));
+  const n = Math.min(200, Math.max(1, Number(req.query.n) || 3));
   res.json({ top: getTopTools(n) });
 });
 api.post('/tool-usage', (req, res) => {

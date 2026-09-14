@@ -5,7 +5,7 @@ import { Loading, ErrorBox } from '../components/ui.jsx';
 const PRESETS = [1, 3, 6, 12, 24];
 const when = (ts) => (ts ? new Date(ts).toLocaleString('ko-KR') : '없음');
 
-/** 전원 꺼짐 점검(v2.484) — 특수 기능 › 자원 최적화 '꺼진 지' 의 관측 출처. 몇 시간마다 점검할지 설정. */
+/** 전원 꺼짐 점검(v2.484) — 특수 기능 › Optimization '꺼진 지' 의 관측 출처. 몇 시간마다 점검할지 설정. */
 export default function PowerOffCheckSettings() {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
@@ -53,7 +53,7 @@ export default function PowerOffCheckSettings() {
       <div className="card" style={{ marginBottom: 12 }}>
         <div style={{ fontWeight: 700, marginBottom: 6 }}>전원 꺼짐 점검 주기</div>
         <p className="muted" style={{ fontSize: 12.5, lineHeight: 1.6, margin: '0 0 10px' }}>
-          설정한 시간마다 현재 스냅샷의 <b>전원 꺼진 VM</b> 을 기록해, 특수 기능 › 자원 최적화 › 전원 꺼짐 표의 <b>'꺼진 지 N일'</b> 에 씁니다.
+          설정한 시간마다 현재 스냅샷의 <b>전원 꺼진 VM</b> 을 기록해, 특수 기능 › Optimization › 전원 꺼짐 표의 <b>'꺼진 지 N일'</b> 에 씁니다.
           처음 꺼진 것으로 보이면 그 시각을 '현재 꺼짐 구간의 시작' 으로 남기고, 다시 켜지면 지웁니다. 실제 꺼진 시각은 직전 점검과 그 점검 사이이므로
           정밀도는 점검 주기와 같습니다(화면엔 '≥ N일 · 점검' 하한으로 표시, vCenter 전원 이벤트가 있으면 그쪽이 정확값으로 우선).
           vCenter 를 다시 조회하지 않고 스냅샷만 읽으므로 자주 돌려도 부하가 거의 없습니다.

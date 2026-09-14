@@ -1,0 +1,215 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap">
+  <style>
+    body { margin: 0; background: #f4f6f9; color: #1a2130;
+           font-family: Pretendard, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif;
+           font-size: 13px; line-height: 1.4; }
+    * { box-sizing: border-box; }
+    a { color: #0e7490; text-decoration: none; }
+    .mono { font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace; }
+    .num { font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; }
+    .panel { border-radius: 12px; background: #fff; border: 1px solid #dfe4ec; overflow: hidden; }
+    .panelh { display: flex; align-items: center; gap: 10px; padding: 13px 18px; border-bottom: 1px solid #dfe4ec; flex-wrap: wrap; }
+    .panelh b { font-size: 14px; } .panelh .sub { font-size: 12px; color: #526075; }
+    .panelh .right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+    .panelb { padding: 14px 18px 16px; }
+    .kpi { padding: 14px 16px 15px; border-radius: 12px; background: #fff; border: 1px solid #dfe4ec; border-left: 3px solid #1a2130; }
+    .kpi .lab { font-size: 12px; color: #526075; }
+    .kpi .val { font-size: 24px; font-weight: 800; margin-top: 6px; font-variant-numeric: tabular-nums; }
+    .kpi .met { font-size: 11px; color: #68738a; margin-top: 5px; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th { text-align: left; padding: 9px 10px; background: #f0f3f7; border-top: 1px solid #dfe4ec; border-bottom: 1px solid #dfe4ec;
+         font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 9.5px; font-weight: 500; letter-spacing: .06em;
+         text-transform: uppercase; color: #526075; white-space: nowrap; }
+    td { padding: 8px 10px; border-bottom: 1px solid #e6eaf0; }
+    tr:last-child td { border-bottom: none; }
+    th:first-child, td:first-child { padding-left: 18px; } th:last-child, td:last-child { padding-right: 18px; }
+    td.n { text-align: right; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 11.5px; white-space: nowrap; }
+    .src { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 9.5px; color: #68738a; background: rgba(139,155,180,.1); padding: 2px 7px; border-radius: 4px; white-space: nowrap; }
+    .badge { display: inline-block; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 9.5px; font-weight: 700; padding: 2px 7px; border-radius: 4px; }
+    .cell { padding: 7px 6px; border-radius: 6px; border: 1px solid #dfe4ec; background: #f4f6f9; text-align: center; color: #526075; }
+    .cell .cn { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 9.5px; }
+    .cell .cv { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 11px; font-weight: 700; margin-top: 2px; }
+    .sidebar { width: 236px; flex: none; background: #fff; border-right: 1px solid #dfe4ec; padding: 16px 14px; display: flex; flex-direction: column; gap: 2px; }
+    .navitem { padding: 6px 10px; border-radius: 7px; font-size: 12.5px; font-weight: 600; color: #3a4556; }
+    .navitem.on { background: rgba(59,130,246,.85); color: #fff; }
+    .navitem.sm { font-weight: 500; font-size: 12px; color: #526075; padding-left: 18px; }
+    .grouplabel { padding: 8px 8px 3px; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 9.5px; letter-spacing: .14em; color: #68738a; }
+  </style>
+</helmet>
+
+<div style="display: flex; width: 1440px; height: 1400px; background: #f4f6f9; overflow: hidden">
+
+  <div class="sidebar">
+    <div style="display: flex; align-items: center; gap: 10px; padding-bottom: 14px; border-bottom: 1px solid #dfe4ec; margin-bottom: 6px">
+      <div style="width: 32px; height: 32px; border-radius: 9px; background: linear-gradient(135deg, #2563eb, #0e7490); display: grid; place-items: center; font-weight: 800; color: #fff; flex: none">V</div>
+      <div style="line-height: 1.2"><div style="font-size: 13.5px; font-weight: 700">The Davinci</div><div class="mono" style="font-size: 10px; color: #526075; margin-top: 2px">GLOBAL OPS CONSOLE</div></div>
+    </div>
+    <div class="grouplabel">홈</div><div class="navitem">전사 현황</div>
+    <div class="grouplabel">컴퓨트</div><div class="navitem">컴퓨트 현황</div>
+    <div class="grouplabel">스토리지</div>
+    <div class="navitem on">스토리지 현황</div>
+    <div class="navitem sm">데이터스토어 목록</div>
+    <div class="navitem sm">vCenter별 스토리지</div>
+    <div class="navitem sm">스토리지 사용량 추이</div>
+    <div class="navitem sm">고아 VMDK 찾기</div>
+    <div class="navitem sm">게스트 디스크 회수</div>
+    <div class="navitem sm">HBA 카드 속도</div>
+    <div class="navitem sm">스토리지 모니터링 🔒</div>
+    <div class="navitem sm">베어메탈 스토리지 🔒</div>
+    <div class="navitem sm">SAN 스위치 모니터링 🔒</div>
+    <div class="navitem sm">폴더 사용량 Top-N 🔒</div>
+    <div class="grouplabel">네트워크 · 설비 · 용량 …</div>
+  </div>
+
+  <div style="flex: 1; min-width: 0; padding: 20px 24px 32px; display: flex; flex-direction: column; gap: 16px; overflow: hidden">
+
+    <div style="display: flex; align-items: flex-end; gap: 14px">
+      <div><div class="mono" style="font-size: 10.5px; letter-spacing: .14em; color: #68738a">STORAGE</div>
+        <div style="font-size: 22px; font-weight: 700; margin-top: 4px">스토리지 — 회수 후보 · SAN</div></div>
+      <div style="margin-left: auto; font-size: 12px; color: #526075">시안에 없던 기능(고아 VMDK v2.505 · 게스트 디스크 회수 · SFP 광레벨)</div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px">
+      <div class="kpi"><div class="lab">데이터스토어</div><div class="val num">1,103</div><div class="met">18.6 PB 중 14.3 PB 사용</div></div>
+      <div class="kpi" style="border-left-color:#d97706"><div class="lab">전사 사용률</div><div class="val num" style="color:#b45309">77%</div><div class="met">90% 초과 7개 · 75% 초과 63개</div></div>
+      <div class="kpi" style="border-left-color:#0e7490"><div class="lab">게스트 회수 가능</div><div class="val num" style="color:#0e7490">86 TB</div><div class="met">게스트 디스크를 보고하는 1,412 VM 중 수집된 1,088 VM 기준 (전체 5,850 VM)</div></div>
+      <div class="kpi" style="border-left-color:#68738a"><div class="lab">고아 VMDK 후보</div><div class="val num" style="color:#68738a">—</div><div class="met">데이터스토어별로 스캔해야 나온다</div></div>
+    </div>
+
+    <!-- 고아 VMDK 경고 밴드 (필수) -->
+    <div style="padding: 13px 16px; border-radius: 12px; background: rgba(245,158,11,.07); border: 1px solid rgba(245,158,11,.4)">
+      <div style="display: flex; align-items: baseline; gap: 8px">
+        <b style="font-size: 13px; color: #b45309">⚠ 고아 VMDK 판정은 이 vCenter 인벤토리 기준입니다</b>
+      </div>
+      <div style="margin-top: 6px; font-size: 11.5px; color: #526075; line-height: 1.75">
+        아래는 <b style="color:#1a2130">사용 중인데도 소유자 없이 보일 수 있습니다</b> —
+        <b>공유 데이터스토어(다른 vCenter 가 등록한 VM)</b> · <b>FCD / 쿠버네티스 PV</b> · <b>콘텐츠 라이브러리</b> ·
+        <b>vSphere Replication</b> · <b>등록 해제한 VM</b> · <b>진행 중인 복제·마이그레이션·백업</b>.<br>
+        그래서 이 화면은 <b style="color:#dc2626">삭제 기능을 제공하지 않습니다</b>(API 자체가 없습니다). 표의 항목은 <b>'확인 필요 후보'</b>입니다.
+      </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: minmax(0,1.2fr) minmax(0,1fr); gap: 16px; align-items: start">
+
+      <div class="panel">
+        <div class="panelh"><b>고아 VMDK 후보</b>
+          <span class="sub">DS-FRA-VMFS03 · 스캔 02:11 · 신뢰도 <b style="color:#15803d">높음</b></span>
+          <div class="right"><span class="src">/tools/orphan-vmdk?datastoreId=</span></div></div>
+        <table>
+          <thead><tr><th>경로</th><th style="text-align:right">크기</th><th>판정</th><th style="text-align:right">최종 변경</th></tr></thead>
+          <tbody>
+            <tr><td class="mono" style="font-size:11px">[FRA-VMFS03] _old/web-14/web-14.vmdk</td><td class="n">240 GB</td><td><span class="badge" style="background: rgba(239,68,68,.16); color:#dc2626">소유 VM 없음</span></td><td class="n" style="color:#526075">412일 전</td></tr>
+            <tr><td class="mono" style="font-size:11px">[FRA-VMFS03] _old/db-07/db-07.vmdk</td><td class="n">1.2 TB</td><td><span class="badge" style="background: rgba(239,68,68,.16); color:#dc2626">소유 VM 없음</span></td><td class="n" style="color:#526075">288일 전</td></tr>
+            <tr><td class="mono" style="font-size:11px">[FRA-VMFS03] app-22/app-22.vmdk</td><td class="n">180 GB</td><td><span class="badge" style="background: rgba(245,158,11,.16); color:#b45309">미등록 VM 폴더</span></td><td class="n" style="color:#526075">63일 전</td></tr>
+            <tr><td class="mono" style="font-size:11px">[FRA-VMFS03] tmp/clone-a/clone-a.vmdk</td><td class="n">96 GB</td><td><span class="badge" style="background: rgba(139,155,180,.12); color:#526075">판정 보류</span></td><td class="n" style="color:#b45309">2시간 전</td></tr>
+          </tbody>
+        </table>
+        <div style="padding: 10px 18px 13px; border-top: 1px solid #e6eaf0; font-size: 11px; color: #68738a; line-height: 1.75">
+          <b style="color:#1a2130">판정 3단</b> — <b>소유 VM 없음</b>(어떤 VM 의 layoutEx 에도 없음) / <b>미등록 VM 폴더</b>(폴더에 .vmx 가 있다 = 등록 해제된 VM 일 수 있다) / <b>판정 보류</b>(최근 변경 = 작업 진행 중일 수 있다).<br>
+          제외 항목 <b>3건</b>(FCD 2 · 콘텐츠 라이브러리 1)은 후보에서 자동으로 빠졌다.
+          디스크립터와 익스텐트는 <b>한 논리 디스크로 묶어</b> 크기를 합산한다.
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panelh"><b>게스트 디스크 회수</b><span class="sub">VMware Tools 파티션</span><div class="right"><span class="src">/tools/guest-disk</span></div></div>
+        <table>
+          <thead><tr><th>VM · 파티션</th><th style="text-align:right">할당</th><th style="text-align:right">사용</th><th style="text-align:right">회수가능</th><th>판정</th></tr></thead>
+          <tbody>
+            <tr><td><b>app-sel-0142</b> <span class="mono" style="color:#526075">C:</span></td><td class="n">500 GB</td><td class="n">88 GB</td><td class="n" style="color:#15803d">380 GB</td><td><span class="badge" style="background: rgba(34,197,94,.14); color:#15803d">회수 가능</span></td></tr>
+            <tr><td><b>db-sha-0071</b> <span class="mono" style="color:#526075">/data</span></td><td class="n">2.0 TB</td><td class="n">610 GB</td><td class="n" style="color:#15803d">1.3 TB</td><td><span class="badge" style="background: rgba(34,197,94,.14); color:#15803d">회수 가능</span></td></tr>
+            <tr><td><b>log-fra-0033</b> <span class="mono" style="color:#526075">/var/log</span></td><td class="n">800 GB</td><td class="n">512 GB</td><td class="n" style="color:#b45309">240 GB</td><td><span class="badge" style="background: rgba(245,158,11,.16); color:#b45309">보류 · 증가 중</span></td></tr>
+            <tr style="background: rgba(139,155,180,.06)"><td><b style="color:#526075">svc-szx-0208</b></td><td class="n" style="color:#68738a">—</td><td class="n" style="color:#68738a">—</td><td class="n" style="color:#68738a">—</td><td><span class="badge" style="background: rgba(139,155,180,.12); color:#526075">게스트 수집 없음</span></td></tr>
+          </tbody>
+        </table>
+        <div style="padding: 10px 18px 13px; border-top: 1px solid #e6eaf0; font-size: 11px; color: #68738a; line-height: 1.75">
+          <b>증가 추세인 파티션은 '보류'</b> 다 — 지금 줄이면 곧 다시 늘어난다.
+          마지막 행의 <b class="mono" style="color:#1a2130">—</b> 는 <b>VMware Tools 가 파티션을 보고하지 않는다</b>는 뜻이지 디스크가 비었다는 뜻이 아니다.
+        </div>
+      </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 16px; align-items: start">
+
+      <div class="panel">
+        <div class="panelh"><b>SAN 스위치 포트 · SFP 광레벨</b><span class="sub">sw-sel-dir-01 · Brocade X7-8</span>
+          <div class="right"><span class="badge" style="background: rgba(139,155,180,.12); color:#526075">🔒 관리자 전용</span><span class="src">/tools/sanswitch/devices/:id/ports</span></div></div>
+        <div class="panelb">
+          <div style="display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 12px; font-size: 12px">
+            <span>포트 <b class="num">512</b></span><span style="color:#dfe4ec">·</span>
+            <span>라이선스 <b class="num">384</b></span><span style="color:#dfe4ec">·</span>
+            <span>사용중 <b class="num" style="color:#15803d">311</b></span><span style="color:#dfe4ec">·</span>
+            <span>여유 <b class="num">73</b></span><span style="color:#dfe4ec">·</span>
+            <span style="color:#b45309">문제 <b class="num">6</b></span>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px">
+            <div class="cell" style="background: rgba(239,68,68,.12); border-color: rgba(239,68,68,.4); color:#dc2626"><div class="cn">p14</div><div class="cv">-9.8</div></div>
+            <div class="cell" style="background: rgba(239,68,68,.12); border-color: rgba(239,68,68,.4); color:#dc2626"><div class="cn">p27</div><div class="cv">-10.4</div></div>
+            <div class="cell" style="background: rgba(245,158,11,.1); border-color: rgba(245,158,11,.35); color:#b45309"><div class="cn">p33</div><div class="cv">-7.9</div></div>
+            <div class="cell" style="background: rgba(245,158,11,.1); border-color: rgba(245,158,11,.35); color:#b45309"><div class="cn">p88</div><div class="cv">-8.1</div></div>
+            <div class="cell" style="background: rgba(245,158,11,.1); border-color: rgba(245,158,11,.35); color:#b45309"><div class="cn">p145</div><div class="cv">CRC</div></div>
+            <div class="cell" style="background: rgba(245,158,11,.1); border-color: rgba(245,158,11,.35); color:#b45309"><div class="cn">p201</div><div class="cv">CRC</div></div>
+          </div>
+          <div style="margin-top: 12px; padding: 10px 12px; border-radius: 9px; background: rgba(245,158,11,.07); border: 1px solid rgba(245,158,11,.35); font-size: 11.5px; color: #b45309; line-height: 1.7">
+            ⚠ <b>정상 포트 305개는 이 화면에 없습니다</b> — 중앙에는 문제 포트만 올라옵니다(고RTT 회선에서 512포트를 매 주기 밀면 수 MB 가 반복 전송됩니다). 요약 수치는 전체 기준입니다.
+          </div>
+          <div style="margin-top: 9px; font-size: 11px; color: #68738a; line-height: 1.7">
+            포트 처리량은 <b>누적 카운터 델타</b>로 계산하므로 <b>첫 수집과 카운터 리셋 시 <span class="mono" style="color:#1a2130">—</span></b> 다 — 0 으로 채우면 '트래픽 없음'으로 오해된다.
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panelh"><b>스토리지 어레이</b><span class="sub">8종 통합</span>
+          <div class="right"><span class="badge" style="background: rgba(139,155,180,.12); color:#526075">🔒 관리자 전용</span><span class="src">/tools/storage</span></div></div>
+        <table>
+          <thead><tr><th>어레이</th><th>타입</th><th>법인</th><th style="text-align:right">사용률</th><th style="text-align:right">용량</th></tr></thead>
+          <tbody>
+            <tr style="background: rgba(239,68,68,.05)"><td style="font-weight:700">fra-pure-02</td><td style="color:#526075">PowerStore</td><td style="color:#526075">FRA</td><td class="n" style="color:#dc2626">91%</td><td class="n">840 TB</td></tr>
+            <tr><td style="font-weight:700">sha-isilon-01</td><td style="color:#526075">PowerScale</td><td style="color:#526075">SHA</td><td class="n" style="color:#b45309">84%</td><td class="n">1.4 PB</td></tr>
+            <tr><td style="font-weight:700">sel-powerstore-03</td><td style="color:#526075">PowerStore</td><td style="color:#526075">SEL</td><td class="n">72%</td><td class="n">1.1 PB</td></tr>
+            <tr><td style="font-weight:700">sjc-vmax-01</td><td style="color:#526075">PowerMax</td><td style="color:#526075">SJC</td><td class="n">64%</td><td class="n">960 TB</td></tr>
+            <tr><td style="font-weight:700">waw-unity-01</td><td style="color:#526075">Unity</td><td style="color:#526075">WAW</td><td class="n" style="color:#b45309">83%</td><td class="n">420 TB</td></tr>
+          </tbody>
+        </table>
+        <div style="padding: 9px 18px 12px; border-top: 1px solid #e6eaf0; font-size: 11px; color: #68738a">
+          엣지 현지 수집 → 중앙 집계. 수집 주기는 <b>중앙에서 배포</b>하고 화면은 서버가 준 값을 표시한다(하드코딩하지 않는다).
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panelh"><b>DS 사용량 추이 · 증감 상위</b><span class="sub">하루 2회 스냅샷 · 변경분만 저장</span><div class="right"><span class="src">/tools/vm-track/ds-top · ds-series-all</span></div></div>
+      <div class="panelb" style="display: grid; grid-template-columns: minmax(0,1.4fr) minmax(0,1fr); gap: 18px; align-items: center">
+        <svg width="100%" height="130" viewBox="0 0 460 130" preserveAspectRatio="none">
+          <line x1="0" y1="32" x2="460" y2="32" stroke="#e6eaf0"></line><line x1="0" y1="65" x2="460" y2="65" stroke="#e6eaf0"></line><line x1="0" y1="98" x2="460" y2="98" stroke="#e6eaf0"></line>
+          <rect x="0" y="0" width="58" height="130" fill="rgba(139,155,180,.08)"></rect>
+          <text x="6" y="16" font-size="9" fill="#68738a" font-family="monospace">첫 관측 이전</text>
+          <path d="M58,96 L108,92 L158,84 L208,78 L258,68 L308,58 L358,48 L408,40 L460,30" fill="none" stroke="#d97706" stroke-width="2"></path>
+          <path d="M58,108 L108,106 L158,104 L208,101 L258,99 L308,96 L358,94 L408,91 L460,88" fill="none" stroke="#0e7490" stroke-width="2"></path>
+        </svg>
+        <div style="display: flex; flex-direction: column; gap: 8px; font-size: 11.5px">
+          <div style="display:flex; align-items:center; gap:8px"><span style="width:14px; height:2px; background:#d97706; display:block"></span>DS-FRA-VMFS03 <b class="num" style="margin-left:auto; color:#b45309">+412 GB/일</b></div>
+          <div style="display:flex; align-items:center; gap:8px"><span style="width:14px; height:2px; background:#0e7490; display:block"></span>DS-SEL-VMFS12 <b class="num" style="margin-left:auto">+64 GB/일</b></div>
+          <div style="margin-top: 6px; padding-top: 9px; border-top: 1px solid #e6eaf0; color: #68738a; line-height: 1.7">
+            회색 구간은 <b style="color:#1a2130">첫 관측 이전</b>이라 그리지 않는다.
+            구버전 행(ds 열 0)을 증감 기준으로 쓰지 않는다 — 과거에 <b style="color:#b45309">'+2만 TB'</b> 오표시가 실제로 났다.
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

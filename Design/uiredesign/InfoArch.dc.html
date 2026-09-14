@@ -1,0 +1,356 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap">
+  <style>
+    body { margin: 0; background: #f4f6f9; color: #1a2130;
+           font-family: Pretendard, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif;
+           font-size: 13px; line-height: 1.4; }
+    * { box-sizing: border-box; }
+    .mono { font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace; }
+    .num { font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; }
+    .panel { border-radius: 12px; background: #fff; border: 1px solid #dfe4ec; overflow: hidden; }
+    .panelh { display: flex; align-items: center; gap: 10px; padding: 13px 18px; border-bottom: 1px solid #dfe4ec; flex-wrap: wrap; }
+    .panelh b { font-size: 14px; } .panelh .sub { font-size: 12px; color: #526075; }
+    .panelh .right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+    .panelb { padding: 14px 18px 16px; }
+    .g { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 10px; letter-spacing: .13em;
+         color: #68738a; padding: 11px 0 4px; display: flex; align-items: center; gap: 8px; }
+    .g b { color: #1a2130; font-size: 11.5px; letter-spacing: 0; font-family: Pretendard, system-ui, sans-serif; }
+    .it { display: flex; align-items: center; gap: 8px; padding: 3.5px 0 3.5px 14px; font-size: 12px; }
+    .it .n { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .it .p { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 9px; padding: 1px 5px;
+             border-radius: 3px; background: rgba(139,155,180,.12); color: #526075; white-space: nowrap; }
+    .it .p.a { background: rgba(239,68,68,.12); color: #dc2626; }
+    .it .p.t { background: rgba(59,130,246,.12); color: #1d4ed8; }
+    .it.page { font-weight: 700; }
+    .it.tab  { font-weight: 600; }
+    .al { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 8.5px; padding: 0 4px;
+          border-radius: 3px; border: 1px solid #dfe4ec; color: #68738a; }
+    .badge { display: inline-block; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 9.5px; font-weight: 700; padding: 2px 7px; border-radius: 4px; }
+    .pal { border-radius: 12px; background: #fff; border: 1px solid #dfe4ec; overflow: hidden; }
+    .palrow { display: flex; align-items: center; gap: 9px; padding: 8px 14px; font-size: 12.5px; }
+    .palrow.on { background: rgba(59,130,246,.09); }
+    .palrow .pth { margin-left: auto; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 10px; color: #68738a; }
+    .st { padding: 11px 13px; border-radius: 9px; border: 1px solid #dfe4ec; background: #fff; }
+    .st .lb { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 9.5px; letter-spacing: .09em; color: #68738a; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th { text-align: left; padding: 8px 10px; background: #f0f3f7; border-top: 1px solid #dfe4ec; border-bottom: 1px solid #dfe4ec;
+         font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 9.5px; font-weight: 500; letter-spacing: .06em;
+         text-transform: uppercase; color: #526075; white-space: nowrap; }
+    td { padding: 7px 10px; border-bottom: 1px solid #e6eaf0; }
+    tr:last-child td { border-bottom: none; }
+    th:first-child, td:first-child { padding-left: 18px; } th:last-child, td:last-child { padding-right: 18px; }
+  </style>
+</helmet>
+
+<div style="width: 1600px; height: 1700px; background: #f4f6f9; padding: 24px 28px; display: flex; flex-direction: column; gap: 16px; overflow: hidden">
+
+  <div style="display: flex; align-items: flex-end; gap: 14px">
+    <div><div class="mono" style="font-size: 10.5px; letter-spacing: .14em; color: #68738a">INFORMATION ARCHITECTURE</div>
+      <div style="font-size: 22px; font-weight: 700; margin-top: 4px">정보구조 · 커맨드 팔레트 · 상태 카탈로그</div></div>
+    <div style="margin-left: auto; font-size: 12px; color: #526075">
+      도구 <b class="num" style="color:#1a2130">79</b> · 기존 탭 <b class="num" style="color:#1a2130">14</b>(그중 6은 <span class="p t">page</span> 로 흡수) · 화면 <b class="num" style="color:#1a2130">9</b> — 한 트리에 <b>1회씩</b> · 미분류 <b class="num" style="color:#15803d">0</b>
+    </div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: 920px minmax(0,1fr); gap: 16px; align-items: start; flex: 1; min-height: 0">
+
+    <!-- 좌: 트리 전개 -->
+    <div class="panel" style="height: 100%; display: flex; flex-direction: column">
+      <div class="panelh"><b>좌측 내비 트리 (전체 전개)</b>
+        <span class="sub">🔒 = 관리자 전용 · <span class="al">별칭</span> = 중복 소속(주소속 1곳 + 검색/칩으로만 노출)</span></div>
+      <div style="padding: 4px 18px 16px; columns: 3; column-gap: 26px; font-size: 12px; flex: 1; overflow: hidden">
+
+        <div style="break-inside: avoid">
+          <div class="g">1 &nbsp;<b>홈</b></div>
+          <div class="it page"><span class="n">전사 현황</span><span class="p t">page</span></div>
+          <div class="it tab"><span class="n">요약 리포트</span><span class="p">dashboard</span></div>
+          <div class="it tab"><span class="n">법인 · 플랫폼</span><span class="p">dashboard</span></div>
+          <div class="it"><span class="n">└ 비교 매트릭스</span><span class="p">dashboard</span></div>
+          <div class="it tab"><span class="n">인사이트</span><span class="p">insights</span></div>
+          <div class="it"><span class="n">AI 검색 (자연어)</span><span class="p">tools</span></div>
+          <div class="it"><span class="n">심층 검색</span><span class="p">tools</span></div>
+        </div>
+
+        <div style="break-inside: avoid">
+          <div class="g">2 &nbsp;<b>컴퓨트</b> <span style="margin-left:auto">12</span></div>
+          <div class="it page"><span class="n">컴퓨트 현황</span><span class="p t">page</span></div>
+          <div class="it tab"><span class="n">VM호스트 목록</span><span class="p">inv.hosts</span></div>
+          <div class="it tab"><span class="n">가상머신 목록</span><span class="p">inv.vms</span></div>
+          <div class="it"><span class="n">탐색 · 랭킹</span><span class="al">별칭</span><span class="p">dashboard</span></div>
+          <div class="it"><span class="n">VM 정밀검색 / 유휴</span><span class="al">별칭</span></div>
+          <div class="it"><span class="n">VM 수량 추이</span></div>
+          <div class="it"><span class="n">VMware Tools 버전</span></div>
+          <div class="it"><span class="n">Guest OS 종류/버전</span></div>
+          <div class="it"><span class="n">실제 OS 확인(게스트)</span></div>
+          <div class="it"><span class="n">ESXi 버전별</span><span class="al">별칭</span></div>
+          <div class="it"><span class="n">vCenter 버전별</span></div>
+          <div class="it"><span class="n">VMware 솔루션 / NSX</span></div>
+          <div class="it"><span class="n">VM 전체 정보 CSV</span></div>
+          <div class="it"><span class="n">스냅샷 있는 VM</span><span class="al">별칭</span></div>
+          <div class="it"><span class="n">구성도 (3D)</span><span class="al">별칭</span></div>
+        </div>
+
+        <div style="break-inside: avoid">
+          <div class="g">3 &nbsp;<b>스토리지</b> <span style="margin-left:auto">9</span></div>
+          <div class="it page"><span class="n">스토리지 현황</span><span class="p t">page</span></div>
+          <div class="it tab"><span class="n">데이터스토어 목록</span><span class="p">inv.datastores</span></div>
+          <div class="it"><span class="n">vCenter별 스토리지</span></div>
+          <div class="it"><span class="n">스토리지 사용량 추이</span><span class="al">별칭</span></div>
+          <div class="it" style="color:#15803d; font-weight:600"><span class="n">고아 VMDK 찾기 ★</span></div>
+          <div class="it" style="color:#15803d; font-weight:600"><span class="n">게스트 디스크 회수 ★</span></div>
+          <div class="it"><span class="n">HBA 카드 속도</span><span class="al">별칭</span></div>
+          <div class="it"><span class="n">스토리지 모니터링 🔒</span></div>
+          <div class="it"><span class="n">베어메탈 스토리지 🔒</span><span class="al">별칭</span></div>
+          <div class="it"><span class="n">SAN 스위치 모니터링 🔒</span><span class="al">별칭</span></div>
+          <div class="it"><span class="n">폴더 사용량 Top-N 🔒</span><span class="al">3중</span></div>
+        </div>
+
+        <div style="break-inside: avoid">
+          <div class="g">4 &nbsp;<b>네트워크</b> <span style="margin-left:auto">7</span></div>
+          <div class="it page"><span class="n">네트워크 현황</span><span class="p t">page</span></div>
+          <div class="it tab"><span class="n">포트그룹 목록</span><span class="p">inv.networks</span></div>
+          <div class="it tab"><span class="n">IP관리</span><span class="p">tools</span></div>
+          <div class="it"><span class="n">NSX 관리</span><span class="p">inv.nsx</span></div>
+          <div class="it"><span class="n">중복 IP 찾기</span><span class="al">별칭</span></div>
+          <div class="it"><span class="n">글로벌 네트워크 점검</span></div>
+          <div class="it"><span class="n">네트워크 트래픽 분석</span></div>
+          <div class="it"><span class="n">네트워크 이슈 분석 🔒</span></div>
+          <div class="it"><span class="n">중계 토폴로지 🔒</span></div>
+          <div class="it"><span class="n">HAProxy 경로 점검 🔒</span></div>
+        </div>
+
+        <div style="break-inside: avoid">
+          <div class="g">5 &nbsp;<b>물리 · 설비</b> <span style="margin-left:auto">11</span></div>
+          <div class="it page"><span class="n">설비 현황</span><span class="p t">page</span></div>
+          <div class="it"><span class="n">통합 서버 인벤토리</span></div>
+          <div class="it"><span class="n">벤더 / 모델 서머리</span></div>
+          <div class="it"><span class="n">서버 분석</span></div>
+          <div class="it"><span class="n">GPU 인벤토리</span><span class="al">별칭</span></div>
+          <div class="it"><span class="n">서버 NIC 속도 구분</span><span class="al">별칭</span></div>
+          <div class="it"><span class="n">서버 NIC 모델 확인</span><span class="al">별칭</span></div>
+          <div class="it"><span class="n">ESXi 온도</span><span class="al">별칭</span></div>
+          <div class="it"><span class="n">법인 전산실 온도 🔒</span></div>
+          <div class="it"><span class="n">전력 분석 (전력 맵)</span></div>
+          <div class="it"><span class="n">PDU 정보 🔒</span></div>
+          <div class="it"><span class="n">시리얼 조회 🔒</span><span class="al">별칭</span></div>
+        </div>
+
+        <div style="break-inside: avoid">
+          <div class="g">6 &nbsp;<b>용량 · 최적화</b> <span style="margin-left:auto">9</span></div>
+          <div class="it"><span class="n">용량 리포트</span><span class="al">별칭</span></div>
+          <div class="it"><span class="n">자원 최적화 (CPU/Mem/Disk)</span></div>
+          <div class="it"><span class="n">VM 라이트사이징</span></div>
+          <div class="it"><span class="n">용량 고갈 예측</span></div>
+          <div class="it"><span class="n">용량 추세 / 예측</span></div>
+          <div class="it"><span class="n">Thin VM 찾기</span><span class="al">별칭</span></div>
+          <div class="it"><span class="n">좀비 / 방치 리소스</span></div>
+          <div class="it"><span class="n">운영 인사이트</span></div>
+          <div class="it"><span class="n">리소스 적정성 진단 🔒</span></div>
+        </div>
+
+        <div style="break-inside: avoid">
+          <div class="g">7 &nbsp;<b>모니터링 · 알람</b> <span style="margin-left:auto">3</span></div>
+          <div class="it page"><span class="n">알람 센터</span><span class="p t">page</span><span class="p">inv.alarms</span></div>
+          <div class="it tab"><span class="n">서비스 모니터</span><span class="p">svcmon</span></div>
+          <div class="it"><span class="n">Monitoring 설정</span><span class="p">svcmon</span></div>
+          <div class="it"><span class="n">알림 채널 · 이력</span></div>
+          <div class="it"><span class="n">다빈치 서비스 점검</span></div>
+        </div>
+
+        <div style="break-inside: avoid">
+          <div class="g">8 &nbsp;<b>리포트</b> <span style="margin-left:auto">9</span></div>
+          <div class="it"><span class="n">일일 헬스체크 리포트</span></div>
+          <div class="it"><span class="n">버전 / 패치 준수</span><span class="al">별칭</span></div>
+          <div class="it"><span class="n">구성 변경 이력</span></div>
+          <div class="it"><span class="n">미보호 VM (백업 공백)</span></div>
+          <div class="it"><span class="n">스냅샷 나이 감시</span></div>
+          <div class="it"><span class="n">인증서 만료 감시</span></div>
+          <div class="it"><span class="n">라이선스 한눈에</span></div>
+          <div class="it"><span class="n">라이선스 만료일 확인</span></div>
+          <div class="it"><span class="n">VMware 구성 백업</span></div>
+        </div>
+
+        <div style="break-inside: avoid">
+          <div class="g">9 &nbsp;<b>보안 · 계정</b> <span style="margin-left:auto">5</span></div>
+          <div class="it"><span class="n">위협 탐지</span></div>
+          <div class="it"><span class="n">평문 자격증명 점검 🔒</span></div>
+          <div class="it"><span class="n">보안점검 🔒</span></div>
+          <div class="it"><span class="n">통합 계정 관리 🔒</span><span class="al">별칭</span></div>
+          <div class="it"><span class="n">로그인 실패 분석 🔒</span></div>
+        </div>
+
+        <div style="break-inside: avoid">
+          <div class="g">10 &nbsp;<b>운영 작업</b> <span style="margin-left:auto">8</span></div>
+          <div class="it"><span class="n">원격 명령 실행 (RMA) 🔒</span><span class="al">별칭</span></div>
+          <div class="it"><span class="n">VM 생성 🔒</span><span class="al">별칭</span></div>
+          <div class="it"><span class="n">VM 복제(백업) 🔒</span><span class="al">별칭</span></div>
+          <div class="it"><span class="n">에이전트 작업 🔒</span></div>
+          <div class="it" style="color:#68738a"><span class="n">디스크 추가 자동화</span><span class="p">준비 중</span></div>
+          <div class="it" style="color:#68738a"><span class="n">백업</span><span class="p">준비 중</span></div>
+          <div class="it" style="color:#68738a"><span class="n">대용량 배포</span><span class="p">준비 중</span></div>
+          <div class="it" style="color:#dc2626; font-weight:700"><span class="n">🛑 긴급중단</span><span class="p a">danger</span></div>
+        </div>
+
+        <div style="break-inside: avoid">
+          <div class="g">11 &nbsp;<b>관리</b> <span style="margin-left:auto">admin</span></div>
+          <div class="it tab"><span class="n">설정 🔒</span><span class="p">settings</span></div>
+          <div class="it"><span class="n">└ 사용자 · 권한</span><span class="p">users.manage</span></div>
+          <div class="it"><span class="n">└ 감사 로그</span></div>
+          <div class="it"><span class="n">└ 컬렉터</span></div>
+          <div class="it"><span class="n">└ 특수 기능 분류</span></div>
+          <div class="it tab"><span class="n">업그레이드 🔒</span><span class="p">upgrade</span></div>
+          <div class="it"><span class="n">포탈 DB</span><span class="al">별칭</span></div>
+          <div class="it" style="color:#15803d; font-weight:600"><span class="n">메일 진단 🔒 ★</span></div>
+          <div class="it" style="color:#68738a"><span class="n">특수 기능(레거시 그리드)</span><span class="p">폴백</span></div>
+          <div class="g" style="padding-top:12px">바로가기</div>
+          <div class="it"><span class="n">🧰 서비스 허브 ↗</span><span class="p">새 탭</span></div>
+        </div>
+
+      </div>
+      <div style="padding: 11px 18px 14px; border-top: 1px solid #dfe4ec; font-size: 11px; color: #68738a; line-height: 1.75">
+        <b style="color:#15803d">★</b> = 기존 추천 분류에 없던 3개(<b>고아 VMDK · 게스트 디스크 회수 · 메일 진단</b>)를 주소속에 배치했다.
+        <b>상태를 바꾸는 도구</b>(RMA · VM 복제 · VM 생성)는 무조건 <b>운영 작업</b>이 주소속이다 — 조회 그룹에서 실행 버튼을 만나지 않게.
+        <b style="color:#b45309">트리 기본 배치는 코드가 소유한다</b> — 관리자 분류 설정은 기본값이 꺼져 있어 거기 의존하면 아무것도 바뀌지 않는다.
+      </div>
+    </div>
+
+    <!-- 우 -->
+    <div style="display: flex; flex-direction: column; gap: 16px; height: 100%">
+
+      <!-- 커맨드 팔레트 -->
+      <div class="panel">
+        <div class="panelh"><b>커맨드 팔레트</b><span class="sub">⌘K / Ctrl+K</span></div>
+        <div class="panelb">
+          <div class="pal">
+            <div style="display: flex; align-items: center; gap: 9px; padding: 11px 14px; border-bottom: 1px solid #dfe4ec">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#68738a" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.7" y2="16.7"></line></svg>
+              <b style="font-size: 13.5px">gpu</b><span style="width:1px; height:15px; background:#2563eb"></span>
+              <span class="mono" style="margin-left:auto; font-size: 10px; color: #68738a">ESC 닫기</span>
+            </div>
+            <div class="mono" style="padding: 8px 14px 3px; font-size: 9.5px; letter-spacing: .1em; color: #68738a">기능</div>
+            <div class="palrow on"><span>GPU 인벤토리</span><span class="al">별칭 · 서버 / 가상화</span><span class="pth">물리 · 설비</span></div>
+            <div class="palrow"><span>서버 분석</span><span class="pth">물리 · 설비</span></div>
+            <div class="palrow"><span>GPU 유휴 (운영 인사이트)</span><span class="pth">용량 · 최적화</span></div>
+            <div class="mono" style="padding: 8px 14px 3px; font-size: 9.5px; letter-spacing: .1em; color: #68738a">화면</div>
+            <div class="palrow"><span>설비 현황</span><span class="pth">#/facility</span></div>
+            <div class="mono" style="padding: 8px 14px 3px; font-size: 9.5px; letter-spacing: .1em; color: #68738a">최근</div>
+            <div class="palrow"><span style="color:#526075">낭비</span><span class="pth">→ 자원 최적화</span></div>
+          </div>
+          <div style="margin-top: 11px; font-size: 11px; color: #68738a; line-height: 1.75">
+            검색 대상을 넓힌다 — 현재는 <b class="mono" style="color:#1a2130">label + desc</b> 뿐이라 키(<span class="mono">gpu</span>)·분류명으로는 못 찾는다.
+            새로 <b class="mono" style="color:#1a2130">k</b> · <b>분류명</b> · <b class="mono" style="color:#1a2130">aka</b>(구 명칭 별칭)를 추가한다.
+            <br><b style="color:#15803d">선례</b>: '낭비 리소스 → 자원 최적화' 개명 때 desc 에 '낭비'를 남겨 검색을 살려 뒀다. 그것을 정식 필드로 승격한다.
+          </div>
+        </div>
+      </div>
+
+      <!-- viewer 해결 -->
+      <div class="panel" style="border-color: rgba(245,158,11,.4)">
+        <div class="panelh" style="background: rgba(245,158,11,.06)"><b>viewer 의 '카드 벽' 해결</b>
+          <div class="right"><span class="badge" style="background: rgba(239,68,68,.16); color:#dc2626">현재 결함</span></div></div>
+        <div class="panelb">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px">
+            <div>
+              <div class="mono" style="font-size: 9.5px; letter-spacing: .1em; color: #68738a; margin-bottom: 6px">현재</div>
+              <div style="padding: 11px; border-radius: 9px; border: 1px solid #dfe4ec; background: #f4f6f9">
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px">
+                  <div style="height: 22px; border-radius: 4px; background: #e8ecf2; display:grid; place-items:center; font-size:10px; color:#68738a">🔒</div>
+                  <div style="height: 22px; border-radius: 4px; background: #e8ecf2; display:grid; place-items:center; font-size:10px; color:#68738a">🔒</div>
+                  <div style="height: 22px; border-radius: 4px; background: #e8ecf2; display:grid; place-items:center; font-size:10px; color:#68738a">🔒</div>
+                  <div style="height: 22px; border-radius: 4px; background: #e8ecf2; display:grid; place-items:center; font-size:10px; color:#68738a">🔒</div>
+                  <div style="height: 22px; border-radius: 4px; background: #e8ecf2; display:grid; place-items:center; font-size:10px; color:#68738a">🔒</div>
+                  <div style="height: 22px; border-radius: 4px; background: #e8ecf2; display:grid; place-items:center; font-size:10px; color:#68738a">🔒</div>
+                  <div style="height: 22px; border-radius: 4px; background: #e8ecf2; display:grid; place-items:center; font-size:10px; color:#68738a">🔒</div>
+                  <div style="height: 22px; border-radius: 4px; background: #e8ecf2; display:grid; place-items:center; font-size:10px; color:#68738a">🔒</div>
+                  <div style="height: 22px; border-radius: 4px; background: #e8ecf2; display:grid; place-items:center; font-size:10px; color:#68738a">🔒</div>
+                </div>
+                <div style="margin-top: 8px; font-size: 10.5px; color: #dc2626; line-height:1.6"><b>78장 전부 잠김</b> · 클릭 가능 0</div>
+              </div>
+            </div>
+            <div>
+              <div class="mono" style="font-size: 9.5px; letter-spacing: .1em; color: #68738a; margin-bottom: 6px">개선</div>
+              <div style="padding: 11px 12px; border-radius: 9px; border: 1px solid #dfe4ec; background: #fff">
+                <div style="font-size: 12.5px; font-weight: 700">🔒 특수 기능 78개 — 접근 권한이 없습니다</div>
+                <div style="font-size: 11px; color: #526075; margin-top: 6px; line-height: 1.6">필요한 기능을 관리자에게 요청하세요.</div>
+                <div style="margin-top: 9px; padding: 7px 9px; border: 1px solid #dfe4ec; border-radius: 6px; display: inline-block; font-size: 11px; color: #2563eb; font-weight: 600">요청 문구 복사</div>
+                <div style="margin-top: 9px; font-size: 10.5px; color: #68738a; line-height: 1.6">기존 <span class="mono">AccessDenied</span> + <span class="mono">buildRequestText()</span> 재사용</div>
+              </div>
+            </div>
+          </div>
+          <div style="margin-top: 11px; font-size: 11px; color: #68738a; line-height: 1.75">
+            <b style="color:#b45309">권한 키를 쪼개지 말 것</b> — <span class="mono">tools</span> 를 '열람/실행'으로 나누면 스키마 마이그레이션이 필요하고, 저장된 설정이 있는 현장에서 <b>operator 가 업그레이드만으로 기능을 잃는</b> 사고 경로를 다시 만든다.
+            관리자가 viewer 행에 <span class="mono">tools</span> 를 켜고 <span class="mono">toolsDenied</span> 로 빼는 <b>기존 경로</b>를 권한 화면에서 안내한다.
+          </div>
+        </div>
+      </div>
+
+      <!-- 상태 카탈로그 -->
+      <div class="panel" style="flex: 1; display: flex; flex-direction: column">
+        <div class="panelh"><b>상태 카탈로그</b><span class="sub">전 화면 공통 8종</span></div>
+        <div class="panelb" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px">
+          <div class="st"><div class="lb">① 로딩</div>
+            <div style="margin-top:7px; display:flex; flex-direction:column; gap:4px">
+              <div style="height:9px; border-radius:4px; background:#e8ecf2; width:80%"></div>
+              <div style="height:9px; border-radius:4px; background:#e8ecf2; width:60%"></div>
+            </div></div>
+          <div class="st"><div class="lb">② 값 없음</div>
+            <div style="margin-top:7px; font-size:11.5px; color:#526075">수집된 항목이 없습니다</div></div>
+          <div class="st"><div class="lb">③ 미측정</div>
+            <div style="margin-top:7px; font-size:11.5px"><b class="mono" style="font-size:15px">—</b> <span style="color:#526075">+ 왜 없는지 한 줄</span></div></div>
+          <div class="st"><div class="lb">④ 권한 없음 (카드)</div>
+            <div style="margin-top:7px; font-size:11.5px; color:#526075">🔒 관리자에게 요청</div></div>
+          <div class="st" style="border-color: rgba(245,158,11,.4)"><div class="lb" style="color:#b45309">⑤ 403 (화면 전체)</div>
+            <div style="margin-top:7px; font-size:11.5px; color:#b45309">AccessDenied — <b>오류가 아니다</b></div></div>
+          <div class="st" style="border-color: rgba(239,68,68,.4)"><div class="lb" style="color:#dc2626">⑥ 오류 (데이터 0)</div>
+            <div style="margin-top:7px; font-size:11.5px; color:#dc2626">ErrorBox — 화면 전체 교체</div></div>
+          <div class="st" style="border-color: rgba(245,158,11,.4); background: rgba(245,158,11,.06)"><div class="lb" style="color:#b45309">⑦ 일시 오류 (데이터 보유)</div>
+            <div style="margin-top:7px; font-size:11.5px; color:#b45309"><b>배너만</b> — 화면은 그대로 둔다</div></div>
+          <div class="st"><div class="lb">⑧ 합성 데이터</div>
+            <div style="margin-top:7px"><span class="badge" style="background: rgba(245,158,11,.16); color:#b45309">합성</span> <span style="font-size:11px; color:#526075">데모 모드 표시</span></div></div>
+        </div>
+        <div style="padding: 0 18px 14px; margin-top: auto">
+          <div style="padding: 10px 12px; border-radius: 9px; background: #f4f6f9; border: 1px solid #dfe4ec; font-size: 11px; color: #526075; line-height: 1.75">
+            ③ 과 ⑥ 을 섞지 않는다 — <b style="color:#1a2130">'값이 없다'</b>와 <b style="color:#1a2130">'조회에 실패했다'</b>는 사용자가 해야 할 행동이 다르다.
+            ⑤ 를 ⑥ 으로 보여주면 사용자가 장애로 오해해 새로고침·재로그인을 반복한다.
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- 하단: 선행 수정 -->
+  <div class="panel" style="border-color: rgba(239,68,68,.35)">
+    <div class="panelh" style="background: rgba(239,68,68,.04)"><b>개편 전 선행 수정 3건</b>
+      <span class="sub">지금 코드에 있는 결함 — 안 고치면 새 IA 에서도 그대로 재현된다</span></div>
+    <table>
+      <thead><tr><th style="width:34px"></th><th>결함</th><th>증상</th><th>수정</th></tr></thead>
+      <tbody>
+        <tr><td class="mono" style="color:#68738a">F0-1</td>
+          <td><b>사용빈도 API 상한 12</b><br><span class="mono" style="font-size:10.5px; color:#526075">웹은 n:200 요청 · 서버는 Math.min(12,…)</span></td>
+          <td>"클릭 많은 순 정렬"이 <b>상위 12개에만</b> 실효. 나머지 66장은 선언 순서. <b class="num">N회</b> 배지도 12장만</td>
+          <td><span class="mono">Math.min(200, …)</span></td></tr>
+        <tr><td class="mono" style="color:#68738a">F0-2</td>
+          <td><b>카드 JSX 중복</b><br><span class="mono" style="font-size:10.5px; color:#526075">인라인 블록 + renderToolCard 동일 내용</span></td>
+          <td>폭 측정 <span class="mono">gridRef</span> 가 인라인 쪽에만 있어 <b>카테고리 모드에서 '자주 쓰는 기능' 칸 수 계산이 안 된다</b></td>
+          <td><span class="mono">renderToolCard</span> 단일화</td></tr>
+        <tr><td class="mono" style="color:#68738a">F0-3</td>
+          <td><b>"76개" 주석이 5개 파일에서 낡음</b></td>
+          <td>실제 79개(카드 78). 새 도구 3개가 추천 분류에 없어 '기타'로 빠진다</td>
+          <td>수치 갱신 또는 제거</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>
