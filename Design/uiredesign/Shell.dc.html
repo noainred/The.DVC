@@ -1,0 +1,221 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap">
+  <style>
+    body { margin: 0; background: #f4f6f9; color: #1a2130;
+           font-family: Pretendard, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif;
+           font-size: 13px; line-height: 1.4; }
+    * { box-sizing: border-box; }
+    a { color: #0e7490; text-decoration: none; }
+    a:hover { color: #0f9d8a; text-decoration: underline; }
+    .mono { font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace; }
+    .num  { font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; }
+    .navitem { display: flex; align-items: center; gap: 9px; width: 100%; padding: 7px 10px;
+               border-radius: 7px; font-size: 12.5px; font-weight: 600; color: #3a4556; }
+    .navitem .nm { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .navitem .ct { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 10px; color: #68738a; }
+    .navitem.on { background: rgba(59,130,246,.85); color: #ffffff; }
+    .navitem.on .ct { color: rgba(255,255,255,.75); }
+    .navitem.ext { font-weight: 500; color: #526075; }
+    .grouplabel { display: flex; align-items: center; gap: 8px; padding: 6px 8px 4px;
+                  font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 9.5px;
+                  letter-spacing: .14em; color: #68738a; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; margin-left: auto; }
+    .panel { border-radius: 12px; background: #ffffff; border: 1px solid #dfe4ec; overflow: hidden; }
+    .panelh { display: flex; align-items: center; gap: 10px; padding: 13px 18px; border-bottom: 1px solid #dfe4ec; }
+    .panelh b { font-size: 14px; }
+    .panelb { padding: 14px 18px 16px; }
+    .spec { display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px solid #e6eaf0; align-items: baseline; }
+    .spec:last-child { border-bottom: none; }
+    .spec .k { width: 132px; flex: none; font-size: 11.5px; color: #526075; }
+    .spec .v { flex: 1; font-size: 12px; }
+    .sw { display: inline-block; width: 13px; height: 13px; border-radius: 3px;
+          border: 1px solid rgba(26,33,48,.12); vertical-align: -2px; margin-right: 6px; }
+    .badge { display: inline-block; font-family: "JetBrains Mono", ui-monospace, monospace;
+             font-size: 9.5px; font-weight: 700; padding: 2px 7px; border-radius: 4px; }
+    .chip { display: flex; align-items: center; gap: 7px; height: 34px; padding: 0 11px;
+            background: #ffffff; border: 1px solid #dfe4ec; border-radius: 8px;
+            font-size: 12px; white-space: nowrap; color: #68738a; }
+    .chip b { color: #1a2130; font-weight: 700; }
+  </style>
+</helmet>
+
+<div style="display: flex; width: 1440px; height: 1024px; background: #f4f6f9; overflow: hidden">
+
+  <!-- 좌측 내비 236px -->
+  <div style="width: 236px; flex: none; background: #ffffff; border-right: 1px solid #dfe4ec; display: flex; flex-direction: column">
+    <div style="display: flex; align-items: center; gap: 10px; padding: 16px 16px 14px; border-bottom: 1px solid #dfe4ec">
+      <div style="width: 32px; height: 32px; border-radius: 9px; background: linear-gradient(135deg, #2563eb, #0e7490); display: grid; place-items: center; font-weight: 800; color: #ffffff; flex: none">V</div>
+      <div style="line-height: 1.2">
+        <div style="font-size: 13.5px; font-weight: 700">The Davinci</div>
+        <div class="mono" style="font-size: 10px; color: #526075; margin-top: 2px">GLOBAL OPS CONSOLE</div>
+      </div>
+    </div>
+
+    <div style="flex: 1; overflow: hidden; padding: 10px 10px 12px; display: flex; flex-direction: column; gap: 2px">
+      <div class="grouplabel">홈<i class="dot" style="background: #16a34a"></i></div>
+      <div class="navitem on"><span class="nm">전사 현황</span><span class="ct">—</span></div>
+      <div class="navitem"><span class="nm">요약 리포트</span><span class="ct"></span></div>
+      <div class="navitem"><span class="nm">법인 · 플랫폼</span><span class="ct num">28</span></div>
+      <div class="navitem"><span class="nm">인사이트</span><span class="ct num">3</span></div>
+
+      <div class="grouplabel" style="margin-top: 8px">용량 · 최적화<i class="dot" style="background: #d97706"></i></div>
+      <div class="navitem"><span class="nm">용량 리포트</span><span class="ct"></span></div>
+      <div class="navitem"><span class="nm">자원 최적화</span><span class="ct"></span></div>
+      <div class="navitem"><span class="nm">용량 고갈 예측</span><span class="ct num">7</span></div>
+
+      <div class="grouplabel" style="margin-top: 8px">모니터링 · 알람<i class="dot" style="background: #dc2626"></i></div>
+      <div class="navitem"><span class="nm">알람 센터</span><span class="ct num">397</span></div>
+      <div class="navitem"><span class="nm">서비스 모니터</span><span class="ct num">1,284</span></div>
+
+      <div class="grouplabel" style="margin-top: 8px">리포트<i class="dot" style="background: #16a34a"></i></div>
+      <div class="navitem"><span class="nm">일일 헬스체크</span><span class="ct"></span></div>
+      <div class="navitem"><span class="nm">미보호 VM</span><span class="ct num">41</span></div>
+
+      <div style="margin-top: 10px; padding: 9px 10px; border: 1px dashed #dfe4ec; border-radius: 8px; background: #f4f6f9">
+        <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #526075; font-weight: 600">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#526075" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+          엔지니어 메뉴 전체
+        </div>
+        <div style="font-size: 10.5px; color: #68738a; margin-top: 4px; line-height: 1.5">컴퓨트 · 스토리지 · 네트워크 · 물리설비 · 보안 · 운영작업 · 관리 <b class="num" style="color:#1a2130">7</b>그룹</div>
+      </div>
+    </div>
+
+    <div style="padding: 12px 16px 14px; border-top: 1px solid #dfe4ec; display: flex; flex-direction: column; gap: 6px">
+      <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 8px">
+        <span class="mono" style="font-size: 9.5px; letter-spacing: .06em; color: #68738a">VERSION</span>
+        <b class="mono" style="font-size: 11.5px; color: #1a2130">v2.507.0</b>
+      </div>
+      <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 8px">
+        <span class="mono" style="font-size: 9.5px; letter-spacing: .06em; color: #68738a">SOURCE</span>
+        <b class="mono" style="font-size: 11.5px; color: #15803d">LIVE</b>
+      </div>
+      <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 8px">
+        <span class="mono" style="font-size: 9.5px; letter-spacing: .06em; color: #68738a">VCENTER</span>
+        <b class="mono" style="font-size: 11.5px; color: #1a2130">28 / 28</b>
+      </div>
+      <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 8px">
+        <span class="mono" style="font-size: 9.5px; letter-spacing: .06em; color: #68738a">UPDATED</span>
+        <b class="mono" style="font-size: 11.5px; color: #1a2130">12초 전</b>
+      </div>
+    </div>
+  </div>
+
+  <!-- 본문 -->
+  <div style="flex: 1; min-width: 0; display: flex; flex-direction: column">
+
+    <!-- 상단바 -->
+    <div style="display: flex; align-items: center; gap: 12px; padding: 12px 24px; border-bottom: 1px solid #dfe4ec; background: #ffffff">
+      <div style="display: flex; align-items: center; gap: 8px; padding: 0 12px; height: 34px; background: #ffffff; border: 1px solid #dfe4ec; border-radius: 8px; flex: 1; max-width: 380px; color: #68738a; font-size: 12.5px">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#68738a" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.7" y2="16.7"></line></svg>
+        <span style="flex: 1">이 화면의 표 · 목록 검색</span>
+        <span class="mono" style="font-size: 10px; padding: 1px 6px; border: 1px solid #dfe4ec; border-radius: 4px">⌘K 전체</span>
+      </div>
+      <div class="chip">리전 <b>전체</b></div>
+      <div class="chip">vCenter <b>전체 28</b></div>
+      <div style="flex: 1"></div>
+
+      <!-- 모드 토글 -->
+      <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 3px">
+        <div style="display: flex; border: 1px solid #dfe4ec; border-radius: 8px; overflow: hidden; background: #ffffff">
+          <div style="padding: 7px 14px; font-size: 12px; font-weight: 700; background: #2563eb; color: #ffffff">경영 보기</div>
+          <div style="padding: 7px 14px; font-size: 12px; font-weight: 600; color: #526075">엔지니어 보기</div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 5px; font-size: 10px; color: #68738a">
+          보기 설정 · 권한과 무관
+          <span style="display: inline-grid; place-items: center; width: 13px; height: 13px; border-radius: 50%; border: 1px solid #dfe4ec; font-size: 9px; color: #68738a">?</span>
+        </div>
+      </div>
+
+      <div style="display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 20px; background: #ffffff; border: 1px solid #dfe4ec; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #526075">
+        <i style="width: 7px; height: 7px; border-radius: 50%; background: #16a34a; box-shadow: 0 0 8px #16a34a; display: block"></i>
+        LIVE · 02:14:07
+      </div>
+      <div style="display: flex; align-items: center; gap: 9px">
+        <div style="width: 30px; height: 30px; border-radius: 50%; background: #dbe7fb; color: #1a2130; display: grid; place-items: center; font-weight: 700; font-size: 12px">박</div>
+        <div>
+          <div style="font-size: 12.5px; font-weight: 600; line-height: 1.2">박준호</div>
+          <div style="font-size: 10.5px; color: #526075">admin</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 본문 스펙 -->
+    <div style="padding: 20px 24px 24px; display: flex; flex-direction: column; gap: 16px; overflow: hidden">
+      <div>
+        <div class="mono" style="font-size: 10.5px; letter-spacing: .14em; color: #68738a">SHELL SPEC</div>
+        <div style="font-size: 22px; font-weight: 700; letter-spacing: -.01em; margin-top: 4px">셸 골격 · 모드 토글 규격</div>
+        <div style="font-size: 12px; color: #526075; margin-top: 6px">나머지 7장이 이 값을 따른다. 전부 <b class="mono" style="font-weight:600">web/src/version_3/v3.css</b> 의 실제 값 — 반올림하지 않았다.</div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: minmax(0,1.25fr) minmax(0,1fr); gap: 16px; align-items: start">
+
+        <div class="panel">
+          <div class="panelh"><b>토큰</b><span style="font-size: 12px; color: #526075">v3.css lift</span></div>
+          <div class="panelb">
+            <div class="spec"><div class="k">배경 / 패널</div><div class="v"><span class="sw" style="background:#f4f6f9"></span><span class="mono">#f4f6f9</span> &nbsp; <span class="sw" style="background:#ffffff"></span><span class="mono">#ffffff</span></div></div>
+            <div class="spec"><div class="k">보더 / 행구분</div><div class="v"><span class="sw" style="background:#dfe4ec"></span><span class="mono">#dfe4ec</span> &nbsp; <span class="sw" style="background:#e6eaf0"></span><span class="mono">#e6eaf0</span></div></div>
+            <div class="spec"><div class="k">본문 / 보조 / 흐림</div><div class="v"><span class="sw" style="background:#1a2130"></span><span class="mono">#1a2130</span> &nbsp; <span class="sw" style="background:#526075"></span><span class="mono">#526075</span> &nbsp; <span class="sw" style="background:#68738a"></span><span class="mono">#68738a</span></div></div>
+            <div class="spec"><div class="k">강조</div><div class="v"><span class="sw" style="background:#2563eb"></span><span class="mono">#2563eb</span> &nbsp; <span class="sw" style="background:#0e7490"></span><span class="mono">#0e7490</span> (링크)</div></div>
+            <div class="spec"><div class="k">상태 · 텍스트</div><div class="v"><span class="sw" style="background:#15803d"></span><span class="mono">#15803d</span> &nbsp; <span class="sw" style="background:#b45309"></span><span class="mono">#b45309</span> &nbsp; <span class="sw" style="background:#dc2626"></span><span class="mono">#dc2626</span></div></div>
+            <div class="spec"><div class="k">상태 · 막대</div><div class="v"><span class="sw" style="background:#16a34a"></span><span class="mono">#16a34a</span> &nbsp; <span class="sw" style="background:#d97706"></span><span class="mono">#d97706</span> &nbsp; 트랙 <span class="sw" style="background:#e8ecf2"></span><span class="mono">#e8ecf2</span></div></div>
+            <div class="spec"><div class="k">임계</div><div class="v"><b>75% 주의 · 90% 위험</b> — <span class="mono" style="font-size:11px">consoleData.js WARN_PCT / CRIT_PCT</span>. 시안 임의값 금지</div></div>
+            <div class="spec"><div class="k">타이포</div><div class="v">Pretendard → Apple SD Gothic Neo → Noto Sans KR → system-ui · 본문 13px/1.4 · 제목 22px/700 · KPI 24px/800 · 표 12px · th 모노 9.5px 대문자</div></div>
+            <div class="spec"><div class="k">숫자</div><div class="v">JetBrains Mono · <span class="mono">tabular-nums</span> · 색 <span class="mono">#1a2130</span></div></div>
+            <div class="spec"><div class="k">형태</div><div class="v">패널 radius 12px · 배지 4px · 사이드바 236px · <b>그림자 없음(플랫)</b></div></div>
+          </div>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 16px">
+          <div class="panel">
+            <div class="panelh"><b>모드 토글 계약</b></div>
+            <div class="panelb">
+              <div class="spec"><div class="k">바꾸는 것</div><div class="v">랜딩 · 내비 순서/펼침 · 요약 밴드 · 표 기본 열/정렬/행수 · 숫자 단위 · 차트 기간</div></div>
+              <div class="spec"><div class="k">바꾸지 않는 것</div><div class="v"><b>권한 · 호출 API · 데이터 범위 · 임계값 · 자물쇠 표기</b></div></div>
+              <div class="spec"><div class="k">저장</div><div class="v">1) <span class="mono">?view=exec|eng</span> (그 탭만, 저장 안 함)<br>2) <span class="mono">localStorage['vmportal.viewMode']</span><br>3) 역할 기본값</div></div>
+              <div class="spec"><div class="k">역할 기본</div><div class="v">admin → 경영 · operator → 엔지니어 · <b>viewer → 경영</b></div></div>
+              <div class="spec"><div class="k">왜 viewer=경영</div><div class="v" style="color:#b45309">viewer 는 <span class="mono">tools</span> 권한이 없어 <b>열 수 있는 도구가 0개</b>다. 엔지니어 랜딩은 잠긴 벽이 된다</div></div>
+              <div class="spec"><div class="k">딥링크</div><div class="v"><span class="mono">#/tools/&lt;k&gt;</span> 는 모드와 무관하게 그 화면을 연다. 모드 전환 시 현재 URL 유지</div></div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panelh"><b>상태 표기</b><span style="font-size: 12px; color: #526075">전 화면 공통</span></div>
+            <div class="panelb" style="display: flex; flex-direction: column; gap: 9px">
+              <div style="display: flex; align-items: center; gap: 10px"><span class="badge" style="background: rgba(34,197,94,.14); color: #15803d">정상</span><span class="badge" style="background: rgba(245,158,11,.16); color: #b45309">주의</span><span class="badge" style="background: rgba(239,68,68,.16); color: #dc2626">위험</span><span class="badge" style="background: rgba(139,155,180,.12); color: #526075">판정 불가</span></div>
+              <div style="font-size: 11.5px; color: #526075; line-height: 1.7">
+                <b class="mono" style="color:#1a2130">—</b> 값 없음 (0 으로 위장 금지) &nbsp;·&nbsp;
+                <b style="color:#1a2130">🔒</b> 권한 없음 &nbsp;·&nbsp;
+                <span class="badge" style="background: rgba(245,158,11,.16); color: #b45309">합성</span> 데모 데이터
+              </div>
+              <div style="padding: 9px 11px; border-radius: 8px; background: rgba(245,158,11,.08); border: 1px solid rgba(245,158,11,.3); font-size: 11.5px; color: #b45309; line-height: 1.6">
+                데이터 보유 중 일시 폴링 오류는 <b>배너</b>로만 — 화면 전체를 오류로 갈아치우지 않는다
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panelh"><b>딥링크 호환</b><span style="font-size: 12px; color: #526075">북마크 · 저장된 권한 설정이 깨지지 않아야 한다</span></div>
+        <div class="panelb" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; font-size: 11.5px">
+          <div><div class="mono" style="color:#68738a; font-size:10px; letter-spacing:.08em">유지</div><div style="margin-top:5px; line-height:1.7"><span class="mono">#/overview · #/hosts · #/vms</span><br><span class="mono">#/datastores · #/networks</span><br><span class="mono">#/alarms · #/ipam · #/svcmon</span></div></div>
+          <div><div class="mono" style="color:#68738a; font-size:10px; letter-spacing:.08em">유지 (핵심)</div><div style="margin-top:5px; line-height:1.7"><span class="mono" style="color:#dc2626; font-weight:700">#/tools/&lt;k&gt;</span><br><span style="color:#526075">키 문자열은 <b>절대 변경 금지</b> —<br>toolsDenied 값이자 서버 집행 매핑</span></div></div>
+          <div><div class="mono" style="color:#68738a; font-size:10px; letter-spacing:.08em">리다이렉트</div><div style="margin-top:5px; line-height:1.7"><span class="mono">#/v3/&lt;page&gt; → #/&lt;page&gt;</span><br><span class="mono">#/console/&lt;page&gt; → #/&lt;page&gt;</span></div></div>
+          <div><div class="mono" style="color:#68738a; font-size:10px; letter-spacing:.08em">신규</div><div style="margin-top:5px; line-height:1.7"><span class="mono">#/compute · #/storage</span><br><span class="mono">#/network · #/facility</span><br><span style="color:#526075">기존 탭 id 와 충돌 없음</span></div></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

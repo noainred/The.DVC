@@ -1,0 +1,252 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap">
+  <style>
+    body { margin: 0; background: #f4f6f9; color: #1a2130;
+           font-family: Pretendard, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif;
+           font-size: 13px; line-height: 1.4; }
+    * { box-sizing: border-box; }
+    a { color: #0e7490; text-decoration: none; } a:hover { color: #0f9d8a; }
+    .mono { font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace; }
+    .num { font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; }
+    .panel { border-radius: 12px; background: #ffffff; border: 1px solid #dfe4ec; overflow: hidden; }
+    .panelh { display: flex; align-items: center; gap: 10px; padding: 13px 18px; border-bottom: 1px solid #dfe4ec; flex-wrap: wrap; }
+    .panelh b { font-size: 14px; } .panelh .sub { font-size: 12px; color: #526075; }
+    .panelh .right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+    .panelb { padding: 14px 18px 16px; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th { text-align: left; padding: 9px 10px; background: #f0f3f7; border-top: 1px solid #dfe4ec; border-bottom: 1px solid #dfe4ec;
+         font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 9.5px; font-weight: 500; letter-spacing: .06em;
+         text-transform: uppercase; color: #526075; white-space: nowrap; }
+    td { padding: 8px 10px; border-bottom: 1px solid #e6eaf0; }
+    tr:last-child td { border-bottom: none; }
+    th:first-child, td:first-child { padding-left: 18px; } th:last-child, td:last-child { padding-right: 18px; }
+    td.n { text-align: right; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 11.5px; white-space: nowrap; }
+    .bar { flex: 1; height: 6px; border-radius: 3px; background: #e8ecf2; overflow: hidden; min-width: 40px; }
+    .bar > i { display: block; height: 100%; }
+    .pct { display: flex; align-items: center; gap: 8px; min-width: 108px; }
+    .pct > .p { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 10.5px; color: #526075; width: 34px; text-align: right; }
+    .badge { display: inline-block; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 9.5px; font-weight: 700; padding: 2px 7px; border-radius: 4px; }
+    .src { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 9.5px; color: #68738a; background: rgba(139,155,180,.1); padding: 2px 7px; border-radius: 4px; white-space: nowrap; }
+    .seg { display: flex; border: 1px solid #dfe4ec; border-radius: 8px; overflow: hidden; background: #fff; }
+    .seg > div { padding: 6px 13px; font-size: 12px; font-weight: 600; color: #526075; }
+    .seg > div.on { background: #2563eb; color: #fff; font-weight: 700; }
+    .cell { padding: 7px 5px; border-radius: 5px; text-align: center; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 11px; font-weight: 700; }
+    .sidebar { width: 236px; flex: none; background: #ffffff; border-right: 1px solid #dfe4ec; padding: 16px 14px; display: flex; flex-direction: column; gap: 3px; }
+    .navitem { padding: 7px 10px; border-radius: 7px; font-size: 12.5px; font-weight: 600; color: #3a4556; }
+    .navitem.on { background: rgba(59,130,246,.85); color: #fff; }
+    .grouplabel { padding: 8px 8px 3px; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 9.5px; letter-spacing: .14em; color: #68738a; }
+  </style>
+</helmet>
+
+<div style="display: flex; width: 1440px; height: 1400px; background: #f4f6f9; overflow: hidden">
+
+  <div class="sidebar">
+    <div style="display: flex; align-items: center; gap: 10px; padding-bottom: 14px; border-bottom: 1px solid #dfe4ec; margin-bottom: 8px">
+      <div style="width: 32px; height: 32px; border-radius: 9px; background: linear-gradient(135deg, #2563eb, #0e7490); display: grid; place-items: center; font-weight: 800; color: #fff; flex: none">V</div>
+      <div style="line-height: 1.2"><div style="font-size: 13.5px; font-weight: 700">The Davinci</div><div class="mono" style="font-size: 10px; color: #526075; margin-top: 2px">GLOBAL OPS CONSOLE</div></div>
+    </div>
+    <div class="grouplabel">홈</div>
+    <div class="navitem">전사 현황</div>
+    <div class="grouplabel">법인 · 용량</div>
+    <div class="navitem on">법인 비교</div>
+    <div class="navitem">용량 고갈 예측</div>
+    <div class="navitem">자원 최적화</div>
+    <div class="grouplabel">비용 · 전력</div>
+    <div class="navitem">전력 · 비용</div>
+    <div class="grouplabel">리스크 · 알람</div>
+    <div class="navitem">알람 센터</div>
+    <div class="grouplabel">리포트</div>
+    <div class="navitem">일일 헬스체크</div>
+  </div>
+
+  <div style="flex: 1; min-width: 0; padding: 20px 24px 32px; display: flex; flex-direction: column; gap: 16px; overflow: hidden">
+
+    <div style="display: flex; align-items: flex-end; gap: 14px">
+      <div><div class="mono" style="font-size: 10.5px; letter-spacing: .14em; color: #68738a">CAPACITY</div>
+        <div style="font-size: 22px; font-weight: 700; margin-top: 4px">법인 비교 · 용량</div></div>
+      <div style="margin-left: auto; font-size: 12px; color: #526075">"어느 법인이 먼저 한계에 닿는가"</div>
+    </div>
+
+    <!-- 비교 매트릭스 -->
+    <div class="panel">
+      <div class="panelh">
+        <b>비교 매트릭스</b>
+        <div class="seg" style="margin-left: 6px"><div class="on">클러스터</div><div>데이터스토어</div></div>
+        <label style="display:flex; align-items:center; gap:6px; font-size: 11.5px; color: #526075"><input type="checkbox" checked>이름 정규화</label>
+        <div class="right"><span class="src">/compare/matrix?axis=cluster</span></div>
+      </div>
+      <div style="overflow: hidden">
+        <table>
+          <thead><tr><th style="width: 200px">클러스터</th><th style="text-align:center">SEL</th><th style="text-align:center">SHA</th><th style="text-align:center">FRA</th><th style="text-align:center">SJC</th><th style="text-align:center">SZX</th><th style="text-align:center">SIN</th><th style="text-align:center">WAW</th><th style="text-align:center">IAD</th><th style="text-align:right">합계</th></tr></thead>
+          <tbody>
+            <tr><td style="font-weight:700">PROD-01</td>
+              <td><div class="cell" style="background: rgba(34,197,94,.14); color:#15803d">64%</div></td>
+              <td><div class="cell" style="background: rgba(239,68,68,.16); color:#dc2626">92%</div></td>
+              <td><div class="cell" style="background: rgba(245,158,11,.16); color:#b45309">79%</div></td>
+              <td><div class="cell" style="background: rgba(34,197,94,.14); color:#15803d">58%</div></td>
+              <td><div class="cell" style="background: rgba(34,197,94,.14); color:#15803d">52%</div></td>
+              <td><div class="cell" style="background: rgba(34,197,94,.14); color:#15803d">47%</div></td>
+              <td><div class="cell" style="background: rgba(34,197,94,.14); color:#15803d">44%</div></td>
+              <td><div class="cell" style="background: rgba(34,197,94,.14); color:#15803d">39%</div></td>
+              <td class="n">8 / 28</td></tr>
+            <tr><td style="font-weight:700">PROD-02</td>
+              <td><div class="cell" style="background: rgba(34,197,94,.14); color:#15803d">61%</div></td>
+              <td><div class="cell" style="background: rgba(245,158,11,.16); color:#b45309">81%</div></td>
+              <td><div class="cell" style="background: rgba(34,197,94,.14); color:#15803d">66%</div></td>
+              <td><div class="cell" style="background: rgba(34,197,94,.14); color:#15803d">54%</div></td>
+              <td style="color:#68738a; text-align:center">—</td>
+              <td><div class="cell" style="background: rgba(34,197,94,.14); color:#15803d">51%</div></td>
+              <td style="color:#68738a; text-align:center">—</td>
+              <td style="color:#68738a; text-align:center">—</td>
+              <td class="n">5 / 28</td></tr>
+            <tr><td style="font-weight:700">DEV</td>
+              <td><div class="cell" style="background: rgba(34,197,94,.14); color:#15803d">38%</div></td>
+              <td><div class="cell" style="background: rgba(34,197,94,.14); color:#15803d">42%</div></td>
+              <td><div class="cell" style="background: rgba(34,197,94,.14); color:#15803d">35%</div></td>
+              <td><div class="cell" style="background: rgba(34,197,94,.14); color:#15803d">29%</div></td>
+              <td><div class="cell" style="background: rgba(34,197,94,.14); color:#15803d">33%</div></td>
+              <td style="color:#68738a; text-align:center">—</td>
+              <td><div class="cell" style="background: rgba(34,197,94,.14); color:#15803d">27%</div></td>
+              <td><div class="cell" style="background: rgba(34,197,94,.14); color:#15803d">22%</div></td>
+              <td class="n">7 / 28</td></tr>
+            <tr><td style="font-weight:700">VDI</td>
+              <td><div class="cell" style="background: rgba(245,158,11,.16); color:#b45309">77%</div></td>
+              <td style="color:#68738a; text-align:center">—</td>
+              <td><div class="cell" style="background: rgba(245,158,11,.16); color:#b45309">83%</div></td>
+              <td style="color:#68738a; text-align:center">—</td>
+              <td style="color:#68738a; text-align:center">—</td>
+              <td><div class="cell" style="background: rgba(34,197,94,.14); color:#15803d">62%</div></td>
+              <td style="color:#68738a; text-align:center">—</td>
+              <td style="color:#68738a; text-align:center">—</td>
+              <td class="n">3 / 28</td></tr>
+            <tr><td style="font-weight:700">MGMT</td>
+              <td><div class="cell" style="background: rgba(34,197,94,.14); color:#15803d">44%</div></td>
+              <td><div class="cell" style="background: rgba(34,197,94,.14); color:#15803d">48%</div></td>
+              <td><div class="cell" style="background: rgba(34,197,94,.14); color:#15803d">41%</div></td>
+              <td><div class="cell" style="background: rgba(34,197,94,.14); color:#15803d">39%</div></td>
+              <td><div class="cell" style="background: rgba(34,197,94,.14); color:#15803d">36%</div></td>
+              <td><div class="cell" style="background: rgba(34,197,94,.14); color:#15803d">33%</div></td>
+              <td><div class="cell" style="background: rgba(34,197,94,.14); color:#15803d">31%</div></td>
+              <td><div class="cell" style="background: rgba(34,197,94,.14); color:#15803d">28%</div></td>
+              <td class="n">28 / 28</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div style="padding: 10px 18px 13px; border-top: 1px solid #e6eaf0; font-size: 11px; color: #68738a; line-height: 1.7">
+        <b class="mono" style="color:#1a2130">—</b> 는 <b>그 법인에 그 이름의 클러스터가 없다</b>는 뜻이다 — <b>0% 로 채우지 않는다</b>(희소 매트릭스).
+        28개 vCenter 중 8개만 표시 · 가로 스크롤. '이름 정규화'는 <b>휴리스틱</b>이라 서로 다른 클러스터가 한 행에 묶일 수 있다.
+      </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 16px; align-items: start">
+
+      <div class="panel">
+        <div class="panelh"><b>클러스터 여력</b><span class="sub">N+1 기준</span><div class="right"><span class="src">/tools/capacity</span></div></div>
+        <table>
+          <thead><tr><th>법인 · 클러스터</th><th style="text-align:right">호스트</th><th style="text-align:right">vCPU/코어</th><th style="text-align:right">RAM 오버커밋</th><th style="text-align:right">여유</th></tr></thead>
+          <tbody>
+            <tr style="background: rgba(239,68,68,.05)"><td><b>SHA</b> · PROD-01</td><td class="n">18</td><td class="n" style="color:#dc2626">6.8 : 1</td><td class="n" style="color:#dc2626">128%</td><td class="n" style="color:#dc2626">-2.1 TB</td></tr>
+            <tr><td><b>FRA</b> · VDI</td><td class="n">12</td><td class="n" style="color:#b45309">5.1 : 1</td><td class="n" style="color:#b45309">104%</td><td class="n">0.8 TB</td></tr>
+            <tr><td><b>SEL</b> · VDI</td><td class="n">14</td><td class="n">4.2 : 1</td><td class="n">92%</td><td class="n">2.4 TB</td></tr>
+            <tr><td><b>SEL</b> · PROD-01</td><td class="n">22</td><td class="n">3.6 : 1</td><td class="n">74%</td><td class="n" style="color:#15803d">6.1 TB</td></tr>
+            <tr><td><b>SJC</b> · PROD-01</td><td class="n">16</td><td class="n">3.1 : 1</td><td class="n">68%</td><td class="n" style="color:#15803d">5.3 TB</td></tr>
+          </tbody>
+        </table>
+        <div style="padding: 9px 18px 12px; border-top: 1px solid #e6eaf0; font-size: 11px; color: #68738a">
+          <b>규칙 적용 결과이지 예측이 아니다</b> — 시계열 추세가 아니라 현재 스냅샷의 할당/용량 비율이다.
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panelh"><b>스토리지 소진 타임라인</b><span class="sub">30일 이내 빨강</span><div class="right"><span class="src">/tools/capacity-forecast</span></div></div>
+        <div class="panelb" style="display: flex; flex-direction: column; gap: 11px">
+          <div>
+            <div style="display: flex; align-items: baseline; gap: 8px; margin-bottom: 5px"><b style="font-size: 12.5px">DS-FRA-VMFS03</b><span class="mono" style="font-size: 10.5px; color: #68738a">FRA · +412 GB/일</span><span class="badge" style="margin-left:auto; background: rgba(239,68,68,.16); color:#dc2626">D-12</span></div>
+            <div style="position: relative; height: 10px; border-radius: 5px; background: #e8ecf2; overflow: hidden"><i style="display:block; height:100%; width:91%; background:#dc2626"></i></div>
+          </div>
+          <div>
+            <div style="display: flex; align-items: baseline; gap: 8px; margin-bottom: 5px"><b style="font-size: 12.5px">DS-SHA-NFS07</b><span class="mono" style="font-size: 10.5px; color: #68738a">SHA · +188 GB/일</span><span class="badge" style="margin-left:auto; background: rgba(239,68,68,.16); color:#dc2626">D-23</span></div>
+            <div style="position: relative; height: 10px; border-radius: 5px; background: #e8ecf2; overflow: hidden"><i style="display:block; height:100%; width:90%; background:#dc2626"></i></div>
+          </div>
+          <div>
+            <div style="display: flex; align-items: baseline; gap: 8px; margin-bottom: 5px"><b style="font-size: 12.5px">DS-WAW-VMFS01</b><span class="mono" style="font-size: 10.5px; color: #68738a">WAW · +96 GB/일</span><span class="badge" style="margin-left:auto; background: rgba(245,158,11,.16); color:#b45309">D-58</span></div>
+            <div style="position: relative; height: 10px; border-radius: 5px; background: #e8ecf2; overflow: hidden"><i style="display:block; height:100%; width:83%; background:#d97706"></i></div>
+          </div>
+          <div>
+            <div style="display: flex; align-items: baseline; gap: 8px; margin-bottom: 5px"><b style="font-size: 12.5px">DS-SEL-VMFS12</b><span class="mono" style="font-size: 10.5px; color: #68738a">SEL · +64 GB/일</span><span class="badge" style="margin-left:auto; background: rgba(245,158,11,.16); color:#b45309">D-91</span></div>
+            <div style="position: relative; height: 10px; border-radius: 5px; background: #e8ecf2; overflow: hidden"><i style="display:block; height:100%; width:79%; background:#d97706"></i></div>
+          </div>
+          <div style="opacity: .65">
+            <div style="display: flex; align-items: baseline; gap: 8px; margin-bottom: 5px"><b style="font-size: 12.5px">DS-SZX-VMFS04</b><span class="mono" style="font-size: 10.5px; color: #68738a">SZX · 표본 부족</span><span class="badge" style="margin-left:auto; background: rgba(139,155,180,.12); color:#526075">—</span></div>
+            <div style="position: relative; height: 10px; border-radius: 5px; background: #e8ecf2; overflow: hidden"><i style="display:block; height:100%; width:76%; background:#68738a"></i></div>
+          </div>
+        </div>
+        <div style="padding: 0 18px 14px; font-size: 11px; color: #68738a; line-height: 1.7">
+          데모(mock) 환경에서는 행마다 <span class="badge" style="background: rgba(245,158,11,.16); color:#b45309">합성</span> 배지가 붙는다 — 서버가 <span class="mono">synthesized:true</span> 를 실어 보낸다.
+        </div>
+      </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; align-items: start">
+      <div class="panel">
+        <div class="panelh"><b>지역별 롤업</b><div class="right"><span class="src">rollups.byRegion</span></div></div>
+        <div class="panelb" style="display: flex; flex-direction: column; gap: 10px">
+          <div style="display:flex; align-items:center; gap:10px"><span style="width:9px; height:9px; border-radius:50%; background:#0e7490"></span><b style="font-size:12.5px; width:52px">아시아</b><div class="bar"><i style="width:66%; background:#16a34a"></i></div><span class="num" style="font-size:11px; color:#526075; width:76px; text-align:right">9 vC · 1,894 VM</span></div>
+          <div style="display:flex; align-items:center; gap:10px"><span style="width:9px; height:9px; border-radius:50%; background:#dc2626"></span><b style="font-size:12.5px; width:52px">중국</b><div class="bar"><i style="width:79%; background:#d97706"></i></div><span class="num" style="font-size:11px; color:#526075; width:76px; text-align:right">6 vC · 1,522 VM</span></div>
+          <div style="display:flex; align-items:center; gap:10px"><span style="width:9px; height:9px; border-radius:50%; background:#7c3aed"></span><b style="font-size:12.5px; width:52px">유럽</b><div class="bar"><i style="width:74%; background:#16a34a"></i></div><span class="num" style="font-size:11px; color:#526075; width:76px; text-align:right">7 vC · 1,287 VM</span></div>
+          <div style="display:flex; align-items:center; gap:10px"><span style="width:9px; height:9px; border-radius:50%; background:#2563eb"></span><b style="font-size:12.5px; width:52px">북미</b><div class="bar"><i style="width:61%; background:#16a34a"></i></div><span class="num" style="font-size:11px; color:#526075; width:76px; text-align:right">6 vC · 1,147 VM</span></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panelh"><b>스토리지 사용량 추이</b><span class="sub">분기</span><div class="right"><span class="src">/tools/vm-track/ds-series-all</span></div></div>
+        <div class="panelb">
+          <div style="display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px">
+            <div class="num" style="font-size: 20px; font-weight: 800">14.3 PB</div>
+            <div class="num" style="font-size: 12px; color: #b45309; font-weight: 700">+1.12 PB</div>
+            <div style="font-size: 11px; color: #68738a">분기 증감</div>
+          </div>
+          <svg width="100%" height="96" viewBox="0 0 320 96" preserveAspectRatio="none">
+            <line x1="0" y1="24" x2="320" y2="24" stroke="#e6eaf0"></line><line x1="0" y1="48" x2="320" y2="48" stroke="#e6eaf0"></line><line x1="0" y1="72" x2="320" y2="72" stroke="#e6eaf0"></line>
+            <path d="M0,74 L53,70 L106,64 L160,56 L213,46 L266,36 L320,26" fill="none" stroke="#d97706" stroke-width="2"></path>
+            <circle cx="320" cy="26" r="3" fill="#d97706"></circle>
+          </svg>
+          <div style="display: flex; justify-content: space-between; font-size: 10px; color: #68738a; margin-top: 4px"><span class="mono">Q2</span><span class="mono">Q3</span></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panelh"><b>30일 내 포화 예상</b><div class="right"><span class="src">/insights/forecast</span></div></div>
+        <div class="panelb" style="display: flex; flex-direction: column; gap: 9px">
+          <div style="padding: 10px 12px; border-radius: 9px; background: #f4f6f9; border: 1px solid #dfe4ec; border-left: 3px solid #dc2626">
+            <div style="font-size: 12.5px; font-weight: 600">FRA 스토리지 — 12일 후</div>
+            <div class="mono" style="font-size: 10.5px; color: #68738a; margin-top: 4px">R² 0.94 · 증설 결재 대기</div>
+          </div>
+          <div style="padding: 10px 12px; border-radius: 9px; background: #f4f6f9; border: 1px solid #dfe4ec; border-left: 3px solid #dc2626">
+            <div style="font-size: 12.5px; font-weight: 600">SHA 클러스터 RAM — 23일 후</div>
+            <div class="mono" style="font-size: 10.5px; color: #68738a; margin-top: 4px">R² 0.88 · 오버커밋 128%</div>
+          </div>
+          <div style="padding: 10px 12px; border-radius: 9px; background: #fff; border: 1px dashed #dfe4ec; font-size: 11.5px; color: #526075; line-height: 1.6">
+            R² 가 기준 미만인 항목은 <b>목록에 넣지 않는다</b> — 추세가 아닌 잡음으로 예상일을 만들지 않기 위해서다.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div style="padding: 11px 14px; border-radius: 9px; background: #fff; border: 1px solid #dfe4ec; font-size: 11.5px; color: #526075">
+      판정 기준: 사용률 <b style="color:#1a2130">75% 주의 · 90% 위험</b> — 포탈 공용 임계값(<span class="mono">consoleData.js WARN_PCT / CRIT_PCT</span>)과 같다. 시안 임의값을 쓰지 않는다.
+    </div>
+
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

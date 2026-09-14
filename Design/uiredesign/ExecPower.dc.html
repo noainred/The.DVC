@@ -1,0 +1,193 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap">
+  <style>
+    body { margin: 0; background: #f4f6f9; color: #1a2130;
+           font-family: Pretendard, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif;
+           font-size: 13px; line-height: 1.4; }
+    * { box-sizing: border-box; }
+    a { color: #0e7490; text-decoration: none; } a:hover { color: #0f9d8a; }
+    .mono { font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace; }
+    .num { font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; }
+    .panel { border-radius: 12px; background: #ffffff; border: 1px solid #dfe4ec; overflow: hidden; }
+    .panelh { display: flex; align-items: center; gap: 10px; padding: 13px 18px; border-bottom: 1px solid #dfe4ec; flex-wrap: wrap; }
+    .panelh b { font-size: 14px; } .panelh .sub { font-size: 12px; color: #526075; }
+    .panelh .right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+    .panelb { padding: 14px 18px 16px; }
+    .kpi { padding: 14px 16px 15px; border-radius: 12px; background: #fff; border: 1px solid #dfe4ec; border-left: 3px solid #1a2130; }
+    .kpi .lab { font-size: 12px; color: #526075; }
+    .kpi .val { font-size: 24px; font-weight: 800; margin-top: 6px; font-variant-numeric: tabular-nums; }
+    .kpi .met { font-size: 11px; color: #68738a; margin-top: 5px; line-height: 1.45; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th { text-align: left; padding: 9px 10px; background: #f0f3f7; border-top: 1px solid #dfe4ec; border-bottom: 1px solid #dfe4ec;
+         font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 9.5px; font-weight: 500; letter-spacing: .06em;
+         text-transform: uppercase; color: #526075; white-space: nowrap; }
+    td { padding: 8px 10px; border-bottom: 1px solid #e6eaf0; }
+    tr:last-child td { border-bottom: none; }
+    th:first-child, td:first-child { padding-left: 18px; } th:last-child, td:last-child { padding-right: 18px; }
+    td.n { text-align: right; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 11.5px; white-space: nowrap; }
+    .bar { flex: 1; height: 6px; border-radius: 3px; background: #e8ecf2; overflow: hidden; min-width: 40px; }
+    .bar > i { display: block; height: 100%; }
+    .src { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 9.5px; color: #68738a; background: rgba(139,155,180,.1); padding: 2px 7px; border-radius: 4px; white-space: nowrap; }
+    .badge { display: inline-block; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 9.5px; font-weight: 700; padding: 2px 7px; border-radius: 4px; }
+    .sidebar { width: 236px; flex: none; background: #fff; border-right: 1px solid #dfe4ec; padding: 16px 14px; display: flex; flex-direction: column; gap: 3px; }
+    .navitem { padding: 7px 10px; border-radius: 7px; font-size: 12.5px; font-weight: 600; color: #3a4556; }
+    .navitem.on { background: rgba(59,130,246,.85); color: #fff; }
+    .grouplabel { padding: 8px 8px 3px; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 9.5px; letter-spacing: .14em; color: #68738a; }
+  </style>
+</helmet>
+
+<div style="display: flex; width: 1440px; height: 1200px; background: #f4f6f9; overflow: hidden">
+
+  <div class="sidebar">
+    <div style="display: flex; align-items: center; gap: 10px; padding-bottom: 14px; border-bottom: 1px solid #dfe4ec; margin-bottom: 8px">
+      <div style="width: 32px; height: 32px; border-radius: 9px; background: linear-gradient(135deg, #2563eb, #0e7490); display: grid; place-items: center; font-weight: 800; color: #fff; flex: none">V</div>
+      <div style="line-height: 1.2"><div style="font-size: 13.5px; font-weight: 700">The Davinci</div><div class="mono" style="font-size: 10px; color: #526075; margin-top: 2px">GLOBAL OPS CONSOLE</div></div>
+    </div>
+    <div class="grouplabel">홈</div><div class="navitem">전사 현황</div>
+    <div class="grouplabel">법인 · 용량</div><div class="navitem">법인 비교</div>
+    <div class="grouplabel">비용 · 전력</div>
+    <div class="navitem on">전력 · 비용</div>
+    <div class="navitem">전력 맵</div>
+    <div class="grouplabel">리스크 · 알람</div><div class="navitem">알람 센터</div>
+    <div class="grouplabel">리포트</div><div class="navitem">일일 헬스체크</div>
+  </div>
+
+  <div style="flex: 1; min-width: 0; padding: 20px 24px 32px; display: flex; flex-direction: column; gap: 16px; overflow: hidden">
+
+    <div style="display: flex; align-items: flex-end; gap: 14px">
+      <div><div class="mono" style="font-size: 10.5px; letter-spacing: .14em; color: #68738a">FINOPS</div>
+        <div style="font-size: 22px; font-weight: 700; margin-top: 4px">전력 · 비용 · 탄소</div></div>
+      <div style="margin-left: auto; font-size: 12px; color: #526075">iDRAC 실측 전력을 경영 단위로 환산한다</div>
+    </div>
+
+    <!-- 환산 전제 (필수) -->
+    <div style="display: flex; align-items: center; gap: 16px; padding: 12px 16px; border-radius: 12px; background: #fff; border: 1px solid rgba(37,99,235,.3); flex-wrap: wrap">
+      <span class="mono" style="font-size: 10px; letter-spacing: .1em; color: #68738a">환산 전제</span>
+      <span style="font-size: 12.5px">단가 <b class="num">₩130</b> / kWh</span>
+      <span style="color:#dfe4ec">·</span>
+      <span style="font-size: 12.5px">PUE <b class="num">1.5</b></span>
+      <span style="color:#dfe4ec">·</span>
+      <span style="font-size: 12.5px">CO₂ <b class="num">0.45</b> kg / kWh</span>
+      <span style="font-size: 11.5px; color: #526075">— 기본값입니다. 현장 값으로 바꾸세요</span>
+      <div style="margin-left: auto; padding: 6px 12px; border: 1px solid #dfe4ec; border-radius: 8px; font-size: 12px; color: #2563eb; font-weight: 600">설정에서 변경</div>
+      <span class="src">/insights/finops/config</span>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px">
+      <div class="kpi"><div class="lab">서버 실측 전력</div><div class="val num">421 kW</div><div class="met">iDRAC 보고 합계(순간값)</div></div>
+      <div class="kpi" style="border-left-color:#0e7490"><div class="lab">설비 포함 (×PUE 1.5)</div><div class="val num" style="color:#0e7490">632 kW</div><div class="met">냉방·UPS 오버헤드 포함</div></div>
+      <div class="kpi" style="border-left-color:#2563eb"><div class="lab">월 전기요금 (추정)</div><div class="val num" style="color:#2563eb">₩59.9 M</div><div class="met">632 kW × 730h × ₩130</div></div>
+      <div class="kpi" style="border-left-color:#15803d"><div class="lab">연 CO₂ (추정)</div><div class="val num" style="color:#15803d">2,491 t</div><div class="met">5,536 MWh × 0.45 kg</div></div>
+    </div>
+
+    <!-- 커버리지 밴드 (정직 필수) -->
+    <div style="display: flex; align-items: center; gap: 18px; padding: 12px 16px; border-radius: 12px; background: rgba(245,158,11,.07); border: 1px solid rgba(245,158,11,.35); flex-wrap: wrap">
+      <span class="mono" style="font-size: 10px; letter-spacing: .1em; color: #b45309">커버리지</span>
+      <span style="font-size: 12.5px">측정 서버 <b class="num">812</b> / 등록 <b class="num">965</b>대</span>
+      <div style="width: 180px; height: 8px; border-radius: 4px; background: #e8ecf2; overflow: hidden"><i style="display:block; height:100%; width:84.1%; background:#d97706"></i></div>
+      <span class="num" style="font-size: 12px; color: #b45309; font-weight: 700">84.1%</span>
+      <span style="color:#dfe4ec">·</span>
+      <span style="font-size: 12.5px">법인 미매핑 <b class="num">43</b>대 · <b class="num">18.2 kW</b></span>
+      <span style="margin-left: auto; font-size: 11.5px; color: #b45309"><b>총계는 전체가 아니다</b> — 나머지 153대는 전력을 보고하지 않는다</span>
+    </div>
+
+    <div style="display: grid; grid-template-columns: minmax(0,1.35fr) minmax(0,1fr); gap: 16px; align-items: start">
+
+      <div class="panel">
+        <div class="panelh"><b>법인별 전력 · 비용 · 탄소</b><span class="sub">열 제목 클릭 정렬</span><div class="right"><span class="src">/insights/power-breakdown</span></div></div>
+        <table>
+          <thead><tr><th>법인</th><th>리전</th><th style="text-align:right">측정 서버</th><th style="text-align:right">전력</th><th style="text-align:right">월 kWh</th><th style="text-align:right">월 요금</th><th style="text-align:right">연 CO₂</th></tr></thead>
+          <tbody>
+            <tr><td style="font-weight:700">SEL 서울</td><td style="color:#526075">아시아</td><td class="n">152</td><td class="n">78 kW</td><td class="n">85,410</td><td class="n">₩11.1 M</td><td class="n">461 t</td></tr>
+            <tr><td style="font-weight:700">SHA 상하이</td><td style="color:#526075">중국</td><td class="n">134</td><td class="n">69 kW</td><td class="n">75,555</td><td class="n">₩9.8 M</td><td class="n">408 t</td></tr>
+            <tr><td style="font-weight:700">FRA 프랑크푸르트</td><td style="color:#526075">유럽</td><td class="n">121</td><td class="n">61 kW</td><td class="n">66,795</td><td class="n">₩8.7 M</td><td class="n">361 t</td></tr>
+            <tr><td style="font-weight:700">SJC 산호세</td><td style="color:#526075">북미</td><td class="n">116</td><td class="n">58 kW</td><td class="n">63,510</td><td class="n">₩8.3 M</td><td class="n">343 t</td></tr>
+            <tr><td style="font-weight:700">SIN 싱가포르</td><td style="color:#526075">아시아</td><td class="n">84</td><td class="n">41 kW</td><td class="n">44,895</td><td class="n">₩5.8 M</td><td class="n">242 t</td></tr>
+            <tr><td style="font-weight:700">SZX 선전</td><td style="color:#526075">중국</td><td class="n">76</td><td class="n">37 kW</td><td class="n">40,515</td><td class="n">₩5.3 M</td><td class="n">219 t</td></tr>
+            <tr><td style="font-weight:700">WAW 바르샤바</td><td style="color:#526075">유럽</td><td class="n">61</td><td class="n">29 kW</td><td class="n">31,755</td><td class="n">₩4.1 M</td><td class="n">172 t</td></tr>
+            <tr style="background: rgba(245,158,11,.05)"><td style="font-weight:700; color:#b45309">IAD 미국동부</td><td style="color:#526075">북미</td><td class="n" style="color:#b45309">0</td><td class="n" style="color:#68738a">—</td><td class="n" style="color:#68738a">—</td><td class="n" style="color:#68738a">—</td><td class="n" style="color:#68738a">—</td></tr>
+            <tr style="background: rgba(139,155,180,.06)"><td style="font-weight:700; color:#526075">(법인 미지정)</td><td style="color:#68738a">—</td><td class="n">43</td><td class="n">18 kW</td><td class="n">19,710</td><td class="n">₩2.6 M</td><td class="n">107 t</td></tr>
+          </tbody>
+        </table>
+        <div style="padding: 9px 18px 12px; border-top: 1px solid #e6eaf0; font-size: 11px; color: #68738a; line-height: 1.7">
+          IAD 가 <b class="mono" style="color:#1a2130">—</b> 인 것은 <b>전력 보고 서버가 0대</b>라는 뜻이다(소비 0 이 아니다).
+          '(법인 미지정)'은 iDRAC 은 응답하는데 <b>vCenter 귀속을 알 수 없는 서버</b> — 맨 뒤에 둔다.
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 16px">
+        <div class="panel">
+          <div class="panelh"><b>전력 추이</b><span class="sub">30일 · 시간당 롤업</span><div class="right"><span class="src">power_hourly</span></div></div>
+          <div class="panelb">
+            <svg width="100%" height="112" viewBox="0 0 320 112" preserveAspectRatio="none">
+              <defs><linearGradient id="gp" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0e7490" stop-opacity=".2"></stop><stop offset="1" stop-color="#0e7490" stop-opacity="0"></stop></linearGradient></defs>
+              <line x1="0" y1="28" x2="320" y2="28" stroke="#e6eaf0"></line><line x1="0" y1="56" x2="320" y2="56" stroke="#e6eaf0"></line><line x1="0" y1="84" x2="320" y2="84" stroke="#e6eaf0"></line>
+              <path d="M0,66 L27,62 L53,70 L80,58 L107,64 L133,54 L160,60 L187,50 L213,56 L240,46 L267,52 L293,42 L320,44 L320,112 L0,112 Z" fill="url(#gp)"></path>
+              <path d="M0,66 L27,62 L53,70 L80,58 L107,64 L133,54 L160,60 L187,50 L213,56 L240,46 L267,52 L293,42 L320,44" fill="none" stroke="#0e7490" stroke-width="2"></path>
+            </svg>
+            <div style="display: flex; justify-content: space-between; font-size: 10px; color: #68738a; margin-top: 5px"><span class="mono">08-15</span><span class="mono">08-30</span><span class="mono">09-14</span></div>
+            <div style="margin-top: 9px; font-size: 11.5px; color: #526075">30일 평균 <b class="num" style="color:#1a2130">408 kW</b> · 최대 <b class="num" style="color:#1a2130">447 kW</b> · <b class="num" style="color:#b45309">+3.2%</b></div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panelh"><b>전력 상위 서버</b><span class="sub">Top 5 / 812</span><div class="right"><span class="src">/insights/finops.topHosts</span></div></div>
+          <table>
+            <thead><tr><th>서버</th><th>법인</th><th style="text-align:right">W</th></tr></thead>
+            <tbody>
+              <tr><td style="font-weight:700">esxi-sel-prod-014</td><td style="color:#526075">SEL</td><td class="n">742</td></tr>
+              <tr><td style="font-weight:700">esxi-sha-prod-008</td><td style="color:#526075">SHA</td><td class="n">718</td></tr>
+              <tr><td style="font-weight:700">esxi-fra-vdi-003</td><td style="color:#526075">FRA</td><td class="n">691</td></tr>
+              <tr><td style="font-weight:700">esxi-sel-prod-021</td><td style="color:#526075">SEL</td><td class="n">677</td></tr>
+              <tr><td style="font-weight:700">esxi-sjc-prod-011</td><td style="color:#526075">SJC</td><td class="n">655</td></tr>
+            </tbody>
+          </table>
+          <div style="padding: 9px 18px 12px; border-top: 1px solid #e6eaf0; font-size: 11px; color: #68738a">
+            경영 보기에서는 <b>서비스태그 열을 숨긴다</b> — 엔지니어 보기에서 나온다.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 16px; align-items: start">
+      <div class="panel">
+        <div class="panelh"><b>DataCenter → 법인</b><div class="right"><span class="src">byDatacenter</span></div></div>
+        <div class="panelb" style="display: flex; flex-direction: column; gap: 10px">
+          <div style="display:flex; align-items:center; gap:10px"><b style="font-size:12.5px; width:96px">DC-Seoul-1</b><div class="bar"><i style="width:88%; background:#0e7490"></i></div><span class="num" style="font-size:11px; width:58px; text-align:right">78 kW</span></div>
+          <div style="display:flex; align-items:center; gap:10px"><b style="font-size:12.5px; width:96px">DC-Shanghai</b><div class="bar"><i style="width:78%; background:#0e7490"></i></div><span class="num" style="font-size:11px; width:58px; text-align:right">69 kW</span></div>
+          <div style="display:flex; align-items:center; gap:10px"><b style="font-size:12.5px; width:96px">DC-Frankfurt</b><div class="bar"><i style="width:69%; background:#0e7490"></i></div><span class="num" style="font-size:11px; width:58px; text-align:right">61 kW</span></div>
+          <div style="display:flex; align-items:center; gap:10px"><b style="font-size:12.5px; width:96px">DC-SanJose</b><div class="bar"><i style="width:65%; background:#0e7490"></i></div><span class="num" style="font-size:11px; width:58px; text-align:right">58 kW</span></div>
+          <div style="display:flex; align-items:center; gap:10px; opacity:.7"><b style="font-size:12.5px; width:96px; color:#526075">(미지정)</b><div class="bar"><i style="width:20%; background:#68738a"></i></div><span class="num" style="font-size:11px; width:58px; text-align:right">18 kW</span></div>
+        </div>
+      </div>
+
+      <div class="panel" style="border-color: rgba(139,155,180,.4)">
+        <div class="panelh" style="background: rgba(139,155,180,.06)"><b>이 화면에 넣지 않은 것</b><span class="sub">데이터가 없다</span></div>
+        <div class="panelb" style="font-size: 11.5px; line-height: 1.85; color: #526075">
+          <div><b style="color:#1a2130">계약 전력 대비 %</b> — 계약 전력 값을 수집하는 API 가 없다. 실측 W 와 단가만 안다.</div>
+          <div><b style="color:#1a2130">SLA · 가용률 %</b> — 가동/정지 이력 저장소가 없다.</div>
+          <div><b style="color:#1a2130">ROI · TCO · 절감 금액</b> — 자원(GB·vCPU·RAM)을 금액으로 바꿀 단가가 없다. 전력만 환산 가능하다.</div>
+          <div style="margin-top: 8px; padding-top: 9px; border-top: 1px solid #e6eaf0; color: #b45309">
+            요구가 있으면 <b>"아직 수집하지 않습니다 + 수집하려면 무엇이 필요한지"</b> 를 화면에 적는다. 임의 상수로 채우지 않는다.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div style="padding: 11px 14px; border-radius: 9px; background: #fff; border: 1px solid #dfe4ec; font-size: 11.5px; color: #526075">
+      <b style="color:#1a2130">순간 전력 기준 추정</b>입니다. 실제 청구액과 다를 수 있습니다 — 요금제(계시별·기본요금)·역률 보정·설비 실측 PUE 를 반영하지 않습니다.
+    </div>
+
+  </div>
+</div>
+</x-dc>
+</body>
+</html>
