@@ -47,6 +47,8 @@ import { accessFor as rmaAccessFor, ipAllowed as rmaIpAllowed, remoteFor as rmaR
 import { scheduleFor as rmaScheduleFor, assignForInstance as rmaAssign } from '../rma/schedules.js';
 import { ingestResult as rmaIngestResult } from '../rma/testResults.js';
 import { commitCollection as commitGuestDisk } from '../guestdisk/db.js';
+import { commitVmSeries, setVmSeriesMeta } from '../vmseries/db.js';   // v2.510: 실시간 스파이크 push 수신(vCenter별 독립 DB)
+import { loadVmSeriesSettings } from '../vmseries/settings.js';
 import { load as loadGuestDiskSettings } from '../guestdisk/settings.js';
 import { sanitizeGuestDiskVms } from '../guestdisk/analyze.js';
 import { brokerFetch as credentialBrokerFetch } from '../security/credentialStore.js';
@@ -498,6 +500,86 @@ centralRouter.post('/guest-disk', async (req, res) => {
   noteVcenterOwner(String(b.vcenterId), agent, { peer: req.socket?.remoteAddress || '', hostname: req.get('X-Agent-Hostname') || '' });
   console.log(`[central] guest-disk 수신: agent=${agent} vc=${b.vcenterId} vms=${vms.length} (series vm=${commit.vmSeriesRows} part=${commit.partSeriesRows})`);
   res.json({ ok: true, vcenterId: b.vcenterId, vms: vms.length, vmSeriesRows: commit.vmSeriesRows, partSeriesRows: commit.partSeriesRows });
+});
+
+// 사이트 위임 실시간 스파이크 수신(v2.510) — 엣지 vmseries 폴러가 저장한 같은 주기 결과를 push.
+// /guest-disk 와 같은 신뢰 경계(개별 토큰 → agent 강제 + TOFU 소유권 + mock 차단). 받은 행은 형식·크기를
+// 검증한 뒤 **그 vCenter 의 독립 DB 파일**에 커밋한다(vmseries/db.js — 다른 vCenter 파일에 섞일 길 없음).
+// Body: { agent, source, vcenterId, vcenterName, chunk, chunks, spikes:[{kind,ref,t0,t1,n,cols[],data(base64),mxcpu,mxmem}],
+//         cover?:[{kind,ref,h,samples}], cursors?:[{kind,ref,lastTs}], stats?, historicalInterval?, generatedAt }
+const VMS_REF_RE = /^[A-Za-z0-9_.:-]{1,64}$/;
+const VMS_COL_RE = /^[A-Za-z0-9]{1,32}$/;
+function sanitizeVmSeriesBody(b, now) {
+  const yr = 366 * 86_400_000;
+  const okTs = (t) => Number.isFinite(t) && t > now - yr && t < now + 86_400_000;
+  const kindOk = (k) => k === 'vm' || k === 'host';
+  const spikes = [];
+  for (const s of (Array.isArray(b.spikes) ? b.spikes : []).slice(0, 20_000)) {
+    if (!s || !kindOk(s.kind) || !VMS_REF_RE.test(String(s.ref || ''))) continue;
+    const t0 = Number(s.t0); const t1 = Number(s.t1); const n = Number(s.n);
+    if (!okTs(t0) || !okTs(t1) || t1 < t0 || !(n >= 1 && n <= 100_000)) continue;
+    const cols = Array.isArray(s.cols) ? s.cols.slice(0, 32).map(String) : [];
+    if (!cols.length || !cols.every((c) => VMS_COL_RE.test(c))) continue;
+    const b64 = String(s.data || '');
+    if (b64.length > 4_000_000) continue;
+    const buf = Buffer.from(b64, 'base64');
+    if (buf.length !== n * (cols.length + 1) * 4) continue;      // 레이아웃 불일치 = 위조/손상
+    spikes.push({ kind: s.kind, ref: String(s.ref), t0, t1, n, cols, buf, mxcpu: Number.isFinite(Number(s.mxcpu)) ? Number(s.mxcpu) : -1, mxmem: Number.isFinite(Number(s.mxmem)) ? Number(s.mxmem) : -1 });
+  }
+  const cover = [];
+  for (const c of (Array.isArray(b.cover) ? b.cover : []).slice(0, 200_000)) {
+    const h = Number(c?.h); const samples = Number(c?.samples);
+    if (!c || !kindOk(c.kind) || !VMS_REF_RE.test(String(c.ref || '')) || !okTs(h) || !(samples >= 1 && samples <= 10_000)) continue;
+    cover.push({ kind: c.kind, ref: String(c.ref), h: Math.floor(h / 3_600_000) * 3_600_000, samples: Math.floor(samples) });
+  }
+  const cursors = [];
+  for (const c of (Array.isArray(b.cursors) ? b.cursors : []).slice(0, 20_000)) {
+    const lastTs = Number(c?.lastTs);
+    if (!c || !kindOk(c.kind) || !VMS_REF_RE.test(String(c.ref || '')) || !okTs(lastTs)) continue;
+    cursors.push({ kind: c.kind, ref: String(c.ref), lastTs });
+  }
+  let historicalInterval = null;
+  if (Array.isArray(b.historicalInterval)) {
+    historicalInterval = b.historicalInterval.slice(0, 8).map((x) => ({ key: Number(x?.key) || 0, samplingPeriod: Number(x?.samplingPeriod) || null, length: Number(x?.length) || null, name: String(x?.name || '').slice(0, 64), level: Number(x?.level) || null, enabled: x?.enabled !== false }));
+  }
+  return { spikes, cover, cursors, historicalInterval };
+}
+centralRouter.post('/vmseries', async (req, res) => {
+  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+  const b = req.body || {};
+  if (!b.vcenterId) return res.status(400).json({ ok: false, reason: 'vcenterId가 필요합니다.' });
+  const agent = req.centralAuth.agent || String(b.agent || '').trim();
+  if (req.centralAuth.mode === 'agent' && !agentOwnsVcenter(agent, String(b.vcenterId))) {
+    const owner = getInventory(String(b.vcenterId))?.agent || '';
+    return res.status(403).json({ ok: false, reason: `vcenterId '${b.vcenterId}'는 '${owner}' 소유입니다(다른 엣지가 덮어쓸 수 없습니다).` });
+  }
+  if (b.source === 'mock' || b.mock === true || isMockVcenter({ id: String(b.vcenterId || ''), name: b.vcenterName })) {
+    return res.status(400).json({ ok: false, reason: `엣지 '${agent}' 가 mock(가짜) 스파이크 데이터를 보냈습니다 — 저장하지 않습니다.`, mockBlocked: true });
+  }
+  const rows = sanitizeVmSeriesBody(b, Date.now());
+  const vcId = String(b.vcenterId);
+  let commit;
+  try { commit = await commitVmSeries(vcId, rows); }
+  catch (e) { return res.status(500).json({ ok: false, reason: `vmseries 커밋 실패: ${e?.message || e}` }); }
+  if (!commit?.ok) return res.status(500).json({ ok: false, reason: commit?.reason || 'vmseries 커밋 실패(DB 사용 불가)' });
+  if (rows.historicalInterval) await setVmSeriesMeta(vcId, 'historicalInterval', { at: Date.now(), intervals: rows.historicalInterval });
+  if (Number(b.chunk) === 0 || b.chunk == null) await setVmSeriesMeta(vcId, 'vcenter', { id: vcId, name: String(b.vcenterName || vcId).slice(0, 256), lastPollAt: Date.now(), agent });
+  noteVcenterOwner(vcId, agent, { peer: req.socket?.remoteAddress || '', hostname: req.get('X-Agent-Hostname') || '' });
+  console.log(`[central] vmseries 수신: agent=${agent} vc=${vcId} chunk=${b.chunk ?? 0}/${b.chunks ?? 1} spikes=${rows.spikes.length} cover=${rows.cover.length}`);
+  res.json({ ok: true, vcenterId: vcId, spikes: rows.spikes.length, cover: rows.cover.length, cursors: rows.cursors.length });
+});
+
+// 실시간 스파이크 수집 설정 배포(v2.510) — 엣지가 주기적으로 GET. 이 엣지가 수집하는(인벤토리 소유)
+// vCenter 의 targets 만 내려준다(다른 법인 id 비노출). scope='all' 은 그대로 내려간다.
+centralRouter.get('/vmseries-config', (req, res) => {
+  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+  const agent = String(req.centralAuth.agent || req.query.agent || '').trim().toLowerCase();
+  const mine = new Set(listInventory().filter((e) => String(e.agent || '').toLowerCase() === agent).map((e) => String(e.vcenterId)));
+  const s = loadVmSeriesSettings();
+  const targets = Object.fromEntries(Object.entries(s.targets || {}).filter(([id]) => mine.has(id)));
+  res.json({ ok: true, settings: { enabled: s.enabled, intervalMin: s.intervalMin, retentionDays: s.retentionDays, thresholds: s.thresholds, scope: s.scope, targets }, vcenters: [...mine] });
 });
 
 // 엣지 베어메탈 집계: 현장 포탈이 자기 DC의 베어메탈 목록(전력 미보고 포함)을 push.

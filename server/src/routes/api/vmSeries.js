@@ -1,0 +1,153 @@
+/**
+ * routes/api/vmSeries.js — 실시간 스파이크 수집(v2.510) API.
+ *
+ *  GET  /tools/vmseries/settings      설정 + vCenter 별 대상 수 + 디스크 사용량 + 폴러 상태 (tools 권한)
+ *  PUT  /tools/vmseries/settings      설정 변경 (admin) — 대상에서 빠진 vCenter 의 DB 파일은 삭제(용량 회수)
+ *  GET  /tools/vmseries/scope-data    범위 선택 트리용 클러스터/호스트/폴더/VM (tools, scope)
+ *  GET  /tools/vmseries/status        폴러 상태 (tools)
+ *  POST /tools/vmseries/run           지금 수집 (admin, 재진입 가드 공유)
+ *  GET  /tools/vmseries/local         리포트 'Local + vCenter' 섹션 — VM 1대 (tools, 단건 scope 404)
+ *  GET  /tools/vmseries/top           전 VM 스파이크 순위 (tools, scope)
+ *  DELETE /tools/vmseries/data        vCenter 데이터 삭제 (admin)
+ *
+ * 보안: 조회는 `scopedVcenterIds` 교집합(요청 필터보다 먼저), 단건은 `inUserScope` 404(존재 은닉).
+ * 설정 응답의 targets 는 범위 계정에 교집합만(범위 밖 id 열거 금지). 도구 게이트 키는 `waste`
+ * (auth/toolAccess.js — Optimization 이 이 리포트의 주인).
+ */
+import { scopedVcenterIds, inUserScope } from '../../auth/scope.js';
+import { requireRole, requirePerm } from '../../auth/auth.js';
+import { logAudit } from '../../audit.js';
+import { store } from '../../store.js';
+import { loadVmSeriesSettings, saveVmSeriesSettings, VMSERIES_LIMITS } from '../../vmseries/settings.js';
+import { summarizeScope, normFolder } from '../../vmseries/scope.js';
+import { vmSeriesDiskUsage, dropVmSeriesDb, vmSeriesDbStats, vmSeriesMeta, vmSeriesFreeBytes } from '../../vmseries/db.js';
+import { dbFileName } from '../../metrics/vmperfDb.js';
+import { vmSeriesPollerStatus, runVmSeriesNow } from '../../vmseries/poller.js';
+import { localReportFor, topSpikers } from '../../vmseries/query.js';
+import { vmSeriesPushStatus } from '../../agent/vmSeriesPush.js';
+import { mockLocalReport } from '../../vmseries/mock.js';
+import { memoJson, scopeKey } from './shared.js';
+
+const morefOf = (id, vcId) => String(id || '').slice(String(vcId || '').length + 1);
+
+export function registerVmSeries(api) {
+
+api.get('/tools/vmseries/settings', requirePerm('tools'), (req, res) => {
+  const snap = store.get();
+  const allowed = scopedVcenterIds(req.user, snap);
+  const s = loadVmSeriesSettings();
+  const vcenters = (snap.vcenters || []).filter((v) => !allowed || allowed.has(v.id))
+    .map((v) => ({ id: v.id, name: v.name || v.id, collectSource: v.collectSource || 'central', status: v.status || '' }));
+  const allowedFiles = allowed ? new Set([...allowed].map((id) => dbFileName(id))) : null;
+  const usage = vmSeriesDiskUsage().filter((u) => (!allowedFiles ? true : allowedFiles.has(dbFileName(u.vcenterId))));
+  const resolved = summarizeScope(snap, s).filter((r) => !allowed || allowed.has(r.vcenterId));
+  const safeTargets = Object.fromEntries(Object.entries(s.targets || {}).filter(([id]) => !allowed || allowed.has(id)));
+  res.json({
+    settings: { ...s, targets: safeTargets }, limits: VMSERIES_LIMITS, vcenters, resolved, usage,
+    totalBytes: usage.reduce((a, u) => a + u.bytes, 0), freeBytes: vmSeriesFreeBytes(),
+    status: vmSeriesPollerStatus(), push: vmSeriesPushStatus(), mock: snap.source === 'mock',
+  });
+});
+
+api.put('/tools/vmseries/settings', requireRole('admin'), (req, res) => {
+  const b = req.body || {};
+  const snap = store.get();
+  const validVc = new Set((snap.vcenters || []).map((v) => v.id));
+  if (b.targets !== undefined) {
+    if (!b.targets || typeof b.targets !== 'object' || Array.isArray(b.targets)) return res.status(400).json({ ok: false, reason: 'targets 는 객체여야 합니다.' });
+    const badVc = Object.keys(b.targets).filter((id) => !validVc.has(id));
+    if (badVc.length) return res.status(400).json({ ok: false, reason: `존재하지 않는 vCenter id: ${badVc.slice(0, 5).join(', ')}` });
+    // 유령 id 저장 방지 — 호스트/VM id 는 스냅샷에 실재해야 한다(클러스터·폴더 이름은 문자열이라 형식만).
+    const hostIds = new Set((snap.hosts || []).map((h) => h.id)); const vmIds = new Set((snap.vms || []).map((v) => v.id));
+    for (const [id, t] of Object.entries(b.targets)) {
+      if (!t || typeof t !== 'object') return res.status(400).json({ ok: false, reason: `targets[${id}] 형식 오류` });
+      if (t.all === true) continue;
+      const badH = (t.hosts || []).filter((x) => !hostIds.has(String(x)));
+      const badV = (t.vms || []).filter((x) => !vmIds.has(String(x)));
+      if (badH.length || badV.length) return res.status(400).json({ ok: false, reason: `스냅샷에 없는 대상: ${[...badH, ...badV].slice(0, 5).join(', ')}` });
+    }
+  }
+  const before = loadVmSeriesSettings();
+  const next = saveVmSeriesSettings(b);
+  // 선택 범위에서 빠진 vCenter 의 DB 파일 삭제(용량 즉시 회수) — 요청이 명시할 때만(dropExcluded).
+  const dropped = [];
+  if (b.dropExcluded === true && next.scope === 'selected') {
+    const keep = new Set(Object.keys(next.targets).map((id) => dbFileName(id)));
+    for (const u of vmSeriesDiskUsage()) if (!keep.has(dbFileName(u.vcenterId))) { dropVmSeriesDb(u.vcenterId); dropped.push(u.vcenterId); }
+  }
+  logAudit({
+    user: req.user?.username, action: 'VM 실시간 스파이크 수집 설정 변경',
+    target: next.enabled ? `주기 ${next.intervalMin}분 · 보존 ${next.retentionDays}일 · 범위 ${next.scope === 'selected' ? `${Object.keys(next.targets).length}개 vCenter` : '전체'}` : '비활성',
+    detail: `${before.enabled !== next.enabled ? `enabled ${before.enabled}→${next.enabled} · ` : ''}임계 cpu ${next.thresholds.cpuPct}% mem ${next.thresholds.memPct}% ready ${next.thresholds.readyPct}%${dropped.length ? ` · DB 삭제: ${dropped.join(', ')}` : ''}`,
+    ip: req.ip || '',
+  });
+  res.json({ ok: true, settings: next, dropped });
+});
+
+/** 범위 선택 트리 데이터 — 한 vCenter 의 클러스터/호스트/폴더/VM(전원 상태 포함, 꺼진 VM 은 표시만). */
+api.get('/tools/vmseries/scope-data', requirePerm('tools'), (req, res) => {
+  const snap = store.get();
+  const vcId = String(req.query.vcenterId || '');
+  if (!vcId || !inUserScope(req.user, snap, vcId) || !(snap.vcenters || []).some((v) => v.id === vcId)) return res.status(404).json({ ok: false, reason: 'not found' });
+  const hosts = (snap.hosts || []).filter((h) => h.vcenterId === vcId).map((h) => ({ id: h.id, name: h.name, cluster: h.cluster || 'standalone', state: h.connectionState }));
+  const vms = (snap.vms || []).filter((v) => v.vcenterId === vcId && !v.template).map((v) => ({ id: v.id, name: v.name, folder: normFolder(v.folder), host: v.host, cluster: v.cluster || '', on: v.powerState === 'POWERED_ON', vcpu: v.cpuCount || 0, memMB: v.memMB || 0 }));
+  const clusters = [...new Set(hosts.map((h) => h.cluster))].sort();
+  res.json({ vcenterId: vcId, clusters, hosts, vms });
+});
+
+api.get('/tools/vmseries/status', requirePerm('tools'), (_req, res) => {
+  res.json({ ok: true, ...vmSeriesPollerStatus(), push: vmSeriesPushStatus() });
+});
+
+api.post('/tools/vmseries/run', requireRole('admin'), async (req, res) => {
+  logAudit({ user: req.user?.username, action: 'VM 실시간 스파이크 수동 수집', ip: req.ip || '' });
+  res.json(await runVmSeriesNow('manual'));
+});
+
+/** 리포트 로컬 섹션 — VM 1대. 산정에는 쓰지 않는다(표시 전용). */
+api.get('/tools/vmseries/local', requirePerm('tools'), async (req, res) => {
+  const vmId = String(req.query.vmId || '');
+  const days = [7, 30, 90, 180, 365].includes(Number(req.query.days)) ? Number(req.query.days) : 30;
+  const snap = store.get();
+  const vm = (snap.vms || []).find((v) => v.id === vmId);
+  if (!vm || !inUserScope(req.user, snap, vm.vcenterId)) return res.status(404).json({ ok: false, reason: 'VM 을 찾을 수 없습니다.' });
+  const s = loadVmSeriesSettings();
+  if (snap.source === 'mock') return res.json({ ok: true, ...mockLocalReport(vm, days, s.thresholds), synthesized: true });
+  const r = await localReportFor({ vcenterId: vm.vcenterId, kind: 'vm', ref: morefOf(vm.id, vm.vcenterId), days, thresholds: s.thresholds, vcpu: Number(vm.cpuCount) || 0 });
+  const vcMeta = await vmSeriesMeta(vm.vcenterId, 'vcenter');
+  res.json({ ok: true, ...r, settings: { enabled: s.enabled, intervalMin: s.intervalMin, retentionDays: s.retentionDays }, lastPollAt: vcMeta?.lastPollAt || null, synthesized: false });
+});
+
+/** 전 VM 스파이크 순위(창 안 스파이크 순간 수 순). */
+api.get('/tools/vmseries/top', requirePerm('tools'), (req, res) => memoJson(req, res, 'vmseries-top', async (snap) => {
+  const allowed = scopedVcenterIds(req.user, snap);
+  const days = Math.max(1, Math.min(60, Number(req.query.days) || 7));
+  const limit = Math.max(1, Math.min(500, Number(req.query.limit) || 100));
+  let vcIds = (snap.vcenters || []).map((v) => v.id).filter((id) => !allowed || allowed.has(id));
+  if (req.query.vcenterId) vcIds = vcIds.filter((id) => id === String(req.query.vcenterId));
+  const byId = new Map((snap.vms || []).map((v) => [v.id, v]));
+  const byHost = new Map((snap.hosts || []).map((h) => [h.id, h]));
+  const items = []; const missingDb = [];
+  for (const vcId of vcIds) {
+    const rows = await topSpikers(vcId, days, limit);
+    if (rows == null) { missingDb.push(vcId); continue; }
+    for (const r of rows) {
+      const ent = r.kind === 'vm' ? byId.get(`${vcId}:${r.ref}`) : byHost.get(`${vcId}:${r.ref}`);
+      items.push({ vcenterId: vcId, kind: r.kind, id: `${vcId}:${r.ref}`, name: ent?.name || r.ref, cluster: ent?.cluster || '', host: r.kind === 'vm' ? (ent?.host || '') : '', moments: r.moments, rows: r.rows, mxcpuPct: r.mxcpuPct, mxmemPct: r.mxmemPct, firstT: r.firstT, lastT: r.lastT, present: !!ent });
+    }
+  }
+  items.sort((a, b) => b.moments - a.moments);
+  const s = loadVmSeriesSettings();
+  return { days, limit, items: items.slice(0, limit), total: items.length, missingDb, thresholds: s.thresholds, enabled: s.enabled, intervalSec: 20, synthesized: snap.source === 'mock' };
+}, { ttlMs: 60_000, extraKey: `${scopeKey(req.user, store.get())}|${req.query.vcenterId || ''}|${req.query.days || ''}|${req.query.limit || ''}` }));
+
+api.delete('/tools/vmseries/data', requireRole('admin'), async (req, res) => {
+  if (req.query.vcenterId === undefined) return res.status(400).json({ ok: false, reason: 'vcenterId 를 명시하세요.' });
+  const vcId = String(req.query.vcenterId);
+  const stats = await vmSeriesDbStats(vcId);
+  const removed = dropVmSeriesDb(vcId);
+  logAudit({ user: req.user?.username, action: 'VM 실시간 스파이크 데이터 삭제', target: vcId, detail: `파일 ${removed}개 · 행 ${stats?.spikeRows ?? '?'}`, ip: req.ip || '' });
+  res.json({ ok: true, vcenterId: vcId, filesRemoved: removed });
+});
+
+}

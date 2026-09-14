@@ -118,6 +118,24 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     직렬화된다. 그래서 실행 시점에 그 데이터스토어의 VM 만 다시 읽는다 — 정상 운영 비용 0,
     실행 시 SOAP 왕복 2회. 기존 `dsBrowse` 의 60초 캐시·90초 시한·파일 상한·시한초과 태스크 취소를
     재사용하고 데이터스토어별 재진입 가드를 더했다(연타가 vCenter 부하를 곱하지 않게).
+  - **실시간(20초) 스파이크 수집은 '임계 이상 순간' 만, vCenter 마다 독립 파일**(`vmseries/`, v2.510 —
+    사용자 결정 "50% 이상만 저장 · 평균은 vCenter 병행 · DB 분리하는거 꼭 기억해"):
+    - 20초 원본을 행으로 쌓지 말 것 — 5,850 VM × 10계열 × 4,320/일 = 연 **184억 행**이다. 저장 단위는
+      트리거(cpu/mem % · ready %/vCPU · 벌룬/스왑>0) 중 하나라도 넘는 **순간의 전 카운터 값**을 50분치
+      BLOB 1행으로 패킹한 것(`spikes.js packMoments`)이고, 임계 미만은 저장하지 않는다. 평균·p95 는
+      vCenter 롤업이 맡는다(롤업은 평균을 보존하고 피크를 파괴한다 — 이 수집은 그 반대만 한다).
+    - **'스파이크 0' 과 '미측정' 을 구분하는 것은 `cover` 표다**(엔티티·시간별 관측 표본 수). 행이 없는 것을
+      '스파이크 없음' 으로 읽는 화면을 만들지 말 것 — `localReportFor` 의 `freq[].measured`·`coverage` 를 써서
+      미측정은 회색 음영으로 그린다. 커서(`cursor`)가 50분 주기 × 60분 버퍼의 겹침을 두 번 세지 않게 한다.
+    - **DB 파일은 `vmseries/<id>-<sha1 8자>.db`** — `metrics/vmperfDb.js dbFileName` 재사용(단사 매핑). 조회
+      경로는 `create:false` 로 열어 없는 id 로 파일을 무한 생성하지 않는다. 대상 제외 = 파일째 삭제.
+    - **권고 vCPU 산정에 20초 최대를 넣지 말 것** — `rightsize.js:176` 의 `최대 > p95 × 1.5` 규칙에 20초 최대를
+      넣으면 거의 전 VM 이 스파이크형이 되어 권고가 전반적으로 커진다. 'Local + vCenter' 템플릿은 표시만 한다.
+      반영 규칙(예: 지속 1분 이상 run 만)은 운영 데이터를 본 뒤 별도 결정.
+    - 주기 50분은 겹침 10분(ESXi 버퍼 60분) — 한 주기 실패 = 40분 영구 소실. 상한 60·하한 20 을 서버가
+      강제하고 설정 화면이 `intervalWarning` 으로 그 사실을 적는다. 기본 **꺼짐(opt-in)**, 디스크 여유 가드
+      (`VMSERIES_MIN_FREE_GB`)로 포탈 디스크를 채우지 않는다. 위임 vCenter 는 엣지가 수집해 `/api/central/vmseries`
+      로 push(gzip·청크·BIG_JSON 등록·413 로그 — v2.503 규약)하고 설정은 `vmseries-config` pull 로 내려간다.
   - (구 '미해결 후속' 2건 — 적용 완료) 전력 대시보드 시간당 롤업 테이블은 `power_hourly`
     (idrac/db.js, 적재 트랜잭션 내 증분 upsert)로, 위임 잡 인출 2단계 확인응답(claim→ack)은
     v2.290(central/captureJobs.js — claim 기한 + 재수확 reap + 재시도 상한, idracScanJobs 패턴

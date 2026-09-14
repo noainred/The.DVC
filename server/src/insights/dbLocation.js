@@ -54,6 +54,7 @@ export const MIGRATABLE = [
 /** 디렉터리 단위로 옮기는 대상(vCenter별 분리 DB). */
 export const MIGRATABLE_DIRS = [
   { dir: 'vmperf', label: 'VM 성능(vCenter별 독립 DB)' },
+  { dir: 'vmseries', label: 'VM 실시간 스파이크(vCenter별 독립 DB, v2.510)' },
 ];
 
 const readFile = () => {

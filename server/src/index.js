@@ -102,6 +102,8 @@ import { startBmstorPoller } from './bmstor/poller.js';           // 베어메�
 import { startBmstorWorker } from './agent/bmstorWorker.js';       // 〃 폴링 위임 워커(엣지, v2.341)
 import { startVmtrackPoller } from './vmtrack/poller.js';          // VM 수량 추이 00/12시 스냅샷(v2.345)
 import { startGuestDiskPoller } from './guestdisk/poller.js';       // 게스트 디스크 회수 리포트(v2.459)
+import { startVmSeriesPoller } from './vmseries/poller.js';         // 실시간(20초) 스파이크 수집(v2.510) — vCenter별 독립 DB
+import { startVmSeriesConfigPull } from './agent/vmSeriesConfigPull.js'; // 〃 중앙→엣지 설정 pull(v2.510)
 import { startPowerOffPoller } from './tools/powerOffPoller.js';     // 전원 꺼짐 점검(v2.484)
 import { resumeHostAccessPending } from './hostaccess/service.js';  // 호스트 접근 제어 확정 대기 복구(v2.485)
 import { startStoragePush } from './storage/push.js';            // 엣지→중앙 스냅샷 push(v2.302)
@@ -195,6 +197,7 @@ app.use((req, res, next) => {
 const BIG_JSON = express.json({ limit: process.env.JSON_BODY_LIMIT || '16mb' });
 app.use('/api/central/inventory', BIG_JSON);
 app.use('/api/central/guest-disk', BIG_JSON); // 게스트 디스크 push(v2.466) — inventory 와 동종(그 vCenter 전 VM+파티션). 1mb 기본이면 대형 site vCenter 가 413 으로 조용히 실패
+app.use('/api/central/vmseries', BIG_JSON);   // 실시간 스파이크 push(v2.510) — 엣지가 700KB 청크로 보내지만 base64 BLOB 이라 1mb 기본을 넘을 수 있다(413 = 조용한 소실)
 app.use('/api/central/agent-config', BIG_JSON); // 엣지 설정 통합 push(다수 파일)
 // v2.503(성능 감사 F-2): 스토리지·PDU push 는 **청크도 gzip 도 없이** 한 번에 올라가고 있었다.
 // 스키마상 스토리지 장비 1대가 약 20~30KB 이고 엣지당 상한이 500대(`MAX_DEVICES_PER_AGENT`)라
@@ -322,6 +325,8 @@ const stagger = [
   resumeHostAccessPending, // 호스트 접근 제어(v2.485) — 확정 대기(commit-confirm)가 남아 있으면 기한을 이어받아 자동 되돌림 타이머 재무장
   startPowerOffPoller,  // 전원 꺼짐 점검(v2.484) — 60초 틱, 설정 주기(기본 6h) 경과 시 스냅샷의 꺼진 VM 관측 적재 + 재진입 가드, vCenter 왕복 없음
   startGuestDiskPush,   // 〃 엣지→중앙 push(v2.466) — site 모드 vCenter 의 guest.disk 를 엣지가 수집해 중앙에 올림. CENTRAL_URL·pushGuestDisk 미충족이면 자기기동 안 함
+  startVmSeriesPoller,  // 실시간 스파이크 수집(v2.510) — 적응형 타이머(기본 50분) + 재진입 가드 + 동시성 4 + 디스크 가드. opt-in(기본 꺼짐). 엣지면 저장 후 중앙 push
+  startVmSeriesConfigPull, // 〃 중앙→엣지 설정 pull(v2.510) — CENTRAL_URL 미설정이면 자기기동 안 함
 ];
 stagger.forEach((start, i) => setTimeout(() => { try { start(); } catch (e) { console.error('[start] 폴러 기동 실패:', e?.message); } }, i * 1500).unref?.());
 

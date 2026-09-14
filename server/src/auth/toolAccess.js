@@ -74,6 +74,8 @@ export const TOOL_PATH_KEYS = Object.freeze({
   'vm-track': 'vm-track',
   vmtools: 'vmtools',
   waste: 'waste',
+  // v2.510: 실시간 스파이크 수집(로컬 리포트 섹션·설정·순위) — Optimization(waste) 리포트의 부속 API.
+  vmseries: 'waste',
 });
 
 /**

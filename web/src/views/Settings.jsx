@@ -20,6 +20,7 @@ import Audit from './Audit.jsx';
 import MetricsSettings from './MetricsSettings.jsx';
 import StorageIntervals from './StorageIntervals.jsx'; // 스토리지 수집 주기(중앙→엣지 배포, v2.409)
 import PowerOffCheckSettings from './PowerOffCheckSettings.jsx'; // 전원 꺼짐 점검 주기(v2.484)
+import VmSeriesSettings from './VmSeriesSettings.jsx'; // VM 실시간 스파이크 수집(20초 표본 · vCenter별 DB, v2.510)
 import PerfMonitor from './PerfMonitor.jsx'; // 서버 성능 측정(요청 지연·루프 정체·hang 로그, v2.498)
 import HostAccessSettings from './HostAccessSettings.jsx'; // 호스트 접근 제어(SSH/웹/OS 방화벽, v2.485)
 import V4Portal from './V4Portal.jsx'; // 신규 포탈 보기(version_4 진입, v2.508 — v2.490 의 V3 승격)
@@ -54,6 +55,7 @@ const SUB = [
   { k: 'metrics', label: '지표 수집', C: MetricsSettings, group: 'collect' },
   { k: 'storage-intervals', label: '스토리지 수집 주기', C: StorageIntervals, group: 'collect' },
   { k: 'power-off-check', label: '전원 꺼짐 점검', C: PowerOffCheckSettings, group: 'collect' },
+  { k: 'vmseries', label: 'VM 실시간 스파이크 수집', C: VmSeriesSettings, group: 'collect' },
   { k: 'sansw-perf', label: 'SAN 스위치 포트 사용량', C: SanSwitchPerf, group: 'collect' },
   // --- GPU 사용량 수집 그룹 ---
   { k: 'gpu-collect', label: 'GPU 수집', C: GpuSettings, group: 'gpu' },
