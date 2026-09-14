@@ -108,14 +108,14 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#526075" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
           엔지니어 메뉴 전체
         </div>
-        <div style="font-size: 10.5px; color: #68738a; margin-top: 4px; line-height: 1.5">숨기지 않는다 — 펼치면 이 역할이 볼 수 있는 <b class="num" style="color:#1a2130">7</b>그룹이 전부 나온다</div>
+        <div style="font-size: 10.5px; color: #68738a; margin-top: 4px; line-height: 1.5">숨기지 않는다 — 펼치면 이 역할이 볼 수 있는 <b class="num" style="color:#1a2130">6</b>그룹이 전부 나온다</div>
       </div>
     </div>
     <div style="padding: 12px 16px 14px; border-top: 1px solid #dfe4ec; display: flex; flex-direction: column; gap: 6px">
       <div style="display: flex; justify-content: space-between"><span class="mono" style="font-size: 9.5px; letter-spacing: .06em; color: #68738a">VERSION</span><b class="mono" style="font-size: 11.5px">v2.507.0</b></div>
       <div style="display: flex; justify-content: space-between"><span class="mono" style="font-size: 9.5px; letter-spacing: .06em; color: #68738a">SOURCE</span><b class="mono" style="font-size: 11.5px; color:#15803d">LIVE</b></div>
       <div style="display: flex; justify-content: space-between"><span class="mono" style="font-size: 9.5px; letter-spacing: .06em; color: #68738a">VCENTER</span><b class="mono" style="font-size: 11.5px">28 / 28</b></div>
-      <div style="display: flex; justify-content: space-between"><span class="mono" style="font-size: 9.5px; letter-spacing: .06em; color: #68738a">UPDATED</span><b class="mono" style="font-size: 11.5px">12초 전</b></div>
+      <div style="display: flex; justify-content: space-between"><span class="mono" style="font-size: 9.5px; letter-spacing: .06em; color: #68738a">UPDATED</span><b class="mono" style="font-size: 11.5px">7초 전</b></div>
     </div>
   </div>
 
@@ -134,7 +134,7 @@
           <div style="padding: 7px 14px; font-size: 12px; font-weight: 700; background: #2563eb; color: #ffffff">경영 보기</div>
           <div style="padding: 7px 14px; font-size: 12px; font-weight: 600; color: #526075; background:#ffffff">엔지니어 보기</div>
         </div>
-        <div style="font-size: 10px; color: #68738a">보기 설정 · 권한과 무관</div>
+        <div style="display:flex; align-items:center; gap:5px; font-size: 10px; color: #68738a">보기 설정 · 권한과 무관<span style="display:inline-grid; place-items:center; width:13px; height:13px; border-radius:50%; border:1px solid #dfe4ec; font-size:9px">?</span></div>
       </div>
       <div style="display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 20px; border: 1px solid #dfe4ec; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #526075">
         <i style="width: 7px; height: 7px; border-radius: 50%; background: #16a34a; box-shadow: 0 0 8px #16a34a; display: block"></i>LIVE · 02:14:07
@@ -161,7 +161,7 @@
         <div class="kpi" style="border-left-color: #1a2130"><div class="lab">물리 서버</div><div class="val num">965</div><div class="met">ESXi 호스트 658 · iDRAC 등록 965</div></div>
         <div class="kpi" style="border-left-color: #1a2130"><div class="lab">가상머신</div><div class="val num">5,850</div><div class="met">가동 4,932 · 정지 918</div></div>
         <div class="kpi" style="border-left-color: #d97706"><div class="lab">스토리지 사용률</div><div class="val num" style="color:#b45309">77%</div><div class="met">18.6 PB 중 14.3 PB · 1,103 DS</div></div>
-        <div class="kpi" style="border-left-color: #1a2130"><div class="lab">측정 전력</div><div class="val num">421 kW</div><div class="met">보고 서버 812 / 965대</div></div>
+        <div class="kpi" style="border-left-color: #1a2130"><div class="lab">측정 전력</div><div class="val num">404 kW</div><div class="met">보고 서버 812 / 965대</div></div>
         <div class="kpi" style="border-left-color: #dc2626"><div class="lab">활성 알람</div><div class="val num" style="color:#dc2626">397</div><div class="met">위험 34 · 주의 218 · 정보 145</div></div>
       </div>
 
@@ -174,52 +174,52 @@
             <div class="right"><span class="src">/overview → rollups.sites</span></div>
           </div>
           <table>
-            <thead><tr><th>법인</th><th>리전</th><th style="text-align:right">서버</th><th style="text-align:right">VM</th><th>CPU</th><th>메모리</th><th>스토리지</th><th style="text-align:right">전력</th><th style="text-align:right">알람</th></tr></thead>
+            <thead><tr><th>법인</th><th>리전</th><th style="text-align:right">호스트</th><th style="text-align:right">VM</th><th>CPU</th><th>메모리</th><th>스토리지</th><th style="text-align:right">전력</th><th style="text-align:right">알람</th></tr></thead>
             <tbody>
-              <tr><td><div class="cellname">SEL 서울</div><div class="cellsub">vc-kr-seoul-01</div></td><td style="color:#526075">아시아</td><td class="n">160</td><td class="n">992</td>
+              <tr><td><div class="cellname">SEL 서울</div><div class="cellsub">vc-kr-seoul-01</div></td><td style="color:#526075">아시아</td><td class="n">96</td><td class="n">812</td>
                   <td><div class="pct"><div class="bar"><i style="width:64%; background:#16a34a"></i></div><span class="p">64%</span></div></td>
                   <td><div class="pct"><div class="bar"><i style="width:71%; background:#16a34a"></i></div><span class="p">71%</span></div></td>
                   <td><div class="pct"><div class="bar"><i style="width:63%; background:#16a34a"></i></div><span class="p">63%</span></div></td>
                   <td class="n">78 kW</td><td class="n" style="color:#b45309">12</td></tr>
-              <tr style="background: rgba(239,68,68,.05)"><td><div class="cellname">FRA 프랑크푸르트</div><div class="cellsub">vc-eu-fra-01</div></td><td style="color:#526075">유럽</td><td class="n">130</td><td class="n">793</td>
+              <tr style="background: rgba(239,68,68,.05)"><td><div class="cellname">FRA 프랑크푸르트</div><div class="cellsub">vc-eu-fra-01</div></td><td style="color:#526075">유럽</td><td class="n">78</td><td class="n">649</td>
                   <td><div class="pct"><div class="bar"><i style="width:63%; background:#16a34a"></i></div><span class="p">63%</span></div></td>
                   <td><div class="pct"><div class="bar"><i style="width:68%; background:#16a34a"></i></div><span class="p">68%</span></div></td>
                   <td><div class="pct"><div class="bar"><i style="width:91%; background:#dc2626"></i></div><span class="p" style="color:#dc2626">91%</span></div></td>
                   <td class="n">61 kW</td><td class="n" style="color:#dc2626">8</td></tr>
-              <tr><td><div class="cellname">SHA 상하이</div><div class="cellsub">vc-cn-sha-01</div></td><td style="color:#526075">중국</td><td class="n">140</td><td class="n">896</td>
+              <tr><td><div class="cellname">SHA 상하이</div><div class="cellsub">vc-cn-sha-01</div></td><td style="color:#526075">중국</td><td class="n">84</td><td class="n">734</td>
                   <td><div class="pct"><div class="bar"><i style="width:77%; background:#d97706"></i></div><span class="p" style="color:#b45309">77%</span></div></td>
                   <td><div class="pct"><div class="bar"><i style="width:80%; background:#d97706"></i></div><span class="p" style="color:#b45309">80%</span></div></td>
                   <td><div class="pct"><div class="bar"><i style="width:77%; background:#d97706"></i></div><span class="p" style="color:#b45309">77%</span></div></td>
                   <td class="n">69 kW</td><td class="n" style="color:#dc2626">31</td></tr>
-              <tr><td><div class="cellname">SJC 산호세</div><div class="cellsub">vc-us-sjc-01</div></td><td style="color:#526075">북미</td><td class="n">120</td><td class="n">720</td>
+              <tr><td><div class="cellname">SJC 산호세</div><div class="cellsub">vc-us-sjc-01</div></td><td style="color:#526075">북미</td><td class="n">72</td><td class="n">590</td>
                   <td><div class="pct"><div class="bar"><i style="width:58%; background:#16a34a"></i></div><span class="p">58%</span></div></td>
                   <td><div class="pct"><div class="bar"><i style="width:66%; background:#16a34a"></i></div><span class="p">66%</span></div></td>
                   <td><div class="pct"><div class="bar"><i style="width:69%; background:#16a34a"></i></div><span class="p">69%</span></div></td>
                   <td class="n">58 kW</td><td class="n">4</td></tr>
-              <tr><td><div class="cellname">SZX 선전</div><div class="cellsub">vc-cn-szx-01</div></td><td style="color:#526075">중국</td><td class="n">80</td><td class="n">488</td>
+              <tr><td><div class="cellname">SZX 선전</div><div class="cellsub">vc-cn-szx-01</div></td><td style="color:#526075">중국</td><td class="n">48</td><td class="n">400</td>
                   <td><div class="pct"><div class="bar"><i style="width:52%; background:#16a34a"></i></div><span class="p">52%</span></div></td>
                   <td><div class="pct"><div class="bar"><i style="width:61%; background:#16a34a"></i></div><span class="p">61%</span></div></td>
                   <td><div class="pct"><div class="bar"><i style="width:68%; background:#16a34a"></i></div><span class="p">68%</span></div></td>
                   <td class="n">37 kW</td><td class="n">9</td></tr>
-              <tr><td><div class="cellname">SIN 싱가포르</div><div class="cellsub">vc-sg-sin-01</div></td><td style="color:#526075">아시아</td><td class="n">90</td><td class="n">541</td>
+              <tr><td><div class="cellname">SIN 싱가포르</div><div class="cellsub">vc-sg-sin-01</div></td><td style="color:#526075">아시아</td><td class="n">54</td><td class="n">443</td>
                   <td><div class="pct"><div class="bar"><i style="width:47%; background:#16a34a"></i></div><span class="p">47%</span></div></td>
                   <td><div class="pct"><div class="bar"><i style="width:55%; background:#16a34a"></i></div><span class="p">55%</span></div></td>
                   <td><div class="pct"><div class="bar"><i style="width:72%; background:#16a34a"></i></div><span class="p">72%</span></div></td>
                   <td class="n">41 kW</td><td class="n">6</td></tr>
-              <tr><td><div class="cellname">WAW 바르샤바</div><div class="cellsub">vc-pl-waw-01</div></td><td style="color:#526075">유럽</td><td class="n">64</td><td class="n">402</td>
+              <tr><td><div class="cellname">WAW 바르샤바</div><div class="cellsub">vc-pl-waw-01</div></td><td style="color:#526075">유럽</td><td class="n">38</td><td class="n">311</td>
                   <td><div class="pct"><div class="bar"><i style="width:44%; background:#16a34a"></i></div><span class="p">44%</span></div></td>
                   <td><div class="pct"><div class="bar"><i style="width:59%; background:#16a34a"></i></div><span class="p">59%</span></div></td>
                   <td><div class="pct"><div class="bar"><i style="width:83%; background:#d97706"></i></div><span class="p" style="color:#b45309">83%</span></div></td>
                   <td class="n">29 kW</td><td class="n">3</td></tr>
-              <tr><td><div class="cellname">IAD 미국동부</div><div class="cellsub">vc-us-iad-01</div></td><td style="color:#526075">북미</td><td class="n">72</td><td class="n">438</td>
+              <tr><td><div class="cellname">IAD 미국동부</div><div class="cellsub">vc-us-iad-01</div></td><td style="color:#526075">북미</td><td class="n">43</td><td class="n">359</td>
                   <td><div class="pct"><div class="bar"><i style="width:39%; background:#16a34a"></i></div><span class="p">39%</span></div></td>
                   <td><div class="pct"><div class="bar"><i style="width:51%; background:#16a34a"></i></div><span class="p">51%</span></div></td>
                   <td><div class="pct"><div class="bar"><i style="width:58%; background:#16a34a"></i></div><span class="p">58%</span></div></td>
-                  <td class="n">— </td><td class="n">2</td></tr>
+                  <td class="n">—</td><td class="n">2</td></tr>
             </tbody>
           </table>
           <div style="padding: 9px 18px 12px; font-size: 11px; color: #68738a; border-top: 1px solid #e6eaf0">
-            IAD 전력이 <b class="mono" style="color:#1a2130">—</b> 인 것은 <b>전력 보고 서버가 0대</b>이기 때문이다 — 소비가 0 이라는 뜻이 아니다.
+            상위 8개 합 <b class="num">513</b> 호스트 · <b class="num">4,298</b> VM — 나머지 20개 법인이 <b class="num">145</b> 호스트 · <b class="num">1,552</b> VM 이다.<br>IAD 전력이 <b class="mono" style="color:#1a2130">—</b> 인 것은 <b>전력 보고 서버가 0대</b>이기 때문이다 — 소비가 0 이라는 뜻이 아니다.
           </div>
         </div>
 
@@ -233,7 +233,7 @@
                 <tr><td><div class="cellname">DS-SHA-NFS07</div><div class="cellsub">SHA · sha-isilon-01</div></td><td class="n" style="color:#dc2626">90%</td><td class="n">+188 GB</td><td class="n"><span class="badge" style="background: rgba(239,68,68,.16); color:#dc2626">D-23</span></td></tr>
                 <tr><td><div class="cellname">DS-WAW-VMFS01</div><div class="cellsub">WAW · waw-unity-01</div></td><td class="n" style="color:#b45309">83%</td><td class="n">+96 GB</td><td class="n"><span class="badge" style="background: rgba(245,158,11,.16); color:#b45309">D-58</span></td></tr>
                 <tr><td><div class="cellname">DS-SEL-VMFS12</div><div class="cellsub">SEL · sel-powerstore-03</div></td><td class="n" style="color:#b45309">79%</td><td class="n">+64 GB</td><td class="n"><span class="badge" style="background: rgba(245,158,11,.16); color:#b45309">D-91</span></td></tr>
-                <tr><td><div class="cellname">DS-SZX-VMFS04</div><div class="cellsub">SZX · szx-vmax-01</div></td><td class="n">76%</td><td class="n">—</td><td class="n" style="color:#68738a">—</td></tr>
+                <tr><td><div class="cellname">DS-SZX-VMFS04</div><div class="cellsub">SZX · szx-vmax-01</div></td><td class="n" style="color:#b45309">76%</td><td class="n">—</td><td class="n" style="color:#68738a">—</td></tr>
               </tbody>
             </table>
             <div style="padding: 9px 18px 12px; font-size: 11px; color: #68738a; border-top: 1px solid #e6eaf0; line-height:1.6">
@@ -261,7 +261,7 @@
               </div>
               <div style="padding: 11px 12px; border-radius: 9px; background: #f4f6f9; border: 1px solid #dfe4ec">
                 <div style="font-size: 11.5px; color: #526075">고아 VMDK 후보</div>
-                <div class="num" style="font-size: 19px; font-weight: 800; margin-top: 4px">— </div>
+                <div class="num" style="font-size: 19px; font-weight: 800; margin-top: 4px">—</div>
                 <div style="font-size: 10.5px; color: #68738a; margin-top: 3px">데이터스토어별 스캔 필요</div>
               </div>
             </div>

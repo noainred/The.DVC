@@ -34,13 +34,13 @@
     .al { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 8.5px; padding: 0 4px;
           border-radius: 3px; border: 1px solid #dfe4ec; color: #68738a; }
     .badge { display: inline-block; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 9.5px; font-weight: 700; padding: 2px 7px; border-radius: 4px; }
-    .pal { border-radius: 11px; background: #fff; border: 1px solid #dfe4ec; overflow: hidden; }
+    .pal { border-radius: 12px; background: #fff; border: 1px solid #dfe4ec; overflow: hidden; }
     .palrow { display: flex; align-items: center; gap: 9px; padding: 8px 14px; font-size: 12.5px; }
     .palrow.on { background: rgba(59,130,246,.09); }
     .palrow .pth { margin-left: auto; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 10px; color: #68738a; }
     .st { padding: 11px 13px; border-radius: 9px; border: 1px solid #dfe4ec; background: #fff; }
     .st .lb { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 9.5px; letter-spacing: .09em; color: #68738a; }
-    table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
     th { text-align: left; padding: 8px 10px; background: #f0f3f7; border-top: 1px solid #dfe4ec; border-bottom: 1px solid #dfe4ec;
          font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 9.5px; font-weight: 500; letter-spacing: .06em;
          text-transform: uppercase; color: #526075; white-space: nowrap; }
@@ -56,7 +56,7 @@
     <div><div class="mono" style="font-size: 10.5px; letter-spacing: .14em; color: #68738a">INFORMATION ARCHITECTURE</div>
       <div style="font-size: 22px; font-weight: 700; margin-top: 4px">정보구조 · 커맨드 팔레트 · 상태 카탈로그</div></div>
     <div style="margin-left: auto; font-size: 12px; color: #526075">
-      도구 <b class="num" style="color:#1a2130">79</b> + 탭 <b class="num" style="color:#1a2130">14</b> + 페이지 <b class="num" style="color:#1a2130">6</b> 를 한 트리에 <b>1회씩</b> · 미분류 <b class="num" style="color:#15803d">0</b>
+      도구 <b class="num" style="color:#1a2130">79</b> · 기존 탭 <b class="num" style="color:#1a2130">14</b>(그중 6은 <span class="p t">page</span> 로 흡수) · 페이지 <b class="num" style="color:#1a2130">6</b> — 한 트리에 <b>1회씩</b> · 미분류 <b class="num" style="color:#15803d">0</b>
     </div>
   </div>
 
@@ -157,7 +157,7 @@
         </div>
 
         <div style="break-inside: avoid">
-          <div class="g">7 &nbsp;<b>모니터링 · 알람</b> <span style="margin-left:auto">4</span></div>
+          <div class="g">7 &nbsp;<b>모니터링 · 알람</b> <span style="margin-left:auto">3</span></div>
           <div class="it page"><span class="n">알람 센터</span><span class="p t">page</span><span class="p">inv.alarms</span></div>
           <div class="it tab"><span class="n">서비스 모니터</span><span class="p">svcmon</span></div>
           <div class="it"><span class="n">Monitoring 설정</span><span class="p">svcmon</span></div>
