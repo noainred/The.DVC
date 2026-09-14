@@ -201,6 +201,31 @@ pyportal/ 아래 파일을 만질 때 자동 로드된다. 되돌리면 안 되�
   th 에 onClick 이 있거나 th 가 컴포넌트면 자체 정렬 표로 보고 손대지 않는다. 정확한 정렬 값이 필요한 셀은
   td 에 `data-sort`, 정렬 제외 열은 th 에 `data-nosort`, 합계 행은 `data-pin`(첫 셀 '합계/총계' 는 자동)을 쓴다.
   규칙: null/'—' 는 방향과 무관하게 항상 뒤로, 문자열은 `localeCompare`(숫자 인식), 숫자·날짜는 수치 비교.
+- **화면이 바뀌는 변경은 Chromium 으로 직접 보고 보고할 것**(v2.507 사용자 지시 '앞으로는 필요할때
+  Chromium 사용하자'): 단위 테스트는 **문자열과 판정**만 본다 — 줄바꿈·클리핑·카드 높이·그리드 정렬·
+  대소문자 변환(CSS `text-transform`)·`**강조**` 가 별표로 새는 것은 **브라우저만 잡는다**.
+  실제 사고: v2.439/v2.440/v2.505 의 `**강조**` 노출, v2.202 React #310 크래시.
+  - **띄우는 기준**: 화면에 보이는 것이 바뀌면 띄운다 — 새 화면·새 표/차트, 텍스트 길이가 눈에 띄게
+    변하는 문구 수정(라벨 11자→27자 같은 것), 조건부 렌더·훅 추가, 권한/빈 상태 분기. 순수 서버 로직·
+    테스트·문서만 바뀌면 생략하고 **생략했다는 사실을 보고에 적는다**(v2.507 에서 '문자열만 바뀌었다'
+    고 판단해 건너뛴 것이 사용자 지적을 받았다 — 판단이 틀릴 수 있으니 침묵하지 말 것).
+  - **실행 방법**(v2.507 실측, 이 환경에서 그대로 동작):
+    ```
+    cd server && mkdir -p tmp && CONFIG_DIR=tmp DATA_SOURCE=mock AUTH_ENABLED=false PORT=<포트> \
+      node src/index.js &          # 목 데이터 · 인증 없음. web/dist 를 그대로 서빙하므로 먼저 vite build
+    until curl -sf http://127.0.0.1:<포트>/api/health >/dev/null; do sleep 2; done
+    ```
+    Playwright 는 전역 설치분을 `createRequire('/opt/node22/lib/node_modules/playwright/package.json')`
+    로 불러오고 `chromium.launch({ executablePath: '/opt/pw-browsers/chromium', args: ['--no-sandbox'] })`.
+    `playwright install` 은 하지 말 것(이미 있다).
+  - **볼 것**: ① `pageerror`·console error 수집(0 인지) ② `scrollWidth - clientWidth` 로 가로 넘침
+    ③ `1440px` 과 `400px` 두 폭 ④ 실제 클릭해서 화면이 열리는지 ⑤ 스크린샷을 **직접 읽어** 확인
+    (수치만 보면 잘린 텍스트를 놓친다 — v2.507 의 스토리지 카드 클리핑을 스크린샷에서 발견했다).
+  - **내가 만든 결함인지 A/B 로 확정할 것**: 넘침·깨짐을 발견하면 변경 전 코드로 되돌려 재빌드해
+    같은 수치가 나오는지 본다. v2.507 에서 이 절차가 '가로 스크롤 115px' 이 **기존 문제**임을
+    밝혀냈다 — 확인 없이 내 탓이라 적거나 남의 탓이라 적는 것 둘 다 거짓 보고다.
+  - **끝나면 목 서버를 반드시 죽일 것**: 과거 목 서버 4개가 남아 있었다. `pgrep -af "node src/index.js"`
+    가 0 인지 확인하고 보고한다. `server/tmp/` 는 `.gitignore` 에 있다(PR #467) — 커밋되지 않는다.
 - **PR 자동 진행**: 작업 완료 시 별도 요청 없이 PR을 생성/갱신한다.
 - **PR 완료 시 GitHub 다운로드 링크 자동 안내**: 모든 PR 작업(푸시/머지 등)이 끝나면,
   요청을 기다리지 말고 자동으로 GitHub 다운로드 링크를 함께 알려준다.
