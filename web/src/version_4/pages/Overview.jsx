@@ -17,7 +17,12 @@ import { TOOLS } from '../../views/specialToolsList.js';
 import { Panel, Bar, PctCell, Badge, Empty, PollState, Kpi, Spark } from '../ui.jsx';
 import { attentionList, regionCounts, siteMarkers, REGION_COLORS, DOMAIN_LABEL, domainOf, ageText, fmtInt, fmtPct, textColor, levelBar, rowMatches, alarmCountColor, SEV_COLOR, WARN_PCT, CRIT_PCT } from '../data.js';
 
-export default function Overview({ tiles, global: g, ov, sitesAll, alarmsAll, scope, go, goAnywhere, polls, mode, spec }) {
+export default function Overview({ tiles, global: g, ov, sitesAll, alarmsAll, scope, go, goAnywhere, polls, mode, spec, phase, phaseText, health }) {
+  // 수집이 끝나기 전 KPI 메타 문구(v2.509) — 예전에는 전부 '수집 대기' 라 **기다리면 되는 상황과
+  // 조치가 필요한 상황이 같은 말**이었다. 셸이 /health 로 판정한 phase 를 쓴다.
+  // ⚠ NSX 는 vCenter 수집과 **다른 수집기**(/nsx)라 이 문구를 쓰지 않는다 — vCenter 대수로
+  //   NSX 상태를 말하면 확인하지 않은 것을 말하는 셈이다.
+  const waitText = phaseText?.short || '수집 대기';
   const now = Date.now();
   const exec = mode !== 'eng';
   const canTools = can('tools');
@@ -51,12 +56,12 @@ export default function Overview({ tiles, global: g, ov, sitesAll, alarmsAll, sc
     <>
       {exec && (
         <div className="v3-kpis">
-          <Kpi label="법인 (vCenter)" value={ov ? fmtInt(sitesAll.length) : '—'} accent="#2563eb" meta={ov ? `연결 ${fmtInt(sitesAll.filter((s) => s.status === 'connected').length)} / ${fmtInt(sitesAll.length)}` : '수집 대기'} />
-          <Kpi label="물리 서버" value={fmtInt(ov?.physical?.servers || g?.hosts)} accent="#1a2130" meta={g ? `ESXi 호스트 ${fmtInt(g.hosts)}` : '수집 대기'} />
-          <Kpi label="가상머신" value={fmtInt(g?.vms)} accent="#0e7490" meta={g ? `데이터스토어 ${fmtInt(g.datastores)}` : '수집 대기'} />
-          <Kpi label="스토리지 사용률" value={fmtPct(g?.storageUsagePct)} accent={textColor(g?.storageUsagePct)} meta={g ? `${g.storageUsedTB} / ${g.storageTotalTB} TB` : '수집 대기'} />
-          <Kpi label="측정 전력" value={g?.powerReporting ? `${fmtInt(g.powerKw)} kW` : '—'} accent="#b45309" meta={g ? `보고 서버 ${fmtInt(g.powerReporting)}대 합계 — 전체가 아닙니다` : '수집 대기'} />
-          <Kpi label="활성 알람" value={polls.al.data ? fmtInt(alarmsAll.length) : '—'} accent={alarms.some((a) => a.severity === 'critical') ? '#dc2626' : '#526075'} meta={polls.al.data ? `위험 ${fmtInt(alarmsAll.filter((a) => a.severity === 'critical').length)}` : '수집 대기'} />
+          <Kpi label="법인 (vCenter)" value={ov ? fmtInt(sitesAll.length) : '—'} accent="#2563eb" meta={ov ? `연결 ${fmtInt(sitesAll.filter((s) => s.status === 'connected').length)} / ${fmtInt(sitesAll.length)}` : waitText} />
+          <Kpi label="물리 서버" value={fmtInt(ov?.physical?.servers || g?.hosts)} accent="#1a2130" meta={g ? `ESXi 호스트 ${fmtInt(g.hosts)}` : waitText} />
+          <Kpi label="가상머신" value={fmtInt(g?.vms)} accent="#0e7490" meta={g ? `데이터스토어 ${fmtInt(g.datastores)}` : waitText} />
+          <Kpi label="스토리지 사용률" value={fmtPct(g?.storageUsagePct)} accent={textColor(g?.storageUsagePct)} meta={g ? `${g.storageUsedTB} / ${g.storageTotalTB} TB` : waitText} />
+          <Kpi label="측정 전력" value={g?.powerReporting ? `${fmtInt(g.powerKw)} kW` : '—'} accent="#b45309" meta={g ? `보고 서버 ${fmtInt(g.powerReporting)}대 합계 — 전체가 아닙니다` : waitText} />
+          <Kpi label="활성 알람" value={polls.al.data ? fmtInt(alarmsAll.length) : '—'} accent={alarms.some((a) => a.severity === 'critical') ? '#dc2626' : '#526075'} meta={polls.al.data ? `위험 ${fmtInt(alarmsAll.filter((a) => a.severity === 'critical').length)}` : waitText} />
         </div>
       )}
       {!exec && (
@@ -83,7 +88,7 @@ export default function Overview({ tiles, global: g, ov, sitesAll, alarmsAll, sc
       <div className="v3-grid2">
         <Panel title="전세계 데이터센터" sub="마커 크기 = 호스트 수 · 색 = 최대 사용률/연결 상태 · 클릭하면 사이트 드릴다운" bodyPad={false}
           right={Object.keys(REGION_COLORS).filter((r) => rc[r]).map((r) => <span key={r} className="v3-legend"><i style={{ background: REGION_COLORS[r] }} />{r} {rc[r]}</span>)}>
-          <PollState poll={polls.ov}>
+          <PollState poll={polls.ov} phase={phase} health={health}>
             <div className="v3-mapwrap">
               <div className="v3-map">
                 <div className="v3-map-grid" />
@@ -102,7 +107,7 @@ export default function Overview({ tiles, global: g, ov, sitesAll, alarmsAll, sc
           </PollState>
         </Panel>
         <Panel title="지금 주목" sub="활성 알람 · 심각도 → 최신 순 · 상위 6" bodyPad={false}>
-          <PollState poll={polls.al}>
+          <PollState poll={polls.al} phase={phase} health={health}>
             <div style={{ padding: '4px 18px 10px' }}>
               {attention.length === 0 && <Empty>범위 안에 활성 알람이 없습니다.</Empty>}
               {attention.map((a) => (
@@ -122,7 +127,7 @@ export default function Overview({ tiles, global: g, ov, sitesAll, alarmsAll, sc
 
       <div className="v3-grid2 wide-r">
         <Panel title="전사 용량 헤드룸">
-          <PollState poll={polls.ov}>
+          <PollState poll={polls.ov} phase={phase} health={health}>
             {g && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>
                 {[
@@ -152,7 +157,7 @@ export default function Overview({ tiles, global: g, ov, sitesAll, alarmsAll, sc
           </PollState>
         </Panel>
         <Panel title="사이트" sub="vCenter 단위 · 최대 사용률 내림차순 · 행 클릭 → 컴퓨트 · 제목 클릭 정렬" bodyPad={false}>
-          <PollState poll={polls.ov}>
+          <PollState poll={polls.ov} phase={phase} health={health}>
             <div className="v3-tablewrap">
               <STable className="v3-table">
                 <thead><tr><th>사이트</th><th>리전</th><th className="num">서버</th><th className="num">VM</th><th>컴퓨트</th><th>스토리지</th><th className="num">전력</th><th className="num">알람</th><th>상태</th></tr></thead>

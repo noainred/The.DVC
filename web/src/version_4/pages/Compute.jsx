@@ -6,7 +6,12 @@ import { STable } from '../../components/STable.jsx';
 import { Panel, Kpi, PctCell, PollState, Empty } from '../ui.jsx';
 import { clusterRows, clusterCountByVc, capacityAdvice, fmtInt, fmtPct, textColor, rowMatches, LEVEL_BAR } from '../data.js';
 
-export default function Compute({ global: g, ov, sitesAll, scope, polls }) {
+export default function Compute({ global: g, ov, sitesAll, scope, polls, phase, phaseText, health }) {
+  // 수집이 끝나기 전 KPI 메타 문구(v2.509) — 예전에는 전부 '수집 대기' 라 **기다리면 되는 상황과
+  // 조치가 필요한 상황이 같은 말**이었다. 셸이 /health 로 판정한 phase 를 쓴다.
+  // ⚠ NSX 는 vCenter 수집과 **다른 수집기**(/nsx)라 이 문구를 쓰지 않는다 — vCenter 대수로
+  //   NSX 상태를 말하면 확인하지 않은 것을 말하는 셈이다.
+  const waitText = phaseText?.short || '수집 대기';
   const canCap = toolAllowed('capacity');
   const cap = usePolling(canCap ? '/tools/capacity' : null, {}, 30_000);
   const clusters = scope.scoped(cap.data?.clusters || []);
@@ -20,16 +25,16 @@ export default function Compute({ global: g, ov, sitesAll, scope, polls }) {
   return (
     <>
       <div className="v3-kpis">
-        <Kpi label="vCenter" value={g ? `${g.vcentersConnected}/${g.vcenters}` : '—'} accent="#0e7490" meta={g ? `연결 불가 ${unreach}${g.vcentersMaintenance ? ` · 점검중 ${g.vcentersMaintenance}` : ''}` : '수집 대기'} />
-        <Kpi label="물리 서버" value={phys?.servers ? fmtInt(phys.servers) : fmtInt(g?.hosts)} accent="#1a2130" meta={g ? (phys?.servers ? `iDRAC 인식 · ESXi ${fmtInt(g.hosts)} · 끊김 ${fmtInt(g.hostsDisconnected)}` : `ESXi ${fmtInt(g.hosts)} · 정상 ${fmtInt(g.hostsConnected)} · 끊김 ${fmtInt(g.hostsDisconnected)}`) : '수집 대기'} />
-        <Kpi label="가상머신" value={fmtInt(g?.vms)} accent="#16a34a" meta={g ? `구동 ${fmtInt(g.vmsPoweredOn)} · 정지 ${fmtInt(g.vmsPoweredOff)}` : '수집 대기'} />
+        <Kpi label="vCenter" value={g ? `${g.vcentersConnected}/${g.vcenters}` : '—'} accent="#0e7490" meta={g ? `연결 불가 ${unreach}${g.vcentersMaintenance ? ` · 점검중 ${g.vcentersMaintenance}` : ''}` : waitText} />
+        <Kpi label="물리 서버" value={phys?.servers ? fmtInt(phys.servers) : fmtInt(g?.hosts)} accent="#1a2130" meta={g ? (phys?.servers ? `iDRAC 인식 · ESXi ${fmtInt(g.hosts)} · 끊김 ${fmtInt(g.hostsDisconnected)}` : `ESXi ${fmtInt(g.hosts)} · 정상 ${fmtInt(g.hostsConnected)} · 끊김 ${fmtInt(g.hostsDisconnected)}`) : waitText} />
+        <Kpi label="가상머신" value={fmtInt(g?.vms)} accent="#16a34a" meta={g ? `구동 ${fmtInt(g.vmsPoweredOn)} · 정지 ${fmtInt(g.vmsPoweredOff)}` : waitText} />
         <Kpi label="클러스터" value={cap.data ? fmtInt(cap.data.totals?.clusters) : '—'} accent="#d97706" meta={cap.data ? `vCPU/코어 ${cap.data.totals?.vcpuPerCore} · RAM 여유 ${fmtInt(cap.data.totals?.ramHeadroomGB)} GB` : canCap ? '용량 집계 대기' : "권한 필요('tools')"} />
-        <Kpi label="GPU" value={ov ? `${fmtInt(ov.gpuCards)}장` : '—'} accent="#7c3aed" meta={ov ? `GPU VM ${fmtInt(ov.gpuVms)} · 활용 ${ov.gpuUtilHosts ? `${ov.gpuUtilPct}%` : '보고 없음'}` : '수집 대기'} />
+        <Kpi label="GPU" value={ov ? `${fmtInt(ov.gpuCards)}장` : '—'} accent="#7c3aed" meta={ov ? `GPU VM ${fmtInt(ov.gpuVms)} · 활용 ${ov.gpuUtilHosts ? `${ov.gpuUtilPct}%` : '보고 없음'}` : waitText} />
       </div>
 
       <div className="v3-grid2 wide">
         <Panel title={`vCenter ${sites.length}`} sub="Platform · CPU/메모리 최대 사용률 내림차순 · 제목 클릭 정렬" bodyPad={false}>
-          <PollState poll={polls.ov}>
+          <PollState poll={polls.ov} phase={phase} health={health}>
             <div className="v3-tablewrap">
               <STable className="v3-table">
                 <thead><tr><th>vCenter</th><th>사이트</th><th className="num">호스트</th><th className="num">VM</th><th className="num">클러스터</th><th>CPU</th><th>메모리</th><th>상태</th></tr></thead>

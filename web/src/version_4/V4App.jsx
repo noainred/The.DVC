@@ -24,6 +24,7 @@ import './v4.css';
 import { PAGE_IDS, PAGE_META, GROUP_TILE } from './nav.js';
 import { visibleTree, groupLabelOfTool } from './tree.js';
 import { MODE_LABEL, MODE_KEY, resolveMode, modeSpec, viewFromHash } from './mode.js';
+import { loadPhase, loadText, collectProgress, liveText, shouldBanner } from './loadState.js';
 import { buildDomainTiles, severityCounts, siteRows, fmtInt, levelBar } from './data.js';
 import Palette from './Palette.jsx';
 import Overview from './pages/Overview.jsx';
@@ -49,7 +50,7 @@ const PAGES = { overview: Overview, compare: Compare, power: Power, compute: Com
 const readStored = () => { try { return window.localStorage.getItem(MODE_KEY); } catch { return null; } };
 const writeStored = (v) => { try { window.localStorage.setItem(MODE_KEY, v); } catch { /* 저장 실패는 기능을 막지 않는다 */ } };
 
-export default function V4App({ user, health, onExit }) {
+export default function V4App({ user, health, healthError, onExit }) {
   const [page, setPageState] = useState(() => pageFromHash(window.location.hash));
   const [mode, setModeState] = useState(() => resolveMode({ query: viewFromHash(window.location.hash), stored: readStored(), role: user?.role }));
   const [q, setQ] = useState('');
@@ -144,9 +145,14 @@ export default function V4App({ user, health, onExit }) {
   const meta = PAGE_META[page] || PAGE_META.overview;
   const Page = PAGES[page] || Overview;
   const updated = health?.generatedAt ? new Date(health.generatedAt).toLocaleTimeString('ko-KR') : '—';
-  const overviewSub = global ? `${fmtInt(sitesAll.length)}개 vCenter · 물리 서버 ${fmtInt(ov.data?.physical?.servers || global.hosts)} · VM ${fmtInt(global.vms)} · 15초 수집` : '수집 대기';
+  // 화면이 비어 있을 때 **왜** 비었는지(v2.509). 셸에서 한 번만 판정해 9화면이 공유한다 —
+  // 각 화면이 따로 판정하면 같은 상황을 다르게 말하게 된다. 기준은 셸의 대표 폴(/overview)이다.
+  const phase = loadPhase({ health, healthError, poll: ov });
+  const phaseText = loadText(phase, { health, pollError: ov.error });
+  const progress = collectProgress(health);
+  const overviewSub = global ? `${fmtInt(sitesAll.length)}개 vCenter · 물리 서버 ${fmtInt(ov.data?.physical?.servers || global.hosts)} · VM ${fmtInt(global.vms)} · 15초 수집` : phaseText.short;
   const pageProps = {
-    user, isAdmin, scope, go, goAnywhere, global, ov: ov.data, sitesAll, alarmsAll, tiles, mode, spec,
+    user, isAdmin, scope, go, goAnywhere, global, ov: ov.data, sitesAll, alarmsAll, tiles, mode, spec, phase, phaseText, health, progress,
     polls: { ov, al, nsx, svc, ds, stor, pdu, idrac }, perms: { storage: canStorage, pdu: canPdu, idrac: isAdmin, svcmon: canSvcmon },
   };
   const powerKw = global?.powerReporting ? `${fmtInt(global.powerKw)} kW` : '—';
@@ -223,13 +229,14 @@ export default function V4App({ user, health, onExit }) {
           </label>
           <label className="v3-chip"><span>vCenter</span>
             <select value={focusVc} onChange={(e) => setFocusVc(e.target.value)}>
-              <option value="">전체 {sitesAll.length}</option>
+              <option value="">{sitesAll.length ? `전체 ${sitesAll.length}` : '전체'}</option>
               {sitesAll.filter((s) => !region || s.region === region).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           </label>
           <span style={{ flex: 1 }} />
-          <div className={`v3-live${health ? '' : ' down'}`} title="데이터 소스 · vCenter 연결 · 마지막 수집 시각">
-            <i />{health ? `${health.vcentersConnected}/${health.vcenters} vCenter OK · ${updated}` : '연결 중…'}
+          <div className={`v3-live${health ? (progress?.pending || progress?.unreachable ? ' warn' : '') : ' down'}`}
+            title={phaseText.long}>
+            <i />{liveText(health, updated)}
           </div>
           <div className="v3-user">
             <div className="v3-avatar" title={user?.name}>{(user?.name || 'U').slice(0, 1).toUpperCase()}</div>
@@ -249,6 +256,14 @@ export default function V4App({ user, health, onExit }) {
               {(region || focusVc) && <span> · 표·목록 범위: <b style={{ color: '#2563eb' }}>{focusVc ? (sitesAll.find((s) => s.id === focusVc)?.name || focusVc) : region}</b> (KPI·타일은 전사 기준)</span>}
             </div>
           </div>
+          {shouldBanner(phase) && (
+            <div className={`v3-banner${phase === 'first-collect' ? ' info' : ''}`}>
+              {phase === 'first-collect' && progress && (
+                <b className="v3-num" style={{ marginRight: 8 }}>{progress.done}/{progress.total} ({progress.pct}%)</b>
+              )}
+              {phaseText.long}
+            </div>
+          )}
           {ov.error && ov.data && <div className="v3-banner">갱신 실패(직전 데이터 표시 중): {ov.error}</div>}
           <ErrorBoundary key={page} fallback={<div className="v3-banner">이 화면을 표시하는 중 오류가 발생했습니다.</div>}>
             <Page {...pageProps} />

@@ -7,7 +7,12 @@ import { STable } from '../../components/STable.jsx';
 import { Panel, Kpi, Bar, PollState, Empty } from '../ui.jsx';
 import { nsxManagerRows, networkTypeCounts, ipamTop, ipamStats, fmtInt, fmtPct, textColor, rowMatches, REGION_COLORS } from '../data.js';
 
-export default function Network({ global: g, sitesAll, scope, polls }) {
+export default function Network({ global: g, sitesAll, scope, polls, phase, phaseText, health }) {
+  // 수집이 끝나기 전 KPI 메타 문구(v2.509) — 예전에는 전부 '수집 대기' 라 **기다리면 되는 상황과
+  // 조치가 필요한 상황이 같은 말**이었다. 셸이 /health 로 판정한 phase 를 쓴다.
+  // ⚠ NSX 는 vCenter 수집과 **다른 수집기**(/nsx)라 이 문구를 쓰지 않는다 — vCenter 대수로
+  //   NSX 상태를 말하면 확인하지 않은 것을 말하는 셈이다.
+  const waitText = phaseText?.short || '수집 대기';
   const nets = usePolling('/networks', {}, 60_000);
   const canIpam = toolAllowed('ipam');
   const ipam = usePolling(canIpam ? '/tools/ipam/subnets' : null, {}, 60_000);
@@ -32,11 +37,11 @@ export default function Network({ global: g, sitesAll, scope, polls }) {
   return (
     <>
       <div className="v3-kpis">
-        <Kpi label="포트그룹" value={fmtInt(g?.networks)} accent="#1a2130" meta={nets.data ? `Distributed ${tc.distributed} · Standard ${tc.standard}${tc.other ? ` · 기타 ${tc.other}` : ''}` : '수집 대기'} />
+        <Kpi label="포트그룹" value={fmtInt(g?.networks)} accent="#1a2130" meta={nets.data ? `Distributed ${tc.distributed} · Standard ${tc.standard}${tc.other ? ` · 기타 ${tc.other}` : ''}` : waitText} />
         <Kpi label="NSX" value={r ? `${r.managersUp} / ${r.managers}` : '—'} accent="#7c3aed" meta={r ? `매니저 UP/전체 · T0 ${r.t0} · T1 ${r.t1}${r.managersDegraded ? ` · 저하 ${r.managersDegraded}` : ''}` : 'NSX 수집 대기'} />
         <Kpi label="세그먼트" value={fmtInt(r?.segments)} accent="#0e7490" meta={r ? `Overlay ${r.overlaySegments} · VLAN ${r.vlanSegments}` : 'NSX 수집 대기'} />
         <Kpi label="트랜스포트 노드" value={r ? fmtInt(r.hostNodes + r.edgeNodes) : '—'} accent={tnDown ? '#dc2626' : '#16a34a'} meta={r ? `호스트 ${r.hostNodes} · 엣지 ${r.edgeNodes} · DOWN ${tnDown}` : 'NSX 수집 대기'} />
-        <Kpi label="IPAM" value={ipam.data ? fmtInt(ist.count) : '—'} accent="#2563eb" meta={ipam.data ? (ist.count ? `대역 · 평균 사용 ${fmtPct(ist.avgPct)} · 90% 초과 ${ist.over90}` : '대역 없음') : canIpam ? '수집 대기' : "권한 필요('tools')"} />
+        <Kpi label="IPAM" value={ipam.data ? fmtInt(ist.count) : '—'} accent="#2563eb" meta={ipam.data ? (ist.count ? `대역 · 평균 사용 ${fmtPct(ist.avgPct)} · 90% 초과 ${ist.over90}` : '대역 없음') : canIpam ? waitText : "권한 필요('tools')"} />
       </div>
 
       <div className="v3-grid2 wide">

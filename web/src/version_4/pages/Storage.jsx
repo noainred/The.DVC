@@ -12,7 +12,12 @@ import { STable } from '../../components/STable.jsx';
 import { Panel, Kpi, PctCell, Bar, Badge, PollState, Empty } from '../ui.jsx';
 import { datastoreTypeCounts, datastoresOver, storageRows, sanCells, sanTotals, fmtInt, fmtPct, fmtBytesTB, textColor, rowMatches, ageText } from '../data.js';
 
-export default function Storage({ global: g, scope, polls, perms, spec }) {
+export default function Storage({ global: g, scope, polls, perms, spec, phase, phaseText, health }) {
+  // 수집이 끝나기 전 KPI 메타 문구(v2.509) — 예전에는 전부 '수집 대기' 라 **기다리면 되는 상황과
+  // 조치가 필요한 상황이 같은 말**이었다. 셸이 /health 로 판정한 phase 를 쓴다.
+  // ⚠ NSX 는 vCenter 수집과 **다른 수집기**(/nsx)라 이 문구를 쓰지 않는다 — vCenter 대수로
+  //   NSX 상태를 말하면 확인하지 않은 것을 말하는 셈이다.
+  const waitText = phaseText?.short || '수집 대기';
   const canSan = toolAllowed('san-switch'), canFc = toolAllowed('forecast');
   const canTools = can('tools');
   const canOrphan = canTools && toolAllowed('orphanvmdk');
@@ -48,11 +53,11 @@ export default function Storage({ global: g, scope, polls, perms, spec }) {
   return (
     <>
       <div className="v3-kpis">
-        <Kpi label="데이터스토어" value={polls.ds.data ? fmtInt(dsAll.length) : '—'} accent="#1a2130" meta={polls.ds.data ? `VMFS ${types.VMFS} · vSAN ${types.vSAN} · NFS ${types.NFS}${types.기타 ? ` · 기타 ${types.기타}` : ''}` : '수집 대기'} />
-        <Kpi label="스토리지 어레이" value={polls.stor.data ? fmtInt(arrays.length) : '—'} accent="#0e7490" meta={polls.stor.data ? (arrays.length ? `수집 정상 ${arrOk} · 실패 ${arrBad} · 미수집 ${arrays.length - arrOk - arrBad}` : '등록된 장비 없음') : perms.storage ? '수집 대기' : "권한 필요('tools')"} />
-        <Kpi label="전사 사용률" value={fmtPct(g?.storageUsagePct)} accent={textColor(g?.storageUsagePct)} meta={g ? `${g.storageUsedTB} / ${g.storageTotalTB} TB (vCenter 데이터스토어 합)` : '수집 대기'} />
-        <Kpi label="임계 초과" value={polls.ds.data ? fmtInt(over90) : '—'} accent="#dc2626" meta={polls.ds.data ? `데이터스토어 ≥ 90% ${over90} · ≥ 95% ${over95}` : '수집 대기'} />
-        <Kpi label="SAN 스위치" value={san.data ? fmtInt(st.devices) : '—'} accent="#d97706" meta={san.data ? (st.measured ? `포트 ${fmtInt(st.online)}/${fmtInt(st.total)} 온라인 · 오프라인 ${st.offline} · 결함 ${st.faulty}` : st.devices ? '포트 스냅샷 없음' : '등록된 장비 없음') : canSan ? '수집 대기' : "권한 필요('tools')"} />
+        <Kpi label="데이터스토어" value={polls.ds.data ? fmtInt(dsAll.length) : '—'} accent="#1a2130" meta={polls.ds.data ? `VMFS ${types.VMFS} · vSAN ${types.vSAN} · NFS ${types.NFS}${types.기타 ? ` · 기타 ${types.기타}` : ''}` : waitText} />
+        <Kpi label="스토리지 어레이" value={polls.stor.data ? fmtInt(arrays.length) : '—'} accent="#0e7490" meta={polls.stor.data ? (arrays.length ? `수집 정상 ${arrOk} · 실패 ${arrBad} · 미수집 ${arrays.length - arrOk - arrBad}` : '등록된 장비 없음') : perms.storage ? waitText : "권한 필요('tools')"} />
+        <Kpi label="전사 사용률" value={fmtPct(g?.storageUsagePct)} accent={textColor(g?.storageUsagePct)} meta={g ? `${g.storageUsedTB} / ${g.storageTotalTB} TB (vCenter 데이터스토어 합)` : waitText} />
+        <Kpi label="임계 초과" value={polls.ds.data ? fmtInt(over90) : '—'} accent="#dc2626" meta={polls.ds.data ? `데이터스토어 ≥ 90% ${over90} · ≥ 95% ${over95}` : waitText} />
+        <Kpi label="SAN 스위치" value={san.data ? fmtInt(st.devices) : '—'} accent="#d97706" meta={san.data ? (st.measured ? `포트 ${fmtInt(st.online)}/${fmtInt(st.total)} 온라인 · 오프라인 ${st.offline} · 결함 ${st.faulty}` : st.devices ? '포트 스냅샷 없음' : '등록된 장비 없음') : canSan ? waitText : "권한 필요('tools')"} />
       </div>
 
       <div className="v3-grid2">
@@ -102,7 +107,7 @@ export default function Storage({ global: g, scope, polls, perms, spec }) {
             </PollState>
           </Panel>
           <Panel title="임계 초과 데이터스토어" sub="사용률 ≥ 85% · 소진 예상은 선형 추정(/tools/capacity-forecast)">
-            <PollState poll={polls.ds}>
+            <PollState poll={polls.ds} phase={phase} health={health}>
               {dsOver.length === 0 ? <Empty>사용률 85% 이상인 데이터스토어가 없습니다.</Empty> : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
                   {dsOver.map((d) => (
