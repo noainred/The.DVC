@@ -2,6 +2,7 @@
 import React from 'react';
 import { ErrorBox } from '../components/ui.jsx';
 import { LEVEL_LABEL, fmtPct, barColor, levelText } from './data.js';
+import { loadText } from './loadState.js';
 
 export function Panel({ title, sub, right, children, bodyPad = true, style }) {
   return (
@@ -55,12 +56,23 @@ export function Empty({ children }) { return <div className="v3-empty">{children
 /**
  * 폴링 결과 래퍼 — 데이터가 없을 때만 오류/로딩을 보여준다(데이터 보유 중 일시 오류 1건으로 화면을 갈아치우지 않는다).
  * 403 은 ErrorBox 가 AccessDenied 안내로 바꾼다. path 가 null(권한상 호출 안 함)이면 skipped 문구.
+ *
+ * `phase`(v2.509, 셸이 loadState.loadPhase 로 계산해 내려준다)를 받으면 '불러오는 중…' 대신
+ * **왜 비었는지**를 말한다 — 첫 수집 중(기다리면 됨) / 연결 실패(기다려도 안 됨) / 응답 지연 구분.
+ * 문구는 **짧은 쪽(short)** 을 쓴다 — 긴 설명은 상단 배너가 한 번만 한다. 패널마다 같은 긴 문장을
+ * 넣으면 화면이 같은 말로 뒤덮인다(실제로 그렇게 나와 스크린샷에서 발견했다).
+ * phase 없이 호출하면 기존 동작 그대로다(화면을 한 번에 다 고치지 않아도 되게).
+ * 타임아웃은 ErrorBox(화면 전체 오류)로 띄우지 않는다 — 재시도 중이지 장애가 아니다.
  */
-export function PollState({ poll, skipped, children }) {
+export function PollState({ poll, skipped, phase, health, children }) {
   if (skipped) return <Empty>{skipped}</Empty>;
   if (!poll) return null;
-  if (poll.error && !poll.data) return <div style={{ padding: 12 }}><ErrorBox message={poll.error} info={poll.errorInfo} /></div>;
-  if (!poll.data) return <Empty>불러오는 중…</Empty>;
+  if (poll.error && !poll.data) {
+    const t = phase ? loadText(phase, { health, pollError: poll.error }) : null;
+    if (t && (phase === 'retrying' || phase === 'first-collect' || phase === 'unreachable')) return <Empty>{t.short}</Empty>;
+    return <div style={{ padding: 12 }}><ErrorBox message={poll.error} info={poll.errorInfo} /></div>;
+  }
+  if (!poll.data) return <Empty>{phase ? loadText(phase, { health, pollError: poll.error }).short : '불러오는 중…'}</Empty>;
   return children;
 }
 

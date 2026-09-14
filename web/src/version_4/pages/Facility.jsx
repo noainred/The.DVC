@@ -11,7 +11,12 @@ import { STable } from '../../components/STable.jsx';
 import { Panel, Kpi, Bar, PctCell, Badge, PollState, Empty, Spark } from '../ui.jsx';
 import { hostFacilityRows, pduSummary, tempCellColor, tempTextColor, fmtInt, fmtPct, rowMatches, REGION_COLORS } from '../data.js';
 
-export default function Facility({ global: g, ov, sitesAll, scope, polls, perms, spec, isAdmin }) {
+export default function Facility({ global: g, ov, sitesAll, scope, polls, perms, spec, isAdmin, phase, phaseText, health }) {
+  // 수집이 끝나기 전 KPI 메타 문구(v2.509) — 예전에는 전부 '수집 대기' 라 **기다리면 되는 상황과
+  // 조치가 필요한 상황이 같은 말**이었다. 셸이 /health 로 판정한 phase 를 쓴다.
+  // ⚠ NSX 는 vCenter 수집과 **다른 수집기**(/nsx)라 이 문구를 쓰지 않는다 — vCenter 대수로
+  //   NSX 상태를 말하면 확인하지 않은 것을 말하는 셈이다.
+  const waitText = phaseText?.short || '수집 대기';
   const hosts = usePolling('/hosts', {}, 60_000);
   const room = usePolling(isAdmin ? '/admin/room-temp' : null, {}, 300_000);
   // 서버 온도 추이(v2.504) — 서버를 고른 뒤에만 1회 조회한다(시계열이라 폴링 대상이 아니다).
@@ -45,11 +50,11 @@ export default function Facility({ global: g, ov, sitesAll, scope, polls, perms,
         {/* 단위는 kW 로 통일한다(v2.508) — MW 표기는 79.1 kW 를 '0.08 MW' 로 보여 자릿수를 읽기 어렵게 했고,
             사이드바 푸터·전력 화면은 kW 라 같은 값이 두 단위로 보였다. 1,000 kW 를 넘으면 MW 를 덧붙인다. */}
         <Kpi label="총 소비전력" value={g?.powerReporting ? `${fmtInt(g.powerKw)} kW` : '—'} accent="#d97706"
-          meta={g ? `${g.powerKw >= 1000 ? `${(g.powerKw / 1000).toFixed(2)} MW · ` : ''}전력 보고 ${fmtInt(g.powerReporting)}대${g.powerUnmappedKw ? ` · 미매핑 ${g.powerUnmappedKw} kW` : ''}` : '수집 대기'} />
-        <Kpi label="PDU" value={ps ? fmtInt(ps.devices) : '—'} accent="#1a2130" meta={ps ? (ps.devices ? `보고 ${ps.ok} · 무응답 ${ps.failed} · 임계 위반 ${ps.violations}` : '등록된 PDU 없음') : perms.pdu ? '수집 대기' : "권한 필요('tools')"} />
-        <Kpi label="온도 센서" value={hosts.data ? fmtInt(measured) : '—'} accent={maxT == null ? '#526075' : maxT >= 26 ? '#dc2626' : maxT >= 24 ? '#d97706' : '#16a34a'} meta={hosts.data ? `호스트 흡기 측정 · 최고 ${maxT != null ? `${maxT}°C` : '—'} · 26°C 초과 ${hot}` : '호스트 수집 대기'} />
+          meta={g ? `${g.powerKw >= 1000 ? `${(g.powerKw / 1000).toFixed(2)} MW · ` : ''}전력 보고 ${fmtInt(g.powerReporting)}대${g.powerUnmappedKw ? ` · 미매핑 ${g.powerUnmappedKw} kW` : ''}` : waitText} />
+        <Kpi label="PDU" value={ps ? fmtInt(ps.devices) : '—'} accent="#1a2130" meta={ps ? (ps.devices ? `보고 ${ps.ok} · 무응답 ${ps.failed} · 임계 위반 ${ps.violations}` : '등록된 PDU 없음') : perms.pdu ? waitText : "권한 필요('tools')"} />
+        <Kpi label="온도 센서" value={hosts.data ? fmtInt(measured) : '—'} accent={maxT == null ? '#526075' : maxT >= 26 ? '#dc2626' : maxT >= 24 ? '#d97706' : '#16a34a'} meta={hosts.data ? `호스트 흡기 측정 · 최고 ${maxT != null ? `${maxT}°C` : '—'} · 26°C 초과 ${hot}` : waitText} />
         <Kpi label="BMC 응답" value={lr ? fmtPct(((lr.ok || 0) / Math.max(1, (lr.ok || 0) + (lr.failed || 0))) * 100) : '—'} accent="#16a34a" meta={polls.idrac.data ? `iDRAC ${fmtInt(polls.idrac.data.poller?.servers)}대 · 무응답 ${fmtInt(lr?.failed)}${phys?.servers ? ` · 인식 ${fmtInt(phys.servers)}대` : ''}` : perms.idrac ? '폴러 상태 대기' : '관리자 권한 필요 (/admin/idrac)'} />
-        <Kpi label="iDRAC 연동 호스트" value={hosts.data && hostN ? fmtPct((idracN / hostN) * 100) : '—'} accent="#0e7490" meta={hosts.data ? `${fmtInt(idracN)} / ${fmtInt(hostN)}대 (호스트 ↔ iDRAC 매핑)` : '호스트 수집 대기'} />
+        <Kpi label="iDRAC 연동 호스트" value={hosts.data && hostN ? fmtPct((idracN / hostN) * 100) : '—'} accent="#0e7490" meta={hosts.data ? `${fmtInt(idracN)} / ${fmtInt(hostN)}대 (호스트 ↔ iDRAC 매핑)` : waitText} />
       </div>
 
       <div className="v3-grid2">

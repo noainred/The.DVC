@@ -344,7 +344,7 @@ function Portal({ user, onLogout }) {
   if (v4On) {
     return (
       <Suspense fallback={<div className="login-screen"><div className="loading">신규 포탈(V4) 불러오는 중…</div></div>}>
-        <V4App user={user} health={health} onExit={exitV4} />
+        <V4App user={user} health={health} healthError={healthError} onExit={exitV4} />
       </Suspense>
     );
   }

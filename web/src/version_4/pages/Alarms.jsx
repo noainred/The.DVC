@@ -12,7 +12,7 @@ const SEV = [
 ];
 const SEV_TAG = { critical: 'CRIT', warning: 'WARN', info: 'INFO' };
 
-export default function Alarms({ alarmsAll, scope, polls }) {
+export default function Alarms({ alarmsAll, scope, polls, phase, health }) {
   const [sev, setSev] = useState('');
   const [domain, setDomain] = useState('ALL');
   const mutes = usePolling('/alarm-mutes', {}, 60_000);
@@ -52,7 +52,7 @@ export default function Alarms({ alarmsAll, scope, polls }) {
             <span style={{ flex: 1 }} />
             <span className="v3-dim" style={{ fontSize: 12 }}>심각도 → 최신 순 · 표시 {rows.length}건 · 제목 클릭 정렬</span>
           </div>
-          <PollState poll={polls.al}>
+          <PollState poll={polls.al} phase={phase} health={health}>
             {rows.length === 0 ? <Empty>조건에 맞는 활성 알람이 없습니다.</Empty> : (
               <div className="v3-tablewrap">
                 <STable className="v3-table">

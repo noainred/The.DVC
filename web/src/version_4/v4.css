@@ -267,3 +267,9 @@
   .v4-facrow > :nth-child(1) { grid-column: 1 / -1; }
   .v4-facrow > :nth-child(4) { grid-column: 1 / -1; }
 }
+
+/* 첫 수집 안내 배너(v2.509) — 오류(빨강)와 구분한다. '기다리면 채워진다' 는 장애가 아니다. */
+.v3-banner.info { background: rgba(37,99,235,.07); border-color: rgba(37,99,235,.35); color: #1d4ed8; }
+.v3-banner.info b { color: #1e3a8a; }
+/* 수집이 아직 끝나지 않았으면 LIVE 점을 초록으로 두지 않는다 — '정상' 으로 읽힌다. */
+.v3-live.warn i { background: #d97706; box-shadow: 0 0 8px #d97706; }
