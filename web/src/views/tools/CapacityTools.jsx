@@ -12,10 +12,16 @@ import { sparkCellState, sparkCellText, sparkProgressText, sparkCapText, SPARK_R
 import { reportCount, exportLabel, exportTitle, progressNote, exportErrText } from './wasteExportText.js';
 
 
+/** 서버 구분 라벨(v2.512) — iDRAC serviceTag 가 ESXi 호스트와 맞으면 가상화, 아니면 물리(베어메탈). */
+const KIND_KO = { physical: '물리', virtual: '가상화' };
+
+/** v2.512: '서버 온도' — iDRAC 수집 온도 + 물리/가상화 구분. 컴포넌트 이름은 라우팅 호환을 위해 유지. */
 export function EsxiTemp({ scope }) {
   const { loading, data, error } = useTool('/tools/esxi-temp', scope ? { vcenterId: scope } : {});
   // 하위 탭을 URL 에 실어 새로고침·북마크·뒤로가기에서 유지한다(v2.438, hooks/useHashTab.js).
-  const [view, setView] = useHashTab({ base: ['tools', 'esxitemp'], valid: ['host', 'cluster', 'vc'], fallback: 'host' });
+  // v2.512: 'server'(iDRAC 서버별)를 추가하고 기본 탭으로 둔다 — 'host'(ESXi) 는 그대로 남긴다.
+  const [view, setView] = useHashTab({ base: ['tools', 'esxitemp'], valid: ['server', 'host', 'cluster', 'vc'], fallback: 'server' });
+  const [kindF, setKindF] = useState('all');   // all | physical | virtual — 물리/가상화 필터
   const [hist, setHist] = useState(null); // { level, key, days, points, synthesized }
   const [days, setDays] = useState(7);
   const [bucket, setBucket] = useState('auto'); // auto | minute | hour | day
@@ -33,31 +39,108 @@ export function EsxiTemp({ scope }) {
   if (loading) return <Loading />;
   if (error) return <ErrorBox message={error} />;
 
-  const rows = view === 'host'
-    ? data.hosts.map((h) => ({ key: h.id, name: h.name, sub: `${h.vcenterId} / ${h.cluster || '-'}`, curC: h.curC, avg5C: h.avg5C, maxC: h.tempMaxC, level: 'host' }))
-    : (view === 'cluster' ? data.clusters : data.vcenters).map((g) => ({ key: g.key, name: g.key.replace('|', ' / '), sub: `${g.hosts} 호스트`, curC: g.curC, avg5C: g.avg5C, maxC: g.maxC, level: view === 'cluster' ? 'cluster' : 'vc' }));
+  const idrac = data.idrac || { rows: [], summary: null, byDatacenter: [], counts: null, reason: '' };
+  const S = idrac.summary || {};
+  const srvAll = idrac.rows || [];
+  const srvRows = kindF === 'all' ? srvAll : srvAll.filter((r) => r.kind === kindF);
+  const avgLabel = `${data.avgWindowLabel || '5분'} 평균 ℃`;
+  const degC = (v) => (v == null ? '—' : `${v}℃`);
+
+  const rows = view === 'server'
+    ? srvRows.map((r) => ({
+      key: r.id, name: r.name, kind: r.kind, source: r.source, stale: r.stale,
+      sub: [KIND_KO[r.kind], r.hostName && r.hostName !== r.name ? r.hostName : '', r.cluster].filter(Boolean).join(' / ') || '-',
+      curC: r.curC, inletC: r.inletC, exhaustC: r.exhaustC, cpuC: r.cpuC, maxC: r.maxC,
+      level: r.source === 'esxi' ? 'host' : null,   // 추이 차트는 ESXi 계열(temp_host)에만 있다
+    }))
+    : view === 'host'
+      ? data.hosts.map((h) => ({ key: h.id, name: h.name, sub: `${h.vcenterId} / ${h.cluster || '-'}`, curC: h.curC, avg5C: h.avg5C, maxC: h.tempMaxC, level: 'host' }))
+      : (view === 'cluster' ? data.clusters : data.vcenters).map((g) => ({ key: g.key, name: g.key.replace('|', ' / '), sub: `${g.hosts} 호스트`, curC: g.curC, avg5C: g.avg5C, maxC: g.maxC, level: view === 'cluster' ? 'cluster' : 'vc' }));
 
   return (
     <>
       <div className="kpis" style={{ marginBottom: 14 }}>
-        <Card label="온도 보고 호스트" value={`${data.reportingHosts}/${data.totalHosts}`} meta="센서 보고 호스트" />
-        <Card label="평균 온도" value={data.hosts.length ? `${(data.hosts.reduce((a, h) => a + h.curC, 0) / data.hosts.length).toFixed(1)}℃` : '—'} />
-        <Card label="최고 온도" value={data.hosts.length ? `${Math.max(...data.hosts.map((h) => h.tempMaxC))}℃` : '—'} accent="var(--red)" />
+        <Card label="온도 수집 서버" value={`${S.all?.reporting ?? 0}`}
+          meta={`iDRAC ${idrac.counts?.idrac ?? 0} · ESXi ${idrac.counts?.esxi ?? 0}`} />
+        <Card label="물리 서버 평균" value={degC(S.physical?.avgC)} accent="var(--amber)"
+          meta={`${S.physical?.servers ?? 0}대 · 최고 ${degC(S.physical?.maxC)}`} />
+        <Card label="가상화 서버 평균" value={degC(S.virtual?.avgC)} accent="var(--green)"
+          meta={`${S.virtual?.servers ?? 0}대 · 최고 ${degC(S.virtual?.maxC)}`} />
+        <Card label="최고 온도" value={degC(S.all?.maxC)} accent="var(--red)"
+          meta={S.all?.avgInletC != null ? `흡기 평균 ${degC(S.all.avgInletC)}` : '전체 센서 기준'} />
       </div>
-      {data.reportingHosts === 0 && <div className="card" style={{ marginBottom: 12, borderColor: 'var(--amber)' }}><span className="muted">온도 센서를 보고하는 호스트가 없습니다(하드웨어/CIM 미지원이거나 nested ESXi). 라이브 수집 시 표시됩니다.</span></div>}
-      <div className="flex gap" style={{ marginBottom: 8 }}>
-        {[['host', '호스트별'], ['cluster', '클러스터별'], ['vc', '법인별']].map(([k, l]) => (
+      {idrac.reason && <div className="card" style={{ marginBottom: 12, borderColor: 'var(--amber)' }}><span className="muted">{idrac.reason} ESXi 센서 값으로 대체 표시합니다.</span></div>}
+      {data.avgError && <div className="card" style={{ marginBottom: 12, borderColor: 'var(--amber)' }}><span className="muted">평균 온도 이력을 읽지 못했습니다: {data.avgError}</span></div>}
+      {data.reportingHosts === 0 && (idrac.counts?.idrac ?? 0) === 0 && <div className="card" style={{ marginBottom: 12, borderColor: 'var(--amber)' }}><span className="muted">온도 센서를 보고하는 서버가 없습니다(iDRAC 미등록이거나 하드웨어/CIM 미지원·nested ESXi). 라이브 수집 시 표시됩니다.</span></div>}
+      <div className="flex gap wrap" style={{ marginBottom: 8, alignItems: 'center' }}>
+        {[['server', '서버별'], ['host', 'ESXi 호스트별'], ['cluster', '클러스터별'], ['vc', '법인별']].map(([k, l]) => (
           <button key={k} className={view === k ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setView(k)}>{l}</button>
         ))}
+        {view === 'server' && <>
+          <span style={{ width: 1, height: 20, background: 'rgba(255,255,255,.14)' }} />
+          {[['all', `전체 ${srvAll.length}`], ['physical', `물리 ${S.physical?.servers ?? 0}`], ['virtual', `가상화 ${S.virtual?.servers ?? 0}`]].map(([k, l]) => (
+            <button key={k} className={kindF === k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 12px', fontSize: 12 }} onClick={() => setKindF(k)}>{l}</button>
+          ))}
+        </>}
       </div>
-      <DataTable rows={rows} initialSort={{ key: 'curC', dir: 'desc' }} columns={[
-        { key: 'name', label: view === 'host' ? '호스트' : (view === 'cluster' ? '클러스터' : '법인'), render: (r) => <button className="cell-link" onClick={() => openHist(r.level, r.key)}>{r.name}</button> },
-        { key: 'sub', label: '구분', render: (r) => <span className="muted" style={{ fontSize: 12 }}>{r.sub}</span> },
-        { key: 'curC', label: '현재온도 ℃', align: 'right', render: (r) => <b style={{ color: tempColor(r.curC) }}>{r.curC ?? '—'}</b> },
-        { key: 'avg5C', label: '5분 평균 ℃', align: 'right', render: (r) => <span style={{ color: tempColor(r.avg5C) }}>{r.avg5C ?? '—'}</span> },
-        { key: 'maxC', label: '최대 온도 ℃', align: 'right', render: (r) => <span style={{ color: tempColor(r.maxC) }}>{r.maxC ?? '—'}</span> },
-        { key: 'hist', label: '추이', render: (r) => <button className="tab" onClick={() => openHist(r.level, r.key)}>5년 추이</button> },
-      ]} />
+
+      {view === 'server' && (idrac.byDatacenter || []).length > 0 && (
+        <div className="table-wrap" style={{ marginBottom: 12 }}>
+          <div className="muted" style={{ fontSize: 12, margin: '0 0 6px' }}>법인별 평균 — 물리 서버와 가상화 서버를 나눠서 봅니다.</div>
+          <DataTable rows={idrac.byDatacenter.map((d) => ({
+            key: d.key, name: d.name,
+            pN: d.physical.servers, pAvg: d.physical.avgC, pMax: d.physical.maxC,
+            vN: d.virtual.servers, vAvg: d.virtual.avgC, vMax: d.virtual.maxC,
+            aAvg: d.all.avgC, aMax: d.all.maxC,
+          }))} initialSort={{ key: 'aAvg', dir: 'desc' }} columns={[
+            { key: 'name', label: '법인' },
+            { key: 'pN', label: '물리 대수', align: 'right' },
+            { key: 'pAvg', label: '물리 평균 ℃', align: 'right', render: (r) => <span style={{ color: tempColor(r.pAvg) }}>{r.pAvg ?? '—'}</span> },
+            { key: 'pMax', label: '물리 최고 ℃', align: 'right', render: (r) => <span style={{ color: tempColor(r.pMax) }}>{r.pMax ?? '—'}</span> },
+            { key: 'vN', label: '가상화 대수', align: 'right' },
+            { key: 'vAvg', label: '가상화 평균 ℃', align: 'right', render: (r) => <span style={{ color: tempColor(r.vAvg) }}>{r.vAvg ?? '—'}</span> },
+            { key: 'vMax', label: '가상화 최고 ℃', align: 'right', render: (r) => <span style={{ color: tempColor(r.vMax) }}>{r.vMax ?? '—'}</span> },
+            { key: 'aAvg', label: '전체 평균 ℃', align: 'right', render: (r) => <b style={{ color: tempColor(r.aAvg) }}>{r.aAvg ?? '—'}</b> },
+          ]} />
+        </div>
+      )}
+
+      {view === 'server' ? (
+        <DataTable rows={srvRows.map((r) => ({
+          key: r.id, name: r.name, kind: r.kind, source: r.source, stale: r.stale,
+          sub: [KIND_KO[r.kind], r.cluster].filter(Boolean).join(' / '),
+          curC: r.curC, inletC: r.inletC, exhaustC: r.exhaustC, cpuC: r.cpuC, maxC: r.maxC,
+          level: r.source === 'esxi' ? 'host' : null,
+        }))} initialSort={{ key: 'curC', dir: 'desc' }} columns={[
+          { key: 'name', label: '서버', render: (r) => (r.level
+            ? <button className="cell-link" onClick={() => openHist(r.level, r.key)}>{r.name}</button>
+            : <span>{r.name}</span>) },
+          { key: 'kind', label: '구분', render: (r) => <span className={`badge ${r.kind === 'physical' ? 'amber' : 'green'}`}>{KIND_KO[r.kind]}</span> },
+          { key: 'source', label: '출처', render: (r) => <span className="muted" style={{ fontSize: 11.5 }}>{r.source === 'idrac' ? 'iDRAC' : 'ESXi'}{r.stale ? ' · 오래됨' : ''}</span> },
+          { key: 'sub', label: '클러스터', render: (r) => <span className="muted" style={{ fontSize: 12 }}>{r.cluster || '—'}</span> },
+          { key: 'curC', label: '현재온도 ℃', align: 'right', render: (r) => <b style={{ color: tempColor(r.curC) }}>{r.curC ?? '—'}</b> },
+          { key: 'inletC', label: '흡기 ℃', align: 'right', render: (r) => <span style={{ color: tempColor(r.inletC) }}>{r.inletC ?? '—'}</span> },
+          { key: 'exhaustC', label: '배기 ℃', align: 'right', render: (r) => <span style={{ color: tempColor(r.exhaustC) }}>{r.exhaustC ?? '—'}</span> },
+          { key: 'cpuC', label: 'CPU ℃', align: 'right', render: (r) => <span style={{ color: tempColor(r.cpuC) }}>{r.cpuC ?? '—'}</span> },
+          { key: 'maxC', label: '최고 ℃', align: 'right', render: (r) => <span style={{ color: tempColor(r.maxC) }}>{r.maxC ?? '—'}</span> },
+        ]} />
+      ) : (
+        <DataTable rows={rows} initialSort={{ key: 'curC', dir: 'desc' }} columns={[
+          { key: 'name', label: view === 'host' ? '호스트' : (view === 'cluster' ? '클러스터' : '법인'), render: (r) => <button className="cell-link" onClick={() => openHist(r.level, r.key)}>{r.name}</button> },
+          { key: 'sub', label: '구분', render: (r) => <span className="muted" style={{ fontSize: 12 }}>{r.sub}</span> },
+          { key: 'curC', label: '현재온도 ℃', align: 'right', render: (r) => <b style={{ color: tempColor(r.curC) }}>{r.curC ?? '—'}</b> },
+          // v2.512: 라벨이 고정 '5분' 이 아니다 — 서버가 알려준 실제 평균 창을 쓴다(샘플 주기에 따라 달라짐).
+          { key: 'avg5C', label: avgLabel, align: 'right', render: (r) => <span style={{ color: tempColor(r.avg5C) }}>{r.avg5C ?? '—'}</span> },
+          { key: 'maxC', label: '최대 온도 ℃', align: 'right', render: (r) => <span style={{ color: tempColor(r.maxC) }}>{r.maxC ?? '—'}</span> },
+          { key: 'hist', label: '추이', render: (r) => <button className="tab" onClick={() => openHist(r.level, r.key)}>5년 추이</button> },
+        ]} />
+      )}
+      {view !== 'server' && data.sampleIntervalMs > 5 * 60_000 && (
+        <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>
+          ※ 온도 샘플 주기가 {Math.round(data.sampleIntervalMs / 60000)}분이라 평균 창을 {data.avgWindowLabel} 로 넓혀 계산했습니다
+          (설정 › 수집 주기에서 조정). 주기보다 짧은 창으로는 표본이 없어 값이 비어 보입니다.
+        </div>
+      )}
 
       {hist && (
         <Modal title={`온도 추이 — ${hist.key || ''}`} onClose={closeHist} width={760}>
