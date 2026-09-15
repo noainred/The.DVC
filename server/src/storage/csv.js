@@ -18,7 +18,7 @@
 
 import { parseCsvRows, csvLine, unguardCell, delimiterHint, CSV_BOM } from '../util/csv.js';
 import { analyzeBulkImport } from '../util/bulkImport.js';
-import { parseFreeRows, rowsToFreeText, unmark } from '../util/bulkText.js';
+import { parseFreeRows, rowsToFreeText, unmark, EMPTY_MARK } from '../util/bulkText.js';
 import { isKnownType, isImplementedType, STORAGE_TYPES } from './types.js';
 
 // 내보내기/샘플 공통 컬럼 순서(password 는 가져오기 전용이라 맨 끝 — export 는 값 비움).
@@ -125,6 +125,12 @@ export function parseDevicesCsv(text) {
   const cell = (cells, i, { trim = true } = {}) => {
     if (i < 0) return '';
     const raw = unguardCell(cells[i] ?? '');
+    // v2.516: `-` 는 자유텍스트에서 '이 칸은 비움' 표시다(EMPTY_MARK). CSV 에는 적용되지 않아
+    // **같은 모달에서 형식만 바꿨을 때 규칙이 달랐다** — 자유텍스트로는 통과한 `-` 가 CSV 에서는
+    // 값으로 읽혀 'Virtual Fabric ID 는 1~128' 오류가 났다(사용자 신고). 두 경로를 통일한다.
+    // ⚠ 인용부호 해제는 하지 않는다 — CSV 는 parseCsvRows/unguardCell 이 이미 처리하며,
+    //   여기서 또 벗기면 정당하게 인용된 값이 망가진다(그래서 unmark 전체를 쓰지 않는다).
+    if (raw.trim() === EMPTY_MARK) return '';
     return trim ? raw.trim() : raw;
   };
   const out = [];

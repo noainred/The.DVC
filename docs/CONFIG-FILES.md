@@ -131,6 +131,7 @@
 | `security-session.json` | 설정 | 세션 보안 설정 — 유휴 자동 로그아웃(분) 등. CONFIG_DIR/security-session.json. | ✅ | ✅ | ✅ | security/securitySettings.js |
 | `settings-owners.txt` | 텍스트 | 설정 소유자 목록(백업·비밀 CSV 등 최상위 권한) | ✅ | ✅ | ✅ | security/securitySettings.js |
 | `storage-activity.json` | 설정 | 스토리지 수집 '작업 로그'(v2.315, 사용자 요구 '진행중/완료 창'). | ✅ | ✅ | ✅ | storage/activityLog.js |
+| `sanswitch-activity.json` | 설정 | SAN 스위치 수집 '작업 로그'(v2.516 — 스토리지와 같은 공용 팩토리 `util/activityLog.js`). 링버퍼(기본 500건, `SANSWITCH_ACTIVITY_MAX`)·0600·손상 시 재생성. | ✅ | ✅ | ✅ | sanswitch/activityLog.js |
 | `storage-devices.json` | 설정 | 스토리지 장비 등록부(v2.302). | ✅ | ✅ | ✅ | storage/registry.js |
 | `storage-history.db` | DB | 스토리지 장비(8종) 용량 이력 |  |  | ✅ | storage/db.js |
 | `storage-intervals.json` | 설정 | 스토리지 수집 주기(중앙에서 엣지 설정, v2.409). | ✅ | ✅ | ✅ | storage/intervals.js |

@@ -8,10 +8,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { recordActivity } from '../sanswitch/activityLog.js';
 
 const FILE = path.join(config.configDir, 'central-agent-sanswitch.json');
 const MAX_DEVICES_PER_AGENT = 300;
 let _map = null;
+// v2.516 엣지 push 로그 중복 제거 — 엣지는 주기마다 전 장비를 다시 보내므로, 같은 collectedAt 을
+// 매번 남기면 한 번의 수집이 여러 건으로 기록돼 로그가 거짓으로 부풀고 상한을 빨리 소진한다
+// (central/storageEdge.js 의 _lastRec 와 같은 규약). deviceId → 마지막 기록한 collectedAt.
+const _lastRec = new Map();
 
 function load() {
   if (_map) return _map;
@@ -32,6 +37,29 @@ export function saveEdgeSanSwitch(agent, devices, { chunk = 0, chunks = 1 } = {}
   }
   load().set(agent, { at: Date.now(), devices: list });
   atomicWriteFileSync(FILE, JSON.stringify(Object.fromEntries(load())), { mode: 0o600 });
+  // 작업 로그(v2.516) — 중앙 화면의 '수집 작업' 구획이 위임 장비도 보여주려면 push 수신 시
+  // 남겨야 한다(엣지의 로컬 로그는 중앙에서 볼 수 없다). 같은 collectedAt 재push 는 건너뛴다.
+  // ⚠ 엣지는 문제 포트만 올리므로(push.js slimSnapshot) 포트 요약 수치는 전체 기준을 쓴다.
+  for (const dv of list) {
+    const ca = Number(dv.collectedAt) || 0;
+    if (ca && _lastRec.get(dv.deviceId) === ca) continue;
+    if (ca) _lastRec.set(dv.deviceId, ca);
+    try {
+      // ⚠ **실패 스냅샷의 포트 수치는 null 이다** — `emptySnapshot` 이 ports 를 0 으로 초기화하므로
+      //   그대로 실으면 화면에 '0/0 · 0%' 가 찍혀 **'포트 0개' 라는 사실과 다른 표시**가 된다
+      //   (v2.516 실측으로 발견: 도달 불가 장비의 로그가 portsOnline:0 이었다).
+      //   '수집 못 함' 과 '진짜 0' 은 구분해야 한다(types.js 정직 표기 규칙).
+      const pt = dv.ok ? (dv.ports || {}) : {};
+      recordActivity({
+        deviceId: dv.deviceId, name: dv.name || dv.deviceId, host: dv.host || '', source: agent,
+        ok: !!dv.ok,
+        portsOnline: pt.online ?? null, portsLicensed: pt.licensed ?? null,
+        portsFree: pt.free ?? null, usedPct: pt.usedPct ?? null,
+        durationMs: Number.isFinite(dv.durationMs) ? dv.durationMs : null,
+        error: dv.ok ? null : (dv.error || null), at: ca || Date.now(),
+      });
+    } catch { /* 로그 실패가 push 수신을 막지 않게 */ }
+  }
   return list.length;
 }
 
@@ -41,4 +69,4 @@ export function edgeSanSwitchSnapshots() {
   for (const [agent, v] of load()) for (const d of v.devices || []) out.push({ ...d, agent, pushedAt: v.at });
   return out;
 }
-export function _resetForTest() { _map = null; }
+export function _resetForTest() { _map = null; _lastRec.clear(); }

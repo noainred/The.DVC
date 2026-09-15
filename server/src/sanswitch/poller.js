@@ -11,6 +11,7 @@
 import { config } from '../config.js';
 import { devicesForThisNode, getDeviceWithSecret } from './registry.js';
 import { putSnapshot } from './store.js';
+import { recordActivity } from './activityLog.js';
 import { emptySnapshot } from './types.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import * as fosSsh from './collectors/fosSsh.js';
@@ -58,6 +59,24 @@ async function collectOne(dev) {
     snap.collectedAt = Date.now();
     snap.durationMs = snap.collectedAt - startedAt;
     putSnapshot(snap);
+    // 작업 로그(v2.516) — 성공/실패 모두 1건. 출처는 이 노드 성격: 중앙(centralUrl 없음)이면
+    // 'central', 엣지면 자기 이름(엣지 로컬 로그용 — 중앙 화면엔 엣지 push 를 sanSwitchEdge 가 기록).
+    // ⚠ 실패도 반드시 남긴다 — 실패만 사라지면 '왜 값이 없나' 를 추적할 근거가 없어진다.
+    try {
+      // ⚠ **실패 스냅샷의 포트 수치는 null 이다** — `emptySnapshot` 이 ports 를 0 으로 초기화하므로
+      //   그대로 실으면 화면에 '0/0 · 0%' 가 찍혀 **'포트 0개' 라는 사실과 다른 표시**가 된다
+      //   (v2.516 실측으로 발견: 도달 불가 장비의 로그가 portsOnline:0 이었다).
+      //   '수집 못 함' 과 '진짜 0' 은 구분해야 한다(types.js 정직 표기 규칙).
+      const p = snap.ok ? (snap.ports || {}) : {};
+      recordActivity({
+        deviceId: dev.id, name: snap.name || dev.name || dev.id, host: dev.host || '',
+        source: config.agent.centralUrl ? (config.agent.name || 'edge') : 'central',
+        ok: !!snap.ok,
+        portsOnline: p.online ?? null, portsLicensed: p.licensed ?? null,
+        portsFree: p.free ?? null, usedPct: p.usedPct ?? null,
+        durationMs: snap.durationMs, error: snap.ok ? null : (snap.error || null), at: startedAt,
+      });
+    } catch { /* 로그 기록 실패가 수집 결과를 가리지 않게 */ }
     return snap.ok;
   } finally { _inFlight.delete(dev.id); }
 }

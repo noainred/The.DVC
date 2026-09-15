@@ -12,6 +12,7 @@ import { stateLabel, stateTone, opticalHealth, errorLevel, capacityLevel, aggreg
   RX_WARN_DBM, RX_BAD_DBM } from './sanSwitchPorts.js';
 import { STable } from '../../components/STable.jsx';
 import BulkDeviceIo from './BulkDeviceIo.jsx';
+import CollectActivity from './CollectActivity.jsx';
 
 /**
  * 특수기능 › SAN 스위치 모니터링(v2.410 — 사용자 요구 'Brocade SAN switch 포트 모니터링 및
@@ -148,6 +149,28 @@ export default function SanSwitchTool() {
     catch (e) { setMsg(`수집 실패: ${e.message}`); }
     finally { setBusy(false); }
   };
+  /**
+   * 전체 수집(v2.516, 사용자 요구 "san switch 전체 수집 기능 버튼 추가").
+   * 중앙 직접 장비는 즉시, 엣지 위임 장비는 재수집 요청 등록 — **무엇을 했는지 나눠 알린다**
+   * (뭉쳐서 '전부 수집했다' 고 말하면 거짓이다. 엣지는 다음 설정 pull 때 수집한다).
+   */
+  const collectAll = async () => {
+    setBusy(true); setMsg('전체 수집 중… (중앙 직접 장비부터)');
+    try {
+      const r = await postJson('/tools/sanswitch/collect-all', {});
+      if (r.ok === false) { setMsg(r.reason || '전체 수집 실패'); return; }
+      const res = r.result || {};
+      const centralPart = res.ok === false
+        ? `중앙 수집은 건너뜀(${res.reason})`
+        : `중앙 ${r.central}대 완료(성공 ${res.collected ?? 0}·실패 ${res.failed ?? 0})`;
+      const edgePart = r.edge
+        ? ` · 엣지 ${r.edge}대는 요청 등록 ${r.requested}건${r.alreadyQueued ? `(이미 대기 ${r.alreadyQueued}건)` : ''} — 다음 설정 pull 때 수집·push`
+        : '';
+      setMsg(`${centralPart}${edgePart}`);
+      await load();
+    } catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(false); }
+  };
+
   const openDetail = async (r) => {
     // 응답 순서 가드 — 늦게 온 이전 요청이 현재 상세를 덮거나, 닫은 모달을 다시 여는 것 방지(고RTT).
     const seq = ++detailSeq.current;
@@ -203,6 +226,9 @@ export default function SanSwitchTool() {
           </button>
           <SearchBox className="input" style={{ marginLeft: 'auto', maxWidth: 260, minWidth: 180 }}
             value={q} onChange={setQ} placeholder="스위치·host·모델·엣지 찾기" />
+          <button className="tab" style={{ flex: 'none', padding: '6px 12px' }} disabled={busy}
+            title="중앙이 직접 수집하는 스위치를 지금 다시 수집하고, 엣지 위임 스위치는 재수집 요청을 등록합니다(엣지는 다음 설정 pull 때 수집 후 바로 push)."
+            onClick={collectAll}>🔄 전체 수집</button>
           <button className="login-btn" style={{ flex: 'none', padding: '6px 14px' }} onClick={() => openForm(null)}>+ 스위치 등록</button>
           {/* v2.513(사용자 요청 "san switch 도 같은 메뉴") — CSV·자유텍스트 대량 등록/내보내기·샘플.
               스토리지 모니터링과 **같은 공용 컴포넌트**를 쓴다(판정·문구 단일 소스 — BulkDeviceIo 헤더).
@@ -254,7 +280,15 @@ export default function SanSwitchTool() {
                   <td>
                     {s?.ok
                       ? <span style={{ color: s.switchState === 'Online' ? TONE.ok : TONE.warn }}>{s.switchState || 'OK'}</span>
-                      : <span className="badge" style={{ background: TONE.bad, color: '#fff' }} title={failReason(s)}>실패 ⓘ</span>}
+                      : (
+                        // v2.516(사용자 요구 "실패일때 클릭하면 구체적인 로그 보여주는 기능"):
+                        // 예전에는 클릭 안 되는 <span title=…> 이라 사유가 툴팁에만 있었다 —
+                        // 복사·공유가 안 되고 모바일에서는 볼 수도 없었다. 스토리지 화면은 이미
+                        // 버튼이었다(게이팅 비대칭). 상세 창이 수집 오류 원문·섹션별 사유를 보여준다.
+                        <button type="button" className="badge" style={{ background: TONE.bad, color: '#fff', cursor: 'pointer', border: 0 }}
+                          title={`실패 사유: ${failReason(s)}\n\n(클릭하면 상세 창에서 전문을 봅니다)`}
+                          onClick={() => openDetail(r)}>실패 ⓘ</button>
+                      )}
                   </td>
                   <td>{s?.ok ? <>{p.online}<span className="muted"> / {p.licensed}</span>{p.noLicense ? <span className="muted" style={{ fontSize: 11 }}> (미라이선스 {p.noLicense})</span> : null}</> : <span className="muted">—</span>}</td>
                   <td>{s?.ok ? <span title={`${p.usedPct}% 사용 · ${lvl === 'bad' ? '증설 검토 필요' : lvl === 'warn' ? '여유 부족' : '여유 있음'}`}><UsageCell pct={p.usedPct || 0} /></span> : <span className="muted">—</span>}</td>
@@ -282,6 +316,22 @@ export default function SanSwitchTool() {
         마지막 수집 {ago(data.poller?.at)} · 성공 {data.poller?.collected ?? 0} / 실패 {data.poller?.failed ?? 0}
         {data.poller?.busy ? ' · 수집 진행중' : ''}
       </div>
+
+      {/* 수집 작업 로그(v2.516, 사용자 요구 "스토리지 모니터링 처럼 화면 하단에 진행상태와 로그").
+          스토리지와 **같은 공용 컴포넌트**를 쓴다 — 주입하는 것은 API 경로와 수치 열뿐이다.
+          ⚠ 스위치의 '용량' 은 저장 용량이 아니라 **포트 용량**이다(라이선스/사용중/여유) —
+            sanSwitchPorts.js 머리말과 같은 규약. 용량(TB)을 여기 넣지 말 것. */}
+      <CollectActivity
+        path="/tools/sanswitch/activity"
+        metricCols={[
+          { key: 'ports', label: '포트(사용/라이선스)', align: 'right', sort: (e) => String(e.portsOnline ?? ''),
+            render: (e) => (e.portsLicensed != null ? `${e.portsOnline ?? '—'}/${e.portsLicensed}` : '—'),
+            detail: (e) => (e.portsLicensed != null ? `${e.portsOnline ?? '—'} / ${e.portsLicensed} (여유 ${e.portsFree ?? '—'})` : '') },
+          { key: 'usedPct', label: '포트 사용률', align: 'right', muted: true, sort: (e) => String(e.usedPct ?? ''),
+            render: (e) => (e.usedPct == null ? '—' : `${e.usedPct}%`),
+            detail: (e) => (e.usedPct == null ? '' : `${e.usedPct}%`) },
+        ]}
+      />
 
       {form && <DeviceForm {...{ form, setForm, data, save, busy, runTest, test, setTest, stopTestPoll }} />}
       {detail && <PortDetail {...{ detail, setDetail, closeDetail, portFilter, setPortFilter, portQ, setPortQ, infoOpen, setInfoOpen, tab, setTab, sort, setSort }} />}
@@ -1077,6 +1127,19 @@ function PortDetail({ detail, setDetail, closeDetail, portFilter, setPortFilter,
     <Modal title={`포트 상세 — ${d.device?.name || ''}`} onClose={closeDetail} width={1180}>
       {d.loading && <Loading />}
       {d.error && <ErrorBox message={d.error} />}
+      {/* v2.516: 수집이 **통째로 실패**한 장비는 아래 섹션 표도 만들어지지 않는다(원천이 없다).
+          그래서 스냅샷의 오류 원문을 맨 위에 따로 보여준다 — 실패 배지를 눌러 여기로 온다.
+          `<pre>` 로 두는 이유: 사용자가 사유를 선택·복사해 문의에 붙일 수 있어야 한다. */}
+      {d.device?.snap && d.device.snap.ok === false && (
+        <div className="card" style={{ padding: 10, marginBottom: 10, borderColor: TONE.bad }}>
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: TONE.bad, marginBottom: 4 }}>수집 오류 원문</div>
+          <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 11.5, color: TONE.bad }}>{failReason(d.device.snap)}</pre>
+          <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
+            수집 시각 {ago(d.device.snap.collectedAt)} · 출처 {d.device.snap.agent || '중앙'}
+            {' — '}단계별 로그는 <b>연결 테스트</b>(장비 수정 → 연결 테스트)에서, 과거 이력은 화면 하단 <b>수집 작업</b> 에서 봅니다.
+          </div>
+        </div>
+      )}
       {!d.loading && !d.error && (
         <>
           <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>

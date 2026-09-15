@@ -45,6 +45,10 @@ server/config/storage-latest.json
 server/config/storage-intervals.json
 server/config/sanswitch-devices.json
 server/config/sanswitch-latest.json
+# 수집 작업 로그(링버퍼 · 재생성 가능한 런타임 캐시) — v2.516.
+# storage-activity.json 은 v2.315 부터 있었는데 여기 빠져 있었다(런타임 파일 커밋 위험).
+server/config/storage-activity.json
+server/config/sanswitch-activity.json
 server/config/rma-agents.json
 server/config/credentials.json
 server/config/rma-settings.json

@@ -88,12 +88,28 @@ function splitWs(s) {
 /**
  * 줄을 토큰으로 쪼갠다. 구분자 판정 순서는 위 주석 참조(탭 → | → 쉼표 → 연속 공백).
  */
-export function splitLine(line) {
+/**
+ * 한 줄 → 칸 배열 + **구분자가 명시적인지**(v2.516).
+ *
+ * 왜 이 구분이 필요한가: 탭·`|`·쉼표는 **빈 칸을 표현할 수 있는** 구분자다(`a\t\tb` = 가운데 칸 비움).
+ * 공백은 아니다(연속 공백은 그냥 한 칸 띄운 것). 그래서 호출부가 빈 토큰을 버려도 되는지 알아야 한다 —
+ * 예전에는 무조건 버려서 **엑셀에서 중간 칸을 비운 채 복사하면 뒤 값이 한 칸씩 밀렸다**
+ * (사용자 신고: "vfId 는 선택 사양인데 빼고 넣으면 입력이 안 된다" — vfId 칸에 다음 값인
+ *  법인 'WA' 가 들어가 'Virtual Fabric ID 는 1~128' 오류가 났다. 경고도 없었다).
+ *
+ * @returns {{cells:string[], explicit:boolean}}
+ */
+export function splitCells(line) {
   const s = String(line);
-  if (s.includes('\t')) return s.split('\t').map(clean);
-  if (s.includes('|')) return s.split('|').map(clean);
-  if (s.includes(',')) return s.split(',').map(clean);
-  return splitWs(s.trim()).map(clean);
+  if (s.includes('\t')) return { cells: s.split('\t').map(clean), explicit: true };
+  if (s.includes('|')) return { cells: s.split('|').map(clean), explicit: true };
+  if (s.includes(',')) return { cells: s.split(',').map(clean), explicit: true };
+  return { cells: splitWs(s.trim()).map(clean), explicit: false };
+}
+
+/** 호환용 — 빈 칸 정보가 필요 없는 곳(조언의 토큰 위치 계산 등)에서 쓴다. */
+export function splitLine(line) {
+  return splitCells(line).cells;
 }
 
 /**
@@ -106,7 +122,7 @@ export function splitLine(line) {
  *     키로 오인돼 note 값이 사라진다(테스트가 잡은 실제 버그).
  */
 export function parseKeyed(line, { aliasOf }) {
-  const s = clean(line);
+  const s = clean(String(line).replace(/[\t\v\f\r]+/g, ' '));
   const starts = [];
   const re = new RegExp(`(^|\\s)(${KEY_CH})\\s*([=:])`, 'gu');
   let m;
@@ -164,8 +180,17 @@ export function parseFreeRows(text, { fields, aliases = {}, defaults = {}, limit
     if (!clean(line)) continue;
     if (/^\s*#/.test(line)) continue;                       // 주석
 
-    const tokens = splitLine(line).filter((t) => t !== '');
-    if (!tokens.length) continue;
+    // v2.516: 명시적 구분자(탭·|·쉼표)에서는 **빈 칸을 유지**한다 — 그 자체가 '이 열은 비움' 이라는
+    // 정보다. 무조건 버리면 중간 칸을 비운 줄의 뒤 값이 한 칸씩 밀린다(splitCells 머리말 참조).
+    // 공백 구분은 빈 토큰이 의미 없으므로 계속 버린다.
+    const { cells, explicit } = splitCells(line);
+    // 뒤쪽 빈 칸은 떼어낸다(`a\tb\t` 처럼 줄 끝에 구분자가 남은 경우 — 열 개수 초과 경고 오탐 방지).
+    const trimmed = [...cells];
+    while (trimmed.length && trimmed[trimmed.length - 1] === '') trimmed.pop();
+    const tokens = explicit ? trimmed : trimmed.filter((t) => t !== '');
+    // 헤더 판정·키형 판정은 **값이 있는 칸만** 본다(빈 칸이 섞이면 둘 다 거짓이 된다).
+    const filled = tokens.filter((t) => t !== '');
+    if (!filled.length) continue;
 
     // 헤더 줄 — 토큰이 **전부** 알려진 필드명/별칭일 때만.
     // (한 토큰이라도 모르면 데이터로 본다 — 'isilon WA-01 …' 같은 줄을 헤더로 삼키지 않게.
@@ -176,8 +201,8 @@ export function parseFreeRows(text, { fields, aliases = {}, defaults = {}, limit
     //   생겼다**(`type='host'`). 샘플을 그대로 가져오면 오류가 나는 상태였다. 중간 헤더는 '여기부터
     //   열 순서가 바뀐다' 는 뜻이고, 섞어 붙여넣는 실제 사용에도 맞다. 조용히 바뀌면 혼란스러우니
     //   경고로 알린다.
-    if (tokens.length >= 2 && tokens.every((t) => aliasOf(t))) {
-      order = tokens.map((t) => aliasOf(t));
+    if (filled.length >= 2 && filled.every((t) => aliasOf(t))) {
+      order = filled.map((t) => aliasOf(t));
       if (!headerUsed) headerUsed = order;                 // 화면이 보여 줄 '해석에 쓴 열 순서'
       if (sawData) warnings.push(`${lineNo}줄: 열 순서를 '${order.join(' ')}' 로 바꿔 이후 줄을 읽습니다.`);
       continue;
@@ -189,7 +214,7 @@ export function parseFreeRows(text, { fields, aliases = {}, defaults = {}, limit
     }
 
     let values = {};
-    if (looksKeyed(tokens, aliasOf)) {
+    if (looksKeyed(filled, aliasOf)) {
       const k = parseKeyed(line, { aliasOf });
       values = k.values;
       if (k.unknown.length) warnings.push(`${lineNo}줄: 알 수 없는 키 ${k.unknown.map((x) => `'${x}'`).join(', ')} — 무시했습니다.`);
