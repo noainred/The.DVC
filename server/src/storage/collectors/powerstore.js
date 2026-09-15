@@ -45,6 +45,7 @@ export function normalizePowerstore(device, raw) {
   // 진단(v2.422): 공간 지표를 어디서(generate/GET)·어떤 구간으로 받았고 점이 몇 개였는지 — 용량이 비면 이 정보가
   // 상세 창 '섹션별 수집 상태' 옆에 보여 원인을 좁힌다(예전에는 '정상 + 0.0 TB' 로만 보여 원인을 알 수 없었다).
   if (raw.metricsDebug) snap.extra.spaceDebug = raw.metricsDebug;
+  if (raw.alertsDebug) snap.extra.alertsDebug = raw.alertsDebug;
   const total = Number(m?.physical_total) || 0;
   if (m && !total) {
     // ⚠ 점은 있는데 physical_total 이 없거나 0 — 'ok + 0 TB' 로 위장하지 않는다(정직 표기).
@@ -175,6 +176,59 @@ const SPACE_INTERVALS = (() => {
 const hasTotal = (pts) => (Array.isArray(pts) ? pts : [pts]).some((p) => p && Number(p.physical_total) > 0);
 
 /**
+ * 활성 알람 조회(v2.514) — **PowerStore 의 필터 문법은 Unity 와 다르다.**
+ *
+ * v2.404~2.513 은 `?filter=state.eq.ACTIVE` 를 보냈다. 그건 `unity.js:77` 의 문법
+ * (`/api/types/alert/instances?filter=state ne 2`)을 그대로 옮긴 것이고, PowerStore 는
+ * **PostgREST 계열**이라 필터의 **필드 이름 자체가 쿼리 파라미터**다(`?state=eq.ACTIVE`).
+ * 그래서 PowerStore 는 `filter` 라는 필드를 찾다 실패해 `HTTP 400 — Unable to parse passed url`
+ * 을 돌려줬고, 알람 섹션이 **모든 PowerStore 에서 항상 오류**였다(운영 화면 캡처로 확인).
+ * 같은 파일의 나머지 호출 15개는 `select`/`limit` 만 써서 영향이 없었다.
+ *
+ * ⚠ 정직한 한계: 이 환경에서 Dell 문서(`developer.dell.com`)에 닿지 못해 **`state` 필드명과
+ *   `ACTIVE` 값을 원문으로 확인하지 못했다**(egress 차단 — 우회 금지 규약). 문법 교정은 같은
+ *   파일의 동작하는 호출들로 확증되지만 필드/값은 버전에 따라 다를 수 있다. 그래서 실패하면
+ *   **필터 없이 받아 클라이언트에서 거른다**. 어느 경로를 썼는지는 `debug` 로 남겨 화면이 밝힌다
+ *   (`spaceDebug` 와 같은 규약 — 조용히 다른 값을 보여주지 않는다).
+ *
+ * 폴백의 대가: 필터 없이 받으면 해제된(CLEARED) 알람이 상한을 채워 **활성 건수가 줄어 보일 수**
+ * 있다. 그래서 상한에 닿으면 `truncated` 로 밝힌다(조용한 상한 금지 — CLAUDE.md).
+ *
+ * @param {(path:string)=>Promise<any>} get  makeGetter 로 만든 GET
+ * @returns {{alerts:Array, debug:{source:string, tried:string[], truncated:boolean}}}
+ */
+export const ALERT_LIMIT = 500;
+/** 해제된 알람으로 보는 상태값(대소문자 무시). 이 목록에 없으면 활성으로 센다 — 모르는 상태를 조용히 버리지 않는다. */
+const CLEARED_STATES = new Set(['cleared', 'inactive', 'resolved', 'closed']);
+
+export async function fetchActiveAlerts(get) {
+  const tried = [];
+  // ① 올바른 PowerStore 문법. 서버가 걸러 주면 상한 안에서 활성만 온다.
+  try {
+    const a = await get(`/api/rest/alert?select=id,severity,state&state=eq.ACTIVE&limit=${ALERT_LIMIT}`);
+    tried.push('state=eq.ACTIVE: OK');
+    const arr = Array.isArray(a) ? a : [];
+    return { alerts: arr, debug: { source: 'filtered', tried, truncated: arr.length >= ALERT_LIMIT } };
+  } catch (e) {
+    tried.push(`state=eq.ACTIVE: ${e.message}`);
+  }
+  // ② 필터 없이 받아 클라이언트에서 거른다(필드명/값이 이 버전과 다를 때).
+  const all = await get(`/api/rest/alert?select=id,severity,state&limit=${ALERT_LIMIT}`);
+  tried.push('필터 없이 조회 후 클라이언트 필터: OK');
+  const arr = Array.isArray(all) ? all : [];
+  // state 열이 아예 없는 버전이면 거르지 않는다 — 전부 버리는 것보다 '거르지 못했다' 고 밝히는 게 정직하다.
+  const hasState = arr.some((x) => x && x.state != null);
+  const active = hasState ? arr.filter((x) => !CLEARED_STATES.has(String(x.state || '').toLowerCase())) : arr;
+  return {
+    alerts: active,
+    debug: {
+      source: hasState ? 'client-filtered' : 'unfiltered',
+      tried, truncated: arr.length >= ALERT_LIMIT,
+    },
+  };
+}
+
+/**
  * v2.422(사용자 요구 '접속은 되는데 데이터 수집이 안 됨'): 원인 후보를 전부 순서대로 시도하고 **무엇을 시도했는지**
  * debug 로 남긴다.
  *  ① generate 를 구간 One_Day → One_Hour → Five_Mins 순으로 — 어떤 구간은 최신 점이 아직 집계 전이라 physical_total
@@ -281,7 +335,11 @@ export async function collect(device, { signal = null } = {}) {
     }
     await step('nodes', () => get('/api/rest/node?select=id,slot,appliance_id'));
     await step('users', () => get('/api/rest/local_user?select=id,name,is_locked'));
-    await step('alerts', () => get('/api/rest/alert?select=id,severity&filter=state.eq.ACTIVE&limit=500'));
+    await step('alerts', async () => {
+      const r = await fetchActiveAlerts(get);
+      raw.alertsDebug = r.debug;
+      return r.alerts;
+    });
 
     // ── 인벤토리/성능(v2.404, 사용자 요구 '수집할 수 있는 모든 데이터') ────────────────
     // 전부 best-effort: 이 장비/버전에 없는 리소스(파일 서비스 미구성 등)는 4xx 가 나는 게

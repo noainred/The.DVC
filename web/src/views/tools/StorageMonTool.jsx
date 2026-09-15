@@ -4,7 +4,7 @@ import { useHashTab } from '../../hooks/useHashTab.js';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
 import { fetchJson, postJson, delJson, downloadFile } from '../../api.js';
 import { Loading, ErrorBox, Kpi, UsageCell, Modal, SearchBox, usageColor } from '../../components/ui.jsx';
-import { columnsFor, cellValue } from './storageColumns.js';
+import { columnsFor, cellValue, sortValue } from './storageColumns.js';
 import { UNIT_OPTIONS, formatBytes, loadUnit, saveUnit } from './storageUnits.js';
 import { STable } from '../../components/STable.jsx';
 import BulkDeviceIo from './BulkDeviceIo.jsx';
@@ -84,7 +84,7 @@ function TypedTable({ list, type, caption, ctx, typeLabel }) {
             {list.map((r) => (
               <tr key={r.id} style={{ opacity: r.enabled === false ? 0.5 : 1 }}>
                 {/* data-sort(v2.425): 셀이 컴포넌트라 STable 이 텍스트를 못 읽는다 — 정렬 값은 storageColumns.cellValue 로 준다. */}
-                {cols.map((c) => <Cell key={c.key} col={c} r={r} ctx={ctx} data-sort={sortValueOf(c.key, r)} />)}
+                {cols.map((c) => <Cell key={c.key} col={c} r={r} ctx={ctx} data-sort={sortValue(c.key, r, ctx)} />)}
               </tr>
             ))}
           </tbody>
@@ -94,13 +94,6 @@ function TypedTable({ list, type, caption, ctx, typeLabel }) {
   );
 }
 
-/** 정렬 값 — 숫자/문자/null 을 STable 이 인식하는 문자열로(null 은 '' → 항상 뒤). */
-function sortValueOf(key, r) {
-  if (key === 'status') return r.snap ? (r.snap.ok ? '2' : '0') : '1';
-  if (key === 'actions') return '';
-  const v = cellValue(key, r);
-  return v == null ? '' : String(v);
-}
 
 /**
  * 장비 표(v2.406, 사용자 요구 '각각의 스토리지 전용 컬럼').
