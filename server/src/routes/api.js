@@ -16,6 +16,7 @@ import { registerToolsCapacity } from './api/toolsCapacity.js';
 import { registerToolsInfo } from './api/toolsInfo.js';
 import { registerToolsGuestDisk } from './api/toolsGuestDisk.js';
 import { registerVmSeries } from './api/vmSeries.js'; // v2.510: 실시간(20초) 스파이크 수집 — vCenter별 독립 DB
+import { registerCurUser } from './api/curUser.js';  // v2.520: '현재 사용자' — 게스트 계정 없이 guestinfo 읽기
 import { registerInventory } from './api/inventory.js';
 import { registerVmClone } from './api/vmClone.js'; // VM 복제(백업식, v2.299)
 import { registerStorageMon } from './api/storageMon.js'; // 스토리지 모니터링(Isilon 등, v2.302)
@@ -64,6 +65,7 @@ registerToolsCapacity(api);
 registerToolsInfo(api);
 registerToolsGuestDisk(api);
 registerVmSeries(api);
+registerCurUser(api);
 registerInventory(api);
 registerVmClone(api);
 registerStorageMon(api);

@@ -46,6 +46,7 @@ export const MIGRATABLE = [
   { file: 'dirusage.db', label: '폴더 사용량 리포트 이력(엣지 공유 폴더 Top-N)' },
   { file: 'pdu.db', label: 'PDU 전력·온습도 이력(v2.424)' },
   { file: 'guest-disk.db', label: '게스트 디스크 회수 리포트 추이(v2.459)' },
+  { file: 'curuser.db', label: "'현재 사용자' 로그인 사용자 수 추이(v2.520)" },
   // vcenter-logs.db 는 **이미 자체 경로 설정**(설정 › 로그 수집의 storagePath)이 있어 제외한다 —
   // 두 곳에서 경로를 제어하면 어느 쪽이 이겼는지 알 수 없다(그 화면에서 옮기세요).
   // ipam.db 는 **외부 프로그램이 경로를 고정해 읽는 공유 파일**이라 기본 대상에서 제외한다

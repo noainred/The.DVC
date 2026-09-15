@@ -133,6 +133,9 @@
 | `storage-activity.json` | 설정 | 스토리지 수집 '작업 로그'(v2.315, 사용자 요구 '진행중/완료 창'). | ✅ | ✅ | ✅ | storage/activityLog.js |
 | `sanswitch-activity.json` | 설정 | SAN 스위치 수집 '작업 로그'(v2.516 — 스토리지와 같은 공용 팩토리 `util/activityLog.js`). 링버퍼(기본 500건, `SANSWITCH_ACTIVITY_MAX`)·0600·손상 시 재생성. | ✅ | ✅ | ✅ | sanswitch/activityLog.js |
 | `sanswitch-perf-activity.json` | 설정 | SAN 스위치 **포트 사용량**(portperfshow) 수집 작업 로그(v2.517). 기본 수집 로그와 파일을 나눈다 — 주기가 달라 한 링버퍼에 섞으면 잦은 쪽이 상한을 먹어 다른 쪽 이력이 사라진다. 링버퍼(기본 500건, `SANSW_PERF_ACTIVITY_MAX`)·0600·손상 시 재생성. | ✅ | ✅ | ✅ | sanswitch/perfActivityLog.js |
+| `curuser-settings.json` | 설정 | '현재 사용자' 수집 설정(v2.520) — 법인별 대상 폴더·주기(포탈 조회 10분 기본 / 게스트 발행 주기는 별도)·보존·상한. **자격증명 없음**(게스트 계정을 쓰지 않는 설계). 0600·원자적 쓰기. | ✅ | ✅ | ✅ | curuser/settings.js |
+| `curuser-activity.json` | 설정 | '현재 사용자' 수집 작업 로그(v2.520). 공용 팩토리 `util/activityLog.js`. 링버퍼(기본 500건, `CURUSER_ACTIVITY_MAX`)·0600·손상 시 재생성. | ✅ | ✅ | ✅ | curuser/activityLog.js |
+| `curuser.db` | DB | '현재 사용자' 최신 스냅샷 + vCenter별 추이(v2.520). 10분 주기 × (28 법인 + 전체) ≈ 연 152만행, 보존 기본 180일. VM 단위 계열은 `CURUSER_VM_SERIES=1` 옵트인(연 2,100만행). WAL·0600. |  |  | ✅ | curuser/db.js |
 | `sanswitch-err-baseline.json` | 설정 | 포트 에러 카운터 **월 기준선**(v2.519) — `porterrshow` 는 부팅 이후 누적이라, 이 시점을 기억해 '당월 신규' 를 가린다. ⚠ 포탈은 `portstatsclear` 를 실행하지 않는다(다른 도구의 기준선을 지우는 파괴적 동작) — 기준선은 포탈 안에 둔다. 0600·원자적 쓰기·손상 시 재생성. | ✅ | ✅ | ✅ | sanswitch/errBaseline.js |
 | `central-agent-sanswitch-perf.json` | 설정 | 엣지가 보고한 **포트 사용량 수집 상태**의 중앙 보관(v2.517) — 표본이 0건이어도 올라오는 하트비트라, 중앙이 '엣지가 켜졌는지·돌았는지·왜 실패하는지' 를 안다. 캐시 성격(손상 시 재생성, preserveCorrupt 아님)·0600. | ✅ |  | ✅ | central/sanSwitchPerfEdge.js |
 | `storage-devices.json` | 설정 | 스토리지 장비 등록부(v2.302). | ✅ | ✅ | ✅ | storage/registry.js |

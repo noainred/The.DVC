@@ -4,17 +4,19 @@
  * 사용자 요청: "vcenter 별로 **사용자가 설정에서 지정한 폴더**의 windows 서버에서 로그인한
  * 사용자의 수를 **설정에서 지정한 시간**마다 수집" + "10분마다 DB 에 저장".
  *
- * 파일: `CONFIG_DIR/curuser-settings.json`. 자격증명은 **여기 두지 않는다** — 게스트 계정은
- * 이미 `gpu/settings.js`(vCenter별 Windows 공용 계정 + VM별 재정의)가 갖고 있고, 비밀을 두 곳에
- * 두면 한쪽만 회전돼 조용히 실패한다.
+ * 파일: `CONFIG_DIR/curuser-settings.json`. **자격증명이 없다** — 2026-09-15 사용자 결정
+ * "Guestos 계정 없이" 에 따라 수집은 게스트가 스스로 발행한 `guestinfo.curuser.*` 를
+ * vCenter `config.extraConfig` 로 **읽는 것뿐**이다(`curuser/guestinfoSource.js`).
  *
- * ── 주기 하한을 두는 이유 ────────────────────────────────────────────────────────
- * 게스트 실행 1회는 VMware Tools 왕복 5~6회 + 결과 파일 회수다(`gpu/guestops.js` 머리말).
- * 폴더에 Windows 서버가 200대면 한 주기에 그만큼이 돈다. 기본 **10분**(사용자 지정),
- * 하한 **5분** — 그 아래로는 이전 주기가 끝나기 전에 다음 주기가 와 재진입 가드가 계속 건너뛴다.
+ * ── 주기 두 개를 따로 두는 이유(중요) ───────────────────────────────────────────
+ * ① `intervalMs`      — **포탈이 vCenter 에서 읽는** 주기. 사용자 지정 기본 10분.
+ * ② `guestPublishMs`  — **게스트 스케줄 작업이 발행하는** 주기. 포탈이 강제할 수 없다
+ *    (각 Windows 서버의 `schtasks` 가 정한다). 이 값은 '관리자가 그렇게 등록했다' 는 **신고**이고,
+ *    신선도 판정(`staleFactor` 배)과 내려주는 스크립트의 기본 주기에 쓰인다.
+ *    ⚠ 둘을 하나로 합치지 말 것 — 합치면 포탈 주기를 바꾸는 순간 **게스트에 손도 대지 않았는데**
+ *      전 서버가 '값이 오래됨' 으로 뒤바뀐다(또는 그 반대로 오래된 값을 신선하다고 말한다).
  *
- * ⚠ 기본은 **꺼짐(opt-in)** 이다 — 운영 Windows 서버에 주기적으로 프로세스를 띄우는 동작이라
- *   관리자가 폴더를 고르고 명시적으로 켜야 시작한다.
+ * ⚠ 기본은 **꺼짐(opt-in)** 이다 — 관리자가 폴더를 고르고 명시적으로 켜야 시작한다.
  * ⚠ 폴더 범위가 **비어 있으면 수집하지 않는다**(전체 VM 으로 확대 해석 금지). 5,850 VM 에
  *   게스트 실행을 돌리는 사고를 기본값으로 만들지 않는다.
  */
@@ -29,7 +31,9 @@ export const LIMITS = Object.freeze({
   intervalMs: { min: 5 * 60_000, max: 12 * 3600_000, def: 10 * 60_000 },   // 기본 10분(사용자 지정)
   retentionDays: { min: 1, max: 3650, def: 180 },
   concurrency: { min: 1, max: 16, def: 4 },
-  vmTimeoutMs: { min: 10_000, max: 300_000, def: 60_000 },
+  vmTimeoutMs: { min: 10_000, max: 300_000, def: 60_000 },   // vCenter 조회 1회(법인 단위) 시한
+  guestPublishMs: { min: 60_000, max: 12 * 3600_000, def: 10 * 60_000 },   // 게스트 스케줄 작업 주기(신고값)
+  staleFactor: { min: 2, max: 12, def: 3 },                  // 발행주기 × 이 배수보다 오래되면 '값이 오래됨'
   maxVms: { min: 1, max: 5000, def: 400 },      // 한 주기 대상 상한(조용한 상한 금지 — 초과는 밝힌다)
 });
 
@@ -42,6 +46,12 @@ const strArr = (v, max = 200) => (Array.isArray(v) ? v : [])
   .map((x) => String(x ?? '').trim()).filter(Boolean).slice(0, max);
 
 let _cache = null;
+/**
+ * 설정 변경 구독자 — `startAdaptiveTimer` 가 **무장된 타이머를 즉시 재무장**하는 데 쓴다.
+ * 없으면 10분 주기에서 최대 10분 뒤에야 새 주기가 먹는다(v2.409 규칙).
+ */
+const listeners = new Set();
+export function onCurUserSettingsChange(cb) { listeners.add(cb); return () => listeners.delete(cb); }
 
 /**
  * 정규화(순수 — 테스트가 고정).
@@ -69,6 +79,8 @@ export function normalize(input = {}) {
     retentionDays: clamp(src.retentionDays, LIMITS.retentionDays),
     concurrency: clamp(src.concurrency, LIMITS.concurrency),
     vmTimeoutMs: clamp(src.vmTimeoutMs, LIMITS.vmTimeoutMs),
+    guestPublishMs: clamp(src.guestPublishMs, LIMITS.guestPublishMs),
+    staleFactor: clamp(src.staleFactor, LIMITS.staleFactor),
     maxVms: clamp(src.maxVms, LIMITS.maxVms),
     // 계정명을 목록·보고서에 상시 노출할지(기본 꺼짐 — 개인정보성. 상세 펼침에서는 항상 보인다).
     showNamesInList: src.showNamesInList === true,
@@ -86,12 +98,25 @@ export function load() {
 }
 
 export function save(input = {}) {
+  const before = _cache ? JSON.stringify(_cache) : null;
   _cache = normalize(input);
   atomicWriteFileSync(FILE(), JSON.stringify({ version: 1, ..._cache }, null, 2), { mode: 0o600 });
+  if (before !== JSON.stringify(_cache)) for (const cb of listeners) { try { cb(); } catch { /* 격리 */ } }
   return load();
 }
 
 /** 이 설정으로 수집할 vCenter 인지. 폴더가 **비어 있으면 대상이 아니다**(전체 확대 금지). */
+/**
+ * 신선도 경계(ms) — **발행 주기 기준**이다(포탈 조회 주기가 아니다. 위 머리말 ⚠ 참조).
+ * 화면은 이 값을 숫자로 하드코딩하지 않고 API 가 주는 것만 쓴다(CLAUDE.md 규칙).
+ */
+export function staleAfterMs(s) {
+  const o = s || {};
+  const pub = clamp(o.guestPublishMs, LIMITS.guestPublishMs);
+  const f = clamp(o.staleFactor, LIMITS.staleFactor);
+  return pub * f;
+}
+
 export function isMonitored(s, vcId) {
   if (!s || s.enabled !== true) return false;
   const v = (s.vcenters || {})[String(vcId)];
@@ -111,5 +136,5 @@ export function applyCentral(remote) {
   return true;
 }
 
-export function _resetForTest() { _cache = null; }
+export function _resetForTest() { _cache = null; listeners.clear(); }
 export const _FILE = FILE;

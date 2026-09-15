@@ -81,6 +81,7 @@ const Forecast = React.lazy(() => import('./tools/CapacityTools.jsx').then((m) =
 const ThinVms = React.lazy(() => import('./tools/CapacityTools.jsx').then((m) => ({ default: m.ThinVms })));
 // v2.505 고아 VMDK 찾기 — 라이브 데이터스토어 탐색이라 전용 청크로 lazy 로드한다.
 const OrphanVmdk = React.lazy(() => import('./tools/OrphanVmdk.jsx').then((m) => ({ default: m.OrphanVmdk })));
+const CurrentUsers = React.lazy(() => import('./tools/CurrentUsers.jsx').then((m) => ({ default: m.CurrentUsers })));
 const Waste = React.lazy(() => import('./tools/CapacityTools.jsx').then((m) => ({ default: m.Waste })));
 const VmFinder = React.lazy(() => import('./tools/VmFinderTool.jsx').then((m) => ({ default: m.VmFinder })));
 const GuestOs = React.lazy(() => import('./tools/GuestOsTools.jsx').then((m) => ({ default: m.GuestOs })));
@@ -380,7 +381,7 @@ function ToolPanel({ tool, onBack, isAdmin }) {
   const [cluster, setCluster] = useState('');
   const [folder, setFolder] = useState('');
   const { data: vcList } = usePolling('/vcenters', {}, 60_000);
-  const scoped = ['vm-export', 'dupip', 'vmtools', 'snapshots', 'hba', 'gpu', 'licenses', 'license-expiry', 'esxi', 'hardware', 'powermap', 'guestos', 'real-os', 'thinvms', 'guest-disk', 'capacity', 'waste', 'esxitemp', 'forecast', 'dsusage', 'orphanvmdk',
+  const scoped = ['vm-export', 'dupip', 'vmtools', 'snapshots', 'hba', 'gpu', 'licenses', 'license-expiry', 'esxi', 'hardware', 'powermap', 'guestos', 'real-os', 'thinvms', 'guest-disk', 'capacity', 'waste', 'esxitemp', 'forecast', 'dsusage', 'orphanvmdk', 'curuser',
     'daily-health', 'snapshot-age', 'zombie-vms', 'rightsizing', 'capacity-forecast', 'compliance-report', 'change-history', 'unprotected-vms'].includes(tool);
 
   // v2.491: 클러스터·폴더 콤보를 지원하는(= 서버가 cluster/folder 쿼리를 실제로 거르는) 도구만.
@@ -483,6 +484,7 @@ function ToolPanel({ tool, onBack, isAdmin }) {
       {tool === 'gpu' && <Gpu scope={scope} />}
       {tool === 'serveranalysis' && <ServerAnalysis />}
       {tool === 'orphanvmdk' && <OrphanVmdk scope={scope} />}
+      {tool === 'curuser' && <CurrentUsers scope={scope} />}
       {tool === 'fleet' && <FleetInventory isAdmin={isAdmin} />}
       {tool === 'nic-speed' && <NicSpeed />}
       {tool === 'nic-models' && <NicModels />}
