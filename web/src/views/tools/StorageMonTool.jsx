@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useLatest } from '../../hooks/useLatest.js';
 import { useHashTab } from '../../hooks/useHashTab.js';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
@@ -7,6 +7,7 @@ import { Loading, ErrorBox, Kpi, UsageCell, Modal, SearchBox, usageColor } from 
 import { columnsFor, cellValue } from './storageColumns.js';
 import { UNIT_OPTIONS, formatBytes, loadUnit, saveUnit } from './storageUnits.js';
 import { STable } from '../../components/STable.jsx';
+import BulkDeviceIo from './BulkDeviceIo.jsx';
 
 /**
  * 특수기능 › 스토리지 모니터링(v2.302) — 글로벌 법인 스토리지(Isilon 우선, XtremIO·PowerStore·
@@ -351,9 +352,12 @@ export default function StorageMonTool() {
         <span style={{ width: 1, height: 22, background: 'var(--border)', margin: '0 2px' }} />
         <button className="tab" style={{ flex: 'none', padding: '7px 13px' }} title="현재 등록 장비를 CSV 로 내려받기(비밀번호 포함 여부 선택)"
           onClick={() => setExportOpen(true)}>⬇ CSV 내보내기</button>
-        <button className="tab" style={{ flex: 'none', padding: '7px 13px' }} title="CSV 파일로 장비를 일괄 등록/수정" onClick={() => setImportOpen(true)}>⬆ CSV 가져오기</button>
-        <button className="tab" style={{ flex: 'none', padding: '7px 13px' }} title="양식·예시가 담긴 샘플 CSV 내려받기"
-          onClick={() => downloadFile('/tools/storage/devices/sample.csv').catch((e) => setMsg(`샘플 오류: ${e.message}`))}>📄 샘플 CSV</button>
+        {/* v2.513(사용자 요청): CSV + 자유텍스트 대량 등록 — 형식 검증 → 실제 연결 테스트 →
+            통과분만 선택 등록 + 실패 행 수정 조언. 샘플·내보내기도 이 모달 안에 있다(두 형식 모두).
+            공용 컴포넌트를 SAN 스위치 화면과 **함께** 쓴다(복제 금지 — BulkDeviceIo 헤더 주석). */}
+        <button className="tab" style={{ flex: 'none', padding: '7px 13px' }}
+          title="CSV 또는 자유텍스트로 장비를 일괄 등록/수정합니다. 샘플 내려받기·형식 검증·실제 연결 테스트·선택 등록을 한 창에서 합니다."
+          onClick={() => setImportOpen(true)}>⬆ 대량 등록(CSV·텍스트)</button>
         {/* 전체 새로고침(v2.315, 사용자 요구) — 중앙 직접 장비 즉시 재수집 + 화면 갱신(엣지는 다음 주기). */}
         <span style={{ width: 1, height: 22, background: 'var(--border)', margin: '0 2px' }} />
         <button className="tab" style={{ flex: 'none', padding: '7px 13px' }} disabled={busy}
@@ -465,7 +469,10 @@ export default function StorageMonTool() {
       )}
 
       {form && <DeviceForm d={d} form={form} setForm={setForm} onSaved={() => { setForm(null); load(); }} />}
-      {importOpen && <CsvImport onClose={() => setImportOpen(false)} onDone={() => { setImportOpen(false); load(); }} />}
+      {importOpen && (
+        <BulkDeviceIo base="/tools/storage" title="스토리지 장비 대량 등록 — CSV · 자유텍스트" keyLabel="host+type"
+          onClose={() => setImportOpen(false)} onDone={() => { setImportOpen(false); load(); }} />
+      )}
       {exportOpen && <CsvExport onClose={() => setExportOpen(false)} />}
 
       {view === 'devices' && <DeviceTable list={shown} ctx={cellCtx} typeLabel={typeLabel} />}
@@ -1359,117 +1366,6 @@ function CsvExport({ onClose }) {
       {err && <div style={{ color: 'var(--red)', fontSize: 12.5, marginBottom: 8 }}>⚠ {err}</div>}
       <div className="flex gap" style={{ justifyContent: 'flex-end' }}>
         <button className="login-btn" style={{ padding: '8px 18px' }} disabled={busy} onClick={run}>{busy ? '내려받는 중…' : '⬇ 내려받기'}</button>
-      </div>
-    </Modal>
-  );
-}
-
-/**
- * CSV 일괄 가져오기 모달(v2.313, 사용자 요구) — 파일 선택 또는 붙여넣기 → 무결성 검증 → 저장.
- * v2.317: '무결성 검증'(드라이런 — 저장 없이 행별 추가/수정/오류 판정, 실제 저장과 같은 규칙)을
- * 먼저 통과해야 실행 버튼이 활성화된다. CSV 내용을 고치면 재검증 필요(검증본과 실행본 불일치 방지).
- * 비밀번호 열이 있으면 그대로 가져와 저장한다(비우면 기존 유지).
- */
-function CsvImport({ onClose, onDone }) {
-  const [text, setText] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState(null);
-  const [check, setCheck] = useState(null);        // 드라이런 결과 { report, summary }
-  const [checkedText, setCheckedText] = useState(null); // 검증 당시 CSV 원문(변경 감지)
-  const [err, setErr] = useState(null);
-  const fileRef = useRef(null);
-
-  const onFile = (e) => {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    const r = new FileReader();
-    r.onload = () => { setText(String(r.result || '')); setCheck(null); setCheckedText(null); };
-    r.readAsText(f);
-  };
-  const verify = async () => {
-    setBusy(true); setErr(null); setResult(null); setCheck(null);
-    try {
-      const r = await postJson('/tools/storage/devices/import', { csv: text, dryRun: true });
-      if (r.ok === false) setErr(r.reason);
-      else { setCheck(r); setCheckedText(text); }
-    } catch (e) { setErr(e.message); } finally { setBusy(false); }
-  };
-  const run = async () => {
-    setBusy(true); setErr(null); setResult(null);
-    try {
-      const r = await postJson('/tools/storage/devices/import', { csv: text });
-      if (r.ok === false) setErr(r.reason);
-      else setResult(r);
-    } catch (e) { setErr(e.message); } finally { setBusy(false); }
-  };
-  const verified = check && checkedText === text; // 검증 후 내용이 바뀌면 재검증 요구
-  const actLabel = { add: '추가', update: '수정', error: '오류' };
-  return (
-    <Modal title="스토리지 장비 CSV 가져오기" onClose={onClose} width={760}>
-      <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
-        헤더 행 필수(<code>name</code>·<code>host</code>는 필수). <b>host+type</b>이 같은 장비는 수정, 없으면 추가됩니다.
-        비밀번호 열은 값이 있으면 저장하고, 비우면 기존 값을 유지합니다. 양식은 <b>📄 샘플 CSV</b>로 받으세요.
-      </div>
-      <div className="flex gap wrap" style={{ marginBottom: 8 }}>
-        <input ref={fileRef} type="file" accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain" style={{ display: 'none' }} onChange={onFile} />
-        <button className="tab" style={{ padding: '6px 12px', fontSize: 12 }} onClick={() => fileRef.current?.click()}>📁 CSV 파일 선택</button>
-        <button className="tab" style={{ padding: '6px 12px', fontSize: 12 }}
-          onClick={() => downloadFile('/tools/storage/devices/sample.csv').catch((e) => setErr(e.message))}>📄 샘플 CSV</button>
-      </div>
-      <textarea className="input" style={{ width: '100%', minHeight: 140, fontFamily: 'ui-monospace, monospace', fontSize: 12 }}
-        value={text} onChange={(e) => { setText(e.target.value); setResult(null); }} placeholder="여기에 CSV 를 붙여넣거나 위에서 파일을 선택하세요." />
-      {err && <div style={{ color: 'var(--red)', fontSize: 12.5, marginTop: 8 }}>⚠ {err}</div>}
-
-      {/* 무결성 검증 결과(드라이런) — 행별 추가/수정/오류 판정 표 */}
-      {check && (
-        <div className="card" style={{ padding: 10, marginTop: 10, fontSize: 12.5 }}>
-          <div style={{ marginBottom: 6 }}>
-            검증 결과: 총 {check.total}행 — <span style={{ color: 'var(--green)' }}>추가 {check.summary.add}</span>
-            {' · '}<span style={{ color: 'var(--blue)' }}>수정 {check.summary.update}</span>
-            {' · '}<span style={{ color: check.summary.error ? 'var(--red)' : 'var(--text-dim)' }}>오류 {check.summary.error}</span>
-            {' · '}비밀번호 반영 {check.summary.withPassword}건
-            {!verified && <b style={{ color: 'var(--amber)', marginLeft: 8 }}>⚠ 내용이 변경됨 — 재검증 필요</b>}
-          </div>
-          <div className="table-wrap" style={{ maxHeight: '26vh' }}>
-            <STable>
-              <thead><tr><th style={{ textAlign: 'right' }}>행</th><th>장비</th><th>host</th><th>타입</th><th>동작</th><th>비밀번호</th><th>문제</th></tr></thead>
-              <tbody>
-                {check.report.map((r, i) => (
-                  <tr key={i}>
-                    <td style={{ textAlign: 'right' }} className="muted">{r.line}</td>
-                    <td><b>{r.name}</b></td>
-                    <td className="muted" style={{ fontSize: 11.5 }}>{r.host}</td>
-                    <td className="muted" style={{ fontSize: 11.5 }}>{r.type}</td>
-                    <td><span className={`badge ${r.action === 'add' ? 'green' : r.action === 'update' ? 'blue' : 'red'}`}>{actLabel[r.action] || r.action}</span></td>
-                    <td className="muted" style={{ fontSize: 11.5 }}>{r.hasPassword ? '반영' : '유지'}</td>
-                    <td style={{ color: 'var(--red)', fontSize: 11.5 }}>{r.reason || ''}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </STable>
-          </div>
-        </div>
-      )}
-
-      {result && (
-        <div className="card" style={{ padding: 10, marginTop: 10, fontSize: 12.5 }}>
-          <div>총 {result.total}행 — <span style={{ color: 'var(--green)' }}>추가 {result.added}</span> · <span style={{ color: 'var(--blue)' }}>수정 {result.updated}</span>{result.failed?.length ? <> · <span style={{ color: 'var(--red)' }}>실패 {result.failed.length}</span></> : ''}</div>
-          {result.failed?.length > 0 && (
-            <ul style={{ margin: '6px 0 0', paddingLeft: 18, color: 'var(--red)' }}>
-              {result.failed.map((f, i) => <li key={i}>행 {f.line} ({f.name}): {f.reason}</li>)}
-            </ul>
-          )}
-        </div>
-      )}
-      <div className="flex gap" style={{ marginTop: 12, justifyContent: 'flex-end' }}>
-        {result
-          ? <button className="login-btn" style={{ padding: '8px 18px' }} onClick={onDone}>완료(목록 새로고침)</button>
-          : <>
-            <button className="tab" style={{ padding: '8px 16px' }} disabled={busy || !text.trim()} onClick={verify}>{busy ? '검사 중…' : '1) 무결성 검증'}</button>
-            <button className="login-btn" style={{ padding: '8px 18px' }} disabled={busy || !verified}
-              title={verified ? (check.summary.error ? '오류 행은 건너뛰고 정상 행만 저장됩니다' : '') : '먼저 무결성 검증을 통과하세요'}
-              onClick={run}>{busy ? '가져오는 중…' : '2) 가져오기 실행'}</button>
-          </>}
       </div>
     </Modal>
   );
