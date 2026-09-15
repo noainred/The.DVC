@@ -77,9 +77,9 @@ export function expectationFor(field, { types = [], agents = [], datacenters = [
     case 'name': return { kind: 'format', hint: `1~64자, < > " ' 는 쓸 수 없습니다` };
     case 'username': return { kind: 'format', hint: '접속 계정(비울 수 없습니다)' };
     case 'password': return { kind: 'format', hint: '한 줄 문자열 — 개행·탭이 섞이지 않게(붙여넣기 확인). 비우면 기존 비밀번호를 유지합니다' };
-    case 'sshPort': return { kind: 'format', hint: '1~65535 정수(기본 22)' };
-    case 'httpsPort': return { kind: 'format', hint: '1~65535 정수(기본 443)' };
-    case 'vfId': return { kind: 'format', hint: '1~128 정수 또는 비움' };
+    case 'sshPort': return { kind: 'format', hint: '1~65535 정수 — 비우면 기본 22' };
+    case 'httpsPort': return { kind: 'format', hint: '1~65535 정수 — 비우면 기본 443(REST 수집일 때만 씁니다)' };
+    case 'vfId': return { kind: 'format', hint: '선택 항목입니다 — Virtual Fabric 을 쓰지 않으면 **CSV 는 칸을 비우고(`,,`)**, **자유텍스트는 `-`** 를 적습니다. 쓰면 1~128 정수(0 은 안 됩니다)' };
     default: return { kind: 'none', hint: '' };
   }
 }
