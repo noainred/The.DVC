@@ -14,6 +14,7 @@ import { STable } from '../../components/STable.jsx';
 import BulkDeviceIo from './BulkDeviceIo.jsx';
 import CollectActivity from './CollectActivity.jsx';
 import { perfDiagText, diagBorder, perfCollectSummary } from './sanPerfDiagText.js';
+import { portsScopeNote } from './sanPortsScopeText.js';
 
 /**
  * 특수기능 › SAN 스위치 모니터링(v2.410 — 사용자 요구 'Brocade SAN switch 포트 모니터링 및
@@ -1220,12 +1221,20 @@ function PortDetail({ detail, setDetail, closeDetail, portFilter, setPortFilter,
             {d.model || (d.extra?.switchType
               ? <span title="chassisshow 에서 모델명(Chassis Family)을 읽지 못했습니다. 대신 스위치가 보고한 switchType 원값을 그대로 표시합니다 — 타입 코드를 모델명으로 바꾸는 표는 확실하지 않아 넣지 않았습니다.">switchType {d.extra.switchType}</span>
               : '모델 미상')} · FOS {d.fabricOs || '—'} · {d.host || ''} · {d.source} · 수집 {ago(d.collectedAt)}
-            {d.ports?.portsOmitted ? (
-              <div style={{ color: TONE.warn, marginTop: 4 }}>
-                ⚠ 이 스위치는 엣지가 수집합니다. 회선 부담 때문에 중앙에는 <b>문제 포트만</b> 올라옵니다 —
-                정상 포트 {d.ports.portsOmitted}개는 여기 표에 없습니다(요약 수치는 전체 기준으로 정확합니다).
-              </div>
-            ) : null}
+            {/* v2.517: 엣지 push 기본이 **전체 포트**로 바뀌었다(push.js 머리말 — gzip 실측 근거).
+                그래서 이 배너는 '전체가 오지 않은 경우' 에만 뜨고, 세 원인(구버전 엣지 / 현장
+                되돌림 / 크기 가드)을 **다르게** 안내한다 — 조치가 다르기 때문이다. 판정·문구는
+                순수 모듈 `sanPortsScopeText.js` 가 소유한다(테스트가 고정). */}
+            {(() => {
+              const note = portsScopeNote({ agent: d.agent, ports: d.ports });
+              if (!note) return null;
+              return (
+                <div style={{ color: TONE.warn, marginTop: 4 }}>
+                  <BoldText text={note.text} />
+                  {note.action && <div className="muted" style={{ marginTop: 2 }}>→ {note.action}</div>}
+                </div>
+              );
+            })()}
             {d.extra?.rateReady === false && (
               <div style={{ marginTop: 4 }}>처리량은 두 번째 수집부터 표시됩니다(누적 카운터의 차이로 계산 — 첫 수집은 비교 대상이 없습니다).</div>
             )}

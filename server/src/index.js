@@ -206,6 +206,12 @@ app.use('/api/central/agent-config', BIG_JSON); // 엣지 설정 통합 push(다
 // 엣지 쪽은 gzip 을 붙였지만 express.json 의 limit 은 **해제 후 길이**라 한도도 함께 올려야 한다.
 app.use('/api/central/storage-data', BIG_JSON);
 app.use('/api/central/pdu-data', BIG_JSON);
+// v2.517: SAN 스위치 push 가 **전체 포트**로 바뀌었다(`sanswitch/push.js` 머리말 — gzip 실측 근거).
+// 엣지는 700KB 청크 + gzip 으로 보내지만 express.json 의 limit 은 **해제 후 길이**라 기본 1MB 로는
+// 포트 수가 많은 디렉터 1대가 단독 청크로 413 이 될 수 있다(413 = 그 법인 데이터의 조용한 전량 소실).
+// 포트 사용량(sanswitch-perf)도 같은 축이라 함께 올린다(v2.517 에 상태 payload 가 더해졌다).
+app.use('/api/central/sanswitch-data', BIG_JSON);
+app.use('/api/central/sanswitch-perf', BIG_JSON);
 // 대상 가져오기는 XLSX 를 base64 로 실을 수 있어(2,000행 규모 ~1MB 초과 가능) 큰 한도를 준다.
 app.use('/api/svcmon/targets/import', BIG_JSON);
 app.use('/api/svcmon/targets/hostmap/parse', BIG_JSON);

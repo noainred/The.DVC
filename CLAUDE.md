@@ -50,9 +50,22 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     licensed/online/free)는 전체 기준을 유지하고 뺀 개수는 `portsOmitted` 로 표시할 것.
     포트 처리량은 누적 카운터 델타로 계산하므로(`rates.js`) **첫 수집은 null** 이고 카운터
     리셋(음수 델타)도 null 이다 — 0 으로 채우면 '트래픽 없음'으로 오해된다.
-    push 는 **gzip + 청크**(`push.js chunkDevices`, 요청당 700KB — 중앙 express.json 1MB 한도 아래)이며
-    청크 0 은 중앙 목록 교체·이후 청크는 upsert 병합(`central/sanSwitchEdge.js`) — 이 병합을 없애면
-    중앙 목록이 마지막 청크만 남는다.
+    push 는 **gzip + 청크**(`push.js chunkDevices`, 요청당 700KB)이며 청크 0 은 중앙 목록 교체·이후
+    청크는 upsert 병합(`central/sanSwitchEdge.js`) — 이 병합을 없애면 중앙 목록이 마지막 청크만 남는다.
+    ⚠ **v2.517 정정 — 이제 기본이 '전체 포트' 다**(사용자 요청 "전체 포트 보는 것으로 기능 개선").
+    위의 '문제 포트만' 근거("매 주기 수 MB")는 **압축 전 크기**였고 이 경로는 그 뒤 gzip 이 붙었다.
+    실측(v2.517): 128포트 × 8대 = 원본 255~408KB · **gzip 6~12KB(압축비 40배)** → 5분 주기로 하루
+    3.5MB 다. 되돌리는 길 두 개를 **지울 것**: ① 엣지 `SANSW_PUSH_PORTS=problem`(회선이 좁은 법인의
+    탈출구) ② 장비당 크기 가드 `SANSW_PUSH_DEVICE_MAX_BYTES`(기본 900KB — 넘으면 **그 장비만**
+    축약하고 `portsScopeReason` 에 사유를 남긴다. 조용히 줄이면 화면이 '전체를 받았다' 고 거짓말한다).
+    `scopeSnapshot` 은 순수 함수이고 테스트가 압축비 20배 하한까지 고정한다 — 그 비율이 깨지면
+    '전체 기본' 의 근거가 사라지므로 재검토할 것.
+    ⚠ `/api/central/sanswitch-data`·`sanswitch-perf` 는 **BIG_JSON 등록이 필수**다(v2.517 에 누락을
+    발견해 추가). `express.json` 기본 1MB 는 **해제 후 길이**라 포트 많은 디렉터 1대가 단독 청크로
+    413 이 되고, 413 은 `resilientFetch` 재시도 대상이 아니라 **그 법인 데이터가 조용히 전량 소실**된다.
+    ⚠ 화면은 **'전체를 받았는지' 를 추측하지 않는다** — `ports.portsScope`('full'|'problem')로
+    구버전 엣지(필드 없음 → 엣지 업그레이드) / 현장 되돌림 / 크기 가드를 **각각 다르게** 안내한다
+    (조치가 다르다). 판정·문구는 `web/src/views/tools/sanPortsScopeText.js` 하나가 소유한다.
   - **장비당 타임아웃은 세션을 실제로 끊어야 한다**(v2.417, `proxy/sshExec.js withDeadline` + `withSsh`
     signal): `Promise.race` 로 결과만 포기하면 SSH 세션이 남은 명령을 끝까지 돌려(최대 ~8.5분) 동시성
     상한이 실효를 잃고 다음 주기가 같은 장비에 두 번째 세션을 연다. SAN·스토리지·perf 폴러 전부 이
