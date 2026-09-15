@@ -16,27 +16,27 @@ import {
 const n = (wwn, side, extra = {}) => ({ wwn, label: wwn, alias: '', side, confidence: 'inferred', degree: 1, port: null, online: null, hint: '', ...extra });
 const graph = {
   nodes: [
-    n('10:00:00:10:9b:c2:11:11', 'initiator', { alias: 'ESX10_HBA1', degree: 3 }),
-    n('10:00:00:10:9b:c2:53:96', 'initiator', { alias: 'ESX14_HBA1', degree: 2 }),
-    n('50:06:01:60:4c:e4:0b:f8', 'target', { alias: 'Unity_SPA0', degree: 2 }),
-    n('50:00:09:79:a0:03:98:98', 'target', { alias: 'VMAX_FA03', degree: 1 }),
-    n('c0:01:44:87:a7:a5:00:00', 'target', { alias: 'VPLEX_FE_A0', degree: 1 }),
+    n('10:00:00:10:9b:00:00:01', 'initiator', { alias: 'HOSTA01_HBA1', degree: 3 }),
+    n('10:00:00:10:9b:00:00:02', 'initiator', { alias: 'HOSTA02_HBA1', degree: 2 }),
+    n('50:06:01:60:00:00:00:a0', 'target', { alias: 'Unity_SPA0', degree: 2 }),
+    n('50:00:09:70:00:00:00:b0', 'target', { alias: 'VMAX_FA03', degree: 1 }),
+    n('c0:01:44:00:00:00:01:00', 'target', { alias: 'VPLEX_FE_A0', degree: 1 }),
   ],
   links: [
-    { a: '10:00:00:10:9b:c2:11:11', b: '50:06:01:60:4c:e4:0b:f8', zone: 'Z1' },
-    { a: '10:00:00:10:9b:c2:11:11', b: 'c0:01:44:87:a7:a5:00:00', zone: 'Z2' },
-    { a: '10:00:00:10:9b:c2:53:96', b: '50:06:01:60:4c:e4:0b:f8', zone: 'Z3' },
-    { a: '10:00:00:10:9b:c2:53:96', b: '50:00:09:79:a0:03:98:98', zone: 'Z4' },
-    { a: '10:00:00:10:9b:c2:11:11', b: '10:00:00:10:9b:c2:53:96', zone: 'BAD_SAME_SIDE' },
+    { a: '10:00:00:10:9b:00:00:01', b: '50:06:01:60:00:00:00:a0', zone: 'Z1' },
+    { a: '10:00:00:10:9b:00:00:01', b: 'c0:01:44:00:00:00:01:00', zone: 'Z2' },
+    { a: '10:00:00:10:9b:00:00:02', b: '50:06:01:60:00:00:00:a0', zone: 'Z3' },
+    { a: '10:00:00:10:9b:00:00:02', b: '50:00:09:70:00:00:00:b0', zone: 'Z4' },
+    { a: '10:00:00:10:9b:00:00:01', b: '10:00:00:10:9b:00:00:02', zone: 'BAD_SAME_SIDE' },
   ],
   columns: {},
 };
 
 describe('라벨·문구', () => {
   it('별칭 > 라벨 > WWN 뒤 4바이트', () => {
-    expect(shortLabel({ alias: 'ESX10', label: 'x', wwn: 'a' })).toBe('ESX10');
-    expect(shortLabel({ label: 'sym-name', wwn: '10:00:00:10:9b:c2:11:11' })).toBe('sym-name');
-    expect(shortLabel({ label: '10:00:00:10:9b:c2:11:11', wwn: '10:00:00:10:9b:c2:11:11' })).toBe('…9b:c2:11:11');
+    expect(shortLabel({ alias: 'HOSTA01', label: 'x', wwn: 'a' })).toBe('HOSTA01');
+    expect(shortLabel({ label: 'sym-name', wwn: '10:00:00:10:9b:00:00:01' })).toBe('sym-name');
+    expect(shortLabel({ label: '10:00:00:10:9b:00:00:01', wwn: '10:00:00:10:9b:00:00:01' })).toBe('…9b:00:00:01');
     expect(shortLabel(null)).toBe('');
   });
   it('sourceText — 활성/정의 출처를 구분해 말한다', () => {
@@ -83,7 +83,7 @@ describe('layoutGraph', () => {
     expect(L.width).toBeGreaterThan(0);
   });
   it('middle 이 있으면 3열', () => {
-    const g = { ...graph, nodes: [...graph.nodes, n('c0:01:44:87:a8:0e:8a:00', 'middle')] };
+    const g = { ...graph, nodes: [...graph.nodes, n('c0:01:44:00:00:00:05:00', 'middle')] };
     expect(layoutGraph(g, {}).cols.map((c) => c.key)).toEqual(['left', 'middle', 'right']);
   });
   it('flip — 좌우가 바뀌고 제목도 따라 바뀐다', () => {
@@ -101,14 +101,14 @@ describe('layoutGraph', () => {
     expect(L.shown.left).toBe(4);
   });
   it('focus — 그 노드에 직접 연결된 것만 남긴다', () => {
-    const L = layoutGraph(graph, { focus: '10:00:00:10:9b:c2:53:96' });
+    const L = layoutGraph(graph, { focus: '10:00:00:10:9b:00:00:02' });
     const shown = L.cols.flatMap((c) => c.nodes).map((x) => x.wwn);
-    expect(shown).toContain('10:00:00:10:9b:c2:53:96');
-    expect(shown).toContain('50:00:09:79:a0:03:98:98');
-    expect(shown).not.toContain('c0:01:44:87:a7:a5:00:00');
+    expect(shown).toContain('10:00:00:10:9b:00:00:02');
+    expect(shown).toContain('50:00:09:70:00:00:00:b0');
+    expect(shown).not.toContain('c0:01:44:00:00:00:01:00');
   });
   it('hover — 관련 없는 선을 dim 표시(지우지 않는다)', () => {
-    const L = layoutGraph(graph, { hover: '10:00:00:10:9b:c2:11:11' });
+    const L = layoutGraph(graph, { hover: '10:00:00:10:9b:00:00:01' });
     expect(L.edges.filter((e) => !e.dim).length).toBe(2);
     expect(L.edges.filter((e) => e.dim).length).toBe(2);
   });
@@ -123,7 +123,7 @@ describe('layoutGraph', () => {
 
 describe('layoutMatrix', () => {
   const matrix = {
-    rows: [n('i1', 'initiator', { alias: 'ESX10' }), n('i2', 'initiator', { alias: 'ESX14' })],
+    rows: [n('i1', 'initiator', { alias: 'HOSTA01' }), n('i2', 'initiator', { alias: 'HOSTA02' })],
     cols: [n('t1', 'target', { alias: 'Unity' }), n('t2', 'target', { alias: 'VMAX' })],
     cells: [{ r: 0, c: 0, n: 2, zones: ['Z1', 'Z2'] }, { r: 1, c: 1, n: 1, zones: ['Z4'] }],
   };
@@ -166,24 +166,24 @@ describe('cellColor · matchNode', () => {
     expect(cellColor(3)).not.toBe(cellColor(1));
   });
   it('검색은 이름·별칭·WWN·포트를 본다', () => {
-    const node = n('50:06:01:60:4c:e4:0b:f8', 'target', { alias: 'Unity_SPA0', port: '3/9' });
+    const node = n('50:06:01:60:00:00:00:a0', 'target', { alias: 'Unity_SPA0', port: '3/9' });
     expect(matchNode(node, '')).toBe(true);
     expect(matchNode(node, 'unity')).toBe(true);
-    expect(matchNode(node, '4c:e4')).toBe(true);
+    expect(matchNode(node, '01:60')).toBe(true, 'WWN 일부만 입력해도 찾는다');
     expect(matchNode(node, '3/9')).toBe(true);
-    expect(matchNode(node, 'esx')).toBe(false);
+    expect(matchNode(node, 'hosta')).toBe(false, '호스트쪽 이름은 이 타깃 노드에 매치되지 않는다');
   });
 });
 
 describe('labelMap — 뒤 4바이트가 겹치면 라벨이 같아 보인다(v2.511 스크린샷에서 발견)', () => {
   // 실제 현장 값: Unity SPA0/SPB0 은 뒤 4바이트가 같다.
-  const SPA = '50:06:01:60:4c:e4:0b:f8';
-  const SPB = '50:06:01:69:4c:e4:0b:f8';
+  const SPA = '50:06:01:60:00:00:00:a0';
+  const SPB = '50:06:01:69:00:00:00:a0';
   it('충돌한 것만 앞으로 늘려 유일하게 만든다', () => {
-    const m = labelMap([n(SPA, 'target'), n(SPB, 'target'), n('10:00:00:10:9b:c2:11:11', 'initiator')]);
+    const m = labelMap([n(SPA, 'target'), n(SPB, 'target'), n('10:00:00:10:9b:00:00:01', 'initiator')]);
     expect(m.get(SPA)).not.toBe(m.get(SPB));
-    expect(m.get(SPA)).toContain('4c:e4:0b:f8');
-    expect(m.has('10:00:00:10:9b:c2:11:11')).toBe(false, '충돌하지 않은 것은 손대지 않는다(라벨이 길어지지 않게)');
+    expect(m.get(SPA)).toContain('00:00:00:a0');
+    expect(m.has('10:00:00:10:9b:00:00:01')).toBe(false, '충돌하지 않은 것은 손대지 않는다(라벨이 길어지지 않게)');
     // shortLabel 이 그 라벨을 실제로 쓴다.
     expect(shortLabel({ wwn: SPA, label: SPA }, m)).toBe(m.get(SPA));
     expect(shortLabel({ wwn: SPB, label: SPB }, m)).toBe(m.get(SPB));
@@ -197,7 +197,7 @@ describe('labelMap — 뒤 4바이트가 겹치면 라벨이 같아 보인다(v2
     expect(shortLabel({ wwn: SPA, alias: 'Unity_SPA0' }, m)).toBe('Unity_SPA0');
   });
   it('labels 없이 호출하던 기존 사용처는 그대로 동작한다', () => {
-    expect(shortLabel({ wwn: SPA, label: SPA })).toBe('…4c:e4:0b:f8');
+    expect(shortLabel({ wwn: SPA, label: SPA })).toBe('…00:00:00:a0');
     expect(labelMap([]).size).toBe(0);
     expect(labelMap().size).toBe(0);
   });

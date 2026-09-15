@@ -62,7 +62,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - **`Initiator+Target`(VPLEX 같은 겸용)은 한쪽 열에 넣지 않는다** — 가운데 열이다. 같은 장비의
       FE/BE 는 **WWN 이 달라** 양쪽 열에 각각 나오는 것이 정상이다(오류로 보고 '고치지' 말 것).
     - **WWN 라벨은 뒤 4바이트만 쓰면 서로 다른 장비가 같은 이름으로 보인다** — 이 현장 Unity
-      SPA0/SPB0 가 실제로 그랬다(`…4c:e4:0b:f8` 두 줄. **스크린샷을 읽어야 잡힌다** — 수치로는
+      SPA0/SPB0 가 실제로 그랬다(`…00:00:00:a0` 두 줄. **스크린샷을 읽어야 잡힌다** — 수치로는
       안 잡혔다). `labelMap()` 이 충돌한 것만 앞으로 늘린다. 전부 늘리면 박스를 넘친다.
     - **폴링 금지** — 탭을 열 때 1회만 부른다(zone 수천 개 패브릭에서 분석이 O(zone×멤버²)).
       수집 자체는 스냅샷만 읽으므로 vCenter/스위치 왕복이 없다.
@@ -72,6 +72,13 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       포트만 중앙에 올라온다(`push.js slimSnapshot`). 일부만 보고 단정하면 거짓이 된다.
     - ⚠ `zoning.zones` 는 v2.510 까지 **숫자(항상 0)** 였고 v2.511 에 **배열**이 됐다. 개수는
       `zoneCount`. 되돌리면 그림이 통째로 빈다.
+    - **테스트 픽스처에 실제 운영 식별자를 넣지 말 것**(v2.513 — 이 저장소는 **공개**다):
+      `test/fixtures/cfgshow-sample.txt` 는 v2.511 에 실장비 출력을 그대로 커밋했다가(호스트명·
+      WWN·어레이 구성) 익명화했다. 파서는 **형식만** 검증하므로 실제 값은 이득이 0 이고 노출만
+      남는다. 되돌리지 말 것. 단 익명화할 때 **두 성질은 보존**한다 — ① WWN 앞 OUI 접두
+      (`WWN_HINTS` 가 벤더·방향 추정에 쓴다) ② Unity SPA0/SPB0 의 **뒤 4바이트 동일**
+      (`labelMap()` 라벨 충돌의 유일한 재현 사례). 상세는 `test/sanZoning2511.test.js` 헤더.
+      새 수집기 픽스처를 만들 때도 같은 규칙 — 실장비 캡처는 형식만 옮기고 값은 합성한다.
   - **롤업 O(N)**(`withRollups`): 호스트/VM/DS/알람을 vCenter별 1회 그룹핑 후 조회(`pick`). 그룹마다 전체 재순회(O(N×vCenter)) 금지.
   - **시계열 prune 스로틀 + ts 인덱스**: 매 샘플 DELETE 스캔 금지 — N틱마다 1회(store 10틱·metrics 20틱·idrac.poller 10틱). `DELETE WHERE ts<?`는 `ts` 단독 인덱스가 있어야 풀스캔을 피한다(복합 `(server_id,ts)`로는 못 탐).
   - **ETag/304**(`util/compress.js`): res.json 래퍼가 본문 SHA-1로 약한 ETag를 발급하고 If-None-Match 일치 시 304(본문 0바이트). 이 래퍼는 res.end로 직접 종료해 Express 기본 ETag가 동작하지 않으므로, 응답 경로 수정 시 ETag 발급을 없애면 프론트 `pollFetch`의 304 지원이 통째로 죽는다(과거 실제 그 상태였음 — 15초 폴 × 30초 스냅샷이면 절반이 무변동 재전송).
