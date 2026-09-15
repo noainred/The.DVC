@@ -17,6 +17,8 @@
  */
 
 import { parseCsvRows, csvLine, unguardCell, delimiterHint, CSV_BOM } from '../util/csv.js';
+import { analyzeBulkImport } from '../util/bulkImport.js';
+import { parseFreeRows, rowsToFreeText, unmark } from '../util/bulkText.js';
 import { isKnownType, isImplementedType, STORAGE_TYPES } from './types.js';
 
 // 내보내기/샘플 공통 컬럼 순서(password 는 가져오기 전용이라 맨 끝 — export 는 값 비움).
@@ -66,29 +68,19 @@ export function devicesToCsv(devices, dcName = (x) => x, { includePasswords = fa
  * @returns {{report:Array, summary:{add:number,update:number,error:number,withPassword:number}}}
  */
 export function analyzeImport(rows, { existingKey, resolveDc, validate }) {
-  const seenInFile = new Map(); // host|type → 첫 등장 행 번호(파일 내 중복 검출)
-  const report = [];
-  const summary = { add: 0, update: 0, error: 0, withPassword: 0 };
-  for (const row of rows) {
-    const base = { line: row._line, name: row.name || row.host, host: row.host, type: row.type, hasPassword: !!row._hasPassword };
-    const quick = rowIssue(row);
-    const k = `${row.host}|${row.type}`;
-    const dupLine = seenInFile.get(k);
-    let action = 'error'; let reason = null;
-    if (quick) reason = quick;
-    else if (dupLine) reason = `파일 내 중복 — ${dupLine}행과 같은 host+type(어느 행이 저장될지 모호)`;
-    else {
-      // 실제 저장과 동일한 입력 형태로 검증(datacenter 해석 포함) — 규칙 단일 소스.
-      reason = validate({ type: row.type, name: row.name, host: row.host, username: row.username,
-        password: row._hasPassword ? row.password : '', datacenterId: resolveDc(row.datacenter) });
-      if (!reason) action = existingKey(row.host, row.type) ? 'update' : 'add';
-    }
-    if (!dupLine) seenInFile.set(k, row._line);
-    if (row._hasPassword && action !== 'error') summary.withPassword++;
-    summary[action === 'error' ? 'error' : action]++;
-    report.push({ ...base, action, reason });
-  }
-  return { report, summary };
+  // v2.513: 판정 코어는 `util/bulkImport.js` 하나다(SAN 스위치도 같은 기능을 요구받았고, 복사하면
+  // 두 판정이 갈라진다). 이 함수는 **시그니처를 유지하는 얇은 위임**이다 —
+  // `storageMon.test.js` 가 이 형태를 고정하고 있어 호출부·테스트를 건드리지 않는다.
+  return analyzeBulkImport(rows, {
+    keyOf: (row) => `${row.host}|${row.type}`,   // 스토리지 식별 키는 host+type
+    keyLabel: 'host+type',
+    quickIssue: rowIssue,
+    // 실제 저장과 동일한 입력 형태로 검증(datacenter 해석 포함) — 규칙 단일 소스.
+    toInput: (row) => ({ type: row.type, name: row.name, host: row.host, username: row.username,
+      password: row._hasPassword ? row.password : '', datacenterId: resolveDc(row.datacenter) }),
+    existing: (row) => !!existingKey(row.host, row.type),
+    validate,
+  });
 }
 
 /** 샘플 CSV — 헤더 + 주석(설명) + 예시 2행. 관리자가 받아서 채워 넣는 템플릿. */
@@ -165,4 +157,97 @@ export function rowIssue(row) {
   if (!isImplementedType(row.type)) return `미구현 타입 '${row.type}'`;
   if (!row.host) return 'host 누락';
   return null;
+}
+
+/* ══════════════════ 자유텍스트(v2.513, 사용자 요청) ══════════════════
+ * CSV 는 헤더·구분자를 맞춰야 하는데 현장에서 장비 목록은 위키 표·메일 본문·엑셀 한 컬럼으로
+ * 온다. 그래서 붙여넣은 그대로 받는 경로를 둔다 — 파싱만 다르고 **이후 파이프라인
+ * (analyzeImport → saveDevice)은 CSV 와 완전히 같다**(판정이 갈라지지 않게).
+ */
+
+/** 자유텍스트 위치형 열 순서 — password 는 맨 끝(내보내기는 늘 비운다). */
+export const TEXT_FIELDS = ['type', 'name', 'host', 'username', 'collectMethod', 'sshPort', 'datacenter', 'agent', 'enabled', 'note', 'password'];
+
+/** 별칭 — CSV 헤더 별칭(parseDevicesCsv 의 idx 목록)과 **같은 어휘**를 쓴다. */
+export const TEXT_ALIASES = {
+  타입: 'type', 표시명: 'name', 이름: 'name', ip: 'host', fqdn: 'host',
+  계정: 'username', user: 'username', 비밀번호: 'password', pw: 'password',
+  method: 'collectMethod', 수집방식: 'collectMethod', collectmethod: 'collectMethod',
+  port: 'sshPort', 포트: 'sshPort', sshport: 'sshPort',
+  datacenterid: 'datacenter', 법인: 'datacenter', dc: 'datacenter',
+  엣지: 'agent', 수집주체: 'agent', 활성: 'enabled', 메모: 'note', comment: 'note',
+};
+
+/**
+ * 자유텍스트 → 장비 입력 행. `parseDevicesCsv` 와 **같은 출력 형태**를 만든다
+ * (`_line`·`_hasPassword`·enabled 불리언) — 그래야 뒤 파이프라인을 공유할 수 있다.
+ * @param {string} text
+ * @param {{defaults?:object}} [opts] 화면의 '공통값' — 빈 필드만 채운다
+ * @returns {{rows:Array, error?:string, warnings:string[], headerUsed:string[]|null, order:string[]}}
+ */
+export function parseDevicesText(text, { defaults = {} } = {}) {
+  const r = parseFreeRows(text, { fields: TEXT_FIELDS, aliases: TEXT_ALIASES, defaults });
+  if (r.error) return { rows: [], error: r.error, warnings: r.warnings, headerUsed: null, order: TEXT_FIELDS };
+  const rows = r.rows.map((row) => {
+    // 내보내기가 빈칸에 넣은 `-` 와 공백 보존용 인용부호를 되돌린다(왕복 안전).
+    const v = (f) => unmark(row[f]);
+    const password = v('password');
+    return {
+      _line: row._line,
+      type: v('type'), name: v('name'), host: v('host'),
+      username: v('username'),
+      password,
+      collectMethod: v('collectMethod').toLowerCase(),
+      sshPort: v('sshPort'),
+      datacenter: v('datacenter'),
+      agent: v('agent'),
+      enabled: bool(v('enabled')),
+      note: v('note'),
+      _hasPassword: password !== '',
+    };
+  }).filter((row) => row.name || row.host);      // 완전 빈 행 스킵(CSV 와 같은 규칙)
+  if (!rows.length) return { rows: [], error: 'name·host 가 모두 빈 줄만 있습니다.', warnings: r.warnings, headerUsed: r.headerUsed, order: r.headerUsed || TEXT_FIELDS };
+  return { rows, warnings: r.warnings, headerUsed: r.headerUsed, order: r.headerUsed || TEXT_FIELDS };
+}
+
+/** 등록 장비 → 자유텍스트(정렬된 표). **비밀번호는 담지 않는다**(CSV export 와 같은 계약). */
+export function devicesToText(devices, dcName = (x) => x) {
+  const rows = (devices || []).map((d) => ({
+    type: d.type || '', name: d.name || '', host: d.host || '', username: d.username || '',
+    collectMethod: d.type === 'isilon' ? (d.collectMethod || 'ssh') : '',
+    sshPort: d.collectMethod === 'ssh' || d.type === 'isilon' ? String(d.sshPort || 22) : '',
+    datacenter: dcName(d.datacenterId) || d.datacenterId || '',
+    agent: d.agent || '', enabled: d.enabled === false ? 'false' : 'true',
+    note: d.note || '', password: '',                        // 절대 내보내지 않는다
+  }));
+  return rowsToFreeText(rows, TEXT_FIELDS, {
+    comment: [
+      '스토리지 장비 목록(자유텍스트) — 이 파일을 고쳐 그대로 가져올 수 있습니다.',
+      '· 열 구분: 탭 · | · 쉼표 · 공백 중 아무거나. 빈칸은 `-`.',
+      '· 비밀번호는 보안상 내보내지 않습니다 — 새로 넣을 때만 마지막 열에 적으세요(비우면 기존 유지).',
+    ].join('\n'),
+  });
+}
+
+/** 샘플 자유텍스트 — 세 가지 표기를 한 파일에서 보여 준다(위치형·키=값·헤더). */
+export function sampleText() {
+  const impl = STORAGE_TYPES.filter((t) => t.implemented).map((t) => t.type).join(' | ');
+  return [
+    '# 스토리지 장비 대량 등록 — 자유텍스트 샘플',
+    '# 한 줄에 장비 하나. `#` 줄과 빈 줄은 무시합니다. 아래 세 가지 표기를 모두 받습니다.',
+    `# type 후보: ${impl}`,
+    '#',
+    '# ① 위치형 — 열 순서대로. 구분자는 탭·|·쉼표·공백 중 아무거나. 빈칸은 `-`.',
+    `#   순서: ${TEXT_FIELDS.join(' ')}`,
+    'isilon  WA-Isilon-01  10.20.0.50  root  ssh  22  WA  WA-Edge  true  "법인 WA 아카이브"  ChangeMe!1',
+    'powerstore  KR-PS-500T  10.10.0.9  admin  -  -  한국  -  true  "중앙 직접 수집"  ChangeMe!2',
+    '',
+    '# ② 키=값형 — 아는 항목만 적습니다(순서 무관, 한글 키도 가능).',
+    'type=unity name=KR-Unity-01 host=10.10.0.20 계정=admin 비밀번호=ChangeMe!3 법인=한국',
+    '',
+    '# ③ 헤더형 — 첫 줄에 열 이름을 적으면 그 순서로 읽습니다(엑셀에서 헤더까지 복사한 경우).',
+    'host  name  type  username',
+    '10.10.0.31  KR-Isilon-02  isilon  root',
+    '',
+  ].join('\n');
 }
