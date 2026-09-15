@@ -1,6 +1,18 @@
 {
   "notes": [
     {
+      "version": "2.514.0",
+      "date": "2026-09-15",
+      "title": "스토리지 수집 오류 진단 — 'fetch failed' 사유 규명 + PowerStore 경보 쿼리 문법 수정",
+      "notes": [
+        "전송 계층 실패를 행동 가능한 사유로 바꾸는 순수 모듈 추가(storage/collectors/netError.js): undici 는 연결 거부·타임아웃·인증서 실패를 전부 'TypeError: fetch failed' 하나로 던지고 진짜 코드는 err.cause 에 숨긴다. 수집기가 e.message 만 섹션 오류에 담아 화면에 'fetch failed' 만 남던 것을, cause 사슬을 따라가 ECONNREFUSED/ETIMEDOUT/EHOSTUNREACH/ENETUNREACH/ECONNRESET/EPIPE/ENOTFOUND/EAI_AGAIN/EPROTO 와 TLS 코드 5종별로 '무엇을 확인해야 하는지' 한 줄 + 원문 코드로 바꾼다. 대상 host:port 를 함께 밝히고, AbortSignal.timeout 은 'aborted' 대신 실제 제한 시간(예: 15초 초과)을 말한다. 상위 작업 취소는 '장비 오류가 아님' 으로 구분한다.",
+        "REST 수집기 전부에 적용: restCommon.js 의 getter/rawGetter/poster 3개 경로가 fetchOrExplain 래퍼를 지나고, 자체 fetch 를 쓰던 isilon.js 도 같은 규약을 따른다. HTTP 응답을 받은 오류(4xx/5xx·401)는 이미 사유가 있으므로 다시 감싸지 않는다(isTransportError). 원문 오류는 cause 로 보존한다.",
+        "PowerStore 경보 쿼리 문법 수정: 'filter=state.eq.ACTIVE' 는 PowerStore REST(PostgREST)에 없는 파라미터라 장비가 'HTTP 400 — Unable to parse passed url.' 로 거부했다(다른 섹션은 전부 정상인데 alerts 만 오류). 필드명 자체가 쿼리 파라미터이므로 'state=eq.ACTIVE' 로 고쳤다. 이 파일의 다른 쿼리는 전부 select=/limit= 만 써서 이 한 줄만 문법이 달랐다.",
+        "경보 폴백과 그 고지: 장비 버전에 따라 alert 에 state 가 없을 수 있으므로 실패 시 필터 없이 받아 코드에서 거른다(isActiveAlert — state 가 있으면 그 값, 없으면 확인된 것만 제외). 폴백을 탔다는 사실은 extra.alertsNote 로 화면에 밝힌다. sections 값에는 섞지 않는다 — 화면 배지는 'ok'/'skip' 정확 일치가 아니면 빨간 '오류' 로 그려서 정상 수집이 오류로 보이기 때문이다.",
+        "회귀 테스트 server/test/storageNetError.test.js(10건): cause 사슬 탐색·코드별 문구·타임아웃 실제 시간 표기·취소 구분·HTTP 오류 비래핑·restCommon/isilon 의 모든 fetch 가 래퍼를 지나는지·alert 호출 줄에 filter= 가 없는지·isActiveAlert 판정·alertsNote 가 sections 를 오염시키지 않는지."
+      ]
+    },
+    {
       "version": "2.513.0",
       "date": "2026-09-15",
       "title": "장비 대량 등록 — CSV·자유텍스트 가져오기/내보내기 + 샘플 + 형식검증 + 실제 연결 테스트 + 통과분만 선택 등록 + 수정 조언(스토리지·SAN 스위치)",

@@ -23,6 +23,19 @@ export function pickLatestSpacePoint(metrics) {
   return pool[pool.length - 1];
 }
 
+/**
+ * 알람 1건이 '미해결' 인가(순수, v2.513).
+ * 폴백 경로(장비가 `state=eq.ACTIVE` 를 못 받는 버전)에서만 쓴다 — 전체를 받아 코드에서 거른다.
+ * PowerStore 는 `state` 를 ACTIVE/CLEARED 로 주는데, 버전에 따라 이 필드가 없고
+ * `is_acknowledged` 만 있는 응답도 있다. **필드가 없다고 해서 미해결이라고 단정하지 않는다** —
+ * 확인(acknowledged)된 것만 제외하고 나머지는 남긴다(건수를 줄여 '조용한 축소' 를 만들지 않기 위함).
+ */
+export function isActiveAlert(a) {
+  const s = String(a?.state ?? '').trim().toUpperCase();
+  if (s) return s === 'ACTIVE';
+  return a?.is_acknowledged !== true;
+}
+
 /** 원시 응답 → 정규화(순수 — storageMon.test.js 픽스처 고정). raw: {cluster,sw,appliances,metrics,appliancePools,nodes,users,alerts} */
 export function normalizePowerstore(device, raw) {
   const snap = emptySnapshot(device);
@@ -89,6 +102,10 @@ export function normalizePowerstore(device, raw) {
     const bySeverity = {};
     for (const a of raw.alerts) { const k = String(a.severity || 'Unknown'); bySeverity[k] = (bySeverity[k] || 0) + 1; }
     snap.extra.alertsBySeverity = bySeverity;
+    // v2.513: 장비가 state 필터를 못 받아 '전체를 받아 코드에서 거른' 경우 그 사실을 밝힌다.
+    // ⚠ sections 값에 섞지 말 것 — 화면 배지는 'ok'/'skip' 정확 일치가 아니면 **빨간 '오류'** 로
+    //   그린다(StorageMonTool.jsx). 정상 수집을 오류로 표시하는 것은 이 수정의 목적과 반대다.
+    if (raw.alertsNote) snap.extra.alertsNote = String(raw.alertsNote);
     snap.sections.alerts = 'ok';
   }
 
@@ -281,7 +298,25 @@ export async function collect(device, { signal = null } = {}) {
     }
     await step('nodes', () => get('/api/rest/node?select=id,slot,appliance_id'));
     await step('users', () => get('/api/rest/local_user?select=id,name,is_locked'));
-    await step('alerts', () => get('/api/rest/alert?select=id,severity&filter=state.eq.ACTIVE&limit=500'));
+    /* alerts(v2.513 수정) — 예전 쿼리는 `filter=state.eq.ACTIVE` 였는데 PowerStore REST 는
+     * **PostgREST 문법**이라 필드명 자체가 쿼리 파라미터다(`state=eq.ACTIVE`). `filter=` 라는
+     * 파라미터는 없어서 장비가 `HTTP 400 — Unable to parse passed url.` 로 거부했다
+     * (사용자 신고: 다른 섹션은 전부 OK 인데 alerts 만 오류). 다른 쿼리들이 전부 `select=`/`limit=`
+     * 만 쓰고 있어 이 한 줄만 문법이 달랐다.
+     * 폴백: 버전에 따라 alert 에 `state` 가 없을 수 있으므로, 400 이면 필터 없이 받아 코드에서
+     * 거른다(필터 하나 때문에 알람 수집 전체를 잃지 않게). 어느 경로를 썼는지는 화면에 밝힌다. */
+    await step('alerts', async () => {
+      try {
+        const r = await get('/api/rest/alert?select=id,severity&state=eq.ACTIVE&limit=500');
+        raw.alertsNote = '';
+        return r;
+      } catch (e) {
+        if (/401/.test(e.message) || signal?.aborted) throw e;
+        const all = await get('/api/rest/alert?select=id,severity,state,is_acknowledged&limit=500');
+        raw.alertsNote = `state 필터 미지원(${String(e.message).slice(0, 80)}) — 전체를 받아 미해결만 집계`;
+        return Array.isArray(all) ? all.filter(isActiveAlert) : all;
+      }
+    });
 
     // ── 인벤토리/성능(v2.404, 사용자 요구 '수집할 수 있는 모든 데이터') ────────────────
     // 전부 best-effort: 이 장비/버전에 없는 리소스(파일 서비스 미구성 등)는 4xx 가 나는 게
