@@ -21,6 +21,7 @@ import { loadPerfSettings } from './perfSettings.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import { config } from '../config.js';
 import { pushPerfNow } from './perfPush.js';
+import { recordActivity, latestEventByDevice } from './perfActivityLog.js';
 
 const CONCURRENCY = Math.max(1, Math.min(8, Number(process.env.SANSW_PERF_CONCURRENCY) || 2));
 /**
@@ -34,10 +35,25 @@ const DEVICE_TIMEOUT_MS = (captureMs) => Math.max(30_000, Number(process.env.SAN
 let _timer = null;
 let _busy = false;
 let _last = { at: 0, collected: 0, failed: 0 };
+/**
+ * 진행중 표시(v2.517) — 화면 하단 '수집 작업' 패널의 '진행중' 구획 원천이다. 기본 수집 폴러
+ * (`poller.js _inFlight`)와 같은 규약: 시작 시 담고 끝나면 지운다(성공·실패 무관).
+ */
+const _inFlight = new Map(); // deviceId → { id, name, host, startedAt }
 
 export const perfIntervalMs = () => loadPerfSettings().intervalMs;
 
-/** 한 스위치에서 1샘플 수집(스냅샷 메타를 붙여 저장). */
+/**
+ * 한 스위치에서 1샘플 수집(스냅샷 메타를 붙여 저장) + **작업 로그 기록**(v2.517).
+ *
+ * 왜 로그가 필요한가: v2.516 까지 실패 사유는 `_last.errors` 5건(메모리·장비명 문자열)뿐이라
+ * 화면에서 '이 스위치가 왜 안 쌓이나' 를 볼 방법이 없었다. 제한 셸(rbash)처럼 계정 때문에
+ * portperfshow 가 안 되는 경우가 실제로 있고(사용자 스크린샷의 `rbash: … command not found`),
+ * 그 사유는 사람이 읽어야 조치할 수 있다.
+ *
+ * ⚠ **REST 장비의 '건너뜀' 은 기록하지 않는다** — 매 주기 시도조차 하지 않으므로 기록하면
+ *   상한을 '아무 일도 없었음' 으로 소진한다. 그 사실은 `perfDiag`('rest-method')가 말한다.
+ */
 async function collectOne(dev) {
   const st = loadPerfSettings();
   const full = getDeviceWithSecret(dev.id) || dev;
@@ -93,11 +109,24 @@ export async function pollPerfOnce({ force = false } = {}) {
   try {
     const devices = devicesForThisNode();
     await pool(devices, CONCURRENCY, async (d) => {
+      const t = Date.now();
+      _inFlight.set(String(d.id), { id: d.id, name: d.name || d.id, host: d.host || '', startedAt: t });
       try {
         const r = await collectOne(d);
-        if (r.skipped) return;
+        if (r.skipped) return;          // REST 장비 — 로그에 남기지 않는다(위 collectOne 머리말)
         collected++;
-      } catch (e) { failed++; errors.push(`${d.name || d.id}: ${e.message}`); }
+        recordActivity({
+          deviceId: d.id, name: d.name || d.id, host: d.host || '', source: 'central', ok: true,
+          durationMs: Date.now() - t, ports: r.ports ?? null, totalBps: r.total ?? null,
+        });
+      } catch (e) {
+        failed++; errors.push(`${d.name || d.id}: ${e.message}`);
+        // ⚠ 실패 이벤트의 수치는 null 이다 — 0 을 실으면 '포트 0개' 라는 거짓이 찍힌다(v2.516 규약).
+        recordActivity({
+          deviceId: d.id, name: d.name || d.id, host: d.host || '', source: 'central', ok: false,
+          durationMs: Date.now() - t, ports: null, totalBps: null, error: e.message,
+        });
+      } finally { _inFlight.delete(String(d.id)); }
     });
     _last = { at: Date.now(), collected, failed, durationMs: Date.now() - t0, total: devices.length, errors: errors.slice(0, 5) };
     // 엣지(v2.423): 수집 직후 중앙으로 중계 — push 타이머를 기다리면 최대 한 주기(기본 5분)가 더 걸린다.
@@ -116,5 +145,34 @@ export function startSanSwitchPerfPoller() {
 
 export function sanSwitchPerfStatus() {
   const st = loadPerfSettings();
-  return { ..._last, settings: st, busy: _busy, concurrency: CONCURRENCY };
+  return {
+    ..._last, settings: st, busy: _busy, concurrency: CONCURRENCY,
+    // 화면 공용 패널(CollectActivity)이 기본 수집과 **같은 키**로 읽는다 — 이름을 바꾸면 한쪽이
+    // 조용히 빈다(v2.516 규약). 주기는 서버가 주는 값만 쓰고 문구에 숫자를 박지 않는다.
+    intervalMs: perfIntervalMs(),
+    inFlight: [..._inFlight.values()],
+    enabled: st.enabled,
+  };
+}
+
+/**
+ * 엣지 → 중앙 보고용 상태(v2.517). 표본이 0건이어도 이것만은 올라가야 중앙이 '엣지가 켜졌는지·
+ * 돌았는지·왜 실패하는지' 를 안다(`central/sanSwitchPerfEdge.js` 머리말 참조).
+ * 장비별 최근 1건은 작업 로그에서 뽑는다 — 폴러의 errors 배열은 id 가 없어 장비와 못 묶는다.
+ */
+export function perfStatusForCentral({ maxDevices = 300 } = {}) {
+  const st = loadPerfSettings();
+  const latest = latestEventByDevice(Math.max(50, maxDevices));
+  const devices = [];
+  for (const d of devicesForThisNode()) {
+    const e = latest.get(String(d.id));
+    if (!e) continue;
+    devices.push({ id: d.id, ok: !!e.ok, at: e.at, error: e.ok ? null : (e.error || null), ports: e.ok ? (e.ports ?? null) : null });
+    if (devices.length >= maxDevices) break;
+  }
+  return {
+    enabled: st.enabled, intervalMs: st.intervalMs, sampleSeconds: st.sampleSeconds,
+    at: _last?.at || null, collected: _last?.collected ?? null, failed: _last?.failed ?? null,
+    total: _last?.total ?? null, devices,
+  };
 }

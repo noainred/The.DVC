@@ -11,6 +11,8 @@ import { dropSnapshot } from '../sanswitch/store.js';
 import { collectDeviceNow, testDeviceConnection } from '../sanswitch/poller.js';
 import { applyCentralPerfSettings } from '../sanswitch/perfSettings.js';
 import { pushSanSwitchNow } from '../sanswitch/push.js';
+import { pollPerfOnce } from '../sanswitch/perfPoller.js';
+import { pushPerfNow } from '../sanswitch/perfPush.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 
 export const configPullMs = () => Math.max(60_000, Number(process.env.SANSW_CONFIG_PULL_MS) || 5 * 60_000);
@@ -59,8 +61,26 @@ async function _pull() {
     // pull 자체를 막지 않도록 비동기로 돌린다(테스트는 최대 60초).
     const tests = Array.isArray(body?.testNow) ? body.testNow.slice(0, 5) : [];
     for (const t of tests) runDelegatedTest(t).catch((e) => console.warn(`[sanswitch-config] 테스트 대행 실패 ${t?.id}: ${e.message}`));
-    _last = { at: Date.now(), applied, count: devices.length, collectRequested: wants.length, collected, testRequested: tests.length, perfApplied };
-    return { ok: true, applied, unchanged: !applied, count: devices.length, collectRequested: wants.length, collected, testRequested: tests.length, perfApplied };
+    /**
+     * 포트 사용량 '지금 수집' 대행(v2.517). 중앙에서 버튼을 누르면 엣지 위임 장비는 이 플래그로만
+     * 실행된다(중앙은 엣지에 명령을 밀어넣을 수 없다 — pull 구조).
+     *
+     * · `force: true` — 설정이 꺼져 있어도 관리자가 눌러 시험할 수 있게(중앙 라우트와 같은 의미론).
+     * · **await 하지 않는다** — portperfshow 캡처는 표본 시간(기본 8초)×장비 수라 pull 응답을 붙잡으면
+     *   설정 반영·연결 테스트 대행이 그만큼 밀린다. 재진입 가드가 중복 실행을 막는다.
+     * · 수집 뒤 즉시 push — 표본이 0건이어도 상태 하트비트가 올라가 중앙이 사유를 본다.
+     */
+    let perfCollect = false;
+    if (body?.perfCollectNow === true) {
+      perfCollect = true;
+      (async () => {
+        const r = await pollPerfOnce({ force: true });
+        console.log(`[sanswitch-config] 중앙 요청 포트 사용량 수집: ${r.ok ? `성공 ${r.collected}대 / 실패 ${r.failed}대` : `건너뜀(${r.reason})`}`);
+        await pushPerfNow();
+      })().catch((e) => console.warn(`[sanswitch-config] 포트 사용량 수집 대행 실패: ${e.message}`));
+    }
+    _last = { at: Date.now(), applied, count: devices.length, collectRequested: wants.length, collected, testRequested: tests.length, perfApplied, perfCollect };
+    return { ok: true, applied, unchanged: !applied, count: devices.length, collectRequested: wants.length, collected, testRequested: tests.length, perfApplied, perfCollect };
   } catch (e) {
     _last = { at: Date.now(), error: e.message };
     return { ok: false, reason: e.message };

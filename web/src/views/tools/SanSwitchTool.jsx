@@ -13,6 +13,7 @@ import { stateLabel, stateTone, opticalHealth, errorLevel, capacityLevel, aggreg
 import { STable } from '../../components/STable.jsx';
 import BulkDeviceIo from './BulkDeviceIo.jsx';
 import CollectActivity from './CollectActivity.jsx';
+import { perfDiagText, diagBorder, perfCollectSummary } from './sanPerfDiagText.js';
 
 /**
  * 특수기능 › SAN 스위치 모니터링(v2.410 — 사용자 요구 'Brocade SAN switch 포트 모니터링 및
@@ -675,7 +676,49 @@ const tsLabel = (ts, hours) => {
  *  2) 스토리지별 — 같은 어레이에 여러 포트가 물려 있으므로(SYMMETRIX 의 SAF-1d/3d/5d…)
  *     포트 처리량을 어레이 단위로 합산해야 '그 스토리지가 실제로 얼마나 쓰이는지'가 보인다.
  */
+/**
+ * 사용량 표본이 없을 때의 안내(v2.517, 사용자 신고 "데이터 수집이 안되, edge 의 사용량도 분석하게 해줘").
+ *
+ * v2.516 까지는 원인이 무엇이든 "설정에서 켜면 쌓기 시작합니다" 한 문구였다 — REST 장비·제한 셸
+ * 계정처럼 **켜도·기다려도 영원히 안 쌓이는** 경우까지 그 문구가 덮었다. 이제 서버가 원인을
+ * 판정해(`sanswitch/perfDiag.js`) `diag.kind` 로 내려주고, 문구는 순수 모듈이 만든다.
+ *
+ * ⚠ 실패 원문은 툴팁이 아니라 `<pre>` 로 보여준다 — 복사·공유가 되고 모바일에서도 보인다(v2.516 규약).
+ */
+function PerfEmptyState({ diag, deviceId }) {
+  const t = perfDiagText(diag);
+  return (
+    <div className="card" style={{ fontSize: 13, lineHeight: 1.8, borderColor: diagBorder(t.tone) }}>
+      <div style={{ fontWeight: 600 }}>
+        {t.waiting ? '⏳ ' : t.tone === 'fix' ? '⚠ ' : 'ℹ '}{t.title}
+      </div>
+      <div className="muted" style={{ marginTop: 2 }}>{t.body}</div>
+      {t.action && <div style={{ marginTop: 6 }}>→ {t.action}</div>}
+      {t.error && (
+        <div style={{ marginTop: 8 }}>
+          <div className="muted" style={{ fontSize: 11, marginBottom: 2 }}>장비가 준 사유(원문):</div>
+          <pre style={{ margin: 0, padding: 8, background: 'var(--bg2, rgba(0,0,0,0.25))', borderRadius: 6,
+            fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 140, overflow: 'auto' }}>{t.error}</pre>
+        </div>
+      )}
+      {diag?.pendingRequest && (
+        <div className="muted" style={{ marginTop: 6 }}>이 스위치의 엣지에 재수집 요청이 대기 중입니다 — 엣지가 다음 설정 pull 때 가져갑니다.</div>
+      )}
+      <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>
+        판정 근거는 아래 <b>수집 작업</b> 로그에서 확인할 수 있습니다{deviceId ? '(이 스위치의 최근 결과 포함)' : ''}.
+      </div>
+    </div>
+  );
+}
+
 function PerfPanel({ deviceId, ports }) {
+  /**
+   * '지금 수집'(v2.517) — 중앙 직접 장비는 즉시, 엣지 위임 장비는 **재수집 요청만** 등록된다.
+   * 응답을 뭉치지 않고 '즉시 N대 / 요청 M곳' 으로 나눠 말한다(v2.516 '전체 수집' 과 같은 규약).
+   * 재진입: 진행 중이면 버튼을 잠근다(연타가 스위치 SSH 세션을 곱하지 않게).
+   */
+  const [collecting, setCollecting] = useState(false);
+  const [collectMsg, setCollectMsg] = useState('');
   const [hours, setHours] = useState(24);
   const [range, setRange] = useState(null);     // {from,to} ms — 기간 지정(v2.420)
   const [mode, setMode] = useState('avg');      // 'avg' | 'peak' (v2.420)
@@ -705,6 +748,14 @@ function PerfPanel({ deviceId, ports }) {
       .catch((e) => { if (alive) setError(e.message); });
     return () => { alive = false; };
   }, [deviceId, hours, range, view]);
+
+  const collectNow = () => {
+    setCollecting(true); setCollectMsg('수집 요청 중…');
+    postJson('/tools/sanswitch/perf/collect', {})
+      .then((r) => setCollectMsg(`${perfCollectSummary(r)}${r?.note ? ` — ${r.note}` : ''}`))
+      .catch((e) => setCollectMsg(`수집 실패: ${e.message}`))
+      .finally(() => setCollecting(false));
+  };
 
   // 포트 현재 속도(포화도 계산용) — 목록 스냅샷에서 가져온다.
   const speedOf = useMemo(() => {
@@ -772,23 +823,26 @@ function PerfPanel({ deviceId, ports }) {
         ))}
         <ModePicker mode={mode} setMode={setMode} />
         <RangePicker hours={hours} setHours={setHours} range={range} setRange={setRange} />
+        <button className="tab" style={{ flex: 'none', padding: '4px 10px' }} disabled={collecting}
+          onClick={collectNow}
+          title="portperfshow 를 지금 1회 실행합니다. 중앙 직접 수집 장비는 즉시, 엣지 위임 장비는 재수집 요청만 등록됩니다(중앙은 엣지에 명령을 밀어넣을 수 없습니다).">
+          {collecting ? '수집 중…' : '🔄 지금 수집'}
+        </button>
       </div>
+      {collectMsg && <div className="card muted" style={{ fontSize: 12, padding: 8, marginBottom: 6 }}>{collectMsg}</div>}
       {shown && <div style={{ marginBottom: 6 }}><MetricHelp mode={mode} bucketMs={shown.bucketMs} hours={effHours} scope={range ? rangeLabel(range) : ''} /></div>}
       {shown?.rangeIssue && <div className="card muted" style={{ fontSize: 12, borderColor: 'var(--amber)' }}>⚠ 기간 지정 무시됨: {shown.rangeIssue} — 최근 24시간으로 표시합니다.</div>}
 
       {error && <ErrorBox message={error} />}
       {!error && !shown && <Loading />}
       {shown && (!rows.length || !top.length) && (
-        <div className="card muted" style={{ fontSize: 13, lineHeight: 1.8 }}>
-          {rows.length && raw.length && !seriesAll.length
-            ? <>'{kind === 'array' ? '스토리지' : kind === 'host' ? '호스트(HBA)' : ''}' 로 분류된 연결 대상이 없습니다 — 위에서 '전체'를 눌러 보세요.</>
-            : <>아직 수집된 사용량 데이터가 없습니다.</>}
-          <div style={{ marginTop: 4 }}>
-            <b>설정 › 수집 서버 › SAN 스위치 포트 사용량</b> 에서 수집을 켜면 <code>portperfshow</code> 를 주기적으로
-            실행해 쌓기 시작합니다(기본은 꺼짐 — 운영 스위치에 주기 접속을 임의로 만들지 않기 위해서입니다).
-            {shown.unavailable ? <div style={{ color: 'var(--amber)', marginTop: 4 }}>이 서버는 시계열 DB(node:sqlite)를 쓸 수 없어 이력이 저장되지 않습니다.</div> : null}
-          </div>
-        </div>
+        rows.length && raw.length && !seriesAll.length
+          ? (
+            <div className="card muted" style={{ fontSize: 13, lineHeight: 1.8 }}>
+              '{kind === 'array' ? '스토리지' : kind === 'host' ? '호스트(HBA)' : ''}' 로 분류된 연결 대상이 없습니다 — 위에서 '전체'를 눌러 보세요.
+            </div>
+          )
+          : <PerfEmptyState diag={shown.diag} deviceId={deviceId} />
       )}
 
       {!!rows.length && (
@@ -860,6 +914,21 @@ function PerfPanel({ deviceId, ports }) {
           </div>
         </>
       )}
+
+      {/* 수집 작업 로그(v2.517) — 기본 수집과 **같은 공용 패널**을 쓴다(응답 형태 {poller,events} 동일).
+          '이 스위치가 왜 안 쌓이나' 의 판정 근거가 여기 있고, 실패 배지를 누르면 원문이 펼쳐진다. */}
+      <CollectActivity
+        path="/tools/sanswitch/perf/activity"
+        title="사용량 수집 작업"
+        metricCols={[
+          { key: 'ports', label: '표본 포트', align: 'right', sort: (e) => String(e.ports ?? ''),
+            render: (e) => (e.ports == null ? '—' : `${e.ports}개`),
+            detail: (e) => (e.ports == null ? '' : `${e.ports}개 포트의 표본을 저장`) },
+          { key: 'totalBps', label: '합계 처리량', align: 'right', muted: true, sort: (e) => String(e.totalBps ?? ''),
+            render: (e) => (e.totalBps == null ? '—' : bytesPerSecText(e.totalBps)),
+            detail: (e) => (e.totalBps == null ? '' : bytesPerSecText(e.totalBps)) },
+        ]}
+      />
     </div>
   );
 }
@@ -1004,7 +1073,12 @@ function DcStoragePerf({ dcPerf, onClose }) {
         <div className="card muted" style={{ fontSize: 13, lineHeight: 1.8 }}>
           {data.series?.length && !series.length ? null : <>'{scopeLabel}' 범위에 아직 수집된 포트 사용량이 없습니다.</>}
           <div style={{ marginTop: 4 }}>
-            <b>설정 › 수집 서버 › SAN 스위치 포트 사용량</b> 에서 수집을 켜야 <code>portperfshow</code> 로 쌓기 시작합니다(기본 꺼짐).
+            {/* v2.517: **꺼져 있을 때만** '켜세요' 라고 말한다. 예전에는 무조건 이 문구여서, 이미 켜져
+                있고 장비에서 실패하는 상황에서도 사용자가 멀쩡한 설정을 의심하며 헤맸다(장비별 진단은
+                장비 상세 › 사용량 분석 탭이 `perfDiag` 로 사유를 말한다). */}
+            {data.perfEnabled === false
+              ? <><b>설정 › 수집 서버 › SAN 스위치 포트 사용량</b> 에서 수집을 켜야 <code>portperfshow</code> 로 쌓기 시작합니다(기본 꺼짐).</>
+              : <>포트 사용량 수집은 <b>켜져 있습니다</b> — 표본이 없는 이유는 스위치마다 다릅니다. 장비를 눌러 <b>사용량 분석</b> 탭을 열면 그 스위치의 사유(첫 주기 대기 / 엣지 미보고 / 명령 실패 등)를 알려줍니다.</>}
             {data.unavailable ? <div style={{ color: 'var(--amber)', marginTop: 4 }}>이 서버는 시계열 DB(node:sqlite)를 쓸 수 없어 이력이 저장되지 않습니다.</div> : null}
             {!data.switches.length ? <div style={{ marginTop: 4 }}>이 법인에 등록된 스위치가 없습니다.</div> : null}
             {data.series?.length && !series.length

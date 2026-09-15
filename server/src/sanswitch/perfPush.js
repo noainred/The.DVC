@@ -15,7 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { promisify } from 'node:util';
-import { config } from '../config.js';
+import { config, currentVersion } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { samplesAfter, metaFor, maxRowid } from './perfDb.js';
 import { loadPerfSettings } from './perfSettings.js';
@@ -77,6 +77,34 @@ export function reconcileCursor(cursor, max) {
   return c > m ? 0 : c;
 }
 
+/**
+ * 이 엣지의 perf 수집 상태(v2.517). perfPoller 를 **동적 import** 로 읽는다 — perfPoller 가
+ * 이 모듈의 `pushPerfNow` 를 정적으로 import 하므로 정적 순환이 되고, 순환은 로드 순서에 따라
+ * 한쪽이 undefined 로 보이는 부류의 사고를 만든다. 이미 로드된 모듈의 동적 import 는 캐시 조회다.
+ */
+async function statusPayload() {
+  try {
+    const { perfStatusForCentral } = await import('./perfPoller.js');
+    return { ...perfStatusForCentral(), pushAt: _last?.at || null, version: currentVersion() };
+  } catch (e) {
+    // 상태를 못 만들어도 push 를 막지 않는다 — '모른다' 를 그대로 보낸다(지어내지 않는다).
+    return { enabled: loadPerfSettings().enabled, at: null, devices: [], statusError: String(e.message).slice(0, 200), version: currentVersion() };
+  }
+}
+
+/** 표본 없이 상태만 올리는 하트비트. 중앙이 v2.517 미만이면 status 를 그냥 무시한다(호환). */
+async function sendStatusOnly(status) {
+  try {
+    const json = Buffer.from(JSON.stringify({ agent: config.agent.name, chunk: 0, chunks: 1, rows: [], meta: [], status }));
+    let body = json;
+    const hdrs = { 'Content-Type': 'application/json', 'X-Agent-Name': config.agent.name, 'X-Central-Token': config.agent.centralToken };
+    if (PUSH_GZIP) { try { body = await gzipAsync(json); hdrs['Content-Encoding'] = 'gzip'; } catch { body = json; } }
+    const res = await resilientFetch(`${config.agent.centralUrl}/api/central/sanswitch-perf`, { method: 'POST', headers: hdrs, body, timeoutMs: 20_000, retries: 1 });
+    if (!res.ok) return { ok: false, reason: `sanswitch-perf <- ${res.status}` };
+    return { ok: true };
+  } catch (e) { return { ok: false, reason: e.message }; }
+}
+
 export async function pushPerfNow() {
   if (!config.agent.centralUrl || !config.agent.centralToken) return { ok: false, reason: 'push 비활성화(CENTRAL_URL/TOKEN 미설정)' };
   if (_busy) return { ok: false, reason: '이전 push 진행 중' };
@@ -87,8 +115,25 @@ export async function pushPerfNow() {
     const rec = reconcileCursor(from, max);
     if (rec !== from) { console.warn(`[sanswitch-perf-push] 커서(${from})가 현재 최대 rowid(${max})보다 큼 — 표가 비워졌다 재적재된 것으로 보고 0 으로 되돌립니다.`); from = rec; saveCursor(0); }
     const { rows, maxRowid, unavailable } = await samplesAfter(from, MAX_ROWS);
-    if (unavailable) { _last = { at: Date.now(), sent: 0, reason: 'DB 비활성' }; return { ok: false, reason: 'DB 비활성' }; }
-    if (!rows.length) { _last = { at: Date.now(), sent: 0, cursor: from }; return { ok: true, sent: 0 }; }
+    const status = await statusPayload();
+    if (unavailable) {
+      // DB 를 못 열면 표본은 영원히 0건이다 — 그 사실도 중앙이 알아야 한다(아래 하트비트로 보고).
+      await sendStatusOnly(status).catch(() => {});
+      _last = { at: Date.now(), sent: 0, reason: 'DB 비활성', statusSent: true };
+      return { ok: false, reason: 'DB 비활성' };
+    }
+    if (!rows.length) {
+      /**
+       * ⚠ **표본이 0건이어도 상태는 올린다**(v2.517). 예전에는 여기서 그냥 반환해, 엣지가 수집에
+       * 실패하거나 꺼져 있으면 중앙으로 **아무것도** 가지 않았다 — 그리고 그게 바로 사용자가
+       * 신고한 상태다("데이터 수집이 안되"). 중앙은 엣지가 켜졌는지·돌았는지·왜 실패하는지
+       * 알 방법이 없었고, 화면은 '설정에서 켜세요' 라는 한 문구로 그 전부를 덮었다.
+       * 상태 전용 요청은 수백 바이트라 push 주기(기본 5분)마다 보내도 회선 부담이 없다.
+       */
+      const r = await sendStatusOnly(status);
+      _last = { at: Date.now(), sent: 0, cursor: from, statusSent: r.ok, statusError: r.ok ? null : r.reason };
+      return { ok: true, sent: 0, statusSent: r.ok };
+    }
     const meta = await metaFor(rows.map((r) => r.d));
     // meta 는 별도 청크로 먼저(각 청크가 예산 안), 그 뒤 표본 청크 — 어느 요청도 700KB 예산을 넘지 않는다.
     const payloads = [
@@ -103,6 +148,9 @@ export async function pushPerfNow() {
         agent: config.agent.name, chunk: i, chunks: chunks.length,
         rows: c.map((r) => [r.d, r.ts, r.p, r.b]),
         meta: chunks[i].meta.map((m) => [m.d, m.p, m.ts, m.name, m.wwn, m.speed, m.type]),
+        // 상태는 **청크 0 에만** 싣는다(v2.517) — 매 청크에 실으면 중앙이 같은 상태를 청크 수만큼
+        // 다시 기록하고, 청크마다 수백 바이트가 늘어난다.
+        ...(i === 0 ? { status } : {}),
       }));
       let body = json;
       const hdrs = { 'Content-Type': 'application/json', 'X-Agent-Name': config.agent.name, 'X-Central-Token': config.agent.centralToken };

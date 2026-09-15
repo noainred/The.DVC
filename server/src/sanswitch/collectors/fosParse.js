@@ -370,29 +370,65 @@ export function parsePortPerfShow(text) {
   const lines = String(text || '').split(/\r?\n/);
   const isSep = (l) => /^=+$/.test(l.trim());
   const tokens = (l) => l.trim().split(/\s+/).filter(Boolean);
-  const isHeader = (t) => t.length > 0 && t.every((x) => /^\d+$/.test(x) || /^total$/i.test(x)) && /^\d+$/.test(t[0]);
+  const isNum = (x) => /^\d+$/.test(x);
+  const isTotal = (x) => /^total$/i.test(x);
+  const isHeader = (t) => t.length > 0 && t.every((x) => isNum(x) || isTotal(x)) && isNum(t[0]);
 
   const samples = [];
   let cur = null;
   let lastFirst = -1;
   for (let i = 0; i < lines.length; i++) {
-    const t = tokens(lines[i]);
-    if (!isHeader(t)) continue;
-    // 구분선을 건너뛰고 값 줄을 찾는다(구분선이 없는 변형도 견디게 최대 2줄까지 본다).
+    let hdr = tokens(lines[i]);
+    if (!isHeader(hdr)) continue;
     let j = i + 1;
+
+    /**
+     * ⚠ **줄바꿈된 출력을 이어붙인다**(v2.517 — 사용자 제공 실장비 캡처로 확정).
+     *
+     * `portperfshow` 는 터미널 폭에 맞춰 한 블록(16포트)을 **여러 줄로 쪼개** 찍는다. 사용자
+     * 환경(FOS v9.2.2c, 128포트)의 실제 출력이 그 형태였다 — 포트 번호 14개 뒤에 `46 47` 두 개가
+     * 다음 줄로 넘어간다. 값 줄도 같은 폭으로 쪼개진다.
+     *
+     * 예전 파서는 헤더 바로 다음 줄을 **값 줄로 단정**해서, 이어지는 헤더 조각(`46  47`)을 값으로
+     * 읽었다 — 실측(같은 캡처): 128포트 중 **3개만** 남고 그 값도 엉뚱했다
+     * (`{port 0: 49, port 62: 5790, port 63: 4030000}`). 0건이 아니라 **틀린 값이 저장**되므로
+     * 화면은 '수집되고 있다' 고 보이면서 숫자가 거짓이 된다. 그래서 여기서 끊어야 한다.
+     *
+     * 판정: 이어지는 헤더 조각은 **직전 포트 번호 + 1 로 시작**해야 한다. 이 연속성 검사가 없으면
+     * 구분선 없는 변형에서 값 줄(`0 0 0 …`, 전부 숫자라 isHeader 가 참)을 헤더로 삼킨다.
+     */
+    for (;;) {
+      const nx = tokens(lines[j] || '');
+      if (!nx.length || !isHeader(nx)) break;
+      const lastPort = hdr.filter(isNum).map(Number).pop();
+      if (lastPort == null || Number(nx[0]) !== lastPort + 1) break;
+      hdr = [...hdr, ...nx];
+      j++;
+    }
+
+    // 구분선/빈 줄 건너뛰기(구분선도 폭에 맞춰 두 줄로 쪼개진다 — 둘 다 `^=+$` 다).
     while (j < lines.length && (isSep(lines[j]) || !lines[j].trim())) j++;
     if (j >= lines.length) break;
-    const vals = tokens(lines[j]);
+
+    // 값은 **헤더 개수만큼** 모은다(쪼개진 줄을 이어붙인다). 빈 줄·구분선을 만나면 멈춘다 —
+    // 캡처가 중간에서 끊긴 경우는 아래 '부분 샘플 버리기' 가 처리한다.
+    const vals = [];
+    while (j < lines.length && vals.length < hdr.length) {
+      if (isSep(lines[j]) || !lines[j].trim()) break;
+      vals.push(...tokens(lines[j]));
+      j++;
+    }
     if (!vals.length) continue;
-    const first = Number(t[0]);
+
+    const first = Number(hdr[0]);
     if (!cur || first <= lastFirst) { cur = { ports: {}, total: null }; samples.push(cur); }
     lastFirst = first;
-    for (let k = 0; k < Math.min(t.length, vals.length); k++) {
+    for (let k = 0; k < Math.min(hdr.length, vals.length); k++) {
       const v = parseCounter(vals[k]);
-      if (/^total$/i.test(t[k])) { cur.total = v; continue; }
-      if (v != null) cur.ports[Number(t[k])] = v;
+      if (isTotal(hdr[k])) { cur.total = v; continue; }
+      if (v != null) cur.ports[Number(hdr[k])] = v;
     }
-    i = j;
+    i = j - 1;   // 다음 반복의 i++ 가 아직 보지 않은 줄을 가리키게 한다
   }
   // 캡처가 값 줄 중간에서 끊기면 마지막 샘플이 부분(포트 수 부족)일 수 있다 — 직전 완전 샘플보다
   // 포트 수가 적으면 마지막 것을 버리고 직전 샘플을 쓴다(절단 토큰이 '최신 값'으로 저장되는 것 방지).
