@@ -17,6 +17,17 @@
 
 import { splitLine } from './bulkText.js';
 
+
+/** 받침 유무로 조사를 고른다 — '항목를'·'하나으로' 같은 어색한 문구를 막는다. */
+function hasJong(word) {
+  const ch = String(word || '').trim().slice(-1);
+  const code = ch.charCodeAt(0);
+  if (Number.isNaN(code) || code < 0xac00 || code > 0xd7a3) return true;   // 한글 아니면 받침 있다고 본다(영문·숫자)
+  return (code - 0xac00) % 28 !== 0;
+}
+const eulReul = (w) => (hasJong(w) ? '을' : '를');
+const euRo = (w) => (hasJong(w) ? '으로' : '로');
+
 /**
  * 검증 메시지 → 어느 필드 문제인지. registry 문구를 **부분 일치**로 본다(문구가 조금 바뀌어도
  * 조언이 죽지 않게). 매칭 실패는 null — 지어내지 않는다.
@@ -37,8 +48,20 @@ const FIELD_RULES = [
 
 export function fieldOfIssue(issue) {
   const s = String(issue || '');
+  // ⚠ '파일 내 중복' 은 **값이 틀린 게 아니라 줄이 겹친 것**이다. 아래 FIELD_RULES 에 맡기면
+  //   메시지에 'host' 가 들어 있어 "host 형식을 고치세요" 라는 **틀린 조언**이 나간다(실측).
+  //   틀린 조언은 조언이 없는 것보다 나쁘다 — 사용자가 멀쩡한 값을 고친다.
+  if (/파일 내 중복/.test(s)) return null;
   // sshPort/httpsPort 를 port 일반 규칙보다 먼저 보도록 순서에 의존한다(위 배열 순서 유지).
   for (const r of FIELD_RULES) if (r.re.test(s)) return r.field;
+  return null;
+}
+
+/** 필드로 환원되지 않는 문제의 조언(중복 등). 없으면 null. */
+export function specialAdvice(issue) {
+  const s = String(issue || '');
+  const m = s.match(/파일 내 중복 — (\d+)행/);
+  if (m) return `이 줄은 ${m[1]}줄과 같은 장비를 가리킵니다 — 둘 중 **하나를 지우거나** host 를 올바른 값으로 고치세요(어느 쪽이 저장될지 모호해 저장하지 않았습니다).`;
   return null;
 }
 
@@ -105,11 +128,18 @@ export function adviseRow(row, issue, { lineText = '', order = [], format = 'tex
   else if (token?.form === 'positional') where = format === 'csv' ? `${row._line}줄의 '${field}' 열` : `${row._line}줄의 ${token.col}번째 항목`;
   else where = format === 'csv' ? `${row._line}줄의 '${field}' 열` : `${row._line}줄의 '${field}'`;
 
+  // 필드로 환원되지 않는 문제(파일 내 중복 등)는 전용 문구를 쓴다 — 엉뚱한 열을 지목하지 않는다.
+  const special = specialAdvice(issue);
+  if (special) {
+    return { line: row?._line ?? 0, field: null, issue: String(issue || ''),
+      advice: `${row?._line ?? '?'}줄: ${special}`, token: null, expected: { kind: 'none', hint: '' }, current: '' };
+  }
+
   const nowPart = field ? (current ? ` 현재 값은 \`${current}\` 입니다.` : ' 현재 값이 비어 있습니다.') : '';
   let fixPart = '';
   if (expected.kind === 'enum' && expected.values?.length) {
     const shown = expected.values.filter((v) => v !== '').slice(0, 8);
-    fixPart = ` ${expected.hint}으로 고치세요 — ${shown.map((v) => `\`${v}\``).join(' · ')}${expected.values.length > shown.length + (expected.values.includes('') ? 1 : 0) ? ' …' : ''}`;
+    fixPart = ` ${expected.hint}${euRo(expected.hint)} 고치세요 — ${shown.map((v) => `\`${v}\``).join(' · ')}${expected.values.length > shown.length + (expected.values.includes('') ? 1 : 0) ? ' …' : ''}`;
   } else if (expected.hint) {
     fixPart = ` ${expected.hint}.`;
   } else {
@@ -119,7 +149,7 @@ export function adviseRow(row, issue, { lineText = '', order = [], format = 'tex
   return {
     line: row?._line ?? 0,
     field, issue: String(issue || ''),
-    advice: `${where} 를 고쳐야 합니다.${nowPart}${fixPart}`,
+    advice: `${where}${eulReul(where)} 고쳐야 합니다.${nowPart}${fixPart}`,
     token, expected, current,
   };
 }

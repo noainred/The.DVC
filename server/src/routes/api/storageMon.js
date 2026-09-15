@@ -16,7 +16,10 @@ import { areaSummary, areaJson, capacityHistory, capacityHistoryAll, dbAvailable
 import { AREA_LABEL } from '../../storage/onefsCatalog.js';
 import { listDatacenters } from '../../datacenter/store.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
-import { devicesToCsv, sampleCsv, parseDevicesCsv, analyzeImport } from '../../storage/csv.js';
+import { devicesToCsv, sampleCsv, parseDevicesCsv, analyzeImport,
+  devicesToText, sampleText, parseDevicesText, TEXT_FIELDS } from '../../storage/csv.js';
+import { enrichAdvice, selectRows } from '../../util/bulkImport.js';
+import { startBulkTest, publicRun, passedLines } from '../../util/bulkRun.js';
 import { requestCollect, hasPendingRequest } from '../../storage/collectRequests.js';
 import { INTERVAL_SPEC, loadIntervalConfig, saveIntervalConfig, intervalsForAgent,
   envIntervals, runtimeIntervalSource, applyOwnIntervals } from '../../storage/intervals.js';
@@ -239,6 +242,22 @@ api.put('/tools/storage/intervals', adminOnly, (req, res) => {
 
 const dcNameMap = () => { try { const m = new Map(listDatacenters().map((x) => [x.id, x.name || x.id])); return (id) => m.get(id) || id || ''; } catch { return (id) => id || ''; } };
 
+
+/**
+ * 가져오기 본문 → 파싱 결과(v2.513). `text` 가 오면 자유텍스트, 아니면 기존 CSV.
+ * 두 경로가 **같은 행 형태**를 만들어 뒤 파이프라인(analyzeImport → saveDevice)을 공유한다.
+ */
+function stParseBody(body = {}) {
+  const raw = String(body.text ?? body.csv ?? '');
+  const format = body.format === 'text' || (body.text != null && body.csv == null) ? 'text' : 'csv';
+  if (format === 'text') {
+    const r = parseDevicesText(raw, { defaults: body.defaults || {} });
+    return { ...r, format, raw };
+  }
+  const r = parseDevicesCsv(raw);
+  return { ...r, warnings: [], headerUsed: null, order: TEXT_FIELDS, format, raw };
+}
+
 /**
  * 현재 등록 장비를 CSV 로 내보내기. 기본은 비밀번호 제외(listDevices 계약).
  * ?passwords=1(v2.317, 사용자 요구 '포함 여부 선택'): 평문 비밀번호 포함 — 자격증명 일괄
@@ -266,6 +285,23 @@ api.get('/tools/storage/devices/sample.csv', adminOnly, (_req, res) => {
   res.send(sampleCsv());
 });
 
+/* ── 자유텍스트 내보내기·샘플(v2.513, 사용자 요청) ──
+ * CSV 는 헤더·구분자를 맞춰야 하는데 현장 장비 목록은 위키 표·메일 본문·엑셀 한 컬럼으로 온다.
+ * 붙여넣은 그대로 받는 경로를 같은 파이프라인에 붙였다. **비밀번호는 담지 않는다**(CSV 와 같은 계약). */
+api.get('/tools/storage/devices/export.txt', adminOnly, (req, res) => {
+  const devices = listDevices();
+  logAudit({ user: req.user?.username, action: '스토리지 자유텍스트 내보내기', detail: `${devices.length}대` });
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="storage-devices.txt"');
+  res.send(devicesToText(devices, dcNameMap()));
+});
+
+api.get('/tools/storage/devices/sample.txt', adminOnly, (_req, res) => {
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="storage-devices-sample.txt"');
+  res.send(sampleText());
+});
+
 /**
  * CSV 일괄 가져오기 — body.csv 텍스트를 파싱해 행마다 saveDevice.
  * (host+type) 동일 장비는 수정(update), 없으면 추가. datacenter 는 이름/ID 모두 해석.
@@ -276,7 +312,7 @@ api.get('/tools/storage/devices/sample.csv', adminOnly, (_req, res) => {
  * 파일 내 중복(host+type) 검출. UI 는 검증 통과 후에만 실행 버튼을 활성화한다.
  */
 api.post('/tools/storage/devices/import', adminOnly, (req, res) => {
-  const { rows, error } = parseDevicesCsv(String(req.body?.csv || ''));
+  const { rows, error, warnings, headerUsed, order, format, raw } = stParseBody(req.body || {});
   if (error) return res.status(400).json({ ok: false, reason: error });
   if (!rows.length) return res.status(400).json({ ok: false, reason: '가져올 데이터 행이 없습니다.' });
 
@@ -301,16 +337,36 @@ api.post('/tools/storage/devices/import', adminOnly, (req, res) => {
     resolveDc,
     validate: deviceInputIssue,
   });
+  // v2.513: 오류 행에 '어디를 어떻게 고쳐라' 를 붙인다(사용자 요청). 판정은 다시 하지 않는다.
+  const adv = enrichAdvice(report, rows, {
+    text: raw, order, format, fields: TEXT_FIELDS,
+    ctx: {
+      types: STORAGE_TYPES.filter((t) => t.implemented).map((t) => t.type),
+      agents: knownAgentNames(),
+      datacenters: dcs.map((d) => d.name || d.id),
+    },
+  });
+
   if (req.body?.dryRun) {
-    return res.json({ ok: true, dryRun: true, report, summary, total: rows.length });
+    return res.json({ ok: true, dryRun: true, report: adv.report, summary, hints: adv.hints,
+      warnings: warnings || [], headerUsed: headerUsed || null, format, total: rows.length });
   }
+
+  // v2.513: '검증을 통과한 일부만 등록'(사용자 요청).
+  //  · selectLines — 화면에서 고른 줄 번호
+  //  · testRunId   — 연결 테스트 통과 줄과의 **교집합**만 저장
+  const tested = req.body?.testRunId ? passedLines(req.body.testRunId) : null;
+  if (req.body?.testRunId && tested == null) {
+    return res.status(400).json({ ok: false, reason: '연결 테스트 결과를 찾을 수 없습니다(15분 지나 폐기되었을 수 있습니다) — 다시 테스트하세요.' });
+  }
+  const sel = selectRows(rows, report, {
+    lines: Array.isArray(req.body?.selectLines) ? req.body.selectLines : null,
+    requireTested: tested,
+  });
 
   let added = 0, updated = 0; const failed = [];
 
-  const verdictByLine = new Map(report.map((r) => [r.line, r])); // O(rows²) find → O(rows) (v2.342 성능)
-  for (const row of rows) {
-    const verdict = verdictByLine.get(row._line);
-    if (verdict?.action === 'error') { failed.push({ line: verdict.line, name: verdict.name, reason: verdict.reason }); continue; }
+  for (const row of sel.picked) {
     const id = existing.get(key(row.host, row.type));
     const input = {
       id, type: row.type, name: row.name, host: row.host, username: row.username,
@@ -323,8 +379,79 @@ api.post('/tools/storage/devices/import', adminOnly, (req, res) => {
       if (id) updated++; else added++;
     } catch (e) { failed.push({ line: row._line, name: row.name || row.host, reason: e.message }); }
   }
-  logAudit({ user: req.user?.username, action: '스토리지 장비 CSV 가져오기', detail: `추가 ${added}·수정 ${updated}·실패 ${failed.length}` });
-  res.json({ ok: true, added, updated, failed, total: rows.length });
+  logAudit({ user: req.user?.username, action: `스토리지 장비 대량 가져오기(${format === 'text' ? '자유텍스트' : 'CSV'})`,
+    detail: `추가 ${added}·수정 ${updated}·실패 ${failed.length}·제외 ${sel.skipped.length}${tested ? ' (연결 통과분만)' : ''}` });
+  res.json({ ok: true, added, updated, failed, skipped: sel.skipped, total: rows.length, format });
+});
+
+/* ── 실제 연결 테스트(v2.513, 사용자 요청 "실제로 테스트해서 동작하는지 검증") ──
+ * 저장 **전에** 행마다 로그인을 시도한다. 형식 검증만으로는 계정·비번·방화벽·SSH 알고리즘을 알 수 없다.
+ *
+ * ⚠ 엣지 위임 장비(`agent` 지정)는 중앙에서 직접 닿을 수 없어 '실패' 가 아니라 **'테스트 불가'** 다
+ *   (닿지 못한 것을 실패라 하면 사용자가 멀쩡한 자격증명을 의심하며 고친다 — 정직 규약).
+ * ⚠ 자동 재시도 없음 — 잘못된 비밀번호를 반복하면 어레이 계정이 잠긴다(bulkRun 이 강제).
+ */
+api.post('/tools/storage/devices/import/test', adminOnly, (req, res) => {
+  const p = stParseBody(req.body || {});
+  if (p.error) return res.status(400).json({ ok: false, reason: p.error });
+
+  let dcs = [];
+  try { dcs = listDatacenters(); } catch { /* 원문 유지 */ }
+  const resolveDc = (v) => {
+    const t = String(v || '').trim();
+    if (!t) return '';
+    if (dcs.some((d) => d.id === t)) return t;
+    const byName = dcs.find((d) => String(d.name || '').toLowerCase() === t.toLowerCase());
+    return byName ? byName.id : t;
+  };
+  const key = (h, t) => `${h}|${t}`;
+  const existing = new Map(listDevices().map((d) => [key(d.host, d.type), d]));
+
+  // 형식 오류 행은 테스트하지 않는다(로그인 시도가 무의미하고 장비에 부하만 준다).
+  const { report } = analyzeImport(p.rows, {
+    existingKey: (h, t) => existing.get(key(h, t))?.id,
+    resolveDc, validate: deviceInputIssue,
+  });
+  const okLines = new Set(report.filter((r) => r.action !== 'error').map((r) => r.line));
+  const targets = p.rows.filter((r) => okLines.has(r._line));
+  if (!targets.length) return res.status(400).json({ ok: false, reason: '형식 검증을 통과한 행이 없습니다 — 먼저 오류를 고치세요.' });
+
+  const started = startBulkTest({
+    kind: 'storage', rows: targets, user: req.user?.username || '',
+    skipReason: (row) => (String(row.agent || '').trim()
+      ? `엣지 위임 장비(${row.agent}) — 중앙에서 직접 접속할 수 없어 테스트하지 않았습니다. 등록 후 엣지에서 수집됩니다.`
+      : null),
+    testOne: async (row) => {
+      const input = {
+        type: row.type, name: row.name, host: row.host, username: row.username,
+        password: row.password, collectMethod: row.collectMethod, sshPort: row.sshPort,
+        datacenterId: resolveDc(row.datacenter), agent: row.agent, enabled: row.enabled, note: row.note,
+      };
+      // 비밀번호가 비어 있으면(기존 유지) 저장된 값으로 테스트한다 — 그게 실제 수집이 쓸 값이다.
+      if (!row._hasPassword) {
+        const prev = existing.get(key(row.host, row.type));
+        const full = prev ? getDeviceWithSecret(prev.id) : null;
+        if (!full?.password) return { ok: false, reason: '비밀번호가 없습니다 — 신규 등록이면 password 열에 비밀번호를 적으세요.' };
+        input.password = full.password;
+      }
+      try {
+        const r = await testDeviceConnection(input, { timeoutMs: 60_000 });
+        return r?.ok
+          ? { ok: true, detail: { summary: r.summary || r.model || '로그인 성공' } }
+          : { ok: false, reason: r?.error || r?.reason || '로그인 실패', detail: { phase: r?.phase, hint: r?.hint } };
+      } catch (e) { return { ok: false, reason: e?.message || String(e) }; }
+    },
+  });
+  if (!started.ok) return res.status(409).json(started);
+  logAudit({ user: req.user?.username, action: '스토리지 대량 연결 테스트', detail: `${targets.length}대 시도(형식 오류 ${p.rows.length - targets.length}건 제외)` });
+  res.json({ ok: true, id: started.id, total: targets.length });
+});
+
+/** 연결 테스트 진행률·결과(폴링). 자격증명은 응답에 없다(bulkRun publicRun). */
+api.get('/tools/storage/devices/import/test/:id', adminOnly, (req, res) => {
+  const run = publicRun(req.params.id);
+  if (!run || run.kind !== 'storage') return res.status(404).json({ ok: false, reason: '실행을 찾을 수 없습니다(15분 지나 폐기되었을 수 있습니다).' });
+  res.json({ ok: true, ...run });
 });
 
 /** 영역별 수집 현황 + 원문(이 노드 DB — 중앙 수집 장비 전용. 엣지 장비 원문은 엣지 DB 에 있음). */
