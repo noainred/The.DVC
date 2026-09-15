@@ -42,7 +42,13 @@
  *   health: { status, fans, psus, tempC, alerts },   // 미수집 항목은 null
  *   licenses: [{ name, expires }],       // ≤32
  *   fabric: { switches, principal },
- *   zoning: { effectiveConfig, zones },
+ *   zoning: {                            // v2.511 — cfgshow/brocade-zone 에서 읽은 조닝
+ *     effectiveConfig,                   // 활성 설정 이름(switchshow 헤더 우선)
+ *     zones: [{ name, members[], aliasOf{} }],   // 멤버는 WWN(해석됨) + 미해석 원문
+ *     zoneCount, aliases, source, available, reason, counts, truncated, limited
+ *   },
+ *   nsRoles: { '<포트 WWN>': 'initiator'|'target'|'both' },  // v2.511 — 네임서버가 보고한 FC4 역할.
+ *                                        // 있을 때만 채운다(없으면 {} — 조닝 그림이 추정으로 떨어진다).
  *   sections: { ... },                   // 섹션별 'ok'|'skip'|오류문자열(부분 실패를 숨기지 않음)
  *   extra: {}
  * }
@@ -108,7 +114,10 @@ export function emptySnapshot(device = {}) {
     ports: { total: 0, licensed: 0, online: 0, offline: 0, disabled: 0, faulty: 0, noLicense: 0,
       free: 0, usedPct: 0, bySpeed: {}, list: [], truncated: false },
     health: { status: '', fans: null, psus: null, tempC: null, alerts: 0 },
-    licenses: [], fabric: { switches: 0, principal: '' }, zoning: { effectiveConfig: '', zones: 0 },
+    licenses: [], fabric: { switches: 0, principal: '' },
+    // v2.511: `zones` 는 **배열**(zone 멤버), 개수는 `zoneCount`. v2.510 까지는 숫자(항상 0)였다.
+    zoning: { effectiveConfig: '', zones: [], zoneCount: 0, aliases: {}, source: 'none', available: false, reason: '', counts: { zones: 0, definedZones: 0, aliases: 0, cfgs: 0 }, truncated: false, limited: false },
+    nsRoles: {},   // v2.511 — 네임서버 FC4 역할. 못 읽으면 비어 있다(추정으로 떨어진다).
     sections: {}, extra: {},
   };
 }

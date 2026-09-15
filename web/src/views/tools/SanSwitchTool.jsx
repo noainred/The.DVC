@@ -4,6 +4,7 @@ import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianG
 import { fetchJson, postJson, delJson } from '../../api.js';
 import { MODES, bucketText, perfQuery, toLocalDt, rangeIssueOf, rangeLabel, RANGE_MAX_DAYS } from './sanSwitchPerfText.js';
 import { statusText, traceText, isActive, phaseLabel } from './sanSwitchTestText.js';
+import SanZoningPanel from './SanZoningPanel.jsx';
 import { Loading, ErrorBox, Kpi, UsageCell, Modal, SearchBox } from '../../components/ui.jsx';
 import { stateLabel, stateTone, opticalHealth, errorLevel, capacityLevel, aggregate,
   throughputText, filterPorts, shortDeviceName, saturationPct, saturationLevel, bytesPerSecText,
@@ -1082,13 +1083,15 @@ function PortDetail({ detail, setDetail, closeDetail, portFilter, setPortFilter,
 
           {/* 포트 목록 / 사용량 분석 전환(v2.411) — 분석 탭은 portperfshow 시계열 DB 를 읽는다. */}
           <div className="vc-views" style={{ marginBottom: 8, display: 'flex', gap: 6 }}>
-            {[['ports', '포트 목록'], ['perf', '📈 사용량 분석']].map(([k, label]) => (
+            {[['ports', '포트 목록'], ['perf', '📈 사용량 분석'], ['zoning', '🔗 조닝']].map(([k, label]) => (
               <button key={k} className={tab === k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '5px 14px' }}
                 onClick={() => setTab(k)}>{label}</button>
             ))}
           </div>
 
           {tab === 'perf' && <PerfPanel deviceId={d.deviceId} ports={list} />}
+          {/* 조닝(v2.511) — cfgshow 파싱 결과. 폴링하지 않는다(탭을 열 때 1회 조회). */}
+          {tab === 'zoning' && <SanZoningPanel deviceId={d.deviceId} />}
 
           {tab === 'ports' && <>
           <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 8 }}>

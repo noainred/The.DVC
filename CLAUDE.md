@@ -47,6 +47,31 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     signal): `Promise.race` 로 결과만 포기하면 SSH 세션이 남은 명령을 끝까지 돌려(최대 ~8.5분) 동시성
     상한이 실효를 잃고 다음 주기가 같은 장비에 두 번째 세션을 연다. SAN·스토리지·perf 폴러 전부 이
     패턴이다 — 새 SSH 수집기를 추가하면 creds 에 `signal` 을 넘길 것. `exec()` 출력 상한(4MB)도 유지.
+  - **SAN 조닝은 '보여 주는 것' 이지 '판정해 주는 것' 이 아니다**(`sanswitch/zoning.js`,
+    `web/src/views/tools/sanZoningView.js`, v2.511 — 사용자 요청 "조닝 정보를 그림으로 예쁘게"·"둘 다"):
+    - **역할(이니시에이터/타깃)의 근거를 반드시 구분해 표시한다.** 스위치 네임서버가 FC4 역할을
+      알려주면 `confirmed`(●), 아니면 zone 그래프를 **BFS 2-색칠**해 나눈 `inferred`(◐)다. 이 구분을
+      없애고 한 색으로 칠하면 추정을 사실로 말하게 된다. `classifyEndpoints` 의 **판정 순서**도 지킬 것 —
+      `ns`(확정)를 `conflict`(홀수 사이클 → middle)보다 **먼저** 본다. 뒤집으면 다중 이니시에이터
+      zone 이 전부 middle 로 덮여 그 결함을 영영 못 찾는다(테스트가 고정).
+    - **`nsRoles` 가 없으면 '확정' 배지는 영원히 안 붙는다** — 초판이 실제로 그랬다(라우트가
+      `nsRoles` 를 만들지 않아 confirmed 분기가 도달 불가). 수집은 `fosParse.parseNsRoles`(nsshow 의
+      `Device type:`/`FC4s:`)와 `fosRest`(`fc4-features`/`name-server-device-type`)가 한다. ⚠ 실장비
+      nsshow 출력은 확인하지 못했다(사용자 제공 캡처는 cfgshow 뿐) — **없으면 빈 객체**이고 그림은
+      추정으로 떨어진다. 이 폴백을 '기본값 initiator' 따위로 바꾸지 말 것.
+    - **`Initiator+Target`(VPLEX 같은 겸용)은 한쪽 열에 넣지 않는다** — 가운데 열이다. 같은 장비의
+      FE/BE 는 **WWN 이 달라** 양쪽 열에 각각 나오는 것이 정상이다(오류로 보고 '고치지' 말 것).
+    - **WWN 라벨은 뒤 4바이트만 쓰면 서로 다른 장비가 같은 이름으로 보인다** — 이 현장 Unity
+      SPA0/SPB0 가 실제로 그랬다(`…4c:e4:0b:f8` 두 줄. **스크린샷을 읽어야 잡힌다** — 수치로는
+      안 잡혔다). `labelMap()` 이 충돌한 것만 앞으로 늘린다. 전부 늘리면 박스를 넘친다.
+    - **폴링 금지** — 탭을 열 때 1회만 부른다(zone 수천 개 패브릭에서 분석이 O(zone×멤버²)).
+      수집 자체는 스냅샷만 읽으므로 vCenter/스위치 왕복이 없다.
+    - **상한으로 잘린 zone·별칭·노드·행·열은 개수를 밝힌다**(`limited`·`omitted`), 페이저
+      (`--More--`)로 잘린 출력도 `truncated` 로 밝힌다(조용한 상한 금지).
+    - **'로그인 안 함' 판정은 포트 목록이 온전할 때만**(`portsComplete`) — 엣지 위임 장비는 문제
+      포트만 중앙에 올라온다(`push.js slimSnapshot`). 일부만 보고 단정하면 거짓이 된다.
+    - ⚠ `zoning.zones` 는 v2.510 까지 **숫자(항상 0)** 였고 v2.511 에 **배열**이 됐다. 개수는
+      `zoneCount`. 되돌리면 그림이 통째로 빈다.
   - **롤업 O(N)**(`withRollups`): 호스트/VM/DS/알람을 vCenter별 1회 그룹핑 후 조회(`pick`). 그룹마다 전체 재순회(O(N×vCenter)) 금지.
   - **시계열 prune 스로틀 + ts 인덱스**: 매 샘플 DELETE 스캔 금지 — N틱마다 1회(store 10틱·metrics 20틱·idrac.poller 10틱). `DELETE WHERE ts<?`는 `ts` 단독 인덱스가 있어야 풀스캔을 피한다(복합 `(server_id,ts)`로는 못 탐).
   - **ETag/304**(`util/compress.js`): res.json 래퍼가 본문 SHA-1로 약한 ETag를 발급하고 If-None-Match 일치 시 304(본문 0바이트). 이 래퍼는 res.end로 직접 종료해 Express 기본 ETag가 동작하지 않으므로, 응답 경로 수정 시 ETag 발급을 없애면 프론트 `pollFetch`의 304 지원이 통째로 죽는다(과거 실제 그 상태였음 — 15초 폴 × 30초 스냅샷이면 절반이 무변동 재전송).

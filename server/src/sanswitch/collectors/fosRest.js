@@ -19,6 +19,7 @@
 import { Agent } from 'undici';
 import { emptySnapshot, summarizePorts, MAX_PORTS } from '../types.js';
 import { applyRates } from '../rates.js';
+import { zoningFromRest } from '../zoningCollect.js';   // v2.511: 조닝 — SSH 경로와 같은 스키마
 
 // 자체서명 인증서 장비 한정 로컬 디스패처 — 전역 TLS 오염 금지(server/CLAUDE.md).
 // 보안(M-4, 2026-09-12): SANSWITCH_TLS_VERIFY=true 면 검증을 켠다(기본은 기존대로 해제 — 자체서명 FOS 대응).
@@ -134,7 +135,21 @@ export function buildSnapshot(device, parts = {}) {
   snap.wwn = sw['name'] || chassis['chassis-wwn'] || '';
   snap.domainId = sw['domain-id'] != null ? Number(sw['domain-id']) : null;
   snap.switchState = Number(sw['operational-status']) === 2 ? 'Online' : (sw['operational-status'] != null ? 'Offline' : '');
-  snap.zoning = { effectiveConfig: asArray(parts.zone?.['effective-configuration'])[0]?.['cfg-name'] || '', zones: 0 };
+  // 조닝(v2.511) — SSH 경로와 **같은 스키마**를 만든다(types.js 규약: 수집 방식이 달라도 요약은 하나).
+  snap.zoning = zoningFromRest(parts.zone, parts.zoneDefined);
+  // 네임서버 FC4 역할(SSH 의 parseNsRoles 와 같은 스키마). REST 는 항목마다 `fc4-features`
+  // (예: 'FCP-Target') 또는 `name-server-device-type`(예: 'Physical Initiator')에 역할이 실린다.
+  // 두 필드 모두 없으면 빈 객체 — 그림은 구조 추론으로 떨어지고 '확정' 배지는 붙지 않는다.
+  snap.nsRoles = {};
+  for (const n of asArray(parts.ns?.['fibrechannel-name-server'])) {
+    const wwn = String(n['port-name'] || '').toLowerCase();
+    if (!/^[0-9a-f]{2}(:[0-9a-f]{2}){7}$/.test(wwn)) continue;
+    const v = `${n['fc4-features'] || ''} ${n['name-server-device-type'] || ''}`;
+    const init = /initiator/i.test(v); const targ = /target/i.test(v);
+    if (init && targ) snap.nsRoles[wwn] = 'both';
+    else if (init) snap.nsRoles[wwn] = 'initiator';
+    else if (targ) snap.nsRoles[wwn] = 'target';
+  }
   snap.fabric = {
     switches: asArray(parts.fabric?.['fabric-switch']).length,
     principal: asArray(parts.fabric?.['fabric-switch']).find((f) => Number(f['principal']) === 1)?.['switch-user-friendly-name'] || '',
@@ -211,6 +226,9 @@ export async function collect(device, { signal, trace = null } = {}) {
     await grab('fabric', 'brocade-fabric/fabric-switch');
     await grab('ns', 'brocade-name-server/fibrechannel-name-server');
     await grab('zone', 'brocade-zone/effective-configuration');
+    // v2.511: 정의 설정에만 별칭(alias)이 있다 — 없으면 활성 zone 의 멤버가 별칭 이름으로 남아
+    // 그림에서 '미해석' 으로 표시된다(조용히 버리지 않는다).
+    await grab('zoneDefined', 'brocade-zone/defined-configuration');
   } finally {
     await c.logout(); // 세션 반납은 반드시(FOS 동시 REST 세션 수가 매우 적다)
   }
