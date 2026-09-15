@@ -175,10 +175,15 @@ describe('v2.514 정렬 값 — 모든 열이 정렬 가능해야 한다', () =>
     expect(sortValue('dc', ROW)).toBe('dc-wa');   // 라벨 함수를 안 주면 원문
   });
 
-  it('장비는 스냅샷 이름 우선 — 화면(Cell)과 같은 규칙', () => {
+  it('장비는 **등록 표시명 우선** — 화면(Cell)과 같은 규칙(v2.515)', () => {
+    // v2.514 까지는 스냅샷 이름이 우선이었다. 그래서 이름을 고쳐 저장해도 표에 반영되지 않아
+    // 사용자가 '수정이 안 된다' 고 신고했다(저장은 성공했다). 정렬 기준도 보이는 글자와 같아야 한다.
+    expect(sortValue('device', { ...ROW, name: '새이름', snap: { ...ROW.snap, name: '옛수집이름' } }, labels)).toBe('새이름');
     expect(sortValue('device', ROW, labels)).toBe('ZULU-PS');
     expect(sortValue('device', { name: '등록명', host: '10.0.0.1' }, labels)).toBe('등록명');
     expect(sortValue('device', { host: '10.0.0.1' }, labels)).toBe('10.0.0.1');
+    // 등록명이 비고 스냅샷만 있으면 스냅샷 이름을 쓴다(빈 칸으로 두지 않는다).
+    expect(sortValue('device', { snap: { name: '수집이름' }, host: '10.0.0.2' }, labels)).toBe('수집이름');
   });
 
   it('수집 주체 — 중앙 장비도 빈 값이 아니다(빈 값이면 항상 뒤로 밀린다)', () => {

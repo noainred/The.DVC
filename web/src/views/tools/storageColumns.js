@@ -193,8 +193,9 @@ export function sortValue(key, row, labels = {}) {
   const typeLabel = labels.typeLabel || ((t) => String(t ?? ''));
   const dcName = labels.dcName || ((id) => String(id ?? ''));
   switch (key) {
-    // 화면은 스냅샷 이름을 우선 보여준다(Cell 'device' 와 같은 규칙) — 정렬도 같아야 한다.
-    case 'device': return String(s?.name || row?.name || row?.host || '');
+    // 화면은 **등록 표시명을 우선** 보여준다(v2.515 — Cell 'device' 와 같은 규칙).
+    // 여기를 스냅샷 우선으로 되돌리면 정렬 기준과 보이는 글자가 어긋난다.
+    case 'device': return String(row?.name || s?.name || row?.host || '');
     case 'type': return String(typeLabel(row?.type) || '');
     case 'dc': return String(dcName(row?.datacenterId) || '');
     // 수집 주체 — 중앙은 엣지보다 앞(빈 문자열은 '뒤로' 규칙에 걸리므로 '중앙' 을 쓴다).
