@@ -4,7 +4,7 @@ import { useHashTab } from '../../hooks/useHashTab.js';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
 import { fetchJson, postJson, delJson, downloadFile } from '../../api.js';
 import { Loading, ErrorBox, Kpi, UsageCell, Modal, SearchBox, usageColor } from '../../components/ui.jsx';
-import { columnsFor, cellValue } from './storageColumns.js';
+import { columnsFor, cellValue, sortValue } from './storageColumns.js';
 import { UNIT_OPTIONS, formatBytes, loadUnit, saveUnit } from './storageUnits.js';
 import { STable } from '../../components/STable.jsx';
 import BulkDeviceIo from './BulkDeviceIo.jsx';
@@ -84,7 +84,7 @@ function TypedTable({ list, type, caption, ctx, typeLabel }) {
             {list.map((r) => (
               <tr key={r.id} style={{ opacity: r.enabled === false ? 0.5 : 1 }}>
                 {/* data-sort(v2.425): 셀이 컴포넌트라 STable 이 텍스트를 못 읽는다 — 정렬 값은 storageColumns.cellValue 로 준다. */}
-                {cols.map((c) => <Cell key={c.key} col={c} r={r} ctx={ctx} data-sort={sortValueOf(c.key, r)} />)}
+                {cols.map((c) => <Cell key={c.key} col={c} r={r} ctx={ctx} data-sort={sortValue(c.key, r, ctx)} />)}
               </tr>
             ))}
           </tbody>
@@ -94,13 +94,6 @@ function TypedTable({ list, type, caption, ctx, typeLabel }) {
   );
 }
 
-/** 정렬 값 — 숫자/문자/null 을 STable 이 인식하는 문자열로(null 은 '' → 항상 뒤). */
-function sortValueOf(key, r) {
-  if (key === 'status') return r.snap ? (r.snap.ok ? '2' : '0') : '1';
-  if (key === 'actions') return '';
-  const v = cellValue(key, r);
-  return v == null ? '' : String(v);
-}
 
 /**
  * 장비 표(v2.406, 사용자 요구 '각각의 스토리지 전용 컬럼').
@@ -128,7 +121,25 @@ function Cell({ col, r, ctx }) {
   const dash = <span className="muted">—</span>;
   switch (col.key) {
     case 'device':
-      return <td><button className="cell-link" onClick={() => setDetail(r.id)}><b>{s?.name || r.name}</b></button><div className="muted" style={{ fontSize: 11 }}>{r.host}</div></td>;
+      // v2.515: **등록 표시명(r.name)이 먼저**다 — 사람이 '수정' 폼에서 바꾸는 값이 그것이기 때문이다.
+      // 예전에는 `s?.name || r.name` 이라 수집 스냅샷의 이름이 덮어써, 이름을 고쳐 저장해도 표는
+      // 옛 이름을 계속 보여줬다(사용자 신고: "수정하는데 수정사항이 반영되지 않는다" — 저장은
+      // 성공하고 응답도 새 이름인데 화면만 그대로였다. 브라우저로 재현해 확인).
+      // 장비가 스스로 보고한 이름은 다를 때만 둘째 줄에 함께 보여준다(SanSwitchTool 과 같은 규칙) —
+      // 현장 콘솔에 찍히는 실제 이름을 잃지 않기 위해서다.
+      return (
+        <td>
+          <button className="cell-link" onClick={() => setDetail(r.id)}><b>{r.name || s?.name || r.host}</b></button>
+          {/* ⚠ 둘째 줄에 상한·생략표시를 반드시 둘 것 — 없이 두면 보고명이 장비 열을 넓혀
+              (A/B 실측 108→136px) 표가 22px 넘치고 오른쪽 '작업' 열이 잘린다(v2.403 이
+              고쳤던 문제의 재발). 전체 문자열은 title 로 남긴다. */}
+          <div className="muted" title={s?.name && s.name !== r.name ? `장비가 보고한 이름: ${s.name} · ${r.host}` : r.host}
+            style={{ fontSize: 11, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {s?.name && s.name !== r.name ? <>{s.name}{' · '}</> : null}
+            {r.host}
+          </div>
+        </td>
+      );
     case 'type':
       return <td><span className="badge blue">{typeLabel(r.type)}</span></td>;
     case 'dc':
@@ -642,7 +653,7 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
   // 제거를 위해 1100 으로 넓혔으나 실제 렌더 결과 노드 표 열 사이 빈 공간이 커서 압축.
   // 노드 표 실제 콘텐츠 폭(모노스페이스 수치 포함)은 ~700px 이라 900 에서도 가로 스크롤 없음.
   return (
-    <Modal title={`${typeLabel(r.type)} — ${s?.name || r.name}`} onClose={onClose} width={900}>
+    <Modal title={`${typeLabel(r.type)} — ${r.name || s?.name || r.host}`} onClose={onClose} width={900}>
       {/* 새로고침(v2.306, 사용자 요구) — 중앙 수집 장비는 즉시 재수집, 엣지 장비는 주기 안내(202 사유) */}
       <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 10 }}>
         <button className="login-btn" style={{ flex: 'none', padding: '6px 14px', fontSize: 12.5 }} disabled={busy} onClick={refresh}>
@@ -1126,6 +1137,14 @@ function DeviceForm({ d, form, setForm, onSaved }) {
           <select className="select" value={form.datacenterId || ''} onChange={(e) => setForm({ ...form, datacenterId: e.target.value })}>
             <option value="">(미지정)</option>
             {(d.datacenters || []).map((x) => <option key={x.id} value={x.id}>{x.name || x.id}</option>)}
+            {/* v2.515: 저장된 값이 목록에 없으면 **그 값을 옵션으로 추가**한다. 없으면 브라우저가
+                첫 옵션('(미지정)')을 표시해 **폼이 사실과 다른 값을 보여준다** — 실제로 법인이
+                'ST' 인 장비를 열었을 때 '(미지정)' 으로 보였다(v2.515 스크린샷 판독에서 발견).
+                그 상태로 다른 칸만 고쳐 저장하면 사용자가 본 것(미지정)과 저장된 것(ST)이 다르다.
+                목록에 없는 이유(법인 삭제·엣지가 보낸 낡은 id)를 단정하지 않고 사실만 적는다. */}
+            {form.datacenterId && !(d.datacenters || []).some((x) => x.id === form.datacenterId)
+              ? <option value={form.datacenterId}>{form.datacenterId} — 법인 목록에 없는 값</option>
+              : null}
           </select>
         </label>
         {/* 수집 주체(v2.312 개선): 알려진 엣지 목록을 제안하되 **직접 입력도 허용**(datalist).

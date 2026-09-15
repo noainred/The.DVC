@@ -160,3 +160,69 @@ export function cellValue(key, row) {
     default: return null;
   }
 }
+
+/**
+ * 표 정렬 값(v2.514) — **헤더 클릭 정렬이 장비 표에서 통째로 동작하지 않던 버그의 수정**.
+ *
+ * 사용자 신고(2026-09-15, 스크린샷): "법인 클릭해도 소팅 안되는 버그 · 표 전체에서 소팅 안되는 버그".
+ *
+ * 원인: `StorageMonTool` 이 셀에 `data-sort={cellValue(key,row)}` 를 실어 STable 에 정렬 값을
+ * 주고 있었는데(v2.425), **`cellValue` 는 타입 전용 열만 계산한다** — 공통 열
+ * (`device`·`type`·`dc`·`collect`·`version`·`status`)은 `default: return null` 로 떨어져
+ * 전부 빈 값이 됐다. STable 은 빈 값을 '항상 뒤로' 규칙에 따라 **원래 순서 그대로** 두므로
+ * 그 열들은 눌러도 순서가 변하지 않았다(브라우저 실측: `aria-sort` 만 바뀌고 DOM 행 순서 불변).
+ * 스냅샷이 아직 없는 장비만 있는 화면에서는 타입 전용 열도 전부 null 이라 **표 전체**가 그랬다.
+ *
+ * 그래서 정렬 값은 `cellValue` 가 아니라 이 함수가 소유한다 — **화면에 보이는 것과 같은 값**으로
+ * 정렬해야 하기 때문이다(장비=표시명, 법인=표시명, 수집=엣지 이름, 버전=스냅샷 버전).
+ *
+ * ⚠ 지킬 것:
+ *  · 공통 열을 여기서 빼면 그 열이 **조용히 정렬 불가**가 된다(오류가 아니라 '눌러도 안 되는' 상태라
+ *    사용자만 알아챈다 — 이 버그가 정확히 그랬다). `storageColumns.test.js` 가 전 열을 고정한다.
+ *  · 표시가 이름(법인·타입)인 열은 **표시명으로** 정렬한다. 원시 id(`dc-wa`)로 정렬하면 화면의
+ *    글자 순서와 달라 사용자가 '정렬이 틀렸다' 고 본다. 그래서 라벨 함수를 주입받는다.
+ *  · 값이 없으면 `''` 를 돌려준다 — STable 이 방향과 무관하게 뒤로 보낸다(CLAUDE.md 규칙).
+ *
+ * @param {string} key   컬럼 key
+ * @param {object} row   장비 행(= 레지스트리 항목 + `snap`)
+ * @param {{typeLabel?:(t:string)=>string, dcName?:(id:string)=>string}} [labels] 표시명 변환
+ * @returns {string} STable 이 인식하는 정렬 문자열(숫자·단위·날짜는 STable 이 해석한다)
+ */
+export function sortValue(key, row, labels = {}) {
+  const s = row?.snap || null;
+  const typeLabel = labels.typeLabel || ((t) => String(t ?? ''));
+  const dcName = labels.dcName || ((id) => String(id ?? ''));
+  switch (key) {
+    // 화면은 **등록 표시명을 우선** 보여준다(v2.515 — Cell 'device' 와 같은 규칙).
+    // 여기를 스냅샷 우선으로 되돌리면 정렬 기준과 보이는 글자가 어긋난다.
+    case 'device': return String(row?.name || s?.name || row?.host || '');
+    case 'type': return String(typeLabel(row?.type) || '');
+    case 'dc': return String(dcName(row?.datacenterId) || '');
+    // 수집 주체 — 중앙은 엣지보다 앞(빈 문자열은 '뒤로' 규칙에 걸리므로 '중앙' 을 쓴다).
+    case 'collect': return String(row?.agent || '중앙');
+    case 'version': return String(s?.version || '');
+    // 상태 — 실패(0) < 수집 전(1) < 부분(2) < 정상(3). 오름차순에서 문제 장비가 먼저 온다.
+    case 'status': {
+      if (!s) return '1';
+      if (!s.ok) return '0';
+      const partial = Object.values(s.sections || {}).some((v) => /오류/.test(String(v)));
+      return partial ? '2' : '3';
+    }
+    case 'actions': return '';
+    // HDD/SSD 풀은 **객체**다(`{usedBytes,totalBytes,pct}`) — 그대로 String() 하면
+    // 모든 행이 '[object Object]' 가 되어 정렬이 통째로 죽는다(v2.514 테스트가 잡은 결함).
+    // 화면(MediaCell)이 그리는 것은 사용률 막대이므로 정렬도 pct 로 한다.
+    case 'hdd': case 'ssd': {
+      const m = cellValue(key, row);
+      const pct = m && typeof m === 'object' ? m.pct : null;
+      return pct == null ? '' : String(pct);
+    }
+    default: {
+      const v = cellValue(key, row);
+      // 객체가 새로 생기면 '[object Object]' 로 조용히 정렬이 죽으므로 빈 값으로 떨군다
+      // (정렬이 안 되는 것이 '전부 같은 값' 으로 보이는 것보다 낫다 — 후자는 원인을 못 찾는다).
+      if (v != null && typeof v === 'object') return '';
+      return v == null ? '' : String(v);
+    }
+  }
+}
