@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { fetchJson, putJson, postJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { RETENTION_PRESETS, bytesText, retentionEstimate } from './tools/sanSwitchPerfText.js';
+import { edgePerfLine, perfCollectSummary } from './tools/sanPerfDiagText.js';
+import { STable } from '../components/STable.jsx';
 
 /**
  * 설정 › 수집 서버 › SAN 스위치 포트 사용량 수집(v2.411, 사용자 요구
@@ -38,7 +40,9 @@ export default function SanSwitchPerf() {
     setBusy(true); setMsg(null);
     try {
       const r = await postJson('/tools/sanswitch/perf/collect', {});
-      setMsg(r.ok ? `수집 완료 — 성공 ${r.collected} / 실패 ${r.failed}${r.errors?.length ? ` · ${r.errors.join(' / ')}` : ''}` : `수집 실패: ${r.reason}`);
+      // v2.517: 중앙 직접분과 엣지 요청분을 **나눠** 말한다. 예전에는 `r.collected`(중앙 직접만)를
+      // '수집 완료' 로 보여줘, 엣지 위임 장비가 하나도 수집되지 않았는데 성공처럼 보였다.
+      setMsg(`${perfCollectSummary(r)}${r?.note ? ` — ${r.note}` : ''}`);
       await load();
     } catch (e) { setMsg(`수집 실패: ${e.message}`); }
     finally { setBusy(false); }
@@ -152,6 +156,55 @@ export default function SanSwitchPerf() {
           {db.file ? <><br />파일: <code>{db.file}</code></> : null}
           {st.errors?.length ? <><br /><span style={{ color: 'var(--amber)' }}>최근 오류: {st.errors.join(' / ')}</span></> : null}
         </div>
+        <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
+          ⚠ 위 수치는 <b>이 서버가 직접 수집하는 스위치</b>만 센 것입니다 — 엣지 위임 스위치는 아래 표를 보세요.
+        </div>
+      </div>
+
+      {/* 엣지별 수집 상태(v2.517, 사용자 신고 "데이터 수집이 안되, edge 의 사용량도 분석하게 해줘").
+          엣지는 표본이 0건이어도 상태를 올리므로(perfPush 하트비트) '켜졌는지·돌았는지·왜 실패하는지'
+          를 중앙에서 볼 수 있다. 보고가 없는 엣지는 '꺼짐' 이라 말하지 않는다 — '모른다' 다. */}
+      <div className="card">
+        <div style={{ fontWeight: 600, marginBottom: 6 }}>엣지 위임 스위치의 수집 상태</div>
+        {!(data.edges || []).length ? (
+          <div className="muted" style={{ fontSize: 12, lineHeight: 1.8 }}>
+            엣지가 보고한 수집 상태가 없습니다. 위임 스위치가 없다면 정상이고, 있다면 그 엣지의 포탈 버전이 낮거나
+            (상태 보고는 v2.517 부터) 중앙 설정을 받아가지 못하는 상태입니다 — 설정 › 수집 서버에서 그 엣지의
+            마지막 연결 시각을 확인하세요.
+          </div>
+        ) : (
+          <div className="table-wrap">
+            <STable>
+              <thead><tr><th>엣지</th><th>상태</th><th data-nosort>실패한 스위치</th></tr></thead>
+              <tbody>
+                {(data.edges || []).map((e) => {
+                  const failed = (e.devices || []).filter((d) => d.ok === false);
+                  return (
+                    <tr key={e.agent}>
+                      <td><b>{e.agent}</b></td>
+                      <td data-sort={String(e.at || 0)}>{edgePerfLine(e)}</td>
+                      <td>
+                        {!failed.length ? <span className="muted">—</span> : (
+                          <div style={{ display: 'grid', gap: 4 }}>
+                            {failed.slice(0, 5).map((d) => (
+                              <div key={d.id}>
+                                <code style={{ fontSize: 11 }}>{d.id}</code>
+                                {/* 사유는 툴팁이 아니라 본문 — 복사·공유가 되고 모바일에서도 보인다(v2.516 규약) */}
+                                <pre style={{ margin: '2px 0 0', padding: 6, background: 'var(--bg2, rgba(0,0,0,0.25))',
+                                  borderRadius: 4, fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{d.error || '사유 미보고'}</pre>
+                              </div>
+                            ))}
+                            {failed.length > 5 && <span className="muted" style={{ fontSize: 11 }}>… 외 {failed.length - 5}대(상한으로 생략)</span>}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </STable>
+          </div>
+        )}
       </div>
     </>
   );

@@ -132,6 +132,8 @@
 | `settings-owners.txt` | 텍스트 | 설정 소유자 목록(백업·비밀 CSV 등 최상위 권한) | ✅ | ✅ | ✅ | security/securitySettings.js |
 | `storage-activity.json` | 설정 | 스토리지 수집 '작업 로그'(v2.315, 사용자 요구 '진행중/완료 창'). | ✅ | ✅ | ✅ | storage/activityLog.js |
 | `sanswitch-activity.json` | 설정 | SAN 스위치 수집 '작업 로그'(v2.516 — 스토리지와 같은 공용 팩토리 `util/activityLog.js`). 링버퍼(기본 500건, `SANSWITCH_ACTIVITY_MAX`)·0600·손상 시 재생성. | ✅ | ✅ | ✅ | sanswitch/activityLog.js |
+| `sanswitch-perf-activity.json` | 설정 | SAN 스위치 **포트 사용량**(portperfshow) 수집 작업 로그(v2.517). 기본 수집 로그와 파일을 나눈다 — 주기가 달라 한 링버퍼에 섞으면 잦은 쪽이 상한을 먹어 다른 쪽 이력이 사라진다. 링버퍼(기본 500건, `SANSW_PERF_ACTIVITY_MAX`)·0600·손상 시 재생성. | ✅ | ✅ | ✅ | sanswitch/perfActivityLog.js |
+| `central-agent-sanswitch-perf.json` | 설정 | 엣지가 보고한 **포트 사용량 수집 상태**의 중앙 보관(v2.517) — 표본이 0건이어도 올라오는 하트비트라, 중앙이 '엣지가 켜졌는지·돌았는지·왜 실패하는지' 를 안다. 캐시 성격(손상 시 재생성, preserveCorrupt 아님)·0600. | ✅ |  | ✅ | central/sanSwitchPerfEdge.js |
 | `storage-devices.json` | 설정 | 스토리지 장비 등록부(v2.302). | ✅ | ✅ | ✅ | storage/registry.js |
 | `storage-history.db` | DB | 스토리지 장비(8종) 용량 이력 |  |  | ✅ | storage/db.js |
 | `storage-intervals.json` | 설정 | 스토리지 수집 주기(중앙에서 엣지 설정, v2.409). | ✅ | ✅ | ✅ | storage/intervals.js |

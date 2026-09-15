@@ -804,12 +804,14 @@ centralRouter.get('/sanswitch-config', async (req, res) => {
     return res.status(403).json({ ok: false, reason: '토큰의 agent 와 요청 agent 불일치' });
   }
   const { devicesForAgent } = await import('../sanswitch/registry.js');
-  const { takeRequestsForAgent } = await import('../sanswitch/collectRequests.js');
+  const { takeRequestsForAgent, takePerfRequestForAgent } = await import('../sanswitch/collectRequests.js');
   const { takeTestRequestsForAgent } = await import('../sanswitch/testRuns.js');
   const { loadPerfSettings } = await import('../sanswitch/perfSettings.js');
   // testNow(v2.421): 중앙 등록 화면의 '연결 테스트' 를 이 엣지가 현지에서 대행(비밀번호 포함 — 엣지가 로그인해야 한다).
   // perf(v2.423): 중앙의 포트 사용량 수집 설정(켜짐/주기/표본/보관)을 위임 스위치에도 적용 — 엣지가 현지 수집 후 중앙으로 중계.
-  res.json({ ok: true, agent, devices: devicesForAgent(agent), collectNow: takeRequestsForAgent(agent), testNow: takeTestRequestsForAgent(agent), perf: loadPerfSettings() });
+  // perfCollectNow(v2.517): 중앙의 '지금 수집'(포트 사용량)을 이 엣지가 현지에서 대행 — 엣지 단위
+  // one-shot 플래그다(엣지의 pollPerfOnce 는 자기 몫 전체를 한 주기에 수집한다).
+  res.json({ ok: true, agent, devices: devicesForAgent(agent), collectNow: takeRequestsForAgent(agent), testNow: takeTestRequestsForAgent(agent), perf: loadPerfSettings(), perfCollectNow: takePerfRequestForAgent(agent) });
 });
 
 /**
@@ -826,7 +828,9 @@ centralRouter.post('/sanswitch-perf', async (req, res) => {
   const { devicesForAgent } = await import('../sanswitch/registry.js');
   const { importSamples } = await import('../sanswitch/perfDb.js');
   const { loadPerfSettings } = await import('../sanswitch/perfSettings.js');
-  const owned = new Set(devicesForAgent(agent).map((d) => String(d.id)));
+  const { saveEdgePerfStatus } = await import('../central/sanSwitchPerfEdge.js');
+  const ownedDevices = devicesForAgent(agent);
+  const owned = new Set(ownedDevices.map((d) => String(d.id)));
   const now = Date.now();
   const rowsIn = Array.isArray(req.body?.rows) ? req.body.rows.slice(0, 100_000) : [];
   const metaIn = Array.isArray(req.body?.meta) ? req.body.meta.slice(0, 20_000) : [];
@@ -835,7 +839,20 @@ centralRouter.post('/sanswitch-perf', async (req, res) => {
   const dropped = rowsIn.length - rows.length;
   if (dropped > 0) console.warn(`[central] sanswitch-perf: ${agent} 미위임 deviceId 표본 ${dropped}건 드롭(위조 방지)`);
   const r = await importSamples(rows, meta, loadPerfSettings().retentionDays);
-  res.json({ ok: true, ...r, dropped });
+  /**
+   * v2.517: 엣지의 **수집 상태**를 함께 받는다(청크 0 에만 실린다). 표본이 0건이어도 엣지가 상태
+   * 전용 하트비트를 올리므로, 중앙이 '엣지가 켜졌는지·돌았는지·왜 실패하는지' 를 알 수 있다 —
+   * 예전에는 표본이 없으면 아무것도 오지 않아 중앙 화면이 '설정에서 켜세요' 한 문구로 전부를 덮었다.
+   * 소유권은 시계열과 같은 규약(위임된 deviceId 만).
+   */
+  let statusSaved = 0;
+  if (req.body?.status && typeof req.body.status === 'object') {
+    try {
+      const names = new Map(ownedDevices.map((d) => [String(d.id), d.name || d.host || d.id]));
+      statusSaved = saveEdgePerfStatus(agent, req.body.status, { owned, names }).saved;
+    } catch (e) { console.warn(`[central] sanswitch-perf 상태 저장 실패(${agent}): ${e.message}`); }
+  }
+  res.json({ ok: true, ...r, dropped, statusSaved });
 });
 
 // POST /api/central/sanswitch-test-result — 엣지가 대행한 연결 테스트 결과(추적 로그 포함) 회신(v2.421).

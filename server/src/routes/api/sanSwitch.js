@@ -21,10 +21,13 @@ import { listActivity as listSwActivity } from '../../sanswitch/activityLog.js';
 import { zonesFromCompact, buildZoneGraph, buildZoneMatrix, zoneFindings, zoneSummary } from '../../sanswitch/zoning.js';
 import { listDatacenters } from '../../datacenter/store.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
-import { requestCollect, hasPendingRequest } from '../../sanswitch/collectRequests.js';
+import { requestCollect, hasPendingRequest, requestPerfCollect, hasPendingPerfRequest } from '../../sanswitch/collectRequests.js';
 import { loadPerfSettings, savePerfSettings, LIMITS as PERF_LIMITS } from '../../sanswitch/perfSettings.js';
 import { pollPerfOnce, sanSwitchPerfStatus } from '../../sanswitch/perfPoller.js';
-import { portSeries, storageSeries, storageSeriesMulti, arraySerialOf, endpointKind, perfDbStats, pruneNow, latestSampleTs } from '../../sanswitch/perfDb.js';
+import { listActivity as listPerfActivity, latestEventByDevice as latestPerfEventByDevice } from '../../sanswitch/perfActivityLog.js';
+import { perfEmptyDiag } from '../../sanswitch/perfDiag.js';
+import { edgePerfStatusFor, listEdgePerfStatus } from '../../central/sanSwitchPerfEdge.js';
+import { portSeries, storageSeries, storageSeriesMulti, arraySerialOf, endpointKind, perfDbStats, pruneNow, latestSampleTs, available as perfDbAvailable } from '../../sanswitch/perfDb.js';
 import { listDevices as listStorageDevices } from '../../storage/registry.js';
 import { localSnapshots as storageLocalSnaps } from '../../storage/store.js';
 import { edgeStorageSnapshots } from '../../central/storageEdge.js';
@@ -263,8 +266,11 @@ api.post('/tools/sanswitch/devices/:id/collect', adminOnly, async (req, res) => 
 
 /** 설정 조회 — 한계값·DB 현황·마지막 수집 결과를 함께(설정 화면이 서버를 단일 소스로 쓰게). */
 api.get('/tools/sanswitch/perf/settings', adminOnly, async (_req, res) => {
+  // ⚠ `status` 는 **이 노드(중앙 직접 수집)** 의 폴러 상태다 — 위임 장비는 여기 안 들어온다.
+  //   v2.516 까지 화면이 이것을 '전체 상태' 처럼 보여줘서, 엣지가 꺼졌거나 실패해도 알 수 없었다.
+  //   `edges` 가 엣지들이 보고한 상태이고, 화면은 둘을 **나눠서** 표시해야 한다(v2.517).
   res.json({ ok: true, settings: loadPerfSettings(), limits: PERF_LIMITS,
-    status: sanSwitchPerfStatus(), db: await perfDbStats() });
+    status: sanSwitchPerfStatus(), edges: listEdgePerfStatus(), db: await perfDbStats() });
 });
 
 api.put('/tools/sanswitch/perf/settings', adminOnly, async (req, res) => {
@@ -274,7 +280,7 @@ api.put('/tools/sanswitch/perf/settings', adminOnly, async (req, res) => {
     logAudit({ user: req.user?.username, action: 'SAN 포트 사용량 수집 설정 변경',
       target: saved.enabled ? '켜짐' : '꺼짐',
       detail: `주기 ${Math.round(saved.intervalMs / 1000)}초 · 표본 ${saved.sampleSeconds}초 · 보관 ${saved.retentionDays}일 (이전: ${before.enabled ? '켜짐' : '꺼짐'})` });
-    res.json({ ok: true, settings: saved, limits: PERF_LIMITS, status: sanSwitchPerfStatus(), db: await perfDbStats() });
+    res.json({ ok: true, settings: saved, limits: PERF_LIMITS, status: sanSwitchPerfStatus(), edges: listEdgePerfStatus(), db: await perfDbStats() });
   } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
 });
 
@@ -291,30 +297,101 @@ api.post('/tools/sanswitch/perf/prune', adminOnly, async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 
-/** 지금 1회 수집(설정이 꺼져 있어도 관리자가 눌러 시험할 수 있게 force). */
+/**
+ * 지금 1회 수집(설정이 꺼져 있어도 관리자가 눌러 시험할 수 있게 force).
+ *
+ * v2.517 — **무엇을 했는지 나눠 말한다**(v2.516 '전체 수집' 과 같은 규약). 예전에는 `pollPerfOnce`
+ * 만 불렀고, 그 안의 `devicesForThisNode()` 는 중앙에서 **agent 없는 장비만** 돌려주므로
+ * (`registry.js:135`) 엣지 위임 장비는 **아무 일도 일어나지 않았는데 화면은 그 사실을 말하지 않았다.**
+ * 이제 위임 엣지마다 재수집 요청을 등록하고(one-shot·TTL 15분), 응답에 '즉시 N대 / 요청 M대' 를 싣는다.
+ */
 api.post('/tools/sanswitch/perf/collect', adminOnly, async (req, res) => {
-  logAudit({ user: req.user?.username, action: 'SAN 포트 사용량 즉시 수집' });
-  res.json(await pollPerfOnce({ force: true }));
+  const devices = listDevices().filter((d) => d.enabled !== false);
+  const centralIds = devices.filter((d) => !(d.agent || '').trim()).map((d) => d.id);
+  const edgeDevices = devices.filter((d) => (d.agent || '').trim());
+  // 엣지 단위로 요청(엣지의 pollPerfOnce 는 자기 몫 전체를 한 주기에 수집한다 — 장비별로 나눌 이유가 없다).
+  const agents = [...new Set(edgeDevices.map((d) => String(d.agent).trim()))];
+  const requested = []; const alreadyQueued = [];
+  for (const a of agents) {
+    const r = requestPerfCollect(a);
+    (r.duplicate ? alreadyQueued : requested).push(a);
+  }
+  logAudit({ user: req.user?.username, action: 'SAN 포트 사용량 즉시 수집',
+    detail: `중앙 직접 ${centralIds.length}대 · 엣지 요청 ${requested.length}곳${alreadyQueued.length ? ` (대기중 ${alreadyQueued.length}곳)` : ''}` });
+  const result = await pollPerfOnce({ force: true });
+  res.json({
+    ok: true, result,
+    central: centralIds.length, edgeDevices: edgeDevices.length,
+    requested, alreadyQueued,
+    // 엣지는 다음 설정 pull 때(≤5분) 가져가 즉시 수집·push 한다 — '지금 수집했다' 가 아니다.
+    note: agents.length
+      ? `중앙 직접 ${centralIds.length}대는 지금 수집했고, 엣지 ${agents.length}곳(${edgeDevices.length}대)에는 재수집 요청만 등록했습니다 — 중앙은 엣지에 명령을 밀어넣을 수 없어, 엣지가 다음 설정 pull 때 가져가 즉시 수집·push 합니다.`
+      : `중앙 직접 ${centralIds.length}대를 수집했습니다(위임 장비 없음).`,
+  });
+});
+
+/**
+ * 포트 사용량 수집 작업 로그(v2.517). 응답 형태 `{poller, events}` 는 기본 수집
+ * (`/tools/sanswitch/activity`)과 **똑같이** 유지할 것 — 웹의 공용 패널(`CollectActivity`)
+ * 하나가 두 경로를 그린다. 키 이름을 바꾸면 한쪽이 조용히 빈다(v2.516 규약).
+ */
+api.get('/tools/sanswitch/perf/activity', toolsPerm, fullScopeOnly, (req, res) => {
+  res.json({ poller: sanSwitchPerfStatus(), events: listPerfActivity(Number(req.query.limit) || 100) });
 });
 
 /**
  * 포트별 사용량 시계열. 원시 점을 그대로 주지 않고 버킷 평균으로 내려준다(브라우저 보호).
  * 단위는 **바이트/초**(portperfshow 원단위) — 화면이 ×8 해 bps 로 환산한다.
  */
+/**
+ * '표본이 왜 없나' 판정(v2.517, 사용자 신고 "데이터 수집이 안되, edge 의 사용량도 분석하게 해줘").
+ *
+ * 시계열이 **빈 경우에만** 만든다 — 판정 근거를 모으려면 `latestSampleTs`·작업 로그·엣지 상태를
+ * 읽어야 하고, 데이터가 있는 정상 경로에 그 비용을 얹을 이유가 없다.
+ * 판정 자체는 순수 모듈(`sanswitch/perfDiag.js`)이 하고, 문구는 웹(`sanPerfDiagText.js`)이 만든다.
+ */
+async function perfDiagFor(deviceId, r) {
+  const dev = listDevices().find((d) => d.id === deviceId) || null;
+  if (!dev) return null;
+  const agent = String(dev.agent || '').trim();
+  let lastSampleAt = null;
+  try { lastSampleAt = (await latestSampleTs([deviceId])).get(String(deviceId)) || null; } catch { /* 판정 근거 없음 */ }
+  let lastEvent = null;
+  try { lastEvent = latestPerfEventByDevice().get(String(deviceId)) || null; } catch { /* 〃 */ }
+  let edge = null;
+  if (agent) { try { edge = edgePerfStatusFor(deviceId, agent); } catch { /* 〃 */ } }
+  const d = perfEmptyDiag({
+    device: { id: dev.id, name: dev.name, agent, collectMethod: dev.collectMethod || 'ssh' },
+    settings: loadPerfSettings(),
+    dbUnavailable: r?.unavailable === true || !(await perfDbAvailable()),
+    lastSampleAt, since: r?.since ?? null,
+    poller: sanSwitchPerfStatus(), lastEvent, edge,
+  });
+  // 엣지 위임 장비는 '지금 수집' 요청이 대기 중일 수 있다 — 화면이 연타를 막고 그 사실을 말한다.
+  return { ...d, pendingRequest: agent ? hasPendingPerfRequest(agent) : false };
+}
+
+/** 시계열이 비었으면 진단을 붙인다(있으면 붙이지 않는다 — 위 머리말). */
+async function withPerfDiag(deviceId, r) {
+  const empty = !(r?.series || []).length;
+  if (!empty) return r;
+  return { ...r, diag: await perfDiagFor(deviceId, r) };
+}
+
 api.get('/tools/sanswitch/devices/:id/perf', toolsPerm, fullScopeOnly, async (req, res) => {
   const { hours, from, to, issue } = rangeParams(req.query);
   // ⚠ `''.split(',')` 은 [''] 이고 Number('') 은 0 이라, 빈 토큰을 먼저 걸러야 한다 — 안 거르면
   //   ports 미지정이 '포트 0 만' 으로 둔갑한다(v2.416 리뷰 확정 결함).
   const ports = parsePortsParam(req.query.ports);
   const r = await portSeries(req.params.id, { hours, from, to, ports: ports.length ? ports : null });
-  res.json({ ok: true, unit: 'bytesPerSec', hours, from, to, rangeIssue: issue || null, ...r });
+  res.json({ ok: true, unit: 'bytesPerSec', hours, from, to, rangeIssue: issue || null, ...(await withPerfDiag(req.params.id, r)) });
 });
 
 /** 연결 장비(스토리지 어레이)별 합산 시계열 — 포트가 아니라 '어느 스토리지가 얼마나 쓰이나'. */
 api.get('/tools/sanswitch/devices/:id/perf/storage', toolsPerm, fullScopeOnly, async (req, res) => {
   const { hours, from, to, issue } = rangeParams(req.query);
   const r = await storageSeries(req.params.id, { hours, from, to });
-  res.json({ ok: true, unit: 'bytesPerSec', hours, from, to, rangeIssue: issue || null, ...r });
+  res.json({ ok: true, unit: 'bytesPerSec', hours, from, to, rangeIssue: issue || null, ...(await withPerfDiag(req.params.id, r)) });
 });
 
 /**
@@ -419,6 +496,9 @@ api.get('/tools/sanswitch/perf/storage-summary', toolsPerm, fullScopeOnly, async
   })();
   res.json({
     ok: true, unit: 'bytesPerSec', hours, from, to, until: agg.until ?? null, rangeIssue: rangeIssue || null, datacenterIds: dcs.map((x) => x || NONE_DC), split, allDatacenters: allDcs,
+    // v2.517: 화면이 '수집을 켜세요' 를 **꺼져 있을 때만** 말하게 하려면 실제 설정을 알아야 한다.
+    // 예전에는 무조건 그 문구여서, 이미 켜져 있고 장비에서 실패하는 상황에서도 설정을 의심하게 만들었다.
+    perfEnabled: loadPerfSettings().enabled,
     edgeSwitches, edgeNote: edgeMissing.length
       ? `엣지(${[...new Set(edgeMissing.map((e) => e.agent))].join(', ')}) 수집 스위치 ${edgeMissing.length}대(${edgeMissing.map((e) => e.name).join(', ')})의 포트 사용량 시계열이 아직 중앙에 오지 않았습니다. 확인: ① 설정 › 수집 서버 › SAN 스위치 포트 사용량이 켜져 있는지(중앙 설정이 엣지에도 내려갑니다) ② 그 엣지가 v2.423 이상인지(엣지가 현지 수집분을 중앙으로 중계) ③ 켠 직후면 수집 주기(기본 5분) + 엣지 설정 pull(≤5분) 뒤 반영됩니다.`
       : '',

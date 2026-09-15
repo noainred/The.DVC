@@ -49,6 +49,7 @@ server/config/sanswitch-latest.json
 # storage-activity.json 은 v2.315 부터 있었는데 여기 빠져 있었다(런타임 파일 커밋 위험).
 server/config/storage-activity.json
 server/config/sanswitch-activity.json
+server/config/sanswitch-perf-activity.json
 server/config/rma-agents.json
 server/config/credentials.json
 server/config/rma-settings.json
