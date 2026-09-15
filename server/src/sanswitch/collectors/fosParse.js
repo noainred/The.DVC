@@ -305,6 +305,49 @@ export function parseNsShow(text) {
 }
 
 /**
+ * nsshow → { <포트 WWN 소문자 콜론표기>: 'initiator'|'target'|'both' }  (v2.511)
+ *
+ * 조닝 그림의 역할(이니시에이터/타깃)을 **추정이 아니라 확정**으로 만들기 위한 것이다.
+ * 네임서버 항목의 `Device type:` 줄(FOS 가 `Physical Initiator` / `Physical Target` /
+ * `Physical Initiator+Target` 로 적는다)과 `FC4s:` 줄의 `FCP-Target`/`FCP-Initiator` 표기를
+ * 둘 다 본다. 키는 헤더 줄의 **세 번째 필드(포트 WWN)** — zone 멤버와 같은 축이다.
+ *
+ * ⚠ 정직 한계: 이 파서는 위 두 표기를 **있으면** 읽는다. 이 환경에서는 실장비 nsshow 출력을
+ *   확인하지 못했고(사용자가 제공한 캡처는 cfgshow 뿐이다), FOS 버전·`nsshow` 옵션에 따라
+ *   `Device type:` 이 없을 수 있다. 없으면 **빈 객체를 돌려주고 그림은 추정으로 떨어진다** —
+ *   없는 역할을 지어내지 않는다. 화면도 '확정(●)' 배지를 그때만 붙인다.
+ */
+export function parseNsRoles(text) {
+  const lines = String(text || '').split(/\r?\n/);
+  const out = {};
+  let cur = null;
+  const set = (wwn, role) => {
+    if (!wwn) return;
+    const prev = out[wwn];
+    out[wwn] = (prev && prev !== role) ? 'both' : role;
+  };
+  for (const raw of lines) {
+    const l = raw.trim();
+    let m;
+    // `N    011000;      3;10:00:...;20:00:...; na` — 세 번째 세미콜론 필드가 포트 WWN.
+    if ((m = l.match(/^N[L]?\s+[0-9a-f]{6}\s*;[^;]*;\s*([0-9a-f]{2}(?::[0-9a-f]{2}){7})\s*;/i))) {
+      cur = m[1].toLowerCase(); continue;
+    }
+    if (/^N[L]?\s+[0-9a-f]{6}\s*;/i.test(l)) { cur = null; continue; } // 형식이 다른 헤더 — 귀속시키지 않는다
+    if (!cur) continue;
+    if ((m = l.match(/^(?:Device type|FC4s)\s*:\s*(.+)$/i))) {
+      const v = m[1];
+      const init = /initiator/i.test(v);
+      const targ = /target/i.test(v);
+      if (init && targ) out[cur] = 'both';
+      else if (init) set(cur, 'initiator');
+      else if (targ) set(cur, 'target');
+    }
+  }
+  return out;
+}
+
+/**
  * portperfshow 파싱(v2.411 — 사용자 제공 실출력 기준).
  *
  * 출력은 '포트 번호 줄 → ===== 구분선 → 값 줄' 이 16포트씩 반복되는 행렬이고, 마지막 블록의

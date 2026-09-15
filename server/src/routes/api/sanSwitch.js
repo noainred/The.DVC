@@ -16,6 +16,8 @@ import { localSnapshots, getSnapshot, dropSnapshot } from '../../sanswitch/store
 import { collectDeviceNow, sanSwitchPollerStatus, pollSanSwitchOnce } from '../../sanswitch/poller.js';
 import { startTestRun, getTestRun } from '../../sanswitch/testRuns.js';
 import { edgeSanSwitchSnapshots } from '../../central/sanSwitchEdge.js';
+// v2.511: 조닝 그림 — 순수 분석(스위치 왕복 없음).
+import { zonesFromCompact, buildZoneGraph, buildZoneMatrix, zoneFindings, zoneSummary } from '../../sanswitch/zoning.js';
 import { listDatacenters } from '../../datacenter/store.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
 import { requestCollect, hasPendingRequest } from '../../sanswitch/collectRequests.js';
@@ -118,6 +120,61 @@ api.get('/tools/sanswitch/devices/:id/ports', toolsPerm, fullScopeOnly, (req, re
     switchState: snap.switchState || '', health: snap.health || null,
     fabric: snap.fabric || null, zoning: snap.zoning || null, licenses: snap.licenses || [],
     ports: snap.ports || { list: [] }, sections: snap.sections || {}, extra: snap.extra || {},
+  });
+});
+
+/**
+ * 조닝 그림 데이터(v2.511) — zone 멤버를 이니시에이터/타깃으로 갈라 그래프·매트릭스로.
+ *
+ * 무거운 일은 분석(2-색칠·매트릭스 조립)뿐이고 **vCenter/스위치 왕복이 없다**(수집 스냅샷만 읽는다).
+ * 그래도 대형 패브릭은 zone 수천 개라 매 폴링으로 부르면 낭비다 — 화면은 탭을 열 때만 1회 부른다.
+ * 포트/네임서버 정보를 함께 넘겨 라벨과 '로그인 여부' 판정을 정확히 한다.
+ */
+api.get('/tools/sanswitch/devices/:id/zoning', toolsPerm, fullScopeOnly, (req, res) => {
+  const local = getSnapshot(req.params.id);
+  const edge = edgeSanSwitchSnapshots().find((s) => s.deviceId === req.params.id);
+  const snap = (!local || (edge && (edge.collectedAt || 0) > (local.collectedAt || 0))) ? edge : local;
+  if (!snap) return res.status(404).json({ ok: false, reason: '수집된 스냅샷이 없습니다.' });
+  const z = snap.zoning || null;
+  const base = {
+    ok: true, deviceId: snap.deviceId, name: snap.name, collectedAt: snap.collectedAt,
+    source: snap === edge ? `엣지(${snap.agent || ''})` : '중앙 직접 수집',
+    section: snap.sections?.zoning || 'skip',
+    zoning: z ? { effectiveConfig: z.effectiveConfig || '', source: z.source || 'none', available: !!z.available,
+      reason: z.reason || '', counts: z.counts || null, zoneCount: z.zoneCount || 0, truncated: !!z.truncated, limited: !!z.limited } : null,
+  };
+  if (!z?.available || !Array.isArray(z.zones) || !z.zones.length) {
+    return res.json({ ...base, graph: { nodes: [], links: [], columns: { left: [], middle: [], right: [] }, zonesTotal: 0, unresolvedTotal: 0 }, matrix: { rows: [], cols: [], cells: [] }, findings: [], summary: null });
+  }
+  // 포트 정보로 라벨·로그인 여부를 채운다. 엣지 위임 장비는 문제 포트만 올라와 있어(push.js)
+  // 대부분의 WWN 에 포트가 없다 — 그래서 **로그인 판정은 포트 목록이 온전할 때만** 한다
+  // (일부만 보고 '로그인 안 함' 이라고 말하면 거짓이 된다).
+  const list = snap.ports?.list || [];
+  const portsComplete = !(snap.ports?.portsOmitted > 0) && !snap.ports?.truncated;
+  const portByWwn = {}; const names = {}; const logged = new Set();
+  for (const p of list) {
+    for (const w of p.attached || []) {
+      const k = String(w).toLowerCase();
+      portByWwn[k] = p;
+      if (p.attachedName) names[k] = p.attachedName;
+      if (p.state === 'online') logged.add(k);
+    }
+  }
+  // 네임서버 FC4 역할(v2.511) — 있으면 역할이 '확정' 이 된다. 수집기가 못 읽었으면 빈 객체라
+  // 그림은 구조 추론으로 떨어진다(없는 근거를 지어내지 않는다 — 화면이 배지로 구분해 보여준다).
+  const nsRoles = {};
+  for (const [w, r] of Object.entries(snap.nsRoles || {})) nsRoles[String(w).toLowerCase()] = r;
+  const zones = zonesFromCompact(z);
+  const graph = buildZoneGraph(zones, { portByWwn, names, nsRoles });
+  const matrix = buildZoneMatrix(graph);
+  const findings = zoneFindings(zones, graph, portsComplete ? { loggedInWwns: logged } : {});
+  res.json({
+    ...base,
+    graph, matrix, findings,
+    summary: { ...zoneSummary({ defined: { zones: {}, aliases: z.aliases || {}, cfgs: {} }, effective: { zones: {} }, truncated: z.truncated },
+      { cfgName: z.effectiveConfig, source: z.source, zones }, graph), ...z.counts },
+    portsComplete,
+    portsOmitted: snap.ports?.portsOmitted || 0,
   });
 });
 

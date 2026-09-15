@@ -14,6 +14,12 @@
  *   switchstatusshow  스위치 종합 헬스
  *   fanshow / psshow  FRU 상태
  *   nsshow            네임서버(연결 장비 심볼릭 이름)
+ *   cfgshow           조닝(활성 설정·zone 멤버·별칭) ← v2.511, 조닝 그림의 원천
+ *
+ * ⚠ cfgshow 출력은 대형 패브릭에서 수십~수백 KB 다(사용자 실장비에서 42KB 지점까지 확인).
+ *   대화식 터미널에서는 FOS 가 `--More--(byte N)` 페이저를 붙이는데, 이 구현은 **비대화식 exec
+ *   채널**이라 보통 붙지 않는다. 그래도 붙으면 파서가 그 흔적을 보고 `truncated` 로 밝힌다
+ *   (조용히 일부만 보여주지 않는다). 출력 상한은 sshExec 의 4MB 를 그대로 쓴다.
  *
  * 부분 실패는 숨기지 않는다 — switchshow 만 성공해도 포트 현황은 보여주고, 실패한 섹션은
  * sections 에 사유를 남긴다(권한이 낮은 계정은 nsshow/licenseshow 가 막히는 경우가 있다).
@@ -23,6 +29,7 @@ import { withSsh } from '../../proxy/sshExec.js';
 import { emptySnapshot, summarizePorts, MAX_PORTS } from '../types.js';
 import { applyRates } from '../rates.js';
 import * as P from './fosParse.js';
+import { zoningFromText } from '../zoningCollect.js';
 
 const RAW_LIMIT = Number(process.env.SANSW_CLI_RAW_LIMIT) || 4000;
 const CMD_TIMEOUT_MS = Number(process.env.SANSW_CLI_TIMEOUT_MS) || 45_000;
@@ -102,6 +109,8 @@ function specs(vfId) {
     { key: 'fanshow', bin: 'fanshow', cmds: [c('fanshow')] },
     { key: 'psshow', bin: 'psshow', cmds: [c('psshow')] },
     { key: 'nsshow', bin: 'nsshow', cmds: [c('nsshow')] },
+    // v2.511: 조닝. `cfgshow` 가 없는 계정/펌웨어면 probeCommands 가 걸러 시도조차 하지 않는다.
+    { key: 'cfgshow', bin: 'cfgshow', cmds: [c('cfgshow')] },
   ];
 }
 
@@ -188,7 +197,13 @@ export function buildSnapshot(device, out = {}, errors = {}) {
   // 확실하지 않아 만들지 않았다. 틀린 모델명을 보여주느니 원값이 낫다.
   snap.model = chassis.model || '';
   snap.serial = chassis.serial || '';
-  snap.zoning = { effectiveConfig: (sw.header.zoning || '').replace(/^ON\s*\(?|\)?$/gi, '').trim(), zones: 0 };
+  // 조닝(v2.511) — switchshow 헤더의 활성 설정 **이름**에 더해, cfgshow 로 zone 멤버까지 읽는다.
+  // v2.510 까지는 이름 한 줄뿐이고 `zones: 0` 은 하드코딩이었다(그래서 그림을 그릴 수 없었다).
+  const headerCfg = (sw.header.zoning || '').replace(/^ON\s*\(?|\)?$/gi, '').trim();
+  snap.zoning = zoningFromText(out.cfgshow || '', headerCfg);
+  // 네임서버가 알려주는 FC4 역할(있을 때만) — 조닝 그림의 역할을 '추정' 이 아니라 '확정' 으로
+  // 만든다. 없으면 빈 객체이고 그림은 구조 추론으로 떨어진다(fosParse.parseNsRoles 주석 참조).
+  snap.nsRoles = P.parseNsRoles(out.nsshow || '');
 
   const list = sw.ports.slice(0, MAX_PORTS).map((p) => {
     const e = errs[p.index] || {};
@@ -232,6 +247,7 @@ export function buildSnapshot(device, out = {}, errors = {}) {
     health: out.switchstatusshow ? 'ok' : (errors.switchstatusshow || 'skip'),
     licenses: out.licenseshow ? 'ok' : (errors.licenseshow || 'skip'),
     nameserver: out.nsshow ? 'ok' : (errors.nsshow || 'skip'),
+    zoning: out.cfgshow ? 'ok' : (errors.cfgshow || 'skip'),
   };
   snap.extra = {
     collectMethod: 'ssh',

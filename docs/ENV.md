@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **367개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **369개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-14)
@@ -506,10 +506,11 @@
 | `PDU_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | pdu/push.js |
 | `PDU_RETAIN_DAYS` | `400` |  | pdu/db.js |
 
-## SAN 스위치 (20)
+## SAN 스위치 (22)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
+| `SANSW_ALIAS_MAX` | `8000` |  | sanswitch/zoning.js |
 | `SANSW_CAPS_TTL_MS` | `6` |  | sanswitch/collectors/fosSsh.js |
 | `SANSW_CLI_RAW_LIMIT` | `4000` |  | sanswitch/collectors/fosSsh.js |
 | `SANSW_CLI_TIMEOUT_MS` | `45000` |  | sanswitch/collectors/fosSsh.js |
@@ -529,6 +530,7 @@
 | `SANSW_PUSH_PORT_LIMIT` | `64` |  | sanswitch/push.js |
 | `SANSW_TEST_PICKUP_MS` | `10` | ✅ | sanswitch/testRuns.js |
 | `SANSW_TEST_RESULT_MS` | `5` | ✅ | sanswitch/testRuns.js |
+| `SANSW_ZONE_MAX` | `4000` |  | sanswitch/zoning.js |
 | `SANSWITCH_TLS_VERIFY` | `기본 아님('true' 일 때만 적용)` |  | sanswitch/collectors/fosRest.js |
 
 ## vCenter 수집 (2)
@@ -546,4 +548,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 367
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 369
