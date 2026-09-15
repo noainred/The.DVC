@@ -111,6 +111,21 @@ function specs(vfId) {
     { key: 'nsshow', bin: 'nsshow', cmds: [c('nsshow')] },
     // v2.511: 조닝. `cfgshow` 가 없는 계정/펌웨어면 probeCommands 가 걸러 시도조차 하지 않는다.
     { key: 'cfgshow', bin: 'cfgshow', cmds: [c('cfgshow')] },
+    /* ── 월간 점검용(v2.519, 사용자 제공 Brocade 월간 점검 체크리스트) ──────────────
+     * 전부 **선택**이다(required 아님) — 없는 장비에서는 probeCommands 가 걸러 시도조차 하지
+     * 않고, 점검 보고서가 '확인 불가(명령 없음)' 로 표시한다.
+     *
+     * ⚠ `errshow` 를 쓰지 않는다 — FOS 의 `errshow` 는 **대화형**(페이저로 입력을 기다린다)이라
+     *   폴러가 부르면 캡처가 시한까지 매달린다. 비대화형인 `errdump` 가 같은 내용을 준다.
+     *   `bin` 은 `errdump` 로 두어(probe 는 실제 파일명을 본다) 부재 판정이 정확하게 되고,
+     *   혹시 이름이 다른 펌웨어를 위해 `errshow` 를 **뒤 후보**로만 남긴다.
+     * ⚠ `bottleneckmon --show` 는 기능이 꺼져 있으면 오류 문구를 낸다 — 그것도 정보다
+     *   (파서가 `enabled:false` 로 읽고, 판정은 '꺼져 있어 알 수 없음' 이라 말한다).
+     */
+    { key: 'sensorshow', bin: 'sensorshow', cmds: [c('sensorshow')] },
+    { key: 'errdump', bin: 'errdump', cmds: [c('errdump'), c('errshow')] },
+    { key: 'bottleneckmon', bin: 'bottleneckmon', cmds: [c('bottleneckmon --show')] },
+    { key: 'fabricshow', bin: 'fabricshow', cmds: [c('fabricshow')] },
   ];
 }
 
@@ -237,6 +252,18 @@ export function buildSnapshot(device, out = {}, errors = {}) {
       ? Math.max(...list.map((p) => p.sfpTempC ?? -Infinity)) : null,
     alerts: Object.values(status.monitors || {}).filter((v) => v !== 'HEALTHY').length,
     monitors: status.monitors || {},
+  };
+  /**
+   * 월간 점검 원천(v2.519). 스냅샷에 **파싱 결과만** 싣는다 — 원문(errdump 는 수천 줄)을 넣으면
+   * `/central/inventory` push 와 응답 캐시에서 매 주기 직렬화된다(v2.505 규약과 같은 이유).
+   * 각 항목은 `parsed` 를 들고 있어, 판정이 '형식 미인식' 과 '정상' 을 구분할 수 있다.
+   */
+  snap.extra = {
+    ...(snap.extra || {}),
+    sensors: out.sensorshow ? P.parseSensorShow(out.sensorshow) : null,
+    raslog: out.errdump ? P.parseErrDump(out.errdump, 200) : null,
+    bottleneck: out.bottleneckmon ? P.parseBottleneckMon(out.bottleneckmon) : null,
+    fabricMembers: out.fabricshow ? P.parseFabricShow(out.fabricshow) : null,
   };
   snap.sections = {
     ports: 'ok',

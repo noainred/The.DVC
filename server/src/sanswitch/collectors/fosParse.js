@@ -449,3 +449,153 @@ export function parseFruShow(text) {
   const ok = lines.filter((l) => /\bOk\b|\bOK\b|is Ok/i.test(l)).length;
   return { ok, total: lines.length };
 }
+
+/* ══════════════════════════════════════════════════════════════════════════════
+ * 월간 점검용 파서 4종(v2.519 — 사용자 제공 Brocade 월간 점검 체크리스트)
+ *
+ * ⚠⚠ **정직 고지 — 이 4종은 실장비 출력을 확인하지 못했다.**
+ *   사용자가 보내 준 캡처는 `cfgshow`·`portperfshow` 뿐이고, 이 환경의 egress 정책에서
+ *   Broadcom TechDocs 는 403(CONNECT 거부)이라 원문 형식을 읽지 못했다. 그래서 각 파서는
+ *   ① **형식에 관용적**이고 ② 아무것도 못 읽으면 `parsed: false` 를 돌려준다.
+ *   판정 모듈(`sanswitch/healthCheck.js`)은 `parsed: false` 를 **'이상 없음' 이 아니라
+ *   '형식 미인식'** 으로 다룬다 — 점검 보고서에서 '확인했는데 정상' 과 '확인하지 못함' 을
+ *   섞는 것이 가장 위험한 거짓이다. 실장비 출력을 받으면 정규식을 조이고 이 고지를 지운다.
+ * ══════════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * `sensorshow` → 전압·온도·팬 센서.
+ *
+ * 관용 매칭: `sensor  N: (종류) 이름 is 상태[, value is N C | speed is N RPM]`
+ * 종류·상태 문구가 펌웨어마다 달라 **종류는 소문자화해 분류만** 하고 원문(raw)을 함께 남긴다.
+ *
+ * @returns {{ parsed:boolean, list:Array<{n,kind,name,state,ok,value,unit,raw}>, counts:object }}
+ */
+export function parseSensorShow(text) {
+  const lines = String(text || '').split(/\r?\n/);
+  const list = [];
+  for (const raw of lines) {
+    const m = raw.match(/^\s*sensor\s+(\d+)\s*:\s*\(([^)]*)\)\s*(.*)$/i);
+    if (!m) continue;
+    const rest = String(m[3] || '');
+    // `... is Ok, value is 31 C` / `... is Ok,speed is 7050 RPM` / `... is Absent`
+    const st = rest.match(/\bis\s+([A-Za-z-]+)/);
+    const val = rest.match(/(?:value|speed)\s+is\s+(-?[\d.]+)\s*([A-Za-z]+)?/i);
+    const name = rest.replace(/\s*[,;]?\s*\bis\b.*$/i, '').trim();
+    const state = st ? st[1] : '';
+    list.push({
+      n: Number(m[1]),
+      kind: String(m[2] || '').trim().toLowerCase().replace(/\s+/g, ' '),
+      name, state,
+      // ⚠ 상태를 모르면 `ok: null`(모른다) — false(장애)로 단정하지 않는다.
+      ok: state ? /^(ok|normal|present|absent)$/i.test(state) && !/^absent$/i.test(state) : null,
+      value: val ? Number(val[1]) : null,
+      unit: val && val[2] ? val[2] : null,
+      raw: raw.trim().slice(0, 200),
+    });
+  }
+  const counts = { total: list.length, ok: 0, bad: 0, unknown: 0, absent: 0 };
+  for (const s of list) {
+    if (/^absent$/i.test(s.state)) counts.absent++;
+    else if (s.ok === true) counts.ok++;
+    else if (s.ok === false) counts.bad++;
+    else counts.unknown++;
+  }
+  return { parsed: list.length > 0, list: list.slice(0, 200), counts };
+}
+
+/** 로그 심각도 정규화 — 펌웨어마다 대소문자·약어가 달라 한 곳에서 맞춘다. */
+function logSeverity(s) {
+  const v = String(s || '').toUpperCase();
+  if (/CRITICAL|CRIT|EMERG|ALERT/.test(v)) return 'critical';
+  if (/^ERROR|\bERR\b/.test(v)) return 'error';
+  if (/WARN/.test(v)) return 'warning';
+  if (/INFO/.test(v)) return 'info';
+  return 'unknown';
+}
+
+/**
+ * `errdump`(또는 `errshow`) → RASLog 항목.
+ *
+ * ⚠ `errshow` 는 **대화형**(페이저로 멈춘다)이라 수집은 `errdump` 를 먼저 쓴다 — 대화형 명령을
+ *   폴러가 부르면 캡처가 시한까지 매달린다.
+ *
+ * 관용 매칭: 한 줄에 `[MOD-1234]` 형태의 메시지 id 가 있으면 항목으로 본다. 날짜·심각도는
+ * 있으면 뽑고 없으면 null. 심각도 문자열이 없으면 **'unknown'** 이고, 판정 모듈은 그것을
+ * 정상으로 치지 않는다.
+ *
+ * @param {number} limit 최근 몇 건까지 보관할지(errdump 는 수천 줄이 올 수 있다)
+ */
+export function parseErrDump(text, limit = 200) {
+  const lines = String(text || '').split(/\r?\n/);
+  const list = [];
+  for (const raw of lines) {
+    // 대괄호로 앵커돼 있으므로 모듈명은 **1글자도 허용**한다(관용 설계 — 실장비 출력을 확인하지
+    // 못했으므로 조이지 않는다). 실제 FOS 모듈은 FW·SEC·HIL 처럼 2~4글자다.
+    const id = raw.match(/\[([A-Z][A-Z0-9]{0,15}-\d{1,5})\]/);
+    if (!id) continue;
+    const date = raw.match(/(\d{4}[/-]\d{2}[/-]\d{2}[ T-]\d{2}:\d{2}:\d{2})/);
+    const sev = raw.match(/\b(CRITICAL|CRIT|EMERG|ALERT|ERROR|ERR|WARNING|WARN|INFO)\b/i);
+    list.push({
+      id: id[1], at: date ? date[1] : null,
+      severity: logSeverity(sev ? sev[1] : ''),
+      text: raw.trim().slice(0, 300),
+    });
+  }
+  const counts = { total: list.length, critical: 0, error: 0, warning: 0, info: 0, unknown: 0 };
+  for (const e of list) counts[e.severity] = (counts[e.severity] || 0) + 1;
+  // 최근 것을 남긴다(errdump 는 보통 오래된 것부터 출력한다 — 뒤가 최신).
+  return { parsed: list.length > 0, list: list.slice(-Math.max(1, limit)), counts };
+}
+
+/**
+ * `bottleneckmon --show` → Slow Drain 감지.
+ *
+ * 출력 형태가 펌웨어·옵션마다 크게 달라 **두 가지만** 본다:
+ *  ① '감지 없음' 류 문구(`No bottleneck`, `not enabled` 등)
+ *  ② 포트 번호가 들어간 행(감지 목록)
+ * `enabled:false` 는 **'정상' 이 아니다** — 기능이 꺼져 있으면 Slow Drain 을 알 수 없다.
+ */
+export function parseBottleneckMon(text) {
+  const s = String(text || '');
+  if (!s.trim()) return { parsed: false, enabled: null, none: false, ports: [], note: '' };
+  const disabled = /\bnot\s+enabled|\bdisabled\b|is\s+not\s+configured/i.test(s);
+  const none = /\bno\s+(bottleneck|congestion|latency)/i.test(s);
+  const ports = [];
+  for (const raw of s.split(/\r?\n/)) {
+    // 헤더·구분선·요약 문구는 건너뛴다. `  12   ...  3.5  ...` 처럼 선두가 포트 번호인 행만.
+    const m = raw.match(/^\s*(\d{1,3})\s+(.*\S)\s*$/);
+    if (!m) continue;
+    if (/^=+$/.test(m[2]) || /port/i.test(m[2]) && /type|state/i.test(m[2])) continue;
+    ports.push({ port: Number(m[1]), detail: m[2].slice(0, 120) });
+  }
+  return {
+    parsed: disabled || none || ports.length > 0,
+    enabled: disabled ? false : (none || ports.length ? true : null),
+    none, ports: ports.slice(0, 100),
+    note: s.trim().split(/\r?\n/).find((l) => /bottleneck|congestion|latency/i.test(l))?.trim().slice(0, 200) || '',
+  };
+}
+
+/**
+ * `fabricshow` → 패브릭 구성원(ISL·도메인).
+ *
+ * 관용 매칭: `<domain>: <hex id> <WWN> <ip> <ip> "<name>"`. 이름 인용부호가 없는 펌웨어도 있어
+ * 마지막 토큰을 이름으로 폴백한다. principal 표시(`>`)가 있으면 그 도메인을 principal 로 본다.
+ */
+export function parseFabricShow(text) {
+  const lines = String(text || '').split(/\r?\n/);
+  const list = [];
+  let principal = null;
+  for (const raw of lines) {
+    const m = raw.match(/^\s*(>?)\s*(\d{1,3})\s*:\s*([0-9a-fA-F]{4,6})\s+([0-9a-fA-F:]{20,23})\s+(\S+)(?:\s+(\S+))?\s*(.*)$/);
+    if (!m) continue;
+    let name = String(m[7] || '').trim();
+    const q = name.match(/"([^"]*)"/);
+    if (q) name = q[1];
+    else name = name.split(/\s+/).filter(Boolean).pop() || '';
+    const domain = Number(m[2]);
+    if (m[1] === '>') principal = domain;
+    list.push({ domain, switchId: m[3], wwn: m[4].toLowerCase(), enetIp: m[5], fcIp: m[6] || '', name: name.slice(0, 60) });
+  }
+  return { parsed: list.length > 0, switches: list.slice(0, 64), count: list.length, principal };
+}
