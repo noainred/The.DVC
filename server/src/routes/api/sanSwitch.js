@@ -16,6 +16,7 @@ import { localSnapshots, getSnapshot, dropSnapshot } from '../../sanswitch/store
 import { collectDeviceNow, sanSwitchPollerStatus, pollSanSwitchOnce, testDeviceConnection } from '../../sanswitch/poller.js';
 import { startTestRun, getTestRun } from '../../sanswitch/testRuns.js';
 import { edgeSanSwitchSnapshots } from '../../central/sanSwitchEdge.js';
+import { listActivity as listSwActivity } from '../../sanswitch/activityLog.js';
 // v2.511: 조닝 그림 — 순수 분석(스위치 왕복 없음).
 import { zonesFromCompact, buildZoneGraph, buildZoneMatrix, zoneFindings, zoneSummary } from '../../sanswitch/zoning.js';
 import { listDatacenters } from '../../datacenter/store.js';
@@ -426,6 +427,52 @@ api.get('/tools/sanswitch/perf/storage-summary', toolsPerm, fullScopeOnly, async
     switches: devices.map((d) => ({ id: d.id, name: d.name, host: d.host, datacenterId: d.datacenterId, datacenterName: dcNameOf(d.datacenterId) })),
     buckets: agg.buckets, bucketMs: agg.bucketMs, series, counts, unavailable: agg.unavailable || false,
   });
+});
+
+/**
+ * 수집 작업 로그(v2.516, 사용자 요구 "스토리지 모니터링 처럼 화면 하단에 진행상태와 로그").
+ * poller.inFlight = 지금 수집 중인 장비('진행중'), events = 최근 완료 이벤트('완료', newest-first).
+ * 조회 전용이라 `toolsPerm + fullScopeOnly`(다른 SAN 조회와 동일 게이트 — SAN 은 vCenter 범위 밖).
+ * ⚠ 스토리지의 `/tools/storage/activity` 와 **같은 응답 형태**를 유지할 것 — 웹이 공용 패널
+ *   하나로 두 화면을 그린다(views/tools/CollectActivity.jsx). 키 이름을 바꾸면 한쪽이 빈다.
+ */
+api.get('/tools/sanswitch/activity', toolsPerm, fullScopeOnly, (req, res) => {
+  res.json({ poller: sanSwitchPollerStatus(), events: listSwActivity(Number(req.query.limit) || 100) });
+});
+
+/**
+ * 전체 수집(v2.516, 사용자 요구 "san switch 전체 수집 기능 버튼 추가").
+ *
+ * 중앙 직접 수집 장비는 **즉시** 수집하고, 엣지 위임 장비는 **재수집 요청을 큐에 등록**한다 —
+ * 중앙은 엣지에 명령을 밀어넣을 수 없고, 엣지가 다음 설정 pull 때 가져가 즉시 수집·push 한다
+ * (단건 `/devices/:id/collect` 와 같은 규약). 이미 대기 중인 요청은 `hasPendingRequest` 가
+ * 중복 등록을 막는다(연타가 엣지 작업을 곱하지 않게).
+ *
+ * ⚠ 스토리지의 `/tools/storage/collect-all` 은 **엣지 요청을 등록하지 않고** '다음 주기' 안내만
+ *   한다(v2.315 당시 설계). 여기서 등록하는 것이 사용자가 기대하는 '전체 수집' 이라 그렇게 했고,
+ *   **응답에 실제로 무엇을 했는지 나눠 싣는다**(즉시 N대 / 요청 M대) — 뭉치면 '전부 지금 수집했다'
+ *   는 거짓이 된다. 스토리지도 같은 동작으로 맞추려면 별건으로 다룰 것.
+ *
+ * 재진입: `pollSanSwitchOnce` 가 진행 중이면 `{ok:false, reason}` 을 돌려주고 그 사실을 그대로
+ * 전달한다(폴러와 가드를 공유 — 중복 수집 금지 규약).
+ */
+api.post('/tools/sanswitch/collect-all', adminOnly, async (req, res) => {
+  try {
+    const all = listDevices().filter((d) => d.enabled !== false);
+    const edgeDevs = all.filter((d) => String(d.agent || '').trim());
+    const central = all.length - edgeDevs.length;
+    // 엣지 요청 먼저 등록 — 중앙 수집(수십 초)이 끝나기를 기다리지 않게.
+    let requested = 0; let alreadyQueued = 0;
+    for (const d of edgeDevs) {
+      if (hasPendingRequest(d.id)) { alreadyQueued++; continue; }
+      try { requestCollect(d.id, d.agent); requested++; } catch { /* 한 대 실패가 전체를 막지 않게 */ }
+    }
+    const result = await pollSanSwitchOnce();   // { ok, collected, failed, ... } 또는 { ok:false, reason }
+    logAudit({ user: req.user?.username, action: 'SAN 스위치 전체 수집',
+      detail: `중앙 ${central}대 즉시(${result.ok === false ? result.reason : `성공 ${result.collected ?? 0}·실패 ${result.failed ?? 0}`})`
+        + ` · 엣지 ${edgeDevs.length}대 중 요청 ${requested}(대기중 ${alreadyQueued})` });
+    res.json({ ok: true, central, edge: edgeDevs.length, requested, alreadyQueued, result });
+  } catch (e) { res.status(502).json({ ok: false, reason: e.message }); }
 });
 
 /** 이 노드 몫 전체 재수집(관리자 수동 실행 — 폴러와 재진입 가드를 공유한다). */

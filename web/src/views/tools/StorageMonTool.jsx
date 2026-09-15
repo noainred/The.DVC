@@ -8,6 +8,7 @@ import { columnsFor, cellValue, sortValue } from './storageColumns.js';
 import { UNIT_OPTIONS, formatBytes, loadUnit, saveUnit } from './storageUnits.js';
 import { STable } from '../../components/STable.jsx';
 import BulkDeviceIo from './BulkDeviceIo.jsx';
+import CollectActivity from './CollectActivity.jsx';
 
 /**
  * 특수기능 › 스토리지 모니터링(v2.302) — 글로벌 법인 스토리지(Isilon 우선, XtremIO·PowerStore·
@@ -534,8 +535,19 @@ export default function StorageMonTool() {
         확장 로드맵(카탈로그): {(d.types || []).filter((t) => !t.implemented).map((t) => t.label).join(' · ')} — 수집기 구현 시 이 화면 변경 없이 표시됩니다.
       </div>
 
-      {/* 수집 작업 로그(v2.315, 사용자 요구) — 진행중 + 완료. 자체 폴링(5초)이라 별도 컴포넌트. */}
-      <ActivityPanel />
+      {/* 수집 작업 로그(v2.315 사용자 요구 → v2.516 공용 컴포넌트로 이관).
+          SAN 스위치도 같은 패널을 요구받아 `CollectActivity` 로 뽑았다 — 복사하면 폴링 주기·문구·
+          표 규약이 갈라진다(CLAUDE.md 복제 금지). 여기서 주입하는 것은 API 경로와 수치 열뿐이다. */}
+      <CollectActivity
+        path="/tools/storage/activity"
+        metricCols={[
+          { key: 'nodes', label: '노드', align: 'right', sort: (e) => String(e.nodes ?? ''), render: (e) => (e.nodes ?? '—'),
+            detail: (e) => (e.nodes == null ? '' : String(e.nodes)) },
+          { key: 'cap', label: '용량', muted: true, sort: (e) => String(e.usedBytes ?? ''),
+            render: (e) => (e.totalBytes ? `${tbFmt(e.usedBytes)}/${tbFmt(e.totalBytes)}` : '—'),
+            detail: (e) => (e.totalBytes ? `${tbFmt(e.usedBytes)} / ${tbFmt(e.totalBytes)}` : '') },
+        ]}
+      />
 
       {detail && (() => {
         const row = rows.find((x) => x.id === detail);
@@ -547,78 +559,6 @@ export default function StorageMonTool() {
   );
 }
 
-/**
- * 수집 작업 로그 패널(v2.315, 사용자 요구 '진행중/완료 창').
- * '진행중' = poller.inFlight(지금 수집 중인 장비), '완료' = 최근 완료 이벤트(newest-first).
- * 표(장비 목록)와 독립적으로 5초마다 폴링한다(수집은 초 단위라 빠른 갱신이 유용).
- * ⚠ 훅은 이 컴포넌트 최상단에만 — 조기 return 은 훅 선언 뒤(#310 회귀 방지, CLAUDE.md).
- */
-function ActivityPanel() {
-  const [a, setA] = useState(null);
-  useEffect(() => {
-    let live = true;
-    const load = () => fetchJson('/tools/storage/activity').then((r) => { if (live) setA(r); }).catch(() => {});
-    load();
-    const t = setInterval(load, 5000);
-    return () => { live = false; clearInterval(t); };
-  }, []);
-  if (!a) return null;
-  const inFlight = a.poller?.inFlight || [];
-  const events = a.events || [];
-  const hms = (ts) => { try { return new Date(ts).toLocaleTimeString('ko-KR', { hour12: false }); } catch { return '—'; } };
-  return (
-    <div className="card" style={{ padding: 14, marginTop: 14 }}>
-      <div className="flex between" style={{ alignItems: 'center', marginBottom: 10 }}>
-        <b style={{ fontSize: 14 }}>📋 수집 작업</b>
-        <span className="muted" style={{ fontSize: 11 }}>⟳ 5초 자동갱신 · 주기 {a.poller?.intervalMs ? `${Math.round(a.poller.intervalMs / 60000)}분` : '—'}</span>
-      </div>
-
-      {/* 진행중 */}
-      <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-dim)', marginBottom: inFlight.length ? 6 : 10 }}>
-        ▸ 진행중{' '}
-        {inFlight.length
-          ? <span className="badge" style={{ background: 'rgba(245,158,11,.2)', color: 'var(--amber)' }}>수집 중 {inFlight.length}건</span>
-          : <span className="muted" style={{ fontWeight: 400 }}>— 진행 중인 수집 없음</span>}
-      </div>
-      {inFlight.length > 0 && (
-        <div style={{ marginBottom: 12, fontSize: 12 }}>
-          {inFlight.map((f) => (
-            <div key={f.id} className="muted" style={{ padding: '2px 0' }}>
-              <span style={{ color: 'var(--text)' }}>{f.name}</span> — 수집 중… <span style={{ fontSize: 11 }}>({ago(f.at)})</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* 완료(최근) */}
-      <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-dim)', margin: '4px 0 6px' }}>▸ 완료 <span className="muted" style={{ fontWeight: 400 }}>(최근 {events.length}건)</span></div>
-      <div className="table-wrap" style={{ maxHeight: '32vh' }}>
-        <STable>
-          <thead><tr><th>시각</th><th>장비</th><th>출처</th><th>결과</th><th style={{ textAlign: 'right' }}>노드</th><th>용량</th><th style={{ textAlign: 'right' }}>소요</th><th>비고</th></tr></thead>
-          <tbody>
-            {events.length === 0 && <tr><td colSpan={8} className="center muted" style={{ padding: 16 }}>아직 수집 기록이 없습니다.</td></tr>}
-            {events.map((e, i) => (
-              <tr key={`${e.deviceId}-${e.at}-${i}`}>
-                <td className="muted" style={{ fontSize: 11.5, whiteSpace: 'nowrap' }}>{hms(e.at)}</td>
-                <td><b>{e.name}</b>{e.host ? <div className="muted" style={{ fontSize: 10.5 }}>{e.host}</div> : null}</td>
-                <td>{e.source === 'central'
-                  ? <span className="muted">중앙</span>
-                  : <span className="badge" style={{ background: 'rgba(167,139,250,.2)', color: '#a78bfa' }}>{e.source}</span>}</td>
-                <td>{e.ok ? <span className="badge green">정상</span> : <span className="badge red" title={e.error || ''}>실패</span>}</td>
-                <td style={{ textAlign: 'right' }}>{e.nodes ?? '—'}</td>
-                <td className="muted" style={{ fontSize: 11.5 }}>{e.totalBytes ? `${tbFmt(e.usedBytes)}/${tbFmt(e.totalBytes)}` : '—'}</td>
-                <td style={{ textAlign: 'right' }} className="muted">{e.durationMs != null ? `${(e.durationMs / 1000).toFixed(1)}s` : '—'}</td>
-                <td className="muted" style={{ fontSize: 11, maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={e.error || ''}>{e.error || ''}</td>
-              </tr>
-            ))}
-          </tbody>
-        </STable>
-      </div>
-    </div>
-  );
-}
-
-/** 장비 상세 모달 — 정규화 스냅샷 전부(풀·계정·섹션별 수집 상태·경보). */
 function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
   const s = r.snap;
   // 수집 방식/타입별 UI 분기(v2.325, 사용자 요구 '가져오는 정보에 맞는 최적 UI·최대한 많은 정보').

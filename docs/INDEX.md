@@ -49,6 +49,7 @@
 | [SVCMON-ARCHITECTURE.md](SVCMON-ARCHITECTURE.md) | 성능점검(svcmon) 아키텍처 — 1만 대·일 2GB 로그 전제의 용량 산정·튜닝 |
 | [SVCMON-TESTS.md](SVCMON-TESTS.md) | 성능점검 테스트 유형 15종 — 프로토콜·판정 기준·파라미터 |
 | [SVCMON-BULK.md](SVCMON-BULK.md) | 성능점검 대량 등록 — CSV 가져오기/내보내기·대량 자동등록 |
+| [DEVICE-BULK-IMPORT.md](DEVICE-BULK-IMPORT.md) | **SAN 스위치·스토리지 대량 등록** — CSV·자유텍스트 열/표기, 선택 항목 비우는 방법(vfId 등), 3단계(검증→연결 테스트→선택 등록), 오류별 조치 |
 
 ## 5. 보안 감사 · 점검 기록 (시간순)
 
