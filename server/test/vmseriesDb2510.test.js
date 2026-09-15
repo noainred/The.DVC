@@ -27,7 +27,20 @@ const { VM_COUNTERS } = await import('../src/vmseries/counters.js');
 const { dbFileName } = await import('../src/metrics/vmperfDb.js');
 
 const HOUR = 3_600_000;
-const NOW = Date.now();
+/**
+ * ⚠ `NOW` 를 `Date.now()` 로 두면 **시각에 따라 깨지는 테스트**가 된다(v2.517 에 CI 에서 실제로
+ * 실패해 원인을 확정했다 — 확률 60/3600 ≈ 1.67%).
+ *
+ * 왜: 이 파일은 스파이크를 `t0 + 60초 / +80초 / +100초` 에 심고, 아래 '빈도 버킷' 검사는
+ * `floor(t0 / HOUR)` 버킷을 찾는다. 그런데 `query.js` 는 버킷을 **run 시작 시각**으로 잡으므로
+ * (`freqMap` 키가 `bucketOf(r.t0)`), `t0` 가 정시 직전 60초 안에 놓이면 run 이 **다음 시간
+ * 버킷**으로 넘어가 찾은 버킷의 `runs` 가 0 이 된다. 제품 코드는 정상이고(`runs.count` 는 1)
+ * 테스트가 틀린 버킷을 본 것이다.
+ *
+ * 그래서 `NOW` 를 **정시 -30분** 으로 고정한다 — 항상 과거이고 시간 경계에서 30분 떨어져 있다.
+ * `Date.now()` 로 되돌리지 말 것.
+ */
+const NOW = Math.floor(Date.now() / HOUR) * HOUR - 30 * 60_000;
 const names = VM_COUNTERS.map((c) => c.name);
 const ci = (n) => names.indexOf(n);
 const moment = (ts, cpuPct, memPct = 10) => { const v = new Array(names.length).fill(-1); v[ci('cpuUsagePct')] = Math.round(cpuPct * 100); v[ci('cpuUsageMhz')] = Math.round(cpuPct * 48); v[ci('memUsagePct')] = Math.round(memPct * 100); v[ci('memActiveMB')] = 2048 * 1024; return { ts, vals: v }; };
@@ -75,7 +88,9 @@ test('localReportFor — run·지속·커버리지·피크·빈도 버킷(미측
   assert.equal(r.coverage.measuredHours, 1, '표본이 있는 시간은 1시간뿐');
   assert.equal(r.coverage.unmeasuredHours, r.coverage.expectedHours - 1);
   assert.ok(r.coverage.pct > 0 && r.coverage.pct < 2, `7일 중 1시간 = ${r.coverage.pct}%`);
-  const bucket = r.freq.find((f) => f.t === Math.floor(t0 / HOUR) * HOUR);
+  // 버킷은 **run 시작 시각**(첫 스파이크 = t0 + 60초) 기준이다 — `t0` 기준으로 찾으면 위 머리말의
+  // 경계 조건에서 다른 버킷을 집는다(이중 안전: NOW 고정 + 여기서도 run 시작으로 찾는다).
+  const bucket = r.freq.find((f) => f.t === Math.floor((t0 + 60_000) / HOUR) * HOUR);
   assert.ok(bucket, '7일 창은 시간 버킷');
   assert.equal(bucket.runs, 1); assert.equal(bucket.measured, true); assert.equal(bucket.maxCpuPct, 85);
   const empty = r.freq.find((f) => f.t === Math.floor((NOW - 10 * HOUR) / HOUR) * HOUR);

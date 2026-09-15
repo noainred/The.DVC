@@ -11,6 +11,16 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
 - 오프라인 패키지: `packaging/offline/build-package.sh` (Rocky Linux 9)
 - 의존성: CI(`ci.yml`)의 `npm audit` 는 **critical 만 차단**(v2.478)이고 **`--omit=dev` 기준**이다. 잔여 수용 항목 — 웹 high `d3-color`(3d-force-graph·react-simple-maps·recharts 경유. v2.500 에서 색 문자열이 **전부 프론트 상수**임을 재확인했다: `Topology3D` COLOR 맵·`WorldMap` 상수·`sInfo.color` 계열, 서버 응답에 color 필드 없음 → 외부 입력 도달 불가. override 강제는 지도·차트 회귀 위험이 실익보다 크다), 서버 moderate `exceljs→uuid`(exceljs 는 `uuid.v4` 만 사용 — CVE 는 v3/v5/v6 의 `buf` 인자 경계검사). 개발·빌드 전용 잔여는 v2.500 의 비파괴 `npm audit fix` 로 11→6 건이 됐고, 남은 critical 은 **dev 전용 `vitest`**(Vitest UI 서버가 열려 있을 때만 성립 — `@vitest/ui` 미설치·`--ui` 미사용. 수정본은 4.1.11+ 로 2.1.9 에서 두 메이저 점프라 미적용). 새 critical 이 뜨면 PR 이 막히니 `npm audit --omit=dev` 로 먼저 확인.
 - 작업 방식 메모(2026-09-11 실제 사고): 백그라운드 분석 에이전트 6개가 **10시간 동안 완료 알림 없이** 멈춘 적이 있다. 30분 내 알림이 없으면 죽은 것으로 보고 **직접 grep→파일 열기→판정** 방식으로 전환할 것(대기하지 말 것).
+- **테스트에서 `Date.now()` 를 기준 시각으로 쓰지 말 것 — 시각에 따라 깨진다**(v2.517 에 CI 실패로
+  확정): `vmseriesDb2510.test.js` 는 `NOW = Date.now()` 였고, 스파이크를 `t0 + 60초` 에 심으면서
+  빈도 버킷은 `floor(t0 / HOUR)` 로 찾았다. `query.js` 는 버킷을 **run 시작 시각**으로 잡으므로
+  (`freqMap` 키 = `bucketOf(r.t0)`) `t0` 가 정시 직전 60초에 놓이면 run 이 다음 버킷으로 넘어가
+  `runs` 가 0 이 됐다 — **확률 60/3600 ≈ 1.67%**. 제품 코드는 정상이고 테스트가 틀린 버킷을 본 것이다.
+  수정은 `NOW = floor(Date.now()/HOUR)*HOUR - 30*60_000`(정시 -30분 — 항상 과거이고 경계에서 30분
+  떨어짐) + 버킷 조회도 run 시작 기준. `t0 % HOUR` 이 항상 30분이라 경계가 **불가능**하다
+  (10만 표본 검증 0건). 새 시계열 테스트를 쓸 때 같은 규칙 — **기준 시각은 경계에서 떨어뜨려 고정**한다.
+  ⚠ 남은 플래키 2건(`perfMonitor2498.test.js:388`, `chunkedPrune2453.test.js:48`)은 원인 미확정이다.
+  '재실행하면 통과' 로 넘기지 말고 이 건처럼 **경계값을 재현해** 확정할 것.
 - 소스 NUL 바이트 탐지는 `tr -cd '\000' < 파일 | wc -c` 로(`grep -cP '\x00'` 은 0 을 돌려주는 오탐 — v2.478 문서 오판의 원인). `file` 이 JS 를 'data' 로 분류하면 의심할 것. 분석 에이전트는 `model` 을 지정하지 말고 기본 모델로, 결과를 scratchpad 파일에도 쓰게 하면 12분 안에 돌아온다(2026-09-11 2차 감사 실측).
 
 ## 운영 환경 (성능 설계 시 반드시 고려)
