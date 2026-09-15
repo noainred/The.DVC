@@ -72,6 +72,21 @@ test('헤더 줄 — 토큰이 전부 필드/별칭일 때만 열 순서로 쓴�
   assert.equal(r2.rows.length, 1, '데이터 행이 헤더로 소비되지 않는다');
 });
 
+test('헤더는 파일 중간에도 받는다 — 세 표기를 한 파일에 담은 샘플이 깨지지 않게', () => {
+  // 실제 결함: '데이터 전에만 헤더' 였을 때, 샘플의 ③ 헤더형이 데이터 행으로 파싱돼
+  // `type='host'` 쓰레기 행이 생겼다(샘플을 그대로 가져오면 오류가 났다).
+  const r = P([
+    'isilon\tWA-01\t10.0.0.1',
+    'host\tname\ttype',
+    '10.0.0.9\tKR-01\tunity',
+  ].join('\n'));
+  assert.equal(r.rows.length, 2, '중간 헤더가 데이터 행이 되지 않는다');
+  assert.equal(r.rows[1].host, '10.0.0.9');
+  assert.equal(r.rows[1].name, 'KR-01');
+  assert.equal(r.rows[1].type, 'unity');
+  assert.ok(r.warnings.some((w) => /열 순서를/.test(w)), '순서가 바뀐 사실을 조용히 넘기지 않는다');
+});
+
 test('기본값은 빈 필드만 채운다 — 줄에 적힌 값을 덮지 않는다', () => {
   const r = P(['10.0.0.1', 'isilon\tX\t10.0.0.2'].join('\n'), { defaults: { type: 'unity', username: 'admin' } });
   // 1줄: 위치형 첫 열은 type 이라 '10.0.0.1' 이 type 에 들어간다(사용자가 헤더/키를 줘야 한다) —
@@ -98,9 +113,9 @@ test('상한·절단은 개수와 사유를 밝힌다(조용한 절단 금지)',
 });
 
 test('제어문자·NBSP 는 값에서 제거한다(비밀번호가 셸·검증으로 흘러가는 필드다)', () => {
-  const r = P('isilon\tA\t10.0.0.1\troot\tpw');
+  const r = P('isilon\tA\t10.0.0.1\troot\tp\u0007w');
   assert.equal(r.rows[0].password, 'pw');
-  const r2 = P('isilon A 10.0.0.1');   // NBSP 는 공백으로 정규화 → 공백 분리
+  const r2 = P('isilon\u00a0A\u00a010.0.0.1');   // NBSP 는 공백으로 정규화 → 공백 분리
   assert.equal(r2.rows[0].name, 'A');
 });
 
