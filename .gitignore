@@ -50,6 +50,7 @@ server/config/sanswitch-latest.json
 server/config/storage-activity.json
 server/config/sanswitch-activity.json
 server/config/sanswitch-perf-activity.json
+server/config/sanswitch-err-baseline.json
 server/config/rma-agents.json
 server/config/credentials.json
 server/config/rma-settings.json

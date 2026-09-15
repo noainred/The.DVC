@@ -27,6 +27,9 @@ import { pollPerfOnce, sanSwitchPerfStatus } from '../../sanswitch/perfPoller.js
 import { listActivity as listPerfActivity, latestEventByDevice as latestPerfEventByDevice } from '../../sanswitch/perfActivityLog.js';
 import { perfEmptyDiag } from '../../sanswitch/perfDiag.js';
 import { edgePerfStatusFor, listEdgePerfStatus } from '../../central/sanSwitchPerfEdge.js';
+// 월간 점검(v2.519) — 판정은 순수 모듈, 기준선은 포탈 안에 저장(스위치 카운터는 건드리지 않는다).
+import { checkDevice, summarizeAll, CHECK_ITEMS } from '../../sanswitch/healthCheck.js';
+import { saveBaseline, getBaseline, clearBaseline, publicBaseline, listBaselines } from '../../sanswitch/errBaseline.js';
 import { portSeries, storageSeries, storageSeriesMulti, arraySerialOf, endpointKind, perfDbStats, pruneNow, latestSampleTs, available as perfDbAvailable } from '../../sanswitch/perfDb.js';
 import { listDevices as listStorageDevices } from '../../storage/registry.js';
 import { localSnapshots as storageLocalSnaps } from '../../storage/store.js';
@@ -328,6 +331,84 @@ api.post('/tools/sanswitch/perf/collect', adminOnly, async (req, res) => {
       ? `중앙 직접 ${centralIds.length}대는 지금 수집했고, 엣지 ${agents.length}곳(${edgeDevices.length}대)에는 재수집 요청만 등록했습니다 — 중앙은 엣지에 명령을 밀어넣을 수 없어, 엣지가 다음 설정 pull 때 가져가 즉시 수집·push 합니다.`
       : `중앙 직접 ${centralIds.length}대를 수집했습니다(위임 장비 없음).`,
   });
+});
+
+/* ── 월간 점검(v2.519, 사용자 제공 Brocade 월간 점검 체크리스트) ────────────────────
+ * "위 명령어를 조합해서 장비 점검하는 기능 / 장비별 점검 / 전체 SAN 스위치 점검 버튼 /
+ *  이상 유무를 간단하게 보고 / 자세한 정보를 세부 보고서를 PDF 로"
+ *
+ * ⚠ 점검은 **저장된 스냅샷을 판정**한다 — 스위치에 새로 접속하지 않는다. 이유:
+ *   ① 판정에 필요한 원천(switchshow·porterrshow·sfpshow·sensorshow·errdump 등)이 이미 정기
+ *      수집에 들어 있다. ② 전체 점검 버튼이 28대에 동시 SSH 를 열면 그게 운영 사고다.
+ *   최신 데이터로 점검하려면 `/collect`(또는 '전체 수집')을 먼저 눌러 수집한 뒤 점검한다 —
+ *   응답의 `collectedAt` 이 '언제 수집한 데이터로 판정했는지' 를 밝힌다.
+ */
+function snapshotFor(id) {
+  const local = getSnapshot(id);
+  const edge = edgeSanSwitchSnapshots().find((s) => s.deviceId === id);
+  return (!local || (edge && (edge.collectedAt || 0) > (local.collectedAt || 0))) ? edge : local;
+}
+
+/** 장비 1대 점검. 기준선이 있으면 '당월 신규 에러' 까지 판정한다. */
+api.get('/tools/sanswitch/devices/:id/healthcheck', toolsPerm, fullScopeOnly, (req, res) => {
+  const dev = listDevices().find((d) => d.id === req.params.id);
+  if (!dev) return res.status(404).json({ ok: false, reason: '스위치를 찾을 수 없습니다.' });
+  const snap = snapshotFor(req.params.id);
+  if (!snap) {
+    return res.status(404).json({ ok: false, reason: '수집된 스냅샷이 없습니다 — 먼저 수집하세요.' });
+  }
+  const baseline = getBaseline(req.params.id);
+  const result = checkDevice(snap, { baseline });
+  res.json({ ok: true, result, baseline: publicBaseline(baseline), items: CHECK_ITEMS });
+});
+
+/**
+ * 전체 점검 — 등록된 모든 스위치를 판정해 **요약 + 장비별 결과**를 준다.
+ * 스냅샷이 없는 장비는 결과에서 빼지 않고 `missing` 으로 밝힌다(조용히 빠지면 '전부 점검했다' 는 거짓).
+ */
+api.get('/tools/sanswitch/healthcheck-all', toolsPerm, fullScopeOnly, (req, res) => {
+  const dcs = String(req.query.datacenterId || '').split(',').map((x) => x.trim()).filter(Boolean).map((x) => (x === NONE_DC ? '' : x));
+  const dcSet = dcs.length ? new Set(dcs) : null;
+  const devices = listDevices().filter((d) => d.enabled !== false && (!dcSet || dcSet.has(String(d.datacenterId || ''))));
+  const results = []; const missing = [];
+  for (const d of devices) {
+    const snap = snapshotFor(d.id);
+    if (!snap) { missing.push({ deviceId: d.id, name: d.name || d.host, agent: d.agent || '', datacenterId: d.datacenterId || '' }); continue; }
+    const r = checkDevice(snap, { baseline: getBaseline(d.id) });
+    if (r) results.push({ ...r, datacenterId: d.datacenterId || '' });
+  }
+  const dcNameOf = (() => {
+    try { const m = new Map(listDatacenters().map((x) => [x.id, x.name || x.id])); return (id) => m.get(id) || id || '(법인 미지정)'; }
+    catch { return (id) => id || '(법인 미지정)'; }
+  })();
+  res.json({
+    ok: true, at: Date.now(),
+    summary: { ...summarizeAll(results), missing: missing.length, registered: devices.length },
+    results: results.map((r) => ({ ...r, datacenterName: dcNameOf(r.datacenterId) })),
+    missing, items: CHECK_ITEMS, baselines: listBaselines(),
+  });
+});
+
+/**
+ * 이번 달 기준선 저장 — 현재 스냅샷의 포트 에러 카운터를 포탈에 기억한다.
+ * ⚠ 스위치의 `portstatsclear` 를 실행하지 않는다(다른 팀의 기준선을 지우는 파괴적 동작).
+ */
+api.post('/tools/sanswitch/devices/:id/err-baseline', adminOnly, (req, res) => {
+  const dev = listDevices().find((d) => d.id === req.params.id);
+  if (!dev) return res.status(404).json({ ok: false, reason: '스위치를 찾을 수 없습니다.' });
+  const snap = snapshotFor(req.params.id);
+  if (!snap) return res.status(404).json({ ok: false, reason: '수집된 스냅샷이 없습니다 — 먼저 수집하세요.' });
+  if (snap.ok === false) return res.status(409).json({ ok: false, reason: '마지막 수집이 실패한 스냅샷입니다 — 기준선으로 쓰면 다음 점검이 틀립니다. 수집 성공 후 저장하세요.' });
+  const saved = saveBaseline(req.params.id, snap);
+  logAudit({ user: req.user?.username, action: 'SAN 스위치 에러 기준선 저장', target: `${dev.name}(${dev.id})`,
+    detail: `포트 ${saved?.portCount ?? 0}개${saved?.portsComplete === false ? ' (중앙에 일부 포트만 있음)' : ''}` });
+  res.json({ ok: true, baseline: saved });
+});
+
+api.delete('/tools/sanswitch/devices/:id/err-baseline', adminOnly, (req, res) => {
+  const had = clearBaseline(req.params.id);
+  logAudit({ user: req.user?.username, action: 'SAN 스위치 에러 기준선 삭제', target: req.params.id });
+  res.json({ ok: true, removed: had });
 });
 
 /**

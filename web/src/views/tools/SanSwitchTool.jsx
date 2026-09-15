@@ -15,6 +15,7 @@ import BulkDeviceIo from './BulkDeviceIo.jsx';
 import CollectActivity from './CollectActivity.jsx';
 import { perfDiagText, diagBorder, perfCollectSummary } from './sanPerfDiagText.js';
 import { portsScopeNote } from './sanPortsScopeText.js';
+import { DeviceHealthPanel, AllHealthCheck } from './SanHealthCheck.jsx';
 
 /**
  * 특수기능 › SAN 스위치 모니터링(v2.410 — 사용자 요구 'Brocade SAN switch 포트 모니터링 및
@@ -65,6 +66,7 @@ export default function SanSwitchTool() {
   const testTimer = useRef(null);                  // 연결 테스트 폴링 타이머(v2.421) — 훅은 조기 return 위에
   const [dcPerf, setDcPerf] = useState(null);      // 법인 단위 스토리지 사용량 분석 모달
   const [bulkOpen, setBulkOpen] = useState(false);  // 대량 등록 모달(v2.513) — 훅은 조기 return 위에
+  const [healthOpen, setHealthOpen] = useState(false); // 전체 점검 모달(v2.519) — 훅은 조기 return 위에
   const [portFilter, setPortFilter] = useState('all');
   const [portQ, setPortQ] = useState('');
   const [infoOpen, setInfoOpen] = useState(false);   // 장비 일반 정보 펼침
@@ -231,6 +233,12 @@ export default function SanSwitchTool() {
           <button className="tab" style={{ flex: 'none', padding: '6px 12px' }} disabled={busy}
             title="중앙이 직접 수집하는 스위치를 지금 다시 수집하고, 엣지 위임 스위치는 재수집 요청을 등록합니다(엣지는 다음 설정 pull 때 수집 후 바로 push)."
             onClick={collectAll}>🔄 전체 수집</button>
+          {/* 전체 점검(v2.519, 사용자 요청 "전체 SAN 스위치 점검하는 버튼") — 저장된 스냅샷을
+              판정한다(스위치 재접속 없음. 28대 동시 SSH 는 그 자체가 운영 사고다).
+              최신 상태가 필요하면 위 '전체 수집' 을 먼저 누른다. */}
+          <button className="tab" style={{ flex: 'none', padding: '6px 12px' }}
+            title="등록된 SAN 스위치를 월간 점검 체크리스트로 판정해 이상 유무를 요약하고, 세부 보고서를 PDF 로 내려받습니다. 스위치에 새로 접속하지 않고 마지막 수집 스냅샷을 판정합니다."
+            onClick={() => setHealthOpen(true)}>🩺 전체 점검</button>
           <button className="login-btn" style={{ flex: 'none', padding: '6px 14px' }} onClick={() => openForm(null)}>+ 스위치 등록</button>
           {/* v2.513(사용자 요청 "san switch 도 같은 메뉴") — CSV·자유텍스트 대량 등록/내보내기·샘플.
               스토리지 모니터링과 **같은 공용 컴포넌트**를 쓴다(판정·문구 단일 소스 — BulkDeviceIo 헤더).
@@ -338,6 +346,14 @@ export default function SanSwitchTool() {
       {form && <DeviceForm {...{ form, setForm, data, save, busy, runTest, test, setTest, stopTestPoll }} />}
       {detail && <PortDetail {...{ detail, setDetail, closeDetail, portFilter, setPortFilter, portQ, setPortQ, infoOpen, setInfoOpen, tab, setTab, sort, setSort }} />}
       {dcPerf && <DcStoragePerf dcPerf={dcPerf} onClose={() => setDcPerf(null)} />}
+      {/* 전체 점검 모달(v2.519). 법인 칩 선택을 그대로 범위로 쓴다 — 목록에서 고른 것과
+          점검 대상이 어긋나면 사용자가 '전체' 로 오해한다. */}
+      {healthOpen && (
+        <Modal title={`SAN 스위치 월간 점검${dcSel.size ? ` — ${[...dcSel].join(', ')}` : ' — 전체'}`} onClose={() => setHealthOpen(false)} width={1180}>
+          <AllHealthCheck datacenterIds={[...dcSel]} />
+        </Modal>
+      )}
+
       {bulkOpen && (
         <BulkDeviceIo base="/tools/sanswitch" title="SAN 스위치 대량 등록 — CSV · 자유텍스트" keyLabel="host"
           onClose={() => setBulkOpen(false)} onDone={() => { setBulkOpen(false); load(); }} />
@@ -1242,7 +1258,7 @@ function PortDetail({ detail, setDetail, closeDetail, portFilter, setPortFilter,
 
           {/* 포트 목록 / 사용량 분석 전환(v2.411) — 분석 탭은 portperfshow 시계열 DB 를 읽는다. */}
           <div className="vc-views" style={{ marginBottom: 8, display: 'flex', gap: 6 }}>
-            {[['ports', '포트 목록'], ['perf', '📈 사용량 분석'], ['zoning', '🔗 조닝']].map(([k, label]) => (
+            {[['ports', '포트 목록'], ['perf', '📈 사용량 분석'], ['zoning', '🔗 조닝'], ['health', '🩺 점검']].map(([k, label]) => (
               <button key={k} className={tab === k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '5px 14px' }}
                 onClick={() => setTab(k)}>{label}</button>
             ))}
@@ -1251,6 +1267,8 @@ function PortDetail({ detail, setDetail, closeDetail, portFilter, setPortFilter,
           {tab === 'perf' && <PerfPanel deviceId={d.deviceId} ports={list} />}
           {/* 조닝(v2.511) — cfgshow 파싱 결과. 폴링하지 않는다(탭을 열 때 1회 조회). */}
           {tab === 'zoning' && <SanZoningPanel deviceId={d.deviceId} />}
+          {/* 월간 점검(v2.519) — 저장된 스냅샷 판정. 폴링하지 않는다(탭을 열 때 1회). */}
+          {tab === 'health' && <DeviceHealthPanel deviceId={d.deviceId} deviceName={d.name} />}
 
           {tab === 'ports' && <>
           <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 8 }}>
