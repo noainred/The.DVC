@@ -18,6 +18,13 @@ import { loadPowerOffSettings, savePowerOffSettings, LIMITS as POWEROFF_LIMITS }
 import { powerOffPollerStatus, runPowerOffCheckNow } from '../../tools/powerOffPoller.js';
 import { diskBreakdown, analyzeDiskTrend, diskTrendPolicyFromEnv } from '../../tools/diskTrend.js';
 import { getMetricsDb } from '../../metrics/db.js';
+// v2.512: '서버 온도' — iDRAC 수집 온도 + 물리/가상화 구분 + 법인별 평균, 5분 평균 창 적응.
+import { buildServerTempReport, avgWindowMs, avgWindowLabel } from '../../tools/serverTemp.js';
+import { analysisServersWithRemote } from '../admin/shared.js';
+import { getSensorSeries } from '../../idrac/sensorStore.js';
+import { listDatacenters } from '../../datacenter/store.js';
+import { loadMetricsSettings } from '../../metrics/settings.js';
+import { DEFAULT_MAX_AGE_MS } from '../../idrac/roomTemp.js';
 import { vmperfHistory, vmperfMeta, vmperfDiskUsage, dropVmperfDb, dbFileName, VMPERF_METRICS, VMPERF_DISK_METRICS, VMPERF_VMDISK_METRICS } from '../../metrics/vmperfDb.js';
 import { loadVmperfSettings, saveVmperfSettings, VMPERF_LIMITS } from '../../metrics/vmperfSettings.js';
 import { memoJson, hash, linregSlope, eachLimited, scopeSlice, scopeKey } from './shared.js';
@@ -1075,22 +1082,31 @@ api.post('/tools/vm-finder', requirePerm('tools'), async (req, res) => {
   res.json(result);
 });
 
-// ESXi 온도 — 현재 값(호스트/클러스터/법인별 그룹) + 5년 히스토리 시계열.
+// 서버 온도(v2.512, 구 ESXi 온도) — iDRAC 수집 온도 + 물리/가상화 구분 + 법인별 평균, ESXi 는 보완.
+// 경로/툴키(esxitemp)는 그대로 둔다 — 권한 매핑(auth/toolAccess.js)·해시탭·북마크 호환.
 api.get('/tools/esxi-temp', requirePerm('tools'), async (req, res) => {
   const snap = store.get();
   const vcId = req.query.vcenterId;
   const allowed = scopedVcenterIds(req.user, snap);
   const hosts = (snap.hosts || []).filter((h) => (!allowed || allowed.has(h.vcenterId)) && (!vcId || h.vcenterId === vcId) && h.tempC != null);
   const r1 = (x) => (x == null ? null : Number(x.toFixed(1)));
-  // 최근 5분 평균/최대(시계열). 표시 컬럼: 현재온도 / 5분 평균 / 최대 온도.
+  /* ── 최근 평균 창(v2.512 수정) ──────────────────────────────────────────────
+   * 예전에는 창이 **고정 5분**이었다. 온도 샘플러 주기는 설정에서 최대 24시간까지 올릴 수 있어
+   * (metrics/settings.js MAX_INTERVAL_MS), 주기가 5분을 넘는 현장에서는 그 창에 표본이 하나도
+   * 없어 **모든 행의 '5분 평균' 이 영구히 '—'** 였다(사용자 신고). 창을 샘플 주기의 2배 이상으로
+   * 넓히고, 실제 창 길이를 응답에 실어 화면이 '5분' 이 아니라 참값을 라벨에 쓰게 한다. */
+  let sampleMs = 0;
+  try { sampleMs = Number(loadMetricsSettings()?.sampleIntervalMs) || 0; } catch { sampleMs = 0; }
+  const windowMs = avgWindowMs(sampleMs);
   let avg5Host = new Map(); let avg5Cluster = new Map(); let avg5Vc = new Map();
+  let avgErr = '';
   try {
     const db = await getMetricsDb();
-    const since = Date.now() - 5 * 60_000;
+    const since = Date.now() - windowMs;
     avg5Host = db.recentAvg('temp_host', since);
     avg5Cluster = db.recentAvg('temp_cluster', since);
     avg5Vc = db.recentAvg('temp_vc', since);
-  } catch { /* 시계열 없으면 5분 평균은 null */ }
+  } catch (e) { avgErr = e?.message || '시계열 조회 실패'; }
   const grp = (keyFn, avg5Map) => {
     const m = new Map();
     for (const h of hosts) { const k = keyFn(h); const g = m.get(k) || { key: k, count: 0, sum: 0, max: -Infinity }; g.count++; g.sum += h.tempC; g.max = Math.max(g.max, h.tempMaxC ?? h.tempC); m.set(k, g); }
@@ -1099,10 +1115,59 @@ api.get('/tools/esxi-temp', requirePerm('tools'), async (req, res) => {
       return { key: g.key, hosts: g.count, curC: r1(g.sum / g.count), avg5C: a5 ? a5.avg : null, maxC: r1(Math.max(g.max, a5?.max ?? -Infinity)) };
     }).sort((a, b) => b.curC - a.curC);
   };
+  /* ── iDRAC 서버 온도(v2.512) ────────────────────────────────────────────────
+   * scope: iDRAC 서버는 vCenter 귀속이 없을 수 있다(베어메탈). 범위 제한 계정에는
+   * '귀속 없는 데이터는 노출하지 않는다'(server/CLAUDE.md) 규칙대로 **허용 vCenter 에
+   * 귀속된 서버만** 남긴다. 무제한 계정은 전량(물리 서버 포함)을 본다. */
+  let idrac = { enabled: true, rows: [], summary: null, byDatacenter: [], counts: null, reason: '' };
+  try {
+    const dcNames = new Map(listDatacenters().map((d) => [String(d.id), d.name || d.id]));
+    let servers = analysisServersWithRemote(req) || [];
+    if (allowed) servers = servers.filter((s) => s.vcenterId && allowed.has(s.vcenterId));
+    if (vcId) servers = servers.filter((s) => !s.vcenterId || s.vcenterId === vcId);
+    const rep = buildServerTempReport({
+      idracServers: servers,
+      hosts,
+      latestOf: (s) => (s.remote ? s.sensors : getSensorSeries(s.id).latest),
+      dcName: (id) => dcNames.get(String(id)) || id,
+      maxAgeMs: DEFAULT_MAX_AGE_MS,
+    });
+    idrac = { enabled: true, ...rep, reason: rep.counts.idrac ? '' : 'iDRAC 센서를 보고한 서버가 없습니다(등록·자격증명·수집 주기를 확인하세요).' };
+    // 데모(mock): iDRAC 등록이 없어 물리 서버가 0 이면 화면의 물리/가상화 분리를 확인할 수 없다.
+    // 다른 도구와 같은 규약으로 합성하고 응답에 synthesized 로 밝힌다(실데이터와 섞이지 않게 mock 에서만).
+    if (snap.source === 'mock' && !rep.counts.idrac) {
+      const dcs = [...new Set(hosts.map((h) => h.vcenterId))].slice(0, 6);
+      const fake = [];
+      dcs.forEach((dc, i) => {
+        for (let n = 1; n <= 3; n++) {
+          const seed = hash(`${dc}|bm${n}`);
+          fake.push({
+            id: `mock-bm-${dc}-${n}`, name: `bm-${dc.replace(/^vc-/, '')}-db0${n}`,
+            ip: `10.${i + 10}.0.${n}`, serviceTag: `MOCK${(seed % 9000) + 1000}`, datacenterId: dc,
+            sensors: { t: Date.now(), temps: { 'Inlet Temp': 20 + (seed % 7), 'Exhaust Temp': 34 + (seed % 9), 'CPU1 Temp': 52 + (seed % 18) } },
+            remote: true,
+          });
+        }
+      });
+      const mrep = buildServerTempReport({
+        idracServers: fake, hosts, latestOf: (s) => s.sensors,
+        dcName: (id) => dcNames.get(String(id)) || id, maxAgeMs: 0,
+      });
+      idrac = { enabled: true, ...mrep, reason: '', synthesized: true };
+    }
+  } catch (e) {
+    // iDRAC 실패가 ESXi 표까지 죽이지 않게 격리한다(기존 화면 보존).
+    idrac = { enabled: false, rows: [], summary: null, byDatacenter: [], counts: null, reason: `iDRAC 온도 조회 실패: ${e?.message || e}` };
+  }
+
   res.json({
     scope: vcId || 'all',
     reportingHosts: hosts.length,
     totalHosts: (snap.hosts || []).filter((h) => (!allowed || allowed.has(h.vcenterId)) && (!vcId || h.vcenterId === vcId)).length,
+    // 평균 창 — 화면이 '5분 평균' 대신 실제 창을 라벨로 쓴다.
+    avgWindowMs: windowMs, avgWindowLabel: avgWindowLabel(windowMs),
+    sampleIntervalMs: sampleMs || null, avgError: avgErr || '',
+    idrac,
     hosts: hosts.map((h) => {
       const a5 = avg5Host.get(h.id);
       return { id: h.id, name: h.name, vcenterId: h.vcenterId, cluster: h.cluster, curC: h.tempC, avg5C: a5 ? a5.avg : null, tempMaxC: r1(Math.max(h.tempMaxC ?? h.tempC, a5?.max ?? -Infinity)), temps: h.temps || [] };

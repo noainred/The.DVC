@@ -110,7 +110,7 @@ export default function ToolCategories() {
       <p className="muted" style={{ fontSize: 12.5, lineHeight: 1.7, marginTop: -4 }}>
         특수 기능이 <b>{allTools.length}개</b>라 한 화면에 다 깔면 찾기 어렵습니다. 카테고리로 묶어 섹션별로 보여줍니다.
         <br />
-        <b>한 기능을 여러 카테고리에 중복해서 넣을 수 있습니다</b> — 예를 들어 'ESXi 온도'는 서버이면서 가상화입니다.
+        <b>한 기능을 여러 카테고리에 중복해서 넣을 수 있습니다</b> — 예를 들어 '서버 온도'는 서버이면서 가상화입니다.
         어느 카테고리에도 없는 기능은 <b>'기타'</b>로 모여 사라지지 않습니다.
       </p>
 

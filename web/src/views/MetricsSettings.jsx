@@ -21,7 +21,7 @@ const fmtAgo = (ts) => {
   return `${Math.round(s / 3600)}시간 전`;
 };
 
-/** 지표 수집(ESXi 온도/데이터스토어 용량/GPU) 주기·보존기간 설정. */
+/** 지표 수집(서버 온도/데이터스토어 용량/GPU) 주기·보존기간 설정. */
 export default function MetricsSettings() {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
@@ -83,7 +83,7 @@ export default function MetricsSettings() {
     <div style={{ maxWidth: 640 }}>
       <div className="section-title" style={{ marginTop: 0 }}>🌡️ 지표 수집 주기</div>
       <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
-        ESXi 온도 · 데이터스토어 사용량 · GPU 사용률을 주기적으로 수집해 시계열로 저장합니다.
+        서버 온도 · 데이터스토어 사용량 · GPU 사용률을 주기적으로 수집해 시계열로 저장합니다.
         기본값은 <b>1분</b>이며 아래에서 변경할 수 있습니다.
       </p>
 
