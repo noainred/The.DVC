@@ -5,6 +5,8 @@
  * 던져 수집기가 즉시 중단하게 한다(장비 계정 잠금 예방 — isilon 과 동일 규칙).
  */
 import { Agent } from 'undici';
+// v2.513: 전송 계층 실패(`fetch failed`·`aborted`)를 행동 가능한 사유로 바꾼다 — 순수 모듈.
+import { describeFetchError, isTransportError } from './netError.js';
 
 // 기본은 자체서명 장비 대응으로 검증 해제(기존 동작 유지). 보안(M-4, 2026-09-12): 사설 CA·공인
 // 인증서를 쓰는 사이트는 STORAGE_TLS_VERIFY=true 로 검증을 켜 MITM(어레이 관리자 자격증명 탈취)을 막는다.
@@ -13,6 +15,22 @@ const TIMEOUT_MS = Number(process.env.STORAGE_HTTP_TIMEOUT_MS) || 15_000;
 /** 요청 signal(v2.421): 호출자 취소(signal) + 요청 타임아웃을 합친다 — 연결 테스트가 끝난 뒤 수집기가 백그라운드에서 계속
  *  요청을 이어가지 않게(라우팅 불가 주소면 요청마다 15초 × 20여 회 = 수 분간 세션이 남았다 — CI 에서 실제 관측). */
 const reqSignal = (signal) => (signal ? AbortSignal.any([signal, AbortSignal.timeout(TIMEOUT_MS)]) : AbortSignal.timeout(TIMEOUT_MS));
+
+/**
+ * fetch 래퍼(v2.513) — 전송 계층 실패를 **어느 장비의 무슨 문제인지** 말하는 오류로 바꾼다.
+ * undici 는 연결 거부·타임아웃·인증서 실패를 전부 `TypeError: fetch failed` 하나로 던지고
+ * 진짜 코드는 `err.cause` 에 숨긴다 — 그대로 두면 화면에 'fetch failed' 만 남는다(실제 신고).
+ * HTTP 응답을 받은 오류(4xx/5xx·401)는 이미 사유가 있으므로 건드리지 않는다.
+ */
+async function fetchOrExplain(url, init, { host, port, signal }) {
+  try {
+    return await fetch(url, init);
+  } catch (e) {
+    if (!isTransportError(e)) throw e;
+    // cause 를 유지한다 — 화면에는 한 줄 사유만 가지만 서버 로그·디버깅에서 원문 사슬을 잃지 않는다.
+    throw new Error(describeFetchError(e, { host, port, timeoutMs: TIMEOUT_MS, cancelled: !!signal?.aborted }), { cause: e });
+  }
+}
 
 /**
  * 헤더 값 사전 검증(v2.311 적대적 검증 확정 결함 수정 — 자격증명 유출 차단).
@@ -55,10 +73,10 @@ export function makeGetter(device, { port = 443, headers = {}, signal = null } =
   assertHeaderSafe(headers); // 값 미포함 오류로 즉시 차단(아래 머리말 참조 — 유출 방지)
   const auth = Buffer.from(`${device.username}:${device.password || ''}`).toString('base64');
   return async (apiPath) => {
-    const res = await fetch(`https://${device.host}:${port}${apiPath}`, {
+    const res = await fetchOrExplain(`https://${device.host}:${port}${apiPath}`, {
       headers: { Authorization: `Basic ${auth}`, Accept: 'application/json', ...headers },
       dispatcher, signal: reqSignal(signal),
-    });
+    }, { host: device.host, port, signal });
     if (res.status === 401) throw new Error('인증 실패(401) — 계정/비밀번호 확인');
     if (!res.ok) throw new Error(await httpFailMessage(res, device));
     return res.json();
@@ -73,10 +91,10 @@ export function makeRawGetter(device, { port = 443, headers = {}, signal = null 
   assertHeaderSafe(headers);
   const auth = Buffer.from(`${device.username}:${device.password || ''}`).toString('base64');
   return async (apiPath) => {
-    const res = await fetch(`https://${device.host}:${port}${apiPath}`, {
+    const res = await fetchOrExplain(`https://${device.host}:${port}${apiPath}`, {
       headers: { Authorization: `Basic ${auth}`, Accept: 'application/json', ...headers },
       dispatcher, signal: reqSignal(signal),
-    });
+    }, { host: device.host, port, signal });
     if (res.status === 401) throw new Error('인증 실패(401) — 계정/비밀번호 확인');
     if (!res.ok) throw new Error(await httpFailMessage(res, device));
     return { body: await res.json(), headers: res.headers };
@@ -94,12 +112,12 @@ export function makePoster(device, { port = 443, headers = {}, signal = null } =
   const auth = Buffer.from(`${device.username}:${device.password || ''}`).toString('base64');
   return async (apiPath, body, extraHeaders = {}) => {
     assertHeaderSafe(extraHeaders);
-    const res = await fetch(`https://${device.host}:${port}${apiPath}`, {
+    const res = await fetchOrExplain(`https://${device.host}:${port}${apiPath}`, {
       method: 'POST',
       headers: { Authorization: `Basic ${auth}`, Accept: 'application/json', 'Content-Type': 'application/json', ...headers, ...extraHeaders },
       body: JSON.stringify(body ?? {}),
       dispatcher, signal: reqSignal(signal),
-    });
+    }, { host: device.host, port, signal });
     if (res.status === 401) throw new Error('인증 실패(401) — 계정/비밀번호 확인');
     if (!res.ok) throw new Error(await httpFailMessage(res, device));
     return res.json();
