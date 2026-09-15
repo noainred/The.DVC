@@ -44,11 +44,16 @@ export function testLabel(status) {
   }
 }
 
-/** 드라이런 요약 한 줄(총 N행 — 추가 a · 수정 u · 오류 e · 비밀번호 반영 p). */
+/**
+ * 드라이런 요약 한 줄.
+ * ⚠ **'검증 결과:' 접두를 지우지 말 것** — 등록 결과 줄(`registerSummary`)과 형태가 같아
+ * 한 화면에 나란히 뜨면 사람이 구분하지 못한다(v2.513 Chromium 스크린샷 판독에서 발견 —
+ * 문자열 테스트로는 잡히지 않았다).
+ */
 export function dryRunSummary(check) {
   if (!check) return '';
   const s = check.summary || {};
-  return `총 ${check.total ?? 0}행 — 추가 ${s.add ?? 0} · 수정 ${s.update ?? 0} · 오류 ${s.error ?? 0} · 비밀번호 반영 ${s.withPassword ?? 0}건`;
+  return `검증 결과: 총 ${check.total ?? 0}행 — 추가 ${s.add ?? 0} · 수정 ${s.update ?? 0} · 오류 ${s.error ?? 0} · 비밀번호 반영 ${s.withPassword ?? 0}건`;
 }
 
 /**
@@ -127,7 +132,7 @@ export function registerSummary(result) {
   const parts = [`추가 ${result.added ?? 0}`, `수정 ${result.updated ?? 0}`];
   if (result.failed?.length) parts.push(`실패 ${result.failed.length}`);
   if (result.skipped?.length) parts.push(`제외 ${result.skipped.length}`);
-  return `총 ${result.total ?? 0}행 — ${parts.join(' · ')}`;
+  return `등록 결과: 총 ${result.total ?? 0}행 — ${parts.join(' · ')}`;
 }
 
 /**

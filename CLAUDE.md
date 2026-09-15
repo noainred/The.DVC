@@ -79,6 +79,38 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       (`WWN_HINTS` 가 벤더·방향 추정에 쓴다) ② Unity SPA0/SPB0 의 **뒤 4바이트 동일**
       (`labelMap()` 라벨 충돌의 유일한 재현 사례). 상세는 `test/sanZoning2511.test.js` 헤더.
       새 수집기 픽스처를 만들 때도 같은 규칙 — 실장비 캡처는 형식만 옮기고 값은 합성한다.
+  - **장비 대량 등록(CSV·자유텍스트)은 판정·문구를 복제하지 말 것**(`util/bulkImport.js`·`util/bulkText.js`·
+    `util/bulkAdvice.js`·`util/bulkRun.js` + 웹 `views/tools/BulkDeviceIo.jsx`·`bulkIoText.js`, v2.513 —
+    사용자 요청 "csv와 free text import/export · sample download · 실제로 테스트해서 검증 ·
+    통과한 일부만 등록 · 어떤 부분을 고치라고 조언"):
+    - **코어는 하나다.** 스토리지(v2.313)가 먼저 가졌던 `storage/csv.js analyzeImport` 를 일반화해
+      `util/bulkImport.js` 로 옮겼고 스토리지는 위임만 한다. SAN 스위치가 같은 기능을 요구받았을 때
+      20줄을 복사했으면 두 판정이 갈라진다(이 저장소는 `console/`↔`version_3/` 중복으로 v2.506
+      svcmon 버그를 두 곳에 고쳐야 했다). 웹도 모달 하나(`BulkDeviceIo`)를 두 화면이 쓴다.
+    - **식별 키는 도구마다 다르다** — 스토리지 `host+type`, SAN 스위치 **`host` 단독**
+      (`sanswitch/registry.js saveDevice` 가 host 중복을 거부한다). 틀리면 '드라이런 통과 →
+      저장 예외' 가 되고 export→편집→import 왕복이 장비를 복제한다.
+    - **'테스트 불가'(skipped)를 '실패'(fail)로 뭉치지 말 것.** 엣지 위임 장비는 중앙에서 닿을 수
+      없어 **시도하지 않은** 것이다. 실패라 말하면 사용자가 멀쩡한 자격증명을 의심하며 고친다.
+      화면 기본 선택에서도 skipped 를 빼지 않는다(등록해야 엣지가 수집한다) — 빼는 것은 fail 뿐.
+      `passedLines()` 는 `ok` 만 돌려주므로 '연결 성공분만' 옵션은 skipped 도 제외한다 —
+      그 사실을 화면이 **말한다**(`testOnlyNote`, 조용한 제외 금지).
+    - **자동 재시도 금지**(`bulkRun.js`). 잘못된 비밀번호를 반복하면 어레이·스위치 계정이 잠긴다.
+      같은 도구의 실행이 진행 중이면 새 실행을 거절한다(연타가 로그인 시도를 곱하지 않게).
+      run 객체는 비밀번호를 들고 있으므로 TTL 15분 폐기 + `publicRun` 이 자격증명을 뺀다.
+    - **`:` 는 `aliasOf` 가 해석될 때만 키 경계다**(`bulkText.js looksKeyed`). 아니면
+      `https://10.30.0.14/` 의 `https:` 가 키로 읽혀 그 줄이 **경고 없이 사라진다**(초판의 실제
+      결함 — 6행 입력이 5행으로 보고됐고 단위 테스트 25건이 전부 통과했다). WWN(`50:06:…`)·
+      시각·`host:443` 도 같은 이유로 보호된다. 키로 읽어 아는 필드가 0개면 위치 해석으로
+      폴백하고 **경고를 남긴다**.
+    - **`enrichAdvice` 는 판정을 다시 하지 않는다** — `report` 를 장식만 한다(검증 단일 소스
+      `deviceInputIssue` 를 건드리지 않기 위해). 필드로 환원되지 않는 문제(파일 내 중복)는
+      `fieldOfIssue` 가 **null** 을 주고 전용 문구를 쓴다 — 엉뚱한 열을 지목하면 거짓 조언이다.
+    - **조언 문구는 `BoldText` 로 렌더**(`**강조**` 가 별표로 샌다 — v2.439/2.440/2.505 실제 사고).
+      조언은 문장이라 길다 — 셀에 `whiteSpace:'normal'` 이 없으면 오른쪽에서 잘린다(v2.513
+      스크린샷 판독에서 실제로 잘려 있었다. 수치로는 안 잡혔다).
+    - **요약 줄 접두('검증 결과:' / '등록 결과:')를 지우지 말 것** — 형태가 같아 한 화면에
+      나란히 뜨면 사람이 구분하지 못한다(같은 판독에서 발견).
   - **롤업 O(N)**(`withRollups`): 호스트/VM/DS/알람을 vCenter별 1회 그룹핑 후 조회(`pick`). 그룹마다 전체 재순회(O(N×vCenter)) 금지.
   - **시계열 prune 스로틀 + ts 인덱스**: 매 샘플 DELETE 스캔 금지 — N틱마다 1회(store 10틱·metrics 20틱·idrac.poller 10틱). `DELETE WHERE ts<?`는 `ts` 단독 인덱스가 있어야 풀스캔을 피한다(복합 `(server_id,ts)`로는 못 탐).
   - **ETag/304**(`util/compress.js`): res.json 래퍼가 본문 SHA-1로 약한 ETag를 발급하고 If-None-Match 일치 시 304(본문 0바이트). 이 래퍼는 res.end로 직접 종료해 Express 기본 ETag가 동작하지 않으므로, 응답 경로 수정 시 ETag 발급을 없애면 프론트 `pollFetch`의 304 지원이 통째로 죽는다(과거 실제 그 상태였음 — 15초 폴 × 30초 스냅샷이면 절반이 무변동 재전송).

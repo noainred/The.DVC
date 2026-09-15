@@ -127,9 +127,12 @@ describe('조용한 제외 금지', () => {
   it('등록 결과에 제외 건수를 싣는다', () => {
     const t = registerSummary({ total: 6, added: 2, updated: 0, failed: [], skipped: [{ line: 3 }, { line: 4 }] });
     expect(t).toMatch(/제외 2/);
+    expect(t).toMatch(/^등록 결과:/);
   });
   it('드라이런 요약에 오류 건수가 보인다', () => {
     expect(dryRunSummary(CHECK)).toMatch(/오류 1/);
+    // 두 요약 줄은 형태가 같아 접두로만 구분된다 — 지우면 화면에서 헷갈린다(실제 발견).
+    expect(dryRunSummary(CHECK)).toMatch(/^검증 결과:/);
     expect(dryRunSummary(null)).toBe('');
   });
 });

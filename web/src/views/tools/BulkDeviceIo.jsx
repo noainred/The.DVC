@@ -237,9 +237,13 @@ export default function BulkDeviceIo({
                 <tr>
                   <th data-nosort>선택</th>
                   <th style={{ textAlign: 'right' }}>줄</th>
-                  <th>장비</th><th>host</th><th>타입</th><th>동작</th><th>비밀번호</th>
+                  <th>장비</th>
+                  <th title="장비 주소(host) — IP 또는 호스트명">주소</th>
+                  <th>타입</th><th>동작</th><th>비밀번호</th>
                   <th>연결 테스트</th>
-                  <th style={{ minWidth: 240 }}>문제 · 고칠 곳</th>
+                  {/* 조언은 문장이라 길다 — 줄바꿈시키지 않으면 오른쪽에서 잘린다
+                      (v2.513 Chromium 스크린샷 판독에서 실제로 잘려 있었다). */}
+                  <th style={{ minWidth: 220, maxWidth: 380 }}>문제 · 고칠 곳</th>
                 </tr>
               </thead>
               <tbody>
@@ -259,14 +263,14 @@ export default function BulkDeviceIo({
                       <td className="muted" style={{ fontSize: 11.5 }}>{r.type || '—'}</td>
                       <td><span className={`badge ${actionClass(r.action)}`}>{actionLabel(r.action)}</span></td>
                       <td className="muted" style={{ fontSize: 11.5 }}>{r.hasPassword ? '반영' : '유지'}</td>
-                      <td data-sort={t?.status || ''} style={{ fontSize: 11.5 }}
+                      <td data-sort={t?.status || ''} style={{ fontSize: 11.5, maxWidth: 240, whiteSpace: 'normal', wordBreak: 'break-word' }}
                         title={t?.reason || (t ? '' : '아직 테스트하지 않았습니다')}>
                         {t
                           ? <span className={tl.cls ? `badge ${tl.cls}` : 'muted'}>{tl.icon} {tl.text}</span>
                           : <span className="muted">—</span>}
                         {t?.reason && t.status !== 'ok' && <div className="muted" style={{ fontSize: 11, lineHeight: 1.5 }}>{t.reason}</div>}
                       </td>
-                      <td style={{ fontSize: 11.5, lineHeight: 1.6 }}>
+                      <td style={{ fontSize: 11.5, lineHeight: 1.6, maxWidth: 380, whiteSpace: 'normal', wordBreak: 'break-word' }}>
                         {r.reason && <div style={{ color: 'var(--red)' }}>{r.reason}</div>}
                         {r.advice && <div style={{ marginTop: 3 }}><BoldText text={r.advice} /></div>}
                         {tokenHint(r) && <div className="muted" style={{ fontSize: 11 }}>위치: {tokenHint(r)}</div>}
