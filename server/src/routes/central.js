@@ -49,6 +49,9 @@ import { ingestResult as rmaIngestResult } from '../rma/testResults.js';
 import { commitCollection as commitGuestDisk } from '../guestdisk/db.js';
 import { commitVmSeries, setVmSeriesMeta } from '../vmseries/db.js';   // v2.510: 실시간 스파이크 push 수신(vCenter별 독립 DB)
 import { loadVmSeriesSettings } from '../vmseries/settings.js';
+import { commitCurUser } from '../curuser/db.js';                     // v2.520: '현재 사용자' push 수신
+import { load as loadCurUserSettings } from '../curuser/settings.js';
+import { recordCurUserActivity } from '../curuser/activityLog.js';
 import { load as loadGuestDiskSettings } from '../guestdisk/settings.js';
 import { sanitizeGuestDiskVms } from '../guestdisk/analyze.js';
 import { brokerFetch as credentialBrokerFetch } from '../security/credentialStore.js';
@@ -568,6 +571,99 @@ centralRouter.post('/vmseries', async (req, res) => {
   noteVcenterOwner(vcId, agent, { peer: req.socket?.remoteAddress || '', hostname: req.get('X-Agent-Hostname') || '' });
   console.log(`[central] vmseries 수신: agent=${agent} vc=${vcId} chunk=${b.chunk ?? 0}/${b.chunks ?? 1} spikes=${rows.spikes.length} cover=${rows.cover.length}`);
   res.json({ ok: true, vcenterId: vcId, spikes: rows.spikes.length, cover: rows.cover.length, cursors: rows.cursors.length });
+});
+
+// 위임 '현재 사용자' 수신(v2.520) — 엣지 curuser 폴러가 읽은 `guestinfo.curuser.*` 해석 결과를 push.
+// /vmseries 와 같은 신뢰 경계(개별 토큰 → agent 강제 + TOFU 소유권 + mock 차단).
+// Body: { agent, generatedAt, chunk, chunks, vcenterIds?:string[], records:[{vmId,vcenterId,name,folder,at,kind,ok,active,disc,other,sessions,users:[{name,kind}],error,guestHost}] }
+//
+// ⚠ 레코드의 `kind` 는 엣지가 계산한 값이지만, 중앙 화면은 **조회 시점에 `at` 로 다시 판정**한다
+//   (`curuser/report.js refreshKinds`) — 엣지가 push 를 멈춰도 며칠 전 값이 '정상' 으로 남지 않는다.
+const CU_ID_RE = /^[A-Za-z0-9_.:-]{1,128}$/;
+const CU_KINDS = new Set(['ok', 'stale', 'no-agent', 'guest-error', 'incomplete', 'unparsed', 'clock-skew', 'not-found']);
+/** 엣지 중복 기록 제거 — 엣지는 주기마다 전 대상을 다시 보낸다(`_lastRec` 규약, v2.516). */
+const _cuLastRec = new Map();
+function sanitizeCurUserRecords(b) {
+  const out = [];
+  for (const r of (Array.isArray(b.records) ? b.records : []).slice(0, 5000)) {
+    if (!r || !CU_ID_RE.test(String(r.vmId || '')) || !CU_ID_RE.test(String(r.vcenterId || ''))) continue;
+    const at = Number(r.at);
+    const n = (v) => (v == null || !Number.isFinite(Number(v)) ? null : Math.max(0, Math.min(100_000, Math.floor(Number(v)))));
+    out.push({
+      vmId: String(r.vmId), vcenterId: String(r.vcenterId),
+      name: String(r.name || '').slice(0, 200), folder: String(r.folder || '').slice(0, 400),
+      at: Number.isFinite(at) && at > 0 ? at : null,
+      kind: CU_KINDS.has(String(r.kind)) ? String(r.kind) : 'unknown',
+      ok: r.ok === true, active: n(r.active), disc: n(r.disc), other: n(r.other), sessions: n(r.sessions),
+      users: (Array.isArray(r.users) ? r.users : []).slice(0, 200)
+        .map((u) => ({ name: String(u?.name || '').slice(0, 128), kind: ['active', 'disc', 'other'].includes(String(u?.kind)) ? String(u.kind) : 'other' }))
+        .filter((u) => u.name),
+      error: String(r.error || '').slice(0, 300), guestHost: String(r.guestHost || '').slice(0, 120),
+    });
+  }
+  return out;
+}
+centralRouter.post('/curuser', async (req, res) => {
+  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+  const b = req.body || {};
+  const agent = req.centralAuth.agent || String(b.agent || '').trim();
+  if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
+  const records = sanitizeCurUserRecords(b);
+  // 소유권 — 이 엣지가 인벤토리를 소유한 vCenter 의 레코드만 받는다(다른 엣지가 덮어쓸 수 없게).
+  const kept = []; const rejected = new Set();
+  for (const r of records) {
+    if (req.centralAuth.mode === 'agent' && !agentOwnsVcenter(agent, r.vcenterId)) { rejected.add(r.vcenterId); continue; }
+    if (isMockVcenter({ id: r.vcenterId })) { rejected.add(r.vcenterId); continue; }
+    kept.push(r);
+  }
+  const chunk0 = Number(b.chunk) === 0 || b.chunk == null;
+  // 청크 0 만 latest 를 교체한다(이후 청크는 병합) — 교체를 매 청크에 하면 마지막 청크만 남는다
+  // (sanSwitchEdge v2.410 과 같은 규약).
+  const replaceVcenters = chunk0
+    ? [...new Set((Array.isArray(b.vcenterIds) ? b.vcenterIds : kept.map((r) => r.vcenterId)).map(String))]
+      .filter((id) => CU_ID_RE.test(id) && (req.centralAuth.mode !== 'agent' || agentOwnsVcenter(agent, id)))
+    : [];
+  const ts = Date.now();
+  let commit;
+  try { commit = await commitCurUser({ ts, records: kept, series: [], replaceVcenters }); }
+  catch (e) { return res.status(500).json({ ok: false, reason: `curuser 커밋 실패: ${e?.message || e}` }); }
+  if (!commit?.ok) return res.status(500).json({ ok: false, reason: commit?.reason || 'curuser 커밋 실패(DB 사용 불가)' });
+  // 작업 로그 — 엣지가 주기마다 전 대상을 다시 보내므로 `generatedAt` 으로 중복을 제거한다.
+  if (chunk0) {
+    const gen = Number(b.generatedAt) || ts;
+    for (const vcId of new Set(kept.map((r) => r.vcenterId))) {
+      const key = `${agent}|${vcId}`;
+      if (_cuLastRec.get(key) === gen) continue;
+      _cuLastRec.set(key, gen);
+      const rs = kept.filter((r) => r.vcenterId === vcId);
+      const uniq = new Set(rs.filter((r) => r.ok).flatMap((r) => r.users.map((u) => u.name.trim().toLowerCase())).filter(Boolean));
+      recordCurUserActivity({ at: gen, deviceId: vcId, name: vcId, source: agent, ok: true, durationMs: null, vms: rs.length, users: uniq.size });
+    }
+    if (_cuLastRec.size > 5000) _cuLastRec.clear();
+    for (const vcId of new Set(kept.map((r) => r.vcenterId))) noteVcenterOwner(vcId, agent, { peer: req.socket?.remoteAddress || '', hostname: req.get('X-Agent-Hostname') || '' });
+  }
+  console.log(`[central] curuser 수신: agent=${agent} chunk=${b.chunk ?? 0}/${b.chunks ?? 1} records=${kept.length}${rejected.size ? ` 거부=${[...rejected].join(',')}` : ''}`);
+  res.json({ ok: true, records: kept.length, rejected: [...rejected], replaced: replaceVcenters.length });
+});
+
+// '현재 사용자' 설정 배포(v2.520) — 엣지가 주기적으로 GET. 이 엣지가 소유한 vCenter 항목만 내려준다.
+centralRouter.get('/curuser-config', (req, res) => {
+  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+  const agent = String(req.centralAuth.agent || req.query.agent || '').trim().toLowerCase();
+  const mine = new Set(listInventory().filter((e) => String(e.agent || '').toLowerCase() === agent).map((e) => String(e.vcenterId)));
+  const s = loadCurUserSettings();
+  const vcenters = Object.fromEntries(Object.entries(s.vcenters || {}).filter(([id]) => mine.has(id)));
+  res.json({
+    ok: true,
+    settings: {
+      enabled: s.enabled, intervalMs: s.intervalMs, retentionDays: s.retentionDays,
+      concurrency: s.concurrency, vmTimeoutMs: s.vmTimeoutMs, maxVms: s.maxVms,
+      guestPublishMs: s.guestPublishMs, staleFactor: s.staleFactor, vcenters,
+    },
+    vcenters: [...mine],
+  });
 });
 
 // 실시간 스파이크 수집 설정 배포(v2.510) — 엣지가 주기적으로 GET. 이 엣지가 수집하는(인벤토리 소유)

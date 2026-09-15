@@ -59,7 +59,7 @@ export const PRESET = Object.freeze([
   },
   {
     id: 'virtualization', label: '가상화', icon: '🧊',
-    tools: ['vmfinder', 'vm-track', 'vmtools', 'guestos', 'real-os', 'snapshots', 'vm-clone',
+    tools: ['vmfinder', 'vm-track', 'vmtools', 'guestos', 'real-os', 'curuser', 'snapshots', 'vm-clone',
       'vmprovision', 'vm-export', 'esxi', 'esxitemp', 'vcversion', 'solutions', 'gpu', 'topo3d'],
   },
   {

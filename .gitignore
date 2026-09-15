@@ -61,6 +61,9 @@ server/config/rma-schedule-*.json
 server/config/rma-outbox-*.json
 server/config/sanswitch-perf-settings.json
 server/config/sanswitch-perf.db
+# '현재 사용자'(v2.520) 런타임 파일 — 비밀은 없지만(게스트 계정을 쓰지 않는 설계) 현장 설정·캐시라 커밋 대상이 아니다.
+server/config/curuser-settings.json
+server/config/curuser-activity.json
 server/config/storage-history.db
 server/config/storage-history.db-wal
 server/config/storage-history.db-shm

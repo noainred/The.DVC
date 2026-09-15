@@ -38,6 +38,9 @@ export const TOOLS = [
   { k: 'forecast', icon: '🔮', label: '용량 추세/예측', desc: '데이터스토어 증가율·가득 찰 예상일' },
   { k: 'dsusage', icon: '💽', label: 'vCenter별 스토리지', desc: 'DataCenter/vCenter별 데이터스토어 연결 현황 · 가용/전체 용량' },
   { k: 'guestos', icon: '🐧', label: 'Guest OS 종류/버전', desc: 'OS·버전별 VM 수 · 전체/법인별 · 검색' },
+  // v2.520 — 게스트 계정 없이(사용자 결정 "Guestos 계정 없이") 게스트가 스스로 발행한
+  // `guestinfo.curuser.*` 를 vCenter 구성에서 읽는다. `aka` 는 옛/다른 이름으로도 찾게 한다.
+  { k: 'curuser', icon: '👥', label: '현재 사용자', desc: '지정 폴더의 Windows 서버에 로그인한 사용자 수 · 전체/법인(vCenter)별 · 같은 계정이 여러 서버에 있으면 1명 · 활성/연결끊김 구분 · 10분 주기 DB 저장·추이 · 게스트 계정 불필요(VMware Tools 발행값 읽기)', aka: ['로그인 사용자', '접속자', 'quser', 'rdp 사용자', 'current users'] },
   { k: 'real-os', icon: '🔎', label: '실제 OS 확인(게스트)', desc: '게스트 OS에서 실제 설치 OS(/etc/os-release 등) 읽기 · ESXi 보고와 불일치 탐지 · 주기 스캔 · CSV' },
   { k: 'thinvms', icon: '💧', label: 'Thin VM 찾기', desc: 'Thin 프로비저닝 VM · 회수 가능 용량(추정)' },
   { k: 'orphanvmdk', icon: '🧩', label: '고아 VMDK 찾기', desc: '데이터스토어에 있지만 어떤 VM 에도 연결되지 않은 가상디스크 · VM 소유 파일(layoutEx)과 대조 · FCD·콘텐츠 라이브러리·복제는 제외 · 확인 필요 후보만 제시(삭제 기능 없음)' },

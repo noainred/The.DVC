@@ -39,6 +39,7 @@ export const TREE = Object.freeze([
       tab('vms', '가상머신 목록', '#/vms'),
       tool('vmfinder'), tool('vm-track'), tool('vmtools'), tool('guestos'), tool('real-os'),
       tool('esxi'), tool('vcversion'), tool('solutions'), tool('vm-export'), tool('snapshots'),
+      tool('curuser'),
       tool('topo3d'),
       tool('esxitemp', true), tool('gpu', true),
     ],

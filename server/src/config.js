@@ -266,6 +266,12 @@ export const config = {
     pushVmSeries: process.env.AGENT_PUSH_VMSERIES != null
       ? process.env.AGENT_PUSH_VMSERIES !== 'false'
       : (EDGE_ALL && process.env.AGENT_PUSH_INVENTORY !== 'false'),
+    // '현재 사용자'(v2.520): site 위임 vCenter 의 config.extraConfig 는 중앙이 읽을 수 없으므로
+    // 엣지의 curuser 폴러가 읽은 결과를 push 한다. 위와 같은 기본 규칙(명시 env 최우선,
+    // 미지정이면 EDGE_ALL + 인벤토리 push 켜짐일 때만 on). 주기는 curuser 설정을 따른다.
+    pushCurUser: process.env.AGENT_PUSH_CURUSER != null
+      ? process.env.AGENT_PUSH_CURUSER !== 'false'
+      : (EDGE_ALL && process.env.AGENT_PUSH_INVENTORY !== 'false'),
   },
   auth: {
     enabled: process.env.AUTH_ENABLED !== 'false',

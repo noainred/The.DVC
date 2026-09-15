@@ -104,6 +104,8 @@ import { startVmtrackPoller } from './vmtrack/poller.js';          // VM 수량 
 import { startGuestDiskPoller } from './guestdisk/poller.js';       // 게스트 디스크 회수 리포트(v2.459)
 import { startVmSeriesPoller } from './vmseries/poller.js';         // 실시간(20초) 스파이크 수집(v2.510) — vCenter별 독립 DB
 import { startVmSeriesConfigPull } from './agent/vmSeriesConfigPull.js'; // 〃 중앙→엣지 설정 pull(v2.510)
+import { startCurUserPoller } from './curuser/poller.js';           // '현재 사용자'(v2.520) — guestinfo 읽기, 게스트 계정 없음
+import { startCurUserConfigPull } from './agent/curUserConfigPull.js'; // 〃 중앙→엣지 설정 pull(v2.520)
 import { startPowerOffPoller } from './tools/powerOffPoller.js';     // 전원 꺼짐 점검(v2.484)
 import { resumeHostAccessPending } from './hostaccess/service.js';  // 호스트 접근 제어 확정 대기 복구(v2.485)
 import { startStoragePush } from './storage/push.js';            // 엣지→중앙 스냅샷 push(v2.302)
@@ -212,6 +214,9 @@ app.use('/api/central/pdu-data', BIG_JSON);
 // 포트 사용량(sanswitch-perf)도 같은 축이라 함께 올린다(v2.517 에 상태 payload 가 더해졌다).
 app.use('/api/central/sanswitch-data', BIG_JSON);
 app.use('/api/central/sanswitch-perf', BIG_JSON);
+// '현재 사용자' push(v2.520) — 레코드에 계정명 목록이 붙어 대상이 많은 법인은 1MB 기본을 넘을 수
+// 있다. express.json 의 limit 은 **gzip 해제 후 길이**라 gzip 만으로는 413 이 해결되지 않는다.
+app.use('/api/central/curuser', BIG_JSON);
 // 대상 가져오기는 XLSX 를 base64 로 실을 수 있어(2,000행 규모 ~1MB 초과 가능) 큰 한도를 준다.
 app.use('/api/svcmon/targets/import', BIG_JSON);
 app.use('/api/svcmon/targets/hostmap/parse', BIG_JSON);
@@ -333,6 +338,8 @@ const stagger = [
   startGuestDiskPush,   // 〃 엣지→중앙 push(v2.466) — site 모드 vCenter 의 guest.disk 를 엣지가 수집해 중앙에 올림. CENTRAL_URL·pushGuestDisk 미충족이면 자기기동 안 함
   startVmSeriesPoller,  // 실시간 스파이크 수집(v2.510) — 적응형 타이머(기본 50분) + 재진입 가드 + 동시성 4 + 디스크 가드. opt-in(기본 꺼짐). 엣지면 저장 후 중앙 push
   startVmSeriesConfigPull, // 〃 중앙→엣지 설정 pull(v2.510) — CENTRAL_URL 미설정이면 자기기동 안 함
+  startCurUserPoller,   // '현재 사용자'(v2.520) — 적응형 타이머(기본 10분) + 재진입 가드 + 동시성 제한. opt-in(기본 꺼짐). 게스트 계정 없이 config.extraConfig 만 읽는다
+  startCurUserConfigPull, // 〃 중앙→엣지 설정 pull(v2.520)
 ];
 stagger.forEach((start, i) => setTimeout(() => { try { start(); } catch (e) { console.error('[start] 폴러 기동 실패:', e?.message); } }, i * 1500).unref?.());
 

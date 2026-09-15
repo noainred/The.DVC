@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "2.520.0",
+      "date": "2026-09-15",
+      "title": "'현재 사용자' — 지정 폴더 Windows 서버의 로그인 사용자 수(게스트 계정 없이)",
+      "notes": [
+        "vCenter별·전체 고유 사용자 집계 — 같은 계정이 한 법인의 여러 서버에 있으면 1명(세션 수와 구분)",
+        "게스트 계정을 쓰지 않는다: 게스트가 VMware Tools 로 발행한 guestinfo.curuser.* 를 vCenter config.extraConfig 에서 읽는다",
+        "발행기 스크립트(PowerShell) 내려받기 + schtasks 등록 명령 안내 — 포탈로 나가는 아웃바운드 불필요",
+        "10분 주기 수집·DB 저장(curuser.db, 보존 기본 180일) + 추이 차트",
+        "확인하지 못한 서버를 '사용자 0명' 으로 뭉개지 않는다 — ok/stale/no-agent/guest-error/incomplete/unparsed/clock-skew 7상태",
+        "엣지 위임 법인은 엣지가 push(gzip·청크·BIG_JSON 등록·413 로그) + 중앙→엣지 설정 pull"
+      ]
+    },
+    {
       "version": "2.519.0",
       "date": "2026-09-15",
       "title": "SAN 스위치 월간 점검 — 장비별/전체 점검 + 세부 보고서 PDF",
