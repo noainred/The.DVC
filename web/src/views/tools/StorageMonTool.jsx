@@ -974,6 +974,9 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
           {/* skip 사유 노출(v2.311) — VPLEX/Metro Node 의 capacity skip 은 오류가 아니라 제품 특성
               (가상화 계층 — 자체 용량 없음). 사유 없이 '건너뜀'만 보이면 수집 실패로 오해한다. */}
           {s.extra?.capacityNote && <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>ℹ {s.extra.capacityNote}</div>}
+          {/* 경보 폴백 고지(v2.513) — 장비가 state 필터를 못 받아 '전체를 받아 코드에서 거른' 경우.
+              수집은 성공(ok)이지만 **어떻게 센 건수인지**가 다르므로 조용히 넘기지 않는다. */}
+          {s.extra?.alertsNote && <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>ℹ 경보: {s.extra.alertsNote}</div>}
         </>
       )}
     </Modal>

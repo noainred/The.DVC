@@ -23,6 +23,19 @@ export function pickLatestSpacePoint(metrics) {
   return pool[pool.length - 1];
 }
 
+/**
+ * 알람 1건이 '미해결' 인가(순수, v2.513).
+ * 폴백 경로(장비가 `state=eq.ACTIVE` 를 못 받는 버전)에서만 쓴다 — 전체를 받아 코드에서 거른다.
+ * PowerStore 는 `state` 를 ACTIVE/CLEARED 로 주는데, 버전에 따라 이 필드가 없고
+ * `is_acknowledged` 만 있는 응답도 있다. **필드가 없다고 해서 미해결이라고 단정하지 않는다** —
+ * 확인(acknowledged)된 것만 제외하고 나머지는 남긴다(건수를 줄여 '조용한 축소' 를 만들지 않기 위함).
+ */
+export function isActiveAlert(a) {
+  const s = String(a?.state ?? '').trim().toUpperCase();
+  if (s) return s === 'ACTIVE';
+  return a?.is_acknowledged !== true;
+}
+
 /** 원시 응답 → 정규화(순수 — storageMon.test.js 픽스처 고정). raw: {cluster,sw,appliances,metrics,appliancePools,nodes,users,alerts} */
 export function normalizePowerstore(device, raw) {
   const snap = emptySnapshot(device);
@@ -45,7 +58,6 @@ export function normalizePowerstore(device, raw) {
   // 진단(v2.422): 공간 지표를 어디서(generate/GET)·어떤 구간으로 받았고 점이 몇 개였는지 — 용량이 비면 이 정보가
   // 상세 창 '섹션별 수집 상태' 옆에 보여 원인을 좁힌다(예전에는 '정상 + 0.0 TB' 로만 보여 원인을 알 수 없었다).
   if (raw.metricsDebug) snap.extra.spaceDebug = raw.metricsDebug;
-  if (raw.alertsDebug) snap.extra.alertsDebug = raw.alertsDebug;
   const total = Number(m?.physical_total) || 0;
   if (m && !total) {
     // ⚠ 점은 있는데 physical_total 이 없거나 0 — 'ok + 0 TB' 로 위장하지 않는다(정직 표기).
@@ -90,6 +102,10 @@ export function normalizePowerstore(device, raw) {
     const bySeverity = {};
     for (const a of raw.alerts) { const k = String(a.severity || 'Unknown'); bySeverity[k] = (bySeverity[k] || 0) + 1; }
     snap.extra.alertsBySeverity = bySeverity;
+    // v2.513: 장비가 state 필터를 못 받아 '전체를 받아 코드에서 거른' 경우 그 사실을 밝힌다.
+    // ⚠ sections 값에 섞지 말 것 — 화면 배지는 'ok'/'skip' 정확 일치가 아니면 **빨간 '오류'** 로
+    //   그린다(StorageMonTool.jsx). 정상 수집을 오류로 표시하는 것은 이 수정의 목적과 반대다.
+    if (raw.alertsNote) snap.extra.alertsNote = String(raw.alertsNote);
     snap.sections.alerts = 'ok';
   }
 
@@ -174,59 +190,6 @@ const SPACE_INTERVALS = (() => {
   return [first, ...['One_Day', 'One_Hour', 'Five_Mins'].filter((x) => x !== first)];
 })();
 const hasTotal = (pts) => (Array.isArray(pts) ? pts : [pts]).some((p) => p && Number(p.physical_total) > 0);
-
-/**
- * 활성 알람 조회(v2.514) — **PowerStore 의 필터 문법은 Unity 와 다르다.**
- *
- * v2.404~2.513 은 `?filter=state.eq.ACTIVE` 를 보냈다. 그건 `unity.js:77` 의 문법
- * (`/api/types/alert/instances?filter=state ne 2`)을 그대로 옮긴 것이고, PowerStore 는
- * **PostgREST 계열**이라 필터의 **필드 이름 자체가 쿼리 파라미터**다(`?state=eq.ACTIVE`).
- * 그래서 PowerStore 는 `filter` 라는 필드를 찾다 실패해 `HTTP 400 — Unable to parse passed url`
- * 을 돌려줬고, 알람 섹션이 **모든 PowerStore 에서 항상 오류**였다(운영 화면 캡처로 확인).
- * 같은 파일의 나머지 호출 15개는 `select`/`limit` 만 써서 영향이 없었다.
- *
- * ⚠ 정직한 한계: 이 환경에서 Dell 문서(`developer.dell.com`)에 닿지 못해 **`state` 필드명과
- *   `ACTIVE` 값을 원문으로 확인하지 못했다**(egress 차단 — 우회 금지 규약). 문법 교정은 같은
- *   파일의 동작하는 호출들로 확증되지만 필드/값은 버전에 따라 다를 수 있다. 그래서 실패하면
- *   **필터 없이 받아 클라이언트에서 거른다**. 어느 경로를 썼는지는 `debug` 로 남겨 화면이 밝힌다
- *   (`spaceDebug` 와 같은 규약 — 조용히 다른 값을 보여주지 않는다).
- *
- * 폴백의 대가: 필터 없이 받으면 해제된(CLEARED) 알람이 상한을 채워 **활성 건수가 줄어 보일 수**
- * 있다. 그래서 상한에 닿으면 `truncated` 로 밝힌다(조용한 상한 금지 — CLAUDE.md).
- *
- * @param {(path:string)=>Promise<any>} get  makeGetter 로 만든 GET
- * @returns {{alerts:Array, debug:{source:string, tried:string[], truncated:boolean}}}
- */
-export const ALERT_LIMIT = 500;
-/** 해제된 알람으로 보는 상태값(대소문자 무시). 이 목록에 없으면 활성으로 센다 — 모르는 상태를 조용히 버리지 않는다. */
-const CLEARED_STATES = new Set(['cleared', 'inactive', 'resolved', 'closed']);
-
-export async function fetchActiveAlerts(get) {
-  const tried = [];
-  // ① 올바른 PowerStore 문법. 서버가 걸러 주면 상한 안에서 활성만 온다.
-  try {
-    const a = await get(`/api/rest/alert?select=id,severity,state&state=eq.ACTIVE&limit=${ALERT_LIMIT}`);
-    tried.push('state=eq.ACTIVE: OK');
-    const arr = Array.isArray(a) ? a : [];
-    return { alerts: arr, debug: { source: 'filtered', tried, truncated: arr.length >= ALERT_LIMIT } };
-  } catch (e) {
-    tried.push(`state=eq.ACTIVE: ${e.message}`);
-  }
-  // ② 필터 없이 받아 클라이언트에서 거른다(필드명/값이 이 버전과 다를 때).
-  const all = await get(`/api/rest/alert?select=id,severity,state&limit=${ALERT_LIMIT}`);
-  tried.push('필터 없이 조회 후 클라이언트 필터: OK');
-  const arr = Array.isArray(all) ? all : [];
-  // state 열이 아예 없는 버전이면 거르지 않는다 — 전부 버리는 것보다 '거르지 못했다' 고 밝히는 게 정직하다.
-  const hasState = arr.some((x) => x && x.state != null);
-  const active = hasState ? arr.filter((x) => !CLEARED_STATES.has(String(x.state || '').toLowerCase())) : arr;
-  return {
-    alerts: active,
-    debug: {
-      source: hasState ? 'client-filtered' : 'unfiltered',
-      tried, truncated: arr.length >= ALERT_LIMIT,
-    },
-  };
-}
 
 /**
  * v2.422(사용자 요구 '접속은 되는데 데이터 수집이 안 됨'): 원인 후보를 전부 순서대로 시도하고 **무엇을 시도했는지**
@@ -335,10 +298,24 @@ export async function collect(device, { signal = null } = {}) {
     }
     await step('nodes', () => get('/api/rest/node?select=id,slot,appliance_id'));
     await step('users', () => get('/api/rest/local_user?select=id,name,is_locked'));
+    /* alerts(v2.513 수정) — 예전 쿼리는 `filter=state.eq.ACTIVE` 였는데 PowerStore REST 는
+     * **PostgREST 문법**이라 필드명 자체가 쿼리 파라미터다(`state=eq.ACTIVE`). `filter=` 라는
+     * 파라미터는 없어서 장비가 `HTTP 400 — Unable to parse passed url.` 로 거부했다
+     * (사용자 신고: 다른 섹션은 전부 OK 인데 alerts 만 오류). 다른 쿼리들이 전부 `select=`/`limit=`
+     * 만 쓰고 있어 이 한 줄만 문법이 달랐다.
+     * 폴백: 버전에 따라 alert 에 `state` 가 없을 수 있으므로, 400 이면 필터 없이 받아 코드에서
+     * 거른다(필터 하나 때문에 알람 수집 전체를 잃지 않게). 어느 경로를 썼는지는 화면에 밝힌다. */
     await step('alerts', async () => {
-      const r = await fetchActiveAlerts(get);
-      raw.alertsDebug = r.debug;
-      return r.alerts;
+      try {
+        const r = await get('/api/rest/alert?select=id,severity&state=eq.ACTIVE&limit=500');
+        raw.alertsNote = '';
+        return r;
+      } catch (e) {
+        if (/401/.test(e.message) || signal?.aborted) throw e;
+        const all = await get('/api/rest/alert?select=id,severity,state,is_acknowledged&limit=500');
+        raw.alertsNote = `state 필터 미지원(${String(e.message).slice(0, 80)}) — 전체를 받아 미해결만 집계`;
+        return Array.isArray(all) ? all.filter(isActiveAlert) : all;
+      }
     });
 
     // ── 인벤토리/성능(v2.404, 사용자 요구 '수집할 수 있는 모든 데이터') ────────────────

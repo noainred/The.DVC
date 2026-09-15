@@ -14,6 +14,8 @@
 
 import { Agent } from 'undici';
 import { emptySnapshot } from '../types.js';
+// v2.513: 전송 계층 실패(`fetch failed`·`aborted`)를 행동 가능한 사유로 — restCommon 과 같은 규약.
+import { describeFetchError, isTransportError } from './netError.js';
 
 // Isilon 전용 로컬 TLS 디스패처 — 사내 자체서명 장비 한정(다른 fetch 에 주입 금지).
 // 보안(M-4): STORAGE_TLS_VERIFY=true 면 인증서 검증을 켠다(기본은 기존대로 해제).
@@ -24,11 +26,17 @@ const TIMEOUT_MS = Number(process.env.STORAGE_HTTP_TIMEOUT_MS) || 15_000;
 export async function get(device, apiPath) { // v2.308: 영역 수집기(areasCollector)가 재사용
   const url = `https://${device.host}:${PORT}${apiPath}`;
   const auth = Buffer.from(`${device.username}:${device.password || ''}`).toString('base64');
-  const res = await fetch(url, {
-    headers: { Authorization: `Basic ${auth}`, Accept: 'application/json' },
-    dispatcher: isilonDispatcher,
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  });
+  let res;
+  try {
+    res = await fetch(url, {
+      headers: { Authorization: `Basic ${auth}`, Accept: 'application/json' },
+      dispatcher: isilonDispatcher,
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+  } catch (e) {
+    if (!isTransportError(e)) throw e;
+    throw new Error(describeFetchError(e, { host: device.host, port: PORT, timeoutMs: TIMEOUT_MS }), { cause: e });
+  }
   if (res.status === 401) throw new Error('인증 실패(401) — 계정/비밀번호 확인');
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
