@@ -11,6 +11,7 @@ import { stateLabel, stateTone, opticalHealth, errorLevel, capacityLevel, aggreg
   toChartRows, topSeries, bps, sortPorts, nextSort, sortRows, seriesStats,
   RX_WARN_DBM, RX_BAD_DBM } from './sanSwitchPorts.js';
 import { STable } from '../../components/STable.jsx';
+import BulkDeviceIo from './BulkDeviceIo.jsx';
 
 /**
  * 특수기능 › SAN 스위치 모니터링(v2.410 — 사용자 요구 'Brocade SAN switch 포트 모니터링 및
@@ -60,6 +61,7 @@ export default function SanSwitchTool() {
   const detailSeq = useRef(0);
   const testTimer = useRef(null);                  // 연결 테스트 폴링 타이머(v2.421) — 훅은 조기 return 위에
   const [dcPerf, setDcPerf] = useState(null);      // 법인 단위 스토리지 사용량 분석 모달
+  const [bulkOpen, setBulkOpen] = useState(false);  // 대량 등록 모달(v2.513) — 훅은 조기 return 위에
   const [portFilter, setPortFilter] = useState('all');
   const [portQ, setPortQ] = useState('');
   const [infoOpen, setInfoOpen] = useState(false);   // 장비 일반 정보 펼침
@@ -202,6 +204,13 @@ export default function SanSwitchTool() {
           <SearchBox className="input" style={{ marginLeft: 'auto', maxWidth: 260, minWidth: 180 }}
             value={q} onChange={setQ} placeholder="스위치·host·모델·엣지 찾기" />
           <button className="login-btn" style={{ flex: 'none', padding: '6px 14px' }} onClick={() => openForm(null)}>+ 스위치 등록</button>
+          {/* v2.513(사용자 요청 "san switch 도 같은 메뉴") — CSV·자유텍스트 대량 등록/내보내기·샘플.
+              스토리지 모니터링과 **같은 공용 컴포넌트**를 쓴다(판정·문구 단일 소스 — BulkDeviceIo 헤더).
+              ⚠ 식별 키는 host **단독**이다(스토리지는 host+type) — sanswitch/registry.js 가 host
+                중복을 거부하므로 type 을 키에 넣으면 '드라이런 통과 → 저장 예외' 가 된다. */}
+          <button className="tab" style={{ flex: 'none', padding: '6px 12px' }}
+            title="CSV 또는 자유텍스트로 스위치를 일괄 등록/수정합니다. 샘플 내려받기·형식 검증·실제 로그인 테스트·선택 등록을 한 창에서 합니다."
+            onClick={() => setBulkOpen(true)}>⬆ 대량 등록(CSV·텍스트)</button>
         </div>
       </div>
 
@@ -277,6 +286,10 @@ export default function SanSwitchTool() {
       {form && <DeviceForm {...{ form, setForm, data, save, busy, runTest, test, setTest, stopTestPoll }} />}
       {detail && <PortDetail {...{ detail, setDetail, closeDetail, portFilter, setPortFilter, portQ, setPortQ, infoOpen, setInfoOpen, tab, setTab, sort, setSort }} />}
       {dcPerf && <DcStoragePerf dcPerf={dcPerf} onClose={() => setDcPerf(null)} />}
+      {bulkOpen && (
+        <BulkDeviceIo base="/tools/sanswitch" title="SAN 스위치 대량 등록 — CSV · 자유텍스트" keyLabel="host"
+          onClose={() => setBulkOpen(false)} onDone={() => { setBulkOpen(false); load(); }} />
+      )}
     </>
   );
 }

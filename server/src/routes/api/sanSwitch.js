@@ -13,7 +13,7 @@ import { logAudit } from '../../audit.js';
 import { SAN_SWITCH_TYPES, collectMethodsFor } from '../../sanswitch/types.js';
 import { listDevices, saveDevice, deleteDevice, deviceInputIssue, getDeviceWithSecret, normalizeDeviceInput } from '../../sanswitch/registry.js';
 import { localSnapshots, getSnapshot, dropSnapshot } from '../../sanswitch/store.js';
-import { collectDeviceNow, sanSwitchPollerStatus, pollSanSwitchOnce } from '../../sanswitch/poller.js';
+import { collectDeviceNow, sanSwitchPollerStatus, pollSanSwitchOnce, testDeviceConnection } from '../../sanswitch/poller.js';
 import { startTestRun, getTestRun } from '../../sanswitch/testRuns.js';
 import { edgeSanSwitchSnapshots } from '../../central/sanSwitchEdge.js';
 // v2.511: 조닝 그림 — 순수 분석(스위치 왕복 없음).
@@ -27,6 +27,9 @@ import { portSeries, storageSeries, storageSeriesMulti, arraySerialOf, endpointK
 import { listDevices as listStorageDevices } from '../../storage/registry.js';
 import { localSnapshots as storageLocalSnaps } from '../../storage/store.js';
 import { edgeStorageSnapshots } from '../../central/storageEdge.js';
+import * as swBulk from '../../sanswitch/bulk.js';
+import { enrichAdvice, selectRows } from '../../util/bulkImport.js';
+import { startBulkTest, publicRun, passedLines } from '../../util/bulkRun.js';
 
 const adminOnly = requireRole('admin');
 const toolsPerm = requirePerm('tools'); // 조회 라우트에도 기능 권한(v2.416 감사 L-3 — 프론트 게이팅만으로는 API 직접 호출을 못 막는다)
@@ -429,6 +432,190 @@ api.get('/tools/sanswitch/perf/storage-summary', toolsPerm, fullScopeOnly, async
 api.post('/tools/sanswitch/poll', adminOnly, async (req, res) => {
   logAudit({ user: req.user?.username, action: 'SAN 스위치 전체 수집 실행' });
   res.json(await pollSanSwitchOnce());
+});
+
+
+/* ══════════════════ 대량 등록(CSV·자유텍스트, v2.513) ══════════════════
+ * 사용자 요청(2026-09-15): "san switch 도 같은 메뉴" — CSV·자유텍스트 import/export,
+ * 샘플 다운로드, 형식 검증, **실제 연결 테스트**, **통과분만 선택 등록**, **수정 조언**.
+ *
+ * 흐름(화면과 1:1):
+ *   ① POST import {dryRun:true}          형식 검증 + 행별 add/update/error + 조언
+ *   ② POST import/test                   실제 로그인 시도(비동기 run) → GET 으로 진행률 폴
+ *   ③ POST import {selectLines, testRunId}  고른 행만 저장(연결 통과 교집합)
+ *
+ * 보안: 전부 adminOnly + fullScopeOnly(기존 SAN 라우트 규약). 내보내기에 비밀번호 없음.
+ * 감사로그는 ②③ 에 남긴다(①은 저장하지 않으므로 남기지 않는다 — 로그 오염 방지).
+ */
+
+/** datacenter 이름/ID → ID 해석기(스토리지 가져오기와 같은 규칙). */
+function swDcResolver() {
+  let dcs = [];
+  try { dcs = listDatacenters(); } catch { /* 목록 실패 시 원문 유지 */ }
+  return (v) => {
+    const s = String(v || '').trim();
+    if (!s) return '';
+    if (dcs.some((d) => d.id === s)) return s;
+    const byName = dcs.find((d) => String(d.name || '').toLowerCase() === s.toLowerCase());
+    return byName ? byName.id : s;      // 못 찾으면 원문 유지(유효 ID 일 수 있음)
+  };
+}
+
+const swDcName = () => {
+  try { const m = new Map(listDatacenters().map((x) => [x.id, x.name || x.id])); return (id) => m.get(id) || id || ''; }
+  catch { return (id) => id || ''; }
+};
+
+/** 입력 본문 → 파싱 결과 + 형식 구분. `text` 가 있으면 자유텍스트, 아니면 CSV. */
+function swParseBody(body = {}) {
+  const raw = String(body.text ?? body.csv ?? '');
+  const format = body.format === 'text' || (body.text != null && body.csv == null) ? 'text' : 'csv';
+  if (format === 'text') {
+    const r = swBulk.parseDevicesText(raw, { defaults: body.defaults || {} });
+    return { ...r, format, raw };
+  }
+  const r = swBulk.parseDevicesCsv(raw);
+  return { ...r, warnings: [], headerUsed: null, order: r.order || swBulk.COLUMNS, format, raw };
+}
+
+api.get('/tools/sanswitch/devices/export.csv', adminOnly, fullScopeOnly, (req, res) => {
+  const devices = listDevices();
+  logAudit({ user: req.user?.username, action: 'SAN 스위치 CSV 내보내기', detail: `${devices.length}대` });
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="san-switches.csv"');
+  res.send(swBulk.devicesToCsv(devices, swDcName()));
+});
+
+api.get('/tools/sanswitch/devices/export.txt', adminOnly, fullScopeOnly, (req, res) => {
+  const devices = listDevices();
+  logAudit({ user: req.user?.username, action: 'SAN 스위치 자유텍스트 내보내기', detail: `${devices.length}대` });
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="san-switches.txt"');
+  res.send(swBulk.devicesToText(devices, swDcName()));
+});
+
+api.get('/tools/sanswitch/devices/sample.csv', adminOnly, fullScopeOnly, (_req, res) => {
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="san-switches-sample.csv"');
+  res.send(swBulk.sampleCsv());
+});
+
+api.get('/tools/sanswitch/devices/sample.txt', adminOnly, fullScopeOnly, (_req, res) => {
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="san-switches-sample.txt"');
+  res.send(swBulk.sampleText());
+});
+
+/**
+ * ② 실제 연결 테스트 — 저장 **전에** 행마다 로그인을 시도한다.
+ *
+ * ⚠ 엣지 위임 장비(`agent` 지정)는 중앙에서 직접 닿을 수 없다. '실패' 가 아니라
+ *   **'테스트 불가'**(skipped) 로 구분한다 — 닿지 못한 것을 실패라 하면 사용자가 멀쩡한
+ *   자격증명을 의심하며 고친다(정직 규약).
+ * ⚠ 자동 재시도 없음(잘못된 비밀번호 반복 = 계정 잠금). bulkRun 이 강제한다.
+ */
+api.post('/tools/sanswitch/devices/import/test', adminOnly, fullScopeOnly, (req, res) => {
+  const p = swParseBody(req.body || {});
+  if (p.error) return res.status(400).json({ ok: false, reason: p.error });
+  const resolveDc = swDcResolver();
+  const existing = new Map(listDevices().map((d) => [String(d.host).toLowerCase(), d]));
+
+  // 형식 오류 행은 테스트하지 않는다(로그인 시도가 무의미하고 장비에 부하만 준다).
+  const { report } = swBulk.analyzeImport(p.rows, {
+    existingHost: (h) => existing.get(String(h).toLowerCase()),
+    resolveDc, validate: deviceInputIssue,
+  });
+  const okLines = new Set(report.filter((r) => r.action !== 'error').map((r) => r.line));
+  const targets = p.rows.filter((r) => okLines.has(r._line));
+  if (!targets.length) return res.status(400).json({ ok: false, reason: '형식 검증을 통과한 행이 없습니다 — 먼저 오류를 고치세요.' });
+
+  const started = startBulkTest({
+    kind: 'sanswitch', rows: targets, user: req.user?.username || '',
+    skipReason: (row) => (String(row.agent || '').trim()
+      ? `엣지 위임 장비(${row.agent}) — 중앙에서 직접 접속할 수 없어 테스트하지 않았습니다. 등록 후 엣지에서 수집됩니다.`
+      : null),
+    testOne: async (row, signal) => {
+      const input = swBulk.toSaveInput(row, resolveDc);
+      // 비밀번호가 비어 있으면(기존 유지) 저장된 값으로 테스트한다 — 그게 실제 수집이 쓸 값이다.
+      if (!row._hasPassword) {
+        const saved = existing.get(String(row.host).toLowerCase());
+        const full = saved ? getDeviceWithSecret(saved.id) : null;
+        if (!full?.password) return { ok: false, reason: '비밀번호가 없습니다 — 신규 등록이면 마지막 열에 비밀번호를 적으세요.' };
+        input.password = full.password;
+      }
+      try {
+        const r = await testDeviceConnection(normalizeDeviceInput(input), { timeoutMs: 60_000, signal, ranOn: '중앙' });
+        return r?.ok
+          ? { ok: true, detail: { summary: r.summary || r.model || '로그인 성공' } }
+          : { ok: false, reason: r?.error || r?.reason || '로그인 실패', detail: { phase: r?.phase, hint: r?.hint } };
+      } catch (e) { return { ok: false, reason: e?.message || String(e) }; }
+    },
+  });
+  if (!started.ok) return res.status(409).json(started);
+  logAudit({ user: req.user?.username, action: 'SAN 스위치 대량 연결 테스트', detail: `${targets.length}대 시도(형식 오류 ${p.rows.length - targets.length}건 제외)` });
+  res.json({ ok: true, id: started.id, total: targets.length });
+});
+
+/** 연결 테스트 진행률·결과(폴링). 자격증명은 응답에 없다(bulkRun publicRun). */
+api.get('/tools/sanswitch/devices/import/test/:id', adminOnly, fullScopeOnly, (req, res) => {
+  const run = publicRun(req.params.id);
+  if (!run || run.kind !== 'sanswitch') return res.status(404).json({ ok: false, reason: '실행을 찾을 수 없습니다(15분 지나 폐기되었을 수 있습니다).' });
+  res.json({ ok: true, ...run });
+});
+
+/**
+ * ①/③ 가져오기 — `dryRun:true` 면 검증만, 아니면 저장.
+ *  · `selectLines`  사용자가 고른 줄 번호(없으면 오류 아닌 전부)
+ *  · `testRunId`    연결 테스트 실행 id — 주면 **통과한 줄과의 교집합**만 저장
+ * 걸러낸 행은 버리지 않고 `skipped` 로 사유와 함께 돌려준다.
+ */
+api.post('/tools/sanswitch/devices/import', adminOnly, fullScopeOnly, (req, res) => {
+  const p = swParseBody(req.body || {});
+  if (p.error) return res.status(400).json({ ok: false, reason: p.error });
+
+  const resolveDc = swDcResolver();
+  const existing = new Map(listDevices().map((d) => [String(d.host).toLowerCase(), d]));
+  const base = swBulk.analyzeImport(p.rows, {
+    existingHost: (h) => existing.get(String(h).toLowerCase()),
+    resolveDc, validate: deviceInputIssue,
+  });
+  // 오류 행에 '어디를 어떻게 고쳐라' 를 붙인다(사용자 요청).
+  const { report, hints } = enrichAdvice(base.report, p.rows, {
+    text: p.raw, order: p.order, format: p.format,
+    fields: swBulk.COLUMNS,
+    ctx: {
+      types: SAN_SWITCH_TYPES.filter((t) => t.implemented).map((t) => t.type),
+      agents: knownAgentNames(),
+      datacenters: (() => { try { return listDatacenters().map((d) => d.name || d.id); } catch { return []; } })(),
+    },
+  });
+
+  if (req.body?.dryRun) {
+    return res.json({ ok: true, dryRun: true, report, summary: base.summary, hints,
+      warnings: p.warnings, headerUsed: p.headerUsed, format: p.format, total: p.rows.length });
+  }
+
+  const tested = req.body?.testRunId ? passedLines(req.body.testRunId) : null;
+  if (req.body?.testRunId && tested == null) {
+    return res.status(400).json({ ok: false, reason: '연결 테스트 결과를 찾을 수 없습니다(15분 지나 폐기되었을 수 있습니다) — 다시 테스트하세요.' });
+  }
+  const { picked, skipped } = selectRows(p.rows, report, {
+    lines: Array.isArray(req.body?.selectLines) ? req.body.selectLines : null,
+    requireTested: tested,
+  });
+
+  let added = 0; let updated = 0; const failed = [];
+  for (const row of picked) {
+    const prev = existing.get(String(row.host).toLowerCase());
+    const input = swBulk.toSaveInput(row, resolveDc);
+    if (prev) input.id = prev.id;
+    if (!row._hasPassword) delete input.password;     // 비우면 기존 유지(saveDevice 규칙)
+    try { saveDevice(input); if (prev) updated++; else added++; }
+    catch (e) { failed.push({ line: row._line, name: row.name || row.host, reason: e.message }); }
+  }
+  logAudit({ user: req.user?.username, action: `SAN 스위치 대량 가져오기(${p.format === 'text' ? '자유텍스트' : 'CSV'})`,
+    detail: `추가 ${added}·수정 ${updated}·실패 ${failed.length}·제외 ${skipped.length}${tested ? ' (연결 통과분만)' : ''}` });
+  res.json({ ok: true, added, updated, failed, skipped, total: p.rows.length, format: p.format });
 });
 
 }
