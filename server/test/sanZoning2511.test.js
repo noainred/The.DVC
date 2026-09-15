@@ -1,8 +1,19 @@
 /**
  * v2.511 — SAN 스위치 조닝(cfgshow) 파서·분석 회귀.
  *
- * 픽스처는 **사용자가 제공한 실장비 출력 2벌**을 합친 것이다(2026-09-15). 그 출력에서 확인된
- * 형식 변주를 전부 고정한다 — 추측으로 만든 형식이 아니라 실제로 본 것만 테스트한다:
+ * 픽스처는 **사용자가 제공한 실장비 출력 2벌의 형식**을 그대로 옮긴 것이다(2026-09-15).
+ *
+ * ⚠ 값은 **익명화했다**(v2.513 — 저장소가 공개라 운영 SAN 토폴로지를 담지 않는다). 호스트명은
+ *   `HOSTA0n`, WWN 뒷자리는 합성값이다. 파서는 *형식*만 검증하므로 판정력은 동일하다.
+ *   **실제 값으로 되돌리지 말 것.** 대신 아래 두 성질은 **반드시 보존**해야 한다:
+ *     ① WWN 앞 OUI 접두 — `zoning.js WWN_HINTS` 가 벤더·방향을 이 접두로 추정한다
+ *        (`10:00:00:10:9b` Emulex · `50:06:01:6` Unity · `50:00:09:7` VMAX ·
+ *         `51:4f:0c` XtremIO · `58:cc:f0` PowerStore · `c0:01:44` VPLEX).
+ *        접두를 바꾸면 역할 추정 테스트가 의미를 잃는다.
+ *     ② Unity SPA0(`…:60:00:00:00:a0`)/SPB0(`…:68:00:00:00:a0`)의 **뒤 4바이트 동일** —
+ *        `labelMap()` 이 고치는 라벨 충돌의 유일한 재현 사례다(실화면에서 발견된 결함).
+ *
+ * 그 출력에서 확인된 형식 변주를 전부 고정한다 — 추측으로 만든 형식이 아니라 실제로 본 것만:
  *   · `cfg: cfg1  ZONE_A;`  이름과 첫 멤버가 같은 줄
  *   · `zone:` 멤버가 한 줄에 `alias1; alias2`(세미콜론)
  *   · `zone:` 멤버가 한 줄에 `WWN; WWN`
@@ -27,25 +38,25 @@ import { parseNsRoles } from '../src/sanswitch/collectors/fosParse.js';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SAMPLE = fs.readFileSync(path.join(HERE, 'fixtures/cfgshow-sample.txt'), 'utf8');
 
-const HOST10 = '10:00:00:10:9b:c2:11:11';
-const HOST14 = '10:00:00:10:9b:c2:53:96';
-const HOST15 = '10:00:00:10:9b:c2:59:c6';
-const UNITY_SPA = '50:06:01:60:4c:e4:0b:f8';
-const VMAX = '50:00:09:79:a0:03:98:98';
-const VPLEX_FE_A0 = 'c0:01:44:87:a7:a5:00:00';
-const VPLEX_BE_B2 = 'c0:01:44:87:a8:0e:8a:00';
-const POWERSTORE = '58:cc:f0:91:4d:22:0c:8b';
-const XTREMIO = '51:4f:0c:50:b0:77:42:01';
+const HOST10 = '10:00:00:10:9b:00:00:01';
+const HOST14 = '10:00:00:10:9b:00:00:02';
+const HOST15 = '10:00:00:10:9b:00:00:03';
+const UNITY_SPA = '50:06:01:60:00:00:00:a0';
+const VMAX = '50:00:09:70:00:00:00:b0';
+const VPLEX_FE_A0 = 'c0:01:44:00:00:00:01:00';
+const VPLEX_BE_B2 = 'c0:01:44:00:00:00:05:00';
+const POWERSTORE = '58:cc:f0:00:00:00:00:c0';
+const XTREMIO = '51:4f:0c:00:00:00:00:d0';
 
 test('WWN·멤버 표기 정규화', () => {
-  assert.equal(normWwn('50:06:01:60:4C:E4:0B:F8'), UNITY_SPA);
-  assert.equal(normWwn('5006016 04ce40bf8'), UNITY_SPA, '구분자 없는 표기도 받는다');
-  assert.equal(normWwn('ESX10_HBA1_0_P37'), null);
+  assert.equal(normWwn('50:06:01:60:00:00:00:A0'), UNITY_SPA);
+  assert.equal(normWwn('5006016 0000000a0'), UNITY_SPA, '구분자 없는 표기도 받는다');
+  assert.equal(normWwn('HOSTA01_HBA1_P01'), null);
   assert.equal(memberKind(UNITY_SPA), 'wwn');
   assert.equal(memberKind('1,15'), 'domainPort');
-  assert.equal(memberKind('ESX10_HBA1_0_P37'), 'alias');
+  assert.equal(memberKind('HOSTA01_HBA1_P01'), 'alias');
   // 실장비에서 본 두 구분자를 모두 쪼갠다(한쪽만 보면 그 현장에서만 맞는다).
-  assert.deepEqual(splitMembers('ESX14_HBA1_0_P41; Unity_SPB0_p9'), ['ESX14_HBA1_0_P41', 'Unity_SPB0_p9']);
+  assert.deepEqual(splitMembers('HOSTA02_HBA1_P02; Unity_SPB0_p9'), ['HOSTA02_HBA1_P02', 'Unity_SPB0_p9']);
   assert.deepEqual(splitMembers('ZONE_A;\n ZONE_B;'), ['ZONE_A', 'ZONE_B'], '끝 세미콜론 제거');
 });
 
@@ -53,18 +64,18 @@ test('parseCfgShow — 두 섹션 · cfg 이름+첫멤버 같은 줄 · 별칭',
   const p = parseCfgShow(SAMPLE);
   assert.deepEqual(p.sections, ['defined', 'effective']);
   // cfg 줄의 첫 멤버가 이름과 같은 줄에 있어도 놓치지 않는다(실장비 형식).
-  assert.ok(p.defined.cfgs.cfg1.includes('LESHDVCPS10_H1_SW3_S09_SW1_D16_VPLEX_FE_E1_A0'), 'cfg 첫 멤버(같은 줄)');
+  assert.ok(p.defined.cfgs.cfg1.includes('HOSTA01_H1_SW3_S09_SW1_D16_VPLEX_FE_E1_A0'), 'cfg 첫 멤버(같은 줄)');
   assert.ok(p.defined.cfgs.cfg1.includes('XtremIO_X1_X1-SC1-FC1_SW1_S32_SW1_D24_VPLEX_BE_E1_A0'), 'cfg 마지막 멤버');
   // 한 줄에 '; ' 로 둘(별칭)
-  assert.deepEqual(p.defined.zones.LESHDVCPS14_H1_SW3_S13_SW1_D9_Unity_SPB0, ['ESX14_HBA1_0_P41', 'Unity_SPB0_p9']);
+  assert.deepEqual(p.defined.zones.HOSTA02_H1_SW3_S13_SW1_D9_Unity_SPB0, ['HOSTA02_HBA1_P02', 'Unity_SPB0_p9']);
   // 한 줄에 '; ' 로 둘(WWN)
-  assert.deepEqual(p.defined.zones.LESHDVCPS14_H1_SW3_S13_SW5_D48_Unity_948_SPA0, [HOST14, UNITY_SPA]);
+  assert.deepEqual(p.defined.zones.HOSTA02_H1_SW3_S13_SW5_D48_Unity_2ND_SPA0, [HOST14, UNITY_SPA]);
   // 줄당 하나(세미콜론 없음) — 첫 번째 첨부 형식
   assert.deepEqual(p.defined.zones.PowerStore_NodeA_S1_P2_SW1_S3_SW1_D31_VPLEX_BE_E2_B2, [POWERSTORE, VPLEX_BE_B2]);
   assert.deepEqual(p.defined.aliases.Unity_SPA0_p8, [UNITY_SPA]);
   assert.equal(p.effective.cfg, 'cfg1');
   assert.equal(Object.keys(p.effective.zones).length, 9);
-  assert.deepEqual(p.effective.zones.LESHDVCPS10_H1_SW3_S09_SW1_D8_Unity_SPA0, [HOST10, UNITY_SPA]);
+  assert.deepEqual(p.effective.zones.HOSTA01_H1_SW3_S09_SW1_D8_Unity_SPA0, [HOST10, UNITY_SPA]);
   assert.equal(p.truncated, false);
 });
 
@@ -84,9 +95,9 @@ test('resolveZones — 활성 섹션 우선 · 별칭 해석 · 미해석 보존
   const defOnly = parseCfgShow(SAMPLE.split('Effective configuration:')[0]);
   const rd = resolveZones(defOnly);
   assert.equal(rd.source, 'defined');
-  const z = rd.zones.find((x) => x.name === 'LESHDVCPS14_H1_SW3_S13_SW1_D9_Unity_SPB0');
-  assert.deepEqual(z.wwns, [HOST14, '50:06:01:68:4c:e4:0b:f8'], '별칭 → WWN');
-  assert.equal(z.members[0].alias, 'ESX14_HBA1_0_P41', '별칭 이름을 라벨용으로 보존');
+  const z = rd.zones.find((x) => x.name === 'HOSTA02_H1_SW3_S13_SW1_D9_Unity_SPB0');
+  assert.deepEqual(z.wwns, [HOST14, '50:06:01:68:00:00:00:a0'], '별칭 → WWN');
+  assert.equal(z.members[0].alias, 'HOSTA02_HBA1_P02', '별칭 이름을 라벨용으로 보존');
   // 정의를 못 찾은 별칭은 버리지 않고 미해석으로 남긴다.
   const orphan = rd.zones.find((x) => x.name === 'ORPHAN_ZONE_NOT_IN_CFG');
   assert.equal(orphan, undefined, '활성 cfg 에 없는 zone 은 기본 목록에서 빠진다');
@@ -96,7 +107,7 @@ test('resolveZones — 활성 섹션 우선 · 별칭 해석 · 미해석 보존
 
 /**
  * VPLEX 는 FE 포트와 BE 포트가 **서로 다른 WWN** 이다(실장비 출력에서 확인:
- * FE `c0:01:44:87:a7:a5:00:00` vs BE `c0:01:44:87:a8:0e:8a:00`). 그래서 한 노드가 양쪽에
+ * FE `c0:01:44:00:00:00:01:00` vs BE `c0:01:44:00:00:00:05:00`). 그래서 한 노드가 양쪽에
  * 걸치지 않고, 2-색칠이 **FE=타깃(호스트를 향함) · BE=이니시에이터(어레이를 향함)** 로
  * 올바르게 나눈다 — 이것이 SAN 의 실제 의미다.
  * ⚠ 이 테스트는 초판에서 'VPLEX 는 가운데' 로 기대했다가 **기대가 틀렸음을 코드가 잡아낸** 것이다.
@@ -165,7 +176,7 @@ test('buildZoneGraph — 3열 배치 · 차수 · 별칭 라벨', () => {
   assert.ok(g.columns.right.includes(VPLEX_FE_A0), 'VPLEX FE 는 오른쪽(호스트의 타깃)');
   assert.ok(g.columns.left.includes(VPLEX_BE_B2), 'VPLEX BE 는 왼쪽(어레이의 이니시에이터)');
   const host14 = g.nodes.find((n) => n.wwn === HOST14);
-  assert.equal(host14.degree, 3, 'ESX14 는 zone 3개(Unity SPB0 · VMAX · Unity_948 SPA0)');
+  assert.equal(host14.degree, 3, 'HOSTA02 는 zone 3개(Unity SPB0 · VMAX · Unity_2ND SPA0)');
   // 포트 정보가 있으면 붙인다(없으면 null — 지어내지 않는다).
   const withPort = buildZoneGraph(r.zones, { portByWwn: { [HOST10]: { slotPort: '3/9', state: 'online' } } });
   const n = withPort.nodes.find((x) => x.wwn === HOST10);
@@ -266,26 +277,26 @@ test('빈 입력·쓰레기 입력에도 던지지 않는다', () => {
  */
 test('parseNsRoles — Device type / FC4s 표기에서 역할을 읽는다', () => {
   const NS = [
-    ' N    011000;      3;10:00:00:10:9b:c2:11:11;20:00:00:10:9b:c2:11:11; na',
+    ' N    011000;      3;10:00:00:10:9b:00:00:01;20:00:00:10:9b:00:00:01; na',
     '    FC4s: FCP',
-    '    PortSymb: [35] "Emulex PPN-10:00:00:10:9b:c2:11:11"',
+    '    PortSymb: [35] "Emulex PPN-10:00:00:10:9b:00:00:01"',
     '    Device type: Physical Initiator',
     '    Port Index: 16',
-    ' N    011900;      3;50:06:01:60:4c:e4:0b:f8;50:06:01:60:c6:e4:0b:f8; na',
+    ' N    011900;      3;50:06:01:60:00:00:00:a0;50:06:01:60:c6:e4:0b:f8; na',
     '    FC4s: FCP',
     '    Device type: Physical Target',
-    ' N    012000;      3;c0:01:44:87:a7:a5:00:00;c0:01:44:87:a7:a5:00:00; na',
+    ' N    012000;      3;c0:01:44:00:00:00:01:00;c0:01:44:00:00:00:01:00; na',
     '    Device type: Physical Initiator+Target',
   ].join('\n');
   const r = parseNsRoles(NS);
-  assert.equal(r['10:00:00:10:9b:c2:11:11'], 'initiator');
-  assert.equal(r['50:06:01:60:4c:e4:0b:f8'], 'target');
-  assert.equal(r['c0:01:44:87:a7:a5:00:00'], 'both', '겸용은 한쪽으로 몰지 않는다');
+  assert.equal(r['10:00:00:10:9b:00:00:01'], 'initiator');
+  assert.equal(r['50:06:01:60:00:00:00:a0'], 'target');
+  assert.equal(r['c0:01:44:00:00:00:01:00'], 'both', '겸용은 한쪽으로 몰지 않는다');
 });
 
 test('parseNsRoles — 역할 표기가 없으면 빈 객체(지어내지 않는다)', () => {
   const NS = [
-    ' N    011000;      3;10:00:00:10:9b:c2:11:11;20:00:00:10:9b:c2:11:11; na',
+    ' N    011000;      3;10:00:00:10:9b:00:00:01;20:00:00:10:9b:00:00:01; na',
     '    FC4s: FCP',
     '    PortSymb: [35] "Emulex"',
   ].join('\n');

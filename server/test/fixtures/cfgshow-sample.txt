@@ -1,77 +1,77 @@
 Defined configuration:
- cfg:   cfg1        LESHDVCPS10_H1_SW3_S09_SW1_D16_VPLEX_FE_E1_A0;
-                LESHDVCPS10_H1_SW3_S09_SW1_D19_VPLEX_FE_E2_B0;
-                LESHDVCPS10_H1_SW3_S09_SW1_D8_Unity_SPA0;
-                LESHDVCPS14_H1_SW3_S13_SW1_D9_Unity_SPB0;
-                LESHDVCPS14_H1_SW3_S13_SW3_D61_VMAX950F_3D24;
-                LESHDVCPS14_H1_SW3_S13_SW5_D48_Unity_948_SPA0;
+ cfg:   cfg1        HOSTA01_H1_SW3_S09_SW1_D16_VPLEX_FE_E1_A0;
+                HOSTA01_H1_SW3_S09_SW1_D19_VPLEX_FE_E2_B0;
+                HOSTA01_H1_SW3_S09_SW1_D8_Unity_SPA0;
+                HOSTA02_H1_SW3_S13_SW1_D9_Unity_SPB0;
+                HOSTA02_H1_SW3_S13_SW3_D61_VMAX950F_3D24;
+                HOSTA02_H1_SW3_S13_SW5_D48_Unity_2ND_SPA0;
                 PowerStore_NodeA_S1_P2_SW1_S3_SW1_D31_VPLEX_BE_E2_B2;
                 XtremIO_X1_X1-SC1-FC1_SW1_S32_SW1_D24_VPLEX_BE_E1_A0
- zone:  LESHDVCPS10_H1_SW3_S09_SW1_D16_VPLEX_FE_E1_A0
-                ESX10_HBA1_0_P37; VPLEX_FE_E1_A0
- zone:  LESHDVCPS10_H1_SW3_S09_SW1_D19_VPLEX_FE_E2_B0
-                ESX10_HBA1_0_P37; VPLEX_FE_E2_B0
- zone:  LESHDVCPS10_H1_SW3_S09_SW1_D8_Unity_SPA0
-                ESX10_HBA1_0_P37; Unity_SPA0_p8
- zone:  LESHDVCPS14_H1_SW3_S13_SW1_D9_Unity_SPB0
-                ESX14_HBA1_0_P41; Unity_SPB0_p9
- zone:  LESHDVCPS14_H1_SW3_S13_SW3_D61_VMAX950F_3D24
-                ESX14_HBA1_0_P41; VMAX950F_FA03D24_P23
- zone:  LESHDVCPS14_H1_SW3_S13_SW5_D48_Unity_948_SPA0
-                10:00:00:10:9b:c2:53:96; 50:06:01:60:4c:e4:0b:f8
- zone:  LESHDVCPS15_H1_SW3_S14_SW1_D17_VPLEX_FE_E1_B0
-                10:00:00:10:9b:c2:59:c6; c0:01:44:87:a7:a5:80:00
+ zone:  HOSTA01_H1_SW3_S09_SW1_D16_VPLEX_FE_E1_A0
+                HOSTA01_HBA1_P01; VPLEX_FE_E1_A0
+ zone:  HOSTA01_H1_SW3_S09_SW1_D19_VPLEX_FE_E2_B0
+                HOSTA01_HBA1_P01; VPLEX_FE_E2_B0
+ zone:  HOSTA01_H1_SW3_S09_SW1_D8_Unity_SPA0
+                HOSTA01_HBA1_P01; Unity_SPA0_p8
+ zone:  HOSTA02_H1_SW3_S13_SW1_D9_Unity_SPB0
+                HOSTA02_HBA1_P02; Unity_SPB0_p9
+ zone:  HOSTA02_H1_SW3_S13_SW3_D61_VMAX950F_3D24
+                HOSTA02_HBA1_P02; VMAX950F_FA03D24_P23
+ zone:  HOSTA02_H1_SW3_S13_SW5_D48_Unity_2ND_SPA0
+                10:00:00:10:9b:00:00:02; 50:06:01:60:00:00:00:a0
+ zone:  HOSTA03_H1_SW3_S14_SW1_D17_VPLEX_FE_E1_B0
+                10:00:00:10:9b:00:00:03; c0:01:44:00:00:00:03:00
  zone:  PowerStore_NodeA_S1_P2_SW1_S3_SW1_D31_VPLEX_BE_E2_B2
-                58:cc:f0:91:4d:22:0c:8b
-                c0:01:44:87:a8:0e:8a:00
+                58:cc:f0:00:00:00:00:c0
+                c0:01:44:00:00:00:05:00
  zone:  XtremIO_X1_X1-SC1-FC1_SW1_S32_SW1_D24_VPLEX_BE_E1_A0
-                51:4f:0c:50:b0:77:42:01
-                c0:01:44:87:a7:a5:08:00
+                51:4f:0c:00:00:00:00:d0
+                c0:01:44:00:00:00:04:00
  zone:  ORPHAN_ZONE_NOT_IN_CFG
-                50:06:01:60:4c:e4:0b:ff; 10:00:00:10:9b:ff:ff:ff
+                50:06:01:60:00:00:00:ff; 10:00:00:10:9b:00:00:ff
  zone:  SINGLE_MEMBER_ZONE
-                ESX10_HBA1_0_P37
- alias: ESX10_HBA1_0_P37
-                10:00:00:10:9b:c2:11:11
- alias: ESX14_HBA1_0_P41
-                10:00:00:10:9b:c2:53:96
+                HOSTA01_HBA1_P01
+ alias: HOSTA01_HBA1_P01
+                10:00:00:10:9b:00:00:01
+ alias: HOSTA02_HBA1_P02
+                10:00:00:10:9b:00:00:02
  alias: Unity_SPA0_p8
-                50:06:01:60:4c:e4:0b:f8
+                50:06:01:60:00:00:00:a0
  alias: Unity_SPB0_p9
-                50:06:01:68:4c:e4:0b:f8
+                50:06:01:68:00:00:00:a0
  alias: VMAX950F_FA03D24_P23
-                50:00:09:79:a0:03:98:98
+                50:00:09:70:00:00:00:b0
  alias: VPLEX_FE_E1_A0
-                c0:01:44:87:a7:a5:00:00
+                c0:01:44:00:00:00:01:00
  alias: VPLEX_FE_E2_B0
-                c0:01:44:87:a8:0e:00:00
+                c0:01:44:00:00:00:02:00
 
 Effective configuration:
  cfg:   cfg1
- zone:  LESHDVCPS10_H1_SW3_S09_SW1_D16_VPLEX_FE_E1_A0
-                10:00:00:10:9b:c2:11:11
-                c0:01:44:87:a7:a5:00:00
- zone:  LESHDVCPS10_H1_SW3_S09_SW1_D19_VPLEX_FE_E2_B0
-                10:00:00:10:9b:c2:11:11
-                c0:01:44:87:a8:0e:00:00
- zone:  LESHDVCPS10_H1_SW3_S09_SW1_D8_Unity_SPA0
-                10:00:00:10:9b:c2:11:11
-                50:06:01:60:4c:e4:0b:f8
- zone:  LESHDVCPS14_H1_SW3_S13_SW1_D9_Unity_SPB0
-                10:00:00:10:9b:c2:53:96
-                50:06:01:68:4c:e4:0b:f8
- zone:  LESHDVCPS14_H1_SW3_S13_SW3_D61_VMAX950F_3D24
-                10:00:00:10:9b:c2:53:96
-                50:00:09:79:a0:03:98:98
- zone:  LESHDVCPS14_H1_SW3_S13_SW5_D48_Unity_948_SPA0
-                10:00:00:10:9b:c2:53:96
-                50:06:01:60:4c:e4:0b:f8
- zone:  LESHDVCPS15_H1_SW3_S14_SW1_D17_VPLEX_FE_E1_B0
-                10:00:00:10:9b:c2:59:c6
-                c0:01:44:87:a7:a5:80:00
+ zone:  HOSTA01_H1_SW3_S09_SW1_D16_VPLEX_FE_E1_A0
+                10:00:00:10:9b:00:00:01
+                c0:01:44:00:00:00:01:00
+ zone:  HOSTA01_H1_SW3_S09_SW1_D19_VPLEX_FE_E2_B0
+                10:00:00:10:9b:00:00:01
+                c0:01:44:00:00:00:02:00
+ zone:  HOSTA01_H1_SW3_S09_SW1_D8_Unity_SPA0
+                10:00:00:10:9b:00:00:01
+                50:06:01:60:00:00:00:a0
+ zone:  HOSTA02_H1_SW3_S13_SW1_D9_Unity_SPB0
+                10:00:00:10:9b:00:00:02
+                50:06:01:68:00:00:00:a0
+ zone:  HOSTA02_H1_SW3_S13_SW3_D61_VMAX950F_3D24
+                10:00:00:10:9b:00:00:02
+                50:00:09:70:00:00:00:b0
+ zone:  HOSTA02_H1_SW3_S13_SW5_D48_Unity_2ND_SPA0
+                10:00:00:10:9b:00:00:02
+                50:06:01:60:00:00:00:a0
+ zone:  HOSTA03_H1_SW3_S14_SW1_D17_VPLEX_FE_E1_B0
+                10:00:00:10:9b:00:00:03
+                c0:01:44:00:00:00:03:00
  zone:  PowerStore_NodeA_S1_P2_SW1_S3_SW1_D31_VPLEX_BE_E2_B2
-                58:cc:f0:91:4d:22:0c:8b
-                c0:01:44:87:a8:0e:8a:00
+                58:cc:f0:00:00:00:00:c0
+                c0:01:44:00:00:00:05:00
  zone:  XtremIO_X1_X1-SC1-FC1_SW1_S32_SW1_D24_VPLEX_BE_E1_A0
-                51:4f:0c:50:b0:77:42:01
-                c0:01:44:87:a7:a5:08:00
+                51:4f:0c:00:00:00:00:d0
+                c0:01:44:00:00:00:04:00
