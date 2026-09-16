@@ -137,6 +137,9 @@
 | `curuser-activity.json` | 설정 | '현재 사용자' 수집 작업 로그(v2.520). 공용 팩토리 `util/activityLog.js`. 링버퍼(기본 500건, `CURUSER_ACTIVITY_MAX`)·0600·손상 시 재생성. | ✅ | ✅ | ✅ | curuser/activityLog.js |
 | `curuser.db` | DB | '현재 사용자' 최신 스냅샷 + vCenter별 추이(v2.520). 10분 주기 × (28 법인 + 전체) ≈ 연 152만행, 보존 기본 180일. VM 단위 계열은 `CURUSER_VM_SERIES=1` 옵트인(연 2,100만행). WAL·0600. |  |  | ✅ | curuser/db.js |
 | `san-health.db` | DB | SAN 스위치 **점검 이력**(v2.522). 장비당 최근 24건(`SANHEALTH_MAX_RUNS`)만 보관하고 **같은 수집 시각(collectedAt)이면 기록하지 않는다**(수집 1회 = 기록 1회 — 탭을 열 때마다 쌓이면 '최근 10회' 가 같은 값 10개가 된다). 근거(evidence)는 저장하지 않는다. WAL·0600. |  |  | ✅ | sanswitch/healthHistory.js |
+| `horizon-sessions.json` | 설정 | Horizon **실시간 사용자**(세션) 수집 설정(v2.525) — 대상 Connection Server·주기(기본 5분)·시한·페이징·상한·계정명 표시. **자격증명 없음**(`horizon.json` 을 재사용한다 — 비밀 스토어를 둘로 늘리지 않기 위해). 0600·원자적 쓰기. | ✅ | ✅ | ✅ | horizon/sessionSettings.js |
+| `horizon-session-activity.json` | 설정 | Horizon 세션 수집 작업 로그(v2.525). 공용 팩토리 `util/activityLog.js`. 링버퍼(기본 500건, `HZSESS_ACTIVITY_MAX`)·0600·손상 시 재생성. | ✅ | ✅ | ✅ | horizon/sessionActivityLog.js |
+| `horizon-sessions.db` | DB | Horizon **실시간 사용자**(세션) 최신 스냅샷 + 서버별·전체 추이(v2.525). 5분 주기 × (서버 수 + 전체 1) → 서버 1대 기준 연 21만행, 보존 기본 180일. **원시 세션 객체는 저장하지 않는다**(계정·풀 집계만 — 1만 세션 직렬화를 매 주기 반복하지 않기 위해). 실패한 주기의 수치는 `NULL`(0 으로 채우면 '사용자 0명' 이라는 거짓). WAL·0600. |  |  | ✅ | horizon/sessionDb.js |
 | `sanswitch-err-baseline.json` | 설정 | 포트 에러 카운터 **월 기준선**(v2.519) — `porterrshow` 는 부팅 이후 누적이라, 이 시점을 기억해 '당월 신규' 를 가린다. ⚠ 포탈은 `portstatsclear` 를 실행하지 않는다(다른 도구의 기준선을 지우는 파괴적 동작) — 기준선은 포탈 안에 둔다. 0600·원자적 쓰기·손상 시 재생성. | ✅ | ✅ | ✅ | sanswitch/errBaseline.js |
 | `central-agent-sanswitch-perf.json` | 설정 | 엣지가 보고한 **포트 사용량 수집 상태**의 중앙 보관(v2.517) — 표본이 0건이어도 올라오는 하트비트라, 중앙이 '엣지가 켜졌는지·돌았는지·왜 실패하는지' 를 안다. 캐시 성격(손상 시 재생성, preserveCorrupt 아님)·0600. | ✅ |  | ✅ | central/sanSwitchPerfEdge.js |
 | `storage-devices.json` | 설정 | 스토리지 장비 등록부(v2.302). | ✅ | ✅ | ✅ | storage/registry.js |

@@ -159,13 +159,35 @@ export function parseJsonLoose(text) {
  */
 export function toBytes(v) {
   const s = String(v ?? '').trim().replace(/,/g, '');
-  if (!s) return 0;
-  const m = /^([\d.]+)\s*([kKmMgGtTpP])?(?:i?[bB])?$/.exec(s);
-  if (!m) return 0;
+  if (!s || s === '-' || /^(n\/?a|none|unknown)$/i.test(s)) return 0;
+
+  // ⚠ v2.525 (사용자 신고 "unity 장비에 ssh 로 접속은 성공했는데, 수집하는 정보가 없어"):
+  //   **uemcli 는 바이트와 사람용 표기를 함께 낸다** — `12094627905536 (11.0T)`.
+  //   예전 정규식은 `^숫자+단위$` 만 받아 이 형태를 **0 으로 버렸고**, `unitySsh.normalizeUnitySsh`
+  //   가 `if (!t) continue;` 로 그 풀을 건너뛰어 **풀 0개 · 용량 섹션 '건너뜀'** 이 됐다
+  //   (화면은 '0.0 TB' 로 보였다 — 수집 실패가 아니라 파싱 실패였다).
+  //   앞에 붙은 **정수 바이트가 있으면 그것이 가장 정확하므로 우선한다**(괄호 안은 반올림 표기다).
+  const paren = /^(\d+)\s*\(/.exec(s);
+  if (paren) return Number(paren[1]);
+
+  const m = /^([\d.]+)\s*([kKmMgGtTpPeE])?(?:i?[bB])?$/.exec(s);
+  if (!m) {
+    // `11.0T (12094627905536)` 처럼 순서가 뒤바뀐 표기, 또는 `Size: 11.0T` 같은 접두가 붙은 값.
+    const any = /([\d.]+)\s*([kKmMgGtTpPeE])(?:i?[bB])?/.exec(s);
+    if (!any) {
+      const plain = /^(\d+)$/.exec(s);
+      return plain ? Number(plain[1]) : 0;
+    }
+    return scale(Number(any[1]), any[2]);
+  }
   const n = Number(m[1]);
   if (!Number.isFinite(n)) return 0;
-  const unit = (m[2] || '').toLowerCase();
-  const mult = { k: 1024, m: 1024 ** 2, g: 1024 ** 3, t: 1024 ** 4, p: 1024 ** 5 }[unit] || 1;
+  return scale(n, m[2]);
+}
+
+function scale(n, unit) {
+  if (!Number.isFinite(n)) return 0;
+  const mult = { k: 1024, m: 1024 ** 2, g: 1024 ** 3, t: 1024 ** 4, p: 1024 ** 5, e: 1024 ** 6 }[String(unit || '').toLowerCase()] || 1;
   return Math.round(n * mult);
 }
 

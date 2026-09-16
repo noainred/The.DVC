@@ -249,6 +249,95 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       부족하고 **열 트랙을 `minmax(0,1fr)`** 로 못 박아야 한다(암시적 트랙이 `auto`=max-content 라
       표가 뷰포트를 넘긴다. 400px 실측 357px → 기준선 228px). 설정 숫자칸도 `minWidth:0` 이 없으면
       설명문 폭으로 자라 옆 칸과 겹친다.
+  - **Horizon 실시간 사용자는 '접속 중 세션의 고유 계정' 이다**(`horizon/sessions.js`·`sessionCollect.js`·
+    `sessionDb.js`·`sessionPoller.js` + 웹 `views/tools/HorizonSessionsPanel.jsx`·`horizonSessionText.js`,
+    v2.525 — 사용자 요청 "Horizon 솔루션 사용중인데 실시간 사용자를 뽑고 싶어"):
+    - **화면은 '현재 사용자' 하나이고 소스 탭으로 나눈다**(사용자 선택 "한 화면에 합치기 — 소스 탭"):
+      `전체(합집합) | Windows 서버 | Horizon(VDI)`. 전체 = **Windows ∪ VDI**(`curuser/combine.js`) —
+      같은 사람이 양쪽에 있으면 1명이다. **단순 합과 겹친 인원을 함께** 낸다(하나만 보여주면 전제가
+      감춰진다). ⚠ 한 출처를 못 읽으면 `partial` 로 밝히고 **'전체' 라고 말하지 않는다**.
+      ⚠ '레코드가 있다' 를 '읽었다' 로 뭉개지 말 것 — 전 서버가 `stale`/`no-agent` 면 지금 유효한 값은
+      **하나도 없다**(목 데이터 실측: 43대 중 stale 41·no-agent 2 인데 `state:'ok'` 였다. `kinds.ok > 0`
+      을 본다).
+    - **상태 필드를 읽지 못하면 `connected` 는 0 이 아니라 null** 이다 — 0 은 '지금 아무도 없다' 는
+      거짓이다. 한 서버라도 못 읽으면 **합계도 단정하지 않는다**(부분 합이 더 위험한 거짓).
+    - **계정명이 없고 SID 만 있으면 `userIdOnly` 로 밝힌다** — SID 로도 인원 수는 정확하지만 **이름을
+      보여줄 수 없다**. SID 를 이름인 척 표시하지 말 것. SID 는 Windows 쪽 이름과 **절대 겹치지 않으므로**
+      합집합에서 `sidOnly` 로 그 사실을 적는다(실제로는 같은 사람일 수 있다 — 지어내지 않는다).
+    - ⚠ **응답 필드명을 확인하지 못했다**(정직 기록): `developer.broadcom.com` 등 공식 문서가 이 환경의
+      egress 정책에서 차단이다. 경로 `GET /rest/inventory/v1/sessions`(page·size, size 최대 1000)와
+      필터명 `user_name`·`desktop_pool_id`·`machine_name`·`client_name`·`state`, 상태값
+      `CONNECTED`/`DISCONNECTED`/`PENDING` 은 `matt-coppinger/horizon-mcp`
+      (`src/horizon_mcp/tools/inventory.py:533-556`, "verified against 2512~2606")에서 직접 읽었고,
+      응답의 **계정명 필드가 `user_name` 인지는 미확정**이다. 그래서 **후보 키 체인**으로 읽고
+      `usedUserKey`/`usedStateKey` 를 화면이 밝힌다(v2.522 `usedCmds` 규약). 실장비 응답을 받으면
+      체인을 좁히고 고지를 지울 것 — **체인을 '기본값 user_name' 으로 굳히지 말 것.**
+    - **로그인·로그아웃·TLS·SSRF 설정은 `horizon.js withHorizonSession` 하나가 갖는다** — 라이선스
+      조회와 공용이다. 복사하면 `dispatcher`(사설 인증서·DNS 리바인딩 가드)와 로그아웃 누락 방지가
+      두 갈래로 갈라진다. **새 Horizon 조회를 추가하면 이 함수를 쓸 것.**
+    - **자격증명 스토어를 새로 만들지 않는다** — 설정 › Horizon 등록(`horizon.json`)을 재사용한다.
+      비밀 승계(`util/secretCarry.js`)·SSRF 가드를 두 곳에서 지키게 만들지 말 것.
+    - 실패는 **원인별로** 구분한다(`auth`/`no-endpoint`(404)/`http`/`timeout`/`unparsed`) — 조치가
+      정반대다. **자동 재시도 금지**(AD 계정 잠금). 기본 **꺼짐(opt-in)**, 주기 5분(하한 1분).
+    - DB 는 `horizon-sessions.db` — **원시 세션 객체를 저장하지 않는다**(1만 세션을 매 주기 직렬화하지
+      않기 위해 계정·풀 집계만). 실패 주기의 수치는 **NULL**. ⚠ `Number(null) === 0` 이라
+      `Number.isFinite(Number(v))` 만 보면 **null 이 0 으로 바뀐다** — v2.525 의 자체 테스트가 이 결함을
+      `sessionDb.nOrNull`·`sessions.seriesRow`·웹 `unionNote` **세 곳에서** 잡았다. 새 null 허용 수치를
+      쓸 때 `v == null` 을 먼저 볼 것.
+    - Horizon 은 **vCenter 에 매인 자원이 아니다** — 법인 범위로 나눌 축이 없으므로 범위 제한 계정에는
+      **403(`requiredOwner`)** 으로 거절한다. 빈 값을 주면 '사용자 0명' 이라는 거짓이 된다.
+  - **Horizon 서버 등록도 CSV/자유텍스트 대량 등록을 쓴다 — 코어는 그대로 하나다**(`horizon/bulk.js` +
+    `routes/admin/horizonAssign.js`, v2.525 — 사용자 요청 "호라이즌 서비스에 호라이즌 서버 등록이
+    필요하면 csv/text import/export 기능 추가해줘"):
+    - **판정 코어는 `util/bulkImport.js`**(v2.513), 화면은 `views/tools/BulkDeviceIo.jsx` 하나다.
+      도구마다 다른 것만 주입한다 — 경로 조각(`resource='servers'`)·단위 이름(`unitLabel`)·타입 열
+      숨김(`typeCol={null}` — Horizon 은 장비 타입이 없다).
+    - ⚠ **식별 키는 `id` 단독**이다(`upsertHorizon` 이 id 로 찾고 **host 중복을 거부하지 않는다**).
+      스토리지 `host+type`·SAN 스위치 `host` 와 다르다 — host 로 두면 정상 구성(같은 host, 다른 id)이
+      막히고 id 중복은 **조용히 덮어써진다**.
+    - ⚠ **host 의 정답 형식이 도구마다 다르다.** Horizon 은 `https://커넥션서버` 가 **필수**라
+      기본 조언("URL 이 들어갔습니다 — 주소만 남기세요")은 **틀린 조언**이 된다(Chromium 판독에서 실제로
+      떴다). `enrichAdvice(..., { hostForm: 'url' })` 로 알려줄 것 — **조언이 틀리면 무음 실패보다 나쁘다**
+      (사용자가 잘못된 수정을 한다). 같은 이유로 중복 조언도 **그 도구의 키 이름**을 지목한다
+      (`specialAdvice` 가 사유 문자열에서 키를 뽑는다 — 언제나 'host' 라고 말하던 것을 고쳤다).
+    - **접속처(host·계정·도메인)가 바뀌면 저장 비밀을 승계하지 않는다**(v2.503 규약) — 그 행은
+      비밀번호를 비우면 검증이 'password는 필수입니다' 로 떨어진다. **이것이 정상 동작**이고 우회를
+      만들지 말 것. 저장 시 폐기된 비밀은 `skipped` 에 사유로 실어 **사용자에게 알린다**.
+    - 내보내기·샘플에 **비밀번호를 담지 않는다**. 연결 테스트는 `bulkRun`(kind `'horizon'`) 재진입
+      가드 — 연타가 AD 로그인 시도를 곱하지 않게.
+  - **Unity(uemcli) SSH 수집 — '수집은 됐는데 정보가 없다' 의 원인은 파싱이었다**(`storage/collectors/
+    unitySsh.js`·`cliSsh.js`, v2.525 — 사용자 신고 "unity 장비에 ssh 로 접속은 성공했는데, 수집하는
+    정보가 없어 / 용량 정보 확인 및 장비 구성정보 등 최대한 많은 정보를 수집해줘"):
+    - ⚠ **`toBytes` 는 uemcli 의 `12094627905536 (11.0T)` 표기를 받아야 한다.** 예전 정규식은
+      `^숫자+단위$` 만 받아 이 형태를 **0 으로 버렸고**, `if (!t) continue;` 가 그 풀을 건너뛰어
+      **풀 0개 · 용량 섹션 '건너뜀'** 이 됐다(화면은 `0.0 TB`). **앞의 정수 바이트를 우선**할 것 —
+      괄호 안은 반올림이라 그것을 쓰면 추이에 없는 계단이 생긴다.
+    - ⚠ **CSV 파서 결과가 '비어 있지 않다' 를 '읽었다' 로 쓰지 말 것.** uemcli 배너에 쉼표가 하나만
+      있어도 그 줄이 헤더로 잡혀 **필드 없는 레코드 1건**이 생겼고, 화면에 `SP 1대 · 이름 SP0 · 상태 ?`
+      로 **없는 장비가 있는 것처럼** 보였다. `recordsFor(text, expect)` 가 CSV·Key=Value 를 **기대 필드
+      적중 수로 채점**하고, **기대 필드가 하나도 없는 레코드는 버린다**. 둘 다 0점이면 빈 배열이다.
+    - **명령은 항목마다 후보 체인**이고 `core`(용량·상태)와 `deep`(구성 상세)로 나뉜다.
+      `UNITY_SSH_DEEP=0` 으로 deep 을 끌 수 있고 **끄면 화면이 밝힌다**(`extra.deepSkipped`).
+      **쓰인 명령(`usedCmds`)과 실행되지 않은 명령(`missingCmds`)을 둘 다 표시할 것** — 구성 정보가
+      비어 있는 이유를 사용자가 알아야 한다.
+    - ⚠ **실장비 출력을 확인하지 못했다**(정직 기록): Dell/Broadcom 문서가 egress 차단이고 장비도 없다.
+      경로는 Unisphere CLI 지식 기반이고 버전마다 있는 것과 없는 것이 다르다. 그래서 파싱이 아무것도
+      못 읽으면 **그 항목을 만들지 않는다**(0 을 지어내지 않는다). 원문은 **연결 테스트에서만** 전부
+      담고(주기 수집은 실패한 명령만 — 20여 개 × 4KB 를 매 주기 push 하지 않기 위해) 화면이 보여준다.
+    - **상태를 읽지 못한 것(`unknown`)을 정상으로도 이상으로도 세지 않는다** — 디스크·팬·PSU·포트
+      전부 '상태 미확인 N' 을 따로 밝힌다(v2.523 스토리지 노드 규약과 같다). 라이선스의 설치 여부를
+      읽지 못하면 `false` 가 아니라 **null**('?')이다.
+    - **용량 합계는 풀 합계**이고 그 사실을 화면이 밝힌다(`capacityNote`) — 풀 밖 미할당 드라이브는
+      빠진다. **용량을 못 읽은 풀은 합계에서 빼고 개수를 밝힌다**(`poolsUnreadable`).
+    - 경보 목록은 `extra.alertsList` 에 둔다 — `types.js` 의 공용 스냅샷 계약은 `alerts:{unresolved}`
+      뿐이고 거기에 타입별 필드를 끼워 넣으면 다른 수집기·중앙 수신과 계약이 어긋난다.
+  - **리포트 표(`.rpt-wrap`)의 숫자칸·계열명칸은 단어 중간에서 쪼개지 않는다**(`web/src/styles.css`,
+    v2.525 — 사용자 신고 "실시간 글자 1줄에 나오게 해줘"): `overflow-wrap: anywhere` 는 **문장 칸**을
+    위한 규칙인데 숫자 칸까지 적용돼 `실시간` 배지가 `실/시간` 으로, `Consumed` 가 `Consum/ed` 로,
+    `63.6 GB` 가 `63.6/GB` 로 쪼개졌다. `td.right`·`td:first-child` 만 해제하고(공백 줄바꿈은 유지 —
+    `nowrap` 으로 굳히면 400px 에서 표가 뷰포트를 넘친다) 배지 자체에 `white-space:nowrap` 을 준다.
+    A/B 실측(Chromium): 칸 폭 50px 이하에서 배지가 **2~4줄** 이었고 이제 항상 1줄, `Consumed` 는
+    2줄 → 1줄, 문장 칸은 6줄로 그대로다(회귀 없음). **스크린샷·DOM 측정을 해야 보이는 결함이다.**
   - **월간 점검은 '확인 불가' 를 '이상 없음' 으로 뭉개지 않는다**(`sanswitch/healthCheck.js` +
     웹 `views/tools/sanHealthText.js`·`SanHealthCheck.jsx`, v2.519 — 사용자 제공 Brocade 월간 점검
     체크리스트 + "장비별 점검 · 전체 점검 버튼 · 이상 유무 간단 보고 · 세부 보고서 PDF"):

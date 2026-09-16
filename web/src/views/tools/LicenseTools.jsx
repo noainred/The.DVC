@@ -5,6 +5,7 @@ import { DataTable, Loading, ErrorBox, UsageCell } from '../../components/ui.jsx
 import { Card, useTool } from './shared.jsx';
 import { csvCell } from '../../util/csv.js'; // 수식 인젝션 가드 포함 공통 셀 이스케이프
 import { STable } from '../../components/STable.jsx';
+import BulkDeviceIo from './BulkDeviceIo.jsx';   // v2.525: Horizon 서버 CSV·자유텍스트 대량 등록(스토리지·SAN 과 같은 공용 모달)
 
 
 export function Solutions() {
@@ -117,6 +118,7 @@ export function LicenseExpiry({ scope, isAdmin }) {
   const [statusSel, setStatusSel] = useState('');
   const [familySel, setFamilySel] = useState('');
   const [hz, setHz] = useState(null); // Horizon 서버 목록(관리자)
+  const [hzBulk, setHzBulk] = useState(false); // v2.525: CSV·자유텍스트 대량 등록 모달
   const [hzForm, setHzForm] = useState({ id: '', name: '', host: '', username: '', password: '', domain: '' });
   const [hzMsg, setHzMsg] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -245,15 +247,25 @@ export function LicenseExpiry({ scope, isAdmin }) {
               <label>AD 도메인 <input className="input" value={hzForm.domain} onChange={hzSet('domain')} placeholder="corp" /></label>
             </div>
             {hzMsg && <div style={{ marginTop: 8, padding: '7px 10px', borderRadius: 8, fontSize: 12, background: hzMsg.ok ? 'rgba(34,197,94,.12)' : 'rgba(239,68,68,.12)', color: hzMsg.ok ? '#4ade80' : '#f87171' }}>{hzMsg.text}</div>}
-            <div className="flex gap" style={{ marginTop: 10 }}>
+            <div className="flex gap wrap" style={{ marginTop: 10 }}>
               <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={busy || !hzForm.host} onClick={hzSave}>{busy ? '저장 중…' : '저장'}</button>
               <button className="logout-btn" style={{ padding: '8px 16px' }} disabled={busy || (!hzForm.host && !hzForm.id)} onClick={hzTest}>연결 테스트</button>
+              {/* v2.525(사용자 요청 "호라이즌 서버 등록이 필요하면 csv/text import/export 기능 추가해줘"):
+                  스토리지·SAN 스위치와 **같은 공용 모달**을 쓴다(판정·문구 단일 소스 — BulkDeviceIo 헤더).
+                  식별 키는 `id` 단독이고 타입 열은 없다(Horizon 은 장비 타입이 없다). */}
+              <button className="tab" style={{ flex: 'none', padding: '8px 16px' }} onClick={() => setHzBulk(true)}>📥 CSV · 자유텍스트 대량 등록</button>
             </div>
             <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>
               Horizon 8(2006+) REST API(<code>/rest/login → /rest/config/v1/licenses</code>)를 사용합니다. 읽기 전용 관리자 계정을 권장하며, 자격증명은 <code>$CONFIG_DIR/horizon.json</code>(0600)에만 저장됩니다.
+              대량 등록의 내보내기·샘플에는 <b>비밀번호가 담기지 않습니다</b>. host·계정·도메인 중 하나라도 바꾸면 저장된 비밀번호를 승계하지 않으므로(보안 규칙) 그 행은 비밀번호를 다시 적어야 합니다.
             </div>
           </div>
         </details>
+      )}
+      {hzBulk && (
+        <BulkDeviceIo base="/admin/horizon" resource="servers" unitLabel="서버" typeCol={null}
+          title="Horizon 연결 서버 대량 등록 — CSV · 자유텍스트" keyLabel="id"
+          onClose={() => setHzBulk(false)} onDone={() => { setHzBulk(false); load(); }} />
       )}
     </>
   );

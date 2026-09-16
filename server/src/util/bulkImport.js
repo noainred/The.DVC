@@ -59,7 +59,7 @@ export function analyzeBulkImport(rows, { keyOf, keyLabel = 'host', quickIssue, 
  *   · `order`  위치형 열 순서(자유텍스트 헤더가 있으면 그 순서)
  * @returns {{report:Array, hints:Array}} report 는 `advice`·`field`·`token`·`expected` 가 붙은 새 배열
  */
-export function enrichAdvice(report, rows, { text = '', order = [], format = 'text', ctx = {}, fields = [] } = {}) {
+export function enrichAdvice(report, rows, { text = '', order = [], format = 'text', ctx = {}, fields = [], hostForm = 'address' } = {}) {
   const lines = String(text || '').split(/\r?\n/);
   const rowByLine = new Map((rows || []).map((r) => [r._line, r]));
   const out = (report || []).map((item) => {
@@ -69,7 +69,9 @@ export function enrichAdvice(report, rows, { text = '', order = [], format = 'te
     const a = adviseRow(row, item.reason, { lineText, order, format, ctx });
     return { ...item, field: a.field, advice: a.advice, token: a.token, expected: a.expected, current: a.current };
   });
-  return { report: out, hints: preflightHints(rows || [], fields) };
+  // `hostForm` — 도구마다 host 의 정답 형식이 다르다(Horizon 은 URL 필수). 틀린 조언을
+  // 내보내지 않기 위해 호출부가 알려준다(v2.525).
+  return { report: out, hints: preflightHints(rows || [], fields, { hostForm }) };
 }
 
 /**

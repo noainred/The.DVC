@@ -13,7 +13,15 @@
  *     그 서버의 사용자는 집계에서 제외했다는 사실을 밝힌다.
  *  4. 계정명은 기본으로 목록에 넣지 않는다(개인정보성). 펼치면 보인다.
  *
- * 판정·문구는 `curUserText.js`(순수, vitest 고정). 이 파일은 조립만 한다.
+ * ── v2.525: **소스 탭**(사용자 선택 "한 화면에 합치기 — 소스 탭") ─────────────────
+ * 사용자 요청 "Horizon 솔루션 사용중인데 실시간 사용자를 뽑고 싶어" 에 따라 이 화면이 두 출처를
+ * 갖는다 — **Windows 서버**(guestinfo 경로, v2.520)와 **Horizon(VDI)**(세션 REST, v2.525).
+ * 맨 위 `전체 | Windows 서버 | Horizon(VDI)` 탭이 본문을 바꾼다.
+ *  · '전체' 는 **합집합**이다(같은 사람이 양쪽에 있으면 1명) — 단순 합·겹친 인원을 함께 밝힌다.
+ *  · ⚠ **한 출처를 읽지 못하면 '전체' 라고 말하지 않는다** — 빠진 출처와 그 이유를 적는다
+ *    (`curuser/combine.js` 의 `partial`). 합쳐서 하나의 숫자만 보여주면 그 전제가 감춰진다.
+ *
+ * 판정·문구는 `curUserText.js`·`horizonSessionText.js`(순수, vitest 고정). 이 파일은 조립만 한다.
  * ⚠ 훅은 전부 조기 return 위에(React #310 — v2.202 실제 크래시).
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -29,6 +37,8 @@ import {
   collectStateNote, unionNote, sinceNote, skippedSummary, agentGuide, TRUST_NOTE, collectSummary,
 } from './curUserText.js';
 import { CurrentUsersSettings } from './CurrentUsersSettings.jsx';
+import HorizonSessionsPanel from './HorizonSessionsPanel.jsx';
+import { combinedNote, partialNote, SOURCE_STATE_LABEL } from './horizonSessionText.js';
 
 const DAYS = [1, 7, 30, 90];
 
@@ -53,7 +63,7 @@ function KindBadge({ kind, labels }) {
  */
 const POLL_MS = 60_000;
 
-export function CurrentUsers({ scope }) {
+function WindowsUsersPanel({ scope }) {
   const [nonce, setNonce] = useState(0);
   const params = useMemo(() => ({ ...(scope ? { vcenterId: scope } : {}), ...(nonce ? { _r: String(nonce) } : {}) }), [scope, nonce]);
   const { loading, data: fresh, error } = usePolling('/tools/curuser', params, POLL_MS);
@@ -313,6 +323,98 @@ export function CurrentUsers({ scope }) {
           <CurrentUsersSettings onSaved={() => reload()} />
         </Modal>
       )}
+    </div>
+  );
+}
+
+/**
+ * '전체' 탭 — Windows ∪ Horizon(VDI) 고유 사용자.
+ *
+ * ⚠ 서버(`/tools/current-users/combined`)가 **판정까지** 해서 내려준다(`curuser/combine.js`).
+ *   여기서 두 숫자를 더하지 말 것 — 겹친 사람을 두 번 세어 '전체 사용자' 가 거짓이 된다.
+ */
+function CombinedPanel() {
+  const { loading, data, error } = usePolling('/tools/current-users/combined', {}, POLL_MS);
+  const c = data?.combined;
+  const src = data?.sources || {};
+  if (loading && !data) return <Loading />;
+  if (error && !data) return <ErrorBox error={error} />;
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 12, minWidth: 0 }}>
+      {error && <ErrorBox error={error} inline />}
+      {c?.partial && (
+        <div style={{ border: '1px solid var(--amber)', borderRadius: 8, padding: '10px 12px', background: 'var(--panel)' }}>
+          <div style={{ fontWeight: 700, color: 'var(--amber)', marginBottom: 4 }}>전체가 아닙니다</div>
+          <div style={{ fontSize: 12.5, color: 'var(--text-dim)', whiteSpace: 'normal', lineHeight: 1.55 }}><BoldText text={partialNote(c)} /></div>
+        </div>
+      )}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
+        <Card label="전체 고유 사용자(합집합)" value={`${c?.union ?? 0}명`} meta={c?.partial ? '⚠ 일부 출처 누락 — 하한' : 'Windows ∪ VDI'} accent="var(--accent)" />
+        <Card label="양쪽 동시" value={`${c?.both ?? 0}명`} meta="Windows 서버와 VDI 에 모두 접속" />
+        <Card label="Windows 서버만" value={`${c?.onlyWindows ?? 0}명`} meta={SOURCE_STATE_LABEL[src.windows?.state] || ''} />
+        <Card label="VDI 만" value={`${c?.onlyVdi ?? 0}명`} meta={SOURCE_STATE_LABEL[src.vdi?.state] || ''} />
+      </div>
+      {c && <div style={{ fontSize: 12, color: 'var(--text-dim)', whiteSpace: 'normal', lineHeight: 1.6 }}><BoldText text={combinedNote(c)} /></div>}
+      {c?.nameFormNote && <div style={{ fontSize: 11.5, color: 'var(--text-faint)', whiteSpace: 'normal', lineHeight: 1.55 }}><BoldText text={c.nameFormNote} /></div>}
+
+      <div className="table-wrap">
+        <STable className="v3-table">
+          <thead><tr><th>출처</th><th>상태</th><th>고유 사용자</th><th>세션</th><th data-nosort>비고</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><b>Windows 서버</b></td>
+              <td>{SOURCE_STATE_LABEL[src.windows?.state] || src.windows?.state || '—'}</td>
+              <td data-sort={String(src.windows?.detail?.users ?? -1)}>{src.windows?.detail?.users ?? '—'}</td>
+              <td data-sort={String(src.windows?.detail?.sessions ?? -1)}>{src.windows?.detail?.sessions ?? '—'}</td>
+              {/* ⚠ 서버 문구에 `**강조**` 가 들어 있다 — 그대로 뿌리면 별표가 화면에 샌다
+                  (v2.439/2.440/2.505 실제 사고. v2.525 Chromium 판독에서 또 발견했다). */}
+              <td style={{ fontSize: 11.5, color: 'var(--text-dim)', whiteSpace: 'normal' }}>{src.windows?.reason ? <BoldText text={src.windows.reason} /> : '—'}</td>
+            </tr>
+            <tr>
+              <td><b>Horizon(VDI)</b></td>
+              <td>{SOURCE_STATE_LABEL[src.vdi?.state] || src.vdi?.state || '—'}</td>
+              <td data-sort={String(src.vdi?.detail?.users ?? -1)}>{src.vdi?.detail?.users ?? '—'}</td>
+              <td data-sort={String(src.vdi?.detail?.sessions ?? -1)}>{src.vdi?.detail?.sessions ?? '—'}</td>
+              <td style={{ fontSize: 11.5, color: 'var(--text-dim)', whiteSpace: 'normal' }}>{src.vdi?.reason ? <BoldText text={src.vdi.reason} /> : (src.vdi?.detail?.stateBlind ? '세션 상태 필드를 읽지 못해 접속 중 인원은 셀 수 없습니다.' : '—')}</td>
+            </tr>
+          </tbody>
+        </STable>
+      </div>
+      <div style={{ fontSize: 11.5, color: 'var(--text-faint)', whiteSpace: 'normal' }}>
+        <BoldText text="계정 목록은 각 소스 탭에서 봅니다 — 이 탭은 **겹치는 인원**을 드러내는 것이 목적입니다." />
+      </div>
+    </div>
+  );
+}
+
+const SOURCES = [
+  { key: 'all', label: '전체(합집합)' },
+  { key: 'windows', label: 'Windows 서버' },
+  { key: 'vdi', label: 'Horizon(VDI)' },
+];
+
+/**
+ * 소스 탭 셸(v2.525). 탭 선택만 담당하고 수치·판정은 각 패널이 갖는다.
+ * ⚠ 탭 키를 바꾸지 말 것 — 사용자가 새로고침해도 같은 탭으로 돌아오게 `localStorage` 에 둔다
+ *   (프라이빗 창에서 throw 하므로 **반드시 try/catch** — V4 규약).
+ */
+export function CurrentUsers({ scope }) {
+  const [tab, setTab] = useState(() => {
+    try { const v = localStorage.getItem('curuser.source'); return SOURCES.some((s) => s.key === v) ? v : 'windows'; }
+    catch { return 'windows'; }
+  });
+  const pick = (k) => { setTab(k); try { localStorage.setItem('curuser.source', k); } catch { /* 프라이빗 창 */ } };
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 10, minWidth: 0 }}>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        {SOURCES.map((s) => (
+          <button key={s.key} className={tab === s.key ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '5px 13px', fontSize: 12.5 }}
+            onClick={() => pick(s.key)}>{s.label}</button>
+        ))}
+      </div>
+      {tab === 'all' && <CombinedPanel />}
+      {tab === 'windows' && <WindowsUsersPanel scope={scope} />}
+      {tab === 'vdi' && <HorizonSessionsPanel />}
     </div>
   );
 }

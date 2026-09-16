@@ -69,8 +69,12 @@ function memCell(s, rtc) {
   if (rtc) return { avg: gb(rtc.avg), p95: '—', max: gb(rtc.max), isRt: true };
   return { avg: '—', p95: '—', max: '—', isRt: false };
 }
+// ⚠ v2.525(사용자 신고 "실시간 글자 1줄에 나오게 해줘"): 이 배지는 숫자 칸 안에 들어가는데
+//   그 칸이 좁아 '실 / 시간' 두 줄로 쪼개져 있었다. `whiteSpace:'nowrap'` + `display:'inline-block'`
+//   으로 배지 안에서는 절대 줄바꿈되지 않게 한다(배지 자체가 다음 줄로 내려가는 것은 정상).
+//   **스크린샷을 읽어야 보이는 종류의 결함**이다 — 수치·단위 테스트로는 잡히지 않는다.
 const RT_TAG = <span title="vCenter 실시간(최근 1시간) 구간에서 조회한 현재값 — 이력 통계 레벨과 무관"
-  style={{ background: '#0ea5e9', color: '#fff', fontSize: 9, marginLeft: 4, padding: '0 4px', borderRadius: 4, verticalAlign: 'middle' }}>실시간</span>;
+  style={{ background: '#0ea5e9', color: '#fff', fontSize: 9, marginLeft: 4, padding: '0 4px', borderRadius: 4, verticalAlign: 'middle', whiteSpace: 'nowrap', display: 'inline-block' }}>실시간</span>;
 // v2.510: 'Local + vCenter' 템플릿에서 두 출처를 구분하는 배지 — vCenter 섹션은 이 배지, Local 섹션은 자기 배지.
 const VC_BADGE = <span className="badge gray" style={{ fontSize: 10, marginLeft: 6, verticalAlign: 'middle' }} title="vCenter 가 보관하는 롤업 통계(각 점 = 간격 평균)">vCenter 롤업</span>;
 
