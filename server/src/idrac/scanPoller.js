@@ -163,6 +163,7 @@ export async function runIdracScanOnce(opts = {}) {
         if (e.id) {
           recordScanRangeRun(e.id, {
             scanned: r.scanned ?? null, found: r.found ?? null, registered: r.registered ?? null,
+            blocked: r.blocked ?? null, // v2.537: 차단 대역이라 찌르지 않은 IP 수(조용한 제외 금지)
             delegated: !!r.delegated, agent: r.agent || null, error: r.error || null,
             ...(r.delegated ? { reqId: r.reqId || '', dispatch: r.dispatch || e.dispatch || 'poll', dispatchedAt: Date.now(), pending: true } : {}),
           });

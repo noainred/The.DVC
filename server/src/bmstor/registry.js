@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
+import { ssrfBlockReason } from '../collector/registry.js'; // v2.537: 등록 시 SSRF 정적 가드
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js';
 import { sanitizeMounts } from './collect.js';
@@ -71,6 +72,8 @@ export function bmServerInputIssue(body = {}) {
   const host = String(body.host || '').trim();
   if (!host) return 'host는 필수입니다.';
   if (host.length > 253 || /[\s'"`;|&<>$\\]/.test(host)) return 'host에 사용할 수 없는 문자가 있습니다.';
+  // v2.537: SSH 대상도 루프백·링크로컬은 거부한다(storage/registry.js 와 같은 방식 — URL 파서 재사용).
+  { const ssrf = ssrfBlockReason(`https://${host}`); if (ssrf) return `host 거부: ${ssrf}`; }
   const port = body.port === undefined || body.port === '' ? 22 : Number(body.port);
   if (!Number.isInteger(port) || port < 1 || port > 65535) return 'SSH 포트가 올바르지 않습니다.';
   const username = String(body.username ?? 'root').trim() || 'root';

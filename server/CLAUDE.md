@@ -567,3 +567,42 @@ medium 1 · low 3 이고 전부 고쳤다. 회귀 테스트: `test/secAudit2535.
   생기지 않은 별칭**을 못 읽으면 멀쩡한 라우트 40여 개를 결함으로 오판한다. 마운트 수준
   가드(`router.use(adminOnly)`)와 `app.use('/api/svcmon', …, requirePerm('svcmon'))` 도 선언
   줄에는 안 보인다 — **후보는 반드시 파일을 열어** 판정할 것.
+
+## 2026-09-16 외부 입력 → 장비 접속·명령 경로 감사 조치(v2.537) — 되돌리지 말 것 (docs/AUDIT-2026-09-16c.md)
+
+3차 감사. 명령 주입 축은 결함 0(tcpdump·SAN vfId·nvidia-smi·hostaccess·deploy·deepSearch 전부
+준수 — 보고서 표), SSRF 축에서 medium 2 · low 2 를 고쳤다. 회귀 테스트 `test/ssrfAgents2537.test.js`.
+
+- ⚠⚠ **undici `Agent` 를 만들면 예외 없이 `lookup: ssrfLookup` 을 붙인다** — 목록이 아니라 **전수 스윕**이
+  고정한다(medium): v2.506 은 11곳을 배선하고 **그 11곳만** 테스트했다. `new Agent(` 전수를 뽑으니
+  훅 없는 dispatcher 가 **9개** 더 있었다 — `vcenter/restClient.js`(SOAP·REST 공용)·`nsx/client.js`·
+  `idrac/redfish.js`·`idrac/ome.js`·`storage/collectors/restCommon.js`·`isilon.js`·
+  `sanswitch/collectors/fosRest.js`·`svcmon/checker.js`·`rma/testRunner.js`. 전부 사용자가 등록한
+  host 로 **자격증명을 싣고** 접속하는 경로다.
+  · 손 grep 은 8개를 셌고 **9번째는 스윕이 잡았다**(`await import('undici')` 로 한 줄에 만든 것).
+    새 dispatcher 를 만들 때 "테스트 목록에 추가" 하는 방식이면 다시 빠진다 — 그래서 스윕이다.
+  · 삼항으로 갈리는 connect(`nsx`·`vcenter`)는 `withSsrfLookup()` 으로 **삼항 바깥**을 감싼다 — 한쪽
+    가지에만 붙이면 검증 ON/OFF 배포 중 하나에서 훅이 사라진다(테스트가 바깥 감싸기를 검사한다).
+  · `connect: vcConnect` 처럼 **변수 참조**면 스윕은 그 변수의 정의가 `withSsrfLookup(` 인지 본다.
+    변수를 다른 이름으로 옮기고 훅을 빼면 그 순간 잡힌다.
+  · **실증 기준**: `fetch('https://localhost:1/', { dispatcher })` 가 `ECONNREFUSED` 가 아니라
+    `ESSRFBLOCKED` 로 끝나야 훅이 산 것이다. 소스에 문자열이 있다는 것과 다르다.
+  · ⚠ **운영 행동 변화**: `localhost` 처럼 이름이 루프백으로 해석되는 대상은 이제 전 클라이언트에서
+    차단이다(svcmon http·RMA url 포함). 엣지 자기 서비스 점검은 `127.0.0.1`(IP 리터럴은 lookup 이
+    불리지 않는다 — v2.506 문서의 한계) 또는 `SSRF_ALLOW_LOOPBACK=true`. 이 한계 때문에 IP 리터럴을
+    받는 스캐너는 **정적 필터가 따로 필요**하다(아래).
+- **등록부는 host 를 저장하기 전에 `ssrfBlockReason` 을 통과시킨다 — 다섯 등록부 전부**(medium/low):
+  storage·sanswitch·pdu 는 v2.313 부터였고 **iDRAC·NSX 가 아니었다**(형식만 검사). bmstor(SSH)·
+  `proxyHost` 도 추가. iDRAC 은 `normalize` 한 곳이 단건·수정·import·`bulkAddByIps`·`registerScanned`
+  를 전부 덮는다(확인함) — **우회 경로(normalize 를 안 지나는 저장)를 만들지 말 것**. 기존 저장 항목은
+  재검증하지 않는다(수정 시점에 걸린다).
+  · `saveConfig`(기본 프록시)는 throw 로 알린다 — 라우트(`PUT /remote/config`)가 **400 + reason** 으로
+    받는다. 500 으로 흘리면 사용자는 무엇을 고칠지 모른다.
+- **IP 리터럴을 받는 스캐너는 차단 대역을 정적으로 거르고, 거른 개수를 말한다**(low — `idrac/scan.js`):
+  `blocked`·`blockedIps`(상한 200)·`blockedTruncated` 가 로컬 `lastRun`(`scanPoller.js`)·위임 결과
+  (`central/idracScanJobs.js` 기록·이벤트·result)·화면 문구(`scanRunText.js` `차단대역 제외 N`)까지
+  이어진다. 조용히 빼면 '전부 스캔했다' 는 거짓이 된다. 새 스캐너(IPAM 등)도 같은 규칙.
+- **고치지 않은 것과 이유**: `execAnswered` 의 `certAccept` 는 `Please input your selection` 꼬리에 `1`
+  을 답하는 넓은 규칙이다 — 실장비에서 프롬프트와 데이터가 같은 줄에 붙어 와서 좁힐 수 없었다
+  (v2.526). 조회(show) 명령에만 붙고 `1` 은 '이 세션만 허용' 이라 오답 피해가 없다. **파괴적 명령에
+  이 규칙을 붙이지 말 것.**

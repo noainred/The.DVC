@@ -22,6 +22,7 @@
 import { Agent } from 'undici';
 import { constants as cryptoConstants } from 'node:crypto';
 import { config } from '../config.js';
+import { withSsrfLookup } from '../util/ssrfLookup.js';
 import { ensureNsxDial } from './proxy.js';
 
 const norm = (s) => String(s || '').replace(/\/+$/, '');
@@ -32,13 +33,15 @@ const norm = (s) => String(s || '').replace(/\/+$/, '');
 // UNAUTHORIZED=true)을 승계 — 검증 ON 배포에서 NSX만 조용히 무검증이 되지 않게 한다.
 // 미검증일 때는 종전 전역 디스패처가 갖던 구형 TLS 호환(legacy 재협상·SECLEVEL)도 유지한다.
 const nsxVerify = process.env.NSX_TLS_REJECT_UNAUTHORIZED === 'true' || config.rejectUnauthorized;
+// v2.537: DNS 리바인딩(TOCTOU) 차단 — util/ssrfLookup.js 머리말. v2.506 배선(11곳)에서 빠져 있던 dispatcher.
+// ⚠ 삼항 **양쪽**에 붙인다 — 검증 ON 배포에서만 훅이 빠지는 실수를 막기 위해 withSsrfLookup 으로 감싼다.
 const nsxDispatcher = new Agent({
-  connect: nsxVerify ? { rejectUnauthorized: true } : {
+  connect: withSsrfLookup(nsxVerify ? { rejectUnauthorized: true } : {
     rejectUnauthorized: false,
     minVersion: config.vcTlsMinVersion,
     ciphers: config.vcTlsCiphers,
     secureOptions: cryptoConstants.SSL_OP_LEGACY_SERVER_CONNECT | cryptoConstants.SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION,
-  },
+  }),
 });
 
 export class NsxClient {

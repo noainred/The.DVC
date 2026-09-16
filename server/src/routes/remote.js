@@ -129,7 +129,12 @@ remoteRouter.get('/targets', requirePerm('remote.access'), (req, res) => {
 
 remoteRouter.get('/config', adminOnly, (_req, res) => res.json({ config: getConfigSafe() }));
 
-remoteRouter.put('/config', adminOnly, (req, res) => res.json({ ok: true, config: saveConfig(req.body || {}) }));
+remoteRouter.put('/config', adminOnly, (req, res) => {
+  // v2.537: saveConfig 가 proxyHost 차단(루프백·링크로컬)을 throw 로 알린다 — 500 으로 흘리면 사용자는
+  // '서버 오류' 로만 보고 무엇을 고칠지 모른다. 400 + reason 으로 돌려준다.
+  try { res.json({ ok: true, config: saveConfig(req.body || {}) }); }
+  catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
+});
 
 // --- per-vCenter proxy CRUD (admin) ---
 remoteRouter.get('/proxies/full', adminOnly, (_req, res) => res.json({ proxies: listProxiesSafe() }));

@@ -7,6 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { ssrfBlockReason } from '../collector/registry.js'; // v2.537: 등록 시 SSRF 정적 가드
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 import { NsxClient } from './client.js';
@@ -59,6 +60,8 @@ function normalize(body, existing = null) {
   if (id.length > 128 || [...id].some((c) => c.charCodeAt(0) < 32)) return [null, 'id에 사용할 수 없는 문자가 있습니다.'];
   if (!name) return [null, 'name(표시 이름)은 필수입니다.'];
   if (!/^https?:\/\//.test(host)) return [null, 'host는 https://... 형식이어야 합니다.'];
+  // v2.537: 루프백·링크로컬·우회표기 차단(형식만 보던 것을 storage/sanswitch/pdu 와 같은 규칙으로).
+  { const ssrf = ssrfBlockReason(host); if (ssrf) return [null, `host 거부: ${ssrf}`]; }
   if (!username) return [null, 'username은 필수입니다.'];
 
   const loc = body.location || e.location || {};

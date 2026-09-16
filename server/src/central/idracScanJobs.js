@@ -310,6 +310,8 @@ export function setIdracScanResult(reqId, data = {}) {
     addEvent(j, `완료 — 스캔 ${data.scanned || 0}개 · iDRAC ${data.foundCount ?? (Array.isArray(data.found) ? data.found.length : 0)}대 발견 · 현지 등록 ${data.registered || 0}대 · 무응답 ${data.unreachable || 0} · 비iDRAC ${data.notIdrac || 0} · 인증실패 ${af}${data.durationMs ? ` · 소요 ${Math.round(data.durationMs / 1000)}초` : ''}`);
     // 인증실패가 있으면 원인을 별도 경고 이벤트로 남긴다('계정 맞는데 401'의 실제 이유).
     if (af > 0 && data.authFailReason) addEvent(j, `인증실패 원인: ${data.authFailReason}`, 'warn');
+    // v2.537: 차단 대역(루프백·링크로컬)이라 찌르지 않은 IP — 조용히 빼면 '전부 스캔했다' 는 거짓이 된다.
+    if (Number(data.blocked) > 0) addEvent(j, `차단 대역이라 스캔하지 않은 IP ${Number(data.blocked)}개${Array.isArray(data.blockedIps) && data.blockedIps.length ? `: ${data.blockedIps.slice(0, 10).join(', ')}${data.blockedIps.length > 10 ? ' …' : ''}` : ''}`, 'warn');
     // '계정 맞는데 막힌' IP 목록을 이벤트에 남긴다(어느 iDRAC을 점검할지 — 처음 몇 개는 인라인, 전체는 result).
     if (af > 0 && Array.isArray(data.authFailedIps) && data.authFailedIps.length) {
       const ips = data.authFailedIps;
@@ -325,6 +327,7 @@ export function setIdracScanResult(reqId, data = {}) {
       pending: false, ok: !data.error,
       scanned: data.scanned ?? null, found: data.error ? null : foundN, registered: data.error ? null : (data.registered || 0),
       unreachable: data.unreachable ?? null, authFailed: data.authFailed ?? null,
+      blocked: data.blocked ?? null, // v2.537
       durationMs: data.durationMs ?? null, error: data.error || null,
     });
   } catch { /* 기록 실패가 결과 처리를 막지 않는다 */ }
@@ -335,6 +338,7 @@ export function setIdracScanResult(reqId, data = {}) {
     found: Array.isArray(data.found) ? data.found.slice(0, 5000) : [],
     unreachable: data.unreachable || 0,
     notIdrac: data.notIdrac || 0,
+    blocked: Number(data.blocked) || 0, // v2.537
     authFailed: af,
     authFailReason: data.authFailReason || null,
     authFailedIps: Array.isArray(data.authFailedIps) ? data.authFailedIps.slice(0, 200) : [],

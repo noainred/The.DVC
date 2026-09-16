@@ -19,10 +19,12 @@ import dgram from 'node:dgram';
 import { execFile } from 'node:child_process';
 import { Resolver } from 'node:dns/promises';
 import { Agent } from 'undici';
+import { withSsrfLookup } from '../util/ssrfLookup.js';
 import { pingOne } from '../util/ping.js';
 import { ssrfBlockReasonResolved } from '../collector/registry.js';
 
-const insecureAgent = new Agent({ connect: { rejectUnauthorized: false } });
+// v2.537: DNS 리바인딩(TOCTOU) 차단 — util/ssrfLookup.js 머리말. v2.506 배선(11곳)에서 빠져 있던 dispatcher. 저장 시점 ssrfBlockReason·실행 시점 ssrfBlockReasonResolved 는 **해석한 IP 로 접속하지 않으므로** 리바인딩 창이 남는다.
+const insecureAgent = new Agent({ connect: withSsrfLookup({ rejectUnauthorized: false }) });
 const SAFE_HOST = /^[a-zA-Z0-9._:-]+$/;
 const shortErr = (e) => String(e?.cause?.code || e?.code || e?.message || e).slice(0, 140);
 

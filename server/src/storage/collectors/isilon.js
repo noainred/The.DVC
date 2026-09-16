@@ -13,13 +13,15 @@
  */
 
 import { Agent } from 'undici';
+import { withSsrfLookup } from '../../util/ssrfLookup.js';
 import { emptySnapshot } from '../types.js';
 // v2.513: 전송 계층 실패(`fetch failed`·`aborted`)를 행동 가능한 사유로 — restCommon 과 같은 규약.
 import { describeFetchError, isTransportError } from './netError.js';
 
 // Isilon 전용 로컬 TLS 디스패처 — 사내 자체서명 장비 한정(다른 fetch 에 주입 금지).
 // 보안(M-4): STORAGE_TLS_VERIFY=true 면 인증서 검증을 켠다(기본은 기존대로 해제).
-const isilonDispatcher = new Agent({ connect: { rejectUnauthorized: process.env.STORAGE_TLS_VERIFY === 'true' } });
+// v2.537: DNS 리바인딩(TOCTOU) 차단 — util/ssrfLookup.js 머리말. v2.506 배선(11곳)에서 빠져 있던 dispatcher.
+const isilonDispatcher = new Agent({ connect: withSsrfLookup({ rejectUnauthorized: process.env.STORAGE_TLS_VERIFY === 'true' }) });
 const PORT = Number(process.env.STORAGE_ISILON_PORT) || 8080;
 const TIMEOUT_MS = Number(process.env.STORAGE_HTTP_TIMEOUT_MS) || 15_000;
 

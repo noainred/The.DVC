@@ -1,6 +1,7 @@
 import { Agent } from 'undici';
 import { constants as cryptoConstants } from 'node:crypto';
 import { config } from '../config.js';
+import { withSsrfLookup } from '../util/ssrfLookup.js';
 
 /**
  * Thin client for the vSphere Automation REST API (vCenter 7.0+ / 8.0).
@@ -23,7 +24,9 @@ import { config } from '../config.js';
 // (인증서 검증 ON)을 유지하고, 자체서명/구형 TLS가 실제로 필요한 vCenter 계열 fetch에만
 // dispatcher 옵션으로 이 permissive Agent를 명시 주입한다(soapClient/guestops/nsx도 동일 패턴).
 // 구형 어플라이언스는 legacy TLS/재협상을 요구하므로 검증 off일 때 SECLEVEL을 낮춘다(기존 동작 유지).
-const vcConnect = config.rejectUnauthorized
+// v2.537: DNS 리바인딩(TOCTOU) 차단 — util/ssrfLookup.js 머리말. v2.506 배선(11곳)에서 빠져 있던 dispatcher.
+// soapClient.js 도 이 vcDispatcher 를 쓰므로 여기 한 곳이 vCenter SOAP·REST 접속 전부를 덮는다.
+const vcConnect = withSsrfLookup(config.rejectUnauthorized
   ? { rejectUnauthorized: true, timeout: 15_000 }
   : {
     rejectUnauthorized: false,
@@ -33,7 +36,7 @@ const vcConnect = config.rejectUnauthorized
       cryptoConstants.SSL_OP_LEGACY_SERVER_CONNECT |
       cryptoConstants.SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION,
     timeout: 15_000,
-  };
+  });
 // vCenter를 HAProxy로 중계하는 환경에서는 reload/방화벽 idle로 keep-alive 연결이 끊겨
 // 죽은 소켓을 재사용하면 응답을 기다리다 타임아웃('operation was aborted due to timeout')한다.
 // 유휴 소켓을 짧게 회수해 매 폴링마다 새 연결로 재접속하도록 한다(폴링 간격 << keepAlive면 영향 없음).
