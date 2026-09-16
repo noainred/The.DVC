@@ -99,3 +99,43 @@ export async function roomTempHistory(db, { kind = 'inlet', group = '', range = 
     points: [...byTs.values()].sort((a, b) => a.ts - b.ts),
   };
 }
+
+/**
+ * 여러 법인의 짧은 추이를 한 번에(v2.534) — 상황실 월보드의 타일 스파크라인용.
+ *
+ * 왜 따로 두는가: 월보드는 16개 법인 타일을 한 화면에 그리므로 `roomTempHistory` 를 법인마다
+ * 부르면 요청이 16번이다. 여기서는 **1시간 버킷**만 쓴다 — `samples_hourly` 롤업이 걸려
+ * (metric, k, h) 인덱스 선탐색이 되므로 법인당 비용이 거의 없다(CLAUDE.md: '전 키 1쿼리' 로
+ * 합치면 오히려 느려진다 — v2.503 실측).
+ *
+ * ⚠ **없는 값을 0 으로 만들지 않는다.** 수집이 없던 시간은 점이 없고, 화면은 선을 잇지 않는다.
+ *
+ * @param {object} db metrics DB
+ * @param {{kind?:string, hours?:number, groups?:string[]}} opts
+ * @returns {Promise<{kind:string, hours:number, bucketMs:number, since:number,
+ *                    groups:Record<string, Array<{ts:number, avg:number|null, max:number|null}>>}>}
+ */
+export async function roomTempSparks(db, { kind = 'inlet', hours = 24, groups = [] } = {}) {
+  const k = ['inlet', 'exhaust', 'cpu'].includes(kind) ? kind : 'inlet';
+  const h = Math.max(1, Math.min(168, Number(hours) || 24));
+  const bucketMs = 3_600_000;                       // 시간당 롤업을 쓰게 하는 값(60분 정배수)
+  const since = Date.now() - h * bucketMs;
+  const keys = [...new Set((groups || []).map((g) => String(g ?? '')))].slice(0, 64);
+  const out = {};
+  for (const key of keys) {
+    let avgPts = []; let maxPts = [];
+    try {
+      avgPts = db.history(roomTempMetric(k, 'avg'), key, since, bucketMs, h + 2) || [];
+      maxPts = db.history(roomTempMetric(k, 'max'), key, since, bucketMs, h + 2) || [];
+    } catch { /* 시계열 없음 — 빈 배열 */ }
+    const byTs = new Map();
+    for (const p of avgPts) byTs.set(p.ts, { ts: p.ts, avg: p.avg, max: null });
+    for (const p of maxPts) {
+      const e = byTs.get(p.ts) || { ts: p.ts, avg: null, max: null };
+      e.max = p.max ?? p.avg;
+      byTs.set(p.ts, e);
+    }
+    out[key] = [...byTs.values()].sort((a, b) => a.ts - b.ts);
+  }
+  return { kind: k, hours: h, bucketMs, since, groups: out };
+}

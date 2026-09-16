@@ -90,6 +90,7 @@ import { startDailyReport } from './reports/dailyReport.js';
 import { startVmCloneScheduler } from './vmclone/scheduler.js'; // VM 복제(백업식) 스케줄러(v2.299)
 import { startStoragePoller } from './storage/poller.js';        // 스토리지 수집(v2.302)
 import { applyGrowthSettings } from './storage/growthSettings.js'; // 사용량 보존 기간(v2.531)
+import { runCapacityBasisMigration } from './storage/capacityBasisMigration.js'; // 용량 기준 변경 1회 정리(v2.534)
 import { startSanSwitchPoller } from './sanswitch/poller.js';    // SAN 스위치 수집(Brocade FOS, v2.410)
 import { startPduPoller } from './pdu/poller.js';                 // PDU 수집(APC Rack PDU 2G, v2.424)
 import { startPduPush } from './pdu/push.js';                     // 엣지→중앙 PDU 스냅샷 push(v2.424)
@@ -313,6 +314,12 @@ try { const rf = writeReleaseFile(); if (rf) console.log(`[release] ${rf} 기록
 // 그 안에서 prune 이 돌 수 있으므로, 사용자가 지정한 보존값이 그 전에 DB 모듈에 들어가 있어야
 // 한다(스태거로 늦게 주입하면 첫 prune 이 기본값 기준으로 돌아 더 지울 수 있다).
 try { applyGrowthSettings(); } catch (e) { console.warn(`[storage-growth] 보존 설정 적용 실패(${e.message}) — 기본값으로 동작`); }
+// v2.534: VMAX/PowerMax 사용량 기준 변경(할당 → 실제 기록량)으로 **이전 이력은 이어 붙일 수 없다**.
+// 그 장비들의 용량 이력만 1회 지우고(마커로 재실행 방지) 재시작 사실을 남긴다 — 그대로 두면
+// 증가량 화면에 전환일 하루치 '거짓 감소'(수 PB)가 찍힌다. 실패해도 기동을 막지 않는다.
+runCapacityBasisMigration()
+  .then((r) => { if (r.ran) console.log(`[storage] 용량 기준 변경 — 장비 ${r.devices}대 이력 ${r.rows}행 재시작(v2.534)`); })
+  .catch((e) => console.warn(`[storage] 용량 이력 재시작 실패(${e.message}) — 증가량 화면에 기준 변경 구간이 남을 수 있습니다`));
 store.start();
 startLoopLagMonitor(); // 이벤트 루프 지연 계측(additive·no-op-on-fail) — docs/ARCH-HEAVY-JOB-ISOLATION.md §10-0
 try { pruneHangLog(); } catch { /* hang 로그 보존일 정리(기동 1회) — 실패 무시 */ }

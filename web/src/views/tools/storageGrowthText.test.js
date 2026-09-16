@@ -6,8 +6,7 @@ import { describe, it, expect } from 'vitest';
 import {
   GROWTH_UNITS, bytesAuto, bytesIn, growthCell, totalCell,
   fullEtaText, headline, missingNote, heat, maxAbsFor,
-  growthPct, growthPctText, aggregateGrowth,
-} from './storageGrowthText.js';
+  growthPct, growthPctText, aggregateGrowth, historyResetNote } from './storageGrowthText.js';
 
 const TB = 1024 ** 4;
 const GB = 1024 ** 3;
@@ -229,5 +228,27 @@ describe('집계 — 법인별·종류별 (서버 totalsOf 와 같은 규칙)', 
     const a = aggregateGrowth([], per);
     expect(a.devices).toBe(0);
     expect(a.growth['30d'].bytes).toBeNull();
+  });
+});
+
+describe('이력 재시작 안내(v2.534)', () => {
+  it('★ 측정 기준이 바뀐 장비는 그 사실을 말한다 — 조용한 삭제 금지', () => {
+    const n = historyResetNote({ at: Date.UTC(2026, 8, 16, 3), reason: 'VMAX 기준 변경', rows: 1234 });
+    expect(n.badge).toBe('기준 변경');
+    expect(n.title).toMatch(/2026-09-16/);
+    expect(n.title).toMatch(/VMAX 기준 변경/);
+    expect(n.title).toMatch(/1,234행/);
+    expect(n.title).toMatch(/이어서 비교할 수 없습니다/);
+  });
+
+  it('지운 행이 0 이면 행 수를 적지 않는다(새 장비와 문구가 같아지지 않게)', () => {
+    const n = historyResetNote({ at: Date.UTC(2026, 8, 16), reason: 'r', rows: 0 });
+    expect(n.title).not.toMatch(/행 삭제/);
+  });
+
+  it('기록이 없으면 null — 배지를 만들지 않는다', () => {
+    expect(historyResetNote(null)).toBe(null);
+    expect(historyResetNote(undefined)).toBe(null);
+    expect(historyResetNote({ reason: 'x' })).toBe(null);
   });
 });

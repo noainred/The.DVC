@@ -138,7 +138,9 @@ test('프로비저닝은 버리지 않고 **별도 키**로 싣는다(용량과 
 
 test('9.x — `system_capacity`(TB) 도 그대로 읽는다(GM1 이 동작 중이다)', () => {
   const c = powermaxCapacity({ system_capacity: { usable_total_tb: 355.8, usable_used_tb: 315.9 } });
-  assert.equal(c.basis, 'system_capacity');
+  // v2.534: basis 가 `.usable` 접미로 구체화됐다 — 어느 필드 쌍을 썼는지 화면이 말해야 한다.
+  assert.equal(c.basis, 'system_capacity.usable');
+  assert.equal(c.documented, true, 'Dell 스펙이 뜻을 명시한 필드다');
   assert.equal(Math.round(c.totalBytes / 1e12 * 10) / 10, 355.8);
 });
 
@@ -166,6 +168,8 @@ test('정규화 — 10.x 본문이 pools·capacity 로 이어지고 프로비저
   assert.equal(snap.capacity.pct, 31.1);
   assert.equal(snap.extra.capacityBasis, 'physicalCapacity');
   assert.equal(snap.extra.provisionedTb, 11510.45);
-  assert.ok(snap.extra.capacityBasisNote.includes('물리 용량'), '무엇을 세었는지 화면이 말해야 한다');
+  // v2.534: physicalCapacity 는 Dell 스펙에 설명이 없는 필드라 화면이 그 사실을 말해야 한다.
+  assert.ok(snap.extra.capacityBasisNote.includes('physicalCapacity'), '무엇으로 읽었는지 화면이 말해야 한다');
+  assert.ok(!snap.extra.capacitySuspect, '31.1% 는 used!=total 이라 의심 대상이 아니다');
   assert.equal(snap.alerts.unresolved, 12);
 });

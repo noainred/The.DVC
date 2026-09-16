@@ -13,7 +13,7 @@ import { collectDeviceNow, storagePollerStatus, pollStorageOnce, testDeviceConne
 import { edgeStorageSnapshots } from '../../central/storageEdge.js';
 import { listActivity } from '../../storage/activityLog.js';
 import { areaSummary, areaJson, capacityHistory, capacityHistoryAll, dbAvailable,
-  dailySeries, dailySpans, dayIndex, dayLabel, dayStartMs, pruneNow, effectiveKeepDays, DAY_OFFSET_MIN } from '../../storage/db.js';
+  dailySeries, dailySpans, dayIndex, dayLabel, dayStartMs, pruneNow, effectiveKeepDays, DAY_OFFSET_MIN, capacityResets } from '../../storage/db.js';
 import { growthMatrix, normalizePeriods, DEFAULT_PERIODS } from '../../storage/growth.js';
 import { GROWTH_SPEC, loadGrowthSettings, saveGrowthSettings } from '../../storage/growthSettings.js';
 import { AREA_LABEL } from '../../storage/onefsCatalog.js';
@@ -540,6 +540,9 @@ api.get('/tools/storage-growth', toolsPerm, fullScopeOnly, async (req, res) => {
   // 조회 구간은 '가장 긴 기간 + 1일' 로 좁히지만, 화면의 '관측 N일' 은 **전체 이력**이어야 한다 —
   // 구간으로 대신하면 700일치를 가진 장비가 '92일' 로 보인다(v2.531 스크린샷 판독에서 발견).
   const spans = await dailySpans();
+  // 측정 기준이 바뀌어 이력을 재시작한 장비(v2.534) — '관측 N일' 이 왜 짧은지 화면이 말해야 한다.
+  // 이것이 없으면 사용자는 수집 장애로 오해한다(조용한 삭제 금지).
+  const resets = await capacityResets();
   const m = growthMatrix(rows, { periods, asOfDay, meta });
   const keep = effectiveKeepDays();
   res.json({
@@ -562,6 +565,8 @@ api.get('/tools/storage-growth', toolsPerm, fullScopeOnly, async (req, res) => {
       gapDays: Math.max(0, totalSpan - observedDays),
       latestLabel: dayLabel(d.latestDay),
       firstLabel: firstDay == null ? null : dayLabel(firstDay),
+      // {at, reason, rows} — 있으면 화면이 '그 날 기준이 바뀌어 다시 쌓기 시작했다' 고 밝힌다.
+      historyReset: resets[d.deviceId] || null,
       growth: Object.fromEntries(Object.entries(d.growth).map(([k, g]) => [k,
         { ...g, baselineLabel: g.baselineDay == null ? null : dayLabel(g.baselineDay) }])),
       }; }),

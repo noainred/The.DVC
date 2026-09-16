@@ -120,7 +120,11 @@ async function open() {
         max_used INTEGER, samples INTEGER NOT NULL DEFAULT 1,
         PRIMARY KEY (device_id, day)
       );
-      CREATE INDEX IF NOT EXISTS idx_capd_day ON capacity_daily (day);`);
+      CREATE INDEX IF NOT EXISTS idx_capd_day ON capacity_daily (day);
+      /* 운영 메타(v2.534) — 1회성 마이그레이션 표식과 '이력 재시작' 기록을 담는다.
+         용량 이력은 '측정 기준' 이 바뀌면 이전 값과 이어 붙일 수 없다. 그 사실을 남기지
+         않으면 화면의 '관측 N일' 이 이유 없이 1일로 줄어 사용자가 수집 장애로 오해한다. */
+      CREATE TABLE IF NOT EXISTS storage_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);`);
     _db = {
       conn,
       upLatest: conn.prepare(`INSERT INTO api_latest (device_id, area, endpoint, ts, ok, bytes, truncated, json, error)
@@ -184,6 +188,10 @@ async function open() {
       // capacity_daily 는 하루 1행이라 전 행을 훑어도 20대×5년 = 3.6만 행이다.
       selDailySpan: conn.prepare(`SELECT device_id, MIN(day) AS first_day, MAX(day) AS last_day,
           COUNT(*) AS observed FROM capacity_daily GROUP BY device_id`),
+      metaGet: conn.prepare('SELECT v FROM storage_meta WHERE k = ?'),
+      metaSet: conn.prepare('INSERT INTO storage_meta (k, v) VALUES (?,?) ON CONFLICT(k) DO UPDATE SET v = excluded.v'),
+      delCapDev: conn.prepare('DELETE FROM capacity_history WHERE device_id = ?'),
+      delDailyDev: conn.prepare('DELETE FROM capacity_daily WHERE device_id = ?'),
       prune1: conn.prepare('DELETE FROM api_history WHERE ts < ?'),
       prune2: conn.prepare('DELETE FROM capacity_history WHERE ts < ?'),
       prune3: conn.prepare('DELETE FROM capacity_daily WHERE day < ?'),
@@ -361,6 +369,73 @@ export async function capacityHistoryAll(sinceMs, bucketMs) {
   //   존재하지 않아 TypeError → catch 가 삼켜 전체 합산 추이가 항상 빈 배열이었다(v2.386 수정).
   try { return db.selCapAllBucket.all(b, b, Number(sinceMs) || 0, b); }
   catch (e) { console.warn(`[storage-db] capacityHistoryAll 실패: ${e.message}`); return []; }
+}
+
+/* ── 측정 기준 변경에 따른 이력 재시작(v2.534) ────────────────────────────────
+ *
+ * 왜 필요한가: v2.533 까지 VMAX 는 `physicalCapacity`(used == total)로 사용량을 적재해
+ * **모든 행이 100%** 였다. v2.534 가 `system_capacity.usable_used_tb`(데이터 감축 후 실제
+ * 기록량)로 바꾸면 그 장비의 사용량이 절반 이하로 떨어진다 — 그대로 두면 증가량 화면에
+ * 전환일 하루치 **−1.5PB 짜리 거짓 '감소'** 가 찍힌다(사용자 선택: 해당 장비 이력만 삭제).
+ *
+ * ⚠ 삭제는 되돌릴 수 없다. 그래서 ① 대상 장비 id 를 호출부가 **명시**해야 하고
+ * ② `storage_meta` 마커로 **1회만** 실행되며 ③ 언제·왜·몇 행을 지웠는지 남겨 화면이
+ * '측정 기준 변경으로 이력을 재시작했습니다' 라고 말할 수 있게 한다(조용한 삭제 금지).
+ */
+const RESET_KEY = (id) => `capacity_reset:${id}`;
+
+/**
+ * 장비들의 용량 이력(원시 + 일 롤업)을 지우고 재시작 사실을 기록한다.
+ * @param {string[]} deviceIds
+ * @param {{reason:string, once?:string, at?:number}} opts
+ *   once - 이 키가 이미 있으면 **아무 것도 하지 않는다**(1회성 마이그레이션용)
+ * @returns {Promise<{ran:boolean, devices:number, rows:number}>}
+ */
+export async function resetCapacityHistory(deviceIds, { reason = '측정 기준 변경', once = null, at = Date.now() } = {}) {
+  const db = await open();
+  if (!db) return { ran: false, devices: 0, rows: 0 };
+  if (once) {
+    const done = db.metaGet.get(`migration:${once}`);
+    if (done) return { ran: false, devices: 0, rows: 0 };
+  }
+  let rows = 0; let devices = 0;
+  const ids = [...new Set((deviceIds || []).map((x) => String(x || '')).filter(Boolean))];
+  db.conn.exec('BEGIN');
+  try {
+    for (const id of ids) {
+      const a = db.delCapDev.run(id);
+      const b = db.delDailyDev.run(id);
+      const n = Number(a?.changes || 0) + Number(b?.changes || 0);
+      rows += n;
+      if (n > 0) devices += 1;
+      // 지운 행이 0 이어도 기록한다 — '새로 등록된 장비' 와 '기준이 바뀐 장비' 는 다르다.
+      db.metaSet.run(RESET_KEY(id), JSON.stringify({ at, reason, rows: n }));
+    }
+    if (once) db.metaSet.run(`migration:${once}`, JSON.stringify({ at, devices: ids.length, rows }));
+    db.conn.exec('COMMIT');
+  } catch (e) {
+    try { db.conn.exec('ROLLBACK'); } catch { /* */ }
+    throw e;
+  }
+  return { ran: true, devices, rows };
+}
+
+/**
+ * 장비별 '이력 재시작' 기록 — 증가량 화면이 '관측 N일' 이 왜 짧은지 말할 수 있게 한다.
+ * @returns {Promise<Record<string,{at:number, reason:string, rows:number}>>}
+ */
+export async function capacityResets() {
+  const db = await open();
+  if (!db) return {};
+  const out = {};
+  try {
+    const rows = db.conn.prepare("SELECT k, v FROM storage_meta WHERE k LIKE 'capacity_reset:%'").all();
+    for (const r of rows) {
+      const id = String(r.k).slice('capacity_reset:'.length);
+      try { out[id] = JSON.parse(r.v); } catch { /* 손상 행은 건너뛴다 */ }
+    }
+  } catch { /* 테이블 없음(구 DB) */ }
+  return out;
 }
 
 export function _resetForTest() { try { _db?.conn?.close?.(); } catch { /* */ } _db = null; _pruneTick = 0; }

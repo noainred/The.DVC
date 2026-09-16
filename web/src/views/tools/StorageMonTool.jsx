@@ -18,6 +18,7 @@ import CollectActivity from './CollectActivity.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { healthBadge } from './storageNodeText.js';   // v2.526: 헬스 배지 색 판정(순수)
 import { authFailInfo } from './storageAuthText.js';  // v2.528: 401 진단 문구(순수)
+import { capacityRows, srpRows, subscribedNote, usageTrust } from './powermaxCapacityText.js'; // v2.534: 구독/할당/실제기록(순수)
 import { nodeFaultSummary, nodeRows, nodeKindLabel, bpsText, faultBadgeTitle } from './storageNodeText.js';
 
 /**
@@ -84,6 +85,76 @@ function failReason(s) {
  *   그 개수를 따로 밝힌다.
  * ⚠ 노드 목록이 없는 수집기에서는 **'어느 노드인지 모른다' 고 말한다**(지어내지 않는다).
  */
+/**
+ * VMAX/PowerMax 용량 구성(v2.534) — **구독 · 할당 · 실제 기록을 섞지 않는다**.
+ * 사용자 신고 "할당량 말고 실제로 디스크에 기록한 사용량 보여줘" 에 대한 화면 쪽 답이다.
+ * 값이 없으면 아무 것도 그리지 않는다(다른 타입 화면은 변화 없음).
+ */
+function PowerMaxCapacityPanel({ ex }) {
+  const rows = capacityRows(ex);
+  const srps = srpRows(ex);
+  const subNote = subscribedNote(ex);
+  const trust = usageTrust(ex);
+  if (!rows.length && !srps.length && trust.kind !== 'suspect') return null;
+  return (
+    <div style={{ marginTop: 10 }}>
+      {/* ⚠ 의심 경고를 맨 위에 — 아래 숫자를 읽기 전에 보아야 한다. */}
+      {trust.text && (
+        <div className="badge amber" style={{ display: 'block', padding: '8px 10px', whiteSpace: 'normal', lineHeight: 1.6, marginBottom: 8 }}>
+          <BoldText text={trust.text} />
+        </div>
+      )}
+      {rows.length > 0 && (
+        <>
+          <div className="muted" style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>용량 구성</div>
+          <div className="table-wrap">
+            <STable>
+              <thead><tr><th>항목</th><th style={{ textAlign: 'right' }}>용량</th><th>설명</th></tr></thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.key}>
+                    <td style={{ whiteSpace: 'nowrap' }}>{r.strong ? <b>{r.label}</b> : r.label}</td>
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+                      {r.strong ? <b>{r.value}</b> : r.value}
+                    </td>
+                    <td className="muted" style={{ fontSize: 11.5, whiteSpace: 'normal', lineHeight: 1.6 }}>{r.desc}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </STable>
+          </div>
+          {subNote && <div className="muted" style={{ fontSize: 11.5, marginTop: 4 }}>ℹ {subNote}</div>}
+        </>
+      )}
+      {srps.length > 0 && (
+        <>
+          <div className="muted" style={{ fontSize: 12, fontWeight: 700, margin: '10px 0 4px' }}>SRP(풀)별</div>
+          <div className="table-wrap">
+            <STable>
+              <thead><tr><th>SRP</th><th style={{ textAlign: 'right' }}>실제 기록</th><th style={{ textAlign: 'right' }}>전체</th><th style={{ textAlign: 'right' }}>사용률</th><th>비고</th></tr></thead>
+              <tbody>
+                {srps.map((x, i) => (
+                  <tr key={`${x.array}-${x.id}-${i}`}>
+                    <td style={{ whiteSpace: 'nowrap', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis' }} title={`${x.array ? `${x.array} · ` : ''}${x.id}`}>
+                      {x.id}
+                      {/* 어느 필드로 읽었는지 밝힌다 — 버전차를 추측 없이 진단하기 위해(v2.522 규약). */}
+                      <div className="muted" style={{ fontSize: 10.5 }}>{x.basis}</div>
+                    </td>
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{x.used}</td>
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{x.total}</td>
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{x.pct == null ? '—' : `${x.pct}%`}</td>
+                    <td className="muted" style={{ fontSize: 11.5, whiteSpace: 'normal', lineHeight: 1.6 }}>{x.meta || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </STable>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function NodeFaultModal({ r, typeLabel, onClose }) {
   const [onlyBad, setOnlyBad] = useState(true);
   const s = r?.snap || null;
@@ -272,6 +343,11 @@ function Cell({ col, r, ctx }) {
       return (
         <td style={{ minWidth: col.minWidth }}>
           {v != null ? <UsageCell pct={v} /> : dash}
+          {/* v2.534: 문서화되지 않은 필드로 읽었고 사용 == 전체면 **목록에서도** 알린다 —
+              상세를 열어야만 알 수 있으면 사용자는 100% 를 용량 부족으로 읽는다. */}
+          {usageTrust(s?.extra).short
+            ? <span className="badge amber" style={{ marginLeft: 4, fontSize: 10 }} title={String(usageTrust(s?.extra).text || '').replace(/\*\*/g, '')}>{usageTrust(s?.extra).short}</span>
+            : null}
           {s?.capacity?.totalBytes ? <div className="muted" style={{ fontSize: 10.5 }}>{tbFmt(s.capacity.usedBytes)} / {tbFmt(s.capacity.totalBytes)}</div> : null}
         </td>
       );
@@ -1099,6 +1175,8 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
           <UnityConfigPanels ex={ex} fmtBytes={tbFmt} />
           {/* v2.526: 이 문구는 `**강조**` 를 담고 있다 — 그대로 그리면 별표가 그대로 인쇄된다
               (v2.439/2.440/2.505 실제 사고). 반드시 BoldText 로 렌더한다. */}
+          {/* v2.534: VMAX/PowerMax 구독·할당·실제 기록 분리 표시(값이 없으면 그리지 않는다). */}
+          <PowerMaxCapacityPanel ex={ex} />
           {s.extra?.capacityBasisNote && <div className="muted" style={{ fontSize: 11, marginTop: 6, whiteSpace: 'normal', lineHeight: 1.6 }}>ℹ <BoldText text={s.extra.capacityBasisNote} /></div>}
           {/* 경보 폴백 고지(v2.513) — 장비가 state 필터를 못 받아 '전체를 받아 코드에서 거른' 경우.
               수집은 성공(ok)이지만 **어떻게 센 건수인지**가 다르므로 조용히 넘기지 않는다. */}

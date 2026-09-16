@@ -522,6 +522,54 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - ⚠ **실장비에서 확인하지 못했다**(정직 기록): 픽스처는 사용자가 제공한 실제 응답 본문이고
       테스트가 그 수치를 고정하지만, 이 어레이는 엣지 위임이라 엣지가 v2.533 으로 올라간 뒤에야
       확인된다.
+  - ⚠⚠ **v2.534 정정 — 용량은 `system_capacity.usable_used_tb` 가 먼저다. `physicalCapacity` 는
+    마지막 수단이다**(사용자 신고 "vmax, powermax 스토리지의 **할당량 말고 실제로 디스크에 기록한
+    사용량** 보여줘"):
+    - 증상은 **VMAX 11대가 전부 정확히 100%**(전체 == 사용)였고 PowerMax 10.2 한 대만 31.1% 였다.
+      원인은 v2.533 이 `physicalCapacity` 를 **①순위**로 본 것이다 — V3 플랫폼(VMAX) 응답에는
+      그 필드가 **있고 `used_capacity_gb == total_capacity_gb`** 다.
+    - **재현으로 확정**: Comcast/libstorage 의 실캡처(VMAX200K, ucode 5977.1125.1125)를
+      `powermaxCapacity` 에 그대로 넣으면 1325680.37/1325680.37 = **100.0%**, 같은 응답의
+      `system_capacity` 로는 **440.74/1070.61 = 41.2%** 다. Dell 의 PyU4V 픽스처(PowerMax_2000,
+      ucode 5978)도 76290.38/76290.38 — **독립 표본 2건이 일치**한다.
+    - ★ **근거는 Dell 공식 스펙 원문**이다. developer.dell.com 은 이 환경에서 차단(http=000)이지만
+      **Dell 이 자사 PyU4V 저장소 `tools/openapi.json` 에 PowerMax 10.3 OpenAPI 를 그대로 커밋해
+      두었다**. 원문:
+      · `usable_used_tb` — "Total Capacity in TBs used by Host, eNas and System **after Data
+        reduction is applied**"  ← 이것이 '실제로 디스크에 기록한 양' 이다
+      · `subscribed_total_tb` — "Host subscribed capacity plus eNas subscribed capacity"(구독)
+      · `subscribed_allocated_tb` — "Host allocated plus eNas allocated capacity"(할당)
+      · `disk_group_total_capacity_gb` — "The total disk group (**raw**) capacity including RAID overhead"
+      **셋은 다른 필드다 — 화면에서 섞지 말 것.**
+    - ⚠ **`physicalCapacity` 를 '원시 용량' 이라 단정하지 말 것.** Dell 자신의 스펙에도 이
+      스키마에는 **설명이 없다**(Java DTO 클래스명 `com.emc.em.restapi.common.dto.PhysicalCapacity`
+      와 필드명 반복뿐). raw 를 뜻하는 필드는 위의 `disk_group_total_capacity_gb` 로 **따로 있다**.
+      확정할 수 있는 것은 "확인한 V3 표본 2건이 used == total 이었다" 까지다. 그래서 이 필드는
+      **마지막 수단**이고, `used === total` 이면 `extra.capacitySuspect` 로 **목록·상세 양쪽에서**
+      경고한다(상세를 열어야만 알 수 있으면 사용자는 100% 를 용량 부족으로 읽는다).
+    - **SRP(풀) 조회를 쓴다**(`powermaxSrp`, `/sloprovisioning/symmetrix/{id}/srp/{srpId}`).
+      10.x/V4 는 어레이 레벨에 `usable_*` 가 없어 **`fba_srp_capacity.effective.physical_capacity`
+      가 실제 기록량을 주는 유일한 경로**이고 데이터 감축 절감량도 여기에만 있다. ⚠ 한 SRP 에서
+      **블록을 하나만** 고른다(`srp_capacity` 통합과 `fba_srp_capacity` 를 둘 다 더하면 중복 집계).
+      ⚠ `effective.used_tb`(감축 후 논리)를 사용량으로 쓰지 말 것 — 실캡처에서 physical 0.49TB 인데
+      effective 는 1.47TB 로 **3배**다(감축 6:1).
+    - ⚠ **단위는 여전히 미확정**: 우리는 `*_tb` 를 10진 1e12 로 보는데 OpenStack Cinder 의 Dell
+      PowerMax 드라이버는 같은 필드에 `* units.Ki`(=1024)를 곱해 **TiB** 로 다룬다(약 10% 차이).
+      Dell 스펙에 단위 명시가 없다. 실장비 Unisphere 화면값과 대조해 보정할 것.
+    - ⚠ **이 현장 VMAX 11대의 실제 응답 본문은 보지 못했다**(정직 기록). 장비 상세의
+      `extra.capacityBasis` 가 `system_capacity.usable` 로 바뀌는지로 **즉시 확인된다**.
+  - **측정 기준이 바뀌면 그 장비의 용량 이력은 이어 붙이지 않는다**(`storage/capacityBasisMigration.js`
+    + `storage/db.js resetCapacityHistory`·`capacityResets`, v2.534 — 사용자 선택 "해당 장비 이력만 삭제"):
+    - '할당' 과 '실제 기록' 은 뜻이 달라 한 계열에 섞이면 전환일에 **−수 PB 짜리 거짓 '감소'** 가
+      증가량 화면에 찍힌다(CLAUDE.md '감소(−)를 0 으로 깎지 않는다' 규칙 때문에 그대로 표시된다).
+    - **대상 타입만**(vmax·powermax) 지우고, `storage_meta` 마커로 **1회만** 돈다 — 재기동마다
+      지우면 이력이 영원히 안 쌓인다. 기동 실패가 포탈을 막지 않는다(경고만).
+    - ⚠ **조용히 지우지 말 것.** 언제·왜·몇 행을 지웠는지 남겨(`capacity_reset:<id>`) 증가량 화면의
+      '관측' 열에 **기준 변경** 배지를 띄운다 — 없으면 '관측 1일' 을 수집 장애로 오해한다.
+    - 새 기준 변경이 생기면 `MIGRATION_ID` 를 올린다(그러면 다시 1회 돈다).
+  - **VMAX/PowerMax 용량 구성 표는 `powermaxCapacityText.js` 하나가 소유한다**(웹, v2.534):
+    행 순서가 계약이다 — **실제 기록 → 할당 → 구독** 순으로 '작은 것부터' 라야 셋의 관계가 보인다.
+    강조(굵게)는 **실제 기록 한 행뿐**이다. 없는 값은 행을 만들지 않는다(0 을 지어내지 않는다).
   - **법인·장비 종류 필터와 집계 축은 `deviceFacets.js` 하나가 소유한다**(`web/src/views/tools/
     deviceFacets.js` + `DeviceFacetBar.jsx`, v2.533 — 사용자 요청 "법인별로 구분해서 볼 수있도록 ·
     장비 종류별로 볼 수있도록, 이건 다른 화면에서 사용했던 메뉴와 동일하게"):
@@ -906,6 +954,31 @@ pyportal/ 아래 파일을 만질 때 자동 로드된다. 되돌리면 안 되�
     순간 필요한 조치**다. 그것을 막으면 사용자는 복구할 길이 없다.
   - **잠긴 버튼은 사유를 말한다**(`title`). 반응 없는 버튼은 '고장' 으로 읽힌다.
   - 같은 패턴을 쓰는 다른 표(SAN 스위치·PDU 등)를 만들 때도 **전역 잠금을 기본으로 삼지 말 것**.
+
+- **법인 전산실 운영 온도는 '보기 전환' 화면이다**(`web/src/views/tools/RoomTemp.jsx` +
+  순수 모듈 `roomTempView.js` + 서버 `idrac/roomTempSeries.js roomTempSparks`, v2.534 —
+  사용자 제공 클로드 디자인 캔버스 '온도 시각화 10안' 의 **적용안 `2a`**):
+  - **범위 플롯 / 매트릭스 / 상황실 월보드** 세 가지를 한 페이지에서 토글한다. 플롯·월보드에서
+    법인을 누르면 매트릭스로 넘어가 **흡기 높은 서버 상위 6대**가 펼쳐진다.
+  - ★ **판정은 흡기 최고값만** 쓴다(v2.381 부터의 규약). 배기·CPU 는 장비·부하에 따라 정상 범위가
+    달라 **임계를 정하지 않고** 값과 **열 안에서의 상대 농도**로만 칠한다 — 두 색 체계를 섞지 말 것
+    (상태색은 **판정**, 농도는 **비교**다). 흡기 열에 농도를 쓰면 판정이 사라진다.
+  - ★ **흡기를 못 읽은 법인은 `ok` 가 아니라 '판정 불가'(회색)** 다. 월보드 카운트에서도
+    `unknown` 을 정상에 흡수하지 않는다(v2.519·v2.523 규약과 같다 — 확인 못 한 것을 이상 없음으로
+    칠하는 것이 이 화면이 만들 수 있는 가장 위험한 거짓이다).
+  - ⚠ **값이 없으면 단위를 붙이지 말 것** — 월보드 타일이 `— ℃` 로 나오면 0℃ 처럼 읽힌다
+    (v2.534 스크린샷 판독에서 발견해 고친 결함. 수치로는 안 잡혔다).
+  - ⚠ **'상위 N대' 라고 적었으면 N행이 전부 보이는 높이여야 한다** — `maxHeight:240` 에서 6번째
+    행이 잘려 '6대' 라고 해 놓고 5행만 보였다(같은 판독에서 발견).
+  - **월보드 스파크라인은 폴링하지 않는다** — 보기를 열 때 `/admin/room-temp/spark` 를 **1회**
+    부른다(법인 집합이 바뀔 때만 재조회). **1시간 버킷**만 써서 `samples_hourly` 롤업이 걸리게
+    한다 — 법인마다 인덱스 선탐색이라 16곳도 가볍다(CLAUDE.md v2.503: '전 키 1쿼리' 로 합치면
+    오히려 느려진다).
+  - ⚠ **수집이 없던 시간은 선을 잇지 않는다**(`sparkPath` 가 subpath 를 끊는다). 이으면 그 시간도
+    값이 있던 것처럼 보인다. 그리고 `p.avg == null` 을 **먼저** 본다 — `Number(null) === 0` 이라
+    `Number.isFinite(Number(v))` 만 보면 결측이 **0℃ 로 둔갑**한다(v2.525 규약. 초판이 실제로
+    그랬고 자체 테스트가 잡아냈다).
+  - 전체 화면은 **Esc 로 닫힌다** — 버튼만 두면 키보드 사용자가 갇힌다.
 
 - **React 훅은 조기 return 위에서 선언**: `if (!data) return <Loading/>` 같은 조기 반환 뒤에 `useState`를
   추가하면 렌더 간 훅 개수가 달라져 **React #310으로 화면 전체가 크래시**한다(v2.202 사용자 관리에서 실제

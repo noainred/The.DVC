@@ -225,3 +225,29 @@ export function aggregateGrowth(devices, periods) {
     growth,
   };
 }
+
+/**
+ * 이력 재시작 안내(v2.534) — 측정 기준이 바뀌어 이전 이력을 이어 붙일 수 없는 장비.
+ *
+ * 왜 필요한가: v2.534 는 VMAX/PowerMax 사용량을 '할당' 에서 '데이터 감축 후 실제 기록량' 으로
+ * 바꿨다. 두 값은 **뜻이 다르므로 이어 붙이면 전환일에 수 PB 짜리 거짓 '감소'** 가 된다.
+ * 사용자 결정에 따라 그 장비의 이력만 지웠는데, **그 사실을 말하지 않으면** 화면의 '관측 N일'
+ * 이 이유 없이 1일로 줄어 사용자가 수집 장애로 오해한다(조용한 삭제 금지).
+ *
+ * @param {{at:number, reason:string, rows:number}|null} reset
+ * @returns {{badge:string, title:string}|null}
+ */
+export function historyResetNote(reset) {
+  if (!reset || !Number.isFinite(Number(reset.at))) return null;
+  const d = new Date(Number(reset.at));
+  const p = (n) => String(n).padStart(2, '0');
+  const when = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  const rows = Number(reset.rows);
+  return {
+    badge: '기준 변경',
+    title: `${when} 에 측정 기준이 바뀌어 이전 이력을 재시작했습니다`
+      + (reset.reason ? ` — ${reset.reason}` : '')
+      + (Number.isFinite(rows) && rows > 0 ? ` (이전 ${rows.toLocaleString('ko-KR')}행 삭제)` : '')
+      + '. 그 전 값과는 뜻이 달라 이어서 비교할 수 없습니다.',
+  };
+}

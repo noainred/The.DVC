@@ -1,6 +1,23 @@
 {
   "notes": [
     {
+      "version": "2.534.0",
+      "date": "2026-09-16",
+      "title": "★ VMAX/PowerMax — '할당' 이 아니라 실제로 디스크에 기록한 사용량 + 전산실 온도 화면 시안 적용",
+      "notes": [
+        "★★ **VMAX 11대가 전부 정확히 100%(전체 용량 == 사용 용량)로 보이던 문제 수정.** 사용자 신고 \"vmax, powermax 스토리지의 할당량 말고 실제로 디스크에 기록한 사용량 보여줘\". 원인은 **읽는 필드의 우선순위**였다 — v2.533 의 `powermaxCapacity` 가 `physicalCapacity` 를 ①순위로 봤는데, V3 플랫폼(VMAX) 응답에는 그 필드가 **있고 `used_capacity_gb == total_capacity_gb`** 다",
+        "**재현으로 확정했다.** Comcast/libstorage 의 실캡처(VMAX200K, ucode 5977.1125.1125)를 이 함수에 그대로 넣으면 1325680.37/1325680.37 = **정확히 100.0%** 가 나오고, 같은 응답의 `system_capacity` 로는 **440.74/1070.61 = 41.2%** 다. Dell 자신의 PyU4V 픽스처(PowerMax_2000, ucode 5978)도 76290.38/76290.38 으로 같은 패턴 — 독립 표본 2건이 일치한다",
+        "★ **근거는 Dell 공식 스펙 원문이다**(Dell 이 자사 PyU4V 저장소 `tools/openapi.json` 에 커밋해 둔 PowerMax 10.3 OpenAPI. developer.dell.com 은 이 환경에서 차단이라 이 경로로 확보했다): `usable_used_tb` = *\"Total Capacity in TBs used by Host, eNas and System **after Data reduction is applied**\"* — 이것이 사용자가 요구한 '실제로 디스크에 기록한 사용량' 이다. `subscribed_total_tb`(구독) · `subscribed_allocated_tb`(할당) 는 **각각 다른 필드**이므로 화면도 셋을 섞지 않는다",
+        "⚠ **`physicalCapacity` 를 '원시 용량' 이라고 단정하지 않는다** — Dell 자신의 스펙에도 이 스키마에는 설명이 없다(Java DTO 클래스명 반복뿐)이고, raw 를 뜻하는 필드는 `disk_group_total_capacity_gb` 로 **따로 있다**. 확정된 것은 '확인한 V3 표본 2건이 used == total 이었다' 까지다. 그래서 이 필드는 **마지막 수단**이고 `used === total` 이면 `extra.capacitySuspect` 로 화면이 목록·상세 양쪽에서 경고한다",
+        "**SRP(풀) 조회를 추가**했다(`/sloprovisioning/symmetrix/{id}/srp/{srpId}`, 어레이당 왕복 +2회). 10.x/V4 는 어레이 레벨에 `usable_*` 가 없어 `fba_srp_capacity.effective.physical_capacity` 가 **실제 기록량을 주는 유일한 경로**이고 데이터 감축 절감량도 여기에만 있다. 상세 창에 **구독 / 할당 / 실제 기록 / usable / raw / 스냅샷 / 감축 절감**을 각각, SRP별 표에는 **어느 필드로 읽었는지**까지 표시한다(v2.522 usedCmds 규약)",
+        "★ **잘못 쌓인 용량 이력은 1회 삭제하고 재시작 사실을 남긴다**(사용자 선택). '할당' 과 '실제 기록' 은 뜻이 달라 이어 붙이면 전환일에 **−수 PB 짜리 거짓 감소**가 증가량 화면에 찍힌다. VMAX·PowerMax 타입만 대상이고 `storage_meta` 마커로 **1회만** 돈다. 증가량 화면의 '관측' 열에 **기준 변경** 배지가 붙어 왜 이력이 짧은지 말한다 — 조용히 지우면 사용자가 수집 장애로 오해한다",
+        "★ **전산실 운영 온도 화면에 클로드 디자인 시안(적용안 2a)을 적용**했다 — **보기 전환(범위 플롯 / 매트릭스 / 상황실 월보드)** 으로 세 시각화를 한 페이지에서. ΔT 정렬 추가, 매트릭스에서 법인을 누르면 **흡기 높은 서버 상위 6대**가 펼쳐지고, 월보드 타일에는 **최근 24시간 흡기 평균 스파크라인**(신규 `/admin/room-temp/spark` — 시간당 롤업이라 법인 16곳도 가볍다)과 전체 화면(Esc 로 닫기)이 붙었다",
+        "온도 화면의 정직성 규칙은 그대로다 — 판정은 **흡기 최고값**만 쓰고, 배기·CPU 는 임계를 정하지 않고 **열 안에서의 상대 농도**로만 칠한다. 흡기를 못 읽은 법인은 정상이 아니라 **'판정 불가'**(회색)이고 월보드 카운트에서도 정상에 섞지 않는다. 수집이 없던 시간은 스파크라인에서 **선을 잇지 않는다**",
+        "⚠ **미확인(정직 기록)**: ① 이 현장 VMAX 11대의 **실제 응답 본문은 보지 못했다** — 근거는 동일 세대 타 표본이다. 장비 화면의 `extra.capacityBasis` 가 `system_capacity.usable` 로 바뀌는지로 즉시 확인된다 ② `*_tb` 가 10진 TB 인지 2진 TiB 인지 **Dell 스펙에 명시가 없다**(OpenStack Cinder 는 ×1024 로 다룬다 — 약 10% 차이). 실장비 Unisphere 화면값과 대조해야 한다 ③ `physicalCapacity` 의 의미는 Dell 문서 어디에도 없다",
+        "검증: `npm run verify` 통과(서버 **2,271**건 · 웹 **884**건 · lint 0 error · 빌드). Chromium 1440px — 세 보기 전부 넘침 0px · pageerror 0 · console error 0 · 행 펼침·타일 클릭·전체화면/Esc 동작 확인. **스크린샷 판독으로 결함 2건을 찾아 고쳤다** — 판정 불가 타일이 `— ℃` 로 나오던 것(값이 없는데 단위를 붙였다), 펼침 표가 '6대' 라고 해 놓고 `maxHeight:240` 에 6번째 행이 잘리던 것. 400px 가로 넘침 228px 은 **A/B 로 기존 문제 확정**(Overview 화면도 같은 228px — 앱 셸 헤더 `.user-box`)"
+      ]
+    },
+    {
       "version": "2.533.0",
       "date": "2026-09-16",
       "title": "PowerMax 10.x 용량 필드 인식 + 스토리지 증가량 화면 — 퍼센트·법인별·종류별",
