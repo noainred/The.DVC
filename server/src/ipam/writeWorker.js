@@ -14,10 +14,16 @@
 
 import { parentPort, workerData } from 'node:worker_threads';
 // eslint-disable-next-line import/no-unresolved
+import fs from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { COLUMNS, toRecord } from './record.js';
 
 const db = new DatabaseSync(workerData.dbPath);
+// v2.535 감사: `ipam/db.js` 는 파일 권한 0600 을 거는데 이 워커는 걸지 않아, **둘 중 먼저 연
+// 쪽이 권한을 정하는 경합**이었다(워커가 먼저면 umask 기본값으로 남는다). ipam.db 는 자격증명이
+// 아니라 IP 인벤토리지만, 같은 파일을 두 곳이 만드는데 한쪽만 권한을 거는 것은 규칙 위반이다.
+// best-effort — 실패가 동기화를 막지 않는다(db.js 와 같은 처리).
+try { fs.chmodSync(workerData.dbPath, 0o600); } catch { /* best effort */ }
 // 메인 스레드 리더(info 조회)와 겹치면 즉시 실패하지 않고 기다린다.
 try { db.exec('PRAGMA busy_timeout=3000;'); } catch { /* 구버전 폴백 */ }
 

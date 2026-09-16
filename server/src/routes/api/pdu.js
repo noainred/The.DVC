@@ -129,11 +129,20 @@ export function registerPdu(api) {
   // ⚠ 정적 경로를 파라미터 경로보다 먼저 등록한다(/tools/pdu/csv 가 :id 로 잡히지 않게).
   api.get('/tools/pdu/csv/export', adminOnly, (req, res) => {
     const withPw = String(req.query.passwords || '') === '1';
-    if (withPw && !req.user?.isSettingsOwner) {
-      // 평문 자격증명 덤프 — 설정 소유자 경계를 서버에서 강제한다.
-      return requireSettingsOwner(req, res, () => sendCsv(req, res, true));
-    }
-    return sendCsv(req, res, withPw);
+    /*
+     * ⚠ **소유자 게이트를 조건부로 두지 말 것**(v2.535 감사에서 고친 것):
+     * 예전 코드는 `if (withPw && !req.user?.isSettingsOwner)` 였다. 그런데 `req.user` 는
+     * `isSettingsOwner` 를 **담지 않는다** — `auth/auth.js resolveTokenUser` 의 반환은
+     * `{username, role, name, scope, mustEnrollOtp}` 뿐이고, `isSettingsOwner` 는
+     * `routes/auth.js` 의 로그인·`/auth/me` **응답 필드로만** 계산된다. 그래서 그 조건은
+     * 언제나 참이 되어 결과적으로 닫혀 있었다 — 즉 **우연히** 안전했다.
+     * 누군가 성능을 이유로 그 필드를 미들웨어로 올리는 순간(그럴 만한 코드가 이미 있다)
+     * 평문 자격증명 일괄 덤프가 소유자 검사 없이 나간다. v2.500 C-1('경로 문자열 비교로
+     * 보안 게이트를 만들지 말 것')과 같은 유형 — **우연히 성립하는 게이트**다.
+     * 이 저장소의 다른 14개 파일처럼 `requireSettingsOwner` 를 무조건 통과시킨다.
+     */
+    if (withPw) return requireSettingsOwner(req, res, () => sendCsv(req, res, true));
+    return sendCsv(req, res, false);
   });
   function sendCsv(req, res, withPw) {
     const dcName = (id) => (listDatacenters().find((d) => d.id === id)?.name || id || '');
