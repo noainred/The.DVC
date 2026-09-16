@@ -88,12 +88,14 @@ test('저장 내용이 파일로 남아 재기동 후에도 유지된다', async
 test('applyCentralIntervals: 실효값이 바뀌고, 지정 안 한 키는 env/기본값을 유지한다', async () => {
   const m = await load();
   m._resetForTest();
-  assert.equal(m.runtimeIntervals().pollMs, 10 * 60_000);   // 기본 10분
+  const POLL_DEF = m.INTERVAL_SPEC.find((x) => x.key === 'pollMs').def;   // v2.531: 기본값을
+  // 테스트에 박지 않는다 — 'pollMs 기본값이 얼마인가' 는 storageGrowth2531.test.js 가 따로 고정한다.
+  assert.equal(m.runtimeIntervals().pollMs, POLL_DEF);
   m.applyCentralIntervals({ pollMs: 120_000 });
   assert.equal(m.runtimeIntervals().pollMs, 120_000);
   assert.equal(m.runtimeIntervals().pushMs, 5 * 60_000);    // 미지정 → 기본 유지
   m.applyCentralIntervals({});                              // 중앙이 지정 해제 → 로컬로 복귀
-  assert.equal(m.runtimeIntervals().pollMs, 10 * 60_000);
+  assert.equal(m.runtimeIntervals().pollMs, POLL_DEF);
   m._resetForTest();
 });
 
@@ -116,7 +118,7 @@ test('STORAGE_INTERVALS_LOCAL=1: 현장 고정 — 중앙 값을 무시한다', 
   process.env.STORAGE_INTERVALS_LOCAL = '1';
   const r = m.applyCentralIntervals({ pollMs: 60_000 });
   assert.equal(r.applied, false);
-  assert.equal(m.runtimeIntervals().pollMs, 10 * 60_000);
+  assert.equal(m.runtimeIntervals().pollMs, m.INTERVAL_SPEC.find((x) => x.key === 'pollMs').def);
   delete process.env.STORAGE_INTERVALS_LOCAL;
   m._resetForTest();
 });

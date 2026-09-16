@@ -15,6 +15,7 @@ export const TOOLS = [
   { k: 'codex-check', icon: '🛡️', label: '보안점검', desc: '프로그램 보안·완성도 점검 리포트 — 외부 전수 점검 결과 + 실시간 지표 · Markdown 저장/다운로드', adminOnly: true },
   { k: 'vm-clone', icon: '🧬', label: 'VM 복제(백업)', desc: 'vCenter별 VM 지정 → 스냅샷 시점 복제(무중단) · 스케줄 정기 실행 · 대상 데이터스토어/NFS 선택 · 최근 N개 보존 · 트리에 Clone 배지', adminOnly: true },
   { k: 'storage-mon', icon: '🗄️', label: '스토리지 모니터링', desc: '글로벌 법인 스토리지 8종(PowerScale/Isilon·PowerStore·Unity·XtremIO·VMAX/PowerMax·VPLEX/Metro Node) 사용량·버전·노드 통합 조회 · 용량 시계열/추이 · 엣지 현지 수집→중앙 집계 · 법인별/타입별 뷰', adminOnly: true },
+  { k: 'storage-growth', icon: '📈', label: '스토리지 증가량', desc: '임원 보고 형태의 스토리지 증가량 보고서 — 전체/장비별 용량과 1일·1주·1개월·3개월·6개월·1년 증가량 매트릭스 · 증가 단위 GB/TB 전환 · 소진 예상 · 일 단위 추이(기본 5년 보관, 보관 기간 설정 가능)', aka: ['storage-growth', '증가량', '용량 증가', '보고서'], adminOnly: true },
   { k: 'serial-lookup', icon: '🔎', label: '시리얼 조회', desc: '등록·수집된 모든 장비의 시리얼을 한 번에 검색 — 서버(iDRAC) 섀시와 부품(PSU·디스크·메모리·NIC) · OME 장비 · ESXi 호스트 · 스토리지 어레이 · SAN 스위치(섀시·PSU·SFP) · 엣지 베어메탈 · 대소문자와 :·- 무시 부분 일치 · CSV 내보내기', adminOnly: true },
   { k: 'pdu', icon: '🔌', label: 'PDU 정보', desc: 'APC Rack PDU 2G(rpdu2g) — 전력(kW·누적 kWh·피상·역률) · 뱅크/상별 전류 · 온도·습도. 데이지체인 PDU 대수와 환경 센서 개수를 자동 탐지 · 엣지 현지 수집→중앙 집계 · 수집 주기 중앙 배포 · CSV 일괄 등록/수정 · 전용 시계열 DB', adminOnly: true },
   { k: 'san-switch', icon: '🔗', label: 'SAN 스위치 모니터링', desc: 'Brocade(Fabric OS) FC 스위치·디렉터 전 모델 — 포트별 상태·속도·연결 장비·에러 카운터·SFP 광레벨(Tx/Rx dBm) · 포트 용량(라이선스/사용중/여유, POD 미라이선스 제외) · SSH CLI 또는 REST(FOS 8.2.1+) · 엣지 현지 수집→중앙 집계 · 법인별 필터', adminOnly: true },

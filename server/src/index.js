@@ -89,6 +89,7 @@ import { startCertMonitor } from './security/certMonitor.js';
 import { startDailyReport } from './reports/dailyReport.js';
 import { startVmCloneScheduler } from './vmclone/scheduler.js'; // VM 복제(백업식) 스케줄러(v2.299)
 import { startStoragePoller } from './storage/poller.js';        // 스토리지 수집(v2.302)
+import { applyGrowthSettings } from './storage/growthSettings.js'; // 사용량 보존 기간(v2.531)
 import { startSanSwitchPoller } from './sanswitch/poller.js';    // SAN 스위치 수집(Brocade FOS, v2.410)
 import { startPduPoller } from './pdu/poller.js';                 // PDU 수집(APC Rack PDU 2G, v2.424)
 import { startPduPush } from './pdu/push.js';                     // 엣지→중앙 PDU 스냅샷 push(v2.424)
@@ -308,6 +309,10 @@ app.use((err, req, res, _next) => {
 // 부팅 직후 동시 폴링으로 인한 CPU 스파이크를 평탄화한다(이후 각자 주기 반복).
 // CONFIG_DIR/vmware-portal-release 에 현재 버전을 명시(redhat-release 방식). 기동 시마다 갱신.
 try { const rf = writeReleaseFile(); if (rf) console.log(`[release] ${rf} 기록`); } catch { /* best effort */ }
+// 스토리지 사용량 보존 기간(v2.531) — **스태거에 넣지 않는다.** 폴러가 첫 용량 점을 적재하면
+// 그 안에서 prune 이 돌 수 있으므로, 사용자가 지정한 보존값이 그 전에 DB 모듈에 들어가 있어야
+// 한다(스태거로 늦게 주입하면 첫 prune 이 기본값 기준으로 돌아 더 지울 수 있다).
+try { applyGrowthSettings(); } catch (e) { console.warn(`[storage-growth] 보존 설정 적용 실패(${e.message}) — 기본값으로 동작`); }
 store.start();
 startLoopLagMonitor(); // 이벤트 루프 지연 계측(additive·no-op-on-fail) — docs/ARCH-HEAVY-JOB-ISOLATION.md §10-0
 try { pruneHangLog(); } catch { /* hang 로그 보존일 정리(기동 1회) — 실패 무시 */ }
