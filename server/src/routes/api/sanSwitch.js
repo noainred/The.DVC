@@ -18,7 +18,7 @@ import { startTestRun, getTestRun } from '../../sanswitch/testRuns.js';
 import { edgeSanSwitchSnapshots } from '../../central/sanSwitchEdge.js';
 import { listActivity as listSwActivity } from '../../sanswitch/activityLog.js';
 // v2.511: 조닝 그림 — 순수 분석(스위치 왕복 없음).
-import { zonesFromCompact, buildZoneGraph, buildZoneMatrix, zoneFindings, zoneSummary } from '../../sanswitch/zoning.js';
+import { zonesFromCompact, buildZoneGraph, buildZoneMatrix, zoneFindings, zoneSummary, portZoneDetail, classifyEndpoints } from '../../sanswitch/zoning.js';
 import { listDatacenters } from '../../datacenter/store.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
 import { requestCollect, hasPendingRequest, requestPerfCollect, hasPendingPerfRequest } from '../../sanswitch/collectRequests.js';
@@ -28,7 +28,7 @@ import { listActivity as listPerfActivity, latestEventByDevice as latestPerfEven
 import { perfEmptyDiag } from '../../sanswitch/perfDiag.js';
 import { edgePerfStatusFor, listEdgePerfStatus } from '../../central/sanSwitchPerfEdge.js';
 // 월간 점검(v2.519) — 판정은 순수 모듈, 기준선은 포탈 안에 저장(스위치 카운터는 건드리지 않는다).
-import { checkDevice, summarizeAll, CHECK_ITEMS } from '../../sanswitch/healthCheck.js';
+import { checkDevice, checkPorts, summarizeAll, CHECK_ITEMS } from '../../sanswitch/healthCheck.js';
 import { saveBaseline, getBaseline, clearBaseline, publicBaseline, listBaselines } from '../../sanswitch/errBaseline.js';
 import { portSeries, storageSeries, storageSeriesMulti, arraySerialOf, endpointKind, perfDbStats, pruneNow, latestSampleTs, available as perfDbAvailable } from '../../sanswitch/perfDb.js';
 import { listDevices as listStorageDevices } from '../../storage/registry.js';
@@ -350,6 +350,34 @@ function snapshotFor(id) {
 }
 
 /** 장비 1대 점검. 기준선이 있으면 '당월 신규 에러' 까지 판정한다. */
+/** 불량 포트 상세의 상한 — 넘으면 개수를 밝힌다(조용한 상한 금지). */
+const PROBLEM_PORT_MAX = Math.max(5, Number(process.env.SANSW_PROBLEM_PORT_MAX) || 40);
+
+/**
+ * 점검이 지목한 포트에 대해서만 조닝 상대를 붙인다(v2.521).
+ * 조닝 스냅샷이 없으면 **'조닝 안 됨' 이라 말하지 않는다** — '조닝 정보를 수집하지 못했다' 다.
+ */
+function zoneDetailFor(snap, problemRows) {
+  const z = snap?.zoning || null;
+  const list = snap?.ports?.list || [];
+  const byIndex = new Map(list.map((p) => [p.index, p]));
+  const ports = problemRows.map((r) => byIndex.get(r.index)).filter(Boolean);
+  if (!ports.length) return { rows: [], note: '' };
+  if (!z?.available || !Array.isArray(z.zones) || !z.zones.length) {
+    return {
+      rows: ports.map((p) => ({ index: p.index, slotPort: p.slotPort ?? null, attachedName: p.attachedName || '', state: p.state, wwns: [], zones: [], zoneCount: 0, zonesOmitted: 0, partnerCount: 0 })),
+      note: z?.reason
+        ? `조닝 정보를 수집하지 못해 상대편을 표시할 수 없습니다: ${String(z.reason).slice(0, 200)}`
+        : '조닝 정보가 이 스냅샷에 없어 상대편을 표시할 수 없습니다(조닝 수집이 꺼져 있거나 명령이 실패했습니다).',
+    };
+  }
+  const zones = zonesFromCompact(z);
+  const names = {}; const aliasOf = { ...(z.aliases || {}) };
+  for (const p of list) for (const w of p.attached || []) { if (p.attachedName) names[String(w).toLowerCase()] = p.attachedName; }
+  const roles = classifyEndpoints(zones, { names, aliasOf, nsRoles: {} });
+  return { rows: portZoneDetail(zones, ports, { names, aliasOf, roles }), note: '' };
+}
+
 api.get('/tools/sanswitch/devices/:id/healthcheck', toolsPerm, fullScopeOnly, (req, res) => {
   const dev = listDevices().find((d) => d.id === req.params.id);
   if (!dev) return res.status(404).json({ ok: false, reason: '스위치를 찾을 수 없습니다.' });
@@ -359,7 +387,19 @@ api.get('/tools/sanswitch/devices/:id/healthcheck', toolsPerm, fullScopeOnly, (r
   }
   const baseline = getBaseline(req.params.id);
   const result = checkDevice(snap, { baseline });
-  res.json({ ok: true, result, baseline: publicBaseline(baseline), items: CHECK_ITEMS });
+  // v2.521 — 사용자 요청 "모든 포트에 대해서 점검" + "불량인 포트는 어떤 서버인지, 어디와
+  // 조닝되어 있는지". 전 포트 판정은 스냅샷만 보므로 싸지만, **조닝 분석은 O(zone×멤버²)** 라
+  // 점검이 지목한 포트에만 돌린다(전 포트로 넓히지 말 것 — zoning.js portZoneDetail 머리말).
+  const portCheck = checkPorts(snap, { baseline });
+  const problem = portCheck.rows.filter((r) => r.verdict === 'bad' || r.verdict === 'warn').slice(0, PROBLEM_PORT_MAX);
+  const zoned = zoneDetailFor(snap, problem);
+  res.json({
+    ok: true, result, baseline: publicBaseline(baseline), items: CHECK_ITEMS,
+    ports: portCheck,
+    problemPorts: zoned.rows,
+    zoningNote: zoned.note,
+    problemPortsOmitted: Math.max(0, portCheck.rows.filter((r) => r.verdict === 'bad' || r.verdict === 'warn').length - problem.length),
+  });
 });
 
 /**

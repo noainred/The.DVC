@@ -23,7 +23,11 @@ import { atomicWriteFileSync } from '../util/atomicWrite.js';
 const FILE = () => path.join(config.configDir, 'sanswitch-err-baseline.json');
 /** 장비 수 상한 — 28대 운영에 30+ 확장을 가정해도 넉넉하다. 포트는 디렉터 768까지. */
 const MAX_DEVICES = 500;
-const KEYS = ['errCrc', 'errEncOut', 'errLossSync', 'discC3'];
+// ⚠ v2.521 에 `errEncIn`·`errLossSig`·`errLinkFail` 을 더했다 — 사용자 제공 해석표가 이 카운터들을
+//   서로 **다른 원인**(물리 Layer / Link·Optic·Cable)으로 구분한다. 기준선에 없으면 '당월 신규' 를
+//   영영 판정할 수 없다. 옛 기준선 파일에는 이 키가 없고, 없는 키는 `errorDelta` 가 null(판정 보류)
+//   을 돌려주므로 안전하다 — **0 으로 채우지 말 것**(오래된 누적이 통째로 '신규' 로 둔갑한다).
+const KEYS = ['errCrc', 'errEncIn', 'errEncOut', 'errLinkFail', 'errLossSync', 'errLossSig', 'discC3'];
 
 let _map = null;
 

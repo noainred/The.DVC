@@ -212,10 +212,29 @@ function drawNote(ctx, text) {
   pdf.text(lines, PAGE.m, ctx.y); ctx.y += lines.length * 3.6 + 2;
 }
 
+/**
+ * 표 열 폭(mm) 배분 — `w` 는 **상대 가중치**다(mm 가 아니다). 순수 함수(테스트가 고정).
+ *
+ * ⚠ v2.521 실제 사고: `[{w:38},{w:20},{w:32},{}]` 처럼 **마지막 열만 `w` 를 빼면** 그 열이 기본값
+ *   1 을 받아 전체의 `1/91`(≈1.9mm)이 된다 — SAN 점검 보고서의 '결과' 열 글자가 한 자씩 세로로
+ *   떨어져 읽을 수 없는 문서가 됐다(웹 화면은 멀쩡했다. **PDF 를 열어 봐야** 보이는 종류의 결함).
+ *   지정한 열이 하나라도 있으면 **미지정 열에는 지정값의 평균**을 준다 — 의도(상대 비율)는 지키고
+ *   붕괴만 막는다. 그래도 호출부는 **모든 열에 `w` 를 명시**하는 것이 원칙이다.
+ */
+export function tableWidths(columns, avail) {
+  const cols = Array.isArray(columns) ? columns : [];
+  if (!cols.length) return [];
+  const given = cols.map((c) => (Number.isFinite(Number(c?.w)) && Number(c.w) > 0 ? Number(c.w) : null));
+  const spec = given.filter((v) => v != null);
+  const fallback = spec.length ? spec.reduce((a, b) => a + b, 0) / spec.length : 1;
+  const ws = given.map((v) => (v == null ? fallback : v));
+  const sum = ws.reduce((a, b) => a + b, 0) || 1;
+  return ws.map((v) => (v / sum) * avail);
+}
+
 function drawTable(ctx, columns, rows) {
   const { pdf } = ctx; const x0 = PAGE.m; const avail = PAGE.w - PAGE.m * 2;
-  const wsum = columns.reduce((s, c) => s + (c.w || 1), 0);
-  const widths = columns.map((c) => (c.w || 1) / wsum * avail);
+  const widths = tableWidths(columns, avail);
   const padX = 1.6; const lineH = 3.5; const padY = 1.9;
   // 셀 내용을 열 폭에 맞춰 여러 줄로 접는다(잘리지 않게 — 사용자 요구 '문장 길면 줄바꿈').
   const wrap = (text, w, fontSize) => { pdf.setFontSize(fontSize); return pdf.splitTextToSize(String(text == null ? '' : text), Math.max(4, w - padX * 2)); };

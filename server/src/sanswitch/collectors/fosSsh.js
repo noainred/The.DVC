@@ -228,7 +228,9 @@ export function buildSnapshot(device, out = {}, errors = {}) {
       state: p.state, stateRaw: p.stateRaw, speed: p.speed, portType: p.portType,
       attached: p.attached, attachedName: ns[String(p.address || '').toLowerCase()] || '',
       comment: p.comment,
-      errCrc: e.crc_err ?? null, errEncOut: e.enc_out ?? null, errLinkFail: e.link_fail ?? null,
+      // `enc_in`(프레임 **안**의 인코딩 오류)은 v2.521 에 추가했다 — 사용자 제공 해석표가
+      // enc_in 을 '물리 Layer 문제' 신호로 따로 구분한다. 파서는 이미 읽고 있었고 옮기지만 않았다.
+      errCrc: e.crc_err ?? null, errEncIn: e.enc_in ?? null, errEncOut: e.enc_out ?? null, errLinkFail: e.link_fail ?? null,
       errLossSync: e.loss_sync ?? null, errLossSig: e.loss_sig ?? null, discC3: e.disc_c3 ?? null,
       inFrames: e.frames_rx ?? null, outFrames: e.frames_tx ?? null,
       inBytes: null, outBytes: null,   // SSH porterrshow 는 옥텟을 주지 않는다 → bps 대신 fps
