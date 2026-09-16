@@ -172,6 +172,32 @@ const PAGER_STRIP = /(--\s*more\s*--|Type\s*<CR>\s*to\s*continue,?\s*Q<CR>\s*to\
 const ANSI_RE = /\x1b\[[0-9;?]*[A-Za-z]/g;
 
 /**
+ * 프롬프트 자동 응답용 PTY 창 크기(v2.530 — **확정된 근본 원인 수정**).
+ *
+ * ⚠ ssh2 의 `{ pty: true }` 는 **80×24** 를 요청한다. 장비 CLI 는 TTY 폭에 맞춰 출력을 접으므로
+ *   80칸을 넘는 줄이 전부 하드랩된다 — 그리고 우리 파서는 **접힌 줄을 읽지 못한다**.
+ *   Dell Unity `uemcli` 에서 실측(2026-09-16, 사용자 제공 실제 출력으로 재현):
+ *     · `-output csv` : 헤더와 데이터 줄이 같은 지점에서 접혀 `Current allocation` 이
+ *       `"29973242855424 (27.2T"` 로 **잘리고**, 접힌 조각이 데이터 줄로 읽혀
+ *       **`ID=47%` · 이름 `38 x 3.8T SAS Flash 4` 라는 없는 풀 1개가 만들어졌다.**
+ *     · 사용자가 손으로 돌린 넓은 터미널에서는 같은 명령이 멀쩡했다 — 즉 **파서가 아니라
+ *       우리가 요청한 터미널 폭이 변수**였다(v2.517 `portperfshow` 줄바꿈과 같은 계열).
+ *   v2.525·v2.529 가 CSV 를 1순위로 두고, v2.526 이 평문을 1순위로 두고 **셋 다 실패**한 이유가
+ *   이것이다 — 순서는 원인이 아니었다.
+ *
+ * ⚠ 장비가 요청 폭을 무시할 수 있으므로 이것만 믿지 않는다 — `cliSsh.parseCsv` 가 **줄이 따옴표
+ *   안에서 끊겼는지**(접힘의 흔적)를 보고 CSV 를 통째로 거부한다(이중 방어).
+ * `rows` 를 크게 두는 것은 페이저가 덜 뜨게 하려는 것이고, 페이저 자동 응답은 그대로 둔다.
+ */
+const WIDE_PTY = Object.freeze({
+  rows: Math.max(24, Number(process.env.SSH_PTY_ROWS) || 200),
+  cols: Math.max(80, Number(process.env.SSH_PTY_COLS) || 1000),
+  width: 0,
+  height: 0,
+  term: 'vt100',
+});
+
+/**
  * 대화형 프롬프트 자동 응답 규칙(v2.526 — v2.522 의 페이저 전용 경로를 일반화).
  *
  * 왜 일반화했나: Dell Unity 의 `uemcli` 는 **자체서명 인증서 수락 프롬프트**에서 멈춘다
@@ -239,7 +265,7 @@ function execAnswered(conn, command, {
   const active = rules.map((k) => [k, PROMPT_RULES[k]]).filter(([, r]) => r);
   const clean = (t) => String(t).replace(ANSI_RE, '').replace(/\r/g, '').replace(PAGER_STRIP, '');
   return new Promise((resolve, reject) => {
-    conn.exec(command, { pty }, (err, stream) => {
+    conn.exec(command, { pty: pty === true ? WIDE_PTY : pty }, (err, stream) => {
       if (err) return reject(err);
       let stdout = ''; let stderr = ''; let done = false; let bytes = 0; let total = 0; let truncated = false;
       const answers = {};
