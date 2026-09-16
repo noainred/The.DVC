@@ -206,3 +206,51 @@ test('★ 스토리지 수집 기본 주기는 1시간이다(사용자 지시)',
   assert.equal(poll.def, 60 * 60_000);
   assert.ok(poll.min <= poll.def, '하한이 기본값보다 크면 저장이 불가능해진다');
 });
+
+/* ── 8. 화면이 실제로 있는 CSS 클래스만 쓰는가(v2.531.1) ──────────────────
+ *
+ * 왜 소스를 검사하나: 단위 테스트는 **문자열과 판정**만 본다. 없는 클래스를 달아도 아무도 틀렸다고
+ * 말해 주지 않고, 화면은 '스타일이 안 먹은 상태' 로 조용히 나온다 — v2.531 초판이 실제로 그랬다:
+ *   ① `className="kpi"` — `styles.css` 에 `.kpi` **단독 박스 규칙이 없다**(자식 규칙뿐). 포탈의
+ *      다른 26곳은 전부 `card kpi` 다. 그래서 핵심 수치 7개가 **배경·테두리 없이 맨 텍스트**로 나왔다.
+ *   ② `className="rpt-table"` — 그런 규칙 자체가 없다(있는 것은 `.rpt-wrap`). 죽은 클래스였다.
+ * 둘 다 **브라우저로 봐야** 보이는 종류이고, 실제로 스크린샷 판독에서 잡혔다.
+ */
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const WEB = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'web', 'src');
+const readWeb = (p) => fs.readFileSync(path.join(WEB, p), 'utf8');
+/**
+ * 주석을 걷어낸 소스. ⚠ **이것 없이 원문을 검사하면 주석이 코드로 읽힌다** — 이 테스트의 첫 판이
+ * 정확히 그랬다: 결함을 설명하려고 주석에 적어 둔 `className="kpi"`·`rpt-wrap` 을 실제 사용으로
+ * 보고 방금 고친 코드를 '아직 결함' 이라 보고했다(테스트가 틀린 것을 본 것이다).
+ * `//` 는 줄 앞 공백 뒤에 있을 때만 주석으로 본다 — `https://` 를 자르지 않기 위해서다.
+ */
+const codeOf = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+
+test('★ 핵심 수치 타일은 `card kpi` 다 — `kpi` 단독은 박스가 통째로 안 걸린다', () => {
+  const src = codeOf(readWeb('views/tools/StorageGrowthTool.jsx'));
+  assert.match(src, /className="card kpi"/, 'ReportKpi 가 card 를 잃으면 KPI 가 맨 텍스트가 된다');
+  const bare = [...src.matchAll(/className="kpi"/g)];
+  assert.equal(bare.length, 0, '`className="kpi"` 단독은 쓰지 않는다');
+});
+
+test('★ 화면이 쓰는 CSS 클래스는 전부 styles.css 에 실제로 존재한다', () => {
+  const css = readWeb('styles.css');
+  const src = readWeb('views/tools/StorageGrowthTool.jsx');
+  // 정적 문자열 className 만 본다(템플릿 리터럴은 값이 런타임에 정해져 여기서 판정할 수 없다).
+  const used = new Set();
+  for (const m of src.matchAll(/className="([^"{}]+)"/g)) {
+    for (const t of m[1].trim().split(/\s+/)) if (t) used.add(t);
+  }
+  assert.ok(used.size > 0, '클래스를 하나도 못 읽었다면 이 테스트가 무의미해진 것이다');
+  const missing = [...used].filter((t) => !new RegExp(`\\.${t.replace(/[-]/g, '\\-')}(?![\\w-])`).test(css));
+  assert.deepEqual(missing, [], `styles.css 에 없는 클래스: ${missing.join(', ')} — 규칙이 하나도 안 걸린다`);
+});
+
+test('숫자 칸을 `rpt-wrap` 으로 풀지 않는다(v2.525 — 단어 중간에서 쪼개진다)', () => {
+  const src = codeOf(readWeb('views/tools/StorageGrowthTool.jsx'));
+  assert.ok(!/rpt-wrap/.test(src), '이 표는 전역 nowrap 이 맞다');
+});
