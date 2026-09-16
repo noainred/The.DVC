@@ -76,6 +76,12 @@ export const SECRET_FILES = [
   'central-agent-gpu-guest.json',  // 엣지 배포용 GPU 게스트 설정 사본(계정 포함)
   'mail.json',                     // 포탈 공용 메일(SMTP) 계정 비밀번호(v2.454)
   'bm-storage.json',               // 베어메탈 스토리지 SSH 계정 비밀번호(v2.500 감사 M4 — 등록 누락이었다)
+  // v2.538 저장 데이터 감사 — 아래 4개는 비밀을 담는데 **등록·봉인 배선이 없었다**(bm-storage 와 같은 계열의
+  // 재발). 파일에 비밀 필드를 두면 ① load 에 openSecretsDeep ② save 에 sealSecretsDeep ③ 여기 등록 — 셋을 같이.
+  'agent-assignments.json',        // 에이전트 위임 IP 스캔 할당 — iDRAC 계정 비밀번호(central/assignments.js)
+  'guest-scans.json',              // 게스트 로그인 스캔 예약 — 게스트 OS 계정(guestPass)(security/guestScanScheduler.js)
+  'upgrade.json',                  // 자동 업그레이드 원격 소스 토큰(upgrade/settings.js)
+  'packages.json',                 // 패키지 저장소 토큰(upgrade/packageSettings.js)
 ];
 
 /* ── 정책(모드·레벨·알고리즘) ─────────────────────────────────────────────── */

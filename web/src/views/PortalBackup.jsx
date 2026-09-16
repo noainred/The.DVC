@@ -28,7 +28,7 @@ export default function PortalBackup() {
   };
   const backupNow = async () => {
     setBusy('now'); setMsg(null);
-    try { const r = await postJson('/admin/backup/now', {}); setMsg(`백업 완료: ${r.name} (${fmtBytes(r.size)}, 중앙 ${r.centralFiles}개 · 엣지 ${r.edges}개)`); await load(); }
+    try { const r = await postJson('/admin/backup/now', {}); setMsg(`백업 완료: ${r.name} (${fmtBytes(r.size)}, 중앙 ${r.centralFiles}개 · 엣지 ${r.edges}개${r.redacted ? ` · .env 의 키·토큰 ${r.redacted}개는 번들에서 제외` : ''})`); await load(); }
     catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(''); }
   };
   const download = async (name) => {
@@ -58,7 +58,7 @@ export default function PortalBackup() {
       <div className="section-title" style={{ marginTop: 0 }}>💾 포탈 백업</div>
       <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
         중앙 포탈 + 엣지 포탈(에이전트)의 <b>모든 설정을 통합</b>해 백업합니다(수집 데이터/대용량 DB는 제외).
-        정기 백업과 설정 변경 시 자동 백업을 지원합니다. <b>백업에는 자격증명이 포함</b>되므로 안전하게 보관하세요.
+        정기 백업과 설정 변경 시 자동 백업을 지원합니다. <b>백업에는 자격증명이 포함</b>되므로 안전하게 보관하세요. 단 <code>.env</code> 의 서명 키·봉인 키·토큰(<code>AUTH_SECRET</code>·<code>SECRETS_KEY</code>·<code>*_TOKEN</code>)은 번들에 싣지 않고 복원 시 현재 값을 이어 씁니다(v2.538).
       </p>
 
       {/* 설정 */}

@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // v2.538: 이 파일은 v2.537 까지 봉인 대상 미등록이었다(감사 M4 계열)
 import { parseCsvRows } from '../util/csv.js';
 
 const FILE = path.join(config.configDir, 'agent-assignments.json');
@@ -22,7 +23,7 @@ export function loadAssignments() {
   if (!fs.existsSync(FILE)) return [];
   try {
     const p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-    return Array.isArray(p?.assignments) ? p.assignments : [];
+    return Array.isArray(p?.assignments) ? openSecretsDeep(p.assignments) : [];
   } catch (err) {
     // ⚠ 손상 파일을 조용히 []로 넘기면 다음 save()가 온전했던 원본(=iDRAC 자격증명 전량)을 빈
     // 목록으로 영구히 덮어쓴다 — server/CLAUDE.md '자격증명 파일은 원자적 쓰기 + 로드 손상
@@ -34,7 +35,7 @@ export function loadAssignments() {
 }
 
 function save(list) {
-  atomicWriteFileSync(FILE, JSON.stringify({ assignments: list }, null, 2), { mode: 0o600 });
+  atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep({ assignments: list }), null, 2), { mode: 0o600 });
 }
 
 export function redact(a) {

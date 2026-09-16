@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
-import { collectConfigDir } from '../backup/service.js';
+import { collectConfigDir, REDACTED_META } from '../backup/service.js';
 
 let timer = null;
 let changeTimer = null;
@@ -32,6 +32,10 @@ async function _pushConfigNow() {
   if (!config.agent.centralUrl) return null;
   try {
     const files = collectConfigDir(); // 자기 설정(*.json/*.env), 대용량 데이터 제외
+    // v2.538: .env 의 키·토큰은 collectConfigDir 가 이미 가렸다(util/envRedact.js). 가린 목록 메타는
+    // 파일이 아니므로 중앙에 보내지 않는다(중앙 수신부는 문자열만 받지만 여기서 명시적으로 뺀다).
+    const redactedMeta = files[REDACTED_META]; delete files[REDACTED_META];
+    if (redactedMeta) console.log(`[config-push] .env 키·토큰 ${Object.values(redactedMeta).reduce((n, k) => n + k.length, 0)}개는 중앙에 보내지 않습니다`);
     const res = await resilientFetch(`${config.agent.centralUrl}/api/central/agent-config`, {
       method: 'POST', headers: headers(),
       body: JSON.stringify({ agent: config.agent.name, files }), timeoutMs: 20_000, retries: 2,

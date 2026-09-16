@@ -124,7 +124,11 @@ export function getCentralAuthStats() {
  * 개별 토큰으로 인증하면 req.centralAuth.agent 에 그 엣지 이름이 바인딩되고, 아래 미들웨어가
  * '자기 agent 데이터만' 접근하도록 강제한다(엣지 1대 침해로 전 사이트 자격증명이 새는 것 차단).
  */
-function resolveCentralAuth(req) {
+/**
+ * v2.538: export 한다 — index.js 의 BIG_JSON 게이트가 **본문을 파싱하기 전에** 이 함수로 토큰을 본다.
+ * 순수(부작용 없음): 토큰 파일 캐시 조회 + 상수시간 비교뿐. sharedStats 갱신은 아래 use() 가 한다.
+ */
+export function resolveCentralAuth(req) {
   const t = req.get('X-Central-Token') || (req.get('Authorization') || '').replace(/^Bearer\s+/i, '');
   const bound = resolveAgentByToken(t);
   if (bound) return { ok: true, mode: 'agent', agent: bound };
