@@ -606,3 +606,45 @@ medium 1 · low 3 이고 전부 고쳤다. 회귀 테스트: `test/secAudit2535.
   을 답하는 넓은 규칙이다 — 실장비에서 프롬프트와 데이터가 같은 줄에 붙어 와서 좁힐 수 없었다
   (v2.526). 조회(show) 명령에만 붙고 `1` 은 '이 세션만 허용' 이라 오답 피해가 없다. **파괴적 명령에
   이 규칙을 붙이지 말 것.**
+
+## 2026-09-16 저장 파일·저장 데이터·외부 공격면 감사 조치(v2.538) — 되돌리지 말 것 (docs/AUDIT-2026-09-16d.md)
+
+4차 감사. 목 서버를 인증 켠 채 띄워 **무인증으로 실제로 찔렀다**(경로 탈출·API 열거·브루트포스·
+XFF 우회·대용량 본문). 경로 탈출·열거·잠금·헤더는 전부 막혀 있었고, medium 2 · low 2 를 고쳤다.
+회귀 테스트 `test/atRest2538.test.js`(8건 — 순수 + 실제 파일 왕복 + **실제 서버 기동**).
+
+- ⚠⚠ **대용량 JSON 파서는 인증된 요청에만 태운다**(medium — `util/bigJsonGate.js`, `index.js`):
+  `app.use('/api/central/x', express.json({limit:'16mb'}))` 는 라우터의 토큰 검사보다 **먼저** 돈다.
+  실측(목 서버): 무토큰 15MB 1건에 RSS 171→225MB, 6건 동시 409MB, 응답은 그 뒤에야 403 —
+  인증 없이 프로세스 메모리를 밀어 올리는 경로였다. `bigJsonGate` 가 **파싱 전에** 토큰/세션 유효성만
+  보고(부작용 없는 조회), 없으면 next() 로 넘긴다 → 전역 1MB 파서가 Content-Length 만 보고 413.
+  · **이 게이트는 권한 판정이 아니다** — 인증·인가는 여전히 각 라우터가 한다. 게이트는 '파싱 허가'
+    다. 두 판정이 어긋나도 안전한 쪽(파싱 생략)으로 실패한다.
+  · 마운트 줄(`app.use('/api/central/…', BIG_JSON)`)은 **그대로 둔다** — v2.517·v2.520 테스트가 그 줄을
+    고정하고, 새 push 경로를 만들 때 "BIG_JSON 에 등록" 규칙도 그대로다. 등록만 하면 게이트가 덮는다.
+  · 마운트 안에서는 `req.path` 가 `/` 라 `req.baseUrl + req.path` 로 본다(초판이 이걸로 틀릴 뻔했다).
+  · 실증 기준: **무토큰 3MB → 413, 유효 토큰 3MB → 413 아님** — 테스트가 실제 서버를 띄워 본다.
+- **비밀 필드를 가진 파일은 ① load 에 `openSecretsDeep` ② save 에 `sealSecretsDeep` ③ `SECRET_FILES`
+  등록 — 셋을 같이**(medium/low): `agent-assignments.json`(위임 스캔 iDRAC 비밀번호)·`guest-scans.json`
+  (게스트 계정)·`upgrade.json`·`packages.json`(토큰)이 v2.537 까지 **셋 다 없었다**. v2.500 M4
+  (bm-storage)와 같은 계열의 재발이다. 파일에 `password|token|guestPass|…` 를 새로 쓰면 이 세 줄부터.
+  `configDir` JSON 전수표(감사 보고서)에서 `pwRefs>0 && seal=0` 인 파일이 곧 후보다.
+- **백업 번들·엣지 설정 push 는 `.env` 의 키·토큰을 싣지 않는다**(medium — `util/envRedact.js`,
+  `backup/service.js collectConfigDir`, `central/agentConfig.js setAgentConfig`): 운영 CONFIG_DIR
+  (`/etc/vmware-portal`)의 `portal.env` 에는 `AUTH_SECRET`(세션 서명 — 관리자 토큰 위조)·`SECRETS_KEY`
+  (봉인 키 — 번들 안 암호문을 전부 연다)·`CENTRAL_TOKEN` 이 있고, 엣지들도 자기 `portal.env` 를
+  중앙에 push 한다(`agent/configPush.js` 가 `.env` 를 포함). 즉 **번들 하나 = 전체 탈취**였다.
+  · 가리는 것은 키 이름이 `SECRET|TOKEN|PASSWORD|PASSWD|PASSPHRASE|PRIVATE_KEY|API_KEY|_KEY` 로
+    끝나는 값뿐. JSON 안의 장비 비밀번호는 **그대로**(번들의 존재 이유 = 복원. 다운로드는 소유자
+    게이트 + '자격증명 포함' 감사 기록). 키·토큰은 설치기가 재생성하는 값이라 뺄 수 있다.
+  · **줄을 지우지 않고 표식(`REDACTED`)으로 남긴다** — 복원 시 현재 파일의 같은 키 값을 이어 붙인다.
+    현재 파일에 없으면 그 줄을 **버린다**(빈 값으로 덮어써 AUTH_SECRET 을 지우면 전 세션 무효).
+  · 가린 개수·키 목록을 번들(`central.redacted`)·응답(`redacted`)·화면(백업 완료 문구)이 말한다.
+    조용히 빼면 복원 뒤 '왜 키가 사라졌나' 를 모른다.
+  · **수신(중앙)에서도 가린다** — 구버전 엣지는 가리지 않고 보낸다. 한쪽만 하면 업그레이드 순서에
+    구멍이 생긴다.
+- `app.disable('x-powered-by')`(low) — 프레임워크 지문. 실서버 테스트가 헤더 부재를 고정한다.
+- **정보(고치지 않음)**: `secrets-policy` 기본은 `plain`(하위호환 — 자가진단이 warn 으로 표시한다) ·
+  CSP 는 `CSP` env 로만 · 세션 토큰은 localStorage(XSS 시 탈취 — CSP 없이는 완화가 없다) ·
+  `/api/auth/config` 가 setup 미완료 동안 초기 비밀번호 **파일 경로**를 무인증 응답에 싣는다(값이
+  아니라 경로. 로그인 화면 안내용 — 코드 주석이 근거를 적고 있다). WS 토큰은 쿼리스트링(프록시 로그).

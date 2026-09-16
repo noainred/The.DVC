@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // v2.538: 이 파일은 v2.537 까지 봉인 대상 미등록이었다(감사 M4 계열)
 
 const FILE = path.join(config.configDir, 'packages.json');
 
@@ -16,7 +17,7 @@ let cache = null;
 function load() {
   if (cache) return cache;
   cache = {};
-  try { if (fs.existsSync(FILE)) cache = JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}; } catch { cache = {}; }
+  try { if (fs.existsSync(FILE)) cache = openSecretsDeep(JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}); } catch { cache = {}; }
   return cache;
 }
 
@@ -41,7 +42,7 @@ export function savePackageSettings(body = {}) {
   if (body.baseUrl !== undefined) next.baseUrl = String(body.baseUrl || '').trim();
   if (body.dir !== undefined) next.dir = String(body.dir || '').trim();
   if (body.token !== undefined && body.token !== '********') next.token = String(body.token || '');
-  atomicWriteFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
+  atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep(next), null, 2), { mode: 0o600 }); // sealSecretsDeep 는 복제본을 봉인한다 — 메모리(cache)는 평문 유지
   cache = next;
   return getPackageSettings();
 }

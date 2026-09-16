@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { redactEnvSecrets } from '../util/envRedact.js'; // v2.538
 
 const FILE = path.join(config.configDir, 'central-agent-config.json');
 
@@ -31,7 +32,13 @@ function persistSoon() {
 /** 에이전트가 자기 설정을 push. files: { name: content(utf8) }. */
 export function setAgentConfig(agent, files) {
   if (!agent || !files || typeof files !== 'object') return;
-  byAgent[agent] = { at: Date.now(), files };
+  // v2.538: 엣지가 보낸 .env 의 키·토큰은 중앙에 저장하지 않는다 — 새 엣지는 push 전에 가리지만
+  // 구버전 엣지는 그대로 보내므로 수신 쪽에서도 가린다(둘 중 하나만 있으면 업그레이드 순서에 구멍이 생긴다).
+  const cleaned = {};
+  for (const [k, v] of Object.entries(files)) {
+    cleaned[k] = (typeof v === 'string' && /\.env$/i.test(String(k))) ? redactEnvSecrets(v).text : v;
+  }
+  byAgent[agent] = { at: Date.now(), files: cleaned };
   persistSoon();
 }
 

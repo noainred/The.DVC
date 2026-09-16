@@ -1,6 +1,18 @@
 {
   "notes": [
     {
+      "version": "2.538.0",
+      "date": "2026-09-16",
+      "title": "보안 — 인증 전 대용량 본문 파싱 차단 · 비밀 파일 4종 봉인 · 백업 번들에서 키·토큰 제거 · 저장 데이터·공격면 감사",
+      "notes": [
+        "무토큰 요청도 16MB JSON 을 파싱하던 중앙/svcmon 경로를 bigJsonGate 로 막는다(실측 무토큰 15MB ×6 → RSS +238MB). 이제 토큰/세션이 있을 때만 큰 파서를 태우고, 없으면 1MB 한도에서 Content-Length 만 보고 413",
+        "agent-assignments·guest-scans·upgrade·packages 4개 파일이 비밀을 담는데 봉인 대상에 없었다 — load/save 배선 + SECRET_FILES 등록(bm-storage 와 같은 계열)",
+        "백업 번들·엣지 설정 push 가 portal.env 의 AUTH_SECRET/SECRETS_KEY/토큰을 그대로 실었다 — 키·토큰 값만 가리고 복원 시 현재 값으로 이어 붙인다. 가린 개수를 화면이 말한다",
+        "X-Powered-By 헤더 제거",
+        "실공격 프로브(경로 탈출·무인증 열거·브루트포스·XFF 우회·대용량 본문)는 전부 막혀 있음 확인. 보고서 docs/AUDIT-2026-09-16d.md"
+      ]
+    },
+    {
       "version": "2.537.0",
       "date": "2026-09-16",
       "title": "보안 — DNS 리바인딩 훅 누락 dispatcher 9개 배선 · iDRAC/NSX 등록 SSRF 가드 · 외부 입력→장비 접속 경로 전수 감사",

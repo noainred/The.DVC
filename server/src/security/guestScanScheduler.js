@@ -17,6 +17,7 @@ import { recordLoginFails } from './loginStore.js';
 import { recordNetScan } from './netIssueStore.js';
 import { notify } from '../alerts.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // v2.538: 이 파일은 v2.537 까지 봉인 대상 미등록이었다(감사 M4 계열)
 
 const FILE = path.join(config.configDir, 'guest-scans.json');
 
@@ -41,14 +42,14 @@ function load() {
     if (fs.existsSync(FILE)) {
       const p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
       if (!Array.isArray(p)) throw new Error('배열이 아님'); // 형식 불일치도 손상으로 취급
-      cache = p;
+      cache = openSecretsDeep(p);
     }
   } catch (e) { cache = []; backupCorrupt(e); }
   return cache;
 }
 // 원자적 쓰기(0600) — runJob이 매 실행마다 lastRun/lastErr을 저장하므로 쓰기 빈도가 높고,
 // 그중 한 번이라도 부분기록으로 끊기면 load가 []가 되어 자격증명 포함 작업 정의가 사라진다.
-function persist() { try { atomicWriteFileSync(FILE, JSON.stringify(cache, null, 2), { mode: 0o600 }); } catch { /* */ } }
+function persist() { try { atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep(cache), null, 2), { mode: 0o600 }); } catch { /* */ } }
 
 const redact = (j) => ({ id: j.id, name: j.name, type: j.type, vcenterId: j.vcenterId, os: j.os, intervalMin: j.intervalMin, days: j.days, maxVms: j.maxVms, enabled: j.enabled, lastRun: j.lastRun || null, lastFound: j.lastFound ?? null, lastErr: j.lastErr || '' });
 export function listGuestScans() { return load().map(redact); }

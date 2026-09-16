@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // v2.538: 이 파일은 v2.537 까지 봉인 대상 미등록이었다(감사 M4 계열)
 
 // Persisted in CONFIG_DIR (default app/server/config; set to e.g.
 // /etc/vmware-portal to survive upgrades).
@@ -19,7 +20,7 @@ const FIELDS = ['enabled', 'watchDir', 'installDir', 'packageName', 'remoteBase'
 
 function readFile() {
   if (!fs.existsSync(FILE)) return {};
-  try { return JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}; } catch { return {}; }
+  try { return openSecretsDeep(JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}); } catch { return {}; }
 }
 
 /** Effective settings = env defaults overlaid with persisted overrides. */
@@ -48,7 +49,7 @@ export function saveSettings(partial) {
     }
   }
   if (Array.isArray(partial.edges)) next.edges = partial.edges;
-  atomicWriteFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
+  atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep(next), null, 2), { mode: 0o600 });
   return loadSettings();
 }
 

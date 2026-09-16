@@ -26,7 +26,9 @@ import { routeKeyOf } from './perf/stats.js';
 import { store } from './store.js';
 import { api } from './routes/api.js';
 import { authRouter } from './routes/auth.js';
-import { authMiddleware, requireEnrolled, requirePerm, warnIfNoOtpAdmin } from './auth/auth.js';
+import { authMiddleware, requireEnrolled, requirePerm, warnIfNoOtpAdmin, resolveTokenUser } from './auth/auth.js';
+import { bigJsonGate } from './util/bigJsonGate.js';        // v2.538: 인증 전 대용량 본문 파싱 차단
+import { resolveCentralAuth } from './routes/central.js';   // v2.538: 게이트가 토큰만 먼저 본다
 import { pruneMockInventory } from './central/inventory.js';
 import { auditMiddleware } from './audit.js';
 import { upgradeRouter } from './routes/upgrade.js';
@@ -115,6 +117,7 @@ import { startStoragePush } from './storage/push.js';            // 엣지→중
 import { startStorageConfigPull } from './agent/storageConfigPull.js'; // 중앙→엣지 장비 배포 pull(v2.302)
 
 const app = express();
+app.disable('x-powered-by'); // v2.538: 'X-Powered-By: Express' 는 정보 노출(프레임워크 지문)일 뿐이다
 
 // 보안 응답 헤더(helmet 무의존 최소 세트) — 클릭재킹·MIME 스니핑·레퍼러 유출·전송보안.
 // CSP는 인라인 스타일/intro 페이지 호환 이슈로 기본 비활성(CSP env로 옵트인 지정 가능).
@@ -199,7 +202,17 @@ app.use((req, res, next) => {
 // 그 외 모든 라우트는 기본 1mb로 제한해 메모리/요청 남용 면적을 줄인다.
 // 한도 16mb: 실제 사이트 push는 수백 KB~수 MB 수준 — 64mb는 동기 JSON.parse가 최악 수 초
 // 이벤트 루프를 막는 것을 허용하는 과대 한도였다(필요 시 JSON_BODY_LIMIT로 상향 가능).
-const BIG_JSON = express.json({ limit: process.env.JSON_BODY_LIMIT || '16mb' });
+// ⚠ v2.538(저장 데이터·외부 공격면 감사): 예전에는 아래 마운트들이 **토큰 검사보다 먼저** 16MB 를
+// 통째로 읽어 JSON.parse 했다 — 토큰 없는 요청도 마찬가지였다. 실측(목 서버): 무토큰 15MB 1건에
+// RSS 171→225MB, 6건 동시 409MB, 응답은 그 뒤에야 403. 인증 없이 프로세스 메모리를 밀어 올리는
+// 경로다. 이제 `bigJsonGate` 가 **요청이 이미 유효한 토큰/세션을 들고 있을 때만** 큰 파서를 태우고,
+// 아니면 next() 로 넘긴다 — 그러면 전역 1MB 파서가 Content-Length 만 보고 413 으로 끊거나(본문을
+// 읽지 않는다) 라우터 인증이 401/403 을 낸다. 인증은 여전히 각 라우터가 한다(이 게이트는 '파싱 허가'
+// 일 뿐 권한 판정이 아니다). 마운트 목록은 그대로 두었다(v2.517·v2.520 테스트가 이 줄들을 고정한다).
+const BIG_JSON = bigJsonGate(express.json({ limit: process.env.JSON_BODY_LIMIT || '16mb' }), {
+  central: (req) => resolveCentralAuth(req).ok,
+  session: (req) => Boolean(resolveTokenUser((req.get('Authorization') || '').replace(/^Bearer\s+/i, ''))),
+});
 app.use('/api/central/inventory', BIG_JSON);
 app.use('/api/central/guest-disk', BIG_JSON); // 게스트 디스크 push(v2.466) — inventory 와 동종(그 vCenter 전 VM+파티션). 1mb 기본이면 대형 site vCenter 가 413 으로 조용히 실패
 app.use('/api/central/vmseries', BIG_JSON);   // 실시간 스파이크 push(v2.510) — 엣지가 700KB 청크로 보내지만 base64 BLOB 이라 1mb 기본을 넘을 수 있다(413 = 조용한 소실)
