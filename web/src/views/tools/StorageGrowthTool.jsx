@@ -7,8 +7,7 @@ import BoldText from '../../components/boldText.jsx';
 import {
   GROWTH_UNITS, bytesAuto, bytesIn, growthCell, totalCell,
   fullEtaText, headline, missingNote, heat, maxAbsFor,
-  growthPct, growthPctText, aggregateGrowth,
-} from './storageGrowthText.js';
+  growthPct, growthPctText, aggregateGrowth, historyResetNote } from './storageGrowthText.js';
 import { facetState, toggleIn, groupBy } from './deviceFacets.js';
 import DeviceFacetBar from './DeviceFacetBar.jsx';
 
@@ -409,6 +408,7 @@ function GroupRow({ g, cols, unit }) {
 }
 
 function DeviceRow({ dev, cols, unit, maxAbs, onOpen }) {
+  const resetNote = historyResetNote(dev.historyReset);
   const eta = fullEtaText(dev.daysToFull);
   return (
     <tr>
@@ -448,6 +448,9 @@ function DeviceRow({ dev, cols, unit, maxAbs, onOpen }) {
           title={`첫 관측 ${dev.firstLabel || '—'} · 최근 ${dev.latestLabel || '—'}${dev.gapDays ? ` · 수집이 없던 날 ${dev.gapDays}일` : ''}`}>
           {dev.observedDays}일{dev.gapDays ? <span style={{ color: 'var(--amber)' }} title={`${dev.gapDays}일은 수집 기록이 없습니다`}> +{dev.gapDays}결측</span> : null}
         </span>
+        {/* v2.534: 측정 기준이 바뀌어 이력을 재시작한 장비 — 말하지 않으면 '관측 1일' 을
+            수집 장애로 오해한다(조용한 삭제 금지). */}
+        {resetNote && <div><span className="badge amber" style={{ fontSize: 10 }} title={resetNote.title}>{resetNote.badge}</span></div>}
       </td>
     </tr>
   );

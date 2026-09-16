@@ -10,7 +10,7 @@ import { loadPowerSettings, savePowerSettings } from '../../idrac/powerSettings.
 import { getInventory as getIdracInventory } from '../../idrac/invCache.js';
 import { getSensorSeries } from '../../idrac/sensorStore.js';
 import { roomTempReport } from '../../idrac/roomTemp.js';
-import { roomTempHistory } from '../../idrac/roomTempSeries.js';
+import { roomTempHistory, roomTempSparks } from '../../idrac/roomTempSeries.js';
 import { getMetricsDb } from '../../metrics/db.js';
 import { hardwareDimMatch } from '../../idrac/hwMatch.js';
 import { partBuckets, serversWithPart, isPartCat } from '../../idrac/partsInventory.js';
@@ -45,6 +45,23 @@ adminRouter.get('/room-temp/history', adminOnly, async (req, res) => {
       kind: String(req.query.kind || 'inlet'),
       group: String(req.query.group || ''),
       range: String(req.query.range || '7d'),
+    }));
+  } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+});
+
+/**
+ * 월보드 타일의 24시간 스파크라인(v2.534) — 법인 여러 개를 한 요청으로.
+ * ?kind=inlet|exhaust|cpu · ?hours=1~168 · ?groups=a,b,c(빈 문자열=전체 합계 키)
+ * ⚠ 수집이 없던 시간은 **점을 만들지 않는다**(0 을 넣으면 '급냉' 으로 보인다).
+ */
+adminRouter.get('/room-temp/spark', adminOnly, async (req, res) => {
+  try {
+    const db = await getMetricsDb();
+    const groups = String(req.query.groups || '').split(',').map((x) => x.trim()).filter((x, i, a) => a.indexOf(x) === i);
+    res.json(await roomTempSparks(db, {
+      kind: String(req.query.kind || 'inlet'),
+      hours: Number(req.query.hours) || 24,
+      groups,
     }));
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });

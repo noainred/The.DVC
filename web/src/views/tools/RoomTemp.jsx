@@ -6,6 +6,7 @@ import { Loading, ErrorBox, Modal } from '../../components/ui.jsx';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
 import { Card } from './shared.jsx';
 import { STable } from '../../components/STable.jsx';
+import { SORTS, VIEWS, sortGroups, matrixStats, heat, tileData, boardCounts, sparkPath } from './roomTempView.js'; // v2.534 시안 적용(순수 판정)
 
 const C = (v) => (v == null ? '—' : `${v}℃`);
 
@@ -21,35 +22,6 @@ const STATUS = {
   hot: { label: '위험', color: '#f87171', desc: '32℃ 초과 — 즉시 조치' },
 };
 
-
-/** 정렬 옵션(v2.384) — 알파벳(법인명) · 흡기/배기/CPU 높은순·낮은순. */
-const SORTS = [
-  ['name-asc', '법인명 A→Z'],
-  ['name-desc', '법인명 Z→A'],
-  ['inlet-desc', '흡기 높은순'],
-  ['inlet-asc', '흡기 낮은순'],
-  ['exhaust-desc', '배기 높은순'],
-  ['exhaust-asc', '배기 낮은순'],
-  ['cpu-desc', 'CPU 높은순'],
-  ['cpu-asc', 'CPU 낮은순'],
-];
-/**
- * 정렬 적용 — 온도 정렬은 그 종류의 **최고값** 기준이고, 값이 없는 법인(null)은 방향과
- * 무관하게 항상 뒤로 보낸다(데이터 없는 카드가 위로 올라와 실제 현황을 가리지 않게).
- */
-function sortGroups(groups, sort) {
-  const [key, dir] = String(sort || 'inlet-desc').split('-');
-  const sign = dir === 'asc' ? 1 : -1;
-  const arr = [...(groups || [])];
-  if (key === 'name') return arr.sort((a, b) => String(a.name).localeCompare(String(b.name)) * sign);
-  return arr.sort((a, b) => {
-    const x = a[key]?.max; const y = b[key]?.max;
-    if (x == null && y == null) return String(a.name).localeCompare(String(b.name));
-    if (x == null) return 1;
-    if (y == null) return -1;
-    return (x - y) * sign || String(a.name).localeCompare(String(b.name));
-  });
-}
 
 /**
  * 버킷 크기 표기(v2.387) — 이전 인라인 식은 30분 버킷에서 Math.round(0.5)=1 이 truthy 가 되어
@@ -161,112 +133,369 @@ function RangeBar({ min, max, avg, color = '#4ade80', lo = 10, hi = 45 }) {
   );
 }
 
-/** 한 종류(흡기/배기/CPU)의 범위 표시 블록. */
-function Metric({ label, agg, color, unitNote, onTrend }) {
+
+/* ══════════════════════════════════════════════════════════════════════════════
+ * 시안 적용(v2.534) — 클로드 디자인 캔버스 '온도 시각화 10안' 의 적용안 `2a`.
+ * 보기 전환(범위 플롯 / 매트릭스 / 상황실 월보드)으로 세 시각화를 한 페이지에서 쓴다.
+ * 정직성 규칙은 `views/tools/roomTempView.js` 머리말 참조(판정은 흡기 최고값만, 배기·CPU 는
+ * 임계 없이 열 내 상대 농도, 확인 못 한 법인을 정상으로 칠하지 않음).
+ * ══════════════════════════════════════════════════════════════════════════════ */
+
+const TONE = { hot: '#f87171', warn: '#fbbf24', ok: '#4ade80', lowok: '#38bdf8', cold: '#60a5fa' };
+const statusColor = (s) => TONE[s] || '#64748b';
+
+/** 상태 배지 — 흡기 데이터가 없으면 '판정 불가'(회색)다. 초록으로 칠하면 거짓이다. */
+function StatusBadge({ status, small }) {
+  const st = status ? STATUS[status] : null;
+  const c = statusColor(status);
   return (
-    <div style={{ flex: 1, minWidth: 150 }}>
-      <div className="flex between" style={{ alignItems: 'baseline' }}>
-        {onTrend
-          ? <button className="cell-link" style={{ fontSize: 11.5, padding: 0 }} title={`${label} 추이 보기(1일~1년)`} onClick={onTrend}>{label} 📈</button>
-          : <span className="muted" style={{ fontSize: 11.5 }}>{label}</span>}
-        <span style={{ fontSize: 12.5, fontVariantNumeric: 'tabular-nums' }}>
-          {agg?.min == null ? <span className="muted">—</span> : <>
-            <b style={{ color }}>{C(agg.min)}</b>
-            <span className="muted"> ~ </span>
-            <b style={{ color }}>{C(agg.max)}</b>
-          </>}
-        </span>
-      </div>
-      <RangeBar min={agg?.min} max={agg?.max} avg={agg?.avg} color={color} />
-      <div className="muted" style={{ fontSize: 11 }}>
-        {agg?.min == null ? (unitNote || '센서 없음')
-          : <>평균 {C(agg.avg)} · 폭 {agg.range}℃ · {agg.servers}대</>}
-      </div>
-    </div>
+    <span className="badge" style={{ background: `${c}22`, color: c, fontSize: small ? 10 : 11, whiteSpace: 'nowrap' }}
+      title={st ? st.desc : '흡기 센서 값을 읽지 못해 판정할 수 없습니다(정상이라는 뜻이 아닙니다)'}>
+      {st ? st.label : '판정 불가'}
+    </span>
   );
 }
 
-/** 법인 카드 — 흡기·배기·CPU 3종 범위 + 상태 + 서버 수. */
-function VcCard({ dc, expanded, onToggle, onTrend }) {
-  const st = dc.status ? STATUS[dc.status] : null;
+/** 클릭 가능한 텍스트 — 표 안에서는 링크 파랑을 쓰지 않는다(v2.527 사용자 신고). */
+function LinkText({ onClick, title, children }) {
   return (
-    <div className="card" style={{ padding: 14, borderColor: st ? `${st.color}55` : undefined }}>
-      <div className="flex between wrap" style={{ alignItems: 'center', marginBottom: 8, gap: 8 }}>
-        <div className="flex gap" style={{ alignItems: 'center', gap: 8 }}>
-          <b style={{ fontSize: 14 }}>🏢 {dc.name}</b>
-          {st && <span className="badge" style={{ background: `${st.color}22`, color: st.color }} title={st.desc}>{st.label}</span>}
-        </div>
-        <span className="muted" style={{ fontSize: 11.5 }}>
-          서버 {dc.hostCount}대
-          {dc.inlet.servers ? ` · 흡기측정 ${dc.inlet.servers}` : ''}
-          {dc.noSensorCount ? ` · 미수집 ${dc.noSensorCount}` : ''}
-          {dc.staleCount ? ` · 미갱신 ${dc.staleCount}` : ''}
-          {dc.remoteCount ? ` · 위임 ${dc.remoteCount}` : ''}
-        </span>
-      </div>
+    <span role="button" tabIndex={0} title={title}
+      style={{ color: 'inherit', cursor: 'pointer', textDecoration: 'underline dotted', textUnderlineOffset: 3 }}
+      onClick={onClick}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick?.(); } }}>
+      {children}
+    </span>
+  );
+}
 
-      <div className="flex gap wrap" style={{ gap: 14 }}>
-        <Metric label="흡기(Inlet)" agg={dc.inlet} color="#60a5fa" unitNote="흡기 센서 없음" onTrend={() => onTrend(dc, 'inlet')} />
-        <Metric label="배기(Exhaust)" agg={dc.exhaust} color="#fb923c" unitNote="배기 센서 없음" onTrend={() => onTrend(dc, 'exhaust')} />
-        <Metric label="CPU" agg={dc.cpu} color="#f87171" unitNote="CPU 센서 없음" onTrend={() => onTrend(dc, 'cpu')} />
-      </div>
+/* ── ① 범위 플롯 ─────────────────────────────────────────────────────────────── */
 
-      <div className="flex between wrap" style={{ alignItems: 'center', marginTop: 8, gap: 8 }}>
-        <span className="muted" style={{ fontSize: 11.5 }}>
-          {dc.deltaAvg != null ? <>배기−흡기 평균 <b style={{ color: 'var(--text)' }}>{dc.deltaAvg}℃</b>{dc.deltaAvg >= 20 ? ' (풍량·부하 점검 권장)' : ''}</> : '흡기·배기 쌍이 있는 서버가 없어 ΔT 미산출'}
-        </span>
-        {dc.hosts.length > 0 && (
-          <button className="tab" style={{ padding: '4px 10px', fontSize: 11.5 }} onClick={() => onToggle(dc.id)}>
-            {expanded ? '서버 접기' : `서버별 보기 (${dc.hosts.length})`}
-          </button>
+/** 한 법인의 흡기 범위 막대 — 한 축(lo~hi)에 전 법인을 그려 눈으로 비교되게 한다. */
+function PlotRow({ g, lo, hi, dtMax, onPick, onHover }) {
+  const a = g.inlet || {};
+  const pct = (v) => Math.max(0, Math.min(100, ((v - lo) / (hi - lo)) * 100));
+  const has = a.min != null && a.max != null;
+  const left = has ? pct(a.min) : 0;
+  const width = has ? Math.max(1.5, pct(a.max) - left) : 0;
+  const dt = g.deltaAvg;
+  return (
+    <tr onMouseEnter={() => onHover(g)} onMouseLeave={() => onHover(null)}>
+      <td style={{ whiteSpace: 'nowrap', maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        <LinkText onClick={() => onPick(g)} title={`${g.name} — 매트릭스에서 서버별로 보기`}>{g.name}</LinkText>
+      </td>
+      <td><StatusBadge status={g.status} small /></td>
+      <td style={{ minWidth: 220 }}>
+        {has ? (
+          <div style={{ position: 'relative', height: 10, background: 'rgba(148,163,184,.15)', borderRadius: 5 }}
+            title={`최저 ${a.min}℃ · 평균 ${a.avg ?? '—'}℃ · 최고 ${a.max}℃ · ${a.servers}대`}>
+            {/* ASHRAE A1 권장 급기 18~27℃ */}
+            <div style={{ position: 'absolute', left: `${pct(18)}%`, width: `${pct(27) - pct(18)}%`, top: 0, bottom: 0, background: 'rgba(74,222,128,.13)', borderLeft: '1px dashed rgba(74,222,128,.45)', borderRight: '1px dashed rgba(74,222,128,.45)' }} />
+            {/* 32℃ 위험선 */}
+            <div style={{ position: 'absolute', left: `${pct(32)}%`, top: -2, bottom: -2, width: 0, borderLeft: '1px dashed rgba(248,113,113,.7)' }} />
+            <div style={{ position: 'absolute', left: `${left}%`, width: `${width}%`, top: 0, bottom: 0, background: statusColor(g.status), borderRadius: 5 }} />
+            {a.avg != null && <div style={{ position: 'absolute', left: `${pct(a.avg)}%`, top: -2, bottom: -2, width: 2, background: '#fff', opacity: 0.9 }} />}
+          </div>
+        ) : <span className="muted" style={{ fontSize: 11.5 }}>흡기 센서 값 없음</span>}
+      </td>
+      <td className="right" style={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+        {has ? <>{a.min}~{a.max}<span className="muted" style={{ fontSize: 10.5 }}>℃</span></> : '—'}
+      </td>
+      <td style={{ minWidth: 90 }}>
+        {dt == null ? <span className="muted">—</span> : (
+          <div style={{ position: 'relative', height: 8, background: 'rgba(148,163,184,.15)', borderRadius: 4 }}
+            title={`배기−흡기 평균 ${dt}℃${dt >= 20 ? ' — 풍량·부하 점검 권장' : ''}`}>
+            <div style={{ position: 'absolute', left: 0, width: `${Math.max(2, Math.min(100, (dt / dtMax) * 100))}%`, top: 0, bottom: 0, background: '#fb923c', borderRadius: 4 }} />
+          </div>
         )}
-      </div>
+      </td>
+      <td className="right" style={{ whiteSpace: 'nowrap' }}>{dt == null ? '—' : `${dt}℃`}</td>
+      <td className="right" style={{ whiteSpace: 'nowrap' }}>{C(g.exhaust?.max)}</td>
+      <td className="right" style={{ whiteSpace: 'nowrap' }}>{C(g.cpu?.max)}</td>
+    </tr>
+  );
+}
 
-      {expanded && dc.hosts.length > 0 && (
-        <div className="table-wrap" style={{ marginTop: 8, maxHeight: 260 }}>
-          <STable>
-            <thead><tr>
-              <th>서버</th><th style={{ textAlign: 'right' }}>흡기</th><th style={{ textAlign: 'right' }}>배기</th>
-              <th style={{ textAlign: 'right' }}>CPU</th><th style={{ textAlign: 'right' }}>ΔT</th>
-            </tr></thead>
-            <tbody>
-              {dc.hosts.map((s) => (
-                <tr key={s.id}>
-                  <td><b style={{ fontSize: 12.5 }}>{s.name}</b><div className="muted" style={{ fontSize: 11 }}>{s.serviceTag}{s.remote ? ' · 위임 수집' : ''}</div></td>
-                  <td style={{ textAlign: 'right', color: s.inlet != null && s.inlet > 27 ? 'var(--amber)' : undefined }}>{C(s.inlet)}</td>
-                  <td style={{ textAlign: 'right' }}>{C(s.exhaust)}</td>
-                  <td style={{ textAlign: 'right' }}>{C(s.cpu)}</td>
-                  <td style={{ textAlign: 'right' }} className="muted">{s.deltaT == null ? '—' : `${s.deltaT}℃`}</td>
-                </tr>
-              ))}
-            </tbody>
-          </STable>
-        </div>
-      )}
+function RangePlot({ groups, onPick }) {
+  const [hover, setHover] = React.useState(null);
+  // 한 축을 쓰므로 스케일은 **전 법인 공통**이다 — 법인마다 다르면 막대 길이를 비교할 수 없다.
+  const vals = groups.flatMap((g) => [g.inlet?.min, g.inlet?.max]).filter((v) => v != null);
+  const lo = vals.length ? Math.min(12, Math.floor(Math.min(...vals) - 1)) : 12;
+  const hi = vals.length ? Math.max(35, Math.ceil(Math.max(...vals) + 1)) : 35;
+  const dtMax = Math.max(20, ...groups.map((g) => g.deltaAvg ?? 0));
+  return (
+    <div className="card" style={{ padding: 12 }}>
+      <div className="flex between wrap" style={{ alignItems: 'baseline', marginBottom: 6, gap: 8 }}>
+        <b style={{ fontSize: 13 }}>흡기 범위 — 법인 {groups.length}곳 한 축</b>
+        <span className="muted" style={{ fontSize: 11.5 }}>막대 = 최저~최고 · 흰 선 = 평균 · 초록 띠 = 권장 18~27℃ · 빨간 점선 = 32℃ · ΔT 막대는 0~{dtMax}℃</span>
+      </div>
+      <div className="table-wrap">
+        <STable>
+          <thead><tr>
+            <th>법인</th><th>상태</th><th data-nosort>흡기 범위</th><th className="right">최저~최고</th>
+            <th data-nosort>ΔT</th><th className="right">ΔT 평균</th><th className="right">배기 최고</th><th className="right">CPU 최고</th>
+          </tr></thead>
+          <tbody>
+            {groups.map((g) => <PlotRow key={g.id || '_none'} g={g} lo={lo} hi={hi} dtMax={dtMax} onPick={onPick} onHover={setHover} />)}
+          </tbody>
+        </STable>
+      </div>
+      <div className="muted" style={{ fontSize: 11.5, marginTop: 6, minHeight: 20, lineHeight: 1.6 }}>
+        {hover ? (
+          <>
+            <b style={{ color: 'var(--text)' }}>{hover.name}</b> · 흡기측정 {hover.inlet?.servers ?? 0}대
+            {hover.exhaust?.min != null ? ` · 배기 ${hover.exhaust.min}~${hover.exhaust.max}℃` : ' · 배기 센서 없음'}
+            {hover.cpu?.min != null ? ` · CPU ${hover.cpu.min}~${hover.cpu.max}℃` : ' · CPU 센서 없음'}
+            {hover.noSensorCount ? ` · 미수집 ${hover.noSensorCount}대` : ''}
+            {hover.staleCount ? ` · 미갱신 ${hover.staleCount}대` : ''}
+          </>
+        ) : '행에 마우스를 올리면 배기·CPU 범위와 서버 수를 여기에 표시합니다.'}
+      </div>
     </div>
   );
 }
+
+/* ── ② 매트릭스 ─────────────────────────────────────────────────────────────── */
+
+/** 열 내 상대 농도 셀. ⚠ 임계가 아니라 **비교** 다 — 색이 진하다고 이상이라는 뜻이 아니다. */
+function HeatCell({ v, stats }) {
+  const t = heat(v, stats);
+  return (
+    <td className="right" data-sort={String(v ?? '')}
+      style={{ whiteSpace: 'nowrap', background: t == null ? undefined : `rgba(251,146,60,${(0.06 + t * 0.34).toFixed(3)})` }}>
+      {C(v)}
+    </td>
+  );
+}
+
+function MatrixRow({ g, stats, expanded, onToggle, onTrend }) {
+  const inlet = g.inlet || {};
+  const cell = (v) => (
+    <td className="right" data-sort={String(v ?? '')} style={{ whiteSpace: 'nowrap', color: v == null ? undefined : statusColor(inletToneOf(v)) }}>{C(v)}</td>
+  );
+  return (
+    <>
+      <tr>
+        <td style={{ whiteSpace: 'nowrap', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis' }} title={g.name}>
+          <LinkText onClick={() => onToggle(g.id)} title={`${g.name} — 흡기 높은 서버 펼치기`}>{g.name}</LinkText>
+        </td>
+        <td><StatusBadge status={g.status} small /></td>
+        <td className="right">{inlet.servers ?? 0}</td>
+        {cell(inlet.min)}{cell(inlet.avg)}{cell(inlet.max)}
+        <HeatCell v={g.exhaust?.avg} stats={stats.get('exAvg')} />
+        <HeatCell v={g.exhaust?.max} stats={stats.get('exMax')} />
+        <HeatCell v={g.cpu?.avg} stats={stats.get('cpuAvg')} />
+        <HeatCell v={g.cpu?.max} stats={stats.get('cpuMax')} />
+        <HeatCell v={g.deltaAvg} stats={stats.get('dt')} />
+        <td className="right" data-sort={String((g.noSensorCount || 0) + (g.staleCount || 0))}>
+          {(g.noSensorCount || 0) + (g.staleCount || 0) || <span className="muted">—</span>}
+        </td>
+      </tr>
+      {expanded && (
+        <tr>
+          <td colSpan={12} style={{ background: 'rgba(148,163,184,.05)' }}>
+            <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 6, gap: 8 }}>
+              <b style={{ fontSize: 12 }}>흡기 높은 서버 {Math.min(6, g.hosts?.length || 0)}대</b>
+              {(g.hosts?.length || 0) > 6 && <span className="muted" style={{ fontSize: 11 }}>(전체 {g.hosts.length}대 중 상위 6대만)</span>}
+              <span style={{ flex: 1 }} />
+              {Object.keys(KIND_LABEL).map((x) => (
+                <button key={x} className="tab" style={{ padding: '3px 9px', fontSize: 11 }} onClick={() => onTrend(g, x)}>{KIND_LABEL[x]} 추이 📈</button>
+              ))}
+            </div>
+            {/* ⚠ maxHeight 는 상한(6대)이 **전부 보이는** 높이여야 한다 — 240px 에서는 6번째 행이
+                잘려 '6대' 라고 해 놓고 5행만 보였다(v2.534 스크린샷 판독에서 발견한 결함). */}
+            {(g.hosts || []).length === 0 ? (
+              <div className="muted" style={{ fontSize: 12 }}>이 법인에서 온도를 읽은 서버가 없습니다.</div>
+            ) : (
+              <div className="table-wrap" style={{ maxHeight: 320 }}>
+                <STable>
+                  <thead><tr>
+                    <th>서버</th><th>서비스태그</th><th className="right">흡기</th><th className="right">배기</th><th className="right">CPU</th><th className="right">ΔT</th>
+                  </tr></thead>
+                  <tbody>
+                    {g.hosts.slice(0, 6).map((h) => (
+                      <tr key={h.id}>
+                        <td style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={h.name}>{h.name}</td>
+                        <td className="muted" style={{ fontSize: 11.5 }}>{h.serviceTag || '—'}{h.remote ? ' · 위임' : ''}</td>
+                        <td className="right" style={{ color: h.inlet != null ? statusColor(inletToneOf(h.inlet)) : undefined }}>{C(h.inlet)}</td>
+                        <td className="right">{C(h.exhaust)}</td>
+                        <td className="right">{C(h.cpu)}</td>
+                        <td className="right muted">{h.deltaT == null ? '—' : `${h.deltaT}℃`}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </STable>
+              </div>
+            )}
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+/** 흡기 값 하나의 상태(서버 셀·매트릭스 흡기 열 색). 서버 규칙(roomTemp.js inletStatus)과 같다. */
+function inletToneOf(c) {
+  if (c == null) return null;
+  if (c < 15) return 'cold';
+  if (c <= 18) return 'lowok';
+  if (c <= 27) return 'ok';
+  if (c <= 32) return 'warn';
+  return 'hot';
+}
+
+function Matrix({ groups, open, onToggle, onTrend }) {
+  const stats = matrixStats(groups);
+  return (
+    <div className="card" style={{ padding: 12 }}>
+      <div className="flex between wrap" style={{ alignItems: 'baseline', marginBottom: 6, gap: 8 }}>
+        <b style={{ fontSize: 13 }}>법인 × 센서 매트릭스</b>
+        <span className="muted" style={{ fontSize: 11.5 }}>흡기 열 = ASHRAE 상태색(판정) · 배기·CPU·ΔT 열 = 열 안에서의 상대 농도(임계 없음)</span>
+      </div>
+      <div className="table-wrap">
+        <STable>
+          <thead><tr>
+            <th>법인</th><th>상태</th><th className="right">서버</th>
+            <th className="right">흡기 최저</th><th className="right">흡기 평균</th><th className="right">흡기 최고</th>
+            <th className="right">배기 평균</th><th className="right">배기 최고</th>
+            <th className="right">CPU 평균</th><th className="right">CPU 최고</th>
+            <th className="right">ΔT 평균</th><th className="right">미수집</th>
+          </tr></thead>
+          <tbody>
+            {groups.map((g) => (
+              <MatrixRow key={g.id || '_none'} g={g} stats={stats} expanded={!!open[g.id]} onToggle={onToggle} onTrend={onTrend} />
+            ))}
+          </tbody>
+        </STable>
+      </div>
+      <div className="muted" style={{ fontSize: 11.5, marginTop: 6, lineHeight: 1.7 }}>
+        법인명을 누르면 그 법인의 <b>흡기 높은 서버 상위 6대</b>가 펼쳐집니다. '미수집' 은 센서를 못 받았거나 15분 이상 갱신되지 않아 <b>집계에서 뺀</b> 서버 수입니다.
+      </div>
+    </div>
+  );
+}
+
+/* ── ③ 상황실 월보드 ─────────────────────────────────────────────────────────── */
+
+function Tile({ t, spark, onPick, big }) {
+  const c = statusColor(t.status);
+  const path = sparkPath(spark, { w: 120, h: 22 });
+  return (
+    <div className="card" role="button" tabIndex={0}
+      onClick={() => onPick(t.id)}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPick(t.id); } }}
+      style={{ padding: big ? '14px 16px' : '12px 14px', borderColor: `${c}66`, cursor: 'pointer', minWidth: 0 }}>
+      <div className="flex between" style={{ alignItems: 'center', gap: 6 }}>
+        <b style={{ fontSize: big ? 15 : 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={t.name}>{t.name}</b>
+        <StatusBadge status={t.status === 'unknown' ? null : t.status} small />
+      </div>
+      <div style={{ fontSize: big ? 44 : 32, fontWeight: 800, lineHeight: 1.05, color: c, textAlign: 'center', margin: '6px 0 2px', fontVariantNumeric: 'tabular-nums' }}>
+        {/* ⚠ 값이 없으면 단위를 붙이지 않는다 — '— ℃' 는 0℃ 처럼 읽힌다(v2.534 스크린샷 판독에서 발견). */}
+        {t.inletMax == null ? '—' : <>{t.inletMax}<span style={{ fontSize: big ? 18 : 14, fontWeight: 600 }}>℃</span></>}
+      </div>
+      <div className="muted" style={{ fontSize: 11, textAlign: 'center' }}>
+        흡기 최고 · 평균 {t.inletAvg == null ? '—' : `${t.inletAvg}℃`} · 서버 {t.servers}대
+      </div>
+      {/* 24시간 흡기 평균. 수집이 없던 시간은 **선을 잇지 않는다**(sparkPath 가 subpath 를 끊는다). */}
+      <div style={{ height: 24, marginTop: 4 }}>
+        {path ? (
+          <svg width="100%" height="24" viewBox="0 0 120 24" preserveAspectRatio="none" role="img"
+            aria-label={`최근 24시간 흡기 평균 ${path.lo}~${path.hi}℃`}>
+            <path d={path.d} fill="none" stroke={c} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+          </svg>
+        ) : <div className="muted" style={{ fontSize: 10, textAlign: 'center', lineHeight: '24px' }}>24시간 추이 없음(수집 시작 대기)</div>}
+      </div>
+      <div className="muted flex between" style={{ fontSize: 10.5, marginTop: 2, gap: 6 }}>
+        <span>배기 {C(t.exMax)}</span><span>CPU {C(t.cpuMax)}</span><span>ΔT {t.dt == null ? '—' : `${t.dt}℃`}</span>
+      </div>
+      {t.missing > 0 && <div className="muted" style={{ fontSize: 10, marginTop: 2 }}>집계 제외 {t.missing}대</div>}
+    </div>
+  );
+}
+
+function WallBoard({ groups, sparks, onPick, full, setFull }) {
+  const counts = boardCounts(groups);
+  const tiles = groups.map(tileData);
+  const body = (
+    <>
+      <div className="flex between wrap" style={{ alignItems: 'center', gap: 10, marginBottom: 10 }}>
+        <div className="flex gap wrap" style={{ gap: 8, alignItems: 'center' }}>
+          <b style={{ fontSize: full ? 16 : 13 }}>상황실 월보드</b>
+          <span className="badge" style={{ background: '#f8717122', color: '#f87171' }}>위험 {counts.hot}</span>
+          <span className="badge" style={{ background: '#fbbf2422', color: '#fbbf24' }}>주의 {counts.warn}</span>
+          <span className="badge" style={{ background: '#4ade8022', color: '#4ade80' }}>정상 {counts.ok}</span>
+          {counts.cold > 0 && <span className="badge" style={{ background: '#60a5fa22', color: '#60a5fa' }}>과냉 {counts.cold}</span>}
+          {/* ⚠ '판정 불가' 를 정상에 섞지 않는다 — 확인 못 한 것을 이상 없음으로 칠하면 거짓이다. */}
+          {counts.unknown > 0 && <span className="badge" style={{ background: '#64748b22', color: '#94a3b8' }} title="흡기 센서 값을 읽지 못한 법인 — 정상이라는 뜻이 아닙니다">판정 불가 {counts.unknown}</span>}
+        </div>
+        <button className="tab" style={{ padding: '4px 12px', fontSize: 12 }} onClick={() => setFull(!full)}>
+          {full ? '닫기 (Esc)' : '전체 화면으로 열기'}
+        </button>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${full ? 230 : 200}px, 1fr))`, gap: 10 }}>
+        {tiles.map((t) => <Tile key={t.id || '_none'} t={t} spark={sparks?.groups?.[t.id]} onPick={onPick} big={full} />)}
+      </div>
+      <div className="muted" style={{ fontSize: 11.5, marginTop: 8, lineHeight: 1.7 }}>
+        큰 숫자는 <b>흡기 최고</b>(가장 보수적인 값), 타일 색은 상태, 아래 선은 <b>최근 24시간 흡기 평균</b>입니다. 타일을 누르면 매트릭스에서 그 법인의 서버가 펼쳐집니다.
+      </div>
+    </>
+  );
+  if (!full) return <div className="card" style={{ padding: 12 }}>{body}</div>;
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 3000, background: 'var(--bg, #0a0e17)', padding: 20, overflow: 'auto' }}>{body}</div>
+  );
+}
+
+/* ── 화면 ────────────────────────────────────────────────────────────────────── */
 
 /**
- * 법인 전산실 운영 온도 — 모든 법인의 흡기·배기·CPU 온도 범위를 카드로 종합(1페이지).
+ * 법인 전산실 운영 온도 — 보기 전환(범위 플롯 / 매트릭스 / 상황실 월보드).
  * 데이터는 서버 분석 › 법인별 온도와 동일한 iDRAC 센서 수집값이다(추가 조회 없음).
- * v2.387 부터 기본 15분 이상 갱신되지 않은 표본은 집계에서 제외하고 그 수를 표기한다
- * (v2.383~2.386 에는 이 코드가 없었는데 주석만 남아 있었다 — 실제 구현과 일치시킴).
  */
 export function RoomTemp() {
-  // ⚠ 훅은 조기 return 위에서 전부 선언(CLAUDE.md — React #310 방지).
+  // ⚠ 훅은 전부 조기 return 위에서 선언(CLAUDE.md — React #310 방지).
   const { data, error } = usePolling('/admin/room-temp', {}, 30_000);
+  const [sort, setSort] = React.useState('inlet-desc');
+  const [view, setView] = React.useState('range');
   const [open, setOpen] = React.useState({});
-  const [sort, setSort] = React.useState('inlet-desc');   // 기본: 흡기 높은순(문제 있는 곳 먼저)
-  const [trend, setTrend] = React.useState(null);          // { group, kind } — 추이 모달
-  const toggle = (id) => setOpen((c) => ({ ...c, [id]: !c[id] }));
-  const openTrend = (g, kind) => setTrend({ group: g, kind });
+  const [trend, setTrend] = React.useState(null);
+  const [sparks, setSparks] = React.useState(null);
+  const [full, setFull] = React.useState(false);
+
+  const groups = React.useMemo(() => data?.groups || [], [data]);
+  const sorted = React.useMemo(() => sortGroups(groups, sort), [groups, sort]);
+  // 스파크라인 조회 키 — 폴링 틱마다 재조회하지 않도록 **법인 집합이 바뀔 때만** 바뀐다.
+  const groupKey = React.useMemo(() => groups.map((g) => g.id).join(','), [groups]);
+
+  // 월보드를 열었을 때만 24시간 추이를 **1회** 조회한다(폴링 금지 — 타일 16개 × 폴링이면 낭비다).
+  React.useEffect(() => {
+    if (view !== 'board' || !groupKey) return undefined;
+    let dead = false;
+    fetchJson('/admin/room-temp/spark', { kind: 'inlet', hours: 24, groups: groupKey })
+      .then((r) => { if (!dead) setSparks(r); })
+      .catch(() => { /* 추이가 없어도 타일은 그린다 — 타일이 '추이 없음' 이라고 말한다 */ });
+    return () => { dead = true; };
+  }, [view, groupKey]);
+
+  // 전체 화면은 Esc 로 닫는다(버튼만 두면 키보드 사용자가 갇힌다).
+  React.useEffect(() => {
+    if (!full) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape') setFull(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [full]);
+
+  const toggle = React.useCallback((id) => setOpen((c) => ({ ...c, [id]: !c[id] })), []);
+  const pick = React.useCallback((g) => {
+    const id = typeof g === 'string' ? g : g?.id;
+    setView('matrix'); setFull(false);
+    setOpen((c) => ({ ...c, [id]: true }));
+  }, []);
+  const openTrend = React.useCallback((g, kind) => setTrend({ group: g, kind }), []);
 
   // 폴링 오류 1회로 화면을 갈아치우지 않는다(데이터 없을 때만 전체 오류 — CLAUDE.md).
   if (error && !data) return <ErrorBox message={error} />;
   if (!data) return <Loading />;
   const t = data.totals || {};
-  const dcs = data.groups || [];
 
   return (
     <>
@@ -291,28 +520,31 @@ export function RoomTemp() {
         <select className="select" value={sort} onChange={(e) => setSort(e.target.value)} style={{ minWidth: 150 }}>
           {SORTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
         </select>
-        <span className="muted" style={{ fontSize: 11.5 }}>· 흡기·배기·CPU 라벨(📈)을 누르면 1일~1년 추이를 봅니다</span>
+        <span className="muted" style={{ fontSize: 12, marginLeft: 6 }}>보기</span>
+        <div className="flex" style={{ gap: 2 }}>
+          {VIEWS.map(([v, l]) => (
+            <button key={v} className={view === v ? 'login-btn' : 'tab'} style={{ padding: '5px 12px', fontSize: 12, flex: 'none' }}
+              onClick={() => setView(v)}>{l}</button>
+          ))}
+        </div>
+        <span className="muted" style={{ fontSize: 11.5 }}>· 플롯·월보드에서 법인을 누르면 매트릭스로 넘어가 서버가 펼쳐집니다</span>
       </div>
       <div className="muted" style={{ fontSize: 12, marginBottom: 10, lineHeight: 1.7 }}>
-        범위 바의 연한 초록 구간은 <b>ASHRAE A1 권장 급기 18~27℃</b>이고, 흰 세로선은 평균입니다. 상태 배지는 <b>흡기 최고값</b>으로 보수적으로 판정합니다.
-        배기·CPU 는 장비·부하에 따라 정상 범위가 달라 임계를 정하지 않고 값만 표시합니다.
+        초록 띠는 <b>ASHRAE A1 권장 급기 18~27℃</b>, 흰 선은 평균, 빨간 점선은 32℃ 위험선입니다. 상태 배지는 <b>흡기 최고값</b>으로 보수적으로 판정합니다.
+        배기·CPU 는 장비·부하에 따라 정상 범위가 달라 <b>임계를 정하지 않고</b> 값과 열 안에서의 상대 농도만 표시합니다.
       </div>
 
-      {dcs.length === 0 ? (
+      {sorted.length === 0 ? (
         <div className="card" style={{ padding: 24, textAlign: 'center' }}>
           <div className="muted" style={{ fontSize: 13, lineHeight: 1.8 }}>
             표시할 데이터가 없습니다.<br />
-iDRAC 온도 수집이 1회 이상 완료되어야 표시됩니다.<br />
+            iDRAC 온도 수집이 1회 이상 완료되어야 표시됩니다.<br />
             같은 데이터를 <b>특수 기능 › 서버 분석 › 법인별 온도</b>에서도 확인할 수 있습니다(동일 소스).
           </div>
         </div>
-      ) : (
-        <div className="grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(420px, 1fr))', gap: 12 }}>
-          {sortGroups(dcs, sort).map((dc) => (
-            <VcCard key={dc.id || '_none'} dc={dc} expanded={!!open[dc.id]} onToggle={toggle} onTrend={openTrend} />
-          ))}
-        </div>
-      )}
+      ) : view === 'range' ? <RangePlot groups={sorted} onPick={pick} />
+        : view === 'matrix' ? <Matrix groups={sorted} open={open} onToggle={toggle} onTrend={openTrend} />
+          : <WallBoard groups={sorted} sparks={sparks} onPick={pick} full={full} setFull={setFull} />}
 
       {trend && (
         <TrendModal groupId={trend.group.id} groupName={trend.group.name} kind={trend.kind} onClose={() => setTrend(null)} />
@@ -323,7 +555,8 @@ iDRAC 온도 수집이 1회 이상 완료되어야 표시됩니다.<br />
         · 센서 분류는 이름 기준입니다 — 흡기(Inlet/Intake/Ambient/Front) · 배기(Exhaust/Outlet/Exit/Rear) · CPU(CPU/CPU1/Proc/Package/Die).
         그 외 센서(메모리·PSU·보드 등)는 성격이 달라 집계에서 제외합니다.<br />
         · 한 서버에 같은 종류 센서가 여러 개면(CPU1·CPU2 등) <b>가장 높은 값</b>을 그 서버의 대표값으로 씁니다.<br />
-        · 법인(DataCenter) 귀속이 1순위이고, 없으면 vCenter, 둘 다 없으면 <b>(미지정)</b> 으로 묶습니다 — 임의 배정하지 않습니다.
+        · 법인(DataCenter) 귀속이 1순위이고, 없으면 vCenter, 둘 다 없으면 <b>(미지정)</b> 으로 묶습니다 — 임의 배정하지 않습니다.<br />
+        · 흡기 값을 읽지 못한 법인은 <b>정상이 아니라 '판정 불가'</b> 로 표시합니다.
       </div>
     </>
   );
