@@ -171,21 +171,87 @@ const PAGER_PROMPT = /(--\s*more\s*--|Type\s*<CR>\s*to\s*continue[^\n]*|\(END\)|
 const PAGER_STRIP = /(--\s*more\s*--|Type\s*<CR>\s*to\s*continue,?\s*Q<CR>\s*to\s*stop:?|\(END\))/gi;
 const ANSI_RE = /\x1b\[[0-9;?]*[A-Za-z]/g;
 
-function execPaged(conn, command, {
+/**
+ * 대화형 프롬프트 자동 응답 규칙(v2.526 — v2.522 의 페이저 전용 경로를 일반화).
+ *
+ * 왜 일반화했나: Dell Unity 의 `uemcli` 는 **자체서명 인증서 수락 프롬프트**에서 멈춘다
+ * (사용자 제공 실제 출력 2026-09-16: `Would you like to: [1] Accept the certificate for this
+ * session / [2] Reject / [3] Accept and store`). 비대화형 `exec` 은 아무도 답하지 않아 배너만
+ * 받고 시한까지 매달렸고, 그 배너가 `Key: Value` 로 파싱돼 **알맹이 없는 레코드**가 되어
+ * 화면에 '없는 SP' 가 보였다. 페이저와 **같은 메커니즘**이므로 규칙 표로 합쳤다.
+ *
+ * ⚠ **`[3] Accept and store` 를 쓰지 않는다** — 장비에 인증서를 저장하는 **상태 변경**이다.
+ *   포탈은 남의 장비 상태를 바꾸지 않는다(v2.519 `portstatsclear` 금지와 같은 판단).
+ *   항상 `1`(이 세션만 수락)로 답한다.
+ * ⚠ 응답 횟수 상한(`maxAnswers`)을 지우지 말 것 — 예상 못 한 프롬프트 루프가 세션을
+ *   무한히 붙잡는다. 상한에 걸리면 `truncated` 로 **밝힌다**(조용한 절단 금지).
+ * ⚠ 규칙에 없는 프롬프트(예: 계정/비밀번호 요구)가 나오면 답하지 않고 시한까지 기다렸다가
+ *   **모아 둔 출력을 살려** 돌려준다 — 그 출력이 '무엇을 더 물었는지' 를 화면이 보여주는 근거다.
+ */
+export const PROMPT_RULES = Object.freeze({
+  pager: { re: PAGER_PROMPT, answer: '\n', capAnswer: 'q\n' },
+  // uemcli 인증서 수락. 꼬리에서만 본다 — 선택지 블록이거나 실제 입력 프롬프트일 때.
+  // ⚠ 두 형태를 **둘 다** 받는다: 선택지가 먼저 오고 `Please input your selection …` 이 뒤따르는데,
+  //   데이터가 그 프롬프트와 **같은 줄에 이어 붙어** 오므로(실측) 어느 쪽에 걸려도 답해야 한다.
+  certAccept: {
+    re: /(\[1\][^\n]*Accept the certificate[\s\S]{0,300}|Please input your selection[^\n]*)\s*$/i,
+    answer: '1\n',
+    capAnswer: null,
+  },
+});
+
+/**
+ * uemcli 배너·인증서 블록 제거(v2.526).
+ *
+ * ⚠ **응답 프롬프트와 첫 데이터가 같은 줄에 붙어 나온다**(사용자 제공 실측 2026-09-16):
+ *   `Please input your selection (The default selection is [1]): 1:    System name  = DE411224865949`
+ *   이걸 그대로 두면 `parseKeyValueBlocks` 가 **앞쪽 `:` 를 키 경계로 읽어** 그 줄을 통째로 잃는다
+ *   (첫 레코드가 시스템 이름·모델인데 그게 사라진다). 프롬프트 접두만 잘라내고 뒤는 남긴다.
+ * ⚠ 배너(`Storage system address:` · `Remote certificate:` 블록)도 지운다 — 남겨 두면
+ *   `Issuer: CN=…` 같은 줄이 **알맹이 없는 레코드**가 되어 '없는 장비' 로 보인다(v2.525 실제 사고).
+ */
+export function stripUemcliBanner(text) {
+  return String(text || '')
+    // 응답 프롬프트 접두 — 같은 줄에 붙은 데이터는 보존한다.
+    .replace(/^.*Please input your selection[^:]*:\s*\d*:?\s*/gm, '')
+    // 접속 배너
+    .replace(/^Storage system (address|port):.*$/gm, '')
+    .replace(/^HTTPS connection\s*$/gm, '')
+    // 인증서 블록 — `Remote certificate:` 부터 선택지 마지막 줄까지
+    .replace(/^Remote certificate:[\s\S]*?^\s*\[3\][^\n]*\n?/gm, '')
+    .replace(/^(Issuer|Subject|Valid from|Valid to|Serial|Id):[^\n]*\n?/gm, '')
+    .replace(/^Would you like to:\s*\n?/gm, '')
+    .replace(/^\s*\[[123]\][^\n]*\n?/gm, '');
+}
+
+/**
+ * 프롬프트 자동 응답 실행. `rules` 는 `PROMPT_RULES` 의 키 배열(앞에서부터 먼저 검사).
+ * 반환: `{ command, code, stdout, stderr, pages, answers, truncated, timedOut }`
+ *  · `pages`  — 페이저 응답 횟수(v2.522 호환).
+ *  · `answers`— 규칙별 응답 횟수(`{pager, certAccept}`) — 화면이 '인증서를 자동 수락했다' 를 말한다.
+ */
+function execAnswered(conn, command, {
   timeoutMs = Number(process.env.SSH_EXEC_TIMEOUT_MS) || 60000,
-  maxPages = Math.max(1, Number(process.env.SSH_PAGER_MAX_PAGES) || 400),
+  maxAnswers = Math.max(1, Number(process.env.SSH_PAGER_MAX_PAGES) || 400),
+  rules = ['pager'],
   pty = true,
 } = {}) {
+  const active = rules.map((k) => [k, PROMPT_RULES[k]]).filter(([, r]) => r);
   const clean = (t) => String(t).replace(ANSI_RE, '').replace(/\r/g, '').replace(PAGER_STRIP, '');
   return new Promise((resolve, reject) => {
     conn.exec(command, { pty }, (err, stream) => {
       if (err) return reject(err);
-      let stdout = ''; let stderr = ''; let done = false; let bytes = 0; let pages = 0; let truncated = false;
+      let stdout = ''; let stderr = ''; let done = false; let bytes = 0; let total = 0; let truncated = false;
+      const answers = {};
+      for (const [k] of active) answers[k] = 0;
+      const out = (extra) => ({ command, stdout: clean(stdout), stderr, pages: answers.pager || 0, answers, truncated, ...extra });
       const finish = (fn, arg) => { if (done) return; done = true; clearTimeout(timer); fn(arg); };
       const kill = () => { try { stream.close?.(); } catch { /* */ } try { stream.destroy?.(); } catch { /* */ } };
       const timer = setTimeout(() => {
         kill();
-        finish(resolve, { command, code: null, stdout: clean(stdout), stderr, pages, truncated: true, timedOut: true });
+        // 시한이 되면 모아 둔 출력을 **살려** 돌려준다(일반 exec 은 버린다 — 그러면 이 경로의 존재 이유가 없다).
+        truncated = true;
+        finish(resolve, out({ code: null, truncated: true, timedOut: true }));
       }, Math.max(1000, timeoutMs));
       timer.unref?.();
       stream.on('data', (d) => {
@@ -193,24 +259,35 @@ function execPaged(conn, command, {
         if (bytes > EXEC_MAX_OUTPUT) { kill(); return finish(reject, new Error(`SSH exec 출력 상한(${Math.round(EXEC_MAX_OUTPUT / 1024)}KB) 초과: ${command}`)); }
         stdout += d.toString();
         // 꼬리에서만 프롬프트를 본다 — 본문에 같은 문구가 있어도 오응답하지 않게.
-        const tail = stdout.slice(-200).replace(ANSI_RE, '');
-        if (!PAGER_PROMPT.test(tail)) return;
-        if (pages >= maxPages) {
+        const tail = stdout.slice(-400).replace(ANSI_RE, '');
+        const hit = active.find(([, r]) => r.re.test(tail));
+        if (!hit) return;
+        const [key, rule] = hit;
+        if (total >= maxAnswers) {
           truncated = true;
-          try { stream.write('q\n'); } catch { /* */ }
-          const t2 = setTimeout(() => { kill(); finish(resolve, { command, code: null, stdout: clean(stdout), stderr, pages, truncated: true }); }, 300);
-          t2.unref?.();
-          return;
+          if (rule.capAnswer) {
+            try { stream.write(rule.capAnswer); } catch { /* */ }
+            const t2 = setTimeout(() => { kill(); finish(resolve, out({ code: null, truncated: true })); }, 300);
+            t2.unref?.();
+            return;
+          }
+          kill();
+          return finish(resolve, out({ code: null, truncated: true }));
         }
-        pages++;
-        try { stream.write('\n'); } catch { /* */ }
+        total += 1; answers[key] += 1;
+        try { stream.write(rule.answer); } catch { /* */ }
       });
       stream.stderr.on('data', (d) => { stderr += d.toString(); });
       stream.on('error', (e) => finish(reject, e));
       stream.stderr.on('error', () => { /* 비치명 */ });
-      stream.on('close', (code) => finish(resolve, { command, code, stdout: clean(stdout), stderr, pages, truncated }));
+      stream.on('close', (code) => finish(resolve, out({ code })));
     });
   });
+}
+
+/** 페이저 전용(v2.522 호환) — `maxPages` 이름을 그대로 받는다. */
+function execPaged(conn, command, { maxPages, ...rest } = {}) {
+  return execAnswered(conn, command, { ...rest, maxAnswers: maxPages, rules: ['pager'] });
 }
 
 function sftpReadFile(conn, path) {
@@ -280,6 +357,9 @@ export async function withSsh(creds, fn, { signal = creds?.signal } = {}) {
     execCapture: async (cmd, captureMs) => { const r = await (trace ? traced('capture', cmd, () => execCapture(conn, cmd, captureMs)) : execCapture(conn, cmd, captureMs)); log.push(r); return r; },
     // 페이저로 멈추는 명령(errshow 등) — 프롬프트에 자동 응답해 끝까지 받는다(상한·시한 있음).
     execPaged: async (cmd, opts) => { const r = await (trace ? traced('paged', cmd, () => execPaged(conn, cmd, opts)) : execPaged(conn, cmd, opts)); log.push(r); return r; },
+    // 대화형 프롬프트 자동 응답(v2.526) — `rules:['certAccept','pager']` 처럼 규칙을 고른다.
+    // uemcli 인증서 수락처럼 **페이저가 아닌** 프롬프트를 다루는 유일한 경로다.
+    execAnswered: async (cmd, opts) => { const r = await (trace ? traced('answered', cmd, () => execAnswered(conn, cmd, opts)) : execAnswered(conn, cmd, opts)); log.push(r); return r; },
     readFile: (p) => sftpReadFile(conn, p),
     writeFile: (p, c, m) => sftpWriteFile(conn, p, c, m),
     putFile: (local, remote) => sftpPutFile(conn, local, remote),
