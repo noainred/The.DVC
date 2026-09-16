@@ -19,6 +19,7 @@ import { store } from '../store.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import { withJob } from '../perf/monitor.js';
 import { describeError } from '../util/errors.js';
+import { createAuthGuard } from '../util/authGuard.js';
 import { isStopped } from '../security/emergencyStop.js';
 import { load as loadHzSettings, onHorizonSessionSettingsChange } from './sessionSettings.js';
 import { collectServerSessions, mockSessionResult } from './sessionCollect.js';
@@ -36,6 +37,23 @@ let lastResult = null;
 let lastRunTs = 0;
 let timer = null;
 const inFlight = new Map();                         // serverId -> startedAt ('진행중' 구획의 원천)
+
+/**
+ * 인증 실패(401/403) 서버의 **주기 수집 정지**(v2.535 자격증명 감사).
+ *
+ * 왜: `sessionCollect.js` 는 401/403 을 `kind:'auth'` 로 정확히 분류하는데 v2.534 까지 아무도
+ * 그것을 소비하지 않았다 — 폴러는 화면 표시용 `errors` 에 담기만 하고 다음 주기에 **같은 AD
+ * 계정으로 다시 로그인**했다. 주기 기본 5분·하한 60초라 서버 1대당 하루 288~1,440회 실패
+ * 로그인이고, 그것이 **AD 서비스 계정을 스스로 잠그는 경로**다(비밀번호 회전·오타만으로 발생).
+ * 스토리지에는 v2.528 부터 같은 방어가 있었는데 Horizon 에만 없었다 — 그 비대칭을 없앤다.
+ *
+ * ⚠ 파일을 스토리지와 **나눈다**(`horizon-auth-stops.json`) — 한 파일에 섞으면 두 도구의 id 가
+ *   충돌해 엉뚱한 대상이 멈춘다.
+ */
+const authGuard = createAuthGuard({ file: 'horizon-auth-stops.json' });
+
+/** 테스트용 — 정지 기록 초기화. */
+export function _resetHzAuthGuard() { authGuard._resetForTest(); }
 
 export function hzSessionPollerStatus() {
   const s = loadHzSettings();
@@ -87,12 +105,35 @@ export async function runHzSessionsNow(trigger = 'manual') {
       return { ok: true, ...lastResult, reason: '대상 Horizon 서버가 없습니다(설정 › Horizon 등록에서 추가하세요).' };
     }
 
+    // ⚠ **수동 실행은 막지 않는다**(authGuard 규칙 3) — 사람이 1회 누르는 것은 잠금 위험이 없고,
+    //   비밀번호를 고쳤는지 확인할 길을 없애면 안 된다. 막는 것은 주기 수집뿐이다.
+    const periodic = trigger !== 'manual';
     const results = await pool(servers, Math.min(CONCURRENCY_CAP, s.concurrency), (srv) => withJob(`horizon.sessions:${srv.id}`, async () => {
       inFlight.set(srv.id, Date.now());
       try {
+        const stop = periodic && !mock ? authGuard.authStopFor(srv) : null;
+        if (stop) {
+          // ⚠ **조용히 멈추지 않는다**(규칙 1) — 정지 사실·시각·시도 횟수를 그대로 실어 화면이 말한다.
+          //   말없이 건너뛰면 사용자는 '수집이 되는 줄' 안다.
+          return {
+            serverId: srv.id, name: srv.name || srv.id, host: srv.host,
+            ok: false, kind: 'auth-stopped', authStopped: stop,
+            error: `인증 실패로 주기 수집을 멈췄습니다 — ${stop.reason}`,
+            hint: '설정 › Horizon 등록에서 비밀번호를 고치면 자동으로 재개합니다(‘지금 수집’ 은 그대로 동작합니다).',
+            parsed: false, sessions: null, connected: null, disconnected: null, pending: null,
+            users: null, usersConnected: null, names: [], pools: [],
+            usersOmitted: 0, poolsOmitted: 0, usedUserKey: null, usedStateKey: null, userIdOnly: false,
+          };
+        }
         const r = mock ? mockSessionResult(srv) : await collectServerSessions(srv, {
           pageSize: s.pageSize, maxPages: s.maxPages, maxUsers: s.maxUsers, timeoutMs: s.timeoutMs,
         });
+        // 401/403 이면 다음 **주기**부터 멈춘다. 성공하면 기록을 지워 재개한다(규칙 2 — 자격증명이
+        // 바뀌면 `authStopFor` 가 credHash 비교로 이미 자동 재개하므로 여기는 성공 경로만 본다).
+        if (!mock) {
+          if (r?.kind === 'auth') authGuard.markAuthStopped(srv.id, srv, r.error || '인증·권한 거부');
+          else if (r?.ok) authGuard.clearAuthStop(srv.id);
+        }
         recordHzSessionActivity({
           deviceId: srv.id, name: srv.name || srv.id, host: srv.host, source: 'central',
           ok: !!r.ok, durationMs: r.ms ?? null, error: r.error || null,

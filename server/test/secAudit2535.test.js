@@ -156,3 +156,67 @@ test('오류 메시지·응답 사유에 비밀번호 변수를 끼워 넣지 �
   }
   assert.deepEqual(bad, [], `오류 문구가 비밀 값을 되울린다: ${bad.join(' | ')}`);
 });
+
+/* ── ⑥ 인증 실패 정지는 도구마다 있어야 한다(v2.535 감사 medium) ─────────────────
+ *
+ * `horizon/sessionCollect.js:82` 는 401/403 을 `kind:'auth'` 로 정확히 분류하는데 v2.534 까지
+ * **아무도 소비하지 않았다** — 폴러는 화면 표시용 errors 에 담기만 하고 다음 주기에 같은 AD
+ * 계정으로 다시 로그인했다(주기 기본 5분·하한 60초 → 서버 1대당 하루 288~1,440회 실패 로그인).
+ * 그것이 **AD 서비스 계정을 스스로 잠그는 경로**다. 스토리지에는 v2.528 부터 방어가 있었다.
+ */
+test('★ 공용 authGuard 코어가 있고 스토리지·Horizon 이 **같은 것**을 쓴다', () => {
+  const st = codeOf(fs.readFileSync(path.join(SRC, 'storage/authGuard.js'), 'utf8'));
+  const hz = codeOf(fs.readFileSync(path.join(SRC, 'horizon/sessionPoller.js'), 'utf8'));
+  assert.ok(/from '\.\.\/util\/authGuard\.js'/.test(st), '스토리지가 공용 코어를 쓰지 않는다');
+  assert.ok(/from '\.\.\/util\/authGuard\.js'/.test(hz), 'Horizon 이 공용 코어를 쓰지 않는다');
+  // ⚠ 파일은 도구마다 달라야 한다 — 한 파일에 섞으면 두 도구의 id 가 충돌해 엉뚱한 대상이 멈춘다.
+  assert.ok(/'storage-auth-stops\.json'/.test(st));
+  assert.ok(/'horizon-auth-stops\.json'/.test(hz));
+  assert.ok(!/'storage-auth-stops\.json'/.test(hz), '두 도구가 같은 정지 파일을 쓰면 안 된다');
+});
+
+test('★ Horizon 은 401/403 에서 **주기** 수집만 멈춘다(수동 실행은 막지 않는다)', () => {
+  const hz = codeOf(fs.readFileSync(path.join(SRC, 'horizon/sessionPoller.js'), 'utf8'));
+  assert.ok(/const periodic = trigger !== 'manual'/.test(hz),
+    "수동 실행을 막으면 비밀번호를 고쳤는지 확인할 길이 없어진다(authGuard 규칙 3)");
+  assert.ok(/periodic[\s\S]{0,60}authStopFor\(srv\)/.test(hz), '주기 실행에서만 건너뛰어야 한다');
+  assert.ok(/kind === 'auth'[\s\S]{0,80}markAuthStopped/.test(hz), '401/403 이면 정지 기록을 남겨야 한다');
+  assert.ok(/r\?\.ok[\s\S]{0,60}clearAuthStop/.test(hz), '성공하면 정지를 해제해야 한다');
+});
+
+test('★ 조용히 멈추지 않는다 — 정지 사실이 레코드로 나간다', () => {
+  const hz = codeOf(fs.readFileSync(path.join(SRC, 'horizon/sessionPoller.js'), 'utf8'));
+  assert.ok(/kind: 'auth-stopped'/.test(hz) && /authStopped: stop/.test(hz),
+    "말없이 건너뛰면 사용자는 '수집이 되는 줄' 안다(authGuard 규칙 1)");
+  // 화면이 그 kind 를 해석할 수 있어야 한다 — 서버 라벨과 웹 조치 문구 양쪽.
+  const label = codeOf(fs.readFileSync(path.join(SRC, 'horizon/sessionCollect.js'), 'utf8'));
+  assert.ok(/'auth-stopped':/.test(label), '서버 KIND_LABEL 에 없으면 화면이 원시 키를 보여준다');
+  const web = codeOf(fs.readFileSync(new URL('../../web/src/views/tools/horizonSessionText.js', import.meta.url).pathname, 'utf8'));
+  assert.ok(/'auth-stopped': 'red'/.test(web), '웹 KIND_TONE 누락 — 배지가 회색(정보)으로 보인다');
+  assert.ok(/'auth-stopped': '[^']*자동으로 재개/.test(web), '재개 방법을 말하지 않으면 사용자가 복구하지 못한다');
+});
+
+test('실패 주기의 수치는 null 이다(0 은 "사용자 0명" 이라는 거짓)', () => {
+  const hz = codeOf(fs.readFileSync(path.join(SRC, 'horizon/sessionPoller.js'), 'utf8'));
+  const seg = hz.slice(hz.indexOf("kind: 'auth-stopped'"));
+  const block = seg.slice(0, seg.indexOf('};') + 2);
+  for (const k of ['sessions', 'connected', 'users']) {
+    assert.ok(new RegExp(`${k}: null`).test(block), `auth-stopped 레코드의 ${k} 는 null 이어야 한다`);
+  }
+});
+
+/* ── ⑦ 런타임 상태 파일도 .gitignore 대상 ─────────────────────────────────────
+ * 평문 비밀은 없지만 내부 host·자격증명 **지문**(계정명 + 비번 길이 + 16비트 해시)이 들어간다.
+ * 기본 CONFIG_DIR 이 server/config 라 개발 호스트에서 `git add -A` 하면 그대로 올라간다.
+ */
+test('★ 신규 런타임 상태 파일이 .gitignore 에 있다', () => {
+  const gi = fs.readFileSync(path.join(ROOT, '.gitignore'), 'utf8');
+  const need = [
+    'server/config/horizon-sessions.json', 'server/config/horizon-session-activity.json',
+    'server/config/horizon-auth-stops.json', 'server/config/storage-auth-stops.json',
+    'server/config/storage-growth-settings.json', 'server/config/vmseries.json',
+    'server/config/vmseries/',
+  ];
+  const missing = need.filter((f) => !gi.includes(f));
+  assert.deepEqual(missing, [], `.gitignore 누락: ${missing.join(', ')}`);
+});

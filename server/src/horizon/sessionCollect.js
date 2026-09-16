@@ -111,6 +111,9 @@ export const KIND_LABEL = Object.freeze({
   ok: '정상',
   unparsed: '형식 미인식',
   auth: '인증·권한 거부',
+  // v2.535: 인증 실패로 **주기 수집을 멈춘** 상태. 'auth'(이번에 실패)와 구분한다 —
+  //   조치가 같아 보여도 사용자가 알아야 할 사실이 다르다(지금은 시도조차 하지 않는다).
+  'auth-stopped': '인증 실패 — 주기 수집 정지',
   'no-endpoint': '이 버전에 없는 경로(404)',
   http: '조회 실패(HTTP)',
   timeout: '시한 초과',

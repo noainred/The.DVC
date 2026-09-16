@@ -478,3 +478,58 @@
   · **`toolEnforcement` 를 화면이 실제로 쓴다** — `web/src/views/UserAdmin.jsx` 의 '도구별 접근'
     표에 '서버 집행' 열(`views/userAdmin/toolEnforcementText.js`, 순수 모듈 + 회귀 테스트).
     서버만 내려주고 화면이 쓰지 않으면 이 모듈이 없애려던 무음 실패가 그대로 남는다.
+
+## 2026-09-16 자격증명·비밀 추적 감사 조치(v2.535) — 되돌리지 말 것 (docs/AUDIT-2026-09-16.md)
+
+v2.529~2.534 에 새로 들어온 코드(Horizon 세션 수집·스토리지 증가량·Unity uemcli·PowerMax 용량·
+전산실 온도)를 **자격증명·비밀이 어디로 흐르는가** 축으로 감사했다. critical 0 · high 0 ·
+medium 1 · low 3 이고 전부 고쳤다. 회귀 테스트: `test/secAudit2535.test.js`(15건 — 주석을
+제거한 뒤 소스를 검사한다. 주석에 규칙을 적어 둔 것이 통과 근거가 되면 안 된다).
+
+- **인증 실패 정지 코어는 `util/authGuard.js` 하나다**(medium — 실재 결함):
+  스토리지는 v2.528(사용자 신고 PowerStore 401)에 `storage/authGuard.js` 를 가졌는데
+  **Horizon 세션 수집에는 같은 방어가 없었다**. `horizon/sessionCollect.js` 는 401/403 을
+  `kind:'auth'` 로 정확히 분류하는데 폴러가 그것을 **소비하지 않아**, 다음 주기에 같은 AD
+  계정으로 다시 로그인했다 — 기본 5분·하한 60초이므로 서버 1대당 **하루 288~1,440회 실패
+  로그인**이고 그것이 **AD 서비스 계정을 스스로 잠그는 경로**다(`util/bulkRun.js` 의
+  '자동 재시도 금지' 가 막으려던 것과 같은 사고).
+  · 코어를 `util/authGuard.js` 로 올렸다(`createAuthGuard({file})` 팩토리 + `isAuthFailureText`
+    + `credHashOf`). `storage/authGuard.js` 는 **위임만** 하고 export 시그니처는 그대로다
+    (기존 `storage/poller.js`·테스트 무변경). **20줄을 복사하지 말 것** — 복사하면 다음 도구에서
+    또 빠진다(`console/`↔`version_3/` 중복으로 v2.506 svcmon 버그를 두 곳에 고쳐야 했다).
+  · **정지 파일은 도구마다 다른 이름**이어야 한다(`storage-auth-stops.json` /
+    `horizon-auth-stops.json`). 한 파일에 섞으면 도구 A 의 id 와 B 의 id 가 충돌해 **엉뚱한
+    대상이 멈춘다**.
+  · Horizon 쪽 배선 규칙: **주기 수집만** 막는다(`trigger !== 'manual'`). '지금 수집' 과 연결
+    테스트는 그대로 동작해야 한다 — 비밀번호를 고친 뒤 확인할 길을 없애면 안 된다.
+    정지 결과는 `kind:'auth-stopped'` 로 **화면에 표시**하고(수치는 전부 `null` — 0 은
+    '사용자 0명' 이라는 거짓이다), 자격증명이 바뀌면 `credHash` 비교로 **자동 재개**한다.
+    작업 로그에는 남기지 않는다(정지 중에는 이벤트가 아니다 — 상한을 비이벤트로 소진한다).
+  · **새 주기 수집기를 추가하면 이 가드를 붙일 것.** 붙이지 않으면 그 도구가 다음 계정 잠금
+    사고의 경로가 된다.
+- **우연히 성립하는 게이트를 두지 말 것**(low — `routes/api/pdu.js` CSV export):
+  예전 조건은 `if (withPw && !req.user?.isSettingsOwner)` 였다. 그런데 **`req.user` 는
+  `isSettingsOwner` 를 담지 않는다** — `auth/auth.js resolveTokenUser` 의 반환은
+  `{username, role, name, scope, mustEnrollOtp}` 뿐이고 `isSettingsOwner` 는 `routes/auth.js` 의
+  로그인·`/auth/me` **응답 필드로만** 계산된다. 즉 그 조건은 언제나 참이라 결과적으로 닫혀
+  있었다 — **우연히** 안전했던 것이다. 누군가 그 필드를 미들웨어로 올리는 순간(그럴 만한 코드가
+  이미 있다) 평문 자격증명 일괄 덤프가 소유자 검사 없이 나간다. 이제 `requireSettingsOwner` 를
+  **무조건** 통과시킨다. 같은 유형이 v2.500 C-1(경로 문자열 비교)이었다.
+  · 일반 규칙: **게이트는 그 시점에 실제로 존재하는 값으로만** 판정한다. '그 필드는 없으니까
+    안전하다' 는 근거는 다음 리팩터에 무효가 된다.
+- **런타임 상태 파일은 `.gitignore` 에 함께 등록한다**(low): 기본 `CONFIG_DIR` 이 `server/config`
+  라 개발 호스트에서 `git add -A` 하면 그대로 올라간다(공개 저장소다). `git check-ignore` 로
+  확인해 6종이 빠져 있었다 — `horizon-sessions.json`(Horizon 커넥션 서버 host·계정) ·
+  `horizon-session-activity.json` · `horizon-auth-stops.json` · `storage-auth-stops.json`
+  (자격증명 **지문**) · `storage-growth-settings.json` · `vmseries.json` + 디렉터리
+  `server/config/vmseries/`. 형제 `server/config/vmperf/` 는 이미 등록돼 있었다.
+  · **새 설정·상태 파일을 만들면 그 커밋에서 `.gitignore` 를 함께 고칠 것.** 비밀을 봉인하는
+    `SECRET_FILES` 등록과 **별개의 항목**이다(봉인해도 host·계정명·지문은 평문으로 남는다).
+- **SQLite 파일 권한은 워커에도 적용된다**(low — `ipam/writeWorker.js`): 메인 스레드는 DB 를
+  열고 `chmodSync(0o600)` 하지만, 워커가 **먼저** 열면 umask 기본값(0644)으로 만들어지고 메인의
+  chmod 는 그 뒤에 온다 — 경합 창이 존재했다(`ipam.db` 는 외부 프로그램이 읽는 공유 파일이라
+  WAL 전환 금지 규칙만 있고 권한 규칙이 빠져 있었다). 워커도 연 직후 chmod 한다.
+  · **새 DB 모듈·워커는 열자마자 `chmodSync(0o600)`** 할 것. `secAudit2535.test.js` 가 소스를
+    검사해 고정한다. ⚠ 그 검사 정규식에 `[^)]*` 를 쓰지 말 것 — `chmodSync(FILE(), 0o600)` 처럼
+    인자에 괄호가 있으면 첫 `)` 에서 멈춰 **멀쩡한 모듈 4개를 누락으로 오판한다**(v2.535 에
+    실제로 그랬다).

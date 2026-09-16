@@ -192,3 +192,15 @@ server/tmp/
 
 # Claude Design 캔버스 씨딩 결과물(에디터 런타임 2.6MB 포함) — 소스는 *.dc.html + canvas.json
 Design/uiredesign/vmware-portal-ui-redesign.html
+
+# v2.535 자격증명 감사 — 런타임 상태 파일(평문 비밀은 없지만 내부 host·자격증명 지문이 들어간다).
+# 기본 CONFIG_DIR 이 server/config 라 개발 호스트에서 `git add -A` 하면 그대로 올라간다
+# (v2.500 C/M4 와 같은 유형). 형제 디렉터리 server/config/vmperf/ 는 이미 등록돼 있는데
+# server/config/vmseries/ 만 빠져 있었다.
+server/config/horizon-sessions.json
+server/config/horizon-session-activity.json
+server/config/horizon-auth-stops.json
+server/config/storage-auth-stops.json
+server/config/storage-growth-settings.json
+server/config/vmseries.json
+server/config/vmseries/

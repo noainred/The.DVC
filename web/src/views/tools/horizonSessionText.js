@@ -21,6 +21,7 @@ export const KIND_TONE = Object.freeze({
   unparsed: 'amber',
   'no-endpoint': 'amber',
   auth: 'red',
+  'auth-stopped': 'red',
   http: 'red',
   timeout: 'amber',
   error: 'red',
@@ -34,6 +35,7 @@ export const KIND_ADVICE = Object.freeze({
   mock: '데모(mock) 모드입니다 — 실제 Horizon 에 접속하지 않습니다.',
   disabled: '이 서버는 수집 대상에서 꺼져 있습니다(설정에서 켜세요).',
   auth: '계정·도메인·권한을 확인하세요. Horizon REST 세션 조회에는 세션을 볼 수 있는 역할이 필요합니다. 비밀번호를 반복 시도하면 AD 계정이 잠길 수 있어 포탈은 자동 재시도하지 않습니다.',
+  'auth-stopped': '인증 실패가 이어져 **주기 수집을 멈췄습니다** — 같은 자격증명으로 계속 로그인하면 AD 계정이 잠깁니다. 설정 › Horizon 등록에서 비밀번호를 고치면 **자동으로 재개**합니다. ‘지금 수집’ 버튼은 막히지 않으니 고친 뒤 눌러 확인하세요.',
   'no-endpoint': '이 Horizon 버전이 세션 목록 경로를 노출하지 않습니다(404). Connection Server 버전을 확인하세요 — 포탈이 쓰는 경로는 화면 아래 **조회 경로**에 적혀 있습니다.',
   unparsed: '응답을 받았지만 계정 필드를 알아보지 못했습니다. 상세의 **응답 필드** 목록을 개발자에게 알려주면 필드 이름을 맞출 수 있습니다.',
   timeout: '시한 내에 응답이 없었습니다. 고지연 회선이면 설정에서 시한을 늘리세요.',
@@ -60,6 +62,31 @@ export function agoText(ts, now = Date.now()) {
   if (s < 3600) return `${Math.round(s / 60)}분 전`;
   if (s < 86_400) return `${Math.round(s / 3600)}시간 전`;
   return `${Math.round(s / 86_400)}일 전`;
+}
+
+/**
+ * 인증 실패로 **주기 수집을 멈춘** 상태의 사실 관계(v2.535).
+ *
+ * 왜 따로 있나: 조치 문구(`KIND_ADVICE['auth-stopped']`)는 '무엇을 하라' 만 말한다.
+ * CLAUDE.md v2.528 규약은 **정지 사실·시점·시도 횟수**를 화면이 말하도록 요구한다 —
+ * '언제부터 안 받고 있었나' 를 모르면 사용자가 그동안의 수치를 현재값으로 읽는다.
+ * (v2.535 에 Chromium 스크린샷을 읽고 발견해 추가했다 — 배지·문구만으로는 빠진 것이 안 보였다.)
+ *
+ * @param {null|object} stop `authStopped` = `{since, at, attempts, reason}`
+ * @returns {null | {text:string, since:string, last:string, attempts:number|null, reason:string}}
+ */
+export function authStopNote(stop, now = Date.now()) {
+  if (!stop || typeof stop !== 'object') return null;
+  const since = agoText(stop.since, now);
+  const last = agoText(stop.at, now);
+  // ⚠ `Number(null) === 0` — `== null` 을 먼저 본다(v2.525 규약). 0 회는 '없다' 가 아니다.
+  const attempts = stop.attempts == null || !Number.isFinite(Number(stop.attempts)) ? null : Number(stop.attempts);
+  const reason = String(stop.reason || '').trim();
+  const bits = [`${since}부터 정지`];
+  if (attempts != null) bits.push(`실패 ${attempts}회`);
+  if (last !== '—') bits.push(`마지막 시도 ${last}`);
+  if (reason) bits.push(`사유: ${reason}`);
+  return { text: bits.join(' · '), since, last, attempts, reason };
 }
 
 /**
