@@ -207,7 +207,7 @@ function DeviceTable({ list, ctx, typeLabel, empty, onClear }) {
 }
 
 function Cell({ col, r, ctx }) {
-  const { setDetail, setNodeFault, typeLabel, dcName, busy, collectNow, setForm, remove } = ctx;
+  const { setDetail, setNodeFault, typeLabel, dcName, busy, busyId, collectNow, setForm, remove } = ctx;
   const s = r.snap;
   const v = cellValue(col.key, r);
   const dash = <span className="muted">—</span>;
@@ -318,9 +318,23 @@ function Cell({ col, r, ctx }) {
     case 'actions':
       return (
         <td className="right" style={{ whiteSpace: 'nowrap' }}>
-          <button className="logout-btn" style={{ padding: '3px 8px', fontSize: 11.5 }} disabled={busy} onClick={() => collectNow(r.id)} title={r.agent ? '엣지 수집 장비 — 주기 반영 안내' : '지금 수집(연결 테스트)'}>수집</button>
-          {' '}<button className="logout-btn" style={{ padding: '3px 8px', fontSize: 11.5 }} disabled={busy} onClick={() => setForm({ ...r, password: '' })}>수정</button>
-          {' '}<button className="logout-btn" style={{ padding: '3px 8px', fontSize: 11.5, color: 'var(--red)' }} disabled={busy} onClick={() => remove(r)}>삭제</button>
+          {/* ⚠ v2.529(사용자 신고 "이 상태에서 수정 버튼 누르면 수정 창이 안떠"): 예전에는 세 버튼이
+              전부 **전역** `busy` 로 잠겼다. 한 장비를 수집하는 동안 **다른 장비의 수정·삭제까지**
+              죽었고, Unity 수집이 최대 2분 넘게 걸리게 되면서(v2.526 명령 24개 + v2.528 예산 150초)
+              그 창이 몇 초 → 수 분으로 늘었다. 게다가 **왜 안 눌리는지 화면이 말하지 않았다**.
+              이제 수집은 **그 장비만**(`busyId`) 잠그고, 수정은 언제나 열린다 —
+              401 같은 상황에서 자격증명을 고치는 것이 바로 그 순간 필요한 조치이기 때문이다. */}
+          <button className="logout-btn" style={{ padding: '3px 8px', fontSize: 11.5 }} disabled={busy || busyId === r.id}
+            onClick={() => collectNow(r.id)}
+            title={busyId === r.id ? '이 장비를 수집하는 중입니다 — 끝나면 다시 누를 수 있습니다'
+              : busy ? '전체 작업이 진행 중입니다' : (r.agent ? '엣지 수집 장비 — 주기 반영 안내' : '지금 수집(연결 테스트)')}>
+            {busyId === r.id ? '수집 중…' : '수집'}
+          </button>
+          {' '}<button className="logout-btn" style={{ padding: '3px 8px', fontSize: 11.5 }} onClick={() => setForm({ ...r, password: '' })}
+            title="등록 정보·자격증명 수정 — 수집 중에도 열립니다">수정</button>
+          {' '}<button className="logout-btn" style={{ padding: '3px 8px', fontSize: 11.5, color: 'var(--red)' }}
+            disabled={busy || busyId === r.id} onClick={() => remove(r)}
+            title={busyId === r.id ? '이 장비를 수집하는 중입니다 — 끝난 뒤 삭제하세요' : '장비 삭제'}>삭제</button>
         </td>
       );
     default:
@@ -333,6 +347,8 @@ export default function StorageMonTool() {
   const [err, setErr] = useState(null);
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
+  // v2.529: '지금 수집' 은 그 장비만 잠근다(전역 busy 는 전체 새로고침·삭제 같은 진짜 전역 작업용).
+  const [busyId, setBusyId] = useState(null);
   // 하위 탭을 URL 에 실어 새로고침·북마크·뒤로가기에서 유지한다(v2.438, hooks/useHashTab.js).
   const [view, setView] = useHashTab({ base: ['tools', 'storage-mon'], valid: ['devices', 'dc', 'type', 'trend'], fallback: 'devices' });
   const [detail, setDetail] = useState(null);    // 장비 상세 모달 — id 로 보관(v2.306: load() 후 최신 스냅샷 자동 반영)
@@ -437,9 +453,10 @@ export default function StorageMonTool() {
 
 
   const collectNow = async (id) => {
-    setBusy(true); setMsg(null);
+    // 전역 busy 를 켜지 않는다 — 한 장비 수집이 다른 장비의 수정·삭제를 막으면 안 된다(v2.529).
+    setBusyId(id); setMsg(null);
     try { const r = await postJson(`/tools/storage/devices/${encodeURIComponent(id)}/collect`, {}); setMsg(r.ok ? '수집 완료 — 갱신됨' : r.reason); await load(); }
-    catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(false); }
+    catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusyId(null); }
   };
   const remove = async (r) => {
     if (!window.confirm(`'${r.name}' (${r.host}) 장비를 삭제할까요? (수집 이력 스냅샷도 화면에서 제거)`)) return;
@@ -462,7 +479,7 @@ export default function StorageMonTool() {
   };
 
   // 셀 렌더 컨텍스트 — Cell 은 최상위 컴포넌트(아래 참조)라 매 렌더 재마운트되지 않는다(v2.417).
-  const cellCtx = { setDetail, setNodeFault, typeLabel, dcName, busy, collectNow, setForm, remove };
+  const cellCtx = { setDetail, setNodeFault, typeLabel, dcName, busy, busyId, collectNow, setForm, remove };
 
   return (
     <div>
