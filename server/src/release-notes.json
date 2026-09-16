@@ -1,6 +1,21 @@
 {
   "notes": [
     {
+      "version": "2.533.0",
+      "date": "2026-09-16",
+      "title": "PowerMax 10.x 용량 필드 인식 + 스토리지 증가량 화면 — 퍼센트·법인별·종류별",
+      "notes": [
+        "★ **PowerMax/VMAX 10.x 의 용량이 스냅샷에 실리지 않던 문제 수정.** v2.532 가 버전 경로(`/102/…`)를 고쳐 조회는 되게 했지만, 응답의 용량 필드가 9.x 와 달라 `normalizePowermax` 가 아무것도 읽지 못했다. 사용자가 제공한 실제 10.2.0.9 응답에는 `system_capacity.usable_total_tb` 가 **없고** `physicalCapacity`(GB 단위)와 `provisioned_capacity`(TB 단위)가 있다",
+        "★★ **`provisioned_capacity` 를 쓰지 말 것 — 55배 틀린다.** 이 어레이 실측: `physicalCapacity.total_capacity_gb 209,160.8` / `used 65,134`(31.1%) 인데 `provisioned_capacity.total_tb` 는 **11,510.45 TB**(= 11.5 PB)다. 씬 프로비저닝 논리 용량이라 물리 용량의 약 55배다. 증가량 DB(`capacity_daily`)에 그 값이 들어가면 추이가 통째로 거짓이 되므로 **물리 용량만 적재**하고 프로비저닝 값은 `extra.provisionedTb` 로 참고 표시만 한다",
+        "용량 인식 우선순위는 `physicalCapacity`(10.x) → `system_capacity`(9.x) 이고 **둘 다 없으면 0 을 지어내지 않고 오류로 보고**한다(`'오류: 용량 필드를 인식하지 못했습니다 …'`). 어느 쪽으로 읽었는지는 `extra.capacityBasis` 로 화면이 밝힌다. 키 이름은 `capacityBasisNote` 를 쓴다 — v2.526 에 확인한 대로 `capacityNote` 는 화면의 `isVirt`(VPLEX 판정)가 존재만으로 반응해 용량 차트를 통째로 숨긴다",
+        "★ 스토리지 증가량 화면 — **증가량을 퍼센트와 용량 2줄로 함께** 표시(사용자 요청). 분모는 **기준일의 사용량**이다(현재 사용량이 아니다 — 그러면 같은 증가량이 기간마다 다른 퍼센트로 보인다). 기준 사용량이 0 이하면 퍼센트는 `null`('—')이다(0 으로 나눈 값을 지어내지 않는다)",
+        "★ 스토리지 증가량 화면 — **법인(데이터센터)·장비 종류 필터 칩**을 추가하고 **집계 축 탭**(장비별 / 법인별 / 종류별)을 뒀다. 사용자 요청대로 **스토리지 모니터링 화면과 동일한 메뉴**다 — 판정을 복제하지 않고 순수 모듈 `web/src/views/tools/deviceFacets.js` + 공용 컴포넌트 `DeviceFacetBar.jsx` 하나를 두 화면이 쓴다(CLAUDE.md '코어는 하나다'). 스토리지 모니터링의 기존 필터 구현 114줄을 이 공용 코어 호출로 교체했다",
+        "필터를 걸면 KPI·합계 행·주의 장비 목록이 **모두 그 범위로 다시 계산**된다. Chromium 스크린샷 판독에서 결함 2건을 발견해 고쳤다 — ① `aggregateGrowth` 가 `freeBytes` 를 빼먹어 필터를 거는 순간 '남은 용량' KPI 가 '—' 가 됐다 ② 주의 장비 목록이 전체 장비를 그려, '1대 표시' 라고 해 놓고 범위 밖 장비가 떴다",
+        "스토리지 모니터링의 죽은 조건식 수정: `kws.length > 0` 이 정의되지 않은 변수를 보고 있었다(필터 적용 여부 표시가 항상 거짓). `dcQuery.trim().length > 0` 으로 고쳤다",
+        "검증: `npm run verify` 통과(서버 2,249건 · 웹 851건 · lint · 빌드). Chromium 1440px/400px 실화면 판독 — 가로 넘침 0px · pageerror 0 · console error 0. ⚠ **PowerMax 용량 수정은 실장비에서 확인하지 못했다** — 픽스처는 사용자가 제공한 실제 응답 본문이고 파서는 그 값으로 고정했지만, 해당 어레이는 엣지 위임이라 엣지가 이 버전으로 올라간 뒤에 확인해야 한다"
+      ]
+    },
+    {
       "version": "2.532.0",
       "date": "2026-09-16",
       "title": "★ PowerMax/VMAX — Unisphere 10.x 수집 전량 실패 수정(버전 경로를 장비가 알려준 목록으로)",

@@ -101,3 +101,71 @@ test('★ 무버전 경로를 하드코딩으로 되돌리지 않았는지 소�
   }
   assert.ok(code.includes('pathsFor('), '경로는 pathsFor 하나가 만든다');
 });
+
+/* ── 4. 용량 필드 — 10.x 실측 본문으로 확정 ─────────────────────────
+ *
+ * 사용자 제공 `/102/sloprovisioning/symmetrix/000220201278` 본문(발췌):
+ *   "provisioned_capacity":{"used_tb":203.13,"total_tb":11510.45,"free_tb":11307.32}
+ *   "physicalCapacity":{"used_capacity_gb":65134.0,"total_capacity_gb":209160.8}
+ * 9.x 의 `system_capacity.usable_total_tb` 는 **10.x 에 아예 없다** — 경로만 고치면
+ * '용량 필드를 인식하지 못했습니다' 로 떨어진다.
+ */
+import { powermaxCapacity } from '../src/storage/collectors/powermax.js';
+
+const REAL_102 = Object.freeze({
+  symmetrixId: '000220201278', model: 'PowerMax_8500', microcode: '6079.275.0', local: true,
+  provisioned_capacity: { used_tb: 203.13, total_tb: 11510.45, free_tb: 11307.32 },
+  physicalCapacity: { used_capacity_gb: 65134.0, total_capacity_gb: 209160.8 },
+});
+
+test('★★ 10.x — `physicalCapacity` 를 쓴다. **`provisioned_capacity` 는 55배 거짓이다**', () => {
+  const c = powermaxCapacity(REAL_102);
+  assert.equal(c.basis, 'physicalCapacity');
+  assert.equal(Math.round(c.totalBytes / 1e12 * 10) / 10, 209.2, '물리 전체 209.2TB');
+  assert.equal(Math.round(c.usedBytes / 1e12 * 10) / 10, 65.1, '물리 사용 65.1TB');
+  assert.equal(Math.round((c.usedBytes / c.totalBytes) * 1000) / 10, 31.1);
+  // 프로비저닝을 용량으로 쓰면 11,510TB(11.5PB)가 되어 **약 55배** 부풀려진다.
+  const wrong = REAL_102.provisioned_capacity.total_tb;
+  assert.ok(wrong / (c.totalBytes / 1e12) > 50, '이 배율이 곧 거짓의 크기다');
+  assert.ok(c.totalBytes / 1e12 < 300, '전체 용량이 300TB 를 넘으면 프로비저닝을 쓴 것이다');
+});
+
+test('프로비저닝은 버리지 않고 **별도 키**로 싣는다(용량과 섞지 않는다)', () => {
+  const c = powermaxCapacity(REAL_102);
+  assert.equal(c.provisioned.totalTb, 11510.45);
+  assert.equal(c.provisioned.usedTb, 203.13);
+});
+
+test('9.x — `system_capacity`(TB) 도 그대로 읽는다(GM1 이 동작 중이다)', () => {
+  const c = powermaxCapacity({ system_capacity: { usable_total_tb: 355.8, usable_used_tb: 315.9 } });
+  assert.equal(c.basis, 'system_capacity');
+  assert.equal(Math.round(c.totalBytes / 1e12 * 10) / 10, 355.8);
+});
+
+test('★ 둘 다 없으면 **null** — 0 을 지어내지 않는다', () => {
+  assert.equal(powermaxCapacity({ provisioned_capacity: { total_tb: 9999 } }), null,
+    '프로비저닝만 있는 응답을 용량으로 승격하면 안 된다');
+  assert.equal(powermaxCapacity({}), null);
+  assert.equal(powermaxCapacity(null), null);
+  assert.equal(powermaxCapacity({ physicalCapacity: { total_capacity_gb: 0 } }), null, '0 은 용량이 아니다');
+});
+
+test('정규화 — 10.x 본문이 pools·capacity 로 이어지고 프로비저닝 고지가 붙는다', async () => {
+  const { normalizePowermax } = await import('../src/storage/collectors/powermax.js');
+  const dev = { id: 'pm-hg', type: 'vmax', name: 'HG-PMAX', host: '10.112.31.25' };
+  const cap = powermaxCapacity(REAL_102);
+  const snap = normalizePowermax(dev, {
+    version: { version: 'V10.2.0.9' },
+    arrays: [{ symmetrixId: REAL_102.symmetrixId, model: REAL_102.model, microcode: REAL_102.microcode }],
+    caps: { [REAL_102.symmetrixId]: cap },
+    alertCount: 12,
+  });
+  assert.equal(snap.version, '10.2.0.9');
+  assert.equal(snap.extra.ucode, '6079.275.0', '10.x 는 ucode 가 아니라 microcode 다');
+  assert.equal(snap.sections.capacity, 'ok');
+  assert.equal(snap.capacity.pct, 31.1);
+  assert.equal(snap.extra.capacityBasis, 'physicalCapacity');
+  assert.equal(snap.extra.provisionedTb, 11510.45);
+  assert.ok(snap.extra.capacityBasisNote.includes('물리 용량'), '무엇을 세었는지 화면이 말해야 한다');
+  assert.equal(snap.alerts.unresolved, 12);
+});

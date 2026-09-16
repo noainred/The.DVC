@@ -76,6 +76,49 @@ export function apiVersionsFrom(v) {
  * 한 리소스의 경로 후보. 버전 경로를 앞에, **무버전을 맨 뒤에** 둔다.
  * ⚠ 무버전을 빼지 말 것 — 9.x 에서 실제로 동작하는 형태다(10.x 에서만 404).
  */
+const GB = 1e9;   // Unisphere *_gb → 바이트(TB 와 같은 10진 가정)
+
+/**
+ * 어레이 응답 → 용량(순수 · v2.532, **실장비 본문으로 확정**).
+ *
+ * ⚠⚠ **`provisioned_capacity` 를 용량으로 쓰지 말 것 — 55배 거짓이 된다.**
+ * 10.2 실측(`/102/sloprovisioning/symmetrix/000220201278`, 사용자 제공):
+ *     "provisioned_capacity": {"used_tb":203.13, "total_tb":11510.45, "free_tb":11307.32}
+ *     "physicalCapacity":     {"used_capacity_gb":65134.0, "total_capacity_gb":209160.8}
+ * 앞엣것은 **씬 프로비저닝으로 호스트에 약속한 크기**이고 뒤엣것이 **실제 물리 용량**이다.
+ * 앞엣것을 쓰면 전체 용량이 209.2TB → **11.5PB** 로 찍힌다(약 55배). Unity 의
+ * "구독(Subscription)은 사용량이 아니다"(v2.526)와 같은 계열의 거짓이다.
+ *
+ * ⚠ 9.x 는 `system_capacity.usable_total_tb` 를 쓴다 — 10.x 에는 **그 필드가 아예 없다**
+ * (그래서 경로만 고치면 'system_capacity 필드 부재' 로 떨어진다). 둘 다 후보로 두고
+ * **어느 쪽으로 읽었는지 `basis` 로 밝힌다**.
+ *
+ * @returns {{totalBytes:number, usedBytes:number, basis:string, provisioned:object|null}|null}
+ */
+export function powermaxCapacity(sym) {
+  if (!sym || typeof sym !== 'object') return null;
+  const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
+  const prov = sym.provisioned_capacity && typeof sym.provisioned_capacity === 'object' ? {
+    usedTb: num(sym.provisioned_capacity.used_tb),
+    totalTb: num(sym.provisioned_capacity.total_tb),
+  } : null;
+
+  // ① 10.x — 물리 용량(GB)
+  const pc = sym.physicalCapacity || sym.physical_capacity;
+  const pt = num(pc?.total_capacity_gb);
+  if (pt && pt > 0) {
+    return { totalBytes: pt * GB, usedBytes: (num(pc.used_capacity_gb) || 0) * GB, basis: 'physicalCapacity', provisioned: prov };
+  }
+  // ② 9.x — system_capacity(TB)
+  const sc = sym.system_capacity;
+  const st = num(sc?.usable_total_tb);
+  if (st && st > 0) {
+    return { totalBytes: st * TB, usedBytes: (num(sc.usable_used_tb) || 0) * TB, basis: 'system_capacity', provisioned: prov };
+  }
+  // ③ 못 읽었다 — **0 을 지어내지 않는다**(호출부가 섹션 오류로 남긴다).
+  return null;
+}
+
 /**
  * 후보를 앞에서부터 시도하고 **성공한 경로까지** 돌려준다.
  * `restCommon.tryAny` 는 데이터만 주는데, 버전차 진단에는 '무엇으로 읽었나' 가 데이터만큼
@@ -109,24 +152,39 @@ export function normalizePowermax(device, raw) {
     snap.name = arrays.length === 1 ? (a0.symmetrixId || device.name) : `${a0.symmetrixId || device.name} 외 ${arrays.length - 1}`;
     snap.serial = a0.symmetrixId || '';
     snap.extra.model = a0.model || '';
-    snap.extra.ucode = a0.ucode || a0.microcode || '';
+    snap.extra.ucode = a0.ucode || a0.microcode || '';   // 9.x=ucode · 10.x=microcode(실측)
     snap.extra.arrays = arrays.slice(0, 8).map((a) => ({ id: a.symmetrixId, model: a.model }));
     snap.sections.config = 'ok';
     // 어레이별 용량(TB→바이트) — 합산이 capacity, 개별은 pools(caps 에 없는 어레이는 0 이 아니라 제외).
     let total = 0, used = 0;
     const pools = [];
+    const bases = new Set();
+    let provTotalTb = 0; let provUsedTb = 0; let provSeen = false;
     for (const a of arrays.slice(0, 32)) {
       const c = raw.caps?.[a.symmetrixId];
       if (!c) continue;
-      const t = (Number(c.usable_total_tb) || 0) * TB;
-      const u = (Number(c.usable_used_tb) || 0) * TB;
+      // v2.532: caps 는 이제 바이트로 들어온다(powermaxCapacity). 옛 형태(usable_*_tb)도
+      // 그대로 받는다 — 기존 픽스처 테스트와 엣지 구버전 push 를 깨지 않기 위해서다.
+      const t = c.totalBytes != null ? Number(c.totalBytes) : (Number(c.usable_total_tb) || 0) * TB;
+      const u = c.usedBytes != null ? Number(c.usedBytes) : (Number(c.usable_used_tb) || 0) * TB;
+      if (!(t > 0)) continue;              // 용량을 못 읽은 어레이는 0 으로 채우지 않고 뺀다
+      if (c.basis) bases.add(c.basis);
+      if (c.provisioned?.totalTb != null) { provSeen = true; provTotalTb += c.provisioned.totalTb; provUsedTb += c.provisioned.usedTb || 0; }
       total += t; used += u;
-      pools.push({ name: a.symmetrixId, totalBytes: t, usedBytes: u, pct: t ? Math.round((u / t) * 1000) / 10 : null });
+      pools.push({ name: a.symmetrixId, totalBytes: t, usedBytes: u, pct: Math.round((u / t) * 1000) / 10 });
     }
     snap.pools = pools;
     if (total > 0) {
       snap.capacity = { totalBytes: total, usedBytes: used, pct: Math.round((used / total) * 1000) / 10 };
       snap.sections.capacity = 'ok';
+      if (bases.size) snap.extra.capacityBasis = [...bases].join(', ');
+      // ⚠ 프로비저닝(씬 약속치)은 **용량이 아니다** — 화면이 섞지 않도록 별도 키로만 싣는다.
+      //   10.2 실측: 물리 209.2TB 인데 프로비저닝은 11,510TB(약 55배)였다.
+      if (provSeen) {
+        snap.extra.provisionedTb = Math.round(provTotalTb * 100) / 100;
+        snap.extra.provisionedUsedTb = Math.round(provUsedTb * 100) / 100;
+        snap.extra.capacityBasisNote = '전체·사용 용량은 **물리 용량**(physicalCapacity)입니다. 프로비저닝(호스트에 약속한 씬 크기)은 물리 용량보다 훨씬 클 수 있어 **용량으로 쓰지 않습니다** — 따로 표시합니다.';
+      }
     }
   }
   if (raw.alertCount != null) { snap.alerts.unresolved = Number(raw.alertCount) || 0; snap.sections.alerts = 'ok'; }
@@ -179,10 +237,11 @@ export async function collect(device, { signal = null } = {}) {
         const r = await tryPaths(get, pathsFor(vers, `/sloprovisioning/symmetrix/${encodeURIComponent(a.symmetrixId)}`));
         raw.usedPaths.capacity = r.path;
         const d = r.data;
+        // 10.x 응답은 `{symmetrix:[…]}` 래핑 없이 **평면 객체**로 온다(실측) — `|| d` 가 그것을 받는다.
         const s = Array.isArray(d?.symmetrix) ? d.symmetrix[0] : d?.symmetrix || d;
-        const c = s?.system_capacity;
-        if (c && (c.usable_total_tb != null)) raw.caps[a.symmetrixId] = { usable_total_tb: c.usable_total_tb, usable_used_tb: c.usable_used_tb };
-        else snap.sections.capacity = '오류: system_capacity 필드 부재(Unisphere 버전 확인)';
+        const cap = powermaxCapacity(s);
+        if (cap) raw.caps[a.symmetrixId] = cap;
+        else snap.sections.capacity = '오류: 용량 필드를 인식하지 못했습니다(physicalCapacity·system_capacity 모두 없음 — Unisphere 버전 확인)';
       } catch (e) { if (/401/.test(e.message)) throw e; snap.sections.capacity = `오류: ${e.message}`; }
     }
     // ④ 미해결 알람 수 — /system/alert 는 알람 ID 배열을 반환(버전에 따라 alert_summary 폴백).

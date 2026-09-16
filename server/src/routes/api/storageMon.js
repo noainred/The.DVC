@@ -567,6 +567,10 @@ api.get('/tools/storage-growth', toolsPerm, fullScopeOnly, async (req, res) => {
       }; }),
     totals: m.totals,
     retention: { ...loadGrowthSettings(), effective: keep },
+    // 법인·장비 종류 필터용 라벨 원천(v2.532) — 스토리지 모니터링 화면과 **같은 출처**를 쓴다.
+    // 화면이 id 를 그대로 보여주면 'dc-wa' 같은 원시 값이 칩에 뜬다.
+    types: STORAGE_TYPES.map((t) => ({ type: t.type, label: t.label })),
+    datacenters: (() => { try { return listDatacenters(); } catch { return []; } })(),
     // 등록돼 있는데 이력이 한 줄도 없는 장비 — 화면이 '빠진 장비' 로 밝힌다(조용히 빼지 않는다).
     noHistory: listDevices().filter((d) => !m.devices.some((x) => x.deviceId === d.id)).map((d) => ({ id: d.id, name: d.name, host: d.host, type: d.type, enabled: d.enabled !== false })),
   });

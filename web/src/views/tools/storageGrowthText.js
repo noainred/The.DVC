@@ -160,3 +160,68 @@ export function maxAbsFor(devices, periodKey) {
   }
   return m;
 }
+
+/* ══ v2.532 — 증가율(%)·집계 ════════════════════════════════════════════════
+ * 사용자 요청: "1일 증가를 증가하는 퍼센트와 용량으로 2줄로 모두 보여줘" ·
+ * "법인별로 구분해서 볼 수 있도록" · "장비 종류별로 볼 수 있도록".
+ */
+
+/**
+ * 증가율(%) — **기준선 사용량 대비**다.
+ *
+ * ⚠ 전체 용량 대비가 아니다. "1일에 몇 % 늘었나" 는 사람이 '어제보다' 로 세는 값이므로
+ *   분모는 **기준선 시점의 사용량**(= 지금 사용량 − 증가량)이다. 전체 용량을 분모로 쓰면
+ *   같은 증가량이라도 큰 어레이에서 항상 작게 보여 추세 비교가 무의미해진다.
+ * ⚠ 기준선 사용량이 0 이면 **null 이다**(0 에서 늘어난 비율은 무한대다 — 숫자를 지어내지 않는다).
+ *
+ * @returns {number|null} 소수 1자리 백분율
+ */
+export function growthPct(g, latestUsedBytes) {
+  if (!g || g.bytes == null || latestUsedBytes == null) return null;
+  const base = Number(latestUsedBytes) - Number(g.bytes);
+  if (!Number.isFinite(base) || base <= 0) return null;
+  return Math.round((Number(g.bytes) / base) * 1000) / 10;
+}
+
+/** 증가율 표시 문자열(부호 포함). 값이 없으면 null — 호출부가 줄을 아예 그리지 않는다. */
+export function growthPctText(pct) {
+  if (pct == null) return null;
+  const sign = pct > 0 ? '+' : pct < 0 ? '−' : '';
+  return `${sign}${Math.abs(pct).toFixed(1)}%`;
+}
+
+/**
+ * 한 묶음(법인·종류·전체)의 집계.
+ *
+ * ⚠ 판정 규칙의 **원본은 서버 `storage/growth.js totalsOf`** 다 — 기준선이 있는 장비만 더하고
+ *   `partial`·`measured`·`missing` 으로 밝힌다. 여기는 화면이 필터를 건 **뒤**의 부분집합을
+ *   같은 규칙으로 다시 더하는 것뿐이다(필터는 화면에만 있어 서버가 알 수 없다).
+ *   규칙을 바꾸면 **양쪽을 같이** 바꿀 것 — 한쪽만 고치면 표와 합계가 다른 말을 한다.
+ */
+export function aggregateGrowth(devices, periods) {
+  const list = devices || [];
+  const nums = (f) => list.map(f).filter((v) => v != null && Number.isFinite(v));
+  const sumOrNull = (f) => { const n = nums(f); return n.length ? n.reduce((a, b) => a + b, 0) : null; };
+  const usedBytes = sumOrNull((d) => d.usedBytes);
+  const totalBytes = sumOrNull((d) => d.totalBytes);
+  const growth = {};
+  for (const p of periods || []) {
+    let sum = 0; let measured = 0; let missing = 0;
+    for (const d of list) {
+      const b = d.growth?.[p.key]?.bytes;
+      if (b != null && Number.isFinite(Number(b))) { sum += Number(b); measured += 1; } else missing += 1;
+    }
+    growth[p.key] = { bytes: measured ? sum : null, measured, missing, partial: measured > 0 && missing > 0 };
+  }
+  return {
+    devices: list.length,
+    usedBytes,
+    totalBytes,
+    // ⚠ `freeBytes` 를 빼먹지 말 것 — 화면의 '남은 용량' KPI 가 이 키를 읽는다. v2.532 초판이
+    //   빠뜨려 필터를 거는 순간 '남은 용량 —' 이 됐다(Chromium 스크린샷 판독에서 발견).
+    freeBytes: totalBytes != null && usedBytes != null ? Math.max(0, totalBytes - usedBytes) : null,
+    pct: totalBytes && usedBytes != null ? Math.round((usedBytes / totalBytes) * 1000) / 10 : null,
+    unknownUsed: list.filter((d) => d.usedBytes == null).length,
+    growth,
+  };
+}

@@ -6,6 +6,7 @@ import { describe, it, expect } from 'vitest';
 import {
   GROWTH_UNITS, bytesAuto, bytesIn, growthCell, totalCell,
   fullEtaText, headline, missingNote, heat, maxAbsFor,
+  growthPct, growthPctText, aggregateGrowth,
 } from './storageGrowthText.js';
 
 const TB = 1024 ** 4;
@@ -159,5 +160,74 @@ describe('히트맵', () => {
 
   it('감소도 크기로 친다(절대값)', () => {
     expect(maxAbsFor([{ growth: { x: { bytes: -3 * GB } } }], 'x')).toBe(3 * GB);
+  });
+});
+
+/* ══ v2.532 — 증가율(%)·집계 ═══════════════════════════════════════════════ */
+
+describe('증가율(%) — 사용자 요청 "퍼센트와 용량으로 2줄"', () => {
+  it('★ 분모는 **기준선 사용량**이다(전체 용량이 아니다)', () => {
+    // 455TB 를 쓰는 장비가 30TB 늘었다 → 기준선은 425TB → 30/425 = 7.1%
+    expect(growthPct({ bytes: 30 * TB }, 455 * TB)).toBe(7.1);
+    // 전체 용량(500TB)을 분모로 쓰면 6.0% 가 되어 같은 증가가 작아 보인다 — 그렇게 하지 않는다.
+    expect(growthPct({ bytes: 30 * TB }, 455 * TB)).not.toBe(6);
+  });
+
+  it('★ 기준선 사용량이 0 이면 null — 0 에서 늘어난 비율은 무한대다(숫자를 지어내지 않는다)', () => {
+    expect(growthPct({ bytes: 5 * TB }, 5 * TB)).toBeNull();
+    expect(growthPct({ bytes: 10 * TB }, 5 * TB)).toBeNull();   // 기준선이 음수가 되는 경우도
+  });
+
+  it('증가량이 없으면 null(0% 가 아니다)', () => {
+    expect(growthPct({ bytes: null }, 100 * TB)).toBeNull();
+    expect(growthPct(null, 100 * TB)).toBeNull();
+    expect(growthPct({ bytes: 1 }, null)).toBeNull();
+  });
+
+  it('감소는 음수 %, 변화 없음은 0%', () => {
+    expect(growthPct({ bytes: -10 * TB }, 90 * TB)).toBe(-10);
+    expect(growthPctText(-10)).toBe('−10.0%');
+    expect(growthPctText(0)).toBe('0.0%');
+    expect(growthPctText(7.1)).toBe('+7.1%');
+    expect(growthPctText(null)).toBeNull();
+  });
+});
+
+describe('집계 — 법인별·종류별 (서버 totalsOf 와 같은 규칙)', () => {
+  const per = [{ key: '30d', days: 30, label: '1개월' }];
+  const dev = (used, total, bytes) => ({ usedBytes: used, totalBytes: total, growth: { '30d': { bytes } } });
+
+  it('★ 기준선이 있는 장비만 더하고 **뺀 수를 밝힌다**', () => {
+    const a = aggregateGrowth([dev(10 * TB, 20 * TB, 2 * TB), dev(5 * TB, 10 * TB, null)], per);
+    expect(a.growth['30d'].bytes).toBe(2 * TB);
+    expect(a.growth['30d'].measured).toBe(1);
+    expect(a.growth['30d'].missing).toBe(1);
+    expect(a.growth['30d'].partial).toBe(true);
+  });
+
+  it('전부 기준선이 없으면 0 이 아니라 null', () => {
+    const a = aggregateGrowth([dev(10 * TB, 20 * TB, null)], per);
+    expect(a.growth['30d'].bytes).toBeNull();
+    expect(a.growth['30d'].partial).toBe(false);
+  });
+
+  it('★ 사용량을 못 읽은 장비는 합계에서 빼고 그 수를 밝힌다(0 으로 더하지 않는다)', () => {
+    const a = aggregateGrowth([dev(10 * TB, 20 * TB, 1), dev(null, 5 * TB, 1)], per);
+    expect(a.usedBytes).toBe(10 * TB);
+    expect(a.totalBytes).toBe(25 * TB);
+    expect(a.unknownUsed).toBe(1);
+  });
+
+  it('전부 null 이면 합계도 null — 0 은 "용량 0" 이라는 거짓', () => {
+    const a = aggregateGrowth([dev(null, null, null)], per);
+    expect(a.usedBytes).toBeNull();
+    expect(a.totalBytes).toBeNull();
+    expect(a.pct).toBeNull();
+  });
+
+  it('빈 목록도 터지지 않는다', () => {
+    const a = aggregateGrowth([], per);
+    expect(a.devices).toBe(0);
+    expect(a.growth['30d'].bytes).toBeNull();
   });
 });

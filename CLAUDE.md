@@ -502,6 +502,44 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       못 하게 되어 있었다. 되돌리지 말 것.
     - **빈 비밀번호(`len:0`)와 앞뒤 공백을 드러낸다** — 전자는 그 자체가 진단(배포가 비밀번호를
       안 실어 왔다)이고, 후자는 붙여넣기 사고의 최다 원인인데 화면에서는 보이지 않는다.
+  - **PowerMax/VMAX 의 용량은 `physicalCapacity` 다 — `provisioned_capacity` 는 55배 틀린다**
+    (`storage/collectors/powermax.js powermaxCapacity`, v2.533 — 사용자 신고 "power max 스토리지
+    10.x 버전에서는 9.x 버전과 좀 달라진것 같네"):
+    - v2.532 가 버전 경로(`/102/…`)를 고쳐 **조회는 되게** 했지만, 10.x 응답에는 9.x 의
+      `system_capacity.usable_total_tb` 가 **없어서** 용량이 스냅샷에 실리지 않았다. 실제 10.2.0.9
+      응답(사용자 제공)에 있는 것은 `physicalCapacity`(GB 단위)와 `provisioned_capacity`(TB 단위)다.
+    - ⚠⚠ **`provisioned_capacity` 를 쓰지 말 것.** 이 어레이 실측:
+      `physicalCapacity.total_capacity_gb 209,160.8` / `used_capacity_gb 65,134`(31.1%) 인데
+      `provisioned_capacity.total_tb` 는 **11,510.45 TB**(= 11.5 PB, 물리의 약 **55배**)다 —
+      씬 프로비저닝 **논리** 용량이다. 그 값이 증가량 DB(`capacity_daily`)에 들어가면 그 장비의
+      추이가 통째로 거짓이 된다. 물리 용량만 적재하고 논리 값은 `extra.provisionedTb` 로
+      **참고 표시만** 한다(지우지는 않는다 — 오버프로비저닝 비율이 운영 정보다).
+    - **우선순위는 `physicalCapacity`(10.x) → `system_capacity`(9.x)** 이고 **둘 다 없으면 `null`
+      을 돌려 오류로 보고**한다(0 을 지어내지 않는다 — v2.525 Unity 규약과 같다). 어느 쪽으로
+      읽었는지는 `extra.capacityBasis` 가 밝힌다.
+    - ⚠ 문구 키는 **`capacityBasisNote`** 다 — v2.526 에 확인한 대로 `capacityNote` 는 화면의
+      `isVirt`(VPLEX 판정)가 **존재만으로** 반응해 그 장비의 용량 추이 차트를 통째로 숨긴다.
+    - ⚠ **실장비에서 확인하지 못했다**(정직 기록): 픽스처는 사용자가 제공한 실제 응답 본문이고
+      테스트가 그 수치를 고정하지만, 이 어레이는 엣지 위임이라 엣지가 v2.533 으로 올라간 뒤에야
+      확인된다.
+  - **법인·장비 종류 필터와 집계 축은 `deviceFacets.js` 하나가 소유한다**(`web/src/views/tools/
+    deviceFacets.js` + `DeviceFacetBar.jsx`, v2.533 — 사용자 요청 "법인별로 구분해서 볼 수있도록 ·
+    장비 종류별로 볼 수있도록, 이건 다른 화면에서 사용했던 메뉴와 동일하게"):
+    - 스토리지 모니터링이 먼저 갖고 있던 필터 구현(114줄)을 순수 모듈로 옮기고 **증가량 화면이
+      같은 모듈을 쓴다**(CLAUDE.md '코어는 하나다'). 20줄을 복사했으면 두 화면의 칩 개수가
+      갈라진다 — `console/`↔`version_3/` 중복으로 v2.506 svcmon 버그를 두 곳에 고쳐야 했다.
+    - **칩 개수는 '검색만 적용한 집합' 에서 센다.** 자기 축의 선택으로 자기 칩 개수를 줄이면
+      선택을 해제할 때까지 다른 칩이 `0` 으로 보여 **고를 수 없는 것처럼** 된다. 각 축의 개수는
+      **다른 축의 선택만** 반영한다.
+    - **필터를 먼저 걸고 그 다음에 묶는다**(`groupBy(facets.shown, …)`) — 순서를 뒤집으면 범위 밖
+      장비가 그룹 합계에 섞인다. 두 축은 AND, 검색어 여러 개도 AND 다.
+    - ⚠ **필터를 걸면 KPI·합계 행·주의 장비 목록을 전부 다시 계산할 것.** v2.533 초판이 두 곳을
+      빠뜨렸고 **Chromium 스크린샷 판독으로만** 발견했다(수치로는 안 잡혔다) — ① `aggregateGrowth`
+      가 `freeBytes` 를 빼먹어 필터를 거는 순간 '남은 용량' KPI 가 **'—'** 가 됐다 ② 주의 장비
+      목록이 전체를 그려 **'1대 표시' 라고 해 놓고 범위 밖 장비가 떴다**.
+    - **증가율(%)의 분모는 `기준일의 사용량`** 이다(`storageGrowthText.js growthPct`). 현재
+      사용량으로 나누면 같은 증가량이 기간마다 다른 퍼센트로 보인다. 기준 사용량이 0 이하면
+      퍼센트는 **`null`('—')** 이다 — 0 으로 나눈 값을 지어내지 않는다.
   - **Overview 에는 지도가 없다 — 그 자리는 '서버·게스트 수량' 이다**(`web/src/views/Overview.jsx` +
     `server/src/idrac/serverByCorp.js`, v2.526 — 사용자 요청 "overview 에서 지도 없애줘" ·
     "전체 물리 서버 수량(idrac 에서 찾은 수량), 가상화 호스트 수량, 법인별 서버 수량과 guestos 수량"):
